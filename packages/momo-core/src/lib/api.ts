@@ -6899,6 +6899,92 @@ export async function fetchAgentRunProgress(
   );
 }
 
+// ---- Agent runs: 「지금 실행 중」 (ADR-0200 증보 2026-10-15 R1, #3847) ----------
+// GET /v1/workspaces/{ws}/agent-runs?state=active&limit=&cursor=
+//
+// 내가 멤버인 채널의 안 끝난 run 전부(queued·claimed·running·awaiting_approval·paused), 새것부터.
+// 행 모양은 채널 진행 읽기와 같다(`agentRunProgressFromWire`). 채널 진행 읽기와 다른 점은 **에이전트
+// 종류를 가리지 않는다**는 것이다: 관리형·BYOA·gateway(Hermes) run도 나온다. 채널 멤버 패널이 이 읽기를
+// 채널로 걸러 쓴다(#5686).
+//
+// 응답의 `agents[]`(에이전트별 수, 그중 `activeTotal`은 **워크스페이스 전체** 수)는 여기서 읽지 않는다.
+// 지금 부르는 쪽(채널 멤버 패널)은 다른 채널의 수를 보이면 안 되므로, 읽지 않는 것이 가장 단단한 막음이다.
+// 수가 필요한 화면이 생기면 그 화면의 결정(ADR-0194 D5·ADR-0202 D5)과 함께 더한다.
+
+/** 「지금 실행 중」 한 쪽. */
+export interface AgentRunActivePage {
+  runs: AgentRunProgress[];
+  nextCursor?: string;
+}
+
+/** 서버의 한 쪽 상한(`ACTIVE_RUN_PAGE_MAX`). 이보다 크게 물어도 서버가 이 값으로 자른다. */
+export const ACTIVE_RUN_PAGE_LIMIT = 100;
+
+export function agentRunActivePageFromWire(value: unknown): AgentRunActivePage {
+  const source = responseRecord(value);
+  const runs = arrayField(source, "runs");
+  if (runs === null) throw new WireShapeError();
+  const nextCursor = optionalString(source, "nextCursor");
+  return {
+    runs: runs.map(agentRunProgressFromWire),
+    ...(nextCursor === undefined || nextCursor === ""
+      ? {}
+      : { nextCursor: nextCursor.toLowerCase() }),
+  };
+}
+
+/** 「지금 실행 중」 한 쪽을 읽는다. 구 서버는 404/405/501 — 호출자는 `serverSaysAbsent`로 접는다. */
+export async function fetchActiveAgentRuns(
+  workspaceId: string,
+  options: { limit?: number; cursor?: string } = {}
+): Promise<AgentRunActivePage> {
+  const query = new URLSearchParams({
+    state: "active",
+    limit: String(options.limit ?? ACTIVE_RUN_PAGE_LIMIT),
+  });
+  if (options.cursor !== undefined) query.set("cursor", options.cursor);
+  return agentRunActivePageFromWire(
+    await request<unknown>(
+      `/v1/workspaces/${encodeURIComponent(
+        workspaceId.toLowerCase()
+      )}/agent-runs?${query.toString()}`
+    )
+  );
+}
+
+/**
+ * 「지금 실행 중」을 쪽 상한(`maxPages`)까지 이어 읽어 한 목록으로. 서버는 내가 멤버인 **모든** 채널의
+ * run을 새것부터 주므로, 한 채널의 run은 다른 채널이 바쁘면 다음 쪽에 있을 수 있다. 상한에 닿으면 거기서
+ * 멈추고 `truncated`를 세운다(그 뒤의 run은 가장 오래된 것들이다).
+ */
+export async function fetchAllActiveAgentRuns(
+  workspaceId: string,
+  options: { maxPages?: number; fetchPage?: typeof fetchActiveAgentRuns } = {}
+): Promise<{ runs: AgentRunProgress[]; truncated: boolean; pages: number }> {
+  const fetchPage = options.fetchPage ?? fetchActiveAgentRuns;
+  const maxPages = Math.max(1, options.maxPages ?? 3);
+  const runs: AgentRunProgress[] = [];
+  const seen = new Set<string>();
+  let cursor: string | undefined;
+  for (let pages = 1; ; pages += 1) {
+    const page = await fetchPage(workspaceId, {
+      limit: ACTIVE_RUN_PAGE_LIMIT,
+      ...(cursor === undefined ? {} : { cursor }),
+    });
+    for (const run of page.runs) {
+      if (seen.has(run.id)) continue;
+      seen.add(run.id);
+      runs.push(run);
+    }
+    // 같은 커서가 돌아오면(서버 결함) 무한히 돌지 않는다.
+    if (page.nextCursor === undefined || page.nextCursor === cursor) {
+      return { runs, truncated: false, pages };
+    }
+    if (pages >= maxPages) return { runs, truncated: true, pages };
+    cursor = page.nextCursor;
+  }
+}
+
 /**
  * run 하나의 원장 전체(≤200행). 커서가 없으니 매번 통째로 다시 읽는다.
  *

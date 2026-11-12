@@ -1198,6 +1198,23 @@ export const messageKeys = [
   "timeline.lightbox.copyFailed",
   "timeline.lightbox.zoomIn",
   "timeline.lightbox.zoomOut",
+  "timeline.memberPanel.agentKind",
+  "timeline.memberPanel.elapsedDays",
+  "timeline.memberPanel.elapsedHours",
+  "timeline.memberPanel.elapsedMinutes",
+  "timeline.memberPanel.groupAgents",
+  "timeline.memberPanel.groupOffline",
+  "timeline.memberPanel.groupOnline",
+  "timeline.memberPanel.groupOtherAgents",
+  "timeline.memberPanel.groupPeople",
+  "timeline.memberPanel.groupWorking",
+  "timeline.memberPanel.listLabel",
+  "timeline.memberPanel.moreRuns",
+  "timeline.memberPanel.moreRunsSpoken",
+  "timeline.memberPanel.nowFailed",
+  "timeline.memberPanel.nowRetry",
+  "timeline.memberPanel.request",
+  "timeline.memberPanel.requestSpoken",
   "timeline.quote.head",
   "timeline.quote.headUnnamed",
   "timeline.runException.open",
@@ -2798,6 +2815,49 @@ export const argumentSpecs = {
   "timeline.lightbox.copyFailed": {},
   "timeline.lightbox.zoomIn": {},
   "timeline.lightbox.zoomOut": {},
+  "timeline.memberPanel.agentKind": {},
+  "timeline.memberPanel.elapsedDays": {
+    "count": "number"
+  },
+  "timeline.memberPanel.elapsedHours": {
+    "count": "number"
+  },
+  "timeline.memberPanel.elapsedMinutes": {
+    "count": "number"
+  },
+  "timeline.memberPanel.groupAgents": {
+    "count": "number"
+  },
+  "timeline.memberPanel.groupOffline": {
+    "count": "number"
+  },
+  "timeline.memberPanel.groupOnline": {
+    "count": "number"
+  },
+  "timeline.memberPanel.groupOtherAgents": {
+    "count": "number"
+  },
+  "timeline.memberPanel.groupPeople": {
+    "count": "number"
+  },
+  "timeline.memberPanel.groupWorking": {
+    "count": "number"
+  },
+  "timeline.memberPanel.listLabel": {},
+  "timeline.memberPanel.moreRuns": {
+    "count": "number"
+  },
+  "timeline.memberPanel.moreRunsSpoken": {
+    "count": "number"
+  },
+  "timeline.memberPanel.nowFailed": {},
+  "timeline.memberPanel.nowRetry": {},
+  "timeline.memberPanel.request": {
+    "text": "string"
+  },
+  "timeline.memberPanel.requestSpoken": {
+    "text": "string"
+  },
   "timeline.quote.head": {
     "name": "string"
   },
@@ -4223,6 +4283,23 @@ export interface MessageArgs {
   "timeline.lightbox.copyFailed": Record<string, never>;
   "timeline.lightbox.zoomIn": Record<string, never>;
   "timeline.lightbox.zoomOut": Record<string, never>;
+  "timeline.memberPanel.agentKind": Record<string, never>;
+  "timeline.memberPanel.elapsedDays": { count: number };
+  "timeline.memberPanel.elapsedHours": { count: number };
+  "timeline.memberPanel.elapsedMinutes": { count: number };
+  "timeline.memberPanel.groupAgents": { count: number };
+  "timeline.memberPanel.groupOffline": { count: number };
+  "timeline.memberPanel.groupOnline": { count: number };
+  "timeline.memberPanel.groupOtherAgents": { count: number };
+  "timeline.memberPanel.groupPeople": { count: number };
+  "timeline.memberPanel.groupWorking": { count: number };
+  "timeline.memberPanel.listLabel": Record<string, never>;
+  "timeline.memberPanel.moreRuns": { count: number };
+  "timeline.memberPanel.moreRunsSpoken": { count: number };
+  "timeline.memberPanel.nowFailed": Record<string, never>;
+  "timeline.memberPanel.nowRetry": Record<string, never>;
+  "timeline.memberPanel.request": { text: string };
+  "timeline.memberPanel.requestSpoken": { text: string };
   "timeline.quote.head": { name: string };
   "timeline.quote.headUnnamed": Record<string, never>;
   "timeline.runException.open": { text: string };
