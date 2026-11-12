@@ -12,6 +12,9 @@
 // 「dpl」로 `deploy`를 찾는 길을 이번 수리가 끊지 않는다.
 // =============================================================================
 
+/** 질의 전체가 명령 이름과 같을 때 더하는 점수. 낱말 점수의 최대 간격(0.2)보다 작다. */
+const NAMED_WHOLE_BONUS = 0.05;
+
 const WORD_SPLIT = /[\s·:/._-]+/;
 
 function words(text: string): string[] {
@@ -49,11 +52,17 @@ function subsequence(needle: string, haystack: string): boolean {
  *
  * `keywords`가 있으면 명령 줄이다: `[이름, 작은 글씨, ...별칭]`을 낱말 앞머리로 잰다.
  * 질의의 **모든** 낱말이 맞아야 하고, 점수는 낱말 점수의 평균이다.
+ *
+ * `commandNames`는 그 명령이 스스로 갖는 이름(슬래시 이름·별칭)이다. 낱말이 둘
+ * 이상인 질의의 **모든** 낱말이 이 이름과 글자 그대로 같으면 점수에 한 칸을 더해
+ * 그 명령을 같은 점수의 이동 줄 위에 세운다(#5726: 「ai 연결」 ↵ = 카드 열기).
+ * 낱말이 하나인 질의(「ai」)는 예전 순서 그대로다.
  */
 export function paletteFilter(
   value: string,
   search: string,
-  keywords?: readonly string[]
+  keywords?: readonly string[],
+  commandNames?: readonly string[]
 ): number {
   const tokens = words(search);
   if (tokens.length === 0) return 1;
@@ -64,7 +73,10 @@ export function paletteFilter(
       if (score === 0) return 0;
       total += score;
     }
-    return total / tokens.length;
+    const names = commandNames?.map((name) => name.toLowerCase());
+    const namedWhole =
+      tokens.length >= 2 && names !== undefined && tokens.every((token) => names.includes(token));
+    return total / tokens.length + (namedWhole ? NAMED_WHOLE_BONUS : 0);
   }
   // 채널·사람 줄: 앞머리 > 부분 문자열 > 부분수열.
   const lowered = value.toLowerCase();
