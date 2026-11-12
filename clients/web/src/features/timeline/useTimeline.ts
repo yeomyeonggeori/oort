@@ -315,7 +315,10 @@ export function useTimeline(
   const [reachedStart, setReachedStart] = useState(false);
   const [olderFailed, setOlderFailed] = useState(false);
   // 옛 쪽을 읽고 있는 대화(#5662). 상태(`loadingOlder`)의 클로저로 막으면 같은 틱의 두 부름(맨 위 닿음 · 다시 시도)이 둘 다 지나간다.
-  const olderFlightRef = useRef<string | null>(null);
+  const olderFlightRef = useRef<number | null>(null);
+  // 방문 번호(#5662): 받아 둔 글을 비우고 대화를 새로 읽을 때마다 오른다. 옛 쪽 읽기는 낸 방문에서만 합치고, 읽는 중 막기도 방문별이다 —
+  // 대화 id 만 보면 A → B → A 로 돌아온 A 에 앞 방문의 늦은 응답이 합쳐져 가운데가 비고, 돌아온 A 의 닿음은 그 읽기에 막힌다.
+  const olderVisitRef = useRef(0);
   // 이어진 옛 쪽 실패 수와 마지막 실패 시각 — 맨 위 닿음으로 다시 읽을 때의 간격(`olderRetryGapMs`).
   const olderFailuresRef = useRef({ count: 0, atMs: 0 });
   const [reloadNonce, setReloadNonce] = useState(0);
@@ -1002,6 +1005,7 @@ export function useTimeline(
       setReachedStart(false);
       setOlderFailed(false);
       olderFailuresRef.current = { count: 0, atMs: 0 };
+      olderVisitRef.current += 1;
     }
     setRecoveryMarkers([]);
     setResume({ lastRecovered: null, lastBackfillCount: 0, resubscribeCount: 0 });
@@ -1231,12 +1235,13 @@ export function useTimeline(
   // 바로 내지 않고 간격을 둔다(망이 끊긴 채 맨 위에서 흔들리는 손가락이 읽기를 쏟아내지 않게). 「다시 시도」(`manual`)는 간격을 넘는다.
   const readOlder = useCallback(
     async (manual: boolean) => {
-      if (!channelId || reachedStart || olderFlightRef.current === channelId) return;
+      const visit = olderVisitRef.current;
+      if (!channelId || reachedStart || olderFlightRef.current === visit) return;
       const oldest = state.oldestSeq;
       if (oldest === null) return;
       const failures = olderFailuresRef.current;
       if (!manual && failures.count > 0 && Date.now() - failures.atMs < olderRetryGapMs(failures.count)) return;
-      olderFlightRef.current = channelId;
+      olderFlightRef.current = visit;
       setLoadingOlder(true);
       try {
         const page = await fetchMessages(workspaceId, channelId, {
@@ -1244,7 +1249,7 @@ export function useTimeline(
           limit: PAGE_LIMIT,
         });
         // 떠난 대화의 쪽은 지금 대화에 합치지 않는다(합치면 앞 대화 줄이 섞이고, 가장 옛 줄이 내려가 지금 대화의 그 사이를 건너뛴다).
-        if (channelRef.current !== channelId) return;
+        if (channelRef.current !== channelId || olderVisitRef.current !== visit) return;
         applyBatch(page.messages);
         hydrateUnfurls(page.messages, channelId);
         if (page.nextBefore === undefined) setReachedStart(true);
@@ -1253,13 +1258,13 @@ export function useTimeline(
           setOlderFailed(false);
         }
       } catch {
-        // 떠난 대화의 실패는 지금 대화에 말하지 않는다.
-        if (channelRef.current === channelId) {
+        // 떠난 대화 · 지난 방문의 실패는 지금 대화에 말하지 않는다.
+        if (channelRef.current === channelId && olderVisitRef.current === visit) {
           olderFailuresRef.current = { count: olderFailuresRef.current.count + 1, atMs: Date.now() };
           setOlderFailed(true);
         }
       } finally {
-        if (olderFlightRef.current === channelId) olderFlightRef.current = null;
+        if (olderFlightRef.current === visit) olderFlightRef.current = null;
         setLoadingOlder(false);
       }
     },

@@ -293,6 +293,50 @@ describe("useTimeline.loadOlder: 실패 뒤에도 다시 읽는다 (#5662)", () 
     expect(olderCalls()).toBe(2);
   });
 
+  // 지키는 것: 같은 대화로 돌아와도(A → B → A) 앞 방문에서 낸 옛 쪽 읽기의 늦은 응답은 합치지 않는다 — 그사이 새 글이 와 머리가 올라갔으면
+  // 가운데가 비고(여기서는 91~95) 「더 없음」까지 잘못 선다. 돌아온 방문의 닿음은 앞 방문의 읽기에 막히지 않는다(검수 2회차).
+  it("같은 대화로 돌아와도 앞 방문의 늦은 옛 쪽 응답은 합치지 않는다 (A → B → A)", async () => {
+    const held: { before: number; resolve: (value: unknown) => void }[] = [];
+    let top = 100;
+    api.fetchMessages.mockImplementation((_ws: string, channel: string, opts: { before?: number; after?: number }) => {
+      if (opts.after !== undefined) return Promise.resolve({ messages: [] });
+      if (opts.before === undefined) {
+        const head = channel === CH ? top : 100;
+        return Promise.resolve({ messages: rows(channel, head - 9, head), nextBefore: head - 9 });
+      }
+      return new Promise((resolve) => held.push({ before: opts.before as number, resolve }));
+    });
+    await mount(CH);
+    await act(async () => {
+      void t().loadOlder();
+    });
+    expect(held.map((entry) => entry.before)).toEqual([91]);
+    await switchTo(CH2);
+    top = 105; // 그사이 CH 에 새 글 5개
+    await switchTo(CH);
+    expect(t().state.oldestSeq).toBe(96);
+    // 돌아온 방문의 닿음은 앞 방문의 읽기에 막히지 않고 자기 가장 옛 줄에서 나간다.
+    await act(async () => {
+      void t().loadOlder();
+    });
+    expect(held.map((entry) => entry.before)).toEqual([91, 96]);
+    // 앞 방문의 늦은 응답(81~90, 더 없음)은 버린다.
+    await act(async () => {
+      held[0]?.resolve({ messages: rows(CH, 81, 90) });
+    });
+    await act(async () => undefined);
+    expect(t().state.messages.length).toBe(10);
+    expect(t().state.oldestSeq).toBe(96);
+    expect(t().reachedStart).toBe(false);
+    // 지금 방문의 응답은 합친다 — 빈 데 없이 86~105.
+    await act(async () => {
+      held[1]?.resolve({ messages: rows(CH, 86, 95), nextBefore: 86 });
+    });
+    await act(async () => undefined);
+    expect(t().state.messages.map((m) => m.seq).sort((x, y) => x - y)).toEqual(Array.from({ length: 20 }, (_, i) => 86 + i));
+    expect(t().loadingOlder).toBe(false);
+  });
+
   // 지키는 것: 「더 없음」 뒤에는 닿아도 「다시 시도」를 눌러도 읽지 않는다.
   it("더 없음 뒤에는 닿아도 다시 시도해도 읽지 않는다", async () => {
     serve(async (before) => ({ messages: rows(CH, before - 10, before - 1) }));
