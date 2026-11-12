@@ -345,6 +345,64 @@ describe.skipIf(ENGINES.length === 0)("옛 쪽 읽기 — 실패 뒤 · 진입 �
     }
   }, 30_000);
 
+  // 지키는 것 (다): 스스로 읽는 길(빈 대화를 거친 짧은 대화 진입 · 답글뿐인 쪽 이어 읽기)의 옛 쪽 읽기가 떠 있는 동안 긴 대화로 바꾸면,
+  // 늦게 온 앞 대화의 쪽이 지금 대화에 섞이지 않고(섞인 줄 0), 지금 대화의 첫 옛 쪽 읽기가 자기 가장 옛 줄(251)에서 나간다(건너뛴 줄 0).
+  // 검수 1회차 H1. 폭은 1280 만(경주는 폭과 무관하다).
+  const switchScenes: { name: string; start: ChannelName; via: boolean; from: "short" | "replies"; delay: number; inFlight: number }[] = [
+    { name: "빈 대화 → 짧은 대화 → 긴 대화", start: "general", via: true, from: "short", delay: 700, inFlight: 1 },
+    { name: "답글뿐인 쪽 이어 읽기 → 긴 대화", start: "replies", via: false, from: "replies", delay: 500, inFlight: 2 },
+  ];
+  it.each(
+    cells
+      .filter((cell) => cell.viewport.width === 1280)
+      .flatMap((cell) => switchScenes.map((scene) => ({ ...cell, scene, sceneName: scene.name })))
+  )(
+    "(다) 읽기가 떠 있는 동안 대화를 바꿔도 앞 대화 글이 섞이지 않는다 — $sceneName · $engine $viewport.width",
+    async (cell) => {
+      const scene = cell.scene;
+      {
+        const { page, close, errors } = await openHarness(cell.engine, cell.viewport, scene.start, scene.via);
+        try {
+          if (scene.via) {
+            await page.locator(`${SCROLLER} [data-index]`).first().waitFor({ state: "attached", timeout: 5_000 });
+            await wait(page, 400);
+          }
+          await page.evaluate((older) => window.__timelineOlder.setDelays({ older }), scene.delay);
+          if (scene.via) await page.evaluate((name) => window.__timelineOlder.open(name), scene.from);
+          // 앞 대화의 `inFlight` 번째 옛 쪽 읽기가 나가 떠 있는 동안 긴 대화로 바꾼다.
+          const deadline = Date.now() + 5_000;
+          while ((await requests(page)).length < scene.inFlight && Date.now() < deadline) await wait(page, 20);
+          await page.evaluate(() => window.__timelineOlder.open("long"));
+          const atSwitch = await requests(page);
+          const where = `${label(cell)} ${scene.name}`;
+          expect(atSwitch.length, `${where}: 바꿀 때 읽기 수`).toBe(scene.inFlight);
+          expect(atSwitch[scene.inFlight - 1], `${where}: 바꿀 때 떠 있는 읽기`).toMatchObject({ channel: scene.from, outcome: "pending" });
+          // 늦은 응답이 실제로 왔다(오지 않으면 섞임 0 은 헛돈다).
+          const late = (await waitRequests(page, scene.inFlight, 3_000))[scene.inFlight - 1];
+          expect(late, `${where}: 늦은 응답`).toMatchObject({ channel: scene.from, outcome: "ok" });
+          await settleBottom(page, 10);
+          await setTop(page, 0);
+          const afterTop = await waitRequests(page, scene.inFlight + 1, 4_000);
+          expect(afterTop.length, `${where}: 맨 위에서 긴 대화 읽기 ${JSON.stringify(afterTop)}`).toBeGreaterThan(scene.inFlight);
+          await wait(page, 400);
+          const rendered = await page.evaluate((selector) => {
+            const texts = [...document.querySelectorAll(`${selector} [data-index]`)].map((el) => el.textContent ?? "");
+            const count = (name: string) => texts.filter((text) => new RegExp(`${name} \\d+`).test(text)).length;
+            return { foreign: count("short") + count("replies") + count("general"), long: count("long") };
+          }, SCROLLER);
+          expect(rendered.foreign, `${where}: 섞인 앞 대화 줄`).toBe(0);
+          expect(rendered.long, `${where}: 긴 대화 줄`).toBeGreaterThan(0);
+          const longReads = (await requests(page)).filter((entry) => entry.channel === "long").map((entry) => entry.before);
+          expect(longReads[0], `${where}: 긴 대화의 첫 옛 쪽(251 이 아니면 그 위를 건너뜀)`).toBe(251);
+          expect(errors).toEqual([]);
+        } finally {
+          await close();
+        }
+      }
+    },
+    40_000
+  );
+
   // 지키는 것: 긴 대화에 들어가는 동안(바닥으로 가는 첫 몇 프레임에 맨 위가 잠깐 보여도) 옛 쪽을 읽지 않는다 — 곧장 들어가도, 빈 대화를 거쳐도.
   it.each(cells)("긴 대화 진입은 옛 쪽을 읽지 않는다 — $engine $viewport.width", async (cell) => {
     const direct = await openHarness(cell.engine, cell.viewport, "long");

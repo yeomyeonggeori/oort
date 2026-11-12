@@ -1243,6 +1243,8 @@ export function useTimeline(
           before: oldest,
           limit: PAGE_LIMIT,
         });
+        // 떠난 대화의 쪽은 지금 대화에 합치지 않는다(합치면 앞 대화 줄이 섞이고, 가장 옛 줄이 내려가 지금 대화의 그 사이를 건너뛴다).
+        if (channelRef.current !== channelId) return;
         applyBatch(page.messages);
         hydrateUnfurls(page.messages, channelId);
         if (page.nextBefore === undefined) setReachedStart(true);

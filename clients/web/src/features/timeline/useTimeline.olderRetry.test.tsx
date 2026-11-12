@@ -234,4 +234,79 @@ describe("useTimeline.loadOlder: 실패 뒤에도 다시 읽는다 (#5662)", () 
     });
     expect(olderCalls()).toBe(2);
   });
+
+  // 떠난 대화의 옛 쪽 읽기를 손에 쥔다: 대화를 바꾼 뒤에 답한다(검수 1회차 H1 · M3).
+  function serveHeld(): { resolve: (value: unknown) => void; reject: (error: unknown) => void }[] {
+    const held: { resolve: (value: unknown) => void; reject: (error: unknown) => void }[] = [];
+    serve(() => new Promise((resolve, reject) => held.push({ resolve, reject })));
+    return held;
+  }
+
+  async function switchTo(channel: string): Promise<void> {
+    await act(async () => {
+      root?.render(createElement(Probe, { channel }));
+    });
+    await act(async () => undefined);
+    expect(t().status).toBe("ready");
+  }
+
+  // 지키는 것: 떠난 대화의 늦은 성공 응답은 지금 대화에 합치지 않는다 — 줄이 섞이지 않고, 가장 옛 줄이 내려가지 않아(그 사이를 건너뛰지
+  // 않음) 「더 없음」도 서지 않는다.
+  it("떠난 대화의 늦은 성공은 지금 대화에 섞이지 않는다", async () => {
+    const held = serveHeld();
+    await mount(CH);
+    await act(async () => {
+      void t().loadOlder();
+    });
+    expect(held.length).toBe(1);
+    await switchTo(CH2);
+    await act(async () => {
+      // 떠난 대화의 81~90, 그리고 「더 없음」.
+      held[0]?.resolve({ messages: rows(CH, 81, 90) });
+    });
+    await act(async () => undefined);
+    expect(t().state.messages.filter((m) => m.channelId !== CH2).length).toBe(0);
+    expect(t().state.messages.length).toBe(10);
+    expect(t().state.oldestSeq).toBe(91);
+    expect(t().reachedStart).toBe(false);
+  });
+
+  // 지키는 것: 떠난 대화의 늦은 실패는 지금 대화에 실패 줄을 세우지 않고, 지금 대화의 다음 닿음을 간격으로 막지도 않는다.
+  it("떠난 대화의 늦은 실패는 지금 대화에 말하지 않고 간격도 걸지 않는다", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(12_000_000);
+    const held = serveHeld();
+    await mount(CH);
+    await act(async () => {
+      void t().loadOlder();
+    });
+    await switchTo(CH2);
+    await act(async () => {
+      held[0]?.reject(new TypeError("Failed to fetch"));
+    });
+    await act(async () => undefined);
+    expect(t().olderFailed).toBe(false);
+    // 같은 시각의 닿음이 바로 읽는다(떠난 대화의 실패가 간격을 걸었다면 0).
+    await act(async () => {
+      void t().loadOlder();
+    });
+    expect(olderCalls()).toBe(2);
+  });
+
+  // 지키는 것: 「더 없음」 뒤에는 닿아도 「다시 시도」를 눌러도 읽지 않는다.
+  it("더 없음 뒤에는 닿아도 다시 시도해도 읽지 않는다", async () => {
+    serve(async (before) => ({ messages: rows(CH, before - 10, before - 1) }));
+    await mount(CH);
+    await act(async () => {
+      await t().loadOlder();
+    });
+    expect(t().reachedStart).toBe(true);
+    expect(olderCalls()).toBe(1);
+    await act(async () => {
+      await t().loadOlder();
+      t().retryOlder();
+    });
+    await act(async () => undefined);
+    expect(olderCalls()).toBe(1);
+  });
 });
