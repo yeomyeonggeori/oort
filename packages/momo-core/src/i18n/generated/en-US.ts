@@ -8478,6 +8478,185 @@ export const catalog: MessageCatalog = {
       "value": "Zoom out"
     }
   ],
+  "timeline.memberPanel.agentKind": [
+    {
+      "type": 0,
+      "value": "Agent"
+    }
+  ],
+  "timeline.memberPanel.elapsedDays": [
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": " d"
+    }
+  ],
+  "timeline.memberPanel.elapsedHours": [
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": " h"
+    }
+  ],
+  "timeline.memberPanel.elapsedMinutes": [
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": " min"
+    }
+  ],
+  "timeline.memberPanel.groupAgents": [
+    {
+      "type": 0,
+      "value": "Agents "
+    },
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    }
+  ],
+  "timeline.memberPanel.groupOffline": [
+    {
+      "type": 0,
+      "value": "Offline "
+    },
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    }
+  ],
+  "timeline.memberPanel.groupOnline": [
+    {
+      "type": 0,
+      "value": "Online "
+    },
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    }
+  ],
+  "timeline.memberPanel.groupOtherAgents": [
+    {
+      "type": 0,
+      "value": "Other agents "
+    },
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    }
+  ],
+  "timeline.memberPanel.groupPeople": [
+    {
+      "type": 0,
+      "value": "Presence unknown "
+    },
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    }
+  ],
+  "timeline.memberPanel.groupWorking": [
+    {
+      "type": 0,
+      "value": "Working agents "
+    },
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    }
+  ],
+  "timeline.memberPanel.listLabel": [
+    {
+      "type": 0,
+      "value": "Channel member list"
+    }
+  ],
+  "timeline.memberPanel.moreRuns": [
+    {
+      "type": 0,
+      "value": "+"
+    },
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    }
+  ],
+  "timeline.memberPanel.moreRunsSpoken": [
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": " more"
+    }
+  ],
+  "timeline.memberPanel.nowFailed": [
+    {
+      "type": 0,
+      "value": "Couldn't load what the agents are doing."
+    }
+  ],
+  "timeline.memberPanel.nowRetry": [
+    {
+      "type": 0,
+      "value": "Reload"
+    }
+  ],
+  "timeline.memberPanel.request": [
+    {
+      "type": 0,
+      "value": "“"
+    },
+    {
+      "type": 1,
+      "value": "text"
+    },
+    {
+      "type": 0,
+      "value": "”"
+    }
+  ],
+  "timeline.memberPanel.requestSpoken": [
+    {
+      "type": 0,
+      "value": "Request: "
+    },
+    {
+      "type": 1,
+      "value": "text"
+    }
+  ],
+  "timeline.memberPanel.stageSpoken": [
+    {
+      "type": 1,
+      "value": "stage"
+    },
+    {
+      "type": 0,
+      "value": " (agent report)"
+    }
+  ],
   "timeline.quote.head": [
     {
       "type": 0,

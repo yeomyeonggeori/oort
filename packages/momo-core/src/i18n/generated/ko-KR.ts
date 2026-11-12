@@ -8100,6 +8100,189 @@ export const catalog: MessageCatalog = {
       "value": "축소"
     }
   ],
+  "timeline.memberPanel.agentKind": [
+    {
+      "type": 0,
+      "value": "에이전트"
+    }
+  ],
+  "timeline.memberPanel.elapsedDays": [
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "일째"
+    }
+  ],
+  "timeline.memberPanel.elapsedHours": [
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "시간째"
+    }
+  ],
+  "timeline.memberPanel.elapsedMinutes": [
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "분째"
+    }
+  ],
+  "timeline.memberPanel.groupAgents": [
+    {
+      "type": 0,
+      "value": "에이전트 "
+    },
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    }
+  ],
+  "timeline.memberPanel.groupOffline": [
+    {
+      "type": 0,
+      "value": "오프라인 "
+    },
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    }
+  ],
+  "timeline.memberPanel.groupOnline": [
+    {
+      "type": 0,
+      "value": "온라인 "
+    },
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    }
+  ],
+  "timeline.memberPanel.groupOtherAgents": [
+    {
+      "type": 0,
+      "value": "그 밖의 에이전트 "
+    },
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    }
+  ],
+  "timeline.memberPanel.groupPeople": [
+    {
+      "type": 0,
+      "value": "접속 확인 안 됨 "
+    },
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    }
+  ],
+  "timeline.memberPanel.groupWorking": [
+    {
+      "type": 0,
+      "value": "일하는 에이전트 "
+    },
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    }
+  ],
+  "timeline.memberPanel.listLabel": [
+    {
+      "type": 0,
+      "value": "채널 멤버 목록"
+    }
+  ],
+  "timeline.memberPanel.moreRuns": [
+    {
+      "type": 0,
+      "value": "+"
+    },
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    }
+  ],
+  "timeline.memberPanel.moreRunsSpoken": [
+    {
+      "type": 0,
+      "value": "다른 작업 "
+    },
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "건 더"
+    }
+  ],
+  "timeline.memberPanel.nowFailed": [
+    {
+      "type": 0,
+      "value": "에이전트가 지금 하는 일을 불러오지 못했어요."
+    }
+  ],
+  "timeline.memberPanel.nowRetry": [
+    {
+      "type": 0,
+      "value": "다시 불러오기"
+    }
+  ],
+  "timeline.memberPanel.request": [
+    {
+      "type": 0,
+      "value": "「"
+    },
+    {
+      "type": 1,
+      "value": "text"
+    },
+    {
+      "type": 0,
+      "value": "」"
+    }
+  ],
+  "timeline.memberPanel.requestSpoken": [
+    {
+      "type": 0,
+      "value": "요청: "
+    },
+    {
+      "type": 1,
+      "value": "text"
+    }
+  ],
+  "timeline.memberPanel.stageSpoken": [
+    {
+      "type": 1,
+      "value": "stage"
+    },
+    {
+      "type": 0,
+      "value": " (에이전트 보고)"
+    }
+  ],
   "timeline.quote.head": [
     {
       "type": 1,
