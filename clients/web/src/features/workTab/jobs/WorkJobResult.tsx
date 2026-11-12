@@ -54,6 +54,11 @@ export interface JobApprovalFacts {
    * 결과 칸은 이 한 줄이 먼저다. `decision`이 없으면 이 한 줄뿐이다(결정 전의 꼬리표·되돌릴 수 없음·만료를 말하지 않는다).
    */
   receipt: string | null;
+  /**
+   * 붙든 줄에 같은 run의 새 요청이 섰을 때 그 요청의 원장 행과 카드 문장(수리 5회차 M3). 새 요청은 영수증 **아래 새 줄**에 서고(`decision`이
+   * 그 요청), 누른 자리에는 영수증이 남는다.
+   */
+  nextAsk?: { item: FeedItem | null; intent: string | null } | null;
 }
 
 /**
@@ -104,6 +109,38 @@ function KindTag({ label, testId }: { label: string; testId: string }) {
   );
 }
 
+/** 승인 요청 한 건이 말하는 줄들: 꼬리표 · 무엇을 승인하는가 · 되돌릴 수 없음 · 기한 · (결정자가 아니면) 대기 줄. */
+function ApprovalAskLines({ item, intent, waiting }: { item: FeedItem | null; intent: string | null; waiting: string | null }) {
+  const formatMessage = useFormatMessage();
+  // 무엇을 승인하는가: 서버가 쓴 카드 문장이 먼저, 없으면 원장 행의 문장(인박스 행과 같은 말). 둘 다 없으면 꼬리표만.
+  const summary = intent ?? item?.predicate ?? null;
+  const note = item?.note ?? null;
+  const timeLabel = item?.timeLabel ?? null;
+  return (
+    <>
+      <KindTag label={formatMessage("desktop.workJobs.tagApproval")} testId="work-job-approval-tag" />
+      {summary !== null && (
+        <span className="min-w-0 break-keep text-meta text-ink" data-testid="work-job-approval-summary">
+          {summary}
+        </span>
+      )}
+      {/* 「되돌릴 수 없음」은 받은함(`InboxDetail`의 `text-meta text-warn`)과 같은 무게로 따로 선다 — 한 번 누르면 끝나는 단추 바로 위다
+          (#5640 수리 3회차, 검수 M5). 기한은 옅은 글자 그대로. */}
+      {note !== null && (
+        <span className="min-w-0 break-keep text-meta text-warn" data-testid="work-job-approval-note">
+          {note}
+        </span>
+      )}
+      {timeLabel !== null && <span className="min-w-0 break-keep text-timestamp text-ink-muted">{timeLabel}</span>}
+      {waiting !== null && (
+        <span className="min-w-0 break-keep text-timestamp text-ink-muted" data-testid="work-job-approval-waiting">
+          {waiting}
+        </span>
+      )}
+    </>
+  );
+}
+
 /**
  * 줄 단추 안의 결과 칸 글. 좁은 폭에서는 같은 글이 첫 열 아래(`data-narrow`)에도 선다 — 상태가 없는 글이라 두 번 그려도 갈라지지 않는다.
  */
@@ -122,9 +159,10 @@ export function JobResultCell({
   inApp: string | null;
 }) {
   const formatMessage = useFormatMessage();
-  if (kind === "approval" && approval?.receipt && approval.decision === null) {
+  if (kind === "approval" && approval?.receipt) {
     // 붙든 줄(방금 결정함)은 결정된 모습만 말한다(수리 4회차, 검수 2회차 M2): 꼬리표·되돌릴 수 없음·만료는 걷고 무엇을 결정했는지(요약)만
     // 남긴다. 걷은 줄의 자리는 비워 둔다 — 줄 높이가 그대로라 누른 점 밑으로 다른 줄이 올라오지 않는다. 영수증은 단추가 있던 층에 선다.
+    // 같은 run의 새 요청이 와도 이 칸은 그대로다(새 요청은 영수증 아래 새 줄, `JobResultActions`).
     const item = approval.item;
     const summary = approval.intent ?? item?.predicate ?? null;
     return (
@@ -148,33 +186,9 @@ export function JobResultCell({
     );
   }
   if (kind === "approval") {
-    const item = approval?.item ?? null;
-    // 무엇을 승인하는가: 서버가 쓴 카드 문장이 먼저, 없으면 원장 행의 문장(인박스 행과 같은 말). 둘 다 없으면 꼬리표만.
-    const summary = approval?.intent ?? item?.predicate ?? null;
-    const note = item?.note ?? null;
-    const timeLabel = item?.timeLabel ?? null;
     return (
       <span className="flex min-w-0 flex-col gap-1" data-testid="work-job-result" data-kind={kind}>
-        {approval?.receipt && <ReceiptLine text={approval.receipt} />}
-        <KindTag label={formatMessage("desktop.workJobs.tagApproval")} testId="work-job-approval-tag" />
-        {summary !== null && (
-          <span className="min-w-0 break-keep text-meta text-ink" data-testid="work-job-approval-summary">
-            {summary}
-          </span>
-        )}
-        {/* 「되돌릴 수 없음」은 받은함(`InboxDetail`의 `text-meta text-warn`)과 같은 무게로 따로 선다 — 한 번 누르면 끝나는 단추 바로 위다
-            (#5640 수리 3회차, 검수 M5). 기한은 옅은 글자 그대로. */}
-        {note !== null && (
-          <span className="min-w-0 break-keep text-meta text-warn" data-testid="work-job-approval-note">
-            {note}
-          </span>
-        )}
-        {timeLabel !== null && <span className="min-w-0 break-keep text-timestamp text-ink-muted">{timeLabel}</span>}
-        {approval !== null && approval.waiting !== null && (
-          <span className="min-w-0 break-keep text-timestamp text-ink-muted" data-testid="work-job-approval-waiting">
-            {approval.waiting}
-          </span>
-        )}
+        <ApprovalAskLines item={approval?.item ?? null} intent={approval?.intent ?? null} waiting={approval?.waiting ?? null} />
       </span>
     );
   }
@@ -249,15 +263,28 @@ export function JobResultActions({
   return (
     <span className="flex min-w-0 flex-col items-start gap-1" data-testid="work-job-actions">
       {kind === "approval" &&
-        (approval?.decision ? (
+        (approval?.receipt ? (
+          <>
+            <ReceiptLine text={approval.receipt} asControl />
+            {approval.decision && (
+              // 같은 run의 새 요청(수리 5회차 M3): 방금 누른 자리에는 영수증이 남고, 새 요청과 그 단추는 영수증 **아래 새 줄**에 선다.
+              <span className="flex min-w-0 flex-col items-start gap-1 pt-1" data-testid="work-job-next-ask">
+                <ApprovalAskLines
+                  item={approval.nextAsk?.item ?? approval.decision.item}
+                  intent={approval.nextAsk?.intent ?? null}
+                  waiting={null}
+                />
+                <JobDecision title={row.title} decision={approval.decision} onDecided={onDecided} focusRow={focusRow} />
+              </span>
+            )}
+          </>
+        ) : approval?.decision ? (
           <JobDecision
             title={row.title}
             decision={approval.decision}
             onDecided={onDecided}
             focusRow={focusRow}
           />
-        ) : approval?.receipt ? (
-          <ReceiptLine text={approval.receipt} asControl />
         ) : (
           <ApprovalCardLink channelId={row.channelId} channel={row.channel} />
         ))}

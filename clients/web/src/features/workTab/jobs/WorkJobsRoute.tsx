@@ -99,8 +99,10 @@ const HOLD_MIN_MS = 1200;
 /** 목록이 그 run을 늦게 바꿔도 이만큼 지나면 놓는다(포인터가 구간 위면 여전히 붙든다). */
 const HOLD_MAX_MS = 10_000;
 const HOLD_TICK_MS = 200;
-/** 줄이 포인터 밑에서 움직인 뒤 결정 단추가 포인터 누름을 받지 않는 시간. 포인터가 움직이면 더 일찍 풀린다. */
+/** 결정 단추가 새 자리에 선 뒤(그 단추가 「선 때」부터) 그 자리의 포인터 누름을 받지 않는 시간. 마우스가 움직이면 더 일찍 풀린다. */
 const SHIFT_GUARD_MS = 1000;
+/** 삼킨 누름의 막힌 모양을 보이는 가장 짧은 시간(막기가 곧 끝나도 눈에 띄게, 검수 3회차 L1). */
+const GUARD_LOOK_MIN_MS = 600;
 /** 「포인터가 움직였다」의 문턱(px). 같은 자리 두 번 누름 사이의 손떨림은 움직임이 아니다. */
 const SHIFT_GUARD_MOVE_PX = 6;
 /** 결정 단추(승인·거부)의 표지(`ApprovalActions`의 `data-decision`). */
@@ -111,19 +113,41 @@ interface PointerSpot {
   y: number;
 }
 
-/** 붙든 결정: 그 run의 결정, 결정이 닿은 때, 영수증 문장(받은함과 같은 `decisionNote`), 누른 손이 터치였는지와 누른 점. */
+type Box = Pick<DOMRect, "left" | "right" | "top" | "bottom" | "height">;
+
+/**
+ * 「같은 자리」의 표지(수리 5회차, 검수 3회차 H1): 누른 점과 누른 결정 단추의 상자. 마우스는 누른 점 6px 안, **터치는 누른 단추의
+ * 상자 안**(좁은 폭 44px 표적) — 손가락은 같은 단추를 다시 누를 때 6px 넘게 흩어진다.
+ */
+interface PressMark {
+  spot: PointerSpot;
+  box: Box | null;
+  touch: boolean;
+}
+
+/** 붙든 결정: 그 run의 결정, 결정이 닿은 때, 영수증 문장(받은함과 같은 `decisionNote`), 누른 손이 터치였는지와 누른 자리, 그리고
+ * 사람이 그 줄을 떠났는지(붙든 줄 상자 밖을 눌렀거나 목록을 굴림 — 터치로 붙든 줄은 이것으로만 놓인다). */
 interface HeldDecision {
   decision: DecidableApproval;
   atMs: number;
   receipt: string;
   touch: boolean;
-  press: PointerSpot | null;
+  press: PressMark | null;
+  movedOn: boolean;
 }
 
-/** 마지막으로 결정 단추를 누른 일(포인터면 그 점과 종류, 키보드면 점 없음). */
+/** 마지막으로 결정 단추를 누른 일(포인터면 그 자리와 종류, 키보드면 자리 없음). */
 interface DecisionPress {
-  spot: PointerSpot | null;
+  mark: PressMark | null;
   touch: boolean;
+}
+
+/** 결정 단추 하나가 지금 자리에 선 일: 자리 표지(「응답 필요」의 몇째 줄 · 화면 좌표), 선 때, 그때의 「같은 자리」 기준들. */
+interface Arrival {
+  sig: string;
+  atMs: number;
+  marks: PressMark[];
+  released: boolean;
 }
 
 /** 붙든 줄의 지금: 붙들었는가, 그리고 원장이 그 run의 **다른** 승인(새 요청)을 내놓았는가. */
@@ -154,6 +178,15 @@ export function pointerInside(spot: PointerSpot | null, box: Pick<DOMRect, "left
 
 function near(a: PointerSpot, b: PointerSpot): boolean {
   return Math.hypot(a.x - b.x, a.y - b.y) < SHIFT_GUARD_MOVE_PX;
+}
+
+/** 그 누름이 표지와 같은 자리인가: 누른 점 6px 안, 또는 터치면 누른 단추의 상자 안. */
+function samePlace(spot: PointerSpot, mark: PressMark): boolean {
+  return near(spot, mark.spot) || (mark.touch && pointerInside(spot, mark.box));
+}
+
+function boxesOverlap(a: Box, b: Box): boolean {
+  return a.height > 0 && b.height > 0 && a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom;
 }
 
 /** 줄의 run 열쇠(소문자) — `rowNeedsMe`가 원장과 맞추는 것과 같은 값. */
@@ -190,6 +223,8 @@ export function WorkJobsRoute() {
   const decisions = useWorkDecisions();
   // 방금 결정한 줄(#5640 수리 3회차 H1): 원장이 그 승인을 뺀 뒤에도 영수증을 보인 채 「응답 필요」의 그 자리에 잠깐 남는다(`useHeldDecisions`).
   const [held, setHeld] = useState<ReadonlyMap<string, HeldDecision>>(() => new Map());
+  const heldRef = useRef(held);
+  heldRef.current = held;
   const approvalRunIds = useMemo(() => new Set(decisions.byRun.keys()), [decisions.byRun]);
   /** 마지막으로 결정 단추를 누른 일(`onListClickCapture`가 적는다). 붙든 줄과 움직인 뒤 막기의 기준점이다. */
   const lastPressRef = useRef<DecisionPress | null>(null);
@@ -207,7 +242,8 @@ export function WorkJobsRoute() {
           atMs: Date.now(),
           receipt,
           touch: press?.touch ?? false,
-          press: press?.spot ?? null,
+          press: press?.mark ?? null,
+          movedOn: false,
         })
       );
       // 받은함과 같이 원장을 다시 읽고(배지·「응답 필요」가 함께 바뀐다), 줄의 phase가 바뀌었으니 목록도 다시 읽는다.
@@ -259,8 +295,8 @@ export function WorkJobsRoute() {
   //   1. 붙들기: 결정한 줄은 영수증을 보인 채 그 자리에 남는다. 포인터가 「응답 필요」 구간 위에 있는 동안, 그리고 영수증을 읽을
   //      틈(`HOLD_MIN_MS`) 동안은 놓지 않는다. 목록이 아직 그 run을 승인 대기로 말하면 더 기다린다(놓자마자 「지금」에서 「승인
   //      대기」로 서지 않게, 상한 `HOLD_MAX_MS`).
-  //   2. 움직인 뒤 잠깐 막기: 줄이 포인터 밑에서 움직이면(붙든 줄을 놓을 때, 원장이 늦게 와 줄이 올라올 때, 서버의 「못 한다」가
-  //      늦게 와 줄이 빠질 때) 결정 단추는 포인터가 움직이거나 `SHIFT_GUARD_MS`가 지나기 전에는 포인터 누름을 받지 않는다.
+  //   2. 움직인 뒤 잠깐 막기: 결정 단추가 새 자리에 서면(붙든 줄을 놓을 때, 원장이 늦게 와 줄이 올라올 때, 서버의 「못 한다」가
+  //      늦게 와 줄이 빠질 때, 위 줄의 높이가 바뀔 때) **그 단추가 선 때부터** `SHIFT_GUARD_MS` 동안 그 자리의 포인터 누름을 받지 않는다.
   // 키보드 초점은 결정 뒤 그 줄 단추에 있고(`focusRow`), 줄이 옮기면 그 줄을 따라간다 — 다음 줄의 단추로 가지 않는다.
   const pointerRef = useRef<PointerSpot | null>(null);
   const needsMeRef = useRef<HTMLElement | null>(null);
@@ -268,22 +304,43 @@ export function WorkJobsRoute() {
   rowsRef.current = rows;
   const byRunRef = useRef(decisions.byRun);
   byRunRef.current = decisions.byRun;
-  /** 터치로 결정한 줄을 놓는 신호: 다른 곳을 누르거나 목록을 굴렸다(`onListScroll`, 문서의 누름). 시간으로는 놓지 않는다. */
-  const touchMovedOnRef = useRef(false);
-  const touchHeld = [...held.values()].some((entry) => entry.touch);
+  /** 붙든 run의 줄(`li`). 붙든 줄 상자 안의 누름은 「다른 곳」이 아니다. */
+  const heldRowOf = useCallback((runKey: string): HTMLElement | null => {
+    const row = rowsRef.current.find((r) => runKeyOf(r) === runKey);
+    return row === undefined ? null : (rowRefs.current.get(row.id.toLowerCase())?.closest("li") ?? null);
+  }, []);
+  /** 사람이 붙든 줄을 떠났다(그 줄 상자 밖을 누름·목록을 굴림): 누른 자리를 잊고, 터치로 붙든 줄은 다음 박자에 놓는다. */
+  const moveOn = useCallback((runKeys: readonly string[]) => {
+    if (runKeys.length === 0) return;
+    setHeld((current) => {
+      const next = new Map(current);
+      for (const key of runKeys) {
+        const entry = next.get(key);
+        if (entry !== undefined) next.set(key, { ...entry, press: null, movedOn: true });
+      }
+      return next;
+    });
+  }, []);
+  const heldNonEmpty = held.size > 0;
   useEffect(() => {
-    if (!touchHeld) return;
-    touchMovedOnRef.current = false;
+    if (!heldNonEmpty) return;
     const onClick = (event: globalThis.MouseEvent) => {
       if (event.detail === 0) return;
       const spot = { x: event.clientX, y: event.clientY };
-      for (const entry of held.values()) {
-        if (entry.touch && (entry.press === null || !near(spot, entry.press))) touchMovedOnRef.current = true;
+      const target = event.target instanceof Node ? event.target : null;
+      const left: string[] = [];
+      for (const [runKey, entry] of heldRef.current) {
+        if (entry.movedOn) continue;
+        // 「다른 곳」은 붙든 줄의 상자 밖이다 — 영수증·그 줄의 단추·여백을 다시 누르는 손가락은 아직 그 줄에 있다(수리 5회차 H1).
+        const li = heldRowOf(runKey);
+        const inside = li !== null && ((target !== null && li.contains(target)) || pointerInside(spot, li.getBoundingClientRect()));
+        if (!inside) left.push(runKey);
       }
+      moveOn(left);
     };
     document.addEventListener("click", onClick);
     return () => document.removeEventListener("click", onClick);
-  }, [touchHeld, held]);
+  }, [heldNonEmpty, heldRowOf, moveOn]);
   useEffect(() => {
     if (held.size === 0) return;
     const tick = () => {
@@ -295,12 +352,13 @@ export function WorkJobsRoute() {
       for (const [runKey, entry] of held) {
         const row = rowsRef.current.find((r) => runKeyOf(r) === runKey) ?? null;
         const waited = now - entry.atMs;
-        // 원장이 그 run의 **다른** 승인을 내놓았다면 새 요청이다: 영수증을 읽을 틈만 지키고 포인터와 상관없이 놓는다(새 단추는 막기가 맡는다).
+        // 원장이 그 run의 **다른** 승인(새 요청)을 내놓았으면 그 요청은 영수증 아래 새 줄에 선다(`approvalFacts`) — 붙들기는 같은 규칙으로
+        // 끝난다(수리 5회차 M3: 놓이면 새 단추가 누른 그 점으로 올라오므로, 사람이 그 줄을 떠나기 전에는 놓지 않는다).
         const next = byRunRef.current.get(runKey);
         const sameAsk = next === undefined || uuidEq(next.approvalId, entry.decision.approvalId);
         const stillAsking = row !== null && row.awaitingApproval && sameAsk && waited < HOLD_MAX_MS;
-        const free = entry.touch ? touchMovedOnRef.current : !pointerOnSection && !stillAsking;
-        if (row === null || (waited >= HOLD_MIN_MS && (!sameAsk || free))) release.push(runKey);
+        const free = entry.touch ? entry.movedOn : !pointerOnSection && !stillAsking;
+        if (row === null || (waited >= HOLD_MIN_MS && free)) release.push(runKey);
       }
       if (release.length === 0) return;
       setHeld((current) => {
@@ -313,30 +371,81 @@ export function WorkJobsRoute() {
     return () => clearInterval(id);
   }, [held]);
 
-  // 막기의 기준점은 둘이다: 줄이 움직일 때 마우스가 있던 점, 그리고 **마지막으로 결정 단추를 누른 점**(터치는 손을 떼면 포인터 자리가
-  // 없다). 그 점 가까이(`SHIFT_GUARD_MOVE_PX`)의 결정 누름은 포인터 종류와 상관없이 `SHIFT_GUARD_MS` 동안 삼킨다. 기준점이 하나도
-  // 없으면 그동안의 결정 누름을 모두 삼킨다. 마우스가 모든 기준점에서 멀어지면 일찍 풀린다(터치의 손떨림은 움직임이 아니다).
-  const guardRef = useRef<{ untilMs: number; spots: PointerSpot[] } | null>(null);
+  // 막기(수리 5회차, 검수 3회차 H1·M1): 결정 단추마다 **그 단추가 지금 자리에 선 때**를 적는다(「응답 필요」의 몇째 줄 · 화면 좌표가
+  // 바뀌거나 새로 섰을 때, `measureArrivals`). 선 지 `SHIFT_GUARD_MS` 안의 포인터 누름이 「같은 자리」면 삼킨다. 「같은 자리」의 기준은
+  // 그 단추가 선 때의 마우스 자리(6px)와 **마지막으로 결정 단추를 누른 자리**(마우스 6px · 터치는 누른 단추의 상자)이고, 기준이 하나도
+  // 없으면(터치로 들어와 아직 누른 적 없음) 그 단추의 누름을 모두 삼킨다. 마우스가 모든 기준에서 멀어지면 일찍 풀린다(터치의 손떨림은
+  // 움직임이 아니다). 움직이지 않은 단추는 막지 않는다 — 다른 줄을 차례로 결정하는 손은 막히지 않는다.
+  const arrivalsRef = useRef(new Map<Element, Arrival>());
+  const measuredOnceRef = useRef(false);
   const [guardShown, setGuardShown] = useState(false);
-  // 결정 단추는 「응답 필요」에만 선다: 그 구간의 줄 순서·결정 단추가 실은 승인·붙든 줄이 바뀔 때만 막는다(다른 구간의 변화는 아니다).
-  const needsMeSection = sections.find((s) => s.key === NEEDS_ME_SECTION) ?? null;
-  const layoutKey = [
-    ...(needsMeSection?.rows ?? []).map((r) => `${r.id}:${decisions.byRun.get(runKeyOf(r))?.approvalId ?? ""}`),
-    `held:${[...held.keys()].join(",")}`,
-  ].join("|");
-  const lastLayoutRef = useRef<string | null>(null);
-  useLayoutEffect(() => {
-    if (lastLayoutRef.current !== null && lastLayoutRef.current !== layoutKey) {
-      const spots = [pointerRef.current, lastPressRef.current?.spot ?? null].filter((spot): spot is PointerSpot => spot !== null);
-      guardRef.current = { untilMs: performance.now() + SHIFT_GUARD_MS, spots };
-    }
-    lastLayoutRef.current = layoutKey;
-  }, [layoutKey]);
+  const guardLookUntilRef = useRef(0);
+  const [guardLookAt, setGuardLookAt] = useState(0);
+  /** 삼킨 누름의 표시: 결정 단추가 막힌 승인의 모양으로, 막기가 끝날 때까지(적어도 `GUARD_LOOK_MIN_MS`). */
+  const showGuardLook = useCallback((untilMs: number) => {
+    const now = performance.now();
+    guardLookUntilRef.current = Math.max(guardLookUntilRef.current, untilMs, now + GUARD_LOOK_MIN_MS);
+    setGuardShown(true);
+    setGuardLookAt(now);
+  }, []);
   useEffect(() => {
     if (!guardShown) return;
-    const id = setTimeout(() => setGuardShown(false), Math.max(0, (guardRef.current?.untilMs ?? 0) - performance.now()));
+    const id = setTimeout(() => setGuardShown(false), Math.max(0, guardLookUntilRef.current - performance.now()));
     return () => clearTimeout(id);
-  }, [guardShown]);
+  }, [guardShown, guardLookAt]);
+  const guardMarks = (): PressMark[] => {
+    const marks: PressMark[] = [];
+    if (pointerRef.current !== null) marks.push({ spot: pointerRef.current, box: null, touch: false });
+    const last = lastPressRef.current?.mark ?? null;
+    if (last !== null) marks.push(last);
+    return marks;
+  };
+  /** 붙든 줄 안에 선 새 요청의 단추가 방금 누른 단추의 상자와 겹치면(배치가 그렇게 되면) 사람이 그 줄을 떠날 때까지 막는다(M3). */
+  const pinnedRef = useRef(new Set<Element>());
+  const [pinnedRuns, setPinnedRuns] = useState<ReadonlySet<string>>(() => new Set());
+  /**
+   * 결정 단추의 자리를 잰다. `scrolled`면 사람이 목록을 굴린 때다: 붙든 줄이 있으면 굴려서 그 점에 온 단추도 막 선 것으로 친다(그 점은
+   * 더는 누른 그 내용이 아니다 — 굴림이 끝나고 1초 뒤에는 받는다, M1), 붙든 줄이 없으면 자리만 새로 적는다(굴림은 사람이 한 일이다).
+   */
+  const measureArrivals = useCallback((scrolled: boolean) => {
+    const section = needsMeRef.current;
+    const now = performance.now();
+    const before = arrivalsRef.current;
+    const next = new Map<Element, Arrival>();
+    const pinned = new Set<Element>();
+    const pinnedKeys = new Set<string>();
+    const stamp = !measuredOnceRef.current ? -Infinity : now;
+    const heldNow = heldRef.current;
+    const heldLis = new Map<Element, PressMark>();
+    for (const [runKey, entry] of heldNow) {
+      const li = entry.press?.box ? heldRowOf(runKey) : null;
+      if (li !== null && entry.press !== null) heldLis.set(li, entry.press);
+    }
+    const lis = section === null ? [] : [...section.querySelectorAll(":scope > ul > li")];
+    lis.forEach((li, index) => {
+      const pressInRow = heldLis.get(li) ?? null;
+      for (const control of li.querySelectorAll(DECISION_CONTROL)) {
+        const r = control.getBoundingClientRect();
+        const sig = `${index}:${Math.round(r.left)}:${Math.round(r.top)}`;
+        const was = before.get(control);
+        if (scrolled) {
+          next.set(control, heldNow.size > 0 ? { sig, atMs: now, marks: guardMarks(), released: false } : { ...(was ?? { atMs: -Infinity, marks: [], released: true }), sig });
+        } else if (was === undefined || was.sig !== sig) {
+          next.set(control, { sig, atMs: stamp, marks: guardMarks(), released: false });
+        } else {
+          next.set(control, was);
+        }
+        if (pressInRow?.box && boxesOverlap(r, pressInRow.box)) {
+          pinned.add(control);
+          for (const [runKey] of heldNow) if (heldRowOf(runKey) === li) pinnedKeys.add(runKey);
+        }
+      }
+    });
+    measuredOnceRef.current = true;
+    arrivalsRef.current = next;
+    pinnedRef.current = pinned;
+    setPinnedRuns((current) => (current.size === pinnedKeys.size && [...pinnedKeys].every((k) => current.has(k)) ? current : pinnedKeys));
+  }, [heldRowOf]);
   const pointerTypeRef = useRef<string>("");
   const onListPointerDown = useCallback((event: PointerEvent<HTMLDivElement>) => {
     pointerTypeRef.current = event.pointerType;
@@ -345,49 +454,55 @@ export function WorkJobsRoute() {
     if (event.pointerType === "touch") return;
     const spot = { x: event.clientX, y: event.clientY };
     pointerRef.current = spot;
-    const guard = guardRef.current;
-    if (guard !== null && guard.spots.every((at) => !near(spot, at))) guardRef.current = null;
+    for (const arrival of arrivalsRef.current.values()) {
+      if (!arrival.released && arrival.marks.every((mark) => !near(spot, mark.spot) && !pointerInside(spot, mark.touch ? mark.box : null))) arrival.released = true;
+    }
   }, []);
   const onListPointerLeave = useCallback(() => {
     pointerRef.current = null;
   }, []);
-  const heldRef = useRef(held);
-  heldRef.current = held;
-  const onListClickCapture = useCallback((event: MouseEvent<HTMLDivElement>) => {
-    if (!(event.target instanceof Element)) return;
-    // 붙든 동안 방금 누른 점을 다시 누르는 것은 아무 일도 아니다(받은함에서 결정한 뒤 같은 자리를 다시 누르는 것과 같다): 그 점 밑이
-    // 영수증이 아니라 줄 단추(서랍)여도 삼킨다.
-    if (event.detail !== 0 && event.target.closest("[data-section] li") !== null) {
-      const at = { x: event.clientX, y: event.clientY };
-      for (const entry of heldRef.current.values()) {
-        if (entry.press !== null && near(at, entry.press)) {
-          event.preventDefault();
-          event.stopPropagation();
-          return;
+  const onListClickCapture = useCallback(
+    (event: MouseEvent<HTMLDivElement>) => {
+      if (!(event.target instanceof Element)) return;
+      // 키보드가 누른 단추(`detail === 0`)는 사람이 초점을 거기로 옮긴 것이다 — 줄이 움직여도 초점은 결정 단추로 가지 않는다.
+      const pointer = event.detail !== 0;
+      const spot = pointer ? { x: event.clientX, y: event.clientY } : null;
+      const control = event.target.closest(DECISION_CONTROL);
+      const swallow = (look: boolean, untilMs = 0) => {
+        event.preventDefault();
+        event.stopPropagation();
+        if (look) showGuardLook(untilMs);
+      };
+      // 붙든 동안 방금 누른 자리를 다시 누르는 것은 아무 일도 아니다(받은함에서 결정한 뒤 같은 자리를 다시 누르는 것과 같다): 그 자리
+      // 밑이 영수증이 아니라 줄 단추(서랍)여도 삼킨다. 삼킨 것이 결정 단추면 막힌 모양을 보인다(M1).
+      if (spot !== null && event.target.closest("[data-section] li") !== null) {
+        for (const entry of heldRef.current.values()) {
+          if (entry.press !== null && samePlace(spot, entry.press)) return swallow(control !== null);
         }
       }
-    }
-    if (event.target.closest(DECISION_CONTROL) === null) return;
-    // 키보드가 누른 단추(`detail === 0`)는 사람이 초점을 거기로 옮긴 것이다 — 줄이 움직여도 초점은 결정 단추로 가지 않는다.
-    const pointer = event.detail !== 0;
-    const spot = pointer ? { x: event.clientX, y: event.clientY } : null;
-    const guard = guardRef.current;
-    if (guard !== null && performance.now() >= guard.untilMs) guardRef.current = null;
-    else if (guard !== null && spot !== null && (guard.spots.length === 0 || guard.spots.some((at) => near(spot, at)))) {
-      event.preventDefault();
-      event.stopPropagation();
-      setGuardShown(true);
-      return;
-    }
-    lastPressRef.current = { spot, touch: pointer && pointerTypeRef.current === "touch" };
-  }, []);
+      if (control === null) return;
+      if (spot !== null) {
+        if (pinnedRef.current.has(control)) return swallow(true);
+        const arrival = arrivalsRef.current.get(control);
+        const fresh = arrival !== undefined && !arrival.released && performance.now() - arrival.atMs < SHIFT_GUARD_MS;
+        if (fresh && (arrival.marks.length === 0 || arrival.marks.some((mark) => samePlace(spot, mark)))) {
+          return swallow(true, arrival.atMs + SHIFT_GUARD_MS);
+        }
+      }
+      const touch = pointer && pointerTypeRef.current === "touch";
+      lastPressRef.current = { mark: spot === null ? null : { spot, box: control.getBoundingClientRect(), touch }, touch };
+    },
+    [showGuardLook]
+  );
   const onListScroll = useCallback(() => {
     if (selfScrollTopRef.current !== null && listRef.current?.scrollTop === selfScrollTopRef.current) {
       selfScrollTopRef.current = null;
       return;
     }
-    touchMovedOnRef.current = true;
-  }, []);
+    // 사람이 굴렸다: 붙든 줄의 누른 자리는 더는 그 내용이 아니다(놓기·잊기), 그 점에 온 단추는 굴림이 끝나고 1초 뒤에 받는다(M1).
+    measureArrivals(true);
+    moveOn([...heldRef.current].filter(([, entry]) => !entry.movedOn).map(([key]) => key));
+  }, [measureArrivals, moveOn]);
 
   const fromList =
     openId === null ? null : list.items.find((i) => uuidEq(i.sessionId, openId)) ?? null;
@@ -502,6 +617,10 @@ export function WorkJobsRoute() {
     }
     readAnchors();
   }, [sectionOf, readAnchors]);
+  // 스크롤 고정이 자리를 맞춘 뒤에 결정 단추의 자리를 잰다(렌더마다 — 위 줄의 높이가 바뀌어 단추가 움직인 것도 「새 자리」다).
+  useLayoutEffect(() => {
+    measureArrivals(false);
+  });
   const rovingId =
     activeId !== null && orderedIds.some((id) => uuidEq(id, activeId))
       ? activeId
@@ -753,6 +872,7 @@ export function WorkJobsRoute() {
                           onDecided={onDecided}
                           selected={openId !== null && uuidEq(row.id, openId)}
                           tabStop={rovingId !== null && uuidEq(row.id, rovingId)}
+                          pinned={pinnedRuns.has(runKeyOf(row))}
                           rowRef={(el) => {
                             const key = row.id.toLowerCase();
                             if (el) rowRefs.current.set(key, el);
@@ -865,14 +985,15 @@ function approvalFacts(
   const { entry, nextAsk } = heldStateOf(row, held, decisions.byRun);
   if (needsMe && entry !== null) {
     // 붙든 줄은 결정된 모습만: 영수증 한 줄(꼬리표·되돌릴 수 없음·만료·카드 링크를 걷는다, 수리 4회차). 원장이 같은 run의 새 요청을
-    // 내놓았으면 영수증 아래에 그 요청을 새 줄처럼 바로 세운다 — 그 단추는 움직인 뒤 막기가 맡는다.
-    const shown = nextAsk ?? entry.decision;
+    // 내놓았으면 그 요청은 영수증 **아래 새 줄**에 바로 선다(수리 5회차 M3) — 결과 칸과 영수증은 방금 결정한 승인 그대로라 누른 자리에
+    // 새 단추가 오지 않는다.
     return {
       decision: nextAsk,
-      item: shown.item,
-      intent: decisions.intentFor(row.channelId, runId, shown.approvalId),
+      item: entry.decision.item,
+      intent: decisions.intentFor(row.channelId, runId, entry.decision.approvalId),
       waiting: null,
       receipt: entry.receipt,
+      nextAsk: nextAsk === null ? null : { item: nextAsk.item, intent: decisions.intentFor(row.channelId, runId, nextAsk.approvalId) },
     };
   }
   const mine = decisions.byRun.get(runId.toLowerCase()) ?? null;
@@ -898,6 +1019,7 @@ function JobRow({
   onDecided,
   selected,
   tabStop,
+  pinned,
   rowRef,
   onOpen,
   onKeyDown,
@@ -922,6 +1044,8 @@ function JobRow({
   onDecided: (outcome: DecisionOutcome, runKey: string, decision: DecidableApproval) => void;
   selected: boolean;
   tabStop: boolean;
+  /** 붙든 줄의 새 요청 단추가 방금 누른 단추의 상자와 겹쳐 막혀 있다(사람이 그 줄을 떠날 때까지, 막힌 모양). */
+  pinned: boolean;
   rowRef: (element: HTMLButtonElement | null) => void;
   onOpen: () => void;
   onKeyDown: (event: KeyboardEvent<HTMLButtonElement>) => void;
@@ -1021,7 +1145,14 @@ function JobRow({
       </button>
       {workJobResultHasControls(row, kind, desktop) && (
         // 결과 열 안으로 내려앉는 컨트롤(단추 안에 단추를 둘 수 없어 형제로 둔다). 같은 열 격자라 넓을 때는 결과 열, 좁을 때는 첫 열에 선다.
-        <div className="work-jobs-row px-3 pb-2" data-testid="work-job-extras">
+        <div
+          className={cn(
+            "work-jobs-row px-3 pb-2",
+            "data-shift-guard:[&_[data-decision]]:cursor-not-allowed data-shift-guard:[&_[data-decision]]:bg-surface-muted data-shift-guard:[&_[data-decision]]:text-ink-muted"
+          )}
+          data-testid="work-job-extras"
+          data-shift-guard={pinned ? "" : undefined}
+        >
           <span data-col="extra" className="min-w-0">
             <JobResultActions
               row={row}
