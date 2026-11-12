@@ -79,4 +79,18 @@ describe("createRealtime 의 「마지막으로 들은 시각」 (#5660)", () =>
     expect("websocket" in mocks.options!).toBe(false);
     expect(handle.lastHeardAt?.()).toBeNull();
   });
+
+  it("addEventListener 없는 가짜 웹소켓이면 감싸지 않아 연결이 그대로 열리고 추적만 꺼진다 (#5700)", async () => {
+    class BareSocket {
+      static opened = 0;
+      constructor(readonly url: string | URL) {
+        BareSocket.opened += 1;
+      }
+    }
+    vi.stubGlobal("WebSocket", BareSocket);
+    const { createRealtime } = await import("./realtime");
+    const handle = createRealtime("ws://heard.invalid/connection/websocket", () => undefined);
+    expect("websocket" in mocks.options!).toBe(false); // centrifuge 가 전역 웹소켓을 그대로 쓴다
+    expect(handle.lastHeardAt?.()).toBeNull();
+  });
 });
