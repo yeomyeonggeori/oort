@@ -312,7 +312,7 @@ describe("사이드바 하단 프로필 (#3574)", () => {
       foot.querySelector('[data-testid="profile-card"]')?.getAttribute("data-compact")
     ).toBe("false");
   });
-  it("업데이트 알약: 펼침의 프로필 줄에는 서고, 접힘(⌘B)에서는 마운트되지 않는다 (#3904)", async () => {
+  it("업데이트 알약: 펼침의 프로필 줄에 서고, 접힘(⌘B)에서는 레일 아바타 위에 작은 모양으로 선다 (#3904, #5661)", async () => {
     const update = {
       version: "0.1.28",
       currentVersion: "0.1.27",
@@ -339,8 +339,18 @@ describe("사이드바 하단 프로필 (#3574)", () => {
     mountedHost?.remove();
     mountedHost = null;
 
+    // owner 2026-11-11: 접어도 알약이 보인다. 레일 footer에, 프로필 아바타 **위**에 하나, 같은 이름으로.
     const collapsed = await mount({ collapsed: true });
-    expect(collapsed.querySelector('[data-testid="update-pill"]')).toBeNull();
+    const rail = collapsed.querySelector('[data-testid="workspace-rail"]') as HTMLElement;
+    const pills = collapsed.querySelectorAll('[data-testid="update-pill"]');
+    expect(pills).toHaveLength(1);
+    const railPill = rail.querySelector('[data-testid="update-pill"]') as HTMLElement | null;
+    expect(railPill?.getAttribute("data-placement")).toBe("rail");
+    expect(railPill?.getAttribute("aria-label")).toBe("업데이트. 0.1.28로 업데이트할 수 있어요. 누르면 받고 다시 실행해요.");
+    // 레일은 가로로 넘친 것을 잘라 직접 그린 툴팁이 서지 못한다: 설명은 레일 타일과 같은 `title`이다.
+    expect(railPill?.getAttribute("title")).toBe("0.1.28로 업데이트할 수 있어요. 누르면 받고 다시 실행해요.");
+    const railOrder = Array.from(rail.querySelectorAll("[data-testid]")).map((n) => n.getAttribute("data-testid"));
+    expect(railOrder.indexOf("update-pill")).toBeLessThan(railOrder.indexOf("profile-card"));
     resetUpdateStoreForTest();
   });
 

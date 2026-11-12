@@ -162,6 +162,7 @@ const CASES: Case[] = [
     label: "채널 멤버 0명",
     render: () =>
       createElement(ChannelMemberPanel, {
+        channelId: "00000000-0000-7000-8000-000000000201",
         channelName: "design-lab",
         members: [],
         status: "ready",

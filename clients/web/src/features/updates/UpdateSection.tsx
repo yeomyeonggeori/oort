@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import { Button } from "@/design/ui/button";
 import { InlineBanner } from "@/features/common/States";
 import { ConnectionDiagSection } from "@/features/settings/ConnectionDiagSection";
@@ -5,17 +6,24 @@ import { StatusChip } from "@/features/settings/SettingsFields";
 import { SettingsRow } from "@/features/settings/shell/SettingsRow";
 import { SettingsSection } from "@/features/settings/shell/SettingsSection";
 import { CardBody } from "@/features/settings/workTierPolicy";
+import { useFormatMessage } from "@/i18n/useFormatMessage";
 import {
+  formatCheckedAt,
   formatPublishedAt,
   progressLabel,
   progressPercent,
+  restartCutLine,
   type UpdateState,
 } from "./model";
 import {
   checkForUpdate,
   installUpdate,
+  registerUpdateNoticeSurface,
   relaunchIntoUpdate,
   useAppVersion,
+  useLastCheckedAt,
+  useRelaunchCountdown,
+  useRelaunchHold,
   useUpdateState,
 } from "./store";
 
@@ -76,17 +84,35 @@ function stateSentence(state: UpdateState): string {
 export function UpdateSection() {
   const state = useUpdateState();
   const version = useAppVersion();
+  const lastCheckedAt = useLastCheckedAt();
+  const countdown = useRelaunchCountdown();
+  const hold = useRelaunchHold();
+  const formatMessage = useFormatMessage();
+  // 다시 시작 상태를 보이는 곳이다: 마운트돼 있으면 저장소가 카운트다운을 시작할 수 있다(수리 3회차).
+  useEffect(() => registerUpdateNoticeSurface(), []);
+  // 설치를 마쳤는데 이 맥의 작업이 끝나기를 기다린다(#5661). 카드와 같은 판정이다.
+  const holding = state.kind === "installed" && hold !== null && countdown === null;
+  const cutLine = holding && hold.cut !== null ? restartCutLine(hold.cut, formatMessage) : null;
+  // 설치를 마쳤는데 카운트다운이 돌지 않는다(기다림 · 「지금 말고」 · 다시 시작 실패): 「곧 다시 실행」이 아니다(수리 2회차).
+  const notSoon = state.kind === "installed" && countdown === null;
 
   const hasUpdate =
     state.kind === "available" || state.kind === "installing" || state.kind === "installed";
   const published = hasUpdate ? formatPublishedAt(state.update.publishedAt) : null;
   const busy = state.kind === "checking" || state.kind === "installing";
+  // 이 판은 피드를 묻지 않는다(#5661): 「최신」도 「직접 확인」 단추도 거짓이 된다. 사실 한 문장만 선다.
+  const off = state.kind === "off";
+  const checkedAt = !off && lastCheckedAt !== null ? formatCheckedAt(lastCheckedAt) : null;
 
   return (
     <div className="flex min-w-0 flex-col gap-8" data-testid="updates-page">
       <SettingsSection
         title="앱 업데이트"
-        description="앱이 스스로 새 버전으로 바꿔요. 내려받은 파일은 서명을 검증한 뒤에만 설치해요. 설치가 끝나면 3초 뒤에 앱이 스스로 다시 실행돼요. 쓰던 글은 그대로 남아요."
+        description={
+          // 확인하지 않는 판에서 「앱이 스스로 새 버전으로 바꿔요」는 거짓이다(#5661): 상태 줄의 한 문장만 둔다.
+          // 다시 시작은 이 맥에서 도는 작업이 끝나기를 기다릴 수 있다(#5661): 「3초 뒤에」라고 약속하지 않는다.
+          off ? undefined : formatMessage("settings.updates.description")
+        }
       >
         <SettingsRow label="지금 버전">
           <span className="font-mono text-body text-ink" data-numeric>
@@ -105,11 +131,36 @@ export function UpdateSection() {
             <span className="text-body text-ink">{published}</span>
           </SettingsRow>
         )}
-        <SettingsRow label="상태" description={stateSentence(state)} keep>
-          <div className="flex items-center gap-2" data-testid="update-status">
-            <StateChip state={state} />
+        <SettingsRow
+          label="상태"
+          description={
+            off
+              ? formatMessage("settings.updates.offSentence")
+              : holding
+                ? formatMessage("settings.updates.holdTitle")
+                : notSoon
+                  ? formatMessage("settings.updates.stoppedSentence")
+                  : stateSentence(state)
+          }
+          keep
+        >
+          <div className="flex items-center gap-2" data-testid="update-status" data-update-state={state.kind}>
+            {off ? (
+              <StatusChip tone="muted">{formatMessage("settings.updates.offChip")}</StatusChip>
+            ) : notSoon ? (
+              <StatusChip tone="ok">{formatMessage("settings.updates.stoppedChip")}</StatusChip>
+            ) : (
+              <StateChip state={state} />
+            )}
           </div>
         </SettingsRow>
+        {checkedAt && (
+          <SettingsRow label={formatMessage("settings.updates.lastCheckedLabel")}>
+            <span className="font-mono text-body text-ink" data-numeric data-testid="update-last-checked">
+              {checkedAt}
+            </span>
+          </SettingsRow>
+        )}
 
         {state.kind === "failed" && (
           <CardBody>
@@ -141,7 +192,7 @@ export function UpdateSection() {
           </CardBody>
         )}
 
-        {state.kind === "installed" && (
+        {state.kind === "installed" && !notSoon && (
           <CardBody>
             <p className="text-body text-ink" data-testid="update-installed">
               새 버전이 설치됐어요. 곧 다시 실행되고 {state.update.version}(으)로 열려요.
@@ -154,8 +205,8 @@ export function UpdateSection() {
             label={state.kind === "available" ? "새 버전 설치" : "다시 실행"}
             description={
               state.kind === "available"
-                ? "설치가 끝나면 3초 뒤에 앱이 스스로 다시 실행돼요."
-                : "기다리지 않고 지금 다시 실행해도 돼요."
+                ? formatMessage("settings.updates.installRowDescription")
+                : (cutLine ?? "기다리지 않고 지금 다시 실행해도 돼요.")
             }
           >
             {state.kind === "available" ? (
@@ -164,22 +215,24 @@ export function UpdateSection() {
               </Button>
             ) : (
               <Button size="sm" onClick={() => void relaunchIntoUpdate()} data-testid="update-relaunch">
-                지금 다시 실행
+                {holding ? formatMessage("settings.updates.restartNow") : "지금 다시 실행"}
               </Button>
             )}
           </SettingsRow>
         )}
-        <SettingsRow label="직접 확인" description="새 버전이 나왔는지 바로 물어봐요.">
-          <Button
-            variant="outline"
-            size="sm"
-            disabled={busy}
-            onClick={() => void checkForUpdate()}
-            data-testid="update-check"
-          >
-            {state.kind === "checking" ? "확인 중" : "업데이트 확인"}
-          </Button>
-        </SettingsRow>
+        {!off && (
+          <SettingsRow label="직접 확인" description="새 버전이 나왔는지 바로 물어봐요.">
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={busy}
+              onClick={() => void checkForUpdate()}
+              data-testid="update-check"
+            >
+              {state.kind === "checking" ? "확인 중" : "업데이트 확인"}
+            </Button>
+          </SettingsRow>
+        )}
       </SettingsSection>
       {/* 연결 기록(#5587): 이 기기 안에만 남는 연결 판정 전이. 버그 보고가 닿는 이 페이지에 둔다(폰은 설정 > 정보). */}
       <ConnectionDiagSection appVersion={version} />

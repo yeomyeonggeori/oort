@@ -7828,6 +7828,12 @@ export const catalog: MessageCatalog = {
       "value": "Connection log"
     }
   ],
+  "settings.connectionLog.updateCheckFailed": [
+    {
+      "type": 0,
+      "value": "Update check failed"
+    }
+  ],
   "settings.connectionLog.wakeLate": [
     {
       "type": 0,
@@ -7968,6 +7974,146 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "Use device language"
+    }
+  ],
+  "settings.updates.cutLine": [
+    {
+      "type": 0,
+      "value": "Restarting now stops: "
+    },
+    {
+      "type": 1,
+      "value": "items"
+    }
+  ],
+  "settings.updates.cutPanes": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " terminal pane"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " terminal panes"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "settings.updates.cutSessions": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " work session"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " work sessions"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "settings.updates.cutUnknown": [
+    {
+      "type": 0,
+      "value": "work that could not be checked"
+    }
+  ],
+  "settings.updates.description": [
+    {
+      "type": 0,
+      "value": "The app updates itself. A download is installed only after its signature checks out. When the install finishes the app restarts on its own; if work is running on this Mac, it waits until that work ends. What you were typing stays."
+    }
+  ],
+  "settings.updates.holdTitle": [
+    {
+      "type": 0,
+      "value": "Restarts when your work ends"
+    }
+  ],
+  "settings.updates.installRowDescription": [
+    {
+      "type": 0,
+      "value": "When the install finishes the app restarts on its own. If work is running on this Mac, it waits until that work ends."
+    }
+  ],
+  "settings.updates.lastCheckedLabel": [
+    {
+      "type": 0,
+      "value": "Last checked"
+    }
+  ],
+  "settings.updates.notNow": [
+    {
+      "type": 0,
+      "value": "Not now"
+    }
+  ],
+  "settings.updates.offChip": [
+    {
+      "type": 0,
+      "value": "Not checking"
+    }
+  ],
+  "settings.updates.offSentence": [
+    {
+      "type": 0,
+      "value": "This build doesn't check for new versions by itself. Download and install new versions yourself."
+    }
+  ],
+  "settings.updates.restartNow": [
+    {
+      "type": 0,
+      "value": "Restart now"
+    }
+  ],
+  "settings.updates.stoppedChip": [
+    {
+      "type": 0,
+      "value": "Waiting to restart"
+    }
+  ],
+  "settings.updates.stoppedSentence": [
+    {
+      "type": 0,
+      "value": "Installed. Restart to open the new version."
     }
   ],
   "teamAi.helper.aliasesLine": [
@@ -8522,6 +8668,185 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "Zoom out"
+    }
+  ],
+  "timeline.memberPanel.agentKind": [
+    {
+      "type": 0,
+      "value": "Agent"
+    }
+  ],
+  "timeline.memberPanel.elapsedDays": [
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": " d"
+    }
+  ],
+  "timeline.memberPanel.elapsedHours": [
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": " h"
+    }
+  ],
+  "timeline.memberPanel.elapsedMinutes": [
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": " min"
+    }
+  ],
+  "timeline.memberPanel.groupAgents": [
+    {
+      "type": 0,
+      "value": "Agents "
+    },
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    }
+  ],
+  "timeline.memberPanel.groupOffline": [
+    {
+      "type": 0,
+      "value": "Offline "
+    },
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    }
+  ],
+  "timeline.memberPanel.groupOnline": [
+    {
+      "type": 0,
+      "value": "Online "
+    },
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    }
+  ],
+  "timeline.memberPanel.groupOtherAgents": [
+    {
+      "type": 0,
+      "value": "Other agents "
+    },
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    }
+  ],
+  "timeline.memberPanel.groupPeople": [
+    {
+      "type": 0,
+      "value": "Presence unknown "
+    },
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    }
+  ],
+  "timeline.memberPanel.groupWorking": [
+    {
+      "type": 0,
+      "value": "Working agents "
+    },
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    }
+  ],
+  "timeline.memberPanel.listLabel": [
+    {
+      "type": 0,
+      "value": "Channel member list"
+    }
+  ],
+  "timeline.memberPanel.moreRuns": [
+    {
+      "type": 0,
+      "value": "+"
+    },
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    }
+  ],
+  "timeline.memberPanel.moreRunsSpoken": [
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": " more"
+    }
+  ],
+  "timeline.memberPanel.nowFailed": [
+    {
+      "type": 0,
+      "value": "Couldn't load what the agents are doing."
+    }
+  ],
+  "timeline.memberPanel.nowRetry": [
+    {
+      "type": 0,
+      "value": "Reload"
+    }
+  ],
+  "timeline.memberPanel.request": [
+    {
+      "type": 0,
+      "value": "“"
+    },
+    {
+      "type": 1,
+      "value": "text"
+    },
+    {
+      "type": 0,
+      "value": "”"
+    }
+  ],
+  "timeline.memberPanel.requestSpoken": [
+    {
+      "type": 0,
+      "value": "Request: "
+    },
+    {
+      "type": 1,
+      "value": "text"
+    }
+  ],
+  "timeline.memberPanel.stageSpoken": [
+    {
+      "type": 1,
+      "value": "stage"
+    },
+    {
+      "type": 0,
+      "value": " (agent report)"
     }
   ],
   "timeline.quote.head": [

@@ -21,7 +21,9 @@
 // Split into three commands rather than one "update now", because each of the
 // three is a different decision for the person at the keyboard:
 //
-//   updater_check      is there one? (silent, may run on a timer)
+//   updater_check      is there one? (silent, runs on a timer: the web store
+//                      asks at launch, at most every 6 hours of wall-clock
+//                      time, and once after the Mac wakes, #5661)
 //   updater_install    download + swap the bundle on disk (slow, cancellable by
 //                      simply not calling relaunch)
 //   updater_relaunch   restart into it, when THEY are ready
@@ -31,6 +33,12 @@
 // image until it exits. Restarting is therefore a separate, user-timed act —
 // yanking the app out from under someone mid-sentence would be the one thing an
 // auto-updater must never do.
+//
+// A build that never asks says so (#5661). The channel guard below used to
+// answer "up to date" for a build that cannot check at all, and the settings
+// page then read 「최신」 on an app that had not looked at any feed: an owner's
+// app sat on an old build for six days with nothing on screen to say why. It now
+// rejects with `UPDATER_DISABLED`, which the web store turns into its own state.
 
 use std::sync::Mutex;
 
@@ -40,6 +48,13 @@ use tauri_plugin_updater::{Update, UpdaterExt};
 
 /// Download progress, emitted while `updater_install` runs.
 pub const PROGRESS_EVENT: &str = "momo:update-progress";
+
+/// The rejection `updater_check` gives in a build that never asks the feed
+/// (local, dev, debug, or a `--public` DMG built without `MOMO_CHANNEL_BUILD=1`).
+/// A closed code, not a sentence: `clients/web/src/features/updates/model.ts`
+/// declares the same `UPDATER_DISABLED` and the store branches on exactly this
+/// string; `shell_contract.rs` pins the two together.
+pub const UPDATER_DISABLED: &str = "updater_disabled";
 
 /// The update found by the last `updater_check`, held so `updater_install` does
 /// not have to hit the network a second time (and cannot race into installing a
@@ -113,14 +128,17 @@ const fn update_check_disabled(is_dev: bool, debug: bool, channel_build: bool) -
 /// check is worth saying out loud — "I could not reach the update server" and
 /// "you are on the latest build" must never look the same, or a stalled channel
 /// is invisible until someone files the bug that was fixed a week ago.
+///
+/// The same holds for a build that never asks: it rejects with
+/// [`UPDATER_DISABLED`] instead of claiming "up to date" (#5661).
 #[tauri::command]
 pub async fn updater_check(app: AppHandle) -> Result<Option<AvailableUpdate>, String> {
     // Channel guard (#1281 / W-B2-5): a local/dev build reports `next.1`, which
     // the published manifest (`next.N`) always outranks, so an unguarded check
-    // would offer to downgrade it to the last release. Report "up to date"
-    // without a network call — the most honest state for a build with nothing
-    // to update to — and clear any pending download. Only a channel artifact
-    // (`MOMO_CHANNEL_BUILD=1`) falls through.
+    // would offer to downgrade it to the last release. No network call and no
+    // pending download — but also no "up to date": this build has not looked,
+    // and saying 「최신」 hid a six-day-old build from its owner (#5661). Only a
+    // channel artifact (`MOMO_CHANNEL_BUILD=1`) falls through.
     if update_check_disabled(
         tauri::is_dev(),
         cfg!(debug_assertions),
@@ -129,7 +147,7 @@ pub async fn updater_check(app: AppHandle) -> Result<Option<AvailableUpdate>, St
         eprintln!("[momo] updater: local/dev/debug build — skipping update check");
         let state = app.state::<UpdaterState>();
         *state.pending.lock().expect("updater state poisoned") = None;
-        return Ok(None);
+        return Err(UPDATER_DISABLED.to_string());
     }
 
     let updater = app.updater().map_err(|error| error.to_string())?;
@@ -193,10 +211,20 @@ pub async fn updater_install(app: AppHandle) -> Result<(), String> {
     Ok(())
 }
 
-/// Restart into the installed build. Never returns.
+/// Restart into the installed build, through the app's normal exit.
+///
+/// `request_restart`, not `restart` (#5661, #5619 follow-up). A command without
+/// `async` runs on the main thread, and from the main thread Tauri's `restart()`
+/// skips `RunEvent::Exit` and calls `exit(0)` directly (tauri 2.11 `app.rs`).
+/// The `Exit` arm in `lib.rs` is what stops the work host (`momo-workd`, this
+/// app's child) and every terminal's process group, so a skipped `Exit` left the
+/// old workd running after an update. `request_restart`
+/// sends the exit through the event loop (`ExitRequested` → `Exit` → restart),
+/// so the same teardown as a ⌘Q runs before the new build starts. Returns at
+/// once; the process ends when the loop gets there.
 #[tauri::command]
 pub fn updater_relaunch(app: AppHandle) {
-    app.restart();
+    app.request_restart();
 }
 
 #[cfg(test)]

@@ -22,11 +22,15 @@ vi.mock("@/lib/tauri", () => ({
   },
 }));
 
+import { SETTINGS_SECTIONS } from "@/features/settings/settingsNav";
+import { SettingsNav } from "@/features/settings/shell/SettingsNav";
+import { UpdateNotice } from "./UpdateNotice";
 import { UpdateSection } from "./UpdateSection";
 import {
   checkForUpdate,
   installUpdate,
   resetUpdateStoreForTest,
+  seedUpdateStateForTest,
   startUpdateWatch,
 } from "./store";
 
@@ -151,5 +155,100 @@ describe("설정 > 업데이트 (#3578 S5a)", () => {
     seen.push(host?.textContent ?? "");
     expect(seen.every((text) => text.length > 0)).toBe(true);
     for (const text of seen) expect(text).not.toMatch(/습니다/);
+  });
+});
+
+describe("다시 시작이 이 맥의 작업을 기다리는 동안 (#5661)", () => {
+  const HOLD = { cut: { kind: "busy" as const, panes: 1, sessions: 1, unknown: false } };
+
+  it("설정 > 업데이트: 상태 문장은 「작업이 끝나면」이고, 다시 시작 줄은 끊길 것 한 줄과 「지금 다시 시작」이다", async () => {
+    act(() => seedUpdateStateForTest({ kind: "installed", update: UPDATE }, null, HOLD));
+    const el = await mount();
+    expect(el.textContent).toContain("Restarts when your work ends");
+    expect(el.textContent).toContain("Restarting now stops: 1 terminal pane, 1 work session");
+    expect(q(el, "update-relaunch")?.textContent).toBe("Restart now");
+  });
+
+  it("연결 화면 띠: 같은 문장과 「지금 다시 시작」", async () => {
+    act(() => seedUpdateStateForTest({ kind: "installed", update: UPDATE }, null, HOLD));
+    host = document.createElement("div");
+    document.body.append(host);
+    root = createRoot(host);
+    await act(async () => {
+      root?.render(createElement(UpdateNotice));
+      await Promise.resolve();
+    });
+    const notice = q(host, "connect-update-notice");
+    expect(notice?.textContent).toContain("Restarts when your work ends");
+    expect(notice?.textContent).toContain("Restart now");
+    expect(notice?.textContent).not.toContain("지금 다시 실행");
+  });
+});
+
+describe("자동 다시 시작이 돌지 않는 동안은 「곧 다시 실행」이라고 하지 않는다 (#5661 수리 2회차)", () => {
+  it("「지금 말고」 뒤(카운트다운·기다림 없음): 칩 「다시 시작 대기」, 문장 「다시 시작하면 새 버전으로」, 「곧」 없음", async () => {
+    act(() => seedUpdateStateForTest({ kind: "installed", update: UPDATE }, null, null));
+    const el = await mount();
+    expect(q(el, "update-status")?.textContent).toBe("Waiting to restart");
+    expect(el.textContent).toContain("Installed. Restart to open the new version.");
+    expect(el.textContent).not.toContain("곧");
+    expect(q(el, "update-relaunch")).not.toBeNull();
+  });
+
+  it("기다리는 동안도 칩은 「다시 시작 대기」다", async () => {
+    act(() =>
+      seedUpdateStateForTest({ kind: "installed", update: UPDATE }, null, { cut: { kind: "busy", panes: 1, sessions: 0, unknown: false } })
+    );
+    const el = await mount();
+    expect(q(el, "update-status")?.textContent).toBe("Waiting to restart");
+    expect(el.textContent).not.toContain("곧");
+  });
+
+  it("연결 화면 띠도 같다", async () => {
+    act(() => seedUpdateStateForTest({ kind: "installed", update: UPDATE }, null, null));
+    host = document.createElement("div");
+    document.body.append(host);
+    root = createRoot(host);
+    await act(async () => {
+      root?.render(createElement(UpdateNotice));
+      await Promise.resolve();
+    });
+    expect(q(host, "connect-update-notice")?.textContent).toContain("Installed. Restart to open the new version.");
+    expect(host.textContent).not.toContain("곧");
+  });
+});
+
+describe("설정 전면에서도 다시 시작 예고가 보인다 (#5661 수리 2회차)", () => {
+  async function mountNav(): Promise<HTMLElement> {
+    host = document.createElement("div");
+    document.body.append(host);
+    root = createRoot(host);
+    await act(async () => {
+      root?.render(
+        createElement(SettingsNav, {
+          sections: SETTINGS_SECTIONS.filter((item) => item.link === undefined),
+          current: "profile",
+          onSelect: () => undefined,
+          onBack: () => undefined,
+          onKeyDown: () => undefined,
+          registerRef: () => undefined,
+        })
+      );
+      await Promise.resolve();
+    });
+    return host;
+  }
+
+  it("다시 시작 카운트다운이 도는 동안 설정 목록 아래에 알약이 서고 예고 카드가 열린다", async () => {
+    act(() => seedUpdateStateForTest({ kind: "installed", update: UPDATE }, 30, null));
+    const el = await mountNav();
+    expect(el.querySelector('[data-testid="settings-restart-notice"] [data-testid="update-pill"]')).not.toBeNull();
+    expect(document.querySelector('[data-testid="update-card-title"]')?.textContent).toBe("곧 다시 실행돼요");
+  });
+
+  it("새 판을 알리기만 하는 동안(받기 전)에는 설정에 알약을 세우지 않는다", async () => {
+    act(() => seedUpdateStateForTest({ kind: "available", update: UPDATE }));
+    const el = await mountNav();
+    expect(el.querySelector('[data-testid="settings-restart-notice"]')).toBeNull();
   });
 });

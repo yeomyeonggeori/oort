@@ -1097,6 +1097,7 @@ export const messageKeys = [
   "settings.connectionLog.sendBlocked",
   "settings.connectionLog.socketDown",
   "settings.connectionLog.title",
+  "settings.connectionLog.updateCheckFailed",
   "settings.connectionLog.wakeLate",
   "settings.connectionLog.windowHidden",
   "settings.invite.guestInvitesPaused",
@@ -1120,6 +1121,20 @@ export const messageKeys = [
   "settings.profile.languageReload",
   "settings.profile.languageRetry",
   "settings.profile.languageSystem",
+  "settings.updates.cutLine",
+  "settings.updates.cutPanes",
+  "settings.updates.cutSessions",
+  "settings.updates.cutUnknown",
+  "settings.updates.description",
+  "settings.updates.holdTitle",
+  "settings.updates.installRowDescription",
+  "settings.updates.lastCheckedLabel",
+  "settings.updates.notNow",
+  "settings.updates.offChip",
+  "settings.updates.offSentence",
+  "settings.updates.restartNow",
+  "settings.updates.stoppedChip",
+  "settings.updates.stoppedSentence",
   "teamAi.helper.aliasesLine",
   "teamAi.helper.aliasNotDerivable",
   "teamAi.helper.aliasReserved",
@@ -1205,6 +1220,24 @@ export const messageKeys = [
   "timeline.lightbox.copyFailed",
   "timeline.lightbox.zoomIn",
   "timeline.lightbox.zoomOut",
+  "timeline.memberPanel.agentKind",
+  "timeline.memberPanel.elapsedDays",
+  "timeline.memberPanel.elapsedHours",
+  "timeline.memberPanel.elapsedMinutes",
+  "timeline.memberPanel.groupAgents",
+  "timeline.memberPanel.groupOffline",
+  "timeline.memberPanel.groupOnline",
+  "timeline.memberPanel.groupOtherAgents",
+  "timeline.memberPanel.groupPeople",
+  "timeline.memberPanel.groupWorking",
+  "timeline.memberPanel.listLabel",
+  "timeline.memberPanel.moreRuns",
+  "timeline.memberPanel.moreRunsSpoken",
+  "timeline.memberPanel.nowFailed",
+  "timeline.memberPanel.nowRetry",
+  "timeline.memberPanel.request",
+  "timeline.memberPanel.requestSpoken",
+  "timeline.memberPanel.stageSpoken",
   "timeline.quote.head",
   "timeline.quote.headUnnamed",
   "timeline.runException.open",
@@ -2690,6 +2723,7 @@ export const argumentSpecs = {
   "settings.connectionLog.sendBlocked": {},
   "settings.connectionLog.socketDown": {},
   "settings.connectionLog.title": {},
+  "settings.connectionLog.updateCheckFailed": {},
   "settings.connectionLog.wakeLate": {},
   "settings.connectionLog.windowHidden": {},
   "settings.invite.guestInvitesPaused": {},
@@ -2715,6 +2749,26 @@ export const argumentSpecs = {
   "settings.profile.languageReload": {},
   "settings.profile.languageRetry": {},
   "settings.profile.languageSystem": {},
+  "settings.updates.cutLine": {
+    "items": "string"
+  },
+  "settings.updates.cutPanes": {
+    "count": "number"
+  },
+  "settings.updates.cutSessions": {
+    "count": "number"
+  },
+  "settings.updates.cutUnknown": {},
+  "settings.updates.description": {},
+  "settings.updates.holdTitle": {},
+  "settings.updates.installRowDescription": {},
+  "settings.updates.lastCheckedLabel": {},
+  "settings.updates.notNow": {},
+  "settings.updates.offChip": {},
+  "settings.updates.offSentence": {},
+  "settings.updates.restartNow": {},
+  "settings.updates.stoppedChip": {},
+  "settings.updates.stoppedSentence": {},
   "teamAi.helper.aliasesLine": {
     "names": "string"
   },
@@ -2814,6 +2868,52 @@ export const argumentSpecs = {
   "timeline.lightbox.copyFailed": {},
   "timeline.lightbox.zoomIn": {},
   "timeline.lightbox.zoomOut": {},
+  "timeline.memberPanel.agentKind": {},
+  "timeline.memberPanel.elapsedDays": {
+    "count": "number"
+  },
+  "timeline.memberPanel.elapsedHours": {
+    "count": "number"
+  },
+  "timeline.memberPanel.elapsedMinutes": {
+    "count": "number"
+  },
+  "timeline.memberPanel.groupAgents": {
+    "count": "number"
+  },
+  "timeline.memberPanel.groupOffline": {
+    "count": "number"
+  },
+  "timeline.memberPanel.groupOnline": {
+    "count": "number"
+  },
+  "timeline.memberPanel.groupOtherAgents": {
+    "count": "number"
+  },
+  "timeline.memberPanel.groupPeople": {
+    "count": "number"
+  },
+  "timeline.memberPanel.groupWorking": {
+    "count": "number"
+  },
+  "timeline.memberPanel.listLabel": {},
+  "timeline.memberPanel.moreRuns": {
+    "count": "number"
+  },
+  "timeline.memberPanel.moreRunsSpoken": {
+    "count": "number"
+  },
+  "timeline.memberPanel.nowFailed": {},
+  "timeline.memberPanel.nowRetry": {},
+  "timeline.memberPanel.request": {
+    "text": "string"
+  },
+  "timeline.memberPanel.requestSpoken": {
+    "text": "string"
+  },
+  "timeline.memberPanel.stageSpoken": {
+    "stage": "string"
+  },
   "timeline.quote.head": {
     "name": "string"
   },
@@ -4138,6 +4238,7 @@ export interface MessageArgs {
   "settings.connectionLog.sendBlocked": Record<string, never>;
   "settings.connectionLog.socketDown": Record<string, never>;
   "settings.connectionLog.title": Record<string, never>;
+  "settings.connectionLog.updateCheckFailed": Record<string, never>;
   "settings.connectionLog.wakeLate": Record<string, never>;
   "settings.connectionLog.windowHidden": Record<string, never>;
   "settings.invite.guestInvitesPaused": Record<string, never>;
@@ -4161,6 +4262,20 @@ export interface MessageArgs {
   "settings.profile.languageReload": Record<string, never>;
   "settings.profile.languageRetry": Record<string, never>;
   "settings.profile.languageSystem": Record<string, never>;
+  "settings.updates.cutLine": { items: string };
+  "settings.updates.cutPanes": { count: number };
+  "settings.updates.cutSessions": { count: number };
+  "settings.updates.cutUnknown": Record<string, never>;
+  "settings.updates.description": Record<string, never>;
+  "settings.updates.holdTitle": Record<string, never>;
+  "settings.updates.installRowDescription": Record<string, never>;
+  "settings.updates.lastCheckedLabel": Record<string, never>;
+  "settings.updates.notNow": Record<string, never>;
+  "settings.updates.offChip": Record<string, never>;
+  "settings.updates.offSentence": Record<string, never>;
+  "settings.updates.restartNow": Record<string, never>;
+  "settings.updates.stoppedChip": Record<string, never>;
+  "settings.updates.stoppedSentence": Record<string, never>;
   "teamAi.helper.aliasesLine": { names: string };
   "teamAi.helper.aliasNotDerivable": Record<string, never>;
   "teamAi.helper.aliasReserved": Record<string, never>;
@@ -4246,6 +4361,24 @@ export interface MessageArgs {
   "timeline.lightbox.copyFailed": Record<string, never>;
   "timeline.lightbox.zoomIn": Record<string, never>;
   "timeline.lightbox.zoomOut": Record<string, never>;
+  "timeline.memberPanel.agentKind": Record<string, never>;
+  "timeline.memberPanel.elapsedDays": { count: number };
+  "timeline.memberPanel.elapsedHours": { count: number };
+  "timeline.memberPanel.elapsedMinutes": { count: number };
+  "timeline.memberPanel.groupAgents": { count: number };
+  "timeline.memberPanel.groupOffline": { count: number };
+  "timeline.memberPanel.groupOnline": { count: number };
+  "timeline.memberPanel.groupOtherAgents": { count: number };
+  "timeline.memberPanel.groupPeople": { count: number };
+  "timeline.memberPanel.groupWorking": { count: number };
+  "timeline.memberPanel.listLabel": Record<string, never>;
+  "timeline.memberPanel.moreRuns": { count: number };
+  "timeline.memberPanel.moreRunsSpoken": { count: number };
+  "timeline.memberPanel.nowFailed": Record<string, never>;
+  "timeline.memberPanel.nowRetry": Record<string, never>;
+  "timeline.memberPanel.request": { text: string };
+  "timeline.memberPanel.requestSpoken": { text: string };
+  "timeline.memberPanel.stageSpoken": { stage: string };
   "timeline.quote.head": { name: string };
   "timeline.quote.headUnnamed": Record<string, never>;
   "timeline.runException.open": { text: string };

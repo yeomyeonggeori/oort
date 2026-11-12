@@ -665,6 +665,65 @@ fn the_tray_tells_the_close_decision_whether_someone_is_signed_in() {
     );
 }
 
+/// Restarting into an update ends the app the way ⌘Q does (#5661, #5619 follow-up). The work host
+/// (`momo-workd`) and the terminals are stopped in `lib.rs`'s `RunEvent::Exit` arm, and nothing else stops
+/// them. `updater_relaunch` is a sync command, so it runs on the main thread, where tauri's `restart()`
+/// skips `RunEvent::Exit` and exits directly: the old workd outlived the update. A real restart cannot run
+/// inside a test (it replaces the test process), so this pins both halves of the path instead: the command
+/// asks the event loop (`request_restart`), and the loop's `Exit` arm stops the work host.
+#[test]
+fn an_update_restart_goes_through_the_exit_that_stops_the_work_host() {
+    const UPDATER_RS: &str = include_str!("updater.rs");
+    let code = code_only(UPDATER_RS);
+    let code = &code[..code.find("#[cfg(test)]").unwrap_or(code.len())];
+    let relaunch = &code[code
+        .find("pub fn updater_relaunch(")
+        .expect("updater.rs `updater_relaunch`")..];
+    let relaunch = &relaunch[..relaunch.find("\n}").expect("end of `updater_relaunch`")];
+    assert_eq!(
+        relaunch.matches("app.request_restart();").count(),
+        1,
+        "`updater_relaunch` must restart through the event loop: {relaunch}"
+    );
+    assert!(
+        !relaunch.contains(".restart()"),
+        "`restart()` from the main thread skips `RunEvent::Exit` (the work host survives): {relaunch}"
+    );
+
+    let lib = code_only(LIB_RS);
+    let exit = &lib[lib
+        .find("if let tauri::RunEvent::Exit = _event {")
+        .expect("lib.rs handles `RunEvent::Exit`")..];
+    let exit = &exit[..exit
+        .find("\n            }\n")
+        .expect("end of the `Exit` arm")];
+    assert!(
+        exit.contains("host.stop_now();"),
+        "the `Exit` arm no longer stops the work host: {exit}"
+    );
+    assert!(
+        exit.contains("state.0.kill_all();"),
+        "the `Exit` arm no longer ends the terminals: {exit}"
+    );
+}
+
+/// A build that never asks the feed rejects `updater_check` with a closed code, and the web branches on
+/// that exact string (#5661). If the two drift apart, the page reads the code as a failed check
+/// (「확인 실패」 every six hours) instead of 「이 앱은 확인하지 않아요」.
+#[test]
+fn the_disabled_update_check_code_is_the_one_the_web_branches_on() {
+    const MODEL_TS: &str = include_str!("../../../web/src/features/updates/model.ts");
+    let quoted = format!(
+        "export const UPDATER_DISABLED = \"{}\";",
+        crate::updater::UPDATER_DISABLED
+    );
+    assert_eq!(
+        MODEL_TS.matches(quoted.as_str()).count(),
+        1,
+        "clients/web/src/features/updates/model.ts must declare `{quoted}`"
+    );
+}
+
 /// The glass invariants (the doc comment of `window_vibrancy.rs`): the window is created
 /// opaque, and the private-API switch is a pair. tauri-build refuses a pair that disagrees,
 /// but only when the build runs; this fails earlier and says why.
