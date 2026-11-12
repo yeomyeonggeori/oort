@@ -568,6 +568,13 @@ export const messageKeys = [
   "expressions.suggest.settingHint",
   "expressions.suggest.settingLabel",
   "inbox.approval.open",
+  "inbox.source.channelUnknown",
+  "inbox.source.dm",
+  "inbox.source.dmGroup",
+  "inbox.source.dmUnknown",
+  "inbox.source.task",
+  "inbox.source.thread",
+  "inbox.source.threadUnknown",
   "mobile.attachmentSave.failed",
   "mobile.attachmentSave.photosDenied",
   "mobile.attachmentSave.savedToFiles",
@@ -2047,6 +2054,20 @@ export const argumentSpecs = {
   "expressions.suggest.settingHint": {},
   "expressions.suggest.settingLabel": {},
   "inbox.approval.open": {},
+  "inbox.source.channelUnknown": {},
+  "inbox.source.dm": {
+    "name": "string"
+  },
+  "inbox.source.dmGroup": {
+    "count": "number",
+    "names": "string"
+  },
+  "inbox.source.dmUnknown": {},
+  "inbox.source.task": {},
+  "inbox.source.thread": {
+    "channel": "string"
+  },
+  "inbox.source.threadUnknown": {},
   "mobile.attachmentSave.failed": {},
   "mobile.attachmentSave.photosDenied": {},
   "mobile.attachmentSave.savedToFiles": {},
@@ -3657,6 +3678,13 @@ export interface MessageArgs {
   "expressions.suggest.settingHint": Record<string, never>;
   "expressions.suggest.settingLabel": Record<string, never>;
   "inbox.approval.open": Record<string, never>;
+  "inbox.source.channelUnknown": Record<string, never>;
+  "inbox.source.dm": { name: string };
+  "inbox.source.dmGroup": { count: number; names: string };
+  "inbox.source.dmUnknown": Record<string, never>;
+  "inbox.source.task": Record<string, never>;
+  "inbox.source.thread": { channel: string };
+  "inbox.source.threadUnknown": Record<string, never>;
   "mobile.attachmentSave.failed": Record<string, never>;
   "mobile.attachmentSave.photosDenied": Record<string, never>;
   "mobile.attachmentSave.savedToFiles": Record<string, never>;

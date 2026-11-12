@@ -63,6 +63,8 @@ const feedContext = {
   isLoading: false,
   directory: { members: [], byId: new Map() },
   labelFor: (id: string) => (id === CH ? "#agent-lab" : id.slice(0, 8)),
+  placeFor: (id: string) =>
+    id === CH ? { kind: "channel", name: "agent-lab" } : { kind: "dm", names: ["서연"] },
   actorFor: (id: string) =>
     id === BOT
       ? { name: "그록봇", handle: "grokbot", isAgent: true }
@@ -363,7 +365,7 @@ describe("useMailbox: 구 서버(404) 후퇴", () => {
 describe("읽음 처리: 서버 항목은 PUT, 구 서버 항목은 채널 커서", () => {
   const base: MailboxEntry = {
     key: "k", kind: "mention", channelId: CH, channelLabel: "#a", typeLabel: "멘션",
-    actor: "서연", actorIsAgent: false, preview: "p", atMs: 0, timeLabel: "방금",
+    source: { kind: "place", place: { kind: "channel", name: "a" } }, actor: "서연", actorIsAgent: false, preview: "p", atMs: 0, timeLabel: "방금",
     unread: true, unreadCount: 0, seq: 4, reason: "r",
   };
 

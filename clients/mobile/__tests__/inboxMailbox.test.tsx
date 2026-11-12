@@ -206,6 +206,32 @@ describe('인박스 「전체」 (#3663)', () => {
     expect(keys.some(k => k.startsWith('mention:'))).toBe(true);
   });
 
+  // #5696: 이름 아래 출처 한 줄은 웹과 같은 코어 판정이다 — 처리할 일은 종류 표시, DM은 「DM · 이름」, 내 글의 스레드는
+  // 「스레드 · #채널」, 채널 멘션은 「#채널」. 낭독 이름에도 같은 출처가 든다.
+  it('줄마다 이름 아래 출처 한 줄: 처리할 일 · DM · 스레드 · 채널 멘션이 같은 자리에 선다', async () => {
+    installFetch(fullWorld());
+    await openInbox();
+    await waitFor(() => expect(rowKeys().length).toBe(5), {timeout: 10_000});
+    const sourceOf = (prefix: string) => {
+      const key = rowKeys().find(k => k.startsWith(prefix));
+      return key === undefined ? '' : screen.getByTestId(`mailbox-source-${key}`);
+    };
+    expect(sourceOf('approval:')).toHaveTextContent('처리할 일 · 승인 요청');
+    expect(sourceOf(`dm:${DM_SEO}`)).toHaveTextContent('DM · 서연');
+    expect(sourceOf(`dm:${DM_BOT}`)).toHaveTextContent('DM · 김인턴');
+    expect(sourceOf('thread:')).toHaveTextContent('스레드 · #general');
+    expect(sourceOf('mention:')).toHaveTextContent(/^#general$/);
+    const mentionKey = rowKeys().find(k => k.startsWith('mention:'));
+    const mentionButton = within(screen.getByTestId(`mailbox-row-${mentionKey}`)).getByRole('button');
+    expect(mentionButton.props.accessibilityLabel).toMatch(/^안 읽음, 멘션, #general, /);
+    // 줄 높이: 출처는 모든 줄에서 비지 않은 한 줄이다(출처가 무엇이든 그 자리가 같은 높이로 선다).
+    for (const key of rowKeys()) {
+      const source = screen.getByTestId(`mailbox-source-${key}`);
+      expect(source.props.numberOfLines).toBe(1);
+      expect(String(source.props.children).trim()).not.toBe('');
+    }
+  });
+
   it('안 읽음은 점으로 말한다: 안 읽은 DM엔 있고 읽은 DM엔 없다', async () => {
     installFetch(fullWorld());
     await openInbox();
