@@ -88,6 +88,14 @@ let waited = false;
  * folded or unfolded, the settings screen opened — does not open itself until the next notice (a countdown starting).
  */
 let cardDismissed = false;
+/**
+ * Surfaces that can show the restart notice right now: the update pill (sidebar, rail, settings), 설정 > 업데이트, the
+ * connect-screen row (#5661 수리 3회차). A countdown never starts while none is mounted — it waits for one, so no screen
+ * restarts the app without first saying so.
+ */
+let noticeSurfaces = 0;
+/** The restart may go, but no surface was there to announce it: the countdown starts when one mounts. */
+let relaunchPending = false;
 
 const listeners = new Set<() => void>();
 
@@ -124,7 +132,7 @@ function holdSnapshot(): RelaunchHold | null {
 }
 
 function deferrableSnapshot(): boolean {
-  return relaunchIn !== null && waited;
+  return relaunchIn !== null;
 }
 
 function notify(): void {
@@ -167,7 +175,7 @@ export function useRelaunchHold(): RelaunchHold | null {
   return useSyncExternalStore(subscribe, holdSnapshot, holdSnapshot);
 }
 
-/** True while the countdown that follows a wait runs: the card offers 「지금 말고」 (`deferRelaunch`). */
+/** True while an automatic restart counts down: the card offers 「지금 말고」 (`deferRelaunch`), and closing the card does the same. */
 export function useRelaunchDeferrable(): boolean {
   return useSyncExternalStore(subscribe, deferrableSnapshot, deferrableSnapshot);
 }
@@ -319,6 +327,7 @@ function afterInstall(): void {
   gateDone = false;
   waited = false;
   cardDismissed = false;
+  relaunchPending = false;
   if (localWork === null) {
     scheduleRelaunch();
     return;
@@ -365,6 +374,14 @@ function applyGate(facts: LocalWorkFacts): boolean {
 /** Start the countdown after a finished install: 3 seconds, or `RELAUNCH_AFTER_WAIT_SECONDS` after a wait. One at a time. */
 function scheduleRelaunch(): void {
   clearRelaunchTimer();
+  if (noticeSurfaces === 0) {
+    // Nowhere to show 「곧 다시 실행돼요」: wait for a surface rather than restart unannounced.
+    relaunchPending = true;
+    relaunchIn = null;
+    notify();
+    return;
+  }
+  relaunchPending = false;
   relaunchIn = waited ? RELAUNCH_AFTER_WAIT_SECONDS : RELAUNCH_COUNTDOWN_SECONDS;
   // A countdown is a new notice: the card opens for it even if an earlier one was closed.
   cardDismissed = false;
@@ -421,14 +438,26 @@ export function updateCardDismissed(): boolean {
 }
 
 /**
- * The person closed the card (Esc, or a press outside it). Closing the notice that follows a wait counts as
- * 「지금 말고」 (#5661 수리 2회차, planner): a countdown nobody can see any more would restart the app unannounced.
- * The 3-second countdown right after a press of 「업데이트」 keeps running — the person just asked for it.
+ * The person closed the card (Esc, or a press outside it). Closing a countdown counts as 「지금 말고」 (#5661 수리 2·3회차,
+ * planner): a countdown nobody can see any more would restart the app unannounced. One rule for the card — the
+ * 3-second countdown right after an install stops the same way (a long download means 「방금 누른 것」 may be minutes old).
  */
 export function noteUpdateCardClosed(): void {
   if (state.kind !== "installed") return;
   cardDismissed = true;
-  if (relaunchIn !== null && waited) deferRelaunch();
+  if (relaunchIn !== null) deferRelaunch();
+}
+
+/**
+ * A surface that shows the restart notice mounted (returns its unmount). If a countdown was waiting for somewhere to be
+ * seen, it starts now.
+ */
+export function registerUpdateNoticeSurface(): () => void {
+  noticeSurfaces += 1;
+  if (relaunchPending && state.kind === "installed" && !gateDone) scheduleRelaunch();
+  return () => {
+    noticeSurfaces = Math.max(0, noticeSurfaces - 1);
+  };
 }
 
 export function deferRelaunch(): void {
@@ -520,5 +549,7 @@ export function resetUpdateStoreForTest(): void {
   relaunchHold = null;
   waited = false;
   cardDismissed = false;
+  noticeSurfaces = 0;
+  relaunchPending = false;
   listeners.clear();
 }

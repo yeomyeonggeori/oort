@@ -18,6 +18,7 @@ import {
   deferRelaunch,
   installUpdate,
   noteUpdateCardClosed,
+  registerUpdateNoticeSurface,
   relaunchIntoUpdate,
   updateCardDismissed,
   useRelaunchCountdown,
@@ -118,7 +119,19 @@ export function UpdateButton({ placement = "row" }: { placement?: "row" | "rail"
   const buttonRef = useRef<HTMLButtonElement>(null);
   const tooltipId = useId();
   const cutId = useId();
+  const textId = useId();
+  const actionsId = useId();
   const rail = placement === "rail";
+  // 이 알약이 마운트돼 있는 동안 다시 시작 예고를 보일 곳이 있다(수리 3회차): 하나도 없으면 저장소는 카운트다운을 시작하지 않는다.
+  useEffect(() => registerUpdateNoticeSurface(), []);
+  // 접힌 레일의 카드는 입력창 독 위에 선다. 초안이 자라 독이 커지면 그 자리에서 다시 잰다(수리 3회차 M2 — 다음 그리기를 기다리지 않음).
+  const [, remeasure] = useState(0);
+  useEffect(() => {
+    if (!rail || !open || typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(() => remeasure((n) => n + 1));
+    for (const dock of document.querySelectorAll("[data-composer-shell]")) observer.observe(dock);
+    return () => observer.disconnect();
+  }, [rail, open]);
   // 카드는 알약이 아니라 프로필 **줄 전체**에 붙는다: 알약 오른쪽 끝에 맞추면 줄보다 넓은
   // 카드가 왼쪽으로 삐져 워크스페이스 레일 위에 걸친다(design-review M2). 레일의 알약은
   // 줄이 없으므로 알약 자신에 붙고, 카드는 오른쪽(대화 쪽)으로 연다.
@@ -166,6 +179,8 @@ export function UpdateButton({ placement = "row" }: { placement?: "row" | "rail"
   const label = tooltip ? `업데이트. ${tooltip}` : "업데이트";
   const percent =
     state.kind === "installing" ? progressPercent(state.downloaded, state.total) : null;
+  // 단추 줄은 설치를 마친 카드에만 이름을 단다(낭독 설명에 이어 붙임). 다른 상태의 단추는 그대로.
+  const cardHasActions = state.kind === "installed";
 
   const onPill = () => {
     autoOpened.current = false;
@@ -223,10 +238,13 @@ export function UpdateButton({ placement = "row" }: { placement?: "row" | "rail"
         align={rail ? "end" : "start"}
         sideOffset={8}
         opener={buttonRef.current}
-        // 저절로 연 카드는 초점을 옮기지 않고(H2), 닫힐 때도 초점이 카드 밖 어딘가(입력창)에 있으면 알약으로 끌어오지 않는다.
+        // 다시 시작을 실행하는 단추는 어떤 길로 열려도 첫 초점을 받지 않는다(수리 3회차 H1): 알약으로 연 카드는 카드 틀에 초점을 두고
+        // (단추는 Tab으로 가야 닿는다), 저절로 연 카드는 초점을 옮기지 않는다. 닫힐 때도 초점이 카드 밖 어딘가(입력창)에 있으면 알약으로
+        // 끌어오지 않는다. 틀에 초점이 오면 낭독은 카드 이름 · 제목 · 부제 · 단추 이름을 읽는다(`aria-describedby`).
         onOpenAutoFocus={(event) => {
           closedFromOutside.current = false;
-          if (autoOpened.current) event.preventDefault();
+          event.preventDefault();
+          if (!autoOpened.current && event.currentTarget instanceof HTMLElement) event.currentTarget.focus();
         }}
         onInteractOutside={() => {
           closedFromOutside.current = true;
@@ -241,6 +259,7 @@ export function UpdateButton({ placement = "row" }: { placement?: "row" | "rail"
         // 접힌 레일: 카드는 입력창 위쪽 끝보다 위에 선다(H2). 붙은 알약에서 떨어져도 끝까지 밀어 올린다.
         {...(rail ? { collisionPadding: { top: RAIL_CARD_GAP, bottom: readRailCardBottomPadding(buttonRef.current) }, sticky: "always" as const } : {})}
         aria-label="앱 업데이트"
+        aria-describedby={cardHasActions ? `${textId} ${actionsId}` : textId}
         data-testid="update-card"
         data-update-state={state.kind}
         className="update-card flex flex-col gap-3 p-4"
@@ -249,7 +268,7 @@ export function UpdateButton({ placement = "row" }: { placement?: "row" | "rail"
           <span className="mt-1 flex size-6 shrink-0 items-center justify-center rounded-md bg-surface-muted">
             <CardIcon state={state} />
           </span>
-          <div className="min-w-0 flex-1" aria-live="polite">
+          <div id={textId} className="min-w-0 flex-1" aria-live="polite">
             <p className="break-keep text-body font-semibold text-ink" data-testid="update-card-title">
               {holding ? formatMessage("settings.updates.holdTitle") : cardTitle(state, countdown)}
             </p>
@@ -298,9 +317,9 @@ export function UpdateButton({ placement = "row" }: { placement?: "row" | "rail"
           </div>
         )}
         {state.kind === "installed" && (
-          <div className="flex justify-end gap-2">
+          <div id={actionsId} className="flex justify-end gap-2">
             {deferrable && (
-              // 기다린 뒤의 카운트다운에만 선다(H3): 사람이 방금 누른 다시 시작이 아니다. 누르면 이번 설치의 자동 다시 시작을 멈추고 「지금」만 남는다.
+              // 자동 다시 시작 카운트다운마다 선다(H3, 수리 3회차: 설치 직후 3초도 같은 규칙). 누르면(카드를 닫아도) 이번 설치의 자동 다시 시작을 멈추고 「지금」만 남는다.
               <Button size="sm" variant="ghost" onClick={deferRelaunch} data-testid="update-card-defer">
                 {formatMessage("settings.updates.notNow")}
               </Button>

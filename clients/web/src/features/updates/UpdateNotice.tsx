@@ -1,8 +1,10 @@
+import { useEffect } from "react";
 import { InlineBanner } from "@/features/common/States";
 import { useFormatMessage } from "@/i18n/useFormatMessage";
 import { badgeLabel, badgeWorthShowing } from "./model";
 import {
   installUpdate,
+  registerUpdateNoticeSurface,
   relaunchIntoUpdate,
   useRelaunchCountdown,
   useRelaunchHold,
@@ -29,6 +31,8 @@ export function UpdateNotice() {
   const countdown = useRelaunchCountdown();
   const hold = useRelaunchHold();
   const formatMessage = useFormatMessage();
+  // 다시 시작 상태를 보이는 곳이다: 마운트돼 있으면 저장소가 카운트다운을 시작할 수 있다(수리 3회차).
+  useEffect(() => registerUpdateNoticeSurface(), []);
   if (!badgeWorthShowing(state)) return null;
 
   // 이 맥의 작업이 끝나기를 기다리는 동안은 「곧 다시 실행」이 아니다(#5661).

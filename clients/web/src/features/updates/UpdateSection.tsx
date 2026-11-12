@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import { Button } from "@/design/ui/button";
 import { InlineBanner } from "@/features/common/States";
 import { ConnectionDiagSection } from "@/features/settings/ConnectionDiagSection";
@@ -17,6 +18,7 @@ import {
 import {
   checkForUpdate,
   installUpdate,
+  registerUpdateNoticeSurface,
   relaunchIntoUpdate,
   useAppVersion,
   useLastCheckedAt,
@@ -86,6 +88,8 @@ export function UpdateSection() {
   const countdown = useRelaunchCountdown();
   const hold = useRelaunchHold();
   const formatMessage = useFormatMessage();
+  // 다시 시작 상태를 보이는 곳이다: 마운트돼 있으면 저장소가 카운트다운을 시작할 수 있다(수리 3회차).
+  useEffect(() => registerUpdateNoticeSurface(), []);
   // 설치를 마쳤는데 이 맥의 작업이 끝나기를 기다린다(#5661). 카드와 같은 판정이다.
   const holding = state.kind === "installed" && hold !== null && countdown === null;
   const cutLine = holding && hold.cut !== null ? restartCutLine(hold.cut, formatMessage) : null;

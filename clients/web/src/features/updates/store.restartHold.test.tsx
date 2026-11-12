@@ -363,10 +363,16 @@ describe("업데이트 수리 1회차: 설치는 한 번, 저절로 연 카드�
     expect(byId("update-card-defer")).toBeNull();
   });
 
-  it("H3 설치 직후 곧바로 도는 3초 카운트다운(사람이 방금 누른 것)에는 「지금 말고」가 없다", async () => {
+  it("H3 설치 직후 곧바로 도는 3초 카운트다운에도 「지금 말고」가 있고, 누르면 멈춘다(수리 3회차: 한 카드에 한 규칙)", async () => {
     await installWith(NONE);
     expect(byId("update-card-subline")?.textContent).toContain("3초 뒤");
-    expect(byId("update-card-defer")).toBeNull();
+    await act(async () => {
+      byId("update-card-defer")?.click();
+      await Promise.resolve();
+    });
+    await advance(60_000);
+    expect(tauri.relaunch).not.toHaveBeenCalled();
+    expect(byId("update-card-title")?.textContent).toBe("다시 실행해 주세요");
   });
 });
 
@@ -429,7 +435,7 @@ describe("업데이트 수리 2회차: 바깥을 눌러 닫은 카드의 초점,
     message.remove();
   });
 
-  it("Esc로 닫으면 연 곳(알약)으로 초점이 돌아간다 — 알약으로 연 카드, 그리고 저절로 열린 카드 안으로 초점을 옮긴 뒤", async () => {
+  it("Esc로 닫으면 연 곳(알약)으로 초점이 돌아간다 — 알약으로 연 카드", async () => {
     await installWith({ ...NONE, panes: [pane("working")] });
     act(() => pressKey("Escape"));
     await advance(50);
@@ -507,5 +513,89 @@ describe("업데이트 수리 2회차: 바깥을 눌러 닫은 카드의 초점,
       await Promise.resolve();
     });
     expect(tauri.install).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("업데이트 수리 3회차: 다시 시작 단추는 첫 초점을 받지 않음, 보일 곳이 없으면 카운트다운을 시작하지 않음 (#5661)", () => {
+  const describedText = () =>
+    (byId("update-card")?.getAttribute("aria-describedby") ?? "")
+      .split(" ")
+      .map((id) => document.getElementById(id)?.textContent ?? "")
+      .join(" ");
+
+  it("H1 Esc 길: 알약으로 연 기다림 카드의 첫 초점은 카드 틀이고, Esc 뒤 Enter 두 번 · Space 두 번이 다시 시작을 부르지 않는다", async () => {
+    await installWith({ ...NONE, panes: [pane("working")] });
+    act(() => pressKey("Escape"));
+    await advance(50);
+    typingInComposer();
+    await act(async () => {
+      byId("update-pill")?.click();
+      await Promise.resolve();
+    });
+    await advance(50);
+    expect(document.activeElement).toBe(byId("update-card"));
+    // 낭독: 카드 이름(앱 업데이트) 뒤에 제목 · 부제 · 단추 이름이 설명으로 읽힌다.
+    expect(byId("update-card")?.getAttribute("role")).toBe("dialog");
+    expect(describedText()).toContain("Restarts when your work ends");
+    expect(describedText()).toContain("Restart now");
+
+    act(() => pressKey("Escape"));
+    await advance(400);
+    expect(document.activeElement).toBe(byId("update-pill"));
+    for (const key of ["Enter", "Enter", " ", " "] as const) {
+      act(() => pressKey(key));
+      await advance(50);
+    }
+    expect(tauri.relaunch).not.toHaveBeenCalled();
+    // 알약의 Enter는 카드를 열 뿐이고, 초점은 다시 틀이다.
+    expect(byId("update-card")).not.toBeNull();
+    expect(document.activeElement).toBe(byId("update-card"));
+  });
+
+  it("H1 알약 → Enter: 카드가 열리고 초점은 「지금 다시 시작」이 아니라 틀, 다음 Enter도 다시 시작을 부르지 않는다", async () => {
+    await installWith({ ...NONE, panes: [pane("working")] });
+    act(() => pressKey("Escape"));
+    await advance(50);
+    act(() => byId("update-pill")?.focus());
+    act(() => pressKey("Enter"));
+    await advance(50);
+    expect(document.activeElement).toBe(byId("update-card"));
+    expect(document.activeElement).not.toBe(byId("update-card-now"));
+    act(() => pressKey("Enter"));
+    await advance(50);
+    expect(tauri.relaunch).not.toHaveBeenCalled();
+  });
+
+  it("예고 중에 닫은 적이 있는 설치라도, 예고가 도는 동안 알약이 다시 마운트되면(목록 열 접기) 예고 카드가 다시 열린다", async () => {
+    await installWith({ ...NONE, panes: [pane("working")] });
+    act(() => pressKey("Escape")); // 기다림 카드를 닫음 → 닫음 표시
+    await advance(50);
+    facts = { ...NONE, panes: [pane("turn-done")] };
+    await advance(RESTART_GATE_TICK_MS + RESTART_QUIET_MS);
+    expect(byId("update-card-title")?.textContent).toBe("곧 다시 실행돼요");
+    act(() => root?.unmount());
+    host?.remove();
+    mountCard();
+    await advance(50);
+    expect(byId("update-card-title")?.textContent).toBe("곧 다시 실행돼요");
+    expect(byId("update-card-defer")).not.toBeNull();
+  });
+
+  it("예고를 보일 곳(알약·설정 > 업데이트·연결 화면 띠)이 하나도 없으면 카운트다운을 시작하지 않고, 보일 곳이 생기면 그때 예고한다", async () => {
+    facts = NONE;
+    stop = startUpdateWatch({ localWork: source });
+    act(() => seedUpdateStateForTest({ kind: "available", update: UPDATE }));
+    await act(async () => {
+      await installUpdate();
+    });
+    await advance(10 * 60 * 1000);
+    expect(tauri.relaunch).not.toHaveBeenCalled();
+
+    mountCard();
+    await advance(50);
+    expect(byId("update-card-title")?.textContent).toBe("곧 다시 실행돼요");
+    expect(byId("update-card-subline")?.textContent).toContain("3초 뒤");
+    await advance(3_000);
+    expect(tauri.relaunch).toHaveBeenCalledTimes(1);
   });
 });
