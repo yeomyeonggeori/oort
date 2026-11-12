@@ -2,13 +2,18 @@ import {
   typingVisualSegments,
   typingLabel,
 } from '@momo/core/features/chat/typing';
-import {cleanup, render, screen} from './fixtures/darkWorld';
+import {cleanup, fireEvent, render, screen} from './fixtures/darkWorld';
 import fs from 'node:fs';
 import path from 'node:path';
 import React from 'react';
 
-import {color} from '../src/design/tokens';
-import {TypingBar} from '../src/features/conversation/TypingBar';
+import {color, SAFE_GUTTER, space} from '../src/design/tokens';
+import {RESPONDING_DOTS_WIDTH} from '../src/features/agents/RespondingDots';
+import {
+  shareTypingNameWidths,
+  TypingBar,
+  typingNameRoom,
+} from '../src/features/conversation/TypingBar';
 
 // =============================================================================
 // 「작성 중」 안정화 — design-review H-3·M-4·M-5·M-6·N-4.
@@ -70,13 +75,14 @@ describe('H-3 — 자리를 예약한다', () => {
     // 아래의 컴포저 전체가 위아래로 뛰었다.
     render(<TypingBar segments={[]} />);
     expect(line()).toBeTruthy();
-    expect(flatten(line().props.style).minHeight).toBeGreaterThan(0);
+    // 칸은 고정 높이다(#5645: `minHeight` 였던 앞 판은 큰 글자에서 글이 칸을 밀었다).
+    expect(flatten(line().props.style).height).toBeGreaterThan(0);
   });
 
   it('예약 높이는 1줄이다 — 두 줄을 예약하면 정말로 빈 띠가 생긴다', () => {
     render(<TypingBar segments={[]} />);
-    // lineHeight 한 줄 + 아래 여백. 두 줄치(32+)를 예약하지 않는다.
-    expect(flatten(line().props.style).minHeight).toBeLessThan(32);
+    // 줄 상자 한 줄(가장 큰 글자에서도 16 × 상한 1.6 = 25.6). 두 줄치(32+)를 예약하지 않는다.
+    expect(flatten(line().props.style).height).toBeLessThan(32);
   });
 
   it('있을 때와 없을 때의 높이가 같다 — 그것이 「안 움직인다」의 뜻이다', () => {
@@ -84,7 +90,7 @@ describe('H-3 — 자리를 예약한다', () => {
     const emptyStyle = flatten(line().props.style);
     rerender(<TypingBar segments={typingVisualSegments(['김민수'])} />);
     const fullStyle = flatten(line().props.style);
-    expect(fullStyle.minHeight).toBe(emptyStyle.minHeight);
+    expect(fullStyle.height).toBe(emptyStyle.height);
     expect(fullStyle.lineHeight).toBe(emptyStyle.lineHeight);
   });
 
@@ -172,6 +178,176 @@ describe('M-4 — 이름에 눈에 보이는 축을 준다', () => {
     expect(screen.queryByText('이하늘')).toBeNull();
     expect(screen.queryByText('박도윤')).toBeNull();
     expect(line().props.accessibilityLabel).toBe('3명이 작성 중');
+  });
+});
+
+describe('점 색 — 사람의 줄은 에이전트 색을 쓰지 않는다 (#5645, #5582 검수 M3)', () => {
+  it('「작성 중」 줄의 점은 글자와 같은 흐린 잉크다', () => {
+    // 폰은 「작업 중」(에이전트)과 「작성 중」(사람)이 컴포저 위에 붙어 선다. 앞 판은 두 줄의 점이 같은 에이전트 색이었다.
+    render(<TypingBar segments={typingVisualSegments(['김민수'])} />);
+    const dots = screen.getAllByTestId(/^responding-dot-/, {includeHiddenElements: true});
+    expect(dots).toHaveLength(3);
+    for (const dot of dots) {
+      expect(flatten(dot.props.style).backgroundColor).toBe(color.textMuted);
+      expect(flatten(dot.props.style).backgroundColor).not.toBe(color.agent);
+    }
+    // 꼬리 글과 같은 잉크다.
+    expect(flatten(screen.getByText(' 작성 중').props.style).color).toBe(color.textMuted);
+  });
+});
+
+// ---- 두 이름이 넘칠 때 (#5645, #5582 검수 M1) ------------------------------------------------
+//
+// 앞 판은 이름 칸마다 `flexShrink: 1` 이라 Yoga 가 넘친 폭을 글 폭에 비례해 나눴다 — 390 폭에서 긴(309) + 짧은(31)이면
+// 짧은 이름이 28 로 줄어 세 글자 이름이 「이…」가 됐다(Yoga 계산). 이 판은 줄 폭과 조각마다의 제 폭을 재고(거울), 웹과 같은
+// 규칙(남는 폭을 똑같이 나누되 글 폭에서 멈춤)으로 이름 칸에 명시 폭을 준다. 제스트에는 Yoga 가 없어서 여기서는 화면이 받는
+// 잰 값(onLayout)을 직접 주고, 그 값으로 화면이 이름 칸에 **실제로 준 폭**을 숫자로 잰다. 같은 구조를 Yoga 로 그린 대조는
+// 인계 노트의 Yoga 표다(앞 판 28.0/31 재현 → 이 판 31.0/31).
+
+const SHORT_NAME = '오민재';
+const LONG_NAME = '한지후 플랫폼엔지니어링 리드 겸 인프라 운영 총괄';
+const LONG_NAME_B = '윤서아 프로덕트디자인 리드 겸 서비스기획 총괄';
+/** 잰 폭(pt, 12pt 굵은 한글 ≈ 10.3pt/자 근사 — dr5582 Yoga 계산과 같은 수). */
+const W = {long: 309, longB: 280, short: 31, comma: 3, space: 3.4, tail: 40} as const;
+
+/** 화면이 받는 잰 값 하나를 준다(onLayout). */
+function giveLayout(testID: string, width: number): void {
+  fireEvent(screen.getByTestId(testID, {includeHiddenElements: true}), 'layout', {
+    nativeEvent: {layout: {x: 0, y: 0, width, height: 16}},
+  });
+}
+
+/** 줄을 폭 `lineWidth` 에 세우고, 거울의 조각(앞부분 칸 순서대로 + 꼬리)마다 제 폭을 준다. */
+function layLine(lineWidth: number, cellWidths: readonly number[], tailWidth: number = W.tail): void {
+  giveLayout('composer-typing', lineWidth);
+  cellWidths.forEach((width, index) => giveLayout(`composer-typing-measure-${index}`, width));
+  giveLayout('composer-typing-measure-tail', tailWidth);
+}
+
+/** 보이는 이름 칸들이 받은 명시 폭(없으면 undefined — 앞 판처럼 제 폭으로 선다). */
+function nameCellWidths(): unknown[] {
+  return screen.getAllByTestId('composer-typing-name').map(cell => flatten(cell.props.style).width);
+}
+
+/** 이 줄의 실제 스타일에서 읽은 「이름 아닌 것」의 폭 — 셈이 구조와 갈라지면 여기서 드러난다. */
+function roomFromRenderedLine(lineWidth: number, textWidths: readonly number[]): number {
+  const style = flatten(line().props.style);
+  const dots = screen.getAllByTestId(/^responding-dot-/, {includeHiddenElements: true});
+  const dotRow = flatten(screen.getByTestId('responding-dots', {includeHiddenElements: true}).props.style);
+  const dotsWidth =
+    dots.reduce((sum, dot) => sum + Number(flatten(dot.props.style).width), 0) +
+    (dots.length - 1) * Number(dotRow.gap);
+  return (
+    lineWidth -
+    2 * Number(style.paddingHorizontal) -
+    2 * Number(style.columnGap) -
+    dotsWidth -
+    W.tail -
+    textWidths.reduce((sum, width) => sum + width, 0)
+  );
+}
+
+describe('두 이름이 넘치면 짧은 이름은 온전히 남고 긴 이름만 준다 (#5645, 웹 typing-names 와 같은 규칙)', () => {
+  it('나누는 규칙: 똑같이 나누되 자기 글 폭에서 멈추고, 멈춘 몫은 남은 이름이 받는다', () => {
+    // (소수 폭은 빼는 순서에 따라 끝자리가 갈려서 10 자리까지 본다. 짧은 이름의 31 은 정확히 같아야 한다.)
+    const near = (value: number) => expect.closeTo(value, 10);
+    expect(shareTypingNameWidths([309, 31], 286.6)).toEqual([near(255.6), 31]);
+    expect(shareTypingNameWidths([31, 309], 286.6)).toEqual([31, near(255.6)]);
+    expect(shareTypingNameWidths([309, 280], 286.6)).toEqual([near(143.3), near(143.3)]);
+    // 둘 다 조금씩 넘치면 반씩이다(짧은 쪽도 반보다 길면 준다 — 웹과 같다).
+    expect(shareTypingNameWidths([150, 160], 286.6)).toEqual([near(143.3), near(143.3)]);
+    // 다 들어가면 아무 칸도 줄이지 않는다.
+    expect(shareTypingNameWidths([120, 120], 286.6)).toBeNull();
+    // 자리가 아예 없으면 0 이다(음수 폭을 주지 않는다).
+    expect(shareTypingNameWidths([309, 31], -5)).toEqual([0, 0]);
+  });
+
+  it('셈에 쓰는 「이름 아닌 것」의 폭이 줄의 실제 스타일과 같다 — 여백 · 칸 사이 · 점', () => {
+    render(<TypingBar segments={typingVisualSegments([LONG_NAME, SHORT_NAME])} />);
+    expect(typingNameRoom(390, W.tail, [W.space])).toBe(roomFromRenderedLine(390, [W.space]));
+    expect(RESPONDING_DOTS_WIDTH).toBe(3 * 4 + 2 * space.xs);
+    expect(flatten(line().props.style).paddingHorizontal).toBe(SAFE_GUTTER);
+  });
+
+  it.each([
+    [390, '긴+짧', [LONG_NAME, SHORT_NAME], [W.long + W.comma, W.space, W.short], 1],
+    [320, '긴+짧', [LONG_NAME, SHORT_NAME], [W.long + W.comma, W.space, W.short], 1],
+    [375, '짧+긴', [SHORT_NAME, LONG_NAME], [W.short + W.comma, W.space, W.long], 0],
+  ] as const)('폭 %i, %s: 짧은 이름 칸은 제 폭 그대로이고 긴 이름이 남은 몫을 다 받는다', (lineWidth, _order, names, cellWidths, shortAt) => {
+    render(<TypingBar segments={typingVisualSegments([...names])} />);
+    // 재기 전(첫 프레임)에는 명시 폭이 없다 — 앞 판과 같은 배치다.
+    expect(nameCellWidths()).toEqual([undefined, undefined]);
+    layLine(lineWidth, cellWidths);
+    const widths = nameCellWidths() as number[];
+    const room = roomFromRenderedLine(lineWidth, [W.space]);
+    const shortNatural = cellWidths[shortAt === 0 ? 0 : 2];
+    const longAt = shortAt === 0 ? 1 : 0;
+    // 짧은 이름은 온전하다(앞 판 Yoga: 31 중 27~28).
+    expect(widths[shortAt]).toBe(shortNatural);
+    // 긴 이름이 나머지를 다 받는다 — 두 칸 합이 이름 몫과 같다(꼬리 「작성 중」은 안 잘린다).
+    expect(widths[longAt]).toBeCloseTo(room - shortNatural, 10);
+    expect(widths[0] + widths[1]).toBeCloseTo(room, 10);
+  });
+
+  it('긴+긴: 반씩 나눈다 — 둘째 사람도 줄에 남는다', () => {
+    render(<TypingBar segments={typingVisualSegments([LONG_NAME, LONG_NAME_B])} />);
+    layLine(390, [W.long + W.comma, W.space, W.longB]);
+    const widths = nameCellWidths() as number[];
+    const room = roomFromRenderedLine(390, [W.space]);
+    expect(widths[0]).toBeCloseTo(room / 2, 10);
+    expect(widths[1]).toBeCloseTo(room / 2, 10);
+  });
+
+  it('다 들어가면 명시 폭이 없다 — 이름이 제 폭으로 선다', () => {
+    render(<TypingBar segments={typingVisualSegments([SHORT_NAME, '정하린'])} />);
+    layLine(390, [W.short + W.comma, W.space, W.short]);
+    expect(nameCellWidths()).toEqual([undefined, undefined]);
+  });
+
+  it('한 이름(「A」·「A 외 N명」)은 재지 않는다 — 줄어드는 칸이 하나라 앞 판 그대로가 같은 답이다', () => {
+    const {rerender} = render(<TypingBar segments={typingVisualSegments([LONG_NAME])} />);
+    expect(screen.queryByTestId('composer-typing-measure', {includeHiddenElements: true})).toBeNull();
+    rerender(<TypingBar segments={typingVisualSegments([LONG_NAME, SHORT_NAME, '정하린'])} />);
+    expect(screen.queryByTestId('composer-typing-measure', {includeHiddenElements: true})).toBeNull();
+  });
+
+  it('재는 거울은 흐름 밖이고 보이지도 · 읽히지도 · 눌리지도 않는다', () => {
+    render(<TypingBar segments={typingVisualSegments([LONG_NAME, SHORT_NAME])} />);
+    const mirror = screen.getByTestId('composer-typing-measure', {includeHiddenElements: true});
+    const style = flatten(mirror.props.style);
+    expect(style.position).toBe('absolute');
+    expect(style.opacity).toBe(0);
+    expect(mirror.props.accessibilityElementsHidden).toBe(true);
+    expect(mirror.props.importantForAccessibility).toBe('no-hide-descendants');
+    expect(mirror.props.pointerEvents).toBe('none');
+    // 기본 쿼리(보조기술이 보는 트리)에는 이름이 한 번만 있다.
+    expect(screen.getAllByText(SHORT_NAME)).toHaveLength(1);
+  });
+
+  it('거울의 조각은 하나도 줄지 않는다 — 칸 높이에 묶인 그릇에서 이름 조각이 높이 0 으로 눌려 재이지 않게', () => {
+    // 그릇은 칸(16~25.6) 높이에 묶이고 조각 넷(이름 둘 · 빈칸 · 꼬리)이 세로로 쌓인다. 이름 칸 옷(`flexShrink: 1`)을 그대로
+    // 입으면 Yoga 가 이름 조각을 높이 0 으로 누른다(yoga-mirror5645 계산) — 그때 잰 폭이 0 이면 나누기가 조용히 꺼진다.
+    render(<TypingBar segments={typingVisualSegments([LONG_NAME, SHORT_NAME])} />);
+    const pieces = [0, 1, 2, 'tail'].map(at =>
+      screen.getByTestId(`composer-typing-measure-${at}`, {includeHiddenElements: true}),
+    );
+    for (const piece of pieces) expect(flatten(piece.props.style).flexShrink).toBe(0);
+    // 보이는 이름 칸은 그대로 줄 수 있다(재기 전 앞 판 배치의 줄임).
+    for (const cell of screen.getAllByTestId('composer-typing-name')) {
+      expect(flatten(cell.props.style).flexShrink).toBe(1);
+    }
+  });
+
+  it('이름이 바뀌면 바뀐 조각만 다시 잰다 — 남은 조각의 잰 값은 그대로 쓴다', () => {
+    const {rerender} = render(<TypingBar segments={typingVisualSegments([LONG_NAME, SHORT_NAME])} />);
+    layLine(390, [W.long + W.comma, W.space, W.short]);
+    // 둘째 사람이 바뀐다. 첫 칸 「긴 이름,」·빈칸·꼬리는 같은 글이라 onLayout 이 다시 오지 않는다(Fabric 은 바뀐 틀만 알린다).
+    rerender(<TypingBar segments={typingVisualSegments([LONG_NAME, '정하린'])} />);
+    expect(nameCellWidths()).toEqual([undefined, undefined]);
+    giveLayout('composer-typing-measure-2', 30);
+    const widths = nameCellWidths() as number[];
+    expect(widths[1]).toBe(30);
+    expect(widths[0]).toBeCloseTo(roomFromRenderedLine(390, [W.space]) - 30, 10);
   });
 });
 

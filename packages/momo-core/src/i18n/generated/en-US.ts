@@ -4176,6 +4176,94 @@ export const catalog: MessageCatalog = {
       "value": "Open"
     }
   ],
+  "inbox.source.channelUnknown": [
+    {
+      "type": 0,
+      "value": "Channel"
+    }
+  ],
+  "inbox.source.dm": [
+    {
+      "type": 0,
+      "value": "DM · "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    }
+  ],
+  "inbox.source.dmGroup": [
+    {
+      "type": 0,
+      "value": "DM · "
+    },
+    {
+      "type": 1,
+      "value": "names"
+    },
+    {
+      "type": 0,
+      "value": " and "
+    },
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " other"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " others"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "inbox.source.dmUnknown": [
+    {
+      "type": 0,
+      "value": "DM"
+    }
+  ],
+  "inbox.source.task": [
+    {
+      "type": 0,
+      "value": "To do · Approval request"
+    }
+  ],
+  "inbox.source.thread": [
+    {
+      "type": 0,
+      "value": "Thread · "
+    },
+    {
+      "type": 1,
+      "value": "channel"
+    }
+  ],
+  "inbox.source.threadUnknown": [
+    {
+      "type": 0,
+      "value": "Thread"
+    }
+  ],
   "mobile.attachmentSave.failed": [
     {
       "type": 0,
