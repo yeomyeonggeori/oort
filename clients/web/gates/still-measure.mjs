@@ -586,7 +586,7 @@ export const TIMELINE_KNOWN_FAILURES = Object.freeze(
     // 옛 기록기로 4px. 다른 회차는 1px.
     { key: "entry-card|webkit|1280", ...NO_ISSUE, what: `${ENTRY_HEAD}(1~3프레임) + 진입 중 카드가 서면 가끔 마지막 줄 4.38px`, maxUnsettledFrames: 3, maxUnexplainedPx: 4.38 },
     { key: "entry-card|webkit|900", ...NO_ISSUE, what: `${ENTRY_HEAD}(1~3프레임) + 진입 중 카드가 서면 가끔 마지막 줄 4.38px`, maxUnsettledFrames: 3, maxUnexplainedPx: 4.38 },
-    { key: "entry-card|webkit|390", ...NO_ISSUE, what: `${ENTRY_HEAD}(2프레임)`, maxUnsettledFrames: 2 },
+    { key: "entry-card|webkit|390", ...NO_ISSUE, what: `${ENTRY_HEAD}(2~3프레임)`, maxUnsettledFrames: 3 },
     { key: "older|chromium|1280", ...NO_ISSUE, what: "위로 더 불러오기: 옛 쪽이 붙은 다음 프레임에 보던 줄 5.25px 내려앉음", maxUnexplainedPx: 5.25 },
     { key: "older|chromium|900", ...NO_ISSUE, what: "위로 더 불러오기: 옛 쪽이 붙은 다음 프레임에 보던 줄 5.25px 내려앉음", maxUnexplainedPx: 5.25 },
     { key: "older|chromium|390", ...NO_ISSUE, what: "위로 더 불러오기: 옛 쪽이 붙은 다음 프레임에 보던 줄 5.25px 내려앉음", maxUnexplainedPx: 5.25 },

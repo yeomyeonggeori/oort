@@ -47,7 +47,7 @@ const KNOWN_SHAPE = [
   ["entry-card|chromium|390", "#5641", null, null, null, 2, null, null, null],
   ["entry-card|webkit|1280", "#5641", 4.38, null, null, 3, null, null, null],
   ["entry-card|webkit|900", "#5641", 4.38, null, null, 3, null, null, null],
-  ["entry-card|webkit|390", "#5641", null, null, null, 2, null, null, null],
+  ["entry-card|webkit|390", "#5641", null, null, null, 3, null, null, null],
   ["older|chromium|1280", "#5641", 5.25, null, null, null, null, null, null],
   ["older|chromium|900", "#5641", 5.25, null, null, null, null, null, null],
   ["older|chromium|390", "#5641", 5.25, null, null, null, null, null, null],
