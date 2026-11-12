@@ -7,7 +7,7 @@
  * (화소: 누른 뒤 72~79ms 에 첫 쪽의 맨 위).
  *
  * 그래서 새로 선 스크롤 상자는 **자리 잡기 전까지 그리지 않는다.** 상자에 `data-placed` 가 없으면 보이지 않고(클래스는
- * `Timeline.tsx`), 가장 새 줄이 붙고 바닥에 닿은(바닥 거리 ≤ 1px) 때 이 모듈이 그 속성을 단다. 속성은 React 가 모르는 DOM 속성이라
+ * `Timeline.tsx`), 가장 새 줄이 붙고 바닥에 닿은(바닥 거리 ≤ `REVEAL_GAP_PX`) 때 이 모듈이 그 속성을 단다. 속성은 React 가 모르는 DOM 속성이라
  * 다시 그리기가 지우지 않고, 새 목록(대화를 바꿔 다시 선 상자)은 속성 없이 태어나 저절로 다시 가려진다 — 따로 켜고 끌 상태가 없다.
  *
  * 판정은 크기 · 스크롤이 바뀔 때마다(ResizeObserver 는 그리기 전에 돈다) 다시 한다. 바닥이 목적지가 아닌 움직임(메시지로 이동 같은
@@ -18,6 +18,13 @@ export const PLACED_ATTRIBUTE = "data-placed";
 
 /** 자리를 끝내 못 잡아도 이만큼 뒤에는 그린다. 수리 전 자리 잡기는 첫 쪽이 붙고 20~110ms 였다. */
 export const REVEAL_FAILSAFE_MS = 600;
+
+/**
+ * 바닥에 「닿았다」로 치는 거리(px). 진입 뒤 바닥이 몇 px 모자란 채 서는 일(#5679 — `itemSize` 없이 4px)이 다시 생겨도 안전판까지
+ * 빈 화면으로 기다리지 않고 그 자리에서 그린다(모자람 자체는 게이트의 바닥 거리 판정이 잡는다). 가상 목록이 바닥으로 가는 중간 걸음은
+ * 수백 px 라 여기 들지 않는다(실측 815 · 2,038px).
+ */
+export const REVEAL_GAP_PX = 8;
 
 /** 보인 까닭. */
 export type RevealReason = "bottom" | "empty" | "jump" | "hand" | "timeout";
@@ -48,7 +55,7 @@ export function revealWhenPlaced(
     const last = lastIndex();
     if (last === null) return "empty";
     if (scroller.querySelector(`[data-index="${last}"]`) === null) return null;
-    return scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight <= 1 ? "bottom" : null;
+    return scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight <= REVEAL_GAP_PX ? "bottom" : null;
   };
   const check = () => {
     const why = placed();
