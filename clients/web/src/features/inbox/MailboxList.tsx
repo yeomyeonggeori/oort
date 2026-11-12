@@ -11,13 +11,19 @@ import {
   entryAriaLabel,
   type MailboxEntry,
 } from "@momo/core/features/inbox/mailbox";
+import { mailboxSourceLine } from "@momo/core/features/inbox/source";
 import { Avatar } from "@/features/timeline/MessageRow";
 import { memberFor, type Directory } from "@/features/workspace/useWorkspace";
+import { useFormatMessage } from "@/i18n/useFormatMessage";
 
 // =============================================================================
-// 인박스 목록 (#3663). 메일함의 한 줄: 보낸 이 · 종류와 장소 · 시각 · 미리보기 ·
-// 안 읽음 점. 줄은 링크가 아니라 **선택**이다 — 누르면 오른쪽 패널이 그 맥락을 연다.
+// 인박스 목록 (#3663). 메일함의 한 줄: 보낸 이 · 시각 / 출처 / 미리보기 · 안 읽음 점.
+// 줄은 링크가 아니라 **선택**이다 — 누르면 오른쪽 패널이 그 맥락을 연다.
 // 채널로 나가는 길은 패널의 「대화에서 보기」에 있다.
+//
+// 출처 한 줄(#5696, Buzz 받은함 참고): 이름 아래 둘째 줄에 「스레드 · #채널」 / 「DM · 이름」 / 「#채널」 /
+// 「처리할 일 · 승인 요청」이 같은 자리·같은 모양으로 선다. 판정과 문장은 코어 `source.ts` 한 곳이고(폰과 같다),
+// 줄은 언제나 세 줄이라 출처가 무엇이든 줄 높이가 같다. 긴 출처는 말줄임으로 접힌다(이름 줄과 따로 서서 겹치지 않는다).
 //
 // 안 읽음은 색 하나로만 말하지 않는다: 점 + 굵은 보낸 이 + 스크린리더용 문장.
 // ↑/↓ 이동은 목록이 갖고 Enter/클릭은 선택이다 (listbox 패턴, 포커스는 옵션에).
@@ -71,6 +77,7 @@ export function MailboxList({
   testId?: string;
 }) {
   const listRef = useRef<HTMLUListElement>(null);
+  const formatMessage = useFormatMessage();
 
   const onKeyDown = useCallback((event: React.KeyboardEvent) => {
     if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
@@ -94,6 +101,7 @@ export function MailboxList({
     >
       {entries.map((entry) => {
         const selected = entry.key === selectedKey;
+        const sourceLine = mailboxSourceLine(entry.source, formatMessage);
         return (
           <li key={entry.key} className="border-b border-line">
             <button
@@ -104,7 +112,7 @@ export function MailboxList({
               data-kind={entry.kind}
               data-unread={entry.unread ? "true" : "false"}
               aria-current={selected ? "true" : undefined}
-              aria-label={entryAriaLabel(entry)}
+              aria-label={entryAriaLabel(entry, sourceLine)}
               title={entry.reason}
               onClick={() => onSelect(entry)}
               className={cn(
@@ -138,8 +146,11 @@ export function MailboxList({
                     {entry.timeLabel}
                   </span>
                 </span>
-                <span className="truncate text-meta text-ink-muted">
-                  {entry.typeLabel}
+                <span
+                  className="truncate text-meta text-ink-muted"
+                  data-testid="mailbox-row-source"
+                >
+                  {sourceLine}
                 </span>
                 <span className="flex items-center gap-2">
                   <span
