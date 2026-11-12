@@ -55,6 +55,7 @@ import {
   judgeCell,
   knownFailureFor,
   listEnv,
+  MAX_ENTRY_HIDDEN_FRAMES,
   loadNow,
   numbersFromRecord,
   positiveIntEnv,
@@ -189,7 +190,7 @@ async function measureCell(meta, run, { onSkip = null } = {}) {
   const known = knownFailureFor(meta.sceneKey, meta.engine, meta.width);
   if (meta.recordOnly && verdict !== "장면 못 만듦") verdict = `기록만(${verdict})`;
   else if (known?.notBuilt && verdict === "장면 못 만듦" && result.verdict.reasons.some((reason) => reason.startsWith(known.notBuilt))) verdict = "알려진 실패(장면 못 만듦)";
-  else if (known !== null && verdict === "FAIL" && withinKnown(known, result.numbers, { kind: meta.kind, unsettled: result.extra?.unsettled ?? 0 })) verdict = "알려진 실패";
+  else if (known !== null && verdict === "FAIL" && withinKnown(known, result.numbers, { kind: meta.kind, unsettled: result.extra?.unsettled ?? 0, hidden: result.extra?.hidden ?? 0 })) verdict = "알려진 실패";
   else if (known !== null && verdict === "FAIL") result.verdict.reasons.push(`알려진 실패의 테두리(${known.key} ${known.issue}) 밖`);
   pushCell({
     ...meta,
@@ -211,6 +212,7 @@ async function measureCell(meta, run, { onSkip = null } = {}) {
     // 실패 칸의 흔적(수리 칸이 볼 프레임): 판정이 PASS 가 아니면 남긴다(JSON 에만).
     trace: verdict === "PASS" || lastRecord === null ? undefined : lastRecord.frames.map((frame) => [frame.t, frame.watch?.w ?? frame.watch?.last ?? null, frame.top, frame.gap]),
     head: result.head ?? null,
+    hidden: result.hidden ?? null,
     missed: gaps?.missed ?? null,
     cross: gaps?.cross ?? null,
   });
@@ -244,6 +246,13 @@ async function entryScene(browser, engine, vp, { withCard }) {
     await openDm(page, backend, origin, { settle: false });
     const record = await readEntryRecord(page, 20_000, 2_000);
     lastRecord = record;
+    // 줄이 붙었어도 목록이 가려진 프레임은 그려지지 않았다(#5678 — `entryWindow`): 창은 처음 보인 프레임부터다. 가려 둔 프레임 수는 따로
+    // 세고 상한(`MAX_ENTRY_HIDDEN_FRAMES`)을 넘으면 실패다 — 빈 화면으로 오래 끌어 「흔들림 0」을 사지 못하게.
+    const hidden = record.hidden ?? { frames: 0, ms: 0, never: false };
+    const hiddenNote = `줄이 붙은 뒤 가려진 ${hidden.frames}프레임(${hidden.ms}ms)`;
+    if (hidden.never) {
+      return { numbers: null, verdict: { verdict: "FAIL", reasons: [`이 대화의 줄이 붙은 뒤 ${hidden.ms}ms 동안 목록이 한 번도 보이지 않았다`] }, extra: { hidden: hidden.frames }, note: hiddenNote };
+    }
     // 자리 잡기 전 프레임(머리)과 그 뒤(몸)를 가른다(`entrySettle`). 머리가 있으면 그것만으로 실패다 — 그 프레임들이 그려졌다(검수 r1 H1).
     // 몸의 숫자 넷은 평소 문턱으로 본다. 알려진 실패는 머리 프레임 수(`maxUnsettledFrames`)와 몸의 숫자에 따로 상한을 둔다.
     const settle = entrySettle(record.frames);
@@ -257,6 +266,10 @@ async function entryScene(browser, engine, vp, { withCard }) {
       verdict.verdict = "FAIL";
       verdict.reasons.push(`첫 줄이 그려진 뒤 ${unsettled}프레임(${settle.body[0].t}ms) 동안 자리 잡지 않은 모양이 그려졌다 — ${settle.summary}`);
     }
+    if (hidden.frames > MAX_ENTRY_HIDDEN_FRAMES && verdict.verdict !== "장면 못 만듦") {
+      verdict.verdict = "FAIL";
+      verdict.reasons.push(`${hiddenNote} — 상한 ${MAX_ENTRY_HIDDEN_FRAMES}프레임 넘게 빈 화면`);
+    }
     if (withCard) {
       const cardShown = await page.locator(`[data-message-id="${cardRow.id}"] [data-testid="unfurl-card"]`).count();
       if (cardShown === 0 || backend.state.unfurlReads === 0) {
@@ -267,9 +280,10 @@ async function entryScene(browser, engine, vp, { withCard }) {
     return {
       numbers,
       verdict,
-      extra: { unsettled },
+      extra: { unsettled, hidden: hidden.frames },
       head: unsettled ? { frames: unsettled, ms: settle.body[0].t, maxOffsetPx: settle.maxOffsetPx, maxGapPx: settle.maxGapPx, missing: settle.missing } : null,
-      note: `표본 ${record.frames.length}프레임(그리기 직전) · 자리 잡기 전 ${unsettled}프레임 · 숫자 넷은 그 뒤 ${settle.body.length}프레임 · 진입 중 옛 쪽 읽기 ${backend.state.olderReads}번`,
+      hidden,
+      note: `표본 ${record.frames.length}프레임(그리기 직전) · ${hiddenNote} · 자리 잡기 전 ${unsettled}프레임 · 숫자 넷은 그 뒤 ${settle.body.length}프레임 · 진입 중 옛 쪽 읽기 ${backend.state.olderReads}번`,
     };
   } finally {
     await context.close();
