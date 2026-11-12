@@ -351,8 +351,23 @@ export function WorkJobsRoute() {
   const onListPointerLeave = useCallback(() => {
     pointerRef.current = null;
   }, []);
+  const heldRef = useRef(held);
+  heldRef.current = held;
   const onListClickCapture = useCallback((event: MouseEvent<HTMLDivElement>) => {
-    if (!(event.target instanceof Element) || event.target.closest(DECISION_CONTROL) === null) return;
+    if (!(event.target instanceof Element)) return;
+    // 붙든 동안 방금 누른 점을 다시 누르는 것은 아무 일도 아니다(받은함에서 결정한 뒤 같은 자리를 다시 누르는 것과 같다): 그 점 밑이
+    // 영수증이 아니라 줄 단추(서랍)여도 삼킨다.
+    if (event.detail !== 0 && event.target.closest("[data-section] li") !== null) {
+      const at = { x: event.clientX, y: event.clientY };
+      for (const entry of heldRef.current.values()) {
+        if (entry.press !== null && near(at, entry.press)) {
+          event.preventDefault();
+          event.stopPropagation();
+          return;
+        }
+      }
+    }
+    if (event.target.closest(DECISION_CONTROL) === null) return;
     // 키보드가 누른 단추(`detail === 0`)는 사람이 초점을 거기로 옮긴 것이다 — 줄이 움직여도 초점은 결정 단추로 가지 않는다.
     const pointer = event.detail !== 0;
     const spot = pointer ? { x: event.clientX, y: event.clientY } : null;

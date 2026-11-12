@@ -56,13 +56,16 @@ export interface JobApprovalFacts {
   receipt: string | null;
 }
 
-/** 영수증 한 줄. `asControl`이면 결정 단추가 서 있던 층에 같은 높이로 선다(누른 자리에 결과가 서고, 줄 높이가 바뀌지 않는다). */
+/**
+ * 영수증 한 줄. `asControl`이면 결정 단추가 서 있던 층에 **단추와 같은 높이**로 선다(`InboxApprovalActions`의 `py-1` + 단추 `h-control-sm`,
+ * 좁은 폭은 손가락 44px `tap-target`) — 누른 자리에 결과가 서고 줄 높이가 바뀌지 않는다.
+ */
 function ReceiptLine({ text, asControl = false }: { text: string; asControl?: boolean }) {
-  return (
+  const line = (
     <span
       className={cn(
         "min-w-0 break-keep text-meta text-ink",
-        asControl && "flex min-h-control-sm items-center py-1"
+        asControl && "flex min-h-control-sm tap-target items-center"
       )}
       data-testid="work-job-approval-settled"
     >
@@ -70,6 +73,7 @@ function ReceiptLine({ text, asControl = false }: { text: string; asControl?: bo
       {text}
     </span>
   );
+  return asControl ? <span className="flex py-1">{line}</span> : line;
 }
 
 type RowControl = ReturnType<typeof approvalRowControl>;

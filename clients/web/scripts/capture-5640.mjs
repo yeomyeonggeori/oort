@@ -712,7 +712,7 @@ async function doublePressScene(browser, origin, viewport) {
           const li = document.querySelector(`[data-testid="work-job-row"][data-job-id="${rid}"]`).closest('[data-testid="work-job"]');
           return { section: li.closest("[data-section]").getAttribute("data-section"), receipt: li.querySelector('[data-testid="work-job-approval-settled"]')?.textContent?.trim() ?? null };
         }, runApproval.runId);
-        check(`${tag} 결정한 줄은 영수증을 보인 채 그 자리(포인터가 구간 안)`, held.section === "needsMe" && held.receipt === "승인을 기록했어요.", held);
+        check(`${tag} 결정한 줄은 영수증을 보인 채 그 자리(포인터가 구간 안)`, held.section === "needsMe" && held.receipt === "승인을 기록했어요.", { ...held, under });
         await shot(page, `5640-decided-held-${viewport.width}-light`);
       }
       await context.close();
