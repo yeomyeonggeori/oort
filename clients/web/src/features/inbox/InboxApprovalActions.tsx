@@ -20,6 +20,8 @@ export function InboxApprovalActions({
   className = "pb-2",
   testIdPrefix = "inbox-approval",
   decisionLabel,
+  errorBeside,
+  onBusyChange,
 }: {
   approvalId: string;
   onSettled: (outcome: DecisionOutcome) => void;
@@ -32,6 +34,10 @@ export function InboxApprovalActions({
   testIdPrefix?: string;
   /** 한 화면에 결정이 여럿 서면 어느 결정인지 접근성 이름에 남긴다(`ApprovalActions`). */
   decisionLabel?: string;
+  /** 실패 문장을 단추 옆 한 줄에(「작업」 칸, #5738 — 줄 높이가 바뀌지 않게). 기본은 단추 아래다. */
+  errorBeside?: boolean;
+  /** 결정이 서버에 나가 있는 동안 true(「작업」 칸, #5738). */
+  onBusyChange?: (busy: boolean) => void;
   /**
    * 스폰 승인의 호스트 후보 (ADR-0125 D6-A, 이슈 1114).
    *
@@ -66,6 +72,8 @@ export function InboxApprovalActions({
       testIdPrefix={testIdPrefix}
       execution={execution ?? null}
       {...(decisionLabel !== undefined ? { decisionLabel } : {})}
+      {...(errorBeside !== undefined ? { errorBeside } : {})}
+      {...(onBusyChange !== undefined ? { onBusyChange } : {})}
     />
   );
 }

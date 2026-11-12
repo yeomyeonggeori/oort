@@ -220,6 +220,8 @@ export function ApprovalActions({
   verbs = APPROVAL_VERBS,
   forbiddenCopy = null,
   decisionLabel,
+  errorBeside = false,
+  onBusyChange,
 }: {
   approvalId: string;
   onSettled: (outcome: DecisionOutcome) => void;
@@ -253,6 +255,13 @@ export function ApprovalActions({
   forbiddenCopy?: string | null;
   /** 같은 화면의 제안이 여러 개여도 어떤 결정인지 접근성 이름에 남겨요. */
   decisionLabel?: string;
+  /**
+   * 실패 문장을 단추 **옆** 한 줄에 세운다(넘치면 자르고 전체는 `title`·낭독). 「작업」의 「응답 필요」 칸(#5738)이 쓴다: 그 칸은 결정 전·
+   * 실패·결과가 모두 같은 높이여야 아래 줄의 단추가 움직이지 않는다. 기본(false)은 지금까지처럼 단추 아래 줄이다.
+   */
+  errorBeside?: boolean;
+  /** 결정이 서버에 나가 있는 동안 true, 답(성공·실패)이 오면 false. 「작업」 칸이 답을 받을 때까지 자리를 지키는 데 쓴다(#5738). */
+  onBusyChange?: (busy: boolean) => void;
 }) {
   // workspaceId comes from session context rather than a prop chain: both
   // callers sit several components below the shell.
@@ -292,6 +301,7 @@ export function ApprovalActions({
     sendingRef.current = true;
     setSending(direction);
     setErrorCopy(null);
+    onBusyChange?.(true);
     try {
       const outcome = await decideApproval(
         workspaceId,
@@ -339,6 +349,7 @@ export function ApprovalActions({
     } finally {
       sendingRef.current = false;
       setSending(null);
+      onBusyChange?.(false);
     }
   }
 
@@ -422,8 +433,22 @@ export function ApprovalActions({
             {sending === "approve" ? "보내는 중" : verbs.approve}
           </Button>
         </span>
+        {errorCopy !== null && errorBeside && (
+          <p
+            role={errorTone === "error" ? "alert" : "status"}
+            data-testid={`${testIdPrefix}-error`}
+            data-tone={errorTone}
+            title={errorCopy}
+            className={cn(
+              "min-w-0 flex-1 basis-0 truncate text-meta",
+              errorTone === "error" ? "text-danger" : "text-ink-muted"
+            )}
+          >
+            {errorCopy}
+          </p>
+        )}
       </div>
-      {errorCopy !== null && (
+      {errorCopy !== null && !errorBeside && (
         <p
           // 미제공은 사고가 아니므로 alert으로 끼어들지도, 빨갛지도 않다.
           role={errorTone === "error" ? "alert" : "status"}

@@ -1931,6 +1931,12 @@ export const catalog: MessageCatalog = {
       "value": "summary"
     }
   ],
+  "desktop.workJobs.settledElsewhere": [
+    {
+      "type": 0,
+      "value": "이제 응답하지 않아도 돼요"
+    }
+  ],
   "desktop.workJobs.stateAwaitingApproval": [
     {
       "type": 0,
