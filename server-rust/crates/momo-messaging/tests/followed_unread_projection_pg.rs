@@ -616,6 +616,74 @@ async fn a_new_reply_tells_every_live_follower_but_its_author() {
     );
 }
 
+/// The reply reaches its channel before any follower hears about it: among the send's own outbox rows,
+/// the reply's `message.new` and `thread.updated` come first and every `followed_unread.updated` frame
+/// after them. The relay drains by outbox id, so the other order would hold the reply's live delivery
+/// behind one personal frame per follower. Every frame is relay work: `broadcast`, `pending`, `publish`.
+///
+/// Sabotage (measured RED, see the PR): move the `signal_followers_of_reply_in_tx` call in
+/// `finish_send_in_tx` back above the `message.new` emit → the frames' ids are below it.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 DB + momo_app role"]
+async fn a_reply_reaches_its_channel_before_any_follower_frame() {
+    ensure_schema_and_roles();
+    let (su, app) = (superuser_pool().await, momo_app_pool().await);
+    let room = seed_room(&su, &app, &["author", "replier", "f1", "f2"], 1).await;
+    let ch = room.channels[0];
+    let (root, _) = say(&app, &room, ch, "author", None, "root").await;
+    for who in ["f1", "f2"] {
+        follow(&app, &room, ch, root, who, true).await;
+    }
+
+    let mark = outbox_mark(&su).await;
+    say(&app, &room, ch, "replier", Some(root), "reply").await;
+    let rows = sqlx::query(
+        "SELECT id, kind::text AS kind, status::text AS status, method, \
+                payload->'data'->>'type' AS frame \
+           FROM outbox WHERE id > $1 ORDER BY id",
+    )
+    .bind(mark)
+    .fetch_all(&su)
+    .await
+    .expect("this send's outbox rows");
+    let ids_of = |frame: &str| -> Vec<i64> {
+        rows.iter()
+            .filter(|row| {
+                row.get::<String, _>("kind") == "broadcast"
+                    && row.get::<Option<String>, _>("frame").as_deref() == Some(frame)
+            })
+            .map(|row| row.get::<i64, _>("id"))
+            .collect()
+    };
+    let (message_new, thread_updated, frames) = (
+        ids_of("message.new"),
+        ids_of("thread.updated"),
+        ids_of("followed_unread.updated"),
+    );
+    assert_eq!(message_new.len(), 1, "one message.new for the reply");
+    assert_eq!(thread_updated.len(), 1, "one thread.updated for the root");
+    assert_eq!(frames.len(), 3, "the root's author, f1 and f2");
+    let channel_last = message_new[0].max(thread_updated[0]);
+    assert!(
+        frames.iter().all(|id| *id > channel_last),
+        "every follower frame is queued after the reply's channel rows: message.new {message_new:?}, \
+         thread.updated {thread_updated:?}, frames {frames:?}"
+    );
+    for row in rows.iter().filter(|row| {
+        row.get::<Option<String>, _>("frame").as_deref() == Some("followed_unread.updated")
+    }) {
+        assert_eq!(
+            (
+                row.get::<String, _>("kind"),
+                row.get::<String, _>("status"),
+                row.get::<String, _>("method"),
+            ),
+            ("broadcast".into(), "pending".into(), "publish".into()),
+            "a follower frame is pending relay work like every other broadcast"
+        );
+    }
+}
+
 // ---------------------------------------------------------------------------
 // membership and tenants
 // ---------------------------------------------------------------------------

@@ -575,9 +575,10 @@ pub async fn followed_unread_by_channel_in_tx(
 
 /// The new-reply half of the signal: after a counted `text` reply (the automatic follow's own guard —
 /// `thread_counted` is `ThreadPolicy::Maintain` at the call site), every follower of the thread except
-/// the reply's author gets a `followed_unread.updated` frame. Called right after
-/// [`auto_follow_in_tx`], so the root's author and the mentioned people that reply just pulled in are
-/// among them.
+/// the reply's author gets a `followed_unread.updated` frame. Called after [`auto_follow_in_tx`], so
+/// the root's author and the mentioned people that reply just pulled in are among them, and after the
+/// reply's own `message.new` / `thread.updated` rows, so the relay (which drains by outbox id) never
+/// delivers these personal frames ahead of the reply itself.
 ///
 /// Only a **live member of the channel**, and only while the channel is not archived: a person who
 /// left (or was removed from) a private channel keeps their follow rows but must not learn that it is
