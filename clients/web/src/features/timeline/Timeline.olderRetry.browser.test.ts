@@ -253,7 +253,12 @@ describe.skipIf(ENGINES.length === 0)("옛 쪽 읽기 — 실패 뒤 · 진입 �
     try {
       await settleBottom(page, 10);
       await page.evaluate(() => window.__timelineOlder.failNextOlder(1));
+      // 실패 응답을 늦춰 줄이 서기 전의 보던 줄 위치를 잰다(뜰 때 이동).
+      await page.evaluate(() => window.__timelineOlder.setDelays({ older: 400 }));
       await setTop(page, 0);
+      await wait(page, 100);
+      const lineBefore = await page.getByTestId("timeline-older-error").count();
+      const topBeforeLine = await rowTop(page);
       const first = await waitRequests(page, 1, 3_000);
       expect(first.map((entry) => entry.outcome), `${label(cell)} 첫 읽기`).toEqual(["failed"]);
       // 실패를 말한다: 목록 위 한 줄과 「다시 시도」(단정은 다시 닿기를 잰 뒤 — 읽기 수가 먼저다).
@@ -262,10 +267,32 @@ describe.skipIf(ENGINES.length === 0)("옛 쪽 읽기 — 실패 뒤 · 진입 �
         .waitFor({ state: "visible", timeout: 1_000 })
         .then(() => true, () => false);
       const topWithLine = await rowTop(page);
+      // 검수 1회차 M1: 맨 위에서 줄이 목록의 첫 줄인 날짜 줄을 덮지 않는다 — 날짜 줄이 위 가장자리에 있고, 줄은 그 바로 아래에 선다.
+      const placed = await page.evaluate((selector) => {
+        const scroller = document.querySelector(selector);
+        const line = document.querySelector("[data-testid='timeline-older-error']");
+        const divider = scroller?.querySelector("[data-testid='day-divider']");
+        if (!(scroller instanceof HTMLElement) || !(line instanceof HTMLElement) || !(divider instanceof HTMLElement)) return null;
+        const pane = scroller.getBoundingClientRect();
+        const a = line.getBoundingClientRect();
+        const b = divider.getBoundingClientRect();
+        return {
+          dividerTop: b.top - pane.top,
+          overlap: Math.max(0, Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top)),
+          gap: a.top - b.bottom,
+        };
+      }, SCROLLER);
       // 연속 실패 간격(첫 실패 뒤 1초)을 넘긴 뒤 사람이 조금 내렸다가 다시 올린다.
       await wait(page, 1_100);
       await setTop(page, 1_500);
       await wait(page, 400);
+      // 날짜 줄이 위로 지나간 뒤에는 줄이 위 가장자리에 머문다(날짜 줄을 따라 화면 밖으로 나가지 않는다).
+      const lineTopBelow = await page.evaluate((selector) => {
+        const scroller = document.querySelector(selector);
+        const line = document.querySelector("[data-testid='timeline-older-error']");
+        if (!(scroller instanceof HTMLElement) || !(line instanceof HTMLElement)) return null;
+        return line.getBoundingClientRect().top - scroller.getBoundingClientRect().top;
+      }, SCROLLER);
       await setTop(page, 0);
       await waitRequests(page, 2, 3_000);
       await wait(page, 600);
@@ -275,6 +302,15 @@ describe.skipIf(ENGINES.length === 0)("옛 쪽 읽기 — 실패 뒤 · 진입 �
       // 닿을 때 한 번: 둘째 읽기가 붙은 뒤 셋째가 겹쳐 나가지 않는다(붙은 쪽이 보던 자리를 맨 위에서 떼어 놓는다).
       expect(settled.length, `${label(cell)} 읽기 총수`).toBe(2);
       expect(lineShown, `${label(cell)} 실패 줄`).toBe(true);
+      expect(lineBefore, `${label(cell)} 줄이 서기 전에 잼`).toBe(0);
+      expect(Math.abs((topWithLine ?? Number.NaN) - (topBeforeLine ?? Number.NaN)), `${label(cell)} 줄이 뜰 때 보던 줄 이동 px`).toBeLessThanOrEqual(2);
+      expect(placed, `${label(cell)} 날짜 줄 · 실패 줄`).not.toBeNull();
+      expect(Math.abs(placed?.dividerTop ?? Number.NaN), `${label(cell)} 날짜 줄이 위 가장자리에 있음`).toBeLessThanOrEqual(2);
+      expect(placed?.overlap, `${label(cell)} 실패 줄이 날짜 줄을 덮는 px`).toBe(0);
+      expect(placed?.gap, `${label(cell)} 실패 줄이 날짜 줄 바로 아래`).toBeGreaterThanOrEqual(0);
+      expect(placed?.gap, `${label(cell)} 실패 줄이 날짜 줄 바로 아래`).toBeLessThanOrEqual(2);
+      expect(lineTopBelow, `${label(cell)} 아래로 내린 뒤 실패 줄 위치`).not.toBeNull();
+      expect(Math.abs(lineTopBelow ?? Number.NaN), `${label(cell)} 아래로 내린 뒤 실패 줄은 위 가장자리`).toBeLessThanOrEqual(1);
       await page.getByTestId("timeline-older-error").waitFor({ state: "detached", timeout: 2_000 });
       // 실패 줄이 뜨고 진 것 · 옛 쪽이 붙은 것으로 보던 줄이 밀리지 않는다(떠 있는 한 줄 + 앞붙이기 보정, ≤ 2px).
       const topAfter = await rowTop(page);
