@@ -288,6 +288,13 @@ export const messageKeys = [
   "desktop.tray.running",
   "desktop.tray.stateBlocked",
   "desktop.tray.stateWorking",
+  "desktop.workJobs.approvalHintInList",
+  "desktop.workJobs.openToAnswer",
+  "desktop.workJobs.reportedTitle",
+  "desktop.workJobs.stateAwaitingApproval",
+  "desktop.workJobs.tagApproval",
+  "desktop.workJobs.tagPermission",
+  "desktop.workPermission.allowInApp",
   "expressions.add.adminsOnly",
   "expressions.add.backLabel",
   "expressions.add.import",
@@ -1706,6 +1713,15 @@ export const argumentSpecs = {
   "desktop.tray.running": {},
   "desktop.tray.stateBlocked": {},
   "desktop.tray.stateWorking": {},
+  "desktop.workJobs.approvalHintInList": {},
+  "desktop.workJobs.openToAnswer": {},
+  "desktop.workJobs.reportedTitle": {
+    "summary": "string"
+  },
+  "desktop.workJobs.stateAwaitingApproval": {},
+  "desktop.workJobs.tagApproval": {},
+  "desktop.workJobs.tagPermission": {},
+  "desktop.workPermission.allowInApp": {},
   "expressions.add.adminsOnly": {},
   "expressions.add.backLabel": {},
   "expressions.add.import": {},
@@ -3413,6 +3429,13 @@ export interface MessageArgs {
   "desktop.tray.running": Record<string, never>;
   "desktop.tray.stateBlocked": Record<string, never>;
   "desktop.tray.stateWorking": Record<string, never>;
+  "desktop.workJobs.approvalHintInList": Record<string, never>;
+  "desktop.workJobs.openToAnswer": Record<string, never>;
+  "desktop.workJobs.reportedTitle": { summary: string };
+  "desktop.workJobs.stateAwaitingApproval": Record<string, never>;
+  "desktop.workJobs.tagApproval": Record<string, never>;
+  "desktop.workJobs.tagPermission": Record<string, never>;
+  "desktop.workPermission.allowInApp": Record<string, never>;
   "expressions.add.adminsOnly": Record<string, never>;
   "expressions.add.backLabel": Record<string, never>;
   "expressions.add.import": Record<string, never>;

@@ -1909,6 +1909,52 @@ export const catalog: MessageCatalog = {
       "value": "작업 중"
     }
   ],
+  "desktop.workJobs.approvalHintInList": [
+    {
+      "type": 0,
+      "value": "승인은 목록에서도 할 수 있어요"
+    }
+  ],
+  "desktop.workJobs.openToAnswer": [
+    {
+      "type": 0,
+      "value": "열어서 답하기"
+    }
+  ],
+  "desktop.workJobs.reportedTitle": [
+    {
+      "type": 0,
+      "value": "에이전트 보고: "
+    },
+    {
+      "type": 1,
+      "value": "summary"
+    }
+  ],
+  "desktop.workJobs.stateAwaitingApproval": [
+    {
+      "type": 0,
+      "value": "승인 대기"
+    }
+  ],
+  "desktop.workJobs.tagApproval": [
+    {
+      "type": 0,
+      "value": "승인 요청"
+    }
+  ],
+  "desktop.workJobs.tagPermission": [
+    {
+      "type": 0,
+      "value": "권한 요청"
+    }
+  ],
+  "desktop.workPermission.allowInApp": [
+    {
+      "type": 0,
+      "value": "허락은 폰이나 데스크탑 앱에서 보내 주세요"
+    }
+  ],
   "expressions.add.adminsOnly": [
     {
       "type": 0,

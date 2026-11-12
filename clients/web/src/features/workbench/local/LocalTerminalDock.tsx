@@ -110,6 +110,7 @@ import { usePaneGit } from "./usePaneGit";
 import { useSessionListOpen } from "./sessionListOpen";
 import { WorkbenchGrid, type WorkbenchPaneInfo } from "../WorkbenchGrid";
 import { useWorkbenchLayout } from "../useWorkbenchLayout";
+import { focusPermissionCardWhenReady } from "../agent/focusPermissionCard";
 import { DOCK_SESSION_KEY, localSessions, type LocalSessions } from "./localSessions";
 import { HARNESS_LABEL, LocalTerminalPane, localPaneTitle, runningPaneNotice } from "./LocalTerminalPane";
 import {
@@ -559,9 +560,12 @@ export function LocalTerminalDock({
   );
 
   // 작업 권한 요청 배너를 눌러 온 A 세션(#5595): 승인 카드는 그 세션의 칸에 있다. 같은 요청은 한 번만 연다.
+  // 「작업」의 「응답 필요」 줄도 같은 주소로 온다(#5640). 칸을 연 뒤 카드가 서면 카드에 초점을 둔다(`focusPermissionCardWhenReady`).
   const openedRequestRef = useRef<string | null>(null);
   const agentOpenedRef = useRef(onAgentSessionOpened);
   agentOpenedRef.current = onAgentSessionOpened;
+  const stopCardFocusRef = useRef<() => void>(() => undefined);
+  useEffect(() => () => stopCardFocusRef.current(), []);
   useEffect(() => {
     if (openAgentSession === null) {
       openedRequestRef.current = null;
@@ -584,6 +588,8 @@ export function LocalTerminalDock({
       }
     }
     agentOpenedRef.current?.();
+    stopCardFocusRef.current();
+    stopCardFocusRef.current = focusPermissionCardWhenReady(rootRef.current, () => layoutRef.current.focused);
   }, [openAgentSession, openAgent, setLayout]);
 
   const runDock = useCallback(
