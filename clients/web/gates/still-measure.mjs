@@ -576,7 +576,7 @@ export const TIMELINE_KNOWN_FAILURES = Object.freeze(
     { key: "entry|chromium|1280", ...NO_ISSUE, what: `${ENTRY_HEAD}(2프레임 · scrollTop 0 · 바닥 거리 2,038px)`, maxUnsettledFrames: 2 },
     { key: "entry|chromium|900", ...NO_ISSUE, what: `${ENTRY_HEAD}(2프레임 · scrollTop 0 · 바닥 거리 2,038px)`, maxUnsettledFrames: 2 },
     { key: "entry|chromium|390", ...NO_ISSUE, what: `${ENTRY_HEAD}(2프레임 · scrollTop 0 · 바닥 거리 2,297px)`, maxUnsettledFrames: 2 },
-    { key: "entry|webkit|1280", ...NO_ISSUE, what: `${ENTRY_HEAD}(낮은 부하 1프레임 가장 새 줄 없음, 높은 부하 3프레임 — 맨 위 → 제자리 811px 아래 → 없음)`, maxUnsettledFrames: 3 },
+    { key: "entry|webkit|1280", ...NO_ISSUE, what: `${ENTRY_HEAD}(대개 1~2프레임 가장 새 줄 없음, 가끔 3프레임 — 맨 위 → 제자리에서 811px → 없음)`, maxUnsettledFrames: 3 },
     { key: "entry|webkit|900", ...NO_ISSUE, what: `${ENTRY_HEAD}(1~3프레임)`, maxUnsettledFrames: 3 },
     { key: "entry|webkit|390", ...NO_ISSUE, what: `${ENTRY_HEAD}(2~3프레임)`, maxUnsettledFrames: 3 },
     { key: "entry-card|chromium|1280", ...NO_ISSUE, what: `${ENTRY_HEAD}(2프레임) + 진입 중 링크 카드가 0.7초 늦게 서면 마지막 줄 4.75px`, maxUnsettledFrames: 2, maxUnexplainedPx: 4.75 },
