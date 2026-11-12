@@ -535,12 +535,16 @@ async function selectedScene(browser, origin, scheme) {
   check(`selected-${scheme} 펼친 줄: 펼침 채움이 네 모서리·컨트롤 층까지`, allNear(selPx, rgb(tokens.hover)), { selPx, hover: tokens.hover });
   const reject = page.locator(`[data-testid="work-job"]`, { has: page.locator(`[data-job-id="${id}"]`) }).getByTestId("work-job-approval-reject");
   const rb = await reject.boundingBox();
+  const pillPoint = (li) => [["pad", 2, 1], ["pill", Math.round(rb.x - li.x + rb.width - 6), Math.round(rb.y - li.y + rb.height / 2)]];
+  const restPx = await bandPixels(page, decoder, sel.li, pillPoint(sel.li));
   await page.mouse.move(rb.x + rb.width / 2, rb.y + rb.height / 2);
   await page.waitForTimeout(50);
   const pillBg = await reject.evaluate((el) => getComputedStyle(el).backgroundColor);
   const after = await jobBox(page, id);
-  const px = await bandPixels(page, decoder, after.li, [["pad", 2, 1], ["pill", Math.round(rb.x - after.li.x + rb.width - 6), Math.round(rb.y - after.li.y + rb.height / 2)]]);
-  console.log(`MEASURE selected-${scheme}: band=${after.liBg} pill(hover)=${pillBg} pillPx=${px.pill} padPx=${px.pad} dist=${dist(px.pill, px.pad).toFixed(2)}`);
+  const px = await bandPixels(page, decoder, after.li, pillPoint(after.li));
+  console.log(`MEASURE selected-${scheme}: band=${after.liBg} pill(rest)=${restPx.pill} pill(hover)=${pillBg} pillPx=${px.pill} padPx=${px.pad} dist(pill,band)=${dist(px.pill, px.pad).toFixed(2)} dist(hover,rest)=${dist(px.pill, restPx.pill).toFixed(2)}`);
+  // 수리 3회차 질문 ② (a): 펼친 줄의 거부 알약을 가리켜도 그릇이 띠와 갈린다(가리킴 채움 = `--surface-pressed`).
+  check(`selected-${scheme} 펼친 줄: 가리킨 거부 알약이 띠에 녹지 않는다`, dist(rgb(pillBg), rgb(tokens.pressed)) <= 3 && dist(px.pill, px.pad) > 3, { pillBg, pressed: tokens.pressed, pill: px.pill, band: px.pad });
   await shot(page, `5640-selected-reject-hover-${scheme}`);
   await decoder.close();
   await context.close();

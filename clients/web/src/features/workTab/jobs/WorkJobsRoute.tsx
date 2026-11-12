@@ -807,6 +807,9 @@ function JobRow({
       className={cn(
         "border-b border-line last:border-b-0",
         selected ? "bg-surface-hover" : "pointer-hover:has-[>button:hover:not(:active)]:bg-surface-hover",
+        // 펼친 줄(띠 = `--surface-hover`) 안의 보조 알약(거부·열기·열어서 답하기)은 가리킴 채움이 띠와 같은 토큰이라 녹는다: 그 줄
+        // 안에서만 한 단계 진한 `--surface-pressed`로 가리킨다(#5640 수리 3회차, 검수 질문 ② (a)). 공용 단추 변형은 그대로다.
+        selected && "[&>[data-testid=work-job-extras]_.bg-surface-muted:hover]:bg-surface-pressed",
         "has-[>button:active]:bg-surface-pressed has-[>button:focus-visible]:focus-ring"
       )}
       data-testid="work-job"
