@@ -446,7 +446,7 @@ export default function InboxScreen({
       if (!approvalsProvided) {
         return (
           <Text style={styles.managed} testID={`decision-elsewhere-${item.key}`}>
-            결정은 데스크톱 앱에서 할 수 있어요.
+            결정은 데스크탑 앱에서 할 수 있어요.
           </Text>
         );
       }

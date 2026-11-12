@@ -295,6 +295,10 @@ export const messageKeys = [
   "desktop.workJobs.tagApproval",
   "desktop.workJobs.tagPermission",
   "desktop.workPermission.allowInApp",
+  "desktop.workSession.backAria",
+  "desktop.workSession.backLabel",
+  "desktop.workSession.listTitle",
+  "desktop.workSession.pageTitle",
   "expressions.add.adminsOnly",
   "expressions.add.backLabel",
   "expressions.add.import",
@@ -1729,6 +1733,10 @@ export const argumentSpecs = {
   "desktop.workJobs.tagApproval": {},
   "desktop.workJobs.tagPermission": {},
   "desktop.workPermission.allowInApp": {},
+  "desktop.workSession.backAria": {},
+  "desktop.workSession.backLabel": {},
+  "desktop.workSession.listTitle": {},
+  "desktop.workSession.pageTitle": {},
   "expressions.add.adminsOnly": {},
   "expressions.add.backLabel": {},
   "expressions.add.import": {},
@@ -3457,6 +3465,10 @@ export interface MessageArgs {
   "desktop.workJobs.tagApproval": Record<string, never>;
   "desktop.workJobs.tagPermission": Record<string, never>;
   "desktop.workPermission.allowInApp": Record<string, never>;
+  "desktop.workSession.backAria": Record<string, never>;
+  "desktop.workSession.backLabel": Record<string, never>;
+  "desktop.workSession.listTitle": Record<string, never>;
+  "desktop.workSession.pageTitle": Record<string, never>;
   "expressions.add.adminsOnly": Record<string, never>;
   "expressions.add.backLabel": Record<string, never>;
   "expressions.add.import": Record<string, never>;

@@ -912,7 +912,7 @@ describe('what the agent is doing, and whether you can turn things off', () => {
   it('sends the terminal to the desktop instead of opening 80 columns here', async () => {
     installFetch();
     await openKimWork();
-    expect(screen.getByText('터미널 화면은 데스크톱 앱에서 엽니다.')).toBeTruthy();
+    expect(screen.getByText('터미널 화면은 데스크탑 앱에서 엽니다.')).toBeTruthy();
   });
 
   it('calls an empty ledger empty now that the run history is readable', async () => {

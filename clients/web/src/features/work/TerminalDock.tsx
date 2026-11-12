@@ -378,7 +378,7 @@ export function TerminalDock({
                   onClick={() => navigate(WORK_CONSOLE_VIEW_PATH)}
                   data-testid="terminal-dock-console"
                 >
-                  작업 콘솔 보기
+                  세션 보기
                 </Button>
               ) : undefined
             }

@@ -1352,7 +1352,7 @@ const ACTION_RESULT_TONE: Readonly<
 const ACTION_RESULT_ELSEWHERE: Readonly<Record<string, string>> = {
   // 「관리」가 아니다(design-review 2R N-A): 웹의 설정 › 멤버와 초대에는 발급된
   // 목록(읽기 전용)과 만들기 폼뿐이고 취소·재발급이 없다. 할 수 있는 것만 이름 댄다.
-  'invite.create': '링크 목록 확인과 새 링크 만들기는 데스크톱이나 웹에서 할 수 있습니다.',
+  'invite.create': '링크 목록 확인과 새 링크 만들기는 데스크탑이나 웹에서 할 수 있습니다.',
 };
 
 /**
@@ -1878,7 +1878,7 @@ function AgentCard({
             여기 있던 문장은 이랬다 (감사 H-1):
 
               // 승인/거부 버튼은 이 배치가 아니다 — 결정은 데스크톱이나 인박스에서.
-              <Text>이 결정은 인박스나 데스크톱 앱에서 처리할 수 있습니다.</Text>
+              <Text>이 결정은 인박스나 데스크탑 앱에서 처리할 수 있습니다.</Text>
 
             승인을 기다리는 에이전트가 **지금 이 화면에 있는데** 폰은 다른 앱으로
             가라고만 했다. 감사 캡처(`m-07`)에는 같은 카드 셋이 연달아 그 한 문장만
@@ -2149,7 +2149,7 @@ function ArtifactCard({
         <Text style={styles.cardMeta}>
           {`변경이 너무 커서 여기서는 펼치지 못합니다. 전체 ${formatCount(
             artifact.totalLineCount,
-          )}줄은 데스크톱 앱에서 열어 보세요.`}
+          )}줄은 데스크탑 앱에서 열어 보세요.`}
         </Text>
       ) : null}
 

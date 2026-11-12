@@ -779,7 +779,8 @@ async function assertConsole(context, state) {
       }))
     );
   const expectedHeadingOutline = [
-    { level: 1, text: "작업 콘솔" },
+    { level: 1, text: "클라우드에서 빌드" },
+    { level: 2, text: "진행 중인 세션" },
     { level: 2, text: "클라우드에서 빌드" },
     { level: 3, text: "터미널 관전" },
     { level: 3, text: "라이브 화면" },

@@ -54,7 +54,12 @@ import { useLocalPaneAttention } from "@/features/workbench/local/paneAttention"
 import { TeamBoardDrawer } from "@/features/workTab/teamBoard/TeamBoardDrawer";
 import { StateChip } from "@/features/workTab/teamBoard/TeamBoardParts";
 import { useTeamBoardItem, useTeamBoardRail } from "@/features/workTab/teamBoard/useTeamBoard";
-import { workConsoleSessionPath } from "@/features/workConsole/model";
+import {
+  rememberWorkReturnSpot,
+  takeWorkReturnSpot,
+  workConsoleSessionPath,
+  WORK_RETURN_STATE,
+} from "@/features/workConsole/model";
 import { useFormatMessage } from "@/i18n/useFormatMessage";
 import { isDesktop } from "@/lib/tauri";
 import {
@@ -621,6 +626,23 @@ export function WorkJobsRoute() {
   useLayoutEffect(() => {
     measureArrivals(false);
   });
+  // 세션 상세에서 돌아왔으면 열었던 줄에 초점을 두고 스크롤을 되돌린다(한 번). 줄이 아직 없으면(첫 읽기 중) 다음 렌더에서 다시 본다.
+  const returnSpotRef = useRef<{ rowId: string; scrollTop: number } | null | undefined>(undefined);
+  useLayoutEffect(() => {
+    if (returnSpotRef.current === undefined) returnSpotRef.current = takeWorkReturnSpot();
+    const spot = returnSpotRef.current;
+    if (spot === null || spot === undefined) return;
+    const row = rowRefs.current.get(spot.rowId.toLowerCase());
+    if (row === undefined) return;
+    returnSpotRef.current = null;
+    const list = listRef.current;
+    if (list !== null) {
+      list.scrollTop = spot.scrollTop;
+      selfScrollTopRef.current = list.scrollTop;
+    }
+    setActiveId(spot.rowId);
+    row.focus({ preventScroll: true });
+  });
   const rovingId =
     activeId !== null && orderedIds.some((id) => uuidEq(id, activeId))
       ? activeId
@@ -852,8 +874,15 @@ export function WorkJobsRoute() {
                       const open = needsMe && (heldNow.entry === null || heldNow.nextAsk !== null);
                       // 내 맥 세션의 권한 요청: 줄이 곧 승인 카드로 가는 길이다(서랍이 아니다).
                       const permission = kind === "permission";
-                      const openPermission = () =>
-                        navigate(desktop ? agentPanePath(row.id) : workConsoleSessionPath(row.id));
+                      const openPermission = () => {
+                        if (desktop) {
+                          navigate(agentPanePath(row.id));
+                          return;
+                        }
+                        // 세션 상세에서 돌아오면 이 줄에 초점과 스크롤이 되돌아온다(#5673).
+                        rememberWorkReturnSpot({ rowId: row.id, scrollTop: listRef.current?.scrollTop ?? 0 });
+                        navigate(workConsoleSessionPath(row.id), { state: { from: WORK_RETURN_STATE } });
+                      };
                       return (
                         <JobRow
                           key={row.id}
