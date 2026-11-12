@@ -953,6 +953,35 @@ export const messageKeys = [
   "releaseNotes.v0145.suggestionSwitchTitle",
   "releaseNotes.v0145.suggestionSwitchTryIt",
   "releaseNotes.v0145.summary",
+  "releaseNotes.v0146.agentsLine1",
+  "releaseNotes.v0146.agentsLine2",
+  "releaseNotes.v0146.backgroundDesktopChanged",
+  "releaseNotes.v0146.backgroundDesktopTitle",
+  "releaseNotes.v0146.backgroundDesktopTryIt",
+  "releaseNotes.v0146.conversationsLine1",
+  "releaseNotes.v0146.conversationsLine2",
+  "releaseNotes.v0146.conversationsLine3",
+  "releaseNotes.v0146.conversationsLine4",
+  "releaseNotes.v0146.desktopLine1",
+  "releaseNotes.v0146.desktopLine2",
+  "releaseNotes.v0146.desktopTopic",
+  "releaseNotes.v0146.needsReplyChanged",
+  "releaseNotes.v0146.needsReplyTitle",
+  "releaseNotes.v0146.needsReplyTryIt",
+  "releaseNotes.v0146.notificationsLine1",
+  "releaseNotes.v0146.steadyChatChanged",
+  "releaseNotes.v0146.steadyChatTitle",
+  "releaseNotes.v0146.steadyChatTryIt",
+  "releaseNotes.v0146.suggestPickChanged",
+  "releaseNotes.v0146.suggestPickTitle",
+  "releaseNotes.v0146.suggestPickTryIt",
+  "releaseNotes.v0146.summary",
+  "releaseNotes.v0146.updateNoticeChanged",
+  "releaseNotes.v0146.updateNoticeTitle",
+  "releaseNotes.v0146.updateNoticeTryIt",
+  "releaseNotes.v0146.whoIsDoingChanged",
+  "releaseNotes.v0146.whoIsDoingTitle",
+  "releaseNotes.v0146.whoIsDoingTryIt",
   "releaseNotes.version.current",
   "releaseNotes.version.label",
   "releaseNotes.version.releasedOn",
@@ -2512,6 +2541,35 @@ export const argumentSpecs = {
   "releaseNotes.v0145.suggestionSwitchTitle": {},
   "releaseNotes.v0145.suggestionSwitchTryIt": {},
   "releaseNotes.v0145.summary": {},
+  "releaseNotes.v0146.agentsLine1": {},
+  "releaseNotes.v0146.agentsLine2": {},
+  "releaseNotes.v0146.backgroundDesktopChanged": {},
+  "releaseNotes.v0146.backgroundDesktopTitle": {},
+  "releaseNotes.v0146.backgroundDesktopTryIt": {},
+  "releaseNotes.v0146.conversationsLine1": {},
+  "releaseNotes.v0146.conversationsLine2": {},
+  "releaseNotes.v0146.conversationsLine3": {},
+  "releaseNotes.v0146.conversationsLine4": {},
+  "releaseNotes.v0146.desktopLine1": {},
+  "releaseNotes.v0146.desktopLine2": {},
+  "releaseNotes.v0146.desktopTopic": {},
+  "releaseNotes.v0146.needsReplyChanged": {},
+  "releaseNotes.v0146.needsReplyTitle": {},
+  "releaseNotes.v0146.needsReplyTryIt": {},
+  "releaseNotes.v0146.notificationsLine1": {},
+  "releaseNotes.v0146.steadyChatChanged": {},
+  "releaseNotes.v0146.steadyChatTitle": {},
+  "releaseNotes.v0146.steadyChatTryIt": {},
+  "releaseNotes.v0146.suggestPickChanged": {},
+  "releaseNotes.v0146.suggestPickTitle": {},
+  "releaseNotes.v0146.suggestPickTryIt": {},
+  "releaseNotes.v0146.summary": {},
+  "releaseNotes.v0146.updateNoticeChanged": {},
+  "releaseNotes.v0146.updateNoticeTitle": {},
+  "releaseNotes.v0146.updateNoticeTryIt": {},
+  "releaseNotes.v0146.whoIsDoingChanged": {},
+  "releaseNotes.v0146.whoIsDoingTitle": {},
+  "releaseNotes.v0146.whoIsDoingTryIt": {},
   "releaseNotes.version.current": {},
   "releaseNotes.version.label": {
     "version": "string"
@@ -4115,6 +4173,35 @@ export interface MessageArgs {
   "releaseNotes.v0145.suggestionSwitchTitle": Record<string, never>;
   "releaseNotes.v0145.suggestionSwitchTryIt": Record<string, never>;
   "releaseNotes.v0145.summary": Record<string, never>;
+  "releaseNotes.v0146.agentsLine1": Record<string, never>;
+  "releaseNotes.v0146.agentsLine2": Record<string, never>;
+  "releaseNotes.v0146.backgroundDesktopChanged": Record<string, never>;
+  "releaseNotes.v0146.backgroundDesktopTitle": Record<string, never>;
+  "releaseNotes.v0146.backgroundDesktopTryIt": Record<string, never>;
+  "releaseNotes.v0146.conversationsLine1": Record<string, never>;
+  "releaseNotes.v0146.conversationsLine2": Record<string, never>;
+  "releaseNotes.v0146.conversationsLine3": Record<string, never>;
+  "releaseNotes.v0146.conversationsLine4": Record<string, never>;
+  "releaseNotes.v0146.desktopLine1": Record<string, never>;
+  "releaseNotes.v0146.desktopLine2": Record<string, never>;
+  "releaseNotes.v0146.desktopTopic": Record<string, never>;
+  "releaseNotes.v0146.needsReplyChanged": Record<string, never>;
+  "releaseNotes.v0146.needsReplyTitle": Record<string, never>;
+  "releaseNotes.v0146.needsReplyTryIt": Record<string, never>;
+  "releaseNotes.v0146.notificationsLine1": Record<string, never>;
+  "releaseNotes.v0146.steadyChatChanged": Record<string, never>;
+  "releaseNotes.v0146.steadyChatTitle": Record<string, never>;
+  "releaseNotes.v0146.steadyChatTryIt": Record<string, never>;
+  "releaseNotes.v0146.suggestPickChanged": Record<string, never>;
+  "releaseNotes.v0146.suggestPickTitle": Record<string, never>;
+  "releaseNotes.v0146.suggestPickTryIt": Record<string, never>;
+  "releaseNotes.v0146.summary": Record<string, never>;
+  "releaseNotes.v0146.updateNoticeChanged": Record<string, never>;
+  "releaseNotes.v0146.updateNoticeTitle": Record<string, never>;
+  "releaseNotes.v0146.updateNoticeTryIt": Record<string, never>;
+  "releaseNotes.v0146.whoIsDoingChanged": Record<string, never>;
+  "releaseNotes.v0146.whoIsDoingTitle": Record<string, never>;
+  "releaseNotes.v0146.whoIsDoingTryIt": Record<string, never>;
   "releaseNotes.version.current": Record<string, never>;
   "releaseNotes.version.label": { version: string };
   "releaseNotes.version.releasedOn": { date: string };
