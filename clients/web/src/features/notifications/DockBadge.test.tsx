@@ -55,6 +55,8 @@ beforeEach(() => {
   reloadDesktopNotificationKindsForTest(localStorage);
 });
 afterEach(() => {
+  // 창 앞뒤 어댑터의 「초점 잃음」은 모듈 상태다: 구독이 살아 있는 동안 되돌려 다음 시험에 새지 않게 한다.
+  act(() => void window.dispatchEvent(new Event("focus")));
   act(() => root?.unmount());
   host?.remove();
   root = null;
@@ -88,11 +90,44 @@ describe("DockBadge (#3339)", () => {
     expect(hoisted.setDockBadge).toHaveBeenLastCalledWith(0);
   });
 
-  it("예전 키(`dockDm: false`, 옛 기본값으로 저장된 것)는 읽지 않는다: owner 결정 뒤 기본은 켬이다 (#5660)", () => {
+  it("예전 키(`dockDm`)에 저장된 선택은 그대로 따른다: 바뀐 것은 기본값이다 (#5660)", () => {
     localStorage.setItem("momo.web.notifications.v1", JSON.stringify({ dockDm: false, dockBadge: true }));
     reloadDesktopNotificationKindsForTest(localStorage);
     mount();
+    expect(hoisted.setDockBadge).toHaveBeenLastCalledWith(4); // 꺼 둔 DM 몫은 꺼진 채
+    localStorage.setItem("momo.web.notifications.v1", JSON.stringify({ dockDm: true, dockBadge: true }));
+    act(() => reloadDesktopNotificationKindsForTest(localStorage));
     expect(hoisted.setDockBadge).toHaveBeenLastCalledWith(9);
+  });
+
+  it("선택을 저장한 적이 없는 기기는 새 기본값(켬)이고, 새 키가 있으면 새 키가 이긴다 (#5660)", () => {
+    localStorage.setItem("momo.web.notifications.v1", JSON.stringify({ dockBadge: true, mention: true }));
+    reloadDesktopNotificationKindsForTest(localStorage);
+    mount();
+    expect(hoisted.setDockBadge).toHaveBeenLastCalledWith(9);
+    localStorage.setItem("momo.web.notifications.v1", JSON.stringify({ dockDm: false, dockDms: true }));
+    act(() => reloadDesktopNotificationKindsForTest(localStorage));
+    expect(hoisted.setDockBadge).toHaveBeenLastCalledWith(9);
+  });
+
+  it("예전 키로 꺼 둔 사람이 스위치를 다시 켜면 새 키로 저장되고 다시 읽어도 켜져 있다 (#5660)", () => {
+    localStorage.setItem("momo.web.notifications.v1", JSON.stringify({ dockDm: false }));
+    reloadDesktopNotificationKindsForTest(localStorage);
+    mount();
+    expect(hoisted.setDockBadge).toHaveBeenLastCalledWith(4);
+    act(() => setDesktopNotificationKind("dockDms", true, localStorage));
+    act(() => reloadDesktopNotificationKindsForTest(localStorage));
+    expect(hoisted.setDockBadge).toHaveBeenLastCalledWith(9);
+  });
+
+  it("창이 뒤에 있으면 주소가 가리키는 DM도 센다: 아무도 보고 있지 않다 (#5660)", () => {
+    hoisted.pathname = "/c/dm1";
+    mount();
+    expect(hoisted.setDockBadge).toHaveBeenLastCalledWith(7); // 앞: 보고 있는 dm1은 뺀다
+    act(() => void window.dispatchEvent(new Event("blur")));
+    expect(hoisted.setDockBadge).toHaveBeenLastCalledWith(9); // 뒤: dm1 2 도 센다
+    act(() => void window.dispatchEvent(new Event("focus")));
+    expect(hoisted.setDockBadge).toHaveBeenLastCalledWith(7);
   });
 
   it("지금 앞에서 보고 있는 DM은 세지 않는다. 알림을 끈 DM은 센다 — 배지는 별개 원장이다 (#5660, ADR-0124 D2)", () => {

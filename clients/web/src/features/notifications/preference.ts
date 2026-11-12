@@ -24,9 +24,9 @@ export type DesktopNotifyKind =
  * touch it, ADR-0124 D2·D4-A). The menu-bar
  * dot follows the same number (#5193).
  *
- * `dockDms` (#5660, owner 2026-11-11 「켜줘」) replaces `dockDm`: on by default. A new key on purpose: the old one was
- * stored as `false` by everyone who saved any switch while the default was off (2026-10-02 decision), so reading it would
- * keep the old default for exactly the people the owner meant. The old key is ignored.
+ * `dockDms` (#5660, owner 2026-11-11) replaces `dockDm` and is on by default. The decision turned the DEFAULT on; it does
+ * not overturn a choice someone stored. So a stored `dockDm` is still read (`parseKinds`) when `dockDms` is absent, and only
+ * a device with neither key takes the new default. Saving writes `dockDms` from then on.
  */
 export type DockPrefKey = "dockBadge" | "dockDms";
 export type DesktopPrefKey = DesktopNotifyKind | DockPrefKey;
@@ -65,7 +65,7 @@ export const DEFAULT_DESKTOP_NOTIFICATION_KINDS: DesktopNotificationKinds = {
   "work-mine-done": true,
   dm: false,
   dockBadge: true,
-  // 기본 켬(#5660, owner 11-11): 안 읽은 DM은 메뉴 막대 점·독 배지도 켠다. 예전 키 `dockDm`(기본 끔)은 읽지 않는다.
+  // 기본 켬(#5660, owner 11-11): 안 읽은 DM은 메뉴 막대 점·독 배지도 켠다. 예전 키 `dockDm`에 저장된 선택은 그대로 따른다(`parseKinds`).
   dockDms: true,
 };
 
@@ -100,6 +100,8 @@ function parseKinds(raw: string | null): DesktopNotificationKinds {
     for (const key of PREFERENCE_KEYS) {
       if (typeof record[key] === "boolean") next[key] = record[key];
     }
+    // 예전 키에 저장된 선택(#3339 `dockDm`)은 새 키가 없을 때 그대로 따른다: 기본값만 바뀌었고 저장된 선택은 그 사람의 것이다(#5660).
+    if (typeof record.dockDms !== "boolean" && typeof record.dockDm === "boolean") next.dockDms = record.dockDm;
     return next;
   } catch {
     return { ...DEFAULT_DESKTOP_NOTIFICATION_KINDS };
