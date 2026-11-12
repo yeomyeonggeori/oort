@@ -13,7 +13,7 @@
 //!
 //! Harness contract (identical to `thread_unread_conformance_pg.rs`): `DATABASE_URL` is a superuser
 //! that applies the migrations and seeds fixtures past RLS; every call under test runs as `momo_app`
-//! (`NOBYPASSRLS`), except the one that stands in for a BYPASSRLS caller on purpose.
+//! (`NOBYPASSRLS`), except the ones that stand in for a BYPASSRLS caller on purpose.
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -371,7 +371,8 @@ fn recipients(frames: &[(Uuid, Uuid)]) -> Vec<Uuid> {
 /// replies only, followed threads only, deleted replies not, a thread the reader has read not.
 ///
 /// Fixture (reader = `author`, who wrote both roots in channel 1 and one in channel 2):
-/// * channel 1, thread A — `bob` replies twice, `author` once: 2 unread (not the author's own);
+/// * channel 1, thread A — `bob` replies twice, `author` once, and `bob` leaves a progress line
+///   (`tool_call`): 2 unread (not the author's own, not the progress line);
 /// * channel 1, thread B — `bob` replies once, then `author` stops following: 0 (not followed);
 /// * channel 1, thread C — `carol`'s root, `bob` replies: `author` never touched it: 0;
 /// * channel 2, thread D — `bob` replies three times, one is deleted: 2.
@@ -379,7 +380,7 @@ fn recipients(frames: &[(Uuid, Uuid)]) -> Vec<Uuid> {
 /// Sabotage (measured RED, see the PR), all in `followed_unread_by_channel_in_tx`: drop
 /// `r.author_member_id <> $2` → channel 1 reads 3 against a per-thread sum of 2; drop
 /// `tf.state IN ('auto', 'followed')` → thread B counts; drop `r.seq > tf.last_read_reply_seq` → the
-/// partial read below lowers nothing.
+/// partial read below lowers nothing; drop `r.type = 'text'` → the progress line counts (3 against 2).
 #[tokio::test]
 #[ignore = "needs DATABASE_URL to a pgvector/pg18 DB + momo_app role"]
 async fn the_channel_total_is_the_sum_of_the_followed_threads_summaries() {
@@ -399,6 +400,22 @@ async fn the_channel_total_is_the_sum_of_the_followed_threads_summaries() {
 
     let (c, _) = say(&app, &room, one, "carol", None, "C").await;
     say(&app, &room, one, "bob", Some(c), "c1").await;
+
+    // A progress line inside thread A (`tool_call`, past the reader's position, by someone else): not a
+    // reply anybody reads. Channel 1's last write, so its borrowed seq collides with nothing.
+    sqlx::query(
+        "INSERT INTO message \
+           (workspace_id, channel_id, seq, hlc_ts, hlc_count, author_member_id, type, props, root_id) \
+         VALUES ($1, $2, (SELECT last_seq + 1 FROM channel_seq WHERE channel_id = $2), 1, 0, $3, \
+                 'tool_call', '{}'::jsonb, $4)",
+    )
+    .bind(room.ws)
+    .bind(one)
+    .bind(room.id("bob"))
+    .bind(a)
+    .execute(&su)
+    .await
+    .expect("insert a tool_call line into thread A");
 
     let (d, _) = say(&app, &room, two, "author", None, "D").await;
     let (_, d1) = say(&app, &room, two, "bob", Some(d), "d1").await;
@@ -423,8 +440,8 @@ async fn the_channel_total_is_the_sum_of_the_followed_threads_summaries() {
     }
     assert_eq!(
         lines[&one].followed_unread_reply_count, 2,
-        "channel 1: bob's a1 and a3 only — the reader's own a2 is not unread, the stopped thread B \
-         and the never-followed thread C count nothing"
+        "channel 1: bob's a1 and a3 only — the reader's own a2 and bob's progress line are not \
+         unread, the stopped thread B and the never-followed thread C count nothing"
     );
     assert_eq!(
         lines[&two].followed_unread_reply_count, 2,
@@ -684,6 +701,125 @@ async fn a_reply_reaches_its_channel_before_any_follower_frame() {
     }
 }
 
+/// An archived channel signals nobody: the same followers that got a frame for the first reply get
+/// none once the channel is archived (the send spine itself does not refuse it — the route does).
+///
+/// Sabotage (measured RED, see the PR): drop `c.archived_at IS NULL` from
+/// `signal_followers_of_reply_in_tx` → the second reply reaches both followers.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 DB + momo_app role"]
+async fn a_reply_in_an_archived_channel_signals_nobody() {
+    ensure_schema_and_roles();
+    let (su, app) = (superuser_pool().await, momo_app_pool().await);
+    let room = seed_room(&su, &app, &["author", "replier", "direct"], 1).await;
+    let ch = room.channels[0];
+    let (root, _) = say(&app, &room, ch, "author", None, "root").await;
+    follow(&app, &room, ch, root, "direct", true).await;
+
+    let mark = outbox_mark(&su).await;
+    say(&app, &room, ch, "replier", Some(root), "before archiving").await;
+    let mut both = vec![room.id("author"), room.id("direct")];
+    both.sort();
+    assert_eq!(
+        recipients(&frames_since(&su, mark).await),
+        both,
+        "control: while the channel is live, both followers hear of the reply"
+    );
+
+    sqlx::query("UPDATE channel SET archived_at = now() WHERE id = $1")
+        .bind(ch)
+        .execute(&su)
+        .await
+        .expect("archive the channel");
+    let mark = outbox_mark(&su).await;
+    say(&app, &room, ch, "replier", Some(root), "after archiving").await;
+    assert!(
+        frames_since(&su, mark).await.is_empty(),
+        "an archived channel has no projection line to re-read, so its replies signal nobody"
+    );
+}
+
+/// A reply reaches only follow rows of **its own workspace and channel**, through a live membership of
+/// **its own workspace**. The thread's root already pins both, so only a row that names something
+/// else can tell — the shape a missing predicate would let through. The send runs as the superuser,
+/// standing in for the agent worker's BYPASSRLS role (under the API role RLS would hide these rows):
+///
+/// * `plain` — a follow row on this very thread, tagged with **another workspace**;
+/// * `drifted` — follows the thread, but their membership row of the channel is tagged with another
+///   workspace (and they have no other);
+/// * `outsider` — a follow row on this thread that names **another channel**, where they are a live
+///   member; they left the thread's channel.
+///
+/// Only the root's author (the control) hears of the reply.
+///
+/// Sabotage (measured RED, see the PR), in `signal_followers_of_reply_in_tx`: drop the three
+/// `workspace_id` predicates → `plain` and `drifted` get frames; drop `tf.workspace_id = $1` alone →
+/// `plain`; drop `ms.workspace_id = $1` alone → `drifted`; drop `tf.channel_id = $3` → `outsider`.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 DB + momo_app role"]
+async fn a_reply_signals_no_row_of_another_workspace_or_channel_even_for_a_bypassing_caller() {
+    ensure_schema_and_roles();
+    let (su, app) = (superuser_pool().await, momo_app_pool().await);
+    let a = seed_room(
+        &su,
+        &app,
+        &["author", "replier", "plain", "drifted", "outsider"],
+        2,
+    )
+    .await;
+    let elsewhere = seed_workspace(&su).await;
+    let (ch, other) = (a.channels[0], a.channels[1]);
+
+    let (root, _) = say(&app, &a, ch, "author", None, "root").await;
+    say(&app, &a, ch, "replier", Some(root), "first").await;
+    follow(&app, &a, ch, root, "drifted", true).await;
+
+    // plain: the same thread, another workspace's row.
+    sqlx::query(
+        "INSERT INTO thread_follow \
+           (workspace_id, channel_id, root_id, member_id, state, last_read_reply_seq) \
+         VALUES ($1, $2, $3, $4, 'followed', 0)",
+    )
+    .bind(elsewhere)
+    .bind(ch)
+    .bind(root)
+    .bind(a.id("plain"))
+    .execute(&su)
+    .await
+    .expect("seed plain's foreign follow row");
+    // drifted: their only membership of the channel names another workspace.
+    sqlx::query("UPDATE membership SET workspace_id = $1 WHERE channel_id = $2 AND member_id = $3")
+        .bind(elsewhere)
+        .bind(ch)
+        .bind(a.id("drifted"))
+        .execute(&su)
+        .await
+        .expect("re-tag drifted's membership");
+    // outsider: out of the thread's channel, a follow row on the thread that names the other channel.
+    leave(&su, ch, a.id("outsider")).await;
+    sqlx::query(
+        "INSERT INTO thread_follow \
+           (workspace_id, channel_id, root_id, member_id, state, last_read_reply_seq) \
+         VALUES ($1, $2, $3, $4, 'followed', 0)",
+    )
+    .bind(a.ws)
+    .bind(other)
+    .bind(root)
+    .bind(a.id("outsider"))
+    .execute(&su)
+    .await
+    .expect("seed outsider's other-channel follow row");
+
+    let mark = outbox_mark(&su).await;
+    say(&su, &a, ch, "replier", Some(root), "second, sent past RLS").await;
+    assert_eq!(
+        recipients(&frames_since(&su, mark).await),
+        vec![a.id("author")],
+        "only the root's author — not plain (another workspace's row), drifted (another \
+         workspace's membership) or outsider (a row naming another channel)"
+    );
+}
+
 // ---------------------------------------------------------------------------
 // membership and tenants
 // ---------------------------------------------------------------------------
@@ -730,7 +866,8 @@ async fn a_channel_the_reader_left_counts_nowhere() {
 ///
 /// Sabotage: drop `tf.workspace_id = $1` from `followed_unread_by_channel_in_tx` → the superuser read
 /// returns B's channel with B's unread replies (the API-role read stays green: RLS masks it, which is
-/// why the bypassing read is the one that guards the predicate).
+/// why the bypassing read is the one that guards the predicate); drop `r.workspace_id = $1` from its
+/// per-thread count → the last bypassing read counts B's re-pointed reply in A's thread (2).
 #[tokio::test]
 #[ignore = "needs DATABASE_URL to a pgvector/pg18 DB + momo_app role"]
 async fn two_tenants_never_mix_even_for_a_caller_that_bypasses_rls() {
@@ -744,7 +881,7 @@ async fn two_tenants_never_mix_even_for_a_caller_that_bypasses_rls() {
     say(&app, &a, ch_a, "bob", Some(root_a), "A's reply").await;
     let (root_b, _) = say(&app, &b, ch_b, "author", None, "B's root").await;
     say(&app, &b, ch_b, "bob", Some(root_b), "B's reply 1").await;
-    say(&app, &b, ch_b, "bob", Some(root_b), "B's reply 2").await;
+    let (b_reply_2, _) = say(&app, &b, ch_b, "bob", Some(root_b), "B's reply 2").await;
 
     // A foreign row: B's workspace, B's thread, but A's reader as the follower (only a superuser can
     // write it — exactly the shape a missing workspace predicate would let through).
@@ -779,6 +916,26 @@ async fn two_tenants_never_mix_even_for_a_caller_that_bypasses_rls() {
     assert_eq!(total(&app, &b, ch_b, "author").await, 2);
     let lines_a = projection(&app, a.ws, reader).await;
     assert!(!lines_a.contains_key(&ch_b));
+
+    // A reply of B's re-pointed at A's thread (again only a superuser can write it; its seq is past
+    // the reader's position there): the per-thread count names the workspace too, so the bypassing
+    // read still counts A's one reply.
+    sqlx::query("UPDATE message SET root_id = $1 WHERE id = $2")
+        .bind(root_a)
+        .bind(b_reply_2)
+        .execute(&su)
+        .await
+        .expect("re-point B's reply at A's thread");
+    let mut tx = su.begin().await.expect("superuser tx");
+    let bypassing = followed_unread_by_channel_in_tx(&mut tx, ws_a, reader)
+        .await
+        .expect("superuser read");
+    tx.rollback().await.expect("rollback");
+    assert_eq!(
+        bypassing,
+        HashMap::from([(ch_a, 1)]),
+        "another workspace's reply never counts in A's thread, even for a caller that bypasses RLS"
+    );
 }
 
 // ---------------------------------------------------------------------------
