@@ -451,3 +451,53 @@ describe("글 없이 첨부만 보낸 메시지의 줄 (#4294)", () => {
     expect(withoutReply?.preview).toBe("내 글에 답글 2개: 사진 3장");
   });
 });
+
+// 구 서버 경로 빌더 셋이 출처를 어떻게 싣는가(#5696). 판정은 `source.test.ts`가 재고, 여기서는 빌더가 줄의 종류·스레드 여부를
+// 맞게 넘기는지만 잠근다(빌더가 출처를 엉뚱하게 지으면 목록 줄의 둘째 줄이 틀린다).
+describe("구 서버 경로 빌더의 출처 (#5696)", () => {
+  it("DM 줄은 DM 장소 그대로의 출처다", () => {
+    const e = dmEntry({
+      channelId: DM,
+      channelLabel: "서연",
+      place: DM_PLACE,
+      selfMemberId: SELF,
+      actorFor,
+      nowMs: NOW,
+      readState: rs(),
+      messages: [msg({ seq: 8, authorMemberId: SEO })],
+    });
+    expect(e?.source).toEqual({ kind: "place", place: DM_PLACE });
+  });
+
+  it("루트 없는 채널 멘션은 「#채널」이고, 스레드 안(rootId) 멘션은 「스레드 · #채널」이다", () => {
+    const plain = mentionEntry(msg({ seq: 4, authorMemberId: SEO, channelId: CH }), actorFor(SEO), "#workbench", NOW, CH_PLACE);
+    expect(plain.source).toEqual({ kind: "place", place: CH_PLACE });
+    const inThread = mentionEntry(
+      msg({ seq: 5, authorMemberId: SEO, channelId: CH, rootId: "m-root" }),
+      actorFor(SEO),
+      "#workbench",
+      NOW,
+      CH_PLACE
+    );
+    expect(inThread.source).toEqual({ kind: "thread", place: CH_PLACE });
+  });
+
+  it("스레드 줄은 받은 장소로 스레드 출처를 짓는다", () => {
+    const e = threadEntry({
+      channelLabel: "#workbench",
+      place: CH_PLACE,
+      selfMemberId: SELF,
+      actorFor,
+      nowMs: NOW,
+      root: msg({
+        seq: 3,
+        authorMemberId: SELF,
+        channelId: CH,
+        thread: { reply_count: 2, last_reply_seq: 9, last_reply_at: NOW - 60_000 },
+      }),
+      readState: rs({ channelId: CH, lastReadSeq: 5 }),
+      lastReply: undefined,
+    });
+    expect(e?.source).toEqual({ kind: "thread", place: CH_PLACE });
+  });
+});

@@ -63,8 +63,13 @@ const feedContext = {
   isLoading: false,
   directory: { members: [], byId: new Map() },
   labelFor: (id: string) => (id === CH ? "#agent-lab" : id.slice(0, 8)),
-  placeFor: (id: string) =>
-    id === CH ? { kind: "channel", name: "agent-lab" } : { kind: "dm", names: ["서연"] },
+  // 서버가 준 채널 사실(`wire`)이 둘째 인자로 오면 그 사실을 이름에 새긴다: 훅이 `wire`를 안 넘기면 시험이 RED가 된다(#5696).
+  placeFor: (id: string, wire?: { name: string | null; kind: string }) =>
+    wire !== undefined
+      ? { kind: "channel", name: `wire:${wire.name}:${wire.kind}` }
+      : id === CH
+        ? { kind: "channel", name: "agent-lab" }
+        : { kind: "dm", names: ["서연"] },
   actorFor: (id: string) =>
     id === BOT
       ? { name: "그록봇", handle: "grokbot", isAgent: true }
@@ -208,6 +213,14 @@ describe("useMailbox: 서버 투영이 정본", () => {
     expect(latest?.serverUnreadCount).toBe(5);
     expect(latest?.hasMore).toBe(true);
     expect(api.fetchMessages).not.toHaveBeenCalled();
+  });
+
+  it("서버 항목의 출처는 서버가 준 채널 사실(이름·종류)을 장소 판정에 넘겨 짓는다 (#5696)", async () => {
+    await render("all");
+    expect(latest?.entries[0]?.source).toEqual({
+      kind: "place",
+      place: { kind: "channel", name: "wire:agent-lab:public" },
+    });
   });
 
   it("더 보기는 서버가 준 커서를 그대로 보내고 읽은 항목을 이어 붙인다", async () => {
@@ -359,6 +372,63 @@ describe("useMailbox: 구 서버(404) 후퇴", () => {
     expect(latest?.failure).toBeNull();
     // 조합이 실제로 돈다: DM 채널의 최근 메시지를 읽는다.
     expect(api.fetchMessages).toHaveBeenCalledWith(WS, DM, { limit: 20 });
+  });
+});
+
+describe("useMailbox: 구 서버 경로의 출처 (#5696)", () => {
+  const msgOf = (over: Record<string, unknown>) => ({
+    id: "m-x",
+    channelId: CH,
+    seq: 3,
+    hlcTs: 1,
+    hlcCount: 0,
+    type: "text",
+    body: "본문",
+    createdAtMs: Date.now() - 60_000,
+    authorMemberId: ME,
+    ...over,
+  });
+  beforeEach(() => {
+    api.fetchInbox.mockRejectedValue(new ApiError(404, "not found"));
+  });
+  afterEach(() => {
+    mentionResults.messages = [];
+  });
+
+  it("스레드 안(rootId)의 멘션은 「스레드 · #채널」, 루트 없는 멘션은 「#채널」로 선다", async () => {
+    (mentionResults as { messages: unknown[] }).messages = [
+      msgOf({ id: "m-in-thread", authorMemberId: BOT, rootId: "m-root", seq: 5 }),
+      msgOf({ id: "m-plain", authorMemberId: BOT, seq: 6 }),
+    ];
+    await render("mention");
+    const byId = Object.fromEntries((latest?.entries ?? []).map((e) => [e.messageId, e.source]));
+    const place = { kind: "channel", name: "agent-lab" };
+    expect(byId["m-in-thread"]).toEqual({ kind: "thread", place });
+    expect(byId["m-plain"]).toEqual({ kind: "place", place });
+  });
+
+  it("스레드 줄과 DM 줄은 채널·DM 각자의 장소를 받는다", async () => {
+    readStatesValue.byChannel = new Map([[CH, { lastReadSeq: 1, latestSeq: 9 }]]) as never;
+    api.fetchMessages.mockImplementation((_ws: string, channelId: string) =>
+      Promise.resolve({
+        messages:
+          channelId === CH
+            ? [
+                msgOf({
+                  id: "m-root",
+                  thread: { reply_count: 1, last_reply_seq: 9, last_reply_at: Date.now() - 1000 },
+                }),
+              ]
+            : [msgOf({ id: "m-dm", channelId: DM, authorMemberId: BOT, seq: 4 })],
+      })
+    );
+    await render("all");
+    const byKey = Object.fromEntries((latest?.entries ?? []).map((e) => [e.key, e.source]));
+    expect(byKey["thread:m-root"]).toEqual({
+      kind: "thread",
+      place: { kind: "channel", name: "agent-lab" },
+    });
+    expect(byKey[`dm:${DM}`]).toEqual({ kind: "place", place: { kind: "dm", names: ["서연"] } });
   });
 });
 

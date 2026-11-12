@@ -776,7 +776,7 @@ function MailboxRow({
           <Text style={styles.time}>{entry.timeLabel}</Text>
         </View>
         <Text
-          style={styles.channel}
+          style={styles.mailSource}
           numberOfLines={1}
           testID={`mailbox-source-${entry.key}`}>
           {sourceLine}
@@ -918,6 +918,9 @@ const buildStyles = (color: Palette) => StyleSheet.create({
     gap: space.xs,
   },
   mailActor: {flex: 1, fontSize: font.label},
+  // 출처 줄(#5696)은 「어디서 온 글인가」를 말하는 둘째 줄이라 둘째 등급 글자색이다(셋째 등급은 본문 AA를 노리지 않는다:
+  // 밝게 3.76 · 어둡게 3.89 → textMuted 밝게 5.25~6.61 · 어둡게 6.14~7.25). 크기·한 줄 말줄임은 그대로다.
+  mailSource: {fontSize: font.meta, color: color.textMuted, flexShrink: 1},
   mailUnreadActor: {fontWeight: '700'},
   // 읽은 항목은 목록에 남되 한 단계 물러선다(점 없음 + 굵기 + 접근성 문장으로도 말한다).
   mailReadActor: {color: color.textMuted},

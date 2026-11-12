@@ -10,11 +10,13 @@ import {
   within,
 } from '@testing-library/react-native';
 import React from 'react';
+import {StyleSheet} from 'react-native';
 
 import '../src/boot/polyfills';
 import '../src/boot/coreHost';
 
 import AppShell from '../src/shell/AppShell';
+import {darkPalette, lightPalette} from '../src/design/tokens';
 import {setHapticMode} from '../src/lib/haptics';
 import {__resetSessionStore, sessionPort} from '../src/storage/secureSession';
 import {__resetServerBaseCache, setServerBase} from '../src/storage/serverBase';
@@ -229,6 +231,9 @@ describe('인박스 「전체」 (#3663)', () => {
       const source = screen.getByTestId(`mailbox-source-${key}`);
       expect(source.props.numberOfLines).toBe(1);
       expect(String(source.props.children).trim()).not.toBe('');
+      // 글자색은 둘째 등급(본문 AA 4.5:1 이상)이다 — 셋째 등급(textFaint)은 3.76~3.89:1이라 출처를 말하는 줄에 못 쓴다.
+      const ink = StyleSheet.flatten(source.props.style).color;
+      expect([darkPalette.textMuted, lightPalette.textMuted]).toContain(ink);
     }
   });
 
@@ -323,6 +328,25 @@ describe('인박스 서버 투영 (#3684)', () => {
     expect(screen.getByTestId('inbox-tab-reply')).toBeTruthy();
     // 조합 경로의 읽기(DM 최근 페이지)는 한 건도 나가지 않는다.
     expect(mock.mock.calls.some(c => String(c[0]).includes(`/channels/${DM_SEO}/messages`))).toBe(false);
+  });
+
+  // #5696: 내 채널 목록에 없는 장소(떠난 DM·볼 수 없게 된 채널)의 출처는 서버 항목이 준 채널 사실만으로 선다 — 훅이 그 사실을
+  // 장소 판정에 넘기지 않으면 「DM」·「#design-private」가 「채널」로 떨어진다.
+  it('서버 항목의 출처: 목록 밖 DM은 「DM」, 목록 밖 채널은 서버가 준 이름, 목록 안 채널은 내 목록의 이름이다', async () => {
+    const world = serverWorld();
+    const gone = 'dddddddd-0000-4000-8000-000000000001';
+    const hidden = 'dddddddd-0000-4000-8000-000000000002';
+    const page = world.inbox?.pages[''] as {items: unknown[]};
+    page.items.push(
+      wireItem('C1', {kind: 'dm', reasons: ['dm'], quotedMessage: undefined, channel: {id: gone, name: null, kind: 'dm'}}),
+      wireItem('C2', {channel: {id: hidden, name: 'design-private', kind: 'private'}}),
+    );
+    installFetch(world);
+    await openInbox();
+    await waitFor(() => expect(rowKeys()).toContain('inbox:c2'), {timeout: 10_000});
+    expect(screen.getByTestId('mailbox-source-inbox:c1')).toHaveTextContent(/^DM$/);
+    expect(screen.getByTestId('mailbox-source-inbox:c2')).toHaveTextContent(/^#design-private$/);
+    expect(screen.getByTestId('mailbox-source-inbox:a1')).toHaveTextContent(/^#general$/);
   });
 
   it('더 보기가 서버 커서로 다음 쪽을 이어 붙인다', async () => {
