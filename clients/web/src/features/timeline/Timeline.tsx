@@ -918,35 +918,6 @@ export function Timeline({
     [checkTopSoon]
   );
 
-  // 옛 쪽 실패 줄의 자리(#5662 검수 1회차 M1). 떠 있는 한 줄이라 뜨고 질 때 목록을 밀지 않지만, 맨 위에서는 목록의 첫 줄인 날짜 줄을
-  // 덮었다. 첫 줄이 날짜 줄이고 줄이 서는 띠에 걸려 있으면 줄을 그 날짜 줄 바로 아래로 내린다 — 아래로 읽어 내려가면 날짜 줄을 따라
-  // 올라가 위 가장자리에서 멈춘다. 스크롤마다 목록을 다시 그리지 않게 상태가 아니라 줄의 `top` 에 바로 적는다.
-  const olderLineShown = status !== "error" && olderFailed;
-  const olderLineRef = useRef<HTMLDivElement | null>(null);
-  const placeOlderLine = useCallback(() => {
-    const line = olderLineRef.current;
-    const scroller = scrollerElRef.current;
-    if (line === null) return;
-    let top = 0;
-    // 그려진 맨 위 줄이 목록의 첫 줄일 때만(가운데의 날짜 줄이 위 가장자리를 지날 때 줄이 따라 뛰지 않게). DOM 번호는 엔진 · 앞붙이기에
-    // 따라 절대 번호이기도 상대 번호이기도 해서 목록 자리로 바꿔 본다.
-    const topRow = scroller?.querySelector<HTMLElement>("[data-index]");
-    const isFirstRow = topRow != null && dataIndexFromVirtuoso(Number(topRow.dataset.index), firstItemIndexRef.current) === 0;
-    const divider = isFirstRow ? topRow.querySelector('[data-testid="day-divider"]') : null;
-    if (scroller && divider instanceof HTMLElement) {
-      const paneTop = scroller.getBoundingClientRect().top;
-      const rect = divider.getBoundingClientRect();
-      if (rect.top - paneTop < line.offsetHeight) top = Math.max(0, rect.bottom - paneTop);
-    }
-    line.style.top = `${Math.round(top)}px`;
-  }, []);
-  useLayoutEffect(() => {
-    if (!olderLineShown || scrollerEl === null) return;
-    placeOlderLine();
-    scrollerEl.addEventListener("scroll", placeOlderLine, { passive: true });
-    return () => scrollerEl.removeEventListener("scroll", placeOlderLine);
-  }, [olderLineShown, scrollerEl, placeOlderLine, items, firstItemIndex]);
-
   // 불러오기가 실패했다(#5221). 받아 둔 글이 **없으면** 제목 + 이유 한 줄 + 다시 시도 상자, **있으면** 상자로 덮지 않고
   // 목록은 그대로 두고 위에 한 줄만 건다(읽을 것이 있는데 화면을 비우면 정보를 버리는 일이다). 이유는 실패가 말하는
   // 원인의 닫힌 분류 문장이고 상태 코드·서버 원문은 없다.
@@ -980,17 +951,14 @@ export function Timeline({
           className="layer-content-float absolute inset-x-0 top-0 bg-pane"
         />
       )}
-      {/* 옛 쪽 읽기 실패(#5662): 떠 있는 한 줄이라 뜨고 질 때 목록이 밀리지 않는다. 맨 위에서는 날짜 줄 아래에 선다(`placeOlderLine`).
-          새 쪽 실패 줄이 서 있으면 그것이 먼저다. */}
-      {olderLineShown && (
-        <div ref={olderLineRef} className="layer-content-float absolute inset-x-0 top-0">
-          <LoadFailureLine
-            titleKey={CONNECTION_KEYS.loadOlderTitle}
-            onRetry={() => onRetryOlder?.()}
-            testId="timeline-older-error"
-            className="bg-pane"
-          />
-        </div>
+      {/* 옛 쪽 읽기 실패(#5662): 같은 자리에 떠 있는 한 줄이라 뜨고 질 때 목록이 밀리지 않는다. 새 쪽 실패 줄이 서 있으면 그것이 먼저다. */}
+      {status !== "error" && olderFailed && (
+        <LoadFailureLine
+          titleKey={CONNECTION_KEYS.loadOlderTitle}
+          onRetry={() => onRetryOlder?.()}
+          testId="timeline-older-error"
+          className="layer-content-float absolute inset-x-0 top-0 bg-pane"
+        />
       )}
       <TimelineLiveRegionProvider>
       <TimelineTailContext.Provider value={tail}>
