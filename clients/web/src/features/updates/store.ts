@@ -83,6 +83,11 @@ let gateDone = false;
 let relaunchHold: RelaunchHold | null = null;
 /** This install's restart has waited for local work at least once: its countdown is the long one and can be put off. */
 let waited = false;
+/**
+ * The person closed the card after this install finished (#5661 수리 2회차). A card that mounts again — the list column
+ * folded or unfolded, the settings screen opened — does not open itself until the next notice (a countdown starting).
+ */
+let cardDismissed = false;
 
 const listeners = new Set<() => void>();
 
@@ -313,6 +318,7 @@ function afterInstall(): void {
   gate = null;
   gateDone = false;
   waited = false;
+  cardDismissed = false;
   if (localWork === null) {
     scheduleRelaunch();
     return;
@@ -360,6 +366,8 @@ function applyGate(facts: LocalWorkFacts): boolean {
 function scheduleRelaunch(): void {
   clearRelaunchTimer();
   relaunchIn = waited ? RELAUNCH_AFTER_WAIT_SECONDS : RELAUNCH_COUNTDOWN_SECONDS;
+  // A countdown is a new notice: the card opens for it even if an earlier one was closed.
+  cardDismissed = false;
   notify();
   const tick = () => {
     relaunchTimer = null;
@@ -407,6 +415,22 @@ export async function relaunchIntoUpdate(): Promise<void> {
  * card falls back to 「다시 실행해 주세요 · 지금」 and the update applies at the next restart or quit. The gate does not
  * run again: a notice every two minutes would be the interruption this is meant to avoid.
  */
+/** Whether the person closed the card since this install finished (read by a card that mounts, not rendered). */
+export function updateCardDismissed(): boolean {
+  return cardDismissed;
+}
+
+/**
+ * The person closed the card (Esc, or a press outside it). Closing the notice that follows a wait counts as
+ * 「지금 말고」 (#5661 수리 2회차, planner): a countdown nobody can see any more would restart the app unannounced.
+ * The 3-second countdown right after a press of 「업데이트」 keeps running — the person just asked for it.
+ */
+export function noteUpdateCardClosed(): void {
+  if (state.kind !== "installed") return;
+  cardDismissed = true;
+  if (relaunchIn !== null && waited) deferRelaunch();
+}
+
 export function deferRelaunch(): void {
   if (relaunchIn === null) return;
   clearRelaunchTimer();
@@ -495,5 +519,6 @@ export function resetUpdateStoreForTest(): void {
   gateDone = false;
   relaunchHold = null;
   waited = false;
+  cardDismissed = false;
   listeners.clear();
 }

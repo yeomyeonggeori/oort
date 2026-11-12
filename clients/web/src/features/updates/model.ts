@@ -258,3 +258,23 @@ export function pillTooltip(state: UpdateState): string | null {
       return null;
   }
 }
+
+export const RAIL_CARD_GAP = 8;
+const RAIL_CARD_SIDE_OFFSET = 8;
+/** 카드 폭(`w-pane-picker`)보다 넉넉한 값: 카드가 닿을 수 있는 가로 끝. */
+const RAIL_CARD_REACH = 360;
+
+/**
+ * 접힌 레일의 카드가 아래쪽에 비워 둘 높이(#5661 수리 2회차 H2): 카드가 닿는 폭 안에 선 입력창 독(`data-composer-shell`) 가운데
+ * 가장 높이 선 것의 위 끝보다 8px 위까지만 내려온다. 그래서 저절로 열린 카드가 쓰던 글을 가리지 않는다(대화 아래 귀퉁이는 덮을 수
+ * 있다). 오른쪽 스레드 판처럼 카드가 닿지 않는 입력창과, 입력창이 없는 화면은 기본 여백 8px.
+ */
+export function railCardBottomPadding(pillRight: number, viewportHeight: number, composers: readonly DOMRectReadOnly[]): number {
+  const reach = pillRight + RAIL_CARD_SIDE_OFFSET + RAIL_CARD_REACH;
+  let top = viewportHeight;
+  for (const r of composers) {
+    if (r.width <= 0 || r.height <= 0 || r.left >= reach) continue;
+    top = Math.min(top, r.top);
+  }
+  return Math.max(RAIL_CARD_GAP, viewportHeight - top + RAIL_CARD_GAP);
+}

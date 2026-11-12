@@ -89,6 +89,8 @@ export function UpdateSection() {
   // 설치를 마쳤는데 이 맥의 작업이 끝나기를 기다린다(#5661). 카드와 같은 판정이다.
   const holding = state.kind === "installed" && hold !== null && countdown === null;
   const cutLine = holding && hold.cut !== null ? restartCutLine(hold.cut, formatMessage) : null;
+  // 설치를 마쳤는데 카운트다운이 돌지 않는다(기다림 · 「지금 말고」 · 다시 시작 실패): 「곧 다시 실행」이 아니다(수리 2회차).
+  const notSoon = state.kind === "installed" && countdown === null;
 
   const hasUpdate =
     state.kind === "available" || state.kind === "installing" || state.kind === "installed";
@@ -132,13 +134,17 @@ export function UpdateSection() {
               ? formatMessage("settings.updates.offSentence")
               : holding
                 ? formatMessage("settings.updates.holdTitle")
-                : stateSentence(state)
+                : notSoon
+                  ? formatMessage("settings.updates.stoppedSentence")
+                  : stateSentence(state)
           }
           keep
         >
           <div className="flex items-center gap-2" data-testid="update-status" data-update-state={state.kind}>
             {off ? (
               <StatusChip tone="muted">{formatMessage("settings.updates.offChip")}</StatusChip>
+            ) : notSoon ? (
+              <StatusChip tone="ok">{formatMessage("settings.updates.stoppedChip")}</StatusChip>
             ) : (
               <StateChip state={state} />
             )}
@@ -182,7 +188,7 @@ export function UpdateSection() {
           </CardBody>
         )}
 
-        {state.kind === "installed" && (
+        {state.kind === "installed" && !notSoon && (
           <CardBody>
             <p className="text-body text-ink" data-testid="update-installed">
               새 버전이 설치됐어요. 곧 다시 실행되고 {state.update.version}(으)로 열려요.

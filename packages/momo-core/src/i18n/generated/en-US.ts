@@ -8058,6 +8058,18 @@ export const catalog: MessageCatalog = {
       "value": "Restart now"
     }
   ],
+  "settings.updates.stoppedChip": [
+    {
+      "type": 0,
+      "value": "Waiting to restart"
+    }
+  ],
+  "settings.updates.stoppedSentence": [
+    {
+      "type": 0,
+      "value": "Installed. Restart to open the new version."
+    }
+  ],
   "teamAi.helper.aliasesLine": [
     {
       "type": 0,

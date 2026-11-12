@@ -7650,6 +7650,18 @@ export const catalog: MessageCatalog = {
       "value": "지금 다시 시작"
     }
   ],
+  "settings.updates.stoppedChip": [
+    {
+      "type": 0,
+      "value": "다시 시작 대기"
+    }
+  ],
+  "settings.updates.stoppedSentence": [
+    {
+      "type": 0,
+      "value": "설치를 마쳤어요. 다시 시작하면 새 버전으로 열려요."
+    }
+  ],
   "teamAi.helper.aliasesLine": [
     {
       "type": 0,

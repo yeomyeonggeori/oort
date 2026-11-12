@@ -33,7 +33,13 @@ export function UpdateNotice() {
 
   // 이 맥의 작업이 끝나기를 기다리는 동안은 「곧 다시 실행」이 아니다(#5661).
   const holding = state.kind === "installed" && hold !== null && countdown === null;
-  const label = holding ? formatMessage("settings.updates.holdTitle") : badgeLabel(state);
+  // 자동 다시 시작이 멈췄다(「지금 말고」·다시 시작 실패): 「곧 다시 실행」이 아니다(수리 2회차).
+  const stopped = state.kind === "installed" && hold === null && countdown === null;
+  const label = holding
+    ? formatMessage("settings.updates.holdTitle")
+    : stopped
+      ? formatMessage("settings.updates.stoppedSentence")
+      : badgeLabel(state);
   if (!label) return null;
 
   const action =

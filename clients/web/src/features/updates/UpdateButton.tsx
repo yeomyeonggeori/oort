@@ -6,6 +6,8 @@ import { useFormatMessage } from "@/i18n/useFormatMessage";
 import {
   pillTooltip,
   pillWorthShowing,
+  RAIL_CARD_GAP,
+  railCardBottomPadding,
   progressLabel,
   progressPercent,
   restartCutLine,
@@ -15,7 +17,9 @@ import {
   checkForUpdate,
   deferRelaunch,
   installUpdate,
+  noteUpdateCardClosed,
   relaunchIntoUpdate,
+  updateCardDismissed,
   useRelaunchCountdown,
   useRelaunchDeferrable,
   useRelaunchHold,
@@ -80,6 +84,13 @@ function cardSubline(state: UpdateState, countdown: number | null): string | nul
   }
 }
 
+/** 레일 카드의 아래 여백을 지금 화면에서 잰다(순수 판정은 `model.ts` `railCardBottomPadding`). */
+function readRailCardBottomPadding(pill: HTMLElement | null): number {
+  if (typeof window === "undefined" || pill === null) return RAIL_CARD_GAP;
+  const composers = Array.from(document.querySelectorAll<HTMLElement>("[data-composer-shell]"), (el) => el.getBoundingClientRect());
+  return railCardBottomPadding(pill.getBoundingClientRect().right, window.innerHeight, composers);
+}
+
 function CardIcon({ state }: { state: UpdateState }) {
   const cls = "size-4";
   if (state.kind === "installed") return <Check className={cls} aria-hidden="true" />;
@@ -100,6 +111,9 @@ export function UpdateButton({ placement = "row" }: { placement?: "row" | "rail"
   // 사람이 누르지 않았는데 열린 카드인가(#5661 H2). 그 카드는 초점을 가져가지 않는다: 받기가 끝나거나 카운트다운이 시작되는
   // 순간 입력창에서 글을 쓰던 사람의 다음 Space·Enter가 카드 단추(「지금 다시 시작」)를 누르게 된다. 알약을 눌러 연 카드만 초점이 들어간다.
   const autoOpened = useRef(false);
+  // 카드 바깥을 눌러(또는 초점을 바깥으로 옮겨) 닫았나(수리 2회차 H1). 그렇게 닫힌 카드는 초점을 알약으로 되돌리지 않는다: 사람은
+  // 누른 곳(입력창)으로 갔고, 알약에 남은 초점은 다음 Enter·Space 두 번을 묻지 않는 「지금 다시 시작」으로 바꾼다. Esc로 닫을 때만 연 곳으로.
+  const closedFromOutside = useRef(false);
   const countdownWas = useRef(countdown);
   const buttonRef = useRef<HTMLButtonElement>(null);
   const tooltipId = useId();
@@ -118,8 +132,9 @@ export function UpdateButton({ placement = "row" }: { placement?: "row" | "rail"
   // 열린다: 왜 다시 시작하지 않는지가 이 카드에 있다. 펼침·접힘 어느 쪽이든 마운트된 쪽이 연다.
   // 기다린 뒤 카운트다운이 시작될 때도 다시 연다(H3): 그 사이 카드를 닫았으면 예고 없이 앱이 꺼진다. 카운트다운이 **시작될 때만**
   // 연다 — 「지금 말고」·다시 기다림으로 멈출 때 다시 열면 방금 닫은 카드가 되살아난다.
+  // 사람이 닫은 뒤에는 새로 마운트된 알약(목록 열 접기·펴기, 설정 화면)이 다시 열지 않는다(수리 2회차).
   useEffect(() => {
-    if (state.kind === "installed" && !openRef.current) {
+    if (state.kind === "installed" && !openRef.current && !updateCardDismissed()) {
       autoOpened.current = true;
       setOpen(true);
     }
@@ -141,7 +156,13 @@ export function UpdateButton({ placement = "row" }: { placement?: "row" | "rail"
   // 「다시 확인」을 누른 사람이 결과를 보기 전에 줄이 사라지면 아무 일도 없었던 것처럼 읽힌다.
   if (!pillWorthShowing(state) && !open) return null;
 
-  const tooltip = holding ? formatMessage("settings.updates.holdTitle") : pillTooltip(state);
+  // 자동 다시 시작이 멈췄다(「지금 말고」·다시 시작 실패): 「곧 다시 실행돼요」는 거짓이다(수리 2회차).
+  const stopped = state.kind === "installed" && hold === null && countdown === null;
+  const tooltip = holding
+    ? formatMessage("settings.updates.holdTitle")
+    : stopped
+      ? formatMessage("settings.updates.stoppedSentence")
+      : pillTooltip(state);
   const label = tooltip ? `업데이트. ${tooltip}` : "업데이트";
   const percent =
     state.kind === "installing" ? progressPercent(state.downloaded, state.total) : null;
@@ -153,7 +174,15 @@ export function UpdateButton({ placement = "row" }: { placement?: "row" | "rail"
   };
 
   return (
-    <Popover open={open} onOpenChange={setOpen} modal={false}>
+    <Popover
+      open={open}
+      onOpenChange={(next) => {
+        setOpen(next);
+        // 사람이 닫았다: 다시 마운트돼도 저절로 열지 않고, 기다린 뒤의 예고였으면 「지금 말고」와 같다(수리 2회차).
+        if (!next) noteUpdateCardClosed();
+      }}
+      modal={false}
+    >
       <PopoverAnchor virtualRef={rowRef} />
       <div className="group relative shrink-0" data-testid="update-pill-wrap">
           <Button
@@ -196,11 +225,21 @@ export function UpdateButton({ placement = "row" }: { placement?: "row" | "rail"
         opener={buttonRef.current}
         // 저절로 연 카드는 초점을 옮기지 않고(H2), 닫힐 때도 초점이 카드 밖 어딘가(입력창)에 있으면 알약으로 끌어오지 않는다.
         onOpenAutoFocus={(event) => {
+          closedFromOutside.current = false;
           if (autoOpened.current) event.preventDefault();
         }}
-        onCloseAutoFocus={(event) => {
-          if (autoOpened.current && document.activeElement && document.activeElement !== document.body) event.preventDefault();
+        onInteractOutside={() => {
+          closedFromOutside.current = true;
         }}
+        onCloseAutoFocus={(event) => {
+          if (
+            closedFromOutside.current ||
+            (autoOpened.current && document.activeElement && document.activeElement !== document.body)
+          )
+            event.preventDefault();
+        }}
+        // 접힌 레일: 카드는 입력창 위쪽 끝보다 위에 선다(H2). 붙은 알약에서 떨어져도 끝까지 밀어 올린다.
+        {...(rail ? { collisionPadding: { top: RAIL_CARD_GAP, bottom: readRailCardBottomPadding(buttonRef.current) }, sticky: "always" as const } : {})}
         aria-label="앱 업데이트"
         data-testid="update-card"
         data-update-state={state.kind}

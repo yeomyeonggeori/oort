@@ -23,6 +23,8 @@
   "settings.updates.holdTitle": "작업이 끝나면 다시 시작해요",
   "settings.updates.restartNow": "지금 다시 시작",
   "settings.updates.notNow": "지금 말고",
+  "settings.updates.stoppedChip": "다시 시작 대기",
+  "settings.updates.stoppedSentence": "설치를 마쳤어요. 다시 시작하면 새 버전으로 열려요.",
   "settings.updates.cutLine": "지금 다시 시작하면 끊겨요: {items}",
   "settings.updates.cutPanes": "터미널 칸 {count, number}개",
   "settings.updates.cutSessions": "작업 세션 {count, number}개",

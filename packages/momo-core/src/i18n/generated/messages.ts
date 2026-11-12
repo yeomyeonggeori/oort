@@ -1126,6 +1126,8 @@ export const messageKeys = [
   "settings.updates.offChip",
   "settings.updates.offSentence",
   "settings.updates.restartNow",
+  "settings.updates.stoppedChip",
+  "settings.updates.stoppedSentence",
   "teamAi.helper.aliasesLine",
   "teamAi.helper.aliasNotDerivable",
   "teamAi.helper.aliasReserved",
@@ -2731,6 +2733,8 @@ export const argumentSpecs = {
   "settings.updates.offChip": {},
   "settings.updates.offSentence": {},
   "settings.updates.restartNow": {},
+  "settings.updates.stoppedChip": {},
+  "settings.updates.stoppedSentence": {},
   "teamAi.helper.aliasesLine": {
     "names": "string"
   },
@@ -4183,6 +4187,8 @@ export interface MessageArgs {
   "settings.updates.offChip": Record<string, never>;
   "settings.updates.offSentence": Record<string, never>;
   "settings.updates.restartNow": Record<string, never>;
+  "settings.updates.stoppedChip": Record<string, never>;
+  "settings.updates.stoppedSentence": Record<string, never>;
   "teamAi.helper.aliasesLine": { names: string };
   "teamAi.helper.aliasNotDerivable": Record<string, never>;
   "teamAi.helper.aliasReserved": Record<string, never>;

@@ -23,6 +23,8 @@
   "settings.updates.holdTitle": "Restarts when your work ends",
   "settings.updates.restartNow": "Restart now",
   "settings.updates.notNow": "Not now",
+  "settings.updates.stoppedChip": "Waiting to restart",
+  "settings.updates.stoppedSentence": "Installed. Restart to open the new version.",
   "settings.updates.cutLine": "Restarting now stops: {items}",
   "settings.updates.cutPanes": "{count, plural, one {# terminal pane} other {# terminal panes}}",
   "settings.updates.cutSessions": "{count, plural, one {# work session} other {# work sessions}}",

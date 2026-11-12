@@ -18,6 +18,8 @@ import {
   UsersRound,
   type LucideIcon,
 } from "lucide-react";
+import { UpdateButton } from "@/features/updates/UpdateButton";
+import { useUpdateState } from "@/features/updates/store";
 import { cn } from "@/design/lib/cn";
 import { useMessages } from "@/i18n/useMessages";
 import {
@@ -130,6 +132,22 @@ export function SettingsNav({
           </div>
         );
       })}
+      <SettingsRestartNotice />
     </nav>
+  );
+}
+
+/**
+ * 설정 전면에는 사이드바가 없다: 설치를 마친 업데이트가 다시 시작을 기다리는 동안 같은 알약·카드를 목록 아래에 세운다(#5661 수리
+ * 2회차). 기다린 뒤의 다시 시작 예고(30초 · 「지금 말고」)가 이 화면에서도 보이고, 예고 없이 앱이 꺼지는 화면이 없다. 새 판을
+ * 알리기만 하는 동안(받기 전)에는 세우지 않는다 — 그 알약은 앱 화면의 것이다.
+ */
+function SettingsRestartNotice() {
+  const update = useUpdateState();
+  if (update.kind !== "installed") return null;
+  return (
+    <div className="settings-nav-group" data-testid="settings-restart-notice">
+      <UpdateButton placement="row" />
+    </div>
   );
 }

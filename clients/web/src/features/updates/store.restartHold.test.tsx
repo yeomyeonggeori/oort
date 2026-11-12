@@ -369,3 +369,143 @@ describe("업데이트 수리 1회차: 설치는 한 번, 저절로 연 카드�
     expect(byId("update-card-defer")).toBeNull();
   });
 });
+
+/** 바깥을 누른다: 브라우저처럼 누른 곳에 `pointerdown`이 가고, 누른 곳이 초점을 받을 수 있으면 초점이 그리로 간다. */
+function pressOutside(target: HTMLElement): void {
+  target.dispatchEvent(new MouseEvent("pointerdown", { bubbles: true, cancelable: true, button: 0 }));
+  target.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true, button: 0 }));
+  if (target.tabIndex >= 0 || target instanceof HTMLTextAreaElement) target.focus();
+  else (document.activeElement as HTMLElement | null)?.blur();
+  target.dispatchEvent(new MouseEvent("mouseup", { bubbles: true, cancelable: true, button: 0 }));
+  target.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, button: 0 }));
+}
+
+describe("업데이트 수리 2회차: 바깥을 눌러 닫은 카드의 초점, 예고를 닫으면 멈춤, 다시 마운트 (#5661)", () => {
+  it("H1 길①: 알약으로 연 기다림 카드를 입력창을 눌러 닫으면 초점은 입력창이고, 이어 친 Enter 두 번이 다시 시작을 부르지 않는다", async () => {
+    await installWith({ ...NONE, panes: [pane("working")] });
+    act(() => pressKey("Escape"));
+    await advance(50);
+    const field = typingInComposer();
+    await act(async () => {
+      byId("update-pill")?.click();
+      await Promise.resolve();
+    });
+    await advance(50);
+    expect(byId("update-card")?.contains(document.activeElement)).toBe(true);
+
+    act(() => pressOutside(field));
+    await advance(400);
+    expect(byId("update-card")).toBeNull();
+    expect(document.activeElement).toBe(field);
+    act(() => pressKey("Enter"));
+    await advance(50);
+    act(() => pressKey("Enter"));
+    await advance(50);
+    act(() => pressKey(" "));
+    await advance(50);
+    act(() => pressKey(" "));
+    await advance(50);
+    expect(tauri.relaunch).not.toHaveBeenCalled();
+  });
+
+  it("H1 길②: 저절로 열린 카드를 대화의 글(초점을 받지 않는 곳)을 눌러 닫아도 초점은 알약으로 가지 않고, Space 두 번이 다시 시작을 부르지 않는다", async () => {
+    const field = typingInComposer();
+    const message = document.createElement("p");
+    message.textContent = "지난 대화";
+    document.body.append(message);
+    await installWith({ ...NONE, panes: [pane("working")] });
+    expect(byId("update-card-title")?.textContent).toBe("Restarts when your work ends");
+    expect(document.activeElement).toBe(field);
+
+    act(() => pressOutside(message));
+    await advance(400);
+    expect(byId("update-card")).toBeNull();
+    expect(document.activeElement).not.toBe(byId("update-pill"));
+    act(() => pressKey(" "));
+    await advance(50);
+    act(() => pressKey(" "));
+    await advance(50);
+    expect(tauri.relaunch).not.toHaveBeenCalled();
+    message.remove();
+  });
+
+  it("Esc로 닫으면 연 곳(알약)으로 초점이 돌아간다 — 알약으로 연 카드, 그리고 저절로 열린 카드 안으로 초점을 옮긴 뒤", async () => {
+    await installWith({ ...NONE, panes: [pane("working")] });
+    act(() => pressKey("Escape"));
+    await advance(50);
+    await act(async () => {
+      byId("update-pill")?.click();
+      await Promise.resolve();
+    });
+    await advance(50);
+    act(() => pressKey("Escape"));
+    await advance(50);
+    expect(document.activeElement).toBe(byId("update-pill"));
+  });
+
+  it("기다린 뒤의 예고를 Esc로 닫으면 「지금 말고」와 같다: 다시 시작하지 않고, 알약은 「곧」이라고 하지 않는다", async () => {
+    const field = typingInComposer();
+    await installWith({ ...NONE, panes: [pane("working")] });
+    act(() => pressKey("Escape"));
+    await advance(50);
+    facts = { ...NONE, panes: [pane("turn-done")] };
+    await advance(RESTART_GATE_TICK_MS + RESTART_QUIET_MS);
+    expect(byId("update-card-title")?.textContent).toBe("곧 다시 실행돼요");
+    expect(document.activeElement).toBe(field);
+
+    act(() => pressKey("Escape"));
+    await advance(60 * 60 * 1000);
+    expect(tauri.relaunch).not.toHaveBeenCalled();
+    expect(byId("update-card")).toBeNull();
+    expect(byId("update-pill")?.getAttribute("aria-label")).toBe("업데이트. Installed. Restart to open the new version.");
+  });
+
+  it("기다린 뒤의 예고를 바깥을 눌러 닫아도 「지금 말고」와 같다", async () => {
+    const field = typingInComposer();
+    await installWith({ ...NONE, panes: [pane("working")] });
+    act(() => pressKey("Escape"));
+    await advance(50);
+    facts = { ...NONE, panes: [pane("turn-done")] };
+    await advance(RESTART_GATE_TICK_MS + RESTART_QUIET_MS);
+    expect(byId("update-card-defer")).not.toBeNull();
+    await advance(50); // 바깥 누름을 듣기 시작하는 것은 카드가 열린 다음 틱부터다(Radix)
+    act(() => pressOutside(field));
+    await advance(60 * 60 * 1000);
+    expect(tauri.relaunch).not.toHaveBeenCalled();
+    expect(document.activeElement).toBe(field);
+  });
+
+  it("사람이 닫은 카드는 알약이 다시 마운트돼도(목록 열 접기·펴기, 설정 화면) 저절로 열리지 않는다. 다음 예고 때는 열린다", async () => {
+    await installWith({ ...NONE, panes: [pane("working")] });
+    act(() => pressKey("Escape"));
+    await advance(50);
+    act(() => root?.unmount());
+    host?.remove();
+    mountCard();
+    await advance(50);
+    expect(byId("update-card")).toBeNull();
+    expect(byId("update-pill")).not.toBeNull();
+
+    facts = { ...NONE, panes: [pane("turn-done")] };
+    await advance(RESTART_GATE_TICK_MS + RESTART_QUIET_MS);
+    expect(byId("update-card-title")?.textContent).toBe("곧 다시 실행돼요");
+  });
+
+  it("설치가 한 번 실패한 뒤 다시 확인하면 다시 받을 수 있다(설치 잠금이 풀린다)", async () => {
+    tauri.install.mockRejectedValueOnce(new Error("signature mismatch"));
+    act(() => seedUpdateStateForTest({ kind: "available", update: UPDATE }));
+    await act(async () => {
+      await installUpdate();
+    });
+    await act(async () => {
+      await checkForUpdate();
+    });
+    tauri.install.mockImplementation(() => new Promise(() => undefined));
+    await act(async () => {
+      void installUpdate();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(tauri.install).toHaveBeenCalledTimes(2);
+  });
+});

@@ -218,9 +218,7 @@ pub async fn updater_install(app: AppHandle) -> Result<(), String> {
 /// skips `RunEvent::Exit` and calls `exit(0)` directly (tauri 2.11 `app.rs`).
 /// The `Exit` arm in `lib.rs` is what stops the work host (`momo-workd`, this
 /// app's child) and every terminal's process group, so a skipped `Exit` left the
-/// OLD workd running from the replaced bundle's unlinked image after an update:
-/// the new app's workd then met `AlreadyRunning` on the control socket and the
-/// old one, without whatever the update fixed, kept the host. `request_restart`
+/// old workd running after an update. `request_restart`
 /// sends the exit through the event loop (`ExitRequested` → `Exit` → restart),
 /// so the same teardown as a ⌘Q runs before the new build starts. Returns at
 /// once; the process ends when the loop gets there.
