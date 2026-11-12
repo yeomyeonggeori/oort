@@ -55,6 +55,8 @@ export const CONNECTION_KEYS = {
   loadMembersTitle: "connection.load.membersTitle",
   /** 받아 둔 글이 있을 때 목록 위 한 줄(상자로 덮지 않는다). */
   loadNewerTitle: "connection.load.newerTitle",
+  /** 옛 쪽(위로 더 읽기)이 실패했을 때 목록 위 한 줄(#5662). 받아 둔 글은 그대로다. */
+  loadOlderTitle: "connection.load.olderTitle",
   loadInboxTitle: "connection.load.inboxTitle",
   loadInboxMoreTitle: "connection.load.inboxMoreTitle",
   loadMemberProfileTitle: "connection.load.memberProfileTitle",

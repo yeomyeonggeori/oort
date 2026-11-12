@@ -291,3 +291,34 @@ describe("#5624 L3 — ChatShell은 훅의 장부와 시계 차이를 목록까�
     expect(listedHeads()).toEqual({ "47분의 글": true, "경계의 글": true, "날아가는 글": true });
   });
 });
+
+// #5662 검수 1회차 M3: 같은 대역으로 옛 쪽 실패 줄의 배선(`ChatShell` → `Timeline`)을 지킨다. 훅 시험 · 브라우저 시험대는 이 두 줄을
+// 지나지 않아, 줄을 지워도 타입 오류도 실패도 없었다.
+describe("#5662 M3 — ChatShell은 옛 쪽 실패와 「다시 시도」를 목록까지 넘긴다", () => {
+  it("훅이 옛 쪽 실패를 말하면 목록 위에 줄이 서고, 그 단추가 훅의 다시 읽기를 부른다", () => {
+    const retryOlder = vi.fn();
+    timelineOver.value = {
+      state: { messages: [FIRST, BOUNDARY], oldestSeq: 1, newestSeq: 2 },
+      reachedStart: false,
+      olderFailed: true,
+      retryOlder,
+    };
+    mountShell();
+    const line = document.querySelector("[data-testid='timeline-older-error']");
+    expect(line).not.toBeNull();
+    const button = line?.querySelector("button");
+    expect(button).not.toBeNull();
+    act(() => button?.click());
+    expect(retryOlder).toHaveBeenCalledTimes(1);
+  });
+
+  it("대조: 훅이 실패를 말하지 않으면 줄이 없다", () => {
+    timelineOver.value = {
+      state: { messages: [FIRST, BOUNDARY], oldestSeq: 1, newestSeq: 2 },
+      reachedStart: false,
+      olderFailed: false,
+    };
+    mountShell();
+    expect(document.querySelector("[data-testid='timeline-older-error']")).toBeNull();
+  });
+});

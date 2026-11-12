@@ -1484,6 +1484,12 @@ export const catalog: MessageCatalog = {
       "value": "알림 규칙을 불러오지 못했어요"
     }
   ],
+  "connection.load.olderTitle": [
+    {
+      "type": 0,
+      "value": "이전 글을 불러오지 못했어요"
+    }
+  ],
   "connection.load.readMarkersTitle": [
     {
       "type": 0,
