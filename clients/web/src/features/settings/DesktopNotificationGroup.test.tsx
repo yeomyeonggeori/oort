@@ -342,7 +342,7 @@ describe("참여한 스레드의 새 답글 행 (#4890)", () => {
   const row = (host: HTMLElement) =>
     host.querySelector('[data-testid="desktop-notification-kind-thread-reply"]')!.closest("tr")!;
 
-  it("사전에서 읽은 이름·설명으로 서고, 기본은 켜짐이며, 독 배지는 세지 않고 폰 푸시 열은 「곧 열려요」다", async () => {
+  it("사전에서 읽은 이름·설명으로 서고, 기본은 켜짐이며, 독 배지는 세고(#5660) 폰 푸시 열은 「곧 열려요」다", async () => {
     const host = await mountKorean();
     const target = row(host);
     expect(target.textContent).toContain("참여한 스레드의 새 답글");
@@ -351,7 +351,7 @@ describe("참여한 스레드의 새 답글 행 (#4890)", () => {
     expect(toggle.getAttribute("aria-checked")).toBe("true");
     expect(toggle.getAttribute("aria-label")).toBe("참여한 스레드의 새 답글 OS 알림");
     const cells = target.querySelectorAll("td");
-    expect(cells[1]?.textContent).toBe("세지 않아요");
+    expect(cells[1]?.textContent).toBe("수에 포함");
     expect(cells[2]?.textContent).toBe("곧 열려요");
   });
 
