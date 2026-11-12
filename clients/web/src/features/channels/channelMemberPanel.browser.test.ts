@@ -365,12 +365,22 @@ const EXTRA: RosterMember[] = [
 const TWELVE: RosterMember[] = [...FIRST, ...EXTRA];
 
 /** 읽기를 `delayMs` 늦춘 채 패널을 열고, 연 직후부터 답이 온 뒤까지의 마크업을 차례로 모은다. */
-async function openingFrames(delayMs: number): Promise<{ at: string; html: string }[]> {
-  api.fetchRoster.mockResolvedValue(TWELVE);
+async function openingFrames(
+  delayMs: number,
+  options: { fail?: boolean; members?: RosterMember[] } = {}
+): Promise<{ at: string; html: string }[]> {
+  const members = options.members ?? TWELVE;
+  api.fetchRoster.mockResolvedValue(members);
   api.fetchAllActiveAgentRuns.mockImplementation(
     () =>
-      new Promise((resolve) =>
-        setTimeout(() => resolve({ runs: [run(), hermes()], truncated: false, pages: 1 }), delayMs)
+      new Promise((resolve, reject) =>
+        setTimeout(
+          () =>
+            options.fail === true
+              ? reject(new ApiError(503, "unavailable"))
+              : resolve({ runs: [run(), hermes()], truncated: false, pages: 1 }),
+          delayMs
+        )
       )
   );
   api.fetchAgentLiveness.mockImplementation(async (_ws: string, agentId: string) => {
@@ -394,7 +404,7 @@ async function openingFrames(delayMs: number): Promise<{ at: string; html: strin
             createElement(ChannelMemberPanel, {
               channelId: CH,
               channelName: "design-lab",
-              members: TWELVE,
+              members,
               status: "ready",
               offline: false,
               onRetry: () => undefined,
@@ -415,7 +425,8 @@ async function openingFrames(delayMs: number): Promise<{ at: string; html: strin
     document.querySelector<HTMLButtonElement>('[data-testid="channel-member-count"]')!.click();
   });
   grab("연 직후");
-  while (Date.now() - start < delayMs + 400) {
+  // 실패는 5xx라 한 번 더 묻고(1초 뒤) 서므로 그 뒤까지 본다
+  while (Date.now() - start < delayMs + (options.fail === true ? 1_600 : 400)) {
     await act(async () => {
       await new Promise((resolve) => setTimeout(resolve, 100));
     });
@@ -499,6 +510,79 @@ describe("채널 멤버 패널을 열 때 뛰지 않는다 (#5686 수리 1회차
       expect(problems).toEqual([]);
     },
     240_000
+  );
+});
+
+// ---- 360 폭에서 「지금」 읽기가 실패해도 패널 안 줄이 움직이지 않는다 (#5701) ---------------------------------------
+// #5686 재검수: 360 폭에서 실패 줄이 서면 발치가 두 줄이 되어 패널이 36px 커졌다. 멤버 3명(작은 패널)과 12명(최대 높이)을
+// 넓은 창·360 폭 × 읽기 성공·실패로 열어, 모든 순간의 패널 높이·목록 높이·발치 단추 자리·줄 자리가 한 값이고 실패 줄이
+// 실제로 섰는지(시험이 헛돌지 않게)를 잰다.
+describe("채널 멤버 패널: 읽기가 실패해도 좁은 폭에서 안 움직인다 (#5701)", () => {
+  it.skipIf(ENGINES.length === 0)(
+    "멤버 3명·12명 × 넓은 창·360 × 읽기 성공·실패: 패널 높이·목록 높이·발치 단추·줄 자리가 모든 순간 같다",
+    async () => {
+      const THREE = FIRST.filter((m) => [ME, DALMURI, SAEBYEOK].includes(m.id));
+      const scenes: Record<string, { at: string; html: string }[]> = {};
+      for (const [name, members] of [["3명", THREE], ["12명", TWELVE]] as const) {
+        scenes[`${name} 성공`] = await openingFrames(300, { members });
+        scenes[`${name} 실패`] = await openingFrames(300, { members, fail: true });
+      }
+      for (const [name, frames] of Object.entries(scenes)) {
+        const last = frames[frames.length - 1]!.html;
+        expect(last.includes('data-testid="channel-member-now-failed"'), `${name}: 실패 줄`).toBe(name.endsWith("실패"));
+      }
+      const css = await compileTokensCss(Object.values(scenes).flat().flatMap((frame) => classesOf(frame.html)));
+      const playwright = await import("playwright");
+      const problems: string[] = [];
+      const report: string[] = [];
+      for (const engine of ENGINES) {
+        const browser = await playwright[engine].launch();
+        try {
+          for (const vp of [{ name: "1280", width: 1280 }, { name: "360", width: 360 }]) {
+            const ctx = await browser.newContext({ viewport: { width: vp.width, height: 1400 } });
+            try {
+              const p = await ctx.newPage();
+              for (const [name, frames] of Object.entries(scenes)) {
+                const seen: string[] = [];
+                for (const frame of frames) {
+                  await p.setContent(page(css, frame.html, 16));
+                  seen.push(
+                    await p.evaluate(() => {
+                      const box = (sel: string) => {
+                        const r = document.querySelector(sel)!.getBoundingClientRect();
+                        return `${Math.round(r.top * 100) / 100}+${Math.round(r.height * 100) / 100}`;
+                      };
+                      const list = document.querySelector<HTMLElement>('[data-testid="channel-member-list"]')!;
+                      const base = list.getBoundingClientRect().top - list.scrollTop;
+                      const rows = [...list.querySelectorAll<HTMLElement>('[data-testid="channel-member-item"]')]
+                        .map((row) => Math.round((row.getBoundingClientRect().top - base) * 100) / 100)
+                        .join(",");
+                      return [
+                        `panel ${box('[data-testid="channel-member-panel"]')}`,
+                        `list ${box('[data-testid="channel-member-list"]')}`,
+                        `add ${box('[data-testid="channel-member-add"]')}`,
+                        `close ${box('[data-testid="channel-member-close"]')}`,
+                        `rows ${rows}`,
+                      ].join(" | ");
+                    })
+                  );
+                }
+                const distinct = [...new Set(seen)];
+                report.push(`${engine} ${vp.name} ${name}: ${seen.length}순간 → ${distinct[0]}`);
+                if (distinct.length !== 1) problems.push(`${engine} ${vp.name} ${name}: 서로 다른 값 ${distinct.length}개\n  ${distinct.join("\n  ")}`);
+              }
+            } finally {
+              await ctx.close();
+            }
+          }
+        } finally {
+          await browser.close();
+        }
+      }
+      console.info(`[#5701 읽기 실패]\n${report.join("\n")}`);
+      expect(problems).toEqual([]);
+    },
+    360_000
   );
 });
 
