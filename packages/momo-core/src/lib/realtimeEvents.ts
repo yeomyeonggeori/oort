@@ -1274,6 +1274,20 @@ export interface RealtimeHandle {
     handlers: { onEvent: (event: InboxEvent) => void; onResync: () => void }
   ) => () => void;
   /**
+   * The signed-in member's `followed_unread.updated` signals (ADR-0124 amendment 4, #5667) on the
+   * same personal channel as the inbox signals: the `followed_unread_reply_count` of a read-state
+   * row may have changed (a new reply in a followed thread, a thread read on any device, a follow
+   * change). Ids only, never the number, so a signal means "read the read-state list again";
+   * `onResync` fires on (re)subscribe.
+   *
+   * Optional like `subscribeInbox`: a runtime that has not wired it (the phone) or a server without
+   * #5667 simply leaves the 30-second read-state poll as the only refresh.
+   */
+  subscribeFollowedUnread?: (
+    memberId: string,
+    handlers: { onSignal: () => void; onResync: () => void }
+  ) => () => void;
+  /**
    * The signed-in member's scheduled-message signals (ADR-0208 D12, #4215):
    * `scheduled_message.updated` on the same personal channel as the inbox signals
    * (`user:read-state#<MEMBER>`). A frame holds ids, status and time only (never the text), so the
@@ -1302,5 +1316,12 @@ export interface RealtimeHandle {
    * backfill path a spontaneous reconnect takes.
    */
   reconnect: () => void;
+  /**
+   * 소켓이 서버에게서 마지막으로 무언가(핑·발행물·답) 들은 시각, epoch ms (#5660). 들은 적이 없으면 null.
+   *
+   * 「연결됨」 상태만으로는 잠든 사이 죽은 소켓과 뒤에서도 핑을 받은 소켓을 가를 수 없다. 돌아온 순간 다시 열지(`resume.ts`)는 이
+   * 값으로 정한다. 없는 구현(폰)은 「모른다」이고, 그러면 예전처럼 30초 넘게 비웠다 돌아오면 다시 연다.
+   */
+  lastHeardAt?: () => number | null;
   dispose: () => void;
 }
