@@ -7418,7 +7418,7 @@ export const catalog: MessageCatalog = {
   "teamAi.delegation.reasonCeilingUnset": [
     {
       "type": 0,
-      "value": "서버 운영자가 아직 Hermes 맡기기를 열지 않았어요."
+      "value": "서버 운영자가 Hermes 맡기기를 꺼 두었어요."
     }
   ],
   "teamAi.delegation.reasonConnectionMode": [

@@ -24,7 +24,10 @@ function status(over: Partial<TeamAiDelegationStatus> = {}): TeamAiDelegationSta
   };
 }
 
-/** 지금 운영의 모양: 천장 없음 = 닫힘. 첫 닫힌 문은 G3(연결)일 수 있다. */
+/** 운영자가 `0`으로 끈 모양(옛 서버는 천장 미설정도 이 모양). 첫 닫힌 문은 G3(연결)일 수 있다. */
+/** 천장 없음(새 서버): 숫자 없음 + 끔 아님. */
+const NO_CEILING = status({ ceiling: null, ceilingOff: false });
+
 const OPS_OFF = status({
   ceiling: null,
   ceilingOff: true,
@@ -37,10 +40,12 @@ describe("hermesSettingsVisible · hermesLimitItemVisible (P8이 정본)", () =>
   it("서버가 위임 칸을 보냈으면 행은 선다 — 운영자 천장이 비어 있는 지금 운영에서도", () => {
     expect(hermesSettingsVisible(status())).toBe(true);
     expect(hermesSettingsVisible(OPS_OFF)).toBe(true);
+    expect(hermesSettingsVisible(NO_CEILING)).toBe(true);
   });
 
-  it("하루 칸은 천장이 있을 때만(P7 「천장 안에서 조정」)", () => {
+  it("하루 칸은 끔이 아닐 때 선다(천장이 있거나 천장이 없을 때)", () => {
     expect(hermesLimitItemVisible(status())).toBe(true);
+    expect(hermesLimitItemVisible(NO_CEILING)).toBe(true);
     expect(hermesLimitItemVisible(OPS_OFF)).toBe(false);
   });
 
