@@ -1,11 +1,11 @@
 import React from 'react';
-import {AccessibilityInfo, Animated} from 'react-native';
+import {AccessibilityInfo, Animated, Dimensions, StyleSheet} from 'react-native';
 import {act, cleanup, render, renderHook, screen} from '@testing-library/react-native';
 import {QueryClient, QueryClientProvider} from '@tanstack/react-query';
 import {type Channel, setChannelNotificationPref} from '@momo/core/lib/api';
 import {typingLabel, typingVisualSegments} from '@momo/core/features/chat/typing';
 import {CHANNEL_MUTE_FAILURE} from '@momo/core/features/channels/model';
-import {TypingBar, TYPING_RESERVE} from '../src/features/conversation/TypingBar';
+import {TypingBar, typingReserve} from '../src/features/conversation/TypingBar';
 import {useChannelRowActions} from '../src/features/sidebar/useChannelRowActions';
 import type {ChannelRowTarget} from '../src/features/sidebar/channelRowActions';
 
@@ -31,7 +31,11 @@ it('작성 중은 동작 줄이기에 점을 멈추고 이름·낭독·빈 높�
   expect(loop).not.toHaveBeenCalled();
   expect(screen.getByTestId('composer-typing').props.accessibilityLabel).toBe('3명이 작성 중');
   const shownStyle = screen.getByTestId('composer-typing').props.style;
-  expect(shownStyle.minHeight + shownStyle.marginBottom).toBe(TYPING_RESERVE);
+  const shownFlat = StyleSheet.flatten(shownStyle);
+  // 흐름 높이 = 칸(글자 배율을 곱한 고정 높이, #5645) + 음수 아래 여백(걸침).
+  expect(Number(shownFlat.height) + Number(shownFlat.marginBottom)).toBe(
+    typingReserve(Dimensions.get('window').fontScale),
+  );
   rerender(<TypingBar segments={[]} />);
   const empty = screen.getByTestId('composer-typing', {includeHiddenElements: true});
   expect(empty.props.style).toEqual(shownStyle);

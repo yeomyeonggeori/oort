@@ -1,8 +1,17 @@
 import { useSyncExternalStore } from "react";
+import {
+  localWorkVerdict,
+  restartGateStep,
+  type LocalWorkFacts,
+  type LocalWorkVerdict,
+  type RestartGate,
+} from "@momo/core/features/workbench/localWork";
+import { recordConnectionDiag } from "@/features/common/connectionDiag";
 import { appVersion, desktopUpdater, isDesktop } from "@/lib/tauri";
 import type { AvailableUpdate } from "@/lib/tauri";
-import { RELAUNCH_COUNTDOWN_SECONDS, type UpdateState } from "./model";
+import { RELAUNCH_COUNTDOWN_SECONDS, UPDATER_DISABLED, type UpdateState } from "./model";
 import { flushBeforeRelaunch } from "./relaunchFlush";
+import { startUpdateSchedule, type ScheduledCheckResult } from "./schedule";
 
 // =============================================================================
 // The one update channel this app run has (ADR-0133 P2, MOMO-606).
@@ -17,21 +26,76 @@ import { flushBeforeRelaunch } from "./relaunchFlush";
 // `useSyncExternalStore` so React never tears between the two renderers.
 // =============================================================================
 
-/**
- * How often a long-running window asks again. Six hours, not six minutes: a
- * tester who leaves the app open for a week should still learn about a build,
- * and an internal channel that publishes twice a day gains nothing from polling
- * a static file on a CDN every few minutes.
- */
-const RECHECK_INTERVAL_MS = 6 * 60 * 60 * 1000;
+// How often a long-running window asks again lives in `schedule.ts` (#5661):
+// at launch, every six hours of WALL-CLOCK time, thirty minutes after a failure,
+// and once when the Mac wakes or the window comes back. Six hours, not six
+// minutes: an internal channel that publishes twice a day gains nothing from
+// polling a static file on a CDN every few minutes. The old `setInterval(6h)`
+// counted only awake time, so a laptop shut every night could go days between
+// checks.
 
 let state: UpdateState = { kind: "idle" };
 let currentVersion: string | null = null;
 let watching = false;
 let inFlight = false;
+/** One install at a time (#5661 H1): a second 「업데이트」 while the first is still downloading does nothing. */
+let installInFlight = false;
+/** When the last check that actually asked (or learned it cannot ask) finished. */
+let lastCheckedAt: number | null = null;
+/** `update.check.off` goes into the connection log once per run, not every six hours. */
+let offRecorded = false;
 /** Seconds left before the automatic restart, or null when none is scheduled. */
 let relaunchIn: number | null = null;
 let relaunchTimer: number | null = null;
+
+/**
+ * Where this run reads its local work (#5661, owner 2026-11-11: restart on its own, but never cut work that is
+ * running on this Mac). `App` wires the real one through `startUpdateWatch`; without one (a test that mounts a
+ * single surface) the restart is the plain three-second countdown it always was.
+ */
+export interface LocalWorkSource {
+  /** Re-read what needs a round trip (the work daemon's status). Never rejects: what it cannot read is unknown. */
+  refresh(): Promise<void>;
+  /** The facts as of now. Synchronous: the countdown asks it every second. */
+  read(): LocalWorkFacts;
+}
+
+/** What holds the automatic restart, for the surfaces. `cut` is what 「지금 다시 시작」 would stop; null once the work has ended and the quiet period runs. */
+export interface RelaunchHold {
+  readonly cut: Extract<LocalWorkVerdict, { kind: "busy" }> | null;
+}
+
+/** While a restart waits for local work, the facts are read again this often. */
+export const RESTART_GATE_TICK_MS = 5_000;
+
+/**
+ * The countdown after a wait (#5661 H3). The person did not just press 「업데이트」 — the restart comes minutes or hours
+ * later, when the work ended — so the card opens without taking focus and runs long enough to reach 「지금 말고」.
+ * The countdown right after an install with nothing running stays `RELAUNCH_COUNTDOWN_SECONDS`.
+ */
+export const RELAUNCH_AFTER_WAIT_SECONDS = 30;
+
+let localWork: LocalWorkSource | null = null;
+let gate: RestartGate | null = null;
+let gateTimer: number | null = null;
+/** Set once a restart has been asked for (automatic or by hand) or put off: the gate stops, and 「지금」 is what is left. */
+let gateDone = false;
+let relaunchHold: RelaunchHold | null = null;
+/** This install's restart has waited for local work at least once: its countdown is the long one and can be put off. */
+let waited = false;
+/**
+ * The person closed the card after this install finished (#5661 수리 2회차). A card that mounts again — the list column
+ * folded or unfolded, the settings screen opened — does not open itself until the next notice (a countdown starting).
+ */
+let cardDismissed = false;
+/**
+ * Surfaces that can show the restart notice right now: the update pill (sidebar, rail, settings), 설정 > 업데이트, the
+ * connect-screen row (#5661 수리 3회차). A countdown never starts while none is mounted — it waits for one, so no screen
+ * restarts the app without first saying so.
+ */
+let noticeSurfaces = 0;
+/** The restart may go, but no surface was there to announce it: the countdown starts when one mounts. */
+let relaunchPending = false;
 
 const listeners = new Set<() => void>();
 
@@ -57,6 +121,22 @@ function countdownSnapshot(): number | null {
 
 function versionSnapshot(): string | null {
   return currentVersion;
+}
+
+function lastCheckedSnapshot(): number | null {
+  return lastCheckedAt;
+}
+
+function holdSnapshot(): RelaunchHold | null {
+  return relaunchHold;
+}
+
+function deferrableSnapshot(): boolean {
+  return relaunchIn !== null;
+}
+
+function notify(): void {
+  for (const listener of listeners) listener();
 }
 
 function messageOf(error: unknown): string | null {
@@ -85,6 +165,21 @@ export function useUpdateState(): UpdateState {
   return useSyncExternalStore(subscribe, snapshot, snapshot);
 }
 
+/** When the last finished check ran (epoch ms), or null before the first one. */
+export function useLastCheckedAt(): number | null {
+  return useSyncExternalStore(subscribe, lastCheckedSnapshot, lastCheckedSnapshot);
+}
+
+/** Non-null while an installed update waits for local work to end (「이 맥의 작업이 끝나면 다시 시작해요」). */
+export function useRelaunchHold(): RelaunchHold | null {
+  return useSyncExternalStore(subscribe, holdSnapshot, holdSnapshot);
+}
+
+/** True while an automatic restart counts down: the card offers 「지금 말고」 (`deferRelaunch`), and closing the card does the same. */
+export function useRelaunchDeferrable(): boolean {
+  return useSyncExternalStore(subscribe, deferrableSnapshot, deferrableSnapshot);
+}
+
 /**
  * Ask the manifest.
  *
@@ -98,20 +193,53 @@ export function useUpdateState(): UpdateState {
  * artifact, so the web side cannot tell a local build (which the published
  * manifest would only ever downgrade) from a shipping one. That judgement
  * lives in the shell, where the build kind is known: `updater_check` in
- * `clients/desktop/src-tauri/src/updater.rs` reports "up to date" unless
- * `MOMO_CHANNEL_BUILD=1` was set at compile time (#1281, W-B2-5), so the
- * `{kind: "current"}` a local build settles on here is the shell's honest
- * answer.
+ * `clients/desktop/src-tauri/src/updater.rs` does not ask the feed unless
+ * `MOMO_CHANNEL_BUILD=1` was set at compile time (#1281, W-B2-5). Then the
+ * shell rejects with `UPDATER_DISABLED`, and that becomes `{kind: "off"}` here
+ * — never `current`: a build that did not look must not say 「최신」 (#5661).
+ *
+ * A check while an installed update waits for its restart is refused too: the
+ * running version is still the old one, so the manifest would offer the same
+ * build again and flip 「곧 다시 시작」 back to 「새 버전」.
+ *
+ * While a new build is already on offer, a re-check keeps the offer on screen
+ * (#5661): no 「확인 중」 blink of the pill on every wake or window return, and a
+ * re-check that fails because the network is not back yet does not take the
+ * pill away. The shell keeps the update it found (`pending`) when a check
+ * errors, so 「업데이트」 still installs that build. The failure is still logged.
+ *
+ * Resolves with what it learned, for the schedule (`schedule.ts`). A failed
+ * check goes into the connection log (설정 > 업데이트 > 연결 기록) as a time and
+ * a kind only. 「마지막 확인」 moves only when a check got an answer.
+ *
+ * Because the pill stays up during a re-check, 「업데이트」 can be pressed while
+ * that check is still out (#5661 H1). Its answer then arrives after the download
+ * started, and must not put 「새 버전」 back over 「받는 중」 or 「설치됨」 — a second
+ * press would run a second install beside the first.
  */
-export async function checkForUpdate(): Promise<void> {
-  if (!isDesktop()) return;
-  if (inFlight || state.kind === "installing") return;
+export async function checkForUpdate(): Promise<ScheduledCheckResult> {
+  if (!isDesktop()) return "refused";
+  if (inFlight || installStarted()) return "refused";
   inFlight = true;
-  set({ kind: "checking" });
+  const offered = state.kind === "available";
+  if (!offered) set({ kind: "checking" });
   try {
     const found = await desktopUpdater.check();
-    set(found ? { kind: "available", update: found } : { kind: "current" });
+    lastCheckedAt = Date.now();
+    if (!installStarted()) set(found ? { kind: "available", update: found } : { kind: "current" });
+    return found ? "available" : "current";
   } catch (error) {
+    const at = Date.now();
+    if (messageOf(error) === UPDATER_DISABLED) {
+      if (!offRecorded) {
+        offRecorded = true;
+        recordConnectionDiag("update.check.off", at);
+      }
+      if (!installStarted()) set({ kind: "off" });
+      return "off";
+    }
+    recordConnectionDiag("update.check.failed", at);
+    if (offered || installStarted()) return "failed";
     set({
       kind: "failed",
       phase: "check",
@@ -119,9 +247,15 @@ export async function checkForUpdate(): Promise<void> {
       detail: messageOf(error),
       update: null,
     });
+    return "failed";
   } finally {
     inFlight = false;
   }
+}
+
+/** A download is running or has finished and waits for its restart: what the manifest says next cannot change that. */
+function installStarted(): boolean {
+  return state.kind === "installing" || state.kind === "installed";
 }
 
 /**
@@ -132,12 +266,15 @@ export async function checkForUpdate(): Promise<void> {
  * listener behind that reports bytes for an update that no longer exists.
  */
 export async function installUpdate(): Promise<void> {
-  if (!isDesktop()) return;
+  if (!isDesktop() || installInFlight) return;
   const pending: AvailableUpdate | null =
     state.kind === "available" || state.kind === "failed" ? state.update : null;
   if (!pending) return;
 
+  installInFlight = true;
   set({ kind: "installing", update: pending, downloaded: 0, total: null });
+  // 받는 동안 이 맥의 작업 사실을 미리 읽어 둔다(#5661): 설치가 끝나는 순간의 판정이 「모름」으로 시작하지 않게.
+  void localWork?.refresh();
 
   const stop = await desktopUpdater.onProgress(({ downloaded, total }) => {
     // Ignore late events from a previous attempt: only the live install owns
@@ -149,7 +286,7 @@ export async function installUpdate(): Promise<void> {
   try {
     await desktopUpdater.install();
     set({ kind: "installed", update: pending });
-    scheduleRelaunch();
+    afterInstall();
   } catch (error) {
     set({
       kind: "failed",
@@ -162,6 +299,7 @@ export async function installUpdate(): Promise<void> {
     });
   } finally {
     stop();
+    installInFlight = false;
   }
 }
 
@@ -172,20 +310,93 @@ function clearRelaunchTimer(): void {
   }
 }
 
-/** Start the 3-second countdown after a finished install. One at a time. */
+function clearGateTimer(): void {
+  if (gateTimer !== null) {
+    window.clearTimeout(gateTimer);
+    gateTimer = null;
+  }
+}
+
+/**
+ * The install finished: restart now, or wait for local work (#5661). Without a wired source this is the plain
+ * countdown. With one, the first verdict decides (nothing running → the countdown at once, no quiet period), and
+ * from then on the facts are read every `RESTART_GATE_TICK_MS` until the gate opens.
+ */
+function afterInstall(): void {
+  gate = null;
+  gateDone = false;
+  waited = false;
+  cardDismissed = false;
+  relaunchPending = false;
+  if (localWork === null) {
+    scheduleRelaunch();
+    return;
+  }
+  void evaluateGate(true);
+}
+
+/**
+ * One step of the gate (`restartGateStep`, core). `refresh` re-reads the work daemon first; the countdown's
+ * per-second check does not (it only needs to see a pane or session that just started).
+ * Returns true when the restart may go on.
+ */
+async function evaluateGate(refresh: boolean): Promise<boolean> {
+  const source = localWork;
+  if (source === null || gateDone || state.kind !== "installed") return !gateDone;
+  if (refresh) await source.refresh();
+  if (localWork !== source || gateDone || state.kind !== "installed") return false;
+  return applyGate(source.read());
+}
+
+function applyGate(facts: LocalWorkFacts): boolean {
+  gate = restartGateStep(gate, localWorkVerdict(facts), Date.now());
+  clearGateTimer();
+  if (gate.kind === "go") {
+    const wasHolding = relaunchHold !== null;
+    relaunchHold = null;
+    if (relaunchIn === null) scheduleRelaunch();
+    else if (wasHolding) notify();
+    return true;
+  }
+  // Holding: no countdown on screen, and the facts are read again shortly.
+  clearRelaunchTimer();
+  relaunchIn = null;
+  waited = true;
+  relaunchHold = { cut: gate.kind === "hold" ? gate.verdict : null };
+  notify();
+  gateTimer = window.setTimeout(() => {
+    gateTimer = null;
+    void evaluateGate(true);
+  }, RESTART_GATE_TICK_MS);
+  return false;
+}
+
+/** Start the countdown after a finished install: 3 seconds, or `RELAUNCH_AFTER_WAIT_SECONDS` after a wait. One at a time. */
 function scheduleRelaunch(): void {
   clearRelaunchTimer();
-  relaunchIn = RELAUNCH_COUNTDOWN_SECONDS;
-  for (const listener of listeners) listener();
+  if (noticeSurfaces === 0) {
+    // Nowhere to show 「곧 다시 시작돼요」: wait for a surface rather than restart unannounced.
+    relaunchPending = true;
+    relaunchIn = null;
+    notify();
+    return;
+  }
+  relaunchPending = false;
+  relaunchIn = waited ? RELAUNCH_AFTER_WAIT_SECONDS : RELAUNCH_COUNTDOWN_SECONDS;
+  // A countdown is a new notice: the card opens for it even if an earlier one was closed.
+  cardDismissed = false;
+  notify();
   const tick = () => {
     relaunchTimer = null;
     if (relaunchIn === null) return;
+    // Work that started during the countdown (a pane opened, a session began) puts the restart back on hold.
+    if (localWork !== null && !applyGate(localWork.read())) return;
     if (relaunchIn <= 1) {
       void relaunchIntoUpdate();
       return;
     }
     relaunchIn -= 1;
-    for (const listener of listeners) listener();
+    notify();
     relaunchTimer = window.setTimeout(tick, 1000);
   };
   relaunchTimer = window.setTimeout(tick, 1000);
@@ -194,53 +405,130 @@ function scheduleRelaunch(): void {
 /**
  * Restart into the installed build. Never returns on success.
  *
- * Every restart path (the automatic countdown, 「지금」, Settings, the connect
- * screen) goes through here, so this is the one place that makes sure unsent
- * text is on disk first. A failed restart keeps the installed state and puts
- * the countdown away; the 「지금」 button stays, so nothing is lost.
+ * Every restart path (the automatic countdown, the gate opening after local
+ * work ends, 「지금」/「지금 다시 시작」, Settings, the connect screen) goes through
+ * here, so this is the one place that makes sure unsent text is on disk first.
+ * Pressed by hand it does not ask the gate: the card already said what it
+ * stops. A failed restart keeps the installed state and puts the countdown
+ * away; the 「지금」 button stays, so nothing is lost.
  */
 export async function relaunchIntoUpdate(): Promise<void> {
   clearRelaunchTimer();
+  clearGateTimer();
+  gateDone = true;
   flushBeforeRelaunch();
   try {
     await desktopUpdater.relaunch();
   } catch {
     relaunchIn = null;
-    for (const listener of listeners) listener();
+    // The gate has stopped: 「작업이 끝나면」 would now be a promise nobody keeps. The card falls back to 「지금」.
+    relaunchHold = null;
+    notify();
   }
 }
 
 /**
- * Resolve the running version and start the periodic check. Idempotent, and a
- * no-op in a browser tab, where there is no app bundle to replace and a reload
- * already gets the newest bundle.
- *
- * Returns the cleanup for the interval. Deliberately NOT tied to a component's
- * lifetime beyond the shell: navigating to another route must not restart the
- * check.
+ * 「지금 말고」 on the countdown that follows a wait (#5661 H3): the automatic restart is off for this install. The
+ * card falls back to 「다시 시작해 주세요 · 지금」 and the update applies at the next restart or quit. The gate does not
+ * run again: a notice every two minutes would be the interruption this is meant to avoid.
  */
-export function startUpdateWatch(): () => void {
+/** Whether the person closed the card since this install finished (read by a card that mounts, not rendered). */
+export function updateCardDismissed(): boolean {
+  return cardDismissed;
+}
+
+/**
+ * The person closed the card (Esc, or a press outside it). Closing a countdown counts as 「지금 말고」 (#5661 수리 2·3회차,
+ * planner): a countdown nobody can see any more would restart the app unannounced. One rule for the card — the
+ * 3-second countdown right after an install stops the same way (a long download means 「방금 누른 것」 may be minutes old).
+ */
+export function noteUpdateCardClosed(): void {
+  if (state.kind !== "installed") return;
+  cardDismissed = true;
+  if (relaunchIn !== null) deferRelaunch();
+}
+
+/**
+ * A surface that shows the restart notice mounted (returns its unmount). If a countdown was waiting for somewhere to be
+ * seen, it starts now.
+ */
+export function registerUpdateNoticeSurface(): () => void {
+  noticeSurfaces += 1;
+  if (relaunchPending && state.kind === "installed" && !gateDone) scheduleRelaunch();
+  return () => {
+    noticeSurfaces = Math.max(0, noticeSurfaces - 1);
+  };
+}
+
+export function deferRelaunch(): void {
+  if (relaunchIn === null) return;
+  clearRelaunchTimer();
+  clearGateTimer();
+  gateDone = true;
+  relaunchIn = null;
+  relaunchHold = null;
+  notify();
+}
+
+/**
+ * Resolve the running version and start the schedule (`schedule.ts`): a check
+ * now, then by the wall clock, and once when the Mac wakes, the window is shown
+ * again or the device comes back online. Idempotent, and a no-op in a browser
+ * tab, where there is no app bundle to replace and a reload already gets the
+ * newest bundle.
+ *
+ * Returns the cleanup. Deliberately NOT tied to a component's lifetime beyond
+ * the shell: navigating to another route must not restart the check.
+ *
+ * `localWork` is what the automatic restart waits on (#5661). The app passes the
+ * real reader (`localWorkSource.ts`); it is a parameter so this module does not
+ * pull the terminal manager into every test that renders an update surface.
+ */
+export function startUpdateWatch(options: { localWork?: LocalWorkSource } = {}): () => void {
   if (!isDesktop() || watching) return () => {};
   watching = true;
+  localWork = options.localWork ?? null;
 
   void appVersion().then((version) => {
     currentVersion = version;
     for (const listener of listeners) listener();
   });
-  void checkForUpdate();
 
-  const timer = window.setInterval(() => void checkForUpdate(), RECHECK_INTERVAL_MS);
+  const schedule = startUpdateSchedule({
+    now: () => Date.now(),
+    setTimer: (run, ms) => window.setTimeout(run, ms),
+    clearTimer: (handle) => window.clearTimeout(handle as number),
+    check: checkForUpdate,
+  });
+  const onVisible = () => {
+    if (document.visibilityState === "visible") schedule.nudge();
+  };
+  const onBack = () => schedule.nudge();
+  const onOnline = () => schedule.nudge("online");
+  document.addEventListener("visibilitychange", onVisible);
+  window.addEventListener("focus", onBack);
+  window.addEventListener("online", onOnline);
   return () => {
-    window.clearInterval(timer);
+    schedule.stop();
+    document.removeEventListener("visibilitychange", onVisible);
+    window.removeEventListener("focus", onBack);
+    window.removeEventListener("online", onOnline);
     watching = false;
+    localWork = null;
+    clearGateTimer();
   };
 }
 
 /** Test and capture seam: put the store into a given state without a manifest. */
-export function seedUpdateStateForTest(next: UpdateState, countdown: number | null = null): void {
+export function seedUpdateStateForTest(
+  next: UpdateState,
+  countdown: number | null = null,
+  hold: RelaunchHold | null = null
+): void {
   state = next;
   relaunchIn = countdown;
-  for (const listener of listeners) listener();
+  relaunchHold = hold;
+  notify();
 }
 
 /** Test seam: reset the singleton between cases. */
@@ -249,7 +537,19 @@ export function resetUpdateStoreForTest(): void {
   currentVersion = null;
   watching = false;
   inFlight = false;
+  installInFlight = false;
+  lastCheckedAt = null;
+  offRecorded = false;
   clearRelaunchTimer();
   relaunchIn = null;
+  localWork = null;
+  gate = null;
+  clearGateTimer();
+  gateDone = false;
+  relaunchHold = null;
+  waited = false;
+  cardDismissed = false;
+  noticeSurfaces = 0;
+  relaunchPending = false;
   listeners.clear();
 }

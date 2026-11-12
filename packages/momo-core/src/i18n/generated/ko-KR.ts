@@ -1909,6 +1909,52 @@ export const catalog: MessageCatalog = {
       "value": "작업 중"
     }
   ],
+  "desktop.workJobs.approvalHintInList": [
+    {
+      "type": 0,
+      "value": "승인은 목록에서도 할 수 있어요"
+    }
+  ],
+  "desktop.workJobs.openToAnswer": [
+    {
+      "type": 0,
+      "value": "열어서 답하기"
+    }
+  ],
+  "desktop.workJobs.reportedTitle": [
+    {
+      "type": 0,
+      "value": "에이전트 보고: "
+    },
+    {
+      "type": 1,
+      "value": "summary"
+    }
+  ],
+  "desktop.workJobs.stateAwaitingApproval": [
+    {
+      "type": 0,
+      "value": "승인 대기"
+    }
+  ],
+  "desktop.workJobs.tagApproval": [
+    {
+      "type": 0,
+      "value": "승인 요청"
+    }
+  ],
+  "desktop.workJobs.tagPermission": [
+    {
+      "type": 0,
+      "value": "권한 요청"
+    }
+  ],
+  "desktop.workPermission.allowInApp": [
+    {
+      "type": 0,
+      "value": "허락은 폰이나 데스크탑 앱에서 보내 주세요"
+    }
+  ],
   "expressions.add.adminsOnly": [
     {
       "type": 0,
@@ -3825,6 +3871,73 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "열기"
+    }
+  ],
+  "inbox.source.channelUnknown": [
+    {
+      "type": 0,
+      "value": "채널"
+    }
+  ],
+  "inbox.source.dm": [
+    {
+      "type": 0,
+      "value": "DM · "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    }
+  ],
+  "inbox.source.dmGroup": [
+    {
+      "type": 0,
+      "value": "DM · "
+    },
+    {
+      "type": 1,
+      "value": "names"
+    },
+    {
+      "type": 0,
+      "value": " 외 "
+    },
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "명"
+    }
+  ],
+  "inbox.source.dmUnknown": [
+    {
+      "type": 0,
+      "value": "DM"
+    }
+  ],
+  "inbox.source.task": [
+    {
+      "type": 0,
+      "value": "처리할 일 · 승인 요청"
+    }
+  ],
+  "inbox.source.thread": [
+    {
+      "type": 0,
+      "value": "스레드 · "
+    },
+    {
+      "type": 1,
+      "value": "channel"
+    }
+  ],
+  "inbox.source.threadUnknown": [
+    {
+      "type": 0,
+      "value": "스레드"
     }
   ],
   "mobile.attachmentSave.failed": [
@@ -7408,6 +7521,12 @@ export const catalog: MessageCatalog = {
       "value": "연결 기록"
     }
   ],
+  "settings.connectionLog.updateCheckFailed": [
+    {
+      "type": 0,
+      "value": "업데이트 확인 실패"
+    }
+  ],
   "settings.connectionLog.wakeLate": [
     {
       "type": 0,
@@ -7548,6 +7667,112 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "기기 언어 따르기"
+    }
+  ],
+  "settings.updates.cutLine": [
+    {
+      "type": 0,
+      "value": "지금 다시 시작하면 끊겨요: "
+    },
+    {
+      "type": 1,
+      "value": "items"
+    }
+  ],
+  "settings.updates.cutPanes": [
+    {
+      "type": 0,
+      "value": "터미널 칸 "
+    },
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "개"
+    }
+  ],
+  "settings.updates.cutSessions": [
+    {
+      "type": 0,
+      "value": "작업 세션 "
+    },
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "개"
+    }
+  ],
+  "settings.updates.cutUnknown": [
+    {
+      "type": 0,
+      "value": "확인하지 못한 작업"
+    }
+  ],
+  "settings.updates.description": [
+    {
+      "type": 0,
+      "value": "앱이 스스로 새 버전으로 바꿔요. 내려받은 파일은 서명을 검증한 뒤에만 설치해요. 설치가 끝나면 앱이 스스로 다시 시작해요. 이 맥에서 도는 작업이 있으면 끝난 뒤에 해요. 쓰던 글은 그대로 남아요."
+    }
+  ],
+  "settings.updates.holdTitle": [
+    {
+      "type": 0,
+      "value": "이 맥의 작업이 끝나면 다시 시작해요"
+    }
+  ],
+  "settings.updates.installRowDescription": [
+    {
+      "type": 0,
+      "value": "설치가 끝나면 앱이 스스로 다시 시작해요. 이 맥에서 도는 작업이 있으면 끝난 뒤에 해요."
+    }
+  ],
+  "settings.updates.lastCheckedLabel": [
+    {
+      "type": 0,
+      "value": "마지막 확인"
+    }
+  ],
+  "settings.updates.notNow": [
+    {
+      "type": 0,
+      "value": "지금 말고"
+    }
+  ],
+  "settings.updates.offChip": [
+    {
+      "type": 0,
+      "value": "확인 안 함"
+    }
+  ],
+  "settings.updates.offSentence": [
+    {
+      "type": 0,
+      "value": "이 앱은 스스로 새 버전을 확인하지 않는 판이에요. 새 버전은 직접 내려받아 설치해요."
+    }
+  ],
+  "settings.updates.restartNow": [
+    {
+      "type": 0,
+      "value": "지금 다시 시작"
+    }
+  ],
+  "settings.updates.stoppedChip": [
+    {
+      "type": 0,
+      "value": "다시 시작 대기"
+    }
+  ],
+  "settings.updates.stoppedSentence": [
+    {
+      "type": 0,
+      "value": "설치를 마쳤어요. 다시 시작하면 새 버전으로 열려요."
     }
   ],
   "teamAi.helper.aliasesLine": [
@@ -8098,6 +8323,189 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "축소"
+    }
+  ],
+  "timeline.memberPanel.agentKind": [
+    {
+      "type": 0,
+      "value": "에이전트"
+    }
+  ],
+  "timeline.memberPanel.elapsedDays": [
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "일째"
+    }
+  ],
+  "timeline.memberPanel.elapsedHours": [
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "시간째"
+    }
+  ],
+  "timeline.memberPanel.elapsedMinutes": [
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "분째"
+    }
+  ],
+  "timeline.memberPanel.groupAgents": [
+    {
+      "type": 0,
+      "value": "에이전트 "
+    },
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    }
+  ],
+  "timeline.memberPanel.groupOffline": [
+    {
+      "type": 0,
+      "value": "오프라인 "
+    },
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    }
+  ],
+  "timeline.memberPanel.groupOnline": [
+    {
+      "type": 0,
+      "value": "온라인 "
+    },
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    }
+  ],
+  "timeline.memberPanel.groupOtherAgents": [
+    {
+      "type": 0,
+      "value": "그 밖의 에이전트 "
+    },
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    }
+  ],
+  "timeline.memberPanel.groupPeople": [
+    {
+      "type": 0,
+      "value": "접속 확인 안 됨 "
+    },
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    }
+  ],
+  "timeline.memberPanel.groupWorking": [
+    {
+      "type": 0,
+      "value": "일하는 에이전트 "
+    },
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    }
+  ],
+  "timeline.memberPanel.listLabel": [
+    {
+      "type": 0,
+      "value": "채널 멤버 목록"
+    }
+  ],
+  "timeline.memberPanel.moreRuns": [
+    {
+      "type": 0,
+      "value": "+"
+    },
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    }
+  ],
+  "timeline.memberPanel.moreRunsSpoken": [
+    {
+      "type": 0,
+      "value": "다른 작업 "
+    },
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "건 더"
+    }
+  ],
+  "timeline.memberPanel.nowFailed": [
+    {
+      "type": 0,
+      "value": "에이전트가 지금 하는 일을 불러오지 못했어요."
+    }
+  ],
+  "timeline.memberPanel.nowRetry": [
+    {
+      "type": 0,
+      "value": "다시 불러오기"
+    }
+  ],
+  "timeline.memberPanel.request": [
+    {
+      "type": 0,
+      "value": "「"
+    },
+    {
+      "type": 1,
+      "value": "text"
+    },
+    {
+      "type": 0,
+      "value": "」"
+    }
+  ],
+  "timeline.memberPanel.requestSpoken": [
+    {
+      "type": 0,
+      "value": "요청: "
+    },
+    {
+      "type": 1,
+      "value": "text"
+    }
+  ],
+  "timeline.memberPanel.stageSpoken": [
+    {
+      "type": 1,
+      "value": "stage"
+    },
+    {
+      "type": 0,
+      "value": " (에이전트 보고)"
     }
   ],
   "timeline.quote.head": [

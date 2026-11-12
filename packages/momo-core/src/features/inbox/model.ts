@@ -215,6 +215,13 @@ export interface FeedItem {
    */
   approvalId?: string;
   /**
+   * 이 승인을 요청한 실행(run)의 id. 승인 행에만 있다(원장 `Approval.runId` 그대로).
+   *
+   * 「작업」 화면의 「응답 필요」 구간(#5640)이 run 줄을 고르는 다리다: 배지가 세는 승인 id(`approvalId`)와 같은 행에서 오므로, 두 자리가
+   * 「내가 결정할 일」을 한 판정으로 읽는다. 결정 컨트롤의 자격은 여전히 `approvalId`가 정한다(이 값은 자격이 아니다).
+   */
+  runId?: string;
+  /**
    * 이 행의 결정이 **어디서 실행할지**까지 묻는가 (ADR-0125 D6-A, #1114).
    *
    * `approvalId`와 같은 조건에서만 실린다(대기 중인 승인 행). 결정할 수 없는 행에
@@ -413,6 +420,7 @@ export function approvalItem(
     key: `approval:${approval.id}`,
     kind: "approval",
     ...(pending ? { approvalId: approval.id } : {}),
+    runId: approval.runId,
     ...(pending && approval.execution !== undefined
       ? { execution: approval.execution }
       : {}),

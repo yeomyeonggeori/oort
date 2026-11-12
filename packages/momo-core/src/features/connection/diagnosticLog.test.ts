@@ -182,6 +182,34 @@ describe("늦게 깬 타이머", () => {
     stop();
     expect(pending).toBeNull();
   });
+
+  it("깬 번마다 onTick을 부르고, 늦게 깬 번에는 onLate 뒤에 부른다 (#5661)", () => {
+    let clock = NOW;
+    let pending: (() => void) | null = null;
+    const calls: string[] = [];
+    const stop = startWakeWatch({
+      now: () => clock,
+      setTimer: (run) => {
+        pending = run;
+        return 1;
+      },
+      clearTimer: () => {
+        pending = null;
+      },
+      onLate: (kind) => calls.push(`late:${kind}`),
+      onTick: (at) => calls.push(`tick:${at - NOW}`),
+    });
+    const fire = (afterMs: number) => {
+      clock += afterMs;
+      const run = pending;
+      pending = null;
+      run?.();
+    };
+    fire(5_000);
+    fire(5_000 + 60 * 60_000); // 한 시간 잠
+    expect(calls).toEqual(["tick:5000", "late:wake.late.1h", `tick:${10_000 + 60 * 60_000}`]);
+    stop();
+  });
 });
 
 describe("상한과 저장 모양", () => {
