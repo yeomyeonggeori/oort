@@ -582,7 +582,10 @@ describe("채널 멤버 패널 캡처 (#5686, 선택)", () => {
       root = null;
       host?.remove();
       host = null;
+      const opening = await openingFrames(300);
       const states: Record<string, string> = {
+        열때첫프레임: opening[0]!.html,
+        열때채워진뒤: opening[opening.length - 1]!.html,
         목록: list,
         아주김: longest,
         로딩: await stateHtml({ members: [], status: "loading" }),
@@ -612,7 +615,12 @@ describe("채널 멤버 패널 캡처 (#5686, 선택)", () => {
             });
             try {
               const p = await ctx.newPage();
-              const names = vp.name === "wide" ? Object.keys(states) : ["목록", "아주김", "지금실패"];
+              const names =
+                vp.name === "wide"
+                  ? Object.keys(states)
+                  : vp.name === "360"
+                    ? ["열때첫프레임", "열때채워진뒤", "목록", "아주김", "지금실패"]
+                    : ["목록", "아주김", "지금실패"];
               for (const name of names) {
                 await p.setContent(page(css, states[name]!, vp.rootFontPx));
                 const file = join(SHOTS, `${name}-${colorScheme}-${vp.name}.png`);
