@@ -2182,8 +2182,8 @@ paths:
         v4 P7 / #5369: how many times a day the helper may hand a request to the
         team's Hermes) is a whole number from 1 to 200 whose absence means the
         default 30, never "no limit" — the server operator's
-        `TEAM_AI_HERMES_DAILY_CAP` (empty = the delegation is closed) is a
-        ceiling over it. `0`, a negative, a fraction for a
+        `TEAM_AI_HERMES_DAILY_CAP` (empty = no ceiling, `0` = the delegation is
+        off — #5685) is a ceiling over it. `0`, a negative, a fraction for a
         count, a non-number and an unknown field are 400; "no limit" is the
         absence of a field, never `0`. Merged one level down like
         `team_ai_roles` — a named field replaces, an omitted field stays, a
@@ -26370,7 +26370,7 @@ components:
             dailyTokens: {type: integer, format: int64, minimum: 1, description: "Tokens (prompt + completion) per UTC day."}
             dailySearches: {type: integer, format: int64, minimum: 1, description: "Provider-side web searches per UTC day."}
             monthlyUsd: {type: number, minimum: 0.000001, maximum: 1000000, description: "Public list-price equivalent per UTC calendar month (read-time, not the provider's invoice)."}
-            dailyDelegations: {type: integer, format: int64, minimum: 1, maximum: 200, description: "Times per UTC day the helper may hand a request to the team's Hermes (ADR-0201 증보 v4 P7). Absent = the default 30, not 'no limit'; the operator's TEAM_AI_HERMES_DAILY_CAP (empty = closed) is a ceiling over it."}
+            dailyDelegations: {type: integer, format: int64, minimum: 1, maximum: 200, description: "Times per UTC day the helper may hand a request to the team's Hermes (ADR-0201 증보 v4 P7). Absent = the default 30, not 'no limit'; the operator's TEAM_AI_HERMES_DAILY_CAP (empty = no ceiling, 0 = off — #5685) is a ceiling over it."}
         team_ai_limits_status:
           $ref: "#/components/schemas/TeamAiLimitsStatus"
         team_ai_alias_status:
@@ -26544,8 +26544,8 @@ components:
         **The delegation to the team's Hermes** (ADR-0201 증보 v4 P7·P8, #5374) rides the same objects
         under the setting's own name (`dailyDelegations`, `todayDelegations`) plus
         `delegationAvailable`/`delegationUnavailableReason` — and runs the other way round: an unset
-        workspace value is the default 30 (never "no limit"), and an unset operator ceiling
-        (`TEAM_AI_HERMES_DAILY_CAP` empty, blank or `0`) is **closed**. A server older than #5374 sends
+        workspace value is the default 30 (never "no limit"). An unset operator ceiling
+        (`TEAM_AI_HERMES_DAILY_CAP` empty or blank) is no ceiling since #5685; only its `0` is **closed**. A server older than #5374 sends
         none of these fields; a client reads their absence as "unknown, closed". No agent or member is
         named anywhere in the delegation fields.
       required: [limits, effective, operatorCeiling, usage, monthlyUsdAvailable, dayResetsAtMs, monthResetsAtMs, delegationAvailable, delegationUnavailableReason]
@@ -26565,29 +26565,29 @@ components:
             The cap that applies after the operator's ceiling: the lower of the workspace's limit and
             the ceiling, `null` for none. `0` is the operator's off switch (the helper for tokens,
             web search for searches). `dailyDelegations` is never `null`: it is
-            `min(the workspace's value or the default 30, the operator's ceiling)`, and `0` when the
-            ceiling is unset — the delegation is closed.
+            the workspace's value or the default 30, lowered by a positive operator ceiling, and `0`
+            when the operator's ceiling is `0` — the delegation is closed (an unset ceiling is no
+            ceiling, #5685).
           required: [dailyTokens, dailySearches, dailyDelegations]
           properties:
             dailyTokens: {type: integer, format: int64, nullable: true}
             dailySearches: {type: integer, format: int64, nullable: true}
-            dailyDelegations: {type: integer, format: int64, minimum: 0, maximum: 200, description: "The day's delegations to Hermes this workspace may make; 0 = closed (no operator ceiling)."}
+            dailyDelegations: {type: integer, format: int64, minimum: 0, maximum: 200, description: "The day's delegations to Hermes this workspace may make; 0 = closed (the operator's ceiling is 0)."}
         operatorCeiling:
           type: object
           description: >
             The server operator's env ceilings as the api process reads them
             (`TEAM_AI_DAILY_TOKEN_CAP`, `TEAM_AI_DAILY_SEARCH_CAP`, `TEAM_AI_HERMES_DAILY_CAP`; set the same
             values on the api and the agent-worker — the worker enforces, the api only explains). `null` =
-            no ceiling — except `dailyDelegations`, whose `null` is the closed delegation
-            (`delegationOff`).
+            no ceiling (each `0` is its own flag: `helperOff`, `searchOff`, `delegationOff`).
           required: [dailyTokens, dailySearches, helperOff, searchOff, dailyDelegations, delegationOff]
           properties:
             dailyTokens: {type: integer, format: int64, nullable: true}
             dailySearches: {type: integer, format: int64, nullable: true}
             helperOff: {type: boolean, description: "TEAM_AI_DAILY_TOKEN_CAP=0 — the operator switched the helper off."}
             searchOff: {type: boolean, description: "TEAM_AI_DAILY_SEARCH_CAP=0 — web search is off for everyone."}
-            dailyDelegations: {type: integer, format: int64, minimum: 1, nullable: true, description: "TEAM_AI_HERMES_DAILY_CAP as a positive per-workspace ceiling; null when unset, blank or 0 (closed)."}
-            delegationOff: {type: boolean, description: "TEAM_AI_HERMES_DAILY_CAP is unset, blank or 0 — the delegation to Hermes is closed (P7 「미설정 = 끔」). True exactly when dailyDelegations is null."}
+            dailyDelegations: {type: integer, format: int64, minimum: 1, nullable: true, description: "TEAM_AI_HERMES_DAILY_CAP as a positive per-workspace ceiling; null when unset or blank (no ceiling, #5685) or 0 (off — see delegationOff)."}
+            delegationOff: {type: boolean, description: "TEAM_AI_HERMES_DAILY_CAP=0 (or a value the api cannot read) — the operator switched the delegation to Hermes off. Unset or blank is no ceiling and false (#5685)."}
         usage:
           type: object
           required: [todayTokens, todaySearches, monthCostMicroUsd, monthRuns, monthUnpricedRuns, monthEstimatedRuns, todayDelegations]

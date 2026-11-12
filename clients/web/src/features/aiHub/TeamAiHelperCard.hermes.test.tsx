@@ -74,19 +74,22 @@ afterEach(() => {
   host = null;
 });
 
-/** 서버 `limits_status_in_tx` 의 모양 + 위임 칸. `ceiling` 이 `null` 이면 지금 운영(닫힘)이다. */
-function limitsBag(ceiling: number | null) {
+/** 서버 `limits_status_in_tx` 의 모양 + 위임 칸. `ceiling` 이 `null` 이면 운영자가 `0`으로 끈 서버(닫힘),
+ * `"none"` 이면 천장이 없는 서버(천장 숫자 `null` + 끔 아님)다. */
+function limitsBag(ceiling: number | null | "none") {
+  const off = ceiling === null;
+  const cap = typeof ceiling === "number" ? ceiling : null;
   return {
     team_ai_limits_status: {
       limits: { dailyTokens: null, dailySearches: null, monthlyUsd: null, dailyDelegations: null },
-      effective: { dailyTokens: null, dailySearches: null, dailyDelegations: ceiling === null ? 0 : Math.min(30, ceiling) },
+      effective: { dailyTokens: null, dailySearches: null, dailyDelegations: off ? 0 : Math.min(30, cap ?? 30) },
       operatorCeiling: {
         dailyTokens: null,
         dailySearches: null,
         helperOff: false,
         searchOff: false,
-        dailyDelegations: ceiling,
-        delegationOff: ceiling === null,
+        dailyDelegations: cap,
+        delegationOff: off,
       },
       usage: {
         todayTokens: 0,
@@ -99,8 +102,8 @@ function limitsBag(ceiling: number | null) {
       },
       monthlyUsdAvailable: true,
       monthlyUsdUnavailableReason: null,
-      delegationAvailable: ceiling !== null,
-      delegationUnavailableReason: ceiling === null ? "ceiling_unset" : null,
+      delegationAvailable: !off,
+      delegationUnavailableReason: off ? "ceiling_unset" : null,
       dayResetsAtMs: Date.now() + 3_600_000,
       monthResetsAtMs: Date.now() + 360_000_000,
     },
@@ -139,12 +142,19 @@ describe("도우미 카드의 「Hermes 도움」 행", () => {
     expect(fetchLimits).toHaveBeenCalledWith(WS);
   });
 
-  it("지금 운영(천장 없음): 행이 서고 「지금은 쓸 수 없어요.」 + 천장 까닭", async () => {
+  it("천장이 없는 서버(숫자 없음 + 끔 아님): 행이 서고 「쓸 수 없어요」 줄이 없다", async () => {
+    fetchLimits.mockResolvedValue(limitsBag("none"));
+    await mount();
+    expect(row()).not.toBeNull();
+    expect(document.querySelector('[data-testid="team-ai-helper-role-unavailable-hermes"]')).toBeNull();
+  });
+
+  it("운영자가 0으로 끈 서버: 행이 서고 「지금은 쓸 수 없어요.」 + 천장 까닭", async () => {
     fetchLimits.mockResolvedValue(limitsBag(null));
     await mount();
     expect(row()).not.toBeNull();
     expect(document.querySelector('[data-testid="team-ai-helper-role-unavailable-hermes"]')?.textContent).toBe(
-      "지금은 쓸 수 없어요. 서버 운영자가 아직 Hermes 맡기기를 열지 않았어요."
+      "지금은 쓸 수 없어요. 서버 운영자가 Hermes 맡기기를 꺼 두었어요."
     );
   });
 

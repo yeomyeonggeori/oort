@@ -88,7 +88,7 @@
   "teamAi.delegation.reasonToolsNotLocked": "서버 운영자가 Hermes의 도구 잠금을 선언하지 않았어요.",
   "teamAi.delegation.reasonConnectionMode": "개인 앱이 연결된 Hermes라서 맡길 수 없어요.",
   "teamAi.delegation.reasonPinUnresolved": "서버에 Hermes 연결 정보가 없어요.",
-  "teamAi.delegation.reasonCeilingUnset": "서버 운영자가 아직 Hermes 맡기기를 열지 않았어요.",
+  "teamAi.delegation.reasonCeilingUnset": "서버 운영자가 Hermes 맡기기를 꺼 두었어요.",
   "teamAi.delegation.reasonDailyCap": "오늘 Hermes에 맡길 수 있는 횟수를 다 썼어요.",
   "teamAi.delegation.reasonUnknown": "지금 상태를 알 수 없어요."
 }

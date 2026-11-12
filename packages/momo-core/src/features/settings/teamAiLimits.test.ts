@@ -164,7 +164,24 @@ describe("계산된 읽기 (?include=team_ai_limits_status)", () => {
     ).toMatchObject({ known: true, limit: null, effective: 30 });
   });
 
-  it("천장이 비면 닫힘이다: 실제 상한 0 + 끔 표지 + 까닭 ceiling_unset", () => {
+  it("천장 숫자 없음 + 끔 아님은 천장 없음이다: 알려진 상태이고 워크스페이스 값(없으면 30)이 그대로 상한이다", () => {
+    const read = delegationRead((s) => ({
+      ...s,
+      limits: { ...s.limits, dailyDelegations: null },
+      effective: { ...s.effective, dailyDelegations: 30 },
+      operatorCeiling: { ...s.operatorCeiling, dailyDelegations: null, delegationOff: false },
+    }));
+    expect(read?.delegation).toMatchObject({
+      known: true,
+      limit: null,
+      effective: 30,
+      ceiling: null,
+      ceilingOff: false,
+      available: true,
+    });
+  });
+
+  it("운영자가 0으로 끄면 닫힘이다(옛 서버의 「천장 숫자 없음 = 끔」도 같다): 실제 상한 0 + 끔 표지 + 까닭 ceiling_unset", () => {
     const read = delegationRead((s) => ({
       ...s,
       effective: { ...s.effective, dailyDelegations: 0 },
@@ -217,6 +234,11 @@ describe("계산된 읽기 (?include=team_ai_limits_status)", () => {
       ["끔인데 실제 상한이 0이 아님", (s) => ({
         ...s,
         operatorCeiling: { ...s.operatorCeiling, dailyDelegations: null, delegationOff: true },
+      })],
+      ["천장 없음인데 실제 상한 0", (s) => ({
+        ...s,
+        effective: { ...s.effective, dailyDelegations: 0 },
+        operatorCeiling: { ...s.operatorCeiling, dailyDelegations: null, delegationOff: false },
       })],
       ["열렸다면서 까닭", (s) => ({ ...s, delegationUnavailableReason: "daily_cap" })],
       ["닫혔다면서 까닭 없음", (s) => ({ ...s, delegationAvailable: false })],

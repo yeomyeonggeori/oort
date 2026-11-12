@@ -42,10 +42,12 @@
 //!
 //! ## What is closed by default in production (사용자 영향 0)
 //!
-//! The operator's per-workspace ceiling (`TEAM_AI_HERMES_DAILY_CAP`) is **unset = closed**; the kind
-//! declarations are unset = no kind; the image kind needs the operator's `…_IMAGE_TOOL` declaration on top of the
-//! code constant S4 turned on ([`ATTACHMENT_WRITE_PATH_READY`]). A deployment therefore opens nothing by
-//! itself: with no ceiling the door is shut before any kind is looked at.
+//! The kind declarations are unset = no kind, and G4's tool lock is unset = not declared; the image kind needs
+//! the operator's `…_IMAGE_TOOL` declaration on top of the code constant S4 turned on
+//! ([`ATTACHMENT_WRITE_PATH_READY`]). A deployment therefore opens nothing by itself: with no kind declared the
+//! door offers nothing. The operator's per-workspace ceiling (`TEAM_AI_HERMES_DAILY_CAP`) is **unset = no
+//! ceiling** since ADR-0201 증보 2026-11-12 (#5685) — the workspace's day cap (default 30) still binds — and
+//! its `0` is the operator's off switch.
 
 use momo_agent::connector_trial::{
     ConnectorTrialAttest, ENV_CONNECTORS_LOCKED, ENV_CONNECTOR_APPS,
@@ -386,8 +388,9 @@ pub fn mentions_target(trigger: &str, target: &HermesTarget) -> bool {
 /// the default, the operator's ceiling and the task bounds folded in). Built by the worker.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct DelegationBounds {
-    /// `min(workspace cap or the default 30, operator ceiling)`; **`None` = closed** — the operator has
-    /// not opened the delegation (`TEAM_AI_HERMES_DAILY_CAP` unset, blank or `0`).
+    /// The workspace cap or the default 30, lowered by a positive operator ceiling
+    /// ([`crate::team_ai_limits::delegation_cap`]); **`None` = closed** — the operator switched the delegation
+    /// off (`TEAM_AI_HERMES_DAILY_CAP=0`). An unset ceiling is no ceiling and never `None` (#5685).
     pub day_cap: Option<i64>,
     /// [`REQUESTER_WINDOW_MAX`] in ten minutes.
     pub requester_window_max: i64,
@@ -419,7 +422,8 @@ pub struct DelegationUsage {
 /// Why G6 is shut.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LimitProblem {
-    /// The operator's ceiling is unset (or `0`): the delegation is **closed**, not unlimited.
+    /// The operator's ceiling is `0`: the delegation is **closed**. Since #5685 an unset ceiling is no ceiling
+    /// and never this; the name and its word `ceiling_unset` stay as they were (the wire is unchanged).
     CeilingUnset,
     /// The day's cap is spent.
     DayCap,
@@ -686,7 +690,8 @@ impl DoorFacts {
     }
 
     /// Has the operator done everything it takes to open the delegation — the declarations hold, at least
-    /// one kind is declared and the ceiling is set? Only then does a closed door say anything to the
+    /// one kind is declared and the delegation is not switched off (`0`; an unset ceiling is no ceiling,
+    /// #5685)? Only then does a closed door say anything to the
     /// model ([`Self::prompt`]): an instance that never opted in is not given a sentence about a
     /// capability nobody switched on (사용자 영향 0).
     pub fn operator_opted_in(&self) -> bool {
@@ -749,7 +754,8 @@ pub struct SettingsDoorFacts {
     pub declarations: HermesDeclarations,
     /// G5 ([`operator_env_pin_resolves`]).
     pub pin_resolves: bool,
-    /// G6: `min(workspace cap or the default 30, operator ceiling)`; `None` = closed (P7 「미설정 = 끔」).
+    /// G6: the workspace cap or the default 30, lowered by a positive operator ceiling; `None` = closed — the
+    /// operator's `0` only (an unset ceiling is no ceiling, ADR-0201 증보 2026-11-12 #5685).
     pub day_cap: Option<i64>,
     /// G6: delegations at or past `called` today (UTC).
     pub today: i64,
@@ -1270,7 +1276,7 @@ mod tests {
             }),
             Err(LimitProblem::TasksBusy)
         );
-        // the operator's ceiling unset is closed whatever else is true — even with room everywhere
+        // the operator's `0` (no day cap at all) is closed whatever else is true — even with room everywhere
         let closed = DelegationBounds {
             day_cap: None,
             ..bounds()
@@ -1652,12 +1658,13 @@ mod tests {
         assert_eq!(almost.closed(), None);
         almost.today = 31;
         assert_eq!(almost.closed().map(DoorClosed::word), Some("daily_cap"));
-        // the door's order: a fresh instance (nothing connected, no lock, no ceiling) names G3 first
+        // the door's order: a fresh instance (nothing connected, no lock, no ceiling = the default 30) names
+        // G3 first
         let fresh = SettingsDoorFacts {
             target: TargetResolution::None,
             declarations: HermesDeclarations::default(),
             pin_resolves: false,
-            day_cap: None,
+            day_cap: Some(30),
             today: 0,
         };
         assert_eq!(
@@ -1798,7 +1805,7 @@ mod tests {
                 "an instance that never opened it says nothing"
             );
         }
-        // limits by a count: the honest sentence; a number the operator unset: nothing
+        // limits by a count: the honest sentence; the operator's `0`: nothing
         let mut spent = open_facts();
         spent.usage.today = 30;
         assert_eq!(spent.prompt(false), HermesPrompt::LimitReached);
@@ -1807,9 +1814,9 @@ mod tests {
             .line()
             .unwrap()
             .contains(HERMES_LIMIT_SENTENCE));
-        let mut unset = open_facts();
-        unset.bounds.day_cap = None;
-        assert_eq!(unset.prompt(false), HermesPrompt::Off);
+        let mut switched_off = open_facts();
+        switched_off.bounds.day_cap = None;
+        assert_eq!(switched_off.prompt(false), HermesPrompt::Off);
         // other closed gates are silent
         for shut in [
             Box::new(|f: &mut DoorFacts| f.direct_mention = true) as Box<dyn Fn(&mut DoorFacts)>,

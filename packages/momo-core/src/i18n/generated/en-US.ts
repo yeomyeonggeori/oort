@@ -7774,7 +7774,7 @@ export const catalog: MessageCatalog = {
   "teamAi.delegation.reasonCeilingUnset": [
     {
       "type": 0,
-      "value": "The server operator has not opened Hermes help yet."
+      "value": "The server operator has turned off Hermes help."
     }
   ],
   "teamAi.delegation.reasonConnectionMode": [

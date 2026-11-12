@@ -533,6 +533,7 @@ describe("맡겨 받은 그림·쓴 양 줄이 늦게 와도 대화가 밀리지
             ]),
             "settings-on": settingsBoard(delegation()),
             "settings-bundle-off": settingsBoard(delegation(), false),
+            "settings-no-ceiling": settingsBoard(delegation({ ceiling: null, ceilingOff: false, limit: null, effective: 30 })),
             "settings-ops-off": settingsBoard(delegation({ ceiling: null, ceilingOff: true, effective: 0, available: false, unavailableReason: "ceiling_unset" })),
             "settings-not-connected": settingsBoard(delegation({ available: false, unavailableReason: "hermes_not_connected" })),
           };

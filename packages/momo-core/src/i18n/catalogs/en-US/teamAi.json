@@ -88,7 +88,7 @@
   "teamAi.delegation.reasonToolsNotLocked": "The server operator has not declared Hermes's tool lock.",
   "teamAi.delegation.reasonConnectionMode": "This Hermes has personal apps connected, so nothing can be handed to it.",
   "teamAi.delegation.reasonPinUnresolved": "The server has no connection details for Hermes.",
-  "teamAi.delegation.reasonCeilingUnset": "The server operator has not opened Hermes help yet.",
+  "teamAi.delegation.reasonCeilingUnset": "The server operator has turned off Hermes help.",
   "teamAi.delegation.reasonDailyCap": "Today's Hermes requests are used up.",
   "teamAi.delegation.reasonUnknown": "The current status is unknown."
 }
