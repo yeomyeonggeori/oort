@@ -419,10 +419,17 @@ export function ChatShell() {
   // failure is what makes the retry the comment already promised real: the next
   // run of this effect (a new message, a remount, a channel round trip) sends
   // it again.
+  //
+  // #5660 H1: only while someone is looking at this conversation (window in front and document visible — the same
+  // `documentForeground` judgment as the thread panel's read signal). The webview now stays alive behind the window, so a
+  // mention or DM arriving in the conversation left open would otherwise be marked read at once: no menu-bar dot, and the
+  // phone's unread cleared too. Coming back to the front runs this effect again and advances once then.
   const newestSeq = timeline.state.newestSeq;
+  const viewingChannel = useDocumentForeground(stressCount === 0 && channelId !== null);
   useEffect(() => {
     if (stressCount > 0 || newestSeq === null || channelId === null) return;
     if (readStates.isPending) return;
+    if (!viewingChannel) return;
     if (!openedWith || !uuidEq(openedWith.channelId, channelId)) return;
     const key = `${channelId}:${newestSeq}`;
     if (markedRef.current === key) return;
@@ -456,6 +463,7 @@ export function ChatShell() {
     invalidateReadStates,
     openedWith,
     readStates.isPending,
+    viewingChannel,
   ]);
 
   const [thread, setThread] = useState<Message | null>(null);

@@ -23,6 +23,9 @@
 //     이어서 다른 기기에서 그 스레드를 읽음 → 점이 꺼짐(각 목표 5초)
 //   F 뒤에 40초, 웹뷰도 소켓도 살아 있었다(수리 뒤 데스크탑의 보통 경우) → 그 사이 온 글은 이미 들어와 있고, 돌아와도 소켓을 다시 열지
 //     않는다(다시 붙기 0회, 연결 화면 0회). 소켓이 「들은 시각」(`lastHeardAt`)이 실제 엔진에서 잡히는지가 여기서 갈린다
+//   I 창을 치운 채 **열어 둔 채널**에서 나를 멘션 → 메뉴 막대 점이 켜지고(목표 1초) 치워 둔 동안 읽음 요청(`PUT read-state`)이 한 건도 나가지
+//     않는다. 앞으로 오면 그때 읽음이 오르고 점이 꺼진다(목표 5초)
+//   J 같은 것을 **열어 둔 DM**으로(장면 G 는 열지 않은 DM 이다)
 //
 // 5분·30분 장면은 따로 재지 않는다: 번들의 판단은 「30초 넘게 자리를 비웠다」 한 갈래라 35초(B)와 같은 길을 간다. 실제 시간의 길이가
 // 다르게 만드는 것(웹뷰 멈춤·앱 낮잠·잠자기)은 데스크탑 실물에서만 잴 수 있다(인계의 runtime-unverified 절차).
@@ -172,7 +175,29 @@ async function debugShot(page) {
 /** 장면 G 의 1:1 DM(나와 PEER). */
 const DM_ID = "00000000-0000-7000-8000-0000000002d1";
 
-async function openScene(browser, { dm = false } = {}) {
+/**
+ * `PUT …/channels/{id}/read-state`(읽음 위치 올리기)를 받는 서버 흉내(장면 I·J). 받은 요청을 `puts`에 적고, 그 줄의 읽음 위치를 올린다.
+ * 서버처럼 그 채널의 최신 번호까지만 올린다(`LEAST(요청, latest_seq)`). 위치가 최신에 닿으면 멘션 수도 0이 된다(서버는 위치 뒤의 멘션만 센다).
+ */
+async function installReadPut(context, backend, puts) {
+  await context.route(/\/channels\/[^/]+\/read-state$/, async (route) => {
+    const request = route.request();
+    if (request.method() !== "PUT") return route.fallback();
+    const channelId = new URL(request.url()).pathname.split("/channels/")[1].split("/")[0].toUpperCase();
+    const body = JSON.parse(request.postData() ?? "{}");
+    puts.push({ at: Date.now(), channelId, seq: body.last_read_seq, intent: body.read_intent ?? null });
+    let row = null;
+    backend.state.readStates = backend.state.readStates.map((r) => {
+      if (r.channel_id !== channelId) return r;
+      const read = Math.max(r.last_read_seq, Math.min(Number(body.last_read_seq), r.latest_seq));
+      row = { ...r, last_read_seq: read, unread_count: Math.max(0, r.latest_seq - read), mention_count: read >= r.latest_seq ? 0 : r.mention_count };
+      return row;
+    });
+    return route.fulfill({ status: row === null ? 404 : 200, contentType: "application/json", body: JSON.stringify(row ?? {}) });
+  });
+}
+
+async function openScene(browser, { dm = false, readPuts = null } = {}) {
   const context = await browser.newContext({
     viewport: { width: 1280, height: 820 },
     locale: "ko-KR",
@@ -190,6 +215,7 @@ async function openScene(browser, { dm = false } = {}) {
     );
     backend.state.readStates.push(readStateRow(DM_ID, 2, 2, 0));
   }
+  if (readPuts !== null) await installReadPut(context, backend, readPuts);
   const page = await context.newPage();
   await installPageShims(page);
   try {
@@ -550,6 +576,86 @@ async function sceneH(browser) {
   }
 }
 
+/**
+ * 장면 I(열어 둔 채널에서 멘션)·J(열어 둔 DM): 창을 치운 채 열어 둔 대화에 나를 부르는 글이 온다. 예전에는 숨은 페이지가 곧바로 그 글까지
+ * 읽음으로 올려서(`PUT read-state`) 점이 켜지지 않았고 서버의 안 읽음(다른 기기의 표시)까지 지워졌다. 이제는 점이 켜져 남고 읽음 요청은 0건,
+ * 앞으로 오면 그때 읽음이 오르고 점이 꺼진다.
+ */
+async function openConversationScene(browser, { dm }) {
+  const scene = dm ? "J" : "I";
+  const channelId = (dm ? DM_ID : GENERAL_ID).toUpperCase();
+  const puts = [];
+  const { context, page, backend } = await openScene(browser, { dm, readPuts: puts });
+  const trayLit = (on) =>
+    timeUntil(
+      page,
+      (want) => {
+        const sent = window.__invokes.filter((call) => call.cmd === "tray_status_set");
+        const unread = sent.length === 0 ? 0 : sent[sent.length - 1].args.status.unread;
+        return want ? unread > 0 : sent.length > 0 && unread === 0;
+      },
+      on,
+      15_000
+    );
+  try {
+    if (dm) {
+      await page.locator(`[data-channel-id="${DM_ID}"]`).first().click();
+      await page.getByTestId("composer-input").waitFor({ state: "visible" });
+      await sleep(1_500);
+    }
+    await page.evaluate(() => window.__away());
+    await sleep(2_000);
+    check((await trayUnread(page)) === 0, `${scene}: 시작할 때 메뉴 막대 점이 이미 켜져 있다`);
+    const seq = backend.state.readStates.find((r) => r.channel_id === channelId).latest_seq + 1;
+    const row = dm
+      ? peerMessage(seq, "열어 둔 DM 으로 온 글", { channelId: DM_ID })
+      : peerMessage(seq, "열어 둔 채널에서 부르는 글", { props: { mention_member_ids: [ME.toUpperCase()] } });
+    backend.state.extraMessages.push(row);
+    backend.state.readStates = backend.state.readStates.map((r) =>
+      r.channel_id === channelId
+        ? { ...r, latest_seq: seq, unread_count: seq - r.last_read_seq, mention_count: r.mention_count + (dm ? 0 : 1) }
+        : r
+    );
+    const t0 = Date.now();
+    backend.publish(channelRail(channelId.toLowerCase()), messageNewFrame(row));
+    backend.publish(personalRail, {
+      type: "inbox_item.created",
+      v: 1,
+      ts: t0,
+      payload: { item_id: dm ? "0199aa11-4444-7000-8000-000000000012" : "0199aa11-4444-7000-8000-000000000011" },
+    });
+    const onMs = await trayLit(true);
+    await sleep(3_000); // 켜진 채 남는가, 그동안 숨은 페이지가 읽음을 올리는가
+    const awayPuts = puts.filter((p) => p.at >= t0 && p.channelId === channelId).length;
+    const litAfterHold = ((await trayUnread(page)) ?? 0) > 0;
+    const tBack = Date.now();
+    await page.evaluate(() => window.__back());
+    const offMs = await trayLit(false);
+    await sleep(500);
+    const backPuts = puts.filter((p) => p.at >= tBack && p.channelId === channelId).map((p) => p.seq);
+    const serverUnread = backend.state.readStates.find((r) => r.channel_id === channelId).unread_count;
+    results.push({
+      scene,
+      label: `창을 치운 채 열어 둔 ${dm ? "DM 에 새 글" : "채널에서 멘션"} → 점, 앞으로 오면 읽음`,
+      ms: onMs,
+      awayPuts,
+      litAfterHold,
+      offMs,
+      backPuts,
+      serverUnreadAfterBack: serverUnread,
+    });
+    check(onMs !== null && onMs <= 1_000, `${scene}: 메뉴 막대 점까지 ${onMs}ms (1초 안이어야, null = 켜지지 않음)`);
+    check(awayPuts === 0, `${scene}: 치워 둔 동안 읽음 요청 ${awayPuts}건 (0건이어야)`);
+    check(litAfterHold, `${scene}: 점이 켜진 채 남지 않았다`);
+    check(backPuts.includes(seq), `${scene}: 앞으로 온 뒤 읽음 요청이 새 글(${seq})까지 오르지 않았다: ${JSON.stringify(backPuts)}`);
+    check(offMs !== null && offMs <= 5_000, `${scene}: 앞으로 온 뒤 점이 꺼지기까지 ${offMs}ms (5초 안이어야)`);
+  } finally {
+    await context.close();
+  }
+}
+const sceneI = (browser) => openConversationScene(browser, { dm: false });
+const sceneJ = (browser) => openConversationScene(browser, { dm: true });
+
 async function sceneF(browser) {
   const { context, page, backend } = await openScene(browser);
   try {
@@ -590,7 +696,7 @@ async function main() {
   try {
     const browser = await engine.launch();
     try {
-      const scenes = { A: sceneA, B: sceneB, C: sceneC, D: sceneD, E: sceneE, F: sceneF, G: sceneG, H: sceneH };
+      const scenes = { A: sceneA, B: sceneB, C: sceneC, D: sceneD, E: sceneE, F: sceneF, G: sceneG, H: sceneH, I: sceneI, J: sceneJ };
       for (const [name, run] of Object.entries(scenes)) {
         if (only !== null && !only.has(name)) continue;
         await run(browser);
