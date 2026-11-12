@@ -91,10 +91,15 @@ const doneRows = Array.from({ length: 12 }, (_, i) => ({
 // 남(이서연)의 로컬 공유 터미널: 그 기기의 입력 대기라 누구에게나 `waiting`이다. 「팀 전체」에만 보인다.
 const othersTerminal = { source: "session", sessionId: id(5), origin: "local_pty", label: "검색 색인 다시 만들기", folderLabel: "oort", status: "running", owner: seoyeon, homeChannel: { id: bench.id, name: "workbench" }, startedAtMs: NOW - 47 * 60_000, endedAtMs: null, sharedAtMs: NOW - 40 * 60_000, repo: "oort", branch: "fix/index", harness: "claude", state: "waiting", stages: [], diff: { ...none, added: 12, deleted: 3, files: 2 }, prUrl: null, lastActivityAt: sec - 200 };
 
-// 인박스 배지가 읽는 승인 원장: run 하나에 내 결정을 기다리는 승인.
+// 수리 3회차 장면용 두 번째 결정자 줄(`state.twoDeciders`일 때만): 「응답 필요」에 승인·거부가 선 줄이 둘.
+const runApproval2 = { ...runBase, runId: id(7), label: "결제 재시도 정책 문서를 #billing-ops에 올리기", status: "running", state: "running", phase: "awaiting_approval", trigger: "mention", startedAtMs: NOW - 5 * 60_000, stepCount: 1, lastActivityAt: sec - 65 };
+
+// 인박스 배지가 읽는 승인 원장: run 하나에 내 결정을 기다리는 승인(두 번째 결정자 장면이면 둘).
 const approvals = [
   { id: id(50), workspaceId, runId: runApproval.runId, channelId: lab.id, requestedBy: agentId, actionType: "tool_call", toolName: "message.send", status: "pending", expiresAtMs: NOW + 30 * 60_000 },
 ];
+const approval2 = { id: id(51), workspaceId, runId: runApproval2.runId, channelId: lab.id, requestedBy: agentId, actionType: "tool_call", toolName: "message.send", status: "pending", expiresAtMs: NOW + 30 * 60_000 };
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 const host = { id: hostId, workspaceId, scope: "member", ownerMemberId: memberId, type: "app", displayName: "도현 맥북", capabilities: { terminal: true }, lastSeenAtMs: NOW, createdAtMs: NOW - 86_400_000, online: true };
 const ledgerSession = (row) => ({ id: row.sessionId, workspaceId, channelId: lab.id, memberId, hostId, rootMessageId: row.sessionId.replace(/9(\d\d)$/, "8$1"), tool: row.harness, label: row.label, status: "running", observation: "open", observerGrantCount: 0, remoteAttachAvailable: false, remoteDisplayAvailable: false, startedAtMs: row.startedAtMs });
@@ -108,10 +113,27 @@ const json = (route, body, status = 200) => route.fulfill({ status, contentType:
 
 /** 서버 흉내(#5639): 주인이 `include=jobs`로 읽을 때만 대기 요청이 있는 실행 중 맥 세션이 `waiting`. */
 function boardView(state) {
-  const view = (row) => (row.origin === "host" && row.owner.memberId === memberId && state.waiting.has(row.sessionId) ? { ...row, state: "waiting" } : row);
-  const mine = [macWaiting, runApproval, runNonDecider, macQuiet, runWorking, ...doneRows].map(view);
-  const team = [macWaiting, runApproval, runNonDecider, othersTerminal, macQuiet, runWorking, ...doneRows].map(view);
+  // 결정이 닿은 run은 서버가 다시 돌린다(phase `running`).
+  const view = (row) =>
+    row.origin === "host" && row.owner.memberId === memberId && state.waiting.has(row.sessionId)
+      ? { ...row, state: "waiting" }
+      : row.runId && state.decidedRuns.has(row.runId)
+        ? { ...row, phase: "running" }
+        : row;
+  const second = state.twoDeciders ? [runApproval2] : [];
+  const mine = [macWaiting, runApproval, ...second, runNonDecider, macQuiet, runWorking, ...doneRows].map(view);
+  const team = [macWaiting, runApproval, ...second, runNonDecider, othersTerminal, macQuiet, runWorking, ...doneRows].map(view);
   return { mine, team };
+}
+
+/** 서버가 쓴 카드 문장과 `canDecide`(run 진행). 늦은 거절 장면(`state.progress`)에서만 답한다. */
+function progressRows(state) {
+  const row = (run, approvalId, intent, canDecide) => ({ id: run.runId, channelId: lab.id, agentMemberId: agentId, status: "running", phase: "awaiting_approval", leaseState: "live", stepCount: 1, ahead: [], createdAtMs: NOW - 300_000, updatedAtMs: NOW - 60_000, bundle: { approvalId, status: "pending", decisionMode: "inline", canDecide, actionType: "tool_call", intent } });
+  return [
+    row(runApproval, id(50), "#launch 채널에 v0.1.46 공지를 올려도 될까요?", state.progress.aCanDecide !== false),
+    // B는 문장 없이(원장 행의 문장 그대로): 거절이 닿을 때 B의 줄 높이가 바뀌지 않아 B가 A의 자리로 그대로 올라온다.
+    row(runApproval2, id(51), undefined, true),
+  ];
 }
 
 async function installRoutes(context, state) {
@@ -126,17 +148,34 @@ async function installRoutes(context, state) {
     if (path.endsWith("/read-state")) return json(route, { read_states: [] });
     if (path.endsWith("/decision")) {
       state.decisions += 1;
+      const approvalId = path.split("/").at(-2);
+      state.decidedOrder.push(approvalId);
       if (state.decision === "hold") return; // 답을 붙잡아 「보내는 중」을 잰다(컨텍스트를 닫으면 끝난다).
       if (state.decision === "fail") return json(route, {}, 500);
-      state.decided = true;
+      // 서버 왕복(수리 3회차): 결정은 바로 기록되고 답은 `decisionDelayMs` 뒤에 온다.
+      state.decidedIds.add(approvalId);
+      const decidedRun = [...approvals, approval2].find((a) => a.id === approvalId)?.runId;
+      if (decidedRun) state.decidedRuns.add(decidedRun);
+      if (state.decisionDelayMs) await sleep(state.decisionDelayMs);
       return json(route, { status: "approved", decided_by: memberId, decided_at_ms: Date.now() });
     }
-    if (path.endsWith("/approvals")) return json(route, { approvals: url.searchParams.get("status") === "pending" && !state.decided ? approvals : [] });
+    if (path.endsWith("/approvals")) {
+      state.ledgerReads += 1;
+      if (state.ledgerDelayMs && state.ledgerReads === 1) await sleep(state.ledgerDelayMs);
+      if (state.roundTripMs) await sleep(state.roundTripMs);
+      const pending = [...approvals, ...(state.twoDeciders ? [approval2] : [])].filter((a) => !state.decidedIds.has(a.id));
+      return json(route, { approvals: url.searchParams.get("status") === "pending" ? pending : [] });
+    }
+    if (state.progress && path.endsWith("/agent-runs/progress")) {
+      if (state.progressDelayMs) await sleep(state.progressDelayMs);
+      return json(route, { runs: path.includes(lab.id) ? progressRows(state) : [] });
+    }
     if (path.endsWith("/huddles/active")) return json(route, { huddle: null });
     if (path.endsWith("/work-hosts")) return json(route, { workHosts: [host] });
     if (path.endsWith("/work-sessions/shared")) {
       const who = url.searchParams.get("who") === "team" ? "team" : "mine";
       state.boardReads += 1;
+      if (state.roundTripMs && state.boardReads > 1) await sleep(state.roundTripMs);
       return json(route, { sessions: boardView(state)[who], nextCursor: null, who });
     }
     if (/\/work-sessions\/[^/]+\/shared$/.test(path)) return json(route, { error: { message: "shared work session not found" } }, 404);
@@ -380,8 +419,8 @@ async function installDesktop(page, origin) {
   }, origin);
 }
 
-async function openContext(browser, origin, { scheme, viewport, deviceScaleFactor = 1, waiting = [macWaiting.sessionId], noNativeAnchor = false, desktop = false, decision = "ok" }) {
-  const state = { waiting: new Set(waiting), boardReads: 0, decision, decisions: 0, decided: false };
+async function openContext(browser, origin, { scheme, viewport, deviceScaleFactor = 1, waiting = [macWaiting.sessionId], noNativeAnchor = false, desktop = false, decision = "ok", server = {} }) {
+  const state = { waiting: new Set(waiting), boardReads: 0, ledgerReads: 0, decision, decisions: 0, decidedIds: new Set(), decidedRuns: new Set(), decidedOrder: [], ...server };
   const context = await browser.newContext({ viewport, deviceScaleFactor, colorScheme: scheme, reducedMotion: "reduce", serviceWorkers: "block", locale: "ko-KR" });
   await installRoutes(context, state);
   const page = await context.newPage();
@@ -446,6 +485,10 @@ async function scene(browser, origin, scheme, viewport, tag) {
   await shot(page, `5640-mine-${tag}`);
   // 권한 요청 줄의 상태 칩도 같은 낱말(두 종류 모두 「응답 필요」, 종류는 꼬리표가).
   check(`${tag} 상태 칩 「응답 필요」(권한 요청 줄)`, (await text(permJob.getByTestId("team-board-state"))) === "응답 필요");
+  // 수리 3회차 H2: 「응답 필요」는 그 구간의 줄만. 머리글 수 = 「응답 필요」 칩 수(화면 전체), 구간 밖 승인 대기 줄은 「승인 대기」.
+  const chipWords = await page.$$eval('[data-testid="team-board-state"]', (els) => els.filter((e) => e.getClientRects().length > 0).map((e) => e.textContent.trim()));
+  check(`${tag} 머리글 수 = 「응답 필요」 칩 수`, chipWords.filter((w) => w === "응답 필요").length === 2, chipWords);
+  check(`${tag} 비결정자 줄 칩 「승인 대기」`, (await text(nonJob.getByTestId("team-board-state"))) === "승인 대기");
   await bandChecks(page, tag);
 
   if (viewport.width >= 1280) {
@@ -454,6 +497,8 @@ async function scene(browser, origin, scheme, viewport, tag) {
     check(`${tag} 팀 전체: 구간 없음`, JSON.stringify(await sectionOrder(page)) === JSON.stringify(["now", "done"]), await sectionOrder(page));
     check(`${tag} 팀 전체: 권한 요청 꼬리표 없음`, (await page.getByTestId("work-job-permission-tag").count()) === 0);
     check(`${tag} 팀 전체: 결정 단추 0`, (await page.getByTestId("work-job-approval-approve").count()) + (await page.getByTestId("work-job-approval-reject").count()) === 0);
+    const teamApprovalChips = await page.$$eval('[data-testid="work-job-row"][data-approval]', (els) => els.map((e) => e.querySelector('[data-testid="team-board-state"]').textContent.trim()));
+    check(`${tag} 팀 전체: 승인 대기 줄의 칩은 「승인 대기」(수리 3회차 H2)`, teamApprovalChips.length === 2 && teamApprovalChips.every((w) => w === "승인 대기"), teamApprovalChips);
     await shot(page, `5640-team-${tag}`);
   }
   await context.close();
@@ -606,6 +651,136 @@ async function decideScene(browser, origin, scheme) {
   }
 }
 
+// ---- 같은 자리 두 번 누름 (수리 3회차 H1) -----------------------------------------------------------------------------------
+
+/** 그 점 밑에 무엇이 있나: 결정 단추면 어느 줄의 무엇인지. */
+const underPoint = (page, x, y) =>
+  page.evaluate(([px, py]) => {
+    const el = document.elementFromPoint(px, py);
+    const decision = el?.closest("[data-decision]");
+    const job = el?.closest('[data-testid="work-job"]')?.querySelector('[data-testid="work-job-row"]')?.getAttribute("data-job-id") ?? null;
+    return { decision: decision?.getAttribute("data-decision") ?? null, job, testid: el?.closest("[data-testid]")?.getAttribute("data-testid") ?? null };
+  }, [x, y]);
+const approveCenter = async (page, rowId) => {
+  const box = await page.locator('[data-testid="work-job"]', { has: page.locator(`[data-job-id="${rowId}"]`) }).getByTestId("work-job-approval-approve").boundingBox();
+  return { x: box.x + box.width / 2, y: box.y + box.height / 2 };
+};
+const twoDecidersReady = (page) =>
+  page.waitForFunction(() => document.querySelectorAll('[data-section="needsMe"] [data-testid="work-job-approval-approve"]').length === 2, null, { timeout: 15_000 });
+
+/**
+ * 결정자 줄 둘(맨 위, scrollTop 0)에서 A의 「승인」을 누르고 포인터를 움직이지 않은 채 같은 자리를 한 번 더 누른다(검수 1회차 재현).
+ * 서버 왕복(결정 POST·원장·목록 GET) 40·100·300ms × 두 번째 누름 +250·+600·+1600ms. 나간 결정은 1건이어야 한다.
+ */
+async function doublePressScene(browser, origin, viewport) {
+  for (const roundTripMs of [40, 100, 300]) {
+    for (const gapMs of [250, 600, 1600]) {
+      const tag = `double-${viewport.width}-rt${roundTripMs}-gap${gapMs}`;
+      const { context, page, state } = await openContext(browser, origin, { scheme: "light", viewport, server: { twoDeciders: true, decisionDelayMs: roundTripMs, roundTripMs } });
+      await twoDecidersReady(page);
+      await sleep(300);
+      const a = await approveCenter(page, runApproval.runId);
+      await page.mouse.move(a.x, a.y);
+      await page.mouse.down();
+      await page.mouse.up();
+      await sleep(gapMs);
+      const under = await underPoint(page, a.x, a.y);
+      await page.mouse.down();
+      await page.mouse.up();
+      await sleep(Math.max(900, roundTripMs * 3));
+      check(`${tag} 같은 자리 두 번 누름 → 나간 결정 1건(A)`, state.decisions === 1 && state.decidedOrder[0] === approvals[0].id, { decisions: state.decisions, order: state.decidedOrder.map((x) => x.slice(-2)), under });
+      if (roundTripMs === 100 && gapMs === 600) {
+        const held = await page.evaluate((rid) => {
+          const li = document.querySelector(`[data-testid="work-job-row"][data-job-id="${rid}"]`).closest('[data-testid="work-job"]');
+          return { section: li.closest("[data-section]").getAttribute("data-section"), receipt: li.querySelector('[data-testid="work-job-approval-settled"]')?.textContent?.trim() ?? null };
+        }, runApproval.runId);
+        check(`${tag} 결정한 줄은 영수증을 보인 채 그 자리(포인터가 구간 안)`, held.section === "needsMe" && held.receipt === "승인을 기록했어요.", held);
+        await shot(page, `5640-decided-held-${viewport.width}-light`);
+      }
+      await context.close();
+    }
+  }
+}
+
+/** Enter 연타: A의 「승인」에 초점을 두고 Enter를 거듭 친다. 나간 결정 1건, 초점은 다음 줄의 단추가 아니다. */
+async function enterRepeatScene(browser, origin) {
+  for (const roundTripMs of [40, 100, 300]) {
+    const tag = `enter-repeat-rt${roundTripMs}`;
+    const { context, page, state } = await openContext(browser, origin, { scheme: "light", viewport: { width: 1280, height: 800 }, server: { twoDeciders: true, decisionDelayMs: roundTripMs, roundTripMs } });
+    await twoDecidersReady(page);
+    await page.mouse.move(0, 0);
+    await page.locator('[data-testid="work-job"]', { has: page.locator(`[data-job-id="${runApproval.runId}"]`) }).getByTestId("work-job-approval-approve").focus();
+    const t0 = Date.now();
+    for (const at of [0, 120, 320, 700, 1500]) {
+      await sleep(Math.max(0, at - (Date.now() - t0)));
+      await page.keyboard.press("Enter");
+    }
+    await sleep(900);
+    const focus = await page.evaluate(() => ({ testid: document.activeElement?.getAttribute("data-testid") ?? null, job: document.activeElement?.closest('[data-testid="work-job"]')?.querySelector('[data-testid="work-job-row"]')?.getAttribute("data-job-id") ?? null }));
+    check(`${tag} Enter 연타 → 나간 결정 1건, 초점은 결정 단추가 아니다`, state.decisions === 1 && focus.testid !== "work-job-approval-approve" && focus.testid !== "work-job-approval-reject", { decisions: state.decisions, focus });
+    await context.close();
+  }
+}
+
+/**
+ * 결정 없이 줄이 포인터 밑에서 움직일 때: (a) 원장이 늦게 와서 「지금」의 줄이 「응답 필요」로 올라오고 카드 링크 자리에 「승인」이 선다,
+ * (b) 서버의 「못 한다」가 늦게 와서 A가 빠지고 A의 「승인」 자리에 B의 「승인」이 선다. 포인터를 움직이지 않은 누름은 결정이 아니고,
+ * 포인터를 움직인 뒤의 누름은 결정이다(보호가 모든 누름을 막지 않는다).
+ */
+async function shiftGuardScene(browser, origin) {
+  // (a) 늦은 원장
+  {
+    const { context, page, state } = await openContext(browser, origin, { scheme: "light", viewport: { width: 1280, height: 800 }, server: { twoDeciders: true, ledgerDelayMs: 2500 } });
+    await page.waitForFunction((rid) => document.querySelector(`[data-section="now"] [data-job-id="${rid}"]`) !== null, runApproval.runId);
+    const link = await page.locator('[data-testid="work-job"]', { has: page.locator(`[data-job-id="${runApproval.runId}"]`) }).getByTestId("work-job-approval-link").boundingBox();
+    const x = link.x + link.width / 2;
+    const y = link.y + link.height / 2;
+    await page.mouse.move(x, y);
+    await twoDecidersReady(page);
+    const under = await underPoint(page, x, y);
+    await page.mouse.down();
+    await page.mouse.up();
+    await sleep(400);
+    check("late-ledger 링크 자리에 결정 단추가 선다(재현 조건)", under.decision !== null, under);
+    check("late-ledger 링크 자리에 선 결정 단추: 움직이지 않은 누름은 결정이 아니다", state.decisions === 0, { under, decisions: state.decisions });
+    await page.mouse.move(x + 8, y);
+    await page.mouse.move(x, y);
+    const again = await underPoint(page, x, y);
+    await page.mouse.down();
+    await page.mouse.up();
+    await sleep(400);
+    check("late-ledger 포인터를 움직인 뒤의 누름은 결정이다", again.decision !== null && state.decisions === 1, { again, decisions: state.decisions });
+    console.log(`MEASURE late-ledger: under=${JSON.stringify(under)} after-move=${JSON.stringify(again)} decisions=${state.decisions}`);
+    await context.close();
+  }
+  // (b) 늦은 서버 거절
+  {
+    const { context, page, state } = await openContext(browser, origin, { scheme: "light", viewport: { width: 1280, height: 800 }, server: { twoDeciders: true, progress: { aCanDecide: false }, progressDelayMs: 1500 } });
+    await twoDecidersReady(page);
+    // 포인터를 A가 빠지면 B의 「승인」이 올 점에 둔다: B는 A의 줄 자리로 올라온다(그 위의 줄은 그대로).
+    const tops = await page.evaluate((ids) => ids.map((rid) => document.querySelector(`[data-testid="work-job-row"][data-job-id="${rid}"]`).closest('[data-testid="work-job"]').getBoundingClientRect().top), [runApproval.runId, runApproval2.runId]);
+    const b = await approveCenter(page, runApproval2.runId);
+    const a = { x: b.x, y: tops[0] + (b.y - tops[1]) };
+    await page.mouse.move(a.x, a.y);
+    await page.waitForFunction((rid) => document.querySelector(`[data-section="needsMe"] [data-job-id="${rid}"]`) === null, runApproval.runId, { timeout: 10_000 });
+    const under = await underPoint(page, a.x, a.y);
+    await page.mouse.down();
+    await page.mouse.up();
+    await sleep(400);
+    check("late-refusal A가 빠진 자리에 B의 「승인」이 선다(재현 조건)", under.decision === "approve" && under.job === runApproval2.runId, under);
+    check("late-refusal A가 빠진 자리: 움직이지 않은 누름은 결정이 아니다", state.decisions === 0, { under, decisions: state.decisions });
+    await page.mouse.move(a.x + 8, a.y);
+    await page.mouse.move(a.x, a.y);
+    const again = await underPoint(page, a.x, a.y);
+    await page.mouse.down();
+    await page.mouse.up();
+    await sleep(400);
+    check("late-refusal 포인터를 움직인 뒤의 누름은 결정이다", again.decision !== null && state.decisions === 1, { again, decisions: state.decisions });
+    console.log(`MEASURE late-refusal: under=${JSON.stringify(under)} after-move=${JSON.stringify(again)} decisions=${state.decisions}`);
+    await context.close();
+  }
+}
+
 /** 브라우저에서 내 맥 세션 줄 Enter → 세션 화면(작업 콘솔). */
 async function enterScene(browser, origin) {
   const { context, page } = await openContext(browser, origin, { scheme: "light", viewport: { width: 1280, height: 800 } });
@@ -651,6 +826,12 @@ async function main() {
       await decideScene(browser, preview.origin, "light");
       await decideScene(browser, preview.origin, "dark");
     }
+    if (ONLY === "" || ONLY === "h1" || ONLY === "double") {
+      await doublePressScene(browser, preview.origin, { width: 1280, height: 800 });
+      await doublePressScene(browser, preview.origin, { width: 390, height: 844 });
+    }
+    if (ONLY === "" || ONLY === "h1") await enterRepeatScene(browser, preview.origin);
+    if (ONLY === "" || ONLY === "h1" || ONLY === "shift") await shiftGuardScene(browser, preview.origin);
   } finally {
     await browser.close();
     await preview.stop?.();

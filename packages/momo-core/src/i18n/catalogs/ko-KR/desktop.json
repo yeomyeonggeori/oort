@@ -35,6 +35,8 @@
   "desktop.workPermission.allowInApp": "허락은 폰이나 데스크탑 앱에서 보내 주세요",
   "desktop.workJobs.tagApproval": "승인 요청",
   "desktop.workJobs.tagPermission": "권한 요청",
+  "desktop.workJobs.stateAwaitingApproval": "승인 대기",
+  "desktop.workJobs.approvalHintInList": "승인은 목록에서도 할 수 있어요",
   "desktop.workJobs.openToAnswer": "열어서 답하기",
   "desktop.workJobs.reportedTitle": "에이전트 보고: {summary}"
 }

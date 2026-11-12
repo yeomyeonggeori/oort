@@ -239,8 +239,10 @@ describe("「작업」 한 화면: 결과 중심 줄 (ADR-0202 D1)", () => {
     render(mount());
     const rows = await screen.findAllByTestId("work-job-row");
     expect(rows[0]!.dataset.jobId).toBe(approvalRun.sessionId);
-    // 상태 칩은 「응답 필요」 하나(수리 2회차), 무엇을 기다리는지는 결과 칸 꼬리표가 말한다 — 한 줄에 비슷한 말이 둘 서지 않는다.
-    expect(within(rows[0]!).getByTestId("team-board-state").textContent).toBe("응답 필요");
+    // 원장에 내 결정이 없는 승인 대기 줄은 「응답 필요」 구간 밖이다: 칩은 「응답 필요」가 아니라 「승인 대기」(수리 3회차, 한국어 낱말은
+    // `WorkJobsRoute.needsMe.test.tsx`가 잠근다 — 이 파일은 로케일 없이 그려 영어 사전을 읽는다). 무엇을 기다리는지는 꼬리표가 말한다.
+    expect(screen.queryAllByTestId("work-jobs-section").map((s) => s.dataset.section)).not.toContain("needsMe");
+    expect(within(rows[0]!).getByTestId("team-board-state").textContent).not.toBe("응답 필요");
     expect(within(rows[0]!).getAllByTestId("work-job-approval-tag").length).toBeGreaterThan(0);
     expect(rows[0]!.textContent).not.toContain("승인 필요");
     const link = screen.getByTestId("work-job-approval-link");

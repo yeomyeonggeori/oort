@@ -7,6 +7,7 @@ import {
   type SharedWorkSession,
   type WorkJobsMode,
 } from "../../lib/api";
+import type { MessageService } from "../../i18n/types";
 import { elapsedSpan } from "../agents/runPhase";
 import { SESSION_STATUS_LABEL } from "./sessionList";
 import {
@@ -146,14 +147,24 @@ export interface WorkJobRow {
   channelId: string;
 }
 
+/** 구간 밖 승인 대기 run의 칩 낱말 「승인 대기」(ADR-0202 D1의 말)의 사전 키(#5640 수리 3회차). */
+export const WORK_JOB_AWAITING_APPROVAL_KEY = "desktop.workJobs.stateAwaitingApproval" as const;
+
 /**
- * 「작업」 줄 상태 칩의 낱말(#5640 수리 2회차). 승인을 기다리는 run도 권한 요청을 기다리는 맥 세션과 같은 **「응답 필요」** 하나다
- * (구간 이름·세션 상태와 같은 낱말 `SESSION_STATUS_LABEL.waiting`). 무엇을 기다리는지는 결과 칸 꼬리표(「승인 요청」·「권한 요청」)가
- * 말한다 — 한 줄에 「승인 필요」 칩과 「승인 요청」 꼬리표가 나란히 서던 비슷한 말 둘을 하나로. 이 화면만의 낱말이다: 사이드바·서랍·폰은
- * 여전히 `stateChipLabel`(「승인 필요」)을 읽는다.
+ * 「작업」 줄 상태 칩의 낱말(#5640 수리 2·3회차). 「응답 필요」는 **「응답 필요」 구간에 선 줄**(내가 답할 줄)만 말한다 — 승인을 기다리는
+ * run도 권한 요청을 기다리는 맥 세션과 같은 낱말 하나(`SESSION_STATUS_LABEL.waiting`)이고, 무엇을 기다리는지는 결과 칸 꼬리표가 말한다.
+ * 구간 밖의 승인 대기 run(결정자가 내가 아니거나 「팀 전체」의 줄)은 **「승인 대기」**다: 내가 답할 수 없는 줄에 「응답 필요」를 붙이면
+ * 틀린 말이다. 그래서 구간 머리글의 수 = 그 구간에서 「응답 필요」 칩이 선 줄의 수다. 그 밖은 공용 낱말(`stateChipLabel`) 그대로다.
+ * 구간을 아는 것은 줄을 그리는 자리다(`needsMe`). 사이드바·서랍 기본값·폰은 여전히 `stateChipLabel`(「승인 필요」)을 읽는다.
  */
-export function workJobStateLabel(item: SharedWorkSession): string {
-  return isAwaitingApproval(item) ? SESSION_STATUS_LABEL.waiting : stateChipLabel(item);
+export function workJobStateLabel(
+  row: WorkJobRow,
+  needsMe: boolean,
+  formatMessage: MessageService["formatMessage"]
+): string {
+  if (needsMe) return SESSION_STATUS_LABEL.waiting;
+  if (row.awaitingApproval) return formatMessage(WORK_JOB_AWAITING_APPROVAL_KEY);
+  return row.statusLabel;
 }
 
 export function workJobRow(item: SharedWorkSession, nowMs: number): WorkJobRow {
@@ -178,7 +189,7 @@ export function workJobRow(item: SharedWorkSession, nowMs: number): WorkJobRow {
     agentIsMember: run,
     finished,
     awaitingApproval,
-    statusLabel: workJobStateLabel(item),
+    statusLabel: stateChipLabel(item),
     duration,
     durationText: durationTextOf(duration, item.startedAtMs, nowMs),
     pr: prFacts(item.prUrl),

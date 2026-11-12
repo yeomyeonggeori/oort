@@ -2077,6 +2077,12 @@ export const catalog: MessageCatalog = {
       "value": "Working"
     }
   ],
+  "desktop.workJobs.approvalHintInList": [
+    {
+      "type": 0,
+      "value": "You can also approve it from the list"
+    }
+  ],
   "desktop.workJobs.openToAnswer": [
     {
       "type": 0,
@@ -2091,6 +2097,12 @@ export const catalog: MessageCatalog = {
     {
       "type": 1,
       "value": "summary"
+    }
+  ],
+  "desktop.workJobs.stateAwaitingApproval": [
+    {
+      "type": 0,
+      "value": "Awaiting approval"
     }
   ],
   "desktop.workJobs.tagApproval": [

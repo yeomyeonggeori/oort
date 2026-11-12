@@ -31,6 +31,7 @@ import {
   type WorkJobRow,
 } from "./workJobs";
 import { approvalWaitingLine } from "../timeline/requestBundle";
+import { createMessageService, loadMessageCatalog } from "../../i18n";
 
 const ME = "00000000-0000-7000-8000-000000000101";
 const OTHER = "00000000-0000-7000-8000-000000000102";
@@ -244,17 +245,24 @@ describe("줄 모델 (ADR-0202 D1)", () => {
     expect(awaitingMeItem(done)).toBe(done);
   });
 
-  it("상태 칩 낱말(수리 2회차): 승인 대기 run도 권한 요청 맥 세션과 같은 「응답 필요」 하나, 이 화면 밖 낱말은 그대로", () => {
+  it("상태 칩 낱말(수리 3회차): 「응답 필요」는 그 구간에 선 줄만, 구간 밖 승인 대기 run은 「승인 대기」, 이 화면 밖 낱말은 그대로", async () => {
+    const ko = createMessageService({ messageLocale: "ko-KR", catalog: await loadMessageCatalog("ko-KR") });
+    const en = createMessageService({ messageLocale: "en-US" });
     const approval = workJobRow(row(wireRun({ runId: "00000000-0000-7000-8000-0000000000c4", phase: "awaiting_approval" })), NOW);
     const permission = workJobRow(row(wireSession({ origin: "host", owner: { memberId: ME, displayName: "구민수" }, state: "waiting" })), NOW);
-    expect(approval.statusLabel).toBe(SESSION_STATUS_LABEL.waiting);
-    expect(approval.statusLabel).toBe("응답 필요");
-    expect(permission.statusLabel).toBe(approval.statusLabel);
-    expect(workJobStateLabel(approval.item)).toBe("응답 필요");
-    // 사이드바·서랍·폰이 읽는 공용 칩 낱말은 바꾸지 않는다.
+    // 구간 안: 두 종류 모두 구간 이름과 같은 낱말 하나.
+    expect(workJobStateLabel(approval, true, ko.formatMessage)).toBe(SESSION_STATUS_LABEL.waiting);
+    expect(workJobStateLabel(approval, true, ko.formatMessage)).toBe("응답 필요");
+    expect(workJobStateLabel(permission, true, ko.formatMessage)).toBe("응답 필요");
+    // 구간 밖(결정자가 아님·「팀 전체」): 내가 답할 수 없는 줄은 「응답 필요」가 아니다.
+    expect(workJobStateLabel(approval, false, ko.formatMessage)).toBe("승인 대기");
+    expect(workJobStateLabel(approval, false, en.formatMessage)).toBe("Awaiting approval");
+    // 사이드바·서랍 기본값·폰이 읽는 공용 칩 낱말은 바꾸지 않는다(줄 모델의 `statusLabel`도 공용 낱말).
     expect(stateChipLabel(approval.item)).toBe("승인 필요");
+    expect(approval.statusLabel).toBe("승인 필요");
     // 승인 대기가 아닌 줄은 공용 낱말 그대로.
-    expect(workJobRow(row(wireRun()), NOW).statusLabel).toBe("실행 중");
+    const running = workJobRow(row(wireRun()), NOW);
+    expect(workJobStateLabel(running, false, ko.formatMessage)).toBe("실행 중");
   });
 
   it("옛 서버(phase 없음)는 승인 필요를 지어내지 않는다", () => {

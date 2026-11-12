@@ -7,6 +7,8 @@ import {
   useState,
   type FocusEvent,
   type KeyboardEvent,
+  type MouseEvent,
+  type PointerEvent,
 } from "react";
 import { ListChecks, SquareTerminal } from "lucide-react";
 import { Link, useLocation, useNavigate, useSearchParams } from "react-router-dom";
@@ -25,6 +27,7 @@ import {
   requesterToAgent,
   rowNeedsMe,
   searchWithFilter,
+  workJobStateLabel,
   workJobResultHasControls,
   workJobResultKind,
   workJobRow,
@@ -46,7 +49,7 @@ import { EmptyInvite, InlineBanner, Skeleton } from "@/features/common/States";
 import { useOffline } from "@/features/common/useOffline";
 import { decisionNote } from "@/features/inbox/approvalsPanel";
 import { useInvalidateApprovals } from "@/features/inbox/useInbox";
-import { useWorkDecisions } from "@/features/inbox/useNeedsMe";
+import { useWorkDecisions, type DecidableApproval } from "@/features/inbox/useNeedsMe";
 import { useLocalPaneAttention } from "@/features/workbench/local/paneAttention";
 import { TeamBoardDrawer } from "@/features/workTab/teamBoard/TeamBoardDrawer";
 import { StateChip } from "@/features/workTab/teamBoard/TeamBoardParts";
@@ -57,6 +60,7 @@ import { isDesktop } from "@/lib/tauri";
 import {
   JobResultActions,
   JobResultCell,
+  decidesInRow,
   type JobApprovalFacts,
 } from "./WorkJobResult";
 import { currentWorkFilter, rememberWorkFilter, useWorkJobsList } from "./useWorkJobs";
@@ -90,6 +94,34 @@ import { currentWorkFilter, rememberWorkFilter, useWorkJobsList } from "./useWor
 
 const MINUTE_MS = 60_000;
 
+/** 결정한 줄을 그 자리에 붙드는 최소 시간: 영수증을 읽을 틈(#5640 수리 3회차 H1). */
+const HOLD_MIN_MS = 1200;
+/** 목록이 그 run을 늦게 바꿔도 이만큼 지나면 놓는다(포인터가 구간 위면 여전히 붙든다). */
+const HOLD_MAX_MS = 10_000;
+const HOLD_TICK_MS = 200;
+/** 줄이 포인터 밑에서 움직인 뒤 결정 단추가 포인터 누름을 받지 않는 시간. 포인터가 움직이면 더 일찍 풀린다. */
+const SHIFT_GUARD_MS = 1000;
+/** 「포인터가 움직였다」의 문턱(px). 같은 자리 두 번 누름 사이의 손떨림은 움직임이 아니다. */
+const SHIFT_GUARD_MOVE_PX = 6;
+/** 결정 단추(승인·거부)의 표지(`ApprovalActions`의 `data-decision`). */
+const DECISION_CONTROL = "[data-decision]";
+
+interface PointerSpot {
+  x: number;
+  y: number;
+}
+
+/** 붙든 결정: 그 run의 결정(영수증을 그릴 재료)과 결정이 닿은 때. */
+interface HeldDecision {
+  decision: DecidableApproval;
+  atMs: number;
+}
+
+/** 줄의 run 열쇠(소문자) — `rowNeedsMe`가 원장과 맞추는 것과 같은 값. */
+function runKeyOf(row: WorkJobRow): string {
+  return (row.item.runId ?? row.item.sessionId).toLowerCase();
+}
+
 function useMinuteNow(): number {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
@@ -117,13 +149,19 @@ export function WorkJobsRoute() {
   const list = useWorkJobsList(workspaceId, filter, live);
   useTeamBoardRail(workspaceId, list.items, { rereadOnApproval: true });
   const decisions = useWorkDecisions();
-  const approvalRunIds = useMemo(() => new Set(decisions.byRun.keys()), [decisions.byRun]);
+  // 방금 결정한 줄(#5640 수리 3회차 H1): 원장이 그 승인을 뺀 뒤에도 영수증을 보인 채 「응답 필요」의 그 자리에 잠깐 남는다(`useHeldDecisions`).
+  const [held, setHeld] = useState<ReadonlyMap<string, HeldDecision>>(() => new Map());
+  const approvalRunIds = useMemo(
+    () => new Set([...decisions.byRun.keys(), ...held.keys()]),
+    [decisions.byRun, held]
+  );
   const invalidateApprovals = useInvalidateApprovals();
   // 그 자리 결정의 결과 한 줄(받은함과 같은 문장, `decisionNote`). 결정이 닿으면 줄이 구간을 옮기므로 결과는 목록 위 상태 노드가 읽는다.
   const [decisionText, setDecisionText] = useState("");
   const onDecided = useCallback(
-    (outcome: DecisionOutcome) => {
+    (outcome: DecisionOutcome, runKey: string, decision: DecidableApproval) => {
       setDecisionText(decisionNote(outcome).text);
+      setHeld((current) => new Map(current).set(runKey, { decision, atMs: Date.now() }));
       // 받은함과 같이 원장을 다시 읽고(배지·「응답 필요」가 함께 바뀐다), 줄의 phase가 바뀌었으니 목록도 다시 읽는다.
       invalidateApprovals();
       void list.refetch();
@@ -157,6 +195,80 @@ export function WorkJobsRoute() {
     [rows, filter, selfId, approvalRunIds]
   );
   const running = inProgressCount(rows);
+
+  // ---- 누른 자리에 다른 결정이 서지 않게 (#5640 수리 3회차 H1) -------------------------------------------------------------
+  // 받은함은 결정 뒤 다음 줄을 대신 열지 않는다 — 되돌릴 수 없는 컨트롤이 방금 누른 자리에 서면 누른 손이 다음 승인을 결정한다
+  // (`InboxRoute`, #5116). 이 목록도 같은 규칙이다. 두 겹으로 막는다:
+  //   1. 붙들기: 결정한 줄은 영수증을 보인 채 그 자리에 남는다. 포인터가 「응답 필요」 구간 위에 있는 동안, 그리고 영수증을 읽을
+  //      틈(`HOLD_MIN_MS`) 동안은 놓지 않는다. 목록이 아직 그 run을 승인 대기로 말하면 더 기다린다(놓자마자 「지금」에서 「승인
+  //      대기」로 서지 않게, 상한 `HOLD_MAX_MS`).
+  //   2. 움직인 뒤 잠깐 막기: 줄이 포인터 밑에서 움직이면(붙든 줄을 놓을 때, 원장이 늦게 와 줄이 올라올 때, 서버의 「못 한다」가
+  //      늦게 와 줄이 빠질 때) 결정 단추는 포인터가 움직이거나 `SHIFT_GUARD_MS`가 지나기 전에는 포인터 누름을 받지 않는다.
+  // 키보드 초점은 결정 뒤 그 줄 단추에 있고(`focusRow`), 줄이 옮기면 그 줄을 따라간다 — 다음 줄의 단추로 가지 않는다.
+  const pointerRef = useRef<PointerSpot | null>(null);
+  const needsMeRef = useRef<HTMLElement | null>(null);
+  const rowsRef = useRef(rows);
+  rowsRef.current = rows;
+  useEffect(() => {
+    if (held.size === 0) return;
+    const tick = () => {
+      const now = Date.now();
+      const spot = pointerRef.current;
+      const box = needsMeRef.current?.getBoundingClientRect() ?? null;
+      const pointerOnSection =
+        spot !== null && box !== null && box.height > 0 &&
+        spot.x >= box.left && spot.x <= box.right && spot.y >= box.top && spot.y <= box.bottom;
+      const release: string[] = [];
+      for (const [runKey, entry] of held) {
+        const row = rowsRef.current.find((r) => runKeyOf(r) === runKey) ?? null;
+        const waited = now - entry.atMs;
+        const stillAsking = row !== null && row.awaitingApproval && waited < HOLD_MAX_MS;
+        if (row === null || (waited >= HOLD_MIN_MS && !pointerOnSection && !stillAsking)) release.push(runKey);
+      }
+      if (release.length === 0) return;
+      setHeld((current) => {
+        const next = new Map(current);
+        for (const key of release) next.delete(key);
+        return next;
+      });
+    };
+    const id = setInterval(tick, HOLD_TICK_MS);
+    return () => clearInterval(id);
+  }, [held]);
+
+  const guardRef = useRef<{ untilMs: number; spot: PointerSpot | null } | null>(null);
+  const layoutKey = sections.map((s) => `${s.key}:${s.rows.map((r) => r.id).join(",")}`).join("|");
+  const lastLayoutRef = useRef<string | null>(null);
+  useLayoutEffect(() => {
+    if (lastLayoutRef.current !== null && lastLayoutRef.current !== layoutKey) {
+      guardRef.current = { untilMs: performance.now() + SHIFT_GUARD_MS, spot: pointerRef.current };
+    }
+    lastLayoutRef.current = layoutKey;
+  }, [layoutKey]);
+  const onListPointerMove = useCallback((event: PointerEvent<HTMLDivElement>) => {
+    const spot = { x: event.clientX, y: event.clientY };
+    pointerRef.current = spot;
+    const guard = guardRef.current;
+    if (guard !== null && (guard.spot === null || Math.hypot(spot.x - guard.spot.x, spot.y - guard.spot.y) >= SHIFT_GUARD_MOVE_PX)) {
+      guardRef.current = null;
+    }
+  }, []);
+  const onListPointerLeave = useCallback(() => {
+    pointerRef.current = null;
+  }, []);
+  const onListClickCapture = useCallback((event: MouseEvent<HTMLDivElement>) => {
+    const guard = guardRef.current;
+    if (guard === null) return;
+    if (performance.now() >= guard.untilMs) {
+      guardRef.current = null;
+      return;
+    }
+    // 키보드가 누른 단추(`detail === 0`)는 사람이 초점을 거기로 옮긴 것이다 — 줄이 움직여도 초점은 결정 단추로 가지 않는다.
+    if (event.detail === 0) return;
+    if (!(event.target instanceof Element) || event.target.closest(DECISION_CONTROL) === null) return;
+    event.preventDefault();
+    event.stopPropagation();
+  }, []);
 
   const fromList =
     openId === null ? null : list.items.find((i) => uuidEq(i.sessionId, openId)) ?? null;
@@ -303,6 +415,21 @@ export function WorkJobsRoute() {
     }
   };
 
+  // 서랍은 연 줄과 같은 말을 한다(#5640 수리 3회차, 검수 질문 ③): 칩 낱말, 그리고 목록에서 바로 결정하는 줄이면 「그 카드에서」가 아니다.
+  const openRow = openId === null ? null : (rows.find((r) => uuidEq(r.id, openId)) ?? null);
+  const openNeeds =
+    openRow !== null && sectionOf.get(openRow.id.toLowerCase()) === NEEDS_ME_SECTION && !held.has(runKeyOf(openRow));
+  const openDecision = openRow === null || !openNeeds ? null : (decisions.byRun.get(runKeyOf(openRow)) ?? null);
+  const drawerFacts = {
+    stateLabel: openRow === null ? undefined : workJobStateLabel(openRow, openNeeds, formatMessage),
+    approvalHint:
+      openDecision !== null && decidesInRow(openDecision)
+        ? formatMessage("desktop.workJobs.approvalHintInList")
+        : undefined,
+  };
+  const sectionCount = (section: (typeof sections)[number]) =>
+    section.key === NEEDS_ME_SECTION ? section.rows.filter((r) => !held.has(runKeyOf(r))).length : section.rows.length;
+
   const hasData = list.data !== undefined;
   const firstLoad = list.isPending && !hasData;
   const blockingError = list.error !== null && !hasData;
@@ -388,6 +515,9 @@ export function WorkJobsRoute() {
           aria-busy={firstLoad}
           role="region"
           onScroll={readAnchors}
+          onPointerMove={onListPointerMove}
+          onPointerLeave={onListPointerLeave}
+          onClickCapture={onListClickCapture}
         >
           {desktop && filter === "mine" && <ThisDeviceStrip />}
           {firstLoad ? (
@@ -445,20 +575,23 @@ export function WorkJobsRoute() {
               {sections.map((section) => (
                 <section
                   key={section.key}
-                  aria-label={`${section.label} ${section.rows.length}개`}
+                  ref={section.key === NEEDS_ME_SECTION ? needsMeRef : undefined}
+                  aria-label={`${section.label} ${sectionCount(section)}개`}
                   data-testid="work-jobs-section"
                   data-section={section.key}
                 >
                   <h2 className="px-3 pt-3 pb-1 text-meta font-semibold text-ink-muted">
                     {section.label}{" "}
-                    <span data-numeric className="font-mono font-normal">
-                      {section.rows.length}
+                    <span data-numeric className="font-mono font-normal" data-testid="work-jobs-section-count">
+                      {sectionCount(section)}
                     </span>
                   </h2>
                   <ul className="flex flex-col">
                     {section.rows.map((row) => {
                       const needsMe = section.key === NEEDS_ME_SECTION;
                       const kind = workJobResultKind(row, needsMe);
+                      // 붙든 줄(방금 결정함)은 구간에 남아도 더는 내 답을 기다리지 않는다: 칩도 머리글 수도 「응답 필요」로 세지 않는다.
+                      const open = needsMe && !held.has(runKeyOf(row));
                       // 내 맥 세션의 권한 요청: 줄이 곧 승인 카드로 가는 길이다(서랍이 아니다).
                       const permission = kind === "permission";
                       const openPermission = () =>
@@ -468,10 +601,11 @@ export function WorkJobsRoute() {
                           key={row.id}
                           row={row}
                           needsMe={needsMe}
+                          stateLabel={workJobStateLabel(row, open, formatMessage)}
                           kind={kind}
                           permission={permission}
                           inApp={permission && !desktop ? formatMessage("desktop.workPermission.allowInApp") : null}
-                          approval={kind === "approval" ? approvalFacts(row, decisions, needsMe) : null}
+                          approval={kind === "approval" ? approvalFacts(row, decisions, needsMe, held) : null}
                           desktop={desktop}
                           onOpenPermission={() => {
                             setActiveId(row.id);
@@ -521,7 +655,14 @@ export function WorkJobsRoute() {
         {drawerOpen && (
           <div data-team-board-drawer="" className="flex min-h-0 min-w-0 flex-col">
             {openItem !== null ? (
-              <TeamBoardDrawer ref={drawerRef} item={openItem} nowMs={nowMs} onClose={close} />
+              <TeamBoardDrawer
+                ref={drawerRef}
+                item={openItem}
+                nowMs={nowMs}
+                onClose={close}
+                stateLabel={drawerFacts.stateLabel}
+                approvalHint={drawerFacts.approvalHint}
+              />
             ) : (
               <aside
                 ref={drawerRef}
@@ -578,10 +719,12 @@ function visibleRowAnchors(list: HTMLElement | null): RowAnchor[] {
 function approvalFacts(
   row: WorkJobRow,
   decisions: ReturnType<typeof useWorkDecisions>,
-  needsMe: boolean
+  needsMe: boolean,
+  held: ReadonlyMap<string, HeldDecision>
 ): JobApprovalFacts {
   const runId = row.item.runId ?? row.id;
-  const mine = decisions.byRun.get(runId.toLowerCase()) ?? null;
+  // 붙든 결정이 원장보다 먼저다: 원장이 그 run의 다음 승인을 내놓아도 방금 누른 자리에는 영수증이 선다(H1).
+  const mine = held.get(runKeyOf(row))?.decision ?? decisions.byRun.get(runId.toLowerCase()) ?? null;
   return {
     decision: needsMe ? mine : null,
     item: mine?.item ?? null,
@@ -593,6 +736,7 @@ function approvalFacts(
 function JobRow({
   row,
   needsMe,
+  stateLabel,
   kind,
   permission,
   inApp,
@@ -610,6 +754,8 @@ function JobRow({
 }: {
   row: WorkJobRow;
   needsMe: boolean;
+  /** 상태 칩 낱말(코어 `workJobStateLabel`: 「응답 필요」는 구간에서 답을 기다리는 줄만). */
+  stateLabel: string;
   /** 결과 칸이 말하는 종류(코어 `workJobResultKind`). */
   kind: WorkJobResultKind;
   /**
@@ -621,7 +767,7 @@ function JobRow({
   approval: JobApprovalFacts | null;
   desktop: boolean;
   onOpenPermission: () => void;
-  onDecided: (outcome: DecisionOutcome) => void;
+  onDecided: (outcome: DecisionOutcome, runKey: string, decision: DecidableApproval) => void;
   selected: boolean;
   tabStop: boolean;
   rowRef: (element: HTMLButtonElement | null) => void;
@@ -709,7 +855,7 @@ function JobRow({
           {result}
         </span>
         <span data-col="state">
-          <StateChip item={row.item} label={row.statusLabel} />
+          <StateChip item={row.item} label={stateLabel} />
         </span>
         <span className="text-meta text-ink-muted" data-col="duration" data-testid="work-job-duration">
           {row.durationText ?? ""}
@@ -728,7 +874,9 @@ function JobRow({
               approval={approval}
               desktop={desktop}
               onOpenPermission={onOpenPermission}
-              onDecided={onDecided}
+              onDecided={(outcome) => {
+                if (approval?.decision) onDecided(outcome, runKeyOf(row), approval.decision);
+              }}
               focusRow={() => buttonRef.current?.focus({ preventScroll: true })}
             />
           </span>

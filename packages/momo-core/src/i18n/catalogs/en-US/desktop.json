@@ -35,6 +35,8 @@
   "desktop.workPermission.allowInApp": "Allow it from the phone or desktop app",
   "desktop.workJobs.tagApproval": "Approval request",
   "desktop.workJobs.tagPermission": "Permission request",
+  "desktop.workJobs.stateAwaitingApproval": "Awaiting approval",
+  "desktop.workJobs.approvalHintInList": "You can also approve it from the list",
   "desktop.workJobs.openToAnswer": "Open to answer",
   "desktop.workJobs.reportedTitle": "Agent report: {summary}"
 }

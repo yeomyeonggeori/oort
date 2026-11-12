@@ -4,7 +4,7 @@ import { act, type ReactNode } from "react";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Link, MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError, type Approval, type SharedWorkSession } from "@momo/core/lib/api";
 import type { WorkSessionACPFrame } from "@momo/core/lib/realtimeEvents";
 import { approvalItem } from "@momo/core/features/inbox/model";
@@ -605,7 +605,7 @@ describe("결과 칸의 그 자리 결정: 인박스와 같은 판정·같은 �
     expect(screen.queryByTestId("work-job-approval-waiting")).toBeNull();
   });
 
-  it("승인은 인박스와 같은 라우트(`POST …/approvals/{id}/decision`)로 나가고, 원장·목록을 다시 읽어 줄이 「지금」으로 가며 캐럿은 그 줄에 남는다", async () => {
+  it("승인은 인박스와 같은 라우트(`POST …/approvals/{id}/decision`)로 나가고, 원장·목록을 다시 읽은 뒤 영수증을 보인 채 잠깐 그 자리에 남았다가 「지금」으로 가며 캐럿은 그 줄에 남는다", async () => {
     board(new Set(), { mine: runs });
     api.fetchApprovals.mockResolvedValue(ledger);
     api.authedResponse.mockImplementation(async (path: string) =>
@@ -624,9 +624,12 @@ describe("결과 칸의 그 자리 결정: 인박스와 같은 판정·같은 �
     expect(path).toBe(`/v1/workspaces/${encodeURIComponent(WS)}/approvals/${encodeURIComponent(A(1))}/decision`);
     expect(init.method).toBe("POST");
     expect(JSON.parse(init.body)).toMatchObject({ approval_id: A(1), approve: true });
-    await waitFor(() => expect(rowsIn("needsMe")).toEqual([R(2)]));
-    expect(api.fetchApprovals.mock.calls.length).toBeGreaterThan(ledgerReads);
+    await waitFor(() => expect(api.fetchApprovals.mock.calls.length).toBeGreaterThan(ledgerReads));
+    // 원장이 그 승인을 뺐어도 줄은 영수증을 보인 채 그 자리다(수리 3회차 H1).
+    expect(rowsIn("needsMe")).toEqual([R(1), R(2)]);
+    expect(within(jobOf(R(1))).getByTestId("work-job-approval-settled").textContent).toBe("승인을 기록했어요.");
     expect(screen.getByTestId("work-jobs-decision-note").textContent).toBe("승인을 기록했어요.");
+    await waitFor(() => expect(rowsIn("needsMe")).toEqual([R(2)]), { timeout: 4000 });
     const moved = screen.getAllByTestId("work-job-row").find((r) => r.dataset.jobId === R(1))!;
     expect(document.activeElement).toBe(moved);
   });
@@ -677,5 +680,287 @@ describe("결과 칸의 그 자리 결정: 인박스와 같은 판정·같은 �
     fireEvent.keyDown(nextRow, { key: "k" });
     fireEvent.click(row);
     expect(decisionCalls()).toHaveLength(0);
+  });
+});
+
+// ---- 누른 자리에 다른 결정이 서지 않는다 (#5640 수리 3회차 H1) ----------------------------------------------------------------
+//
+// jsdom에는 자리(좌표)가 없다. 「같은 자리」는 「응답 필요」 구간의 같은 칸(n번째 줄)으로 잰다 — 결정한 줄이 빠지면 다음 줄이 그 칸으로
+// 올라오는 것이 검수가 잰 그 위험이다. 포인터 누름은 `detail: 1`, 키보드 누름(Enter)은 `detail: 0`이다. 좌표가 같은지는
+// `scripts/capture-5640.mjs`(진짜 브라우저)가 잰다.
+
+const sleepMs = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+describe("누른 자리에 다른 결정이 서지 않는다 (#5640 수리 3회차 H1)", () => {
+  const R = (n: number) => `00000000-0000-7000-8000-0000000000c${n}`;
+  const A = (n: number) => `00000000-0000-7000-8000-0000000000f${n}`;
+  const twoRuns = [1, 8].map((n) =>
+    runRow({
+      sessionId: R(n),
+      runId: R(n),
+      requestedBy: DOHYUN,
+      owner: AGENT,
+      label: `에이전트 작업 ${n}`,
+      phase: "awaiting_approval",
+      trigger: "mention",
+    })
+  );
+  const twoApprovals = [approval({ id: A(1), runId: R(1) }), approval({ id: A(8), runId: R(8) })];
+
+  beforeAll(() => {
+    // jsdom에는 PointerEvent가 없다: 좌표를 싣는 MouseEvent로 흉내 낸다(`ProfileCard.test.tsx`와 같다).
+    if (typeof globalThis.PointerEvent === "undefined") {
+      globalThis.PointerEvent = class PointerEvent extends MouseEvent {} as unknown as typeof globalThis.PointerEvent;
+    }
+  });
+
+  /** 서버 흉내: 결정 POST·원장·목록 모두 `roundTripMs` 뒤에 답한다. 결정이 닿은 run은 원장에서 빠지고 다시 돈다. */
+  function serveDecisions(roundTripMs: number) {
+    const decided = new Set<string>();
+    api.fetchWorkJobs.mockImplementation(async () => {
+      await sleepMs(roundTripMs);
+      return {
+        sessions: twoRuns.map((r) => (decided.has(r.runId!) ? { ...r, phase: "running" } : r)),
+        nextCursor: null,
+        mode: "jobs",
+      };
+    });
+    api.fetchApprovals.mockImplementation(async () => {
+      await sleepMs(roundTripMs);
+      return twoApprovals.filter((a) => !decided.has(a.runId!));
+    });
+    api.authedResponse.mockImplementation(async (path: string) => {
+      if (!String(path).endsWith("/decision")) return httpResponse(404, {});
+      const approvalId = String(path).split("/").at(-2)!;
+      decided.add(twoApprovals.find((a) => a.id === decodeURIComponent(approvalId))!.runId!);
+      await sleepMs(roundTripMs);
+      return httpResponse(200, { status: "approved", decided_by: ME, decided_at_ms: Date.now() });
+    });
+  }
+  const decidedIds = () => decisionCalls().map(([path]) => decodeURIComponent(String(path).split("/").at(-2)!));
+  const needsMeSlot = (n: number) =>
+    within(screen.getAllByTestId("work-jobs-section").find((s) => s.dataset.section === "needsMe")!).getAllByTestId("work-job")[n]!;
+  /** 그 칸을 포인터로 누른다: 결정 단추가 있으면 그 단추, 없으면 컨트롤 층(영수증)을. */
+  const pressSlot = (n: number) => {
+    const li = needsMeSlot(n);
+    const target = li.querySelector<HTMLElement>('[data-testid="work-job-approval-approve"]') ?? within(li).getByTestId("work-job-extras");
+    fireEvent.click(target, { detail: 1 });
+  };
+  const needsMeCount = () => Number(screen.getAllByTestId("work-jobs-section-count")[0]!.textContent);
+  const needsMeChips = () =>
+    within(screen.getAllByTestId("work-jobs-section").find((s) => s.dataset.section === "needsMe")!)
+      .getAllByTestId("team-board-state")
+      .filter((chip) => chip.textContent === "응답 필요").length;
+
+  it.each([40, 100, 300])(
+    "결정자 줄 둘에서 A의 승인 → 같은 칸을 한 번 더 누름(서버 왕복 %ims): 나간 결정은 A 1건, A는 영수증을 보인 채 그 칸에 남고 B의 승인은 그 칸에 오지 않는다",
+    async (roundTripMs) => {
+      board(new Set(), { mine: twoRuns });
+      serveDecisions(roundTripMs);
+      render(mount());
+      await waitFor(() => expect(rowsIn("needsMe")).toEqual([R(1), R(8)]), { timeout: 3000 });
+      // 사람이 포인터를 A의 승인으로 옮겨 누른다. 그 뒤로 포인터는 움직이지 않는다.
+      fireEvent.pointerMove(screen.getByRole("region", { name: WORK_JOBS_COPY.listLabel }), { clientX: 300, clientY: 120 });
+      pressSlot(0);
+      await waitFor(() => expect(within(needsMeSlot(0)).queryByTestId("work-job-approval-settled")).not.toBeNull(), { timeout: 3000 });
+      // 원장·목록이 다시 읽혀(A가 빠짐) 줄이 옮겨 갈 수 있는 때까지 기다린 뒤, 같은 칸을 다시 누른다.
+      await sleepMs(roundTripMs * 2 + 50);
+      expect(rowsIn("needsMe")[0]).toBe(R(1));
+      expect(within(needsMeSlot(0)).queryByTestId("work-job-approval-approve")).toBeNull();
+      // 붙든 줄은 더는 내 답을 기다리지 않는다: 머리글 수 = 구간에서 「응답 필요」 칩이 선 줄 수(H2), 붙든 줄의 칩은 「응답 필요」가 아니다.
+      expect(needsMeCount()).toBe(1);
+      expect(needsMeChips()).toBe(needsMeCount());
+      expect(within(needsMeSlot(0)).getByTestId("team-board-state").textContent).not.toBe("응답 필요");
+      pressSlot(0);
+      await sleepMs(roundTripMs * 2 + 50);
+      expect(decidedIds()).toEqual([A(1)]);
+      // 잠깐 뒤 놓이면 A는 「지금」으로 가고, 키보드 초점은 B의 단추가 아니라 A의 줄을 따라간다.
+      await waitFor(() => expect(rowsIn("needsMe")).toEqual([R(8)]), { timeout: 4000 });
+      expect(document.activeElement?.getAttribute("data-job-id")).toBe(R(1));
+    },
+    15_000
+  );
+
+  it("Enter 연타(키보드): A의 승인에서 Enter를 거듭 쳐도 나간 결정은 1건이고 초점은 다음 줄의 결정 단추로 가지 않는다", async () => {
+    board(new Set(), { mine: twoRuns });
+    serveDecisions(40);
+    render(mount());
+    await waitFor(() => expect(rowsIn("needsMe")).toEqual([R(1), R(8)]), { timeout: 3000 });
+    within(needsMeSlot(0)).getByTestId("work-job-approval-approve").focus();
+    for (const at of [0, 120, 200, 380]) {
+      await sleepMs(at === 0 ? 0 : 120);
+      // Enter = 초점이 있는 것을 키보드로 누름(`detail: 0`).
+      fireEvent.click(document.activeElement!, { detail: 0 });
+    }
+    await sleepMs(300);
+    expect(decidedIds()).toEqual([A(1)]);
+    expect(document.activeElement?.hasAttribute("data-decision")).toBe(false);
+  });
+
+  it("서버의 「못 한다」가 늦게 와서 A가 빠지면 그 칸에 올라온 B의 승인은 포인터가 움직이기 전까지 누름을 받지 않는다 — 움직인 뒤에는 받는다", async () => {
+    board(new Set(), { mine: twoRuns });
+    serveDecisions(0);
+    let deliver: (runs: AgentRunProgress[]) => void = () => undefined;
+    const stop = startRunProgress({
+      workspaceId: WS,
+      channelIds: [CH_AGENT_LAB],
+      realtime: null,
+      fetchProgress: () => new Promise<AgentRunProgress[]>((resolve) => (deliver = resolve)),
+    });
+    try {
+      render(mount());
+      await waitFor(() => expect(rowsIn("needsMe")).toEqual([R(1), R(8)]), { timeout: 3000 });
+      const list = screen.getByRole("region", { name: WORK_JOBS_COPY.listLabel });
+      fireEvent.pointerMove(list, { clientX: 300, clientY: 120 });
+      await act(async () =>
+        deliver([
+          {
+            id: R(1),
+            channelId: CH_AGENT_LAB,
+            agentMemberId: AGENT.memberId,
+            status: "running",
+            phase: "awaiting_approval",
+            leaseState: "live",
+            stepCount: 0,
+            ahead: [],
+            createdAtMs: Date.now(),
+            updatedAtMs: Date.now(),
+            bundle: { approvalId: A(1), status: "pending", decisionMode: "inline", canDecide: false, actionType: "tool_call" },
+          } as AgentRunProgress,
+        ])
+      );
+      await waitFor(() => expect(rowsIn("needsMe")).toEqual([R(8)]));
+      // 포인터는 그대로다: 그 칸에 올라온 B의 승인을 누르는 것은 결정이 아니다.
+      pressSlot(0);
+      await sleepMs(50);
+      expect(decisionCalls()).toHaveLength(0);
+      // 손떨림(문턱 아래)도 움직임이 아니다.
+      fireEvent.pointerMove(list, { clientX: 302, clientY: 121 });
+      pressSlot(0);
+      await sleepMs(50);
+      expect(decisionCalls()).toHaveLength(0);
+      // 포인터가 움직였다: 이제는 결정이다(막기가 모든 누름을 삼키지 않는다).
+      fireEvent.pointerMove(list, { clientX: 300, clientY: 160 });
+      pressSlot(0);
+      await waitFor(() => expect(decidedIds()).toEqual([A(8)]));
+    } finally {
+      stop();
+    }
+  });
+
+  it("원장이 늦게 와서 줄이 「지금」에서 「응답 필요」로 올라와도, 막 선 승인은 짧은 보호 시간 동안 움직이지 않은 포인터 누름을 받지 않고 그 뒤에는 받는다", async () => {
+    board(new Set(), { mine: twoRuns });
+    serveDecisions(0);
+    let answer: (approvals: Approval[]) => void = () => undefined;
+    api.fetchApprovals.mockImplementationOnce(() => new Promise<Approval[]>((resolve) => (answer = resolve)));
+    render(mount());
+    await waitFor(() => expect(rowsIn("now")).toEqual([R(1), R(8)]));
+    const list = screen.getByRole("region", { name: WORK_JOBS_COPY.listLabel });
+    fireEvent.pointerMove(list, { clientX: 300, clientY: 120 });
+    await act(async () => answer(twoApprovals));
+    await waitFor(() => expect(rowsIn("needsMe")).toEqual([R(1), R(8)]));
+    pressSlot(0);
+    await sleepMs(50);
+    expect(decisionCalls()).toHaveLength(0);
+    // 보호 시간이 지나면(포인터가 움직이지 않아도) 사람이 본 그 단추를 누를 수 있다.
+    await sleepMs(1000);
+    pressSlot(0);
+    await waitFor(() => expect(decidedIds()).toEqual([A(1)]));
+  });
+});
+
+describe("상태 칩·서랍의 낱말 (#5640 수리 3회차 H2·질문 ③)", () => {
+  const R = (n: number) => `00000000-0000-7000-8000-0000000000c${n}`;
+  const A = (n: number) => `00000000-0000-7000-8000-0000000000f${n}`;
+  const run = (n: number, requestedBy = DOHYUN) =>
+    runRow({ sessionId: R(n), runId: R(n), requestedBy, owner: AGENT, label: `에이전트 작업 ${n}`, phase: "awaiting_approval", trigger: "mention" });
+  const chipOf = (runId: string) =>
+    within(screen.getAllByTestId("work-job-row").find((r) => r.dataset.jobId === runId)!).getByTestId("team-board-state").textContent;
+
+  it("「응답 필요」는 그 구간의 줄만: 머리글 수 = 구간에서 「응답 필요」 칩이 선 줄 수, 구간 밖 승인 대기 줄(결정자 아님)은 「승인 대기」", async () => {
+    // 내 맥 세션(권한 요청) + 내가 결정할 run R1 + 결정이 내 몫이 아닌 run R4.
+    board(new Set([macSession.sessionId]), { mine: [run(1), run(4)] });
+    api.fetchApprovals.mockResolvedValue([approval({ id: A(1), runId: R(1) })]);
+    render(mount());
+    await waitFor(() => expect(rowsIn("needsMe")).toEqual([macSession.sessionId, R(1)]));
+    const section = screen.getAllByTestId("work-jobs-section").find((s) => s.dataset.section === "needsMe")!;
+    const count = Number(within(section).getByTestId("work-jobs-section-count").textContent);
+    const chips = within(section).getAllByTestId("team-board-state").map((c) => c.textContent);
+    expect(count).toBe(2);
+    expect(chips.filter((c) => c === "응답 필요")).toHaveLength(count);
+    expect(chipOf(R(4))).toBe("승인 대기");
+    // 화면 전체에서 「응답 필요」 칩 = 머리글 수(이 픽스처에는 구간 밖 대기 세션이 없다).
+    expect(screen.getAllByTestId("team-board-state").filter((c) => c.textContent === "응답 필요")).toHaveLength(count);
+  });
+
+  it("「팀 전체」의 승인 대기 줄은 「승인 대기」다(구간이 없다)", async () => {
+    board(new Set(), { team: [run(6), run(7, SEOYEON)] });
+    api.fetchApprovals.mockResolvedValue([approval({ id: A(6), runId: R(6) })]);
+    render(mount("/work?who=team"));
+    await waitFor(() => expect(screen.getAllByTestId("work-job-approval-link")).toHaveLength(2));
+    expect(chipOf(R(6))).toBe("승인 대기");
+    expect(chipOf(R(7))).toBe("승인 대기");
+  });
+
+  it("서랍은 연 줄과 같은 말을 한다: 결정자 줄은 칩 「응답 필요」와 「승인은 목록에서도 할 수 있어요」, 결정자가 아닌 줄은 「승인 대기」와 「승인은 그 카드에서 해요」", async () => {
+    board(new Set(), { mine: [run(1), run(4)] });
+    api.fetchApprovals.mockResolvedValue([approval({ id: A(1), runId: R(1) })]);
+    render(mount());
+    await waitFor(() => expect(rowsIn("needsMe")).toEqual([R(1)]));
+    fireEvent.click(screen.getAllByTestId("work-job-row").find((r) => r.dataset.jobId === R(1))!);
+    let drawer = await screen.findByTestId("team-board-drawer");
+    expect(within(drawer).getByTestId("team-board-state").textContent).toBe("응답 필요");
+    expect(drawer.textContent).toContain("승인은 목록에서도 할 수 있어요");
+    expect(drawer.textContent).not.toContain(WORK_JOBS_COPY.approvalHint);
+    fireEvent.click(screen.getAllByTestId("work-job-row").find((r) => r.dataset.jobId === R(4))!);
+    await waitFor(() => expect(screen.getByTestId("team-board-drawer").dataset.sessionId).toBe(R(4)));
+    drawer = screen.getByTestId("team-board-drawer");
+    expect(within(drawer).getByTestId("team-board-state").textContent).toBe("승인 대기");
+    expect(drawer.textContent).toContain(WORK_JOBS_COPY.approvalHint);
+  });
+});
+
+describe("다른 승인의 문장은 이 단추 위에 서지 않는다 (#5640 수리 3회차, 검수 M6)", () => {
+  const R = (n: number) => `00000000-0000-7000-8000-0000000000c${n}`;
+  const A = (n: number) => `00000000-0000-7000-8000-0000000000f${n}`;
+  const run = (n: number) =>
+    runRow({ sessionId: R(n), runId: R(n), requestedBy: DOHYUN, owner: AGENT, label: `에이전트 작업 ${n}`, phase: "awaiting_approval", trigger: "mention" });
+  const progressOf = (n: number, approvalId: string, intent: string) =>
+    ({
+      id: R(n),
+      channelId: CH_AGENT_LAB,
+      agentMemberId: AGENT.memberId,
+      status: "running",
+      phase: "awaiting_approval",
+      leaseState: "live",
+      stepCount: 0,
+      ahead: [],
+      createdAtMs: Date.now(),
+      updatedAtMs: Date.now(),
+      bundle: { approvalId, status: "pending", decisionMode: "inline", canDecide: true, actionType: "tool_call", intent },
+    }) as AgentRunProgress;
+
+  it("run 진행의 카드 문장은 그 승인의 것일 때만 결과 칸에 선다 — 같은 run의 다른 승인 문장이면 원장 행의 문장", async () => {
+    board(new Set(), { mine: [run(1), run(8)] });
+    api.fetchApprovals.mockResolvedValue([approval({ id: A(1), runId: R(1) }), approval({ id: A(8), runId: R(8) })]);
+    const stop = startRunProgress({
+      workspaceId: WS,
+      channelIds: [CH_AGENT_LAB],
+      realtime: null,
+      // R1의 진행은 앞선 다른 승인(A9)의 문장을 들고 있다. R8은 그 승인(A8)의 문장이다.
+      fetchProgress: async () => [progressOf(1, A(9), "앞선 승인의 문장: 고객에게 메일을 보내도 될까요?"), progressOf(8, A(8), "#launch 채널에 공지를 올려도 될까요?")],
+    });
+    try {
+      render(mount());
+      await waitFor(() => expect(rowsIn("needsMe")).toEqual([R(1), R(8)]));
+      const summaryOf = (runId: string) =>
+        within(screen.getAllByTestId("work-job").find((li) => li.querySelector<HTMLElement>('[data-testid="work-job-row"]')!.dataset.jobId === runId)!)
+          .getAllByTestId("work-job-approval-summary")[0]!.textContent;
+      await waitFor(() => expect(summaryOf(R(8))).toBe("#launch 채널에 공지를 올려도 될까요?"));
+      expect(summaryOf(R(1))).not.toContain("앞선 승인의 문장");
+      expect(summaryOf(R(1))).toBe(approvalItem(approval({ id: A(1), runId: R(1) }), { name: AGENT.displayName, isAgent: true }, "#agent-lab", Date.now()).predicate);
+    } finally {
+      stop();
+    }
   });
 });

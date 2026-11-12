@@ -1909,6 +1909,12 @@ export const catalog: MessageCatalog = {
       "value": "작업 중"
     }
   ],
+  "desktop.workJobs.approvalHintInList": [
+    {
+      "type": 0,
+      "value": "승인은 목록에서도 할 수 있어요"
+    }
+  ],
   "desktop.workJobs.openToAnswer": [
     {
       "type": 0,
@@ -1923,6 +1929,12 @@ export const catalog: MessageCatalog = {
     {
       "type": 1,
       "value": "summary"
+    }
+  ],
+  "desktop.workJobs.stateAwaitingApproval": [
+    {
+      "type": 0,
+      "value": "승인 대기"
     }
   ],
   "desktop.workJobs.tagApproval": [

@@ -51,6 +51,22 @@ export interface JobApprovalFacts {
   waiting: string | null;
 }
 
+type RowControl = ReturnType<typeof approvalRowControl>;
+
+/** 결정 컨트롤이 그 줄의 승인·거부인가(카드를 열어 결정하는 「열기」·끊김·영수증이 아니다). */
+function decidesHere(control: RowControl): boolean {
+  return control.kind === "decide";
+}
+
+/**
+ * 이 승인을 목록의 그 줄에서 바로 결정하는가(승인·거부가 선다). 서랍이 「승인은 그 카드에서 해요」 대신 사실을 말하는 데 쓴다
+ * (#5640 수리 3회차, 검수 질문 ③). 끊김은 묻지 않는다 — 배지와 같이 할 일이 사라지지 않는다.
+ */
+// eslint-disable-next-line react-refresh/only-export-components -- 결과 칸과 한 판정을 나누는 함수다(서랍이 같은 판정을 읽는다).
+export function decidesInRow(decision: DecidableApproval): boolean {
+  return decidesHere(approvalRowControl(decision.item, { offline: false }));
+}
+
 function KindTag({ label, testId }: { label: string; testId: string }) {
   return (
     <span
@@ -221,13 +237,14 @@ function JobDecision({
   const receipt = useSettledApproval(decision.approvalId);
   const settledLine = receipt === null ? null : settledStatusLine(receipt.status);
   const control = approvalRowControl(decision.item, { offline, settled: settledLine !== null });
-  const decideHere = control.kind === "decide";
+  const decideHere = decidesHere(control);
+  const awaited = awaitedApprovalId(control);
   // 열기를 `kind === "open"`으로 묻지 않는 것은 받은함과 같은 이유다(직접 문구 장부가 영어 낱말 리터럴도 센다): id를 싣는데 `decide`가 아니면 열기다.
-  const opensOnCard = !decideHere && awaitedApprovalId(control) !== null;
-  if (decideHere) {
+  const opensOnCard = !decideHere && awaited !== null;
+  if (decideHere && awaited !== null) {
     return (
       <InboxApprovalActions
-        approvalId={control.approvalId}
+        approvalId={awaited}
         execution={decision.item.execution}
         lead=""
         className="px-0 py-1"
@@ -236,7 +253,7 @@ function JobDecision({
         onSettled={(outcome) => {
           // 눌린 단추는 이 렌더에서 영수증 줄로 바뀌며 사라진다. 캐럿이 body로 떨어지지 않게 그 줄이 받는다.
           focusRow();
-          onDecided(outcome, control.approvalId);
+          onDecided(outcome, awaited);
         }}
       />
     );
