@@ -50,6 +50,7 @@ import { MemberProfileProvider } from "@/features/directory/MemberProfileDialog"
 import { InboxHotkeys } from "@/features/inbox/InboxHotkeys";
 import { DesktopNotifications } from "@/features/notifications/DesktopNotifications";
 import { ApprovalsLiveSync } from "@/features/inbox/ApprovalsLiveSync";
+import { ReadStateLiveSync } from "@/features/workspace/ReadStateLiveSync";
 import { DockBadge } from "@/features/notifications/DockBadge";
 import { TrayStatus } from "@/features/notifications/TrayStatus";
 import { RestartWorkWatch } from "@/features/updates/localWorkSource";
@@ -530,6 +531,8 @@ export function AppShell({
           {!stress && <DesktopNotifications />}
           {/* 새 승인 카드가 올라오면 처리할 일 목록을 바로 다시 읽는다(#3738). */}
           {!stress && <ApprovalsLiveSync />}
+          {/* 나를 부른 새 글이 오면 읽음 투영(독 배지·메뉴 막대 점·탭 제목의 수)을 바로 다시 읽는다(#5660). */}
+          {!stress && <ReadStateLiveSync />}
           {!stress && <DockBadge />}
           {/* 메뉴 막대 아이콘(#5193): 독 배지와 같은 수에 실행 중인 작업을 얹어 셸에 보내고, 메뉴에서 고른 것을 받아 간다. 아무것도 그리지 않는다. */}
           {!stress && <TrayStatus />}

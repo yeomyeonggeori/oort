@@ -311,6 +311,16 @@ describe("읽음 투영 캐시: 두 필드는 말하지 않은 응답이 지우�
     expect(merged.latestReadableSeq).toBe(12);
   });
 
+  it("따라가는 스레드의 답글 수(#5667)도 PUT 응답이 지우지 않는다: 채널을 읽어도 스레드 안 답글은 읽은 것이 아니다 (#5660)", () => {
+    const current = readRow(READ_CH, { followedUnreadReplyCount: 2, lastReadSeq: 4 });
+    // 채널을 열어 읽음 커서를 올렸다(PUT 응답: 이 필드 없음).
+    const merged = mergeReadStateRow(current, readRow(READ_CH, { lastReadSeq: 10 }));
+    expect(merged.followedUnreadReplyCount).toBe(2);
+    expect(merged.lastReadSeq).toBe(10);
+    // GET 이 말하면 그 값이다(0 도 답이다).
+    expect(mergeReadStateRow(current, readRow(READ_CH, { followedUnreadReplyCount: 0 })).followedUnreadReplyCount).toBe(0);
+  });
+
   it("캐시에도 응답에도 없으면 키를 만들지 않는다(여전히 「말하지 않음」)", () => {
     const merged = mergeReadStateRow(readRow(READ_CH), readRow(READ_CH));
     expect("closedAtSeq" in merged).toBe(false);

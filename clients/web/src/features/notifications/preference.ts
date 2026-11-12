@@ -19,11 +19,16 @@ export type DesktopNotifyKind =
   | "work-mine-done";
 
 /**
- * Dock badge switches (#3339). The badge is the needs-me count and nothing
- * else (`useNeedsMeCount`, one source); these only decide whether it is drawn
- * and whether unread DMs are added on top (default off, owner decision).
+ * Dock badge switches (#3339). The badge is the needs-me count (`useNeedsMeCount`, one source); these decide whether
+ * it is drawn and whether unread DMs are added on top (core `dmUnreadForBadge`; like every share, muting and the pause do not
+ * touch it, ADR-0124 D2·D4-A). The menu-bar
+ * dot follows the same number (#5193).
+ *
+ * `dockDms` (#5660, owner 2026-11-11) replaces `dockDm` and is on by default. The decision turned the DEFAULT on; it does
+ * not overturn a choice someone stored. So a stored `dockDm` is still read (`parseKinds`) when `dockDms` is absent, and only
+ * a device with neither key takes the new default. Saving writes `dockDms` from then on.
  */
-export type DockPrefKey = "dockBadge" | "dockDm";
+export type DockPrefKey = "dockBadge" | "dockDms";
 export type DesktopPrefKey = DesktopNotifyKind | DockPrefKey;
 
 // =============================================================================
@@ -60,7 +65,8 @@ export const DEFAULT_DESKTOP_NOTIFICATION_KINDS: DesktopNotificationKinds = {
   "work-mine-done": true,
   dm: false,
   dockBadge: true,
-  dockDm: false,
+  // 기본 켬(#5660, owner 11-11): 안 읽은 DM은 메뉴 막대 점·독 배지도 켠다. 예전 키 `dockDm`에 저장된 선택은 그대로 따른다(`parseKinds`).
+  dockDms: true,
 };
 
 const PREFERENCE_KEYS = Object.keys(
@@ -94,6 +100,8 @@ function parseKinds(raw: string | null): DesktopNotificationKinds {
     for (const key of PREFERENCE_KEYS) {
       if (typeof record[key] === "boolean") next[key] = record[key];
     }
+    // 예전 키에 저장된 선택(#3339 `dockDm`)은 새 키가 없을 때 그대로 따른다: 기본값만 바뀌었고 저장된 선택은 그 사람의 것이다(#5660).
+    if (typeof record.dockDms !== "boolean" && typeof record.dockDm === "boolean") next.dockDms = record.dockDm;
     return next;
   } catch {
     return { ...DEFAULT_DESKTOP_NOTIFICATION_KINDS };
