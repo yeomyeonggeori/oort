@@ -7,9 +7,11 @@ import {
   type InfiniteData,
 } from "@tanstack/react-query";
 import {
+  ApiError,
   fetchInbox,
   fetchMessages,
   isInboxAbsent,
+  markFollowedThreadsRead,
   markInboxItemRead,
   markInboxReadAll,
   fetchThreadReplies,
@@ -42,6 +44,7 @@ import { isSurfaceProvided } from "@momo/core/features/capabilities/serverSurfac
 import { useSession } from "@/app/session";
 import { advertiseReadState } from "@/features/chat/advertiseReadState";
 import {
+  applyFollowedThreadShareToCache,
   applyReadStateToCache,
   useChannels,
   useReadStates,
@@ -94,6 +97,11 @@ const THREAD_ROOT_CAP = 10;
 const STALE_MS = 15_000;
 /** 메뉴 막대 「모두 읽음 처리」가 한 번에 보내는 요청 수(`markChannelsRead`). */
 const READ_ALL_CONCURRENCY = 4;
+/**
+ * 「모두 읽음 처리」가 스레드 읽음 길(`POST …/threads/read-all`)을 부르는 횟수 상한. 한 번에 서버가 100개까지 옮기고
+ * 「더 있음」을 주므로, 상한 안에서 끝날 때까지 되부른다(서버는 분당 60번 예산).
+ */
+const THREAD_READ_ALL_MAX_CALLS = 10;
 
 /** `probing`: 아직 어느 서버인지 모른다. `server`: 투영 API. `composed`: 구 서버 후퇴. */
 export type MailboxSource = "probing" | "server" | "composed";
@@ -762,5 +770,37 @@ export function useMailboxReadActions() {
     [workspaceId, client, invalidate]
   );
 
-  return { markRead, markUnread, markAllRead, markChannelsRead };
+  /**
+   * 메뉴 막대 「모두 읽음 처리」의 스레드 몫(#5690, 서버 #5689): 따라가는 스레드의 읽은 위치를 마지막 답글로 올린다.
+   * 채널 읽음 위치(`markChannelsRead`)와 받은함 줄은 건드리지 않는다 — 스레드를 직접 읽을 때와 같은 범위다.
+   * 응답 줄의 답글 몫(`followedUnreadReplyCount`)만 캐시의 채널 줄에 바로 끼우고(채널 위치·멘션 수는 캐시 값을 지킨다), `hasMore`면 같은 요청을 되부른다
+   * (`THREAD_READ_ALL_MAX_CALLS`번 안에서). 서버가 이 길을 모르면(404·405) 아무것도 하지 않고 `unsupported`로 돌려준다 —
+   * 지금처럼 답글 몫이 남는다. 그 밖의 실패는 `failed`이고, 이미 읽은 만큼은 캐시에 남으며 다시 누를 수 있다.
+   */
+  const markFollowedThreads = useCallback(async () => {
+    let marked = 0;
+    let outcome: "done" | "partial" | "failed" | "unsupported" = "done";
+    try {
+      for (let call = 0; ; call += 1) {
+        if (call >= THREAD_READ_ALL_MAX_CALLS) {
+          outcome = "partial";
+          break;
+        }
+        const page = await markFollowedThreadsRead(workspaceId);
+        marked += page.markedThreadCount;
+        for (const row of page.readStates) applyFollowedThreadShareToCache(client, workspaceId, row);
+        if (!page.hasMore) break;
+      }
+    } catch (error) {
+      outcome =
+        error instanceof ApiError && (error.status === 404 || error.status === 405)
+          ? "unsupported"
+          : "failed";
+    }
+    void client.invalidateQueries({ queryKey: ["read-state", workspaceId] });
+    invalidate();
+    return { marked, outcome };
+  }, [workspaceId, client, invalidate]);
+
+  return { markRead, markUnread, markAllRead, markChannelsRead, markFollowedThreads };
 }
