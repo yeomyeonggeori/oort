@@ -35,7 +35,14 @@ vi.mock("@/features/work/useWorkSessions", async () => {
 });
 
 import { localWorkVerdict } from "@momo/core/features/workbench/localWork";
-import { LEDGER_FRESH_MS, RestartWorkWatch, localWorkSource, resetLocalWorkSourceForTest } from "./localWorkSource";
+import {
+  HOST_REFRESH_MS,
+  LEDGER_FRESH_MS,
+  LEDGER_POLL_WHILE_WAITING_MS,
+  RestartWorkWatch,
+  localWorkSource,
+  resetLocalWorkSourceForTest,
+} from "./localWorkSource";
 import { resetUpdateStoreForTest, seedUpdateStateForTest } from "./store";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -76,7 +83,13 @@ async function watchLedger(): Promise<void> {
   }
 }
 
+/** 벽시계만 가짜다(질의·React의 타이머는 진짜). */
+function later(ms: number): void {
+  vi.setSystemTime(Date.now() + ms);
+}
+
 beforeEach(() => {
+  vi.useFakeTimers({ toFake: ["Date"], now: Date.UTC(2026, 10, 11, 3, 0, 0) });
   resetLocalWorkSourceForTest();
   resetUpdateStoreForTest();
   bridge.status.mockReset();
@@ -95,8 +108,9 @@ describe("다시 시작이 기다릴 이 맥의 작업", () => {
     await watchLedger();
     await localWorkSource.refresh();
     expect(localWorkVerdict(localWorkSource.read())).toEqual({ kind: "busy", panes: 0, sessions: 1, unknown: false });
-    // 데몬이 꺼져 있으면 원장에 남은 세션은 끊길 것이 아니다.
+    // 데몬이 꺼져 있으면 원장에 남은 세션은 끊길 것이 아니다(데몬 상태는 30초에 한 번 다시 묻는다).
     bridge.status.mockResolvedValue(status({ running: false }));
+    later(HOST_REFRESH_MS);
     await localWorkSource.refresh();
     expect(localWorkVerdict(localWorkSource.read())).toEqual({ kind: "clear" });
   });
@@ -114,12 +128,28 @@ describe("다시 시작이 기다릴 이 맥의 작업", () => {
     bridge.status.mockResolvedValue(
       status({ registered: { hostId: MINE, workspaceId: OTHER, ownerMemberId: "m", serverUrl: "https://oort.invalid" } })
     );
+    later(HOST_REFRESH_MS);
     await localWorkSource.refresh();
     expect(localWorkVerdict(localWorkSource.read())).toEqual({ kind: "busy", panes: 0, sessions: 0, unknown: true });
 
     bridge.status.mockResolvedValue(status());
+    later(HOST_REFRESH_MS);
     await localWorkSource.refresh();
-    vi.useFakeTimers({ now: Date.now() + LEDGER_FRESH_MS + 1 });
+    expect(localWorkVerdict(localWorkSource.read())).toEqual({ kind: "clear" });
+    later(LEDGER_FRESH_MS + 1);
     expect(localWorkVerdict(localWorkSource.read())).toEqual({ kind: "busy", panes: 0, sessions: 0, unknown: true });
+  });
+
+  it("창이 숨어 질의의 주기 읽기가 멈춰도, 다시 읽기가 낡은 원장을 직접 다시 읽는다(세션이 끝나면 맑아진다)", async () => {
+    ledger.sessions = [session(MINE, "running")];
+    bridge.status.mockResolvedValue(status());
+    await watchLedger();
+    expect(localWorkVerdict(localWorkSource.read())).toEqual({ kind: "busy", panes: 0, sessions: 1, unknown: false });
+    ledger.sessions = [session(MINE, "ended")];
+    later(LEDGER_POLL_WHILE_WAITING_MS);
+    await act(async () => {
+      await localWorkSource.refresh();
+    });
+    expect(localWorkVerdict(localWorkSource.read())).toEqual({ kind: "clear" });
   });
 });

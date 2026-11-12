@@ -229,6 +229,8 @@ export async function installUpdate(): Promise<void> {
   if (!pending) return;
 
   set({ kind: "installing", update: pending, downloaded: 0, total: null });
+  // 받는 동안 이 맥의 작업 사실을 미리 읽어 둔다(#5661): 설치가 끝나는 순간의 판정이 「모름」으로 시작하지 않게.
+  void localWork?.refresh();
 
   const stop = await desktopUpdater.onProgress(({ downloaded, total }) => {
     // Ignore late events from a previous attempt: only the live install owns
