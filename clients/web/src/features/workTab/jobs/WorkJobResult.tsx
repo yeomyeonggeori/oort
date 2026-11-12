@@ -129,18 +129,19 @@ export function JobResultCell({
     const summary = approval.intent ?? item?.predicate ?? null;
     return (
       <span className="flex min-w-0 flex-col gap-1" data-testid="work-job-result" data-kind={kind} data-held="">
-        <span aria-hidden className={cn(CHIP_CLASS, "invisible self-start")}>
-          &nbsp;
+        <span aria-hidden className={cn(CHIP_CLASS, "invisible inline-flex shrink-0 items-center gap-1 self-start")}>
+          <ShieldCheck className="size-3 shrink-0" />
+          {formatMessage("desktop.workJobs.tagApproval")}
         </span>
         {summary !== null && <span className="min-w-0 break-keep text-meta text-ink">{summary}</span>}
         {item?.note && (
-          <span aria-hidden className="invisible text-meta">
-            &nbsp;
+          <span aria-hidden className="invisible min-w-0 break-keep text-meta">
+            {item.note}
           </span>
         )}
         {item?.timeLabel && (
-          <span aria-hidden className="invisible text-timestamp">
-            &nbsp;
+          <span aria-hidden className="invisible min-w-0 break-keep text-timestamp">
+            {item.timeLabel}
           </span>
         )}
       </span>

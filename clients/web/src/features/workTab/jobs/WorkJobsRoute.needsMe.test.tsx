@@ -801,7 +801,10 @@ describe("누른 자리에 다른 결정이 서지 않는다 (#5640 수리 3·4�
       expect(held.querySelector("[data-decision]")).toBeNull();
       expect(within(held).queryAllByTestId("work-job-approval-tag")).toHaveLength(0);
       expect(within(held).queryAllByTestId("work-job-approval-note")).toHaveLength(0);
-      expect(held.textContent).not.toContain("후 만료");
+      // 걷은 줄은 자리만 남는다(보이지 않고 낭독에서도 빠짐 — `invisible` + `aria-hidden`), 줄 높이를 지키려고.
+      const expiry = [...held.querySelectorAll("span")].filter((e) => e.children.length === 0 && (e.textContent ?? "").includes("후 만료"));
+      expect(expiry.length).toBeGreaterThan(0);
+      expect(expiry.every((e) => e.closest('.invisible[aria-hidden="true"]') !== null)).toBe(true);
       // 머리글 수 = 구간에서 「응답 필요」 칩이 선 줄 수(H2), 붙든 줄의 칩은 「응답 필요」가 아니다.
       expect(needsMeCount()).toBe(1);
       expect(needsMeChips()).toBe(needsMeCount());
