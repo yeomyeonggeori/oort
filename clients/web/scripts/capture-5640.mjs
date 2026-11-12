@@ -17,6 +17,8 @@
 //   - 줄이 구간을 옮길 때(지금 → 응답 필요) 스크롤한 목록의 보던 줄 이동 px와 캐럿 유지. 브라우저의 스크롤 고정을 끄고
 //     (`overflow-anchor: none`, 데스크탑 셸 WebKit에는 이 기능이 없다) 화면 코드의 고정만으로 잰다.
 //   - 브라우저에서 내 맥 세션 줄 Enter → 세션 화면(작업 콘솔)
+//   - 수리 2회차: 줄의 띠(가리킴·눌림·펼침 채움, 키보드 초점 링)가 구분선 사이를 끝에서 끝까지 채우는 각진 띠인지 — 찍힌 픽셀로
+//     네 모서리와 컨트롤 층(승인·거부 옆)을 재고, 거부 알약을 가리키면 띠가 꺼져 알약이 남는지, 상태 칩이 「응답 필요」 하나인지
 // =============================================================================
 import { homedir } from "node:os";
 import { mkdirSync } from "node:fs";
@@ -202,6 +204,157 @@ const shot = async (page, name, opts = {}) => {
   shots.push(`${name}.png`);
 };
 
+// ---- 줄의 띠 (수리 2회차) ------------------------------------------------------------------------------------------------
+
+const rgb = (css) => (css.match(/\d+(\.\d+)?/g) ?? []).slice(0, 3).map(Number);
+const dist = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]);
+/** 목록 안에서 읽은 띠 토큰(셸·테마가 토큰을 바꿀 수 있어 그 자리에서 잰다). */
+const bandTokens = (page) =>
+  page.evaluate(() => {
+    const probe = document.createElement("div");
+    document.querySelector('[data-testid="work-jobs-table"]').append(probe);
+    const read = (name) => {
+      probe.style.backgroundColor = `var(${name})`;
+      return getComputedStyle(probe).backgroundColor;
+    };
+    const out = { hover: read("--surface-hover"), pressed: read("--surface-pressed") };
+    probe.remove();
+    return out;
+  });
+/** 줄(`li`) 상자·계산 스타일. 줄 단추·컨트롤 층·상태 칩도 함께. */
+const jobBox = (page, rowId) =>
+  page.evaluate((id) => {
+    const btn = document.querySelector(`[data-testid="work-job-row"][data-job-id="${id}"]`);
+    const li = btn.closest('[data-testid="work-job"]');
+    const box = (el) => {
+      const r = el.getBoundingClientRect();
+      return { x: r.left, y: r.top, width: r.width, height: r.height };
+    };
+    const cs = (el) => getComputedStyle(el);
+    const extras = li.querySelector('[data-testid="work-job-extras"]');
+    const chip = li.querySelector('[data-testid="team-board-state"]');
+    const tag = [...li.querySelectorAll('[data-testid$="-tag"]')].find((el) => el.getClientRects().length > 0) ?? null;
+    return {
+      li: box(li),
+      extras: extras ? box(extras) : null,
+      liBg: cs(li).backgroundColor,
+      liRadius: cs(li).borderRadius,
+      liOutline: { style: cs(li).outlineStyle, width: cs(li).outlineWidth },
+      btnBg: cs(btn).backgroundColor,
+      btnRadius: cs(btn).borderRadius,
+      btnOutline: cs(btn).outlineStyle,
+      chipText: chip?.textContent?.trim() ?? null,
+      chipBg: chip ? cs(chip).backgroundColor : null,
+      tagBg: tag ? cs(tag).backgroundColor : null,
+      title: box(btn.querySelector('[data-col="task"] > span:first-child')),
+    };
+  }, rowId);
+/** 줄 상자 안의 찍힌 픽셀(CSS px 좌표, 줄 왼쪽 위 기준). 해독은 CSP 없는 빈 쪽의 캔버스로(새 의존 없음). */
+async function bandPixels(page, decoder, li, points) {
+  const clip = { x: Math.round(li.x), y: Math.round(li.y), width: Math.floor(li.width), height: Math.floor(li.height) };
+  const png = await page.screenshot({ clip });
+  return decoder.evaluate(
+    async ({ b64, pts, w }) => {
+      const image = new Image();
+      image.src = `data:image/png;base64,${b64}`;
+      await image.decode();
+      const canvas = document.createElement("canvas");
+      canvas.width = image.width;
+      canvas.height = image.height;
+      const g = canvas.getContext("2d");
+      g.drawImage(image, 0, 0);
+      const scale = image.width / w;
+      const out = {};
+      for (const [name, x, y] of pts) {
+        const d = g.getImageData(Math.floor(x * scale), Math.floor(y * scale), 1, 1).data;
+        out[name] = [d[0], d[1], d[2]];
+      }
+      return out;
+    },
+    { b64: png.toString("base64"), pts: points, w: clip.width }
+  );
+}
+/** 띠의 네 모서리(구분선 바로 위까지) + 컨트롤 층의 왼쪽 여백. 둥근 띠·단추에만 칠한 띠면 모서리·컨트롤 층이 바탕색이다. */
+const bandPoints = (m) => {
+  const w = Math.floor(m.li.width);
+  const h = Math.floor(m.li.height);
+  const pts = [["tl", 1, 1], ["tr", w - 2, 1], ["bl", 1, h - 3], ["br", w - 2, h - 3]];
+  if (m.extras) pts.push(["extras", 2, Math.round(m.extras.y - m.li.y + m.extras.height / 2)]);
+  return pts;
+};
+const allNear = (px, color) => Object.values(px).every((p) => dist(p, color) <= 3);
+/**
+ * 띠가 그 점까지 칠했는가: 모든 점이 쉬는 때와 달라졌고(채움이 닿았다), 오른쪽 두 모서리는 토큰 색 그대로다. 왼쪽 점은 토큰과 같다고
+ * 묻지 않는다 — 폰 폭에서는 닫힌 사이드바 서랍(`.sidebar-drawer`, 화면 밖 -280..0)의 `shadow-lg`가 본문 왼쪽 10px 안팎에 비쳐
+ * 쉬는 때든 칠한 때든 그 점이 조금 어둡다(이 PR 밖의 기존 그림자, 인계 「후속」).
+ */
+const bandLit = (rest, lit, color) =>
+  Object.keys(rest).every((k) => dist(rest[k], lit[k]) > 3) && dist(lit.tr, color) <= 3 && dist(lit.br, color) <= 3;
+
+/**
+ * 결정자 승인 줄의 띠: 가리킴 → 눌림 → 거부 알약 가리킴 → 키보드 초점 링 → Tab 거부. 캡처 `5640-hover-*`·`5640-focus-ring-*`.
+ * 모든 폭·스킴(그리고 200%)에서 같은 단언이다.
+ */
+async function bandChecks(page, tag) {
+  const decoder = await page.context().newPage();
+  try {
+    const tokens = await bandTokens(page);
+    const hover = rgb(tokens.hover);
+    const pressed = rgb(tokens.pressed);
+    const id = runApproval.runId;
+    // 줄 전체(컨트롤 층까지)가 화면 안이어야 찍힌 픽셀을 잴 수 있다(200%에서는 줄이 화면 아래로 걸친다).
+    await page.evaluate((rid) => document.querySelector(`[data-testid="work-job-row"][data-job-id="${rid}"]`).closest('[data-testid="work-job"]').scrollIntoView({ block: "center" }), id);
+    await page.mouse.move(0, 0);
+    const rest = await jobBox(page, id);
+    const vh = page.viewportSize().height;
+    check(`${tag} 띠를 재는 줄이 화면 안`, rest.li.y >= 0 && rest.li.y + rest.li.height <= vh, { li: rest.li, vh });
+    const restPx = await bandPixels(page, decoder, rest.li, bandPoints(rest));
+    check(`${tag} 띠: 쉬는 줄은 채움 없음(재는 색과 바탕이 다르다)`, Object.values(restPx).every((p) => dist(p, hover) > 3), { restPx, hover });
+    check(`${tag} 상태 칩 「응답 필요」(승인 요청 줄)`, rest.chipText === "응답 필요", rest.chipText);
+    // 가리킴: 줄 단추(제목) 위.
+    await page.mouse.move(rest.title.x + Math.min(20, rest.title.width / 2), rest.title.y + rest.title.height / 2);
+    await page.waitForTimeout(50);
+    const hov = await jobBox(page, id);
+    const hovPx = await bandPixels(page, decoder, hov.li, bandPoints(hov));
+    check(`${tag} 띠: 가리킴 채움이 네 모서리·컨트롤 층까지(각진 띠)`, bandLit(restPx, hovPx, hover) && hov.extras !== null, { restPx, hovPx, hover });
+    check(`${tag} 띠: 줄·줄 단추 반경 0, 단추 채움 = 띠 색(이음매 없음)`, hov.liRadius === "0px" && hov.btnRadius === "0px" && dist(rgb(hov.btnBg), hover) <= 3 && dist(rgb(hov.liBg), hover) <= 3, { li: hov.liRadius, btn: hov.btnRadius, btnBg: hov.btnBg, liBg: hov.liBg });
+    check(`${tag} 띠: 가리켜도 줄 높이 그대로`, Math.abs(hov.li.height - rest.li.height) < 0.5, { rest: rest.li.height, hover: hov.li.height });
+    check(`${tag} 칩 그릇이 띠 위에 남는다(상태 칩·꼬리표)`, dist(rgb(hov.chipBg), hover) > 3 && dist(rgb(hov.tagBg), hover) > 3, { chip: hov.chipBg, tag: hov.tagBg, band: tokens.hover });
+    await shot(page, `5640-hover-${tag}`);
+    // 눌림: 줄 단추를 누르는 동안. 뗄 때는 거부 위로 옮겨 떼어 서랍을 열지 않는다(누른 곳과 뗀 곳이 달라 단추의 click이 없다).
+    await page.mouse.down();
+    await page.waitForTimeout(50);
+    const prsPx = await bandPixels(page, decoder, hov.li, bandPoints(hov));
+    check(`${tag} 띠: 눌림 채움이 네 모서리·컨트롤 층까지`, bandLit(restPx, prsPx, pressed) && dist(prsPx.tr, hover) > 3, { prsPx, pressed });
+    const reject = page.locator(`[data-testid="work-job"]`, { has: page.locator(`[data-job-id="${id}"]`) }).getByTestId("work-job-approval-reject");
+    const rb = await reject.boundingBox();
+    await page.mouse.move(rb.x + rb.width / 2, rb.y + rb.height / 2);
+    await page.mouse.up();
+    await page.waitForTimeout(50);
+    // 거부 알약 가리킴: 띠는 꺼지고 알약의 가리킴 채움이 바탕과 갈린다. 알약은 오른쪽 안쪽 끝을 잰다(폰 폭의 왼쪽 그림자 밖, 글자 밖).
+    const onPill = await jobBox(page, id);
+    const pillBg = await reject.evaluate((el) => getComputedStyle(el).backgroundColor);
+    const pillPx = await bandPixels(page, decoder, onPill.li, [["pad", 2, 1], ["pill", Math.round(rb.x - onPill.li.x + rb.width - 6), Math.round(rb.y - onPill.li.y + rb.height / 2)]]);
+    check(`${tag} 거부를 가리키면 띠는 꺼지고 알약(가리킴 채움)이 남는다`, /rgba\(0, 0, 0, 0\)|transparent/.test(onPill.liBg) && dist(rgb(pillBg), hover) <= 3 && dist(pillPx.pill, hover) <= 3 && dist(pillPx.pill, pillPx.pad) > 3, { liBg: onPill.liBg, pillBg, pillPx });
+    console.log(`MEASURE band-${tag}: hover=${tokens.hover} pressed=${tokens.pressed} pill(on hover)=${pillBg} pillPx=${pillPx.pill} padPx=${pillPx.pad}`);
+    // 키보드 초점 링: 띠 둘레(줄 단추 자신의 링 없음).
+    await page.mouse.move(0, 0);
+    await page.locator(`[data-testid="work-job-row"][data-job-id="${id}"]`).focus();
+    await page.keyboard.press("ArrowDown");
+    await page.keyboard.press("ArrowUp");
+    const ring = await jobBox(page, id);
+    const active = await page.evaluate(() => document.activeElement?.getAttribute("data-job-id") ?? null);
+    check(`${tag} 키보드 초점 링: 띠(li) 둘레 2px, 줄 단추 자신은 링 없음`, active === id && ring.liOutline.style === "solid" && ring.liOutline.width === "2px" && ring.btnOutline === "none" && ring.liRadius === "0px", { active, ring: ring.liOutline, btn: ring.btnOutline });
+    await shot(page, `5640-focus-ring-${tag}`);
+    await page.keyboard.press("Tab");
+    const inner = await jobBox(page, id);
+    const innerActive = await page.evaluate(() => ({ id: document.activeElement?.getAttribute("data-testid"), outline: getComputedStyle(document.activeElement).outlineStyle }));
+    check(`${tag} Tab 거부: 띠 링은 접히고 거부 자신의 링만`, innerActive.id === "work-job-approval-reject" && innerActive.outline === "solid" && inner.liOutline.style === "none", { innerActive, li: inner.liOutline });
+  } finally {
+    await decoder.close();
+  }
+}
+
 /** 데스크탑 셸 흉내(명령은 빈 답). 「작업」 화면이 `isDesktop()`으로 가르는 것만 본다 — 실제 WKWebView·A 칸은 runtime-unverified. */
 async function installDesktop(page, origin) {
   await page.addInitScript((serverOrigin) => {
@@ -291,21 +444,11 @@ async function scene(browser, origin, scheme, viewport, tag) {
   check(`${tag} 가로 넘침 0`, (await overflowX(page)) === 0, await overflowX(page));
   check(`${tag} 안내·제목 잘림 0`, (await clippedText(page)).length === 0, await clippedText(page));
   await shot(page, `5640-mine-${tag}`);
+  // 권한 요청 줄의 상태 칩도 같은 낱말(두 종류 모두 「응답 필요」, 종류는 꼬리표가).
+  check(`${tag} 상태 칩 「응답 필요」(권한 요청 줄)`, (await text(permJob.getByTestId("team-board-state"))) === "응답 필요");
+  await bandChecks(page, tag);
 
   if (viewport.width >= 1280) {
-    // 키보드 초점 링: 목록의 첫 줄(응답 필요)까지 Tab으로.
-    await page.locator('[data-section="needsMe"] [data-testid="work-job-row"]').first().focus();
-    await page.keyboard.press("ArrowDown");
-    await page.keyboard.press("ArrowUp");
-    const ring = await page.evaluate(() => {
-      const el = document.activeElement;
-      if (!el) return null;
-      const cs = getComputedStyle(el);
-      return { testid: el.getAttribute("data-testid"), outline: cs.outlineStyle, width: cs.outlineWidth, visible: el.matches(":focus-visible") };
-    });
-    check(`${tag} 키보드 초점 링(첫 줄)`, ring?.testid === "work-job-row" && ring.visible && ring.outline !== "none", ring);
-    await shot(page, `5640-focus-ring-${tag}`);
-
     await page.getByTestId("work-jobs-filter-team").click();
     await page.waitForFunction(() => document.querySelectorAll('[data-testid="work-job-row"]').length === 18);
     check(`${tag} 팀 전체: 구간 없음`, JSON.stringify(await sectionOrder(page)) === JSON.stringify(["now", "done"]), await sectionOrder(page));
@@ -323,6 +466,38 @@ async function zoomScene(browser, origin) {
   check("zoom200 가로 넘침 0", (await overflowX(page)) === 0, await overflowX(page));
   check("zoom200 안내·제목 잘림 0", (await clippedText(page)).length === 0, await clippedText(page));
   await shot(page, "5640-zoom200-light");
+  await bandChecks(page, "zoom200-light");
+  await context.close();
+}
+
+/**
+ * 펼친 줄(서랍이 열림)의 띠와 그 줄의 거부 알약 — 단언 없이 잰 값만 남긴다(planner가 정할 것: 펼침 채움과 보조 알약의 가리킴 채움이
+ * 같은 토큰). 캡처 `5640-selected-reject-hover-*`(1440: 목록과 서랍이 함께 선다).
+ */
+async function selectedScene(browser, origin, scheme) {
+  // 1400보다 좁으면 서랍이 목록 자리를 차지한다(`team-board-layout`): 목록과 서랍이 함께 서는 폭에서 잰다.
+  const { context, page } = await openContext(browser, origin, { scheme, viewport: { width: 1440, height: 900 } });
+  await page.waitForFunction(() => document.querySelectorAll('[data-section="needsMe"] [data-testid="work-job-row"]').length === 2);
+  const id = runApproval.runId;
+  const decoder = await context.newPage();
+  const tokens = await bandTokens(page);
+  await page.locator(`[data-testid="work-job-row"][data-job-id="${id}"]`).click();
+  await page.waitForFunction((rid) => document.querySelector(`[data-testid="work-job-row"][data-job-id="${rid}"]`)?.getAttribute("aria-expanded") === "true", id);
+  await page.mouse.move(0, 0);
+  await page.waitForTimeout(100);
+  const sel = await jobBox(page, id);
+  const selPx = await bandPixels(page, decoder, sel.li, bandPoints(sel));
+  check(`selected-${scheme} 펼친 줄: 펼침 채움이 네 모서리·컨트롤 층까지`, allNear(selPx, rgb(tokens.hover)), { selPx, hover: tokens.hover });
+  const reject = page.locator(`[data-testid="work-job"]`, { has: page.locator(`[data-job-id="${id}"]`) }).getByTestId("work-job-approval-reject");
+  const rb = await reject.boundingBox();
+  await page.mouse.move(rb.x + rb.width / 2, rb.y + rb.height / 2);
+  await page.waitForTimeout(50);
+  const pillBg = await reject.evaluate((el) => getComputedStyle(el).backgroundColor);
+  const after = await jobBox(page, id);
+  const px = await bandPixels(page, decoder, after.li, [["pad", 2, 1], ["pill", Math.round(rb.x - after.li.x + rb.width - 6), Math.round(rb.y - after.li.y + rb.height / 2)]]);
+  console.log(`MEASURE selected-${scheme}: band=${after.liBg} pill(hover)=${pillBg} pillPx=${px.pill} padPx=${px.pad} dist=${dist(px.pill, px.pad).toFixed(2)}`);
+  await shot(page, `5640-selected-reject-hover-${scheme}`);
+  await decoder.close();
   await context.close();
 }
 
@@ -459,6 +634,10 @@ async function main() {
       }
     }
     if (ONLY === "" || ONLY === "zoom") await zoomScene(browser, preview.origin);
+    if (ONLY === "" || ONLY === "selected") {
+      await selectedScene(browser, preview.origin, "light");
+      await selectedScene(browser, preview.origin, "dark");
+    }
     if (ONLY === "" || ONLY === "jump") {
       await jumpScene(browser, preview.origin, "light");
       await jumpScene(browser, preview.origin, "dark");

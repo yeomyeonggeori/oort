@@ -637,7 +637,25 @@ function JobRow({
   const buttonRef = useRef<HTMLButtonElement | null>(null);
   return (
     // 한 작업 = 한 덩어리: 줄 단추와 결과 열의 컨트롤이 한 `li` 안에 서고, 덩어리 사이는 머리카락 선 하나다(가장 조용한 구분).
-    <li className="border-b border-line last:border-b-0" data-testid="work-job">
+    //
+    // 줄의 띠(가리킴·펼침·눌림 채움과 키보드 초점 링)는 `li`가 그린다(#5640 수리 2회차, owner 「구분선이랑 라운드 호버 배경이랑 잘 안
+    // 어울려」): 구분선 사이를 끝에서 끝까지 채우는 **각진** 띠다(Linear·GitHub 표와 같은 꼴). 줄 단추에 둥근 채움을 두면 컨트롤 층(승인·
+    // 거부, PR 링크)이 띠 밖에 남고 모서리가 선과 어긋났다. 띠의 상태는 **직계 줄 단추**에서만 읽는다:
+    //   - 가리킴: 포인터가 줄 단추 위일 때만. 컨트롤 층 위에서는 켜지 않는다 — 보조 알약(거부·열기)의 가리킴 채움이 띠와 같은
+    //     `--surface-hover`라, 띠가 켜진 채로 알약을 가리키면 알약이 띠에 녹아 사라진다(README 「상태 토큰과 그릇 토큰」과 같은 산술).
+    //   - 눌림: 줄 단추를 누를 때만(`li:active`는 안의 승인·거부를 눌러도 켜진다). 가리킴 규칙은 `:not(:active)`로 눌림과 겹치지
+    //     않게 둔다 — 두 규칙의 특정도가 같고 `pointer-hover:` 규칙이 CSS에서 뒤에 나와, 겹치면 눌림 채움이 지고 만다(빌드 실측).
+    //   - 초점 링: 줄 단추가 키보드 초점일 때 띠 둘레에. 안의 승인·거부에 초점이 가면 그 단추 자신의 링만 선다(두 겹 없음).
+    // 줄 안의 칩·단추의 둥근 모서리는 그대로다.
+    <li
+      className={cn(
+        "border-b border-line last:border-b-0",
+        selected ? "bg-surface-hover" : "pointer-hover:has-[>button:hover:not(:active)]:bg-surface-hover",
+        "has-[>button:active]:bg-surface-pressed has-[>button:focus-visible]:focus-ring"
+      )}
+      data-testid="work-job"
+      data-selected={selected ? "" : undefined}
+    >
       <button
         ref={(el) => {
           buttonRef.current = el;
@@ -659,8 +677,10 @@ function JobRow({
         data-needs-me={needsMe ? "" : undefined}
         data-permission={permission ? "" : undefined}
         data-result-kind={kind}
+        // 단추는 자기 자리를 띠와 **같은 토큰·각진 모서리**로 칠한다(전폭 행의 채움 눌림, 눌림 장부 ADR-0179 D5) — 띠(`li`)와 한
+        // 색이라 이음매가 없고, 컨트롤 층까지는 띠가 잇는다. 링은 띠가 그리므로 단추 자신의 링은 걷는다(두 겹 없음).
         className={cn(
-          "work-jobs-row w-full rounded-lg px-3 py-2 text-start text-body text-ink focus-visible:focus-ring",
+          "work-jobs-row w-full px-3 py-2 text-start text-body text-ink focus-visible:outline-none",
           "active:bg-surface-pressed",
           selected ? "bg-surface-hover" : "hover:bg-surface-hover"
         )}
@@ -689,7 +709,7 @@ function JobRow({
           {result}
         </span>
         <span data-col="state">
-          <StateChip item={row.item} />
+          <StateChip item={row.item} label={row.statusLabel} />
         </span>
         <span className="text-meta text-ink-muted" data-col="duration" data-testid="work-job-duration">
           {row.durationText ?? ""}

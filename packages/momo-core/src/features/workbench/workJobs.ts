@@ -146,6 +146,16 @@ export interface WorkJobRow {
   channelId: string;
 }
 
+/**
+ * 「작업」 줄 상태 칩의 낱말(#5640 수리 2회차). 승인을 기다리는 run도 권한 요청을 기다리는 맥 세션과 같은 **「응답 필요」** 하나다
+ * (구간 이름·세션 상태와 같은 낱말 `SESSION_STATUS_LABEL.waiting`). 무엇을 기다리는지는 결과 칸 꼬리표(「승인 요청」·「권한 요청」)가
+ * 말한다 — 한 줄에 「승인 필요」 칩과 「승인 요청」 꼬리표가 나란히 서던 비슷한 말 둘을 하나로. 이 화면만의 낱말이다: 사이드바·서랍·폰은
+ * 여전히 `stateChipLabel`(「승인 필요」)을 읽는다.
+ */
+export function workJobStateLabel(item: SharedWorkSession): string {
+  return isAwaitingApproval(item) ? SESSION_STATUS_LABEL.waiting : stateChipLabel(item);
+}
+
 export function workJobRow(item: SharedWorkSession, nowMs: number): WorkJobRow {
   const run = isRunItem(item);
   const requester: WorkJobPerson | null = run
@@ -168,7 +178,7 @@ export function workJobRow(item: SharedWorkSession, nowMs: number): WorkJobRow {
     agentIsMember: run,
     finished,
     awaitingApproval,
-    statusLabel: stateChipLabel(item),
+    statusLabel: workJobStateLabel(item),
     duration,
     durationText: durationTextOf(duration, item.startedAtMs, nowMs),
     pr: prFacts(item.prUrl),

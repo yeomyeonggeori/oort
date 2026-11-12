@@ -27,6 +27,7 @@ import {
   rowNeedsMe,
   workJobResultHasControls,
   workJobResultKind,
+  workJobStateLabel,
   type WorkJobRow,
 } from "./workJobs";
 import { approvalWaitingLine } from "../timeline/requestBundle";
@@ -199,12 +200,11 @@ describe("줄 모델 (ADR-0202 D1)", () => {
     expect(requesterToAgent(job)).toBe("그록봇");
   });
 
-  it("phase=awaiting_approval인 run만 「승인 필요」이고 「지금」 맨 위에 선다", () => {
+  it("phase=awaiting_approval인 run만 승인 대기이고 「지금」 맨 위에 선다", () => {
     const waiting = workJobRow(row(wireRun({ runId: "00000000-0000-7000-8000-0000000000c2", phase: "awaiting_approval" })), NOW);
     const working = workJobRow(row(wireRun()), NOW);
     const done = workJobRow(row(wireRun({ runId: "00000000-0000-7000-8000-0000000000c3", state: "done", endedAtMs: NOW })), NOW);
     expect(waiting.awaitingApproval).toBe(true);
-    expect(waiting.statusLabel).toBe("승인 필요");
     expect(working.awaitingApproval).toBe(false);
     const sections = workJobSections([working, done, waiting]);
     expect(sections.map((s) => s.key)).toEqual(["now", "done"]);
@@ -242,6 +242,19 @@ describe("줄 모델 (ADR-0202 D1)", () => {
     expect(awaitingMeItem(idle).state).toBe("waiting");
     const done = row(wireSession({ sessionId: "00000000-0000-7000-8000-0000000000e3", state: "done", endedAtMs: NOW }));
     expect(awaitingMeItem(done)).toBe(done);
+  });
+
+  it("상태 칩 낱말(수리 2회차): 승인 대기 run도 권한 요청 맥 세션과 같은 「응답 필요」 하나, 이 화면 밖 낱말은 그대로", () => {
+    const approval = workJobRow(row(wireRun({ runId: "00000000-0000-7000-8000-0000000000c4", phase: "awaiting_approval" })), NOW);
+    const permission = workJobRow(row(wireSession({ origin: "host", owner: { memberId: ME, displayName: "구민수" }, state: "waiting" })), NOW);
+    expect(approval.statusLabel).toBe(SESSION_STATUS_LABEL.waiting);
+    expect(approval.statusLabel).toBe("응답 필요");
+    expect(permission.statusLabel).toBe(approval.statusLabel);
+    expect(workJobStateLabel(approval.item)).toBe("응답 필요");
+    // 사이드바·서랍·폰이 읽는 공용 칩 낱말은 바꾸지 않는다.
+    expect(stateChipLabel(approval.item)).toBe("승인 필요");
+    // 승인 대기가 아닌 줄은 공용 낱말 그대로.
+    expect(workJobRow(row(wireRun()), NOW).statusLabel).toBe("실행 중");
   });
 
   it("옛 서버(phase 없음)는 승인 필요를 지어내지 않는다", () => {
