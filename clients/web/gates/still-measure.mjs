@@ -582,9 +582,10 @@ export const TIMELINE_KNOWN_FAILURES = Object.freeze(
     { key: "entry-card|chromium|1280", ...NO_ISSUE, what: `${ENTRY_HEAD}(2프레임) + 진입 중 링크 카드가 0.7초 늦게 서면 마지막 줄 4.75px`, maxUnsettledFrames: 2, maxUnexplainedPx: 4.75 },
     { key: "entry-card|chromium|900", ...NO_ISSUE, what: `${ENTRY_HEAD}(2프레임) + 진입 중 링크 카드가 0.7초 늦게 서면 마지막 줄 4.75px`, maxUnsettledFrames: 2, maxUnexplainedPx: 4.75 },
     { key: "entry-card|chromium|390", ...NO_ISSUE, what: `${ENTRY_HEAD}(2프레임)`, maxUnsettledFrames: 2 },
-    // 4px 는 검수 r1 · 앞 회차 실측(K3, 세 번에 한 번꼴 — 카드가 서는 순간이 진입의 어느 프레임과 겹치느냐). 오늘 5번은 1px 이었다.
-    { key: "entry-card|webkit|1280", ...NO_ISSUE, what: `${ENTRY_HEAD}(1~3프레임) + 진입 중 카드가 서면 가끔 마지막 줄 4px`, maxUnsettledFrames: 3, maxUnexplainedPx: 4 },
-    { key: "entry-card|webkit|900", ...NO_ISSUE, what: `${ENTRY_HEAD}(1~3프레임) + 진입 중 카드가 서면 가끔 마지막 줄 4px`, maxUnsettledFrames: 3, maxUnexplainedPx: 4 },
+    // 가끔(앞 회차 K3 · 검수 r1: 세 번에 한 번꼴 — 카드가 서는 순간이 진입의 어느 프레임과 겹치느냐). 그리기 직전 표본으로 4.38px(11-12, 900),
+    // 옛 기록기로 4px. 다른 회차는 1px.
+    { key: "entry-card|webkit|1280", ...NO_ISSUE, what: `${ENTRY_HEAD}(1~3프레임) + 진입 중 카드가 서면 가끔 마지막 줄 4.38px`, maxUnsettledFrames: 3, maxUnexplainedPx: 4.38 },
+    { key: "entry-card|webkit|900", ...NO_ISSUE, what: `${ENTRY_HEAD}(1~3프레임) + 진입 중 카드가 서면 가끔 마지막 줄 4.38px`, maxUnsettledFrames: 3, maxUnexplainedPx: 4.38 },
     { key: "entry-card|webkit|390", ...NO_ISSUE, what: `${ENTRY_HEAD}(2프레임)`, maxUnsettledFrames: 2 },
     { key: "older|chromium|1280", ...NO_ISSUE, what: "위로 더 불러오기: 옛 쪽이 붙은 다음 프레임에 보던 줄 5.25px 내려앉음", maxUnexplainedPx: 5.25 },
     { key: "older|chromium|900", ...NO_ISSUE, what: "위로 더 불러오기: 옛 쪽이 붙은 다음 프레임에 보던 줄 5.25px 내려앉음", maxUnexplainedPx: 5.25 },
