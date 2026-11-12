@@ -81,7 +81,9 @@
 //!   the (non-archived) channel ([`signal_followers_of_reply_in_tx`], after the automatic follow so the
 //!   people it just pulled in are included, and after the reply's own channel broadcast, in one batch);
 //! * **the reader read the thread** — the signal moved the position of a row they follow;
-//! * **follow / stop following** — the write changed the row's state.
+//! * **follow / stop following** — the write changed the row's state;
+//! * **read all** (#5689, ADR-0124 증보 5) — [`mark_followed_threads_read_in_tx`] moved at least one
+//!   followed thread's position in that channel: one frame per changed channel.
 //!
 //! The inbox's `inbox_item.created` is not a substitute: its `thread_reply` recipients are the root's
 //! author and the thread's writers (migration 126), so a direct follower or a person only mentioned
@@ -469,39 +471,20 @@ pub async fn mark_thread_read_in_tx(
     {
         return Ok(Err(refused));
     }
-    let moved = sqlx::query(
-        "UPDATE thread_follow tf \
-            SET last_read_reply_seq = target.seq \
-           FROM (SELECT LEAST($4::bigint, \
-                              COALESCE((SELECT t.last_reply_seq FROM thread t \
-                                         WHERE t.workspace_id = $1 AND t.root_id = $2), 0)) AS seq) target \
-          WHERE tf.workspace_id = $1 \
-            AND tf.root_id = $2 \
-            AND tf.member_id = $3 \
-            AND target.seq > tf.last_read_reply_seq \
-         RETURNING tf.state, tf.last_read_reply_seq",
-    )
-    .bind(workspace_id)
-    .bind(root_id)
-    .bind(member_id)
-    .bind(requested.max(0))
-    .fetch_optional(&mut *conn)
-    .await?;
-    if let Some(row) = moved {
-        let state: String = row.try_get("state")?;
-        let position: i64 = row.try_get("last_read_reply_seq")?;
-        if matches!(state.as_str(), STATE_AUTO | STATE_FOLLOWED) {
-            // The position only moves forward, so (root, position) names this change once.
-            emit_followed_unread_in_tx(
-                &mut *conn,
-                workspace_id,
-                member_id,
-                channel_id,
-                root_id,
-                &format!("r:{}:{position}", upper(root_id)),
-            )
+    let moved =
+        advance_read_positions_in_tx(&mut *conn, workspace_id, member_id, &[(root_id, requested)])
             .await?;
-        }
+    if let Some(moved) = moved.first().filter(|moved| moved.following) {
+        // The position only moves forward, so (root, position) names this change once.
+        emit_followed_unread_in_tx(
+            &mut *conn,
+            workspace_id,
+            member_id,
+            channel_id,
+            root_id,
+            &format!("r:{}:{}", upper(root_id), moved.position),
+        )
+        .await?;
     }
 
     let views = thread_follow_views_in_tx(&mut *conn, workspace_id, member_id, &[root_id]).await?;
@@ -519,6 +502,217 @@ pub async fn mark_thread_read_in_tx(
             },
         },
     ))
+}
+
+/// One row the position statement really moved.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct MovedPosition {
+    root_id: Uuid,
+    channel_id: Uuid,
+    /// `auto` or `followed` — a stopped follow's position moves too, but counts nowhere.
+    following: bool,
+    position: i64,
+}
+
+/// **The** statement that moves read positions, for [`mark_thread_read_in_tx`] (one thread) and
+/// [`mark_followed_threads_read_in_tx`] (many): one rule, written once.
+///
+/// For each `(root, requested)` the new position is `LEAST(requested, thread head)` (a negative request
+/// reads as `0`) and it is written only when it is greater than the stored one — never backward, never
+/// past the last reply that exists. It updates rows that are there and creates none. Returns the rows
+/// it moved; a row that stayed where it was is not in the list.
+///
+/// `workspace_id` is named on every table (the agent worker's BYPASSRLS role also reaches this
+/// module), and `member_id` binds the owner: no request shape can move another member's position.
+async fn advance_read_positions_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    member_id: Uuid,
+    targets: &[(Uuid, i64)],
+) -> Result<Vec<MovedPosition>, DbError> {
+    if targets.is_empty() {
+        return Ok(Vec::new());
+    }
+    let (roots, requested): (Vec<Uuid>, Vec<i64>) = targets
+        .iter()
+        .map(|(root, seq)| (*root, (*seq).max(0)))
+        .unzip();
+    let rows = sqlx::query(
+        "UPDATE thread_follow tf \
+            SET last_read_reply_seq = target.seq \
+           FROM (SELECT u.root_id, \
+                        LEAST(u.requested, \
+                              COALESCE((SELECT t.last_reply_seq FROM thread t \
+                                         WHERE t.workspace_id = $1 AND t.root_id = u.root_id), 0)) \
+                          AS seq \
+                   FROM unnest($3::uuid[], $4::bigint[]) AS u (root_id, requested)) target \
+          WHERE tf.workspace_id = $1 \
+            AND tf.root_id = target.root_id \
+            AND tf.member_id = $2 \
+            AND target.seq > tf.last_read_reply_seq \
+         RETURNING tf.root_id, tf.channel_id, tf.state, tf.last_read_reply_seq",
+    )
+    .bind(workspace_id)
+    .bind(member_id)
+    .bind(&roots)
+    .bind(&requested)
+    .fetch_all(&mut *conn)
+    .await?;
+    let mut moved = Vec::with_capacity(rows.len());
+    for row in rows {
+        let state: String = row.try_get("state")?;
+        moved.push(MovedPosition {
+            root_id: row.try_get("root_id")?,
+            channel_id: row.try_get("channel_id")?,
+            following: matches!(state.as_str(), STATE_AUTO | STATE_FOLLOWED),
+            position: row.try_get("last_read_reply_seq")?,
+        });
+    }
+    Ok(moved)
+}
+
+// ---------------------------------------------------------------------------
+// read all followed threads at once (#5689, ADR-0124 증보 5)
+// ---------------------------------------------------------------------------
+
+/// The most threads one `POST …/threads/read-all` moves. Past it the answer says `has_more` and the
+/// client calls again. [추정] the inbox page's ceiling (`INBOX_MAX_LIMIT`, 100): the inbox's own
+/// read-all has no cap to copy.
+pub const THREAD_READ_ALL_MAX_THREADS: i64 = 100;
+
+/// The most `channel_ids` one read-all may name. [추정] the channel list's page ceiling
+/// (`CHANNEL_LIST_LIMIT_MAX`, 500), so a client can pass one page of its channel list as it is.
+pub const THREAD_READ_ALL_MAX_CHANNEL_IDS: usize = 500;
+
+/// What a read-all did.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct FollowedThreadsReadAll {
+    /// The channels in which at least one followed thread's position moved, in id order. Each got
+    /// exactly one `followed_unread.updated` frame.
+    pub changed_channels: Vec<Uuid>,
+    /// How many threads' positions moved.
+    pub marked: i64,
+    /// More followed threads with unread replies were left than `max_threads` allowed.
+    pub has_more: bool,
+}
+
+/// 「모두 읽음」 for the threads `member_id` **follows**: move the read position of each followed thread
+/// that has an unread reply to that thread's last reply, in the caller's transaction (#5689).
+///
+/// Which threads: a row in `auto` / `followed`, in a channel the member is a **live member** of
+/// (`left_at IS NULL`) and that is **not archived** — the channels that have a read-state projection
+/// line, so exactly the threads `followed_unread_reply_count` counts — narrowed to `channels` when the
+/// caller named some (an id that is not such a channel matches nothing, whatever the reason). "Has an
+/// unread reply" is the per-thread count's predicate word for word ([`thread_follow_views_in_tx`]), and
+/// a thread whose position is already at its head is not a candidate, so every candidate really moves
+/// and `has_more` can never stay true without progress.
+///
+/// At most `max_threads` threads, in `(channel, root)` order; the rows are locked in that order
+/// (`FOR UPDATE OF tf`), so two devices pressing at once wait for each other instead of deadlocking.
+/// The positions move through [`advance_read_positions_in_tx`] — the single read's statement — with the
+/// head seen here as the request: a reply that lands after this read stays unread, and a position
+/// another device already moved further is left alone.
+///
+/// Signal: one ids-only `followed_unread.updated` frame per changed channel on the member's personal
+/// channel, in one batch insert. Its `root_id` is one of the threads that moved there (the smallest
+/// id), not a list. Nothing moved, nothing sent. The channel cursor (`read_state`) and the inbox are
+/// not touched — the same as reading one thread.
+pub async fn mark_followed_threads_read_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    member_id: Uuid,
+    channels: Option<&[Uuid]>,
+    max_threads: i64,
+) -> Result<FollowedThreadsReadAll, DbError> {
+    let max_threads = max_threads.max(1);
+    let candidates = sqlx::query(
+        "SELECT tf.root_id, t.last_reply_seq AS head \
+           FROM thread_follow tf \
+           JOIN membership ms \
+             ON ms.workspace_id = $1 \
+            AND ms.channel_id = tf.channel_id \
+            AND ms.member_id = tf.member_id \
+            AND ms.left_at IS NULL \
+           JOIN channel c \
+             ON c.id = tf.channel_id \
+            AND c.workspace_id = $1 \
+            AND c.archived_at IS NULL \
+           JOIN thread t \
+             ON t.workspace_id = $1 \
+            AND t.root_id = tf.root_id \
+          WHERE tf.workspace_id = $1 \
+            AND tf.member_id = $2 \
+            AND tf.state IN ('auto', 'followed') \
+            AND ($3::uuid[] IS NULL OR tf.channel_id = ANY($3::uuid[])) \
+            AND tf.last_read_reply_seq < t.last_reply_seq \
+            AND EXISTS (SELECT 1 FROM message r \
+                         WHERE r.workspace_id = $1 \
+                           AND r.root_id = tf.root_id \
+                           AND r.seq > tf.last_read_reply_seq \
+                           AND r.author_member_id <> $2 \
+                           AND r.type = 'text' \
+                           AND r.deleted_at IS NULL) \
+          ORDER BY tf.channel_id, tf.root_id \
+          LIMIT $4 \
+            FOR UPDATE OF tf",
+    )
+    .bind(workspace_id)
+    .bind(member_id)
+    .bind(channels)
+    .bind(max_threads + 1)
+    .fetch_all(&mut *conn)
+    .await?;
+    let has_more = candidates.len() as i64 > max_threads;
+    let mut targets = Vec::with_capacity(candidates.len());
+    for row in candidates.iter().take(max_threads as usize) {
+        targets.push((row.try_get("root_id")?, row.try_get("head")?));
+    }
+
+    let moved = advance_read_positions_in_tx(&mut *conn, workspace_id, member_id, &targets).await?;
+
+    // One frame per changed channel; the smallest moved root names the change. The positions only move
+    // forward, so (that root, its new position) is a key no other change produces.
+    let mut by_channel: std::collections::BTreeMap<Uuid, (Uuid, i64)> =
+        std::collections::BTreeMap::new();
+    for row in moved.iter().filter(|row| row.following) {
+        by_channel
+            .entry(row.channel_id)
+            .and_modify(|first| {
+                if row.root_id < first.0 {
+                    *first = (row.root_id, row.position);
+                }
+            })
+            .or_insert((row.root_id, row.position));
+    }
+    let timestamp_ms = Utc::now().timestamp_millis();
+    let frames: Vec<(Value, Option<Uuid>)> = by_channel
+        .iter()
+        .map(|(channel_id, (root_id, position))| {
+            let payload = build_followed_unread_payload(
+                workspace_id,
+                member_id,
+                *channel_id,
+                *root_id,
+                &format!("ra:{}:{position}", upper(*root_id)),
+                timestamp_ms,
+            );
+            (payload, Some(member_id))
+        })
+        .collect();
+    emit_outbox_batch(
+        &mut *conn,
+        workspace_id,
+        OutboxKind::Broadcast,
+        "publish",
+        &frames,
+    )
+    .await?;
+
+    Ok(FollowedThreadsReadAll {
+        changed_channels: by_channel.into_keys().collect(),
+        marked: moved.len() as i64,
+        has_more,
+    })
 }
 
 // ---------------------------------------------------------------------------

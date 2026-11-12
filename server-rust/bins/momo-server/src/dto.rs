@@ -4132,6 +4132,25 @@ pub struct ReadStateListResponseDto {
     pub read_states: Vec<ReadStateRowDto>,
 }
 
+/// `POST …/threads/read-all` request (ADR-0124 증보 5, #5689). snake_case like the read-state family.
+/// `channel_ids` absent or `null` = every channel the caller is a member of; `[]` = none (a no-op). No
+/// member id: the positions moved are always the bearer's.
+#[derive(Debug, Deserialize)]
+pub struct ThreadReadAllRequestDto {
+    #[serde(default)]
+    pub channel_ids: Option<Vec<Uuid>>,
+}
+
+/// `POST …/threads/read-all` response: the `GET read-state` lines of the channels whose followed-thread
+/// positions moved (the same [`ReadStateRowDto`], read after the write), how many threads moved, and
+/// whether more were left than one request moves. Nothing moved → `read_states: []`.
+#[derive(Debug, Serialize)]
+pub struct ThreadReadAllResponseDto {
+    pub read_states: Vec<ReadStateRowDto>,
+    pub marked_thread_count: i64,
+    pub has_more: bool,
+}
+
 /// `PUT …/channels/{ch}/closure` request (ADR-0177 증보 D7, #4227).
 ///
 /// **camelCase `seenSeq`**, the one spelling D7 names — unlike the snake_case read-state island next
