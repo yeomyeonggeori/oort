@@ -9,6 +9,7 @@
 //      있으면 실패). 밝게·어둡게·200%(640×400 @2x).
 //   2) 알약을 눌러 받고 설치를 마쳤는데 이 맥의 작업 데몬에서 세션이 돈다: 카운트다운 대신 「작업이 끝나면 다시 시작해요」와 끊길
 //      것 한 줄. 다시 시작하지 않는다. 밝게·어둡게·200%, 그리고 펼친 사이드바 한 장.
+//   3) 수리 1회차: 기다리던 작업이 끝나면 닫아 둔 카드가 초점 없이 다시 열려 다시 시작을 예고하고 「지금 말고」로 미룬다. 밝게·어둡게.
 // 사람·워크스페이스·컴퓨터 이름은 가상이다.
 // =============================================================================
 import { mkdirSync } from "node:fs";
@@ -45,11 +46,13 @@ const roster = [
 ];
 
 const HOST_ID = "00000000-0000-7000-8000-0000000000a1";
+/** 그 세션의 상태. 수리 1회차 장면(`sceneNotice`)이 「끝남」으로 바꿔 기다림을 푼다. */
+let sessionStatus = "running";
 /** 이 맥 호스트에서 도는 작업 세션 하나(가상). */
 function workSessions() {
   return [{
     id: "00000000-0000-7000-8000-000000000301", workspaceId, channelId: channels[0].id, memberId, hostId: HOST_ID,
-    rootMessageId: "00000000-0000-7000-8000-000000000401", tool: "claude", label: "릴리스 노트 정리", status: "running",
+    rootMessageId: "00000000-0000-7000-8000-000000000401", tool: "claude", label: "릴리스 노트 정리", status: sessionStatus,
     observation: "owner_only", observerGrantCount: 0, remoteAttachAvailable: false, remoteDisplayAvailable: false,
     startedAtMs: Date.UTC(2026, 10, 5, 2, 50), origin: "host",
   }];
@@ -300,6 +303,87 @@ async function sceneHoldRow(browser, origin, scheme) {
   await context.close();
 }
 
+/** 대화 영역·입력창·프로필 줄의 자리(펼친 사이드바). */
+async function chatLayout(page) {
+  return page.evaluate(() => {
+    const box = (el) => {
+      if (!el) return null;
+      const r = el.getBoundingClientRect();
+      return [r.x, r.y, r.width, r.height].map((v) => Math.round(v * 100) / 100);
+    };
+    return {
+      main: box(document.querySelector("main")),
+      composer: box(document.querySelector('[data-testid="composer-input"]')),
+      foot: box(document.querySelector('[data-testid="sidebar-profile-foot"]')),
+    };
+  });
+}
+
+/** 카드가 열리는 움직임(240ms)이 끝날 때까지: 그 사이에 찍으면 반투명한 카드가 찍힌다. */
+const cardSettled = (page) =>
+  page.waitForFunction(() => {
+    const card = document.querySelector('[data-testid="update-card"]');
+    return card !== null && card.getAnimations({ subtree: true }).every((a) => a.playState !== "running");
+  }, null, { timeout: 3_000 }).catch(() => undefined);
+
+const focusedTestId = (page) => page.evaluate(() => document.activeElement?.getAttribute("data-testid") ?? document.activeElement?.tagName ?? null);
+
+/**
+ * 수리 1회차(H2·H3): 기다리던 작업이 끝나면 닫아 둔 카드가 다시 열려 다시 시작을 예고한다. 초점은 글을 쓰던 입력창에 그대로이고,
+ * 「지금 말고」로 미룬다. 예고가 뜨고 질 때 대화 영역·입력창·프로필 줄 이동 0px.
+ */
+async function sceneNotice(browser, origin, scheme) {
+  sessionStatus = "running";
+  const { context, page } = await open(browser, origin, scheme, "offer");
+  try {
+    await page.getByTestId("update-pill").waitFor({ timeout: 5_000 });
+    await page.getByTestId("update-pill").click();
+    await page.waitForFunction(() => document.querySelector('[data-testid="update-card-subline"]')?.textContent?.includes("작업 세션 1개"), null, { timeout: 12_000 });
+    // 기다리는 카드를 닫고 입력창으로 돌아가 글을 쓴다.
+    await page.keyboard.press("Escape");
+    await page.getByTestId("update-card").waitFor({ state: "detached", timeout: 5_000 });
+    const composer = page.getByTestId("composer-input");
+    await composer.waitFor({ timeout: 10_000 });
+    await composer.click();
+    await page.keyboard.type("배포 전에 확인할 것");
+    const before = await chatLayout(page);
+    check(`${scheme} 예고: 대화 영역·입력창·프로필 줄을 잴 수 있다`, [before.main, before.composer, before.foot].every((b) => b !== null && b[2] > 0), JSON.stringify(before));
+
+    // 작업이 끝난다 → 원장 다시 읽기(15초) → 쉬는 시간(2분) → 카운트다운. 5초씩 시계를 돌려 예고가 서는 순간에 멈춘다.
+    sessionStatus = "ended";
+    for (let i = 0; i < 60 && (await page.getByTestId("update-card").count()) === 0; i += 1) await page.clock.runFor(5_000);
+    const title = await page.getByTestId("update-card-title").textContent().catch(() => null);
+    const sub = (await page.getByTestId("update-card-subline").textContent().catch(() => null)) ?? "";
+    const left = Number(/(\d+)초 뒤/.exec(sub)?.[1] ?? 0);
+    check(`${scheme} 예고: 닫아 둔 카드가 다시 열려 「곧 다시 실행돼요」`, title === "곧 다시 실행돼요", title ?? "카드 없음");
+    check(`${scheme} 예고: 남은 시간이 보인다(20초 넘게)`, left > 20, sub);
+    check(`${scheme} 예고: 「지금 말고」`, (await page.getByTestId("update-card-defer").textContent()) === "지금 말고");
+    check(`${scheme} 예고: 초점은 입력창 그대로`, (await focusedTestId(page)) === "composer-input", await focusedTestId(page));
+    check(`${scheme} 예고: 아직 다시 시작하지 않았다`, (await page.evaluate(() => window.__relaunched ?? 0)) === 0);
+    const shown = await chatLayout(page);
+    check(`${scheme} 예고가 떠도 대화 영역·입력창·프로필 줄 이동 0px`, JSON.stringify(before) === JSON.stringify(shown), JSON.stringify({ before, shown }));
+    await cardSettled(page);
+    await page.screenshot({ path: resolve(OUT_DIR, `8-notice-${scheme}.png`) });
+
+    await page.getByTestId("update-card-defer").click();
+    await page.waitForFunction(() => document.querySelector('[data-testid="update-card-title"]')?.textContent === "다시 실행해 주세요", null, { timeout: 5_000 }).catch(() => undefined);
+    check(`${scheme} 미룸: 「다시 실행해 주세요 · 지금」만 남는다`, (await page.getByTestId("update-card-title").textContent()) === "다시 실행해 주세요" && (await page.getByTestId("update-card-defer").count()) === 0);
+    await cardSettled(page);
+    await page.screenshot({ path: resolve(OUT_DIR, `8-notice-deferred-${scheme}.png`) });
+    // 입력창을 눌러 카드를 닫고 계속 쓴다.
+    await composer.click();
+    await page.getByTestId("update-card").waitFor({ state: "detached", timeout: 5_000 });
+    const gone = await chatLayout(page);
+    check(`${scheme} 예고가 져도 대화 영역·입력창·프로필 줄 이동 0px`, JSON.stringify(before) === JSON.stringify(gone), JSON.stringify({ before, gone }));
+    await page.clock.runFor(60_000);
+    check(`${scheme} 미룬 뒤 1분 동안 다시 시작하지 않는다`, (await page.evaluate(() => window.__relaunched ?? 0)) === 0);
+    check(`${scheme} 입력창의 글이 그대로다`, (await composer.inputValue().catch(() => composer.textContent())) === "배포 전에 확인할 것");
+  } finally {
+    sessionStatus = "running";
+    await context.close();
+  }
+}
+
 async function main() {
   mkdirSync(OUT_DIR, { recursive: true });
   const preview = await startGuardedPreview({ webRoot: WEB_ROOT, port: PORT, portEnvVar: "CAPTURE_PORT" });
@@ -308,6 +392,7 @@ async function main() {
     for (const scheme of ["light", "dark"]) {
       await sceneRail(browser, preview.origin, scheme, false);
       await sceneHoldRow(browser, preview.origin, scheme);
+      await sceneNotice(browser, preview.origin, scheme);
     }
     await sceneRail(browser, preview.origin, "light", true);
     await sceneRail(browser, preview.origin, "dark", true);
