@@ -929,6 +929,25 @@ describe("「응답 필요」의 칸은 화면에 떠 있는 동안 자리를 �
     void three;
   });
 
+  it("목록에서 줄이 빠졌을 뿐(다음 쪽으로 밀림)이고 원장은 아직 그 승인을 내놓으면, 칸은 단추를 지킨다 — 「다른 곳에서」는 사실이 말할 때만", async () => {
+    const asks = [1, 2].map((n) => approval({ id: A(n), runId: R(n) }));
+    let order = [runOf(1), runOf(2)];
+    api.fetchWorkJobs.mockImplementation(async () => ({ sessions: order, nextCursor: null, mode: "jobs" }));
+    api.fetchApprovals.mockImplementation(async () => asks);
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: 30_000 } } });
+    render(mount("/work", client));
+    await waitFor(() => expect(rowsIn("needsMe")).toEqual([R(1), R(2)]));
+    order = [runOf(2)];
+    await act(async () => {
+      await client.invalidateQueries();
+    });
+    await sleepMs(50);
+    expect(rowsIn("needsMe")).toEqual([R(1), R(2)]);
+    expect(resultIn(0)).toBeNull();
+    expect(needsMeSlot(0).querySelector("[data-decision]")).not.toBeNull();
+    expect(needsMeCount()).toBe(2);
+  });
+
   it("같은 run의 다음 승인은 새 요청이라 맨 아래 새 칸에 서고, 방금 결정한 칸은 그 자리의 결과 줄이다", async () => {
     board(new Set(), { mine: twoRuns });
     const second = approval({ id: A(9), runId: R(1) });

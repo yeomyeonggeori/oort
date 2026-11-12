@@ -1054,8 +1054,10 @@ async function mixedScene(browser, origin, engine) {
     await mousePress(page, a.x, a.y);
     await sleep(300);
     await page.mouse.move(640, 30);
-    await page.waitForFunction(([x, y]) => document.elementFromPoint(x, y)?.closest("[data-decision]") != null, [a.x, a.y], { timeout: 6000 });
-    await sleep(150);
+    // #5738: 줄은 빠지지 않는다 — 마우스가 떠나고 1.5초 뒤에도 그 점은 A의 결과 줄이다(앞 판은 여기서 B가 올라오길 기다렸다).
+    await sleep(1500);
+    const stayed = await underPoint(page, a.x, a.y);
+    check(`mixed-left-${engine}-${which} 마우스가 떠나도 그 점은 A의 결과 줄`, stayed.job === runApproval.runId && stayed.decision === null, stayed);
     await tap(a.x + 8, a.y + 3);
     await sleep(350);
     await tap(a.x - 8, a.y - 2);

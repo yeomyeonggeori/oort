@@ -205,10 +205,17 @@ export function WorkJobsRoute() {
   const slotsRef = useRef<{ scope: string; slots: Slot[] }>({ scope, slots: [] });
   const slots = useMemo(() => {
     const previous = slotsRef.current.scope === scope ? slotsRef.current.slots : [];
-    const next = keepNeedsMeSlots(previous, asks, { decidedHere: new Set(receipts.keys()), sending });
+    // 「다른 곳에서」는 사실이 말할 때만이다: 목록에 그 줄이 없으면(다음 쪽으로 밀려남·읽기 실패) 「끝났다」는 증거가 아니다. 원장이 아직 그
+    // 승인을 내놓는 run 칸, 그리고 증거가 목록뿐인 권한 요청 칸은 그 줄이 목록에 다시 보일 때까지 묻는 칸으로 남는다.
+    const listed = new Set(rows.map((row) => row.id.toLowerCase()));
+    const held = previous
+      .filter((slot) => slot.settled === null && !listed.has(slot.row.id.toLowerCase()))
+      .filter((slot) => slot.askId === null || uuidEq(decisions.byRun.get(runKeyOf(slot.row))?.approvalId ?? "", slot.askId))
+      .map((slot) => ({ row: slot.row, askId: slot.askId, facts: slot.facts }));
+    const next = keepNeedsMeSlots(previous, [...asks, ...held], { decidedHere: new Set(receipts.keys()), sending });
     slotsRef.current = { scope, slots: next };
     return next;
-  }, [scope, asks, receipts, sending]);
+  }, [scope, asks, rows, decisions.byRun, receipts, sending]);
   const onDecided = useCallback(
     (outcome: DecisionOutcome, slotKey: string) => {
       const receipt = decisionNote(outcome).text;
