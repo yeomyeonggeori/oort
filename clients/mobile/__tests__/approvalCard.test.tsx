@@ -146,7 +146,7 @@ function renderCard(props: {
   );
 }
 
-const DEAD_END = '이 결정은 인박스나 데스크톱 앱에서 할 수 있어요.';
+const DEAD_END = '이 결정은 인박스나 데스크탑 앱에서 할 수 있어요.';
 
 describe('요청 묶음 카드', () => {
   const gates = new Map([['ap-1', GATE]]);

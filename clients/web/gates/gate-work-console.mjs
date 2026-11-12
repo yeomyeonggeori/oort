@@ -652,8 +652,8 @@ async function assertCachedRefetchFailure(page, state, kind) {
   const warning = page.getByTestId("work-console-stale-error");
   await warning.waitFor({ timeout: 10_000 });
   const expectedCopy = isHost
-    ? "실행 위치를 새로 확인하지 못했습니다. 마지막 호스트 정보를 표시합니다."
-    : "작업 세션을 새로 확인하지 못했습니다. 마지막 목록을 표시합니다.";
+    ? "실행 위치를 새로 확인하지 못했어요. 마지막으로 확인한 컴퓨터 정보를 보여 줘요."
+    : "작업 세션을 새로 확인하지 못했어요. 마지막 목록을 보여 줘요.";
   if ((await warning.textContent())?.includes(expectedCopy) !== true) {
     throw new Error(`${kind} cached refetch warning did not name the stale projection`);
   }
@@ -779,7 +779,8 @@ async function assertConsole(context, state) {
       }))
     );
   const expectedHeadingOutline = [
-    { level: 1, text: "작업 콘솔" },
+    { level: 1, text: "클라우드에서 빌드" },
+    { level: 2, text: "최근 세션" },
     { level: 2, text: "클라우드에서 빌드" },
     { level: 3, text: "터미널 관전" },
     { level: 3, text: "라이브 화면" },
@@ -1660,13 +1661,13 @@ async function main() {
         browser,
         { mode: "normal", failChannels: true },
         "채널 조회 실패 · 곽성재 · codex",
-        "채널 정보를 새로 확인하지 못했습니다."
+        "채널 정보를 새로 확인하지 못했어요."
       );
       await assertMetadataFallback(
         browser,
         { mode: "normal", failRoster: true },
         "#agent-runtime · 담당자 조회 실패 · codex",
-        "담당자 정보를 새로 확인하지 못했습니다."
+        "담당자 정보를 새로 확인하지 못했어요."
       );
       await assertDisplayConnectCleanup(browser);
       await assertObserverConnectCleanup(browser);

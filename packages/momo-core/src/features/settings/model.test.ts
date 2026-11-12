@@ -530,7 +530,7 @@ describe("work host row (WorkHostRoutes projection)", () => {
 
   it("labels every type and scope the server validates", () => {
     expect(["app", "workd", "cloud"].map(workHostTypeLabel)).toEqual([
-      "데스크톱 앱",
+      "데스크탑 앱",
       "workd 데몬",
       "oort Cloud",
     ]);

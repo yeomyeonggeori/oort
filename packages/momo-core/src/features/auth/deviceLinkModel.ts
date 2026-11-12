@@ -26,7 +26,7 @@ export const DEVICE_LINK_USED_COPY =
 export const DEVICE_LINK_MALFORMED_COPY =
   "연결 코드 형식이 아닙니다. QR을 다시 찍으세요.";
 export const DEVICE_LINK_SAS_WAIT_COPY =
-  "데스크톱에서 확인을 누르면 진행됩니다.";
+  "데스크탑에서 확인을 누르면 진행됩니다.";
 export const DEVICE_LINK_PERMISSION_COPY =
   "카메라 권한이 없어 QR을 찍을 수 없습니다. 주소로 연결하세요.";
 export const DEVICE_LINK_UNREACHABLE_COPY =
@@ -36,7 +36,7 @@ export const DEVICE_LINK_QR_LABEL = "QR로 연결";
 export const DEVICE_LINK_ADDRESS_FALLBACK_LABEL = "주소로 연결";
 export const DEVICE_LINK_SETTINGS_LABEL = "설정에서 허용";
 export const DEVICE_LINK_QR_INSTRUCTION =
-  "데스크톱 화면의 QR을 카메라에 맞추세요.";
+  "데스크탑 화면의 QR을 카메라에 맞추세요.";
 export const DEVICE_LINK_CAMERA_OPENING_COPY = "카메라 여는 중";
 export const DEVICE_LINK_CAMERA_ERROR_COPY =
   "카메라를 열 수 없습니다. 주소로 연결하세요.";

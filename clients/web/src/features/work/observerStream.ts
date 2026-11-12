@@ -300,7 +300,7 @@ export const OBSERVER_FAILURE_COPY: Readonly<Record<ObserverFailure, string>> = 
   host_unreachable:
     "호스트에 닿지 못했습니다. 출력은 서버를 거치지 않고 호스트에서 직접 오므로, 이 브라우저가 호스트 주소에 닿을 수 있어야 합니다.",
   host_blocked_by_policy:
-    "이 페이지의 보안 정책이 호스트 주소로의 연결을 막았습니다. 데스크톱 앱에서는 그대로 관전할 수 있고, 브라우저에서 열려면 이 웹을 서빙하는 서버가 호스트 주소를 허용해야 합니다.",
+    "이 페이지의 보안 정책이 호스트 주소로의 연결을 막았습니다. 데스크탑 앱에서는 그대로 관전할 수 있고, 브라우저에서 열려면 이 웹을 서빙하는 서버가 호스트 주소를 허용해야 합니다.",
   host_timeout: `호스트가 ${Math.round(
     HOST_CONNECT_TIMEOUT_MS / 1000
   )}초 안에 응답하지 않았습니다. 호스트 주소와 네트워크를 확인한 뒤 다시 연결하세요.`,

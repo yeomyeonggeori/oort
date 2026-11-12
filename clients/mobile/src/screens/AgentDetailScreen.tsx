@@ -284,7 +284,7 @@ export default function AgentDetailScreen({
         ) : placement.present.length === 0 && placement.unresolved === 0 ? (
           <EmptyState
             headline="아직 어느 채널에도 없습니다."
-            detail="채널에 넣기 전까지는 멘션해도 닿지 않습니다. 채널 배치는 데스크톱에서 할 수 있습니다."
+            detail="채널에 넣기 전까지는 멘션해도 닿지 않습니다. 채널 배치는 데스크탑에서 할 수 있습니다."
             testID="agent-channels-empty"
           />
         ) : (

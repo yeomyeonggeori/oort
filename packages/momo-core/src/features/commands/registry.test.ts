@@ -195,16 +195,16 @@ describe("명령 레지스트리", () => {
     const commands = visibleCommands(env());
     const status = (id: string) =>
       commands.find((command) => command.id === id)!.run(context()).status;
-    // ㄹ은 열린 음절처럼 로를 받는다 — 「작업 콘솔으로」가 아니다.
-    expect(status("nav.workConsole")).toBe("작업 콘솔로 이동");
+    expect(status("nav.workConsole")).toBe("세션으로 이동");
     expect(status("nav.workstreams")).toBe("작업 흐름으로 이동");
     expect(status("nav.inbox")).toBe("인박스로 이동");
     expect(status("nav.activity")).toBe("활동으로 이동");
     expect(status("nav.directory")).toBe("멤버로 이동");
+    // ㄹ은 열린 음절처럼 로를 받는다 — 「연결으로」가 아니다.
     expect(status("nav.settings.agents")).toBe("외부 에이전트 연결로 이동");
   });
 
-  it("작업 콘솔은 웹·데스크탑 모두 /work?view=console로 간다 (#2854·#3334 — /work는 데스크탑에서 「내 작업」 격자, 웹에서 설명 상태)", () => {
+  it("세션은 웹·데스크탑 모두 /work?view=console로 간다 (#2854·#3334 — /work는 데스크탑에서 「내 작업」 격자, 웹에서 설명 상태)", () => {
     const command = visibleCommands(env()).find((c) => c.id === "nav.workConsole")!;
     const web = context();
     command.run(web);
@@ -212,7 +212,7 @@ describe("명령 레지스트리", () => {
     const result = command.run(desktop);
     expect(web.navigate.mock.calls).toEqual([["/work?view=console"]]);
     expect(desktop.navigate.mock.calls).toEqual([["/work?view=console"]]);
-    expect(result.status).toBe("작업 콘솔로 이동");
+    expect(result.status).toBe("세션으로 이동");
   });
 
   it("AI 허브 이동 명령 다섯이 ⌘K에 서고 제 경로로 간다 (AIH-3)", () => {
