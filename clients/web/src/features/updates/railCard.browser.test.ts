@@ -125,7 +125,7 @@ afterAll(async () => {
 
 async function openHarness(
   engine: EngineName,
-  win: (typeof WINDOWS)[number],
+  win: { readonly viewport: { readonly width: number; readonly height: number }; readonly scale: number },
   mode: (typeof MODES)[number],
   placement: "rail" | "row" | "settings" = "rail"
 ): Promise<{ page: Page; close: () => Promise<void> }> {
