@@ -434,7 +434,8 @@ function ChannelMemberPanelBody({
 }) {
   const formatMessage = useFormatMessage();
   const showList = members.length > 0;
-  const now = useChannelMemberNow(channelId, showList);
+  // 연 순간부터 읽는다(명부가 아직 오는 중이어도): 명부가 닿을 때 「지금」도 이미 와 있어 묶음을 바로 정한다.
+  const now = useChannelMemberNow(channelId, true);
   return (
     <>
       <div

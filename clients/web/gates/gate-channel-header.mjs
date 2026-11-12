@@ -81,6 +81,19 @@ const {
   topicView: TOPIC_VIEW_LABEL,
 } = canonicalCopy(webRoot);
 
+/** 멤버 패널 에이전트 줄의 낱말(#5686): 사전이 정본이다. 게이트가 낱말을 다시 적지 않는다. */
+const AGENT_KIND_WORD = Object.fromEntries(
+  ["ko-KR", "en-US"].map((locale) => [
+    locale,
+    JSON.parse(
+      readFileSync(
+        resolve(webRoot, `../../packages/momo-core/src/i18n/catalogs/${locale}/timeline.json`),
+        "utf8"
+      )
+    )["timeline.memberPanel.agentKind"],
+  ])
+);
+
 const proveRedCount = process.env.HEADER_GATE_PROVE_RED_COUNT === "1";
 const proveRedRename = process.env.HEADER_GATE_PROVE_RED_RENAME === "1";
 const proveRedMute = process.env.HEADER_GATE_PROVE_RED_MUTE === "1";
@@ -492,7 +505,10 @@ async function exercise(browser) {
   const agentRow = page.locator(
     '[data-testid="channel-member-item"][data-member-kind="agent"]'
   );
-  if ((await agentRow.count()) !== 1 || !((await agentRow.textContent()) ?? "").includes("에이전트")) {
+  // 에이전트 줄의 낱말은 사전 키(`timeline.memberPanel.agentKind`, #5686)다: 화면 언어의 사전에서 읽는다.
+  const agentWord = await page.evaluate(() => document.documentElement.lang);
+  const expectedAgentWord = AGENT_KIND_WORD[agentWord.startsWith("ko") ? "ko-KR" : "en-US"];
+  if ((await agentRow.count()) !== 1 || !((await agentRow.textContent()) ?? "").includes(expectedAgentWord)) {
     throw new Error("the member panel did not distinguish the agent row in text");
   }
   await page.keyboard.press("Escape");
