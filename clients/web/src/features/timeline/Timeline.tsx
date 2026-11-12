@@ -10,7 +10,7 @@ import {
   type MutableRefObject,
   type ReactNode,
 } from "react";
-import { Virtuoso, type VirtuosoHandle } from "react-virtuoso";
+import { Virtuoso, type SizeFunction, type VirtuosoHandle } from "react-virtuoso";
 
 /**
  * 타임라인 꼬리 행 (#2944 GC-3, brief §3.2 · Q1).
@@ -30,6 +30,14 @@ function TimelineTail() {
 }
 
 const TIMELINE_COMPONENTS = { Footer: TimelineTail };
+
+/**
+ * 줄 높이를 **소수 그대로** 잰다 (#5681). 가상 목록의 기본 잣대는 `Math.round(getBoundingClientRect().height)` 인데, 본문 줄 높이가 24.375px
+ * (15px × `leading-relaxed`) 라 줄은 거의 다 소수 높이다. 가상 목록은 반올림한 값(64)으로 위쪽 여백을 쌓고 실제 줄(64.375)과 어긋나, 바닥에
+ * 붙은 목록이 한 줄 자라 맨 위 줄이 그려진 줄에서 빠지는 프레임에 위쪽 보정(`scrollBy({ top: -1 })`)을 한 번 더 한다 — scrollTop 이 정수인 WebKit 에서
+ * 그 1px 이 마지막 줄을 움직인다(반응을 더하거나 뺄 때 1.63 · 2px).
+ */
+const measureItem: SizeFunction = (el, field) => el.getBoundingClientRect()[field === "offsetHeight" ? "height" : "width"];
 import {
   type AgentRunProgress,
   type Channel,
@@ -85,7 +93,7 @@ import type { ConnectionCause } from "@momo/core/features/connection/model";
 import { LoadFailureBox, LoadFailureLine } from "@/features/common/LoadFailureBox";
 import { SystemLine } from "./SystemLine";
 import { isSystemLineMessage, startGroupAfterSystemLine } from "./systemLineRows";
-import { holdScrollPosition, type ScrollHold } from "./scrollHold";
+import { holdScrollPosition, virtualListHold, type ScrollHold } from "./scrollHold";
 import { JUMP_LATEST_SHOW_DELAY_MS } from "@/design/motion";
 import { chipsFor, type ReactionMap } from "@momo/core/features/timeline/reactions";
 import { isPinned, type PinMap } from "@momo/core/features/timeline/pins";
@@ -633,6 +641,8 @@ export function Timeline({
         // `behavior` 를 부드럽게 두지 않는 이유: 바로 뒤에 워처가 마운트된 행에
         // `scrollIntoView` 를 한 번 더 건다. 애니메이션이 도는 중에 그 호출이
         // 끼면 목록이 두 목적지 사이에서 튄다.
+        // 스크립트가 옮기는 스크롤이다: 휠 직후여도 사람의 손으로 치지 않게 자리 지키기에 알린다(#5649 검수 H1).
+        holdRef.current?.expectScripted();
         ref.current?.scrollToIndex({ index, align: "center" });
         return true;
       },
@@ -815,6 +825,7 @@ export function Timeline({
 
   const jumpToLatest = useCallback(() => {
     const seq = newestSeqRef.current;
+    holdRef.current?.expectScripted();
     ref.current?.scrollToIndex({
       index: "LAST",
       align: "end",
@@ -829,6 +840,7 @@ export function Timeline({
     const seq = firstUnreadMessageSeq(itemsRef.current, index);
     // 실행 자체가 진입이다. IO가 늦어도 이 epoch에서 필을 다시 세우지 않는다.
     setUnreadJumpLatched(true);
+    holdRef.current?.expectScripted();
     ref.current?.scrollToIndex({
       index,
       align: "start",
@@ -838,12 +850,12 @@ export function Timeline({
   }, []);
 
   // 창의 높이가 줄어도(DS2-6 #2718), 줄 높이가 바뀌어도(#5575) 바닥은 바닥이고, 위를 읽던 사람의 줄은
-  // 제자리다. 데스크탑 WebKit 은 이 목록 안에서 스크롤 앵커링을 하지 않아 그림 줄이 자라면 목록이 밀렸다.
-  // 판정·바로잡기의 규칙은 `scrollHold.ts`.
+  // 제자리다. 이 목록 안에서는 브라우저 스크롤 앵커링이 돌지 않아(`timeline-scroller`) 그림 줄이 자라면 목록이 밀린다.
+  // 판정·바로잡기의 규칙은 `scrollHold.ts`(스레드 답글 목록과 같은 모듈, 가상 목록용 규칙은 `virtualListHold`).
   const holdRef = useRef<ScrollHold | null>(null);
   useEffect(() => {
     if (!scrollerEl) return;
-    const hold = holdScrollPosition(scrollerEl, { firstItemIndex: () => firstItemIndexRef.current });
+    const hold = holdScrollPosition(scrollerEl, virtualListHold(() => firstItemIndexRef.current));
     holdRef.current = hold;
     return () => {
       hold.stop();
@@ -973,9 +985,10 @@ export function Timeline({
         // 느껴지기 때문이다.
         // `timeline-scroller` (#5638): 브라우저 스크롤 앵커링을 끈다. 스크롤 위치는 가상 목록과
         // `scrollHold` 한 길로만 움직이고, 앵커링이 있는 엔진(Chromium · macOS 27 WebKit)과 없는
-        // 엔진(macOS 14~26 WebKit)이 같은 길을 탄다.
+        // 엔진(문서상 macOS 14~26 WebKit)이 같은 길을 탄다.
         className="overscroll-contain h-full timeline-scroller"
         data={items}
+        itemSize={measureItem}
         components={TIMELINE_COMPONENTS}
         data-testid="timeline-virtuoso"
         alignToBottom
