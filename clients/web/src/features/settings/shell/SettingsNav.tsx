@@ -146,7 +146,9 @@ function SettingsRestartNotice() {
   const update = useUpdateState();
   if (update.kind !== "installed") return null;
   return (
-    <div className="settings-nav-group" data-testid="settings-restart-notice">
+    // 목록 스크롤 바닥에 붙는다(sticky): 창이 낮아 목록이 넘쳐도 알약 · 예고 카드가 창 안에 선다(수리 3회차 M1). 바닥 색(`canvas-mid`)을 깔아
+    // 아래로 지나가는 목록 글자가 알약 뒤로 비치지 않게 하고, 목록의 아래 안쪽 여백(8px)까지 덮는다(`-bottom-2`).
+    <div className="settings-nav-group sticky -bottom-2 bg-canvas-mid pb-4" data-testid="settings-restart-notice">
       <UpdateButton placement="row" />
     </div>
   );

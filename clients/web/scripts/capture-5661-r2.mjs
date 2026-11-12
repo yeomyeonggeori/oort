@@ -11,7 +11,7 @@
 //      것 한 줄. 다시 시작하지 않는다. 밝게·어둡게·200%, 그리고 펼친 사이드바 한 장.
 //   3) 수리 1회차: 기다리던 작업이 끝나면 닫아 둔 카드가 초점 없이 다시 열려 다시 시작을 예고하고 「지금 말고」로 미룬다. 밝게·어둡게.
 //   4) 수리 2회차(Chromium · WebKit): 바깥을 눌러 닫은 카드의 초점과 그 뒤 키 두 번, 접힌 레일 카드와 입력창 독의 겹침(1280×800 ·
-//      720×480 · 640×400 @2x), 예고를 Esc로 닫으면 멈춤, 설정 전면의 예고. `ENGINES=chromium,webkit`(기본 둘 다), `SCENES=r2`면 4)만, `R2_ONLY=outside`면 초점 장면만, `R2_ONLY=rail`이면 레일 겹침만(밝게).
+//      720×480 · 640×400 @2x), 예고를 Esc로 닫으면 멈춤, 설정 전면의 예고. `ENGINES=chromium,webkit`(기본 둘 다), `SCENES=r2`면 4)만, `R2_ONLY=outside`면 초점 장면만, `R2_ONLY=rail`이면 레일 겹침만(밝게), `R2_ONLY=settings`면 설정 전면만(창 세 크기).
 // 사람·워크스페이스·컴퓨터 이름은 가상이다.
 // =============================================================================
 import { mkdirSync } from "node:fs";
@@ -545,9 +545,10 @@ async function sceneRailOverlap(browser, origin, engine, size, scheme = "light")
 }
 
 /** 설정 전면: 기다리는 중 ⌘,로 설정에 들어가 있는 동안 작업이 끝나면 목록 아래 알약의 예고 카드가 열린다. */
-async function sceneSettingsNotice(browser, origin, engine, scheme = "light") {
+async function sceneSettingsNotice(browser, origin, engine, scheme = "light", size = "1280x800") {
   sessionStatus = "running";
-  const { context, page } = await open(browser, origin, scheme, "offer");
+  const [w, h] = size.split("x").map(Number);
+  const { context, page } = await open(browser, origin, scheme, "offer", { viewport: { width: w, height: h } });
   try {
     const pill = page.getByTestId("update-pill");
     await pill.waitFor({ timeout: 5_000 });
@@ -562,7 +563,16 @@ async function sceneSettingsNotice(browser, origin, engine, scheme = "light") {
     const title = await page.getByTestId("update-card-title").textContent().catch(() => null);
     check(`${engine} ${scheme} 설정: 예고 카드 「곧 다시 실행돼요」·「지금 말고」`, title === "곧 다시 실행돼요" && (await page.getByTestId("update-card-defer").count()) === 1, title ?? "카드 없음");
     check(`${engine} ${scheme} 설정: 아직 다시 시작 0번`, (await relaunched(page)) === 0);
-    if (engine === "chromium") await page.screenshot({ path: resolve(OUT_DIR, `10-settings-notice-${scheme}.png`) });
+    // 수리 3회차 M1: 창 높이와 상관없이 알약 · 예고 카드 · 두 단추가 창 안에 있다(목록이 넘쳐도).
+    const inView = (b) => b !== null && b[0] >= 0 && b[1] >= 0 && b[0] + b[2] <= w && b[1] + b[3] <= h;
+    const boxes = {
+      pill: await boxOf(page, '[data-testid="settings-restart-notice"] [data-testid="update-pill"]'),
+      card: await boxOf(page, '[data-testid="update-card"]'),
+      defer: await boxOf(page, '[data-testid="update-card-defer"]'),
+      now: await boxOf(page, '[data-testid="update-card-now"]'),
+    };
+    check(`${engine} ${scheme} 설정 ${size}: 알약 · 카드 · 「지금 말고」 · 「지금」이 창 안`, Object.values(boxes).every(inView), JSON.stringify(boxes));
+    if (engine === "chromium") await page.screenshot({ path: resolve(OUT_DIR, `10-settings-notice-${scheme}-${size}.png`) });
     await page.getByTestId("update-card-defer").click();
     await runFor(page, 60_000);
     check(`${engine} ${scheme} 설정: 「지금 말고」 뒤 1분 0번`, (await relaunched(page)) === 0);
@@ -603,13 +613,14 @@ async function main() {
         }
       };
       try {
-        if (process.env.R2_ONLY !== "rail") await guard("길①·②", () => sceneOutsideFocus(b, preview.origin, engine));
-        if (process.env.R2_ONLY === "outside") continue;
-        for (const size of ["1280", "720", "640@2x"]) await guard(`레일 ${size}`, () => sceneRailOverlap(b, preview.origin, engine, size));
-        if (process.env.R2_ONLY === "rail") continue;
-        if (engine === "chromium") await guard("레일 어둡게", () => sceneRailOverlap(b, preview.origin, engine, "1280", "dark"));
-        await guard("설정", () => sceneSettingsNotice(b, preview.origin, engine));
-        if (engine === "chromium") await guard("설정 어둡게", () => sceneSettingsNotice(b, preview.origin, engine, "dark"));
+        const only = process.env.R2_ONLY;
+        if (only !== "rail" && only !== "settings") await guard("길①·②", () => sceneOutsideFocus(b, preview.origin, engine));
+        if (only === "outside") continue;
+        if (only !== "settings") for (const size of ["1280", "720", "640@2x"]) await guard(`레일 ${size}`, () => sceneRailOverlap(b, preview.origin, engine, size));
+        if (only === "rail") continue;
+        if (engine === "chromium" && only !== "settings") await guard("레일 어둡게", () => sceneRailOverlap(b, preview.origin, engine, "1280", "dark"));
+        for (const size of ["720x480", "1100x760", "1280x800"]) await guard(`설정 ${size}`, () => sceneSettingsNotice(b, preview.origin, engine, "light", size));
+        if (engine === "chromium") await guard("설정 어둡게", () => sceneSettingsNotice(b, preview.origin, engine, "dark", "720x480"));
       } finally {
         if (b !== browser) await b.close();
       }
