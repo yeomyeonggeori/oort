@@ -40,6 +40,12 @@ export const RAIL_REFETCH_GAP_MS = 5_000;
 export const MEMBER_NOW_CLOCK_MS = 15_000;
 /** 다시 열 때 받아 둔 답을 그대로 쓰는 시간. */
 const ACTIVE_RUNS_STALE_MS = 5_000;
+/**
+ * 받아 둔 「지금」 답을 묶음 판정과 「작업 중」 줄에 쓰는 나이 상한(#5701). 패널을 연 때 이보다 오래된 답은 새 답이 올
+ * 때까지 쓰지 않는다: 그사이 끝난 run이 「작업 중 · n분째」로 서거나 일하는 묶음에 남지 않게(react-query는 닫은 뒤에도
+ * 5분 보관한다). 열려 있는 동안 받은 답은 나이를 다시 묻지 않는다.
+ */
+export const MEMBER_NOW_ANSWER_MAX_AGE_MS = 60_000;
 
 export function activeAgentRunsQueryKey(workspaceId: string) {
   return ["agent-runs-active", workspaceId.toLowerCase()] as const;
@@ -114,6 +120,8 @@ export function useChannelMemberNow(
   options: { offline?: boolean } = {}
 ): ChannelMemberNow {
   const { workspaceId } = useSession();
+  // 패널을 연 때(이 훅이 선 때). 열기 전에 받아 둔 답의 나이는 이 시각으로 잰다.
+  const openedAt = useRef(Date.now());
   const query = useQuery({
     queryKey: activeAgentRunsQueryKey(workspaceId),
     queryFn: async (): Promise<ActiveRuns> => {
@@ -174,7 +182,9 @@ export function useChannelMemberNow(
     []
   );
 
-  const stale = answered && (options.offline === true || query.isError);
+  // 연 때 60초보다 오래된 답은 새 답이 올 때까지 없는 것으로 친다(열려 있는 동안 받은 답은 `dataUpdatedAt`이 연 때 뒤라 통과).
+  const usable = answered && openedAt.current - query.dataUpdatedAt <= MEMBER_NOW_ANSWER_MAX_AGE_MS;
+  const stale = usable && (options.offline === true || query.isError);
   const nowMs = useClock(enabled && !stale, MEMBER_NOW_CLOCK_MS);
   // 줄을 재는 시각: 끊겼거나 다시 읽기가 실패했으면 마지막으로 받은 때, 아니면 지금.
   const linesAt = stale && query.dataUpdatedAt > 0 ? query.dataUpdatedAt : nowMs;
@@ -183,7 +193,7 @@ export function useChannelMemberNow(
     if (isUncollected(turn.server, nowMs)) continue;
     railWorking.add(turn.memberId.toLowerCase());
   }
-  const runs = query.data?.runs;
+  const runs = usable ? query.data?.runs : undefined;
   const lines = useMemo(
     () => (runs === undefined ? new Map<string, ChannelAgentNow>() : channelAgentNow(runs, channelId, linesAt)),
     [runs, channelId, linesAt]
@@ -192,7 +202,7 @@ export function useChannelMemberNow(
   const read: MemberNowRead =
     query.data === null
       ? "absent"
-      : query.data !== undefined
+      : usable
         ? "ready"
         : query.isError
           ? "failed"

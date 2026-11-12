@@ -867,6 +867,9 @@ export function Sidebar({
           marks={railMarks}
           footer={
             <div className="safe-area-bottom flex flex-col items-center gap-2">
+              {/* 「업데이트」 알약의 작은 모양(owner 2026-11-11 「접힌 사이드바에서도 보이게」): 접힘(⌘B)에서만, 아바타 위.
+                  레일은 위(목적지)와 아래(아바타)에 붙어 있고 그 사이 빈 칸이 이 자리를 받으므로 뜨고 질 때 아무것도 움직이지 않는다. */}
+              {railCollapsed && <UpdateButton placement="rail" />}
               {/* 접힘(⌘B)에서만 프로필이 레일에 아바타로 선다. 펼친 동안은 목록 끝의 한 줄이다(#3574). */}
               {railCollapsed && profileCard(true)}
             </div>
@@ -1508,7 +1511,7 @@ export function Sidebar({
             >
               {!railCollapsed && profileCard(false)}
               {/* 「업데이트」 알약(성재 결재 2026-10-16, Cursor 방식): 새 버전이 있는 동안만,
-                  펼친 프로필 줄 오른쪽 도움말 아이콘 앞에. 접힘에서는 마운트하지 않는다. */}
+                  펼친 프로필 줄 오른쪽 도움말 아이콘 앞에. 접힘에서는 레일 아바타 위의 작은 모양이 대신 선다. */}
               {!railCollapsed && <UpdateButton />}
               <ShortcutHelpDialog />
             </div>

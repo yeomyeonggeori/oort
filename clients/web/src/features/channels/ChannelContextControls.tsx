@@ -486,11 +486,15 @@ function ChannelMemberPanelBody({
         ) : null}
       </div>
 
-      <div className="flex flex-wrap items-center justify-end gap-2 border-t border-line p-4">
+      <div className="flex items-center justify-end gap-2 border-t border-line p-4">
         {hasAgent && now.read === "failed" && (
           <p className="mr-auto flex min-w-0 items-center gap-2 text-meta text-ink-muted" data-testid="channel-member-now-failed">
-            <span className="min-w-0">{formatMessage("timeline.memberPanel.nowFailed")}</span>
-            <Button type="button" variant="ghost" size="sm" onClick={now.retry} data-testid="channel-member-now-retry">
+            {/* 발치는 한 줄로 고정이다(실패가 떠도 줄이 두 줄이 되어 패널이 커지지 않게, #5701): 좁은 폭에서는 글을
+                낭독용으로만 두고 「다시 불러오기」만 보이며, 넓은 창에서도 모자라면 글이 줄어든다. */}
+            <span className="sr-only min-w-0 truncate sm:not-sr-only">
+              {formatMessage("timeline.memberPanel.nowFailed")}
+            </span>
+            <Button type="button" variant="ghost" size="sm" className="shrink-0" onClick={now.retry} data-testid="channel-member-now-retry">
               {formatMessage("timeline.memberPanel.nowRetry")}
             </Button>
           </p>
@@ -530,7 +534,12 @@ function firstActionFocus(event: Event) {
   if (!(content instanceof HTMLElement)) return;
   const first = [
     ...content.querySelectorAll<HTMLElement>("button:not([disabled]), a[href], input:not([disabled])"),
-  ].find((element) => element.closest('[data-testid="channel-member-list"]') === null || element.closest("[data-testid=\"channel-member-empty\"]") !== null);
+  ].find(
+    (element) =>
+      // 「지금」 읽기 실패 줄의 「다시 불러오기」는 첫 초점이 아니다: 다시 읽기가 실패한 채 다시 열어도 첫 초점은 「멤버 추가」(#5701).
+      element.closest('[data-testid="channel-member-now-failed"]') === null &&
+      (element.closest('[data-testid="channel-member-list"]') === null || element.closest('[data-testid="channel-member-empty"]') !== null)
+  );
   if (first === undefined) return;
   event.preventDefault();
   first.focus();

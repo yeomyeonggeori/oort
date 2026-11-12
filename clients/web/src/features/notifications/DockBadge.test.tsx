@@ -90,34 +90,35 @@ describe("DockBadge (#3339)", () => {
     expect(hoisted.setDockBadge).toHaveBeenLastCalledWith(0);
   });
 
-  it("예전 키(`dockDm`)에 저장된 선택은 그대로 따른다: 바뀐 것은 기본값이다 (#5660)", () => {
+  it("예전 키(`dockDm`)는 읽지 않는다: 값이 꺼짐이든 켬이든 새 기본값(켬)이다 (#5690)", () => {
     localStorage.setItem("momo.web.notifications.v1", JSON.stringify({ dockDm: false, dockBadge: true }));
     reloadDesktopNotificationKindsForTest(localStorage);
     mount();
-    expect(hoisted.setDockBadge).toHaveBeenLastCalledWith(4); // 꺼 둔 DM 몫은 꺼진 채
+    expect(hoisted.setDockBadge).toHaveBeenLastCalledWith(9); // 예전의 꺼짐은 무시
     localStorage.setItem("momo.web.notifications.v1", JSON.stringify({ dockDm: true, dockBadge: true }));
     act(() => reloadDesktopNotificationKindsForTest(localStorage));
     expect(hoisted.setDockBadge).toHaveBeenLastCalledWith(9);
   });
 
-  it("선택을 저장한 적이 없는 기기는 새 기본값(켬)이고, 새 키가 있으면 새 키가 이긴다 (#5660)", () => {
-    localStorage.setItem("momo.web.notifications.v1", JSON.stringify({ dockBadge: true, mention: true }));
+  it("새 키(`dockDms`)가 있으면 그 값을 따르고, 예전 키는 이기지 못한다 (#5690)", () => {
+    localStorage.setItem("momo.web.notifications.v1", JSON.stringify({ dockDm: true, dockDms: false }));
     reloadDesktopNotificationKindsForTest(localStorage);
     mount();
-    expect(hoisted.setDockBadge).toHaveBeenLastCalledWith(9);
+    expect(hoisted.setDockBadge).toHaveBeenLastCalledWith(4);
     localStorage.setItem("momo.web.notifications.v1", JSON.stringify({ dockDm: false, dockDms: true }));
     act(() => reloadDesktopNotificationKindsForTest(localStorage));
     expect(hoisted.setDockBadge).toHaveBeenLastCalledWith(9);
   });
 
-  it("예전 키로 꺼 둔 사람이 스위치를 다시 켜면 새 키로 저장되고 다시 읽어도 켜져 있다 (#5660)", () => {
+  it("예전 키만 있던 기기가 한 번 끄면 새 키로 저장되고 그 뒤로 계속 꺼져 있다 (#5690)", () => {
     localStorage.setItem("momo.web.notifications.v1", JSON.stringify({ dockDm: false }));
     reloadDesktopNotificationKindsForTest(localStorage);
     mount();
-    expect(hoisted.setDockBadge).toHaveBeenLastCalledWith(4);
-    act(() => setDesktopNotificationKind("dockDms", true, localStorage));
-    act(() => reloadDesktopNotificationKindsForTest(localStorage));
     expect(hoisted.setDockBadge).toHaveBeenLastCalledWith(9);
+    act(() => setDesktopNotificationKind("dockDms", false, localStorage));
+    expect(JSON.parse(localStorage.getItem("momo.web.notifications.v1") ?? "{}").dockDms).toBe(false);
+    act(() => reloadDesktopNotificationKindsForTest(localStorage));
+    expect(hoisted.setDockBadge).toHaveBeenLastCalledWith(4);
   });
 
   it("창이 뒤에 있으면 주소가 가리키는 DM도 센다: 아무도 보고 있지 않다 (#5660)", () => {
