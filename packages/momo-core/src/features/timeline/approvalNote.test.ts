@@ -244,7 +244,7 @@ describe("문구", () => {
    */
   it("오프라인 문장은 때의 문제를 말하고, 안내 문장은 자리의 문제를 말한다", () => {
     expect(APPROVAL_OFFLINE_COPY).toContain("다시 연결되면");
-    expect(APPROVAL_ELSEWHERE_COPY).toContain("인박스나 데스크톱");
+    expect(APPROVAL_ELSEWHERE_COPY).toContain("인박스나 데스크탑");
     expect(APPROVAL_OFFLINE_COPY).not.toBe(APPROVAL_ELSEWHERE_COPY);
   });
 

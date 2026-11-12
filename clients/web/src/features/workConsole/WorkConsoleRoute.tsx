@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
+  ArrowLeft,
   Cloud,
   CircleHelp,
   Laptop,
@@ -162,7 +163,7 @@ function WorkConsoleRow({
             className="min-w-0 flex-1 truncate text-meta text-ink-muted"
             data-testid="work-console-host"
           >
-            {location.host?.displayName ?? "호스트 정보 없음"}
+            {location.host?.displayName ?? "실행하는 컴퓨터 정보 없음"}
           </span>
         </span>
         <span className="flex min-w-0 items-center gap-2 text-meta text-ink-muted">
@@ -191,6 +192,8 @@ export function WorkConsoleRoute() {
   const navigate = useNavigate();
   const offline = useOffline();
   const [params, setParams] = useSearchParams();
+  // 「← 작업」은 언제나 「작업」 목록이다(세션을 몇 번 갈아탄 뒤에도). 열었던 줄·스크롤은 목록이 기억한 자리로 되찾는다.
+  const backToWork = () => navigate("/work", { state: { restoreWork: true } });
   const selectedParam = params.get("session")?.trim() || null;
   // 직접 조작 동선을 달고 온 주소인가 (LIVE-5b). 채팅 표면의 `?work=&control=1`
   // 과 같은 부사이고, 여기서도 같은 일만 한다: 도착지에서 확인 단계를 무장할 뿐
@@ -340,11 +343,24 @@ export function WorkConsoleRoute() {
         <div className="min-w-0 break-keep">
           <div className="flex min-w-0 items-center gap-2">
             <SidebarDrawerToggle />
-            <h1 className="text-body font-semibold text-ink">작업 콘솔</h1>
+            {/* 「작업」의 세션 상세다(#5673): 돌아가는 길은 「작업」이고, 제목은 이 세션의 이름이다. */}
+            <button
+              type="button"
+              onClick={backToWork}
+              aria-label={formatMessage("desktop.workSession.backAria")}
+              data-testid="work-console-back"
+              className="flex h-control-sm shrink-0 items-center gap-1 rounded-md pe-2 ps-1 text-meta text-ink-muted press hover:bg-surface-hover focus-visible:focus-ring"
+            >
+              <ArrowLeft className="size-4" aria-hidden="true" />
+              {formatMessage("desktop.workSession.backLabel")}
+            </button>
+            <h1
+              className="min-w-0 truncate text-body font-semibold text-ink"
+              title={selected?.label}
+            >
+              {selected?.label ?? formatMessage("desktop.workSession.pageTitle")}
+            </h1>
           </div>
-          <p className="break-words text-meta text-ink-muted">
-            워크스페이스의 작업 세션과 터미널 관전을 한곳에서 확인합니다.
-          </p>
         </div>
         <div className="flex shrink-0 items-center gap-2">
           {panelChannelId !== null && (
@@ -387,8 +403,8 @@ export function WorkConsoleRoute() {
         <InlineBanner
           message={
             sessionsQuery.error !== null
-              ? "작업 세션을 새로 확인하지 못했습니다. 마지막 목록을 표시합니다."
-              : "실행 위치를 새로 확인하지 못했습니다. 마지막 호스트 정보를 표시합니다."
+              ? "작업 세션을 새로 확인하지 못했어요. 마지막 목록을 보여 줘요."
+              : "실행 위치를 새로 확인하지 못했어요. 마지막으로 확인한 컴퓨터 정보를 보여 줘요."
           }
           actionLabel="다시 시도"
           onAction={() => {
@@ -403,10 +419,10 @@ export function WorkConsoleRoute() {
         <InlineBanner
           message={
             channelsQuery.error !== null && directoryQuery.error !== null
-              ? "채널과 담당자 정보를 새로 확인하지 못했습니다. 확인 가능한 세션 정보는 유지합니다."
+              ? "채널과 담당자 정보를 새로 확인하지 못했어요. 확인한 세션 정보는 그대로 둬요."
               : channelsQuery.error !== null
-                ? "채널 정보를 새로 확인하지 못했습니다. 확인 가능한 세션 정보는 유지합니다."
-                : "담당자 정보를 새로 확인하지 못했습니다. 확인 가능한 세션 정보는 유지합니다."
+                ? "채널 정보를 새로 확인하지 못했어요. 확인한 세션 정보는 그대로 둬요."
+                : "담당자 정보를 새로 확인하지 못했어요. 확인한 세션 정보는 그대로 둬요."
           }
           actionLabel="다시 시도"
           onAction={() => {
@@ -422,7 +438,7 @@ export function WorkConsoleRoute() {
           className="border-b border-line px-4 py-1 text-meta text-ink-muted"
           data-testid="work-console-coverage"
         >
-          실시간 표시 한도 때문에 일부 채널의 세션은 새로고침될 때 갱신됩니다.
+          실시간 표시 한도 때문에 일부 채널의 세션은 새로고침할 때 갱신돼요.
         </p>
       )}
 
@@ -435,10 +451,16 @@ export function WorkConsoleRoute() {
           id="work-console-session-list"
           ref={listRef}
           tabIndex={-1}
-          aria-label="작업 세션 목록"
+          aria-labelledby="work-console-list-title"
           data-work-console-list=""
           className="min-h-0 min-w-0 overflow-y-auto border-e border-line focus-visible:focus-ring"
         >
+          <h2
+            id="work-console-list-title"
+            className="px-4 pb-1 pt-3 text-meta font-semibold text-ink-muted"
+          >
+            {formatMessage("desktop.workSession.listTitle")}
+          </h2>
           {projectionsPending ? (
             <Skeleton ready={false} rows={6} className="p-4" />
           ) : blockingProjectionError ? (
@@ -458,8 +480,8 @@ export function WorkConsoleRoute() {
             />
           ) : sessions.length === 0 ? (
             <EmptyInvite
-              headline="아직 작업 세션이 없습니다."
-              detail="에이전트가 작업을 시작하면 실행 위치와 상태가 여기에 쌓입니다."
+              headline="아직 작업 세션이 없어요."
+              detail="에이전트가 작업을 시작하면 실행 위치와 상태가 여기에 쌓여요."
               testId="work-console-empty"
             />
           ) : (
@@ -514,7 +536,7 @@ export function WorkConsoleRoute() {
                 <span className="flex min-w-0 items-center gap-2">
                   <LocationBadge location={selectedLocation} />
                   <span className="min-w-0 truncate text-meta text-ink-muted">
-                    {selectedLocation?.host?.displayName ?? "호스트 정보 없음"}
+                    {selectedLocation?.host?.displayName ?? "실행하는 컴퓨터 정보 없음"}
                   </span>
                 </span>
                 <button
@@ -545,6 +567,7 @@ export function WorkConsoleRoute() {
                 live={live}
                 nowMs={nowMs}
                 headingLevel={2}
+                routeHeader
                 wide={detailWide}
                 onWideChange={(nextWide) =>
                   setWideSessionId(nextWide ? selected.id : null)
@@ -579,15 +602,15 @@ export function WorkConsoleRoute() {
             </>
           ) : showingDetail ? (
             <InlineBanner
-              message="이 작업 세션을 찾지 못했습니다. 목록이 바뀌었거나 주소가 잘못됐을 수 있습니다."
+              message="이 작업 세션을 찾지 못했어요. 목록이 바뀌었거나 주소가 잘못됐을 수 있어요."
               actionLabel="목록으로"
               onAction={clearSelection}
               testId="work-console-not-found"
             />
           ) : (
             <EmptyInvite
-              headline="확인할 세션을 선택하세요."
-              detail="상태와 실행 위치를 비교한 뒤 진행 내역이나 터미널 관전을 열 수 있습니다."
+              headline="확인할 세션을 골라 주세요."
+              detail="상태와 실행 위치를 비교한 뒤 진행 내역이나 터미널 관전을 열 수 있어요."
               testId="work-console-detail-empty"
             />
           )}

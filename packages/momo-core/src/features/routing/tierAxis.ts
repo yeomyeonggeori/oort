@@ -139,7 +139,7 @@ export interface ExecutionTierAxis {
 // 문장을 그대로 두는 쪽이 번역 가능하고 읽힌다.
 
 const NO_HOST_REASON: Readonly<Record<ExecutionTierKey, string>> = {
-  t1: "이 워크스페이스에 등록된 데스크톱 앱 호스트가 없습니다.",
+  t1: "이 워크스페이스에 등록된 데스크탑 앱 호스트가 없습니다.",
   t2: "이 워크스페이스에 등록된 셀프호스트 데몬이 없습니다.",
   t3: "이 워크스페이스에 등록된 클라우드 호스트가 없습니다.",
 };
@@ -154,7 +154,7 @@ const RESERVED_CLOUD_T3_REASON =
   "등록된 클라우드 호스트는 없지만, 정책이 관리형 oort Cloud에서 자동 재개합니다.";
 
 const ALL_OFFLINE_REASON: Readonly<Record<ExecutionTierKey, string>> = {
-  t1: "등록된 데스크톱 앱 호스트가 모두 오프라인입니다.",
+  t1: "등록된 데스크탑 앱 호스트가 모두 오프라인입니다.",
   t2: "등록된 셀프호스트 데몬이 모두 오프라인입니다.",
   t3: "등록된 클라우드 호스트가 모두 오프라인입니다.",
 };
