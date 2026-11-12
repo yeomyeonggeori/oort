@@ -351,7 +351,7 @@ describe("채널 멤버 패널의 줄은 상태가 바뀌어도 밀리지 않는
 });
 
 // ---- 캡처 (선택): `MEMBER_PANEL_SHOTS=<폴더>`일 때만 돈다. 시험이 아니라 검수용 그림이다 ----------------------------
-// 네 상태(로딩·빈·오류·오프라인)와 「지금」 읽기 실패, 키보드 초점, 밝게·어둡게, 좁은 폭(360), 큰 글자(뿌리 200%).
+// 네 상태(로딩·빈·오류·오프라인)와 「지금」 읽기 실패, 아주 긴 글, 키보드 초점, 밝게·어둡게, 좁은 폭(360), 브라우저 확대 200%, 큰 글자(뿌리 200%).
 const SHOTS = process.env.MEMBER_PANEL_SHOTS ?? "";
 
 /** 패널 하나를 그 상태로 열어 마크업을 얻는다. */
@@ -423,13 +423,16 @@ describe("채널 멤버 패널 캡처 (#5686, 선택)", () => {
       const { mkdirSync } = await import("node:fs");
       const { join } = await import("node:path");
       mkdirSync(SHOTS, { recursive: true });
-      const list = (await scenes())["처음"];
+      const listScenes = await scenes();
+      const list = listScenes["처음"];
+      const longest = listScenes["아주 김"];
       act(() => root?.unmount());
       root = null;
       host?.remove();
       host = null;
       const states: Record<string, string> = {
         목록: list,
+        아주김: longest,
         로딩: await stateHtml({ members: [], status: "loading" }),
         빈: await stateHtml({ members: [], status: "ready" }),
         오류: await stateHtml({ members: [], status: "failed" }),
@@ -443,14 +446,21 @@ describe("채널 멤버 패널 캡처 (#5686, 선택)", () => {
       try {
         for (const colorScheme of ["light", "dark"] as const) {
           for (const vp of [
-            { name: "wide", width: 1280, height: 900, rootFontPx: 16 },
-            { name: "360", width: 360, height: 780, rootFontPx: 16 },
-            { name: "font200", width: 1280, height: 1400, rootFontPx: 32 },
+            { name: "wide", width: 1280, height: 900, rootFontPx: 16, scale: 1 },
+            { name: "360", width: 360, height: 780, rootFontPx: 16, scale: 1 },
+            // 브라우저 확대 200%: 1280 창이 CSS 640px가 되고 화소는 두 배다.
+            { name: "zoom200", width: 640, height: 450, rootFontPx: 16, scale: 2 },
+            // 큰 글자(브라우저 기본 글자 200%): 확대와 다르다 — 틀은 그대로, rem만 두 배.
+            { name: "bigtext200", width: 1280, height: 1400, rootFontPx: 32, scale: 1 },
           ]) {
-            const ctx = await browser.newContext({ viewport: { width: vp.width, height: vp.height }, colorScheme });
+            const ctx = await browser.newContext({
+              viewport: { width: vp.width, height: vp.height },
+              deviceScaleFactor: vp.scale,
+              colorScheme,
+            });
             try {
               const p = await ctx.newPage();
-              const names = vp.name === "wide" ? Object.keys(states) : ["목록", "지금실패"];
+              const names = vp.name === "wide" ? Object.keys(states) : ["목록", "아주김", "지금실패"];
               for (const name of names) {
                 await p.setContent(page(css, states[name]!, vp.rootFontPx));
                 const file = join(SHOTS, `${name}-${colorScheme}-${vp.name}.png`);

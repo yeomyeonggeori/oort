@@ -92,13 +92,22 @@ export interface ChannelMemberNow {
   /** 이 채널에서 일하는 에이전트의 한 줄(에이전트 id 소문자 → 줄). */
   lines: ReadonlyMap<string, ChannelAgentNow>;
   read: MemberNowRead;
+  /**
+   * 연결이 끊겼거나 마지막 다시 읽기가 실패해 줄이 **마지막으로 받은 때**의 사실이다. 그동안 「n분째」와 「아직 받지 않았어요」
+   * 유예는 그 시각에 멈춘다(끊긴 소켓 위에서 시계가 계속 가면 에이전트가 아니라 우리의 짐작을 잰다, ADR-0200 증보 7 ③).
+   */
+  stale: boolean;
   /** 묶음을 정해도 되는가: 첫 읽기가 끝났거나 기다림 상한을 넘었다. */
   settled: boolean;
   nowMs: number;
   retry: () => void;
 }
 
-export function useChannelMemberNow(channelId: string, enabled: boolean): ChannelMemberNow {
+export function useChannelMemberNow(
+  channelId: string,
+  enabled: boolean,
+  options: { offline?: boolean } = {}
+): ChannelMemberNow {
   const { workspaceId } = useSession();
   const query = useQuery({
     queryKey: activeAgentRunsQueryKey(workspaceId),
@@ -162,11 +171,14 @@ export function useChannelMemberNow(channelId: string, enabled: boolean): Channe
     return () => clearTimeout(id);
   }, [enabled]);
 
-  const nowMs = useClock(enabled, MEMBER_NOW_CLOCK_MS);
+  const stale = answered && (options.offline === true || query.isError);
+  const nowMs = useClock(enabled && !stale, MEMBER_NOW_CLOCK_MS);
+  // 줄을 재는 시각: 끊겼거나 다시 읽기가 실패했으면 마지막으로 받은 때, 아니면 지금.
+  const linesAt = stale && query.dataUpdatedAt > 0 ? query.dataUpdatedAt : nowMs;
   const runs = query.data?.runs;
   const lines = useMemo(
-    () => (runs === undefined ? new Map<string, ChannelAgentNow>() : channelAgentNow(runs, channelId, nowMs)),
-    [runs, channelId, nowMs]
+    () => (runs === undefined ? new Map<string, ChannelAgentNow>() : channelAgentNow(runs, channelId, linesAt)),
+    [runs, channelId, linesAt]
   );
 
   const read: MemberNowRead =
@@ -186,6 +198,7 @@ export function useChannelMemberNow(channelId: string, enabled: boolean): Channe
   return {
     lines,
     read: read === "ready" && query.isError ? "failed" : read,
+    stale,
     settled,
     nowMs,
     retry: () => void refetch(),

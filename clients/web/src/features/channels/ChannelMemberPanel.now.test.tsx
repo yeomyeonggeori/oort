@@ -33,7 +33,12 @@ vi.mock("@momo/core/lib/api", async (importOriginal) => {
 import { markAgentWorking, resetAgentWorking } from "@/features/agents/agentWorkingSignal";
 import { signalFromProgress } from "@momo/core/features/agents/runPhase";
 import { ChannelMemberPanel } from "./ChannelContextControls";
-import { activeAgentRunsQueryKey, RAIL_REFETCH_GAP_MS, SNAPSHOT_WAIT_MS } from "./useChannelMemberNow";
+import {
+  activeAgentRunsQueryKey,
+  RAIL_REFETCH_GAP_MS,
+  SLOW_POLL_MS,
+  SNAPSHOT_WAIT_MS,
+} from "./useChannelMemberNow";
 
 const WS = "00000000-0000-7000-8000-000000000001";
 const CH = "00000000-0000-7000-8000-000000000201";
@@ -150,34 +155,43 @@ async function waitFor(check: () => boolean, timeoutMs = 4_000) {
   }
 }
 
-async function mount(members: RosterMember[] = MEMBERS) {
+function tree(members: RosterMember[], offline: boolean) {
+  return createElement(
+    QueryClientProvider,
+    { client },
+    createElement(LocaleProvider, {
+      locale: korean,
+      children: createElement(
+        SessionProvider,
+        { value: session() },
+        createElement(ChannelMemberPanel, {
+          channelId: CH,
+          channelName: "design-lab",
+          members,
+          status: "ready",
+          offline,
+          onRetry: () => undefined,
+          onAddMember: () => undefined,
+        })
+      ),
+    })
+  );
+}
+
+async function mount(members: RosterMember[] = MEMBERS, offline = false) {
   host = document.createElement("div");
   document.body.append(host);
   root = createRoot(host);
   await act(async () => {
-    root?.render(
-      createElement(
-        QueryClientProvider,
-        { client },
-        createElement(
-          LocaleProvider,
-          { locale: korean, children: 
-          createElement(
-            SessionProvider,
-            { value: session() },
-            createElement(ChannelMemberPanel, {
-              channelId: CH,
-              channelName: "design-lab",
-              members,
-              status: "ready",
-              offline: false,
-              onRetry: () => undefined,
-              onAddMember: () => undefined,
-            })
-          ) }
-        )
-      )
-    );
+    root?.render(tree(members, offline));
+  });
+  await settle();
+}
+
+/** 같은 마운트에 새 사실을 준다(열린 패널은 그대로). */
+async function rerender(members: RosterMember[] = MEMBERS, offline = false) {
+  await act(async () => {
+    root?.render(tree(members, offline));
   });
   await settle();
 }
@@ -269,14 +283,14 @@ describe("채널 멤버 패널의 「지금」 (#5686)", () => {
     );
     expect(dalmuri.querySelector('[data-testid="channel-member-agent-report"]')?.textContent).toBe("에이전트 보고");
     expect(dalmuri.querySelector(".sr-only")?.textContent).toBe(
-      "달무리봇, 에이전트, 작업 중, 설계 문서 읽는 중 (에이전트 보고), 4분째"
+      "달무리봇, @dalmuri, 에이전트, 작업 중, 설계 문서 읽는 중 (에이전트 보고), 4분째"
     );
 
     const saebyeok = rowOf(SAEBYEOK)!;
     expect(saebyeok.querySelector('[data-testid="channel-member-request"]')?.textContent).toBe("「배포 준비 체크리스트」");
     expect(saebyeok.querySelector('[data-testid="channel-member-agent-report"]')).toBeNull();
     expect(saebyeok.querySelector(".sr-only")?.textContent).toBe(
-      "새벽봇, 에이전트, 작업 중, 요청: 배포 준비 체크리스트, 2분째"
+      "새벽봇, @saebyeok, 에이전트, 작업 중, 요청: 배포 준비 체크리스트, 2분째"
     );
 
     // 이 채널에 run이 없는 에이전트는 생존 낱말
@@ -287,7 +301,7 @@ describe("채널 멤버 패널의 「지금」 (#5686)", () => {
     expect(rowOf(SEOYEON)!.querySelector('[data-testid="custom-status-text"]')?.textContent).toBe("회의 중");
     expect(rowOf(JUNHO)!.querySelector('[data-testid="channel-member-now"]')?.textContent).toBe("자리 비움");
     expect(rowOf(YUNA)!.querySelector('[data-testid="channel-member-now"]')?.getAttribute("data-now")).toBe("none");
-    expect(rowOf(YUNA)!.querySelector(".sr-only")?.textContent).toBe("최유나, 오프라인");
+    expect(rowOf(YUNA)!.querySelector(".sr-only")?.textContent).toBe("최유나, @yuna, 오프라인");
   });
 
   it("다른 채널의 run은 제목도 수도 나오지 않는다", async () => {
@@ -329,32 +343,7 @@ describe("채널 멤버 패널의 「지금」 (#5686)", () => {
     await mount();
     await open();
     const moved = MEMBERS.map((m) => (m.id === YUNA ? { ...m, online: true } : m.id === SEOYEON ? { ...m, online: false } : m));
-    await act(async () => {
-      root?.render(
-        createElement(
-          QueryClientProvider,
-          { client },
-          createElement(
-            LocaleProvider,
-            { locale: korean, children: 
-            createElement(
-              SessionProvider,
-              { value: session() },
-              createElement(ChannelMemberPanel, {
-                channelId: CH,
-                channelName: "design-lab",
-                members: moved,
-                status: "ready",
-                offline: false,
-                onRetry: () => undefined,
-                onAddMember: () => undefined,
-              })
-            ) }
-          )
-        )
-      );
-    });
-    await settle();
+    await rerender(moved);
     expect(rowOf(YUNA)!.dataset.memberGroup).toBe("offline");
     expect(rowOf(SEOYEON)!.dataset.memberGroup).toBe("online");
     // 점은 지금 사실을 말한다(글·점은 고쳐 그리고 묶음만 얼어 있다)
@@ -399,6 +388,34 @@ describe("채널 멤버 패널의 「지금」 (#5686)", () => {
     await settle();
     expect(rowOf(DALMURI)!.dataset.memberGroup).toBe("agents");
     expect(rowOf(DALMURI)!.querySelector('[data-testid="channel-member-now"]')?.getAttribute("data-now")).toBe("run");
+  });
+
+  it("연결이 끊겼거나 다시 읽기가 실패하면 「n분째」는 마지막으로 받은 때에 멈추고, 다시 읽히면 지금 시각으로 돌아온다", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const fixed = defaultRuns();
+    api.fetchAllActiveAgentRuns.mockImplementation(async () => ({ runs: fixed, truncated: false, pages: 1 }));
+    const elapsed = () =>
+      rowOf(DALMURI)!.querySelector('[data-testid="channel-member-elapsed"]')?.textContent;
+    await mount();
+    await open();
+    expect(elapsed()).toBe("4분째");
+
+    api.fetchAllActiveAgentRuns.mockRejectedValue(new TypeError("Failed to fetch"));
+    await rerender(MEMBERS, true);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(3 * MIN);
+    });
+    await settle();
+    expect(elapsed()).toBe("4분째");
+
+    api.fetchAllActiveAgentRuns.mockImplementation(async () => ({ runs: fixed, truncated: false, pages: 1 }));
+    await rerender(MEMBERS, false);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(SLOW_POLL_MS + 100);
+    });
+    await settle();
+    expect(document.querySelector('[data-testid="channel-member-now-failed"]')).toBeNull();
+    expect(elapsed()).toBe("8분째");
   });
 
   it("레일 신호는 간격 안에서 한 번으로 모아 다시 읽는다", async () => {

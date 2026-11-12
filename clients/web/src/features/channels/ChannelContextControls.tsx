@@ -237,7 +237,9 @@ function RowIdentity({ member }: { member: RosterMember }) {
       >
         {member.displayName}
       </span>
-      <span className="min-w-0 truncate text-meta text-ink-muted">@{member.handle}</span>
+      {/* 이름이 먼저다: 핸들은 남는 자리만 받고(`flex-1` = 기준 폭 0), 글 칸이 20rem보다 좁으면(폰 폭) 통째로 접는다 —
+          「@…」 같은 조각을 세우지 않는다. 핸들은 낭독 문장에 그대로 있다. */}
+      <span className="min-w-0 flex-1 truncate text-meta text-ink-muted @max-xs:hidden">@{member.handle}</span>
     </span>
   );
 }
@@ -247,7 +249,7 @@ function HumanMemberRow({ member, group }: { member: RosterMember; group: Member
   const { visible: custom, accessible } = useCustomStatusView(member);
   // 자리 비움·방해 금지는 사람이 스스로 정한 상태라 낱말로도 선다. 접속 중·접속 없음은 묶음 머리가 이미 말한다.
   const declared = dot !== null && (dot.tone === "warn" || dot.tone === "danger") ? dot : null;
-  const spoken = [member.displayName, dot?.label, accessible].filter(
+  const spoken = [member.displayName, `@${member.handle}`, dot?.label, accessible].filter(
     (part): part is string => part !== undefined && part !== null && part !== ""
   );
   return (
@@ -261,7 +263,7 @@ function HumanMemberRow({ member, group }: { member: RosterMember; group: Member
       <AvatarWithPresence member={member}>
         <Avatar member={member} />
       </AvatarWithPresence>
-      <span className="flex min-w-0 flex-1 flex-col" aria-hidden="true">
+      <span className="@container flex min-w-0 flex-1 flex-col" aria-hidden="true">
         <RowIdentity member={member} />
         <span className={NOW_LINE_CLASS} data-testid="channel-member-now" data-now={custom ? "status" : declared ? "presence" : "none"}>
           {custom ? (
@@ -297,6 +299,7 @@ function AgentMemberRow({
   const dot = useDmStatusDot(member, mayAct, nowMs);
   const spoken = [
     member.displayName,
+    `@${member.handle}`,
     formatMessage("timeline.memberPanel.agentKind"),
     ...(line !== undefined ? agentNowSpoken(line, formatMessage) : dot !== null ? [dot.label] : []),
   ];
@@ -317,7 +320,7 @@ function AgentMemberRow({
         <Avatar member={member} />
         <PresenceBadgeDot dot={dot} testId="agent-liveness-dot" />
       </span>
-      <span className="flex min-w-0 flex-1 flex-col" aria-hidden="true">
+      <span className="@container flex min-w-0 flex-1 flex-col" aria-hidden="true">
         <RowIdentity member={member} />
         {line !== undefined ? (
           <AgentNowLine line={line} formatMessage={formatMessage} />
@@ -422,6 +425,7 @@ function ChannelMemberPanelBody({
   members,
   showLoading,
   showEmpty,
+  offline,
   onAddMember,
   onClose,
 }: {
@@ -429,13 +433,14 @@ function ChannelMemberPanelBody({
   members: RosterMember[];
   showLoading: boolean;
   showEmpty: boolean;
+  offline: boolean;
   onAddMember: () => void;
   onClose: () => void;
 }) {
   const formatMessage = useFormatMessage();
   const showList = members.length > 0;
   // 연 순간부터 읽는다(명부가 아직 오는 중이어도): 명부가 닿을 때 「지금」도 이미 와 있어 묶음을 바로 정한다.
-  const now = useChannelMemberNow(channelId, true);
+  const now = useChannelMemberNow(channelId, true, { offline });
   return (
     <>
       <div
@@ -608,6 +613,7 @@ export function ChannelMemberPanel({
           members={members}
           showLoading={showLoading}
           showEmpty={showEmpty}
+          offline={offline}
           onAddMember={openAddMember}
           onClose={() => setOpen(false)}
         />
