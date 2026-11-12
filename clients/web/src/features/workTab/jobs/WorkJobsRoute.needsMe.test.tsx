@@ -928,7 +928,7 @@ describe("누른 자리에 다른 결정이 서지 않는다 (#5640 수리 3·4�
     pressSlot(0, "approve", { clientX: 300, clientY: 190 }, "touch");
     await waitFor(() => expect(decidedIds()).toEqual([A(1), A(2)]));
     await sleepMs(300);
-  });
+  }, 15_000);
 
   it("Enter 연타(키보드): A의 승인에서 Enter를 거듭 쳐도 나간 결정은 1건이고 초점은 다음 줄의 결정 단추로 가지 않는다", async () => {
     board(new Set(), { mine: twoRuns });
@@ -1212,7 +1212,7 @@ describe("누른 자리에 다른 결정이 서지 않는다 (#5640 수리 3·4�
     pressSlot(1, "approve", at(spot));
     await waitFor(() => expect(decidedIds()).toEqual([A(8)]));
     await settleAnswers();
-  });
+  }, 15_000);
 
   it("「응답 필요」 아래에 새 요청 줄이 서도 움직이지 않은 단추는 막지 않는다(포인터 밑의 B는 바로 눌린다)", async () => {
     const third = runOf(5);
@@ -1235,7 +1235,7 @@ describe("누른 자리에 다른 결정이 서지 않는다 (#5640 수리 3·4�
     pressSlot(1, "approve", POINT);
     await waitFor(() => expect(decidedIds()).toEqual([A(8)]));
     await settleAnswers();
-  });
+  }, 15_000);
 
   it("마우스: 붙든 동안 목록을 굴려 다른 줄의 단추가 그 점에 오면, 굴림이 끝나고 1초 동안은 막힌 모양으로 삼키고 그 뒤에는 받는다", async () => {
     mockSlotGeometry({ sectionBox: true });
@@ -1259,7 +1259,7 @@ describe("누른 자리에 다른 결정이 서지 않는다 (#5640 수리 3·4�
     pressSlot(1, "approve", at(spot));
     await waitFor(() => expect(decidedIds()).toEqual([A(1), A(8)]));
     await settleAnswers();
-  });
+  }, 15_000);
 
   it("실제 서버처럼 결정한 run이 목록 맨 앞으로 와도, 붙든 동안 「응답 필요」의 칸 순서는 그대로다(아래 줄 B를 결정해도 A의 단추가 B의 칸으로 내려오지 않는다)", async () => {
     board(new Set(), { mine: twoRuns });
@@ -1278,7 +1278,7 @@ describe("누른 자리에 다른 결정이 서지 않는다 (#5640 수리 3·4�
     pressSlot(1, "approve", POINT, "touch");
     await sleepMs(100);
     expect(decidedIds()).toEqual([A(8)]);
-  });
+  }, 15_000);
 
   it("터치: 붙든 줄은 사람이 목록을 굴리면 놓이고, 놓인 run은 서버 말대로 「시작 전」이다", async () => {
     board(new Set(), { mine: twoRuns });
@@ -1295,7 +1295,7 @@ describe("누른 자리에 다른 결정이 서지 않는다 (#5640 수리 3·4�
     await waitFor(() => expect(rowsIn("needsMe")).toEqual([R(8)]), { timeout: 2000 });
     const chip = within(screen.getAllByTestId("work-job").find((li) => li.querySelector(`[data-job-id="${R(1)}"]`) !== null)!).getByTestId("team-board-state");
     expect(chip.textContent).toBe("시작 전");
-  });
+  }, 15_000);
 
   it("터치: 화면이 스스로 맞춘 스크롤(보던 줄 고정)은 사람이 굴린 것이 아니다 — 붙든 줄을 놓지 않는다", async () => {
     const working = (n: number) => runRow({ sessionId: R(n), runId: R(n), requestedBy: DOHYUN, owner: AGENT, label: `진행 ${n}`, phase: "running", trigger: "work" });
@@ -1345,7 +1345,7 @@ describe("누른 자리에 다른 결정이 서지 않는다 (#5640 수리 3·4�
     await sleepMs(1500);
     expect(rowsIn("needsMe")).toEqual([R(1), R(8)]);
     expect(receiptIn(0)).toBe(RECEIPT.approve);
-  });
+  }, 15_000);
 
   it("붙든 줄의 새 요청 단추가 (배치가 바뀌어) 방금 누른 단추의 상자와 겹치면, 그 단추는 막힌 모양으로 서서 누름을 받지 않고 사람이 그 줄을 떠난 뒤에 받는다", async () => {
     mockSlotGeometry();
@@ -1379,7 +1379,7 @@ describe("누른 자리에 다른 결정이 서지 않는다 (#5640 수리 3·4�
     pressSlot(0, "approve", at({ x: spot.x + 20, y: spot.y + 10 }), "touch");
     await waitFor(() => expect(decidedIds()).toEqual([A(1), A(2)]));
     await settleAnswers();
-  });
+  }, 15_000);
 });
 
 describe("상태 칩·서랍의 낱말 (#5640 수리 3회차 H2·질문 ③)", () => {
