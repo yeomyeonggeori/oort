@@ -1081,10 +1081,21 @@ fn subscription_agents_from_env() -> bool {
 /// read is a warning and "not shown", never a refusal to boot (the worker, which enforces, fails
 /// loudly on the same value).
 pub fn team_ai_caps_from_env() -> momo_workspace_actions::team_ai_limits::OperatorCaps {
+    team_ai_caps_from_lookup(|key| std::env::var_os(key))
+}
+
+/// [`team_ai_caps_from_env`] over a given lookup of raw values (#5685 review M3: the test injects one, so the
+/// wiring of each variable is measured without `set_var`). A value that is present but not UTF-8 stays a
+/// **value** (decoded lossily) and so is unreadable — never "unset", which for a ceiling means "no ceiling"
+/// (review H1). Blank is still unset: the parsers read it so.
+pub fn team_ai_caps_from_lookup(
+    lookup: impl Fn(&str) -> Option<std::ffi::OsString>,
+) -> momo_workspace_actions::team_ai_limits::OperatorCaps {
     use momo_workspace_actions::team_ai_limits::{
-        parse_hermes_cap, parse_operator_cap, OperatorCaps, HERMES_CAP_ENV,
+        parse_operator_cap, OperatorCaps, HERMES_CAP_ENV,
     };
-    let read = |key: &'static str| match parse_operator_cap(key, env(key).as_deref()) {
+    let raw = |key: &str| lookup(key).map(|value| operator_value_lossy(key, value));
+    let read = |key: &'static str| match parse_operator_cap(key, raw(key).as_deref()) {
         Ok(cap) => cap,
         Err(invalid) => {
             tracing::warn!(
@@ -1097,20 +1108,26 @@ pub fn team_ai_caps_from_env() -> momo_workspace_actions::team_ai_limits::Operat
     OperatorCaps {
         daily_tokens: read("TEAM_AI_DAILY_TOKEN_CAP"),
         daily_searches: read("TEAM_AI_DAILY_SEARCH_CAP"),
-        // ADR-0201 증보 v4 P7 (#5369): the third ceiling, whose empty is CLOSED (not "no ceiling"). The api
-        // does not enforce it (the worker does) and no settings screen shows it yet (P14-S6~S8), so a value it
-        // cannot read is the same warning and reads as the closed door.
-        daily_delegations: match parse_hermes_cap(env(HERMES_CAP_ENV).as_deref()) {
-            Ok(cap) => cap,
-            Err(invalid) => {
-                tracing::warn!(
-                    variable = invalid.0,
-                    "unreadable team AI delegation ceiling; it reads as closed (the agent-worker refuses to boot on it)"
-                );
-                None
-            }
-        },
+        // ADR-0201 증보 v4 P7 (#5369) + 증보 2026-11-12 (#5685): the third ceiling — unset = no ceiling, `0` = off.
+        daily_delegations: team_ai_hermes_ceiling(raw(HERMES_CAP_ENV).as_deref()),
     }
+}
+
+/// `TEAM_AI_HERMES_DAILY_CAP` as the api **explains** it (ADR-0201 증보 2026-11-12, #5685) — the worker's rule
+/// (`parse_hermes_cap`: unset or blank = no ceiling, `0` = off, a positive number = the ceiling), except that a
+/// value it cannot read is a warning and reads as **off** (closed): the agent-worker refuses to boot on the
+/// same value, so the delegation is closed in fact and the settings screen must not say it is open.
+pub fn team_ai_hermes_ceiling(
+    raw: Option<&str>,
+) -> momo_workspace_actions::team_ai_limits::HermesCeiling {
+    use momo_workspace_actions::team_ai_limits::{parse_hermes_cap, HermesCeiling};
+    parse_hermes_cap(raw).unwrap_or_else(|invalid| {
+        tracing::warn!(
+            variable = invalid.0,
+            "unreadable team AI delegation ceiling; it reads as closed (the agent-worker refuses to boot on it)"
+        );
+        HermesCeiling::Off
+    })
 }
 
 /// ADR-0201 증보 v4 P8 (#5374): G4's three declarations as **this** process reads them — the rule the
@@ -1120,7 +1137,32 @@ pub fn team_ai_caps_from_env() -> momo_workspace_actions::team_ai_limits::Operat
 /// templates give it the worker's values (K-S2 flipped). The two kind declarations are the worker's alone and
 /// are not read here (v4.1).
 pub fn team_ai_hermes_from_env() -> momo_workspace_actions::team_ai_hermes::HermesDeclarations {
-    momo_workspace_actions::team_ai_hermes::HermesDeclarations::from_lookup(env)
+    team_ai_hermes_from_lookup(|key| std::env::var_os(key))
+}
+
+/// [`team_ai_hermes_from_env`] over a given lookup of raw values (#5685 마무리). A declaration that is present
+/// but not UTF-8 stays a **value**: a connection-mode declaration that cannot be read counts as present and
+/// shuts G4 (its absence would open it), and an unreadable tool lock is not a lock. `from_lookup` reads blank as
+/// unset itself.
+pub fn team_ai_hermes_from_lookup(
+    lookup: impl Fn(&str) -> Option<std::ffi::OsString>,
+) -> momo_workspace_actions::team_ai_hermes::HermesDeclarations {
+    momo_workspace_actions::team_ai_hermes::HermesDeclarations::from_lookup(|key| {
+        lookup(key).map(|value| operator_value_lossy(key, value))
+    })
+}
+
+/// An operator variable whose absence opens something (a ceiling, a G4 declaration), as text: a value that is
+/// not UTF-8 is decoded lossily with a warning, so it stays an (unreadable) value and is never read as unset
+/// (#5685 review H1 and its 마무리).
+fn operator_value_lossy(key: &str, value: std::ffi::OsString) -> String {
+    if value.to_str().is_none() {
+        tracing::warn!(
+            variable = key,
+            "operator variable is not UTF-8; it is read as an unreadable value, never as unset"
+        );
+    }
+    value.to_string_lossy().into_owned()
 }
 
 fn claude_subscription_agents_from_env() -> bool {
@@ -3856,6 +3898,153 @@ mod tests {
             Some("ture"),
         ] {
             assert!(!claude_subscription_agents_switch_on(off), "{off:?}");
+        }
+    }
+
+    /// ADR-0201 증보 2026-11-12 (#5685): what the api **explains** about `TEAM_AI_HERMES_DAILY_CAP`, case by
+    /// case — the same five rows as the agent-worker's `the_hermes_cap_is_enforced_by_the_five_case_rule`.
+    /// Columns: `operatorCeiling.dailyDelegations`, `operatorCeiling.delegationOff`, and
+    /// `effective.dailyDelegations` for a workspace that set nothing (`None` = closed, sent as `0`).
+    #[test]
+    fn the_hermes_cap_is_explained_by_the_five_case_rule() {
+        use momo_workspace_actions::team_ai_limits::{
+            delegation_cap, HermesCeiling, OperatorCaps, TeamAiLimits,
+        };
+        for (raw, ceiling, ceiling_number, off, effective) in [
+            (None, HermesCeiling::NoCeiling, None, false, Some(30)), // unset: no ceiling
+            (Some("  "), HermesCeiling::NoCeiling, None, false, Some(30)), // blank: no ceiling
+            (Some("0"), HermesCeiling::Off, None, true, None),       // 0: off
+            (
+                Some("12"),
+                HermesCeiling::Ceiling(12),
+                Some(12),
+                false,
+                Some(12),
+            ), // a ceiling
+            (Some("ten"), HermesCeiling::Off, None, true, None),     // unreadable: closed + warning
+        ] {
+            let read = team_ai_hermes_ceiling(raw);
+            assert_eq!(read, ceiling, "{raw:?}");
+            let caps = OperatorCaps {
+                daily_delegations: read,
+                ..OperatorCaps::default()
+            };
+            assert_eq!(caps.delegation_ceiling(), ceiling_number, "{raw:?}");
+            assert_eq!(caps.delegation_off(), off, "{raw:?}");
+            assert_eq!(
+                delegation_cap(&TeamAiLimits::default(), &caps),
+                effective,
+                "{raw:?}"
+            );
+        }
+    }
+
+    /// #5685 review M3 + H1: each variable reaches its field of the caps the settings screen explains — the
+    /// reader is given a lookup (no `set_var`). Pinning `daily_delegations` (or a token/search ceiling) to a
+    /// constant, reading another name, or reading a value that is not UTF-8 as "unset" turns it red. For the
+    /// delegation, unreadable (a word, or bytes that are not UTF-8) is **off**; for the two older ceilings it is
+    /// "not shown" (`None`), as before — the agent-worker refuses to boot on all of them.
+    #[test]
+    fn the_ceilings_reach_the_caps_from_the_lookup() {
+        use momo_workspace_actions::team_ai_limits::HermesCeiling;
+        use std::ffi::OsString;
+        const HERMES: &str = "TEAM_AI_HERMES_DAILY_CAP";
+        const TOKENS: &str = "TEAM_AI_DAILY_TOKEN_CAP";
+        const SEARCHES: &str = "TEAM_AI_DAILY_SEARCH_CAP";
+        let caps_of = |vars: Vec<(&'static str, OsString)>| {
+            team_ai_caps_from_lookup(move |key| {
+                vars.iter()
+                    .find(|(name, _)| *name == key)
+                    .map(|(_, value)| value.clone())
+            })
+        };
+        let caps = |vars: Vec<(&'static str, &str)>| {
+            caps_of(
+                vars.into_iter()
+                    .map(|(name, value)| (name, OsString::from(value)))
+                    .collect(),
+            )
+        };
+        for (label, vars, delegations) in [
+            ("nothing set", vec![], HermesCeiling::NoCeiling),
+            ("empty", vec![(HERMES, "")], HermesCeiling::NoCeiling),
+            ("blank", vec![(HERMES, "  ")], HermesCeiling::NoCeiling),
+            ("0", vec![(HERMES, "0")], HermesCeiling::Off),
+            ("12", vec![(HERMES, " 12 ")], HermesCeiling::Ceiling(12)),
+            ("a word", vec![(HERMES, "ten")], HermesCeiling::Off),
+        ] {
+            assert_eq!(caps(vars).daily_delegations, delegations, "{label}");
+        }
+        let older = caps(vec![(TOKENS, "0"), (SEARCHES, "7")]);
+        assert_eq!(
+            (
+                older.daily_tokens,
+                older.daily_searches,
+                older.daily_delegations
+            ),
+            (Some(0), Some(7), HermesCeiling::NoCeiling)
+        );
+        // a value that is present but not UTF-8 is unreadable, never "unset"
+        #[cfg(unix)]
+        {
+            use std::os::unix::ffi::OsStringExt;
+            let broken = || OsString::from_vec(b"0\xff".to_vec());
+            assert_eq!(
+                caps_of(vec![(HERMES, broken())]).daily_delegations,
+                HermesCeiling::Off,
+                "the delegation reads as closed, not as no ceiling"
+            );
+            let older = caps_of(vec![(TOKENS, broken()), (SEARCHES, broken())]);
+            assert_eq!((older.daily_tokens, older.daily_searches), (None, None));
+        }
+    }
+
+    /// #5685 마무리: G4's declarations as the api reads them, through an injected lookup. A connection-mode
+    /// declaration that is present but not UTF-8 shuts G4 (its absence would open it); an unreadable tool lock
+    /// is not a lock (the closed side, as before).
+    #[test]
+    fn the_hermes_declarations_read_an_unreadable_value_as_a_value() {
+        use momo_workspace_actions::team_ai_hermes::AttestProblem;
+        use std::ffi::OsString;
+        const LOCKED: &str = "OORT_COHOSTED_AGENT_TOOLS_LOCKED";
+        const CONNECTORS: &str = "OORT_COHOSTED_AGENT_CONNECTORS_LOCKED";
+        const APPS: &str = "OORT_COHOSTED_AGENT_CONNECTOR_APPS";
+        let g4 = |vars: Vec<(&'static str, OsString)>| {
+            team_ai_hermes_from_lookup(move |key| {
+                vars.iter()
+                    .find(|(name, _)| *name == key)
+                    .map(|(_, value)| value.clone())
+            })
+            .g4()
+        };
+        assert_eq!(
+            g4(vec![(LOCKED, OsString::from("1"))]),
+            Ok(()),
+            "team default mode"
+        );
+        assert_eq!(
+            g4(vec![
+                (LOCKED, OsString::from("1")),
+                (APPS, OsString::from("  "))
+            ]),
+            Ok(()),
+            "blank is unset"
+        );
+        #[cfg(unix)]
+        {
+            use std::os::unix::ffi::OsStringExt;
+            let broken = || OsString::from_vec(b"x\xff".to_vec());
+            for name in [APPS, CONNECTORS] {
+                assert_eq!(
+                    g4(vec![(LOCKED, OsString::from("1")), (name, broken())]),
+                    Err(AttestProblem::ConnectionMode),
+                    "{name} not UTF-8"
+                );
+            }
+            assert_eq!(
+                g4(vec![(LOCKED, OsString::from_vec(b"1\xff".to_vec()))]),
+                Err(AttestProblem::ToolsNotLocked)
+            );
         }
     }
 
