@@ -1587,6 +1587,8 @@ export function ChatShell() {
                     }
               }
               onStartReached={stressCount > 0 ? undefined : timeline.loadOlder}
+              olderFailed={stressCount > 0 ? false : timeline.olderFailed}
+              onRetryOlder={timeline.retryOlder}
               onRetry={timeline.reload}
               onOpenThread={(message) => {
                 setWorkOpen(false);

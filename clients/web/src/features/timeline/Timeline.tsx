@@ -139,6 +139,8 @@ import {
 // shift is measured against the anchor row itself, the oldest message that was
 // already on screen, by how far it moved.
 const START_INDEX = 1_000_000;
+/** 맨 위 닿음 확인을 미루는 시간(#5662). 가상 목록의 `startReached` 조절(200ms)과 같아 진입 수렴의 첫 몇 프레임을 맨 위로 읽지 않는다. */
+const TOP_REACH_SETTLE_MS = 200;
 
 /** 답글이 없는 루트가 부르는 빈 배열 — 렌더마다 새 배열을 만들지 않는다. */
 const NO_REPLIES: readonly Message[] = [];
@@ -262,6 +264,8 @@ export function Timeline({
   pins,
   unfurls,
   onStartReached,
+  olderFailed = false,
+  onRetryOlder,
   onRetry,
   onOpenThread,
   onQuoteMessage,
@@ -347,6 +351,10 @@ export function Timeline({
   /** ADR-0170 server projection, keyed by case-folded message id. */
   unfurls?: UnfurlMap;
   onStartReached?: () => void;
+  /** 마지막 옛 쪽 읽기가 실패했다(#5662). 목록 위에 한 줄과 「다시 시도」를 건다. */
+  olderFailed?: boolean;
+  /** 그 줄의 「다시 시도」. */
+  onRetryOlder?: () => void;
   onRetry?: () => void;
   onOpenThread?: (message: Message) => void;
   /** ADR-0148 - pin a row to the composer as a quote. */
@@ -870,6 +878,46 @@ export function Timeline({
     setScrollerEl(node instanceof HTMLElement ? node : null);
   }, []);
 
+  // 맨 위 닿음(#5662). 가상 목록의 `startReached` 는 첫 줄 번호가 바뀔 때만 다시 나간다(같은 번호는 한 번만 — react-virtuoso 4.18).
+  // 그래서 (가) 옛 쪽 읽기가 실패해 번호가 그대로면 다시 맨 위에 닿아도 나가지 않았고, (나) 머리말 한 줄뿐인 빈 대화에서 이미 나간
+  // 번호를 다음 대화가 같은 목록 인스턴스에서 물려받으면(첫 쪽이 한 프레임 안에 와 로딩 뼈대가 서지 않을 때 — 앞 대화에 메시지 줄이
+  // 없어 다시 붙지 않는다) 그 대화에서는 나가지 않았다. 그래서 `startReached` 옆에 닿음 확인을 하나 더 둔다: 위 상태가 참이 될
+  // 때마다, 그리고 보이는 대화가 바뀔 때 이미 맨 위면, 가상 목록과 같은 시간 뒤 스크롤러가 아직 맨 위인지 보고 부른다. 진입 수렴(바닥으로
+  // 가는 첫 몇 프레임의 맨 위)은 그 안에 끝나 부르지 않는다. 두 길이 겹쳐도 훅이 읽는 중이면 하나 더 내지 않는다(`useTimeline.loadOlder`).
+  const atTopRef = useRef(false);
+  const scrollerElRef = useRef<HTMLElement | null>(null);
+  scrollerElRef.current = scrollerEl;
+  const onStartReachedRef = useRef(onStartReached);
+  onStartReachedRef.current = onStartReached;
+  const topCheckRef = useRef<number | null>(null);
+  const checkTopSoon = useCallback(() => {
+    if (topCheckRef.current !== null) window.clearTimeout(topCheckRef.current);
+    topCheckRef.current = window.setTimeout(() => {
+      topCheckRef.current = null;
+      const scroller = scrollerElRef.current;
+      if (atTopRef.current && scroller !== null && scroller.scrollTop <= 0) onStartReachedRef.current?.();
+    }, TOP_REACH_SETTLE_MS);
+  }, []);
+  useEffect(
+    () => () => {
+      if (topCheckRef.current !== null) window.clearTimeout(topCheckRef.current);
+    },
+    []
+  );
+  // 가장 옛 줄(답글 포함)이 바뀌어도 다시 본다: 옛 쪽이 본류에 줄을 하나도 더하지 않으면(스레드 답글뿐) 목록 번호도 위 상태도 그대로라
+  // 두 신호 모두 다시 나가지 않는다.
+  const oldestLoadedSeq = messages[0]?.seq ?? null;
+  useEffect(() => {
+    if (atTopRef.current) checkTopSoon();
+  }, [timelineChannelId, oldestLoadedSeq, checkTopSoon]);
+  const onAtTopChange = useCallback(
+    (top: boolean) => {
+      atTopRef.current = top;
+      if (top) checkTopSoon();
+    },
+    [checkTopSoon]
+  );
+
   // 불러오기가 실패했다(#5221). 받아 둔 글이 **없으면** 제목 + 이유 한 줄 + 다시 시도 상자, **있으면** 상자로 덮지 않고
   // 목록은 그대로 두고 위에 한 줄만 건다(읽을 것이 있는데 화면을 비우면 정보를 버리는 일이다). 이유는 실패가 말하는
   // 원인의 닫힌 분류 문장이고 상태 코드·서버 원문은 없다.
@@ -903,6 +951,15 @@ export function Timeline({
           className="layer-content-float absolute inset-x-0 top-0 bg-pane"
         />
       )}
+      {/* 옛 쪽 읽기 실패(#5662): 같은 자리에 떠 있는 한 줄이라 뜨고 질 때 목록이 밀리지 않는다. 새 쪽 실패 줄이 서 있으면 그것이 먼저다. */}
+      {status !== "error" && olderFailed && (
+        <LoadFailureLine
+          titleKey={CONNECTION_KEYS.loadOlderTitle}
+          onRetry={() => onRetryOlder?.()}
+          testId="timeline-older-error"
+          className="layer-content-float absolute inset-x-0 top-0 bg-pane"
+        />
+      )}
       <TimelineLiveRegionProvider>
       <TimelineTailContext.Provider value={tail}>
       <Virtuoso
@@ -924,6 +981,7 @@ export function Timeline({
         alignToBottom
         followOutput={followOutput}
         startReached={onStartReached}
+        atTopStateChange={onAtTopChange}
         scrollerRef={onScrollerRef}
         rangeChanged={({ startIndex, endIndex }) => {
           const first = firstItemIndexRef.current;
