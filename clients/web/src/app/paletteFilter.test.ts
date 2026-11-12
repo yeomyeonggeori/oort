@@ -38,26 +38,4 @@ describe("paletteFilter (#4111)", () => {
   it("빈 질의는 모두 남긴다", () => {
     expect(paletteFilter("x", "  ", inbox)).toBeGreaterThan(0);
   });
-
-  // #5726: 「ai 연결」 ↵ = 카드 열기. 같은 점수면 이동 줄이 앞서던 것을 이름이 바로잡는다.
-  it("낱말 둘 이상이 전부 명령 이름과 같으면 같은 점수의 이동 줄보다 위에 선다", () => {
-    const names = ["연결", "connect", "ai"];
-    const card = ["AI 계정 카드 열기", "이 채널 · 나에게만", "연결", "connect", "ai"];
-    const hub = ["AI", "ai 허브", "허브", "ai 연결", "hermes"];
-    expect(paletteFilter("nav.ai", "ai 연결", hub)).toBe(
-      paletteFilter("ai.connect", "ai 연결", card)
-    );
-    expect(paletteFilter("ai.connect", "ai 연결", card, names)).toBeGreaterThan(
-      paletteFilter("nav.ai", "ai 연결", hub)
-    );
-  });
-
-  it("낱말이 하나인 질의와 이름에 없는 낱말이 섞인 질의는 순서가 그대로다", () => {
-    const names = ["연결", "connect", "ai"];
-    const card = ["AI 계정 카드 열기", "이 채널 · 나에게만", "연결", "connect", "ai"];
-    expect(paletteFilter("ai.connect", "ai", card, names)).toBe(paletteFilter("ai.connect", "ai", card));
-    expect(paletteFilter("ai.connect", "claude 연결", card, names)).toBe(
-      paletteFilter("ai.connect", "claude 연결", card)
-    );
-  });
 });

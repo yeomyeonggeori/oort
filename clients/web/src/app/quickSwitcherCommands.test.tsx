@@ -981,16 +981,14 @@ describe("⌘K 걸러내기 (#4111)", () => {
     }
   });
 
-  it("「ai 연결」은 「AI 계정 카드 열기」를 맨 위 명령으로 세우고, 「AI」(허브)도 남는다 (#4141 · #5726)", async () => {
+  it("「ai 연결」은 「AI」(허브)를 맨 위 명령으로 세우고 허브로 간다 (#4141)", async () => {
     await mount({ path: `/c/${CH}` });
     await typeQuery("ai 연결");
     const rows = commandRows();
-    expect(rows[0]?.dataset.commandId).toBe("ai.connect");
+    expect(rows[0]?.dataset.commandId).toBe("nav.ai");
     expect(itemKeys()).not.toContain("nav.settings.ai");
-    const hub = rows.find((row) => row.dataset.commandId === "nav.ai");
-    expect(hub).toBeDefined();
     await act(async () => {
-      hub?.click();
+      rows[0].click();
     });
     await settle();
     expect(currentPath).toBe("/ai");

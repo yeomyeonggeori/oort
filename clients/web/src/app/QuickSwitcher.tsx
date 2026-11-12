@@ -1,6 +1,5 @@
 import {
   useEffect,
-  useCallback,
   useMemo,
   useRef,
   useState,
@@ -713,23 +712,6 @@ export function QuickSwitcher({
           },
   };
 
-  // 명령이 스스로 갖는 이름(슬래시 이름·별칭) — 「ai 연결」 ↵ 가 카드 열기가 되게
-  // 순서를 잡는 재료다(#5726). 줄의 `value`(= id)로 찾는다.
-  const commandNames = useMemo(() => {
-    const byId = new Map<string, string[]>();
-    for (const command of commands) {
-      if (command.slash !== undefined) {
-        byId.set(command.id, [command.slash.name, ...command.slash.aliases]);
-      }
-    }
-    return byId;
-  }, [commands]);
-  const commandPaletteFilter = useCallback(
-    (value: string, search: string, keywords?: string[]) =>
-      paletteFilter(value, search, keywords, commandNames.get(value)),
-    [commandNames]
-  );
-
   // 「명령」 그룹. 자리는 친 말이 정한다(아래 `commandsFirst`).
   const commandGroup =
     commands.length > 0 ? (
@@ -819,7 +801,7 @@ export function QuickSwitcher({
     <AnimatePresence>
       {open ? (
     <PaletteLayer onOpenChange={onOpenChange}>
-      <Command label="검색과 이동" filter={commandPaletteFilter}>
+      <Command label="검색과 이동" filter={paletteFilter}>
       {/* 입력은 팔레트 안에 또 하나의 진한 상자를 그리지 않는다 (#1753 H-1).
           팔레트는 모달이고 입력이 유일한 포커스 대상이라, 열려 있는 동안 링은
           상시 점등이 되어 정보가 0이다 — 링 없이 hairline 구분선만 남긴다.
