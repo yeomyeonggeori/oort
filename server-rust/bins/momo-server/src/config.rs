@@ -1082,7 +1082,7 @@ fn subscription_agents_from_env() -> bool {
 /// loudly on the same value).
 pub fn team_ai_caps_from_env() -> momo_workspace_actions::team_ai_limits::OperatorCaps {
     use momo_workspace_actions::team_ai_limits::{
-        parse_hermes_cap, parse_operator_cap, OperatorCaps, HERMES_CAP_ENV,
+        parse_operator_cap, OperatorCaps, HERMES_CAP_ENV,
     };
     let read = |key: &'static str| match parse_operator_cap(key, env(key).as_deref()) {
         Ok(cap) => cap,
@@ -1097,20 +1097,26 @@ pub fn team_ai_caps_from_env() -> momo_workspace_actions::team_ai_limits::Operat
     OperatorCaps {
         daily_tokens: read("TEAM_AI_DAILY_TOKEN_CAP"),
         daily_searches: read("TEAM_AI_DAILY_SEARCH_CAP"),
-        // ADR-0201 증보 v4 P7 (#5369): the third ceiling, whose empty is CLOSED (not "no ceiling"). The api
-        // does not enforce it (the worker does) and no settings screen shows it yet (P14-S6~S8), so a value it
-        // cannot read is the same warning and reads as the closed door.
-        daily_delegations: match parse_hermes_cap(env(HERMES_CAP_ENV).as_deref()) {
-            Ok(cap) => cap,
-            Err(invalid) => {
-                tracing::warn!(
-                    variable = invalid.0,
-                    "unreadable team AI delegation ceiling; it reads as closed (the agent-worker refuses to boot on it)"
-                );
-                None
-            }
-        },
+        // ADR-0201 증보 v4 P7 (#5369) + 증보 2026-11-12 (#5685): the third ceiling — unset = no ceiling, `0` = off.
+        daily_delegations: team_ai_hermes_ceiling(env(HERMES_CAP_ENV).as_deref()),
     }
+}
+
+/// `TEAM_AI_HERMES_DAILY_CAP` as the api **explains** it (ADR-0201 증보 2026-11-12, #5685) — the worker's rule
+/// (`parse_hermes_cap`: unset or blank = no ceiling, `0` = off, a positive number = the ceiling), except that a
+/// value it cannot read is a warning and reads as **off** (closed): the agent-worker refuses to boot on the
+/// same value, so the delegation is closed in fact and the settings screen must not say it is open.
+pub fn team_ai_hermes_ceiling(
+    raw: Option<&str>,
+) -> momo_workspace_actions::team_ai_limits::HermesCeiling {
+    use momo_workspace_actions::team_ai_limits::{parse_hermes_cap, HermesCeiling};
+    parse_hermes_cap(raw).unwrap_or_else(|invalid| {
+        tracing::warn!(
+            variable = invalid.0,
+            "unreadable team AI delegation ceiling; it reads as closed (the agent-worker refuses to boot on it)"
+        );
+        HermesCeiling::Off
+    })
 }
 
 /// ADR-0201 증보 v4 P8 (#5374): G4's three declarations as **this** process reads them — the rule the
@@ -3856,6 +3862,44 @@ mod tests {
             Some("ture"),
         ] {
             assert!(!claude_subscription_agents_switch_on(off), "{off:?}");
+        }
+    }
+
+    /// ADR-0201 증보 2026-11-12 (#5685): what the api **explains** about `TEAM_AI_HERMES_DAILY_CAP`, case by
+    /// case — the same five rows as the agent-worker's `the_hermes_cap_is_enforced_by_the_five_case_rule`.
+    /// Columns: `operatorCeiling.dailyDelegations`, `operatorCeiling.delegationOff`, and
+    /// `effective.dailyDelegations` for a workspace that set nothing (`None` = closed, sent as `0`).
+    #[test]
+    fn the_hermes_cap_is_explained_by_the_five_case_rule() {
+        use momo_workspace_actions::team_ai_limits::{
+            delegation_cap, HermesCeiling, OperatorCaps, TeamAiLimits,
+        };
+        for (raw, ceiling, ceiling_number, off, effective) in [
+            (None, HermesCeiling::NoCeiling, None, false, Some(30)), // unset: no ceiling
+            (Some("  "), HermesCeiling::NoCeiling, None, false, Some(30)), // blank: no ceiling
+            (Some("0"), HermesCeiling::Off, None, true, None),       // 0: off
+            (
+                Some("12"),
+                HermesCeiling::Ceiling(12),
+                Some(12),
+                false,
+                Some(12),
+            ), // a ceiling
+            (Some("ten"), HermesCeiling::Off, None, true, None),     // unreadable: closed + warning
+        ] {
+            let read = team_ai_hermes_ceiling(raw);
+            assert_eq!(read, ceiling, "{raw:?}");
+            let caps = OperatorCaps {
+                daily_delegations: read,
+                ..OperatorCaps::default()
+            };
+            assert_eq!(caps.delegation_ceiling(), ceiling_number, "{raw:?}");
+            assert_eq!(caps.delegation_off(), off, "{raw:?}");
+            assert_eq!(
+                delegation_cap(&TeamAiLimits::default(), &caps),
+                effective,
+                "{raw:?}"
+            );
         }
     }
 

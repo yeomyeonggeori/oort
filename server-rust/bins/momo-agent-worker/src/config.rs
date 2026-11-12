@@ -178,14 +178,14 @@ pub struct WorkerConfig {
     /// `TEAM_AI_TASK_MAX_WALL_SECS`, `TEAM_AI_TASK_MAX_MODEL_CALLS`, `TEAM_AI_TASK_MAX_TOOL_CALLS`,
     /// `TEAM_AI_TASK_MAX_PER_WORKSPACE`, `TEAM_AI_TASK_MAX_PER_REQUESTER` (each at least 1).
     pub team_ai_task: momo_agent::team_ai_task::TaskLimits,
-    /// `TEAM_AI_HERMES_DAILY_CAP` (ADR-0201 증보 v4 P7, #5369) — the operator's per-workspace ceiling on
-    /// the team AI's delegations to Hermes per UTC day. **The opposite direction of the two ceilings
-    /// above**: `None` (unset or blank) and `Some(0)` mean the delegation is **closed**, a positive number
-    /// opens it as a ceiling no workspace value gets past, and anything that is not a whole number stops
-    /// the worker at boot like the other two do. See [`OperatorCaps::daily_delegations`].
+    /// `TEAM_AI_HERMES_DAILY_CAP` (ADR-0201 증보 v4 P7, #5369; 증보 2026-11-12, #5685) — the operator's
+    /// per-workspace ceiling on the team AI's delegations to Hermes per UTC day. Unset or blank = **no
+    /// ceiling** (the workspace's own cap, default 30, binds), `0` = the delegation is **off**, a positive
+    /// number = a ceiling no workspace value gets past, and anything that is not a whole number stops the
+    /// worker at boot like the other two do. See [`HermesCeiling`].
     ///
-    /// [`OperatorCaps::daily_delegations`]: momo_workspace_actions::team_ai_limits::OperatorCaps::daily_delegations
-    pub team_ai_hermes_daily_cap: Option<i64>,
+    /// [`HermesCeiling`]: momo_workspace_actions::team_ai_limits::HermesCeiling
+    pub team_ai_hermes_daily_cap: momo_workspace_actions::team_ai_limits::HermesCeiling,
     /// What the operator declared about the Hermes behind this worker (ADR-0201 증보 v4 P2 G4, #5369):
     /// `OORT_COHOSTED_AGENT_TOOLS_LOCKED`, the two connection-mode declarations (presence of a non-empty
     /// value) and the two kind declarations. **The worker reads what the api reads** (ADR-0203 K-S2 flipped);
@@ -230,7 +230,7 @@ impl HermesDeadlines {
 
 impl WorkerConfig {
     /// The operator ceilings as one value (the shape `momo_workspace_actions::team_ai_limits`
-    /// judges with). `daily_delegations` is the third and **inverted**: its `None` is "closed".
+    /// judges with). `daily_delegations` is the third, with its own type (#5685: unset = no ceiling, `0` = off).
     pub fn team_ai_caps(&self) -> momo_workspace_actions::team_ai_limits::OperatorCaps {
         momo_workspace_actions::team_ai_limits::OperatorCaps {
             daily_tokens: self.team_ai_daily_token_cap,
@@ -240,13 +240,14 @@ impl WorkerConfig {
     }
 
     /// Has the operator done everything it takes to open the team AI's delegation to Hermes on **this
-    /// process** — G4 holds, a kind is declared, the ceiling is a positive number? Without it the door is
-    /// shut whatever a workspace says, so the worker does not even read the delegation's inputs from the
-    /// database (an instance that never opted in pays nothing, and nothing about it changes).
+    /// process** — G4 holds, a kind is declared, the ceiling is not the operator's `0` (an unset ceiling is
+    /// no ceiling, #5685)? Without it the door is shut whatever a workspace says, so the worker does not even
+    /// read the delegation's inputs from the database (an instance that never opted in pays nothing, and
+    /// nothing about it changes).
     pub fn hermes_delegation_opened(&self) -> bool {
         self.hermes.g4().is_ok()
             && (self.hermes.image_tool || self.hermes.search_tool)
-            && self.team_ai_caps().delegation_ceiling().is_some()
+            && !self.team_ai_caps().delegation_off()
     }
 }
 
@@ -728,14 +729,20 @@ fn operator_cap(key: &'static str) -> Result<Option<i64>, ConfigError> {
         .map_err(|invalid| ConfigError::NotANumber(invalid.0))
 }
 
-/// `TEAM_AI_HERMES_DAILY_CAP` (ADR-0201 증보 v4 P7): read by the same rule as the other two ceilings but
-/// meaning the opposite when empty — unset, blank and `0` are **closed**. A value that is not a whole
-/// number is an error here (the worker does not boot), like `TEAM_AI_DAILY_*_CAP`.
-fn operator_hermes_cap() -> Result<Option<i64>, ConfigError> {
-    momo_workspace_actions::team_ai_limits::parse_hermes_cap(
-        env(momo_workspace_actions::team_ai_limits::HERMES_CAP_ENV).as_deref(),
-    )
-    .map_err(|invalid| ConfigError::NotANumber(invalid.0))
+/// `TEAM_AI_HERMES_DAILY_CAP` (ADR-0201 증보 v4 P7; 증보 2026-11-12, #5685): unset or blank = no ceiling,
+/// `0` = off, a positive number = the ceiling. A value that is not a whole number is an error here (the
+/// worker does not boot), like `TEAM_AI_DAILY_*_CAP`.
+fn operator_hermes_cap(
+) -> Result<momo_workspace_actions::team_ai_limits::HermesCeiling, ConfigError> {
+    operator_hermes_cap_from(env(momo_workspace_actions::team_ai_limits::HERMES_CAP_ENV).as_deref())
+}
+
+/// [`operator_hermes_cap`] over a given raw value (the environment-free half its test reads).
+fn operator_hermes_cap_from(
+    raw: Option<&str>,
+) -> Result<momo_workspace_actions::team_ai_limits::HermesCeiling, ConfigError> {
+    momo_workspace_actions::team_ai_limits::parse_hermes_cap(raw)
+        .map_err(|invalid| ConfigError::NotANumber(invalid.0))
 }
 
 /// The task bounds from the environment (ADR-0201 증보 v3 B5-5): every key optional, each value at
@@ -901,7 +908,8 @@ impl WorkerConfig {
             ),
             team_ai_daily_search_cap: None,
             team_ai_task: momo_agent::team_ai_task::TaskLimits::default(),
-            team_ai_hermes_daily_cap: None,
+            team_ai_hermes_daily_cap:
+                momo_workspace_actions::team_ai_limits::HermesCeiling::NoCeiling,
             hermes: momo_workspace_actions::team_ai_hermes::HermesDeclarations::default(),
             hermes_deadlines: HermesDeadlines::default(),
         }
@@ -923,9 +931,12 @@ impl WorkerConfig {
         self
     }
 
-    /// The same config with the operator's delegation ceiling (`TEAM_AI_HERMES_DAILY_CAP`): `None` and
-    /// `Some(0)` are the closed door.
-    pub fn with_hermes_daily_cap(mut self, cap: Option<i64>) -> WorkerConfig {
+    /// The same config with the operator's delegation ceiling (`TEAM_AI_HERMES_DAILY_CAP`): `NoCeiling` is
+    /// unset, `Off` is the operator's `0` — the closed door (#5685).
+    pub fn with_hermes_daily_cap(
+        mut self,
+        cap: momo_workspace_actions::team_ai_limits::HermesCeiling,
+    ) -> WorkerConfig {
         self.team_ai_hermes_daily_cap = cap;
         self
     }
@@ -1329,5 +1340,47 @@ mod tests {
             momo_agent::DEFAULT_MAX_CONSECUTIVE_AUTO
         );
         assert_eq!(config.a2a.max_steps, momo_agent::DEFAULT_MAX_STEPS);
+    }
+
+    /// ADR-0201 증보 2026-11-12 (#5685): what the worker **enforces** for `TEAM_AI_HERMES_DAILY_CAP`, case by
+    /// case — the same five rows as the api's `the_hermes_cap_is_explained_by_the_five_case_rule`. Columns:
+    /// the boot (a value or the refusal), whether the door opens on this process (G4 and a kind declared),
+    /// and the day cap G6 judges for a workspace that set nothing (`None` = closed).
+    #[test]
+    fn the_hermes_cap_is_enforced_by_the_five_case_rule() {
+        use momo_workspace_actions::team_ai_hermes::HermesDeclarations;
+        use momo_workspace_actions::team_ai_limits::{delegation_cap, HermesCeiling, TeamAiLimits};
+        for (raw, ceiling, opened, day_cap) in [
+            (None, HermesCeiling::NoCeiling, true, Some(30)), // unset: no ceiling
+            (Some("  "), HermesCeiling::NoCeiling, true, Some(30)), // blank: no ceiling
+            (Some("0"), HermesCeiling::Off, false, None),     // 0: off
+            (Some("12"), HermesCeiling::Ceiling(12), true, Some(12)), // a ceiling
+        ] {
+            let read = operator_hermes_cap_from(raw).expect("a readable value boots");
+            assert_eq!(read, ceiling, "{raw:?}");
+            let config = WorkerConfig::for_target("postgres://x/y")
+                .with_hermes_declarations(HermesDeclarations {
+                    tools_locked: true,
+                    search_tool: true,
+                    ..HermesDeclarations::default()
+                })
+                .with_hermes_daily_cap(read);
+            assert_eq!(config.hermes_delegation_opened(), opened, "{raw:?}");
+            assert_eq!(
+                delegation_cap(&TeamAiLimits::default(), &config.team_ai_caps()),
+                day_cap,
+                "{raw:?}"
+            );
+        }
+        // unreadable: the worker does not boot
+        assert!(matches!(
+            operator_hermes_cap_from(Some("ten")),
+            Err(ConfigError::NotANumber("TEAM_AI_HERMES_DAILY_CAP"))
+        ));
+        // the default config (what a test or a fresh process without the variable runs) is no ceiling
+        assert_eq!(
+            WorkerConfig::for_target("postgres://x/y").team_ai_hermes_daily_cap,
+            HermesCeiling::NoCeiling
+        );
     }
 }
