@@ -26,7 +26,7 @@ import {
 // 새 버전이 있는 동안만 서는 작은 알약 하나다. 점·배너·X·나중에는 없다: 업데이트가
 // 있으면 단추가 있고, 없으면 없다. 펼친 사이드바에서는 프로필 줄 오른쪽(`placement="row"`),
 // 접힘(⌘B)에서는 레일 아래 프로필 아바타 위(`placement="rail"`, owner 2026-11-11 「접힌
-// 사이드바에서도 보이게」)에 같은 알약이 작은 모양(글자 대신 아이콘, 같은 이름·툴팁·카드)으로
+// 사이드바에서도 보이게」)에 같은 알약이 작은 모양(레일 글자 크기, 같은 이름·툴팁·카드)으로
 // 선다. 둘은 동시에 마운트되지 않는다. 브라우저 탭에서는 업데이트 상태가 생기지
 // 않아(`startUpdateWatch` 는 데스크탑 전용) 아무것도 그리지 않는다.
 //
@@ -140,23 +140,27 @@ export function UpdateButton({ placement = "row" }: { placement?: "row" | "rail"
             variant="secondary"
             onClick={onPill}
             aria-label={label}
-            aria-describedby={tooltip && !open ? tooltipId : undefined}
+            aria-describedby={tooltip && !open && !rail ? tooltipId : undefined}
+            // 레일은 가로로 넘친 것을 자른다(`overflow-x-hidden`): 직접 그린 툴팁이 잘리므로 레일의 다른 타일처럼 `title`을 쓴다.
+            // 같은 문장은 접근 가능한 이름(`label`)에도 있다.
+            title={rail && tooltip ? tooltip : undefined}
             aria-expanded={open}
             aria-haspopup="dialog"
             data-testid="update-pill"
             data-placement={placement}
             data-update-state={state.kind}
-            // 레일(56px)에는 글자 알약이 들어가지 않는다: 같은 채움 알약을 타일 폭(44px)에 아이콘으로 세운다.
-            className={rail ? "w-rail-tile px-0" : "tap-target"}
+            // 레일(56px)에서는 같은 채움 알약·같은 낱말을 레일 글자 크기(11px, 목적지 이름과 같다)로 줄여 세운다. 아이콘만 두면
+            // 창 오른쪽 위의 「내려받기」(같은 화살표)와 헷갈린다.
+            className={rail ? "h-control-sm px-1.5 text-timestamp" : "tap-target"}
           >
-            {rail ? <ArrowDownToLine aria-hidden="true" /> : "업데이트"}
+            업데이트
           </Button>
-          {tooltip && !open && (
+          {tooltip && !open && !rail && (
             <span
               id={tooltipId}
               role="tooltip"
               data-testid="update-pill-tooltip"
-              className={`pointer-events-none invisible absolute ${rail ? "bottom-0 left-full ml-2" : "bottom-full right-0 mb-2"} w-max max-w-pane-sm rounded-md bg-primary px-3 py-2 break-keep text-meta text-on-primary shadow-lg layer-overlay-surface group-hover:visible group-focus-within:visible`}
+              className="pointer-events-none invisible absolute bottom-full right-0 mb-2 w-max max-w-pane-sm rounded-md bg-primary px-3 py-2 break-keep text-meta text-on-primary shadow-lg layer-overlay-surface group-hover:visible group-focus-within:visible"
             >
               {tooltip}
             </span>
