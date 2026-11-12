@@ -158,6 +158,29 @@ export function applyReadStateToCache(
 }
 
 /**
+ * 스레드 모두 읽음 응답의 줄(#5690)에서는 따라가는 스레드의 답글 몫만 캐시의 채널 줄에 끼운다. 그 응답 줄은 같은 단추의
+ * 채널 `PUT`과 엇갈려 옛 위치·멘션 수를 실어 올 수 있어서, 통째로 바꾸면 방금 읽음으로 올린 채널의 수가 되살아난다.
+ * 캐시에 없는 채널이면 그 줄을 그대로 덧붙인다(지킬 값이 없다).
+ */
+export function applyFollowedThreadShareToCache(
+  client: QueryClient,
+  workspaceId: string,
+  incoming: ReadState
+): void {
+  client.setQueryData<ReadState[]>(["read-state", workspaceId], (current) => {
+    if (!current) return [incoming];
+    const key = idKey(incoming.channelId);
+    let found = false;
+    const next = current.map((row) => {
+      if (idKey(row.channelId) !== key) return row;
+      found = true;
+      return { ...row, followedUnreadReplyCount: incoming.followedUnreadReplyCount };
+    });
+    return found ? next : [...next, incoming];
+  });
+}
+
+/**
  * The writing device already knows the new closure state (ADR-0177 D10: other devices converge on
  * their next projection read), so a successful `PUT`/`DELETE closure` writes it straight into the
  * cached row instead of waiting for the next refetch. `null` = reopened.
