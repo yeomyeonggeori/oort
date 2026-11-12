@@ -8153,7 +8153,7 @@ export const catalog: MessageCatalog = {
   "timeline.memberPanel.groupOffline": [
     {
       "type": 0,
-      "value": "접속 없음 "
+      "value": "오프라인 "
     },
     {
       "type": 2,
@@ -8164,7 +8164,7 @@ export const catalog: MessageCatalog = {
   "timeline.memberPanel.groupOnline": [
     {
       "type": 0,
-      "value": "접속 중 "
+      "value": "온라인 "
     },
     {
       "type": 2,
@@ -8271,6 +8271,16 @@ export const catalog: MessageCatalog = {
     {
       "type": 1,
       "value": "text"
+    }
+  ],
+  "timeline.memberPanel.stageSpoken": [
+    {
+      "type": 1,
+      "value": "stage"
+    },
+    {
+      "type": 0,
+      "value": " (에이전트 보고)"
     }
   ],
   "timeline.quote.head": [

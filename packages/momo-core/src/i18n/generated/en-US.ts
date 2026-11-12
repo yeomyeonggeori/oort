@@ -8647,6 +8647,16 @@ export const catalog: MessageCatalog = {
       "value": "text"
     }
   ],
+  "timeline.memberPanel.stageSpoken": [
+    {
+      "type": 1,
+      "value": "stage"
+    },
+    {
+      "type": 0,
+      "value": " (agent report)"
+    }
+  ],
   "timeline.quote.head": [
     {
       "type": 0,

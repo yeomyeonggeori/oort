@@ -32,6 +32,7 @@
   "timeline.memberPanel.groupPeople": "People {count, number}",
   "timeline.memberPanel.groupOffline": "Offline {count, number}",
   "timeline.memberPanel.request": "“{text}”",
+  "timeline.memberPanel.stageSpoken": "{stage} (agent report)",
   "timeline.memberPanel.requestSpoken": "Request: {text}",
   "timeline.memberPanel.elapsedMinutes": "{count, number} min",
   "timeline.memberPanel.elapsedHours": "{count, number} h",

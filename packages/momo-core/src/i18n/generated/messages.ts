@@ -1215,6 +1215,7 @@ export const messageKeys = [
   "timeline.memberPanel.nowRetry",
   "timeline.memberPanel.request",
   "timeline.memberPanel.requestSpoken",
+  "timeline.memberPanel.stageSpoken",
   "timeline.quote.head",
   "timeline.quote.headUnnamed",
   "timeline.runException.open",
@@ -2858,6 +2859,9 @@ export const argumentSpecs = {
   "timeline.memberPanel.requestSpoken": {
     "text": "string"
   },
+  "timeline.memberPanel.stageSpoken": {
+    "stage": "string"
+  },
   "timeline.quote.head": {
     "name": "string"
   },
@@ -4300,6 +4304,7 @@ export interface MessageArgs {
   "timeline.memberPanel.nowRetry": Record<string, never>;
   "timeline.memberPanel.request": { text: string };
   "timeline.memberPanel.requestSpoken": { text: string };
+  "timeline.memberPanel.stageSpoken": { stage: string };
   "timeline.quote.head": { name: string };
   "timeline.quote.headUnnamed": Record<string, never>;
   "timeline.runException.open": { text: string };
