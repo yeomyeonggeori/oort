@@ -33,6 +33,12 @@ import {
   readTeamAiSwitch,
   teamAiHelperName,
 } from "@momo/core/features/settings/teamAiSwitch";
+import {
+  delegationOf,
+  fetchTeamAiLimitsBag,
+  readTeamAiLimitsStatus,
+} from "@momo/core/features/settings/teamAiLimits";
+import { teamAiLimitsQueryKey } from "@momo/core/features/settings/teamAiLimitsView";
 import { Button } from "@/design/ui/button";
 import { Input } from "@/design/ui/input";
 import { useBrowserOffline } from "@/features/common/useOffline";
@@ -137,6 +143,16 @@ export function TeamAiHelperCard({ workspaceId }: { workspaceId: string }) {
     onSuccess: (next) => client.setQueryData(bagKey, next),
     onSettled: () => setPending(null),
   });
+  // 「Hermes 도움」 행의 서버 사실(#5375): 「사용 한도」 칸과 **같은 쿼리**(같은 키)라 요청이 하나다. 읽지 못하면(관리자
+  // 아님·옛 서버·실패) 행이 없다 — 운영자가 연 서버에서만 서는 행이라 모름은 닫힘이다.
+  const limitsBag = useQuery({
+    queryKey: teamAiLimitsQueryKey(workspaceId),
+    queryFn: () => fetchTeamAiLimitsBag(workspaceId),
+    retry: false,
+    staleTime: 30_000,
+  });
+  const limitsStatus = limitsBag.data === undefined ? null : readTeamAiLimitsStatus(limitsBag.data);
+  const hermes = limitsStatus === null ? null : delegationOf(limitsStatus);
   // 저장 중에는 누른 값을 보인다(되돌아 튀는 스위치는 고장 난 것처럼 보인다).
   const roles: TeamAiRoles = pending === null ? stored : { ...stored, [pending.bundle]: pending.next };
   const busyBundle: TeamAiBundle | null = pending === null ? null : pending.bundle;
@@ -250,6 +266,7 @@ export function TeamAiHelperCard({ workspaceId }: { workspaceId: string }) {
           rowNotices
           testIdPrefix="team-ai-helper"
           labelledBy={rolesTitleId}
+          hermes={hermes}
           onToggle={(bundle, next) => {
             if (offline || toggle.isPending) return;
             toggle.mutate({ bundle, next });

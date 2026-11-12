@@ -1,5 +1,6 @@
 import type {Member, Message, RosterMember} from '@momo/core/lib/api';
 import {makeDirectory} from '@momo/core/features/workspace/directory';
+import servedReply from '@momo/core/features/timeline/__fixtures__/team-ai-reply-props.json';
 import {QueryClient, QueryClientProvider} from '@tanstack/react-query';
 import {
   act,
@@ -285,7 +286,8 @@ describe('「그록봇에게 맡기기」 (폰)', () => {
 const V2_REPLY = {
   source: 'team_ai',
   run_id: '0199aa11-2222-7000-8000-0000000006b1',
-  model_label: 'Claude Sonnet 4.5',
+  // 서버가 쓰는 모양(#5600, 코어·서버 공용 픽스처): 칩은 이 객체에서만 선다.
+  team_ai_model: servedReply.props.team_ai_model,
   tools_used: [
     {name: 'search_messages'},
     {name: 'read_channel', channel: '마케팅'},
@@ -322,6 +324,17 @@ describe('도우미 답의 꼬리 (폰, v2)', () => {
     });
     expect(open).toHaveBeenCalledWith('https://www.example.com/rust-2026');
     open.mockRestore();
+  });
+
+  // #5577: 같은 표지를 사람이 쓰면 평범한 글이다 — 행이 멤버 목록의 작성자 종류를 코어에 넘긴다.
+  it('사람이 쓴 같은 표지에는 꼬리도 모델 칩도 없다', () => {
+    renderRow(
+      message({body: '지난주 마케팅 채널에서 정한 건 세 가지예요.', props: V2_REPLY, authorMemberId: OTHER_ID}),
+      actionsFor(SELF_ID),
+    );
+    expect(screen.getByTestId('message-row')).toBeTruthy();
+    expect(screen.queryByTestId('team-ai-tools-line')).toBeNull();
+    expect(screen.queryByTestId('team-ai-model-chip')).toBeNull();
   });
 
   it('칸이 없는 도우미 답(옛 서버)에는 꼬리도 로터 행동도 없다', () => {

@@ -66,6 +66,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         rate_limit_unfurl_proxy_per_member = config.rate_limit.unfurl_proxy_per_member_limit,
         rate_limit_photo_draft_per_member = config.rate_limit.photo_draft_per_member_limit,
         rate_limit_unfurl_preview_per_member = config.rate_limit.unfurl_preview_per_member_limit,
+        rate_limit_thread_read_all_per_member = config.rate_limit.thread_read_all_per_member_limit,
         agent_port_rate_limit_per_token = config.agent_port.per_token_limit,
         agent_port_rate_limit_per_agent = config.agent_port.per_agent_limit,
         agent_port_rate_limit_per_ip = config.agent_port.per_ip_limit,
@@ -189,6 +190,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             "RATE_LIMIT_UNFURL_PREVIEW_PER_MEMBER",
             config.rate_limit.unfurl_preview_per_member_limit,
             "link previews of a draft, fetched from remote sites",
+        ),
+        (
+            "RATE_LIMIT_THREAD_READ_ALL_PER_MEMBER",
+            config.rate_limit.thread_read_all_per_member_limit,
+            "marking every followed thread read at once (up to 100 positions per request)",
         ),
     ] {
         if limit == 0 {

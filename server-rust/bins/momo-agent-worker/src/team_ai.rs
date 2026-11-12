@@ -1752,8 +1752,7 @@ impl AgentWorker {
         // which wire actually spoke (a plain id — no key, no URL).
         let label = trace
             .as_ref()
-            .filter(|trace| !trace.model.is_empty())
-            .map(|trace| json!({"model": trace.model, "wire": trace.wire}));
+            .and_then(|trace| answer_model_label(&trace.model, trace.wire));
         let audit_detail = trace
             .as_ref()
             .map(|trace| trace.audit_detail(usage, outcome));
@@ -1884,14 +1883,7 @@ impl AgentWorker {
                 // went without it, with the fixed sentence): the delegation's audit row says so.
                 let mut picture_posted = true;
                 if let Some(text) = body {
-                    let mut props = if props.is_object() { props } else { json!({}) };
-                    if let Some(object) = props.as_object_mut() {
-                        object.insert("run_id".into(), json!(run_id));
-                        object.entry("source").or_insert_with(|| json!("team_ai"));
-                        if let Some(label) = label {
-                            object.insert("team_ai_model".into(), label);
-                        }
-                    }
+                    let props = answer_props(props, run_id, label);
                     // #4622 (ADR-0148 증보 2026-10-27): the same place and the same spine
                     // as every other final answer — inside the thread the request was
                     // made in (the rollup moves with it), the main flow otherwise.
@@ -2310,6 +2302,28 @@ fn millis(since: Instant) -> i64 {
     i64::try_from(since.elapsed().as_millis()).unwrap_or(i64::MAX)
 }
 
+/// H2-8 / H9-I9: the label an answer carries — which model on which wire actually spoke, a plain id (no
+/// key, no URL). `None` when the turn named no model, and the answer then carries no label.
+fn answer_model_label(model: &str, wire: &str) -> Option<Value> {
+    (!model.is_empty()).then(|| json!({"model": model, "wire": wire}))
+}
+
+/// #5600: the props of the helper's answer — what the ending put there, the run, the source (an ending's
+/// own is kept) and the label under `team_ai_model`. The core's `parseTeamAiReplyMeta` draws its
+/// 「팀 AI · 모델」 chip from exactly this shape; both sides are pinned to one file,
+/// `packages/momo-core/src/features/timeline/__fixtures__/team-ai-reply-props.json`.
+fn answer_props(props: Value, run_id: Uuid, label: Option<Value>) -> Value {
+    let mut props = if props.is_object() { props } else { json!({}) };
+    if let Some(object) = props.as_object_mut() {
+        object.insert("run_id".into(), json!(run_id));
+        object.entry("source").or_insert_with(|| json!("team_ai"));
+        if let Some(label) = label {
+            object.insert("team_ai_model".into(), label);
+        }
+    }
+    props
+}
+
 #[cfg(test)]
 mod profile_tests_4791 {
     use super::*;
@@ -2415,5 +2429,64 @@ mod profile_tests_4791 {
             web_search_requests: 0,
         }));
         assert!(!image_was_refused(&answered));
+    }
+}
+
+/// #5600: the helper's answer props and the core's chip parser read one file.
+#[cfg(test)]
+mod answer_props_tests_5600 {
+    use super::*;
+
+    /// The server half of the shared fixture; the core half is
+    /// `packages/momo-core/src/features/timeline/teamAiReply.test.ts`, which draws the chip from the
+    /// same `props`.
+    const SHARED: &str = include_str!(
+        "../../../../packages/momo-core/src/features/timeline/__fixtures__/team-ai-reply-props.json"
+    );
+
+    #[test]
+    fn the_answer_props_are_the_shared_fixture() {
+        let fixture: Value = serde_json::from_str(SHARED).expect("the shared fixture is JSON");
+        let model = fixture["trace"]["model"].as_str().expect("trace.model");
+        let run_id: Uuid = fixture["run_id"]
+            .as_str()
+            .and_then(|id| id.parse().ok())
+            .expect("run_id");
+        // The fixture's wire is one the worker really speaks, read off the enum, not typed again.
+        let wire = ProviderWire::AnthropicMessages.as_str();
+        assert_eq!(fixture["trace"]["wire"], json!(wire));
+        let props = answer_props(json!({}), run_id, answer_model_label(model, wire));
+        assert_eq!(
+            props, fixture["props"],
+            "the server's answer props drifted from the core's fixture"
+        );
+    }
+
+    #[test]
+    fn no_model_no_label_and_an_endings_own_keys_stay() {
+        assert_eq!(answer_model_label("", "chat_completions"), None);
+        let run_id = Uuid::from_u128(0x56a0);
+        // A delegation's chip key and an ending's own source are kept; nothing is labelled without a model.
+        assert_eq!(
+            answer_props(
+                json!({"source": "kept", "team_ai_delegated": []}),
+                run_id,
+                None
+            ),
+            json!({"source": "kept", "team_ai_delegated": [], "run_id": run_id})
+        );
+        // Not an object (a refusal's `{}` is one; anything else is replaced).
+        assert_eq!(
+            answer_props(
+                json!(null),
+                run_id,
+                answer_model_label("gpt-4o", "responses")
+            ),
+            json!({
+                "run_id": run_id,
+                "source": "team_ai",
+                "team_ai_model": {"model": "gpt-4o", "wire": "responses"},
+            })
+        );
     }
 }

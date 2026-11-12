@@ -41,7 +41,7 @@ const MODERN_VERSION: &str = "2026-07-28";
 /// server: a kind that leaves the server's list must turn this suite red, which it could not do if
 /// the suite iterated the list it is checking. Each is paired with the message type its reader
 /// expects, so a forged one would actually be drawn (or judged) the way the server's is.
-const SERVER_ONLY_KINDS: [(&str, &str); 15] = [
+const SERVER_ONLY_KINDS: [(&str, &str); 16] = [
     ("completion_report", "text"),
     ("login_handoff", "approval_request"),
     ("resume_offer", "approval_request"),
@@ -52,6 +52,7 @@ const SERVER_ONLY_KINDS: [(&str, &str); 15] = [
     ("work_session", "system"),
     ("work_session_idle", "system"),
     ("work_session_event", "system"),
+    ("work_session_notice", "system"),
     ("work_control_approval", "approval_request"),
     ("agent_hosted_skip", "system"),
     ("agent_run_timed_out", "system"),

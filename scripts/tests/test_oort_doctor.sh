@@ -43,6 +43,11 @@ port_busy() {
   return 1
 }
 
+# Only for ports this test never binds (the fixture env's web/api/centrifugo
+# ports, which the doctor merely needs to find free). A port this test binds is
+# assigned by whoever binds it — Docker for postgres, the kernel for the mock —
+# never picked ahead: a docs gate running beside this one could pick the same
+# free port and bind it first (#5623).
 pick_port() {
   local port="$1" limit=$(($1 + 40))
   [ "$limit" -le 65536 ] || limit=65536
@@ -51,6 +56,21 @@ pick_port() {
     port=$((port + 1))
   done
   fail "no free port near $1"
+}
+
+# #5623: after teardown nothing may still listen on a port this run bound.
+assert_ports_released() {
+  local left="$*" still p i=0
+  while [ -n "$left" ] && [ "$i" -lt 20 ]; do
+    [ "$i" -eq 0 ] || sleep 0.1
+    still=""
+    for p in $left; do
+      if port_busy "$p"; then still="$still $p"; fi
+    done
+    left="${still# }"
+    i=$((i + 1))
+  done
+  [ -z "$left" ] || fail "a listener is still on port(s) ${left} after teardown"
 }
 
 validate_schema() {
@@ -76,9 +96,11 @@ validate_schema() {
 
 check_field() {
   local file="$1" id="$2" field="$3"
+  # first() rather than `| head -1`: no reader that can exit before the writer
+  # is done, so no SIGPIPE under pipefail (#5623). Details are one TSV line.
   jq -r --arg id "$id" --arg field "$field" '
-    .checks[] | select(.id == $id) | .[$field]
-  ' "$file" | head -1
+    first(.checks[] | select(.id == $id) | .[$field])
+  ' "$file"
 }
 
 has_check() {
@@ -646,15 +668,21 @@ jq -r '.checks[].id' "$SANDBOX/status.out" | sort >"$T1_IDS"
 T1_COUNT="$(wc -l <"$T1_IDS" | tr -d '[:space:]')"
 [ "$T1_COUNT" = "36" ] || fail "T1 check id count ${T1_COUNT} != 36 (normal case)"
 
-PG_PORT="$(pick_port 25432)"
-MOCK_PORT="$(pick_port 18765)"
+# #5623: Docker assigns the postgres host port at `docker run` and the mock
+# binds port 0 below. Both used to be picked here by probing, seconds before the
+# bind, so a docs gate running beside this one picked the same free 25432/18765
+# and took it first.
 PG_CID="$(docker run -d --rm --name "$PG_NAME" \
   --label "com.momo.gate-run=${LOCAL_GATE_RUN_ID:-manual-$$}" \
   -e POSTGRES_USER=momo \
   -e POSTGRES_PASSWORD="$TOKEN_PG" \
   -e POSTGRES_DB=momo \
-  -p "127.0.0.1:${PG_PORT}:5432" \
+  -p "127.0.0.1::5432" \
   postgres:18)"
+PG_PORT="$(docker port "$PG_CID" 5432/tcp)"
+PG_PORT="${PG_PORT%%$'\n'*}"
+PG_PORT="${PG_PORT##*:}"
+[[ "$PG_PORT" =~ ^[0-9]+$ ]] || fail "T2 doctor postgres host port unreadable: ${PG_PORT}"
 i=0
 while [ "$i" -lt 40 ]; do
   docker exec "$PG_CID" pg_isready -U momo >/dev/null 2>&1 && break
@@ -712,15 +740,18 @@ APPLIED_N="$(docker exec -i "$PG_CID" psql -U momo -d momo -At -c "SELECT count(
 # upgrade's Origin (or <none>) is appended to MOCK_ORIGIN_LOG.
 MOCK_CONFIG="$SANDBOX/mock-config.json"
 MOCK_ORIGIN_LOG="$SANDBOX/mock-origins.log"
+# #5623: the mock binds port 0 and writes the port the kernel gave it here.
+MOCK_PORT_FILE="$SANDBOX/mock.port"
 : >"$MOCK_ORIGIN_LOG"
-python3 - "$MOCK_PORT" "$EXPECTED_MIG" "$MOCK_CONFIG" "$MOCK_ORIGIN_LOG" <<'PY' &
+python3 - "$MOCK_PORT_FILE" "$EXPECTED_MIG" "$MOCK_CONFIG" "$MOCK_ORIGIN_LOG" <<'PY' &
 import base64
 import hashlib
 import json
+import os
 import sys
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
-port = int(sys.argv[1])
+port_file = sys.argv[1]
 applied = int(sys.argv[2])
 config_path = sys.argv[3]
 origin_log = sys.argv[4]
@@ -793,9 +824,22 @@ class H(BaseHTTPRequestHandler):
     def log_message(self, *_args):
         return
 
-HTTPServer(("127.0.0.1", port), H).serve_forever()
+server = HTTPServer(("127.0.0.1", 0), H)
+# Published only once the socket listens; rename so a reader never sees half.
+with open(port_file + ".tmp", "w", encoding="utf-8") as fh:
+    fh.write("%d\n" % server.server_address[1])
+os.replace(port_file + ".tmp", port_file)
+server.serve_forever()
 PY
 HTTP_PID=$!
+i=0
+while [ ! -s "$MOCK_PORT_FILE" ] && [ "$i" -lt 50 ]; do
+  kill -0 "$HTTP_PID" 2>/dev/null || fail "T2 mock exited before it listened"
+  i=$((i + 1))
+  sleep 0.2
+done
+MOCK_PORT="$(cat "$MOCK_PORT_FILE" 2>/dev/null || true)"
+[[ "$MOCK_PORT" =~ ^[0-9]+$ ]] || fail "T2 mock did not report its port: ${MOCK_PORT}"
 i=0
 while [ "$i" -lt 20 ]; do
   curl -sS -m 1 "http://127.0.0.1:${MOCK_PORT}/healthz" >/dev/null 2>&1 && break
@@ -995,8 +1039,16 @@ docker exec -i "$PG_CID" psql -U momo -d momo -v ON_ERROR_STOP=1 \
 # change the verdict (a check that cannot fail proves nothing): overdue → fail, past the grace window → fail
 # naming the grace, missed/send_error in the last day → info, a deleted workspace's rows → not counted,
 # and a connection that cannot skip RLS → unknown (skip), never a quiet pass.
-SCHED_WS="$(docker exec -i "$PG_CID" psql -U momo -d momo -At -c "INSERT INTO workspace DEFAULT VALUES RETURNING id;" | head -n1)"
-SCHED_DEAD_WS="$(docker exec -i "$PG_CID" psql -U momo -d momo -At -c "INSERT INTO workspace (deleted_at) VALUES (now()) RETURNING id;" | head -n1)"
+# #5623: no `| head -n1` here. `-At` printed the id and then `INSERT 0 1`; when
+# the docker relay delivered those as two writes after head had exited, the
+# second write hit a closed pipe — SIGPIPE, exit 141, and pipefail + set -e
+# ended the test with no FAIL line (11-09 PR #5612 gate). `-q` drops the tag, so
+# the whole output is the id, and a bad shape fails loudly below.
+SCHED_WS="$(docker exec -i "$PG_CID" psql -U momo -d momo -qAt -v ON_ERROR_STOP=1 -c "INSERT INTO workspace DEFAULT VALUES RETURNING id;")"
+SCHED_DEAD_WS="$(docker exec -i "$PG_CID" psql -U momo -d momo -qAt -v ON_ERROR_STOP=1 -c "INSERT INTO workspace (deleted_at) VALUES (now()) RETURNING id;")"
+UUID_RE='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+[[ "$SCHED_WS" =~ $UUID_RE ]] || fail "scheduler fixture workspace id is not one uuid: ${SCHED_WS}"
+[[ "$SCHED_DEAD_WS" =~ $UUID_RE ]] || fail "scheduler fixture deleted workspace id is not one uuid: ${SCHED_DEAD_WS}"
 sched_status() {
   local name="$1"
   OUT="$SANDBOX/t2-sched-${name}.json"
@@ -1122,5 +1174,15 @@ printf '%s' "$(check_field "$OUT" roles.momo_notifier detail)" | grep -Fq 'momo_
   fail "drop momo_notifier detail: $(check_field "$OUT" roles.momo_notifier detail)"
 assert_no_secret_leak "drop notifier json" "$OUT"
 pass "sabotage DROP ROLE momo_notifier → roles.momo_notifier fail (blocker)"
+
+# #5623: release this run's two listeners now (the EXIT trap then has nothing
+# left) and prove no process still listens on their ports.
+kill "$HTTP_PID" >/dev/null 2>&1 || true
+wait "$HTTP_PID" 2>/dev/null || true
+HTTP_PID=""
+docker rm -f -v "$PG_CID" >/dev/null
+PG_CID=""
+assert_ports_released "$MOCK_PORT" "$PG_PORT"
+pass "teardown: no listener left on mock port ${MOCK_PORT} or postgres port ${PG_PORT}"
 
 echo "[oort-doctor-test] PASS: $CASES case(s)"

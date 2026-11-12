@@ -21,7 +21,7 @@
 //! | `a_dollar_limit_needs_a_model_the_server_can_price` | drop the availability check from the PATCH (cold start, unpriced model) |
 //! | `the_price_check_agrees_with_the_usage_read` | change the match rule of `pricing_available_for_model_in_tx` without changing `agent_usage_in_tx` (or the other way round) |
 //! | `the_status_read_explains_limits_ceiling_usage_and_availability` | compute the cap without the ceiling, count another workspace's ledger, or attach the status when it was not asked for |
-//! | `the_status_read_counts_todays_delegations_and_names_why_the_door_is_shut` (ADR-0201 증보 v4 P7·P8, #5374) | count a pending row, yesterday's or another workspace's delegation; drop the default 30 or the ceiling from `effective.dailyDelegations`; read the ceiling's absence as "no ceiling"; judge G3 per requester (or count the helper / a connector-marked / paused agent) instead of for the team; skip G4's connection-mode presence check or G5; name an agent in the status |
+//! | `the_status_read_counts_todays_delegations_and_names_why_the_door_is_shut` (ADR-0201 증보 v4 P7·P8, #5374) | count a pending row, yesterday's or another workspace's delegation; drop the default 30 or the ceiling from `effective.dailyDelegations`; read the ceiling's absence as closed (#5685) or its `0` as open; judge G3 per requester (or count the helper / a connector-marked / paused agent) instead of for the team; skip G4's connection-mode presence check or G5; name an agent in the status |
 
 use std::net::SocketAddr;
 use std::path::PathBuf;
@@ -34,7 +34,7 @@ use momo_db::sqlx::postgres::{PgConnectOptions, PgPoolOptions};
 use momo_db::{with_tenant_tx, PgPool};
 use momo_server::{build_app, AppState};
 use momo_workspace_actions::team_ai_hermes::HermesDeclarations;
-use momo_workspace_actions::team_ai_limits::OperatorCaps;
+use momo_workspace_actions::team_ai_limits::{HermesCeiling, OperatorCaps};
 use serde_json::{json, Value};
 use uuid::Uuid;
 
@@ -718,8 +718,8 @@ async fn the_status_read_explains_limits_ceiling_usage_and_availability() {
     let caps = OperatorCaps {
         daily_tokens: Some(400_000),
         daily_searches: None,
-        // the third ceiling is not what this test reads: unset = the delegation is closed
-        daily_delegations: None,
+        // the third ceiling is not what this test reads: unset = no ceiling (#5685), the default 30 binds
+        daily_delegations: HermesCeiling::NoCeiling,
     };
     let d = door(caps).await;
     let ws = d.fixture.workspace;
@@ -779,13 +779,13 @@ async fn the_status_read_explains_limits_ceiling_usage_and_availability() {
     );
     assert_eq!(
         status["effective"],
-        json!({"dailyTokens": 400_000, "dailySearches": 10, "dailyDelegations": 0}),
-        "the operator's 400,000 is lower than the workspace's 1,000,000 (and no delegation ceiling = closed = 0)"
+        json!({"dailyTokens": 400_000, "dailySearches": 10, "dailyDelegations": 30}),
+        "the operator's 400,000 is lower than the workspace's 1,000,000 (and no delegation ceiling = the default 30)"
     );
     assert_eq!(
         status["operatorCeiling"],
         json!({"dailyTokens": 400_000, "dailySearches": null, "helperOff": false, "searchOff": false,
-               "dailyDelegations": null, "delegationOff": true})
+               "dailyDelegations": null, "delegationOff": false})
     );
     assert_eq!(status["usage"]["todayTokens"], 1_005_500, "{status}");
     assert_eq!(status["usage"]["todaySearches"], 4);
@@ -829,8 +829,8 @@ async fn the_status_read_explains_limits_ceiling_usage_and_availability() {
         .unwrap();
     assert_eq!(
         free_status["team_ai_limits_status"]["effective"],
-        json!({"dailyTokens": null, "dailySearches": null, "dailyDelegations": 0}),
-        "no token or search limit means none; the delegation is never unlimited — closed is 0"
+        json!({"dailyTokens": null, "dailySearches": null, "dailyDelegations": 30}),
+        "no token or search limit means none; the delegation is never unlimited — no ceiling is the default 30"
     );
     assert_eq!(
         free_status["team_ai_limits_status"]["usage"]["todayTokens"],
@@ -998,7 +998,7 @@ async fn delegation_door(caps: OperatorCaps, process: Process) -> (Door, Uuid, U
     (d, helper, channel, hermes)
 }
 
-fn ceiling(cap: Option<i64>) -> OperatorCaps {
+fn ceiling(cap: HermesCeiling) -> OperatorCaps {
     OperatorCaps {
         daily_delegations: cap,
         ..OperatorCaps::default()
@@ -1009,8 +1009,9 @@ fn ceiling(cap: Option<i64>) -> OperatorCaps {
 /// about the delegation to Hermes — 「오늘 Hermes에 맡긴 횟수 4/30」 and 「지금은 쓸 수 없어요」 with the door's
 /// own closed word. The count is the task rows' marker (`called` or later, today UTC — a pending row,
 /// yesterday's and another workspace's are not counted; an ended row still is); the cap is `min(the
-/// workspace's value or the default 30, the operator's ceiling)` and an unset ceiling is **closed** (`0`, with
-/// `delegationOff`), never "no limit"; the reason is G3~G6 in the door's order, judged for the team (the
+/// workspace's value or the default 30, the operator's ceiling)`; an unset ceiling is **no ceiling** (#5685:
+/// the workspace's value or 30, never "no limit") and only the operator's `0` is closed (`0`, with
+/// `delegationOff`); the reason is G3~G6 in the door's order, judged for the team (the
 /// helper pinned to the operator's link and a connector-marked agent are not a team Hermes; two are
 /// ambiguous), with G4 as this process reads its three variables and G5 as its env link. No agent is named.
 #[tokio::test]
@@ -1019,8 +1020,11 @@ async fn the_status_read_counts_todays_delegations_and_names_why_the_door_is_shu
     let _guard = test_lock().await;
 
     // ---- the count and the cap: a ceiling of 100, the team default mode ----
-    let (d, helper, channel, hermes) =
-        delegation_door(ceiling(Some(100)), Process::team_default()).await;
+    let (d, helper, channel, hermes) = delegation_door(
+        ceiling(HermesCeiling::Ceiling(100)),
+        Process::team_default(),
+    )
+    .await;
     let ws = d.fixture.workspace;
     assert_eq!(
         delegation_of(&status_of(&d).await),
@@ -1053,7 +1057,11 @@ async fn the_status_read_counts_todays_delegations_and_names_why_the_door_is_shu
         seed_delegation(&here, state, called, ended).await;
     }
     // another workspace's delegation today is not this workspace's
-    let other = delegation_door(ceiling(Some(100)), Process::team_default()).await;
+    let other = delegation_door(
+        ceiling(HermesCeiling::Ceiling(100)),
+        Process::team_default(),
+    )
+    .await;
     let there = Place {
         su: &other.0.su,
         workspace: other.0.fixture.workspace,
@@ -1170,34 +1178,28 @@ async fn the_status_read_counts_todays_delegations_and_names_why_the_door_is_shu
     };
     for (caps, process, word, label) in [
         (
-            ceiling(Some(100)),
+            ceiling(HermesCeiling::Ceiling(100)),
             Process::none(),
             "tools_not_locked",
             "nothing declared on the api",
         ),
         (
-            ceiling(Some(100)),
+            ceiling(HermesCeiling::Ceiling(100)),
             connection_mode,
             "connection_mode",
             "a connection-mode variable holds a value",
         ),
         (
-            ceiling(Some(100)),
+            ceiling(HermesCeiling::Ceiling(100)),
             unresolved,
             "pin_unresolved",
             "the env link or its key is missing",
         ),
         (
-            ceiling(None),
+            ceiling(HermesCeiling::Off),
             Process::team_default(),
             "ceiling_unset",
-            "no ceiling: closed",
-        ),
-        (
-            ceiling(Some(0)),
-            Process::team_default(),
-            "ceiling_unset",
-            "a ceiling of 0: closed",
+            "a ceiling of 0: closed (the only operator value that is, #5685)",
         ),
     ] {
         let (shut, ..) = delegation_door(caps, process).await;
@@ -1220,6 +1222,34 @@ async fn the_status_read_counts_todays_delegations_and_names_why_the_door_is_shu
             );
         }
     }
+    // ---- no operator ceiling (#5685): open, and the workspace's value or the default 30 is the cap ----
+    let (unset, ..) =
+        delegation_door(ceiling(HermesCeiling::NoCeiling), Process::team_default()).await;
+    assert_eq!(
+        delegation_of(&status_of(&unset).await),
+        (
+            json!(null),
+            json!(30),
+            json!(null),
+            json!(false),
+            json!(0),
+            json!(true),
+            json!(null)
+        ),
+        "no ceiling and nothing set: the default 30 and the door open — not closed, not unlimited"
+    );
+    assert_eq!(
+        unset
+            .patch(json!({"team_ai_limits": {"dailyDelegations": 200}}))
+            .await
+            .status(),
+        200
+    );
+    assert_eq!(
+        delegation_of(&status_of(&unset).await).1,
+        json!(200),
+        "no ceiling: the administrator's 200 is the cap, nothing lowers it"
+    );
     // a fresh instance (nothing connected, nothing declared, no ceiling) names the first gate: G3
     let fresh = door_with(OperatorCaps::default(), Process::none()).await;
     enable_the_helper(
