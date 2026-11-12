@@ -117,7 +117,7 @@ type Box = Pick<DOMRect, "left" | "right" | "top" | "bottom" | "height">;
 
 /**
  * 「같은 자리」의 표지(수리 5회차, 검수 3회차 H1): 누른 점과 누른 결정 단추의 상자. 마우스는 누른 점 6px 안, **터치는 누른 단추의
- * 상자 안**(좁은 폭 44px 표적) — 손가락은 같은 단추를 다시 누를 때 6px 넘게 흩어진다.
+ * 상자 안**(좁은 폭 44px 표적) — 손가락은 같은 단추를 다시 누를 때 6px 넘게 흩어진다. `touch`는 손가락처럼 누른 손(터치·펜, `fingerLike`).
  */
 interface PressMark {
   spot: PointerSpot;
@@ -180,9 +180,20 @@ function near(a: PointerSpot, b: PointerSpot): boolean {
   return Math.hypot(a.x - b.x, a.y - b.y) < SHIFT_GUARD_MOVE_PX;
 }
 
-/** 그 누름이 표지와 같은 자리인가: 누른 점 6px 안, 또는 터치면 누른 단추의 상자 안. */
-function samePlace(spot: PointerSpot, mark: PressMark): boolean {
-  return near(spot, mark.spot) || (mark.touch && pointerInside(spot, mark.box));
+/**
+ * 손가락처럼 누르는 포인터(터치·펜, #5712): 화면 위에 자리를 들고 있지 않고(떼면 자리가 없다), 같은 단추를 다시 누를 때 6px 넘게
+ * 흩어진다. 마우스 자리(`pointerRef`)는 이 손이 적지도 지우지도 않는다.
+ */
+function fingerLike(pointerType: string): boolean {
+  return pointerType === "touch" || pointerType === "pen";
+}
+
+/**
+ * 그 누름이 표지와 같은 자리인가: 누른 점 6px 안, 또는 누른 단추의 상자 안. 6px만 보는 것은 **표지도 지금 누름도 마우스일 때뿐**이다 —
+ * 마우스로 결정하고 손가락으로 다시 누르는 손도 같은 단추를 겨눈다(#5712, 검수 4회차 M2).
+ */
+function samePlace(spot: PointerSpot, mark: PressMark, mouseNow: boolean): boolean {
+  return near(spot, mark.spot) || ((mark.touch || !mouseNow) && pointerInside(spot, mark.box));
 }
 
 function boxesOverlap(a: Box, b: Box): boolean {
@@ -451,15 +462,16 @@ export function WorkJobsRoute() {
     pointerTypeRef.current = event.pointerType;
   }, []);
   const onListPointerMove = useCallback((event: PointerEvent<HTMLDivElement>) => {
-    if (event.pointerType === "touch") return;
+    if (fingerLike(event.pointerType)) return;
     const spot = { x: event.clientX, y: event.clientY };
     pointerRef.current = spot;
     for (const arrival of arrivalsRef.current.values()) {
-      if (!arrival.released && arrival.marks.every((mark) => !near(spot, mark.spot) && !pointerInside(spot, mark.touch ? mark.box : null))) arrival.released = true;
+      if (!arrival.released && arrival.marks.every((mark) => !samePlace(spot, mark, true))) arrival.released = true;
     }
   }, []);
-  const onListPointerLeave = useCallback(() => {
-    pointerRef.current = null;
+  // 마우스 자리는 마우스가 떠날 때만 지운다: 터치 탭이 끝나며 오는 `pointerleave`가 지우면 마우스로 붙든 줄이 손 밑에서 놓인다(#5712).
+  const onListPointerLeave = useCallback((event: PointerEvent<HTMLDivElement>) => {
+    if (!fingerLike(event.pointerType)) pointerRef.current = null;
   }, []);
   const onListClickCapture = useCallback(
     (event: MouseEvent<HTMLDivElement>) => {
@@ -467,6 +479,7 @@ export function WorkJobsRoute() {
       // 키보드가 누른 단추(`detail === 0`)는 사람이 초점을 거기로 옮긴 것이다 — 줄이 움직여도 초점은 결정 단추로 가지 않는다.
       const pointer = event.detail !== 0;
       const spot = pointer ? { x: event.clientX, y: event.clientY } : null;
+      const touch = pointer && fingerLike(pointerTypeRef.current);
       const control = event.target.closest(DECISION_CONTROL);
       const swallow = (look: boolean, untilMs = 0) => {
         event.preventDefault();
@@ -477,7 +490,7 @@ export function WorkJobsRoute() {
       // 밑이 영수증이 아니라 줄 단추(서랍)여도 삼킨다. 삼킨 것이 결정 단추면 막힌 모양을 보인다(M1).
       if (spot !== null && event.target.closest("[data-section] li") !== null) {
         for (const entry of heldRef.current.values()) {
-          if (entry.press !== null && samePlace(spot, entry.press)) return swallow(control !== null);
+          if (entry.press !== null && samePlace(spot, entry.press, !touch)) return swallow(control !== null);
         }
       }
       if (control === null) return;
@@ -485,11 +498,10 @@ export function WorkJobsRoute() {
         if (pinnedRef.current.has(control)) return swallow(true);
         const arrival = arrivalsRef.current.get(control);
         const fresh = arrival !== undefined && !arrival.released && performance.now() - arrival.atMs < SHIFT_GUARD_MS;
-        if (fresh && (arrival.marks.length === 0 || arrival.marks.some((mark) => samePlace(spot, mark)))) {
+        if (fresh && (arrival.marks.length === 0 || arrival.marks.some((mark) => samePlace(spot, mark, !touch)))) {
           return swallow(true, arrival.atMs + SHIFT_GUARD_MS);
         }
       }
-      const touch = pointer && pointerTypeRef.current === "touch";
       lastPressRef.current = { mark: spot === null ? null : { spot, box: control.getBoundingClientRect(), touch }, touch };
     },
     [showGuardLook]

@@ -1380,6 +1380,85 @@ describe("누른 자리에 다른 결정이 서지 않는다 (#5640 수리 3·4�
     await waitFor(() => expect(decidedIds()).toEqual([A(1), A(2)]));
     await settleAnswers();
   }, 15_000);
+
+  // ---- #5712 (검수 4회차 M1·M2): 입력 종류가 바뀌어도, 차례로 결정해도 ----------------------------------------------------------
+
+  it.each(["approve", "reject"] as const)(
+    "마우스로 %s한 뒤 손가락으로 두 번(8px 옆, 1.4초 안): 터치 탭이 끝나며 오는 pointerleave가 마우스 자리를 지우지 않아 붙든 줄이 그 칸에 남고 결정은 A 1건",
+    async (which) => {
+      mockSlotGeometry({ sectionBox: true });
+      board(new Set(), { mine: twoRuns });
+      serveDecisions(40);
+      render(mount());
+      await waitFor(() => expect(rowsIn("needsMe")).toEqual([R(1), R(8)]), { timeout: 3000 });
+      const spot = slotButton(0, which);
+      fireEvent.pointerMove(list(), { ...at(spot), pointerType: "mouse" });
+      pressSlot(0, which, at(spot));
+      await waitFor(() => expect(receiptIn(0)).toBe(RECEIPT[which]), { timeout: 3000 });
+      for (const [dx, dy, wait] of [[8, 3, 500], [-8, -2, 900]] as const) {
+        await sleepMs(wait);
+        pressSlot(0, which, at({ x: spot.x + dx, y: spot.y + dy }), "touch");
+        fireEvent.pointerLeave(list(), { pointerType: "touch" });
+      }
+      await sleepMs(400);
+      // 마우스는 그대로 구간 위다 — 붙든 줄은 1.2초가 지나도 놓이지 않는다.
+      expect(rowsIn("needsMe")).toEqual([R(1), R(8)]);
+      expect(receiptIn(0)).toBe(RECEIPT[which]);
+      pressSlot(0, which, at({ x: spot.x + 7, y: spot.y + 3 }), "touch");
+      await sleepMs(100);
+      expect(decidedIds()).toEqual([A(1)]);
+      await settleAnswers();
+    },
+    15_000
+  );
+
+  it.each(["approve", "reject"] as const)(
+    "마우스로 %s하고 포인터가 구간을 떠나 A가 빠진 뒤, 그 자리에 선 B의 단추는 손가락 탭(누른 단추 상자 안, 6px 밖)을 1초 동안 받지 않는다 — 마우스 표지도 손가락 누름은 단추 상자로 잰다",
+    async (which) => {
+      mockSlotGeometry({ sectionBox: true });
+      board(new Set(), { mine: twoRuns });
+      serveDecisions(40);
+      render(mount());
+      await waitFor(() => expect(rowsIn("needsMe")).toEqual([R(1), R(8)]), { timeout: 3000 });
+      const spot = slotButton(0, which);
+      fireEvent.pointerMove(list(), { ...at(spot), pointerType: "mouse" });
+      pressSlot(0, which, at(spot));
+      await waitFor(() => expect(receiptIn(0)).toBe(RECEIPT[which]), { timeout: 3000 });
+      fireEvent.pointerMove(list(), { clientX: 300, clientY: 900, pointerType: "mouse" });
+      await waitFor(() => expect(rowsIn("needsMe")).toEqual([R(8)]), { timeout: 3000 });
+      const tapAt = at({ x: spot.x + 9, y: spot.y + 4 });
+      pressSlot(0, which, tapAt, "touch");
+      fireEvent.pointerLeave(list(), { pointerType: "touch" });
+      await sleepMs(50);
+      expect(decidedIds()).toEqual([A(1)]);
+      expect(list().hasAttribute("data-shift-guard")).toBe(true);
+      await sleepMs(1100);
+      pressSlot(0, which, tapAt, "touch");
+      await waitFor(() => expect(decidedIds()).toEqual([A(1), A(8)]), { timeout: 3000 });
+      await settleAnswers();
+    },
+    15_000
+  );
+
+  it("펜으로 결정한 줄은 펜을 떼도(pointerleave) 시간으로 놓이지 않고, 누른 단추 상자 안의 다시 누름은 결정이 아니다 — 펜은 손가락과 같다", async () => {
+    mockSlotGeometry({ sectionBox: true });
+    board(new Set(), { mine: twoRuns });
+    serveDecisions(40);
+    render(mount());
+    await waitFor(() => expect(rowsIn("needsMe")).toEqual([R(1), R(8)]), { timeout: 3000 });
+    await sleepMs(1100);
+    const spot = slotButton(0, "approve");
+    fireEvent.pointerMove(list(), { ...at(spot), pointerType: "pen" });
+    pressSlot(0, "approve", at(spot), "pen");
+    fireEvent.pointerLeave(list(), { pointerType: "pen" });
+    await waitFor(() => expect(receiptIn(0)).toBe(RECEIPT.approve), { timeout: 3000 });
+    await sleepMs(1500);
+    expect(rowsIn("needsMe")).toEqual([R(1), R(8)]);
+    pressSlot(0, "approve", at({ x: spot.x + 9, y: spot.y + 4 }), "pen");
+    await sleepMs(100);
+    expect(decidedIds()).toEqual([A(1)]);
+    await settleAnswers();
+  }, 15_000);
 });
 
 describe("상태 칩·서랍의 낱말 (#5640 수리 3회차 H2·질문 ③)", () => {
