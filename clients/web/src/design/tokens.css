@@ -4076,6 +4076,28 @@
   }
 }
 
+/* 채널 멤버 패널 발치의 「지금」 읽기 실패 글은 폭에 따라 세 단계다 (#5711): 512px 이상 전체 문장, 375~511px 대상을 말하는 중간
+ * 글, 375px 미만 짧은 글. 기준은 창 폭이다(패널은 512px에서 다 펴지고 그 아래에서는 창과 같은 폭). 문턱은 각 글이 기본 글자에서
+ * 말줄임 없이 들어가는 가장 좁은 창으로 쟀다(중간 글 한국어 114px·영어 120px, 375px에서 칸 114px). 임의 Tailwind 값은
+ * 프리플라이트가 막으므로 미디어 질의를 유틸리티로 둔다. */
+@utility member-now-failed-short {
+  @media (width >= 375px) {
+    display: none;
+  }
+}
+@utility member-now-failed-mid {
+  display: none;
+  @media (width >= 375px) and (width < 512px) {
+    display: block;
+  }
+}
+@utility member-now-failed-long {
+  display: none;
+  @media (width >= 512px) {
+    display: block;
+  }
+}
+
 /* 작업 패널 기하 (goal WEB-WP1). 문턱은 900px이고, 그것은 이제 덮는 표면 셋
  * (`thread-pane` · `work-pane` · 이 패널)이 **함께 쓰는 하나의 숫자**다.
  * thread-pane만 600px이던 판은 #1421이 실측으로 닫았다 — 세 열이 동시에 서려면

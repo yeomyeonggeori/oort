@@ -351,6 +351,51 @@ describe('두 이름이 넘치면 짧은 이름은 온전히 남고 긴 이름�
   });
 });
 
+describe('거울은 보이는 칸과 같은 옷으로 그린다 — 굵기·크기 상한이 다르면 잰 폭이 좁아져 이름이 잘린다 (#5719)', () => {
+  /** 칸 안의 글 조각(이름 조각 · 쉼표 조각)들이 입은 옷. 칸 자신의 `flexShrink` · `width` 는 거울과 보이는 칸이 일부러 다르다. */
+  function dressOf(cell: {props: Record<string, unknown>; findAll: (match: (node: any) => boolean) => any[]}) {
+    const inner = cell.findAll(node => node.type === 'Text' && node !== cell);
+    return {
+      cap: cell.props.maxFontSizeMultiplier,
+      lines: cell.props.numberOfLines,
+      pieces: inner.map(node => flatten(node.props.style)),
+    };
+  }
+
+  it('이름 칸마다 거울 조각의 안쪽 조각 옷 · 글자 상한 · 줄 수가 보이는 칸과 같고, 이름은 굵다', () => {
+    render(<TypingBar segments={typingVisualSegments([LONG_NAME, SHORT_NAME])} />);
+    const visible = screen.getAllByTestId('composer-typing-name');
+    expect(visible).toHaveLength(2);
+    // 이름 칸의 자리는 앞부분 칸 순서(이름 · 빈칸 · 이름)에서 0 과 2 다.
+    [0, 2].forEach((at, order) => {
+      const mirror = screen.getByTestId(`composer-typing-measure-${at}`, {includeHiddenElements: true});
+      const seen = dressOf(visible[order]);
+      const mirrored = dressOf(mirror);
+      expect(mirrored).toEqual(seen);
+      // 같다는 것이 빈 것끼리 같다가 아니다: 이름 조각이 실제로 있고 굵다(굵은 한글이 더 넓어서 폭이 달라진다).
+      expect(seen.pieces.some(piece => piece.fontWeight === '700')).toBe(true);
+      expect(mirrored.pieces.some(piece => piece.fontWeight === '700')).toBe(true);
+      expect(mirrored.cap).toBe(1.6);
+      expect(mirrored.lines).toBe(1);
+    });
+  });
+});
+
+describe('잰 폭 기억은 쌓이지 않는다 — 지금 줄에 없는 조각은 잊는다 (#5719)', () => {
+  it('둘째 사람이 바뀌어 새로 잰 뒤 옛 사람으로 돌아오면 옛 잰 값을 쓰지 않고 다시 잰다', () => {
+    const {rerender} = render(<TypingBar segments={typingVisualSegments([LONG_NAME, SHORT_NAME])} />);
+    layLine(390, [W.long + W.comma, W.space, W.short]);
+    // 먼저 짧은 이름의 잰 값이 실제로 쓰이고 있다(기억이 비어서 통과하지 않는다).
+    expect((nameCellWidths() as number[])[1]).toBe(W.short);
+    rerender(<TypingBar segments={typingVisualSegments([LONG_NAME, '정하린'])} />);
+    giveLayout('composer-typing-measure-2', 30);
+    expect((nameCellWidths() as number[])[1]).toBe(30);
+    // 옛 사람으로 돌아온다. 그 사이 새로 잰 조각만 남기고 옛 조각은 잊었으니, 다시 잴 때까지 명시 폭이 없다.
+    rerender(<TypingBar segments={typingVisualSegments([LONG_NAME, SHORT_NAME])} />);
+    expect(nameCellWidths()).toEqual([undefined, undefined]);
+  });
+});
+
 describe('M-6 — 이 줄이 AA 를 지난다', () => {
   it('textFaint 를 쓰지 않는다', () => {
     // 실측: textFaint on bg = 3.562:1 (본문 AA 4.5 미달) · textMuted = 6.358:1.

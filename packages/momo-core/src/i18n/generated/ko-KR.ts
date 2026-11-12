@@ -8492,6 +8492,18 @@ export const catalog: MessageCatalog = {
       "value": "에이전트가 지금 하는 일을 불러오지 못했어요."
     }
   ],
+  "timeline.memberPanel.nowFailedMid": [
+    {
+      "type": 0,
+      "value": "하는 일을 못 불러왔어요"
+    }
+  ],
+  "timeline.memberPanel.nowFailedShort": [
+    {
+      "type": 0,
+      "value": "실패했어요"
+    }
+  ],
   "timeline.memberPanel.nowRetry": [
     {
       "type": 0,

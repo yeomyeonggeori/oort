@@ -1245,6 +1245,8 @@ export const messageKeys = [
   "timeline.memberPanel.moreRuns",
   "timeline.memberPanel.moreRunsSpoken",
   "timeline.memberPanel.nowFailed",
+  "timeline.memberPanel.nowFailedMid",
+  "timeline.memberPanel.nowFailedShort",
   "timeline.memberPanel.nowRetry",
   "timeline.memberPanel.request",
   "timeline.memberPanel.requestSpoken",
@@ -2933,6 +2935,8 @@ export const argumentSpecs = {
     "count": "number"
   },
   "timeline.memberPanel.nowFailed": {},
+  "timeline.memberPanel.nowFailedMid": {},
+  "timeline.memberPanel.nowFailedShort": {},
   "timeline.memberPanel.nowRetry": {},
   "timeline.memberPanel.request": {
     "text": "string"
@@ -4415,6 +4419,8 @@ export interface MessageArgs {
   "timeline.memberPanel.moreRuns": { count: number };
   "timeline.memberPanel.moreRunsSpoken": { count: number };
   "timeline.memberPanel.nowFailed": Record<string, never>;
+  "timeline.memberPanel.nowFailedMid": Record<string, never>;
+  "timeline.memberPanel.nowFailedShort": Record<string, never>;
   "timeline.memberPanel.nowRetry": Record<string, never>;
   "timeline.memberPanel.request": { text: string };
   "timeline.memberPanel.requestSpoken": { text: string };
