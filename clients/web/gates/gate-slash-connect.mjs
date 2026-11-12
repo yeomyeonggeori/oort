@@ -319,11 +319,13 @@ async function exercise(browser) {
   const meta = await row5.textContent();
   if (!meta?.includes("이 채널 · 나에게만")) fail(`카드 자리가 있는데 줄이 「이 채널 · 나에게만」을 말하지 않는다: ${meta}`);
   const before5 = await hash(page);
-  // 시안 ①: 「ai 연결」을 치면 첫 강조가 「AI 연결 카드 열기」다(review H-2).
+  // #4141(owner 10-20): 「AI 설정은 AI 허브 한 곳」 — 「ai 연결」을 치면 첫 강조가 「AI」(허브)로 가는 항목이다.
+  // 연결 카드 열기 항목은 같은 목록에 남아 있다(아래에서 골라 연다).
   await page.keyboard.type("ai 연결");
   await wait(300);
   const selected = await page.locator('[cmdk-item][aria-selected="true"]').getAttribute("data-testid");
-  if (selected !== "switcher-ai-connect") fail(`「ai 연결」의 첫 강조가 카드 열기가 아니다: ${selected}`);
+  if (selected !== "switcher-ai") fail(`「ai 연결」의 첫 강조가 AI 허브 항목이 아니다: ${selected}`);
+  if ((await page.getByTestId("switcher-ai-connect").count()) !== 1) fail("「ai 연결」 목록에서 연결 카드 열기 항목이 사라졌다");
   if ((await page.getByTestId("switcher-message-search").count()) !== 1)
     fail("명령이 앞에 서며 메시지 검색 줄이 사라졌다(R1 B-2)");
   // 부정 질의: id 조각(`gen`)은 명령을 앞세우지 않는다(review R2 H-1).
@@ -336,11 +338,22 @@ async function exercise(browser) {
   await page.keyboard.type("ai 연결");
   await wait(300);
   await page.keyboard.press("Enter");
+  await page.waitForFunction(() => window.location.hash.startsWith("#/ai"), null, { timeout: 5_000 });
+  if (posted.length !== 1) fail("⌘K 허브 이동이 무언가를 전송했다");
+  console.log("[5a] ⌘K 「ai 연결」 첫 강조 = AI 허브 → ↵ → AI 허브로 이동");
+  // 채널로 돌아와 카드 열기 항목을 직접 골라 연다.
+  await page.evaluate((h) => { window.location.hash = h; }, before5);
+  await page.getByTestId("timeline-message").first().waitFor();
+  await page.keyboard.press("ControlOrMeta+k");
+  await page.getByTestId("switcher-ai-connect").waitFor({ timeout: 5_000 });
+  await page.keyboard.type("ai 연결");
+  await wait(300);
+  await page.getByTestId("switcher-ai-connect").click();
   await card.waitFor({ timeout: 5_000 });
   if ((await hash(page)) !== before5) fail("⌘K 줄이 채널을 떠났다");
   if ((await card.getAttribute("data-line")) !== "all") fail("⌘K 카드가 두 절 전부를 열지 않았다");
   if (posted.length !== 1) fail("⌘K 줄이 무언가를 전송했다");
-  console.log("[5] ⌘K 「ai 연결」 첫 강조 = AI 연결 카드 열기 → ↵ → 이 채널의 카드(두 절), 검색 줄 유지");
+  console.log("[5b] ⌘K 「AI 계정 카드 열기」 항목을 골라 → 이 채널의 카드(두 절), 검색 줄 유지");
   await page.keyboard.press("Escape");
 
   await context.close();
@@ -409,7 +422,7 @@ async function main() {
   }
   console.log("GATE PASS: `/`는 맨 앞에서만 열렸고, 명령은 전송되지 않고 실행됐고, 키는");
   console.log("           보내지 않고 이유를 말했으며 초안에도 남지 않았고, 모르는 `/`는");
-  console.log("           평문으로 갔고, ⌘K 줄은 이 채널에 같은 카드를 열었다.");
+  console.log("           평문으로 갔고, ⌘K 「ai 연결」은 AI 허브로 가고 카드 열기 항목은 이 채널에 같은 카드를 열었다.");
 }
 
 await main();
