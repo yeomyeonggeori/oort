@@ -807,12 +807,12 @@ describe("누른 자리에 다른 결정이 서지 않는다 (#5640 수리 3·4�
       expect(needsMeChips()).toBe(needsMeCount());
       expect(within(held).getByTestId("team-board-state").textContent).not.toBe("응답 필요");
       pressSlot(0, which);
-      await sleepMs(roundTripMs * 2 + 50);
-      expect(decidedIds()).toEqual([A(1)]);
-      expect(decidedHow()).toEqual([which === "approve"]);
       // 그 점 밑이 줄 단추여도(폭·배너로 줄이 밀린 경우) 붙든 동안 같은 점을 다시 누르는 것은 아무 일도 아니다(서랍도 열지 않는다).
       fireEvent.click(within(needsMeSlot(0)).getByTestId("work-job-row"), { detail: 1, ...POINT });
       expect(new URLSearchParams(seen.search).get("card")).toBeNull();
+      await sleepMs(roundTripMs * 2 + 50);
+      expect(decidedIds()).toEqual([A(1)]);
+      expect(decidedHow()).toEqual([which === "approve"]);
       // 잠깐 뒤 놓이면(jsdom에는 구간 상자가 없어 포인터가 구간 밖) A는 그 구간을 떠나고, 초점은 B의 단추가 아니라 A의 줄을 따라간다.
       await waitFor(() => expect(rowsIn("needsMe")).toEqual([R(8)]), { timeout: 4000 });
       expect(document.activeElement?.getAttribute("data-job-id")).toBe(R(1));
