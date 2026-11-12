@@ -397,6 +397,35 @@ describe("⑥-2 돌아온 순간은 확인하고, 끊겼으면 기다리지 않�
     expect(reconnect).toHaveBeenCalledTimes(1);
   });
 
+  it("끊긴 동안 창을 6초마다 오가도 끊긴 때부터 10초에 「끊김」과 다시 연결 단추가 선다(돌아옴이 시계를 새로 시작하지 않는다)", () => {
+    mountHealthy();
+    setStatus("disconnected");
+    advance(5_700);
+    blur();
+    advance(300);
+    focus(); // 6초: 기다리지 않고 다시 연다
+    expect(reconnect).toHaveBeenCalledTimes(1);
+    expect(card()!.dataset.tone).toBe("connecting");
+    advance(4_000); // 끊긴 지 10초
+    expect(card()!.dataset.tone).toBe("down");
+    expect(action()).not.toBeNull();
+    advance(1_700);
+    blur();
+    advance(300);
+    focus(); // 12초: 또 연다, 그래도 「끊김」은 그대로
+    expect(reconnect).toHaveBeenCalledTimes(2);
+    expect(card()!.dataset.tone).toBe("down");
+    expect(action()).not.toBeNull();
+  });
+
+  it("앱이 뒤에서 시작했어도 자리 비움은 시작한 때부터 센다: 31초 뒤 앞으로 오면 아무것도 듣지 못한 소켓을 연다", () => {
+    Object.defineProperty(document, "visibilityState", { configurable: true, get: () => "hidden" });
+    mount("connected");
+    advance(31_000);
+    visibility("visible");
+    expect(reconnect).toHaveBeenCalledTimes(1);
+  });
+
   it("처음 붙는 중(`connecting`)에는 창을 오가도 손대지 않는다", () => {
     mount("connecting");
     blur();

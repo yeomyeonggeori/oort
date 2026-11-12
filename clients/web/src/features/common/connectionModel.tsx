@@ -31,6 +31,7 @@ import {
   socketDiagKind,
 } from "@momo/core/features/connection/diagnosticLog";
 import { verdictOnLateWake, verdictOnReturn } from "@momo/core/features/connection/resume";
+import { RESUME_AFTER_HIDDEN_MS } from "@momo/core/features/connection/thresholds";
 import { subscribeRestOutcome } from "@momo/core/lib/http";
 import { documentForeground } from "@/features/chat/useChannelViewingBeat";
 import { readBrowserOnline, useBrowserOffline } from "./browserOffline";
@@ -174,14 +175,17 @@ export function ConnectionProvider({ children }: { children: ReactNode }) {
   //  - 깨어난 순간: 앱을 앞에 둔 채 맥이 잠들었다 깨면 창 사건이 없다. 늦게 깬 시계(`wakeWatch.ts`)가 그 사실이고, 멈춘 동안 아무것도 듣지 못했으면
   //    핑 마감(최대 35초)을 기다리지 않고 연다.
   //  다시 열면 레일마다 놓친 것을 메운다(타임라인은 복구·`?after`, 읽음 투영은 `ReadStateLiveSync`).
+  //  - 짧은 자리 비움(30초 미만) 뒤에 끊긴 소켓을 여는 것은 다시 붙기를 앞당길 뿐, 틈의 시계(「연결 중」→ 10초에 「끊김」)는 끊긴 때부터 그대로 센다.
+  //    돌아올 때마다 시계를 새로 시작하면, 끊긴 동안 창을 자주 오가는 사람에게는 「끊김」과 다시 연결 단추가 끝내 서지 않는다(#5660 검수 M1).
   const connStatusRef = useRef(connStatus);
   connStatusRef.current = connStatus;
   // 돌아옴·깨어남으로 마지막에 다시 연 시각: 둘이 연달아 와도 막 붙던 시도를 끊지 않게(`RESUME_KICK_SETTLE_MS`). 효과가 다시 서도 이어진다.
   const kickedAtRef = useRef<number | null>(null);
   useEffect(() => {
-    const kick = () => {
+    const kick = (restartClock = true) => {
       kickedAtRef.current = Date.now();
-      reconnectNow();
+      if (restartClock) reconnectNow();
+      else realtime?.reconnect();
     };
     const facts = () => {
       const heardAt = realtime?.lastHeardAt?.() ?? null;
@@ -202,7 +206,8 @@ export function ConnectionProvider({ children }: { children: ReactNode }) {
       const since = awaySince;
       awaySince = null;
       if (since === null) return;
-      if (verdictOnReturn({ awayMs: Date.now() - since, ...facts() }) === "reconnect") kick();
+      const awayMs = Date.now() - since;
+      if (verdictOnReturn({ awayMs, ...facts() }) === "reconnect") kick(awayMs >= RESUME_AFTER_HIDDEN_MS);
     });
     const stopWake = subscribeLateWake((_kind, _at, lateMs) => {
       if (verdictOnLateWake({ lateMs, ...facts() }) === "reconnect") kick();
