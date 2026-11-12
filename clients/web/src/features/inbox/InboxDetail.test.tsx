@@ -69,7 +69,7 @@ function msg(seq: number, body: string, extra: Partial<Message> = {}): Message {
 function entry(over: Partial<MailboxEntry>): MailboxEntry {
   return {
     key: "k", kind: "dm", channelId: CH, channelLabel: "서연", typeLabel: "DM · 서연", actor: "서연",
-    actorIsAgent: false, preview: "p", atMs: NOW, timeLabel: "방금", unread: true, unreadCount: 1,
+    source: { kind: "place", place: { kind: "dm", names: ["서연"] } }, actorIsAgent: false, preview: "p", atMs: NOW, timeLabel: "방금", unread: true, unreadCount: 1,
     seq: 5, reason: "r", ...over,
   };
 }

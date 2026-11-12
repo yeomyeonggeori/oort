@@ -18,6 +18,7 @@ import {
   type MailboxEntry,
 } from "./mailbox";
 import { actorToken, resolveActorNames, type ActorNames, type FeedItem } from "./model";
+import type { MailboxPlace } from "./source";
 import { channelLabel, makeDirectory } from "../workspace/directory";
 
 const NOW = 1_800_000_000_000;
@@ -33,6 +34,9 @@ const people: Record<string, ActorNames> = {
   [BOT]: { name: "김인턴", handle: "kim-intern", isAgent: true },
 };
 const actorFor = (id: string): ActorNames => people[id] ?? { name: id, isAgent: false };
+/** 출처 줄의 장소(#5696). 이 파일의 판정은 장소를 받아 출처로 옮길 뿐이다 — 장소 짓기는 `source.test.ts`가 잰다. */
+const DM_PLACE: MailboxPlace = { kind: "dm", names: ["서연"] };
+const CH_PLACE: MailboxPlace = { kind: "channel", name: "workbench" };
 
 function msg(over: Partial<Message> & { seq: number; authorMemberId: string }): Message {
   return {
@@ -74,7 +78,7 @@ describe("isUnreadSeq: 읽음 기준은 ADR-0178 합성 한 곳", () => {
 });
 
 describe("dmEntry", () => {
-  const base = { channelId: DM, channelLabel: "서연", selfMemberId: SELF, actorFor, nowMs: NOW };
+  const base = { channelId: DM, channelLabel: "서연", place: DM_PLACE, selfMemberId: SELF, actorFor, nowMs: NOW };
 
   it("상대의 마지막 말이 커서 뒤면 안 읽은 DM", () => {
     const e = dmEntry({
@@ -131,7 +135,7 @@ describe("threadEntry", () => {
       thread: { reply_count: 2, last_reply_seq: 9, last_reply_at: NOW - 60_000 },
       ...over,
     });
-  const base = { channelLabel: "#workbench", selfMemberId: SELF, actorFor, nowMs: NOW };
+  const base = { channelLabel: "#workbench", place: CH_PLACE, selfMemberId: SELF, actorFor, nowMs: NOW };
 
   it("내 글의 마지막 답글이 읽음 기준 뒤면 항목", () => {
     const e = threadEntry({
@@ -189,11 +193,11 @@ describe("taskEntry", () => {
 
 describe("composeMailbox / 필터 / 세기", () => {
   const dm = dmEntry({
-    channelId: DM, channelLabel: "서연", selfMemberId: SELF, actorFor, nowMs: NOW,
+    channelId: DM, channelLabel: "서연", place: DM_PLACE, selfMemberId: SELF, actorFor, nowMs: NOW,
     readState: rs(), messages: [msg({ seq: 8, authorMemberId: SEO })],
   }) as MailboxEntry;
   const mention = (channelId: string, id: string): MailboxEntry =>
-    mentionEntry(msg({ seq: 4, authorMemberId: SEO, channelId, id }), actorFor(SEO), "#workbench", NOW);
+    mentionEntry(msg({ seq: 4, authorMemberId: SEO, channelId, id }), actorFor(SEO), "#workbench", NOW, CH_PLACE);
   const task = taskEntry(
     {
       key: "approval:a1", kind: "approval", tone: "warn", actor: "@kim-intern", actorIsAgent: true,
@@ -251,10 +255,28 @@ describe("entryAriaLabel", () => {
     const { entryAriaLabel } = await import("./mailbox");
     const e = {
       key: "k", kind: "dm", channelId: DM, channelLabel: "서연", typeLabel: "DM · 서연", actor: "서연",
+      source: { kind: "place", place: DM_PLACE },
       actorIsAgent: false, preview: "안녕", atMs: NOW, timeLabel: "방금", unread: true, unreadCount: 3, reason: "r",
     } as MailboxEntry;
-    expect(entryAriaLabel(e)).toBe("안 읽음 3개, DM · 서연, 서연, 방금, 안녕");
-    expect(entryAriaLabel({ ...e, unread: false })).toBe("DM · 서연, 서연, 방금, 안녕");
+    expect(entryAriaLabel(e, "DM · 서연")).toBe("안 읽음 3개, DM · 서연, 서연, 방금, 안녕");
+    expect(entryAriaLabel({ ...e, unread: false }, "DM · 서연")).toBe("DM · 서연, 서연, 방금, 안녕");
+  });
+
+  // #5696: 출처 줄 「#채널」은 종류를 말하지 않는다. 아바타가 있는 줄은 종류 그림도 없어서, 낭독이 종류 낱말을 따로 붙인다.
+  it("출처 줄이 종류를 말하지 않으면(채널의 멘션·답글) 종류 낱말을 앞에 붙이고, 말하면 붙이지 않는다", async () => {
+    const { entryAriaLabel } = await import("./mailbox");
+    const base = {
+      key: "k", channelId: CH, channelLabel: "workbench", typeLabel: "멘션 · workbench", actor: "서연",
+      actorIsAgent: false, preview: "확인 부탁", atMs: NOW, timeLabel: "방금", unread: false, unreadCount: 0, reason: "r",
+    };
+    const mention = { ...base, kind: "mention", source: { kind: "place", place: CH_PLACE } } as MailboxEntry;
+    const reply = { ...base, kind: "reply", source: { kind: "place", place: CH_PLACE } } as MailboxEntry;
+    const thread = { ...base, kind: "thread", source: { kind: "thread", place: CH_PLACE } } as MailboxEntry;
+    const dmThread = { ...base, kind: "thread", source: { kind: "place", place: DM_PLACE } } as MailboxEntry;
+    expect(entryAriaLabel(mention, "#workbench")).toBe("멘션, #workbench, 서연, 방금, 확인 부탁");
+    expect(entryAriaLabel(reply, "#workbench")).toBe("답글, #workbench, 서연, 방금, 확인 부탁");
+    expect(entryAriaLabel(thread, "스레드 · #workbench")).toBe("스레드 · #workbench, 서연, 방금, 확인 부탁");
+    expect(entryAriaLabel(dmThread, "DM · 서연")).toBe("스레드, DM · 서연, 서연, 방금, 확인 부탁");
   });
 });
 
@@ -289,6 +311,7 @@ describe("dmEntry · 명부에서 빠진 상대", () => {
     const e = dmEntry({
       channelId: DM,
       channelLabel: channelLabel(dmChannel, directory, SELF),
+      place: { kind: "dm", names: [channelLabel(dmChannel, directory, SELF)] },
       readState: rs(),
       messages: [msg({ seq: 3, authorMemberId: SELF, body: "ㅎㅇ" })],
       selfMemberId: SELF,
@@ -354,7 +377,7 @@ describe("resolveActorNames: 목록과 패널이 쓰는 글쓴이 해석 한 곳
 describe("글 없이 첨부만 보낸 메시지의 줄 (#4294)", () => {
   const attach = (n: number, mime = "image/jpeg"): MessageAttachment[] =>
     Array.from({ length: n }, (_, i) => ({ id: `a-${mime}-${i}`, name: `파일${i}`, mime, sizeBytes: 1000 }));
-  const base = { channelId: DM, channelLabel: "서연", selfMemberId: SELF, actorFor, nowMs: NOW, readState: rs() };
+  const base = { channelId: DM, channelLabel: "서연", place: DM_PLACE, selfMemberId: SELF, actorFor, nowMs: NOW, readState: rs() };
   const dm = (over: Partial<Message> & { authorMemberId: string }) =>
     dmEntry({ ...base, messages: [msg({ seq: 8, body: "", attachments: attach(2), ...over })] });
 
@@ -396,7 +419,8 @@ describe("글 없이 첨부만 보낸 메시지의 줄 (#4294)", () => {
       msg({ seq: 4, authorMemberId: SEO, channelId: CH, body: "", attachments: attach(1) }),
       actorFor(SEO),
       "#workbench",
-      NOW
+      NOW,
+      CH_PLACE
     );
     expect(e.preview).toBe("사진 1장");
   });
@@ -415,7 +439,7 @@ describe("글 없이 첨부만 보낸 메시지의 줄 (#4294)", () => {
       attachments: attach(3),
       thread: { reply_count: 2, last_reply_seq: 9, last_reply_at: NOW - 60_000 },
     });
-    const common = { channelLabel: "#workbench", selfMemberId: SELF, actorFor, nowMs: NOW, readState: rs({ channelId: CH, lastReadSeq: 5 }) };
+    const common = { channelLabel: "#workbench", place: CH_PLACE, selfMemberId: SELF, actorFor, nowMs: NOW, readState: rs({ channelId: CH, lastReadSeq: 5 }) };
     const withReply = threadEntry({
       ...common,
       root,
@@ -425,5 +449,55 @@ describe("글 없이 첨부만 보낸 메시지의 줄 (#4294)", () => {
     expect(withReply?.rootPreview).toBe("사진 3장");
     const withoutReply = threadEntry({ ...common, root, lastReply: undefined });
     expect(withoutReply?.preview).toBe("내 글에 답글 2개: 사진 3장");
+  });
+});
+
+// 구 서버 경로 빌더 셋이 출처를 어떻게 싣는가(#5696). 판정은 `source.test.ts`가 재고, 여기서는 빌더가 줄의 종류·스레드 여부를
+// 맞게 넘기는지만 잠근다(빌더가 출처를 엉뚱하게 지으면 목록 줄의 둘째 줄이 틀린다).
+describe("구 서버 경로 빌더의 출처 (#5696)", () => {
+  it("DM 줄은 DM 장소 그대로의 출처다", () => {
+    const e = dmEntry({
+      channelId: DM,
+      channelLabel: "서연",
+      place: DM_PLACE,
+      selfMemberId: SELF,
+      actorFor,
+      nowMs: NOW,
+      readState: rs(),
+      messages: [msg({ seq: 8, authorMemberId: SEO })],
+    });
+    expect(e?.source).toEqual({ kind: "place", place: DM_PLACE });
+  });
+
+  it("루트 없는 채널 멘션은 「#채널」이고, 스레드 안(rootId) 멘션은 「스레드 · #채널」이다", () => {
+    const plain = mentionEntry(msg({ seq: 4, authorMemberId: SEO, channelId: CH }), actorFor(SEO), "#workbench", NOW, CH_PLACE);
+    expect(plain.source).toEqual({ kind: "place", place: CH_PLACE });
+    const inThread = mentionEntry(
+      msg({ seq: 5, authorMemberId: SEO, channelId: CH, rootId: "m-root" }),
+      actorFor(SEO),
+      "#workbench",
+      NOW,
+      CH_PLACE
+    );
+    expect(inThread.source).toEqual({ kind: "thread", place: CH_PLACE });
+  });
+
+  it("스레드 줄은 받은 장소로 스레드 출처를 짓는다", () => {
+    const e = threadEntry({
+      channelLabel: "#workbench",
+      place: CH_PLACE,
+      selfMemberId: SELF,
+      actorFor,
+      nowMs: NOW,
+      root: msg({
+        seq: 3,
+        authorMemberId: SELF,
+        channelId: CH,
+        thread: { reply_count: 2, last_reply_seq: 9, last_reply_at: NOW - 60_000 },
+      }),
+      readState: rs({ channelId: CH, lastReadSeq: 5 }),
+      lastReply: undefined,
+    });
+    expect(e?.source).toEqual({ kind: "thread", place: CH_PLACE });
   });
 });

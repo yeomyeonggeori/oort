@@ -35,6 +35,11 @@ import {
   serverSaysAbsent,
 } from "@momo/core/features/capabilities/serverSurfaces";
 import type { ApprovalWait } from "@momo/core/features/agents/workingSignal";
+import {
+  mailboxPlace,
+  type MailboxPlace,
+  type MailboxWireChannel,
+} from "@momo/core/features/inbox/source";
 
 // =============================================================================
 // Inbox / activity reads. EXISTING REST only, no server change (MOMO-599):
@@ -97,6 +102,11 @@ export interface Feed {
 export interface FeedContext {
   directory: Directory;
   labelFor: (channelId: string) => string;
+  /**
+   * 받은함 출처 줄의 장소(#5696, 코어 `mailboxPlace`). 내 채널 목록에 있으면 그 채널로, 없으면 `wire`(서버 항목이 준
+   * 채널 사실)만으로 짓는다 — 목록에 없는 채널의 이름을 다른 곳에서 끌어오지 않는다.
+   */
+  placeFor: (channelId: string, wire?: MailboxWireChannel) => MailboxPlace;
   actorFor: (memberId: string) => ActorNames;
   isLoading: boolean;
 }
@@ -123,6 +133,17 @@ export function useFeedContext(): FeedContext {
     [channels, directory, selfId]
   );
 
+  const placeFor = useCallback(
+    (channelId: string, wire?: MailboxWireChannel): MailboxPlace =>
+      mailboxPlace({
+        channel: channels.find((c) => uuidEq(c.id, channelId)),
+        ...(wire === undefined ? {} : { wire }),
+        directory,
+        selfMemberId: selfId,
+      }),
+    [channels, directory, selfId]
+  );
+
   const actorFor = useCallback(
     (memberId: string): ActorNames => actorNamesIn(directory, memberId),
     [directory]
@@ -133,8 +154,8 @@ export function useFeedContext(): FeedContext {
   // Stable identity: every feed below memoises its rows against this object, so
   // a fresh one per render would rebuild the whole list on every keystroke.
   return useMemo(
-    () => ({ directory, labelFor, actorFor, isLoading }),
-    [directory, labelFor, actorFor, isLoading]
+    () => ({ directory, labelFor, placeFor, actorFor, isLoading }),
+    [directory, labelFor, placeFor, actorFor, isLoading]
   );
 }
 

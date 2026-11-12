@@ -3827,6 +3827,73 @@ export const catalog: MessageCatalog = {
       "value": "열기"
     }
   ],
+  "inbox.source.channelUnknown": [
+    {
+      "type": 0,
+      "value": "채널"
+    }
+  ],
+  "inbox.source.dm": [
+    {
+      "type": 0,
+      "value": "DM · "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    }
+  ],
+  "inbox.source.dmGroup": [
+    {
+      "type": 0,
+      "value": "DM · "
+    },
+    {
+      "type": 1,
+      "value": "names"
+    },
+    {
+      "type": 0,
+      "value": " 외 "
+    },
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "명"
+    }
+  ],
+  "inbox.source.dmUnknown": [
+    {
+      "type": 0,
+      "value": "DM"
+    }
+  ],
+  "inbox.source.task": [
+    {
+      "type": 0,
+      "value": "처리할 일 · 승인 요청"
+    }
+  ],
+  "inbox.source.thread": [
+    {
+      "type": 0,
+      "value": "스레드 · "
+    },
+    {
+      "type": 1,
+      "value": "channel"
+    }
+  ],
+  "inbox.source.threadUnknown": [
+    {
+      "type": 0,
+      "value": "스레드"
+    }
+  ],
   "mobile.attachmentSave.failed": [
     {
       "type": 0,

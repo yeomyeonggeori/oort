@@ -60,6 +60,7 @@ function entry(over: Partial<MailboxEntry> & { key: string; kind: MailboxEntry["
     channelId: CH,
     channelLabel: "서연",
     typeLabel: "DM · 서연",
+    source: { kind: "place", place: { kind: "dm", names: ["서연"] } },
     actor: "서연",
     actorIsAgent: false,
     preview: "회의 어때요",

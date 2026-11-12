@@ -8,6 +8,7 @@ import {
   buildTrayStatus,
   cleanTitle,
   createRowIds,
+  hasFollowedThreadShare,
   readAllTargets,
   TRAY_MAX_ROWS,
   trayCopy,
@@ -249,5 +250,30 @@ describe("「모두 읽음 처리」가 읽을 채널 (#5195)", () => {
         dmChannelIds: dms,
       })
     ).toEqual([{ channelId: upper, seq: 3 }]);
+  });
+});
+
+// 답글 몫(#5690): 채널 읽음 위치로는 끄지 않는다 — 위치를 올리면 받은함 「스레드」 줄까지 읽음이 된다. 그래서 목표 채널에는 들지 않고 따로 센다.
+describe("hasFollowedThreadShare (#5690)", () => {
+  const DM = "0000000a-0000-7000-8000-00000000dd01";
+  const CH_PLAIN = "0a1b2c3d-0000-4000-8000-0000000000c2";
+  const row = (channelId: string, over: Partial<ReadState> = {}): ReadState => ({
+    channelId,
+    lastReadSeq: 10,
+    latestSeq: 10,
+    unreadCount: 0,
+    mentionCount: 0,
+    markedUnreadBeforeSeq: null,
+    ...over,
+  });
+  it("따라가는 스레드의 안 읽은 답글이 있는 줄이 하나라도 있으면 참이고, 그 채널은 읽음 위치 목표에 들지 않는다", () => {
+    const rows = [row(CH_PLAIN, { latestSeq: 9, lastReadSeq: 9, followedUnreadReplyCount: 2 }), row(DM)];
+    expect(hasFollowedThreadShare(rows)).toBe(true);
+    expect(readAllTargets({ readStates: rows, dmChannelIds: new Set([DM]) })).toEqual([]);
+  });
+  it("0·없음(옛 서버)·망가진 값은 거짓이다", () => {
+    expect(hasFollowedThreadShare([])).toBe(false);
+    expect(hasFollowedThreadShare([row(CH_PLAIN, { followedUnreadReplyCount: 0 }), row(DM)])).toBe(false);
+    expect(hasFollowedThreadShare([row(CH_PLAIN, { followedUnreadReplyCount: Number.NaN })])).toBe(false);
   });
 });
