@@ -326,6 +326,7 @@ function pageA() {
     );
   }
   const base = FIRST_AT + FILLER * 600_000;
+  const tombAt = Math.ceil((base + 1_200_000) / 60_000) * 60_000;
   rows.push(
     // 긴 한 문단 — 접기 예산 아래로 짧게 유지해 접기 컨트롤이 붙지 않는다.
     row(channelA, {
@@ -344,13 +345,14 @@ function pageA() {
       createdAtMs: base + 900_000,
     }),
     // 한 저자의 묘비 넷. 첫 번째가 묶음의 머리이고 나머지 셋이 그 밑으로 접힌다.
+    // 같은 사람 묶음은 같은 로컬 분까지만 이어진다(#5603). 넷을 한 분 안(tombAt 부터 10초 간격)에 둔다.
     row(channelA, {
       id: TOMB_HEAD,
       seq: 260,
       authorMemberId: memberId,
       body: null,
       state: "deleted",
-      createdAtMs: base + 1_200_000,
+      createdAtMs: tombAt,
     }),
     row(channelA, {
       id: TOMB_2,
@@ -358,7 +360,7 @@ function pageA() {
       authorMemberId: memberId,
       body: null,
       state: "deleted",
-      createdAtMs: base + 1_240_000,
+      createdAtMs: tombAt + 10_000,
     }),
     row(channelA, {
       id: TOMB_3,
@@ -366,7 +368,7 @@ function pageA() {
       authorMemberId: memberId,
       body: null,
       state: "deleted",
-      createdAtMs: base + 1_280_000,
+      createdAtMs: tombAt + 20_000,
     }),
     row(channelA, {
       id: TOMB_4,
@@ -374,7 +376,7 @@ function pageA() {
       authorMemberId: memberId,
       body: null,
       state: "deleted",
-      createdAtMs: base + 1_320_000,
+      createdAtMs: tombAt + 30_000,
     }),
     // 접힌 묘비 하나(TOMB_3)를 가리키는 인용. 서버가 원본 스냅샷을 동봉한다.
     row(channelA, {
@@ -390,7 +392,7 @@ function pageA() {
         authorMemberId: memberId,
         state: "deleted",
         body: null,
-        createdAtMs: base + 1_280_000,
+        createdAtMs: tombAt + 20_000,
       },
     })
   );
@@ -790,6 +792,11 @@ async function exerciseComposer(browser) {
   await input.evaluate((node) => node.setSelectionRange(1, 1));
   await page.getByTestId("composer-emoji-trigger").click();
   await page.getByTestId("composer-emoji-picker").waitFor({ state: "visible" });
+  // 넣기 고르개는 첫 탭이 「이모티콘」이다(#5482). 🎉 같은 표준 그림 문자는 「이모지」 탭에 있다.
+  await page
+    .getByTestId("composer-emoji-picker")
+    .getByRole("button", { name: "이모지", exact: true })
+    .click();
   await page.getByTestId("picker-insert-🎉").waitFor({ state: "visible" });
   await page.getByTestId("picker-insert-🎉").click();
   await wait(100);
