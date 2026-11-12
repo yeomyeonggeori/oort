@@ -503,7 +503,7 @@ export function entryWindow(raw, { windowMs }) {
 /**
  * 진입 창을 「자리 잡기 전(머리)」과 「그 뒤(몸)」로 가른다. 몸은 가장 새 줄이 **세 프레임 이어** 보이고 그 셋이 1px 안에 있는 첫 프레임부터다.
  * 머리는 그 앞 프레임 전부다 — 가장 새 줄이 없거나(맨 위 · 빈 목록), 엉뚱한 곳에 있다가 사라지는 프레임(검수 r1 H1 의 WebKit 판 A).
- * @returns {{ head: object[], body: object[], summary: string }}
+ * @returns {{ head: object[], body: object[], summary: string, missing: number, maxOffsetPx: number, maxGapPx: number }}
  */
 export function entrySettle(frames, watch = "last") {
   const at = (i) => frames[i]?.watch?.[watch];
@@ -515,7 +515,7 @@ export function entrySettle(frames, watch = "last") {
       break;
     }
   }
-  if (start < 0) return { head: frames, body: [], summary: "" };
+  if (start < 0) return { head: frames, body: [], summary: "", missing: 0, maxOffsetPx: 0, maxGapPx: 0 };
   const head = frames.slice(0, start);
   const settled = at(start);
   const tops = [...new Set(head.map((frame) => frame.top))].join("→");
@@ -524,7 +524,14 @@ export function entrySettle(frames, watch = "last") {
     ? `가장 새 줄 없음 ${head.filter((frame) => frame.watch?.[watch] === null || frame.watch?.[watch] === undefined).length}프레임` +
       `${offsets.length ? ` · 제자리에서 ${round2(Math.max(...offsets))}px 떨어져 보임 ${offsets.length}프레임` : ""} · scrollTop ${tops} · 바닥 거리 최대 ${Math.max(...head.map((frame) => frame.gap ?? 0))}px`
     : "";
-  return { head, body: frames.slice(start), summary };
+  return {
+    head,
+    body: frames.slice(start),
+    summary,
+    missing: head.filter((frame) => frame.watch?.[watch] === null || frame.watch?.[watch] === undefined).length,
+    maxOffsetPx: offsets.length ? round2(Math.max(...offsets)) : 0,
+    maxGapPx: head.length ? Math.max(...head.map((frame) => frame.gap ?? 0)) : 0,
+  };
 }
 
 /** 놓친 프레임을 이 수보다 많이 놓친 창은 「장면 못 만듦」이다(놓친 프레임에 흔들림이 숨을 수 있다). */
@@ -575,8 +582,9 @@ export const TIMELINE_KNOWN_FAILURES = Object.freeze(
     { key: "entry-card|chromium|1280", ...NO_ISSUE, what: `${ENTRY_HEAD}(2프레임) + 진입 중 링크 카드가 0.7초 늦게 서면 마지막 줄 4.75px`, maxUnsettledFrames: 2, maxUnexplainedPx: 4.75 },
     { key: "entry-card|chromium|900", ...NO_ISSUE, what: `${ENTRY_HEAD}(2프레임) + 진입 중 링크 카드가 0.7초 늦게 서면 마지막 줄 4.75px`, maxUnsettledFrames: 2, maxUnexplainedPx: 4.75 },
     { key: "entry-card|chromium|390", ...NO_ISSUE, what: `${ENTRY_HEAD}(2프레임)`, maxUnsettledFrames: 2 },
-    { key: "entry-card|webkit|1280", ...NO_ISSUE, what: `${ENTRY_HEAD}(1~3프레임)`, maxUnsettledFrames: 3 },
-    { key: "entry-card|webkit|900", ...NO_ISSUE, what: `${ENTRY_HEAD}(1~3프레임)`, maxUnsettledFrames: 3 },
+    // 4px 는 검수 r1 · 앞 회차 실측(K3, 세 번에 한 번꼴 — 카드가 서는 순간이 진입의 어느 프레임과 겹치느냐). 오늘 5번은 1px 이었다.
+    { key: "entry-card|webkit|1280", ...NO_ISSUE, what: `${ENTRY_HEAD}(1~3프레임) + 진입 중 카드가 서면 가끔 마지막 줄 4px`, maxUnsettledFrames: 3, maxUnexplainedPx: 4 },
+    { key: "entry-card|webkit|900", ...NO_ISSUE, what: `${ENTRY_HEAD}(1~3프레임) + 진입 중 카드가 서면 가끔 마지막 줄 4px`, maxUnsettledFrames: 3, maxUnexplainedPx: 4 },
     { key: "entry-card|webkit|390", ...NO_ISSUE, what: `${ENTRY_HEAD}(2프레임)`, maxUnsettledFrames: 2 },
     { key: "older|chromium|1280", ...NO_ISSUE, what: "위로 더 불러오기: 옛 쪽이 붙은 다음 프레임에 보던 줄 5.25px 내려앉음", maxUnexplainedPx: 5.25 },
     { key: "older|chromium|900", ...NO_ISSUE, what: "위로 더 불러오기: 옛 쪽이 붙은 다음 프레임에 보던 줄 5.25px 내려앉음", maxUnexplainedPx: 5.25 },
@@ -649,7 +657,8 @@ const judged = (cell) => cell.verdict.startsWith("PASS") || cell.verdict === "FA
 /**
  * 게이트의 마지막 판정(순수). 종료 코드 1 = FAIL, 3 = NOT-MEASURED(통과 아님), 0 = PASS.
  *   - 실패 칸이나 모르는 「장면 못 만듦」이 있으면 FAIL.
- *   - **판정한 칸이 0이면 FAIL** — 부하 · 못 만듦 · 판 없음 어느 까닭이든 「0칸 PASS」는 없다(#5641 검수 r1 H2).
+ *   - **판정한 칸이 0이면 FAIL** — 못 만듦 · 판 없음 · 기록만 어느 까닭이든 「0칸 PASS」는 없다(#5641 검수 r1 H2). 단 부하로 「재지 않음」인
+ *     칸이 있으면 NOT-MEASURED 다(이슈 수용 기준: 부하가 높으면 통과도 실패도 아니다 — 부하가 내려온 뒤 다시 돈다).
  *   - 재지 않음(부하) · 알려진 장면 못 만듦 · 꼭 재야 하는 엔진(WebKit · Chromium)의 판 없음이 하나라도 있으면 NOT-MEASURED.
  * 「알려진 장면 못 만듦」은 통과로 세지 않고 따로 크게 적는다.
  * @returns {{ code: 0 | 1 | 3, out: string[], err: string[] }}
@@ -666,7 +675,7 @@ export function finalVerdict(cells, label = "timeline-still") {
   const unmeasuredLine = `재지 않음(부하) ${notMeasured.length} · 알려진 장면 못 만듦 ${notBuilt.length} · 엔진 판 없음 ${noEngine.length}`;
   const err = [];
   for (const cell of failures) err.push(`FAIL ${cell.set} ${where(cell)} ${(cell.reasons ?? []).join(" · ")}`);
-  const empty = nothingRan(judgedCells.length, label);
+  const empty = notMeasured.length > 0 ? null : nothingRan(judgedCells.length, label);
   if (empty !== null) err.push(`FAIL ${empty} (${unmeasuredLine})`);
   if (err.length > 0) return { code: 1, out: [], err };
   const out = [];

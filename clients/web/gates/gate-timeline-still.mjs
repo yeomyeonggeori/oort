@@ -210,6 +210,7 @@ async function measureCell(meta, run, { onSkip = null } = {}) {
       .join(" · "),
     // 실패 칸의 흔적(수리 칸이 볼 프레임): 판정이 PASS 가 아니면 남긴다(JSON 에만).
     trace: verdict === "PASS" || lastRecord === null ? undefined : lastRecord.frames.map((frame) => [frame.t, frame.watch?.w ?? frame.watch?.last ?? null, frame.top, frame.gap]),
+    head: result.head ?? null,
     missed: gaps?.missed ?? null,
     cross: gaps?.cross ?? null,
   });
@@ -267,6 +268,7 @@ async function entryScene(browser, engine, vp, { withCard }) {
       numbers,
       verdict,
       extra: { unsettled },
+      head: unsettled ? { frames: unsettled, ms: settle.body[0].t, maxOffsetPx: settle.maxOffsetPx, maxGapPx: settle.maxGapPx, missing: settle.missing } : null,
       note: `표본 ${record.frames.length}프레임(그리기 직전) · 자리 잡기 전 ${unsettled}프레임 · 숫자 넷은 그 뒤 ${settle.body.length}프레임 · 진입 중 옛 쪽 읽기 ${backend.state.olderReads}번`,
     };
   } finally {

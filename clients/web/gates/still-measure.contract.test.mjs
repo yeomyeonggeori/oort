@@ -45,8 +45,8 @@ const KNOWN_SHAPE = [
   ["entry-card|chromium|1280", "#5641", 4.75, null, null, 2, null, null, null],
   ["entry-card|chromium|900", "#5641", 4.75, null, null, 2, null, null, null],
   ["entry-card|chromium|390", "#5641", null, null, null, 2, null, null, null],
-  ["entry-card|webkit|1280", "#5641", null, null, null, 3, null, null, null],
-  ["entry-card|webkit|900", "#5641", null, null, null, 3, null, null, null],
+  ["entry-card|webkit|1280", "#5641", 4, null, null, 3, null, null, null],
+  ["entry-card|webkit|900", "#5641", 4, null, null, 3, null, null, null],
   ["entry-card|webkit|390", "#5641", null, null, null, 2, null, null, null],
   ["older|chromium|1280", "#5641", 5.25, null, null, null, null, null, null],
   ["older|chromium|900", "#5641", 5.25, null, null, null, null, null, null],
@@ -284,9 +284,10 @@ describe("마지막 판정 — 0칸 PASS 없음 · 못 만든 칸은 통과가 �
     expect(finalVerdict([noWebkit, { ...noWebkit, engine: "chromium" }]).code).toBe(1);
   });
 
-  it("부하로 모두 재지 않았거나 기록만 있으면 FAIL(1), 일부만 재지 않았으면 NOT-MEASURED(3), 실패가 있으면 FAIL(1)", () => {
+  it("부하로 재지 않은 칸이 있으면(모두여도) NOT-MEASURED(3), 기록만 있으면 FAIL(1), 실패가 있으면 FAIL(1)", () => {
     const skipped = { ...pass, verdict: "재지 않음" };
-    expect(finalVerdict([skipped, skipped]).code).toBe(1);
+    expect(finalVerdict([skipped, skipped]).code).toBe(3);
+    expect(finalVerdict([skipped, notBuilt]).code).toBe(3);
     expect(finalVerdict([{ ...pass, verdict: "기록만(PASS)" }]).code).toBe(1);
     expect(finalVerdict([pass, skipped]).code).toBe(3);
     expect(finalVerdict([pass, { ...pass, verdict: "FAIL", reasons: ["마지막 줄 5px(> 1)"] }]).code).toBe(1);
