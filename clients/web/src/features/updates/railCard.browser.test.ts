@@ -447,7 +447,9 @@ describe.skipIf(ENGINES.length === 0)("카드 틀의 초점 고리: 키보드로
       await settledCard(page);
       await page.keyboard.press("Escape");
       await page.locator('[data-testid="update-card"]').waitFor({ state: "detached" });
-      await page.locator('[data-testid="update-pill"]').focus();
+      // 닫힌 카드가 초점을 알약으로 돌려주는 것은 조금 뒤(약 15ms)다. 그 전에 Enter 를 누르면 뒤늦은
+      // 돌려주기가 새 카드에서 초점을 빼앗아 카드가 닫힌다 — 초점이 돌아온 것을 보고 누른다.
+      await page.waitForFunction(() => document.activeElement?.getAttribute("data-testid") === "update-pill");
       await page.keyboard.press("Enter");
       await settledCard(page);
       expect(await ring(page)).toEqual({ focused: true, style: "solid", width: 2 });
