@@ -2135,10 +2135,16 @@ export const catalog: MessageCatalog = {
       "value": "Tasks"
     }
   ],
+  "desktop.workSession.backToListLabel": [
+    {
+      "type": 0,
+      "value": "Session list"
+    }
+  ],
   "desktop.workSession.listTitle": [
     {
       "type": 0,
-      "value": "Active sessions"
+      "value": "Recent sessions"
     }
   ],
   "desktop.workSession.pageTitle": [

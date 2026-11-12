@@ -11,7 +11,7 @@ import {
   type PointerEvent,
 } from "react";
 import { ListChecks, SquareTerminal } from "lucide-react";
-import { Link, useLocation, useNavigate, useSearchParams } from "react-router-dom";
+import { Link, useLocation, useNavigate, useNavigationType, useSearchParams } from "react-router-dom";
 import type { SharedWorkSession } from "@momo/core/lib/api";
 import { uuidEq } from "@momo/core/lib/api";
 import { isRealtimeConnected } from "@momo/core/lib/realtimeEvents";
@@ -58,7 +58,6 @@ import {
   rememberWorkReturnSpot,
   takeWorkReturnSpot,
   workConsoleSessionPath,
-  WORK_RETURN_STATE,
 } from "@/features/workConsole/model";
 import { useFormatMessage } from "@/i18n/useFormatMessage";
 import { isDesktop } from "@/lib/tauri";
@@ -212,6 +211,7 @@ export function WorkJobsRoute() {
   const { workspaceId, session, realtime, connStatus } = useSession();
   const navigate = useNavigate();
   const location = useLocation();
+  const navigationType = useNavigationType();
   const offline = useOffline();
   const [params, setParams] = useSearchParams();
   const openId = params.get("card");
@@ -629,7 +629,12 @@ export function WorkJobsRoute() {
   // 세션 상세에서 돌아왔으면 열었던 줄에 초점을 두고 스크롤을 되돌린다(한 번). 줄이 아직 없으면(첫 읽기 중) 다음 렌더에서 다시 본다.
   const returnSpotRef = useRef<{ rowId: string; scrollTop: number } | null | undefined>(undefined);
   useLayoutEffect(() => {
-    if (returnSpotRef.current === undefined) returnSpotRef.current = takeWorkReturnSpot();
+    // 되찾는 것은 세션 화면에서 「← 작업」·브라우저 뒤로 돌아온 방문뿐이다. 사이드바로 새로 들어온 방문은 묵은 자리를 버린다.
+    if (returnSpotRef.current === undefined) {
+      const spot = takeWorkReturnSpot();
+      const back = navigationType === "POP" || (location.state as { restoreWork?: boolean } | null)?.restoreWork === true;
+      returnSpotRef.current = back ? spot : null;
+    }
     const spot = returnSpotRef.current;
     if (spot === null || spot === undefined) return;
     const row = rowRefs.current.get(spot.rowId.toLowerCase());
@@ -642,6 +647,8 @@ export function WorkJobsRoute() {
     }
     setActiveId(spot.rowId);
     row.focus({ preventScroll: true });
+    // 자리를 비운 사이 줄이 옮겨 갔으면 되돌린 스크롤에서 줄이 가려질 수 있다: 보이게만 맞춘다.
+    row.scrollIntoView?.({ block: "nearest" });
   });
   const rovingId =
     activeId !== null && orderedIds.some((id) => uuidEq(id, activeId))
@@ -881,7 +888,7 @@ export function WorkJobsRoute() {
                         }
                         // 세션 상세에서 돌아오면 이 줄에 초점과 스크롤이 되돌아온다(#5673).
                         rememberWorkReturnSpot({ rowId: row.id, scrollTop: listRef.current?.scrollTop ?? 0 });
-                        navigate(workConsoleSessionPath(row.id), { state: { from: WORK_RETURN_STATE } });
+                        navigate(workConsoleSessionPath(row.id));
                       };
                       return (
                         <JobRow

@@ -303,7 +303,7 @@ const SURFACES: Record<SurfaceId, ServerSurface> = {
     // #2780: 정적 값은 거짓으로 두고, 온라인 호스트가 있으면 런타임에 펼친다
     // (`HOST_GATED_SURFACE_IDS`). 아래 문구는 호스트가 없을 때 하는 말이다.
     provided: false,
-    absentReason: "이 워크스페이스에 연결된 코드 실행 호스트가 아직 없습니다.",
+    absentReason: "이 워크스페이스에 연결된 실행하는 컴퓨터가 아직 없어요.",
     fallback: "실행하는 컴퓨터가 연결되면 세션이 열려요. 그동안 에이전트와는 채널에서 이야기할 수 있어요.",
     measured:
       "셀프호스트 1차 목표(2026-09-07 §5-2): workd/T3 데몬을 쓰지 않으므로 " +

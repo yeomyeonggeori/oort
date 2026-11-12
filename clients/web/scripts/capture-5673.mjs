@@ -5,7 +5,7 @@
 //   npm run build && OUT_DIR=<dir> CAPTURE_PORT=<port> node scripts/capture-5673.mjs
 //
 // 백엔드가 없다(고정 응답은 capture-5640의 것을 그대로 쓴다). 사람·컴퓨터 이름은 가상 인물이다. 재는 것:
-//   - 세션 상세 머리: 「← 작업」과 세션 이름, 제목에 「작업 콘솔」 0줄, 목록 이름 「진행 중인 세션」
+//   - 세션 상세 머리: 「← 작업」과 세션 이름, 제목에 「작업 콘솔」 0줄, 목록 이름 「최근 세션」
 //   - 「작업」 목록을 굴린 뒤 세션 줄을 열고 「← 작업」(그리고 브라우저 뒤로)으로 돌아오면 열었던 줄에 초점, 스크롤 위치 유지
 //   - 1280·900·390 × 밝게·어둡게 캡처
 // **라이브 서버·데스크탑 앱·실기기 왕복은 runtime-unverified**다.
@@ -16,7 +16,7 @@ import { homedir } from "node:os";
 import { mkdirSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { chromium } from "playwright";
+import { chromium, webkit } from "playwright";
 import { startGuardedPreview } from "../gates/preview-guard.mjs";
 import { advanceToAccount } from "../e2e/advanceOnboarding.mjs";
 
@@ -321,7 +321,7 @@ async function headScene(browser, origin, scheme, viewport, tag) {
   check(`head ${tag}: 제목은 세션 이름`, head.h1 === macWaiting.label, head.h1);
   check(`head ${tag}: 「← 작업」 단추와 낭독 이름`, head.back === "작업" && head.backAria === "작업으로 돌아가기", head);
   check(`head ${tag}: 화면 글에 「작업 콘솔」 0줄`, !head.text.includes("작업 콘솔"), "");
-  if (viewport.width >= 900) check(`head ${tag}: 목록 이름 「진행 중인 세션」`, head.listTitle === "진행 중인 세션", head.listTitle);
+  if (viewport.width >= 900) check(`head ${tag}: 목록 이름 「최근 세션」`, head.listTitle === "최근 세션", head.listTitle);
   check(`head ${tag}: 가로 넘침 0`, (await overflowX(page)) <= 0, await overflowX(page));
   await shot(page, `5673-session-${tag}`);
   await context.close();
@@ -349,6 +349,76 @@ async function returnScene(browser, origin, scheme, viewport, tag, how) {
   await context.close();
 }
 
+/** 세션을 두 번 갈아탄 뒤 「← 작업」: 언제나 「작업」 목록, 처음 연 줄에 초점·스크롤 유지(좁은 폭은 상세의 「← 세션 목록」으로 목록을 거쳐 갈아탄다). */
+async function switchScene(browser, origin, scheme, viewport, tag, engine) {
+  const { context, page } = await openContext(browser, origin, { scheme, viewport, waiting: [macWaiting.sessionId, macQuiet.sessionId] });
+  await page.evaluate(() => { document.querySelector("[data-team-board-list]").scrollTop = 70; });
+  await page.waitForTimeout(150);
+  const before = await listScroll(page);
+  await openSession(page, macQuiet.sessionId);
+  const narrow = viewport.width < 900;
+  const pick = async (sid) => {
+    if (narrow) {
+      await page.getByTestId("work-detail-back").click();
+      await page.waitForFunction(() => !window.location.hash.includes("session="));
+    }
+    await page.locator(`[data-testid="work-console-row"] [data-session-id="${sid}"], [data-testid="work-console-row"][data-session-id="${sid}"]`).first().click();
+    await page.waitForFunction((x) => window.location.hash.includes(`session=${x}`), sid);
+    await page.waitForTimeout(150);
+  };
+  await pick(macWaiting.sessionId);
+  await pick(macQuiet.sessionId);
+  await pick(macWaiting.sessionId);
+  await page.getByTestId("work-console-back").click();
+  await page.getByTestId("work-jobs-route").waitFor();
+  await page.waitForTimeout(250);
+  const hash = await page.evaluate(() => window.location.hash);
+  const focused = await focusedRowId(page);
+  const after = await listScroll(page);
+  check(`switch ${engine} ${tag}: 세션을 세 번 갈아탄 뒤 「← 작업」은 「작업」 목록`, !hash.includes("session=") && !hash.includes("view=console"), hash);
+  check(`switch ${engine} ${tag}: 처음 연 줄에 초점`, focused === macQuiet.sessionId, focused);
+  check(`switch ${engine} ${tag}: 스크롤 위치 유지(${before} → ${after})`, Math.abs(after - before) <= 1, { before, after });
+  await context.close();
+}
+
+/** 머리가 한 번만 서는가(넓은 폭은 안쪽 「←」·이름이 눈에 없고, 좁은 폭은 「← 세션 목록」), 키보드 순서에서 「← 작업」이 상세 안쪽보다 앞. */
+async function headerOnceScene(browser, origin, scheme, viewport, tag) {
+  const { context, page } = await openContext(browser, origin, { scheme, viewport });
+  await openSession(page, macWaiting.sessionId);
+  const m = await page.evaluate(() => {
+    const vis = (el) => el !== null && el.getClientRects().length > 0 && getComputedStyle(el).visibility !== "hidden";
+    const inner = document.querySelector('[data-testid="work-detail-back"]');
+    const h2 = document.querySelector('[data-testid="work-detail"] h2, [data-work-console-detail] h2');
+    const route = document.querySelector('[data-testid="work-console-back"]');
+    const order = route && inner ? (route.compareDocumentPosition(inner) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0 : null;
+    const h2Box = h2?.getBoundingClientRect();
+    return { innerVisible: vis(inner), innerText: inner?.textContent?.trim() ?? null, h2Visible: h2 ? h2Box.width > 2 && h2Box.height > 2 : false, order, activeIsRoute: document.activeElement === route };
+  });
+  if (viewport.width >= 900) check(`header ${tag}: 넓은 폭에서 안쪽 「←」와 이름이 눈에 없다`, !m.innerVisible && !m.h2Visible, m);
+  else check(`header ${tag}: 좁은 폭에서 안쪽은 「← 세션 목록」 하나`, m.innerVisible && m.innerText === "세션 목록" && !m.h2Visible, m);
+  check(`header ${tag}: 키보드 순서에서 「← 작업」이 안쪽보다 앞`, m.order === true, m);
+  await shot(page, `5673r1-head-${tag}`);
+  await context.close();
+}
+
+/** 사이드바로 새로 들어온 「작업」은 묵은 자리를 붙들지 않는다. */
+async function staleScene(browser, origin, engine) {
+  const { context, page } = await openContext(browser, origin, { scheme: "light", viewport: { width: 1280, height: 560 }, waiting: [macWaiting.sessionId, macQuiet.sessionId] });
+  await page.evaluate(() => { document.querySelector("[data-team-board-list]").scrollTop = 70; });
+  await page.waitForTimeout(150);
+  await openSession(page, macQuiet.sessionId);
+  await page.evaluate(() => { window.location.hash = "#/inbox"; });
+  await page.waitForTimeout(400);
+  await page.getByTestId("nav-work").click();
+  await page.getByTestId("work-jobs-route").waitFor();
+  await page.waitForTimeout(300);
+  const focused = await focusedRowId(page);
+  const after = await listScroll(page);
+  check(`stale ${engine}: 사이드바로 새로 들어오면 옛 줄 초점 없음`, focused !== macQuiet.sessionId, focused);
+  check(`stale ${engine}: 스크롤은 처음 자리(0)`, after === 0, after);
+  await context.close();
+}
+
 async function main() {
   mkdirSync(OUT_DIR, { recursive: true });
   const preview = await startGuardedPreview({ webRoot: WEB_ROOT, port: PORT, portEnvVar: "CAPTURE_PORT" });
@@ -362,6 +432,23 @@ async function main() {
       }
     }
     await returnScene(browser, preview.origin, "light", { width: 1280, height: 560 }, "1280-light", "back");
+    await staleScene(browser, preview.origin, "chromium");
+    for (const viewport of [{ width: 1280, height: 560 }, { width: 900, height: 560 }, { width: 390, height: 700 }]) {
+      await switchScene(browser, preview.origin, "light", viewport, `${viewport.width}-light`, "chromium");
+      await headerOnceScene(browser, preview.origin, "light", viewport, `${viewport.width}-light`);
+    }
+    await headerOnceScene(browser, preview.origin, "dark", { width: 1280, height: 560 }, "1280-dark");
+    await headerOnceScene(browser, preview.origin, "dark", { width: 390, height: 700 }, "390-dark");
+    const wk = await webkit.launch();
+    try {
+      for (const viewport of [{ width: 1280, height: 560 }, { width: 390, height: 700 }]) {
+        await switchScene(wk, preview.origin, "light", viewport, `${viewport.width}-light`, "webkit");
+      }
+      await returnScene(wk, preview.origin, "light", { width: 1280, height: 560 }, "1280-light-wk", "back");
+      await staleScene(wk, preview.origin, "webkit");
+    } finally {
+      await wk.close();
+    }
   } finally {
     await browser.close();
     await preview.stop?.();

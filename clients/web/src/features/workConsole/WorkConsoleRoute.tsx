@@ -7,7 +7,7 @@ import {
   PanelLeft,
   Server,
 } from "lucide-react";
-import { Link, useLocation, useNavigate, useSearchParams } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { cn } from "@/design/lib/cn";
 import { Button } from "@/design/ui/button";
 import { useSession } from "@/app/session";
@@ -55,7 +55,6 @@ import {
 import {
   workConsoleLocation,
   workConsoleSessionPath,
-  WORK_RETURN_STATE,
   type WorkConsoleLocation,
 } from "./model";
 import { BlockedReason } from "@/features/common/BlockedReason";
@@ -193,13 +192,8 @@ export function WorkConsoleRoute() {
   const navigate = useNavigate();
   const offline = useOffline();
   const [params, setParams] = useSearchParams();
-  const location = useLocation();
-  // 「작업」 목록에서 열고 왔으면 「← 작업」은 브라우저 뒤로 가기와 같은 한 걸음이다(목록이 초점·자리를 되찾는다).
-  // 주소로 바로 온 사람에게는 돌아갈 기록이 없으니 「작업」 주소로 간다.
-  const cameFromWork = useRef(
-    (location.state as { from?: string } | null)?.from === WORK_RETURN_STATE
-  ).current;
-  const backToWork = () => (cameFromWork ? navigate(-1) : navigate("/work"));
+  // 「← 작업」은 언제나 「작업」 목록이다(세션을 몇 번 갈아탄 뒤에도). 열었던 줄·스크롤은 목록이 기억한 자리로 되찾는다.
+  const backToWork = () => navigate("/work", { state: { restoreWork: true } });
   const selectedParam = params.get("session")?.trim() || null;
   // 직접 조작 동선을 달고 온 주소인가 (LIVE-5b). 채팅 표면의 `?work=&control=1`
   // 과 같은 부사이고, 여기서도 같은 일만 한다: 도착지에서 확인 단계를 무장할 뿐
@@ -360,7 +354,10 @@ export function WorkConsoleRoute() {
               <ArrowLeft className="size-4" aria-hidden="true" />
               {formatMessage("desktop.workSession.backLabel")}
             </button>
-            <h1 className="min-w-0 truncate text-body font-semibold text-ink">
+            <h1
+              className="min-w-0 truncate text-body font-semibold text-ink"
+              title={selected?.label}
+            >
               {selected?.label ?? formatMessage("desktop.workSession.pageTitle")}
             </h1>
           </div>
@@ -570,6 +567,7 @@ export function WorkConsoleRoute() {
                 live={live}
                 nowMs={nowMs}
                 headingLevel={2}
+                routeHeader
                 wide={detailWide}
                 onWideChange={(nextWide) =>
                   setWideSessionId(nextWide ? selected.id : null)

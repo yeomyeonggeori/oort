@@ -297,6 +297,7 @@ export const messageKeys = [
   "desktop.workPermission.allowInApp",
   "desktop.workSession.backAria",
   "desktop.workSession.backLabel",
+  "desktop.workSession.backToListLabel",
   "desktop.workSession.listTitle",
   "desktop.workSession.pageTitle",
   "expressions.add.adminsOnly",
@@ -1737,6 +1738,7 @@ export const argumentSpecs = {
   "desktop.workPermission.allowInApp": {},
   "desktop.workSession.backAria": {},
   "desktop.workSession.backLabel": {},
+  "desktop.workSession.backToListLabel": {},
   "desktop.workSession.listTitle": {},
   "desktop.workSession.pageTitle": {},
   "expressions.add.adminsOnly": {},
@@ -3471,6 +3473,7 @@ export interface MessageArgs {
   "desktop.workPermission.allowInApp": Record<string, never>;
   "desktop.workSession.backAria": Record<string, never>;
   "desktop.workSession.backLabel": Record<string, never>;
+  "desktop.workSession.backToListLabel": Record<string, never>;
   "desktop.workSession.listTitle": Record<string, never>;
   "desktop.workSession.pageTitle": Record<string, never>;
   "expressions.add.adminsOnly": Record<string, never>;

@@ -1967,10 +1967,16 @@ export const catalog: MessageCatalog = {
       "value": "작업"
     }
   ],
+  "desktop.workSession.backToListLabel": [
+    {
+      "type": 0,
+      "value": "세션 목록"
+    }
+  ],
   "desktop.workSession.listTitle": [
     {
       "type": 0,
-      "value": "진행 중인 세션"
+      "value": "최근 세션"
     }
   ],
   "desktop.workSession.pageTitle": [
