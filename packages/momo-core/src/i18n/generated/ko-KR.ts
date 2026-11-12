@@ -7626,6 +7626,12 @@ export const catalog: MessageCatalog = {
       "value": "마지막 확인"
     }
   ],
+  "settings.updates.notNow": [
+    {
+      "type": 0,
+      "value": "지금 말고"
+    }
+  ],
   "settings.updates.offChip": [
     {
       "type": 0,

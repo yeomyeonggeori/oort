@@ -1122,6 +1122,7 @@ export const messageKeys = [
   "settings.updates.holdTitle",
   "settings.updates.installRowDescription",
   "settings.updates.lastCheckedLabel",
+  "settings.updates.notNow",
   "settings.updates.offChip",
   "settings.updates.offSentence",
   "settings.updates.restartNow",
@@ -2726,6 +2727,7 @@ export const argumentSpecs = {
   "settings.updates.holdTitle": {},
   "settings.updates.installRowDescription": {},
   "settings.updates.lastCheckedLabel": {},
+  "settings.updates.notNow": {},
   "settings.updates.offChip": {},
   "settings.updates.offSentence": {},
   "settings.updates.restartNow": {},
@@ -4177,6 +4179,7 @@ export interface MessageArgs {
   "settings.updates.holdTitle": Record<string, never>;
   "settings.updates.installRowDescription": Record<string, never>;
   "settings.updates.lastCheckedLabel": Record<string, never>;
+  "settings.updates.notNow": Record<string, never>;
   "settings.updates.offChip": Record<string, never>;
   "settings.updates.offSentence": Record<string, never>;
   "settings.updates.restartNow": Record<string, never>;

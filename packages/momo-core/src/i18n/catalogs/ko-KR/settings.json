@@ -22,6 +22,7 @@
   "settings.updates.installRowDescription": "설치가 끝나면 앱이 스스로 다시 실행돼요. 이 맥에서 도는 작업이 있으면 끝난 뒤에 해요.",
   "settings.updates.holdTitle": "작업이 끝나면 다시 시작해요",
   "settings.updates.restartNow": "지금 다시 시작",
+  "settings.updates.notNow": "지금 말고",
   "settings.updates.cutLine": "지금 다시 시작하면 끊겨요: {items}",
   "settings.updates.cutPanes": "터미널 칸 {count, number}개",
   "settings.updates.cutSessions": "작업 세션 {count, number}개",

@@ -8034,6 +8034,12 @@ export const catalog: MessageCatalog = {
       "value": "Last checked"
     }
   ],
+  "settings.updates.notNow": [
+    {
+      "type": 0,
+      "value": "Not now"
+    }
+  ],
   "settings.updates.offChip": [
     {
       "type": 0,

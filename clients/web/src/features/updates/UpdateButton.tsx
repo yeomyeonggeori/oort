@@ -13,9 +13,11 @@ import {
 } from "./model";
 import {
   checkForUpdate,
+  deferRelaunch,
   installUpdate,
   relaunchIntoUpdate,
   useRelaunchCountdown,
+  useRelaunchDeferrable,
   useRelaunchHold,
   useUpdateState,
 } from "./store";
@@ -90,8 +92,15 @@ export function UpdateButton({ placement = "row" }: { placement?: "row" | "rail"
   const state = useUpdateState();
   const countdown = useRelaunchCountdown();
   const hold = useRelaunchHold();
+  const deferrable = useRelaunchDeferrable();
   const formatMessage = useFormatMessage();
   const [open, setOpen] = useState(false);
+  const openRef = useRef(open);
+  openRef.current = open;
+  // 사람이 누르지 않았는데 열린 카드인가(#5661 H2). 그 카드는 초점을 가져가지 않는다: 받기가 끝나거나 카운트다운이 시작되는
+  // 순간 입력창에서 글을 쓰던 사람의 다음 Space·Enter가 카드 단추(「지금 다시 시작」)를 누르게 된다. 알약을 눌러 연 카드만 초점이 들어간다.
+  const autoOpened = useRef(false);
+  const countdownWas = useRef(countdown);
   const buttonRef = useRef<HTMLButtonElement>(null);
   const tooltipId = useId();
   const cutId = useId();
@@ -107,9 +116,22 @@ export function UpdateButton({ placement = "row" }: { placement?: "row" | "rail"
   // 설치가 끝나 카운트다운이 돌기 시작하면 카드를 연다: 곧 앱이 사라질 것이므로
   // 어디서 시작했든(설정 화면 포함) 이 알약이 마지막 안내다. 로컬 작업 때문에 기다릴 때도
   // 열린다: 왜 다시 시작하지 않는지가 이 카드에 있다. 펼침·접힘 어느 쪽이든 마운트된 쪽이 연다.
+  // 기다린 뒤 카운트다운이 시작될 때도 다시 연다(H3): 그 사이 카드를 닫았으면 예고 없이 앱이 꺼진다. 카운트다운이 **시작될 때만**
+  // 연다 — 「지금 말고」·다시 기다림으로 멈출 때 다시 열면 방금 닫은 카드가 되살아난다.
   useEffect(() => {
-    if (state.kind === "installed") setOpen(true);
+    if (state.kind === "installed" && !openRef.current) {
+      autoOpened.current = true;
+      setOpen(true);
+    }
   }, [state.kind]);
+  useEffect(() => {
+    const started = countdownWas.current === null && countdown !== null;
+    countdownWas.current = countdown;
+    if (started && state.kind === "installed" && !openRef.current) {
+      autoOpened.current = true;
+      setOpen(true);
+    }
+  }, [countdown, state.kind]);
 
   // 설치를 마쳤는데 이 맥의 작업이 끝나기를 기다린다(카운트다운 없음).
   const holding = state.kind === "installed" && hold !== null && countdown === null;
@@ -125,6 +147,7 @@ export function UpdateButton({ placement = "row" }: { placement?: "row" | "rail"
     state.kind === "installing" ? progressPercent(state.downloaded, state.total) : null;
 
   const onPill = () => {
+    autoOpened.current = false;
     setOpen(true);
     if (state.kind === "available") void installUpdate();
   };
@@ -171,6 +194,13 @@ export function UpdateButton({ placement = "row" }: { placement?: "row" | "rail"
         align={rail ? "end" : "start"}
         sideOffset={8}
         opener={buttonRef.current}
+        // 저절로 연 카드는 초점을 옮기지 않고(H2), 닫힐 때도 초점이 카드 밖 어딘가(입력창)에 있으면 알약으로 끌어오지 않는다.
+        onOpenAutoFocus={(event) => {
+          if (autoOpened.current) event.preventDefault();
+        }}
+        onCloseAutoFocus={(event) => {
+          if (autoOpened.current && document.activeElement && document.activeElement !== document.body) event.preventDefault();
+        }}
         aria-label="앱 업데이트"
         data-testid="update-card"
         data-update-state={state.kind}
@@ -229,7 +259,13 @@ export function UpdateButton({ placement = "row" }: { placement?: "row" | "rail"
           </div>
         )}
         {state.kind === "installed" && (
-          <div className="flex justify-end">
+          <div className="flex justify-end gap-2">
+            {deferrable && (
+              // 기다린 뒤의 카운트다운에만 선다(H3): 사람이 방금 누른 다시 시작이 아니다. 누르면 이번 설치의 자동 다시 시작을 멈추고 「지금」만 남는다.
+              <Button size="sm" variant="ghost" onClick={deferRelaunch} data-testid="update-card-defer">
+                {formatMessage("settings.updates.notNow")}
+              </Button>
+            )}
             {holding ? (
               // 기다리는 동안 「지금 다시 시작」은 무엇이 끊기는지 한 줄(위 부제)을 읽힌 뒤 묻지 않고 진행한다.
               <Button
