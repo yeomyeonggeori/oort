@@ -32,6 +32,10 @@ import { AT_BOTTOM_SLACK_PX } from "./navigation";
 export const SCROLLING_QUIET_MS = 150;
 /** 휠 · 터치가 이 안에 왔으면 지금의 스크롤은 사람의 손이 움직인 것으로 본다(휠 이벤트는 그 스크롤 이벤트보다 한두 프레임 먼저 온다). */
 export const HAND_SCROLL_MS = SCROLLING_QUIET_MS * 2;
+/** `expectScripted` 뒤 첫 스크롤 이벤트를 기다리는 시간. 부드러운 스크롤은 시작이 늦을 수 있다. */
+export const SCRIPTED_START_MS = 1000;
+/** 스크립트의 스크롤이 이어지는 동안: 마지막 스크롤 이벤트 뒤 이만큼 조용해지면 끝난 것이다. */
+export const SCRIPTED_QUIET_MS = HAND_SCROLL_MS;
 
 interface Anchor {
   /** 줄의 이름(`rowAttribute` 의 값). 가상 목록은 앞에 붙어도 그대로인 번호, 스레드는 메시지 id. */
@@ -122,12 +126,19 @@ export interface ScrollHold {
    * 무를 수 있다 — 어느 쪽이 먼저 도는지는 엔진과 타이밍에 달렸다.
    */
   expectBottom(): void;
+  /**
+   * 스크립트가 이 목록을 곧 옮긴다(`scrollToIndex` 로 「최신 메시지로 이동」 · 메시지로 이동 · 안 읽은 곳으로 이동 — #5649 검수 H1).
+   * 그 스크롤은 휠 · 터치 직후여도 **사람의 손이 아니다**: 손으로 치면 이 모듈이 자리를 붙들어 부드러운 스크롤을 도중에 멈춘다(WebKit 실측:
+   * 휠 뒤 30~160ms 에 누르면 바닥에 360~526px 못 미침). 그 스크롤이 이어지는 동안(마지막 스크롤 이벤트 뒤 `SCRIPTED_QUIET_MS`, 처음 이벤트가 늦어도
+   * `SCRIPTED_START_MS`)과, 사람이 휠 · 터치로 끼어들기 전까지만이다.
+   */
+  expectScripted(): void;
   /** 관찰을 멈춘다. */
   stop(): void;
 }
 
 export function holdScrollPosition(scroller: HTMLElement, options: ScrollHoldOptions): ScrollHold {
-  if (typeof ResizeObserver === "undefined") return { expectBottom: () => {}, stop: () => {} };
+  if (typeof ResizeObserver === "undefined") return { expectBottom: () => {}, expectScripted: () => {}, stop: () => {} };
   const { rowAttribute, coOwner } = options;
   const prependToken = () => coOwner?.prependToken() ?? 0;
   const findRow = (key: string) => scroller.querySelector(`[${rowAttribute}="${CSS.escape(key)}"]`);
@@ -155,10 +166,13 @@ export function holdScrollPosition(scroller: HTMLElement, options: ScrollHoldOpt
 
   /** 휠 · 터치가 마지막으로 온 때. 사람의 손이 움직인 스크롤과 스크립트가 옮긴 스크롤을 가른다. */
   let lastHandInputAt = Number.NEGATIVE_INFINITY;
+  /** `expectScripted` 가 연 창의 끝. 이 안에서는 스크롤을 스크립트의 것으로 친다(스크롤 이벤트마다 이어진다). 사람이 휠 · 터치를 하면 닫힌다. */
+  let scriptedUntil = Number.NEGATIVE_INFINITY;
   const onHandInput = () => {
     lastHandInputAt = performance.now();
+    scriptedUntil = Number.NEGATIVE_INFINITY;
   };
-  const handScrolling = () => performance.now() - lastHandInputAt <= HAND_SCROLL_MS;
+  const handScrolling = () => performance.now() > scriptedUntil && performance.now() - lastHandInputAt <= HAND_SCROLL_MS;
 
   /** 지금의 줄 높이 변화는 다른 손(가상 목록)의 몫이다 — 손대지 않는다. */
   const coOwnerHandles = () =>
@@ -210,6 +224,7 @@ export function holdScrollPosition(scroller: HTMLElement, options: ScrollHoldOpt
     }
     if (top !== lastTop) lastForeignDirection = top < lastTop ? "up" : "down";
     lastForeignScrollAt = performance.now();
+    if (scriptedUntil > lastForeignScrollAt) scriptedUntil = lastForeignScrollAt + SCRIPTED_QUIET_MS;
     // 스크롤과 같은 프레임에 줄 높이가 바뀌었다(이 이벤트는 그 프레임의 ResizeObserver 보다 먼저 온다). 보던 줄은 이 스크롤이 옮긴 만큼만
     // 움직였어야 한다 — 나머지는 줄 높이 변화가 민 것이다. 여기서 다시 적으면 그 밀림이 새 기준에 섞여 사라지므로, 적어 둔 자리를 스크롤이
     // 옮긴 만큼만 옮겨 두고(높이 기록은 그대로) 바로잡기는 곧 올 ResizeObserver 에게 맡긴다: 바로잡는 곳이 한 군데여야 다시 확인(settle)이
@@ -319,6 +334,9 @@ export function holdScrollPosition(scroller: HTMLElement, options: ScrollHoldOpt
       wasAtBottom = true;
       place(scroller.scrollHeight);
       armSettle("bottom");
+    },
+    expectScripted: () => {
+      scriptedUntil = performance.now() + SCRIPTED_START_MS;
     },
     stop: () => {
       if (settleFrame !== 0) cancelAnimationFrame(settleFrame);

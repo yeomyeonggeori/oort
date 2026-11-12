@@ -254,6 +254,10 @@ function ThreadPanelFrame({
   useLayoutEffect(() => {
     const node = repliesScrollRef.current;
     if (node === null) return;
+    // 스크롤 상자(와 그 scrollTop)는 패널이 `key` 로 고정이라 스레드를 바꿔도 이어진다: 새 스레드는 처음(루트가 보이는 맨 위)에서 연다.
+    // 앞 스레드의 scrollTop 이 남으면 「스크롤해 내려와 바닥」 판정이 새 스레드의 뼈대(짧은 순간의 최대 scrollTop)에서 참이 되어 맨 아래 ·
+    // 어중간한 자리에서 열린다(#5649 검수 H2). 손을 걸기 전에 놓는다.
+    node.scrollTop = 0;
     const hold = holdScrollPosition(node, plainListHold("data-message-id"));
     holdRef.current = hold;
     return () => {

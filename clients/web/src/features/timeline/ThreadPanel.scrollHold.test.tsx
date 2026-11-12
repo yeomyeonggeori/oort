@@ -15,7 +15,8 @@ import { ThreadPanel } from "./ThreadPanel";
 //     진짜 엔진에서 잠근다. 클래스만 붙이고 손을 안 걸면 위쪽 답글이 자랄 때 읽던 답글이 그 높이만큼 밀린다.
 //   - 평범한 목록 규칙(`plainListHold("data-message-id")`)으로 건다 — 「맨 위에 선 채로는 바닥이 아니다」가 그 안에 있어, 스레드를 열 때
 //     답글이 채워지며 바닥으로 끌려가지 않는다(진짜 엔진에서는 `scrollHold.chromium.test.ts` · 게이트 T0 가 잰다).
-//   - 루트가 바뀌면 앞 손을 걷고 새로 건다.
+//   - 루트가 바뀌면 앞 손을 걷고 새로 건다. 그때 스크롤 상자(패널이 `key` 로 고정이라 앞 스레드의 scrollTop 이 이어진다)를 처음으로 돌려놓고
+//     건다 — 안 그러면 새 스레드가 읽던 자리가 아닌 맨 아래 · 어중간한 자리에서 열린다(검수 H2).
 //   - 내가 단 답글이 목록에 서면 `expectBottom` 을 부른다(직접 scrollTop 을 놓으면 보던 답글 지키기가 되돌린다).
 // 진짜 엔진의 숫자(WebKit · Chromium: 보던 답글 ≤ 2px · 바닥 ≤ 1px · 열면 맨 위)는 `gates/gate-thread-hold.mjs` 가 잰다.
 // =============================================================================
@@ -27,7 +28,7 @@ const OTHER = "human-other";
 
 const api = vi.hoisted(() => ({ fetch: vi.fn(), read: vi.fn() }));
 const composer = vi.hoisted(() => ({ onSent: null as (() => void) | null }));
-type FakeHold = { node: HTMLElement; options: unknown; expectBottom: ReturnType<typeof vi.fn>; stop: ReturnType<typeof vi.fn> };
+type FakeHold = { node: HTMLElement; options: unknown; scrollTopWhenMade: number; expectBottom: ReturnType<typeof vi.fn>; stop: ReturnType<typeof vi.fn> };
 const holds = vi.hoisted(() => ({ made: [] as FakeHold[] }));
 
 vi.mock("@momo/core/lib/api", async (original) => ({
@@ -52,7 +53,7 @@ vi.mock("./ThreadComposer", () => ({
 vi.mock("./scrollHold", () => ({
   plainListHold: (rowAttribute: string) => ({ plainList: rowAttribute }),
   holdScrollPosition: (node: HTMLElement, options: unknown) => {
-    const hold: FakeHold = { node, options, expectBottom: vi.fn(), stop: vi.fn() };
+    const hold: FakeHold = { node, options, scrollTopWhenMade: node.scrollTop, expectBottom: vi.fn(), stop: vi.fn() };
     holds.made.push(hold);
     return hold;
   },
@@ -122,6 +123,22 @@ describe("스레드 답글 목록의 자리 지키기 (#5649)", () => {
     await waitFor(() => expect(holds.made).toHaveLength(2));
     expect(holds.made[0].stop).toHaveBeenCalledTimes(1);
     expect(holds.made[1].stop).not.toHaveBeenCalled();
+  });
+
+  it("루트가 바뀌면 앞 스레드의 scrollTop 을 처음으로 돌려놓고 새 손을 건다 — 받아 둔 스레드로 바꿔도 같다", async () => {
+    api.fetch.mockResolvedValue({ messages: [reply(11)] });
+    const { rerender, client, container } = mount();
+    await waitFor(() => expect(holds.made).toHaveLength(1));
+    // 앞 스레드를 10px 내려 읽던 중이다(jsdom 은 scrollTop 을 레이아웃과 무관하게 들고 있다).
+    const box = scrollBox(container) as HTMLElement;
+    box.scrollTop = 10;
+    expect(box.scrollTop).toBe(10);
+    client.setQueryData(["thread", WS, CH, "other-root"], { messages: [{ ...reply(21), rootId: "other-root" }] });
+    rerender(tree(client, rootOf("other-root")));
+    await waitFor(() => expect(holds.made).toHaveLength(2));
+    // 새 손이 걸리는 순간의 위치가 처음이다(손이 그 위치로 「바닥이었나」를 적는다).
+    expect(holds.made[1].scrollTopWhenMade).toBe(0);
+    expect(box.scrollTop).toBe(0);
   });
 
   it("내가 단 답글이 목록에 서면 손에게 「이제 바닥」을 알린다 — 남의 답글에는 알리지 않는다", async () => {

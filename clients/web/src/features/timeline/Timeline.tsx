@@ -633,6 +633,8 @@ export function Timeline({
         // `behavior` 를 부드럽게 두지 않는 이유: 바로 뒤에 워처가 마운트된 행에
         // `scrollIntoView` 를 한 번 더 건다. 애니메이션이 도는 중에 그 호출이
         // 끼면 목록이 두 목적지 사이에서 튄다.
+        // 스크립트가 옮기는 스크롤이다: 휠 직후여도 사람의 손으로 치지 않게 자리 지키기에 알린다(#5649 검수 H1).
+        holdRef.current?.expectScripted();
         ref.current?.scrollToIndex({ index, align: "center" });
         return true;
       },
@@ -815,6 +817,7 @@ export function Timeline({
 
   const jumpToLatest = useCallback(() => {
     const seq = newestSeqRef.current;
+    holdRef.current?.expectScripted();
     ref.current?.scrollToIndex({
       index: "LAST",
       align: "end",
@@ -829,6 +832,7 @@ export function Timeline({
     const seq = firstUnreadMessageSeq(itemsRef.current, index);
     // 실행 자체가 진입이다. IO가 늦어도 이 epoch에서 필을 다시 세우지 않는다.
     setUnreadJumpLatched(true);
+    holdRef.current?.expectScripted();
     ref.current?.scrollToIndex({
       index,
       align: "start",

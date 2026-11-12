@@ -64,6 +64,7 @@ declare global {
        */
       run: (steps: string[], inFrame?: boolean) => Promise<Probe>;
       expectBottom: () => void;
+      expectScripted: () => void;
     };
   }
 }
@@ -152,6 +153,7 @@ function installLab() {
       hold = holdScrollPosition(box, virtual ? virtualListHold(() => lab.token) : plainListHold(rowAttribute));
     },
     expectBottom: () => hold?.expectBottom(),
+    expectScripted: () => hold?.expectScripted(),
     run: async (steps, inFrame = false) => {
       const edge = box.getBoundingClientRect().top;
       const rows = [...list.children] as HTMLElement[];
@@ -174,6 +176,7 @@ function installLab() {
             box.dispatchEvent(new WheelEvent("wheel", { deltaY: amount }));
             box.scrollTop += amount;
           }
+          else if (name === "expectScripted") hold?.expectScripted();
           else if (name === "scrollToEnd") box.scrollTop = box.scrollHeight;
           else if (name === "margin") list.classList.add("margin-300");
           else if (name === "prepend") lab.token += 1;
@@ -328,6 +331,21 @@ describe("scrollHold — 진짜 엔진의 배치 (#5649, Chromium)", () => {
     // 앞에 붙었다(`firstItemIndex` 가 바뀜): 그 높이는 목록이 스스로 메운다 — 손대지 않는다.
     const prepended = await scene({ kind: "virtual", hold: true, startTop: 500, steps: ["prepend:1+growAbove:120"] });
     expect(prepended.moved).toBe(120);
+  });
+
+  it.skipIf(!chromiumAvailable)("가상 목록 규칙: 휠 직후에 스크립트가 옮긴 스크롤(「최신 메시지로 이동」)은 손대지 않는다 — `expectScripted` 가 없으면 사람의 스크롤로 오해해 붙든다(#5649 검수 H1)", async () => {
+    // 휠 30px 뒤 곧바로 스크립트가 30px 옮기며 위 밖 줄이 120px 자란다(같은 프레임). 알렸으면 목록의 몫: 손대지 않는다(보던 줄 −30 −30 +120 = +60).
+    const scripted = await scene({ kind: "virtual", hold: true, startTop: 500, steps: ["wheel:30", "expectScripted:1", "scroll:30+growAbove:120"] });
+    expect(scripted.moved).toBe(60);
+    // 알리지 않으면 휠 직후의 스크롤이라 사람의 손으로 쳐 붙든다 — 스크립트의 이동을 무르는 길이다(H1 의 원인).
+    const unannounced = await scene({ kind: "virtual", hold: true, startTop: 500, steps: ["wheel:30", "scroll:30+growAbove:120"] });
+    expect(Math.abs(unannounced.moved - -60)).toBeLessThanOrEqual(1);
+    // 알린 뒤 사람이 휠로 끼어들면 창이 닫혀 다시 사람의 손으로 친다.
+    const handBack = await scene({ kind: "virtual", hold: true, startTop: 500, steps: ["expectScripted:1", "wheel:30", "growAbove:120+wheel:30"] });
+    expect(Math.abs(handBack.moved - -60)).toBeLessThanOrEqual(1);
+    // 알린 스크롤이 이어지는 동안(스크롤 이벤트마다 창이 이어진다): 시작 1초 안의 첫 스크롤 뒤 300ms 안에 이어진 스크롤도 스크립트의 것이다.
+    const continued = await scene({ kind: "virtual", hold: true, startTop: 500, steps: ["wheel:30", "expectScripted:1", "scroll:30", "wait:100", "scroll:30+growAbove:120"] });
+    expect(continued.moved).toBe(30);
   });
 
   it.skipIf(!chromiumAvailable)("가상 목록 규칙: 목록이 같은 변화를 한 번 더 보정해도 그리기 전에 되돌린다 — 가만히, 그리고 아래로 내리는 중", async () => {

@@ -13,11 +13,13 @@
 //   T5 창 높이 800 → 640 → 800: 위 읽기 ≤ 2px · 바닥 ≤ 1px
 //   T6 움직임 줄이기 설정에서 T1
 //   T7 한 화면에 다 들어오는 짧은 스레드: 답글이 자라 넘쳐도 맨 위 그대로(맨 위에 선 채로는 「바닥」이 아니다)
+//   T8 스레드 A 를 10~45px 내려 둔 채(창 높이 640, 루트가 상자보다 긴 아직 안 받은 스레드 B 로) 바꿔 열기 → B 는 맨 위(scrollTop ≤ 1) (검수 H2)
 // 타임라인(가상 목록):
 //   L1 가만히 위 읽기 +120px (대조 — 이 칸 전부터 지키던 장면)
 //   L2 휠로 **내리는 중** 위 밖 줄 ±120px → 이동 차 ≤ 2px · 거꾸로 간 프레임 0
 //   L3 내리다 멈춘 지 60ms 뒤 ±120px → ≤ 2px
 //   L4 올리는 중 · 올리다 멈춘 직후 +120px — **기록만**(가상 목록의 위쪽 보정 몫, 이 칸이 바꾸지 않는 길)
+//   L5 휠로 한 번 내린 뒤 30 · 80 · 160ms 에 「최신 메시지로 이동」 → 끝 바닥 거리가 휠 없이 누른 값과 ±1px 안(검수 H1 — WebKit 에서 360~526px 못 미쳤다)
 //
 // 재는 법: 프레임마다 그려진 모양(rAF 뒤의 태스크에서 읽고, 그 사이 DOM 이 바뀐 표본은 버린다 — #5641 `still-measure` 와 같은 규칙)의
 // 보던 줄 위 끝(창 좌표) · scrollTop · 바닥 거리를 적는다. 휠 장면은 A/B 다: 같은 휠 열을 자람 없이 돌린 값이 기준이라 엔진이 휠을
@@ -73,6 +75,9 @@ const channelId = "00000000-0000-7000-8000-000000000231";
 const ROOT_MSG = "0199ffff-0000-7000-8000-000000000a20";
 /** 답글 둘뿐인 짧은 스레드의 루트(T7). */
 const SHORT_ROOT_MSG = "0199ffff-0000-7000-8000-000000000a22";
+/** 루트가 답글 상자보다 긴 스레드의 루트(T8). 답글 30개, 답글 응답은 500ms 늦다(뼈대가 서는 순간을 만든다). */
+const LONG_ROOT_MSG = "0199ffff-0000-7000-8000-000000000a24";
+const LONG_BODY = Array.from({ length: 5 }, (_, i) => `${i + 1}번째 문단: 릴리스 노트에 넣을 변경을 한 줄씩 적어 두었어요. 읽고 빠진 것이 있으면 이어서 적어 주세요.`).join("\n\n");
 
 const session = {
   accessToken: "gate-only-not-a-credential",
@@ -105,15 +110,17 @@ function history() {
     const at = todayAt(9, 0) + i * 120_000;
     const isRoot = i === 30;
     const isShortRoot = i === 32;
+    const isLongRoot = i === 34;
     rows.push(
       row({
-        id: isRoot ? ROOT_MSG : isShortRoot ? SHORT_ROOT_MSG : `0199ffff-0000-7000-8000-${String(0xa00 + i).padStart(12, "0")}`,
+        id: isRoot ? ROOT_MSG : isShortRoot ? SHORT_ROOT_MSG : isLongRoot ? LONG_ROOT_MSG : `0199ffff-0000-7000-8000-${String(0xa00 + i).padStart(12, "0")}`,
         seq: 100 + i,
         authorMemberId: i % 2 === 0 ? peerId : meId,
-        body: isRoot ? "릴리스 노트 초안은 이 스레드에서 이어 갈게요." : isShortRoot ? "짧은 확인은 이 스레드에서 할게요." : `${i + 1}번째 이야기입니다. 오늘 일정과 남은 일을 정리했어요.`,
+        body: isRoot ? "릴리스 노트 초안은 이 스레드에서 이어 갈게요." : isShortRoot ? "짧은 확인은 이 스레드에서 할게요." : isLongRoot ? LONG_BODY : `${i + 1}번째 이야기입니다. 오늘 일정과 남은 일을 정리했어요.`,
         createdAtMs: at,
         ...(isRoot ? { thread: { reply_count: 30, last_reply_seq: 1029, last_reply_at: at + 30 * 60_000 } } : {}),
         ...(isShortRoot ? { thread: { reply_count: 2, last_reply_seq: 1101, last_reply_at: at + 10 * 60_000 } } : {}),
+        ...(isLongRoot ? { thread: { reply_count: 30, last_reply_seq: 1229, last_reply_at: at + 30 * 60_000 } } : {}),
       })
     );
   }
@@ -145,7 +152,7 @@ function json(route, body, status = 200) {
 }
 
 async function installBackend(context) {
-  const state = { messages: history(), replies: replies(), shortReplies: replies(SHORT_ROOT_MSG, 2, 1100, 0xd00) };
+  const state = { messages: history(), replies: replies(), shortReplies: replies(SHORT_ROOT_MSG, 2, 1100, 0xd00), longReplies: replies(LONG_ROOT_MSG, 30, 1200, 0xf00) };
   await context.route("**/healthz", (route) => json(route, { status: "ok" }));
   await context.route("**/v1/**", async (route) => {
     const request = route.request();
@@ -164,7 +171,12 @@ async function installBackend(context) {
     if (path.endsWith("/work-sessions")) return json(route, { sessions: [] });
     if (/\/expressions$/.test(path)) return json(route, { workspaceId, version: "1", baseVersion: null, reset: true, addPolicy: "members", items: [] });
     if (path.endsWith("/replies")) {
-      return json(route, { messages: path.toLowerCase().includes(SHORT_ROOT_MSG) ? state.shortReplies : state.replies, following: true });
+      const lower = path.toLowerCase();
+      if (lower.includes(LONG_ROOT_MSG)) {
+        await wait(500);
+        return json(route, { messages: state.longReplies, following: true });
+      }
+      return json(route, { messages: lower.includes(SHORT_ROOT_MSG) ? state.shortReplies : state.replies, following: true });
     }
     if (path.includes("/messages")) {
       if (url.searchParams.has("after") || url.searchParams.has("before")) return json(route, { messages: [] });
@@ -620,7 +632,7 @@ async function bottomScene(page, rows, scene, act, built) {
   });
 }
 
-async function threadScenes(page, backend, rows, tag) {
+async function threadScenes(page, backend, rows, tag, measured) {
   const list = { name: `스레드${tag}`, selector: THREAD, rowSelector: "[data-message-id]", park: 0.5 };
   const opened = await openThread(page);
   rows.push({
@@ -725,6 +737,110 @@ async function threadScenes(page, backend, rows, tag) {
     verdict: overflow >= 400 && tops.length >= 10 && worstTop !== null && worstTop <= 1 ? "PASS" : "FAIL",
     note: `${overflow >= 400 ? "" : "장면을 못 만들었다 · "}넘친 높이 ${overflow}px · 가장 큰 scrollTop ${worstTop} · 프레임 ${tops.length}`,
   });
+  await threadSwitchScene(page, backend, rows, tag, measured);
+}
+
+/** T8: 스레드 A 를 조금 내려 둔 채 긴 루트의 B 로 바꿔 열면 B 는 루트가 보이는 맨 위에서 열린다. `measured` 는 B 루트 높이를 따로 잰 값이다. */
+async function threadSwitchScene(page, backend, rows, tag, measured) {
+  // 띠 [M−64, M] 안의 세 자리(M 은 잰 B 루트 높이와 창 높이 640 에서 나온다 — 1280×640 에서 M−64 ≥ 1 이 되게 본문 길이를 맞춰 두었다).
+  const bandNow = measured.rootHeight + 32 - 459;
+  for (const delta of [bandNow - 55, bandNow - 30, bandNow - 8].map((value) => Math.max(1, value))) {
+    const scene = `스레드${tag} 바꿔 열기 — A 를 ${delta}px 내려 둔 채 긴 루트의 B 로`;
+    await page.setViewportSize({ width: viewport.width, height: 640 });
+    await wait(300);
+    await openThread(page, ROOT_MSG, backend.replies.length + 1);
+    const box = await page.locator(THREAD).evaluate((node) => ({ clientHeight: node.clientHeight, max: node.scrollHeight - node.clientHeight }));
+    // 뼈대가 서는 순간의 최대 scrollTop M = 루트 높이 + 32 − 상자 높이. A 의 scrollTop 이 [M−64, M] 에 들어야 틈이 열린다.
+    const band = measured.rootHeight + 32 - box.clientHeight;
+    // 장면이 서려면 M > 0 이고 delta 가 띠 안이다. 띠에서 벗어난 delta 는 건너뛰지 않고 「장면을 못 만들었다」로 FAIL 한다(헛도는 칸 금지).
+    const inBand = band > 0 && delta >= band - 64 && delta <= band;
+    await page.locator(THREAD).evaluate((node, top) => {
+      node.scrollTop = top;
+    }, delta);
+    await wait(500);
+    const set = await page.locator(THREAD).evaluate((node) => node.scrollTop);
+    await openThread(page, LONG_ROOT_MSG, 31);
+    const samples = [];
+    for (let i = 0; i < 6; i += 1) {
+      samples.push(await page.locator(THREAD).evaluate((node) => Math.round(node.scrollTop)));
+      await wait(250);
+    }
+    const worst = Math.max(...samples.map(Math.abs));
+    const built = inBand && Math.abs(set - delta) <= 1;
+    rows.push({
+      scene,
+      verdict: built && worst <= 1 ? "PASS" : "FAIL",
+      note: `${built ? "" : "장면을 못 만들었다 · "}B 루트 ${measured.rootHeight}px · 상자 ${box.clientHeight}px · 띠 M=${band} · A 의 scrollTop ${set} · 연 뒤 scrollTop ${samples.join("/")}`,
+    });
+    await page.setViewportSize(viewport);
+    await wait(300);
+  }
+}
+
+/** B 루트의 높이를 따로 잰다(받아 두지 않은 채로 T8 을 하려고 별도 맥락에서). */
+async function measureLongRoot(browser) {
+  const context = await browser.newContext({ viewport: { width: viewport.width, height: 640 }, deviceScaleFactor: 2, locale: "ko-KR", colorScheme: "light" });
+  try {
+    await installBackend(context);
+    const page = await context.newPage();
+    await installPage(page);
+    await openChannel(page);
+    await openThread(page, LONG_ROOT_MSG, 31);
+    // 루트 높이가 두 번 연달아 같을 때까지 기다려 읽는다(그림 · 글꼴이 늦게 자리를 잡을 수 있다).
+    let rootHeight = -1;
+    for (let i = 0; i < 10; i += 1) {
+      const now = await page.locator(THREAD).evaluate((node) => Math.round(node.querySelector("[data-message-id]").getBoundingClientRect().height));
+      if (now === rootHeight) break;
+      rootHeight = now;
+      await wait(300);
+    }
+    return { rootHeight };
+  } finally {
+    await context.close();
+  }
+}
+
+/** L5: 휠로 한 번 내린 뒤 `afterMs` 에 「최신 메시지로 이동」을 누른다(null 이면 휠 없이 — 기준). 끝 바닥 거리를 돌려준다. */
+async function jumpRun(page, afterMs) {
+  await park(page, TIMELINE, 0.4);
+  await page.waitForFunction(() => document.querySelector('[data-testid="jump-latest"]') !== null, null, { timeout: 5000 }).catch(() => {});
+  const box = await page.locator(TIMELINE).boundingBox();
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await page.evaluate(() => {
+    window.__hold.node = document.querySelector('[data-testid="timeline-virtuoso"]');
+    window.__hold.watch = null;
+  });
+  await record(page);
+  await wait(100);
+  if (afterMs !== null) {
+    await page.mouse.wheel(0, WHEEL.dy);
+    await wait(afterMs);
+  }
+  const pill = await page.evaluate(() => {
+    const button = document.querySelector('[data-testid="jump-latest"]');
+    if (button === null) return false;
+    button.click();
+    return true;
+  });
+  await wait(1800);
+  const { frames } = await stop(page);
+  const last = frames[frames.length - 1];
+  return { pill, gap: last ? last.gap : null, top: last ? last.top : null };
+}
+
+async function jumpScenes(page, rows) {
+  const base = await jumpRun(page, null);
+  rows.push({ scene: "타임라인 최신 메시지로 이동 — 휠 없이(기준)", verdict: base.pill && base.gap !== null ? "기록" : "FAIL", gapPx: base.gap, note: `${base.pill ? "" : "장면을 못 만들었다(이동 버튼이 없다) · "}끝 바닥 거리 ${base.gap}px` });
+  for (const afterMs of [30, 80, 160]) {
+    const run = await jumpRun(page, afterMs);
+    const built = run.pill && base.gap !== null && run.gap !== null;
+    rows.push({
+      scene: `타임라인 휠 뒤 ${afterMs}ms 에 최신 메시지로 이동`,
+      verdict: built && run.gap <= base.gap + LIMIT.bottomPx ? "PASS" : "FAIL",
+      gapPx: run.gap,
+      note: `${built ? "" : "장면을 못 만들었다 · "}끝 바닥 거리 ${run.gap}px (휠 없이 ${base.gap}px)`,
+    });
+  }
 }
 
 async function timelineScenes(page, rows) {
@@ -738,6 +854,7 @@ async function timelineScenes(page, rows) {
   await justStoppedScene(page, list, rows, { dy: WHEEL.dy, change: "shrink" });
   await scrollingScene(page, list, rows, { dy: -WHEEL.dy, change: "grow", recordOnly: true });
   await justStoppedScene(page, list, rows, { dy: -WHEEL.dy, change: "grow", recordOnly: true });
+  await jumpScenes(page, rows);
 }
 
 async function runEngine(browser, engine) {
@@ -748,7 +865,7 @@ async function runEngine(browser, engine) {
   await installPage(page);
   await openChannel(page);
   if (sets.includes("timeline")) await timelineScenes(page, rows);
-  if (sets.includes("thread")) await threadScenes(page, backend, rows, "");
+  if (sets.includes("thread")) await threadScenes(page, backend, rows, "", await measureLongRoot(browser));
   await context.close();
   if (sets.includes("thread")) {
     // T6 움직임 줄이기: 같은 위 읽기 장면을 한 번.
