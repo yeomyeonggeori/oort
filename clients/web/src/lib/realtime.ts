@@ -157,6 +157,8 @@ export function watchExpressionChanges(handle: RealtimeHandle, workspaceId: stri
 function heardWebSocket(onHeard: () => void): typeof WebSocket | null {
   const Base = globalThis.WebSocket;
   if (typeof Base !== "function") return null;
+  // 이벤트 대상이 아닌 바탕(시험·게이트의 가짜 소켓)은 감싸지 않는다: 생성자의 addEventListener 가 던지면 연결이 아예 안 열린다(#5700).
+  if (typeof Base.prototype?.addEventListener !== "function") return null;
   return class HeardWebSocket extends Base {
     constructor(url: string | URL, protocols?: string | string[]) {
       super(url, protocols);

@@ -1144,6 +1144,7 @@ export function ChatShell() {
     const members =
       stressCount === 0 && channel && channel.kind !== "dm" ? (
         <ChannelMemberPanel
+          channelId={channel.id}
           channelName={channel.name ?? label}
           members={channelMembers}
           status={channelMemberListStatus}
