@@ -851,10 +851,11 @@ function approvalFacts(
   if (needsMe && entry !== null) {
     // 붙든 줄은 결정된 모습만: 영수증 한 줄(꼬리표·되돌릴 수 없음·만료·카드 링크를 걷는다, 수리 4회차). 원장이 같은 run의 새 요청을
     // 내놓았으면 영수증 아래에 그 요청을 새 줄처럼 바로 세운다 — 그 단추는 움직인 뒤 막기가 맡는다.
+    const shown = nextAsk ?? entry.decision;
     return {
       decision: nextAsk,
-      item: nextAsk?.item ?? null,
-      intent: nextAsk === null ? null : decisions.intentFor(row.channelId, runId, nextAsk.approvalId),
+      item: shown.item,
+      intent: decisions.intentFor(row.channelId, runId, shown.approvalId),
       waiting: null,
       receipt: entry.receipt,
     };
@@ -1003,7 +1004,7 @@ function JobRow({
           {row.channel}
         </span>
       </button>
-      {workJobResultHasControls(row, kind, desktop) && !(approval?.receipt && approval.decision === null && row.pr === null) && (
+      {workJobResultHasControls(row, kind, desktop) && (
         // 결과 열 안으로 내려앉는 컨트롤(단추 안에 단추를 둘 수 없어 형제로 둔다). 같은 열 격자라 넓을 때는 결과 열, 좁을 때는 첫 열에 선다.
         <div className="work-jobs-row px-3 pb-2" data-testid="work-job-extras">
           <span data-col="extra" className="min-w-0">

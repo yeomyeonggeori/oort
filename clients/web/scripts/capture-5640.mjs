@@ -24,7 +24,7 @@ import { homedir } from "node:os";
 import { mkdirSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { chromium } from "playwright";
+import { chromium, webkit } from "playwright";
 import { startGuardedPreview } from "../gates/preview-guard.mjs";
 import { advanceToAccount } from "../e2e/advanceOnboarding.mjs";
 
@@ -113,12 +113,19 @@ const json = (route, body, status = 200) => route.fulfill({ status, contentType:
 
 /** 서버 흉내(#5639): 주인이 `include=jobs`로 읽을 때만 대기 요청이 있는 실행 중 맥 세션이 `waiting`. */
 function boardView(state) {
-  // 결정이 닿은 run은 서버가 다시 돌린다(phase `running`).
+  // 결정이 닿은 run은 실제 서버처럼(수리 4회차, 검수 2회차 `realRun`): 거부하면 바로 끝나고(`reject_run` → 보드 `stopped`), 승인하면
+  // 줄을 선다(`queued`). `finishOnApprove`면 승인한 run이 곧바로 끝난다.
+  const decided = (row) => {
+    const approve = state.decidedRuns.get(row.runId);
+    if (approve === false) return { ...row, status: "cancelled", state: "stopped", phase: "cancelled", endedAtMs: Date.now() };
+    if (state.finishOnApprove) return { ...row, status: "done", state: "done", phase: "succeeded", endedAtMs: Date.now() };
+    return { ...row, status: "queued", phase: "queued" };
+  };
   const view = (row) =>
     row.origin === "host" && row.owner.memberId === memberId && state.waiting.has(row.sessionId)
       ? { ...row, state: "waiting" }
       : row.runId && state.decidedRuns.has(row.runId)
-        ? { ...row, phase: "running" }
+        ? decided(row)
         : row;
   const second = state.twoDeciders ? [runApproval2] : [];
   const mine = [macWaiting, runApproval, ...second, runNonDecider, macQuiet, runWorking, ...doneRows].map(view);
@@ -154,10 +161,17 @@ async function installRoutes(context, state) {
       if (state.decision === "fail") return json(route, {}, 500);
       // 서버 왕복(수리 3회차): 결정은 바로 기록되고 답은 `decisionDelayMs` 뒤에 온다.
       state.decidedIds.add(approvalId);
+      let approve = true;
+      try {
+        approve = JSON.parse(route.request().postData() ?? "{}").approve !== false;
+      } catch {
+        approve = true; // 본문이 없으면 승인으로 본다(이 하네스의 모든 결정은 본문을 싣는다)
+      }
+      state.decidedHow.push(approve);
       const decidedRun = [...approvals, approval2].find((a) => a.id === approvalId)?.runId;
-      if (decidedRun) state.decidedRuns.add(decidedRun);
+      if (decidedRun) state.decidedRuns.set(decidedRun, approve);
       if (state.decisionDelayMs) await sleep(state.decisionDelayMs);
-      return json(route, { status: "approved", decided_by: memberId, decided_at_ms: Date.now() });
+      return json(route, { status: approve ? "approved" : "rejected", decided_by: memberId, decided_at_ms: Date.now() });
     }
     if (path.endsWith("/approvals")) {
       state.ledgerReads += 1;
@@ -419,9 +433,9 @@ async function installDesktop(page, origin) {
   }, origin);
 }
 
-async function openContext(browser, origin, { scheme, viewport, deviceScaleFactor = 1, waiting = [macWaiting.sessionId], noNativeAnchor = false, desktop = false, decision = "ok", server = {} }) {
-  const state = { waiting: new Set(waiting), boardReads: 0, ledgerReads: 0, decision, decisions: 0, decidedIds: new Set(), decidedRuns: new Set(), decidedOrder: [], ...server };
-  const context = await browser.newContext({ viewport, deviceScaleFactor, colorScheme: scheme, reducedMotion: "reduce", serviceWorkers: "block", locale: "ko-KR" });
+async function openContext(browser, origin, { scheme, viewport, deviceScaleFactor = 1, waiting = [macWaiting.sessionId], noNativeAnchor = false, desktop = false, decision = "ok", server = {}, touch = false }) {
+  const state = { waiting: new Set(waiting), boardReads: 0, ledgerReads: 0, decision, decisions: 0, decidedIds: new Set(), decidedRuns: new Map(), decidedOrder: [], decidedHow: [], ...server };
+  const context = await browser.newContext({ viewport, deviceScaleFactor, colorScheme: scheme, reducedMotion: "reduce", serviceWorkers: "block", locale: "ko-KR", ...(touch ? { hasTouch: true } : {}) });
   await installRoutes(context, state);
   const page = await context.newPage();
   await installRealtime(page);
@@ -803,6 +817,89 @@ async function shiftGuardScene(browser, origin) {
   }
 }
 
+// ---- 결정 × 입력 × 손떨림 × 간격 (수리 4회차, 검수 2회차 H1의 표) ----------------------------------------------------------
+
+const decisionCenter = async (page, rowId, which) => {
+  const box = await page.locator('[data-testid="work-job"]', { has: page.locator(`[data-job-id="${rowId}"]`) }).getByTestId(`work-job-approval-${which}`).boundingBox();
+  return { x: Math.round(box.x + box.width / 2), y: Math.round(box.y + box.height / 2) };
+};
+
+/**
+ * 결정자 줄 둘(맨 위, scrollTop 0)에서 A를 승인 또는 거부하고, 같은 점(손떨림 0·1px)을 간격 뒤 한 번 더 누른다. 마우스는 Playwright 마우스,
+ * 터치는 CDP `Input.dispatchTouchEvent`(손떨림이면 `touchMove` 1px, Chromium만). 서버는 실제처럼(거부 → run 끝남). 나간 결정은 1건이어야 한다.
+ */
+async function matrixScene(browser, origin, engine) {
+  const inputs = engine === "chromium" ? ["mouse", "touch"] : ["mouse"];
+  const summary = [];
+  for (const which of ["approve", "reject"]) {
+    for (const input of inputs) {
+      for (const jitter of [0, 1]) {
+        for (const gapMs of [250, 1100, 1600, 2500, 4000]) {
+          const tag = `matrix-${engine}-${which}-${input}-jit${jitter}-gap${gapMs}`;
+          const viewport = input === "touch" ? { width: 390, height: 844 } : { width: 1280, height: 800 };
+          const { context, page, state } = await openContext(browser, origin, { scheme: "light", viewport, touch: input === "touch", server: { twoDeciders: true, decisionDelayMs: 60, roundTripMs: 60 } });
+          await twoDecidersReady(page);
+          // 원장이 와서 줄이 막 올라온 1초(막기)가 지난 뒤, 사람이 본 단추를 누른다.
+          await sleep(1100);
+          const a = await decisionCenter(page, runApproval.runId, which);
+          const cdp = input === "touch" ? await context.newCDPSession(page) : null;
+          const press = async (dx) => {
+            if (cdp) {
+              await cdp.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [{ x: a.x, y: a.y, id: 1 }] });
+              if (dx > 0) await cdp.send("Input.dispatchTouchEvent", { type: "touchMove", touchPoints: [{ x: a.x + dx, y: a.y + dx, id: 1 }] });
+              await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+            } else {
+              if (dx > 0) await page.mouse.move(a.x + dx, a.y + dx);
+              await page.mouse.down();
+              await page.mouse.up();
+            }
+          };
+          if (!cdp) await page.mouse.move(a.x, a.y);
+          await press(0);
+          await sleep(gapMs);
+          const under = await underPoint(page, a.x + jitter, a.y + jitter);
+          await press(jitter);
+          await sleep(900);
+          const ok = state.decisions === 1 && state.decidedHow[0] === (which === "approve");
+          check(`${tag} 나간 결정 1건(A ${which})`, ok, { decisions: state.decisions, how: state.decidedHow, under });
+          summary.push(`${which}/${input}/jit${jitter}/+${gapMs}=${state.decisions}`);
+          await context.close();
+        }
+      }
+    }
+  }
+  console.log(`MEASURE matrix-${engine}: ${summary.join(" ")}`);
+}
+
+/** 거부한 줄의 영수증(그 자리, 결정된 모습만) 캡처: 1280·390 × 밝게·어둡게. */
+async function rejectReceiptScene(browser, origin, scheme, viewport) {
+  const tag = `reject-held-${viewport.width}-${scheme}`;
+  const { context, page, state } = await openContext(browser, origin, { scheme, viewport, server: { twoDeciders: true, decisionDelayMs: 60, roundTripMs: 60 } });
+  await twoDecidersReady(page);
+  await sleep(1100);
+  const a = await decisionCenter(page, runApproval.runId, "reject");
+  await page.mouse.move(a.x, a.y);
+  await page.mouse.click(a.x, a.y);
+  await page.waitForFunction(() => [...document.querySelectorAll('[data-testid="work-job-approval-settled"]')].some((e) => e.getClientRects().length > 0));
+  await sleep(500);
+  const held = await page.evaluate((rid) => {
+    const li = document.querySelector(`[data-testid="work-job-row"][data-job-id="${rid}"]`).closest('[data-testid="work-job"]');
+    const visible = (sel) => [...li.querySelectorAll(sel)].filter((e) => e.getClientRects().length > 0).map((e) => e.textContent.trim());
+    return {
+      section: li.closest("[data-section]").getAttribute("data-section"),
+      receipt: visible('[data-testid="work-job-approval-settled"]')[0] ?? null,
+      tags: visible('[data-testid="work-job-approval-tag"]').length,
+      notes: visible('[data-testid="work-job-approval-note"]').length,
+      buttons: li.querySelectorAll("[data-decision]").length,
+      head: document.querySelector('[data-section="needsMe"] h2')?.innerText.replace(/\s+/g, " ").trim(),
+    };
+  }, runApproval.runId);
+  check(`${tag} 거부한 줄은 끝났어도 「응답 필요」의 그 자리에 영수증만`, held.section === "needsMe" && held.receipt === "거부를 기록했어요." && held.tags === 0 && held.notes === 0 && held.buttons === 0 && state.decidedHow[0] === false, held);
+  check(`${tag} 가로 넘침 0`, (await overflowX(page)) === 0, await overflowX(page));
+  await shot(page, `5640-${tag}`);
+  await context.close();
+}
+
 /** 브라우저에서 내 맥 세션 줄 Enter → 세션 화면(작업 콘솔). */
 async function enterScene(browser, origin) {
   const { context, page } = await openContext(browser, origin, { scheme: "light", viewport: { width: 1280, height: 800 } });
@@ -855,6 +952,20 @@ async function main() {
       await heldShot(browser, preview.origin, { width: 390, height: 844 });
     }
     if (ONLY === "" || ONLY === "h1") await enterRepeatScene(browser, preview.origin);
+    if (ONLY === "" || ONLY === "h1" || ONLY === "receipts") {
+      for (const scheme of ["light", "dark"]) {
+        for (const viewport of [{ width: 1280, height: 800 }, { width: 390, height: 844 }]) await rejectReceiptScene(browser, preview.origin, scheme, viewport);
+      }
+    }
+    if (ONLY === "" || ONLY === "matrix") {
+      await matrixScene(browser, preview.origin, "chromium");
+      const wk = await webkit.launch();
+      try {
+        await matrixScene(wk, preview.origin, "webkit");
+      } finally {
+        await wk.close();
+      }
+    }
     if (ONLY === "" || ONLY === "h1" || ONLY === "shift") await shiftGuardScene(browser, preview.origin);
   } finally {
     await browser.close();

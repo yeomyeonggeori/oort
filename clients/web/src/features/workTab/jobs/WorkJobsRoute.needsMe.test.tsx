@@ -870,6 +870,7 @@ describe("누른 자리에 다른 결정이 서지 않는다 (#5640 수리 3·4�
       expect(decidedIds()).toEqual([A(1)]);
       // 멀리 떨어진 점을 겨눈 탭은 결정이다(막기가 모든 탭을 삼키지 않는다).
       pressSlot(0, which, { clientX: 40, clientY: 400 }, "touch");
+      await sleepMs(300);
       await waitFor(() => expect(decidedIds()).toEqual([A(1), A(8)]), { timeout: 3000 });
     },
     15_000

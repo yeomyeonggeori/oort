@@ -56,10 +56,17 @@ export interface JobApprovalFacts {
   receipt: string | null;
 }
 
-function ReceiptLine({ text }: { text: string }) {
+/** 영수증 한 줄. `asControl`이면 결정 단추가 서 있던 층에 같은 높이로 선다(누른 자리에 결과가 서고, 줄 높이가 바뀌지 않는다). */
+function ReceiptLine({ text, asControl = false }: { text: string; asControl?: boolean }) {
   return (
-    <span className="min-w-0 break-keep text-meta text-ink" data-testid="work-job-approval-settled">
-      <Check className="me-1 inline size-4 align-text-bottom" aria-hidden="true" />
+    <span
+      className={cn(
+        "min-w-0 break-keep text-meta text-ink",
+        asControl && "flex min-h-control-sm items-center py-1"
+      )}
+      data-testid="work-job-approval-settled"
+    >
+      <Check className="me-1 inline size-4 shrink-0 align-text-bottom" aria-hidden="true" />
       {text}
     </span>
   );
@@ -112,9 +119,26 @@ export function JobResultCell({
 }) {
   const formatMessage = useFormatMessage();
   if (kind === "approval" && approval?.receipt && approval.decision === null) {
+    // 붙든 줄(방금 결정함)은 결정된 모습만 말한다(수리 4회차, 검수 2회차 M2): 꼬리표·되돌릴 수 없음·만료는 걷고 무엇을 결정했는지(요약)만
+    // 남긴다. 걷은 줄의 자리는 비워 둔다 — 줄 높이가 그대로라 누른 점 밑으로 다른 줄이 올라오지 않는다. 영수증은 단추가 있던 층에 선다.
+    const item = approval.item;
+    const summary = approval.intent ?? item?.predicate ?? null;
     return (
-      <span className="flex min-w-0 flex-col gap-1" data-testid="work-job-result" data-kind={kind}>
-        <ReceiptLine text={approval.receipt} />
+      <span className="flex min-w-0 flex-col gap-1" data-testid="work-job-result" data-kind={kind} data-held="">
+        <span aria-hidden className={cn(CHIP_CLASS, "invisible self-start")}>
+          &nbsp;
+        </span>
+        {summary !== null && <span className="min-w-0 break-keep text-meta text-ink">{summary}</span>}
+        {item?.note && (
+          <span aria-hidden className="invisible text-meta">
+            &nbsp;
+          </span>
+        )}
+        {item?.timeLabel && (
+          <span aria-hidden className="invisible text-timestamp">
+            &nbsp;
+          </span>
+        )}
       </span>
     );
   }
@@ -227,7 +251,9 @@ export function JobResultActions({
             onDecided={onDecided}
             focusRow={focusRow}
           />
-        ) : approval?.receipt ? null : (
+        ) : approval?.receipt ? (
+          <ReceiptLine text={approval.receipt} asControl />
+        ) : (
           <ApprovalCardLink channelId={row.channelId} channel={row.channel} />
         ))}
       {kind === "permission" && desktop && (
