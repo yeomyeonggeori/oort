@@ -186,6 +186,7 @@ function installLab() {
             box.scrollTop += amount;
           }
           else if (name === "expectScripted") hold?.expectScripted();
+          else if (name === "key") box.dispatchEvent(new KeyboardEvent("keydown", { key: "End", bubbles: true }));
           else if (name === "scrollToEnd") box.scrollTop = box.scrollHeight;
           else if (name === "margin") list.classList.add("margin-300");
           else if (name === "prepend") lab.token += 1;
@@ -350,12 +351,14 @@ describe("scrollHold — 진짜 엔진의 배치 (#5649, Chromium)", () => {
     // 알리지 않으면 휠 직후의 스크롤이라 사람의 손으로 쳐 붙든다 — 스크립트의 이동을 무르는 길이다(H1 의 원인).
     const unannounced = await scene({ kind: "virtual", hold: true, startTop: 500, steps: ["wheel:30", "scroll:30+growAbove:120"] });
     expect(Math.abs(unannounced.moved - -60)).toBeLessThanOrEqual(1);
-    // 알린 뒤 사람이 휠로 끼어들면 창이 닫혀 다시 사람의 손으로 친다.
-    const handBack = await scene({ kind: "virtual", hold: true, startTop: 500, steps: ["expectScripted:1", "wheel:30", "growAbove:120+wheel:30"] });
-    expect(Math.abs(handBack.moved - -60)).toBeLessThanOrEqual(1);
-    // 알린 스크롤이 이어지는 동안(스크롤 이벤트마다 창이 이어진다): 시작 1초 안의 첫 스크롤 뒤 300ms 안에 이어진 스크롤도 스크립트의 것이다.
-    const continued = await scene({ kind: "virtual", hold: true, startTop: 500, steps: ["wheel:30", "expectScripted:1", "scroll:30", "wait:100", "scroll:30+growAbove:120"] });
-    expect(continued.moved).toBe(30);
+    // 알린 뒤 휠이 끼어들어도 창은 닫히지 않는다(검수 2회차): 「최신 메시지로 이동」 뒤 휠이 이어져도 그 스크롤은 스크립트의 것이라 붙들지 않는다.
+    const wheelDuring = await scene({ kind: "virtual", hold: true, startTop: 500, steps: ["expectScripted:1", "wheel:30", "growAbove:120+wheel:30"] });
+    expect(wheelDuring.moved).toBe(60);
+    // 휠 직후 누른 키보드 End · PageDown 도 사람의 손(휠)이 아니다: 휠 기억을 지워 붙들지 않는다. 키 없이는 휠 직후의 스크롤이라 붙든다.
+    const keyboard = await scene({ kind: "virtual", hold: true, startTop: 500, steps: ["wheel:30", "key:End", "scroll:30+growAbove:120"] });
+    expect(keyboard.moved).toBe(60);
+    const noKey = await scene({ kind: "virtual", hold: true, startTop: 500, steps: ["wheel:30", "scroll:30+growAbove:120"] });
+    expect(Math.abs(noKey.moved - -60)).toBeLessThanOrEqual(1);
   });
 
   it.skipIf(!chromiumAvailable)("가상 목록 규칙: 목록이 같은 변화를 한 번 더 보정해도 그리기 전에 되돌린다 — 가만히, 그리고 아래로 내리는 중", async () => {

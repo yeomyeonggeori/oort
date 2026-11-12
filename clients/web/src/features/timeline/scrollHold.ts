@@ -32,10 +32,8 @@ import { AT_BOTTOM_SLACK_PX } from "./navigation";
 export const SCROLLING_QUIET_MS = 150;
 /** 휠 · 터치가 이 안에 왔으면 지금의 스크롤은 사람의 손이 움직인 것으로 본다(휠 이벤트는 그 스크롤 이벤트보다 한두 프레임 먼저 온다). */
 export const HAND_SCROLL_MS = SCROLLING_QUIET_MS * 2;
-/** `expectScripted` 뒤 첫 스크롤 이벤트를 기다리는 시간. 부드러운 스크롤은 시작이 늦을 수 있다. */
-export const SCRIPTED_START_MS = 1000;
-/** 스크립트의 스크롤이 이어지는 동안: 마지막 스크롤 이벤트 뒤 이만큼 조용해지면 끝난 것이다. */
-export const SCRIPTED_QUIET_MS = HAND_SCROLL_MS;
+/** `expectScripted` 가 연 창의 길이. 이 안의 스크롤은 휠이 끼어들어도 스크립트의 것으로 친다(부드러운 스크롤은 시작이 늦을 수 있다). */
+export const SCRIPTED_WINDOW_MS = 1000;
 
 interface Anchor {
   /** 줄의 이름(`rowAttribute` 의 값). 가상 목록은 앞에 붙어도 그대로인 번호, 스레드는 메시지 id. */
@@ -89,7 +87,8 @@ const distanceToBottom = (scroller: HTMLElement) => scroller.scrollHeight - scro
  *
  * 다만 **사람의 손(휠 · 터치)이 움직인 스크롤일 때만**이다. 스크립트가 아래로 옮기는 스크롤(「최신 메시지로 이동」 · 메시지로 이동 — 목록이
  * 줄을 새로 재며 몇 프레임에 걸쳐 자리를 다시 놓는다)의 직후는 예전처럼 비워 둔다: 거기서 이 모듈이 자리를 붙들면 그 이동을 무른다.
- * 스크롤 막대 끌기 · 키보드로 내리는 스크롤은 가를 길이 없어 스크립트 쪽으로 친다(예전과 같다).
+ * 키보드로 내리는 스크롤(End · PageDown · 화살표 · 스페이스)은 `keydown` 이 휠 · 터치의 기억을 지워 스크립트 쪽으로 친다(예전과 같다 — 휠 직후에
+ * 눌러도 그렇다, #5649 검수 2회차). 스크롤 막대 끌기도 가를 길이 없어 스크립트 쪽이다.
  */
 export function virtualListHold(firstItemIndex: () => number, entering: () => boolean = () => false): ScrollHoldOptions {
   return {
@@ -132,8 +131,8 @@ export interface ScrollHold {
   /**
    * 스크립트가 이 목록을 곧 옮긴다(`scrollToIndex` 로 「최신 메시지로 이동」 · 메시지로 이동 · 안 읽은 곳으로 이동 — #5649 검수 H1).
    * 그 스크롤은 휠 · 터치 직후여도 **사람의 손이 아니다**: 손으로 치면 이 모듈이 자리를 붙들어 부드러운 스크롤을 도중에 멈춘다(WebKit 실측:
-   * 휠 뒤 30~160ms 에 누르면 바닥에 360~526px 못 미침). 그 스크롤이 이어지는 동안(마지막 스크롤 이벤트 뒤 `SCRIPTED_QUIET_MS`, 처음 이벤트가 늦어도
-   * `SCRIPTED_START_MS`)과, 사람이 휠 · 터치로 끼어들기 전까지만이다.
+   * 휠 뒤 30~160ms 에 누르면 바닥에 360~526px 못 미침). 알린 뒤 `SCRIPTED_WINDOW_MS` 동안이며, 그 사이 휠이
+   * 끼어들어도 창은 닫히지 않는다(브라우저가 휠로 부드러운 스크롤을 멈추고 휠이 멎은 자리에 서면 그것이 사람의 뜻이다 — 이 모듈은 되돌리지 않는다).
    */
   expectScripted(): void;
   /** 관찰을 멈춘다. */
@@ -169,11 +168,14 @@ export function holdScrollPosition(scroller: HTMLElement, options: ScrollHoldOpt
 
   /** 휠 · 터치가 마지막으로 온 때. 사람의 손이 움직인 스크롤과 스크립트가 옮긴 스크롤을 가른다. */
   let lastHandInputAt = Number.NEGATIVE_INFINITY;
-  /** `expectScripted` 가 연 창의 끝. 이 안에서는 스크롤을 스크립트의 것으로 친다(스크롤 이벤트마다 이어진다). 사람이 휠 · 터치를 하면 닫힌다. */
+  /** `expectScripted` 가 연 창의 끝. 이 안에서는 스크롤을 스크립트의 것으로 친다(휠이 와도 닫히지 않는다). */
   let scriptedUntil = Number.NEGATIVE_INFINITY;
   const onHandInput = () => {
     lastHandInputAt = performance.now();
-    scriptedUntil = Number.NEGATIVE_INFINITY;
+  };
+  /** 키보드 스크롤(End · PageDown · 화살표 · 스페이스)은 사람의 손(휠 · 터치)이 아니다: 휠 직후여도 그 기억을 지운다. */
+  const onKey = () => {
+    lastHandInputAt = Number.NEGATIVE_INFINITY;
   };
   const handScrolling = () => performance.now() > scriptedUntil && performance.now() - lastHandInputAt <= HAND_SCROLL_MS;
 
@@ -227,7 +229,6 @@ export function holdScrollPosition(scroller: HTMLElement, options: ScrollHoldOpt
     }
     if (top !== lastTop) lastForeignDirection = top < lastTop ? "up" : "down";
     lastForeignScrollAt = performance.now();
-    if (scriptedUntil > lastForeignScrollAt) scriptedUntil = lastForeignScrollAt + SCRIPTED_QUIET_MS;
     // 스크롤과 같은 프레임에 줄 높이가 바뀌었다(이 이벤트는 그 프레임의 ResizeObserver 보다 먼저 온다). 보던 줄은 이 스크롤이 옮긴 만큼만
     // 움직였어야 한다 — 나머지는 줄 높이 변화가 민 것이다. 여기서 다시 적으면 그 밀림이 새 기준에 섞여 사라지므로, 적어 둔 자리를 스크롤이
     // 옮긴 만큼만 옮겨 두고(높이 기록은 그대로) 바로잡기는 곧 올 ResizeObserver 에게 맡긴다: 바로잡는 곳이 한 군데여야 다시 확인(settle)이
@@ -328,6 +329,7 @@ export function holdScrollPosition(scroller: HTMLElement, options: ScrollHoldOpt
   scroller.addEventListener("scroll", onScroll, { passive: true });
   scroller.addEventListener("wheel", onHandInput, { passive: true });
   scroller.addEventListener("touchmove", onHandInput, { passive: true });
+  scroller.addEventListener("keydown", onKey);
   return {
     expectBottom: () => {
       // 바닥에 있던 목록은 늘 하던 대로 둔다(가상 목록의 따라가기 + 위 바닥 붙이기). 바닥에서 보낸 글은 수리 전에도 따라갔으므로 이 수리의
@@ -339,13 +341,14 @@ export function holdScrollPosition(scroller: HTMLElement, options: ScrollHoldOpt
       armSettle("bottom");
     },
     expectScripted: () => {
-      scriptedUntil = performance.now() + SCRIPTED_START_MS;
+      scriptedUntil = performance.now() + SCRIPTED_WINDOW_MS;
     },
     stop: () => {
       if (settleFrame !== 0) cancelAnimationFrame(settleFrame);
       scroller.removeEventListener("scroll", onScroll);
       scroller.removeEventListener("wheel", onHandInput);
       scroller.removeEventListener("touchmove", onHandInput);
+      scroller.removeEventListener("keydown", onKey);
       structure.disconnect();
       observer.disconnect();
     },
