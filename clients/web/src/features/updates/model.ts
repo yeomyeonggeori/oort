@@ -194,13 +194,13 @@ export function badgeLabel(state: UpdateState): string | null {
       return percent === null ? "업데이트 받는 중" : `업데이트 받는 중 ${percent}%`;
     }
     case "installed":
-      return "곧 다시 실행";
+      return "곧 다시 시작";
     default:
       return null;
   }
 }
 
-/** Seconds the 「곧 다시 실행돼요」 card counts down before restarting on its own. */
+/** Seconds the 「곧 다시 시작돼요」 card counts down before restarting on its own. */
 export const RELAUNCH_COUNTDOWN_SECONDS = 3;
 
 /**
@@ -243,13 +243,13 @@ export function pillWorthShowing(state: UpdateState): boolean {
 export function pillTooltip(state: UpdateState): string | null {
   switch (state.kind) {
     case "available":
-      return `${state.update.version}로 업데이트할 수 있어요. 누르면 받고 다시 실행해요.`;
+      return `${state.update.version}로 업데이트할 수 있어요. 누르면 받고 다시 시작해요.`;
     case "installing": {
       const percent = progressPercent(state.downloaded, state.total);
       return percent === null ? "받는 중이에요." : `받는 중 ${percent}%`;
     }
     case "installed":
-      return "곧 다시 실행돼요.";
+      return "곧 다시 시작돼요.";
     case "failed":
       return state.phase === "install"
         ? "업데이트하지 못했어요. 눌러서 다시 확인해요."
