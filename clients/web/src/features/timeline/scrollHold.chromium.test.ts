@@ -64,7 +64,7 @@ declare global {
        */
       run: (steps: string[], inFrame?: boolean) => Promise<Probe>;
       expectBottom: () => void;
-      expectScripted: () => void;
+      expectScripted: (destination?: "bottom") => void;
     };
   }
 }
@@ -153,7 +153,7 @@ function installLab() {
       hold = holdScrollPosition(box, virtual ? virtualListHold(() => lab.token) : plainListHold(rowAttribute));
     },
     expectBottom: () => hold?.expectBottom(),
-    expectScripted: () => hold?.expectScripted(),
+    expectScripted: (destination) => hold?.expectScripted(destination),
     run: async (steps, inFrame = false) => {
       const edge = box.getBoundingClientRect().top;
       const rows = [...list.children] as HTMLElement[];
@@ -176,9 +176,12 @@ function installLab() {
             box.dispatchEvent(new WheelEvent("wheel", { deltaY: amount }));
             box.scrollTop += amount;
           }
-          else if (name === "expectScripted") hold?.expectScripted();
+          else if (name === "expectScripted") hold?.expectScripted(value === "bottom" ? "bottom" : undefined);
           else if (name === "key") box.dispatchEvent(new KeyboardEvent("keydown", { key: "End", bubbles: true }));
+          else if (name === "pointer") box.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true }));
           else if (name === "scrollToEnd") box.scrollTop = box.scrollHeight;
+          // 바닥 `amount`px 위에 선다(바닥으로 가던 스크립트 스크롤이 거기서 끊겼다).
+          else if (name === "stopShort") box.scrollTop = box.scrollHeight - box.clientHeight - amount;
           else if (name === "margin") list.classList.add("margin-300");
           else if (name === "prepend") lab.token += 1;
           else if (name === "append") {
@@ -350,6 +353,33 @@ describe("scrollHold — 진짜 엔진의 배치 (#5649, Chromium)", () => {
     const noKey = await scene({ kind: "virtual", hold: true, startTop: 500, steps: ["wheel:30", "scroll:30+growAbove:120"] });
     expect(Math.abs(noKey.moved - -60)).toBeLessThanOrEqual(1);
   });
+
+  it.skipIf(!chromiumAvailable)("가상 목록 규칙: 바닥으로 가는 스크립트 이동(「최신 메시지로 이동」)이 못 미쳐 멈추면 조용해진 뒤 바닥으로 마무리한다 — 사람이 넘겨받았거나 다른 목적지면 그대로 둔다(#5649 검수 3회차)", async () => {
+    // WebKit 실측: 이동 중 ⋯ 단추로 넘어간 초점이 부드러운 스크롤을 끊어 바닥 64px 위에 섰다. 바닥으로 알렸으면 조용해진 뒤 바닥이다.
+    const short = await scene({ kind: "virtual", hold: true, startTop: 500, steps: ["expectScripted:bottom", "stopShort:64", "wait:300"] });
+    expect(short.gap).toBeLessThanOrEqual(1);
+    // 바닥 여유(64px) 밖이어도 목적지는 바닥이다(가장 새 줄이 두 줄이면 단추가 더 위에 있다).
+    const far = await scene({ kind: "virtual", hold: true, startTop: 500, steps: ["expectScripted:bottom", "stopShort:120", "wait:300"] });
+    expect(far.gap).toBeLessThanOrEqual(1);
+    // 이동 뒤에도 아래로 굴린 휠은 같은 방향이다: 걷지 않는다(게이트 L7).
+    const wheelDown = await scene({ kind: "virtual", hold: true, startTop: 500, steps: ["expectScripted:bottom", "stopShort:64", "wheel:6", "wait:300"] });
+    expect(wheelDown.gap).toBeLessThanOrEqual(1);
+    // 사람이 넘겨받았다 — 위로 굴린 휠 · 키 · 누름(스크롤 막대 끌기): 그 자리를 둔다(삼키지 않는다).
+    const wheelUp = await scene({ kind: "virtual", hold: true, startTop: 500, steps: ["expectScripted:bottom", "stopShort:20", "wheel:-30", "wait:300"] });
+    expect(wheelUp.gap).toBe(50);
+    const key = await scene({ kind: "virtual", hold: true, startTop: 500, steps: ["expectScripted:bottom", "stopShort:20", "key:End", "wait:300"] });
+    expect(key.gap).toBe(20);
+    const pointer = await scene({ kind: "virtual", hold: true, startTop: 500, steps: ["expectScripted:bottom", "stopShort:20", "pointer:1", "wait:300"] });
+    expect(pointer.gap).toBe(20);
+    // 다른 목적지(메시지로 이동 · 안 읽은 곳으로)는 마무리하지 않는다. 바닥으로 알린 뒤 다른 목적지로 다시 알려도 걷힌다.
+    const elsewhere = await scene({ kind: "virtual", hold: true, startTop: 500, steps: ["expectScripted:1", "stopShort:50", "wait:300"] });
+    expect(elsewhere.gap).toBe(50);
+    const retargeted = await scene({ kind: "virtual", hold: true, startTop: 500, steps: ["expectScripted:bottom", "expectScripted:1", "stopShort:50", "wait:300"] });
+    expect(retargeted.gap).toBe(50);
+    // 바닥에 닿았으면 끝이다: 그 뒤 사람이 아닌 스크롤로 올라가도 끌어내리지 않는다.
+    const arrived = await scene({ kind: "virtual", hold: true, startTop: 500, steps: ["expectScripted:bottom", "stopShort:0", "scroll:-40", "wait:300"] });
+    expect(arrived.gap).toBe(40);
+  }, 20_000);
 
   it.skipIf(!chromiumAvailable)("가상 목록 규칙: 목록이 같은 변화를 한 번 더 보정해도 그리기 전에 되돌린다 — 가만히, 그리고 아래로 내리는 중", async () => {
     // 위 밖 줄이 줄면 이 모듈이 위로 바로잡고, 그 스크롤이 목록에는 「위」로 보여 다음 프레임에 같은 높이를 한 번 더 옮긴다(#5575: 127.5px).
