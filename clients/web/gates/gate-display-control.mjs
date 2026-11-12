@@ -1152,7 +1152,8 @@ async function exerciseConsoleIntent(browser) {
     // 그만두고 나갔다 돌아온다. 새 의도가 없으므로 확인은 서지 않아야 한다.
     await page.getByTestId("work-control-confirm-cancel").click();
     await page.getByTestId("work-control-start").waitFor({ timeout: 10_000 });
-    await page.goto(`${origin}/#/work`);
+    // 맨 `/work`는 이제 「작업」 목록(jobs)이다. 콘솔 목록은 `view=console`로 연다(#3334).
+    await page.goto(`${origin}/#/work?view=console`);
     await page.getByTestId("work-console-route").waitFor({ timeout: 20_000 });
     await page.goto(`${origin}/#/work?session=${sessionId}`);
     await page.getByTestId("work-control-start").waitFor({ timeout: 20_000 });
