@@ -35,6 +35,7 @@ import { signalFromProgress } from "@momo/core/features/agents/runPhase";
 import { ChannelMemberPanel } from "./ChannelContextControls";
 import {
   activeAgentRunsQueryKey,
+  MEMBER_NOW_ANSWER_MAX_AGE_MS,
   RAIL_REFETCH_GAP_MS,
   SLOW_POLL_MS,
 } from "./useChannelMemberNow";
@@ -557,5 +558,112 @@ describe("채널 멤버 패널의 「지금」 (#5686)", () => {
     await open();
     expect(document.querySelector('[data-testid="channel-member-now-failed"]')).toBeNull();
     expect(sections().map((s) => s.group)).toEqual(["agents", "online", "offline"]);
+  });
+
+  // ---- #5701: 낡은 「지금」 답 ----------------------------------------------------------------------------------
+  /** 받아 둔 답을 `ageMs` 전에 받은 것으로 두고(닫은 뒤에도 5분 남는 답), 새 답은 `next`가 정할 때까지 기다리게 한다. */
+  async function openWithAnswerAged(ageMs: number, next: () => Promise<unknown>) {
+    api.fetchAllActiveAgentRuns.mockImplementation(next);
+    await act(async () => {
+      client.setQueryData(activeAgentRunsQueryKey(WS), { runs: defaultRuns() }, { updatedAt: Date.now() - ageMs });
+    });
+    await open();
+  }
+
+  it("받아 둔 답이 60초보다 오래됐으면 새 답이 올 때까지 묶음에도 「작업 중」 줄에도 쓰지 않는다(60초를 글자로)", async () => {
+    expect(MEMBER_NOW_ANSWER_MAX_AGE_MS).toBe(60_000);
+    await mount();
+    let answer: (value: unknown) => void = () => undefined;
+    await openWithAnswerAged(MEMBER_NOW_ANSWER_MAX_AGE_MS + 2_000, () => new Promise((resolve) => { answer = resolve; }));
+    // 끝났을 수 있는 run이 「작업 중 · n분째」로 서지 않는다: 에이전트는 한 묶음, 줄 둘째 줄은 생존 라벨
+    expect(sections().map((s) => [s.group, s.heading])).toEqual([
+      ["agents", "에이전트 3"],
+      ["online", "온라인 3"],
+      ["offline", "오프라인 1"],
+    ]);
+    for (const id of [DALMURI, SAEBYEOK, BYEOLBIT]) {
+      expect(rowOf(id)!.querySelector('[data-testid="channel-member-now"]')?.getAttribute("data-now")).not.toBe("run");
+      expect(rowOf(id)!.querySelector('[data-testid="channel-member-elapsed"]')).toBeNull();
+    }
+    expect(rowOf(DALMURI)!.querySelector('[data-testid="channel-member-now"]')?.getAttribute("data-now")).toBe("liveness");
+    expect(panel()!.textContent).not.toContain("분째");
+    // 새 답이 오면 줄만 채우고 묶음은 다시 짜지 않는다(이동 0)
+    const before = sections();
+    await act(async () => answer({ runs: defaultRuns(), truncated: false, pages: 1 }));
+    await settle();
+    expect(sections()).toEqual(before);
+    expect(rowOf(DALMURI)!.querySelector('[data-testid="channel-member-now"]')?.getAttribute("data-now")).toBe("run");
+  });
+
+  it("받아 둔 답이 60초 안이면 쓴다: 열 때부터 「일하는 에이전트」와 「작업 중」 줄", async () => {
+    await mount();
+    await openWithAnswerAged(MEMBER_NOW_ANSWER_MAX_AGE_MS - 2_000, () => new Promise(() => undefined));
+    expect(sections().map((s) => [s.group, s.heading])[0]).toEqual(["working", "일하는 에이전트 2"]);
+    expect(rowOf(DALMURI)!.querySelector('[data-testid="channel-member-now"]')?.getAttribute("data-now")).toBe("run");
+  });
+
+  it("낡은 답이고 새 읽기가 실패하면 낡은 답은 여전히 쓰지 않는다(실패 줄만)", async () => {
+    await mount();
+    await openWithAnswerAged(MEMBER_NOW_ANSWER_MAX_AGE_MS + 2_000, async () => {
+      throw new ApiError(404 + 99, "unavailable");
+    });
+    await waitFor(() => document.querySelector('[data-testid="channel-member-now-failed"]') !== null);
+    expect(sections().map((s) => s.group)).toEqual(["agents", "online", "offline"]);
+    expect(panel()!.textContent).not.toContain("분째");
+  });
+
+  // ---- #5686 수리 1회차 L1·L2: 실패 중·도는 읽기 중에는 레일 신호로 다시 묻지 않는다 --------------------------------
+  const railSignal = (stage: string) => signalFromProgress({ ...defaultRuns()[0]!, latestStage: stage })!;
+
+  it("마지막 읽기가 실패한 동안에는 레일 신호가 와도 다시 읽지 않는다", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    await mount();
+    await open();
+    api.fetchAllActiveAgentRuns.mockRejectedValue(new ApiError(503, "unavailable"));
+    // 느린 박자에 읽기가 실패한다(5xx는 한 번 더 물은 뒤 실패로 선다)
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(SLOW_POLL_MS + 4_000);
+    });
+    await settle();
+    expect(document.querySelector('[data-testid="channel-member-now-failed"]')).not.toBeNull();
+    const calls = api.fetchAllActiveAgentRuns.mock.calls.length;
+    for (const stage of ["단계 1", "단계 2"]) {
+      await act(async () => markAgentWorking(railSignal(stage)));
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(RAIL_REFETCH_GAP_MS + 500);
+      });
+    }
+    expect(api.fetchAllActiveAgentRuns.mock.calls.length).toBe(calls);
+  });
+
+  it("읽기가 도는 중에는 레일 신호가 와도 끊고 다시 읽지 않는다(열 때의 요청이 둘이 되지 않는다)", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    await mount();
+    // 10초 전 답(5초 신선도를 넘어 열 때 다시 읽는다, 60초 안이라 줄은 선다) + 끝나지 않는 읽기
+    await openWithAnswerAged(10_000, () => new Promise(() => undefined));
+    expect(api.fetchAllActiveAgentRuns).toHaveBeenCalledTimes(1);
+    await act(async () => markAgentWorking(railSignal("단계 1")));
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(RAIL_REFETCH_GAP_MS + 500);
+    });
+    expect(api.fetchAllActiveAgentRuns).toHaveBeenCalledTimes(1);
+  });
+
+  // ---- #5701: 다시 읽기가 실패한 채 다시 열 때의 첫 초점 ----------------------------------------------------------
+  it("「지금」 읽기가 실패한 채 닫았다가 다시 열어도 첫 초점은 「멤버 추가」이고 「다시 불러오기」가 아니다", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    await mount();
+    await open();
+    api.fetchAllActiveAgentRuns.mockRejectedValue(new ApiError(503, "unavailable"));
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(SLOW_POLL_MS + 4_000);
+    });
+    await settle();
+    expect(document.querySelector('[data-testid="channel-member-now-failed"]')).not.toBeNull();
+    await close();
+    await open();
+    // 실패 줄이 첫 프레임부터 서 있고, 그 단추가 문서 차례에서 「멤버 추가」보다 앞이어도 첫 초점은 아니다
+    expect(document.querySelector('[data-testid="channel-member-now-failed"]')).not.toBeNull();
+    expect(document.activeElement?.getAttribute("data-testid")).toBe("channel-member-add");
   });
 });

@@ -252,7 +252,7 @@ describe("자동 다시 실행 (store 가 시계를 쥔다)", () => {
     expect(tauri.relaunch).toHaveBeenCalledTimes(1);
   });
 
-  it("카드를 닫아도 시계는 계속 돌고 다시 실행한다", async () => {
+  it("카드를 닫으면 설치 직후 3초 카운트다운도 멈추고 「지금」만 남는다(#5661 수리 3회차: 한 카드에 한 규칙)", async () => {
     vi.useFakeTimers();
     mount();
     await finishInstall();
@@ -260,9 +260,12 @@ describe("자동 다시 실행 (store 가 시계를 쥔다)", () => {
       document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
     });
     await act(async () => {
-      await vi.advanceTimersByTimeAsync(3000);
+      await vi.advanceTimersByTimeAsync(60_000);
     });
-    expect(tauri.relaunch).toHaveBeenCalledTimes(1);
+    expect(tauri.relaunch).not.toHaveBeenCalled();
+    act(() => pill()?.click());
+    expect(byId("update-card-title")?.textContent).toBe("다시 실행해 주세요");
+    expect(byId("update-card-now")).not.toBeNull();
   });
 
   it("다시 실행하기 전에 쓰던 글을 저장하라는 신호를 먼저, 동기로 보낸다", async () => {

@@ -18,6 +18,8 @@ import type { ConnectionState } from "./screenState";
 //   window.*        창 보임·숨김·초점 얻음·잃음
 //   wake.late.*     타이머가 예정보다 크게 늦게 깼다(앱 낮잠·맥 잠자기의 흔적). 늦은 정도는 네 칸으로만 접는다
 //   send.blocked.*  보내기가 막혔다(「보낼 수 없음」)와 그 원인 · send.open 다시 열렸다
+//   update.check.*  데스크탑 앱의 새 버전 확인: failed 확인하지 못했다(피드에 닿지 못함·서명·형식 — 까닭은 남기지 않는다) ·
+//                   off 이 판은 확인하지 않는다(채널 표지 없이 만든 판, 실행마다 한 번) (#5661)
 //
 // ## 남기지 않는 것
 // 요청 주소·메서드(주소에 워크스페이스·채널 id가 든다), 메시지 내용, 이름, 토큰, 서버가 보낸 글, 오류 문장. 종류는 아래 표의 낱말만
@@ -51,6 +53,8 @@ export const CONNECTION_DIAG_KINDS = [
   "send.blocked.serverUnreachable",
   "send.blocked.expired",
   "send.open",
+  "update.check.failed",
+  "update.check.off",
 ] as const;
 
 export type ConnectionDiagKind = (typeof CONNECTION_DIAG_KINDS)[number];
@@ -175,6 +179,7 @@ export const CONNECTION_DIAG_GROUPS = {
   appRested: ["wake.late.10s", "wake.late.1m", "wake.late.10m", "wake.late.1h"],
   cutWhileResting: ["rest.fail.timeoutLate"],
   windowHidden: ["window.hidden"],
+  updateCheckFailed: ["update.check.failed"],
 } as const satisfies Record<string, readonly ConnectionDiagKind[]>;
 
 export type ConnectionDiagGroup = keyof typeof CONNECTION_DIAG_GROUPS;
@@ -263,6 +268,11 @@ export interface WakeWatchDeps {
   readonly clearTimer: (handle: unknown) => void;
   /** 타이머가 `LATE_WAKE_MS` 넘게 늦게 깼다. 종류는 늦은 정도의 칸이고, `lateMs`는 늦은 정도 그대로다(#5660: 소켓을 다시 열지 정하는 쪽이 쓴다). */
   readonly onLate: (kind: ConnectionDiagKind, at: number, lateMs: number) => void;
+  /**
+   * 깬 번마다(늦었든 아니든) `onLate` 뒤에 부른다. 같은 시계로 벽시계 마감을 재는 쪽(업데이트 확인 일정, #5661)이 늦게 깬 것을
+   * 알아채는 판정을 따로 만들지 않게 한다.
+   */
+  readonly onTick?: (at: number) => void;
 }
 
 /**
@@ -281,6 +291,7 @@ export function startWakeWatch(deps: WakeWatchDeps, periodMs: number = WAKE_WATC
     const lateMs = at - dueAt;
     const kind = wakeLateDiagKind(lateMs);
     if (kind !== null) deps.onLate(kind, at, lateMs);
+    deps.onTick?.(at);
     dueAt = at + periodMs;
     handle = deps.setTimer(tick, periodMs);
   }
