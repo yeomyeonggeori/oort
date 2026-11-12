@@ -6,7 +6,7 @@
 //
 // 실제 design 번들을 Tauri 흉내(updater_check/install/relaunch + 진행 이벤트)로 열어
 // 알약·툴팁(호버·키보드)·받는 중 카드·3초 카운트다운·실패 카드·접힘(알약 없음)을
-// 라이트·다크로 찍고, 자동 다시 실행이 정확히 한 번 일어나는지 단언한다.
+// 라이트·다크로 찍고, 자동 다시 시작이 정확히 한 번 일어나는지 단언한다.
 // =============================================================================
 import { mkdirSync } from "node:fs";
 import { dirname, resolve } from "node:path";
@@ -174,7 +174,7 @@ async function scene(browser, origin, scheme) {
     await page.waitForTimeout(150);
     const tip = page.getByTestId("update-pill-tooltip");
     check(`${scheme} 호버 툴팁이 보인다`, await tip.isVisible());
-    check(`${scheme} 툴팁 문구`, (await tip.textContent()) === "0.1.28로 업데이트할 수 있어요. 누르면 받고 다시 실행해요.");
+    check(`${scheme} 툴팁 문구`, (await tip.textContent()) === "0.1.28로 업데이트할 수 있어요. 누르면 받고 다시 시작해요.");
     const box = await tip.boundingBox();
     check(`${scheme} 툴팁 문장은 어절에서 끊는다(keep-all)`, (await tip.evaluate((el) => getComputedStyle(el).wordBreak)) === "keep-all");
     check(`${scheme} 툴팁이 창 안에 있다`, !!box && box.x >= 0 && box.y >= 0 && box.x + box.width <= 1280);
@@ -208,14 +208,14 @@ async function scene(browser, origin, scheme) {
     check(`${scheme} 길이를 모르면 value 가 없다`, (await page.locator("[data-testid=update-card] progress").getAttribute("value")) === null);
     await shot(page, "3b-downloading-unknown");
 
-    // 3) 끝남 → 3초 카운트다운 → 자동 다시 실행 한 번
+    // 3) 끝남 → 3초 카운트다운 → 자동 다시 시작 한 번
     await page.evaluate(() => window.__finishInstall());
     await page.waitForTimeout(200);
-    check(`${scheme} 카운트다운 카드`, (await page.getByTestId("update-card-title").textContent()) === "곧 다시 실행돼요");
+    check(`${scheme} 카운트다운 카드`, (await page.getByTestId("update-card-title").textContent()) === "곧 다시 시작돼요");
     await shot(page, "4-restarting");
-    check(`${scheme} 2.5초 안에는 다시 실행하지 않았다`, (await page.evaluate(() => window.__relaunched)) === 0);
+    check(`${scheme} 2.5초 안에는 다시 시작하지 않았다`, (await page.evaluate(() => window.__relaunched)) === 0);
     await page.waitForTimeout(3300);
-    check(`${scheme} 3초 뒤 정확히 한 번 다시 실행했다`, (await page.evaluate(() => window.__relaunched)) === 1);
+    check(`${scheme} 3초 뒤 정확히 한 번 다시 시작했다`, (await page.evaluate(() => window.__relaunched)) === 1);
     await context.close();
   }
 

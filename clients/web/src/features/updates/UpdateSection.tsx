@@ -53,7 +53,7 @@ function StateChip({ state }: { state: UpdateState }) {
     case "installing":
       return <StatusChip tone="accent">받는 중</StatusChip>;
     case "installed":
-      return <StatusChip tone="ok">곧 다시 실행</StatusChip>;
+      return <StatusChip tone="ok">곧 다시 시작</StatusChip>;
     case "failed":
       return <StatusChip tone="danger">확인 실패</StatusChip>;
     default:
@@ -73,7 +73,7 @@ function stateSentence(state: UpdateState): string {
     case "installing":
       return "새 버전을 받고 있어요. 앱은 그대로 쓸 수 있어요.";
     case "installed":
-      return "설치를 마쳤어요. 곧 새 버전으로 다시 실행돼요.";
+      return "설치를 마쳤어요. 곧 새 버전으로 다시 시작돼요.";
     case "failed":
       return "확인하지 못했어요. 아래 안내를 따라 다시 시도하세요.";
     default:
@@ -93,7 +93,7 @@ export function UpdateSection() {
   // 설치를 마쳤는데 이 맥의 작업이 끝나기를 기다린다(#5661). 카드와 같은 판정이다.
   const holding = state.kind === "installed" && hold !== null && countdown === null;
   const cutLine = holding && hold.cut !== null ? restartCutLine(hold.cut, formatMessage) : null;
-  // 설치를 마쳤는데 카운트다운이 돌지 않는다(기다림 · 「지금 말고」 · 다시 시작 실패): 「곧 다시 실행」이 아니다(수리 2회차).
+  // 설치를 마쳤는데 카운트다운이 돌지 않는다(기다림 · 「지금 말고」 · 다시 시작 실패): 「곧 다시 시작」이 아니다(수리 2회차).
   const notSoon = state.kind === "installed" && countdown === null;
 
   const hasUpdate =
@@ -195,18 +195,18 @@ export function UpdateSection() {
         {state.kind === "installed" && !notSoon && (
           <CardBody>
             <p className="text-body text-ink" data-testid="update-installed">
-              새 버전이 설치됐어요. 곧 다시 실행되고 {state.update.version}(으)로 열려요.
+              새 버전이 설치됐어요. 곧 다시 시작되고 {state.update.version}(으)로 열려요.
             </p>
           </CardBody>
         )}
 
         {(state.kind === "available" || state.kind === "installed") && (
           <SettingsRow
-            label={state.kind === "available" ? "새 버전 설치" : "다시 실행"}
+            label={state.kind === "available" ? "새 버전 설치" : "다시 시작"}
             description={
               state.kind === "available"
                 ? formatMessage("settings.updates.installRowDescription")
-                : (cutLine ?? "기다리지 않고 지금 다시 실행해도 돼요.")
+                : (cutLine ?? "기다리지 않고 지금 다시 시작해도 돼요.")
             }
           >
             {state.kind === "available" ? (
@@ -215,7 +215,7 @@ export function UpdateSection() {
               </Button>
             ) : (
               <Button size="sm" onClick={() => void relaunchIntoUpdate()} data-testid="update-relaunch">
-                {holding ? formatMessage("settings.updates.restartNow") : "지금 다시 실행"}
+                {holding ? formatMessage("settings.updates.restartNow") : "지금 다시 시작"}
               </Button>
             )}
           </SettingsRow>

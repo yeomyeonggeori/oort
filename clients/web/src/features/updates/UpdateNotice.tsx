@@ -35,9 +35,9 @@ export function UpdateNotice() {
   useEffect(() => registerUpdateNoticeSurface(), []);
   if (!badgeWorthShowing(state)) return null;
 
-  // 이 맥의 작업이 끝나기를 기다리는 동안은 「곧 다시 실행」이 아니다(#5661).
+  // 이 맥의 작업이 끝나기를 기다리는 동안은 「곧 다시 시작」이 아니다(#5661).
   const holding = state.kind === "installed" && hold !== null && countdown === null;
-  // 자동 다시 시작이 멈췄다(「지금 말고」·다시 시작 실패): 「곧 다시 실행」이 아니다(수리 2회차).
+  // 자동 다시 시작이 멈췄다(「지금 말고」·다시 시작 실패): 「곧 다시 시작」이 아니다(수리 2회차).
   const stopped = state.kind === "installed" && hold === null && countdown === null;
   const label = holding
     ? formatMessage("settings.updates.holdTitle")
@@ -51,7 +51,7 @@ export function UpdateNotice() {
       ? { label: "지금 업데이트", run: () => void installUpdate() }
       : state.kind === "installed"
         ? {
-            label: holding ? formatMessage("settings.updates.restartNow") : "지금 다시 실행",
+            label: holding ? formatMessage("settings.updates.restartNow") : "지금 다시 시작",
             run: () => void relaunchIntoUpdate(),
           }
         : null;

@@ -1,13 +1,13 @@
 #!/usr/bin/env node
 // =============================================================================
-// #5661 2회차(owner 2026-11-11): 접힌 사이드바의 「업데이트」 알약과 「작업이 끝나면 다시 시작해요」. 골격은 capture-5661.mjs.
+// #5661 2회차(owner 2026-11-11): 접힌 사이드바의 「업데이트」 알약과 「이 맥의 작업이 끝나면 다시 시작해요」. 골격은 capture-5661.mjs.
 //
 //   npm run build:design && OUT_DIR=<dir> CAPTURE_PORT=26522 node scripts/capture-5661-r2.mjs
 //
 //   1) ⌘B로 접은 사이드바: 처음에는 새 판이 없다. 맥이 한 시간 잤다 깨서 다시 묻고, 레일 아바타 위에 작은 알약(레일 글자 크기)이 선다.
 //      레일 항목(워크스페이스 타일·+·대화·인박스·에이전트·작업)·레일 아바타·대화 영역의 자리가 0px 움직이는지 잰다(잴 것이 비어
 //      있으면 실패). 밝게·어둡게·200%(640×400 @2x).
-//   2) 알약을 눌러 받고 설치를 마쳤는데 이 맥의 작업 데몬에서 세션이 돈다: 카운트다운 대신 「작업이 끝나면 다시 시작해요」와 끊길
+//   2) 알약을 눌러 받고 설치를 마쳤는데 이 맥의 작업 데몬에서 세션이 돈다: 카운트다운 대신 「이 맥의 작업이 끝나면 다시 시작해요」와 끊길
 //      것 한 줄. 다시 시작하지 않는다. 밝게·어둡게·200%, 그리고 펼친 사이드바 한 장.
 //   3) 수리 1회차: 기다리던 작업이 끝나면 닫아 둔 카드가 초점 없이 다시 열려 다시 시작을 예고하고 「지금 말고」로 미룬다. 밝게·어둡게.
 //   4) 수리 2회차(Chromium · WebKit): 바깥을 눌러 닫은 카드의 초점과 그 뒤 키 두 번, 접힌 레일 카드와 입력창 독의 겹침(1280×800 ·
@@ -284,7 +284,7 @@ async function sceneRail(browser, origin, scheme, zoom) {
   await page.waitForFunction(() => document.querySelector('[data-testid="update-card-subline"]')?.textContent?.includes("작업 세션 1개"), null, { timeout: 12_000 }).catch(() => undefined);
   const title = await page.getByTestId("update-card-title").textContent();
   const sub = await page.getByTestId("update-card-subline").textContent().catch(() => null);
-  check(`${tag} 「작업이 끝나면 다시 시작해요」`, title === "작업이 끝나면 다시 시작해요", title);
+  check(`${tag} 「이 맥의 작업이 끝나면 다시 시작해요」`, title === "이 맥의 작업이 끝나면 다시 시작해요", title);
   check(`${tag} 끊길 것 한 줄`, sub === "지금 다시 시작하면 끊겨요: 작업 세션 1개", sub);
   check(`${tag} 「지금 다시 시작」`, ((await page.getByTestId("update-card-now").textContent()) ?? "").includes("지금 다시 시작"));
   const held = await railLayout(page);
@@ -300,7 +300,7 @@ async function sceneHoldRow(browser, origin, scheme) {
   await page.getByTestId("update-pill").waitFor({ timeout: 5_000 });
   await page.getByTestId("update-pill").click();
   await page.waitForFunction(() => document.querySelector('[data-testid="update-card-subline"]')?.textContent?.includes("작업 세션 1개"), null, { timeout: 12_000 }).catch(() => undefined);
-  check(`${scheme} 펼침: 같은 카드`, (await page.getByTestId("update-card-title").textContent()) === "작업이 끝나면 다시 시작해요");
+  check(`${scheme} 펼침: 같은 카드`, (await page.getByTestId("update-card-title").textContent()) === "이 맥의 작업이 끝나면 다시 시작해요");
   await page.screenshot({ path: resolve(OUT_DIR, `7-hold-row-${scheme}.png`) });
   await context.close();
 }
@@ -391,7 +391,7 @@ async function sceneNotice(browser, origin, scheme) {
     const title = await page.getByTestId("update-card-title").textContent().catch(() => null);
     const sub = (await page.getByTestId("update-card-subline").textContent().catch(() => null)) ?? "";
     const left = Number(/(\d+)초 뒤/.exec(sub)?.[1] ?? 0);
-    check(`${scheme} 예고: 닫아 둔 카드가 다시 열려 「곧 다시 실행돼요」`, title === "곧 다시 실행돼요", title ?? "카드 없음");
+    check(`${scheme} 예고: 닫아 둔 카드가 다시 열려 「곧 다시 시작돼요」`, title === "곧 다시 시작돼요", title ?? "카드 없음");
     check(`${scheme} 예고: 남은 시간이 보인다(20초 넘게)`, left > 20, sub);
     check(`${scheme} 예고: 「지금 말고」`, (await page.getByTestId("update-card-defer").textContent()) === "지금 말고");
     check(`${scheme} 예고: 초점은 입력창 그대로`, (await focusedTestId(page)) === "composer-input", await focusedTestId(page));
@@ -402,8 +402,8 @@ async function sceneNotice(browser, origin, scheme) {
     await page.screenshot({ path: resolve(OUT_DIR, `8-notice-${scheme}.png`) });
 
     await page.getByTestId("update-card-defer").click();
-    await page.waitForFunction(() => document.querySelector('[data-testid="update-card-title"]')?.textContent === "다시 실행해 주세요", null, { timeout: 5_000 }).catch(() => undefined);
-    check(`${scheme} 미룸: 「다시 실행해 주세요 · 지금」만 남는다`, (await page.getByTestId("update-card-title").textContent()) === "다시 실행해 주세요" && (await page.getByTestId("update-card-defer").count()) === 0);
+    await page.waitForFunction(() => document.querySelector('[data-testid="update-card-title"]')?.textContent === "다시 시작해 주세요", null, { timeout: 5_000 }).catch(() => undefined);
+    check(`${scheme} 미룸: 「다시 시작해 주세요 · 지금」만 남는다`, (await page.getByTestId("update-card-title").textContent()) === "다시 시작해 주세요" && (await page.getByTestId("update-card-defer").count()) === 0);
     await cardSettled(page);
     await page.screenshot({ path: resolve(OUT_DIR, `8-notice-deferred-${scheme}.png`) });
     // 입력창을 눌러 카드를 닫고 계속 쓴다.
@@ -561,7 +561,7 @@ async function sceneSettingsNotice(browser, origin, engine, scheme = "light", si
     check(`${engine} ${scheme} 설정: 닫아 둔 카드는 다시 열리지 않는다`, (await page.getByTestId("update-card").count()) === 0);
     await untilNotice(page);
     const title = await page.getByTestId("update-card-title").textContent().catch(() => null);
-    check(`${engine} ${scheme} 설정: 예고 카드 「곧 다시 실행돼요」·「지금 말고」`, title === "곧 다시 실행돼요" && (await page.getByTestId("update-card-defer").count()) === 1, title ?? "카드 없음");
+    check(`${engine} ${scheme} 설정: 예고 카드 「곧 다시 시작돼요」·「지금 말고」`, title === "곧 다시 시작돼요" && (await page.getByTestId("update-card-defer").count()) === 1, title ?? "카드 없음");
     check(`${engine} ${scheme} 설정: 아직 다시 시작 0번`, (await relaunched(page)) === 0);
     // 수리 3회차 M1: 창 높이와 상관없이 알약 · 예고 카드 · 두 단추가 창 안에 있다(목록이 넘쳐도).
     const inView = (b) => b !== null && b[0] >= 0 && b[1] >= 0 && b[0] + b[2] <= w && b[1] + b[3] <= h;

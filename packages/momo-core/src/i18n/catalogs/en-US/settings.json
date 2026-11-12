@@ -20,7 +20,7 @@
   "settings.updates.lastCheckedLabel": "Last checked",
   "settings.updates.description": "The app updates itself. A download is installed only after its signature checks out. When the install finishes the app restarts on its own; if work is running on this Mac, it waits until that work ends. What you were typing stays.",
   "settings.updates.installRowDescription": "When the install finishes the app restarts on its own. If work is running on this Mac, it waits until that work ends.",
-  "settings.updates.holdTitle": "Restarts when your work ends",
+  "settings.updates.holdTitle": "Restarts when work on this Mac ends",
   "settings.updates.restartNow": "Restart now",
   "settings.updates.notNow": "Not now",
   "settings.updates.stoppedChip": "Waiting to restart",

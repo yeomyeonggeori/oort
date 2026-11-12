@@ -441,10 +441,16 @@ async function exerciseScenario(browser, timing, interactive) {
 
     await page.getByTestId("agent-hub-tab-profile").click();
     const effortSelect = page.getByTestId("agent-hub-routing-effort");
-    if (
-      await effortSelect.isDisabled() ||
-      (await effortSelect.locator("option").count()) < 2
-    ) {
+    // 추론 강도는 이제 ListboxSelect(role=combobox 단추 + role=option 목록)다 — 네이티브 <select>/<option>이 아니다.
+    let effortOptionCount = 0;
+    if (!(await effortSelect.isDisabled())) {
+      await effortSelect.click();
+      await page.getByRole("listbox").waitFor();
+      effortOptionCount = await page.getByRole("listbox").getByRole("option").count();
+      await page.keyboard.press("Escape");
+      await page.getByRole("listbox").waitFor({ state: "detached" });
+    }
+    if (effortOptionCount < 2) {
       throw new Error(
         "effort table ready path: real schema did not unlock effort choices"
       );

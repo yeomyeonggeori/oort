@@ -170,7 +170,7 @@ export function useLastCheckedAt(): number | null {
   return useSyncExternalStore(subscribe, lastCheckedSnapshot, lastCheckedSnapshot);
 }
 
-/** Non-null while an installed update waits for local work to end (「작업이 끝나면 다시 시작해요」). */
+/** Non-null while an installed update waits for local work to end (「이 맥의 작업이 끝나면 다시 시작해요」). */
 export function useRelaunchHold(): RelaunchHold | null {
   return useSyncExternalStore(subscribe, holdSnapshot, holdSnapshot);
 }
@@ -200,7 +200,7 @@ export function useRelaunchDeferrable(): boolean {
  *
  * A check while an installed update waits for its restart is refused too: the
  * running version is still the old one, so the manifest would offer the same
- * build again and flip 「곧 다시 실행」 back to 「새 버전」.
+ * build again and flip 「곧 다시 시작」 back to 「새 버전」.
  *
  * While a new build is already on offer, a re-check keeps the offer on screen
  * (#5661): no 「확인 중」 blink of the pill on every wake or window return, and a
@@ -375,7 +375,7 @@ function applyGate(facts: LocalWorkFacts): boolean {
 function scheduleRelaunch(): void {
   clearRelaunchTimer();
   if (noticeSurfaces === 0) {
-    // Nowhere to show 「곧 다시 실행돼요」: wait for a surface rather than restart unannounced.
+    // Nowhere to show 「곧 다시 시작돼요」: wait for a surface rather than restart unannounced.
     relaunchPending = true;
     relaunchIn = null;
     notify();
@@ -429,7 +429,7 @@ export async function relaunchIntoUpdate(): Promise<void> {
 
 /**
  * 「지금 말고」 on the countdown that follows a wait (#5661 H3): the automatic restart is off for this install. The
- * card falls back to 「다시 실행해 주세요 · 지금」 and the update applies at the next restart or quit. The gate does not
+ * card falls back to 「다시 시작해 주세요 · 지금」 and the update applies at the next restart or quit. The gate does not
  * run again: a notice every two minutes would be the interruption this is meant to avoid.
  */
 /** Whether the person closed the card since this install finished (read by a card that mounts, not rendered). */
