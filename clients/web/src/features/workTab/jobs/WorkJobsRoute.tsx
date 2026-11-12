@@ -849,7 +849,9 @@ function JobRow({
     // 줄 안의 칩·단추의 둥근 모서리는 그대로다.
     <li
       className={cn(
-        "border-b border-line last:border-b-0",
+        // 구분선은 줄 **위**에 둔다(첫 줄 빼고): 맨 아래에 새 줄이 붙어도 앞 줄의 상자(높이)가 바뀌지 않는다(#5738 — 「마지막 줄은 아래
+        // 선 없음」이면 새 줄이 붙는 순간 앞 마지막 줄이 1px 자랐다).
+        "border-t border-line first:border-t-0",
         selected ? "bg-surface-hover" : "pointer-hover:has-[>button:hover:not(:active)]:bg-surface-hover",
         // 펼친 줄(띠 = `--surface-hover`) 안의 보조 알약(거부·열기·열어서 답하기)은 가리킴 채움이 띠와 같은 토큰이라 녹는다: 그 줄
         // 안에서만 한 단계 진한 `--surface-pressed`로 가리킨다(#5640 수리 3회차, 검수 질문 ② (a)). 공용 단추 변형은 그대로다.

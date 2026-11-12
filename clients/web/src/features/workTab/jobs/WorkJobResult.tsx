@@ -58,13 +58,14 @@ export interface JobApprovalFacts {
 }
 
 /**
- * 결정 층의 상자(#5738): 단추(`h-control-sm`) 한 줄 높이 + 위아래 `py-1`. 결정 전 단추·보내는 중·실패(단추 옆 한 줄)·끊김·「열기」·
- * 결과 한 줄이 모두 이 상자 하나에 선다 — 무엇이 서도 줄 높이가 같아 아래 줄이 움직이지 않는다(390 폭·큰 글자 포함, 글은 한 줄에서 자른다).
+ * 결정 층의 상자(#5738): 단추 한 줄 높이(`h-control-sm`, 폰 폭은 손가락 44px `tap-target` — 결정 단추가 그 폭에서 서는 높이와 같다) +
+ * 위아래 `py-1`. 결정 전 단추·보내는 중·실패(단추 옆 한 줄)·끊김·「열기」·결과 한 줄이 모두 이 상자 하나에 선다 — 무엇이 서도 줄 높이가
+ * 같아 아래 줄이 움직이지 않는다(브라우저 하네스 `fix5738:move0`가 1280·900·390 × 글자 150%로 잰다). 글은 한 줄에서 자른다.
  */
 function ControlBox({ children }: { children: ReactNode }) {
   return (
     <span className="flex w-full min-w-0 py-1" data-testid="work-job-control-box">
-      <span className="flex min-h-control-sm min-w-0 flex-1 items-center">{children}</span>
+      <span className="flex min-h-control-sm tap-target min-w-0 flex-1 items-center">{children}</span>
     </span>
   );
 }
