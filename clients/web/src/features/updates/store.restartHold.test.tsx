@@ -29,6 +29,7 @@ vi.mock("@/lib/tauri", () => ({
 
 import { BEFORE_RELAUNCH_EVENT } from "./relaunchFlush";
 import { UpdateButton } from "./UpdateButton";
+import { UpdateNotice } from "./UpdateNotice";
 import {
   RELAUNCH_AFTER_WAIT_SECONDS,
   RESTART_GATE_TICK_MS,
@@ -596,6 +597,48 @@ describe("업데이트 수리 3회차: 다시 시작 단추는 첫 초점을 받
     expect(byId("update-card-title")?.textContent).toBe("곧 다시 실행돼요");
     expect(byId("update-card-subline")?.textContent).toContain("3초 뒤");
     await advance(3_000);
+    expect(tauri.relaunch).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("업데이트 후속: 보일 곳이 없으면 카운트다운을 시작하지 않는 두 줄 (#5708)", () => {
+  it("알약이 섰다가 사라진 뒤 문이 열려도 다시 시작하지 않고, 알약이 다시 서면 30초 예고를 한 뒤에 다시 시작한다", async () => {
+    await installWith({ ...NONE, panes: [pane("working")] });
+    // 보일 곳이 하나였던 알약이 사라진다(정리 함수가 수를 줄여야 「곳 없음」이 된다).
+    act(() => root?.unmount());
+    host?.remove();
+    root = null;
+    facts = { ...NONE, panes: [pane("turn-done")] };
+    await advance(10 * 60 * 1000);
+    expect(tauri.relaunch).not.toHaveBeenCalled();
+
+    mountCard();
+    await advance(50);
+    expect(byId("update-card-title")?.textContent).toBe("곧 다시 실행돼요");
+    expect(byId("update-card-subline")?.textContent).toContain("30초 뒤");
+    await advance(29_000);
+    expect(tauri.relaunch).not.toHaveBeenCalled();
+    await advance(2_000);
+    expect(tauri.relaunch).toHaveBeenCalledTimes(1);
+  });
+
+  it("연결 화면 띠만 있는 화면에서 받은 업데이트도 띠가 예고를 보이고 3초 뒤 다시 시작한다", async () => {
+    facts = NONE;
+    stop = startUpdateWatch({ localWork: source });
+    host = document.createElement("div");
+    document.body.append(host);
+    root = createRoot(host);
+    act(() => root?.render(createElement(UpdateNotice)));
+    act(() => seedUpdateStateForTest({ kind: "available", update: UPDATE }));
+    await act(async () => {
+      await installUpdate();
+    });
+    await advance(0);
+    const row = byId("connect-update-notice");
+    expect(row?.textContent).toContain("곧 다시 실행");
+    await advance(2_000);
+    expect(tauri.relaunch).not.toHaveBeenCalled();
+    await advance(1_500);
     expect(tauri.relaunch).toHaveBeenCalledTimes(1);
   });
 });
