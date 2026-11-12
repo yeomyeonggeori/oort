@@ -494,8 +494,8 @@ function ChannelMemberPanelBody({
                 `inline`과 같은 요소에 있어 보임 클래스가 말줄임을 덮지 않는다(큰 글자에서도 줄바꿈 없음). 「다시 불러오기」는
                 줄어들지 않되 칸보다 넓어지지 않고(`max-w-full`), 모자라면 글이 말줄임으로 줄어 이웃 단추와 겹치지 않는다. 줄 높이는
                 단추 높이로 고정(`h-control-sm`)이라 큰 글자에서 글줄이 더 커도 발치가 늘지 않는다. */}
-            <span className="min-w-0 truncate sm:hidden">{formatMessage("timeline.memberPanel.nowFailedShort")}</span>
-            <span className="hidden min-w-0 truncate sm:block">{formatMessage("timeline.memberPanel.nowFailed")}</span>
+            <span className="min-w-0 truncate sm:hidden" data-testid="channel-member-now-failed-reason">{formatMessage("timeline.memberPanel.nowFailedShort")}</span>
+            <span className="hidden min-w-0 truncate sm:block" data-testid="channel-member-now-failed-reason">{formatMessage("timeline.memberPanel.nowFailed")}</span>
             <Button
               type="button"
               variant="ghost"

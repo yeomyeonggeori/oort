@@ -8854,7 +8854,7 @@ export const catalog: MessageCatalog = {
   "timeline.memberPanel.nowFailedShort": [
     {
       "type": 0,
-      "value": "Couldn't load activity"
+      "value": "Load failed"
     }
   ],
   "timeline.memberPanel.nowRetry": [

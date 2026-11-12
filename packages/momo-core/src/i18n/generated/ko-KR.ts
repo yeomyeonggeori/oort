@@ -8425,7 +8425,7 @@ export const catalog: MessageCatalog = {
   "timeline.memberPanel.nowFailedShort": [
     {
       "type": 0,
-      "value": "하는 일을 못 불러왔어요"
+      "value": "실패했어요"
     }
   ],
   "timeline.memberPanel.nowRetry": [
