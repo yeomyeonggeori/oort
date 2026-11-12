@@ -1,5 +1,6 @@
 import { createElement } from "react";
 import { createRoot } from "react-dom/client";
+import { initFocusModality } from "@/design/focusModality";
 import { SETTINGS_SECTIONS } from "@/features/settings/settingsNav";
 import { SettingsNav } from "@/features/settings/shell/SettingsNav";
 import { BEFORE_RELAUNCH_EVENT } from "@/features/updates/relaunchFlush";
@@ -79,6 +80,9 @@ export function Shell() {
 
 if (window.__railCardMode === "countdown") seedUpdateStateForTest({ kind: "installed", update: UPDATE }, 30, null);
 else seedUpdateStateForTest({ kind: "installed", update: UPDATE }, null, { cut: { kind: "busy", panes: 1, sessions: 0, unknown: false } });
+
+// 앱(`main.tsx`)과 같게 입력 방식 표지를 찍는다: 초점 고리가 키보드로 열었을 때만 서는 것을 잰다(#5708).
+initFocusModality(document);
 
 window.__railCard = { relaunches: () => relaunches };
 

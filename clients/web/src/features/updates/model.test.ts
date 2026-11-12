@@ -52,7 +52,7 @@ describe("badge visibility", () => {
     expect(
       badgeLabel({ kind: "installing", update: UPDATE, downloaded: 25, total: 100 })
     ).toBe("업데이트 받는 중 25%");
-    expect(badgeLabel({ kind: "installed", update: UPDATE })).toBe("곧 다시 실행");
+    expect(badgeLabel({ kind: "installed", update: UPDATE })).toBe("곧 다시 시작");
     expect(badgeLabel({ kind: "current" })).toBeNull();
   });
 
@@ -144,10 +144,10 @@ describe("업데이트 알약 (성재 결재 2026-10-16)", () => {
       pillTooltip(installFailed),
     ];
     expect(texts).toEqual([
-      "0.1.0-next.2로 업데이트할 수 있어요. 누르면 받고 다시 실행해요.",
+      "0.1.0-next.2로 업데이트할 수 있어요. 누르면 받고 다시 시작해요.",
       "받는 중 26%",
       "받는 중이에요.",
-      "곧 다시 실행돼요.",
+      "곧 다시 시작돼요.",
       "업데이트하지 못했어요. 눌러서 다시 확인해요.",
     ]);
     for (const text of texts) expect(text).not.toMatch(/[—–]/);
