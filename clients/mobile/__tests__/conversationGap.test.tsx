@@ -533,7 +533,7 @@ function typingTextBoxes(fontScale: number): number[] {
 }
 
 describe('「작성 중」 칸은 글자 크기 배율을 따라 미리 잡힌다 — 줄이 서고 져도 대화가 안 움직인다 (#5645)', () => {
-  it.each([1, 1.3, AX5_FONT_SCALE])('글자 배율 %p: 줄 없음 · 한 이름 · 두 이름(짧+긴 · 긴+짧 · 긴+긴)에서 칸 높이와 도크 흐름의 합이 같다', async fontScale => {
+  it.each([0.823, 1, 1.3, AX5_FONT_SCALE])('글자 배율 %p: 줄 없음 · 한 이름 · 두 이름(짧+긴 · 긴+짧 · 긴+긴)에서 칸 높이와 도크 흐름의 합이 같다', async fontScale => {
     setFontScale(fontScale);
     await openConversation(0, GENERAL);
     const slotHeight = typingSlotHeight(fontScale);
@@ -553,6 +553,8 @@ describe('「작성 중」 칸은 글자 크기 배율을 따라 미리 잡힌�
       const boxes = typingTextBoxes(fontScale);
       if (state.typists.length > 0) expect(boxes.length).toBeGreaterThan(0);
       for (const box of boxes) expect(box).toBeLessThanOrEqual(slotHeight);
+      // 줄이 서 있으면 가장 큰 글 상자가 칸과 **같다**(≤ 만 보면 칸 상한이 글 상한과 갈라져 빈 띠가 늘 서도 초록이다, #5719).
+      if (state.typists.length > 0) expect(Math.max(...boxes)).toBeCloseTo(slotHeight, 10);
     }
     // 신호가 실제로 줄을 바꿨다 — 이름 칸 수가 0 · 1 · 2 · 2 · 2 다(바뀌지 않은 화면을 재고 같다고 하지 않는다).
     expect(rows.map(row => row.names)).toEqual([0, 1, 2, 2, 2]);
@@ -571,6 +573,21 @@ describe('「작성 중」 칸은 글자 크기 배율을 따라 미리 잡힌�
       CONV.listPillGap + railSlotHeight(fontScale) + typingReserve(fontScale) - TYPING_RESERVE,
       10,
     );
+  });
+
+  it('칸 높이는 숫자로 못 박혀 있다 — 상한 1.6 · 레일 칸과 같은 식 · 작은 글자에서는 줄어든다 (#5719)', () => {
+    // 구현 함수에서 기대값을 꺼내지 않고 손으로 적은 값이다. 상한을 1.9 로 바꾸면 가장 큰 글자에서 30.4 가 되어 깨진다.
+    expect(typingSlotHeight(1)).toBe(16);
+    expect(typingSlotHeight(1.3)).toBeCloseTo(20.8, 10);
+    expect(typingSlotHeight(1.6)).toBeCloseTo(25.6, 10);
+    expect(typingSlotHeight(AX5_FONT_SCALE)).toBeCloseTo(25.6, 10);
+    // 글자 배율 1 미만(작은 글자): 칸이 16 아래로 줄어드는 것이 **뜻한 것**이다. 바로 위 레일 칸(`railSlotHeight`)이 같은 식이라
+    // 두 줄이 함께 줄고, 최소 16 을 지키면 레일과 갈라져 작은 글자에서만 「작업 중」과 「작성 중」 사이가 벌어진다.
+    expect(typingSlotHeight(0.823)).toBeCloseTo(13.168, 10);
+    expect(typingReserve(0.823)).toBeCloseTo(13.168 - TYPING_OVERHANG, 10);
+    for (const scale of [0.823, 1, 1.3, 1.6, AX5_FONT_SCALE]) {
+      expect(typingSlotHeight(scale)).toBe(railSlotHeight(scale));
+    }
   });
 
   it('줄 상자가 자라도 걸침은 그대로다 — 가장 큰 글자에서도 컴포저 위 여백 안에서 끝난다', () => {
