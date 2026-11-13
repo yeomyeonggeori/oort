@@ -20,19 +20,16 @@ function ruleBody(selector: string): string {
 
 const nameRule = ruleBody("&[data-dim] {");
 const handleRule = ruleBody("&[data-dim] [data-row-handle] {");
-const HANDLE_MIX = /color-mix\(in srgb, var\(--ink-muted\) (\d+)%, var\(--ink\)\)/.exec(handleRule);
 
 describe("읽은 줄의 CSS 규칙", () => {
-  it("이름은 --ink-muted 이고, 핸들은 그것을 옅게 섞어 이름과 다른 색이다", () => {
+  it("이름과 핸들은 같은 --ink-muted 이고, 핸들은 굵기로 가른다", () => {
     expect(nameRule).toContain("color: var(--ink-muted)");
-    expect(HANDLE_MIX).not.toBeNull();
-    const mixed = Number(HANDLE_MIX?.[1]) / 100;
-    expect(mixed).toBeGreaterThan(0);
-    expect(mixed).toBeLessThan(1);
+    expect(handleRule).toContain("color: var(--ink-muted)");
+    expect(handleRule).toContain("font-weight: 400");
+    expect(nameRule).toContain("font-weight: 500");
   });
 });
 
-const alpha = Number(HANDLE_MIX?.[1] ?? "100") / 100;
 
 interface Case {
   label: string;
@@ -88,15 +85,11 @@ describe("읽은 줄의 대비 — 첫 파티 테마 × 카탈로그 파생 테�
     expect(CATALOG.length).toBeGreaterThanOrEqual(catalogEntries().length);
   });
 
-  it("이름과 핸들이 모든 칸에서 4.5:1 이상이고 서로 다른 색이다", () => {
+  it("이름(핸들도 같은 색)이 모든 칸에서 4.5:1 이상이다", () => {
     const failures = CASES.flatMap((c) => {
-      const handle = blend(c.name, c.ink, alpha);
       const problems: string[] = [];
       const nameRatio = contrast(c.name, c.bg);
-      const handleRatio = contrast(handle, c.bg);
-      if (nameRatio < TEXT_MIN) problems.push(`이름 ${nameRatio.toFixed(2)}`);
-      if (handleRatio < TEXT_MIN) problems.push(`핸들 ${handleRatio.toFixed(2)}`);
-      if (handle === c.name) problems.push("핸들 = 이름 색");
+      if (nameRatio < TEXT_MIN) problems.push(`이름·핸들 ${nameRatio.toFixed(2)}`);
       return problems.length > 0 ? [`${c.label}: ${problems.join(", ")}`] : [];
     });
     expect(failures).toEqual([]);

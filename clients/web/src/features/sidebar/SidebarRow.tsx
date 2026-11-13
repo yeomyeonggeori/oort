@@ -266,7 +266,9 @@ export function SidebarRow({
         <span
           className={cn(
             "min-w-0 truncate",
-            agent && "text-agent"
+            // 읽은 줄(`dim`)은 에이전트 DM 도 줄의 연한 색을 따른다(#5775, 폰과 같은 규칙): 정체성은 아바타가 지고,
+            // 띠 위에서는 `--agent` 가 `--on-band` 라 읽은 에이전트 줄이 안 읽은 줄과 같은 색이 됐었다.
+            agent && !dim && "text-agent"
           )}
         >
           {label}

@@ -206,10 +206,10 @@ async function runScheme(origin, scheme) {
     check(scheme, "B5 연한 이름도 대비 4.5:1 이상", read.ratio >= 4.5 && readDm.ratio >= 4.5, { read: read.ratio, readDm: readDm.ratio });
     check(scheme, "B6 목적지 줄(인박스)은 짙다(읽은 줄보다 진하다)", inbox !== null && inbox.color === unread.color, { inbox, unread });
     const handles = await handlesOf(page);
-    check(scheme, "B7 같은 이름 둘의 @핸들이 서고, 자기 줄의 이름과 다른 색이며 4.5:1 이상", handles.length === 2 && handles.every((h) => h.color !== h.nameColor && h.ratio >= 4.5), handles);
-    // 읽은 에이전트 DM: 이름은 에이전트 정체성 색(`text-agent`)이 이긴다 — 연하게 칠하지 않는다(planner 결정 사항으로 보고).
+    check(scheme, "B7 같은 이름 둘의 @핸들이 서고 4.5:1 이상(색은 이름과 같고 크기·굵기로 가름)", handles.length === 2 && handles.every((h) => h.ratio >= 4.5), handles);
+    // 읽은 에이전트 DM 도 읽은 사람 줄과 같은 연한 색이다(정체성은 아바타가 진다 — 폰과 같은 규칙).
     const agentRead = await nameOf(page, dmId(4));
-    check(scheme, "B8 (보고) 읽은 에이전트 DM 의 이름 색은 연한 줄 색과 다르다 = 연하게 칠해지지 않고 에이전트 색이 이긴다", agentRead.color !== read.color, { agentRead, read });
+    check(scheme, "B8 읽은 에이전트 DM 의 이름도 읽은 줄과 같은 연한 색이다", agentRead.color === read.color, { agentRead, read });
     await shot("rest");
 
     // C. 낱말
@@ -245,7 +245,7 @@ async function runVariants(origin, scheme) {
       await page.evaluate(MEASURE);
       if (zoom) await page.addStyleTag({ content: `html{font-size:${zoom} !important}` });
       if (name === "narrow") {
-        const drawer = page.getByTestId("open-drawer");
+        const drawer = page.getByTestId("open-sidebar-drawer");
         if (await drawer.count()) await drawer.first().click().catch(() => undefined);
       }
       await page.waitForTimeout(400);
@@ -272,7 +272,7 @@ async function runBand(origin, scheme) {
     const unread = await named(chId(2));
     const handles = await handlesOf(page, band);
     check(`${scheme}-노을띠`, "D1 띠 위 읽은 이름 4.5:1 이상 · 안 읽은 줄과 다른 색", read.ratio >= 4.5 && read.color !== unread.color, { band, read, unread });
-    check(`${scheme}-노을띠`, "D2 띠 위 @핸들 4.5:1 이상 · 이름과 다른 색", handles.length === 2 && handles.every((h) => h.ratio >= 4.5 && h.color !== h.nameColor), handles);
+    check(`${scheme}-노을띠`, "D2 띠 위 @핸들 4.5:1 이상", handles.length === 2 && handles.every((h) => h.ratio >= 4.5), handles);
     await page.screenshot({ path: resolve(OUT_DIR, `c5775-band-${scheme}.png`), clip: { x: 0, y: 0, width: 420, height: 900 } });
   } finally {
     await browser.close();
