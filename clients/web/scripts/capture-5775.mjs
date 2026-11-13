@@ -43,18 +43,19 @@ const person = (n, displayName, handle, extra = {}) => ({
 });
 // 이서연이 둘이다: 이름만으로는 갈리지 않아 행에 `@핸들`이 선다.
 const roster = [
-  person("01", "곽성재", "seongjae", { role: "owner" }),
+  person("01", "박지우", "jiwoo", { role: "owner" }),
   person("11", "김도현", "dohyeon"),
   person("12", "이서연", "seoyeon"),
   person("13", "이서연", "seoyeon-design"),
+  person("14", "김인턴", "intern", { kind: "agent", hostOnline: true, ownerHumanId: P("01") }),
 ];
 const dm = (n, other) => ({ id: dmId(n), workspaceId, kind: "dm", muted: false, memberIds: [P("01"), other] });
-const dms = [dm(1, P("11")), dm(2, P("12")), dm(3, P("13"))];
+const dms = [dm(1, P("11")), dm(2, P("12")), dm(3, P("13")), dm(4, P("14"))];
 
 // [마지막으로 읽은 seq, 최신 seq]
 const READ = {
   [chId(1)]: [10, 10], [chId(2)]: [7, 9], [chId(3)]: [4, 4], [chId(4)]: [2, 6], [chId(5)]: [3, 3],
-  [dmId(1)]: [8, 8], [dmId(2)]: [5, 7], [dmId(3)]: [6, 6],
+  [dmId(1)]: [8, 8], [dmId(2)]: [5, 7], [dmId(3)]: [6, 6], [dmId(4)]: [4, 4],
 };
 // 「가나다」를 저장해 둔 계정: 끌어서 정한 차례는 alpha(가나다)와 다르게 zeta → beta → alpha 로 적어 둔다.
 const PREFS = { version: 1, sections: [{ id: "sec-1", name: "출시 준비", order: 0, channelIds: [chId(4), chId(5), chId(3)] }], starredChannelIds: [], sectionSort: "alpha" };
@@ -73,7 +74,7 @@ const wireRead = (id) => ({
 async function installMocks(context) {
   const auth = {
     accessToken: "capture-only-not-a-credential", refreshToken: "capture-only-not-a-credential",
-    member: { id: memberId, workspaceId, kind: "human", displayName: "곽성재", handle: "seongjae" },
+    member: { id: memberId, workspaceId, kind: "human", displayName: "박지우", handle: "jiwoo" },
     realtimeWebSocketUrl: "ws://sidebar-5775-capture.invalid/connection/websocket",
   };
   await context.route("**/v1/**", async (route) => {
@@ -86,7 +87,7 @@ async function installMocks(context) {
     if (path.endsWith("/channels")) return json(route, { channels: [...channels, ...dms] });
     if (path.endsWith("/roster")) return json(route, { members: roster });
     if (path.endsWith("/huddles/active")) return json(route, { huddle: null });
-    if (path.endsWith(`/workspaces/${workspaceId}`)) return json(route, { workspace: { id: workspaceId, name: "여명거리" } });
+    if (path.endsWith(`/workspaces/${workspaceId}`)) return json(route, { workspace: { id: workspaceId, name: "새벽 팀" } });
     if (path.includes("/messages")) return json(route, { messages: [] });
     return json(route, {});
   });
@@ -206,6 +207,9 @@ async function runScheme(origin, scheme) {
     check(scheme, "B6 목적지 줄(인박스)은 짙다(읽은 줄보다 진하다)", inbox !== null && inbox.color === unread.color, { inbox, unread });
     const handles = await handlesOf(page);
     check(scheme, "B7 같은 이름 둘의 @핸들이 서고, 자기 줄의 이름과 다른 색이며 4.5:1 이상", handles.length === 2 && handles.every((h) => h.color !== h.nameColor && h.ratio >= 4.5), handles);
+    // 읽은 에이전트 DM: 이름은 에이전트 정체성 색(`text-agent`)이 이긴다 — 연하게 칠하지 않는다(planner 결정 사항으로 보고).
+    const agentRead = await nameOf(page, dmId(4));
+    check(scheme, "B8 (보고) 읽은 에이전트 DM 의 이름 색은 연한 줄 색과 다르다 = 연하게 칠해지지 않고 에이전트 색이 이긴다", agentRead.color !== read.color, { agentRead, read });
     await shot("rest");
 
     // C. 낱말
