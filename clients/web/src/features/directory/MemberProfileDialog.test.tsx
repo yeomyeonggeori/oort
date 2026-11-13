@@ -797,13 +797,21 @@ describe("역할 바꾸기 확인 단계 (수용 2)", () => {
     await act(async () => {
       window.dispatchEvent(new Event("offline"));
     });
-    await vi.waitFor(() => expect(document.querySelectorAll('[data-testid="member-profile-offline"]')).toHaveLength(1));
-    expect(document.querySelectorAll("#member-profile-offline-reason")).toHaveLength(1);
-    await pressEscape();
-    await vi.waitFor(() => expect(byId("member-profile-role-stage")).toBeNull());
-    expect(byId("member-profile-body")).toBe(body);
-    expect(body?.getAttribute("aria-hidden")).toBeNull();
-    expect(document.querySelectorAll("#member-profile-offline-reason")).toHaveLength(1);
+    try {
+      await vi.waitFor(() => expect(document.querySelectorAll('[data-testid="member-profile-offline"]')).toHaveLength(1));
+      expect(document.querySelectorAll("#member-profile-offline-reason")).toHaveLength(1);
+      await pressEscape();
+      await vi.waitFor(() => expect(byId("member-profile-role-stage")).toBeNull());
+      expect(byId("member-profile-body")).toBe(body);
+      expect(body?.getAttribute("aria-hidden")).toBeNull();
+      expect(document.querySelectorAll("#member-profile-offline-reason")).toHaveLength(1);
+    } finally {
+      // 연결 상태는 창 밖(브라우저 이벤트를 듣는 공용 저장소)에 남는다: 다음 시험이 끊긴 채 시작하지 않게 되돌린다.
+      Object.defineProperty(window.navigator, "onLine", { configurable: true, value: true });
+      await act(async () => {
+        window.dispatchEvent(new Event("online"));
+      });
+    }
   });
 
   it("오프라인이면 고르개를 잠그고 배너 사유를 가리킨다", async () => {
