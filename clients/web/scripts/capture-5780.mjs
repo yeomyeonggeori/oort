@@ -10,8 +10,12 @@
 //   R. 소유자 → 멤버: 고르개 열림 · 확인 단계(일반) · 확인 단계(소유자 승격) · 바뀐 뒤 「바뀜」 · 관리자 → 소유자(잠긴 글)
 //   N. 좁은 폭(375) · 200%(1280 창의 200% = 640×450 CSS px, 배율 2)
 //   O. 오프라인(사유 줄 자리·잠김) — 프로필 본문과 재설정 단계
-//   T. 키보드 길(검수 r1 B1): Tab 정·역방향 정거장과 정거장마다 초점 고리
+//   T. 키보드 길(검수 r1 B1): Tab 정·역방향 정거장과 정거장마다 초점 고리(#5781: 정지·내보내기 줄이 든 여덟 정거장)
 //   H. 요청이 나간 뒤의 취소(검수 r1 H1): PATCH 를 늦춘 채 취소 → 단계 그대로·요청 한 번·실제 결과
+//   L. 정지·정지 풀기·내보내기(#5781): 시점 × 대상 표대로 줄 유무, 정지 → 칩·「정지 풀기」, 409 사유 문장, 진행 중 잠김,
+//      내보낸 결과, 좁은 폭·200% 의 단계. 가짜 명부는 서버처럼 **활성 멤버만** 돌려준다(정지·내보낸 사람은 빠진다).
+//
+// 장면 일부만: `npm run build && SCENES=T OUT_DIR=<폴더> node scripts/capture-5780.mjs` (Tab 정거장 단정만, 실패하면 종료 코드 1).
 // =============================================================================
 
 import { existsSync, mkdirSync } from "node:fs";
@@ -54,6 +58,12 @@ const json = (route, body, status = 200) =>
 const patches = [];
 /** 역할 PATCH 응답을 늦춘다(진행 중 취소 장면, 검수 r1 H1). */
 let patchDelayMs = 0;
+/** 정지·풀기·내보내기 요청 기록(#5781). `lifecycleDelayMs` 는 응답을 늦추고, `lifecycleConflict` 는 그사이 상태가 바뀐 409 를 낸다. */
+const lifecycleCalls = [];
+let lifecycleDelayMs = 0;
+let lifecycleConflict = false;
+/** 서버 `MembershipLifecycleError` 문장(`as_swift_message`)과 같은 봉투. */
+const refuse = (route, status, message) => json(route, { error: { message } }, status);
 
 async function installRoutes(context, viewerId) {
   const viewer = roster.find((m) => m.id === viewerId);
@@ -80,10 +90,27 @@ async function installRoutes(context, viewerId) {
       roster = roster.map((m) => (m.id === role[1] ? { ...m, role: body.role } : m));
       return json(route, { memberId: role[1], scope: "workspace", role: body.role });
     }
+    // #5781: 서버 `routes/member_lifecycle.rs` 와 같은 길·상태 규칙(정지 = 활성만, 풀기 = 정지된 멤버만, 그 밖은 409).
+    const lifecycle = /\/members\/([^/]+)(\/suspend|\/reinstate)?$/.exec(path);
+    if (lifecycle && lifecycle[1] !== "me" && ((method === "POST" && lifecycle[2]) || (method === "DELETE" && !lifecycle[2]))) {
+      const [, id, verb] = lifecycle;
+      const action = verb === "/suspend" ? "suspend" : verb === "/reinstate" ? "reinstate" : "remove";
+      lifecycleCalls.push(`${id}:${action}`);
+      if (lifecycleDelayMs > 0) await new Promise((done) => setTimeout(done, lifecycleDelayMs));
+      const target = roster.find((m) => m.id === id);
+      if (!target || target.status === "deleted") return refuse(route, 404, "workspace member not found");
+      if (lifecycleConflict && action === "suspend") return refuse(route, 409, "member status must be active");
+      if (action === "suspend" && target.status !== "active") return refuse(route, 409, "member status must be active");
+      if (action === "reinstate" && target.status !== "suspended") return refuse(route, 409, "member status must be suspended");
+      const next = action === "suspend" ? "suspended" : action === "reinstate" ? "active" : "deleted";
+      roster = roster.map((m) => (m.id === id ? { ...m, status: next } : m));
+      return json(route, { memberId: id, status: next });
+    }
     if (/\/inbox(\/|$)/.test(path)) return json(route, { items: [], nextCursor: null, unreadCount: 0, approvalsPending: 0 });
     if (path.endsWith("/members/me/sidebar-prefs")) return json(route, { prefs: { version: 1, sections: [], starredChannelIds: [] } });
     if (path.endsWith("/channels")) return json(route, { channels: [{ id: GENERAL, workspaceId, kind: "public", name: "일반", topic: "팀 공지", muted: false }] });
-    if (path.endsWith("/roster")) return json(route, { members: roster });
+    // 서버 명부(`list_workspace_roster`)는 `m.status = 'active'` 만 돌려준다.
+    if (path.endsWith("/roster")) return json(route, { members: roster.filter((m) => m.status === "active") });
     if (path.endsWith("/read-state") && method === "GET") {
       return json(route, { read_states: [{ channel_id: GENERAL, last_read_seq: 9, latest_seq: 9, unread_count: 0, mention_count: 0, marked_unread_before_seq: null }] });
     }
@@ -231,15 +258,38 @@ async function stageHolds(page, name, before) {
   return d;
 }
 
+/** 큰 얼굴 묶음의 자리. */
+const heroBox = (page) =>
+  page.evaluate(() => {
+    const r = document.querySelector('[data-testid="member-profile-hero"]')?.getBoundingClientRect();
+    return r ? { top: r.top, left: r.left, width: r.width, height: r.height } : null;
+  });
+
+/**
+ * 단계가 선 뒤에도 큰 얼굴 묶음이 처음 자리(±0.5px)에 보이고(`visibility`·가려진 조상 없음), 이름을 말한다(#5780 검수 r2 N2).
+ * 넓은 창에서만 자리를 맞댄다 — 좁은 창·200%에서는 단계가 보이도록 바깥 스크롤이 움직일 수 있다.
+ */
+async function heroStays(page, before, name) {
+  const after = await heroBox(page);
+  const shown = await page.evaluate(() => {
+    const hero = document.querySelector('[data-testid="member-profile-hero"]');
+    return !!hero && getComputedStyle(hero).visibility === "visible" && hero.closest('[aria-hidden="true"]') === null;
+  });
+  const said = ((await text(page, "member-profile-name")) ?? "").includes(name);
+  const d = before && after ? Math.max(Math.abs(after.top - before.top), Math.abs(after.left - before.left), Math.abs(after.height - before.height)) : NaN;
+  console.log(`measure hero ${JSON.stringify({ before, after, delta: d, shown, said })}`);
+  return shown && said && d <= 0.5;
+}
+
 const text = (page, id) => page.getByTestId(id).innerText().catch(() => null);
 const count = (page, id) => page.getByTestId(id).count();
 
 /** V. 네 시점 × 대상(사람·에이전트). */
 const VIEWS = [
-  { viewer: OWNER, label: "owner", human: MEMBER, expect: { manage: 1, select: 1, options: ["소유자", "관리자", "멤버", "게스트"], email: "dohyun.lee@dalmuri.example", reset: 1 } },
-  { viewer: ADMIN, label: "admin", human: OWNER, expect: { manage: 1, select: 0, options: null, email: "dohyeon@dalmuri.example", reset: 0, text: "소유자" } },
-  { viewer: MEMBER, label: "member", human: ADMIN, expect: { manage: 0, select: 0, options: null, email: "seoyeon@dalmuri.example", reset: 0 } },
-  { viewer: GUEST, label: "guest", human: ADMIN, expect: { manage: 0, select: 0, options: null, email: null, reset: 0 } },
+  { viewer: OWNER, label: "owner", human: MEMBER, expect: { manage: 1, select: 1, options: ["소유자", "관리자", "멤버", "게스트"], email: "dohyun.lee@dalmuri.example", reset: 1, lifecycle: 1 } },
+  { viewer: ADMIN, label: "admin", human: OWNER, expect: { manage: 1, select: 0, options: null, email: "dohyeon@dalmuri.example", reset: 0, text: "소유자", lifecycle: 0 } },
+  { viewer: MEMBER, label: "member", human: ADMIN, expect: { manage: 0, select: 0, options: null, email: "seoyeon@dalmuri.example", reset: 0, lifecycle: 0 } },
+  { viewer: GUEST, label: "guest", human: ADMIN, expect: { manage: 0, select: 0, options: null, email: null, reset: 0, lifecycle: 0 } },
 ];
 
 async function sceneViews(browser, origin, scheme) {
@@ -258,6 +308,8 @@ async function sceneViews(browser, origin, scheme) {
       if (e.text) check(`V ${tag} 고르개 대신 글 「${e.text}」`, (await text(page, "member-profile-role-text")) === e.text);
       check(`V ${tag} 이메일 ${e.email}`, (await count(page, "member-profile-email")) === (e.email ? 1 : 0) && (e.email === null || (await text(page, "member-profile-email")) === e.email));
       check(`V ${tag} 재설정 줄 ${e.reset}`, (await count(page, "member-profile-reset-open")) === e.reset);
+      check(`V ${tag} 정지·내보내기 줄 ${e.lifecycle}`,
+        (await count(page, "member-profile-suspend")) === e.lifecycle && (await count(page, "member-profile-remove")) === e.lifecycle);
       check(`V ${tag} 종류·상태 줄과 글자 닫기가 없다`, !(await dialog.innerText()).includes("종류") && (await dialog.getByRole("button", { name: "닫기", exact: true }).count()) === 0);
       check(`V ${tag} 창 안에서 넘치지 않는다`, (await dialogOverflow(page)) <= 0, await dialogOverflow(page));
       if (e.options) {
@@ -285,7 +337,9 @@ async function sceneViews(browser, origin, scheme) {
         (await count(page, "member-profile-routing")) === 1 &&
           (await text(page, "member-profile-owner")) === "김도현 님이 관리" &&
           (await count(page, "member-profile-email")) === 0 &&
-          (await count(page, "member-profile-manage")) === 0);
+          (await count(page, "member-profile-manage")) === 0 &&
+          (await count(page, "member-profile-suspend")) === 0 &&
+          (await count(page, "member-profile-remove")) === 0);
       await page.keyboard.press("Escape");
       await agent.dialog.waitFor({ state: "detached" });
       const escFocus = await focusReturnsTo(page, agent.row);
@@ -307,6 +361,7 @@ async function sceneRole(browser, origin, scheme) {
     const { dialog } = await openProfile(page, MEMBER);
     await settle(page);
     const profileBox = await dialogBox(page);
+    const profileHero = await heroBox(page);
     // 일반 확인 단계(멤버 → 관리자).
     await page.getByTestId("member-profile-role").click();
     await page.getByRole("option", { name: "관리자" }).click();
@@ -318,7 +373,7 @@ async function sceneRole(browser, origin, scheme) {
     const dialogs = await page.locator('[role="dialog"], [role="alertdialog"]').evaluateAll((els) => els.map((el) => el.getAttribute("data-testid") ?? el.tagName));
     check(`R ${tag} 대화상자는 하나다(겹친 창 없음, §3.4)`, dialogs.length === 1, dialogs);
     check(`R ${tag} 초점은 취소에 있다`, await page.evaluate(() => document.activeElement?.getAttribute("data-testid") === "member-profile-role-stage-cancel"));
-    check(`R ${tag} 단계 위에 누구의 역할인지(작은 얼굴 + 이름)가 남는다`, ((await text(page, "member-profile-role-stage-subject")) ?? "").includes("이도현"));
+    check(`R ${tag} 단계 위에 큰 얼굴 묶음(이름)이 제자리에 보인 채 남는다(검수 r2 N2)`, await heroStays(page, profileHero, "이도현"));
     await page.mouse.move(0, 0);
     await shot(page, `R-${tag}-confirm-general`);
     await stageHolds(page, `R ${tag} 일반`, profileBox);
@@ -516,7 +571,8 @@ const ringShown = (page) =>
   });
 
 /**
- * T. 키보드 길 (#5780 검수 r1 B1). 소유자 → 멤버(이메일 있음): Tab 정방향 여섯 정거장, Shift+Tab 역방향 여섯 정거장.
+ * T. 키보드 길 (#5780 검수 r1 B1). 소유자 → 멤버(이메일 있음): Tab 정방향 여덟 정거장, Shift+Tab 역방향 여덟 정거장
+ * (#5781: 재설정 다음에 정지 · 워크스페이스에서 내보내기 줄이 든다).
  * 이메일 복사·X 의 툴팁은 키보드 초점에서 뜨는 공용 `Tooltip` 이고, 그 툴팁이 초점 이동 도중에 떼어지면 모달의 초점 가둠이
  * 초점을 대화상자 상자로 끌어갔다(역할 고르개·재설정·X 에 닿지 못함). 정거장마다 초점 고리가 보이는 그림을 남긴다.
  * 에이전트 프로필(라우팅 설정 · X)도 같은 길을 잰다.
@@ -527,6 +583,8 @@ const PROFILE_STOPS = [
   "member-profile-email-copy",
   "member-profile-role",
   "member-profile-reset-open",
+  "member-profile-suspend",
+  "member-profile-remove",
   "member-profile-close",
 ];
 const AGENT_STOPS = ["member-profile-dm", "member-profile-copy-mention", "member-profile-routing", "member-profile-close"];
@@ -569,7 +627,7 @@ async function sceneTab(browser, origin, scheme) {
     await page.mouse.move(0, 0);
     await page.waitForFunction(() => document.activeElement?.getAttribute("data-testid") === "member-profile-dm");
     const human = await walk(page, PROFILE_STOPS, `${tag}-member`, { shots: true });
-    check(`T ${tag} 멤버: 정방향 메시지 → 멘션 → 이메일 복사 → 역할 → 재설정 → X → (처음)`,
+    check(`T ${tag} 멤버: 정방향 메시지 → 멘션 → 이메일 복사 → 역할 → 재설정 → 정지 → 내보내기 → X → (처음)`,
       JSON.stringify(human.forward) === JSON.stringify([...PROFILE_STOPS, PROFILE_STOPS[0]]), human.forward);
     check(`T ${tag} 멤버: 역방향은 같은 정거장을 거꾸로`,
       JSON.stringify(human.backward) === JSON.stringify([...PROFILE_STOPS].reverse()), human.backward);
@@ -666,13 +724,240 @@ async function sceneInFlightCancel(browser, origin, scheme) {
   }
 }
 
+/**
+ * L. 정지 · 정지 풀기 · 워크스페이스에서 내보내기 (#5781). 실제 엔진에서:
+ *   - 시점(소유자·관리자·멤버·게스트) × 대상 표대로 줄이 서고 안 선다(서버 사다리: 자기보다 낮은 역할만, 자기 자신·소유자 불가).
+ *   - 정지 → 확인 단계(겹친 창 없음 · 초점 취소 · 얼굴 그대로 · 창 크기 그대로) → 요청 한 번 → 명부에서 빠져도 「정지됨」 칩과
+ *     「정지 풀기」·영수증, 초점은 「정지 풀기」 → 정지 풀기 → 칩이 사라지고 「정지」.
+ *   - 그사이 상태가 바뀐 409 → 단계 안 사유 문장. 진행 중에는 취소·Esc·바깥 누름이 단계를 내리지 못하고 요청은 한 번.
+ *   - 내보내기 → 되돌릴 수 없다는 경고 → 결과 한 줄과 「닫기」(초점), 명부의 그 줄은 사라진다.
+ */
+const LIFECYCLE_TABLE = [
+  { viewer: OWNER, label: "owner", targets: [[ADMIN, 1], [MEMBER, 1], [GUEST, 1], [AGENT, 0], [OWNER, 0]] },
+  { viewer: ADMIN, label: "admin", targets: [[OWNER, 0], [MEMBER, 1], [GUEST, 1], [AGENT, 0]] },
+  { viewer: MEMBER, label: "member", targets: [[GUEST, 0], [ADMIN, 0]] },
+  { viewer: GUEST, label: "guest", targets: [[MEMBER, 0], [OWNER, 0]] },
+];
+
+async function sceneLifecycle(browser, origin, scheme) {
+  const tag = scheme;
+  // 표: 시점 × 대상.
+  for (const row of LIFECYCLE_TABLE) {
+    roster = freshRoster();
+    const { context, page } = await openContext(browser, origin, { scheme, viewerId: row.viewer });
+    try {
+      await page.goto(origin, { waitUntil: "domcontentloaded" });
+      const seen = [];
+      for (const [targetId, expected] of row.targets) {
+        const { dialog } = await openProfile(page, targetId);
+        const got = [await count(page, "member-profile-suspend"), await count(page, "member-profile-remove")];
+        seen.push(`${roster.find((m) => m.id === targetId).handle}:${got.join("")}`);
+        check(`L ${tag} ${row.label} → ${roster.find((m) => m.id === targetId).handle} 정지·내보내기 줄 ${expected}`, got[0] === expected && got[1] === expected, got);
+        await page.keyboard.press("Escape");
+        await dialog.waitFor({ state: "detached" });
+      }
+      console.log(`measure L ${tag} table ${row.label} ${JSON.stringify(seen)}`);
+    } finally {
+      await context.close();
+    }
+  }
+
+  // 정지 → 정지 풀기 (소유자 → 멤버).
+  roster = freshRoster();
+  lifecycleCalls.length = 0;
+  {
+    const { context, page } = await openContext(browser, origin, { scheme, viewerId: OWNER });
+    try {
+      await page.goto(origin, { waitUntil: "domcontentloaded" });
+      const { dialog } = await openProfile(page, MEMBER);
+      await settle(page);
+      const profileBox = await dialogBox(page);
+      const hero = await heroBox(page);
+      await page.mouse.move(0, 0);
+      await shot(page, `L-${tag}-profile`);
+      await page.getByTestId("member-profile-suspend").click();
+      await page.getByTestId("member-profile-lifecycle-stage").waitFor();
+      const dialogs = await page.locator('[role="dialog"], [role="alertdialog"]').count();
+      check(`L ${tag} 정지 단계: 대화상자 하나 · 요청 없음 · 초점 취소 · 위험 단추`,
+        dialogs === 1 && lifecycleCalls.length === 0 &&
+          (await activeId(page)) === "member-profile-lifecycle-stage-cancel" &&
+          (await page.getByTestId("member-profile-lifecycle-stage-confirm").getAttribute("data-tone")) === "destructive",
+        { dialogs, calls: [...lifecycleCalls], active: await activeId(page) });
+      check(`L ${tag} 정지 단계 위에 큰 얼굴 묶음이 제자리에 남는다`, await heroStays(page, hero, "이도현"));
+      await page.mouse.move(0, 0);
+      await shot(page, `L-${tag}-suspend-stage`);
+      await stageHolds(page, `L ${tag} 정지`, profileBox);
+      const stops = [
+        await pressTo(page, "Tab", "member-profile-lifecycle-stage-confirm"),
+        await pressTo(page, "Tab", "member-profile-lifecycle-stage-cancel"),
+      ];
+      check(`L ${tag} 정지 단계의 Tab 정거장은 취소·정지 둘뿐`,
+        JSON.stringify(stops) === JSON.stringify(["member-profile-lifecycle-stage-confirm", "member-profile-lifecycle-stage-cancel"]), stops);
+      await page.getByTestId("member-profile-lifecycle-stage-confirm").click();
+      await page.getByTestId("member-profile-lifecycle-stage").waitFor({ state: "detached" });
+      await page.waitForFunction(() => document.querySelector('[data-testid="member-profile-status-chip"]')?.textContent === "정지됨", null, { timeout: 10_000 }).catch(() => undefined);
+      // 명부가 다시 읽혔고(그 사람이 빠짐) 창은 붙든 값으로 남는다.
+      const behind = page.locator(`[data-testid="directory-row"][data-member-id="${MEMBER}"]`);
+      await behind.waitFor({ state: "detached", timeout: 10_000 }).catch(() => undefined);
+      const after = {
+        calls: [...lifecycleCalls],
+        chip: await text(page, "member-profile-status-chip"),
+        reinstate: await text(page, "member-profile-reinstate"),
+        receipt: await text(page, "member-profile-lifecycle-receipt"),
+        rowBehind: await behind.count(),
+        active: await activeId(page),
+        empty: await count(page, "member-profile-empty"),
+      };
+      console.log(`measure L ${tag} suspended ${JSON.stringify(after)}`);
+      check(`L ${tag} 정지 뒤: 요청 한 번, 명부에서 빠져도 「정지됨」 칩 · 「정지 풀기」 · 영수증, 초점 「정지 풀기」`,
+        JSON.stringify(after.calls) === JSON.stringify([`${MEMBER}:suspend`]) && after.chip === "정지됨" && after.reinstate === "정지 풀기" &&
+          after.receipt === "정지함" && after.rowBehind === 0 && after.active === "member-profile-reinstate" && after.empty === 0, after);
+      await page.mouse.move(0, 0);
+      await shot(page, `L-${tag}-suspended`);
+      // 정지 풀기.
+      await page.getByTestId("member-profile-reinstate").click();
+      await page.getByTestId("member-profile-lifecycle-stage").waitFor();
+      check(`L ${tag} 정지 풀기 단계는 잉크 단추`, (await page.getByTestId("member-profile-lifecycle-stage-confirm").getAttribute("data-tone")) === "default");
+      await page.mouse.move(0, 0);
+      await shot(page, `L-${tag}-reinstate-stage`);
+      await page.getByTestId("member-profile-lifecycle-stage-confirm").click();
+      await page.getByTestId("member-profile-lifecycle-stage").waitFor({ state: "detached" });
+      await page.getByTestId("member-profile-suspend").waitFor({ timeout: 10_000 }).catch(() => undefined);
+      await page.getByTestId("member-profile-status-chip").waitFor({ state: "detached", timeout: 10_000 }).catch(() => undefined);
+      const back = { calls: [...lifecycleCalls], chip: await count(page, "member-profile-status-chip"), suspend: await text(page, "member-profile-suspend"), receipt: await text(page, "member-profile-lifecycle-receipt") };
+      check(`L ${tag} 정지 풀기 뒤: 칩이 사라지고 「정지」 · 영수증 「풀림」`,
+        back.calls.length === 2 && back.calls[1] === `${MEMBER}:reinstate` && back.chip === 0 && back.suspend === "정지" && back.receipt === "풀림", back);
+      await dialog.isVisible();
+    } finally {
+      await context.close();
+    }
+  }
+
+  // 그사이 상태가 바뀐 409, 그리고 진행 중 잠김(관리자 → 게스트).
+  roster = freshRoster();
+  lifecycleCalls.length = 0;
+  {
+    const { context, page } = await openContext(browser, origin, { scheme, viewerId: ADMIN });
+    try {
+      await page.goto(origin, { waitUntil: "domcontentloaded" });
+      await openProfile(page, GUEST);
+      lifecycleConflict = true;
+      await page.getByTestId("member-profile-suspend").click();
+      await page.getByTestId("member-profile-lifecycle-stage-confirm").click();
+      await page.getByTestId("member-profile-lifecycle-stage-error").waitFor({ timeout: 10_000 }).catch(() => undefined);
+      const sentence = await text(page, "member-profile-lifecycle-stage-error");
+      check(`L ${tag} 409(그사이 상태가 바뀜) → 단계 안 사유 문장, 단계는 그대로`,
+        sentence === "이 멤버는 지금 활성 상태가 아니에요. 그사이 다른 사람이 정지했을 수 있어요." && (await count(page, "member-profile-lifecycle-stage")) === 1, sentence);
+      await page.mouse.move(0, 0);
+      await shot(page, `L-${tag}-409`);
+      lifecycleConflict = false;
+      // 진행 중: 확정을 다시 누르면(같은 단계에서 재시도) 요청이 나가고, 늦게 오는 동안 취소·Esc·바깥 누름이 단계를 내리지 못한다.
+      lifecycleDelayMs = 1_500;
+      lifecycleCalls.length = 0;
+      await page.getByTestId("member-profile-lifecycle-stage-confirm").click();
+      await page.waitForFunction(() => document.querySelector('[data-testid="member-profile-lifecycle-stage-confirm"]')?.getAttribute("aria-busy") === "true");
+      const locked = await page.getByTestId("member-profile-lifecycle-stage-cancel").getAttribute("aria-disabled");
+      await page.getByTestId("member-profile-lifecycle-stage-cancel").click({ force: true });
+      await page.keyboard.press("Escape");
+      await page.mouse.click(8, 8);
+      const held = { locked, stage: await count(page, "member-profile-lifecycle-stage"), dialog: await count(page, "member-profile-dialog"), calls: lifecycleCalls.length };
+      await page.mouse.move(0, 0);
+      await shot(page, `L-${tag}-in-flight`);
+      await page.getByTestId("member-profile-lifecycle-stage").waitFor({ state: "detached", timeout: 15_000 }).catch(() => undefined);
+      await page.waitForFunction(() => document.querySelector('[data-testid="member-profile-status-chip"]')?.textContent === "정지됨", null, { timeout: 10_000 }).catch(() => undefined);
+      const settled = { chip: await text(page, "member-profile-status-chip"), calls: [...lifecycleCalls] };
+      console.log(`measure L ${tag} in-flight ${JSON.stringify({ held, settled })}`);
+      check(`L ${tag} 진행 중: 취소 잠김 · 취소·Esc·바깥 누름에도 단계와 창이 그대로 · 요청 한 번 · 끝나면 「정지됨」`,
+        held.locked === "true" && held.stage === 1 && held.dialog === 1 && held.calls === 1 && settled.chip === "정지됨" && settled.calls.length === 1, { held, settled });
+    } finally {
+      lifecycleDelayMs = 0;
+      lifecycleConflict = false;
+      await context.close();
+    }
+  }
+
+  // 내보내기(소유자 → 게스트).
+  roster = freshRoster();
+  lifecycleCalls.length = 0;
+  {
+    const { context, page } = await openContext(browser, origin, { scheme, viewerId: OWNER });
+    try {
+      await page.goto(origin, { waitUntil: "domcontentloaded" });
+      const { dialog } = await openProfile(page, GUEST);
+      await settle(page);
+      const profileBox = await dialogBox(page);
+      await page.getByTestId("member-profile-remove").click();
+      await page.getByTestId("member-profile-lifecycle-stage").waitFor();
+      check(`L ${tag} 내보내기 단계: 되돌릴 수 없다는 경고 + 위험 단추`,
+        (await text(page, "member-profile-lifecycle-stage-warning")) === "되돌릴 수 없어요. 다시 초대해도 같은 이메일로는 이 워크스페이스에 들어올 수 없어요." &&
+          (await page.getByTestId("member-profile-lifecycle-stage-confirm").getAttribute("data-tone")) === "destructive");
+      await page.mouse.move(0, 0);
+      await shot(page, `L-${tag}-remove-stage`);
+      await stageHolds(page, `L ${tag} 내보내기`, profileBox);
+      await page.getByTestId("member-profile-lifecycle-stage-confirm").click();
+      await page.getByTestId("member-profile-removed").waitFor({ timeout: 10_000 });
+      const behind = page.locator(`[data-testid="directory-row"][data-member-id="${GUEST}"]`);
+      await behind.waitFor({ state: "detached", timeout: 10_000 }).catch(() => undefined);
+      const done = { calls: [...lifecycleCalls], line: await text(page, "member-profile-removed"), active: await activeId(page), x: await count(page, "member-profile-close"), rowBehind: await behind.count() };
+      console.log(`measure L ${tag} removed ${JSON.stringify(done)}`);
+      check(`L ${tag} 내보낸 뒤: 요청 한 번 · 결과 한 줄 · 초점 「닫기」 · X 없음 · 명부의 줄 사라짐`,
+        JSON.stringify(done.calls) === JSON.stringify([`${GUEST}:remove`]) && (done.line ?? "").includes("최민수 님을 워크스페이스에서 내보냈어요.") &&
+          done.active === "member-profile-removed-close" && done.x === 0 && done.rowBehind === 0, done);
+      await stageHolds(page, `L ${tag} 내보낸 결과`, profileBox);
+      await page.mouse.move(0, 0);
+      await shot(page, `L-${tag}-removed`);
+      await page.getByTestId("member-profile-removed-close").click();
+      await dialog.waitFor({ state: "detached" });
+      console.log(`measure L ${tag} focus-after-removed-close ${await activeId(page)}`);
+    } finally {
+      await context.close();
+    }
+  }
+
+  // 좁은 폭·200%: 정지·내보내기 단계의 단추가 바깥 스크롤 안에 보이고, 창이 넘치지 않는다.
+  for (const [label, opts] of [
+    ["375", { width: 375, height: 812, scale: 2 }],
+    ["zoom200", { width: 640, height: 450, scale: 2 }],
+  ]) {
+    roster = freshRoster();
+    const { context, page } = await openContext(browser, origin, { scheme, viewerId: OWNER, ...opts });
+    try {
+      await page.goto(origin, { waitUntil: "domcontentloaded" });
+      await openProfile(page, MEMBER);
+      await settle(page);
+      const profileBox = await dialogBox(page);
+      for (const [opener, name] of [["member-profile-suspend", "suspend"], ["member-profile-remove", "remove"]]) {
+        await page.getByTestId(opener).scrollIntoViewIfNeeded();
+        await page.getByTestId(opener).click();
+        await page.getByTestId("member-profile-lifecycle-stage").waitFor();
+        await settle(page);
+        const inView = await page.evaluate(() => {
+          const scroller = document.querySelector('[data-testid="member-profile-scroll"]')?.getBoundingClientRect();
+          const button = document.querySelector('[data-testid="member-profile-lifecycle-stage-confirm"]')?.getBoundingClientRect();
+          return !!scroller && !!button && button.top >= scroller.top - 0.5 && button.bottom <= scroller.bottom + 0.5;
+        });
+        check(`L ${tag} ${label} ${name} 단계의 확정 단추가 창 안에 보인다`, inView);
+        check(`L ${tag} ${label} ${name} 단계가 창 안에서 넘치지 않는다`, (await dialogOverflow(page)) <= 0, await dialogOverflow(page));
+        check(`L ${tag} ${label} 페이지가 가로로 넘치지 않는다`, (await overflowX(page)) <= 0, await overflowX(page));
+        await stageHolds(page, `L ${tag} ${label} ${name}`, profileBox);
+        await page.mouse.move(0, 0);
+        await shot(page, `L-${tag}-${label}-${name}-stage`);
+        await page.keyboard.press("Escape");
+        await page.getByTestId("member-profile-lifecycle-stage").waitFor({ state: "detached" });
+      }
+    } finally {
+      await context.close();
+    }
+  }
+}
+
 if (!existsSync(resolve(WEB_ROOT, "dist/index.html"))) throw new Error("dist/ is missing. Run npm run build first.");
 mkdirSync(OUT_DIR, { recursive: true });
 const preview = await startGuardedPreview({ webRoot: WEB_ROOT, port: PORT, portEnvVar: "CAPTURE_PORT" });
 const origin = preview.origin;
 const browser = await chromium.launch();
 // `SCENES=T,H` 처럼 장면 일부만 돌린다(기본은 전부).
-const SCENES = new Set((process.env.SCENES ?? "V,R,N,O,T,H").split(",").map((s) => s.trim()));
+const SCENES = new Set((process.env.SCENES ?? "V,R,N,O,T,H,L").split(",").map((s) => s.trim()));
 try {
   for (const scheme of SCHEMES) {
     if (SCENES.has("V")) await sceneViews(browser, origin, scheme);
@@ -681,6 +966,7 @@ try {
     if (SCENES.has("O")) await sceneOffline(browser, origin, scheme);
     if (SCENES.has("T")) await sceneTab(browser, origin, scheme);
     if (SCENES.has("H")) await sceneInFlightCancel(browser, origin, scheme);
+    if (SCENES.has("L")) await sceneLifecycle(browser, origin, scheme);
   }
 } finally {
   await browser.close();

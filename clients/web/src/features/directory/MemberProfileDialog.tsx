@@ -561,8 +561,9 @@ function LifecycleRows({
   onPick: (action: MemberLifecycleAction) => void;
   t: Format;
 }) {
+  // 줄 높이는 위의 역할 줄(고르개 32 + 위아래 8)과 같은 48: 글 한 줄(24) + 위아래 12.
   const rowButton =
-    "press flex min-h-control-lg min-w-0 flex-1 items-center px-4 py-2 text-start text-body hover:bg-surface-hover focus-visible:focus-ring disabled:opacity-50 disabled:hover:bg-transparent";
+    "press flex min-h-control-lg min-w-0 flex-1 items-center px-4 py-3 text-start text-body hover:bg-surface-hover focus-visible:focus-ring disabled:opacity-50 disabled:hover:bg-transparent";
   return (
     <div ref={rowsRef} className="flex min-w-0 flex-col divide-y divide-line" data-testid="member-profile-lifecycle">
       {suspension !== null ? (
