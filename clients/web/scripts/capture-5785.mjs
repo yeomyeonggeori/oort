@@ -24,10 +24,13 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { readFileSync } from "node:fs";
 import { chromium } from "playwright";
 import { startGuardedPreview } from "../gates/preview-guard.mjs";
 import { advanceToAccount } from "../e2e/advanceOnboarding.mjs";
 
+/** 웹 배포의 CSP(`infra/rust/Caddyfile`의 모양): 다른 출처로의 fetch는 전부 막힌다. 미리보기 응답 머리글로 단다. */
+const PROD_CSP = "default-src 'self'; connect-src 'self' ws://localhost:* ws://127.0.0.1:* https://www.googleapis.com; img-src 'self' data:; style-src 'self' 'unsafe-inline'; frame-ancestors 'none'";
 const WEB_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const OUT_DIR = process.env.OUT_DIR ? resolve(process.env.OUT_DIR) : resolve(WEB_ROOT, "artifacts/cap5785");
 const PORT = Number(process.env.CAPTURE_PORT || 5785);
@@ -82,6 +85,11 @@ let leaveDelayMs = 0;
 
 async function installRoutes(context, role) {
   await installHealthRoutes(context);
+  // 새 탭이 열 「다른 서버」: 닿는 것처럼 빈 페이지로 답한다(요청이 그 주소로 갔는지만 본다).
+  await context.route("https://team.example.com/**", async (route) => {
+    if (new URL(route.request().url()).pathname === "/healthz") return route.fulfill({ status: 200, body: "{}" });
+    return route.fulfill({ status: 200, contentType: "text/html", body: "<title>team</title>" });
+  });
   await context.route("**/v1/**", async (route) => {
     const req = route.request();
     const path = new URL(req.url()).pathname;
@@ -132,7 +140,7 @@ async function installRealtime(page) {
   });
 }
 
-async function newContext(browser, origin, scheme, vp, role) {
+async function newContext(browser, origin, scheme, vp, role, desktop = false) {
   const context = await browser.newContext({
     viewport: { width: vp.w, height: vp.h },
     deviceScaleFactor: vp.dpr,
@@ -144,6 +152,12 @@ async function newContext(browser, origin, scheme, vp, role) {
   await context.grantPermissions(["clipboard-read", "clipboard-write"], { origin }).catch(() => {});
   await installRoutes(context, role);
   const page = await context.newPage();
+  // 데스크탑 길: 셸 판정(`IS_TAURI`)이 읽는 전역만 단다. 나머지 셸 호출은 없다.
+  if (desktop) await page.addInitScript(() => { window.__TAURI__ = {}; });
+  await page.addInitScript(() => {
+    window.__cspv = [];
+    document.addEventListener("securitypolicyviolation", (e) => window.__cspv.push(e.blockedURI));
+  });
   await installRealtime(page);
   await page.addInitScript((server) => { try { localStorage.setItem("momo.web.server.v1", server); } catch { /* 저장소 없음 */ } }, origin);
   return { context, page };
@@ -239,9 +253,14 @@ async function ownerRun(page, origin, tag, withHandoff) {
   await fits(page, tag, "join-step", "add-workspace-dialog");
   await shot(page, tag, "join-step");
 
-  // 거절 둘: 지금 서버의 주소 · 닿지 않는 주소. 로그아웃 요청 0회, 걸음은 그대로.
+  // 거절: 지금 서버의 주소(웹·데스크탑 같다). 로그아웃 요청 0회, 걸음은 그대로.
   let logoutRequests = 0;
-  const onRequest = (req) => { if (new URL(req.url()).pathname === "/v1/auth/logout") logoutRequests += 1; };
+  const healthHosts = [];
+  const onRequest = (req) => {
+    const u = new URL(req.url());
+    if (u.pathname === "/v1/auth/logout") logoutRequests += 1;
+    if (u.pathname === "/healthz") healthHosts.push(u.hostname);
+  };
   page.on("request", onRequest);
   await page.getByTestId("add-workspace-join-link").fill(origin);
   await page.getByTestId("add-workspace-join-next").click();
@@ -251,29 +270,53 @@ async function ownerRun(page, origin, tag, withHandoff) {
   check(tag, "지금 서버 주소: 「이미 이 서버에 있어요」, 걸음은 join", sameText.includes("이미 이 서버에 있어요") && sameStep === "join", { sameText, sameStep });
   await fits(page, tag, "join-refuse-same", "add-workspace-dialog");
   await shot(page, tag, "join-refuse-same");
-  await page.getByTestId("add-workspace-join-link").fill("https://unreachable.example.invalid");
+  await page.getByTestId("add-workspace-join-link").fill("javascript:alert(1)");
   await page.getByTestId("add-workspace-join-next").click();
-  await page.waitForFunction(() => document.querySelector("[data-testid=add-workspace-join-link-error]")?.textContent?.includes("닿지 않아서"), null, { timeout: 10_000 });
-  const deadText = await page.getByTestId("add-workspace-join-link-error").innerText();
-  const deadStep = await page.getByTestId("add-workspace-dialog").getAttribute("data-step");
-  check(tag, "닿지 않는 주소: 사유를 말하고 걸음은 join", deadText.includes("닿지 않아서 로그아웃하지 않았어요") && deadStep === "join", { deadText, deadStep });
-  await fits(page, tag, "join-refuse-unreachable", "add-workspace-dialog");
-  await shot(page, tag, "join-refuse-unreachable");
+  await page.getByTestId("add-workspace-join-link-error").waitFor();
+  check(tag, "javascript: 주소는 거절되고 걸음은 join", (await page.getByTestId("add-workspace-dialog").getAttribute("data-step")) === "join", null);
+  if (withHandoff) {
+    // 데스크탑 길(셸 판정 true): 닿지 않는 주소는 확인 fetch 1건 뒤 거절, 로그아웃 0회.
+    await page.getByTestId("add-workspace-join-link").fill("https://unreachable.example.invalid");
+    await page.getByTestId("add-workspace-join-next").click();
+    await page.waitForFunction(() => document.querySelector("[data-testid=add-workspace-join-link-error]")?.textContent?.includes("닿지 않아서"), null, { timeout: 10_000 });
+    check(tag, "데스크탑: 닿지 않는 주소는 확인 fetch 1건 뒤 거절·로그아웃 0회", healthHosts.filter((h) => h.startsWith("unreachable.")).length === 1 && logoutRequests === 0, { healthHosts, logoutRequests });
+    await shot(page, tag, "join-refuse-unreachable");
+  }
   await page.waitForTimeout(300);
   const stillSignedIn = await page.getByTestId("workspace-current").count();
-  check(tag, "두 거절 뒤 로그아웃 요청 0회·세션 유지", logoutRequests === 0 && stillSignedIn > 0, { logoutRequests, stillSignedIn });
-  page.off("request", onRequest);
+  check(tag, "거절들 뒤 로그아웃 요청 0회·세션 유지", logoutRequests === 0 && stillSignedIn > 0, { logoutRequests, stillSignedIn });
   await page.getByTestId("add-workspace-join-link").fill(JOIN_INPUT);
+  await shot(page, tag, "join-before-next");
   await page.getByTestId("add-workspace-join-next").click();
-  await page.getByTestId("add-workspace-join-confirm").waitFor();
-  const confirmText = await page.getByTestId("add-workspace-dialog").innerText();
-  check(tag, "확인 걸음이 로그아웃과 넘어갈 곳을 말하고 초안은 말하지 않는다(거짓 문장 0)", confirmText.includes("로그아웃돼요") && !confirmText.includes("초안") && confirmText.includes("team.example.com의 초대로 넘어가요"), null);
-  const confirmFocus = await page.evaluate(() => document.activeElement?.getAttribute("data-testid"));
-  check(tag, "확인 걸음의 초점은 위험 단추가 아니라 확인 묶음", confirmFocus === "add-workspace-join-confirm", { confirmFocus });
-  await fits(page, tag, "join-confirm", "add-workspace-join-logout");
-  await shot(page, tag, "join-confirm");
-
+  if (!withHandoff) {
+    // 웹(운영 CSP): 다른 출처의 서버는 확인도 로그아웃도 없이 새 탭으로 연다.
+    await page.getByTestId("add-workspace-join-open").waitFor({ timeout: 10_000 });
+    const webText = await page.getByTestId("add-workspace-dialog").innerText();
+    const href = await page.getByTestId("add-workspace-join-open").getAttribute("href");
+    const rel = await page.getByTestId("add-workspace-join-open").getAttribute("rel");
+    const cspv = await page.evaluate(() => window.__cspv);
+    check(tag, "웹: 다른 서버는 새 탭 열기(확인 걸음, 「닿지 않아서」 0)", webText.includes("새 탭에서 열까요?") && !webText.includes("닿지 않아서"), null);
+    check(tag, "웹: 열 주소가 초대 링크 그대로(서버+코드)", href === `https://team.example.com/?code=${INVITE_SHAPE}` && rel === "noopener noreferrer", { href: href?.replace(INVITE_SHAPE, "<code>"), rel });
+    check(tag, "웹: 그 서버로 가는 확인 요청 0건·CSP 위반 0건", !healthHosts.includes("team.example.com") && cspv.length === 0, { healthHosts, cspv });
+    await fits(page, tag, "join-open", "add-workspace-join-open");
+    await shot(page, tag, "join-open");
+    const popupPromise = page.context().waitForEvent("page", { timeout: 10_000 }).catch(() => null);
+    await page.getByTestId("add-workspace-join-open").click();
+    const popup = await popupPromise;
+    const popupUrl = popup ? popup.url() : null;
+    if (popup) await popup.close().catch(() => {});
+    await page.waitForTimeout(300);
+    check(tag, "웹: 눌러도 로그아웃 0회·세션 유지, 새 탭이 그 주소", logoutRequests === 0 && (await page.getByTestId("workspace-current").count()) > 0 && (popupUrl ?? "").startsWith("https://team.example.com"), { logoutRequests, popupUrl: popupUrl?.replace(INVITE_SHAPE, "<code>") });
+  }
+  page.off("request", onRequest);
   if (withHandoff) {
+    // 데스크탑 길: 확인 걸음(로그아웃) → 그 자리에서 넘김.
+    await page.getByTestId("add-workspace-join-confirm").waitFor();
+    check(tag, "데스크탑: 맞는 주소의 확인 fetch 1건 뒤 확인 걸음", healthHosts.filter((h) => h === "team.example.com").length === 1, { healthHosts });
+    const confirmText = await page.getByTestId("add-workspace-dialog").innerText();
+    check(tag, "데스크탑: 확인 걸음이 로그아웃과 넘어갈 곳을 말하고 초안은 말하지 않는다", confirmText.includes("로그아웃돼요") && !confirmText.includes("초안") && confirmText.includes("team.example.com의 초대로 넘어가요"), null);
+    await fits(page, tag, "join-confirm", "add-workspace-join-logout");
+    await shot(page, tag, "join-confirm");
     await page.getByTestId("add-workspace-join-logout").click();
     await page.getByTestId("join-sign-in-instead").waitFor({ timeout: 15_000 });
     // 첫 그림은 저장된 서버로 서고, 링크를 읽은 효과가 다음 커밋에서 칩을 바꾼다. 그 커밋을 기다린다.
@@ -321,8 +364,6 @@ async function ownerRun(page, origin, tag, withHandoff) {
       const g = el ? glyph(el) : null;
       return { id, iconX: g ? Math.round(g.x * 100) / 100 : null, iconW: g ? Math.round(g.width * 100) / 100 : null, textX: el ? Math.round(first(el) * 100) / 100 : null };
     });
-    const note = document.querySelector("[data-testid=profile-copy-address-note]");
-    out.push({ id: "profile-copy-address-note", iconX: null, iconW: null, textX: note ? Math.round(first(note) * 100) / 100 : null });
     return out;
   });
   console.log(JSON.stringify({ tag, rows }));
@@ -331,14 +372,32 @@ async function ownerRun(page, origin, tag, withHandoff) {
   const spread = Math.max(...iconXs) - Math.min(...iconXs);
   const textSpread = Math.max(...textXs) - Math.min(...textXs);
   check(tag, "메뉴 열 줄의 아이콘 칸 x가 한 세로 줄(차이 ≤ 0.5px)", iconXs.length === 10 && spread <= 0.5, { iconXs, spread });
-  check(tag, "메뉴 열 줄과 주소 아래 글의 글자 시작 x가 한 세로 줄(차이 ≤ 0.5px)", textXs.every((x) => x !== null) && textSpread <= 0.5, { textXs, textSpread });
+  check(tag, "메뉴 열 줄의 글자 시작 x가 한 세로 줄(차이 ≤ 0.5px)", textXs.every((x) => x !== null) && textSpread <= 0.5, { textXs, textSpread });
   check(tag, "아이콘 칸 폭이 열 줄 모두 16px", rows.filter((r) => r.iconW !== null).every((r) => r.iconW === 16), rows.map((r) => r.iconW));
   await fits(page, tag, "profile-menu", "profile-card-menu");
+  const hidden = await page.evaluate(() => {
+    const m = document.querySelector("[data-testid=profile-card-menu]");
+    return { scrollHeight: m.scrollHeight, clientHeight: m.clientHeight, hiddenPx: m.scrollHeight - m.clientHeight };
+  });
+  console.log(JSON.stringify({ tag, menuHidden: hidden }));
   await shot(page, tag, "profile-menu");
 
   // 주소 복사(1280 밝게에서 클립보드까지 읽는다)
+  const topBefore = await page.evaluate(() => document.querySelector("[data-testid=profile-copy-address]").getBoundingClientRect().y);
   await page.getByTestId("profile-copy-address").click();
   await page.waitForTimeout(200);
+  const noteBox = await page.evaluate(() => {
+    const n = document.querySelector("[data-testid=profile-copy-address-note]");
+    const r = n.getBoundingClientRect();
+    const range = document.createRange();
+    range.selectNodeContents(n.firstChild);
+    return { w: Math.round(r.width), h: Math.round(r.height), sr: n.className.includes("sr-only"), textX: Math.round(range.getBoundingClientRect().x * 100) / 100 };
+  });
+  check(tag, "복사 뒤 안내 글의 글자 시작이 아이콘 줄과 같은 세로 줄(107)", noteBox.textX === 107, noteBox);
+  const topAfter = await page.evaluate(() => document.querySelector("[data-testid=profile-copy-address]").getBoundingClientRect().y);
+  console.log(JSON.stringify({ tag, copiedNote: noteBox, copyRowShiftPx: Math.round((topAfter - topBefore) * 10) / 10 }));
+  check(tag, "복사한 순간에만 안내가 보인다(복사 전 sr-only, 뒤 보임)", !noteBox.sr && noteBox.h > 0, noteBox);
+  await shot(page, tag, "profile-menu-copied");
   const copyLabel = await page.getByTestId("profile-copy-address").innerText();
   check(tag, "서버 주소 복사 → 메뉴가 열린 채 「서버 주소 복사됨」", copyLabel.includes("서버 주소 복사됨"), { copyLabel });
   const clip = await page.evaluate(() => navigator.clipboard.readText()).catch((e) => `ERR ${String(e).slice(0, 60)}`);
@@ -372,7 +431,7 @@ async function ownerRun(page, origin, tag, withHandoff) {
     focus: document.activeElement?.getAttribute("data-testid"),
     sentence: document.querySelector("[data-testid=workspace-leave-dialog-last-owner]").textContent,
   }));
-  check(tag, "409 뒤 「나가기」가 잠기고 초점이 「취소」, 다음 걸음 문장이 있다", after409.confirmDisabled && after409.focus === "workspace-leave-dialog-cancel" && after409.sentence.includes("멤버와 초대"), after409);
+  check(tag, "409 뒤 「나가기」가 잠기고 초점이 「취소」, 다음 걸음 문장이 있다", after409.confirmDisabled && after409.focus === "workspace-leave-dialog-cancel" && after409.sentence.includes("멤버 탭") && !after409.sentence.includes("멤버와 초대"), after409);
   const stillIn = await page.getByTestId("workspace-current").count();
   check(tag, "409: 거절 문장이 창 안에 서고 로그아웃되지 않는다", stillIn > 0, { stillIn });
   await fits(page, tag, "leave-last-owner", "workspace-leave-dialog");
@@ -395,7 +454,12 @@ async function memberRun(page, origin, tag) {
 
 async function main() {
   mkdirSync(OUT_DIR, { recursive: true });
-  const preview = await startGuardedPreview({ webRoot: WEB_ROOT, port: PORT, portEnvVar: "CAPTURE_PORT", extraArgs: [] });
+  // 웹은 운영 CSP를, 데스크탑 길은 `tauri.conf.json`의 CSP를 문서 응답 머리글로 단 미리보기에서 잰다.
+  const deskCsp = JSON.parse(readFileSync(resolve(WEB_ROOT, "../desktop/src-tauri/tauri.conf.json"), "utf8")).app.security.csp;
+  const preview = await startGuardedPreview({ webRoot: WEB_ROOT, port: PORT, portEnvVar: "CAPTURE_PORT", extraArgs: [], env: { ...process.env, MOMO_CSP_GATE_HEADER: PROD_CSP } });
+  const deskPreview = wants("handoff")
+    ? await startGuardedPreview({ webRoot: WEB_ROOT, port: PORT + 1, portEnvVar: "CAPTURE_PORT", extraArgs: [], env: { ...process.env, MOMO_CSP_GATE_HEADER: deskCsp } })
+    : null;
   const browser = await chromium.launch();
   const allSizes = [
     { w: 1280, h: 800, dpr: 2, name: "1280" },
@@ -426,10 +490,10 @@ async function main() {
     }
     // 넘김은 한 번이면 된다(로그아웃한다).
     const { context, page } = wants("handoff")
-      ? await newContext(browser, preview.origin, "light", allSizes[0], "owner")
+      ? await newContext(browser, deskPreview.origin, "light", allSizes[0], "owner", true)
       : { context: null, page: null };
     if (page) try {
-      await ownerRun(page, preview.origin, "1280-light", true);
+      await ownerRun(page, deskPreview.origin, "1280-light", true);
     } catch (error) {
       await page.screenshot({ path: resolve(OUT_DIR, "FAIL-handoff.png") }).catch(() => {});
       check("1280-light", "handoff 장면이 끝까지 간다", false, String(error).slice(0, 400));
@@ -439,6 +503,7 @@ async function main() {
   } finally {
     await browser.close();
     await preview.stop?.();
+    await deskPreview?.stop?.();
   }
   const bad = results.filter((r) => !r.ok);
   writeFileSync(resolve(OUT_DIR, "results.json"), JSON.stringify({ shots, results }, null, 1));

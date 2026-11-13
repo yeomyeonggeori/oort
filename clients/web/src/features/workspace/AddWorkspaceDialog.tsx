@@ -54,13 +54,16 @@ import {
 } from "./useAddWorkspace";
 import { memberFor, useDirectory } from "./useWorkspace";
 import {
+  browserOpenHref,
   isSameServer,
   joinHandoffHref,
+  opensInBrowser,
   joinTargetFromEntry,
   probeServerReachable,
   type JoinTarget,
 } from "./joinHandoff";
 import { absoluteApiBase } from "@/lib/serverBase";
+import { IS_TAURI } from "@/lib/env";
 import { BlockedReason } from "@/features/common/BlockedReason";
 
 // =============================================================================
@@ -431,6 +434,18 @@ function AddWorkspacePanel({
       return;
     }
     setJoinError(null);
+    // 웹에서 다른 출처의 서버: 이 페이지의 CSP가 그 서버로의 fetch를 막는다. 확인도 로그아웃도 하지 않고
+    // 확인 걸음에서 그 주소를 브라우저로 연다(지금 워크스페이스는 그대로).
+    if (opensInBrowser(target, IS_TAURI, absoluteApiBase())) {
+      if (browserOpenHref(target) === null) {
+        setJoinError(formatMessage("workspace.add.joinBadScheme"));
+        joinInputRef.current?.focus();
+        return;
+      }
+      setJoinTarget(target);
+      goTo("confirm", "confirm");
+      return;
+    }
     if (target.serverUrl !== "") {
       // 로그아웃은 되돌릴 수 없다: 닿지 않는 주소로는 가지 않는다(오타·꺼진 서버).
       const check = (joinCheckRef.current += 1);
@@ -475,13 +490,17 @@ function AddWorkspacePanel({
   }
 
   const inCreate = step === "create";
+  const openHref =
+    joinTarget && opensInBrowser(joinTarget, IS_TAURI, absoluteApiBase())
+      ? browserOpenHref(joinTarget)
+      : null;
   const title =
     step === "create"
       ? formatMessage("workspace.add.createTitle")
       : step === "join"
         ? formatMessage("workspace.add.joinTitle")
         : step === "confirm"
-          ? formatMessage("workspace.add.joinConfirmTitle")
+          ? formatMessage(openHref ? "workspace.add.joinOpenTitle" : "workspace.add.joinConfirmTitle")
           : formatMessage("workspace.add.title");
   const description = created ? (
     <span
@@ -496,14 +515,19 @@ function AddWorkspacePanel({
   ) : step === "join" ? (
     formatMessage("workspace.add.joinLead")
   ) : step === "confirm" ? (
-    formatMessage("workspace.add.joinConfirmBody")
+    formatMessage(openHref ? "workspace.add.joinOpenBody" : "workspace.add.joinConfirmBody")
   ) : (
     formatMessage("workspace.add.lead")
   );
 
   const joinTargetSentence = !joinTarget
     ? ""
-    : joinTarget.kind === "server"
+    : openHref
+      ? formatMessage(
+          joinTarget.kind === "invite" ? "workspace.add.joinOpenInvite" : "workspace.add.joinOpenServer",
+          { server: serverLabel(joinTarget.serverUrl) }
+        )
+      : joinTarget.kind === "server"
       ? formatMessage("workspace.add.joinTargetServer", {
           server: serverLabel(joinTarget.serverUrl),
         })
@@ -696,15 +720,29 @@ function AddWorkspacePanel({
             >
               {formatMessage("workspace.add.back")}
             </Button>
-            <Button
-              type="button"
-              variant="destructive"
-              size="sm"
-              onClick={handOffToLogin}
-              data-testid="add-workspace-join-logout"
-            >
-              {formatMessage("workspace.add.joinConfirmAction")}
-            </Button>
+            {openHref ? (
+              <Button asChild size="sm">
+                <a
+                  href={openHref}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  onClick={() => onOpenChange(false)}
+                  data-testid="add-workspace-join-open"
+                >
+                  {formatMessage("workspace.add.joinOpenAction")}
+                </a>
+              </Button>
+            ) : (
+              <Button
+                type="button"
+                variant="destructive"
+                size="sm"
+                onClick={handOffToLogin}
+                data-testid="add-workspace-join-logout"
+              >
+                {formatMessage("workspace.add.joinConfirmAction")}
+              </Button>
+            )}
           </div>
         </>
       ) : created ? (

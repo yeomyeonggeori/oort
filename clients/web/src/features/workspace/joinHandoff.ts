@@ -99,3 +99,32 @@ export async function probeServerReachable(
     clearTimeout(timer);
   }
 }
+
+/**
+ * 웹(Tauri가 아님)에서 넘어갈 서버가 지금 출처와 다르면 이 창 안에서 넘길 수 없다: 운영 CSP가 다른 출처로의
+ * fetch(확인·로그인)를 막는다(`connect-src 'self'`). 그때는 로그아웃도 확인 fetch도 없이 그 주소를 브라우저로
+ * 연다. 데스크탑(CSP가 http:·https:를 허락)은 지금 길(확인 → 로그아웃 → 넘김)을 그대로 쓴다.
+ */
+export function opensInBrowser(
+  target: JoinTarget,
+  isTauri: boolean,
+  currentBase: string
+): boolean {
+  return !isTauri && target.serverUrl !== "" && !isSameServer(target.serverUrl, currentBase);
+}
+
+/**
+ * 브라우저로 열 주소. `http:`·`https:`만 받는다(`javascript:`·`data:` 등은 null). 서버 주소만이면 그 출처의
+ * 로그인 화면, 초대면 그 서버의 `?code=`(로그인 화면이 마운트될 때 읽는 값, `useJoinPrefill`)를 실어서.
+ */
+export function browserOpenHref(target: JoinTarget): string | null {
+  let url: URL;
+  try {
+    url = new URL(target.serverUrl);
+  } catch {
+    return null;
+  }
+  if (url.protocol !== "http:" && url.protocol !== "https:") return null;
+  if (target.kind === "invite") url.searchParams.set("code", target.inviteCode);
+  return url.toString();
+}

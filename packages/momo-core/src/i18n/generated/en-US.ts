@@ -10858,6 +10858,12 @@ export const catalog: MessageCatalog = {
       "value": "Create a new workspace"
     }
   ],
+  "workspace.add.joinBadScheme": [
+    {
+      "type": 0,
+      "value": "Only http or https addresses can be opened."
+    }
+  ],
   "workspace.add.joinChecking": [
     {
       "type": 0,
@@ -10916,6 +10922,52 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "Continue"
+    }
+  ],
+  "workspace.add.joinOpenAction": [
+    {
+      "type": 0,
+      "value": "Open in a new tab"
+    }
+  ],
+  "workspace.add.joinOpenBody": [
+    {
+      "type": 0,
+      "value": "On the web you can't switch to another server from this window. That server opens in a new tab, and this workspace stays as it is."
+    }
+  ],
+  "workspace.add.joinOpenInvite": [
+    {
+      "type": 0,
+      "value": "Opens the invite to "
+    },
+    {
+      "type": 1,
+      "value": "server"
+    },
+    {
+      "type": 0,
+      "value": " in a new tab."
+    }
+  ],
+  "workspace.add.joinOpenServer": [
+    {
+      "type": 0,
+      "value": "Opens the sign-in screen of "
+    },
+    {
+      "type": 1,
+      "value": "server"
+    },
+    {
+      "type": 0,
+      "value": " in a new tab."
+    }
+  ],
+  "workspace.add.joinOpenTitle": [
+    {
+      "type": 0,
+      "value": "Open in a new tab?"
     }
   ],
   "workspace.add.joinSameServer": [
@@ -11047,7 +11099,7 @@ export const catalog: MessageCatalog = {
   "workspace.leave.lastOwnerNext": [
     {
       "type": 0,
-      "value": "Make someone else an owner in Settings › Members and invites, then leave again."
+      "value": "In the Members tab, open that person's profile and change their role to owner, then leave again."
     }
   ],
   "workspace.leave.title": [
@@ -11085,7 +11137,7 @@ export const catalog: MessageCatalog = {
   "workspace.menu.copyAddressNote": [
     {
       "type": 0,
-      "value": "A workspace that isn't the default also needs its workspace ID on the sign-in screen."
+      "value": "A non-default workspace needs its ID too."
     }
   ],
   "workspace.menu.copyFailed": [

@@ -10179,6 +10179,12 @@ export const catalog: MessageCatalog = {
       "value": "새 워크스페이스 만들기"
     }
   ],
+  "workspace.add.joinBadScheme": [
+    {
+      "type": 0,
+      "value": "http 또는 https 주소만 열 수 있어요."
+    }
+  ],
   "workspace.add.joinChecking": [
     {
       "type": 0,
@@ -10237,6 +10243,44 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "계속"
+    }
+  ],
+  "workspace.add.joinOpenAction": [
+    {
+      "type": 0,
+      "value": "새 탭에서 열기"
+    }
+  ],
+  "workspace.add.joinOpenBody": [
+    {
+      "type": 0,
+      "value": "웹에서는 이 창에서 다른 서버로 넘어갈 수 없어요. 그 서버를 새 탭에서 열고, 지금 워크스페이스는 그대로 있어요."
+    }
+  ],
+  "workspace.add.joinOpenInvite": [
+    {
+      "type": 1,
+      "value": "server"
+    },
+    {
+      "type": 0,
+      "value": "의 초대를 새 탭에서 열어요."
+    }
+  ],
+  "workspace.add.joinOpenServer": [
+    {
+      "type": 1,
+      "value": "server"
+    },
+    {
+      "type": 0,
+      "value": "의 로그인 화면을 새 탭에서 열어요."
+    }
+  ],
+  "workspace.add.joinOpenTitle": [
+    {
+      "type": 0,
+      "value": "새 탭에서 열까요?"
     }
   ],
   "workspace.add.joinSameServer": [
@@ -10356,7 +10400,7 @@ export const catalog: MessageCatalog = {
   "workspace.leave.lastOwnerNext": [
     {
       "type": 0,
-      "value": "설정의 「멤버와 초대」에서 다른 소유자를 세운 뒤 다시 나가세요."
+      "value": "멤버 탭에서 그 사람의 프로필을 열어 역할을 소유자로 바꾼 뒤 다시 나가세요."
     }
   ],
   "workspace.leave.title": [
@@ -10390,7 +10434,7 @@ export const catalog: MessageCatalog = {
   "workspace.menu.copyAddressNote": [
     {
       "type": 0,
-      "value": "기본이 아닌 워크스페이스는 로그인할 때 워크스페이스 ID도 넣어야 해요."
+      "value": "기본이 아닌 워크스페이스는 ID도 필요해요."
     }
   ],
   "workspace.menu.copyFailed": [

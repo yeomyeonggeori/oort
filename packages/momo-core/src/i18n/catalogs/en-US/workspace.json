@@ -22,6 +22,12 @@
   "workspace.add.joinTargetInvite": "Continues with an invite to {server}.",
   "workspace.add.joinTargetInviteOnly": "Continues with the invite link you received.",
   "workspace.add.joinConfirmAction": "Sign out and continue",
+  "workspace.add.joinOpenTitle": "Open in a new tab?",
+  "workspace.add.joinOpenBody": "On the web you can't switch to another server from this window. That server opens in a new tab, and this workspace stays as it is.",
+  "workspace.add.joinOpenServer": "Opens the sign-in screen of {server} in a new tab.",
+  "workspace.add.joinOpenInvite": "Opens the invite to {server} in a new tab.",
+  "workspace.add.joinOpenAction": "Open in a new tab",
+  "workspace.add.joinBadScheme": "Only http or https addresses can be opened.",
   "workspace.add.operatorContact": "If you have an invite, use “Join one that already exists”. Otherwise, ask the person who runs this server.",
   "workspace.create.lead": "Adds another workspace on this server. Whoever creates it becomes the owner, and it starts with a single #general channel. Only the server operator can create one.",
   "workspace.create.slugHint": "Lowercase letters, numbers and hyphens only. It must be unique on the whole server.",
@@ -30,7 +36,7 @@
   "workspace.menu.copyAddress": "Copy server address",
   "workspace.menu.copiedAddress": "Server address copied",
   "workspace.menu.copyFailed": "Couldn't copy",
-  "workspace.menu.copyAddressNote": "A workspace that isn't the default also needs its workspace ID on the sign-in screen.",
+  "workspace.menu.copyAddressNote": "A non-default workspace needs its ID too.",
   "workspace.menu.settings": "Workspace settings",
   "workspace.menu.leave": "Leave workspace",
   "workspace.leave.title": "Leave {name}?",
@@ -40,5 +46,5 @@
   "workspace.leave.confirm": "Leave",
   "workspace.leave.busy": "Leaving",
   "workspace.leave.lastOwner": "The last owner can't leave. Make someone else an owner first.",
-  "workspace.leave.lastOwnerNext": "Make someone else an owner in Settings › Members and invites, then leave again."
+  "workspace.leave.lastOwnerNext": "In the Members tab, open that person's profile and change their role to owner, then leave again."
 }

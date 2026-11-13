@@ -51,6 +51,18 @@ vi.mock("./joinHandoff", async (importOriginal) => {
   return { ...actual, probeServerReachable: (...args: unknown[]) => probeMock(...args) as Promise<boolean> };
 });
 
+// 셸 판정: 웹(false)은 다른 서버를 새 탭으로 열고, 데스크탑(true)은 확인 → 로그아웃 → 넘김이다.
+const shell = vi.hoisted(() => ({ tauri: false }));
+vi.mock("@/lib/env", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/env")>();
+  return {
+    ...actual,
+    get IS_TAURI() {
+      return shell.tauri;
+    },
+  };
+});
+
 vi.mock("@momo/core/features/settings/api", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@momo/core/features/settings/api")>();
   return {
@@ -102,6 +114,7 @@ beforeEach(() => {
   fetchRosterMock.mockReset();
   fetchRosterMock.mockResolvedValue([selfRow("owner")]);
   logoutMock.mockReset();
+  shell.tauri = false;
   probeMock.mockReset();
   probeMock.mockResolvedValue(true);
   writeText.mockReset();
@@ -563,6 +576,10 @@ describe("워크스페이스 추가: 두 카드 (#5785)", () => {
 describe("워크스페이스 추가: 이미 있는 곳에 참여 (#5785)", () => {
   // 서버가 만드는 초대 코드 모양(22자 이상 base64url). 시험용 값이다.
   const INVITE = "Q".repeat(24);
+  // 데스크탑 길(확인 → 확인 걸음 → 그 자리에서 로그아웃·넘김). 웹 길은 아래 「웹」 묶음이다.
+  beforeEach(() => {
+    shell.tauri = true;
+  });
 
   it("빈 칸·읽을 수 없는 글·claim 링크는 그 칸에서 말하고 로그아웃하지 않는다", async () => {
     mount();
@@ -704,3 +721,75 @@ describe("워크스페이스 추가: 이미 있는 곳에 참여 (#5785)", () =>
     expect(logoutMock).not.toHaveBeenCalled();
   });
 });
+
+describe("워크스페이스 추가: 웹에서 다른 서버로 참여 (#5785 수리 2회차)", () => {
+  const INVITE = "Q".repeat(24);
+  beforeEach(() => {
+    shell.tauri = false;
+  });
+
+  it("다른 서버 주소: 확인도 로그아웃도 없이 새 탭으로 그 주소를 연다(「닿지 않아서」 0)", async () => {
+    mount();
+    await openJoin();
+    await submitJoin("https://team.example.com");
+    await vi.waitFor(() =>
+      expect(q("add-workspace-dialog")?.getAttribute("data-step")).toBe("confirm")
+    );
+    expect(probeMock).not.toHaveBeenCalled();
+    expect(logoutMock).not.toHaveBeenCalled();
+    const open = q("add-workspace-join-open") as HTMLAnchorElement;
+    expect(open.getAttribute("href")).toBe("https://team.example.com/");
+    expect(open.getAttribute("target")).toBe("_blank");
+    expect(open.getAttribute("rel")).toBe("noopener noreferrer");
+    expect(q("add-workspace-join-logout")).toBeNull();
+    const dialog = text("add-workspace-dialog");
+    expect(dialog).toContain("새 탭에서 열까요?");
+    expect(dialog).toContain("지금 워크스페이스는 그대로 있어요");
+    expect(dialog).not.toContain("닿지 않아서");
+    expect(text("add-workspace-join-target")).toBe("team.example.com의 로그인 화면을 새 탭에서 열어요.");
+  });
+
+  it("초대 링크: 그 서버의 주소에 초대 코드를 실어 연다", async () => {
+    mount();
+    await openJoin();
+    await submitJoin(`https://team.example.com/?code=${INVITE}`);
+    await vi.waitFor(() => expect(q("add-workspace-join-open")).not.toBeNull());
+    const url = new URL(q("add-workspace-join-open")!.getAttribute("href")!);
+    expect(url.origin).toBe("https://team.example.com");
+    expect(url.searchParams.get("code")).toBe(INVITE);
+    expect(logoutMock).not.toHaveBeenCalled();
+  });
+
+  it("「새 탭에서 열기」를 누르면 창이 닫히고 로그아웃은 없다", async () => {
+    mount();
+    await openJoin();
+    await submitJoin("https://team.example.com");
+    await vi.waitFor(() => expect(q("add-workspace-join-open")).not.toBeNull());
+    const open = q("add-workspace-join-open") as HTMLAnchorElement;
+    open.addEventListener("click", (event) => event.preventDefault());
+    await act(async () => open.click());
+    expect(onOpenChange).toHaveBeenCalledWith(false);
+    expect(logoutMock).not.toHaveBeenCalled();
+  });
+
+  it("javascript:·data:·ftp: 주소는 확인 걸음에 가지 않는다", async () => {
+    mount();
+    await openJoin();
+    for (const bad of ["javascript:alert(1)", "data:text/html,x", "ftp://team.example.com"]) {
+      await submitJoin(bad);
+      expect(q("add-workspace-join-open")).toBeNull();
+      expect(q("add-workspace-dialog")?.getAttribute("data-step")).toBe("join");
+      expect(q("add-workspace-join-link-error")).not.toBeNull();
+    }
+    expect(logoutMock).not.toHaveBeenCalled();
+  });
+
+  it("지금 서버의 주소는 웹에서도 「이미 이 서버에 있어요」다", async () => {
+    mount();
+    await openJoin();
+    await submitJoin(window.location.origin);
+    expect(text("add-workspace-join-link-error")).toContain("이미 이 서버에 있어요");
+    expect(q("add-workspace-join-open")).toBeNull();
+  });
+});
+

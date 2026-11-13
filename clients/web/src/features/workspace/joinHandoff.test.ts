@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { isSameServer, probeServerReachable } from "./joinHandoff";
+import { browserOpenHref, isSameServer, opensInBrowser, probeServerReachable } from "./joinHandoff";
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -51,5 +51,27 @@ describe("probeServerReachable", () => {
     const pending = probeServerReachable("https://slow.example.com", 1_000);
     await vi.advanceTimersByTimeAsync(1_001);
     await expect(pending).resolves.toBe(false);
+  });
+});
+
+describe("opensInBrowser · browserOpenHref (#5785 수리 2회차)", () => {
+  const other = { kind: "server", serverUrl: "https://team.example.com" } as const;
+  it("웹이고 출처가 다르면 브라우저로 연다. 데스크탑·같은 출처·서버 없는 초대는 아니다", () => {
+    expect(opensInBrowser(other, false, "https://app.oor7.com")).toBe(true);
+    expect(opensInBrowser(other, true, "https://app.oor7.com")).toBe(false);
+    expect(opensInBrowser(other, false, "https://team.example.com/")).toBe(false);
+    expect(opensInBrowser({ kind: "invite", serverUrl: "", inviteCode: "x" }, false, "https://a.b")).toBe(false);
+  });
+  it("http·https만 연다(javascript:·data:·ftp:는 null)", () => {
+    expect(browserOpenHref(other)).toBe("https://team.example.com/");
+    expect(browserOpenHref({ kind: "server", serverUrl: "http://10.0.0.5:8080" })).toBe("http://10.0.0.5:8080/");
+    for (const serverUrl of ["javascript:alert(1)", "data:text/html,x", "ftp://a.example.com", "not a url"]) {
+      expect(browserOpenHref({ kind: "server", serverUrl })).toBeNull();
+    }
+  });
+  it("초대면 코드를 실어서 연다", () => {
+    expect(
+      browserOpenHref({ kind: "invite", serverUrl: "https://team.example.com", inviteCode: "abc_DEF-123" })
+    ).toBe("https://team.example.com/?code=abc_DEF-123");
   });
 });

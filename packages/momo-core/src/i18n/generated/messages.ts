@@ -1448,6 +1448,7 @@ export const messageKeys = [
   "workspace.add.createLead",
   "workspace.add.createLeadNotOperator",
   "workspace.add.createTitle",
+  "workspace.add.joinBadScheme",
   "workspace.add.joinChecking",
   "workspace.add.joinClaim",
   "workspace.add.joinConfirmAction",
@@ -1458,6 +1459,11 @@ export const messageKeys = [
   "workspace.add.joinHint",
   "workspace.add.joinLead",
   "workspace.add.joinNext",
+  "workspace.add.joinOpenAction",
+  "workspace.add.joinOpenBody",
+  "workspace.add.joinOpenInvite",
+  "workspace.add.joinOpenServer",
+  "workspace.add.joinOpenTitle",
   "workspace.add.joinSameServer",
   "workspace.add.joinTargetInvite",
   "workspace.add.joinTargetInviteOnly",
@@ -3371,6 +3377,7 @@ export const argumentSpecs = {
   "workspace.add.createLead": {},
   "workspace.add.createLeadNotOperator": {},
   "workspace.add.createTitle": {},
+  "workspace.add.joinBadScheme": {},
   "workspace.add.joinChecking": {},
   "workspace.add.joinClaim": {},
   "workspace.add.joinConfirmAction": {},
@@ -3381,6 +3388,15 @@ export const argumentSpecs = {
   "workspace.add.joinHint": {},
   "workspace.add.joinLead": {},
   "workspace.add.joinNext": {},
+  "workspace.add.joinOpenAction": {},
+  "workspace.add.joinOpenBody": {},
+  "workspace.add.joinOpenInvite": {
+    "server": "string"
+  },
+  "workspace.add.joinOpenServer": {
+    "server": "string"
+  },
+  "workspace.add.joinOpenTitle": {},
   "workspace.add.joinSameServer": {},
   "workspace.add.joinTargetInvite": {
     "server": "string"
@@ -4867,6 +4883,7 @@ export interface MessageArgs {
   "workspace.add.createLead": Record<string, never>;
   "workspace.add.createLeadNotOperator": Record<string, never>;
   "workspace.add.createTitle": Record<string, never>;
+  "workspace.add.joinBadScheme": Record<string, never>;
   "workspace.add.joinChecking": Record<string, never>;
   "workspace.add.joinClaim": Record<string, never>;
   "workspace.add.joinConfirmAction": Record<string, never>;
@@ -4877,6 +4894,11 @@ export interface MessageArgs {
   "workspace.add.joinHint": Record<string, never>;
   "workspace.add.joinLead": Record<string, never>;
   "workspace.add.joinNext": Record<string, never>;
+  "workspace.add.joinOpenAction": Record<string, never>;
+  "workspace.add.joinOpenBody": Record<string, never>;
+  "workspace.add.joinOpenInvite": { server: string };
+  "workspace.add.joinOpenServer": { server: string };
+  "workspace.add.joinOpenTitle": Record<string, never>;
   "workspace.add.joinSameServer": Record<string, never>;
   "workspace.add.joinTargetInvite": { server: string };
   "workspace.add.joinTargetInviteOnly": Record<string, never>;

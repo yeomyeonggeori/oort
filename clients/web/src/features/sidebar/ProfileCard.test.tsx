@@ -993,8 +993,10 @@ describe("ProfileCard 워크스페이스 줄 묶음 (#5785)", () => {
     mountCard();
     await openMenu();
     const note = q("profile-copy-address-note")!;
-    expect(note.textContent).toBe("기본이 아닌 워크스페이스는 로그인할 때 워크스페이스 ID도 넣어야 해요.");
+    expect(note.textContent).toBe("기본이 아닌 워크스페이스는 ID도 필요해요.");
     expect(q("profile-copy-address")?.getAttribute("aria-describedby")).toBe(note.id);
+    // 복사하기 전에는 메뉴를 늘이지 않는다(낭독 전용), 복사한 순간에만 보인다.
+    expect(note.className).toContain("sr-only");
     // 줄이 아니다: 초점도 선택도 받지 않는다.
     expect(note.getAttribute("role")).toBeNull();
     expect(note.hasAttribute("tabindex")).toBe(false);
@@ -1014,6 +1016,7 @@ describe("ProfileCard 워크스페이스 줄 묶음 (#5785)", () => {
     expect(copied).toBe(absoluteApiBase());
     await vi.waitFor(() => expect(text("profile-copy-address")).toBe("서버 주소 복사됨"));
     expect(q("profile-card-menu")).not.toBeNull();
+    expect(q("profile-copy-address-note")?.className).not.toContain("sr-only");
     // 로그인 화면의 첫 칸이 이 글을 서버 주소로 읽는다(같은 판정 함수).
     const decision = classifyEntry(copied);
     expect(decision.kind).toBe("server");
@@ -1066,7 +1069,7 @@ describe("ProfileCard 워크스페이스 줄 묶음 (#5785)", () => {
     await act(async () => q("workspace-leave-dialog-confirm")!.click());
     await vi.waitFor(() =>
       expect(text("workspace-leave-dialog-last-owner")).toBe(
-        "마지막 소유자는 나갈 수 없어요. 먼저 다른 사람에게 소유자를 넘기세요. 설정의 「멤버와 초대」에서 다른 소유자를 세운 뒤 다시 나가세요."
+        "마지막 소유자는 나갈 수 없어요. 먼저 다른 사람에게 소유자를 넘기세요. 멤버 탭에서 그 사람의 프로필을 열어 역할을 소유자로 바꾼 뒤 다시 나가세요."
       )
     );
     expect(q("workspace-leave-dialog-last-owner")?.getAttribute("role")).toBe("alert");
