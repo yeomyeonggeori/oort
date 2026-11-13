@@ -185,7 +185,7 @@ export function JobResultCell({
     return (
       <span className="flex min-w-0 flex-col gap-1" data-testid="work-job-result" data-kind={kind} data-held="">
         <span
-          className={cn(CHIP_CLASS, "inline-flex shrink-0 items-center gap-1 self-start bg-surface-muted text-ink-muted")}
+          className={cn(CHIP_CLASS, "inline-flex shrink-0 items-center gap-1 self-start bg-muted-soft text-ink-muted")}
           data-testid="work-job-settled-tag"
         >
           <Check aria-hidden className="size-3 shrink-0" />
