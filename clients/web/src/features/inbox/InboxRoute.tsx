@@ -373,11 +373,6 @@ export function InboxRoute() {
     }
   }, [isServer, filter, markAllServerRead, unreadChannels, markMentionsRead]);
 
-  // 옛 「에이전트」 탭 딥링크는 활동으로 보낸다(#3337).
-  if (params.get("filter") === "agents") {
-    return <Navigate to="/activity" replace />;
-  }
-
   // 서버 경로는 읽어 온 쪽만 알 수 있어서 종류별 수를 지어내지 않는다. 서버가 센
   // 전체 안 읽음 수만 「전체」·「안 읽음」에 쓴다.
   const tabCounts: Partial<Record<(typeof tabs)[number], number>> = isServer
@@ -414,6 +409,12 @@ export function InboxRoute() {
     ).find((element) => element.getAttribute("data-entry-key") === opened.key);
     row?.focus({ preventScroll: true });
   }, [listHidden, showDetail]);
+
+  // 옛 「에이전트」 탭 딥링크는 활동으로 보낸다(#3337). 이 이른 return 은 모든 훅 **아래**에 둔다 —
+  // 위에 두면 인박스가 열린 채 그 링크로 올 때 훅 수가 달라져 화면이 죽는다(#5754 검수 2회차).
+  if (params.get("filter") === "agents") {
+    return <Navigate to="/activity" replace />;
+  }
 
   // 로딩과 오류는 **이 탭에 보일 줄**이 없을 때만 말한다. 전체 항목 수(`entries`)로 가르면 투영에 줄이
   // 있는 순간 「처리할 일」 탭이 원장의 실패·로딩을 가리고 「지금 처리할 일이 없어요」라고 말한다 —
