@@ -656,6 +656,18 @@ export const messageKeys = [
   "memberList.search.placeholder",
   "memberList.search.placeholderGuest",
   "memberList.state.offline",
+  "mobile.addMember.addHint",
+  "mobile.addMember.adding",
+  "mobile.addMember.close",
+  "mobile.addMember.emptyWorkspace",
+  "mobile.addMember.kindAgent",
+  "mobile.addMember.kindHuman",
+  "mobile.addMember.loading",
+  "mobile.addMember.noMatch",
+  "mobile.addMember.present",
+  "mobile.addMember.searchLabel",
+  "mobile.addMember.searchPlaceholder",
+  "mobile.addMember.title",
   "mobile.attachmentSave.failed",
   "mobile.attachmentSave.photosDenied",
   "mobile.attachmentSave.savedToFiles",
@@ -1343,6 +1355,9 @@ export const messageKeys = [
   "teamAi.stage.setupLine",
   "teamAi.stage.setupUnverifiedDetail",
   "teamAi.stage.verifyingLine",
+  "timeline.addMember.createdDescription",
+  "timeline.addMember.createdDescriptionPublic",
+  "timeline.addMember.later",
   "timeline.agentRail.open",
   "timeline.agentRail.openActivity",
   "timeline.agentRail.openRecord",
@@ -1351,6 +1366,8 @@ export const messageKeys = [
   "timeline.approval.reproposeBusy",
   "timeline.approval.reproposeSeeded",
   "timeline.approvalExpiry.soon",
+  "timeline.createChannel.privateDetail",
+  "timeline.createChannel.publicDetail",
   "timeline.edited.atDate",
   "timeline.edited.atDay",
   "timeline.edited.atTime",
@@ -2346,6 +2363,20 @@ export const argumentSpecs = {
   "memberList.search.placeholder": {},
   "memberList.search.placeholderGuest": {},
   "memberList.state.offline": {},
+  "mobile.addMember.addHint": {},
+  "mobile.addMember.adding": {},
+  "mobile.addMember.close": {},
+  "mobile.addMember.emptyWorkspace": {},
+  "mobile.addMember.kindAgent": {},
+  "mobile.addMember.kindHuman": {},
+  "mobile.addMember.loading": {},
+  "mobile.addMember.noMatch": {
+    "query": "string"
+  },
+  "mobile.addMember.present": {},
+  "mobile.addMember.searchLabel": {},
+  "mobile.addMember.searchPlaceholder": {},
+  "mobile.addMember.title": {},
   "mobile.attachmentSave.failed": {},
   "mobile.attachmentSave.photosDenied": {},
   "mobile.attachmentSave.savedToFiles": {},
@@ -3197,6 +3228,13 @@ export const argumentSpecs = {
   "teamAi.stage.setupLine": {},
   "teamAi.stage.setupUnverifiedDetail": {},
   "teamAi.stage.verifyingLine": {},
+  "timeline.addMember.createdDescription": {
+    "name": "string"
+  },
+  "timeline.addMember.createdDescriptionPublic": {
+    "name": "string"
+  },
+  "timeline.addMember.later": {},
   "timeline.agentRail.open": {
     "label": "string"
   },
@@ -3209,6 +3247,8 @@ export const argumentSpecs = {
   "timeline.approval.reproposeBusy": {},
   "timeline.approval.reproposeSeeded": {},
   "timeline.approvalExpiry.soon": {},
+  "timeline.createChannel.privateDetail": {},
+  "timeline.createChannel.publicDetail": {},
   "timeline.edited.atDate": {
     "date": "string",
     "time": "string"
@@ -4158,6 +4198,18 @@ export interface MessageArgs {
   "memberList.search.placeholder": Record<string, never>;
   "memberList.search.placeholderGuest": Record<string, never>;
   "memberList.state.offline": Record<string, never>;
+  "mobile.addMember.addHint": Record<string, never>;
+  "mobile.addMember.adding": Record<string, never>;
+  "mobile.addMember.close": Record<string, never>;
+  "mobile.addMember.emptyWorkspace": Record<string, never>;
+  "mobile.addMember.kindAgent": Record<string, never>;
+  "mobile.addMember.kindHuman": Record<string, never>;
+  "mobile.addMember.loading": Record<string, never>;
+  "mobile.addMember.noMatch": { query: string };
+  "mobile.addMember.present": Record<string, never>;
+  "mobile.addMember.searchLabel": Record<string, never>;
+  "mobile.addMember.searchPlaceholder": Record<string, never>;
+  "mobile.addMember.title": Record<string, never>;
   "mobile.attachmentSave.failed": Record<string, never>;
   "mobile.attachmentSave.photosDenied": Record<string, never>;
   "mobile.attachmentSave.savedToFiles": Record<string, never>;
@@ -4845,6 +4897,9 @@ export interface MessageArgs {
   "teamAi.stage.setupLine": Record<string, never>;
   "teamAi.stage.setupUnverifiedDetail": Record<string, never>;
   "teamAi.stage.verifyingLine": Record<string, never>;
+  "timeline.addMember.createdDescription": { name: string };
+  "timeline.addMember.createdDescriptionPublic": { name: string };
+  "timeline.addMember.later": Record<string, never>;
   "timeline.agentRail.open": { label: string };
   "timeline.agentRail.openActivity": Record<string, never>;
   "timeline.agentRail.openRecord": { name: string };
@@ -4853,6 +4908,8 @@ export interface MessageArgs {
   "timeline.approval.reproposeBusy": Record<string, never>;
   "timeline.approval.reproposeSeeded": Record<string, never>;
   "timeline.approvalExpiry.soon": Record<string, never>;
+  "timeline.createChannel.privateDetail": Record<string, never>;
+  "timeline.createChannel.publicDetail": Record<string, never>;
   "timeline.edited.atDate": { date: string; time: string };
   "timeline.edited.atDay": { day: string; time: string };
   "timeline.edited.atTime": { time: string };
