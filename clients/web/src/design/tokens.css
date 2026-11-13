@@ -1929,6 +1929,7 @@
   --on-primary-base: var(--on-primary);
   --surface-hover-base: var(--surface-hover);
   --surface-pressed-base: var(--surface-pressed);
+  --status-ok-base: var(--ok);
   --band-fill: color-mix(in srgb, var(--on-band) 10%, transparent);
   --band-fill-strong: color-mix(in srgb, var(--on-band) 16%, transparent);
   --band-line: color-mix(in srgb, var(--on-band) 12%, transparent);
@@ -1963,7 +1964,7 @@
    * 묶음에서 하는 까닭: 팔레트가 문서 뿌리가 아니라 미리보기 상자(`data-palette-preview`)에 걸린 자리에서도 그 상자의
    * on-band 를 읽는다. */
   --band-status-ok: color-mix(in srgb, var(--ok) 55%, var(--on-band));
-  --status-ok: var(--band-status-ok, var(--ok));
+  --status-ok: var(--band-status-ok, var(--status-ok-base));
   color: var(--ink);
 }
 
@@ -1980,7 +1981,7 @@
   --on-primary: var(--on-primary-base);
   --surface-hover: var(--surface-hover-base);
   --surface-pressed: var(--surface-pressed-base);
-  --status-ok: var(--ok);
+  --status-ok: var(--status-ok-base);
 }
 
 /* 흰 면 채움을 가진 자식은 클래스로 알 수 있다: 사이드바 안에서 그 채움을 든
@@ -2000,7 +2001,7 @@
   --on-primary: var(--on-primary-base);
   --surface-hover: var(--surface-hover-base);
   --surface-pressed: var(--surface-pressed-base);
-  --status-ok: var(--ok);
+  --status-ok: var(--status-ok-base);
 }
 
 /* 레일의 「현재」 마커. 타일 밖 바닥 위에 서므로 바닥의 글자 역할을 쓴다: 띠가

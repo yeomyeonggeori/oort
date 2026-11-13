@@ -55,7 +55,8 @@ const avatarStatus = ruleBody("@utility avatar-status {");
  * 묶지 않으면 띠 위 점은 섞지 않은 `--ok`(2.8:1)다.
  */
 const bandOkMix = (() => {
-  expect(sidebarScope).toContain("--status-ok: var(--band-status-ok, var(--ok));");
+  expect(sidebarScope).toContain("--status-ok: var(--band-status-ok, var(--status-ok-base));");
+  expect(css).toContain("--status-ok-base: var(--ok);");
   expect(avatarStatus).toContain("background-color: var(--status-ok, var(--ok));");
   const match = /--band-status-ok:\s*color-mix\(in srgb, var\(--ok\) (\d+)%, var\(--on-band\)\);/.exec(sidebarScope);
   expect(match, "--band-status-ok 가 ok 와 on-band 를 섞는다").not.toBeNull();
