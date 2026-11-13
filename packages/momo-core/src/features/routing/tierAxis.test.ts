@@ -88,7 +88,7 @@ describe("eligibility is read from the registry and nowhere else", () => {
     const axis = resolveExecutionTierAxis(input({ hosts: [host({ type: "workd" })] }));
     expect(optionFor(axis, "t1")).toMatchObject({
       eligible: false,
-      reason: "이 워크스페이스에 등록된 데스크톱 앱 호스트가 없습니다.",
+      reason: "이 워크스페이스에 등록된 데스크탑 앱 호스트가 없습니다.",
     });
     expect(optionFor(axis, "t3").reason).toBe(
       "이 워크스페이스에 등록된 클라우드 호스트가 없습니다."
@@ -122,7 +122,7 @@ describe("eligibility is read from the registry and nowhere else", () => {
     );
     expect(optionFor(axis, "t1")).toMatchObject({
       eligible: false,
-      reason: "등록된 데스크톱 앱 호스트가 모두 오프라인입니다.",
+      reason: "등록된 데스크탑 앱 호스트가 모두 오프라인입니다.",
     });
   });
 
@@ -131,7 +131,7 @@ describe("eligibility is read from the registry and nowhere else", () => {
       input({ hosts: [host({ type: "app", online: true, revokedAtMs: 1 })] })
     );
     expect(optionFor(axis, "t1").reason).toBe(
-      "이 워크스페이스에 등록된 데스크톱 앱 호스트가 없습니다."
+      "이 워크스페이스에 등록된 데스크탑 앱 호스트가 없습니다."
     );
   });
 

@@ -3,6 +3,7 @@ import { resumeFailureLine } from "@momo/core/features/auth/signedControl";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { ArrowLeft, KeyRound, Loader2 } from "lucide-react";
+import { useFormatMessage } from "@/i18n/useFormatMessage";
 import { cn } from "@/design/lib/cn";
 import { Button } from "@/design/ui/button";
 import {
@@ -738,6 +739,7 @@ export function WorkSessionDetail({
   onResumed,
   controlIntent = false,
   onControlIntentConsumed,
+  routeHeader = false,
 }: {
   session: WorkSession;
   hosts: WorkHost[] | undefined;
@@ -758,6 +760,11 @@ export function WorkSessionDetail({
   wide: boolean;
   onWideChange: (wide: boolean) => void;
   onBack: () => void;
+  /**
+   * 세션 화면(콘솔 라우트)의 머리가 「← 작업」과 세션 이름을 이미 말한다(#5673). 이 안쪽 머리는 이름을 눈에서 걷고(낭독 제목은
+   * 남는다), 「←」는 목록이 숨는 좁은 폭에서만 「세션 목록」 글자와 함께 선다.
+   */
+  routeHeader?: boolean;
   /** 이 세션의 채널 스레드를 여는 요청이 이미 나가 있다. */
   openingThread: boolean;
   /**
@@ -864,9 +871,12 @@ export function WorkSessionDetail({
   // receiving keys and the documented step back (상세 -> 리스트 -> 밖) was dead
   // for exactly the readers who need it. The back control is the right landing
   // spot because it is both the heading's neighbour and the way out.
+  const formatMessage = useFormatMessage();
   const backRef = useRef<HTMLButtonElement>(null);
   useEffect(() => {
-    backRef.current?.focus();
+    const back = backRef.current;
+    // 머리가 따로 있는 화면의 넓은 폭에서는 이 단추가 숨어 있어 초점을 줄 수 없다(숨은 단추에 focus()는 조용히 실패한다).
+    if (back !== null && back.getClientRects().length > 0) back.focus();
   }, [session.id]);
 
   const status = workSessionContinuityStatus(session, hosts);
@@ -939,11 +949,15 @@ export function WorkSessionDetail({
               onClick={onBack}
               aria-label="세션 목록으로"
               data-testid="work-detail-back"
-              className="flex size-6 shrink-0 items-center justify-center rounded-sm text-ink-muted press hover:bg-surface-hover focus-visible:focus-ring"
+              className={cn(
+                "flex shrink-0 items-center justify-center rounded-sm text-ink-muted press hover:bg-surface-hover focus-visible:focus-ring",
+                routeHeader ? "h-6 gap-1 pe-1 text-meta min-[900px]:hidden" : "size-6"
+              )}
             >
               <ArrowLeft className="size-4" />
+              {routeHeader && formatMessage("desktop.workSession.backToListLabel")}
             </button>
-            <Heading className="min-w-0 flex-1 truncate text-body font-medium text-ink">
+            <Heading className={cn("min-w-0 flex-1 truncate text-body font-medium text-ink", routeHeader && "sr-only")}>
               {session.label}
             </Heading>
             {/* The clock rides with the title rather than living in the meta

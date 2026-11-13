@@ -102,7 +102,7 @@ export function cancelReceipt(
     return `${subject} 실행을 중단했어요. 연결된 작업 세션도 함께 끝났어요.`;
   }
   if (linked === 0) return `${subject} 실행을 중단했어요.`;
-  return `${subject} 실행을 중단했어요. 이 실행에 연결된 작업 세션 ${linked}개는 계속 돌아요. 세션은 데스크톱에서 멈출 수 있어요.`;
+  return `${subject} 실행을 중단했어요. 이 실행에 연결된 작업 세션 ${linked}개는 계속 돌아요. 세션은 데스크탑에서 멈출 수 있어요.`;
 }
 
 /** 200 → the receipt, as an outcome. */

@@ -151,7 +151,7 @@ describe('detail — read-only status, honest time, cleanup progress', () => {
     expect(screen.getByTestId('hosted-detail-status-chip')).toHaveTextContent('감지됨');
     expect(screen.getByText(/사람이 채널과 권한을 확인해야/)).toBeTruthy();
     // read-only honesty: mutations live on the desktop.
-    expect(screen.getByText(/데스크톱에서 해요/)).toBeTruthy();
+    expect(screen.getByText(/데스크탑에서 해요/)).toBeTruthy();
     // liveness honesty: updatedAtMs is not a live heartbeat.
     expect(screen.getByText(/실시간으로 알려 주는 값은 아니에요/)).toBeTruthy();
   });

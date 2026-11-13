@@ -295,6 +295,11 @@ export const messageKeys = [
   "desktop.workJobs.tagApproval",
   "desktop.workJobs.tagPermission",
   "desktop.workPermission.allowInApp",
+  "desktop.workSession.backAria",
+  "desktop.workSession.backLabel",
+  "desktop.workSession.backToListLabel",
+  "desktop.workSession.listTitle",
+  "desktop.workSession.pageTitle",
   "expressions.add.adminsOnly",
   "expressions.add.backLabel",
   "expressions.add.import",
@@ -1241,6 +1246,8 @@ export const messageKeys = [
   "timeline.memberPanel.moreRuns",
   "timeline.memberPanel.moreRunsSpoken",
   "timeline.memberPanel.nowFailed",
+  "timeline.memberPanel.nowFailedMid",
+  "timeline.memberPanel.nowFailedShort",
   "timeline.memberPanel.nowRetry",
   "timeline.memberPanel.request",
   "timeline.memberPanel.requestSpoken",
@@ -1729,6 +1736,11 @@ export const argumentSpecs = {
   "desktop.workJobs.tagApproval": {},
   "desktop.workJobs.tagPermission": {},
   "desktop.workPermission.allowInApp": {},
+  "desktop.workSession.backAria": {},
+  "desktop.workSession.backLabel": {},
+  "desktop.workSession.backToListLabel": {},
+  "desktop.workSession.listTitle": {},
+  "desktop.workSession.pageTitle": {},
   "expressions.add.adminsOnly": {},
   "expressions.add.backLabel": {},
   "expressions.add.import": {},
@@ -2925,6 +2937,8 @@ export const argumentSpecs = {
     "count": "number"
   },
   "timeline.memberPanel.nowFailed": {},
+  "timeline.memberPanel.nowFailedMid": {},
+  "timeline.memberPanel.nowFailedShort": {},
   "timeline.memberPanel.nowRetry": {},
   "timeline.memberPanel.request": {
     "text": "string"
@@ -3457,6 +3471,11 @@ export interface MessageArgs {
   "desktop.workJobs.tagApproval": Record<string, never>;
   "desktop.workJobs.tagPermission": Record<string, never>;
   "desktop.workPermission.allowInApp": Record<string, never>;
+  "desktop.workSession.backAria": Record<string, never>;
+  "desktop.workSession.backLabel": Record<string, never>;
+  "desktop.workSession.backToListLabel": Record<string, never>;
+  "desktop.workSession.listTitle": Record<string, never>;
+  "desktop.workSession.pageTitle": Record<string, never>;
   "expressions.add.adminsOnly": Record<string, never>;
   "expressions.add.backLabel": Record<string, never>;
   "expressions.add.import": Record<string, never>;
@@ -4403,6 +4422,8 @@ export interface MessageArgs {
   "timeline.memberPanel.moreRuns": { count: number };
   "timeline.memberPanel.moreRunsSpoken": { count: number };
   "timeline.memberPanel.nowFailed": Record<string, never>;
+  "timeline.memberPanel.nowFailedMid": Record<string, never>;
+  "timeline.memberPanel.nowFailedShort": Record<string, never>;
   "timeline.memberPanel.nowRetry": Record<string, never>;
   "timeline.memberPanel.request": { text: string };
   "timeline.memberPanel.requestSpoken": { text: string };

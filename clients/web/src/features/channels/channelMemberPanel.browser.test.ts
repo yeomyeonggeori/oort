@@ -9,6 +9,9 @@ import { SessionProvider, type SessionContextValue } from "@/app/session";
 import { compileTokensCss, ENGINES } from "@/design/appearance/compileTokensTestKit";
 import { LocaleProvider } from "@/i18n/LocaleProvider";
 import { koreanLocaleForTest } from "@/i18n/koreanLocaleForTest";
+import koTimeline from "../../../../../packages/momo-core/src/i18n/catalogs/ko-KR/timeline.json";
+import enTimeline from "../../../../../packages/momo-core/src/i18n/catalogs/en-US/timeline.json";
+import { createAppLocale } from "@/i18n/localeStore";
 import type { AppLocale } from "@/i18n/localeStore";
 
 // =============================================================================
@@ -127,7 +130,9 @@ const hermes = (over: Partial<AgentRunProgress> = {}) =>
 
 let root: Root | null = null;
 let host: HTMLElement | null = null;
+const CATALOG = { ko: koTimeline as Record<string, string>, en: enTimeline as Record<string, string> };
 let korean: AppLocale;
+let english: AppLocale;
 
 function session(): SessionContextValue {
   return {
@@ -156,6 +161,14 @@ async function settle(rounds = 6) {
 beforeAll(async () => {
   (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
   korean = await koreanLocaleForTest();
+  english = await createAppLocale(
+    {
+      readPreference: () => "en-US",
+      writePreference: () => {},
+      readDevice: () => ({ languages: ["en-US"], timeZone: "UTC" }),
+    },
+    { applyLang: () => {} }
+  );
 });
 afterEach(() => {
   if (root) act(() => root?.unmount());
@@ -367,7 +380,7 @@ const TWELVE: RosterMember[] = [...FIRST, ...EXTRA];
 /** 읽기를 `delayMs` 늦춘 채 패널을 열고, 연 직후부터 답이 온 뒤까지의 마크업을 차례로 모은다. */
 async function openingFrames(
   delayMs: number,
-  options: { fail?: boolean; members?: RosterMember[] } = {}
+  options: { fail?: boolean; members?: RosterMember[]; english?: boolean } = {}
 ): Promise<{ at: string; html: string }[]> {
   const members = options.members ?? TWELVE;
   api.fetchRoster.mockResolvedValue(members);
@@ -397,7 +410,7 @@ async function openingFrames(
         QueryClientProvider,
         { client },
         createElement(LocaleProvider, {
-          locale: korean,
+          locale: options.english === true ? english : korean,
           children: createElement(
             SessionProvider,
             { value: session() },
@@ -519,7 +532,7 @@ describe("채널 멤버 패널을 열 때 뛰지 않는다 (#5686 수리 1회차
 // 실제로 섰는지(시험이 헛돌지 않게)를 잰다.
 describe("채널 멤버 패널: 읽기가 실패해도 좁은 폭에서 안 움직인다 (#5701)", () => {
   it.skipIf(ENGINES.length === 0)(
-    "멤버 3명·12명 × 넓은 창·360 × 읽기 성공·실패: 패널 높이·목록 높이·발치 단추·줄 자리가 모든 순간 같다",
+    "멤버 3명·12명 × 넓은 창·512·360 × 글자 기본·150%·200% × 읽기 성공·실패: 모든 순간 같은 값이고, 실패 글은 보이고 한 줄이며, 발치 단추 상자가 겹치지 않는다",
     async () => {
       const THREE = FIRST.filter((m) => [ME, DALMURI, SAEBYEOK].includes(m.id));
       const scenes: Record<string, { at: string; html: string }[]> = {};
@@ -527,6 +540,7 @@ describe("채널 멤버 패널: 읽기가 실패해도 좁은 폭에서 안 움�
         scenes[`${name} 성공`] = await openingFrames(300, { members });
         scenes[`${name} 실패`] = await openingFrames(300, { members, fail: true });
       }
+      scenes["영어 3명 실패"] = await openingFrames(300, { members: THREE, fail: true, english: true });
       for (const [name, frames] of Object.entries(scenes)) {
         const last = frames[frames.length - 1]!.html;
         expect(last.includes('data-testid="channel-member-now-failed"'), `${name}: 실패 줄`).toBe(name.endsWith("실패"));
@@ -535,54 +549,143 @@ describe("채널 멤버 패널: 읽기가 실패해도 좁은 폭에서 안 움�
       const playwright = await import("playwright");
       const problems: string[] = [];
       const report: string[] = [];
+      const VIEWPORTS = [
+        { name: "1280", width: 1280 },
+        { name: "640", width: 640 },
+        { name: "512", width: 512 },
+        { name: "511", width: 511 },
+        { name: "390", width: 390 },
+        { name: "375", width: 375 },
+        { name: "374", width: 374 },
+        { name: "360", width: 360 },
+        { name: "320", width: 320 },
+      ];
+      const FONTS = [
+        { name: "기본", px: 16 },
+        { name: "150%", px: 24 },
+        { name: "200%", px: 32 },
+      ];
       for (const engine of ENGINES) {
         const browser = await playwright[engine].launch();
         try {
-          for (const vp of [{ name: "1280", width: 1280 }, { name: "360", width: 360 }]) {
-            const ctx = await browser.newContext({ viewport: { width: vp.width, height: 1400 } });
-            try {
-              const p = await ctx.newPage();
-              for (const [name, frames] of Object.entries(scenes)) {
-                const seen: string[] = [];
-                for (const frame of frames) {
-                  await p.setContent(page(css, frame.html, 16));
-                  seen.push(
-                    await p.evaluate(() => {
-                      const box = (sel: string) => {
+          for (const vp of VIEWPORTS) {
+            for (const font of FONTS) {
+              const ctx = await browser.newContext({ viewport: { width: vp.width, height: 2400 } });
+              try {
+                const p = await ctx.newPage();
+                for (const [name, frames] of Object.entries(scenes)) {
+                  const at = `${engine} ${vp.name} ${font.name} ${name}`;
+                  const seen: string[] = [];
+                  let last = "";
+                  for (const frame of frames) {
+                    // 같은 마크업은 같은 값이라 다시 재지 않는다
+                    if (frame.html === last) {
+                      seen.push(seen[seen.length - 1]!);
+                      continue;
+                    }
+                    last = frame.html;
+                    await p.setContent(page(css, frame.html, font.px));
+                    seen.push(
+                      await p.evaluate(() => {
+                        const box = (sel: string) => {
+                          const r = document.querySelector(sel)!.getBoundingClientRect();
+                          return `${Math.round(r.top * 100) / 100}+${Math.round(r.height * 100) / 100}`;
+                        };
+                        const list = document.querySelector<HTMLElement>('[data-testid="channel-member-list"]')!;
+                        const base = list.getBoundingClientRect().top - list.scrollTop;
+                        const rows = [...list.querySelectorAll<HTMLElement>('[data-testid="channel-member-item"]')]
+                          .map((row) => Math.round((row.getBoundingClientRect().top - base) * 100) / 100)
+                          .join(",");
+                        return [
+                          `panel ${box('[data-testid="channel-member-panel"]')}`,
+                          `list ${box('[data-testid="channel-member-list"]')}`,
+                          `add ${box('[data-testid="channel-member-add"]')}`,
+                          `close ${box('[data-testid="channel-member-close"]')}`,
+                          `rows ${rows}`,
+                        ].join(" | ");
+                      })
+                    );
+                  }
+                  const distinct = [...new Set(seen)];
+                  report.push(`${at}: ${seen.length}순간 → ${distinct[0]}`);
+                  if (distinct.length !== 1) problems.push(`${at}: 서로 다른 값 ${distinct.length}개\n  ${distinct.join("\n  ")}`);
+                  // 마지막 마크업(실패가 선 뒤): 글이 눈에 보이고 한 줄이며, 발치 단추 상자가 서로·패널 밖으로 겹치지 않는다
+                  if (name.endsWith("실패")) {
+                    const foot = await p.evaluate(() => {
+                      const rect = (sel: string) => {
                         const r = document.querySelector(sel)!.getBoundingClientRect();
-                        return `${Math.round(r.top * 100) / 100}+${Math.round(r.height * 100) / 100}`;
+                        return { l: r.left, r: r.right, t: r.top, b: r.bottom, h: r.height };
                       };
-                      const list = document.querySelector<HTMLElement>('[data-testid="channel-member-list"]')!;
-                      const base = list.getBoundingClientRect().top - list.scrollTop;
-                      const rows = [...list.querySelectorAll<HTMLElement>('[data-testid="channel-member-item"]')]
-                        .map((row) => Math.round((row.getBoundingClientRect().top - base) * 100) / 100)
-                        .join(",");
-                      return [
-                        `panel ${box('[data-testid="channel-member-panel"]')}`,
-                        `list ${box('[data-testid="channel-member-list"]')}`,
-                        `add ${box('[data-testid="channel-member-add"]')}`,
-                        `close ${box('[data-testid="channel-member-close"]')}`,
-                        `rows ${rows}`,
-                      ].join(" | ");
-                    })
-                  );
+                      const failed = document.querySelector('[data-testid="channel-member-now-failed"]')!;
+                      // 까닭 글 요소 자체(단추 안 라벨은 아니다): 보이는 것이 정확히 하나여야 한다
+                      const reasons = [...failed.querySelectorAll<HTMLElement>('[data-testid="channel-member-now-failed-reason"]')];
+                      const shown = reasons.filter((el) => getComputedStyle(el).display !== "none");
+                      const text = shown[0] ?? reasons[0]!;
+                      const style = getComputedStyle(text);
+                      return {
+                        textWidth: text.getBoundingClientRect().width,
+                        textFull: text.scrollWidth,
+                        textClient: text.clientWidth,
+                        reasonCount: reasons.length,
+                        shownCount: shown.length,
+                        shownText: shown[0]?.textContent ?? "",
+                        shownAriaHidden: shown.every((el) => el.getAttribute("aria-hidden") === "true"),
+                        srText: failed.querySelector('[data-testid="channel-member-now-failed-sr"]')?.textContent ?? "",
+                        srVisible: failed.querySelector('[data-testid="channel-member-now-failed-sr"]')?.getAttribute("aria-hidden") ?? "none",
+                        titleText: failed.getAttribute("title") ?? "",
+                        textHeight: text.getBoundingClientRect().height,
+                        lineHeight: Number.parseFloat(style.lineHeight),
+                        whiteSpace: style.whiteSpace,
+                        retry: rect('[data-testid="channel-member-now-retry"]'),
+                        add: rect('[data-testid="channel-member-add"]'),
+                        close: rect('[data-testid="channel-member-close"]'),
+                        panel: rect('[data-testid="channel-member-panel"]'),
+                      };
+                    });
+                    const overlap = (a: { l: number; r: number }, b: { l: number; r: number }) => Math.min(a.r, b.r) - Math.max(a.l, b.l);
+                    if (overlap(foot.retry, foot.add) > 0.5) problems.push(`${at}: 「다시 불러오기」와 「멤버 추가」 상자가 ${overlap(foot.retry, foot.add)}px 겹침`);
+                    if (overlap(foot.add, foot.close) > 0.5) problems.push(`${at}: 「멤버 추가」와 「닫기」 상자가 겹침`);
+                    if (foot.close.r > foot.panel.r + 0.5) problems.push(`${at}: 「닫기」가 패널 밖으로 넘침`);
+                    if (foot.textHeight > foot.lineHeight * 1.5) problems.push(`${at}: 실패 글이 줄바꿈됨(높이 ${foot.textHeight})`);
+                    if (foot.whiteSpace !== "nowrap") problems.push(`${at}: 실패 글 white-space ${foot.whiteSpace}`);
+                    // 까닭 글 요소 자체를 잰다: 보이는 것이 정확히 하나이고, 글자가 사전의 짧은 글(640 미만)/긴 글(640 이상)이며,
+                    // 기본 글자에서는 말줄임 없이 다 들어간다(320·360 × 한국어·영어). 글을 숨기거나 지우면 여기서 RED다.
+                    const dict = name.startsWith("영어") ? CATALOG.en : CATALOG.ko;
+                    // 단계: 512 이상 긴 글, 375~511 중간 글, 375 미만 짧은 글
+                    const wanted =
+                      vp.width >= 512
+                        ? dict["timeline.memberPanel.nowFailed"]
+                        : vp.width >= 375
+                          ? dict["timeline.memberPanel.nowFailedMid"]
+                          : dict["timeline.memberPanel.nowFailedShort"];
+                    const fullSentence = dict["timeline.memberPanel.nowFailed"];
+                    // 낭독: 어느 폭에서든 전체 문장이 한 번(보이는 글은 aria-hidden, 전체 문장은 sr-only 한 곳)이고 `title`에도 있다
+                    if (foot.srText !== fullSentence) problems.push(`${at}: 낭독 글 「${foot.srText}」 ≠ 전체 문장`);
+                    if (foot.srVisible !== "none") problems.push(`${at}: 낭독 글이 aria-hidden`);
+                    if (!foot.shownAriaHidden) problems.push(`${at}: 보이는 글이 낭독에도 잡힘(두 번 읽힘)`);
+                    if (foot.titleText !== fullSentence) problems.push(`${at}: title 「${foot.titleText}」 ≠ 전체 문장`);
+                    if (foot.reasonCount !== 3) problems.push(`${at}: 까닭 글 요소 ${foot.reasonCount}개(3개여야 함)`);
+                    if (foot.shownCount !== 1) problems.push(`${at}: 보이는 까닭 글 ${foot.shownCount}개(1개여야 함)`);
+                    if (foot.shownText !== wanted) problems.push(`${at}: 보이는 글 「${foot.shownText}」 ≠ 「${wanted}」`);
+                    if (font.px === 16 && foot.textFull > foot.textClient) {
+                      problems.push(`${at}: 기본 글자에서 까닭 글이 말줄임됨(칸 ${foot.textClient} < 글 ${foot.textFull})`);
+                    }
+                    report.push(`${at} 실패 글 칸 ${foot.textClient} / 글 전체 ${Math.round(foot.textFull)}px, 패널 ${Math.round(foot.panel.r - foot.panel.l)}px`);
+                  }
                 }
-                const distinct = [...new Set(seen)];
-                report.push(`${engine} ${vp.name} ${name}: ${seen.length}순간 → ${distinct[0]}`);
-                if (distinct.length !== 1) problems.push(`${engine} ${vp.name} ${name}: 서로 다른 값 ${distinct.length}개\n  ${distinct.join("\n  ")}`);
+              } finally {
+                await ctx.close();
               }
-            } finally {
-              await ctx.close();
             }
           }
         } finally {
           await browser.close();
         }
       }
-      console.info(`[#5701 읽기 실패]\n${report.join("\n")}`);
+      console.info(`[#5701·#5711 읽기 실패]\n${report.join("\n")}`);
       expect(problems).toEqual([]);
     },
-    360_000
+    900_000
   );
 });
 
@@ -687,6 +790,9 @@ describe("채널 멤버 패널 캡처 (#5686, 선택)", () => {
           for (const vp of [
             { name: "wide", width: 1280, height: 900, rootFontPx: 16, scale: 1 },
             { name: "360", width: 360, height: 780, rootFontPx: 16, scale: 1 },
+            { name: "320", width: 320, height: 780, rootFontPx: 16, scale: 1 },
+            { name: "375", width: 375, height: 780, rootFontPx: 16, scale: 1 },
+            { name: "512", width: 512, height: 780, rootFontPx: 16, scale: 1 },
             // 브라우저 확대 200%: 1280 창이 CSS 640px가 되고 화소는 두 배다.
             { name: "zoom200", width: 640, height: 450, rootFontPx: 16, scale: 2 },
             // 큰 글자(브라우저 기본 글자 200%): 확대와 다르다 — 틀은 그대로, rem만 두 배.

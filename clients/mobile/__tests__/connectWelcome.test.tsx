@@ -174,7 +174,7 @@ describe('M2 확인 번호', () => {
       'api.example.com',
     );
     expect(screen.getByTestId('device-link-sas-wait')).toHaveTextContent(
-      '데스크톱에서 확인을 누르면 진행됩니다.',
+      '데스크탑에서 확인을 누르면 진행됩니다.',
     );
     expect(screen.getByTestId('onboarding-dots').props.accessibilityLabel).toBe(
       '3단계 중 2단계',

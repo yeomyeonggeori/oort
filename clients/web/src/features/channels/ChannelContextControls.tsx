@@ -488,14 +488,29 @@ function ChannelMemberPanelBody({
 
       <div className="flex items-center justify-end gap-2 border-t border-line p-4">
         {hasAgent && now.read === "failed" && (
-          <p className="mr-auto flex min-w-0 items-center gap-2 text-meta text-ink-muted" data-testid="channel-member-now-failed">
-            {/* 발치는 한 줄로 고정이다(실패가 떠도 줄이 두 줄이 되어 패널이 커지지 않게, #5701): 좁은 폭에서는 글을
-                낭독용으로만 두고 「다시 불러오기」만 보이며, 넓은 창에서도 모자라면 글이 줄어든다. */}
-            <span className="sr-only min-w-0 truncate sm:not-sr-only">
-              {formatMessage("timeline.memberPanel.nowFailed")}
-            </span>
-            <Button type="button" variant="ghost" size="sm" className="shrink-0" onClick={now.retry} data-testid="channel-member-now-retry">
-              {formatMessage("timeline.memberPanel.nowRetry")}
+          <p
+            className="mr-auto flex h-control-sm min-w-0 items-center gap-2 text-meta text-ink-muted"
+            data-testid="channel-member-now-failed"
+            title={formatMessage("timeline.memberPanel.nowFailed")}
+          >
+            {/* 발치는 한 줄로 고정이다(실패가 떠도 줄이 두 줄이 되어 패널이 커지지 않게, #5701). 보이는 글은 폭에 따라 세
+                단계다(#5711): 512px 이상 긴 글, 375~511px 대상을 말하는 중간 글, 375px 미만 짧은 글(이 폭에서는 대상 없이
+                실패만 말한다). 모두 말줄임 없이 들어가는 폭에서만 고른다. 각 글은 `truncate`가 보임 클래스와 같은 요소에 있어
+                큰 글자에서도 줄바꿈이 없다. 낭독은 폭과 무관하게 전체 문장 한 번이다: 보이는 글은 `aria-hidden`, 전체 문장은
+                `sr-only` 한 곳(`title`에도 같은 문장). */}
+            <span className="sr-only" data-testid="channel-member-now-failed-sr">{formatMessage("timeline.memberPanel.nowFailed")}</span>
+            <span aria-hidden="true" className="min-w-0 truncate member-now-failed-short" data-testid="channel-member-now-failed-reason">{formatMessage("timeline.memberPanel.nowFailedShort")}</span>
+            <span aria-hidden="true" className="min-w-0 truncate member-now-failed-mid" data-testid="channel-member-now-failed-reason">{formatMessage("timeline.memberPanel.nowFailedMid")}</span>
+            <span aria-hidden="true" className="min-w-0 truncate member-now-failed-long" data-testid="channel-member-now-failed-reason">{formatMessage("timeline.memberPanel.nowFailed")}</span>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="max-w-full shrink-0"
+              onClick={now.retry}
+              data-testid="channel-member-now-retry"
+            >
+              <span className="min-w-0 truncate">{formatMessage("timeline.memberPanel.nowRetry")}</span>
             </Button>
           </p>
         )}
