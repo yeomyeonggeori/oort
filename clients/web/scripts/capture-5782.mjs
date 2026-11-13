@@ -15,6 +15,7 @@
 //   G. 게스트 시점: 화면·접근 이름 어디에도 이메일이 없고, 이메일 조각으로는 아무도 안 찾힌다.
 //   N. 좁은 폭(390)·200%(1440 창의 200% = 720 CSS px): 가로 넘침 0, 줄 높이 같음.
 //   Y. 갤러리 견본: ListRowSkeleton = ListRow 높이, 글자 크기 「크게」에서도 같다.
+//   D. 새 DM 창(같은 부품, 대화 상자 안이라 시트 채움 그릇): 줄 높이가 멤버 탭 줄과 같고, 그릇이 카드가 아니다.
 // =============================================================================
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
@@ -141,8 +142,6 @@ async function goDirectory(page) {
   await page.getByTestId("nav-directory").click();
   await page.getByTestId("directory-route").waitFor({ timeout: 10_000 });
 }
-
-const round = (n) => Math.round(n * 10) / 10;
 
 async function rowGeometry(page, selector) {
   return page.evaluate((sel) => [...document.querySelectorAll(sel)].map((el) => {
@@ -318,6 +317,33 @@ async function runStates(origin, scheme) {
   }
 }
 
+async function runNewDm(origin, scheme) {
+  const scene = `newdm-${scheme}`;
+  const { browser, context, page } = await open(origin, scheme, { width: 1440, height: 900 });
+  try {
+    await attempt(scene, "D.newdm", async () => {
+      await page.getByTestId("sidebar-section-dms-header").hover();
+      await page.getByTestId("new-dm").click();
+      await page.getByTestId("new-dm-dialog").waitFor({ timeout: 10_000 });
+      await page.getByTestId("new-dm-row").first().waitFor({ timeout: 10_000 });
+      await page.waitForTimeout(300);
+      const geo = await page.evaluate(() => ({
+        rows: [...document.querySelectorAll('[data-testid="new-dm-row"]')].map((el) => Math.round(el.getBoundingClientRect().height * 10) / 10),
+        surfaces: [...document.querySelectorAll('[data-testid="new-dm-dialog"] [data-list-surface]')].map((el) => el.getAttribute("data-list-surface")),
+        bandHeads: document.querySelectorAll('[data-testid="new-dm-dialog"] h2.border-b').length,
+      }));
+      check(scene, "D1 새 DM 창의 줄도 두 층 56(멤버 탭과 같은 줄, 나와 초대됨을 뺀 다섯)", geo.rows.length === 5 && geo.rows.every((h) => h === 56), geo.rows);
+      check(scene, "D2 대화 상자 안의 묶음은 시트 채움 그릇이고 선 띠 머리글은 없다", geo.surfaces.length === 2 && geo.surfaces.every((x) => x === "sheet") && geo.bandHeads === 0, geo);
+      await page.mouse.move(0, 0);
+      await page.waitForTimeout(150);
+      await page.screenshot({ path: resolve(OUT_DIR, `newdm-${scheme}.png`) });
+    });
+  } finally {
+    await context.close();
+    await browser.close();
+  }
+}
+
 async function runGallery(origin, scheme) {
   const scene = `gallery-${scheme}`;
   const browser = await chromium.launch();
@@ -359,6 +385,7 @@ async function main() {
       await runMember(preview.origin, scheme);
       await runGuest(preview.origin, scheme);
       await runStates(preview.origin, scheme);
+      await runNewDm(preview.origin, scheme);
       await runGallery(preview.origin, scheme);
     }
   } finally {

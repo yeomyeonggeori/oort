@@ -37,10 +37,19 @@ const SUBTITLE_CLASS = "block min-w-0 truncate text-meta text-ink-muted";
 /** 비어 있는 자리의 중립 막대(다른 스켈레톤과 같은 면). */
 const BAR_CLASS = "rounded-sm bg-surface-hover";
 
+/**
+ * 묶음 그릇은 **서는 바탕이 정한다**(README §2.14 ②).
+ *
+ *   pane   본문 판 위(멤버 탭·설정): `Card` 하나(반경 20 · rest 그림자 · 고대비 `card-edge`).
+ *   sheet  떠 있는 표면(대화 상자) 안: 카드 그림자를 겹치지 않고 `bg-sheet` 채움 + `rounded-lg`(프로필 #5780 의 묶음과 같다).
+ */
+export type ListGroupSurface = "pane" | "sheet";
+
 export function ListGroup({
   label,
   count,
   children,
+  surface = "pane",
   testId,
   className,
 }: {
@@ -50,10 +59,12 @@ export function ListGroup({
   count?: ReactNode;
   /** `ListRow`·`ListRowSkeleton` 들. */
   children: ReactNode;
+  surface?: ListGroupSurface;
   testId?: string;
   className?: string;
 }) {
   const headingId = useId();
+  const rows = <ul className="flex flex-col divide-y divide-line">{children}</ul>;
   return (
     <section
       aria-labelledby={headingId}
@@ -71,11 +82,17 @@ export function ListGroup({
           </span>
         ) : null}
       </h2>
-      {/* 카드 하나가 묶음이다(「Card only when elevation means grouping」, SKILL §8). 줄은 카드 안의 평평한
+      {/* 그릇 하나가 묶음이다(「Card only when elevation means grouping」, SKILL §8). 줄은 그 안의 평평한
           띠이고, 가리킴은 채움뿐이다(README §2.6 「전폭은 폭이다」 — 스케일 눌림 없음). */}
-      <Card className="overflow-hidden">
-        <ul className="flex flex-col divide-y divide-line">{children}</ul>
-      </Card>
+      {surface === "pane" ? (
+        <Card className="overflow-hidden" data-list-surface="pane">
+          {rows}
+        </Card>
+      ) : (
+        <div className="overflow-hidden rounded-lg bg-sheet" data-list-surface="sheet">
+          {rows}
+        </div>
+      )}
     </section>
   );
 }
@@ -89,17 +106,19 @@ type ListRowProps = Omit<ButtonHTMLAttributes<HTMLButtonElement>, "title"> & {
   subtitle: ReactNode;
   /** 끝 칸: 역할 칩·생존 칩처럼 값이 아닌 표식. 이름보다 먼저 줄지 않는다. */
   trailing?: ReactNode;
+  /** 줄 단추 **아래**, 같은 `li` 안에 서는 한 줄(그 줄에만 딸린 실패 문장 등). 있을 때만 줄이 그만큼 자란다. */
+  after?: ReactNode;
   /** 바깥 `li` 의 시험 id(줄 단추에는 `data-testid` 를 그대로 넘긴다). */
   itemTestId?: string;
 };
 
 export const ListRow = forwardRef<HTMLButtonElement, ListRowProps>(
   function ListRow(
-    { leading, title, subtitle, trailing, itemTestId, className, type, ...rest },
+    { leading, title, subtitle, trailing, after, itemTestId, className, type, ...rest },
     ref
   ) {
     return (
-      <li className="flex min-w-0" data-testid={itemTestId}>
+      <li className="flex min-w-0 flex-col" data-testid={itemTestId}>
         <button
           ref={ref}
           type={type ?? "button"}
@@ -119,6 +138,7 @@ export const ListRow = forwardRef<HTMLButtonElement, ListRowProps>(
             <span className="flex shrink-0 items-center gap-2">{trailing}</span>
           ) : null}
         </button>
+        {after}
       </li>
     );
   }
@@ -130,7 +150,7 @@ export const ListRow = forwardRef<HTMLButtonElement, ListRowProps>(
  */
 export function ListRowSkeleton({ testId }: { testId?: string }) {
   return (
-    <li className="flex min-w-0" aria-hidden="true" data-testid={testId}>
+    <li className="flex min-w-0 flex-col" aria-hidden="true" data-testid={testId}>
       <span className={ROW_CLASS}>
         <span className={cn(BAR_CLASS, "block size-8 shrink-0 rounded-full")} />
         <span className={STACK_CLASS}>

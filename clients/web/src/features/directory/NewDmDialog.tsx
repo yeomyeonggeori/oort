@@ -20,8 +20,10 @@ import {
 } from "@/design/ui/dialog";
 import { Button } from "@/design/ui/button";
 import { Input } from "@/design/ui/input";
+import { ListGroup, ListRow, ListRowSkeleton } from "@/design/ui/list-row";
 import { cn } from "@/design/lib/cn";
-import { EmptyInvite, InlineBanner, Skeleton } from "@/features/common/States";
+import { useFormatMessage } from "@/i18n/useFormatMessage";
+import { EmptyInvite, InlineBanner } from "@/features/common/States";
 import { LoadFailureBox } from "@/features/common/LoadFailureBox";
 import { loadCauseOf } from "@/features/common/loadFailure";
 import { CONNECTION_KEYS } from "@momo/core/features/connection/copyKeys";
@@ -48,6 +50,10 @@ import { BlockedReason } from "@/features/common/BlockedReason";
 // 말해 준다. 입력에서 ↓ 로 목록에 들어가고, 목록에서 ↑↓ 로 오가며, Enter 가 고른다.
 // =============================================================================
 
+/**
+ * 받는 사람 한 줄 (#5782: 공용 목록 줄로). 제목은 이름, 보조 줄은 「@핸들 · 접속 낱말」, 끝 칸은 이미 대화
+ * 중이면 「대화 중」. 이 줄에서 대화를 열다 실패하면 그 문장이 줄 바로 아래(같은 `li`)에 선다.
+ */
 function PickRow({
   member,
   hasDm,
@@ -66,58 +72,56 @@ function PickRow({
   const isAgent = member.kind === "agent";
   const dot = peerDot(member, Date.now());
   return (
-    <li className="flex flex-col border-b border-line last:border-b-0">
-      <button
-        type="button"
-        data-testid="new-dm-row"
-        data-new-dm-row=""
-        data-member-id={member.id}
-        data-member-kind={member.kind}
-        data-has-dm={hasDm ? "" : undefined}
-        aria-busy={pending || undefined}
-        disabled={disabled}
-        aria-label={`${member.displayName} @${member.handle}${
-          dot ? `, ${dot.label}` : ""
-        }${hasDm ? ", 대화 이어가기" : ", 새 대화 시작"}`}
-        onClick={() => onPick(member)}
-        className="flex w-full items-center gap-3 px-4 py-2 text-left hover:bg-surface-hover active:bg-surface-pressed focus-visible:focus-ring disabled:opacity-60"
-      >
-        <Avatar member={member} />
-        <span className="flex min-w-0 flex-1 items-baseline gap-2">
-          <span
-            className={cn(
-              "min-w-0 truncate text-body font-semibold",
-              isAgent ? "text-agent" : "text-ink"
-            )}
-          >
-            {member.displayName}
-          </span>
-          <span className="min-w-0 truncate text-meta text-ink-muted">@{member.handle}</span>
+    <ListRow
+      data-testid="new-dm-row"
+      data-new-dm-row=""
+      data-member-id={member.id}
+      data-member-kind={member.kind}
+      data-has-dm={hasDm ? "" : undefined}
+      aria-busy={pending || undefined}
+      disabled={disabled}
+      aria-label={`${member.displayName} @${member.handle}${
+        dot ? `, ${dot.label}` : ""
+      }${hasDm ? ", 대화 이어가기" : ", 새 대화 시작"}`}
+      onClick={() => onPick(member)}
+      className="disabled:opacity-60"
+      leading={<Avatar member={member} />}
+      title={
+        <span
+          className={cn(
+            "min-w-0 truncate font-semibold",
+            isAgent ? "text-agent" : "text-ink"
+          )}
+        >
+          {member.displayName}
         </span>
-        {dot ? (
-          <span className="shrink-0 text-meta text-ink-muted">{dot.label}</span>
-        ) : null}
-        {hasDm ? (
+      }
+      subtitle={dot ? `@${member.handle} · ${dot.label}` : `@${member.handle}`}
+      trailing={
+        hasDm ? (
           <span
-            className="inline-flex shrink-0 items-center gap-1 text-meta text-ink-muted"
+            className="inline-flex items-center gap-1 text-meta text-ink-muted"
             data-testid="new-dm-has-dm"
           >
             <MessageSquare className="size-4" aria-hidden="true" />
             대화 중
           </span>
-        ) : null}
-      </button>
-      {failure ? (
-        <p className="px-4 pb-2 text-meta text-danger" role="alert" data-testid="new-dm-error">
-          {failure}
-        </p>
-      ) : null}
-    </li>
+        ) : null
+      }
+      after={
+        failure ? (
+          <p className="px-4 pb-2 text-meta text-danger" role="alert" data-testid="new-dm-error">
+            {failure}
+          </p>
+        ) : null
+      }
+    />
   );
 }
 
 function NewDmPanel({ onOpenChange }: { onOpenChange: (open: boolean) => void }) {
   const { session, workspaceId } = useSession();
+  const t = useFormatMessage();
   const roster = useDirectory(workspaceId);
   const channels = useChannels(workspaceId);
   const navigate = useNavigate();
@@ -185,34 +189,39 @@ function NewDmPanel({ onOpenChange }: { onOpenChange: (open: boolean) => void })
     else list[at - 1]?.focus();
   }
 
+  // 묶음은 공용 머리글 + 그릇(#5782). 대화 상자 안이라 카드가 아니라 시트 채움 그릇이다(README §2.14 ②).
   const section = (title: string, testId: string, members: RosterMember[]) =>
     members.length === 0 ? null : (
-      <section className="flex flex-col" data-testid={testId}>
-        <h2 className="border-b border-line px-4 py-1 text-meta font-medium text-ink-muted">
-          {title}
-        </h2>
-        <ul className="flex flex-col">
-          {members.map((member) => (
-            <PickRow
-              key={member.id}
-              member={member}
-              hasDm={
-                existingDmChannelId(channels.groups.dms, session.member.id, member.id) !==
-                null
-              }
-              pending={dm.pendingMemberId === member.id}
-              failure={dm.error?.memberId === member.id ? dm.error.message : null}
-              disabled={busy}
-              onPick={(m) => void pick(m)}
-            />
-          ))}
-        </ul>
-      </section>
+      <ListGroup label={title} count={members.length} surface="sheet" testId={testId}>
+        {members.map((member) => (
+          <PickRow
+            key={member.id}
+            member={member}
+            hasDm={
+              existingDmChannelId(channels.groups.dms, session.member.id, member.id) !==
+              null
+            }
+            pending={dm.pendingMemberId === member.id}
+            failure={dm.error?.memberId === member.id ? dm.error.message : null}
+            disabled={busy}
+            onPick={(m) => void pick(m)}
+          />
+        ))}
+      </ListGroup>
     );
 
   let body: ReactNode;
   if (roster.isPending && candidates.length === 0) {
-    body = <Skeleton ready={false} rows={6} className="p-4" />;
+    // 도착할 줄과 같은 상자(아바타 32 · 두 줄 상자)라 명부가 와도 목록이 움직이지 않는다(#5782).
+    body = (
+      <div aria-hidden="true" data-testid="new-dm-skeleton">
+        <ListGroup label={<span className="inline-block h-2 w-8 rounded-sm bg-surface-hover align-middle" />} surface="sheet">
+          {Array.from({ length: 6 }, (_, i) => (
+            <ListRowSkeleton key={i} testId="skeleton-row" />
+          ))}
+        </ListGroup>
+      </div>
+    );
   } else if (roster.error !== null && candidates.length === 0) {
     body = (
       <LoadFailureBox
@@ -257,8 +266,8 @@ function NewDmPanel({ onOpenChange }: { onOpenChange: (open: boolean) => void })
   } else {
     body = (
       <>
-        {section("사람", "new-dm-people", groups.people)}
-        {section("에이전트", "new-dm-agents", groups.agents)}
+        {section(t("memberList.group.people"), "new-dm-people", groups.people)}
+        {section(t("memberList.group.agents"), "new-dm-agents", groups.agents)}
       </>
     );
   }
@@ -312,7 +321,7 @@ function NewDmPanel({ onOpenChange }: { onOpenChange: (open: boolean) => void })
 
       <div
         ref={listRef}
-        className="min-h-0 flex-1 overflow-y-auto"
+        className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-4 py-3"
         data-testid="new-dm-list"
         onKeyDown={onListKeyDown}
       >

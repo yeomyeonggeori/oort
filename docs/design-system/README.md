@@ -582,7 +582,7 @@ owner 물음 「우리 저 부분 디자인 시스템에서 컴포넌트로 구�
 **② 묶음 머리글 — `ListGroup`** (같은 파일)
 
 - 머리글: `h2`, `text-meta font-semibold text-ink-muted`, 줄의 글자 열과 같은 `px-4`. 곁의 수는 `font-normal` + `data-numeric`. 문장형 평문이다 — 대문자 라벨·번호 머리 금지(스킬 §8). 옛 멤버 탭의 **선으로 가른 머리글 띠**(`border-b … py-1`)는 쓰지 않는다.
-- 그릇은 **서는 바탕이 정한다**. 본문 판 위(멤버 탭·설정)는 `Card`(반경 20 · rest 그림자 · 고대비 `card-edge`) 하나에 줄 사이 `--line` 한 줄(`divide-y divide-line`) — 설정의 `SettingsSection` 과 같은 문법이다(「Card only when elevation means grouping」). 떠 있는 표면(대화 상자) 안에서는 카드 그림자를 겹치지 않고 `bg-sheet` 채움 + `rounded-lg` 묶음이 같은 일을 한다(프로필 ③).
+- 그릇은 **서는 바탕이 정한다**. 본문 판 위(멤버 탭·설정)는 `Card`(반경 20 · rest 그림자 · 고대비 `card-edge`) 하나에 줄 사이 `--line` 한 줄(`divide-y divide-line`) — 설정의 `SettingsSection` 과 같은 문법이다(「Card only when elevation means grouping」). 떠 있는 표면(대화 상자) 안에서는 카드 그림자를 겹치지 않고 `bg-sheet` 채움 + `rounded-lg` 묶음이 같은 일을 한다 — `ListGroup surface="sheet"`(새 DM 창), 프로필 ③의 묶음도 같은 모양이다. 대화 상자 안 목록은 그릇 바깥에 `px-4` 를 두고 묶음 사이 16(`gap-4`)이다.
 - 묶음 사이 24(`gap-6`), 머리글과 그릇 사이 8(`gap-2`).
 - `list-row.tsx` 는 §3.3 분류의 **컨테이너 프리미티브**다: 줄 사이 선은 나누는 선이고, 줄 단추는 경계가 아니라 가리킴 채움으로 자기를 말한다(`designSystem.test.ts` · `controlBorders.test.ts` 의 닫힌 표).
 
@@ -608,9 +608,9 @@ owner 물음 「우리 저 부분 디자인 시스템에서 컴포넌트로 구�
 - 초점은 열리면 **취소**로 들어간다. `tone="destructive"` 면 확정이 위험 채움이다(§3.1 파괴 > 주 > 보조). 왕복 중에는 확정이 `aria-busy` + 진행 낱말이고 다시 눌러도 한 번이다. 결과는 토스트가 아니라 그 자리에서 말한다.
 - 아직 손으로 조립한 확인 네 곳(`TeamUnlinkDialog` · `HarnessUnlinkDialog` · `GithubSubscribeForm` · `PersonalKeyRevokeDialog`)은 후속에서 이 부품으로 옮긴다.
 
-**기계가 재는 것.** `designSystem.test.ts`·`controlBorders.test.ts`(`list-row.tsx` 가 컨테이너 분류에 든다) · `gallery.test.tsx`(`ListGroup`·`ListRow`·`ListRowSkeleton` 견본이 면적 있게 렌더된다, 갤러리 「ListGroup · ListRow · ListRowSkeleton」) · `MemberRow.test.tsx`(두 층 — 사용자 상태 글이 셋째 줄로 서지 않음 · 「@핸들 · 이메일」 · 게스트·역할 모름에서 가림 · 에이전트 관리 줄 · 역할 칩 · 「나」) · `memberListModel.test.ts`(이메일 보임과 찾기 — 게스트가 주소를 쳐도 0 줄) · 렌더 실측 `clients/web/scripts/capture-5782.mjs`(스켈레톤 줄 = 실제 줄 56 · 「크게」 58.7, 목록 도착 전후 첫 줄 위 끝 같음, 모든 줄 같은 높이, 390 폭·200% 가로 넘침 0, 게스트 시점 DOM 에 이메일 0). 프로필·확인 창의 시험은 #5780 의 `MemberProfileDialog.test.tsx` · `ConfirmDialog.test.tsx` 다.
+**기계가 재는 것.** `designSystem.test.ts`·`controlBorders.test.ts`(`list-row.tsx` 가 컨테이너 분류에 든다) · `gallery.test.tsx`(`ListGroup`·`ListRow`·`ListRowSkeleton` 견본이 면적 있게 렌더된다, 갤러리 「ListGroup · ListRow · ListRowSkeleton」) · `MemberRow.test.tsx`(두 층 — 사용자 상태 글이 셋째 줄로 서지 않음 · 「@핸들 · 이메일」 · 게스트·역할 모름에서 가림 · 에이전트 관리 줄 · 역할 칩 · 「나」) · `memberListModel.test.ts`(이메일 보임과 찾기 — 게스트가 주소를 쳐도 0 줄) · 렌더 실측 `clients/web/scripts/capture-5782.mjs`(스켈레톤 줄 = 실제 줄 56 · 「크게」 58.7, 목록 도착 전후 첫 줄 위 끝 같음, 모든 줄 같은 높이, 390 폭·200% 가로 넘침 0, 게스트 시점 DOM 에 이메일 0, 새 DM 창의 줄도 56 이고 그릇이 시트 채움). 프로필·확인 창의 시험은 #5780 의 `MemberProfileDialog.test.tsx` · `ConfirmDialog.test.tsx` 다.
 
-**재지 않는 것.** 다른 사람 목록이 이 부품을 쓰는지 — 채널 멤버 패널 · 새 DM 창 · 채널 멤버 추가 창은 아직 손으로 쓴 줄과 선 띠 머리글이다(후속). 묶음 그릇을 바탕에 맞게 골랐는지(본문 판 위 카드 / 표면 안 시트 채움)는 사람과 design-review 가 본다(§5.3).
+**재지 않는 것.** 다른 사람 목록이 이 부품을 쓰는지 — 멤버 탭과 새 DM 창은 옮겼고, 채널 멤버 패널(`ChannelContextControls`) · 채널 멤버 추가 창(`AddChannelMemberDialog`)은 아직 손으로 쓴 줄과 선 띠 머리글이다(후속). 그것을 세는 기계는 없다. 묶음 그릇을 바탕에 맞게 골랐는지(본문 판 위 카드 / 표면 안 시트 채움)는 사람과 design-review 가 본다(§5.3).
 
 ### 2.10 좁은 웹 창에서 사이드바 열은 본문 칸에 바닥을 내준다 (#5093, #5048 D4)
 
