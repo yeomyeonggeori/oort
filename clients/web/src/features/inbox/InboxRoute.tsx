@@ -143,11 +143,13 @@ const EMPTY_WITH_LOCAL_WAITING = {
 
 // 목록 칸 폭 22rem(352). 아래 목록 칸의 `w-[22rem]`과 같은 값이다.
 const INBOX_LIST_PX = 352;
-// 상세가 두 칸일 때 지켜야 하는 폭 = `--spacing-pane-sm`(192, 「그 안의 내용이 아직 목록으로 읽히는 폭」).
-// tokens.css의 「부차 표면이 양보하는 자기 바닥」 문법을 그대로 쓴다: 이 자리의 폭이 목록 + 이 값에 못 미치면
-// 폰 폭과 같은 한 칸(목록 ↔ 상세)이 된다. 값은 화면 폭이 아니라 **인박스 자리의 폭**에 건다 — 같은 창 폭도 사이드바를
-// 펴면 자리가 324 줄어 상세가 36px로 눌렸다(#5754). 900×600 · 사이드바 펼침(자리 576, 상세 224)은 두 칸 그대로다.
-const INBOX_DETAIL_FLOOR_PX = 192;
+// 상세가 두 칸일 때 지켜야 하는 폭 = 256(16rem). 스레드 항목의 입력 카드가 도구 줄(첨부·멘션·이모지·보내기·「예약해서
+// 보내기」)을 카드 안에 담고, 메시지 이름이 한 줄로 서는 가장 좁은 칸이 252쯤이라(검수 잰 값) 리듬 배수(8)로 올렸다.
+// 이 폭에 맞는 기존 토큰이 없다: `--spacing-pane-sm`(192)은 「목록으로 읽히는 폭」이고 입력 카드는 그보다 넓다.
+// 이 자리의 폭이 목록 + 이 값에 못 미치면 폰 폭과 같은 한 칸(목록 ↔ 상세)이 된다. 값은 화면 폭이 아니라 **인박스
+// 자리의 폭**에 건다 — 같은 창 폭도 사이드바를 펴면 자리가 332(사이드바 324 + 오른쪽 인셋 8) 줄어 상세가 36px로
+// 눌렸다(#5754). 문턱은 자리 608 = 사이드바를 편 창 940이다(창 900×600 · 사이드바 펼침은 한 칸).
+const INBOX_DETAIL_FLOOR_PX = 256;
 const INBOX_SPLIT_MIN_PX = INBOX_LIST_PX + INBOX_DETAIL_FLOOR_PX;
 
 /** 이 상자의 폭이 두 칸에 모자란가. 폭을 모르면(0 · ResizeObserver 없음) 모자라다고 하지 않는다. */
@@ -304,8 +306,14 @@ export function InboxRoute() {
     (row ?? pane)?.focus();
   }, [approvalGone, selected, shown]);
 
+  // 한 칸에서 열었다 돌아오면 열었던 줄에 초점을 주고 목록 스크롤을 되돌린다(목록 칸이 떼였다 다시 붙어 맨 위로 갔다).
+  const openedRef = useRef<{ key: string; scrollTop: number } | null>(null);
   const select = useCallback(
     (entry: MailboxEntry) => {
+      openedRef.current = {
+        key: entry.key,
+        scrollTop: listPaneRef.current?.scrollTop ?? 0,
+      };
       setReadError(null);
       setSelected(entry);
       // 열어서 읽는 것이 읽음이다. 처리할 일은 결정이 닫는다.
@@ -391,6 +399,21 @@ export function InboxRoute() {
 
   const showDetail = active !== null && filter !== "reminders";
   const listHidden = isMobile && showDetail;
+  const wasListHidden = useRef(false);
+  useLayoutEffect(() => {
+    const returned = wasListHidden.current && !listHidden;
+    wasListHidden.current = listHidden;
+    const opened = openedRef.current;
+    const pane = listPaneRef.current;
+    if (!returned || opened === null || pane === null) return;
+    pane.scrollTop = opened.scrollTop;
+    // 칸 수만 바뀐 경우(사이드바 접기·펴기, 상세는 그대로)에는 초점을 건드리지 않는다.
+    if (showDetail) return;
+    const row = Array.from(
+      pane.querySelectorAll<HTMLElement>("[data-mailbox-row]")
+    ).find((element) => element.getAttribute("data-entry-key") === opened.key);
+    row?.focus({ preventScroll: true });
+  }, [listHidden, showDetail]);
 
   // 로딩과 오류는 **이 탭에 보일 줄**이 없을 때만 말한다. 전체 항목 수(`entries`)로 가르면 투영에 줄이
   // 있는 순간 「처리할 일」 탭이 원장의 실패·로딩을 가리고 「지금 처리할 일이 없어요」라고 말한다 —

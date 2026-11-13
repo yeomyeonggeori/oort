@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // =============================================================================
-// #5754 인박스 한 칸 ↔ 두 칸: 기준은 화면 폭이 아니라 인박스 자리의 폭(목록 352 + 상세 바닥 192 = 544).
+// #5754 인박스 한 칸 ↔ 두 칸: 기준은 화면 폭이 아니라 인박스 자리의 폭(목록 352 + 상세 바닥 256 = 608).
 // 720×480 · 사이드바 펼침(자리 388)에서 항목을 열면 한 칸(상세만)이고 「보내기」가 화면 안이며, 900×600 · 1024 · 1280 · 1440은
 // 두 칸 그대로, 390은 한 칸 그대로다. 사이드바를 접고 펴는 동안 열어 둔 항목이 유지된다. Chromium · WebKit 둘 다 잰다.
 //
@@ -17,8 +17,8 @@ import { startGuardedPreview } from "../gates/preview-guard.mjs";
 import { advanceToAccount } from "../e2e/advanceOnboarding.mjs";
 
 const WEB_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const OUT_DIR = process.env.OUT_DIR ? resolve(process.env.OUT_DIR) : resolve(WEB_ROOT, "artifacts/inbox-source");
-const PORT = Number(process.env.CAPTURE_PORT || 26701);
+const OUT_DIR = process.env.OUT_DIR ? resolve(process.env.OUT_DIR) : resolve(WEB_ROOT, "artifacts/inbox-5754");
+const PORT = Number(process.env.CAPTURE_PORT || 27581);
 const NOW = Date.now();
 const MIN = 60_000;
 
@@ -226,54 +226,116 @@ const box = (page, id) =>
 const present = (page, id) => page.evaluate((testId) => document.querySelector(`[data-testid='${testId}']`) !== null, id);
 const DM = "[data-testid='mailbox-row'][data-entry-key='inbox:00000000-0000-7000-8000-000000000902']";
 
+const ROW = ["task", "thread", "dm"]; // 목록 위에서부터 처리할 일 · 스레드 답글 · DM
+const FLOOR = 256;
+const SPLIT = 352 + FLOOR; // 자리 폭 문턱
+
+// 상세 안 모든 컨트롤(단추 · 입력 · 링크)의 가로 상자가 화면과 상세 칸 안인가.
+const controlsInside = (page, W) =>
+  page.evaluate((viewW) => {
+    const detail = document.querySelector("[data-testid='inbox-detail']");
+    if (!detail) return { ok: false, why: "no detail", bad: [] };
+    const d = detail.getBoundingClientRect();
+    const bad = [];
+    let count = 0;
+    for (const el of detail.querySelectorAll("button, input, textarea, a[href], [role='button']")) {
+      const r = el.getBoundingClientRect();
+      const cs = getComputedStyle(el);
+      if (r.width === 0 || r.height === 0 || cs.visibility === "hidden" || cs.display === "none") continue;
+      count += 1;
+      if (r.x < -0.5 || r.right > viewW + 0.5 || r.right > d.right + 0.5 || r.x < d.x - 0.5) {
+        bad.push(`${el.getAttribute("data-testid") || el.getAttribute("aria-label") || el.tagName} ${r.x.toFixed(0)}~${r.right.toFixed(0)}`);
+      }
+    }
+    return { ok: bad.length === 0 && count > 0, count, bad };
+  }, W);
+
 async function scene(browser, engine, origin, opts) {
-  const tag = `${engine}-${opts.name}-${opts.scheme}`;
+  const tag = `${engine}-${opts.name}${opts.collapsed ? "-folded" : ""}-${opts.scheme}`;
   const { context, page } = await open(browser, origin, opts);
-  const W = opts.width;
-  const snap = (n) => page.screenshot({ path: resolve(OUT_DIR, `${n}-${tag}.png`) });
-  const listBefore = await box(page, "inbox-list-pane");
-  await snap("1-list");
-  if (opts.single) {
-    check(`${tag} 한 칸: 목록이 자리를 다 쓴다 (${listBefore.width.toFixed(0)}px)`, listBefore.width > 352 || W <= 400, JSON.stringify(listBefore));
-  } else {
-    check(`${tag} 두 칸: 목록 352px 그대로`, Math.abs(listBefore.width - 352) <= 1, JSON.stringify(listBefore));
-    check(`${tag} 두 칸: 빈 상세 안내가 서 있다`, await present(page, "inbox-detail-empty"));
-  }
-  await page.locator(DM).click();
-  await page.getByTestId("inbox-detail").waitFor();
-  await page.waitForTimeout(300);
-  const detail = await box(page, "inbox-detail");
-  const send = await box(page, "inbox-reply-send");
-  const input = await box(page, "inbox-reply-input");
-  const back = await present(page, "inbox-detail-back");
-  const listShown = await present(page, "inbox-list-pane");
-  await snap("2-open");
-  check(`${tag} 「보내기」 상자가 화면 안`, send !== null && send.x >= 0 && send.right <= W && send.bottom <= opts.height, JSON.stringify(send));
-  check(`${tag} 답장 칸이 화면 안`, input !== null && input.x >= 0 && input.right <= W, JSON.stringify(input));
-  check(`${tag} 가로 넘침 0`, (await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)) === 0);
-  if (opts.single) {
-    check(`${tag} 한 칸: 목록 대신 상세, 「목록으로」 있음`, !listShown && back);
-    check(`${tag} 한 칸: 상세 폭 ${detail.width.toFixed(0)} >= 192`, detail.width >= 192, JSON.stringify(detail));
-    // 사이드바 접고 펴기: 열어 둔 항목 유지
-    if (opts.toggles) {
+  try {
+    const W = opts.width;
+    const snap = (n) => page.screenshot({ path: resolve(OUT_DIR, `${n}-${tag}.png`) });
+    if (opts.collapsed) {
+      await page.locator("body").press("ControlOrMeta+b");
+      await page.waitForTimeout(500);
+    }
+    const route = await box(page, "inbox-route");
+    // 기대: 사이드바 펼침이면 자리 = 창 − 332. 칸 수는 자리 폭이 문턱(608)에 닿는가로만 정해진다.
+    const single = route.width < SPLIT;
+    if (opts.expectSingle !== undefined) {
+      check(`${tag} 자리 ${route.width.toFixed(0)}: ${opts.expectSingle ? "한 칸" : "두 칸"}이어야 한다`, single === opts.expectSingle, `single=${single}`);
+    }
+    const listBox = await box(page, "inbox-list-pane");
+    await snap("1-list");
+    if (single) {
+      check(`${tag} 한 칸: 빈 상세 안내 없음`, !(await present(page, "inbox-detail-empty")));
+    } else {
+      check(`${tag} 두 칸: 목록 352px 그대로 (${listBox.width.toFixed(0)})`, Math.abs(listBox.width - 352) <= 1, JSON.stringify(listBox));
+      check(`${tag} 두 칸: 빈 상세 안내가 서 있다`, await present(page, "inbox-detail-empty"));
+    }
+    check(`${tag} 가로 넘침 0`, (await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)) === 0);
+
+    for (let i = 0; i < ROW.length; i += 1) {
+      const kind = ROW[i];
+      const t = `${tag} ${kind}`;
+      if (!(await present(page, "inbox-list-pane"))) {
+        await page.getByTestId("inbox-detail-back").click();
+        await page.getByTestId("inbox-list-pane").waitFor();
+      }
+      await page.locator("[data-testid='mailbox-row']").nth(i).click();
+      await page.getByTestId("inbox-detail").waitFor();
+      await page.waitForTimeout(250);
+      const detail = await box(page, "inbox-detail");
+      if (i === 1) await snap("2-open");
+      const inside = await controlsInside(page, W);
+      check(`${t} 상세 ${detail.width.toFixed(0)}px, 모든 컨트롤(${inside.count}) ⊂ 화면·칸`, inside.ok, `${inside.why ?? ""} ${inside.bad.join(" | ")}`);
+      if (single) {
+        check(`${t} 한 칸: 목록 대신 상세, 「목록으로」 있음`, !(await present(page, "inbox-list-pane")) && (await present(page, "inbox-detail-back")));
+      } else {
+        check(`${t} 두 칸: 상세 ${detail.width.toFixed(0)} >= ${FLOOR}, 「목록으로」 없음`, detail.width >= FLOOR - 0.5 && !(await present(page, "inbox-detail-back")), JSON.stringify(detail));
+      }
+    }
+
+    if (single && opts.focusBack) {
+      // 돌아오면 열었던 줄에 초점, 목록 스크롤 유지.
+      if (!(await present(page, "inbox-list-pane"))) {
+        await page.getByTestId("inbox-detail-back").click();
+        await page.getByTestId("inbox-list-pane").waitFor();
+      }
+      await page.evaluate(() => { document.querySelector("[data-testid='inbox-list-pane']").scrollTop = 120; });
+      const before = await page.evaluate(() => document.querySelector("[data-testid='inbox-list-pane']").scrollTop);
+      const key = await page.locator("[data-testid='mailbox-row']").nth(2).getAttribute("data-entry-key");
+      await page.locator("[data-testid='mailbox-row']").nth(2).click();
+      await page.getByTestId("inbox-detail").waitFor();
+      await page.getByTestId("inbox-detail-back").click();
+      await page.getByTestId("inbox-list-pane").waitFor();
+      await page.waitForTimeout(200);
+      const after = await page.evaluate(() => ({
+        key: document.activeElement?.getAttribute("data-entry-key") ?? null,
+        top: document.querySelector("[data-testid='inbox-list-pane']").scrollTop,
+      }));
+      check(`${tag} 돌아오면 열었던 줄에 초점 (${after.key === key})`, after.key === key, JSON.stringify(after));
+      check(`${tag} 돌아오면 목록 스크롤 유지 (${before} → ${after.top})`, before === 0 || Math.abs(after.top - before) <= 1, JSON.stringify(after));
+    }
+    if (single && opts.toggles) {
+      await page.locator("[data-testid='mailbox-row']").nth(2).click();
+      await page.getByTestId("inbox-detail").waitFor();
       await page.locator("[data-testid='inbox-detail']").focus();
       await page.keyboard.press("ControlOrMeta+b");
       await page.waitForTimeout(500);
       const wide = await box(page, "inbox-detail");
       await snap("3-collapsed");
-      check(`${tag} 접으면 두 칸(목록 + 상세), 항목 유지 (상세 ${wide?.width.toFixed(0)})`, (await present(page, "inbox-list-pane")) && wide !== null && wide.width >= 192 && !(await present(page, "inbox-detail-back")), JSON.stringify(wide));
+      check(`${tag} 접으면 두 칸 + 같은 항목 (상세 ${wide?.width.toFixed(0)})`, (await present(page, "inbox-list-pane")) && wide !== null && wide.width >= FLOOR - 0.5 && !(await present(page, "inbox-detail-back")), JSON.stringify(wide));
       await page.keyboard.press("ControlOrMeta+b");
       await page.waitForTimeout(500);
-      const again = await box(page, "inbox-detail");
-      check(`${tag} 다시 펴면 한 칸, 같은 항목 유지`, again !== null && !(await present(page, "inbox-list-pane")) && (await page.getByTestId("inbox-detail").getAttribute("data-kind")) === "dm", JSON.stringify(again));
+      check(`${tag} 다시 펴면 한 칸 + 같은 항목`, !(await present(page, "inbox-list-pane")) && (await page.getByTestId("inbox-detail").getAttribute("data-kind")) === "dm");
     }
-    await page.getByTestId("inbox-detail-back").click();
-    await page.getByTestId("inbox-list-pane").waitFor();
-    check(`${tag} 「목록으로」 뒤 목록이 돌아오고 상세는 닫힘`, (await present(page, "inbox-list-pane")) && !(await present(page, "inbox-detail")));
-  } else {
-    check(`${tag} 두 칸: 목록과 상세가 함께, 「목록으로」 없음 (상세 ${detail.width.toFixed(0)})`, listShown && !back && detail.width >= 192, JSON.stringify(detail));
+  } catch (e) {
+    check(`${tag} 장면이 끝까지 돈다`, false, String(e).split("\n")[0]);
+  } finally {
+    await context.close();
   }
-  await context.close();
 }
 
 async function main() {
@@ -289,12 +351,21 @@ async function main() {
       const browser = await type.launch();
       try {
         for (const scheme of schemes) {
-          await scene(browser, engine, preview.origin, { name: "720", width: 720, height: 480, scheme, single: true, toggles: true });
-          await scene(browser, engine, preview.origin, { name: "900", width: 900, height: 600, scheme, single: false });
-          await scene(browser, engine, preview.origin, { name: "1024", width: 1024, height: 700, scheme, single: false });
-          await scene(browser, engine, preview.origin, { name: "1280", width: 1280, height: 800, scheme, single: false });
-          await scene(browser, engine, preview.origin, { name: "1440", width: 1440, height: 900, scheme, single: false });
-          await scene(browser, engine, preview.origin, { name: "390", width: 390, height: 780, scheme, single: true });
+          const S = (name, width, height, extra) => scene(browser, engine, preview.origin, { name, width, height, scheme, ...extra });
+          // 펼침: 자리 = 창 − 332, 문턱 자리 608 = 창 940. 939 = 한 칸의 끝, 940 = 두 칸의 시작.
+          await S("720", 720, 480, { expectSingle: true, toggles: true, focusBack: true });
+          await S("876", 876, 600, { expectSingle: true });
+          await S("889", 889, 600, { expectSingle: true });
+          await S("900", 900, 600, { expectSingle: true });
+          await S("939", 939, 700, { expectSingle: true });
+          await S("940", 940, 700, { expectSingle: false });
+          await S("1024", 1024, 700, { expectSingle: false });
+          await S("1280", 1280, 800, { expectSingle: false });
+          await S("1440", 1440, 900, { expectSingle: false });
+          await S("390", 390, 780, { expectSingle: true, focusBack: true });
+          // 접힘: 사이드바 열이 0이라 자리가 넓어져 두 칸이 된다.
+          await S("720", 720, 480, { collapsed: true, expectSingle: false });
+          await S("900", 900, 600, { collapsed: true, expectSingle: false });
         }
       } finally {
         await browser.close();
