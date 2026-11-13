@@ -3970,6 +3970,80 @@ export const catalog: MessageCatalog = {
       "value": "스레드"
     }
   ],
+  "mobile.addMember.addHint": [
+    {
+      "type": 0,
+      "value": "채널에 추가해요."
+    }
+  ],
+  "mobile.addMember.close": [
+    {
+      "type": 0,
+      "value": "멤버 추가 닫기"
+    }
+  ],
+  "mobile.addMember.emptyWorkspace": [
+    {
+      "type": 0,
+      "value": "이 워크스페이스에 다른 멤버가 아직 없어요."
+    }
+  ],
+  "mobile.addMember.kindAgent": [
+    {
+      "type": 0,
+      "value": "에이전트"
+    }
+  ],
+  "mobile.addMember.kindHuman": [
+    {
+      "type": 0,
+      "value": "사람"
+    }
+  ],
+  "mobile.addMember.loading": [
+    {
+      "type": 0,
+      "value": "멤버 목록을 불러오는 중이에요."
+    }
+  ],
+  "mobile.addMember.noMatch": [
+    {
+      "type": 0,
+      "value": "「"
+    },
+    {
+      "type": 1,
+      "value": "query"
+    },
+    {
+      "type": 0,
+      "value": "」에 맞는 멤버가 없어요."
+    }
+  ],
+  "mobile.addMember.present": [
+    {
+      "type": 0,
+      "value": "멤버"
+    }
+  ],
+  "mobile.addMember.searchLabel": [
+    {
+      "type": 0,
+      "value": "추가할 멤버 찾기"
+    }
+  ],
+  "mobile.addMember.searchPlaceholder": [
+    {
+      "type": 0,
+      "value": "이름이나 @핸들"
+    }
+  ],
+  "mobile.addMember.title": [
+    {
+      "type": 0,
+      "value": "멤버 추가"
+    }
+  ],
   "mobile.attachmentSave.failed": [
     {
       "type": 0,
@@ -8701,6 +8775,22 @@ export const catalog: MessageCatalog = {
       "value": "키를 확인하는 중이에요."
     }
   ],
+  "timeline.addMember.createdDescription": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " 채널을 만들었어요. 비공개 채널은 추가한 멤버에게만 보여요."
+    }
+  ],
+  "timeline.addMember.later": [
+    {
+      "type": 0,
+      "value": "나중에"
+    }
+  ],
   "timeline.agentRail.open": [
     {
       "type": 1,
@@ -8755,6 +8845,18 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "결정하지 않으면 에이전트가 다시 제안해야 해요."
+    }
+  ],
+  "timeline.createChannel.privateDetail": [
+    {
+      "type": 0,
+      "value": "추가된 멤버에게만 보여요."
+    }
+  ],
+  "timeline.createChannel.publicDetail": [
+    {
+      "type": 0,
+      "value": "소유자나 관리자가 추가한 멤버가 들어와요. 앞으로 워크스페이스에 들어오는 사람은 자동으로 들어와요."
     }
   ],
   "timeline.edited.atDate": [
