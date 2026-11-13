@@ -516,6 +516,8 @@ describe("역할 바꾸기 확인 단계 (수용 2)", () => {
     expect(changeWorkspaceMemberRole).not.toHaveBeenCalled();
     // 겹쳐 뜬 두 번째 대화상자가 아니다: 같은 창 안의 단계다(§3.4).
     expect(document.querySelectorAll('[role="dialog"], [role="alertdialog"]')).toHaveLength(1);
+    // 단계가 서 있는 동안 문은 그 단계의 취소다: 창의 X 는 비켜선다.
+    expect(byId("member-profile-close")).toBeNull();
     expect(stage.getAttribute("role")).toBe("group");
     expect(stage.textContent).toContain("김인턴 님의 역할을 바꿀까요?");
     expect(byId("member-profile-role-pair")?.textContent).toBe("멤버관리자");

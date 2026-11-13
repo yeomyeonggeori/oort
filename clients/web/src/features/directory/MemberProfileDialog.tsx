@@ -296,11 +296,14 @@ function RoleRow({
   busy,
   receipt,
   roleRowRef,
+  lockReason,
   onPick,
   t,
 }: {
   member: RosterMember;
   assignable: readonly RoleKey[];
+  /** 고르개 대신 글이 설 때 그 까닭(「못 고르는 선택지는 이유와 함께」). 라벨 아래 한 줄. */
+  lockReason: string | null;
   labels: RoleLabels;
   offline: boolean;
   busy: boolean;
@@ -313,9 +316,16 @@ function RoleRow({
   const current = member.role;
   return (
     <div ref={roleRowRef} className={cn(ROW_CLASS, "justify-between")} data-testid="member-profile-role-row">
-      <span id={labelId} className="shrink-0 text-body text-ink">
-        {t("directory.role.label")}
-      </span>
+      <div className="flex min-w-0 flex-col">
+        <span id={labelId} className="text-body text-ink">
+          {t("directory.role.label")}
+        </span>
+        {lockReason ? (
+          <span className="break-keep text-meta text-ink-muted" data-testid="member-profile-role-locked">
+            {lockReason}
+          </span>
+        ) : null}
+      </div>
       <div className="flex min-w-0 items-center justify-end gap-2">
         {/* 영수증 자리는 늘 서 있다: 낭독 영역이 미리 등록되고, 글이 와도 고르개가 밀리지 않는다(오른쪽 끝 정렬). */}
         <span
@@ -633,19 +643,19 @@ function ReadyProfile({
                   busy={roleChange.pending}
                   receipt={receipt.confirmed}
                   roleRowRef={roleRowRef}
+                  lockReason={
+                    lock === "ownerPeer"
+                      ? t("directory.role.lockedOwnerPeer")
+                      : lock === "adminCeiling"
+                        ? t("directory.role.lockedAdminCeiling")
+                        : null
+                  }
                   onPick={(role) => {
                     roleChange.clearError();
                     roleStage.open(role);
                   }}
                   t={t}
                 />
-              )}
-              {lock !== null && (
-                <p className="break-keep px-4 py-2 text-meta text-ink-muted" data-testid="member-profile-role-locked">
-                  {lock === "ownerPeer"
-                    ? t("directory.role.lockedOwnerPeer")
-                    : t("directory.role.lockedAdminCeiling")}
-                </p>
               )}
               {canIssueReset && (
                 <div className={cn(ROW_CLASS, "flex-wrap justify-between")} data-testid="member-profile-reset-row">
@@ -727,9 +737,9 @@ function MemberProfilePanel({
   const title = member
     ? t("directory.profile.title", { name: member.displayName })
     : t("directory.profile.titleUnknown");
-  // X 는 비밀번호 재설정 단계가 서 있지 않을 때만 선다: 링크가 선 뒤에는 「닫기」만 닫아야 하고(다시 볼 길이 없는 값),
-  // 확인 단계에서는 그 단계의 취소가 문이다. 역할 요청이 도는 동안에도 서지 않는다.
-  const showClose = reset.phase === PasswordResetPhase.Idle && !roleChange.pending;
+  // X 는 단계(비밀번호 재설정·역할 확인)가 서 있지 않을 때만 선다: 링크가 선 뒤에는 「닫기」만 닫아야 하고(다시 볼 길이
+  // 없는 값), 확인 단계에서는 그 단계의 취소가 문이다(Esc 도 단계만 내린다). 단계의 제목 줄이 X 자리와 겹치지도 않는다.
+  const showClose = reset.phase === PasswordResetPhase.Idle && pendingRole === null;
 
   return (
     <DialogContent
@@ -769,8 +779,9 @@ function MemberProfilePanel({
           <DialogDescription className="sr-only">{t("directory.profile.description")}</DialogDescription>
         </>
       ) : (
-        <div className="flex flex-col gap-1 p-4 pe-12">
-          <DialogTitle>{title}</DialogTitle>
+        <div className="flex flex-col gap-1 p-4">
+          {/* 오른쪽 위 X(12 + 34)를 비킨다: 칸 여백 16 + 32 = 48. */}
+          <DialogTitle className="pe-8">{title}</DialogTitle>
           <DialogDescription className="sr-only">{t("directory.profile.description")}</DialogDescription>
         </div>
       )}
