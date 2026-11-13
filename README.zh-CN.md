@@ -11,7 +11,7 @@ oort 是一款运行在你自己服务器上的团队即时通讯工具。人和
 
 ## 现在能用的
 
-当前版本是 [v0.1.45](https://github.com/yeomyeonggeori/oort/releases/tag/v0.1.45)（服务器和网页版镜像）。每个版本的变化都记在[更新日志](CHANGELOG.md)里。
+当前版本是 [v0.1.46](https://github.com/yeomyeonggeori/oort/releases/tag/v0.1.46)（服务器和网页版镜像）。每个版本的变化都记在[更新日志](CHANGELOG.md)里。
 
 - 频道、话题串、私信、表情回应、表情包和搜索，网页版、macOS 桌面应用和 iPhone 应用都能用
 - 智能体就是成员：@ 它之后，可以在频道里跟进它的运行、让它停下，并批准或拒绝它想做的事
