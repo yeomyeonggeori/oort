@@ -4872,6 +4872,86 @@ export const catalog: MessageCatalog = {
       "value": "Disconnected, reconnecting. The roster is as last received, and new conversations open once the connection is back."
     }
   ],
+  "mobile.addMember.addHint": [
+    {
+      "type": 0,
+      "value": "Adds them to the channel."
+    }
+  ],
+  "mobile.addMember.adding": [
+    {
+      "type": 0,
+      "value": "Adding"
+    }
+  ],
+  "mobile.addMember.close": [
+    {
+      "type": 0,
+      "value": "Close Add members"
+    }
+  ],
+  "mobile.addMember.emptyWorkspace": [
+    {
+      "type": 0,
+      "value": "No one else is in this workspace yet."
+    }
+  ],
+  "mobile.addMember.kindAgent": [
+    {
+      "type": 0,
+      "value": "Agent"
+    }
+  ],
+  "mobile.addMember.kindHuman": [
+    {
+      "type": 0,
+      "value": "Person"
+    }
+  ],
+  "mobile.addMember.loading": [
+    {
+      "type": 0,
+      "value": "Loading members."
+    }
+  ],
+  "mobile.addMember.noMatch": [
+    {
+      "type": 0,
+      "value": "No results for “"
+    },
+    {
+      "type": 1,
+      "value": "query"
+    },
+    {
+      "type": 0,
+      "value": "”."
+    }
+  ],
+  "mobile.addMember.present": [
+    {
+      "type": 0,
+      "value": "Member"
+    }
+  ],
+  "mobile.addMember.searchLabel": [
+    {
+      "type": 0,
+      "value": "Find members to add"
+    }
+  ],
+  "mobile.addMember.searchPlaceholder": [
+    {
+      "type": 0,
+      "value": "Name or @handle"
+    }
+  ],
+  "mobile.addMember.title": [
+    {
+      "type": 0,
+      "value": "Add members"
+    }
+  ],
   "mobile.attachmentSave.failed": [
     {
       "type": 0,
@@ -9761,6 +9841,40 @@ export const catalog: MessageCatalog = {
       "value": "Checking the key."
     }
   ],
+  "timeline.addMember.createdDescription": [
+    {
+      "type": 0,
+      "value": "Created "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": ". A private channel is visible only to the members you add."
+    }
+  ],
+  "timeline.addMember.createdDescriptionPublic": [
+    {
+      "type": 0,
+      "value": "Created "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": ". It's a public channel, so people who join the workspace later are added automatically."
+    }
+  ],
+  "timeline.addMember.later": [
+    {
+      "type": 0,
+      "value": "Later"
+    }
+  ],
   "timeline.agentRail.open": [
     {
       "type": 1,
@@ -9819,6 +9933,18 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "If you do not decide, the agent has to propose it again."
+    }
+  ],
+  "timeline.createChannel.privateDetail": [
+    {
+      "type": 0,
+      "value": "Only members who are added can see it."
+    }
+  ],
+  "timeline.createChannel.publicDetail": [
+    {
+      "type": 0,
+      "value": "Owners and admins add members. People who join the workspace later are added automatically."
     }
   ],
   "timeline.edited.atDate": [

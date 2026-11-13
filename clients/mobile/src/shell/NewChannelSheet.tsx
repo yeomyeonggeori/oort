@@ -1,4 +1,4 @@
-import {createChannel, type Channel} from '@momo/core/lib/api';
+import {createChannel, type Channel, type RosterMember} from '@momo/core/lib/api';
 import {
   channelNameIssue,
   CHANNEL_NAME_MAX,
@@ -7,6 +7,7 @@ import {
   normalizeChannelName,
   type CreateChannelFailure,
 } from '@momo/core/features/channels/model';
+import {withChannelMemberAdded} from '@momo/core/features/channels/memberAdd';
 import {upsertChannel} from '@momo/core/features/directory/model';
 import {useQueryClient} from '@tanstack/react-query';
 import React, {useState} from 'react';
@@ -14,7 +15,12 @@ import {StyleSheet, Text, View} from 'react-native';
 
 import {FailureBanner} from '../design/atoms';
 import {HOME_ICONS} from '../design/icons';
-import {PageSheet, usePageSheetClose, usePageSheetGone} from '../design/PageSheet';
+import {
+  PageSheet,
+  usePageSheetClose,
+  usePageSheetGone,
+  usePageSheetHandoff,
+} from '../design/PageSheet';
 import {SheetHeader} from '../design/SheetChrome';
 import {ChoiceRow, GroupCard, GroupLabel, InputPill, SheetScroll} from '../design/sheetParts';
 import {useStyles} from '../design/theme';
@@ -25,7 +31,9 @@ import {
   useRestoredEntryDraft,
 } from '../lib/entryDrafts';
 import {workspaceKeys} from '../features/workspace/queries';
+import {useFormatMessage} from '../i18n/useFormatMessage';
 import {useSession} from '../session/useSession';
+import type {ChannelMemberAddTarget} from './ChannelMemberAddSheet';
 
 // =============================================================================
 // 새 채널 시트 — + 메뉴의 「새 채널」 (DS2-2b #2750).
@@ -54,24 +62,32 @@ interface NewChannelDraft {
   kind: 'public' | 'private';
 }
 
+// 설명은 웹 「채널 만들기」와 같은 사전 키다(#5784). 공개 채널을 「찾아서 들어오는」 길은 아직 없어서, 지금 동작(소유자·관리자가
+// 추가, 앞으로 워크스페이스에 들어오는 사람은 자동)을 그대로 말한다.
 const KINDS = [
   {
     id: 'public' as const,
     label: '공개',
-    detail: '워크스페이스의 누구나 찾아서 들어올 수 있습니다.',
+    detailKey: 'timeline.createChannel.publicDetail' as const,
   },
   {
     id: 'private' as const,
     label: '비공개',
-    detail: '추가된 멤버에게만 보입니다.',
+    detailKey: 'timeline.createChannel.privateDetail' as const,
   },
 ];
 
 export function NewChannelSheet({
   onOpenConversation,
+  onCreated,
   onClose,
 }: {
   onOpenConversation: (channelId: string, title: string) => void;
+  /**
+   * 채널을 만들었다 — 셸이 「멤버 추가」 시트를 잇는다(#5784). 공개·비공개 모두다: 지금은 공개도 만든 사람 한 명으로 시작하고,
+   * 폰에는 이 시트 말고 채널에 사람을 넣는 문이 없다.
+   */
+  onCreated?: (target: ChannelMemberAddTarget) => void;
   onClose: () => void;
 }): React.JSX.Element {
   return (
@@ -81,23 +97,33 @@ export function NewChannelSheet({
       accessibilityLabel="새 채널"
       scrimLabel="새 채널 닫기"
       testID="new-channel-sheet">
-      <SheetBody onOpenConversation={onOpenConversation} onClose={onClose} />
+      <SheetBody
+        onOpenConversation={onOpenConversation}
+        onCreated={onCreated}
+        onClose={onClose}
+      />
     </PageSheet>
   );
 }
 
 function SheetBody({
   onOpenConversation,
+  onCreated,
   onClose,
 }: {
   onOpenConversation: (channelId: string, title: string) => void;
+  onCreated?: (target: ChannelMemberAddTarget) => void;
   onClose: () => void;
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
-  const {workspaceId} = useSession();
+  const formatMessage = useFormatMessage();
+  const {member, workspaceId} = useSession();
   const client = useQueryClient();
   const slideClose = usePageSheetClose() ?? onClose;
   const sheetGone = usePageSheetGone();
+  // 「멤버 추가」는 **다른 Modal** 이다 — 이 시트의 Modal 이 iOS 에서 다 내려간 뒤에 세운다(#5417, `PageSheet` 머리말). 한 화면 갱신에 이 시트의
+  // 언마운트와 멤버 추가 시트의 마운트가 겹치면 iOS 가 뒤의 제시를 거절해 시트가 영영 안 뜬다(검수 r1 B1, 시뮬레이터 4/4).
+  const afterDismissed = usePageSheetHandoff();
   // 알림이 걷어 간 시트였다면 쓰던 이름과 공개 범위로 선다(#4667). 사람이 X 로 닫은 시트는 평소처럼 빈 채로 선다. 자리는 워크스페이스로
   // 묶인다(`lib/entryDrafts.ts`) — 다른 사람이 같은 기기로 로그인해도 앞 사람의 이름이 나타나지 않는다.
   const draftKey = newChannelDraftKey(workspaceId);
@@ -116,13 +142,16 @@ function SheetBody({
     failure?.field === 'name' ? failure.message : issueMessage;
   // 규칙은 처음부터 칸 밑에 선다 — 웹 다이얼로그와 같은 자리, 같은 문장 가족이다
   // (design-review M4). 어기면 같은 자리가 그 이유로 바뀐다.
-  const nameRule = `영문, 숫자, 하이픈, 밑줄로 ${CHANNEL_NAME_MAX}자 이내, 처음과 끝은 영문이나 숫자. 대문자는 소문자로 저장됩니다.`;
+  const nameRule = `영문, 숫자, 하이픈, 밑줄로 ${CHANNEL_NAME_MAX}자 이내, 처음과 끝은 영문이나 숫자. 대문자는 소문자로 저장돼요.`;
 
   const submit = async () => {
     setTouched(true);
     if (issue || pending) return;
     setPending(true);
     setFailure(null);
+    // 「멤버 추가」로 넘겼는가. 넘긴 뒤 시트는 내려가는 동안 「만드는 중」 그대로 둔다 — ✓ 가 다시 눌리지 않고, 그 사이 알림이
+    // 착지해도 이미 만든 채널 이름을 초안으로 맡기지 않는다(`useHoldDraftOnEntry` 는 `pending` 이면 맡기지 않는다).
+    let handedOff = false;
     try {
       const created = await createChannel(workspaceId, {
         kind,
@@ -136,19 +165,38 @@ function SheetBody({
       void client.invalidateQueries({
         queryKey: workspaceKeys.channels(workspaceId),
       });
+      // 만든 사람은 서버에서 이미 멤버다 — 명부의 내 `channelIds` 에도 먼저 넣고 다시 읽는다(웹 `useCreateChannel` 과 같은 이유,
+      // #5784). 이어 뜨는 「멤버 추가」 시트와 채널 멤버 수가 다음 명부 읽기를 기다리지 않는다.
+      client.setQueryData<RosterMember[]>(workspaceKeys.roster(workspaceId), current =>
+        current ? withChannelMemberAdded(current, created.channel.id, member.id) : current,
+      );
+      void client.invalidateQueries({queryKey: workspaceKeys.roster(workspaceId)});
       // 만드는 동안 시트가 걷혔으면(알림이 착지했거나 사람이 X 로 닫았다) 채널은 만들어졌고 목록에는 들어갔다 — 여기까지다.
       // 요청이 끝났다고 사람을 새 채널로 끌고 가면 알림이 세운 목적지를 덮고, 늦은 `onClose()` 는 그 사이 사람이 새로 연
-      // 시트를 닫는다(#5058). 닫히는 슬라이드가 도는 동안도 걷힌 것으로 센다.
+      // 시트를 닫는다(#5058). 닫히는 슬라이드가 도는 동안도 걷힌 것으로 센다. 「멤버 추가」도 잇지 않는다.
       if (sheetGone()) return;
+      const title = created.channel.name ?? normalizeChannelName(name);
+      if (onCreated) {
+        // 채널은 만든 사람 한 명으로 시작한다(공개도 지금은 누군가 추가해야 들어온다) — 새 채널 안에서 「멤버 추가」 시트를 잇는다
+        // (X 가 건너뛰기). `onClose` 는 넘겨주기가 부른다: 다 내려간 뒤 `onClose` -> 새 채널로 -> 멤버 추가 시트.
+        handedOff = true;
+        const target: ChannelMemberAddTarget = {
+          id: created.channel.id,
+          name: title,
+          kind: created.channel.kind === 'private' ? 'private' : 'public',
+        };
+        afterDismissed(() => {
+          onOpenConversation(target.id, title);
+          onCreated(target);
+        });
+        return;
+      }
       onClose();
-      onOpenConversation(
-        created.channel.id,
-        created.channel.name ?? normalizeChannelName(name),
-      );
+      onOpenConversation(created.channel.id, title);
     } catch (error) {
       setFailure(createChannelFailure(error));
     } finally {
-      setPending(false);
+      if (!handedOff) setPending(false);
     }
   };
 
@@ -226,7 +274,9 @@ function SheetBody({
             <ChoiceRow
               key={choice.id}
               title={choice.label}
-              detail={choice.detail}
+              detail={formatMessage(choice.detailKey)}
+              // 설명은 화면에만 있지 않다 — VoiceOver 도 「공개」 뒤에 같은 문장을 듣는다(검수 r1 M7).
+              accessibilityHint={formatMessage(choice.detailKey)}
               selected={kind === choice.id}
               onPress={() => setKind(choice.id)}
               testID={`new-channel-kind-${choice.id}`}

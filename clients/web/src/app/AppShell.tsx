@@ -381,17 +381,19 @@ export function AppShell({
        * 컴포저의 멘션 줄과 ⌘K가 하나의 다이얼로그를 연다. 진입점
        * 마다 다이얼로그를 두면 폼 상태가 세 벌이 되고 그중 하나는 낡는다. */}
       <ShellNavProvider value={{ isMobile, drawerOpen, openDrawer, closeDrawer }}>
+      {/* 채널에 멤버 추가 다이얼로그도 셸에 한 벌만 있다(검수 #2): 빈 채널의
+       * 멤버 추가 진입점이 이 하나를 열고, 헤더 메뉴가 생기면 그것도 같은
+       * 하나를 연다. 채널 만들기와 같은 이유로 폼 상태가 여러 벌이 되지
+       * 않는다. (낱말은 #1573 예약 · #1584 — 이 주석을 인용하는 짝은
+       * `packages/momo-core/src/features/timeline/model.ts` 머리말이다.)
+       * 채널 만들기 **바깥**에 선다(#5784): 채널을 만들면 만들기 창이
+       * 이 창을 이어서 연다. */}
+      <AddChannelMemberProvider>
       <CreateChannelProvider>
       {/* 워크스페이스 추가도 같은 규칙이다 (검수 피드백 #4a-2). 레일의 [+]가
        * 설정으로 새던 것을 하나의 다이얼로그로 모으고, 스위처·인박스 단축키가
        * 이 모달 위에서 물러설 수 있게 열림 상태를 함께 내린다. */}
       <AddWorkspaceProvider>
-        {/* 채널에 멤버 추가 다이얼로그도 셸에 한 벌만 있다(검수 #2): 빈 채널의
-         * 멤버 추가 진입점이 이 하나를 열고, 헤더 메뉴가 생기면 그것도 같은
-         * 하나를 연다. 채널 만들기와 같은 이유로 폼 상태가 여러 벌이 되지
-         * 않는다. (낱말은 #1573 예약 · #1584 — 이 주석을 인용하는 짝은
-         * `packages/momo-core/src/features/timeline/model.ts` 머리말이다.) */}
-        <AddChannelMemberProvider>
         <NewDmProvider>
         <AgentProfileProvider>
         <MemberProfileProvider>
@@ -572,9 +574,9 @@ export function AppShell({
         </MemberProfileProvider>
         </AgentProfileProvider>
         </NewDmProvider>
-        </AddChannelMemberProvider>
       </AddWorkspaceProvider>
       </CreateChannelProvider>
+      </AddChannelMemberProvider>
       </ShellNavProvider>
       </TeamExpressionsProvider>
       </ConnectionProvider>

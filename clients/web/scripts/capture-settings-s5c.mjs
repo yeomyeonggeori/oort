@@ -380,7 +380,7 @@ const DIALOGS = [
     scope: "[data-testid=create-channel-dialog]",
     verify: async (page, tag) => {
       const t = await page.getByTestId("create-channel-dialog").innerText();
-      check(`${tag} 안내가 해요체`, t.includes("찾아서 들어올 수 있어요") && t.includes("추가된 멤버에게만 보여요") && t.includes("저장돼요") && t.includes("280자까지 쓸 수 있어요"), t);
+      check(`${tag} 안내가 해요체`, t.includes("워크스페이스에 들어오는 사람은 자동으로 들어와요") && t.includes("추가된 멤버에게만 보여요") && t.includes("저장돼요") && t.includes("280자까지 쓸 수 있어요"), t);
     },
   },
   {
