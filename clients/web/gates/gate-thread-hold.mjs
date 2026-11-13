@@ -25,6 +25,10 @@
 //      부드러운 스크롤을 끊으면 조용해진 뒤 바닥으로 마무리)
 //   L6b 휠 뒤 80ms 에 키보드 PageDown, 그 스크롤 도중 화면 위 밖 줄이 120px 자랐다 되돌아감 → 움직인 거리 ≥ 450px(검수 3회차 M1 —
 //      키보드 스크롤을 사람의 손으로 치면 그 줄 높이 변화에서 자리를 붙들어 스크롤을 끊는다. 줄 높이가 안 바뀌면 그 길을 안 타서 L6 은 못 잡는다)
+//   L8 진짜 키로 키보드 초점을 세운 뒤 줄에 초점을 두고 휠 뒤 160ms 에 「최신 메시지로 이동」 × 6 → 멈칫(끝 자리까지 9px 넘게 남은 채 50ms 이상
+//      정지) 0 = 멈춤 뒤 한 프레임 이동 0 · 누른 뒤 목록 안 focus() 모두 스크롤 막음 · 바닥 ≤ 9px (#5747 — ⋯ 로 넘어가는 초점이 스크롤을 끊음)
+//   L9 키보드로 줄 오가기: 아래 가장자리에서 Tab × 6 · 위 가장자리에서 Shift+Tab × 6 → 매 번 다른 줄 · 초점 요소(⋯)가 목록 안 · 그 줄이 목록과 겹침
+//      (#5747 범위 — WebKit 은 ⋯ 넘겨주기의 스크롤이 줄을 드러낸다)
 //
 // 재는 법: 프레임마다 그려진 모양(rAF 뒤의 태스크에서 읽고, 그 사이 DOM 이 바뀐 표본은 버린다 — #5641 `still-measure` 와 같은 규칙)의
 // 보던 줄 위 끝(창 좌표) · scrollTop · 바닥 거리를 적는다. 휠 장면은 A/B 다: 같은 휠 열을 자람 없이 돌린 값이 기준이라 엔진이 휠을
@@ -327,6 +331,21 @@ async function installPage(page) {
     H.stop = () => {
       H.gen += 1;
       return { frames: H.frames, marks: H.marks, dropped: H.dropped };
+    };
+    // L8: 타임라인 안 요소의 focus() 호출 — 언제 · 어느 단추 · 스크롤을 막았는지(#5747). 지나가기만 한다(동작은 그대로).
+    H.focusLog = [];
+    const nativeFocus = HTMLElement.prototype.focus;
+    HTMLElement.prototype.focus = function (options) {
+      const list = document.querySelector('[data-testid="timeline-virtuoso"]');
+      if (list !== null && list.contains(this)) {
+        H.focusLog.push({
+          t: round(performance.now() - (H.t0 ?? 0)),
+          action: this.getAttribute("data-row-action"),
+          preventScroll: options?.preventScroll === true,
+          gap: round(list.scrollHeight - list.scrollTop - list.clientHeight),
+        });
+      }
+      return nativeFocus.call(this, options);
     };
   });
 }
@@ -935,6 +954,169 @@ async function jumpScenes(page, rows) {
   }
 }
 
+/**
+ * L8 되풀이 수 · 멈칫(이동 시작 뒤 끝 자리까지 9px 넘게 남은 채 이만큼 안 움직임). 수리 전 멈칫은 137~170ms, 수리 판은 이동 도중 같은 자리 표본이
+ * 하나도 없다(실측 #5747). 「끝 가까이 한 프레임 이동 상한」은 쓰지 않는다: 멈추지 않은 부드러운 스크롤도 끝 100px 안에서 한 프레임에 74~90px 간다.
+ * 그래서 「멈춘 구간을 끝낸 한 프레임 이동」을 멈칫과 함께 적고, 멈칫 0 을 단정한다(멈춤 뒤 한 프레임 이동 0).
+ */
+const KBD_JUMP = Object.freeze({ reps: 6, stallMs: 50 });
+
+/** 누른 뒤 프레임 열에서: 멈칫 구간들(시작 시각 · 길이 · 남은 거리 · 그 구간을 끝낸 한 프레임 이동). */
+function jumpMotion(frames, clickT) {
+  const after = frames.filter((frame) => frame.t >= clickT);
+  if (after.length < 2) return null;
+  const target = after[after.length - 1].top;
+  const stalls = [];
+  let started = false;
+  let runStart = null;
+  for (let i = 1; i < after.length; i += 1) {
+    const step = Math.abs(after[i].top - after[i - 1].top);
+    const moved = step >= 0.5;
+    if (!started) {
+      started = moved;
+      continue;
+    }
+    if (!moved && Math.abs(after[i].top - target) > JUMP_GAP_MAX) {
+      if (runStart === null) runStart = i - 1;
+      continue;
+    }
+    if (runStart !== null && after[i - 1].t - after[runStart].t >= KBD_JUMP.stallMs) {
+      stalls.push({ at: round2(after[runStart].t - clickT), ms: round2(after[i - 1].t - after[runStart].t), left: round2(Math.abs(after[runStart].top - target)), stepAfter: round2(step) });
+    }
+    runStart = null;
+  }
+  if (runStart !== null && after[after.length - 1].t - after[runStart].t >= KBD_JUMP.stallMs) {
+    stalls.push({ at: round2(after[runStart].t - clickT), ms: round2(after[after.length - 1].t - after[runStart].t), left: round2(Math.abs(after[runStart].top - target)), stepAfter: null });
+  }
+  return { stalls, gap: after[after.length - 1].gap };
+}
+
+/**
+ * L8 줄에 키보드 초점을 둔 채 「최신 메시지로 이동」(#5747 — #5670 검수 4회차 M1). 진짜 키(End)로 키보드 초점을 세운 뒤, 줄에 초점을 두고
+ * 휠 30px · 160ms 뒤 누름을 `reps` 번. 이동 도중 가장 새 줄의 ⋯ 로 넘어가는 초점이 스크롤을 막지 않으면 WebKit 이 부드러운 스크롤을 끊어
+ * 바닥 64px 위에서 약 150ms 멈췄다가 바닥 마무리가 한 프레임에 붙였다(9/16). 끊김은 ⋯ 초점이 오는 순간에 달려 확률적이라, 누른 뒤 목록 안
+ * focus() 가 모두 스크롤을 막는지도 함께 단정한다(시점과 상관없이 되돌림을 잡는다). 매 회 ⋯ 로 넘어가는 초점이 와야 장면이 선다 —
+ * 오지 않으면 마우스 모드 장면이라 이 칸이 RED 를 낼 수 없다.
+ */
+async function keyboardJumpScenes(page, rows) {
+  await page.evaluate(() => {
+    document.querySelector('[data-testid="timeline-virtuoso"] [data-testid="timeline-message"]')?.focus({ preventScroll: true });
+  });
+  await page.keyboard.press("End");
+  await wait(1500);
+  const runs = [];
+  for (let i = 0; i < KBD_JUMP.reps; i += 1) {
+    await park(page, TIMELINE, 0.4);
+    await page.waitForFunction(() => document.querySelector('[data-testid="jump-latest"]') !== null, null, { timeout: 5000 }).catch(() => {});
+    const box = await page.locator(TIMELINE).boundingBox();
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+    const keyboardFocus = await page.evaluate(() => {
+      const H = window.__hold;
+      H.node = document.querySelector('[data-testid="timeline-virtuoso"]');
+      H.watch = null;
+      const edge = H.node.getBoundingClientRect();
+      const row = [...H.node.querySelectorAll('[data-testid="timeline-message"]')].find((el) => el.getBoundingClientRect().top > edge.top + 80);
+      row?.focus();
+      return row !== undefined && document.activeElement === row && row.matches(":focus-visible");
+    });
+    await record(page);
+    await wait(100);
+    await page.mouse.wheel(0, WHEEL.dy);
+    await wait(160);
+    const pill = await page.evaluate(() => {
+      const H = window.__hold;
+      H.focusLog = [];
+      H.mark("click");
+      const button = document.querySelector('[data-testid="jump-latest"]');
+      if (button === null) return false;
+      button.click();
+      return true;
+    });
+    await wait(1800);
+    const { frames, marks } = await stop(page);
+    const focusLog = await page.evaluate(() => window.__hold.focusLog);
+    const clickT = marks.find((mark) => mark.name === "click")?.t ?? 0;
+    const motion = jumpMotion(frames, clickT);
+    const handoff = focusLog.find((entry) => entry.action === "primary") ?? null;
+    runs.push({ keyboardFocus, pill, motion, handoff, unprotected: focusLog.filter((entry) => !entry.preventScroll).length });
+  }
+  const built = runs.every((run) => run.keyboardFocus && run.pill && run.motion !== null && run.handoff !== null);
+  const stalls = runs.flatMap((run) => run.motion?.stalls ?? []);
+  const unprotected = runs.reduce((sum, run) => sum + run.unprotected, 0);
+  const stepAfterStall = Math.max(0, ...stalls.map((stall) => stall.stepAfter ?? 0));
+  const gaps = runs.map((run) => run.motion?.gap ?? null);
+  const worstGap = gaps.some((gap) => gap === null) ? null : Math.max(...gaps);
+  const pass = built && stalls.length === 0 && unprotected === 0 && worstGap !== null && worstGap <= JUMP_GAP_MAX;
+  const scene = runs.map((run) => `${run.keyboardFocus ? "키" : "마우스"}${run.pill ? "" : "·필없음"}${run.handoff ? `·⋯@${run.handoff.gap}px` : "·⋯없음"}`).join(" ");
+  rows.push({
+    scene: `타임라인 줄에 키보드 초점 · 휠 뒤 160ms 에 최신 메시지로 이동 × ${KBD_JUMP.reps}`,
+    verdict: pass ? "PASS" : "FAIL",
+    gapPx: worstGap,
+    note: `${built ? "" : "장면을 못 만들었다(키보드 초점 · 필 · ⋯ 넘겨주기가 매 회 와야 함) · "}멈칫 ${stalls.length}번${stalls.length > 0 ? ` ${JSON.stringify(stalls)}` : ""} · 멈춤 뒤 한 프레임 이동 최대 ${stepAfterStall}px · 스크롤을 막지 않은 focus() ${unprotected}번 · 끝 바닥 거리 최대 ${worstGap}px (상한 ${JUMP_GAP_MAX}) · 회차 ${scene}`,
+  });
+}
+
+/**
+ * L9 키보드로 줄을 오가기(#5747 의 범위 잠금): 아래 가장자리에 걸친 줄 바로 앞 줄에서 Tab × 6, 위 가장자리에 걸친 줄 바로 뒤 줄에서
+ * Shift+Tab × 6. 매 번 초점이 다른 줄로 가고, 초점을 받은 요소(⋯)가 목록 안에 다 보이고, 그 줄이 목록과 겹친다. WebKit 은 줄 초점이
+ * 줄을 드러내지 않고 ⋯ 넘겨주기의 스크롤이 드러낸다(실측: 넘겨주기를 늘 스크롤 막게 한 판에서 둘째 Tab 부터 ⋯ 가 목록 밖) — 그래서
+ * L8 의 수리는 착지 초점에 이어진 넘겨주기만 막는다.
+ */
+const TAB_WALK_STEPS = 6;
+
+async function tabWalkScenes(page, rows) {
+  for (const edge of ["bottom", "top"]) {
+    await park(page, TIMELINE, 0.5);
+    const start = await page.evaluate((side) => {
+      const list = document.querySelector('[data-testid="timeline-virtuoso"]');
+      const box = list.getBoundingClientRect();
+      const all = [...list.querySelectorAll('[data-testid="timeline-message"]')];
+      const line = side === "bottom" ? box.bottom : box.top;
+      const straddle = all.findIndex((el) => {
+        const r = el.getBoundingClientRect();
+        return r.top < line && r.bottom > line;
+      });
+      const row = straddle < 0 ? undefined : all[straddle + (side === "bottom" ? -1 : 1)];
+      row?.focus({ preventScroll: true });
+      return row === undefined ? null : row.getAttribute("data-seq");
+    }, edge);
+    await wait(300);
+    const key = edge === "bottom" ? "Tab" : "Shift+Tab";
+    const steps = [];
+    for (let i = 0; i < TAB_WALK_STEPS; i += 1) {
+      await page.keyboard.press(key);
+      await wait(250);
+      steps.push(
+        await page.evaluate(() => {
+          const list = document.querySelector('[data-testid="timeline-virtuoso"]');
+          const box = list.getBoundingClientRect();
+          const active = document.activeElement;
+          const row = active?.closest?.('[data-testid="timeline-message"]') ?? null;
+          if (row === null || !list.contains(row)) return { seq: null };
+          const a = active.getBoundingClientRect();
+          const r = row.getBoundingClientRect();
+          return {
+            seq: row.getAttribute("data-seq"),
+            action: active.getAttribute("data-row-action"),
+            activeInside: a.top >= box.top - 0.5 && a.bottom <= box.bottom + 0.5,
+            activeTop: Math.round(a.top - box.top),
+            activeBottom: Math.round(box.bottom - a.bottom),
+            rowShown: Math.round(Math.min(r.bottom, box.bottom) - Math.max(r.top, box.top)),
+          };
+        })
+      );
+    }
+    const seqs = steps.map((step) => step.seq);
+    const built = start !== null && seqs.every((seq, i) => seq !== null && seq !== (i === 0 ? start : seqs[i - 1]));
+    const hidden = steps.filter((step) => !step.activeInside || !(step.rowShown > 0));
+    rows.push({
+      scene: `타임라인 키보드로 줄 오가기 — ${edge === "bottom" ? "아래 가장자리에서 Tab" : "위 가장자리에서 Shift+Tab"} × ${TAB_WALK_STEPS}`,
+      verdict: built && hidden.length === 0 ? "PASS" : "FAIL",
+      note: `${built ? "" : `장면을 못 만들었다(시작 ${start} · 줄 ${seqs.join(",")}) · `}초점 요소가 목록 밖이거나 줄이 안 보인 번 ${hidden.length} · 번마다 ${steps.map((step) => `${step.seq}:${step.action === "primary" ? "⋯" : (step.action ?? "줄")}${step.activeTop}/${step.activeBottom}·줄${step.rowShown}`).join(" ")}`,
+    });
+  }
+}
+
 async function timelineScenes(page, rows) {
   const list = { name: "타임라인", selector: TIMELINE, rowSelector: "[data-index]", park: 0.4 };
   const anchor = await page.locator(TIMELINE).evaluate((node) => getComputedStyle(node).getPropertyValue("overflow-anchor") || "(계산값 없음)");
@@ -947,6 +1129,8 @@ async function timelineScenes(page, rows) {
   await scrollingScene(page, list, rows, { dy: -WHEEL.dy, change: "grow", recordOnly: true });
   await justStoppedScene(page, list, rows, { dy: -WHEEL.dy, change: "grow", recordOnly: true });
   await jumpScenes(page, rows);
+  await keyboardJumpScenes(page, rows);
+  await tabWalkScenes(page, rows);
 }
 
 async function runEngine(browser, engine) {
