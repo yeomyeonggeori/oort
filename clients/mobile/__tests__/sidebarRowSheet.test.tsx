@@ -545,11 +545,11 @@ describe('채널 나가기는 확인 단계를 지난다', () => {
   });
 });
 
-describe('DM 의 「대화 닫기」 (#4367, ADR-0177 증보 D7)', () => {
+describe('DM 의 「목록에서 숨기기」 (#4367, ADR-0177 증보 D7)', () => {
   const DM_ROW = 'sidebar-row-dm:ch-dm-human';
   const closureCalls = () => calls.filter(call => call.url.endsWith('/closure'));
 
-  it('서버가 닫기를 싣고 다 읽은 DM: 상태 무리 끝(알림 다음)에 「대화 닫기」가 서고, 나가기는 여전히 없다', async () => {
+  it('서버가 닫기를 싣고 다 읽은 DM: 상태 무리 끝(알림 다음)에 「목록에서 숨기기」가 서고, 나가기는 여전히 없다', async () => {
     await mount({serverClosure: true, dmRead: true});
     longPress(DM_ROW);
     expect(sheetKeys()).toEqual([
@@ -626,7 +626,7 @@ describe('DM 의 「대화 닫기」 (#4367, ADR-0177 증보 D7)', () => {
     await waitFor(() => expect(screen.queryByTestId('conversation-pane', BEHIND)).toBeNull());
   });
 
-  it('로터의 「대화 닫기」도 같은 일을 한다 (시트를 열지 않고 같은 PUT)', async () => {
+  it('로터의 「목록에서 숨기기」도 같은 일을 한다 (시트를 열지 않고 같은 PUT)', async () => {
     await mount({serverClosure: true, dmRead: true});
     const row = screen.getByTestId(DM_ROW);
     const actions = row.props.accessibilityActions as {name: string; label: string}[];

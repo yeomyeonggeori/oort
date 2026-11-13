@@ -112,7 +112,7 @@ export type ChannelActionKey =
  *   copy   이름 · 링크 · ID (행 전용, 제목 「복사」)
  *   place  섹션으로 이동 (행 전용, 채널만)
  *   state  읽음 · 읽지 않음 · 알림 · 기억 · 별표
- *   close  대화 닫기 (행 전용, DM 만)
+ *   close  목록에서 숨기기 (행 전용, DM 만)
  *   danger 채널 나가기
  */
 export type ChannelActionCluster =
@@ -170,8 +170,11 @@ export interface ChannelActionItem {
   /** `data-testid` 접미사. 표면이 접두사를 붙인다(`channel-` / `channel-row-`). */
   testKey: string;
   label: string;
-  /** 폰에 대응하는 디자인 시스템 아이콘이 없는 경우의 상태 표지. */
-  icon?: "🔔" | "🔕";
+  /**
+   * 알림 항목의 상태 표지 — 그림이 아니라 **뜻 낱말**이다(켜짐 `bell`, 꺼짐 `bell-off`). 폰이 자기 종 아이콘으로 그리고
+   * 웹은 이 칸을 그리지 않는다. 이모지를 코어에 두지 않는다(#5776).
+   */
+  icon?: "bell" | "bell-off";
   /**
    * 왕복이 도는 동안 이 항목이 하는 말 (design-review #1937 N-1). 없으면
    * 낱말이 바뀌지 않는다 — 왕복이 없는 항목(복사·다이얼로그 인계)이 그렇다.
@@ -259,7 +262,7 @@ export interface ChannelActionState {
  * 서버의 `remove_member`(`routes/channels.rs`)에는 DM 분기가 없어서 호출하면
  * 그냥 멤버십이 지워지는데, DM 은 그것으로 「대화를 닫는」 것이 아니라 상대가
  * 빈 방에 남는 것이고, 되돌아올 길도 없다(`add_member` 도 관리자 전용). 버즈의
- * 「대화 닫기」에 해당하는 **서버** 라우트는 지금도 없다.
+ * 「목록에서 숨기기」에 해당하는 **서버** 라우트는 지금도 없다.
  *
  * 그 자리를 #3963 이 **기기 로컬 닫기**(`close-dm`)로 채웠고, ADR-0177 증보(#4228)가 **서버가 기억하는 닫기**로 옮겼다:
  * 서버가 닫기를 싣는 동안 닫으면 모든 기기에서 닫히고(옛 서버에서만 이 기기의 원장), 멤버십도 상대 쪽도 건드리지 않으며, 새
@@ -408,7 +411,7 @@ export function channelActionItems(
       key: "mute",
       testKey: "mute-toggle",
       label: channelMuteToggleLabel(state.muted),
-      icon: state.muted ? "🔕" : "🔔",
+      icon: state.muted ? "bell-off" : "bell",
     });
   }
   if (available.memory === true) {

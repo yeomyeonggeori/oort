@@ -369,7 +369,7 @@ describe("channelActionItemsForSurface", () => {
       ["mute", false],
       ["close-dm", true],
     ]);
-    expect(items.find((i) => i.key === "close-dm")?.label).toBe("대화 닫기");
+    expect(items.find((i) => i.key === "close-dm")?.label).toBe("목록에서 숨기기");
     // 닫기는 파괴적이지 않다(대화가 지워지지 않는다): 빨강 행이 아니다.
     expect(items.find((i) => i.key === "close-dm")?.tone).toBeUndefined();
   });
@@ -478,7 +478,7 @@ describe("진행 낱말과 메뉴 이름 (design-review #1937)", () => {
     for (const muted of [false, true]) {
       const item = channelActionItems(ALL, { ...REST, muted }).find(i => i.key === "mute");
       expect(item?.label).toBe(muted ? "알림 꺼짐" : "알림 켜짐");
-      expect(item?.icon).toBe(muted ? "🔕" : "🔔");
+      expect(item?.icon).toBe(muted ? "bell-off" : "bell");
       expect(item?.busyLabel).toBeUndefined();
     }
   });

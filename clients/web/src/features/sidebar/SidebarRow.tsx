@@ -58,6 +58,12 @@ export interface SidebarRowProps {
   unreadCount?: number;
   /** Server mention count; promotes the badge to an accent pill. */
   mentionCount?: number;
+  /**
+   * 새 글이 없다고 말하는 줄: 이름·아이콘이 한 단계 연하다(#5775, 폰 #4953 과 같은 규칙). 판정은 코어
+   * `rowEmphasis` 한 함수이고 호출부(채널·DM 줄)만 준다 — 인박스·멤버 같은 목적지 줄과 프로필 줄은 읽음을 말하지
+   * 않으므로 이 프롭이 없고 예전 그대로 또렷하다.
+   */
+  dim?: boolean;
   /** Trailing slot, e.g. the agent turn badge. */
   trailing?: ReactNode;
   testId?: string;
@@ -95,7 +101,7 @@ export interface SidebarRowProps {
    */
   dot?: DotTone | null;
   /**
-   * 호버하면 오른쪽에 서는 X (DM 행의 「대화 닫기」, #3963). 없으면 X 가 서지 않는다.
+   * 호버하면 오른쪽에 서는 X (DM 행의 「목록에서 숨기기」, #3963). 없으면 X 가 서지 않는다.
    *
    * X 는 **링크 안이 아니라 링크의 형제**다: 앵커 안의 `<button>` 은 상호작용 콘텐츠의 중첩이라
    * 클릭이 어느 쪽인지 브라우저마다 다르다. 그래서 `<li>` 가 위치의 기준(`relative`)이 되고 X 는
@@ -135,6 +141,7 @@ export function SidebarRow({
   label,
   handle = null,
   agent = false,
+  dim = false,
   unreadCount = 0,
   mentionCount = 0,
   trailing,
@@ -225,6 +232,7 @@ export function SidebarRow({
     ...dataAttrs,
     ...dragProps,
     "data-unread": hasUnread ? "" : undefined,
+    "data-dim": dim ? "" : undefined,
     // X 가 서 있는 동안 오른쪽 안쪽 여백을 비우고 알약·점을 내린다(`sidebar-row`, tokens.css).
     "data-row-close": showClose ? "" : undefined,
     "aria-label": badgeLabel ? `${label}, ${badgeLabel}` : undefined,
@@ -258,7 +266,9 @@ export function SidebarRow({
         <span
           className={cn(
             "min-w-0 truncate",
-            agent && "text-agent"
+            // 읽은 줄(`dim`)은 에이전트 DM 도 줄의 연한 색을 따른다(#5775, 폰과 같은 규칙): 정체성은 아바타가 지고,
+            // 띠 위에서는 `--agent` 가 `--on-band` 라 읽은 에이전트 줄이 안 읽은 줄과 같은 색이 됐었다.
+            agent && !dim && "text-agent"
           )}
         >
           {label}
@@ -266,6 +276,7 @@ export function SidebarRow({
         {handle && (
           <span
             className="min-w-0 truncate text-meta text-ink-muted"
+            data-row-handle=""
             data-testid="row-handle"
           >
             {handle}

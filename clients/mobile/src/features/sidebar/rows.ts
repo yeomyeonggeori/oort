@@ -16,7 +16,11 @@ import {
 } from '@momo/core/features/workspace/directory';
 import type {ChannelGroups} from '../workspace/queries';
 import type {DmVerdict} from './dmVerdicts';
-import {rowEmphasis, type RowEmphasis} from './rowEmphasis';
+import {
+  readPhaseMayDim,
+  rowEmphasis,
+  type RowEmphasis,
+} from '@momo/core/features/sidebar/rowEmphasis';
 
 // 대화 목록을 못 불러왔을 때의 머리줄은 사전 키 `connection.load.channelListTitle`(`CONNECTION_KEYS.loadChannelListTitle`)이다(#5285). 이 문장을 두 곳이
 // 말한다(#2584 리뷰 M-1): 목록 자리의 오류 상자와, 알림 탭이 그 실패에 막혔을 때의 낭독. 둘이 같은 키를 읽어 같은 사실이 두 이름으로 들리지 않는다.
@@ -57,7 +61,7 @@ import {rowEmphasis, type RowEmphasis} from './rowEmphasis';
 //   4. **닫은 대화와 나간 멤버와의 대화는 목록에 서지 않는다** (#4367, ADR-0177 증보 D8). 한 DM 이
 //      서는가는 코어 `dmVisibility` 한 함수가 정하고 웹 사이드바와 같다. 이 파일은 그 판정을
 //      (`dmVerdicts.ts` 가 입력을 모아 만든) `dmVerdicts` 로 받아 행을 거를 뿐이다. 숨은 DM 은
-//      「⋯ › 닫은 대화」 시트가 연다. **검색 중에는 거르지 않는다**: 이름으로 찾는 것은 숨은 대화를
+//      「⋯ › 숨긴 대화」 시트가 연다. **검색 중에는 거르지 않는다**: 이름으로 찾는 것은 숨은 대화를
 //      찾겠다는 뜻이고, 닫기는 지우기가 아니다. 열려 있는 DM 은 언제나 선다.
 //
 // ## The count is the COMPOSED one (ADR-0178 D3, #1964)
@@ -261,17 +265,6 @@ function withLabel(
   return {...row, accessibilityLabel: accessibilityLabelFor(row), searchText};
 }
 
-/**
- * 읽음 투영의 국면마다, 새 글 없는 줄을 회색(= 다 읽었다)으로 그려도 되는가(`rowEmphasis` 의 `mayDim`). 실패(`error`)면 안 읽음 수를
- * 모르므로 회색을 칠하지 않는다. 오는 중은 조용한 쪽(회색)이다 — 새 글이 있는 줄만 나중에 떠오른다. 표로 둔 것은 직접 문구
- * 장부가 낱말 하나짜리 비교 리터럴도 세기 때문이고, 새 국면이 생기면 이 표가 컴파일에서 빨갛게 된다.
- */
-const READ_PHASE_MAY_DIM: Readonly<Record<ReadProjectionPhase, boolean>> = {
-  loading: true,
-  error: false,
-  ready: true,
-};
-
 function channelRow(
   channel: Channel,
   input: SidebarInput,
@@ -315,7 +308,7 @@ function channelRow(
       mentionCount,
       muted: channel.muted,
       tracksRead: true,
-      mayDim: input.readPhase === undefined || READ_PHASE_MAY_DIM[input.readPhase],
+      mayDim: readPhaseMayDim(input.readPhase),
       selected: open,
     }),
   }, peer ? [`@${peer.handle}`] : []);
@@ -405,7 +398,7 @@ export function buildSidebarSections(input: SidebarInput): SidebarSection[] {
   // An empty section is dropped rather than rendered with a header and nothing
   // under it. A heading over a void reads as "something failed to load here",
   // which is a different and untrue statement from "you have no DMs".
-  // 숨은 DM 만 남은 DM 섹션도 선다: 「⋯ › 닫은 대화」가 그 대화들의 문이고, 문은 섹션 머리에 있다(웹의 DM 구역 머리도 그대로 선다).
+  // 숨은 DM 만 남은 DM 섹션도 선다: 「⋯ › 숨긴 대화」가 그 대화들의 문이고, 문은 섹션 머리에 있다(웹의 DM 구역 머리도 그대로 선다).
   // 닫은 대화만 있는 사람에게 「참여한 채널이 없다」고 말하면 거짓이고 돌아올 길도 없다.
   const hasHiddenDm =
     needle === '' &&
