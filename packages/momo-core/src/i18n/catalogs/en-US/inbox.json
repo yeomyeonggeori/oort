@@ -1,3 +1,10 @@
 {
-  "inbox.approval.open": "Open"
+  "inbox.approval.open": "Open",
+  "inbox.source.thread": "Thread · {channel}",
+  "inbox.source.threadUnknown": "Thread",
+  "inbox.source.dm": "DM · {name}",
+  "inbox.source.dmGroup": "DM · {names} and {count, plural, one {# other} other {# others}}",
+  "inbox.source.dmUnknown": "DM",
+  "inbox.source.channelUnknown": "Channel",
+  "inbox.source.task": "To do · Approval request"
 }

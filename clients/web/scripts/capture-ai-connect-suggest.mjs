@@ -374,7 +374,8 @@ function scenes() {
       expect: { viewer: "target" },
       act: async (page) => {
         await page.getByTestId("thread-panel").getByTestId("ai-connect-card-ask-operator").click();
-        const box = page.getByTestId("thread-composer").locator("textarea");
+        // 입력창은 자기 시험 열쇠로 찾는다: 높이를 재는 숨은 거울도 `<textarea>`라 태그로 찾으면 둘이 잡힌다(#5567 M-5).
+        const box = page.getByTestId("thread-composer-input");
         const value = await box.inputValue();
         if (value !== "@haneul ") throw new Error(`스레드 입력창에 멘션이 차지 않았다: ${JSON.stringify(value)}`);
         const channel = await page.getByTestId("composer-input").inputValue();
@@ -393,7 +394,7 @@ function scenes() {
       expect: { viewer: "target" },
       act: async (page) => {
         await page.getByTestId("thread-panel").getByTestId("ai-connect-card-ask-operator").click();
-        const value = await page.getByTestId("thread-composer").locator("textarea").inputValue();
+        const value = await page.getByTestId("thread-composer-input").inputValue();
         if (value !== "@haneul ") throw new Error(`스레드 입력창에 멘션이 차지 않았다: ${JSON.stringify(value)}`);
         const channel = await page.getByTestId("composer-input").inputValue();
         if (channel !== "") throw new Error(`채널 입력창이 채워졌다: ${JSON.stringify(channel)}`);

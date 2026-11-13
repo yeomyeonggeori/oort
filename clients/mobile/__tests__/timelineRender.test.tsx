@@ -270,6 +270,26 @@ describe('리스트 구성 — 정방향과 프리펜드 보정', () => {
   });
 });
 
+describe('머리 칸 높이 (#5757)', () => {
+  // 읽는 동안만 돌림표가 서서 목록 길이가 늘었다 줄면 맨 아래 따라가기가 계속 끊긴다. 읽는 중·아닐 때·시작에 닿았을 때 높이가 같아야 한다.
+  const headerHeight = () =>
+    StyleSheet.flatten(screen.getByTestId('timeline-header').props.style).minHeight;
+  it('돌림표가 서도 서지 않아도 같은 자리를 잡는다', () => {
+    const first = renderTimeline({loadingOlder: false});
+    const idle = headerHeight();
+    first.unmount();
+    const second = renderTimeline({loadingOlder: true});
+    const loading = headerHeight();
+    second.unmount();
+    const third = renderTimeline({reachedStart: true});
+    const atStart = headerHeight();
+    third.unmount();
+    expect(idle).toBeGreaterThanOrEqual(20 + 16);
+    expect(loading).toBe(idle);
+    expect(atStart).toBe(idle);
+  });
+});
+
 describe('네 가지 상태', () => {
   it('불러오는 중', () => {
     renderTimeline({messages: [], status: 'loading'});

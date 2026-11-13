@@ -1,0 +1,137 @@
+/* oort 문서 (#5590). site.css(토큰·머리 줄·메뉴·꼬리) 뒤에 붙는다. 첫 화면 하늘 대신 평평한 바탕(--page)이다.
+   상태 표지는 웹 클라이언트 StatusChip 문법(글자 먼저, 테두리 + 글자색, 바탕 없음)이고 반경은 표지 단(10)이다. */
+.docs .top { position: relative; }
+.docs .docs-link[aria-current="page"] { background: var(--surface-muted); }
+.skip {
+  position: absolute; left: 16px; top: -100px; z-index: 20; padding: 10px 14px; border-radius: 10px;
+  background: var(--primary); color: var(--on-primary); font-weight: 600; text-decoration: none;
+}
+.skip:focus { top: 12px; }
+.vh { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+
+.docs-shell {
+  max-width: 1200px; margin: 0 auto; padding: 24px 24px 0;
+  display: grid; grid-template-columns: 216px minmax(0, 1fr); gap: 56px; align-items: start;
+}
+/* 옆 목록: 넓은 창에서만. 좁은 창은 본문 위 접는 목록(.docs-toc) */
+.docs-side { position: sticky; top: 24px; }
+.docs-side-h { margin: 0 0 8px; padding: 0 12px; font-size: 13px; font-weight: 600; color: var(--ink-muted); }
+.docs-side ol, .docs-toc ol { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
+.docs-side a, .docs-toc a {
+  display: flex; align-items: center; min-height: 36px; padding: 6px 12px; border-radius: 10px;
+  color: var(--ink-muted); font-size: 15px; line-height: 1.4; text-decoration: none;
+}
+.docs-side a[aria-current="page"], .docs-toc a[aria-current="page"] { background: var(--surface-muted); color: var(--ink); font-weight: 600; }
+.docs-toc { display: none; border: 1px solid var(--line); border-radius: 14px; }
+.docs-toc summary {
+  display: flex; align-items: center; gap: 8px; min-height: 44px; padding: 0 14px; cursor: pointer; list-style: none;
+  font-size: 15px; border-radius: 14px;
+}
+.docs-toc summary::-webkit-details-marker { display: none; }
+.docs-toc-h { color: var(--ink-muted); white-space: nowrap; }
+.docs-toc-now { flex: 1; min-width: 0; font-weight: 600; }
+.docs-toc summary .i, .doc-sources summary .i { color: var(--icon); transition: transform .15s ease; }
+.docs-toc[open] summary .i, .doc-sources[open] summary .i { transform: rotate(180deg); }
+.docs-toc ol { padding: 0 6px 8px; }
+
+/* 본문 */
+.doc { min-width: 0; max-width: 760px; }
+.doc:focus { outline: none; }
+.doc-head h1 { margin: 0; font-size: clamp(28px, 3.4vw, 36px); line-height: 1.2; letter-spacing: -.02em; font-weight: 700; }
+:lang(ko) .doc-head h1 { letter-spacing: -.01em; }
+.doc-lead { margin: 12px 0 0; font-size: 17px; line-height: 1.6; color: var(--ink-muted); }
+.doc-meta { display: flex; flex-wrap: wrap; gap: 8px 20px; align-items: center; margin: 20px 0 0; }
+.doc-meta-row { display: flex; align-items: center; gap: 8px; }
+.doc-meta dt { font-size: 14px; color: var(--ink-muted); }
+.doc-meta dd { margin: 0; font-size: 14px; font-variant-numeric: tabular-nums; }
+.doc-sources { margin: 12px 0 0; padding-bottom: 28px; border-bottom: 1px solid var(--line); }
+.doc-sources summary {
+  display: inline-flex; align-items: center; gap: 6px; min-height: 32px; cursor: pointer; list-style: none;
+  font-size: 14px; color: var(--ink-muted); border-radius: 6px;
+}
+.doc-sources summary::-webkit-details-marker { display: none; }
+.doc-sources p { margin: 4px 0 8px; font-size: 14px; color: var(--ink-muted); }
+.doc-sources ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
+.doc-sources li { font-size: 13px; line-height: 1.5; }
+.doc-sources a { text-decoration: none; }
+.doc-sources a:hover code { text-decoration: underline; text-underline-offset: 3px; }
+
+/* 상태 표지: 글자가 뜻을 낸다(색만으로 말하지 않는다) */
+.status {
+  display: inline-flex; align-items: center; padding: 0 8px; border: 1px solid currentColor; border-radius: 10px;
+  font-size: 13px; font-weight: 600; line-height: 22px; letter-spacing: 0; white-space: nowrap; vertical-align: middle;
+}
+.status-done { color: var(--ok); }
+.status-partial { color: var(--warn); }
+.status-planned { color: var(--ink-muted); border-color: var(--line-strong); }
+h2 .status, h3 .status { margin-left: 8px; position: relative; top: -2px; }
+
+.doc-body { font-size: 16px; line-height: 1.75; }
+.doc-body > :first-child { margin-top: 32px; }
+.doc-body h2 { margin: 48px 0 12px; font-size: 22px; line-height: 1.35; letter-spacing: -.01em; font-weight: 700; scroll-margin-top: 16px; }
+.doc-body h3 { margin: 32px 0 8px; font-size: 18px; line-height: 1.4; font-weight: 700; scroll-margin-top: 16px; }
+.doc-body p { margin: 12px 0 0; }
+.doc-body ul, .doc-body ol { margin: 12px 0 0; padding-left: 1.4em; }
+.doc-body li + li { margin-top: 6px; }
+.doc-body li::marker { color: var(--icon); }
+.doc-body a { color: var(--ink); text-decoration: underline; text-decoration-color: var(--line-strong); text-underline-offset: 3px; }
+.doc-body a:hover { text-decoration-color: var(--ink); }
+.doc-body code, .doc-sources code { font-family: var(--mono); font-size: .875em; }
+.doc-body :not(pre) > code { padding: 1px 5px; border-radius: 6px; background: var(--surface-muted); }
+.doc-body pre {
+  margin: 16px 0 0; padding: 14px 16px; border-radius: 14px; background: var(--surface-muted);
+  overflow-x: auto; font-size: 14px; line-height: 1.6; white-space: pre; overflow-wrap: normal; word-break: normal;
+}
+.doc-body pre code { font-size: inherit; }
+.doc-body .table-wrap { margin: 16px 0 0; overflow-x: auto; }
+.doc-body table { width: 100%; border-collapse: collapse; font-size: 15px; line-height: 1.6; }
+.doc-body th, .doc-body td { padding: 10px 16px 10px 0; text-align: left; vertical-align: top; border-bottom: 1px solid var(--line); overflow-wrap: break-word; }
+/* 표 칸의 코드는 낱말 가운데서 끊지 않는다(#5590 검수 M1: 「{주소}/message / s」). 줄은 `/` 뒤(build.py 의 <wbr>)·`-` 뒤·빈칸에서만 바꾼다.
+   칸이 넓어져 표가 스크롤되면 check.mjs docs 칸이 막는다 */
+.doc-body td code { overflow-wrap: normal; }
+.doc-body code .ph { white-space: nowrap; }
+.doc-body th:last-child, .doc-body td:last-child { padding-right: 0; }
+.doc-body th { font-size: 13px; font-weight: 600; color: var(--ink-muted); }
+.doc-body td .status { vertical-align: baseline; }
+
+/* 이전·다음 */
+.doc-pager { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin: 64px 0 0; }
+.doc-pager a {
+  display: flex; flex-direction: column; gap: 2px; min-height: 64px; padding: 12px 16px; border: 1px solid var(--line); border-radius: 14px;
+  text-decoration: none;
+}
+.doc-pager span { font-size: 13px; color: var(--ink-muted); }
+.doc-pager b { font-weight: 600; }
+.doc-pager .pager-next { grid-column: 2; text-align: right; align-items: flex-end; }
+
+/* 꼬리는 본문 판과 같은 폭·같은 왼쪽 끝 */
+.docs .foot { max-width: 1200px; margin-top: 96px; }
+
+@media (hover: hover) {
+  .docs-side a:hover, .docs-toc a:hover { background: var(--surface-hover); color: var(--ink); }
+  .doc-pager a:hover { border-color: var(--line-strong); }
+  .doc-sources summary:hover { color: var(--ink); }
+}
+@media (max-width: 899px) {
+  .docs-shell { grid-template-columns: minmax(0, 1fr); gap: 20px; padding-top: 8px; }
+  .docs-side { display: none; }
+  .docs-toc { display: block; }
+}
+@media (max-width: 560px) {
+  .docs-shell { padding: 4px 16px 0; }
+  .doc-head h1 { font-size: 28px; }
+  .doc-lead { font-size: 16px; }
+  .doc-body h2 { margin-top: 40px; font-size: 20px; }
+  .doc-body table { font-size: 14px; }
+  .doc-body th, .doc-body td { padding-right: 12px; }
+  .doc-pager { grid-template-columns: minmax(0, 1fr); }
+  .doc-pager .pager-next { grid-column: auto; }
+  .docs .foot { margin-top: 72px; padding-left: 16px; padding-right: 16px; }
+}
+@media (max-width: 599px) {
+  .docs-side a, .docs-toc a { min-height: 44px; }
+  .doc-sources summary { min-height: 44px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .docs-toc summary .i, .doc-sources summary .i { transition: none; }
+}

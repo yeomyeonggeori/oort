@@ -86,16 +86,18 @@ export function WorkStatusBadge({
   testID?: string;
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
+  // 「응답 필요」(주인에게 열린 권한 요청, #5593 수리 M2)는 실행 중(경고 톤)과 갈리게 주목 톤이다.
+  const attention = status.key === 'orphaned' || status.key === 'waiting';
   const tone =
     status.key === 'running'
       ? styles.statusRunning
-      : status.key === 'orphaned'
+      : attention
         ? styles.statusAttention
         : styles.statusNeutral;
   const textTone =
     status.key === 'running'
       ? styles.statusTextRunning
-      : status.key === 'orphaned'
+      : attention
         ? styles.statusTextAttention
         : styles.statusTextNeutral;
   return (

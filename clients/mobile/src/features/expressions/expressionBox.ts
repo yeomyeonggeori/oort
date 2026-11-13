@@ -27,7 +27,7 @@ export type PhoneExpressionSize =
  * 크기·변형 이름은 표의 **키**에서 꺼낸다(`SIZE.large`, `VARIANT.thumb`). 이 파일에 글자 낱말을 새로 쓰면 직접 문구 장부(`direct-copy`, 글자 낱말을 센다)가
  * 늘어서, 같은 이름을 키(세지 않는다)에서 되돌려 받는다. 타입이 키의 존재를 지킨다.
  */
-const nameOf = <K extends string>(table: Record<K, unknown>) =>
+export const nameOf = <K extends string>(table: Record<K, unknown>) =>
   Object.fromEntries(Object.keys(table).map(key => [key, key])) as {[P in K]: P};
 const SIZE = nameOf<PhoneExpressionSize>({reaction: 0, inline: 0, medium: 0, large: 0, grid: 0, tile: 0});
 const VARIANT = nameOf<ExpressionVariant>({thumb: 0, small: 0, large: 0});

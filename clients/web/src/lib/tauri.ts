@@ -668,10 +668,14 @@ export const desktopPty = {
     onOutput: (bytes: ArrayBuffer) => void,
     onExit: (exit: PtyExit) => void,
     /**
-     * A harness hook's status signal for this session (#2776,
-     * `pane_signal.rs`): one of `PaneSignal` in `@momo/core` workbench
-     * `paneStatus`. Unknown values arrive as-is; the caller filters them.
-     * Never derived from output.
+     * A harness pane's status signal (`pane_signal.rs` `PaneSignalEvent`):
+     * `{ from: "hook" | "report", signal }`. `hook` is a hook line on the
+     * app-only socket (#2776); `report` is the program's own OSC 7501 report,
+     * which the shell reads in `program_status.rs` and reduces to the same
+     * closed `PaneSignal` (null = the program withdrew it, #5579). Unknown
+     * values arrive as-is; the caller parses them with `parsePaneSignalEvent`
+     * in `@momo/core` workbench `paneStatus`. The webview derives nothing
+     * from output.
      */
     onSignal: (signal: unknown) => void = () => undefined
   ): Promise<number> {
@@ -1607,7 +1611,9 @@ export interface UpdateProgress {
  * of degrading quietly. "I could not reach the update server" and "you are on
  * the latest build" must never look the same to a tester, or a stalled release
  * channel stays invisible until someone reports a bug that was fixed a week
- * ago. `relaunch` is the exception and by nature: it never returns.
+ * ago. A build that cannot check at all rejects too, with the closed code
+ * `UPDATER_DISABLED` (`features/updates/model.ts`, #5661). `relaunch` resolves
+ * at once and the app ends shortly after, through its normal exit.
  */
 export const desktopUpdater = {
   /** Ask the manifest. Resolves to null when this build is current. */
@@ -1626,7 +1632,11 @@ export const desktopUpdater = {
     return invoke<void>("updater_install");
   },
 
-  /** Restart into the installed build. Never resolves. */
+  /**
+   * Restart into the installed build. Resolves once the shell has asked its
+   * event loop to exit; the app then ends the way ⌘Q ends it (work host and
+   * terminals stopped) and starts the new build.
+   */
   async relaunch(): Promise<void> {
     if (!IS_TAURI) return;
     return invoke<void>("updater_relaunch");

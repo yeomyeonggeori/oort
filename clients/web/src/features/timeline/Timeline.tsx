@@ -3,13 +3,14 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
   type MutableRefObject,
   type ReactNode,
 } from "react";
-import { Virtuoso, type VirtuosoHandle } from "react-virtuoso";
+import { Virtuoso, type SizeFunction, type VirtuosoHandle } from "react-virtuoso";
 
 /**
  * 타임라인 꼬리 행 (#2944 GC-3, brief §3.2 · Q1).
@@ -29,6 +30,14 @@ function TimelineTail() {
 }
 
 const TIMELINE_COMPONENTS = { Footer: TimelineTail };
+
+/**
+ * 줄 높이를 **소수 그대로** 잰다 (#5681). 가상 목록의 기본 잣대는 `Math.round(getBoundingClientRect().height)` 인데, 본문 줄 높이가 24.375px
+ * (15px × `leading-relaxed`) 라 줄은 거의 다 소수 높이다. 가상 목록은 반올림한 값(64)으로 위쪽 여백을 쌓고 실제 줄(64.375)과 어긋나, 바닥에
+ * 붙은 목록이 한 줄 자라 맨 위 줄이 그려진 줄에서 빠지는 프레임에 위쪽 보정(`scrollBy({ top: -1 })`)을 한 번 더 한다 — scrollTop 이 정수인 WebKit 에서
+ * 그 1px 이 마지막 줄을 움직인다(반응을 더하거나 뺄 때 1.63 · 2px).
+ */
+const measureItem: SizeFunction = (el, field) => el.getBoundingClientRect()[field === "offsetHeight" ? "height" : "width"];
 import {
   type AgentRunProgress,
   type Channel,
@@ -42,6 +51,7 @@ import type { OpenWorkSession } from "@/features/work/openWorkSession";
 import { Skeleton } from "@/features/common/States";
 import {
   buildTimelineItems,
+  type EchoPins,
   type PendingMessage,
   type RecoveryMarker,
   type TimelineItem,
@@ -83,6 +93,9 @@ import type { ConnectionCause } from "@momo/core/features/connection/model";
 import { LoadFailureBox, LoadFailureLine } from "@/features/common/LoadFailureBox";
 import { SystemLine } from "./SystemLine";
 import { isSystemLineMessage, startGroupAfterSystemLine } from "./systemLineRows";
+import { holdScrollPosition, virtualListHold, type ScrollHold } from "./scrollHold";
+import { PLACED_ATTRIBUTE, revealWhenPlaced, type EntryReveal } from "./entryReveal";
+import { JUMP_LATEST_SHOW_DELAY_MS } from "@/design/motion";
 import { chipsFor, type ReactionMap } from "@momo/core/features/timeline/reactions";
 import { isPinned, type PinMap } from "@momo/core/features/timeline/pins";
 import {
@@ -95,6 +108,7 @@ import {
   countUnreadJump,
   dataIndexFromVirtuoso,
   firstUnreadMessageSeq,
+  hasFreshSelfSend,
   reconcileDividerRelation,
   relationFromIntersection,
   shouldLatchUnreadJump,
@@ -134,6 +148,8 @@ import {
 // shift is measured against the anchor row itself, the oldest message that was
 // already on screen, by how far it moved.
 const START_INDEX = 1_000_000;
+/** 맨 위 닿음 확인을 미루는 시간(#5662). 가상 목록의 `startReached` 조절(200ms)과 같아 진입 수렴의 첫 몇 프레임을 맨 위로 읽지 않는다. */
+const TOP_REACH_SETTLE_MS = 200;
 
 /** 답글이 없는 루트가 부르는 빈 배열 — 렌더마다 새 배열을 만들지 않는다. */
 const NO_REPLIES: readonly Message[] = [];
@@ -250,11 +266,15 @@ export function Timeline({
   unreadCount,
   recoveryMarkers,
   pending,
+  echoPins,
+  serverOffsetMs,
   actions,
   reactions,
   pins,
   unfurls,
   onStartReached,
+  olderFailed = false,
+  onRetryOlder,
   onRetry,
   onOpenThread,
   onQuoteMessage,
@@ -315,6 +335,13 @@ export function Timeline({
   /** Local echoes awaiting their seq; folded in at the tail (M10). */
   pending?: PendingMessage[];
   /**
+   * #5624 — 에코였던 확정본이 이 화면에서 이어 쓰는 에코의 시각(`useTimeline`의 `echoPins`). 있으면 에코가 확정본으로 바뀌어도
+   * 머리/이어짐이 그대로다. 없는 표면(작업 기록 등)은 서버 시각으로 묶는다.
+   */
+  echoPins?: EchoPins;
+  /** #5624 — 서버 시계와 이 기기 시계의 차이(ms, `useTimeline`의 `serverOffsetMs`). 에코의 묶음과 시각 글자가 쓴다. */
+  serverOffsetMs?: number;
+  /**
    * B11 — what a row may do to its message. Omitted where the surface is a
    * transcript rather than a conversation (the work session event log), and the
    * rows there then render exactly as before.
@@ -333,6 +360,10 @@ export function Timeline({
   /** ADR-0170 server projection, keyed by case-folded message id. */
   unfurls?: UnfurlMap;
   onStartReached?: () => void;
+  /** 마지막 옛 쪽 읽기가 실패했다(#5662). 목록 위에 한 줄과 「다시 시도」를 건다. */
+  olderFailed?: boolean;
+  /** 그 줄의 「다시 시도」. */
+  onRetryOlder?: () => void;
   onRetry?: () => void;
   onOpenThread?: (message: Message) => void;
   /** ADR-0148 - pin a row to the composer as a quote. */
@@ -504,6 +535,8 @@ export function Timeline({
         unreadCount,
         recoveryMarkers,
         pending,
+        echoPins,
+        serverOffsetMs,
       }),
       (item) => ({
         hasRollup: rollupFor(item.message) !== null,
@@ -522,6 +555,8 @@ export function Timeline({
     unreadCount,
     recoveryMarkers,
     pending,
+    echoPins,
+    serverOffsetMs,
     reactions,
     myMemberIdForFold,
     rollupFor,
@@ -607,6 +642,10 @@ export function Timeline({
         // `behavior` 를 부드럽게 두지 않는 이유: 바로 뒤에 워처가 마운트된 행에
         // `scrollIntoView` 를 한 번 더 건다. 애니메이션이 도는 중에 그 호출이
         // 끼면 목록이 두 목적지 사이에서 튄다.
+        // 스크립트가 옮기는 스크롤이다: 휠 직후여도 사람의 손으로 치지 않게 자리 지키기에 알린다(#5649 검수 H1).
+        holdRef.current?.expectScripted();
+        // 바닥이 목적지가 아니다: 진입 첫 그림을 기다리지 않고 지금 그린다(#5678 — 메시지 링크로 들어온 대화).
+        revealRef.current?.reveal("jump");
         ref.current?.scrollToIndex({ index, align: "center" });
         return true;
       },
@@ -650,6 +689,29 @@ export function Timeline({
       baseline === null ? 0 : countNewerThan(messages, baseline, myMemberId)
     );
   }, [messages, myMemberId]);
+
+  // ---- 내가 보낸 글은 맨 아래로 (#5603, owner 11-09) -----------------------------
+  //
+  // 위로 올려 읽던 중이어도 **내가 보내면** 맨 아래로 가서 보낸 줄이 보인다(폰 `selfSendToken` 과 같은 규칙). 남의 말은 지금처럼
+  // 따라가지 않고 「최신 메시지로 이동」이 센다. 수리 전에는 바닥이 아닐 때 새 줄을 따라가지 않는 규칙이 내 메아리에도 걸려,
+  // 보낸 줄이 화면 아래 밖에 섰다.
+  //
+  // 신호는 **처음 나타난 내 메아리**다(`hasFreshSelfSend`). 대화를 갈아탄 첫 렌더의 메아리(다른 대화의 것·되살린 실패 행)는 보낸
+  // 것이 아니라 바탕으로만 적는다. 옮기는 손은 아래 `holdScrollPosition` 의 `expectBottom` 하나다 — 가상 목록의 따라가기
+  // (`followOutput`)를 억지로 켜지 않는다: 게이트 실측(#5603)에서 그 따라가기는 마지막 줄의 아래 몇 px 위에 앉았고, 바닥 붙이기는
+  // 줄 높이가 바뀔 때마다 진짜 바닥(거리 0)에 다시 붙인다. 바닥에서 보낸 글은 예전 길 그대로다(`expectBottom` 이 손대지 않는다).
+  const seenPendingRef = useRef<{ epoch: number; ids: ReadonlySet<string> } | null>(null);
+  const selfSendTickRef = useRef(0);
+  {
+    const rows = pending ?? [];
+    const seen = seenPendingRef.current;
+    if (seen === null || seen.epoch !== epoch) {
+      seenPendingRef.current = { epoch, ids: new Set(rows.map((row) => row.clientMsgId)) };
+    } else if (rows.some((row) => !seen.ids.has(row.clientMsgId))) {
+      if (hasFreshSelfSend(seen.ids, rows, Date.now())) selfSendTickRef.current += 1;
+      seenPendingRef.current = { epoch, ids: new Set(rows.map((row) => row.clientMsgId)) };
+    }
+  }
 
   const followOutput = useCallback(() => {
     // Same pre-batch at-bottom as the leftover sweep (#2050 R5 M-1).
@@ -766,11 +828,16 @@ export function Timeline({
 
   const jumpToLatest = useCallback(() => {
     const seq = newestSeqRef.current;
+    holdRef.current?.expectScripted();
+    revealRef.current?.reveal("jump");
     ref.current?.scrollToIndex({
       index: "LAST",
       align: "end",
       behavior: timelineScrollBehavior(prefersReducedMotion()),
     });
+    // 목적지가 바닥이다: 그 스크롤이 못 미쳐 멈추면(WebKit — 이동 중 ⋯ 단추로 넘어가는 초점이 부드러운 스크롤을 끊는다) 조용해진 뒤
+    // 바닥으로 마무리한다(#5649 검수 3회차). 위 알림과 따로 두는 것은 목적지를 덧붙이는 것이라서다.
+    holdRef.current?.expectScripted("bottom");
     if (seq !== null) scheduleFocusRowStationBySeq(seq);
   }, []);
 
@@ -780,6 +847,8 @@ export function Timeline({
     const seq = firstUnreadMessageSeq(itemsRef.current, index);
     // 실행 자체가 진입이다. IO가 늦어도 이 epoch에서 필을 다시 세우지 않는다.
     setUnreadJumpLatched(true);
+    holdRef.current?.expectScripted();
+    revealRef.current?.reveal("jump");
     ref.current?.scrollToIndex({
       index,
       align: "start",
@@ -788,40 +857,102 @@ export function Timeline({
     if (seq !== null) scheduleFocusRowStationBySeq(seq);
   }, []);
 
-  // 창의 높이가 줄어도 바닥은 바닥이다 (DS2-6 #2718). 사이드바를 접으면 떠
-  // 있는 판이 상단 줄 아래로 내려가 32px 낮아지고, 창을 줄여도 같다. 스크롤러는
-  // scrollTop을 지키므로 바닥에 있던 사람의 마지막 줄이 컴포저 뒤로 잘린다.
-  // 판정은 **줄기 전의** 위치로 한다: 스크롤 이벤트마다 적어 둔 값이다. 가상
-  // 목록의 atBottom은 같은 프레임의 크기 변화로 이미 거짓이 되었을 수 있다.
+  // 창의 높이가 줄어도(DS2-6 #2718), 줄 높이가 바뀌어도(#5575) 바닥은 바닥이고, 위를 읽던 사람의 줄은
+  // 제자리다. 이 목록 안에서는 브라우저 스크롤 앵커링이 돌지 않아(`timeline-scroller`) 그림 줄이 자라면 목록이 밀린다.
+  // 판정·바로잡기의 규칙은 `scrollHold.ts`(스레드 답글 목록과 같은 모듈, 가상 목록용 규칙은 `virtualListHold`).
+  // 진입 첫 그림이 서기 전(`data-placed` 가 없을 때)은 지키지 않는다(#5717): 붙을 때의 맨 위 줄을 「보던 줄」로 적어 가상 목록이
+  // 바닥으로 간 것을 맨 위로 되돌렸다. 값은 보지 않는다 — 안전판(`timeout`) · 이동(`jump`)으로 보인 뒤에도 그때부터 지킨다.
+  const holdRef = useRef<ScrollHold | null>(null);
   useEffect(() => {
-    if (!scrollerEl || typeof ResizeObserver === "undefined") return;
-    const nearBottom = () =>
-      scrollerEl.scrollHeight - scrollerEl.scrollTop - scrollerEl.clientHeight <=
-      AT_BOTTOM_SLACK_PX;
-    let wasAtBottom = nearBottom();
-    let lastHeight = scrollerEl.clientHeight;
-    const onScroll = () => {
-      wasAtBottom = nearBottom();
-    };
-    const observer = new ResizeObserver(() => {
-      const height = scrollerEl.clientHeight;
-      if (height < lastHeight && wasAtBottom) {
-        scrollerEl.scrollTop = scrollerEl.scrollHeight;
-      }
-      lastHeight = height;
-      wasAtBottom = nearBottom();
-    });
-    scrollerEl.addEventListener("scroll", onScroll, { passive: true });
-    observer.observe(scrollerEl);
+    if (!scrollerEl) return;
+    const entering = () => !scrollerEl.hasAttribute(PLACED_ATTRIBUTE);
+    const hold = holdScrollPosition(scrollerEl, virtualListHold(() => firstItemIndexRef.current, entering));
+    holdRef.current = hold;
     return () => {
-      scrollerEl.removeEventListener("scroll", onScroll);
-      observer.disconnect();
+      hold.stop();
+      if (holdRef.current === hold) holdRef.current = null;
     };
   }, [scrollerEl]);
+
+  // 진입 첫 그림(#5678): 새로 선 스크롤 상자는 가장 새 줄이 바닥에 붙을 때까지 그리지 않는다(`entryReveal.ts`). 상자가 바뀌면(대화를
+  // 바꿔 목록이 다시 섬) 새 상자는 `data-placed` 없이 태어나 저절로 가려지고 여기서 다시 지켜본다.
+  const revealRef = useRef<EntryReveal | null>(null);
+  useEffect(() => {
+    if (!scrollerEl) return;
+    const reveal = revealWhenPlaced(scrollerEl, () => (itemsRef.current.length === 0 ? null : itemsRef.current.length - 1));
+    revealRef.current = reveal;
+    return () => {
+      reveal.stop();
+      if (revealRef.current === reveal) revealRef.current = null;
+    };
+  }, [scrollerEl]);
+
+  // 내 메아리가 들어온 커밋에서 위 바로잡기에게 「이제 바닥」이라고 알린다(#5603): 위를 읽던 중이면 그 자리에서 맨 아래로 옮기고,
+  // 이어지는 줄 높이 변화(메아리 → 확정본)에도 바닥에 붙인다. 보던 줄을 지키는 바로잡기(WebKit 수동 앵커, #5583)와 같은 모듈이
+  // 하므로 둘이 다투지 않는다. 그리기 전에 옮기려고 레이아웃 효과다.
+  const handledSelfSendRef = useRef(0);
+  useLayoutEffect(() => {
+    if (selfSendTickRef.current === handledSelfSendRef.current) return;
+    handledSelfSendRef.current = selfSendTickRef.current;
+    holdRef.current?.expectBottom();
+  }, [pending, epoch]);
+
+  // 「최신 메시지로 이동」의 늦춤 (#5575): 바닥을 떠난 상태가 잠깐 이어져야 선다. 바닥에 닿으면 바로 걷는다.
+  // 목록이 한 프레임 밀렸다 돌아오는 동안 필이 섰다 사라지며 깜빡이지 않게 한다. `atBottom` 자체(기준선 ·
+  // 따라가기)는 늦추지 않는다 — 늦추는 것은 그리기뿐이다.
+  const [showJumpLatest, setShowJumpLatest] = useState(false);
+  useEffect(() => {
+    if (atBottom) {
+      setShowJumpLatest(false);
+      return undefined;
+    }
+    const timer = window.setTimeout(() => setShowJumpLatest(true), JUMP_LATEST_SHOW_DELAY_MS);
+    return () => window.clearTimeout(timer);
+  }, [atBottom]);
 
   const onScrollerRef = useCallback((node: HTMLElement | Window | null) => {
     setScrollerEl(node instanceof HTMLElement ? node : null);
   }, []);
+
+  // 맨 위 닿음(#5662). 가상 목록의 `startReached` 는 첫 줄 번호가 바뀔 때만 다시 나간다(같은 번호는 한 번만 — react-virtuoso 4.18).
+  // 그래서 (가) 옛 쪽 읽기가 실패해 번호가 그대로면 다시 맨 위에 닿아도 나가지 않았고, (나) 머리말 한 줄뿐인 빈 대화에서 이미 나간
+  // 번호를 다음 대화가 같은 목록 인스턴스에서 물려받으면(첫 쪽이 한 프레임 안에 와 로딩 뼈대가 서지 않을 때 — 앞 대화에 메시지 줄이
+  // 없어 다시 붙지 않는다) 그 대화에서는 나가지 않았다. 그래서 `startReached` 옆에 닿음 확인을 하나 더 둔다: 위 상태가 참이 될
+  // 때마다, 그리고 보이는 대화가 바뀔 때 이미 맨 위면, 가상 목록과 같은 시간 뒤 스크롤러가 아직 맨 위인지 보고 부른다. 진입 수렴(바닥으로
+  // 가는 첫 몇 프레임의 맨 위)은 그 안에 끝나 부르지 않는다. 두 길이 겹쳐도 훅이 읽는 중이면 하나 더 내지 않는다(`useTimeline.loadOlder`).
+  const atTopRef = useRef(false);
+  const scrollerElRef = useRef<HTMLElement | null>(null);
+  scrollerElRef.current = scrollerEl;
+  const onStartReachedRef = useRef(onStartReached);
+  onStartReachedRef.current = onStartReached;
+  const topCheckRef = useRef<number | null>(null);
+  const checkTopSoon = useCallback(() => {
+    if (topCheckRef.current !== null) window.clearTimeout(topCheckRef.current);
+    topCheckRef.current = window.setTimeout(() => {
+      topCheckRef.current = null;
+      const scroller = scrollerElRef.current;
+      if (atTopRef.current && scroller !== null && scroller.scrollTop <= 0) onStartReachedRef.current?.();
+    }, TOP_REACH_SETTLE_MS);
+  }, []);
+  useEffect(
+    () => () => {
+      if (topCheckRef.current !== null) window.clearTimeout(topCheckRef.current);
+    },
+    []
+  );
+  // 가장 옛 줄(답글 포함)이 바뀌어도 다시 본다: 옛 쪽이 본류에 줄을 하나도 더하지 않으면(스레드 답글뿐) 목록 번호도 위 상태도 그대로라
+  // 두 신호 모두 다시 나가지 않는다.
+  const oldestLoadedSeq = messages[0]?.seq ?? null;
+  useEffect(() => {
+    if (atTopRef.current) checkTopSoon();
+  }, [timelineChannelId, oldestLoadedSeq, checkTopSoon]);
+  const onAtTopChange = useCallback(
+    (top: boolean) => {
+      atTopRef.current = top;
+      if (top) checkTopSoon();
+    },
+    [checkTopSoon]
+  );
 
   // 불러오기가 실패했다(#5221). 받아 둔 글이 **없으면** 제목 + 이유 한 줄 + 다시 시도 상자, **있으면** 상자로 덮지 않고
   // 목록은 그대로 두고 위에 한 줄만 건다(읽을 것이 있는데 화면을 비우면 정보를 버리는 일이다). 이유는 실패가 말하는
@@ -856,6 +987,15 @@ export function Timeline({
           className="layer-content-float absolute inset-x-0 top-0 bg-pane"
         />
       )}
+      {/* 옛 쪽 읽기 실패(#5662): 같은 자리에 떠 있는 한 줄이라 뜨고 질 때 목록이 밀리지 않는다. 새 쪽 실패 줄이 서 있으면 그것이 먼저다. */}
+      {status !== "error" && olderFailed && (
+        <LoadFailureLine
+          titleKey={CONNECTION_KEYS.loadOlderTitle}
+          onRetry={() => onRetryOlder?.()}
+          testId="timeline-older-error"
+          className="layer-content-float absolute inset-x-0 top-0 bg-pane"
+        />
+      )}
       <TimelineLiveRegionProvider>
       <TimelineTailContext.Provider value={tail}>
       <Virtuoso
@@ -867,13 +1007,19 @@ export function Timeline({
         // 위에서 더 당기는 몸짓의 뜻은 언제나 "더 옛날 것"이지 "앱을 다시 열기"가
         // 아니다. `none`이 아닌 이유는 고무줄 자체는 남겨야 화면이 살아 있게
         // 느껴지기 때문이다.
-        className="overscroll-contain h-full"
+        // `timeline-scroller` (#5638): 브라우저 스크롤 앵커링을 끈다. 스크롤 위치는 가상 목록과
+        // `scrollHold` 한 길로만 움직이고, 앵커링이 있는 엔진(Chromium · macOS 27 WebKit)과 없는
+        // 엔진(문서상 macOS 14~26 WebKit)이 같은 길을 탄다.
+        // `data-placed` 가 없으면 보이지 않는다(#5678): 새로 선 목록은 가장 새 줄이 바닥에 붙은 뒤에 처음 그린다 — `entryReveal.ts`.
+        className="overscroll-contain h-full timeline-scroller [&:not([data-placed])]:invisible"
         data={items}
+        itemSize={measureItem}
         components={TIMELINE_COMPONENTS}
         data-testid="timeline-virtuoso"
         alignToBottom
         followOutput={followOutput}
         startReached={onStartReached}
+        atTopStateChange={onAtTopChange}
         scrollerRef={onScrollerRef}
         rangeChanged={({ startIndex, endIndex }) => {
           const first = firstItemIndexRef.current;
@@ -945,6 +1091,7 @@ export function Timeline({
               <PendingRow
                 pending={item.pending}
                 startsGroup={item.startsGroup}
+                serverOffsetMs={serverOffsetMs}
                 directory={directory}
                 quoteLookup={quoteLookup}
                 onResend={onResendPending}
@@ -1019,7 +1166,7 @@ export function Timeline({
           />
         </UnreadPillDock>
       )}
-      {!atBottom && (
+      {!atBottom && showJumpLatest && (
         // 컨트롤은 떠 있고 그 아래 타임라인은 계속 눌린다: 감싼 상자는 클릭을
         // 통과시키고 버튼만 받는다. 그러지 않으면 이 줄이 덮은 폭만큼 마지막
         // 메시지가 눌리지 않는 띠가 된다.

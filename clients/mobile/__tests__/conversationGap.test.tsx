@@ -30,7 +30,10 @@ import {
   TYPING_OVERHANG,
   TYPING_RESERVE,
   TypingBar,
+  typingReserve,
+  typingSlotHeight,
 } from '../src/features/conversation/TypingBar';
+import {markTyping, resetTyping} from '../src/features/conversation/typingSignals';
 import AppShell from '../src/shell/AppShell';
 import {__resetSessionStore, sessionPort} from '../src/storage/secureSession';
 import {__resetServerBaseCache, setServerBase} from '../src/storage/serverBase';
@@ -98,6 +101,17 @@ function rosterMember(over: Record<string, unknown>) {
   };
 }
 
+/** 「작성 중」 줄에 서는 사람들(가상 인물, #5645). 짧은 이름 하나와 한 줄을 넘치는 긴 이름 둘. */
+const SHORT_TYPIST = {id: 'dddddddd-1111-4111-8111-dddddddddddd', name: '오민재'};
+const LONG_TYPIST_A = {
+  id: 'eeeeeeee-1111-4111-8111-eeeeeeeeeeee',
+  name: '한지후 플랫폼엔지니어링 리드 겸 인프라 운영 총괄',
+};
+const LONG_TYPIST_B = {
+  id: 'ffffffff-1111-4111-8111-ffffffffffff',
+  name: '윤서아 프로덕트디자인 리드 겸 서비스기획 총괄',
+};
+
 const ROSTER = [
   rosterMember({id: SELF_ID, displayName: '박서연', handle: 'seoyeon'}),
   rosterMember({
@@ -108,6 +122,15 @@ const ROSTER = [
     channelCount: 1,
     channelIds: [GENERAL],
   }),
+  ...[SHORT_TYPIST, LONG_TYPIST_A, LONG_TYPIST_B].map((typist, index) =>
+    rosterMember({
+      id: typist.id,
+      displayName: typist.name,
+      handle: `typist-${index}`,
+      channelCount: 1,
+      channelIds: [GENERAL],
+    }),
+  ),
 ];
 
 /** 에이전트(김인턴)가 없는 대화 — 사람만 있는 방. 레일 칸이 없고 간격은 20 그대로여야 한다. */
@@ -240,9 +263,23 @@ afterEach(() => {
   cleanup();
   queryClient?.clear();
   queryClient = null;
+  resetTyping();
+  Dimensions.set({window: BASE_WINDOW, screen: BASE_WINDOW});
   jest.useRealTimers();
   jest.restoreAllMocks();
 });
+
+/** 제스트의 기본 창(글자 배율 2 — RN 프리셋의 목). 배율을 바꾼 시험은 끝나면 이것으로 되돌린다. */
+const BASE_WINDOW = Dimensions.get('window');
+
+/** 글자 크기 배율을 바꾼다(설정 앱의 「더 큰 텍스트」). 화면은 `useWindowDimensions` 로 읽는다. */
+function setFontScale(fontScale: number): void {
+  const window = {...BASE_WINDOW, fontScale};
+  Dimensions.set({window, screen: window});
+}
+
+/** 지금 창의 글자 배율. */
+const currentFontScale = (): number => Dimensions.get('window').fontScale;
 
 // ---- 렌더 트리에서 읽는 것 ----------------------------------------------------
 
@@ -258,11 +295,11 @@ const above = (s: Flat) => num(s.marginTop) + num(s.paddingTop) + num(s.borderTo
 const below = (s: Flat) => num(s.marginBottom) + num(s.paddingBottom) + num(s.borderBottomWidth);
 
 /**
- * 「작성 중」 줄이 흐름에서 차지하는 높이. 빈 줄은 `minHeight` 가 지키고(H-3), 아래 여백이 음수면 그만큼
- * 다음 형제가 올라와 걸친다.
+ * 「작성 중」 줄이 흐름에서 차지하는 높이. 빈 줄은 칸 높이(`height`, 글자 배율을 곱한 값)가 지키고(H-3, #5645), 아래
+ * 여백이 음수면 그만큼 다음 형제가 올라와 걸친다.
  */
 function typingFlowHeight(s: Flat): number {
-  const own = Math.max(num(s.minHeight), num(s.paddingTop) + num(s.paddingBottom));
+  const own = Math.max(num(s.height), num(s.minHeight), num(s.paddingTop) + num(s.paddingBottom));
   return num(s.marginTop) + own + num(s.marginBottom);
 }
 
@@ -321,7 +358,10 @@ const keyboardFrame = (height: number) => ({
 });
 
 describe('마지막 행 아래 → 알약 위 — 대화 화면 (#4264)', () => {
-  it.each([0, 34])('사람만 있는 대화: 쉬는 상태에서 CONV.listPillGap(Buzz 실측 ≈ 20pt)이다 — 화면이 실제로 세우는 조각들의 합 (하단 인셋 %i)', async inset => {
+  it.each([0, 34])('사람만 있는 대화: 글자 배율 1 의 쉬는 상태에서 CONV.listPillGap(Buzz 실측 ≈ 20pt)이다 — 화면이 실제로 세우는 조각들의 합 (하단 인셋 %i)', async inset => {
+    // 20 은 글자 배율 1 의 약속이다(Buzz 대조). 제스트의 기본 창은 배율 2 라 여기서 1 로 못 박는다 — 큰 글자의 값은
+    // 아래 「글자 크기 배율 × 줄 상태」 표가 잰다(#5645).
+    setFontScale(1);
     await openConversation(inset, ROOM);
     const g = gapPieces();
     // 합이 목표다. 조각 하나가 바뀌면(꼬리 8 을 되돌림 · 예약 줄에 아래 여백 4 를 되돌림 · 컴포저 위 여백을
@@ -341,12 +381,14 @@ describe('마지막 행 아래 → 알약 위 — 대화 화면 (#4264)', () => 
   it.each([0, 34])('에이전트가 있는 대화: 레일 칸(예약)만큼 더해 CONV.listPillGap + 칸이다 — 칸 밖의 조각은 그대로다 (#4620, 하단 인셋 %i)', async inset => {
     await openConversation(inset, GENERAL);
     const g = gapPieces();
-    const slot = railSlotHeight(Dimensions.get('window').fontScale);
+    const slot = railSlotHeight(currentFontScale());
+    // 제스트 기본 창은 글자 배율 2 다: 「작성 중」 줄도 레일처럼 배율만큼 자란 칸을 잡는다(#5645) — 배율 1 의 12 보다 자란 몫이 더해진다.
+    const typingGrowth = typingReserve(currentFontScale()) - TYPING_RESERVE;
     expect(g.rail).toBe(slot);
-    expect(g.sum).toBe(CONV.listPillGap + slot);
+    expect(g.sum).toBe(CONV.listPillGap + slot + typingGrowth);
     // 칸이 더한 것 외의 조각은 사람 대화와 같다(상쇄 없이 이름 붙은 값으로 단정).
     expect(g.tail).toBe(CONV.conversationTail);
-    expect(g.typing).toBe(TYPING_RESERVE);
+    expect(g.typing).toBe(typingReserve(currentFontScale()));
     expect(g.composerTop).toBe(CONV.composerTopAir);
   });
 
@@ -361,7 +403,9 @@ describe('마지막 행 아래 → 알약 위 — 대화 화면 (#4264)', () => 
   it.each([0, 34])('키보드가 올라와도 내려가도 같은 값이다 — 조각들이 키보드를 모른다 (열림·닫힘 같은 간격, 하단 인셋 %i)', async inset => {
     await openConversation(inset);
     const closed = gapPieces();
-    expect(closed.sum).toBe(CONV.listPillGap + closed.rail);
+    expect(closed.sum).toBe(
+      CONV.listPillGap + closed.rail + typingReserve(currentFontScale()) - TYPING_RESERVE,
+    );
     act(() => {
       emitter().emit('keyboardWillShow', keyboardFrame(336));
     });
@@ -408,7 +452,7 @@ describe('마지막 행 아래 → 알약 위 — 대화 화면 (#4264)', () => 
     rerender(<TypingBar segments={typingSegments(['김민수'])} />);
     const shown = typingFlowHeight(flat(screen.getByTestId('composer-typing').props.style));
     expect(shown).toBe(idle);
-    expect(idle).toBe(TYPING_RESERVE);
+    expect(idle).toBe(typingReserve(currentFontScale()));
   });
 
   it('줄 상자가 예약보다 큰 만큼은 컴포저의 위 여백 안에서 끝난다 — 알약에 닿지 않고 후보 시트에 온전히 덮인다', () => {
@@ -430,6 +474,130 @@ describe('마지막 행 아래 → 알약 위 — 대화 화면 (#4264)', () => 
     // 칸이 마지막 행에서 떨어지는 값은 이 높이 하나다(`CONV.agentRailSlot` × 글자 배율). 따로 얹은 여백이 있으면 합이 둘로 갈라진다.
     expect(above(style)).toBe(0);
     expect(below(style)).toBe(0);
+  });
+});
+
+// ---- 글자 크기 배율 × 줄 상태 (#5645, #5582 검수 M2) -----------------------------------------
+//
+// 앞 판은 「작성 중」 칸이 `minHeight: 16` 고정이고 줄의 글은 16 × 배율로 자랐다: 배율 1 에서만 「줄이 서고 져도 대화가 안
+// 움직인다」가 참이었다. 여기서는 **에이전트가 있는 대화**(레일 칸이 위에 예약된 도크 — 「작업 중」 줄과 함께 서는 자리)를
+// 배율마다 한 번 열고, 그 화면에 실제 신호(`markTyping`)를 흘려 줄 상태를 바꾸며 두 가지를 잰다.
+//
+//   ① 도크 흐름의 합(= 대화 영역이 내주는 높이)과 「작성 중」 칸 높이가 줄 상태와 무관하게 한 값이다.
+//   ② 그 칸 안의 글 상자(줄 높이 × min(배율, 그 글의 `maxFontSizeMultiplier`))가 칸을 넘지 않는다 — 넘으면 Yoga 가 칸을
+//      밀거나(최소 높이였다면) 글이 칸 밖으로 삐져나온다. 제스트에는 Yoga 가 없어서 ①만으로는 「칸이 모자라다」를 못 잡는다.
+//
+// 가장 큰 값 3.571 은 iOS 「더 큰 텍스트」 최대(AX5)에서 RN 이 주는 배율이다(`RCTAccessibilityManager` 의 표).
+
+const AX5_FONT_SCALE = 3.571;
+
+type TypingState = {label: string; typists: readonly {id: string; name: string}[]};
+const TYPING_STATES: readonly TypingState[] = [
+  {label: '줄 없음', typists: []},
+  {label: '한 이름', typists: [SHORT_TYPIST]},
+  {label: '두 이름(짧+긴)', typists: [SHORT_TYPIST, LONG_TYPIST_A]},
+  {label: '두 이름(긴+짧)', typists: [LONG_TYPIST_A, SHORT_TYPIST]},
+  {label: '두 이름(긴+긴)', typists: [LONG_TYPIST_A, LONG_TYPIST_B]},
+];
+
+/** 도크에 그 사람들의 「작성 중」 신호를 실제 경로(레일 → 명부)로 흘린다. 도착 순서 = 줄의 이름 순서. */
+function showTypists(typists: TypingState['typists']): void {
+  act(() => {
+    resetTyping();
+    const now = Date.now();
+    typists.forEach((typist, index) =>
+      markTyping({
+        type: 'ephemeral.typing',
+        v: 1,
+        ts: now + index,
+        payload: {
+          workspace_id: WS,
+          channel_id: GENERAL,
+          member_id: typist.id,
+          expires_at: now + 6_000,
+        },
+      }),
+    );
+  });
+}
+
+/** 「작성 중」 칸 안의 글 상자들 — 자기 줄 높이를 가진 글(이름 칸 · 이름 아닌 칸 · 꼬리)마다 그려질 높이. */
+function typingTextBoxes(fontScale: number): number[] {
+  const slot = screen.getByTestId('composer-typing', {includeHiddenElements: true});
+  return slot
+    .findAll((node: TestNode) => node.type === 'Text' && flat(node.props.style).lineHeight !== undefined)
+    .map((node: TestNode) => {
+      const cap = typeof node.props.maxFontSizeMultiplier === 'number' ? node.props.maxFontSizeMultiplier : Infinity;
+      return num(flat(node.props.style).lineHeight) * Math.min(fontScale, cap);
+    });
+}
+
+describe('「작성 중」 칸은 글자 크기 배율을 따라 미리 잡힌다 — 줄이 서고 져도 대화가 안 움직인다 (#5645)', () => {
+  it.each([0.823, 1, 1.3, AX5_FONT_SCALE])('글자 배율 %p: 줄 없음 · 한 이름 · 두 이름(짧+긴 · 긴+짧 · 긴+긴)에서 칸 높이와 도크 흐름의 합이 같다', async fontScale => {
+    setFontScale(fontScale);
+    await openConversation(0, GENERAL);
+    const slotHeight = typingSlotHeight(fontScale);
+    const rows: {label: string; slot: number; typing: number; sum: number; names: number}[] = [];
+    for (const state of TYPING_STATES) {
+      showTypists(state.typists);
+      const g = gapPieces();
+      const slot = num(styleOf('composer-typing', true).height);
+      rows.push({
+        label: state.label,
+        slot,
+        typing: g.typing,
+        sum: g.sum,
+        names: screen.queryAllByTestId('composer-typing-name').length,
+      });
+      // ② 칸 안의 글 상자가 칸을 넘지 않는다. 줄이 서 있으면 잴 글이 실제로 있다(빈 목록으로 통과하지 않는다).
+      const boxes = typingTextBoxes(fontScale);
+      if (state.typists.length > 0) expect(boxes.length).toBeGreaterThan(0);
+      for (const box of boxes) expect(box).toBeLessThanOrEqual(slotHeight);
+      // 줄이 서 있으면 가장 큰 글 상자가 칸과 **같다**(≤ 만 보면 칸 상한이 글 상한과 갈라져 빈 띠가 늘 서도 초록이다, #5719).
+      if (state.typists.length > 0) expect(Math.max(...boxes)).toBeCloseTo(slotHeight, 10);
+    }
+    // 신호가 실제로 줄을 바꿨다 — 이름 칸 수가 0 · 1 · 2 · 2 · 2 다(바뀌지 않은 화면을 재고 같다고 하지 않는다).
+    expect(rows.map(row => row.names)).toEqual([0, 1, 2, 2, 2]);
+    // ① 줄 상태와 무관하게 한 값이다.
+    for (const row of rows) {
+      expect({label: row.label, slot: row.slot, typing: row.typing, sum: row.sum}).toEqual({
+        label: row.label,
+        slot: slotHeight,
+        typing: typingReserve(fontScale),
+        sum: rows[0].sum,
+      });
+    }
+    // 그 한 값은 배율 1 의 간격(20 + 레일 칸)에 「작성 중」 칸이 자란 몫만 더한 것이다 — 칸 밖의 조각은 그대로다.
+    // (소수 배율은 더하는 순서에 따라 끝자리가 갈려서 10 자리까지 본다.)
+    expect(rows[0].sum).toBeCloseTo(
+      CONV.listPillGap + railSlotHeight(fontScale) + typingReserve(fontScale) - TYPING_RESERVE,
+      10,
+    );
+  });
+
+  it('칸 높이는 숫자로 못 박혀 있다 — 상한 1.6 · 레일 칸과 같은 식 · 작은 글자에서는 줄어든다 (#5719)', () => {
+    // 구현 함수에서 기대값을 꺼내지 않고 손으로 적은 값이다. 상한을 1.9 로 바꾸면 가장 큰 글자에서 30.4 가 되어 깨진다.
+    expect(typingSlotHeight(1)).toBe(16);
+    expect(typingSlotHeight(1.3)).toBeCloseTo(20.8, 10);
+    expect(typingSlotHeight(1.6)).toBeCloseTo(25.6, 10);
+    expect(typingSlotHeight(AX5_FONT_SCALE)).toBeCloseTo(25.6, 10);
+    // 글자 배율 1 미만(작은 글자): 칸이 16 아래로 줄어드는 것이 **뜻한 것**이다. 바로 위 레일 칸(`railSlotHeight`)이 같은 식이라
+    // 두 줄이 함께 줄고, 최소 16 을 지키면 레일과 갈라져 작은 글자에서만 「작업 중」과 「작성 중」 사이가 벌어진다.
+    expect(typingSlotHeight(0.823)).toBeCloseTo(13.168, 10);
+    expect(typingReserve(0.823)).toBeCloseTo(13.168 - TYPING_OVERHANG, 10);
+    for (const scale of [0.823, 1, 1.3, 1.6, AX5_FONT_SCALE]) {
+      expect(typingSlotHeight(scale)).toBe(railSlotHeight(scale));
+    }
+  });
+
+  it('줄 상자가 자라도 걸침은 그대로다 — 가장 큰 글자에서도 컴포저 위 여백 안에서 끝난다', () => {
+    // 걸침이 배율을 따라 자라면 AX5 에서 4 × 1.6 = 6.4 → 위 여백 8 에 가까워지고, 상한을 풀면 넘어서 알약 위로 내려앉는다.
+    setFontScale(AX5_FONT_SCALE);
+    render(<TypingBar segments={typingSegments([SHORT_TYPIST.name])} />);
+    const style = flat(screen.getByTestId('composer-typing').props.style);
+    expect(-num(style.marginBottom)).toBe(TYPING_OVERHANG);
+    expect(num(style.height) + num(style.marginBottom)).toBe(typingReserve(AX5_FONT_SCALE));
+    expect(TYPING_OVERHANG).toBeLessThan(CONV.composerTopAir);
   });
 });
 

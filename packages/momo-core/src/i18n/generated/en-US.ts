@@ -1530,6 +1530,12 @@ export const catalog: MessageCatalog = {
       "value": "Couldn't load the notification rules"
     }
   ],
+  "connection.load.olderTitle": [
+    {
+      "type": 0,
+      "value": "Couldn't load earlier messages"
+    }
+  ],
   "connection.load.readMarkersTitle": [
     {
       "type": 0,
@@ -1862,6 +1868,22 @@ export const catalog: MessageCatalog = {
       "pluralType": "cardinal"
     }
   ],
+  "desktop.notify.workPermission": [
+    {
+      "type": 1,
+      "value": "session"
+    },
+    {
+      "type": 0,
+      "value": ": waiting for permission to run on your Mac"
+    }
+  ],
+  "desktop.notify.workPermissionTitle": [
+    {
+      "type": 0,
+      "value": "Waiting for you"
+    }
+  ],
   "desktop.tray.closeNotice": [
     {
       "type": 0,
@@ -2055,6 +2077,82 @@ export const catalog: MessageCatalog = {
       "value": "Working"
     }
   ],
+  "desktop.workJobs.approvalHintInList": [
+    {
+      "type": 0,
+      "value": "You can also approve it from the list"
+    }
+  ],
+  "desktop.workJobs.openToAnswer": [
+    {
+      "type": 0,
+      "value": "Open to answer"
+    }
+  ],
+  "desktop.workJobs.reportedTitle": [
+    {
+      "type": 0,
+      "value": "Agent report: "
+    },
+    {
+      "type": 1,
+      "value": "summary"
+    }
+  ],
+  "desktop.workJobs.stateAwaitingApproval": [
+    {
+      "type": 0,
+      "value": "Awaiting approval"
+    }
+  ],
+  "desktop.workJobs.tagApproval": [
+    {
+      "type": 0,
+      "value": "Approval request"
+    }
+  ],
+  "desktop.workJobs.tagPermission": [
+    {
+      "type": 0,
+      "value": "Permission request"
+    }
+  ],
+  "desktop.workPermission.allowInApp": [
+    {
+      "type": 0,
+      "value": "Allow it from the phone or desktop app"
+    }
+  ],
+  "desktop.workSession.backAria": [
+    {
+      "type": 0,
+      "value": "Back to tasks"
+    }
+  ],
+  "desktop.workSession.backLabel": [
+    {
+      "type": 0,
+      "value": "Tasks"
+    }
+  ],
+  "desktop.workSession.backToListLabel": [
+    {
+      "type": 0,
+      "value": "Session list"
+    }
+  ],
+  "desktop.workSession.listTitle": [
+    {
+      "type": 0,
+      "value": "Recent sessions"
+    }
+  ],
+  "desktop.workSession.pageTitle": [
+    {
+      "type": 0,
+      "value": "Session"
+    }
+  ],
   "expressions.add.adminsOnly": [
     {
       "type": 0,
@@ -2175,6 +2273,16 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "Loading the picture. Register after you have seen the new preview."
+    }
+  ],
+  "expressions.image.waitingA11y": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " emoticon"
     }
   ],
   "expressions.import.displayName": [
@@ -4042,6 +4150,12 @@ export const catalog: MessageCatalog = {
       "value": "This one is not available right now. Please choose another."
     }
   ],
+  "expressions.suggest.dismiss": [
+    {
+      "type": 0,
+      "value": "Close for now"
+    }
+  ],
   "expressions.suggest.group": [
     {
       "type": 0,
@@ -4064,6 +4178,16 @@ export const catalog: MessageCatalog = {
       "value": "name"
     }
   ],
+  "expressions.suggest.replaced": [
+    {
+      "type": 0,
+      "value": "Replaced your text with "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    }
+  ],
   "expressions.suggest.settingHint": [
     {
       "type": 0,
@@ -4080,6 +4204,94 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "Open"
+    }
+  ],
+  "inbox.source.channelUnknown": [
+    {
+      "type": 0,
+      "value": "Channel"
+    }
+  ],
+  "inbox.source.dm": [
+    {
+      "type": 0,
+      "value": "DM · "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    }
+  ],
+  "inbox.source.dmGroup": [
+    {
+      "type": 0,
+      "value": "DM · "
+    },
+    {
+      "type": 1,
+      "value": "names"
+    },
+    {
+      "type": 0,
+      "value": " and "
+    },
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " other"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " others"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "inbox.source.dmUnknown": [
+    {
+      "type": 0,
+      "value": "DM"
+    }
+  ],
+  "inbox.source.task": [
+    {
+      "type": 0,
+      "value": "To do · Approval request"
+    }
+  ],
+  "inbox.source.thread": [
+    {
+      "type": 0,
+      "value": "Thread · "
+    },
+    {
+      "type": 1,
+      "value": "channel"
+    }
+  ],
+  "inbox.source.threadUnknown": [
+    {
+      "type": 0,
+      "value": "Thread"
     }
   ],
   "mobile.attachmentSave.failed": [
@@ -4612,6 +4824,62 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "Applying language…"
+    }
+  ],
+  "mobile.workPermission.elsewhereOnHost": [
+    {
+      "type": 0,
+      "value": "For now, answer it on "
+    },
+    {
+      "type": 1,
+      "value": "host"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "mobile.workPermission.elsewhereOnMac": [
+    {
+      "type": 0,
+      "value": "For now, answer it on your Mac."
+    }
+  ],
+  "mobile.workPermission.elsewhereTitle": [
+    {
+      "type": 0,
+      "value": "Your Mac is asking for permission"
+    }
+  ],
+  "mobile.workPermission.landingGoneDetail": [
+    {
+      "type": 0,
+      "value": "It may have been answered on another device, expired, or the work may have ended."
+    }
+  ],
+  "mobile.workPermission.landingGoneTitle": [
+    {
+      "type": 0,
+      "value": "This permission request is already closed"
+    }
+  ],
+  "mobile.workPermission.recheck": [
+    {
+      "type": 0,
+      "value": "Check again"
+    }
+  ],
+  "mobile.workPermission.rechecking": [
+    {
+      "type": 0,
+      "value": "Checking again"
+    }
+  ],
+  "mobile.workPermission.recheckMissed": [
+    {
+      "type": 0,
+      "value": "Checked again, but the signing setting still couldn’t be read."
     }
   ],
   "notifications.inviteLink.fallback": [
@@ -6428,6 +6696,180 @@ export const catalog: MessageCatalog = {
       "value": "Emoticons you have already seen are not downloaded again after a restart, the pictures you use most gather at the top of the Emoticons tab, and on the phone you can now react with emoticons and GIFs too."
     }
   ],
+  "releaseNotes.v0146.agentsLine1": [
+    {
+      "type": 0,
+      "value": "Team AI replies now show the chip naming the model that answered, including replies you got before."
+    }
+  ],
+  "releaseNotes.v0146.agentsLine2": [
+    {
+      "type": 0,
+      "value": "On web and desktop, the work console is now the session view inside Work, and “← Work” returns to the row you opened."
+    }
+  ],
+  "releaseNotes.v0146.backgroundDesktopChanged": [
+    {
+      "type": 0,
+      "value": "After a few minutes with its window closed or behind other apps, the desktop app used to pause, and new messages only caught up when you brought it back. Now the menu bar mark and the Dock badge light up as soon as a new message arrives, even in the background. Unread DMs and new replies from others in threads you follow now count toward the menu bar mark and the Dock badge too. The setting that counts new DMs in the Dock badge, under Settings › Notifications, is on by default, and it is turned on once even on devices where it was off. A message that arrives in a chat you have open is marked read when you bring the window forward and see it. Waking your Mac no longer shows “Can't reach the server” while the connection is fine, and “Mark all as read” in the menu bar now also covers new replies in threads you follow."
+    }
+  ],
+  "releaseNotes.v0146.backgroundDesktopTitle": [
+    {
+      "type": 0,
+      "value": "The desktop app keeps up in the background"
+    }
+  ],
+  "releaseNotes.v0146.backgroundDesktopTryIt": [
+    {
+      "type": 0,
+      "value": "Close the desktop app's window, wait a few minutes and ask a teammate to send you a DM. The menu bar mark and the Dock badge light up right away without bringing the app forward."
+    }
+  ],
+  "releaseNotes.v0146.conversationsLine1": [
+    {
+      "type": 0,
+      "value": "On web and desktop, opening a chat shows the newest message at the bottom right from the start."
+    }
+  ],
+  "releaseNotes.v0146.conversationsLine2": [
+    {
+      "type": 0,
+      "value": "On desktop, adding or removing a reaction on the last message no longer nudges the chat."
+    }
+  ],
+  "releaseNotes.v0146.conversationsLine3": [
+    {
+      "type": 0,
+      "value": "In web and desktop threads, the reply you read stays put as replies above change; new ones stay in view at the bottom."
+    }
+  ],
+  "releaseNotes.v0146.conversationsLine4": [
+    {
+      "type": 0,
+      "value": "On the phone, the “is typing…” line no longer pushes the chat when it appears or goes, even with large text."
+    }
+  ],
+  "releaseNotes.v0146.desktopLine1": [
+    {
+      "type": 0,
+      "value": "After updating, once no work runs on this Mac, quit the desktop app with ⌘Q and reopen it so every part of it updates."
+    }
+  ],
+  "releaseNotes.v0146.desktopLine2": [
+    {
+      "type": 0,
+      "value": "Settings › Updates now has a Connection log of today's connection changes, with a button to copy it for a report."
+    }
+  ],
+  "releaseNotes.v0146.desktopTopic": [
+    {
+      "type": 0,
+      "value": "Desktop"
+    }
+  ],
+  "releaseNotes.v0146.needsReplyChanged": [
+    {
+      "type": 0,
+      "value": "On web and desktop, the top of My work in Work now has a section for work waiting on you. When an agent job you started needs your approval, you approve or reject it right in that row, or press Open when the approval has to be decided on its card. When a session on your Mac asks for permission, its row says so, and in the desktop app “Open to answer” takes you straight to that session's approval card. That permission request also shows up as a desktop notification. The phone's work list puts the same rows first, and tapping your session row or a permission notification opens that session's screen directly. When Codex running in a desktop terminal pane waits for an answer, that pane now shows it needs you. Stopping one of your Mac sessions on web or desktop now ends the work on the Mac, as it already did on the phone. If work on your Mac stops because the connection dropped or it failed, or a permission request closes after 10 minutes, a line is added to that session and its owner is notified."
+    }
+  ],
+  "releaseNotes.v0146.needsReplyTitle": [
+    {
+      "type": 0,
+      "value": "Work waiting on you comes first"
+    }
+  ],
+  "releaseNotes.v0146.needsReplyTryIt": [
+    {
+      "type": 0,
+      "value": "Open Work in the desktop app and choose My work. If a row waiting for your approval sits at the top, approve or reject it right in that row without opening the card."
+    }
+  ],
+  "releaseNotes.v0146.notificationsLine1": [
+    {
+      "type": 0,
+      "value": "Phone notifications for thread replies no longer start with “Thread ·”, and tapping one still opens that thread."
+    }
+  ],
+  "releaseNotes.v0146.steadyChatChanged": [
+    {
+      "type": 0,
+      "value": "On web and desktop, a chat no longer jumps while you are only looking at it because emoticons briefly turned into :name: text. While the connection is unsteady, a blank space of the same size holds each picture's place, and the picture is drawn back into it. The chat no longer shakes while you write several lines, and the other person's “is typing…” line now sits on its own row right under the composer, so nothing moves when it appears or goes. When two people type, both names stay visible even if they are long, and the phone does the same. On every screen, the name and time line above a message you just sent no longer appears and then disappears. One person's messages are now grouped only when they were sent in the same minute. On web and desktop, sending while you are scrolled up takes you to the bottom, and if earlier messages fail to load at the top, a “Try again” button appears."
+    }
+  ],
+  "releaseNotes.v0146.steadyChatTitle": [
+    {
+      "type": 0,
+      "value": "Chats stay still while you read, type and send"
+    }
+  ],
+  "releaseNotes.v0146.steadyChatTryIt": [
+    {
+      "type": 0,
+      "value": "On web or desktop, scroll a chat up a little and send a message. The chat moves to the bottom, and the message you sent settles in place without its name line flashing on and off."
+    }
+  ],
+  "releaseNotes.v0146.suggestPickChanged": [
+    {
+      "type": 0,
+      "value": "When you tap a picture in the suggestion row and the composer holds only that word, the word is replaced with the emoticon; if the word is part of a longer phrase, your text stays and the emoticon is added. When a phrase like “ㅋㅋ 개웃기네 진심” has several matching words, pictures for each word appear together in one row. The row now appears only when the word you just typed is an emoticon keyword, so it no longer pops up every time you pause in a phrase. Closing it with Esc (on the phone, swipe the row down) keeps it closed until the next keyword. On the phone, emoticons no longer turn into :name: text when the connection drops; they keep a space of the same size, and an emoticon in a message whose picture has not arrived for more than 3 seconds shows its name there, so you can tell what was sent."
+    }
+  ],
+  "releaseNotes.v0146.suggestPickTitle": [
+    {
+      "type": 0,
+      "value": "Emoticon suggestions fit what you wrote"
+    }
+  ],
+  "releaseNotes.v0146.suggestPickTryIt": [
+    {
+      "type": 0,
+      "value": "Type just one emoticon keyword, such as “ㅋㅋ”, and tap a picture in the suggestion row. The word turns into the picture, and pressing send posts only the emoticon."
+    }
+  ],
+  "releaseNotes.v0146.summary": [
+    {
+      "type": 0,
+      "value": "Chats stay still while you read, type and send, work waiting on your answer gathers at the top, and the desktop app keeps up with new messages and new versions even in the background."
+    }
+  ],
+  "releaseNotes.v0146.updateNoticeChanged": [
+    {
+      "type": 0,
+      "value": "From this version, the desktop app checks for a new version every 6 hours while it runs, and again right after your Mac wakes. When a new version is downloaded, the app restarts on its own after 3 seconds if no terminal pane or work session is running on this Mac, and you can put it off with “Not now” during those 3 seconds. If something is running, it says “Restarts when work on this Mac ends” and waits. The card shows what a restart would cut off right now, and “Restart now” restarts at once. A restart also moves the part that runs work on your Mac to the new version, and your drafts stay as they were. Settings › Updates now shows when it last checked, and a build that does not check for itself says “Not checking”. You can move between the update card's buttons with Tab."
+    }
+  ],
+  "releaseNotes.v0146.updateNoticeTitle": [
+    {
+      "type": 0,
+      "value": "A running desktop app notices new versions"
+    }
+  ],
+  "releaseNotes.v0146.updateNoticeTryIt": [
+    {
+      "type": 0,
+      "value": "In the desktop app, open Settings › Updates and see when it last checked. When a new version is out, the Update pill next to your profile at the bottom of the sidebar tells you, even with the sidebar collapsed."
+    }
+  ],
+  "releaseNotes.v0146.whoIsDoingChanged": [
+    {
+      "type": 0,
+      "value": "On web and desktop, the Channel members window, opened with the members button in the channel header, now has a second line for each member about what is happening now. People show their presence dot and the status they wrote, and away and do not disturb are also written out. Agents show what they are doing in this channel: the step they reported and how many minutes it has taken. The list is grouped as working agents, other agents, online and offline. In the Inbox, each row now has a line under the name saying where it came from, such as “Thread · #channel”, “DM · name” or “#channel”. The phone's Inbox shows the same line."
+    }
+  ],
+  "releaseNotes.v0146.whoIsDoingTitle": [
+    {
+      "type": 0,
+      "value": "See who is doing what"
+    }
+  ],
+  "releaseNotes.v0146.whoIsDoingTryIt": [
+    {
+      "type": 0,
+      "value": "On web or desktop, open a channel where an agent is working and press the members button in the channel header. Working agents are listed first, each with a line about what it is doing now."
+    }
+  ],
   "releaseNotes.version.current": [
     {
       "type": 0,
@@ -7609,6 +8051,152 @@ export const catalog: MessageCatalog = {
       "value": "No server address is saved on this device."
     }
   ],
+  "settings.connectionLog.cappedToday": [
+    {
+      "type": 0,
+      "value": "Today's log filled up, so its earliest entries were dropped. Counts cover the latest 500 entries."
+    }
+  ],
+  "settings.connectionLog.clear": [
+    {
+      "type": 0,
+      "value": "Clear log"
+    }
+  ],
+  "settings.connectionLog.copied": [
+    {
+      "type": 0,
+      "value": "Copied"
+    }
+  ],
+  "settings.connectionLog.copy": [
+    {
+      "type": 0,
+      "value": "Copy connection log"
+    }
+  ],
+  "settings.connectionLog.copyDescription": [
+    {
+      "type": 0,
+      "value": "Holds up to the last 7 days or 500 entries. Paste it when you report a problem."
+    }
+  ],
+  "settings.connectionLog.copyFailed": [
+    {
+      "type": 0,
+      "value": "Couldn't copy. Try again."
+    }
+  ],
+  "settings.connectionLog.copyLabel": [
+    {
+      "type": 0,
+      "value": "Copy log"
+    }
+  ],
+  "settings.connectionLog.count": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " time"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " times"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "settings.connectionLog.cutWhileResting": [
+    {
+      "type": 0,
+      "value": "Requests cut off while resting"
+    }
+  ],
+  "settings.connectionLog.description": [
+    {
+      "type": 0,
+      "value": "How often the connection changed today. Only times and kinds stay on this device, never messages, addresses or names. Nothing is sent to the server."
+    }
+  ],
+  "settings.connectionLog.deviceOffline": [
+    {
+      "type": 0,
+      "value": "Device offline"
+    }
+  ],
+  "settings.connectionLog.readFailedMessage": [
+    {
+      "type": 0,
+      "value": "The connection log saved on this device is damaged. Clear it to start a new one."
+    }
+  ],
+  "settings.connectionLog.readFailedTitle": [
+    {
+      "type": 0,
+      "value": "Couldn't read the connection log"
+    }
+  ],
+  "settings.connectionLog.restFailed": [
+    {
+      "type": 0,
+      "value": "No server response"
+    }
+  ],
+  "settings.connectionLog.sendBlocked": [
+    {
+      "type": 0,
+      "value": "Couldn't send"
+    }
+  ],
+  "settings.connectionLog.socketDown": [
+    {
+      "type": 0,
+      "value": "Live connection dropped"
+    }
+  ],
+  "settings.connectionLog.title": [
+    {
+      "type": 0,
+      "value": "Connection log"
+    }
+  ],
+  "settings.connectionLog.updateCheckFailed": [
+    {
+      "type": 0,
+      "value": "Update check failed"
+    }
+  ],
+  "settings.connectionLog.wakeLate": [
+    {
+      "type": 0,
+      "value": "App rested, then woke"
+    }
+  ],
+  "settings.connectionLog.windowHidden": [
+    {
+      "type": 0,
+      "value": "Window hidden"
+    }
+  ],
   "settings.invite.guestInvitesPaused": [
     {
       "type": 0,
@@ -7737,6 +8325,146 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "Use device language"
+    }
+  ],
+  "settings.updates.cutLine": [
+    {
+      "type": 0,
+      "value": "Restarting now stops: "
+    },
+    {
+      "type": 1,
+      "value": "items"
+    }
+  ],
+  "settings.updates.cutPanes": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " terminal pane"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " terminal panes"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "settings.updates.cutSessions": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " work session"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " work sessions"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "settings.updates.cutUnknown": [
+    {
+      "type": 0,
+      "value": "work that could not be checked"
+    }
+  ],
+  "settings.updates.description": [
+    {
+      "type": 0,
+      "value": "The app updates itself. A download is installed only after its signature checks out. When the install finishes the app restarts on its own; if work is running on this Mac, it waits until that work ends. What you were typing stays."
+    }
+  ],
+  "settings.updates.holdTitle": [
+    {
+      "type": 0,
+      "value": "Restarts when work on this Mac ends"
+    }
+  ],
+  "settings.updates.installRowDescription": [
+    {
+      "type": 0,
+      "value": "When the install finishes the app restarts on its own. If work is running on this Mac, it waits until that work ends."
+    }
+  ],
+  "settings.updates.lastCheckedLabel": [
+    {
+      "type": 0,
+      "value": "Last checked"
+    }
+  ],
+  "settings.updates.notNow": [
+    {
+      "type": 0,
+      "value": "Not now"
+    }
+  ],
+  "settings.updates.offChip": [
+    {
+      "type": 0,
+      "value": "Not checking"
+    }
+  ],
+  "settings.updates.offSentence": [
+    {
+      "type": 0,
+      "value": "This build doesn't check for new versions by itself. Download and install new versions yourself."
+    }
+  ],
+  "settings.updates.restartNow": [
+    {
+      "type": 0,
+      "value": "Restart now"
+    }
+  ],
+  "settings.updates.stoppedChip": [
+    {
+      "type": 0,
+      "value": "Waiting to restart"
+    }
+  ],
+  "settings.updates.stoppedSentence": [
+    {
+      "type": 0,
+      "value": "Installed. Restart to open the new version."
     }
   ],
   "teamAi.delegation.chipImage": [
@@ -8603,6 +9331,197 @@ export const catalog: MessageCatalog = {
       "value": "Zoom out"
     }
   ],
+  "timeline.memberPanel.agentKind": [
+    {
+      "type": 0,
+      "value": "Agent"
+    }
+  ],
+  "timeline.memberPanel.elapsedDays": [
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": " d"
+    }
+  ],
+  "timeline.memberPanel.elapsedHours": [
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": " h"
+    }
+  ],
+  "timeline.memberPanel.elapsedMinutes": [
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": " min"
+    }
+  ],
+  "timeline.memberPanel.groupAgents": [
+    {
+      "type": 0,
+      "value": "Agents "
+    },
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    }
+  ],
+  "timeline.memberPanel.groupOffline": [
+    {
+      "type": 0,
+      "value": "Offline "
+    },
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    }
+  ],
+  "timeline.memberPanel.groupOnline": [
+    {
+      "type": 0,
+      "value": "Online "
+    },
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    }
+  ],
+  "timeline.memberPanel.groupOtherAgents": [
+    {
+      "type": 0,
+      "value": "Other agents "
+    },
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    }
+  ],
+  "timeline.memberPanel.groupPeople": [
+    {
+      "type": 0,
+      "value": "Presence unknown "
+    },
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    }
+  ],
+  "timeline.memberPanel.groupWorking": [
+    {
+      "type": 0,
+      "value": "Working agents "
+    },
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    }
+  ],
+  "timeline.memberPanel.listLabel": [
+    {
+      "type": 0,
+      "value": "Channel member list"
+    }
+  ],
+  "timeline.memberPanel.moreRuns": [
+    {
+      "type": 0,
+      "value": "+"
+    },
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    }
+  ],
+  "timeline.memberPanel.moreRunsSpoken": [
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": " more"
+    }
+  ],
+  "timeline.memberPanel.nowFailed": [
+    {
+      "type": 0,
+      "value": "Couldn't load what the agents are doing."
+    }
+  ],
+  "timeline.memberPanel.nowFailedMid": [
+    {
+      "type": 0,
+      "value": "Couldn't load activity"
+    }
+  ],
+  "timeline.memberPanel.nowFailedShort": [
+    {
+      "type": 0,
+      "value": "Load failed"
+    }
+  ],
+  "timeline.memberPanel.nowRetry": [
+    {
+      "type": 0,
+      "value": "Reload"
+    }
+  ],
+  "timeline.memberPanel.request": [
+    {
+      "type": 0,
+      "value": "“"
+    },
+    {
+      "type": 1,
+      "value": "text"
+    },
+    {
+      "type": 0,
+      "value": "”"
+    }
+  ],
+  "timeline.memberPanel.requestSpoken": [
+    {
+      "type": 0,
+      "value": "Request: "
+    },
+    {
+      "type": 1,
+      "value": "text"
+    }
+  ],
+  "timeline.memberPanel.stageSpoken": [
+    {
+      "type": 1,
+      "value": "stage"
+    },
+    {
+      "type": 0,
+      "value": " (agent report)"
+    }
+  ],
   "timeline.quote.head": [
     {
       "type": 0,
@@ -8869,6 +9788,78 @@ export const catalog: MessageCatalog = {
       },
       "offset": 0,
       "pluralType": "cardinal"
+    }
+  ],
+  "timeline.typing.many": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " and "
+    },
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " other"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " others"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    },
+    {
+      "type": 0,
+      "value": " are typing…"
+    }
+  ],
+  "timeline.typing.one": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " is typing…"
+    }
+  ],
+  "timeline.typing.two": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " and "
+    },
+    {
+      "type": 1,
+      "value": "second"
+    },
+    {
+      "type": 0,
+      "value": " are typing…"
     }
   ],
   "timeline.unfurl.label": [

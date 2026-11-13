@@ -2,7 +2,7 @@
 import { createElement, useRef } from "react";
 import { act, render } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { COMPOSER_MAX_ROWS, useAutoGrow } from "./useAutoGrow";
+import { AUTO_GROW_MIRROR_ATTR, COMPOSER_MAX_ROWS, useAutoGrow } from "./useAutoGrow";
 
 let contentHeight = 0;
 function Field({ value }: { value: string }) {
@@ -46,5 +46,61 @@ describe("#4790 데스크탑 입력창 성장", () => {
     act(() => view.rerender(createElement(Field, { value: "짧은 글" })));
     expect(input.style.height).toBe("42px");
     expect(input.style.overflowY).toBe("hidden");
+  });
+});
+
+describe("#5567 재는 동안 살아 있는 입력창을 접지 않는다", () => {
+  // 앞 판은 키마다 입력창을 `height: auto`로 접고 `scrollHeight`를 읽었다. 그 강제 레이아웃에서 WebKit 이 대화 목록의
+  // scrollTop 을 깎아 여러 줄 초안을 치는 동안 목록이 입력창 뒤로 내려앉았다(gates/gate-typing-jitter.mjs 가 WebKit 에서 잰다).
+  // jsdom 은 레이아웃이 없으므로 여기서는 그 원인 자체를 잰다: 살아 있는 입력창에 쓰인 높이 값의 차례.
+  function heightWrites(input: HTMLTextAreaElement) {
+    const writes: string[] = [];
+    const observer = new MutationObserver((records) => {
+      for (const record of records) writes.push(record.oldValue ?? "");
+    });
+    observer.observe(input, { attributes: true, attributeFilter: ["style"], attributeOldValue: true });
+    return {
+      /** 바뀌기 전 값들 + 지금 값 = 이 입력창이 거쳐 간 모든 style. */
+      seen: () => {
+        for (const record of observer.takeRecords()) writes.push(record.oldValue ?? "");
+        return [...writes, input.getAttribute("style") ?? ""];
+      },
+      stop: () => observer.disconnect(),
+    };
+  }
+
+  it("세 줄 초안에서 한 글자씩 쳐도 입력창 높이는 한 번도 auto 를 거치지 않고, 높이는 마지막 값 하나다", () => {
+    contentHeight = 3 * 24 + 16;
+    const view = mount();
+    const input = view.container.querySelector("textarea")!;
+    const probe = heightWrites(input);
+    for (const value of ["세 줄 초안 가", "세 줄 초안 가나", "세 줄 초안 가나다"]) {
+      act(() => view.rerender(createElement(Field, { value })));
+    }
+    const seen = probe.seen();
+    probe.stop();
+    expect(seen.filter((style) => /height:\s*auto/.test(style))).toEqual([]);
+    expect(input.style.height).toBe("90px");
+  });
+
+  it("높이는 같은 부모 안의 보이지 않는 거울에서 잰다: 초점·포인터·보조기술에 서지 않고, 입력창이 사라지면 함께 사라진다", () => {
+    contentHeight = 2 * 24 + 16;
+    const view = mount();
+    const input = view.container.querySelector("textarea")!;
+    const mirror = input.parentElement!.querySelector<HTMLTextAreaElement>(`[${AUTO_GROW_MIRROR_ATTR}]`);
+    expect(mirror).not.toBeNull();
+    expect(mirror).not.toBe(input);
+    expect(mirror!.tabIndex).toBe(-1);
+    expect(mirror!.getAttribute("aria-hidden")).toBe("true");
+    // 자리·가시성·높이 0은 스타일시트(`autogrow-mirror`)가 든다 — 스크립트가 거울에 쓰는 인라인 값은 잰 폭뿐이다(M-4).
+    // jsdom 은 스타일시트를 읽지 않으므로 그 값 자체는 designSystem.test.ts 가 CSS 에서 잰다.
+    expect(mirror!.classList.contains("autogrow-mirror")).toBe(true);
+    expect(mirror!.style.visibility).toBe("");
+    expect(mirror!.style.position).toBe("");
+    expect(mirror!.style.height).toBe("");
+    act(() => view.rerender(createElement(Field, { value: "거울로 재는 글" })));
+    expect(mirror!.value).toBe("거울로 재는 글");
+    view.unmount();
+    expect(mirror!.isConnected).toBe(false);
   });
 });

@@ -542,4 +542,28 @@ describe("컴포넌트는 스타일을 짓지 않는다 — 런타임 몫", () =
       expect(fit).not.toContain(`probe.style.${authored}`);
     }
   });
+
+  it("지어낸 값은 이미 스타일시트에 있다 — 입력창 거울의 옷 (#5567 design-review M-4)", () => {
+    // `useAutoGrow`의 거울은 입력창의 클래스를 달고, 자리·가시성·포인터·높이 0은 `autogrow-mirror`가 든다. 스크립트가
+    // 거울에 쓰는 인라인 값은 잰 폭 하나다(`text-probe`가 글꼴만 스크립트로 넣는 것과 같은 나눔).
+    const mirror = /@utility autogrow-mirror \{([\s\S]*?)\n\}/.exec(CSS)?.[1] ?? "";
+    for (const declaration of [
+      "position: absolute;",
+      "visibility: hidden;",
+      "pointer-events: none;",
+      "block-size: 0;",
+      "overflow: hidden;",
+    ]) {
+      expect(mirror).toContain(declaration);
+    }
+    const grow = codeOnly(
+      readFileSync(`${SRC_DIR}/features/timeline/useAutoGrow.ts`, "utf8")
+    );
+    expect(grow).toContain('"autogrow-mirror"');
+    expect(grow).not.toMatch(/cssText|visibility\s*:|position\s*:|pointer-events/);
+    expect(grow).not.toMatch(/mirror\.style\.(?!width\b)[A-Za-z]+\s*=/);
+    // CSSOM 메서드 꼴도 같은 우회다(#5582, design-review R2-N1): `style.setProperty("visibility", …)`는 위 두 줄을 피해 갔다.
+    expect(grow).not.toMatch(/\.style\.(?:setProperty|removeProperty)\s*\(/);
+    expect(grow).not.toMatch(/setAttribute\(\s*["'`]style["'`]/);
+  });
 });

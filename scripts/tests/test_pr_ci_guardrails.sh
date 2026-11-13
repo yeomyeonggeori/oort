@@ -927,6 +927,9 @@ assert_policy_lane docs/GITHUB_OPS.md false false true
 assert_policy_lane docs/LOCAL_PR_GATE.md false false true
 assert_policy_lane docs/TRACKS.md false false true
 assert_policy_lane docs/adr/0153-ci-stack-selfhosted-runners.md false false true
+# The direct-copy ledger's seal and counting rules (#5589): a node file and a policy file.
+assert_policy_lane packages/momo-core/src/i18n/tooling/direct-copy.mjs false true true
+assert_policy_lane packages/momo-core/src/i18n/tooling/direct-copy-baseline.json false true false
 # A Rust-lane PR runs the policy fixtures too: test_pr_ci_guardrails.sh scans the
 # Rust sources for files read from outside the tree, and test_ghcr_notice_bundle.sh
 # copies legal/generated/spdx-texts.

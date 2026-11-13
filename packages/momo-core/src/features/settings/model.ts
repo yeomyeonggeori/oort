@@ -80,7 +80,7 @@ export const CLOUD_TARGET = "cloud";
 
 /** `WorkHostRoutes.validatedType`. */
 export function workHostTypeLabel(type: string): string {
-  if (type === "app") return "데스크톱 앱";
+  if (type === "app") return "데스크탑 앱";
   if (type === "workd") return "workd 데몬";
   if (type === "cloud") return "oort Cloud";
   return type;

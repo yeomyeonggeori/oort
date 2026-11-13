@@ -13,7 +13,7 @@ import { ScheduleSendMenu, type ScheduleSendMenuProps } from "@/features/schedul
 // 단추). 사람 눈에는 같은 일(글 쓰기)을 하는 입력창이 두 모양이었고, owner 가 「답글 채팅창은 보더 있고 UI 독특하던데」라고 짚었다. 그래서
 // 그릇·도구 줄·보내기 알약을 이 한 곳에 둔다: 반경·그림자·테두리·바탕·안쪽 여백은 `composer-card`(tokens.css) 한 유틸리티가 정하고, 도구 줄의
 // 단추 묶음(첨부·멘션·이모지·서식)과 보내기 + ▾ 알약은 아래 두 부품이 정한다. 두 입력창이 다른 것은 **자리표시 글과 그릇 안에 넣는 내용**
-// (맥락 띠·힌트 줄·작성 중 줄)뿐이다 — 그 자리는 이 부품의 `children`·`meta` 슬롯이다.
+// (맥락 띠·힌트 줄)뿐이다 — 그 자리는 이 부품의 `children`·`meta` 슬롯이다. 남의 「작성 중」은 카드 밖, 카드 바로 아래 줄이다(#5567).
 //
 // 이 부품은 상태를 갖지 않는다: 초안·보내기·멘션·예약은 각 입력창의 것이고, 여기는 그것을 **같은 모양으로 그리기만** 한다.
 // 시험 열쇠는 `testIdPrefix`("composer" | "thread-composer")가 앞에 붙는다 — 두 입력창이 한 화면에 함께 서므로 열쇠가 겹치지 않는다.
@@ -56,7 +56,7 @@ export function ComposerCard({
   sending?: boolean;
   /** 도구 줄의 왼쪽 묶음(`ComposerTools`). */
   tools: ReactNode;
-  /** 도구 줄의 가운데 슬롯(힌트·작성 중·예약 확정 줄). 없으면 도구와 보내기가 양끝에 선다. */
+  /** 도구 줄의 가운데 슬롯(힌트·예약 확정 줄). 없으면 도구와 보내기가 양끝에 선다. 남의 「작성 중」은 카드 아래 줄이다(#5567). */
   meta?: ReactNode;
   /** 도구 줄의 오른쪽 알약(`ComposerSend`). */
   send: ReactNode;

@@ -19,8 +19,9 @@
 //   5. 읽던 화면은        읽는 중에 새 메시지가 오면 화면은 움직이지 않고 개수만
 //      움직이지 않는다    올라간다. 바닥에 있으면 그 컨트롤은 아예 뜨지 않는다
 //                        (`followOutput`이 이미 따라간다).
-//   6. hover가 없는       포인터가 없는 기기에서는 거터의 시각이 정지 상태로 선다.
-//      기기의 시계        hover로만 여는 것은 그 기기에서 「없는 기능」이다 (리뷰 W-4).
+//   6. hover가 없는       포인터가 없는 기기에서는 이어진 줄의 거터 시각이 서지 않는다
+//      기기의 시계        (#5624 M2, 폰 앱 #3386과 같게): 같은 분 묶음(#5603)에서 그 시각은
+//                        언제나 바로 위 머리의 시각과 같다. 머리의 시각은 그대로 선다.
 //   7. 컨트롤 없는 행도   액션이 없는 행은 자기 자신이 탭 정거장이 되어, 키보드만
 //      정거장이 된다      쓰는 사람도 그 행의 시각에 닿는다 (리뷰 W-4 후반).
 //
@@ -30,7 +31,7 @@
 //   FOLD_GATE_PROVE_RED_JUMP=1 npm run gate:fold
 //     expected failure: "no way back to the newest message"
 //   FOLD_GATE_PROVE_RED_ROWTIME=1 npm run gate:fold
-//     expected failure: "a touch reader can never see a row's time"
+//     expected failure: "a touch reader sees the header's time repeated on every continuation row"
 //   FOLD_GATE_PROVE_RED_ROWSTOP=1 npm run gate:fold
 //     expected failure: "a row with no controls is not reachable by keyboard"
 //
@@ -228,6 +229,7 @@ function historyPage() {
     }),
     // 한 저자의 묶음: 머리 + 연속 + tombstone(연속). tombstone은 액션이 하나도
     // 없는 행이라(`isActionable`이 거짓) 컨트롤 없는 행의 실물 표본이다.
+    // 셋은 **같은 분**(14:20) 안이다 — 묶음은 같은 로컬 분까지만 이어진다(#5603).
     row({
       id: GROUP_HEAD_MSG,
       seq: 202,
@@ -240,7 +242,7 @@ function historyPage() {
       seq: 203,
       authorMemberId: memberId,
       body: "빠진 항목 있으면 알려 주세요.",
-      createdAtMs: base + 1_240_000,
+      createdAtMs: base + 1_220_000,
     }),
     row({
       id: TOMBSTONE_MSG,
@@ -248,7 +250,7 @@ function historyPage() {
       authorMemberId: memberId,
       body: null,
       state: "deleted",
-      createdAtMs: base + 1_280_000,
+      createdAtMs: base + 1_240_000,
     })
   );
   return rows;
@@ -785,10 +787,10 @@ async function exerciseTouch(browser) {
   await login(page, { narrow: true });
 
   if (proveRedRowTime) {
-    // red seam: 거터의 시각을 다시 hover에만 맡긴다 = 손가락만 쓰는 사람에게는
-    // 그 시각을 여는 제스처가 하나도 없는 상태 (진단 H-3이 폰에서 살아남은 꼴).
+    // red seam: 이어진 줄의 거터 시각을 터치에서 다시 상시로 세운다 = 같은 분 묶음에서
+    // 머리 시각이 줄마다 되풀이되던 #5624 M2의 상태.
     await page.addStyleTag({
-      content: "[data-row-clock]{opacity:0!important}",
+      content: "[data-row-clock]{opacity:1!important}",
     });
   }
 
@@ -813,14 +815,26 @@ async function exerciseTouch(browser) {
   const toolbarCount = await contRow
     .locator('[data-testid="message-hover-toolbar"]')
     .count();
+  // 그 행이 쓰인 분은 머리가 말한다: 같은 묶음 머리의 시각은 정지 상태로 서 있어야 한다.
+  const headTime = rowLocator(page, GROUP_HEAD_MSG).locator('[data-testid="row-time"]');
+  const headOpacity =
+    (await headTime.count()) === 0
+      ? 0
+      : await headTime.first().evaluate((node) => Number(getComputedStyle(node).opacity));
   console.log(
-    `[touch] 정지 상태 불투명도 ${opacity} · 호버 툴바 ${toolbarCount}개`
+    `[touch] 이어진 줄 시각 불투명도 ${opacity} · 머리 시각 ${headOpacity} · 호버 툴바 ${toolbarCount}개`
   );
-  if (opacity < 0.99) {
+  if (opacity > 0.01) {
     throw new Error(
-      `a touch reader can never see a row's time: 정지 상태 불투명도가 ${opacity}인데 ` +
-        "이 기기에는 hover가 없다. 드러낼 제스처가 없는 것을 hover 뒤에 두면 " +
-        "그 기기에서는 없는 기능이다 (리뷰 W-4)"
+      `a touch reader sees the header's time repeated on every continuation row: 정지 상태 ` +
+        `불투명도가 ${opacity}다. 같은 분 묶음(#5603)에서 이 시각은 언제나 머리 시각과 같다 — ` +
+        "폰 앱(#3386)처럼 이어진 줄에는 시각을 세우지 않는다 (#5624 M2)"
+    );
+  }
+  if (headOpacity < 0.99) {
+    throw new Error(
+      `묶음 머리의 시각이 터치에서 보이지 않는다(불투명도 ${headOpacity}): 이어진 줄의 시각을 ` +
+        "걷으면 그 행이 쓰인 분은 머리가 말해야 한다"
     );
   }
   if (toolbarCount !== 0) {
@@ -930,8 +944,8 @@ async function main() {
   console.log("GATE PASS: 긴 답변은 예산만큼만 펴고 남은 줄을 숫자로 말했고, 짧은");
   console.log("           답변은 그대로였고, 펼치면 원문이 전부 왔고, 위로 올라간");
   console.log("           사람에게 돌아갈 길이 생겼고, 읽던 화면은 새 메시지에");
-  console.log("           밀리지 않았고, hover 없는 기기의 시각은 정지 상태로");
-  console.log("           섰고, 컨트롤 없는 행도 키보드의 정거장이 되었다.");
+  console.log("           밀리지 않았고, hover 없는 기기에서는 이어진 줄의 시각이 서지");
+  console.log("           않고 머리가 시각을 말했고, 컨트롤 없는 행도 키보드의 정거장이 되었다.");
 }
 
 await main();

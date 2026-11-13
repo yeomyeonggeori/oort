@@ -136,6 +136,9 @@ async function launchBurstHarness(opts: { history?: number } = {}): Promise<{
     ENTER_CONVERSATION_CLASS,
     "h-full",
     "relative",
+    // 따옴표 짝으로 읽는 아래 추출은 주석의 백틱과 어긋나 스크롤러 클래스를 놓친다(h-full · relative 와 같은 까닭). 규칙이
+    // `tokens.css` 에서 빠지면 이 후보는 아무것도 만들지 않고, 클래스가 `Timeline.tsx` 에서 빠지면 스크롤러가 받지 않는다(#5638).
+    "timeline-scroller",
     ...quotedClassTokens(readFileSync(join(HERE, "Timeline.tsx"), "utf8")),
     ...quotedClassTokens(readFileSync(join(HERE, "MessageRow.tsx"), "utf8")),
     ...quotedClassTokens(readFileSync(join(HERE, "UnreadPill.tsx"), "utf8")),
@@ -607,6 +610,48 @@ describe("virtualized Timeline burst (Chromium)", () => {
           }
         );
         expect(jumped).toBe(1);
+      } finally {
+        await handle.browser.close();
+      }
+    },
+    40_000
+  );
+});
+
+/**
+ * 타임라인 스크롤러는 브라우저 스크롤 앵커링을 끈다 (#5638).
+ *
+ * 스크롤 위치의 주인은 가상 목록 + `scrollHold` 한 길이다. 앵커링은 Chromium · Playwright WebKit 26.5 · macOS 27의
+ * WKWebView(데스크탑 앱)에서 켜져 있고(2026-11-10 실측) macOS 14~26의 시스템 WebKit 에는 문서상 없다. 스크롤러에 걸어 두지 않으면
+ * 앵커링이 있는 엔진에서만 손이 하나 더 낄 수 있다(스레드 답글 상자도 같은 클래스를 입는다 — #5649, `ThreadPanel.scrollHold.test.tsx`). 이 시험은 진짜 `Timeline`(진짜 react-virtuoso)과
+ * `tokens.css` 를 컴파일한 CSS 로 엔진이 **계산한** 값을 잰다: `Timeline.tsx` 의 클래스를 빼도, `tokens.css` 의 규칙을 빼도
+ * `auto` 로 빨개진다. 이 파일의 다른 시험처럼 번들 Chromium 만 띄운다(`supportsAuto` 가 「이 엔진이 속성을 안다」를 단정해,
+ * 속성을 모르는 엔진에서 빈 계산값으로 헛되이 통과하지 않게 한다).
+ */
+describe("타임라인 스크롤러의 스크롤 앵커링 (#5638, Chromium)", () => {
+  it.skipIf(!chromiumAvailable)(
+    "진짜 Timeline 의 스크롤러는 계산된 overflow-anchor 가 none 이고, 문서의 다른 상자는 기본값 그대로다",
+    async () => {
+      const handle = await launchBurstHarness({ history: 8 });
+      try {
+        await handle.page.evaluate(() => window.__timelineBurst.onSubscribed());
+        const scroller = handle.page.locator("[data-testid='timeline-virtuoso']");
+        await scroller.waitFor({ state: "attached", timeout: 4000 });
+        const measured = await scroller.evaluate((node) => ({
+          // 이 엔진이 앵커링을 안다: 모르는 엔진이면 계산값이 비어 아래 단정이 아무것도 재지 않는다.
+          supportsAuto: CSS.supports("overflow-anchor", "auto"),
+          // 클래스가 붙은 곳이 가상 목록의 스크롤러다(바깥 상자에 붙으면 스크롤러는 그대로 auto 다).
+          isVirtuosoScroller: node.hasAttribute("data-virtuoso-scroller"),
+          scroller: getComputedStyle(node).overflowAnchor,
+          // 대조: 끄는 것은 손보정(`scrollHold`)이 붙은 스크롤 상자뿐이다. 문서 전체를 끄면 손보정 없는 다른 스크롤 상자가 자리를 잃는다.
+          body: getComputedStyle(document.body).overflowAnchor,
+        }));
+        expect(measured).toEqual({
+          supportsAuto: true,
+          isVirtuosoScroller: true,
+          scroller: "none",
+          body: "auto",
+        });
       } finally {
         await handle.browser.close();
       }

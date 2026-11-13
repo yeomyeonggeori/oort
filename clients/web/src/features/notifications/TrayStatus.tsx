@@ -18,7 +18,7 @@ import { useFormatMessage } from "@/i18n/useFormatMessage";
 import { isDesktop, onTrayAction, setTrayStatus, type TrayStatusWire } from "@/lib/tauri";
 import { createCloseNotice } from "./closeNotice";
 import { useDockBadgeCount } from "./useDockBadgeCount";
-import { buildTrayStatus, createRowIds, readAllTargets, trayCopy } from "./trayModel";
+import { buildTrayStatus, createRowIds, hasFollowedThreadShare, readAllTargets, trayCopy } from "./trayModel";
 
 /**
  * 메뉴 막대 아이콘의 상태를 셸에 보내고, 메뉴에서 고른 것을 받아 간다 (#5193). 아무것도 렌더하지 않는다.
@@ -32,7 +32,8 @@ import { buildTrayStatus, createRowIds, readAllTargets, trayCopy } from "./trayM
  *    줄은 관제 서랍의 카드와 같은 곳으로 간다. 이벤트의 id는 마지막으로 보낸 줄들과 맞춰 본 것만 믿는다.
  *    알림 배너처럼 메뉴 막대도 **새 입구**라서 이동 직전에 겹친 임시 표면을 걷고(`dismissTemporarySurfaces`), 한 번만
  *    보이는 값을 쥔 화면이 있으면(`globalShortcutsHeld`) 전역 단축키처럼 물러선다 — 창은 이미 앞으로 와 있다.
- *    둘이 더 있다. **「모두 읽음 처리」**(#5195)는 안 읽은 멘션이 있는 채널과 안 읽은 DM의 읽음 위치를 올린다
+ *    둘이 더 있다. **「모두 읽음 처리」**(#5195)는 안 읽은 멘션이 있는 채널과 안 읽은 DM의 읽음 위치를 올리고, 따라가는 스레드의
+ *    답글 몫이 있으면 스레드 읽음 길도 부른다(#5690, `markFollowedThreads`; 받은함 「스레드」 줄은 건드리지 않는다)
  *    (`readAllTargets`; 승인·응답 필요 칸은 결정으로만 닫히므로 두고, 남은 수를 메뉴의 한 줄로 말한다). 이동도 겹친 표면도
  *    없는 일이라 걷지도, 물러서지도 않는다 — 창이 앞으로 오지도 않는다(셸이 그렇게 한다). **「창 치움」**(#5196)은 선택이
  *    아니라 빨간 단추가 창을 메뉴 막대로 치웠다는 알림이다: 처음 한 번만 그 사실을 OS 알림으로 말한다(`closeNotice.ts`).
@@ -54,7 +55,7 @@ export function TrayStatus() {
   const formatMessage = useFormatMessage();
   const navigate = useNavigate();
   const openNewDm = useOpenNewDm();
-  const { markChannelsRead } = useMailboxReadActions();
+  const { markChannelsRead, markFollowedThreads } = useMailboxReadActions();
 
   // 「모두 읽음 처리」가 읽을 채널들. 메뉴 항목의 켜짐과 눌렀을 때 읽는 목록이 같은 답이다.
   const targets = useMemo(
@@ -66,6 +67,9 @@ export function TrayStatus() {
     [readStates.data, channels.groups.dms]
   );
 
+  // 따라가는 스레드의 답글 몫(#5690). 채널 위치로는 안 꺼지므로 따로 센다.
+  const threadShare = hasFollowedThreadShare(readStates.data ?? []);
+
   // 카드마다 짧은 줄 id를 정해 주는 장부. 컴포넌트가 사는 동안 같은 카드는 같은 id를 갖는다(지연 초기화: 다시 그릴 때마다 만들지 않는다).
   const [rowIds] = useState(createRowIds);
 
@@ -74,7 +78,7 @@ export function TrayStatus() {
   const { status, byId } = buildTrayStatus({
     unread,
     compose: true,
-    readAll: targets.length > 0,
+    readAll: targets.length > 0 || threadShare,
     left: { approvals: needs.approvals, panes: needs.panes },
     items,
     copy: trayCopy(formatMessage),
@@ -110,11 +114,13 @@ export function TrayStatus() {
 
   // 가장 최근의 이동 함수를 ref로 읽는다: 구독은 한 번만 만든다(`navigate`는 경로마다 새 함수라서 그 변화에 다시 구독하면
   // 그 사이에 온 선택을 놓친다 — `DesktopNotifications`의 같은 이유).
-  const landRef = useRef({ navigate, openNewDm, markChannelsRead });
-  landRef.current = { navigate, openNewDm, markChannelsRead };
+  const landRef = useRef({ navigate, openNewDm, markChannelsRead, markFollowedThreads });
+  landRef.current = { navigate, openNewDm, markChannelsRead, markFollowedThreads };
   // 눌린 순간의 목록을 읽는다(구독은 한 번만 만든다).
   const targetsRef = useRef(targets);
   targetsRef.current = targets;
+  const threadShareRef = useRef(threadShare);
+  threadShareRef.current = threadShare;
   const closeNoticeText = formatMessage("desktop.tray.closeNotice");
   const closeNoticeTextRef = useRef(closeNoticeText);
   closeNoticeTextRef.current = closeNoticeText;
@@ -132,7 +138,9 @@ export function TrayStatus() {
         return;
       }
       if (action.action === TRAY_ACTION.readAll) {
-        void landRef.current.markChannelsRead(targetsRef.current);
+        // 채널·DM 읽음과 스레드 몫은 서로 기다리지 않는다: 한쪽의 실패가 다른 쪽을 멈추지 않는다.
+        if (targetsRef.current.length > 0) void landRef.current.markChannelsRead(targetsRef.current);
+        if (threadShareRef.current) void landRef.current.markFollowedThreads();
         return;
       }
       if (globalShortcutsHeld()) return;

@@ -264,7 +264,7 @@ describe("호스트 등급", () => {
   it("names D5's three grades", () => {
     expect(hostTier(session(), [host({ type: "app" })])).toEqual({
       key: "app",
-      label: "데스크톱 앱",
+      label: "데스크탑 앱",
     });
     expect(hostTier(session(), [host({ type: "workd" })]).label).toBe("상시 서버");
     expect(hostTier(session(), [host({ type: "cloud" })]).label).toBe("클라우드");
@@ -334,7 +334,7 @@ describe("지금 이거 꺼도 되나 — 세션 상태까지 읽고 답한다",
   it("tells an orphaned session where it can be picked up", () => {
     const lost = sessionSurvival(session({ status: "orphaned" }), APP);
     expect(lost.sentence).toContain("호스트와 연결이 끊겼습니다");
-    expect(lost.sentence).toContain("데스크톱에서");
+    expect(lost.sentence).toContain("데스크탑에서");
     expect(lost.atRisk).toBe(false);
   });
 

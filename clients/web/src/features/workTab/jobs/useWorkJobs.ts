@@ -10,7 +10,7 @@ import {
   initialWorkFilter,
   type WorkFilter,
 } from "@momo/core/features/workbench/workJobs";
-import { teamBoardKey } from "@/features/workTab/teamBoard/useTeamBoard";
+import { railCoversItems, teamBoardKey } from "@/features/workTab/teamBoard/useTeamBoard";
 
 // =============================================================================
 // 「작업」 화면의 읽기 (ADR-0202 D4, U1 #3842).
@@ -19,25 +19,43 @@ import { teamBoardKey } from "@/features/workTab/teamBoard/useTeamBoard";
 // 옛 서버면 `include=runs` 한 벌로 물러선다(판정은 코어 `fetchWorkJobs`가 한 번 하고 기억한다).
 // 질의 열쇠는 팀 보드 열쇠 밑에 둔다: 보드의 실시간 재읽기(`useTeamBoardRail`)가 무효화하는
 // 열쇠가 그대로 이 목록도 다시 읽게 한다(새 프레임 이름 없음, D4).
+//
+// 박자(#5640): 실시간이 붙어 있고 줄의 집 채널을 모두 듣고 있으면 60초 박자를 멈춘다 — 권한 요청·결정·상태 전환은 신호가
+// 다시 읽게 한다. 끊겼거나(연결 중 포함) 듣는 채널 상한을 넘은 줄이 있으면 60초 박자다. 실시간이 있는 동안 신호가 없는 것
+// (diff·단계 숫자, 60초를 넘긴 멘션 run, 권한 요청의 만료)과 화면을 떠난 동안의 일은 다시 들어올 때·창에 돌아올 때의
+// 재읽기가 받친다(`staleTime: 0`).
 // =============================================================================
 
 const PAGE = 50;
-/** diff·단계 숫자는 이벤트가 없다: 느린 타이머가 바닥이다(보드와 같은 값). */
-const POLL_MS = 60_000;
+/** 실시간이 끊겼을 때의 박자(보드와 같은 값). */
+export const WORK_JOBS_POLL_MS = 60_000;
 
 export function workJobsKey(workspaceId: string, filter: WorkFilter) {
   return [...teamBoardKey(workspaceId), "jobs", filter] as const;
 }
 
-export function useWorkJobsList(workspaceId: string, filter: WorkFilter) {
+/** 실시간이 붙어 있고 받은 줄의 집 채널을 모두 듣는가. 아니면 60초 박자다. */
+export function workJobsPollMs(
+  live: boolean,
+  items: readonly SharedWorkSession[]
+): number | false {
+  return live && railCoversItems(items) ? false : WORK_JOBS_POLL_MS;
+}
+
+export function useWorkJobsList(workspaceId: string, filter: WorkFilter, live = false) {
   const query = useInfiniteQuery({
     queryKey: workJobsKey(workspaceId, filter),
     queryFn: ({ pageParam }) =>
       fetchWorkJobs(workspaceId, { who: filter, cursor: pageParam, limit: PAGE }),
     initialPageParam: null as string | null,
     getNextPageParam: (last) => last.nextCursor,
-    refetchInterval: POLL_MS,
+    refetchInterval: (q) =>
+      workJobsPollMs(live, q.state.data?.pages.flatMap((page) => page.sessions ?? []) ?? []),
     refetchOnWindowFocus: true,
+    // 「작업」을 떠난 동안(승인 카드·A 칸·채널로 간 동안) 온 결정·요청은 이 화면의 레일이 듣지 못하고, 실시간이 붙어 있으면
+    // 박자도 없다. 앱 기본 신선 시간(30초)을 따르면 그 안에 돌아오거나 창에 돌아와도 다시 읽지 않아, 답한 줄이 「응답 필요」에
+    // 남는다. 그래서 이 목록은 늘 낡은 것으로 본다: 다시 들어올 때와 창에 돌아올 때마다 한 번 읽는다.
+    staleTime: 0,
     enabled: workspaceId !== "",
   });
   const items = useMemo<SharedWorkSession[]>(

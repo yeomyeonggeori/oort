@@ -29,7 +29,10 @@ import {
   workSessionResumeTargets,
   workSessionStatus,
   type WorkSessionEvent,
+  withOpenRequest,
+  withRunnerSubject,
 } from "./workSessionModel";
+import { workRunnerPlace, workRunnerSubject } from "./workLocation";
 import { silenceLabel } from "./workSessionFormat";
 
 // =============================================================================
@@ -647,7 +650,7 @@ describe("workHostTrust", () => {
   it("does not present a running session on an offline host as active", () => {
     expect(
       workSessionContinuityStatus(session(), [host({ online: false })])
-    ).toEqual({ key: "unavailable", label: "호스트 응답 없음" });
+    ).toEqual({ key: "unavailable", label: "연결 안 됨" });
     expect(workSessionContinuityStatus(session(), [host()]).key).toBe("running");
     expect(
       workSessionContinuityStatus(
@@ -698,7 +701,7 @@ describe("workHostTrust", () => {
   });
 
   it("drops the promise of coming steps when nobody has heard the host", () => {
-    const promise = "에이전트가 첫 단계를 보고하면 여기에 한 줄씩 쌓입니다.";
+    const promise = "에이전트가 첫 단계를 보고하면 여기에 한 줄씩 쌓여요.";
     expect(emptyStepsDetail(session(), [host()])).toBe(promise);
     // A finished session is history: the host's heartbeat now says nothing
     // about the steps it already did or did not deliver.
@@ -708,7 +711,7 @@ describe("workHostTrust", () => {
     // No answer from the registry is not evidence either way.
     expect(emptyStepsDetail(session(), undefined)).toBe(promise);
     expect(emptyStepsDetail(session(), [host({ online: false })])).toBe(
-      "이 호스트에서 최근 신호를 받은 기록이 없습니다. 새 단계가 도착하지 않을 수 있습니다."
+      "이 호스트에서 최근 신호를 받은 기록이 없어요. 새 단계가 도착하지 않을 수 있어요."
     );
   });
 });
@@ -880,5 +883,57 @@ describe("parseSessionThreadReply (N3 #3595)", () => {
     expect(parseSessionThreadReply({ ...base, state: "deleted" })).toBeNull();
     expect(parseSessionThreadReply({ ...base, body: "   " })).toBeNull();
     expect(parseSessionThreadReply({ ...base, type: "system" })).toBeNull();
+  });
+});
+
+describe("주인에게 열린 권한 요청 — 「응답 필요」 (#5593 수리 M2)", () => {
+  it("주인에게 열린 요청이 있으면 돌거나 대기 중인 세션이 「응답 필요」다", () => {
+    expect(withOpenRequest(workSessionStatus({ status: "running" }), true)).toEqual({
+      key: "waiting",
+      label: "응답 필요",
+    });
+    expect(withOpenRequest(workSessionStatus({ status: "idle" }), true).key).toBe("waiting");
+  });
+
+  it("요청이 없거나 주인이 아니면, 그리고 호스트 응답 없음·끝난 세션이면 원래 상태 그대로다", () => {
+    const running = workSessionStatus({ status: "running" });
+    expect(withOpenRequest(running, false)).toBe(running);
+    const unavailable = { key: "unavailable" as const, label: "연결 안 됨" };
+    expect(withOpenRequest(unavailable, true)).toBe(unavailable);
+    const ended = workSessionStatus({ status: "ended" });
+    expect(withOpenRequest(ended, true)).toBe(ended);
+  });
+});
+
+describe("맥 연결 낱말 — 한 자리에 한 말 (#5593 수리 3회차 M2·L3)", () => {
+  it("고아 세션도 「연결 안 됨」이다 — 레지스트리가 못 본 세션과 같은 말, 열쇠(색)는 그대로", () => {
+    expect(workSessionStatus({ status: "orphaned" })).toEqual({ key: "orphaned", label: "연결 안 됨" });
+  });
+
+  it("주어는 실행 위치가 정한다: 데스크탑 앱만 「맥」, 셀프호스트 서버·클라우드·모름은 「실행하는 컴퓨터」", () => {
+    const unavailable = { key: "unavailable" as const, label: "연결 안 됨" };
+    expect(
+      (["t1", "t2", "t3", "unknown"] as const).map((key) => [key, withRunnerSubject(unavailable, key).label])
+    ).toEqual([
+      ["t1", "맥 연결 안 됨"],
+      ["t2", "실행하는 컴퓨터 연결 안 됨"],
+      ["t3", "실행하는 컴퓨터 연결 안 됨"],
+      ["unknown", "실행하는 컴퓨터 연결 안 됨"],
+    ]);
+    // 답할 곳: 이름이 있으면 이름(실행 위치와 상관없이), 없으면 같은 주어.
+    expect(workRunnerPlace(" 사무실 맥 mini ", "t2")).toBe("사무실 맥 mini");
+    expect(workRunnerPlace("", "t1")).toBe("맥");
+    expect(workRunnerPlace(null, "unknown")).toBe(workRunnerSubject("unknown"));
+  });
+
+  it("폰 세션 머리는 「연결 안 됨」으로 읽는 두 열쇠에 주어를 붙이고, 다른 상태는 그대로 둔다", () => {
+    expect(withRunnerSubject(workSessionStatus({ status: "orphaned" }), "t1")).toEqual({
+      key: "orphaned",
+      label: "맥 연결 안 됨",
+    });
+    const running = workSessionStatus({ status: "running" });
+    expect(withRunnerSubject(running, "t1")).toBe(running);
+    const waiting = withOpenRequest(running, true);
+    expect(withRunnerSubject(waiting, "t2")).toBe(waiting);
   });
 });

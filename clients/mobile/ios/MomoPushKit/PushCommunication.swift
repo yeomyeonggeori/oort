@@ -35,15 +35,12 @@ import Foundation
 public enum PushPresentationCopy {
     /// 「메시지 미리보기」 off, and 「보낸 사람 표시」 off: the body says only that something came.
     public static let hiddenBody = "새 메시지"
-    /// Put before the text of a reply that lives in a thread (설계 1: 「앞에 스레드 표시」).
-    public static let threadLabel = "스레드"
-    public static let threadSeparator = " · "
     /// A channel's name is shown as `#name`, the way the app writes it.
+    ///
+    /// A reply in a thread carries no mark of its own any more (#5660, owner 2026-11-11: 「스레드 가운데점 앞에 붙는 거」 빼기):
+    /// its notification reads like any message of its room — the sender, the room's `#name` as the group, the text. Opening
+    /// it still lands in the thread (the envelope keeps `threadRootID`, `isThreadReply` below).
     public static let channelPrefix = "#"
-
-    static func threaded(_ body: String) -> String {
-        threadLabel + threadSeparator + body
-    }
 }
 
 // MARK: - what the planner decides
@@ -148,7 +145,6 @@ public enum PushPresentationPlanner {
         }
 
         let isThreadReply = envelope.threadRootID != nil
-        if isThreadReply { body = PushPresentationCopy.threaded(body) }
 
         let groupName = Self.groupName(reason: envelope.reason, channel: channel)
         let descriptor = PushCommunicationDescriptor(

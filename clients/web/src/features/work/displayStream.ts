@@ -347,7 +347,7 @@ export const DISPLAY_FAILURE_COPY: Readonly<Record<DisplayFailure, string>> = {
   host_unreachable:
     "호스트에 닿지 못했습니다. 화면은 서버를 거치지 않고 호스트에서 직접 오므로, 이 브라우저가 호스트 주소에 닿을 수 있어야 합니다.",
   host_blocked_by_policy:
-    "이 페이지의 보안 정책이 호스트 주소로의 연결을 막았습니다. 데스크톱 앱에서는 그대로 볼 수 있고, 브라우저에서 열려면 이 웹을 서빙하는 서버가 호스트 주소를 허용해야 합니다.",
+    "이 페이지의 보안 정책이 호스트 주소로의 연결을 막았습니다. 데스크탑 앱에서는 그대로 볼 수 있고, 브라우저에서 열려면 이 웹을 서빙하는 서버가 호스트 주소를 허용해야 합니다.",
   host_timeout: `호스트가 ${Math.round(
     HOST_CONNECT_TIMEOUT_MS / 1000
   )}초 안에 응답하지 않았습니다. 호스트 주소와 네트워크를 확인한 뒤 다시 연결하세요.`,
@@ -373,7 +373,7 @@ export const DISPLAY_FAILURE_COPY: Readonly<Record<DisplayFailure, string>> = {
   media_failed:
     "권한과 신호는 오갔지만 화면 데이터가 흐르지 못했습니다. 이 브라우저와 호스트 사이의 방화벽이 미디어 포트를 막았을 수 있습니다.",
   webrtc_unsupported:
-    "이 브라우저에서는 라이브 화면을 열 수 없습니다. WebRTC를 지원하는 브라우저나 데스크톱 앱에서 열어 보세요.",
+    "이 브라우저에서는 라이브 화면을 열 수 없습니다. WebRTC를 지원하는 브라우저나 데스크탑 앱에서 열어 보세요.",
 };
 
 /**

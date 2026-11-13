@@ -79,6 +79,7 @@ import {
   canPinMessage,
   canReactToMessage,
   canReplyToMessage,
+  echoAtMs,
   hasAnyAction,
   type MessageActionAvailability,
   type PendingMessage,
@@ -1351,7 +1352,7 @@ const ACTION_RESULT_TONE: Readonly<
 const ACTION_RESULT_ELSEWHERE: Readonly<Record<string, string>> = {
   // 「관리」가 아니다(design-review 2R N-A): 웹의 설정 › 멤버와 초대에는 발급된
   // 목록(읽기 전용)과 만들기 폼뿐이고 취소·재발급이 없다. 할 수 있는 것만 이름 댄다.
-  'invite.create': '링크 목록 확인과 새 링크 만들기는 데스크톱이나 웹에서 할 수 있습니다.',
+  'invite.create': '링크 목록 확인과 새 링크 만들기는 데스크탑이나 웹에서 할 수 있습니다.',
 };
 
 /**
@@ -2148,7 +2149,7 @@ function ArtifactCard({
         <Text style={styles.cardMeta}>
           {`변경이 너무 커서 여기서는 펼치지 못합니다. 전체 ${formatCount(
             artifact.totalLineCount,
-          )}줄은 데스크톱 앱에서 열어 보세요.`}
+          )}줄은 데스크탑 앱에서 열어 보세요.`}
         </Text>
       ) : null}
 
@@ -3793,14 +3794,14 @@ function MessageRowInner({
           // 말한다」는 이유로 **비어 있는 아바타 칸에 연속 행의 시각을 세웠다**.
           // 그 판단(5분 창 안 개별 발화의 시각이 화면 어디에도 없다)은 접근성
           // 라벨엔 시각이 있다는 점과 함께 당시엔 합리적이었으나, owner 결정이
-          // 그것을 **대체한다**: 같은 작성자 5분 창(`AUTHOR_GROUP_WINDOW_MS`)의
-          // 연속 발화는 머리(아바타·이름·시각) 한 번 + 본문만 문단처럼 이어진다.
+          // 그것을 **대체한다**: 같은 작성자의 연속 발화(묶음 — #5603부터 같은 로컬 분,
+          // 코어 `startsAuthorGroup`)는 머리(아바타·이름·시각) 한 번 + 본문만 문단처럼 이어진다.
           // 왼쪽 칸의 시각은 묶음을 개별 메시지 더미로 쪼개 보이게 했다.
           //
           // 개별 시각은 사라지지 않는다:
           //   * 길게 눌러 여는 액션 시트 머리(`MessageActionSheet` 의 `sheet-time`)
           //   * 접근성 라벨(`rowAccessibilityLabel`) — 로터는 늘 알고 있었다
-          // 웹은 hover 로 주므로 그대로다. 그룹 창(5분)도 그대로다.
+          // 웹은 hover 로 주므로 그대로다. 묶음은 같은 분까지라 머리의 시각이 곧 그 묶음의 시각이다.
           //
           // 되돌리지 말 것: 연속 행에 시각 `Text` 를 다시 세우면 `row-time` 시험이
           // 빨개진다(묶음 머리 한 곳에만 있어야 한다).
@@ -4375,6 +4376,7 @@ export function PendingRow({
   onDiscard,
   failureKind = null,
   arrivalSurface = ARRIVAL_SURFACE_CHANNEL,
+  serverOffsetMs = 0,
 }: {
   pending: PendingMessage;
   startsGroup: boolean;
@@ -4407,10 +4409,15 @@ export function PendingRow({
    * (`null`) 지금까지처럼 「전송 실패」만 말한다. 상태 코드·서버 원문은 어디에도 없다.
    */
   failureKind?: SendFailureKind | null;
+  /**
+   * #5624 — 서버 시계와 이 기기 시계의 차이(ms). 시각 글자에 더해 확정본(서버 시각)과 같은 시계를 말하게 한다. 묶음 판정과 같은 값이다.
+   */
+  serverOffsetMs?: number;
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
   const formatMessage = useFormatMessage();
   const failed = pending.status === 'failed';
+  const shownAtMs = echoAtMs(pending, serverOffsetMs);
   // 인용 머리의 재료(#5381 Q4). 점프는 주지 않는다: 아직 보내지지도 않은 글에서 원본으로 떠나는 길은, 돌아왔을 때 그 글이 어디 있는지 아무도
   // 보장하지 못한다(웹 `PendingRow` 와 같은 규칙).
   const echoQuoteHead: QuoteHeadSpec | undefined = quote
@@ -4507,7 +4514,7 @@ export function PendingRow({
             memberId={pending.authorMemberId}
             // 기기 시계의 보낸 시각(`Author` 의 `time` 설명). 서버 사본이 오기 전에도 시각 글자가 서 있어서
             // 교체 때 글자가 새로 생기지 않는다. 시각을 알 수 없으면(유한한 수가 아니면) 지어내지 않는다.
-            time={Number.isFinite(pending.createdAtMs) ? timeLabel(pending.createdAtMs) : undefined}
+            time={Number.isFinite(shownAtMs) ? timeLabel(shownAtMs) : undefined}
             pendingMark={slowMark}
           />
         ) : null}

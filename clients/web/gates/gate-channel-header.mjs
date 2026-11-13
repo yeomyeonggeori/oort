@@ -81,6 +81,27 @@ const {
   topicView: TOPIC_VIEW_LABEL,
 } = canonicalCopy(webRoot);
 
+/**
+ * 멤버 패널에서 에이전트 줄을 **눈에 보이게** 가르는 글(#5686): 에이전트 줄이 든 묶음의 머리(「일하는 에이전트 N」·「그 밖의
+ * 에이전트 N」·「에이전트 N」). 사전이 정본이라 게이트가 낱말을 다시 적지 않고, 값의 `{count…}` 앞 글만 쓴다.
+ */
+const AGENT_HEADING_PREFIXES = Object.fromEntries(
+  ["ko-KR", "en-US"].map((locale) => {
+    const catalog = JSON.parse(
+      readFileSync(
+        resolve(webRoot, `../../packages/momo-core/src/i18n/catalogs/${locale}/timeline.json`),
+        "utf8"
+      )
+    );
+    return [
+      locale,
+      ["groupWorking", "groupAgents", "groupOtherAgents"].map((key) =>
+        catalog[`timeline.memberPanel.${key}`].split("{")[0].trim()
+      ),
+    ];
+  })
+);
+
 const proveRedCount = process.env.HEADER_GATE_PROVE_RED_COUNT === "1";
 const proveRedRename = process.env.HEADER_GATE_PROVE_RED_RENAME === "1";
 const proveRedMute = process.env.HEADER_GATE_PROVE_RED_MUTE === "1";
@@ -492,7 +513,22 @@ async function exercise(browser) {
   const agentRow = page.locator(
     '[data-testid="channel-member-item"][data-member-kind="agent"]'
   );
-  if ((await agentRow.count()) !== 1 || !((await agentRow.textContent()) ?? "").includes("에이전트")) {
+  // 보이는 글로 가른다(#5686): 에이전트 줄이 든 묶음의 머리가 화면에 서 있고, 그 글이 화면 언어 사전의 에이전트 묶음
+  // 머리다. 줄 안의 숨은 낭독 문장(`sr-only`)은 재지 않는다(`innerText`는 보이는 글만 읽는다).
+  const lang = await page.evaluate(() => document.documentElement.lang);
+  const agentHeading = page
+    .locator('[data-testid="channel-member-section"]', { has: agentRow })
+    .locator("h2");
+  const headingText =
+    (await agentHeading.count()) === 1 && (await agentHeading.isVisible())
+      ? (await agentHeading.innerText()).trim()
+      : "";
+  if (
+    (await agentRow.count()) !== 1 ||
+    !AGENT_HEADING_PREFIXES[lang.startsWith("ko") ? "ko-KR" : "en-US"].some(
+      (prefix) => prefix !== "" && headingText.startsWith(prefix)
+    )
+  ) {
     throw new Error("the member panel did not distinguish the agent row in text");
   }
   await page.keyboard.press("Escape");

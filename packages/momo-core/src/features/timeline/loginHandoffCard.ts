@@ -160,7 +160,7 @@ export const LOGIN_HANDOFF_IN_CONTROL_COPY = `${LOGIN_HANDOFF_IN_CONTROL_LEAD} �
 
 /** 폰처럼 결정 동선이 없는 표면이 말할 문장. */
 export const LOGIN_HANDOFF_ELSEWHERE_COPY =
-  "직접 조작은 데스크톱이나 웹에서 할 수 있습니다. 이 화면에서는 진행 상황만 보여 줍니다.";
+  "직접 조작은 데스크탑이나 웹에서 할 수 있습니다. 이 화면에서는 진행 상황만 보여 줍니다.";
 
 /**
  * 이 기기가 지금 결정을 보낼 수 없을 때. `approvalNote` 의 문장과 같은 꼴이다.

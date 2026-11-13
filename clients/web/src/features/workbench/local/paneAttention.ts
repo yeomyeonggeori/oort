@@ -1,11 +1,17 @@
 import { useSyncExternalStore } from "react";
 import {
+  derivePaneMark,
   derivePaneStatus,
   attentionCopy,
+  attentionStatusOf,
   attentionTransitions,
+  paneStatusSource,
   shouldNotifyAttention,
+  type AttentionMark,
   type AttentionStatus,
+  type PaneMark,
   type PaneSignal,
+  type PaneStatusInput,
 } from "@momo/core/features/workbench/paneStatus";
 import type { SessionStatus } from "@momo/core/features/workbench/sessionList";
 import { focusPane } from "@momo/core/features/workbench/layoutTree";
@@ -35,20 +41,49 @@ import { DOCK_SESSION_KEY, type LocalSessionView } from "./localSessions";
 // 「내 작업」 탭이 번갈아 마운트돼도 같은 이전 판정을 보므로 알림이 두 번 뜨지 않는다.
 // =============================================================================
 
-/** 칸 하나의 상태(#2776): 생명주기와 하네스 hook 신호만. 출력은 읽지 않는다. */
+/**
+ * 칸 하나의 상태(#2776·#5579): 생명주기와 하네스가 스스로 낸 신호(hook과 OSC 7501 보고를 합친
+ * `view.signal`)만. 웹은 출력을 읽지 않는다(보고도 데스크탑이 읽어 채널로 준다).
+ */
 export function paneStatusOf(view: LocalSessionView | null | undefined): SessionStatus | undefined {
   if (!view) return undefined;
-  return derivePaneStatus({
+  return derivePaneStatus(statusInputOf(view));
+}
+
+function statusInputOf(view: LocalSessionView): PaneStatusInput {
+  return {
     phase: view.phase,
     exitCode: view.exit?.code ?? null,
     exitSignal: view.exit?.signal ?? null,
     signal: view.signal,
-  });
+    // 사람의 입력이 정한 신호는 출처 줄을 달지 않는다(#5584 r2 M1). 판정은 같다.
+    ...(view.signalByPerson === true ? { byPerson: true } : {}),
+  };
+}
+
+/**
+ * 칸 하나의 표지(design-review #5584 H1): 상태와 같되, 프로그램이 턴 실패를 보고한 살아 있는
+ * 칸은 「실패」다. 칸 머리·세션 목록·인박스·사이드바가 이것으로 그린다.
+ */
+export function paneMarkOf(view: LocalSessionView | null | undefined): PaneMark | undefined {
+  if (!view) return undefined;
+  return derivePaneMark(statusInputOf(view));
+}
+
+/**
+ * 상태가 그 프로그램의 말일 때의 출처 한 줄(「Codex가 알린 상태예요」, #5584 M2). 신호가 없거나, 마지막 변화가 사람의
+ * 입력이었으면(#5584 r2 M1) null.
+ */
+export function paneSourceOf(view: LocalSessionView | null | undefined, programName: string): string | null {
+  if (!view) return null;
+  return paneStatusSource(statusInputOf(view), programName);
 }
 
 export interface PaneAttentionEntry {
   paneId: string;
   status: AttentionStatus;
+  /** 그릴 표지. `status`가 「끝남」이어도 실패한 턴이면 「실패」다. */
+  mark: AttentionMark;
   signal: PaneSignal | null;
   index: number;
   name: string;
@@ -60,6 +95,8 @@ export interface PaneObservation {
   index: number;
   name: string;
   status: SessionStatus;
+  /** 칸의 표지(`paneMarkOf`). 없으면 상태 그대로다. */
+  mark?: PaneMark;
   signal: PaneSignal | null;
 }
 
@@ -78,7 +115,7 @@ export interface PaneAttentionDeps {
 }
 
 export function createPaneAttention(deps: PaneAttentionDeps) {
-  let previous = new Map<string, SessionStatus>();
+  let previous = new Map<string, PaneMark>();
   let entries: readonly PaneAttentionEntry[] = [];
   const listeners = new Set<() => void>();
   const emit = () => listeners.forEach((l) => l());
@@ -97,7 +134,8 @@ export function createPaneAttention(deps: PaneAttentionDeps) {
      * 판정에서 빠진 칸(닫은 칸), 상태가 바뀐 칸, 본 「끝남」 칸은 인박스에서 내린다.
      */
     observe(panes: readonly PaneObservation[], viewing: string | null): void {
-      const next = new Map(panes.map((p) => [p.paneId, p.status] as const));
+      // 표지로 비교한다: 「끝남」 뒤의 「실패」도 새 전이다(실패가 끝남에 묻히지 않는다).
+      const next = new Map(panes.map((p) => [p.paneId, p.mark ?? p.status] as const));
       const fresh = attentionTransitions(previous, next);
       previous = next;
       const byId = new Map(panes.map((p) => [p.paneId, p] as const));
@@ -116,33 +154,45 @@ export function createPaneAttention(deps: PaneAttentionDeps) {
       for (const t of fresh) {
         const p = byId.get(t.paneId)!;
         const inView = t.paneId === viewing;
+        const status = attentionStatusOf(t.status);
         if (!inView) {
           kept = [
             ...kept.filter((e) => e.paneId !== t.paneId),
-            { paneId: t.paneId, status: t.status, signal: p.signal, index: p.index, name: p.name, atMs: deps.now() },
+            {
+              paneId: t.paneId,
+              status,
+              mark: t.status,
+              signal: p.signal,
+              index: p.index,
+              name: p.name,
+              atMs: deps.now(),
+            },
           ];
           changed = true;
         }
-        const prefKind: DesktopNotifyKind = t.status === "waiting" ? "pane-waiting" : "work-mine-done";
+        const prefKind: DesktopNotifyKind = status === "waiting" ? "pane-waiting" : "work-mine-done";
         if (
           shouldNotifyAttention({ windowFocused: focused, paneInView: inView, paused }) &&
           (deps.kindEnabled?.(prefKind) ?? true)
         ) {
           const copy = attentionCopy(t.status, { index: p.index, name: p.name }, p.signal);
           deps.notify({
-            kind: t.status === "waiting" ? "waiting" : "done",
+            // 묶음의 종류는 표지 그대로다(응답 필요·끝남·실패). 실패한 턴은 「끝남」과 다른 묶음이라 같은 1.2초 창에 와도
+            // 「작업 끝남 N건」에 섞이지 않고 「실패」·「실패 N건」으로 따로 나간다(design-review #5584 r2 H1 (a)).
+            // 켜고 끄는 설정은 「끝남」과 같다(`work-mine-done`).
+            kind: t.status,
             title: copy.title,
             body: copy.body,
             label: `${p.index}번 칸 · ${p.name}`,
           });
         }
       }
-      // 번호·이름은 배치가 바뀌면 따라간다.
+      // 번호·이름은 배치가 바뀌면 따라간다. 기다림의 종류(허락 ↔ 답)도 신호를 따라간다.
       kept = kept.map((e) => {
         const p = byId.get(e.paneId);
-        if (!p || (p.index === e.index && p.name === e.name)) return e;
+        if (!p || (p.index === e.index && p.name === e.name && p.signal === e.signal)) return e;
         changed = true;
-        return { ...e, index: p.index, name: p.name };
+        return { ...e, index: p.index, name: p.name, signal: p.signal };
       });
       if (changed) {
         entries = kept;

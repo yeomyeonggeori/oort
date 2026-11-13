@@ -1,0 +1,156 @@
+<!doctype html>
+<html lang="{{lang}}">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex, nofollow">
+<meta name="color-scheme" content="light dark">
+<meta name="theme-color" media="(prefers-color-scheme: light)" content="#e2e9f3">
+<meta name="theme-color" media="(prefers-color-scheme: dark)" content="#0f141c">
+<title>{{t.meta_title}}</title>
+<meta name="description" content="{{t.meta_description}}">
+{{hreflang}}
+<link rel="icon" type="image/svg+xml" href="{{b}}assets/favicon.svg">
+<link rel="icon" type="image/png" sizes="32x32" href="{{b}}assets/favicon-32.png">
+<link rel="apple-touch-icon" href="{{b}}assets/apple-touch-icon.png">
+{{root_redirect}}
+<script>(function(){try{var n=navigator,u=n.userAgentData;if((u&&u.mobile===true)||/iPhone|iPod|Android.*Mobile/.test(n.userAgent||""))document.documentElement.setAttribute("data-phone","")}catch(e){}})();</script>
+<style>{{css}}</style>
+</head>
+<body>
+<svg class="sprite" aria-hidden="true" focusable="false">
+  <!-- Lucide (ISC) 0.454.0: download, chevron-down, languages, arrow-up-right, laptop, smartphone, globe, check, folder, arrow-right, book-open -->
+  <symbol id="i-download" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/></symbol>
+  <symbol id="i-chevron" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></symbol>
+  <symbol id="i-languages" viewBox="0 0 24 24"><path d="m5 8 6 6"/><path d="m4 14 6-6 2-3"/><path d="M2 5h12"/><path d="M7 2h1"/><path d="m22 22-5-10-5 10"/><path d="M14 18h6"/></symbol>
+  <symbol id="i-out" viewBox="0 0 24 24"><path d="M7 7h10v10"/><path d="M7 17 17 7"/></symbol>
+  <symbol id="i-laptop" viewBox="0 0 24 24"><path d="M20 16V7a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v9m16 0H4m16 0 1.28 2.55a1 1 0 0 1-.9 1.45H3.62a1 1 0 0 1-.9-1.45L4 16"/></symbol>
+  <symbol id="i-phone" viewBox="0 0 24 24"><rect width="14" height="20" x="5" y="2" rx="2" ry="2"/><path d="M12 18h.01"/></symbol>
+  <symbol id="i-globe" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"/><path d="M2 12h20"/></symbol>
+  <symbol id="i-check" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></symbol>
+  <symbol id="i-folder" viewBox="0 0 24 24"><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/></symbol>
+  <symbol id="i-right" viewBox="0 0 24 24"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></symbol>
+  <symbol id="i-book" viewBox="0 0 24 24"><path d="M12 7v14"/><path d="M3 18a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h5a4 4 0 0 1 4 4 4 4 0 0 1 4-4h5a1 1 0 0 1 1 1v13a1 1 0 0 1-1 1h-6a3 3 0 0 0-3 3 3 3 0 0 0-3-3z"/></symbol>
+</svg>
+
+<header class="top">
+  <a class="brand" href="./" aria-label="oort">
+    <svg class="mark" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><g fill-rule="evenodd"><path d="M18.59 10.46A8 8 0 0 1 7.32 20.1A0.5 0.5 0 0 0 6.91 20.08L3.6 21.38A0.75 0.75 0 0 1 2.62 20.4L3.92 17.09A0.5 0.5 0 0 0 3.9 16.68A8 8 0 0 1 13.54 5.41A4.5 4.5 0 0 0 18.59 10.46ZM15 13A4 4 0 1 0 7 13A4 4 0 1 0 15 13Z"/><path class="mark-sat" d="M21 6A3 3 0 1 1 15 6A3 3 0 1 1 21 6Z"/></g></svg>
+    <span>oort</span>
+  </a>
+  <nav class="top-nav" aria-label="{{t.nav_label}}">
+    <a class="ghost docs-link" href="{{b}}docs/{{docs_lang}}/" hreflang="{{docs_lang}}" aria-label="{{t.nav_docs}}" title="{{t.nav_docs}}"><svg class="i" aria-hidden="true"><use href="#i-book"/></svg><span class="docs-t">{{t.nav_docs}}</span></a>
+    <div class="pop" data-pop>
+      <button type="button" class="ghost lang-btn" aria-expanded="false" aria-controls="lang-list" aria-label="{{t.lang_button}}: {{t.lang_name}}">
+        <svg class="i" aria-hidden="true"><use href="#i-languages"/></svg><span class="lang-name">{{t.lang_name}}</span><svg class="i i-sm lang-chev" aria-hidden="true"><use href="#i-chevron"/></svg>
+      </button>
+      <ul class="menu lang-list" id="lang-list" role="list" hidden>
+{{lang_items}}
+      </ul>
+    </div>
+    <a class="pill pill-quiet web-link" href="{{v.WEB_URL}}" aria-label="{{t.nav_web}}" title="{{t.nav_web}}"><span class="web-t">{{t.nav_web}}</span><svg class="i i-sm" aria-hidden="true"><use href="#i-out"/></svg></a>
+  </nav>
+</header>
+
+<main>
+  <section class="hero" aria-labelledby="hero-title" data-webgl="pending" data-running="0">
+    <canvas class="sky" aria-hidden="true"></canvas>
+    <div class="hero-in">
+      <p class="eyebrow">{{t.hero_eyebrow}}</p>
+      <h1 id="hero-title"><span>{{t.hero_title_1}}</span> <span>{{t.hero_title_2}}</span></h1>
+      <p class="lead">{{t.hero_lead}}</p>
+      <ul class="proof" role="list">
+        <li>{{t.hero_proof_1}}</li>
+        <li>{{t.hero_proof_2}}</li>
+        <li>{{t.hero_proof_3}}</li>
+      </ul>
+      <div class="get" data-get data-chip="arm">
+        <a class="get-main" id="get-mac" href="{{v.DMG_ARM_URL}}" data-arm="{{v.DMG_ARM_URL}}" data-x64="{{v.DMG_X64_URL}}">
+          <svg class="i" aria-hidden="true"><use href="#i-download"/></svg>
+          <span class="get-t"><span>{{t.dl_mac}}</span> <span class="get-chip" data-chip-label>Apple Silicon</span></span>
+        </a>
+        <button type="button" class="get-more" aria-haspopup="menu" aria-expanded="false" aria-controls="chip-menu" aria-label="{{t.chip_pick}}">
+          <svg class="i" aria-hidden="true"><use href="#i-chevron"/></svg>
+        </button>
+        <div class="menu chip-menu" id="chip-menu" role="menu" aria-label="{{t.chip_pick}}" hidden>
+          <button type="button" role="menuitemradio" aria-checked="true" data-chip="arm" tabindex="-1"><span><b>Apple Silicon</b><small>{{t.chip_arm_note}}</small></span><svg class="i tick" aria-hidden="true"><use href="#i-check"/></svg></button>
+          <button type="button" role="menuitemradio" aria-checked="false" data-chip="x64" tabindex="-1"><span><b>Intel</b><small>{{t.chip_x64_note}}</small></span><svg class="i tick" aria-hidden="true"><use href="#i-check"/></svg></button>
+        </div>
+      </div>
+      <div class="phone-get">
+        <a class="get-web" id="get-web" href="{{v.WEB_URL}}">{{t.nav_web}}<svg class="i" aria-hidden="true"><use href="#i-out"/></svg></a>
+        <div class="phone-notes">
+          <p class="phone-note"><svg class="i" aria-hidden="true"><use href="#i-phone"/></svg><span>{{t.phone_iphone}}</span></p>
+          <p class="phone-note"><svg class="i" aria-hidden="true"><use href="#i-laptop"/></svg><span>{{t.phone_mac}}</span></p>
+        </div>
+      </div>
+      <p class="spec"><span>macOS {{v.MIN_MACOS}}+</span> · <span>v{{v.VERSION}}</span> · <span class="spec-w">Apple Silicon</span> · <span class="spec-w">Intel</span></p>
+    </div>
+  </section>
+
+  <section class="shot" aria-label="{{t.shot_label}}">
+    <figure class="shot-fig">
+      <div class="frame">
+        <picture>
+          <source media="(prefers-color-scheme: dark)" srcset="{{b}}assets/app-{{shot}}-dark.webp">
+          <img src="{{b}}assets/app-{{shot}}-light.webp" width="{{shot_w}}" height="{{shot_h}}" alt="{{t.shot_alt}}" decoding="async">
+        </picture>
+      </div>
+      <figcaption class="caption">{{t.shot_caption}}{{app_lang_note}}</figcaption>
+    </figure>
+  </section>
+
+  <section class="band devices" id="devices" aria-labelledby="devices-title">
+    <div class="band-head">
+      <h2 id="devices-title">{{t.devices_title}}</h2>
+      <p>{{t.devices_lead}}</p>
+    </div>
+    <ul class="rows" role="list">
+      <li class="row">
+        <svg class="i row-i" aria-hidden="true"><use href="#i-laptop"/></svg>
+        <span class="row-t"><b>Mac · Apple Silicon</b><span>{{t.chip_arm_note}}</span></span>
+        <a class="pill" href="{{v.DMG_ARM_URL}}" data-row="arm" aria-label="{{t.act_download}}: Mac, Apple Silicon">{{t.act_download}}</a>
+      </li>
+      <li class="row">
+        <svg class="i row-i" aria-hidden="true"><use href="#i-laptop"/></svg>
+        <span class="row-t"><b>Mac · Intel</b><span>{{t.chip_x64_note}}</span></span>
+        <a class="pill" href="{{v.DMG_X64_URL}}" data-row="x64" aria-label="{{t.act_download}}: Mac, Intel">{{t.act_download}}</a>
+      </li>
+      <li class="row">
+        <svg class="i row-i" aria-hidden="true"><use href="#i-phone"/></svg>
+        <span class="row-t"><b>iPhone</b><span>{{t.dev_iphone_note}}</span></span>
+        <span class="tag">{{t.dev_iphone_tag}}</span>
+      </li>
+      <li class="row">
+        <svg class="i row-i" aria-hidden="true"><use href="#i-globe"/></svg>
+        <span class="row-t"><b>{{t.dev_web}}</b><span>{{t.dev_web_note}}</span></span>
+        <a class="pill" href="{{v.WEB_URL}}" aria-label="{{t.act_open}}: {{t.dev_web}}">{{t.act_open}}<svg class="i i-sm" aria-hidden="true"><use href="#i-out"/></svg></a>
+      </li>
+    </ul>
+  </section>
+
+  <section class="band install" id="install" aria-labelledby="install-title">
+    <div class="band-head">
+      <h2 id="install-title">{{t.install_title}}</h2>
+      <p class="install-art" aria-hidden="true"><img src="{{b}}assets/app-icon-96.png" width="48" height="48" alt=""><svg class="i" aria-hidden="true"><use href="#i-right"/></svg><span class="folder"><svg class="i" aria-hidden="true"><use href="#i-folder"/></svg></span></p>
+    </div>
+    <ol class="steps" role="list">
+      <li><span class="n" aria-hidden="true">1</span><b>{{t.step1_title}}</b><span>{{t.step1_body}}</span></li>
+      <li><span class="n" aria-hidden="true">2</span><b>{{t.step2_title}}</b><span>{{t.step2_body}}</span></li>
+      <li><span class="n" aria-hidden="true">3</span><b>{{t.step3_title}}</b><span>{{t.step3_body}}</span></li>
+    </ol>
+  </section>
+</main>
+
+<footer class="foot">
+  <p class="foot-v">oort {{v.VERSION}}</p>
+  <nav class="foot-langs" aria-label="{{t.foot_langs}}">
+{{foot_langs}}
+  </nav>
+  <p class="foot-note">{{t.foot_note}}</p>
+</footer>
+
+<script>{{js}}</script>
+<script>{{sky}}</script>
+</body>
+</html>

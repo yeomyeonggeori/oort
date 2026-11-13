@@ -588,9 +588,6 @@ export function isStrictlyOrdered(messages: Message[]): boolean {
 // 않으므로 모델도 뒤집을 이유가 없다.
 // -----------------------------------------------------------------------------
 
-/** Author group window: a new header after 5 minutes of the same author. */
-export const AUTHOR_GROUP_WINDOW_MS = 300_000;
-
 /** The two fields grouping depends on; a pending row has them before it has a seq. */
 export type GroupingRow = Pick<Message, "authorMemberId" | "createdAtMs">;
 
@@ -601,9 +598,31 @@ export function dayKey(atMs: number): string {
 }
 
 /**
- * A message starts a new author group when the author changes, when more than
- * AUTHOR_GROUP_WINDOW_MS passed since the previous message, or across a day
- * boundary. Continuation rows drop the header for density (Slack convention).
+ * Local-minute key (day + hour + minute) — the unit the row's time label shows.
+ * Two messages share a group only when they share this key (#5603).
+ */
+export function minuteKey(atMs: number): string {
+  const d = new Date(atMs);
+  return `${dayKey(atMs)} ${d.getHours()}:${d.getMinutes()}`;
+}
+
+/** One minute. Two rows further apart than this never share a group (see `startsAuthorGroup`). */
+const ONE_MINUTE_MS = 60_000;
+
+/**
+ * 같은 사람의 말은 **같은 분**까지만 한 묶음이다 (#5603, owner 11-09).
+ *
+ * 묶음이 이어지는 조건은 셋이 모두 맞을 때다: 같은 작성자, 같은 로컬 날, 같은 로컬 시·분(`minuteKey`). 분이 바뀌면
+ * 새 머리(이름·시각)가 선다 — 47분 59초와 48분 01초는 다른 묶음이다. 기준은 화면이 보여 주는 시각의 단위(시·분)와 같다:
+ * 머리가 「15:47」이라고 말하면 그 아래 말은 모두 15:47에 한 말이다.
+ *
+ * 예전 규칙(앞 메시지와 5분 안이면 이어 붙임)은 기준이 **앞 메시지**라 3~4분 간격으로 말이 이어지면 몇 시간이든 한 묶음이
+ * 됐다(owner 보고: 47분과 50분의 말이 한 묶음). 이 규칙에는 사슬이 없다: 분이 바뀌면 끊긴다.
+ *
+ * 날이 바뀌는 것은 `minuteKey`가 날을 품으므로 같이 끊긴다. 1분보다 멀면 같은 열쇠여도 끊는다 — 서머타임이 끝나는 밤에는
+ * 같은 「1:30」이 한 시간 간격으로 두 번 온다.
+ *
+ * 웹·데스크탑·폰이 이 함수 하나를 쓴다. 이어지는 행은 머리를 빼고 본문만 잇는다(밀도 — Slack·Buzz 관례).
  */
 export function startsAuthorGroup(
   previous: GroupingRow | undefined,
@@ -611,10 +630,10 @@ export function startsAuthorGroup(
 ): boolean {
   if (!previous) return true;
   if (!uuidEq(previous.authorMemberId, current.authorMemberId)) return true;
-  if (current.createdAtMs - previous.createdAtMs > AUTHOR_GROUP_WINDOW_MS) {
+  if (Math.abs(current.createdAtMs - previous.createdAtMs) >= ONE_MINUTE_MS) {
     return true;
   }
-  return dayKey(previous.createdAtMs) !== dayKey(current.createdAtMs);
+  return minuteKey(previous.createdAtMs) !== minuteKey(current.createdAtMs);
 }
 
 // ---- 멈춘 에이전트 알림 접기 (goal P3 1-2) -----------------------------------
@@ -814,6 +833,10 @@ export interface PendingMessage {
   channelId: string;
   authorMemberId: string;
   body: string;
+  /**
+   * 보낸 순간의 **기기** 시계. 기기의 `Date.now()`와 견주는 것들이 이것을 읽는다(느린 전송 안내, 도착 연출, 자동 재전송, 실패 기록).
+   * 묶음·날 줄·에코의 시각 글자는 여기에 서버 시계와의 차이를 더한 값을 읽는다(`echoAtMs`, #5624).
+   */
   createdAtMs: number;
   /** newestSeq at the moment the send started; the echo must land above it. */
   sinceSeq: number | null;
@@ -889,6 +912,38 @@ export function confirmsPending(
   return expected.every((want) => arrived.has(want.id.toLowerCase()));
 }
 
+/** 확정본 하나와 그것이 정착시킨 에코 하나. */
+export interface SettledEcho {
+  message: Message;
+  pending: PendingMessage;
+}
+
+/**
+ * 에코와 확정본의 짝짓기 — 규칙은 여기 한 곳이다. 메시지를 차례로 보며 각 메시지가 아직 열린 에코 중 **가장 먼저 보낸 것** 하나를
+ * 정착시킨다(같은 글을 두 번 보내도 둘이 하나씩 정착한다). `open`은 보낸 순서 그대로의 남은 에코다.
+ *
+ * `sameChannel`이면 채널이 같은 짝만 잇는다. 그리는 접기(`unsettledPending`)는 한 채널의 목록만 받으므로 필요 없지만, 확정본이
+ * 들어오는 문(`pinSettledEchoes`)은 다른 채널의 첫 화면 읽기도 지난다 — 떠난 채널에서 아직 날아가는 에코가 거기 있는 내 같은 글
+ * (seq는 채널마다 따로 센다)과 짝지어지면 엉뚱한 행이 묶음을 잇고, 몇 시간 전 시각이 서버 시계 표본으로 들어간다(#5624).
+ */
+export function settlePending(
+  messages: readonly Message[],
+  pending: readonly PendingMessage[],
+  sameChannel = false
+): { open: PendingMessage[]; settled: SettledEcho[] } {
+  const open = pending.slice();
+  const settled: SettledEcho[] = [];
+  if (open.length === 0) return { open, settled };
+  for (const message of messages) {
+    const index = open.findIndex(
+      (p) => confirmsPending(message, p) && (!sameChannel || uuidEq(message.channelId, p.channelId))
+    );
+    if (index >= 0) settled.push({ message, pending: open.splice(index, 1)[0] });
+    if (open.length === 0) break;
+  }
+  return { open, settled };
+}
+
 /**
  * The pending rows that are still unconfirmed against this message array, in
  * send order. One confirmed message settles at most one pending row.
@@ -898,13 +953,76 @@ export function unsettledPending(
   pending: PendingMessage[]
 ): PendingMessage[] {
   if (pending.length === 0) return pending;
-  const open = pending.slice();
-  for (const message of messages) {
-    const index = open.findIndex((p) => confirmsPending(message, p));
-    if (index >= 0) open.splice(index, 1);
-    if (open.length === 0) break;
+  return settlePending(messages, pending).open;
+}
+
+// ---- 확정본이 에코의 묶음을 잇는다 (#5624) ------------------------------------
+//
+// 서버 시계를 어림해도(`serverClock.ts`) 에코와 확정본의 시각은 같은 값이 아니다. 왕복 사이에 분이 바뀌면(기기 10:47:59.8에 보냈는데
+// 서버가 10:48:00.1에 찍었다) 시계가 맞는 기기에서도 묶음이 갈리고, 세션의 첫 보내기는 아직 잰 차이가 없다. 그래서 에코가 확정본으로
+// 바뀔 때는 **에코가 쓰던 시각을 확정본이 묶음에 그대로 쓴다**: 그 행의 머리/이어짐이 그 화면에서는 에코 때와 같다(같은 날일 때만 —
+// 날 줄은 언제나 서버 시각이 정한다, `buildTimelineItems`의 `ownAtMs`).
+// 서버 시각으로 다시 묶는 것은 다시 불러올 때(이 장부가 없는 새 화면)뿐이다. 행의 시각 글자는 서버 값을 그대로 보여 준다 — 글자가
+// 바뀌어도 높이는 같다.
+//
+// 장부는 메시지 id(소문자) → 에코의 시각이다. 훅이 확정본이 들어오는 문(`applyBatch` — 보내기 응답과 실시간 프레임이 함께 지난다)에서
+// 적는다: 어느 쪽이 먼저 와도 확정본을 처음 그리는 렌더가 이미 장부를 본다.
+
+/** 장부가 기억하는 확정본 수. 그 화면에서 막 보낸 글들만 필요하므로 넉넉한 값이고, 넘치면 오래된 것부터 잊는다. */
+export const ECHO_PIN_LIMIT = 200;
+
+/** 확정본 하나가 잇는 에코: 그 에코가 묶음에 쓰던 시각과, 두 번 짝짓지 않기 위한 그 에코의 키. */
+export interface EchoPin {
+  atMs: number;
+  clientMsgId: string;
+}
+
+/** 메시지 id(소문자) → 그 확정본이 이어받은 에코. */
+export type EchoPins = ReadonlyMap<string, EchoPin>;
+
+/**
+ * 에코가 묶음·날 줄·시각 글자에 쓰는 시각: 보낸 순간의 기기 시계에 지금까지 잰 서버 시계와의 차이(`serverClock.ts`)를 더한 값.
+ * 차이는 **지금 값**을 쓴다 — 첫 보내기의 응답이 차이를 알려 주는 순간, 아직 날아가는 둘째 에코도 같은 시계로 옮겨 가야 위의 확정본
+ * (서버 시각)과 같은 시계로 견주어진다(연달아 두 번 보내기).
+ */
+export function echoAtMs(row: Pick<PendingMessage, "createdAtMs">, serverOffsetMs = 0): number {
+  return row.createdAtMs + serverOffsetMs;
+}
+
+/**
+ * 막 들어온 메시지들 가운데 열린 에코를 정착시키는 것을 장부에 적는다. 장부의 시각은 **직전 렌더가 그 에코를 그린 시각**이다
+ * (`serverOffsetMs`는 그 렌더가 쓴 차이 — 이 배치로 차이를 새로 재기 전의 값을 넘긴다). 새로 적을 것이 없으면 받은 장부를 그대로 돌려준다.
+ *
+ * 이미 적힌 메시지는 다시 적지 않고(보내기 응답과 실시간 프레임이 같은 메시지를 두 번 들인다), 이미 다른 메시지에 이어진 에코는 다시
+ * 짝짓지 않는다(같은 글 「네」를 두 번 보냈을 때 둘째 확정본이 첫 에코를 가로채지 않게). `settled`는 이번에 새로 이은 짝이다 — 훅은 그
+ * 짝으로 서버 시계를 잰다(에코를 보낸 기기 시각과 지금 사이에 서버가 확정본을 찍었다).
+ */
+export function pinSettledEchoes(
+  pins: EchoPins,
+  batch: readonly Message[],
+  pending: readonly PendingMessage[],
+  serverOffsetMs = 0,
+  limit: number = ECHO_PIN_LIMIT
+): { pins: EchoPins; settled: SettledEcho[] } {
+  if (batch.length === 0 || pending.length === 0) return { pins, settled: [] };
+  const taken = new Set<string>();
+  for (const pin of pins.values()) taken.add(pin.clientMsgId);
+  const fresh = batch.filter((message) => !pins.has(message.id.toLowerCase()));
+  const open = pending.filter((row) => !taken.has(row.clientMsgId));
+  const { settled } = settlePending(fresh, open, true);
+  if (settled.length === 0) return { pins, settled };
+  const next = new Map(pins);
+  for (const { message, pending: row } of settled) {
+    next.set(message.id.toLowerCase(), {
+      atMs: echoAtMs(row, serverOffsetMs),
+      clientMsgId: row.clientMsgId,
+    });
   }
-  return open;
+  for (const key of next.keys()) {
+    if (next.size <= limit) break;
+    next.delete(key);
+  }
+  return { pins: next, settled };
 }
 
 // ---- pending list transitions (pure, so the hook holds no logic) ------------
@@ -1041,6 +1159,18 @@ export interface BuildItemsOptions {
    * 글을 두 번 보낸 에코 둘을 모두 삼킨다.
    */
   settleAgainst?: readonly Message[];
+  /**
+   * #5624 — 에코였던 확정본이 이어 쓸 에코의 시각(`pinSettledEchoes`가 적은 장부). 여기 있는 메시지는 **자기** 머리/이어짐을 에코
+   * 때의 시각으로 판정받는다 — 그래서 에코가 확정본으로 바뀌어도 그 행의 묶음이 같다. 단 장부의 시각이 서버 시각과 **같은 날**일 때만이고,
+   * 날 줄은 언제나 서버 시각이 정한다(검수 H1: 밤새 남은 실패 글을 다음 날 다시 보낸 경우). 그 행을 「앞 행」으로 보는 다음 행의 판정은
+   * 서버 시각을 읽는다(뒤따르는 에코·확정본이 모두 서버 시계이므로). 주지 않으면 모두 서버 시각으로 묶는다(다시 불러온 화면).
+   */
+  echoPins?: EchoPins;
+  /**
+   * #5624 — 서버 시계와 이 기기 시계의 차이(서버 − 기기, ms; `serverClock.ts`). 에코는 기기 시계로 찍혀 있으므로 이 값을 더해 서버
+   * 시각의 확정본들과 같은 시계로 견준다. 없으면 0.
+   */
+  serverOffsetMs?: number;
 }
 
 /**
@@ -1056,7 +1186,26 @@ export function buildTimelineItems(
     unreadCount = 0,
     recoveryMarkers = [],
     pending = [],
+    echoPins,
+    serverOffsetMs = 0,
   } = options;
+  // 행이 **자기** 머리/이어짐을 판정받는 시각. 에코였던 확정본은 에코 때의 시각(#5624, `pinSettledEchoes`), 나머지는 서버가 찍은
+  // 시각이다. 앞 행으로 읽힐 때는 언제나 서버 시각(`previous.createdAtMs`)이다.
+  //
+  // 장부는 **서버 시각과 같은 날**일 때만 쓴다(#5624 검수 H1). 실패한 글은 다시 보내도 처음 시각을 들고 있어서(#5221) 밤에 못 보낸
+  // 글을 아침에 다시 보내면 장부가 어제 시각을 잇는다 — 그러면 확정본이 오늘 줄 아래에 어제 날 줄을 다시 세우고(`day-<key>` 겹침),
+  // 오늘 말이 없으면 오늘이 통째로 어제 날짜 아래에 놓였다. 같은 날이면 날 줄 판정은 장부가 있든 없든 서버 시각과 같으므로, 날 줄은
+  // 언제나 서버 시각이 정하고(아래 `dayKey(message.createdAtMs)`), 장부는 같은 날 안의 머리/이어짐만 잇는다. 날을 넘긴 확정본은 서버
+  // 시각으로 묶여 그 순간 날 줄이 선다 — 사람이 다시 보낸 글이거나 자정을 걸친 왕복이라 드물고, 날짜가 틀린 화면보다 낫다.
+  //
+  // 문턱을 「같은 날」보다 좁히지 않는다: 연결이 깜빡여 몇 분 뒤 저절로 다시 나간 글(자동 재전송 창 5분)도 장부가 이어야 확정 순간에
+  // 머리가 서며 뒤집히지 않는다(웹 `useTimeline.echoStale.test.tsx`).
+  const ownAtMs = (message: Message): number => {
+    const pinned = echoPins?.get(message.id.toLowerCase())?.atMs;
+    return pinned !== undefined && dayKey(pinned) === dayKey(message.createdAtMs)
+      ? pinned
+      : message.createdAtMs;
+  };
   const items: TimelineItem[] = [];
   let previous: Message | undefined;
   // The newest `createdAtMs` among the rows laid so far — confirmed rows in the
@@ -1095,10 +1244,8 @@ export function buildTimelineItems(
     // 그리지 않을 행은 날짜 구분선도 저자 묶음도 만들지 않는다: `previous`는
     // 언제나 **화면에 남은** 직전 행이어야 접힌 자리에 빈 헤더가 생기지 않는다.
     if (pausedFold.suppressed.has(message.seq)) continue;
-    if (
-      !previous ||
-      dayKey(previous.createdAtMs) !== dayKey(message.createdAtMs)
-    ) {
+    const atMs = ownAtMs(message);
+    if (!previous || dayKey(previous.createdAtMs) !== dayKey(message.createdAtMs)) {
       items.push({
         kind: "day",
         key: `day-${dayKey(message.createdAtMs)}`,
@@ -1123,7 +1270,12 @@ export function buildTimelineItems(
       kind: "message",
       key: `m-${message.seq}`,
       message,
-      startsGroup: dividerAbove || startsAuthorGroup(previous, message),
+      startsGroup:
+        dividerAbove ||
+        startsAuthorGroup(previous, {
+          authorMemberId: message.authorMemberId,
+          createdAtMs: atMs,
+        }),
       pausedRepeat: pausedFold.repeats.get(message.seq),
     });
     dividerAbove = false;
@@ -1148,7 +1300,12 @@ export function buildTimelineItems(
   // already in `messages` is dropped here, which is where "중복 0" is enforced
   // regardless of whether the POST response or the realtime frame won the race.
   let previousRow: GroupingRow | undefined = previous;
-  for (const row of unsettledPending(options.settleAgainst ?? messages, pending)) {
+  for (const pendingRow of unsettledPending(options.settleAgainst ?? messages, pending)) {
+    // 에코는 서버 시계로 옮긴 시각으로 묶는다(#5624): 위 확정본들이 서버 시각이므로 같은 시계끼리 견준다.
+    const row: GroupingRow = {
+      authorMemberId: pendingRow.authorMemberId,
+      createdAtMs: echoAtMs(pendingRow, serverOffsetMs),
+    };
     // The echo that opens a new local day carries the day line itself (#4749).
     // The confirmed twin gets one from the loop above (`day-<key>`, the same key
     // for the same day), so without this the line appeared only when the POST
@@ -1179,8 +1336,8 @@ export function buildTimelineItems(
     }
     items.push({
       kind: "pending",
-      key: `p-${row.clientMsgId}`,
-      pending: row,
+      key: `p-${pendingRow.clientMsgId}`,
+      pending: pendingRow,
       startsGroup: dividerAbove || startsAuthorGroup(previousRow, row),
     });
     dividerAbove = false;
