@@ -134,8 +134,8 @@ const ROLE_RANK: Readonly<Record<RoleKey, number>> = { owner: 0, admin: 1, membe
  * - 마지막 소유자 보호(409)는 이 거울에서 저절로 지켜진다: 소유자는 누구의 대상도 되지 않는다.
  * - 역할을 모르는 대상은 열지 않는다(모름이 열림이 되지 않게). 되돌리기 어려운 일이라 역할 고르개보다 좁다.
  *
- * 에이전트는 서버가 막지 않지만(`kind` 를 보지 않는다) 여기서 열지 않는다: 에이전트를 끄고 거두는 길은 에이전트 관리에
- * 따로 있고(#5781 인계), 프로필의 관리 묶음 자체가 사람에게만 선다(`canSeeMemberManagement`).
+ * 에이전트는 열지 않는다: 에이전트를 끄고 거두는 일은 에이전트 관리의 길을 따르고, 프로필의 관리 묶음 자체가 사람에게만
+ * 선다(`canSeeMemberManagement`).
  */
 export function canManageWorkspaceMembership(
   viewerRole: MembershipRole | undefined,
@@ -168,8 +168,8 @@ export function suspensionAction(
 }
 
 /**
- * 「워크스페이스에서 내보내기」 줄 (#5781). 서버는 내보내기에 상태 조건을 두지 않지만(초대 대기도 지워진다) 이 줄은
- * 활성·정지된 멤버에게만 선다: 확인 문장이 말하는 일(채널·DM 에서 빠지고 로그아웃)이 그 둘의 일이다.
+ * 「워크스페이스에서 내보내기」 줄 (#5781). 활성·정지된 멤버에게만 선다: 확인 문장이 말하는 일(채널·DM 에서 빠지고
+ * 로그아웃)이 그 둘의 일이다.
  */
 export function canRemoveWorkspaceMember(
   viewerRole: MembershipRole | undefined,
