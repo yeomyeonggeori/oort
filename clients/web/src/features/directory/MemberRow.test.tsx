@@ -102,10 +102,9 @@ function render(
   root = createRoot(host);
   act(() =>
     root?.render(
-      createElement(
-        LocaleProvider,
-        { locale: ko },
-        createElement(
+      createElement(LocaleProvider, {
+        locale: ko,
+        children: createElement(
           QueryClientProvider,
           { client },
           createElement(
@@ -122,8 +121,8 @@ function render(
               })
             )
           )
-        )
-      )
+        ),
+      })
     )
   );
   return host;
