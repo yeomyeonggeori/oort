@@ -55,6 +55,7 @@ use momo_messaging::{send_message_in_tx, NewMessage};
 use momo_outbox::{emit_outbox, OutboxKind};
 use momo_settings::{seal_bearer, upsert_link, EgressPolicy};
 use momo_workspace_actions::team_ai_hermes::{self, HermesDeclarations};
+use momo_workspace_actions::team_ai_limits::HermesCeiling;
 use serde_json::{json, Value};
 use sqlx::postgres::{PgConnectOptions, PgPoolOptions};
 use uuid::Uuid;
@@ -663,7 +664,7 @@ impl ChatProvider for Routed {
 #[derive(Clone)]
 struct Setup {
     hermes: HermesDeclarations,
-    ceiling: Option<i64>,
+    ceiling: HermesCeiling,
     /// The deadline of the request to Hermes (both kinds).
     deadline: Duration,
     /// The operator wrote `HERMES_BASE_URL`, so the egress policy trusts its host (the loopback fake).
@@ -696,7 +697,7 @@ impl Setup {
     fn open() -> Setup {
         Setup {
             hermes: declared(),
-            ceiling: Some(30),
+            ceiling: HermesCeiling::Ceiling(30),
             deadline: Duration::from_secs(10),
             loopback_allowed: true,
             search_cap: None,
@@ -1668,7 +1669,7 @@ async fn x4_hermes_failures_end_in_the_fixed_sentence_with_one_ledger_row() {
 async fn x5_the_day_the_rate_and_the_concurrent_limits_are_judged_again_under_the_lock() {
     let w = world(good_hermes()).await;
     let mut setup = Setup::open();
-    setup.ceiling = Some(1);
+    setup.ceiling = HermesCeiling::Ceiling(1);
     let (worker, routed) = w.worker(
         vec![
             ask_hermes("web_search", REQUEST),
@@ -2245,7 +2246,7 @@ async fn x10_the_gates_are_judged_again_when_the_step_runs() {
         KindNoLongerDeclared,
         ConnectionModeAppears,
         SearchSwitchOff,
-        CeilingGone,
+        CeilingOff,
         KeyGone,
         LongResearchOff,
     }
@@ -2256,7 +2257,7 @@ async fn x10_the_gates_are_judged_again_when_the_step_runs() {
         Change::KindNoLongerDeclared,
         Change::ConnectionModeAppears,
         Change::SearchSwitchOff,
-        Change::CeilingGone,
+        Change::CeilingOff,
         Change::KeyGone,
         Change::LongResearchOff,
     ] {
@@ -2286,7 +2287,7 @@ async fn x10_the_gates_are_judged_again_when_the_step_runs() {
             Change::SearchSwitchOff => {
                 set_setting(&w.su, &w.t, "team_ai_web_search", json!(false)).await
             }
-            Change::CeilingGone => later.ceiling = None,
+            Change::CeilingOff => later.ceiling = HermesCeiling::Off,
             Change::KeyGone => later.key = false,
             Change::LongResearchOff => {
                 set_roles(&w.su, &w.t, json!({"long_research": false})).await
@@ -2328,7 +2329,7 @@ async fn x10_the_gates_are_judged_again_when_the_step_runs() {
         );
         let (sentence, end) = match change {
             Change::BundleOff => (team_ai_sentence_role_off(), "task_role_off"),
-            Change::CeilingGone => (
+            Change::CeilingOff => (
                 "오늘 Hermes에 맡길 수 있는 횟수를 다 썼어요. 관리자가 설정 › AI에서 바꿀 수 있어요.".to_string(),
                 "hermes_cap_reached",
             ),
@@ -3293,7 +3294,7 @@ async fn x21_a_stop_between_the_write_up_and_the_upload_leaves_no_picture() {
 }
 
 /// A10 (the two halves of "both") and the step's own gates: `image` is offered when the operator declared it and
-/// the ceiling is set — and a deployment that declares nothing, or has no ceiling, spends nothing. Without a
+/// the ceiling is not `0` — and a deployment that declares nothing, or switched the ceiling to `0`, spends nothing. Without a
 /// private origin, or without the operator's strict-media attestation (security review M1), the door still
 /// offers `image` (the offer is the code constant and the declaration, P6) and the **step** ends `unavailable`
 /// before Hermes is called: no request, no `called`, no ledger row, no count.
@@ -3317,7 +3318,7 @@ async fn x22_image_is_on_offer_by_the_declaration_and_a_ceiling_and_a_step_witho
         Some(vec!["image".to_string()])
     );
 
-    // (b) the ceiling is unset (the production default): the door is shut — no tool at all
+    // (b) the operator's ceiling is `0` (off): the door is shut — no tool at all
     let w = world_with_api(
         drawn(),
         ApiBehavior::Store {
@@ -3326,7 +3327,7 @@ async fn x22_image_is_on_offer_by_the_declaration_and_a_ceiling_and_a_step_witho
     )
     .await;
     let setup = Setup {
-        ceiling: None,
+        ceiling: HermesCeiling::Off,
         ..Setup::image()
     };
     let (worker, routed) = w.worker(vec![say("그릴 수 없어요")], &setup);
@@ -3335,7 +3336,7 @@ async fn x22_image_is_on_offer_by_the_declaration_and_a_ceiling_and_a_step_witho
     assert_eq!(
         offered_kinds(&routed.model.requests()[0]),
         None,
-        "an unset ceiling is closed, `image` declared or not"
+        "a ceiling of `0` is closed, `image` declared or not"
     );
     assert_eq!(w.fake.connections(), 0);
 
@@ -3500,10 +3501,14 @@ async fn x23_a_search_answer_with_a_picture_address_uploads_nothing() {
 #[ignore = "requires an isolated PostgreSQL 18 (see module docs)"]
 async fn x24_a_picture_counts_toward_the_days_delegations() {
     for (label, ceiling, admin) in [
-        ("the operator's ceiling of one", Some(1i64), None),
+        (
+            "the operator's ceiling of one",
+            HermesCeiling::Ceiling(1),
+            None,
+        ),
         (
             "the administrator's dailyDelegations of one",
-            Some(30),
+            HermesCeiling::Ceiling(30),
             Some(1i64),
         ),
     ] {
@@ -3814,4 +3819,123 @@ async fn x30_an_answer_of_only_a_picture_is_still_an_answer() {
     let rows = attachments(&w.su, &w.t).await;
     assert_eq!(rows.len(), 1);
     assert_eq!(rows[0].message_id, Some(message));
+}
+
+/// ADR-0201 증보 2026-11-12 (#5685): with **no operator ceiling** (`TEAM_AI_HERMES_DAILY_CAP` unset) the delegation
+/// is open and the workspace's own day cap binds. (a) The administrator's `dailyDelegations` of one: two people ask,
+/// both are advertised the tool, the first calls Hermes and the second is refused at the `called` commit with the
+/// cap sentence (`cap_reached`, a `pending` marker, no Hermes row). (b) Nothing set anywhere: the default 30 — 29
+/// delegations called today leave the door open, the 30th closes it at the advertisement. Red when an unset ceiling
+/// reads as closed again (`HermesCeiling::NoCeiling` in `delegation_cap`, or `hermes_delegation_opened`), or when
+/// the default 30 or the commit-time re-judge is dropped.
+#[tokio::test]
+#[ignore = "requires an isolated PostgreSQL 18 (see module docs)"]
+async fn x31_with_no_operator_ceiling_the_workspace_cap_binds_and_the_default_is_30() {
+    // (a) no ceiling, the administrator's one
+    let w = world(good_hermes()).await;
+    set_setting(
+        &w.su,
+        &w.t,
+        "team_ai_limits",
+        json!({"dailyDelegations": 1}),
+    )
+    .await;
+    let unset = Setup {
+        ceiling: HermesCeiling::NoCeiling,
+        ..Setup::open()
+    };
+    let (worker, routed) = w.worker(
+        vec![
+            ask_hermes("web_search", REQUEST),
+            ask_hermes("web_search", REQUEST),
+            say("서울은 맑아요"),
+        ],
+        &unset,
+    );
+    let owner_run = w.ask(w.t.owner_id, "@oort-helper 날씨 알려 줘").await;
+    let member_run = w.ask(w.t.member_id, "@oort-helper 날씨 알려 줘").await;
+    w.drain(&worker).await;
+    assert_eq!(
+        w.fake.connections(),
+        1,
+        "the workspace's one lets one request through"
+    );
+    assert_eq!(run_status(&w.su, owner_run).await, "succeeded");
+    assert_eq!(w.hermes_ledger(owner_run).await.len(), 1);
+    assert_eq!(run_status(&w.su, member_run).await, "failed");
+    assert_eq!(
+        w.run_error_code(member_run).await.as_deref(),
+        Some("hermes_cap_reached")
+    );
+    let refused = w.task(member_run).await;
+    assert_eq!(refused.marker.as_deref(), Some("pending"), "never `called`");
+    assert!(!refused.called && refused.request_null);
+    assert_eq!(w.hermes_ledger(member_run).await.len(), 0);
+    assert_eq!(
+        routed.model.requests().len(),
+        3,
+        "two decisions and one write-up"
+    );
+    assert_eq!(
+        w.delegate_audit(member_run).await[0]["code"],
+        json!("cap_reached")
+    );
+
+    // (b) no ceiling and no workspace value: the default 30
+    let w = world(good_hermes()).await;
+    let seed_called_today = |count: usize| {
+        let w = &w;
+        async move {
+            for _ in 0..count {
+                // another requester's ended delegation, called today: in the day's count only (not the owner's
+                // ten minutes, not in flight)
+                let run = enqueue(&w.pool, &w.t, w.t.member_id, "@oort-helper 질문", None).await;
+                sqlx::query(
+                    "INSERT INTO team_ai_task (workspace_id, run_id, agent_member_id, state, end_reason, ended_at, \
+                         delegation_kind, delegation_state, delegation_called_at, delegation_target) \
+                     VALUES ($1, $2, $3, 'ended', 'done', now(), 'web_search', 'done', now(), $4)",
+                )
+                .bind(w.t.workspace_id)
+                .bind(run)
+                .bind(w.t.agent_id)
+                .bind(w.hermes)
+                .execute(&w.su)
+                .await
+                .expect("seed a called delegation");
+            }
+            // the seeded runs' own jobs are not part of this measurement
+            sqlx::query(
+                "UPDATE outbox SET status = 'done', processed_at = now() \
+                  WHERE workspace_id = $1 AND kind = 'agent_job' AND status = 'pending'",
+            )
+            .bind(w.t.workspace_id)
+            .execute(&w.su)
+            .await
+            .unwrap();
+        }
+    };
+    seed_called_today(29).await;
+    let (worker, routed) = w.worker(vec![say("네")], &unset);
+    w.ask(w.t.owner_id, "@oort-helper 날씨 알려 줘").await;
+    w.drain(&worker).await;
+    let requests = routed.model.requests();
+    assert_eq!(requests.len(), 1);
+    assert_eq!(
+        offered_kinds(&requests[0]),
+        Some(vec!["web_search".to_string()]),
+        "29 of the default 30: still open"
+    );
+    seed_called_today(1).await;
+    let (worker, routed) = w.worker(vec![say("지금은 못 맡겨요")], &unset);
+    w.ask(w.t.owner_id, "@oort-helper 날씨 알려 줘").await;
+    w.drain(&worker).await;
+    let requests = routed.model.requests();
+    assert_eq!(requests.len(), 1);
+    assert_eq!(
+        offered_kinds(&requests[0]),
+        None,
+        "30 of the default 30: closed at the advertisement"
+    );
+    assert!(system_prompt(&requests[0]).contains("Hermes에 맡길 수 있는 횟수를 다 썼어요"));
+    assert_eq!(w.fake.connections(), 0, "nothing reached Hermes in (b)");
 }

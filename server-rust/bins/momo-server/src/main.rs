@@ -66,6 +66,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         rate_limit_unfurl_proxy_per_member = config.rate_limit.unfurl_proxy_per_member_limit,
         rate_limit_photo_draft_per_member = config.rate_limit.photo_draft_per_member_limit,
         rate_limit_unfurl_preview_per_member = config.rate_limit.unfurl_preview_per_member_limit,
+        rate_limit_thread_read_all_per_member = config.rate_limit.thread_read_all_per_member_limit,
         agent_port_rate_limit_per_token = config.agent_port.per_token_limit,
         agent_port_rate_limit_per_agent = config.agent_port.per_agent_limit,
         agent_port_rate_limit_per_ip = config.agent_port.per_ip_limit,
@@ -189,6 +190,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             "RATE_LIMIT_UNFURL_PREVIEW_PER_MEMBER",
             config.rate_limit.unfurl_preview_per_member_limit,
             "link previews of a draft, fetched from remote sites",
+        ),
+        (
+            "RATE_LIMIT_THREAD_READ_ALL_PER_MEMBER",
+            config.rate_limit.thread_read_all_per_member_limit,
+            "marking every followed thread read at once (up to 100 positions per request)",
         ),
     ] {
         if limit == 0 {
@@ -369,6 +375,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         // ADR-0201 증보 v3 B9 (#4944): the operator's team-AI ceilings, so the settings screen can
         // say "서버 운영자가 하루 N까지로 제한했어요". The agent-worker enforces; this only explains.
         .with_team_ai_caps(momo_server::config::team_ai_caps_from_env())
+        // ADR-0201 증보 v4 P8 (#5374): the delegation door's G4 declarations, so the same screen can say
+        // 「지금은 쓸 수 없어요」 with the door's own word. The agent-worker enforces; this only explains.
+        .with_team_ai_hermes(momo_server::config::team_ai_hermes_from_env())
         // ADR-0149 (SRV-T2): 휘발 신호 stays 503 unless the operator handed this
         // process the Centrifugo publish credential (CENT_API_URL + CENT_API_KEY).
         // No deployment did before this batch, so an un-updated env block keeps the

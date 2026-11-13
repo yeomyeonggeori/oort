@@ -9,7 +9,9 @@
 #                              it writes satisfies the real scripts/ensure_runtime_env.sh
 #                              and carries a DATABASE_URL on the published port.
 #   B  psql absent             fails in `up` before any container starts, with a hint.
-#   C  gate_runtime_db.sh down removes only a container carrying this run's label.
+#   C  gate_runtime_db.sh down removes only a container carrying this run's label,
+#                              and every removal carries `-v` so the image's VOLUME
+#                              does not outlive the container (#5606).
 #   D  local_gate.sh wiring    runtime-db brings the DB up before the env guard, no
 #                              longer calls `make up`, and exports ENV_FILE after it.
 #   E  verify_owner_bootstrap_rust.sh env covers every `${VAR:?}` the runtime-roles
@@ -22,7 +24,9 @@ set -euo pipefail
 SCRIPT_DIR="$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)"
 REPO_ROOT="$(CDPATH='' cd -- "$SCRIPT_DIR/../.." && pwd)"
 SANDBOX="$(mktemp -d "${TMPDIR:-/tmp}/momo-runtime-db-gate-test.XXXXXX")"
-trap 'rm -rf "$SANDBOX"' EXIT INT TERM
+# #5606: remove only the directory mktemp made (never an empty value or /).
+rm_sandbox() { case "$SANDBOX" in "${TMPDIR:-/tmp}"/momo-runtime-db-gate-test.*) rm -rf -- "$SANDBOX" ;; esac; }
+trap rm_sandbox EXIT INT TERM
 cd "$REPO_ROOT"
 
 # Scripts under test may be swapped for sabotaged copies (see the PR table): the
@@ -117,7 +121,10 @@ if grep -Fq "$pw" "$up_log" "$CALLS"; then fail "A: the generated password leake
 ER_LOG="$SANDBOX/ensure.log"
 PATH="$BASE_PATH" ENV_FILE="$ENVF" bash "$REPO_ROOT/scripts/ensure_runtime_env.sh" >"$ER_LOG" 2>&1 \
   || { cat "$ER_LOG" >&2; fail "A: the generated env does not satisfy scripts/ensure_runtime_env.sh"; }
-pass "A up: loopback-only, pinned digest, labelled, 0600 env on the published port, accepted by ensure_runtime_env.sh"
+# #5606: the stale-name pre-clean in `up` must take the anonymous volume too.
+grep -q '^rm -f -v momo-gate-pg-' "$CALLS" || fail "A: up's stale-container pre-clean does not remove with -v (#5606)"
+if grep '^rm ' "$CALLS" | grep -qv '^rm -f -v '; then fail "A: a container removal without -v leaves its anonymous volume (#5606)"; fi
+pass "A up: loopback-only, pinned digest, labelled, 0600 env on the published port, accepted by ensure_runtime_env.sh, pre-clean with -v"
 
 # ---- B: psql absent ---------------------------------------------------------
 : >"$CALLS"
@@ -139,7 +146,7 @@ if grep -q '^rm ' "$CALLS"; then fail "C: down removed a container that does not
 printf 'momo-gate-pg-fixture\n' >"$OUT/runtime-db.container"
 : >"$CALLS"
 PATH="$BASE_PATH" DOCKER_STUB_LABEL="test-run-4386" bash "$SCRIPTS/gate_runtime_db.sh" down >/dev/null 2>&1
-grep -q '^rm -f momo-gate-pg-fixture' "$CALLS" || fail "C: down did not remove the run's own container"
+grep -q '^rm -f -v momo-gate-pg-fixture' "$CALLS" || fail "C: down did not remove the run's own container with -v (#5606)"
 # --keep must leave the container alone (and the state file for a later down).
 printf 'momo-gate-pg-fixture\n' >"$OUT/runtime-db.container"
 : >"$CALLS"
@@ -158,8 +165,8 @@ fi
 [ -s "$OUT/runtime-db.container" ] || fail "C: the container name was not recorded before the readiness wait"
 : >"$CALLS"
 PATH="$BASE_PATH" DOCKER_STUB_LABEL="test-run-4386" bash "$SCRIPTS/gate_runtime_db.sh" down >/dev/null 2>&1
-grep -q '^rm -f momo-gate-pg-' "$CALLS" || fail "C: a boot that failed before readiness left its container behind"
-pass "C down: removes only the container labelled with this run; --keep keeps; a half-booted run is still found"
+grep -q '^rm -f -v momo-gate-pg-' "$CALLS" || fail "C: a boot that failed before readiness left its container (or its volume) behind"
+pass "C down: removes only the container labelled with this run (with -v); --keep keeps; a half-booted run is still found"
 
 # ---- D: local_gate.sh wiring ------------------------------------------------
 # Structural, not behavioural: local_gate.sh cannot be executed here (its static

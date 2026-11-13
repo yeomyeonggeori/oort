@@ -6,8 +6,15 @@ openapi: 3.0.3
 # This file is the canonical client contract for the web v0 surface. Clients
 # (f399e417:clients/web-legacy via openapi-typescript, and packages/momo-core as a
 # conformance target) follow this spec. The live server is server-rust
-# (bins/momo-server, ADR-0145); drift between this spec and the running server
-# is detected by scripts/verify_openapi_contract.sh (docs/LOCAL_PR_GATE.md).
+# (bins/momo-server, ADR-0145). Drift between this spec and the running server
+# is checked two ways, and neither proves every operation here is served: the
+# router-versus-spec difference is held to an exact, listed drift in both
+# directions by server-rust/bins/momo-server/tests/dev_token_door_conformance_pg.rs
+# (`CONTRACT_WITHOUT_MOUNT` names the operations this file still declares that
+# the router does not mount), and scripts/verify_openapi_contract_rust.sh
+# round-trips only the operations listed in scripts/openapi_sampled_on_rust.txt
+# on the deployed image. The Swift pass that sampled every operation
+# (`verify_openapi_contract.sh`) was retired with the Swift server (#2142).
 #
 # Provenance note: this spec was written field-level identical to the retired
 # Swift DTOs (server/Sources/MomoServer/Routes/DTOs.swift). That tree is being
@@ -2100,7 +2107,10 @@ paths:
         `team_ai_limits_status` (ADR-0201 증보 v3 B9-4, #4944): the team AI's
         limits as set, the cap that applies after the operator's ceiling,
         today's and this month's usage and whether a monthly dollar limit can
-        be switched on. It is never stored and is not a PATCH-able key. Without
+        be switched on — and (ADR-0201 증보 v4 P7·P8, #5374) the same for the
+        helper's delegation to the team's Hermes: today's count, the day's cap,
+        whether the operator left it closed and the closed word of the first shut
+        gate. It is never stored and is not a PATCH-able key. Without
         the parameter the response is exactly the stored bag (a workspace that
         never wrote a key still reads `{}`). Any other `include` value is 400.
       security:
@@ -2172,8 +2182,8 @@ paths:
         v4 P7 / #5369: how many times a day the helper may hand a request to the
         team's Hermes) is a whole number from 1 to 200 whose absence means the
         default 30, never "no limit" — the server operator's
-        `TEAM_AI_HERMES_DAILY_CAP` (empty = the delegation is closed) is a
-        ceiling over it. `0`, a negative, a fraction for a
+        `TEAM_AI_HERMES_DAILY_CAP` (empty = no ceiling, `0` = the delegation is
+        off — #5685) is a ceiling over it. `0`, a negative, a fraction for a
         count, a non-number and an unknown field are 400; "no limit" is the
         absence of a field, never `0`. Merged one level down like
         `team_ai_roles` — a named field replaces, an omitted field stays, a
@@ -2197,8 +2207,8 @@ paths:
         helper on, the settings screen on the PATCH that turns `files` or `memory`
         on. It is taken out of the body before the merge, so it is never stored,
         never echoed in the bag and not one of the keys the settings audit row
-        names. Its fields are `bundles` (one or two distinct names from `files`,
-        `memory` — the bundles that carry a notice; `code`, `chat_read` and any
+        names. Its fields are `bundles` (one to three distinct names from `files`,
+        `memory`, `hermes` — the bundles that carry a notice; `code`, `chat_read` and any
         other name are 400), `noticeVersion` (the wording the screen showed; it
         must be one the server lists, and an unknown one is 400 rather than a
         record of words nobody read) and `via` (`onboarding` or `settings`; `card`
@@ -5666,89 +5676,6 @@ paths:
         "400": {description: Malformed identifier, content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}}
         "401": {$ref: "#/components/responses/Unauthorized"}
         "404": {description: No such hosted agent visible to the caller, content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}}
-
-  /v1/workspaces/{workspaceId}/agents/from-card:
-    post:
-      tags: [agents]
-      operationId: registerAgentFromCard
-      summary: Fetch an A2A v0.3 Agent Card for administrator consent.
-      description: >
-        Human workspace owner/admin only. The server fetches
-        `/.well-known/agent-card.json` with a five-second timeout, a 256KB
-        response limit, at most two manually validated redirects, and DNS/IP
-        SSRF checks on every hop. HTTPS is required except for an explicit
-        local-development opt-in. A successful parse stores public card
-        provenance and display-only security requirements with
-        status=pending_consent; failures persist nothing. Provider credentials
-        and secret-shaped card fields are rejected.
-      security: [{bearerAuth: []}]
-      parameters:
-        - $ref: "#/components/parameters/WorkspaceId"
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: {$ref: "#/components/schemas/RegisterAgentCardRequest"}
-      responses:
-        "201":
-          description: Public card metadata is pending administrator consent.
-          content:
-            application/json:
-              schema: {$ref: "#/components/schemas/AgentCardRegistrationResponse"}
-        "400":
-          description: Unsafe URL, failed fetch, redirect violation, oversize response, or invalid card.
-          content:
-            application/json:
-              schema: {$ref: "#/components/schemas/ErrorResponse"}
-        "401": {$ref: "#/components/responses/Unauthorized"}
-        "403": {$ref: "#/components/responses/Forbidden"}
-        "429": {$ref: "#/components/responses/RateLimited"}
-
-  /v1/workspaces/{workspaceId}/agents/from-card/{registrationId}/confirm:
-    post:
-      tags: [agents]
-      operationId: confirmAgentFromCard
-      summary: Confirm a pending Agent Card and issue its first gateway bearer.
-      description: >
-        Human workspace owner/admin only. The member(kind=agent), agent row,
-        workspace membership, one-time per-agent gateway bearer digest,
-        registration transition, and audit rows commit in one tenant
-        transaction. The raw bearer is returned once with no-store headers;
-        no card-provided credential is accepted or persisted.
-      security: [{bearerAuth: []}]
-      parameters:
-        - $ref: "#/components/parameters/WorkspaceId"
-        - name: registrationId
-          in: path
-          required: true
-          schema: {type: string, format: uuid}
-      responses:
-        "201":
-          description: Agent member and initial gateway credential created atomically.
-          headers:
-            Cache-Control:
-              schema: {type: string, enum: [no-store]}
-          content:
-            application/json:
-              schema: {$ref: "#/components/schemas/ConfirmAgentCardResponse"}
-        "400":
-          description: Invalid registration identifier.
-          content:
-            application/json:
-              schema: {$ref: "#/components/schemas/ErrorResponse"}
-        "401": {$ref: "#/components/responses/Unauthorized"}
-        "403": {$ref: "#/components/responses/Forbidden"}
-        "404":
-          description: Pending registration not found in this workspace.
-          content:
-            application/json:
-              schema: {$ref: "#/components/schemas/ErrorResponse"}
-        "409":
-          description: Registration was already confirmed.
-          content:
-            application/json:
-              schema: {$ref: "#/components/schemas/ErrorResponse"}
-        "429": {$ref: "#/components/responses/RateLimited"}
 
   /v1/workspaces/{workspaceId}/channels:
     get:
@@ -10837,6 +10764,21 @@ paths:
         runs on each board transition and for top-level mention runs on their
         final transition (done, failed or stopped); nothing is emitted when a
         mention run crosses 60 seconds, so a client also refetches on focus.
+
+        The owner's waiting session (#5639, ADR-0202 D4, ADR-0188 D3 and D5):
+        in an include=jobs page, a running agent-lane session that has a
+        permission request still pending and not yet expired has state waiting
+        instead of running (status stays the ledger word), but only for a
+        caller who can answer it: the caller owns the session and also owns the
+        session's host, which is not revoked, the same rule the
+        permission-decisions route applies. A session that is not running
+        (idle, ended, orphaned), on a host someone else registered (a shared
+        host) or on a revoked host is never waiting, for anyone; the decision
+        route would close or refuse that request too. The next read after the request is decided, expires or is
+        cancelled has the ledger word again. No key is added and nothing of the
+        request (tool, title, options, preview) or of the host is sent. Every
+        other caller, and every read without include=jobs (including the single
+        read below), gets the ledger word as before.
       security:
         - bearerAuth: []
       parameters:
@@ -13215,8 +13157,12 @@ paths:
         becomes a direct one, and a thread the caller stopped following is followed
         again — this is the only way back from `DELETE`, because nothing automatic
         (a new reply, a new mention, being the root's author) re-follows it. Idempotent;
-        no body. A personal setting: nothing is broadcast, and other devices see it on
-        their next read of the thread (`getThreadReplies` → `following`).
+        no body. A personal setting: nothing is broadcast to anyone else, and other devices
+        see it on their next read of the thread (`getThreadReplies` → `following`). When the
+        write changed the record (`PUT` here or `DELETE` below), the caller's own personal
+        channel gets one ids-only `followed_unread.updated` frame (ADR-0124 amendment 4,
+        #5667): the channel's `followed_unread_reply_count` in `listReadStates` may have
+        changed.
 
         Guard order is the thread read's: active channel membership (403, the same
         bytes for a channel that does not exist), then the root (404 when it is absent
@@ -13340,7 +13286,10 @@ paths:
         a late or stale signal from another device cannot rewind it, and it never passes the
         last reply that exists, so a request cannot mark replies that have not been written
         as read. The replies past the position that other people wrote are what
-        `ThreadRollup.unread_reply_count` counts.
+        `ThreadRollup.unread_reply_count` counts. When the position of a thread the caller
+        follows moved, the caller's personal channel gets one ids-only
+        `followed_unread.updated` frame (ADR-0124 amendment 4, #5667) so their other devices
+        re-read `listReadStates` (`followed_unread_reply_count`).
 
 
         This is the **only** thing that moves the position. A `GET …/replies` does not (the
@@ -13413,6 +13362,103 @@ paths:
               schema: {$ref: "#/components/schemas/ErrorResponse"}
         "429": {$ref: "#/components/responses/RateLimited"}
 
+  /v1/workspaces/{workspaceId}/threads/read-all:
+    post:
+      tags: [read-state]
+      operationId: markFollowedThreadsRead
+      summary: Mark every thread you follow read at once (스레드 모두 읽음).
+      description: >
+        ADR-0124 amendment 5 (#5689). For every thread the caller **follows** (`auto` or
+        `followed`) that has an unread reply - the replies `followed_unread_reply_count`
+        counts - moves the caller's read position to the thread's last reply, in one write
+        transaction, through the same statement as `markThreadRead`: the position becomes
+        `LEAST(the last reply this request saw, the thread's last reply)` and is written only
+        when that is greater than what is stored, so it never moves backward and a reply that
+        lands while the request runs stays unread. It creates no row; a stopped follow is not
+        touched.
+
+
+        Which channels: those the caller is a live member of and that are not archived (the
+        channels `listReadStates` has a line for), narrowed to `channel_ids` when given.
+        The body is a JSON object whose only key is `channel_ids`: `{}` or
+        `{"channel_ids": null}` means all of them, `{"channel_ids": []}` means none (a no-op).
+        Any other body is 400 before anything is read - an unknown key (a misspelt
+        `channelIds` is never read as "all"), a body that is not an object (a bare `[]`), an
+        id that is not a uuid, malformed JSON. Duplicate ids count once. An id that
+        is not such a channel - one the caller is not in, has left, an archived one, another
+        workspace's, one that never existed - is skipped without a word: the answer is the
+        one the request would get without it, so it says nothing about whether that channel
+        exists. A guest (ADR-0219) reaches only the channels they are in.
+
+
+        Answer: the `listReadStates` lines of the channels where a position moved, read in a
+        second transaction **after** the write commits (`followed_unread_reply_count` is `0`
+        unless the cap was hit or a reply landed meanwhile - a reply that lands just after the
+        commit can already be counted, and its own frame makes the client read again),
+        `marked_thread_count`, and `has_more`. At most 100 threads move per
+        request; when more were waiting `has_more` is `true` and the client calls again until
+        it is `false`. With `has_more: false`, the same request again answers
+        `{"read_states": [], "marked_thread_count": 0, "has_more": false}` and sends nothing.
+
+
+        Signal: one ids-only `followed_unread.updated` frame per changed channel on the
+        caller's personal channel (`user:read-state#<MEMBER>`), in the write transaction's
+        outbox; its `root_id` is one of the threads that moved there, not a list. Nobody
+        else hears anything. The channel cursor (`updateReadState`) does not move and the
+        inbox's thread-reply items stay as they are - exactly what reading one thread does.
+
+
+        Human bearer only: an agent bearer is refused whatever its scopes, a developer token
+        is refused (the route is not on its closed table), so are the narrow notification
+        and lock-screen tokens, a work-host signature and the legacy gateway secret (each has
+        its own allow-list without this path), and the caller must be an active
+        human member of the workspace. Per-member budget `RATE_LIMIT_THREAD_READ_ALL_PER_MEMBER`
+        (default 60 per window). Nothing is audited.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ThreadReadAllRequest"
+      responses:
+        "200":
+          description: What moved.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ThreadReadAllResponse"
+        "400":
+          description: >
+            The body is not exactly the shape: not valid JSON, not an object, a key other than
+            `channel_ids`, `channel_ids` not an array of uuids or `null`, or more than 500
+            distinct ids.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ErrorResponse"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403":
+          description: >
+            Workspace scope mismatch, a non-human bearer, or not an active human member of the
+            workspace.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ErrorResponse"}
+        "413":
+          description: The body is larger than the server's body limit.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ErrorResponse"}
+        "415":
+          description: The request has no JSON content type (send `{}` for every channel).
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ErrorResponse"}
+        "429": {$ref: "#/components/responses/RateLimited"}
+
   /v1/workspaces/{workspaceId}/read-state:
     get:
       tags: [read-state]
@@ -13431,6 +13477,18 @@ paths:
         revives. The `PUT .../read-state` response and the realtime
         `read_state` frame do not carry them (ADR-0177 D10: no closure event);
         other devices pick a closure up on their next read of this list.
+        ADR-0124 amendment 4 (#5667) adds `followed_unread_reply_count` to every
+        row (always present, `0` when none): the unread replies in the threads
+        the caller follows in that channel. When it may have changed - a new
+        reply in a followed thread (every follower but its author, while still
+        a member of the channel), the caller reading a followed thread
+        (`PUT .../messages/{rootId}/read` moved the position), the caller
+        following or stopping following (`PUT`/`DELETE .../follow` changed the
+        row) - the caller's personal channel (`user:read-state#<MEMBER>`) gets a
+        `followed_unread.updated` frame through the outbox. The frame carries
+        ids only (`workspace_id`, `member_id`, `channel_id`, `root_id`) and
+        means "read this list again"; it never carries the number. The
+        `PUT .../read-state` response and the `read_state` frame are unchanged.
       security:
         - bearerAuth: []
       parameters:
@@ -16265,7 +16323,9 @@ components:
         default 60; attachment upload starts, default 60; video length, size and poster writes
         (`PUT …/attachments/{id}/media`, ADR-0151 amendment 5 D5, `RATE_LIMIT_MEDIA_WRITE_PER_MEMBER`),
         default 60; starts of a picture from a
-        photo (`POST …/expressions/photo-drafts`, ADR-0218 §8 H11), default 10. Cancelling a scheduled
+        photo (`POST …/expressions/photo-drafts`, ADR-0218 §8 H11), default 10; marking every
+        followed thread read (`POST …/threads/read-all`, ADR-0124 amendment 5,
+        `RATE_LIMIT_THREAD_READ_ALL_PER_MEMBER`), default 60. Cancelling a scheduled
         message, editing a message (`PATCH …/messages/{id}`, which streaming answers
         use) and every read except the two below are not budgeted. Retrying with the
         same `clientMsgId` after a 429 is safe. The link-card proxies
@@ -20793,42 +20853,6 @@ components:
         agent:
           $ref: "#/components/schemas/AgentMember"
 
-    RegisterAgentCardRequest:
-      type: object
-      required: [url]
-      additionalProperties: false
-      properties:
-        url:
-          type: string
-          format: uri
-          description: Agent origin or exact /.well-known/agent-card.json URL; userinfo, query, and fragment are forbidden.
-
-    AgentCardRegistration:
-      type: object
-      required: [id, status, name, url, capabilities, securitySchemes, createdAtMs]
-      properties:
-        id: {type: string, format: uuid}
-        status: {type: string, enum: [pending_consent, confirmed]}
-        name: {type: string, minLength: 1, maxLength: 100}
-        description: {type: string, maxLength: 2000}
-        url: {type: string, format: uri}
-        capabilities:
-          type: object
-          additionalProperties: true
-        securitySchemes:
-          type: object
-          description: Display-only summary; never includes submitted credentials or secrets.
-          additionalProperties: true
-        agentMemberId: {type: string, format: uuid}
-        createdAtMs: {type: integer, format: int64}
-        confirmedAtMs: {type: integer, format: int64}
-
-    AgentCardRegistrationResponse:
-      type: object
-      required: [registration]
-      properties:
-        registration: {$ref: "#/components/schemas/AgentCardRegistration"}
-
     AgentCredentialScope:
       type: string
       description: >
@@ -20897,7 +20921,7 @@ components:
         (`PUT …/unfurl-settings`, `PATCH …/memory/settings`, `PUT
         …/work-tier-policy`) with the approver's authority, and its result
         `ref` is `{type: workspace_settings, id: <workspace id>}`.
-        `plugin.install` (`{pluginId}`, one of the four official plugins,
+        `plugin.install` (`{pluginId}`, one of the seven official plugins,
         admin; ADR-0201 증보 v2 H7, #3889) is team-AI-only the same way. Its
         card names the app, its version and the domains it reaches out to
         (ADR-0113 D5), pins the manifest digest it showed, and approving runs
@@ -21680,21 +21704,6 @@ components:
         credential: {$ref: "#/components/schemas/AgentCredential"}
         revokedNow: {type: boolean}
         alreadyRevoked: {type: boolean}
-
-    ConfirmAgentCardResponse:
-      type: object
-      required: [registrationId, status, agent, credential, token, tokenType, confirmedAtMs]
-      properties:
-        registrationId: {type: string, format: uuid}
-        status: {type: string, enum: [confirmed]}
-        agent: {$ref: "#/components/schemas/AgentMember"}
-        credential: {$ref: "#/components/schemas/AgentCredential"}
-        token:
-          type: string
-          writeOnly: true
-          description: One-time-issued scoped gateway bearer; only its SHA-256 digest is persisted.
-        tokenType: {type: string, enum: [Bearer]}
-        confirmedAtMs: {type: integer, format: int64}
 
     # ---- Provider cascade + effort table (ADR-0135 D1 / ADR-0134 D2) --------
     ProviderChainEntry:
@@ -26372,7 +26381,7 @@ components:
             dailyTokens: {type: integer, format: int64, minimum: 1, description: "Tokens (prompt + completion) per UTC day."}
             dailySearches: {type: integer, format: int64, minimum: 1, description: "Provider-side web searches per UTC day."}
             monthlyUsd: {type: number, minimum: 0.000001, maximum: 1000000, description: "Public list-price equivalent per UTC calendar month (read-time, not the provider's invoice)."}
-            dailyDelegations: {type: integer, format: int64, minimum: 1, maximum: 200, description: "Times per UTC day the helper may hand a request to the team's Hermes (ADR-0201 증보 v4 P7). Absent = the default 30, not 'no limit'; the operator's TEAM_AI_HERMES_DAILY_CAP (empty = closed) is a ceiling over it."}
+            dailyDelegations: {type: integer, format: int64, minimum: 1, maximum: 200, description: "Times per UTC day the helper may hand a request to the team's Hermes (ADR-0201 증보 v4 P7). Absent = the default 30, not 'no limit'; the operator's TEAM_AI_HERMES_DAILY_CAP (empty = no ceiling, 0 = off — #5685) is a ceiling over it."}
         team_ai_limits_status:
           $ref: "#/components/schemas/TeamAiLimitsStatus"
         team_ai_alias_status:
@@ -26496,17 +26505,21 @@ components:
             bundles:
               type: array
               minItems: 1
-              maxItems: 2
+              maxItems: 3
               uniqueItems: true
-              description: The bundles whose line the screen showed (the two that carry a notice).
-              items: {type: string, enum: [files, memory]}
+              description: >
+                The bundles whose line the screen showed (the ones that carry a notice: `files`, `memory`,
+                and `hermes` — ADR-0201 증보 v4 P10, whose two-sentence notice says the request sentence goes to
+                the AI company Hermes uses and stays in Hermes's own record).
+              items: {type: string, enum: [files, memory, hermes]}
             noticeVersion:
               type: string
               description: >
                 The wording version the screen showed. One of the versions the server lists
                 (`momo_agent::team_ai_roles::NOTICE_VERSIONS`, newest last); a new wording appends
-                a version and never removes one while a client can still show it.
-              enum: ["2026-11-01.v1"]
+                a version and never removes one while a client can still show it. `2026-11-06.v2` added
+                the `hermes` notice (#5369); the `files` and `memory` lines are the same in both.
+              enum: ["2026-11-01.v1", "2026-11-06.v2"]
             via:
               type: string
               description: The screen. `card` is not here — a card's consent is the approval's own record.
@@ -26539,41 +26552,56 @@ components:
         (ADR-0147 증보 2026-10-30), not the provider's invoice, and a run on a model with no price
         adds tokens but no dollars (`monthUnpricedRuns`). The model's name is never returned — only
         whether it is priced.
-      required: [limits, effective, operatorCeiling, usage, monthlyUsdAvailable, dayResetsAtMs, monthResetsAtMs]
+        **The delegation to the team's Hermes** (ADR-0201 증보 v4 P7·P8, #5374) rides the same objects
+        under the setting's own name (`dailyDelegations`, `todayDelegations`) plus
+        `delegationAvailable`/`delegationUnavailableReason` — and runs the other way round: an unset
+        workspace value is the default 30 (never "no limit"). An unset operator ceiling
+        (`TEAM_AI_HERMES_DAILY_CAP` empty or blank) is no ceiling since #5685; only its `0` is **closed**. A server older than #5374 sends
+        none of these fields; a client reads their absence as "unknown, closed". No agent or member is
+        named anywhere in the delegation fields.
+      required: [limits, effective, operatorCeiling, usage, monthlyUsdAvailable, dayResetsAtMs, monthResetsAtMs, delegationAvailable, delegationUnavailableReason]
       properties:
         limits:
           type: object
           description: What the administrator set (`team_ai_limits`), `null` where nothing is set.
-          required: [dailyTokens, dailySearches, monthlyUsd]
+          required: [dailyTokens, dailySearches, monthlyUsd, dailyDelegations]
           properties:
             dailyTokens: {type: integer, format: int64, nullable: true}
             dailySearches: {type: integer, format: int64, nullable: true}
             monthlyUsd: {type: number, nullable: true}
+            dailyDelegations: {type: integer, format: int64, minimum: 1, maximum: 200, nullable: true, description: "What the administrator set for the day's delegations to Hermes; `null` = not set, which is the default 30 — never \"no limit\"."}
         effective:
           type: object
           description: >
             The cap that applies after the operator's ceiling: the lower of the workspace's limit and
             the ceiling, `null` for none. `0` is the operator's off switch (the helper for tokens,
-            web search for searches).
-          required: [dailyTokens, dailySearches]
+            web search for searches). `dailyDelegations` is never `null`: it is
+            the workspace's value or the default 30, lowered by a positive operator ceiling, and `0`
+            when the operator's ceiling is `0` — the delegation is closed (an unset ceiling is no
+            ceiling, #5685).
+          required: [dailyTokens, dailySearches, dailyDelegations]
           properties:
             dailyTokens: {type: integer, format: int64, nullable: true}
             dailySearches: {type: integer, format: int64, nullable: true}
+            dailyDelegations: {type: integer, format: int64, minimum: 0, maximum: 200, description: "The day's delegations to Hermes this workspace may make; 0 = closed (the operator's ceiling is 0)."}
         operatorCeiling:
           type: object
           description: >
             The server operator's env ceilings as the api process reads them
-            (`TEAM_AI_DAILY_TOKEN_CAP`, `TEAM_AI_DAILY_SEARCH_CAP`; set the same values on the api and
-            the agent-worker — the worker enforces, the api only explains). `null` = no ceiling.
-          required: [dailyTokens, dailySearches, helperOff, searchOff]
+            (`TEAM_AI_DAILY_TOKEN_CAP`, `TEAM_AI_DAILY_SEARCH_CAP`, `TEAM_AI_HERMES_DAILY_CAP`; set the same
+            values on the api and the agent-worker — the worker enforces, the api only explains). `null` =
+            no ceiling (each `0` is its own flag: `helperOff`, `searchOff`, `delegationOff`).
+          required: [dailyTokens, dailySearches, helperOff, searchOff, dailyDelegations, delegationOff]
           properties:
             dailyTokens: {type: integer, format: int64, nullable: true}
             dailySearches: {type: integer, format: int64, nullable: true}
             helperOff: {type: boolean, description: "TEAM_AI_DAILY_TOKEN_CAP=0 — the operator switched the helper off."}
             searchOff: {type: boolean, description: "TEAM_AI_DAILY_SEARCH_CAP=0 — web search is off for everyone."}
+            dailyDelegations: {type: integer, format: int64, minimum: 1, nullable: true, description: "TEAM_AI_HERMES_DAILY_CAP as a positive per-workspace ceiling; null when unset or blank (no ceiling, #5685) or 0 (off — see delegationOff)."}
+            delegationOff: {type: boolean, description: "TEAM_AI_HERMES_DAILY_CAP=0 (or a value the api cannot read) — the operator switched the delegation to Hermes off. Unset or blank is no ceiling and false (#5685)."}
         usage:
           type: object
-          required: [todayTokens, todaySearches, monthCostMicroUsd, monthRuns, monthUnpricedRuns, monthEstimatedRuns]
+          required: [todayTokens, todaySearches, monthCostMicroUsd, monthRuns, monthUnpricedRuns, monthEstimatedRuns, todayDelegations]
           properties:
             todayTokens: {type: integer, format: int64, description: "Prompt + completion tokens since 00:00 UTC."}
             todaySearches: {type: integer, format: int64, description: "Provider-side web searches since 00:00 UTC."}
@@ -26581,6 +26609,7 @@ components:
             monthRuns: {type: integer, format: int64}
             monthUnpricedRuns: {type: integer, format: int64, description: "Runs on a model with no price on file (counted in tokens, not in dollars)."}
             monthEstimatedRuns: {type: integer, format: int64, description: "Runs whose tokens or price are estimates: the dollar figure is a lower bound."}
+            todayDelegations: {type: integer, format: int64, minimum: 0, description: "Delegations to Hermes called since 00:00 UTC (the task rows' marker at `called` or later, ended ones included) — the count the day's cap is judged by. A person who calls Hermes directly is not counted."}
         monthlyUsdAvailable:
           type: boolean
           description: Whether a monthly dollar limit can be switched on now.
@@ -26591,6 +26620,25 @@ components:
           description: >
             Why not (`null` when it can): `model_unpriced` (the helper's last request ran on a model with no price on file)
             or `no_usage_yet` (the helper has not answered anything, so there is no model to price).
+        delegationAvailable:
+          type: boolean
+          description: >
+            ADR-0201 증보 v4 P8 (#5374). Every gate of the delegation door this workspace decides is open:
+            G3 (exactly one Hermes every member could hand work to — an operator-env agent that is active,
+            not paused, not connector-marked, not owner-only and not the helper), G4 (the operator's
+            declarations as the api reads them: the tool lock true and no connection-mode variable with a
+            value), G5 (the operator's env link and key) and G6's day (the ceiling set and today's count
+            under the cap). The role switch (G1, `team_ai_roles.hermes` in the same bag) is not folded in,
+            and neither is a request's own half (who asks, what it read) nor the kinds the worker was told
+            it may offer — so `true` does not promise the tool on every request.
+        delegationUnavailableReason:
+          type: string
+          nullable: true
+          enum: [hermes_not_connected, hermes_ambiguous, tools_not_locked, connection_mode, pin_unresolved, ceiling_unset, daily_cap, null]
+          description: >
+            The first shut gate, in the door's order and in the door's own closed words (`null` exactly when
+            `delegationAvailable` is true) — what the screen shows after 「지금은 쓸 수 없어요」 (P8, P10:
+            even while the role switch is on).
         dayResetsAtMs: {type: integer, format: int64, description: "Epoch milliseconds of the next 00:00 UTC."}
         monthResetsAtMs: {type: integer, format: int64, description: "Epoch milliseconds of 00:00 UTC on the first of next month."}
 
@@ -27612,6 +27660,7 @@ components:
         - marked_unread_before_seq
         - latest_readable_seq
         - closed_at_seq
+        - followed_unread_reply_count
       properties:
         channel_id:
           type: string
@@ -27663,6 +27712,22 @@ components:
             every channel that is not a DM). Always present. Another member's
             closure is never returned. Reviving writes nothing: the stored value
             stays and the client compares it with `latest_readable_seq`.
+        followed_unread_reply_count:
+          type: integer
+          format: int64
+          minimum: 0
+          description: >
+            ADR-0124 amendment 4 (#5667). The unread replies in the threads the
+            **caller** follows in this channel: the sum, over those threads, of
+            the thread summary's `unread_reply_count` (other people's undeleted
+            `text` replies past the caller's thread read position; ADR-0206
+            amendment 1 F10). `0` when the caller follows nothing here or has
+            read it all. Always present. It does not change `unread_count` or
+            `mention_count`, and a reply that names the caller is counted both
+            here and in `mention_count`. Like every unread and badge number it
+            ignores channel mute and the notification pause (ADR-0124 D2,
+            D4-A). The `followed_unread.updated` frame on the caller's personal
+            channel says when to read it again.
 
     ReadStateListResponse:
       type: object
@@ -27672,6 +27737,46 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/ReadStateRow"
+
+    ThreadReadAllRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        channel_ids:
+          type: array
+          nullable: true
+          maxItems: 500
+          items:
+            type: string
+            format: uuid
+          description: >
+            Narrow the request to these channels. Absent or `null` = every channel the caller is
+            a live member of; `[]` = none. Ids that are not the caller's live, unarchived channels
+            are skipped without a word. Duplicates count once (the 500 is distinct ids). No other
+            key is accepted.
+
+    ThreadReadAllResponse:
+      type: object
+      required: [read_states, marked_thread_count, has_more]
+      properties:
+        read_states:
+          type: array
+          description: >
+            The `listReadStates` line of every channel where a position moved, read after the
+            write. Empty when nothing moved.
+          items:
+            $ref: "#/components/schemas/ReadStateRow"
+        marked_thread_count:
+          type: integer
+          format: int64
+          minimum: 0
+          maximum: 100
+          description: How many threads' positions moved in this request.
+        has_more:
+          type: boolean
+          description: >
+            More followed threads with unread replies were waiting than one request moves
+            (100). Call again until this is `false`.
 
     PutDmClosureRequest:
       type: object

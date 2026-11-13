@@ -309,9 +309,10 @@ curl -sS -X PUT http://localhost:8088/v1/provider/link \
 `http://host.docker.internal:<port>/v1` 로 닿는다. `127.0.0.1` 은 컨테이너
 자신이다. env를 만들 때 opt-in을 켠 뒤 **설정 › AI 연결**에 그 주소를 넣는다.
 
-실측 hermes 절차(이 머신의 OpenAI 호환 SSE → 웰컴 킥오프 답장). 이미 본인
-hermes가 돌고 있으면 그 프로세스를 쓰고 mock은 건너뛴다. 이 체크아웃에는
-hermes 바이너리가 없다. 대체는 `scripts/mock_hermes.py` 다.
+실측 hermes 절차(이 머신의 OpenAI 호환 `/v1/chat/completions`, 스트리밍 아님:
+`agent-worker`가 `"stream": false`로 보내고 JSON 답 하나를 읽는다 → 웰컴 킥오프
+답장). 이미 본인 hermes가 돌고 있으면 그 프로세스를 쓰고 mock은 건너뛴다. 이
+체크아웃에는 hermes 바이너리가 없다. 대체는 `scripts/mock_hermes.py` 다.
 
 1. Docker가 닿을 호스트 포트에 provider를 띄운다. 아래 `<provider-port>` 는
    빈 포트를 고른다. `0.0.0.0` 에 바인드한다 — `host.docker.internal` 은

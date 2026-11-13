@@ -3566,3 +3566,228 @@ async fn an_unseated_personal_alias_in_an_admitted_dm_skips_notice_and_refuses_s
     assert_eq!(code(&body), Some("dm_agent_consent_required"));
     assert_eq!(s.runs_and_jobs().await, (0, 0));
 }
+
+// ---------------------------------------------------------------------------
+// #5594 — when the Mac does not start or does not finish the work, the owner is told
+// ---------------------------------------------------------------------------
+
+/// One stop notice (#5594): (body, root, author, props).
+type StopNotice = (String, Option<Uuid>, Uuid, Value);
+
+/// Every stop notice of the stage's workspace, oldest first.
+async fn stop_notices(s: &Stage) -> Vec<StopNotice> {
+    let rows: Vec<(Option<String>, Option<Uuid>, Uuid, Value)> = sqlx::query_as(
+        "SELECT body, root_id, author_member_id, props FROM message \
+          WHERE workspace_id = $1 AND props->>'kind' = 'work_session_notice' ORDER BY seq",
+    )
+    .bind(s.workspace)
+    .fetch_all(&s.su)
+    .await
+    .expect("read stop notices");
+    rows.into_iter()
+        .map(|(body, root, author, props)| (body.unwrap_or_default(), root, author, props))
+        .collect()
+}
+
+impl Stage {
+    /// The owner calls their Mac from `origin`; the signed spawn is dispatched.
+    async fn dispatched_spawn(&self, origin: Option<Uuid>) -> Uuid {
+        let mut req = self.req();
+        req.origin = origin;
+        let (status, body, _) = self.spawn(&req).await;
+        assert_eq!(status, 201, "{body}");
+        Uuid::parse_str(body["workControl"]["id"].as_str().unwrap()).unwrap()
+    }
+
+    async fn ack(&self, control: Uuid, body: Value) -> (u16, Value) {
+        self.host_request(
+            "POST",
+            &format!(
+                "/v1/workspaces/{}/work-controls/{control}/ack",
+                self.workspace
+            ),
+            Some(body),
+        )
+        .await
+    }
+
+    /// A session the owner's Mac opened for a signed spawn and acknowledged.
+    async fn open_session(&self) -> (Uuid, Uuid) {
+        let control = self.dispatched_spawn(None).await;
+        let req = self.req();
+        let (status, created) = self
+            .host_request(
+                "POST",
+                &format!("/v1/workspaces/{}/work-sessions", self.workspace),
+                Some(
+                    json!({ "channelId": self.channel, "hostId": self.host, "tool": req.tool,
+                             "label": req.label, "controlId": control }),
+                ),
+            )
+            .await;
+        assert_eq!(status, 201, "the host opens the session: {created}");
+        let session = Uuid::parse_str(created["workSession"]["id"].as_str().unwrap()).unwrap();
+        let (status, acked) = self
+            .ack(control, json!({ "ok": true, "sessionId": session }))
+            .await;
+        assert_eq!(status, 200, "{acked}");
+        let root: Uuid =
+            sqlx::query_scalar("SELECT root_message_id FROM work_session WHERE id = $1")
+                .bind(session)
+                .fetch_one(&self.su)
+                .await
+                .unwrap();
+        (session, root)
+    }
+
+    /// The Mac reports the session over (signed), with `exit_code`.
+    async fn host_ends(&self, session: Uuid, exit_code: i32) {
+        let (status, body) = self
+            .host_request(
+                "PATCH",
+                &format!("/v1/workspaces/{}/work-sessions/{session}", self.workspace),
+                Some(json!({ "status": "ended", "exitCode": exit_code })),
+            )
+            .await;
+        assert_eq!(status, 200, "{body}");
+    }
+}
+
+/// #5594 (ADR-0220 P2 ③, P3 (b)): the Mac refused the spawn — the place the owner called from
+/// gets one line in closed words. The host's own label never reaches a message.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
+async fn a_refused_spawn_leaves_one_closed_line_where_it_was_called() {
+    let _lock = test_lock().await;
+    let s = stage(true).await;
+    s.host_online(s.host, true).await;
+    let call = s
+        .say(&s.access, s.channel, None, "내 맥에서 빌드 봐 줘")
+        .await;
+    let control = s.dispatched_spawn(Some(call)).await;
+    let (status, acked) = s
+        .ack(
+            control,
+            json!({ "ok": false, "errorLabel": "codex_login_required" }),
+        )
+        .await;
+    assert_eq!(status, 200, "{acked}");
+
+    let lines = stop_notices(&s).await;
+    assert_eq!(lines.len(), 1, "{lines:?}");
+    let (body, root, author, props) = &lines[0];
+    assert_eq!(
+        *root,
+        Some(call),
+        "a reply under the message the owner called from"
+    );
+    assert_eq!(*author, s.person);
+    assert_eq!(props["code"], "spawn_refused");
+    assert_eq!(props["reason"], "login_required");
+    assert_eq!(props["control_id"], control.to_string());
+    assert!(body.contains("로그인이 필요해요"), "{body}");
+
+    // A label the server has never heard of is `other`, and its text is nowhere in a message or
+    // in the line's broadcast.
+    let marker = format!("LEAKMARKER{}", &Uuid::new_v4().simple().to_string()[..12]);
+    let second = s.dispatched_spawn(None).await;
+    let (status, acked) = s
+        .ack(second, json!({ "ok": false, "errorLabel": marker }))
+        .await;
+    assert_eq!(status, 200, "{acked}");
+    let lines = stop_notices(&s).await;
+    assert_eq!(lines.len(), 2, "{lines:?}");
+    let (body, root, _, props) = &lines[1];
+    assert_eq!(props["reason"], "other");
+    assert_eq!(
+        *root, None,
+        "a spawn that named no thread or message: the room itself"
+    );
+    assert_eq!(body, "맥에서 작업을 시작하지 못했어요");
+    let leaked_messages: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM message WHERE workspace_id = $1 \
+            AND (body LIKE '%' || $2 || '%' OR props::text LIKE '%' || $2 || '%')",
+    )
+    .bind(s.workspace)
+    .bind(&marker)
+    .fetch_one(&s.su)
+    .await
+    .unwrap();
+    assert_eq!(
+        leaked_messages, 0,
+        "the host's raw label is never stored in a line"
+    );
+    let leaked_lines: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM outbox WHERE workspace_id = $1 \
+            AND payload::text LIKE '%work_session_notice%' \
+            AND payload::text LIKE '%' || $2 || '%'",
+    )
+    .bind(s.workspace)
+    .bind(&marker)
+    .fetch_one(&s.su)
+    .await
+    .unwrap();
+    assert_eq!(leaked_lines, 0, "nor broadcast with the line");
+
+    // A successful ack writes no line.
+    let (session, _) = s.open_session().await;
+    let _ = session;
+    assert_eq!(stop_notices(&s).await.len(), 2);
+}
+
+/// #5594 (ADR-0188 D8 「실패」, ADR-0220 P2 ④): the Mac ended a session with an error nobody asked
+/// for — one line in its thread. A kill the owner asked for, a clean end and the owner's own end
+/// are not failures.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
+async fn a_host_ended_session_with_an_error_tells_the_owner_but_a_kill_or_a_clean_end_does_not() {
+    let _lock = test_lock().await;
+    let s = stage(true).await;
+    s.host_online(s.host, true).await;
+
+    let (failing, failing_root) = s.open_session().await;
+    s.host_ends(failing, 1).await;
+    let lines = stop_notices(&s).await;
+    assert_eq!(lines.len(), 1, "{lines:?}");
+    let (body, root, author, props) = &lines[0];
+    assert_eq!(body, "작업이 오류로 끝났어요");
+    assert_eq!(*root, Some(failing_root), "in the session's thread");
+    assert_eq!(*author, s.person);
+    assert_eq!(props["code"], "failed");
+    assert_eq!(props["exit_code"], 1);
+    assert_eq!(props["owner_member_id"], s.person.to_string());
+    assert_eq!(props["session_id"], failing.to_string());
+    // The end is idempotent: a repeated report writes nothing more.
+    s.host_ends(failing, 1).await;
+    assert_eq!(stop_notices(&s).await.len(), 1);
+
+    // The owner pressed 멈추기 and the agent needed SIGKILL after the grace (137): the kill
+    // row, not the code, is what says it was asked for.
+    let (killed, _) = s.open_session().await;
+    let (status, body) = s
+        .post(
+            &format!("/v1/workspaces/{}/work-sessions/{killed}/kill", s.workspace),
+            &s.access,
+            json!({}),
+        )
+        .await;
+    assert!(
+        status == 200 || status == 201 || status == 202,
+        "{status}: {body}"
+    );
+    s.host_ends(killed, 137).await;
+
+    // The desktop app quit: workd stops every session itself (SIGTERM → 143), no kill row.
+    let (app_quit, _) = s.open_session().await;
+    s.host_ends(app_quit, 143).await;
+
+    // A clean end.
+    let (clean, _) = s.open_session().await;
+    s.host_ends(clean, 0).await;
+
+    assert_eq!(
+        stop_notices(&s).await.len(),
+        1,
+        "a requested stop, the host's own stop and a clean end are not failures"
+    );
+}

@@ -170,7 +170,7 @@ cleanup() {
   if [ "$DST_UP" = "1" ]; then
     compose_cmd "$DST_PROJECT" "$DST_ENV" down -v --remove-orphans >/dev/null 2>&1 || true
   fi
-  docker rm -f "${SRC_PROJECT}-probe" "${DST_PROJECT}-probe" >/dev/null 2>&1 || true
+  docker rm -f -v "${SRC_PROJECT}-probe" "${DST_PROJECT}-probe" >/dev/null 2>&1 || true  # #5606
 }
 trap cleanup EXIT
 
