@@ -1,6 +1,5 @@
 import {
   CHANNEL_COPY_FAILURE,
-  CHANNEL_LEAVE_CONFIRM_TITLE,
   CHANNEL_LEAVE_LABEL,
   CHANNEL_MUTE_FAILURE,
   DM_CLOSE_FAILURE,
@@ -438,7 +437,7 @@ describe('시트 — 채널 나가기의 확인 단계 (#4319)', () => {
 
   it('확인 단계는 코어 문장 그대로이고, 항목 카드는 사라진다', () => {
     channelSheet();
-    expect(screen.getByTestId('conversation-menu-leave-confirm-headline')).toHaveTextContent(CHANNEL_LEAVE_CONFIRM_TITLE);
+    expect(screen.getByTestId('conversation-menu-leave-confirm-headline')).toHaveTextContent(ko.formatMessage('timeline.channelLeave.title'));
     expect(screen.getByTestId('conversation-menu-leave-confirm-detail')).toHaveTextContent(
       ko.formatMessage(channelLeaveConfirmBodyKey('public'), {name: 'general'}),
     );

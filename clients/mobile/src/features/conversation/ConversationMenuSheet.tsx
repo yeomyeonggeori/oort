@@ -4,8 +4,6 @@ import type {
 } from '@momo/core/features/channels/actionModel';
 import {isChannelActionStatusIcon} from '@momo/core/features/channels/actionModel';
 import {
-  CHANNEL_LEAVE_CONFIRM_TITLE,
-  CHANNEL_LEAVE_LABEL,
   channelLeaveConfirmBodyKey,
 } from '@momo/core/features/channels/model';
 import type {Channel} from '@momo/core/lib/api';
@@ -133,12 +131,13 @@ export function ConversationMenuSheet({
         {confirmingLeave ? (
           <ConfirmStep
             testID="conversation-menu-leave-confirm"
-            headline={CHANNEL_LEAVE_CONFIRM_TITLE}
+            headline={formatMessage('timeline.channelLeave.title')}
             detail={formatMessage(channelLeaveConfirmBodyKey(kind), {name: title})}
             error={leave.error}
             errorTestID="conversation-menu-leave-error"
-            confirmLabel={CHANNEL_LEAVE_LABEL}
-            pendingLabel="나가는 중…"
+            confirmLabel={formatMessage('timeline.channelLeave.confirm')}
+            pendingLabel={formatMessage('timeline.channelLeave.busy')}
+            cancelLabel={formatMessage('timeline.channelLeave.cancel')}
             pending={leave.pending}
             onCancel={onCancelLeave}
             onConfirm={onConfirmLeave}

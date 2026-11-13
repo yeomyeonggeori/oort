@@ -1,6 +1,5 @@
 import {
   CHANNEL_COPY_GROUP_LABEL,
-  CHANNEL_LEAVE_CONFIRM_TITLE,
   CHANNEL_LEAVE_LABEL,
   DM_CLOSE_LABEL,
   channelCopyIdLabel,
@@ -570,7 +569,7 @@ describe('정보 페이지 — 채널 나가기의 확인 단계 (#4319)', () =>
   it('확인 단계는 코어 문장 그대로이고, 항목 카드는 사라진다 — 머리·히어로는 그대로다', () => {
     confirming();
     expect(screen.getByTestId('conversation-info-leave-confirm-headline')).toHaveTextContent(
-      CHANNEL_LEAVE_CONFIRM_TITLE,
+      ko.formatMessage('timeline.channelLeave.title'),
     );
     expect(screen.getByTestId('conversation-info-leave-confirm-detail')).toHaveTextContent(
       ko.formatMessage(channelLeaveConfirmBodyKey('public'), {name: 'general'}),

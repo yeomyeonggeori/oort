@@ -6,10 +6,7 @@ import { MemoryRouter } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError, type Channel } from "@momo/core/lib/api";
-import {
-  CHANNEL_LEAVE_LABEL,
-  channelLeaveFailure,
-} from "@momo/core/features/channels/model";
+import { channelLeaveFailure } from "@momo/core/features/channels/model";
 import enTimeline from "../../../../../packages/momo-core/src/i18n/catalogs/en-US/timeline.json";
 import { resetEscapeLayers } from "@/design/ui/escapeLayer";
 import { ChannelHeaderMenu } from "./ChannelHeaderMenu";
@@ -29,6 +26,7 @@ import { SidebarRowContextMenu } from "@/features/sidebar/SidebarRowContextMenu"
 // 한 곳에 들어갔다. 두 표면이 함께 닫히지 않으면 정본이 정본이 아니다.
 // =============================================================================
 
+const EN = enTimeline as Record<string, string>;
 const WS = "00000000-0000-7000-8000-000000000001";
 const ME = "00000000-0000-7000-8000-000000000101";
 const CHANNEL_ID = "00000000-0000-7000-8000-000000000201";
@@ -250,7 +248,8 @@ for (const surface of SURFACES) {
       expect(byId(surface.confirm)).not.toBeNull();
       const action = byId(`${surface.confirm}-action`);
       expect(action?.getAttribute("aria-busy")).toBe("true");
-      expect(action?.textContent).toContain("나가는 중");
+      // 사전 없이 띄운 시험이라 영어 사전이 말한다(`useFormatMessage` 의 대체). 확인 단계의 낱말은 모두 한 사전 묶음이다.
+      expect(action?.textContent).toContain(EN["timeline.channelLeave.busy"]);
       // 서버가 답하기 전에는 목록을 건드리지 않는다 — 되돌릴 것을 만들지 않는다.
       expect(cachedChannels()).toHaveLength(1);
 
@@ -288,7 +287,7 @@ for (const surface of SURFACES) {
         byId(`${surface.confirm}-action`)?.getAttribute("aria-busy")
       ).toBeNull();
       expect(byId(`${surface.confirm}-action`)?.textContent).toContain(
-        CHANNEL_LEAVE_LABEL
+        EN["timeline.channelLeave.confirm"]
       );
     });
 

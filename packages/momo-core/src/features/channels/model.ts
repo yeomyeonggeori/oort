@@ -121,11 +121,9 @@ export function canLeaveChannel(kind: Channel["kind"]): boolean {
 export const CHANNEL_MUTE_FAILURE =
   "알림 설정을 바꾸지 못했어요. 잠시 뒤에 다시 시도해 주세요.";
 
-/** 나가기 확인 다이얼로그의 제목. */
-export const CHANNEL_LEAVE_CONFIRM_TITLE = "이 채널에서 나갈까요?";
-
 /**
- * 확인 단계의 본문 사전 키(`{name}` = 채널 이름). 문장은 사전이 진다(`timeline.channelLeave.*`).
+ * 확인 단계의 본문 사전 키(`{name}` = 채널 이름). 문장은 사전이 진다(`timeline.channelLeave.*` — 제목·단추·진행 낱말도
+ * 같은 묶음이라, 한 확인 단계 안에서 본문만 기기 언어로 서고 나머지가 한국어로 남는 섞임이 없다).
  *
  * 「다시 들어오는 길」은 지금 있는 길만 말한다: 채널에 사람을 넣는 라우트(`add_member`)가 소유자·관리자 권한이라, 나간
  * 뒤 스스로 다시 들어올 길이 없다. 공개 채널도 같다 — 채널 둘러보기·스스로 참여는 아직 없으니 약속하지 않는다.

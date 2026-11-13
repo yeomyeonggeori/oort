@@ -9433,6 +9433,24 @@ export const catalog: MessageCatalog = {
       "value": " 채널이 사이드바에서 사라져요. 다시 들어오려면 소유자나 관리자가 다시 추가해야 해요."
     }
   ],
+  "timeline.channelLeave.busy": [
+    {
+      "type": 0,
+      "value": "나가는 중…"
+    }
+  ],
+  "timeline.channelLeave.cancel": [
+    {
+      "type": 0,
+      "value": "취소"
+    }
+  ],
+  "timeline.channelLeave.confirm": [
+    {
+      "type": 0,
+      "value": "채널 나가기"
+    }
+  ],
   "timeline.channelLeave.errorForbidden": [
     {
       "type": 0,
@@ -9459,6 +9477,12 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "이미 이 채널의 멤버가 아니에요. 채널이 보관됐을 수도 있어요."
+    }
+  ],
+  "timeline.channelLeave.title": [
+    {
+      "type": 0,
+      "value": "이 채널에서 나갈까요?"
     }
   ],
   "timeline.createChannel.privateDetail": [

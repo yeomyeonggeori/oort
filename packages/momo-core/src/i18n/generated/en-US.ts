@@ -9955,6 +9955,24 @@ export const catalog: MessageCatalog = {
       "value": " will disappear from your sidebar. To come back, an owner or admin has to add you again."
     }
   ],
+  "timeline.channelLeave.busy": [
+    {
+      "type": 0,
+      "value": "Leaving…"
+    }
+  ],
+  "timeline.channelLeave.cancel": [
+    {
+      "type": 0,
+      "value": "Cancel"
+    }
+  ],
+  "timeline.channelLeave.confirm": [
+    {
+      "type": 0,
+      "value": "Leave channel"
+    }
+  ],
   "timeline.channelLeave.errorForbidden": [
     {
       "type": 0,
@@ -9981,6 +9999,12 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "You're no longer a member of this channel. It may have been archived."
+    }
+  ],
+  "timeline.channelLeave.title": [
+    {
+      "type": 0,
+      "value": "Leave this channel?"
     }
   ],
   "timeline.createChannel.privateDetail": [

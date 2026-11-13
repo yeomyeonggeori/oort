@@ -87,7 +87,7 @@ describe("실행부는 한 벌이다", () => {
     expect(callers("channelLeaveFailure")).toEqual([CANON]);
     expect(callers("channelLeaveConfirmBodyKey")).toEqual([CANON]);
     const dialogs = FILES.filter((file) =>
-      /CHANNEL_LEAVE_CONFIRM_TITLE/.test(file.code)
+      /timeline\.channelLeave\.title/.test(file.code)
     ).map((file) => file.path);
     expect(dialogs).toEqual([CANON]);
   });

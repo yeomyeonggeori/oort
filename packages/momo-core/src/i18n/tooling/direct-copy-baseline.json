@@ -658,9 +658,13 @@
     "packages/momo-core/src/lib/wire.ts": {"ko": 1, "en": 0}
   },
   "lowered": {
+    "clients/mobile/src/features/conversation/ConversationInfoPage.tsx": {"ko": 11, "en": 0},
+    "clients/mobile/src/features/conversation/ConversationMenuSheet.tsx": {"ko": 5, "en": 0},
+    "clients/mobile/src/features/sidebar/ChannelActionSheet.tsx": {"ko": 2, "en": 0},
     "clients/mobile/src/shell/NewChannelSheet.tsx": {"ko": 13, "en": 1},
     "clients/web/src/features/channels/ChannelContextControls.tsx": {"ko": 19, "en": 0},
     "clients/web/src/features/channels/CreateChannelDialog.tsx": {"ko": 13, "en": 1},
+    "clients/web/src/features/chat/channelActions.tsx": {"ko": 0, "en": 0},
     "clients/web/src/features/directory/DirectoryRoute.tsx": {"ko": 0, "en": 0},
     "clients/web/src/features/directory/MemberProfileDialog.tsx": {"ko": 0, "en": 0},
     "clients/web/src/features/directory/MemberRow.tsx": {"ko": 0, "en": 0},
@@ -673,7 +677,7 @@
     "clients/web/src/features/work/WorkPanel.tsx": {"ko": 39, "en": 0},
     "clients/web/src/features/work/WorkSessionDetail.tsx": {"ko": 49, "en": 6},
     "clients/web/src/features/workConsole/WorkConsoleRoute.tsx": {"ko": 35, "en": 0},
-    "packages/momo-core/src/features/channels/model.ts": {"ko": 39, "en": 0},
+    "packages/momo-core/src/features/channels/model.ts": {"ko": 38, "en": 0},
     "packages/momo-core/src/features/sidebar/sidebarSections.ts": {"ko": 32, "en": 0},
     "packages/momo-core/src/features/work/workSessionModel.ts": {"ko": 59, "en": 0}
   },

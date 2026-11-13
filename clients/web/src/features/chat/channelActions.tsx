@@ -40,8 +40,6 @@ import {
   CHANNEL_ACTION_ERROR_GROUP_LABEL,
   CHANNEL_COPY_FAILURE,
   CHANNEL_COPY_UNAVAILABLE,
-  CHANNEL_LEAVE_CONFIRM_TITLE,
-  CHANNEL_LEAVE_LABEL,
   CHANNEL_MARK_READ_FAILURE,
   CHANNEL_MARK_UNREAD_FAILURE,
   CHANNEL_MUTE_FAILURE,
@@ -927,7 +925,7 @@ export function ChannelLeaveConfirmDialog({
           }}
         >
           <div className="flex flex-col gap-1">
-            <DialogTitle>{CHANNEL_LEAVE_CONFIRM_TITLE}</DialogTitle>
+            <DialogTitle>{formatMessage("timeline.channelLeave.title")}</DialogTitle>
             <DialogDescription>
               {formatMessage(channelLeaveConfirmBodyKey(leave.kind), { name: title })}
             </DialogDescription>
@@ -949,7 +947,7 @@ export function ChannelLeaveConfirmDialog({
               onClick={() => leave.close()}
               data-testid={`${testId}-cancel`}
             >
-              취소
+              {formatMessage("timeline.channelLeave.cancel")}
             </Button>
             <Button
               type="button"
@@ -962,7 +960,7 @@ export function ChannelLeaveConfirmDialog({
               {leave.pending && (
                 <Loader2 aria-hidden="true" className="spinner-busy" />
               )}
-              {leave.pending ? "나가는 중" : CHANNEL_LEAVE_LABEL}
+              {formatMessage(leave.pending ? "timeline.channelLeave.busy" : "timeline.channelLeave.confirm")}
             </Button>
           </div>
       </DialogContent>

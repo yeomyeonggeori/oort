@@ -1368,10 +1368,14 @@ export const messageKeys = [
   "timeline.approvalExpiry.soon",
   "timeline.channelLeave.bodyPrivate",
   "timeline.channelLeave.bodyPublic",
+  "timeline.channelLeave.busy",
+  "timeline.channelLeave.cancel",
+  "timeline.channelLeave.confirm",
   "timeline.channelLeave.errorForbidden",
   "timeline.channelLeave.errorGeneric",
   "timeline.channelLeave.errorNetwork",
   "timeline.channelLeave.errorNotFound",
+  "timeline.channelLeave.title",
   "timeline.createChannel.privateDetail",
   "timeline.createChannel.publicDetail",
   "timeline.edited.atDate",
@@ -3271,12 +3275,16 @@ export const argumentSpecs = {
   "timeline.channelLeave.bodyPublic": {
     "name": "string"
   },
+  "timeline.channelLeave.busy": {},
+  "timeline.channelLeave.cancel": {},
+  "timeline.channelLeave.confirm": {},
   "timeline.channelLeave.errorForbidden": {},
   "timeline.channelLeave.errorGeneric": {},
   "timeline.channelLeave.errorNetwork": {
     "reason": "string"
   },
   "timeline.channelLeave.errorNotFound": {},
+  "timeline.channelLeave.title": {},
   "timeline.createChannel.privateDetail": {},
   "timeline.createChannel.publicDetail": {},
   "timeline.edited.atDate": {
@@ -4963,10 +4971,14 @@ export interface MessageArgs {
   "timeline.approvalExpiry.soon": Record<string, never>;
   "timeline.channelLeave.bodyPrivate": { name: string };
   "timeline.channelLeave.bodyPublic": { name: string };
+  "timeline.channelLeave.busy": Record<string, never>;
+  "timeline.channelLeave.cancel": Record<string, never>;
+  "timeline.channelLeave.confirm": Record<string, never>;
   "timeline.channelLeave.errorForbidden": Record<string, never>;
   "timeline.channelLeave.errorGeneric": Record<string, never>;
   "timeline.channelLeave.errorNetwork": { reason: string };
   "timeline.channelLeave.errorNotFound": Record<string, never>;
+  "timeline.channelLeave.title": Record<string, never>;
   "timeline.createChannel.privateDetail": Record<string, never>;
   "timeline.createChannel.publicDetail": Record<string, never>;
   "timeline.edited.atDate": { date: string; time: string };
