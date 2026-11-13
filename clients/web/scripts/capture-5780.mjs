@@ -299,7 +299,13 @@ async function sceneRole(browser, origin, scheme) {
     await shot(page, `R-${tag}-confirm-owner`);
     await page.getByTestId("member-profile-role-stage-cancel").click();
 
-    // 실제로 바꾼다(멤버 → 관리자) → 「바뀜」.
+    // 실제로 바꾼다(멤버 → 관리자) → 「바뀜」. 영수증이 서도 고르개의 오른쪽 끝과 줄 높이가 움직이지 않는다(자리를 미리 잡음).
+    const box = async () => page.evaluate(() => {
+      const select = document.querySelector('[data-testid="member-profile-role"]')?.getBoundingClientRect();
+      const row = document.querySelector('[data-testid="member-profile-role-row"]')?.getBoundingClientRect();
+      return { right: select?.right ?? NaN, rowH: row?.height ?? NaN, rowTop: row?.top ?? NaN };
+    });
+    const before = await box();
     await page.getByTestId("member-profile-role").click();
     await page.getByRole("option", { name: "관리자" }).click();
     await page.getByTestId("member-profile-role-stage-confirm").click();
@@ -307,6 +313,10 @@ async function sceneRole(browser, origin, scheme) {
     await page.waitForFunction(() => document.querySelector('[data-testid="member-profile-role-receipt"]')?.textContent === "바뀜");
     check(`R ${tag} 확인 뒤에만 PATCH 한 번`, JSON.stringify(patches) === JSON.stringify([`${MEMBER}:admin`]), patches);
     await page.waitForFunction(() => document.querySelector('[data-testid="member-profile-role"]')?.getAttribute("data-value") === "admin");
+    const after = await box();
+    const shift = { right: Math.abs(after.right - before.right), rowH: Math.abs(after.rowH - before.rowH), rowTop: Math.abs(after.rowTop - before.rowTop) };
+    console.log(`measure R ${tag} receipt shift ${JSON.stringify(shift)}`);
+    check(`R ${tag} 「바뀜」이 서도 고르개 오른쪽 끝·줄 높이·줄 위치가 그대로다(±0.5px)`, shift.right <= 0.5 && shift.rowH <= 0.5 && shift.rowTop <= 0.5, shift);
     await page.mouse.move(0, 0);
     await shot(page, `R-${tag}-changed`);
   } finally {
