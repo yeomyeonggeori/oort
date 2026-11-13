@@ -170,8 +170,11 @@ export interface ChannelActionItem {
   /** `data-testid` 접미사. 표면이 접두사를 붙인다(`channel-` / `channel-row-`). */
   testKey: string;
   label: string;
-  /** 폰에 대응하는 디자인 시스템 아이콘이 없는 경우의 상태 표지. */
-  icon?: "🔔" | "🔕";
+  /**
+   * 알림 항목의 상태 표지 — 그림이 아니라 **뜻 낱말**이다(켜짐 `bell`, 꺼짐 `bell-off`). 폰이 자기 종 아이콘으로 그리고
+   * 웹은 이 칸을 그리지 않는다. 이모지를 코어에 두지 않는다(#5776).
+   */
+  icon?: "bell" | "bell-off";
   /**
    * 왕복이 도는 동안 이 항목이 하는 말 (design-review #1937 N-1). 없으면
    * 낱말이 바뀌지 않는다 — 왕복이 없는 항목(복사·다이얼로그 인계)이 그렇다.
@@ -408,7 +411,7 @@ export function channelActionItems(
       key: "mute",
       testKey: "mute-toggle",
       label: channelMuteToggleLabel(state.muted),
-      icon: state.muted ? "🔕" : "🔔",
+      icon: state.muted ? "bell-off" : "bell",
     });
   }
   if (available.memory === true) {
