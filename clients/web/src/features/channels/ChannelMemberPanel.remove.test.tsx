@@ -254,6 +254,8 @@ describe("확인 단계 → 서버 → 줄과 영수증 (#5778)", () => {
     await press(byId("channel-member-remove-stage-cancel")!);
     expect(byId("channel-member-remove-stage")).not.toBeNull();
     expect(rowOf(HANEUL)).not.toBeNull();
+    // 셸은 명부 캐시로 채널 멤버를 센다: 서버가 답하기 전에는 캐시도 그대로다(낙관 삭제 없음).
+    expect(client.getQueryData<RosterMember[]>(["roster", WS])!.find((m) => m.id === HANEUL)!.channelIds).toEqual([CH]);
 
     await act(async () => {
       serverRemoves(HANEUL);
