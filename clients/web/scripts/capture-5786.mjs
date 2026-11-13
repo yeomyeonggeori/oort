@@ -14,8 +14,8 @@
 //      같다 — 색 테가 없다. 점 표식은 그 바탕과 3:1 이상(네 모양 모두: 채운 원의 가운데 · 초승달의 오른쪽 아래 · 가로 줄의
 //      위 · 고리), 모양의 빈 곳(초승달 왼쪽 위 · 가로 줄 · 고리 속)은 바탕.
 //   수리 1회차(design-review r1):
-//   I. 24 글자 아바타의 이니셜 잉크 손실 ≤ 3%(B1): DM 줄의 받침 있는 이니셜(김·박·한·정·홍)·라틴(K·D)·에이전트(김·리)와
-//      접힌 레일의 내 배지. 기준판은 같은 자리에서 마스크만 끄고 점을 숨긴 것(이니셜 옮김은 그대로)이고, 손실 = 기준판의
+//   I. 24 글자 아바타의 이니셜 잉크 손실 ≤ 3%(B1): DM 줄의 받침 있는 이니셜(김·박·한·정·홍)·라틴(K·D)·에이전트(김·리).
+//      접힌 레일의 내 배지도 부르지만 이 픽스처의 「나」는 사진이라 재지 않고 로그에 한 줄 남긴다. 기준판은 같은 자리에서 마스크만 끄고 점을 숨긴 것(이니셜 옮김은 그대로)이고, 손실 = 기준판의
 //      잉크 픽셀 가운데 실제 화면에서 바뀐 것의 비율이다.
 //   H. 에이전트 경고는 채운 원(H2): 사람 초승달이면 빈 왼쪽 위까지 표식이다.
 //   W. 배경화면을 켠 사이드바(H1): 밝게·어둡게 × 먹(어두운 단색)·진주(밝은 프리셋) + 그래파이트 밝게·먹 — 네 상태 표식이
@@ -309,8 +309,11 @@ async function inkLoss(page, frameLocator) {
 }
 
 async function checkInk(page, scene, frameLocator, label) {
-  // 사진 아바타는 이니셜이 없다(옮기지도 않는다) — 글자 아바타만 잰다.
-  if (await frameLocator.locator("img").count()) return;
+  // 사진 아바타는 이니셜이 없다(옮기지도 않는다) — 글자 아바타만 잰다. 건너뛴 것은 로그에 남긴다(단정 수에는 넣지 않는다).
+  if (await frameLocator.locator("img").count()) {
+    console.log(JSON.stringify({ scene, skip: `I ${label}`, reason: "사진 아바타 — 이니셜 없음" }));
+    return;
+  }
   const r = await inkLoss(page, frameLocator);
   check(scene, `I ${label} 「${r.text}」 이니셜 잉크 손실 ≤ ${INK_LOSS_MAX}%`, r.inkPx > 20 && r.pct !== null && r.pct <= INK_LOSS_MAX, r);
 }
