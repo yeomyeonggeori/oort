@@ -809,10 +809,8 @@ async function main() {
       await openThemePanel(page);
 
       // ---- ⑦a 갤러리로 파생 테마를 고른다 (AP-1b #4188) ----------------------
-      // 위 ②에서 새로고침한 라이트 고정 상태(첫 파티)에서 시작한다. 갤러리를 펴고 카탈로그의 짝 테마 GitHub를 고른다.
-      await page.getByTestId("theme-style-trigger").waitFor({ timeout: 20_000 }); // 갤러리는 지연 청크다
-      await page.getByTestId("theme-style-trigger").click();
-      await page.getByTestId("theme-style-options").waitFor();
+      // 위 ②에서 새로고침한 라이트 고정 상태(첫 파티)에서 시작한다. 늘 펴진 갤러리(#5783)에서 카탈로그의 짝 테마 GitHub를 고른다.
+      await page.getByTestId("theme-style-options").waitFor({ timeout: 20_000 }); // 갤러리는 지연 청크다
       await page.locator('label.theme-tile:has(input[value="catalog:github"])').click();
       await page
         .waitForFunction(
@@ -899,14 +897,12 @@ async function main() {
           { timeout: 20_000 }
         )
         .catch(() => fail("새로고침하니 고른 파생 테마가 풀렸거나 변수가 다시 서지 않았다"));
-      await page.getByTestId("theme-style-trigger").waitFor({ timeout: 20_000 });
-      if (!(await page.getByTestId("theme-style-trigger").getAttribute("aria-label"))?.includes("GitHub")) {
-        fail("새로고침 뒤 갤러리 행이 고른 테마(GitHub)를 가리키지 않는다");
+      await page.getByTestId("theme-style-options").waitFor({ timeout: 20_000 });
+      if ((await page.locator(".theme-tile[data-selected] .theme-tile-name").textContent()) !== "GitHub") {
+        fail("새로고침 뒤 갤러리의 고른 타일이 고른 테마(GitHub)가 아니다");
       }
 
       // 첫 파티로 돌아가면 자기가 꽂은 변수가 하나도 안 남고 캐시 항목이 걷힌다(잔존 0).
-      await page.getByTestId("theme-style-trigger").click();
-      await page.getByTestId("theme-style-options").waitFor();
       await page.locator('label.theme-tile:has(input[value="dawnsky"])').click();
       await page
         .waitForFunction(() => document.documentElement.getAttribute("data-theme-ref") === "dawnsky", undefined, {

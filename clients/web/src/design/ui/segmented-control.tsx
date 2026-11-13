@@ -7,7 +7,8 @@ import { cn } from "@/design/lib/cn";
 //
 // 네이티브 `fieldset` + `radio`다. 방향키 이동·그룹 이름·단일 탭 정차는 브라우저가
 // 이미 한다(버튼 묶음 `aria-pressed`로 흉내 내면 이 셋을 직접 다시 써야 한다).
-// 입력은 화면에서 숨기고(`sr-only`) 라벨이 칸이다. 포커스 링은 칸의 안쪽 인셋이다.
+// 입력은 칸(라벨) 전체를 투명하게 덮고(`radio-cover`, #5783: 초점 든 상자가 곧 칸이라 Tab으로 닿을 때
+// 브라우저가 칸을 창 안으로 데려온다) 모양은 라벨이 그린다. 포커스 링은 칸의 안쪽 인셋이다.
 //
 // 칸 폭은 라벨에 맞춘 뒤 모든 칸이 같은 폭(`auto-cols-fr`)이다. 고정 폭 3종을 두지
 // 않는 이유: 한국어 라벨 길이가 칸마다 다르고, 칸 수가 둘이든 셋이든 같은 규칙이
@@ -61,7 +62,7 @@ export function SegmentedControl<V extends string>({
         <label
           key={optionValue}
           className={cn(
-            "flex h-control-sm cursor-pointer items-center justify-center gap-1 whitespace-nowrap rounded-full px-3 text-meta font-semibold press has-[:focus-visible]:focus-ring",
+            "radio-cover flex h-control-sm cursor-pointer items-center justify-center gap-1 whitespace-nowrap rounded-full px-3 text-meta font-semibold press has-[:focus-visible]:focus-ring",
             "has-[:disabled]:cursor-default",
             value === optionValue
               ? "bg-surface text-ink shadow-sm"
@@ -75,7 +76,6 @@ export function SegmentedControl<V extends string>({
             checked={value === optionValue}
             onChange={() => onValueChange(optionValue)}
             data-testid={testId ? `${testId}-${optionValue}` : undefined}
-            className="sr-only"
           />
           {Icon ? <Icon aria-hidden className="size-4" /> : null}
           {label}
