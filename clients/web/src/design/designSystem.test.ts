@@ -383,6 +383,7 @@ const CONTAINER_PRIMITIVES = [
   "context-menu.tsx",
   "dialog.tsx",
   "dropdown-menu.tsx",
+  "list-row.tsx",
   "popover.tsx",
   "tooltip.tsx",
 ] as const;

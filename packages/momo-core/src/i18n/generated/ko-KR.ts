@@ -3970,6 +3970,208 @@ export const catalog: MessageCatalog = {
       "value": "스레드"
     }
   ],
+  "memberList.empty.detail": [
+    {
+      "type": 0,
+      "value": "초대 링크를 만들어 팀을 부르면 여기에 명부가 쌓이고, 각 행에서 프로필과 대화를 열 수 있습니다."
+    }
+  ],
+  "memberList.empty.headline": [
+    {
+      "type": 0,
+      "value": "이 워크스페이스에 아직 다른 멤버가 없습니다."
+    }
+  ],
+  "memberList.empty.invite": [
+    {
+      "type": 0,
+      "value": "멤버 초대하기"
+    }
+  ],
+  "memberList.group.agents": [
+    {
+      "type": 0,
+      "value": "에이전트"
+    }
+  ],
+  "memberList.group.people": [
+    {
+      "type": 0,
+      "value": "사람"
+    }
+  ],
+  "memberList.newDm.close": [
+    {
+      "type": 0,
+      "value": "닫기"
+    }
+  ],
+  "memberList.newDm.continueAction": [
+    {
+      "type": 0,
+      "value": "대화 이어가기"
+    }
+  ],
+  "memberList.newDm.description": [
+    {
+      "type": 0,
+      "value": "대화할 멤버나 에이전트를 고르세요. 이미 대화 중이면 그 대화로 이동합니다."
+    }
+  ],
+  "memberList.newDm.emptyDetail": [
+    {
+      "type": 0,
+      "value": "워크스페이스에 멤버를 초대하면 여기서 바로 대화를 시작할 수 있습니다."
+    }
+  ],
+  "memberList.newDm.emptyHeadline": [
+    {
+      "type": 0,
+      "value": "대화할 다른 멤버가 없습니다."
+    }
+  ],
+  "memberList.newDm.hasDm": [
+    {
+      "type": 0,
+      "value": "대화 중"
+    }
+  ],
+  "memberList.newDm.noMatchDetail": [
+    {
+      "type": 0,
+      "value": "검색어 \""
+    },
+    {
+      "type": 1,
+      "value": "query"
+    },
+    {
+      "type": 0,
+      "value": "\"에 해당하는 이름이나 핸들이 없습니다."
+    }
+  ],
+  "memberList.newDm.placeholder": [
+    {
+      "type": 0,
+      "value": "이름이나 핸들로 검색"
+    }
+  ],
+  "memberList.newDm.startAction": [
+    {
+      "type": 0,
+      "value": "새 대화 시작"
+    }
+  ],
+  "memberList.newDm.title": [
+    {
+      "type": 0,
+      "value": "새 다이렉트 메시지"
+    }
+  ],
+  "memberList.newDm.toLabel": [
+    {
+      "type": 0,
+      "value": "받는 사람"
+    }
+  ],
+  "memberList.noMatch.clear": [
+    {
+      "type": 0,
+      "value": "검색 지우기"
+    }
+  ],
+  "memberList.noMatch.detail": [
+    {
+      "type": 0,
+      "value": "검색어 \""
+    },
+    {
+      "type": 1,
+      "value": "query"
+    },
+    {
+      "type": 0,
+      "value": "\"에 해당하는 이름, 핸들, 이메일이 없습니다. 다른 말로 찾아 보세요."
+    }
+  ],
+  "memberList.noMatch.detailGuest": [
+    {
+      "type": 0,
+      "value": "검색어 \""
+    },
+    {
+      "type": 1,
+      "value": "query"
+    },
+    {
+      "type": 0,
+      "value": "\"에 해당하는 이름이나 핸들이 없습니다. 다른 이름으로 검색하세요."
+    }
+  ],
+  "memberList.noMatch.headline": [
+    {
+      "type": 0,
+      "value": "일치하는 멤버가 없습니다."
+    }
+  ],
+  "memberList.page.title": [
+    {
+      "type": 0,
+      "value": "멤버"
+    }
+  ],
+  "memberList.row.openOwnProfile": [
+    {
+      "type": 0,
+      "value": "나, 프로필 열기"
+    }
+  ],
+  "memberList.row.openProfile": [
+    {
+      "type": 0,
+      "value": "프로필 열기"
+    }
+  ],
+  "memberList.row.ownedBy": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " 님이 관리"
+    }
+  ],
+  "memberList.row.self": [
+    {
+      "type": 0,
+      "value": "나"
+    }
+  ],
+  "memberList.search.label": [
+    {
+      "type": 0,
+      "value": "멤버 검색"
+    }
+  ],
+  "memberList.search.placeholder": [
+    {
+      "type": 0,
+      "value": "이름, 핸들, 이메일로 찾기"
+    }
+  ],
+  "memberList.search.placeholderGuest": [
+    {
+      "type": 0,
+      "value": "이름이나 핸들로 찾기"
+    }
+  ],
+  "memberList.state.offline": [
+    {
+      "type": 0,
+      "value": "연결 끊김, 재연결 중입니다. 명부는 마지막으로 받은 상태이고, 새 대화는 연결이 돌아온 뒤 열립니다."
+    }
+  ],
   "mobile.attachmentSave.failed": [
     {
       "type": 0,
