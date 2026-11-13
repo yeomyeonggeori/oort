@@ -3501,8 +3501,9 @@
       var(--ink) calc(var(--status-hole) + 0.5px)
     );
   }
-  /* 글자 아바타의 이니셜만: 오른쪽·아래 안쪽 여백 = 옮김 × 2 → 가운데 정렬된 글자가 왼쪽 위로 옮김만큼 간다. */
-  &[data-status-cut] > [data-avatar-status-face] > :not(:has(img, svg)) {
+  /* 글자 아바타의 이니셜만: 오른쪽·아래 안쪽 여백 = 옮김 × 2 → 가운데 정렬된 글자가 왼쪽 위로 옮김만큼 간다. 옮김이 있는
+   * 크기(24)에만 건다 — 다른 크기의 아바타가 가진 여백을 0 으로 덮지 않는다. */
+  &[data-status-face="24"][data-status-cut] > [data-avatar-status-face] > :not(:has(img, svg)) {
     padding-right: calc(var(--status-glyph-shift) * 2);
     padding-bottom: calc(var(--status-glyph-shift) * 2);
   }

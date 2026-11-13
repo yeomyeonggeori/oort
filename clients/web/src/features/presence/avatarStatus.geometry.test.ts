@@ -42,7 +42,8 @@ describe("CSS 크기 표 = 코어 statusBadgeGeometry", () => {
   });
 
   it("CSS 에 코어 표 밖의 크기가 없다(크기를 더하면 코어 표에도 더한다)", () => {
-    const faces = [...block.matchAll(/data-status-face="(\d+)"/g)].map((m) => Number(m[1]));
+    // 24 는 크기 규칙과 이니셜 옮김 규칙 두 곳에 선다 — 다른 크기의 수를 센다.
+    const faces = [...new Set([...block.matchAll(/data-status-face="(\d+)"/g)].map((m) => Number(m[1])))];
     expect(faces.sort((a, b) => a - b)).toEqual([...WEB_STATUS_BADGE_FACES]);
   });
 
@@ -56,7 +57,7 @@ describe("CSS 크기 표 = 코어 statusBadgeGeometry", () => {
   });
 
   it("점이 있는 글자 아바타만 이니셜을 옮긴다: 사진(img)·기본 아바타(svg)는 제외, 오른쪽·아래 여백 = 옮김 × 2 (r1 B1)", () => {
-    const at = block.indexOf("&[data-status-cut] > [data-avatar-status-face] > :not(:has(img, svg)) {");
+    const at = block.indexOf('&[data-status-face="24"][data-status-cut] > [data-avatar-status-face] > :not(:has(img, svg)) {');
     expect(at).toBeGreaterThan(-1);
     const body = block.slice(at, block.indexOf("}", at));
     expect(body).toContain("padding-right: calc(var(--status-glyph-shift) * 2);");

@@ -25,6 +25,7 @@ export const STATUS_DOT_FILL_CLASS: Readonly<Record<StatusDotTone, string>> = {
 };
 
 // 아바타 모서리의 점(글자가 없는 자리)은 이 파일의 클래스가 아니라 한 부품(`features/presence/AvatarStatus.tsx`)과 그
-// CSS(`tokens.css` 의 `avatar-status`)가 그린다(#5786): 아바타를 점 둘레만큼 도려낸 자리에 앉고, 톤마다 모양이 다르다
-// (ok 채운 원 · warn 초승달 · danger 가로 줄 · muted 속 빈 고리). 색 역할은 위 칩과 같은 `--ok`·`--warn`·`--danger` 이고
+// CSS(`tokens.css` 의 `avatar-status` · `status-shape-*`)가 그린다(#5786): 아바타를 점 둘레만큼 도려낸 자리에 앉고, 모양은
+// 뜻이 고른다(코어 `statusBadgeShape` — 사람: 채운 원 · 초승달(자리 비움) · 가로 줄(방해 금지) · 속 빈 고리, 에이전트: 채운
+// 원(살아 있음·경고) · 속 빈 고리). 색 역할은 위 칩과 같은 `--ok`·`--warn`·`--danger` 이고
 // (띠 위의 초록만 점 전용 `--status-ok`), 꺼짐 고리의 선은 `--ink-muted` 다.

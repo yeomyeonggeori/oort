@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { contrast } from "../../design/color";
+import { blend } from "../../design/scrim";
 import { catalogEntries, deriveCatalogMode } from "../../design/deriveCatalog";
 import { THEMES, type ThemeId, type ThemeModeTokens } from "../../design/themes";
 import { AVATAR_SIZE } from "../workspace/avatar";
@@ -112,14 +113,34 @@ describe("실효 상태 → 점 톤 (내 프로필 줄의 배지)", () => {
   });
 });
 
-describe("폰 얼굴 점의 대비 — 면색 틈 위의 표식 (#5786, #4725 M2)", () => {
-  // 폰은 면색 고리(틈)를 쓰므로 표식이 맞닿는 것은 `surface` 다. 꺼짐 고리의 선은 `textFaint`(= line-strong).
+describe("폰 얼굴 점의 대비 — 얼굴이 서는 바탕 위의 표식 (#5786 r1 M3, #4725 M2)", () => {
+  // 폰은 고리(틈)를 얼굴이 서는 바탕 색으로 칠한다(`FaceStatusDot` 의 `ground`). 그래서 표식이 맞닿는 것은 그 바탕이다:
+  //   대화 머리 알약 · 새 메시지 카드 = surface
+  //   홈 줄 = 바닥 그라데이션의 세 정지점(고리 색은 가운데 정지점이지만 줄은 위·아래 끝에도 선다) · 눌린 줄 = surface-pressed ·
+  //   고른 줄 = 바닥 위 유리 합성(`homeRowGround`)
+  // 꺼짐 고리의 선은 `textMuted`(= ink-muted)다 — `textFaint`(= line-strong)는 밝게 눌린 줄 위에서 2.7~3.0:1 이었다.
   const marks = (t: ThemeModeTokens) => ({
     ok: t.color.ok,
     warn: t.color.warn,
     danger: t.color.danger,
-    muted: t.color["line-strong"],
+    muted: t.color["ink-muted"],
   });
+  const rgba = (value: string) => {
+    const parts = (value.match(/[\d.]+/g) ?? []).map(Number);
+    const hex = `#${parts.slice(0, 3).map((v) => Math.round(v).toString(16).padStart(2, "0")).join("")}`;
+    return { hex, alpha: parts[3] ?? 1 };
+  };
+  const grounds = (t: ThemeModeTokens): Record<string, string> => {
+    const glass = rgba(t.glass);
+    return {
+      surface: t.color.surface,
+      "canvas-top": t.canvas[0],
+      "canvas-mid": t.canvas[1],
+      "canvas-bottom": t.canvas[2],
+      "surface-pressed": t.derived["surface-pressed"],
+      "glass-on-canvas": blend(glass.hex, t.canvas[1], glass.alpha),
+    };
+  };
   const modes = ["light", "dark"] as const;
   const all: [string, ThemeModeTokens][] = [
     ...(Object.keys(THEMES) as ThemeId[]).flatMap((id) => modes.map((m) => [`${id} ${m}`, THEMES[id][m]] as [string, ThemeModeTokens])),
@@ -131,14 +152,23 @@ describe("폰 얼굴 점의 대비 — 면색 틈 위의 표식 (#5786, #4725 M2
     ),
   ];
 
-  it("첫 파티·카탈로그 테마 × 밝게/어둡게: 네 표식 모두 surface 와 3:1 이상", () => {
+  it("첫 파티·카탈로그 테마 × 밝게/어둡게 × 바탕 여섯: 네 표식 모두 3:1 이상", () => {
     expect(all.length).toBeGreaterThan(Object.keys(THEMES).length * 2);
     const failures = all.flatMap(([label, t]) =>
-      Object.entries(marks(t)).flatMap(([tone, color]) => {
-        const r = contrast(color, t.color.surface);
-        return r < 3 ? [`${label} ${tone} ${r.toFixed(2)}`] : [];
-      })
+      Object.entries(grounds(t)).flatMap(([ground, bg]) =>
+        Object.entries(marks(t)).flatMap(([tone, color]) => {
+          const r = contrast(color, bg);
+          return r < 3 ? [`${label} ${ground} ${tone} ${r.toFixed(2)}`] : [];
+        })
+      )
     );
     expect(failures).toEqual([]);
+  });
+
+  it("고리 색(바닥 가운데 정지점)과 위·아래 끝의 차이는 1.06:1 이하다 — 그라데이션 위 줄에서 고리가 테로 서지 않는다", () => {
+    for (const [label, t] of all) {
+      expect(contrast(t.canvas[0], t.canvas[1]), `${label} 위`).toBeLessThanOrEqual(1.06);
+      expect(contrast(t.canvas[2], t.canvas[1]), `${label} 아래`).toBeLessThanOrEqual(1.06);
+    }
   });
 });

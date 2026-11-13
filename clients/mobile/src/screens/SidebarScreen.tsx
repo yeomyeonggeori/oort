@@ -1394,8 +1394,8 @@ function Row({
 }
 
 /**
- * 홈 줄의 점 고리 색 = 줄이 서는 바탕 (#5786 r1 M3). 쉬는 줄은 바닥(`bg`, 그라데이션의 가운데 정지점 — 위·아래 끝과는 1.04:1
- * 안쪽), 눌린 줄은 눌림 면(`rowPressed`), 고른 줄은 바닥 위 유리(`rowSelected`, 반투명이라 바닥에 얹은 색). 고리는 얼굴을
+ * 홈 줄의 점 고리 색 = 줄이 서는 바탕 (#5786 r1 M3). 쉬는 줄은 바닥(`bg`, 그라데이션의 가운데 정지점 — 위·아래 끝과는 1.06:1
+ * 이하), 눌린 줄은 눌림 면(`rowPressed`), 고른 줄은 바닥 위 유리(`rowSelected`, 반투명이라 바닥에 얹은 색). 고리는 얼굴을
  * 가리는 틈이라 반투명이면 얼굴이 비친다 — 그래서 합성한 불투명 색이다.
  */
 export function homeRowGround(color: Palette, selected: boolean, pressed: boolean): string {

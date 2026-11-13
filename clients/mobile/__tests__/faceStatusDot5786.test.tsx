@@ -51,12 +51,12 @@ describe('얼굴 점의 기하 (r1 M4 P2·P3)', () => {
     }
   });
 
-  it('꺼짐: 속 빈 고리의 두께 = 틈(0 이면 점이 바탕색으로 사라진다), 선은 textFaint', () => {
+  it('꺼짐: 속 빈 고리의 두께 = 틈(0 이면 점이 바탕색으로 사라진다), 선은 textMuted(눌린 줄 위 3:1)', () => {
     const {gap} = statusBadgeGeometry(28);
     const {mark} = dot({tone: 'muted'});
     expect(gap).toBeGreaterThan(0);
     expect(mark.borderWidth).toBe(gap);
-    expect(darkPalette.textFaint).toBe(mark.borderColor);
+    expect(mark.borderColor).toBe(darkPalette.textMuted);
   });
 
   it('채운 점은 고리가 없다(두께 0)', () => {

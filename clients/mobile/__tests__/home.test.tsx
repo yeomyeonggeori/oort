@@ -714,9 +714,9 @@ describe('홈 — DM 줄의 상태 점 (#3964)', () => {
       expect(node).toBeTruthy();
       return node!;
     });
-    // 속이 빈 고리: 바탕(줄의 바닥) 채움 + 선 색(textFaint) 둘레. 채운 초록과 한 점이 되지 않는다.
+    // 속이 빈 고리: 바탕(줄의 바닥) 채움 + 선 색(textMuted, 웹 --ink-muted 와 같은 역할) 둘레. 채운 초록과 한 점이 되지 않는다.
     expect([lightPalette.bg, darkPalette.bg]).toContain(bg(off));
-    expect([lightPalette.textFaint, darkPalette.textFaint]).toContain(border(off));
+    expect([lightPalette.textMuted, darkPalette.textMuted]).toContain(border(off));
     expect(bg(on)).not.toBe(bg(off));
     // 낱말은 낭독 라벨이 잇는다(점은 보조기술에서 숨는다).
     expect(screen.getByTestId('sidebar-row-dm:ch-dm-human').props.accessibilityLabel).toMatch(
@@ -773,14 +773,14 @@ describe('홈 — DM 줄의 상태 점 (#3964)', () => {
     });
     expect([lightPalette.ok, darkPalette.ok]).toContain(bg(alive));
     expect(bg(alive)).toBe(bg(live));
-    // 꺼짐: 속이 빈 고리. 바탕(줄의 바닥) 채움 + 선 색(textFaint) 둘레. 채운 점과도, 아무것도 없는 것과도 다르다(#3964 H1).
+    // 꺼짐: 속이 빈 고리. 바탕(줄의 바닥) 채움 + 선 색(textMuted) 둘레. 채운 점과도, 아무것도 없는 것과도 다르다(#3964 H1).
     const off = await waitFor(() => {
       const node = dotOf('dm:ch-dm-coby');
       expect(node).toBeTruthy();
       return node!;
     });
     expect([lightPalette.bg, darkPalette.bg]).toContain(bg(off));
-    expect([lightPalette.textFaint, darkPalette.textFaint]).toContain(border(off));
+    expect([lightPalette.textMuted, darkPalette.textMuted]).toContain(border(off));
     expect(bg(alive)).not.toBe(bg(off));
   });
 
