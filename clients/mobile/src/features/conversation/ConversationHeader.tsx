@@ -6,7 +6,7 @@ import {
   presentConnection,
   type ConnectionPresentation,
 } from '@momo/core/features/connection/presentation';
-import type {Directory} from '@momo/core/features/workspace/directory';
+import {memberFor, type Directory} from '@momo/core/features/workspace/directory';
 import React, {useCallback, useEffect, useState} from 'react';
 import {
   Image,
@@ -243,7 +243,12 @@ export function ConversationHeader({
         <View style={styles.face} testID="conversation-title-face">
           <Avatar directory={directory} memberId={peerId as string} size={CONV.titleFace} ground="muted" />
           {peerStatusTone !== null ? (
-            <FaceStatusDot face={CONV.titleFace} tone={peerStatusTone} testID="conversation-title-status-dot" />
+            <FaceStatusDot
+              face={CONV.titleFace}
+              tone={peerStatusTone}
+              subject={memberFor(directory, peerId as string)?.kind === 'agent' ? 'agent' : 'human'}
+              testID="conversation-title-status-dot"
+            />
           ) : null}
         </View>
       ) : isChannel ? (

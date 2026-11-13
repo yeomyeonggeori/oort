@@ -1,9 +1,13 @@
-import {statusBadgeGeometry} from '@momo/core/features/presence/statusBadge';
+import {
+  statusBadgeGeometry,
+  statusBadgeShape,
+  type StatusBadgeSubject,
+} from '@momo/core/features/presence/statusBadge';
 import type {StatusDotTone} from '@momo/core/features/presence/statusDot';
 import React from 'react';
 import {StyleSheet, View} from 'react-native';
 import {radius, type Palette} from '../../design/tokens';
-import {useStyles} from '../../design/theme';
+import {usePalette, useStyles} from '../../design/theme';
 
 // =============================================================================
 // 상태 점 — 폰 (#3964). 점의 **톤**(어떤 상태가 어떤 색 역할인가)은 웹과 같은 core
@@ -49,56 +53,68 @@ export function StatusDot({
  * 점 지름 ≈ 38%·틈)가 정한다 — 28pt 얼굴에 점 10 · 틈 2, 32pt 얼굴에 점 12 · 틈 2. 예전에는 얼굴 크기와 무관하게 바깥
  * 10pt(색 점 7pt, 25~36%)였다.
  *
- * 웹은 얼굴을 점 둘레만큼 도려낸다(CSS 마스크). 폰은 도려내기가 기본 기능이 아니라(마스크는 새 의존) **면색 고리**를
- * 그대로 쓴다: 고리 두께 = 틈이고, 색 점의 바깥 끝이 얼굴 상자의 오른쪽 아래에 닿는다(웹의 점과 같은 자리). 폰의 점은
- * 정해진 면(홈 줄·대화 머리 알약·새 메시지 카드 = `surface`) 위에 서므로 면색 고리가 곧 틈으로 보인다. 눌린 줄처럼 면이
- * 잠깐 바뀌는 순간에만 고리가 면과 한 단 달라진다(인계에 적은 선택).
+ * 웹은 얼굴을 점 둘레만큼 도려낸다(CSS 마스크). 폰은 도려내기가 기본 기능이 아니라(마스크는 새 의존) **고리**를 쓴다:
+ * 고리 두께 = 틈이고, 색 점의 바깥 끝이 얼굴 상자의 오른쪽 아래에 닿는다(웹의 점과 같은 자리). 고리의 색은 **얼굴이 서는
+ * 바탕**(`ground`)이다 — 그래야 고리가 테가 아니라 틈으로 보인다. 대화 머리 알약·새 메시지 카드는 면(`surface`, 기본값)
+ * 위이고, 홈 줄은 면이 아니라 바닥(`bg`) 위라서 홈 줄이 바닥 색을 넘긴다(눌린 줄은 눌림 면). design-review r1 M3: 밝게 홈
+ * 목록에서 면색 고리(255,254,252)가 바닥(239,237,234) 위에 흰 테로 보였다. 바닥은 세로 그라데이션이라 가운데 정지점(`bg`)과
+ * 위·아래 끝은 1.04:1 안쪽으로 다르다. 사용자 배경화면(사진) 위에서는 고리 색이 사진과 맞을 수 없다(인계에 적은 한계).
  *
- * 모양은 웹과 같다(글자가 곁에 없는 자리라 색만으로 말하지 않는다): 채운 원 = ok · 초승달 = warn · 가로 줄 = danger ·
- * 속 빈 고리 = muted. 초승달·가로 줄의 빈 곳은 면색이다(웹은 바탕이 비친다 — 폰의 바탕이 그 면이다).
- * 꺼짐(`muted`)은 속 빈 고리다: 면색 틈 안에 틈 굵기의 선(`textFaint`) 고리, 속은 면색. 고리의 선은 이제 아바타가 아니라
- * 면색 틈에 맞닿는다(#4725 M2: 아바타 색 위에서 3:1 미만이던 것). 부모는 얼굴 크기의 상자다.
+ * 모양은 웹과 같은 코어 판정(`statusBadgeShape`, 뜻으로 고른다)이다: 사람은 채운 원 = 온라인 · 초승달 = 자리 비움 · 가로 줄 =
+ * 방해 금지 · 속 빈 고리 = 오프라인, 에이전트는 채운 원 = 살아 있음·경고(채운 주황) · 속 빈 고리 = 꺼짐. 초승달·가로 줄·고리
+ * 속의 빈 곳도 바탕색이다(웹은 바탕이 비친다). 꺼짐 고리의 선은 `textFaint` 다(#4725 M2: 아바타 색 위에서 3:1 미만이던
+ * 것이 이제 틈에 맞닿는다). 부모는 얼굴 크기의 상자다.
  */
 export function FaceStatusDot({
   face,
   tone,
+  subject = 'human',
+  ground,
   testID = 'status-dot',
 }: {
   /** 얼굴 한 변(pt). */
   face: number;
   tone: StatusDotTone;
+  /** 누구의 상태인가 — 같은 톤이라도 모양(뜻)이 다르다(에이전트 경고 = 채운 원, r1 H2). */
+  subject?: StatusBadgeSubject;
+  /** 얼굴이 서는 바탕 색. 고리(틈)와 모양의 빈 곳이 이 색이다. 기본은 면(`surface`). */
+  ground?: string;
   testID?: string;
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
+  const palette = usePalette();
+  const fill = ground ?? palette.surface;
   const {dot, gap} = statusBadgeGeometry(face);
+  const shape = statusBadgeShape(tone, subject);
   const outer = dot + 2 * gap;
-  // 바깥 원 = 틈(면색), 안의 원 = 표식. 표식이 시험이 읽는 자리(`testID`)다: 채움 색 · 꺼짐의 면 채움 + 선 색 둘레.
+  // 바깥 원 = 틈(바탕색), 안의 원 = 표식. 표식이 시험이 읽는 자리(`testID`)다: 채움 색 · 꺼짐의 바탕 채움 + 선 색 둘레.
   return (
     <View
       accessibilityElementsHidden
       importantForAccessibility="no-hide-descendants"
-      style={[styles.faceGap, {right: -gap, bottom: -gap, width: outer, height: outer}]}
+      style={[styles.faceGap, {right: -gap, bottom: -gap, width: outer, height: outer, backgroundColor: fill}]}
       testID={`${testID}-gap`}>
       <View
         style={[
           styles.faceMark,
           styles[tone],
-          {width: dot, height: dot, borderWidth: tone === 'muted' ? gap : 0},
+          shape === 'ring' && {backgroundColor: fill},
+          {width: dot, height: dot, borderWidth: shape === 'ring' ? gap : 0},
         ]}
         testID={testID}>
-        {tone === 'warn' ? (
-          // 초승달: 왼쪽 위를 면색 원으로 덜어 낸다(웹 마스크와 같은 기하: 중심 25%·25%, 반지름 37.5%).
+        {shape === 'moon' ? (
+          // 초승달: 왼쪽 위를 바탕색 원으로 덜어 낸다(웹 마스크와 같은 기하: 중심 25%·25%, 반지름 37.5%).
           <View
             style={[
               styles.faceCut,
-              {left: -dot / 8, top: -dot / 8, width: (dot * 3) / 4, height: (dot * 3) / 4},
+              {left: -dot / 8, top: -dot / 8, width: (dot * 3) / 4, height: (dot * 3) / 4, backgroundColor: fill},
             ]}
             testID={`${testID}-moon`}
           />
-        ) : tone === 'danger' ? (
-          // 가로 줄: 틈 굵기의 면색 줄(웹과 같은 폭 = 점 - 틈×2).
+        ) : shape === 'bar' ? (
+          // 가로 줄: 틈 굵기의 바탕색 줄(웹과 같은 폭 = 점 - 틈×2).
           <View
-            style={[styles.faceBar, {width: dot - 2 * gap, height: gap}]}
+            style={[styles.faceBar, {width: dot - 2 * gap, height: gap, backgroundColor: fill}]}
             testID={`${testID}-bar`}
           />
         ) : null}
@@ -125,7 +141,6 @@ const buildStyles = (color: Palette) =>
       alignItems: 'center',
       justifyContent: 'center',
       borderRadius: radius.pill,
-      backgroundColor: color.surface,
     },
     faceMark: {
       borderRadius: radius.pill,
@@ -133,6 +148,6 @@ const buildStyles = (color: Palette) =>
       alignItems: 'center',
       justifyContent: 'center',
     },
-    faceCut: {position: 'absolute', borderRadius: radius.pill, backgroundColor: color.surface},
-    faceBar: {backgroundColor: color.surface},
+    faceCut: {position: 'absolute', borderRadius: radius.pill},
+    faceBar: {},
   });
