@@ -185,7 +185,7 @@ describe('나간 상대 (6번): 닫기보다 먼저, 안 읽은 것이 없을 �
     ).toBe(true);
   });
 
-  it('나간 상대의 DM 도 내가 닫았으면 「닫은 대화」 이유는 gone 이다(6번이 7번보다 먼저)', () => {
+  it('나간 상대의 DM 도 내가 닫았으면 「숨긴 대화」 이유는 gone 이다(6번이 7번보다 먼저)', () => {
     const rows = [row(DM_GONE.id, {closedAtSeq: 5, latestReadableSeq: 5})];
     expect(verdicts(rows).get(DM_GONE.id)?.rule).toBe(6);
   });
@@ -268,7 +268,7 @@ describe('첫 페인트 캐시: 마지막 투영에서 닫혀 있던 DM 은 오�
   });
 });
 
-describe('dmClosedEntries: 「닫은 대화」 목록은 숨은 DM 중 닫음(7)과 나감(6)만', () => {
+describe('dmClosedEntries: 「숨긴 대화」 목록은 숨은 DM 중 닫음(7)과 나감(6)만', () => {
   it('보이는 대화는 넣지 않고, 이유를 붙인다', () => {
     const rows = [
       row(DM_PEER.id, {closedAtSeq: 5, latestReadableSeq: 5}),

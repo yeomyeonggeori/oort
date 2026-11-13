@@ -137,7 +137,7 @@ export interface DmClosedEntry {
   reason: 'closed' | 'gone';
 }
 
-/** 「⋯ › 닫은 대화」 목록(D11): 숨겨진 DM 중 명시적 닫기(7)와 나간 상대(6)만. 열린 DM 은 verdict 가 이미 보임이다. */
+/** 「⋯ › 숨긴 대화」 목록(D11): 숨겨진 DM 중 명시적 닫기(7)와 나간 상대(6)만. 열린 DM 은 verdict 가 이미 보임이다. */
 export function dmClosedEntries(
   dms: readonly Channel[],
   verdicts: ReadonlyMap<string, DmVerdict>,

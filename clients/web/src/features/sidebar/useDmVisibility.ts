@@ -78,7 +78,7 @@ export interface DmVisibilityView {
   phase: ReadProjectionPhase;
   /** 열림 여부를 **뺀** 판정. 열린 DM 은 호출부가 보임으로 얹는다(`dmShownNow`). */
   verdictOf: (channelId: string) => DmVerdict;
-  /** 「⋯ › 닫은 대화」 목록: 숨겨진 DM 중 명시적 닫기(7)와 나간 상대(6)만. */
+  /** 「⋯ › 숨긴 대화」 목록: 숨겨진 DM 중 명시적 닫기(7)와 나간 상대(6)만. */
   closedList: readonly ClosedListEntry[];
   /** 지금 DM 이 하나라도 판정을 미루고 있나(재설치 직후 첫 투영을 기다린다). */
   anyPending: boolean;
