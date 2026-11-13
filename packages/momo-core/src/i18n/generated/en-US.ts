@@ -4339,7 +4339,7 @@ export const catalog: MessageCatalog = {
   "mobile.addMember.noMatch": [
     {
       "type": 0,
-      "value": "No members match “"
+      "value": "No results for “"
     },
     {
       "type": 1,

@@ -17,7 +17,7 @@
   "mobile.addMember.adding": "추가 중",
   "mobile.addMember.loading": "멤버 목록을 불러오는 중이에요.",
   "mobile.addMember.emptyWorkspace": "이 워크스페이스에 다른 멤버가 아직 없어요.",
-  "mobile.addMember.noMatch": "「{query}」에 맞는 멤버가 없어요.",
+  "mobile.addMember.noMatch": "「{query}」 검색 결과가 없어요.",
   "mobile.workPermission.landingGoneTitle": "이 권한 요청은 이미 닫혔어요",
   "mobile.workPermission.landingGoneDetail": "다른 기기에서 답했거나, 기한이 지났거나, 작업이 끝났을 수 있어요.",
   "mobile.workPermission.elsewhereTitle": "맥이 권한을 묻고 있어요",

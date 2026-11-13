@@ -17,7 +17,7 @@
   "mobile.addMember.adding": "Adding",
   "mobile.addMember.loading": "Loading members.",
   "mobile.addMember.emptyWorkspace": "No one else is in this workspace yet.",
-  "mobile.addMember.noMatch": "No members match “{query}”.",
+  "mobile.addMember.noMatch": "No results for “{query}”.",
   "mobile.workPermission.landingGoneTitle": "This permission request is already closed",
   "mobile.workPermission.landingGoneDetail": "It may have been answered on another device, expired, or the work may have ended.",
   "mobile.workPermission.elsewhereTitle": "Your Mac is asking for permission",

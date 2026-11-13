@@ -246,7 +246,7 @@ function CreateChannelPanel({
       if (closedSinceSubmit.current) return;
       if (created.kind === "private") {
         // 비공개 채널은 만든 사람 한 명으로 시작하고, 다른 사람은 누군가 추가해야 들어온다. 만든 그 자리에서 「멤버 추가」를
-        // 이어서 연다 — 「나중에」로 건너뛸 수 있다(#5784, owner 「비공개면 이후에 인원 초대하는 모달도 있는거야?」).
+        // 이어서 연다 — 「나중에」로 건너뛸 수 있다(#5784).
         handedOff.current = true;
         onCreatedPrivate({
           id: created.id,

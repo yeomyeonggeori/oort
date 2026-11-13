@@ -258,6 +258,8 @@ describe("비공개 채널을 만들면 「멤버 추가」가 이어서 뜬다 
     expect(q("add-channel-member-dialog")).toBeNull();
     // 건너뛰어도 채널로는 들어와 있다.
     expect(q("where")?.textContent).toBe(`/c/${CREATED_ID}`);
+    // 캐럿은 만들기 창을 열었던 자리로 돌아간다(만들기 창이 넘긴 `opener`).
+    expect(document.activeElement).toBe(q("opener"));
   });
 
   it("한 명을 추가하면 「나중에」가 평소의 「닫기」로 돌아간다", async () => {

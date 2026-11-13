@@ -4023,7 +4023,7 @@ export const catalog: MessageCatalog = {
     },
     {
       "type": 0,
-      "value": "」에 맞는 멤버가 없어요."
+      "value": "」 검색 결과가 없어요."
     }
   ],
   "mobile.addMember.present": [
