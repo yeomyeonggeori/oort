@@ -33,6 +33,7 @@ import {
   NEW_WORKSPACE_ID_ONCE_NOTICE,
 } from "@/features/auth/loginWorkspaceEntry";
 import { classifyEntry, serverLabel } from "@/features/auth/entryInput";
+import { normalizeServerUrl } from "@momo/core/lib/serverUrl";
 import { PRIMARY_ACTION_SHORTCUT } from "@/app/keyboardShortcuts";
 import { useFormatMessage } from "@/i18n/useFormatMessage";
 import {
@@ -437,8 +438,11 @@ function AddWorkspacePanel({
     // 웹에서 다른 출처의 서버: 이 페이지의 CSP가 그 서버로의 fetch를 막는다. 확인도 로그아웃도 하지 않고
     // 확인 걸음에서 그 주소를 브라우저로 연다(지금 워크스페이스는 그대로).
     if (opensInBrowser(target, IS_TAURI, absoluteApiBase())) {
+      // 방어선: 첫 판정(`classifyEntry`)이 http(s)가 아닌 주소를 이미 걸러서 여기는 닿지 않는다. 그래도 오면 링크를
+      // 세우지 않고, 같은 판정(`normalizeServerUrl`)의 문장으로 멈춘다(따로 둔 사전 문장 없음, #5785 r3 L4).
       if (browserOpenHref(target) === null) {
-        setJoinError(formatMessage("workspace.add.joinBadScheme"));
+        const checked = normalizeServerUrl(target.serverUrl);
+        setJoinError(checked.ok ? null : checked.message);
         joinInputRef.current?.focus();
         return;
       }
@@ -470,7 +474,8 @@ function AddWorkspacePanel({
   function handOffToLogin() {
     if (!joinTarget) return;
     // 로그인 화면은 마운트될 때 페이지 주소에서 링크를 읽는다(`useJoinPrefill`). 그래서 주소를 먼저 바꾸고
-    // 그다음에 로그아웃한다. 로그아웃이 같은 틱에 로그인 화면을 새로 세운다.
+    // 그다음에 로그아웃한다. 로그아웃이 같은 틱에 로그인 화면을 새로 세운다. 링크의 서버로 바꾸는 일은
+    // 로그아웃 요청이 다 끝난 뒤에 한다(`useJoinPrefill`이 `pendingLogout()`을 기다린다, #5785).
     window.history.replaceState(
       window.history.state,
       "",
@@ -513,7 +518,7 @@ function AddWorkspacePanel({
   ) : step === "create" ? (
     formatMessage("workspace.create.lead")
   ) : step === "join" ? (
-    formatMessage("workspace.add.joinLead")
+    formatMessage(IS_TAURI ? "workspace.add.joinLead" : "workspace.add.joinLeadWeb")
   ) : step === "confirm" ? (
     formatMessage(openHref ? "workspace.add.joinOpenBody" : "workspace.add.joinConfirmBody")
   ) : (
@@ -599,7 +604,7 @@ function AddWorkspacePanel({
             <ChoiceCard
               icon={LinkIcon}
               title={formatMessage("workspace.add.joinTitle")}
-              lead={formatMessage("workspace.add.joinLead")}
+              lead={formatMessage(IS_TAURI ? "workspace.add.joinLead" : "workspace.add.joinLeadWeb")}
               onChoose={() => goTo("join", "join")}
               buttonRef={joinCardRef}
               onKeyDown={onCardKey}

@@ -5,7 +5,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError, type JoinResponse, type LoginResponse, type Member } from "@momo/core/lib/api";
 import { NetworkError } from "@momo/core/lib/http";
-import { setServerBase } from "@/lib/serverBase";
+import { getServerBase, setServerBase } from "@/lib/serverBase";
 import { applyLogin, clearSession } from "@/lib/session";
 import { useRestoredSession } from "@/app/session";
 import { clearRecentServers } from "./recentServers";
@@ -26,6 +26,7 @@ const changeMyDisplayName = vi.hoisted(() => vi.fn());
 const fetchRoster = vi.hoisted(() => vi.fn());
 const navigateTo = vi.hoisted(() => vi.fn());
 const restoreSession = vi.hoisted(() => vi.fn());
+const pendingLogout = vi.hoisted(() => vi.fn((): Promise<void> | null => null));
 const releaseSessionRestoreMock = vi.hoisted(() => vi.fn());
 const discoveryMock = vi.hoisted(() =>
   vi.fn(
@@ -48,6 +49,7 @@ vi.mock("@momo/core/lib/api", async (importOriginal) => {
       changeMyDisplayName(...args) as Promise<Member>,
     fetchRoster: (...args: unknown[]) => fetchRoster(...args) as Promise<unknown[]>,
     restoreSession: () => restoreSession() as Promise<LoginResponse | null>,
+    pendingLogout: () => pendingLogout(),
   };
 });
 
@@ -111,6 +113,8 @@ beforeEach(() => {
   navigateTo.mockReset();
   online = true;
   restoreSession.mockReset();
+  pendingLogout.mockReset();
+  pendingLogout.mockReturnValue(null);
   login.mockResolvedValue(session);
   joinWithInvite.mockResolvedValue({ ...session, createdMember: true });
   restoreSession.mockResolvedValue(session);
@@ -365,6 +369,38 @@ describe("D0 환영 (#2808 OB2-2)", () => {
     ).toBe("none");
     // 초대 코드는 주소창에서 걷힌다(bearer secret).
     expect(window.location.href).not.toContain(CODE);
+  });
+
+  // #5785 넘김: 워크스페이스 추가 창이 다른 서버의 초대로 넘기면, 이 화면은 앞 세션의 로그아웃이 아직 앞 서버와
+  // 말하는 동안 선다. 링크의 서버를 저장하는 일은 그 로그아웃이 끝난 뒤다. 고장 내기: 기다리지 않고 링크를 곧바로
+  // 적용하면 첫 단정에서 저장값이 이미 새 서버라 RED.
+  it("applies a page link's server only after the leaving session's logout settled", async () => {
+    setServerBase("https://start.example.com");
+    let release = () => {};
+    pendingLogout.mockReturnValue(
+      new Promise<void>((resolve) => {
+        release = resolve;
+      })
+    );
+    window.history.replaceState(
+      null,
+      "",
+      `/?server=${encodeURIComponent("https://team.example.com")}&code=${CODE}`
+    );
+    mount();
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(getServerBase()).toBe("https://start.example.com");
+    // 초대 코드는 기다리는 동안에도 주소창에서 걷힌다.
+    expect(window.location.href).not.toContain(CODE);
+    await act(async () => {
+      release();
+      await Promise.resolve();
+    });
+    expect(getServerBase()).toBe("https://team.example.com");
+    expect(q("onboarding-join")).not.toBeNull();
+    expect(q("connect-server-chip-host")?.textContent).toBe("team.example.com");
   });
 
   it("offers servers found on this network and goes to D1 on 여기로", () => {

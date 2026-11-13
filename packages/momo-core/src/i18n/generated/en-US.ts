@@ -10858,12 +10858,6 @@ export const catalog: MessageCatalog = {
       "value": "Create a new workspace"
     }
   ],
-  "workspace.add.joinBadScheme": [
-    {
-      "type": 0,
-      "value": "Only http or https addresses can be opened."
-    }
-  ],
   "workspace.add.joinChecking": [
     {
       "type": 0,
@@ -10916,6 +10910,12 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "Use an address or an invite link. For now this signs you out and continues on the sign-in screen."
+    }
+  ],
+  "workspace.add.joinLeadWeb": [
+    {
+      "type": 0,
+      "value": "Use an address or an invite link. Another server opens in a new tab; an invite to this server signs you out and continues on the sign-in screen."
     }
   ],
   "workspace.add.joinNext": [

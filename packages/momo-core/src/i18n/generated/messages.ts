@@ -1448,7 +1448,6 @@ export const messageKeys = [
   "workspace.add.createLead",
   "workspace.add.createLeadNotOperator",
   "workspace.add.createTitle",
-  "workspace.add.joinBadScheme",
   "workspace.add.joinChecking",
   "workspace.add.joinClaim",
   "workspace.add.joinConfirmAction",
@@ -1458,6 +1457,7 @@ export const messageKeys = [
   "workspace.add.joinField",
   "workspace.add.joinHint",
   "workspace.add.joinLead",
+  "workspace.add.joinLeadWeb",
   "workspace.add.joinNext",
   "workspace.add.joinOpenAction",
   "workspace.add.joinOpenBody",
@@ -3377,7 +3377,6 @@ export const argumentSpecs = {
   "workspace.add.createLead": {},
   "workspace.add.createLeadNotOperator": {},
   "workspace.add.createTitle": {},
-  "workspace.add.joinBadScheme": {},
   "workspace.add.joinChecking": {},
   "workspace.add.joinClaim": {},
   "workspace.add.joinConfirmAction": {},
@@ -3387,6 +3386,7 @@ export const argumentSpecs = {
   "workspace.add.joinField": {},
   "workspace.add.joinHint": {},
   "workspace.add.joinLead": {},
+  "workspace.add.joinLeadWeb": {},
   "workspace.add.joinNext": {},
   "workspace.add.joinOpenAction": {},
   "workspace.add.joinOpenBody": {},
@@ -4883,7 +4883,6 @@ export interface MessageArgs {
   "workspace.add.createLead": Record<string, never>;
   "workspace.add.createLeadNotOperator": Record<string, never>;
   "workspace.add.createTitle": Record<string, never>;
-  "workspace.add.joinBadScheme": Record<string, never>;
   "workspace.add.joinChecking": Record<string, never>;
   "workspace.add.joinClaim": Record<string, never>;
   "workspace.add.joinConfirmAction": Record<string, never>;
@@ -4893,6 +4892,7 @@ export interface MessageArgs {
   "workspace.add.joinField": Record<string, never>;
   "workspace.add.joinHint": Record<string, never>;
   "workspace.add.joinLead": Record<string, never>;
+  "workspace.add.joinLeadWeb": Record<string, never>;
   "workspace.add.joinNext": Record<string, never>;
   "workspace.add.joinOpenAction": Record<string, never>;
   "workspace.add.joinOpenBody": Record<string, never>;

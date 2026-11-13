@@ -467,6 +467,7 @@ describe("desktop: the shell carries the refresh", () => {
         refreshToken: "rt-0",
         workspaceId: member.workspaceId,
         memberId: member.id,
+        apiBase: "http://server.test",
       },
     ]);
     expect(h.sent).toEqual([]);

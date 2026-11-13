@@ -276,15 +276,12 @@ export function ProfileCard({
             </DropdownMenuItem>
             {/* 서버 주소만으로는 같은 서버의 기본이 아닌 워크스페이스에 못 들어온다(로그인 화면이 따로 ID를 받는다,
                 `loginWorkspaceEntry.ts`). 클라이언트는 지금 워크스페이스가 기본인지 몰라서 늘 말한다.
-                줄이 아니라 줄 아래 글이다: 초점도 선택도 받지 않고, 글자 시작은 아이콘 줄과 같은 세로 줄(pl-8)이다. */}
-            {/* 복사한 순간에만 보인다(영수증 자리). 그 전에는 낭독용(`sr-only`)으로 줄의 설명이다: 메뉴가 늘 길지 않다. */}
+                낭독용 설명(`sr-only`)으로만 둔다: 보이는 줄로 두면 메뉴 높이가 바뀐다. 복사의 영수증은 줄 글 하나
+                (「서버 주소 복사됨」)뿐이라 메뉴의 높이·줄 위치는 복사 전·직후·영수증이 걷힌 뒤 모두 같다(#5785 r3 H1:
+                보였다 사라지는 안내가 포인터 밑의 줄을 옮겼다). */}
             <p
               id={copyNoteId}
-              className={
-                addressCopy.copied && !copyFailed
-                  ? "select-none break-keep pb-1 pl-8 pr-2 text-meta text-ink-muted"
-                  : "sr-only"
-              }
+              className="sr-only"
               data-testid="profile-copy-address-note"
             >
               {formatMessage("workspace.menu.copyAddressNote")}

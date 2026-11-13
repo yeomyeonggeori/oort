@@ -10179,12 +10179,6 @@ export const catalog: MessageCatalog = {
       "value": "새 워크스페이스 만들기"
     }
   ],
-  "workspace.add.joinBadScheme": [
-    {
-      "type": 0,
-      "value": "http 또는 https 주소만 열 수 있어요."
-    }
-  ],
   "workspace.add.joinChecking": [
     {
       "type": 0,
@@ -10237,6 +10231,12 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "주소나 초대 링크로 들어가요. 지금은 로그아웃한 뒤 로그인 화면에서 이어 가요."
+    }
+  ],
+  "workspace.add.joinLeadWeb": [
+    {
+      "type": 0,
+      "value": "주소나 초대 링크로 들어가요. 다른 서버는 새 탭에서 열고, 이 서버의 초대는 로그아웃한 뒤 로그인 화면에서 이어 가요."
     }
   ],
   "workspace.add.joinNext": [

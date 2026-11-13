@@ -17,7 +17,13 @@
 //   profile-menu     프로필 카드 → 메뉴(내 상태 → 워크스페이스 이름 머리글 → 네 줄)
 //   leave-confirm    「워크스페이스 나가기」 → 확인 창
 //   leave-last-owner 나가기 → 서버 409 → 창 안의 거절 문장(로그아웃 안 됨)
-//   handoff          (1280 밝게만) 확인 → 로그아웃 → 로그인 화면이 초대 링크로 가입 걸음에 서고 주소창에 코드가 없다
+//   handoff          (1280 밝게만) 확인 → 로그아웃 → 로그인 화면이 초대 링크로 가입 걸음에 서고 주소창에 코드가 없다.
+//                    로그아웃 요청은 원래 서버로 1건, 넘어갈 서버에 인증 값이 실린 요청 0건. 원래 서버의 로그아웃 답을
+//                    늦춘 동안 저장된 서버는 원래 서버 그대로다(링크의 서버로는 로그아웃이 끝난 뒤에 바꾼다).
+//   menu-steady      (네 크기) 「서버 주소 복사」 전 · 직후 · 2.5초 뒤 메뉴의 모든 줄의 y와 메뉴의 높이 · 위 끝 ·
+//                    스크롤이 같다(±0.5px). 다섯 줄 각각에 포인터를 둔 채 복사하고 2.5초 뒤에도 포인터 밑이 같은 줄.
+//
+// `CAPTURE_DIST=<폴더>`이면 그 빌드를 연다(고치기 전 빌드로 RED를 볼 때).
 //
 // 단정이 하나라도 빨가면 exit 1.
 // =============================================================================
@@ -82,8 +88,12 @@ async function installHealthRoutes(context) {
 
 /** 나가기 응답을 늦추는 시간(ms). 0이면 곧바로 409. */
 let leaveDelayMs = 0;
+/** 원래 서버의 로그아웃 답을 늦추는 시간(ms). */
+let holdLogoutMs = 0;
+/** `/v1/**` 요청마다 출처 · 경로 · 인증 값(머리글 · 본문의 refresh 값)이 실렸는지. 값 자체는 적지 않는다. */
+const apiLog = [];
 
-async function installRoutes(context, role) {
+async function installRoutes(context, role, pageOrigin) {
   await installHealthRoutes(context);
   // 새 탭이 열 「다른 서버」: 닿는 것처럼 빈 페이지로 답한다(요청이 그 주소로 갔는지만 본다).
   await context.route("https://team.example.com/**", async (route) => {
@@ -92,11 +102,17 @@ async function installRoutes(context, role) {
   });
   await context.route("**/v1/**", async (route) => {
     const req = route.request();
-    const path = new URL(req.url()).pathname;
+    const url = new URL(req.url());
+    const path = url.pathname;
     const method = req.method();
+    const headers = await req.allHeaders();
+    apiLog.push({ origin: url.origin, path, auth: Boolean(headers.authorization) || /refreshToken/.test(req.postData() ?? "") });
     if (path === "/v1/auth/login") return json(route, auth);
     if (path === "/v1/auth/refresh") return json(route, { accessToken: auth.accessToken, refreshToken: auth.refreshToken });
-    if (path === "/v1/auth/logout") return json(route, {});
+    if (path === "/v1/auth/logout") {
+      if (holdLogoutMs > 0 && url.origin === pageOrigin) await new Promise((r) => setTimeout(r, holdLogoutMs));
+      return json(route, {});
+    }
     if (path === "/v1/auth/realtime-token") {
       return json(route, { token: "capture", tokenType: "Bearer", expiresAtMs: Date.now() + 600_000, ttlSeconds: 60, workspaceId, memberId });
     }
@@ -140,7 +156,44 @@ async function installRealtime(page) {
   });
 }
 
-async function newContext(browser, origin, scheme, vp, role, desktop = false) {
+/**
+ * 데스크탑 셸의 키체인 대역: 셸 명령 몇 개만 흉내 낸다(키체인 있음 · 저장 · 손잡이 · 셸이 나르는 갱신과 폐기).
+ * 셸이 받은 갱신 · 폐기 요청의 `apiBase`만 적는다. 폐기의 답은 1.5초 늦춘다(그동안 저장된 서버를 본다).
+ * 나머지 명령은 셸이 없는 것처럼 거절한다.
+ */
+async function installKeychainShell(page) {
+  await page.addInitScript(() => {
+    const handle = "shell:0123456789abcdef0123456789abcdef";
+    let stored = false;
+    let callbacks = 0;
+    window.__shellCalls = [];
+    window.__TAURI_INTERNALS__ = {
+      transformCallback: () => (callbacks += 1),
+      unregisterCallback: () => {},
+      convertFileSrc: (path) => path,
+      invoke: async (cmd, args) => {
+        const apiBase = args?.request?.apiBase;
+        if (cmd === "keychain_available") return true;
+        if (cmd === "keychain_store_refresh_token") { stored = true; return null; }
+        if (cmd === "keychain_refresh_token_handle") return stored ? handle : null;
+        if (cmd === "keychain_clear_refresh_token") { stored = false; return null; }
+        if (cmd === "session_rotation_begin" || cmd === "session_rotation_end") return null;
+        if (cmd === "session_refresh_attempt") {
+          window.__shellCalls.push({ cmd, apiBase });
+          return { status: 200, accessToken: "capture-access", refreshToken: handle, proved: true };
+        }
+        if (cmd === "session_revoke") {
+          window.__shellCalls.push({ cmd, apiBase });
+          await new Promise((r) => setTimeout(r, 1_500));
+          return true;
+        }
+        throw new Error(`capture: no shell command ${cmd}`);
+      },
+    };
+  });
+}
+
+async function newContext(browser, origin, scheme, vp, role, desktop = false, keychain = false) {
   const context = await browser.newContext({
     viewport: { width: vp.w, height: vp.h },
     deviceScaleFactor: vp.dpr,
@@ -150,10 +203,11 @@ async function newContext(browser, origin, scheme, vp, role, desktop = false) {
     serviceWorkers: "block",
   });
   await context.grantPermissions(["clipboard-read", "clipboard-write"], { origin }).catch(() => {});
-  await installRoutes(context, role);
+  await installRoutes(context, role, new URL(origin).origin);
   const page = await context.newPage();
   // 데스크탑 길: 셸 판정(`IS_TAURI`)이 읽는 전역만 단다. 나머지 셸 호출은 없다.
   if (desktop) await page.addInitScript(() => { window.__TAURI__ = {}; });
+  if (keychain) await installKeychainShell(page);
   await page.addInitScript(() => {
     window.__cspv = [];
     document.addEventListener("securitypolicyviolation", (e) => window.__cspv.push(e.blockedURI));
@@ -215,7 +269,7 @@ async function openProfileMenu(page) {
   await page.getByTestId("profile-card-menu").waitFor({ timeout: 10_000 });
 }
 
-async function ownerRun(page, origin, tag, withHandoff) {
+async function ownerRun(page, origin, tag, withHandoff, keychain = false) {
   await signIn(page, origin);
 
   // 두 카드
@@ -317,7 +371,18 @@ async function ownerRun(page, origin, tag, withHandoff) {
     check(tag, "데스크탑: 확인 걸음이 로그아웃과 넘어갈 곳을 말하고 초안은 말하지 않는다", confirmText.includes("로그아웃돼요") && !confirmText.includes("초안") && confirmText.includes("team.example.com의 초대로 넘어가요"), null);
     await fits(page, tag, "join-confirm", "add-workspace-join-logout");
     await shot(page, tag, "join-confirm");
+    // 원래 서버의 로그아웃 답을 1.5초 늦춘다: 그동안 저장된 서버가 바뀌면(넘김 순서가 깨지면) 아래 단정이 빨갛다.
+    holdLogoutMs = 1_500;
+    const logFrom = apiLog.length;
+    if (keychain) {
+      const shellBefore = await page.evaluate(() => window.__shellCalls);
+      check(tag, "키체인 대역: 로그인 뒤 셸이 갱신을 날라 세션이 손잡이 상태다", shellBefore.some((c) => c.cmd === "session_refresh_attempt"), shellBefore);
+    }
     await page.getByTestId("add-workspace-join-logout").click();
+    await page.waitForTimeout(500);
+    const storedWhileHeld = await page.evaluate(() => localStorage.getItem("momo.web.server.v1"));
+    check(tag, "넘김: 원래 서버의 로그아웃이 끝나기 전에는 저장된 서버가 원래 서버", storedWhileHeld === origin, { storedWhileHeld, origin });
+    await shot(page, tag, "handoff-waiting");
     await page.getByTestId("join-sign-in-instead").waitFor({ timeout: 15_000 });
     // 첫 그림은 저장된 서버로 서고, 링크를 읽은 효과가 다음 커밋에서 칩을 바꾼다. 그 커밋을 기다린다.
     await page.waitForFunction(
@@ -332,6 +397,18 @@ async function ownerRun(page, origin, tag, withHandoff) {
     const href = page.url();
     check(tag, "넘김: 로그인 화면이 초대 가입 걸음에 서고 서버 칩이 그 주소다", chip.includes("team.example.com"), { chip });
     check(tag, "넘김: 주소창에서 초대 코드를 지웠다", !href.includes("code="), { href: href.replace(INVITE_SHAPE, "<code>") });
+    await page.waitForTimeout(500);
+    holdLogoutMs = 0;
+    const after = apiLog.slice(logFrom);
+    const originLogouts = after.filter((r) => r.origin === origin && r.path === "/v1/auth/logout").length;
+    const otherAuthed = after.filter((r) => r.origin === "https://team.example.com" && r.auth);
+    if (keychain) {
+      const revokes = (await page.evaluate(() => window.__shellCalls)).filter((c) => c.cmd === "session_revoke");
+      check(tag, "키체인 대역: 셸이 받은 폐기 1건, 그 서버가 원래 서버", revokes.length === 1 && revokes[0].apiBase === origin && originLogouts === 0, { revokes, originLogouts });
+    } else {
+      check(tag, "넘김: 원래 서버가 받은 로그아웃 1건", originLogouts === 1, { originLogouts });
+    }
+    check(tag, "넘김: 넘어갈 서버에 인증 값이 실린 요청 0건", otherAuthed.length === 0, { otherAuthed });
     await shot(page, tag, "handoff-login");
     return;
   }
@@ -393,10 +470,9 @@ async function ownerRun(page, origin, tag, withHandoff) {
     range.selectNodeContents(n.firstChild);
     return { w: Math.round(r.width), h: Math.round(r.height), sr: n.className.includes("sr-only"), textX: Math.round(range.getBoundingClientRect().x * 100) / 100 };
   });
-  check(tag, "복사 뒤 안내 글의 글자 시작이 아이콘 줄과 같은 세로 줄(107)", noteBox.textX === 107, noteBox);
   const topAfter = await page.evaluate(() => document.querySelector("[data-testid=profile-copy-address]").getBoundingClientRect().y);
-  console.log(JSON.stringify({ tag, copiedNote: noteBox, copyRowShiftPx: Math.round((topAfter - topBefore) * 10) / 10 }));
-  check(tag, "복사한 순간에만 안내가 보인다(복사 전 sr-only, 뒤 보임)", !noteBox.sr && noteBox.h > 0, noteBox);
+  const copyRowShiftPx = Math.round((topAfter - topBefore) * 10) / 10;
+  check(tag, "복사 뒤에도 안내 글은 낭독 전용(sr-only), 복사 줄은 움직이지 않는다(±0.5px)", noteBox.sr && Math.abs(copyRowShiftPx) <= 0.5, { ...noteBox, copyRowShiftPx });
   await shot(page, tag, "profile-menu-copied");
   const copyLabel = await page.getByTestId("profile-copy-address").innerText();
   check(tag, "서버 주소 복사 → 메뉴가 열린 채 「서버 주소 복사됨」", copyLabel.includes("서버 주소 복사됨"), { copyLabel });
@@ -438,6 +514,92 @@ async function ownerRun(page, origin, tag, withHandoff) {
   await shot(page, tag, "leave-last-owner");
 }
 
+/** 메뉴 판과 그 안의 모든 줄(머리글 · 줄 · 구분선 · 묶음 안 줄)의 위치. */
+async function menuGeometry(page) {
+  return page.evaluate(() => {
+    const menu = document.querySelector("[data-testid=profile-card-menu]");
+    const box = menu.getBoundingClientRect();
+    const rows = [...menu.querySelectorAll(":scope > *, [role=group] > *")].map((el, i) => {
+      const r = el.getBoundingClientRect();
+      return { key: el.getAttribute("data-testid") ?? `${el.getAttribute("role") ?? el.tagName.toLowerCase()}#${i}`, y: r.y, h: r.height };
+    });
+    return { top: box.y, height: box.height, width: box.width, scrollTop: menu.scrollTop, rows };
+  });
+}
+
+/** 두 순간의 차이(가장 큰 값). 줄 수가 다르면 Infinity. */
+function geometryDelta(a, b) {
+  if (a.rows.length !== b.rows.length) return { max: Infinity, moved: ["rows"] };
+  const moved = [];
+  let max = Math.max(Math.abs(a.top - b.top), Math.abs(a.height - b.height), Math.abs(a.scrollTop - b.scrollTop));
+  if (max > 0.5) moved.push("menu");
+  a.rows.forEach((r, i) => {
+    const d = Math.max(Math.abs(r.y - b.rows[i].y), Math.abs(r.h - b.rows[i].h));
+    if (r.key !== b.rows[i].key || d > 0.5) moved.push(`${r.key}:${Math.round((b.rows[i].y - r.y) * 10) / 10}`);
+    max = Math.max(max, d);
+  });
+  return { max: Math.round(max * 100) / 100, moved };
+}
+
+/** (x, y) 밑의 메뉴 줄 testid. */
+const rowAt = (page, x, y) =>
+  page.evaluate(([px, py]) => document.elementFromPoint(px, py)?.closest("[data-testid]")?.getAttribute("data-testid") ?? null, [x, y]);
+
+/** 실제 포인터로 복사 줄을 누른다(판 안으로 먼저 보이게). 누른 시각을 돌려준다. */
+async function clickCopyRow(page) {
+  await page.getByTestId("profile-copy-address").evaluate((el) => el.scrollIntoView({ block: "nearest" }));
+  const box = await page.getByTestId("profile-copy-address").boundingBox();
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await page.mouse.down();
+  await page.mouse.up();
+  return Date.now();
+}
+
+async function menuSteadyRun(page, origin, tag, withShots) {
+  await signIn(page, origin);
+  await closeLayers(page);
+  await openProfileMenu(page);
+  await page.waitForTimeout(300);
+  // ① 복사 전 · ② 복사 직후(줄 글이 「복사됨」) · ③ 2.5초 뒤(줄 글이 되돌아옴).
+  await page.getByTestId("profile-copy-address").evaluate((el) => el.scrollIntoView({ block: "nearest" }));
+  const before = await menuGeometry(page);
+  if (withShots) await shot(page, tag, "menu-steady-1-before");
+  const t0 = await clickCopyRow(page);
+  await page.waitForFunction(() => document.querySelector("[data-testid=profile-copy-address]")?.textContent?.includes("서버 주소 복사됨"), null, { timeout: 2_000 });
+  const copied = await menuGeometry(page);
+  if (withShots) await shot(page, tag, "menu-steady-2-copied");
+  await page.waitForTimeout(Math.max(0, t0 + 2_500 - Date.now()));
+  const label3 = await page.getByTestId("profile-copy-address").innerText();
+  const later = await menuGeometry(page);
+  if (withShots) await shot(page, tag, "menu-steady-3-after2500");
+  const d1 = geometryDelta(before, copied);
+  const d2 = geometryDelta(before, later);
+  console.log(JSON.stringify({ tag, steady: { before: { top: before.top, height: before.height, scrollTop: before.scrollTop, rows: before.rows.length }, d1, d2 } }));
+  check(tag, "복사 직후: 줄 글만 「서버 주소 복사됨」, 메뉴의 모든 줄 y · 높이 · 위 끝 · 스크롤이 그대로(±0.5px)", d1.max <= 0.5, d1);
+  check(tag, "2.5초 뒤: 줄 글이 「서버 주소 복사」로 돌아오고 모든 줄이 그대로(±0.5px)", label3.trim() === "서버 주소 복사" && d2.max <= 0.5, { label3, ...d2 });
+
+  // 다섯 겨눔: 복사한 뒤 그 줄에 포인터를 두고 2.5초를 기다린다. 포인터 밑은 줄곧 같은 줄이어야 한다.
+  const targets = ["profile-workspace-settings", "nav-settings", "profile-leave-workspace", "profile-add-workspace", "presence-option-away"];
+  for (const target of targets) {
+    await page.keyboard.press("Escape");
+    await page.waitForTimeout(150);
+    await openProfileMenu(page);
+    await page.waitForTimeout(200);
+    const t1 = await clickCopyRow(page);
+    // 영수증이 선 뒤에 겨눈다(사람이 복사하고 다음 줄로 옮기는 순서). 그 뒤로 메뉴가 움직이면 포인터 밑이 바뀐다.
+    await page.waitForFunction(() => document.querySelector("[data-testid=profile-copy-address]")?.textContent?.includes("서버 주소 복사됨"), null, { timeout: 2_000 });
+    await page.getByTestId(target).evaluate((el) => el.scrollIntoView({ block: "nearest" }));
+    const box = await page.getByTestId(target).boundingBox();
+    const x = box.x + box.width / 2;
+    const y = box.y + box.height / 2;
+    await page.mouse.move(x, y);
+    const atMove = await rowAt(page, x, y);
+    await page.waitForTimeout(Math.max(0, t1 + 2_500 - Date.now()));
+    const atLater = await rowAt(page, x, y);
+    check(tag, `포인터를 「${target}」에 둔 채 복사 → 2.5초 뒤에도 포인터 밑이 같은 줄`, atMove === target && atLater === target, { atMove, atLater, x: Math.round(x), y: Math.round(y) });
+  }
+}
+
 async function memberRun(page, origin, tag) {
   await signIn(page, origin);
   await openAdd(page);
@@ -456,9 +618,10 @@ async function main() {
   mkdirSync(OUT_DIR, { recursive: true });
   // 웹은 운영 CSP를, 데스크탑 길은 `tauri.conf.json`의 CSP를 문서 응답 머리글로 단 미리보기에서 잰다.
   const deskCsp = JSON.parse(readFileSync(resolve(WEB_ROOT, "../desktop/src-tauri/tauri.conf.json"), "utf8")).app.security.csp;
-  const preview = await startGuardedPreview({ webRoot: WEB_ROOT, port: PORT, portEnvVar: "CAPTURE_PORT", extraArgs: [], env: { ...process.env, MOMO_CSP_GATE_HEADER: PROD_CSP } });
+  const distArgs = process.env.CAPTURE_DIST ? ["--outDir", resolve(process.env.CAPTURE_DIST)] : [];
+  const preview = await startGuardedPreview({ webRoot: WEB_ROOT, port: PORT, portEnvVar: "CAPTURE_PORT", extraArgs: distArgs, env: { ...process.env, MOMO_CSP_GATE_HEADER: PROD_CSP } });
   const deskPreview = wants("handoff")
-    ? await startGuardedPreview({ webRoot: WEB_ROOT, port: PORT + 1, portEnvVar: "CAPTURE_PORT", extraArgs: [], env: { ...process.env, MOMO_CSP_GATE_HEADER: deskCsp } })
+    ? await startGuardedPreview({ webRoot: WEB_ROOT, port: PORT + 1, portEnvVar: "CAPTURE_PORT", extraArgs: distArgs, env: { ...process.env, MOMO_CSP_GATE_HEADER: deskCsp } })
     : null;
   const browser = await chromium.launch();
   const allSizes = [
@@ -488,6 +651,29 @@ async function main() {
         }
       }
     }
+    // 메뉴가 복사 영수증 동안 움직이지 않는가: 네 크기(1280×800 · 1280×510 · 720×480 · 200%).
+    if (wants("menu-steady")) {
+      const steadySizes = [
+        { w: 1280, h: 800, dpr: 2, name: "1280" },
+        { w: 1280, h: 510, dpr: 1, name: "1280x510" },
+        { w: 720, h: 480, dpr: 1, name: "720x480" },
+        { w: 640, h: 400, dpr: 2, name: "zoom200" },
+      ].filter((v) => SIZES.length === 0 || SIZES.includes(v.name));
+      for (const vp of steadySizes) {
+        for (const scheme of SCHEMES) {
+          const tag = `${vp.name}-${scheme}`;
+          const { context, page } = await newContext(browser, preview.origin, scheme, vp, "owner");
+          try {
+            await menuSteadyRun(page, preview.origin, tag, vp.name === "1280" || vp.name === "720x480");
+          } catch (error) {
+            await page.screenshot({ path: resolve(OUT_DIR, `FAIL-menu-steady-${tag}.png`) }).catch(() => {});
+            check(tag, "menu-steady 장면이 끝까지 간다", false, String(error).slice(0, 400));
+          } finally {
+            await context.close();
+          }
+        }
+      }
+    }
     // 넘김은 한 번이면 된다(로그아웃한다).
     const { context, page } = wants("handoff")
       ? await newContext(browser, deskPreview.origin, "light", allSizes[0], "owner", true)
@@ -499,6 +685,18 @@ async function main() {
       check("1280-light", "handoff 장면이 끝까지 간다", false, String(error).slice(0, 400));
     } finally {
       await context.close();
+    }
+    // 같은 넘김을 키체인 방식(셸이 토큰을 쥔 상태) 대역으로 한 번 더.
+    const keyed = wants("handoff")
+      ? await newContext(browser, deskPreview.origin, "light", allSizes[0], "owner", true, true)
+      : null;
+    if (keyed) try {
+      await ownerRun(keyed.page, deskPreview.origin, "1280-light-keychain", true, true);
+    } catch (error) {
+      await keyed.page.screenshot({ path: resolve(OUT_DIR, "FAIL-handoff-keychain.png") }).catch(() => {});
+      check("1280-light-keychain", "handoff(키체인) 장면이 끝까지 간다", false, String(error).slice(0, 400));
+    } finally {
+      await keyed.context.close();
     }
   } finally {
     await browser.close();

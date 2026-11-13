@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { IS_TAURI } from "@/lib/env";
 import { onDeepLink, takePendingDeepLinks, type DeepLinkJoin } from "@/lib/tauri";
+import { pendingLogout } from "@momo/core/lib/api";
 import {
   parseJoinDeepLink,
   parseJoinFromPageUrl,
@@ -26,13 +27,35 @@ import {
  *
  * A new value means a new link arrived; the connect screen re-applies it and
  * moves focus to the first field the link could not fill.
+ *
+ * Applying a link can point this device at another server. When this screen
+ * opens while a logout is still talking to the server it is leaving (the
+ * add-workspace hand-off, #5785), the page URL's link is handed over only once
+ * that logout has finished, so its requests end where they began.
  */
 export function useJoinPrefill(): JoinPrefill | null {
-  const [prefill, setPrefill] = useState<JoinPrefill | null>(() =>
+  const [held] = useState(() =>
+    typeof window === "undefined" ? null : pendingLogout()
+  );
+  const [pageLink] = useState(() =>
     typeof window === "undefined"
       ? null
       : parseJoinFromPageUrl(window.location.href)
   );
+  const [prefill, setPrefill] = useState<JoinPrefill | null>(
+    held ? null : pageLink
+  );
+
+  useEffect(() => {
+    if (!held || !pageLink) return;
+    let live = true;
+    void held.then(() => {
+      if (live) setPrefill(pageLink);
+    });
+    return () => {
+      live = false;
+    };
+  }, [held, pageLink]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;

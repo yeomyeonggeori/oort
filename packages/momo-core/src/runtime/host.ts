@@ -126,6 +126,11 @@ export interface RefreshDeviceProof {
 export interface HostRefreshRequest {
   workspaceId: string;
   memberId: string;
+  /**
+   * The server this refresh belongs to, read when the core read the session.
+   * The host sends there — never to the base it would read later (#5785).
+   */
+  apiBase: string;
   /** Server time minus local time, from a `refresh_proof_stale` answer. */
   skewMs: number;
   /**
@@ -162,6 +167,8 @@ export interface HostRevokeRequest {
   refreshToken: string | null;
   workspaceId: string;
   memberId: string;
+  /** The server the leaving session belongs to (see `HostRefreshRequest.apiBase`). */
+  apiBase: string;
 }
 
 /** Everything the core needs from the platform it is running on. */

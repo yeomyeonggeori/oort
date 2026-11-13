@@ -995,7 +995,7 @@ describe("ProfileCard 워크스페이스 줄 묶음 (#5785)", () => {
     const note = q("profile-copy-address-note")!;
     expect(note.textContent).toBe("기본이 아닌 워크스페이스는 ID도 필요해요.");
     expect(q("profile-copy-address")?.getAttribute("aria-describedby")).toBe(note.id);
-    // 복사하기 전에는 메뉴를 늘이지 않는다(낭독 전용), 복사한 순간에만 보인다.
+    // 보이는 줄이 아니다(낭독 전용): 메뉴의 높이를 바꾸지 않는다.
     expect(note.className).toContain("sr-only");
     // 줄이 아니다: 초점도 선택도 받지 않는다.
     expect(note.getAttribute("role")).toBeNull();
@@ -1016,7 +1016,8 @@ describe("ProfileCard 워크스페이스 줄 묶음 (#5785)", () => {
     expect(copied).toBe(absoluteApiBase());
     await vi.waitFor(() => expect(text("profile-copy-address")).toBe("서버 주소 복사됨"));
     expect(q("profile-card-menu")).not.toBeNull();
-    expect(q("profile-copy-address-note")?.className).not.toContain("sr-only");
+    // 영수증은 줄 글뿐이다: 안내 글은 복사 뒤에도 낭독 전용이라 메뉴가 자라지 않는다(#5785 r3 H1).
+    expect(q("profile-copy-address-note")?.className).toContain("sr-only");
     // 로그인 화면의 첫 칸이 이 글을 서버 주소로 읽는다(같은 판정 함수).
     const decision = classifyEntry(copied);
     expect(decision.kind).toBe("server");
