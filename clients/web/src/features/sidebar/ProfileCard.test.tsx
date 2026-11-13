@@ -559,6 +559,8 @@ describe("ProfileCard 커스텀 상태 (#1889)", () => {
     );
     const menu = await openMenu();
     expect(menu.className).toContain("max-w-pane-sm");
+    // #5785: 줄이 늘어 낮은 창(200% 640×400)에서 위가 잘렸다. 높이도 가용 높이 안에서 스크롤한다.
+    expect(menu.className).toContain("max-h-menu-available");
     expect(
       menu.querySelector('[data-testid="profile-card-status-head"]')?.className
     ).toMatch(/break-words/);

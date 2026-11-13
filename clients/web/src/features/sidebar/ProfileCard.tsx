@@ -203,7 +203,9 @@ export function ProfileCard({
           // Menu measure is the menu's (pane-sm), not the user's status
           // sentence. Without a cap the head's wrap never fires and an
           // 80-char status pushes the panel past a 390 viewport (#1889 R2-B1).
-          className="max-w-pane-sm"
+          // #5785: 워크스페이스 줄 넷이 더해져 메뉴가 길어졌다. 낮은 창(200% 확대 640×400)에서 위쪽
+          // 「내 상태」가 창 밖으로 잘리던 것을 판 안 스크롤로 받는다(컨텍스트 메뉴와 같은 유틸, #3963).
+          className="max-w-pane-sm max-h-menu-available overscroll-contain scrollbar-visible"
           onCloseAutoFocus={(event) => {
             // The add-workspace item hands the next layer a dialog. If this
             // menu yanks focus back to the card, Esc lands on the trigger and

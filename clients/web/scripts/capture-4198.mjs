@@ -210,6 +210,8 @@ const SCENES = [
       // 폰 폭에서는 「+」가 화면 밖 레일에 있어 DOM 클릭으로 연다(대화상자가 뜨는지는 이어서 기다린다).
       await opener.evaluate((el) => el.click());
       await page.getByTestId("add-workspace-dialog").waitFor({ timeout: 10_000 });
+      // #5785: 첫 화면은 두 카드다. 만들기 카드를 눌러 폼으로 들어간다.
+      await page.getByTestId("add-workspace-choose-create").click();
       await page.getByTestId("add-workspace-name").fill("디자인팀");
       await page.getByTestId("add-workspace-slug").fill("design-team");
       await page.getByTestId("add-workspace-submit").click();
@@ -435,6 +437,8 @@ async function sweep(browser, origin) {
       await opener.waitFor({ state: "attached", timeout: 10_000 });
       await opener.evaluate((el) => el.click());
       await page.getByTestId("add-workspace-dialog").waitFor({ timeout: 10_000 });
+      // #5785: 첫 화면은 두 카드다. 만들기 카드를 눌러 폼으로 들어간다.
+      await page.getByTestId("add-workspace-choose-create").click();
       await page.getByTestId("add-workspace-name").fill("디자인팀");
       await page.getByTestId("add-workspace-slug").fill("design-team");
       await page.getByTestId("add-workspace-submit").click();
@@ -493,6 +497,8 @@ async function shortViewports(browser, origin) {
       await opener.waitFor({ state: "attached", timeout: 10_000 });
       await opener.evaluate((el) => el.click());
       await page.getByTestId("add-workspace-dialog").waitFor({ timeout: 10_000 });
+      // #5785: 첫 화면은 두 카드다. 만들기 카드를 눌러 폼으로 들어간다.
+      await page.getByTestId("add-workspace-choose-create").click();
       await page.getByTestId("add-workspace-name").fill("디자인팀");
       await page.getByTestId("add-workspace-slug").fill("design-team");
       await page.getByTestId("add-workspace-submit").click();
