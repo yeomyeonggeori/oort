@@ -2,8 +2,13 @@ import { describe, expect, it } from "vitest";
 import { ApiError, uuidEq, type Channel, type RosterMember } from "../../lib/api";
 import { NetworkError } from "../../lib/http";
 import {
+  assignableWorkspaceRoles,
   canChangeWorkspaceRole,
   canIssuePasswordReset,
+  canSeeMemberManagement,
+  profileEmail,
+  roleChangeKind,
+  workspaceRoleLock,
   changeWorkspaceRoleErrorMessage,
   countLabel,
   dmAvailability,
@@ -153,6 +158,112 @@ describe("canChangeWorkspaceRole", () => {
       false
     );
     expect(canChangeWorkspaceRole("owner", DEMO.id, HERMES)).toBe(false);
+  });
+});
+
+// #5780: 역할 고르개의 선택지는 서버 사다리의 거울이다(`membership_lifecycle.rs` `require_can_manage`,
+// `workspace_authorization.rs` `can_change_role_of`·`can_grant_role`, 시험
+// `membership_lifecycle_conformance_pg.rs` 의 칸별 표). 보는 사람 × 대상 16칸을 서버가 쓰는 대로 적는다.
+describe("assignableWorkspaceRoles", () => {
+  const VIEWER_ID = "00000000-0000-7000-8000-0000000000a1";
+  const TARGET_ID = "00000000-0000-7000-8000-0000000000b2";
+  const target = (role: RosterMember["role"], over: Partial<RosterMember> = {}) =>
+    member({ id: TARGET_ID, role, ...over });
+  type Role = "owner" | "admin" | "member" | "guest";
+  const ALL: Role[] = ["owner", "admin", "member", "guest"];
+  const LADDER: ReadonlyArray<readonly [Role, Role, readonly Role[]]> = [
+    ["owner", "owner", []],
+    ["owner", "admin", ALL],
+    ["owner", "member", ALL],
+    ["owner", "guest", ALL],
+    ["admin", "owner", []],
+    ["admin", "admin", []],
+    ["admin", "member", ["member", "guest"]],
+    ["admin", "guest", ["member", "guest"]],
+    ["member", "owner", []],
+    ["member", "admin", []],
+    ["member", "member", []],
+    ["member", "guest", []],
+    ["guest", "owner", []],
+    ["guest", "admin", []],
+    ["guest", "member", []],
+    ["guest", "guest", []],
+  ];
+
+  it.each(LADDER)("%s 가 %s 를 보면 %j", (viewer, targetRole, expected) => {
+    expect(assignableWorkspaceRoles(viewer, VIEWER_ID, target(targetRole))).toEqual(expected);
+    expect(canChangeWorkspaceRole(viewer, VIEWER_ID, target(targetRole))).toBe(expected.length > 0);
+  });
+
+  it("자기 자신·에이전트·역할 모르는 보는 사람에게는 비어 있다", () => {
+    expect(assignableWorkspaceRoles("owner", TARGET_ID, target("member"))).toEqual([]);
+    // UUID 대소문자가 달라도 자기 자신이다.
+    expect(assignableWorkspaceRoles("owner", TARGET_ID.toUpperCase(), target("member"))).toEqual([]);
+    expect(assignableWorkspaceRoles("owner", VIEWER_ID, target("member", { kind: "agent" }))).toEqual([]);
+    expect(assignableWorkspaceRoles(undefined, VIEWER_ID, target("member"))).toEqual([]);
+  });
+
+  it("역할을 모르는 대상은 소유자에게만 열린다(관리자에게 모름이 열림이 되지 않는다)", () => {
+    expect(assignableWorkspaceRoles("owner", VIEWER_ID, target(undefined))).toEqual(ALL);
+    expect(assignableWorkspaceRoles("admin", VIEWER_ID, target(undefined))).toEqual([]);
+  });
+});
+
+describe("canSeeMemberManagement · workspaceRoleLock", () => {
+  const VIEWER_ID = "00000000-0000-7000-8000-0000000000a1";
+  const TARGET_ID = "00000000-0000-7000-8000-0000000000b2";
+  const target = (role: RosterMember["role"], over: Partial<RosterMember> = {}) =>
+    member({ id: TARGET_ID, role, ...over });
+
+  it("관리 묶음은 운영자가 자기 아닌 사람을 볼 때만 선다", () => {
+    expect(canSeeMemberManagement("owner", VIEWER_ID, target("owner"))).toBe(true);
+    expect(canSeeMemberManagement("admin", VIEWER_ID, target("owner"))).toBe(true);
+    expect(canSeeMemberManagement("member", VIEWER_ID, target("guest"))).toBe(false);
+    expect(canSeeMemberManagement("guest", VIEWER_ID, target("guest"))).toBe(false);
+    expect(canSeeMemberManagement("owner", TARGET_ID, target("owner"))).toBe(false);
+    expect(canSeeMemberManagement("owner", VIEWER_ID, target("member", { kind: "agent" }))).toBe(false);
+  });
+
+  it("글로만 보이는 역할에는 까닭이 있고, 고를 수 있으면 까닭이 없다", () => {
+    expect(workspaceRoleLock("owner", VIEWER_ID, target("owner"))).toBe("ownerPeer");
+    expect(workspaceRoleLock("admin", VIEWER_ID, target("owner"))).toBe("adminCeiling");
+    expect(workspaceRoleLock("admin", VIEWER_ID, target("admin"))).toBe("adminCeiling");
+    expect(workspaceRoleLock("owner", VIEWER_ID, target("admin"))).toBeNull();
+    expect(workspaceRoleLock("admin", VIEWER_ID, target("member"))).toBeNull();
+    expect(workspaceRoleLock("member", VIEWER_ID, target("owner"))).toBeNull();
+    // 역할을 모르면 까닭을 지어내지 않는다.
+    expect(workspaceRoleLock("admin", VIEWER_ID, target(undefined))).toBeNull();
+  });
+});
+
+describe("roleChangeKind", () => {
+  it("소유자 승격·관리자 부여·관리자 회수·그 밖을 가른다", () => {
+    expect(roleChangeKind("admin", "owner")).toBe("promoteOwner");
+    expect(roleChangeKind("member", "owner")).toBe("promoteOwner");
+    expect(roleChangeKind("member", "admin")).toBe("grantAdmin");
+    expect(roleChangeKind("admin", "member")).toBe("revokeAdmin");
+    expect(roleChangeKind("admin", "guest")).toBe("revokeAdmin");
+    expect(roleChangeKind("member", "guest")).toBe("plain");
+    expect(roleChangeKind("guest", "member")).toBe("plain");
+    expect(roleChangeKind(undefined, "member")).toBe("plain");
+  });
+});
+
+describe("profileEmail", () => {
+  const person = member({ id: "00000000-0000-7000-8000-0000000000c3", email: " seoyeon@example.com " });
+
+  it("게스트가 아닌 사람이 보면 사람의 이메일이 보인다", () => {
+    for (const viewer of ["owner", "admin", "member"] as const) {
+      expect(profileEmail(viewer, person)).toBe("seoyeon@example.com");
+    }
+  });
+
+  it("게스트·역할 모르는 보는 사람·에이전트·빈 값에는 없다", () => {
+    expect(profileEmail("guest", person)).toBeNull();
+    expect(profileEmail(undefined, person)).toBeNull();
+    expect(profileEmail("owner", { ...person, kind: "agent" })).toBeNull();
+    expect(profileEmail("owner", { ...person, email: "  " })).toBeNull();
+    expect(profileEmail("owner", { ...person, email: undefined })).toBeNull();
   });
 });
 

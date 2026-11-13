@@ -13,10 +13,10 @@ import { useCustomStatusView } from "@/features/sidebar/useCustomStatusView";
 import { CHIP_CLASS } from "@/features/common/chip";
 import {
   memberRowLabel,
+  profileEmail,
   roleLabel,
   statusLabel,
 } from "@momo/core/features/directory/model";
-import { visibleEmail } from "./memberListModel";
 
 // =============================================================================
 // One directory row (parity G-3), drawn with the shared list row (#5782,
@@ -25,7 +25,7 @@ import { visibleEmail } from "./memberListModel";
 //   title     name (agent ink for an agent) · 「나」 on my own row · the custom
 //             status emoji · a 초대됨/정지됨/삭제됨 chip when the member is not active
 //   subtitle  people: 「@핸들 · 이메일」 (the email only when this viewer may see
-//             it, `visibleEmail`) / agents: 「@핸들 · ○○ 님이 관리」
+//             it, `profileEmail`) / agents: 「@핸들 · ○○ 님이 관리」
 //   trailing  people: the role chip / agents: the liveness chip (ADR-0200 D4)
 //
 // Exactly two layers, always: the row's height is the two line boxes, so the
@@ -66,7 +66,7 @@ export function MemberRow({
   const isSelf = uuidEq(member.id, selfMemberId);
   const owner = isAgent ? memberFor(directory, member.ownerHumanId) : null;
   const viewerRole = memberFor(directory, selfMemberId)?.role;
-  const email = visibleEmail(viewerRole, member);
+  const email = profileEmail(viewerRole, member);
   const role = roleLabel(member, labels);
   const status = statusLabel(member);
   const { visible: custom, nowMs } = useCustomStatusView(member);
