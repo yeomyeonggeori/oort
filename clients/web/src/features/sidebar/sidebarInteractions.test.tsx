@@ -26,17 +26,12 @@ import type { Channel } from "@momo/core/lib/api";
 import {
   deriveSidebarSections,
   emptySidebarPrefs,
-  SIDEBAR_SORT_ALPHA,
-  SIDEBAR_SORT_MANUAL,
   SIDEBAR_STARRED_TOUCH_HINT,
   type SidebarPrefs,
 } from "@momo/core/features/sidebar/sidebarSections";
 import { SidebarRow, SidebarSection } from "./SidebarRow";
 import { SidebarRowContextMenu } from "./SidebarRowContextMenu";
-import {
-  SidebarSectionMenu,
-  SidebarSortMenu,
-} from "./SidebarSectionDialogs";
+import { SidebarSectionMenu } from "./SidebarSectionDialogs";
 import { roveSidebarRows } from "./sidebarRoving";
 import {
   reloadSidebarSectionPreferenceForTest,
@@ -203,7 +198,6 @@ interface Handle {
   create: (name: string) => void;
   move: (channelId: string, sectionId: string | null) => void;
   toggleStar: (channelId: string) => void;
-  setSortMode: (mode: typeof SIDEBAR_SORT_ALPHA | typeof SIDEBAR_SORT_MANUAL) => void;
   moveSection: (id: string, delta: -1 | 1) => void;
   dragging: () => boolean;
 }
@@ -246,7 +240,6 @@ function Harness({ enabled = true }: { enabled?: boolean }) {
     create: prefs.createSection,
     move: prefs.moveChannel,
     toggleStar: prefs.toggleStar,
-    setSortMode: prefs.setSortMode,
     moveSection: prefs.moveSection,
     dragging: () => drag.subject !== null,
   };
@@ -359,13 +352,7 @@ function Harness({ enabled = true }: { enabled?: boolean }) {
                   },
                   onOpenChange: () => undefined,
                 })
-              : canEdit && section.kind === "channels"
-                ? createElement(SidebarSortMenu, {
-                    mode: prefs.sortMode,
-                    onChange: prefs.setSortMode,
-                    onOpenChange: () => undefined,
-                  })
-                : undefined,
+              : undefined,
           children: rowsOf(section),
         })
       )
@@ -450,16 +437,6 @@ function openSectionMenu(sectionId: string): void {
   hoverHeader(sectionId);
   act(() => {
     menuItem(`section-menu-${sectionId}`).dispatchEvent(
-      new KeyboardEvent("keydown", { key: "Enter", bubbles: true })
-    );
-  });
-}
-
-/** 정렬 문. 기본 「채널」 머리글에 살고 섹션 ⋮ 와 다른 컨트롤이다(R1 M-2). */
-function openSortMenu(): void {
-  hoverHeader("channels");
-  act(() => {
-    menuItem("sidebar-sort-menu").dispatchEvent(
       new KeyboardEvent("keydown", { key: "Enter", bubbles: true })
     );
   });
@@ -615,48 +592,29 @@ describe("red proof 1 — 별표", () => {
   });
 });
 
-describe("red proof 2 — 정렬", () => {
-  it("렌더 순서만 바뀌고 저장된 배치는 그대로다", async () => {
+describe("red proof 2 — 정렬 단추는 없고 차례는 늘 끌어서 정한 것이다 (#5775)", () => {
+  it("「가나다」를 저장해 둔 계정도 끌어서 정한 차례로 보이고, 값은 서버로 왕복만 한다", async () => {
     useSidebarFakeTimers();
+    fetchSidebarPrefs.mockResolvedValue({
+      ...emptySidebarPrefs(),
+      sections: [{ id: "sec-1", name: "나", order: 0, channelIds: [GENERAL, RANDOM] }],
+      sectionSort: "alpha",
+    } satisfies SidebarPrefs);
     await mount();
-    await withSection();
-    await act(async () => handle?.move(GENERAL, "sec-1"));
-    await act(async () => handle?.move(RANDOM, "sec-1"));
+    // 가나다였다면 [RANDOM, GENERAL] 이다.
     expect(channelsIn("sec-1")).toEqual([GENERAL, RANDOM]);
 
-    await act(async () => handle?.setSortMode(SIDEBAR_SORT_ALPHA));
-    // 「가나다」: 화면이 다시 선다.
-    expect(channelsIn("sec-1")).toEqual([RANDOM, GENERAL]);
-    // 그런데 payload 의 차례는 사람이 만든 그대로다.
-    expect(handle?.prefs().sections[0].channelIds).toEqual([GENERAL, RANDOM]);
-
-    await act(async () => handle?.setSortMode(SIDEBAR_SORT_MANUAL));
-    expect(channelsIn("sec-1")).toEqual([GENERAL, RANDOM]);
+    await act(async () => handle?.toggleStar(RELEASE));
     await settleSave();
-    // 마지막 상태 하나만 나가고, 그 상태에는 정렬 칸이 없다(기본값은 적지 않는다).
     expect(putSidebarPrefs).toHaveBeenCalledTimes(1);
-    const saved = putSidebarPrefs.mock.calls[0][1] as SidebarPrefs;
-    expect(saved.sectionSort).toBeUndefined();
-    expect(saved.sections[0].channelIds).toEqual([GENERAL, RANDOM]);
+    expect((putSidebarPrefs.mock.calls[0][1] as SidebarPrefs).sectionSort).toBe("alpha");
   });
 
-  it("정렬의 문은 기본 「채널」 헤더 하나이고, 지금 값이 체크로 들린다", async () => {
+  it("기본 「채널」 머리글에 정렬 단추가 없다", async () => {
     useSidebarFakeTimers();
     const host = await mount();
-    // 커스텀 섹션이 하나도 없어도 서 있다 — 섹션을 만들어야 열리는 설정이 아니다.
     hoverHeader("channels");
-    // 문이 자기 글리프·자기 이름을 갖는다 (R1 M-2): 섹션 ⋮ 가 아니다.
-    expect(host.querySelector('[data-testid="sidebar-sort-menu"]')).not.toBeNull();
-    expect(host.querySelector('[data-testid="section-menu-channels"]')).toBeNull();
-    openSortMenu();
-    expect(menuItem("sidebar-sort-label").textContent).toBe("채널 정렬");
-    const alpha = menuItem("sidebar-sort-alpha");
-    const manual = menuItem("sidebar-sort-manual");
-    expect(manual.getAttribute("aria-checked")).toBe("true");
-    expect(alpha.getAttribute("aria-checked")).toBe("false");
-
-    act(() => alpha.click());
-    expect(channelsIn("channels")).toEqual([RELEASE, RANDOM, GENERAL]);
+    expect(host.querySelector('[data-testid="sidebar-sort-menu"]')).toBeNull();
   });
 });
 
@@ -1116,7 +1074,7 @@ describe("R1 M-4 — 2초 창이 새로고침을 삼키지 않는다", () => {
     useSidebarFakeTimers();
     await mount();
     await act(async () => handle?.toggleStar(RELEASE));
-    await act(async () => handle?.setSortMode(SIDEBAR_SORT_ALPHA));
+    await act(async () => handle?.toggleStar(GENERAL));
     // 아직 디바운스 창 안이다.
     await act(async () => {
       vi.advanceTimersByTime(1200);
@@ -1136,8 +1094,7 @@ describe("R1 M-4 — 2초 창이 새로고침을 삼키지 않는다", () => {
 
     expect(putSidebarPrefs).toHaveBeenCalledTimes(1);
     const saved = putSidebarPrefs.mock.calls[0][1] as SidebarPrefs;
-    expect(saved.starredChannelIds).toEqual([RELEASE]);
-    expect(saved.sectionSort).toBe(SIDEBAR_SORT_ALPHA);
+    expect(saved.starredChannelIds).toEqual([RELEASE, GENERAL]);
 
     // 남은 타이머가 같은 payload 를 한 번 더 보내지 않는다.
     await act(async () => {
@@ -1206,10 +1163,9 @@ describe("하네스와 출하 배선", () => {
     expect(source).toContain("sidebarPrefs.toggleStar(");
     expect(source).toContain("sidebarPrefs.reorderSection(");
     expect(source).toContain("sidebarPrefs.moveSection(");
-    expect(source).toContain("sidebarPrefs.setSortMode");
-    // R1 M-2: 정렬은 자기 문에 산다(섹션 ⋮ 가 아니다).
-    expect(source).toContain("<SidebarSortMenu");
-    expect(source).not.toMatch(/SidebarSectionMenu[\s\S]{0,200}sort=\{/);
+    // #5775: 정렬 단추는 없다 — 쓰기 경로도 마운트도 남지 않는다.
+    expect(source).not.toContain("setSortMode");
+    expect(source).not.toContain("SidebarSortMenu");
     // R1 M-1 · R2-2: 터치의 별표 섹션이 사정을 말한다 — **조건까지** 읽는다.
     //
     // 앞 회전의 단정은 `toContain("SIDEBAR_STARRED_TOUCH_HINT")` 하나였고, 그

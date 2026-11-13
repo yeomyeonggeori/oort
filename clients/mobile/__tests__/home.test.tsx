@@ -1145,7 +1145,7 @@ describe('홈 — 닫은 대화·나간 멤버와의 대화 (#4367)', () => {
   /** DM 섹션 ⋯ 가 내놓는 항목들(눌러서 고르지 않고 취소한다). */
   const dmMenu = () => chooseFromMenu('dms', '취소');
   const hasClosedDoor = () => dmMenu().includes(DM_CLOSED_LIST_LABEL);
-  /** 숨은 DM 이 「닫은 대화」 시트의 문으로 잡힐 때까지(= 판정이 자리 잡을 때까지) 기다린다. */
+  /** 숨은 DM 이 「숨긴 대화」 시트의 문으로 잡힐 때까지(= 판정이 자리 잡을 때까지) 기다린다. */
   const settledHidden = () => waitFor(() => expect(hasClosedDoor()).toBe(true));
   const openClosedSheet = () => chooseFromMenu('dms', DM_CLOSED_LIST_LABEL);
   /** 닫기·다시 열기 쓰기(`…/closure`)만 센다: 같은 앱의 다른 쓰기(푸시 토큰 등)는 이 시험의 일이 아니다. */
@@ -1190,7 +1190,7 @@ describe('홈 — 닫은 대화·나간 멤버와의 대화 (#4367)', () => {
     expect(projectionCalls(fetchMock)).toBeGreaterThan(before);
   };
 
-  it('나간 멤버 행은 목록에 없고, 접힌 줄도 없다: 문은 ⋯ 의 「닫은 대화」다', async () => {
+  it('나간 멤버 행은 목록에 없고, 접힌 줄도 없다: 문은 ⋯ 의 「숨긴 대화」다', async () => {
     await mountHome({channels: withGone});
     await settledHidden();
     expect(screen.queryByTestId(GONE_ROW)).toBeNull();
@@ -1199,7 +1199,7 @@ describe('홈 — 닫은 대화·나간 멤버와의 대화 (#4367)', () => {
     expect(dmMenu()).toEqual([FILTER_ACTION, AGENT_LIST_ACTION, DM_CLOSED_LIST_LABEL, '취소']);
   });
 
-  it('숨은 DM 이 없으면 ⋯ 에 「닫은 대화」가 서지 않는다 (항목이 없는 문은 문이 아니다)', async () => {
+  it('숨은 DM 이 없으면 ⋯ 에 「숨긴 대화」가 서지 않는다 (항목이 없는 문은 문이 아니다)', async () => {
     await mountHome();
     expect(dmMenu()).toEqual([FILTER_ACTION, AGENT_LIST_ACTION, '취소']);
   });
@@ -1212,9 +1212,9 @@ describe('홈 — 닫은 대화·나간 멤버와의 대화 (#4367)', () => {
     expect(item).toHaveTextContent(/나간 멤버/);
     expect(item).toHaveTextContent(/상대가 나갔고 안 읽은 메시지가 없어요/);
     const reopen = screen.getByTestId('dm-closed-reopen-ch-dm-gone');
-    // 대화 하나는 행 하나이고 행 전체가 동사다(#4458): 동사는 오른쪽 값이다. 「열기」와 「다시 열기」는 다른 동사다.
+    // 대화 하나는 행 하나이고 행 전체가 동사다(#4458): 동사는 오른쪽 값이다. 「열기」와 「다시 보이기」는 다른 동사다.
     expect(within(reopen).getByText('열기')).toBeTruthy();
-    expect(within(reopen).queryByText('다시 열기')).toBeNull();
+    expect(within(reopen).queryByText('다시 보이기')).toBeNull();
     expect(reopen.props.accessibilityLabel).toBe('나간 멤버, 열기');
     fireEvent.press(reopen);
     await waitFor(() => expect(screen.getByTestId('conversation-pane')).toBeTruthy());
@@ -1420,7 +1420,7 @@ describe('홈 — 닫은 대화·나간 멤버와의 대화 (#4367)', () => {
     expect(notice).toHaveTextContent(/나간 멤버와의 대화도 접지 못했어요\./);
     expect(notice).not.toHaveTextContent(/습니다/);
     expect(notice).not.toHaveTextContent(/목록은 그대로/);
-    // 접지 않는다: 나간 멤버 DM 이 목록에 있고 「닫은 대화」 문은 없다.
+    // 접지 않는다: 나간 멤버 DM 이 목록에 있고 「숨긴 대화」 문은 없다.
     expect(screen.getByTestId(GONE_ROW)).toBeTruthy();
     expect(dmMenu()).not.toContain(DM_CLOSED_LIST_LABEL);
   });
@@ -1470,7 +1470,7 @@ describe('홈 — 닫은 대화·나간 멤버와의 대화 (#4367)', () => {
     serverRow('ch-dm-human', 4, 4, humanClosedAt),
   ];
 
-  it('내가 닫은 DM(closed_at_seq ≥ 읽을 seq)은 목록에서 사라지고 「닫은 대화」 시트에 「내가 닫았어요」로 선다', async () => {
+  it('내가 닫은 DM(closed_at_seq ≥ 읽을 seq)은 목록에서 사라지고 「숨긴 대화」 시트에 「내가 숨겼어요」로 선다', async () => {
     const fetchMock = await mountHome({channels: withGone, readStates: serverRows(4)});
     await settledHidden();
     expect(screen.queryByTestId(HUMAN_ROW)).toBeNull();
@@ -1478,11 +1478,11 @@ describe('홈 — 닫은 대화·나간 멤버와의 대화 (#4367)', () => {
     expect(goneMessageCalls(fetchMock)).toEqual([]);
     openClosedSheet();
     const item = await screen.findByTestId('dm-closed-item-ch-dm-human');
-    expect(item).toHaveTextContent(/내가 닫았어요/);
-    expect(within(screen.getByTestId('dm-closed-reopen-ch-dm-human')).getByText('다시 열기')).toBeTruthy();
+    expect(item).toHaveTextContent(/내가 숨겼어요/);
+    expect(within(screen.getByTestId('dm-closed-reopen-ch-dm-human')).getByText('다시 보이기')).toBeTruthy();
     expect(within(screen.getByTestId('dm-closed-reopen-ch-dm-human')).queryByText('열기')).toBeNull();
     expect(screen.getByTestId('dm-closed-hint')).toHaveTextContent(
-      /새 메시지가 오면 닫은 대화는 사이드바로 돌아와요\./,
+      /새 메시지가 오면 숨긴 대화는 사이드바로 돌아와요\./,
     );
   });
 
@@ -1527,7 +1527,7 @@ describe('홈 — 닫은 대화·나간 멤버와의 대화 (#4367)', () => {
     expect(screen.getByTestId(HUMAN_ROW)).toBeTruthy();
   });
 
-  it('「다시 열기」: 서버의 닫힘을 풀고(DELETE …/closure 한 번) 그 대화를 연다', async () => {
+  it('「다시 보이기」: 서버의 닫힘을 풀고(DELETE …/closure 한 번) 그 대화를 연다', async () => {
     const routes: Routes = {channels: withGone, readStates: serverRows(4)};
     await mountHome(routes);
     await settledHidden();
@@ -1551,7 +1551,7 @@ describe('홈 — 닫은 대화·나간 멤버와의 대화 (#4367)', () => {
     expect(screen.queryByTestId('dm-closed-sheet')).toBeNull();
   });
 
-  it('「다시 열기」가 거절되면 시트가 그대로 서서 이유를 말하고, 대화는 열리지 않는다', async () => {
+  it('「다시 보이기」가 거절되면 시트가 그대로 서서 이유를 말하고, 대화는 열리지 않는다', async () => {
     await mountHome({channels: withGone, readStates: serverRows(4)});
     await settledHidden();
     const inner = globalThis.fetch as unknown as (url: string, init?: {method?: string}) => Promise<Response>;
@@ -1567,7 +1567,7 @@ describe('홈 — 닫은 대화·나간 멤버와의 대화 (#4367)', () => {
     expect(screen.queryByTestId('conversation-pane')).toBeNull();
   });
 
-  it('「다시 열기」 답을 기다리는 동안 같은 버튼·다른 행의 탭은 대화를 열지 않는다 (이중 탭 방지)', async () => {
+  it('「다시 보이기」 답을 기다리는 동안 같은 버튼·다른 행의 탭은 대화를 열지 않는다 (이중 탭 방지)', async () => {
     await mountHome({channels: withGone, readStates: serverRows(4)});
     await settledHidden();
     const inner = globalThis.fetch as unknown as (url: string, init?: {method?: string}) => Promise<Response>;
@@ -1606,7 +1606,7 @@ describe('홈 — 닫은 대화·나간 멤버와의 대화 (#4367)', () => {
     await screen.findByTestId('dm-closed-item-ch-dm-human');
     routes.readStates = serverRows(null);
     await reprojectReadStates(fetchMock);
-    expect(screen.getByTestId('dm-closed-empty')).toHaveTextContent(/닫은 대화가 없어요\./);
+    expect(screen.getByTestId('dm-closed-empty')).toHaveTextContent(/숨긴 대화가 없어요\./);
   });
 
   it('닫은 DM 뿐이고 채널이 없어도 DM 섹션 머리가 서서 시트로 돌아갈 길이 있다', async () => {
@@ -1616,7 +1616,7 @@ describe('홈 — 닫은 대화·나간 멤버와의 대화 (#4367)', () => {
     expect(screen.queryByTestId(HUMAN_ROW)).toBeNull();
   });
 
-  it('대화 하나는 묶음 카드의 행 하나이고, 맨 아래 「닫기」 줄·외곽선 「다시 열기」 단추는 없다 (#4458)', async () => {
+  it('대화 하나는 묶음 카드의 행 하나이고, 맨 아래 「닫기」 줄·외곽선 「다시 보이기」 단추는 없다 (#4458)', async () => {
     await mountHome({channels: withGone, readStates: serverRows(4)});
     await settledHidden();
     openClosedSheet();
@@ -1645,9 +1645,9 @@ describe('홈 — 닫은 대화·나간 멤버와의 대화 (#4367)', () => {
     // 부모(사이드바)가 시트를 걷는다 — 시트가 사라졌으면 「닫아 달라」고 한 것이다.
     closedCount: () => (screen.queryByTestId('dm-closed-sheet') === null ? 1 : 0),
     closeTestID: 'dm-closed-close',
-    closeLabel: '닫은 대화 닫기',
+    closeLabel: '숨긴 대화 목록 닫기',
     scrimTestID: 'dm-closed-backdrop',
-    scrimLabel: '닫은 대화 닫기',
+    scrimLabel: '숨긴 대화 목록 닫기',
   });
 });
 

@@ -7,7 +7,7 @@ import {applyClosureToReadStates, workspaceKeys} from '../workspace/queries';
 import type {DmClosedEntry} from './dmVerdicts';
 
 // =============================================================================
-// 「닫은 대화」 시트의 「다시 열기」 (ADR-0177 증보 D7·D8·D11, #4367). 웹 `reopenClosedDm` 의 폰판이다.
+// 「숨긴 대화」 시트의 「다시 보이기」 (ADR-0177 증보 D7·D8·D11, #4367). 웹 `reopenClosedDm` 의 폰판이다.
 //
 //   * 내가 닫은 대화(`closed`): 서버의 닫힘을 푼다(`DELETE …/closure`) - 투영 행의 `closedAtSeq` 가 숫자일 때만. 쓸 것이 없으면
 //     왕복을 만들지 않는다. 풀린 뒤에 그 대화를 연다.
