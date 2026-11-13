@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Link, Navigate, useSearchParams } from "react-router-dom";
 import { ChevronRight } from "lucide-react";
 import { useSession } from "@/app/session";
@@ -141,12 +141,44 @@ const EMPTY_WITH_LOCAL_WAITING = {
   detail: "위의 「이 기기의 칸」이 내 결정을 기다려요. 누르면 그 칸으로 가요.",
 };
 
+// 목록 칸 폭 22rem(352). 아래 목록 칸의 `w-[22rem]`과 같은 값이다.
+const INBOX_LIST_PX = 352;
+// 상세가 두 칸일 때 지켜야 하는 폭 = `--spacing-pane-sm`(192, 「그 안의 내용이 아직 목록으로 읽히는 폭」).
+// tokens.css의 「부차 표면이 양보하는 자기 바닥」 문법을 그대로 쓴다: 이 자리의 폭이 목록 + 이 값에 못 미치면
+// 폰 폭과 같은 한 칸(목록 ↔ 상세)이 된다. 값은 화면 폭이 아니라 **인박스 자리의 폭**에 건다 — 같은 창 폭도 사이드바를
+// 펴면 자리가 324 줄어 상세가 36px로 눌렸다(#5754). 900×600 · 사이드바 펼침(자리 576, 상세 224)은 두 칸 그대로다.
+const INBOX_DETAIL_FLOOR_PX = 192;
+const INBOX_SPLIT_MIN_PX = INBOX_LIST_PX + INBOX_DETAIL_FLOOR_PX;
+
+/** 이 상자의 폭이 두 칸에 모자란가. 폭을 모르면(0 · ResizeObserver 없음) 모자라다고 하지 않는다. */
+function useRouteTooNarrow(ref: React.RefObject<HTMLElement | null>): boolean {
+  const [narrow, setNarrow] = useState(false);
+  useLayoutEffect(() => {
+    const node = ref.current;
+    if (node === null) return;
+    const read = () => {
+      const width = node.getBoundingClientRect().width;
+      if (width > 0) setNarrow(width < INBOX_SPLIT_MIN_PX);
+    };
+    read();
+    if (typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(read);
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [ref]);
+  return narrow;
+}
+
 export function InboxRoute() {
   const { session } = useSession();
   const needs = useNeedsMe();
   const localWaiting = needs.panes;
   const [params, setParams] = useSearchParams();
-  const isMobile = useIsMobileShell();
+  const isPhoneShell = useIsMobileShell();
+  const routeRef = useRef<HTMLDivElement | null>(null);
+  const routeTooNarrow = useRouteTooNarrow(routeRef);
+  // 한 칸(목록 ↔ 상세): 폰 폭 셸이거나 이 자리가 두 칸에 모자랄 때.
+  const isMobile = isPhoneShell || routeTooNarrow;
   const tasksProvided = isSurfaceProvided("approvals");
   // 「답글」은 서버 투영에만 있는 종류다. 구 서버에서는 항상 빈 탭이 되므로 세우지 않는다.
   const rawFilter = params.get("filter");
@@ -393,7 +425,7 @@ export function InboxRoute() {
         (mailbox.serverUnreadCount ?? 0) > 0));
 
   return (
-    <div className="flex min-h-0 min-w-0 flex-1 flex-col" data-testid="inbox-route">
+    <div ref={routeRef} className="flex min-h-0 min-w-0 flex-1 flex-col" data-testid="inbox-route">
       <header className="flex flex-wrap items-center justify-between gap-3 border-b border-line px-4 py-2">
         <div className="flex min-w-0 items-center gap-2">
           <SidebarDrawerToggle />
