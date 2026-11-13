@@ -344,6 +344,26 @@ describe("고르면 앱 전체가 바뀐다 (AC 3)", () => {
     expect(getAppearance().scheme).toBe("system");
   });
 
+  it("사람이 고르면 고른 타일로 따라간다, 색 모드가 테마를 옮긴 때는 따라가지 않는다 (검수 r1 Blocker: 방향키로 고른 카드가 격자 밖으로 나감)", async () => {
+    const host = await mountSection();
+    const seen: string[] = [];
+    const original = Element.prototype.scrollIntoView;
+    Element.prototype.scrollIntoView = function scrollIntoView(this: Element) {
+      seen.push(this.querySelector("input")?.getAttribute("value") ?? "?");
+    };
+    try {
+      // 라디오의 change는 방향키로 옮길 때도 같은 길로 온다(브라우저가 checked를 옮기고 click을 낸다).
+      click(radio(host, tileTestId("catalog:github")));
+      expect(seen).toEqual(["catalog:github"]);
+      // 색 모드 변경은 사람이 타일을 고른 것이 아니다: 격자 안쪽만 재고 페이지는 따라가지 않는다.
+      change({ scheme: "dark" });
+      change({ scheme: "light" });
+      expect(seen).toEqual(["catalog:github"]);
+    } finally {
+      Element.prototype.scrollIntoView = original;
+    }
+  });
+
   it("다크 단독 테마를 다크 목록에서 고르면 색 모드는 다크 그대로이고 안내는 없다 (이미 그 모드다)", async () => {
     updateAppearance({ scheme: "dark" });
     const host = await mountSection();
