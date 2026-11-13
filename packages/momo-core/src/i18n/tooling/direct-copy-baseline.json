@@ -658,15 +658,23 @@
     "packages/momo-core/src/lib/wire.ts": {"ko": 1, "en": 0}
   },
   "lowered": {
+    "clients/mobile/src/shell/NewChannelSheet.tsx": {"ko": 13, "en": 1},
     "clients/web/src/features/channels/ChannelContextControls.tsx": {"ko": 19, "en": 0},
+    "clients/web/src/features/channels/CreateChannelDialog.tsx": {"ko": 13, "en": 1},
+    "clients/web/src/features/directory/DirectoryRoute.tsx": {"ko": 0, "en": 0},
+    "clients/web/src/features/directory/MemberProfileDialog.tsx": {"ko": 0, "en": 0},
+    "clients/web/src/features/directory/MemberRow.tsx": {"ko": 0, "en": 0},
+    "clients/web/src/features/directory/NewDmDialog.tsx": {"ko": 0, "en": 0},
     "clients/web/src/features/inbox/LocalPaneInbox.tsx": {"ko": 1, "en": 0},
     "clients/web/src/features/settings/appearance/ThemeGallery.tsx": {"ko": 4, "en": 0},
+    "clients/web/src/features/sidebar/Sidebar.tsx": {"ko": 18, "en": 1},
     "clients/web/src/features/sidebar/SidebarDestinations.tsx": {"ko": 9, "en": 0},
     "clients/web/src/features/sidebar/WorkspaceRail.tsx": {"ko": 10, "en": 0},
     "clients/web/src/features/updates/UpdateSection.tsx": {"ko": 33, "en": 0},
     "clients/web/src/features/work/WorkPanel.tsx": {"ko": 39, "en": 0},
     "clients/web/src/features/work/WorkSessionDetail.tsx": {"ko": 49, "en": 6},
     "clients/web/src/features/workConsole/WorkConsoleRoute.tsx": {"ko": 35, "en": 0},
+    "packages/momo-core/src/features/sidebar/sidebarSections.ts": {"ko": 32, "en": 0},
     "packages/momo-core/src/features/work/workSessionModel.ts": {"ko": 59, "en": 0}
   },
   "raises": [
@@ -679,6 +687,7 @@
     {"file": "packages/momo-core/src/features/workbench/permissionPreviewGate.ts", "issue": 5593, "ko": 2, "reason": "The refusal sentence that now ends with where to answer (a template around the runner name), shared by the phone and web permission cards in #5621; it waits for the P1 workbench namespace."},
     {"file": "packages/momo-core/src/features/workbench/workJobs.ts", "issue": 5593, "ko": 1, "reason": "The permission request hint on a session row (permissionHint) that #5621 added to the needs-reply section; it waits for the P1 workbench namespace."},
     {"file": "packages/momo-core/src/features/timeline/teamAiDelegationView.ts", "issue": 5375, "ko": 1, "reason": "The kind word 그림 that #5375 matches in the server's Korean delegation stage label (위임: {name} · 그림/검색) to start the Hermes wait line; it is parsed, not shown, and waits for P1 to carry the delegation kind as a field instead of a Korean word."},
-    {"file": "clients/web/src/features/settings/TeamAiRolesList.tsx", "issue": 5375, "cat": 1, "reason": "The Hermes help row's unavailable line that #5375 builds by joining teamAi.delegation.unavailable with the closed reason sentence; it waits for P1 to become one key with the reason as an argument."}
+    {"file": "clients/web/src/features/settings/TeamAiRolesList.tsx", "issue": 5375, "cat": 1, "reason": "The Hermes help row's unavailable line that #5375 builds by joining teamAi.delegation.unavailable with the closed reason sentence; it waits for P1 to become one key with the reason as an argument."},
+    {"file": "clients/web/src/design/Gallery.tsx", "issue": 5782, "ko": 5, "en": 2, "reason": "Design gallery specimen of the shared list row (fictional people, role chips, a caption); the gallery is a diagnostic surface that never ships and quotes product copy as fixtures."}
   ]
 }

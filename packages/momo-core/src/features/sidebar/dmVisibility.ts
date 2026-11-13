@@ -40,7 +40,7 @@ export type DmCounterpart = "present" | "gone" | "unknown";
 
 export type DmVisibility = "shown" | "hidden" | "hold";
 
-/** D8 표의 줄 번호. 「닫은 대화」 목록이 6(나간 상대)과 7(명시적 닫기)을 가르는 데도 쓴다. */
+/** D8 표의 줄 번호. 「숨긴 대화」 목록이 6(나간 상대)과 7(명시적 닫기)을 가르는 데도 쓴다. */
 export type DmVisibilityRule = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9;
 
 export interface DmVisibilityInput {
@@ -123,7 +123,7 @@ export function dmReadFacts(read: ReadState | undefined, serverCarriesClosure: b
 }
 
 /**
- * 이 DM 에 닫기를 내미는가 - 호버 X 와 행 메뉴 「대화 닫기」가 **같은 한 함수**를 읽는다(D7).
+ * 이 DM 에 닫기를 내미는가 - 호버 X 와 행 메뉴 「목록에서 숨기기」가 **같은 한 함수**를 읽는다(D7).
  *
  *   * 읽음 투영이 준비된 뒤에만: 닫을 때 `seenSeq` 로 적을 최신 seq 가 있어야 한다.
  *   * 안 읽은 메시지(멘션 포함)가 있으면 내밀지 않는다(2026-10-17 소유자 결정).
@@ -160,7 +160,7 @@ export function dmCloseBlockedByStar(input: {
 export const DM_CLOSE_STAR_FIRST_HINT = "별표를 먼저 빼요";
 
 /**
- * 「⋯ › 닫은 대화」 목록에 들어가는가(D11): 숨겨진 DM 중 명시적 닫기(7)와 나간 상대(6)만이다. 지금 사이드바에 보이는
+ * 「⋯ › 숨긴 대화」 목록에 들어가는가(D11): 숨겨진 DM 중 명시적 닫기(7)와 나간 상대(6)만이다. 지금 사이드바에 보이는
  * 대화는 넣지 않는다.
  */
 export function dmClosedListReason(rule: DmVisibilityRule): "closed" | "gone" | null {
@@ -169,32 +169,32 @@ export function dmClosedListReason(rule: DmVisibilityRule): "closed" | "gone" | 
   return null;
 }
 
-// ---- 「⋯ › 닫은 대화」 문구 (D11). 웹 다이얼로그와 폰 시트가 같은 낱말을 쓴다. ----------------------------------------
+// ---- 「⋯ › 숨긴 대화」 문구 (D11). 웹 다이얼로그와 폰 시트가 같은 낱말을 쓴다. ----------------------------------------
 
 /** DM 구역 머리의 「⋯」 메뉴 항목이자 목록의 제목. */
-export const DM_CLOSED_LIST_LABEL = "닫은 대화";
+export const DM_CLOSED_LIST_LABEL = "숨긴 대화";
 
-/** 목록 행의 동작. 닫은 DM 을 다시 연다. */
-export const DM_REOPEN_LABEL = "다시 열기";
+/** 목록 행의 동작. 숨긴 DM 을 다시 보이게 한다. */
+export const DM_REOPEN_LABEL = "다시 보이기";
 
-/** 목록 머리의 한 줄. 닫기는 지우기가 아니라는 것과 돌아오는 조건을 말한다. */
-export const DM_CLOSED_LIST_HINT = "새 메시지가 오면 닫은 대화는 사이드바로 돌아와요.";
+/** 목록 머리의 한 줄. 숨기기는 지우기가 아니라는 것과 돌아오는 조건을 말한다. */
+export const DM_CLOSED_LIST_HINT = "새 메시지가 오면 숨긴 대화는 사이드바로 돌아와요.";
 
 /**
  * 목록 행의 이유 줄. `closed` 는 내가 닫았다. `gone` 은 왜 숨었는지를 원인까지 말한다: 상대가 나갔고(원인) 안 읽은 메시지가 없다
  * (조건). 이름 줄의 「나간 멤버」만으로는 원인이 이름에 기대고, 이 줄이 그 뒤를 잇는다.
  */
 export function dmClosedReasonLabel(reason: "closed" | "gone"): string {
-  return reason === "closed" ? "내가 닫았어요" : "상대가 나갔고 안 읽은 메시지가 없어요";
+  return reason === "closed" ? "내가 숨겼어요" : "상대가 나갔고 안 읽은 메시지가 없어요";
 }
 
 /**
- * 행의 동작 낱말. 내가 닫은 대화는 「다시 열기」(닫힘을 푼다)이고, 나간 상대의 대화는 풀 닫힘이 없다 - 열려 있는 동안만 사이드바에 서고
- * 다 읽으면 다시 숨는다(D8). 그래서 「열기」다. 「다시 열기」는 돌아와 머문다는 약속처럼 읽힌다.
+ * 행의 동작 낱말. 내가 숨긴 대화는 「다시 보이기」(숨김을 푼다)이고, 나간 상대의 대화는 풀 닫힘이 없다 - 열려 있는 동안만 사이드바에 서고
+ * 다 읽으면 다시 숨는다(D8). 그래서 「열기」다. 「다시 보이기」는 돌아와 머문다는 약속처럼 읽힌다.
  */
 export function dmReopenLabelFor(reason: "closed" | "gone"): string {
   return reason === "closed" ? DM_REOPEN_LABEL : "열기";
 }
 
 /** 목록이 비었을 때 메뉴가 말하는 한 줄(항목이 없는 메뉴는 문이 아니다). */
-export const DM_CLOSED_LIST_EMPTY = "닫은 대화가 없어요.";
+export const DM_CLOSED_LIST_EMPTY = "숨긴 대화가 없어요.";

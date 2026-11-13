@@ -34,6 +34,7 @@ import {
   releaseReduceMotion,
   setReduceMotion as setSheetReduceMotion,
 } from './fixtures/sheetContract';
+import {captureNativeDismiss, finishNativeDismiss, isModalDown} from './fixtures/nativeDismiss';
 import {Avatar} from '../src/features/conversation/Avatar';
 import {
   darkPalette,
@@ -147,11 +148,27 @@ function installFetch(
     return row;
   });
   // 만든 뒤의 재조회는 끝나지 않는다 — 새 채널이 캐시에 있다면 그것은 재조회가 아니라
-  // 시트의 업서트(`upsertChannel`)가 넣은 것이다.
+  // 시트의 업서트(`upsertChannel`)가 넣은 것이다. 명부도 같다(#5784): 만든 내가 명부의 그 채널 멤버로
+  // 서 있다면 다시 읽기가 아니라 시트가 먼저 넣은 것이고, 추가한 사람이 「멤버」로 서면 낙관적 갱신이다.
   let createdOnce = false;
   const mock = jest.fn(async (url: string, init?: RequestInit) => {
     if (url.includes('/dms') && init?.method === 'POST') {
       return jsonResponse(200, {channel: DM_CHANNEL, created: true});
+    }
+    // 채널에 멤버 추가(#5784) — 멤버십 한 줄로 답한다.
+    const added = url.match(/\/channels\/([^/]+)\/members$/);
+    if (added && init?.method === 'POST') {
+      const body = JSON.parse(String(init.body)) as {memberId: string; role?: string};
+      return jsonResponse(201, {
+        membership: {
+          id: `m-${body.memberId}`,
+          workspaceId: WS,
+          channelId: added[1],
+          memberId: body.memberId,
+          role: body.role ?? 'member',
+          joinedAtMs: 0,
+        },
+      });
     }
     if (url.endsWith('/channels') && init?.method === 'POST') {
       // 서버가 끝내 답하지 않는다 — 만드는 중 상태를 붙든다.
@@ -185,7 +202,10 @@ function installFetch(
         ],
       });
     }
-    if (url.includes('/roster')) return jsonResponse(200, {members: roster});
+    if (url.includes('/roster')) {
+      if (createdOnce) return new Promise<Response>(() => {});
+      return jsonResponse(200, {members: roster});
+    }
     if (url.includes('/read-state')) {
       return jsonResponse(200, {
         read_states: [
@@ -569,12 +589,12 @@ describe('탭 셋과 + (ADR-0189 D1, #2750)', () => {
     expect(screen.getByTestId('new-channel-sheet')).toBeTruthy();
     // 규칙은 처음부터 칸 밑에 선다(웹과 같은 자리).
     expect(screen.getByTestId('new-channel-name-rule')).toHaveTextContent(
-      '영문, 숫자, 하이픈, 밑줄로 80자 이내, 처음과 끝은 영문이나 숫자. 대문자는 소문자로 저장됩니다.',
+      '영문, 숫자, 하이픈, 밑줄로 80자 이내, 처음과 끝은 영문이나 숫자. 대문자는 소문자로 저장돼요.',
     );
     // VoiceOver 는 같은 규칙을 힌트로 듣는다.
     expect(screen.getByTestId('new-channel-name')).toHaveProp(
       'accessibilityHint',
-      '영문, 숫자, 하이픈, 밑줄로 80자 이내, 처음과 끝은 영문이나 숫자. 대문자는 소문자로 저장됩니다.',
+      '영문, 숫자, 하이픈, 밑줄로 80자 이내, 처음과 끝은 영문이나 숫자. 대문자는 소문자로 저장돼요.',
     );
     // 빈 이름으로는 만들 수 없다.
     expect(screen.getByTestId('new-channel-create').props.accessibilityState).toMatchObject(
@@ -590,7 +610,16 @@ describe('탭 셋과 + (ADR-0189 D1, #2750)', () => {
     expect(
       screen.getByTestId('new-channel-kind-private').props.accessibilityState,
     ).toEqual({selected: true});
+    // iOS 가 새 채널 시트의 Modal 을 「다 내렸다」고 알릴 핸들러 — Modal 이 서 있을 때 잡는다(`fixtures/nativeDismiss`).
+    const signal = captureNativeDismiss('new-channel-sheet');
     fireEvent.press(screen.getByTestId('new-channel-create'));
+    // 「멤버 추가」는 다른 Modal 이다(#5417·검수 r1 B1). 슬라이드가 끝나 그릇이 새 채널 Modal 을 내린 순간(= iOS 의 신호 전)에 멤버 추가
+    // 시트가 이미 마운트돼 있으면 한 화면 갱신에 두 Modal 이 겹친 것이고, iOS 는 그 제시를 거절해 시트가 영영 안 뜬다(시뮬레이터 4/4).
+    await waitFor(() => expect(isModalDown('new-channel-sheet')).toBe(true), {timeout: 8000});
+    expect(
+      screen.queryByTestId('channel-member-add-sheet', {includeHiddenElements: true}),
+    ).toBeNull();
+    signal();
     await waitFor(() => expect(screen.getByTestId('conversation-pane')).toBeTruthy());
     const post = fetchMock.mock.calls.find(
       ([url, init]) =>
@@ -604,6 +633,63 @@ describe('탭 셋과 + (ADR-0189 D1, #2750)', () => {
     // 새 채널이 목록 캐시에 바로 들어간다.
     const cached = queryClient?.getQueryData<Array<{id: string}>>(['channels', WS]);
     expect(cached?.some(channel => channel.id === 'ch-new')).toBe(true);
+
+    // 비공개 채널이라 새 채널 안에서 「멤버 추가」 시트가 이어서 선다(#5784). 만든 채널의 이름을 말한다.
+    await waitFor(() => expect(screen.getByTestId('channel-member-add-sheet')).toBeTruthy());
+    expect(screen.getByTestId('channel-member-add-lead')).toHaveTextContent(
+      'design-review 채널을 만들었어요. 비공개 채널은 추가한 멤버에게만 보여요.',
+    );
+    // 명부에는 만든 내가 이미 이 채널의 멤버로 들어가 있다(머리의 멤버 수 0 → 1).
+    const rosterNow = queryClient?.getQueryData<Array<{id: string; channelIds: string[]}>>([
+      'roster',
+      WS,
+    ]);
+    expect(rosterNow?.find(row => row.id === SELF_ID)?.channelIds).toContain('ch-new');
+    // 나는 고를 사람에 없고, 사람·에이전트가 선다.
+    await waitFor(() => expect(screen.getByTestId('channel-member-add-person-seeun')).toBeTruthy());
+    expect(screen.queryByTestId('channel-member-add-person-seongjae')).toBeNull();
+    expect(screen.getByTestId('channel-member-add-person-kim-intern')).toBeTruthy();
+    // 누르면 그 사람이 채널에 추가되고, 줄은 그 자리에서 「멤버」가 된다(시트는 닫히지 않는다).
+    fireEvent.press(screen.getByTestId('channel-member-add-person-seeun'));
+    await waitFor(() =>
+      expect(screen.getByTestId('channel-member-add-person-seeun-value')).toHaveTextContent('멤버'),
+    );
+    const add = fetchMock.mock.calls.find(
+      ([url, init]) => String(url).endsWith('/channels/ch-new/members') && init?.method === 'POST',
+    );
+    expect(JSON.parse(String(add?.[1]?.body))).toEqual({memberId: PERSON_ID, role: 'member'});
+    expect(screen.getByTestId('channel-member-add-sheet')).toBeTruthy();
+    // X 로 닫으면(건너뛰기와 같은 길) 새 채널이 그대로 선다.
+    fireEvent.press(screen.getByTestId('channel-member-add-close'));
+    await waitFor(() => expect(screen.queryByTestId('channel-member-add-sheet')).toBeNull());
+    expect(screen.getByTestId('conversation-pane')).toBeTruthy();
+  });
+
+  it('공개 채널도 「멤버 추가」를 잇는다 — 안내 줄이 공개 채널의 뜻을 말한다 (#5784, planner 결정)', async () => {
+    installFetch();
+    await renderReady();
+    openMenu();
+    await waitFor(() => expect(screen.getByTestId('plus-menu-channel')).toBeTruthy());
+    fireEvent.press(screen.getByTestId('plus-menu-channel'));
+    // 공개 설명은 지금 동작 그대로다 — 「찾아서 들어올 수 있다」고 말하지 않는다.
+    const publicDetail =
+      '소유자나 관리자가 추가한 멤버가 들어와요. 앞으로 워크스페이스에 들어오는 사람은 자동으로 들어와요.';
+    expect(screen.getByTestId('new-channel-kind-public')).toHaveTextContent(`공개${publicDetail}`);
+    // VoiceOver 도 같은 설명을 듣는다 — 이름은 「공개」, 힌트가 설명(검수 r1 M7).
+    expect(screen.getByTestId('new-channel-kind-public')).toHaveProp('accessibilityHint', publicDetail);
+    expect(screen.getByTestId('new-channel-kind-private')).toHaveProp(
+      'accessibilityHint',
+      '추가된 멤버에게만 보여요.',
+    );
+    fireEvent.changeText(screen.getByTestId('new-channel-name'), 'design-review');
+    fireEvent.press(screen.getByTestId('new-channel-create'));
+    await finishNativeDismiss('new-channel-sheet');
+    await waitFor(() => expect(screen.getByTestId('channel-member-add-sheet')).toBeTruthy());
+    expect(screen.getByTestId('channel-member-add-lead')).toHaveTextContent(
+      'design-review 채널을 만들었어요. 공개 채널이라 앞으로 워크스페이스에 들어오는 사람은 자동으로 들어와요.',
+    );
+    expect(screen.getByTestId('conversation-pane')).toBeTruthy();
+    expect(screen.queryByTestId('new-channel-sheet')).toBeNull();
   });
 
   it('만드는 동안 ✓ 자리에 스피너가 서고 이름이 「채널 만드는 중」이며, 다시 눌러도 요청은 한 번이다', async () => {

@@ -1312,15 +1312,16 @@ const TARGET = {
 };
 
 const ITEMS: ChannelActionItem[] = [
-  {key: 'copy-name', cluster: 'copy', testKey: 'copy-name', label: '이름 복사하기'},
-  {key: 'copy-link', cluster: 'copy', testKey: 'copy-link', label: '링크 복사하기'},
-  {key: 'copy-id', cluster: 'copy', testKey: 'copy-id', label: 'ID 복사하기'},
-  {key: 'mute', cluster: 'state', testKey: 'mute-toggle', label: '알림 끄기', separatorBefore: true},
+  {key: 'copy-name', cluster: 'copy', testKey: 'copy-name', label: '이름 복사하기', icon: 'copy-name'},
+  {key: 'copy-link', cluster: 'copy', testKey: 'copy-link', label: '링크 복사하기', icon: 'copy-link'},
+  {key: 'copy-id', cluster: 'copy', testKey: 'copy-id', label: 'ID 복사하기', icon: 'copy-id'},
+  {key: 'mute', cluster: 'state', testKey: 'mute-toggle', label: '알림 끄기', icon: 'bell', separatorBefore: true},
   {
     key: 'leave',
     cluster: 'danger',
     testKey: 'leave',
     label: '채널 나가기',
+    icon: 'leave',
     tone: 'danger',
     separatorBefore: true,
   },

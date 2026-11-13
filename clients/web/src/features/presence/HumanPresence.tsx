@@ -49,10 +49,13 @@ export function AvatarWithPresence({
   member,
   children,
   className,
+  dotClassName,
 }: {
   member: RosterMember;
   children: React.ReactNode;
   className?: string;
+  /** 점의 크기·자리만 바꾼다(모양은 그대로). 큰 얼굴(프로필 히어로, #5780)이 원의 가장자리에 점을 앉힌다. */
+  dotClassName?: string;
 }) {
   const dot = useHumanPresenceDot(member);
   return (
@@ -63,7 +66,7 @@ export function AvatarWithPresence({
       title={dot ? statusDotTooltip(dot) : undefined}
     >
       {children}
-      <PresenceBadgeDot dot={dot} />
+      <PresenceBadgeDot dot={dot} className={dotClassName} />
     </span>
   );
 }

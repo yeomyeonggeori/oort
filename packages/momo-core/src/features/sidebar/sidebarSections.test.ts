@@ -10,17 +10,10 @@ import {
   isChannelStarred,
   moveSidebarSection,
   reorderSidebarSection,
-  sidebarSortMode,
-  sidebarSortModeLabel,
   SECTION_MOVE_DOWN_LABEL,
   SECTION_MOVE_UP_LABEL,
-  SIDEBAR_SORT_GROUP_LABEL,
   SIDEBAR_STARRED_TOUCH_HINT,
   toggleStarredChannel,
-  withSidebarSortMode,
-  SIDEBAR_SORT_ALPHA,
-  SIDEBAR_SORT_MANUAL,
-  SIDEBAR_SORT_MODES,
   createSidebarSection,
   deleteSidebarSection,
   deriveSidebarSections,
@@ -563,37 +556,10 @@ describe("BT-5 별표", () => {
   });
 });
 
-describe("BT-5 정렬", () => {
+describe("정렬 단추 제거 (#5775)", () => {
   const CHANNELS = [ALPHA, BETA, GAMMA];
 
-  it("두 값뿐이다 — Recent 는 자가 없어서 싣지 않았다", () => {
-    // ADR-0177 D5 는 「A-Z/Recent」라 적었다. 축소의 근거는 `SIDEBAR_SORT_MODES`
-    // 머리말에 있고(oort 의 `Channel` 에 마지막 활동 시각이 없다), 이 단정이
-    // 그 판정을 잠근다 — 값을 늘리려면 근거를 먼저 고쳐야 한다.
-    expect([...SIDEBAR_SORT_MODES]).toEqual([
-      SIDEBAR_SORT_MANUAL,
-      SIDEBAR_SORT_ALPHA,
-    ]);
-    expect(sidebarSortModeLabel(SIDEBAR_SORT_ALPHA)).toBe("가나다");
-    expect(sidebarSortModeLabel(SIDEBAR_SORT_MANUAL)).toBe("사용자 지정");
-  });
-
-  it("모르는 낱말은 「사용자 지정」이다", () => {
-    expect(sidebarSortMode(emptySidebarPrefs())).toBe(SIDEBAR_SORT_MANUAL);
-    expect(
-      sidebarSortMode({ ...emptySidebarPrefs(), sectionSort: "recent" })
-    ).toBe(SIDEBAR_SORT_MANUAL);
-  });
-
-  it("「사용자 지정」은 칸을 지우고, 「가나다」만 적는다", () => {
-    const alpha = withSidebarSortMode(emptySidebarPrefs(), SIDEBAR_SORT_ALPHA);
-    expect(alpha.sectionSort).toBe(SIDEBAR_SORT_ALPHA);
-    const manual = withSidebarSortMode(alpha, SIDEBAR_SORT_MANUAL);
-    expect("sectionSort" in manual).toBe(false);
-    expect(sidebarPrefsToWire(manual).prefs.sectionSort).toBeUndefined();
-  });
-
-  it("렌더 차례만 바꾸고 저장값은 그대로다", () => {
+  it("「가나다」를 저장해 둔 계정도 끌어서 정한 차례로 보인다", () => {
     const manual = prefsWith(
       [
         {
@@ -605,68 +571,45 @@ describe("BT-5 정렬", () => {
       ],
       { starredChannelIds: [] }
     );
-    const before = deriveSidebarSections({
-      prefs: manual,
-      channels: CHANNELS,
-      dms: [],
+    const input = { channels: [...CHANNELS, RANDOM], dms: [DM_ONE] };
+    const derived = deriveSidebarSections({
+      prefs: { ...manual, sectionSort: "alpha" },
+      ...input,
     });
-    expect(before.custom[0].channels.map((c) => c.name)).toEqual([
+    // 커스텀 섹션은 payload 가 적은 차례 그대로다(가나다로 흔들리지 않는다).
+    expect(derived.custom[0].channels.map((c) => c.name)).toEqual([
       "zebra",
       "가나다",
       "Apple",
     ]);
-
-    const alpha = withSidebarSortMode(manual, SIDEBAR_SORT_ALPHA);
-    const sorted = deriveSidebarSections({
-      prefs: alpha,
-      channels: CHANNELS,
-      dms: [],
+    // 저장값이 없을 때와 같은 결과다.
+    expect(derived).toEqual(deriveSidebarSections({ prefs: manual, ...input }));
+    // 별표 구역도 적힌 차례다(가나다였다면 Apple 이 먼저다).
+    const starred = deriveSidebarSections({
+      prefs: { ...manual, starredChannelIds: [ALPHA.id, GAMMA.id], sectionSort: "alpha" },
+      ...input,
     });
-    // 한글이 앞이다 — `localeCompare(…, "ko")` 의 collation 이고, 그래서 이
-    // 항목의 이름이 「A-Z」가 아니라 「가나다」다. 코드유닛 비교였다면 라틴이
-    // 먼저 서서 이름과 결과가 어긋났을 것이다.
-    expect(sorted.custom[0].channels.map((c) => c.name)).toEqual([
-      "가나다",
-      "Apple",
-      "zebra",
-    ]);
-    // **저장값 불변**: 사람이 만든 차례는 payload 에 그대로 있다.
-    expect(alpha.sections[0].channelIds).toEqual([ALPHA.id, BETA.id, GAMMA.id]);
+    expect(starred.starred.channels.map((c) => c.name)).toEqual(["zebra", "Apple"]);
+  });
 
-    // 되돌아오면 그 차례가 다시 화면이다.
-    const back = deriveSidebarSections({
-      prefs: withSidebarSortMode(alpha, SIDEBAR_SORT_MANUAL),
-      channels: CHANNELS,
-      dms: [],
+  it("DM 은 서버 차례 그대로다", () => {
+    const derived = deriveSidebarSections({
+      prefs: { ...emptySidebarPrefs(), sectionSort: "alpha" },
+      channels: [],
+      dms: [dm("99999999-9999-4999-8999-999999999999"), DM_ONE],
     });
-    expect(back.custom[0].channels.map((c) => c.name)).toEqual([
-      "zebra",
-      "가나다",
-      "Apple",
+    expect(derived.dms.channels.map((c) => c.id)).toEqual([
+      "99999999-9999-4999-8999-999999999999",
+      DM_ONE.id,
     ]);
   });
 
-  it("기본 「채널」과 「별표」도 같은 자를 쓰고, DM 은 서버 차례 그대로다", () => {
-    const prefs = withSidebarSortMode(
-      prefsWith([], { starredChannelIds: [ALPHA.id, GAMMA.id] }),
-      SIDEBAR_SORT_ALPHA
-    );
-    const derived = deriveSidebarSections({
-      prefs,
-      channels: CHANNELS,
-      dms: [DM_ONE, dm("88888888-8888-4888-8888-888888888888")],
-    });
-    expect(derived.starred.channels.map((c) => c.name)).toEqual([
-      "Apple",
-      "zebra",
-    ]);
-    expect(derived.base.channels.map((c) => c.name)).toEqual(["가나다"]);
-    expect(derived.dms.channels.map((c) => c.id)).toEqual([
-      DM_ONE.id,
-      "88888888-8888-4888-8888-888888888888",
-    ]);
+  it("저장된 값은 서버로 왕복만 한다 — 읽은 것을 그대로 다시 쓴다", () => {
+    const saved = { ...emptySidebarPrefs(), sectionSort: "alpha" };
+    expect(sidebarPrefsToWire(saved).prefs.sectionSort).toBe("alpha");
   });
 });
+
 
 describe("BT-5 섹션 차례", () => {
   const THREE = prefsWith([
@@ -758,21 +701,5 @@ describe("BT-5 R1 — design-review 수리의 낱말", () => {
   it("차례 항목이 동사구다", () => {
     expect(SECTION_MOVE_UP_LABEL).toContain("옮기기");
     expect(SECTION_MOVE_DOWN_LABEL).toContain("옮기기");
-  });
-
-  // N-2: 이 차례는 DM 을 타지 않는다. 낱말이 그보다 넓게 약속하면 안 된다.
-  it("정렬의 이름이 사이드바 전체를 약속하지 않는다", () => {
-    expect(SIDEBAR_SORT_GROUP_LABEL).not.toContain("사이드바");
-    expect(SIDEBAR_SORT_GROUP_LABEL).toContain("채널");
-    // 그리고 실제로 DM 은 서버 차례 그대로다(위 정렬 시험이 값으로 잰다).
-    const derived = deriveSidebarSections({
-      prefs: withSidebarSortMode(emptySidebarPrefs(), SIDEBAR_SORT_ALPHA),
-      channels: [],
-      dms: [dm("99999999-9999-4999-8999-999999999999"), DM_ONE],
-    });
-    expect(derived.dms.channels.map((c) => c.id)).toEqual([
-      "99999999-9999-4999-8999-999999999999",
-      DM_ONE.id,
-    ]);
   });
 });

@@ -27,6 +27,7 @@ import {UNKNOWN_AGENT_NAME} from '@momo/core/features/agents/turnCopy';
 import {isSurfaceProvided} from '@momo/core/features/capabilities/serverSurfaces';
 import type {ChannelActionKey} from '@momo/core/features/channels/actionModel';
 import {normalizeChannelTopic} from '@momo/core/features/channels/model';
+import {profileEmail} from '@momo/core/features/directory/model';
 import {dmCloseOffered} from '@momo/core/features/sidebar/dmVisibility';
 import {readProjectionPhase} from '@momo/core/features/sidebar/goneDm';
 import {composedUnreadCount} from '@momo/core/features/readState/model';
@@ -1073,7 +1074,7 @@ export default function ConversationScreen({
       muted: channel?.muted ?? false,
       selfRole,
       readState: liveReadState,
-      // 「대화 닫기」: 코어 `dmCloseOffered` 한 함수(웹 호버 X · 사이드바 행 시트와 같다) + 서버가 닫기를 싣는 동안만 + 닫을 때 적을 투영 행이
+      // 「목록에서 숨기기」: 코어 `dmCloseOffered` 한 함수(웹 호버 X · 사이드바 행 시트와 같다) + 서버가 닫기를 싣는 동안만 + 닫을 때 적을 투영 행이
       // 있을 때만(메시지가 한 번도 없는 DM 에는 행이 없어 훅이 아무 일도 하지 않는다 — 눌러도 반응 없는 행을 내밀지 않는다).
       closeOffered:
         channel?.kind === 'dm' &&
@@ -1111,7 +1112,7 @@ export default function ConversationScreen({
   );
   const runMenuAction = useCallback(
     (key: ChannelActionKey) => {
-      // 같은 행동이 도는 중이면 다시 보내지 않는다 — 두 번 누른 「대화 닫기」가 요청과 뒤로가기를 두 번 내지 않게.
+      // 같은 행동이 도는 중이면 다시 보내지 않는다 — 두 번 누른 「목록에서 숨기기」가 요청과 뒤로가기를 두 번 내지 않게.
       if (isRowActionPending(key)) return;
       runRowAction(menuTarget, key);
     },
@@ -2699,6 +2700,8 @@ export default function ConversationScreen({
           dmError={profileDmError}
           status={profileStatus}
           nowMs={nowMs}
+          // 명부가 싣는 이메일(#5780). 게스트 시점에서는 가린다 — 웹 프로필 창과 같은 코어 판정이다.
+          email={profileEmail(memberFor(directory, member.id)?.role, profileMember) ?? undefined}
           onClose={closeMemberProfile}
           onOpenDm={() => openProfileDm(profileMember.id)}
           // 「에이전트 정보」·「설정 열기」 타일은 `closesSheet` 라 시트가 내려가며 `onClose`(= `closeMemberProfile`)를 먼저 부른다 — 여기서

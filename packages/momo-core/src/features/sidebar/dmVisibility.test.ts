@@ -126,7 +126,7 @@ describe("닫기를 내미는가 (D7)", () => {
   });
 });
 
-describe("「닫은 대화」 목록에 드는 줄 (D11)", () => {
+describe("「숨긴 대화」 목록에 드는 줄 (D11)", () => {
   it("명시적 닫기(7)와 나간 상대(6)만 든다", () => {
     expect(dmClosedListReason(7)).toBe("closed");
     expect(dmClosedListReason(6)).toBe("gone");
@@ -136,20 +136,20 @@ describe("「닫은 대화」 목록에 드는 줄 (D11)", () => {
   });
 });
 
-describe("「닫은 대화」 문구 (D11)", () => {
-  it("이유 줄: 닫음은 「내가 닫았어요」, 나간 상대는 원인(상대가 나갔다)과 조건(안 읽은 메시지가 없다)을 함께 말한다", () => {
-    expect(dmClosedReasonLabel("closed")).toBe("내가 닫았어요");
+describe("「숨긴 대화」 문구 (D11)", () => {
+  it("이유 줄: 숨김은 「내가 숨겼어요」, 나간 상대는 원인(상대가 나갔다)과 조건(안 읽은 메시지가 없다)을 함께 말한다", () => {
+    expect(dmClosedReasonLabel("closed")).toBe("내가 숨겼어요");
     expect(dmClosedReasonLabel("gone")).toBe("상대가 나갔고 안 읽은 메시지가 없어요");
   });
 
-  it("동작 낱말: 닫은 대화는 「다시 열기」, 나간 상대는 풀 닫힘이 없어 「열기」", () => {
-    expect(DM_REOPEN_LABEL).toBe("다시 열기");
-    expect(dmReopenLabelFor("closed")).toBe("다시 열기");
+  it("동작 낱말: 숨긴 대화는 「다시 보이기」, 나간 상대는 풀 숨김이 없어 「열기」", () => {
+    expect(DM_REOPEN_LABEL).toBe("다시 보이기");
+    expect(dmReopenLabelFor("closed")).toBe("다시 보이기");
     expect(dmReopenLabelFor("gone")).toBe("열기");
   });
 
   it("제목과 힌트는 한 번씩만 말한다", () => {
-    expect(DM_CLOSED_LIST_LABEL).toBe("닫은 대화");
+    expect(DM_CLOSED_LIST_LABEL).toBe("숨긴 대화");
     expect(DM_CLOSED_LIST_HINT).toContain("새 메시지가 오면");
     expect(DM_CLOSED_LIST_HINT).not.toContain("—");
   });

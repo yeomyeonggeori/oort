@@ -69,3 +69,27 @@ describe("fetchRoster aliases", () => {
     expect("aliases" in (roster[3] ?? {})).toBe(false);
   });
 });
+
+// #5780: 명부는 사람의 이메일을 이미 싣는다(openapi `RosterMember.email`). 문자열만 남기고 멤버는 버리지 않는다.
+describe("fetchRoster email", () => {
+  it("문자열 이메일은 그대로 싣고, 못 읽는 값은 칸만 버린다", async () => {
+    installHost();
+    vi.stubGlobal("fetch", async () =>
+      new Response(
+        JSON.stringify({
+          members: [
+            row("a", { kind: "human", email: "seoyeon@example.com" }),
+            row("b", { kind: "human", email: 42 }),
+            row("c", { kind: "human" }),
+          ],
+        }),
+        { status: 200, headers: { "content-type": "application/json" } }
+      )
+    );
+    const roster = await fetchRoster(WS);
+    expect(roster.map((member) => member.id)).toEqual(["a", "b", "c"]);
+    expect(roster[0]?.email).toBe("seoyeon@example.com");
+    expect("email" in (roster[1] ?? {})).toBe(false);
+    expect("email" in (roster[2] ?? {})).toBe(false);
+  });
+});

@@ -84,7 +84,7 @@ import {
   type SidebarRow,
   type SidebarSection,
 } from '../features/sidebar/rows';
-import {CHIP_TONE, type ChipTone, type RowChip} from '../features/sidebar/rowEmphasis';
+import {CHIP_TONE, type ChipTone, type RowChip} from '@momo/core/features/sidebar/rowEmphasis';
 import {useGoneUnreadVerdicts} from '../features/sidebar/useGoneUnreadVerdicts';
 import {dmClosedEntries, dmClosureMode, dmVerdicts} from '../features/sidebar/dmVerdicts';
 import {DmClosedSheet} from '../features/sidebar/DmClosedSheet';
@@ -404,7 +404,7 @@ export default function SidebarScreen({
   // 마지막 투영의 닫힘 id: 첫 프레임에만 쓰는 캐시(원장 아님, `dmClosedCache.ts`).
   const cachedClosed = useDmClosedCacheInitial(workspaceId);
 
-  // DM 이 목록에 서는가: 코어 `dmVisibility` 한 함수(웹과 같다). 숨은 DM 은 「⋯ › 닫은 대화」가 연다.
+  // DM 이 목록에 서는가: 코어 `dmVisibility` 한 함수(웹과 같다). 숨은 DM 은 「⋯ › 숨긴 대화」가 연다.
   const verdicts = useMemo(
     () =>
       dmVerdicts({
@@ -588,7 +588,7 @@ export default function SidebarScreen({
         muted: row.muted,
         selfRole,
         readState: readStates.byChannel.get(idKey(row.targetId)) ?? null,
-        // 「대화 닫기」: 코어 `dmCloseOffered` 한 함수(웹 호버 X·행 메뉴와 같다) + 서버가 닫기를 싣는 동안만(기기 로컬 닫기는 없다).
+        // 「목록에서 숨기기」: 코어 `dmCloseOffered` 한 함수(웹 호버 X·행 메뉴와 같다) + 서버가 닫기를 싣는 동안만(기기 로컬 닫기는 없다).
         closeOffered:
           row.kind === 'dm' &&
           closureMode === 'server' &&
@@ -603,7 +603,7 @@ export default function SidebarScreen({
     [channelById, selfRole, readStates.byChannel, closureMode, readPhase],
   );
 
-  // 「⋯ › 닫은 대화」 시트(ADR-0177 증보 D11, #4367). 내가 닫은 대화와 상대가 나간 대화를 다시 연다.
+  // 「⋯ › 숨긴 대화」 시트(ADR-0177 증보 D11, #4367). 내가 닫은 대화와 상대가 나간 대화를 다시 연다.
   const [closedListOpen, setClosedListOpen] = useState(false);
   const closedItems = useMemo(
     () =>
