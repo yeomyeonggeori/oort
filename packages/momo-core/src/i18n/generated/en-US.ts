@@ -10827,5 +10827,245 @@ export const catalog: MessageCatalog = {
       "type": 0,
       "value": "oort tool"
     }
+  ],
+  "workspace.add.back": [
+    {
+      "type": 0,
+      "value": "Back"
+    }
+  ],
+  "workspace.add.cancel": [
+    {
+      "type": 0,
+      "value": "Cancel"
+    }
+  ],
+  "workspace.add.createLead": [
+    {
+      "type": 0,
+      "value": "Opens a new workspace on this server. Only the server operator can create one."
+    }
+  ],
+  "workspace.add.createLeadNotOperator": [
+    {
+      "type": 0,
+      "value": "Only this server's operator can create one. This account can't."
+    }
+  ],
+  "workspace.add.createTitle": [
+    {
+      "type": 0,
+      "value": "Create a new workspace"
+    }
+  ],
+  "workspace.add.joinClaim": [
+    {
+      "type": 0,
+      "value": "First-owner and reset links can't be used here. Sign out and paste it on the sign-in screen."
+    }
+  ],
+  "workspace.add.joinConfirmAction": [
+    {
+      "type": 0,
+      "value": "Sign out and continue"
+    }
+  ],
+  "workspace.add.joinConfirmBody": [
+    {
+      "type": 0,
+      "value": "This app signs in to one workspace at a time. You'll be signed out of this workspace, and unsent drafts on this device are erased. The sign-in screen will be filled in with what you entered."
+    }
+  ],
+  "workspace.add.joinConfirmTitle": [
+    {
+      "type": 0,
+      "value": "Sign out and continue?"
+    }
+  ],
+  "workspace.add.joinEmpty": [
+    {
+      "type": 0,
+      "value": "Enter an address or an invite link."
+    }
+  ],
+  "workspace.add.joinField": [
+    {
+      "type": 0,
+      "value": "Address or invite link"
+    }
+  ],
+  "workspace.add.joinHint": [
+    {
+      "type": 0,
+      "value": "Paste it as you received it. For example: https://team.example.com"
+    }
+  ],
+  "workspace.add.joinLead": [
+    {
+      "type": 0,
+      "value": "Use an address or an invite link. For now this signs you out and continues on the sign-in screen."
+    }
+  ],
+  "workspace.add.joinNext": [
+    {
+      "type": 0,
+      "value": "Continue"
+    }
+  ],
+  "workspace.add.joinTargetInvite": [
+    {
+      "type": 0,
+      "value": "Continues with an invite to "
+    },
+    {
+      "type": 1,
+      "value": "server"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "workspace.add.joinTargetInviteOnly": [
+    {
+      "type": 0,
+      "value": "Continues with the invite link you received."
+    }
+  ],
+  "workspace.add.joinTargetServer": [
+    {
+      "type": 0,
+      "value": "Continues on the sign-in screen of "
+    },
+    {
+      "type": 1,
+      "value": "server"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "workspace.add.joinTitle": [
+    {
+      "type": 0,
+      "value": "Join one that already exists"
+    }
+  ],
+  "workspace.add.lead": [
+    {
+      "type": 0,
+      "value": "Create a new workspace, or get into one that already exists."
+    }
+  ],
+  "workspace.add.operatorContact": [
+    {
+      "type": 0,
+      "value": "If you have an invite, use “Join one that already exists”. Otherwise, ask the person who runs this server."
+    }
+  ],
+  "workspace.add.title": [
+    {
+      "type": 0,
+      "value": "Add a workspace"
+    }
+  ],
+  "workspace.create.lead": [
+    {
+      "type": 0,
+      "value": "Whoever creates it becomes the owner, and it starts with a single #general channel. Only the server operator can create one."
+    }
+  ],
+  "workspace.create.operatorOnly": [
+    {
+      "type": 0,
+      "value": "Only this server's operator can create a new workspace."
+    }
+  ],
+  "workspace.create.slugHint": [
+    {
+      "type": 0,
+      "value": "Lowercase letters, numbers and hyphens only. It must be unique on the whole server."
+    }
+  ],
+  "workspace.leave.body": [
+    {
+      "type": 0,
+      "value": "Your membership ends and you're signed out right away. You'll need an invite to come back."
+    }
+  ],
+  "workspace.leave.busy": [
+    {
+      "type": 0,
+      "value": "Leaving"
+    }
+  ],
+  "workspace.leave.cancel": [
+    {
+      "type": 0,
+      "value": "Cancel"
+    }
+  ],
+  "workspace.leave.confirm": [
+    {
+      "type": 0,
+      "value": "Leave"
+    }
+  ],
+  "workspace.leave.lastOwner": [
+    {
+      "type": 0,
+      "value": "The last owner can't leave. Make someone else an owner first."
+    }
+  ],
+  "workspace.leave.title": [
+    {
+      "type": 0,
+      "value": "Leave "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "?"
+    }
+  ],
+  "workspace.menu.copiedAddress": [
+    {
+      "type": 0,
+      "value": "Address copied"
+    }
+  ],
+  "workspace.menu.copyAddress": [
+    {
+      "type": 0,
+      "value": "Copy address"
+    }
+  ],
+  "workspace.menu.copyFailed": [
+    {
+      "type": 0,
+      "value": "Couldn't copy"
+    }
+  ],
+  "workspace.menu.fallbackTitle": [
+    {
+      "type": 0,
+      "value": "Workspace"
+    }
+  ],
+  "workspace.menu.leave": [
+    {
+      "type": 0,
+      "value": "Leave workspace"
+    }
+  ],
+  "workspace.menu.settings": [
+    {
+      "type": 0,
+      "value": "Workspace settings"
+    }
   ]
 };

@@ -1442,7 +1442,43 @@ export const messageKeys = [
   "timeline.workTool.ping",
   "timeline.workTool.runComplete",
   "timeline.workTool.runEvent",
-  "timeline.workTool.unknown"
+  "timeline.workTool.unknown",
+  "workspace.add.back",
+  "workspace.add.cancel",
+  "workspace.add.createLead",
+  "workspace.add.createLeadNotOperator",
+  "workspace.add.createTitle",
+  "workspace.add.joinClaim",
+  "workspace.add.joinConfirmAction",
+  "workspace.add.joinConfirmBody",
+  "workspace.add.joinConfirmTitle",
+  "workspace.add.joinEmpty",
+  "workspace.add.joinField",
+  "workspace.add.joinHint",
+  "workspace.add.joinLead",
+  "workspace.add.joinNext",
+  "workspace.add.joinTargetInvite",
+  "workspace.add.joinTargetInviteOnly",
+  "workspace.add.joinTargetServer",
+  "workspace.add.joinTitle",
+  "workspace.add.lead",
+  "workspace.add.operatorContact",
+  "workspace.add.title",
+  "workspace.create.lead",
+  "workspace.create.operatorOnly",
+  "workspace.create.slugHint",
+  "workspace.leave.body",
+  "workspace.leave.busy",
+  "workspace.leave.cancel",
+  "workspace.leave.confirm",
+  "workspace.leave.lastOwner",
+  "workspace.leave.title",
+  "workspace.menu.copiedAddress",
+  "workspace.menu.copyAddress",
+  "workspace.menu.copyFailed",
+  "workspace.menu.fallbackTitle",
+  "workspace.menu.leave",
+  "workspace.menu.settings"
 ] as const;
 
 export type MessageKey = typeof messageKeys[number];
@@ -3323,7 +3359,49 @@ export const argumentSpecs = {
   "timeline.workTool.ping": {},
   "timeline.workTool.runComplete": {},
   "timeline.workTool.runEvent": {},
-  "timeline.workTool.unknown": {}
+  "timeline.workTool.unknown": {},
+  "workspace.add.back": {},
+  "workspace.add.cancel": {},
+  "workspace.add.createLead": {},
+  "workspace.add.createLeadNotOperator": {},
+  "workspace.add.createTitle": {},
+  "workspace.add.joinClaim": {},
+  "workspace.add.joinConfirmAction": {},
+  "workspace.add.joinConfirmBody": {},
+  "workspace.add.joinConfirmTitle": {},
+  "workspace.add.joinEmpty": {},
+  "workspace.add.joinField": {},
+  "workspace.add.joinHint": {},
+  "workspace.add.joinLead": {},
+  "workspace.add.joinNext": {},
+  "workspace.add.joinTargetInvite": {
+    "server": "string"
+  },
+  "workspace.add.joinTargetInviteOnly": {},
+  "workspace.add.joinTargetServer": {
+    "server": "string"
+  },
+  "workspace.add.joinTitle": {},
+  "workspace.add.lead": {},
+  "workspace.add.operatorContact": {},
+  "workspace.add.title": {},
+  "workspace.create.lead": {},
+  "workspace.create.operatorOnly": {},
+  "workspace.create.slugHint": {},
+  "workspace.leave.body": {},
+  "workspace.leave.busy": {},
+  "workspace.leave.cancel": {},
+  "workspace.leave.confirm": {},
+  "workspace.leave.lastOwner": {},
+  "workspace.leave.title": {
+    "name": "string"
+  },
+  "workspace.menu.copiedAddress": {},
+  "workspace.menu.copyAddress": {},
+  "workspace.menu.copyFailed": {},
+  "workspace.menu.fallbackTitle": {},
+  "workspace.menu.leave": {},
+  "workspace.menu.settings": {}
 } as const;
 
 export interface MessageArgs {
@@ -4770,4 +4848,40 @@ export interface MessageArgs {
   "timeline.workTool.runComplete": Record<string, never>;
   "timeline.workTool.runEvent": Record<string, never>;
   "timeline.workTool.unknown": Record<string, never>;
+  "workspace.add.back": Record<string, never>;
+  "workspace.add.cancel": Record<string, never>;
+  "workspace.add.createLead": Record<string, never>;
+  "workspace.add.createLeadNotOperator": Record<string, never>;
+  "workspace.add.createTitle": Record<string, never>;
+  "workspace.add.joinClaim": Record<string, never>;
+  "workspace.add.joinConfirmAction": Record<string, never>;
+  "workspace.add.joinConfirmBody": Record<string, never>;
+  "workspace.add.joinConfirmTitle": Record<string, never>;
+  "workspace.add.joinEmpty": Record<string, never>;
+  "workspace.add.joinField": Record<string, never>;
+  "workspace.add.joinHint": Record<string, never>;
+  "workspace.add.joinLead": Record<string, never>;
+  "workspace.add.joinNext": Record<string, never>;
+  "workspace.add.joinTargetInvite": { server: string };
+  "workspace.add.joinTargetInviteOnly": Record<string, never>;
+  "workspace.add.joinTargetServer": { server: string };
+  "workspace.add.joinTitle": Record<string, never>;
+  "workspace.add.lead": Record<string, never>;
+  "workspace.add.operatorContact": Record<string, never>;
+  "workspace.add.title": Record<string, never>;
+  "workspace.create.lead": Record<string, never>;
+  "workspace.create.operatorOnly": Record<string, never>;
+  "workspace.create.slugHint": Record<string, never>;
+  "workspace.leave.body": Record<string, never>;
+  "workspace.leave.busy": Record<string, never>;
+  "workspace.leave.cancel": Record<string, never>;
+  "workspace.leave.confirm": Record<string, never>;
+  "workspace.leave.lastOwner": Record<string, never>;
+  "workspace.leave.title": { name: string };
+  "workspace.menu.copiedAddress": Record<string, never>;
+  "workspace.menu.copyAddress": Record<string, never>;
+  "workspace.menu.copyFailed": Record<string, never>;
+  "workspace.menu.fallbackTitle": Record<string, never>;
+  "workspace.menu.leave": Record<string, never>;
+  "workspace.menu.settings": Record<string, never>;
 }
