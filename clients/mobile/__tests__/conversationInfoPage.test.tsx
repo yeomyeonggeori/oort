@@ -5,10 +5,12 @@ import {
   DM_CLOSE_LABEL,
   channelCopyIdLabel,
   channelCopyNameLabel,
-  channelLeaveConfirmBody,
+  channelLeaveConfirmBodyKey,
   channelMuteToggleLabel,
 } from '@momo/core/features/channels/model';
 import type {ChannelActionKey} from '@momo/core/features/channels/actionModel';
+import {catalog as koCatalog} from '@momo/core/i18n/generated/ko-KR';
+import {createMessageService} from '@momo/core/i18n/service';
 import {copyLinkActionLabel} from '@momo/core/features/timeline/copyLabels';
 import type {StatusDot as PeerStatus} from '@momo/core/features/presence/statusDot';
 import {makeDirectory} from '@momo/core/features/workspace/directory';
@@ -415,7 +417,7 @@ describe('정보 페이지 — 행은 코어 표의 답이다 (#4319)', () => {
     expect(color('conversation-info-leave')).not.toBe(color('conversation-info-mute-toggle'));
   });
 
-  it('채널: 일반 멤버·손님에게는 「채널 나가기」가 없다(`canLeaveChannel`) — 서버가 403 으로 답할 막다른 길이다', () => {
+  it('채널: 일반 멤버·손님에게도 「채널 나가기」가 선다(`canLeaveChannel`) — 본인 나가기 길은 역할을 보지 않는다 (#5778)', () => {
     for (const selfRole of ['member', 'guest'] as const) {
       renderPage({
         kind: 'public',
@@ -423,7 +425,7 @@ describe('정보 페이지 — 행은 코어 표의 답이다 (#4319)', () => {
         peer: null,
         items: conversationInfoActionItems(channelTarget({selfRole})),
       });
-      expect([selfRole, rowKeys()]).toEqual([selfRole, ['mute-toggle', 'copy-name', 'copy-link', 'copy-id']]);
+      expect([selfRole, rowKeys()]).toEqual([selfRole, ['mute-toggle', 'copy-name', 'copy-link', 'copy-id', 'leave']]);
     }
   });
 
@@ -553,6 +555,8 @@ describe('정보 페이지 — 행은 코어 표의 답이다 (#4319)', () => {
 describe('정보 페이지 — 채널 나가기의 확인 단계 (#4319)', () => {
   motionOff();
 
+  // 제공자 없이 세운 화면은 한국어 사전으로 읽는다(`useFormatMessage` 의 대체) — 같은 사전으로 기대값을 짓는다.
+  const ko = createMessageService({messageLocale: 'ko-KR', catalog: koCatalog});
   const confirming = (over: Partial<ConversationInfoPageProps> = {}) =>
     renderPage({
       kind: 'public',
@@ -569,7 +573,7 @@ describe('정보 페이지 — 채널 나가기의 확인 단계 (#4319)', () =>
       CHANNEL_LEAVE_CONFIRM_TITLE,
     );
     expect(screen.getByTestId('conversation-info-leave-confirm-detail')).toHaveTextContent(
-      channelLeaveConfirmBody('general'),
+      ko.formatMessage(channelLeaveConfirmBodyKey('public'), {name: 'general'}),
     );
     expect(screen.getByTestId('conversation-info-leave-confirm-button')).toHaveTextContent(CHANNEL_LEAVE_LABEL);
     expect(rowKeys()).toEqual([]);

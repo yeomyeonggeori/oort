@@ -74,17 +74,17 @@ describe("실행부는 한 벌이다", () => {
     expect(callers("setChannelNotificationPref")).toEqual([CANON]);
   });
 
-  it("멤버십 DELETE 의 임자는 둘이고, 둘은 다른 일이다", () => {
-    // `removeChannelMember` 자체는 「나가기」 전용 동사가 아니다. 에이전트
-    // 허브가 **남(에이전트)의** 채널 멤버십을 관리하며 같은 라우트를 부르는데,
-    // 그것은 이 메뉴의 「내가 나간다」와 다른 행위다. 그래서 목록은 둘이고,
-    // 새 이름이 붙으면 그 자리에서 이유를 적어야 한다.
+  it("관리자 길(남의 멤버십 끝내기)과 본인 나가기 길은 다른 함수다 — 나가기는 본인 길 하나다", () => {
+    // `removeChannelMember`(`…/members/{id}`)는 소유자·관리자가 **남의** 채널 멤버십을 끝내는 길이다. 에이전트 허브가
+    // 에이전트를 내보낼 때 쓴다. 「내가 나간다」는 그 길이 아니라 본인 길(`leaveChannel`, `…/members/me`)이다 — 관리자
+    // 길로 자기를 지우면 일반 멤버는 403 이었다(#5778 이전). 새 이름이 붙으면 그 자리에서 이유를 적어야 한다.
     expect(callers("removeChannelMember").sort()).toEqual(
-      [CANON, "features/agentHub/AgentChannelsSection.tsx"].sort()
+      ["features/agentHub/AgentChannelsSection.tsx"].sort()
     );
+    expect(callers("leaveChannel")).toEqual([CANON]);
     // 「나가기」 흐름 자체 — 실패 문장·확인 문장 — 은 한 벌이다.
-    expect(callers("channelLeaveFailureMessage")).toEqual([CANON]);
-    expect(callers("channelLeaveConfirmBody")).toEqual([CANON]);
+    expect(callers("channelLeaveFailure")).toEqual([CANON]);
+    expect(callers("channelLeaveConfirmBodyKey")).toEqual([CANON]);
     const dialogs = FILES.filter((file) =>
       /CHANNEL_LEAVE_CONFIRM_TITLE/.test(file.code)
     ).map((file) => file.path);

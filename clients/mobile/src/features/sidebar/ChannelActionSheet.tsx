@@ -8,7 +8,7 @@ import {
 import {
   CHANNEL_LEAVE_CONFIRM_TITLE,
   CHANNEL_LEAVE_LABEL,
-  channelLeaveConfirmBody,
+  channelLeaveConfirmBodyKey,
 } from '@momo/core/features/channels/model';
 import React from 'react';
 import {StyleSheet} from 'react-native';
@@ -18,6 +18,7 @@ import {SheetHeader} from '../../design/SheetChrome';
 import {ConfirmStep, GroupCard, ListRow, RowStatusIcon, SheetScroll} from '../../design/sheetParts';
 import {font, line, type Palette} from '../../design/tokens';
 import {useStyles} from '../../design/theme';
+import {useFormatMessage} from '../../i18n/useFormatMessage';
 import type {ChannelRowTarget} from './channelRowActions';
 
 // =============================================================================
@@ -87,6 +88,7 @@ export function ChannelActionSheet({
   onClose: () => void;
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
+  const formatMessage = useFormatMessage();
   const isDm = target.channel.kind === 'dm';
 
   return (
@@ -108,7 +110,7 @@ export function ChannelActionSheet({
           <ConfirmStep
             testID="channel-leave-confirm"
             headline={CHANNEL_LEAVE_CONFIRM_TITLE}
-            detail={channelLeaveConfirmBody(target.title)}
+            detail={formatMessage(channelLeaveConfirmBodyKey(target.channel.kind), {name: target.title})}
             error={leave.error}
             errorTestID="channel-leave-error"
             confirmLabel={CHANNEL_LEAVE_LABEL}

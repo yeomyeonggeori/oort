@@ -9413,6 +9413,54 @@ export const catalog: MessageCatalog = {
       "value": "결정하지 않으면 에이전트가 다시 제안해야 해요."
     }
   ],
+  "timeline.channelLeave.bodyPrivate": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " 채널이 사이드바에서 사라져요. 비공개 채널이라 다시 들어오려면 소유자나 관리자의 초대가 필요해요. 마지막 멤버가 나가면 채널이 보관되고 아무도 다시 들어올 수 없어요."
+    }
+  ],
+  "timeline.channelLeave.bodyPublic": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " 채널이 사이드바에서 사라져요. 다시 들어오려면 소유자나 관리자가 다시 추가해야 해요."
+    }
+  ],
+  "timeline.channelLeave.errorForbidden": [
+    {
+      "type": 0,
+      "value": "이 채널에서는 나갈 수 없어요."
+    }
+  ],
+  "timeline.channelLeave.errorGeneric": [
+    {
+      "type": 0,
+      "value": "채널에서 나가지 못했어요. 잠시 뒤에 다시 시도해 주세요."
+    }
+  ],
+  "timeline.channelLeave.errorNetwork": [
+    {
+      "type": 0,
+      "value": "채널에서 나가지 못했어요. "
+    },
+    {
+      "type": 1,
+      "value": "reason"
+    }
+  ],
+  "timeline.channelLeave.errorNotFound": [
+    {
+      "type": 0,
+      "value": "이미 이 채널의 멤버가 아니에요. 채널이 보관됐을 수도 있어요."
+    }
+  ],
   "timeline.createChannel.privateDetail": [
     {
       "type": 0,
@@ -9674,6 +9722,96 @@ export const catalog: MessageCatalog = {
       "value": "다시 불러오기"
     }
   ],
+  "timeline.memberPanel.remove": [
+    {
+      "type": 0,
+      "value": "채널에서 내보내기"
+    }
+  ],
+  "timeline.memberPanel.removeBody": [
+    {
+      "type": 1,
+      "value": "channel"
+    },
+    {
+      "type": 0,
+      "value": " 채널이 "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " 님의 사이드바에서 사라져요. 다시 들어오려면 소유자나 관리자가 다시 추가해야 해요."
+    }
+  ],
+  "timeline.memberPanel.removeBusy": [
+    {
+      "type": 0,
+      "value": "내보내는 중"
+    }
+  ],
+  "timeline.memberPanel.removeCancel": [
+    {
+      "type": 0,
+      "value": "취소"
+    }
+  ],
+  "timeline.memberPanel.removeConfirm": [
+    {
+      "type": 0,
+      "value": "내보내기"
+    }
+  ],
+  "timeline.memberPanel.removed": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " 님을 채널에서 내보냈어요."
+    }
+  ],
+  "timeline.memberPanel.removeErrorForbidden": [
+    {
+      "type": 0,
+      "value": "이 멤버를 채널에서 내보낼 권한이 없어요."
+    }
+  ],
+  "timeline.memberPanel.removeErrorGeneric": [
+    {
+      "type": 0,
+      "value": "내보내지 못했어요. 잠시 뒤에 다시 시도해 주세요."
+    }
+  ],
+  "timeline.memberPanel.removeErrorNetwork": [
+    {
+      "type": 0,
+      "value": "내보내지 못했어요. "
+    },
+    {
+      "type": 1,
+      "value": "reason"
+    }
+  ],
+  "timeline.memberPanel.removeErrorNotFound": [
+    {
+      "type": 0,
+      "value": "이미 이 채널의 멤버가 아니에요."
+    }
+  ],
+  "timeline.memberPanel.removeTitle": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " 님을 이 채널에서 내보낼까요?"
+    }
+  ],
   "timeline.memberPanel.request": [
     {
       "type": 0,
@@ -9696,6 +9834,16 @@ export const catalog: MessageCatalog = {
     {
       "type": 1,
       "value": "text"
+    }
+  ],
+  "timeline.memberPanel.rowActions": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " 님 관리"
     }
   ],
   "timeline.memberPanel.stageSpoken": [

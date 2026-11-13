@@ -1,6 +1,6 @@
 import {
   closeDm,
-  removeChannelMember,
+  leaveChannel,
   setChannelNotificationPref,
   uuidEq,
   type Channel,
@@ -12,7 +12,7 @@ import {
   CHANNEL_MARK_UNREAD_FAILURE,
   CHANNEL_MUTE_FAILURE,
   DM_CLOSE_FAILURE,
-  channelLeaveFailureMessage,
+  channelLeaveFailure,
 } from '@momo/core/features/channels/model';
 import {channelShareUrlFromServerBase} from '@momo/core/features/channels/shareLink';
 import {useQueryClient} from '@tanstack/react-query';
@@ -22,6 +22,7 @@ import {copyText, COPY_RECEIPT_MS} from '../conversation/copy';
 import {useMarkRead} from '../inbox/useInbox';
 import {applyClosureToReadStates, workspaceKeys} from '../workspace/queries';
 import {haptics} from '../../lib/haptics';
+import {useFormatMessage} from '../../i18n/useFormatMessage';
 import {apiBase} from '../../storage/serverBase';
 import {
   NOTHING_COPIED,
@@ -81,11 +82,13 @@ function announce(message: string): void {
 
 export function useChannelRowActions(
   workspaceId: string,
-  selfMemberId: string,
+  /** 나가기가 본인 길(`…/members/me`)이 된 뒤로(#5778) 읽지 않는다 — 부르는 쪽(셸)의 모양만 남았다. */
+  _selfMemberId: string,
   /** 채널을 나간 뒤·DM 을 닫은 뒤(서버가 답한 뒤)에 부른다. 열려 있던 대화를 걷는 일은 부르는 쪽(셸)이 한다. */
   onLeft?: (channelId: string) => void,
 ): ChannelRowActions {
   const client = useQueryClient();
+  const formatMessage = useFormatMessage();
   const markRead = useMarkRead();
   const [active, setActive] = useState<ChannelRowTarget | null>(null);
   const [confirmingLeave, setConfirmingLeave] = useState(false);
@@ -323,7 +326,8 @@ export function useChannelRowActions(
     if (target === null || leavePending) return;
     setLeavePending(true);
     setLeaveError(null);
-    void removeChannelMember(workspaceId, target.channel.id, selfMemberId)
+    // 본인 나가기 길(#5778). 관리자 전용 `removeChannelMember` 로 자기를 지우면 일반 멤버는 403 이다.
+    void leaveChannel(workspaceId, target.channel.id)
       .then(() => {
         if (!mounted.current) return;
         // 서버가 답한 **뒤에** 목록에서 지운다(웹과 같다).
@@ -339,12 +343,13 @@ export function useChannelRowActions(
         if (!mounted.current) return;
         haptics.error();
         // 목록을 건드리지 않았으므로 되돌릴 것이 없다. 확인 단계는 그대로 서 있고 이유를 말한다.
-        setLeaveError(channelLeaveFailureMessage(cause));
+        const failure = channelLeaveFailure(cause);
+        setLeaveError(formatMessage(failure.key, failure.values as never));
       })
       .finally(() => {
         if (mounted.current) setLeavePending(false);
       });
-  }, [active, client, leavePending, onLeft, selfMemberId, succeeded, workspaceId]);
+  }, [active, client, formatMessage, leavePending, onLeft, succeeded, workspaceId]);
 
   const cancelLeave = useCallback(() => {
     setConfirmingLeave(false);

@@ -24,7 +24,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import {
-  removeChannelMember,
+  leaveChannel,
   setChannelNotificationPref,
   uuidEq,
   type Channel,
@@ -35,8 +35,8 @@ import { composedUnreadCount } from "@momo/core/features/readState/model";
 import { useChannelNotificationMutation } from "./useChannelNotificationMutation";
 import { advertiseReadState } from "@/features/chat/advertiseReadState";
 import {
-  channelLeaveConfirmBody,
-  channelLeaveFailureMessage,
+  channelLeaveConfirmBodyKey,
+  channelLeaveFailure,
   CHANNEL_ACTION_ERROR_GROUP_LABEL,
   CHANNEL_COPY_FAILURE,
   CHANNEL_COPY_UNAVAILABLE,
@@ -78,6 +78,7 @@ import { channelShareUrl } from "@/features/inbox/anchor";
 import { openChannelId } from "@/features/sidebar/openChannel";
 import { SECTION_MOVE_TO_BASE_LABEL } from "@momo/core/features/sidebar/sidebarSections";
 import { absoluteApiBase } from "@/lib/serverBase";
+import { useFormatMessage } from "@/i18n/useFormatMessage";
 import {
   applyReadStateToCache,
   useInvalidateReadStates,
@@ -116,6 +117,7 @@ export interface ChannelActionTarget {
   channel: Channel;
   /** 화면에 보이는 채널 이름(labelParts.text ?? label). 확인 문장·이름 복사가 쓴다. */
   title: string;
+  /** 로그인 멤버. 나가기가 본인 길(`…/members/me`)이 된 뒤로(#5778) 이 훅은 읽지 않는다 — 부르는 쪽의 모양만 남았다. */
   selfMemberId: string;
   /** 로그인 멤버의 워크스페이스 역할. undefined 면 내놓고 서버가 답하게 둔다. */
   selfRole: MembershipRole | undefined;
@@ -176,6 +178,8 @@ export interface ChannelActions {
   /** 「섹션으로 이동」의 라디오 행이 고른 목적지. 표면이 없으면 아무 일도 없다. */
   moveToSection: (sectionId: string | null) => void;
   leave: {
+    /** 확인 문장이 공개·비공개로 갈린다(`channelLeaveConfirmBodyKey`). */
+    kind: Channel["kind"];
     confirmOpen: boolean;
     open: () => void;
     close: () => void;
@@ -189,7 +193,6 @@ export function useChannelActions({
   workspaceId,
   channel,
   title,
-  selfMemberId,
   selfRole,
   readState = null,
   onActionSucceeded,
@@ -203,6 +206,7 @@ export function useChannelActions({
   const client = useQueryClient();
   const navigate = useNavigate();
   const location = useLocation();
+  const formatMessage = useFormatMessage();
   const invalidateReadStates = useInvalidateReadStates(workspaceId);
   const [error, setErrorState] = useState<string | null>(null);
   const [copyFailure, setCopyFailure] = useState<{
@@ -319,7 +323,8 @@ export function useChannelActions({
   // 한 행에 겹쳐 그린다. 스냅샷·롤백이 함께 사라지는 것은 덤이다 — 되돌릴 것을
   // 만들지 않으면 되돌리기가 필요 없다.
   const leaveMutation = useMutation({
-    mutationFn: () => removeChannelMember(workspaceId, channel.id, selfMemberId),
+    // 본인 나가기 길(#5778). 관리자 전용 `removeChannelMember` 로 자기를 지우면 일반 멤버는 403 이다.
+    mutationFn: () => leaveChannel(workspaceId, channel.id),
     onSuccess: () => {
       setLeaveError(null);
       setConfirmLeave(false);
@@ -341,7 +346,8 @@ export function useChannelActions({
     onError: (mutationError) => {
       // 목록을 건드리지 않았으므로 되돌릴 것이 없다. 다이얼로그는 그대로 서
       // 있고, 그 안에서 이유를 말한다.
-      setLeaveError(channelLeaveFailureMessage(mutationError));
+      const failure = channelLeaveFailure(mutationError);
+      setLeaveError(formatMessage(failure.key, failure.values as never));
     },
   });
 
@@ -483,6 +489,7 @@ export function useChannelActions({
       onMoveToSection?.(sectionId);
     },
     leave: {
+      kind: channel.kind,
       confirmOpen: confirmLeave,
       open: () => {
         setLeaveError(null);
@@ -900,6 +907,7 @@ export function ChannelLeaveConfirmDialog({
   opener?: DialogFocusTarget | null;
 }) {
   const { leave } = actions;
+  const formatMessage = useFormatMessage();
   return (
     <Dialog
       open={leave.confirmOpen}
@@ -920,7 +928,9 @@ export function ChannelLeaveConfirmDialog({
         >
           <div className="flex flex-col gap-1">
             <DialogTitle>{CHANNEL_LEAVE_CONFIRM_TITLE}</DialogTitle>
-            <DialogDescription>{channelLeaveConfirmBody(title)}</DialogDescription>
+            <DialogDescription>
+              {formatMessage(channelLeaveConfirmBodyKey(leave.kind), { name: title })}
+            </DialogDescription>
           </div>
           {leave.error && (
             <InlineBanner

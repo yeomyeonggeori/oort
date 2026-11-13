@@ -6,7 +6,7 @@ import {isChannelActionStatusIcon} from '@momo/core/features/channels/actionMode
 import {
   CHANNEL_LEAVE_CONFIRM_TITLE,
   CHANNEL_LEAVE_LABEL,
-  channelLeaveConfirmBody,
+  channelLeaveConfirmBodyKey,
 } from '@momo/core/features/channels/model';
 import type {Channel} from '@momo/core/lib/api';
 import React from 'react';
@@ -16,6 +16,7 @@ import {PageSheet} from '../../design/PageSheet';
 import {SheetHeader} from '../../design/SheetChrome';
 import {ConfirmStep, GroupCard, ListRow, RowStatusIcon, SheetScroll} from '../../design/sheetParts';
 import {useStyles} from '../../design/theme';
+import {useFormatMessage} from '../../i18n/useFormatMessage';
 import {font, line, type Palette} from '../../design/tokens';
 import {
   CONVERSATION_DELEGATE_LABEL,
@@ -92,6 +93,7 @@ export function ConversationMenuSheet({
   onClose: () => void;
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
+  const formatMessage = useFormatMessage();
   const infoLabel = kind === 'dm' ? CONVERSATION_INFO_LABEL.dm : CONVERSATION_INFO_LABEL.channel;
   const mute = items.find(item => item.key === 'mute');
   // DM 은 「목록에서 숨기기」, 채널은 「채널 나가기」 — 코어 표가 한 대화에 둘을 함께 내지 않는다(`isDm`).
@@ -132,7 +134,7 @@ export function ConversationMenuSheet({
           <ConfirmStep
             testID="conversation-menu-leave-confirm"
             headline={CHANNEL_LEAVE_CONFIRM_TITLE}
-            detail={channelLeaveConfirmBody(title)}
+            detail={formatMessage(channelLeaveConfirmBodyKey(kind), {name: title})}
             error={leave.error}
             errorTestID="conversation-menu-leave-error"
             confirmLabel={CHANNEL_LEAVE_LABEL}

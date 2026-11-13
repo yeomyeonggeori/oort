@@ -388,7 +388,8 @@ export function channelActionAvailability(input: {
     copyName: true,
     copyId: true,
     closeDm: isDm && (input.canCloseDm ?? false),
-    leave: !isDm && canLeaveChannel(input.selfRole),
+    // 본인 나가기 길은 역할을 보지 않는다(#5778). DM 만 빠진다.
+    leave: canLeaveChannel(input.channel.kind),
   };
 }
 

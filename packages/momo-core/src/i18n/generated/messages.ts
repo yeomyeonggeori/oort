@@ -1366,6 +1366,12 @@ export const messageKeys = [
   "timeline.approval.reproposeBusy",
   "timeline.approval.reproposeSeeded",
   "timeline.approvalExpiry.soon",
+  "timeline.channelLeave.bodyPrivate",
+  "timeline.channelLeave.bodyPublic",
+  "timeline.channelLeave.errorForbidden",
+  "timeline.channelLeave.errorGeneric",
+  "timeline.channelLeave.errorNetwork",
+  "timeline.channelLeave.errorNotFound",
   "timeline.createChannel.privateDetail",
   "timeline.createChannel.publicDetail",
   "timeline.edited.atDate",
@@ -1395,8 +1401,20 @@ export const messageKeys = [
   "timeline.memberPanel.nowFailedMid",
   "timeline.memberPanel.nowFailedShort",
   "timeline.memberPanel.nowRetry",
+  "timeline.memberPanel.remove",
+  "timeline.memberPanel.removeBody",
+  "timeline.memberPanel.removeBusy",
+  "timeline.memberPanel.removeCancel",
+  "timeline.memberPanel.removeConfirm",
+  "timeline.memberPanel.removed",
+  "timeline.memberPanel.removeErrorForbidden",
+  "timeline.memberPanel.removeErrorGeneric",
+  "timeline.memberPanel.removeErrorNetwork",
+  "timeline.memberPanel.removeErrorNotFound",
+  "timeline.memberPanel.removeTitle",
   "timeline.memberPanel.request",
   "timeline.memberPanel.requestSpoken",
+  "timeline.memberPanel.rowActions",
   "timeline.memberPanel.stageSpoken",
   "timeline.quote.head",
   "timeline.quote.headUnnamed",
@@ -3247,6 +3265,18 @@ export const argumentSpecs = {
   "timeline.approval.reproposeBusy": {},
   "timeline.approval.reproposeSeeded": {},
   "timeline.approvalExpiry.soon": {},
+  "timeline.channelLeave.bodyPrivate": {
+    "name": "string"
+  },
+  "timeline.channelLeave.bodyPublic": {
+    "name": "string"
+  },
+  "timeline.channelLeave.errorForbidden": {},
+  "timeline.channelLeave.errorGeneric": {},
+  "timeline.channelLeave.errorNetwork": {
+    "reason": "string"
+  },
+  "timeline.channelLeave.errorNotFound": {},
   "timeline.createChannel.privateDetail": {},
   "timeline.createChannel.publicDetail": {},
   "timeline.edited.atDate": {
@@ -3306,11 +3336,34 @@ export const argumentSpecs = {
   "timeline.memberPanel.nowFailedMid": {},
   "timeline.memberPanel.nowFailedShort": {},
   "timeline.memberPanel.nowRetry": {},
+  "timeline.memberPanel.remove": {},
+  "timeline.memberPanel.removeBody": {
+    "channel": "string",
+    "name": "string"
+  },
+  "timeline.memberPanel.removeBusy": {},
+  "timeline.memberPanel.removeCancel": {},
+  "timeline.memberPanel.removeConfirm": {},
+  "timeline.memberPanel.removed": {
+    "name": "string"
+  },
+  "timeline.memberPanel.removeErrorForbidden": {},
+  "timeline.memberPanel.removeErrorGeneric": {},
+  "timeline.memberPanel.removeErrorNetwork": {
+    "reason": "string"
+  },
+  "timeline.memberPanel.removeErrorNotFound": {},
+  "timeline.memberPanel.removeTitle": {
+    "name": "string"
+  },
   "timeline.memberPanel.request": {
     "text": "string"
   },
   "timeline.memberPanel.requestSpoken": {
     "text": "string"
+  },
+  "timeline.memberPanel.rowActions": {
+    "name": "string"
   },
   "timeline.memberPanel.stageSpoken": {
     "stage": "string"
@@ -4908,6 +4961,12 @@ export interface MessageArgs {
   "timeline.approval.reproposeBusy": Record<string, never>;
   "timeline.approval.reproposeSeeded": Record<string, never>;
   "timeline.approvalExpiry.soon": Record<string, never>;
+  "timeline.channelLeave.bodyPrivate": { name: string };
+  "timeline.channelLeave.bodyPublic": { name: string };
+  "timeline.channelLeave.errorForbidden": Record<string, never>;
+  "timeline.channelLeave.errorGeneric": Record<string, never>;
+  "timeline.channelLeave.errorNetwork": { reason: string };
+  "timeline.channelLeave.errorNotFound": Record<string, never>;
   "timeline.createChannel.privateDetail": Record<string, never>;
   "timeline.createChannel.publicDetail": Record<string, never>;
   "timeline.edited.atDate": { date: string; time: string };
@@ -4937,8 +4996,20 @@ export interface MessageArgs {
   "timeline.memberPanel.nowFailedMid": Record<string, never>;
   "timeline.memberPanel.nowFailedShort": Record<string, never>;
   "timeline.memberPanel.nowRetry": Record<string, never>;
+  "timeline.memberPanel.remove": Record<string, never>;
+  "timeline.memberPanel.removeBody": { channel: string; name: string };
+  "timeline.memberPanel.removeBusy": Record<string, never>;
+  "timeline.memberPanel.removeCancel": Record<string, never>;
+  "timeline.memberPanel.removeConfirm": Record<string, never>;
+  "timeline.memberPanel.removed": { name: string };
+  "timeline.memberPanel.removeErrorForbidden": Record<string, never>;
+  "timeline.memberPanel.removeErrorGeneric": Record<string, never>;
+  "timeline.memberPanel.removeErrorNetwork": { reason: string };
+  "timeline.memberPanel.removeErrorNotFound": Record<string, never>;
+  "timeline.memberPanel.removeTitle": { name: string };
   "timeline.memberPanel.request": { text: string };
   "timeline.memberPanel.requestSpoken": { text: string };
+  "timeline.memberPanel.rowActions": { name: string };
   "timeline.memberPanel.stageSpoken": { stage: string };
   "timeline.quote.head": { name: string };
   "timeline.quote.headUnnamed": Record<string, never>;

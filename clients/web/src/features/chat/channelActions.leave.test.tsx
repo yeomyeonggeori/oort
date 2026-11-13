@@ -8,8 +8,9 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vite
 import { ApiError, type Channel } from "@momo/core/lib/api";
 import {
   CHANNEL_LEAVE_LABEL,
-  channelLeaveFailureMessage,
+  channelLeaveFailure,
 } from "@momo/core/features/channels/model";
+import enTimeline from "../../../../../packages/momo-core/src/i18n/catalogs/en-US/timeline.json";
 import { resetEscapeLayers } from "@/design/ui/escapeLayer";
 import { ChannelHeaderMenu } from "./ChannelHeaderMenu";
 import { SidebarRowContextMenu } from "@/features/sidebar/SidebarRowContextMenu";
@@ -32,12 +33,15 @@ const WS = "00000000-0000-7000-8000-000000000001";
 const ME = "00000000-0000-7000-8000-000000000101";
 const CHANNEL_ID = "00000000-0000-7000-8000-000000000201";
 
+const leaveChannel = vi.hoisted(() => vi.fn());
+// 관리자 전용 길(`…/members/{id}`). 나가기가 이 길을 부르면 일반 멤버는 403 이다(#5778) — 불리면 시험이 붉다.
 const removeChannelMember = vi.hoisted(() => vi.fn());
 
 vi.mock("@momo/core/lib/api", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@momo/core/lib/api")>();
   return {
     ...actual,
+    leaveChannel: (ws: string, ch: string) => leaveChannel(ws, ch) as Promise<unknown>,
     removeChannelMember: (ws: string, ch: string, member: string) =>
       removeChannelMember(ws, ch, member) as Promise<unknown>,
   };
@@ -72,6 +76,7 @@ beforeAll(() => {
 });
 
 beforeEach(() => {
+  leaveChannel.mockReset();
   removeChannelMember.mockReset();
   vi.stubGlobal("matchMedia", (query: string) => ({
     matches: false,
@@ -164,18 +169,20 @@ function click(id: string) {
 /**
  * 두 표면. 열쇠(메뉴를 여는 손 · testid 접두사)만 다르고 시나리오는 같다.
  */
+type SelfRole = "owner" | "member" | "guest";
+
 const SURFACES = [
   {
     name: "헤더 ⋮",
     confirm: "channel-leave-confirm",
-    mount: () => {
+    mount: (selfRole: SelfRole = "owner") => {
       mount(
         createElement(ChannelHeaderMenu, {
           workspaceId: WS,
           channel: channelFixture(),
           title: "general",
           selfMemberId: ME,
-          selfRole: "owner" as const,
+          selfRole,
         })
       );
       click("channel-title-menu");
@@ -185,7 +192,7 @@ const SURFACES = [
   {
     name: "사이드바 행 우클릭",
     confirm: "channel-row-leave-confirm",
-    mount: () => {
+    mount: (selfRole: SelfRole = "owner") => {
       mount(
         createElement(
           "ul",
@@ -196,7 +203,7 @@ const SURFACES = [
               channel: channelFixture(),
               title: "general",
               selfMemberId: ME,
-              selfRole: "owner" as const,
+              selfRole,
               readState: null,
               children: createElement("a", {
                 href: `/c/${CHANNEL_ID}`,
@@ -227,18 +234,19 @@ for (const surface of SURFACES) {
   describe(`나가기 왕복 — ${surface.name}`, () => {
     it("확인 뒤에도 다이얼로그가 서서 「나가는 중」이라 말한다", async () => {
       const pending = deferred<unknown>();
-      removeChannelMember.mockReturnValue(pending.promise);
+      leaveChannel.mockReturnValue(pending.promise);
       surface.mount();
       click(surface.leaveItem);
       await flush();
       expect(byId(surface.confirm)).not.toBeNull();
-      expect(removeChannelMember).not.toHaveBeenCalled();
+      expect(leaveChannel).not.toHaveBeenCalled();
 
       click(`${surface.confirm}-action`);
       await flush();
 
       // 이 세 줄이 결함이 삼켰던 것 전부다.
-      expect(removeChannelMember).toHaveBeenCalledWith(WS, CHANNEL_ID, ME);
+      expect(leaveChannel).toHaveBeenCalledWith(WS, CHANNEL_ID);
+      expect(removeChannelMember).not.toHaveBeenCalled();
       expect(byId(surface.confirm)).not.toBeNull();
       const action = byId(`${surface.confirm}-action`);
       expect(action?.getAttribute("aria-busy")).toBe("true");
@@ -252,7 +260,7 @@ for (const surface of SURFACES) {
 
     it("403 이면 그 자리에서 이유를 말하고 채널은 그대로 남는다", async () => {
       const pending = deferred<unknown>();
-      removeChannelMember.mockReturnValue(pending.promise);
+      leaveChannel.mockReturnValue(pending.promise);
       surface.mount();
       click(surface.leaveItem);
       await flush();
@@ -268,7 +276,10 @@ for (const surface of SURFACES) {
 
       const banner = byId(`${surface.confirm}-error`);
       expect(banner).not.toBeNull();
-      expect(banner?.textContent).toBe(channelLeaveFailureMessage(denied));
+      // 사전 없이 띄운 시험이라 영어 사전이 말한다(`useFormatMessage` 의 대체).
+      expect(banner?.textContent).toBe(
+        (enTimeline as Record<string, string>)[channelLeaveFailure(denied).key]
+      );
       expect(byId(surface.confirm)).not.toBeNull();
       // 실패했으니 채널은 그 자리에 있다. 사라졌다가 되돌아오지 않는다.
       expect(cachedChannels()).toHaveLength(1);
@@ -283,7 +294,7 @@ for (const surface of SURFACES) {
 
     it("성공하면 그때 목록에서 사라지고 다이얼로그가 닫힌다", async () => {
       const pending = deferred<unknown>();
-      removeChannelMember.mockReturnValue(pending.promise);
+      leaveChannel.mockReturnValue(pending.promise);
       surface.mount();
       click(surface.leaveItem);
       await flush();
@@ -300,5 +311,26 @@ for (const surface of SURFACES) {
       expect(cachedChannels()).toHaveLength(0);
       expect(byId(surface.confirm)).toBeNull();
     });
+
+    for (const role of ["member", "guest"] as const) {
+      it(`${role} 도 나가기를 보고, 누르면 관리자 길이 아니라 본인 나가기 길을 부른다 (#5778)`, async () => {
+        const pending = deferred<unknown>();
+        leaveChannel.mockReturnValue(pending.promise);
+        surface.mount(role);
+        expect(byId(surface.leaveItem)).not.toBeNull();
+        click(surface.leaveItem);
+        await flush();
+        click(`${surface.confirm}-action`);
+        await flush();
+        expect(leaveChannel).toHaveBeenCalledWith(WS, CHANNEL_ID);
+        expect(removeChannelMember).not.toHaveBeenCalled();
+        await act(async () => {
+          pending.resolve({ channelId: CHANNEL_ID, memberId: ME, archived: false });
+          await Promise.resolve();
+        });
+        await flush();
+        expect(cachedChannels()).toHaveLength(0);
+      });
+    }
   });
 }

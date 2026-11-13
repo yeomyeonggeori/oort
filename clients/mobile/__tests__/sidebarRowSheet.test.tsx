@@ -168,9 +168,18 @@ function installFetch(routes: Routes = {}) {
         mention_count: 0,
       });
     }
-    if (method === 'DELETE' && url.includes('/members/')) {
+    // 본인 나가기 길(#5778). 서버처럼 역할을 보지 않는다.
+    if (method === 'DELETE' && url.endsWith('/members/me')) {
       if ((routes.leaveStatus ?? 200) !== 200) {
-        return jsonResponse(routes.leaveStatus as number, {error: {message: 'forbidden'}});
+        return jsonResponse(routes.leaveStatus as number, {error: {message: 'direct message channels cannot be left'}});
+      }
+      return jsonResponse(200, {channelId: 'ch-general', memberId: SELF_ID, archived: false});
+    }
+    // 관리자 전용 길(`…/members/{id}`). 서버처럼 소유자·관리자만 받는다 — 일반 멤버의 나가기가 이 길로 새면 403 이다.
+    if (method === 'DELETE' && url.includes('/members/')) {
+      const role = routes.selfRole ?? 'admin';
+      if (role !== 'owner' && role !== 'admin') {
+        return jsonResponse(403, {error: {message: 'workspace owner or admin role required'}});
       }
       return jsonResponse(200, {
         membership: {
@@ -386,10 +395,16 @@ describe('길게 누르기가 시트를 연다', () => {
     expect(screen.queryByTestId('channel-action-sheet')).toBeNull();
   });
 
-  it('일반 멤버에게는 나가기가 없다', async () => {
+  it('일반 멤버도 나가기가 서고, 확인하면 본인 나가기 길로 나간다 — 관리자 길이면 서버가 403 이다 (#5778)', async () => {
     await mount({selfRole: 'member'});
     longPress('sidebar-row-channel:ch-general');
-    expect(sheetKeys()).not.toContain('leave');
+    expect(sheetKeys()).toContain('leave');
+    fireEvent.press(screen.getByTestId('channel-sheet-leave'));
+    fireEvent.press(screen.getByTestId('channel-leave-confirm-button'));
+    await waitFor(() => expect(screen.queryByTestId('channel-action-sheet')).toBeNull());
+    expect(calls.filter(call => call.method === 'DELETE').map(call => call.url.replace(/^.*\/channels\//, ''))).toEqual([
+      'ch-general/members/me',
+    ]);
   });
 
   it('머리의 원형 X 와 배경이 시트를 닫는다 — 글자 「닫기」 줄은 없다 (#4318)', async () => {
@@ -502,7 +517,7 @@ describe('채널 나가기는 확인 단계를 지난다', () => {
     fireEvent.press(screen.getByTestId('channel-leave-confirm-button'));
     await waitFor(() => expect(calls.some(call => call.method === 'DELETE')).toBe(true));
     const del = calls.find(call => call.method === 'DELETE')!;
-    expect(del.url).toContain(`/channels/ch-general/members/${SELF_ID}`);
+    expect(del.url).toMatch(/\/channels\/ch-general\/members\/me$/);
     await waitFor(() => expect(screen.queryByTestId('channel-action-sheet')).toBeNull());
   });
 
@@ -540,7 +555,7 @@ describe('채널 나가기는 확인 단계를 지난다', () => {
     fireEvent.press(screen.getByTestId('channel-sheet-leave'));
     fireEvent.press(screen.getByTestId('channel-leave-confirm-button'));
     await waitFor(() => expect(screen.getByTestId('channel-leave-error')).toBeTruthy());
-    expect(screen.getByTestId('channel-leave-error')).toHaveTextContent(/나갈 권한이 없습니다/);
+    expect(screen.getByTestId('channel-leave-error')).toHaveTextContent(/나갈 수 없어요/);
     expect(screen.getByTestId('channel-leave-confirm')).toBeTruthy();
   });
 });
