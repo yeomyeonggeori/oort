@@ -236,6 +236,12 @@ async function ownerRun(page, origin, tag, withHandoff) {
   if (withHandoff) {
     await page.getByTestId("add-workspace-join-logout").click();
     await page.getByTestId("join-sign-in-instead").waitFor({ timeout: 15_000 });
+    // 첫 그림은 저장된 서버로 서고, 링크를 읽은 효과가 다음 커밋에서 칩을 바꾼다. 그 커밋을 기다린다.
+    await page.waitForFunction(
+      () => document.querySelector("[data-testid=connect-server-chip-host]")?.textContent?.includes("team.example.com"),
+      null,
+      { timeout: 5_000 }
+    ).catch(() => {});
     const chip = await page.getByTestId("connect-server-chip-host").innerText().catch(() => "");
     const href = page.url();
     check(tag, "넘김: 로그인 화면이 초대 가입 걸음에 서고 서버 칩이 그 주소다", chip.includes("team.example.com"), { chip });
@@ -305,14 +311,18 @@ async function main() {
   mkdirSync(OUT_DIR, { recursive: true });
   const preview = await startGuardedPreview({ webRoot: WEB_ROOT, port: PORT, portEnvVar: "CAPTURE_PORT", extraArgs: [] });
   const browser = await chromium.launch();
-  const sizes = [
+  const allSizes = [
     { w: 1280, h: 800, dpr: 2, name: "1280" },
     { w: 720, h: 480, dpr: 1, name: "720x480" },
     { w: 640, h: 400, dpr: 2, name: "zoom200" },
   ];
+  /** `SIZES=zoom200` 처럼 주면 그 크기만. */
+  const SIZES = (process.env.SIZES || "").split(",").map((v) => v.trim()).filter(Boolean);
+  const sizes = SIZES.length === 0 ? allSizes : allSizes.filter((v) => SIZES.includes(v.name));
+  const SCHEMES = (process.env.SCHEMES || "light,dark").split(",").map((v) => v.trim()).filter(Boolean);
   try {
     for (const vp of sizes) {
-      for (const scheme of ["light", "dark"]) {
+      for (const scheme of SCHEMES) {
         const tag = `${vp.name}-${scheme}`;
         for (const [role, run] of [["owner", ownerRun], ["member", memberRun]]) {
           if (!wants(role)) continue;
@@ -330,7 +340,7 @@ async function main() {
     }
     // 넘김은 한 번이면 된다(로그아웃한다).
     const { context, page } = wants("handoff")
-      ? await newContext(browser, preview.origin, "light", sizes[0], "owner")
+      ? await newContext(browser, preview.origin, "light", allSizes[0], "owner")
       : { context: null, page: null };
     if (page) try {
       await ownerRun(page, preview.origin, "1280-light", true);
