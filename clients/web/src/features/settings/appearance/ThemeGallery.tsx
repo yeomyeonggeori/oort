@@ -52,8 +52,10 @@ export default function ThemeGallery() {
   const groupName = `theme-style-${useId()}`;
   const tiles = useMemo(() => galleryTiles(scheme), [scheme]);
 
-  // 처음 설 때와 색 모드가 바뀌어 목록이 바뀔 때만 격자 안쪽을 잰다(바깥 페이지는 그대로). 사람이 고르거나(누름·방향키) Tab으로 닿을
-  // 때 따라가는 일은 브라우저의 초점 따라가기가 한다: 라디오가 타일 전체를 덮어서(`radio-cover`, tokens.css) 초점 든 상자가 곧 타일이다.
+  // 처음 설 때와 색 모드가 바뀌어 목록이 바뀔 때만 격자 안쪽을 잰다(바깥 페이지는 그대로). Tab으로 닿을 때 따라가는 일은 브라우저의
+  // 초점 따라가기가 한다: 라디오가 타일 전체를 덮어서(`radio-cover`, tokens.css) 초점 든 상자가 곧 타일이다. 사람이 고른 순간(누름·
+  // 방향키의 change)에는 `ThemeTile`이 고른 카드를 가장 가까운 자리로 데려온다: WebKit은 방향키로 일부만 보이는 줄에 들어갈 때 따라오지
+  // 않는다(검수 r4 B-1d).
   useLayoutEffect(() => {
     const box = scroller.current;
     const tile = box?.querySelector<HTMLElement>(".theme-tile[data-selected]");

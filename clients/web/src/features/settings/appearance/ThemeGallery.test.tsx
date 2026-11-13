@@ -429,6 +429,55 @@ describe("색 모드를 바꿀 때 단일 모드 규칙 2·3이 화면 경로에
   });
 });
 
+describe("고른 카드로 따라가기: 사람이 고른 순간(change)에만 (#5783 검수 r4 B-1d)", () => {
+  // jsdom에는 `scrollIntoView`가 없다: 부른 요소와 인자를 센다. 실제 배치(WebKit·Chromium)는 캡처 `follow` 장면이 잰다.
+  const calls: { node: Element; options: unknown }[] = [];
+  const original = Element.prototype.scrollIntoView;
+  beforeEach(() => {
+    calls.length = 0;
+    Element.prototype.scrollIntoView = function (this: Element, options?: unknown) {
+      calls.push({ node: this, options });
+    };
+  });
+  afterEach(() => {
+    Element.prototype.scrollIntoView = original;
+  });
+
+  it("마운트·초점·색 모드가 테마를 옮길 때는 부르지 않고, 타일을 고르면 그 카드 하나를 가장 가까운 자리로 한 번 부른다", async () => {
+    // 다크 단독 테마에서 연다: 라이트로 바꾸면 규칙 3이 테마를 새벽하늘로 옮긴다(테마가 바뀌는 효과에 걸었다면 여기서 불린다).
+    updateAppearance({ theme: "catalog:nord", scheme: "dark" });
+    const host = await mountSection();
+    expect(calls, "마운트").toHaveLength(0);
+    const nord = radio(host, tileTestId("catalog:nord"))!;
+    act(() => nord.focus());
+    expect(document.activeElement).toBe(nord);
+    expect(calls, "초점(Tab 도착)").toHaveLength(0);
+    click(radio(host, "theme-choice-light"));
+    expect(getThemeRef()).toBe("dawnsky");
+    expect(calls, "색 모드가 테마를 옮김").toHaveLength(0);
+    click(radio(host, tileTestId("catalog:github")));
+    expect(getThemeRef()).toBe("catalog:github");
+    expect(calls).toHaveLength(1);
+    expect(calls[0].node).toBe(q(host, tileTestId("catalog:github")));
+    expect(calls[0].options).toEqual({ block: "nearest", inline: "nearest" });
+  });
+
+  it("강조색 칩도 같다: 초점에서는 부르지 않고, 고르면 그 칩의 라디오(초점 링 여유 `scroll-margin`을 가진 상자)를 한 번 부른다", async () => {
+    updateAppearance({ theme: "catalog:catppuccin-frappe", scheme: "dark" });
+    const host = await mountSection();
+    expect(calls, "마운트").toHaveLength(0);
+    const dawn = radio(host, "accent-swatch-dawn")!;
+    act(() => dawn.focus());
+    expect(document.activeElement).toBe(dawn);
+    expect(calls, "초점(Tab 도착)").toHaveLength(0);
+    click(radio(host, "accent-swatch-gamram"));
+    expect(getAccent()).toBe("gamram");
+    expect(calls).toHaveLength(1);
+    expect(calls[0].node).toBe(radio(host, "accent-swatch-gamram"));
+    expect(calls[0].options).toEqual({ block: "nearest", inline: "nearest" });
+  });
+});
+
 describe("강조색 칩: 그 테마·모드에서 푼 색과 쓸 수 있는지 (AC 6)", () => {
   const chip = (host: HTMLElement, id: string) => q(host, `accent-swatch-${id}`)!;
 

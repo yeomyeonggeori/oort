@@ -30,14 +30,17 @@
 //            고른 타일이 격자 안·창 안에 온전히 ② 타일에 갔다가 Shift+Tab으로 돌아온 색 모드 초점이 창 안(Tab 때 페이지가 실제로 움직인 경우
 //            포함) ③ 방향키로 끝까지(다크 43장, 순환 포함) 고른 타일과 초점이 온전히 ④ 다 보이는 타일을 마우스로 고르면 페이지·격자 0px
 //            ⑤ 색 모드를 바꾸면 페이지 0px ⑥ 타일에서 Tab으로 닿은 강조색 칩이 초점 링까지 창 안. 덮은 라디오가 포인터를 받지 않는지(타일·칩·
-//            색 모드 가운데에서 맞는 요소가 라벨 안)와 칩의 누르는 자리 44도 잰다. 어기면 종료 코드 1. 측정 `follow.json`.
+//            색 모드 가운데에서 맞는 요소가 라벨 안)와 칩의 누르는 자리 44도 잰다. 어기면 종료 코드 1. 측정 `follow-<엔진>.json`.
+//            **두 엔진**(번들 Chromium · 번들 WebKit, `FOLLOW_ENGINES=chromium,webkit` 기본)에서 같은 단정을 잰다: 데스크탑 앱은 WKWebView라
+//            WebKit이 실제 사용자 길이고, 방향키로 일부만 보이는 줄에 들어갈 때 WebKit만 따라오지 않았다(검수 r4 B-1d). WebKit은 macOS
+//            기본값에서 Tab이 라디오를 건너뛰어 Option+Tab으로 옮긴다. 엔진이 없으면 건너뛰지 않고 실패한다.
 //
 // 백엔드 없이 `/v1/**` 고정 응답 + 가짜 소켓. 벽시계·로케일·시간대를 고정한다.
 // =============================================================================
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { chromium } from "playwright";
+import { chromium, webkit } from "playwright";
 import { startGuardedPreview } from "../gates/preview-guard.mjs";
 import { advanceToAccount } from "../e2e/advanceOnboarding.mjs";
 
@@ -934,14 +937,36 @@ const FOLLOW_TAB_CASES = [
 ];
 const FOLLOW_ARROW_CASES = [
   [{ name: "1440x900", width: 1440, height: 900 }, "catalog:catppuccin-frappe"],
+  // 데스크탑 기본 창(tauri.conf.json). WebKit에서 방향키로 일부만 보이는 줄에 들어가면 고른 카드가 39px만 보였다(검수 r4 B-1d).
+  [{ name: "1100x760", width: 1100, height: 760 }, "catalog:catppuccin-frappe"],
   [{ name: "720x480", width: 720, height: 480 }, "catalog:catppuccin-frappe"],
   [{ name: "zoom200", width: 720, height: 450 }, "catalog:catppuccin-frappe"],
   [{ name: "390x844", width: 390, height: 844 }, "catalog:catppuccin-frappe"],
 ];
-async function followScenes(browser, origin) {
+const FOLLOW_ENGINES = { chromium, webkit };
+async function followScenes(origin) {
+  const names = (process.env.FOLLOW_ENGINES || "chromium,webkit").split(",").filter(Boolean);
+  for (const name of names) {
+    if (!FOLLOW_ENGINES[name]) throw new Error(`follow: 모르는 엔진 ${name} (chromium · webkit)`);
+    // 엔진이 설치돼 있지 않으면 여기서 던진다(건너뛰지 않는다): 한 엔진만 잰 초록은 r4 B-1d를 숨긴 그 초록이다.
+    const browser = await FOLLOW_ENGINES[name].launch();
+    try {
+      await followIn(browser, name, origin);
+    } finally {
+      await browser.close();
+    }
+  }
+}
+async function followIn(browser, engine, origin) {
   const bad = [];
-  const out = { tab: [], arrows: [], mouse: [], scheme: [] };
+  const out = { engine, tab: [], arrows: [], mouse: [], scheme: [] };
   const fail = (where, what) => bad.push(`${where}: ${what}`);
+  // WebKit(macOS 기본값)은 Tab이 단추·라디오를 건너뛴다: Option+Tab이 「모든 컨트롤」 길이다.
+  const keyName = (name) => (engine === "webkit" ? name.replace(/^Shift\+Tab$/, "Alt+Shift+Tab").replace(/^Tab$/, "Alt+Tab") : name);
+  /** 엉뚱한 스크롤(페이지 스크롤 상자·격자의 세로 말고 다른 조상·창·가로)이 있으면 어긴다. */
+  const straight = (where, name, s) => {
+    if (s.stray.length > 0) fail(where, `${name}: 엉뚱한 스크롤 ${s.stray.join(" | ")}`);
+  };
   /** 초점 든 컨트롤과 고른 타일의 자리. 페이지 스크롤 상자는 격자에서 위로 올라가며 처음 만나는 스크롤 상자다. */
   const stop = (page) =>
     page.evaluate(() => {
@@ -962,7 +987,18 @@ async function followScenes(browser, origin) {
       const ring = chip ? 4 : 0; // 칩의 초점 링은 누르는 자리 바깥 2에 두께 2(swatches.css)
       const sel = document.querySelector(".theme-tile[data-selected]");
       const sr = sel.getBoundingClientRect();
+      // 따라가기는 페이지 스크롤 상자와 격자의 세로만 움직여야 한다. 다른 조상(`overflow: hidden` 포함)·가로·창이 구르면 어긴다.
+      const stray = [];
+      for (let p = control.parentElement; p; p = p.parentElement) {
+        if (p === grid || p === pane) {
+          if (p.scrollLeft) stray.push(`${p === grid ? "grid" : "pane"}-x ${Math.round(p.scrollLeft)}`);
+          continue;
+        }
+        if (p.scrollTop || p.scrollLeft) stray.push(`${p.tagName}.${String(p.className).slice(0, 40)} ${Math.round(p.scrollTop)},${Math.round(p.scrollLeft)}`);
+      }
+      if (pane !== document.scrollingElement && (scrollX || scrollY)) stray.push(`window ${scrollX},${scrollY}`);
       return {
+        stray,
         what: tile ? "tile" : chip ? `chip:${chip.getAttribute("data-accent-swatch")}` : seg ? `seg:${a.value}` : `other:${a?.tagName}`,
         page: Math.round(pane.scrollTop),
         grid: Math.round(grid.scrollTop),
@@ -978,7 +1014,7 @@ async function followScenes(browser, origin) {
       };
     });
   const key = async (page, name) => {
-    await page.keyboard.press(name);
+    await page.keyboard.press(keyName(name));
     await page.waitForTimeout(160);
     await settle(page);
     return stop(page);
@@ -1014,6 +1050,7 @@ async function followScenes(browser, origin) {
       const s6 = await key(page, "Tab");
       const s7 = await key(page, "Shift+Tab");
       out.tab.push({ where, mustMove, s0, s1, s2, s3, s4, s5, s6, s7 });
+      for (const [name, s] of Object.entries({ s0, s1, s2, s3, s4, s5, s6, s7 })) straight(where, name, s);
       if (s0.what !== `seg:${scheme}` || !s0.full) fail(where, `시작 초점이 색 모드가 아니거나 안 보임 ${JSON.stringify(s0)}`);
       for (const [name, s] of [["① Tab 도착", s1], ["① 다시 Tab", s3], ["① 칩에서 Shift+Tab", s5], ["① 맨 아래에서 Tab·Shift+Tab", s7]]) {
         if (!tileOk(s)) fail(where, `${name}: 고른 타일이 온전히 보이지 않음 ${JSON.stringify(s)}`);
@@ -1023,8 +1060,9 @@ async function followScenes(browser, origin) {
       for (const [name, s] of [["⑥ 타일에서 Tab", s4], ["⑥ 맨 아래에서 Tab", s6]]) {
         if (!s.what.startsWith("chip:") || !s.full) fail(where, `${name}: 칩(초점 링 포함)이 창 안이 아님 ${JSON.stringify(s)}`);
       }
-      if (s1.page !== s0.page || s1.what !== "tile") {
-        await page.screenshot({ path: resolve(outDir(), `follow-tab-${viewport.name}-${scheme}-${theme.replace("catalog:", "")}.png`), animations: "disabled", caret: "hide" });
+      if (s1.page !== s0.page || s1.what !== "tile" || viewport.name === "720x480") {
+        // 끝 장면(맨 아래에서 Tab → Shift+Tab 뒤): 720×480은 늘 남긴다(데스크탑 최소 창).
+        await page.screenshot({ path: resolve(outDir(), `follow-${engine}-tab-${viewport.name}-${scheme}-${theme.replace("catalog:", "")}.png`), animations: "disabled", caret: "hide" });
       }
     } finally {
       await context.close();
@@ -1074,30 +1112,50 @@ async function followScenes(browser, origin) {
       }
       for (const name of ["segment", "tileFrame", "tileName"]) if (!measured.has(name)) fail(where, `포인터: ${name}를 잴 자리가 없었다(시험 전제)`);
       const steps = [];
+      let shotCut = false;
       for (const dir of ["forward", "back"]) {
         for (let i = 0; i < 46; i += 1) {
           const name = dir === "forward" ? (i % 2 ? "ArrowRight" : "ArrowDown") : (i % 2 ? "ArrowLeft" : "ArrowUp");
           const s = await key(page, name);
           steps.push({ dir, i, selected: s.selected, ok: tileOk(s), dPage: s.page - prev.page, dGrid: s.grid - prev.grid, top: s.top, bottom: s.bottom });
-          if (!tileOk(s)) fail(where, `③ ${dir} ${i + 1}번째 ${name}: 고른 타일·초점이 온전히 보이지 않음 ${JSON.stringify(s)}`);
+          straight(where, `③ ${dir} ${i + 1}`, s);
+          if (!tileOk(s)) {
+            fail(where, `③ ${dir} ${i + 1}번째 ${name}: 고른 타일·초점이 온전히 보이지 않음 ${JSON.stringify(s)}`);
+            if (!shotCut) {
+              shotCut = true;
+              await page.screenshot({ path: resolve(outDir(), `follow-${engine}-arrowcut-${viewport.name}-${dir}${i + 1}.png`), animations: "disabled", caret: "hide" });
+            }
+          }
           prev = s;
         }
       }
       out.arrows.push({ where, count: steps.length, ok: steps.filter((s) => s.ok).length, distinct: new Set(steps.map((s) => s.selected)).size, steps });
       if (new Set(steps.map((s) => s.selected)).size < 40) fail(where, `③ 방향키가 테마를 끝까지 옮기지 않음(서로 다른 테마 ${new Set(steps.map((s) => s.selected)).size})`);
-      await page.screenshot({ path: resolve(outDir(), `follow-arrows-${viewport.name}.png`), animations: "disabled", caret: "hide" });
+      await page.screenshot({ path: resolve(outDir(), `follow-${engine}-arrows-${viewport.name}.png`), animations: "disabled", caret: "hide" });
 
-      // ④ 마우스: 격자 상자와 보이는 영역 안에 온전히 있는 (고르지 않은) 타일 셋을 차례로 누른다.
+      // ④ 마우스: 격자 상자와 보이는 영역 안에 온전히 있는 (고르지 않은) 타일 셋을 차례로 누른다. 「온전히」는 격자 위아래 페이드 구간
+      // (`scroll-padding-block` 12) 밖이다: 페이드 안의 타일은 이름이 흐려 덜 보이고, 고른 순간 따라가기가 그 구간 밖으로 12px까지 옮긴다.
+      // 누르기 전 준비로 격자 윗변을 페이지 보이는 영역 위 8에 둔다(검수자 탐침과 같은 자리: 낮은 창에서도 페이드 밖의 줄이 하나는 선다).
+      await page.evaluate(() => {
+        const grid = document.querySelector(".theme-gallery-scroll");
+        let pane = grid.parentElement;
+        while (pane && !(/(auto|scroll)/.test(getComputedStyle(pane).overflowY) && pane.scrollHeight > pane.clientHeight + 1)) pane = pane.parentElement;
+        pane = pane ?? document.scrollingElement;
+        pane.scrollTop += grid.getBoundingClientRect().top - Math.max(0, pane.getBoundingClientRect().top) - 8;
+      });
+      await settle(page);
       const clicks = [];
       for (let k = 0; k < 3; k += 1) {
         const target = await page.evaluate(() => {
-          const grid = document.querySelector(".theme-gallery-scroll").getBoundingClientRect();
-          const top = Math.max(grid.top, 0) + 1;
-          const bottom = Math.min(grid.bottom, innerHeight) - 1;
+          const box = document.querySelector(".theme-gallery-scroll");
+          const grid = box.getBoundingClientRect();
+          const fade = Number.parseFloat(getComputedStyle(box).scrollPaddingBlockStart) || 0;
+          const top = Math.max(grid.top + fade, 0) + 1;
+          const bottom = Math.min(grid.bottom - fade, innerHeight) - 1;
           const full = [...document.querySelectorAll(".theme-tile:not([data-selected])")]
             .map((t) => t.getBoundingClientRect())
             .filter((r) => r.top - 4 >= top && r.bottom + 4 <= bottom && r.left >= 0 && r.right <= innerWidth);
-          const r = full[full.length - 1 - (full.length > 2 ? 1 : 0)];
+          const r = full[Math.floor(full.length / 2)];
           return r ? { x: r.left + r.width / 2, y: r.top + r.height / 3 } : null;
         });
         if (!target) { fail(where, "④ 다 보이는 타일이 없다(시험 전제)"); break; }
@@ -1106,6 +1164,7 @@ async function followScenes(browser, origin) {
         await page.waitForTimeout(220);
         await settle(page);
         const after = await stop(page);
+        straight(where, `④ ${k + 1}`, after);
         clicks.push({ changed: after.selected !== before.selected, dPage: after.page - before.page, dGrid: after.grid - before.grid });
         if (after.selected === before.selected) fail(where, `④ 누른 타일이 골라지지 않음`);
         if (after.page !== before.page || after.grid !== before.grid) fail(where, `④ 다 보이는 타일을 눌렀는데 페이지 ${after.page - before.page} · 격자 ${after.grid - before.grid}px 움직임`);
@@ -1134,13 +1193,20 @@ async function followScenes(browser, origin) {
         const s = await stop(page);
         const now = await page.evaluate(() => document.querySelector('[data-testid="theme-choice"] input:checked').value);
         toggles.push({ by: "mouse", to, now, dPage: s.page - pv.page });
+        straight(where, `⑤ ${to}`, s);
         if (now !== to) fail(where, `⑤ 색 모드 ${to}를 눌렀는데 ${now}`);
         if (s.page !== pv.page) fail(where, `⑤ 색 모드 ${to}로 바꿀 때 페이지 ${s.page - pv.page}px`);
         pv = s;
       }
+      // 방향키 둘: WebKit은 라벨을 눌러도 라디오에 초점을 주지 않으므로 고른 칸에 초점을 직접 둔다(스크롤 없이). 두 엔진 모두 초점이
+      // 색 모드에 있고 값이 실제로 바뀌었는지까지 잰다(초점이 없는 채 0px이면 빈 단정이다).
+      await page.evaluate(() => document.querySelector('[data-testid="theme-choice"] input:checked').focus({ preventScroll: true }));
+      pv = await stop(page);
       for (const name of ["ArrowLeft", "ArrowRight"]) {
         const s = await key(page, name);
-        toggles.push({ by: name, now: s.what, dPage: s.page - pv.page });
+        toggles.push({ by: name, from: pv.what, now: s.what, dPage: s.page - pv.page });
+        straight(where, `⑤ ${name}`, s);
+        if (!s.what.startsWith("seg:") || s.what === pv.what) fail(where, `⑤ ${name}: 색 모드가 바뀌지 않음(${pv.what} → ${s.what})`);
         if (s.page !== pv.page) fail(where, `⑤ 색 모드를 ${name}로 바꿀 때 페이지 ${s.page - pv.page}px`);
         pv = s;
       }
@@ -1156,10 +1222,10 @@ async function followScenes(browser, origin) {
     mouseClicks: out.mouse.reduce((n, m) => n + m.clicks.length, 0),
     schemeToggles: out.scheme.reduce((n, s) => n + s.toggles.length, 0),
   };
-  writeFileSync(resolve(outDir(), "follow.json"), JSON.stringify({ summary, bad, ...out }, null, 1));
-  console.log(`FOLLOW: ${JSON.stringify(summary)}, ${bad.length} violations`);
+  writeFileSync(resolve(outDir(), `follow-${engine}.json`), JSON.stringify({ summary, bad, ...out }, null, 1));
+  console.log(`FOLLOW ${engine}: ${JSON.stringify(summary)}, ${bad.length} violations`);
   if (bad.length > 0) {
-    console.error(bad.slice(0, 20).join("\n"));
+    console.error(bad.slice(0, 20).map((line) => `[${engine}] ${line}`).join("\n"));
     process.exitCode = 1;
   }
 }
@@ -1214,7 +1280,7 @@ async function capture() {
     if (SCENES.includes("names")) await nameScenes(browser, preview.origin);
     if (SCENES.includes("extra")) await extraScenes(browser, preview.origin);
     if (SCENES.includes("qa8")) await qa8Scenes(browser, preview.origin);
-    if (SCENES.includes("follow")) await followScenes(browser, preview.origin);
+    if (SCENES.includes("follow")) await followScenes(preview.origin);
     if (SCENES.includes("design")) {
       // 디자인 갤러리는 `VITE_DESIGN_GALLERY=1`로 빌드한 dist가 따로 필요하다.
       const designDist = process.env.DIST_DESIGN ? resolve(WEB_ROOT, process.env.DIST_DESIGN) : null;
