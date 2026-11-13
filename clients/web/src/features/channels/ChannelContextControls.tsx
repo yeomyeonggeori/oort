@@ -289,7 +289,7 @@ function MemberRowMenu({
   const label = formatMessage("timeline.memberPanel.rowActions", { name: member.displayName });
   return (
     <DropdownMenu>
-      <Tooltip label={label} side="top" align="end">
+      <Tooltip label={label} side="bottom" align="end">
         <DropdownMenuTrigger asChild>
           <Button
             ref={triggerRef}
@@ -685,31 +685,43 @@ function memberListLabel(status: ChannelMemberListStatus, count: number): string
   return `채널 멤버 ${count}명`;
 }
 
-export function ChannelMemberPanel({
+/** 확인 단계가 지금 서 있는가·도는가·내리는 길. 패널(`DialogContent`)의 Esc·바깥 누름이 읽는다. */
+interface RemoveStageControl {
+  up: boolean;
+  pending: boolean;
+  cancel: () => void;
+}
+
+/**
+ * 목록·발치와 「채널에서 내보내기」 확인 단계(#5778). Dialog 안이라 **열려 있을 때만** 선다: 내보내기 상태(세션·명부 캐시를
+ * 쓰는 훅)는 닫힌 머리 단추에 붙지 않고, 닫히면 단계도 함께 사라진다(다음에 열 때 목록부터).
+ *
+ * 확인은 두 번째 대화상자가 아니라 **표면 안의 단계**다(`ConfirmStage`, 디자인 시스템 §3.4 — 표면 위에 표면을 세우면 뒤
+ * 스크림이 앞 표면 아래에 깔린다). 단계는 목록·발치를 **덮어** 선다(#5780 프로필 창과 같은 틀): 둘이 한 격자 칸에 겹치고, 목록은
+ * 단계가 서 있는 동안 자리만 지킨다(`invisible` — 보이지도, 초점이 닿지도, 읽히지도 않는다). 그래서 창 높이가 뛰지 않는다.
+ */
+function ChannelMemberPanelFrame({
   channelId,
   channelName,
   members,
-  status,
+  showLoading,
+  showEmpty,
   offline,
-  onRetry,
   onAddMember,
+  onClose,
+  stageControl,
 }: {
   channelId: string;
   channelName: string;
   members: RosterMember[];
-  status: ChannelMemberListStatus;
+  showLoading: boolean;
+  showEmpty: boolean;
   offline: boolean;
-  onRetry: () => void;
   onAddMember: () => void;
+  onClose: () => void;
+  stageControl: { current: RemoveStageControl };
 }) {
-  const triggerRef = useRef<HTMLButtonElement | null>(null);
-  const addAfterClose = useRef(false);
-  const [open, setOpen] = useState(false);
-  useRestoreFocusOnClose(open, triggerRef);
-  const label = memberListLabel(status, members.length);
   const formatMessage = useFormatMessage();
-  // 「채널에서 내보내기」 확인 단계(#5778). 패널이 이미 떠 있는 표면이라 두 번째 대화상자가 아니라 **표면 안의 단계**다
-  // (`ConfirmStage`, 디자인 시스템 §3.4 — 표면 위에 표면을 세우면 뒤 스크림이 앞 표면 아래에 깔린다).
   const [removing, setRemoving] = useState<{ member: RosterMember; opener: HTMLElement | null } | null>(null);
   const removal = useRemoveChannelMember(channelId);
   const receipt = useInlineConfirm();
@@ -723,13 +735,6 @@ export function ChannelMemberPanel({
     focusAfterStage.current = null;
     (target.isConnected ? target : listRef.current)?.focus({ preventScroll: true });
   }, [removing]);
-  // 패널이 닫히면 단계도 내려간다(다음에 열 때 목록부터).
-  useEffect(() => {
-    if (open) return;
-    setRemoving(null);
-    removal.clearError();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open]);
 
   const requestRemove = (member: RosterMember, opener: HTMLElement | null) => {
     removal.clearError();
@@ -754,6 +759,88 @@ export function ChannelMemberPanel({
     });
   };
   const stageUp = removing !== null;
+  stageControl.current = { up: stageUp, pending: removal.pending, cancel: cancelRemove };
+
+  return (
+    <div className="grid min-h-0 flex-1 grid-cols-1 grid-rows-1" data-testid="channel-member-frame">
+      <div
+        className={cn("col-start-1 row-start-1 flex min-h-0 flex-col", stageUp && "invisible")}
+        aria-hidden={stageUp || undefined}
+      >
+        <ChannelMemberPanelBody
+          channelId={channelId}
+          members={members}
+          showLoading={showLoading}
+          showEmpty={showEmpty}
+          offline={offline}
+          onAddMember={onAddMember}
+          onClose={onClose}
+          onRemove={requestRemove}
+          receipt={
+            receipt.confirmed && removedName !== null
+              ? formatMessage("timeline.memberPanel.removed", { name: removedName })
+              : null
+          }
+          listRef={listRef}
+        />
+      </div>
+      {removing !== null ? (
+        <ConfirmStage
+          testId="channel-member-remove-stage"
+          className="col-start-1 row-start-1"
+          tone="destructive"
+          subject={
+            <div className="flex min-w-0 items-center gap-2" data-testid="channel-member-remove-subject">
+              <Avatar member={removing.member} />
+              <span className="flex min-w-0 flex-col">
+                <span className="truncate text-body font-semibold text-ink">{removing.member.displayName}</span>
+                <span className="truncate text-meta text-ink-muted">@{removing.member.handle}</span>
+              </span>
+            </div>
+          }
+          title={formatMessage("timeline.memberPanel.removeTitle", { name: removing.member.displayName })}
+          description={formatMessage("timeline.memberPanel.removeBody", {
+            channel: channelName,
+            name: removing.member.displayName,
+          })}
+          confirmLabel={formatMessage("timeline.memberPanel.removeConfirm")}
+          busyLabel={formatMessage("timeline.memberPanel.removeBusy")}
+          cancelLabel={formatMessage("timeline.memberPanel.removeCancel")}
+          busy={removal.pending}
+          error={removal.error}
+          lockedReason={offline ? <BlockedReason frame="doThis" /> : undefined}
+          onCancel={cancelRemove}
+          onConfirm={confirmRemove}
+        />
+      ) : null}
+    </div>
+  );
+}
+
+export function ChannelMemberPanel({
+  channelId,
+  channelName,
+  members,
+  status,
+  offline,
+  onRetry,
+  onAddMember,
+}: {
+  channelId: string;
+  channelName: string;
+  members: RosterMember[];
+  status: ChannelMemberListStatus;
+  offline: boolean;
+  onRetry: () => void;
+  onAddMember: () => void;
+}) {
+  const triggerRef = useRef<HTMLButtonElement | null>(null);
+  const addAfterClose = useRef(false);
+  const [open, setOpen] = useState(false);
+  useRestoreFocusOnClose(open, triggerRef);
+  const label = memberListLabel(status, members.length);
+  // 안의 확인 단계(#5778)가 매 그림마다 적어 두는 지금. 닫혀 있으면 단계도 없다.
+  const stageControl = useRef<RemoveStageControl>({ up: false, pending: false, cancel: () => undefined });
 
   // 두 Radix focus scope를 같은 커밋에서 교체하면 닫히는 패널의 포커스 복귀가
   // 새 다이얼로그의 auto-focus를 뒤에서 덮을 수 있다. 먼저 이 패널을 완전히
@@ -808,12 +895,12 @@ export function ChannelMemberPanel({
         }}
         // Esc 는 가장 위 층의 것이다(§3.4): 확인 단계가 서 있으면 단계만 내린다(요청이 도는 동안은 아무 일 없다).
         onEscapeKeyDown={(event) => {
-          if (!stageUp) return;
+          if (!stageControl.current.up) return;
           event.preventDefault();
-          cancelRemove();
+          stageControl.current.cancel();
         }}
         onInteractOutside={(event) => {
-          if (removal.pending) event.preventDefault();
+          if (stageControl.current.pending) event.preventDefault();
         }}
       >
         <div className="flex flex-col gap-1 border-b border-line p-4">
@@ -841,60 +928,17 @@ export function ChannelMemberPanel({
           />
         )}
 
-        {/* 단계는 목록·발치를 **덮어** 선다(#5780 프로필 창과 같은 틀): 둘이 한 격자 칸에 겹치고, 목록은 단계가 서 있는 동안
-            자리만 지킨다(`invisible` — 보이지도, 초점이 닿지도, 읽히지도 않는다). 그래서 창 높이가 뛰지 않는다. */}
-        <div className="grid min-h-0 flex-1 grid-cols-1 grid-rows-1" data-testid="channel-member-frame">
-          <div
-            className={cn("col-start-1 row-start-1 flex min-h-0 flex-col", stageUp && "invisible")}
-            aria-hidden={stageUp || undefined}
-          >
-            <ChannelMemberPanelBody
-              channelId={channelId}
-              members={members}
-              showLoading={showLoading}
-              showEmpty={showEmpty}
-              offline={offline}
-              onAddMember={openAddMember}
-              onClose={() => setOpen(false)}
-              onRemove={requestRemove}
-              receipt={
-                receipt.confirmed && removedName !== null
-                  ? formatMessage("timeline.memberPanel.removed", { name: removedName })
-                  : null
-              }
-              listRef={listRef}
-            />
-          </div>
-          {removing !== null ? (
-            <ConfirmStage
-              testId="channel-member-remove-stage"
-              className="col-start-1 row-start-1"
-              tone="destructive"
-              subject={
-                <div className="flex min-w-0 items-center gap-2" data-testid="channel-member-remove-subject">
-                  <Avatar member={removing.member} />
-                  <span className="flex min-w-0 flex-col">
-                    <span className="truncate text-body font-semibold text-ink">{removing.member.displayName}</span>
-                    <span className="truncate text-meta text-ink-muted">@{removing.member.handle}</span>
-                  </span>
-                </div>
-              }
-              title={formatMessage("timeline.memberPanel.removeTitle", { name: removing.member.displayName })}
-              description={formatMessage("timeline.memberPanel.removeBody", {
-                channel: channelName,
-                name: removing.member.displayName,
-              })}
-              confirmLabel={formatMessage("timeline.memberPanel.removeConfirm")}
-              busyLabel={formatMessage("timeline.memberPanel.removeBusy")}
-              cancelLabel={formatMessage("timeline.memberPanel.removeCancel")}
-              busy={removal.pending}
-              error={removal.error}
-              lockedReason={offline ? <BlockedReason frame="doThis" /> : undefined}
-              onCancel={cancelRemove}
-              onConfirm={confirmRemove}
-            />
-          ) : null}
-        </div>
+        <ChannelMemberPanelFrame
+          channelId={channelId}
+          channelName={channelName}
+          members={members}
+          showLoading={showLoading}
+          showEmpty={showEmpty}
+          offline={offline}
+          onAddMember={openAddMember}
+          onClose={() => setOpen(false)}
+          stageControl={stageControl}
+        />
       </DialogContent>
     </Dialog>
   );

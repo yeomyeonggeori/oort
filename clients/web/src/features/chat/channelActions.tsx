@@ -926,7 +926,8 @@ export function ChannelLeaveConfirmDialog({
         >
           <div className="flex flex-col gap-1">
             <DialogTitle>{formatMessage("timeline.channelLeave.title")}</DialogTitle>
-            <DialogDescription>
+            {/* 비공개 문장이 세 문장이라 줄이 여럿이다: 낱말 가운데서 끊지 않는다(공용 확인 단계 `ConfirmStage` 와 같은 결). */}
+            <DialogDescription className="break-keep">
               {formatMessage(channelLeaveConfirmBodyKey(leave.kind), { name: title })}
             </DialogDescription>
           </div>
