@@ -7,6 +7,8 @@ import {
   useState,
   type FocusEvent,
   type KeyboardEvent,
+  type MouseEvent,
+  type RefObject,
 } from "react";
 import { ListChecks, SquareTerminal } from "lucide-react";
 import { Link, useLocation, useNavigate, useNavigationType, useSearchParams } from "react-router-dom";
@@ -40,6 +42,7 @@ import {
 import { TEAM_BOARD_COPY, isRunItem } from "@momo/core/features/workbench/teamBoard";
 import { LOCAL_TERMINALS_PATH, agentPanePath } from "@momo/core/features/workbench/workTab";
 import { SESSION_STATUS_LABEL } from "@momo/core/features/workbench/sessionList";
+import { clockLabel } from "@momo/core/features/work/workSessionFormat";
 import { PANE_MARK_LABEL, isFailedMark } from "@momo/core/features/workbench/paneStatus";
 import { useSession } from "@/app/session";
 import { SidebarDrawerToggle } from "@/app/SidebarDrawerToggle";
@@ -99,9 +102,23 @@ import { currentWorkFilter, rememberWorkFilter, useWorkJobsList } from "./useWor
 //
 // 「응답 필요」의 칸은 화면에 떠 있는 동안 자리를 지킨다(#5738, 코어 `keepNeedsMeSlots`): 결정한 줄은 같은 상자의 결과 줄이 되고,
 // 다른 곳에서 끝난 줄도 그 자리의 결과 줄이 되며, 새 요청은 구간 맨 아래에 붙는다. 그래서 방금 누른 자리에 다른 줄의 결정 단추가
-// 오지 않는다. 시간·포인터로 막지 않는다(남은 막기는 같은 단추의 연타를 거르는 「보내는 중」뿐이다, `ApprovalActions`).
+// 오지 않는다 — 내 결정은 줄을 옮기지 않는다(첫 겹).
+//
+// 둘째 겹(#5738 수리 1회차, 검수 H1·H2·M1): 칸 묶음 **밖**에서 오는 밀림은 칸 장부가 닿지 않는다 — 「응답 필요」 아래 손 밑으로 들어오는
+// 새 칸, 목록 위에 서고 걷히는 띠(이 화면의 다시 읽기 실패 띠, 셸의 연결 띠·작업 요약 줄, 그 밖의 무엇이든), 창 크기. 그래서 **사람의
+// 입력 없이 새로 서거나 화면 좌표가 바뀐 결정 단추**는 `ARRIVAL_GUARD_MS` 동안 포인터 누름을 받지 않고 막힌 모양으로 선다
+// (`useArrivalGuard`). 판정은 「어느 띠인가」가 아니라 그 단추의 좌표다. 사람이 굴려 옮긴 단추(휠·터치·키보드·스크롤바)는 막지 않고,
+// 「작업」에 들어오거나 「내 작업/팀 전체」를 갈아탄 뒤 처음 그린 단추도 막지 않는다. 키보드(Enter·Space)는 초점이 고른 단추라 막지 않는다.
+// 같은 단추의 연타는 따로 「보내는 중」이 거른다(`ApprovalActions`).
 
 const MINUTE_MS = 60_000;
+
+/** 밖에서 온 변화로 새로 서거나 옮겨진 결정 단추가 포인터 누름을 받지 않는 시간(앞 판 R3의 값 그대로). 옮겨질 때마다 다시 잰다. */
+const ARRIVAL_GUARD_MS = 1000;
+/** 「옮겨졌다」의 문턱(px): 반올림 차이는 움직임이 아니다. */
+const ARRIVAL_MOVE_PX = 1;
+/** 결정 단추(승인·거부)의 표지(`ApprovalActions`의 `data-decision`). */
+const DECISION_CONTROL = "[data-decision]";
 
 /**
  * 「응답 필요」 칸이 그리는 사실(#5738): run 줄은 묻는 승인과 서버가 쓴 카드 문장, 내 맥 세션의 권한 요청은 없음. 칸이 처음 선 때의 것을
@@ -203,6 +220,7 @@ export function WorkJobsRoute() {
       });
   }, [rows, filter, selfId, decisions]);
   const slotsRef = useRef<{ scope: string; slots: Slot[] }>({ scope, slots: [] });
+  const settledAtRef = useRef<{ scope: string; at: Map<string, number> }>({ scope, at: new Map() });
   const slots = useMemo(() => {
     const previous = slotsRef.current.scope === scope ? slotsRef.current.slots : [];
     // 「다른 곳에서」는 사실이 말할 때만이다: 목록에 그 줄이 없으면(다음 쪽으로 밀려남·읽기 실패) 「끝났다」는 증거가 아니다. 원장이 아직 그
@@ -214,6 +232,11 @@ export function WorkJobsRoute() {
       .map((slot) => ({ row: slot.row, askId: slot.askId, facts: slot.facts }));
     const next = keepNeedsMeSlots(previous, [...asks, ...held], { decidedHere: new Set(receipts.keys()), sending });
     slotsRef.current = { scope, slots: next };
+    // 결과 칸이 된 때(흐린 결과 요약의 「언제」): 이 화면에서 결정했으면 그 결정이 닿은 때, 다른 곳에서 끝났으면 이 화면이 알아챈 때.
+    if (settledAtRef.current.scope !== scope) settledAtRef.current = { scope, at: new Map() };
+    for (const slot of next) {
+      if (slot.settled !== null && !settledAtRef.current.at.has(slot.key)) settledAtRef.current.at.set(slot.key, Date.now());
+    }
     return next;
   }, [scope, asks, rows, decisions.byRun, receipts, sending]);
   const onDecided = useCallback(
@@ -399,6 +422,8 @@ export function WorkJobsRoute() {
     // 자리를 비운 사이 줄이 옮겨 갔으면 되돌린 스크롤에서 줄이 가려질 수 있다: 보이게만 맞춘다.
     row.scrollIntoView?.({ block: "nearest" });
   });
+  // 둘째 겹: 스크롤 고정·자리 되찾기가 자리를 맞춘 **뒤에** 결정 단추의 자리를 잰다(그래서 이 호출이 위 두 효과 다음이다).
+  const arrival = useArrivalGuard(listRef, scope);
   const rovingKey =
     activeKey !== null && orderedKeys.includes(activeKey) ? activeKey : (orderedKeys[0] ?? null);
 
@@ -446,6 +471,12 @@ export function WorkJobsRoute() {
       openDecision !== null && decidesInRow(openDecision)
         ? formatMessage("desktop.workJobs.approvalHintInList")
         : undefined,
+  };
+  /** 결과 칸의 흐린 요약 한 줄(누가·언제): 이 화면에서 결정했으면 나와 그 때, 다른 곳에서 끝났으면 알아챈 때만(누가인지 모른다). */
+  const settledMeta = (slot: Slot): string | null => {
+    const at = settledAtRef.current.at.get(slot.key);
+    if (slot.settled === null || at === undefined) return null;
+    return slot.settled === "mine" ? `${session.member.displayName} · ${clockLabel(at)}` : clockLabel(at);
   };
   const sectionCount = (section: (typeof sections)[number]) =>
     section.slots ? section.slots.filter((slot) => slot.settled === null).length : section.rows.length;
@@ -535,6 +566,7 @@ export function WorkJobsRoute() {
           aria-busy={firstLoad}
           role="region"
           onScroll={readAnchors}
+          onClickCapture={arrival.onClickCapture}
         >
           {desktop && filter === "mine" && <ThisDeviceStrip />}
           {firstLoad ? (
@@ -643,9 +675,10 @@ export function WorkJobsRoute() {
                               settledLine={result}
                               approval={
                                 kind === "approval"
-                                  ? slotApprovalFacts(slot, result)
+                                  ? slotApprovalFacts(slot, result, settledMeta(slot))
                                   : null
                               }
+                              guarded={arrival.guardedRows.has(slot.key)}
                               desktop={desktop}
                               onOpenPermission={() => {
                                 setActiveKey(slot.key);
@@ -685,6 +718,7 @@ export function WorkJobsRoute() {
                               inApp={null}
                               settledLine={null}
                               approval={kind === "approval" ? approvalFacts(row, decisions) : null}
+                              guarded={false}
                               desktop={desktop}
                               onOpenPermission={() => undefined}
                               onDecided={() => undefined}
@@ -784,12 +818,171 @@ function visibleRowAnchors(list: HTMLElement | null): RowAnchor[] {
   return out;
 }
 
+/** 결정 단추 하나의 마지막으로 잰 자리(화면 좌표)와, 밖에서 온 변화로 지금 자리에 선 때(막기의 시작, 막지 않으면 -Infinity). */
+interface ControlSpot {
+  left: number;
+  top: number;
+  atMs: number;
+  /** 그 단추가 선 칸의 줄 열쇠(막힌 모양을 그 줄에 건다). */
+  row: string;
+}
+
+/** 마지막으로 잰 때의 굴림 자리(목록 상자 · 창). */
+interface ScrollSpot {
+  listTop: number;
+  listLeft: number;
+  winX: number;
+  winY: number;
+}
+
+function scrollSpotOf(list: HTMLElement | null): ScrollSpot {
+  return { listTop: list?.scrollTop ?? 0, listLeft: list?.scrollLeft ?? 0, winX: window.scrollX, winY: window.scrollY };
+}
+
+function sameScroll(a: ScrollSpot, b: ScrollSpot): boolean {
+  return a.listTop === b.listTop && a.listLeft === b.listLeft && a.winX === b.winX && a.winY === b.winY;
+}
+
+function sameKeys(a: ReadonlySet<string>, b: ReadonlySet<string>): boolean {
+  return a.size === b.size && [...a].every((key) => b.has(key));
+}
+
+/** 결정 단추의 열쇠: 그 칸의 줄 열쇠 + 승인/거부. 같은 칸의 단추가 다시 그려져도(같은 자리) 같은 단추다. */
+function controlKey(control: Element): { key: string; row: string } | null {
+  const row = control.closest('[data-testid="work-job"]')?.querySelector<HTMLElement>("[data-row-key]")?.dataset.rowKey;
+  return row === undefined ? null : { key: `${row}:${control.getAttribute("data-decision") ?? ""}`, row };
+}
+
+/**
+ * 둘째 겹(#5738 수리 1회차): 사람의 입력 없이 새로 서거나 화면 좌표가 바뀐 결정 단추는 `ARRIVAL_GUARD_MS` 동안 포인터 누름을 받지 않는다.
+ *
+ * 재는 때: 이 화면이 그릴 때마다(스크롤 고정 뒤), 그리고 이 화면 밖의 변화 — 문서의 DOM이 바뀌거나(셸의 띠가 서고 걷힘) 목록 상자의 크기·
+ * 창 크기가 바뀌면 — 다음 프레임에. 새로 선 단추와 1px 넘게 옮겨진 단추는 그때부터 막힌다(이어서 움직이면 움직일 때마다 다시).
+ * 사람이 목록·창을 굴린 것(`scroll` 사건)은 자리만 새로 적고 막지 않는다 — 굴림 사건은 같은 프레임의 다른 재기보다 먼저 온다.
+ * 「작업」에 들어온 뒤·「내 작업/팀 전체」를 갈아탄 뒤 처음 잰 단추는 막지 않는다(앞 판과 같이 그 뒤에 늦게 선 단추 — 원장이 늦게 와 선
+ * 칸 — 는 막는다). 그려지지 않은 단추(0×0)는 화면에 없으니 세지 않는다.
+ *
+ * 누를 때: 키보드(Enter·Space, `detail === 0`)는 초점이 고른 단추라 막지 않는다. 포인터는 입력 종류와 무관하다. 마지막으로 잰 뒤 아무도
+ * 굴리지 않았는데 그 단추의 자리가 바뀌었으면(아직 재지 못한 밖의 변화) 누르는 순간에 재어 막는다. 막힌 누름은 삼키고(결정 0), 막힘이
+ * 풀린 뒤의 누름은 그대로 간다 — 그 뒤로는 사람이 새 자리를 본 것이다.
+ */
+function useArrivalGuard(listRef: RefObject<HTMLDivElement | null>, scope: string) {
+  const spotsRef = useRef(new Map<string, ControlSpot>());
+  /** null이면 다음 재기가 바탕이다(막지 않음): 처음 그릴 때, 필터를 갈아탔을 때. */
+  const scrollRef = useRef<ScrollSpot | null>(null);
+  const scopeRef = useRef(scope);
+  const [guardedRows, setGuardedRows] = useState<ReadonlySet<string>>(NO_KEYS);
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // 막힌 모양: 막힌 단추가 선 줄들. 가장 먼저 풀리는 때에 다시 본다.
+  const publishRef = useRef<() => void>(() => undefined);
+  publishRef.current = () => {
+    const now = performance.now();
+    const rows = new Set<string>();
+    let next = Infinity;
+    for (const spot of spotsRef.current.values()) {
+      const until = spot.atMs + ARRIVAL_GUARD_MS;
+      if (until > now) {
+        rows.add(spot.row);
+        next = Math.min(next, until);
+      }
+    }
+    setGuardedRows((current) => (sameKeys(current, rows) ? current : rows));
+    if (timerRef.current !== null) clearTimeout(timerRef.current);
+    timerRef.current = next === Infinity ? null : setTimeout(() => publishRef.current(), Math.ceil(next - now) + 1);
+  };
+
+  /** `move`: 밖에서 온 변화를 잰다(새로 선·옮겨진 단추는 지금부터 막힘). `scroll`: 사람이 굴렸다(옮겨진 단추를 새로 막지 않음). */
+  const measure = useCallback(
+    (mode: "move" | "scroll") => {
+      const list = listRef.current;
+      const now = performance.now();
+      const baseline = scrollRef.current === null;
+      const before = spotsRef.current;
+      const next = new Map<string, ControlSpot>();
+      for (const control of list?.querySelectorAll(DECISION_CONTROL) ?? []) {
+        const box = control.getBoundingClientRect();
+        if (box.width === 0 && box.height === 0) continue;
+        const id = controlKey(control);
+        if (id === null) continue;
+        const was = before.get(id.key);
+        const moved =
+          was !== undefined && (Math.abs(box.left - was.left) > ARRIVAL_MOVE_PX || Math.abs(box.top - was.top) > ARRIVAL_MOVE_PX);
+        const atMs = baseline ? -Infinity : was === undefined || (moved && mode === "move") ? now : was.atMs;
+        next.set(id.key, { left: box.left, top: box.top, atMs, row: id.row });
+      }
+      spotsRef.current = next;
+      scrollRef.current = scrollSpotOf(list);
+      publishRef.current();
+    },
+    [listRef]
+  );
+
+  // 이 화면이 그릴 때마다(필터를 갈아탔으면 그 첫 그림은 바탕).
+  useLayoutEffect(() => {
+    if (scopeRef.current !== scope) {
+      scopeRef.current = scope;
+      scrollRef.current = null;
+    }
+    measure("move");
+  });
+
+  // 이 화면 밖의 변화: 문서의 DOM(셸의 띠 등) · 목록 상자 크기 · 창 크기 → 다음 프레임에 잰다. 사람의 굴림은 자리만 새로 적는다.
+  useEffect(() => {
+    let frame = 0;
+    const later = () => {
+      if (frame === 0) {
+        frame = requestAnimationFrame(() => {
+          frame = 0;
+          measure("move");
+        });
+      }
+    };
+    const onScroll = (event: Event) => {
+      if (event.target === listRef.current || event.target === document) measure("scroll");
+    };
+    const mutations = new MutationObserver(later);
+    mutations.observe(document.body, { subtree: true, childList: true, attributes: true, characterData: true });
+    const sizes = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(later);
+    if (listRef.current !== null) sizes?.observe(listRef.current);
+    window.addEventListener("resize", later);
+    document.addEventListener("scroll", onScroll, { capture: true, passive: true });
+    return () => {
+      mutations.disconnect();
+      sizes?.disconnect();
+      window.removeEventListener("resize", later);
+      document.removeEventListener("scroll", onScroll, { capture: true });
+      if (frame !== 0) cancelAnimationFrame(frame);
+      if (timerRef.current !== null) clearTimeout(timerRef.current);
+    };
+  }, [listRef, measure]);
+
+  const onClickCapture = useCallback(
+    (event: MouseEvent<HTMLDivElement>) => {
+      if (event.detail === 0) return;
+      const control = event.target instanceof Element ? event.target.closest(DECISION_CONTROL) : null;
+      if (control === null) return;
+      const last = scrollRef.current;
+      if (last !== null && sameScroll(last, scrollSpotOf(listRef.current))) measure("move");
+      const id = controlKey(control);
+      const spot = id === null ? undefined : spotsRef.current.get(id.key);
+      if (spot !== undefined && performance.now() - spot.atMs < ARRIVAL_GUARD_MS) {
+        event.preventDefault();
+        event.stopPropagation();
+      }
+    },
+    [listRef, measure]
+  );
+
+  return { guardedRows, onClickCapture };
+}
+
 /**
  * 「응답 필요」 칸의 승인 사실(#5738). 아직 묻는 칸은 칸이 처음 선 때의 승인과 카드 문장으로 단추를 세운다(그 칸의 승인 id는 바뀌지
  * 않는다 — 같은 run의 다음 승인은 맨 아래 새 칸이다). 결과 칸은 단추 대신 결과 한 줄(`receipt`)이고, 결정 전의 꼬리표·되돌릴 수
  * 없음·만료는 자리만 남긴다(`JobResultCell`) — 무엇을 결정했는지(요약)는 그대로 보인다.
  */
-function slotApprovalFacts(slot: Slot, result: string | null): JobApprovalFacts {
+function slotApprovalFacts(slot: Slot, result: string | null, receiptMeta: string | null): JobApprovalFacts {
   const facts = slot.facts;
   return {
     decision: result === null ? (facts?.decision ?? null) : null,
@@ -797,6 +990,7 @@ function slotApprovalFacts(slot: Slot, result: string | null): JobApprovalFacts 
     intent: facts?.intent ?? null,
     waiting: null,
     receipt: result,
+    receiptMeta: result === null ? null : receiptMeta,
   };
 }
 
@@ -828,6 +1022,7 @@ function JobRow({
   inApp,
   settledLine,
   approval,
+  guarded,
   desktop,
   onOpenPermission,
   onDecided,
@@ -857,6 +1052,8 @@ function JobRow({
   /** 결과 칸(#5738)의 결과 한 줄: 권한 요청 칸이 더는 묻지 않을 때. 승인 칸은 `approval.receipt`가 말한다. */
   settledLine: string | null;
   approval: JobApprovalFacts | null;
+  /** 둘째 겹(#5738 수리 1회차): 이 줄의 결정 단추가 밖에서 온 변화로 막 섰거나 옮겨져 잠깐 포인터 누름을 받지 않는다 — 막힌 모양. */
+  guarded: boolean;
   desktop: boolean;
   onOpenPermission: () => void;
   onDecided: (outcome: DecisionOutcome) => void;
@@ -896,10 +1093,13 @@ function JobRow({
         // 펼친 줄(띠 = `--surface-hover`) 안의 보조 알약(거부·열기·열어서 답하기)은 가리킴 채움이 띠와 같은 토큰이라 녹는다: 그 줄
         // 안에서만 한 단계 진한 `--surface-pressed`로 가리킨다(#5640 수리 3회차, 검수 질문 ② (a)). 공용 단추 변형은 그대로다.
         selected && "[&>[data-testid=work-job-extras]_.bg-surface-muted:hover]:bg-surface-pressed",
-        "has-[>button:active]:bg-surface-pressed has-[>button:focus-visible]:focus-ring"
+        "has-[>button:active]:bg-surface-pressed has-[>button:focus-visible]:focus-ring",
+        // 막힌 동안 결정 단추는 막힌 승인과 같은 모양이다(채움을 버리고 옅은 글자, 투명해지지 않는다 — `ApprovalActions`). 자리는 그대로다.
+        "data-arrival-guard:[&_[data-decision]]:cursor-not-allowed data-arrival-guard:[&_[data-decision]]:bg-surface-muted data-arrival-guard:[&_[data-decision]]:text-ink-muted"
       )}
       data-testid="work-job"
       data-selected={selected ? "" : undefined}
+      data-arrival-guard={guarded ? "" : undefined}
     >
       <button
         ref={(el) => {

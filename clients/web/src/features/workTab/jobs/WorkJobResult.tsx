@@ -55,17 +55,28 @@ export interface JobApprovalFacts {
    * 등), 다른 곳에서 끝났으면 「이제 응답하지 않아도 돼요」. 있으면 결정 전의 꼬리표·되돌릴 수 없음·만료는 자리만 남는다.
    */
   receipt: string | null;
+  /**
+   * 결과 칸의 흐린 요약 한 줄(#5738 수리 1회차): 누가·언제(이 화면에서 결정했으면 「나 · 시각」, 다른 곳에서 끝났으면 알아챈 시각). 결정 전의
+   * 되돌릴 수 없음·만료가 서 있던 자리를 채운다(빈 띠가 남지 않게). 없으면 그 자리는 비어 있다.
+   */
+  receiptMeta?: string | null;
 }
 
 /**
  * 결정 층의 상자(#5738): 단추 한 줄 높이(`h-control-sm`, 폰 폭은 손가락 44px `tap-target` — 결정 단추가 그 폭에서 서는 높이와 같다) +
  * 위아래 `py-1`. 결정 전 단추·보내는 중·실패(단추 옆 한 줄)·끊김·「열기」·결과 한 줄이 모두 이 상자 하나에 선다 — 무엇이 서도 줄 높이가
- * 같아 아래 줄이 움직이지 않는다(브라우저 하네스 `fix5738:move0`가 1280·900·390 × 글자 150%로 잰다). 글은 한 줄에서 자른다.
+ * 같아 아래 줄이 움직이지 않는다(브라우저 하네스 `fix5738:move0`가 1280·900·390 × 글자 100·150·200%로 잰다). 글은 한 줄에서 자른다.
+ *
+ * 상자의 바닥 높이는 단추 높이와 한 줄의 줄높이 가운데 큰 쪽이다(#5738 수리 1회차 M2): 단추는 `--spacing-control-sm` 28px로 고정이고
+ * 결과·실패 한 줄의 줄높이는 글자 크기를 따라 커져(200%에서 36px) 둘 중 하나만 바닥으로 두면 큰 글자에서 결정 전·후가 8px 어긋난다.
+ * 그래서 바깥 겹이 둘 중 큰 쪽을, 안쪽 겹이 단추 높이와 폰 폭 44px(`tap-target`)을 진다 — 같은 속성을 한 상자에 두 번 적지 않는다.
  */
 function ControlBox({ children }: { children: ReactNode }) {
   return (
     <span className="flex w-full min-w-0 py-1" data-testid="work-job-control-box">
-      <span className="flex min-h-control-sm tap-target min-w-0 flex-1 items-center">{children}</span>
+      <span className="flex min-h-[max(var(--spacing-control-sm),var(--text-meta--line-height))] min-w-0 flex-1">
+        <span className="flex min-h-control-sm tap-target min-w-0 flex-1 items-center">{children}</span>
+      </span>
     </span>
   );
 }
@@ -164,25 +175,37 @@ export function JobResultCell({
 }) {
   const formatMessage = useFormatMessage();
   if (kind === "approval" && approval?.receipt) {
-    // 결과 칸(#5738, 수리 4회차의 모양 그대로)은 결정된 모습만 말한다: 꼬리표·되돌릴 수 없음·만료는 걷고 무엇을 결정했는지(요약)만
-    // 남긴다. 걷은 줄의 자리는 비워 둔다 — 칸이 처음 선 때의 사실 그대로라 줄 높이가 결정 전과 같다. 결과 한 줄은 단추가 있던 상자에 선다.
+    // 결과 칸(#5738)은 결정된 모습만 말한다: 되돌릴 수 없음·만료는 걷고 무엇을 결정했는지(요약)를 남긴다. 결과 한 줄은 단추가 있던 상자에
+    // 선다. 걷은 줄의 자리는 빈 띠로 두지 않고 **같은 높이의 흐린 결과 요약**으로 채운다(수리 1회차, owner가 볼 모양): 꼬리표 자리에는 같은
+    // 꼬리표를 흐리게(방패 대신 체크), 되돌릴 수 없음·만료 자리에는 누가·언제 한 줄. 높이는 칸이 처음 선 때의 글이 정한다 — 그 글은 보이지
+    // 않게 그 자리에 남고 흐린 한 줄이 같은 칸에 겹쳐 서며(한 줄에서 자름), 꼬리표는 같은 칩이라 높이가 같다.
     const item = approval.item;
     const summary = approval.intent ?? item?.predicate ?? null;
+    const meta = approval.receiptMeta ?? null;
     return (
       <span className="flex min-w-0 flex-col gap-1" data-testid="work-job-result" data-kind={kind} data-held="">
-        <span aria-hidden className={cn(CHIP_CLASS, "invisible inline-flex shrink-0 items-center gap-1 self-start")}>
-          <ShieldCheck className="size-3 shrink-0" />
+        <span
+          className={cn(CHIP_CLASS, "inline-flex shrink-0 items-center gap-1 self-start bg-surface-muted text-ink-muted")}
+          data-testid="work-job-settled-tag"
+        >
+          <Check aria-hidden className="size-3 shrink-0" />
           {formatMessage("desktop.workJobs.tagApproval")}
         </span>
         {summary !== null && <span className="min-w-0 break-keep text-meta text-ink">{summary}</span>}
-        {item?.note && (
-          <span aria-hidden className="invisible min-w-0 break-keep text-meta">
-            {item.note}
-          </span>
-        )}
-        {item?.timeLabel && (
-          <span aria-hidden className="invisible min-w-0 break-keep text-timestamp">
-            {item.timeLabel}
+        {(item?.note || item?.timeLabel) && (
+          <span className="grid min-w-0">
+            <span aria-hidden className="invisible col-start-1 row-start-1 flex min-w-0 flex-col gap-1">
+              {item?.note && <span className="min-w-0 break-keep text-meta">{item.note}</span>}
+              {item?.timeLabel && <span className="min-w-0 break-keep text-timestamp">{item.timeLabel}</span>}
+            </span>
+            {meta !== null && (
+              <span
+                className="col-start-1 row-start-1 min-w-0 self-center truncate text-timestamp text-ink-muted"
+                data-testid="work-job-settled-meta"
+              >
+                {meta}
+              </span>
+            )}
           </span>
         )}
       </span>

@@ -5,6 +5,7 @@
 //   npm run build && OUT_DIR=<dir> CAPTURE_PORT=<port> node scripts/capture-5640.mjs
 //   (`CAPTURE_ONLY=fix5712`: 마우스 뒤 손가락 · 줄 높이가 같은 세 줄 차례로 · 둘째 줄 누른 자리 다시 — 두 엔진. `CAPTURE_DIST=<폴더>`: 그 빌드를 띄움)
 //   (`CAPTURE_ONLY=fix5738` 또는 `fix5738:n1,rows,slow,still,move0,shots`: 칸이 자리를 지킴 — #5732 검수 N1·N2b·N2c·N7, 남이 일으킨 변화, 이동 0, 캡처)
+//   (`CAPTURE_ONLY=fix5738r2` 또는 `fix5738r2:below,band,conn,scroll,four,shots`: 둘째 겹 — 밖에서 온 변화로 선·옮겨진 단추는 잠깐 막힘, #5744 검수 H1·H2·M1)
 //
 // 백엔드가 없다. `/v1/**`는 이 파일의 고정 응답이고, 보드는 #5639 계약을 흉내 낸다: `include=jobs`로 읽는 사람이 세션 주인일
 // 때만, 대기 요청이 있는 실행 중 맥 세션의 상태가 `waiting`이다. 승인 원장은 인박스 배지가 읽는 그 경로다. 사람·컴퓨터 이름은
@@ -105,6 +106,8 @@ const approval2 = { id: id(51), workspaceId, runId: runApproval2.runId, channelI
 const runApproval3 = { ...runBase, runId: id(8), label: "주간 보고서를 #reports에 올리기", status: "running", state: "running", phase: "awaiting_approval", trigger: "mention", startedAtMs: NOW - 6 * 60_000, stepCount: 1, lastActivityAt: sec - 66 };
 const approval3 = { ...approval2, id: id(53), runId: runApproval3.runId };
 const reaskA = { ...approvals[0], id: id(52) };
+// #5738 수리 1회차: 「지금」의 run(`runWorking`)이 승인을 묻게 되어 「응답 필요」 맨 아래 새 칸이 되는 장면의 승인.
+const approvalW = { ...approval2, id: id(60), runId: runWorking.runId };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 const host = { id: hostId, workspaceId, scope: "member", ownerMemberId: memberId, type: "app", displayName: "도현 맥북", capabilities: { terminal: true }, lastSeenAtMs: NOW, createdAtMs: NOW - 86_400_000, online: true };
@@ -130,12 +133,15 @@ function boardView(state) {
     // 실제 서버: 승인한 run은 줄을 서고(`queued`) 보드 상태는 `waiting`이다(클라이언트는 실행 줄의 `waiting`을 `idle` → 칩 「시작 전」으로 읽는다).
     return { ...row, status: "queued", state: "waiting", phase: "queued" };
   };
-  const view = (row) =>
+  // #5738 수리 1회차: 줄 하나를 바꿔 준다(`state.patch`: runId → 고칠 칸).
+  const patched = (row) => (state.patch?.has(row.runId ?? row.sessionId) ? { ...row, ...state.patch.get(row.runId ?? row.sessionId) } : row);
+  const view0 = (row) =>
     row.origin === "host" && row.owner.memberId === memberId && state.waiting.has(row.sessionId)
       ? { ...row, state: "waiting" }
       : row.runId && state.decidedRuns.has(row.runId)
         ? decided(row)
         : row;
+  const view = (row) => view0(patched(row));
   const second = [...(state.twoDeciders ? [runApproval2] : []), ...(state.threeDeciders ? [runApproval3] : [])];
   // 실제 서버 순서(`ORDER BY activity_us DESC`, 수리 5회차 검수 3회차): 결정이 닿은 run은 `updated_at`이 올라 목록 맨 앞으로 온다.
   const bump = (rows) => [...state.decidedRunOrder.map((rid) => rows.find((r) => r.runId === rid)).filter(Boolean), ...rows.filter((r) => !(r.runId && state.decidedRuns.has(r.runId)))];
@@ -188,7 +194,7 @@ async function installRoutes(context, state) {
         approve = true; // 본문이 없으면 승인으로 본다(이 하네스의 모든 결정은 본문을 싣는다)
       }
       state.decidedHow.push(approve);
-      const decidedRun = [...approvals, approval2, approval3, reaskA].find((a) => a.id === approvalId)?.runId;
+      const decidedRun = [...approvals, approval2, approval3, reaskA, approvalW].find((a) => a.id === approvalId)?.runId;
       if (decidedRun) {
         state.decidedRuns.set(decidedRun, approve);
         state.decidedRunOrder = [decidedRun, ...state.decidedRunOrder.filter((rid) => rid !== decidedRun)];
@@ -201,7 +207,7 @@ async function installRoutes(context, state) {
       if (state.ledgerDelayMs && state.ledgerReads === 1) await sleep(state.ledgerDelayMs);
       if (state.roundTripMs) await sleep(state.roundTripMs);
       const reask = state.reaskSameRun && state.decidedIds.has(approvals[0].id) ? [reaskA] : [];
-      const pending = [...approvals, ...(state.twoDeciders ? [approval2] : []), ...(state.threeDeciders ? [approval3] : []), ...reask].filter((a) => !state.decidedIds.has(a.id));
+      const pending = [...approvals, ...(state.twoDeciders ? [approval2] : []), ...(state.threeDeciders ? [approval3] : []), ...(state.extraApprovals ?? []), ...reask].filter((a) => !state.decidedIds.has(a.id) && !state.dropApprovals?.has(a.id));
       return json(route, { approvals: url.searchParams.get("status") === "pending" ? pending : [] });
     }
     if (state.progress && path.endsWith("/agent-runs/progress")) {
@@ -213,6 +219,8 @@ async function installRoutes(context, state) {
     if (path.endsWith("/work-sessions/shared")) {
       const who = url.searchParams.get("who") === "team" ? "team" : "mine";
       state.boardReads += 1;
+      // #5738 수리 1회차: 목록 다시 읽기 실패(「작업」의 다시 읽기 실패 띠가 목록 위에 선다).
+      if (state.listFail) return json(route, { error: { message: "capture list failure" } }, 500);
       if (state.roundTripMs && state.boardReads > 1) await sleep(state.roundTripMs);
       return json(route, { sessions: boardView(state)[who], nextCursor: null, who });
     }
@@ -235,7 +243,7 @@ async function installRealtime(page) {
     };
     class CaptureSocket {
       static CONNECTING = 0; static OPEN = 1; static CLOSING = 2; static CLOSED = 3;
-      constructor(url) { this.url = String(url); this.readyState = 0; queueMicrotask(() => { this.readyState = 1; this.onopen?.(new Event("open")); }); }
+      constructor(url) { (window.__sockets ??= []).push(this); this.url = String(url); this.readyState = 0; queueMicrotask(() => { this.readyState = 1; this.onopen?.(new Event("open")); }); }
       send(data) {
         const replies = String(data).trim().split("\n").map((line) => {
           const c = JSON.parse(line);
@@ -1562,9 +1570,10 @@ async function stillScene(browser, origin, engine) {
 async function moveZeroScene(browser, origin, engine) {
   const summary = [];
   for (const viewport of [{ width: 1280, height: 900 }, { width: 900, height: 900 }, { width: 390, height: 1500 }]) {
-    for (const big of [false, true]) {
-      const { context, page, state } = await openContext(browser, origin, { scheme: "light", viewport, waiting: [], server: { twoDeciders: true, threeDeciders: true, decisionDelayMs: 60, roundTripMs: 60, failOnce: new Map([[approval2.id, 500]]) } });
-      if (big) await page.addStyleTag({ content: "html { font-size: 150% !important; }" });
+    // 수리 1회차(검수 M2): 글자 200%까지 — 단추 높이(28 고정)와 결과·실패 한 줄의 줄높이(200%에서 36)가 어긋나던 곳.
+    for (const big of [null, "150%", "200%"]) {
+      const { context, page, state } = await openContext(browser, origin, { scheme: "light", viewport: big === "200%" ? { ...viewport, height: 2400 } : viewport, waiting: [], server: { twoDeciders: true, threeDeciders: true, decisionDelayMs: 60, roundTripMs: 60, failOnce: new Map([[approval2.id, 500]]) } });
+      if (big) await page.addStyleTag({ content: `html { font-size: ${big} !important; }` });
       await threeReady(page);
       await settle(page);
       const s0 = await slotBoxes(page);
@@ -1583,7 +1592,7 @@ async function moveZeroScene(browser, origin, engine) {
       const s3 = await slotBoxes(page);
       const m = [maxMove(s0, s1), maxMove(s1, s2), maxMove(s2, s3)];
       const appended = Object.keys(s3).length === Object.keys(s2).length + 1;
-      const tag = `${viewport.width}${big ? "-150" : ""}`;
+      const tag = `${viewport.width}${big ? `-${big.replace("%", "")}` : ""}`;
       check(`move0-${engine}-${tag} 결과 줄 · 실패 · 새 요청 맨 아래 → 앞 칸 움직임 0px`, m.every((v) => v === 0) && appended, { moves: m, appended });
       summary.push(`${tag}=${m.map((v) => v.toFixed(1)).join("/")}`);
       await context.close();
@@ -1620,6 +1629,307 @@ async function slotShots(browser, origin) {
       await reread(page, state);
       await shot(page, `5738-4-new-request-bottom-${tag}`);
       check(`shots-${tag} 가로 넘침 0`, (await overflowX(page)) === 0, await overflowX(page));
+      await context.close();
+    }
+  }
+}
+
+// ---- #5738 수리 1회차: 둘째 겹 — 밖에서 온 변화로 새로 서거나 옮겨진 결정 단추는 잠깐 포인터 누름을 받지 않는다 -----------------------
+// 검수 r1 H1(`rv-below`)·H2(`rv-banner-appear`)·M1(띠가 걷힘)의 탐침을 하네스로 옮겼다. 판정 = 서버에 나간 결정 수: 밖의 변화가 단추를
+// 손 밑에 세운 직후(+100ms)의 누름은 0건, 막힘이 풀린 뒤(+1.2초) 같은 자리의 누름은 그 자리의 줄을 결정한다(정상). 그리고 내가 굴린 뒤
+// 곧바로 누름은 막히지 않는다.
+
+const R2_VP = { "1280": { width: 1280, height: 900 }, "390": { width: 390, height: 1500 } };
+/** 막힘(1초)이 풀린 뒤. */
+const GUARD_OVER_MS = 1200;
+const short = (u) => `${(u.job ?? "-").slice(-2)}/${u.decision ?? u.testid}`;
+const guardLookOf = (page, rid) =>
+  page.evaluate((r) => document.querySelector(`[data-section="needsMe"] [data-job-id="${r}"]`)?.closest('[data-testid="work-job"]')?.hasAttribute("data-arrival-guard") ?? null, rid);
+const pressHere = async (page) => {
+  await page.mouse.down();
+  await page.mouse.up();
+};
+
+/** 점 격자(검수 r1 `sampleGrid`): 목록 표 안 결정 단추·제목·카드 링크의 가운데 x마다 2px 간격으로 그 점 밑(줄 id · 결정 단추). */
+async function sampleGrid(page) {
+  return page.evaluate(() => {
+    const table = document.querySelector('[data-testid="work-jobs-table"]').getBoundingClientRect();
+    const xs = new Set();
+    for (const el of document.querySelectorAll('[data-testid="work-job-approval-approve"], [data-testid="work-job-approval-reject"], [data-testid="work-job-row"] [data-col="task"] > span:first-child, [data-testid="work-job-approval-link"]')) {
+      const b = el.getBoundingClientRect();
+      if (b.width > 0) xs.add(Math.round(b.left + b.width / 2));
+    }
+    const pts = [];
+    for (const x of xs) {
+      // 짝수 y만(두 격자의 점이 같은 자리끼리 맞도록 — 띠 높이가 홀수여도).
+      for (let y = 2 * Math.ceil(Math.max(0, table.top) / 2); y < Math.min(window.innerHeight, table.bottom); y += 2) {
+        const el = document.elementFromPoint(x, y);
+        const d = el?.closest("[data-decision]");
+        const job = el?.closest('[data-testid="work-job"]')?.querySelector('[data-testid="work-job-row"]')?.dataset.jobId ?? null;
+        pts.push([x, y, job, d ? d.getAttribute("data-decision") : null]);
+      }
+    }
+    return pts;
+  });
+}
+const gridMap = (pts) => new Map(pts.map(([x, y, job, d]) => [`${x},${y}`, [job, d]]));
+
+/**
+ * H1(`rv-below`): 포인터가 「응답 필요」 아래(「지금」 줄)에 있을 때 새 요청이 오면(「지금」의 run이 승인을 물음 → 맨 아래 새 칸) 새 칸의 결정
+ * 단추가 손 밑에 선다. 1280·390 × 구간 있음·빈 구간. 점은 앞 창에서 격자로 찾고, 새 창에서 그 점에 마우스를 두고 잰다.
+ */
+async function belowScene(browser, origin, engine) {
+  const summary = [];
+  for (const vp of ["1280", "390"]) {
+    for (const empty of [false, true]) {
+      const tag = `r2-below-${engine}-${vp}${empty ? "-empty" : ""}`;
+      const server = { twoDeciders: !empty, decisionDelayMs: 60, roundTripMs: 60, ...(empty ? { dropApprovals: new Set([approvals[0].id]) } : {}) };
+      const open = async () => {
+        const ctx = await openContext(browser, origin, { scheme: "light", viewport: R2_VP[vp], waiting: [], server });
+        if (!empty) await twoDecidersReady(ctx.page);
+        await sleep(1500);
+        await settle(ctx.page, runNonDecider.runId);
+        return ctx;
+      };
+      const ask = async (page, state) => {
+        state.patch = new Map([[runWorking.runId, { phase: "awaiting_approval" }]]);
+        state.extraApprovals = [approvalW];
+        await page.evaluate(() => {
+          window.__capture5640Advance(31_000);
+          window.dispatchEvent(new Event("visibilitychange"));
+        });
+        await page.waitForFunction(
+          (rid) => !!document.querySelector(`[data-section="needsMe"] [data-job-id="${rid}"]`)?.closest('[data-testid="work-job"]')?.querySelector('[data-decision="approve"]'),
+          runWorking.runId,
+          { timeout: 8000, polling: "raf" }
+        );
+      };
+      let pick = null;
+      {
+        const { context, page, state } = await open();
+        const g0 = await sampleGrid(page);
+        await ask(page, state);
+        await sleep(200);
+        const g1 = gridMap(await sampleGrid(page));
+        pick = g0.find(([x, y, , d]) => { const a = g1.get(`${x},${y}`); return d === null && a && a[1] !== null && a[0] === runWorking.runId; }) ?? null;
+        await context.close();
+      }
+      if (pick === null) {
+        check(`${tag} 장면 성립: 새 칸의 결정 단추가 손 밑에 오는 점`, false, {});
+        continue;
+      }
+      const { context, page, state } = await open();
+      await page.mouse.move(pick[0], pick[1]);
+      const u0 = await underPoint(page, pick[0], pick[1]);
+      await ask(page, state);
+      await sleep(100);
+      const u1 = await underPoint(page, pick[0], pick[1]);
+      const look = await guardLookOf(page, runWorking.runId);
+      await pressHere(page);
+      await sleep(300);
+      const during = state.decisions;
+      // 풀린 뒤: 자리가 가라앉으면(1.2초 동안 그대로) 같은 자리를 누른다. 폰 폭에서는 시계를 당긴 탓에 셸의 연결 띠가 뒤따라 서며(검수 r1 (마))
+      // 칸 묶음이 한 번 더 옮겨 갈 수 있다 — 그러면 그 점은 더는 새 칸의 단추가 아니므로 새 칸의 단추(지금 자리)를 누른다.
+      await settle(page, runWorking.runId);
+      const band = await page.evaluate(() => document.querySelector('[data-testid="connection-banner"]') !== null);
+      let u2 = await underPoint(page, pick[0], pick[1]);
+      if (u2.job === runWorking.runId && u2.decision !== null) await pressHere(page);
+      else {
+        const c = await decisionCenter(page, runWorking.runId, u1.decision);
+        await mousePress(page, c.x, c.y);
+        u2 = { ...(await underPoint(page, c.x, c.y)), moved: true };
+      }
+      await sleep(600);
+      const ok = u1.job === runWorking.runId && u1.decision !== null && look === true && during === 0 && state.decisions === 1 && state.decidedOrder[0] === approvalW.id;
+      check(`${tag} 「지금」 위 포인터 + 새 요청 → 새 칸의 단추가 손 밑: +100ms 누름 0건(막힌 모양) · 풀린 뒤 누름 = 새 요청 1건`, ok, { u0: short(u0), u1: short(u1), u2: short(u2), look, during, band, order: state.decidedOrder.map((x) => x.slice(-2)) });
+      summary.push(`${vp}${empty ? "/빈" : ""}: ${short(u0)}→${short(u1)} 막힌모양=${look} +100ms=${during} 풀린뒤=${state.decisions}(${u2.moved ? "연결 띠로 자리 옮김 → 새 칸 단추 " : "같은 자리 "}${short(u2)})`);
+      await context.close();
+    }
+  }
+  console.log(`MEASURE r2-below-${engine}: ${summary.join(" | ")}`);
+}
+
+/** 「작업」의 다시 읽기 실패 띠를 세우거나(`fail`) 걷는다 — 목록을 다시 읽게 하고 띠가 서고/걷힐 때까지(한 프레임 단위로) 기다린다. */
+async function toggleBand(page, state, fail) {
+  state.listFail = fail;
+  await page.evaluate(() => window.dispatchEvent(new Event("visibilitychange")));
+  await page.waitForFunction((want) => !!document.querySelector('[data-testid="work-jobs-stale-error"]') === want, fail, { timeout: 5000, polling: "raf" });
+}
+
+/**
+ * H2(`rv-banner-appear`)·M1: 목록 위 다시 읽기 실패 띠가 서면(내려감) / 걷히면(올라옴) 결정 단추가 손 밑에 온다. 점은 앞 창에서 격자로 찾는다:
+ * 섬 — 지금은 B의 글이고 띠가 서면 다른 줄(A)의 결정 단추인 점, 걷힘 — 띠가 선 동안은 글이고 걷히면 결정 단추인 점.
+ */
+async function bandScene(browser, origin, engine) {
+  const summary = [];
+  for (const vp of ["1280", "390"]) {
+    for (const way of ["appear", "gone"]) {
+      const tag = `r2-band-${way}-${engine}-${vp}`;
+      const open = async () => {
+        const ctx = await openContext(browser, origin, { scheme: "light", viewport: R2_VP[vp], waiting: [], server: { twoDeciders: true, threeDeciders: true, decisionDelayMs: 60, roundTripMs: 60 } });
+        await threeReady(ctx.page);
+        await settle(ctx.page);
+        if (way === "gone") {
+          await toggleBand(ctx.page, ctx.state, true);
+          await sleep(GUARD_OVER_MS);
+        }
+        return ctx;
+      };
+      let pick = null;
+      {
+        const { context, page, state } = await open();
+        const g0 = await sampleGrid(page);
+        await toggleBand(page, state, way === "appear");
+        await sleep(200);
+        const g1 = gridMap(await sampleGrid(page));
+        pick =
+          g0.find(([x, y, job, d]) => {
+            const a = g1.get(`${x},${y}`);
+            if (!(d === null && a && a[1] !== null)) return false;
+            return way === "appear" ? job === runApproval2.runId && a[0] === runApproval.runId : true;
+          }) ?? null;
+        await context.close();
+      }
+      if (pick === null) {
+        check(`${tag} 장면 성립: 띠가 ${way === "appear" ? "서면" : "걷히면"} 결정 단추가 손 밑에 오는 점`, false, {});
+        continue;
+      }
+      const { context, page, state } = await open();
+      await page.mouse.move(pick[0], pick[1]);
+      const u0 = await underPoint(page, pick[0], pick[1]);
+      await toggleBand(page, state, way === "appear");
+      await sleep(100);
+      const u1 = await underPoint(page, pick[0], pick[1]);
+      const look = u1.job ? await guardLookOf(page, u1.job) : null;
+      await pressHere(page);
+      await sleep(300);
+      const during = state.decisions;
+      await sleep(GUARD_OVER_MS - 300);
+      const u2 = await underPoint(page, pick[0], pick[1]);
+      await pressHere(page);
+      await sleep(600);
+      const ok = u1.decision !== null && look === true && during === 0 && state.decisions === 1 && u2.job === u1.job;
+      check(`${tag} 띠가 ${way === "appear" ? "서며 내려옴" : "걷히며 올라옴"} → 손 밑 결정 단추: +100ms 누름 0건(막힌 모양) · +1.2초 같은 자리 = 그 줄 1건`, ok, { u0: short(u0), u1: short(u1), u2: short(u2), look, during, order: state.decidedOrder.map((x) => x.slice(-2)) });
+      summary.push(`${vp}/${way}: ${short(u0)}→${short(u1)} 막힌모양=${look} +100ms=${during} +1.2s=${state.decisions}(${short(u2)})`);
+      await context.close();
+    }
+  }
+  console.log(`MEASURE r2-band-${engine}: ${summary.join(" | ")}`);
+}
+
+/**
+ * 셸의 연결 띠(이 화면이 다시 그리지 않는 띠, 390): 실시간이 끊기면 목록 위에 「연결 중…」이 서며 칸 묶음이 내려간다. 띠가 선 직후 A의
+ * 「거부」(지금 자리)를 누르면 0건 — 판정은 띠의 종류가 아니라 단추의 좌표다.
+ */
+async function connScene(browser, origin, engine) {
+  const { context, page, state } = await openContext(browser, origin, { scheme: "light", viewport: R2_VP["390"], waiting: [], server: { twoDeciders: true, threeDeciders: true, decisionDelayMs: 60, roundTripMs: 60 } });
+  await threeReady(page);
+  await settle(page);
+  const before = await decisionCenter(page, runApproval.runId, "reject");
+  await page.evaluate(() => (window.__sockets ?? []).forEach((s) => s.close()));
+  await page.waitForFunction(() => !!document.querySelector('[data-testid="connection-banner"]'), null, { timeout: 5000, polling: "raf" });
+  await sleep(100);
+  const band = await page.evaluate(() => { const e = document.querySelector('[data-testid="connection-banner"]'); return `${Math.round(e.getBoundingClientRect().height)}:${(e.textContent ?? "").trim().slice(0, 10)}`; });
+  const now = await decisionCenter(page, runApproval.runId, "reject");
+  const look = await guardLookOf(page, runApproval.runId);
+  await mousePress(page, now.x, now.y);
+  await sleep(400);
+  const ok = now.y !== before.y && look === true && state.decisions === 0;
+  check(`r2-conn-${engine}-390 셸의 연결 띠가 서며 옮겨진 A의 「거부」 → +100ms 누름 0건(막힌 모양)`, ok, { band, moved: now.y - before.y, look, decisions: state.decisions });
+  console.log(`MEASURE r2-conn-${engine}: 띠 ${band} · A 거부 ${before.y}→${now.y} · 막힌모양=${look} · +100ms 누름 결정 ${state.decisions}`);
+  await context.close();
+}
+
+/** 내가 굴린 뒤 곧바로 누름은 막히지 않는다: 휠(두 엔진)·손가락 끌기(Chromium) × 1280·390 → C의 「승인」 1건. */
+async function scrollScene(browser, origin, engine) {
+  const summary = [];
+  for (const vp of ["1280", "390"]) {
+    for (const input of engine === "chromium" ? ["wheel", "touch"] : ["wheel"]) {
+      const viewport = vp === "1280" ? { width: 1280, height: 700 } : { width: 390, height: 900 };
+      const { context, page, state } = await openContext(browser, origin, { scheme: "light", viewport, waiting: [], touch: input === "touch", server: { twoDeciders: true, threeDeciders: true, decisionDelayMs: 60, roundTripMs: 60 } });
+      await threeReady(page);
+      await settle(page);
+      const b = await decisionCenter(page, runApproval2.runId, "approve");
+      const c0 = await decisionCenter(page, runApproval3.runId, "approve");
+      if (input === "wheel") {
+        await page.mouse.move(b.x, b.y - 30);
+        await page.mouse.wheel(0, 60);
+      } else {
+        const cdp = await context.newCDPSession(page);
+        await cdp.send("Input.synthesizeScrollGesture", { x: Math.round(b.x), y: Math.round(b.y - 30), yDistance: -60, gestureSourceType: "touch", speed: 3000 });
+      }
+      await page.waitForFunction(() => (document.querySelector("[data-team-board-list]")?.scrollTop ?? 0) > 0, null, { timeout: 3000, polling: "raf" });
+      const c = await decisionCenter(page, runApproval3.runId, "approve");
+      const look = await guardLookOf(page, runApproval3.runId);
+      if (input === "touch") {
+        const tap = await touchTapper(context, page, engine);
+        await tap(c.x, c.y);
+      } else await mousePress(page, c.x, c.y);
+      await sleep(500);
+      const ok = c.y !== c0.y && look === false && state.decisions === 1 && state.decidedOrder[0] === approval3.id;
+      check(`r2-scroll-${engine}-${vp}-${input} 내가 굴려 옮긴 C의 「승인」을 곧바로 누름 → 막히지 않고 1건`, ok, { moved: c.y - c0.y, look, order: state.decidedOrder.map((x) => x.slice(-2)) });
+      summary.push(`${vp}/${input}: C ${c0.y}→${c.y} 막힌모양=${look} 결정 ${state.decisions}`);
+      await context.close();
+    }
+  }
+  console.log(`MEASURE r2-scroll-${engine}: ${summary.join(" | ")}`);
+}
+
+/**
+ * 내 연속 결정은 막히지 않는다: 손가락으로 네 줄을 차례로(간격 0.3초, 답 60·300ms) — 내 결정은 줄을 옮기지 않으니 막힐 까닭이 없다.
+ * 셋째 줄 승인 묻는 run(`runWorking` + `approvalW`)을 넷째 결정자로 둔다.
+ */
+async function fourRowsScene(browser, origin, engine) {
+  const summary = [];
+  for (const vp of ["1280", "390"]) {
+    for (const delay of [60, 300]) {
+      const { context, page, state } = await openContext(browser, origin, { scheme: "light", viewport: R2_VP[vp], waiting: [], touch: true, server: { twoDeciders: true, threeDeciders: true, decisionDelayMs: delay, roundTripMs: 60, patch: new Map([[runWorking.runId, { phase: "awaiting_approval" }]]), extraApprovals: [approvalW] } });
+      await page.waitForFunction(() => document.querySelectorAll('[data-section="needsMe"] [data-testid="work-job-approval-approve"]').length === 4, null, { timeout: 15_000 });
+      await settle(page);
+      const tap = await touchTapper(context, page, engine);
+      const looks = [];
+      for (const [i, rid] of [runApproval.runId, runApproval2.runId, runApproval3.runId, runWorking.runId].entries()) {
+        const c = await decisionCenter(page, rid, i % 2 ? "reject" : "approve");
+        looks.push(await guardLookOf(page, rid));
+        await tap(c.x, c.y);
+        await sleep(300);
+      }
+      await sleep(delay + 900);
+      const ok = state.decisions === 4 && new Set(state.decidedOrder).size === 4 && looks.every((l) => l === false);
+      check(`r2-four-${engine}-${vp}-d${delay} 손가락 네 줄 차례로(0.3초) → 4건, 누를 때 막힌 줄 0`, ok, { order: state.decidedOrder.map((x) => x.slice(-2)), looks });
+      summary.push(`${vp}/d${delay}=${state.decisions}`);
+      await context.close();
+    }
+  }
+  console.log(`MEASURE r2-four-${engine}: ${summary.join(" ")}`);
+}
+
+/** owner에게 보일 캡처(수리 1회차): 1280·390 × 밝게·어둡게 — 두 줄 결정 뒤(흐린 결과 요약), 막힌 모양(맨 아래 새 요청이 선 직후). */
+async function r2Shots(browser, origin) {
+  for (const scheme of ["light", "dark"]) {
+    for (const viewport of [{ width: 1280, height: 900 }, { width: 390, height: 1100 }]) {
+      const { context, page, state } = await openContext(browser, origin, { scheme, viewport, waiting: [], server: { twoDeciders: true, threeDeciders: true, decisionDelayMs: 60, roundTripMs: 60 } });
+      await threeReady(page);
+      await settle(page);
+      const tag = `${viewport.width}-${scheme}`;
+      const a = await decisionCenter(page, runApproval.runId, "approve");
+      await mousePress(page, a.x, a.y);
+      await settledIn(page, runApproval.runId);
+      const b = await decisionCenter(page, runApproval2.runId, "reject");
+      await mousePress(page, b.x, b.y);
+      await settledIn(page, runApproval2.runId);
+      await page.mouse.move(5, 5);
+      await sleep(300);
+      await shot(page, `5738r2-1-two-decided-${tag}`);
+      state.patch = new Map([[runWorking.runId, { phase: "awaiting_approval" }]]);
+      state.extraApprovals = [approvalW];
+      await page.evaluate(() => {
+        window.__capture5640Advance(31_000);
+        window.dispatchEvent(new Event("visibilitychange"));
+      });
+      await page.waitForFunction((rid) => document.querySelector(`[data-section="needsMe"] [data-job-id="${rid}"]`)?.closest('[data-testid="work-job"]')?.hasAttribute("data-arrival-guard"), runWorking.runId, { timeout: 8000, polling: "raf" });
+      await shot(page, `5738r2-2-guarded-new-request-${tag}`);
+      check(`r2-shots-${tag} 가로 넘침 0`, (await overflowX(page)) === 0, await overflowX(page));
       await context.close();
     }
   }
@@ -1707,6 +2017,22 @@ async function main() {
           if (parts.includes("move0")) await moveZeroScene(b, preview.origin, engine);
         }
         if (parts.includes("shots")) await slotShots(browser, preview.origin);
+      } finally {
+        await wk.close();
+      }
+    }
+    if (ONLY === "" || ONLY === "fix5738r2" || ONLY.startsWith("fix5738r2:")) {
+      const parts = ONLY.startsWith("fix5738r2:") ? ONLY.slice(10).split(",") : ["below", "band", "conn", "scroll", "four", "shots"];
+      const wk = await webkit.launch();
+      try {
+        for (const [engine, b] of [["chromium", browser], ["webkit", wk]]) {
+          if (parts.includes("below")) await belowScene(b, preview.origin, engine);
+          if (parts.includes("band")) await bandScene(b, preview.origin, engine);
+          if (parts.includes("conn")) await connScene(b, preview.origin, engine);
+          if (parts.includes("scroll")) await scrollScene(b, preview.origin, engine);
+          if (parts.includes("four")) await fourRowsScene(b, preview.origin, engine);
+        }
+        if (parts.includes("shots")) await r2Shots(browser, preview.origin);
       } finally {
         await wk.close();
       }
