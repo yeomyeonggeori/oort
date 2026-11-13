@@ -1,5 +1,11 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { browserOpenHref, isSameServer, opensInBrowser, probeServerReachable } from "./joinHandoff";
+import {
+  browserOpenHref,
+  isSameServer,
+  opensInBrowser,
+  pastesAfterLogout,
+  probeServerReachable,
+} from "./joinHandoff";
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -73,5 +79,18 @@ describe("opensInBrowser · browserOpenHref (#5785 수리 2회차)", () => {
     expect(
       browserOpenHref({ kind: "invite", serverUrl: "https://team.example.com", inviteCode: "abc_DEF-123" })
     ).toBe("https://team.example.com/?code=abc_DEF-123");
+  });
+});
+
+describe("pastesAfterLogout (#5785 수리 4회차)", () => {
+  const other = { kind: "server", serverUrl: "https://team.example.com" } as const;
+  it("데스크탑이고 서버가 다르면 넘기지 않는다. 웹·같은 서버·서버 없는 초대(지금 서버)는 아니다", () => {
+    expect(pastesAfterLogout(other, true, "https://app.oor7.com")).toBe(true);
+    expect(
+      pastesAfterLogout({ kind: "invite", serverUrl: "https://team.example.com", inviteCode: "x" }, true, "https://app.oor7.com")
+    ).toBe(true);
+    expect(pastesAfterLogout(other, false, "https://app.oor7.com")).toBe(false);
+    expect(pastesAfterLogout(other, true, "https://TEAM.example.com/")).toBe(false);
+    expect(pastesAfterLogout({ kind: "invite", serverUrl: "", inviteCode: "x" }, true, "https://a.b")).toBe(false);
   });
 });

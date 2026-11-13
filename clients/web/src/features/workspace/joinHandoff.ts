@@ -15,7 +15,9 @@ import type { EntryDecision } from "@/features/auth/entryInput";
 //   2. 어떻게 넘기나 — 로그인 화면은 마운트될 때 페이지 주소에서 `server`·`code`를 읽는다
 //      (`useJoinPrefill` → `parseJoinFromPageUrl`, 다 읽으면 주소창에서 지운다). 그래서 로그아웃
 //      **전에** 지금 주소에 그 두 값을 얹는다. 로그아웃은 같은 틱에 세션을 비우고 로그인 화면을
-//      새로 마운트한다(`app/session.tsx` signOut).
+//      새로 마운트한다(`app/session.tsx` signOut). 이 창이 넘기는 것은 **지금 서버**의 초대뿐이다.
+//      다른 서버는 웹이면 새 탭으로 열고(`opensInBrowser`), 데스크탑이면 로그아웃한 뒤 로그인 화면에서
+//      사람이 그 링크를 넣는다(`pastesAfterLogout`): 넘어갈 서버를 고르는 것은 사람이다.
 //
 // 해시는 `#/`로 돌린다: 다른 워크스페이스에 로그인한 뒤 앞 워크스페이스의 채널 주소로 떨어지지 않게.
 // =============================================================================
@@ -103,7 +105,7 @@ export async function probeServerReachable(
 /**
  * 웹(Tauri가 아님)에서 넘어갈 서버가 지금 출처와 다르면 이 창 안에서 넘길 수 없다: 운영 CSP가 다른 출처로의
  * fetch(확인·로그인)를 막는다(`connect-src 'self'`). 그때는 로그아웃도 확인 fetch도 없이 그 주소를 브라우저로
- * 연다. 데스크탑(CSP가 http:·https:를 허락)은 지금 길(확인 → 로그아웃 → 넘김)을 그대로 쓴다.
+ * 연다. 데스크탑은 `pastesAfterLogout`.
  */
 export function opensInBrowser(
   target: JoinTarget,
@@ -111,6 +113,18 @@ export function opensInBrowser(
   currentBase: string
 ): boolean {
   return !isTauri && target.serverUrl !== "" && !isSameServer(target.serverUrl, currentBase);
+}
+
+/**
+ * 데스크탑에서 넘어갈 서버가 지금 서버와 다르면 이 창은 넘기지 않는다: 로그아웃한 뒤 로그인 화면에서 사람이 그
+ * 링크를 넣는다(#5785). 넘김은 지금 서버의 초대만 한다.
+ */
+export function pastesAfterLogout(
+  target: JoinTarget,
+  isTauri: boolean,
+  currentBase: string
+): boolean {
+  return isTauri && target.serverUrl !== "" && !isSameServer(target.serverUrl, currentBase);
 }
 
 /**

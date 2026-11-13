@@ -586,7 +586,8 @@ describe("워크스페이스 추가: 두 카드 (#5785)", () => {
 describe("워크스페이스 추가: 이미 있는 곳에 참여 (#5785)", () => {
   // 서버가 만드는 초대 코드 모양(22자 이상 base64url). 시험용 값이다.
   const INVITE = "Q".repeat(24);
-  // 데스크탑 길(확인 → 확인 걸음 → 그 자리에서 로그아웃·넘김). 웹 길은 아래 「웹」 묶음이다.
+  // 데스크탑 길(확인 → 확인 걸음). 이 서버의 초대만 그 자리에서 넘기고, 다른 서버는 링크를 복사하게 한 뒤 보통의
+  // 로그아웃이다. 웹 길은 아래 「웹」 묶음이다.
   beforeEach(() => {
     shell.tauri = true;
   });
@@ -609,7 +610,7 @@ describe("워크스페이스 추가: 이미 있는 곳에 참여 (#5785)", () =>
     expect(q("add-workspace-dialog")?.getAttribute("data-step")).toBe("join");
   });
 
-  it("주소를 넣으면 확인 걸음이 로그아웃과 넘어갈 곳을 말하고(초안은 말하지 않는다), 초점은 확인 묶음이다", async () => {
+  it("다른 서버 주소: 확인 걸음은 넘기지 않고, 로그인 화면이 받는 링크와 「복사」를 준다(초안은 말하지 않는다), 초점은 확인 묶음이다", async () => {
     mount();
     await openJoin();
     await submitJoin("team.example.com");
@@ -617,50 +618,71 @@ describe("워크스페이스 추가: 이미 있는 곳에 참여 (#5785)", () =>
       expect(q("add-workspace-dialog")?.getAttribute("data-step")).toBe("confirm")
     );
     const dialog = text("add-workspace-dialog");
-    expect(dialog).toContain("로그아웃하고 넘어갈까요?");
-    expect(dialog).toContain("로그아웃돼요");
+    expect(dialog).toContain("로그아웃할까요?");
+    expect(dialog).toContain("로그인 화면의 「바꾸기」에 이 링크를 넣어요");
     // 로그아웃 뒤에도 초안이 남는 기존 결함이 고쳐지기 전까지 「지워져요」는 거짓이다(#5785 수리 1회차).
     expect(dialog).not.toContain("초안");
-    expect(text("add-workspace-join-target")).toBe("team.example.com의 로그인 화면으로 넘어가요.");
+    expect(text("add-workspace-join-paste-link")).toBe("https://team.example.com/");
+    // 그 자리 넘김은 없다: 「로그아웃하고 넘어가기」가 서지 않는다.
+    expect(q("add-workspace-join-logout")).toBeNull();
+    expect(text("add-workspace-join-signout")).toBe("로그아웃");
     await vi.waitFor(() => expect(document.activeElement).toBe(q("add-workspace-join-confirm")));
     // 확인 걸음은 아직 아무것도 하지 않았다.
     expect(logoutMock).not.toHaveBeenCalled();
   });
 
-  it("확인하면 주소를 로그인 화면이 읽는 모양으로 얹은 뒤 로그아웃한다(서버 주소)", async () => {
+  it("다른 서버: 「로그아웃」은 주소에 링크를 얹지 않는 보통의 로그아웃이다(로그인 화면은 지금 서버로 선다)", async () => {
     const before = window.location.href;
     mount();
     await openJoin();
     await submitJoin("https://team.example.com");
-    await vi.waitFor(() => expect(q("add-workspace-join-logout")).not.toBeNull());
+    await vi.waitFor(() => expect(q("add-workspace-join-signout")).not.toBeNull());
     let hrefAtLogout = "";
     logoutMock.mockImplementation(() => {
       hrefAtLogout = window.location.href;
     });
-    await act(async () => q("add-workspace-join-logout")?.click());
+    await act(async () => q("add-workspace-join-signout")?.click());
     expect(logoutMock).toHaveBeenCalledTimes(1);
-    // 로그아웃이 불린 순간에 주소가 이미 바뀌어 있다(로그인 화면은 마운트될 때 읽는다).
-    expect(parseJoinFromPageUrl(hrefAtLogout)).toEqual({
-      serverUrl: "https://team.example.com",
-      inviteCode: "",
-    });
-    window.history.replaceState(null, "", before);
+    expect(hrefAtLogout).toBe(before);
+    expect(parseJoinFromPageUrl(hrefAtLogout)).toBeNull();
   });
 
-  it("초대 링크면 서버와 초대 코드를 함께 넘긴다", async () => {
-    const before = window.location.href;
+  it("다른 서버의 초대 링크: 「복사」가 코드까지 실은 링크를 클립보드에 쓴다", async () => {
     mount();
     await openJoin();
     await submitJoin(`초대 받았어요 https://team.example.com/?code=${INVITE} 여기로`);
-    await vi.waitFor(() => expect(q("add-workspace-join-target")).not.toBeNull());
-    expect(text("add-workspace-join-target")).toBe("team.example.com의 초대로 넘어가요.");
-    await act(async () => q("add-workspace-join-logout")?.click());
-    expect(logoutMock).toHaveBeenCalledTimes(1);
-    expect(parseJoinFromPageUrl(window.location.href)).toEqual({
-      serverUrl: "https://team.example.com",
-      inviteCode: INVITE,
-    });
-    window.history.replaceState(null, "", before);
+    await vi.waitFor(() => expect(q("add-workspace-join-paste-copy")).not.toBeNull());
+    const link = `https://team.example.com/?code=${INVITE}`;
+    expect(text("add-workspace-join-paste-link")).toBe(link);
+    await act(async () => q("add-workspace-join-paste-copy")?.click());
+    expect(writeText).toHaveBeenCalledWith(link);
+    await vi.waitFor(() => expect(text("add-workspace-join-paste-copy")).toBe("복사됨"));
+    expect(logoutMock).not.toHaveBeenCalled();
+  });
+
+  it("이 서버의 초대(코드만 · 이 서버 주소의 링크)는 그 자리에서 넘긴다: 코드를 얹은 뒤 로그아웃", async () => {
+    const before = window.location.href;
+    for (const entry of [INVITE, `${window.location.origin}/?code=${INVITE}`]) {
+      logoutMock.mockReset();
+      mount();
+      await openJoin();
+      await submitJoin(entry);
+      await vi.waitFor(() => expect(q("add-workspace-join-logout")).not.toBeNull());
+      expect(q("add-workspace-join-signout")).toBeNull();
+      expect(text("add-workspace-dialog")).toContain("로그아웃하고 넘어갈까요?");
+      let hrefAtLogout = "";
+      logoutMock.mockImplementation(() => {
+        hrefAtLogout = window.location.href;
+      });
+      await act(async () => q("add-workspace-join-logout")?.click());
+      expect(logoutMock).toHaveBeenCalledTimes(1);
+      expect(parseJoinFromPageUrl(hrefAtLogout)?.inviteCode).toBe(INVITE);
+      window.history.replaceState(null, "", before);
+      act(() => mountedRoot?.unmount());
+      mountedRoot = null;
+      mountedHost?.remove();
+      mountedHost = null;
+    }
   });
 
   it("지금 붙어 있는 서버의 주소(초대 코드 없이)는 로그아웃하지 않고 「이미 이 서버에 있어요」를 말한다", async () => {

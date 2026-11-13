@@ -10909,7 +10909,7 @@ export const catalog: MessageCatalog = {
   "workspace.add.joinLead": [
     {
       "type": 0,
-      "value": "Use an address or an invite link. For now this signs you out and continues on the sign-in screen."
+      "value": "Use an address or an invite link. For another server, sign out and enter it on the sign-in screen; an invite to this server signs you out and continues on the sign-in screen."
     }
   ],
   "workspace.add.joinLeadWeb": [
@@ -10968,6 +10968,24 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "Open in a new tab?"
+    }
+  ],
+  "workspace.add.joinPasteAction": [
+    {
+      "type": 0,
+      "value": "Sign out"
+    }
+  ],
+  "workspace.add.joinPasteBody": [
+    {
+      "type": 0,
+      "value": "To join another server, sign out, then choose “Change” on the sign-in screen and enter this link. Copy it before you sign out."
+    }
+  ],
+  "workspace.add.joinPasteTitle": [
+    {
+      "type": 0,
+      "value": "Sign out?"
     }
   ],
   "workspace.add.joinSameServer": [

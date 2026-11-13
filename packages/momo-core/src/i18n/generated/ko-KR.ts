@@ -10230,7 +10230,7 @@ export const catalog: MessageCatalog = {
   "workspace.add.joinLead": [
     {
       "type": 0,
-      "value": "주소나 초대 링크로 들어가요. 지금은 로그아웃한 뒤 로그인 화면에서 이어 가요."
+      "value": "주소나 초대 링크로 들어가요. 다른 서버는 로그아웃한 뒤 로그인 화면에서 그 링크를 넣고, 이 서버의 초대는 로그아웃한 뒤 로그인 화면에서 이어 가요."
     }
   ],
   "workspace.add.joinLeadWeb": [
@@ -10281,6 +10281,24 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "새 탭에서 열까요?"
+    }
+  ],
+  "workspace.add.joinPasteAction": [
+    {
+      "type": 0,
+      "value": "로그아웃"
+    }
+  ],
+  "workspace.add.joinPasteBody": [
+    {
+      "type": 0,
+      "value": "다른 서버에 참여하려면 로그아웃한 뒤 로그인 화면의 「바꾸기」에 이 링크를 넣어요. 로그아웃하기 전에 복사해 두세요."
+    }
+  ],
+  "workspace.add.joinPasteTitle": [
+    {
+      "type": 0,
+      "value": "로그아웃할까요?"
     }
   ],
   "workspace.add.joinSameServer": [

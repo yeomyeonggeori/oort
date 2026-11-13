@@ -13,13 +13,13 @@
 //   cards-member     같은 창, 명부가 멤버라 만들기 카드가 「이 계정으로는 만들 수 없어요」(aria-disabled)
 //   create-form      만들기 카드 → 폼(설명은 설정 › 워크스페이스와 같은 문장)
 //   join-step        참여 카드 → 주소 칸에 초대 링크
-//   join-confirm     계속 → 확인 걸음(로그아웃·초안 삭제·넘어갈 곳)
+//   join-confirm     계속 → 확인 걸음(웹: 새 탭 / 데스크탑의 다른 서버: 로그인 화면이 받는 링크 · 복사 · 로그아웃)
 //   profile-menu     프로필 카드 → 메뉴(내 상태 → 워크스페이스 이름 머리글 → 네 줄)
 //   leave-confirm    「워크스페이스 나가기」 → 확인 창
 //   leave-last-owner 나가기 → 서버 409 → 창 안의 거절 문장(로그아웃 안 됨)
-//   handoff          (1280 밝게만) 확인 → 로그아웃 → 로그인 화면이 초대 링크로 가입 걸음에 서고 주소창에 코드가 없다.
-//                    로그아웃 요청은 원래 서버로 1건, 넘어갈 서버에 인증 값이 실린 요청 0건. 원래 서버의 로그아웃 답을
-//                    늦춘 동안 저장된 서버는 원래 서버 그대로다(링크의 서버로는 로그아웃이 끝난 뒤에 바꾼다).
+//   handoff          (1280 밝게만, 데스크탑) 다른 서버의 초대 → 확인 걸음은 넘기지 않는다 → 「로그아웃」 → 로그인 화면이
+//                    지금 서버의 로그인 걸음으로 서고, 원래 서버의 답이 늦게 와도 칩·저장된 서버·초점이 그대로다.
+//                    로그아웃 요청은 원래 서버로 1건, 넘어갈 서버에 인증 값이 실린 요청 0건.
 //   menu-steady      (네 크기) 「서버 주소 복사」 전 · 직후 · 2.5초 뒤 메뉴의 모든 줄의 y와 메뉴의 높이 · 위 끝 ·
 //                    스크롤이 같다(±0.5px). 다섯 줄 각각에 포인터를 둔 채 복사하고 2.5초 뒤에도 포인터 밑이 같은 줄.
 //
@@ -364,41 +364,43 @@ async function ownerRun(page, origin, tag, withHandoff, keychain = false) {
   }
   page.off("request", onRequest);
   if (withHandoff) {
-    // 데스크탑 길: 확인 걸음(로그아웃) → 그 자리에서 넘김.
+    // 데스크탑 길: 다른 서버는 넘기지 않는다. 확인 걸음은 로그인 화면이 받는 링크와 「복사」, 보통의 「로그아웃」이다.
     await page.getByTestId("add-workspace-join-confirm").waitFor();
     check(tag, "데스크탑: 맞는 주소의 확인 fetch 1건 뒤 확인 걸음", healthHosts.filter((h) => h === "team.example.com").length === 1, { healthHosts });
     const confirmText = await page.getByTestId("add-workspace-dialog").innerText();
-    check(tag, "데스크탑: 확인 걸음이 로그아웃과 넘어갈 곳을 말하고 초안은 말하지 않는다", confirmText.includes("로그아웃돼요") && !confirmText.includes("초안") && confirmText.includes("team.example.com의 초대로 넘어가요"), null);
-    await fits(page, tag, "join-confirm", "add-workspace-join-logout");
+    const pasteLink = await page.getByTestId("add-workspace-join-paste-link").innerText();
+    const handOffButtons = await page.getByTestId("add-workspace-join-logout").count();
+    check(
+      tag,
+      "데스크탑: 다른 서버는 넘기지 않고 링크·복사·로그아웃을 준다(초안은 말하지 않는다)",
+      confirmText.includes("로그아웃할까요?") && confirmText.includes("「바꾸기」") && !confirmText.includes("초안") && pasteLink === JOIN_INPUT && handOffButtons === 0,
+      { pasteLink: pasteLink.replace(INVITE_SHAPE, "<code>"), handOffButtons }
+    );
+    await fits(page, tag, "join-confirm", "add-workspace-join-signout");
     await shot(page, tag, "join-confirm");
-    // 원래 서버의 로그아웃 답을 3초 늦춘다: 그동안 저장된 서버가 바뀌면(넘김 순서가 깨지면) 아래 단정이 빨갛다.
+    // 원래 서버의 로그아웃 답을 늦춘다: 그 답이 로그인 화면의 무엇이든 바꾸면 아래 단정이 빨갛다.
     holdLogoutMs = 3_000;
     const logFrom = apiLog.length;
     if (keychain) {
       const shellBefore = await page.evaluate(() => window.__shellCalls);
       check(tag, "키체인 대역: 로그인 뒤 셸이 갱신을 날라 세션이 손잡이 상태다", shellBefore.some((c) => c.cmd === "session_refresh_attempt"), shellBefore);
     }
-    await page.getByTestId("add-workspace-join-logout").click();
-    // 로그인 화면이 선 뒤에 본다(서기 전에 보면 아무것도 재지 않는다).
-    await page.getByTestId("onboarding-join").waitFor({ timeout: 2_500 });
-    const storedWhileHeld = await page.evaluate(() => localStorage.getItem("momo.web.server.v1"));
-    check(tag, "넘김: 원래 서버의 로그아웃이 끝나기 전에는 저장된 서버가 원래 서버", storedWhileHeld === origin, { storedWhileHeld, origin });
-    await shot(page, tag, "handoff-waiting");
-    await page.getByTestId("join-sign-in-instead").waitFor({ timeout: 15_000 });
-    // 첫 그림은 저장된 서버로 서고, 링크를 읽은 효과가 다음 커밋에서 칩을 바꾼다. 그 커밋을 기다린다.
-    await page.waitForFunction(
-      () => document.querySelector("[data-testid=connect-server-chip-host]")?.textContent?.includes("team.example.com"),
-      null,
-      { timeout: 5_000 }
-    ).catch(() => {});
-    const chip = await page.getByTestId("connect-server-chip-host").innerText().catch(() => "");
-    // 칩만이 아니라 이 기기가 실제로 붙을 서버(저장값)도 새 서버여야 한다: 아니면 초대 코드가 앞 서버로 간다.
-    const stored = await page.evaluate(() => localStorage.getItem("momo.web.server.v1"));
-    check(tag, "넘김: 저장된 서버가 초대의 서버다", stored === "https://team.example.com", { stored });
-    const href = page.url();
-    check(tag, "넘김: 로그인 화면이 초대 가입 걸음에 서고 서버 칩이 그 주소다", chip.includes("team.example.com"), { chip });
-    check(tag, "넘김: 주소창에서 초대 코드를 지웠다", !href.includes("code="), { href: href.replace(INVITE_SHAPE, "<code>") });
-    await page.waitForTimeout(500);
+    await page.getByTestId("add-workspace-join-signout").click();
+    await page.getByTestId("onboarding-sign-in").waitFor({ timeout: 2_500 });
+    const loginState = () =>
+      page.evaluate(() => ({
+        step: ["onboarding-welcome", "onboarding-sign-in", "onboarding-join"].find((id) => document.querySelector(`[data-testid=${id}]`)) ?? null,
+        chip: document.querySelector("[data-testid=connect-server-chip-host]")?.textContent ?? null,
+        stored: localStorage.getItem("momo.web.server.v1"),
+        focus: document.activeElement?.getAttribute("data-testid") ?? document.activeElement?.tagName ?? null,
+        code: location.search.includes("code="),
+      }));
+    const first = await loginState();
+    check(tag, "로그아웃: 로그인 화면이 지금 서버의 로그인 걸음으로 서고 주소에 링크가 없다", first.step === "onboarding-sign-in" && first.stored === origin && first.chip === new URL(origin).host && !first.code, first);
+    await shot(page, tag, "handoff-login");
+    await page.waitForTimeout(holdLogoutMs + 500);
+    const later = await loginState();
+    check(tag, "로그아웃: 원래 서버의 답이 늦게 와도 걸음·칩·저장된 서버·초점이 그대로", JSON.stringify(later) === JSON.stringify(first), { first, later });
     holdLogoutMs = 0;
     const after = apiLog.slice(logFrom);
     const originLogouts = after.filter((r) => r.origin === origin && r.path === "/v1/auth/logout").length;
@@ -407,10 +409,9 @@ async function ownerRun(page, origin, tag, withHandoff, keychain = false) {
       const revokes = (await page.evaluate(() => window.__shellCalls)).filter((c) => c.cmd === "session_revoke");
       check(tag, "키체인 대역: 셸이 받은 폐기 1건, 그 서버가 원래 서버", revokes.length === 1 && revokes[0].apiBase === origin && originLogouts === 0, { revokes, originLogouts });
     } else {
-      check(tag, "넘김: 원래 서버가 받은 로그아웃 1건", originLogouts === 1, { originLogouts });
+      check(tag, "로그아웃: 원래 서버가 받은 로그아웃 1건", originLogouts === 1, { originLogouts });
     }
-    check(tag, "넘김: 넘어갈 서버에 인증 값이 실린 요청 0건", otherAuthed.length === 0, { otherAuthed });
-    await shot(page, tag, "handoff-login");
+    check(tag, "로그아웃: 넘어갈 서버에 인증 값이 실린 요청 0건", otherAuthed.length === 0, { otherAuthed });
     return;
   }
   await closeLayers(page);

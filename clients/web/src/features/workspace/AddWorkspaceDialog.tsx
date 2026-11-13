@@ -60,6 +60,7 @@ import {
   joinHandoffHref,
   opensInBrowser,
   joinTargetFromEntry,
+  pastesAfterLogout,
   probeServerReachable,
   type JoinTarget,
 } from "./joinHandoff";
@@ -96,7 +97,10 @@ import { BlockedReason } from "@/features/common/BlockedReason";
 //           classifier, a same-server address is refused and any other address
 //           must answer a light reachability check (no logout for a typo), a
 //           confirm step names the cost (logout), and only then is the link handed to the login screen
-//           (`joinHandoff.ts`, `useJoinPrefill`). The confirm is a step inside this
+//           (`joinHandoff.ts`, `useJoinPrefill`). Only an invite to THIS server is handed
+//           over: another server opens in a new tab on the web, and on the desktop the
+//           step offers the link to copy and a plain logout, and the person enters it on
+//           the login screen. The confirm is a step inside this
 //           surface, not a second dialog (design-system README §3.4).
 //
 // What this dialog still does NOT do is switch to the workspace it just made. A
@@ -499,13 +503,24 @@ function AddWorkspacePanel({
     joinTarget && opensInBrowser(joinTarget, IS_TAURI, absoluteApiBase())
       ? browserOpenHref(joinTarget)
       : null;
+  // 데스크탑의 다른 서버: 넘기지 않는다. 로그인 화면이 받는 모양의 링크를 보여 주고 복사하게 한다(#5785).
+  const pasteLink =
+    joinTarget && pastesAfterLogout(joinTarget, IS_TAURI, absoluteApiBase())
+      ? (browserOpenHref(joinTarget) ?? joinLink.trim())
+      : null;
   const title =
     step === "create"
       ? formatMessage("workspace.add.createTitle")
       : step === "join"
         ? formatMessage("workspace.add.joinTitle")
         : step === "confirm"
-          ? formatMessage(openHref ? "workspace.add.joinOpenTitle" : "workspace.add.joinConfirmTitle")
+          ? formatMessage(
+              pasteLink
+                ? "workspace.add.joinPasteTitle"
+                : openHref
+                  ? "workspace.add.joinOpenTitle"
+                  : "workspace.add.joinConfirmTitle"
+            )
           : formatMessage("workspace.add.title");
   const description = created ? (
     <span
@@ -520,7 +535,13 @@ function AddWorkspacePanel({
   ) : step === "join" ? (
     formatMessage(IS_TAURI ? "workspace.add.joinLead" : "workspace.add.joinLeadWeb")
   ) : step === "confirm" ? (
-    formatMessage(openHref ? "workspace.add.joinOpenBody" : "workspace.add.joinConfirmBody")
+    formatMessage(
+      pasteLink
+        ? "workspace.add.joinPasteBody"
+        : openHref
+          ? "workspace.add.joinOpenBody"
+          : "workspace.add.joinConfirmBody"
+    )
   ) : (
     formatMessage("workspace.add.lead")
   );
@@ -706,13 +727,33 @@ function AddWorkspacePanel({
               className="rounded-lg border border-line p-3 focus-visible:focus-ring"
               data-testid="add-workspace-join-confirm"
             >
-              <p
-                id={confirmTargetId}
-                className="break-all text-body text-ink"
-                data-testid="add-workspace-join-target"
-              >
-                {joinTargetSentence}
-              </p>
+              {pasteLink ? (
+                <span className="@container block min-w-0">
+                  <span className="flex min-w-0 flex-col items-start gap-2 @sm:flex-row @sm:items-center">
+                    <span
+                      id={confirmTargetId}
+                      className="min-w-0 select-all break-all font-mono text-meta text-ink"
+                      data-testid="add-workspace-join-paste-link"
+                    >
+                      {pasteLink}
+                    </span>
+                    <CopyButton
+                      value={pasteLink}
+                      subject={formatMessage("workspace.add.joinField")}
+                      testId="add-workspace-join-paste-copy"
+                      className="tap-target"
+                    />
+                  </span>
+                </span>
+              ) : (
+                <p
+                  id={confirmTargetId}
+                  className="break-all text-body text-ink"
+                  data-testid="add-workspace-join-target"
+                >
+                  {joinTargetSentence}
+                </p>
+              )}
             </div>
           </div>
           <div className="flex items-center justify-end gap-2 border-t border-line p-4">
@@ -725,7 +766,18 @@ function AddWorkspacePanel({
             >
               {formatMessage("workspace.add.back")}
             </Button>
-            {openHref ? (
+            {pasteLink ? (
+              // 보통의 로그아웃이다: 주소에 링크를 얹지 않는다. 로그인 화면은 지금 서버로 서고, 넘어갈 서버는 사람이 고른다.
+              <Button
+                type="button"
+                variant="destructive"
+                size="sm"
+                onClick={() => logout()}
+                data-testid="add-workspace-join-signout"
+              >
+                {formatMessage("workspace.add.joinPasteAction")}
+              </Button>
+            ) : openHref ? (
               <Button asChild size="sm">
                 <a
                   href={openHref}

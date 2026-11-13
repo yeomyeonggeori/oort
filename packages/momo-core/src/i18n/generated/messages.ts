@@ -1464,6 +1464,9 @@ export const messageKeys = [
   "workspace.add.joinOpenInvite",
   "workspace.add.joinOpenServer",
   "workspace.add.joinOpenTitle",
+  "workspace.add.joinPasteAction",
+  "workspace.add.joinPasteBody",
+  "workspace.add.joinPasteTitle",
   "workspace.add.joinSameServer",
   "workspace.add.joinTargetInvite",
   "workspace.add.joinTargetInviteOnly",
@@ -3397,6 +3400,9 @@ export const argumentSpecs = {
     "server": "string"
   },
   "workspace.add.joinOpenTitle": {},
+  "workspace.add.joinPasteAction": {},
+  "workspace.add.joinPasteBody": {},
+  "workspace.add.joinPasteTitle": {},
   "workspace.add.joinSameServer": {},
   "workspace.add.joinTargetInvite": {
     "server": "string"
@@ -4899,6 +4905,9 @@ export interface MessageArgs {
   "workspace.add.joinOpenInvite": { server: string };
   "workspace.add.joinOpenServer": { server: string };
   "workspace.add.joinOpenTitle": Record<string, never>;
+  "workspace.add.joinPasteAction": Record<string, never>;
+  "workspace.add.joinPasteBody": Record<string, never>;
+  "workspace.add.joinPasteTitle": Record<string, never>;
   "workspace.add.joinSameServer": Record<string, never>;
   "workspace.add.joinTargetInvite": { server: string };
   "workspace.add.joinTargetInviteOnly": Record<string, never>;
