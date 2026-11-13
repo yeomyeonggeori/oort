@@ -68,15 +68,15 @@ export function StatusDot({
 export function FaceStatusDot({
   face,
   tone,
-  subject = 'human',
+  kind = 'human',
   ground,
   testID = 'status-dot',
 }: {
   /** 얼굴 한 변(pt). */
   face: number;
   tone: StatusDotTone;
-  /** 누구의 상태인가 — 같은 톤이라도 모양(뜻)이 다르다(에이전트 경고 = 채운 원, r1 H2). */
-  subject?: StatusBadgeSubject;
+  /** 누구의 상태인가(사람 · 에이전트) — 같은 톤이라도 모양(뜻)이 다르다(에이전트 경고 = 채운 원, r1 H2). */
+  kind?: StatusBadgeSubject;
   /** 얼굴이 서는 바탕 색. 고리(틈)와 모양의 빈 곳이 이 색이다. 기본은 면(`surface`). */
   ground?: string;
   testID?: string;
@@ -85,7 +85,7 @@ export function FaceStatusDot({
   const palette = usePalette();
   const fill = ground ?? palette.surface;
   const {dot, gap} = statusBadgeGeometry(face);
-  const shape = statusBadgeShape(tone, subject);
+  const shape = statusBadgeShape(tone, kind);
   const outer = dot + 2 * gap;
   // 바깥 원 = 틈(바탕색), 안의 원 = 표식. 표식이 시험이 읽는 자리(`testID`)다: 채움 색 · 꺼짐의 바탕 채움 + 선 색 둘레.
   return (

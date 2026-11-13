@@ -327,7 +327,7 @@ function AgentMemberRow({
       <AvatarStatus
         face={32}
         tone={dot?.tone ?? null}
-        subject="agent"
+        kind="agent"
         dotTestId="agent-liveness-dot"
         data-testid="avatar-with-liveness"
         data-status-tone={dot?.tone}

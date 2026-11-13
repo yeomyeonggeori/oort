@@ -38,7 +38,7 @@ const SHAPE_CLASS: Readonly<Record<StatusBadgeShape, string | undefined>> = {
 export function AvatarStatus({
   face,
   tone,
-  subject,
+  kind,
   dotTestId = "presence-dot",
   className,
   children,
@@ -48,8 +48,8 @@ export function AvatarStatus({
   face: WebStatusBadgeFace;
   /** 점의 톤. `null` 이면 점도, 도려낸 자리도 없다. */
   tone: StatusDotTone | null;
-  /** 누구의 상태인가 — 같은 톤이라도 모양(뜻)이 다르다(에이전트 경고 = 채운 원). */
-  subject: StatusBadgeSubject;
+  /** 누구의 상태인가(사람 · 에이전트) — 같은 톤이라도 모양(뜻)이 다르다(에이전트 경고 = 채운 원). */
+  kind: StatusBadgeSubject;
   dotTestId?: string;
   className?: string;
   /** 아바타 하나. 감싸는 칸이 도려내므로 아바타 쪽은 아무것도 몰라도 된다. */
@@ -66,11 +66,11 @@ export function AvatarStatus({
       {tone === null ? null : (
         <span
           aria-hidden="true"
-          className={SHAPE_CLASS[statusBadgeShape(tone, subject)]}
+          className={SHAPE_CLASS[statusBadgeShape(tone, kind)]}
           data-avatar-status-dot=""
           data-testid={dotTestId}
           data-tone={tone}
-          data-shape={statusBadgeShape(tone, subject)}
+          data-shape={statusBadgeShape(tone, kind)}
         />
       )}
     </span>

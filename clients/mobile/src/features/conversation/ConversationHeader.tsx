@@ -246,7 +246,7 @@ export function ConversationHeader({
             <FaceStatusDot
               face={CONV.titleFace}
               tone={peerStatusTone}
-              subject={memberFor(directory, peerId as string)?.kind === 'agent' ? 'agent' : 'human'}
+              kind={memberFor(directory, peerId as string)?.kind === 'agent' ? 'agent' : 'human'}
               testID="conversation-title-status-dot"
             />
           ) : null}

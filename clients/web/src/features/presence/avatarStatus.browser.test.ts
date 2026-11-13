@@ -144,7 +144,7 @@ function pageHtml(css: string, cells: Cell[]): string {
         createElement(AvatarStatus, {
           face: cell.face as 24 | 32 | 112,
           tone: cell.tone,
-          subject: cell.subject,
+          kind: cell.subject,
           children: face,
         })
       );

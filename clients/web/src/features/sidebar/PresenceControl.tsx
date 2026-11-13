@@ -105,7 +105,7 @@ export function PresenceBadge({
     <AvatarStatus
       face={md ? 32 : 24}
       tone={effectivePresenceTone(effective)}
-      subject="human"
+      kind="human"
       dotTestId="presence-badge-dot"
       aria-hidden="true"
     >

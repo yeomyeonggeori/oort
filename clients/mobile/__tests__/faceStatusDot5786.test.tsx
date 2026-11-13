@@ -30,7 +30,7 @@ const HIDDEN = {includeHiddenElements: true} as const;
 function dot(props: {face?: number; tone: StatusDotTone; subject?: 'human' | 'agent'; ground?: string}) {
   const view = render(
     <View style={{width: props.face ?? 28, height: props.face ?? 28}}>
-      <FaceStatusDot face={props.face ?? 28} tone={props.tone} subject={props.subject} ground={props.ground} testID="d" />
+      <FaceStatusDot face={props.face ?? 28} tone={props.tone} kind={props.subject} ground={props.ground} testID="d" />
     </View>,
   );
   const q = (id: string) => {

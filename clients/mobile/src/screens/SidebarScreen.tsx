@@ -1331,7 +1331,7 @@ function Row({
         <FaceStatusDot
           face={HOME.rowFace}
           tone={status.tone}
-          subject={row.isAgent ? 'agent' : 'human'}
+          kind={row.isAgent ? 'agent' : 'human'}
           ground={homeRowGround(palette, selected, pressed)}
           testID="home-row-status-dot"
         />
