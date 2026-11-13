@@ -288,9 +288,10 @@ export const SUBMENU_SIDE_OFFSET = 9;
 
 /**
  * 하위 메뉴를 여는 줄의 끝 표지(›). 줄의 글자보다 한 단 연한 잉크이고 오른쪽 끝에 붙는다. 읽는 이름은
- * Radix 가 `aria-haspopup="menu"` · `aria-expanded` 로 따로 말하므로 그림은 숨긴다.
+ * Radix 가 `aria-haspopup="menu"` · `aria-expanded` 로 따로 말하므로 그림은 숨긴다. 부품이 아니라 두 여는 줄이
+ * 같이 쓰는 그림 조각이라 소문자 함수다(갤러리 전수 목록에 들지 않는다).
  */
-export function SubmenuChevron() {
+export function submenuChevron() {
   return (
     <ChevronRight
       className="ml-auto size-4 shrink-0 text-ink-muted"
@@ -352,7 +353,7 @@ export const DropdownMenuSubTrigger = React.forwardRef<
     {...props}
   >
     {children}
-    <SubmenuChevron />
+    {submenuChevron()}
   </MenuPrimitive.SubTrigger>
 ));
 DropdownMenuSubTrigger.displayName = MenuPrimitive.SubTrigger.displayName;

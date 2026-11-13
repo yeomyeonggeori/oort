@@ -12,7 +12,7 @@ import {
   DropdownMenuSubTrigger,
   DropdownMenuTrigger,
   SUBMENU_LOCKED_ROW_ERROR,
-} from "./dropdown-menu";
+} from "./ui/dropdown-menu";
 import {
   ContextMenu,
   ContextMenuContent,
@@ -21,7 +21,7 @@ import {
   ContextMenuSubContent,
   ContextMenuSubTrigger,
   ContextMenuTrigger,
-} from "./context-menu";
+} from "./ui/context-menu";
 
 // =============================================================================
 // 하위 메뉴 부품 (#5777, owner 2026-11-14) — 규칙 「고를 수 없는 줄이 없는 묶음에만」의 가드와 여는 줄의 모양.

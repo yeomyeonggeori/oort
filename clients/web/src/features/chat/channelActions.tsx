@@ -694,7 +694,7 @@ function clusterRuns(items: ChannelActionItem[]): ChannelActionItem[][] {
  *
  * 예전에는 복사가 「제목 + 화면에 남는 세 줄」이었다(하위 메뉴 금지, #1383). 그 규칙은 「고를 수 없는 줄이
  * 없는 묶음에만 하위 메뉴」로 좁혀졌고(`dropdown-menu.tsx` 머리말), 이 두 무리는 잠긴 줄이 없다. 여는 줄은
- * 다른 줄처럼 아이콘을 앞에 들어 아이콘 세로 줄이 끊기지 않고, 끝에 › 가 선다(`SubmenuChevron`).
+ * 다른 줄처럼 아이콘을 앞에 들어 아이콘 세로 줄이 끊기지 않고, 끝에 › 가 선다(`submenuChevron`).
  *
  * 하위 판의 접근 이름은 여는 줄의 글자다(Radix 가 판에 `aria-labelledby` 로 단다). 복사 줄은 「복사됨」
  * 영수증 동안 두 판이 다 열려 있고(`channelActionKeepsMenuOpen`), 목적지를 고르면 표면이 메뉴를 통째로 닫는다.

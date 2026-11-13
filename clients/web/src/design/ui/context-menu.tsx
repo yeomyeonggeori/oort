@@ -7,7 +7,7 @@ import {
   SUBMENU_ALIGN_OFFSET,
   SUBMENU_SIDE_OFFSET,
   submenuPanelClass,
-  SubmenuChevron,
+  submenuChevron,
   useSubmenuGuardRef,
 } from "@/design/ui/dropdown-menu";
 
@@ -231,7 +231,7 @@ export const ContextMenuSubTrigger = React.forwardRef<
     {...props}
   >
     {children}
-    <SubmenuChevron />
+    {submenuChevron()}
   </ContextMenuPrimitive.SubTrigger>
 ));
 ContextMenuSubTrigger.displayName = ContextMenuPrimitive.SubTrigger.displayName;

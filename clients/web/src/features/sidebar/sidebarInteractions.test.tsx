@@ -981,6 +981,8 @@ describe("R1 H-1 — 행을 옮기는 액션은 캐럿을 데리고 간다", () 
     const row = rowEl(RELEASE);
     row.focus();
     rightClick(row);
+    // 목적지는 「섹션으로 이동 ›」 하위 판 안에 있다(#5777): 여는 줄을 눌러 판을 연 뒤 고른다.
+    act(() => menuRow("move-to-section").click());
     act(() => {
       document
         .querySelector<HTMLElement>('[data-testid="channel-row-section-sec-1"]')
