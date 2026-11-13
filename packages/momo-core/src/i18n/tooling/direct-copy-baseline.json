@@ -665,6 +665,7 @@
     "clients/web/src/features/updates/UpdateSection.tsx": {"ko": 33, "en": 0},
     "clients/web/src/features/work/WorkPanel.tsx": {"ko": 39, "en": 0},
     "clients/web/src/features/work/WorkSessionDetail.tsx": {"ko": 49, "en": 6},
+    "clients/web/src/features/workConsole/WorkConsoleRoute.tsx": {"ko": 35, "en": 0},
     "packages/momo-core/src/features/work/workSessionModel.ts": {"ko": 59, "en": 0}
   },
   "raises": [

@@ -2123,6 +2123,36 @@ export const catalog: MessageCatalog = {
       "value": "Allow it from the phone or desktop app"
     }
   ],
+  "desktop.workSession.backAria": [
+    {
+      "type": 0,
+      "value": "Back to tasks"
+    }
+  ],
+  "desktop.workSession.backLabel": [
+    {
+      "type": 0,
+      "value": "Tasks"
+    }
+  ],
+  "desktop.workSession.backToListLabel": [
+    {
+      "type": 0,
+      "value": "Session list"
+    }
+  ],
+  "desktop.workSession.listTitle": [
+    {
+      "type": 0,
+      "value": "Recent sessions"
+    }
+  ],
+  "desktop.workSession.pageTitle": [
+    {
+      "type": 0,
+      "value": "Session"
+    }
+  ],
   "expressions.add.adminsOnly": [
     {
       "type": 0,
@@ -9069,6 +9099,18 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "Couldn't load what the agents are doing."
+    }
+  ],
+  "timeline.memberPanel.nowFailedMid": [
+    {
+      "type": 0,
+      "value": "Couldn't load activity"
+    }
+  ],
+  "timeline.memberPanel.nowFailedShort": [
+    {
+      "type": 0,
+      "value": "Load failed"
     }
   ],
   "timeline.memberPanel.nowRetry": [

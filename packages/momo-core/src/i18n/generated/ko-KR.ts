@@ -1955,6 +1955,36 @@ export const catalog: MessageCatalog = {
       "value": "허락은 폰이나 데스크탑 앱에서 보내 주세요"
     }
   ],
+  "desktop.workSession.backAria": [
+    {
+      "type": 0,
+      "value": "작업으로 돌아가기"
+    }
+  ],
+  "desktop.workSession.backLabel": [
+    {
+      "type": 0,
+      "value": "작업"
+    }
+  ],
+  "desktop.workSession.backToListLabel": [
+    {
+      "type": 0,
+      "value": "세션 목록"
+    }
+  ],
+  "desktop.workSession.listTitle": [
+    {
+      "type": 0,
+      "value": "최근 세션"
+    }
+  ],
+  "desktop.workSession.pageTitle": [
+    {
+      "type": 0,
+      "value": "세션"
+    }
+  ],
   "expressions.add.adminsOnly": [
     {
       "type": 0,
@@ -8640,6 +8670,18 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "에이전트가 지금 하는 일을 불러오지 못했어요."
+    }
+  ],
+  "timeline.memberPanel.nowFailedMid": [
+    {
+      "type": 0,
+      "value": "하는 일을 못 불러왔어요"
+    }
+  ],
+  "timeline.memberPanel.nowFailedShort": [
+    {
+      "type": 0,
+      "value": "실패했어요"
     }
   ],
   "timeline.memberPanel.nowRetry": [

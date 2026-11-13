@@ -139,7 +139,7 @@ describe("SurfaceRoute (#2780)", () => {
     });
     expect(el.querySelector('[data-testid="surface-unavailable-route"]')).toBeNull();
     expect(el.querySelector('[data-testid="console-body"]')).toBeNull();
-    expect(el.querySelector("h1")?.textContent).toBe("작업 콘솔");
+    expect(el.querySelector("h1")?.textContent).toBe("세션");
   });
 
   it("목록을 읽었고 온라인 호스트가 없으면 이유를 말하는 빈 상태다", async () => {
@@ -167,7 +167,7 @@ describe("SurfaceRoute (#2780)", () => {
     const { el } = await mount();
     expect(el.querySelector('[data-testid="surface-route-pending"]')).not.toBeNull();
     expect(el.querySelector('[data-testid="surface-unavailable-route"]')).toBeNull();
-    expect(el.querySelector("h1")?.textContent).toBe("작업 콘솔");
+    expect(el.querySelector("h1")?.textContent).toBe("세션");
   });
 });
 

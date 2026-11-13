@@ -34,13 +34,13 @@ export const DESKTOP_NOTIFICATION_ENABLE_LABEL = "알림 켜기";
 export const DESKTOP_NOTIFICATION_REQUESTING_LABEL = "요청 중";
 export const DESKTOP_NOTIFICATION_GRANTED_LABEL = "켜짐";
 export const DESKTOP_NOTIFICATION_GRANTED_DETAIL =
-  "이 기기에서 데스크톱 알림을 보낼 수 있어요.";
+  "이 기기에서 데스크탑 알림을 보낼 수 있어요.";
 export const DESKTOP_NOTIFICATION_DEFAULT_DETAIL =
   "이 앱이 앞에 없을 때 알려 주려면 알림을 켜세요.";
 export const DESKTOP_NOTIFICATION_DENIED_MESSAGE =
   "이 앱의 알림이 macOS에서 막혀 있어요. 시스템 설정 › 알림에서 oort를 허용하세요.";
 export const DESKTOP_NOTIFICATION_UNSUPPORTED_MESSAGE =
-  "이 화면에서는 데스크톱 알림을 쓸 수 없어요. 데스크톱 앱을 쓰면 알림이 와요.";
+  "이 화면에서는 데스크탑 알림을 쓸 수 없어요. 데스크탑 앱을 쓰면 알림이 와요.";
 
 // 브라우저 탭 문장(#3340). 권한은 이 단추를 누른 뒤에만 묻는다.
 export const BROWSER_NOTIFICATION_GRANTED_DETAIL =
