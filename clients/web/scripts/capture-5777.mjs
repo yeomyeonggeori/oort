@@ -431,15 +431,91 @@ async function sceneZoom(browser, origin) {
   }
 }
 
+// ── H. 복사 실패: 판이 포인터 밑에서 움직이지 않는다(#5777 검수 M1) ─────────────────────────────
+// 클립보드 쓰기를 거절시키고(`noClipboard` 면 API 자체가 없는 주소), 채널 줄 · DM 줄의 복사 하위 판 세 줄을 차례로 눌러
+// ① 실패 전후 위 판 폭 · 위 판 각 줄 y · 하위 판 각 줄 y 가 ±0.5px 안에서 같고 ② 같은 좌표를 다시 눌러도 복사 말고 다른 쓰기
+// 요청(읽음 · 알림 …)이 0건이며 포인터 밑 줄이 그 줄 그대로임을 잰다.
+async function sceneCopyFail(browser, origin, scheme, { noClipboard = false } = {}) {
+  const scene = `copyfail-${scheme}${noClipboard ? "-noclipboard" : ""}`;
+  const { context, page } = await open(browser, origin, { scheme });
+  const writes = [];
+  page.on("request", (req) => {
+    if (req.method() !== "GET" && new URL(req.url()).pathname.startsWith("/v1/") && !new URL(req.url()).pathname.startsWith("/v1/auth/")) writes.push(`${req.method()} ${new URL(req.url()).pathname}`);
+  });
+  try {
+    await page.evaluate((none) => {
+      if (none) Object.defineProperty(navigator, "clipboard", { value: undefined, configurable: true });
+      else Object.defineProperty(navigator, "clipboard", { value: { writeText: () => Promise.reject(new DOMException("denied", "NotAllowedError")) }, configurable: true });
+    }, noClipboard);
+    const SUB = '[data-testid="channel-row-copy-group-menu"]';
+    const ys = (g) => g.rows.map((r) => r.top);
+    const same = (a, b) => a.length === b.length && a.every((v, i) => Math.abs(v - b[i]) <= 0.5);
+    for (const [label, id] of [["채널 줄", chId(4)], ["DM 줄", dmId(2)]]) {
+      for (const key of ["copy-name", "copy-link", "copy-id"]) {
+        await attempt(scene, async () => {
+          // 메뉴를 여는 데까지(부하로 하위 판이 늦게 서거나 닫히는 것)만 한 번 다시 시도한다. 단정은 다시 시도하지 않는다.
+          for (let tries = 0; ; tries += 1) {
+            try {
+              await openRowMenu(page, id);
+              await hoverOpen(page, "channel-row-copy-group", "channel-row-copy-group-menu");
+              await page.getByTestId(`channel-row-${key}`).waitFor({ state: "visible", timeout: 3_000 });
+              break;
+            } catch (error) {
+              if (tries >= 1) throw error;
+              await closeMenus(page);
+            }
+          }
+          const rootBefore = await panelGeometry(page, ROW_MENU);
+          const subBefore = await panelGeometry(page, SUB);
+          const target = page.getByTestId(`channel-row-${key}`);
+          const box = await target.boundingBox();
+          const x = box.x + box.width / 2;
+          const y = box.y + box.height / 2;
+          const writesBefore = writes.length;
+          await page.mouse.click(x, y);
+          await page.getByTestId("channel-row-action-error").waitFor({ state: "attached", timeout: 3_000 });
+          await page.waitForTimeout(150);
+          const rootAfter = await panelGeometry(page, ROW_MENU);
+          const subAfter = await panelGeometry(page, SUB);
+          check(scene, `H ${label} ${key}: 실패 뒤 위 판 폭 · 줄 y 그대로(±0.5)`,
+            rootBefore && rootAfter && Math.abs(rootBefore.panel.width - rootAfter.panel.width) <= 0.5 && same(ys(rootBefore), ys(rootAfter)),
+            { widthBefore: rootBefore?.panel.width, widthAfter: rootAfter?.panel.width, before: rootBefore && ys(rootBefore), after: rootAfter && ys(rootAfter) });
+          check(scene, `H ${label} ${key}: 하위 판 줄 y · 왼쪽 끝 그대로(±0.5)`,
+            subBefore && subAfter && same(ys(subBefore), ys(subAfter)) && Math.abs(subBefore.panel.left - subAfter.panel.left) <= 0.5,
+            { before: subBefore && ys(subBefore), after: subAfter && ys(subAfter), leftBefore: subBefore?.panel.left, leftAfter: subAfter?.panel.left });
+          const underPointer = () => page.evaluate(([px, py]) => document.elementFromPoint(px, py)?.closest('[role="menuitem"]')?.getAttribute("data-testid") ?? null, [x, y]);
+          check(scene, `H ${label} ${key}: 포인터 밑 줄이 방금 누른 그 줄 · 그 줄이 실패를 말함`,
+            (await underPointer()) === `channel-row-${key}` && (await target.getAttribute("data-copy-failed")) !== null, { under: await underPointer(), text: (await target.textContent())?.trim() });
+          await page.mouse.click(x, y);
+          await page.waitForTimeout(250);
+          const extra = writes.slice(writesBefore);
+          check(scene, `H ${label} ${key}: 같은 좌표를 다시 눌러도 다른 쓰기 요청 0건`, extra.length === 0 && (await underPointer()) === `channel-row-${key}`, { extra });
+          if (key === "copy-id") await shot(page, `copy-fail-${label === "DM 줄" ? "dm" : "channel"}${noClipboard ? "-noclipboard" : ""}-${scheme}`);
+          await closeMenus(page);
+        });
+      }
+    }
+  } finally {
+    await context.close();
+  }
+}
+
 async function main() {
   mkdirSync(OUT_DIR, { recursive: true });
-  const preview = await startGuardedPreview({ webRoot: WEB_ROOT, port: PORT, portEnvVar: "CAPTURE_PORT", ...(DIST_DIR ? { distDir: resolve(DIST_DIR) } : {}) });
+  // `startGuardedPreview` 는 `distDir` 칸을 받지 않는다(#5777 검수 M3: 예전에는 조용히 무시돼 「고치기 전 번들」 대조가 늘
+  // 지금 번들로 돌았다). 번들 자리는 `vite preview --outDir` 로 넘긴다(`capture-5192.mjs` 와 같은 길).
+  const preview = await startGuardedPreview({
+    webRoot: WEB_ROOT, port: PORT, portEnvVar: "CAPTURE_PORT",
+    ...(DIST_DIR ? { extraArgs: ["--outDir", resolve(DIST_DIR)] } : {}),
+  });
   const browser = await chromium.launch();
   try {
     for (const scheme of ["light", "dark"]) await sceneWide(browser, preview.origin, scheme);
     await sceneKeyboard(browser, preview.origin);
     for (const scheme of ["light", "dark"]) await sceneEdge(browser, preview.origin, scheme);
     await sceneZoom(browser, preview.origin);
+    for (const scheme of ["light", "dark"]) await sceneCopyFail(browser, preview.origin, scheme);
+    await sceneCopyFail(browser, preview.origin, "light", { noClipboard: true });
   } finally {
     await browser.close();
     await preview.stop?.();

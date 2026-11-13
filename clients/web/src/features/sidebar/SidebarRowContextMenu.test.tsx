@@ -7,7 +7,9 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Channel, MembershipRole, ReadState } from "@momo/core/lib/api";
 import {
+  CHANNEL_COPY_FAILURE,
   CHANNEL_COPY_ID_DONE_LABEL,
+  CHANNEL_COPY_UNAVAILABLE,
   CHANNEL_COPY_ID_LABEL,
   CHANNEL_LEAVE_LABEL,
   CHANNEL_MARK_READ_LABEL,
@@ -1309,6 +1311,14 @@ describe("복사 무리 (#3963)", () => {
     ]);
   });
 
+  it("「나가기」는 문 글리프이고 로그아웃 글리프가 아니다 (#5777 M2)", () => {
+    mountRow();
+    rightClick();
+    const glyph = item("leave")?.querySelector("svg")?.getAttribute("class") ?? "";
+    expect(glyph).toContain("lucide-door-open");
+    expect(glyph).not.toContain("lucide-log-out");
+  });
+
   it("구분선이 복사 무리와 다음 무리 사이에만 선다", () => {
     mountRow();
     rightClick();
@@ -1345,6 +1355,46 @@ describe("ID 복사 (#3963)", () => {
     clickItem("copy-id");
     await flush();
     expect(writeText).toHaveBeenCalledWith(CHANNEL_ID);
+  });
+});
+
+describe("복사 실패는 누른 줄이 말한다 (#5777 M1)", () => {
+  it("쓰기가 거절되면 배너가 서지 않고 그 줄의 글자만 바뀐다", async () => {
+    const writeText = vi.fn().mockRejectedValue(new Error("denied"));
+    vi.stubGlobal("navigator", { clipboard: { writeText } });
+    mountRow();
+    rightClick();
+    openSub("copy-group");
+    const before = Array.from(menu()?.children ?? []).length;
+    clickItem("copy-id");
+    await flush();
+    expect(menu()).not.toBeNull();
+    // 판의 자식 수가 늘지 않는다 = 위 판 맨 위에 보이는 줄이 서지 않았다(보이지 않는 알림은 sr-only).
+    expect(
+      document.querySelector('[data-testid="channel-row-action-error"]')?.className
+    ).toContain("sr-only");
+    expect(Array.from(menu()?.children ?? []).length).toBe(before + 1);
+    expect(item("copy-id")?.hasAttribute("data-copy-failed")).toBe(true);
+    expect(item("copy-id")?.textContent?.trim()).toBe("복사하지 못했습니다");
+    expect(item("copy-id")?.getAttribute("title")).toBe(CHANNEL_COPY_FAILURE);
+    // 같은 줄을 다시 누르면 다시 복사한다(다른 줄이 아니다).
+    clickItem("copy-id");
+    await flush();
+    expect(writeText).toHaveBeenCalledTimes(2);
+  });
+
+  it("클립보드 API 가 없는 주소에서도 같은 길이다", async () => {
+    vi.stubGlobal("navigator", {});
+    mountRow();
+    rightClick();
+    openSub("copy-group");
+    clickItem("copy-link");
+    await flush();
+    expect(item("copy-link")?.hasAttribute("data-copy-failed")).toBe(true);
+    expect(item("copy-link")?.getAttribute("title")).toBe(CHANNEL_COPY_UNAVAILABLE);
+    expect(
+      document.querySelector('[data-testid="channel-row-action-error"]')?.textContent
+    ).toBe(CHANNEL_COPY_UNAVAILABLE);
   });
 });
 

@@ -15,7 +15,7 @@ import {
   Info,
   Link,
   Loader2,
-  LogOut,
+  DoorOpen,
   Mail,
   MailOpen,
   Star,
@@ -165,6 +165,12 @@ export interface ChannelActions {
   isPending: (key: ChannelActionKey) => boolean;
   /** 항목 자리에서 하는 말(§5, 토스트가 아니다). 메뉴가 열려 있어야 읽힌다. */
   error: string | null;
+  /**
+   * 복사 실패는 배너가 아니라 **누른 그 줄**이 말한다(#5777 검수 M1). 배너가 판 맨 위에 서면 위 판이
+   * 192 → 331px 로 넓어져 방금 누른 자리를 다른 줄이 차지했고, 「다시 눌러 보세요」대로 누르면 읽음·알림이
+   * 실행됐다. 줄은 높이도 위치도 그대로이고 글자만 바뀐다(「복사됨」 영수증과 같은 자리).
+   */
+  copyFailure: { key: ChannelActionKey; message: string } | null;
   clearError: () => void;
   run: (key: ChannelActionKey) => void;
   /** 「섹션으로 이동」의 라디오 행이 고른 목적지. 표면이 없으면 아무 일도 없다. */
@@ -198,7 +204,16 @@ export function useChannelActions({
   const navigate = useNavigate();
   const location = useLocation();
   const invalidateReadStates = useInvalidateReadStates(workspaceId);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setErrorState] = useState<string | null>(null);
+  const [copyFailure, setCopyFailure] = useState<{
+    key: ChannelActionKey;
+    message: string;
+  } | null>(null);
+  // 배너 쪽 오류를 비우거나 새로 세울 때 복사 실패 줄도 같이 쉰다 - 두 말이 한 메뉴에 겹치지 않는다.
+  const setError = (next: string | null) => {
+    setCopyFailure(null);
+    setErrorState(next);
+  };
   const [confirmLeave, setConfirmLeave] = useState(false);
   const [leaveError, setLeaveError] = useState<string | null>(null);
 
@@ -371,16 +386,16 @@ export function useChannelActions({
     currentSectionId,
   };
 
-  function runCopy(copy: () => Promise<boolean>) {
+  function runCopy(key: ChannelActionKey, copy: () => Promise<boolean>) {
     // 클립보드 API 자체가 없으면 다시 눌러도 같다. 「다시 시도」라고 말하지
     // 않는 이유이고, `MessageRow.onCopyLink` 가 이미 하는 판정이다.
     if (typeof navigator.clipboard?.writeText !== "function") {
-      setError(CHANNEL_COPY_UNAVAILABLE);
+      setCopyFailure({ key, message: CHANNEL_COPY_UNAVAILABLE });
       return;
     }
     setError(null);
     void copy().then((ok) => {
-      if (!ok) setError(CHANNEL_COPY_FAILURE);
+      if (!ok) setCopyFailure({ key, message: CHANNEL_COPY_FAILURE });
     });
   }
 
@@ -415,13 +430,13 @@ export function useChannelActions({
         markUnreadMutation.mutate();
         return;
       case "copy-link":
-        runCopy(linkCopy.copy);
+        runCopy(key, linkCopy.copy);
         return;
       case "copy-name":
-        runCopy(nameCopy.copy);
+        runCopy(key, nameCopy.copy);
         return;
       case "copy-id":
-        runCopy(idCopy.copy);
+        runCopy(key, idCopy.copy);
         return;
       case "close-dm":
         // 왕복이 없다. 닫기는 이 기기의 원장 한 칸이고(`sidebarDmClosure.ts`), 서버도 상대 쪽
@@ -460,6 +475,7 @@ export function useChannelActions({
     items: (surface) => channelActionItemsForSurface(surface, available, state),
     isPending,
     error,
+    copyFailure,
     clearError: () => setError(null),
     run,
     moveToSection: (sectionId) => {
@@ -503,7 +519,7 @@ export function useChannelActions({
  *   github       GitPullRequest  앱이 GitHub 를 그리는 글리프(작업 보드 · 실행 보고)
  *   star/unstar  Star / StarOff  별표 붙이기 / 떼기
  *   hide         EyeOff          「목록에서 숨기기」(대화를 지우지 않고 목록에서 안 보이게 한다)
- *   leave        LogOut          나가기. 위험 줄이라 글자와 함께 `--danger` 를 입는다(`currentColor`)
+ *   leave        DoorOpen        나가기. 위험 줄이라 글자와 함께 `--danger` 를 입는다(`currentColor`)
  * 색은 따로 주지 않는다: 메시지 메뉴(`MessageActions.tsx` `actionIcon`)처럼 줄 글자색을 물려받는다.
  */
 const ACTION_ICON: Record<ChannelActionIcon, LucideIcon> = {
@@ -522,7 +538,7 @@ const ACTION_ICON: Record<ChannelActionIcon, LucideIcon> = {
   star: Star,
   unstar: StarOff,
   hide: EyeOff,
-  leave: LogOut,
+  leave: DoorOpen,
 };
 
 function ActionIcon({ name }: { name: ChannelActionIcon }) {
@@ -617,6 +633,15 @@ function ChannelSectionMoveChoices({
 }
 
 /**
+ * 복사 실패 문장의 첫 문장(「복사하지 못했습니다」). 줄은 한 줄·32px 로 고정이라 전체 문장은 `title` 과
+ * 스크린리더용 알림이 맡는다. 새 문구를 코드에 적지 않고 코어가 가진 문장에서 가져온다.
+ */
+function copyFailureRowLabel(message: string): string {
+  const first = message.split(". ")[0];
+  return first.endsWith(".") ? first.slice(0, -1) : first;
+}
+
+/**
  * 한 줄. 아이콘(`ActionIcon`) + 낱말. 그릇만 다르고(드롭다운 / 컨텍스트) 나머지는 같다 —
  * `MessageActionMenuItems` 와 같은 갈래이고, 같은 이유다.
  */
@@ -634,11 +659,16 @@ function ChannelActionMenuRow({
   onHandOff: (key: ChannelActionKey) => void;
 }) {
   const busy = actions.isPending(item.key);
+  const failure =
+    actions.copyFailure?.key === item.key ? actions.copyFailure : null;
   const props = {
     "data-testid": `${prefix}-${item.testKey}`,
     "data-muted":
       item.key === "mute" && actions.state.muted ? "" : undefined,
-    tone: item.tone,
+    tone: failure ? ("danger" as const) : item.tone,
+    // 눌린 줄이 실패를 말할 때 전체 문장(다시 눌러 보세요 / 클립보드를 쓸 수 없습니다)은 title 에 둔다.
+    title: failure?.message,
+    "data-copy-failed": failure ? "" : undefined,
     // 왕복 중에도 잠그지도 흐리지도 않는다 (design-review #1937 N-1).
     // `States.tsx` 가 같은 축에 「`aria-busy` 와 바뀐 낱말, never `disabled`
     // and never dimmed」라 적어 두었다 — 회색이 된 컨트롤은 「지금 일어나는
@@ -663,7 +693,11 @@ function ChannelActionMenuRow({
     children: (
       <>
         <ActionIcon name={item.icon} />
-        {busy ? item.busyLabel ?? item.label : item.label}
+        {failure
+          ? copyFailureRowLabel(failure.message)
+          : busy
+            ? item.busyLabel ?? item.label
+            : item.label}
       </>
     ),
   };
@@ -811,6 +845,19 @@ export function ChannelActionMenuItems({
 
           `px-2`: 배너의 기본 `px-4` 는 메뉴 행(`px-2`)과 다른 축이라 첫 글자가
           8px 오른쪽으로 밀려 섰다(실측 21px 대 13px, N-3). 같은 왼쪽 자를 쓴다. */}
+      {actions.copyFailure && (
+        // 눈에는 누른 줄이 말하고(위 `ChannelActionMenuRow`), 귀에는 여기가 문장 전체를 읽는다. `sr-only`
+        // 는 자리를 차지하지 않으므로 판의 폭도 줄 위치도 움직이지 않는다.
+        <div role="group" aria-label={CHANNEL_ACTION_ERROR_GROUP_LABEL}>
+          <p
+            role="alert"
+            className="sr-only"
+            data-testid={`${prefix}-action-error`}
+          >
+            {actions.copyFailure.message}
+          </p>
+        </div>
+      )}
       {actions.error && (
         <div role="group" aria-label={CHANNEL_ACTION_ERROR_GROUP_LABEL}>
           <InlineBanner
