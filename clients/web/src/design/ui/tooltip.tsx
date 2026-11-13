@@ -102,13 +102,16 @@ export function Tooltip({
   // 초점이 나갈 때: 보이는 것은 지금 닫고, 노드는 초점 이동이 끝난 뒤에 뗀다(머리말). 그 사이 다시 열리면 `clear`가 떼기를 취소한다.
   const closeOnBlur = React.useCallback(() => {
     clear();
+    // 보이던 툴팁도, 숨긴 채 남은 노드도 없으면 DOM 에는 아무 일도 없다(전과 같다: 마우스로 간 초점의 blur 등).
+    // 숨긴 채 남아 있는데 다시 blur 가 오면 `clear` 가 걷은 떼기를 아래에서 다시 건다(노드가 남지 않게).
+    if (!open && !leaving) return;
     setOpen(false);
     setLeaving(true);
     timer.current = setTimeout(() => {
       timer.current = null;
       setLeaving(false);
     }, 0);
-  }, [clear]);
+  }, [clear, open, leaving]);
   React.useEffect(() => clear, [clear]);
   // 떠 있는 동안 무리에 「떠 있음」을 알린다. 정리 함수가 닫힘·언마운트를 모두 맡는다(포인터가 나가서 닫히든, 트리거가 사라져
   // 닫히든 같은 길이다). 지연 없는 옮겨 가기는 이 기록에서 나온다.

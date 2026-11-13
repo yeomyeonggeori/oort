@@ -152,6 +152,33 @@ describe("공용 툴팁", () => {
     expect(leftover()).toBeNull();
   });
 
+  it("떠 있지 않던 툴팁의 blur 는 DOM 에 아무 일도 하지 않는다(마우스로 간 초점 등, 전과 같다)", () => {
+    vi.useFakeTimers();
+    const { button, tip, leftover, host } = mount();
+    focusVisible(button, false);
+    const before = host.innerHTML;
+    act(() => button.focus());
+    act(() => button.blur());
+    expect(tip()).toBeNull();
+    expect(leftover()).toBeNull();
+    expect(host.innerHTML).toBe(before);
+  });
+
+  it("숨긴 채 남은 동안 blur 가 한 번 더 와도 노드는 한 박자 뒤에 떼어진다", () => {
+    vi.useFakeTimers();
+    const { button, leftover } = mount();
+    focusVisible(button, true);
+    act(() => button.focus());
+    act(() => button.blur());
+    expect(leftover()).not.toBeNull();
+    // 마우스로 다시 간 초점(:focus-visible 아님)은 툴팁을 열지 않고, 그 뒤의 blur 가 떼기를 다시 건다.
+    focusVisible(button, false);
+    act(() => button.focus());
+    act(() => button.blur());
+    act(() => void vi.advanceTimersByTime(0));
+    expect(leftover()).toBeNull();
+  });
+
   it("숨긴 채 남은 한 박자 안에 초점이 돌아오면 같은 노드가 다시 보이고 떼기는 취소된다", () => {
     vi.useFakeTimers();
     const { button, tip, leftover } = mount();
