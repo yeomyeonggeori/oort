@@ -1584,7 +1584,8 @@ async function moveZeroScene(browser, origin, engine) {
       const s1 = await slotBoxes(page);
       const b = await decisionCenter(page, runApproval2.runId, "reject");
       await mousePress(page, b.x, b.y);
-      await page.locator('[data-section="needsMe"] [data-testid="work-job-approval-error"]').first().waitFor({ timeout: 6000 });
+      // 실패 문장이 서지 않으면(예: 위 칸의 결과 줄이 높이를 바꿔 B가 옮겨져 둘째 겹이 누름을 삼킴) 멈추지 않고 그 사실을 단언에 싣는다.
+      const errorShown = await page.locator('[data-section="needsMe"] [data-testid="work-job-approval-error"]').first().waitFor({ timeout: 6000 }).then(() => true, () => false);
       await sleep(300);
       const s2 = await slotBoxes(page);
       state.waiting.add(macQuiet.sessionId);
@@ -1593,7 +1594,7 @@ async function moveZeroScene(browser, origin, engine) {
       const m = [maxMove(s0, s1), maxMove(s1, s2), maxMove(s2, s3)];
       const appended = Object.keys(s3).length === Object.keys(s2).length + 1;
       const tag = `${viewport.width}${big ? `-${big.replace("%", "")}` : ""}`;
-      check(`move0-${engine}-${tag} 결과 줄 · 실패 · 새 요청 맨 아래 → 앞 칸 움직임 0px`, m.every((v) => v === 0) && appended, { moves: m, appended });
+      check(`move0-${engine}-${tag} 결과 줄 · 실패 · 새 요청 맨 아래 → 앞 칸 움직임 0px`, m.every((v) => v === 0) && appended && errorShown, { moves: m, appended, errorShown });
       summary.push(`${tag}=${m.map((v) => v.toFixed(1)).join("/")}`);
       await context.close();
     }
@@ -1733,7 +1734,9 @@ async function belowScene(browser, origin, engine) {
       await settle(page, runWorking.runId);
       const band = await page.evaluate(() => document.querySelector('[data-testid="connection-banner"]') !== null);
       let u2 = await underPoint(page, pick[0], pick[1]);
-      if (u2.job === runWorking.runId && u2.decision !== null) await pressHere(page);
+      if (during > 0) {
+        // 막지 못했다(이미 새 요청이 결정됨): 풀린 뒤 누름은 재지 않는다.
+      } else if (u2.job === runWorking.runId && u2.decision !== null) await pressHere(page);
       else {
         const c = await decisionCenter(page, runWorking.runId, u1.decision);
         await mousePress(page, c.x, c.y);
