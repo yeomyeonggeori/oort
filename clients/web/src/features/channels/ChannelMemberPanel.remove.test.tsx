@@ -53,6 +53,8 @@ function member(id: string, kind: "human" | "agent", name: string, handle: strin
     channelCount: 1,
     channelIds: [CH],
     capabilities: [],
+    createdAtMs: 1,
+    updatedAtMs: 1,
   } as RosterMember;
 }
 
