@@ -43,5 +43,6 @@
   "desktop.workJobs.stateAwaitingApproval": "승인 대기",
   "desktop.workJobs.approvalHintInList": "승인은 목록에서도 할 수 있어요",
   "desktop.workJobs.openToAnswer": "열어서 답하기",
+  "desktop.workJobs.settledElsewhere": "이제 응답하지 않아도 돼요",
   "desktop.workJobs.reportedTitle": "에이전트 보고: {summary}"
 }

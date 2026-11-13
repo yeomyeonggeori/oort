@@ -291,6 +291,7 @@ export const messageKeys = [
   "desktop.workJobs.approvalHintInList",
   "desktop.workJobs.openToAnswer",
   "desktop.workJobs.reportedTitle",
+  "desktop.workJobs.settledElsewhere",
   "desktop.workJobs.stateAwaitingApproval",
   "desktop.workJobs.tagApproval",
   "desktop.workJobs.tagPermission",
@@ -1732,6 +1733,7 @@ export const argumentSpecs = {
   "desktop.workJobs.reportedTitle": {
     "summary": "string"
   },
+  "desktop.workJobs.settledElsewhere": {},
   "desktop.workJobs.stateAwaitingApproval": {},
   "desktop.workJobs.tagApproval": {},
   "desktop.workJobs.tagPermission": {},
@@ -3467,6 +3469,7 @@ export interface MessageArgs {
   "desktop.workJobs.approvalHintInList": Record<string, never>;
   "desktop.workJobs.openToAnswer": Record<string, never>;
   "desktop.workJobs.reportedTitle": { summary: string };
+  "desktop.workJobs.settledElsewhere": Record<string, never>;
   "desktop.workJobs.stateAwaitingApproval": Record<string, never>;
   "desktop.workJobs.tagApproval": Record<string, never>;
   "desktop.workJobs.tagPermission": Record<string, never>;

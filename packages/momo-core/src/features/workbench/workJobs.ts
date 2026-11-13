@@ -327,28 +327,23 @@ export interface WorkJobSection {
  * 구간: 응답 필요 → 끝나지 않은 일(승인 대기를 맨 위로) → 끝난 일. 구간 안은 서버 순서(마지막 활동
  * 최신순)를 지킨다. 빈 구간은 만들지 않는다.
  *
- * 「응답 필요」(#5593)는 호출자가 답한다(`needsMyCheck`). 웹·데스크탑(#5640)은 `rowNeedsMe`로 서버가 준 사실만 읽는다(#5639의
- * `include=jobs` 상태 `waiting` + 인박스 배지와 같은 승인 원장). 폰은 아직 그 세션의 진행을 읽어 정한다(`pendingPermission`, v0.1.47에
- * 서버 사실로 옮긴다). 답하지 않으면 이 구간은 없다 — 예전 두 구간 그대로다. 끝난 줄은 묻지 않는다: 끝난 세션의 요청은 이미 취소됐다(D5).
+ * 「응답 필요」(#5593)는 호출자가 답한다(`needsMyCheck`). 폰은 그 세션의 진행을 읽어 정한다(`pendingPermission`, v0.1.47에 서버 사실로
+ * 옮긴다). 웹·데스크탑(#5640)은 이 함수로 「응답 필요」를 가르지 않는다: 그 구간은 화면에 떠 있는 동안 칸이 자리를 지키므로
+ * (`keepNeedsMeSlots`, #5738) 칸에 선 줄을 뺀 나머지만 이 함수에 넘긴다. 답하지 않으면 이 구간은 없다 — 예전 두 구간 그대로다.
+ * 끝난 줄은 묻지 않는다: 끝난 세션의 요청은 이미 취소됐다(D5).
  */
 export function workJobSections(
   rows: readonly WorkJobRow[],
-  needsMyCheck: (row: WorkJobRow) => boolean = () => false,
-  /**
-   * 방금 그 자리에서 결정해 「응답 필요」의 칸에 붙든 줄(#5640 수리 4회차). **끝났어도** 그 칸에 남는다 — 서버는 거부하면 run을
-   * 바로 끝내고(`stopped`), 승인한 run도 곧바로 끝날 수 있다. 끝난 줄을 먼저 걷으면 붙든 줄이 「끝난 일」로 가서 다음 줄의 결정
-   * 단추가 방금 누른 자리로 올라온다.
-   */
-  heldInPlace: (row: WorkJobRow) => boolean = () => false
+  needsMyCheck: (row: WorkJobRow) => boolean = () => false
 ): WorkJobSection[] {
-  const open = rows.filter((row) => !row.finished || heldInPlace(row));
-  const mine = open.filter((row) => heldInPlace(row) || needsMyCheck(row));
-  const rest = open.filter((row) => !heldInPlace(row) && !needsMyCheck(row));
+  const open = rows.filter((row) => !row.finished);
+  const mine = open.filter((row) => needsMyCheck(row));
+  const rest = open.filter((row) => !needsMyCheck(row));
   const now = [
     ...rest.filter((row) => row.awaitingApproval),
     ...rest.filter((row) => !row.awaitingApproval),
   ];
-  const done = rows.filter((row) => row.finished && !heldInPlace(row));
+  const done = rows.filter((row) => row.finished);
   const sections: WorkJobSection[] = [];
   if (mine.length > 0) {
     sections.push({ key: "needsMe", label: WORK_JOBS_COPY.sectionNeedsMe, rows: mine });
@@ -356,6 +351,96 @@ export function workJobSections(
   if (now.length > 0) sections.push({ key: "now", label: WORK_JOBS_COPY.sectionNow, rows: now });
   if (done.length > 0) sections.push({ key: "done", label: WORK_JOBS_COPY.sectionDone, rows: done });
   return sections;
+}
+
+// =============================================================================
+// 「응답 필요」의 칸 (#5738, ADR-0202 증보 2026-11-11의 그 자리 결정).
+//
+// 한 줄을 결정하면 그 줄이 빠지고 아래 줄이 올라와, 방금 누른 자리에 다른 줄의 「승인」이 섰다. 그것을 시간·자리 규칙으로 막던
+// 여섯 번의 수리를 걷고 **구조**로 닫는다: 구간이 화면에 떠 있는 동안 칸은 자리를 지킨다.
+//   - 결정한 칸은 빠지지 않고 그 자리에서 결과 칸이 된다(`settled: "mine"`). 내가 결정하지 않았는데 묻지 않게 된 칸(다른 기기·대화
+//     카드에서 결정, 만료, 취소, run이 끝남)도 그 자리에서 결과 칸이 된다(`"elsewhere"`).
+//   - 새로 온 요청은 구간 **맨 아래**에 붙는다. 서버가 순서를 바꿔 줘도 처음 본 순서를 지킨다.
+//   - 결과 칸은 되살아나지 않는다(같은 승인이 원장에 다시 보여도). 칸이 정리되는 것은 호출자가 이 목록을 버릴 때뿐이다 — 「작업」을
+//     떠났다 돌아올 때, 「내 작업/팀 전체」를 갈아탈 때. 시간·포인터·스크롤로 정리하지 않는다.
+// 칸 하나 = 묻는 일 하나다(run 줄은 승인 하나, 내 맥 세션은 그 세션의 권한 요청). 같은 run이 다음 승인을 물으면 그것은 새 요청이라
+// 맨 아래 새 칸에 선다.
+// =============================================================================
+
+/** 지금 나에게 묻는 일 하나(호출자가 `rowNeedsMe`로 고른 줄과 그 줄이 묻는 것). */
+export interface NeedsMeAsk<Facts> {
+  row: WorkJobRow;
+  /** 묻는 승인의 id(run 줄). 내 맥 세션의 권한 요청은 서버가 id를 주지 않아 null이다(#5639 계약). */
+  askId: string | null;
+  /** 칸이 그리는 사실(승인 원장 행·카드 문장 등). 칸이 처음 선 때의 것을 끝까지 쓴다 — 늦게 온 글이 칸 높이를 바꾸지 않게. */
+  facts: Facts;
+}
+
+export interface NeedsMeSlot<Facts> {
+  /** 화면에 떠 있는 동안 바뀌지 않는 열쇠(같은 줄이 다시 물으면 `#2`처럼 새 열쇠). */
+  key: string;
+  /** 칸이 처음 선 때의 줄. 목록에서 줄이 빠지거나 바뀌어도 칸은 이 줄로 그린다(높이를 지키려고). */
+  row: WorkJobRow;
+  askId: string | null;
+  facts: Facts;
+  /** null = 아직 나에게 묻는다. `mine` = 이 화면에서 내가 결정했다. `elsewhere` = 내가 결정하지 않았는데 더는 묻지 않는다. */
+  settled: "mine" | "elsewhere" | null;
+}
+
+/** 칸 열쇠의 바탕: 줄 id와 묻는 승인 id(소문자). */
+export function needsMeAskBase(rowId: string, askId: string | null): string {
+  return `${rowId.toLowerCase()}:${askId === null ? "ask" : askId.toLowerCase()}`;
+}
+
+function baseOf(key: string): string {
+  const hash = key.indexOf("#");
+  return hash < 0 ? key : key.slice(0, hash);
+}
+
+/**
+ * 앞 칸들과 지금 묻는 일들로 다음 칸들을 낸다(순수 함수, 같은 입력을 두 번 넣어도 같다).
+ *
+ * - `decidedHere`: 이 화면에서 내가 결정해 결정이 닿은 칸의 열쇠. 원장이 아직 그 승인을 내놓아도 결과 칸이다.
+ * - `sending`: 지금 결정을 보내는 칸의 열쇠. 원장이 답보다 먼저 그 승인을 빼도 「다른 곳에서」로 바꾸지 않는다 — 결정 컨트롤이 그
+ *   칸에 남아 답(성공·실패)을 받는다.
+ */
+export function keepNeedsMeSlots<Facts>(
+  previous: readonly NeedsMeSlot<Facts>[],
+  asks: readonly NeedsMeAsk<Facts>[],
+  opts: { decidedHere: ReadonlySet<string>; sending: ReadonlySet<string> }
+): NeedsMeSlot<Facts>[] {
+  const live = new Map<string, NeedsMeAsk<Facts>>();
+  for (const ask of asks) {
+    const base = needsMeAskBase(ask.row.id, ask.askId);
+    if (!live.has(base)) live.set(base, ask);
+  }
+  // 바탕마다 마지막 칸(같은 줄이 다시 물은 칸이 뒤에 선다).
+  const lastByBase = new Map<string, NeedsMeSlot<Facts>>();
+  for (const slot of previous) lastByBase.set(baseOf(slot.key), slot);
+  const next: NeedsMeSlot<Facts>[] = previous.map((slot) => {
+    if (slot.settled !== null) return slot;
+    if (opts.decidedHere.has(slot.key)) return { ...slot, settled: "mine" };
+    const base = baseOf(slot.key);
+    if (live.has(base) && lastByBase.get(base) === slot) return slot;
+    if (opts.sending.has(slot.key)) return slot;
+    return { ...slot, settled: "elsewhere" };
+  });
+  const generations = new Map<string, number>();
+  for (const slot of previous) {
+    const base = baseOf(slot.key);
+    generations.set(base, (generations.get(base) ?? 0) + 1);
+  }
+  for (const [base, ask] of live) {
+    const last = lastByBase.get(base);
+    if (last !== undefined) {
+      // 묻는 칸이 이미 있다. 결과 칸이면: 같은 승인(id가 있는 것)은 되살리지 않고, id가 없는 권한 요청은 새로 물은 것이라 새 칸이다.
+      if (next[previous.indexOf(last)]!.settled === null || ask.askId !== null) continue;
+    }
+    const gen = generations.get(base) ?? 0;
+    generations.set(base, gen + 1);
+    next.push({ key: gen === 0 ? base : `${base}#${gen + 1}`, row: ask.row, askId: ask.askId, facts: ask.facts, settled: null });
+  }
+  return next;
 }
 
 const RESULT_KIND_TEXT: Readonly<Record<AgentResultKind, string>> = {

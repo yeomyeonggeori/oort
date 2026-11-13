@@ -23,6 +23,7 @@ import {
   workFilterFromSearch,
   workJobRow,
   workJobSections,
+  keepNeedsMeSlots,
   awaitingMeItem,
   rowNeedsMe,
   workJobResultHasControls,
@@ -235,26 +236,89 @@ describe("줄 모델 (ADR-0202 D1)", () => {
     expect(workJobSections(rows, () => false).map((s) => s.key)).toEqual(["now", "done"]);
   });
 
-  it("붙든 줄(방금 그 자리에서 결정함, 수리 4회차)은 끝났어도 「응답 필요」의 그 칸에 남고 「끝난 일」에 두 번 서지 않는다", () => {
-    // 서버는 거부하면 run을 바로 끝낸다(`stopped`).
-    const rejected = workJobRow(
-      row(wireRun({ runId: "00000000-0000-7000-8000-0000000000c5", state: "stopped", endedAtMs: NOW, phase: "cancelled" })),
-      NOW
-    );
-    const next = workJobRow(row(wireRun({ runId: "00000000-0000-7000-8000-0000000000c6", phase: "awaiting_approval" })), NOW);
-    const ended = workJobRow(row(wireRun({ runId: "00000000-0000-7000-8000-0000000000c7", state: "done", endedAtMs: NOW })), NOW);
-    expect(rejected.finished).toBe(true);
-    const rows = [rejected, next, ended];
-    const sections = workJobSections(rows, (r) => r.id === next.id, (r) => r.id === rejected.id);
-    expect(sections.map((s) => [s.key, s.rows.map((r) => r.id)])).toEqual([
-      ["needsMe", [rejected.id, next.id]],
-      ["done", [ended.id]],
-    ]);
-    // 붙들지 않으면 예전대로 「끝난 일」이다.
-    expect(workJobSections(rows, (r) => r.id === next.id).map((s) => [s.key, s.rows.map((r) => r.id)])).toEqual([
-      ["needsMe", [next.id]],
-      ["done", [rejected.id, ended.id]],
-    ]);
+  describe("「응답 필요」의 칸은 화면에 떠 있는 동안 자리를 지킨다 (#5738)", () => {
+    const runRowOf = (n: number, over: Record<string, unknown> = {}) =>
+      workJobRow(row(wireRun({ runId: `00000000-0000-7000-8000-0000000000c${n}`, phase: "awaiting_approval", ...over })), NOW);
+    const ask = (n: number, approval: string | null = `a${n}`, over: Record<string, unknown> = {}) => ({
+      row: runRowOf(n, over),
+      askId: approval,
+      facts: `facts-${n}-${approval}`,
+    });
+    const none = { decidedHere: new Set<string>(), sending: new Set<string>() };
+
+    it("처음 본 순서를 지키고, 서버가 순서를 바꿔도 칸은 그대로다", () => {
+      const first = keepNeedsMeSlots<string>([], [ask(1), ask(2), ask(3)], none);
+      const reordered = keepNeedsMeSlots(first, [ask(3), ask(1), ask(2)], none);
+      expect(reordered.map((s) => s.row.id)).toEqual(first.map((s) => s.row.id));
+      // 같은 입력을 두 번 넣어도 같다(그리기가 두 번 돌아도 칸이 늘지 않는다).
+      expect(keepNeedsMeSlots(reordered, [ask(3), ask(1), ask(2)], none)).toEqual(reordered);
+    });
+
+    it("내가 결정한 칸은 빠지지 않고 그 자리의 결과 칸이 되고, 원장이 그 승인을 다시 내놓아도 되살아나지 않는다", () => {
+      const first = keepNeedsMeSlots<string>([], [ask(1), ask(2), ask(3)], none);
+      const key1 = first[0]!.key;
+      // 원장이 아직 A를 내놓는 동안에도(결정이 막 닿음) 내가 결정했으면 결과 칸이다.
+      const decided = keepNeedsMeSlots(first, [ask(1), ask(2), ask(3)], { ...none, decidedHere: new Set([key1]) });
+      expect(decided.map((s) => [s.askId, s.settled])).toEqual([["a1", "mine"], ["a2", null], ["a3", null]]);
+      // 결정이 닿아 원장이 A를 뺐다 → 칸 셋 그대로. 다시 내놓아도(낡은 읽기) A는 새 칸으로 서지 않는다.
+      const gone = keepNeedsMeSlots(decided, [ask(2), ask(3)], none);
+      expect(gone.map((s) => s.settled)).toEqual(["mine", null, null]);
+      expect(keepNeedsMeSlots(gone, [ask(1), ask(2), ask(3)], none)).toEqual(gone);
+    });
+
+    it("내가 결정하지 않았는데 묻지 않게 된 칸(다른 기기의 결정·만료·run 끝남)도 그 자리의 결과 칸이고, 아래 칸은 올라오지 않는다", () => {
+      const first = keepNeedsMeSlots<string>([], [ask(1), ask(2), ask(3)], none);
+      const elsewhere = keepNeedsMeSlots(first, [ask(1), ask(3)], none);
+      expect(elsewhere.map((s) => [s.row.id, s.settled])).toEqual([
+        [first[0]!.row.id, null],
+        [first[1]!.row.id, "elsewhere"],
+        [first[2]!.row.id, null],
+      ]);
+      // 칸은 처음 본 줄로 그린다(목록에서 줄이 빠지거나 바뀌어도).
+      expect(elsewhere[1]!.row).toBe(first[1]!.row);
+      expect(elsewhere[1]!.facts).toBe("facts-2-a2");
+    });
+
+    it("보내는 중인 칸은 원장이 답보다 먼저 그 승인을 빼도 「다른 곳에서」가 되지 않는다 — 답이 오면 결정이 닿았는지로 갈린다", () => {
+      const first = keepNeedsMeSlots<string>([], [ask(1), ask(2)], none);
+      const key1 = first[0]!.key;
+      const sending = keepNeedsMeSlots(first, [ask(2)], { ...none, sending: new Set([key1]) });
+      expect(sending.map((s) => s.settled)).toEqual([null, null]);
+      expect(keepNeedsMeSlots(sending, [ask(2)], { ...none, decidedHere: new Set([key1]) }).map((s) => s.settled)).toEqual(["mine", null]);
+      // 실패했는데 원장이 이미 그 승인을 뺐다면(다른 곳에서 끝남) 그때 결과 칸이 된다.
+      expect(keepNeedsMeSlots(sending, [ask(2)], none).map((s) => s.settled)).toEqual(["elsewhere", null]);
+    });
+
+    it("새로 온 요청은 맨 아래에 붙는다 — 서버가 맨 앞에 줘도. 같은 run의 다음 승인도 새 요청이라 맨 아래 새 칸이다", () => {
+      const first = keepNeedsMeSlots<string>([], [ask(1), ask(2)], none);
+      const arrived = keepNeedsMeSlots(first, [ask(4), ask(1), ask(2)], none);
+      expect(arrived.map((s) => s.row.id)).toEqual([first[0]!.row.id, first[1]!.row.id, runRowOf(4).id]);
+      // A를 결정했고, 같은 run이 다음 승인(a9)을 묻는다: A의 결과 칸은 그 자리, 다음 승인은 맨 아래.
+      const decided = keepNeedsMeSlots(arrived, [ask(2), ask(4), ask(1, "a9")], { ...none, decidedHere: new Set([first[0]!.key]) });
+      expect(decided.map((s) => [s.row.id, s.askId, s.settled])).toEqual([
+        [first[0]!.row.id, "a1", "mine"],
+        [first[1]!.row.id, "a2", null],
+        [runRowOf(4).id, "a4", null],
+        [first[0]!.row.id, "a9", null],
+      ]);
+      expect(new Set(decided.map((s) => s.key)).size).toBe(4);
+    });
+
+    it("id가 없는 권한 요청(내 맥 세션)은 결과 칸이 된 뒤 다시 물으면 맨 아래 새 칸이다(열쇠가 겹치지 않는다)", () => {
+      const session = workJobRow(row(wireSession({ sessionId: "00000000-0000-7000-8000-0000000000d2" })), NOW);
+      const permission = { row: session, askId: null, facts: "p" };
+      const first = keepNeedsMeSlots<string>([], [permission, ask(1)], none);
+      const answered = keepNeedsMeSlots(first, [ask(1)], none);
+      expect(answered.map((s) => s.settled)).toEqual(["elsewhere", null]);
+      const again = keepNeedsMeSlots(answered, [ask(1), permission], none);
+      expect(again.map((s) => [s.row.id, s.settled])).toEqual([
+        [session.id, "elsewhere"],
+        [first[1]!.row.id, null],
+        [session.id, null],
+      ]);
+      expect(again[2]!.key).not.toBe(again[0]!.key);
+      expect(keepNeedsMeSlots(again, [ask(1), permission], none)).toEqual(again);
+    });
   });
 
   it("주인에게 열린 권한 요청이 있는 줄의 칩은 「응답 필요」다 — 돌거나 대기 중인 줄만(#5593 수리 M2)", () => {

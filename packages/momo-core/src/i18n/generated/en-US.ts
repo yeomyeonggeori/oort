@@ -2099,6 +2099,12 @@ export const catalog: MessageCatalog = {
       "value": "summary"
     }
   ],
+  "desktop.workJobs.settledElsewhere": [
+    {
+      "type": 0,
+      "value": "No response needed anymore"
+    }
+  ],
   "desktop.workJobs.stateAwaitingApproval": [
     {
       "type": 0,

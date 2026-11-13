@@ -3,6 +3,9 @@
 // 「작업 · 내 작업」의 「응답 필요」 구간 캡처·실측 (#5640, ADR-0202 D1·D5·증보 2026-11-11, ADR-0188 D5).
 //
 //   npm run build && OUT_DIR=<dir> CAPTURE_PORT=<port> node scripts/capture-5640.mjs
+//   (`CAPTURE_ONLY=fix5712`: 마우스 뒤 손가락 · 줄 높이가 같은 세 줄 차례로 · 둘째 줄 누른 자리 다시 — 두 엔진. `CAPTURE_DIST=<폴더>`: 그 빌드를 띄움)
+//   (`CAPTURE_ONLY=fix5738` 또는 `fix5738:n1,rows,slow,still,move0,shots`: 칸이 자리를 지킴 — #5732 검수 N1·N2b·N2c·N7, 남이 일으킨 변화, 이동 0, 캡처)
+//   (`CAPTURE_ONLY=fix5738r2` 또는 `fix5738r2:below,band,conn,scroll,hold,wheelmix,clamp,touchrev,four,shots,look`: 둘째 겹 — 밖에서 온 변화로 선·옮겨진 단추는 잠깐 막힘, #5744 검수 H1·H2·M1)
 //
 // 백엔드가 없다. `/v1/**`는 이 파일의 고정 응답이고, 보드는 #5639 계약을 흉내 낸다: `include=jobs`로 읽는 사람이 세션 주인일
 // 때만, 대기 요청이 있는 실행 중 맥 세션의 상태가 `waiting`이다. 승인 원장은 인박스 배지가 읽는 그 경로다. 사람·컴퓨터 이름은
@@ -103,6 +106,8 @@ const approval2 = { id: id(51), workspaceId, runId: runApproval2.runId, channelI
 const runApproval3 = { ...runBase, runId: id(8), label: "주간 보고서를 #reports에 올리기", status: "running", state: "running", phase: "awaiting_approval", trigger: "mention", startedAtMs: NOW - 6 * 60_000, stepCount: 1, lastActivityAt: sec - 66 };
 const approval3 = { ...approval2, id: id(53), runId: runApproval3.runId };
 const reaskA = { ...approvals[0], id: id(52) };
+// #5738 수리 1회차: 「지금」의 run(`runWorking`)이 승인을 묻게 되어 「응답 필요」 맨 아래 새 칸이 되는 장면의 승인.
+const approvalW = { ...approval2, id: id(60), runId: runWorking.runId };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 const host = { id: hostId, workspaceId, scope: "member", ownerMemberId: memberId, type: "app", displayName: "도현 맥북", capabilities: { terminal: true }, lastSeenAtMs: NOW, createdAtMs: NOW - 86_400_000, online: true };
@@ -128,17 +133,23 @@ function boardView(state) {
     // 실제 서버: 승인한 run은 줄을 서고(`queued`) 보드 상태는 `waiting`이다(클라이언트는 실행 줄의 `waiting`을 `idle` → 칩 「시작 전」으로 읽는다).
     return { ...row, status: "queued", state: "waiting", phase: "queued" };
   };
-  const view = (row) =>
+  // #5738 수리 1회차: 줄 하나를 바꿔 준다(`state.patch`: runId → 고칠 칸).
+  const patched = (row) => (state.patch?.has(row.runId ?? row.sessionId) ? { ...row, ...state.patch.get(row.runId ?? row.sessionId) } : row);
+  const view0 = (row) =>
     row.origin === "host" && row.owner.memberId === memberId && state.waiting.has(row.sessionId)
       ? { ...row, state: "waiting" }
       : row.runId && state.decidedRuns.has(row.runId)
         ? decided(row)
         : row;
+  const view = (row) => view0(patched(row));
   const second = [...(state.twoDeciders ? [runApproval2] : []), ...(state.threeDeciders ? [runApproval3] : [])];
   // 실제 서버 순서(`ORDER BY activity_us DESC`, 수리 5회차 검수 3회차): 결정이 닿은 run은 `updated_at`이 올라 목록 맨 앞으로 온다.
   const bump = (rows) => [...state.decidedRunOrder.map((rid) => rows.find((r) => r.runId === rid)).filter(Boolean), ...rows.filter((r) => !(r.runId && state.decidedRuns.has(r.runId)))];
-  const mine = bump([macWaiting, runApproval, ...second, runNonDecider, macQuiet, runWorking, ...doneRows]).map(view);
-  const team = bump([macWaiting, runApproval, ...second, runNonDecider, othersTerminal, macQuiet, runWorking, ...doneRows]).map(view);
+  const mineRows = bump([macWaiting, runApproval, ...second, runNonDecider, macQuiet, runWorking, ...doneRows]);
+  // #5738 (다): 서버가 순서를 바꿔 준다.
+  const shown = (row) => !state.hidden?.has(row.runId ?? row.sessionId); // #5738 수리 3회차: 서버 목록에서 줄이 빠진다(`state.hidden`).
+  const mine = (state.reverse ? [...mineRows].reverse() : mineRows).filter(shown).map(view);
+  const team = bump([macWaiting, runApproval, ...second, runNonDecider, othersTerminal, macQuiet, runWorking, ...doneRows]).filter(shown).map(view);
   return { mine, team };
 }
 
@@ -168,6 +179,13 @@ async function installRoutes(context, state) {
       state.decidedOrder.push(approvalId);
       if (state.decision === "hold") return; // 답을 붙잡아 「보내는 중」을 잰다(컨텍스트를 닫으면 끝난다).
       if (state.decision === "fail") return json(route, {}, 500);
+      // #5738: 그 승인의 첫 결정만 실패(500 또는 409 — 결정은 기록되지 않는다). 다시 누르면 그 승인이 다시 나간다.
+      if (state.failOnce?.has(approvalId)) {
+        const status = state.failOnce.get(approvalId);
+        state.failOnce.delete(approvalId);
+        if (state.decisionDelayMs) await sleep(state.decisionDelayMs);
+        return status === 409 ? json(route, { status: "pending" }, 409) : json(route, {}, 500);
+      }
       // 서버 왕복(수리 3회차): 결정은 바로 기록되고 답은 `decisionDelayMs` 뒤에 온다.
       state.decidedIds.add(approvalId);
       let approve = true;
@@ -177,7 +195,7 @@ async function installRoutes(context, state) {
         approve = true; // 본문이 없으면 승인으로 본다(이 하네스의 모든 결정은 본문을 싣는다)
       }
       state.decidedHow.push(approve);
-      const decidedRun = [...approvals, approval2, approval3, reaskA].find((a) => a.id === approvalId)?.runId;
+      const decidedRun = [...approvals, approval2, approval3, reaskA, approvalW].find((a) => a.id === approvalId)?.runId;
       if (decidedRun) {
         state.decidedRuns.set(decidedRun, approve);
         state.decidedRunOrder = [decidedRun, ...state.decidedRunOrder.filter((rid) => rid !== decidedRun)];
@@ -190,7 +208,7 @@ async function installRoutes(context, state) {
       if (state.ledgerDelayMs && state.ledgerReads === 1) await sleep(state.ledgerDelayMs);
       if (state.roundTripMs) await sleep(state.roundTripMs);
       const reask = state.reaskSameRun && state.decidedIds.has(approvals[0].id) ? [reaskA] : [];
-      const pending = [...approvals, ...(state.twoDeciders ? [approval2] : []), ...(state.threeDeciders ? [approval3] : []), ...reask].filter((a) => !state.decidedIds.has(a.id));
+      const pending = [...approvals, ...(state.twoDeciders ? [approval2] : []), ...(state.threeDeciders ? [approval3] : []), ...(state.extraApprovals ?? []), ...reask].filter((a) => !state.decidedIds.has(a.id) && !state.dropApprovals?.has(a.id));
       return json(route, { approvals: url.searchParams.get("status") === "pending" ? pending : [] });
     }
     if (state.progress && path.endsWith("/agent-runs/progress")) {
@@ -202,6 +220,8 @@ async function installRoutes(context, state) {
     if (path.endsWith("/work-sessions/shared")) {
       const who = url.searchParams.get("who") === "team" ? "team" : "mine";
       state.boardReads += 1;
+      // #5738 수리 1회차: 목록 다시 읽기 실패(「작업」의 다시 읽기 실패 띠가 목록 위에 선다).
+      if (state.listFail) return json(route, { error: { message: "capture list failure" } }, 500);
       if (state.roundTripMs && state.boardReads > 1) await sleep(state.roundTripMs);
       return json(route, { sessions: boardView(state)[who], nextCursor: null, who });
     }
@@ -224,7 +244,7 @@ async function installRealtime(page) {
     };
     class CaptureSocket {
       static CONNECTING = 0; static OPEN = 1; static CLOSING = 2; static CLOSED = 3;
-      constructor(url) { this.url = String(url); this.readyState = 0; queueMicrotask(() => { this.readyState = 1; this.onopen?.(new Event("open")); }); }
+      constructor(url) { (window.__sockets ??= []).push(this); this.url = String(url); this.readyState = 0; queueMicrotask(() => { this.readyState = 1; this.onopen?.(new Event("open")); }); }
       send(data) {
         const replies = String(data).trim().split("\n").map((line) => {
           const c = JSON.parse(line);
@@ -853,7 +873,7 @@ async function matrixScene(browser, origin, engine) {
           const viewport = input === "touch" ? { width: 390, height: 844 } : { width: 1280, height: 800 };
           const { context, page, state } = await openContext(browser, origin, { scheme: "light", viewport, touch: input === "touch", server: { twoDeciders: true, decisionDelayMs: 60, roundTripMs: 60 } });
           await twoDecidersReady(page);
-          // 원장이 와서 줄이 막 올라온 1초(막기)와 목록 위 띠가 서는 이동(약 0.9초 뒤 45px)이 가라앉은 뒤, 사람이 본 단추를 누른다.
+          // 원장이 와서 줄이 막 올라온 1초(막기)가 지나 자리가 가라앉은 뒤, 사람이 본 단추를 누른다.
           await settle(page);
           const a = await decisionCenter(page, runApproval.runId, which);
           const cdp = input === "touch" && engine === "chromium" ? await context.newCDPSession(page) : null;
@@ -932,9 +952,9 @@ async function touchTapper(context, page, engine) {
   };
 }
 /**
- * 줄 자리가 가라앉을 때까지 기다린다: A의 「승인」 자리가 1.2초 동안 그대로일 때까지(최대 8초). 이 하네스의 가짜 소켓은 연결되지
- * 않아 원장이 온 지 약 0.9초 뒤 목록 위에 「연결 중…」 띠가 서며 목록 전체가 45px 내려간다 — 그 1초 안의 누름은 막기가 삼키는 것이 맞다
- * (단추가 선 때부터 1초). 사람이 자리를 본 뒤의 누름을 재려고 기다린다.
+ * 줄 자리가 가라앉을 때까지 기다린다: A의 「승인」 자리가 1.2초 동안 그대로일 때까지(최대 8초). 원장이 와서 줄이 막 선 1초 안의 누름은
+ * 막기가 삼키는 것이 맞다(단추가 선 때부터 1초) — 사람이 자리를 본 뒤의 누름을 재려고 기다린다. (#5700 앞에는 가짜 소켓이 연결되지 않아
+ * 약 0.9초 뒤 목록 위에 「연결 중…」 띠가 서며 목록이 45px 내려갔다. #5700 뒤로는 띠가 서지 않는다 — #5712에서 30회 표본 0회.)
  */
 async function settle(page, rowId = runApproval.runId) {
   const t0 = Date.now();
@@ -1005,6 +1025,118 @@ async function threeRowsScene(browser, origin, engine) {
     await context.close();
   }
   console.log(`MEASURE three-rows-${engine}: ${summary.join(" ")}`);
+}
+
+/**
+ * #5712(검수 4회차 M2): 마우스로 A를 결정하고 마우스는 그대로 둔 채 손가락으로 그 점을 ±8px 흩어 네 번(+500·+1000·+1700·+2600ms).
+ * 터치가 끝나며 오는 `pointerleave`가 마우스 자리를 지우면 A가 1.2초에 놓여 B가 그 점에 서고 다음 탭이 B를 결정했다. 나간 결정 1건.
+ */
+async function mixedScene(browser, origin, engine) {
+  const summary = [];
+  for (const which of ["approve", "reject"]) {
+    const { context, page, state } = await openContext(browser, origin, { scheme: "light", viewport: { width: 1280, height: 800 }, touch: true, server: { twoDeciders: true, decisionDelayMs: 60, roundTripMs: 60 } });
+    await twoDecidersReady(page);
+    await settle(page);
+    const tap = await touchTapper(context, page, engine);
+    const a = await decisionCenter(page, runApproval.runId, which);
+    await mousePress(page, a.x, a.y);
+    const t0 = Date.now();
+    const unders = [];
+    for (const [dx, dy, at] of [[8, 3, 500], [-8, -2, 1000], [7, 3, 1700], [0, 0, 2600]]) {
+      await sleep(Math.max(0, at - (Date.now() - t0)));
+      const under = await underPoint(page, a.x + dx, a.y + dy);
+      unders.push(`${(under.job ?? "-").slice(-2)}/${under.decision ?? under.testid}`);
+      await tap(a.x + dx, a.y + dy);
+    }
+    await sleep(900);
+    check(`mixed-${engine}-${which} 마우스 결정 → 손가락 ±8px 네 번 → 나간 결정 1건(A ${which})`, state.decisions === 1 && state.decidedHow[0] === (which === "approve"), { decisions: state.decisions, order: state.decidedOrder.map((x) => x.slice(-2)), unders });
+    summary.push(`${which}=${state.decisions}(${unders.join(",")})`);
+    await context.close();
+  }
+  // 마우스가 목록을 떠나 A가 놓이고 B가 그 점에 선 뒤 1초 안의 손가락 ±8px 두 번: 마우스 표지도 손가락 누름은 누른 단추의 상자로 잰다.
+  for (const which of ["approve", "reject"]) {
+    const { context, page, state } = await openContext(browser, origin, { scheme: "light", viewport: { width: 1280, height: 800 }, touch: true, server: { twoDeciders: true, decisionDelayMs: 60, roundTripMs: 60 } });
+    await twoDecidersReady(page);
+    await settle(page);
+    const tap = await touchTapper(context, page, engine);
+    const a = await decisionCenter(page, runApproval.runId, which);
+    await mousePress(page, a.x, a.y);
+    await sleep(300);
+    await page.mouse.move(640, 30);
+    // #5738: 줄은 빠지지 않는다 — 마우스가 떠나고 1.5초 뒤에도 그 점은 A의 결과 줄이다(앞 판은 여기서 B가 올라오길 기다렸다).
+    await sleep(1500);
+    const stayed = await underPoint(page, a.x, a.y);
+    check(`mixed-left-${engine}-${which} 마우스가 떠나도 그 점은 A의 결과 줄`, stayed.job === runApproval.runId && stayed.decision === null, stayed);
+    await tap(a.x + 8, a.y + 3);
+    await sleep(350);
+    await tap(a.x - 8, a.y - 2);
+    await sleep(900);
+    check(`mixed-left-${engine}-${which} 마우스 결정 → 목록 밖 → B가 선 지 1초 안 손가락 ±8px 두 번 → 나간 결정 1건(A ${which})`, state.decisions === 1 && state.decidedHow[0] === (which === "approve"), { decisions: state.decisions, order: state.decidedOrder.map((x) => x.slice(-2)) });
+    summary.push(`left/${which}=${state.decisions}`);
+    await context.close();
+  }
+  console.log(`MEASURE mixed-${engine}: ${summary.join(" ")}`);
+}
+
+/**
+ * #5712(검수 4회차 M1): 터치로 세 줄을 차례로, **줄 높이가 같은** 1280과 390(셋째 단추의 가운데에서 10px 아래 = 둘째 상자와 겹친 쪽).
+ * 앞 줄이 놓이면 셋째 줄이 둘째를 누른 자리로 올라와 「붙든 동안 같은 자리」에 끝없이 막혔다. 간격과 상관없이 3건.
+ */
+async function threeRowsEvenScene(browser, origin, engine) {
+  const summary = [];
+  for (const [name, viewport, dy] of [["1280", { width: 1280, height: 900 }, 0], ["390", { width: 390, height: 1500 }, 10]]) {
+    for (const gapMs of [500, 1500, 2500]) {
+      const { context, page, state } = await openContext(browser, origin, { scheme: "light", viewport, touch: true, server: { twoDeciders: true, threeDeciders: true, decisionDelayMs: 60, roundTripMs: 60 } });
+      await page.waitForFunction(() => document.querySelectorAll('[data-section="needsMe"] [data-testid="work-job-approval-approve"]').length === 3, null, { timeout: 15_000 });
+      await settle(page);
+      const tap = await touchTapper(context, page, engine);
+      for (const [i, rid] of [runApproval.runId, runApproval2.runId, runApproval3.runId].entries()) {
+        const c = await decisionCenter(page, rid, "approve");
+        await tap(c.x, c.y + (i === 2 ? dy : 0));
+        await sleep(gapMs);
+      }
+      await sleep(600);
+      check(`three-even-${engine}-${name}-gap${gapMs} 터치로 세 줄 차례로(줄 높이 같음) → 3건`, state.decisions === 3, { decisions: state.decisions, order: state.decidedOrder.map((x) => x.slice(-2)) });
+      summary.push(`${name}/gap${gapMs}=${state.decisions}`);
+      await context.close();
+    }
+  }
+  console.log(`MEASURE three-even-${engine}: ${summary.join(" ")}`);
+}
+
+/**
+ * #5712(검수 4회차 M1의 ㉡): A를 결정하고 1.6초 뒤 B를 결정한 다음, B를 누른 자리(5px 옆)를 +250·+600·+1300·+2500·+4000ms에 다시.
+ * 셋째 줄을 살리는 수리가 이 보호를 풀면 안 된다 — 나간 결정은 A·B 2건이고 그 점 밑은 늘 B의 영수증.
+ */
+async function repressSecondScene(browser, origin, engine) {
+  const summary = [];
+  for (const [name, viewport] of [["1280", { width: 1280, height: 900 }], ["390", { width: 390, height: 1500 }]]) {
+    for (const which of ["approve", "reject"]) {
+      const { context, page, state } = await openContext(browser, origin, { scheme: "light", viewport, touch: true, server: { twoDeciders: true, threeDeciders: true, decisionDelayMs: 60, roundTripMs: 60 } });
+      await page.waitForFunction(() => document.querySelectorAll('[data-section="needsMe"] [data-testid="work-job-approval-approve"]').length === 3, null, { timeout: 15_000 });
+      await settle(page);
+      const tap = await touchTapper(context, page, engine);
+      const a = await decisionCenter(page, runApproval.runId, which);
+      await tap(a.x, a.y);
+      await sleep(1600);
+      const b = await decisionCenter(page, runApproval2.runId, which);
+      await tap(b.x, b.y);
+      const t0 = Date.now();
+      const unders = [];
+      for (const at of [250, 600, 1300, 2500, 4000]) {
+        await sleep(Math.max(0, at - (Date.now() - t0)));
+        const under = await underPoint(page, b.x + 5, b.y + 3);
+        unders.push(`${(under.job ?? "-").slice(-2)}/${under.decision ?? under.testid}`);
+        await tap(b.x + 5, b.y + 3);
+      }
+      await sleep(900);
+      const onReceipt = unders.every((u) => u === `${runApproval2.runId.slice(-2)}/work-job-approval-settled`);
+      check(`repress-second-${engine}-${name}-${which} A → B → B 자리 다시 다섯 번 → 나간 결정 2건(A·B), 그 점 밑은 B의 영수증`, state.decisions === 2 && onReceipt, { decisions: state.decisions, order: state.decidedOrder.map((x) => x.slice(-2)), unders });
+      summary.push(`${name}/${which}=${state.decisions}${onReceipt ? "" : `(${unders.join(",")})`}`);
+      await context.close();
+    }
+  }
+  console.log(`MEASURE repress-second-${engine}: ${summary.join(" ")}`);
 }
 
 /**
@@ -1236,9 +1368,945 @@ async function enterScene(browser, origin) {
   await context.close();
 }
 
+
+// ---- #5738: 「응답 필요」의 칸은 화면에 떠 있는 동안 자리를 지킨다 -------------------------------------------------------------------
+// 판정 = 서버에 나간 결정 수와 「누르는 순간 그 점 밑」, 그리고 줄 상자의 자리(px). 결정한 줄은 같은 상자의 결과 줄이 되고, 새 요청은 맨
+// 아래에 붙고, 남이 일으킨 변화(다른 기기의 결정·새 요청·서버의 순서)는 칸을 옮기지 않는다.
+
+/** 「응답 필요」 칸의 상자(줄 열쇠 → 위·높이). */
+const slotBoxes = (page) =>
+  page.evaluate(() =>
+    Object.fromEntries(
+      [...document.querySelectorAll('[data-section="needsMe"] [data-testid="work-job"]')].map((li) => {
+        const r = li.getBoundingClientRect();
+        return [li.querySelector('[data-testid="work-job-row"]').dataset.rowKey, { top: r.top, h: r.height }];
+      })
+    )
+  );
+/** 앞뒤 상자를 견줘 가장 큰 움직임(px, 위·높이). 앞에 있던 칸만 본다. */
+const maxMove = (before, after) =>
+  Math.max(0, ...Object.entries(before).map(([k, b]) => (after[k] ? Math.max(Math.abs(after[k].top - b.top), Math.abs(after[k].h - b.h)) : 999)));
+/** 사람이 창으로 돌아온 것처럼 목록을 다시 읽게 한다(목록은 창에 돌아올 때 다시 읽는다). */
+const reread = async (page, state) => {
+  const reads = state.boardReads;
+  await page.evaluate(() => window.dispatchEvent(new Event("visibilitychange")));
+  for (let i = 0; i < 40 && state.boardReads === reads; i++) await sleep(50);
+  await sleep(250);
+};
+const threeReady = (page) =>
+  page.waitForFunction(() => document.querySelectorAll('[data-section="needsMe"] [data-testid="work-job-approval-approve"]').length === 3, null, { timeout: 15_000 });
+const settledIn = (page, rowId) =>
+  page.waitForFunction(
+    (rid) => document.querySelector(`[data-section="needsMe"] [data-job-id="${rid}"]`)?.closest('[data-testid="work-job"]')?.querySelector('[data-testid="work-job-approval-settled"]') != null,
+    rowId,
+    { timeout: 8000 }
+  );
+
+/**
+ * 검수 #5732 H1(`N1`): 터치로 A → 1.5초 → B → 1.5초 → A를 누른 점을 두 번(+0.25·+0.6초). 결정은 A·B 2건, 그 점 밑은 늘 A의 결과 줄.
+ * 8초 뒤에도 같다(`N1L`).
+ */
+async function n1Scene(browser, origin, engine) {
+  const summary = [];
+  for (const [name, viewport] of [["1280", { width: 1280, height: 900 }], ["390", { width: 390, height: 1500 }]]) {
+    for (const which of ["approve", "reject"]) {
+      for (const late of [0, 8000]) {
+        const { context, page, state } = await openContext(browser, origin, { scheme: "light", viewport, touch: true, server: { twoDeciders: true, threeDeciders: true, decisionDelayMs: 60, roundTripMs: 60 } });
+        await threeReady(page);
+        await settle(page);
+        const tap = await touchTapper(context, page, engine);
+        const a = await decisionCenter(page, runApproval.runId, which);
+        await tap(a.x, a.y);
+        await sleep(1500);
+        const b = await decisionCenter(page, runApproval2.runId, which);
+        await tap(b.x, b.y);
+        await sleep(1500 + late);
+        const unders = [];
+        for (const gap of [250, 350]) {
+          await sleep(gap);
+          const u = await underPoint(page, a.x, a.y);
+          unders.push(`${(u.job ?? "-").slice(-2)}/${u.decision ?? u.testid}`);
+          await tap(a.x, a.y);
+        }
+        await sleep(900);
+        const onA = unders.every((u) => u.startsWith(`${runApproval.runId.slice(-2)}/`) && !u.endsWith("approve") && !u.endsWith("reject"));
+        check(`n1-${engine}-${name}-${which}${late ? "-8s" : ""} A → B → A 자리 두 번 → 결정 2건(A·B), 그 점 밑은 A의 결과 줄`, state.decisions === 2 && onA, { decisions: state.decisions, order: state.decidedOrder.map((x) => x.slice(-2)), unders });
+        summary.push(`${name}/${which}${late ? "/8s" : ""}=${state.decisions}`);
+        await context.close();
+      }
+    }
+  }
+  console.log(`MEASURE n1-${engine}: ${summary.join(" ")}`);
+}
+
+/** 터치로 세 줄을 차례로(통과 기준 4): 결정 왕복 60·300·600ms × 간격 0.3·1.5초 × 1280·390(+10px, 줄 높이 다름). 누른 만큼 3건. */
+async function delayRowsScene(browser, origin, engine) {
+  const summary = [];
+  for (const [name, viewport, dy] of [["1280", { width: 1280, height: 900 }, 0], ["390", { width: 390, height: 1500 }, 10]]) {
+    for (const delay of [60, 300, 600]) {
+      for (const gap of [300, 1500]) {
+        const { context, page, state } = await openContext(browser, origin, { scheme: "light", viewport, touch: true, server: { twoDeciders: true, threeDeciders: true, decisionDelayMs: delay, roundTripMs: 60 } });
+        await threeReady(page);
+        await settle(page);
+        const tap = await touchTapper(context, page, engine);
+        for (const [i, rid] of [runApproval.runId, runApproval2.runId, runApproval3.runId].entries()) {
+          const c = await decisionCenter(page, rid, "approve");
+          await tap(c.x, c.y + (i === 2 ? dy : 0));
+          await sleep(gap);
+        }
+        await sleep(delay + 900);
+        check(`rows-${engine}-${name}-d${delay}-gap${gap} 터치 세 줄 차례로 → 3건`, state.decisions === 3 && new Set(state.decidedOrder).size === 3, { decisions: state.decisions, order: state.decidedOrder.map((x) => x.slice(-2)) });
+        summary.push(`${name}/d${delay}/g${gap}=${state.decisions}`);
+        await context.close();
+      }
+    }
+  }
+  console.log(`MEASURE rows-${engine}: ${summary.join(" ")}`);
+}
+
+/**
+ * 느린 답·실패(`N2c`·`N7`): B의 결정 답이 1.5초 걸리는 동안 B를 누른 점(5px 옆)을 +1.25·+1.4초에 다시 → 결정 A·B 2건(C 0).
+ * B가 500·409로 실패한 뒤 1.5초에 B를 누른 점 → B가 다시 나감(C 0).
+ */
+async function slowFailScene(browser, origin, engine) {
+  const summary = [];
+  for (const [name, viewport] of [["1280", { width: 1280, height: 900 }], ["390", { width: 390, height: 1500 }]]) {
+    {
+      const { context, page, state } = await openContext(browser, origin, { scheme: "light", viewport, touch: true, server: { twoDeciders: true, threeDeciders: true, decisionDelayMs: 60, roundTripMs: 60 } });
+      await threeReady(page);
+      await settle(page);
+      const tap = await touchTapper(context, page, engine);
+      const a = await decisionCenter(page, runApproval.runId, "approve");
+      await tap(a.x, a.y);
+      await settledIn(page, runApproval.runId);
+      state.decisionDelayMs = 1500;
+      const b = await decisionCenter(page, runApproval2.runId, "approve");
+      const t0 = Date.now();
+      await tap(b.x, b.y);
+      for (const at of [1250, 1400]) {
+        await sleep(Math.max(0, at - (Date.now() - t0)));
+        await tap(b.x + 5, b.y + 3);
+      }
+      await sleep(2200);
+      const cDecided = state.decidedOrder.includes(approval3.id);
+      check(`slow-${engine}-${name} B 답 1.5초 동안 B 자리 다시 두 번 → 결정 A·B(C 0)`, !cDecided && state.decidedIds.size === 2, { decisions: state.decisions, order: state.decidedOrder.map((x) => x.slice(-2)) });
+      summary.push(`${name}/slow=${state.decidedIds.size}${cDecided ? "+C" : ""}`);
+      await context.close();
+    }
+    for (const status of [500, 409]) {
+      const { context, page, state } = await openContext(browser, origin, { scheme: "light", viewport, touch: true, server: { twoDeciders: true, threeDeciders: true, decisionDelayMs: 60, roundTripMs: 60, failOnce: new Map([[approval2.id, status]]) } });
+      await threeReady(page);
+      await settle(page);
+      const tap = await touchTapper(context, page, engine);
+      const a = await decisionCenter(page, runApproval.runId, "approve");
+      await tap(a.x, a.y);
+      await settledIn(page, runApproval.runId);
+      const b = await decisionCenter(page, runApproval2.runId, "approve");
+      await tap(b.x, b.y);
+      await page.locator('[data-section="needsMe"] [data-testid="work-job-approval-error"]').first().waitFor({ timeout: 6000 });
+      await sleep(1500);
+      const under = await underPoint(page, b.x, b.y);
+      await tap(b.x, b.y);
+      await settledIn(page, runApproval2.runId);
+      await sleep(600);
+      const cDecided = state.decidedOrder.includes(approval3.id);
+      const retriedB = state.decidedOrder.filter((x) => x === approval2.id).length === 2;
+      check(`fail${status}-${engine}-${name} B 실패 뒤 B 자리 → B 다시 나감(C 0), 그 점 밑은 B의 「승인」`, !cDecided && retriedB && under.job === runApproval2.runId && under.decision === "approve", { order: state.decidedOrder.map((x) => x.slice(-2)), under });
+      summary.push(`${name}/${status}=${state.decidedOrder.map((x) => x.slice(-2)).join(">")}`);
+      await context.close();
+    }
+  }
+  console.log(`MEASURE slow-fail-${engine}: ${summary.join(" ")}`);
+}
+
+/**
+ * 내가 일으키지 않은 변화(통과 기준 3): 마우스를 B의 「승인」 위에 둔 채 (가) 다른 기기가 A를 거부 (나) 새 권한 요청이 옴(내 맥 세션)
+ * (다) 서버가 순서를 뒤집음 → 매번 포인터 밑은 B의 「승인」, 칸 상자 움직임 0, 나간 결정 0.
+ */
+async function stillScene(browser, origin, engine) {
+  const summary = [];
+  for (const [name, viewport] of [["1280", { width: 1280, height: 900 }], ["390", { width: 390, height: 1500 }]]) {
+    const { context, page, state } = await openContext(browser, origin, { scheme: "light", viewport, waiting: [], server: { twoDeciders: true, threeDeciders: true, decisionDelayMs: 60, roundTripMs: 60 } });
+    await threeReady(page);
+    await settle(page);
+    const b = await decisionCenter(page, runApproval2.runId, "approve");
+    await page.mouse.move(b.x, b.y);
+    const before = await slotBoxes(page);
+    const steps = [];
+    const stepCheck = async (label) => {
+      const u = await underPoint(page, b.x, b.y);
+      const after = await slotBoxes(page);
+      const move = maxMove(before, after);
+      steps.push(`${label}:${(u.job ?? "-").slice(-2)}/${u.decision ?? u.testid}/${move.toFixed(1)}px/${Object.keys(after).length}`);
+      return u.job === runApproval2.runId && u.decision === "approve" && move === 0;
+    };
+    // (가) 다른 기기가 A를 거부: 서버는 run을 끝낸다.
+    state.decidedIds.add(approvals[0].id);
+    state.decidedRuns.set(runApproval.runId, false);
+    await reread(page, state);
+    const ga = await stepCheck("가");
+    // (나) 새 요청: 내 맥 세션이 권한을 묻는다.
+    state.waiting.add(macQuiet.sessionId);
+    await reread(page, state);
+    const na = await stepCheck("나");
+    const appendedLast = await page.evaluate((sid) => {
+      const rows = [...document.querySelectorAll('[data-section="needsMe"] [data-testid="work-job-row"]')];
+      return rows.at(-1)?.dataset.jobId === sid;
+    }, macQuiet.sessionId);
+    // (다) 서버가 순서를 뒤집는다.
+    state.reverse = true;
+    await reread(page, state);
+    const da = await stepCheck("다");
+    check(`still-${engine}-${name} 포인터가 B의 「승인」 위 — 남의 결정·새 요청·순서 바꿈에도 그 밑은 B, 움직임 0, 결정 0, 새 요청은 맨 아래`, ga && na && da && appendedLast && state.decisions === 0, { steps, appendedLast, decisions: state.decisions });
+    summary.push(`${name}=${steps.join(" ")}`);
+    await context.close();
+  }
+  console.log(`MEASURE still-${engine}: ${summary.join(" | ")}`);
+}
+
+/**
+ * 이동 0(통과 기준 6): 결정해 결과 줄로 바뀔 때 · 실패해 단추가 돌아올 때 · 새 요청이 맨 아래 붙을 때, 앞에 있던 칸의 위·높이 변화.
+ * 1280·900·390 × 글자 100%·150%. 실패 문장은 단추 옆 한 줄이다.
+ */
+async function moveZeroScene(browser, origin, engine) {
+  const summary = [];
+  for (const viewport of [{ width: 1280, height: 900 }, { width: 900, height: 900 }, { width: 390, height: 1500 }]) {
+    // 수리 1회차(검수 M2): 글자 200%까지 — 단추 높이(28 고정)와 결과·실패 한 줄의 줄높이(200%에서 36)가 어긋나던 곳.
+    for (const big of [null, "150%", "200%"]) {
+      const { context, page, state } = await openContext(browser, origin, { scheme: "light", viewport: big === "200%" ? { ...viewport, height: 2400 } : viewport, waiting: [], server: { twoDeciders: true, threeDeciders: true, decisionDelayMs: 60, roundTripMs: 60, failOnce: new Map([[approval2.id, 500]]) } });
+      if (big) await page.addStyleTag({ content: `html { font-size: ${big} !important; }` });
+      await threeReady(page);
+      await settle(page);
+      const s0 = await slotBoxes(page);
+      const a = await decisionCenter(page, runApproval.runId, "approve");
+      await mousePress(page, a.x, a.y);
+      await settledIn(page, runApproval.runId);
+      await sleep(400);
+      const s1 = await slotBoxes(page);
+      const b = await decisionCenter(page, runApproval2.runId, "reject");
+      await mousePress(page, b.x, b.y);
+      // 실패 문장이 서지 않으면(예: 위 칸의 결과 줄이 높이를 바꿔 B가 옮겨져 둘째 겹이 누름을 삼킴) 멈추지 않고 그 사실을 단언에 싣는다.
+      const errorShown = await page.locator('[data-section="needsMe"] [data-testid="work-job-approval-error"]').first().waitFor({ timeout: 6000 }).then(() => true, () => false);
+      await sleep(300);
+      const s2 = await slotBoxes(page);
+      state.waiting.add(macQuiet.sessionId);
+      await reread(page, state);
+      const s3 = await slotBoxes(page);
+      const m = [maxMove(s0, s1), maxMove(s1, s2), maxMove(s2, s3)];
+      const appended = Object.keys(s3).length === Object.keys(s2).length + 1;
+      const tag = `${viewport.width}${big ? `-${big.replace("%", "")}` : ""}`;
+      check(`move0-${engine}-${tag} 결과 줄 · 실패 · 새 요청 맨 아래 → 앞 칸 움직임 0px`, m.every((v) => v === 0) && appended && errorShown, { moves: m, appended, errorShown });
+      summary.push(`${tag}=${m.map((v) => v.toFixed(1)).join("/")}`);
+      await context.close();
+    }
+  }
+  console.log(`MEASURE move0-${engine}: ${summary.join(" ")}`);
+}
+
+/** owner에게 보일 캡처: 1280·390 × 밝게·어둡게 — 결정 전 · 한 줄 결정 뒤 · 두 줄 결정 뒤 · 실패 뒤 · 새 요청이 맨 아래 붙은 뒤. */
+async function slotShots(browser, origin) {
+  for (const scheme of ["light", "dark"]) {
+    for (const viewport of [{ width: 1280, height: 900 }, { width: 390, height: 1100 }]) {
+      const { context, page, state } = await openContext(browser, origin, { scheme, viewport, waiting: [], server: { twoDeciders: true, threeDeciders: true, decisionDelayMs: 60, roundTripMs: 60, failOnce: new Map([[approval3.id, 500]]) } });
+      await threeReady(page);
+      await settle(page);
+      const tag = `${viewport.width}-${scheme}`;
+      await shot(page, `5738-0-before-${tag}`);
+      const a = await decisionCenter(page, runApproval.runId, "approve");
+      await mousePress(page, a.x, a.y);
+      await settledIn(page, runApproval.runId);
+      await page.mouse.move(5, 5);
+      await shot(page, `5738-1-one-decided-${tag}`);
+      const b = await decisionCenter(page, runApproval2.runId, "reject");
+      await mousePress(page, b.x, b.y);
+      await settledIn(page, runApproval2.runId);
+      await page.mouse.move(5, 5);
+      await shot(page, `5738-2-two-decided-${tag}`);
+      const c = await decisionCenter(page, runApproval3.runId, "approve");
+      await mousePress(page, c.x, c.y);
+      await page.locator('[data-section="needsMe"] [data-testid="work-job-approval-error"]').first().waitFor({ timeout: 6000 });
+      await page.mouse.move(5, 5);
+      await shot(page, `5738-3-failed-${tag}`);
+      state.waiting.add(macQuiet.sessionId);
+      await reread(page, state);
+      await shot(page, `5738-4-new-request-bottom-${tag}`);
+      check(`shots-${tag} 가로 넘침 0`, (await overflowX(page)) === 0, await overflowX(page));
+      await context.close();
+    }
+  }
+}
+
+// ---- #5738 수리 1회차: 둘째 겹 — 밖에서 온 변화로 새로 서거나 옮겨진 결정 단추는 잠깐 포인터 누름을 받지 않는다 -----------------------
+// 검수 r1 H1(`rv-below`)·H2(`rv-banner-appear`)·M1(띠가 걷힘)의 탐침을 하네스로 옮겼다. 판정 = 서버에 나간 결정 수: 밖의 변화가 단추를
+// 손 밑에 세운 직후(+100ms)의 누름은 0건, 막힘이 풀린 뒤(+1.2초) 같은 자리의 누름은 그 자리의 줄을 결정한다(정상). 그리고 내가 굴린 뒤
+// 곧바로 누름은 막히지 않는다.
+
+const R2_VP = { "1280": { width: 1280, height: 900 }, "390": { width: 390, height: 1500 } };
+/** 막힘(1초)이 풀린 뒤. */
+const GUARD_OVER_MS = 1200;
+const short = (u) => `${(u.job ?? "-").slice(-2)}/${u.decision ?? u.testid}`;
+const guardLookOf = (page, rid) =>
+  page.evaluate((r) => document.querySelector(`[data-section="needsMe"] [data-job-id="${r}"]`)?.closest('[data-testid="work-job"]')?.hasAttribute("data-arrival-guard") ?? null, rid);
+const pressHere = async (page) => {
+  await page.mouse.down();
+  await page.mouse.up();
+};
+
+/** 점 격자(검수 r1 `sampleGrid`): 목록 표 안 결정 단추·제목·카드 링크의 가운데 x마다 2px 간격으로 그 점 밑(줄 id · 결정 단추). */
+async function sampleGrid(page) {
+  return page.evaluate(() => {
+    const table = document.querySelector('[data-testid="work-jobs-table"]').getBoundingClientRect();
+    const xs = new Set();
+    for (const el of document.querySelectorAll('[data-testid="work-job-approval-approve"], [data-testid="work-job-approval-reject"], [data-testid="work-job-row"] [data-col="task"] > span:first-child, [data-testid="work-job-approval-link"]')) {
+      const b = el.getBoundingClientRect();
+      if (b.width > 0) xs.add(Math.round(b.left + b.width / 2));
+    }
+    const pts = [];
+    for (const x of xs) {
+      // 짝수 y만(두 격자의 점이 같은 자리끼리 맞도록 — 띠 높이가 홀수여도).
+      for (let y = 2 * Math.ceil(Math.max(0, table.top) / 2); y < Math.min(window.innerHeight, table.bottom); y += 2) {
+        const el = document.elementFromPoint(x, y);
+        const d = el?.closest("[data-decision]");
+        const job = el?.closest('[data-testid="work-job"]')?.querySelector('[data-testid="work-job-row"]')?.dataset.jobId ?? null;
+        pts.push([x, y, job, d ? d.getAttribute("data-decision") : null]);
+      }
+    }
+    return pts;
+  });
+}
+const gridMap = (pts) => new Map(pts.map(([x, y, job, d]) => [`${x},${y}`, [job, d]]));
+
+/**
+ * H1(`rv-below`): 포인터가 「응답 필요」 아래(「지금」 줄)에 있을 때 새 요청이 오면(「지금」의 run이 승인을 물음 → 맨 아래 새 칸) 새 칸의 결정
+ * 단추가 손 밑에 선다. 1280·390 × 구간 있음·빈 구간. 점은 앞 창에서 격자로 찾고, 새 창에서 그 점에 마우스를 두고 잰다.
+ */
+async function belowScene(browser, origin, engine) {
+  const summary = [];
+  for (const vp of ["1280", "390"]) {
+    for (const empty of [false, true]) {
+      const tag = `r2-below-${engine}-${vp}${empty ? "-empty" : ""}`;
+      const server = { twoDeciders: !empty, decisionDelayMs: 60, roundTripMs: 60, ...(empty ? { dropApprovals: new Set([approvals[0].id]) } : {}) };
+      const open = async () => {
+        const ctx = await openContext(browser, origin, { scheme: "light", viewport: R2_VP[vp], waiting: [], server });
+        if (!empty) await twoDecidersReady(ctx.page);
+        await sleep(1500);
+        await settle(ctx.page, runNonDecider.runId);
+        return ctx;
+      };
+      const ask = async (page, state) => {
+        state.patch = new Map([[runWorking.runId, { phase: "awaiting_approval" }]]);
+        state.extraApprovals = [approvalW];
+        await page.evaluate(() => {
+          window.__capture5640Advance(31_000);
+          window.dispatchEvent(new Event("visibilitychange"));
+        });
+        await page.waitForFunction(
+          (rid) => !!document.querySelector(`[data-section="needsMe"] [data-job-id="${rid}"]`)?.closest('[data-testid="work-job"]')?.querySelector('[data-decision="approve"]'),
+          runWorking.runId,
+          { timeout: 8000, polling: "raf" }
+        );
+      };
+      let pick = null;
+      {
+        const { context, page, state } = await open();
+        const g0 = await sampleGrid(page);
+        await ask(page, state);
+        await sleep(200);
+        const g1 = gridMap(await sampleGrid(page));
+        pick = g0.find(([x, y, , d]) => { const a = g1.get(`${x},${y}`); return d === null && a && a[1] !== null && a[0] === runWorking.runId; }) ?? null;
+        await context.close();
+      }
+      if (pick === null) {
+        check(`${tag} 장면 성립: 새 칸의 결정 단추가 손 밑에 오는 점`, false, {});
+        continue;
+      }
+      const { context, page, state } = await open();
+      await page.mouse.move(pick[0], pick[1]);
+      const u0 = await underPoint(page, pick[0], pick[1]);
+      await ask(page, state);
+      await sleep(100);
+      const u1 = await underPoint(page, pick[0], pick[1]);
+      const look = await guardLookOf(page, runWorking.runId);
+      await pressHere(page);
+      await sleep(300);
+      const during = state.decisions;
+      // 풀린 뒤: 자리가 가라앉으면(1.2초 동안 그대로) 같은 자리를 누른다. 폰 폭에서는 시계를 당긴 탓에 셸의 연결 띠가 뒤따라 서며(검수 r1 (마))
+      // 칸 묶음이 한 번 더 옮겨 갈 수 있다 — 그러면 그 점은 더는 새 칸의 단추가 아니므로 새 칸의 단추(지금 자리)를 누른다.
+      await settle(page, runWorking.runId);
+      const band = await page.evaluate(() => document.querySelector('[data-testid="connection-banner"]') !== null);
+      let u2 = await underPoint(page, pick[0], pick[1]);
+      if (during > 0) {
+        // 막지 못했다(이미 새 요청이 결정됨): 풀린 뒤 누름은 재지 않는다.
+      } else if (u2.job === runWorking.runId && u2.decision !== null) await pressHere(page);
+      else {
+        const c = await decisionCenter(page, runWorking.runId, u1.decision);
+        await mousePress(page, c.x, c.y);
+        u2 = { ...(await underPoint(page, c.x, c.y)), moved: true };
+      }
+      await sleep(600);
+      const ok = u1.job === runWorking.runId && u1.decision !== null && look === true && during === 0 && state.decisions === 1 && state.decidedOrder[0] === approvalW.id;
+      check(`${tag} 「지금」 위 포인터 + 새 요청 → 새 칸의 단추가 손 밑: +100ms 누름 0건(막힌 모양) · 풀린 뒤 누름 = 새 요청 1건`, ok, { u0: short(u0), u1: short(u1), u2: short(u2), look, during, band, order: state.decidedOrder.map((x) => x.slice(-2)) });
+      summary.push(`${vp}${empty ? "/빈" : ""}: ${short(u0)}→${short(u1)} 막힌모양=${look} +100ms=${during} 풀린뒤=${state.decisions}(${u2.moved ? "연결 띠로 자리 옮김 → 새 칸 단추 " : "같은 자리 "}${short(u2)})`);
+      await context.close();
+    }
+  }
+  console.log(`MEASURE r2-below-${engine}: ${summary.join(" | ")}`);
+}
+
+/** 「작업」의 다시 읽기 실패 띠를 세우거나(`fail`) 걷는다 — 목록을 다시 읽게 하고 띠가 서고/걷힐 때까지(한 프레임 단위로) 기다린다. */
+async function toggleBand(page, state, fail) {
+  state.listFail = fail;
+  await page.evaluate(() => window.dispatchEvent(new Event("visibilitychange")));
+  await page.waitForFunction((want) => !!document.querySelector('[data-testid="work-jobs-stale-error"]') === want, fail, { timeout: 5000, polling: "raf" });
+}
+
+/**
+ * H2(`rv-banner-appear`)·M1: 목록 위 다시 읽기 실패 띠가 서면(내려감) / 걷히면(올라옴) 결정 단추가 손 밑에 온다. 점은 앞 창에서 격자로 찾는다:
+ * 섬 — 지금은 B의 글이고 띠가 서면 다른 줄(A)의 결정 단추인 점, 걷힘 — 띠가 선 동안은 글이고 걷히면 결정 단추인 점.
+ */
+async function bandScene(browser, origin, engine) {
+  const summary = [];
+  for (const vp of ["1280", "390"]) {
+    for (const way of ["appear", "gone"]) {
+      const tag = `r2-band-${way}-${engine}-${vp}`;
+      const open = async () => {
+        const ctx = await openContext(browser, origin, { scheme: "light", viewport: R2_VP[vp], waiting: [], server: { twoDeciders: true, threeDeciders: true, decisionDelayMs: 60, roundTripMs: 60 } });
+        await threeReady(ctx.page);
+        await settle(ctx.page);
+        if (way === "gone") {
+          await toggleBand(ctx.page, ctx.state, true);
+          await sleep(GUARD_OVER_MS);
+        }
+        return ctx;
+      };
+      let pick = null;
+      {
+        const { context, page, state } = await open();
+        const g0 = await sampleGrid(page);
+        await toggleBand(page, state, way === "appear");
+        await sleep(200);
+        const g1 = gridMap(await sampleGrid(page));
+        pick =
+          g0.find(([x, y, job, d]) => {
+            const a = g1.get(`${x},${y}`);
+            if (!(d === null && a && a[1] !== null)) return false;
+            return way === "appear" ? job === runApproval2.runId && a[0] === runApproval.runId : true;
+          }) ?? null;
+        await context.close();
+      }
+      if (pick === null) {
+        check(`${tag} 장면 성립: 띠가 ${way === "appear" ? "서면" : "걷히면"} 결정 단추가 손 밑에 오는 점`, false, {});
+        continue;
+      }
+      const { context, page, state } = await open();
+      await page.mouse.move(pick[0], pick[1]);
+      const u0 = await underPoint(page, pick[0], pick[1]);
+      await toggleBand(page, state, way === "appear");
+      await sleep(100);
+      const u1 = await underPoint(page, pick[0], pick[1]);
+      const look = u1.job ? await guardLookOf(page, u1.job) : null;
+      await pressHere(page);
+      await sleep(300);
+      const during = state.decisions;
+      await sleep(GUARD_OVER_MS - 300);
+      const u2 = await underPoint(page, pick[0], pick[1]);
+      await pressHere(page);
+      await sleep(600);
+      const ok = u1.decision !== null && look === true && during === 0 && state.decisions === 1 && u2.job === u1.job;
+      check(`${tag} 띠가 ${way === "appear" ? "서며 내려옴" : "걷히며 올라옴"} → 손 밑 결정 단추: +100ms 누름 0건(막힌 모양) · +1.2초 같은 자리 = 그 줄 1건`, ok, { u0: short(u0), u1: short(u1), u2: short(u2), look, during, order: state.decidedOrder.map((x) => x.slice(-2)) });
+      summary.push(`${vp}/${way}: ${short(u0)}→${short(u1)} 막힌모양=${look} +100ms=${during} +1.2s=${state.decisions}(${short(u2)})`);
+      await context.close();
+    }
+  }
+  console.log(`MEASURE r2-band-${engine}: ${summary.join(" | ")}`);
+}
+
+/**
+ * 셸의 연결 띠(이 화면이 다시 그리지 않는 띠, 390): 실시간이 끊기면 목록 위에 「연결 중…」이 서며 칸 묶음이 내려간다. 띠가 선 직후 A의
+ * 「거부」(지금 자리)를 누르면 0건 — 판정은 띠의 종류가 아니라 단추의 좌표다.
+ */
+async function connScene(browser, origin, engine) {
+  const { context, page, state } = await openContext(browser, origin, { scheme: "light", viewport: R2_VP["390"], waiting: [], server: { twoDeciders: true, threeDeciders: true, decisionDelayMs: 60, roundTripMs: 60 } });
+  await threeReady(page);
+  await settle(page);
+  const before = await decisionCenter(page, runApproval.runId, "reject");
+  await page.evaluate(() => (window.__sockets ?? []).forEach((s) => s.close()));
+  await page.waitForFunction(() => !!document.querySelector('[data-testid="connection-banner"]'), null, { timeout: 5000, polling: "raf" });
+  await sleep(100);
+  const band = await page.evaluate(() => { const e = document.querySelector('[data-testid="connection-banner"]'); return `${Math.round(e.getBoundingClientRect().height)}:${(e.textContent ?? "").trim().slice(0, 10)}`; });
+  const now = await decisionCenter(page, runApproval.runId, "reject");
+  const look = await guardLookOf(page, runApproval.runId);
+  await mousePress(page, now.x, now.y);
+  await sleep(400);
+  const ok = now.y !== before.y && look === true && state.decisions === 0;
+  check(`r2-conn-${engine}-390 셸의 연결 띠가 서며 옮겨진 A의 「거부」 → +100ms 누름 0건(막힌 모양)`, ok, { band, moved: now.y - before.y, look, decisions: state.decisions });
+  console.log(`MEASURE r2-conn-${engine}: 띠 ${band} · A 거부 ${before.y}→${now.y} · 막힌모양=${look} · +100ms 누름 결정 ${state.decisions}`);
+  await context.close();
+}
+
+/** 내가 굴린 뒤 곧바로 누름은 막히지 않는다: 휠(두 엔진)·손가락 끌기(Chromium) × 1280·390 → C의 「승인」 1건. */
+async function scrollScene(browser, origin, engine) {
+  const summary = [];
+  for (const vp of ["1280", "390"]) {
+    for (const input of engine === "chromium" ? ["wheel", "touch"] : ["wheel"]) {
+      const viewport = vp === "1280" ? { width: 1280, height: 700 } : { width: 390, height: 900 };
+      const { context, page, state } = await openContext(browser, origin, { scheme: "light", viewport, waiting: [], touch: input === "touch", server: { twoDeciders: true, threeDeciders: true, decisionDelayMs: 60, roundTripMs: 60 } });
+      await threeReady(page);
+      await settle(page);
+      const b = await decisionCenter(page, runApproval2.runId, "approve");
+      const c0 = await decisionCenter(page, runApproval3.runId, "approve");
+      if (input === "wheel") {
+        await page.mouse.move(b.x, b.y - 30);
+        await page.mouse.wheel(0, 60);
+      } else {
+        const cdp = await context.newCDPSession(page);
+        await cdp.send("Input.synthesizeScrollGesture", { x: Math.round(b.x), y: Math.round(b.y - 30), yDistance: -60, gestureSourceType: "touch", speed: 3000 });
+      }
+      await page.waitForFunction(() => (document.querySelector("[data-team-board-list]")?.scrollTop ?? 0) > 0, null, { timeout: 3000, polling: "raf" });
+      const c = await decisionCenter(page, runApproval3.runId, "approve");
+      const look = await guardLookOf(page, runApproval3.runId);
+      if (input === "touch") {
+        const tap = await touchTapper(context, page, engine);
+        await tap(c.x, c.y);
+      } else await mousePress(page, c.x, c.y);
+      await sleep(500);
+      const ok = c.y !== c0.y && look === false && state.decisions === 1 && state.decidedOrder[0] === approval3.id;
+      check(`r2-scroll-${engine}-${vp}-${input} 내가 굴려 옮긴 C의 「승인」을 곧바로 누름 → 막히지 않고 1건`, ok, { moved: c.y - c0.y, look, order: state.decidedOrder.map((x) => x.slice(-2)) });
+      summary.push(`${vp}/${input}: C ${c0.y}→${c.y} 막힌모양=${look} 결정 ${state.decisions}`);
+      await context.close();
+    }
+  }
+  console.log(`MEASURE r2-scroll-${engine}: ${summary.join(" | ")}`);
+}
+
+/** 검수 r2 탐침의 흉내 상자: 이 화면이 그리지 않는 높이 `h`의 상자를 목록 상자 바로 위에 세운다(다시 읽기 실패 띠가 서는 자리). */
+const installFakeBox = (page) =>
+  page.evaluate(() => {
+    window.__fakeBox = (h) => {
+      let b = document.getElementById("fake-box");
+      if (!b) {
+        b = document.createElement("div");
+        b.id = "fake-box";
+        b.style.flex = "none";
+        document.querySelector('[data-testid="work-jobs-route"] .team-board-layout').before(b);
+      }
+      b.style.height = `${h}px`;
+    };
+  });
+const listScrollTop = (page) => page.evaluate(() => document.querySelector("[data-team-board-list]")?.scrollTop ?? 0);
+
+/**
+ * 수리 2회차 High(검수 r2 H1, `e5`·`e8`·`e12` hold): 막힌 동안 누르기 시작해 1초 넘게 붙들었다가 풀린 뒤 떼면 손 밑에 온 다른 줄이 결정되던
+ * 것 — 판정을 click(누름의 끝)에서만 해서였다. 누름의 시작에서도 본다. 마우스·손가락(Chromium) × 흉내 상자·진짜 다시 읽기 실패 띠:
+ * 막힌 동안 시작 → 1.2초 붙듦 → 뗌 = 0건, 그 뒤 같은 자리 정상 누름 = 1건. 반대 순서(풀린 상태에서 시작 → 붙든 동안 밖의 변화 → 뗌)도 0건.
+ */
+async function holdScene(browser, origin, engine) {
+  const summary = [];
+  const open = async (vp, touch = false) => {
+    const ctx = await openContext(browser, origin, { scheme: "light", viewport: vp, waiting: [], touch, server: { twoDeciders: true, threeDeciders: true, decisionDelayMs: 60, roundTripMs: 60 } });
+    await threeReady(ctx.page);
+    await settle(ctx.page);
+    await sleep(1200);
+    await installFakeBox(ctx.page);
+    return ctx;
+  };
+  for (const input of engine === "chromium" ? ["mouse", "touch"] : ["mouse"]) {
+    const { context, page, state } = await open(input === "touch" ? { width: 390, height: 1500 } : { width: 1280, height: 900 }, input === "touch");
+    const H = input === "touch" ? 61 : 45;
+    const p = await decisionCenter(page, runApproval.runId, "reject");
+    const P = { x: p.x, y: p.y + H };
+    await page.mouse.move(P.x, P.y);
+    const u0 = await underPoint(page, P.x, P.y);
+    await page.evaluate((h) => window.__fakeBox(h), H);
+    await sleep(100);
+    const u1 = await underPoint(page, P.x, P.y);
+    const look = u1.job ? await guardLookOf(page, u1.job) : null;
+    if (input === "touch") {
+      const cdp = await context.newCDPSession(page);
+      await cdp.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [{ x: P.x, y: P.y, id: 1 }] });
+      await sleep(1100);
+      await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+    } else {
+      await page.mouse.down();
+      await sleep(GUARD_OVER_MS);
+      await page.mouse.up();
+    }
+    await sleep(500);
+    const held = state.decisions;
+    await sleep(GUARD_OVER_MS);
+    if (input === "touch") await (await touchTapper(context, page, engine))(P.x, P.y);
+    else await mousePress(page, P.x, P.y);
+    await sleep(600);
+    const ok = u1.decision !== null && u1.job !== u0.job && look === true && held === 0 && state.decisions === 1;
+    check(`r2-hold-${engine}-${input} 막힌 동안 누르기 시작 → 1.2초 붙듦 → 풀린 뒤 뗌 = 결정 0건 · 그 뒤 같은 자리 누름 = 1건`, ok, { u0: short(u0), u1: short(u1), look, held, after: state.decisions });
+    summary.push(`${input}/흉내: ${short(u0)}→${short(u1)} 붙든 뒤 뗌=${held} · 정상=${state.decisions}`);
+    await context.close();
+  }
+  {
+    // 진짜 다시 읽기 실패 띠: 점은 앞 창에서 격자로(띠가 서면 B 글자 자리에 A 결정 단추가 오는 점).
+    let pick = null;
+    {
+      const { context, page, state } = await open({ width: 1280, height: 900 });
+      const g0 = await sampleGrid(page);
+      await toggleBand(page, state, true);
+      await sleep(200);
+      const g1 = gridMap(await sampleGrid(page));
+      pick = g0.find(([x, y, job, d]) => {
+        const a = g1.get(`${x},${y}`);
+        return d === null && a && a[1] !== null && job === runApproval2.runId && a[0] === runApproval.runId;
+      }) ?? null;
+      await context.close();
+    }
+    if (pick === null) check(`r2-hold-${engine}-band 장면 성립`, false, {});
+    else {
+      const { context, page, state } = await open({ width: 1280, height: 900 });
+      await page.mouse.move(pick[0], pick[1]);
+      await toggleBand(page, state, true);
+      await sleep(100);
+      const u1 = await underPoint(page, pick[0], pick[1]);
+      await page.mouse.down();
+      await sleep(GUARD_OVER_MS);
+      await page.mouse.up();
+      await sleep(600);
+      check(`r2-hold-${engine}-band 진짜 다시 읽기 실패 띠 + 막힌 동안 누르기 시작 → 1.2초 뒤 뗌 = 0건`, u1.decision !== null && state.decisions === 0, { u1: short(u1), decisions: state.decisions });
+      summary.push(`띠: ${short(u1)} 붙든 뒤 뗌=${state.decisions}`);
+      await context.close();
+    }
+  }
+  {
+    // 반대 순서: 풀린 상태에서 누르기 시작 → 붙든 동안 밖의 변화로 옮겨짐 → 뗌.
+    const { context, page, state } = await open({ width: 1280, height: 900 });
+    const p = await decisionCenter(page, runApproval.runId, "reject");
+    const P = { x: p.x, y: p.y + 45 };
+    await page.mouse.move(P.x, P.y);
+    await page.mouse.down();
+    await page.evaluate(() => window.__fakeBox(45));
+    await sleep(200);
+    await page.mouse.up();
+    await sleep(600);
+    check(`r2-hold-${engine}-reverse 풀린 상태에서 누르기 시작 → 붙든 동안 옮겨짐 → 뗌 = 다른 줄 결정 0건`, state.decisions === 0, { decisions: state.decisions });
+    summary.push(`반대 순서 뗌=${state.decisions}`);
+    await context.close();
+  }
+  {
+    // 상자가 선 직후(다음 프레임 전) 곧바로 누름 — 관찰자가 아직 못 본 사이를 누르는 순간의 재기가 막는지(검수 r2 `e3`, 사보타주 C가 구현자 장면에서 GREEN이던 길).
+    const wrongs = [];
+    for (let i = 0; i < 4; i++) {
+      const { context, page, state } = await open({ width: 1280, height: 900 });
+      const p = await decisionCenter(page, runApproval.runId, "reject");
+      const P = { x: p.x, y: p.y + 45 };
+      await page.mouse.move(P.x, P.y);
+      await page.evaluate(() => window.__fakeBox(45));
+      await page.mouse.down();
+      await page.mouse.up();
+      await sleep(500);
+      wrongs.push(state.decisions);
+      await context.close();
+    }
+    check(`r2-hold-${engine}-instant 상자가 선 직후(다음 프레임 전) 곧바로 누름 4번 = 결정 0건`, wrongs.every((n) => n === 0), { wrongs });
+    summary.push(`선 직후 누름 ${wrongs.join("")}`);
+  }
+  console.log(`MEASURE r2-hold-${engine}: ${summary.join(" | ")}`);
+}
+
+/**
+ * 수리 2회차 Medium(검수 r2 M1, `e10`): 휠로 굴리는 도중 밖의 변화(흉내 상자 100px)가 서면 그 옮김이 「굴린 것」으로 적혀 막히지 않던 것 —
+ * 굴림 양을 빼고 남는 옮김으로 센다. 휠 10px × 5 중 첫째·셋째·다섯째 뒤에 상자를 세우고, 굴림이 멈춘 직후 손 밑 단추를 누름 → 0건.
+ */
+async function wheelMixScene(browser, origin, engine) {
+  const summary = [];
+  for (const at of [1, 3, 5]) {
+    const ctx = await openContext(browser, origin, { scheme: "light", viewport: { width: 1280, height: 600 }, waiting: [], server: { twoDeciders: true, threeDeciders: true, decisionDelayMs: 60, roundTripMs: 60 } });
+    const { context, page, state } = ctx;
+    await threeReady(page);
+    await settle(page);
+    await sleep(1200);
+    await installFakeBox(page);
+    const p = await decisionCenter(page, runApproval.runId, "reject");
+    const P = { x: p.x, y: p.y + 50 };
+    await page.mouse.move(P.x, P.y);
+    const u0 = await underPoint(page, P.x, P.y);
+    for (let i = 1; i <= 5; i++) {
+      await page.mouse.wheel(0, 10);
+      if (i === at) await page.evaluate(() => window.__fakeBox(100));
+    }
+    await page.waitForFunction(() => {
+      const el = document.querySelector("[data-team-board-list]");
+      window.__st = window.__st ?? [];
+      window.__st.push(el.scrollTop);
+      const n = window.__st.length;
+      return n >= 3 && window.__st[n - 1] === window.__st[n - 2] && window.__st[n - 2] === window.__st[n - 3];
+    }, null, { timeout: 2000, polling: "raf" }).catch(() => undefined);
+    const u1 = await underPoint(page, P.x, P.y);
+    const top = await listScrollTop(page);
+    await pressHere(page);
+    await sleep(500);
+    check(`r2-wheelmix-${engine}-k${at} 휠로 굴리는 도중 밖의 변화(상자 100px)로 손 밑 단추가 바뀜 → 굴림이 멈춘 직후 누름 = 0건`, u1.decision !== null && u1.job !== u0.job && state.decisions === 0, { u0: short(u0), u1: short(u1), top, decisions: state.decisions });
+    summary.push(`k${at}: ${short(u0)}→${short(u1)} scrollTop ${top} 결정=${state.decisions}`);
+    await context.close();
+  }
+  console.log(`MEASURE r2-wheelmix-${engine}: ${summary.join(" | ")}`);
+}
+
+/** 목록을 서버에서 다시 읽게 하고(시계를 당겨 재읽기 창을 연다) 읽기가 끝날 때까지 기다린다. */
+async function rereadBoard(page, state) {
+  const r = state.ledgerReads;
+  const b = state.boardReads;
+  await page.evaluate(() => {
+    window.__capture5640Advance(31_000);
+    window.dispatchEvent(new Event("visibilitychange"));
+  });
+  for (let i = 0; i < 60 && (state.ledgerReads === r || state.boardReads === b); i++) await sleep(50);
+  await sleep(400);
+}
+
+/**
+ * 수리 3회차 High 1(검수 r3 `v2`): 목록을 끝까지 내린 채 아래쪽 줄이 서버 목록에서 빠지면 브라우저가 스스로 scrollTop을 줄인다. 그 줄어듦이
+ * 「사람이 굴린 것」으로 빠지면 내려온 단추가 안 막혀 손 밑에 온 다른 줄이 결정된다 — 스스로 줄어든 굴림 양은 사람의 것에서 뺀다.
+ * 창 높이를 키워 목록이 조금만 길게(끝에서도 「응답 필요」가 보이게) 둔다. +100ms 누름 = 결정 0건, 그리고 끝까지 내린 채 사람이 위로 굴린 직후
+ * 누름 = 막히지 않고 1건(수리가 이것을 막으면 안 된다).
+ */
+async function clampScene(browser, origin, engine) {
+  const summary = [];
+  const LIST = "[data-team-board-list]";
+  const open = async () => {
+    const ctx = await openContext(browser, origin, { scheme: "light", viewport: { width: 1280, height: 1500 }, waiting: [], server: { twoDeciders: true, threeDeciders: true, decisionDelayMs: 60, roundTripMs: 60 } });
+    await threeReady(ctx.page);
+    await settle(ctx.page);
+    await sleep(1200);
+    return ctx;
+  };
+  const tops = (page) =>
+    page.evaluate((sel) => {
+      const el = document.querySelector(sel);
+      const r = el.getBoundingClientRect();
+      return {
+        st: el.scrollTop,
+        max: el.scrollHeight - el.clientHeight,
+        box: { l: r.left, t: r.top, b: r.bottom },
+        btn: [...el.querySelectorAll('[data-decision="reject"]')].map((b) => {
+          const q = b.getBoundingClientRect();
+          return { x: Math.round(q.left + q.width / 2), y: Math.round(q.top + q.height / 2), job: b.closest('[data-testid="work-job"]').querySelector('[data-testid="work-job-row"]').dataset.jobId };
+        }),
+      };
+    }, LIST);
+  const toBottom = async (page, box) => {
+    await page.mouse.move(Math.round(box.l + 30), Math.round(box.t + 60));
+    await page.mouse.wheel(0, 3000);
+    await sleep(1500);
+  };
+  for (const rep of [0, 1]) {
+    const { context, page, state } = await open();
+    const t00 = await tops(page);
+    await toBottom(page, t00.box);
+    const t0 = await tops(page);
+    state.hidden = new Set([runWorking.runId]);
+    await rereadBoard(page, state);
+    await sleep(300);
+    const t1 = await tops(page);
+    const shift = t1.btn[0].y - t0.btn[0].y;
+    state.hidden = new Set();
+    await rereadBoard(page, state);
+    await toBottom(page, t00.box);
+    const t2 = await tops(page);
+    const cand = t2.btn.find((b) => b.y + shift > t00.box.t + 12 && b.y + shift < t00.box.b - 12);
+    if (!cand || shift === 0) {
+      check(`r3-clamp-${engine}-#${rep} 장면 성립(끝까지 내림 + 줄 빠짐으로 단추가 내려옴)`, false, { shift, t0: [t0.st, t0.max], t1: [t1.st, t1.max], cand: cand ?? null });
+      await context.close();
+      continue;
+    }
+    const P = { x: cand.x, y: cand.y + shift };
+    await page.mouse.move(P.x, P.y);
+    const u0 = await underPoint(page, P.x, P.y);
+    state.hidden = new Set([runWorking.runId]);
+    await page.evaluate(() => {
+      window.__capture5640Advance(31_000);
+      window.dispatchEvent(new Event("visibilitychange"));
+    });
+    await page.waitForFunction(
+      ([sel, job, y]) => {
+        const b = [...document.querySelectorAll(`${sel} [data-decision="reject"]`)].find((e) => e.closest('[data-testid="work-job"]').querySelector('[data-testid="work-job-row"]').dataset.jobId === job);
+        if (!b) return false;
+        const r = b.getBoundingClientRect();
+        return Math.abs(Math.round(r.top + r.height / 2) - y) > 2;
+      },
+      [LIST, cand.job, cand.y],
+      { timeout: 5000, polling: "raf" }
+    );
+    await sleep(100);
+    const u1 = await underPoint(page, P.x, P.y);
+    await pressHere(page);
+    await sleep(600);
+    check(`r3-clamp-${engine}-#${rep} 끝까지 내린 목록에서 아래 줄이 빠져 단추가 내려옴 → +100ms 누름 = 다른 줄 결정 0건`, u1.decision !== null && u1.job !== u0.job && state.decisions === 0, { shift, u0: short(u0), u1: short(u1), decisions: state.decisions, order: state.decidedOrder.map((x) => x.slice(-2)) });
+    summary.push(`#${rep}: 옮김 ${shift}px ${short(u0)}→${short(u1)} +100ms 결정=${state.decisions}`);
+    await context.close();
+  }
+  {
+    // 정당한 누름: 끝까지 내린 채 사람이 위로 굴린 직후 보이는 「승인」을 누름 = 막히지 않고 1건.
+    const { context, page, state } = await open();
+    const t00 = await tops(page);
+    await toBottom(page, t00.box);
+    await page.mouse.wheel(0, -60);
+    await sleep(250);
+    const rid = runApproval.runId;
+    const c = await decisionCenter(page, rid, "approve");
+    const look = await guardLookOf(page, rid);
+    await mousePress(page, c.x, c.y);
+    await sleep(500);
+    check(`r3-clamp-${engine}-human 끝까지 내린 채 사람이 위로 굴린 직후 누름 = 막히지 않고 1건`, look === false && state.decisions === 1, { look, decisions: state.decisions });
+    summary.push(`위로 굴린 직후 막힌모양=${look} 결정=${state.decisions}`);
+    await context.close();
+  }
+  {
+    // 스크롤 막대를 끈 것과 같은 굴림(입력 사건 없이 scroll 사건만): 끝까지 내린 뒤 scrollTop만 바꾼 직후 누름 = 막히지 않고 1건.
+    const { context, page, state } = await open();
+    const t00 = await tops(page);
+    await toBottom(page, t00.box);
+    await page.evaluate((sel) => {
+      document.querySelector(sel).scrollTop = 80;
+    }, LIST);
+    await sleep(120);
+    const c = await decisionCenter(page, runApproval.runId, "approve");
+    const look = await guardLookOf(page, runApproval.runId);
+    await mousePress(page, c.x, c.y);
+    await sleep(500);
+    check(`r3-clamp-${engine}-bar 끝까지 내린 뒤 scroll 사건만으로 위로 굴린(막대 끌기와 같은) 직후 누름 = 막히지 않고 1건`, look === false && state.decisions === 1, { look, decisions: state.decisions });
+    summary.push(`막대형 굴림 직후 막힌모양=${look} 결정=${state.decisions}`);
+    await context.close();
+  }
+  console.log(`MEASURE r3-clamp-${engine}: ${summary.join(" | ")}`);
+}
+
+/**
+ * 수리 3회차 High 2(검수 r3 `v1` label, Chromium 터치 흉내): 손가락을 단추가 아닌 곳(다른 줄의 제목)에 대고 있는 동안 띠가 서서 손 밑으로 다른 줄의
+ * 「거부」가 오고 1.3초 뒤 떼면 그 단추가 결정되던 것 — 터치의 click은 뗀 자리에 떨어진다. 누르는 동안 손 밑으로 온 단추는 누른 것이 아니다.
+ */
+async function touchRevScene(browser, origin, engine) {
+  if (engine !== "chromium") return;
+  const { context, page, state } = await openContext(browser, origin, { scheme: "light", viewport: R2_VP["390"], waiting: [], touch: true, server: { twoDeciders: true, threeDeciders: true, decisionDelayMs: 60, roundTripMs: 60 } });
+  await threeReady(page);
+  await settle(page);
+  await sleep(1200);
+  await installFakeBox(page);
+  const cdp = await context.newCDPSession(page);
+  const a = await decisionCenter(page, runApproval.runId, "reject");
+  const F = { x: a.x, y: a.y + 61 };
+  const u0 = await underPoint(page, F.x, F.y);
+  await cdp.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [{ x: F.x, y: F.y, id: 1 }] });
+  await sleep(60);
+  await page.evaluate(() => window.__fakeBox(61));
+  await sleep(1300);
+  const u1 = await underPoint(page, F.x, F.y);
+  await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+  await sleep(700);
+  check(`r3-touchrev-${engine} 손가락을 단추 밖에 댄 채 띠가 서서 다른 줄 「거부」가 손 밑에 옴 → 1.3초 뒤 뗌 = 결정 0건`, u0.decision === null && u1.decision !== null && state.decisions === 0, { u0: short(u0), u1: short(u1), decisions: state.decisions });
+  console.log(`MEASURE r3-touchrev-${engine}: 처음 ${short(u0)} → 뗄 때 ${short(u1)} 결정=${state.decisions}`);
+  await context.close();
+}
+
+/**
+ * 내 연속 결정은 막히지 않는다: 손가락으로 네 줄을 차례로(간격 0.3초, 답 60·300ms) — 내 결정은 줄을 옮기지 않으니 막힐 까닭이 없다.
+ * 셋째 줄 승인 묻는 run(`runWorking` + `approvalW`)을 넷째 결정자로 둔다.
+ */
+async function fourRowsScene(browser, origin, engine) {
+  const summary = [];
+  for (const vp of ["1280", "390"]) {
+    for (const delay of [60, 300]) {
+      const { context, page, state } = await openContext(browser, origin, { scheme: "light", viewport: R2_VP[vp], waiting: [], touch: true, server: { twoDeciders: true, threeDeciders: true, decisionDelayMs: delay, roundTripMs: 60, patch: new Map([[runWorking.runId, { phase: "awaiting_approval" }]]), extraApprovals: [approvalW] } });
+      await page.waitForFunction(() => document.querySelectorAll('[data-section="needsMe"] [data-testid="work-job-approval-approve"]').length === 4, null, { timeout: 15_000 });
+      await settle(page);
+      const tap = await touchTapper(context, page, engine);
+      const looks = [];
+      for (const [i, rid] of [runApproval.runId, runApproval2.runId, runApproval3.runId, runWorking.runId].entries()) {
+        const c = await decisionCenter(page, rid, i % 2 ? "reject" : "approve");
+        looks.push(await guardLookOf(page, rid));
+        await tap(c.x, c.y);
+        await sleep(300);
+      }
+      await sleep(delay + 900);
+      const ok = state.decisions === 4 && new Set(state.decidedOrder).size === 4 && looks.every((l) => l === false);
+      check(`r2-four-${engine}-${vp}-d${delay} 손가락 네 줄 차례로(0.3초) → 4건, 누를 때 막힌 줄 0`, ok, { order: state.decidedOrder.map((x) => x.slice(-2)), looks });
+      summary.push(`${vp}/d${delay}=${state.decisions}`);
+      await context.close();
+    }
+  }
+  console.log(`MEASURE r2-four-${engine}: ${summary.join(" ")}`);
+}
+
+/** owner에게 보일 캡처(수리 1회차): 1280·390 × 밝게·어둡게 — 두 줄 결정 뒤(흐린 결과 요약), 막힌 모양(맨 아래 새 요청이 선 직후). */
+async function r2Shots(browser, origin) {
+  for (const scheme of ["light", "dark"]) {
+    for (const viewport of [{ width: 1280, height: 900 }, { width: 390, height: 1100 }]) {
+      const { context, page, state } = await openContext(browser, origin, { scheme, viewport, waiting: [], server: { twoDeciders: true, threeDeciders: true, decisionDelayMs: 60, roundTripMs: 60 } });
+      await threeReady(page);
+      await settle(page);
+      const tag = `${viewport.width}-${scheme}`;
+      const a = await decisionCenter(page, runApproval.runId, "approve");
+      await mousePress(page, a.x, a.y);
+      await settledIn(page, runApproval.runId);
+      const b = await decisionCenter(page, runApproval2.runId, "reject");
+      await mousePress(page, b.x, b.y);
+      await settledIn(page, runApproval2.runId);
+      await page.mouse.move(5, 5);
+      await sleep(300);
+      await shot(page, `5738r2-1-two-decided-${tag}`);
+      state.patch = new Map([[runWorking.runId, { phase: "awaiting_approval" }]]);
+      state.extraApprovals = [approvalW];
+      await page.evaluate(() => {
+        window.__capture5640Advance(31_000);
+        window.dispatchEvent(new Event("visibilitychange"));
+      });
+      await page.waitForFunction((rid) => document.querySelector(`[data-section="needsMe"] [data-job-id="${rid}"]`)?.closest('[data-testid="work-job"]')?.hasAttribute("data-arrival-guard"), runWorking.runId, { timeout: 8000, polling: "raf" });
+      await shot(page, `5738r2-2-guarded-new-request-${tag}`);
+      check(`r2-shots-${tag} 가로 넘침 0`, (await overflowX(page)) === 0, await overflowX(page));
+      await context.close();
+    }
+  }
+}
+
+/**
+ * 수리 3회차 L1: 막힌 동안 결정 단추는 알약 모양(채움)을 그대로 두고 흐리게만 선다. 밝게 1280 · 어둡게 390의 보통 / 막힘 한 쌍 + 자리·크기 0px 변화 · 채움 그대로 · 투명도 0.5.
+ */
+async function guardLookShots(browser, origin) {
+  const summary = [];
+  for (const [scheme, viewport] of [["light", { width: 1280, height: 900 }], ["dark", { width: 390, height: 1500 }]]) {
+    const { context, page } = await openContext(browser, origin, { scheme, viewport, waiting: [], server: { twoDeciders: true, threeDeciders: true, decisionDelayMs: 60, roundTripMs: 60 } });
+    await threeReady(page);
+    await settle(page);
+    await sleep(1200);
+    await installFakeBox(page);
+    const look = () =>
+      page.evaluate((rid) => {
+        const li = document.querySelector(`[data-section="needsMe"] [data-job-id="${rid}"]`).closest('[data-testid="work-job"]');
+        const of = (w) => {
+          const el = li.querySelector(`[data-decision="${w}"]`);
+          const r = el.getBoundingClientRect();
+          const c = getComputedStyle(el);
+          return { w: r.width, h: r.height, bg: c.backgroundColor, color: c.color, op: c.opacity, cursor: c.cursor, li: li.getBoundingClientRect().top };
+        };
+        return { approve: of("approve"), reject: of("reject"), guarded: li.hasAttribute("data-arrival-guard") };
+      }, runApproval.runId);
+    await page.mouse.move(5, 5);
+    const n = await look();
+    await shot(page, `5738r3-look-normal-${viewport.width}-${scheme}`);
+    // 띠(흉내 상자)가 서서 줄이 밀리면 막힌다(줄 위치가 아니라 단추의 막힌 모양만 잰다).
+    await page.evaluate(() => window.__fakeBox(45));
+    await sleep(100);
+    const g = await look();
+    await shot(page, `5738r3-look-guarded-${viewport.width}-${scheme}`);
+    const same = (k) => n[k].w === g[k].w && n[k].h === g[k].h && n[k].bg === g[k].bg;
+    check(`r3-look-${scheme}-${viewport.width} 막힌 단추: 크기 0px 변화 · 채움 그대로 · 투명도 0.5 · not-allowed`, g.guarded === true && same("approve") && same("reject") && g.approve.op === "0.5" && g.reject.op === "0.5" && n.approve.op === "1" && g.approve.cursor === "not-allowed", { n, g });
+    summary.push(`${scheme}-${viewport.width}: 승인 ${g.approve.w}x${g.approve.h} 채움 ${g.approve.bg} 투명도 ${g.approve.op}`);
+    await context.close();
+  }
+  console.log(`MEASURE r3-look: ${summary.join(" | ")}`);
+}
+
 async function main() {
   mkdirSync(OUT_DIR, { recursive: true });
-  const preview = await startGuardedPreview({ webRoot: WEB_ROOT, port: PORT, portEnvVar: "CAPTURE_PORT" });
+  // `CAPTURE_DIST`: 다른 빌드 폴더를 띄운다(수리 전 빌드로 같은 장면의 RED를 재려고, #5712).
+  const extraArgs = process.env.CAPTURE_DIST ? ["--outDir", resolve(process.env.CAPTURE_DIST)] : [];
+  const preview = await startGuardedPreview({ webRoot: WEB_ROOT, port: PORT, portEnvVar: "CAPTURE_PORT", extraArgs });
   const browser = await chromium.launch();
   try {
     if (ONLY === "" || ONLY === "scenes") {
@@ -1303,6 +2371,55 @@ async function main() {
       await nextAskScene(browser, preview.origin);
       await guardLookScene(browser, preview.origin);
       await queuedChipScene(browser, preview.origin);
+    }
+    if (ONLY === "" || ONLY === "fix5738" || ONLY.startsWith("fix5738:")) {
+      const parts = ONLY.startsWith("fix5738:") ? ONLY.slice(8).split(",") : ["n1", "rows", "slow", "still", "move0", "shots"];
+      const wk = await webkit.launch();
+      try {
+        for (const [engine, b] of [["chromium", browser], ["webkit", wk]]) {
+          if (parts.includes("n1")) await n1Scene(b, preview.origin, engine);
+          if (parts.includes("rows")) await delayRowsScene(b, preview.origin, engine);
+          if (parts.includes("slow")) await slowFailScene(b, preview.origin, engine);
+          if (parts.includes("still")) await stillScene(b, preview.origin, engine);
+          if (parts.includes("move0")) await moveZeroScene(b, preview.origin, engine);
+        }
+        if (parts.includes("shots")) await slotShots(browser, preview.origin);
+      } finally {
+        await wk.close();
+      }
+    }
+    if (ONLY === "" || ONLY === "fix5738r2" || ONLY.startsWith("fix5738r2:")) {
+      const parts = ONLY.startsWith("fix5738r2:") ? ONLY.slice(10).split(",") : ["below", "band", "conn", "scroll", "hold", "wheelmix", "clamp", "touchrev", "four", "shots", "look"];
+      const wk = await webkit.launch();
+      try {
+        for (const [engine, b] of [["chromium", browser], ["webkit", wk]]) {
+          if (parts.includes("below")) await belowScene(b, preview.origin, engine);
+          if (parts.includes("band")) await bandScene(b, preview.origin, engine);
+          if (parts.includes("conn")) await connScene(b, preview.origin, engine);
+          if (parts.includes("scroll")) await scrollScene(b, preview.origin, engine);
+          if (parts.includes("hold")) await holdScene(b, preview.origin, engine);
+          if (parts.includes("wheelmix")) await wheelMixScene(b, preview.origin, engine);
+          if (parts.includes("clamp")) await clampScene(b, preview.origin, engine);
+          if (parts.includes("touchrev")) await touchRevScene(b, preview.origin, engine);
+          if (parts.includes("four")) await fourRowsScene(b, preview.origin, engine);
+        }
+        if (parts.includes("shots")) await r2Shots(browser, preview.origin);
+        if (parts.includes("look")) await guardLookShots(browser, preview.origin);
+      } finally {
+        await wk.close();
+      }
+    }
+    if (ONLY === "" || ONLY === "fix5712") {
+      const wk = await webkit.launch();
+      try {
+        for (const [engine, b] of [["chromium", browser], ["webkit", wk]]) {
+          await mixedScene(b, preview.origin, engine);
+          await threeRowsEvenScene(b, preview.origin, engine);
+          await repressSecondScene(b, preview.origin, engine);
+        }
+      } finally {
+        await wk.close();
+      }
     }
     if (ONLY === "" || ONLY === "fix5" || ONLY === "box") {
       await boxScene(browser, preview.origin, "chromium");
