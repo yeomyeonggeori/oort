@@ -2911,9 +2911,10 @@ export async function fetchMessages(
     )}/channels/${encodeURIComponent(channelId)}/messages${suffix}`
   );
   const messages = arrayField<Message>(page, "messages");
-  // 서버는 대화의 맨 처음에 닿으면 `nextBefore: null` 을 준다(Swift 와 같은 모양). 클라이언트는
-  // 「없음」을 `undefined` 로만 읽으므로(`nextBefore === undefined` = 더 옛 글 없음) 여기서 한 번
-  // 키를 지운다 — `null` 이 새면 「끝」이 영영 서지 않아 더 읽기가 되풀이된다(#5757).
+  // 서버는 글이 든 쪽에는 언제나 숫자를 주고(대화의 맨 처음이 든 쪽도), 더 옛 글이 없어 빈 쪽을 줄
+  // 때만 `nextBefore: null` 을 준다(키는 늘 실린다). 클라이언트는 「없음」을 `undefined` 로만
+  // 읽으므로(`nextBefore === undefined` = 더 옛 글 없음) 여기서 한 번 키를 지운다 — `null` 이 새면
+  // 「끝」이 영영 서지 않아 맨 위에 닿을 때마다 빈 쪽을 되풀이해 읽는다(#5757).
   const { nextBefore, ...rest } = page;
   return {
     ...rest,
