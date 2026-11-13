@@ -27,7 +27,7 @@ import type { PendingMessage } from "@momo/core/features/timeline/model";
 // 그래서 `localStorage` 이고, 그 선택의 비용을 여기 적어 둔다: **공용 기기에서
 // 초안은 다음 사람이 읽을 수 있다.** 이 앱은 이미 같은 자리에 세션 기록을 두고
 // 있고(`lib/session.ts` 가 그 위험을 적어 두었다), 로그아웃이 그 둘을 함께 지운다
-// — 아래 [`clearAllDrafts`] 를 세션 정리가 부른다.
+// — 아래 [`closeDraftsForSignOut`] 를 세션 정리가 부른다(지우고, 다음 로그인까지 닫는다).
 //
 // ## 수명
 //
@@ -142,7 +142,17 @@ function readRaw(key: string): string | null {
   }
 }
 
+// 로그아웃이 지운 뒤에는 다음 로그인까지 새로 쓰지 않는다 (#5799).
+//
+// 지우는 순간과 세션이 실제로 내려가는 순간 사이에 쓰는 손이 있다: 열려 있던 입력창은 내려가며 마지막 글을
+// 남기고, 날아가던 전송은 내려갈 때와 늦게 실패할 때 「못 보낸 글」을 남긴다. 지우는 순서를 맞추는 것으로는
+// 새 입력창·늦게 끝나는 요청이 생길 때마다 다시 깨진다. 그래서 문을 쓰는 쪽(이 저장소) 하나에 둔다: 이 파일의
+// 모든 쓰기가 아래 `writeRaw`를 지나므로 여기서 막으면 초안·답글 초안·보내지 못한 글이 함께 지켜진다.
+// 지우기(`null`)는 언제나 통한다. 닫는 것은 `closeDraftsForSignOut`, 여는 것은 `openDraftsForSignIn`이다.
+let closedForSignOut = false;
+
 function writeRaw(key: string, value: string | null): void {
+  if (value !== null && closedForSignOut) return;
   try {
     if (typeof localStorage === "undefined") return;
     if (value === null) localStorage.removeItem(key);
@@ -366,6 +376,20 @@ export function clearAllDrafts(): void {
   for (const key of threadDraftKeys()) writeRaw(key, null);
   for (const key of failedSendKeys()) writeRaw(key, null);
   emitDraftsChanged();
+}
+
+/**
+ * 로그아웃(#5799). 전부 지우고, 다음 로그인까지 이 저장소에 새로 쓰지 않는다 — 내려가는 입력창의 마지막 저장과
+ * 늦게 실패한 전송이 지운 자리를 되살리지 못하게.
+ */
+export function closeDraftsForSignOut(): void {
+  closedForSignOut = true;
+  clearAllDrafts();
+}
+
+/** 로그인. 이 사람의 초안을 다시 남긴다. */
+export function openDraftsForSignIn(): void {
+  closedForSignOut = false;
 }
 
 /**

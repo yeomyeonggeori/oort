@@ -26,7 +26,10 @@ import {
   sessionRestoreHeld,
   subscribeSessionRestoreHold,
 } from "@/features/auth/onboardingSessionHold";
-import { clearAllDrafts } from "@/features/chat/draftStore";
+import {
+  closeDraftsForSignOut,
+  openDraftsForSignIn,
+} from "@/features/chat/draftStore";
 import {
   clearSessionNotices,
   markBootUnreachableNotice,
@@ -206,6 +209,7 @@ export function useRestoredSession(): SessionLifecycle {
     // not `/v1/auth/refresh`, so this hidden rotation escaped to a real backend,
     // came back 401, and bounced the app to the login card mid-run.
     attempted.current = true;
+    openDraftsForSignIn(); // 로그아웃이 닫은 초안 저장소를 이 사람에게 다시 연다(#5799).
     clearSessionNotices();
     clearApprovalAvatarPreviews();
     setSession(next);
@@ -225,11 +229,12 @@ export function useRestoredSession(): SessionLifecycle {
     // call resolves, and a failed revoke cannot pin them inside the app.
     clearDurableForCurrentAccount(); // 세션이 지워지기 전에: 계정 꼬리가 필요하다(#3696).
     clearSessionNotices(); // 직접 나간 사람에게 만료·서버 안내는 맞지 않는다.
-    void logout();
     // 초안도 함께 지운다 (U4-f). 로그아웃은 「이 기기에서 내 흔적을 지운다」이고,
     // 쓰다 만 글은 보낸 메시지보다 사적이다 — 세션 기록과 같은 저장소에 사는 이상
-    // 같은 순간에 사라져야 한다(`draftStore.ts` 머리말의 비용 항목).
-    clearAllDrafts();
+    // 같은 순간에 사라져야 한다(`draftStore.ts` 머리말의 비용 항목). 지운 뒤에는 다음 로그인까지 닫는다(#5799):
+    // 열려 있던 입력창은 이 함수가 끝난 **뒤에** 내려가며 마지막 글을 다시 남기려 한다. 세션을 비우기 전에 닫는다.
+    closeDraftsForSignOut();
+    void logout();
     clearAllFirstMentionRecords();
     clearApprovalAvatarPreviews();
     clearDownloadHistory(); // 받은 파일의 이름은 이 기기에서 이 사람의 흔적이다(#4587).
