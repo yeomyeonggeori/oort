@@ -474,8 +474,8 @@ function AddWorkspacePanel({
   function handOffToLogin() {
     if (!joinTarget) return;
     // 로그인 화면은 마운트될 때 페이지 주소에서 링크를 읽는다(`useJoinPrefill`). 그래서 주소를 먼저 바꾸고
-    // 그다음에 로그아웃한다. 로그아웃이 같은 틱에 로그인 화면을 새로 세운다. 링크의 서버로 바꾸는 일은
-    // 로그아웃 요청이 다 끝난 뒤에 한다(`useJoinPrefill`이 `pendingLogout()`을 기다린다, #5785).
+    // 그다음에 로그아웃한다. 로그아웃이 같은 틱에 로그인 화면을 새로 세우고, 그 화면은 첫 그림부터 링크의
+    // 서버·걸음·초점을 가진다(그 뒤로는 사람만 바꾼다, #5785).
     window.history.replaceState(
       window.history.state,
       "",
