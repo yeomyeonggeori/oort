@@ -27,6 +27,8 @@
 //      키보드 스크롤을 사람의 손으로 치면 그 줄 높이 변화에서 자리를 붙들어 스크롤을 끊는다. 줄 높이가 안 바뀌면 그 길을 안 타서 L6 은 못 잡는다)
 //   L8 진짜 키로 키보드 초점을 세운 뒤 줄에 초점을 두고 휠 뒤 160ms 에 「최신 메시지로 이동」 × 6 → 멈칫(끝 자리까지 9px 넘게 남은 채 50ms 이상
 //      정지) 0 = 멈춤 뒤 한 프레임 이동 0 · 누른 뒤 목록 안 focus() 모두 스크롤 막음 · 바닥 ≤ 9px (#5747 — ⋯ 로 넘어가는 초점이 스크롤을 끊음)
+//   L9 키보드로 줄 오가기: 아래 가장자리에서 Tab × 6 · 위 가장자리에서 Shift+Tab × 6 → 매 번 다른 줄 · 초점 요소(⋯)가 목록 안 · 그 줄이 목록과 겹침
+//      (#5747 범위 — WebKit 은 ⋯ 넘겨주기의 스크롤이 줄을 드러낸다)
 //
 // 재는 법: 프레임마다 그려진 모양(rAF 뒤의 태스크에서 읽고, 그 사이 DOM 이 바뀐 표본은 버린다 — #5641 `still-measure` 와 같은 규칙)의
 // 보던 줄 위 끝(창 좌표) · scrollTop · 바닥 거리를 적는다. 휠 장면은 A/B 다: 같은 휠 열을 자람 없이 돌린 값이 기준이라 엔진이 휠을
@@ -1054,6 +1056,67 @@ async function keyboardJumpScenes(page, rows) {
   });
 }
 
+/**
+ * L9 키보드로 줄을 오가기(#5747 의 범위 잠금): 아래 가장자리에 걸친 줄 바로 앞 줄에서 Tab × 6, 위 가장자리에 걸친 줄 바로 뒤 줄에서
+ * Shift+Tab × 6. 매 번 초점이 다른 줄로 가고, 초점을 받은 요소(⋯)가 목록 안에 다 보이고, 그 줄이 목록과 겹친다. WebKit 은 줄 초점이
+ * 줄을 드러내지 않고 ⋯ 넘겨주기의 스크롤이 드러낸다(실측: 넘겨주기를 늘 스크롤 막게 한 판에서 둘째 Tab 부터 ⋯ 가 목록 밖) — 그래서
+ * L8 의 수리는 착지 초점에 이어진 넘겨주기만 막는다.
+ */
+const TAB_WALK_STEPS = 6;
+
+async function tabWalkScenes(page, rows) {
+  for (const edge of ["bottom", "top"]) {
+    await park(page, TIMELINE, 0.5);
+    const start = await page.evaluate((side) => {
+      const list = document.querySelector('[data-testid="timeline-virtuoso"]');
+      const box = list.getBoundingClientRect();
+      const all = [...list.querySelectorAll('[data-testid="timeline-message"]')];
+      const line = side === "bottom" ? box.bottom : box.top;
+      const straddle = all.findIndex((el) => {
+        const r = el.getBoundingClientRect();
+        return r.top < line && r.bottom > line;
+      });
+      const row = straddle < 0 ? undefined : all[straddle + (side === "bottom" ? -1 : 1)];
+      row?.focus({ preventScroll: true });
+      return row === undefined ? null : row.getAttribute("data-seq");
+    }, edge);
+    await wait(300);
+    const key = edge === "bottom" ? "Tab" : "Shift+Tab";
+    const steps = [];
+    for (let i = 0; i < TAB_WALK_STEPS; i += 1) {
+      await page.keyboard.press(key);
+      await wait(250);
+      steps.push(
+        await page.evaluate(() => {
+          const list = document.querySelector('[data-testid="timeline-virtuoso"]');
+          const box = list.getBoundingClientRect();
+          const active = document.activeElement;
+          const row = active?.closest?.('[data-testid="timeline-message"]') ?? null;
+          if (row === null || !list.contains(row)) return { seq: null };
+          const a = active.getBoundingClientRect();
+          const r = row.getBoundingClientRect();
+          return {
+            seq: row.getAttribute("data-seq"),
+            action: active.getAttribute("data-row-action"),
+            activeInside: a.top >= box.top - 0.5 && a.bottom <= box.bottom + 0.5,
+            activeTop: Math.round(a.top - box.top),
+            activeBottom: Math.round(box.bottom - a.bottom),
+            rowShown: Math.round(Math.min(r.bottom, box.bottom) - Math.max(r.top, box.top)),
+          };
+        })
+      );
+    }
+    const seqs = steps.map((step) => step.seq);
+    const built = start !== null && seqs.every((seq, i) => seq !== null && seq !== (i === 0 ? start : seqs[i - 1]));
+    const hidden = steps.filter((step) => !step.activeInside || !(step.rowShown > 0));
+    rows.push({
+      scene: `타임라인 키보드로 줄 오가기 — ${edge === "bottom" ? "아래 가장자리에서 Tab" : "위 가장자리에서 Shift+Tab"} × ${TAB_WALK_STEPS}`,
+      verdict: built && hidden.length === 0 ? "PASS" : "FAIL",
+      note: `${built ? "" : `장면을 못 만들었다(시작 ${start} · 줄 ${seqs.join(",")}) · `}초점 요소가 목록 밖이거나 줄이 안 보인 번 ${hidden.length} · 번마다 ${steps.map((step) => `${step.seq}:${step.action === "primary" ? "⋯" : (step.action ?? "줄")}${step.activeTop}/${step.activeBottom}·줄${step.rowShown}`).join(" ")}`,
+    });
+  }
+}
+
 async function timelineScenes(page, rows) {
   const list = { name: "타임라인", selector: TIMELINE, rowSelector: "[data-index]", park: 0.4 };
   const anchor = await page.locator(TIMELINE).evaluate((node) => getComputedStyle(node).getPropertyValue("overflow-anchor") || "(계산값 없음)");
@@ -1067,6 +1130,7 @@ async function timelineScenes(page, rows) {
   await justStoppedScene(page, list, rows, { dy: -WHEEL.dy, change: "grow", recordOnly: true });
   await jumpScenes(page, rows);
   await keyboardJumpScenes(page, rows);
+  await tabWalkScenes(page, rows);
 }
 
 async function runEngine(browser, engine) {
