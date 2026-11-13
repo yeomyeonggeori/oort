@@ -380,6 +380,7 @@ const CONTROL_PRIMITIVES = [
  */
 const CONTAINER_PRIMITIVES = [
   "card.tsx",
+  "confirm-dialog.tsx",
   "context-menu.tsx",
   "dialog.tsx",
   "dropdown-menu.tsx",

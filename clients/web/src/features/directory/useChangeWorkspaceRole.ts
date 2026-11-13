@@ -13,6 +13,8 @@ export interface ChangeWorkspaceRoleHandle {
   error: string | null;
   apply: (member: RosterMember, role: MembershipRole) => Promise<boolean>;
   retry: () => Promise<boolean>;
+  /** 지난 실패 문장을 지운다: 확인 단계를 새로 열거나 취소할 때 앞 시도의 오류가 남지 않게(#5780). */
+  clearError: () => void;
 }
 
 export function useChangeWorkspaceRole(): ChangeWorkspaceRoleHandle {
@@ -49,5 +51,7 @@ export function useChangeWorkspaceRole(): ChangeWorkspaceRoleHandle {
     return apply(lastAttempt.member, lastAttempt.role);
   }, [apply, lastAttempt]);
 
-  return { pending, error, apply, retry };
+  const clearError = useCallback(() => setError(null), []);
+
+  return { pending, error, apply, retry, clearError };
 }

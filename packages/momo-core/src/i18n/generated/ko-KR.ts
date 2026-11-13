@@ -1985,6 +1985,274 @@ export const catalog: MessageCatalog = {
       "value": "세션"
     }
   ],
+  "directory.manage.heading": [
+    {
+      "type": 0,
+      "value": "관리"
+    }
+  ],
+  "directory.manage.hint": [
+    {
+      "type": 0,
+      "value": "소유자·관리자에게만 보여요"
+    }
+  ],
+  "directory.profile.close": [
+    {
+      "type": 0,
+      "value": "프로필 닫기"
+    }
+  ],
+  "directory.profile.copied": [
+    {
+      "type": 0,
+      "value": "복사됨"
+    }
+  ],
+  "directory.profile.copyEmail": [
+    {
+      "type": 0,
+      "value": "이메일 복사"
+    }
+  ],
+  "directory.profile.copyFailed": [
+    {
+      "type": 0,
+      "value": "복사하지 못했어요. 다시 눌러 보세요."
+    }
+  ],
+  "directory.profile.copyMention": [
+    {
+      "type": 0,
+      "value": "멘션 복사"
+    }
+  ],
+  "directory.profile.description": [
+    {
+      "type": 0,
+      "value": "멤버 정보와 연락 방법, 역할을 확인해요."
+    }
+  ],
+  "directory.profile.dmInactive": [
+    {
+      "type": 1,
+      "value": "status"
+    },
+    {
+      "type": 0,
+      "value": " 상태에서는 다이렉트 메시지를 열 수 없습니다."
+    }
+  ],
+  "directory.profile.dmSelf": [
+    {
+      "type": 0,
+      "value": "내 프로필에서는 다이렉트 메시지를 열 수 없습니다."
+    }
+  ],
+  "directory.profile.emailLabel": [
+    {
+      "type": 0,
+      "value": "이메일"
+    }
+  ],
+  "directory.profile.emptyAction": [
+    {
+      "type": 0,
+      "value": "명부 다시 불러오기"
+    }
+  ],
+  "directory.profile.emptyDetail": [
+    {
+      "type": 0,
+      "value": "명부를 다시 불러온 뒤 프로필을 확인하세요."
+    }
+  ],
+  "directory.profile.emptyHeadline": [
+    {
+      "type": 0,
+      "value": "이 멤버를 명부에서 찾을 수 없습니다."
+    }
+  ],
+  "directory.profile.kindAgent": [
+    {
+      "type": 0,
+      "value": "에이전트"
+    }
+  ],
+  "directory.profile.loading": [
+    {
+      "type": 0,
+      "value": "멤버 프로필을 불러오는 중입니다."
+    }
+  ],
+  "directory.profile.message": [
+    {
+      "type": 0,
+      "value": "메시지 보내기"
+    }
+  ],
+  "directory.profile.messageBusy": [
+    {
+      "type": 0,
+      "value": "대화 여는 중"
+    }
+  ],
+  "directory.profile.offline": [
+    {
+      "type": 0,
+      "value": "연결 끊김, 마지막으로 받은 프로필입니다. 연결이 돌아오면 새 대화를 열 수 있습니다."
+    }
+  ],
+  "directory.profile.offlineMissing": [
+    {
+      "type": 0,
+      "value": "연결 끊김, 이 멤버의 마지막 프로필을 찾지 못했습니다."
+    }
+  ],
+  "directory.profile.ownerLabel": [
+    {
+      "type": 0,
+      "value": "책임자"
+    }
+  ],
+  "directory.profile.ownerLine": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " 님이 관리"
+    }
+  ],
+  "directory.profile.ownerUnknown": [
+    {
+      "type": 0,
+      "value": "관리자 정보 없음"
+    }
+  ],
+  "directory.profile.retry": [
+    {
+      "type": 0,
+      "value": "다시 시도"
+    }
+  ],
+  "directory.profile.routing": [
+    {
+      "type": 0,
+      "value": "라우팅 설정"
+    }
+  ],
+  "directory.profile.title": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " 프로필"
+    }
+  ],
+  "directory.profile.titleUnknown": [
+    {
+      "type": 0,
+      "value": "멤버 프로필"
+    }
+  ],
+  "directory.role.cancel": [
+    {
+      "type": 0,
+      "value": "취소"
+    }
+  ],
+  "directory.role.changed": [
+    {
+      "type": 0,
+      "value": "바뀜"
+    }
+  ],
+  "directory.role.confirmAction": [
+    {
+      "type": 0,
+      "value": "역할 바꾸기"
+    }
+  ],
+  "directory.role.confirmBusy": [
+    {
+      "type": 0,
+      "value": "바꾸는 중"
+    }
+  ],
+  "directory.role.confirmGrantAdmin": [
+    {
+      "type": 0,
+      "value": "관리자는 채널을 만들고 채널에 멤버를 넣고 뺄 수 있어요."
+    }
+  ],
+  "directory.role.confirmOwnerWarning": [
+    {
+      "type": 0,
+      "value": "되돌릴 수 없어요. 소유자끼리는 서로의 역할을 바꿀 수 없어서 다시 내릴 수 없어요."
+    }
+  ],
+  "directory.role.confirmPair": [
+    {
+      "type": 0,
+      "value": "지금 역할 "
+    },
+    {
+      "type": 1,
+      "value": "from"
+    },
+    {
+      "type": 0,
+      "value": ", 바꿀 역할 "
+    },
+    {
+      "type": 1,
+      "value": "to"
+    }
+  ],
+  "directory.role.confirmRevokeAdmin": [
+    {
+      "type": 0,
+      "value": "채널을 만들거나 채널에 멤버를 넣고 뺄 수 없게 돼요."
+    }
+  ],
+  "directory.role.confirmTitle": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " 님의 역할을 바꿀까요?"
+    }
+  ],
+  "directory.role.label": [
+    {
+      "type": 0,
+      "value": "역할"
+    }
+  ],
+  "directory.role.lockedAdminCeiling": [
+    {
+      "type": 0,
+      "value": "관리자는 관리자나 소유자의 역할을 바꿀 수 없어요."
+    }
+  ],
+  "directory.role.lockedOwnerPeer": [
+    {
+      "type": 0,
+      "value": "소유자끼리는 서로의 역할을 바꿀 수 없어요."
+    }
+  ],
+  "directory.role.placeholder": [
+    {
+      "type": 0,
+      "value": "역할 고르기"
+    }
+  ],
   "expressions.add.adminsOnly": [
     {
       "type": 0,

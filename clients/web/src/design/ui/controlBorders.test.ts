@@ -66,6 +66,8 @@ const ROLE: Record<string, "control" | "filled" | "container"> = {
   "card.tsx": "container",
   // 담는 것. 다이얼로그를 앞으로 세우는 것은 경계가 아니라 스크림과 고도다.
   "dialog.tsx": "container",
+  // 담는 것. 다이얼로그의 몸을 확인 문법으로 채운 판이고(#5780), 경계는 그 다이얼로그의 것이다.
+  "confirm-dialog.tsx": "container",
   // 담는 것. 떠 있는 판이고, 그 안의 항목은 호버/포커스 채움으로 자기를 말한다.
   "dropdown-menu.tsx": "container",
   // 같은 판을 우클릭 좌표에서 여는 프리미티브. 경계 역할도 dropdown과 같다.
