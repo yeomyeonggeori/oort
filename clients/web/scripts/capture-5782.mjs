@@ -16,6 +16,8 @@
 //   N. 좁은 폭(390)·200%(1440 창의 200% = 720 CSS px): 가로 넘침 0, 줄 높이 같음.
 //   Y. 갤러리 견본: ListRowSkeleton = ListRow 높이, 글자 크기 「크게」에서도 같다.
 //   D. 새 DM 창(같은 부품, 대화 상자 안이라 시트 채움 그릇): 줄 높이가 멤버 탭 줄과 같고, 그릇이 카드가 아니다.
+//   M. 많은 명부(사람 15)·낮은 창(1024×480): 묶음 그릇이 눌려 잘리지 않고(scrollHeight = clientHeight) 마지막 줄까지
+//      스크롤된다 — 멤버 탭과 새 DM 창 둘 다. 새 DM 창의 「대화 중」 표지·찾지 못함·390 폭도 여기서 찍는다.
 // =============================================================================
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
@@ -56,6 +58,9 @@ function rosterFor(viewerRole) {
   ];
 }
 const channels = [{ id: chId(1), workspaceId, kind: "public", name: "일반", muted: false }];
+// 많은 명부 장면의 가상 인물 열(이름은 이니셜 + 번호, 사람이 아님이 분명하게).
+const MANY = Array.from({ length: 10 }, (_, i) => person(String(30 + i), `시험 멤버 ${i + 1}`, `member${i + 1}`, { email: `member${i + 1}@example.com` }));
+const dmWithSeoyeon = { id: "00000000-0000-7000-8000-000000000301", workspaceId, kind: "dm", muted: false, memberIds: [ME, P("02")] };
 
 const results = [];
 function check(scene, name, ok, detail) {
@@ -70,7 +75,7 @@ async function attempt(scene, name, fn) {
   }
 }
 
-/** `mode`: ok | hold(명부를 붙잡아 두었다가 `release()`) | fail | alone(나 혼자). */
+/** `mode`: ok | hold(명부를 붙잡아 두었다가 `release()`) | fail | alone(나 혼자) | many(사람 15 + 이서연과의 DM). */
 async function installMocks(context, { viewerRole, mode }) {
   let release;
   const held = new Promise((done) => { release = done; });
@@ -90,12 +95,12 @@ async function installMocks(context, { viewerRole, mode }) {
       return json(route, { read_states: channels.map((c) => ({ channel_id: c.id, last_read_seq: 2, latest_seq: 2, unread_count: 0, mention_count: 0, marked_unread_before_seq: null })) });
     }
     if (path.endsWith("/members/me/sidebar-prefs")) return json(route, { prefs: { version: 1, sections: [], starredChannelIds: [] } });
-    if (path.endsWith("/channels")) return json(route, { channels });
+    if (path.endsWith("/channels")) return json(route, { channels: mode === "many" ? [...channels, dmWithSeoyeon] : channels });
     if (path.endsWith("/roster")) {
       if (mode === "fail") return json(route, { error: "unavailable" }, 503);
       if (mode === "hold") await held;
       const roster = rosterFor(viewerRole);
-      return json(route, { members: mode === "alone" ? roster.slice(0, 1) : roster });
+      return json(route, { members: mode === "alone" ? roster.slice(0, 1) : mode === "many" ? [...roster, ...MANY] : roster });
     }
     if (path.endsWith("/huddles/active")) return json(route, { huddle: null });
     if (path.endsWith(`/workspaces/${workspaceId}`)) return json(route, { workspace: { id: workspaceId, name: "달무리 스튜디오" } });
@@ -344,6 +349,70 @@ async function runNewDm(origin, scheme) {
   }
 }
 
+/** 묶음 그릇마다 눌려 잘렸는가: 안의 높이(scrollHeight)와 보이는 높이(clientHeight)가 같아야 한다. */
+async function surfacesUnclipped(page, root) {
+  return page.evaluate((sel) => [...document.querySelectorAll(`${sel} [data-list-surface]`)].map((el) => ({ surface: el.getAttribute("data-list-surface"), scroll: el.scrollHeight, client: el.clientHeight })), root);
+}
+
+async function lastRowReachable(page, listSel, rowSel) {
+  return page.evaluate(async ({ listSel, rowSel }) => {
+    const list = document.querySelector(listSel);
+    const rows = list.querySelectorAll(rowSel);
+    const last = rows[rows.length - 1];
+    list.scrollTop = list.scrollHeight;
+    await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+    const lr = list.getBoundingClientRect();
+    const r = last.getBoundingClientRect();
+    return { rows: rows.length, scrolls: list.scrollHeight > list.clientHeight, inside: r.top >= lr.top - 0.5 && r.bottom <= lr.bottom + 0.5, h: Math.round(r.height * 10) / 10 };
+  }, { listSel, rowSel });
+}
+
+async function runMany(origin, scheme) {
+  const scene = `many-${scheme}`;
+  const { browser, context, page } = await open(origin, scheme, { width: 1024, height: 480 }, { mode: "many" });
+  try {
+    await attempt(scene, "M.directory", async () => {
+      await goDirectory(page);
+      await page.getByTestId("directory-row").first().waitFor({ timeout: 10_000 });
+      await page.waitForTimeout(300);
+      const surfaces = await surfacesUnclipped(page, '[data-testid="directory-list"]');
+      check(scene, "M1 멤버 탭: 묶음 그릇이 눌려 잘리지 않는다(사람 15 · 낮은 창)", surfaces.length === 2 && surfaces.every((x) => x.surface === "pane" && x.scroll === x.client), surfaces);
+      const reach = await lastRowReachable(page, '[data-testid="directory-list"]', '[data-testid="directory-row"]');
+      check(scene, "M2 멤버 탭: 목록이 스크롤되고 마지막 줄(56)이 목록 안에 온전히 선다", reach.rows === 17 && reach.scrolls && reach.inside && reach.h === 56, reach);
+      await shot(page, `directory-many-bottom-${scheme}.png`);
+    });
+    await attempt(scene, "M.newdm", async () => {
+      await page.getByTestId("sidebar-section-dms-header").hover();
+      await page.getByTestId("new-dm").click();
+      await page.getByTestId("new-dm-row").first().waitFor({ timeout: 10_000 });
+      await page.waitForTimeout(300);
+      const surfaces = await surfacesUnclipped(page, '[data-testid="new-dm-list"]');
+      check(scene, "M3 새 DM 창: 시트 그릇이 눌려 잘리지 않는다", surfaces.length === 2 && surfaces.every((x) => x.surface === "sheet" && x.scroll === x.client), surfaces);
+      const hasDm = await page.locator('[data-testid="new-dm-row"][data-has-dm] [data-testid="new-dm-has-dm"]').count();
+      check(scene, "M4 새 DM 창: 이미 대화 중인 사람에게 「대화 중」 표지(끝 칸)", hasDm === 1, hasDm);
+      await shot(page, `newdm-many-top-${scheme}.png`);
+      const reach = await lastRowReachable(page, '[data-testid="new-dm-list"]', '[data-testid="new-dm-row"]');
+      check(scene, "M5 새 DM 창: 마지막 줄까지 스크롤되고 온전히 선다", reach.scrolls && reach.inside && reach.h === 56, reach);
+      await page.getByTestId("new-dm-search").fill("zzzz");
+      await page.getByTestId("new-dm-no-match").waitFor({ timeout: 5_000 });
+      check(scene, "M6 새 DM 창: 찾지 못함", true, null);
+      await shot(page, `newdm-no-match-${scheme}.png`);
+      await page.getByTestId("new-dm-search").fill("");
+      await page.setViewportSize({ width: 390, height: 844 });
+      await page.waitForTimeout(400);
+      const over = await page.evaluate(() => {
+        const list = document.querySelector('[data-testid="new-dm-list"]');
+        return { list: list.scrollWidth - list.clientWidth, doc: document.documentElement.scrollWidth - document.documentElement.clientWidth };
+      });
+      check(scene, "M7 새 DM 창 390 폭: 가로 넘침 0", over.list <= 0 && over.doc <= 0, over);
+      await shot(page, `newdm-narrow-${scheme}.png`);
+    });
+  } finally {
+    await context.close();
+    await browser.close();
+  }
+}
+
 async function runGallery(origin, scheme) {
   const scene = `gallery-${scheme}`;
   const browser = await chromium.launch();
@@ -386,6 +455,7 @@ async function main() {
       await runGuest(preview.origin, scheme);
       await runStates(preview.origin, scheme);
       await runNewDm(preview.origin, scheme);
+      await runMany(preview.origin, scheme);
       await runGallery(preview.origin, scheme);
     }
   } finally {
