@@ -834,6 +834,18 @@ async function qa8Scenes(browser, origin) {
         await page.getByTestId("accent-swatch-gamram").hover();
         await page.waitForTimeout(900);
         row.tipLast = await tipInside(page);
+        if (row.disabled.length > 0) {
+          // 흐린(쓸 수 없는) 칩도 가리키면 이름을 띄운다: 이유 줄의 이름과 칩을 잇는 길이다.
+          const off = row.disabled[row.disabled.length - 1];
+          await page.mouse.move(0, 0);
+          await page.waitForTimeout(400);
+          await page.getByTestId(`accent-swatch-${off}`).hover();
+          await page.waitForTimeout(900);
+          row.tipDisabled = { id: off, ...(await tipInside(page)) };
+          const want = row.chipNames[row.chipNames.length === 5 ? ["dawn", "seongun", "hongyeom", "hyeseong", "gamram"].indexOf(off) : 0];
+          if (row.tipDisabled.text !== want || !row.tipDisabled.inside) fails0.push(`흐린 칩 툴팁 ${JSON.stringify(row.tipDisabled)} ≠ ${want}`);
+          await shoot(page, `qa8-${c.mode}-${viewport.name}-tip-disabled`, where);
+        }
         if (row.tipLast.text !== row.chipNames[4]) fails0.push(`끝 칩 툴팁 글자 ${row.tipLast.text} ≠ ${row.chipNames[4]}`);
         await shoot(page, `qa8-${c.mode}-${viewport.name}-tip-last`, where);
         rows.push(row);
