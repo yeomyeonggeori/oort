@@ -8,6 +8,7 @@ import {
   type FocusEvent,
   type KeyboardEvent,
   type MouseEvent,
+  type MutableRefObject,
   type RefObject,
 } from "react";
 import { ListChecks, SquareTerminal } from "lucide-react";
@@ -371,6 +372,8 @@ export function WorkJobsRoute() {
   // 스크롤한 목록에서 줄이 구간을 옮겨도 보던 줄이 밀리지 않게 한다. 데스크탑 셸(WebKit)은 브라우저의 스크롤 고정(overflow-anchor)이
   // 없어 직접 맞춘다: 보이는 줄 가운데 구간이 그대로인 첫 줄을 제자리에 둔다. 맨 위(scrollTop 0)에서는 맞추지 않는다 — 새로 선
   // 「응답 필요」가 보여야 한다. 움직임은 없다(scrollTop을 한 번에 고친다).
+  /** 이 화면의 줄 고정이 목록 scrollTop을 바꾼 양(둘째 겹이 사람의 굴림에서 뺀다). */
+  const selfScrollRef = useRef(0);
   const anchorsRef = useRef<RowAnchor[]>([]);
   const readAnchors = useCallback(() => {
     anchorsRef.current = visibleRowAnchors(listRef.current);
@@ -395,7 +398,11 @@ export function WorkJobsRoute() {
         const el = rowRefs.current.get(anchor.key);
         if (!el) continue;
         const delta = el.getBoundingClientRect().top - top - anchor.offset;
-        if (delta !== 0) list.scrollTop += delta;
+        if (delta !== 0) {
+          const before = list.scrollTop;
+          list.scrollTop += delta;
+          selfScrollRef.current += list.scrollTop - before;
+        }
         break;
       }
     }
@@ -423,7 +430,7 @@ export function WorkJobsRoute() {
     row.scrollIntoView?.({ block: "nearest" });
   });
   // 둘째 겹: 스크롤 고정·자리 되찾기가 자리를 맞춘 **뒤에** 결정 단추의 자리를 잰다(그래서 이 호출이 위 두 효과 다음이다).
-  const arrival = useArrivalGuard(listRef, scope);
+  const arrival = useArrivalGuard(listRef, scope, selfScrollRef);
   const rovingKey =
     activeKey !== null && orderedKeys.includes(activeKey) ? activeKey : (orderedKeys[0] ?? null);
 
@@ -834,10 +841,20 @@ interface ScrollSpot {
   listLeft: number;
   winX: number;
   winY: number;
+  /** 굴릴 수 있는 끝(scrollHeight - clientHeight): 목록 · 창. 내용이 줄면 브라우저가 scrollTop·scrollY를 끝에 맞춰 스스로 줄인다. */
+  listMax: number;
+  winMax: number;
 }
 
 function scrollSpotOf(list: HTMLElement | null): ScrollSpot {
-  return { listTop: list?.scrollTop ?? 0, listLeft: list?.scrollLeft ?? 0, winX: window.scrollX, winY: window.scrollY };
+  return {
+    listTop: list?.scrollTop ?? 0,
+    listLeft: list?.scrollLeft ?? 0,
+    winX: window.scrollX,
+    winY: window.scrollY,
+    listMax: list === null ? 0 : Math.max(0, list.scrollHeight - list.clientHeight),
+    winMax: Math.max(0, document.documentElement.scrollHeight - window.innerHeight),
+  };
 }
 
 function sameScroll(a: ScrollSpot, b: ScrollSpot): boolean {
@@ -859,7 +876,8 @@ function controlKey(control: Element): { key: string; row: string } | null {
  *
  * 재는 때: 이 화면이 그릴 때마다(스크롤 고정 뒤), 그리고 이 화면 밖의 변화 — 문서의 DOM이 바뀌거나(셸의 띠가 서고 걷힘) 목록 상자의 크기·
  * 창 크기가 바뀌면 — 다음 프레임에. 새로 선 단추와 1px 넘게 옮겨진 단추는 그때부터 막힌다(이어서 움직이면 움직일 때마다 다시).
- * 사람이 목록·창을 굴린 것(`scroll` 사건)은 자리만 새로 적고 막지 않는다 — 굴림 사건은 같은 프레임의 다른 재기보다 먼저 온다.
+ * 재기마다 사람이 굴린 양(scrollTop·scrollY 차에서 스스로 바뀐 양 — 끝이 줄어 줄어든 것 · 줄 고정이 바꾼 것 — 을 뺀 것)을 빼고 보므로, 굴려서
+ * 옮긴 단추는 막지 않고 그 위에 겹친 밖의 변화만 막는다.
  * 「작업」에 들어온 뒤·「내 작업/팀 전체」를 갈아탄 뒤 처음 잰 단추는 막지 않는다(앞 판과 같이 그 뒤에 늦게 선 단추 — 원장이 늦게 와 선
  * 칸 — 는 막는다). 그려지지 않은 단추(0×0)는 화면에 없으니 세지 않는다.
  *
@@ -867,7 +885,7 @@ function controlKey(control: Element): { key: string; row: string } | null {
  * 굴리지 않았는데 그 단추의 자리가 바뀌었으면(아직 재지 못한 밖의 변화) 누르는 순간에 재어 막는다. 막힌 누름은 삼키고(결정 0), 막힘이
  * 풀린 뒤의 누름은 그대로 간다 — 그 뒤로는 사람이 새 자리를 본 것이다.
  */
-function useArrivalGuard(listRef: RefObject<HTMLDivElement | null>, scope: string) {
+function useArrivalGuard(listRef: RefObject<HTMLDivElement | null>, scope: string, selfScrollRef: MutableRefObject<number>) {
   const spotsRef = useRef(new Map<string, ControlSpot>());
   /** null이면 다음 재기가 바탕이다(막지 않음): 처음 그릴 때, 필터를 갈아탔을 때. */
   const scrollRef = useRef<ScrollSpot | null>(null);
@@ -902,8 +920,12 @@ function useArrivalGuard(listRef: RefObject<HTMLDivElement | null>, scope: strin
       const before = spotsRef.current;
       const prev = scrollRef.current;
       const cur = scrollSpotOf(list);
-      // 굴림이 옮긴 만큼(목록 scrollTop·창 scrollY 차)은 사람의 것, 그보다 더 옮겨진 만큼은 밖의 변화다.
-      const dy = prev === null ? 0 : cur.listTop - prev.listTop + (cur.winY - prev.winY);
+      // 굴림이 옮긴 만큼(목록 scrollTop·창 scrollY 차)은 사람의 것, 그보다 더 옮겨진 만큼은 밖의 변화다. 스스로 바뀐 굴림 양은 사람의 것에서
+      // 한곳에서 뺀다: ① 굴릴 수 있는 끝이 줄어 브라우저가 scrollTop·scrollY를 줄인 만큼(목록 · 창), ② 이 화면의 줄 고정이 바꾼 만큼.
+      const selfPin = selfScrollRef.current;
+      selfScrollRef.current = 0;
+      const clampY = prev === null ? 0 : Math.max(0, prev.listTop - cur.listMax) + Math.max(0, prev.winY - cur.winMax);
+      const dy = prev === null ? 0 : cur.listTop - prev.listTop + (cur.winY - prev.winY) + clampY - selfPin;
       const dx = prev === null ? 0 : cur.listLeft - prev.listLeft + (cur.winX - prev.winX);
       const next = new Map<string, ControlSpot>();
       for (const control of list?.querySelectorAll(DECISION_CONTROL) ?? []) {
@@ -921,7 +943,7 @@ function useArrivalGuard(listRef: RefObject<HTMLDivElement | null>, scope: strin
       scrollRef.current = cur;
       publishRef.current();
     },
-    [listRef]
+    [listRef, selfScrollRef]
   );
 
   // 이 화면이 그릴 때마다(필터를 갈아탔으면 그 첫 그림은 바탕).
@@ -963,18 +985,16 @@ function useArrivalGuard(listRef: RefObject<HTMLDivElement | null>, scope: strin
     };
   }, [listRef, measure]);
 
-  const pressRef = useRef<{ key: string; guarded: boolean } | null>(null);
+  const pressRef = useRef<{ key: string | null; guarded: boolean; atMs: number } | null>(null);
   const onPointerDownCapture = useCallback(
     (event: { target: EventTarget | null }) => {
       const control = event.target instanceof Element ? event.target.closest(DECISION_CONTROL) : null;
-      if (control === null) {
-        pressRef.current = null;
-        return;
-      }
       measure();
-      const id = controlKey(control);
+      // 단추가 아닌 데서 시작한 누름도 시작 시각을 적는다: 손가락의 click은 뗀 자리에 떨어지니, 누르는 동안 손 밑으로 온 단추를 가려낸다.
+      const atMs = performance.now();
+      const id = control === null ? null : controlKey(control);
       const spot = id === null ? undefined : spotsRef.current.get(id.key);
-      pressRef.current = id === null ? null : { key: id.key, guarded: spot !== undefined && performance.now() - spot.atMs < ARRIVAL_GUARD_MS };
+      pressRef.current = { key: id?.key ?? null, guarded: spot !== undefined && atMs - spot.atMs < ARRIVAL_GUARD_MS, atMs };
     },
     [listRef, measure]
   );
@@ -990,7 +1010,8 @@ function useArrivalGuard(listRef: RefObject<HTMLDivElement | null>, scope: strin
       const id = controlKey(control);
       const spot = id === null ? undefined : spotsRef.current.get(id.key);
       // 누름의 시작과 끝 둘 다에서 본다: 막힌 동안 시작한 누름(풀린 뒤 떼도)과, 누르는 동안 줄이 옮겨져 다른 단추 위에서 뗀 누름도 삼킨다.
-      const pressed = press !== null && id !== null && (press.key !== id.key || press.guarded);
+      // 누르는 동안 그 자리에 선(손 밑으로 온) 단추는 누른 것이 아니다 — 1초 창과 무관하게 삼킨다.
+      const pressed = press !== null && id !== null && ((press.key !== null && press.key !== id.key) || press.guarded || (spot !== undefined && spot.atMs >= press.atMs));
       if ((spot !== undefined && performance.now() - spot.atMs < ARRIVAL_GUARD_MS) || pressed) {
         event.preventDefault();
         event.stopPropagation();
@@ -1119,9 +1140,8 @@ function JobRow({
         // 안에서만 한 단계 진한 `--surface-pressed`로 가리킨다(#5640 수리 3회차, 검수 질문 ② (a)). 공용 단추 변형은 그대로다.
         selected && "[&>[data-testid=work-job-extras]_.bg-surface-muted:hover]:bg-surface-pressed",
         "has-[>button:active]:bg-surface-pressed has-[>button:focus-visible]:focus-ring",
-        // 막힌 동안 결정 단추는 둘 다 채움을 버리고 옅은 글자로 선다(승인은 검은 채움 → 없음, 거부는 옅은 채움 → 없음 — 「거부」도 보통 모양과
-        // 구별된다). 자리·크기는 그대로다(채움만 걷고 글자는 그대로 보인다 — 투명도를 쓰지 않는다).
-        "data-arrival-guard:[&_[data-decision]]:cursor-not-allowed data-arrival-guard:[&_[data-decision]]:bg-transparent data-arrival-guard:[&_[data-decision]]:text-ink-muted"
+        // 막힌 동안 결정 단추는 알약 모양(채움·테두리)을 그대로 두고 흐리게만 선다(공용 `Button`의 disabled와 같은 `opacity-50`). 자리·크기는 그대로다.
+        "data-arrival-guard:[&_[data-decision]]:cursor-not-allowed data-arrival-guard:[&_[data-decision]]:opacity-50"
       )}
       data-testid="work-job"
       data-selected={selected ? "" : undefined}

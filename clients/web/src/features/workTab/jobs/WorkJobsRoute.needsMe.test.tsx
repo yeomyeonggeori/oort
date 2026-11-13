@@ -1168,6 +1168,67 @@ describe("「응답 필요」의 칸은 화면에 떠 있는 동안 자리를 �
     await sleepMs(50);
     expect(decidedIds()).toEqual([]);
   });
+
+  it("단추가 아닌 곳에서 시작한 누름도 시작 시각을 적는다 — 누르는 동안 손 밑으로 온 단추는 1초가 지난 뒤 떼도 삼킨다 (수리 3회차 H2)", async () => {
+    const at = { y: 0 };
+    placeControls(at);
+    board(new Set(), { mine: twoRuns });
+    serveDecisions(20);
+    render(mount());
+    await waitFor(() => expect(rowsIn("needsMe")).toEqual([R(1), R(8)]), { timeout: 3000 });
+    await sleepMs(GUARD_PASSED_MS);
+    const open = [0, 1].find((n) => needsMeSlot(n).querySelector("[data-decision]") !== null)!;
+    // 손가락을 단추가 아닌 곳(줄)에 대고 있는 동안 띠가 서서 단추가 손 밑으로 옮겨 온다. 1초 넘게 붙들었다 떼면 click이 그 단추에 떨어진다.
+    fireEvent.pointerDown(needsMeSlot(open));
+    at.y = 45;
+    const band = document.createElement("div");
+    act(() => {
+      document.body.prepend(band);
+    });
+    await sleepMs(GUARD_PASSED_MS);
+    expect(guardedLook(open)).toBe(false);
+    fireEvent.click(within(needsMeSlot(open)).getByTestId("work-job-approval-reject"), { detail: 1 });
+    await sleepMs(80);
+    expect(decidedIds()).toEqual([]);
+    // 새로 시작한 누름은 받는다.
+    pressSlot(open, "reject");
+    await waitFor(() => expect(decidedIds().length).toBe(1), { timeout: 3000 });
+    band.remove();
+  });
+
+  it("목록을 끝까지 내린 채 내용이 줄어 브라우저가 scrollTop을 스스로 줄인 만큼은 사람의 굴림이 아니다 — 내려온 단추는 막는다 (수리 3회차 H1)", async () => {
+    const at = { y: 0 };
+    placeControls(at);
+    board(new Set(), { mine: twoRuns });
+    serveDecisions(20);
+    render(mount());
+    await waitFor(() => expect(rowsIn("needsMe")).toEqual([R(1), R(8)]), { timeout: 3000 });
+    await sleepMs(GUARD_PASSED_MS);
+    const list = screen.getByRole("region", { name: WORK_JOBS_COPY.listLabel });
+    let scrollHeight = 1541;
+    Object.defineProperty(list, "scrollHeight", { configurable: true, get: () => scrollHeight });
+    Object.defineProperty(list, "clientHeight", { configurable: true, get: () => 1395 });
+    // 끝까지 내렸다(사람의 굴림 146px — 단추는 -146): 막지 않고 자리만 새로 적는다.
+    list.scrollTop = 146;
+    at.y = -146;
+    fireEvent.scroll(list);
+    const open = [0, 1].find((n) => needsMeSlot(n).querySelector("[data-decision]") !== null)!;
+    expect(guardedLook(open)).toBe(false);
+    // 아래쪽 줄이 빠져 내용이 55px 줄었다: 브라우저가 scrollTop을 끝(91)에 맞춰 스스로 줄이니 단추는 화면에서 +55px 내려온다. 사람이 굴린 것이 아니다.
+    scrollHeight = 1486;
+    list.scrollTop = 91;
+    at.y = -91;
+    const band = document.createElement("div");
+    act(() => {
+      document.body.prepend(band);
+    });
+    await sleepMs(60);
+    expect(guardedLook(open)).toBe(true);
+    pressSlot(open, "reject");
+    await sleepMs(50);
+    expect(decidedIds()).toEqual([]);
+    band.remove();
+  });
 });
 
 describe("상태 칩·서랍의 낱말 (#5640 수리 3회차 H2·질문 ③)", () => {
