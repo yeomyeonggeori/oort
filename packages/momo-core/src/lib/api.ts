@@ -4099,6 +4099,71 @@ export async function changeWorkspaceMemberRole(
   );
 }
 
+// ---- 워크스페이스 멤버 정지·정지 풀기·내보내기 (#5781 / ADR-0128 D2·D3) --------
+// POST   /v1/workspaces/{ws}/members/{member}/suspend
+// POST   /v1/workspaces/{ws}/members/{member}/reinstate
+// DELETE /v1/workspaces/{ws}/members/{member}   { ban, reason }
+//
+// 서열(자기보다 낮은 역할만 · 자기 자신 불가 · 마지막 소유자 보호)과 상태(정지는 활성만, 풀기는 정지된 멤버만)는
+// 서버가 판정한다. 이 클라이언트는 요청을 보내고 서버가 말한 새 상태를 돌려줄 뿐이다. 차단(`ban`)은 이 화면의 범위가
+// 아니라 늘 `false` 로 보낸다(차단 목록 화면은 따로).
+
+/** `MembershipLifecycleResponse`(`memberId`, `status`). `status` 는 서버가 적은 새 멤버 상태다. */
+export interface WorkspaceMemberLifecycle {
+  memberId: string;
+  status: RosterMember["status"];
+}
+
+export function workspaceMemberLifecycleFromWire(value: unknown): WorkspaceMemberLifecycle {
+  const source = responseRecord(value);
+  const memberId = str(source, "memberId");
+  const status = str(source, "status");
+  if (
+    memberId === undefined ||
+    (status !== "active" && status !== "invited" && status !== "suspended" && status !== "deleted")
+  ) {
+    throw new WireShapeError();
+  }
+  return { memberId: memberId.toLowerCase(), status };
+}
+
+function memberLifecyclePath(workspaceId: string, memberId: string): string {
+  return `/v1/workspaces/${encodeURIComponent(workspaceId)}/members/${encodeURIComponent(memberId)}`;
+}
+
+/** 멤버를 정지한다. 서버가 그 멤버의 모든 세션·푸시 등록을 끝낸다. 활성이 아니면 409. */
+export async function suspendWorkspaceMember(
+  workspaceId: string,
+  memberId: string
+): Promise<WorkspaceMemberLifecycle> {
+  return workspaceMemberLifecycleFromWire(
+    await request<unknown>(`${memberLifecyclePath(workspaceId, memberId)}/suspend`, { method: "POST" })
+  );
+}
+
+/** 정지를 푼다. 끝난 세션은 되살아나지 않는다(다시 로그인). 정지된 멤버가 아니면 409. */
+export async function reinstateWorkspaceMember(
+  workspaceId: string,
+  memberId: string
+): Promise<WorkspaceMemberLifecycle> {
+  return workspaceMemberLifecycleFromWire(
+    await request<unknown>(`${memberLifecyclePath(workspaceId, memberId)}/reinstate`, { method: "POST" })
+  );
+}
+
+/** 워크스페이스에서 내보낸다(모든 채널·DM 에서 빠지고 세션이 끝난다). 차단은 하지 않는다. */
+export async function removeWorkspaceMember(
+  workspaceId: string,
+  memberId: string
+): Promise<WorkspaceMemberLifecycle> {
+  return workspaceMemberLifecycleFromWire(
+    await request<unknown>(memberLifecyclePath(workspaceId, memberId), {
+      method: "DELETE",
+      body: JSON.stringify({ ban: false }),
+    })
+  );
+}
+
 // ---- 관리자 재설정 링크 발급 (ADR-0215 D6, #4603) ----------------------------
 // POST /v1/workspaces/{ws}/members/{member}/password-reset  { currentPassword }
 //

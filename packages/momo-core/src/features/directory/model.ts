@@ -122,6 +122,104 @@ export function canChangeWorkspaceRole(
   return assignableWorkspaceRoles(viewerRole, viewerMemberId, target).length > 0;
 }
 
+const ROLE_RANK: Readonly<Record<RoleKey, number>> = { owner: 0, admin: 1, member: 2, guest: 3 };
+
+/**
+ * 멤버를 정지하거나 워크스페이스에서 내보낼 수 있는 대상인가 (#5781). `canChangeWorkspaceRole` 과 같은 모양의 서버
+ * 사다리 **UX 거울**이고 권위는 서버다: `membership_lifecycle.rs` 의 `require_can_manage`(자기 자신 금지 →
+ * `can_suspend` && `can_remove`)와 `workspace_authorization.rs` 의 서열표가 같은 문장을 판정한다.
+ *
+ * - 보는 사람은 소유자나 관리자이고, 대상은 **사람**이고, 자기 자신이 아니다.
+ * - 대상의 역할이 보는 사람보다 **엄격히 낮다**: 소유자 → 관리자·멤버·게스트, 관리자 → 멤버·게스트. 소유자끼리·관리자끼리는 안 된다.
+ * - 마지막 소유자 보호(409)는 이 거울에서 저절로 지켜진다: 소유자는 누구의 대상도 되지 않는다.
+ * - 역할을 모르는 대상은 열지 않는다(모름이 열림이 되지 않게). 되돌리기 어려운 일이라 역할 고르개보다 좁다.
+ *
+ * 에이전트는 서버가 막지 않지만(`kind` 를 보지 않는다) 여기서 열지 않는다: 에이전트를 끄고 거두는 길은 에이전트 관리에
+ * 따로 있고(#5781 인계), 프로필의 관리 묶음 자체가 사람에게만 선다(`canSeeMemberManagement`).
+ */
+export function canManageWorkspaceMembership(
+  viewerRole: MembershipRole | undefined,
+  viewerMemberId: string,
+  target: Pick<RosterMember, "id" | "kind" | "role">
+): boolean {
+  if (viewerRole !== "owner" && viewerRole !== "admin") return false;
+  if (target.kind !== "human") return false;
+  if (uuidEq(viewerMemberId, target.id)) return false;
+  if (target.role === undefined) return false;
+  return ROLE_RANK[target.role] > ROLE_RANK[viewerRole];
+}
+
+/** 정지 줄이 무엇을 하는가: 활성이면 정지, 정지된 멤버면 정지 풀기(서버 `StatusTransition` 의 기대 상태와 같다). */
+export type SuspensionAction = "suspend" | "reinstate";
+
+/**
+ * 프로필 관리 묶음의 정지 줄 (#5781). 서열은 `canManageWorkspaceMembership`, 상태는 서버의 기대 상태(정지 = 활성만,
+ * 풀기 = 정지된 멤버만, 그 밖은 409)를 따른다. 초대 대기·삭제된 멤버에게는 줄이 없다.
+ */
+export function suspensionAction(
+  viewerRole: MembershipRole | undefined,
+  viewerMemberId: string,
+  target: Pick<RosterMember, "id" | "kind" | "role" | "status">
+): SuspensionAction | null {
+  if (!canManageWorkspaceMembership(viewerRole, viewerMemberId, target)) return null;
+  if (target.status === "active") return "suspend";
+  if (target.status === "suspended") return "reinstate";
+  return null;
+}
+
+/**
+ * 「워크스페이스에서 내보내기」 줄 (#5781). 서버는 내보내기에 상태 조건을 두지 않지만(초대 대기도 지워진다) 이 줄은
+ * 활성·정지된 멤버에게만 선다: 확인 문장이 말하는 일(채널·DM 에서 빠지고 로그아웃)이 그 둘의 일이다.
+ */
+export function canRemoveWorkspaceMember(
+  viewerRole: MembershipRole | undefined,
+  viewerMemberId: string,
+  target: Pick<RosterMember, "id" | "kind" | "role" | "status">
+): boolean {
+  if (!canManageWorkspaceMembership(viewerRole, viewerMemberId, target)) return false;
+  return target.status === "active" || target.status === "suspended";
+}
+
+/** 정지·풀기·내보내기 중 하나. */
+export type MemberLifecycleAction = SuspensionAction | "remove";
+
+/**
+ * 정지·풀기·내보내기가 거절된 까닭의 **종류** (#5781). 문장은 사전이 진다(`directory.lifecycle.error*`) — 여기는
+ * 서버의 상태 코드와 문장(`MembershipLifecycleError::as_swift_message`)을 종류로만 접는다.
+ *
+ * 이 길의 409 는 대개 「그사이 상태가 바뀌었다」다(다른 운영자가 먼저 정지했거나 풀었다). 마지막 소유자 409 는 거울이
+ * 소유자에게 줄을 세우지 않으므로 오래된 명부에서만 닿는다. 그래서 역할 바꾸기처럼 「409 = 마지막 소유자」로 접지 않고
+ * 서버 문장으로 가른다.
+ */
+export type MemberLifecycleFailure =
+  | "notActive"
+  | "notSuspended"
+  | "lastOwner"
+  | "rank"
+  | "self"
+  | "forbidden"
+  | "notFound"
+  | "rateLimited"
+  | "network"
+  | "unknown";
+
+export function memberLifecycleFailure(error: unknown): MemberLifecycleFailure {
+  if (error instanceof ApiError) {
+    const wire = error.message;
+    if (wire.includes("must retain at least one owner")) return "lastOwner";
+    if (wire.includes("status must be suspended")) return "notSuspended";
+    if (wire.includes("status must be active")) return "notActive";
+    if (wire.includes("cannot manage themselves")) return "self";
+    if (wire.includes("equal or higher")) return "rank";
+    if (error.status === 404) return "notFound";
+    if (error.status === 403) return "forbidden";
+    if (error.status === 429) return "rateLimited";
+    return "unknown";
+  }
+  if (error instanceof NetworkError) return "network";
+  return "unknown";
+}
+
 /**
  * 프로필의 「관리」 묶음을 그릴지 (#5780): 보는 사람이 소유자·관리자이고 대상이 자기 아닌 사람이면. 묶음 안에서
  * 역할 줄은 고르개(줄 수 있는 역할이 있을 때) 또는 글 + 잠긴 이유(`workspaceRoleLock`)이고, 비밀번호 줄은
