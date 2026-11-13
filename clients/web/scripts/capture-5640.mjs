@@ -5,7 +5,7 @@
 //   npm run build && OUT_DIR=<dir> CAPTURE_PORT=<port> node scripts/capture-5640.mjs
 //   (`CAPTURE_ONLY=fix5712`: 마우스 뒤 손가락 · 줄 높이가 같은 세 줄 차례로 · 둘째 줄 누른 자리 다시 — 두 엔진. `CAPTURE_DIST=<폴더>`: 그 빌드를 띄움)
 //   (`CAPTURE_ONLY=fix5738` 또는 `fix5738:n1,rows,slow,still,move0,shots`: 칸이 자리를 지킴 — #5732 검수 N1·N2b·N2c·N7, 남이 일으킨 변화, 이동 0, 캡처)
-//   (`CAPTURE_ONLY=fix5738r2` 또는 `fix5738r2:below,band,conn,scroll,four,shots`: 둘째 겹 — 밖에서 온 변화로 선·옮겨진 단추는 잠깐 막힘, #5744 검수 H1·H2·M1)
+//   (`CAPTURE_ONLY=fix5738r2` 또는 `fix5738r2:below,band,conn,scroll,hold,wheelmix,four,shots`: 둘째 겹 — 밖에서 온 변화로 선·옮겨진 단추는 잠깐 막힘, #5744 검수 H1·H2·M1)
 //
 // 백엔드가 없다. `/v1/**`는 이 파일의 고정 응답이고, 보드는 #5639 계약을 흉내 낸다: `include=jobs`로 읽는 사람이 세션 주인일
 // 때만, 대기 요청이 있는 실행 중 맥 세션의 상태가 `waiting`이다. 승인 원장은 인박스 배지가 읽는 그 경로다. 사람·컴퓨터 이름은
@@ -1878,6 +1878,175 @@ async function scrollScene(browser, origin, engine) {
   console.log(`MEASURE r2-scroll-${engine}: ${summary.join(" | ")}`);
 }
 
+/** 검수 r2 탐침의 흉내 상자: 이 화면이 그리지 않는 높이 `h`의 상자를 목록 상자 바로 위에 세운다(다시 읽기 실패 띠가 서는 자리). */
+const installFakeBox = (page) =>
+  page.evaluate(() => {
+    window.__fakeBox = (h) => {
+      let b = document.getElementById("fake-box");
+      if (!b) {
+        b = document.createElement("div");
+        b.id = "fake-box";
+        b.style.flex = "none";
+        document.querySelector('[data-testid="work-jobs-route"] .team-board-layout').before(b);
+      }
+      b.style.height = `${h}px`;
+    };
+  });
+const listScrollTop = (page) => page.evaluate(() => document.querySelector("[data-team-board-list]")?.scrollTop ?? 0);
+
+/**
+ * 수리 2회차 High(검수 r2 H1, `e5`·`e8`·`e12` hold): 막힌 동안 누르기 시작해 1초 넘게 붙들었다가 풀린 뒤 떼면 손 밑에 온 다른 줄이 결정되던
+ * 것 — 판정을 click(누름의 끝)에서만 해서였다. 누름의 시작에서도 본다. 마우스·손가락(Chromium) × 흉내 상자·진짜 다시 읽기 실패 띠:
+ * 막힌 동안 시작 → 1.2초 붙듦 → 뗌 = 0건, 그 뒤 같은 자리 정상 누름 = 1건. 반대 순서(풀린 상태에서 시작 → 붙든 동안 밖의 변화 → 뗌)도 0건.
+ */
+async function holdScene(browser, origin, engine) {
+  const summary = [];
+  const open = async (vp, touch = false) => {
+    const ctx = await openContext(browser, origin, { scheme: "light", viewport: vp, waiting: [], touch, server: { twoDeciders: true, threeDeciders: true, decisionDelayMs: 60, roundTripMs: 60 } });
+    await threeReady(ctx.page);
+    await settle(ctx.page);
+    await sleep(1200);
+    await installFakeBox(ctx.page);
+    return ctx;
+  };
+  for (const input of engine === "chromium" ? ["mouse", "touch"] : ["mouse"]) {
+    const { context, page, state } = await open(input === "touch" ? { width: 390, height: 1500 } : { width: 1280, height: 900 }, input === "touch");
+    const H = input === "touch" ? 61 : 45;
+    const p = await decisionCenter(page, runApproval.runId, "reject");
+    const P = { x: p.x, y: p.y + H };
+    await page.mouse.move(P.x, P.y);
+    const u0 = await underPoint(page, P.x, P.y);
+    await page.evaluate((h) => window.__fakeBox(h), H);
+    await sleep(100);
+    const u1 = await underPoint(page, P.x, P.y);
+    const look = u1.job ? await guardLookOf(page, u1.job) : null;
+    if (input === "touch") {
+      const cdp = await context.newCDPSession(page);
+      await cdp.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [{ x: P.x, y: P.y, id: 1 }] });
+      await sleep(1100);
+      await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+    } else {
+      await page.mouse.down();
+      await sleep(GUARD_OVER_MS);
+      await page.mouse.up();
+    }
+    await sleep(500);
+    const held = state.decisions;
+    await sleep(GUARD_OVER_MS);
+    if (input === "touch") await (await touchTapper(context, page, engine))(P.x, P.y);
+    else await mousePress(page, P.x, P.y);
+    await sleep(600);
+    const ok = u1.decision !== null && u1.job !== u0.job && look === true && held === 0 && state.decisions === 1;
+    check(`r2-hold-${engine}-${input} 막힌 동안 누르기 시작 → 1.2초 붙듦 → 풀린 뒤 뗌 = 결정 0건 · 그 뒤 같은 자리 누름 = 1건`, ok, { u0: short(u0), u1: short(u1), look, held, after: state.decisions });
+    summary.push(`${input}/흉내: ${short(u0)}→${short(u1)} 붙든 뒤 뗌=${held} · 정상=${state.decisions}`);
+    await context.close();
+  }
+  {
+    // 진짜 다시 읽기 실패 띠: 점은 앞 창에서 격자로(띠가 서면 B 글자 자리에 A 결정 단추가 오는 점).
+    let pick = null;
+    {
+      const { context, page, state } = await open({ width: 1280, height: 900 });
+      const g0 = await sampleGrid(page);
+      await toggleBand(page, state, true);
+      await sleep(200);
+      const g1 = gridMap(await sampleGrid(page));
+      pick = g0.find(([x, y, job, d]) => {
+        const a = g1.get(`${x},${y}`);
+        return d === null && a && a[1] !== null && job === runApproval2.runId && a[0] === runApproval.runId;
+      }) ?? null;
+      await context.close();
+    }
+    if (pick === null) check(`r2-hold-${engine}-band 장면 성립`, false, {});
+    else {
+      const { context, page, state } = await open({ width: 1280, height: 900 });
+      await page.mouse.move(pick[0], pick[1]);
+      await toggleBand(page, state, true);
+      await sleep(100);
+      const u1 = await underPoint(page, pick[0], pick[1]);
+      await page.mouse.down();
+      await sleep(GUARD_OVER_MS);
+      await page.mouse.up();
+      await sleep(600);
+      check(`r2-hold-${engine}-band 진짜 다시 읽기 실패 띠 + 막힌 동안 누르기 시작 → 1.2초 뒤 뗌 = 0건`, u1.decision !== null && state.decisions === 0, { u1: short(u1), decisions: state.decisions });
+      summary.push(`띠: ${short(u1)} 붙든 뒤 뗌=${state.decisions}`);
+      await context.close();
+    }
+  }
+  {
+    // 반대 순서: 풀린 상태에서 누르기 시작 → 붙든 동안 밖의 변화로 옮겨짐 → 뗌.
+    const { context, page, state } = await open({ width: 1280, height: 900 });
+    const p = await decisionCenter(page, runApproval.runId, "reject");
+    const P = { x: p.x, y: p.y + 45 };
+    await page.mouse.move(P.x, P.y);
+    await page.mouse.down();
+    await page.evaluate(() => window.__fakeBox(45));
+    await sleep(200);
+    await page.mouse.up();
+    await sleep(600);
+    check(`r2-hold-${engine}-reverse 풀린 상태에서 누르기 시작 → 붙든 동안 옮겨짐 → 뗌 = 다른 줄 결정 0건`, state.decisions === 0, { decisions: state.decisions });
+    summary.push(`반대 순서 뗌=${state.decisions}`);
+    await context.close();
+  }
+  {
+    // 상자가 선 직후(다음 프레임 전) 곧바로 누름 — 관찰자가 아직 못 본 사이를 누르는 순간의 재기가 막는지(검수 r2 `e3`, 사보타주 C가 구현자 장면에서 GREEN이던 길).
+    const wrongs = [];
+    for (let i = 0; i < 4; i++) {
+      const { context, page, state } = await open({ width: 1280, height: 900 });
+      const p = await decisionCenter(page, runApproval.runId, "reject");
+      const P = { x: p.x, y: p.y + 45 };
+      await page.mouse.move(P.x, P.y);
+      await page.evaluate(() => window.__fakeBox(45));
+      await page.mouse.down();
+      await page.mouse.up();
+      await sleep(500);
+      wrongs.push(state.decisions);
+      await context.close();
+    }
+    check(`r2-hold-${engine}-instant 상자가 선 직후(다음 프레임 전) 곧바로 누름 4번 = 결정 0건`, wrongs.every((n) => n === 0), { wrongs });
+    summary.push(`선 직후 누름 ${wrongs.join("")}`);
+  }
+  console.log(`MEASURE r2-hold-${engine}: ${summary.join(" | ")}`);
+}
+
+/**
+ * 수리 2회차 Medium(검수 r2 M1, `e10`): 휠로 굴리는 도중 밖의 변화(흉내 상자 100px)가 서면 그 옮김이 「굴린 것」으로 적혀 막히지 않던 것 —
+ * 굴림 양을 빼고 남는 옮김으로 센다. 휠 10px × 5 중 첫째·셋째·다섯째 뒤에 상자를 세우고, 굴림이 멈춘 직후 손 밑 단추를 누름 → 0건.
+ */
+async function wheelMixScene(browser, origin, engine) {
+  const summary = [];
+  for (const at of [1, 3, 5]) {
+    const ctx = await openContext(browser, origin, { scheme: "light", viewport: { width: 1280, height: 600 }, waiting: [], server: { twoDeciders: true, threeDeciders: true, decisionDelayMs: 60, roundTripMs: 60 } });
+    const { context, page, state } = ctx;
+    await threeReady(page);
+    await settle(page);
+    await sleep(1200);
+    await installFakeBox(page);
+    const p = await decisionCenter(page, runApproval.runId, "reject");
+    const P = { x: p.x, y: p.y + 50 };
+    await page.mouse.move(P.x, P.y);
+    const u0 = await underPoint(page, P.x, P.y);
+    for (let i = 1; i <= 5; i++) {
+      await page.mouse.wheel(0, 10);
+      if (i === at) await page.evaluate(() => window.__fakeBox(100));
+    }
+    await page.waitForFunction(() => {
+      const el = document.querySelector("[data-team-board-list]");
+      window.__st = window.__st ?? [];
+      window.__st.push(el.scrollTop);
+      const n = window.__st.length;
+      return n >= 3 && window.__st[n - 1] === window.__st[n - 2] && window.__st[n - 2] === window.__st[n - 3];
+    }, null, { timeout: 2000, polling: "raf" }).catch(() => undefined);
+    const u1 = await underPoint(page, P.x, P.y);
+    const top = await listScrollTop(page);
+    await pressHere(page);
+    await sleep(500);
+    check(`r2-wheelmix-${engine}-k${at} 휠로 굴리는 도중 밖의 변화(상자 100px)로 손 밑 단추가 바뀜 → 굴림이 멈춘 직후 누름 = 0건`, u1.decision !== null && u1.job !== u0.job && state.decisions === 0, { u0: short(u0), u1: short(u1), top, decisions: state.decisions });
+    summary.push(`k${at}: ${short(u0)}→${short(u1)} scrollTop ${top} 결정=${state.decisions}`);
+    await context.close();
+  }
+  console.log(`MEASURE r2-wheelmix-${engine}: ${summary.join(" | ")}`);
+}
+
 /**
  * 내 연속 결정은 막히지 않는다: 손가락으로 네 줄을 차례로(간격 0.3초, 답 60·300ms) — 내 결정은 줄을 옮기지 않으니 막힐 까닭이 없다.
  * 셋째 줄 승인 묻는 run(`runWorking` + `approvalW`)을 넷째 결정자로 둔다.
@@ -2025,7 +2194,7 @@ async function main() {
       }
     }
     if (ONLY === "" || ONLY === "fix5738r2" || ONLY.startsWith("fix5738r2:")) {
-      const parts = ONLY.startsWith("fix5738r2:") ? ONLY.slice(10).split(",") : ["below", "band", "conn", "scroll", "four", "shots"];
+      const parts = ONLY.startsWith("fix5738r2:") ? ONLY.slice(10).split(",") : ["below", "band", "conn", "scroll", "hold", "wheelmix", "four", "shots"];
       const wk = await webkit.launch();
       try {
         for (const [engine, b] of [["chromium", browser], ["webkit", wk]]) {
@@ -2033,6 +2202,8 @@ async function main() {
           if (parts.includes("band")) await bandScene(b, preview.origin, engine);
           if (parts.includes("conn")) await connScene(b, preview.origin, engine);
           if (parts.includes("scroll")) await scrollScene(b, preview.origin, engine);
+          if (parts.includes("hold")) await holdScene(b, preview.origin, engine);
+          if (parts.includes("wheelmix")) await wheelMixScene(b, preview.origin, engine);
           if (parts.includes("four")) await fourRowsScene(b, preview.origin, engine);
         }
         if (parts.includes("shots")) await r2Shots(browser, preview.origin);

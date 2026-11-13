@@ -567,6 +567,7 @@ export function WorkJobsRoute() {
           role="region"
           onScroll={readAnchors}
           onClickCapture={arrival.onClickCapture}
+          onPointerDownCapture={arrival.onPointerDownCapture}
         >
           {desktop && filter === "mine" && <ThisDeviceStrip />}
           {firstLoad ? (
@@ -892,13 +893,18 @@ function useArrivalGuard(listRef: RefObject<HTMLDivElement | null>, scope: strin
     timerRef.current = next === Infinity ? null : setTimeout(() => publishRef.current(), Math.ceil(next - now) + 1);
   };
 
-  /** `move`: 밖에서 온 변화를 잰다(새로 선·옮겨진 단추는 지금부터 막힘). `scroll`: 사람이 굴렸다(옮겨진 단추를 새로 막지 않음). */
+  /** 단추 자리를 잰다. 새로 선 단추와, 사람의 굴림 양을 뺀 뒤에도 1px 넘게 옮겨진 단추는 지금부터 막힌다. */
   const measure = useCallback(
-    (mode: "move" | "scroll") => {
+    () => {
       const list = listRef.current;
       const now = performance.now();
       const baseline = scrollRef.current === null;
       const before = spotsRef.current;
+      const prev = scrollRef.current;
+      const cur = scrollSpotOf(list);
+      // 굴림이 옮긴 만큼(목록 scrollTop·창 scrollY 차)은 사람의 것, 그보다 더 옮겨진 만큼은 밖의 변화다.
+      const dy = prev === null ? 0 : cur.listTop - prev.listTop + (cur.winY - prev.winY);
+      const dx = prev === null ? 0 : cur.listLeft - prev.listLeft + (cur.winX - prev.winX);
       const next = new Map<string, ControlSpot>();
       for (const control of list?.querySelectorAll(DECISION_CONTROL) ?? []) {
         const box = control.getBoundingClientRect();
@@ -907,12 +913,12 @@ function useArrivalGuard(listRef: RefObject<HTMLDivElement | null>, scope: strin
         if (id === null) continue;
         const was = before.get(id.key);
         const moved =
-          was !== undefined && (Math.abs(box.left - was.left) > ARRIVAL_MOVE_PX || Math.abs(box.top - was.top) > ARRIVAL_MOVE_PX);
-        const atMs = baseline ? -Infinity : was === undefined || (moved && mode === "move") ? now : was.atMs;
+          was !== undefined && (Math.abs(box.left - (was.left - dx)) > ARRIVAL_MOVE_PX || Math.abs(box.top - (was.top - dy)) > ARRIVAL_MOVE_PX);
+        const atMs = baseline ? -Infinity : was === undefined || moved ? now : was.atMs;
         next.set(id.key, { left: box.left, top: box.top, atMs, row: id.row });
       }
       spotsRef.current = next;
-      scrollRef.current = scrollSpotOf(list);
+      scrollRef.current = cur;
       publishRef.current();
     },
     [listRef]
@@ -924,7 +930,7 @@ function useArrivalGuard(listRef: RefObject<HTMLDivElement | null>, scope: strin
       scopeRef.current = scope;
       scrollRef.current = null;
     }
-    measure("move");
+    measure();
   });
 
   // 이 화면 밖의 변화: 문서의 DOM(셸의 띠 등) · 목록 상자 크기 · 창 크기 → 다음 프레임에 잰다. 사람의 굴림은 자리만 새로 적는다.
@@ -934,12 +940,12 @@ function useArrivalGuard(listRef: RefObject<HTMLDivElement | null>, scope: strin
       if (frame === 0) {
         frame = requestAnimationFrame(() => {
           frame = 0;
-          measure("move");
+          measure();
         });
       }
     };
     const onScroll = (event: Event) => {
-      if (event.target === listRef.current || event.target === document) measure("scroll");
+      if (event.target === listRef.current || event.target === document) measure();
     };
     const mutations = new MutationObserver(later);
     mutations.observe(document.body, { subtree: true, childList: true, attributes: true, characterData: true });
@@ -957,16 +963,35 @@ function useArrivalGuard(listRef: RefObject<HTMLDivElement | null>, scope: strin
     };
   }, [listRef, measure]);
 
+  const pressRef = useRef<{ key: string; guarded: boolean } | null>(null);
+  const onPointerDownCapture = useCallback(
+    (event: { target: EventTarget | null }) => {
+      const control = event.target instanceof Element ? event.target.closest(DECISION_CONTROL) : null;
+      if (control === null) {
+        pressRef.current = null;
+        return;
+      }
+      measure();
+      const id = controlKey(control);
+      const spot = id === null ? undefined : spotsRef.current.get(id.key);
+      pressRef.current = id === null ? null : { key: id.key, guarded: spot !== undefined && performance.now() - spot.atMs < ARRIVAL_GUARD_MS };
+    },
+    [listRef, measure]
+  );
   const onClickCapture = useCallback(
     (event: MouseEvent<HTMLDivElement>) => {
       if (event.detail === 0) return;
+      const press = pressRef.current;
+      pressRef.current = null;
       const control = event.target instanceof Element ? event.target.closest(DECISION_CONTROL) : null;
       if (control === null) return;
       const last = scrollRef.current;
-      if (last !== null && sameScroll(last, scrollSpotOf(listRef.current))) measure("move");
+      if (last !== null && sameScroll(last, scrollSpotOf(listRef.current))) measure();
       const id = controlKey(control);
       const spot = id === null ? undefined : spotsRef.current.get(id.key);
-      if (spot !== undefined && performance.now() - spot.atMs < ARRIVAL_GUARD_MS) {
+      // 누름의 시작과 끝 둘 다에서 본다: 막힌 동안 시작한 누름(풀린 뒤 떼도)과, 누르는 동안 줄이 옮겨져 다른 단추 위에서 뗀 누름도 삼킨다.
+      const pressed = press !== null && id !== null && (press.key !== id.key || press.guarded);
+      if ((spot !== undefined && performance.now() - spot.atMs < ARRIVAL_GUARD_MS) || pressed) {
         event.preventDefault();
         event.stopPropagation();
       }
@@ -974,7 +999,7 @@ function useArrivalGuard(listRef: RefObject<HTMLDivElement | null>, scope: strin
     [listRef, measure]
   );
 
-  return { guardedRows, onClickCapture };
+  return { guardedRows, onClickCapture, onPointerDownCapture };
 }
 
 /**
@@ -1094,8 +1119,9 @@ function JobRow({
         // 안에서만 한 단계 진한 `--surface-pressed`로 가리킨다(#5640 수리 3회차, 검수 질문 ② (a)). 공용 단추 변형은 그대로다.
         selected && "[&>[data-testid=work-job-extras]_.bg-surface-muted:hover]:bg-surface-pressed",
         "has-[>button:active]:bg-surface-pressed has-[>button:focus-visible]:focus-ring",
-        // 막힌 동안 결정 단추는 막힌 승인과 같은 모양이다(채움을 버리고 옅은 글자, 투명해지지 않는다 — `ApprovalActions`). 자리는 그대로다.
-        "data-arrival-guard:[&_[data-decision]]:cursor-not-allowed data-arrival-guard:[&_[data-decision]]:bg-surface-muted data-arrival-guard:[&_[data-decision]]:text-ink-muted"
+        // 막힌 동안 결정 단추는 둘 다 채움을 버리고 옅은 글자로 선다(승인은 검은 채움 → 없음, 거부는 옅은 채움 → 없음 — 「거부」도 보통 모양과
+        // 구별된다). 자리·크기는 그대로다(채움만 걷고 글자는 그대로 보인다 — 투명도를 쓰지 않는다).
+        "data-arrival-guard:[&_[data-decision]]:cursor-not-allowed data-arrival-guard:[&_[data-decision]]:bg-transparent data-arrival-guard:[&_[data-decision]]:text-ink-muted"
       )}
       data-testid="work-job"
       data-selected={selected ? "" : undefined}

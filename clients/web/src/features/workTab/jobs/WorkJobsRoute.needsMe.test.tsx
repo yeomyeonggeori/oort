@@ -1111,6 +1111,61 @@ describe("「응답 필요」의 칸은 화면에 떠 있는 동안 자리를 �
     pressSlot(1);
     await waitFor(() => expect(decidedIds()).toEqual([A(1), A(8)]), { timeout: 3000 });
   });
+
+  it("누름의 시작과 끝 둘 다에서 본다 — 막힌 동안 시작한 누름은 풀린 뒤 떼도, 누르는 동안 줄이 옮겨져 다른 단추 위에서 뗀 누름도 삼킨다 (수리 2회차 H1)", async () => {
+    const at = { y: 0 };
+    placeControls(at);
+    board(new Set(), { mine: twoRuns });
+    serveDecisions(20);
+    render(mount());
+    await waitFor(() => expect(rowsIn("needsMe")).toEqual([R(1), R(8)]), { timeout: 3000 });
+    await sleepMs(GUARD_PASSED_MS);
+    const approve = (n: number) => within(needsMeSlot(n)).getByTestId("work-job-approval-approve");
+    const reject = (n: number) => within(needsMeSlot(n)).getByTestId("work-job-approval-reject");
+    // 띠가 서서 막힌 동안 누르기 시작 → 1초 넘게 붙들어 막힘이 풀린 뒤 뗌: 삼킨다(풀린 뒤 시작한 누름이 아니다).
+    at.y = 45;
+    const band = document.createElement("div");
+    act(() => {
+      document.body.prepend(band);
+    });
+    await sleepMs(60);
+    expect(guardedLook(0)).toBe(true);
+    fireEvent.pointerDown(reject(0));
+    await sleepMs(GUARD_PASSED_MS);
+    expect(guardedLook(0)).toBe(false);
+    fireEvent.click(reject(0), { detail: 1 });
+    await sleepMs(80);
+    expect(decidedIds()).toEqual([]);
+    // 같은 자리를 이번에는 풀린 상태에서 시작해 뗌: 받는다.
+    fireEvent.pointerDown(reject(0));
+    fireEvent.click(reject(0), { detail: 1 });
+    await waitFor(() => expect(decidedIds()).toEqual([A(1)]), { timeout: 3000 });
+    // 누르는 동안 줄이 옮겨져 다른 단추 위에서 뗌: 시작한 단추와 뗀 단추가 다르면 삼킨다.
+    await sleepMs(GUARD_PASSED_MS);
+    fireEvent.pointerDown(approve(1));
+    fireEvent.click(reject(1), { detail: 1 });
+    await sleepMs(80);
+    expect(decidedIds()).toEqual([A(1)]);
+  });
+
+  it("굴리는 도중에 밖의 변화가 겹쳐도, 굴림 양을 뺀 남는 옮김이 1px를 넘으면 막는다 (수리 2회차 M1)", async () => {
+    const at = { y: 0 };
+    placeControls(at);
+    board(new Set(), { mine: twoRuns });
+    serveDecisions(20);
+    render(mount());
+    await waitFor(() => expect(rowsIn("needsMe")).toEqual([R(1), R(8)]), { timeout: 3000 });
+    await sleepMs(GUARD_PASSED_MS);
+    const list = screen.getByRole("region", { name: WORK_JOBS_COPY.listLabel });
+    // 사람이 50px 굴렸다(단추는 -50) — 같은 사이에 밖의 변화가 100px 밀었다(합쳐 +50): 굴림 사건 하나로 오지만 막는다.
+    list.scrollTop = 50;
+    at.y = 50;
+    fireEvent.scroll(list);
+    expect(guardedLook(0)).toBe(true);
+    pressSlot(0, "reject");
+    await sleepMs(50);
+    expect(decidedIds()).toEqual([]);
+  });
 });
 
 describe("상태 칩·서랍의 낱말 (#5640 수리 3회차 H2·질문 ③)", () => {
