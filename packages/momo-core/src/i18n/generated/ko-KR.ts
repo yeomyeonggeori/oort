@@ -3979,7 +3979,7 @@ export const catalog: MessageCatalog = {
   "mobile.addMember.adding": [
     {
       "type": 0,
-      "value": "추가하는 중"
+      "value": "추가 중"
     }
   ],
   "mobile.addMember.close": [

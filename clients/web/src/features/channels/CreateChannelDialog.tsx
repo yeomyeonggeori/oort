@@ -407,7 +407,8 @@ function CreateChannelPanel({
                 </span>
                 <span className="flex min-w-0 flex-col gap-px">
                   <span className="text-body text-ink">{choice.label}</span>
-                  <span className="text-meta text-ink-muted">
+                  {/* 공개 설명이 두 문장으로 길어져 좁은 폭에서 「워크스페/이스」처럼 어절 가운데서 꺾였다 — 어절에서 꺾는다. */}
+                  <span className="break-keep text-meta text-ink-muted">
                     {formatMessage(choice.detailKey)}
                   </span>
                 </span>
