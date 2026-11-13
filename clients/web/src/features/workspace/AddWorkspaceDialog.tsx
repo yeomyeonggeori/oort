@@ -8,7 +8,7 @@ import {
   type ReactNode,
   type Ref,
 } from "react";
-import { ChevronRight, Link2, Loader2, Plus, type LucideIcon } from "lucide-react";
+import { ChevronRight, Link as LinkIcon, Loader2, Plus, type LucideIcon } from "lucide-react";
 import { useMutation } from "@tanstack/react-query";
 import { Button } from "@/design/ui/button";
 import {
@@ -174,7 +174,8 @@ function WorkspaceDialogField({
  * cannot use stays on screen with its reason (house rule #1383: an ineligible
  * option is not hidden) and is `aria-disabled` rather than `disabled`, so it keeps
  * its tab stop and the reason is still heard; it loses the chevron because it
- * leads nowhere.
+ * leads nowhere. It wears `cursor-not-allowed` and no press paint: nothing
+ * happens on press, so nothing may look pressed (pressLedger excludes the pair).
  */
 function ChoiceCard({
   icon: Icon,
@@ -212,7 +213,7 @@ function ChoiceCard({
       data-unavailable={unavailable ? "" : undefined}
       className={
         unavailable
-          ? "tap-target flex w-full min-w-0 cursor-default items-center gap-3 rounded-lg border border-line p-3 text-left focus-visible:focus-ring"
+          ? "tap-target flex w-full min-w-0 cursor-not-allowed items-center gap-3 rounded-lg border border-line p-3 text-left focus-visible:focus-ring"
           : "tap-target flex w-full min-w-0 items-center gap-3 rounded-lg border border-line p-3 text-left press-instant-fill hover:bg-surface-hover active:bg-surface-pressed focus-visible:focus-ring"
       }
     >
@@ -534,7 +535,7 @@ function AddWorkspacePanel({
               testId="add-workspace-choose-create"
             />
             <ChoiceCard
-              icon={Link2}
+              icon={LinkIcon}
               title={formatMessage("workspace.add.joinTitle")}
               lead={formatMessage("workspace.add.joinLead")}
               onChoose={() => goTo("join", "join")}

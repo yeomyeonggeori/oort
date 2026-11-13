@@ -243,6 +243,9 @@ async function ownerRun(page, origin, tag, withHandoff) {
       { timeout: 5_000 }
     ).catch(() => {});
     const chip = await page.getByTestId("connect-server-chip-host").innerText().catch(() => "");
+    // 칩만이 아니라 이 기기가 실제로 붙을 서버(저장값)도 새 서버여야 한다: 아니면 초대 코드가 앞 서버로 간다.
+    const stored = await page.evaluate(() => localStorage.getItem("momo.web.server.v1"));
+    check(tag, "넘김: 저장된 서버가 초대의 서버다", stored === "https://team.example.com", { stored });
     const href = page.url();
     check(tag, "넘김: 로그인 화면이 초대 가입 걸음에 서고 서버 칩이 그 주소다", chip.includes("team.example.com"), { chip });
     check(tag, "넘김: 주소창에서 초대 코드를 지웠다", !href.includes("code="), { href: href.replace(INVITE_SHAPE, "<code>") });

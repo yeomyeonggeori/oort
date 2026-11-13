@@ -1,8 +1,8 @@
 import { useId, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
+  Copy,
   DoorOpen,
-  Link2,
   LogOut,
   Plus,
   Settings,
@@ -77,6 +77,8 @@ import { useCustomStatusView } from "./useCustomStatusView";
 //     받는다. 워크스페이스 ID는 싣지 않는다: 로그인 화면의 그 칸이 ID를 읽지 않고, 클라이언트는 지금
 //     워크스페이스가 서버의 기본 워크스페이스인지 모른다. 메뉴는 열린 채 줄 글이 「주소 복사됨」으로 바뀐다
 //     (채널 메뉴의 복사 줄과 같은 문법, 토스트 없음).
+//   * 아이콘은 README §2.8의 정본 낱말을 따른다(복사 = `Copy`). 나가기는 `DoorOpen`이다: 같은 메뉴 두 줄
+//     아래 「로그아웃」이 `LogOut`이라, 두 다른 행동이 같은 글리프를 쓰지 않게 한다.
 // =============================================================================
 
 export function ProfileCard({
@@ -267,7 +269,7 @@ export function ProfileCard({
                 });
               }}
             >
-              <Link2 className="size-4" aria-hidden="true" />
+              <Copy className="size-4" aria-hidden="true" />
               {addressLabel}
             </DropdownMenuItem>
             <DropdownMenuItem
