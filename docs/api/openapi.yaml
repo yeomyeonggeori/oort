@@ -28462,7 +28462,14 @@ components:
     # ---- Hosted Agent Port MCP JSON-RPC (ADR-0162 / HAP-E2) ---------------
     AgentPortClientInfo:
       type: object
-      additionalProperties: false
+      description: >
+        The client's MCP `Implementation`, on both doors (`/v1/mcp/agent-port` and
+        `/v1/mcp/me`). Only `name`, `title` and `version` are read, each with the shape
+        below. Any other key (the MCP `description`, `websiteUrl`, `icons`, or a vendor's
+        own) is accepted and ignored: it is never read, echoed, logged or stored, and only
+        the request-wide bounds (the 64 KiB body and the string, collection and nesting
+        limits every request already has) apply to it (#5787, ADR-0216 증보 2026-11-14).
+      additionalProperties: true
       required: [name, version]
       properties:
         name:
