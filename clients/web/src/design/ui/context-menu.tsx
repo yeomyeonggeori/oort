@@ -2,7 +2,14 @@ import * as React from "react";
 import * as ContextMenuPrimitive from "@radix-ui/react-context-menu";
 import { cn } from "@/design/lib/cn";
 import { POPOVER_MOTION } from "@/design/motion";
-import { menuRowClass } from "@/design/ui/dropdown-menu";
+import {
+  menuRowClass,
+  SUBMENU_ALIGN_OFFSET,
+  SUBMENU_SIDE_OFFSET,
+  submenuPanelClass,
+  SubmenuChevron,
+  useSubmenuGuardRef,
+} from "@/design/ui/dropdown-menu";
 
 // shadcn/ui new-york ContextMenu (vendored, Radix primitive).
 //
@@ -66,8 +73,9 @@ export const ContextMenu = ContextMenuPrimitive.Root;
 export const ContextMenuTrigger = ContextMenuPrimitive.Trigger;
 /**
  * A plain (non-radio) group: `role="group"`, named by a `ContextMenuLabel` through
- * `aria-labelledby`. The `DropdownMenuGroup` twin; the row menu's 「복사」 cluster
- * uses it (#3963), a title over three rows that stay on screen.
+ * `aria-labelledby`. The `DropdownMenuGroup` twin, for a group whose rows can be
+ * locked and so must stay on screen under a title. The row menu's 「복사」 cluster
+ * used it until #5777 folded that lock-free group into the 「복사 ›」 submenu.
  */
 export const ContextMenuGroup = ContextMenuPrimitive.Group;
 
@@ -146,12 +154,12 @@ ContextMenuItem.displayName = ContextMenuPrimitive.Item.displayName;
  * A group's **title** inside a context menu, and the radio rows it heads.
  *
  * These three are the `DropdownMenuLabel` / `RadioGroup` / `RadioItem` trio
- * transplanted, and the transplant is the point: `dropdown-menu.tsx`'s header
- * argues at length that grouping in this app is *a title over rows that stay on
- * screen*, never a submenu, and BT-4's 「섹션으로 이동」 is the first grouping the
- * right-click menu needs. Reaching for `ContextMenuSub*` here would have
- * re-opened that decision inside a component change, which that file explicitly
- * says is ADR work; reaching for these keeps the two menus one grammar.
+ * transplanted, and the transplant is the point: the two menus are one grammar.
+ * A group whose rows can be locked is *a title over rows that stay on screen*
+ * (`dropdown-menu.tsx` header). Since #5777 a group with **no** lockable row may
+ * fold into a submenu instead (`ContextMenuSub*` below): BT-4's 「섹션으로 이동」,
+ * the first grouping this menu needed, now lives behind 「섹션으로 이동 ›」, and its
+ * radio rows sit in that submenu panel.
  *
  * `RadioItem` rather than `Item` for the same reason `PresenceControl` uses it:
  * picking a section is **one choice among several**, so the row has to announce
@@ -202,3 +210,51 @@ export const ContextMenuSeparator = React.forwardRef<
   />
 ));
 ContextMenuSeparator.displayName = ContextMenuPrimitive.Separator.displayName;
+
+// =============================================================================
+// 하위 메뉴 (#5777) — 드롭다운의 하위 메뉴와 같은 판 · 같은 줄 · 같은 가드. 규칙: `dropdown-menu.tsx` 머리말
+// (고를 수 없는 줄이 없는 묶음에만). 하위 판은 포털로 따로 뜨지만 React 트리에서는 위 `ContextMenuContent`
+// 안이라, 「메뉴를 연 제스처의 뗌」 보호(위 머리말)가 하위 판의 누름 · 뗌도 그대로 센다.
+// =============================================================================
+
+export const ContextMenuSub = ContextMenuPrimitive.Sub;
+
+export const ContextMenuSubTrigger = React.forwardRef<
+  React.ElementRef<typeof ContextMenuPrimitive.SubTrigger>,
+  React.ComponentPropsWithoutRef<typeof ContextMenuPrimitive.SubTrigger>
+>(({ className, children, ...props }, ref) => (
+  <ContextMenuPrimitive.SubTrigger
+    ref={ref}
+    className={menuRowClass({
+      className: cn("data-[state=open]:bg-surface-hover", className),
+    })}
+    {...props}
+  >
+    {children}
+    <SubmenuChevron />
+  </ContextMenuPrimitive.SubTrigger>
+));
+ContextMenuSubTrigger.displayName = ContextMenuPrimitive.SubTrigger.displayName;
+
+export const ContextMenuSubContent = React.forwardRef<
+  React.ElementRef<typeof ContextMenuPrimitive.SubContent>,
+  React.ComponentPropsWithoutRef<typeof ContextMenuPrimitive.SubContent> & {
+    container?: HTMLElement | null;
+  }
+>(({ className, container, ...props }, ref) => {
+  const guardedRef = useSubmenuGuardRef(ref);
+  return (
+    <ContextMenuPrimitive.Portal container={container ?? undefined}>
+      <ContextMenuPrimitive.SubContent
+        ref={guardedRef}
+        sideOffset={SUBMENU_SIDE_OFFSET}
+        alignOffset={SUBMENU_ALIGN_OFFSET}
+        collisionPadding={8}
+        className={cn(submenuPanelClass, POPOVER_MOTION, className)}
+        {...props}
+        data-overlay-layer="surface"
+      />
+    </ContextMenuPrimitive.Portal>
+  );
+});
+ContextMenuSubContent.displayName = ContextMenuPrimitive.SubContent.displayName;
