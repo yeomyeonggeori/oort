@@ -83,7 +83,14 @@ cmd_up() {
   pg_pass="$(gen)"
 
   log "starting isolated PostgreSQL 18 container '$container'"
-  docker rm -f "$container" >/dev/null 2>&1 || true
+  # #5606: `-v` everywhere this container is removed. The image declares
+  # VOLUME /var/lib/postgresql, so a bare `rm -f` leaves one nameless volume
+  # behind per run (197 of them, ~9GB, on 11-09).
+  docker rm -f -v "$container" >/dev/null 2>&1 || true
+  # Recorded before `docker run` (#5606), so `down` still finds a container that was
+  # created but failed to start, or a boot interrupted before readiness. `down` only
+  # removes it when it carries this run's label.
+  printf '%s\n' "$container" >"$STATE_OUT"
   # `-e POSTGRES_PASSWORD` (no value) forwards the variable from this process's
   # environment, so the password never appears in docker's argv / `ps`.
   POSTGRES_PASSWORD="$pg_pass" docker run -d --name "$container" \
@@ -91,8 +98,6 @@ cmd_up() {
     -e POSTGRES_DB=momo -e POSTGRES_USER=momo -e POSTGRES_PASSWORD \
     -p 127.0.0.1::5432 \
     "$PG_IMAGE" >/dev/null
-  # Recorded before readiness so an interrupted boot is still torn down.
-  printf '%s\n' "$container" >"$STATE_OUT"
 
   pg_port="$(docker port "$container" 5432/tcp | sed -E 's/.*:([0-9]+)$/\1/' | tail -n 1)"
   case "$pg_port" in ''|*[!0-9]*) fail "could not resolve the published PostgreSQL port" ;; esac
@@ -148,8 +153,8 @@ cmd_down() {
   # that was reused by something else must not be taken down.
   if [ -n "$container" ] &&
     [ "$(docker inspect -f "{{ index .Config.Labels \"$LABEL_KEY\" }}" "$container" 2>/dev/null || true)" = "$RUN_ID" ]; then
-    docker rm -f "$container" >/dev/null 2>&1 || true
-    log "removed $container"
+    docker rm -f -v "$container" >/dev/null 2>&1 || true
+    log "removed $container (with its anonymous volume)"
   else
     log "nothing to remove for run $RUN_ID"
   fi

@@ -37,7 +37,9 @@
 //! `--control-socket` is how the desktop app, which starts `run` as its child,
 //! asks for status and a shutdown (see [`crate::control_socket`]). It is a
 //! user-only Unix socket with a peer code-signature check; workd opens no TCP
-//! socket with or without it.
+//! socket with or without it. With it, `run` first reads one stdin line: this
+//! run's control secret, which every request must carry (#5619). No secret, no
+//! start.
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -47,9 +49,9 @@ use crate::client::{self, ClientError, HostClient};
 use crate::config::{ConfigError, HostState, WorkdConfig, SERVED_SCOPE};
 #[cfg(target_os = "macos")]
 use crate::control_socket::{ControlSocket, ControlSocketError, HostIdentity, PeerPolicy};
-use crate::controls::HostHealth;
 use crate::controls::SocketShared;
 use crate::controls::{heartbeat_loop, ControlLoop};
+use crate::controls::{ControlSecret, HostHealth};
 use crate::folders::FolderBook;
 use crate::human_trust::{HumanTrust, TrustIdentity};
 use crate::keystore::{HostKey, KeyStore, KeyStoreError};
@@ -83,6 +85,8 @@ usage:
 --dev-key-file keeps the host key in a 0600 file instead of the keychain.
 It exists for development and tests only.
 --control-socket answers the desktop app on a user-only Unix socket (macOS).
+It first reads this run's control secret as one line on stdin (the app makes
+it; every request must carry it).
 --dev-unsigned-peer skips the peer's code-signature check; an unsigned
 development build only (a team-signed momo-workd refuses it).";
 
@@ -584,17 +588,43 @@ pub fn host_key_fingerprint(public_key_b64: &str) -> Option<String> {
     )
 }
 
+/// The longest stdin line `run --control-socket` reads for its secret.
+const CONTROL_SECRET_LINE_BYTES: u64 = 128;
+
+/// `run --control-socket`: this run's control secret, one line from the
+/// parent (#5619). Read before anything else runs, so no child workd starts
+/// can inherit the line unread. Refused when absent or malformed: an app that
+/// sends none gets no control socket rather than one without the secret.
+pub fn read_control_secret(input: impl std::io::BufRead) -> Result<ControlSecret, CliError> {
+    use std::io::BufRead as _;
+    let mut line = String::new();
+    let _ = input.take(CONTROL_SECRET_LINE_BYTES).read_line(&mut line);
+    ControlSecret::parse(&line).ok_or_else(|| {
+        CliError::Usage(
+            "--control-socket needs this run's control secret: one line on stdin \
+             (the desktop app writes it)"
+                .into(),
+        )
+    })
+}
+
 /// Bind the control socket and serve it on a task (macOS; see
 /// [`crate::control_socket`]). `None` when the app did not ask for one.
 #[cfg(target_os = "macos")]
 fn start_control_socket(
     path: Option<PathBuf>,
+    secret: Option<ControlSecret>,
     dev_unsigned_peer: bool,
     state: &HostState,
     shared: SocketShared,
 ) -> Result<Option<tokio::task::JoinHandle<()>>, CliError> {
     let Some(path) = path else {
         return Ok(None);
+    };
+    let Some(secret) = secret else {
+        return Err(CliError::Usage(
+            "--control-socket needs this run's control secret".into(),
+        ));
     };
     let policy = PeerPolicy::for_this_binary(dev_unsigned_peer).map_err(CliError::Usage)?;
     match &policy {
@@ -611,6 +641,7 @@ fn start_control_socket(
     let socket = ControlSocket::bind(&path, policy)?;
     tracing::info!(path = %socket.path().display(), "control socket listening");
     Ok(Some(tokio::spawn(socket.serve(
+        secret,
         HostIdentity {
             host_id: state.host_id,
             workspace_id: state.workspace_id,
@@ -624,6 +655,7 @@ fn start_control_socket(
 #[cfg(not(target_os = "macos"))]
 fn start_control_socket(
     path: Option<PathBuf>,
+    _secret: Option<ControlSecret>,
     _dev_unsigned_peer: bool,
     _state: &HostState,
     _shared: SocketShared,
@@ -711,10 +743,12 @@ pub fn reset_root(config_path: PathBuf) -> Result<(), CliError> {
 /// Serve until a signal (exit 0) or until the server refuses the host
 /// (`CliError::Revoked`, exit 3 — ADR-0188 D7: a 401 stops remote sessions),
 /// or until the desktop app asks for `shutdown` on the control socket (exit 0).
+/// `control_secret` is [`read_control_secret`]'s, read by `main` first.
 pub async fn run(
     config_path: PathBuf,
     dev_key_file: Option<PathBuf>,
     control_socket: Option<PathBuf>,
+    control_secret: Option<ControlSecret>,
     dev_unsigned_peer: bool,
 ) -> Result<(), CliError> {
     let config = WorkdConfig::load(&config_path)?;
@@ -842,6 +876,7 @@ pub async fn run(
     // stops here (exit 4) instead of racing the first one's server session.
     let control = start_control_socket(
         control_socket,
+        control_secret,
         dev_unsigned_peer,
         &state,
         SocketShared {
@@ -1061,6 +1096,32 @@ mod tests {
             r#"{"registration":"x"}"#,
         ] {
             assert!(parse_signing_answer(line).is_err(), "{line:?}");
+        }
+    }
+
+    /// #5619: `run --control-socket` reads exactly one well-formed line and
+    /// refuses to start on anything else (an app that sends none included).
+    #[test]
+    fn the_control_secret_is_one_stdin_line_or_no_start() {
+        let digits = format!(
+            "{}{}",
+            uuid::Uuid::new_v4().simple(),
+            uuid::Uuid::new_v4().simple()
+        );
+        let read = |input: String| read_control_secret(std::io::Cursor::new(input));
+        let secret = read(format!("{digits}\nleft for nobody\n")).expect("one line");
+        assert!(secret.admits(Some(&digits)));
+        for refused in [
+            String::new(),
+            "\n".to_string(),
+            format!("{digits}{digits}\n"),
+            format!("{}\n", "0".repeat(200)),
+            format!("x{digits}\n"),
+        ] {
+            assert!(
+                matches!(read(refused.clone()), Err(CliError::Usage(_))),
+                "{refused:?}"
+            );
         }
     }
 

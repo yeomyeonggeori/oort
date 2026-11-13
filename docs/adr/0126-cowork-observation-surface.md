@@ -2,6 +2,7 @@
 
 - Status: **Accepted** (2026-07-21, 성재 — "우선순위 작업 진행" 지시로 우선순위 3(D1 관전) 실행 승인. D1·D2=v0 착수, D3·D4=v1 예약)
 - 관련: ADR-0114(Interactive Work Console — D2 세션=채널 스레드, D6 터미널+스레드 브리지), ADR-0125(D10 원격 attach — owner-only 계약), ADR-0119(웹 — v1+ Work 표면), docs/planning/2026-07-21-opensource-cowork-diagnosis.md §5
+- 증보 포인터: 2026-11-09 [ADR-0222](0222-work-ledger-and-orchestrator-view.md) D8(#5592)이 D1을 증보한다. 남의 터미널 화면 보기를 열 때 세션 단위 `observation`의 「기본 open」은 「세션마다 주인 동의」로 바뀐다(1시간·보는 사람 표시·접근 기록·비밀 경고·주인이 언제든 끝냄·관리자도 주인 동의 없이는 못 봄). `observer` 등급과 호스트 재검사는 그대로 쓴다. 지금은 열지 않는다(ADR-0190 D6). 본문은 바꾸지 않았다.
 - 발단: 외부 개발자 피드백(성재 전달, 2026-07-21) — "Figma가 패러다임을 바꾼 지점은 개발자·PM·디자이너가 하나의 화면을 보며 논의하는 cowork 시스템. claude/codex도 에이전트니까 hermes처럼 호스팅해 결과물을 모두가 공유·확인하며 작업·논의할 수 있으면 큰 메리트."
 
 ## Context

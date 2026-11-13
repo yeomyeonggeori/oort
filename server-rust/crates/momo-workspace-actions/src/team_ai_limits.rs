@@ -39,6 +39,7 @@ use serde_json::{json, Value};
 use uuid::Uuid;
 
 use crate::team_ai::{self, FallbackReason, TeamAiWorkspace};
+use crate::team_ai_hermes;
 
 /// `team_ai_limits` as the reader sees it. `None` = that limit is not set. A stored value the
 /// settings door would refuse (a hand edit: `0`, a negative, a string) reads as **absent**, never
@@ -91,8 +92,8 @@ impl TeamAiLimits {
     }
 
     /// The workspace's own day cap on delegations to Hermes: what the administrator set, else the
-    /// default 30 **[추정]**. Never "none" — the operator's ceiling ([`delegation_cap`]) is what turns
-    /// the delegation off, and this is what an administrator lowers or raises under it.
+    /// default 30 **[추정]**. Never "none" — the operator's `0` ([`HermesCeiling::Off`]) is what turns
+    /// the delegation off, and this is what an administrator lowers or raises under any ceiling.
     pub fn delegation_cap(&self) -> i64 {
         self.daily_delegations
             .unwrap_or(DEFAULT_TEAM_AI_DAILY_DELEGATIONS)
@@ -120,14 +121,27 @@ pub fn usd_to_micro(usd: f64) -> i64 {
 pub struct OperatorCaps {
     pub daily_tokens: Option<i64>,
     pub daily_searches: Option<i64>,
-    /// `TEAM_AI_HERMES_DAILY_CAP` (ADR-0201 증보 v4 P7, #5369): the per-workspace ceiling on the day's
-    /// delegations to Hermes. **The opposite direction of the two fields above**: `None` (unset, blank —
-    /// and a default-constructed value) means the delegation is **closed**, because a subscription is not
-    /// the team's own BYOK money and the protection must not be missing on the operator's side. `Some(0)`
-    /// is closed too (the explicit way to say it); `Some(n)` with `n > 0` is a per-workspace ceiling no
-    /// workspace value gets past. Read it through [`OperatorCaps::delegation_ceiling`], which is `None`
-    /// exactly when the delegation is closed.
-    pub daily_delegations: Option<i64>,
+    /// `TEAM_AI_HERMES_DAILY_CAP` (ADR-0201 증보 v4 P7, #5369; 증보 2026-11-12 #5685): the per-workspace
+    /// ceiling on the day's delegations to Hermes. Its own type so "no ceiling" and "off" cannot be one
+    /// `None`: unset or blank (and a default-constructed value) is [`HermesCeiling::NoCeiling`] — the
+    /// workspace's own cap (or the default 30) is the cap; `0` is [`HermesCeiling::Off`]; a positive number
+    /// is [`HermesCeiling::Ceiling`].
+    pub daily_delegations: HermesCeiling,
+}
+
+/// `TEAM_AI_HERMES_DAILY_CAP` as one process read it (ADR-0201 증보 2026-11-12, #5685 — owner: unset = no
+/// ceiling). Until #5685 an unset value was the closed door; now only an explicit `0` is.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum HermesCeiling {
+    /// Unset or blank: **no operator ceiling**. The effective day cap is the workspace's `dailyDelegations`,
+    /// or the default 30 when it has none — the same shape as the two older ceilings' "unset = no ceiling".
+    #[default]
+    NoCeiling,
+    /// `0` (a negative reads as `0`): the operator switched the delegation **off**. The api also reads a value
+    /// it cannot parse as this (the worker refuses to boot on it).
+    Off,
+    /// A positive per-workspace ceiling no workspace value gets past.
+    Ceiling(i64),
 }
 
 impl OperatorCaps {
@@ -150,11 +164,23 @@ impl OperatorCaps {
         self.daily_searches == Some(0)
     }
 
-    /// The delegation ceiling as a positive number, or `None` = **the delegation is closed** (unset,
-    /// blank, `0`). Unlike [`Self::token_ceiling`] and [`Self::search_ceiling`], where `None` means "no
-    /// ceiling", here `None` is the stop — see [`OperatorCaps::daily_delegations`].
+    /// The delegation ceiling as a positive number, if there is one — like [`Self::token_ceiling`]: `None`
+    /// is "no positive ceiling" (unset, or the `0` that [`Self::delegation_off`] names), never "closed".
     pub fn delegation_ceiling(&self) -> Option<i64> {
-        self.daily_delegations.filter(|cap| *cap > 0)
+        match self.daily_delegations {
+            HermesCeiling::Ceiling(cap) if cap > 0 => Some(cap),
+            _ => None,
+        }
+    }
+
+    /// `TEAM_AI_HERMES_DAILY_CAP=0`: the operator switched the delegation to Hermes off. The only operator
+    /// value that closes it (#5685); unset is no ceiling.
+    pub fn delegation_off(&self) -> bool {
+        match self.daily_delegations {
+            HermesCeiling::Off => true,
+            HermesCeiling::Ceiling(cap) => cap <= 0,
+            HermesCeiling::NoCeiling => false,
+        }
     }
 }
 
@@ -205,24 +231,35 @@ pub fn search_cap(limits: &TeamAiLimits, caps: &OperatorCaps) -> Option<i64> {
     effective_cap(limits.daily_searches, caps.daily_searches)
 }
 
-/// The day's delegations to Hermes one workspace may make: `min(the workspace's own cap or the default
-/// 30, the operator's ceiling)`. **`None` = closed**: the operator's ceiling is the thing that opens the
-/// delegation, and while it is unset (or `0`) no workspace value does (ADR-0201 증보 v4 P7: 「미설정 =
-/// 끔」, the one operator ceiling whose absence is not "no ceiling").
+/// The day's delegations to Hermes one workspace may make (ADR-0201 증보 2026-11-12, #5685): the
+/// workspace's own cap or the default 30, lowered by a positive operator ceiling when there is one —
+/// `min(workspace or 30, ceiling)`; with no ceiling (unset, blank) it is the workspace's value or 30.
+/// **`None` = closed, and only the operator's `0` gets here** ([`HermesCeiling::Off`]); an unset ceiling
+/// never does.
 pub fn delegation_cap(limits: &TeamAiLimits, caps: &OperatorCaps) -> Option<i64> {
-    caps.delegation_ceiling()
-        .map(|ceiling| limits.delegation_cap().min(ceiling))
+    if caps.delegation_off() {
+        return None;
+    }
+    let workspace = limits.delegation_cap();
+    Some(match caps.delegation_ceiling() {
+        Some(ceiling) => workspace.min(ceiling),
+        None => workspace,
+    })
 }
 
-/// `TEAM_AI_HERMES_DAILY_CAP`, read by **one** rule in both processes: unset or blank = `None` (closed);
-/// a whole number is the ceiling, a negative one reads as `0` (closed — the side that fails visibly, as
-/// [`parse_operator_cap`] does); anything else (`ten`, `1.5`, `30 `-then-garbage, a unit) is an error
-/// the caller decides how to treat — the worker refuses to boot on it like it does for the other two
-/// ceilings, the api only warns because it merely explains the number. The result goes straight into
-/// [`OperatorCaps::daily_delegations`]; **the difference from [`parse_operator_cap`] is what a `None`
-/// means afterwards**, not how a number is read, so this is that function with the name that says so.
-pub fn parse_hermes_cap(raw: Option<&str>) -> Result<Option<i64>, OperatorCapInvalid> {
-    parse_operator_cap(HERMES_CAP_ENV, raw)
+/// `TEAM_AI_HERMES_DAILY_CAP`, read by **one** rule in both processes (#5685): unset or blank =
+/// [`HermesCeiling::NoCeiling`]; `0` = [`HermesCeiling::Off`], a negative one reads as `0` (off — the side
+/// that fails visibly, as [`parse_operator_cap`] does); a positive whole number = [`HermesCeiling::Ceiling`];
+/// anything else (`ten`, `1.5`, `30 `-then-garbage, a unit) is an error the caller decides how to treat — the
+/// worker refuses to boot on it like it does for the other two ceilings, the api warns and reads it as
+/// [`HermesCeiling::Off`] because it merely explains the number. A number is read exactly as
+/// [`parse_operator_cap`] reads it.
+pub fn parse_hermes_cap(raw: Option<&str>) -> Result<HermesCeiling, OperatorCapInvalid> {
+    Ok(match parse_operator_cap(HERMES_CAP_ENV, raw)? {
+        None => HermesCeiling::NoCeiling,
+        Some(cap) if cap > 0 => HermesCeiling::Ceiling(cap),
+        Some(_) => HermesCeiling::Off,
+    })
 }
 
 /// The variable behind [`parse_hermes_cap`].
@@ -419,16 +456,38 @@ pub async fn month_spend_if_limited_in_tx(
     agent_month_spend_in_tx(conn, workspace_id, agent_member_id).await
 }
 
+/// The two facts of the delegation door that are this **process's**, not the database's (ADR-0201 증보 v4
+/// P8, #5374): G4's three declarations as the api reads them and whether an `operator_env` pin resolves
+/// here (G5, [`team_ai_hermes::operator_env_pin_resolves`]). The api only explains; the worker enforces
+/// with its own copy of the same variables. Default = nothing declared, nothing resolves (closed).
+#[derive(Debug, Clone, Default)]
+pub struct DelegationProcessFacts {
+    pub declarations: team_ai_hermes::HermesDeclarations,
+    pub env_pin_resolves: bool,
+}
+
 /// What the settings screen reads (B9-4) — the limits as set, the cap that actually applies after
 /// the operator's ceiling, the ceiling itself, today's and this month's usage, and whether a
 /// dollar limit can be switched on. Computed, never stored: it rides the settings GET/PATCH under
 /// `team_ai_limits_status` when asked for, and is not a PATCH-able key.
 ///
-/// **Only a boolean says whether the model is priced — never the model's name.**
+/// **The delegation to Hermes** (ADR-0201 증보 v4 P7·P8, #5374) rides the same objects under the setting's
+/// own name: `limits.dailyDelegations` (what the administrator set; `null` = the default 30, never "no
+/// limit"), `effective.dailyDelegations` (`that or 30`, lowered by a positive ceiling; `0` = **closed**, the
+/// operator's `0` — an unset ceiling is no ceiling since #5685), `operatorCeiling.dailyDelegations` (the
+/// positive ceiling, else `null`) with `operatorCeiling.delegationOff` (the operator's `0`, like `helperOff`
+/// and `searchOff`), `usage.todayDelegations` (delegations at
+/// or past `called` today — the counters' own source, the task row's marker), and the door's workspace half:
+/// `delegationAvailable` + `delegationUnavailableReason` (one closed word of the door, `null` when open —
+/// [`team_ai_hermes::SettingsDoorFacts::closed`]).
+///
+/// **Only a boolean says whether the model is priced — never the model's name.** Nothing about the
+/// delegation names a member or an agent either: the reason is a closed word.
 pub async fn limits_status_in_tx(
     conn: &mut PgConnection,
     workspace_id: Uuid,
     caps: &OperatorCaps,
+    process: &DelegationProcessFacts,
 ) -> Result<Value, DbError> {
     let settings: Option<Value> =
         sqlx::query_scalar("SELECT settings FROM workspace WHERE id = $1")
@@ -449,6 +508,29 @@ pub async fn limits_status_in_tx(
         None => (0, 0, AgentMonthSpend::default()),
     };
     let availability = monthly_usd_availability_in_tx(conn, workspace_id, state.member_id).await?;
+    // P7: the day's delegations are counted from the task row's marker (`called` or later, the UTC day of
+    // `delegation_called_at`) — the same read the door's G6 and the `called` commit judge by. The requester
+    // and the window only shape the two other counts, which this read does not show.
+    let today_delegations =
+        momo_agent::team_ai_task::delegation_counts_in_tx(conn, workspace_id, Uuid::nil(), 0)
+            .await?
+            .today;
+    let day_delegation_cap = delegation_cap(&limits, caps);
+    // G3 for the team: the helper (if it exists yet) is never a Hermes; no member has the nil id.
+    let pinned = team_ai_hermes::pinned_agents_in_tx(
+        conn,
+        workspace_id,
+        state.member_id.unwrap_or_else(Uuid::nil),
+    )
+    .await?;
+    let delegation_closed = team_ai_hermes::SettingsDoorFacts {
+        target: team_ai_hermes::resolve_team_target(&pinned),
+        declarations: process.declarations.clone(),
+        pin_resolves: process.env_pin_resolves,
+        day_cap: day_delegation_cap,
+        today: today_delegations,
+    }
+    .closed();
     let (day_resets_at_ms, month_resets_at_ms): (i64, i64) = sqlx::query_as(
         "SELECT \
            floor(extract(epoch FROM ((date_trunc('day', now() AT TIME ZONE 'UTC') \
@@ -463,16 +545,21 @@ pub async fn limits_status_in_tx(
             "dailyTokens": limits.daily_tokens,
             "dailySearches": limits.daily_searches,
             "monthlyUsd": limits.monthly_usd(),
+            "dailyDelegations": limits.daily_delegations,
         },
         "effective": {
             "dailyTokens": effective_cap(limits.daily_tokens, caps.daily_tokens),
             "dailySearches": search_cap(&limits, caps),
+            // never "none": the delegation always has a cap, and `0` is the closed door
+            "dailyDelegations": day_delegation_cap.unwrap_or(0),
         },
         "operatorCeiling": {
             "dailyTokens": caps.token_ceiling(),
             "dailySearches": caps.search_ceiling(),
             "helperOff": caps.helper_off(),
             "searchOff": caps.search_off(),
+            "dailyDelegations": caps.delegation_ceiling(),
+            "delegationOff": caps.delegation_off(),
         },
         "usage": {
             "todayTokens": tokens_today,
@@ -481,9 +568,12 @@ pub async fn limits_status_in_tx(
             "monthRuns": month.runs,
             "monthUnpricedRuns": month.unpriced_runs,
             "monthEstimatedRuns": month.estimated_runs,
+            "todayDelegations": today_delegations,
         },
         "monthlyUsdAvailable": availability.is_available(),
         "monthlyUsdUnavailableReason": availability.reason(),
+        "delegationAvailable": delegation_closed.is_none(),
+        "delegationUnavailableReason": delegation_closed.map(team_ai_hermes::DoorClosed::word),
         "dayResetsAtMs": day_resets_at_ms,
         "monthResetsAtMs": month_resets_at_ms,
     }))
@@ -686,57 +776,91 @@ mod tests {
         );
     }
 
-    /// ADR-0201 증보 v4 P7 (#5369): the delegation cap is the **one** limit whose absence is not "no
-    /// limit". The operator's ceiling being unset (or blank, or `0`) means CLOSED whatever the
-    /// workspace set; a positive ceiling opens it and the effective cap is `min(workspace or the
-    /// default 30, ceiling)`. Every branch of that sentence is measured on its own.
+    /// ADR-0201 증보 2026-11-12 (#5685): the operator's ceiling unset (or blank) is **no ceiling** — the
+    /// cap is the workspace's own value, or the default 30 (never "no limit"). Only the operator's `0` is
+    /// closed; a positive ceiling lowers the cap to `min(workspace or 30, ceiling)`. Every branch of that
+    /// sentence is measured on its own.
     #[test]
-    fn the_delegation_cap_is_closed_without_an_operator_ceiling_and_never_above_it() {
+    fn the_delegation_cap_is_the_workspace_value_without_a_ceiling_closed_only_by_zero() {
         let default = TeamAiLimits::default();
         let admin = |n: i64| TeamAiLimits {
             daily_delegations: Some(n),
             ..TeamAiLimits::default()
         };
-        let ceiling = |n: Option<i64>| OperatorCaps {
-            daily_delegations: n,
+        let ceiling = |c: HermesCeiling| OperatorCaps {
+            daily_delegations: c,
             ..OperatorCaps::default()
         };
-        // CLOSED: unset, `0`, whatever the administrator asked for
+        // NO CEILING (unset, the default value): the workspace's value or 30 — open, never unlimited
+        assert_eq!(
+            OperatorCaps::default().daily_delegations,
+            HermesCeiling::NoCeiling
+        );
         assert_eq!(OperatorCaps::default().delegation_ceiling(), None);
-        assert_eq!(delegation_cap(&default, &OperatorCaps::default()), None);
-        assert_eq!(delegation_cap(&admin(200), &ceiling(None)), None);
-        assert_eq!(delegation_cap(&admin(200), &ceiling(Some(0))), None);
-        // the ceiling opens it; the workspace's default is 30 and the ceiling only lowers it
-        assert_eq!(delegation_cap(&default, &ceiling(Some(1000))), Some(30));
-        assert_eq!(delegation_cap(&default, &ceiling(Some(10))), Some(10));
+        assert!(!OperatorCaps::default().delegation_off());
+        assert_eq!(delegation_cap(&default, &OperatorCaps::default()), Some(30));
+        assert_eq!(
+            delegation_cap(&admin(200), &ceiling(HermesCeiling::NoCeiling)),
+            Some(200)
+        );
+        assert_eq!(
+            delegation_cap(&admin(1), &ceiling(HermesCeiling::NoCeiling)),
+            Some(1)
+        );
+        // CLOSED: only the operator's `0`, whatever the administrator asked for
+        assert!(ceiling(HermesCeiling::Off).delegation_off());
+        assert_eq!(delegation_cap(&default, &ceiling(HermesCeiling::Off)), None);
+        assert_eq!(
+            delegation_cap(&admin(200), &ceiling(HermesCeiling::Off)),
+            None
+        );
+        // a positive ceiling only lowers it; the workspace's default is 30
+        assert_eq!(
+            delegation_cap(&default, &ceiling(HermesCeiling::Ceiling(1000))),
+            Some(30)
+        );
+        assert_eq!(
+            delegation_cap(&default, &ceiling(HermesCeiling::Ceiling(10))),
+            Some(10)
+        );
         // an administrator may raise it up to the ceiling and no further
-        assert_eq!(delegation_cap(&admin(100), &ceiling(Some(1000))), Some(100));
-        assert_eq!(delegation_cap(&admin(100), &ceiling(Some(50))), Some(50));
-        assert_eq!(delegation_cap(&admin(5), &ceiling(Some(50))), Some(5));
+        assert_eq!(
+            delegation_cap(&admin(100), &ceiling(HermesCeiling::Ceiling(1000))),
+            Some(100)
+        );
+        assert_eq!(
+            delegation_cap(&admin(100), &ceiling(HermesCeiling::Ceiling(50))),
+            Some(50)
+        );
+        assert_eq!(
+            delegation_cap(&admin(5), &ceiling(HermesCeiling::Ceiling(50))),
+            Some(5)
+        );
+        assert!(!ceiling(HermesCeiling::Ceiling(50)).delegation_off());
         // `delegation_cap()` itself never says "none": absent is the default
         assert_eq!(default.delegation_cap(), 30);
         assert_eq!(admin(7).delegation_cap(), 7);
-        // the two older ceilings are untouched by the new field: `None` there is still "no ceiling"
+        // the two older ceilings are untouched: `None` there is still "no ceiling"
         assert_eq!(OperatorCaps::default().token_ceiling(), None);
         assert!(!OperatorCaps::default().helper_off());
         assert!(!OperatorCaps::default().search_off());
     }
 
-    /// RL4 (review, ADR-0201 증보 v4): `TEAM_AI_HERMES_DAILY_CAP` is read by one rule. Unset and
-    /// blank are `None` (= closed here), a whole number is the ceiling, a negative one reads as `0`
-    /// (closed), and anything that is not a whole number is an error — never a number somebody
-    /// else's parser would have guessed (`ten`, `1.5`, `10x`, `1e2`, `0x10`).
+    /// RL4 (review, ADR-0201 증보 v4) + #5685: `TEAM_AI_HERMES_DAILY_CAP` is read by one rule. Unset and
+    /// blank are no ceiling, `0` is off (a negative reads as `0`), a positive whole number is the ceiling,
+    /// and anything that is not a whole number is an error — never a number somebody else's parser would
+    /// have guessed (`ten`, `1.5`, `10x`, `1e2`, `0x10`).
     #[test]
     fn the_hermes_cap_value_is_a_whole_number_and_anything_else_is_refused_by_name() {
         for (raw, expected) in [
-            (None, None),
-            (Some(""), None),
-            (Some("   "), None),
-            (Some("0"), Some(0)),
-            (Some("30"), Some(30)),
-            (Some(" 30 "), Some(30)),
-            (Some("+30"), Some(30)),
-            (Some("-5"), Some(0)),
+            (None, HermesCeiling::NoCeiling),
+            (Some(""), HermesCeiling::NoCeiling),
+            (Some("   "), HermesCeiling::NoCeiling),
+            (Some("0"), HermesCeiling::Off),
+            (Some("-5"), HermesCeiling::Off),
+            (Some("30"), HermesCeiling::Ceiling(30)),
+            (Some(" 30 "), HermesCeiling::Ceiling(30)),
+            (Some("+30"), HermesCeiling::Ceiling(30)),
         ] {
             assert_eq!(parse_hermes_cap(raw), Ok(expected), "{raw:?}");
         }
@@ -749,15 +873,25 @@ mod tests {
                 "{bad:?}"
             );
         }
-        // a read cap of 0 and an unset one are the same closed door
-        let read = |raw| OperatorCaps {
-            daily_delegations: parse_hermes_cap(raw).unwrap(),
-            ..OperatorCaps::default()
+        // the five cases of #5685, read into the cap both processes judge by (no workspace value set)
+        let cap = |raw| {
+            delegation_cap(
+                &TeamAiLimits::default(),
+                &OperatorCaps {
+                    daily_delegations: parse_hermes_cap(raw).unwrap(),
+                    ..OperatorCaps::default()
+                },
+            )
         };
-        assert_eq!(read(Some("0")).delegation_ceiling(), None);
-        assert_eq!(read(None).delegation_ceiling(), None);
-        assert_eq!(read(Some("-5")).delegation_ceiling(), None);
-        assert_eq!(read(Some("12")).delegation_ceiling(), Some(12));
+        assert_eq!(cap(None), Some(30), "unset: no ceiling, the default 30");
+        assert_eq!(cap(Some("")), Some(30), "blank: no ceiling, the default 30");
+        assert_eq!(cap(Some("0")), None, "0: off");
+        assert_eq!(cap(Some("-5")), None, "a negative: off");
+        assert_eq!(
+            cap(Some("12")),
+            Some(12),
+            "a positive ceiling lowers the 30"
+        );
     }
 
     /// `dailyDelegations` as the reader sees it: only a value the settings door would accept is a

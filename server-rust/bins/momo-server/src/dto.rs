@@ -4121,12 +4121,38 @@ pub struct ReadStateRowDto {
     pub latest_readable_seq: i64,
     /// The **caller's own** closure watermark, never another member's.
     pub closed_at_seq: Option<i64>,
+    /// ADR-0124 증보 4 (#5667): unread replies in the threads the caller follows in this channel (the
+    /// sum of the thread summaries' `unread_reply_count`). Always present, `0` when there are none.
+    pub followed_unread_reply_count: i64,
 }
 
 /// Swift `ReadStateListResponseDTO` (:317-322).
 #[derive(Debug, Serialize)]
 pub struct ReadStateListResponseDto {
     pub read_states: Vec<ReadStateRowDto>,
+}
+
+/// `POST …/threads/read-all` request (ADR-0124 증보 5, #5689). snake_case like the read-state family.
+/// `channel_ids` absent or `null` = every channel the caller is a member of; `[]` = none (a no-op). No
+/// member id: the positions moved are always the bearer's. **Closed** (security review r1 M2): an
+/// unknown key is refused, so a misspelt `channelIds` is never read as "every channel". The route
+/// also refuses a body that is not an object before it gets here (serde would read a bare `[]` as
+/// this struct with no ids).
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ThreadReadAllRequestDto {
+    #[serde(default)]
+    pub channel_ids: Option<Vec<Uuid>>,
+}
+
+/// `POST …/threads/read-all` response: the `GET read-state` lines of the channels whose followed-thread
+/// positions moved (the same [`ReadStateRowDto`], read after the write), how many threads moved, and
+/// whether more were left than one request moves. Nothing moved → `read_states: []`.
+#[derive(Debug, Serialize)]
+pub struct ThreadReadAllResponseDto {
+    pub read_states: Vec<ReadStateRowDto>,
+    pub marked_thread_count: i64,
+    pub has_more: bool,
 }
 
 /// `PUT …/channels/{ch}/closure` request (ADR-0177 증보 D7, #4227).
@@ -7505,6 +7531,7 @@ mod tests {
                 },
                 latest_readable_seq: 2,
                 closed_at_seq: None,
+                followed_unread_reply_count: 3,
             }],
         })
         .expect("serialize");
@@ -7533,6 +7560,22 @@ mod tests {
         );
         // `flatten` keeps the row flat: the cursor fields are siblings, not nested under `state`.
         assert!(json["read_states"][0].get("state").is_none(), "{json}");
+        // ADR-0124 증보 4 (#5667): exactly one key more, snake_case like its siblings; every other key
+        // and value of the row is what it was.
+        assert_eq!(
+            json["read_states"][0],
+            serde_json::json!({
+                "channel_id": "c",
+                "last_read_seq": 1,
+                "latest_seq": 2,
+                "unread_count": 1,
+                "mention_count": 0,
+                "marked_unread_before_seq": null,
+                "latest_readable_seq": 2,
+                "closed_at_seq": null,
+                "followed_unread_reply_count": 3,
+            }),
+        );
     }
 
     /// ADR-0177 증보 D7 (#4227): the closure body is exactly `{ "seenSeq": <integer> }`.

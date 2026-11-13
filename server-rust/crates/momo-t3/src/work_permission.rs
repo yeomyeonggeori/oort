@@ -15,7 +15,8 @@
 //! of a route remembering to check.
 
 use momo_db::sqlx;
-use momo_db::PgConnection;
+use momo_db::sqlx::Row;
+use momo_db::{PgConnection, PgPool};
 use serde_json::{json, Value};
 use uuid::Uuid;
 
@@ -404,6 +405,76 @@ pub async fn withdraw_permission_request_in_tx(
     .execute(&mut *conn)
     .await?;
     Ok(result.rows_affected() == 1)
+}
+
+// ---------------------------------------------------------------------------
+// #5594 — the deadline, enforced (ADR-0188 D7 「짧은 TTL」, ADR-0220 P7 (a))
+// ---------------------------------------------------------------------------
+
+/// One lapsed request the expiry sweep holds a row lock on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct LapsedPermissionRequest {
+    pub id: Uuid,
+    pub work_session_id: Uuid,
+    pub request_event_id: Uuid,
+}
+
+/// Workspaces holding a pending request past its deadline, across every tenant.
+///
+/// The expiry sweep's one cross-tenant **read**, on the notifier pool (BYPASSRLS
+/// `momo_notifier`), and the only statement of the sweep that runs there: it names
+/// three columns — `workspace_id`, `status`, `expires_at` — and those are the only
+/// columns of this table that role may read (a column GRANT, #5614 M1: never the
+/// owner-only `preview`). Every write runs per workspace on the RLS-bound
+/// `momo_app` pool ([`lock_lapsed_permission_requests_in_tx`] →
+/// [`close_permission_request_in_tx`]).
+pub async fn workspaces_with_lapsed_permission_requests(
+    pool: &PgPool,
+    limit: i64,
+) -> Result<Vec<Uuid>, T3Error> {
+    let workspaces: Vec<Uuid> = sqlx::query_scalar(
+        "SELECT DISTINCT workspace_id FROM work_permission_request \
+          WHERE status = 'pending' AND expires_at <= clock_timestamp() \
+          LIMIT $1",
+    )
+    .bind(limit)
+    .fetch_all(pool)
+    .await?;
+    Ok(workspaces)
+}
+
+/// One workspace's pending requests whose deadline passed, oldest first, row-locked
+/// (`FOR UPDATE SKIP LOCKED`) for the caller's tenant transaction on the RLS-bound
+/// pool. A decision landing at the same moment either wins its own
+/// `WHERE status = 'pending'` first or finds the row closed — 「첫 결정이 이긴다」
+/// still holds. Each row is then closed with the decision route's own
+/// [`close_permission_request_in_tx`] (`pending → expired`).
+pub async fn lock_lapsed_permission_requests_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    limit: i64,
+) -> Result<Vec<LapsedPermissionRequest>, T3Error> {
+    let rows = sqlx::query(&format!(
+        "SELECT id, work_session_id, request_event_id FROM work_permission_request \
+          WHERE workspace_id = $1 AND status = '{STATUS_PENDING}' \
+            AND expires_at <= clock_timestamp() \
+          ORDER BY expires_at, id \
+          LIMIT $2 \
+          FOR UPDATE SKIP LOCKED"
+    ))
+    .bind(workspace_id)
+    .bind(limit)
+    .fetch_all(&mut *conn)
+    .await?;
+    rows.iter()
+        .map(|row| {
+            Ok(LapsedPermissionRequest {
+                id: row.try_get("id")?,
+                work_session_id: row.try_get("work_session_id")?,
+                request_event_id: row.try_get("request_event_id")?,
+            })
+        })
+        .collect()
 }
 
 #[cfg(test)]

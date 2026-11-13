@@ -21,7 +21,7 @@
 //! | [`policy`] | the D6 invariants |
 //! | [`codex_check`] | Codex's effective feature switches read back from the adapter's codex before every Codex session, or no session (#2647) |
 //! | [`profile`] | which account a remote session runs as: this Mac's own choice, checked profile folder or refusal (#3033) |
-//! | [`control_socket`] | the app ↔ workd Unix socket: `status`, `shutdown`, `pin_root`, `revoke_device`, `reset_signature_requirement`, peer signature check |
+//! | [`control_socket`] | the app ↔ workd Unix socket: `status`, `shutdown`, `pin_root`, `revoke_device`, `reset_signature_requirement`, peer signature check, the run's secret on every request (#5619) |
 //! | [`cli`] | `register` / `run` |
 
 pub mod acp;

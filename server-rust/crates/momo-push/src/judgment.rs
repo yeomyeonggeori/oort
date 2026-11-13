@@ -75,6 +75,21 @@
 //!   status is not read from `work_permission_request`, so a request that was already decided or
 //!   cancelled before the candidate is judged can still push (the window above bounds that to the
 //!   request's deadline, and the app's card is the authority on what is still open).
+//! * **A work session stopped (`work_session_notice`, #5594, ADR-0188 D7·D8, ADR-0220 P2 ③·④)** — the
+//!   server's own System line in a session's thread: the Mac went quiet (`host_lost`), the Mac ended the
+//!   session with an error (`failed`), a permission request passed its deadline unanswered
+//!   (`permission_expired`), or the Mac refused to start the work (`spawn_refused`). The arm **claims the
+//!   message for everyone** (a DM peer never falls through to `dm`) and selects at most one person: the
+//!   session's owner, re-checked against `work_session` (owner = `props.owner_member_id` = the session's
+//!   member, the line in the session's channel and thread, written by the owner or the session's persona).
+//!   A `host_lost` line of a session that had no turn running (`was_running: false`) pushes nobody
+//!   (ADR-0220 P5: a Mac that sleeps with finished sessions is one cause, not a burst of pushes).
+//!   A resumable `host_lost` is the existing `resume_offer` reason (always sent, ADR-0206 D5 table
+//!   「이어받기」: the host-death path ADR-0120 A-4 names). `failed`, `permission_expired` and a host loss
+//!   the member's policy ended are the `work_notice` arm — wire `mention`, kind `agentAnswer`, the reason
+//!   and switch ADR-0204 D8 gives the server-written expiry and stall notices — not sent while the owner
+//!   is reading the channel (the same 30 s window, ADR-0188 D8 「완료·실패: 활동 중이 아닐 때만」). A
+//!   `spawn_refused` line pushes nobody. The owner is a recipient even when they wrote the line.
 //! * **An agent's answer to you (ADR-0204 D8, #3929)** — a run's closing line pushes
 //!   the person whose message the run answered: the final answer, the approval-expiry
 //!   result, the stall notice. "Answers" is a fact the line carries — `reply_to_id`
@@ -222,7 +237,7 @@
 //!
 //! Reason precedence per member is the `CASE` arm order below: the three work
 //! reasons (`resume_offer`, `work_session_idle`, `work_run_done` — each claims its
-//! message for the one person it names) > `work_permission` (the same: its message is claimed for
+//! message for the one person it names, and the work notice beside them, #5594) > `work_permission` (the same: its message is claimed for
 //! the session's owner) > `approval_request` > `mention` > `dm` > an
 //! agent's answer to you > a reply in a thread you follow. The last two never outrank a
 //! mention or a DM, and only a person nothing else selected reaches them, so one message
@@ -305,6 +320,15 @@ pub const WORK_PERMISSION_PUSH_WINDOW_SECS: i64 = 600;
 /// category and its id are not an `approval` row's.
 pub(crate) const WORK_PERMISSION_ARM: &str = "work_permission";
 
+/// The arm label of a work session's failure notice (#5594, ADR-0220 P2 ④ 실패 · P3): a
+/// `work_session_notice` line whose `code` is `failed` or `permission_expired` (or `host_lost` when
+/// the member's policy ended the session rather than leaving it resumable), pushed to the session's
+/// owner only. The wire reason is the existing `mention` and the kind `agentAnswer` — the reason and
+/// switch ADR-0204 D8 already gives the server-written expiry and stall notices of a hosted run —
+/// under the `momo.work` category (no reply button: a reply in the session's thread is not an
+/// instruction). No relay, app or NSE change: no new word on the wire.
+pub(crate) const WORK_NOTICE_ARM: &str = "work_notice";
+
 /// One (member, active token) pair to notify, with the reason that selected it.
 #[derive(Debug, Clone)]
 pub struct JudgedTarget {
@@ -368,6 +392,7 @@ pub async fn judge_candidate_targets(
 /// | `work_session_idle`, `work_run_done` | the same | `workDone` |
 /// | `approval` | `approval_request` | `approval` |
 /// | `work_permission` | `approval_request` | `approval` (a work-session permission request, to the session's owner; ADR-0188 D5·D8) |
+/// | `work_notice` | `mention` | `agentAnswer` (a work session's failure or expiry notice, to the session's owner; #5594) |
 /// | `mentionHuman`, `mentionAgent` | `mention` | the same (by the author's kind) |
 /// | `agentAnswer` | `mention` | `agentAnswer` (the agent's answer to you, and the settled-approval
 /// notice to the person who asked) |
@@ -380,6 +405,7 @@ pub async fn judge_candidate_targets(
 pub(crate) fn decode_arm(label: &str) -> Option<(PushReason, Option<NotificationKind>)> {
     Some(match label {
         "resume_offer" => (PushReason::ResumeOffer, None),
+        WORK_NOTICE_ARM => (PushReason::Mention, Some(NotificationKind::AgentAnswer)),
         "work_session_idle" => (
             PushReason::WorkSessionIdle,
             Some(NotificationKind::WorkDone),
@@ -420,6 +446,9 @@ async fn judge_targets_for_source(
                   m.props->>'owner_member_id' AS owner_member_id, \
                   m.props->>'session_id' AS session_id, \
                   m.props->>'event_type' AS event_type, \
+                  m.props->>'code' AS notice_code, \
+                  COALESCE(m.props->'resumable' = 'true'::jsonb, false) AS notice_resumable, \
+                  COALESCE(m.props->'was_running' = 'true'::jsonb, false) AS notice_was_running, \
                   CASE WHEN m.props->>'event_id' \
                             ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' \
                        THEN (m.props->>'event_id')::uuid END AS event_id, \
@@ -538,6 +567,48 @@ async fn judge_targets_for_source(
                     WHEN (SELECT props_kind FROM msg) = 'resume_offer' \
                          AND lower(mem.id::text) = lower((SELECT owner_member_id FROM msg)) \
                       THEN 'resume_offer' \
+                    WHEN (SELECT props_kind FROM msg) = 'work_session_notice' THEN \
+                      CASE WHEN (SELECT message_type FROM msg) = 'system' \
+                            AND lower(mem.id::text) = lower((SELECT owner_member_id FROM msg)) \
+                            AND EXISTS ( \
+                              SELECT 1 FROM work_session nws \
+                               WHERE nws.workspace_id = $1 \
+                                 AND lower(nws.id::text) = lower((SELECT session_id FROM msg)) \
+                                 AND nws.member_id = mem.id \
+                                 AND nws.channel_id = (SELECT channel_id FROM msg) \
+                                 AND nws.root_message_id = (SELECT root_id FROM msg) \
+                                 AND ( nws.member_id = (SELECT author_member_id FROM msg) \
+                                       OR nws.persona_member_id = (SELECT author_member_id FROM msg) ) \
+                            ) THEN \
+                        CASE WHEN (SELECT notice_code FROM msg) = 'host_lost' \
+                                  AND NOT (SELECT notice_was_running FROM msg) \
+                               THEN NULL \
+                             WHEN (SELECT notice_code FROM msg) = 'host_lost' \
+                                  AND (SELECT notice_resumable FROM msg) \
+                               THEN 'resume_offer' \
+                             WHEN (SELECT notice_code FROM msg) IN ('host_lost', 'failed', 'permission_expired') \
+                                  AND nr0.kinds->'agentAnswer'->'phone' IS DISTINCT FROM 'false'::jsonb \
+                                  AND NOT EXISTS ( \
+                                    SELECT 1 FROM read_state seen \
+                                     WHERE seen.workspace_id = $1 \
+                                       AND seen.channel_id = (SELECT channel_id FROM msg) \
+                                       AND seen.member_id = mem.id \
+                                       AND seen.last_read_seq > 0 \
+                                       AND ( seen.last_read_seq >= (SELECT seq FROM msg) \
+                                             OR seen.last_read_at >= (SELECT created_at FROM msg) \
+                                                  - make_interval(secs => $4::double precision) ) \
+                                  ) \
+                                  AND NOT EXISTS ( \
+                                    SELECT 1 FROM channel_viewing viewing \
+                                     WHERE viewing.workspace_id = $1 \
+                                       AND viewing.channel_id = (SELECT channel_id FROM msg) \
+                                       AND viewing.member_id = mem.id \
+                                       AND viewing.seen_at >= (SELECT created_at FROM msg) \
+                                            - make_interval(secs => $4::double precision) \
+                                  ) \
+                               THEN 'work_notice' \
+                        END \
+                      END \
                     WHEN (SELECT props_kind FROM msg) = 'work_session_idle' THEN \
                       CASE WHEN lower(mem.id::text) = lower((SELECT owner_member_id FROM msg)) \
                             AND ( mem.id = (SELECT author_member_id FROM msg) \
@@ -711,7 +782,8 @@ async fn judge_targets_for_source(
               AND ms.left_at IS NULL \
               AND ( \
                 ms.member_id <> (SELECT author_member_id FROM msg) \
-                OR (SELECT props_kind FROM msg) IN ('resume_offer', 'work_session_idle') \
+                OR (SELECT props_kind FROM msg) IN ('resume_offer', 'work_session_idle', \
+                                                    'work_session_notice') \
                 OR ((SELECT props_kind FROM msg) = 'work_session_event' \
                     AND (SELECT event_type FROM msg) = 'approval.requested') \
               ) \
@@ -958,8 +1030,9 @@ mod tests {
     /// Every arm label the statement can produce. A new `THEN '<label>'` in the `recipients` CASE
     /// must be a row of [`decode_arm`] (an unknown label fails the decode so the candidate retries),
     /// and a row of [`decode_arm`] the statement no longer produces is dead.
-    const ARM_LABELS: [&str; 10] = [
+    const ARM_LABELS: [&str; 11] = [
         "resume_offer",
+        "work_notice",
         "work_session_idle",
         "work_run_done",
         "approval",
@@ -1023,12 +1096,13 @@ mod tests {
             let (_, kind) = decode_arm(label).unwrap();
             assert_eq!(kind.is_none(), label == "resume_offer", "{label}");
         }
-        // Three arms share the wire reason `mention`, two share the kind `workDone`.
+        // Four arms share the wire reason `mention` (#5594 added the work notice), two share the
+        // kind `workDone`.
         let mention: Vec<_> = ARM_LABELS
             .iter()
             .filter(|label| decode_arm(label).unwrap().0 == PushReason::Mention)
             .collect();
-        assert_eq!(mention.len(), 3);
+        assert_eq!(mention.len(), 4);
         let work: Vec<_> = ARM_LABELS
             .iter()
             .filter(|label| decode_arm(label).unwrap().1 == Some(NotificationKind::WorkDone))

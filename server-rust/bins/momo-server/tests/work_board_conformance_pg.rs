@@ -26,6 +26,10 @@
 //! | `b11_mention_managed_linked_and_stale_runs_are_not_listed` | mention·managed work run 제외, 세션에 연결된 run은 세션 한 줄만, 종료 30일 뒤 제외 | the `input.type` / hosted `EXISTS` / `NOT EXISTS` link / retention predicates |
 //! | `b12_a_cursor_is_stable_across_mixed_sources` | 세션+run 혼합 목록의 커서 완전·무중복·동률 안정 | the `(activity_us, id) <` keyset over `board` |
 //! | `b13_work_run_updated_fires_on_board_transitions_only` | 보드 어휘 전환·생성에서만 `work.run.updated`, 단계/step 갱신·승인 보류에서는 없음, managed work run도 냄·최상위 mention은 마지막 전환만·하위 run은 없음(#3853 migration 135) | the trigger's state comparison and its type/top-level/final-transition guards |
+//! | `b20_the_owner_reads_their_session_waiting_on_a_permission_request` | 주인의 `include=jobs` 읽기만 `waiting`(team·mine), 결정·만료·취소 뒤 원래 낱말(running), 주인 아닌 멤버·`include` 없음·`runs`뿐·단건 읽기는 같은 바이트, 새 키·요청 내용 없음(#5639) | the `ws.member_id = $2` / `pr.expires_at >` / `$9` conditions of `awaiting_owner` in `work_board::SELECT` |
+//! | `b21_a_waiting_session_reads_only_its_own_workspaces_requests` | 다른 워크스페이스의 요청이 섞이지 않음 — api 역할(RLS)과, RLS가 없는 읽기에서도 쿼리 자체의 워크스페이스 조건으로(#5639) | the `pr.workspace_id = ws.workspace_id` condition of `awaiting_owner` |
+//! | `b22_a_session_on_a_host_someone_else_owns_never_waits` | 세션 주인 ≠ 호스트 주인(공유 호스트)이면 세션 주인도 호스트 주인도 `waiting` 아님, 결정 경로도 둘 다 403(#5639) | the `h.owner_member_id = $2` decider check of `awaiting_owner` |
+//! | `b23_the_board_waits_for_exactly_the_people_the_decision_route_accepts` | 같은 준비물(내 맥·공유 맥·해지된 맥·`idle` 세션·앨리스의 맥 × 주인·앨리스·밥)에서 보드가 `waiting`을 준 사람 집합 = 결정 경로가 받아들인(200) 사람 집합(#5639) | the decider check (`h.owner_member_id`, `h.revoked_at IS NULL`) drifting from `active_host_owner_in_tx`; `idle` mapped to `waiting` in `state_of_host_session` |
 //!
 //! Every refusal test also takes the legitimate path beside it, so none of them
 //! can pass by a route that refuses everything, and each asserts the status and
@@ -3022,4 +3026,558 @@ fn sorted_object_keys(value: &Value) -> Vec<String> {
     let mut keys: Vec<String> = value.as_object().unwrap().keys().cloned().collect();
     keys.sort();
     keys
+}
+
+// ---------------------------------------------------------------------------
+// 20·21 — the owner's Mac session waiting on a permission request (#5639,
+// ADR-0202 D4 · ADR-0188 D3·D5)
+// ---------------------------------------------------------------------------
+
+/// Written into the request's option id and preview: neither may reach the wire.
+const MARK_OPTION: &str = "W5639-OPTION-MARK";
+const MARK_PREVIEW: &str = "W5639-PREVIEW-MARK";
+
+fn allow_mark() -> momo_t3::work_permission::PermissionOption {
+    momo_t3::work_permission::PermissionOption {
+        option_id: MARK_OPTION.to_string(),
+        kind: "allow_once".to_string(),
+    }
+}
+
+/// Where a request lives: one session of one tenant.
+#[derive(Clone, Copy)]
+struct Asking {
+    workspace: Uuid,
+    session: Uuid,
+    host: Uuid,
+    channel: Uuid,
+}
+
+impl Asking {
+    fn of(b: &Board, session: Uuid) -> Asking {
+        Asking {
+            workspace: b.tenant.workspace,
+            session,
+            host: b.desktop,
+            channel: b.tenant.channel,
+        }
+    }
+}
+
+/// A pending request, recorded by the ledger itself
+/// (`momo_t3::work_permission`) in the session's own tenant transaction as the
+/// NOBYPASSRLS api role — what the host's `approval.requested` writes. Returns
+/// the request row id.
+async fn pending_request(app: &PgPool, at: Asking) -> Uuid {
+    momo_db::with_tenant_tx(app, at.workspace, move |conn| {
+        Box::pin(async move {
+            let event = Uuid::new_v4();
+            let written = momo_t3::work_permission::insert_permission_request_in_tx(
+                conn,
+                at.workspace,
+                &momo_t3::work_permission::NewPermissionRequest {
+                    work_session_id: at.session,
+                    host_id: at.host,
+                    channel_id: at.channel,
+                    request_event_id: event,
+                    options: vec![
+                        allow_mark(),
+                        momo_t3::work_permission::PermissionOption {
+                            option_id: "reject".to_string(),
+                            kind: "reject_once".to_string(),
+                        },
+                    ],
+                    preview: Some((
+                        json!({"tool": MARK_PREVIEW, "title": MARK_PREVIEW}),
+                        format!("{:064x}", event.as_u128()),
+                    )),
+                },
+            )
+            .await
+            .expect("record the request");
+            assert!(written, "a new request is one row");
+            let row = momo_t3::work_permission::load_permission_request_in_tx(
+                conn,
+                at.workspace,
+                at.session,
+                event,
+            )
+            .await
+            .expect("load the request")
+            .expect("the request row");
+            assert_eq!(row.status, "pending");
+            Ok::<_, momo_db::DbError>(row.id)
+        })
+    })
+    .await
+    .expect("tenant tx")
+}
+
+/// The owner's decision through the ledger (`pending → approved`).
+async fn decide_request(b: &Board, request: Uuid) {
+    let (workspace, owner) = (b.tenant.workspace, b.tenant.owner);
+    momo_db::with_tenant_tx(&b.app, workspace, move |conn| {
+        Box::pin(async move {
+            let decided = momo_t3::work_permission::decide_permission_request_in_tx(
+                conn,
+                workspace,
+                request,
+                owner,
+                &allow_mark(),
+            )
+            .await
+            .expect("decide");
+            assert_eq!(decided.expect("first decision wins").status, "approved");
+            Ok::<_, momo_db::DbError>(())
+        })
+    })
+    .await
+    .expect("tenant tx");
+}
+
+/// The session's pending requests cancelled through the ledger (the turn
+/// ended); answers how many rows closed.
+async fn cancel_requests(b: &Board, session: Uuid) -> u64 {
+    let workspace = b.tenant.workspace;
+    momo_db::with_tenant_tx(&b.app, workspace, move |conn| {
+        Box::pin(async move {
+            Ok::<_, momo_db::DbError>(
+                momo_t3::work_permission::cancel_pending_for_session_in_tx(
+                    conn, workspace, session,
+                )
+                .await
+                .expect("cancel"),
+            )
+        })
+    })
+    .await
+    .expect("tenant tx")
+}
+
+async fn raw_list(b: &Board, token: &str, tenant: &Tenant, query: &str) -> String {
+    let response = b.get(token, board_list_url(&b.base, tenant, query)).await;
+    assert_eq!(response.status(), 200, "the board list answers");
+    response.text().await.expect("list body")
+}
+
+async fn raw_one(b: &Board, token: &str, session: Uuid) -> String {
+    let response = b.one(token, session).await;
+    assert_eq!(response.status(), 200, "the single read answers");
+    response.text().await.expect("single body")
+}
+
+/// `state` of `session` in a jobs page read by `token`.
+async fn jobs_state(b: &Board, token: &str, session: Uuid, query: &str) -> String {
+    let list = jobs(b, token, query).await;
+    let item = row(&list, session).unwrap_or_else(|| panic!("{session} listed: {list}"));
+    item["state"].as_str().expect("state").to_string()
+}
+
+const JOBS: &str = "?include=runs,jobs&limit=100";
+
+#[tokio::test]
+#[ignore = "needs a pgvector/pg18 superuser DB (DATABASE_URL)"]
+async fn b20_the_owner_reads_their_session_waiting_on_a_permission_request() {
+    let b = board().await;
+    let asking = open_host_session(&b.http, &b.base, &b.owner_token, &b.tenant, b.desktop).await;
+    let quiet = open_host_session(&b.http, &b.base, &b.owner_token, &b.tenant, b.desktop).await;
+
+    // Before any request: the shipped reads, byte for byte, and alice's jobs page.
+    let shipped = [
+        ("", b.owner_token.as_str()),
+        ("?include=runs&limit=100", b.owner_token.as_str()),
+        ("?who=mine", b.owner_token.as_str()),
+        ("", b.alice_token.as_str()),
+        ("?include=runs&limit=100", b.alice_token.as_str()),
+        (JOBS, b.alice_token.as_str()),
+        (
+            "?include=runs,jobs&limit=100&who=team",
+            b.alice_token.as_str(),
+        ),
+    ];
+    let mut before = Vec::new();
+    for (query, token) in shipped {
+        before.push(raw_list(&b, token, &b.tenant, query).await);
+    }
+    let one_before = [
+        raw_one(&b, &b.owner_token, asking).await,
+        raw_one(&b, &b.alice_token, asking).await,
+    ];
+    let jobs_before = jobs(&b, &b.owner_token, "").await;
+    let keys_before = sorted_object_keys(row(&jobs_before, asking).expect("listed"));
+    assert_eq!(jobs_state(&b, &b.owner_token, asking, "").await, "running");
+
+    let request = pending_request(&b.app, Asking::of(&b, asking)).await;
+    let request_text = request.to_string();
+
+    // ① The owner's include=jobs read (team and mine alike): waiting, only on
+    // the session that asks; the ledger status is untouched.
+    for query in ["", "&who=mine", "&who=team"] {
+        let list = jobs(&b, &b.owner_token, query).await;
+        let item = row(&list, asking).expect("listed");
+        assert_eq!(item["state"], "waiting", "owner{query}: {item}");
+        assert_eq!(item["status"], "running", "the ledger word stays");
+        assert_eq!(row(&list, quiet).expect("listed")["state"], "running");
+        // ⑤ No new key, and nothing of the request on the wire.
+        assert_eq!(sorted_object_keys(item), keys_before, "the same row shape");
+        let wire = serde_json::to_string(&list).unwrap();
+        for mark in [MARK_OPTION, MARK_PREVIEW, request_text.as_str()] {
+            assert!(!wire.contains(mark), "{mark} leaked: {wire}");
+        }
+    }
+
+    // ② Not the owner: alice's jobs page is the very bytes it was.
+    // ④ Every read without include=jobs, and the single read, is byte-identical.
+    for ((query, token), was) in shipped.iter().zip(&before) {
+        let now = raw_list(&b, token, &b.tenant, query).await;
+        assert_eq!(&now, was, "{query} is unchanged for this caller");
+    }
+    assert_eq!(raw_one(&b, &b.owner_token, asking).await, one_before[0]);
+    assert_eq!(raw_one(&b, &b.alice_token, asking).await, one_before[1]);
+    assert_eq!(
+        jobs_state(&b, &b.alice_token, asking, "").await,
+        "running",
+        "a member who is not the owner reads the ledger word"
+    );
+
+    // ③ A request past its deadline that the sweep has not closed yet is still
+    // `pending` in the table — and is not counted.
+    sqlx::query(
+        "UPDATE work_permission_request \
+            SET expires_at = clock_timestamp() - interval '1 second' WHERE id = $1",
+    )
+    .bind(request)
+    .execute(&b.su)
+    .await
+    .expect("let the request lapse");
+    let status: String =
+        sqlx::query_scalar("SELECT status FROM work_permission_request WHERE id = $1")
+            .bind(request)
+            .fetch_one(&b.su)
+            .await
+            .unwrap();
+    assert_eq!(status, "pending", "lapsed, not yet swept");
+    assert_eq!(
+        jobs_state(&b, &b.owner_token, asking, "").await,
+        "running",
+        "an expired request asks nothing"
+    );
+
+    // Decided → the ledger word on the next read.
+    let request = pending_request(&b.app, Asking::of(&b, asking)).await;
+    assert_eq!(jobs_state(&b, &b.owner_token, asking, "").await, "waiting");
+    decide_request(&b, request).await;
+    assert_eq!(jobs_state(&b, &b.owner_token, asking, "").await, "running");
+
+    // Cancelled → the ledger word.
+    pending_request(&b.app, Asking::of(&b, asking)).await;
+    assert_eq!(jobs_state(&b, &b.owner_token, asking, "").await, "waiting");
+    assert_eq!(jobs_state(&b, &b.alice_token, asking, "").await, "running");
+    assert_eq!(
+        cancel_requests(&b, asking).await,
+        2,
+        "the new request and the lapsed, unswept one"
+    );
+    assert_eq!(jobs_state(&b, &b.owner_token, asking, "").await, "running");
+    // (An idle session with a stray pending row is b23's: it never waits.)
+}
+
+#[tokio::test]
+#[ignore = "needs a pgvector/pg18 superuser DB (DATABASE_URL)"]
+async fn b21_a_waiting_session_reads_only_its_own_workspaces_requests() {
+    let b = board().await;
+    let asking = open_host_session(&b.http, &b.base, &b.owner_token, &b.tenant, b.desktop).await;
+
+    // Tenant B: its owner, their own Mac, their own session waiting on a request.
+    let other = seed_tenant(&b.su, &b.app).await;
+    let other_token = token_for(&b, &other).await;
+    let (other_desktop, _) = seed_host(&b.su, &other, other.owner, "member", "app", "B의 맥").await;
+    let theirs = open_host_session(&b.http, &b.base, &other_token, &other, other_desktop).await;
+    pending_request(
+        &b.app,
+        Asking {
+            workspace: other.workspace,
+            session: theirs,
+            host: other_desktop,
+            channel: other.channel,
+        },
+    )
+    .await;
+
+    // B's request turns B's session for B's owner, and nothing of A.
+    let b_page: Value = b
+        .get(&other_token, board_list_url(&b.base, &other, JOBS))
+        .await
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(item_ids(&b_page), vec![theirs.to_string()]);
+    assert_eq!(row(&b_page, theirs).unwrap()["state"], "waiting");
+    // A's owner: A's session is not waiting, and B's session is not listed.
+    let a_page = jobs(&b, &b.owner_token, "").await;
+    assert!(row(&a_page, theirs).is_none());
+    assert_eq!(row(&a_page, asking).unwrap()["state"], "running");
+
+    // A row that names A's session under B's workspace (only a superuser can
+    // write one). RLS hides it from the api role; the query's own workspace
+    // predicate must hide it too, for a reader RLS does not stop.
+    sqlx::query(
+        "INSERT INTO work_permission_request \
+           (workspace_id, work_session_id, host_id, channel_id, request_event_id, options, \
+            expires_at) \
+         VALUES ($1, $2, $3, $4, $5, $6, clock_timestamp() + interval '10 minutes')",
+    )
+    .bind(other.workspace)
+    .bind(asking)
+    .bind(b.desktop)
+    .bind(b.tenant.channel)
+    .bind(Uuid::new_v4())
+    .bind(json!([{"option_id": MARK_OPTION, "kind": "allow_once"}]))
+    .execute(&b.su)
+    .await
+    .expect("a cross-workspace row");
+    assert_eq!(
+        jobs_state(&b, &b.owner_token, asking, "").await,
+        "running",
+        "api role: B's row never reaches A's read"
+    );
+    let (workspace_a, owner_a) = (b.tenant.workspace, b.tenant.owner);
+    let read_as_superuser = || {
+        let su = b.su.clone();
+        async move {
+            momo_db::with_tenant_tx(&su, workspace_a, move |conn| {
+                Box::pin(async move {
+                    let page = momo_t3::work_board::list_board_scoped_in_tx(
+                        conn,
+                        workspace_a,
+                        owner_a,
+                        momo_t3::work_board::BoardScope {
+                            include_runs: true,
+                            include_jobs: true,
+                            who_mine: false,
+                        },
+                        None,
+                        100,
+                    )
+                    .await
+                    .expect("query");
+                    Ok::<_, momo_db::DbError>(
+                        page.items
+                            .into_iter()
+                            .find(|item| item.session_id == asking)
+                            .expect("listed")
+                            .state,
+                    )
+                })
+            })
+            .await
+            .expect("tenant tx")
+        }
+    };
+    assert_eq!(
+        read_as_superuser().await,
+        "running",
+        "past RLS, the workspace predicate still keeps B's row out"
+    );
+    // Control: the same superuser read does see A's own request.
+    pending_request(&b.app, Asking::of(&b, asking)).await;
+    assert_eq!(read_as_superuser().await, "waiting");
+    assert_eq!(jobs_state(&b, &b.owner_token, asking, "").await, "waiting");
+}
+
+// ---------------------------------------------------------------------------
+// 22·23 — 「응답 필요」 = I can answer it: the board asks who the decision
+// route accepts (ADR-0188 D3: 결정자 = 세션 소유자 = host 소유자)
+// ---------------------------------------------------------------------------
+
+/// The `approval.requested` event id of request row `request`.
+async fn event_of(su: &PgPool, request: Uuid) -> Uuid {
+    sqlx::query_scalar("SELECT request_event_id FROM work_permission_request WHERE id = $1")
+        .bind(request)
+        .fetch_one(su)
+        .await
+        .expect("request event id")
+}
+
+/// A pending request on `session` (running on `host`, in the tenant's channel).
+async fn pending_on(b: &Board, session: Uuid, host: Uuid) -> Uuid {
+    let request = pending_request(
+        &b.app,
+        Asking {
+            host,
+            ..Asking::of(b, session)
+        },
+    )
+    .await;
+    event_of(&b.su, request).await
+}
+
+/// The real decision route, as `token`: an unsigned **reject** (a reject needs
+/// no device signature even with R2 on). Answers `(status, error code)`.
+async fn decide_as(b: &Board, token: &str, session: Uuid, event: Uuid) -> (u16, Value) {
+    let response = b
+        .http
+        .post(format!(
+            "{}/v1/workspaces/{}/work-sessions/{session}/permission-decisions",
+            b.base, b.tenant.workspace
+        ))
+        .bearer_auth(token)
+        .json(&json!({"requestEventId": event, "optionId": "reject", "kind": "reject_once"}))
+        .send()
+        .await
+        .expect("decide");
+    if response.status().as_u16() == 200 {
+        return (200, Value::Null);
+    }
+    let (status, code, _) = error_of(response).await;
+    (status, code)
+}
+
+#[tokio::test]
+#[ignore = "needs a pgvector/pg18 superuser DB (DATABASE_URL)"]
+async fn b22_a_session_on_a_host_someone_else_owns_never_waits() {
+    let b = board().await;
+    // alice registered a shared Mac; the owner's session runs on it.
+    let (shared_host, _) = seed_host(
+        &b.su,
+        &b.tenant,
+        b.alice,
+        "workspace",
+        "app",
+        "앨리스가 등록한 공용 맥",
+    )
+    .await;
+    let shared = open_host_session(&b.http, &b.base, &b.owner_token, &b.tenant, shared_host).await;
+    // Control: the owner's session on the owner's own Mac, with a request too.
+    let own = open_host_session(&b.http, &b.base, &b.owner_token, &b.tenant, b.desktop).await;
+    let shared_event = pending_on(&b, shared, shared_host).await;
+    pending_on(&b, own, b.desktop).await;
+
+    // The session owner who does not own the host: not waiting, in any jobs read.
+    for query in ["", "&who=mine", "&who=team"] {
+        assert_eq!(
+            jobs_state(&b, &b.owner_token, own, query).await,
+            "waiting",
+            "control{query}: own Mac"
+        );
+        assert_eq!(
+            jobs_state(&b, &b.owner_token, shared, query).await,
+            "running",
+            "session owner, not host owner{query}"
+        );
+    }
+    // The host owner who does not own the session: not waiting either.
+    for session in [shared, own] {
+        assert_eq!(
+            jobs_state(&b, &b.alice_token, session, "").await,
+            "running",
+            "host owner, not session owner"
+        );
+    }
+    // …because neither of them can answer it.
+    for token in [&b.owner_token, &b.alice_token] {
+        assert_eq!(
+            decide_as(&b, token, shared, shared_event).await,
+            (403, json!("permission_owner_only"))
+        );
+    }
+}
+
+#[tokio::test]
+#[ignore = "needs a pgvector/pg18 superuser DB (DATABASE_URL)"]
+async fn b23_the_board_waits_for_exactly_the_people_the_decision_route_accepts() {
+    use std::collections::BTreeSet;
+    let b = board().await;
+    // alice: a shared Mac she registered, and her own Mac.
+    let (alice_shared, _) =
+        seed_host(&b.su, &b.tenant, b.alice, "workspace", "app", "공용 맥").await;
+    let (alice_mac, _) = seed_host(&b.su, &b.tenant, b.alice, "member", "app", "앨리스의 맥").await;
+    // The owner's second Mac, revoked after its session asked.
+    let (owner_old_mac, _) =
+        seed_host(&b.su, &b.tenant, b.tenant.owner, "member", "app", "옛 맥").await;
+
+    let mut sessions = Vec::new();
+    for (name, token, host) in [
+        ("owner·own", &b.owner_token, b.desktop),
+        ("owner·shared", &b.owner_token, alice_shared),
+        ("owner·revoked", &b.owner_token, owner_old_mac),
+        ("owner·idle", &b.owner_token, b.desktop),
+        ("alice·own", &b.alice_token, alice_mac),
+    ] {
+        let session = open_host_session(&b.http, &b.base, token, &b.tenant, host).await;
+        let event = pending_on(&b, session, host).await;
+        sessions.push((name, session, event));
+    }
+    sqlx::query("UPDATE work_host SET revoked_at = clock_timestamp() WHERE id = $1")
+        .bind(owner_old_mac)
+        .execute(&b.su)
+        .await
+        .expect("revoke the old Mac");
+    // The turn ended under a request the ledger did not get to cancel (the idle
+    // transition cancels it; this row stays pending on purpose).
+    let idle = sessions[3].1;
+    sqlx::query(
+        "UPDATE work_session SET status = 'idle', idle_at = clock_timestamp() WHERE id = $1",
+    )
+    .bind(idle)
+    .execute(&b.su)
+    .await
+    .expect("the turn ends");
+    assert_eq!(
+        jobs_state(&b, &b.owner_token, idle, "").await,
+        "idle",
+        "an idle session keeps its word under a pending request"
+    );
+    let viewers = [
+        ("owner", &b.owner_token),
+        ("alice", &b.alice_token),
+        ("bob", &b.bob_token),
+    ];
+
+    // The board's set, read before anyone decides anything.
+    let mut waiting = BTreeSet::new();
+    for (who, token) in viewers {
+        let list = jobs(&b, token, "").await;
+        for (name, session, _) in &sessions {
+            if row(&list, *session).is_some_and(|item| item["state"] == "waiting") {
+                waiting.insert((who, *name));
+            }
+        }
+    }
+    // The decision route's set: every person tries every request.
+    let mut accepted = BTreeSet::new();
+    let mut outcomes = Vec::new();
+    for (who, token) in viewers {
+        for (name, session, event) in &sessions {
+            let (status, code) = decide_as(&b, token, *session, *event).await;
+            if status == 200 {
+                accepted.insert((who, *name));
+            }
+            outcomes.push((who, *name, status, code));
+        }
+    }
+
+    assert_eq!(
+        waiting, accepted,
+        "the board waits for exactly the people the decision route accepts\n{outcomes:#?}"
+    );
+    // Not vacuous: two people can answer, each their own request only.
+    assert_eq!(
+        waiting,
+        BTreeSet::from([("alice", "alice·own"), ("owner", "owner·own")])
+    );
+    // Every other outcome is the route's own refusal: not the decider (403), or
+    // — for the owner of the revoked Mac and of the idle session — a request
+    // nobody can answer any more (409).
+    for (who, name, status, code) in &outcomes {
+        if accepted.contains(&(*who, *name)) {
+            continue;
+        }
+        let expected = if who == &"owner" && ["owner·revoked", "owner·idle"].contains(name) {
+            (409, json!("permission_request_closed"))
+        } else {
+            (403, json!("permission_owner_only"))
+        };
+        assert_eq!((*status, code.clone()), expected, "{who} → {name}");
+    }
 }

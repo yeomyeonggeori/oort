@@ -344,10 +344,11 @@ reached from the containers at `http://host.docker.internal:<port>/v1`, not
 at `127.0.0.1` (that address inside the container is the container itself).
 Write the opt-in when creating env, then put that URL in **설정 › AI 연결**.
 
-Measured hermes procedure (OpenAI-compatible SSE on this machine → welcome
-kickoff reply). If you already run a real hermes, use that process and skip
-the mock. This checkout has no hermes binary; the stand-in is
-`scripts/mock_hermes.py`.
+Measured hermes procedure (OpenAI-compatible `/v1/chat/completions` on this
+machine, non-streamed: `agent-worker` sends `"stream": false` and reads one
+JSON answer → welcome kickoff reply). If you already run a real hermes, use
+that process and skip the mock. This checkout has no hermes binary; the
+stand-in is `scripts/mock_hermes.py`.
 
 1. Start the provider on a host port Docker can reach. Pick a free port
    (`<provider-port>` below). Bind `0.0.0.0` — `host.docker.internal` is the

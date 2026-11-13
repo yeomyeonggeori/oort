@@ -42,7 +42,7 @@ hermes `startCommand`)가 이 릴리스에서 바뀌었다면 이미지 발행�
 
 첫 공개 발행의 빌드 커밋은 `main=45a154d2` 다 (패킷 §G1).
 
-승격 때 통합자가 앱 안 「업데이트 소식」 파일을 쓴다: 이번 릴리스에서 사용자에게 보이는 변화를 쉬운 말(핵심 항목 8개 이하, 나머지는 「그 밖에 바뀐 점」 주제별 한 줄)로 적는다(#4937, #5054). 글(ko·en)은 문구 사전 `releaseNotes.json`에 쓰고, `packages/momo-core/src/features/releaseNotes/notes/v<버전>.ts` 한 파일에는 번호·빌드·사전 키 목록을 적어 `notes/index.ts`에 더한다(순서는 `notes/README.md`). 그 소식을 처음 담는 폰 빌드 번호와 데스크탑 버전(`phoneBuild`·`desktopFrom`, 다음 채널 빌드가 담으면 `0.1.0-next.N`도)도 그 파일에 적는다. 붙는 규칙은 `releaseNotes/model.ts` 머리말이고, 팀 채널 「업데이트 소식」 게시(#4793)는 같은 글을 쓴다. `CHANGELOG.md`는 개발 기록으로 그대로 둔다.
+승격 때 통합자가 앱 안 「업데이트 소식」 파일을 쓴다: 이번 릴리스에서 사용자에게 보이는 변화를 쉬운 말(핵심 항목 8개 이하, 나머지는 「그 밖에 바뀐 점」 주제별 한 줄)로 적는다(#4937, #5054). 글(ko·en)은 문구 사전 `releaseNotes.json`에 쓰고, `packages/momo-core/src/features/releaseNotes/notes/v<버전>.ts` 한 파일에는 번호·빌드·사전 키 목록을 적어 `notes/index.ts`에 더한다(순서는 `notes/README.md`). 그 소식을 처음 담는 폰 빌드 번호와 데스크탑 버전(`phoneBuild`·`desktopFrom`: 팀 판 번호 `0.1.N`만 적는다. `-fix`·`-staging` 판은 소식을 띄우지 않는다)도 그 파일에 적는다. 붙는 규칙은 `releaseNotes/model.ts` 머리말이고, 팀 채널 「업데이트 소식」 게시(#4793)는 같은 글을 쓴다. `CHANGELOG.md`는 개발 기록으로 그대로 둔다.
 
 ---
 
@@ -70,8 +70,8 @@ scripts/collect_changes.py --since <지난 승격의 main 커밋> --output <결�
 순서대로 한다.
 
 1. **빌드 번호·버전을 먼저 정한 뒤** 앱 안 「업데이트 소식」 파일을 쓴다(#4937). 다음 폰 빌드 번호는
-   [`docs/runbooks/ios-testflight.md`](runbooks/ios-testflight.md) §2의 규칙으로, 데스크탑 버전은 채널마다(release `0.1.N`,
-   next `0.1.0-next.N`) 정한다. 그 뒤 이번 릴리스에서 사용자에게 보이는 변화를 쉬운 말(핵심 항목 8개 이하, 나머지는 「그 밖에
+   [`docs/runbooks/ios-testflight.md`](runbooks/ios-testflight.md) §2의 규칙으로, 데스크탑 버전은 승격 번호 `0.1.N`으로 정한다(팀 판·피드·사이트가 같은 번호,
+   [`NEXT_CHANNEL.md`](NEXT_CHANNEL.md) §1). 그 뒤 이번 릴리스에서 사용자에게 보이는 변화를 쉬운 말(핵심 항목 8개 이하, 나머지는 「그 밖에
    바뀐 점」 주제별 한 줄)로 쓴다: 글(ko·en)은 문구 사전 `releaseNotes.json`에, 번호·빌드·사전 키 목록은
    `packages/momo-core/src/features/releaseNotes/notes/v<버전>.ts` 한 파일에 적고 `notes/index.ts`에 더한다. 순서와 키 이름은
    `packages/momo-core/src/features/releaseNotes/notes/README.md`다.
@@ -202,7 +202,7 @@ git tag v0.1.0 45a154d2
 git push origin v0.1.0
 ```
 
-버전 `v0.1.0` 은 데스크탑 `0.1.0-next.N` 과 같은 0.1.0 계열이다
+서버 태그 `v0.x` 와 데스크탑 앱 번호 `0.1.N` 은 같은 승격 번호 줄이다
 ([§경계](#데스크탑-next-채널과의-경계)). 태그 이름에 `next-` 접두를 붙이지
 않는다.
 
@@ -272,22 +272,66 @@ GitHub Release 다.
 데스크탑 Tauri 자동 업데이트는 **다른 채널**이다. 정본
 [`docs/NEXT_CHANNEL.md`](NEXT_CHANNEL.md) §8:
 
-| | 이 문서 (서버/이미지) | next 채널 (데스크탑) |
+| | 이 문서 (서버/이미지) | 팀 채널 (데스크탑) |
 |---|---|---|
-| 버전 | `v0.1.0` (`v0.x`) | `0.1.0-next.N` |
-| 태그 | `v0.1.0` — **main 의 빌드 커밋** | `next-v0.1.0-next.N` |
+| 버전 | `v0.1.N` (`v0.x`) | `0.1.N` (같은 승격 번호) |
+| 태그 | `v0.1.N` — **main 의 빌드 커밋** | `mac-v0.1.N` (배포 저장소 릴리스) |
 | 저장소 | `yeomyeonggeori/oort` | `yeomyeonggeori/momo-alpha` (이 레포가 아님) |
-| 발행 | `publish-images.yml` (dispatch · `release` Environment) | `scripts/publish_next_build.sh` |
-| 불변 신원 | 이미지 `@sha256:` digest | minisign 서명 매니페스트 + 공증된 `.app.tar.gz` |
+| 발행 | `publish-images.yml` (dispatch · `release` Environment) | 아래 §데스크탑 팀 판 배포 (손 절차) |
+| 불변 신원 | 이미지 `@sha256:` digest | minisign 서명 피드 + 공증된 `.app.tar.gz` |
 
-`0.1.0-next.N < 0.1.0` 이 semver 로 항상 성립한다. next 채널에 `0.1.0` 을
-밀면 오픈 베타 번호를 태워 되돌릴 수 없다(`NEXT_CHANNEL.md` §1). 이 문서의
-`v0.1.0` 은 next 매니페스트를 올리지 않고, next 발행은 GHCR digest 를
-올리지 않는다. 한 커밋·한 릴리스에 두 절차를 섞지 마라.
+2026-11-13 owner 결정(#5665, 「추천대로.」)으로 데스크탑 앱·피드·사이트 번호는 승격 번호
+`0.1.N` 한 줄이다(`v0.1.46`부터, 정본 [`NEXT_CHANNEL.md`](NEXT_CHANNEL.md) §1).
+옛 `0.1.0-next.N` 줄은 `0.1.0-next.11`(v0.1.45 팀 판)에서 끝났다. 오픈 베타의 minor 는
+`0.2.0` 으로 그대로 지킨다. 서버 이미지 발행은 데스크탑 피드를 올리지 않고, 데스크탑
+발행은 GHCR digest 를 올리지 않는다. 한 커밋·한 릴리스에 두 절차를 섞지 마라.
 
-공개 dmg 의 번들 버전은 `0.1.0`(태그 `v0.1.0` 과 동일)이고, 파일명은 버전을
-넣지 않는다([§데스크탑 dmg 공개 릴리스](#데스크탑-dmg-공개-릴리스)). next
-채널 스크립트는 `--public` 없이 `0.1.0` 을 거절한다.
+공개 dmg(`--public`)의 번들 버전은 `0.1.0` 이고 파일명은 버전을 넣지 않는다
+([§데스크탑 dmg 공개 릴리스](#데스크탑-dmg-공개-릴리스)). 그 빌드는 업데이트 확인이 꺼져
+있어 팀에 주지 않는다.
+
+---
+
+## 데스크탑 팀 판 배포
+
+팀이 쓰는 맥 앱을 새 판으로 내는 한 흐름. 번호는 승격 번호 `0.1.N` 하나다. 지금
+`scripts/publish_next_build.sh` 는 이 흐름을 한 번에 하지 못하므로(`0.1.N` 거절 · 빌드 맥
+아키텍처 하나 · DMG 미게시, #5560) 같은 단계를 손으로 따른다. 이 스크립트를
+`0.1.0-next.N` 으로 돌리지 않는다([`NEXT_CHANNEL.md`](NEXT_CHANNEL.md) §8 머리).
+시크릿(업데이터 키·Developer ID·notarytool 프로파일)은 값으로 출력하거나 붙이지 않는다.
+자격 위치와 확인 명령은 [`NEXT_CHANNEL.md`](NEXT_CHANNEL.md) §8.1.
+
+1. **승격(main 핀).** 이번 판의 소스는 main 에 올라온 승격 핀 커밋이다.
+2. **팀 판 빌드.** 환경 변수 `MOMO_CHANNEL_BUILD=1`(업데이트 확인은 이 컴파일 표지 하나로
+   켜진다. 없으면 앱이 망에 묻지 않고 확인을 거절한다)과 `--config '{"version":"0.1.N"}'` 으로
+   `aarch64-apple-darwin`·`x86_64-apple-darwin` 두 아키텍처를 만든다. 작업 데몬 헬퍼를 넣고
+   프로파일을 삽입한 뒤 안쪽부터 다시 서명하고, 검증 스크립트 둘로 확인한다:
+   `scripts/desktop/check_provisioning_profile.sh --verify-app`,
+   `scripts/desktop/build_workd_sidecar.sh --verify-bundle --require-signed`.
+3. **앱 공증·스테이플.**
+4. **DMG 공증·스테이플.**
+5. **업데이터 자산.** 스테이플된 앱으로 `oort-0.1.N-darwin-<arch>.app.tar.gz` 를 묶고 같은
+   이름의 `.sig` 를 만든다(공증 전 번들러 산출물을 쓰지 않는다 — `NEXT_CHANNEL.md` §3).
+6. **배포 저장소 릴리스 `mac-v0.1.N`.** DMG 2개 + 업데이터 자산 2개(`.app.tar.gz` ×2)를 올린다
+   (`.sig` 내용은 피드에 들어간다). 사전 릴리스로 만들지 않는다.
+7. **사이트 값 파일.** `clients/site/values.json` 의 `DMG_ARM_URL`·`DMG_X64_URL` 두 주소와
+   `VERSION` 을 고친다. 릴리스 주소가 200 을 준 **뒤에** 올린다(먼저 올리면 내려받기가 404).
+8. **피드 게시.** `update-next.json` 을 `version 0.1.N`, 한 문장 `notes`, `pub_date`,
+   `platforms` 두 키(`darwin-aarch64`·`darwin-x86_64`, `signature` 는 `.sig` 내용 그대로)로
+   고쳐 올린다. 올리기 전 대조 넷과 올린 뒤 10분 확인은 `NEXT_CHANNEL.md` §1 피드 규칙.
+   피드는 내릴 수 없으므로 **맨 뒤**에 한다.
+9. **기록.** [M7-I](cicd/03-store-readiness-gate.md) 의 I-1 사실·5분 스모크·승인 인용을 이슈에 남긴다.
+
+옛 판(`v0.1.45` 이하)에서 올라오는 맥은 옛 작업 데몬이 남을 수 있어, 번호 줄을 옮기는
+판은 **손 설치를 먼저, 피드는 그 뒤에** 한다(`NEXT_CHANNEL.md` §1).
+
+**시험판.** 새 판 → 새 판 자동 받기 → 다시 시작 → 작업 데몬 하나를 재는 자리는
+`0.1.N-staging.K` 두 개와 `update-staging.json`(스테이징 피드)이다. 번들 id 가 같아 owner 계정이
+아닌 임시 사용자 계정에서 잰다.
+
+**승인 경계.** 피드·팀 설치 파일 게시는 [M7-I](cicd/03-store-readiness-gate.md) PASS 기록과
+**배포 건마다의** owner 승인 뒤에만 한다. 서명·공증 빌드, 배포 저장소 push, 사이트 반영도
+승인 범위 안에서만 한다. 구현 권한이 배포 권한으로 넓어지지 않는다.
 
 ---
 
@@ -308,7 +352,7 @@ T-2 플레이북이 사람·그록봇에게 줄 **안정 다운로드 URL** 의 
 자산 없음). 그 Release 에 고정 파일명으로 붙이면 T-2 링크가 즉시 성립하고,
 서버 digest 표가 `/releases/latest` 에서 밀리지 않는다. (b) 를 풀 릴리스로
 만들면 그 태그가 latest 가 되어 이미지 digest 안내가 가려진다. prerelease 로
-만들면 `/releases/latest` 가 dmg 를 안 준다. next 채널(`0.1.0-next.N` →
+만들면 `/releases/latest` 가 dmg 를 안 준다. 팀 채널(`0.1.N` →
 `momo-alpha`) 과 저장소가 갈라져 계열도 안 섞인다.
 
 파일명에 버전을 넣지 않는다. latest 패턴이 가리키는 이름은 릴리스마다
@@ -330,8 +374,9 @@ darwin-x86_64 / Windows 는 이 절의 범위가 아니다.
 출력하거나 채팅/이슈/커밋에 붙이지 말 것.** 존재와 이름만
 [`docs/NEXT_CHANNEL.md`](NEXT_CHANNEL.md) §8.1.
 
-`tauri.conf.json` 의 커밋된 버전은 `0.1.0-next.1` 로 둔다. 공개 번호는
-`--config` 로만 주입한다. `--public` 은 next 매니페스트/`momo-alpha` 를
+`tauri.conf.json` 의 커밋된 버전은 `0.1.0-next.1` 자리표시자로 둔다. 실제 번호는
+`--config` 로만 주입한다. `--public` 으로 만든 DMG 는 업데이트 확인이 꺼진 증거용
+빌드라 **팀에 주지 않는다**(2026-11-05 owner 결정: 자동 업데이트 없는 예외 DMG 는 쓰지 않는다). `--public` 은 next 매니페스트/`momo-alpha` 를
 건드리지 않는다.
 
 ```sh

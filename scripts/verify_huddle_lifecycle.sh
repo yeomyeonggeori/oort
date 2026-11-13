@@ -48,7 +48,7 @@ cleanup() {
   if [ "${HUDDLE_GATE_KEEP:-0}" = "1" ]; then
     echo "[huddle] leaving container '$CONTAINER' up"
   else
-    docker rm -f "$CONTAINER" >/dev/null 2>&1 || true
+    docker rm -f -v "$CONTAINER" >/dev/null 2>&1 || true  # #5606: with its PG VOLUME
   fi
   exit "$rc"
 }
@@ -57,7 +57,7 @@ trap 'exit 130' INT
 trap 'exit 143' TERM
 
 echo "[huddle] booting isolated PostgreSQL 18 container '$CONTAINER'"
-docker rm -f "$CONTAINER" >/dev/null 2>&1 || true
+docker rm -f -v "$CONTAINER" >/dev/null 2>&1 || true
 docker run -d --name "$CONTAINER" \
   -e POSTGRES_DB="$POSTGRES_DB" \
   -e POSTGRES_USER="$POSTGRES_USER" \
