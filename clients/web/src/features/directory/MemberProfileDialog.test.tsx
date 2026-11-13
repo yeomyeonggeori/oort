@@ -676,6 +676,47 @@ describe("역할 바꾸기 확인 단계 (수용 2)", () => {
     expect(byId("member-profile-close")).not.toBeNull();
   });
 
+  // #5780 검수 r1 H1: 요청이 나간 뒤의 「취소」는 아무것도 되돌리지 못한다. 눌러도 단계가 그대로 서서 결과를 기다리고,
+  // 끝나면 화면이 실제 결과(바뀐 역할)를 보인다 — 취소된 것처럼 물러섰다가 몇 초 뒤 역할이 바뀌는 일이 없다.
+  it.each([
+    ["멤버 → 관리자", MEMBER_ID, "admin" as const],
+    ["관리자 → 소유자(되돌릴 수 없는 길)", ADMIN_ID, "owner" as const],
+  ])("요청이 도는 동안 「취소」는 잠기고 단계가 그대로다: %s", async (_label, targetId, to) => {
+    let resolvePatch: (value: unknown) => void = () => undefined;
+    changeWorkspaceMemberRole.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolvePatch = resolve;
+        })
+    );
+    mountProfile({ viewer: OWNER, targetId });
+    fetchRoster.mockResolvedValue(ROSTER.map((row) => (row.id === targetId ? { ...row, role: to } : row)));
+    await waitForDialog();
+    await pickRole(to);
+    await confirmStage();
+    await vi.waitFor(() =>
+      expect(byId("member-profile-role-stage-confirm")?.getAttribute("aria-busy")).toBe("true")
+    );
+    const cancel = byId<HTMLButtonElement>("member-profile-role-stage-cancel")!;
+    expect(cancel.getAttribute("aria-disabled")).toBe("true");
+    await act(async () => {
+      cancel.click();
+    });
+    expect(byId("member-profile-role-stage")).not.toBeNull();
+    expect(changeWorkspaceMemberRole).toHaveBeenCalledTimes(1);
+    await act(async () => {
+      resolvePatch({ memberId: targetId, scope: "workspace", role: to });
+    });
+    await vi.waitFor(() => expect(byId("member-profile-role-stage")).toBeNull());
+    expect(byId("member-profile-role-receipt")?.textContent).toBe("바뀜");
+    if (to === "owner") {
+      await vi.waitFor(() => expect(byId("member-profile-role-text")?.textContent).toBe("소유자"));
+    } else {
+      await vi.waitFor(() => expect(roleSelect()?.dataset.value).toBe(to));
+    }
+    expect(changeWorkspaceMemberRole).toHaveBeenCalledTimes(1);
+  });
+
   it("role_labels 오버라이드가 고르개·확인 문장에 반영된다", async () => {
     mountProfile({
       viewer: OWNER,

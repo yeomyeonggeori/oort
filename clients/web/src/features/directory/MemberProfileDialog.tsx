@@ -118,7 +118,10 @@ interface MemberProfileTarget {
 interface RoleStage {
   pending: RoleKey | null;
   open: (role: RoleKey) => void;
+  /** 취소 단추·Esc. 요청이 도는 동안에는 아무 일 없다(요청이 이미 나갔다, #5780 검수 r1 H1). */
   cancel: () => void;
+  /** 요청이 성공한 뒤 단계를 내린다. */
+  finish: () => void;
 }
 
 function ProfileSkeleton({ label }: { label: string }) {
@@ -530,10 +533,10 @@ function ReadyProfile({
         ? t("directory.profile.dmInactive", { status: availability.label })
         : null;
 
-  const endRoleStage = (changed: boolean) => {
-    roleStage.cancel();
+  const finishRoleStage = () => {
+    roleStage.finish();
     roleChange.clearError();
-    if (changed) receipt.confirm();
+    receipt.confirm();
   };
 
   const stageUp = reset.phase !== PasswordResetPhase.Idle || roleStage.pending !== null;
@@ -569,8 +572,8 @@ function ReadyProfile({
           labels={labels}
           offline={offline}
           roleChange={roleChange}
-          onCancel={() => endRoleStage(false)}
-          onDone={() => endRoleStage(true)}
+          onCancel={roleStage.cancel}
+          onDone={finishRoleStage}
           t={t}
         />
       ) : (
@@ -738,10 +741,18 @@ function MemberProfilePanel({
   const reset = useIssuePasswordReset();
   const roleChange = useChangeWorkspaceRole();
   const [pendingRole, setPendingRole] = useState<RoleKey | null>(null);
+  // 역할 단계를 「취소」로 내리는 길(취소 단추·Esc)은 이 가드 하나를 거친다: 요청이 나갔으면 취소는 아무것도 되돌리지 못하니
+  // 단계는 그대로 서서 결과를 기다린다(#5780 검수 r1 H1). 바깥 누름은 아래 `onInteractOutside` 가 같은 조건으로 막는다.
+  const cancelRoleStage = () => {
+    if (roleChange.pending) return;
+    setPendingRole(null);
+    roleChange.clearError();
+  };
   const roleStage: RoleStage = {
     pending: pendingRole,
     open: setPendingRole,
-    cancel: useCallback(() => setPendingRole(null), []),
+    cancel: cancelRoleStage,
+    finish: useCallback(() => setPendingRole(null), []),
   };
   const query = useDirectory(workspaceId);
   const member = memberFor(query.directory, target.memberId);
@@ -776,10 +787,8 @@ function MemberProfilePanel({
         }
         if (pendingRole !== null) {
           event.preventDefault();
-          if (roleChange.pending) return;
-          // 단계만 내린다. 초점은 `ReadyProfile` 이 역할 자리로 돌린다.
-          setPendingRole(null);
-          roleChange.clearError();
+          // 단계만 내린다(요청이 도는 동안은 아무 일 없다). 초점은 `ReadyProfile` 이 역할 자리로 돌린다.
+          cancelRoleStage();
         }
       }}
       onInteractOutside={(event) => {

@@ -14,7 +14,12 @@ import { fitTooltipElement } from "./tooltipFit";
 //   · 처음 가리키면 `TOOLTIP_DELAY_MS` 뒤에 뜬다(그 전에 나가면 안 뜬다: 지나가는 포인터를 거른다). 툴팁이 떠 있거나 방금
 //     닫혔으면(`TOOLTIP_SKIP_DELAY_MS` 안) 옮겨 간 트리거는 지연 없이 바로 뜬다(`tooltipGroup.ts`). 터치 포인터는 띄우지 않는다.
 //   · 키보드 초점(`:focus-visible`)은 지연 없이 즉시 뜬다. 마우스 클릭으로 간 초점은 띄우지 않는다.
-//   · 눌리면·포인터가 나가면·초점이 나가면·Esc면 닫는다. 닫힘은 즉시다(나타남만 모션이 있다).
+//   · 눌리면·포인터가 나가면·초점이 나가면·Esc면 닫는다. **보이는 닫힘은 즉시다**(나타남만 모션이 있다).
+//     눌림·나감·Esc는 노드도 그 자리에서 뗀다. **초점이 나가서 닫힐 때만** 노드를 같은 커밋에 `hidden`으로 숨기고(그 프레임부터
+//     안 보인다) 한 박자 뒤(`setTimeout 0`, 초점 이동이 끝난 다음)에 뗀다(#5780 검수 r1 B1): Tab으로 초점이 옮겨 가는 도중(blur
+//     안, `activeElement`는 body)에 노드가 사라지면 모달의 초점 가둠(Radix FocusScope의 MutationObserver)이 「초점을 잃었다」고
+//     보고 초점을 대화상자 상자로 끌어가, Tab이 다음 컨트롤에 닿지 못한다. 속성 바꾸기는 그 관찰자가 보지 않는다.
+//     숨긴 노드는 `data-testid="tooltip"`을 내려놓고 `data-tooltip-leaving`을 단다: 바깥에서 보면 툴팁은 그 순간 없다.
 //   · 트리거가 이미 `aria-label`로 같은 이름을 갖는다. 툴팁은 눈으로 보는 보조라
 //     `aria-hidden`이고 `aria-describedby`로 이름을 두 번 읽히게 하지 않는다.
 //   · 면은 `tooltip-surface`(연회색 둥근 알약: `--muted-soft` 한 면, 선도 그림자도 없다, 12×6), 간격 4(`mb-1`/`mt-1`),
@@ -73,6 +78,8 @@ export function Tooltip({
   children,
 }: TooltipProps) {
   const [open, setOpen] = React.useState(defaultOpen);
+  // 초점이 나가며 닫힌 툴팁이 숨긴 채 남아 있는 한 박자(머리말 「보이는 닫힘은 즉시다」). 보이는지는 `open`만 정한다.
+  const [leaving, setLeaving] = React.useState(false);
   const timer = React.useRef<ReturnType<typeof setTimeout> | null>(null);
   const tipRef = React.useRef<HTMLSpanElement>(null);
 
@@ -90,6 +97,17 @@ export function Tooltip({
   const close = React.useCallback(() => {
     clear();
     setOpen(false);
+    setLeaving(false);
+  }, [clear]);
+  // 초점이 나갈 때: 보이는 것은 지금 닫고, 노드는 초점 이동이 끝난 뒤에 뗀다(머리말). 그 사이 다시 열리면 `clear`가 떼기를 취소한다.
+  const closeOnBlur = React.useCallback(() => {
+    clear();
+    setOpen(false);
+    setLeaving(true);
+    timer.current = setTimeout(() => {
+      timer.current = null;
+      setLeaving(false);
+    }, 0);
   }, [clear]);
   React.useEffect(() => clear, [clear]);
   // 떠 있는 동안 무리에 「떠 있음」을 알린다. 정리 함수가 닫힘·언마운트를 모두 맡는다(포인터가 나가서 닫히든, 트리거가 사라져
@@ -124,17 +142,20 @@ export function Tooltip({
         clear();
         setOpen(true);
       }}
-      onBlur={close}
+      onBlur={closeOnBlur}
       onKeyDown={(event) => {
         if (event.key === "Escape") close();
       }}
     >
       {children}
-      {open && (
+      {(open || leaving) && (
         <span
           ref={tipRef}
+          hidden={!open}
           aria-hidden="true"
-          data-testid="tooltip"
+          // 숨긴 채 남은 한 박자의 노드는 「툴팁」으로 세지 않는다: 시험·게이트·캡처의 `[data-testid="tooltip"]`은 보이는 것만 본다.
+          data-testid={open ? "tooltip" : undefined}
+          data-tooltip-leaving={open ? undefined : ""}
           data-side={side}
           className={cn(TOOLTIP_CLASS, TOOLTIP_SIDE_CLASS[side], TOOLTIP_MOTION, align === "end" && TOOLTIP_END_CLASS)}
         >

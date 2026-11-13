@@ -69,9 +69,31 @@ describe("ConfirmDialog", () => {
     });
     expect(screen.getByTestId("state").textContent).toBe("open");
   });
+
+  it("진행 중에는 취소도 잠긴다: aria-disabled 이고 눌러도 닫히지 않는다(요청이 이미 나갔다, #5780 검수 r1 H1)", () => {
+    render(<DialogHarness busy />);
+    const cancel = screen.getByTestId("c-cancel");
+    expect(cancel.getAttribute("aria-disabled")).toBe("true");
+    expect((cancel as HTMLButtonElement).disabled).toBe(false);
+    fireEvent.click(cancel);
+    expect(screen.getByTestId("state").textContent).toBe("open");
+  });
 });
 
 describe("ConfirmStage", () => {
+  it("진행 중에는 취소가 aria-disabled 이고 눌러도 부르지 않는다. 오프라인 잠김(lockedReason)만으로는 취소가 잠기지 않는다", () => {
+    const onCancel = vi.fn();
+    const { rerender } = render(<ConfirmStage {...COPY} busy onConfirm={() => {}} onCancel={onCancel} autoFocus={false} />);
+    const cancel = screen.getByTestId("c-cancel");
+    expect(cancel.getAttribute("aria-disabled")).toBe("true");
+    fireEvent.click(cancel);
+    expect(onCancel).not.toHaveBeenCalled();
+    rerender(<ConfirmStage {...COPY} lockedReason="오프라인" onConfirm={() => {}} onCancel={onCancel} autoFocus={false} />);
+    expect(screen.getByTestId("c-cancel").getAttribute("aria-disabled")).toBeNull();
+    fireEvent.click(screen.getByTestId("c-cancel"));
+    expect(onCancel).toHaveBeenCalledTimes(1);
+  });
+
   it("표면 안의 단계: 대화상자를 더 세우지 않고, 초점은 취소, 잠긴 까닭을 가리키며 확정을 막는다", async () => {
     const onConfirm = vi.fn();
     const onCancel = vi.fn();

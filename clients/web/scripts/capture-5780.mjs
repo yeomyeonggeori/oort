@@ -10,6 +10,8 @@
 //   R. 소유자 → 멤버: 고르개 열림 · 확인 단계(일반) · 확인 단계(소유자 승격) · 바뀐 뒤 「바뀜」 · 관리자 → 소유자(잠긴 글)
 //   N. 좁은 폭(375) · 200%(1280 창의 200% = 640×450 CSS px, 배율 2)
 //   O. 오프라인(사유 줄 자리·잠김) — 프로필 본문과 재설정 단계
+//   T. 키보드 길(검수 r1 B1): Tab 정·역방향 정거장과 정거장마다 초점 고리
+//   H. 요청이 나간 뒤의 취소(검수 r1 H1): PATCH 를 늦춘 채 취소 → 단계 그대로·요청 한 번·실제 결과
 // =============================================================================
 
 import { existsSync, mkdirSync } from "node:fs";
@@ -50,6 +52,8 @@ const json = (route, body, status = 200) =>
   route.fulfill({ status, contentType: "application/json", body: JSON.stringify(body) });
 
 const patches = [];
+/** 역할 PATCH 응답을 늦춘다(진행 중 취소 장면, 검수 r1 H1). */
+let patchDelayMs = 0;
 
 async function installRoutes(context, viewerId) {
   const viewer = roster.find((m) => m.id === viewerId);
@@ -72,6 +76,7 @@ async function installRoutes(context, viewerId) {
     if (role && method === "PATCH") {
       const body = JSON.parse(route.request().postData() ?? "{}");
       patches.push(`${role[1]}:${body.role}`);
+      if (patchDelayMs > 0) await new Promise((done) => setTimeout(done, patchDelayMs));
       roster = roster.map((m) => (m.id === role[1] ? { ...m, role: body.role } : m));
       return json(route, { memberId: role[1], scope: "workspace", role: body.role });
     }
@@ -413,17 +418,205 @@ async function sceneOffline(browser, origin, scheme) {
   }
 }
 
+/** 지금 초점의 이름(`data-testid`, 없으면 태그). */
+const activeId = (page) =>
+  page.evaluate(() => {
+    const a = document.activeElement;
+    return a ? a.getAttribute("data-testid") ?? a.tagName : "none";
+  });
+
+/** 키를 누르고, 기대한 정거장에 서기를 기다린다(시간이 아니라 조건 — 부하에 걸지 않는다). 2초 안에 안 서면 선 자리를 돌려준다. */
+async function pressTo(page, key, expected) {
+  await page.keyboard.press(key);
+  await page
+    .waitForFunction((id) => document.activeElement?.getAttribute("data-testid") === id, expected, { timeout: 2_000 })
+    .catch(() => undefined);
+  return activeId(page);
+}
+
+/** 보이는 툴팁의 글(숨긴 채 떼기를 기다리는 노드는 「툴팁」 표지가 없다). */
+const visibleTips = (page) =>
+  page.evaluate(() =>
+    [...document.querySelectorAll('[data-testid="tooltip"]')]
+      .filter((tip) => getComputedStyle(tip).display !== "none")
+      .map((tip) => tip.textContent)
+  );
+
+/** 초점이 키보드 초점(:focus-visible)이고 고리(외곽선이나 그림자)가 그려져 있는지. */
+const ringShown = (page) =>
+  page.evaluate(() => {
+    const a = document.activeElement;
+    if (!a || a === document.body) return false;
+    const cs = getComputedStyle(a);
+    return a.matches(":focus-visible") && (cs.outlineStyle !== "none" || cs.boxShadow !== "none");
+  });
+
+/**
+ * T. 키보드 길 (#5780 검수 r1 B1). 소유자 → 멤버(이메일 있음): Tab 정방향 여섯 정거장, Shift+Tab 역방향 여섯 정거장.
+ * 이메일 복사·X 의 툴팁은 키보드 초점에서 뜨는 공용 `Tooltip` 이고, 그 툴팁이 초점 이동 도중에 떼어지면 모달의 초점 가둠이
+ * 초점을 대화상자 상자로 끌어갔다(역할 고르개·재설정·X 에 닿지 못함). 정거장마다 초점 고리가 보이는 그림을 남긴다.
+ * 에이전트 프로필(라우팅 설정 · X)도 같은 길을 잰다.
+ */
+const PROFILE_STOPS = [
+  "member-profile-dm",
+  "member-profile-copy-mention",
+  "member-profile-email-copy",
+  "member-profile-role",
+  "member-profile-reset-open",
+  "member-profile-close",
+];
+const AGENT_STOPS = ["member-profile-dm", "member-profile-copy-mention", "member-profile-routing", "member-profile-close"];
+
+async function walk(page, stops, tag, { shots = false } = {}) {
+  const forward = [await activeId(page)];
+  const tipsAt = {};
+  for (let i = 1; i < stops.length; i += 1) {
+    forward.push(await pressTo(page, "Tab", stops[i]));
+    tipsAt[stops[i]] = await visibleTips(page);
+    if (shots) {
+      check(`T ${tag} 정방향 ${stops[i]} 에 초점 고리가 보인다`, await ringShown(page));
+      await shot(page, `T-${tag}-fwd-${i}-${stops[i].replace("member-profile-", "")}`);
+    }
+  }
+  // 끝에서 한 번 더 Tab → 처음으로 돈다(초점 가둠).
+  forward.push(await pressTo(page, "Tab", stops[0]));
+  const backward = [];
+  const reversed = [...stops].reverse();
+  for (const id of reversed) {
+    backward.push(await pressTo(page, "Shift+Tab", id));
+    if (shots && id === stops[0]) {
+      check(`T ${tag} 역방향 ${id} 에 초점 고리가 보인다`, await ringShown(page));
+      await shot(page, `T-${tag}-back-${id.replace("member-profile-", "")}`);
+    }
+  }
+  console.log(`measure T ${tag} forward ${JSON.stringify(forward)}`);
+  console.log(`measure T ${tag} backward ${JSON.stringify(backward)}`);
+  console.log(`measure T ${tag} visible-tooltips ${JSON.stringify(tipsAt)}`);
+  return { forward, backward, tipsAt };
+}
+
+async function sceneTab(browser, origin, scheme) {
+  roster = freshRoster();
+  const tag = scheme;
+  const { context, page } = await openContext(browser, origin, { scheme, viewerId: OWNER });
+  try {
+    await page.goto(origin, { waitUntil: "domcontentloaded" });
+    await openProfile(page, MEMBER);
+    await page.mouse.move(0, 0);
+    await page.waitForFunction(() => document.activeElement?.getAttribute("data-testid") === "member-profile-dm");
+    const human = await walk(page, PROFILE_STOPS, `${tag}-member`, { shots: true });
+    check(`T ${tag} 멤버: 정방향 메시지 → 멘션 → 이메일 복사 → 역할 → 재설정 → X → (처음)`,
+      JSON.stringify(human.forward) === JSON.stringify([...PROFILE_STOPS, PROFILE_STOPS[0]]), human.forward);
+    check(`T ${tag} 멤버: 역방향은 같은 정거장을 거꾸로`,
+      JSON.stringify(human.backward) === JSON.stringify([...PROFILE_STOPS].reverse()), human.backward);
+    // 전제가 섰는지: 툴팁 단추에 닿으면 그 툴팁이 실제로 떠 있었다(안 뜨면 이 결함은 재현되지 않아 위 단정이 헛돈다).
+    check(`T ${tag} 멤버: 이메일 복사·X 에 닿으면 그 툴팁 하나가 떠 있다`,
+      JSON.stringify(human.tipsAt["member-profile-email-copy"]) === JSON.stringify(["이메일 복사"]) &&
+        JSON.stringify(human.tipsAt["member-profile-close"]) === JSON.stringify(["프로필 닫기"]), human.tipsAt);
+    // 초점이 나가며 숨긴 채 한 박자 남는 툴팁 노드(`hidden`)가 이 앱의 CSS 아래에서도 실제로 안 보이는지(display:none).
+    const hiddenDisplay = await page.evaluate(() => {
+      const wrap = document.querySelector('[data-testid="member-profile-close"]')?.parentElement;
+      const probe = document.createElement("span");
+      // `TOOLTIP_CLASS` + 아래 방향 + 나타남 모션(tooltip.tsx 와 같은 클래스).
+      probe.className = "tooltip-surface layer-content-float absolute left-1/2 -translate-x-1/2 text-meta top-full mt-1 motion-tooltip-enter";
+      probe.hidden = true;
+      probe.textContent = "probe";
+      wrap?.append(probe);
+      const display = getComputedStyle(probe).display;
+      probe.remove();
+      return display;
+    });
+    check(`T ${tag} 숨긴 툴팁 노드는 display:none 이다(보이는 닫힘은 즉시)`, hiddenDisplay === "none", hiddenDisplay);
+    await page.keyboard.press("Escape");
+    await page.getByTestId("member-profile-dialog").waitFor({ state: "detached" });
+
+    await openProfile(page, AGENT);
+    await page.mouse.move(0, 0);
+    await page.waitForFunction(() => document.activeElement?.getAttribute("data-testid") === "member-profile-dm");
+    const agent = await walk(page, AGENT_STOPS, `${tag}-agent`);
+    check(`T ${tag} 에이전트: 정·역방향 네 정거장`,
+      JSON.stringify(agent.forward) === JSON.stringify([...AGENT_STOPS, AGENT_STOPS[0]]) &&
+        JSON.stringify(agent.backward) === JSON.stringify([...AGENT_STOPS].reverse()), agent);
+  } finally {
+    await context.close();
+  }
+}
+
+/**
+ * H. 요청이 나간 뒤의 「취소」 (#5780 검수 r1 H1). PATCH 를 늦춘 채 확정 → 「바꾸는 중」 동안 취소를 누른다. 취소는 잠겨 있고
+ * (`aria-disabled`) 단계는 그대로 서며 요청은 한 번이다. 끝나면 화면이 실제 결과(바뀐 역할)를 보인다. 소유자 승격 길 포함.
+ */
+async function sceneInFlightCancel(browser, origin, scheme) {
+  for (const [label, target, optionName, to] of [
+    ["plain", GUEST, "멤버", "member"],
+    ["owner", ADMIN, "소유자", "owner"],
+  ]) {
+    roster = freshRoster();
+    patches.length = 0;
+    patchDelayMs = 1_500;
+    const tag = `${scheme}-${label}`;
+    const { context, page } = await openContext(browser, origin, { scheme, viewerId: OWNER });
+    try {
+      await page.goto(origin, { waitUntil: "domcontentloaded" });
+      await openProfile(page, target);
+      await page.getByTestId("member-profile-role").click();
+      await page.getByRole("option", { name: optionName }).click();
+      await page.getByTestId("member-profile-role-stage").waitFor();
+      await page.getByTestId("member-profile-role-stage-confirm").click();
+      await page.waitForFunction(() => document.querySelector('[data-testid="member-profile-role-stage-confirm"]')?.getAttribute("aria-busy") === "true");
+      const cancel = page.getByTestId("member-profile-role-stage-cancel");
+      const lockedAttr = await cancel.getAttribute("aria-disabled");
+      // 사람의 누름 그대로: `aria-disabled` 단추도 눌리게 Playwright 의 사용 가능 검사를 건너뛴다.
+      await cancel.click({ force: true });
+      const stageAfterCancel = await page.getByTestId("member-profile-role-stage").count();
+      await page.mouse.move(0, 0);
+      await shot(page, `H-${tag}-cancel-in-flight`);
+      await page.getByTestId("member-profile-role-stage").waitFor({ state: "detached", timeout: 15_000 });
+      await page.waitForFunction(
+        (expected) => {
+          const select = document.querySelector('[data-testid="member-profile-role"]');
+          const text = document.querySelector('[data-testid="member-profile-role-text"]');
+          return expected === "owner" ? text?.textContent === "소유자" : select?.getAttribute("data-value") === expected;
+        },
+        to,
+        { timeout: 15_000 }
+      ).catch(() => undefined);
+      const settled = await page.evaluate(() => ({
+        select: document.querySelector('[data-testid="member-profile-role"]')?.getAttribute("data-value") ?? null,
+        text: document.querySelector('[data-testid="member-profile-role-text"]')?.textContent ?? null,
+        receipt: document.querySelector('[data-testid="member-profile-role-receipt"]')?.textContent ?? null,
+      }));
+      const result = { lockedAttr, stageAfterCancel, patches: [...patches], settled };
+      console.log(`measure H ${tag} ${JSON.stringify(result)}`);
+      check(`H ${tag} 진행 중 취소: 잠겨 있고 단계가 그대로이며 요청은 한 번, 끝나면 실제 결과를 보인다`,
+        lockedAttr === "true" &&
+          stageAfterCancel === 1 &&
+          patches.length === 1 &&
+          (to === "owner" ? settled.text === "소유자" : settled.select === to) &&
+          settled.receipt === "바뀜", result);
+      await shot(page, `H-${tag}-settled`);
+    } finally {
+      patchDelayMs = 0;
+      await context.close();
+    }
+  }
+}
+
 if (!existsSync(resolve(WEB_ROOT, "dist/index.html"))) throw new Error("dist/ is missing. Run npm run build first.");
 mkdirSync(OUT_DIR, { recursive: true });
 const preview = await startGuardedPreview({ webRoot: WEB_ROOT, port: PORT, portEnvVar: "CAPTURE_PORT" });
 const origin = preview.origin;
 const browser = await chromium.launch();
+// `SCENES=T,H` 처럼 장면 일부만 돌린다(기본은 전부).
+const SCENES = new Set((process.env.SCENES ?? "V,R,N,O,T,H").split(",").map((s) => s.trim()));
 try {
   for (const scheme of SCHEMES) {
-    await sceneViews(browser, origin, scheme);
-    await sceneRole(browser, origin, scheme);
-    await sceneNarrow(browser, origin, scheme);
-    await sceneOffline(browser, origin, scheme);
+    if (SCENES.has("V")) await sceneViews(browser, origin, scheme);
+    if (SCENES.has("R")) await sceneRole(browser, origin, scheme);
+    if (SCENES.has("N")) await sceneNarrow(browser, origin, scheme);
+    if (SCENES.has("O")) await sceneOffline(browser, origin, scheme);
+    if (SCENES.has("T")) await sceneTab(browser, origin, scheme);
+    if (SCENES.has("H")) await sceneInFlightCancel(browser, origin, scheme);
   }
 } finally {
   await browser.close();

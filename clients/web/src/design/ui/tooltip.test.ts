@@ -10,7 +10,8 @@ import { TOOLTIP_DELAY_MS } from "@/design/motion";
 import { Tooltip } from "./tooltip";
 
 /**
- * 공용 툴팁의 동작 (#4324): 가리키면 지연(`TOOLTIP_DELAY_MS`) 뒤, 키보드 초점은 즉시, 눌림·나감·Esc는 즉시 닫힘.
+ * 공용 툴팁의 동작 (#4324): 가리키면 지연(`TOOLTIP_DELAY_MS`) 뒤, 키보드 초점은 즉시, 눌림·나감·Esc·초점 나감은 즉시 안 보인다
+ * (초점 나감만 노드를 한 박자 뒤에 뗀다, #5780 B1 — 실제 Tab 이동은 `scripts/capture-5780.mjs`가 실제 엔진에서 잰다).
  * 지연의 값과 옮겨 다닐 때의 0은 `tooltipDelay.test.ts`가 잰다(#5192).
  * 시간은 가짜 타이머로 재고, 경계(499 / 500)에서 단정한다.
  */
@@ -51,7 +52,9 @@ function mount(props: { side?: "top" | "bottom"; align?: "center" | "end" } = {}
   );
   const button = host.querySelector("button") as HTMLButtonElement;
   const tip = () => host.querySelector<HTMLElement>('[data-testid="tooltip"]');
-  return { host, button, tip };
+  /** 초점이 나가며 숨긴 채 남은 한 박자의 노드(#5780 B1). */
+  const leftover = () => host.querySelector<HTMLElement>("[data-tooltip-leaving]");
+  return { host, button, tip, leftover };
 }
 
 function pointer(el: Element, type: "pointerover" | "pointerout" | "pointerdown", pointerType = "mouse") {
@@ -116,15 +119,22 @@ describe("공용 툴팁", () => {
     expect(tip()).toBeNull();
   });
 
-  it("눌림·초점 나감·Esc는 즉시 닫는다", () => {
+  it("보이는 닫힘은 즉시다: 눌림·Esc는 노드도 그 자리에서 떼고, 초점 나감은 같은 커밋에 숨긴 뒤 한 박자 뒤에 뗀다 (#5780 B1)", () => {
     vi.useFakeTimers();
-    const { button, tip } = mount();
+    const { button, tip, leftover } = mount();
     focusVisible(button, true);
 
     act(() => button.focus());
-    expect(tip()).not.toBeNull();
+    const shown = tip();
+    expect(shown?.hidden).toBe(false);
     act(() => button.blur());
+    // 보이는 것은 지금 닫힌다(`hidden` → display:none, 「툴팁」 표지도 내려놓음). 노드는 초점 이동이 끝난 뒤에 떼어진다: blur
+    // 안에서 노드를 떼면 모달의 초점 가둠(Radix FocusScope)이 초점을 대화상자 상자로 끌어가 Tab이 다음 컨트롤에 닿지 못한다.
     expect(tip()).toBeNull();
+    expect(leftover()).toBe(shown);
+    expect(leftover()?.hidden).toBe(true);
+    act(() => void vi.advanceTimersByTime(0));
+    expect(leftover()).toBeNull();
 
     act(() => button.focus());
     expect(tip()).not.toBeNull();
@@ -132,12 +142,30 @@ describe("공용 툴팁", () => {
       button.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
     });
     expect(tip()).toBeNull();
+    expect(leftover()).toBeNull();
 
     act(() => button.blur());
     act(() => button.focus());
     expect(tip()).not.toBeNull();
     pointer(button, "pointerdown");
     expect(tip()).toBeNull();
+    expect(leftover()).toBeNull();
+  });
+
+  it("숨긴 채 남은 한 박자 안에 초점이 돌아오면 같은 노드가 다시 보이고 떼기는 취소된다", () => {
+    vi.useFakeTimers();
+    const { button, tip, leftover } = mount();
+    focusVisible(button, true);
+    act(() => button.focus());
+    const first = tip();
+    act(() => button.blur());
+    expect(leftover()).toBe(first);
+    act(() => button.focus());
+    expect(tip()).toBe(first);
+    expect(tip()?.hidden).toBe(false);
+    act(() => void vi.advanceTimersByTime(1000));
+    expect(tip()).toBe(first);
+    expect(tip()?.hidden).toBe(false);
   });
 
   it("방향은 data-side로 드러나고 이름을 두 번 읽히지 않는다(aria-hidden, describedby 없음)", () => {
@@ -285,6 +313,8 @@ describe("판 안에 머문다 (#4230)", () => {
     expect(tip()?.style.getPropertyValue("--tooltip-shift")).not.toBe("");
     act(() => button.blur());
     expect(tip()).toBeNull();
+    // 숨긴 노드가 떼어진 뒤에 다시 연다(한 박자 안에 다시 열면 같은 노드를 다시 재며, `fitTooltipElement`가 먼저 값을 걷는다).
+    act(() => void vi.advanceTimersByTime(0));
 
     // 다른 자리(판 한가운데)에서 다시 열면 새 요소가 값 없이 선다.
     layout.anchor = { left: 200, right: 234 };

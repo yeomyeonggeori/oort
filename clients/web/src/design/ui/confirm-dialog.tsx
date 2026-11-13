@@ -29,8 +29,9 @@ import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/design/
 //
 // - 초점은 열리면 **안전한 쪽(취소)** 으로 들어간다(§3.4). 확정은 한 번 더 Tab 이다.
 // - `tone="destructive"` 면 확정 단추가 위험 채움이다(파괴 > 주 > 보조, §3.1). 기본은 주 단추(잉크).
-// - `busy` 면 확정 단추가 `aria-busy` + 진행 낱말이고 다시 눌러도 아무 일 없다. 취소는 열려 있되 단계 그릇에서는
-//   부르는 쪽이 막을지 정한다(요청이 이미 나갔다).
+// - `busy` 면 확정 단추가 `aria-busy` + 진행 낱말이고 다시 눌러도 아무 일 없다. **취소도 `aria-disabled` 이고 눌러도
+//   아무 일 없다**: 요청이 이미 나갔으면 취소는 아무것도 되돌리지 못하니, 취소된 것처럼 물러서면 안 된다(#5780 검수 r1 H1).
+//   초점은 남는다(`disabled` 가 아니다). 두 그릇 모두 같다 — 대화상자는 Esc·바깥 누름도 같은 가드(`requestClose`)를 거친다.
 // - `lockedReason` 이 있으면 확정이 `aria-disabled` 로 잠기고 그 문장을 가리킨다(오프라인 등). 초점은 남는다.
 // - 문구는 이 파일에 없다. 부르는 쪽이 사전 키로 넘긴다(직접 문구 장부).
 // =============================================================================
@@ -130,8 +131,11 @@ function ConfirmBody({
           type="button"
           variant="ghost"
           size="sm"
-          className="tap-target"
-          onClick={onCancel}
+          className={cn("tap-target", busy && "opacity-50 hover:opacity-50")}
+          aria-disabled={busy || undefined}
+          onClick={() => {
+            if (!busy) onCancel();
+          }}
           data-testid={id("cancel")}
         >
           {cancelLabel}
@@ -174,8 +178,13 @@ export function ConfirmDialog({
   const cancelRef = React.useRef<HTMLButtonElement>(null);
   const titleId = React.useId();
   const descriptionId = React.useId();
+  // 닫는 길(Esc·바깥 누름·취소)은 하나의 가드를 거친다: 요청이 도는 동안에는 닫히지 않는다.
+  const requestClose = (next: boolean) => {
+    if (body.busy && !next) return;
+    onOpenChange(next);
+  };
   return (
-    <Dialog open={open} onOpenChange={(next) => (body.busy && !next ? undefined : onOpenChange(next))}>
+    <Dialog open={open} onOpenChange={requestClose}>
       {open && (
         <DialogContent
           role="alertdialog"
@@ -194,7 +203,7 @@ export function ConfirmDialog({
             cancelRef={cancelRef}
             titleId={titleId}
             descriptionId={descriptionId}
-            onCancel={() => onOpenChange(false)}
+            onCancel={() => requestClose(false)}
           />
         </DialogContent>
       )}
