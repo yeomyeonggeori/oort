@@ -224,7 +224,6 @@ const box = (page, id) =>
     return { x: r.x, right: r.right, width: r.width, y: r.y, bottom: r.bottom };
   }, id);
 const present = (page, id) => page.evaluate((testId) => document.querySelector(`[data-testid='${testId}']`) !== null, id);
-const DM = "[data-testid='mailbox-row'][data-entry-key='inbox:00000000-0000-7000-8000-000000000902']";
 
 const ROW = ["task", "thread", "dm"]; // 목록 위에서부터 처리할 일 · 스레드 답글 · DM
 const FLOOR = 256;
