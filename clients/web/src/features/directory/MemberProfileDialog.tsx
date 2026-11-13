@@ -561,9 +561,10 @@ function LifecycleRows({
   onPick: (action: MemberLifecycleAction) => void;
   t: Format;
 }) {
-  // 줄 높이는 위의 역할 줄(고르개 32 + 위아래 8)과 같은 48: 글 한 줄(24) + 위아래 12.
+  // 줄 높이는 위의 역할 줄(고르개 32 + 위아래 8)과 같은 48: 글 한 줄(24) + 위아래 12. 전폭 행이라 눌림은 크기 변형(`press`)이
+  // 아니라 채움이다(ADR-0179 D5 · B4-3, `pressLedger.test.ts`).
   const rowButton =
-    "press flex min-h-control-lg min-w-0 flex-1 items-center px-4 py-3 text-start text-body hover:bg-surface-hover focus-visible:focus-ring disabled:opacity-50 disabled:hover:bg-transparent";
+    "flex min-h-control-lg w-full min-w-0 flex-1 items-center px-4 py-3 text-start text-body hover:bg-surface-hover active:bg-surface-pressed focus-visible:focus-ring disabled:opacity-50 disabled:hover:bg-transparent";
   return (
     <div ref={rowsRef} className="flex min-w-0 flex-col divide-y divide-line" data-testid="member-profile-lifecycle">
       {suspension !== null ? (
@@ -598,7 +599,7 @@ function LifecycleRows({
       {removable ? (
         <button
           type="button"
-          className={cn(rowButton, "w-full rounded-b-lg text-danger")}
+          className={cn(rowButton, "rounded-b-lg text-danger")}
           disabled={offline}
           aria-describedby={offline ? OFFLINE_REASON_ID : undefined}
           data-testid="member-profile-remove"
