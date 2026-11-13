@@ -4,6 +4,7 @@ import { RELEASE_NOTE_0_1_42 } from "./v0_1_42";
 import { RELEASE_NOTE_0_1_43 } from "./v0_1_43";
 import { RELEASE_NOTE_0_1_44 } from "./v0_1_44";
 import { RELEASE_NOTE_0_1_45 } from "./v0_1_45";
+import { RELEASE_NOTE_0_1_46 } from "./v0_1_46";
 
 // =============================================================================
 // 앱에 묶어 넣는 업데이트 소식의 등록부 (#4937).
@@ -16,6 +17,7 @@ import { RELEASE_NOTE_0_1_45 } from "./v0_1_45";
 // =============================================================================
 
 export const RELEASE_NOTES: readonly ReleaseNote[] = listReleaseNotes([
+  RELEASE_NOTE_0_1_46,
   RELEASE_NOTE_0_1_45,
   RELEASE_NOTE_0_1_44,
   RELEASE_NOTE_0_1_43,
