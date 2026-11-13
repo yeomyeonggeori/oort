@@ -6,6 +6,7 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vite
 import { SIGNAL_REJECTION_COPY } from "@momo/core/design/signal";
 import { THEMES } from "@momo/core/design/themes";
 import {
+  ACCENT_THEMES,
   APPEARANCE_STORAGE_KEY,
   getAccent,
   getAppearance,
@@ -18,9 +19,10 @@ import { AppearanceSection } from "../AppearanceSection";
 import { tileTestId } from "./tileIds";
 
 // =============================================================================
-// 테마 스타일 행과 갤러리, 색 모드 규칙, 강조색 칩 (AP-1b #4188, AC 3·6). 진짜 외양 저장소 · 진짜 엔진 · 진짜 지연
-// 청크(`React.lazy` 경계 포함) 위에서 잰다. 규칙 표 자체(단일 모드 세 규칙, 목록 수)는 core 시험이 재고, 여기서는 그
-// 규칙이 화면 경로에서 실제로 불리는지를 잰다.
+// 테마 스타일 행과 갤러리, 색 모드 규칙, 강조색 칩 (AP-1b #4188, AC 3·6 · #5783 QA 8). 진짜 외양 저장소 · 진짜 엔진 ·
+// 진짜 지연 청크(`React.lazy` 경계 포함) 위에서 잰다. 규칙 표 자체(단일 모드 세 규칙, 목록 수)는 core 시험이 재고, 여기서는
+// 그 규칙이 화면 경로에서 실제로 불리는지를 잰다. #5783부터 격자는 늘 펴져 있고(접힌 행·트리거가 없다) 타일 안은 글자 없는
+// 미니어처이며, 강조색 칩은 이름 없는 원 한 줄이다(이름은 낭독·툴팁).
 // =============================================================================
 
 const reactActEnvironment = globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean };
@@ -65,7 +67,7 @@ async function settled(host: HTMLElement) {
   try {
     await vi.waitFor(
       () => {
-        expect(q(host, "theme-style-trigger")).not.toBeNull();
+        expect(q(host, "theme-style-group")).not.toBeNull();
         // 강조색 칩: 지연 청크가 도착하면 칩 요소에 푼 색이 꽂힌다.
         expect(
           host.querySelector<HTMLElement>('[data-testid="accent-swatch-dawn"]')?.style.getPropertyValue("--signal")
@@ -107,12 +109,10 @@ function click(node: Element | null) {
   });
 }
 
-function open(host: HTMLElement) {
-  click(q(host, "theme-style-trigger"));
-  expect(q(host, "theme-style-options")).not.toBeNull();
-}
-
 const tiles = (host: HTMLElement) => [...host.querySelectorAll<HTMLElement>(".theme-tile")];
+/** 고른 타일 아래 이름(글자로 보이는 지금 테마의 이름, 설계 리뷰 M1). */
+const selectedName = (host: HTMLElement) =>
+  host.querySelector<HTMLElement>(".theme-tile[data-selected] .theme-tile-name")?.textContent ?? null;
 const tileRefs = (host: HTMLElement) =>
   tiles(host).map((tile) => tile.querySelector<HTMLInputElement>("input")!.value);
 
@@ -122,102 +122,96 @@ function paintOf(host: HTMLElement, testId: string): Record<string, string>[] {
   );
 }
 
-describe("행: 접힌 모습", () => {
-  it("청크를 받는 동안은 같은 라벨의 행과 중립 막대 자리가 서고, 강조색 칩은 기존 모양 그대로다", async () => {
+describe("행: 늘 펴진 격자 (#5783)", () => {
+  it("청크를 받는 동안은 같은 라벨의 행과 펴진 격자 높이만큼의 중립 판이 서고, 강조색 칩은 같은 부품의 정적 칩이다", async () => {
     const host = mountOnly();
     // 같은 틱: 아직 아무 청크도 오지 않았다.
     const pending = q(host, "theme-style-row-pending");
     expect(pending).not.toBeNull();
     expect(pending?.textContent).toContain("테마 스타일");
-    expect(pending?.querySelector(".theme-style-skeleton")).not.toBeNull();
-    expect(q(host, "theme-style-trigger")).toBeNull();
+    expect(pending?.getAttribute("data-stack")).toBe("");
+    expect(pending?.querySelector(".theme-gallery-region .theme-gallery-skeleton-hint")).not.toBeNull();
+    expect(pending?.querySelector(".theme-gallery-region .theme-gallery-skeleton")).not.toBeNull();
+    expect(q(host, "theme-style-group")).toBeNull();
     expect(host.querySelectorAll('[data-testid^="accent-swatch-"]')).toHaveLength(5);
+    // 정적 칩과 지연 청크의 칩은 같은 부품이다: 청크가 와도 칩 줄의 모양(클래스·자식 구조)이 같다.
+    const shape = () =>
+      [...host.querySelectorAll<HTMLElement>('[data-testid^="accent-swatch-"]')].map((chip) =>
+        [chip.className, ...[...chip.children].map((child) => `${child.tagName}.${child.getAttribute("class")}`)].join("|")
+      );
+    const before = shape();
     // 청크가 도착해 선 뒤까지 기다려서 다음 시험으로 갱신이 새지 않게 한다.
     await settled(host);
+    expect(shape()).toEqual(before);
   });
 
-  it("지금 고른 테마의 이름을 말하는 접힌 트리거 + 썸네일 한 장(시스템이면 분할)", async () => {
+  it("격자가 처음부터 서 있다: 펼치는 단추·chevron·aria-expanded가 없고, 격자는 행 안(라벨·설명 아래)에 있다", async () => {
     const host = await mountSection();
-    const trigger = q(host, "theme-style-trigger")!;
-    expect(trigger.getAttribute("aria-label")).toBe("테마 스타일, 지금은 새벽하늘");
-    expect(trigger.getAttribute("aria-expanded")).toBe("false");
-    expect(trigger.hasAttribute("aria-controls")).toBe(false);
-    expect(q(host, "theme-style-options")).toBeNull();
-    const thumb = q(host, "theme-style-selected-preview")!.querySelector<HTMLElement>("[data-tile-kind]")!;
-    expect(thumb.getAttribute("data-tile-kind")).toBe("split");
-    expect(thumb.querySelectorAll(".theme-tile-paint")).toHaveLength(2);
+    const row = q(host, "theme-style-row")!;
+    expect(row.getAttribute("data-stack")).toBe("");
+    expect(row.contains(q(host, "theme-style-options"))).toBe(true);
+    expect(q(host, "theme-style-trigger")).toBeNull();
+    expect(row.querySelector("[aria-expanded], [aria-controls], button")).toBeNull();
+    expect(tiles(host)).toHaveLength(19);
   });
 
-  it("접힌 행이 지금 고른 테마의 이름을 글자로 말한다 (aria-label에만 있지 않다, 설계 리뷰 M1)", async () => {
+  it("타일 안에는 글자가 없다 (선·점 미니어처): 모든 모드의 모든 타일, 이름은 타일 아래 한 줄뿐이다", async () => {
+    const host = await mountSection();
+    for (const mode of ["system", "light", "dark"] as const) {
+      click(radio(host, `theme-choice-${mode}`));
+      const all = tiles(host);
+      expect(all.length).toBeGreaterThan(0);
+      for (const tile of all) {
+        const frame = tile.querySelector<HTMLElement>(".theme-tile-frame")!;
+        expect(frame.textContent, `${mode} ${tile.textContent}`).toBe("");
+        expect(frame.querySelectorAll("[data-bare]").length).toBe(frame.querySelectorAll(".theme-preview-layer").length);
+        // 타일의 글자는 이름 한 줄이 전부다.
+        expect(tile.textContent).toBe(tile.querySelector(".theme-tile-name")!.textContent);
+      }
+    }
+  });
+
+  it("맨 아래 큰 미리보기에는 글자가 남는다 (글자·알약 대비를 읽는 자리)", async () => {
+    const host = await mountSection();
+    const card = q(host, "theme-preview")!;
+    expect(card.querySelector("[data-bare]")).toBeNull();
+    expect(q(card, "theme-preview-title")?.textContent).toBe("오늘 배포");
+    expect(q(card, "theme-preview-pill")?.textContent).toBe("새 글 3");
+    expect(q(card, "theme-preview-muted")?.textContent).toBe("김인턴 답장");
+  });
+
+  it("지금 고른 테마의 이름이 글자로 보인다: 고른 타일 아래 잉크색 이름 (aria-label에만 있지 않다, 설계 리뷰 M1)", async () => {
     let host = await mountSection();
-    expect(q(host, "theme-style-selected-name")?.textContent).toBe("새벽하늘");
+    expect(selectedName(host)).toBe("새벽하늘");
     act(() => mountedRoot?.unmount());
     mountedRoot = null;
     mountedHost?.remove();
     updateAppearance({ theme: "catalog:github", scheme: "dark" });
     host = await mountSection();
-    expect(q(host, "theme-style-selected-name")?.textContent).toBe("GitHub");
+    expect(selectedName(host)).toBe("GitHub");
     change({ theme: "catalog:nord" });
-    expect(q(host, "theme-style-selected-name")?.textContent).toBe("Nord");
+    expect(selectedName(host)).toBe("Nord");
   });
 
-  it("이름은 한 줄이고 썸네일과 chevron은 한 덩이다: 줄바꿈 flex가 아니다 (설계 리뷰 2차 H-A · 3차 M-1)", async () => {
-    const host = await mountSection();
-    const name = q(host, "theme-style-selected-name")!;
-    // jsdom에는 레이아웃이 없다: 클래스와 구조가 약속한 것을 고정하고, 실제 폭 위의 한 줄·배치·높이는 캡처 스크립트의 `names` 장면
-    // (모든 이름 × 320~760 폭)이 잰다. 배치는 이름 길이가 아니라 카드 폭이 정한다(`theme-gallery.css`의 컨테이너 질의).
-    expect(name.className).toContain("truncate");
-    expect(name.className).not.toContain("break-");
-    const trigger = q(host, "theme-style-trigger")!;
-    expect(trigger.className).toContain("theme-style-trigger");
-    // 이름이 줄바꿈 flex의 항목이면 이름마다 배치가 갈리고 chevron이 홀로 아랫줄에 떨어진다(3차 M-1).
-    expect(trigger.className).not.toContain("flex-wrap");
-    expect(name.parentElement).toBe(trigger);
-    const tail = trigger.querySelector(".theme-style-trigger-tail")!;
-    expect(tail.parentElement).toBe(trigger);
-    expect(tail.contains(q(host, "theme-style-selected-preview"))).toBe(true);
-    expect(tail.querySelector("svg")).not.toBeNull();
-    expect(name.compareDocumentPosition(tail) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-  });
-
-  it("썸네일은 그 테마의 색으로 칠해진다 (루트가 아니라 요소의 변수): 새벽하늘 라이트의 바닥", async () => {
-    const host = await mountSection();
-    const [light, dark] = paintOf(host, "theme-style-selected-preview");
-    expect(light["--canvas-mid"]).toBe(THEMES.dawnsky.light.canvas[1]);
-    expect(dark["--canvas-mid"]).toBe(THEMES.dawnsky.dark.canvas[1]);
-    expect(Object.keys(light)).toHaveLength(13);
-  });
-
-  it("고정 스킴이면 그 모드 한 장이고, 단일 모드 테마는 그 모드 한 장이다", async () => {
+  it("고정 스킴이면 고른 타일이 그 모드 한 장이고, 단일 모드 테마는 그 모드 한 장이다", async () => {
     updateAppearance({ scheme: "dark" });
     let host = await mountSection();
-    expect(q(host, "theme-style-selected-preview")!.querySelector("[data-tile-kind]")!.getAttribute("data-tile-kind")).toBe("dark");
+    const kindOf = (h: HTMLElement) =>
+      h.querySelector(".theme-tile[data-selected] [data-tile-kind]")!.getAttribute("data-tile-kind");
+    expect(kindOf(host)).toBe("dark");
     act(() => mountedRoot?.unmount());
     mountedRoot = null;
     mountedHost?.remove();
     updateAppearance({ theme: "catalog:snazzy-light", scheme: "light" });
     host = await mountSection();
-    expect(q(host, "theme-style-trigger")!.getAttribute("aria-label")).toBe("테마 스타일, 지금은 Snazzy Light");
-    expect(q(host, "theme-style-selected-preview")!.querySelector("[data-tile-kind]")!.getAttribute("data-tile-kind")).toBe("light");
+    expect(selectedName(host)).toBe("Snazzy Light");
+    expect(kindOf(host)).toBe("light");
   });
 });
 
 describe("갤러리: 색 모드가 목록을 정한다 (탭이 모드를 따른다)", () => {
-  it("펼치면 격자가 서고 aria-expanded·aria-controls가 맞는다", async () => {
-    const host = await mountSection();
-    open(host);
-    const trigger = q(host, "theme-style-trigger")!;
-    const region = q(host, "theme-style-options")!;
-    expect(trigger.getAttribute("aria-expanded")).toBe("true");
-    expect(trigger.getAttribute("aria-controls")).toBe(region.id);
-    click(trigger);
-    expect(q(host, "theme-style-options")).toBeNull();
-    expect(trigger.getAttribute("aria-expanded")).toBe("false");
-  });
-
   it("시스템 19 · 라이트 20 · 다크 43 타일, 첫 파티가 먼저다", async () => {
     const host = await mountSection();
-    open(host);
     expect(tiles(host)).toHaveLength(19);
     expect(tileRefs(host).slice(0, 3)).toEqual(["dawnsky", "graphite", "noeul"]);
     click(radio(host, "theme-choice-light"));
@@ -231,7 +225,6 @@ describe("갤러리: 색 모드가 목록을 정한다 (탭이 모드를 따른�
 
   it("시스템에서는 짝이 있는 테마만 (한 장이 분할), 탭마다 안 보이는 테마가 어디서 보이는지 안내 한 줄이 선다", async () => {
     const host = await mountSection();
-    open(host);
     expect(q(host, "theme-style-hint")?.textContent).toBe(
       "라이트와 다크를 모두 가진 테마만 보여요. 한쪽만 있는 테마는 라이트나 다크에서 골라요."
     );
@@ -249,28 +242,40 @@ describe("갤러리: 색 모드가 목록을 정한다 (탭이 모드를 따른�
     expect(tileRefs(host)).not.toContain("catalog:nord");
   });
 
-  it("펼치면 고른 타일이 보이는 자리로 스크롤한다 (43장 가운데 어디에 있든, 설계 리뷰 M1)", async () => {
-    const scrolled: Element[] = [];
-    const original = Element.prototype.scrollIntoView;
+  it("고른 타일이 보이게 격자 안쪽만 스크롤한다: 페이지는 움직이지 않는다 (43장 가운데 어디에 있든, 설계 리뷰 M1)", async () => {
+    // jsdom에는 레이아웃이 없어 상자 위치를 심는다: 격자 안쪽 스크롤 상자는 위 100~580, 고른 타일은 그 아래 1,200~1,330이다.
+    const pageMoves: Element[] = [];
+    const originalScroll = Element.prototype.scrollIntoView;
+    const originalRect = Element.prototype.getBoundingClientRect;
     Element.prototype.scrollIntoView = function (this: Element) {
-      scrolled.push(this);
+      pageMoves.push(this);
+    };
+    Element.prototype.getBoundingClientRect = function (this: Element) {
+      const at = (top: number, bottom: number) => ({ top, bottom, left: 0, right: 0, width: 0, height: bottom - top, x: 0, y: top, toJSON: () => ({}) }) as DOMRect;
+      if (this.classList.contains("theme-gallery-scroll")) return at(100, 580);
+      if (this.matches(".theme-tile[data-selected]")) return at(1200, 1330);
+      return at(0, 0);
     };
     try {
       updateAppearance({ theme: "catalog:github", scheme: "dark" });
       const host = await mountSection();
-      expect(scrolled).toHaveLength(0); // 접힌 행은 아무것도 움직이지 않는다
-      open(host);
-      expect(scrolled).toHaveLength(1);
-      expect(scrolled[0]).toBe(q(host, tileTestId("catalog:github")));
-      expect(scrolled[0].hasAttribute("data-selected")).toBe(true);
+      const box = q(host, "theme-style-scroll")!;
+      // 타일 아래 끝(1,330)이 상자 아래 끝(580)에 오도록 상자 안만 750 내린다.
+      expect(box.scrollTop).toBe(750);
+      expect(pageMoves).toHaveLength(0);
     } finally {
-      Element.prototype.scrollIntoView = original;
+      Element.prototype.scrollIntoView = originalScroll;
+      Element.prototype.getBoundingClientRect = originalRect;
     }
+  });
+
+  it("고른 타일이 이미 보이면 격자 안쪽도 움직이지 않는다", async () => {
+    const host = await mountSection();
+    expect(q(host, "theme-style-scroll")!.scrollTop).toBe(0);
   });
 
   it("라디오 그룹이다: fieldset + 보이지 않는 legend, 한 이름, 고른 칸은 하나", async () => {
     const host = await mountSection();
-    open(host);
     const group = q(host, "theme-style-group")!;
     expect(group.tagName).toBe("FIELDSET");
     expect(group.querySelector("legend")?.textContent).toBe("테마 스타일");
@@ -282,7 +287,6 @@ describe("갤러리: 색 모드가 목록을 정한다 (탭이 모드를 따른�
 
   it("타일마다 자기 테마의 색으로 칠해진다: 첫 파티도 카탈로그도 같은 길, 분할은 두 층이 다르다", async () => {
     const host = await mountSection();
-    open(host);
     const dawn = paintOf(host, tileTestId("dawnsky"));
     expect(dawn).toHaveLength(2);
     expect(dawn[0]["--canvas-mid"]).toBe(THEMES.dawnsky.light.canvas[1]);
@@ -301,7 +305,6 @@ describe("갤러리: 색 모드가 목록을 정한다 (탭이 모드를 따른�
   it("타일의 알약은 고른 강조색을 그 테마에 올린 색이다 (거절되면 그 테마의 기본 신호)", async () => {
     updateAppearance({ scheme: "dark", signal: { preset: "hyeseong" } });
     const host = await mountSection();
-    open(host);
     const github = paintOf(host, tileTestId("catalog:github"))[0];
     expect(github["--signal"]).toBe(paintFor("catalog:github", "dark", { preset: "hyeseong" })!["--signal"]);
     expect(github["--signal"]).not.toBe(paintFor("catalog:github", "dark", null)!["--signal"]);
@@ -313,7 +316,6 @@ describe("갤러리: 색 모드가 목록을 정한다 (탭이 모드를 따른�
 
   it("네 상태: 목록은 로컬 데이터라 빈 상태가 없고, 모든 모드의 모든 타일이 칠해진다 (파생이 던지는 테마가 없다)", async () => {
     const host = await mountSection();
-    open(host);
     for (const mode of ["system", "light", "dark"] as const) {
       click(radio(host, `theme-choice-${mode}`));
       expect(tiles(host).length).toBeGreaterThan(0);
@@ -329,13 +331,12 @@ describe("갤러리: 색 모드가 목록을 정한다 (탭이 모드를 따른�
 describe("고르면 앱 전체가 바뀐다 (AC 3)", () => {
   it("카탈로그 테마를 고르면 저장소·루트 스탬프·저장(localStorage)·접힌 트리거가 따라온다", async () => {
     const host = await mountSection();
-    open(host);
     click(radio(host, tileTestId("catalog:github")));
     expect(getThemeRef()).toBe("catalog:github");
     expect(document.documentElement.getAttribute("data-palette")).toBe("derived");
     expect(document.documentElement.getAttribute("data-theme-ref")).toBe("catalog:github");
     expect(JSON.parse(localStorage.getItem(APPEARANCE_STORAGE_KEY) ?? "{}").theme).toBe("catalog:github");
-    expect(q(host, "theme-style-trigger")!.getAttribute("aria-label")).toBe("테마 스타일, 지금은 GitHub");
+    expect(selectedName(host)).toBe("GitHub");
     expect(q(host, tileTestId("catalog:github"))!.hasAttribute("data-selected")).toBe(true);
     expect(radio(host, tileTestId("catalog:github"))!.checked).toBe(true);
     expect(tiles(host).filter((tile) => tile.hasAttribute("data-selected"))).toHaveLength(1);
@@ -346,7 +347,6 @@ describe("고르면 앱 전체가 바뀐다 (AC 3)", () => {
   it("다크 단독 테마를 다크 목록에서 고르면 색 모드는 다크 그대로이고 안내는 없다 (이미 그 모드다)", async () => {
     updateAppearance({ scheme: "dark" });
     const host = await mountSection();
-    open(host);
     click(radio(host, tileTestId("catalog:nord")));
     expect(getThemeRef()).toBe("catalog:nord");
     expect(getAppearance().scheme).toBe("dark");
@@ -357,37 +357,22 @@ describe("고르면 앱 전체가 바뀐다 (AC 3)", () => {
   it("새로고침 뒤에도 남는다: 저장된 레코드를 다시 읽으면 같은 테마가 선택된 타일이다", async () => {
     updateAppearance({ scheme: "light" });
     let host = await mountSection();
-    open(host);
     click(radio(host, tileTestId("catalog:solarized")));
     act(() => mountedRoot?.unmount());
     mountedRoot = null;
     mountedHost?.remove();
     reloadAppearanceForTest();
     host = await mountSection();
-    expect(q(host, "theme-style-trigger")!.getAttribute("aria-label")).toBe("테마 스타일, 지금은 Solarized");
-    open(host);
+    expect(selectedName(host)).toBe("Solarized");
     expect(radio(host, tileTestId("catalog:solarized"))!.checked).toBe(true);
   });
 
   it("첫 파티를 다시 고르면 되돌아온다", async () => {
     const host = await mountSection();
-    open(host);
     click(radio(host, tileTestId("catalog:github")));
     click(radio(host, tileTestId("graphite")));
     expect(getThemeRef()).toBe("graphite");
     expect(document.documentElement.getAttribute("data-palette")).toBe("graphite");
-  });
-
-  it("Esc는 펼친 갤러리를 닫고 포커스를 트리거에 돌려준다", async () => {
-    const host = await mountSection();
-    open(host);
-    const first = radio(host, tileTestId("graphite"))!;
-    first.focus();
-    act(() => {
-      first.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
-    });
-    expect(q(host, "theme-style-options")).toBeNull();
-    expect(document.activeElement).toBe(q(host, "theme-style-trigger"));
   });
 });
 
@@ -541,6 +526,43 @@ describe("강조색 칩: 그 테마·모드에서 푼 색과 쓸 수 있는지 (
     expect(getAccent()).toBe("hongyeom"); // 저장된 선택은 건드리지 않는다
     // 화면이 왜 기본 색인지 문장이 말한다(폰도 같은 말을 한다).
     expect(q(host, "accent-unavailable")!.textContent).toContain("고른 강조색은 이 테마에서 쓸 수 없어 기본 색으로 보여요.");
+  });
+
+  it("칩은 이름 없는 원 한 줄이다: 보이는 글자가 없고 이름은 라디오의 낭독 이름과 툴팁에 있다 (#5783)", async () => {
+    const host = await mountSection();
+    const row = q(host, "accent-chip-row")!;
+    const chips = [...row.querySelectorAll<HTMLElement>('[data-testid^="accent-swatch-"]')];
+    expect(chips.map((c) => c.getAttribute("data-accent-swatch"))).toEqual(ACCENT_THEMES.map((t) => t.id));
+    for (const [index, chipNode] of chips.entries()) {
+      const name = ACCENT_THEMES[index].label;
+      // 보이는 글자: sr-only를 걷은 사본에는 글자가 하나도 없다.
+      const shown = chipNode.cloneNode(true) as HTMLElement;
+      for (const hidden of shown.querySelectorAll(".sr-only")) hidden.remove();
+      expect(shown.textContent, name).toBe("");
+      // 낭독 이름: 라디오를 품은 라벨의 글자가 곧 이름이다.
+      expect(chipNode.tagName).toBe("LABEL");
+      expect(chipNode.textContent).toBe(name);
+      expect(chipNode.querySelector("input")?.type).toBe("radio");
+      // 네이티브 title은 두지 않는다(툴팁과 같이 뜬다).
+      expect(chipNode.closest("[title]")).toBeNull();
+    }
+    // 키보드 초점이 가면 우리 툴팁이 이름을 띄운다(보조기술에는 숨김: 이름을 두 번 읽히지 않는다).
+    const input = radio(host, "accent-swatch-hyeseong")!;
+    act(() => input.focus());
+    const tip = chips[3].parentElement!.querySelector<HTMLElement>('[data-testid="tooltip"]');
+    expect(tip?.textContent).toBe("혜성");
+    expect(tip?.getAttribute("aria-hidden")).toBe("true");
+    act(() => input.blur());
+    expect(chips[3].parentElement!.querySelector('[data-testid="tooltip"]')).toBeNull();
+  });
+
+  it("다른 테마에서 첫 칩의 낭독 이름·툴팁은 「기본」이다", async () => {
+    updateAppearance({ theme: "graphite", scheme: "light" });
+    const host = await mountSection();
+    const input = radio(host, "accent-swatch-dawn")!;
+    expect(chip(host, "dawn").textContent).toBe("기본");
+    act(() => input.focus());
+    expect(chip(host, "dawn").parentElement!.querySelector('[data-testid="tooltip"]')?.textContent).toBe("기본");
   });
 
   it("모든 프리셋이 서는 테마에서는 이유 줄이 없다", async () => {

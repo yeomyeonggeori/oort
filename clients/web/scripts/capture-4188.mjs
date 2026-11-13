@@ -9,7 +9,7 @@
 //   base     기준(AP-1b 전): 설정 > 모양의 「색상」 카드(테마 스타일 행 없음)를 새벽하늘·흑연·노을띠 라이트·다크로.
 //   app      대표 여덟 테마(새벽하늘·흑연·노을띠·github·catppuccin·nord(다크 단독)·solarized·gruvbox-hard)로 선 앱을
 //            라이트·다크(단독은 한 모드) × 1440·390. 저장소에 외양 v2 레코드를 **심고** 불러온다(첫 페인트 경로도 잰다).
-//   gallery  설정 > 모양의 테마 스타일 행: 접힘, 시스템·라이트·다크 세 목록을 펼친 모습(1440, 390), 스크롤 아래쪽.
+//   gallery  설정 > 모양의 테마 스타일 행: 늘 펴진 격자(#5783)의 시스템·라이트·다크 세 목록(1440, 390), 스크롤 아래쪽.
 //   states   새 화면의 상태들: 청크를 받는 동안(자리 막대) · 받지 못했을 때(한 줄) · 거절된 강조색 칩과 이유 한 줄 ·
 //            색 모드를 바꿔 테마가 옮겨진 안내(규칙 2·3) · 타일을 눌러 전 화면이 바뀐 모습 · 타일 키보드 초점 ·
 //            가리킴·눌림·트리거 초점·칩 초점 · 펼칠 때 고른 타일로 스크롤(390, 늦은 알파벳 테마).
@@ -17,14 +17,15 @@
 //            가리킨 행) × 라이트·다크 × 1440·390. 강조색을 고른 카탈로그 앱 화면(frappe 다크 + 홍염은 거절).
 //   design   디자인 갤러리 `#/design`의 「칩 그릇」·「States」 구역을 구역별 요소 사진으로(쪽 전체 사진은 늦게 그려지는 구역이 비어
 //            있다) × 같은 테마들 + 첫 파티 둘. `VITE_DESIGN_GALLERY=1`로 빌드한 dist를 `DIST_DESIGN`으로 준다.
-//   widths   설정 > 모양 900·1280(접힘·펼침).
+//   widths   설정 > 모양 900·1280.
 //   extra    설계 리뷰 2차가 요청한 나머지: 컴포저 `@` 자동완성의 강조된 줄(선택 행 `accent-soft`) × 어두운·밝은 카탈로그 테마 ·
 //            640~760px 폭의 갤러리 · 390 다크 탭에서 격자 안쪽을 스크롤한 중간 장면.
-//   names    접힌 행의 테마 이름이 한 줄이고 잘리거나 넘치지 않는가를 **모든** 타일(시스템·라이트·다크 탭)에서 320~760 폭으로 잰다
-//            (설계 리뷰 2차 H-A). 그리고 배치가 이름마다 갈리지 않는가(한 줄 · 이름 위 썸네일 아래 · chevron만 홀로 아랫줄)와 선택해도
-//            트리거 높이가 뛰지 않는가를 잰다(3차 M-1). 고를 때마다 **고른 타일의 이름**이 잘리지 않는지와 열린 격자가 움직이지 않는지도
-//            재고(4차 B-1), 글자 크기는 기본과 「크게」 둘이다. 어기는 것이 하나라도 있으면 캡처가 실패한다(종료 코드 1). 사진은 한 장씩 남긴다
-//            (접힌 행, 폰 폭에서는 열린 갤러리에서 가장 긴 이름을 고른 모양).
+//   names    **모든** 타일(시스템·라이트·다크 탭)을 320~760 폭에서 차례로 골라 가며 고른 타일의 이름이 잘리지 않고 두 줄 안인지, 격자가
+//            선택 때문에 움직이지 않는지, 페이지가 가로로 넘치지 않는지 잰다(설계 리뷰 4차 B-1). 글자 크기는 기본과 「크게」 둘이다. 어기는 것이
+//            하나라도 있으면 캡처가 실패한다(종료 코드 1). #5783 전에는 접힌 행의 이름·배치(2차 H-A · 3차 M-1)도 쟀다: 접힌 행이 걷혔다.
+//   qa8      #5783(QA 8): 「색상」 카드를 시스템·라이트·다크 × 1440·390·360·200%(720×450)로. 페이지·카드·칩 줄의 가로 넘침, 칩 다섯이 한 줄인지,
+//            타일 틀 안 글자 0, 큰 미리보기 글자, 첫 칩 키보드 초점·끝 칩 가리킴의 툴팁이 카드 안인지, 청크를 받는 동안과 받은 뒤의 강조색 행
+//            위치 차이를 잰다. 어기면 종료 코드 1.
 //
 // 백엔드 없이 `/v1/**` 고정 응답 + 가짜 소켓. 벽시계·로케일·시간대를 고정한다.
 // =============================================================================
@@ -273,6 +274,12 @@ async function goAppearance(page) {
   await page.waitForTimeout(400);
 }
 
+/** 갤러리는 늘 펴져 있다(#5783): 지연 청크가 와서 격자가 선 뒤를 기다린다(누를 트리거가 없다). */
+async function galleryReady(page) {
+  await page.getByTestId("theme-style-options").waitFor({ timeout: 20_000 });
+  await page.waitForTimeout(300);
+}
+
 async function appScenes(browser, origin) {
   for (const rep of REPS) {
     for (const mode of rep.modes) {
@@ -298,24 +305,14 @@ async function galleryScenes(browser, origin) {
       const { context, page } = await openWith(browser, origin, { osScheme, viewport, record: github(mode) });
       try {
         await goAppearance(page);
-        await page.getByTestId("theme-style-trigger").waitFor({ timeout: 15_000 });
-        await page.getByTestId("theme-style-trigger").scrollIntoViewIfNeeded();
-        await shoot(page, `gallery-closed-${mode}-${viewport.name}`, { mode, viewport: viewport.name, open: false });
-        await page.getByTestId("theme-style-trigger").click();
-        await page.getByTestId("theme-style-options").waitFor();
-        await page.waitForTimeout(300);
+        await galleryReady(page);
         await page.getByTestId("theme-style-options").scrollIntoViewIfNeeded();
         const tiles = await page.locator(".theme-tile").count();
-        // 미니 앱 제목은 좁은 타일에서 빠지고(display none) 접힌 행 썸네일에는 남는다. 증거로 meta에 적는다.
-        const titles = await page.evaluate(() => {
-          const shown = (el) => (el ? getComputedStyle(el).display : "absent");
-          return {
-            tile: shown(document.querySelector(".theme-tile-frame .theme-preview-title")),
-            thumb: shown(document.querySelector(".theme-style-thumb .theme-preview-title")),
-            tileWidth: Math.round(document.querySelector(".theme-tile-frame")?.getBoundingClientRect().width ?? 0),
-            thumbWidth: Math.round(document.querySelector(".theme-style-thumb")?.getBoundingClientRect().width ?? 0),
-          };
-        });
+        // 타일 안은 글자 없는 미니어처다(#5783): 틀 안 글자가 있는 타일 수(0이어야 한다)를 meta에 적는다.
+        const titles = await page.evaluate(() => ({
+          tilesWithText: [...document.querySelectorAll(".theme-tile-frame")].filter((el) => el.textContent.trim() !== "").length,
+          tileWidth: Math.round(document.querySelector(".theme-tile-frame")?.getBoundingClientRect().width ?? 0),
+        }));
         await shoot(page, `gallery-open-${mode}-${viewport.name}`, { mode, viewport: viewport.name, open: true, tiles, titles });
         if (viewport.name === "1440") {
           // 목록 안에서 끝까지 스크롤한 모습(아래 페이드).
@@ -401,45 +398,32 @@ async function stateScenes(browser, origin) {
     // 5. 타일을 눌러 고르면 전 화면이 바뀐다(설정 화면 자신이 그 테마가 된다). 다크 탭에서 Nord.
     await run(viewport, { osScheme: "dark", record: seedRecord({ theme: "dawnsky", scheme: "dark" }) }, async (page) => {
       await goAppearance(page);
-      await page.getByTestId("theme-style-trigger").click();
-      await page.getByTestId("theme-style-options").waitFor();
+      await galleryReady(page);
       await page.getByTestId("theme-tile-catalog-nord").click();
       await page.waitForTimeout(400);
       await page.getByTestId("theme-style-options").scrollIntoViewIfNeeded();
       await shoot(page, `state-pick-nord-${viewport.name}`, { viewport: viewport.name, facts: await settingsFacts(page) });
     });
 
-    // 6. 타일의 키보드 초점: 트리거에서 Tab으로 첫 타일로(초점 고리가 보이는지).
+    // 6. 키보드 초점: 색 모드 라이트 라디오에서 Tab 한 번이면 고른 타일, 한 번 더면 강조색 칩(툴팁이 이름을 띄운다).
     await run(viewport, { osScheme: "light", record: seedRecord({ theme: "catalog:github", scheme: "light" }) }, async (page) => {
       await goAppearance(page);
-      await page.getByTestId("theme-style-trigger").click();
-      await page.getByTestId("theme-style-options").waitFor();
-      await page.getByTestId("theme-style-trigger").focus();
+      await galleryReady(page);
+      await page.getByTestId("theme-choice-light").focus();
       await page.keyboard.press("Tab");
       await page.waitForTimeout(200);
       await page.getByTestId("theme-style-options").scrollIntoViewIfNeeded();
       await shoot(page, `state-focus-tile-${viewport.name}`, { viewport: viewport.name, facts: await settingsFacts(page) });
-    });
-
-    // 7. 트리거의 키보드 초점(색 모드 라이트 라디오에서 Tab 한 번)과 강조색 칩의 키보드 초점.
-    await run(viewport, { osScheme: "light", record: seedRecord({ theme: "catalog:github", scheme: "light" }) }, async (page) => {
-      await goAppearance(page);
-      await page.getByTestId("theme-choice-light").focus();
-      await page.keyboard.press("Tab");
-      await page.waitForTimeout(150);
-      await page.getByTestId("theme-style-trigger").scrollIntoViewIfNeeded();
-      await shoot(page, `state-focus-trigger-${viewport.name}`, { viewport: viewport.name, facts: await settingsFacts(page) });
       await page.keyboard.press("Tab");
       await page.waitForTimeout(150);
       await page.getByTestId("accent-choice").scrollIntoViewIfNeeded();
       await shoot(page, `state-focus-chip-${viewport.name}`, { viewport: viewport.name, facts: await settingsFacts(page) });
     });
 
-    // 8. 늦은 알파벳 테마(vitesse, 다크)를 고른 채 펼친다: 고른 타일이 보이는 자리로 스크롤돼 있다(43장 가운데 어디든).
+    // 8. 늦은 알파벳 테마(vitesse, 다크)를 고른 채 연다: 고른 타일이 격자 안쪽에서 보이는 자리로 스크롤돼 있다(43장 가운데 어디든).
     await run(viewport, { osScheme: "dark", record: seedRecord({ theme: "catalog:vitesse", scheme: "dark" }) }, async (page) => {
       await goAppearance(page);
-      await page.getByTestId("theme-style-trigger").click();
-      await page.getByTestId("theme-style-options").waitFor();
+      await galleryReady(page);
       await page.waitForTimeout(300);
       const inView = await page.evaluate(() => {
         const tile = document.querySelector(".theme-tile[data-selected]");
@@ -454,8 +438,7 @@ async function stateScenes(browser, origin) {
     if (viewport.name === "1440") {
       await run(viewport, { osScheme: "light", record: seedRecord({ theme: "catalog:github", scheme: "light" }) }, async (page) => {
         await goAppearance(page);
-        await page.getByTestId("theme-style-trigger").click();
-        await page.getByTestId("theme-style-options").waitFor();
+        await galleryReady(page);
         await page.getByTestId("theme-style-options").scrollIntoViewIfNeeded();
         const target = page.getByTestId("theme-tile-catalog-everforest");
         await target.scrollIntoViewIfNeeded();
@@ -613,8 +596,7 @@ async function extraScenes(browser, origin) {
     const { context, page } = await openWith(browser, origin, { osScheme: "dark", viewport, record: seedRecord({ theme: "catalog:github", scheme: "dark" }) });
     try {
       await goAppearance(page);
-      await page.getByTestId("theme-style-trigger").click();
-      await page.getByTestId("theme-style-options").waitFor();
+      await galleryReady(page);
       await page.waitForTimeout(300);
       await page.getByTestId("theme-style-options").scrollIntoViewIfNeeded();
       const columns = await page.evaluate(() => getComputedStyle(document.querySelector(".theme-gallery-grid")).gridTemplateColumns.split(" ").length);
@@ -629,8 +611,7 @@ async function extraScenes(browser, origin) {
     const { context, page } = await openWith(browser, origin, { osScheme: "dark", viewport, record: seedRecord({ theme: "dawnsky", scheme: "dark" }) });
     try {
       await goAppearance(page);
-      await page.getByTestId("theme-style-trigger").click();
-      await page.getByTestId("theme-style-options").waitFor();
+      await galleryReady(page);
       await page.getByTestId("theme-style-options").scrollIntoViewIfNeeded();
       const scroller = page.locator(".theme-gallery-scroll");
       const metrics = await scroller.evaluate((el) => ({ client: el.clientHeight, scroll: el.scrollHeight }));
@@ -665,14 +646,11 @@ async function extraScenes(browser, origin) {
   }
 }
 
-// 접힌 행의 이름과 타일: 모든 타일을 차례로 골라 가며, 고를 때마다 (1) 접힌 행의 이름이 한 줄이고 잘리지 않고 넘치지 않는지 (2) 배치가
-// 이름마다 갈리지 않는지 (3) **고른 타일의 이름**이 잘리지 않는지 (4) 열린 격자가 선택 때문에 움직이지 않는지 잰다. 글자 크기는 기본과
-// 「크게」 둘이다(크게에서는 이름이 타일보다 길어진다). 배치는 `row`(이름 · 썸네일 · chevron이 한 줄) 아니면 `stacked`(이름이 윗줄, 썸네일과
-// chevron이 아랫줄)이고, chevron은 늘 썸네일 옆이다. 3·4는 설계 리뷰 4차 B-1: 타일 이름을 고르기 전에 한 번만 재서, 고른 순간에만 굵어진 이름이
-// 잘리는 것을 못 잡았다.
+// 타일 이름: 모든 타일을 차례로 골라 가며, 고를 때마다 (1) **고른 타일의 이름**이 잘리지 않고 두 줄 안인지 (2) 격자가 선택 때문에 움직이지
+// 않는지 (3) 페이지가 가로로 넘치지 않는지 잰다. 글자 크기는 기본과 「크게」 둘이다(크게에서는 이름이 타일보다 길어진다). 설계 리뷰 4차 B-1:
+// 타일 이름을 고르기 전에 한 번만 재서, 고른 순간에만 굵어진 이름이 잘리는 것을 못 잡았다. #5783 전에는 접힌 행의 이름·배치도 쟀다.
 const NAME_WIDTHS = (process.env.NAME_WIDTHS ?? "390,375,360,320,640,700,760").split(",").map(Number);
 const NAME_WIDTHS_LARGER = (process.env.NAME_WIDTHS_LARGER ?? "390,375,360,640,700").split(",").map(Number);
-const NAME_SHOT_WIDTHS = new Set([390, 375, 360, 640]);
 const NAME_OPEN_SHOT_WIDTHS = new Set([375, 360]);
 async function nameScenes(browser, origin) {
   const bad = [];
@@ -693,8 +671,7 @@ async function nameScenes(browser, origin) {
         const where = { width, mode, fontSize };
         try {
           await goAppearance(page);
-          await page.getByTestId("theme-style-trigger").click();
-          await page.getByTestId("theme-style-options").waitFor();
+          await galleryReady(page);
           // 타일 이름과 열 수(설계 리뷰 3차 M-2): 360 이상에서는 두 열이고, 이름은 잘리지 않고 두 줄 안에서 접힌다.
           const tileMeasure = await page.evaluate(() => {
             const names = [...document.querySelectorAll(".theme-tile-name")];
@@ -709,45 +686,24 @@ async function nameScenes(browser, origin) {
           });
           tileReport.push({ ...where, ...tileMeasure });
           if (tileMeasure.clipped.length > 0 || tileMeasure.maxLines > 2 || (width >= 360 && tileMeasure.cols < 2)) {
-            bad.push({ ...where, ref: "*", label: `(타일: 열 ${tileMeasure.cols}, 최대 ${tileMeasure.maxLines}줄, 잘린 이름 ${tileMeasure.clipped.join("·") || "없음"})`, lines: tileMeasure.maxLines, truncated: tileMeasure.clipped.length > 0, triggerOverflow: false, layout: "tile", chevronBeside: true });
+            bad.push({ ...where, ref: "*", label: `(타일: 열 ${tileMeasure.cols}, 최대 ${tileMeasure.maxLines}줄, 잘린 이름 ${tileMeasure.clipped.join("·") || "없음"})` });
           }
           const refs = await page.locator(".theme-tile input").evaluateAll((nodes) => nodes.map((n) => n.value));
           for (const ref of refs) {
             const label = await page.evaluate((value) => document.querySelector(`.theme-tile input[value="${value}"]`)?.closest("label")?.querySelector(".theme-tile-name")?.textContent ?? "", ref);
             await page.locator(`.theme-tile input[value="${ref}"]`).evaluate((node) => node.closest("label").click());
             await page.waitForFunction(
-              (text) => document.querySelector('[data-testid="theme-style-selected-name"]')?.textContent === text,
+              (text) => document.querySelector(".theme-tile[data-selected] .theme-tile-name")?.textContent === text,
               label,
               { timeout: 5000 }
             );
             const m = await page.evaluate(() => {
-              const name = document.querySelector('[data-testid="theme-style-selected-name"]');
-              const trigger = document.querySelector('[data-testid="theme-style-trigger"]');
-              const tail = trigger.querySelector(".theme-style-trigger-tail");
-              const chevron = tail.querySelector("svg");
-              const thumb = document.querySelector('[data-testid="theme-style-selected-preview"]');
-              const style = getComputedStyle(name);
-              const lineHeight = parseFloat(style.lineHeight);
-              const rect = name.getBoundingClientRect();
-              const tailBox = tail.getBoundingClientRect();
-              const chevronBox = chevron.getBoundingClientRect();
-              const thumbBox = thumb.getBoundingClientRect();
-              // 고른 타일의 이름(고른 순간에 굵기·색이 바뀌는 자리): 잘리지 않고 두 줄 안이다.
               const tileName = document.querySelector(".theme-tile[data-selected] .theme-tile-name");
               const region = document.querySelector('[data-testid="theme-style-options"]');
               // 격자는 안쪽에서 스크롤하는 상자라 바깥 높이(`regionHeight`)는 안쪽 줄이 늘어도 안 변한다: 안쪽 전체 높이(`gridHeight`)를 잰다.
               const scroller = document.querySelector(".theme-gallery-scroll");
               return {
-                lines: Math.round(rect.height / lineHeight),
-                truncated: name.scrollWidth > name.clientWidth + 1,
-                triggerOverflow: trigger.scrollWidth > trigger.clientWidth + 1,
                 pageOverflow: document.documentElement.scrollWidth > document.documentElement.clientWidth + 1,
-                nameWidth: Math.round(rect.width),
-                triggerWidth: Math.round(trigger.getBoundingClientRect().width),
-                triggerHeight: Math.round(trigger.getBoundingClientRect().height),
-                layout: tailBox.top >= rect.bottom - 1 ? "stacked" : "row",
-                // chevron은 썸네일 옆(위아래로 썸네일 범위 안)에 선다: 홀로 아랫줄에 떨어지지 않는다.
-                chevronBeside: chevronBox.top >= thumbBox.top - 1 && chevronBox.bottom <= thumbBox.bottom + 1 && chevronBox.left >= thumbBox.right - 1,
                 tileNameClipped: tileName.scrollWidth > tileName.clientWidth + 1,
                 tileNameLines: Math.round(tileName.getBoundingClientRect().height / parseFloat(getComputedStyle(tileName).lineHeight)),
                 regionHeight: Math.round(region.getBoundingClientRect().height),
@@ -757,30 +713,19 @@ async function nameScenes(browser, origin) {
             const row = { ...where, ref, label, ...m };
             report.push(row);
             rows.push(row);
-            if (m.lines !== 1 || m.truncated || m.triggerOverflow || m.pageOverflow || !m.chevronBeside || m.tileNameClipped || m.tileNameLines > 2) bad.push(row);
+            if (m.pageOverflow || m.tileNameClipped || m.tileNameLines > 2) bad.push(row);
           }
-          // 이름마다 배치·높이가 갈리거나 열린 격자가 선택 때문에 움직이면 선택할 때 화면이 뛴다(설계 리뷰 3차 M-1 · 4차 B-1).
-          const layouts = [...new Set(rows.map((r) => r.layout))];
-          const heights = rows.map((r) => r.triggerHeight);
+          // 열린 격자가 선택 때문에 움직이면 선택할 때 화면이 뛴다(설계 리뷰 4차 B-1).
           const regionHeights = rows.map((r) => r.regionHeight);
           const gridHeights = rows.map((r) => r.gridHeight);
-          if (layouts.length > 1 || Math.max(...heights) - Math.min(...heights) > 1) {
-            bad.push({ ...where, ref: "*", label: `(배치가 이름마다 갈린다: ${layouts.join("/")}, 높이 ${Math.min(...heights)}~${Math.max(...heights)})`, lines: 1, truncated: false, triggerOverflow: false, layout: layouts.join("/"), chevronBeside: true });
-          }
           if (Math.max(...regionHeights) - Math.min(...regionHeights) > 1 || Math.max(...gridHeights) - Math.min(...gridHeights) > 1) {
-            bad.push({ ...where, ref: "*", label: `(열린 갤러리의 높이가 선택에 따라 움직인다: 바깥 ${Math.min(...regionHeights)}~${Math.max(...regionHeights)}, 격자 안쪽 ${Math.min(...gridHeights)}~${Math.max(...gridHeights)})`, lines: 1, truncated: false, triggerOverflow: false, layout: "region", chevronBeside: true });
+            bad.push({ ...where, ref: "*", label: `(갤러리의 높이가 선택에 따라 움직인다: 바깥 ${Math.min(...regionHeights)}~${Math.max(...regionHeights)}, 격자 안쪽 ${Math.min(...gridHeights)}~${Math.max(...gridHeights)})` });
           }
-          // 가장 긴 이름 하나를 사진으로 남긴다: 접힌 행(이름·썸네일)과, 폰 폭에서는 열린 갤러리에서 그 타일이 고른 모양.
+          // 폰 폭에서는 가장 긴 이름을 고른 모양을 사진으로 남긴다.
           const longest = rows.slice().sort((a, b) => b.label.length - a.label.length)[0];
           const suffix = fontSize === "default" ? "" : `-${fontSize}`;
-          const shotNeeded = fontSize === "default" ? NAME_SHOT_WIDTHS.has(width) : NAME_OPEN_SHOT_WIDTHS.has(width);
-          if (longest && shotNeeded) {
-            await page.locator(`.theme-tile input[value="${longest.ref}"]`).evaluate((node) => node.closest("label").click());
-            await page.getByTestId("theme-style-trigger").scrollIntoViewIfNeeded();
-            await page.getByTestId("theme-style-row").scrollIntoViewIfNeeded();
-            await shoot(page, `names-${mode}-${width}${suffix}`, { ...where, longest: longest.label });
-          }
           if (longest && NAME_OPEN_SHOT_WIDTHS.has(width)) {
+            await page.locator(`.theme-tile input[value="${longest.ref}"]`).evaluate((node) => node.closest("label").click());
             await page.locator(".theme-tile[data-selected]").scrollIntoViewIfNeeded();
             await shoot(page, `names-open-${mode}-${width}${suffix}`, { ...where, longest: longest.label });
           }
@@ -793,12 +738,167 @@ async function nameScenes(browser, origin) {
   writeFileSync(resolve(outDir(), "names.json"), JSON.stringify({ checked: report.length, bad, report, tiles: tileReport }, null, 1));
   console.log(`NAMES: ${report.length} measured, ${bad.length} violations`);
   if (bad.length > 0) {
-    console.error(bad.slice(0, 12).map((r) => `${r.width}px ${r.mode} ${r.fontSize} ${r.label}: lines=${r.lines} truncated=${r.truncated} triggerOverflow=${r.triggerOverflow} layout=${r.layout} chevronBeside=${r.chevronBeside} tileNameClipped=${r.tileNameClipped ?? ""}`).join("\n"));
+    console.error(bad.slice(0, 12).map((r) => `${r.width}px ${r.mode} ${r.fontSize} ${r.label}: pageOverflow=${r.pageOverflow ?? ""} tileNameClipped=${r.tileNameClipped ?? ""} lines=${r.tileNameLines ?? ""}`).join("\n"));
     process.exitCode = 1;
   }
 }
 
-// 설정 > 모양 900·1280(접힘·펼침).
+// #5783(QA 8): 「색상」 카드 — 늘 펴진 격자 · 글자 없는 타일 · 이름 없는 강조색 한 줄.
+const QA8_VIEWPORTS = [
+  { name: "1440", width: 1440, height: 900 },
+  { name: "390", width: 390, height: 844 },
+  { name: "360", width: 360, height: 780 },
+  { name: "zoom200", width: 720, height: 450 }, // 1440×900 창의 브라우저 200%와 같은 CSS 뷰포트(capture-4198의 관례)
+];
+const QA8_CASES = [
+  { mode: "system", osScheme: "light", theme: "dawnsky" },
+  { mode: "light", osScheme: "light", theme: "catalog:github" },
+  { mode: "dark", osScheme: "dark", theme: "catalog:catppuccin-frappe" }, // 거절된 칩 둘 + 이유 한 줄
+];
+async function qa8Scenes(browser, origin) {
+  const bad = [];
+  const rows = [];
+  const measure = (page) =>
+    page.evaluate(() => {
+      const row = document.querySelector('[data-testid="theme-style-row"]');
+      const card = row.parentElement;
+      const chipRow = document.querySelector('[data-testid="accent-chip-row"]');
+      const chips = [...chipRow.querySelectorAll("[data-accent-swatch]")];
+      const frames = [...document.querySelectorAll(".theme-tile-frame")];
+      const preview = document.querySelector('[data-testid="theme-preview"]');
+      const grid = document.querySelector(".theme-gallery-grid");
+      return {
+        pageOverflow: document.documentElement.scrollWidth - document.documentElement.clientWidth,
+        cardOverflow: card.scrollWidth - card.clientWidth,
+        chipRowOverflow: chipRow.scrollWidth - chipRow.clientWidth,
+        chipCount: chips.length,
+        chipLines: new Set(chips.map((n) => Math.round(n.getBoundingClientRect().top))).size,
+        chipCircle: Math.round(chips[0].querySelector(".accent-swatch-chip").getBoundingClientRect().width),
+        chipTap: Math.round(chips[0].getBoundingClientRect().width),
+        chipVisibleText: chips.map((n) => { const c = n.cloneNode(true); c.querySelectorAll(".sr-only").forEach((x) => x.remove()); return c.textContent; }).join(""),
+        chipNames: chips.map((n) => n.textContent),
+        disabled: chips.filter((n) => n.getAttribute("aria-disabled") === "true").map((n) => n.getAttribute("data-accent-swatch")),
+        reason: document.querySelector('[data-testid="accent-unavailable"]')?.textContent ?? null,
+        tileCount: frames.length,
+        tilesWithText: frames.filter((f) => f.textContent.trim() !== "").length,
+        previewText: preview?.textContent ?? "",
+        cols: getComputedStyle(grid).gridTemplateColumns.split(" ").length,
+        gridHeight: Math.round(document.querySelector(".theme-gallery-scroll").getBoundingClientRect().height),
+        selectedVisible: (() => {
+          const box = document.querySelector(".theme-gallery-scroll").getBoundingClientRect();
+          const tile = document.querySelector(".theme-tile[data-selected]")?.getBoundingClientRect();
+          return tile ? tile.top >= box.top - 1 && tile.bottom <= box.bottom + 1 : false;
+        })(),
+      };
+    });
+  const tipInside = (page) =>
+    page.evaluate(() => {
+      const tip = document.querySelector('[data-testid="accent-choice"] [data-testid="tooltip"]');
+      if (!tip) return { shown: false };
+      const card = document.querySelector('[data-testid="theme-style-row"]').parentElement.getBoundingClientRect();
+      const box = tip.getBoundingClientRect();
+      return {
+        shown: true,
+        text: tip.textContent,
+        inside: box.left >= card.left - 0.5 && box.right <= card.right + 0.5 && box.top >= card.top - 0.5 && box.bottom <= card.bottom + 0.5,
+      };
+    });
+  for (const viewport of QA8_VIEWPORTS) {
+    for (const c of QA8_CASES) {
+      const { context, page } = await openWith(browser, origin, { osScheme: c.osScheme, viewport, record: seedRecord({ theme: c.theme, scheme: c.mode }) });
+      const where = { viewport: viewport.name, mode: c.mode, theme: c.theme };
+      try {
+        await goAppearance(page);
+        await galleryReady(page);
+        await page.waitForFunction(() => document.querySelector('[data-testid="accent-swatch-dawn"]')?.style.getPropertyValue("--signal"), undefined, { timeout: 15_000 });
+        const m = await measure(page);
+        const row = { ...where, ...m };
+        const fails0 = [];
+        await page.getByTestId("theme-choice").scrollIntoViewIfNeeded();
+        await page.evaluate(() => document.querySelector('[data-testid="theme-choice"]').scrollIntoView({ block: "start" }));
+        await shoot(page, `qa8-${c.mode}-${viewport.name}-gallery`, where);
+        await page.evaluate(() => document.querySelector('[data-testid="accent-choice"]').scrollIntoView({ block: "center" }));
+        await shoot(page, `qa8-${c.mode}-${viewport.name}-accent`, where);
+        await page.evaluate(() => document.querySelector('[data-testid="theme-preview"]').scrollIntoView({ block: "center" }));
+        await shoot(page, `qa8-${c.mode}-${viewport.name}-preview`, where);
+        // 첫 칩: 키보드(고른 타일에서 Tab). 끝 칩: 가리킴(툴팁 지연 뒤).
+        await page.locator(".theme-tile[data-selected] input").focus();
+        await page.keyboard.press("Tab");
+        await page.waitForTimeout(250);
+        await page.evaluate(() => document.querySelector('[data-testid="accent-choice"]').scrollIntoView({ block: "center" }));
+        row.tipFirst = await tipInside(page);
+        if (row.tipFirst.text !== row.chipNames[0]) fails0.push(`첫 칩 툴팁 글자 ${row.tipFirst.text} ≠ ${row.chipNames[0]}`);
+        await shoot(page, `qa8-${c.mode}-${viewport.name}-tip-first`, where);
+        // 첫 칩의 초점을 걷어야 그 툴팁이 닫힌다(초점이 남으면 첫 칩 툴팁이 계속 선다).
+        await page.evaluate(() => document.activeElement instanceof HTMLElement && document.activeElement.blur());
+        await page.getByTestId("accent-swatch-gamram").hover();
+        await page.waitForTimeout(900);
+        row.tipLast = await tipInside(page);
+        if (row.tipLast.text !== row.chipNames[4]) fails0.push(`끝 칩 툴팁 글자 ${row.tipLast.text} ≠ ${row.chipNames[4]}`);
+        await shoot(page, `qa8-${c.mode}-${viewport.name}-tip-last`, where);
+        rows.push(row);
+        const fails = [...fails0];
+        if (m.pageOverflow > 1) fails.push(`페이지 가로 넘침 ${m.pageOverflow}`);
+        if (m.cardOverflow > 1) fails.push(`카드 가로 넘침 ${m.cardOverflow}`);
+        if (m.chipRowOverflow > 1) fails.push(`칩 줄 넘침 ${m.chipRowOverflow}`);
+        if (m.chipCount !== 5 || m.chipLines !== 1) fails.push(`칩 ${m.chipCount}개가 ${m.chipLines}줄`);
+        if (m.chipVisibleText !== "") fails.push(`칩에 보이는 글자: ${m.chipVisibleText}`);
+        if (m.tileCount === 0 || m.tilesWithText !== 0) fails.push(`타일 ${m.tileCount}장 가운데 글자 있는 타일 ${m.tilesWithText}`);
+        if (!m.previewText.includes("새 글 3")) fails.push("큰 미리보기에 글자가 없다");
+        if (!m.selectedVisible) fails.push("고른 타일이 격자 안쪽에서 보이지 않는다");
+        if (!row.tipFirst.shown || !row.tipFirst.inside) fails.push(`첫 칩 툴팁 ${JSON.stringify(row.tipFirst)}`);
+        if (!row.tipLast.shown || !row.tipLast.inside) fails.push(`끝 칩 툴팁 ${JSON.stringify(row.tipLast)}`);
+        if (fails.length > 0) bad.push({ ...where, fails });
+      } finally {
+        await context.close();
+      }
+    }
+  }
+  // 청크를 받는 동안과 받은 뒤의 강조색 행 위치(색 모드 행 기준). 지연 청크를 문으로 잡아 두었다가 연다.
+  const shift = [];
+  // 안내 한 줄은 폭과 탭에 따라 두 줄이 된다(시스템 탭 문장이 가장 길다): 좁은 폭의 시스템 탭도 잰다.
+  for (const [viewport, scheme] of [[QA8_VIEWPORTS[0], "light"], [QA8_VIEWPORTS[1], "light"], [QA8_VIEWPORTS[1], "system"]]) {
+    let release = () => {};
+    const gate = new Promise((done) => { release = done; });
+    const { context, page } = await openWith(browser, origin, {
+      osScheme: "light",
+      viewport,
+      record: seedRecord({ theme: "catalog:github", scheme }),
+      prepare: (ctx) =>
+        ctx.route("**/assets/ThemeGallery-*.js", async (route) => {
+          await gate;
+          await route.continue();
+        }),
+    });
+    try {
+      await goAppearance(page);
+      await page.getByTestId("theme-style-row-pending").waitFor({ timeout: 15_000 });
+      const offset = () =>
+        page.evaluate(() => {
+          const top = (id) => document.querySelector(`[data-testid="${id}"]`).getBoundingClientRect().top;
+          return Math.round((top("accent-choice") - top("theme-choice")) * 10) / 10;
+        });
+      const before = await offset();
+      await page.evaluate(() => document.querySelector('[data-testid="theme-choice"]').scrollIntoView({ block: "start" }));
+      await shoot(page, `qa8-pending-${scheme}-${viewport.name}`, { viewport: viewport.name, scheme });
+      release();
+      await galleryReady(page);
+      const after = await offset();
+      shift.push({ viewport: viewport.name, scheme, before, after, delta: Math.round((after - before) * 10) / 10 });
+    } finally {
+      release();
+      await context.close();
+    }
+  }
+  writeFileSync(resolve(outDir(), "qa8.json"), JSON.stringify({ checked: rows.length, bad, rows, shift }, null, 1));
+  console.log(`QA8: ${rows.length} measured, ${bad.length} violations; shift ${JSON.stringify(shift)}`);
+  if (bad.length > 0) {
+    console.error(bad.map((r) => `${r.viewport} ${r.mode}: ${r.fails.join(" / ")}`).join("\n"));
+    process.exitCode = 1;
+  }
+}
+
+// 설정 > 모양 900·1280.
 async function widthScenes(browser, origin) {
   for (const width of [900, 1280]) {
     const viewport = { name: String(width), width, height: 900 };
@@ -806,10 +906,7 @@ async function widthScenes(browser, origin) {
       const { context, page } = await openWith(browser, origin, { osScheme: mode, viewport, record: seedRecord({ theme: "catalog:github", scheme: mode }) });
       try {
         await goAppearance(page);
-        await page.getByTestId("theme-style-trigger").scrollIntoViewIfNeeded();
-        await shoot(page, `width-closed-${mode}-${viewport.name}`, { mode, viewport: viewport.name, open: false });
-        await page.getByTestId("theme-style-trigger").click();
-        await page.getByTestId("theme-style-options").waitFor();
+        await galleryReady(page);
         await page.waitForTimeout(300);
         await page.getByTestId("theme-style-options").scrollIntoViewIfNeeded();
         const columns = await page.evaluate(() => getComputedStyle(document.querySelector(".theme-gallery-grid")).gridTemplateColumns.split(" ").length);
@@ -850,6 +947,7 @@ async function capture() {
     if (SCENES.includes("widths")) await widthScenes(browser, preview.origin);
     if (SCENES.includes("names")) await nameScenes(browser, preview.origin);
     if (SCENES.includes("extra")) await extraScenes(browser, preview.origin);
+    if (SCENES.includes("qa8")) await qa8Scenes(browser, preview.origin);
     if (SCENES.includes("design")) {
       // 디자인 갤러리는 `VITE_DESIGN_GALLERY=1`로 빌드한 dist가 따로 필요하다.
       const designDist = process.env.DIST_DESIGN ? resolve(WEB_ROOT, process.env.DIST_DESIGN) : null;

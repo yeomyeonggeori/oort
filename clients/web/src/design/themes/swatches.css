@@ -1,14 +1,17 @@
 /* Accent swatch chrome (ADR-0174 D2). Color comes from [data-accent-swatch]
  * rebinding the signal four (ADR-0189 D3) on the control itself; no inline style.
- * 설정 > 모양(#3578 S3a): 40px 원 + 라벨. 고른 원은 잉크 고리와 체크를 든다. */
+ * 설정 > 모양(#3578 S3a, #5783 QA 8): 이름 없는 32px 원 한 줄. 누르는 자리는 원보다 넓은 44(`--tap-target`)이고 그 차이(12)가
+ * 원 사이의 간격이다(줄에는 따로 gap을 두지 않는다). 이름은 낭독(라벨 안 sr-only)과 툴팁에 있다(`AccentSwatch.tsx`).
+ * 고른 원은 잉크 고리와 체크를 든다. */
 .accent-swatch {
   min-block-size: var(--tap-target);
   min-inline-size: var(--tap-target);
+  border-radius: 9999px;
 }
 
 .accent-swatch-chip {
-  inline-size: var(--spacing-control-lg);
-  block-size: var(--spacing-control-lg);
+  inline-size: var(--spacing-control);
+  block-size: var(--spacing-control);
   background-color: var(--signal);
   color: var(--on-signal);
 }
@@ -27,8 +30,9 @@
   opacity: 1;
 }
 
+/* 키보드 초점은 누르는 자리(44) 바깥 2에 선 원이다: 고른 원의 잉크 고리(반지름 20)와 겹치지 않고 이웃 원(12 떨어짐)에도 닿지
+ * 않는다. */
 .accent-swatch:has(:focus-visible) {
   outline: 2px solid var(--focus-ring-ink, var(--accent));
   outline-offset: 2px;
-  border-radius: var(--radius-lg);
 }
