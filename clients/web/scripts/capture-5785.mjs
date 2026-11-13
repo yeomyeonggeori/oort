@@ -385,6 +385,23 @@ async function ownerRun(page, origin, tag, withHandoff, keychain = false) {
       const shellBefore = await page.evaluate(() => window.__shellCalls);
       check(tag, "키체인 대역: 로그인 뒤 셸이 갱신을 날라 세션이 손잡이 상태다", shellBefore.some((c) => c.cmd === "session_refresh_attempt"), shellBefore);
     }
+    // 프레임마다 걸음 · 칩 · 초점을 적는다(누르기 전에 건다): 첫 그림부터 칸에 초점이 있고, 그 뒤로 아무것도 바뀌지 않는가.
+    await page.evaluate(() => {
+      const ids = ["onboarding-welcome", "onboarding-sign-in", "onboarding-join"];
+      const rec = { frames: [], live: true };
+      window.__loginFrames = rec;
+      const tick = () => {
+        if (!rec.live) return;
+        const step = ids.find((id) => document.querySelector(`[data-testid=${id}]`));
+        if (step) {
+          const f = { step, chip: document.querySelector("[data-testid=connect-server-chip-host]")?.textContent ?? null, focus: document.activeElement?.getAttribute("data-testid") ?? document.activeElement?.tagName ?? null };
+          const last = rec.frames[rec.frames.length - 1];
+          if (!last || JSON.stringify(last) !== JSON.stringify(f)) rec.frames.push(f);
+        }
+        requestAnimationFrame(tick);
+      };
+      requestAnimationFrame(tick);
+    });
     await page.getByTestId("add-workspace-join-signout").click();
     await page.getByTestId("onboarding-sign-in").waitFor({ timeout: 2_500 });
     const loginState = () =>
@@ -401,6 +418,11 @@ async function ownerRun(page, origin, tag, withHandoff, keychain = false) {
     await page.waitForTimeout(holdLogoutMs + 500);
     const later = await loginState();
     check(tag, "로그아웃: 원래 서버의 답이 늦게 와도 걸음·칩·저장된 서버·초점이 그대로", JSON.stringify(later) === JSON.stringify(first), { first, later });
+    const frames = await page.evaluate(() => {
+      window.__loginFrames.live = false;
+      return window.__loginFrames.frames;
+    });
+    check(tag, "로그아웃: 로그인 화면의 첫 프레임부터 칸에 초점이 있고 모든 프레임이 같다", frames.length === 1 && /^login-(email|password)$/.test(frames[0].focus ?? ""), { frames });
     holdLogoutMs = 0;
     const after = apiLog.slice(logFrom);
     const originLogouts = after.filter((r) => r.origin === origin && r.path === "/v1/auth/logout").length;
