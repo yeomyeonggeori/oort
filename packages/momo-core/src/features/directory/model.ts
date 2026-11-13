@@ -190,8 +190,10 @@ export function profileEmail(
 ): string | null {
   if (viewerRole === undefined || viewerRole === "guest") return null;
   if (member.kind !== "human") return null;
-  const email = member.email?.trim();
-  return email ? email : null;
+  const raw: unknown = member.email;
+  if (typeof raw !== "string") return null;
+  const email = raw.trim();
+  return email === "" ? null : email;
 }
 
 /**
