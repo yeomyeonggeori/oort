@@ -2,7 +2,7 @@
 import {act, cleanup, renderHook} from '@testing-library/react';
 import {afterEach, beforeEach, expect, it, vi} from 'vitest';
 import type {AgentRunProgress} from '@momo/core/lib/api';
-import {useAgentFeed, useNeedsAction} from './useInbox';
+import {useAgentFeed, useFeedContext, useNeedsAction} from './useInbox';
 
 const data = vi.hoisted(() => ({
   approval: {id: 'approval', workspaceId: 'workspace', runId: 'run', channelId: 'channel', requestedBy: 'agent', actionType: 'tool_call', status: 'approved' as const},
@@ -58,4 +58,16 @@ it.each(['needs-action', 'agent'] as const)('%s는 타임라인 진행 입력의
     });
     expect(outcome()).toBe(word);
   }
+});
+
+// 출처 줄의 장소(#5696): 내 채널 목록에 있는 채널만 그 목록으로 이름을 짓고, 없으면 서버가 준 채널 사실만 쓴다.
+it('placeFor는 내 채널 목록에 있으면 그 채널로, 없으면 서버가 준 채널 사실로만 장소를 짓는다', () => {
+  const {result} = renderHook(() => useFeedContext());
+  const {placeFor} = result.current;
+  expect(placeFor('channel')).toEqual({kind: 'channel', name: '실험실'});
+  expect(placeFor('gone')).toEqual({kind: 'channel', name: null});
+  expect(placeFor('gone', {name: '비공개방', kind: 'private'})).toEqual({kind: 'channel', name: '비공개방'});
+  expect(placeFor('gone', {name: null, kind: 'dm'})).toEqual({kind: 'dm', names: []});
+  // 목록에 있는 채널이면 서버가 준 이름보다 내 목록이 이긴다.
+  expect(placeFor('channel', {name: '서버가 준 이름', kind: 'public'})).toEqual({kind: 'channel', name: '실험실'});
 });

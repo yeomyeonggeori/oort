@@ -19,11 +19,16 @@ export type DesktopNotifyKind =
   | "work-mine-done";
 
 /**
- * Dock badge switches (#3339). The badge is the needs-me count and nothing
- * else (`useNeedsMeCount`, one source); these only decide whether it is drawn
- * and whether unread DMs are added on top (default off, owner decision).
+ * Dock badge switches (#3339). The badge is the needs-me count (`useNeedsMeCount`, one source); these decide whether
+ * it is drawn and whether unread DMs are added on top (core `dmUnreadForBadge`; like every share, muting and the pause do not
+ * touch it, ADR-0124 D2·D4-A). The menu-bar
+ * dot follows the same number (#5193).
+ *
+ * `dockDms` (#5660, owner 2026-11-11) replaces `dockDm` and is on by default. A stored `dockDm: false` cannot tell a deliberate
+ * off from "another switch was saved" (every save writes the whole record), so owner 2026-11-12 (#5690): `dockDm` is never
+ * read. A device without `dockDms` takes the new default (on); saving writes `dockDms` from then on and that value is kept.
  */
-export type DockPrefKey = "dockBadge" | "dockDm";
+export type DockPrefKey = "dockBadge" | "dockDms";
 export type DesktopPrefKey = DesktopNotifyKind | DockPrefKey;
 
 // =============================================================================
@@ -60,7 +65,8 @@ export const DEFAULT_DESKTOP_NOTIFICATION_KINDS: DesktopNotificationKinds = {
   "work-mine-done": true,
   dm: false,
   dockBadge: true,
-  dockDm: false,
+  // 기본 켬(#5660, owner 11-11): 안 읽은 DM은 메뉴 막대 점·독 배지도 켠다. 예전 키 `dockDm`은 읽지 않는다(owner 11-12, #5690): `dockDms`가 없으면 이 기본값을 쓴다.
+  dockDms: true,
 };
 
 const PREFERENCE_KEYS = Object.keys(
@@ -94,6 +100,7 @@ function parseKinds(raw: string | null): DesktopNotificationKinds {
     for (const key of PREFERENCE_KEYS) {
       if (typeof record[key] === "boolean") next[key] = record[key];
     }
+    // 예전 키 `dockDm`(#3339)은 읽지 않는다(owner 11-12, #5690): 설정 저장이 기록 전체를 쓰므로 거기 적힌 「꺼짐」은 고른 것이 아니다.
     return next;
   } catch {
     return { ...DEFAULT_DESKTOP_NOTIFICATION_KINDS };

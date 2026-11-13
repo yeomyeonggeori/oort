@@ -45,7 +45,13 @@
 // this file settles is only how it is reached and left.
 // =============================================================================
 
-import {isSurfaceProvided} from '@momo/core/features/capabilities/serverSurfaces';
+import {
+  hasOnlineWorkHost,
+  isSurfaceProvided,
+  surfaceProvidedWithHosts,
+  type SurfaceId,
+  type WorkHostPresenceFact,
+} from '@momo/core/features/capabilities/serverSurfaces';
 import type {NotificationLanding} from '../push/tapArrival';
 
 /**
@@ -88,9 +94,26 @@ export function tabLabel(tab: Tab): string {
   return TAB_LABELS[tab];
 }
 
-/** 작업 콘솔의 문을 세울지. 탭이던 때와 같은 조건이다. */
-export function workConsoleAvailable(): boolean {
-  return isSurfaceProvided('workConsole');
+/**
+ * 세션 화면(작업 콘솔)의 문을 세울지 (#5593). **웹과 같은 판정**이다 — 웹 `useSurfaceProvided('workConsole')` 이 쓰는 코어 두
+ * 함수 그대로다: 정적 표(`isSurfaceProvided`)가 싣지 않은 표면을 「이 워크스페이스에 지금 온라인인 호스트가 있는가」
+ * (`hasOnlineWorkHost`)로 펼친다(`surfaceProvidedWithHosts`, #2780).
+ *
+ * 예전 판은 정적 표만 읽었다. 그 표의 값은 `provided:false` 라서 운영 빌드에서는 세션 화면의 문이 하나도 서지 않았다 —
+ * 목록 줄·대화·보낸 직후 시트 어디서도 열리지 않고 「작업 끝남」 알림만 그 화면을 열었다.
+ *
+ * 호스트 목록을 아직 못 받았으면(`undefined`) 닫힌다: 모르는 채 문을 세우면 누른 뒤에야 빈 화면을 만난다(웹과 같다).
+ * 알림 입구는 이 판정을 묻지 않는다(`useNotificationTapRouting` 머리말: 콜드 런치의 탭이 목록보다 먼저 온다).
+ */
+export function workConsoleAvailable(
+  hosts: readonly WorkHostPresenceFact[] | null | undefined,
+): boolean {
+  const surface: SurfaceId = 'workConsole';
+  return surfaceProvidedWithHosts(
+    surface,
+    isSurfaceProvided(surface),
+    hasOnlineWorkHost(hosts),
+  );
 }
 
 /**
@@ -139,6 +162,14 @@ export interface OpenAgent {
 /** One read-only work-session detail pushed over the 작업 tab. */
 export interface OpenWorkSession {
   sessionId: string;
+  /**
+   * 권한 요청 알림을 눌러 열렸을 때만 선다 — 그 요청의 승인 카드로 착지한다 (#5593, ADR-0188 D5).
+   *
+   * `requestEventId` 는 알림의 `approval_id` 다: 맥 세션의 권한 요청에서 서버는 그 자리에 요청 이벤트 id 를 싣는다
+   * (`momo-push` judgment `work_permission`). `token` 은 탭마다 새로 서서, 같은 요청을 가리키는 두 번의 탭이 두 번
+   * 착지한다(`OpenConversation.notification` 과 같은 이유).
+   */
+  permission?: {requestEventId: string; token: number};
 }
 
 /**
@@ -262,6 +293,7 @@ export type NavAction =
   | {type: 'openConversation'; conversation: OpenConversation}
   | {type: 'openFromNotification'; conversation: OpenConversation}
   | {type: 'openWorkSessionFromNotification'; workSession: OpenWorkSession}
+  | {type: 'enterWorkSession'; workSession: OpenWorkSession}
   | {type: 'openSearch'; initialQuery?: string}
   | {type: 'openAgentList'}
   | {type: 'openAgent'; agent: OpenAgent}
@@ -324,6 +356,18 @@ export function navReducer(state: NavState, action: NavAction): NavState {
       return {
         ...state,
         tab: 'home',
+        ...NO_LAYERS,
+        workList: true,
+        workSession: action.workSession,
+      };
+    case 'enterWorkSession':
+      // 「내 맥에 보내기」·대화의 개인 에이전트 부르기가 만든 세션으로 **바로** 간다 (#5593). 보낸 자리(시트·대화)
+      // 위에 세션 화면이 서야 하는데, 대화 판은 트리에서 세션 판보다 위에 그려진다(대화는 세션 상세가 여는 층이다) —
+      // 열린 대화를 남겨 두면 새 세션 화면이 그 밑에 깔려 아무 일도 없었던 것처럼 보인다. 그래서 알림 입구처럼 층을
+      // 걷고 작업 목록 위에 세션을 연다: 그 화면의 뒤로가기가 말하는 「작업 목록으로」가 참이 된다. 알림 입구와 달리
+      // 탭은 그대로다 — 사람은 이 탭에서 보냈고, 잠금 화면에서 온 것이 아니다.
+      return {
+        ...state,
         ...NO_LAYERS,
         workList: true,
         workSession: action.workSession,

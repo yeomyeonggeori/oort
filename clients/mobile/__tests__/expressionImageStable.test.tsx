@@ -489,11 +489,12 @@ describe('알림 뒤 목록이 적용되기 전', () => {
     expect(layerCount(still.name)).toBe(0);
   });
 
-  it('알림 뒤 목록 읽기가 실패하면 닫힌다: 문이 내려가고 글자가 서며 그림 층은 없다', async () => {
+  it('알림 뒤 목록 읽기가 실패하면 닫힌다: 문이 내려가고 그림 층은 없으며, 글자가 아니라 같은 크기 칸이 남는다(#5585)', async () => {
     const {store, deltas} = setup(true);
     await act(async () => store.refresh(true));
     mount(store, both());
     for (let step = 0; step < 6; step += 1) await flush();
+    const drawnBox = boxOf(still.name, 'large');
     act(() => store.changed());
     await flush();
     await act(async () => {
@@ -502,7 +503,8 @@ describe('알림 뒤 목록이 적용되기 전', () => {
     for (let step = 0; step < 3; step += 1) await flush();
     expect(store.snapshot()).toMatchObject({state: 'error', changePending: false});
     expect(layerCount(still.name)).toBe(0);
-    expect(screen.getByText(`:${still.name}:`)).toBeTruthy();
+    expect(tokenText(still.name)).toBeNull();
+    expect(boxOf(still.name, 'large')).toEqual(drawnBox);
   });
 });
 

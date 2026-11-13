@@ -63,7 +63,7 @@ export const HOSTED_LIST_LEAD =
  * 에서 한다(ADR-0162, 이 화면의 out-of-scope).
  */
 export const HOSTED_READONLY_NOTE =
-  "연결을 만들고, 해제하고, 정리를 확인하는 일은 데스크톱에서 해요. 이 화면은 지금 어떤 상태인지만 보여 줘요.";
+  "연결을 만들고, 해제하고, 정리를 확인하는 일은 데스크탑에서 해요. 이 화면은 지금 어떤 상태인지만 보여 줘요.";
 
 /**
  * 시각의 정직함. 읽기 모델은 `createdAtMs`·`updatedAtMs` 만 싣고, 서버가 안에
@@ -79,7 +79,7 @@ export const HOSTED_UPDATED_LABEL = "마지막 상태 변화";
 
 export const HOSTED_LIST_EMPTY_HEADLINE = "아직 호스티드 연결이 없어요.";
 export const HOSTED_LIST_EMPTY_DETAIL =
-  "다른 인프라의 에이전트를 들이는 것은 데스크톱에서 시작해요.";
+  "다른 인프라의 에이전트를 들이는 것은 데스크탑에서 시작해요.";
 
 /** owner/admin 이 아니면 목록 자체가 403 이다(장애가 아니라 권한의 답). */
 export const HOSTED_LIST_DENIED_HEADLINE = "이 목록은 볼 수 없어요.";

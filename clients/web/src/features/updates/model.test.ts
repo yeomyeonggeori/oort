@@ -10,6 +10,7 @@ import {
   pillTooltip,
   pillWorthShowing,
   progressPercent,
+  railCardBottomPadding,
   type UpdateState,
 } from "./model";
 
@@ -51,7 +52,7 @@ describe("badge visibility", () => {
     expect(
       badgeLabel({ kind: "installing", update: UPDATE, downloaded: 25, total: 100 })
     ).toBe("업데이트 받는 중 25%");
-    expect(badgeLabel({ kind: "installed", update: UPDATE })).toBe("곧 다시 실행");
+    expect(badgeLabel({ kind: "installed", update: UPDATE })).toBe("곧 다시 시작");
     expect(badgeLabel({ kind: "current" })).toBeNull();
   });
 
@@ -143,14 +144,33 @@ describe("업데이트 알약 (성재 결재 2026-10-16)", () => {
       pillTooltip(installFailed),
     ];
     expect(texts).toEqual([
-      "0.1.0-next.2로 업데이트할 수 있어요. 누르면 받고 다시 실행해요.",
+      "0.1.0-next.2로 업데이트할 수 있어요. 누르면 받고 다시 시작해요.",
       "받는 중 26%",
       "받는 중이에요.",
-      "곧 다시 실행돼요.",
+      "곧 다시 시작돼요.",
       "업데이트하지 못했어요. 눌러서 다시 확인해요.",
     ]);
     for (const text of texts) expect(text).not.toMatch(/[—–]/);
     expect(pillTooltip(checkFailed)).toBeNull();
     expect(pillTooltip({ kind: "current" })).toBeNull();
+  });
+});
+
+describe("접힌 레일 카드의 아래 여백 (#5661 수리 2회차 H2)", () => {
+  const rect = (left: number, top: number, width: number, height: number) =>
+    ({ left, top, width, height, right: left + width, bottom: top + height, x: left, y: top, toJSON: () => ({}) }) as DOMRectReadOnly;
+
+  it("카드가 닿는 폭의 입력창 독 위 끝보다 8px 위까지만 내려온다", () => {
+    // 1280×800: 레일 알약 오른쪽 끝 48, 대화 판 입력창 독 top 640.
+    expect(railCardBottomPadding(48, 800, [rect(72, 640, 1180, 152)])).toBe(800 - 640 + 8);
+  });
+
+  it("여러 독 가운데 가장 높이 선 것, 카드가 닿지 않는 오른쪽 스레드 판의 독은 빼고", () => {
+    expect(railCardBottomPadding(48, 800, [rect(72, 660, 700, 132), rect(72, 600, 700, 192), rect(900, 300, 360, 492)])).toBe(208);
+  });
+
+  it("입력창이 없거나 그려지지 않았으면 기본 여백 8px", () => {
+    expect(railCardBottomPadding(48, 800, [])).toBe(8);
+    expect(railCardBottomPadding(48, 800, [rect(72, 640, 0, 0)])).toBe(8);
   });
 });

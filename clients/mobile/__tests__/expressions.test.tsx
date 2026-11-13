@@ -808,7 +808,16 @@ it('preserves aspect ratio, reaction size and VoiceOver name, with literal fallb
   expect(Math.max(geometry.width, geometry.height)).toBe(20);
   expect(screen.getByLabelText('파티 앵무새 · 축하')).toBeTruthy();
   act(() => store.setOnline(false));
-  expect(screen.getByText(':party_parrot:')).toBeTruthy();
+  // 오프라인(#5585): 그림 바이트는 내리되(D3) 글자가 아니라 같은 크기의 정지 자리표시다 — 반응 칩의 크기가 그대로다.
+  expect(screen.queryByText(':party_parrot:')).toBeNull();
+  expect(screen.queryByTestId('expression-image-party_parrot-reaction')).toBeNull();
+  const held = StyleSheet.flatten(
+    screen.getByTestId('expression-box-party_parrot-reaction').props.style,
+  );
+  expect({width: held.width, height: held.height}).toEqual({
+    width: geometry.width,
+    height: geometry.height,
+  });
 });
 
 it('uses authenticated live JSON and binary adapters through the fixture-compatible port', async () => {

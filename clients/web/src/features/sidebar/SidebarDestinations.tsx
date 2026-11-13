@@ -8,6 +8,7 @@ import {
   WORK_PATH,
 } from "@momo/core/features/workbench/workTab";
 import { SCHEDULED_COPY } from "@momo/core/features/scheduled/copy";
+import { isFailedMark } from "@momo/core/features/workbench/paneStatus";
 import { scheduledNavEntry } from "@momo/core/features/scheduled/model";
 import { DraftsNavItem } from "@/features/drafts/DraftsNavItem";
 import { useScheduled } from "@/features/scheduled/useScheduled";
@@ -68,10 +69,12 @@ export function SidebarDestinations({
   // 「예약됨」 줄(ADR-0208): 보낼 예정 또는 보내지 못함이 있을 때만 선다. 알약은 보내지 못한 예약의 수다.
   const scheduled = useScheduled();
   const scheduledNav = scheduledNavEntry(scheduled.surface === "absent" ? [] : scheduled.rows);
+  const failedUnseen = donePanes.some((e) => isFailedMark(e.mark));
   const marks = destinationMarks({
     needsMe,
     unreadChannels,
     doneUnseen: donePanes.length > 0,
+    failedUnseen,
     scheduledFailed: scheduledNav.failedCount,
   });
   // 구획 B의 지금 도는 세션 줄: 응답 필요가 먼저, 안 본 끝남이 뒤. 최대 셋.
@@ -123,11 +126,8 @@ export function SidebarDestinations({
           mentionCount={marks.mine.pill?.count ?? 0}
           dot={marks.mine.dot}
           badgeLabel={
-            needsMe.panes > 0
-              ? `응답이 필요한 세션 ${needsMe.panes}개`
-              : marks.mine.dot === "ok"
-                ? "아직 안 본 끝난 세션이 있어요"
-                : undefined
+            // 점의 문장은 점과 같은 판정(`destinationMarks`)에서 나온다: 접힌 레일과 같은 말이다(#5584 r2 H1 (b)).
+            needsMe.panes > 0 ? `응답이 필요한 세션 ${needsMe.panes}개` : marks.mine.dotLabel
           }
         />
         {liveRows.map((entry) => (
@@ -138,7 +138,7 @@ export function SidebarDestinations({
               data-status={entry.status}
               className="sidebar-row flex w-full items-center gap-2 text-left hover:bg-surface-hover active:bg-surface-pressed focus-visible:focus-ring"
             >
-              <SessionStateChip status={entry.status} testId="sidebar-live-pane-chip" />
+              <SessionStateChip status={entry.mark} testId="sidebar-live-pane-chip" />
               <span
                 className={
                   entry.status === "waiting"

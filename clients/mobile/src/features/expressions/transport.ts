@@ -38,6 +38,14 @@ export interface ExpressionTransport {
 
 /** 5 MiB 를 올리는 데 15초(JSON 한도)는 모자랄 수 있다. 넉넉하되 끝이 있다. */
 const UPLOAD_TIMEOUT_MS = 60_000;
+/** 내려받기 오류 글에 적힌 HTTP 상태(세 자리). 없으면 `null`. 401 을 알아보는 아래 `unauthorized` 와 같은 두 모양을 읽는다. */
+const ANSWERED_STATUS = /(?:status(?: code)?\s*[:=]?\s*|http\s*)([1-5]\d\d)\b/i;
+export function answeredStatus(error: unknown): number | null {
+  const found = ANSWERED_STATUS.exec(
+    error instanceof Error ? error.message : String(error),
+  );
+  return found === null ? null : Number(found[1]);
+}
 const EXPRESSION_PATH =
   /^\/v1\/workspaces\/[^/]+\/(?:expressions|expression-drafts)(?:[/?]|$)/;
 
@@ -166,7 +174,13 @@ export const expressionTransport: ExpressionTransport = {
       try {
         return await send();
       } catch (error) {
-        if (!unauthorized(error)) throw error;
+        if (!unauthorized(error)) {
+          // 네이티브 내려받기는 성공이 아닌 답도 오류로 던진다(iOS 「response has status 404」, Android 「HTTP 404」). 상태가 적혀 있으면 상태로 돌려준다 —
+          // 저장소가 숨김·틀린 sha(404)와 서버가 잠시 못 답함(5xx)을 가른다(#5585). 상태가 없는 오류(응답 없음·시간 초과)는 그대로 던진다.
+          const status = answeredStatus(error);
+          if (status !== null) return {status};
+          throw error;
+        }
         if (
           coreSession().getRefreshToken() &&
           (await rotateAfterUnauthorized())

@@ -22,6 +22,7 @@ const api = vi.hoisted(() => ({
   fetchThreadReplies: vi.fn(),
   markInboxItemRead: vi.fn(),
   markInboxReadAll: vi.fn(),
+  markFollowedThreadsRead: vi.fn(),
   advertiseReadState: vi.fn(),
 }));
 
@@ -32,6 +33,7 @@ vi.mock("@momo/core/lib/api", async (importOriginal) => ({
   fetchThreadReplies: api.fetchThreadReplies,
   markInboxItemRead: api.markInboxItemRead,
   markInboxReadAll: api.markInboxReadAll,
+  markFollowedThreadsRead: api.markFollowedThreadsRead,
 }));
 vi.mock("@/features/chat/advertiseReadState", () => ({
   advertiseReadState: api.advertiseReadState,
@@ -57,12 +59,20 @@ vi.mock("@/features/workspace/useWorkspace", () => ({
   useChannels: () => channelsValue,
   useReadStates: () => readStatesValue,
   applyReadStateToCache: () => undefined,
+  applyFollowedThreadShareToCache: () => undefined,
 }));
 
 const feedContext = {
   isLoading: false,
   directory: { members: [], byId: new Map() },
   labelFor: (id: string) => (id === CH ? "#agent-lab" : id.slice(0, 8)),
+  // 서버가 준 채널 사실(`wire`)이 둘째 인자로 오면 그 사실을 이름에 새긴다: 훅이 `wire`를 안 넘기면 시험이 RED가 된다(#5696).
+  placeFor: (id: string, wire?: { name: string | null; kind: string }) =>
+    wire !== undefined
+      ? { kind: "channel", name: `wire:${wire.name}:${wire.kind}` }
+      : id === CH
+        ? { kind: "channel", name: "agent-lab" }
+        : { kind: "dm", names: ["서연"] },
   actorFor: (id: string) =>
     id === BOT
       ? { name: "그록봇", handle: "grokbot", isAgent: true }
@@ -206,6 +216,14 @@ describe("useMailbox: 서버 투영이 정본", () => {
     expect(latest?.serverUnreadCount).toBe(5);
     expect(latest?.hasMore).toBe(true);
     expect(api.fetchMessages).not.toHaveBeenCalled();
+  });
+
+  it("서버 항목의 출처는 서버가 준 채널 사실(이름·종류)을 장소 판정에 넘겨 짓는다 (#5696)", async () => {
+    await render("all");
+    expect(latest?.entries[0]?.source).toEqual({
+      kind: "place",
+      place: { kind: "channel", name: "wire:agent-lab:public" },
+    });
   });
 
   it("더 보기는 서버가 준 커서를 그대로 보내고 읽은 항목을 이어 붙인다", async () => {
@@ -360,10 +378,67 @@ describe("useMailbox: 구 서버(404) 후퇴", () => {
   });
 });
 
+describe("useMailbox: 구 서버 경로의 출처 (#5696)", () => {
+  const msgOf = (over: Record<string, unknown>) => ({
+    id: "m-x",
+    channelId: CH,
+    seq: 3,
+    hlcTs: 1,
+    hlcCount: 0,
+    type: "text",
+    body: "본문",
+    createdAtMs: Date.now() - 60_000,
+    authorMemberId: ME,
+    ...over,
+  });
+  beforeEach(() => {
+    api.fetchInbox.mockRejectedValue(new ApiError(404, "not found"));
+  });
+  afterEach(() => {
+    mentionResults.messages = [];
+  });
+
+  it("스레드 안(rootId)의 멘션은 「스레드 · #채널」, 루트 없는 멘션은 「#채널」로 선다", async () => {
+    (mentionResults as { messages: unknown[] }).messages = [
+      msgOf({ id: "m-in-thread", authorMemberId: BOT, rootId: "m-root", seq: 5 }),
+      msgOf({ id: "m-plain", authorMemberId: BOT, seq: 6 }),
+    ];
+    await render("mention");
+    const byId = Object.fromEntries((latest?.entries ?? []).map((e) => [e.messageId, e.source]));
+    const place = { kind: "channel", name: "agent-lab" };
+    expect(byId["m-in-thread"]).toEqual({ kind: "thread", place });
+    expect(byId["m-plain"]).toEqual({ kind: "place", place });
+  });
+
+  it("스레드 줄과 DM 줄은 채널·DM 각자의 장소를 받는다", async () => {
+    readStatesValue.byChannel = new Map([[CH, { lastReadSeq: 1, latestSeq: 9 }]]) as never;
+    api.fetchMessages.mockImplementation((_ws: string, channelId: string) =>
+      Promise.resolve({
+        messages:
+          channelId === CH
+            ? [
+                msgOf({
+                  id: "m-root",
+                  thread: { reply_count: 1, last_reply_seq: 9, last_reply_at: Date.now() - 1000 },
+                }),
+              ]
+            : [msgOf({ id: "m-dm", channelId: DM, authorMemberId: BOT, seq: 4 })],
+      })
+    );
+    await render("all");
+    const byKey = Object.fromEntries((latest?.entries ?? []).map((e) => [e.key, e.source]));
+    expect(byKey["thread:m-root"]).toEqual({
+      kind: "thread",
+      place: { kind: "channel", name: "agent-lab" },
+    });
+    expect(byKey[`dm:${DM}`]).toEqual({ kind: "place", place: { kind: "dm", names: ["서연"] } });
+  });
+});
+
 describe("읽음 처리: 서버 항목은 PUT, 구 서버 항목은 채널 커서", () => {
   const base: MailboxEntry = {
     key: "k", kind: "mention", channelId: CH, channelLabel: "#a", typeLabel: "멘션",
-    actor: "서연", actorIsAgent: false, preview: "p", atMs: 0, timeLabel: "방금",
+    source: { kind: "place", place: { kind: "channel", name: "a" } }, actor: "서연", actorIsAgent: false, preview: "p", atMs: 0, timeLabel: "방금",
     unread: true, unreadCount: 0, seq: 4, reason: "r",
   };
 
@@ -428,6 +503,59 @@ describe("읽음 처리: 서버 항목은 PUT, 구 서버 항목은 채널 커�
     // 인박스 항목만 읽는 길이 아니다: 그 길은 점을 못 끈다.
     expect(api.markInboxReadAll).not.toHaveBeenCalled();
     expect(api.markInboxItemRead).not.toHaveBeenCalled();
+  });
+});
+
+// 메뉴 막대 「모두 읽음 처리」의 스레드 몫(#5690, 서버 #5689). 채널 위치·받은함 항목은 건드리지 않고 스레드 읽음 길만 부른다.
+describe("useMailboxReadActions.markFollowedThreads (#5690)", () => {
+  const page = (over: object) => ({ readStates: [], markedThreadCount: 0, hasMore: false, ...over });
+
+  it("hasMore가 거짓이 될 때까지 같은 요청을 되부르고, 채널 읽음·인박스 읽음 길은 부르지 않는다", async () => {
+    await render("all");
+    api.markFollowedThreadsRead
+      .mockResolvedValueOnce(page({ markedThreadCount: 100, hasMore: true }))
+      .mockResolvedValueOnce(page({ markedThreadCount: 7, hasMore: false }));
+    let result: { marked: number; outcome: string } | undefined;
+    await act(async () => {
+      result = await actions?.markFollowedThreads();
+    });
+    expect(api.markFollowedThreadsRead).toHaveBeenCalledTimes(2);
+    expect(api.markFollowedThreadsRead).toHaveBeenCalledWith(WS);
+    expect(result).toEqual({ marked: 107, outcome: "done" });
+    expect(api.advertiseReadState).not.toHaveBeenCalled();
+    expect(api.markInboxReadAll).not.toHaveBeenCalled();
+    expect(api.markInboxItemRead).not.toHaveBeenCalled();
+  });
+
+  it("hasMore가 계속 참이어도 상한(10번)에서 멈추고 partial로 알린다", async () => {
+    await render("all");
+    api.markFollowedThreadsRead.mockResolvedValue(page({ markedThreadCount: 100, hasMore: true }));
+    let result: { marked: number; outcome: string } | undefined;
+    await act(async () => {
+      result = await actions?.markFollowedThreads();
+    });
+    expect(api.markFollowedThreadsRead).toHaveBeenCalledTimes(10);
+    expect(result).toEqual({ marked: 1000, outcome: "partial" });
+  });
+
+  it("서버가 이 길을 모르면(404) unsupported이고 던지지 않는다. 그 밖의 실패는 failed로 남기고 다시 누를 수 있다", async () => {
+    await render("all");
+    api.markFollowedThreadsRead.mockRejectedValueOnce(new ApiError(404, "nf"));
+    let result: { marked: number; outcome: string } | undefined;
+    await act(async () => {
+      result = await actions?.markFollowedThreads();
+    });
+    expect(result).toEqual({ marked: 0, outcome: "unsupported" });
+    api.markFollowedThreadsRead.mockRejectedValueOnce(new Error("down"));
+    await act(async () => {
+      result = await actions?.markFollowedThreads();
+    });
+    expect(result).toEqual({ marked: 0, outcome: "failed" });
+    api.markFollowedThreadsRead.mockResolvedValueOnce(page({ markedThreadCount: 2 }));
+    await act(async () => {
+      result = await actions?.markFollowedThreads();
+    });
+    expect(result).toEqual({ marked: 2, outcome: "done" });
   });
 });
 

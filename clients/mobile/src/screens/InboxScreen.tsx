@@ -12,6 +12,7 @@ import {
   type MailboxEntry,
   type MailboxFilter,
 } from '@momo/core/features/inbox/mailbox';
+import {mailboxSourceLine} from '@momo/core/features/inbox/source';
 import {
   agentsFeedPartial,
   approvalOpensOnCard,
@@ -445,7 +446,7 @@ export default function InboxScreen({
       if (!approvalsProvided) {
         return (
           <Text style={styles.managed} testID={`decision-elsewhere-${item.key}`}>
-            결정은 데스크톱 앱에서 할 수 있어요.
+            결정은 데스크탑 앱에서 할 수 있어요.
           </Text>
         );
       }
@@ -740,8 +741,9 @@ export default function InboxScreen({
 }
 
 /**
- * 메일함의 한 줄 (#3663): 보낸 이 · 종류와 장소 · 시각 · 미리보기 · 안 읽음 점.
- * 문장은 core가 지었다 — 이 컴포넌트는 그리기만 한다. 안 읽음은 점만이 아니라
+ * 메일함의 한 줄 (#3663): 보낸 이 · 시각 / 출처 / 미리보기 · 안 읽음 점.
+ * 문장은 core가 지었다 — 이 컴포넌트는 그리기만 한다. 출처 한 줄(#5696)은 웹과 같은 코어 판정
+ * (`mailboxSourceLine`)이고 한 줄로 접혀 줄 높이가 출처에 따라 달라지지 않는다. 안 읽음은 점만이 아니라
  * 굵은 보낸 이와 접근성 레이블의 「안 읽음」으로도 말한다.
  */
 function MailboxRow({
@@ -752,11 +754,13 @@ function MailboxRow({
   onPress: () => void;
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
+  const formatMessage = useFormatMessage();
+  const sourceLine = mailboxSourceLine(entry.source, formatMessage);
   return (
     <View style={styles.rowShell} testID={`mailbox-row-${entry.key}`}>
       <Pressable
         accessibilityRole="button"
-        accessibilityLabel={entryAriaLabel(entry)}
+        accessibilityLabel={entryAriaLabel(entry, sourceLine)}
         onPress={onPress}
         style={({pressed}) => [styles.mailRow, pressed && styles.pressed]}>
         <View style={styles.rowHead}>
@@ -771,8 +775,11 @@ function MailboxRow({
           </Text>
           <Text style={styles.time}>{entry.timeLabel}</Text>
         </View>
-        <Text style={styles.channel} numberOfLines={1}>
-          {entry.typeLabel}
+        <Text
+          style={styles.mailSource}
+          numberOfLines={1}
+          testID={`mailbox-source-${entry.key}`}>
+          {sourceLine}
         </Text>
         <View style={styles.mailPreviewLine}>
           <Text
@@ -911,6 +918,9 @@ const buildStyles = (color: Palette) => StyleSheet.create({
     gap: space.xs,
   },
   mailActor: {flex: 1, fontSize: font.label},
+  // 출처 줄(#5696)은 「어디서 온 글인가」를 말하는 둘째 줄이라 둘째 등급 글자색이다(셋째 등급은 본문 AA를 노리지 않는다:
+  // 밝게 3.76 · 어둡게 3.89 → textMuted 밝게 5.25~6.61 · 어둡게 6.14~7.25). 크기·한 줄 말줄임은 그대로다.
+  mailSource: {fontSize: font.meta, color: color.textMuted, flexShrink: 1},
   mailUnreadActor: {fontWeight: '700'},
   // 읽은 항목은 목록에 남되 한 단계 물러선다(점 없음 + 굵기 + 접근성 문장으로도 말한다).
   mailReadActor: {color: color.textMuted},

@@ -29,6 +29,9 @@ import { titlebarDragProps } from "./sidebarPane";
 //    그리고(`trafficLightPosition`), 토글은 이 번들의 `app-titlebar` 줄 가운데
 //    선다. 둘은 서로를 모른다. 한쪽만 바뀌면 어긋나고, 번들 시험도 셸 시험도
 //    각각은 초록이다. 그래서 여기서 두 값을 한 식으로 묶는다.
+// 5. 뒤에서도 도는 페이지(#5660). 실시간 소켓·알림 배너·메뉴 막대 점은 모두 이 번들 안에서 돈다. WebKit의
+//    기본값(`suspend`)은 치운 창의 페이지를 몇 분 뒤 멈춘다(실측: 약 4분 뒤 멈춤, 8.6분마다 몇 초만 깸. 최소화·가려진 창도
+//    WebKit에는 같은 「보이지 않음」이다). 셸이 `backgroundThrottling: "disabled"`로 만들어야 번들의 실시간이 뒤에서도 산다.
 // =============================================================================
 
 const desktopDir = new URL("../../../desktop/src-tauri/", import.meta.url);
@@ -49,6 +52,7 @@ interface Capability {
 interface TauriWindow {
   label?: string;
   dragDropEnabled?: boolean;
+  backgroundThrottling?: string;
   titleBarStyle?: string;
   hiddenTitle?: boolean;
   trafficLightPosition?: { x: number; y: number };
@@ -77,6 +81,12 @@ describe("데스크탑 셸 계약 (#2671, #2676)", () => {
     expect(main).toBeDefined();
     // 키가 없으면 Tauri 기본값(true)이다. false여야 컴포저의 onDrop이 불린다.
     expect(main?.dragDropEnabled).toBe(false);
+  });
+
+  it("main 창의 페이지는 창이 뒤에 있어도 멈추지 않는다 (#5660)", () => {
+    const main = conf.app?.windows?.find((w) => (w.label ?? "main") === "main");
+    // 키가 없으면 WebKit 기본값(`suspend`)이다: 치운 창의 실시간과 메뉴 막대 점이 몇 분 뒤 멈춘다.
+    expect(main?.backgroundThrottling).toBe("disabled");
   });
 
   it("알림 플러그인에는 부팅 때 묻는 읽기 전용 확인 하나만 허용한다 (#2676)", () => {

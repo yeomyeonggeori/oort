@@ -16,7 +16,7 @@ import {
   sendFailureReasonKey,
   type SendFailureKind,
 } from "@momo/core/features/connection/sendFailure";
-import type { PendingMessage } from "@momo/core/features/timeline/model";
+import { echoAtMs, type PendingMessage } from "@momo/core/features/timeline/model";
 import { resolveQuote } from "@momo/core/features/timeline/quote";
 import type { Message } from "@momo/core/lib/api";
 import {
@@ -90,6 +90,7 @@ export function PendingRow({
   failureKind = null,
   resendAllCount,
   onResendAll,
+  serverOffsetMs = 0,
 }: {
   pending: PendingMessage;
   startsGroup: boolean;
@@ -107,6 +108,8 @@ export function PendingRow({
    */
   resendAllCount?: number;
   onResendAll?: () => Promise<void> | void;
+  /** #5624 — 서버 시계와의 차이(ms). 시각 글자가 확정본과 같은 시계를 말하게 더한다. 묶음 판정과 같은 값이다. */
+  serverOffsetMs?: number;
 }) {
   const formatMessage = useFormatMessage();
   const [resending, setResending] = useState(false);
@@ -116,8 +119,10 @@ export function PendingRow({
   const failed = pending.status === "failed";
   // 오래 걸리는 전송만 시계 하나로 알린다(#4468). 시작 시각은 보낸 시각이다(`sendSlow.ts`).
   const slow = useSlowSend(pending.createdAtMs, failed);
-  // 보낸 시각을 알 수 없으면(유한한 수가 아니면) 시각 글자를 지어내지 않는다.
-  const sentAtMs = Number.isFinite(pending.createdAtMs) ? pending.createdAtMs : null;
+  // 보낸 시각을 알 수 없으면(유한한 수가 아니면) 시각 글자를 지어내지 않는다. 글자는 서버 시계로 어림한 값이다(#5624):
+  // 확정본이 서버 시각을 들고 오므로, 기기 시계가 어긋난 사람에게도 에코와 확정본이 같은 분을 말한다.
+  const shownAtMs = echoAtMs(pending, serverOffsetMs);
+  const sentAtMs = Number.isFinite(shownAtMs) ? shownAtMs : null;
   // 확정된 행과 **같은 것**을 그린다 (ADR-0148). echo가 인용을 안 그렸다가 seq가
   // 도착하는 순간 하나 자라면, 읽는 사람 눈 아래에서 본문이 아래로 밀린다 - 이
   // 파일이 마크다운을 echo에도 그리기로 한 것과 같은 이유다(goal B8 H6).

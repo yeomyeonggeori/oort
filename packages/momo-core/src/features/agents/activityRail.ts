@@ -129,7 +129,11 @@ export interface ActivityRailOptions {
   doorbellFor?: (runId: string) => DoorbellFact | null | undefined;
 }
 
-function phaseOf(
+/**
+ * 열린 턴 → 레일의 국면. 채널 멤버 패널(#5686 `channelAgentNow`)도 이 함수로 낱말을 고른다: 같은 run을 입력창
+ * 레일과 패널이 다른 낱말로 말하지 않게.
+ */
+export function railPhaseOf(
   turn: AgentWorkingSignal,
   doorbell: DoorbellFact | null | undefined
 ): RailPhase {
@@ -192,7 +196,7 @@ function railAgentOf(
   const name = raw.name.trim() === "" ? { name: UNKNOWN_AGENT_NAME } : raw;
   const doorbell =
     turn.runId === undefined ? undefined : options.doorbellFor?.(turn.runId);
-  const phase = phaseOf(turn, doorbell);
+  const phase = railPhaseOf(turn, doorbell);
   const headline = turn.headlines[0]?.trim() ?? "";
   const detail = detailOf(phase, turn, nowMs);
   const stale = turn.server?.leaseState === "stale";

@@ -27,6 +27,21 @@
  *  container to answer, short enough to stay inside a person's patience. */
 export const REQUEST_TIMEOUT_MS = 15_000;
 
+/**
+ * A deadline timer that runs this long (or longer) past its due time ran on an event loop that was not
+ * running for that long: the Mac slept, or the app was napping or suspended behind other windows (#5587).
+ * The deadline then measured the device, not the server — the timer fires the moment the app wakes,
+ * before the request has had any awake time to be answered. Such a timeout is still thrown (callers keep
+ * their behaviour) but is reported with `lateMs`, and the connection verdict does not count it as
+ * "the server did not answer" (`features/connection/restSignal.ts`).
+ *
+ * 10 s: a hidden page's timers are aligned to 1 s and a busy loop runs a timer late by well under a
+ * second, so 10 s past due is not ordinary throttling. A browser tab hidden for many minutes can run
+ * timers up to a minute late; a timeout there is not counted either — nobody was looking, and the next
+ * request after the person returns tests the server again.
+ */
+export const LATE_WAKE_MS = 10_000;
+
 export type NetworkFailure = "timeout" | "unreachable";
 
 /**
@@ -166,6 +181,12 @@ export interface RestResponseOutcome extends RestOutcomeBase {
 export interface RestNetworkOutcome extends RestOutcomeBase {
   readonly kind: "network";
   readonly failure: NetworkFailure;
+  /**
+   * #5587 (additive): only on a `timeout` whose deadline timer fired `LATE_WAKE_MS` or more after it was
+   * due — how late, in ms. The app was asleep for that long, so this timeout is not evidence about the
+   * server. Absent on an on-time timeout and on every connection failure.
+   */
+  readonly lateMs?: number;
 }
 
 export type RestOutcome = RestResponseOutcome | RestNetworkOutcome;
@@ -237,13 +258,19 @@ function reportResponse(url: string, init: RequestInit, response: HttpResponse):
   });
 }
 
-function reportNetworkFailure(url: string, init: RequestInit, failure: NetworkFailure): void {
+function reportNetworkFailure(
+  url: string,
+  init: RequestInit,
+  failure: NetworkFailure,
+  lateMs: number | null = null
+): void {
   reportRestOutcome(() => ({
     kind: "network",
     at: Date.now(),
     method: restMethod(init),
     target: restTarget(url),
     failure,
+    ...(lateMs === null ? {} : { lateMs }),
   }));
 }
 
@@ -260,8 +287,14 @@ export async function fetchWithDeadline(
 ): Promise<HttpResponse> {
   const controller = new AbortController();
   let timedOut = false;
+  // How late the deadline timer woke, when it woke `LATE_WAKE_MS` or more past due (#5587). Wall clock
+  // on purpose: a monotonic clock may not advance while the Mac sleeps, and sleep is what this measures.
+  let lateMs: number | null = null;
+  const armedAt = Date.now();
   const timer = setTimeout(() => {
     timedOut = true;
+    const late = Date.now() - armedAt - timeoutMs;
+    if (late >= LATE_WAKE_MS) lateMs = late;
     controller.abort();
   }, timeoutMs);
 
@@ -291,7 +324,7 @@ export async function fetchWithDeadline(
     return response;
   } catch (error) {
     if (timedOut) {
-      reportNetworkFailure(url, init, "timeout");
+      reportNetworkFailure(url, init, "timeout", lateMs);
       throw new NetworkError("timeout", timeoutMs, error);
     }
     if (callerSignal?.aborted) throw error; // the caller cancelled; not a failure

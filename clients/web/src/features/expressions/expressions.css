@@ -5,6 +5,14 @@
 .expression-image[data-size="medium"] { height: auto; max-height: 64px; max-width: min(100%, 64px); }
 .expression-image[data-size="inline"] { width: auto; height: 1em; }
 .expression-image[data-size="reaction"] { width: auto; height: 20px; max-width: 20px; }
+/*
+ * 오래 이어진 빈 칸의 정지 자리표시 (#5575 M1·M2). 받는 중·오프라인·지나가는 실패의 칸은 처음에는 투명하고(재연결마다 깜빡이지 않게), `ExpressionImage` 가
+ * 3초 넘게 비어 있거나 다시 받기를 다 쓴 칸에 `data-expression-lingering` 을 달면 **칸 자신**(canvas)이 옅은 그릇과 테두리를 입는다. 칸에 칠하므로 크기가
+ * 그림과 똑같다(글 사이의 칸은 줄 높이보다 작아 바깥 상자에 칠하면 위아래로 넘친다). 그릇은 `--pane` 위에서 두 스킴 모두 구분되는 `--surface-muted`이고,
+ * 반응 칩처럼 바탕이 이미 그 색인 자리에서도 보이도록 작은 칸(글 사이·반응)의 테두리는 `--line-strong`이다. 이름 글자는 큰 칸·고르개 칸에만 얹는다.
+ */
+[data-expression-lingering] canvas.expression-image[data-expression-placeholder] { background-color: var(--surface-muted); box-shadow: inset 0 0 0 1px var(--line); border-radius: var(--radius-sm); }
+[data-expression-lingering] canvas.expression-image[data-expression-placeholder]:is([data-size="inline"], [data-size="reaction"]) { box-shadow: inset 0 0 0 1px var(--line-strong); }
 
 /*
  * 「AI와 만들기」 칩 미리보기 (#4820 B). ADR-0218 §7 G3.3 의 움직임을 비슷하게 흉내 낸다.
@@ -111,7 +119,9 @@
 .expression-grid-cell > [data-expression-name],
 .expression-set-button > [data-expression-name],
 .expression-suggest-cell > [data-expression-name] { display: flex; width: 100%; height: 100%; align-items: center; justify-content: center; }
-.expression-grid-cell > [data-expression-name]:not(:has(img)),
+/* 단, 고르개 격자 칸은 빈 칸이 오래 이어지거나 다시 받기를 다 쓰면(#5575 M1·M2) 같은 칸 안의 이름을 보인다: 7칸이 모두 비어 「팀 그림이 없다」로 읽혔다.
+ * 그 이름은 칸 안의 절대 위치 글자라 칸이 자라지 않는다. 세트 띠·추천 줄의 칸은 이름이 들 자리가 없어 그대로 그림만이다. */
+.expression-grid-cell > [data-expression-name]:not(:has(img)):not([data-expression-lingering]),
 .expression-set-button > [data-expression-name]:not(:has(img)),
 .expression-suggest-cell > [data-expression-name]:not(:has(img)) { visibility: hidden; }
 .expression-grid-cell .expression-image[data-size="medium"],

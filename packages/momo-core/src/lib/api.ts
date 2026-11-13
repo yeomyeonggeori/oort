@@ -389,6 +389,16 @@ export interface ReadState {
    * `latestReadableSeq` (the shared decision function lands with #4228).
    */
   closedAtSeq?: number | null;
+  /**
+   * ADR-0124 amendment 4 (#5667). The unread replies, written by other people, in the threads the
+   * caller follows in this channel. Wire name `followed_unread_reply_count`. A reply that names the
+   * caller is counted here **and** in `mentionCount`.
+   *
+   * **`undefined` means "this response did not say"**, like `latestReadableSeq`: a server without
+   * #5667, the `PUT read-state` response and the realtime `read_state` frame omit it. A merge keeps
+   * the cached value; a reader treats a value it never had as `0`.
+   */
+  followedUnreadReplyCount?: number;
 }
 
 /** ADR-0178 D6. Only `"explicit_open"` is sent; absence means background. */
@@ -2690,6 +2700,8 @@ interface WireReadState {
   latest_readable_seq?: number;
   /** ADR-0177 D6/D8. `null` = not closed (GET), absent = the response did not say. */
   closed_at_seq?: number | null;
+  /** ADR-0124 amendment 4 (#5667). Absent on an older server and on a `PUT read-state` response. */
+  followed_unread_reply_count?: number;
 }
 
 function markedUnreadBeforeSeqFromWire(
@@ -2736,6 +2748,9 @@ function toReadState(wire: WireReadState): ReadState {
   if (latestReadableSeq !== undefined) state.latestReadableSeq = latestReadableSeq;
   const closedAtSeq = closedAtSeqFromWire(wire);
   if (closedAtSeq !== undefined) state.closedAtSeq = closedAtSeq;
+  // A count, not a seq, but the same shape: a non-negative integer, anything else is "did not say".
+  const followedUnreadReplyCount = seqFromWire(wire.followed_unread_reply_count);
+  if (followedUnreadReplyCount !== undefined) state.followedUnreadReplyCount = followedUnreadReplyCount;
   return state;
 }
 
@@ -2746,7 +2761,11 @@ export async function fetchReadStates(
   const res = await request<{ read_states: WireReadState[] }>(
     `/v1/workspaces/${encodeURIComponent(workspaceId)}/read-state`
   );
-  const states = arrayField(res, "read_states");
+  return readStatesFromWire(arrayField(res, "read_states"));
+}
+
+/** The rows of a `read_states` array that have the six required fields, as domain rows. */
+function readStatesFromWire(states: readonly unknown[] | null): ReadState[] {
   return states === null ? [] : states.filter((state): state is WireReadState => {
     return typeof state === "object" && state !== null &&
       typeof (state as Record<string, unknown>).channel_id === "string" &&
@@ -2812,6 +2831,44 @@ export async function updateReadState(
   return toReadState(res);
 }
 
+/** `POST …/threads/read-all` answer (ADR-0124 amendment 5, #5689). */
+export interface FollowedThreadsReadAll {
+  /** Read-state rows of the channels whose followed-thread position moved; same shape as `GET read-state`. */
+  readStates: ReadState[];
+  /** How many followed threads this call moved. */
+  markedThreadCount: number;
+  /** The server stopped at its per-call cap: send the same request again until this is `false`. */
+  hasMore: boolean;
+}
+
+/**
+ * Move every followed thread (optionally only those in `channelIds`) to its last reply (ADR-0124 amendment 5, #5689).
+ * The body is required: `{}` means every channel the caller is in, `channel_ids: []` means none (so an empty list is
+ * never sent by accident: an absent `channelIds` omits the key). A server that does not know the route answers 404/405
+ * and the caller falls back to the old behaviour. It does not read the inbox "thread" rows and does not move channel cursors.
+ */
+export async function markFollowedThreadsRead(
+  workspaceId: string,
+  channelIds?: readonly string[]
+): Promise<FollowedThreadsReadAll> {
+  const body: Record<string, unknown> = {};
+  if (channelIds !== undefined) body.channel_ids = channelIds;
+  const res = await request<{
+    read_states?: unknown;
+    marked_thread_count?: unknown;
+    has_more?: unknown;
+  }>(`/v1/workspaces/${encodeURIComponent(workspaceId)}/threads/read-all`, {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+  const count = seqFromWire(res.marked_thread_count);
+  return {
+    readStates: readStatesFromWire(arrayField(res, "read_states")),
+    markedThreadCount: count ?? 0,
+    hasMore: res.has_more === true,
+  };
+}
+
 /**
  * 「이 채널을 화면에 띄워 두고 있어요」 존재 신호 (ADR-0204 증보 3, #4018/#4063).
  * `PUT /v1/workspaces/{ws}/channels/{ch}/viewing` - 본문 없음, 204. 주기·멈춤은
@@ -2854,7 +2911,16 @@ export async function fetchMessages(
     )}/channels/${encodeURIComponent(channelId)}/messages${suffix}`
   );
   const messages = arrayField<Message>(page, "messages");
-  return { ...page, messages: (messages ?? []).filter(isMessage) };
+  // 서버는 글이 든 쪽에는 언제나 숫자를 주고(대화의 맨 처음이 든 쪽도), 더 옛 글이 없어 빈 쪽을 줄
+  // 때만 `nextBefore: null` 을 준다(키는 늘 실린다). 클라이언트는 「없음」을 `undefined` 로만
+  // 읽으므로(`nextBefore === undefined` = 더 옛 글 없음) 여기서 한 번 키를 지운다 — `null` 이 새면
+  // 「끝」이 영영 서지 않아 맨 위에 닿을 때마다 빈 쪽을 되풀이해 읽는다(#5757).
+  const { nextBefore, ...rest } = page;
+  return {
+    ...rest,
+    ...(typeof nextBefore === "number" ? { nextBefore } : {}),
+    messages: (messages ?? []).filter(isMessage),
+  };
 }
 
 // ---- 링크 언퍼얼 (ADR-0170 D5) ---------------------------------------------
@@ -4426,6 +4492,11 @@ export interface WorkSession {
   exitCode?: number;
   endReason?: string;
   resumedFromSessionId?: string;
+  /**
+   * ADR-0190 D4: `host`(호스트가 연 세션) 또는 `local_pty`(맥에서 직접 연 창을 공유한 것). 서버 DTO가
+   * 늘 싣는다. 옛 시험 줄처럼 없으면 `host`로 읽는다. kill 라우트는 `local_pty`를 받지 않는다(#5595).
+   */
+  origin?: "host" | "local_pty";
 }
 
 export async function fetchWorkSessions(
@@ -6950,6 +7021,92 @@ export async function fetchAgentRunProgress(
       )}/agent-runs/progress?${query.toString()}`
     )
   );
+}
+
+// ---- Agent runs: 「지금 실행 중」 (ADR-0200 증보 2026-10-15 R1, #3847) ----------
+// GET /v1/workspaces/{ws}/agent-runs?state=active&limit=&cursor=
+//
+// 내가 멤버인 채널의 안 끝난 run 전부(queued·claimed·running·awaiting_approval·paused), 새것부터.
+// 행 모양은 채널 진행 읽기와 같다(`agentRunProgressFromWire`). 채널 진행 읽기와 다른 점은 **에이전트
+// 종류를 가리지 않는다**는 것이다: 관리형·BYOA·gateway(Hermes) run도 나온다. 채널 멤버 패널이 이 읽기를
+// 채널로 걸러 쓴다(#5686).
+//
+// 응답의 `agents[]`(에이전트별 수, 그중 `activeTotal`은 **워크스페이스 전체** 수)는 여기서 읽지 않는다.
+// 지금 부르는 쪽(채널 멤버 패널)은 다른 채널의 수를 보이면 안 되므로, 읽지 않는 것이 가장 단단한 막음이다.
+// 수가 필요한 화면이 생기면 그 화면의 결정(ADR-0194 D5·ADR-0202 D5)과 함께 더한다.
+
+/** 「지금 실행 중」 한 쪽. */
+export interface AgentRunActivePage {
+  runs: AgentRunProgress[];
+  nextCursor?: string;
+}
+
+/** 서버의 한 쪽 상한(`ACTIVE_RUN_PAGE_MAX`). 이보다 크게 물어도 서버가 이 값으로 자른다. */
+export const ACTIVE_RUN_PAGE_LIMIT = 100;
+
+export function agentRunActivePageFromWire(value: unknown): AgentRunActivePage {
+  const source = responseRecord(value);
+  const runs = arrayField(source, "runs");
+  if (runs === null) throw new WireShapeError();
+  const nextCursor = optionalString(source, "nextCursor");
+  return {
+    runs: runs.map(agentRunProgressFromWire),
+    ...(nextCursor === undefined || nextCursor === ""
+      ? {}
+      : { nextCursor: nextCursor.toLowerCase() }),
+  };
+}
+
+/** 「지금 실행 중」 한 쪽을 읽는다. 구 서버는 404/405/501 — 호출자는 `serverSaysAbsent`로 접는다. */
+export async function fetchActiveAgentRuns(
+  workspaceId: string,
+  options: { limit?: number; cursor?: string } = {}
+): Promise<AgentRunActivePage> {
+  const query = new URLSearchParams({
+    state: "active",
+    limit: String(options.limit ?? ACTIVE_RUN_PAGE_LIMIT),
+  });
+  if (options.cursor !== undefined) query.set("cursor", options.cursor);
+  return agentRunActivePageFromWire(
+    await request<unknown>(
+      `/v1/workspaces/${encodeURIComponent(
+        workspaceId.toLowerCase()
+      )}/agent-runs?${query.toString()}`
+    )
+  );
+}
+
+/**
+ * 「지금 실행 중」을 쪽 상한(`maxPages`)까지 이어 읽어 한 목록으로. 서버는 내가 멤버인 **모든** 채널의
+ * run을 새것부터 주므로, 한 채널의 run은 다른 채널이 바쁘면 다음 쪽에 있을 수 있다. 상한에 닿으면 거기서
+ * 멈추고 `truncated`를 세운다(그 뒤의 run은 가장 오래된 것들이다).
+ */
+export async function fetchAllActiveAgentRuns(
+  workspaceId: string,
+  options: { maxPages?: number; fetchPage?: typeof fetchActiveAgentRuns } = {}
+): Promise<{ runs: AgentRunProgress[]; truncated: boolean; pages: number }> {
+  const fetchPage = options.fetchPage ?? fetchActiveAgentRuns;
+  const maxPages = Math.max(1, options.maxPages ?? 3);
+  const runs: AgentRunProgress[] = [];
+  const seen = new Set<string>();
+  let cursor: string | undefined;
+  for (let pages = 1; ; pages += 1) {
+    const page = await fetchPage(workspaceId, {
+      limit: ACTIVE_RUN_PAGE_LIMIT,
+      ...(cursor === undefined ? {} : { cursor }),
+    });
+    for (const run of page.runs) {
+      if (seen.has(run.id)) continue;
+      seen.add(run.id);
+      runs.push(run);
+    }
+    // 같은 커서가 돌아오면(서버 결함) 무한히 돌지 않는다.
+    if (page.nextCursor === undefined || page.nextCursor === cursor) {
+      return { runs, truncated: false, pages };
+    }
+    if (pages >= maxPages) return { runs, truncated: true, pages };
+    cursor = page.nextCursor;
+  }
 }
 
 /**

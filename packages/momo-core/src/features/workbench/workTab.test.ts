@@ -9,6 +9,8 @@ import {
   workTabPaneWidth,
   workViewOf,
   LOCAL_TERMINALS_PATH,
+  agentPanePath,
+  agentPaneSessionOf,
 } from "./workTab";
 
 /** 목록 열까지 편 앱 사이드바(레일 56 + 목록 268). */
@@ -75,5 +77,23 @@ describe("sessionListFits (#2856)", () => {
   it("경계: 목록을 편 격자 폭이 최소 폭과 같으면 선다", () => {
     expect(sessionListFits(WORK_TAB_RAIL_PX + WORK_TAB_SESSION_LIST_PX + 24 + min4x2, min4x2)).toBe(true);
     expect(sessionListFits(WORK_TAB_RAIL_PX + WORK_TAB_SESSION_LIST_PX + 24 + min4x2 - 1, min4x2)).toBe(false);
+  });
+});
+
+describe("작업 권한 요청이 여는 A 칸 주소 (#5595)", () => {
+  const SID = "019F9A10-0000-7000-8000-0000000000A1";
+  it("격자 보기 + `agent` 열쇠(소문자 id)다. 콘솔의 `session` 열쇠가 아니다", () => {
+    const path = agentPanePath(SID);
+    expect(path).toBe(`/work?view=terminals&agent=${SID.toLowerCase()}`);
+    const search = path.slice("/work".length);
+    expect(workViewOf(search)).toBe("terminals");
+    expect(isMyWorkTab("/work", search, true)).toBe(true);
+    expect(agentPaneSessionOf(search)).toBe(SID.toLowerCase());
+  });
+  it("격자 보기가 아니거나 열쇠가 비면 null이다", () => {
+    expect(agentPaneSessionOf(`?view=console&agent=${SID}`)).toBeNull();
+    expect(agentPaneSessionOf(`?agent=${SID}`)).toBeNull();
+    expect(agentPaneSessionOf("?view=terminals&agent=")).toBeNull();
+    expect(agentPaneSessionOf("?view=terminals")).toBeNull();
   });
 });

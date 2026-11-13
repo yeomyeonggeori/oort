@@ -29,8 +29,8 @@
 //                    규칙을 형제 표면도 받는다(리뷰 H1 ②).
 //  10. 바깥 클릭     덮이지 않은 라우트 영역을 누르면 서랍이 닫힌다. 보이는데
 //                    아무 반응도 없는 표면을 남기지 않는다(리뷰 H2).
-//  11. 조각 띠 없음  899px 에서 서랍 오른쪽에 남는 라우트 띠는 0px 이고, 1200px
-//                    위에서는 최소 한 칸(320px)이다. 반쯤 잘린 컨트롤이 걸리는
+//  11. 조각 띠 없음  899px·1291px 에서 서랍 오른쪽에 남는 라우트 띠는 0px 이고, 1292px
+//                    (사이드바 332 + 서랍 640 + 320) 이상에서는 최소 한 칸(320px)이다. 반쯤 잘린 컨트롤이 걸리는
 //                    폭이 없다(리뷰 M3).
 //
 // ADE 3단계 D3 (#1137) — 재개/인수 어휘 분리:
@@ -1302,32 +1302,38 @@ async function exerciseControl(browser) {
       };
     });
 
-  await page.setViewportSize({ width: 899, height: 900 });
-  await openDrawer(page);
-  const narrow = await routeStrip();
-  console.log(
-    `[strip] 899px: 라우트 상자 ${narrow?.box}px · 서랍 ${narrow?.drawer}px · 남는 띠 ${narrow?.strip}px`
-  );
-  if (narrow === null || narrow.strip !== 0) {
-    throw new Error(
-      `the drawer left a sliver of route: 899px 에서 ${narrow?.strip}px 가 남았다 (반쯤 잘린 컨트롤이 걸리는 폭 — 전면 문턱은 1200px 이어야 한다)`
+  // 문턱 1292 = 사이드바 자리 332 + 서랍 640 + 남는 한 칸 320 (tokens.css ade-drawer).
+  // 바로 아래 1291 은 한 칸이 모자란 폭이라 서랍이 통째로 덮어야 한다.
+  for (const width of [899, 1291]) {
+    await page.setViewportSize({ width, height: 900 });
+    if (width === 899) await openDrawer(page);
+    const narrow = await routeStrip();
+    console.log(
+      `[strip] ${width}px: 라우트 상자 ${narrow?.box}px · 서랍 ${narrow?.drawer}px · 남는 띠 ${narrow?.strip}px`
     );
-  }
-  if ((await panelInert()) !== true) {
-    throw new Error(
-      "a covered sibling stayed in the tab order: 서랍이 통째로 덮은 작업 패널에 inert 가 없다 (라우트에만 걸려 있다)"
-    );
+    if (narrow === null || narrow.strip !== 0) {
+      throw new Error(
+        `the drawer left a sliver of route: ${width}px 에서 ${narrow?.strip}px 가 남았다 (반쯤 잘린 컨트롤이 걸리는 폭 — 전면 문턱은 1292px 이어야 한다)`
+      );
+    }
+    if ((await panelInert()) !== true) {
+      throw new Error(
+        "a covered sibling stayed in the tab order: 서랍이 통째로 덮은 작업 패널에 inert 가 없다 (라우트에만 걸려 있다)"
+      );
+    }
   }
 
-  await page.setViewportSize({ width: 1280, height: 900 });
-  const wide = await routeStrip();
-  console.log(
-    `[strip] 1280px: 라우트 상자 ${wide?.box}px · 서랍 ${wide?.drawer}px · 남는 칸 ${wide?.strip}px`
-  );
-  if (wide === null || wide.strip < 320) {
-    throw new Error(
-      `the drawer left a sliver of route: 1280px 에서 ${wide?.strip}px 만 남았다 (남는 것은 띠가 아니라 최소 한 칸 320px 이어야 한다)`
+  for (const width of [1292, 1300]) {
+    await page.setViewportSize({ width, height: 900 });
+    const wide = await routeStrip();
+    console.log(
+      `[strip] ${width}px: 라우트 상자 ${wide?.box}px · 서랍 ${wide?.drawer}px · 남는 칸 ${wide?.strip}px`
     );
+    if (wide === null || wide.strip < 320) {
+      throw new Error(
+        `the drawer left a sliver of route: ${width}px 에서 ${wide?.strip}px 만 남았다 (남는 것은 띠가 아니라 최소 한 칸 320px 이어야 한다)`
+      );
+    }
   }
   if ((await panelInert()) !== true) {
     throw new Error(
@@ -1533,7 +1539,7 @@ async function exerciseAnchor(browser) {
       const look = () => {
         if (window.__adeAnchorLandedSeq !== null) return;
         const hit = document.querySelector(
-          '[data-testid="timeline-message"].bg-accent-soft'
+          '[data-testid="timeline-message"].landed-surface'
         );
         if (hit !== null) {
           window.__adeAnchorLandedSeq = Number(hit.getAttribute("data-seq"));

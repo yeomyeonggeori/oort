@@ -29,5 +29,19 @@
   "desktop.tray.remainPanes": "{count, plural, one {# pane is still waiting for you} other {# panes are still waiting for you}}",
   "desktop.tray.remainBoth": "{approvals, plural, one {# approval} other {# approvals}} and {panes, plural, one {# pane} other {# panes}} are still waiting for you",
   "desktop.tray.closeNotice": "Closing the window keeps oort in the menu bar, so you still get notifications",
-  "desktop.notify.threadSummary": "{count, plural, one {# thread reply} other {# thread replies}}"
+  "desktop.notify.threadSummary": "{count, plural, one {# thread reply} other {# thread replies}}",
+  "desktop.notify.workPermission": "{session}: waiting for permission to run on your Mac",
+  "desktop.notify.workPermissionTitle": "Waiting for you",
+  "desktop.workPermission.allowInApp": "Allow it from the phone or desktop app",
+  "desktop.workSession.backLabel": "Tasks",
+  "desktop.workSession.backAria": "Back to tasks",
+  "desktop.workSession.listTitle": "Recent sessions",
+  "desktop.workSession.backToListLabel": "Session list",
+  "desktop.workSession.pageTitle": "Session",
+  "desktop.workJobs.tagApproval": "Approval request",
+  "desktop.workJobs.tagPermission": "Permission request",
+  "desktop.workJobs.stateAwaitingApproval": "Awaiting approval",
+  "desktop.workJobs.approvalHintInList": "You can also approve it from the list",
+  "desktop.workJobs.openToAnswer": "Open to answer",
+  "desktop.workJobs.reportedTitle": "Agent report: {summary}"
 }

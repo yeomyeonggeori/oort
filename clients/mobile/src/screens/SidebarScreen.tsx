@@ -916,7 +916,7 @@ export default function SidebarScreen({
           // 워크스페이스에 새 사람을 부르는 낱말이고, 이 문장이 가리키는
           // 데스크톱의 문은 「멤버 추가」 다이얼로그다. 채널 만들기는 폰의 + 메뉴에도
           // 생겼다(DS2-2b #2750) — 소유자·관리자에게만 서므로 그 조건을 함께 말한다.
-          detail="아래 +에서 새 DM을 시작하고, 소유자·관리자는 새 채널도 만들 수 있습니다. 멤버 추가는 데스크톱에서 할 수 있습니다."
+          detail="아래 +에서 새 DM을 시작하고, 소유자·관리자는 새 채널도 만들 수 있습니다. 멤버 추가는 데스크탑에서 할 수 있습니다."
           refreshControl={refreshControl}
           scrollProps={scrollProps}
           testID="channels-empty"

@@ -229,6 +229,7 @@ export const messageKeys = [
   "connection.load.membersTitle",
   "connection.load.newerTitle",
   "connection.load.notificationRulesTitle",
+  "connection.load.olderTitle",
   "connection.load.readMarkersTitle",
   "connection.load.reasonOffline",
   "connection.load.reasonServer",
@@ -273,6 +274,8 @@ export const messageKeys = [
   "desktop.menu.view",
   "desktop.menu.window",
   "desktop.notify.threadSummary",
+  "desktop.notify.workPermission",
+  "desktop.notify.workPermissionTitle",
   "desktop.tray.closeNotice",
   "desktop.tray.more",
   "desktop.tray.newMessage",
@@ -285,6 +288,18 @@ export const messageKeys = [
   "desktop.tray.running",
   "desktop.tray.stateBlocked",
   "desktop.tray.stateWorking",
+  "desktop.workJobs.approvalHintInList",
+  "desktop.workJobs.openToAnswer",
+  "desktop.workJobs.reportedTitle",
+  "desktop.workJobs.stateAwaitingApproval",
+  "desktop.workJobs.tagApproval",
+  "desktop.workJobs.tagPermission",
+  "desktop.workPermission.allowInApp",
+  "desktop.workSession.backAria",
+  "desktop.workSession.backLabel",
+  "desktop.workSession.backToListLabel",
+  "desktop.workSession.listTitle",
+  "desktop.workSession.pageTitle",
   "expressions.add.adminsOnly",
   "expressions.add.backLabel",
   "expressions.add.import",
@@ -304,6 +319,7 @@ export const messageKeys = [
   "expressions.draft.rights",
   "expressions.draft.source",
   "expressions.draft.waiting",
+  "expressions.image.waitingA11y",
   "expressions.import.displayName",
   "expressions.import.displayNamePlaceholder",
   "expressions.import.face",
@@ -556,12 +572,21 @@ export const messageKeys = [
   "expressions.sheet.tabs",
   "expressions.sheet.title",
   "expressions.sheet.unavailable",
+  "expressions.suggest.dismiss",
   "expressions.suggest.group",
   "expressions.suggest.mute",
   "expressions.suggest.pick",
+  "expressions.suggest.replaced",
   "expressions.suggest.settingHint",
   "expressions.suggest.settingLabel",
   "inbox.approval.open",
+  "inbox.source.channelUnknown",
+  "inbox.source.dm",
+  "inbox.source.dmGroup",
+  "inbox.source.dmUnknown",
+  "inbox.source.task",
+  "inbox.source.thread",
+  "inbox.source.threadUnknown",
   "mobile.attachmentSave.failed",
   "mobile.attachmentSave.photosDenied",
   "mobile.attachmentSave.savedToFiles",
@@ -634,6 +659,14 @@ export const messageKeys = [
   "mobile.linkPreview.title",
   "mobile.locale.backToSettings",
   "mobile.locale.saving",
+  "mobile.workPermission.elsewhereOnHost",
+  "mobile.workPermission.elsewhereOnMac",
+  "mobile.workPermission.elsewhereTitle",
+  "mobile.workPermission.landingGoneDetail",
+  "mobile.workPermission.landingGoneTitle",
+  "mobile.workPermission.recheck",
+  "mobile.workPermission.rechecking",
+  "mobile.workPermission.recheckMissed",
   "notifications.inviteLink.fallback",
   "recovery.claim.hostBody",
   "recovery.claim.hostConfirm",
@@ -925,6 +958,35 @@ export const messageKeys = [
   "releaseNotes.v0145.suggestionSwitchTitle",
   "releaseNotes.v0145.suggestionSwitchTryIt",
   "releaseNotes.v0145.summary",
+  "releaseNotes.v0146.agentsLine1",
+  "releaseNotes.v0146.agentsLine2",
+  "releaseNotes.v0146.backgroundDesktopChanged",
+  "releaseNotes.v0146.backgroundDesktopTitle",
+  "releaseNotes.v0146.backgroundDesktopTryIt",
+  "releaseNotes.v0146.conversationsLine1",
+  "releaseNotes.v0146.conversationsLine2",
+  "releaseNotes.v0146.conversationsLine3",
+  "releaseNotes.v0146.conversationsLine4",
+  "releaseNotes.v0146.desktopLine1",
+  "releaseNotes.v0146.desktopLine2",
+  "releaseNotes.v0146.desktopTopic",
+  "releaseNotes.v0146.needsReplyChanged",
+  "releaseNotes.v0146.needsReplyTitle",
+  "releaseNotes.v0146.needsReplyTryIt",
+  "releaseNotes.v0146.notificationsLine1",
+  "releaseNotes.v0146.steadyChatChanged",
+  "releaseNotes.v0146.steadyChatTitle",
+  "releaseNotes.v0146.steadyChatTryIt",
+  "releaseNotes.v0146.suggestPickChanged",
+  "releaseNotes.v0146.suggestPickTitle",
+  "releaseNotes.v0146.suggestPickTryIt",
+  "releaseNotes.v0146.summary",
+  "releaseNotes.v0146.updateNoticeChanged",
+  "releaseNotes.v0146.updateNoticeTitle",
+  "releaseNotes.v0146.updateNoticeTryIt",
+  "releaseNotes.v0146.whoIsDoingChanged",
+  "releaseNotes.v0146.whoIsDoingTitle",
+  "releaseNotes.v0146.whoIsDoingTryIt",
   "releaseNotes.version.current",
   "releaseNotes.version.label",
   "releaseNotes.version.releasedOn",
@@ -1065,6 +1127,26 @@ export const messageKeys = [
   "settings.appearance.linkPreviewRich",
   "settings.appearance.linkPreviewRichHint",
   "settings.connection.noServer",
+  "settings.connectionLog.cappedToday",
+  "settings.connectionLog.clear",
+  "settings.connectionLog.copied",
+  "settings.connectionLog.copy",
+  "settings.connectionLog.copyDescription",
+  "settings.connectionLog.copyFailed",
+  "settings.connectionLog.copyLabel",
+  "settings.connectionLog.count",
+  "settings.connectionLog.cutWhileResting",
+  "settings.connectionLog.description",
+  "settings.connectionLog.deviceOffline",
+  "settings.connectionLog.readFailedMessage",
+  "settings.connectionLog.readFailedTitle",
+  "settings.connectionLog.restFailed",
+  "settings.connectionLog.sendBlocked",
+  "settings.connectionLog.socketDown",
+  "settings.connectionLog.title",
+  "settings.connectionLog.updateCheckFailed",
+  "settings.connectionLog.wakeLate",
+  "settings.connectionLog.windowHidden",
   "settings.invite.guestInvitesPaused",
   "settings.notifications.alwaysDetail",
   "settings.notifications.checking",
@@ -1086,6 +1168,20 @@ export const messageKeys = [
   "settings.profile.languageReload",
   "settings.profile.languageRetry",
   "settings.profile.languageSystem",
+  "settings.updates.cutLine",
+  "settings.updates.cutPanes",
+  "settings.updates.cutSessions",
+  "settings.updates.cutUnknown",
+  "settings.updates.description",
+  "settings.updates.holdTitle",
+  "settings.updates.installRowDescription",
+  "settings.updates.lastCheckedLabel",
+  "settings.updates.notNow",
+  "settings.updates.offChip",
+  "settings.updates.offSentence",
+  "settings.updates.restartNow",
+  "settings.updates.stoppedChip",
+  "settings.updates.stoppedSentence",
   "teamAi.delegation.chipImage",
   "teamAi.delegation.chipSearch",
   "teamAi.delegation.hermesFallbackName",
@@ -1196,6 +1292,26 @@ export const messageKeys = [
   "timeline.lightbox.copyFailed",
   "timeline.lightbox.zoomIn",
   "timeline.lightbox.zoomOut",
+  "timeline.memberPanel.agentKind",
+  "timeline.memberPanel.elapsedDays",
+  "timeline.memberPanel.elapsedHours",
+  "timeline.memberPanel.elapsedMinutes",
+  "timeline.memberPanel.groupAgents",
+  "timeline.memberPanel.groupOffline",
+  "timeline.memberPanel.groupOnline",
+  "timeline.memberPanel.groupOtherAgents",
+  "timeline.memberPanel.groupPeople",
+  "timeline.memberPanel.groupWorking",
+  "timeline.memberPanel.listLabel",
+  "timeline.memberPanel.moreRuns",
+  "timeline.memberPanel.moreRunsSpoken",
+  "timeline.memberPanel.nowFailed",
+  "timeline.memberPanel.nowFailedMid",
+  "timeline.memberPanel.nowFailedShort",
+  "timeline.memberPanel.nowRetry",
+  "timeline.memberPanel.request",
+  "timeline.memberPanel.requestSpoken",
+  "timeline.memberPanel.stageSpoken",
   "timeline.quote.head",
   "timeline.quote.headUnnamed",
   "timeline.runException.open",
@@ -1215,6 +1331,9 @@ export const messageKeys = [
   "timeline.thread.openUnread",
   "timeline.thread.replyCount",
   "timeline.thread.unreadChip",
+  "timeline.typing.many",
+  "timeline.typing.one",
+  "timeline.typing.two",
   "timeline.unfurl.label",
   "timeline.unfurl.previewDismiss",
   "timeline.unfurl.previewDismissed",
@@ -1591,6 +1710,7 @@ export const argumentSpecs = {
   "connection.load.membersTitle": {},
   "connection.load.newerTitle": {},
   "connection.load.notificationRulesTitle": {},
+  "connection.load.olderTitle": {},
   "connection.load.readMarkersTitle": {},
   "connection.load.reasonOffline": {},
   "connection.load.reasonServer": {},
@@ -1642,6 +1762,10 @@ export const argumentSpecs = {
   "desktop.notify.threadSummary": {
     "count": "number"
   },
+  "desktop.notify.workPermission": {
+    "session": "string"
+  },
+  "desktop.notify.workPermissionTitle": {},
   "desktop.tray.closeNotice": {},
   "desktop.tray.more": {
     "count": "number"
@@ -1663,6 +1787,20 @@ export const argumentSpecs = {
   "desktop.tray.running": {},
   "desktop.tray.stateBlocked": {},
   "desktop.tray.stateWorking": {},
+  "desktop.workJobs.approvalHintInList": {},
+  "desktop.workJobs.openToAnswer": {},
+  "desktop.workJobs.reportedTitle": {
+    "summary": "string"
+  },
+  "desktop.workJobs.stateAwaitingApproval": {},
+  "desktop.workJobs.tagApproval": {},
+  "desktop.workJobs.tagPermission": {},
+  "desktop.workPermission.allowInApp": {},
+  "desktop.workSession.backAria": {},
+  "desktop.workSession.backLabel": {},
+  "desktop.workSession.backToListLabel": {},
+  "desktop.workSession.listTitle": {},
+  "desktop.workSession.pageTitle": {},
   "expressions.add.adminsOnly": {},
   "expressions.add.backLabel": {},
   "expressions.add.import": {},
@@ -1686,6 +1824,9 @@ export const argumentSpecs = {
     "host": "string"
   },
   "expressions.draft.waiting": {},
+  "expressions.image.waitingA11y": {
+    "name": "string"
+  },
   "expressions.import.displayName": {},
   "expressions.import.displayNamePlaceholder": {},
   "expressions.import.face": {},
@@ -2004,14 +2145,32 @@ export const argumentSpecs = {
   "expressions.sheet.tabs": {},
   "expressions.sheet.title": {},
   "expressions.sheet.unavailable": {},
+  "expressions.suggest.dismiss": {},
   "expressions.suggest.group": {},
   "expressions.suggest.mute": {},
   "expressions.suggest.pick": {
     "name": "string"
   },
+  "expressions.suggest.replaced": {
+    "name": "string"
+  },
   "expressions.suggest.settingHint": {},
   "expressions.suggest.settingLabel": {},
   "inbox.approval.open": {},
+  "inbox.source.channelUnknown": {},
+  "inbox.source.dm": {
+    "name": "string"
+  },
+  "inbox.source.dmGroup": {
+    "count": "number",
+    "names": "string"
+  },
+  "inbox.source.dmUnknown": {},
+  "inbox.source.task": {},
+  "inbox.source.thread": {
+    "channel": "string"
+  },
+  "inbox.source.threadUnknown": {},
   "mobile.attachmentSave.failed": {},
   "mobile.attachmentSave.photosDenied": {},
   "mobile.attachmentSave.savedToFiles": {},
@@ -2109,6 +2268,16 @@ export const argumentSpecs = {
   "mobile.linkPreview.title": {},
   "mobile.locale.backToSettings": {},
   "mobile.locale.saving": {},
+  "mobile.workPermission.elsewhereOnHost": {
+    "host": "string"
+  },
+  "mobile.workPermission.elsewhereOnMac": {},
+  "mobile.workPermission.elsewhereTitle": {},
+  "mobile.workPermission.landingGoneDetail": {},
+  "mobile.workPermission.landingGoneTitle": {},
+  "mobile.workPermission.recheck": {},
+  "mobile.workPermission.rechecking": {},
+  "mobile.workPermission.recheckMissed": {},
   "notifications.inviteLink.fallback": {},
   "recovery.claim.hostBody": {},
   "recovery.claim.hostConfirm": {},
@@ -2415,6 +2584,35 @@ export const argumentSpecs = {
   "releaseNotes.v0145.suggestionSwitchTitle": {},
   "releaseNotes.v0145.suggestionSwitchTryIt": {},
   "releaseNotes.v0145.summary": {},
+  "releaseNotes.v0146.agentsLine1": {},
+  "releaseNotes.v0146.agentsLine2": {},
+  "releaseNotes.v0146.backgroundDesktopChanged": {},
+  "releaseNotes.v0146.backgroundDesktopTitle": {},
+  "releaseNotes.v0146.backgroundDesktopTryIt": {},
+  "releaseNotes.v0146.conversationsLine1": {},
+  "releaseNotes.v0146.conversationsLine2": {},
+  "releaseNotes.v0146.conversationsLine3": {},
+  "releaseNotes.v0146.conversationsLine4": {},
+  "releaseNotes.v0146.desktopLine1": {},
+  "releaseNotes.v0146.desktopLine2": {},
+  "releaseNotes.v0146.desktopTopic": {},
+  "releaseNotes.v0146.needsReplyChanged": {},
+  "releaseNotes.v0146.needsReplyTitle": {},
+  "releaseNotes.v0146.needsReplyTryIt": {},
+  "releaseNotes.v0146.notificationsLine1": {},
+  "releaseNotes.v0146.steadyChatChanged": {},
+  "releaseNotes.v0146.steadyChatTitle": {},
+  "releaseNotes.v0146.steadyChatTryIt": {},
+  "releaseNotes.v0146.suggestPickChanged": {},
+  "releaseNotes.v0146.suggestPickTitle": {},
+  "releaseNotes.v0146.suggestPickTryIt": {},
+  "releaseNotes.v0146.summary": {},
+  "releaseNotes.v0146.updateNoticeChanged": {},
+  "releaseNotes.v0146.updateNoticeTitle": {},
+  "releaseNotes.v0146.updateNoticeTryIt": {},
+  "releaseNotes.v0146.whoIsDoingChanged": {},
+  "releaseNotes.v0146.whoIsDoingTitle": {},
+  "releaseNotes.v0146.whoIsDoingTryIt": {},
   "releaseNotes.version.current": {},
   "releaseNotes.version.label": {
     "version": "string"
@@ -2639,6 +2837,28 @@ export const argumentSpecs = {
   "settings.appearance.linkPreviewRich": {},
   "settings.appearance.linkPreviewRichHint": {},
   "settings.connection.noServer": {},
+  "settings.connectionLog.cappedToday": {},
+  "settings.connectionLog.clear": {},
+  "settings.connectionLog.copied": {},
+  "settings.connectionLog.copy": {},
+  "settings.connectionLog.copyDescription": {},
+  "settings.connectionLog.copyFailed": {},
+  "settings.connectionLog.copyLabel": {},
+  "settings.connectionLog.count": {
+    "count": "number"
+  },
+  "settings.connectionLog.cutWhileResting": {},
+  "settings.connectionLog.description": {},
+  "settings.connectionLog.deviceOffline": {},
+  "settings.connectionLog.readFailedMessage": {},
+  "settings.connectionLog.readFailedTitle": {},
+  "settings.connectionLog.restFailed": {},
+  "settings.connectionLog.sendBlocked": {},
+  "settings.connectionLog.socketDown": {},
+  "settings.connectionLog.title": {},
+  "settings.connectionLog.updateCheckFailed": {},
+  "settings.connectionLog.wakeLate": {},
+  "settings.connectionLog.windowHidden": {},
   "settings.invite.guestInvitesPaused": {},
   "settings.notifications.alwaysDetail": {},
   "settings.notifications.checking": {},
@@ -2662,6 +2882,26 @@ export const argumentSpecs = {
   "settings.profile.languageReload": {},
   "settings.profile.languageRetry": {},
   "settings.profile.languageSystem": {},
+  "settings.updates.cutLine": {
+    "items": "string"
+  },
+  "settings.updates.cutPanes": {
+    "count": "number"
+  },
+  "settings.updates.cutSessions": {
+    "count": "number"
+  },
+  "settings.updates.cutUnknown": {},
+  "settings.updates.description": {},
+  "settings.updates.holdTitle": {},
+  "settings.updates.installRowDescription": {},
+  "settings.updates.lastCheckedLabel": {},
+  "settings.updates.notNow": {},
+  "settings.updates.offChip": {},
+  "settings.updates.offSentence": {},
+  "settings.updates.restartNow": {},
+  "settings.updates.stoppedChip": {},
+  "settings.updates.stoppedSentence": {},
   "teamAi.delegation.chipImage": {
     "name": "string"
   },
@@ -2812,6 +3052,54 @@ export const argumentSpecs = {
   "timeline.lightbox.copyFailed": {},
   "timeline.lightbox.zoomIn": {},
   "timeline.lightbox.zoomOut": {},
+  "timeline.memberPanel.agentKind": {},
+  "timeline.memberPanel.elapsedDays": {
+    "count": "number"
+  },
+  "timeline.memberPanel.elapsedHours": {
+    "count": "number"
+  },
+  "timeline.memberPanel.elapsedMinutes": {
+    "count": "number"
+  },
+  "timeline.memberPanel.groupAgents": {
+    "count": "number"
+  },
+  "timeline.memberPanel.groupOffline": {
+    "count": "number"
+  },
+  "timeline.memberPanel.groupOnline": {
+    "count": "number"
+  },
+  "timeline.memberPanel.groupOtherAgents": {
+    "count": "number"
+  },
+  "timeline.memberPanel.groupPeople": {
+    "count": "number"
+  },
+  "timeline.memberPanel.groupWorking": {
+    "count": "number"
+  },
+  "timeline.memberPanel.listLabel": {},
+  "timeline.memberPanel.moreRuns": {
+    "count": "number"
+  },
+  "timeline.memberPanel.moreRunsSpoken": {
+    "count": "number"
+  },
+  "timeline.memberPanel.nowFailed": {},
+  "timeline.memberPanel.nowFailedMid": {},
+  "timeline.memberPanel.nowFailedShort": {},
+  "timeline.memberPanel.nowRetry": {},
+  "timeline.memberPanel.request": {
+    "text": "string"
+  },
+  "timeline.memberPanel.requestSpoken": {
+    "text": "string"
+  },
+  "timeline.memberPanel.stageSpoken": {
+    "stage": "string"
+  },
   "timeline.quote.head": {
     "name": "string"
   },
@@ -2843,6 +3131,17 @@ export const argumentSpecs = {
   },
   "timeline.thread.unreadChip": {
     "count": "number"
+  },
+  "timeline.typing.many": {
+    "count": "number",
+    "name": "string"
+  },
+  "timeline.typing.one": {
+    "name": "string"
+  },
+  "timeline.typing.two": {
+    "name": "string",
+    "second": "string"
   },
   "timeline.unfurl.label": {
     "domain": "string",
@@ -3257,6 +3556,7 @@ export interface MessageArgs {
   "connection.load.membersTitle": Record<string, never>;
   "connection.load.newerTitle": Record<string, never>;
   "connection.load.notificationRulesTitle": Record<string, never>;
+  "connection.load.olderTitle": Record<string, never>;
   "connection.load.readMarkersTitle": Record<string, never>;
   "connection.load.reasonOffline": Record<string, never>;
   "connection.load.reasonServer": Record<string, never>;
@@ -3301,6 +3601,8 @@ export interface MessageArgs {
   "desktop.menu.view": Record<string, never>;
   "desktop.menu.window": Record<string, never>;
   "desktop.notify.threadSummary": { count: number };
+  "desktop.notify.workPermission": { session: string };
+  "desktop.notify.workPermissionTitle": Record<string, never>;
   "desktop.tray.closeNotice": Record<string, never>;
   "desktop.tray.more": { count: number };
   "desktop.tray.newMessage": Record<string, never>;
@@ -3313,6 +3615,18 @@ export interface MessageArgs {
   "desktop.tray.running": Record<string, never>;
   "desktop.tray.stateBlocked": Record<string, never>;
   "desktop.tray.stateWorking": Record<string, never>;
+  "desktop.workJobs.approvalHintInList": Record<string, never>;
+  "desktop.workJobs.openToAnswer": Record<string, never>;
+  "desktop.workJobs.reportedTitle": { summary: string };
+  "desktop.workJobs.stateAwaitingApproval": Record<string, never>;
+  "desktop.workJobs.tagApproval": Record<string, never>;
+  "desktop.workJobs.tagPermission": Record<string, never>;
+  "desktop.workPermission.allowInApp": Record<string, never>;
+  "desktop.workSession.backAria": Record<string, never>;
+  "desktop.workSession.backLabel": Record<string, never>;
+  "desktop.workSession.backToListLabel": Record<string, never>;
+  "desktop.workSession.listTitle": Record<string, never>;
+  "desktop.workSession.pageTitle": Record<string, never>;
   "expressions.add.adminsOnly": Record<string, never>;
   "expressions.add.backLabel": Record<string, never>;
   "expressions.add.import": Record<string, never>;
@@ -3332,6 +3646,7 @@ export interface MessageArgs {
   "expressions.draft.rights": Record<string, never>;
   "expressions.draft.source": { host: string };
   "expressions.draft.waiting": Record<string, never>;
+  "expressions.image.waitingA11y": { name: string };
   "expressions.import.displayName": Record<string, never>;
   "expressions.import.displayNamePlaceholder": Record<string, never>;
   "expressions.import.face": Record<string, never>;
@@ -3584,12 +3899,21 @@ export interface MessageArgs {
   "expressions.sheet.tabs": Record<string, never>;
   "expressions.sheet.title": Record<string, never>;
   "expressions.sheet.unavailable": Record<string, never>;
+  "expressions.suggest.dismiss": Record<string, never>;
   "expressions.suggest.group": Record<string, never>;
   "expressions.suggest.mute": Record<string, never>;
   "expressions.suggest.pick": { name: string };
+  "expressions.suggest.replaced": { name: string };
   "expressions.suggest.settingHint": Record<string, never>;
   "expressions.suggest.settingLabel": Record<string, never>;
   "inbox.approval.open": Record<string, never>;
+  "inbox.source.channelUnknown": Record<string, never>;
+  "inbox.source.dm": { name: string };
+  "inbox.source.dmGroup": { count: number; names: string };
+  "inbox.source.dmUnknown": Record<string, never>;
+  "inbox.source.task": Record<string, never>;
+  "inbox.source.thread": { channel: string };
+  "inbox.source.threadUnknown": Record<string, never>;
   "mobile.attachmentSave.failed": Record<string, never>;
   "mobile.attachmentSave.photosDenied": Record<string, never>;
   "mobile.attachmentSave.savedToFiles": Record<string, never>;
@@ -3662,6 +3986,14 @@ export interface MessageArgs {
   "mobile.linkPreview.title": Record<string, never>;
   "mobile.locale.backToSettings": Record<string, never>;
   "mobile.locale.saving": Record<string, never>;
+  "mobile.workPermission.elsewhereOnHost": { host: string };
+  "mobile.workPermission.elsewhereOnMac": Record<string, never>;
+  "mobile.workPermission.elsewhereTitle": Record<string, never>;
+  "mobile.workPermission.landingGoneDetail": Record<string, never>;
+  "mobile.workPermission.landingGoneTitle": Record<string, never>;
+  "mobile.workPermission.recheck": Record<string, never>;
+  "mobile.workPermission.rechecking": Record<string, never>;
+  "mobile.workPermission.recheckMissed": Record<string, never>;
   "notifications.inviteLink.fallback": Record<string, never>;
   "recovery.claim.hostBody": Record<string, never>;
   "recovery.claim.hostConfirm": Record<string, never>;
@@ -3953,6 +4285,35 @@ export interface MessageArgs {
   "releaseNotes.v0145.suggestionSwitchTitle": Record<string, never>;
   "releaseNotes.v0145.suggestionSwitchTryIt": Record<string, never>;
   "releaseNotes.v0145.summary": Record<string, never>;
+  "releaseNotes.v0146.agentsLine1": Record<string, never>;
+  "releaseNotes.v0146.agentsLine2": Record<string, never>;
+  "releaseNotes.v0146.backgroundDesktopChanged": Record<string, never>;
+  "releaseNotes.v0146.backgroundDesktopTitle": Record<string, never>;
+  "releaseNotes.v0146.backgroundDesktopTryIt": Record<string, never>;
+  "releaseNotes.v0146.conversationsLine1": Record<string, never>;
+  "releaseNotes.v0146.conversationsLine2": Record<string, never>;
+  "releaseNotes.v0146.conversationsLine3": Record<string, never>;
+  "releaseNotes.v0146.conversationsLine4": Record<string, never>;
+  "releaseNotes.v0146.desktopLine1": Record<string, never>;
+  "releaseNotes.v0146.desktopLine2": Record<string, never>;
+  "releaseNotes.v0146.desktopTopic": Record<string, never>;
+  "releaseNotes.v0146.needsReplyChanged": Record<string, never>;
+  "releaseNotes.v0146.needsReplyTitle": Record<string, never>;
+  "releaseNotes.v0146.needsReplyTryIt": Record<string, never>;
+  "releaseNotes.v0146.notificationsLine1": Record<string, never>;
+  "releaseNotes.v0146.steadyChatChanged": Record<string, never>;
+  "releaseNotes.v0146.steadyChatTitle": Record<string, never>;
+  "releaseNotes.v0146.steadyChatTryIt": Record<string, never>;
+  "releaseNotes.v0146.suggestPickChanged": Record<string, never>;
+  "releaseNotes.v0146.suggestPickTitle": Record<string, never>;
+  "releaseNotes.v0146.suggestPickTryIt": Record<string, never>;
+  "releaseNotes.v0146.summary": Record<string, never>;
+  "releaseNotes.v0146.updateNoticeChanged": Record<string, never>;
+  "releaseNotes.v0146.updateNoticeTitle": Record<string, never>;
+  "releaseNotes.v0146.updateNoticeTryIt": Record<string, never>;
+  "releaseNotes.v0146.whoIsDoingChanged": Record<string, never>;
+  "releaseNotes.v0146.whoIsDoingTitle": Record<string, never>;
+  "releaseNotes.v0146.whoIsDoingTryIt": Record<string, never>;
   "releaseNotes.version.current": Record<string, never>;
   "releaseNotes.version.label": { version: string };
   "releaseNotes.version.releasedOn": { date: string };
@@ -4093,6 +4454,26 @@ export interface MessageArgs {
   "settings.appearance.linkPreviewRich": Record<string, never>;
   "settings.appearance.linkPreviewRichHint": Record<string, never>;
   "settings.connection.noServer": Record<string, never>;
+  "settings.connectionLog.cappedToday": Record<string, never>;
+  "settings.connectionLog.clear": Record<string, never>;
+  "settings.connectionLog.copied": Record<string, never>;
+  "settings.connectionLog.copy": Record<string, never>;
+  "settings.connectionLog.copyDescription": Record<string, never>;
+  "settings.connectionLog.copyFailed": Record<string, never>;
+  "settings.connectionLog.copyLabel": Record<string, never>;
+  "settings.connectionLog.count": { count: number };
+  "settings.connectionLog.cutWhileResting": Record<string, never>;
+  "settings.connectionLog.description": Record<string, never>;
+  "settings.connectionLog.deviceOffline": Record<string, never>;
+  "settings.connectionLog.readFailedMessage": Record<string, never>;
+  "settings.connectionLog.readFailedTitle": Record<string, never>;
+  "settings.connectionLog.restFailed": Record<string, never>;
+  "settings.connectionLog.sendBlocked": Record<string, never>;
+  "settings.connectionLog.socketDown": Record<string, never>;
+  "settings.connectionLog.title": Record<string, never>;
+  "settings.connectionLog.updateCheckFailed": Record<string, never>;
+  "settings.connectionLog.wakeLate": Record<string, never>;
+  "settings.connectionLog.windowHidden": Record<string, never>;
   "settings.invite.guestInvitesPaused": Record<string, never>;
   "settings.notifications.alwaysDetail": Record<string, never>;
   "settings.notifications.checking": Record<string, never>;
@@ -4114,6 +4495,20 @@ export interface MessageArgs {
   "settings.profile.languageReload": Record<string, never>;
   "settings.profile.languageRetry": Record<string, never>;
   "settings.profile.languageSystem": Record<string, never>;
+  "settings.updates.cutLine": { items: string };
+  "settings.updates.cutPanes": { count: number };
+  "settings.updates.cutSessions": { count: number };
+  "settings.updates.cutUnknown": Record<string, never>;
+  "settings.updates.description": Record<string, never>;
+  "settings.updates.holdTitle": Record<string, never>;
+  "settings.updates.installRowDescription": Record<string, never>;
+  "settings.updates.lastCheckedLabel": Record<string, never>;
+  "settings.updates.notNow": Record<string, never>;
+  "settings.updates.offChip": Record<string, never>;
+  "settings.updates.offSentence": Record<string, never>;
+  "settings.updates.restartNow": Record<string, never>;
+  "settings.updates.stoppedChip": Record<string, never>;
+  "settings.updates.stoppedSentence": Record<string, never>;
   "teamAi.delegation.chipImage": { name: string };
   "teamAi.delegation.chipSearch": { name: string };
   "teamAi.delegation.hermesFallbackName": Record<string, never>;
@@ -4224,6 +4619,26 @@ export interface MessageArgs {
   "timeline.lightbox.copyFailed": Record<string, never>;
   "timeline.lightbox.zoomIn": Record<string, never>;
   "timeline.lightbox.zoomOut": Record<string, never>;
+  "timeline.memberPanel.agentKind": Record<string, never>;
+  "timeline.memberPanel.elapsedDays": { count: number };
+  "timeline.memberPanel.elapsedHours": { count: number };
+  "timeline.memberPanel.elapsedMinutes": { count: number };
+  "timeline.memberPanel.groupAgents": { count: number };
+  "timeline.memberPanel.groupOffline": { count: number };
+  "timeline.memberPanel.groupOnline": { count: number };
+  "timeline.memberPanel.groupOtherAgents": { count: number };
+  "timeline.memberPanel.groupPeople": { count: number };
+  "timeline.memberPanel.groupWorking": { count: number };
+  "timeline.memberPanel.listLabel": Record<string, never>;
+  "timeline.memberPanel.moreRuns": { count: number };
+  "timeline.memberPanel.moreRunsSpoken": { count: number };
+  "timeline.memberPanel.nowFailed": Record<string, never>;
+  "timeline.memberPanel.nowFailedMid": Record<string, never>;
+  "timeline.memberPanel.nowFailedShort": Record<string, never>;
+  "timeline.memberPanel.nowRetry": Record<string, never>;
+  "timeline.memberPanel.request": { text: string };
+  "timeline.memberPanel.requestSpoken": { text: string };
+  "timeline.memberPanel.stageSpoken": { stage: string };
   "timeline.quote.head": { name: string };
   "timeline.quote.headUnnamed": Record<string, never>;
   "timeline.runException.open": { text: string };
@@ -4243,6 +4658,9 @@ export interface MessageArgs {
   "timeline.thread.openUnread": { count: number; unread: number };
   "timeline.thread.replyCount": { count: number };
   "timeline.thread.unreadChip": { count: number };
+  "timeline.typing.many": { count: number; name: string };
+  "timeline.typing.one": { name: string };
+  "timeline.typing.two": { name: string; second: string };
   "timeline.unfurl.label": { domain: string; title: string };
   "timeline.unfurl.previewDismiss": Record<string, never>;
   "timeline.unfurl.previewDismissed": Record<string, never>;

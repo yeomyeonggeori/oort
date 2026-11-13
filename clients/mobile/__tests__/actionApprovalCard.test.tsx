@@ -407,7 +407,7 @@ describe('#1084 — 타임라인 승인 카드에서 바로 결정한다', () =>
     expect(within(card).getByTestId(`${PREFIX}-approve`)).toBeTruthy();
     expect(within(card).getByTestId(`${PREFIX}-reject`)).toBeTruthy();
     expect(
-      within(card).queryByText('이 결정은 인박스나 데스크톱 앱에서 할 수 있어요.'),
+      within(card).queryByText('이 결정은 인박스나 데스크탑 앱에서 할 수 있어요.'),
     ).toBeNull();
   });
 
@@ -1158,7 +1158,7 @@ describe('#2513 — 영속 결과 카드 (부록 B)', () => {
     // 이 앱의 다른 「여기서는 못 한다」 문장과 같은 모양 — 할 일을 이름으로, 자리로
     // 끝난다(design-review M-4). 서버의 버튼 캡션을 옮겨 붙이지 않는다.
     expect(elsewhere.props.children).toBe(
-      '링크 목록 확인과 새 링크 만들기는 데스크톱이나 웹에서 할 수 있습니다.',
+      '링크 목록 확인과 새 링크 만들기는 데스크탑이나 웹에서 할 수 있습니다.',
     );
     expect(elsewhere.props.children).not.toContain('에서 보기');
     // 누를 것이 아니다 — 없는 방으로 가는 버튼을 세우지 않는다.

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { FIXTURE_EXPRESSIONS, FIXTURE_HIDDEN_DELTA, FIXTURE_LIST, FIXTURE_NOW_MS, FIXTURE_READY_DRAFT, FIXTURE_WORKSPACE_ID, fixtureManualDraft } from "./fixtures";
-import { applyExpressionList, compareExpressionVersions, emptyExpressionCache, expressionCacheNeedsRefresh, isNextExpressionVersion } from "./cache";
+import { applyExpressionList, compareExpressionVersions, emptyExpressionCache, expressionCacheNeedsRefresh, isNextExpressionVersion, sameExpressionMedia } from "./cache";
 import { expressionChoice, expressionDraftCard, matchesExpressionChoice } from "./cards";
 import { buildExpressionMessage, expressionAltText, expressionFallbackBody, expressionMessageModel, expressionResultMessage, expressionToken, isExpressionName, tokenizeExpressionReaction, tokenizeExpressions } from "./message";
 import { koreanInitials, searchExpressions } from "./search";
@@ -155,6 +155,31 @@ describe("workspace catalogue cache", () => {
     expect(update.cache.items).toHaveLength(2);
     expect(update.evictImageIds).toEqual([party.id]);
     expect(applyExpressionList(update.cache, FIXTURE_LIST).applied).toBe(false);
+  });
+  // #5575: 같은 그림을 다시 읽었는데 키 차례만 다르면(계약은 차례를 정하지 않는다) 앞 판은 JSON 문자열이 달라 모든 그림을 걷었다
+  // (30초마다 · 창 포커스마다 clearImages → 세대 교체). 값으로 견주면 걷지 않고, 그림이 정말 바뀐 등록만 걷는다.
+  it("does not evict a picture whose media merely arrives with its keys in another order (#5575)", () => {
+    const current = applyExpressionList(empty, FIXTURE_LIST).cache;
+    const reordered = (media: NonNullable<typeof party.media>) => JSON.parse(JSON.stringify({
+      thumb: Object.fromEntries(Object.entries(media.thumb).reverse()),
+      large: Object.fromEntries(Object.entries(media.large).reverse()),
+      small: Object.fromEntries(Object.entries(media.small).reverse()),
+    })) as NonNullable<typeof party.media>;
+    const reread = applyExpressionList(current, { ...FIXTURE_LIST, items: FIXTURE_LIST.items.map((item) => ({ ...item, media: reordered(item.media!) })) });
+    expect(reread.applied).toBe(true);
+    expect(reread.evictImageIds).toEqual([]);
+    expect(sameExpressionMedia(party.media, reordered(party.media!))).toBe(true);
+    // 정말로 바뀐 그림(sha · 크기 · 형식)은 그 등록만 걷는다.
+    const changed = { ...party, version: "4", media: { ...party.media!, large: { ...party.media!.large, sha256: "b".repeat(64) } } };
+    const update = applyExpressionList(current, { ...FIXTURE_HIDDEN_DELTA, items: [changed] });
+    expect(update.applied).toBe(true);
+    expect(update.evictImageIds).toEqual([party.id]);
+    for (const field of ["mime", "bytes", "width", "height", "frameCount", "durationMs"] as const) {
+      const other = { ...party.media!, thumb: { ...party.media!.thumb, [field]: field === "mime" ? "image/gif" : party.media!.thumb[field] as number + 1 } };
+      expect(sameExpressionMedia(party.media, other), field).toBe(false);
+    }
+    expect(sameExpressionMedia(null, null)).toBe(true);
+    expect(sameExpressionMedia(party.media, null)).toBe(false);
   });
   it("rejects another workspace, a delta gap, duplicate names/ids and renames", () => {
     const current = applyExpressionList(empty, FIXTURE_LIST).cache;

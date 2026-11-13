@@ -3,6 +3,9 @@ import type {MessageFormatElement} from '@formatjs/icu-messageformat-parser';
 import {parse, TYPE, pseudoCatalog} from './tooling/pseudo.mjs';
 import {compileCatalogs} from './tooling/generate.mjs';
 import {createMessageService} from './service';
+import {AST_TYPE, PSEUDO_LOCALE, pseudoCatalog as runtimePseudoCatalog} from './pseudo';
+import {supportedLocales} from './locale';
+import {catalog as english} from './generated/en-US';
 
 function structure(ast: MessageFormatElement[]): unknown {
   return ast.filter(node => node.type !== TYPE.literal).map(node => {
@@ -62,5 +65,31 @@ describe('development pseudo locale', () => {
       const ast = parse(source);
       expect(structure(pseudoCatalog({sample: ast}).sample)).toEqual(structure(ast));
     }
+  });
+});
+
+describe('pseudo locale runtime module (#5589)', () => {
+  it('pins the AST type numbers it reads without loading the parser', () => {
+    expect(AST_TYPE).toEqual({literal: TYPE.literal, select: TYPE.select, plural: TYPE.plural, tag: TYPE.tag});
+    expect(pseudoCatalog).toBe(runtimePseudoCatalog);
+  });
+
+  it('pads at word ends, so long messages keep their line-break opportunities', () => {
+    const source = 'Emoticons you have already seen are not downloaded again after a restart, so the pictures load at once';
+    const [, body] = runtimePseudoCatalog({sample: parse(source)}).sample as [unknown, {value: string}];
+    const words = body.value.split(' ');
+    expect(words).toHaveLength(source.split(' ').length);
+    expect(Math.max(...words.map(word => word.length))).toBeLessThan(16);
+    expect(words.filter(word => word.endsWith('~')).length).toBeGreaterThan(10);
+  });
+
+  it('marks every product message and is never one of the seven languages', () => {
+    const pseudo = runtimePseudoCatalog(english);
+    expect(Object.keys(pseudo)).toEqual(Object.keys(english));
+    const service = createMessageService({messageLocale: PSEUDO_LOCALE, catalog: pseudo});
+    const label = service.formatMessage('settings.profile.languageLabel');
+    expect(label).toMatch(/^\[Ľáñğúáğé~+\]$/);
+    expect([...label].length / 'Language'.length).toBeGreaterThanOrEqual(1.3);
+    expect((supportedLocales as readonly string[]).includes(PSEUDO_LOCALE)).toBe(false);
   });
 });

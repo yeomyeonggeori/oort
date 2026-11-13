@@ -41,7 +41,7 @@ const REGISTRY_REFRESH_LABEL = "등록 목록 다시 불러오기";
 
 const REGISTRY_TITLE = "등록된 호스트";
 const REGISTRY_DESCRIPTION =
-  "에이전트가 실제로 명령을 돌리는 자리예요. 데스크톱 앱은 설정의 「기기」에서 이 맥을 등록하고, 리눅스 서버의 workd 데몬은 스스로 등록해요. 온라인 여부는 서버가 정하고 30초마다 다시 읽어요. 호스트 키는 그 호스트를 떠나지 않아요.";
+  "에이전트가 실제로 명령을 돌리는 자리예요. 데스크탑 앱은 설정의 「기기」에서 이 맥을 등록하고, 리눅스 서버의 workd 데몬은 스스로 등록해요. 온라인 여부는 서버가 정하고 30초마다 다시 읽어요. 호스트 키는 그 호스트를 떠나지 않아요.";
 
 export function WorkHostSection({
   workspaceId,
@@ -199,7 +199,7 @@ function RegistryBlock({
             again. The copy names the app and the moment that creates the row. */}
         <EmptyInvite
           headline="등록된 호스트가 아직 없어요."
-          detail="oort 데스크톱 앱의 설정 「기기」에서 이 맥을 등록하면 여기에 나타나고, 리눅스 서버는 workd 데몬이 켜질 때 스스로 등록해요."
+          detail="oort 데스크탑 앱의 설정 「기기」에서 이 맥을 등록하면 여기에 나타나고, 리눅스 서버는 workd 데몬이 켜질 때 스스로 등록해요."
           actions={<RegistryRefreshButton hosts={hosts} offline={offline} />}
           testId="work-hosts-empty"
         />

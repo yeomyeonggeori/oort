@@ -419,10 +419,17 @@ export function ChatShell() {
   // failure is what makes the retry the comment already promised real: the next
   // run of this effect (a new message, a remount, a channel round trip) sends
   // it again.
+  //
+  // #5660 H1: only while someone is looking at this conversation (window in front and document visible — the same
+  // `documentForeground` judgment as the thread panel's read signal). The webview now stays alive behind the window, so a
+  // mention or DM arriving in the conversation left open would otherwise be marked read at once: no menu-bar dot, and the
+  // phone's unread cleared too. Coming back to the front runs this effect again and advances once then.
   const newestSeq = timeline.state.newestSeq;
+  const viewingChannel = useDocumentForeground(stressCount === 0 && channelId !== null);
   useEffect(() => {
     if (stressCount > 0 || newestSeq === null || channelId === null) return;
     if (readStates.isPending) return;
+    if (!viewingChannel) return;
     if (!openedWith || !uuidEq(openedWith.channelId, channelId)) return;
     const key = `${channelId}:${newestSeq}`;
     if (markedRef.current === key) return;
@@ -456,6 +463,7 @@ export function ChatShell() {
     invalidateReadStates,
     openedWith,
     readStates.isPending,
+    viewingChannel,
   ]);
 
   const [thread, setThread] = useState<Message | null>(null);
@@ -471,7 +479,8 @@ export function ChatShell() {
   );
   // 열린 스레드를 **보고 있는가**(패널이 떠 있고 창이 앞이다): 채널 목록의 그 루트 요약 줄은 남의 새 답글에도 안 읽은 수를 0으로
   // 읽는다. 패널이 읽음 신호를 보내는 조건(`ThreadPanel`)과 같은 창 앞 판정이다(#5032). 작업 패널이 덮으면 스레드 패널이 없다.
-  // 스레드가 열려 있을 때만 구독한다 — 열려 있지 않으면 이 컴포넌트는 창 앞뒤 전환에 다시 그려지지 않는다.
+  // 스레드가 열려 있을 때만 구독한다. 이 컴포넌트는 대화가 열려 있는 동안 위의 읽음 판정(`viewingChannel`, #5660)으로 이미 창 앞뒤
+  // 전환마다 한 번 다시 그려진다.
   const windowForeground = useDocumentForeground(thread !== null);
 
   // ── 걸어 둔 인용 (ADR-0148) ────────────────────────────────────────────────
@@ -1135,6 +1144,7 @@ export function ChatShell() {
     const members =
       stressCount === 0 && channel && channel.kind !== "dm" ? (
         <ChannelMemberPanel
+          channelId={channel.id}
           channelName={channel.name ?? label}
           members={channelMembers}
           status={channelMemberListStatus}
@@ -1566,6 +1576,8 @@ export function ChatShell() {
               unreadCount={timelineUnread.unreadCount}
               recoveryMarkers={timeline.recoveryMarkers}
               pending={stressCount > 0 ? undefined : timeline.pending}
+              echoPins={stressCount > 0 ? undefined : timeline.echoPins}
+              serverOffsetMs={timeline.serverOffsetMs}
               // B11 — the stress fixture renders synthetic rows with no server
               // row behind them, so the actions are withheld there rather than
               // offered and then failing on every click.
@@ -1585,6 +1597,8 @@ export function ChatShell() {
                     }
               }
               onStartReached={stressCount > 0 ? undefined : timeline.loadOlder}
+              olderFailed={stressCount > 0 ? false : timeline.olderFailed}
+              onRetryOlder={timeline.retryOlder}
               onRetry={timeline.reload}
               onOpenThread={(message) => {
                 setWorkOpen(false);

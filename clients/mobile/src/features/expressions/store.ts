@@ -73,13 +73,37 @@ function httpErrorOf(response: {status: number; json?: unknown}) {
   );
 }
 
-/** 처음 읽는 동안(loading)만 마지막으로 읽은 목록으로 그린다 — 끊김·오류·세션 끝은 닫힌 채로 둔다. 상태 이름은 표의 키다(직접 문구 장부를 늘리지 않는다). */
+/**
+ * 확인된 목록이 없는 동안(읽는 중·오프라인·목록 읽기 오류) 칸을 마지막으로 읽은 목록으로 세운다 — **칸만**이다(#5585). 그림 파일은 목록이 확인된 뒤(`ready`)에만
+ * 받으므로(`image()`), 오프라인·오류 동안 아는 이모티콘은 같은 크기의 정지 자리표시다(ADR-0218 D3 「offline에서는 문자열/정지 자리표시만」). 앞 판은 오프라인·오류에서
+ * 보관함을 비워 모든 이모티콘이 `:이름:` 글자가 됐다(대화 높이가 바뀌었다). 세션 끝과 목록 읽기 거절(401·403·404)은 마지막 목록을 버리므로 닫힌 채다(글자).
+ * 상태 이름은 표의 키다(직접 문구 장부를 늘리지 않는다).
+ */
 const SHELF_FROM_LAST: Record<ExpressionSnapshot['state'], boolean> = {
   loading: true,
   ready: false,
-  error: false,
-  offline: false,
+  error: true,
+  offline: true,
 };
+/** 그림을 지금 못 준 까닭(#5585). 화면은 `closed`(저장소가 그림을 내주지 않는 상태)와 `transient`(지나가는 실패)에 같은 크기 칸으로 기다리고, `broken` 에만 글자로 내린다. */
+export type ExpressionImageMiss = 'closed' | 'transient' | 'broken';
+/** 까닭 이름은 표의 키에서 꺼낸다(직접 문구 장부를 늘리지 않는다). 타입이 키의 존재를 지킨다. */
+const MISS_TABLE: Record<ExpressionImageMiss, 0> = {closed: 0, transient: 0, broken: 0};
+export const IMAGE_MISS = Object.fromEntries(
+  Object.keys(MISS_TABLE).map(key => [key, key]),
+) as {[P in ExpressionImageMiss]: P};
+/** 그림 하나를 물은 답: 그릴 파일 주소(`uri`), 못 주면 `null` 과 그 까닭(`miss`). */
+export interface ExpressionImageLoad {
+  uri: string | null;
+  miss: ExpressionImageMiss | null;
+}
+const CLOSED: ExpressionImageLoad = {uri: null, miss: IMAGE_MISS.closed};
+const TRANSIENT: ExpressionImageLoad = {uri: null, miss: IMAGE_MISS.transient};
+const BROKEN: ExpressionImageLoad = {uri: null, miss: IMAGE_MISS.broken};
+const gotImage = (uri: string): ExpressionImageLoad => ({uri, miss: null});
+/** 다시 받으면 될 수 있는 답(웹 `transientImageFailure` 와 같은 줄): 시간 초과·너무 많음·서버가 잠시 못 답함. 404(숨김·틀린 sha)·권한은 다시 받아도 같다. */
+const passingStatus = (status: number) =>
+  status === 408 || status === 429 || status >= 500;
 /** 목록 응답의 계약 이름과 「쓸 수 있는 등록」 판정 — 아래 여러 곳이 같은 낱말을 쓴다. */
 const LIST_CONTRACT = 'List';
 const isActive = (item: Expression) => item.status === 'active';
@@ -154,7 +178,8 @@ export interface ExpressionSnapshot {
    * 대화 줄(본문 토큰·반응 칩)이 **그리는** 표현 목록. `items` 는 서버가 확인한 목록(고르개·보내기가 쓴다)이고, 이것은 그리기 전용이다:
    *   · 읽은 목록이 있을 때(`ready`) = `items`
    *   · 처음 읽는 중(`loading`) = 마지막으로 읽은 목록(기기에 남긴 것 포함) — 그림 칸이 첫 프레임부터 선다. 그림 파일은 목록이 확인된 뒤에야 받는다.
-   *   · 끊김·오류(`offline`·`error`)·세션 끝 = 비어 있다(닫힌 채로 — 숨김·삭제를 확인할 수 없는 동안 낡은 목록으로 그리지 않는다).
+   *   · 오프라인·목록 읽기 오류(`offline`·`error`) = 마지막으로 읽은 목록 — **칸만** 선다(#5585). 숨김·삭제를 확인할 수 없는 동안이라 그림 파일은 내주지 않는다(같은 크기의 정지 자리표시).
+   *   · 세션 끝·목록 읽기 거절(401·403·404) = 비어 있다(닫힌 채로).
    */
   shelf: readonly Expression[];
   state: 'loading' | 'ready' | 'error' | 'offline';
@@ -258,7 +283,7 @@ export function createPhoneExpressionStore(
   const receipts = new Set<string>();
   const listeners = new Set<() => void>();
   const images = new Map<string, Held>();
-  const pending = new Map<string, Promise<string | null>>();
+  const pending = new Map<string, Promise<ExpressionImageLoad>>();
   const root = `/v1/workspaces/${encodeURIComponent(workspaceId)}`;
   const base = `${root}/expressions`;
   // 등록 전 미리보기 파일. 목록 그림(`images`)과 따로 둔다: 변경 알림이 목록 그림을 걷어도 사람이 보고 있는
@@ -276,6 +301,13 @@ export function createPhoneExpressionStore(
   let reconnectConfirmed = 0;
   /** 이 저장소의 첫 `connected` 를 이미 봤는가: 첫 연결은 재연결이 아니다(`reconnected`). */
   let reconnectedOnce = false;
+  /**
+   * 실시간 소켓만 끊겨 있다(`socketLost()` 뒤, 다음 `reconnected()` 전 — #5585). 이 동안은 **어떤 목록 읽기도 디스크 읽기 문을 내리지 않는다**: 끊긴 동안의
+   * 30초 주기 읽기·고르는 순간의 확인 읽기·세트 승인·`mutate` 의 다시 읽기·앱이 앞으로 올 때의 읽기는 숨긴 그림을 메모리에서 걷을 뿐이다(`evictImageIds`).
+   * 문은 다시 이어진 뒤(`connected` → `reconnected()` → `refresh(true)`)의 전체 읽기만 내린다 — 알림을 못 받는 동안 새로 서는 칸은 디스크가 아니라
+   * 네트워크로 간다(숨긴 것은 서버가 404 로 막는다). ADR-0218 §17.
+   */
+  let socketDown = false;
   /** 디스크 쓰기가 한 번 실패하면 이 세션은 쓰기를 쉰다(재시도 폭주 방지, M2.7). */
   let writesPaused = false;
   let writesSinceTrim = 0;
@@ -344,7 +376,7 @@ export function createPhoneExpressionStore(
         if (!oldest.done) confirmedNotices.delete(oldest.value);
       }
     }
-    if (list.reset && mark.reconnect > reconnectConfirmed)
+    if (list.reset && mark.reconnect > reconnectConfirmed && !socketDown)
       reconnectConfirmed = mark.reconnect;
   };
   /**
@@ -611,6 +643,11 @@ export function createPhoneExpressionStore(
         evict();
         cache = emptyExpressionCache(workspaceId, memberId);
         changePending = false;
+        // 거절은 지나가는 오류가 아니다(강제 퇴장·멤버 제거·로그인 끝): 마지막 목록도 버려 칸 없이 닫는다(글자, #5585 앞 판 그대로). 그 밖의 실패는 칸을 남긴다.
+        if (refused) {
+          lastKnown = emptyItems;
+          shelfVersion = null;
+        }
         publish('error');
         // 목록 읽기가 401·403·404 로 끝났다(강제 퇴장·멤버 제거·로그인 끝): 그 보관 칸을 지운다(M2.5). 읽기 실패 자체는 청소를 돌리지 않고 문만 닫아 둔다(`error` 는 `ready` 가 아니다).
         if (disk !== null && refused) trackDisk(disk.compartment.destroy());
@@ -654,6 +691,97 @@ export function createPhoneExpressionStore(
         publish();
         void refresh();
     }
+  };
+  /**
+   * 한 표현의 그림 파일과, 못 줄 때 그 까닭(#5585). `loop` 는 반응 칩만 켠다(#5504, owner 「계속 움직임」): 움직이는 그림의 반복 횟수(서버는 4번)만 무한으로 바꾼
+   * **따로 쓴 파일**을 준다 - 서버가 준 그림·해시는 그대로이고, 같은 그림의 모든 반응 칩이 이 파일 하나를 나눠 쓴다(받기도 쓰기도 한 번). 메시지 속 그림은 `loop` 없이
+   * 서버 그대로의 파일이라 4번 규칙을 지킨다.
+   *
+   * 까닭(`miss`): `closed` = 저장소가 지금 그림을 내주지 않는다(오프라인·목록이 확인되기 전·알림 뒤 목록이 적용되기 전·세션 끝) — 상태가 바뀌면 화면이 다시 묻는다.
+   * `transient` = 지나가는 실패(받는 도중 걷힘·응답 없음·시간 초과·408·429·5xx) — 다시 받으면 될 수 있다. `broken` = 확인된 목록에 없거나 정말로 깨진 그림(404 등·
+   * 바이트가 맞지 않음) — 다시 받아도 같다. 화면은 `broken` 에만 글자로 내린다(웹 #5575 와 같은 규칙).
+   */
+  const loadImage = async (
+    item: Pick<Expression, 'id' | 'name'>,
+    variant: ExpressionVariant,
+    loop = false,
+  ): Promise<ExpressionImageLoad> => {
+    const current = cache.items.find(
+      entry =>
+        entry.id === item.id && entry.name === item.name && isActive(entry),
+    );
+    // 알림 뒤 목록이 아직 적용되지 않았으면(`changePending`) 두었던 파일도 내주지 않는다 — 어느 등록이 내려갔는지 모르는 동안이다.
+    if (disposed || !online || changePending || !isReady()) return CLOSED;
+    // 확인된 목록에 없다(숨김·삭제·목록 밖).
+    if (!current?.media) return BROKEN;
+    const media = current.media[variant];
+    const forever = loop && media.mime === 'image/gif';
+    const key = `${item.id}/${variant}/${media.sha256}${forever ? '/loop' : ''}`;
+    const kept = images.get(key);
+    if (kept !== undefined) return gotImage(kept.uri);
+    if (pending.has(key)) return pending.get(key)!;
+    const started = epoch;
+    const idStarted = idEpochs.get(item.id) ?? 0;
+    // 받는 도중 전체 걷기·이 id 의 걷기·세션 끝이 있었는가.
+    const stale = () =>
+      disposed ||
+      started !== epoch ||
+      (idEpochs.get(item.id) ?? 0) !== idStarted;
+    const task = (async (): Promise<ExpressionImageLoad> => {
+      try {
+        const path = `${base}/${encodeURIComponent(
+          item.id,
+        )}/image?size=${variant}&v=${media.sha256}`;
+        // 디스크 → 네트워크 순서다. 디스크는 읽기 문(M2.4-1)을 모두 지났을 때만 본다: 문이 닫혀 있으면 그림은 네트워크로 간다(숨긴 것은 서버가 404 로 막는다).
+        const target = diskTargetOf(path);
+        if (target !== null && diskDoorOpen()) {
+          const found = await readFromDisk(target, forever, stale);
+          if (stale()) return TRANSIENT;
+          if (found !== null) {
+            images.set(key, found);
+            return gotImage(found.uri);
+          }
+          if (!disk!.sessionUnchanged()) return CLOSED;
+        }
+        const response = await transport.request({method: 'GET', path});
+        // 그 사이 전체 걷기·이 id 의 걷기가 있었으면 받은 것을 파일로 쓰지 않는다.
+        if (stale()) return TRANSIENT;
+        if (response.status !== 200)
+          return passingStatus(response.status) ? TRANSIENT : BROKEN;
+        const bytes =
+          response.bytes ??
+          (response.bodyBase64 === undefined
+            ? null
+            : Uint8Array.from(atob(response.bodyBase64), char =>
+                char.charCodeAt(0),
+              ));
+        if (!bytes || bytes.length > media.bytes || bytes.length === 0)
+          return BROKEN;
+        // 보관 칸에 쓴다(쓰기 문, 길이·형식 대조). 못 썼으면(문이 닫힘·쓰기 실패·길이 어긋남) 받은 바이트를 세션의 임시 파일로 그대로 그린다.
+        const stored =
+          target === null ? null : await rememberOnDisk(target, bytes, stale);
+        // 쓰는 사이 세션이 끝났다면(로그아웃) 그리지도 않는다.
+        if (stale()) return TRANSIENT;
+        if (disk !== null && !disk.sessionUnchanged()) return CLOSED;
+        if (stored !== null && target !== null && !forever) {
+          images.set(key, {uri: stored, owned: false, diskKey: target.key});
+          return gotImage(stored);
+        }
+        const uri = files.write(
+          `${++serial}.${media.mime === 'image/gif' ? 'gif' : 'png'}`,
+          forever ? loopForever(bytes) : bytes,
+        );
+        images.set(key, {uri, owned: true, diskKey: null});
+        return gotImage(uri);
+      } catch {
+        // 응답 없음·시간 초과·임시 파일을 못 씀: 다시 받으면 될 수 있다.
+        return TRANSIENT;
+      } finally {
+        if (started === epoch) pending.delete(key);
+      }
+    })();
+    pending.set(key, task);
+    return task;
   };
   return {
     start() {
@@ -706,11 +834,24 @@ export function createPhoneExpressionStore(
      * 그대로 한다. 앱을 다시 켤 때마다 첫 연결이 문을 닫으면 그 순간(첫 화면이 서는 때) 새로 서는 칸이 모두 네트워크로 가서 이득이 사라진다.
      */
     reconnected() {
+      // 소켓이 다시 이어졌다: 이 뒤의 전체 읽기가 문을 내릴 수 있다(첫 연결 예외·칸 없음보다 먼저 푼다).
+      socketDown = false;
       if (disk === null) return;
       if (!reconnectedOnce) {
         reconnectedOnce = true;
         return;
       }
+      noteReconnect();
+    },
+    /**
+     * 실시간 소켓만 끊겼다(표시 유예가 지나 `disconnected`, 보내기는 된다 — #5585). 오프라인이 아니다: 그린 그림·받은 파일은 그대로 둔다(웹과 같다).
+     * 다만 끊긴 동안의 알림은 오지 않으므로 디스크 읽기 문을 올리고, **다시 이어질 때까지(`reconnected()`) 어떤 목록 읽기도 그 문을 내리지 않는다**(`socketDown`):
+     * 새로 서는 칸은 디스크에서 읽지 않고 네트워크로 간다(숨긴 것은 서버가 404 로 막는다). 앞 판은 이 자리에서 `setOnline(false)` 로 문을 닫았다(ADR §14 B-2 보충의
+     * 「끊김 한 번에 10초 이하」) — 디스크에 대해서는 같다. 메모리의 그림은 걷지 않고, 끊긴 동안의 30초 주기 전체 읽기(`ExpressionProvider`)가 숨긴 것을 걷는다
+     * (웹과 같은 30초, ADR-0218 §17).
+     */
+    socketLost() {
+      socketDown = true;
       noteReconnect();
     },
     /** 새로 구독했다(되쏘기 포함): 앞서 본 version 은 그 틈 뒤를 말해 주지 않는다. */
@@ -729,93 +870,15 @@ export function createPhoneExpressionStore(
       publish(value ? 'loading' : 'offline');
       if (value) void refresh(true);
     },
-    /**
-     * 한 표현의 그림 파일. `loop` 는 반응 칩만 켠다(#5504, owner 「계속 움직임」): 움직이는 그림의 반복 횟수(서버는 4번)만 무한으로 바꾼 **따로 쓴 파일**을 준다 -
-     * 서버가 준 그림·해시는 그대로이고, 같은 그림의 모든 반응 칩이 이 파일 하나를 나눠 쓴다(받기도 쓰기도 한 번). 메시지 속 그림은 `loop` 없이 서버 그대로의 파일이라 4번 규칙을 지킨다.
-     */
+    /** 한 표현의 그림 파일(못 주면 `null`). 까닭이 필요한 화면은 `load` 를 쓴다(#5585). */
     async image(
       item: Pick<Expression, 'id' | 'name'>,
       variant: ExpressionVariant,
       loop = false,
     ): Promise<string | null> {
-      const current = cache.items.find(
-        entry =>
-          entry.id === item.id && entry.name === item.name && isActive(entry),
-      );
-      // 알림 뒤 목록이 아직 적용되지 않았으면(`changePending`) 두었던 파일도 내주지 않는다 — 어느 등록이 내려갔는지 모르는 동안이다.
-      if (
-        disposed ||
-        !online ||
-        changePending ||
-        !isReady() ||
-        !current?.media
-      )
-        return null;
-      const media = current.media[variant];
-      const forever = loop && media.mime === 'image/gif';
-      const key = `${item.id}/${variant}/${media.sha256}${forever ? '/loop' : ''}`;
-      const kept = images.get(key);
-      if (kept !== undefined) return kept.uri;
-      if (pending.has(key)) return pending.get(key)!;
-      const started = epoch;
-      const idStarted = idEpochs.get(item.id) ?? 0;
-      // 받는 도중 전체 걷기·이 id 의 걷기·세션 끝이 있었는가.
-      const stale = () =>
-        disposed ||
-        started !== epoch ||
-        (idEpochs.get(item.id) ?? 0) !== idStarted;
-      const task = (async () => {
-        try {
-          const path = `${base}/${encodeURIComponent(
-            item.id,
-          )}/image?size=${variant}&v=${media.sha256}`;
-          // 디스크 → 네트워크 순서다. 디스크는 읽기 문(M2.4-1)을 모두 지났을 때만 본다: 문이 닫혀 있으면 그림은 네트워크로 간다(숨긴 것은 서버가 404 로 막는다).
-          const target = diskTargetOf(path);
-          if (target !== null && diskDoorOpen()) {
-            const found = await readFromDisk(target, forever, stale);
-            if (stale()) return null;
-            if (found !== null) {
-              images.set(key, found);
-              return found.uri;
-            }
-            if (!disk!.sessionUnchanged()) return null;
-          }
-          const response = await transport.request({method: 'GET', path});
-          // 그 사이 전체 걷기·이 id 의 걷기가 있었으면 받은 것을 파일로 쓰지 않는다.
-          if (stale() || response.status !== 200) return null;
-          const bytes =
-            response.bytes ??
-            (response.bodyBase64 === undefined
-              ? null
-              : Uint8Array.from(atob(response.bodyBase64), char =>
-                  char.charCodeAt(0),
-                ));
-          if (!bytes || bytes.length > media.bytes || bytes.length === 0)
-            return null;
-          // 보관 칸에 쓴다(쓰기 문, 길이·형식 대조). 못 썼으면(문이 닫힘·쓰기 실패·길이 어긋남) 받은 바이트를 세션의 임시 파일로 그대로 그린다.
-          const stored =
-            target === null ? null : await rememberOnDisk(target, bytes, stale);
-          // 쓰는 사이 세션이 끝났다면(로그아웃) 그리지도 않는다.
-          if (stale() || (disk !== null && !disk.sessionUnchanged())) return null;
-          if (stored !== null && target !== null && !forever) {
-            images.set(key, {uri: stored, owned: false, diskKey: target.key});
-            return stored;
-          }
-          const uri = files.write(
-            `${++serial}.${media.mime === 'image/gif' ? 'gif' : 'png'}`,
-            forever ? loopForever(bytes) : bytes,
-          );
-          images.set(key, {uri, owned: true, diskKey: null});
-          return uri;
-        } catch {
-          return null;
-        } finally {
-          if (started === epoch) pending.delete(key);
-        }
-      })();
-      pending.set(key, task);
-      return task;
+      return (await loadImage(item, variant, loop)).uri;
     },
+    load: loadImage,
     /** `/v1/workspaces/{id}` — 가져오기가 `…/expressions/import`·`…/expression-drafts/{id}/file` 같은 길을 이어 붙인다. */
     root,
     workspaceId,

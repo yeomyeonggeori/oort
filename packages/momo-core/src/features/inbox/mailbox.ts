@@ -5,6 +5,12 @@ import { attachmentPreviewLine } from "../attachments/model";
 import type { FilterTabsSpec } from "../common/filterTabs";
 import type { InboxWireKind, ServerInboxItem } from "./serverInbox";
 import {
+  mailboxSource,
+  sourceSaysKind,
+  type MailboxPlace,
+  type MailboxSource,
+} from "./source";
+import {
   actorToken,
   relativeLabel,
   type ActorNames,
@@ -110,8 +116,13 @@ export interface MailboxEntry {
   channelId: string;
   /** 사람이 읽는 채널 이름 (DM은 상대 이름). */
   channelLabel: string;
-  /** 「DM · 서연」 / 「멘션 · #workbench」 / 「스레드 · #workbench」 / 「처리할 일」. */
+  /**
+   * 오른쪽 패널 머리의 종류와 장소: 「DM · 서연」 / 「멘션 · #workbench」 / 「스레드 · #workbench」 /
+   * 「처리할 일 · 승인 요청」. 목록 줄의 둘째 줄은 이것이 아니라 `source`다(#5696).
+   */
   typeLabel: string;
+  /** 목록 줄의 출처 한 줄 판정(#5696). 문장은 `mailboxSourceLine`이 사전 키로 짓는다. */
+  source: MailboxSource;
   /** 아바타와 한 줄의 주어. 에이전트면 `@handle`. */
   actor: string;
   actorMemberId?: string;
@@ -186,6 +197,8 @@ function isConversational(message: Message): boolean {
 export function dmEntry(input: {
   channelId: string;
   channelLabel: string;
+  /** 출처 줄의 장소(`mailboxPlace`). */
+  place: MailboxPlace;
   readState: ReadState | undefined;
   messages: readonly Message[];
   selfMemberId: string;
@@ -206,6 +219,8 @@ export function dmEntry(input: {
     channelId: input.channelId,
     channelLabel: input.channelLabel,
     typeLabel: `DM · ${input.channelLabel}`,
+    // 대표는 대화형(루트) 메시지뿐이라 스레드 안의 글이 아니다.
+    source: mailboxSource("dm", input.place, false),
     actor: mine ? "나" : actorToken(actor),
     actorMemberId: latest.authorMemberId,
     actorIsAgent: !mine && actor.isAgent,
@@ -227,7 +242,9 @@ export function mentionEntry(
   message: Message,
   actor: ActorNames,
   channelLabel: string,
-  nowMs: number
+  nowMs: number,
+  /** 출처 줄의 장소(`mailboxPlace`). */
+  place: MailboxPlace
 ): MailboxEntry {
   return {
     key: `mention:${message.id}`,
@@ -235,6 +252,7 @@ export function mentionEntry(
     channelId: message.channelId,
     channelLabel,
     typeLabel: `멘션 · ${channelLabel}`,
+    source: mailboxSource("mention", place, message.rootId !== undefined),
     actor: actorToken(actor),
     actorMemberId: message.authorMemberId,
     actorIsAgent: actor.isAgent,
@@ -259,6 +277,8 @@ export function mentionEntry(
 export function threadEntry(input: {
   root: Message;
   channelLabel: string;
+  /** 출처 줄의 장소(`mailboxPlace`). */
+  place: MailboxPlace;
   readState: ReadState | undefined;
   lastReply: Message | undefined;
   selfMemberId: string;
@@ -278,6 +298,7 @@ export function threadEntry(input: {
     channelId: input.root.channelId,
     channelLabel: input.channelLabel,
     typeLabel: `스레드 · ${input.channelLabel}`,
+    source: mailboxSource("thread", input.place, true),
     actor,
     ...(reply ? { actorMemberId: reply.authorMemberId } : {}),
     actorIsAgent: replyAuthor?.isAgent ?? false,
@@ -305,6 +326,7 @@ export function taskEntry(item: FeedItem, nowMs: number): MailboxEntry | null {
     channelId: item.channelId,
     channelLabel: item.channelLabel,
     typeLabel: "처리할 일 · 승인 요청",
+    source: mailboxSource("task", { kind: "channel", name: null }, false),
     actor: item.actor,
     actorIsAgent: item.actorIsAgent,
     preview: item.predicate,
@@ -382,6 +404,8 @@ export function serverEntry(
   item: ServerInboxItem,
   input: {
     channelLabel: string;
+    /** 출처 줄의 장소(`mailboxPlace`, 서버 항목의 `channel`을 `wire`로 넘겨 짓는다). */
+    place: MailboxPlace;
     actor: ActorNames;
     nowMs: number;
     /** 이 항목의 채널에 대한 서버 읽음 위치(`read_state.last_read_seq`). 모르면 생략. */
@@ -398,6 +422,11 @@ export function serverEntry(
     channelId: item.channel.id,
     channelLabel: input.channelLabel,
     typeLabel: `${SERVER_TYPE_LABEL[kind]} · ${input.channelLabel}`,
+    source: mailboxSource(
+      kind,
+      input.place,
+      item.kind === "thread_reply" || item.rootId !== undefined
+    ),
     actor: actorToken(input.actor),
     actorMemberId: item.actorMemberId,
     actorIsAgent: input.actor.isAgent,
@@ -573,12 +602,21 @@ export function readTargetSeq(entry: MailboxEntry): number | null {
   return entry.seq === undefined ? null : entry.seq;
 }
 
-/** 스크린리더가 한 줄로 읽는 문장: (안 읽음일 때만 「안 읽음」) 종류 · 보낸 이 · 시각 · 미리보기. */
-export function entryAriaLabel(entry: MailboxEntry): string {
+/**
+ * 스크린리더가 한 줄로 읽는 문장: (안 읽음일 때만 「안 읽음」) 출처 · 보낸 이 · 시각 · 미리보기 (#5696).
+ *
+ * `sourceLine`은 화면이 둘째 줄에 그린 바로 그 문장(`mailboxSourceLine`)이다 — 보이는 출처와 읽히는 출처가 하나다.
+ * 출처 줄이 종류를 말하지 않으면(채널의 멘션·답글 「#채널」, DM 안의 스레드) 종류 낱말을 앞에 붙인다: 아바타가 있는
+ * 줄은 종류 그림도 없어서, 이 낱말이 아니면 낭독에서 종류가 사라진다.
+ */
+export function entryAriaLabel(entry: MailboxEntry, sourceLine: string): string {
   const unread = entry.unread
     ? entry.unreadCount > 1
       ? `안 읽음 ${entry.unreadCount}개, `
       : "안 읽음, "
     : "";
-  return `${unread}${entry.typeLabel}, ${entry.actor}, ${entry.timeLabel}, ${entry.preview}`;
+  const kind = sourceSaysKind(entry.kind, entry.source)
+    ? ""
+    : `${mailboxFilterLabel(entry.kind)}, `;
+  return `${unread}${kind}${sourceLine}, ${entry.actor}, ${entry.timeLabel}, ${entry.preview}`;
 }

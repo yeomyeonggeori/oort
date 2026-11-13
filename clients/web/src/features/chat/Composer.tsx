@@ -2,6 +2,7 @@ import { ComposerExpressionPreview } from "@/features/expressions/ComposerExpres
 import { ComposerExpressionSuggest, type ExpressionSuggestHandle } from "@/features/expressions/ComposerExpressionSuggest";
 import { useExpressions } from "@/features/expressions/context";
 import { useExpressionSuggest } from "@/features/expressions/useExpressionSuggest";
+import { isKeywordOnlyInput } from "@momo/core/features/expressions/suggest";
 import type { Expression } from "@momo/core/features/expressions/types";
 import { dmAdmissionCandidates, dmAdmissionHint } from "@momo/core/features/agents/dmAdmission";
 import {
@@ -20,6 +21,7 @@ import type {
   RosterMember,
 } from "@momo/core/lib/api";
 import { cn } from "@/design/lib/cn";
+import { applyKeyboardModality } from "@/design/focusModality";
 import { useSession } from "@/app/session";
 import { useIsMobileShell } from "@/app/shellNav";
 import type { Directory } from "@/features/workspace/useWorkspace";
@@ -55,7 +57,7 @@ import {
   keepPhoneDmHint,
 } from "@/features/chat/composerMeta";
 import { useTypingSend } from "@/features/chat/useTyping";
-import { useTypingThreshold, useTypists } from "@/features/chat/typingStore";
+import { useTypists } from "@/features/chat/typingStore";
 import {
   COMPOSER_SEED_EVENT,
   clearDraft,
@@ -412,10 +414,12 @@ export function Composer({
   // 글을 치다 0.3초 멈추면 입력창 위에 맞는 이모티콘·GIF 추천이 뜬다(#5476). 맞추기는 기기 안에서만 한다(네트워크 없음). 이미 미리 본 그림이 있거나(큰 그림은 하나),
   // 오프라인이거나(그림을 받을 수 없다), 멘션·채널·`:` 후보나 `/` 명령을 치는 중이면(`autocomplete.kind`) 줄이 서지 않는다.
   const suggestRef = useRef<ExpressionSuggestHandle>(null);
+  // 줄은 **방금 친 낱말**(캐럿 바로 앞 낱말)이 키워드일 때만 선다(#5602 M1): 캐럿은 0.3초 쉼이 끝나는 순간 입력칸에서 읽는다.
   const suggest = useExpressionSuggest({
     workspaceId,
     channelId,
     text,
+    readCaret: () => inputRef.current?.selectionStart ?? null,
     enabled: !offline && pendingExpression === null && autocomplete.kind === null && parseSlashCommand(text) === null,
   });
   // 키 배치 설명이 아직 필요한가 (감사 M-7). 이 기기에서 ↵로 한 번 보내면 꺼진다.
@@ -456,23 +460,20 @@ export function Composer({
     // 명부에 없는 id도 떨군다 - 이름 없는 「누군가 작성 중」은 정보가 0이다.
     isEligible: (memberId) => memberFor(directory, memberId)?.kind === "human",
   });
-  const typingThreshold = useTypingThreshold();
   // 에이전트가 있는 채널은 입력창 위에 레일 칸을 **미리** 잡는다(#4619): 줄이 서고 사라져도 타임라인이
   // 밀리지 않으려면 칸이 먼저 있어야 한다. 칸이 폼의 윗 여백을 대신하므로 폼에 `data-rail`을 달아 `pt-0`이 되게 한다.
   const railReserved = isRailReserved({ dmAgent, directory, channelId });
 
   /**
-   * 작성 중이 아닐 때 공유 액션 슬롯을 힌트가 차지하는가 (U-8 · #1749).
+   * 공유 액션 슬롯을 힌트가 차지하는가 (U-8 · #1749).
    *
-   * 폰에서 키 힌트는 원래 보이지 않는다. 빈 슬롯과 `TypingLine`은 모두 이미 높이가
-   * 정해진 액션 행 안에서 바뀌므로 사람의 타이핑이 시작돼도 컴포저가 움직이지 않는다.
-   * DM 힌트는 폭과 무관한 방의 성질이므로 기존처럼 폰에도 남는다.
+   * 폰에서 키 힌트는 원래 보이지 않는다. 남의 「작성 중」은 이 슬롯이 아니라 카드 아래 늘 잡아 둔 줄(`TypingLine`)에
+   * 서므로(#5567) 누가 치기 시작해도 힌트와 컴포저가 그대로다. DM 힌트는 폭과 무관한 방의 성질이므로 기존처럼 폰에도 남는다.
    */
   const deliveryHint = useDmDeliveryHint({ workspaceId, channelId, directory, dmAgent });
   const dmHint = dmAdmissionHint(text, channel, directory, session.member.id) ?? deliveryHint;
   const pendingLink = composerFormatHasPendingLink(text);
   const metaMode = composerMetaMode({
-    typistCount: typists.length,
     hasDmHint: dmHint !== null,
     keysHintNeeded,
     isMobile,
@@ -773,20 +774,25 @@ export function Composer({
     inputRef.current?.focus();
   }
 
-  /** 추천 줄의 그림을 눌렀다: 입력창 위 미리 보기에 올린다. **보내지 않는다** - 글과 같이 가는 것은 보내기 한 번이다. 눌린 그림이 사라지므로 포커스는 입력칸이 받는다. */
+  /**
+   * 추천 줄의 그림을 눌렀다: 입력창 위 미리 보기에 올린다. **보내지 않는다** - 보내는 것은 보내기 한 번이다. 눌린 그림이 사라지므로 포커스는 입력칸이 받는다.
+   * 글이 그 낱말뿐이면(「ㅋㅋㅋㅋ!!」, 코어 `isKeywordOnlyInput`) 글을 지워 그림으로 **바꾼다**: 보내면 글 없이 그림만 간다(#5588). 낱말이 문구 안에 있으면 글은 그대로 두고
+   * 그림을 **더한다**(보내기 한 번이 그림 → 글). 지우는 길은 멘션을 고를 때와 같은 `replaceValue`(글·캐럿·초안을 함께 비운다)다.
+   */
   function pickSuggestion(item: Expression) {
+    if (isKeywordOnlyInput(text, item)) autocomplete.replaceValue("", 0);
     setPendingExpression(item);
     suggest.close();
     inputRef.current?.focus();
   }
 
-  /** 추천 줄의 ✕: 이 대화에서 이 낱말 추천을 끈다. */
+  /** 추천 줄의 ✕: 줄을 띄운 낱말 하나를 이 대화에서 끈다(#5602 M2). */
   function muteSuggestion() {
     suggest.mute();
     inputRef.current?.focus();
   }
 
-  /** 추천 줄의 Esc: 줄만 닫는다(쓴 글도 끈 낱말도 그대로). */
+  /** 추천 줄의 Esc: 줄을 닫고 다음 키워드까지 닫아 둔다(#5602 M1). 쓴 글도 끈 낱말도 그대로다. */
   function dismissSuggestion() {
     suggest.close();
     inputRef.current?.focus();
@@ -863,6 +869,10 @@ export function Composer({
         return;
       case "suggest-focus":
         event.preventDefault();
+        // ↑ 는 글 입력 칸 안의 키라 모달리티 표지(`focusModality.ts`)가 키보드로 올리지 않는다: 마우스로 입력칸에 들어온 사람은 표지가 「포인터」인 채로
+        // 줄에 들어가고, 포인터 표지는 첫 칸의 초점 링을 걷는다(#5602 M4, 실측 `outline: none`). 여기서는 ↑ 가 캐럿이 아니라 초점을 옮긴 키보드 탐색이다 —
+        // 라이트박스(#5275)처럼 옮기기 전에 표지를 올린다.
+        applyKeyboardModality(document);
         suggestRef.current?.focus();
         return;
       case "preview-dismiss":
@@ -904,9 +914,10 @@ export function Composer({
       onDrop={drop.onDrop}
       data-dragging={drop.dragging ? "" : undefined}
       className={cn(
-        // 떠 있는 컴포저 (DS2-6, 시안 A `.a-dcomp`): 넓은 창에서는 판 아래 좌우 24 ·
-        // 아래 18 인셋 위에 흰 카드(`composer-card`)로 뜬다. 폰에서는 예전처럼
-        // 위 경계선 하나로 셸의 마지막 줄이다(`composer-dock`).
+        // 떠 있는 컴포저 (DS2-6, 시안 A `.a-dcomp`): 넓은 창에서는 판 아래 좌우 24 인셋에
+        // 흰 카드(`composer-card`)로 뜬다. 카드 아래는 시안의 여백 18이 아니라 늘 서 있는
+        // 「작성 중」 줄(`typing-line`, 글 한 줄 + 위아래 숨 8 = 34)이다(#5567). 폰에서는
+        // 예전처럼 위 경계선 하나로 셸의 마지막 줄이고, 그림자가 없어 그 칸은 숨 4로 26이다(#5582, `composer-dock`).
         "composer-dock safe-area-bottom shrink-0",
         // 강조는 배경 한 겹이다. 점선 테두리와 가운데 정렬된 큼직한 안내는
         // 랜딩 페이지의 문법이고, 이 자리에서 필요한 것은 "여기 놓으면 된다"를
@@ -979,17 +990,9 @@ export function Composer({
         )
       )}
 
-      {/* 상태 행은 그릇 위에 선다. 힌트·작성 중 교대 슬롯은 액션 행 안으로 내려가
-          별도 26px 예약 띠를 만들지 않는다. 마지막 컨트롤 뒤에는 p-3+safe-area만 둔다. */}
-      {offline && (
-        <p
-          role="status"
-          className="px-6 pb-2 text-meta text-warn break-keep"
-          data-testid="composer-offline"
-        >
-          {blockedLine}
-        </p>
-      )}
+      {/* 상태 행은 그릇 위에 선다. 힌트 슬롯은 액션 행 안에 있고, 남의 「작성 중」은 카드 아래 늘 잡아 둔 한 줄이다(#5567).
+          그 줄이 카드 아래 여백을 맡으므로 폼의 아래 여백은 0이고 그 뒤에는 safe-area만 둔다. 보내기가 막힌 이유(기기 오프라인 ·
+          서버에 닿지 못함)도 그 줄에 선다(#5575 검수 H1): 여기 따로 서면 연결이 흔들릴 때마다 대화 목록의 바닥이 26~44px 움직였다. */}
 
       {persistentPhoneDmHint && (
         <ComposerHint
@@ -1042,7 +1045,7 @@ export function Composer({
       )}
       <form
         onSubmit={onSubmit}
-        className="relative p-3 data-rail:pt-0"
+        className="relative p-3 pb-0 data-rail:pt-0"
         // 레일 칸이 윗 여백을 대신한다(칸 24 + 여백 12가 겹쳐 쌓이지 않는다).
         data-rail={railReserved ? "" : undefined}
       >
@@ -1093,7 +1096,7 @@ export function Composer({
           }
           meta={
             <>
-              {/* 예약 확정 줄(ADR-0182 ②, UI 명세 0.3): 힌트·작성 중 줄이 서는 **같은 고정 자리**를 3초 동안 대신 쓰고
+              {/* 예약 확정 줄(ADR-0182 ②, UI 명세 0.3): 힌트 줄이 서는 **같은 고정 자리**를 3초 동안 대신 쓰고
                   원래 줄로 돌아간다. 새 줄을 만들지 않으므로 입력창이 움직이지 않는다(#1749). 누를 것은 두지 않는다. 낭독은
                   늘 붙어 있는 안 보이는 `role="status"` 노드가 맡는다: 조건부로 처음 생기는 라이브 리전은 낭독이
                   보장되지 않는다. */}
@@ -1117,10 +1120,12 @@ export function Composer({
                   sharedRow
                 />
               ) : (
-                <TypingLine
-                  memberIds={metaMode === "typing" ? typists : []}
-                  threshold={typingThreshold}
-                  directory={directory}
+                // 빈 슬롯: 문장은 없고 도구와 보내기 사이의 가로폭만 있다. 높이는 단추가 지고 보조기술에서도 빠진다.
+                <p
+                  className="min-w-0 flex-1"
+                  aria-hidden="true"
+                  data-testid="composer-meta-empty"
+                  data-composer-meta-slot=""
                 />
               )}
             </>
@@ -1250,6 +1255,9 @@ export function Composer({
             className={COMPOSER_TEXTAREA_CLASS}
           />
         </ComposerCard>
+        {/* 남의 「작성 중」(#5567): 카드 바로 아래 늘 잡아 둔 한 줄이다(글 한 줄 + 위아래 숨 8). 아무도 안 칠 때도 같은 높이로
+            서므로 줄이 서고 져도 카드·입력창·대화 목록이 움직이지 않는다. 보내기가 막히면 같은 칸이 그 이유를 말한다(#5575). */}
+        <TypingLine memberIds={typists} directory={directory} blocked={offline ? blockedLine : null} />
       </form>
 
       <ComposerFormatTray

@@ -24,6 +24,7 @@
   "connection.load.threadTitle": "Couldn't load the thread",
   "connection.load.membersTitle": "Couldn't load the member list",
   "connection.load.newerTitle": "Couldn't load new messages",
+  "connection.load.olderTitle": "Couldn't load earlier messages",
   "connection.load.inboxTitle": "Couldn't load the inbox",
   "connection.load.inboxMoreTitle": "Couldn't load the next items. The ones you already have are still here",
   "connection.load.memberProfileTitle": "Couldn't load the member profile",

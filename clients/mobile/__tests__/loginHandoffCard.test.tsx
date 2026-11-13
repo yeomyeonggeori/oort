@@ -116,7 +116,7 @@ describe('폰은 그리되 결정하지 않는다', () => {
     // 문제를 구분하는 것이 정직 카피 2분법의 전부다.
     expect(MESSAGE_ROW_CODE).not.toContain(LOGIN_HANDOFF_DEPLOYMENT_COPY);
     expect(MESSAGE_ROW_CODE).toContain('LOGIN_HANDOFF_ELSEWHERE_COPY');
-    expect(LOGIN_HANDOFF_ELSEWHERE_COPY).toContain('데스크톱이나 웹에서');
+    expect(LOGIN_HANDOFF_ELSEWHERE_COPY).toContain('데스크탑이나 웹에서');
   });
 
   it('세 결과의 문장을 폰이 다시 쓰지 않는다', () => {

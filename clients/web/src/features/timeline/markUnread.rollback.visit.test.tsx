@@ -443,6 +443,8 @@ beforeEach(() => {
   timelineState.newestSeq = 10;
   timelineState.oldestSeq = 1;
   directoryState.directory = makeDirectory([member()]);
+  // 읽는 사람이 이 창을 보고 있다(#5660 H1: 열어 둔 채널의 읽음 위치는 창이 앞일 때만 오른다). jsdom 의 `hasFocus()`는 기본이 거짓이다.
+  vi.spyOn(document, "hasFocus").mockReturnValue(true);
   vi.stubGlobal(
     "IntersectionObserver",
     class {

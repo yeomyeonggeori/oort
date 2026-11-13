@@ -14,6 +14,9 @@ import { SERVER_UNREACHABLE_STREAK } from "./thresholds";
 //     증거이므로 세지 않고, 연속도 끊는다.
 //   - **서로 다른 요청** 3건이 연달아 닿지 못했고 그 뒤 응답이 없으면 선언한다. 한 요청이 세 번 재시도하는
 //     것은 한 건이다. 응답 한 건으로 풀린다. 앱이 스스로 보내는 확인 요청(`restProbe.ts`, #5407)은 풀기만 하고 실패는 쌓지 않는다.
+//   - **늦게 깬 마감**의 시간 초과(`lateMs`가 있는 결과, #5587)는 쌓지도 풀지도 않는다. 마감 타이머가 예정보다 10초 넘게 늦게
+//     돌았다는 것은 그동안 앱이 잠들어 있었다는 뜻이다(맥 잠자기, 창이 뒤에 있는 앱의 낮잠). 깨는 순간 타이머가 먼저 돌아
+//     요청이 깨어 있는 시간을 한 번도 받지 못하고 끝난다. 그 시간 초과는 서버가 아니라 이 기기의 잠을 잰 것이다.
 // 정상 운영에서도 503을 내는 길이 있어(허들 미구성 인스턴스의 `…/huddles/active`) 한 건으로는 판정하지
 // 않는다. 그런 503은 다른 요청의 성공이 곧바로 끊는다.
 //
@@ -42,6 +45,14 @@ export function isRestProbeOutcome(outcome: RestOutcome): boolean {
   return outcome.method === "GET" && outcome.target.endsWith(REST_PROBE_PATH);
 }
 
+/**
+ * 이 결과가 늦게 깬 마감에서 온 시간 초과인가(#5587). 앱이 잠든 동안 흐른 시간이 마감을 다 써 버린 것이라 서버에 대해 아무것도
+ * 말하지 않는다. `lib/http.ts`가 마감 타이머가 `LATE_WAKE_MS` 넘게 늦게 돌았을 때만 `lateMs`를 붙인다.
+ */
+export function isLateWakeOutcome(outcome: RestOutcome): boolean {
+  return outcome.kind === "network" && outcome.lateMs !== undefined;
+}
+
 /** 이 결과가 「서버에 닿지 못함」 한 건인가. */
 export function isUnreachableOutcome(outcome: RestOutcome): boolean {
   if (outcome.kind === "network") return true;
@@ -59,6 +70,9 @@ export function foldRestOutcome(state: RestSignal, outcome: RestOutcome): RestSi
   // 확인 요청의 실패는 쌓지 않는다(#5407): 확인은 이미 선 판정을 다시 묻는 것이지 새 증거가 아니다. 쌓으면 「알 수 없음」(실패 1~2건)이 확인 한 번에
   // 선언(3건)으로 올라 보내기를 막는다. 풀기만 한다 - 서버가 답한 확인(위 가지)은 어떤 응답이든 기억을 지운다.
   if (isRestProbeOutcome(outcome)) return state;
+  // 늦게 깬 마감의 시간 초과는 증거가 아니다(#5587): 쌓지 않고, 응답도 아니니 풀지도 않는다. 잠에서 깬 앱이 함께 끝내는 요청
+  // 서너 건이 서로 다른 요청 3건으로 세어져 「보낼 수 없음」을 세우던 길이다.
+  if (isLateWakeOutcome(outcome)) return state;
   const request = `${outcome.method} ${outcome.target}`;
   if (state.unanswered.includes(request)) return state;
   if (state.unanswered.length >= SERVER_UNREACHABLE_STREAK) return state;

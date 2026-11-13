@@ -17,11 +17,6 @@ import {
   type QuoteDraft,
 } from '@momo/core/features/timeline/quote';
 import {
-  typingLabel,
-  typingVisualSegments,
-  TYPING_AGGREGATE_THRESHOLD_FALLBACK,
-} from '@momo/core/features/chat/typing';
-import {
   channelLabel,
   channelLabelParts,
   labelRecipientKind,
@@ -119,12 +114,11 @@ import {
 import {channelDraftKey, seedDraft} from '../features/conversation/drafts';
 import {conversationFloor} from '../features/conversation/bubble';
 import {CONV} from '../features/conversation/convDesign';
-import {TYPING_OVERHANG, TypingBar} from '../features/conversation/TypingBar';
+import {TYPING_OVERHANG} from '../features/conversation/TypingBar';
+import {TypingLiveBar} from '../features/conversation/TypingLiveBar';
 import {
   markTyping,
   resetTyping,
-  sweepTyping,
-  useTypists,
 } from '../features/conversation/typingSignals';
 import {useTypingSender} from '../features/conversation/useTypingSender';
 import {ConversationLayout} from '../features/conversation/ConversationLayout';
@@ -899,36 +893,8 @@ export default function ConversationScreen({
     };
   }, [rail, railLive, workspaceId, channelId]);
 
-  // 만료는 1Hz 시계가 훑는다. 두 번째 인터벌을 세우지 않는 이유는
-  // `typingSignals.ts` 머리말에 있다 — 같은 박자를 두 번 사는 일이다.
-  useEffect(() => sweepTyping(nowMs), [nowMs]);
-
-  // 에이전트를 화면에서 떨구는 자리. 서버가 403 으로 막지만(`require_human`)
-  // 그것은 서버의 방어이고 이것은 화면의 방어다: 어떤 경로로든 에이전트 id 를
-  // 실은 신호가 그려지는 순간 「사람은 작성 중, 에이전트는 작업 중」이 깨진다.
-  // 명부에 없는 id 도 떨군다 — 이름 없는 「누군가 작성 중」은 나르는 정보가 0이다.
-  const isTypistEligible = useCallback(
-    (memberId: string) => memberFor(directory, memberId)?.kind === 'human',
-    [directory],
-  );
-  const typists = useTypists({
-    channelId,
-    nowMs,
-    myMemberId: member.id,
-    isEligible: isTypistEligible,
-  });
-  const typistNames = useMemo(
-    () => typists.map(id => memberNameParts(directory, id, '').name),
-    [typists, directory],
-  );
-  const typingParts = useMemo(
-    () => typingVisualSegments(typistNames),
-    [typistNames],
-  );
-  const typingA11y = useMemo(
-    () => typingLabel(typistNames, TYPING_AGGREGATE_THRESHOLD_FALLBACK),
-    [typistNames],
-  );
+  // 「작성 중」 줄의 만료는 `TypingLiveBar` 가 제 1초 시계로 훑는다(#5756). 이 화면의 `nowMs` 는
+  // 분 눈금이라 줄 만료를 맡기면 다음 분 눈금까지 줄이 서 있고, 1초로 돌리면 대화 전체가 다시 그려진다.
 
   // 송신: 타이머 없이 키스트로크에 매단다. 자세한 이유는 `useTypingSender` 머리말.
   const onTyping = useTypingSender(workspaceId, channelId, railLive);
@@ -2377,6 +2343,8 @@ export default function ConversationScreen({
               unreadCount={boundary?.unreadCount ?? 0}
               recoveryMarkers={timeline.recoveryMarkers}
               pending={timeline.pending}
+              echoPins={timeline.echoPins}
+              serverOffsetMs={timeline.serverOffsetMs}
               working={working}
               reactions={timeline.reactions}
               pins={timeline.pins}
@@ -2512,7 +2480,7 @@ export default function ConversationScreen({
                 예약하면서 그 이유가 사라졌다** — 이제 이 줄은 나타나고 사라지며
                 아무것도 밀어내지 않는다. 수리 하나가 다른 수리를 가능하게 한 자리다.
                 =================================================== */}
-            <TypingBar segments={typingParts} label={typingA11y} />
+            <TypingLiveBar channelId={channelId} myMemberId={member.id} directory={directory} />
             {/* 결과는 컨트롤 밖에서, 줄보다 넓은 자리에 말한다. 「이미 끝났습니다」는
                 실패가 아니라 답이므로 배너가 아니라 영수증과 같은 자리에 선다 —
                 빨간 글씨와 재시도는 이미 이긴 경주를 다시 뛰라는 뜻이 된다. */}

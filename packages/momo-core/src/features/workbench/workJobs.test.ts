@@ -8,6 +8,8 @@ import {
   type SharedWorkSession,
 } from "../../lib/api";
 import { installCoreHost, resetCoreHost } from "../../runtime/host";
+import { SESSION_STATUS_LABEL } from "./sessionList";
+import { TEAM_BOARD_COPY, stateChipLabel } from "./teamBoard";
 import {
   WORK_JOBS_COPY,
   inProgressCount,
@@ -21,7 +23,15 @@ import {
   workFilterFromSearch,
   workJobRow,
   workJobSections,
+  awaitingMeItem,
+  rowNeedsMe,
+  workJobResultHasControls,
+  workJobResultKind,
+  workJobStateLabel,
+  type WorkJobRow,
 } from "./workJobs";
+import { approvalWaitingLine } from "../timeline/requestBundle";
+import { createMessageService, loadMessageCatalog } from "../../i18n";
 
 const ME = "00000000-0000-7000-8000-000000000101";
 const OTHER = "00000000-0000-7000-8000-000000000102";
@@ -191,17 +201,90 @@ describe("줄 모델 (ADR-0202 D1)", () => {
     expect(requesterToAgent(job)).toBe("그록봇");
   });
 
-  it("phase=awaiting_approval인 run만 「승인 필요」이고 「지금」 맨 위에 선다", () => {
+  it("phase=awaiting_approval인 run만 승인 대기이고 「지금」 맨 위에 선다", () => {
     const waiting = workJobRow(row(wireRun({ runId: "00000000-0000-7000-8000-0000000000c2", phase: "awaiting_approval" })), NOW);
     const working = workJobRow(row(wireRun()), NOW);
     const done = workJobRow(row(wireRun({ runId: "00000000-0000-7000-8000-0000000000c3", state: "done", endedAtMs: NOW })), NOW);
     expect(waiting.awaitingApproval).toBe(true);
-    expect(waiting.statusLabel).toBe("승인 필요");
     expect(working.awaitingApproval).toBe(false);
     const sections = workJobSections([working, done, waiting]);
     expect(sections.map((s) => s.key)).toEqual(["now", "done"]);
     expect(sections[0]!.rows.map((r) => r.id)).toEqual([waiting.id, working.id]);
     expect(inProgressCount([working, done, waiting])).toBe(2);
+  });
+
+  it("「응답 필요」(#5593): 호출자가 답한 줄이 맨 위 구간이고, 승인 대기 run 보다도 위다", () => {
+    const approval = workJobRow(row(wireRun({ runId: "00000000-0000-7000-8000-0000000000c2", phase: "awaiting_approval" })), NOW);
+    const quiet = workJobRow(row(wireSession({ sessionId: "00000000-0000-7000-8000-0000000000d1" })), NOW);
+    const asking = workJobRow(row(wireSession({ sessionId: "00000000-0000-7000-8000-0000000000d2" })), NOW);
+    const ended = workJobRow(
+      row(wireSession({ sessionId: "00000000-0000-7000-8000-0000000000d3", state: "done", endedAtMs: NOW })),
+      NOW
+    );
+    // 서버 순서(마지막 활동 최신순)로는 묻는 세션이 맨 끝이다. 끝난 줄은 물어도 「응답 필요」가 아니다(D5: 요청은 취소됐다).
+    const rows = [approval, quiet, ended, asking];
+    const needs = (r: typeof asking) => r.id === asking.id || r.id === ended.id;
+    const sections = workJobSections(rows, needs);
+    expect(sections.map((s) => [s.key, s.label, s.rows.map((r) => r.id)])).toEqual([
+      ["needsMe", "응답 필요", [asking.id]],
+      ["now", "지금", [approval.id, quiet.id]],
+      ["done", "끝난 일", [ended.id]],
+    ]);
+    // 답하지 않으면(웹·옛 부름) 예전 두 구간 그대로다.
+    expect(workJobSections(rows).map((s) => s.key)).toEqual(["now", "done"]);
+    expect(workJobSections(rows, () => false).map((s) => s.key)).toEqual(["now", "done"]);
+  });
+
+  it("붙든 줄(방금 그 자리에서 결정함, 수리 4회차)은 끝났어도 「응답 필요」의 그 칸에 남고 「끝난 일」에 두 번 서지 않는다", () => {
+    // 서버는 거부하면 run을 바로 끝낸다(`stopped`).
+    const rejected = workJobRow(
+      row(wireRun({ runId: "00000000-0000-7000-8000-0000000000c5", state: "stopped", endedAtMs: NOW, phase: "cancelled" })),
+      NOW
+    );
+    const next = workJobRow(row(wireRun({ runId: "00000000-0000-7000-8000-0000000000c6", phase: "awaiting_approval" })), NOW);
+    const ended = workJobRow(row(wireRun({ runId: "00000000-0000-7000-8000-0000000000c7", state: "done", endedAtMs: NOW })), NOW);
+    expect(rejected.finished).toBe(true);
+    const rows = [rejected, next, ended];
+    const sections = workJobSections(rows, (r) => r.id === next.id, (r) => r.id === rejected.id);
+    expect(sections.map((s) => [s.key, s.rows.map((r) => r.id)])).toEqual([
+      ["needsMe", [rejected.id, next.id]],
+      ["done", [ended.id]],
+    ]);
+    // 붙들지 않으면 예전대로 「끝난 일」이다.
+    expect(workJobSections(rows, (r) => r.id === next.id).map((s) => [s.key, s.rows.map((r) => r.id)])).toEqual([
+      ["needsMe", [next.id]],
+      ["done", [rejected.id, ended.id]],
+    ]);
+  });
+
+  it("주인에게 열린 권한 요청이 있는 줄의 칩은 「응답 필요」다 — 돌거나 대기 중인 줄만(#5593 수리 M2)", () => {
+    const running = row(wireSession({ sessionId: "00000000-0000-7000-8000-0000000000e1" }));
+    expect(awaitingMeItem(running).state).toBe("waiting");
+    expect(stateChipLabel(awaitingMeItem(running))).toBe("응답 필요");
+    const idle = row(wireSession({ sessionId: "00000000-0000-7000-8000-0000000000e2", state: "idle" }));
+    expect(awaitingMeItem(idle).state).toBe("waiting");
+    const done = row(wireSession({ sessionId: "00000000-0000-7000-8000-0000000000e3", state: "done", endedAtMs: NOW }));
+    expect(awaitingMeItem(done)).toBe(done);
+  });
+
+  it("상태 칩 낱말(수리 3회차): 「응답 필요」는 그 구간에 선 줄만, 구간 밖 승인 대기 run은 「승인 대기」, 이 화면 밖 낱말은 그대로", async () => {
+    const ko = createMessageService({ messageLocale: "ko-KR", catalog: await loadMessageCatalog("ko-KR") });
+    const en = createMessageService({ messageLocale: "en-US" });
+    const approval = workJobRow(row(wireRun({ runId: "00000000-0000-7000-8000-0000000000c4", phase: "awaiting_approval" })), NOW);
+    const permission = workJobRow(row(wireSession({ origin: "host", owner: { memberId: ME, displayName: "구민수" }, state: "waiting" })), NOW);
+    // 구간 안: 두 종류 모두 구간 이름과 같은 낱말 하나.
+    expect(workJobStateLabel(approval, true, ko.formatMessage)).toBe(SESSION_STATUS_LABEL.waiting);
+    expect(workJobStateLabel(approval, true, ko.formatMessage)).toBe("응답 필요");
+    expect(workJobStateLabel(permission, true, ko.formatMessage)).toBe("응답 필요");
+    // 구간 밖(결정자가 아님·「팀 전체」): 내가 답할 수 없는 줄은 「응답 필요」가 아니다.
+    expect(workJobStateLabel(approval, false, ko.formatMessage)).toBe("승인 대기");
+    expect(workJobStateLabel(approval, false, en.formatMessage)).toBe("Awaiting approval");
+    // 사이드바·서랍 기본값·폰이 읽는 공용 칩 낱말은 바꾸지 않는다(줄 모델의 `statusLabel`도 공용 낱말).
+    expect(stateChipLabel(approval.item)).toBe("승인 필요");
+    expect(approval.statusLabel).toBe("승인 필요");
+    // 승인 대기가 아닌 줄은 공용 낱말 그대로.
+    const running = workJobRow(row(wireRun()), NOW);
+    expect(workJobStateLabel(running, false, ko.formatMessage)).toBe("실행 중");
   });
 
   it("옛 서버(phase 없음)는 승인 필요를 지어내지 않는다", () => {
@@ -330,5 +413,149 @@ describe("fetchWorkJobs 기능 감지 (ADR-0202 D4)", () => {
     vi.stubGlobal("fetch", vi.fn(async () => json({ error: "boom" }, 500)));
     await expect(fetchWorkJobs("ws", { who: "mine" })).rejects.toBeTruthy();
     expect(workJobsKnownLegacy("ws")).toBe(false);
+  });
+});
+
+describe("보기 전환 낱말 — owner 2026-11-09 「내것 -> 내 작업으로」", () => {
+  it("작업 목록과 옛 팀 보드가 같은 낱말 「내 작업」을 쓴다 — 웹·데스크탑·폰이 이 상수를 읽는다", () => {
+    expect(WORK_JOBS_COPY.filterMine).toBe("내 작업");
+    expect(TEAM_BOARD_COPY.filterMine).toBe("내 작업");
+  });
+});
+
+describe("맨 위 구간 낱말 — owner 2026-11-10 「응답 필요」", () => {
+  it("구간 머리글은 세션 상태의 정본 낱말을 읽는다 — 글자를 따로 적지 않는다(정의 하나)", () => {
+    expect(WORK_JOBS_COPY.sectionNeedsMe).toBe("응답 필요");
+    expect(WORK_JOBS_COPY.sectionNeedsMe).toBe(SESSION_STATUS_LABEL.waiting);
+  });
+});
+
+describe("「응답 필요」 한 판정 — 서버가 준 사실만 (#5640, ADR-0202 D1·D5)", () => {
+  const RUN_ID = "00000000-0000-7000-8000-0000000000c1";
+  const mine = (over: Record<string, unknown> = {}) =>
+    workJobRow(
+      row(
+        wireSession({
+          sessionId: "00000000-0000-7000-8000-0000000000e1",
+          origin: "host",
+          owner: { memberId: ME, displayName: "김도현" },
+          harness: "claude",
+          ...over,
+        })
+      ),
+      NOW
+    );
+  const facts = (over: Partial<Parameters<typeof rowNeedsMe>[1]> = {}) => ({
+    filter: "mine" as const,
+    selfMemberId: ME,
+    approvalRunIds: new Set<string>(),
+    ...over,
+  });
+
+  it("내 맥 세션은 서버가 `waiting`을 준 것만 선다 — `running`은 요청이 있어도 화면이 짐작하지 않는다", () => {
+    expect(rowNeedsMe(mine({ state: "waiting" }), facts())).toBe(true);
+    expect(rowNeedsMe(mine({ state: "running" }), facts())).toBe(false);
+    expect(rowNeedsMe(mine({ state: "idle" }), facts())).toBe(false);
+  });
+
+  it("「팀 전체」, 남의 세션, 로컬 공유 터미널, 끝난 줄에는 서지 않는다", () => {
+    expect(rowNeedsMe(mine({ state: "waiting" }), facts({ filter: "team" }))).toBe(false);
+    expect(
+      rowNeedsMe(mine({ state: "waiting", owner: { memberId: OTHER, displayName: "김민지" } }), facts())
+    ).toBe(false);
+    // 로컬 공유 터미널의 `waiting`은 그 기기의 입력 대기다(보는 사람 누구에게나 같다).
+    expect(rowNeedsMe(mine({ state: "waiting", origin: "local_pty" }), facts())).toBe(false);
+    expect(rowNeedsMe(mine({ state: "done", endedAtMs: NOW - 1000 }), facts())).toBe(false);
+  });
+
+  it("에이전트 실행 줄은 승인 원장이 고른 run id로만 선다 — 보드의 phase만으로는 서지 않는다", () => {
+    const run = workJobRow(row(wireRun({ phase: "running" })), NOW);
+    const phaseOnly = workJobRow(row(wireRun({ phase: "awaiting_approval" })), NOW);
+    expect(rowNeedsMe(run, facts({ approvalRunIds: new Set([RUN_ID]) }))).toBe(true);
+    // 서버가 대문자 id를 내도 같은 run이다(id 비교는 소문자로).
+    const upper = workJobRow(row(wireRun({ runId: RUN_ID.toUpperCase() })), NOW);
+    expect(rowNeedsMe(upper, facts({ approvalRunIds: new Set([RUN_ID]) }))).toBe(true);
+    expect(rowNeedsMe(phaseOnly, facts())).toBe(false);
+    // 남이 맡긴 run은 내 결정 대기가 있어도 「내 작업」의 내 줄이 아니다.
+    const others = workJobRow(row(wireRun({ requestedBy: { memberId: OTHER, displayName: "김민지" } })), NOW);
+    expect(rowNeedsMe(others, facts({ approvalRunIds: new Set([RUN_ID]) }))).toBe(false);
+    expect(rowNeedsMe(run, facts({ filter: "team", approvalRunIds: new Set([RUN_ID]) }))).toBe(false);
+  });
+
+  it("구간 순서는 응답 필요 → 지금 → 끝난 일이고, 비면 머리글도 없다", () => {
+    const waiting = mine({ state: "waiting" });
+    const running = mine({ sessionId: "00000000-0000-7000-8000-0000000000e2", state: "running" });
+    const done = mine({ sessionId: "00000000-0000-7000-8000-0000000000e3", state: "done", endedAtMs: NOW - 1000 });
+    const judge = (r: WorkJobRow) => rowNeedsMe(r, facts());
+    expect(workJobSections([done, running, waiting], judge).map((s) => [s.key, s.rows.map((r) => r.id)])).toEqual([
+      ["needsMe", [waiting.id]],
+      ["now", [running.id]],
+      ["done", [done.id]],
+    ]);
+    expect(workJobSections([done, running], judge).map((s) => s.key)).toEqual(["now", "done"]);
+    expect(workJobSections([waiting], (r) => rowNeedsMe(r, facts({ filter: "team" }))).map((s) => s.key)).toEqual([
+      "now",
+    ]);
+  });
+});
+
+describe("열 이름 — owner 2026-11-11 「작업」 · 「작업 시간」 · 「요청 채널」", () => {
+  it("웹·데스크탑 머리 줄이 읽는 상수가 새 낱말이다(옛 「맡긴 일」 · 「걸린 시간」 · 「채널」이 아니다)", () => {
+    expect([
+      WORK_JOBS_COPY.colTask,
+      WORK_JOBS_COPY.colResult,
+      WORK_JOBS_COPY.colState,
+      WORK_JOBS_COPY.colDuration,
+      WORK_JOBS_COPY.colChannel,
+    ]).toEqual(["작업", "결과", "상태", "작업 시간", "요청 채널"]);
+  });
+});
+
+describe("결과 칸의 종류 — 한 판정 (#5640 수리 1회차)", () => {
+  const session = (over: Record<string, unknown> = {}) =>
+    workJobRow(
+      row(
+        wireSession({
+          sessionId: "00000000-0000-7000-8000-0000000000e1",
+          origin: "host",
+          owner: { memberId: ME, displayName: "김도현" },
+          harness: "claude",
+          ...over,
+        })
+      ),
+      NOW
+    );
+  const prUrl = "https://github.com/example/oort/pull/3521";
+
+  it("「응답 필요」에 선 줄은 그 구간에 올린 사실이 곧 종류다: 맥 세션 → 권한 요청, run → 승인 요청", () => {
+    expect(workJobResultKind(session({ state: "waiting" }), true)).toBe("permission");
+    expect(workJobResultKind(workJobRow(row(wireRun({ phase: "running" })), NOW), true)).toBe("approval");
+  });
+
+  it("구간 밖에서는 서버 phase가 승인 대기인 run만 승인 요청이고, 그다음 에이전트 보고 → PR → 없음", () => {
+    expect(workJobResultKind(workJobRow(row(wireRun({ phase: "awaiting_approval" })), NOW), false)).toBe("approval");
+    // 맥 세션의 `waiting`은 구간 밖(「팀 전체」)에서 권한 요청 꼬리표를 얻지 않는다 — 답할 사람이 보는 구간에서만 말한다.
+    expect(workJobResultKind(session({ state: "waiting" }), false)).toBe("none");
+    const reported = workJobRow(
+      row(wireRun({ phase: "succeeded", status: "done", agentReported: { resultKind: "pr_opened" } })),
+      NOW
+    );
+    expect(workJobResultKind(reported, false)).toBe("reported");
+    expect(workJobResultKind(workJobRow(row(wireRun({ phase: "running", pr: { url: prUrl } })), NOW), false)).toBe("pr");
+    expect(workJobResultKind(workJobRow(row(wireRun({ phase: "running" })), NOW), false)).toBe("none");
+  });
+
+  it("결과 칸 아래층은 컨트롤이 있을 때만 선다 — 「열어서 답하기」는 데스크탑 앱에서만", () => {
+    const waiting = session({ state: "waiting" });
+    expect(workJobResultHasControls(waiting, "permission", true)).toBe(true);
+    expect(workJobResultHasControls(waiting, "permission", false)).toBe(false);
+    const run = workJobRow(row(wireRun({ phase: "running" })), NOW);
+    expect(workJobResultHasControls(run, "approval", false)).toBe(true);
+    expect(workJobResultHasControls(run, "none", true)).toBe(false);
+  });
+
+  it("결정자가 아닌 줄의 대기 줄은 카드의 문장 그대로다", () => {
+    expect(approvalWaitingLine()).toBe("관리자의 승인을 기다려요");
+    expect(approvalWaitingLine("이서연")).toBe("이서연 님의 승인을 기다려요");
   });
 });

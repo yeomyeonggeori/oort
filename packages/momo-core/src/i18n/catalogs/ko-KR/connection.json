@@ -24,6 +24,7 @@
   "connection.load.threadTitle": "스레드를 불러오지 못했어요",
   "connection.load.membersTitle": "멤버 목록을 불러오지 못했어요",
   "connection.load.newerTitle": "새 글을 불러오지 못했어요",
+  "connection.load.olderTitle": "이전 글을 불러오지 못했어요",
   "connection.load.inboxTitle": "인박스를 불러오지 못했어요",
   "connection.load.inboxMoreTitle": "다음 항목을 불러오지 못했어요. 이미 받은 항목은 그대로예요",
   "connection.load.memberProfileTitle": "멤버 프로필을 불러오지 못했어요",
