@@ -136,6 +136,12 @@ export interface RosterMember {
   avatarUrl?: string;
   /** Workspace role, as the roster projection reports it. */
   role?: MembershipRole;
+  /**
+   * Humans only (openapi `RosterMember.email`): the sign-in address. The server sends it to every
+   * reader of the roster today; who may SEE it is the client gate `profileEmail` (guests do not, #5780).
+   * Absent for agents and on servers that predate the column; a non-string drops the column.
+   */
+  email?: string;
   channelCount: number;
   channelIds: string[];
   capabilities: string[];
@@ -281,8 +287,8 @@ function sanitizeRosterMember(value: unknown): unknown {
     const { statusText: _bad, ...rest } = row;
     row = rest;
   }
-  // v3 agent profile text: a non-string drops the column, never the member.
-  for (const key of ["tagline", "roleLabel", "avatarPreset"] as const) {
+  // v3 agent profile text, and the human's email (#5780): a non-string drops the column, never the member.
+  for (const key of ["tagline", "roleLabel", "avatarPreset", "email"] as const) {
     if (key in row && typeof row[key] !== "string") {
       const { [key]: _bad, ...rest } = row;
       row = rest;

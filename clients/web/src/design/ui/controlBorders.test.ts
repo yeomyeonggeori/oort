@@ -74,6 +74,9 @@ const ROLE: Record<string, "control" | "filled" | "container"> = {
   "popover.tsx": "container",
   // 작은 안내 면. 눌리지도 값을 받지도 않고(`pointer-events: none`), 경계는 면을 나누는 선이다(#4324).
   "tooltip.tsx": "container",
+  // 목록 묶음(#5782). 카드 하나가 줄들을 담고 줄 사이 `--line` 은 나누는 선이다. 줄 단추는 경계가 아니라
+  // 가리킴 채움으로 자기를 말한다(전폭 줄 — README §2.6).
+  "list-row.tsx": "container",
 };
 
 /** 클래스 문자열 안의 `border-line` (뒤에 `-strong` 이 붙지 않은 것). */

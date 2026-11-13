@@ -1,0 +1,20 @@
+{
+  "memberList.page.title": "Members",
+  "memberList.search.label": "Search members",
+  "memberList.search.placeholder": "Find by name, handle, or email",
+  "memberList.search.placeholderGuest": "Find by name or handle",
+  "memberList.group.people": "People",
+  "memberList.group.agents": "Agents",
+  "memberList.row.self": "You",
+  "memberList.row.ownedBy": "Managed by {name}",
+  "memberList.row.openProfile": "Open profile",
+  "memberList.row.openOwnProfile": "You, open profile",
+  "memberList.state.offline": "Disconnected, reconnecting. The roster is as last received, and new conversations open once the connection is back.",
+  "memberList.empty.headline": "No one else is in this workspace yet.",
+  "memberList.empty.detail": "Create an invite link to bring your team in. The roster fills up here, and each row opens a profile and a conversation.",
+  "memberList.empty.invite": "Invite members",
+  "memberList.noMatch.headline": "No matching members.",
+  "memberList.noMatch.detail": "No name, handle, or email matches \"{query}\". Try a different search.",
+  "memberList.noMatch.detailGuest": "No name or handle matches \"{query}\". Try a different name.",
+  "memberList.noMatch.clear": "Clear search"
+}

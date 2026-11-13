@@ -1,0 +1,20 @@
+{
+  "memberList.page.title": "멤버",
+  "memberList.search.label": "멤버 검색",
+  "memberList.search.placeholder": "이름, 핸들, 이메일로 찾기",
+  "memberList.search.placeholderGuest": "이름이나 핸들로 찾기",
+  "memberList.group.people": "사람",
+  "memberList.group.agents": "에이전트",
+  "memberList.row.self": "나",
+  "memberList.row.ownedBy": "{name} 님이 관리",
+  "memberList.row.openProfile": "프로필 열기",
+  "memberList.row.openOwnProfile": "나, 프로필 열기",
+  "memberList.state.offline": "연결 끊김, 재연결 중입니다. 명부는 마지막으로 받은 상태이고, 새 대화는 연결이 돌아온 뒤 열립니다.",
+  "memberList.empty.headline": "이 워크스페이스에 아직 다른 멤버가 없습니다.",
+  "memberList.empty.detail": "초대 링크를 만들어 팀을 부르면 여기에 명부가 쌓이고, 각 행에서 프로필과 대화를 열 수 있습니다.",
+  "memberList.empty.invite": "멤버 초대하기",
+  "memberList.noMatch.headline": "일치하는 멤버가 없습니다.",
+  "memberList.noMatch.detail": "검색어 \"{query}\"에 해당하는 이름, 핸들, 이메일이 없습니다. 다른 말로 찾아 보세요.",
+  "memberList.noMatch.detailGuest": "검색어 \"{query}\"에 해당하는 이름이나 핸들이 없습니다. 다른 이름으로 검색하세요.",
+  "memberList.noMatch.clear": "검색 지우기"
+}
