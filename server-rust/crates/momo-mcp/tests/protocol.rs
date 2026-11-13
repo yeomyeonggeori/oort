@@ -651,8 +651,9 @@ fn unknown_fields_and_method_specific_params_are_rejected() {
 
 #[test]
 fn client_info_fields_have_closed_shapes_and_lengths() {
+    // The three known fields only. A key the server does not know is accepted and never read
+    // (#5787) — `tests/client_info.rs` holds that side, on both doors and in both eras.
     for client_info in [
-        json!({"name":"fixture","version":"1","extra":true}),
         json!({"name":"fixture","version":"1","title":""}),
         json!({"name":"x".repeat(129),"version":"1"}),
         json!({"name":"fixture","version":"x".repeat(65)}),
