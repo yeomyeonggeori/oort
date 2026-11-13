@@ -4294,6 +4294,208 @@ export const catalog: MessageCatalog = {
       "value": "Thread"
     }
   ],
+  "memberList.empty.detail": [
+    {
+      "type": 0,
+      "value": "Create an invite link to bring your team in. The roster fills up here, and each row opens a profile and a conversation."
+    }
+  ],
+  "memberList.empty.headline": [
+    {
+      "type": 0,
+      "value": "No one else is in this workspace yet."
+    }
+  ],
+  "memberList.empty.invite": [
+    {
+      "type": 0,
+      "value": "Invite members"
+    }
+  ],
+  "memberList.group.agents": [
+    {
+      "type": 0,
+      "value": "Agents"
+    }
+  ],
+  "memberList.group.people": [
+    {
+      "type": 0,
+      "value": "People"
+    }
+  ],
+  "memberList.newDm.close": [
+    {
+      "type": 0,
+      "value": "Close"
+    }
+  ],
+  "memberList.newDm.continueAction": [
+    {
+      "type": 0,
+      "value": "continue the conversation"
+    }
+  ],
+  "memberList.newDm.description": [
+    {
+      "type": 0,
+      "value": "Pick a member or an agent to talk to. If you already have a conversation, it opens that one."
+    }
+  ],
+  "memberList.newDm.emptyDetail": [
+    {
+      "type": 0,
+      "value": "Invite members to the workspace and you can start a conversation right here."
+    }
+  ],
+  "memberList.newDm.emptyHeadline": [
+    {
+      "type": 0,
+      "value": "There is no one else to talk to yet."
+    }
+  ],
+  "memberList.newDm.hasDm": [
+    {
+      "type": 0,
+      "value": "In conversation"
+    }
+  ],
+  "memberList.newDm.noMatchDetail": [
+    {
+      "type": 0,
+      "value": "No name or handle matches \""
+    },
+    {
+      "type": 1,
+      "value": "query"
+    },
+    {
+      "type": 0,
+      "value": "\"."
+    }
+  ],
+  "memberList.newDm.placeholder": [
+    {
+      "type": 0,
+      "value": "Search by name or handle"
+    }
+  ],
+  "memberList.newDm.startAction": [
+    {
+      "type": 0,
+      "value": "start a new conversation"
+    }
+  ],
+  "memberList.newDm.title": [
+    {
+      "type": 0,
+      "value": "New direct message"
+    }
+  ],
+  "memberList.newDm.toLabel": [
+    {
+      "type": 0,
+      "value": "To"
+    }
+  ],
+  "memberList.noMatch.clear": [
+    {
+      "type": 0,
+      "value": "Clear search"
+    }
+  ],
+  "memberList.noMatch.detail": [
+    {
+      "type": 0,
+      "value": "No name, handle, or email matches \""
+    },
+    {
+      "type": 1,
+      "value": "query"
+    },
+    {
+      "type": 0,
+      "value": "\". Try a different search."
+    }
+  ],
+  "memberList.noMatch.detailGuest": [
+    {
+      "type": 0,
+      "value": "No name or handle matches \""
+    },
+    {
+      "type": 1,
+      "value": "query"
+    },
+    {
+      "type": 0,
+      "value": "\". Try a different name."
+    }
+  ],
+  "memberList.noMatch.headline": [
+    {
+      "type": 0,
+      "value": "No matching members."
+    }
+  ],
+  "memberList.page.title": [
+    {
+      "type": 0,
+      "value": "Members"
+    }
+  ],
+  "memberList.row.openOwnProfile": [
+    {
+      "type": 0,
+      "value": "You, open profile"
+    }
+  ],
+  "memberList.row.openProfile": [
+    {
+      "type": 0,
+      "value": "Open profile"
+    }
+  ],
+  "memberList.row.ownedBy": [
+    {
+      "type": 0,
+      "value": "Managed by "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    }
+  ],
+  "memberList.row.self": [
+    {
+      "type": 0,
+      "value": "You"
+    }
+  ],
+  "memberList.search.label": [
+    {
+      "type": 0,
+      "value": "Search members"
+    }
+  ],
+  "memberList.search.placeholder": [
+    {
+      "type": 0,
+      "value": "Find by name, handle, or email"
+    }
+  ],
+  "memberList.search.placeholderGuest": [
+    {
+      "type": 0,
+      "value": "Find by name or handle"
+    }
+  ],
+  "memberList.state.offline": [
+    {
+      "type": 0,
+      "value": "Disconnected, reconnecting. The roster is as last received, and new conversations open once the connection is back."
+    }
+  ],
   "mobile.addMember.addHint": [
     {
       "type": 0,

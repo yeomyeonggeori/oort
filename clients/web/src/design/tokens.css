@@ -2150,6 +2150,23 @@
   &[data-unread] [data-row-icon] {
     color: var(--ink);
   }
+  /* 새 글이 없는 채널·DM 줄 (`data-dim`, #5775 · 폰 #4953 과 같은 규칙): 이름이 한 단계 연하다(`--ink-muted`,
+   * 띠 위에서는 `--on-band-muted`로 다시 묶인다). 아이콘은 `--icon` 으로 돌아가는데, 알림을 끈 줄은 새 글이 있어도
+   * 연하고(`data-unread` 의 잉크 아이콘을 이긴다) 선택 행은 이 표지를 받지 않는다. 목적지 줄(인박스·멤버)과 프로필 줄은
+   * 읽음을 말하지 않아 표지가 없다. 이름 옆 `@핸들`은 이름과 같은 색이고 크기(`text-meta`)·굵기(400)·`@`로 가른다
+   * (색으로 가르면 차이가 눈에 안 보이거나 대비가 무너진다, 폰도 같은 색 — #5775 검수 r1 A. 대비는 `sidebarRowDim.contrast.test.ts` 가 첫 파티·카탈로그 테마
+   * 전부의 바닥·호버·눌림에서 잰다). */
+  &[data-dim] {
+    color: var(--ink-muted);
+    font-weight: 500;
+  }
+  &[data-dim] [data-row-icon] {
+    color: var(--icon);
+  }
+  &[data-dim] [data-row-handle] {
+    color: var(--ink-muted);
+    font-weight: 400;
+  }
   /* DM 행의 아바타는 24px 이고 글리프는 18px 이다. 둘이 같은 이름 시작 위치를 갖도록 아바타가
    * 글리프의 **축 위에** 앉는다: 양쪽으로 3px 씩 행 안쪽 여백으로 번진다(18 + 6 = 24). 이름은
    * 채널 행과 같은 자리에서 시작하고(실측 38px, 번지지 않으면 44px), 아바타의 중심은 글리프의
@@ -2917,9 +2934,15 @@
 }
 
 /* Radix DropdownMenu sets this on the panel. A long row must truncate inside
- * that box instead of growing the menu past the viewport (#1886 M-1). */
+ * that box instead of growing the menu past the viewport (#1886 M-1).
+ * 컨텍스트 메뉴는 같은 값을 다른 이름으로 싣는다(아래 높이 쪽과 같은 이유로 둘을 잇는다). 하위 메뉴 판(#5777)이
+ * 이것을 입는다: 720 창에서 80자 섹션 이름의 하위 판이 양쪽 다 자리가 모자라면 Radix 는 뒤집기만 하고 줄이지는
+ * 않아 창 밖으로 15px 나갔다(레인 capture-5777 E). 드롭다운 판에는 컨텍스트 변수가 없으므로 예전 값 그대로다. */
 @utility max-w-menu-available {
-  max-inline-size: var(--radix-dropdown-menu-content-available-width);
+  max-inline-size: var(
+    --radix-context-menu-content-available-width,
+    var(--radix-dropdown-menu-content-available-width)
+  );
 }
 
 /* 같은 일의 높이 쪽 (#3963 design-review B1). Radix 메뉴(컨텍스트·드롭다운)는 패널에 가용 높이를

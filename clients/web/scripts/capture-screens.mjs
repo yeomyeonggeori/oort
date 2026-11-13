@@ -2742,13 +2742,10 @@ async function captureSidebarRowMenu(page, scheme, shots) {
   // BT-5(#1933)가 「별표」를 사이드바 정리 무리의 첫 항목으로 들여놨다. 배치
   // (「섹션으로 이동」)는 커스텀 섹션이 하나도 없는 이 시점에는 서지 않는다 —
   // 목적지가 없는 라디오 무리는 선택지가 아니기 때문이다(BT-4).
-  // 복사 무리(이름·링크·ID)가 맨 앞에 서고 접히지 않는다(SidebarRowContextMenu 시험이 같은 차례를 못박는다).
-  // `channel-row-copy-group`은 그 무리의 상자라 접두사 선택자에 함께 잡힌다(#5048).
+  // 「복사 ›」(이름·링크·ID 의 하위 메뉴, #5777)가 맨 앞에 선다(SidebarRowContextMenu 시험이 같은 차례를
+  // 못박는다). 이름·링크·ID 는 하위 판 안이라 위 판에는 여는 줄 하나뿐이다.
   const expected = [
     "channel-row-copy-group",
-    "channel-row-copy-name",
-    "channel-row-copy-link",
-    "channel-row-copy-id",
     "channel-row-mark-read",
     "channel-row-mute-toggle",
     "channel-row-star",
@@ -2783,12 +2780,10 @@ async function captureSidebarRowMenu(page, scheme, shots) {
   await row.focus();
   await page.keyboard.press("Shift+F10");
   await menu.waitFor({ state: "visible" });
-  // 복사 무리(이름·링크·ID)가 메뉴 맨 앞이라 첫 정거장은 「이름 복사」다(SidebarRowContextMenu 시험이 같은 차례를
+  // 「복사 ›」가 메뉴 맨 앞이라 첫 정거장은 그 여는 줄이다(#5777, SidebarRowContextMenu 시험이 같은 차례를
   // 못박는다). 알림 항목까지 ↓로 걸어가는 동안 메뉴는 살아 있어야 한다 — 한 걸음마다 정거장을 단정한다(#5048).
   const kbdWalk = [
-    "channel-row-copy-name",
-    "channel-row-copy-link",
-    "channel-row-copy-id",
+    "channel-row-copy-group",
     "channel-row-mark-read",
     "channel-row-mute-toggle",
   ];
@@ -3342,7 +3337,8 @@ async function captureCustomSection(page, scheme, shots) {
     throw new Error(`새 섹션이 비어 있지 않다 ${scheme}: ${emptyRows}`);
   }
 
-  // 행 우클릭 → 「섹션으로 이동」. 서브메뉴가 아니라 제목 + 라디오 무리다.
+  // 행 우클릭 → 「섹션으로 이동 ›」. 잠긴 줄이 없는 묶음이라 하위 메뉴로 접힌다(#5777): 여는 줄을 눌러 하위
+  // 판을 열고, 목적지 라디오는 그 판에 선다.
   const row = page
     .getByTestId("sidebar-section-channels")
     .locator('[data-testid="channel-item"]')
@@ -3352,8 +3348,12 @@ async function captureCustomSection(page, scheme, shots) {
   await page
     .getByTestId("channel-row-move-to-section")
     .waitFor({ state: "visible" });
+  await sceneClick(page, page.getByTestId("channel-row-move-to-section"));
+  await page
+    .getByTestId("channel-row-move-to-section-menu")
+    .waitFor({ state: "visible" });
   const radios = await page
-    .getByTestId("channel-row-menu")
+    .getByTestId("channel-row-move-to-section-menu")
     .locator('[role="menuitemradio"]')
     .count();
   if (radios !== 2) {
@@ -3369,9 +3369,9 @@ async function captureCustomSection(page, scheme, shots) {
       `배치 전 기본 섹션이 체크가 아니다 ${scheme}: ${baseChecked}`
     );
   }
-  // 80자 이름이 메뉴를 창 밖으로 밀지 않는다.
+  // 80자 이름이 하위 판을 창 밖으로 밀지 않는다.
   const menuBox = await page.evaluate(`(() => {
-    const el = document.querySelector('[data-testid="channel-row-menu"]');
+    const el = document.querySelector('[data-testid="channel-row-move-to-section-menu"]');
     const r = el.getBoundingClientRect();
     return { right: Math.round(r.right), width: Math.round(r.width), view: window.innerWidth };
   })()`);
@@ -3396,6 +3396,10 @@ async function captureCustomSection(page, scheme, shots) {
     button: "right",
   });
   await page.getByTestId("channel-row-menu").waitFor({ state: "visible" });
+  await sceneClick(page, page.getByTestId("channel-row-move-to-section"));
+  await page
+    .getByTestId("channel-row-move-to-section-menu")
+    .waitFor({ state: "visible" });
   const nowChecked = await page
     .getByTestId("channel-row-section-sec-1")
     .getAttribute("aria-checked");
@@ -3470,49 +3474,24 @@ async function captureCustomSection(page, scheme, shots) {
 }
 
 /**
- * 정렬의 문 (BT-5 / #1933, design-review R1 M-2).
- *
- * 이 문은 한동안 기본 「채널」 섹션의 ⋮ 안에 있었고, 그때 스크린리더는 그것을
- * 「채널 섹션 메뉴」라 읽었다 — 사이드바 전체에 걸리는 설정인데. 눈으로도 같은 ⋯
- * 글리프가 섹션마다 다른 메뉴를 열었다. 그래서 문을 갈랐고, 이 장면이 그 판정을
- * 레인 안으로 들여 잠근다: **자기 글리프·자기 이름**이고, 섹션 ⋮ 는 그 자리에
- * 없다.
+ * 정렬 단추가 없다 (#5775). 기본 「채널」 머리에는 「새 채널」·「새 섹션」만 서고 정렬 문(⇅)도
+ * 섹션 ⋮ 도 없다. 사라진 것을 장면으로 잠근다.
  */
 async function captureSortDoor(page, scheme, shots) {
   beginScene("sidebar-sort-menu");
   await page.getByTestId("sidebar-section-channels-header").hover();
-  const door = page.getByTestId("sidebar-sort-menu");
-  await door.waitFor({ state: "visible" });
-  await assertSectionControlSize(page, scheme, "sidebar-sort-menu");
-  const name = await door.getAttribute("aria-label");
-  if (name !== "채널 정렬") {
-    throw new Error(`정렬 문의 이름 ${scheme}: ${name}`);
+  const sortDoor = await page.getByTestId("sidebar-sort-menu").count();
+  if (sortDoor !== 0) {
+    throw new Error(`정렬 문이 남았다 ${scheme}: ${sortDoor}`);
   }
-  // 기본 섹션에는 ⋮ 가 없다 — 그 메뉴는 커스텀 섹션의 것이다(BT-4 그대로).
   const sectionMenu = await page.getByTestId("section-menu-channels").count();
   if (sectionMenu !== 0) {
     throw new Error(`기본 섹션에 ⋮ 가 섰다 ${scheme}: ${sectionMenu}`);
   }
-
-  await sceneClick(page, door);
-  const content = page.getByTestId("sidebar-sort-menu-content");
-  await content.waitFor({ state: "visible" });
-  const label = (await page.getByTestId("sidebar-sort-label").innerText()).trim();
-  if (label !== "채널 정렬") {
-    throw new Error(`정렬 무리의 제목 ${scheme}: ${label}`);
-  }
-  const checked = await page
-    .getByTestId("sidebar-sort-manual")
-    .getAttribute("aria-checked");
-  if (checked !== "true") {
-    throw new Error(`기본 정렬이 체크가 아니다 ${scheme}: ${checked}`);
-  }
-  await assertNoHorizontalOverflow(page, `sort door ${scheme}`);
+  await assertNoHorizontalOverflow(page, `channels header ${scheme}`);
   const shot = beginSceneFromShotPath(`${OUT_DIR}/sidebar-sort-menu-${scheme}.png`);
   await page.screenshot({ path: shot });
   shots.push(shot);
-  await page.keyboard.press("Escape");
-  await content.waitFor({ state: "detached" });
 }
 
 /**

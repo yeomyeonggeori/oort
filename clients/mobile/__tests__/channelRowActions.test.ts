@@ -128,7 +128,7 @@ describe('DM 행', () => {
   });
 });
 
-describe('DM 행의 「대화 닫기」 (#4367)', () => {
+describe('DM 행의 「목록에서 숨기기」 (#4367)', () => {
   const dmKeys = (over: Partial<ChannelRowTarget> = {}) => keys(target({kind: 'dm', ...over}));
 
   it('내미는 손(closeOffered)을 받은 DM 에만 선다: 알림 다음, 코어 표의 차례 그대로', () => {

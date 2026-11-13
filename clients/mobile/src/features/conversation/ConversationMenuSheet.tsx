@@ -2,6 +2,7 @@ import type {
   ChannelActionItem,
   ChannelActionKey,
 } from '@momo/core/features/channels/actionModel';
+import {isChannelActionStatusIcon} from '@momo/core/features/channels/actionModel';
 import {
   CHANNEL_LEAVE_CONFIRM_TITLE,
   CHANNEL_LEAVE_LABEL,
@@ -13,7 +14,7 @@ import {StyleSheet} from 'react-native';
 import {Sentence} from '../../design/atoms';
 import {PageSheet} from '../../design/PageSheet';
 import {SheetHeader} from '../../design/SheetChrome';
-import {ConfirmStep, GroupCard, ListRow, RowEmoji, SheetScroll} from '../../design/sheetParts';
+import {ConfirmStep, GroupCard, ListRow, RowStatusIcon, SheetScroll} from '../../design/sheetParts';
 import {useStyles} from '../../design/theme';
 import {font, line, type Palette} from '../../design/tokens';
 import {
@@ -44,7 +45,7 @@ import {
 //
 // 알림 · 닫기 · 나가기는 부르는 쪽이 코어 표의 답(`conversationMenuActionItems`)을 그대로 넘기고 여기는 **그리기만** 한다 — 내밀지 말지(`canLeaveChannel`·
 // `dmCloseOffered`)도, 낱말도, 위험색도 코어의 것이다. 「채널 나가기」만 확인 단계를 지난다(되돌릴 길이 없다 — 다시 들어오려면 관리자가 추가해야
-// 한다). 「대화 닫기」는 되돌릴 수 있어(닫은 대화 목록·새 메시지) 확인 단계도 위험색도 없다(코어 표가 그렇게 답한다).
+// 한다). 「목록에서 숨기기」는 되돌릴 수 있어(닫은 대화 목록·새 메시지) 확인 단계도 위험색도 없다(코어 표가 그렇게 답한다).
 // =============================================================================
 
 export function ConversationMenuSheet({
@@ -93,7 +94,7 @@ export function ConversationMenuSheet({
   const styles = useStyles(buildStyles);
   const infoLabel = kind === 'dm' ? CONVERSATION_INFO_LABEL.dm : CONVERSATION_INFO_LABEL.channel;
   const mute = items.find(item => item.key === 'mute');
-  // DM 은 「대화 닫기」, 채널은 「채널 나가기」 — 코어 표가 한 대화에 둘을 함께 내지 않는다(`isDm`).
+  // DM 은 「목록에서 숨기기」, 채널은 「채널 나가기」 — 코어 표가 한 대화에 둘을 함께 내지 않는다(`isDm`).
   const leaving = items.find(item => item.key === 'close-dm' || item.key === 'leave');
 
   const actionRow = (item: ChannelActionItem): React.JSX.Element => {
@@ -102,7 +103,7 @@ export function ConversationMenuSheet({
       <ListRow
         title={busy && item.busyLabel ? item.busyLabel : item.label}
         // 알림 상태 표지는 오른쪽 값 자리다. 앞 칸·행 차례·위험색은 #4319 계약을 따른다.
-        trailing={item.icon ? <RowEmoji emoji={item.icon} /> : undefined}
+        trailing={isChannelActionStatusIcon(item.icon) ? <RowStatusIcon name={item.icon} align="chevron" /> : undefined}
         tone={item.tone === 'danger' ? 'danger' : 'default'}
         busy={busy}
         // 닫는 길로 보내지 않는다: 이 시트는 왕복 중의 「…하는 중」과 실패를 스스로 보이는 면이라 행동이 끝날 때까지 떠 있어야 한다.

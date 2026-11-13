@@ -39,8 +39,18 @@ import {
   ContextMenuRadioGroup,
   ContextMenuRadioItem,
   ContextMenuSeparator,
+  ContextMenuSub,
+  ContextMenuSubContent,
+  ContextMenuSubTrigger,
   ContextMenuTrigger,
 } from "@/design/ui/context-menu";
+// 하위 메뉴 견본(#5777)의 낱말은 채널 메뉴가 쓰는 이름 그대로다(새 문구를 만들지 않는다).
+import { CHANNEL_COPY_GROUP_LABEL } from "@momo/core/features/channels/model";
+import {
+  SECTION_MOVE_GROUP_LABEL,
+  SECTION_MOVE_TO_BASE_LABEL,
+} from "@momo/core/features/sidebar/sidebarSections";
+import { COPY_LINK_ACTION_LABEL } from "@momo/core/features/timeline/copyLabels";
 import {
   Dialog,
   DialogClose,
@@ -59,9 +69,13 @@ import {
   DropdownMenuCheckboxItem,
   DropdownMenuRadioItem,
   DropdownMenuSeparator,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from "@/design/ui/dropdown-menu";
 import { Input } from "@/design/ui/input";
+import { ListGroup, ListRow, ListRowSkeleton } from "@/design/ui/list-row";
 import {
   Popover,
   PopoverAnchor,
@@ -88,13 +102,14 @@ import {
 } from "@/features/settings/SettingsFields";
 import { DraftRow } from "@/features/drafts/DraftsRoute";
 import type { DraftViewItem } from "@/features/drafts/model";
-import { MessageRow } from "@/features/timeline/MessageRow";
+import { Avatar, MessageRow } from "@/features/timeline/MessageRow";
 import { PendingRow } from "@/features/timeline/PendingRow";
 import { ReactionChips } from "@/features/timeline/ReactionChips";
 import { makeDirectory } from "@momo/core/features/workspace/directory";
 import type { Message, RosterMember } from "@momo/core/lib/api";
 import type { ReactionChip } from "@momo/core/features/timeline/reactions";
 import { OnboardingGuideGallery } from "@/features/onboarding/guide/OnboardingGuideGallery";
+import { useFormatMessage } from "@/i18n/useFormatMessage";
 import "./gallery-preview.css";
 
 // Reading this as: design gallery (diagnostic surface) for internal team users
@@ -280,6 +295,103 @@ function galleryMember(): RosterMember {
     createdAtMs: 0,
     updatedAtMs: 0,
   };
+}
+
+/**
+ * 목록 줄 견본의 사람들(#5782). 가상 인물만: 김도현(나, 소유자) · 이서연(관리자) · 에이전트 hermes(김도현이 관리).
+ * 아바타는 공용 `Avatar` 의 이니셜이다(사진·접속 점은 제품 화면의 몫).
+ */
+const LIST_SAMPLE = {
+  me: { id: "00000000-0000-7000-8000-0000000005e1", name: "김도현", handle: "dohyeon", role: "소유자" },
+  peer: { id: "00000000-0000-7000-8000-0000000005e2", name: "이서연", handle: "seoyeon", role: "관리자" },
+  agent: { id: "00000000-0000-7000-8000-0000000005e3", name: "hermes", handle: "hermes" },
+} as const;
+
+function listSampleMember(
+  sample: { id: string; name: string; handle: string },
+  kind: RosterMember["kind"]
+): RosterMember {
+  return {
+    ...galleryMember(),
+    id: sample.id,
+    kind,
+    displayName: sample.name,
+    handle: sample.handle,
+  };
+}
+
+/** 목록 줄 · 묶음 머리글 · 스켈레톤 (#5782). 같은 줄의 rest·hover·focus, 그리고 스켈레톤이 같은 높이로 선다. */
+function ListGallery() {
+  const t = useFormatMessage();
+  const me = listSampleMember(LIST_SAMPLE.me, "human");
+  const peer = listSampleMember(LIST_SAMPLE.peer, "human");
+  const agent = listSampleMember(LIST_SAMPLE.agent, "agent");
+  const roleChip = cn(CHIP_CLASS, "bg-muted-soft text-ink-muted");
+  const personRow = (
+    member: RosterMember,
+    role: string,
+    self: boolean,
+    preview?: "hover" | "focus"
+  ) => (
+    <ListRow
+      key={`${member.id}-${preview ?? "rest"}`}
+      data-gallery-preview={preview}
+      data-gallery-export={preview ? undefined : "ListRow"}
+      leading={<Avatar member={member} />}
+      title={
+        <>
+          <span className="min-w-0 truncate font-semibold text-ink">{member.displayName}</span>
+          {self ? (
+            <span className="shrink-0 text-meta text-ink-muted">{t("memberList.row.self")}</span>
+          ) : null}
+        </>
+      }
+      subtitle={`@${member.handle} · ${member.handle}@example.com`}
+      trailing={<span className={roleChip}>{role}</span>}
+    />
+  );
+  return (
+    <section
+      data-testid="gallery-list-row"
+      className="flex flex-col gap-3 border-b border-line py-6"
+    >
+      <h2 className="text-title font-medium text-ink">ListGroup · ListRow · ListRowSkeleton</h2>
+      <p className="text-meta text-ink-muted">
+        묶음 머리글 + 카드 하나 + 두 층 줄(제목 / 보조 한 줄) + 끝 칸. 둘째 줄은 hover, 셋째 줄은 focus 미리보기다.
+        오른쪽 묶음은 같은 줄의 스켈레톤이고 높이가 같다(README 「목록 줄」).
+      </p>
+      <div className="flex flex-wrap items-start gap-6">
+        <Export name="ListGroup">
+          <div className="flex w-pane-lg max-w-full flex-col gap-6">
+            <ListGroup label={t("memberList.group.people")} count={2}>
+              {personRow(me, LIST_SAMPLE.me.role, true)}
+              {personRow(peer, LIST_SAMPLE.peer.role, false, "hover")}
+              {personRow(peer, LIST_SAMPLE.peer.role, false, "focus")}
+            </ListGroup>
+            <ListGroup label={t("memberList.group.agents")} count={1}>
+              <ListRow
+                leading={<Avatar member={agent} />}
+                title={
+                  <span className="min-w-0 truncate font-semibold text-agent">
+                    {agent.displayName}
+                  </span>
+                }
+                subtitle={`@${agent.handle} · ${t("memberList.row.ownedBy", { name: LIST_SAMPLE.me.name })}`}
+              />
+            </ListGroup>
+          </div>
+        </Export>
+        <Export name="ListRowSkeleton">
+          <div className="flex w-pane-sm flex-col">
+            <ListGroup label={t("memberList.group.people")}>
+              <ListRowSkeleton />
+              <ListRowSkeleton />
+            </ListGroup>
+          </div>
+        </Export>
+      </div>
+    </section>
+  );
 }
 
 function gallerySession(): SessionContextValue {
@@ -494,6 +606,24 @@ function OverlayExamples() {
                     >
                       켜고 끄기
                     </DropdownMenuCheckboxItem>
+                    {/* 하위 메뉴(#5777): 고를 수 없는 줄이 없는 묶음에만(README 「메뉴」). */}
+                    <Export name="DropdownMenuSub">
+                      <DropdownMenuSub open>
+                        <DropdownMenuSubTrigger data-gallery-export="DropdownMenuSubTrigger">
+                          {CHANNEL_COPY_GROUP_LABEL}
+                        </DropdownMenuSubTrigger>
+                        <OverlayCell className="mt-2 w-max max-w-full">
+                          {(subHost) => (
+                            <DropdownMenuSubContent
+                              container={subHost}
+                              data-gallery-export="DropdownMenuSubContent"
+                            >
+                              <DropdownMenuItem>{COPY_LINK_ACTION_LABEL}</DropdownMenuItem>
+                            </DropdownMenuSubContent>
+                          )}
+                        </OverlayCell>
+                      </DropdownMenuSub>
+                    </Export>
                   </DropdownMenuContent>
                 )}
               </OverlayCell>
@@ -663,6 +793,24 @@ function ContextMenuSpecimen() {
                 유지
               </ContextMenuRadioItem>
             </ContextMenuRadioGroup>
+            {/* 하위 메뉴(#5777): 고를 수 없는 줄이 없는 묶음에만(README 「메뉴」). */}
+            <Export name="ContextMenuSub">
+              <ContextMenuSub open>
+                <ContextMenuSubTrigger data-gallery-export="ContextMenuSubTrigger">
+                  {SECTION_MOVE_GROUP_LABEL}
+                </ContextMenuSubTrigger>
+                <OverlayCell className="mt-2 w-max max-w-full">
+                  {(subHost) => (
+                    <ContextMenuSubContent
+                      container={subHost}
+                      data-gallery-export="ContextMenuSubContent"
+                    >
+                      <ContextMenuItem>{SECTION_MOVE_TO_BASE_LABEL}</ContextMenuItem>
+                    </ContextMenuSubContent>
+                  )}
+                </OverlayCell>
+              </ContextMenuSub>
+            </Export>
           </ContextMenuContent>
         )}
       </OverlayCell>
@@ -1106,6 +1254,8 @@ function GalleryBody() {
           </ul>
         )}
       </StateRow>
+
+      <ListGallery />
 
       <section className="flex flex-col gap-3 border-b border-line py-6">
         <h2 className="text-title font-medium text-ink">MessageRow</h2>

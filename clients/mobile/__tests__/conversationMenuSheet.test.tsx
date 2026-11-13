@@ -31,7 +31,7 @@ import {AccessibilityInfo, Dimensions, Image, Keyboard, StyleSheet} from 'react-
 import '../src/boot/polyfills';
 import '../src/boot/coreHost';
 
-import {SHEET_ICONS} from '../src/design/icons';
+import {CONV_ICONS, SHEET_ICONS} from '../src/design/icons';
 import {COPY_RECEIPT_MS, copyText} from '../src/features/conversation/copy';
 import {TOUCH_TARGET} from '../src/design/tokens';
 import {ConversationMenuSheet} from '../src/features/conversation/ConversationMenuSheet';
@@ -140,7 +140,7 @@ describe('항목은 코어 표의 답에서 거른다 — 새로 짓지 않는�
     expect(keysOf(conversationMenuActionItems(target({selfRole: undefined})))).toEqual(['mute', 'leave']);
   });
 
-  it('DM: 닫기를 내밀 때만 「대화 닫기」가 서고, 나가기는 DM 에 없다 — 역할이 관리자여도', () => {
+  it('DM: 닫기를 내밀 때만 「목록에서 숨기기」가 서고, 나가기는 DM 에 없다 — 역할이 관리자여도', () => {
     expect(keysOf(conversationMenuActionItems(dmTarget({closeOffered: true})))).toEqual(['mute', 'close-dm']);
     expect(keysOf(conversationMenuActionItems(dmTarget({closeOffered: false})))).toEqual(['mute']);
     expect(keysOf(conversationMenuActionItems(dmTarget()))).toEqual(['mute']);
@@ -160,7 +160,7 @@ describe('항목은 코어 표의 답에서 거른다 — 새로 짓지 않는�
     expect([on.label, on.busyLabel]).toEqual(['알림 꺼짐', undefined]);
     const leave = conversationMenuActionItems(target()).find(item => item.key === 'leave');
     expect([leave?.label, leave?.tone]).toEqual([CHANNEL_LEAVE_LABEL, 'danger']);
-    // 「대화 닫기」는 되돌릴 수 있는 닫기라 위험색이 아니다(웹·사이드바 시트와 같은 표).
+    // 「목록에서 숨기기」는 되돌릴 수 있는 닫기라 위험색이 아니다(웹·사이드바 시트와 같은 표).
     const close = conversationMenuActionItems(dmTarget({closeOffered: true})).find(item => item.key === 'close-dm');
     expect([close?.label, close?.tone]).toEqual([DM_CLOSE_LABEL, undefined]);
   });
@@ -339,6 +339,27 @@ describe('시트 — 카드와 행의 차례 (#4319)', () => {
   });
 });
 
+describe('시트 — 알림 줄의 끝 표지는 종 아이콘이다 (#5776)', () => {
+  motionOff();
+
+  it('켜짐은 bell·꺼짐은 bell-off, 이모지 없이 20pt 로 서고 위 줄들의 셰브론(잉크 끝 6pt)과 같은 선에 끝이 선다', () => {
+    const muteOn = conversationMenuActionItems(target({muted: true}))[0];
+    for (const [item, source, ink] of [
+      [MUTE_OFF, CONV_ICONS.bell, 5 / 3],
+      [muteOn, CONV_ICONS.bellOff, 1],
+    ] as const) {
+      renderSheet({onOpenInfo: jest.fn(), items: [item]});
+      const row = screen.getByTestId('conversation-menu-mute-toggle');
+      const glyphs = within(row).UNSAFE_queryAllByType(Image);
+      expect(glyphs.map(node => node.props.source)).toEqual([source]);
+      const style = StyleSheet.flatten(glyphs[0].props.style);
+      expect([style.width, style.height]).toEqual([20, 20]);
+      expect(style.marginRight).toBeCloseTo(6 - ink, 5);
+      expect(row).not.toHaveTextContent(/🔔|🔕/);
+    }
+  });
+});
+
 describe('시트 — 닫는 길: 문은 시트를 먼저 내리고, 행동은 시트가 진행을 보인다 (#4319)', () => {
   motionOff();
 
@@ -360,7 +381,7 @@ describe('시트 — 닫는 길: 문은 시트를 먼저 내리고, 행동은 �
     }
   });
 
-  it('알림 · 대화 닫기 · 채널 나가기는 `closesSheet` 가 아니다 — 시트를 닫지 않고 바로 실행을 부탁한다', () => {
+  it('알림 · 목록에서 숨기기 · 채널 나가기는 `closesSheet` 가 아니다 — 시트를 닫지 않고 바로 실행을 부탁한다', () => {
     const dm = renderSheet({items: [MUTE_OFF, CLOSE_DM]});
     fireEvent.press(screen.getByTestId('conversation-menu-mute-toggle'));
     fireEvent.press(screen.getByTestId('conversation-menu-close-dm'));
@@ -383,7 +404,7 @@ describe('시트 — 닫는 길: 문은 시트를 먼저 내리고, 행동은 �
     expect(close.props.accessibilityState).toMatchObject({busy: false});
   });
 
-  it('위험색은 코어 표가 정한 행에만 선다 — 채널 나가기는 위험색, 알림·대화 닫기는 아니다', () => {
+  it('위험색은 코어 표가 정한 행에만 선다 — 채널 나가기는 위험색, 알림·목록에서 숨기기는 아니다', () => {
     renderSheet({kind: 'public', title: 'general', items: [MUTE_OFF, LEAVE]});
     const titleOf = (key: string) =>
       flatten(within(screen.getByTestId(`conversation-menu-${key}`)).getByText(/\S/).props.style);
@@ -798,7 +819,7 @@ describe('셸 — ⋮ 시트의 항목은 대화마다 다르다 (#4319)', () =>
     expect(screen.getByTestId('conversation-menu-mute-toggle')).toHaveTextContent(/알림 꺼짐/);
   });
 
-  it('사람 DM(서버가 닫기를 싣고 다 읽음): 고정 · 알림 · 대화 닫기 — 머리는 상대 이름이고 나가기는 없다', async () => {
+  it('사람 DM(서버가 닫기를 싣고 다 읽음): 고정 · 알림 · 목록에서 숨기기 — 머리는 상대 이름이고 나가기는 없다', async () => {
     await mountShell({serverClosure: true});
     await openConversation(ROW.human);
     await openConversationMenu();
@@ -1095,12 +1116,12 @@ describe('셸 — 채널 나가기는 확인 단계를 지난다 (#4319)', () =>
   });
 });
 
-describe('셸 — DM 의 「대화 닫기」 (#4319, ADR-0177 증보 D7)', () => {
+describe('셸 — DM 의 「목록에서 숨기기」 (#4319, ADR-0177 증보 D7)', () => {
   liveWorld();
 
   const closeRow = 'conversation-menu-close-dm';
 
-  it('누르면 서버에 PUT …/closure 를 seenSeq(투영의 latestSeq)로 한 번 보내고, 대화가 걷히고, 「대화를 닫았습니다.」를 낭독하고, 행이 목록에서 사라진다', async () => {
+  it('누르면 서버에 PUT …/closure 를 seenSeq(투영의 latestSeq)로 한 번 보내고, 대화가 걷히고, 「대화를 목록에서 숨겼습니다.」를 낭독하고, 행이 목록에서 사라진다', async () => {
     const spoken = announce();
     await mountShell({serverClosure: true});
     await openConversation(ROW.human);
@@ -1114,7 +1135,7 @@ describe('셸 — DM 의 「대화 닫기」 (#4319, ADR-0177 증보 D7)', () =>
     await waitFor(() => expect(screen.queryByTestId('conversation-pane')).toBeNull());
     expect(screen.queryByTestId('conversation-menu-sheet')).toBeNull();
     // 대화가 걷히며 낭독이 삼켜지지 않는다 — 훅이 걷기 전에 알린다.
-    expect(spoken).toHaveBeenCalledWith('대화를 닫았습니다.');
+    expect(spoken).toHaveBeenCalledWith('대화를 목록에서 숨겼습니다.');
     await waitFor(() => expect(screen.queryByTestId(ROW.human)).toBeNull());
   });
 
@@ -1168,7 +1189,7 @@ describe('셸 — DM 의 「대화 닫기」 (#4319, ADR-0177 증보 D7)', () =>
     expect(screen.getByTestId('conversation-pane')).toBeTruthy();
     await act(async () => releaseHeld());
     await waitFor(() => expect(screen.queryByTestId('conversation-pane')).toBeNull());
-    expect(spoken).toHaveBeenCalledWith('대화를 닫았습니다.');
+    expect(spoken).toHaveBeenCalledWith('대화를 목록에서 숨겼습니다.');
     expect(closedDms.get('ch-dm-human')).toBe(2);
   });
 });
@@ -1574,7 +1595,7 @@ describe('셸 — 정보 페이지의 채널 나가기 (#4319)', () => {
   });
 });
 
-describe('셸 — 정보 페이지의 DM 「대화 닫기」 (#4319)', () => {
+describe('셸 — 정보 페이지의 DM 「목록에서 숨기기」 (#4319)', () => {
   liveWorld();
 
   it('닫기를 내미는 DM: 누르면 PUT …/closure 를 한 번 보내고 대화가 페이지째 걷히며 낭독한다', async () => {
@@ -1589,12 +1610,12 @@ describe('셸 — 정보 페이지의 DM 「대화 닫기」 (#4319)', () => {
     expect(callsTo('/closure')[0].body).toEqual({seenSeq: 2});
     await waitFor(() => expect(screen.queryByTestId('conversation-pane')).toBeNull());
     expect(screen.queryByTestId('conversation-info-page')).toBeNull();
-    expect(spoken).toHaveBeenCalledWith('대화를 닫았습니다.');
+    expect(spoken).toHaveBeenCalledWith('대화를 목록에서 숨겼습니다.');
     // 한 겹만 걷혔다: 사이드바가 그대로 서 있다.
     expect(screen.getByTestId('sidebar-list')).toBeTruthy();
   });
 
-  it('닫기를 내밀지 않는 DM(안 읽은 메시지가 있다)에는 「대화 닫기」가 없다', async () => {
+  it('닫기를 내밀지 않는 DM(안 읽은 메시지가 있다)에는 「목록에서 숨기기」가 없다', async () => {
     await mountShell({serverClosure: true, dmUnread: true});
     await openConversation(ROW.human);
     await openInfoPage();
