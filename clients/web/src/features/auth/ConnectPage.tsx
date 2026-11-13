@@ -540,6 +540,9 @@ export function ConnectPage({
   function onJoinSubmit(e: FormEvent) {
     e.preventDefault();
     if (busy || profileBusy || submitLockRef.current) return;
+    // 코드 없는 가입은 없다. 넘김에서 링크가 앞 세션의 로그아웃을 기다리는 동안(`useJoinPrefill`) 이 걸음은
+    // 코드가 아직 비어 있다: 그때 누른 것은 아무 데로도 보내지 않는다(#5785).
+    if (!joined && inviteCode === "") return;
     if (joined) {
       if (profileFailed || !wantsNamePatch(joined)) {
         finishJoin(joined, joined.member);

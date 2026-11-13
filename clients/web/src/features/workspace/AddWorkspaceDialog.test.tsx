@@ -503,6 +503,16 @@ describe("워크스페이스 추가: 두 카드 (#5785)", () => {
     expect(q("add-workspace-name")).toBeNull();
     // 참여 카드는 지금 하는 일을 숨기지 않는다: 로그아웃한 뒤 로그인 화면에서 이어 간다.
     expect(text("add-workspace-choose-join")).toContain("로그아웃한 뒤 로그인 화면");
+    // 웹은 다른 서버를 새 탭으로 연다(#5785 r3 L2).
+    expect(text("add-workspace-choose-join")).toContain("다른 서버는 새 탭에서 열고");
+  });
+
+  it("데스크탑의 참여 카드는 새 탭을 말하지 않는다(로그아웃 뒤 로그인 화면만)", async () => {
+    shell.tauri = true;
+    mount();
+    await waitForRoster();
+    expect(text("add-workspace-choose-join")).toContain("로그아웃한 뒤 로그인 화면");
+    expect(text("add-workspace-choose-join")).not.toContain("새 탭");
   });
 
   it("두 카드는 Tab 순서의 단추이고 ↑/↓로 오간다(끝에서 감는다)", async () => {

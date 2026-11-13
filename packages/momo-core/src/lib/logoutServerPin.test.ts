@@ -120,7 +120,7 @@ afterEach(() => {
 });
 
 describe("logout은 시작할 때의 서버로만 보낸다", () => {
-  it("호스트가 폐기를 맡지 않고(false) 돌아온 뒤에도 폐기 요청은 시작한 서버로 간다", async () => {
+  it("호스트에 먼저 물은 뒤에도 폐기는 시작한 서버로 간다", async () => {
     const h = harness();
     h.port.revokeThroughHost = async () => false;
     const done = logout();
@@ -154,7 +154,7 @@ describe("logout은 시작할 때의 서버로만 보낸다", () => {
     expect(h.sent).toEqual([]);
   });
 
-  it("접근 토큰이 만료돼 401이면, 그 뒤 갱신과 두 번째 폐기도 시작한 서버로 간다", async () => {
+  it("401 뒤의 갱신과 두 번째 폐기도 시작한 서버로 간다", async () => {
     const h = harness();
     h.reply(
       { status: 401, body: { error: { message: "expired" } } },
@@ -229,7 +229,7 @@ describe("logout은 시작할 때의 서버로만 보낸다", () => {
 });
 
 describe("갱신은 토큰을 읽은 때의 서버로만 보낸다", () => {
-  it("증명 서명을 기다리는 사이 서버가 바뀌어도 refresh 요청은 원래 서버로 간다", async () => {
+  it("증명 서명을 기다린 뒤에도 refresh는 토큰을 읽은 때의 서버로 간다", async () => {
     const h = harness();
     h.port.signRefreshProof = async (request): Promise<RefreshDeviceProof> => {
       h.switchServer();
@@ -245,7 +245,7 @@ describe("갱신은 토큰을 읽은 때의 서버로만 보낸다", () => {
     expect(h.sent.map((s) => `${s.origin}${s.path}`)).toEqual([`${START}/v1/auth/refresh`]);
   });
 
-  it("셸이 나르는 갱신이 다시 서명해 두 번째로 갈 때도 토큰을 읽은 때의 서버를 건넨다", async () => {
+  it("셸이 나르는 갱신의 두 번째 시도도 토큰을 읽은 때의 서버를 건넨다", async () => {
     const h = harness();
     const bases: string[] = [];
     h.port.refreshThroughHost = async (request) => {

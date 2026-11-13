@@ -158,7 +158,7 @@ async function installRealtime(page) {
 
 /**
  * 데스크탑 셸의 키체인 대역: 셸 명령 몇 개만 흉내 낸다(키체인 있음 · 저장 · 손잡이 · 셸이 나르는 갱신과 폐기).
- * 셸이 받은 갱신 · 폐기 요청의 `apiBase`만 적는다. 폐기의 답은 1.5초 늦춘다(그동안 저장된 서버를 본다).
+ * 셸이 받은 갱신 · 폐기 요청의 `apiBase`만 적는다. 폐기의 답은 3초 늦춘다(그동안 저장된 서버를 본다).
  * 나머지 명령은 셸이 없는 것처럼 거절한다.
  */
 async function installKeychainShell(page) {
@@ -184,7 +184,7 @@ async function installKeychainShell(page) {
         }
         if (cmd === "session_revoke") {
           window.__shellCalls.push({ cmd, apiBase });
-          await new Promise((r) => setTimeout(r, 1_500));
+          await new Promise((r) => setTimeout(r, 3_000));
           return true;
         }
         throw new Error(`capture: no shell command ${cmd}`);
@@ -371,15 +371,16 @@ async function ownerRun(page, origin, tag, withHandoff, keychain = false) {
     check(tag, "데스크탑: 확인 걸음이 로그아웃과 넘어갈 곳을 말하고 초안은 말하지 않는다", confirmText.includes("로그아웃돼요") && !confirmText.includes("초안") && confirmText.includes("team.example.com의 초대로 넘어가요"), null);
     await fits(page, tag, "join-confirm", "add-workspace-join-logout");
     await shot(page, tag, "join-confirm");
-    // 원래 서버의 로그아웃 답을 1.5초 늦춘다: 그동안 저장된 서버가 바뀌면(넘김 순서가 깨지면) 아래 단정이 빨갛다.
-    holdLogoutMs = 1_500;
+    // 원래 서버의 로그아웃 답을 3초 늦춘다: 그동안 저장된 서버가 바뀌면(넘김 순서가 깨지면) 아래 단정이 빨갛다.
+    holdLogoutMs = 3_000;
     const logFrom = apiLog.length;
     if (keychain) {
       const shellBefore = await page.evaluate(() => window.__shellCalls);
       check(tag, "키체인 대역: 로그인 뒤 셸이 갱신을 날라 세션이 손잡이 상태다", shellBefore.some((c) => c.cmd === "session_refresh_attempt"), shellBefore);
     }
     await page.getByTestId("add-workspace-join-logout").click();
-    await page.waitForTimeout(500);
+    // 로그인 화면이 선 뒤에 본다(서기 전에 보면 아무것도 재지 않는다).
+    await page.getByTestId("onboarding-join").waitFor({ timeout: 2_500 });
     const storedWhileHeld = await page.evaluate(() => localStorage.getItem("momo.web.server.v1"));
     check(tag, "넘김: 원래 서버의 로그아웃이 끝나기 전에는 저장된 서버가 원래 서버", storedWhileHeld === origin, { storedWhileHeld, origin });
     await shot(page, tag, "handoff-waiting");

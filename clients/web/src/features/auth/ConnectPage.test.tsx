@@ -394,6 +394,13 @@ describe("D0 환영 (#2808 OB2-2)", () => {
     expect(getServerBase()).toBe("https://start.example.com");
     // 초대 코드는 기다리는 동안에도 주소창에서 걷힌다.
     expect(window.location.href).not.toContain(CODE);
+    // 기다리는 동안의 가입 걸음은 코드가 비어 있다: 눌러도 아무 데로도 보내지 않는다.
+    expect(q("onboarding-join")).not.toBeNull();
+    const form = q("onboarding-join")?.closest("form") ?? document.querySelector("form");
+    act(() => {
+      form?.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+    });
+    expect(joinWithInvite).not.toHaveBeenCalled();
     await act(async () => {
       release();
       await Promise.resolve();
