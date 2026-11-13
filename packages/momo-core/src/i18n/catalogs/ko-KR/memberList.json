@@ -16,5 +16,16 @@
   "memberList.noMatch.headline": "일치하는 멤버가 없습니다.",
   "memberList.noMatch.detail": "검색어 \"{query}\"에 해당하는 이름, 핸들, 이메일이 없습니다. 다른 말로 찾아 보세요.",
   "memberList.noMatch.detailGuest": "검색어 \"{query}\"에 해당하는 이름이나 핸들이 없습니다. 다른 이름으로 검색하세요.",
-  "memberList.noMatch.clear": "검색 지우기"
+  "memberList.noMatch.clear": "검색 지우기",
+  "memberList.newDm.title": "새 다이렉트 메시지",
+  "memberList.newDm.description": "대화할 멤버나 에이전트를 고르세요. 이미 대화 중이면 그 대화로 이동합니다.",
+  "memberList.newDm.toLabel": "받는 사람",
+  "memberList.newDm.placeholder": "이름이나 핸들로 검색",
+  "memberList.newDm.hasDm": "대화 중",
+  "memberList.newDm.continueAction": "대화 이어가기",
+  "memberList.newDm.startAction": "새 대화 시작",
+  "memberList.newDm.emptyHeadline": "대화할 다른 멤버가 없습니다.",
+  "memberList.newDm.emptyDetail": "워크스페이스에 멤버를 초대하면 여기서 바로 대화를 시작할 수 있습니다.",
+  "memberList.newDm.noMatchDetail": "검색어 \"{query}\"에 해당하는 이름이나 핸들이 없습니다.",
+  "memberList.newDm.close": "닫기"
 }

@@ -4000,6 +4000,80 @@ export const catalog: MessageCatalog = {
       "value": "사람"
     }
   ],
+  "memberList.newDm.close": [
+    {
+      "type": 0,
+      "value": "닫기"
+    }
+  ],
+  "memberList.newDm.continueAction": [
+    {
+      "type": 0,
+      "value": "대화 이어가기"
+    }
+  ],
+  "memberList.newDm.description": [
+    {
+      "type": 0,
+      "value": "대화할 멤버나 에이전트를 고르세요. 이미 대화 중이면 그 대화로 이동합니다."
+    }
+  ],
+  "memberList.newDm.emptyDetail": [
+    {
+      "type": 0,
+      "value": "워크스페이스에 멤버를 초대하면 여기서 바로 대화를 시작할 수 있습니다."
+    }
+  ],
+  "memberList.newDm.emptyHeadline": [
+    {
+      "type": 0,
+      "value": "대화할 다른 멤버가 없습니다."
+    }
+  ],
+  "memberList.newDm.hasDm": [
+    {
+      "type": 0,
+      "value": "대화 중"
+    }
+  ],
+  "memberList.newDm.noMatchDetail": [
+    {
+      "type": 0,
+      "value": "검색어 \""
+    },
+    {
+      "type": 1,
+      "value": "query"
+    },
+    {
+      "type": 0,
+      "value": "\"에 해당하는 이름이나 핸들이 없습니다."
+    }
+  ],
+  "memberList.newDm.placeholder": [
+    {
+      "type": 0,
+      "value": "이름이나 핸들로 검색"
+    }
+  ],
+  "memberList.newDm.startAction": [
+    {
+      "type": 0,
+      "value": "새 대화 시작"
+    }
+  ],
+  "memberList.newDm.title": [
+    {
+      "type": 0,
+      "value": "새 다이렉트 메시지"
+    }
+  ],
+  "memberList.newDm.toLabel": [
+    {
+      "type": 0,
+      "value": "받는 사람"
+    }
+  ],
   "memberList.noMatch.clear": [
     {
       "type": 0,

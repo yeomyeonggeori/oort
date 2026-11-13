@@ -661,7 +661,7 @@
     "clients/web/src/features/channels/ChannelContextControls.tsx": {"ko": 19, "en": 0},
     "clients/web/src/features/directory/DirectoryRoute.tsx": {"ko": 0, "en": 0},
     "clients/web/src/features/directory/MemberRow.tsx": {"ko": 0, "en": 0},
-    "clients/web/src/features/directory/NewDmDialog.tsx": {"ko": 15, "en": 0},
+    "clients/web/src/features/directory/NewDmDialog.tsx": {"ko": 0, "en": 0},
     "clients/web/src/features/inbox/LocalPaneInbox.tsx": {"ko": 1, "en": 0},
     "clients/web/src/features/sidebar/SidebarDestinations.tsx": {"ko": 9, "en": 0},
     "clients/web/src/features/sidebar/WorkspaceRail.tsx": {"ko": 10, "en": 0},

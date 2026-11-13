@@ -4324,6 +4324,80 @@ export const catalog: MessageCatalog = {
       "value": "People"
     }
   ],
+  "memberList.newDm.close": [
+    {
+      "type": 0,
+      "value": "Close"
+    }
+  ],
+  "memberList.newDm.continueAction": [
+    {
+      "type": 0,
+      "value": "continue the conversation"
+    }
+  ],
+  "memberList.newDm.description": [
+    {
+      "type": 0,
+      "value": "Pick a member or an agent to talk to. If you already have a conversation, it opens that one."
+    }
+  ],
+  "memberList.newDm.emptyDetail": [
+    {
+      "type": 0,
+      "value": "Invite members to the workspace and you can start a conversation right here."
+    }
+  ],
+  "memberList.newDm.emptyHeadline": [
+    {
+      "type": 0,
+      "value": "There is no one else to talk to yet."
+    }
+  ],
+  "memberList.newDm.hasDm": [
+    {
+      "type": 0,
+      "value": "In conversation"
+    }
+  ],
+  "memberList.newDm.noMatchDetail": [
+    {
+      "type": 0,
+      "value": "No name or handle matches \""
+    },
+    {
+      "type": 1,
+      "value": "query"
+    },
+    {
+      "type": 0,
+      "value": "\"."
+    }
+  ],
+  "memberList.newDm.placeholder": [
+    {
+      "type": 0,
+      "value": "Search by name or handle"
+    }
+  ],
+  "memberList.newDm.startAction": [
+    {
+      "type": 0,
+      "value": "start a new conversation"
+    }
+  ],
+  "memberList.newDm.title": [
+    {
+      "type": 0,
+      "value": "New direct message"
+    }
+  ],
+  "memberList.newDm.toLabel": [
+    {
+      "type": 0,
+      "value": "To"
+    }
+  ],
   "memberList.noMatch.clear": [
     {
       "type": 0,

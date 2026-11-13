@@ -592,6 +592,17 @@ export const messageKeys = [
   "memberList.empty.invite",
   "memberList.group.agents",
   "memberList.group.people",
+  "memberList.newDm.close",
+  "memberList.newDm.continueAction",
+  "memberList.newDm.description",
+  "memberList.newDm.emptyDetail",
+  "memberList.newDm.emptyHeadline",
+  "memberList.newDm.hasDm",
+  "memberList.newDm.noMatchDetail",
+  "memberList.newDm.placeholder",
+  "memberList.newDm.startAction",
+  "memberList.newDm.title",
+  "memberList.newDm.toLabel",
   "memberList.noMatch.clear",
   "memberList.noMatch.detail",
   "memberList.noMatch.detailGuest",
@@ -2194,6 +2205,19 @@ export const argumentSpecs = {
   "memberList.empty.invite": {},
   "memberList.group.agents": {},
   "memberList.group.people": {},
+  "memberList.newDm.close": {},
+  "memberList.newDm.continueAction": {},
+  "memberList.newDm.description": {},
+  "memberList.newDm.emptyDetail": {},
+  "memberList.newDm.emptyHeadline": {},
+  "memberList.newDm.hasDm": {},
+  "memberList.newDm.noMatchDetail": {
+    "query": "string"
+  },
+  "memberList.newDm.placeholder": {},
+  "memberList.newDm.startAction": {},
+  "memberList.newDm.title": {},
+  "memberList.newDm.toLabel": {},
   "memberList.noMatch.clear": {},
   "memberList.noMatch.detail": {
     "query": "string"
@@ -3961,6 +3985,17 @@ export interface MessageArgs {
   "memberList.empty.invite": Record<string, never>;
   "memberList.group.agents": Record<string, never>;
   "memberList.group.people": Record<string, never>;
+  "memberList.newDm.close": Record<string, never>;
+  "memberList.newDm.continueAction": Record<string, never>;
+  "memberList.newDm.description": Record<string, never>;
+  "memberList.newDm.emptyDetail": Record<string, never>;
+  "memberList.newDm.emptyHeadline": Record<string, never>;
+  "memberList.newDm.hasDm": Record<string, never>;
+  "memberList.newDm.noMatchDetail": { query: string };
+  "memberList.newDm.placeholder": Record<string, never>;
+  "memberList.newDm.startAction": Record<string, never>;
+  "memberList.newDm.title": Record<string, never>;
+  "memberList.newDm.toLabel": Record<string, never>;
   "memberList.noMatch.clear": Record<string, never>;
   "memberList.noMatch.detail": { query: string };
   "memberList.noMatch.detailGuest": { query: string };

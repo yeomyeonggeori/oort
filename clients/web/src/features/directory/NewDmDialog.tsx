@@ -69,6 +69,7 @@ function PickRow({
   disabled: boolean;
   onPick: (member: RosterMember) => void;
 }) {
+  const t = useFormatMessage();
   const isAgent = member.kind === "agent";
   const dot = peerDot(member, Date.now());
   return (
@@ -82,7 +83,7 @@ function PickRow({
       disabled={disabled}
       aria-label={`${member.displayName} @${member.handle}${
         dot ? `, ${dot.label}` : ""
-      }${hasDm ? ", 대화 이어가기" : ", 새 대화 시작"}`}
+      }, ${t(hasDm ? "memberList.newDm.continueAction" : "memberList.newDm.startAction")}`}
       onClick={() => onPick(member)}
       className="disabled:opacity-60"
       leading={<Avatar member={member} />}
@@ -104,7 +105,7 @@ function PickRow({
             data-testid="new-dm-has-dm"
           >
             <MessageSquare className="size-4" aria-hidden="true" />
-            대화 중
+            {t("memberList.newDm.hasDm")}
           </span>
         ) : null
       }
@@ -234,8 +235,8 @@ function NewDmPanel({ onOpenChange }: { onOpenChange: (open: boolean) => void })
   } else if (candidates.length === 0) {
     body = (
       <EmptyInvite
-        headline="대화할 다른 멤버가 없습니다."
-        detail="워크스페이스에 멤버를 초대하면 여기서 바로 대화를 시작할 수 있습니다."
+        headline={t("memberList.newDm.emptyHeadline")}
+        detail={t("memberList.newDm.emptyDetail")}
         actions={
           <Button
             size="sm"
@@ -244,7 +245,7 @@ function NewDmPanel({ onOpenChange }: { onOpenChange: (open: boolean) => void })
               onOpenChange(false);
             }}
           >
-            멤버 초대하기
+            {t("memberList.empty.invite")}
           </Button>
         }
         testId="new-dm-empty-workspace"
@@ -253,11 +254,11 @@ function NewDmPanel({ onOpenChange }: { onOpenChange: (open: boolean) => void })
   } else if (groups.matched === 0) {
     body = (
       <EmptyInvite
-        headline="일치하는 멤버가 없습니다."
-        detail={`검색어 "${query.trim()}"에 해당하는 이름이나 핸들이 없습니다.`}
+        headline={t("memberList.noMatch.headline")}
+        detail={t("memberList.newDm.noMatchDetail", { query: query.trim() })}
         actions={
           <Button variant="outline" size="sm" onClick={() => setQuery("")}>
-            검색 지우기
+            {t("memberList.noMatch.clear")}
           </Button>
         }
         testId="new-dm-no-match"
@@ -287,9 +288,9 @@ function NewDmPanel({ onOpenChange }: { onOpenChange: (open: boolean) => void })
       }}
     >
       <div className="flex flex-col gap-1 border-b border-line p-4">
-        <DialogTitle>새 다이렉트 메시지</DialogTitle>
+        <DialogTitle>{t("memberList.newDm.title")}</DialogTitle>
         <DialogDescription>
-          대화할 멤버나 에이전트를 고르세요. 이미 대화 중이면 그 대화로 이동합니다.
+          {t("memberList.newDm.description")}
         </DialogDescription>
       </div>
 
@@ -303,7 +304,7 @@ function NewDmPanel({ onOpenChange }: { onOpenChange: (open: boolean) => void })
 
       <div className="flex items-center gap-3 border-b border-line px-4 py-3">
         <label htmlFor="new-dm-to" className="shrink-0 text-meta font-medium text-ink-muted">
-          받는 사람
+          {t("memberList.newDm.toLabel")}
         </label>
         <Input
           id="new-dm-to"
@@ -312,7 +313,7 @@ function NewDmPanel({ onOpenChange }: { onOpenChange: (open: boolean) => void })
           value={query}
           onChange={(event) => setQuery(event.target.value)}
           onKeyDown={onSearchKeyDown}
-          placeholder="이름이나 핸들로 검색"
+          placeholder={t("memberList.newDm.placeholder")}
           autoComplete="off"
           spellCheck={false}
           data-testid="new-dm-search"
@@ -337,7 +338,7 @@ function NewDmPanel({ onOpenChange }: { onOpenChange: (open: boolean) => void })
           onClick={() => onOpenChange(false)}
           data-testid="new-dm-close"
         >
-          닫기
+          {t("memberList.newDm.close")}
         </Button>
       </div>
     </DialogContent>
