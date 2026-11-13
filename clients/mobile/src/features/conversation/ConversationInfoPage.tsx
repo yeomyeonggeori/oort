@@ -176,7 +176,7 @@ function InfoBody({
         key={found.key}
         title={busy && found.busyLabel ? found.busyLabel : found.label}
         // 알림 상태 표지는 오른쪽 값 자리다. 앞 칸·행 차례·위험색은 #4319 계약을 따른다.
-        trailing={isChannelActionStatusIcon(found.icon) ? <RowStatusIcon name={found.icon} align="copy" /> : undefined}
+        trailing={isChannelActionStatusIcon(found.icon) ? <RowStatusIcon name={found.icon} /> : undefined}
         tone={found.tone === 'danger' ? 'danger' : 'default'}
         accessory={accessory}
         busy={busy}

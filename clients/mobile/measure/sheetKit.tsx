@@ -508,6 +508,9 @@ const DM_TARGET: ChannelRowTarget = {
   closeOffered: true,
 };
 
+// 알림을 끈 채널(#5791) - 알림 줄의 끝 표지가 빗금 종(bell-off)이다. 켜짐(`channel`)과 한 쌍으로 찍어 두 종의 잉크 끝을 잰다.
+const CHANNEL_MUTED_TARGET: ChannelRowTarget = {...CHANNEL_TARGET, muted: true};
+
 function ChannelSheetSurface({
   target,
   confirmingLeave,
@@ -784,6 +787,8 @@ export function SheetKitSurface({which}: {which: string}): React.JSX.Element {
       return <ChannelSheetSurface target={CHANNEL_TARGET} confirmingLeave />;
     case 'channel-dm':
       return <ChannelSheetSurface target={DM_TARGET} confirmingLeave={false} />;
+    case 'channel-muted':
+      return <ChannelSheetSurface target={CHANNEL_MUTED_TARGET} confirmingLeave={false} />;
     case 'devicekey-pending':
       return <DeviceKeySheetSurface which="pending" />;
     case 'devicekey-approved':
