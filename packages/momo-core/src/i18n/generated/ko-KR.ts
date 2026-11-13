@@ -1985,6 +1985,222 @@ export const catalog: MessageCatalog = {
       "value": "세션"
     }
   ],
+  "directory.lifecycle.cancel": [
+    {
+      "type": 0,
+      "value": "취소"
+    }
+  ],
+  "directory.lifecycle.errorForbidden": [
+    {
+      "type": 0,
+      "value": "이 워크스페이스에서 멤버를 정지하거나 내보낼 권한이 없어요."
+    }
+  ],
+  "directory.lifecycle.errorLastOwner": [
+    {
+      "type": 0,
+      "value": "워크스페이스에는 "
+    },
+    {
+      "type": 1,
+      "value": "owner"
+    },
+    {
+      "type": 0,
+      "value": " 역할인 사람이 한 명은 있어야 해서 정지하거나 내보낼 수 없어요."
+    }
+  ],
+  "directory.lifecycle.errorNetwork": [
+    {
+      "type": 0,
+      "value": "서버에 닿지 못했어요. 연결을 확인한 뒤 다시 시도하세요."
+    }
+  ],
+  "directory.lifecycle.errorNotActive": [
+    {
+      "type": 0,
+      "value": "이 멤버는 지금 활성 상태가 아니에요. 그사이 다른 사람이 정지했을 수 있어요."
+    }
+  ],
+  "directory.lifecycle.errorNotFound": [
+    {
+      "type": 0,
+      "value": "이 멤버를 찾지 못했어요. 이미 워크스페이스에서 나갔을 수 있어요."
+    }
+  ],
+  "directory.lifecycle.errorNotSuspended": [
+    {
+      "type": 0,
+      "value": "이 멤버는 지금 정지된 상태가 아니에요. 그사이 다른 사람이 정지를 풀었을 수 있어요."
+    }
+  ],
+  "directory.lifecycle.errorRank": [
+    {
+      "type": 0,
+      "value": "같거나 높은 역할의 멤버는 정지하거나 내보낼 수 없어요. 그사이 역할이 바뀌었을 수 있어요."
+    }
+  ],
+  "directory.lifecycle.errorRateLimited": [
+    {
+      "type": 0,
+      "value": "요청이 너무 잦아요. 잠시 뒤에 다시 시도하세요."
+    }
+  ],
+  "directory.lifecycle.errorSelf": [
+    {
+      "type": 0,
+      "value": "자기 자신은 정지하거나 내보낼 수 없어요."
+    }
+  ],
+  "directory.lifecycle.errorUnknown": [
+    {
+      "type": 0,
+      "value": "처리하지 못했어요. 다시 시도하세요."
+    }
+  ],
+  "directory.lifecycle.reinstate": [
+    {
+      "type": 0,
+      "value": "정지 풀기"
+    }
+  ],
+  "directory.lifecycle.reinstateBody": [
+    {
+      "type": 0,
+      "value": "다시 로그인할 수 있게 돼요. 정지 전의 로그인은 되살아나지 않아서 새로 로그인해야 해요. 들어가 있던 채널은 그대로예요."
+    }
+  ],
+  "directory.lifecycle.reinstateBusy": [
+    {
+      "type": 0,
+      "value": "푸는 중"
+    }
+  ],
+  "directory.lifecycle.reinstatedReceipt": [
+    {
+      "type": 0,
+      "value": "풀림"
+    }
+  ],
+  "directory.lifecycle.reinstateTitle": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " 님의 정지를 풀까요?"
+    }
+  ],
+  "directory.lifecycle.remove": [
+    {
+      "type": 0,
+      "value": "워크스페이스에서 내보내기"
+    }
+  ],
+  "directory.lifecycle.removeAction": [
+    {
+      "type": 0,
+      "value": "내보내기"
+    }
+  ],
+  "directory.lifecycle.removeBusy": [
+    {
+      "type": 0,
+      "value": "내보내는 중"
+    }
+  ],
+  "directory.lifecycle.removedClose": [
+    {
+      "type": 0,
+      "value": "닫기"
+    }
+  ],
+  "directory.lifecycle.removedTitle": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " 님을 워크스페이스에서 내보냈어요."
+    }
+  ],
+  "directory.lifecycle.removeKeeps": [
+    {
+      "type": 0,
+      "value": "쓴 글과 DM 기록은 남고, 글쓴이 이름은 「나간 멤버」 표시로 바뀌어요."
+    }
+  ],
+  "directory.lifecycle.removeLeaves": [
+    {
+      "type": 0,
+      "value": "모든 채널과 DM에서 빠지고, 모든 기기에서 바로 로그아웃돼요. 예약해 둔 메시지는 취소돼요."
+    }
+  ],
+  "directory.lifecycle.removeTitle": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " 님을 워크스페이스에서 내보낼까요?"
+    }
+  ],
+  "directory.lifecycle.removeWarning": [
+    {
+      "type": 0,
+      "value": "되돌릴 수 없어요. 다시 초대해도 같은 이메일로는 이 워크스페이스에 들어올 수 없어요."
+    }
+  ],
+  "directory.lifecycle.suspend": [
+    {
+      "type": 0,
+      "value": "정지"
+    }
+  ],
+  "directory.lifecycle.suspendBusy": [
+    {
+      "type": 0,
+      "value": "정지 중"
+    }
+  ],
+  "directory.lifecycle.suspendedReceipt": [
+    {
+      "type": 0,
+      "value": "정지함"
+    }
+  ],
+  "directory.lifecycle.suspendKeeps": [
+    {
+      "type": 0,
+      "value": "쓴 글과 들어가 있던 채널은 그대로 남아요. 다만 정지된 동안에는 그 글의 글쓴이 이름이 「나간 멤버」 표시로 바뀌어요."
+    }
+  ],
+  "directory.lifecycle.suspendSignOut": [
+    {
+      "type": 0,
+      "value": "모든 기기에서 바로 로그아웃되고, 정지가 풀릴 때까지 다시 로그인할 수 없어요. 폰 알림도 더는 가지 않아요."
+    }
+  ],
+  "directory.lifecycle.suspendTitle": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " 님을 정지할까요?"
+    }
+  ],
+  "directory.lifecycle.suspendUndo": [
+    {
+      "type": 0,
+      "value": "정지는 이 창에서 바로 풀 수 있어요. 창을 닫으면 정지된 멤버는 명부에 보이지 않아요."
+    }
+  ],
   "directory.manage.heading": [
     {
       "type": 0,
@@ -2236,7 +2452,7 @@ export const catalog: MessageCatalog = {
     },
     {
       "type": 0,
-      "value": "끼리는 서로의 역할을 바꾸거나 내보낼 수 없어서, 한 번 올리면 되돌릴 수 없어요."
+      "value": "끼리는 서로의 역할을 바꾸거나 서로를 정지하고 내보낼 수 없지만, 서로의 비밀번호 재설정 링크는 만들 수 있어요. 한 번 올리면 되돌릴 수 없어요."
     }
   ],
   "directory.role.confirmPair": [

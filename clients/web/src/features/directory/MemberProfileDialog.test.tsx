@@ -30,6 +30,9 @@ const AGENT_ID = "00000000-0000-7000-8000-000000000102";
 
 const changeWorkspaceMemberRole = vi.hoisted(() => vi.fn());
 const fetchRoster = vi.hoisted(() => vi.fn());
+const suspendWorkspaceMember = vi.hoisted(() => vi.fn());
+const reinstateWorkspaceMember = vi.hoisted(() => vi.fn());
+const removeWorkspaceMember = vi.hoisted(() => vi.fn());
 
 vi.mock("@momo/core/lib/api", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@momo/core/lib/api")>();
@@ -42,6 +45,12 @@ vi.mock("@momo/core/lib/api", async (importOriginal) => {
     ) => changeWorkspaceMemberRole(workspaceId, memberId, role) as Promise<unknown>,
     fetchRoster: (workspaceId: string) =>
       fetchRoster(workspaceId) as Promise<RosterMember[]>,
+    suspendWorkspaceMember: (workspaceId: string, memberId: string) =>
+      suspendWorkspaceMember(workspaceId, memberId) as Promise<unknown>,
+    reinstateWorkspaceMember: (workspaceId: string, memberId: string) =>
+      reinstateWorkspaceMember(workspaceId, memberId) as Promise<unknown>,
+    removeWorkspaceMember: (workspaceId: string, memberId: string) =>
+      removeWorkspaceMember(workspaceId, memberId) as Promise<unknown>,
   };
 });
 
@@ -60,6 +69,9 @@ beforeAll(async () => {
 beforeEach(() => {
   changeWorkspaceMemberRole.mockReset();
   fetchRoster.mockReset();
+  suspendWorkspaceMember.mockReset();
+  reinstateWorkspaceMember.mockReset();
+  removeWorkspaceMember.mockReset();
   writeText.mockReset();
   writeText.mockResolvedValue(undefined);
   Object.defineProperty(window.navigator, "clipboard", { configurable: true, value: { writeText } });
@@ -598,7 +610,7 @@ describe("역할 바꾸기 확인 단계 (수용 2)", () => {
     await pickRole("owner");
     await vi.waitFor(() => expect(byId("member-profile-role-stage")).not.toBeNull());
     expect(byId("member-profile-role-stage-warning")?.textContent).toBe(
-      "이서연 님도 나와 같은 권한을 갖게 돼요. 소유자끼리는 서로의 역할을 바꾸거나 내보낼 수 없어서, 한 번 올리면 되돌릴 수 없어요."
+      "이서연 님도 나와 같은 권한을 갖게 돼요. 소유자끼리는 서로의 역할을 바꾸거나 서로를 정지하고 내보낼 수 없지만, 서로의 비밀번호 재설정 링크는 만들 수 있어요. 한 번 올리면 되돌릴 수 없어요."
     );
     expect(byId("member-profile-role-stage-confirm")?.dataset.tone).toBe("destructive");
     await confirmStage();
@@ -765,7 +777,7 @@ describe("역할 바꾸기 확인 단계 (수용 2)", () => {
     await pickRole("owner");
     await vi.waitFor(() =>
       expect(byId("member-profile-role-stage-warning")?.textContent).toBe(
-        "이서연 님도 나와 같은 권한을 갖게 돼요. 마스터끼리는 서로의 역할을 바꾸거나 내보낼 수 없어서, 한 번 올리면 되돌릴 수 없어요."
+        "이서연 님도 나와 같은 권한을 갖게 돼요. 마스터끼리는 서로의 역할을 바꾸거나 서로를 정지하고 내보낼 수 없지만, 서로의 비밀번호 재설정 링크는 만들 수 있어요. 한 번 올리면 되돌릴 수 없어요."
       )
     );
   });
@@ -779,7 +791,8 @@ describe("역할 바꾸기 확인 단계 (수용 2)", () => {
 
   // 검수 r1 M2: 단계가 본문 자리를 갈아 끼우면 창이 548 → 157 로 뛰었다. 단계는 본문을 덮어 서고, 본문은 떼지 않고 자리만
   // 지킨다(높이는 실제 엔진에서 `capture-5780.mjs` 의 「단계에서 창의 위쪽 끝·폭이 그대로이고 높이가 줄지 않는다」가 잰다).
-  it("단계는 본문을 덮어 선다: 본문은 그대로 남아 자리만 지키고(aria-hidden·invisible), 대상 줄이 서며, 오프라인 사유 줄은 한 번만 선다", async () => {
+  // 검수 r2 N2: 단계는 큰 얼굴 묶음을 제자리에 남기고 그 아래 자리만 덮는다 — 대상은 단계 안의 작은 줄이 아니라 큰 얼굴로 남는다.
+  it("단계는 얼굴 아래 본문을 덮어 선다: 본문은 그대로 남아 자리만 지키고(aria-hidden·invisible), 큰 얼굴은 보이는 채 남으며, 오프라인 사유 줄은 한 번만 선다", async () => {
     mountProfile({ viewer: OWNER, targetId: MEMBER_ID });
     await waitForDialog();
     const body = byId("member-profile-body");
@@ -790,8 +803,13 @@ describe("역할 바꾸기 확인 단계 (수용 2)", () => {
     expect(byId("member-profile-body")).toBe(body);
     expect(body?.getAttribute("aria-hidden")).toBe("true");
     expect(body?.className.split(/\s+/)).toContain("invisible");
-    expect(byId("member-profile-role-stage-subject")?.textContent).toContain("김인턴");
-    expect(byId("member-profile-role-stage-subject")?.textContent).toContain("@intern-kim");
+    const hero = byId("member-profile-hero");
+    expect(hero?.textContent).toContain("김인턴");
+    expect(hero?.textContent).toContain("@intern-kim");
+    // 얼굴은 덮인 본문 밖이고 숨긴 조상도 없다: 단계가 선 동안 보이고 읽힌다.
+    expect(body?.contains(hero ?? null)).toBe(false);
+    expect(hero?.closest('[aria-hidden="true"], .invisible')).toBeNull();
+    expect(byId("member-profile-stage-frame")?.contains(byId("member-profile-role-stage"))).toBe(true);
     // 단계가 선 뒤 연결이 끊기면 사유 줄은 단계 위 띠 하나다(덮인 본문 안의 줄과 겹쳐 서지 않는다 — 같은 id 가 둘이 되지 않는다).
     Object.defineProperty(window.navigator, "onLine", { configurable: true, value: false });
     await act(async () => {
@@ -820,6 +838,232 @@ describe("역할 바꾸기 확인 단계 (수용 2)", () => {
     expect(byId("member-profile-offline")).not.toBeNull();
     expect(roleSelect()?.disabled).toBe(true);
     expect(roleSelect()?.getAttribute("aria-describedby")).toBe("member-profile-offline-reason");
+  });
+});
+
+// #5781: 관리 묶음의 정지(정지 풀기)·워크스페이스에서 내보내기. 줄은 서버 사다리의 거울이고, 누르면 같은 확인 단계를 거친다.
+// 서버 명부는 활성 멤버만 돌려주므로(정지·내보내기 뒤 다시 읽은 명부에서 빠진다) 픽스처의 다시 읽기도 그 사람을 뺀다.
+describe("정지·내보내기 (#5781)", () => {
+  const without = (id: string) => ROSTER.filter((row) => row.id !== id);
+  const click = async (testId: string) => {
+    const el = byId<HTMLButtonElement>(testId);
+    expect(el).not.toBeNull();
+    await act(async () => {
+      el!.click();
+    });
+  };
+
+  type Row = { viewer: RosterMember; target: RosterMember; suspend: boolean; remove: boolean };
+  const rows: Row[] = [
+    { viewer: OWNER, target: OWNER2, suspend: false, remove: false },
+    { viewer: OWNER, target: ADMIN, suspend: true, remove: true },
+    { viewer: OWNER, target: INTERN, suspend: true, remove: true },
+    { viewer: OWNER, target: GUEST, suspend: true, remove: true },
+    { viewer: OWNER, target: AGENT, suspend: false, remove: false },
+    { viewer: OWNER, target: OWNER, suspend: false, remove: false },
+    { viewer: ADMIN, target: OWNER, suspend: false, remove: false },
+    { viewer: ADMIN, target: ADMIN2, suspend: false, remove: false },
+    { viewer: ADMIN, target: INTERN, suspend: true, remove: true },
+    { viewer: ADMIN, target: GUEST, suspend: true, remove: true },
+    { viewer: INTERN, target: GUEST, suspend: false, remove: false },
+    { viewer: GUEST, target: INTERN, suspend: false, remove: false },
+  ];
+  it.each(rows.map((row) => [row.viewer.handle, row.target.handle, row] as const))(
+    "@%s 가 @%s 를 보면 줄이 서버 사다리대로 선다",
+    async (_viewer, _target, row) => {
+      mountProfile({ viewer: row.viewer, targetId: row.target.id });
+      await waitForDialog();
+      expect(byId("member-profile-suspend") !== null).toBe(row.suspend);
+      expect(byId("member-profile-remove") !== null).toBe(row.remove);
+      expect(byId("member-profile-reinstate")).toBeNull();
+      if (row.suspend) {
+        // 관리 묶음의 맨 아래, 역할·재설정 줄 다음이다. 정지·내보내기는 위험색이다.
+        const manage = byId("member-profile-manage")!;
+        const order = [...manage.querySelectorAll<HTMLElement>("[data-testid]")]
+          .map((el) => el.dataset.testid)
+          .filter((id) => ["member-profile-role", "member-profile-reset-open", "member-profile-suspend", "member-profile-remove"].includes(id ?? ""));
+        expect(order).toEqual(["member-profile-role", "member-profile-reset-open", "member-profile-suspend", "member-profile-remove"]);
+        expect(byId("member-profile-suspend")?.className).toContain("text-danger");
+        expect(byId("member-profile-remove")?.className).toContain("text-danger");
+        expect(byId("member-profile-suspend")?.textContent).toBe("정지");
+        expect(byId("member-profile-remove")?.textContent).toBe("워크스페이스에서 내보내기");
+      }
+    }
+  );
+
+  it("정지: 확인 단계가 서고(요청 없음·초점 취소·위험 단추), 확정하면 한 번 보내고, 명부에서 빠져도 「정지됨」 칩과 「정지 풀기」가 그 자리에 선다", async () => {
+    suspendWorkspaceMember.mockResolvedValue({ memberId: MEMBER_ID, status: "suspended" });
+    mountProfile({ viewer: OWNER, targetId: MEMBER_ID });
+    fetchRoster.mockResolvedValue(without(MEMBER_ID));
+    await waitForDialog();
+    await click("member-profile-suspend");
+    await vi.waitFor(() => expect(byId("member-profile-lifecycle-stage")).not.toBeNull());
+    expect(suspendWorkspaceMember).not.toHaveBeenCalled();
+    expect(document.activeElement).toBe(byId("member-profile-lifecycle-stage-cancel"));
+    const stage = byId("member-profile-lifecycle-stage")!;
+    expect(stage.textContent).toContain("김인턴 님을 정지할까요?");
+    expect(byId("member-profile-lifecycle-lines")?.textContent).toBe(
+      "모든 기기에서 바로 로그아웃되고, 정지가 풀릴 때까지 다시 로그인할 수 없어요. 폰 알림도 더는 가지 않아요." +
+        "쓴 글과 들어가 있던 채널은 그대로 남아요. 다만 정지된 동안에는 그 글의 글쓴이 이름이 「나간 멤버」 표시로 바뀌어요." +
+        "정지는 이 창에서 바로 풀 수 있어요. 창을 닫으면 정지된 멤버는 명부에 보이지 않아요."
+    );
+    expect(byId("member-profile-lifecycle-stage-confirm")?.dataset.tone).toBe("destructive");
+    expect(byId("member-profile-lifecycle-stage-confirm")?.textContent).toBe("정지");
+    expect(byId("member-profile-close")).toBeNull();
+    // 큰 얼굴은 단계 위에 그대로 남는다.
+    expect(byId("member-profile-hero")?.closest('[aria-hidden="true"], .invisible')).toBeNull();
+    await click("member-profile-lifecycle-stage-confirm");
+    await vi.waitFor(() => expect(byId("member-profile-lifecycle-stage")).toBeNull());
+    expect(suspendWorkspaceMember).toHaveBeenCalledTimes(1);
+    expect(suspendWorkspaceMember).toHaveBeenCalledWith(WS, MEMBER_ID);
+    // 다시 읽은 명부에는 그 사람이 없다(서버와 같다). 창은 붙든 값으로 그 사람을 계속 보인다.
+    await vi.waitFor(() => expect(fetchRoster).toHaveBeenCalled());
+    await vi.waitFor(() => expect(byId("member-profile-status-chip")?.textContent).toBe("정지됨"));
+    expect(byId("member-profile-empty")).toBeNull();
+    expect(byId("member-profile-suspend")).toBeNull();
+    expect(byId("member-profile-reinstate")?.textContent).toBe("정지 풀기");
+    expect(byId("member-profile-reinstate")?.className).not.toContain("text-danger");
+    expect(byId("member-profile-lifecycle-receipt")?.textContent).toBe("정지함");
+    // 정지된 멤버에게는 재설정 링크를 만들 수 없다(서버: 활성 멤버만) — 줄이 없다.
+    expect(byId("member-profile-reset-open")).toBeNull();
+    await vi.waitFor(() => expect(document.activeElement).toBe(byId("member-profile-reinstate")));
+    expect(byId("member-profile-close")).not.toBeNull();
+  });
+
+  it("정지 풀기: 붙든 정지된 멤버를 다시 활성으로 — 잉크 단추, 명부가 따라잡으면 칩이 사라지고 「정지」로 돌아온다", async () => {
+    suspendWorkspaceMember.mockResolvedValue({ memberId: MEMBER_ID, status: "suspended" });
+    reinstateWorkspaceMember.mockResolvedValue({ memberId: MEMBER_ID, status: "active" });
+    mountProfile({ viewer: ADMIN, targetId: MEMBER_ID });
+    fetchRoster.mockResolvedValue(without(MEMBER_ID));
+    await waitForDialog();
+    await click("member-profile-suspend");
+    await click("member-profile-lifecycle-stage-confirm");
+    await vi.waitFor(() => expect(byId("member-profile-reinstate")).not.toBeNull());
+    fetchRoster.mockResolvedValue(ROSTER);
+    await click("member-profile-reinstate");
+    await vi.waitFor(() => expect(byId("member-profile-lifecycle-stage")).not.toBeNull());
+    expect(byId("member-profile-lifecycle-stage")?.textContent).toContain("김인턴 님의 정지를 풀까요?");
+    expect(byId("member-profile-lifecycle-lines")?.textContent).toBe(
+      "다시 로그인할 수 있게 돼요. 정지 전의 로그인은 되살아나지 않아서 새로 로그인해야 해요. 들어가 있던 채널은 그대로예요."
+    );
+    expect(byId("member-profile-lifecycle-stage-confirm")?.dataset.tone).toBe("default");
+    await click("member-profile-lifecycle-stage-confirm");
+    await vi.waitFor(() => expect(byId("member-profile-lifecycle-stage")).toBeNull());
+    expect(reinstateWorkspaceMember).toHaveBeenCalledWith(WS, MEMBER_ID);
+    await vi.waitFor(() => expect(byId("member-profile-status-chip")).toBeNull());
+    expect(byId("member-profile-suspend")?.textContent).toBe("정지");
+    expect(byId("member-profile-lifecycle-receipt")?.textContent).toBe("풀림");
+    await vi.waitFor(() => expect(document.activeElement).toBe(byId("member-profile-suspend")));
+  });
+
+  it("서버 거절(409 상태가 그사이 바뀜)은 단계 안에 사유 문장으로 서고, 단계·값은 그대로이며 취소가 다시 열린다", async () => {
+    suspendWorkspaceMember.mockRejectedValue(new ApiError(409, "member status must be active"));
+    mountProfile({ viewer: OWNER, targetId: MEMBER_ID });
+    await waitForDialog();
+    await click("member-profile-suspend");
+    await click("member-profile-lifecycle-stage-confirm");
+    await vi.waitFor(() =>
+      expect(byId("member-profile-lifecycle-stage-error")?.textContent).toBe(
+        "이 멤버는 지금 활성 상태가 아니에요. 그사이 다른 사람이 정지했을 수 있어요."
+      )
+    );
+    expect(byId("member-profile-lifecycle-stage-error")?.getAttribute("role")).toBe("alert");
+    expect(byId("member-profile-lifecycle-stage")).not.toBeNull();
+    expect(byId("member-profile-lifecycle-stage-cancel")?.getAttribute("aria-disabled")).toBeNull();
+    expect(byId("member-profile-status-chip")).toBeNull();
+    await click("member-profile-lifecycle-stage-cancel");
+    await vi.waitFor(() => expect(byId("member-profile-lifecycle-stage")).toBeNull());
+    await vi.waitFor(() => expect(document.activeElement).toBe(byId("member-profile-suspend")));
+    // 다시 열면 앞 시도의 사유가 남아 있지 않다.
+    await click("member-profile-suspend");
+    await vi.waitFor(() => expect(byId("member-profile-lifecycle-stage")).not.toBeNull());
+    expect(byId("member-profile-lifecycle-stage-error")).toBeNull();
+  });
+
+  it.each([
+    [403, "cannot manage an equal or higher role", "같거나 높은 역할의 멤버는 정지하거나 내보낼 수 없어요. 그사이 역할이 바뀌었을 수 있어요."],
+    [409, "workspace must retain at least one owner", "워크스페이스에는 소유자 역할인 사람이 한 명은 있어야 해서 정지하거나 내보낼 수 없어요."],
+  ] as const)("내보내기 거절 %i 「%s」 → 사유 문장", async (status, wire, sentence) => {
+    removeWorkspaceMember.mockRejectedValue(new ApiError(status, wire));
+    mountProfile({ viewer: OWNER, targetId: ADMIN_ID });
+    await waitForDialog();
+    await click("member-profile-remove");
+    await click("member-profile-lifecycle-stage-confirm");
+    await vi.waitFor(() => expect(byId("member-profile-lifecycle-stage-error")?.textContent).toBe(sentence));
+    expect(byId("member-profile-removed")).toBeNull();
+  });
+
+  it("요청이 도는 동안 취소는 잠기고(aria-disabled) Esc 도 단계를 내리지 못하며 X 가 없다 — 끝나면 실제 결과를 보인다", async () => {
+    let resolve: (value: unknown) => void = () => undefined;
+    suspendWorkspaceMember.mockImplementation(
+      () =>
+        new Promise((done) => {
+          resolve = done;
+        })
+    );
+    mountProfile({ viewer: OWNER, targetId: MEMBER_ID });
+    fetchRoster.mockResolvedValue(without(MEMBER_ID));
+    await waitForDialog();
+    await click("member-profile-suspend");
+    await click("member-profile-lifecycle-stage-confirm");
+    await vi.waitFor(() =>
+      expect(byId("member-profile-lifecycle-stage-confirm")?.getAttribute("aria-busy")).toBe("true")
+    );
+    expect(byId("member-profile-lifecycle-stage-confirm")?.textContent).toBe("정지 중");
+    expect(byId("member-profile-lifecycle-stage-cancel")?.getAttribute("aria-disabled")).toBe("true");
+    await click("member-profile-lifecycle-stage-cancel");
+    await pressEscape();
+    await click("member-profile-lifecycle-stage-confirm");
+    expect(byId("member-profile-lifecycle-stage")).not.toBeNull();
+    expect(byId("member-profile-dialog")).not.toBeNull();
+    expect(byId("member-profile-close")).toBeNull();
+    expect(suspendWorkspaceMember).toHaveBeenCalledTimes(1);
+    await act(async () => {
+      resolve({ memberId: MEMBER_ID, status: "suspended" });
+    });
+    await vi.waitFor(() => expect(byId("member-profile-status-chip")?.textContent).toBe("정지됨"));
+    expect(byId("member-profile-lifecycle-stage")).toBeNull();
+  });
+
+  it("내보내기: 되돌릴 수 없다는 경고와 위험 단추를 거치고, 내보낸 뒤에는 결과 한 줄과 「닫기」만 선다(초점 「닫기」)", async () => {
+    removeWorkspaceMember.mockResolvedValue({ memberId: GUEST_ID, status: "deleted" });
+    mountProfile({ viewer: ADMIN, targetId: GUEST_ID });
+    fetchRoster.mockResolvedValue(without(GUEST_ID));
+    await waitForDialog();
+    await click("member-profile-remove");
+    await vi.waitFor(() => expect(byId("member-profile-lifecycle-stage")).not.toBeNull());
+    expect(byId("member-profile-lifecycle-stage")?.textContent).toContain("이도현 님을 워크스페이스에서 내보낼까요?");
+    expect(byId("member-profile-lifecycle-lines")?.textContent).toBe(
+      "모든 채널과 DM에서 빠지고, 모든 기기에서 바로 로그아웃돼요. 예약해 둔 메시지는 취소돼요." +
+        "쓴 글과 DM 기록은 남고, 글쓴이 이름은 「나간 멤버」 표시로 바뀌어요."
+    );
+    expect(byId("member-profile-lifecycle-stage-warning")?.textContent).toBe(
+      "되돌릴 수 없어요. 다시 초대해도 같은 이메일로는 이 워크스페이스에 들어올 수 없어요."
+    );
+    expect(byId("member-profile-lifecycle-stage-confirm")?.dataset.tone).toBe("destructive");
+    expect(byId("member-profile-lifecycle-stage-confirm")?.textContent).toBe("내보내기");
+    await click("member-profile-lifecycle-stage-confirm");
+    await vi.waitFor(() => expect(byId("member-profile-removed")).not.toBeNull());
+    expect(removeWorkspaceMember).toHaveBeenCalledTimes(1);
+    expect(removeWorkspaceMember).toHaveBeenCalledWith(WS, GUEST_ID);
+    await vi.waitFor(() => expect(fetchRoster).toHaveBeenCalled());
+    expect(byId("member-profile-removed")?.textContent).toContain("이도현 님을 워크스페이스에서 내보냈어요.");
+    expect(byId("member-profile-empty")).toBeNull();
+    expect(byId("member-profile-status-chip")).toBeNull();
+    expect(byId("member-profile-close")).toBeNull();
+    expect(byId("member-profile-body")?.getAttribute("aria-hidden")).toBe("true");
+    await vi.waitFor(() => expect(document.activeElement).toBe(byId("member-profile-removed-close")));
+    await click("member-profile-removed-close");
+    await vi.waitFor(() => expect(byId("member-profile-dialog")).toBeNull());
+  });
+
+  it("오프라인이면 정지·내보내기 줄이 잠기고 배너 사유를 가리킨다", async () => {
+    mountProfile({ viewer: OWNER, targetId: MEMBER_ID, deviceOffline: true });
+    await waitForDialog();
+    for (const id of ["member-profile-suspend", "member-profile-remove"]) {
+      expect(byId<HTMLButtonElement>(id)?.disabled).toBe(true);
+      expect(byId(id)?.getAttribute("aria-describedby")).toBe("member-profile-offline-reason");
+    }
   });
 });
 

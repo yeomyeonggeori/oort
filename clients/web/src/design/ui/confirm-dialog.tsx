@@ -129,8 +129,9 @@ function ConfirmBody({
           {lockedReason}
         </p>
       ) : null}
-      {/* 단계가 앞 본문의 높이를 덮어 설 때(#5780 검수 r1 M2) 단추 줄은 바닥에 붙는다. 높이가 내용만큼이면 차이가 없다. */}
-      <div className={cn("flex shrink-0 flex-wrap items-center justify-end gap-2 pt-1", host === "stage" && "mt-auto")}>
+      {/* 단추 줄은 내용 바로 아래에 붙는다: 단계가 앞 본문의 높이를 덮어 설 때도 바닥으로 떼지 않는다(#5780 검수 r2 N2 — 내용과
+          단추 사이가 비지 않게). 남는 높이는 단추 줄 아래에 남는다. */}
+      <div className="flex shrink-0 flex-wrap items-center justify-end gap-2 pt-1">
         <Button
           ref={cancelRef}
           type="button"
