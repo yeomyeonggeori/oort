@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { act, createElement, type ReactNode } from "react";
+import { act, type ReactNode } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import {
@@ -91,51 +91,39 @@ function click(target: HTMLElement | null) {
 
 /** 드롭다운: 열린 판 안에 「복사 ›」 하나, 그 하위 판에 줄 둘(하나는 `locked` 이면 잠긴 줄). */
 function dropdown(locked: boolean) {
-  return createElement(
-    DropdownMenu,
-    { open: true },
-    createElement(DropdownMenuTrigger, null, "열기"),
-    createElement(
-      DropdownMenuContent,
-      null,
-      createElement(DropdownMenuItem, null, "앞 줄"),
-      createElement(
-        DropdownMenuSub,
-        null,
-        createElement(DropdownMenuSubTrigger, { "data-testid": "sub-trigger" }, "복사"),
-        createElement(
-          DropdownMenuSubContent,
-          { "data-testid": "sub-panel" },
-          createElement(DropdownMenuItem, null, "이름 복사하기"),
-          createElement(DropdownMenuItem, { disabled: locked }, "링크 복사하기")
-        )
-      )
-    )
+  return (
+    <DropdownMenu open>
+      <DropdownMenuTrigger>열기</DropdownMenuTrigger>
+      <DropdownMenuContent>
+        <DropdownMenuItem>앞 줄</DropdownMenuItem>
+        <DropdownMenuSub>
+          <DropdownMenuSubTrigger data-testid="sub-trigger">복사</DropdownMenuSubTrigger>
+          <DropdownMenuSubContent data-testid="sub-panel">
+            <DropdownMenuItem>이름 복사하기</DropdownMenuItem>
+            <DropdownMenuItem disabled={locked}>링크 복사하기</DropdownMenuItem>
+          </DropdownMenuSubContent>
+        </DropdownMenuSub>
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }
 
 /** 컨텍스트 메뉴: 우클릭으로 연 판 안에 같은 모양. */
 function contextMenu(locked: boolean) {
-  return createElement(
-    ContextMenu,
-    null,
-    createElement(ContextMenuTrigger, { "data-testid": "ctx-trigger" }, "행"),
-    createElement(
-      ContextMenuContent,
-      null,
-      createElement(ContextMenuItem, null, "앞 줄"),
-      createElement(
-        ContextMenuSub,
-        null,
-        createElement(ContextMenuSubTrigger, { "data-testid": "sub-trigger" }, "복사"),
-        createElement(
-          ContextMenuSubContent,
-          { "data-testid": "sub-panel" },
-          createElement(ContextMenuItem, null, "이름 복사하기"),
-          createElement(ContextMenuItem, { disabled: locked }, "링크 복사하기")
-        )
-      )
-    )
+  return (
+    <ContextMenu>
+      <ContextMenuTrigger data-testid="ctx-trigger">행</ContextMenuTrigger>
+      <ContextMenuContent>
+        <ContextMenuItem>앞 줄</ContextMenuItem>
+        <ContextMenuSub>
+          <ContextMenuSubTrigger data-testid="sub-trigger">복사</ContextMenuSubTrigger>
+          <ContextMenuSubContent data-testid="sub-panel">
+            <ContextMenuItem>이름 복사하기</ContextMenuItem>
+            <ContextMenuItem disabled={locked}>링크 복사하기</ContextMenuItem>
+          </ContextMenuSubContent>
+        </ContextMenuSub>
+      </ContextMenuContent>
+    </ContextMenu>
   );
 }
 
@@ -203,16 +191,12 @@ describe("규칙 가드: 하위 판에 고를 수 없는 줄이 서면 개발 �
   it("가드는 하위 판만 본다: 위 판의 잠긴 줄(이유와 함께 화면에 남는 줄)은 규칙 그대로다", () => {
     const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
     mount(
-      createElement(
-        DropdownMenu,
-        { open: true },
-        createElement(DropdownMenuTrigger, null, "열기"),
-        createElement(
-          DropdownMenuContent,
-          null,
-          createElement(DropdownMenuItem, { disabled: true }, "낡은 맥 (오프라인)")
-        )
-      )
+      <DropdownMenu open>
+        <DropdownMenuTrigger>열기</DropdownMenuTrigger>
+        <DropdownMenuContent>
+          <DropdownMenuItem disabled>낡은 맥 (오프라인)</DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
     );
     expect(document.querySelector("[data-disabled]")).not.toBeNull();
     expect(error.mock.calls.filter((call) => call[0] === SUBMENU_LOCKED_ROW_ERROR)).toHaveLength(0);

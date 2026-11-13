@@ -270,10 +270,12 @@ DropdownMenuSeparator.displayName = MenuPrimitive.Separator.displayName;
 /**
  * 하위 메뉴 판. 부모 판과 같은 그릇(층 · 테두리 · 그림자 · 안쪽 4px)이고, 컨텍스트 메뉴 판처럼 창보다
  * 길면 판 안에서 스크롤한다(`max-h-menu-available`, Radix 가 하위 판에도 가용 높이를 싣는다). 섹션
- * 목적지는 50개까지 늘 수 있다(ADR-0177).
+ * 목적지는 50개까지 늘 수 있다(ADR-0177). 폭도 그 쪽의 가용 폭을 넘지 않는다(`max-w-menu-available`): 부모
+ * 판 양쪽 다 자리가 모자라면 Radix 는 뒤집기만 하고 줄이지 않으므로, 긴 섹션 이름은 판 안에서 잘린다(전체
+ * 이름은 줄의 title).
  */
 export const submenuPanelClass =
-  "layer-overlay-surface min-w-pane-sm max-h-menu-available overscroll-contain scrollbar-visible rounded-lg border border-line bg-surface-raised p-1 text-ink shadow-lg";
+  "layer-overlay-surface min-w-pane-sm max-w-menu-available max-h-menu-available overscroll-contain scrollbar-visible rounded-lg border border-line bg-surface-raised p-1 text-ink shadow-lg";
 
 /**
  * 하위 판이 서는 자리. 부모 판의 테두리 1 + 안쪽 4 = 5px 이 줄과 판 가장자리 사이에 있다.
