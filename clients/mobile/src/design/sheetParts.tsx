@@ -862,7 +862,8 @@ const buildStyles = (color: Palette) =>
     statusIcon: {
       width: CONV_ICON_SIZE.bell,
       height: CONV_ICON_SIZE.bell,
-      tintColor: color.text,
+      // 줄 끝의 다른 글리프(셰브론·복사)와 같은 아이콘 색 — 상태는 제목 글자(「알림 켜짐/꺼짐」)와 모양(빗금)이 말한다(#5776 검수 M1).
+      tintColor: color.icon,
     },
     rowEmoji: {fontSize: font.heading, lineHeight: line.heading, textAlign: 'center'},
     rowText: {flex: 1},

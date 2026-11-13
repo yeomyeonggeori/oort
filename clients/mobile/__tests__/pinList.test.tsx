@@ -269,7 +269,7 @@ describe('빈 목록도 말을 한다', () => {
   it('뒤로가기가 「뒤로」가 아니라 무엇을 닫는지 말한다', () => {
     const {onClose} = renderPanel(emptyPins());
     const back = screen.getByTestId('header-back');
-    expect(back.props.accessibilityLabel).toBe('고정 목록 닫기');
+    expect(back.props.accessibilityLabel).toBe('대화로 돌아가기');
     fireEvent.press(back);
     expect(onClose).toHaveBeenCalledTimes(1);
   });

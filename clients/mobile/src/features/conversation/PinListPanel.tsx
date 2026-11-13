@@ -126,8 +126,8 @@ export function PinListPanel({
       <Screen>
         <PageHeader
           title={pinListHeaderLabel(entries.length, status)}
-          // 「뒤로」가 아니다. 덮고 있는 표면은 자기가 무엇을 닫는지 말한다. 대화 위에 쌓인 안쪽 장이라 X 가 아니라 ‹ 다(`phone-sheets.md` §3).
-          back={{label: '고정 목록 닫기', onPress: onClose, testID: 'header-back'}}
+          // 대화 위에 쌓인 안쪽 장이라 X 가 아니라 ‹ 이고, ‹ 의 이름은 돌아갈 곳을 말한다(`phone-sheets.md` §3, 「대화 정보」와 같은 이름).
+          back={{label: '대화로 돌아가기', onPress: onClose, testID: 'header-back'}}
           titleTestID="pin-list-title"
         />
         <FlatList
