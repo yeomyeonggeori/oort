@@ -12,7 +12,6 @@ export interface ChangeWorkspaceRoleHandle {
   pending: boolean;
   error: string | null;
   apply: (member: RosterMember, role: MembershipRole) => Promise<boolean>;
-  retry: () => Promise<boolean>;
   /** 지난 실패 문장을 지운다: 확인 단계를 새로 열거나 취소할 때 앞 시도의 오류가 남지 않게(#5780). */
   clearError: () => void;
 }
@@ -22,16 +21,11 @@ export function useChangeWorkspaceRole(): ChangeWorkspaceRoleHandle {
   const client = useQueryClient();
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [lastAttempt, setLastAttempt] = useState<{
-    member: RosterMember;
-    role: MembershipRole;
-  } | null>(null);
 
   const apply = useCallback(
     async (member: RosterMember, role: MembershipRole): Promise<boolean> => {
       setPending(true);
       setError(null);
-      setLastAttempt({ member, role });
       try {
         await changeWorkspaceMemberRole(workspaceId, member.id, role);
         await client.invalidateQueries({ queryKey: ["roster", workspaceId] });
@@ -46,12 +40,7 @@ export function useChangeWorkspaceRole(): ChangeWorkspaceRoleHandle {
     [workspaceId, client]
   );
 
-  const retry = useCallback(async (): Promise<boolean> => {
-    if (lastAttempt === null) return false;
-    return apply(lastAttempt.member, lastAttempt.role);
-  }, [apply, lastAttempt]);
-
   const clearError = useCallback(() => setError(null), []);
 
-  return { pending, error, apply, retry, clearError };
+  return { pending, error, apply, clearError };
 }

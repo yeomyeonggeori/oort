@@ -206,12 +206,22 @@ export function ConfirmDialog({
  * 떠 있는 표면 **안의** 확인 단계(§3.4). 부르는 쪽이 자기 본문 자리에 이것을 세우고, Esc·바깥 누름은 그 표면이
  * 받아 `onCancel` 로 보낸다. 서면 초점이 취소로 들어간다.
  */
-export function ConfirmStage({ className, ...body }: ConfirmBodyProps & { className?: string }) {
+export function ConfirmStage({
+  className,
+  autoFocus = true,
+  ...body
+}: ConfirmBodyProps & {
+  className?: string;
+  /** 서면 초점을 취소로 옮길지. 기본은 옮긴다(§3.4). 견본(갤러리)처럼 사람이 부르지 않은 단계만 끈다. */
+  autoFocus?: boolean;
+}) {
   const cancelRef = React.useRef<HTMLButtonElement>(null);
   const titleId = React.useId();
   const descriptionId = React.useId();
   React.useEffect(() => {
-    cancelRef.current?.focus({ preventScroll: true });
+    if (autoFocus) cancelRef.current?.focus({ preventScroll: true });
+    // 서는 순간 한 번만: 다시 그려질 때 초점을 빼앗지 않는다.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   return (
     <div

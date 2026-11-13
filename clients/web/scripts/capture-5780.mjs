@@ -9,6 +9,7 @@
 //   V. 네 시점(소유자·관리자·멤버·게스트) × 대상(사람·에이전트) — 1280 폭
 //   R. 소유자 → 멤버: 고르개 열림 · 확인 단계(일반) · 확인 단계(소유자 승격) · 바뀐 뒤 「바뀜」 · 관리자 → 소유자(잠긴 글)
 //   N. 좁은 폭(375) · 200%(1280 창의 200% = 640×450 CSS px, 배율 2)
+//   O. 오프라인(사유 줄 자리·잠김) — 프로필 본문과 재설정 단계
 // =============================================================================
 
 import { existsSync, mkdirSync } from "node:fs";
@@ -356,6 +357,62 @@ async function sceneNarrow(browser, origin, scheme) {
   }
 }
 
+/** O. 오프라인: 사유 줄이 X 자리와 겹치지 않고 창 모서리 밖으로 번지지 않으며, 잠긴 단추가 그 줄을 가리킨다. */
+async function sceneOffline(browser, origin, scheme) {
+  roster = freshRoster();
+  const tag = scheme;
+  const { context, page } = await openContext(browser, origin, { scheme, viewerId: OWNER });
+  try {
+    await page.goto(origin, { waitUntil: "domcontentloaded" });
+    await page.evaluate(() => { location.hash = "#/directory"; });
+    await page.locator(`[data-testid="directory-row"][data-member-id="${MEMBER}"]`).first().waitFor({ timeout: 20_000 });
+    await context.setOffline(true);
+    await page.waitForFunction(() => navigator.onLine === false);
+    await openProfile(page, MEMBER);
+    await page.getByTestId("member-profile-offline").waitFor();
+    await page.mouse.move(0, 0);
+    await shot(page, `O-${tag}-offline`);
+    const geo = await page.evaluate(() => {
+      const r = (id) => document.querySelector(`[data-testid="${id}"]`)?.getBoundingClientRect();
+      const banner = r("member-profile-offline");
+      const close = r("member-profile-close");
+      const dialog = r("member-profile-dialog");
+      const overlap = banner && close
+        ? Math.max(0, Math.min(banner.right, close.right) - Math.max(banner.left, close.left)) *
+          Math.max(0, Math.min(banner.bottom, close.bottom) - Math.max(banner.top, close.top))
+        : -1;
+      const inset = banner && dialog ? Math.min(banner.left - dialog.left, dialog.right - banner.right, banner.top - dialog.top) : -1;
+      return { overlap, inset };
+    });
+    console.log(`measure O ${tag} ${JSON.stringify(geo)}`);
+    check(`O ${tag} 사유 줄과 X 가 겹치지 않는다(겹친 면적 0)`, geo.overlap === 0, geo);
+    check(`O ${tag} 사유 줄이 창 가장자리에 붙지 않는다(둥근 모서리 밖으로 번지지 않음)`, geo.inset >= 16, geo);
+    check(`O ${tag} 메시지·고르개·재설정이 잠기고 사유 줄을 가리킨다`,
+      (await page.getByTestId("member-profile-dm").isDisabled()) &&
+        (await page.getByTestId("member-profile-role").isDisabled()) &&
+        (await page.getByTestId("member-profile-reset-open").isDisabled()) &&
+        (await page.getByTestId("member-profile-role").getAttribute("aria-describedby")) === "member-profile-offline-reason");
+    // 재설정 단계에서는 사유 줄이 단계 위의 띠다(창 위 모서리를 따라 둥글게).
+    await context.setOffline(false);
+    await page.waitForFunction(() => navigator.onLine === true);
+    await page.getByTestId("member-profile-reset-open").click();
+    await page.getByTestId("member-profile-reset-stage").waitFor();
+    await context.setOffline(true);
+    await page.waitForFunction(() => navigator.onLine === false);
+    await page.getByTestId("member-profile-offline").waitFor();
+    await page.mouse.move(0, 0);
+    await shot(page, `O-${tag}-offline-stage`);
+    const band = await page.evaluate(() => {
+      const el = document.querySelector('[data-testid="member-profile-offline"]');
+      return el ? getComputedStyle(el).borderTopLeftRadius : null;
+    });
+    check(`O ${tag} 단계 위 띠는 창 모서리를 따라 둥글다`, band === "20px", band);
+    await context.setOffline(false);
+  } finally {
+    await context.close();
+  }
+}
+
 if (!existsSync(resolve(WEB_ROOT, "dist/index.html"))) throw new Error("dist/ is missing. Run npm run build first.");
 mkdirSync(OUT_DIR, { recursive: true });
 const preview = await startGuardedPreview({ webRoot: WEB_ROOT, port: PORT, portEnvVar: "CAPTURE_PORT" });
@@ -366,6 +423,7 @@ try {
     await sceneViews(browser, origin, scheme);
     await sceneRole(browser, origin, scheme);
     await sceneNarrow(browser, origin, scheme);
+    await sceneOffline(browser, origin, scheme);
   }
 } finally {
   await browser.close();

@@ -203,14 +203,24 @@ function ProfileHero({ member, t }: { member: RosterMember; t: Format }) {
 }
 
 /** 묶음: 선이 아니라 바탕으로 갈린다. 줄 사이에만 선이 선다. */
-function Group({ children, testId, className }: { children: ReactNode; testId?: string; className?: string }) {
+function Group({
+  children,
+  testId,
+  className,
+  as: Tag = "div",
+}: {
+  children: ReactNode;
+  testId?: string;
+  className?: string;
+  as?: "div" | "dl";
+}) {
   return (
-    <div
+    <Tag
       className={cn("flex min-w-0 flex-col divide-y divide-line rounded-lg bg-sheet", className)}
       data-testid={testId}
     >
       {children}
-    </div>
+    </Tag>
   );
 }
 
@@ -248,9 +258,9 @@ function InfoGroup({ member, email, owner, t }: { member: RosterMember; email: s
   const emailCopy = useClipboardCopy(email ?? "");
   const isAgent = member.kind === "agent";
   if (email === null && !isAgent) return null;
+  // 묶음 상자 자체가 `dl` 이다(`dl > div > dt + dd`). 감싸는 `display: contents` 는 WebKit 에서 목록 뜻을 잃을 수 있다.
   return (
-    <dl className="contents">
-      <Group testId="member-profile-info">
+    <Group as="dl" testId="member-profile-info">
         {email !== null ? (
           <div className={ROW_CLASS}>
             <dt className="flex shrink-0 items-center text-ink-muted">
@@ -283,8 +293,7 @@ function InfoGroup({ member, email, owner, t }: { member: RosterMember; email: s
             </dd>
           </div>
         ) : null}
-      </Group>
-    </dl>
+    </Group>
   );
 }
 
@@ -527,16 +536,24 @@ function ReadyProfile({
     if (changed) receipt.confirm();
   };
 
+  const stageUp = reset.phase !== PasswordResetPhase.Idle || roleStage.pending !== null;
+  // 오프라인 사유 줄. 잠긴 단추들이 이 문장을 `aria-describedby` 로 가리키므로 한 번만 선다: 단계가 서 있으면 단계 위의 띠
+  // (창 위 모서리를 따라 둥글게 — 창은 넘치는 것을 자르지 않는다), 프로필 본문이면 얼굴 아래·행동 위의 둥근 줄
+  // (오른쪽 위 X 자리와 겹치지 않게, 그리고 잠긴 「메시지 보내기」 바로 위에서 까닭을 말하게).
+  const offlineBanner = (placement: "band" | "inline") => (
+    <InlineBanner
+      tone="neutral"
+      message={t("directory.profile.offline")}
+      messageId={OFFLINE_REASON_ID}
+      separator={placement === "band"}
+      className={placement === "band" ? "rounded-t-2xl" : "rounded-lg"}
+      testId="member-profile-offline"
+    />
+  );
+
   return (
     <>
-      {offline && (
-        <InlineBanner
-          tone="neutral"
-          message={t("directory.profile.offline")}
-          messageId={OFFLINE_REASON_ID}
-          testId="member-profile-offline"
-        />
-      )}
+      {offline && stageUp ? offlineBanner("band") : null}
       {reset.phase !== PasswordResetPhase.Idle ? (
         <PasswordResetStage
           member={member}
@@ -559,6 +576,8 @@ function ReadyProfile({
       ) : (
         <div className="flex min-h-0 flex-col gap-6 overflow-y-auto px-6 pb-6 pt-8" data-testid="member-profile-body">
           <ProfileHero member={member} t={t} />
+
+          {offline ? offlineBanner("inline") : null}
 
           <div className="flex flex-col items-center gap-2">
             <div className="flex flex-wrap items-center justify-center gap-2" data-testid="member-profile-actions">
