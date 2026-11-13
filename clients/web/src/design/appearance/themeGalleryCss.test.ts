@@ -149,7 +149,7 @@ describe("격자·스크롤·페이드", () => {
     expect(body).toContain("outline-offset: -2px"); // tokens.css `focus-ring` 유틸과 같은 값(바깥 오프셋 링은 걷은 모양이다)
     expect(css).not.toContain(".theme-tile:has(:focus-visible)");
     // 전역 규칙이 걷으려면 라디오가 `.peer`여야 한다: 링을 그리는 틀이 그 뒤의 형제(`.peer:focus-visible ~ *`)다.
-    expect(tile).toMatch(/className="peer sr-only"/);
+    expect(tile).toMatch(/className="peer"/);
     expect(tokens).toContain(".peer:focus-visible ~ *");
   });
 

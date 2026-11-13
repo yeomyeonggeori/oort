@@ -36,3 +36,9 @@
   outline: 2px solid var(--focus-ring-ink, var(--accent));
   outline-offset: 2px;
 }
+
+/* 라디오는 누르는 자리(44)를 덮는다(`radio-cover`). Tab으로 닿을 때 브라우저는 그 상자를 창 끝에 맞춰 세우므로, 바깥 링(2 + 2)까지
+ * 창 안에 들게 그만큼 여유를 둔다(1440×900에서 칩 아래 링 4px이 잘렸다, #5783). */
+.accent-swatch > input {
+  scroll-margin: var(--spacing-1);
+}

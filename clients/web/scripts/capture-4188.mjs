@@ -26,6 +26,11 @@
 //   qa8      #5783(QA 8): 「색상」 카드를 시스템·라이트·다크 × 1440·390·360·200%(720×450)로. 페이지·카드·칩 줄의 가로 넘침, 칩 다섯이 한 줄인지,
 //            타일 틀 안 글자 0, 큰 미리보기 글자, 첫 칩 키보드 초점·끝 칩 가리킴의 툴팁이 카드 안인지, 청크를 받는 동안과 받은 뒤의 강조색 행
 //            위치 차이를 잰다. 어기면 종료 코드 1.
+//   follow   #5783 구조 수리: 키보드 초점 따라가기를 실제 키·마우스로 잰다(설계 리뷰 r1~r3의 B-1·B-1b·B-1c·L-7). ① Tab·Shift+Tab으로 닿은
+//            고른 타일이 격자 안·창 안에 온전히 ② 타일에 갔다가 Shift+Tab으로 돌아온 색 모드 초점이 창 안(Tab 때 페이지가 실제로 움직인 경우
+//            포함) ③ 방향키로 끝까지(다크 43장, 순환 포함) 고른 타일과 초점이 온전히 ④ 다 보이는 타일을 마우스로 고르면 페이지·격자 0px
+//            ⑤ 색 모드를 바꾸면 페이지 0px ⑥ 타일에서 Tab으로 닿은 강조색 칩이 초점 링까지 창 안. 덮은 라디오가 포인터를 받지 않는지(타일·칩·
+//            색 모드 가운데에서 맞는 요소가 라벨 안)와 칩의 누르는 자리 44도 잰다. 어기면 종료 코드 1. 측정 `follow.json`.
 //
 // 백엔드 없이 `/v1/**` 고정 응답 + 가짜 소켓. 벽시계·로케일·시간대를 고정한다.
 // =============================================================================
@@ -910,6 +915,255 @@ async function qa8Scenes(browser, origin) {
   }
 }
 
+// #5783 구조 수리: 초점 따라가기를 브라우저에 맡긴 뒤(`radio-cover`) 그것이 실제 배치에서 일하는지 잰다. 「온전히 보임」은 초점 든 컨트롤의
+// 상자가 페이지의 보이는 영역(설정 스크롤 상자 ∩ 창) 안이고, 타일이면 격자 상자 안이기도 한 것이다. 칩은 초점 링(바깥 2 + 두께 2)까지 잰다.
+// 200%는 1440×900 창의 브라우저 200%와 같은 CSS 뷰포트(720×450)다. 720×480은 데스크탑 최소 창(tauri.conf.json)이다.
+const FOLLOW_TAB_CASES = [
+  // [창, 색 모드, 고른 테마, Tab 때 페이지가 움직여야 하는가(고른 타일이 처음에 창 밖) — ②가 빈 단정이 되지 않게]
+  [{ name: "720x480", width: 720, height: 480 }, "dark", "catalog:vscode-plus", true],
+  [{ name: "720x480", width: 720, height: 480 }, "dark", "catalog:catppuccin-frappe", true],
+  [{ name: "720x480", width: 720, height: 480 }, "system", "dawnsky", false],
+  [{ name: "zoom200", width: 720, height: 450 }, "dark", "catalog:catppuccin-frappe", true],
+  [{ name: "zoom200", width: 720, height: 450 }, "light", "catalog:github", false],
+  [{ name: "1100x760", width: 1100, height: 760 }, "dark", "catalog:vscode-plus", false],
+  [{ name: "1100x760", width: 1100, height: 760 }, "dark", "catalog:catppuccin-frappe", false],
+  [{ name: "390x844", width: 390, height: 844 }, "dark", "catalog:catppuccin-frappe", false],
+  [{ name: "390x844", width: 390, height: 844 }, "dark", "catalog:vscode-plus", false],
+  [{ name: "1440x900", width: 1440, height: 900 }, "dark", "catalog:vscode-plus", false],
+  [{ name: "1440x900", width: 1440, height: 900 }, "light", "catalog:github", false],
+];
+const FOLLOW_ARROW_CASES = [
+  [{ name: "1440x900", width: 1440, height: 900 }, "catalog:catppuccin-frappe"],
+  [{ name: "720x480", width: 720, height: 480 }, "catalog:catppuccin-frappe"],
+  [{ name: "zoom200", width: 720, height: 450 }, "catalog:catppuccin-frappe"],
+  [{ name: "390x844", width: 390, height: 844 }, "catalog:catppuccin-frappe"],
+];
+async function followScenes(browser, origin) {
+  const bad = [];
+  const out = { tab: [], arrows: [], mouse: [], scheme: [] };
+  const fail = (where, what) => bad.push(`${where}: ${what}`);
+  /** 초점 든 컨트롤과 고른 타일의 자리. 페이지 스크롤 상자는 격자에서 위로 올라가며 처음 만나는 스크롤 상자다. */
+  const stop = (page) =>
+    page.evaluate(() => {
+      const grid = document.querySelector(".theme-gallery-scroll");
+      let pane = grid.parentElement;
+      while (pane && !(/(auto|scroll)/.test(getComputedStyle(pane).overflowY) && pane.scrollHeight > pane.clientHeight + 1)) pane = pane.parentElement;
+      pane = pane ?? document.scrollingElement;
+      const pr = pane.getBoundingClientRect();
+      const viewTop = Math.max(0, pr.top);
+      const viewBottom = Math.min(innerHeight, pr.bottom);
+      const box = grid.getBoundingClientRect();
+      const a = document.activeElement;
+      const tile = a?.closest?.("label.theme-tile");
+      const chip = a?.closest?.("label.accent-swatch");
+      const seg = a?.closest?.('[data-testid="theme-choice"]') ? a.closest("label") : null;
+      const control = tile ?? chip ?? seg ?? a;
+      const r = control.getBoundingClientRect();
+      const ring = chip ? 4 : 0; // 칩의 초점 링은 누르는 자리 바깥 2에 두께 2(swatches.css)
+      const sel = document.querySelector(".theme-tile[data-selected]");
+      const sr = sel.getBoundingClientRect();
+      return {
+        what: tile ? "tile" : chip ? `chip:${chip.getAttribute("data-accent-swatch")}` : seg ? `seg:${a.value}` : `other:${a?.tagName}`,
+        page: Math.round(pane.scrollTop),
+        grid: Math.round(grid.scrollTop),
+        top: Math.round(r.top - ring),
+        bottom: Math.round(r.bottom + ring),
+        viewTop: Math.round(viewTop),
+        viewBottom: Math.round(viewBottom),
+        full: r.top - ring >= viewTop - 1 && r.bottom + ring <= viewBottom + 1,
+        inGrid: tile ? r.top >= box.top - 1 && r.bottom <= box.bottom + 1 : null,
+        focusOnSelected: tile === sel,
+        selected: sel.querySelector(".theme-tile-name").textContent,
+        selectedFull: sr.top >= Math.max(viewTop, box.top) - 1 && sr.bottom <= Math.min(viewBottom, box.bottom) + 1,
+      };
+    });
+  const key = async (page, name) => {
+    await page.keyboard.press(name);
+    await page.waitForTimeout(160);
+    await settle(page);
+    return stop(page);
+  };
+  const ready = async (page) => {
+    await goAppearance(page);
+    await galleryReady(page);
+    await page.waitForFunction(() => document.querySelector('[data-testid="accent-swatch-dawn"]')?.style.getPropertyValue("--signal"), undefined, { timeout: 15_000 });
+    await settle(page);
+  };
+  const tileOk = (s) => s.what === "tile" && s.focusOnSelected && s.full && s.inGrid;
+
+  // ① ② ⑥: 색 모드 → Tab(타일) → Shift+Tab(색 모드) → Tab(타일) → Tab(칩) → Shift+Tab(타일) → 페이지를 맨 아래로 내린 뒤 Tab(칩)
+  // → Shift+Tab(타일). 초점은 타일에 남은 채 페이지만 내려간 자리에서 다시 닿는 길이다.
+  for (const [viewport, scheme, theme, mustMove] of FOLLOW_TAB_CASES) {
+    const where = `${viewport.name} ${scheme} ${theme}`;
+    const { context, page } = await openWith(browser, origin, { osScheme: scheme === "light" ? "light" : "dark", viewport, record: seedRecord({ theme, scheme }) });
+    try {
+      await ready(page);
+      await page.locator('[data-testid="theme-choice"] input:checked').focus();
+      const s0 = await stop(page);
+      const s1 = await key(page, "Tab");
+      const s2 = await key(page, "Shift+Tab");
+      const s3 = await key(page, "Tab");
+      const s4 = await key(page, "Tab");
+      const s5 = await key(page, "Shift+Tab");
+      await page.evaluate(() => {
+        let pane = document.querySelector(".theme-gallery-scroll").parentElement;
+        while (pane && !(/(auto|scroll)/.test(getComputedStyle(pane).overflowY) && pane.scrollHeight > pane.clientHeight + 1)) pane = pane.parentElement;
+        (pane ?? document.scrollingElement).scrollTop = 1e6;
+      });
+      await settle(page);
+      const s6 = await key(page, "Tab");
+      const s7 = await key(page, "Shift+Tab");
+      out.tab.push({ where, mustMove, s0, s1, s2, s3, s4, s5, s6, s7 });
+      if (s0.what !== `seg:${scheme}` || !s0.full) fail(where, `시작 초점이 색 모드가 아니거나 안 보임 ${JSON.stringify(s0)}`);
+      for (const [name, s] of [["① Tab 도착", s1], ["① 다시 Tab", s3], ["① 칩에서 Shift+Tab", s5], ["① 맨 아래에서 Tab·Shift+Tab", s7]]) {
+        if (!tileOk(s)) fail(where, `${name}: 고른 타일이 온전히 보이지 않음 ${JSON.stringify(s)}`);
+      }
+      if (mustMove && !(s1.page > s0.page)) fail(where, `② 전제: Tab 때 페이지가 움직이지 않음(${s0.page} → ${s1.page}) — 이 경우는 고른 타일이 창 밖이어야 한다`);
+      if (!s2.what.startsWith("seg:") || !s2.full) fail(where, `② Shift+Tab으로 돌아온 색 모드가 안 보임 ${JSON.stringify(s2)}`);
+      for (const [name, s] of [["⑥ 타일에서 Tab", s4], ["⑥ 맨 아래에서 Tab", s6]]) {
+        if (!s.what.startsWith("chip:") || !s.full) fail(where, `${name}: 칩(초점 링 포함)이 창 안이 아님 ${JSON.stringify(s)}`);
+      }
+      if (s1.page !== s0.page || s1.what !== "tile") {
+        await page.screenshot({ path: resolve(outDir(), `follow-tab-${viewport.name}-${scheme}-${theme.replace("catalog:", "")}.png`), animations: "disabled", caret: "hide" });
+      }
+    } finally {
+      await context.close();
+    }
+  }
+
+  // ③ 방향키로 끝까지(앞으로 46번 = 43장 + 순환, 뒤로 46번) ④ 다 보이는 타일을 마우스로 ⑤ 색 모드를 마우스·방향키로.
+  for (const [viewport, theme] of FOLLOW_ARROW_CASES) {
+    const where = `${viewport.name} dark ${theme}`;
+    const { context, page } = await openWith(browser, origin, { osScheme: "dark", viewport, record: seedRecord({ theme, scheme: "dark" }) });
+    try {
+      await ready(page);
+      // 덮은 라디오는 포인터를 받지 않는다: 타일 그림·이름, 칩, 색 모드 칸의 가운데에서 맞는 요소가 라디오가 아니라 라벨 안이다(가리킴·툴팁·
+      // 커서·글자 선택·누르는 자리가 수리 전과 같은 길). 칩의 누르는 자리는 44다. 창 안·격자 안에 온전히 보이는 것만 잰다: 처음 자리에서
+      // 한 번, Tab으로 고른 타일에 닿은 뒤(낮은 창에서는 그제야 타일이 창 안이다) 한 번.
+      const pointerHits = () =>
+        page.evaluate(() => {
+          const at = (el, label) => {
+            const r = el.getBoundingClientRect();
+            const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+            return { tag: hit?.tagName ?? null, inLabel: hit !== null && label.contains(hit) };
+          };
+          const shown = (r, top = 0, bottom = innerHeight) => r.top >= Math.max(top, 0) && r.bottom <= Math.min(bottom, innerHeight);
+          const box = document.querySelector(".theme-gallery-scroll").getBoundingClientRect();
+          const tile = [...document.querySelectorAll(".theme-tile")].find((t) => shown(t.getBoundingClientRect(), box.top, box.bottom));
+          const chip = document.querySelector('[data-testid="accent-swatch-dawn"]');
+          const seg = document.querySelector('[data-testid="theme-choice-light"]').closest("label");
+          const rows = {};
+          if (shown(seg.getBoundingClientRect())) rows.segment = at(seg, seg);
+          if (tile) Object.assign(rows, { tileFrame: at(tile.querySelector(".theme-tile-frame"), tile), tileName: at(tile.querySelector(".theme-tile-name"), tile) });
+          const cr = chip.getBoundingClientRect();
+          if (shown(cr)) rows.chip = at(chip, chip);
+          return { rows, chipTap: [Math.round(cr.width), Math.round(cr.height)] };
+        });
+      const hitsAtStart = await pointerHits();
+      await page.locator('[data-testid="theme-choice"] input:checked').focus();
+      let prev = await key(page, "Tab");
+      const hitsAtTile = await pointerHits();
+      out.pointer = [...(out.pointer ?? []), { where, atStart: hitsAtStart, atTile: hitsAtTile }];
+      const measured = new Set();
+      for (const hits of [hitsAtStart, hitsAtTile]) {
+        for (const [name, h] of Object.entries(hits.rows)) {
+          measured.add(name);
+          if (h.tag === "INPUT" || !h.inLabel) fail(where, `포인터: ${name} 가운데에서 맞는 요소가 ${h.tag}(라벨 안 ${h.inLabel})`);
+        }
+        if (hits.chipTap[0] !== 44 || hits.chipTap[1] !== 44) fail(where, `칩의 누르는 자리 ${hits.chipTap.join("×")} ≠ 44×44`);
+      }
+      for (const name of ["segment", "tileFrame", "tileName"]) if (!measured.has(name)) fail(where, `포인터: ${name}를 잴 자리가 없었다(시험 전제)`);
+      const steps = [];
+      for (const dir of ["forward", "back"]) {
+        for (let i = 0; i < 46; i += 1) {
+          const name = dir === "forward" ? (i % 2 ? "ArrowRight" : "ArrowDown") : (i % 2 ? "ArrowLeft" : "ArrowUp");
+          const s = await key(page, name);
+          steps.push({ dir, i, selected: s.selected, ok: tileOk(s), dPage: s.page - prev.page, dGrid: s.grid - prev.grid, top: s.top, bottom: s.bottom });
+          if (!tileOk(s)) fail(where, `③ ${dir} ${i + 1}번째 ${name}: 고른 타일·초점이 온전히 보이지 않음 ${JSON.stringify(s)}`);
+          prev = s;
+        }
+      }
+      out.arrows.push({ where, count: steps.length, ok: steps.filter((s) => s.ok).length, distinct: new Set(steps.map((s) => s.selected)).size, steps });
+      if (new Set(steps.map((s) => s.selected)).size < 40) fail(where, `③ 방향키가 테마를 끝까지 옮기지 않음(서로 다른 테마 ${new Set(steps.map((s) => s.selected)).size})`);
+      await page.screenshot({ path: resolve(outDir(), `follow-arrows-${viewport.name}.png`), animations: "disabled", caret: "hide" });
+
+      // ④ 마우스: 격자 상자와 보이는 영역 안에 온전히 있는 (고르지 않은) 타일 셋을 차례로 누른다.
+      const clicks = [];
+      for (let k = 0; k < 3; k += 1) {
+        const target = await page.evaluate(() => {
+          const grid = document.querySelector(".theme-gallery-scroll").getBoundingClientRect();
+          const top = Math.max(grid.top, 0) + 1;
+          const bottom = Math.min(grid.bottom, innerHeight) - 1;
+          const full = [...document.querySelectorAll(".theme-tile:not([data-selected])")]
+            .map((t) => t.getBoundingClientRect())
+            .filter((r) => r.top - 4 >= top && r.bottom + 4 <= bottom && r.left >= 0 && r.right <= innerWidth);
+          const r = full[full.length - 1 - (full.length > 2 ? 1 : 0)];
+          return r ? { x: r.left + r.width / 2, y: r.top + r.height / 3 } : null;
+        });
+        if (!target) { fail(where, "④ 다 보이는 타일이 없다(시험 전제)"); break; }
+        const before = await stop(page);
+        await page.mouse.click(target.x, target.y);
+        await page.waitForTimeout(220);
+        await settle(page);
+        const after = await stop(page);
+        clicks.push({ changed: after.selected !== before.selected, dPage: after.page - before.page, dGrid: after.grid - before.grid });
+        if (after.selected === before.selected) fail(where, `④ 누른 타일이 골라지지 않음`);
+        if (after.page !== before.page || after.grid !== before.grid) fail(where, `④ 다 보이는 타일을 눌렀는데 페이지 ${after.page - before.page} · 격자 ${after.grid - before.grid}px 움직임`);
+      }
+      out.mouse.push({ where, clicks });
+
+      // ⑤ 색 모드: 색 모드 줄을 창 위쪽에 둔 채(좌표로 누른다: 도구가 대신 스크롤하지 않게) 라이트 → 다크 → 시스템 → 다크, 이어서 방향키 둘.
+      await page.evaluate(() => {
+        let pane = document.querySelector(".theme-gallery-scroll").parentElement;
+        while (pane && !(/(auto|scroll)/.test(getComputedStyle(pane).overflowY) && pane.scrollHeight > pane.clientHeight + 1)) pane = pane.parentElement;
+        pane = pane ?? document.scrollingElement;
+        const seg = document.querySelector('[data-testid="theme-choice"]').getBoundingClientRect();
+        pane.scrollTop += seg.top - Math.max(0, pane.getBoundingClientRect().top) - 48;
+      });
+      await settle(page);
+      const toggles = [];
+      let pv = await stop(page);
+      for (const to of ["light", "dark", "system", "dark"]) {
+        const pt = await page.evaluate((v) => {
+          const r = document.querySelector(`[data-testid="theme-choice-${v}"]`).closest("label").getBoundingClientRect();
+          return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+        }, to);
+        await page.mouse.click(pt.x, pt.y);
+        await page.waitForTimeout(260);
+        await settle(page);
+        const s = await stop(page);
+        const now = await page.evaluate(() => document.querySelector('[data-testid="theme-choice"] input:checked').value);
+        toggles.push({ by: "mouse", to, now, dPage: s.page - pv.page });
+        if (now !== to) fail(where, `⑤ 색 모드 ${to}를 눌렀는데 ${now}`);
+        if (s.page !== pv.page) fail(where, `⑤ 색 모드 ${to}로 바꿀 때 페이지 ${s.page - pv.page}px`);
+        pv = s;
+      }
+      for (const name of ["ArrowLeft", "ArrowRight"]) {
+        const s = await key(page, name);
+        toggles.push({ by: name, now: s.what, dPage: s.page - pv.page });
+        if (s.page !== pv.page) fail(where, `⑤ 색 모드를 ${name}로 바꿀 때 페이지 ${s.page - pv.page}px`);
+        pv = s;
+      }
+      out.scheme.push({ where, toggles });
+    } finally {
+      await context.close();
+    }
+  }
+  const summary = {
+    tab: out.tab.length,
+    arrowSteps: out.arrows.reduce((n, a) => n + a.count, 0),
+    arrowOk: out.arrows.reduce((n, a) => n + a.ok, 0),
+    mouseClicks: out.mouse.reduce((n, m) => n + m.clicks.length, 0),
+    schemeToggles: out.scheme.reduce((n, s) => n + s.toggles.length, 0),
+  };
+  writeFileSync(resolve(outDir(), "follow.json"), JSON.stringify({ summary, bad, ...out }, null, 1));
+  console.log(`FOLLOW: ${JSON.stringify(summary)}, ${bad.length} violations`);
+  if (bad.length > 0) {
+    console.error(bad.slice(0, 20).join("\n"));
+    process.exitCode = 1;
+  }
+}
+
 // 설정 > 모양 900·1280.
 async function widthScenes(browser, origin) {
   for (const width of [900, 1280]) {
@@ -960,6 +1214,7 @@ async function capture() {
     if (SCENES.includes("names")) await nameScenes(browser, preview.origin);
     if (SCENES.includes("extra")) await extraScenes(browser, preview.origin);
     if (SCENES.includes("qa8")) await qa8Scenes(browser, preview.origin);
+    if (SCENES.includes("follow")) await followScenes(browser, preview.origin);
     if (SCENES.includes("design")) {
       // 디자인 갤러리는 `VITE_DESIGN_GALLERY=1`로 빌드한 dist가 따로 필요하다.
       const designDist = process.env.DIST_DESIGN ? resolve(WEB_ROOT, process.env.DIST_DESIGN) : null;

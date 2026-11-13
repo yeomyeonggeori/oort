@@ -45,43 +45,22 @@ function revealTileInside(box: HTMLElement, tile: HTMLElement): void {
   }
 }
 
-/** 키보드로 온 초점인가(마우스로 누른 초점은 아니다). 엔진이 선택자를 모르면 키보드로 본다(`tooltip.tsx`와 같은 판단). */
-function isKeyboardFocus(target: EventTarget): target is HTMLElement {
-  if (!(target instanceof HTMLElement)) return false;
-  try {
-    return target.matches(":focus-visible");
-  } catch {
-    return true;
-  }
-}
-
 export default function ThemeGallery() {
   const { theme, scheme, signal } = useAppearance();
   const [notice, setNotice] = useState<string | null>(null);
   const scroller = useRef<HTMLDivElement>(null);
-  // 사람이 타일을 골랐는가(방향키·누름). 색 모드가 테마를 옮긴 것(규칙 2·3)과 가른다: 그때는 페이지를 움직이지 않는다.
-  const picked = useRef(false);
   const groupName = `theme-style-${useId()}`;
   const tiles = useMemo(() => galleryTiles(scheme), [scheme]);
 
-  // 처음 설 때와 색 모드가 바뀌어 목록이 바뀔 때는 격자 안쪽만 옮긴다(바깥 페이지는 그대로).
+  // 처음 설 때와 색 모드가 바뀌어 목록이 바뀔 때만 격자 안쪽을 잰다(바깥 페이지는 그대로). 사람이 고르거나(누름·방향키) Tab으로 닿을
+  // 때 따라가는 일은 브라우저의 초점 따라가기가 한다: 라디오가 타일 전체를 덮어서(`radio-cover`, tokens.css) 초점 든 상자가 곧 타일이다.
   useLayoutEffect(() => {
     const box = scroller.current;
     const tile = box?.querySelector<HTMLElement>(".theme-tile[data-selected]");
     if (box && tile) revealTileInside(box, tile);
   }, [scheme]);
 
-  // 방향키로 고르면 고른 타일이 보이는 줄 밖으로 나간다. 라디오가 `sr-only`(absolute)이고 타일(label)이 static이라 라디오가
-  // 격자 스크롤 상자의 내용이 아니어서, 브라우저의 초점 따라가기가 격자도 페이지도 움직이지 못한다(tokens.css의 MOMO-628 주석과
-  // 같은 원리). 사람이 고른 것이므로 이때는 가장 가까운 자리로 따라간다(이미 다 보이면 아무것도 안 움직인다).
-  useLayoutEffect(() => {
-    if (!picked.current) return;
-    picked.current = false;
-    scroller.current?.querySelector<HTMLElement>(".theme-tile[data-selected]")?.scrollIntoView?.({ block: "nearest" });
-  }, [theme]);
-
   function select(tile: GalleryTile) {
-    picked.current = true;
     const next = schemeForThemePick(scheme, tile.ref);
     updateAppearance({ theme: tile.ref, scheme: next.scheme });
     setNotice(next.adjusted ? pickNotice(next.adjusted) : null);
@@ -103,16 +82,7 @@ export default function ThemeGallery() {
         </div>
         <fieldset className="m-0 min-w-0 border-0 p-0" data-testid="theme-style-group">
           <legend className="sr-only">테마 스타일</legend>
-          <div
-            ref={scroller}
-            className="theme-gallery-scroll"
-            data-testid="theme-style-scroll"
-            // 키보드 초점이 타일에 닿을 때(Tab 도착)도 그 타일로 따라간다: 낮은 창·좁은 폭에서는 고른 타일이 창 아래에 있다.
-            // 브라우저가 못 하는 까닭은 위 `picked` 주석과 같다. 마우스로 누른 초점은 건드리지 않는다.
-            onFocus={(event) => {
-              if (isKeyboardFocus(event.target)) event.target.closest(".theme-tile")?.scrollIntoView?.({ block: "nearest" });
-            }}
-          >
+          <div ref={scroller} className="theme-gallery-scroll" data-testid="theme-style-scroll">
             <div className="theme-gallery-grid" data-count={tiles.length}>
               {tiles.map((tile) => (
                 <ThemeTile
