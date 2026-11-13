@@ -1889,13 +1889,15 @@ async fn claude_codes_own_handshake_is_admitted_directly_and_its_extra_client_in
             "io.modelcontextprotocol/clientInfo": info
         })
     };
-    // (era header, Mcp-Method, Mcp-Name, body) — the order Claude Code sends them in.
-    let handshake = |info: &Value| -> Vec<(
+    /// (era header, Mcp-Method, Mcp-Name, body) of one POST.
+    type Step = (
         Option<&'static str>,
         Option<&'static str>,
         Option<&'static str>,
         Value,
-    )> {
+    );
+    // The order Claude Code sends them in.
+    let handshake = |info: &Value| -> Vec<Step> {
         vec![
             (
                 Some(MODERN),
