@@ -9,8 +9,8 @@ import type { StatusDotTone } from "@momo/core/features/presence/statusDot";
 // Buzz식(소유자 결정 2026-10-17 「Buzz식: 초록=살아 있음, 회색 고리=꺼짐」): 채운 초록 = 살아 있음(응답함·살아 있음·대기),
 // 속 빈 회색 고리 = 꺼짐(조용함·꺼짐), 채운 주황 = 경고(owner/admin 에게만).
 //
-// 색은 `--ok`/`--warn`/`--danger` 상태 토큰과 `--ink-muted`/`--line-strong` 뿐이다(SKILL §2: 상태색은
-// 이 셋에서만). 점이 색에만 기대지 않도록 muted 는 **모양**도 다르다(아래).
+// 색은 `--ok`/`--warn`/`--danger` 상태 토큰과 `--ink-muted` 뿐이다(SKILL §2: 상태색은 이 셋에서만). 점이 색에만
+// 기대지 않도록 글자가 없는 자리의 점은 **모양**도 다르다(아래).
 // =============================================================================
 
 /**
@@ -24,15 +24,7 @@ export const STATUS_DOT_FILL_CLASS: Readonly<Record<StatusDotTone, string>> = {
   muted: "bg-ink-muted",
 };
 
-/**
- * 아바타 모서리의 점(DM 행: 글자가 없다) - **모양이 말한다**. 채움이 있는 톤(ok·warn·danger)은 채운 점이고, 꺼짐을 뜻하는
- * `muted`(조용함·꺼짐)는 **속이 빈 고리**다: 프로필 카드의 오프라인 배지(`PresenceControl`)와 같은 문법이라 「오프라인은
- * 채움이 없는 고리 - 채운 점과도, 아무것도 없는 것과도 다르다」. 살아 있음(채운 초록)과 꺼짐(고리)이 한 점이 되지 않는다
- * (design-review #3964 H1). 테두리 한 겹(`border-surface`)은 점이 아바타에서 떨어져 보이게 하는 면색 고리다.
- */
-export const STATUS_DOT_BADGE_CLASS: Readonly<Record<StatusDotTone, string>> = {
-  ok: "bg-ok border-surface",
-  warn: "bg-warn border-surface",
-  danger: "bg-danger border-surface",
-  muted: "bg-surface border-line-strong",
-};
+// 아바타 모서리의 점(글자가 없는 자리)은 이 파일의 클래스가 아니라 한 부품(`features/presence/AvatarStatus.tsx`)과 그
+// CSS(`tokens.css` 의 `avatar-status`)가 그린다(#5786): 아바타를 점 둘레만큼 도려낸 자리에 앉고, 톤마다 모양이 다르다
+// (ok 채운 원 · warn 초승달 · danger 가로 줄 · muted 속 빈 고리). 색 역할은 위 칩과 같은 `--ok`·`--warn`·`--danger` 이고
+// (띠 위의 초록만 점 전용 `--status-ok`), 꺼짐 고리의 선은 `--ink-muted` 다.

@@ -31,7 +31,7 @@ import {usePalette, useStyles} from '../../design/theme';
 import {ds2Radius, font, space, TOUCH_TARGET, type Palette} from '../../design/tokens';
 import type {StatusDotTone} from '@momo/core/features/presence/statusDot';
 import {useFormatMessage} from '../../i18n/useFormatMessage';
-import {StatusDot} from '../presence/StatusDot';
+import {FaceStatusDot} from '../presence/StatusDot';
 import {Avatar} from './Avatar';
 import {CONV} from './convDesign';
 import {headerSlotWidth, pillShowsSecondary, pillStatusWord} from './headerPill';
@@ -243,9 +243,7 @@ export function ConversationHeader({
         <View style={styles.face} testID="conversation-title-face">
           <Avatar directory={directory} memberId={peerId as string} size={CONV.titleFace} ground="muted" />
           {peerStatusTone !== null ? (
-            <View style={styles.statusAnchor}>
-              <StatusDot tone={peerStatusTone} testID="conversation-title-status-dot" />
-            </View>
+            <FaceStatusDot face={CONV.titleFace} tone={peerStatusTone} testID="conversation-title-status-dot" />
           ) : null}
         </View>
       ) : isChannel ? (
@@ -505,7 +503,6 @@ const buildStyles = (color: Palette) =>
     },
     pillPressed: {borderColor: color.textFaint},
     face: {width: CONV.titleFace, height: CONV.titleFace},
-    statusAnchor: {position: 'absolute', right: -2, bottom: -2},
     titleGlyph: {width: CONV.titleGlyph, height: CONV.titleGlyph},
     title: {
       flexShrink: 1,

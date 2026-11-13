@@ -3,6 +3,7 @@ import {contrast} from '@momo/core/design/color';
 import type {AgentWorkingSignal} from '@momo/core/features/agents/workingSignal';
 import {TURN_STALE_SENTENCE} from '@momo/core/features/agents/turnCopy';
 import {makeDirectory} from '@momo/core/features/workspace/directory';
+import {statusBadgeGeometry} from '@momo/core/features/presence/statusBadge';
 import {QueryClient, QueryClientProvider} from '@tanstack/react-query';
 import {
   act,
@@ -622,6 +623,52 @@ describe('홈 — DM 줄의 상태 점 (#3964)', () => {
     await mountHome();
     expect(dotOf('channel:ch-general')).toBeNull();
     expect(dotOf('channel:ch-agent-lab')).toBeNull();
+  });
+
+  it('점의 크기는 얼굴(28)에서 정해진다 — 웹과 같은 코어 비율: 점 10 · 면색 틈 2, 색 점의 바깥 끝이 얼굴 모서리에 닿는다 (#5786)', async () => {
+    await mountHome({roster: asRoster({[HUMAN_ID]: {online: true}})});
+    const mark = await waitFor(() => {
+      const node = dotOf('dm:ch-dm-human');
+      expect(node).toBeTruthy();
+      return node!;
+    });
+    const {dot, gap} = statusBadgeGeometry(28);
+    expect({dot, gap}).toEqual({dot: 10, gap: 2});
+    expect(flat(mark.props.style)).toMatchObject({width: dot, height: dot, borderWidth: 0});
+    // 바깥 원(틈): 면색, 지름 = 점 + 틈×2, 얼굴 상자 밖으로 틈만큼만 나간다.
+    const ring = flat(
+      within(screen.getByTestId('sidebar-row-dm:ch-dm-human')).getByTestId('home-row-status-dot-gap', {
+        includeHiddenElements: true,
+      }).props.style,
+    );
+    expect(ring).toMatchObject({width: dot + 2 * gap, height: dot + 2 * gap, right: -gap, bottom: -gap});
+    expect([lightPalette.surface, darkPalette.surface]).toContain(ring.backgroundColor);
+  });
+
+  it('모양이 말한다 — 자리 비움은 초승달(면색 원이 왼쪽 위를 덜어 냄), 방해 금지는 면색 가로 줄, 온라인은 둘 다 없다 (#5786)', async () => {
+    const shapeOf = async (over: Record<string, unknown>) => {
+      await mountHome({roster: asRoster({[HUMAN_ID]: over})});
+      await waitFor(() => expect(dotOf('dm:ch-dm-human')).toBeTruthy());
+      const row = within(screen.getByTestId('sidebar-row-dm:ch-dm-human'));
+      const q = (id: string) => {
+        const node = row.queryByTestId(id, {includeHiddenElements: true});
+        return node === null ? null : flat(node.props.style);
+      };
+      const result = {moon: q('home-row-status-dot-moon'), bar: q('home-row-status-dot-bar')};
+      screen.unmount();
+      return result;
+    };
+    const away = await shapeOf({presenceStatus: 'away', online: true});
+    expect(away.moon).toBeTruthy();
+    expect(away.bar).toBeNull();
+    expect([lightPalette.surface, darkPalette.surface]).toContain(away.moon!.backgroundColor);
+    const dnd = await shapeOf({presenceStatus: 'dnd', online: true});
+    expect(dnd.bar).toBeTruthy();
+    expect(dnd.moon).toBeNull();
+    expect(dnd.bar).toMatchObject({width: 10 - 2 * 2, height: 2});
+    const on = await shapeOf({online: true});
+    expect(on.moon).toBeNull();
+    expect(on.bar).toBeNull();
   });
 
   it('사람: 자리 비움은 주황 점', async () => {

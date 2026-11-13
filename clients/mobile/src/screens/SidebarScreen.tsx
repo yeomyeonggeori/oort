@@ -68,7 +68,7 @@ import {
   withApprovalWaits,
 } from '../features/agents/workingSignal';
 import {useWorkspaceApprovalWaits} from '../features/conversation/usePendingApprovals';
-import {StatusDot} from '../features/presence/StatusDot';
+import {FaceStatusDot} from '../features/presence/StatusDot';
 import {useCollapsedSections, visibleRows} from '../features/home/collapsedSections';
 import {
   buildWorkingCard,
@@ -1326,9 +1326,7 @@ function Row({
     ) : (
       <View style={styles.face} testID="home-row-face">
         {lead}
-        <View style={styles.statusAnchor}>
-          <StatusDot tone={status.tone} testID="home-row-status-dot" />
-        </View>
+        <FaceStatusDot face={HOME.rowFace} tone={status.tone} testID="home-row-status-dot" />
       </View>
     );
   return (
@@ -1908,7 +1906,6 @@ const buildStyles = (color: Palette) => StyleSheet.create({
   },
   // 상태 점이 있는 줄의 얼굴 상자(점의 절대 위치 기준). 크기는 얼굴과 같다.
   face: {width: HOME.rowFace, height: HOME.rowFace},
-  statusAnchor: {position: 'absolute', right: -2, bottom: -2},
   agentSquare: {
     backgroundColor: color.agentSurface,
     alignItems: 'center',
