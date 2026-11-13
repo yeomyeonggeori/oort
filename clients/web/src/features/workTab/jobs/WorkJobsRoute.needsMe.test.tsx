@@ -1122,6 +1122,11 @@ describe("「응답 필요」의 칸은 화면에 떠 있는 동안 자리를 �
     await sleepMs(GUARD_PASSED_MS);
     const approve = (n: number) => within(needsMeSlot(n)).getByTestId("work-job-approval-approve");
     const reject = (n: number) => within(needsMeSlot(n)).getByTestId("work-job-approval-reject");
+    // 누르는 동안 줄이 옮겨져 다른 단추 위에서 뗌: 시작한 단추와 뗀 단추가 다르면 삼킨다(막힘 여부와 무관).
+    fireEvent.pointerDown(approve(0));
+    fireEvent.click(reject(0), { detail: 1 });
+    await sleepMs(80);
+    expect(decidedIds()).toEqual([]);
     // 띠가 서서 막힌 동안 누르기 시작 → 1초 넘게 붙들어 막힘이 풀린 뒤 뗌: 삼킨다(풀린 뒤 시작한 누름이 아니다).
     at.y = 45;
     const band = document.createElement("div");
@@ -1140,12 +1145,7 @@ describe("「응답 필요」의 칸은 화면에 떠 있는 동안 자리를 �
     fireEvent.pointerDown(reject(0));
     fireEvent.click(reject(0), { detail: 1 });
     await waitFor(() => expect(decidedIds()).toEqual([A(1)]), { timeout: 3000 });
-    // 누르는 동안 줄이 옮겨져 다른 단추 위에서 뗌: 시작한 단추와 뗀 단추가 다르면 삼킨다.
-    await sleepMs(GUARD_PASSED_MS);
-    fireEvent.pointerDown(approve(1));
-    fireEvent.click(reject(1), { detail: 1 });
-    await sleepMs(80);
-    expect(decidedIds()).toEqual([A(1)]);
+    band.remove();
   });
 
   it("굴리는 도중에 밖의 변화가 겹쳐도, 굴림 양을 뺀 남는 옮김이 1px를 넘으면 막는다 (수리 2회차 M1)", async () => {
@@ -1161,8 +1161,10 @@ describe("「응답 필요」의 칸은 화면에 떠 있는 동안 자리를 �
     list.scrollTop = 50;
     at.y = 50;
     fireEvent.scroll(list);
-    expect(guardedLook(0)).toBe(true);
-    pressSlot(0, "reject");
+    // 앞 시험에서 결정한 run이 남아 있을 수 있어(모듈 장부) 결정 단추가 서 있는 첫 칸을 본다.
+    const open = [0, 1].find((n) => needsMeSlot(n).querySelector("[data-decision]") !== null)!;
+    expect(guardedLook(open)).toBe(true);
+    pressSlot(open, "reject");
     await sleepMs(50);
     expect(decidedIds()).toEqual([]);
   });
