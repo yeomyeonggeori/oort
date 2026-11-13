@@ -135,10 +135,10 @@ export function ListRowSkeleton({ testId }: { testId?: string }) {
         <span className={cn(BAR_CLASS, "block size-8 shrink-0 rounded-full")} />
         <span className={STACK_CLASS}>
           <span className="block text-body">
-            <span className={cn(BAR_CLASS, "inline-block h-3 w-action-sm align-middle")} />
+            <span className={cn(BAR_CLASS, "inline-block h-3 w-action-sm max-w-full align-middle")} />
           </span>
           <span className="block text-meta">
-            <span className={cn(BAR_CLASS, "inline-block h-2 w-pane-sm align-middle")} />
+            <span className={cn(BAR_CLASS, "inline-block h-2 w-pane-sm max-w-full align-middle")} />
           </span>
         </span>
       </span>
