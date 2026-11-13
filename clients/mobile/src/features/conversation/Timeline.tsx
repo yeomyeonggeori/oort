@@ -3694,7 +3694,7 @@ function TimelineInner({
     () => (
       <>
         {headerContent}
-        <View style={styles.header}>
+        <View style={styles.header} testID="timeline-header">
           {loadingOlder ? (
             <ActivityIndicator color={palette.accentText} />
           ) : reachedStart && items.length > 0 ? (
@@ -3990,9 +3990,13 @@ function TimelineInner({
 export const Timeline = React.memo(TimelineInner);
 Timeline.displayName = 'Timeline';
 
+/** 머리 칸 안쪽 높이: `ActivityIndicator` 기본(small) 크기. */
+const HEADER_SLOT = 20;
+
 const buildStyles = (color: Palette) => StyleSheet.create({
   header: {
-    minHeight: space.md,
+    // 돌림표(20pt)가 서도 서지 않아도 같은 높이 — 읽는 동안만 목록이 20pt 늘었다 줄면 맨 아래 따라가기가 계속 끊긴다(#5757).
+    minHeight: HEADER_SLOT + space.sm * 2,
     paddingVertical: space.sm,
     paddingHorizontal: SAFE_GUTTER,
     alignItems: 'center',
