@@ -39,8 +39,18 @@ import {
   ContextMenuRadioGroup,
   ContextMenuRadioItem,
   ContextMenuSeparator,
+  ContextMenuSub,
+  ContextMenuSubContent,
+  ContextMenuSubTrigger,
   ContextMenuTrigger,
 } from "@/design/ui/context-menu";
+// 하위 메뉴 견본(#5777)의 낱말은 채널 메뉴가 쓰는 이름 그대로다(새 문구를 만들지 않는다).
+import { CHANNEL_COPY_GROUP_LABEL } from "@momo/core/features/channels/model";
+import {
+  SECTION_MOVE_GROUP_LABEL,
+  SECTION_MOVE_TO_BASE_LABEL,
+} from "@momo/core/features/sidebar/sidebarSections";
+import { COPY_LINK_ACTION_LABEL } from "@momo/core/features/timeline/copyLabels";
 import {
   Dialog,
   DialogClose,
@@ -59,6 +69,9 @@ import {
   DropdownMenuCheckboxItem,
   DropdownMenuRadioItem,
   DropdownMenuSeparator,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from "@/design/ui/dropdown-menu";
 import { Input } from "@/design/ui/input";
@@ -593,6 +606,24 @@ function OverlayExamples() {
                     >
                       켜고 끄기
                     </DropdownMenuCheckboxItem>
+                    {/* 하위 메뉴(#5777): 고를 수 없는 줄이 없는 묶음에만(README 「메뉴」). */}
+                    <Export name="DropdownMenuSub">
+                      <DropdownMenuSub open>
+                        <DropdownMenuSubTrigger data-gallery-export="DropdownMenuSubTrigger">
+                          {CHANNEL_COPY_GROUP_LABEL}
+                        </DropdownMenuSubTrigger>
+                        <OverlayCell className="mt-2 w-max max-w-full">
+                          {(subHost) => (
+                            <DropdownMenuSubContent
+                              container={subHost}
+                              data-gallery-export="DropdownMenuSubContent"
+                            >
+                              <DropdownMenuItem>{COPY_LINK_ACTION_LABEL}</DropdownMenuItem>
+                            </DropdownMenuSubContent>
+                          )}
+                        </OverlayCell>
+                      </DropdownMenuSub>
+                    </Export>
                   </DropdownMenuContent>
                 )}
               </OverlayCell>
@@ -762,6 +793,24 @@ function ContextMenuSpecimen() {
                 유지
               </ContextMenuRadioItem>
             </ContextMenuRadioGroup>
+            {/* 하위 메뉴(#5777): 고를 수 없는 줄이 없는 묶음에만(README 「메뉴」). */}
+            <Export name="ContextMenuSub">
+              <ContextMenuSub open>
+                <ContextMenuSubTrigger data-gallery-export="ContextMenuSubTrigger">
+                  {SECTION_MOVE_GROUP_LABEL}
+                </ContextMenuSubTrigger>
+                <OverlayCell className="mt-2 w-max max-w-full">
+                  {(subHost) => (
+                    <ContextMenuSubContent
+                      container={subHost}
+                      data-gallery-export="ContextMenuSubContent"
+                    >
+                      <ContextMenuItem>{SECTION_MOVE_TO_BASE_LABEL}</ContextMenuItem>
+                    </ContextMenuSubContent>
+                  )}
+                </OverlayCell>
+              </ContextMenuSub>
+            </Export>
           </ContextMenuContent>
         )}
       </OverlayCell>

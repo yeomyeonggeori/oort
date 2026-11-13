@@ -1,6 +1,7 @@
 import {
   channelActionClusterTitle,
   channelActionMenuLabel,
+  isChannelActionStatusIcon,
   type ChannelActionItem,
   type ChannelActionKey,
 } from '@momo/core/features/channels/actionModel';
@@ -134,7 +135,7 @@ export function ChannelActionSheet({
                       key={item.key}
                       title={busy && item.busyLabel ? item.busyLabel : item.label}
                       // 알림 상태 표지는 오른쪽 값 자리다. 앞 칸·행 차례·위험색은 #4319 계약을 따른다.
-                      trailing={item.icon ? <RowStatusIcon name={item.icon} /> : undefined}
+                      trailing={isChannelActionStatusIcon(item.icon) ? <RowStatusIcon name={item.icon} /> : undefined}
                       tone={item.tone === 'danger' ? 'danger' : 'default'}
                       busy={busy}
                       // 닫는 길로 보내지 않는다: 이 시트는 왕복 중의 「…하는 중」·「복사됨」·실패를 스스로
