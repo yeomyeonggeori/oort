@@ -81,10 +81,12 @@ function rosterMember(over: Record<string, unknown>) {
 }
 
 let seoyeon: Record<string, unknown> = {};
+/** 보는 사람(나)의 역할 — 이메일을 게스트에게서 가리는지 잰다(#5780). */
+let selfRole = 'owner';
 
 function roster() {
   return [
-    rosterMember({ id: SELF_ID, displayName: '이도현', handle: 'dohyun', role: 'owner' }),
+    rosterMember({ id: SELF_ID, displayName: '이도현', handle: 'dohyun', role: selfRole }),
     rosterMember({
       id: SEOYEON,
       displayName: '박서연',
@@ -191,6 +193,7 @@ beforeEach(async () => {
   setServerBase(BASE);
   sessionPort.applyLogin(LOGIN_BODY);
   seoyeon = {};
+  selfRole = 'owner';
   liveness = null;
   installFetch();
 });
@@ -303,5 +306,26 @@ describe('상태 칩은 DM 머리와 같은 판정이다 (#4319)', () => {
         '살아 있음 · 대기 중',
       ),
     );
+  });
+});
+
+// #5780: 명부가 싣는 이메일이 프로필 시트의 정보 카드에 선다. 게스트 시점에서는 가린다(코어 `profileEmail`).
+describe('이메일은 명부에서 온다 (#5780)', () => {
+  it('멤버가 보면 정보 카드에 그 사람의 이메일 한 줄이 선다', async () => {
+    seoyeon = { email: 'seoyeon@example.com' };
+    selfRole = 'member';
+    await openGeneral();
+    fireEvent.press(screen.getByLabelText('박서연 프로필 보기'));
+    expect(screen.getByTestId('profile-email')).toHaveTextContent('이메일seoyeon@example.com');
+  });
+
+  it('게스트가 보면 이메일이 없다(서버는 아직 싣는다 — 화면의 가림)', async () => {
+    seoyeon = { email: 'seoyeon@example.com' };
+    selfRole = 'guest';
+    await openGeneral();
+    fireEvent.press(screen.getByLabelText('박서연 프로필 보기'));
+    expect(screen.getByTestId('member-profile-sheet')).toBeTruthy();
+    expect(screen.queryByTestId('profile-email')).toBeNull();
+    expect(screen.queryByText('seoyeon@example.com')).toBeNull();
   });
 });

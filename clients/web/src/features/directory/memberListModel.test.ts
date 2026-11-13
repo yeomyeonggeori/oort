@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { RosterMember } from "@momo/core/lib/api";
-import { canSearchByEmail, groupMemberList, visibleEmail } from "./memberListModel";
+import { profileEmail } from "@momo/core/features/directory/model";
+import { canSearchByEmail, groupMemberList } from "./memberListModel";
 
 // #5782: who sees a member's email in the member tab, and who can find a member
 // by it. The search half is the one that leaks: a guest who cannot see the
@@ -29,22 +30,22 @@ const dohyeon = row({ id: "a2", displayName: "김도현", handle: "dohyeon", ema
 const hermes = row({ id: "a3", displayName: "hermes", handle: "hermes", kind: "agent", email: "bot@example.com" });
 const roster = [seoyeon, dohyeon, hermes];
 
-describe("visibleEmail", () => {
+describe("profileEmail", () => {
   it("members, admins and owners see a person's trimmed email", () => {
     for (const role of ["owner", "admin", "member"] as const) {
-      expect(visibleEmail(role, { kind: "human", email: "  kim.d@example.com " })).toBe("kim.d@example.com");
+      expect(profileEmail(role, { kind: "human", email: "  kim.d@example.com " })).toBe("kim.d@example.com");
     }
   });
 
   it("a guest, or a viewer whose role is unknown, sees none", () => {
-    expect(visibleEmail("guest", seoyeon)).toBeNull();
-    expect(visibleEmail(undefined, seoyeon)).toBeNull();
+    expect(profileEmail("guest", seoyeon)).toBeNull();
+    expect(profileEmail(undefined, seoyeon)).toBeNull();
   });
 
   it("an agent has no email to show, and blank or non-string values are absent", () => {
-    expect(visibleEmail("owner", hermes)).toBeNull();
-    expect(visibleEmail("owner", { kind: "human", email: "   " })).toBeNull();
-    expect(visibleEmail("owner", { kind: "human", email: 42 as unknown as string })).toBeNull();
+    expect(profileEmail("owner", hermes)).toBeNull();
+    expect(profileEmail("owner", { kind: "human", email: "   " })).toBeNull();
+    expect(profileEmail("owner", { kind: "human", email: 42 as unknown as string })).toBeNull();
   });
 
   it("canSearchByEmail follows the same line", () => {
