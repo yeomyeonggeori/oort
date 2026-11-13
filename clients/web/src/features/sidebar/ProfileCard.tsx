@@ -70,10 +70,10 @@ import { useCustomStatusView } from "./useCustomStatusView";
 // against the list would pin the card inside a box the trigger is not in.
 //
 // #5785 (QA 14 1단, Buzz의 프로필 메뉴): 내 상태 → **워크스페이스 이름**(머리글) 아래 펼친 줄
-// 「주소 복사」 · 「워크스페이스 설정」 · 「워크스페이스 나가기」(위험색, 확인 창) · 「워크스페이스 추가」.
+// 「서버 주소 복사」 · 「워크스페이스 설정」 · 「워크스페이스 나가기」(위험색, 확인 창) · 「워크스페이스 추가」.
 // 하위 메뉴가 아니라 머리글 + 보이는 줄이다(#1383, 하위 메뉴 부품은 따로 들어오는 중). 머리글은 자기 id를
 // 갖고 줄 묶음이 `aria-labelledby`로 되짚는다(`DropdownMenuLabel` 머리말).
-//   * 주소 복사는 이 기기가 붙은 서버 주소(`absoluteApiBase`)다. 로그인 화면의 첫 칸이 그 글을 그대로
+//   * 서버 주소 복사는 이 기기가 붙은 서버 주소(`absoluteApiBase`)다. 로그인 화면의 첫 칸이 그 글을 그대로
 //     받는다. 워크스페이스 ID는 싣지 않는다: 로그인 화면의 그 칸이 ID를 읽지 않고, 클라이언트는 지금
 //     워크스페이스가 서버의 기본 워크스페이스인지 모른다. 메뉴는 열린 채 줄 글이 「주소 복사됨」으로 바뀐다
 //     (채널 메뉴의 복사 줄과 같은 문법, 토스트 없음).
@@ -119,6 +119,7 @@ export function ProfileCard({
   const [leaveOpen, setLeaveOpen] = useState(false);
   const [copyFailed, setCopyFailed] = useState(false);
   const workspaceHeadId = useId();
+  const copyNoteId = useId();
   const addressCopy = useClipboardCopy(absoluteApiBase());
   const addressLabel = copyFailed
     ? formatMessage("workspace.menu.copyFailed")
@@ -253,13 +254,14 @@ export function ProfileCard({
           <DropdownMenuLabel
             id={workspaceHeadId}
             data-testid="profile-workspace-head"
-            className="max-w-full min-w-0 break-words whitespace-normal"
+            className="max-w-full min-w-0 break-keep [overflow-wrap:anywhere] whitespace-normal"
           >
             {workspaceName ?? formatMessage("workspace.menu.fallbackTitle")}
           </DropdownMenuLabel>
           <DropdownMenuGroup aria-labelledby={workspaceHeadId}>
             <DropdownMenuItem
               data-testid="profile-copy-address"
+              aria-describedby={copyNoteId}
               onSelect={(event) => {
                 // 메뉴를 열어 둔 채 줄 글이 결과를 말한다(복사됨 / 복사하지 못했어요).
                 event.preventDefault();
@@ -272,6 +274,16 @@ export function ProfileCard({
               <Copy className="size-4" aria-hidden="true" />
               {addressLabel}
             </DropdownMenuItem>
+            {/* 서버 주소만으로는 같은 서버의 기본이 아닌 워크스페이스에 못 들어온다(로그인 화면이 따로 ID를 받는다,
+                `loginWorkspaceEntry.ts`). 클라이언트는 지금 워크스페이스가 기본인지 몰라서 늘 말한다.
+                줄이 아니라 줄 아래 글이다: 초점도 선택도 받지 않고, 글자 시작은 아이콘 줄과 같은 세로 줄(pl-8)이다. */}
+            <p
+              id={copyNoteId}
+              className="select-none break-keep pb-1 pl-8 pr-2 text-meta text-ink-muted"
+              data-testid="profile-copy-address-note"
+            >
+              {formatMessage("workspace.menu.copyAddressNote")}
+            </p>
             <DropdownMenuItem
               data-testid="profile-workspace-settings"
               onSelect={() => {

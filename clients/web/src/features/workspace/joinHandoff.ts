@@ -64,3 +64,38 @@ export function joinHandoffHref(href: string, target: JoinTarget): string {
   url.hash = "#/";
   return url.toString();
 }
+
+/** 서버 주소끼리 같은가: 끝 슬래시와 대소문자는 같은 주소다(`normalizeServerUrl`이 낸 base 모양). */
+export function isSameServer(a: string, b: string): boolean {
+  const key = (value: string) => value.trim().replace(/\/+$/, "").toLowerCase();
+  return key(a) !== "" && key(a) === key(b);
+}
+
+export const SERVER_PROBE_TIMEOUT_MS = 5_000;
+
+/**
+ * 넘어갈 주소에 **닿는지** 가볍게 본다(로그아웃하기 전). `no-cors`라서 응답 내용은 못 읽는다: 서버가 CORS를
+ * 열어 두지 않은 주소에서도 닿은 것은 닿은 것으로 센다. 그래서 「oort 서버가 답한다」까지는 확인하지 못하고,
+ * 오타 주소(이름이 안 풀림)·꺼진 서버·이 앱이 연결하지 못하게 막힌 주소를 로그아웃 전에 거른다.
+ * 응답 코드와 상관없이 응답이 오면 닿은 것이다.
+ */
+export async function probeServerReachable(
+  base: string,
+  timeoutMs: number = SERVER_PROBE_TIMEOUT_MS
+): Promise<boolean> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    await fetch(`${base.replace(/\/+$/, "")}/healthz`, {
+      mode: "no-cors",
+      cache: "no-store",
+      credentials: "omit",
+      signal: controller.signal,
+    });
+    return true;
+  } catch {
+    return false;
+  } finally {
+    clearTimeout(timer);
+  }
+}

@@ -977,19 +977,42 @@ describe("ProfileCard 워크스페이스 줄 묶음 (#5785)", () => {
     expect(menu.querySelector('[aria-haspopup="menu"]')).toBeNull();
   });
 
+  it("「내 상태」 줄의 점은 아이콘 줄과 같은 16px 칸에 서서 글자 시작이 한 세로 줄이다(실측은 capture-5785)", async () => {
+    mountCard();
+    await openMenu();
+    for (const status of ["auto", "away", "dnd"]) {
+      const slot = q(`presence-dot-slot-${status}`);
+      expect(slot?.className).toContain("size-4");
+      expect(slot?.className).toContain("justify-center");
+    }
+    // 아이콘 줄의 아이콘도 같은 size-4다.
+    expect(q("profile-set-status")?.querySelector("svg")?.getAttribute("class")).toContain("size-4");
+  });
+
+  it("「서버 주소 복사」 줄 아래 글이 기본이 아닌 워크스페이스는 ID가 더 필요하다고 말하고, 줄이 그 글을 설명으로 가진다", async () => {
+    mountCard();
+    await openMenu();
+    const note = q("profile-copy-address-note")!;
+    expect(note.textContent).toBe("기본이 아닌 워크스페이스는 로그인할 때 워크스페이스 ID도 넣어야 해요.");
+    expect(q("profile-copy-address")?.getAttribute("aria-describedby")).toBe(note.id);
+    // 줄이 아니다: 초점도 선택도 받지 않는다.
+    expect(note.getAttribute("role")).toBeNull();
+    expect(note.hasAttribute("tabindex")).toBe(false);
+  });
+
   it("이름이 아직 없으면 머리글은 「워크스페이스」다", async () => {
     mountCard();
     await openMenu();
     expect(text("profile-workspace-head")).toBe("워크스페이스");
   });
 
-  it("「주소 복사」는 서버 주소를 쓰고, 메뉴를 연 채 「주소 복사됨」으로 바뀐다. 로그인 화면이 그 글을 그대로 받는다", async () => {
+  it("「서버 주소 복사」는 서버 주소를 쓰고, 메뉴를 연 채 「서버 주소 복사됨」으로 바뀐다. 로그인 화면이 그 글을 그대로 받는다", async () => {
     mountCard(() => undefined, rosterMember(), { workspaceName: "새벽팀" });
     await chooseRow("profile-copy-address");
     expect(writeText).toHaveBeenCalledTimes(1);
     const copied = writeText.mock.calls[0]![0] as string;
     expect(copied).toBe(absoluteApiBase());
-    await vi.waitFor(() => expect(text("profile-copy-address")).toBe("주소 복사됨"));
+    await vi.waitFor(() => expect(text("profile-copy-address")).toBe("서버 주소 복사됨"));
     expect(q("profile-card-menu")).not.toBeNull();
     // 로그인 화면의 첫 칸이 이 글을 서버 주소로 읽는다(같은 판정 함수).
     const decision = classifyEntry(copied);
@@ -1043,12 +1066,45 @@ describe("ProfileCard 워크스페이스 줄 묶음 (#5785)", () => {
     await act(async () => q("workspace-leave-dialog-confirm")!.click());
     await vi.waitFor(() =>
       expect(text("workspace-leave-dialog-last-owner")).toBe(
-        "마지막 소유자는 나갈 수 없어요. 먼저 다른 사람에게 소유자를 넘기세요."
+        "마지막 소유자는 나갈 수 없어요. 먼저 다른 사람에게 소유자를 넘기세요. 설정의 「멤버와 초대」에서 다른 소유자를 세운 뒤 다시 나가세요."
       )
     );
     expect(q("workspace-leave-dialog-last-owner")?.getAttribute("role")).toBe("alert");
+    // 같은 거절을 또 부르지 않게 「나가기」가 잠기고, 초점은 「취소」로 간다(M7).
+    expect(q("workspace-leave-dialog-confirm")?.hasAttribute("disabled")).toBe(true);
+    expect(document.activeElement).toBe(q("workspace-leave-dialog-cancel"));
+    await act(async () => q("workspace-leave-dialog-confirm")!.click());
+    expect(leaveWorkspace).toHaveBeenCalledTimes(1);
     expect(q("workspace-leave-dialog")).not.toBeNull();
     expect(logout).not.toHaveBeenCalled();
+  });
+
+  it("나가는 동안 「취소」는 잠긴 모양(aria-disabled)이고 눌러도 창이 그대로다(M1)", async () => {
+    let finish: () => void = () => undefined;
+    leaveWorkspace.mockReturnValue(new Promise<void>((resolve) => (finish = resolve)));
+    const logout = vi.fn();
+    mountCard(logout);
+    await chooseRow("profile-leave-workspace");
+    await vi.waitFor(() => expect(q("workspace-leave-dialog-confirm")).not.toBeNull());
+    expect(q("workspace-leave-dialog-cancel")?.getAttribute("aria-disabled")).toBeNull();
+    await act(async () => q("workspace-leave-dialog-confirm")!.click());
+    await vi.waitFor(() =>
+      expect(q("workspace-leave-dialog-cancel")?.getAttribute("aria-disabled")).toBe("true")
+    );
+    const cancel = q("workspace-leave-dialog-cancel")!;
+    expect(cancel.className).toContain("cursor-not-allowed");
+    expect(cancel.className).toContain("opacity-50");
+    await act(async () => cancel.click());
+    expect(q("workspace-leave-dialog")).not.toBeNull();
+    await act(async () => finish());
+    await vi.waitFor(() => expect(logout).toHaveBeenCalledTimes(1));
+  });
+
+  it("나가기 창은 보낸 메시지가 남는다고 말한다(L7)", async () => {
+    mountCard(vi.fn());
+    await chooseRow("profile-leave-workspace");
+    await vi.waitFor(() => expect(q("workspace-leave-dialog")).not.toBeNull());
+    expect(text("workspace-leave-dialog")).toContain("보낸 메시지는 남아요");
   });
 
   it("취소하면 아무것도 쓰지 않는다", async () => {

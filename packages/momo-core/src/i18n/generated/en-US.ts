@@ -10858,6 +10858,12 @@ export const catalog: MessageCatalog = {
       "value": "Create a new workspace"
     }
   ],
+  "workspace.add.joinChecking": [
+    {
+      "type": 0,
+      "value": "Checking"
+    }
+  ],
   "workspace.add.joinClaim": [
     {
       "type": 0,
@@ -10873,7 +10879,7 @@ export const catalog: MessageCatalog = {
   "workspace.add.joinConfirmBody": [
     {
       "type": 0,
-      "value": "This app signs in to one workspace at a time. You'll be signed out of this workspace, and unsent drafts on this device are erased. The sign-in screen will be filled in with what you entered."
+      "value": "This app signs in to one workspace at a time. You'll be signed out of this workspace. The sign-in screen will be filled in with what you entered."
     }
   ],
   "workspace.add.joinConfirmTitle": [
@@ -10910,6 +10916,12 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "Continue"
+    }
+  ],
+  "workspace.add.joinSameServer": [
+    {
+      "type": 0,
+      "value": "You're already on this server. For another workspace on it, sign out and use “Sign in to another workspace” on the sign-in screen with its workspace ID."
     }
   ],
   "workspace.add.joinTargetInvite": [
@@ -10952,6 +10964,20 @@ export const catalog: MessageCatalog = {
       "value": "Join one that already exists"
     }
   ],
+  "workspace.add.joinUnreachable": [
+    {
+      "type": 0,
+      "value": "Couldn't reach "
+    },
+    {
+      "type": 1,
+      "value": "server"
+    },
+    {
+      "type": 0,
+      "value": ", so you weren't signed out. Check the address."
+    }
+  ],
   "workspace.add.lead": [
     {
       "type": 0,
@@ -10991,7 +11017,7 @@ export const catalog: MessageCatalog = {
   "workspace.leave.body": [
     {
       "type": 0,
-      "value": "Your membership ends and you're signed out right away. You'll need an invite to come back."
+      "value": "Your membership ends and you're signed out right away. Messages you sent stay. You'll need an invite to come back."
     }
   ],
   "workspace.leave.busy": [
@@ -11018,6 +11044,12 @@ export const catalog: MessageCatalog = {
       "value": "The last owner can't leave. Make someone else an owner first."
     }
   ],
+  "workspace.leave.lastOwnerNext": [
+    {
+      "type": 0,
+      "value": "Make someone else an owner in Settings › Members and invites, then leave again."
+    }
+  ],
   "workspace.leave.title": [
     {
       "type": 0,
@@ -11041,13 +11073,19 @@ export const catalog: MessageCatalog = {
   "workspace.menu.copiedAddress": [
     {
       "type": 0,
-      "value": "Address copied"
+      "value": "Server address copied"
     }
   ],
   "workspace.menu.copyAddress": [
     {
       "type": 0,
-      "value": "Copy address"
+      "value": "Copy server address"
+    }
+  ],
+  "workspace.menu.copyAddressNote": [
+    {
+      "type": 0,
+      "value": "A workspace that isn't the default also needs its workspace ID on the sign-in screen."
     }
   ],
   "workspace.menu.copyFailed": [

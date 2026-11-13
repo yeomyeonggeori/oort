@@ -10179,6 +10179,12 @@ export const catalog: MessageCatalog = {
       "value": "새 워크스페이스 만들기"
     }
   ],
+  "workspace.add.joinChecking": [
+    {
+      "type": 0,
+      "value": "확인 중"
+    }
+  ],
   "workspace.add.joinClaim": [
     {
       "type": 0,
@@ -10194,7 +10200,7 @@ export const catalog: MessageCatalog = {
   "workspace.add.joinConfirmBody": [
     {
       "type": 0,
-      "value": "이 앱은 한 번에 워크스페이스 하나에만 로그인해요. 지금 워크스페이스에서 로그아웃되고, 이 기기에 쓰다 만 초안은 지워져요. 로그인 화면에는 넣은 주소를 채워 둘게요."
+      "value": "이 앱은 한 번에 워크스페이스 하나에만 로그인해요. 지금 워크스페이스에서 로그아웃돼요. 로그인 화면에는 넣은 주소를 채워 둘게요."
     }
   ],
   "workspace.add.joinConfirmTitle": [
@@ -10233,6 +10239,12 @@ export const catalog: MessageCatalog = {
       "value": "계속"
     }
   ],
+  "workspace.add.joinSameServer": [
+    {
+      "type": 0,
+      "value": "이미 이 서버에 있어요. 같은 서버의 다른 워크스페이스는 로그아웃한 뒤 로그인 화면의 「다른 워크스페이스로 로그인」에서 워크스페이스 ID로 들어가요."
+    }
+  ],
   "workspace.add.joinTargetInvite": [
     {
       "type": 1,
@@ -10263,6 +10275,16 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "이미 있는 곳에 참여"
+    }
+  ],
+  "workspace.add.joinUnreachable": [
+    {
+      "type": 1,
+      "value": "server"
+    },
+    {
+      "type": 0,
+      "value": "에 닿지 않아서 로그아웃하지 않았어요. 주소를 다시 확인하세요."
     }
   ],
   "workspace.add.lead": [
@@ -10304,7 +10326,7 @@ export const catalog: MessageCatalog = {
   "workspace.leave.body": [
     {
       "type": 0,
-      "value": "나가면 멤버십이 끝나고, 확인하면 바로 로그아웃돼요. 다시 들어오려면 초대가 필요해요."
+      "value": "나가면 멤버십이 끝나고, 확인하면 바로 로그아웃돼요. 보낸 메시지는 남아요. 다시 들어오려면 초대가 필요해요."
     }
   ],
   "workspace.leave.busy": [
@@ -10331,6 +10353,12 @@ export const catalog: MessageCatalog = {
       "value": "마지막 소유자는 나갈 수 없어요. 먼저 다른 사람에게 소유자를 넘기세요."
     }
   ],
+  "workspace.leave.lastOwnerNext": [
+    {
+      "type": 0,
+      "value": "설정의 「멤버와 초대」에서 다른 소유자를 세운 뒤 다시 나가세요."
+    }
+  ],
   "workspace.leave.title": [
     {
       "type": 1,
@@ -10350,13 +10378,19 @@ export const catalog: MessageCatalog = {
   "workspace.menu.copiedAddress": [
     {
       "type": 0,
-      "value": "주소 복사됨"
+      "value": "서버 주소 복사됨"
     }
   ],
   "workspace.menu.copyAddress": [
     {
       "type": 0,
-      "value": "주소 복사"
+      "value": "서버 주소 복사"
+    }
+  ],
+  "workspace.menu.copyAddressNote": [
+    {
+      "type": 0,
+      "value": "기본이 아닌 워크스페이스는 로그인할 때 워크스페이스 ID도 넣어야 해요."
     }
   ],
   "workspace.menu.copyFailed": [

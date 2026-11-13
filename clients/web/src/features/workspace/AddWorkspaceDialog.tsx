@@ -54,10 +54,13 @@ import {
 } from "./useAddWorkspace";
 import { memberFor, useDirectory } from "./useWorkspace";
 import {
+  isSameServer,
   joinHandoffHref,
   joinTargetFromEntry,
+  probeServerReachable,
   type JoinTarget,
 } from "./joinHandoff";
+import { absoluteApiBase } from "@/lib/serverBase";
 import { BlockedReason } from "@/features/common/BlockedReason";
 
 // =============================================================================
@@ -86,8 +89,9 @@ import { BlockedReason } from "@/features/common/BlockedReason";
 //   참여    the app holds ONE sign-in (session switching is ADR-0161 4b-3), so
 //           joining another workspace is 「로그아웃 → 로그인 화면」. The card says
 //           exactly that, the step reads one field with the login screen's own
-//           classifier, a confirm step names the cost (logout, drafts on this
-//           device), and only then is the link handed to the login screen
+//           classifier, a same-server address is refused and any other address
+//           must answer a light reachability check (no logout for a typo), a
+//           confirm step names the cost (logout), and only then is the link handed to the login screen
 //           (`joinHandoff.ts`, `useJoinPrefill`). The confirm is a step inside this
 //           surface, not a second dialog (design-system README §3.4).
 //
@@ -277,6 +281,14 @@ function AddWorkspacePanel({
   const [joinLink, setJoinLink] = useState("");
   const [joinError, setJoinError] = useState<string | null>(null);
   const [joinTarget, setJoinTarget] = useState<JoinTarget | null>(null);
+  // 「계속」이 넘어갈 주소에 닿는지 보는 동안(로그아웃 전). 걸음을 되돌리거나 창이 닫히면 늦게 온 답을 버린다.
+  const [joinChecking, setJoinChecking] = useState(false);
+  const joinCheckRef = useRef(0);
+  useEffect(() => {
+    return () => {
+      joinCheckRef.current += 1;
+    };
+  }, []);
   const nameRef = useRef<HTMLInputElement>(null);
   const slugRef = useRef<HTMLInputElement>(null);
   const formRef = useRef<HTMLFormElement>(null);
@@ -370,6 +382,8 @@ function AddWorkspacePanel({
   function backToChoose(from: "create" | "join") {
     // 걸음을 되돌려도 만들기 초안은 provider에 남는다. 참여 칸은 비운다(코드를 실을 수 있다).
     if (from === "join") {
+      joinCheckRef.current += 1;
+      setJoinChecking(false);
       setJoinLink("");
       setJoinError(null);
       setJoinTarget(null);
@@ -391,9 +405,9 @@ function AddWorkspacePanel({
     create.mutate();
   }
 
-  function submitJoin(event: React.FormEvent) {
+  async function submitJoin(event: React.FormEvent) {
     event.preventDefault();
-    if (offline) return;
+    if (offline || joinChecking) return;
     // 로그인 화면의 첫 칸과 같은 판정이다: 여기서 받은 것을 로그인 화면이 거절하는 일이 없다.
     const result = joinTargetFromEntry(classifyEntry(joinLink));
     if (!result.ok) {
@@ -409,8 +423,32 @@ function AddWorkspacePanel({
       joinInputRef.current?.focus();
       return;
     }
+    const target = result.target;
+    // 지금 붙어 있는 서버의 주소만 넣으면 로그아웃해도 같은 서버의 로그인 화면이 열릴 뿐이다: 하지 않는다.
+    if (target.kind === "server" && isSameServer(target.serverUrl, absoluteApiBase())) {
+      setJoinError(formatMessage("workspace.add.joinSameServer"));
+      joinInputRef.current?.focus();
+      return;
+    }
     setJoinError(null);
-    setJoinTarget(result.target);
+    if (target.serverUrl !== "") {
+      // 로그아웃은 되돌릴 수 없다: 닿지 않는 주소로는 가지 않는다(오타·꺼진 서버).
+      const check = (joinCheckRef.current += 1);
+      setJoinChecking(true);
+      const reachable = await probeServerReachable(target.serverUrl);
+      if (check !== joinCheckRef.current) return;
+      setJoinChecking(false);
+      if (!reachable) {
+        setJoinError(
+          formatMessage("workspace.add.joinUnreachable", {
+            server: serverLabel(target.serverUrl),
+          })
+        );
+        joinInputRef.current?.focus();
+        return;
+      }
+    }
+    setJoinTarget(target);
     goTo("confirm", "confirm");
   }
 
@@ -614,10 +652,13 @@ function AddWorkspacePanel({
               type="submit"
               form={JOIN_FORM_ID}
               size="sm"
-              disabled={offline}
+              disabled={offline || joinChecking}
+              aria-busy={joinChecking || undefined}
               data-testid="add-workspace-join-next"
             >
-              {formatMessage("workspace.add.joinNext")}
+              {joinChecking
+                ? formatMessage("workspace.add.joinChecking")
+                : formatMessage("workspace.add.joinNext")}
             </Button>
           </div>
         </>

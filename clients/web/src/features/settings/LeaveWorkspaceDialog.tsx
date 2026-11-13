@@ -1,3 +1,4 @@
+import { useEffect, useRef } from "react";
 import { Button } from "@/design/ui/button";
 import {
   Dialog,
@@ -38,6 +39,12 @@ function LeaveWorkspacePanel({
   const offline = useOffline();
   const { leave, lastOwner, otherError } = useLeaveWorkspace(workspaceId);
   const pending = leave.isPending;
+  const cancelRef = useRef<HTMLButtonElement>(null);
+  // 마지막 소유자 거절 뒤에는 같은 「나가기」가 같은 거절이라 잠근다. 눌렀던 단추가 잠기면 초점이 body로
+  // 떨어지므로 「취소」로 옮긴다.
+  useEffect(() => {
+    if (lastOwner) cancelRef.current?.focus();
+  }, [lastOwner]);
 
   return (
     <DialogContent
@@ -75,7 +82,8 @@ function LeaveWorkspacePanel({
           role="alert"
           data-testid="workspace-leave-dialog-last-owner"
         >
-          {formatMessage("workspace.leave.lastOwner")}
+          {formatMessage("workspace.leave.lastOwner")}{" "}
+          {formatMessage("workspace.leave.lastOwnerNext")}
         </p>
       )}
       {otherError && (
@@ -91,9 +99,12 @@ function LeaveWorkspacePanel({
           `aria-busy`가 말하고 두 번째 누름은 아래에서 막는다(#1403 리뷰 H-1). 잠그는 것은 오프라인뿐이다. */}
       <div className="flex items-center justify-end gap-2">
         <Button
+          ref={cancelRef}
           type="button"
           variant="outline"
           size="sm"
+          aria-disabled={pending || undefined}
+          className={pending ? "cursor-not-allowed opacity-50" : undefined}
           onClick={() => {
             if (!pending) onClose();
           }}
@@ -105,7 +116,7 @@ function LeaveWorkspacePanel({
           type="button"
           variant="destructive"
           size="sm"
-          disabled={offline}
+          disabled={offline || lastOwner}
           aria-busy={pending || undefined}
           onClick={() => {
             if (pending) return;

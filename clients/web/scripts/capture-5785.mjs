@@ -68,7 +68,20 @@ function check(tag, name, ok, detail) {
   console.log(JSON.stringify({ tag, check: name, ok: Boolean(ok), detail }));
 }
 
+/** 참여 걸음이 로그아웃 전에 닿는지 보는 요청(`/healthz`, no-cors). 닿는 주소는 응답하고 `unreachable` 호스트는 끊는다. */
+async function installHealthRoutes(context) {
+  await context.route("**/healthz", async (route) => {
+    const host = new URL(route.request().url()).hostname;
+    if (host.startsWith("unreachable.")) return route.abort("namenotresolved");
+    return route.fulfill({ status: 200, contentType: "application/json", headers: { "access-control-allow-origin": "*" }, body: "{}" });
+  });
+}
+
+/** 나가기 응답을 늦추는 시간(ms). 0이면 곧바로 409. */
+let leaveDelayMs = 0;
+
 async function installRoutes(context, role) {
+  await installHealthRoutes(context);
   await context.route("**/v1/**", async (route) => {
     const req = route.request();
     const path = new URL(req.url()).pathname;
@@ -81,6 +94,7 @@ async function installRoutes(context, role) {
     }
     // 나가기는 늘 마지막 소유자 409다(캡처가 실제로 로그아웃되지 않게).
     if (path === `/v1/workspaces/${workspaceId}/members/me` && method === "DELETE") {
+      if (leaveDelayMs > 0) await new Promise((r) => setTimeout(r, leaveDelayMs));
       return json(route, { error: "last owner" }, 409);
     }
     if (path.endsWith("/channels")) return json(route, { channels });
@@ -224,10 +238,36 @@ async function ownerRun(page, origin, tag, withHandoff) {
   await page.getByTestId("add-workspace-join-link").fill(JOIN_INPUT);
   await fits(page, tag, "join-step", "add-workspace-dialog");
   await shot(page, tag, "join-step");
+
+  // 거절 둘: 지금 서버의 주소 · 닿지 않는 주소. 로그아웃 요청 0회, 걸음은 그대로.
+  let logoutRequests = 0;
+  const onRequest = (req) => { if (new URL(req.url()).pathname === "/v1/auth/logout") logoutRequests += 1; };
+  page.on("request", onRequest);
+  await page.getByTestId("add-workspace-join-link").fill(origin);
+  await page.getByTestId("add-workspace-join-next").click();
+  await page.getByTestId("add-workspace-join-link-error").waitFor();
+  const sameText = await page.getByTestId("add-workspace-join-link-error").innerText();
+  const sameStep = await page.getByTestId("add-workspace-dialog").getAttribute("data-step");
+  check(tag, "지금 서버 주소: 「이미 이 서버에 있어요」, 걸음은 join", sameText.includes("이미 이 서버에 있어요") && sameStep === "join", { sameText, sameStep });
+  await fits(page, tag, "join-refuse-same", "add-workspace-dialog");
+  await shot(page, tag, "join-refuse-same");
+  await page.getByTestId("add-workspace-join-link").fill("https://unreachable.example.invalid");
+  await page.getByTestId("add-workspace-join-next").click();
+  await page.waitForFunction(() => document.querySelector("[data-testid=add-workspace-join-link-error]")?.textContent?.includes("닿지 않아서"), null, { timeout: 10_000 });
+  const deadText = await page.getByTestId("add-workspace-join-link-error").innerText();
+  const deadStep = await page.getByTestId("add-workspace-dialog").getAttribute("data-step");
+  check(tag, "닿지 않는 주소: 사유를 말하고 걸음은 join", deadText.includes("닿지 않아서 로그아웃하지 않았어요") && deadStep === "join", { deadText, deadStep });
+  await fits(page, tag, "join-refuse-unreachable", "add-workspace-dialog");
+  await shot(page, tag, "join-refuse-unreachable");
+  await page.waitForTimeout(300);
+  const stillSignedIn = await page.getByTestId("workspace-current").count();
+  check(tag, "두 거절 뒤 로그아웃 요청 0회·세션 유지", logoutRequests === 0 && stillSignedIn > 0, { logoutRequests, stillSignedIn });
+  page.off("request", onRequest);
+  await page.getByTestId("add-workspace-join-link").fill(JOIN_INPUT);
   await page.getByTestId("add-workspace-join-next").click();
   await page.getByTestId("add-workspace-join-confirm").waitFor();
   const confirmText = await page.getByTestId("add-workspace-dialog").innerText();
-  check(tag, "확인 걸음이 로그아웃·초안 삭제·넘어갈 곳을 말한다", confirmText.includes("로그아웃되고") && confirmText.includes("초안은 지워져요") && confirmText.includes("team.example.com의 초대로 넘어가요"), null);
+  check(tag, "확인 걸음이 로그아웃과 넘어갈 곳을 말하고 초안은 말하지 않는다(거짓 문장 0)", confirmText.includes("로그아웃돼요") && !confirmText.includes("초안") && confirmText.includes("team.example.com의 초대로 넘어가요"), null);
   const confirmFocus = await page.evaluate(() => document.activeElement?.getAttribute("data-testid"));
   check(tag, "확인 걸음의 초점은 위험 단추가 아니라 확인 묶음", confirmFocus === "add-workspace-join-confirm", { confirmFocus });
   await fits(page, tag, "join-confirm", "add-workspace-join-logout");
@@ -262,13 +302,37 @@ async function ownerRun(page, origin, tag, withHandoff) {
       .filter((id) => /^(profile-(set-status|workspace-head|copy-address|workspace-settings|leave-workspace|add-workspace|logout)|nav-settings)$/.test(id))
   );
   check(tag, "메뉴 차례: 상태 설정 → 이름 머리글 → 주소 복사·설정·나가기·추가 → 설정 → 로그아웃", JSON.stringify(ids) === JSON.stringify(["profile-set-status", "profile-workspace-head", "profile-copy-address", "profile-workspace-settings", "profile-leave-workspace", "profile-add-workspace", "nav-settings", "profile-logout"]), ids);
-  // 줄 아이콘이 한 세로 줄에 선다.
-  const iconXs = await page.evaluate(() =>
-    ["profile-set-status", "profile-copy-address", "profile-workspace-settings", "profile-leave-workspace", "profile-add-workspace", "nav-settings", "profile-logout"]
-      .map((id) => document.querySelector(`[data-testid=${id}] svg`)?.getBoundingClientRect().x ?? null)
-  );
+  // 줄마다 아이콘(점 칸) 왼쪽 x · 글자 시작 x. 아이콘이 한 세로 줄, 글자 시작이 한 세로 줄이어야 한다.
+  const rows = await page.evaluate(() => {
+    const first = (el) => {
+      const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+      for (let n = walker.nextNode(); n; n = walker.nextNode()) {
+        if ((n.textContent ?? "").trim() === "") continue;
+        const r = document.createRange();
+        r.selectNodeContents(n);
+        return r.getBoundingClientRect().x;
+      }
+      return null;
+    };
+    const glyph = (el) => (el.querySelector("[data-testid^=presence-dot-slot-]") ?? el.querySelector("svg"))?.getBoundingClientRect();
+    const ids = ["presence-option-auto", "presence-option-away", "presence-option-dnd", "profile-set-status", "profile-copy-address", "profile-workspace-settings", "profile-leave-workspace", "profile-add-workspace", "nav-settings", "profile-logout"];
+    const out = ids.map((id) => {
+      const el = document.querySelector(`[data-testid=${id}]`);
+      const g = el ? glyph(el) : null;
+      return { id, iconX: g ? Math.round(g.x * 100) / 100 : null, iconW: g ? Math.round(g.width * 100) / 100 : null, textX: el ? Math.round(first(el) * 100) / 100 : null };
+    });
+    const note = document.querySelector("[data-testid=profile-copy-address-note]");
+    out.push({ id: "profile-copy-address-note", iconX: null, iconW: null, textX: note ? Math.round(first(note) * 100) / 100 : null });
+    return out;
+  });
+  console.log(JSON.stringify({ tag, rows }));
+  const iconXs = rows.filter((r) => r.iconX !== null).map((r) => r.iconX);
+  const textXs = rows.map((r) => r.textX);
   const spread = Math.max(...iconXs) - Math.min(...iconXs);
-  check(tag, "메뉴 줄 아이콘의 x가 한 줄(차이 ≤ 0.5px)", iconXs.every((x) => x !== null) && spread <= 0.5, { iconXs, spread });
+  const textSpread = Math.max(...textXs) - Math.min(...textXs);
+  check(tag, "메뉴 열 줄의 아이콘 칸 x가 한 세로 줄(차이 ≤ 0.5px)", iconXs.length === 10 && spread <= 0.5, { iconXs, spread });
+  check(tag, "메뉴 열 줄과 주소 아래 글의 글자 시작 x가 한 세로 줄(차이 ≤ 0.5px)", textXs.every((x) => x !== null) && textSpread <= 0.5, { textXs, textSpread });
+  check(tag, "아이콘 칸 폭이 열 줄 모두 16px", rows.filter((r) => r.iconW !== null).every((r) => r.iconW === 16), rows.map((r) => r.iconW));
   await fits(page, tag, "profile-menu", "profile-card-menu");
   await shot(page, tag, "profile-menu");
 
@@ -276,11 +340,12 @@ async function ownerRun(page, origin, tag, withHandoff) {
   await page.getByTestId("profile-copy-address").click();
   await page.waitForTimeout(200);
   const copyLabel = await page.getByTestId("profile-copy-address").innerText();
-  check(tag, "주소 복사 → 메뉴가 열린 채 「주소 복사됨」", copyLabel.includes("주소 복사됨"), { copyLabel });
+  check(tag, "서버 주소 복사 → 메뉴가 열린 채 「서버 주소 복사됨」", copyLabel.includes("서버 주소 복사됨"), { copyLabel });
   const clip = await page.evaluate(() => navigator.clipboard.readText()).catch((e) => `ERR ${String(e).slice(0, 60)}`);
   check(tag, "주소 복사: 클립보드가 이 서버 주소", clip === origin, { clip, origin });
 
-  // 나가기 확인 → 409
+  // 나가기 확인 → (늦은 응답 동안 「취소」 잠김) → 409
+  leaveDelayMs = 1_500;
   await page.getByTestId("profile-leave-workspace").click();
   await page.getByTestId("workspace-leave-dialog").waitFor();
   const leaveFocus = await page.evaluate(() => document.activeElement?.getAttribute("data-testid"));
@@ -288,8 +353,26 @@ async function ownerRun(page, origin, tag, withHandoff) {
   check(tag, "나가기 확인: 제목이 워크스페이스 이름", (await page.getByTestId("workspace-leave-dialog").innerText()).includes("새벽팀에서 나갈까요?"), null);
   await fits(page, tag, "leave-confirm", "workspace-leave-dialog");
   await shot(page, tag, "leave-confirm");
+  check(tag, "나가기 확인: 「보낸 메시지는 남아요」", (await page.getByTestId("workspace-leave-dialog").innerText()).includes("보낸 메시지는 남아요"), null);
   await page.getByTestId("workspace-leave-dialog-confirm").click();
+  await page.getByTestId("workspace-leave-dialog-cancel").evaluate((el) => el.getAttribute("aria-disabled") === "true" || new Promise((r) => setTimeout(r, 50)));
+  const pendingCancel = await page.evaluate(() => {
+    const el = document.querySelector("[data-testid=workspace-leave-dialog-cancel]");
+    const s = getComputedStyle(el);
+    return { ariaDisabled: el.getAttribute("aria-disabled"), opacity: Number(s.opacity), cursor: s.cursor };
+  });
+  check(tag, "나가는 동안 「취소」가 잠긴 모양(aria-disabled·옅게·not-allowed)", pendingCancel.ariaDisabled === "true" && pendingCancel.opacity < 1 && pendingCancel.cursor === "not-allowed", pendingCancel);
+  await shot(page, tag, "leave-pending");
+  await page.getByTestId("workspace-leave-dialog-cancel").evaluate((el) => el.click());
+  check(tag, "나가는 동안 「취소」를 눌러도 창이 그대로", (await page.getByTestId("workspace-leave-dialog").count()) === 1, null);
   await page.getByTestId("workspace-leave-dialog-last-owner").waitFor({ timeout: 10_000 });
+  leaveDelayMs = 0;
+  const after409 = await page.evaluate(() => ({
+    confirmDisabled: document.querySelector("[data-testid=workspace-leave-dialog-confirm]").hasAttribute("disabled"),
+    focus: document.activeElement?.getAttribute("data-testid"),
+    sentence: document.querySelector("[data-testid=workspace-leave-dialog-last-owner]").textContent,
+  }));
+  check(tag, "409 뒤 「나가기」가 잠기고 초점이 「취소」, 다음 걸음 문장이 있다", after409.confirmDisabled && after409.focus === "workspace-leave-dialog-cancel" && after409.sentence.includes("멤버와 초대"), after409);
   const stillIn = await page.getByTestId("workspace-current").count();
   check(tag, "409: 거절 문장이 창 안에 서고 로그아웃되지 않는다", stillIn > 0, { stillIn });
   await fits(page, tag, "leave-last-owner", "workspace-leave-dialog");

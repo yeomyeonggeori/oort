@@ -44,6 +44,13 @@ vi.mock("@momo/core/lib/api", async (importOriginal) => {
   };
 });
 
+// 닿는지 보는 걸음은 진짜 fetch를 타지 않는다(jsdom): 시험마다 답을 정한다.
+const probeMock = vi.hoisted(() => vi.fn());
+vi.mock("./joinHandoff", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./joinHandoff")>();
+  return { ...actual, probeServerReachable: (...args: unknown[]) => probeMock(...args) as Promise<boolean> };
+});
+
 vi.mock("@momo/core/features/settings/api", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@momo/core/features/settings/api")>();
   return {
@@ -95,6 +102,8 @@ beforeEach(() => {
   fetchRosterMock.mockReset();
   fetchRosterMock.mockResolvedValue([selfRow("owner")]);
   logoutMock.mockReset();
+  probeMock.mockReset();
+  probeMock.mockResolvedValue(true);
   writeText.mockReset();
   writeText.mockResolvedValue(undefined);
   Object.defineProperty(window.navigator, "clipboard", {
@@ -573,7 +582,7 @@ describe("워크스페이스 추가: 이미 있는 곳에 참여 (#5785)", () =>
     expect(q("add-workspace-dialog")?.getAttribute("data-step")).toBe("join");
   });
 
-  it("주소를 넣으면 확인 걸음이 로그아웃·초안 삭제와 넘어갈 곳을 말하고, 초점은 확인 묶음이다", async () => {
+  it("주소를 넣으면 확인 걸음이 로그아웃과 넘어갈 곳을 말하고(초안은 말하지 않는다), 초점은 확인 묶음이다", async () => {
     mount();
     await openJoin();
     await submitJoin("team.example.com");
@@ -582,8 +591,9 @@ describe("워크스페이스 추가: 이미 있는 곳에 참여 (#5785)", () =>
     );
     const dialog = text("add-workspace-dialog");
     expect(dialog).toContain("로그아웃하고 넘어갈까요?");
-    expect(dialog).toContain("로그아웃되고");
-    expect(dialog).toContain("초안은 지워져요");
+    expect(dialog).toContain("로그아웃돼요");
+    // 로그아웃 뒤에도 초안이 남는 기존 결함이 고쳐지기 전까지 「지워져요」는 거짓이다(#5785 수리 1회차).
+    expect(dialog).not.toContain("초안");
     expect(text("add-workspace-join-target")).toBe("team.example.com의 로그인 화면으로 넘어가요.");
     await vi.waitFor(() => expect(document.activeElement).toBe(q("add-workspace-join-confirm")));
     // 확인 걸음은 아직 아무것도 하지 않았다.
@@ -624,6 +634,63 @@ describe("워크스페이스 추가: 이미 있는 곳에 참여 (#5785)", () =>
       inviteCode: INVITE,
     });
     window.history.replaceState(null, "", before);
+  });
+
+  it("지금 붙어 있는 서버의 주소(초대 코드 없이)는 로그아웃하지 않고 「이미 이 서버에 있어요」를 말한다", async () => {
+    mount();
+    await openJoin();
+    // 끝 슬래시·대문자가 달라도 같은 서버다.
+    await submitJoin(`${window.location.origin.toUpperCase()}/`);
+    expect(text("add-workspace-join-link-error")).toContain("이미 이 서버에 있어요");
+    expect(q("add-workspace-dialog")?.getAttribute("data-step")).toBe("join");
+    expect(probeMock).not.toHaveBeenCalled();
+    expect(logoutMock).not.toHaveBeenCalled();
+    expect(document.activeElement).toBe(q("add-workspace-join-link"));
+  });
+
+  it("닿지 않는 주소는 확인 걸음에 가지 않고 로그아웃하지 않는다(사유를 그 칸에서 말한다)", async () => {
+    probeMock.mockResolvedValue(false);
+    mount();
+    await openJoin();
+    await submitJoin("tema.exmaple.com");
+    await vi.waitFor(() =>
+      expect(text("add-workspace-join-link-error")).toContain("tema.exmaple.com에 닿지 않아서 로그아웃하지 않았어요")
+    );
+    expect(probeMock).toHaveBeenCalledWith("https://tema.exmaple.com");
+    expect(q("add-workspace-dialog")?.getAttribute("data-step")).toBe("join");
+    expect(logoutMock).not.toHaveBeenCalled();
+    // 다시 시도할 수 있다: 「계속」이 풀려 있다.
+    expect(q("add-workspace-join-next")?.hasAttribute("disabled")).toBe(false);
+  });
+
+  it("확인하는 동안 「계속」은 한 번만 받고 「확인하는 중」을 말한다", async () => {
+    let answer: (ok: boolean) => void = () => undefined;
+    probeMock.mockReturnValue(new Promise<boolean>((resolve) => (answer = resolve)));
+    mount();
+    await openJoin();
+    await submitJoin("team.example.com");
+    expect(q("add-workspace-join-next")?.textContent).toBe("확인 중");
+    expect(q("add-workspace-join-next")?.getAttribute("aria-busy")).toBe("true");
+    await act(async () => q("add-workspace-join-next")?.click());
+    expect(probeMock).toHaveBeenCalledTimes(1);
+    await act(async () => answer(true));
+    await vi.waitFor(() =>
+      expect(q("add-workspace-dialog")?.getAttribute("data-step")).toBe("confirm")
+    );
+  });
+
+  it("확인하는 중에 「뒤로」를 누르면 늦게 온 답이 걸음을 바꾸지 않는다", async () => {
+    let answer: (ok: boolean) => void = () => undefined;
+    probeMock.mockReturnValue(new Promise<boolean>((resolve) => (answer = resolve)));
+    mount();
+    await openJoin();
+    await submitJoin("team.example.com");
+    await act(async () => q("add-workspace-back")?.click());
+    await vi.waitFor(() =>
+      expect(q("add-workspace-dialog")?.getAttribute("data-step")).toBe("choose")
+    );
+    await act(async () => answer(true));
+    expect(q("add-workspace-dialog")?.getAttribute("data-step")).toBe("choose");
   });
 
   it("확인 걸음의 「뒤로」는 칸으로 돌아가고 로그아웃하지 않는다", async () => {

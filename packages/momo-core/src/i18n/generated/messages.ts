@@ -1448,6 +1448,7 @@ export const messageKeys = [
   "workspace.add.createLead",
   "workspace.add.createLeadNotOperator",
   "workspace.add.createTitle",
+  "workspace.add.joinChecking",
   "workspace.add.joinClaim",
   "workspace.add.joinConfirmAction",
   "workspace.add.joinConfirmBody",
@@ -1457,10 +1458,12 @@ export const messageKeys = [
   "workspace.add.joinHint",
   "workspace.add.joinLead",
   "workspace.add.joinNext",
+  "workspace.add.joinSameServer",
   "workspace.add.joinTargetInvite",
   "workspace.add.joinTargetInviteOnly",
   "workspace.add.joinTargetServer",
   "workspace.add.joinTitle",
+  "workspace.add.joinUnreachable",
   "workspace.add.lead",
   "workspace.add.operatorContact",
   "workspace.add.title",
@@ -1472,10 +1475,12 @@ export const messageKeys = [
   "workspace.leave.cancel",
   "workspace.leave.confirm",
   "workspace.leave.lastOwner",
+  "workspace.leave.lastOwnerNext",
   "workspace.leave.title",
   "workspace.leave.titleUnnamed",
   "workspace.menu.copiedAddress",
   "workspace.menu.copyAddress",
+  "workspace.menu.copyAddressNote",
   "workspace.menu.copyFailed",
   "workspace.menu.fallbackTitle",
   "workspace.menu.leave",
@@ -3366,6 +3371,7 @@ export const argumentSpecs = {
   "workspace.add.createLead": {},
   "workspace.add.createLeadNotOperator": {},
   "workspace.add.createTitle": {},
+  "workspace.add.joinChecking": {},
   "workspace.add.joinClaim": {},
   "workspace.add.joinConfirmAction": {},
   "workspace.add.joinConfirmBody": {},
@@ -3375,6 +3381,7 @@ export const argumentSpecs = {
   "workspace.add.joinHint": {},
   "workspace.add.joinLead": {},
   "workspace.add.joinNext": {},
+  "workspace.add.joinSameServer": {},
   "workspace.add.joinTargetInvite": {
     "server": "string"
   },
@@ -3383,6 +3390,9 @@ export const argumentSpecs = {
     "server": "string"
   },
   "workspace.add.joinTitle": {},
+  "workspace.add.joinUnreachable": {
+    "server": "string"
+  },
   "workspace.add.lead": {},
   "workspace.add.operatorContact": {},
   "workspace.add.title": {},
@@ -3394,12 +3404,14 @@ export const argumentSpecs = {
   "workspace.leave.cancel": {},
   "workspace.leave.confirm": {},
   "workspace.leave.lastOwner": {},
+  "workspace.leave.lastOwnerNext": {},
   "workspace.leave.title": {
     "name": "string"
   },
   "workspace.leave.titleUnnamed": {},
   "workspace.menu.copiedAddress": {},
   "workspace.menu.copyAddress": {},
+  "workspace.menu.copyAddressNote": {},
   "workspace.menu.copyFailed": {},
   "workspace.menu.fallbackTitle": {},
   "workspace.menu.leave": {},
@@ -4855,6 +4867,7 @@ export interface MessageArgs {
   "workspace.add.createLead": Record<string, never>;
   "workspace.add.createLeadNotOperator": Record<string, never>;
   "workspace.add.createTitle": Record<string, never>;
+  "workspace.add.joinChecking": Record<string, never>;
   "workspace.add.joinClaim": Record<string, never>;
   "workspace.add.joinConfirmAction": Record<string, never>;
   "workspace.add.joinConfirmBody": Record<string, never>;
@@ -4864,10 +4877,12 @@ export interface MessageArgs {
   "workspace.add.joinHint": Record<string, never>;
   "workspace.add.joinLead": Record<string, never>;
   "workspace.add.joinNext": Record<string, never>;
+  "workspace.add.joinSameServer": Record<string, never>;
   "workspace.add.joinTargetInvite": { server: string };
   "workspace.add.joinTargetInviteOnly": Record<string, never>;
   "workspace.add.joinTargetServer": { server: string };
   "workspace.add.joinTitle": Record<string, never>;
+  "workspace.add.joinUnreachable": { server: string };
   "workspace.add.lead": Record<string, never>;
   "workspace.add.operatorContact": Record<string, never>;
   "workspace.add.title": Record<string, never>;
@@ -4879,10 +4894,12 @@ export interface MessageArgs {
   "workspace.leave.cancel": Record<string, never>;
   "workspace.leave.confirm": Record<string, never>;
   "workspace.leave.lastOwner": Record<string, never>;
+  "workspace.leave.lastOwnerNext": Record<string, never>;
   "workspace.leave.title": { name: string };
   "workspace.leave.titleUnnamed": Record<string, never>;
   "workspace.menu.copiedAddress": Record<string, never>;
   "workspace.menu.copyAddress": Record<string, never>;
+  "workspace.menu.copyAddressNote": Record<string, never>;
   "workspace.menu.copyFailed": Record<string, never>;
   "workspace.menu.fallbackTitle": Record<string, never>;
   "workspace.menu.leave": Record<string, never>;
