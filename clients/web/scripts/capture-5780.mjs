@@ -456,8 +456,16 @@ async function sceneOffline(browser, origin, scheme) {
     // 재설정 단계에서는 사유 줄이 단계 위의 띠다(창 위 모서리를 따라 둥글게).
     await context.setOffline(false);
     await page.waitForFunction(() => navigator.onLine === true);
+    await page.getByTestId("member-profile-offline").waitFor({ state: "detached" });
+    await settle(page);
+    const profileBox = await dialogBox(page);
     await page.getByTestId("member-profile-reset-open").click();
     await page.getByTestId("member-profile-reset-stage").waitFor();
+    // 재설정 단계도 본문을 덮어 선다(검수 r1 M2): 창이 뛰지 않고, 바닥 줄(취소·만들기)이 창 안에 보인다.
+    await page.mouse.move(0, 0);
+    await shot(page, `O-${tag}-reset-stage`);
+    await stageHolds(page, `O ${tag} 재설정 단계`, profileBox);
+    check(`O ${tag} 재설정 단계의 바닥 줄이 창 안에 보인다`, await page.getByTestId("member-profile-reset-submit").isVisible());
     await context.setOffline(true);
     await page.waitForFunction(() => navigator.onLine === false);
     await page.getByTestId("member-profile-offline").waitFor();
