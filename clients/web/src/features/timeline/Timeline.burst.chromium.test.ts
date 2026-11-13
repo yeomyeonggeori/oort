@@ -622,8 +622,8 @@ describe("virtualized Timeline burst (Chromium)", () => {
  * 타임라인 스크롤러는 브라우저 스크롤 앵커링을 끈다 (#5638).
  *
  * 스크롤 위치의 주인은 가상 목록 + `scrollHold` 한 길이다. 앵커링은 Chromium · Playwright WebKit 26.5 · macOS 27의
- * WKWebView(데스크탑 앱)에서 켜져 있고(2026-11-10 실측) macOS 14~26의 시스템 WebKit 에는 없다. 스크롤러에 걸어 두지 않으면
- * 앵커링이 있는 엔진에서만 손이 하나 더 껴 엔진마다 다른 길로 움직인다. 이 시험은 진짜 `Timeline`(진짜 react-virtuoso)과
+ * WKWebView(데스크탑 앱)에서 켜져 있고(2026-11-10 실측) macOS 14~26의 시스템 WebKit 에는 문서상 없다. 스크롤러에 걸어 두지 않으면
+ * 앵커링이 있는 엔진에서만 손이 하나 더 낄 수 있다(스레드 답글 상자도 같은 클래스를 입는다 — #5649, `ThreadPanel.scrollHold.test.tsx`). 이 시험은 진짜 `Timeline`(진짜 react-virtuoso)과
  * `tokens.css` 를 컴파일한 CSS 로 엔진이 **계산한** 값을 잰다: `Timeline.tsx` 의 클래스를 빼도, `tokens.css` 의 규칙을 빼도
  * `auto` 로 빨개진다. 이 파일의 다른 시험처럼 번들 Chromium 만 띄운다(`supportsAuto` 가 「이 엔진이 속성을 안다」를 단정해,
  * 속성을 모르는 엔진에서 빈 계산값으로 헛되이 통과하지 않게 한다).
@@ -643,7 +643,7 @@ describe("타임라인 스크롤러의 스크롤 앵커링 (#5638, Chromium)", (
           // 클래스가 붙은 곳이 가상 목록의 스크롤러다(바깥 상자에 붙으면 스크롤러는 그대로 auto 다).
           isVirtuosoScroller: node.hasAttribute("data-virtuoso-scroller"),
           scroller: getComputedStyle(node).overflowAnchor,
-          // 대조: 문서 전체를 끄는 수리는 스레드 답글 목록의 앵커링(그 목록의 유일한 자리 지키기)까지 끈다.
+          // 대조: 끄는 것은 손보정(`scrollHold`)이 붙은 스크롤 상자뿐이다. 문서 전체를 끄면 손보정 없는 다른 스크롤 상자가 자리를 잃는다.
           body: getComputedStyle(document.body).overflowAnchor,
         }));
         expect(measured).toEqual({

@@ -199,9 +199,11 @@ export function judgeCell(numbers, { kind, limit, minSamples = 10 }) {
   if (numbers.reversals !== 0) reasons.push(`되돌아옴 ${numbers.reversals}회`);
   if (numbers.vanishedFrames > 0) reasons.push(`지켜본 줄이 ${numbers.vanishedFrames}프레임 동안 사라졌다(화면 밖으로 밀림)`);
   if (kind === "entry") {
-    // 대화 진입: 첫 줄이 그려진 뒤 마지막 줄이 창에서 움직인 폭 ≤ 1px · 필 0. 바닥 거리는 기록만 한다(첫 착지의 몇 px 는 #5567 기록).
+    // 대화 진입: 첫 줄이 그려진 뒤 마지막 줄이 창에서 움직인 폭 ≤ 1px · 필 0 · 자리 잡은 뒤 바닥 거리 ≤ 1px(#5679 — 진입 직후 바닥에서
+    // 4px 모자란 채 서던 것. 예전에는 기록만 했다).
     const cap = limit ?? LIMITS.stillPx;
     if (numbers.unexplainedPx > cap) reasons.push(`마지막 줄 ${numbers.unexplainedPx}px(> ${cap})`);
+    if (numbers.maxGapPx === null || numbers.maxGapPx > LIMITS.gapPx) reasons.push(`바닥 거리 ${numbers.maxGapPx}px(> ${LIMITS.gapPx})`);
     if (numbers.pillShows !== 0) reasons.push(`필 ${numbers.pillShows}번 섬`);
   } else if (kind === "bottom") {
     const cap = limit ?? LIMITS.stillPx;
@@ -478,27 +480,52 @@ export async function readEntryRecord(page, timeoutMs = 20_000, windowMs = 2_000
   await page.waitForFunction(() => window.__stillEntry?.done === true, null, { timeout: timeoutMs });
   const raw = await page.evaluate(() => ({ raw: window.__stillEntry.raw, pillMounts: window.__stillEntry.pillMounts }));
   const picked = entryWindow(raw.raw, { windowMs });
-  return { frames: picked.frames, before: picked.before, pillMounts: raw.pillMounts, pillAtStart: false };
+  return { frames: picked.frames, before: picked.before, hidden: picked.hidden, pillMounts: raw.pillMounts, pillAtStart: false };
 }
 
 // ---------------------------------------------------------------------------------------------- 창 고르기 · 놓친 프레임 (순수)
 
 /**
- * 진입 장면의 창: **이 대화의 줄이 처음 붙은 프레임**(`match`)부터 `windowMs` 안의 프레임 전부. 그 프레임이 「깨끗한지」는 보지 않고,
- * 창 안의 프레임은 하나도 버리지 않는다(#5641 검수 r1 H1 — 옛 판은 처음 깨끗한 프레임에서 시작해 진입 첫 2~3프레임을 창 밖에 뒀다).
- * @param {{ t: number, match: boolean }[]} raw 페이지가 뜬 뒤 프레임마다 적은 것(`t` 는 performance.now)
- * @returns {{ frames: object[], before: number }} `frames` 의 `t` 는 시작 프레임 기준 ms, `before` 는 시작 앞 프레임 수
+ * 진입 장면의 창: **이 대화의 줄이 붙고 목록이 처음 보인 프레임**(`match` · `visible`)부터 `windowMs` 안의 프레임 전부. 그 프레임이
+ * 「깨끗한지」는 보지 않고, 창 안의 프레임은 하나도 버리지 않는다(#5641 검수 r1 H1 — 옛 판은 처음 깨끗한 프레임에서 시작해 진입 첫
+ * 2~3프레임을 창 밖에 뒀다).
+ *
+ * 「보인」(#5678): 줄이 붙었어도 스크롤 상자가 가려져 있으면(`visible: false` — `visibility: hidden` · 투명) 그 프레임에 그려진 줄은 없다.
+ * 그 프레임들은 창에 넣지 않고 `hidden`(줄이 붙은 뒤 처음 보이기까지의 프레임 수 · ms)으로 따로 센다 — 가려 둔 채 오래 끌면 그것도
+ * 실패다(`MAX_ENTRY_HIDDEN_FRAMES`). 한 번 보인 뒤 다시 가려진 프레임은 지켜보는 줄이 없는 프레임(`null`)으로 바꿔 둔다: 화면에서
+ * 줄이 사라진 것이니 머리(자리 잡기 전)나 사라진 프레임으로 잡힌다. `visible` 을 적지 않은 기록(옛 판)은 보인 것으로 친다.
+ * @param {{ t: number, match: boolean, visible?: boolean }[]} raw 페이지가 뜬 뒤 프레임마다 적은 것(`t` 는 performance.now)
+ * @returns {{ frames: object[], before: number, hidden: { frames: number, ms: number, never: boolean } }}
+ *   `frames` 의 `t` 는 시작 프레임 기준 ms, `before` 는 시작 앞 프레임 수
  */
 export function entryWindow(raw, { windowMs }) {
-  const start = raw.findIndex((frame) => frame.match === true);
-  if (start < 0) return { frames: [], before: raw.length };
+  const attached = raw.findIndex((frame) => frame.match === true);
+  if (attached < 0) return { frames: [], before: raw.length, hidden: { frames: 0, ms: 0, never: false } };
+  const start = raw.findIndex((frame, i) => i >= attached && frame.match === true && frame.visible !== false);
+  const last = raw.length - 1;
+  const hidden = {
+    frames: (start < 0 ? raw.length : start) - attached,
+    ms: Math.round(raw[start < 0 ? last : start].t - raw[attached].t),
+    never: start < 0,
+  };
+  if (start < 0) return { frames: [], before: raw.length, hidden };
   const t0 = raw[start].t;
   const frames = raw
     .slice(start)
     .filter((frame) => frame.t - t0 <= windowMs)
-    .map((frame) => ({ ...frame, t: Math.round(frame.t - t0) }));
-  return { frames, before: start };
+    .map((frame) => {
+      const shown = { ...frame, t: Math.round(frame.t - t0) };
+      if (frame.visible === false) shown.watch = Object.fromEntries(Object.keys(frame.watch ?? {}).map((name) => [name, null]));
+      return shown;
+    });
+  return { frames, before: start, hidden };
 }
+
+/**
+ * 대화 진입에서 줄이 붙은 뒤 목록이 가려진 채 있어도 되는 프레임 수(#5678). 자리 잡기(가상 목록이 바닥으로 두 걸음 · 줄 다시 재기)는
+ * 수리 전 실측 1~6프레임이었다. 그보다 오래 가리면 「흔들림 0」을 빈 화면으로 산 것이다 — 앱의 마지막 안전판(600ms)이 열리는 것도 여기에 걸린다.
+ */
+export const MAX_ENTRY_HIDDEN_FRAMES = 8;
 
 /**
  * 진입 창을 「자리 잡기 전(머리)」과 「그 뒤(몸)」로 가른다. 몸은 가장 새 줄이 **세 프레임 이어** 보이고 그 셋이 1px 안에 있는 첫 프레임부터다.
@@ -621,15 +648,18 @@ export function knownFailureFor(scene, engine, width, list = TIMELINE_KNOWN_FAIL
  * 기본 0)보다 오래 사라졌으면(사보타주 · 새 회귀) 밖이다.
  * @param {object} known  `TIMELINE_KNOWN_FAILURES` 의 한 줄
  * @param {object|null} numbers  `stillNumbers` 의 결과
- * @param {{ kind: "entry" | "bottom" | "reading", unsettled?: number }} cell  `unsettled` = 진입의 자리 잡기 전 프레임 수(`entrySettle`)
+ * @param {{ kind: "entry" | "bottom" | "reading", unsettled?: number, hidden?: number }} cell  `unsettled` = 진입의 자리 잡기 전 프레임 수(`entrySettle`),
+ *   `hidden` = 진입에서 줄이 붙은 뒤 목록이 가려져 있던 프레임 수(`entryWindow`, 상한 없으면 `MAX_ENTRY_HIDDEN_FRAMES`)
  */
-export function withinKnown(known, numbers, { kind, unsettled = 0 }) {
+export function withinKnown(known, numbers, { kind, unsettled = 0, hidden = 0 }) {
   if (numbers === null || numbers === undefined || numbers.vanishedFrames > (known.maxVanishedFrames ?? 0)) return false;
   const pxCap = known.maxUnexplainedPx ?? (kind === "reading" ? LIMITS.readingPx : LIMITS.stillPx);
   if ((numbers.unexplainedPx ?? Infinity) > pxCap) return false;
   if ((numbers.reversals ?? Infinity) > (known.maxReversals ?? 0)) return false;
-  if (kind === "bottom" && (numbers.maxGapPx ?? Infinity) > (known.maxGapPx ?? LIMITS.gapPx)) return false;
+  // 진입도 바닥 거리를 판정한다(#5679): 알려진 실패 줄이 진입의 바닥 거리 실패를 덮지 않는다.
+  if ((kind === "bottom" || kind === "entry") && (numbers.maxGapPx ?? Infinity) > (known.maxGapPx ?? LIMITS.gapPx)) return false;
   if (unsettled > (known.maxUnsettledFrames ?? 0)) return false;
+  if (hidden > (known.maxHiddenFrames ?? MAX_ENTRY_HIDDEN_FRAMES)) return false;
   if (kind !== "reading" && (numbers.pillShows ?? 0) > (known.maxPill ?? 0)) return false;
   return true;
 }

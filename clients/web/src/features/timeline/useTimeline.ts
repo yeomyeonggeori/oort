@@ -133,6 +133,10 @@ export const MAX_SIMULTANEOUS_ARRIVALS = 3;
 const HEAD_LIMIT = 50;
 const PAGE_LIMIT = 50;
 
+/** 대화를 바꾼 첫 렌더가 내주는 빈 상태(#5678). 렌더마다 새 객체를 만들지 않는다. */
+const SWITCHING_STATE: TimelineState = emptyTimeline();
+const NO_MARKERS: RecoveryMarker[] = [];
+
 /**
  * 옛 쪽 읽기가 `failures` 번 이어 실패한 뒤, 맨 위 닿음으로 다시 읽기까지 둘 간격(#5662): 1초에서 두 배씩, 30초에서 멈춘다.
  * 「다시 시도」 단추는 이 간격을 넘는다.
@@ -296,6 +300,10 @@ export function useTimeline(
 ): UseTimelineResult {
   const [state, setState] = useState<TimelineState>(emptyTimeline);
   const [status, setStatus] = useState<UseTimelineResult["status"]>("loading");
+  // 지금 `state`·`status` 가 어느 대화의 것인가(#5678). 대화를 바꾼 첫 렌더는 아래 읽기 효과가 비우기 **전**이라 앞 대화의 것을 들고 있다 —
+  // 그대로 내주면 새 대화의 머리 아래 앞 대화의 줄, 또는 앞 대화가 비었으면 「…님과의 대화를 시작하세요」 빈 안내가 한 프레임 그려진다
+  // (화소 실측: 누른 뒤 35~60ms 빈 안내). 그 렌더에서는 효과가 곧 만들 모양(비운 목록 · 읽는 중)을 미리 내준다(아래 `switching`).
+  const [stateChannelId, setStateChannelId] = useState(channelId);
   const [loadCause, setLoadCause] = useState<ConnectionCause | null>(null);
   const [resume, setResume] = useState<ResumeInfo>({
     lastRecovered: null,
@@ -961,6 +969,7 @@ export function useTimeline(
   }, [state.messages, updatePending, forgetRow]);
 
   useEffect(() => {
+    setStateChannelId(channelId);
     if (!channelId) return;
     let cancelled = false;
     // #3676: 기록(REST 머리)은 실시간 레일과 무관하게 읽을 수 있다. 레일이 아직 없거나 끝내 안 와도
@@ -1399,13 +1408,16 @@ export function useTimeline(
     [workspaceId, applyPins]
   );
 
+  // 대화를 바꾼 첫 렌더(#5678 — 위 `stateChannelId`): 효과가 비우기 전의 앞 대화 상태를 내주지 않는다. 같은 대화에서 효과만 다시 도는
+  // 때(레일이 늦게 옴 · 다시 읽기)는 대화가 그대로라 여기에 걸리지 않는다 — 그때는 받아 둔 글을 지키는 길(`keepLoaded`)이 그대로다.
+  const switching = channelId !== null && channelId !== stateChannelId;
   return {
-    state,
-    status,
-    loadCause,
+    state: switching ? SWITCHING_STATE : state,
+    status: switching ? "loading" : status,
+    loadCause: switching ? null : loadCause,
     resume,
-    recoveryMarkers,
-    pending,
+    recoveryMarkers: switching ? NO_MARKERS : recoveryMarkers,
+    pending: switching ? pending.filter((row) => row.channelId === channelId) : pending,
     echoPins,
     serverOffsetMs,
     send,
@@ -1416,8 +1428,8 @@ export function useTimeline(
     loadOlder,
     reload,
     loadingOlder,
-    reachedStart,
-    olderFailed,
+    reachedStart: switching ? false : reachedStart,
+    olderFailed: switching ? false : olderFailed,
     retryOlder,
     reactions,
     toggleReaction,

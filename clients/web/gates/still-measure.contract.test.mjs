@@ -15,6 +15,7 @@ import {
   installEntryRecorder,
   judgeCell,
   listEnv,
+  MAX_ENTRY_HIDDEN_FRAMES,
   motionOf,
   nothingRan,
   numbersFromRecord,
@@ -211,6 +212,70 @@ describe("대화 진입의 창 (검수 r1 H1)", () => {
     const holed = frames.filter((frame) => frame.n !== 3);
     expect(frameGaps(holed).missedAtStart).toBe(1);
     expect(frameGaps(holed).reason).toMatch(/놓쳤다/);
+  });
+});
+
+describe("대화 진입 — 그려진 프레임만 · 가려 둔 시간 · 바닥 거리 (#5678 · #5679)", () => {
+  // 앱이 자리 잡기 전의 목록을 가려 두는 모양(#5678): 줄이 붙은 첫 세 프레임은 가려진 채(`visible: false`) 맨 위 · 가장 새 줄 없음이고,
+  // 처음 보인 프레임에는 이미 바닥에 서 있다.
+  const frame = (n, { visible = true, last = 664.36, top = 2671, gap = 0, match = true } = {}) => ({ n, t: 1000 + n * 16, match, visible, top, gap, pill: false, watch: { last } });
+  const hiddenThenPlaced = [
+    frame(1, { match: false, last: null, top: 0 }),
+    frame(2, { visible: false, last: null, top: 0, gap: 2038 }),
+    frame(3, { visible: false, last: null }),
+    frame(4, { visible: false, last: 1475, top: 2174, gap: 815 }),
+    ...Array.from({ length: 20 }, (_, i) => frame(5 + i)),
+  ];
+
+  it("가려진 프레임은 창에 넣지 않고 따로 센다 — 처음 보인 프레임부터 재면 자리 잡기 전 프레임이 0", () => {
+    const picked = entryWindow(hiddenThenPlaced, { windowMs: 2_000 });
+    expect(picked.hidden).toEqual({ frames: 3, ms: 48, never: false });
+    expect(picked.frames[0].n).toBe(5);
+    expect(entrySettle(picked.frames).head).toHaveLength(0);
+  });
+
+  it("가리지 않으면(옛 판 · 앱이 가리지 않음) 같은 프레임이 그대로 머리로 잡힌다 — 「보인」 판정이 머리를 지우는 유일한 길이다", () => {
+    const unhidden = hiddenThenPlaced.map((one) => ({ ...one, visible: true }));
+    const picked = entryWindow(unhidden, { windowMs: 2_000 });
+    expect(picked.hidden.frames).toBe(0);
+    expect(entrySettle(picked.frames).head).toHaveLength(3);
+    // `visible` 을 적지 않은 기록도 보인 것으로 친다.
+    const legacy = hiddenThenPlaced.map((one) => {
+      const rest = { ...one };
+      delete rest.visible;
+      return rest;
+    });
+    expect(entrySettle(entryWindow(legacy, { windowMs: 2_000 }).frames).head).toHaveLength(3);
+  });
+
+  it("한 번 보인 뒤 다시 가려지면 그 프레임은 줄이 없는 프레임이다(사라짐 → 실패)", () => {
+    const flicker = [...hiddenThenPlaced];
+    flicker[10] = { ...flicker[10], visible: false };
+    const picked = entryWindow(flicker, { windowMs: 2_000 });
+    const numbers = numbersFromRecord({ frames: picked.frames, pillMounts: 0, pillAtStart: false }, { watch: "last" });
+    expect(numbers.vanishedFrames).toBe(1);
+    expect(judgeCell(numbers, { kind: "entry" }).verdict).toBe("FAIL");
+  });
+
+  it("끝내 보이지 않으면 창이 비고 `never` 다 · 가려 둔 프레임이 상한을 넘으면 알려진 실패 줄도 덮지 못한다", () => {
+    const never = hiddenThenPlaced.map((one) => ({ ...one, visible: false }));
+    const picked = entryWindow(never, { windowMs: 2_000 });
+    expect(picked.frames).toHaveLength(0);
+    expect(picked.hidden.never).toBe(true);
+    expect(picked.hidden.frames).toBe(23);
+    const known = { key: "entry|webkit|1280", issue: "#1", maxUnsettledFrames: 3 };
+    const fine = { reversals: 0, unexplainedPx: 0, maxGapPx: 0, pillShows: 0, vanishedFrames: 0 };
+    expect(withinKnown(known, fine, { kind: "entry", hidden: MAX_ENTRY_HIDDEN_FRAMES })).toBe(true);
+    expect(withinKnown(known, fine, { kind: "entry", hidden: MAX_ENTRY_HIDDEN_FRAMES + 1 })).toBe(false);
+  });
+
+  it("진입의 바닥 거리도 판정한다 — 자리 잡은 뒤 바닥에서 4px 모자라면 실패이고 알려진 실패 줄이 덮지 않는다(#5679)", () => {
+    const shortBy = (gap) => entryWindow(hiddenThenPlaced.map((one) => (one.visible ? { ...one, gap } : one)), { windowMs: 2_000 }).frames;
+    const numbers = (gap) => numbersFromRecord({ frames: shortBy(gap), pillMounts: 0, pillAtStart: false }, { watch: "last" });
+    expect(judgeCell(numbers(0), { kind: "entry" }).verdict).toBe("PASS");
+    expect(judgeCell(numbers(1), { kind: "entry" }).verdict).toBe("PASS");
+    expect(judgeCell(numbers(4), { kind: "entry" }).reasons).toContain("바닥 거리 4px(> 1)");
+    expect(withinKnown({ key: "entry-card|chromium|1280", issue: "#1", maxUnsettledFrames: 2, maxUnexplainedPx: 4.75 }, numbers(4), { kind: "entry" })).toBe(false);
   });
 });
 
