@@ -14,8 +14,25 @@ vi.mock("@/lib/tauri", async (importOriginal) => ({
   isDesktop: () => shell.desktop,
 }));
 vi.mock("@/features/workbench/agent/ConnectedTerminalDock", () => ({
-  ConnectedTerminalDock: ({ presentation }: { presentation?: string }) =>
-    createElement("div", { "data-testid": "dock-stub", "data-presentation": presentation ?? "dock" }),
+  ConnectedTerminalDock: ({
+    presentation,
+    openAgentSession,
+    onAgentSessionOpened,
+  }: {
+    presentation?: string;
+    openAgentSession?: string | null;
+    onAgentSessionOpened?: () => void;
+  }) =>
+    createElement(
+      "div",
+      {
+        "data-testid": "dock-stub",
+        "data-presentation": presentation ?? "dock",
+        "data-open-agent": openAgentSession ?? "",
+      },
+      // 격자가 칸을 열었다고 알리는 자리(#5595). 진짜 격자의 여는 일은 agentDock.open 시험이 잰다.
+      createElement("button", { type: "button", "data-testid": "dock-stub-opened", onClick: () => onAgentSessionOpened?.() })
+    ),
 }));
 vi.mock("@/features/capabilities/SurfaceGate", () => ({
   SurfaceRoute: ({ surface, children }: { surface: string; children: unknown }) =>
@@ -157,5 +174,32 @@ describe("/work 보기 (#2854 → ADR-0202 D6)", () => {
     expect(el.querySelector('[data-testid="work-console-stub"]')).not.toBeNull();
     expect(new URLSearchParams(seen.search).get("view")).toBe("console");
     expect(new URLSearchParams(seen.search).get("session")).toBe("abc");
+  });
+});
+
+describe("작업 권한 요청 배너가 연 A 칸 (#5595)", () => {
+  const SID = "019f9a10-0000-7000-8000-0000000000a1";
+
+  it("데스크탑: 격자에 그 세션을 넘기고, 격자가 열었다고 하면 주소에서 열쇠만 지운다(격자 보기는 그대로)", async () => {
+    shell.desktop = true;
+    const el = await mount(`/work?view=terminals&agent=${SID}`);
+    const dock = el.querySelector<HTMLElement>('[data-testid="dock-stub"]');
+    expect(dock?.getAttribute("data-presentation")).toBe("tab");
+    expect(dock?.getAttribute("data-open-agent")).toBe(SID);
+    act(() => el.querySelector<HTMLButtonElement>('[data-testid="dock-stub-opened"]')?.click());
+    expect(seen.search).toBe("?view=terminals");
+    expect(el.querySelector('[data-testid="dock-stub"]')?.getAttribute("data-open-agent")).toBe("");
+  });
+
+  it("격자 주소에 열쇠가 없으면 아무 세션도 넘기지 않는다. 브라우저는 격자가 없다", async () => {
+    shell.desktop = true;
+    const desk = await mount("/work?view=terminals");
+    expect(desk.querySelector('[data-testid="dock-stub"]')?.getAttribute("data-open-agent")).toBe("");
+    act(() => root?.unmount());
+    root = null;
+    host?.remove();
+    shell.desktop = false;
+    const web = await mount(`/work?view=terminals&agent=${SID}`);
+    expect(web.querySelector('[data-testid="dock-stub"]')).toBeNull();
   });
 });

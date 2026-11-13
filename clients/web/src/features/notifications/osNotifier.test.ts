@@ -41,6 +41,25 @@ describe("osNotifier 묶음 (#3339)", () => {
     );
   });
 
+  it("실패한 턴(#5584 r2 H1)은 「끝남」과 다른 묶음이고, 묶이면 알림 제목 그대로 「실패 N건」이다", () => {
+    const failed = (label: string): OsNotifyItem => ({ kind: "failed", title: "실패", body: `${label}: 오류로 끝났어요`, label });
+    expect(summarize([failed("3번 칸")])).toEqual({ title: "실패", body: "3번 칸: 오류로 끝났어요" });
+    expect(summarize([failed("3번 칸"), failed("4번 칸")])).toEqual({ title: "실패 2건", body: "3번 칸, 4번 칸" });
+    vi.useFakeTimers();
+    try {
+      const send = vi.fn(async () => true);
+      const n = createOsNotifier({ send });
+      n.offer(failed("3번 칸"));
+      n.offer({ kind: "done", title: "끝남", body: "4번 칸: 작업이 끝났어요", label: "4번 칸" });
+      vi.advanceTimersByTime(COALESCE_MS);
+      expect(send).toHaveBeenCalledTimes(2);
+      expect(send).toHaveBeenCalledWith("실패", "3번 칸: 오류로 끝났어요", { kind: "failed" });
+      expect(send).toHaveBeenCalledWith("끝남", "4번 칸: 작업이 끝났어요", { kind: "done" });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("창 안의 같은 종류는 한 번만 보내고, 다른 종류는 따로 보낸다", () => {
     vi.useFakeTimers();
     try {

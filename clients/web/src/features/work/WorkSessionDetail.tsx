@@ -3,15 +3,28 @@ import { resumeFailureLine } from "@momo/core/features/auth/signedControl";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { ArrowLeft, KeyRound, Loader2 } from "lucide-react";
+import { useFormatMessage } from "@/i18n/useFormatMessage";
 import { cn } from "@/design/lib/cn";
 import { Button } from "@/design/ui/button";
 import {
   endWorkSession,
+  killWorkSession,
   sendThreadReply,
   uuidEq,
   type WorkHost,
   type WorkSession,
 } from "@momo/core/lib/api";
+import {
+  STOP_ACTION_LABEL,
+  STOP_CONFIRM_ASK,
+  STOP_CONFIRM_DETAIL,
+  STOP_NOT_RUNNING_LINE,
+  STOP_OWNER_ONLY_LINE,
+  STOP_STOPPED_LINE,
+  stopFailureLine,
+  stopRequestedLine,
+  stopsWithKill,
+} from "@momo/core/features/work/stopWork";
 import { useSession } from "@/app/session";
 import { memberFor, type Directory } from "@/features/workspace/useWorkspace";
 import { CHIP_CLASS } from "@/features/common/chip";
@@ -275,7 +288,7 @@ function ExcerptForm({
     if (pending) return;
     const trimmed = text.trim();
     if (trimmed === "") {
-      setError("공유할 내용이 없습니다.");
+      setError("공유할 내용이 없어요.");
       return;
     }
     setPending(true);
@@ -290,7 +303,7 @@ function ExcerptForm({
       );
       onDone(true);
     } catch {
-      setError("발췌를 스레드에 보내지 못했습니다. 다시 시도하세요.");
+      setError("발췌를 스레드에 보내지 못했어요. 다시 시도해 주세요.");
     } finally {
       setPending(false);
     }
@@ -326,8 +339,8 @@ function ExcerptForm({
         className="w-full resize-y rounded-sm border border-line-strong bg-surface-raised p-2 text-meta text-ink focus-visible:focus-ring"
       />
       <p className="text-meta text-ink-muted">
-        토큰, 비밀번호, 개인 경로가 없는지 확인하세요. 공유하면 채널 스레드
-        원장에 저장됩니다.
+        토큰, 비밀번호, 개인 경로가 없는지 확인해 주세요. 공유하면 채널 스레드
+        원장에 저장돼요.
       </p>
       {error && (
         <p role="alert" className="text-meta text-danger" data-testid="work-excerpt-error">
@@ -378,14 +391,25 @@ function ExcerptForm({
  * vocabulary), not a status. 세션 종료 is the different thing this pane really
  * can do (the process, not the turn), behind a two step confirmation, and it
  * states its own reason when it is unavailable.
+ *
+ * #5595 (ADR-0188 D3): a session on the owner's own Mac stops through the kill
+ * route (`killWorkSession`), the phone's verb and copy (core `stopWork.ts`).
+ * `PATCH ended` only settles the ledger and never reaches the Mac, so on that
+ * session it is gone from here. It stays for the sessions the kill route
+ * refuses by rule (`stopPath`: a workspace host, a shared local pane, another
+ * person's or a revoked host), where it is the only end there is. The kill
+ * answer says whether the Mac is on: off means 「맥이 켜지면 멈춰요」, never
+ * 「멈췄어요」, which waits for the ledger to say `ended`.
  */
 function SessionActions({
   session,
+  hosts,
   onExcerpt,
   excerptOpen,
   excerptRef,
 }: {
   session: WorkSession;
+  hosts: readonly WorkHost[] | undefined;
   onExcerpt: () => void;
   excerptOpen: boolean;
   excerptRef: React.RefObject<HTMLButtonElement>;
@@ -395,55 +419,119 @@ function SessionActions({
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [ended, setEnded] = useState(false);
+  /** The kill route's answer as one line (#5595); null until it answered. */
+  const [requested, setRequested] = useState<string | null>(null);
 
+  // 캐럿 (#5595 design-review H-1, `StopRunControl` #3854 H-1과 같은 규칙). 누른 단추가 확인 줄로
+  // 바뀌면 그 단추가 사라져 캐럿이 <body>로 떨어진다. 무장하면 안전한 쪽(취소)으로, 접으면 무장
+  // 단추로, 답이 서면 방금 선 문장(`tabIndex=-1`)으로 옮긴다. 실패는 확정 단추가 남아 캐럿도 남는다.
+  const sectionRef = useRef<HTMLDivElement>(null);
+  const armRef = useRef<HTMLButtonElement>(null);
+  const keepRef = useRef<HTMLButtonElement>(null);
+  const outcomeRef = useRef<HTMLParagraphElement>(null);
+  /** 접은 뒤 캐럿을 무장 단추로 돌려줄 것인가. 처음 그릴 때는 옮기지 않는다. */
+  const returnFocus = useRef(false);
+  /** 답이 선 뒤 캐럿을 그 문장으로 옮길 것인가(누를 때 캐럿이 이 줄 안에 있었을 때만). */
+  const focusOutcome = useRef(false);
+  const questionId = `work-end-question-${session.id.toLowerCase()}`;
+
+  const kill = stopsWithKill(session, hosts);
+  const verb = kill ? STOP_ACTION_LABEL : "세션 종료";
+  const done = kill ? requested !== null : ended;
+  // 내가 멈춘 세션만 「멈췄어요」를 말한다(폰과 같은 규칙). 원장이 ended를 말할 때까지는 요청 줄이다.
+  const stopped = kill && requested !== null && session.status === "ended";
   const running = session.status === "running" || session.status === "idle";
   const owner = uuidEq(session.memberId, auth.member.id);
   const endReason = !running
-    ? session.status === "orphaned"
-      // Same M1 rule as observerStream: orphaned is resumable, not closed.
-      ? "호스트 연결이 끊긴 세션입니다."
-      : "이미 닫힌 세션입니다."
+    ? kill
+      ? STOP_NOT_RUNNING_LINE
+      : session.status === "orphaned"
+        // Same M1 rule as observerStream: orphaned is resumable, not closed.
+        ? "호스트 연결이 끊긴 세션이에요."
+        : "이미 닫힌 세션이에요."
     : !owner
-      ? "세션을 시작한 사람만 종료할 수 있습니다."
+      ? kill
+        ? STOP_OWNER_ONLY_LINE
+        : "세션을 시작한 사람만 종료할 수 있어요."
       : null;
+
+  useEffect(() => {
+    if (armed) {
+      keepRef.current?.focus();
+    } else if (returnFocus.current) {
+      returnFocus.current = false;
+      armRef.current?.focus();
+    }
+  }, [armed]);
+
+  useEffect(() => {
+    if (!done || !focusOutcome.current) return;
+    focusOutcome.current = false;
+    outcomeRef.current?.focus();
+  }, [done]);
 
   async function end() {
     if (pending) return;
     setPending(true);
     setError(null);
+    const caretInside = () => sectionRef.current?.contains(document.activeElement) ?? false;
     try {
-      await endWorkSession(workspaceId, session.id);
-      setEnded(true);
+      if (kill) {
+        const line = stopRequestedLine(await killWorkSession(workspaceId, session.id));
+        focusOutcome.current = caretInside();
+        setRequested(line);
+      } else {
+        await endWorkSession(workspaceId, session.id);
+        focusOutcome.current = caretInside();
+        setEnded(true);
+      }
       setArmed(false);
-    } catch {
-      setError("세션을 종료하지 못했습니다. 다시 시도하세요.");
+    } catch (caught) {
+      // 실패하면 확인 줄이 남는다: 아직 도는 작업에 다시 누를 수 있어야 한다.
+      setError(kill ? stopFailureLine(caught) : "세션을 종료하지 못했어요. 다시 시도해 주세요.");
     } finally {
       setPending(false);
     }
   }
 
   return (
-    <div className="flex flex-col gap-2 border-t border-line px-4 py-2">
+    <div ref={sectionRef} className="flex flex-col gap-2 border-t border-line px-4 py-2">
+      {/* 묻는 문장이 단추보다 먼저 온다(읽는 순서). 두 단추가 이 문장을 설명으로 갖는다. */}
+      {armed && (
+        <p id={questionId} className="break-keep text-meta text-ink" data-testid="work-end-warning">
+          {kill
+            ? `${STOP_CONFIRM_ASK} ${STOP_CONFIRM_DETAIL}`
+            : "세션 기록만 닫아요. 호스트에서 돌던 작업은 그대로 남을 수 있어요."}
+        </p>
+      )}
       <div className="flex flex-wrap items-center gap-2">
         {!armed ? (
           <Button
+            ref={armRef}
             type="button"
             variant="outline"
             size="sm"
-            disabled={endReason !== null || ended}
+            disabled={endReason !== null || done}
             onClick={() => setArmed(true)}
             data-testid="work-end-session"
           >
-            세션 종료
+            {verb}
           </Button>
         ) : (
           <span className="flex items-center gap-2" data-testid="work-end-confirm">
             <Button
+              ref={keepRef}
               type="button"
               variant="ghost"
               size="sm"
-              disabled={pending}
-              onClick={() => setArmed(false)}
+              // 네이티브 disabled가 아니다: 보내는 동안에도 캐럿이 머물 수 있어야 한다.
+              aria-disabled={pending || undefined}
+              aria-describedby={questionId}
+              onClick={() => {
+                if (pending) return;
+                returnFocus.current = true;
+                setArmed(false);
+              }}
               data-testid="work-end-cancel"
             >
               취소
@@ -453,11 +541,12 @@ function SessionActions({
               variant="destructive"
               size="sm"
               aria-busy={pending || undefined}
+              aria-describedby={questionId}
               onClick={() => void end()}
               data-testid="work-end-commit"
             >
               {pending && <Loader2 aria-hidden="true" className="spinner-busy" />}
-              {pending ? "종료 중" : "종료 확정"}
+              {kill ? STOP_ACTION_LABEL : pending ? "종료 중" : "종료 확정"}
             </Button>
           </span>
         )}
@@ -478,20 +567,33 @@ function SessionActions({
       {/* Each unavailable action states its own reason, on its own line. One
           merged sentence would leave the reader guessing which action it is
           about. */}
-      {armed && (
-        <p className="text-meta text-ink" data-testid="work-end-warning">
-          세션 종료는 턴 하나가 아니라 이 세션 전체를 끝냅니다. 호스트에서
-          실행 중이던 작업도 함께 정리됩니다.
+      {endReason !== null && !done && (
+        <p className="text-meta text-ink-muted" data-testid="work-end-reason">
+          {verb}: {endReason}
         </p>
       )}
-      {endReason !== null && !ended && (
-        <p className="text-meta text-ink-muted" data-testid="work-end-reason">
-          세션 종료: {endReason}
+      {/* 답 줄은 캐럿이 머물 수 있는 문장이다(탭 순서에는 자리를 만들지 않는다). 상태 영역이라
+          「멈추기를 요청했어요」 → 「멈췄어요」로 바뀌는 것도 읽힌다. */}
+      {kill && requested !== null && (
+        <p
+          ref={outcomeRef}
+          tabIndex={-1}
+          role="status"
+          className="break-keep text-meta text-ink-muted focus-visible:focus-ring"
+          data-testid="work-stop-requested"
+        >
+          {stopped ? STOP_STOPPED_LINE : requested}
         </p>
       )}
       {ended && (
-        <p role="status" className="text-meta text-ink-muted" data-testid="work-end-done">
-          종료를 서버에 기록했습니다.
+        <p
+          ref={outcomeRef}
+          tabIndex={-1}
+          role="status"
+          className="break-keep text-meta text-ink-muted focus-visible:focus-ring"
+          data-testid="work-end-done"
+        >
+          세션 기록을 닫았어요.
         </p>
       )}
       {error && (
@@ -637,6 +739,7 @@ export function WorkSessionDetail({
   onResumed,
   controlIntent = false,
   onControlIntentConsumed,
+  routeHeader = false,
 }: {
   session: WorkSession;
   hosts: WorkHost[] | undefined;
@@ -657,6 +760,11 @@ export function WorkSessionDetail({
   wide: boolean;
   onWideChange: (wide: boolean) => void;
   onBack: () => void;
+  /**
+   * 세션 화면(콘솔 라우트)의 머리가 「← 작업」과 세션 이름을 이미 말한다(#5673). 이 안쪽 머리는 이름을 눈에서 걷고(낭독 제목은
+   * 남는다), 「←」는 목록이 숨는 좁은 폭에서만 「세션 목록」 글자와 함께 선다.
+   */
+  routeHeader?: boolean;
   /** 이 세션의 채널 스레드를 여는 요청이 이미 나가 있다. */
   openingThread: boolean;
   /**
@@ -763,9 +871,12 @@ export function WorkSessionDetail({
   // receiving keys and the documented step back (상세 -> 리스트 -> 밖) was dead
   // for exactly the readers who need it. The back control is the right landing
   // spot because it is both the heading's neighbour and the way out.
+  const formatMessage = useFormatMessage();
   const backRef = useRef<HTMLButtonElement>(null);
   useEffect(() => {
-    backRef.current?.focus();
+    const back = backRef.current;
+    // 머리가 따로 있는 화면의 넓은 폭에서는 이 단추가 숨어 있어 초점을 줄 수 없다(숨은 단추에 focus()는 조용히 실패한다).
+    if (back !== null && back.getClientRects().length > 0) back.focus();
   }, [session.id]);
 
   const status = workSessionContinuityStatus(session, hosts);
@@ -838,11 +949,15 @@ export function WorkSessionDetail({
               onClick={onBack}
               aria-label="세션 목록으로"
               data-testid="work-detail-back"
-              className="flex size-6 shrink-0 items-center justify-center rounded-sm text-ink-muted press hover:bg-surface-hover focus-visible:focus-ring"
+              className={cn(
+                "flex shrink-0 items-center justify-center rounded-sm text-ink-muted press hover:bg-surface-hover focus-visible:focus-ring",
+                routeHeader ? "h-6 gap-1 pe-1 text-meta min-[900px]:hidden" : "size-6"
+              )}
             >
               <ArrowLeft className="size-4" />
+              {routeHeader && formatMessage("desktop.workSession.backToListLabel")}
             </button>
-            <Heading className="min-w-0 flex-1 truncate text-body font-medium text-ink">
+            <Heading className={cn("min-w-0 flex-1 truncate text-body font-medium text-ink", routeHeader && "sr-only")}>
               {session.label}
             </Heading>
             {/* The clock rides with the title rather than living in the meta
@@ -902,7 +1017,7 @@ export function WorkSessionDetail({
                   tabular. Korean prose stays in the sans stack. */}
               마지막 신호 뒤{" "}
               <span data-numeric>{silenceLabel(lastSignalAtMs, nowMs)}</span>{" "}
-              동안 조용합니다. 세션은 아직 실행 중입니다.
+              동안 조용해요. 세션은 아직 실행 중이에요.
             </p>
           )}
         </div>
@@ -1035,7 +1150,7 @@ export function WorkSessionDetail({
                 </span>
               </MetaRow>
             )}
-            {hostName !== null && <MetaRow label="호스트">{hostName}</MetaRow>}
+            {hostName !== null && <MetaRow label="실행하는 컴퓨터">{hostName}</MetaRow>}
             {session.exitCode !== undefined && (
               <MetaRow label="마지막 실행 결과">
                 <span data-numeric className="font-mono">
@@ -1084,8 +1199,8 @@ export function WorkSessionDetail({
             tone="neutral"
             message={
               session.remoteDisplayAvailable
-                ? "호스트 응답이 없어 터미널 관전과 라이브 화면을 볼 수 없습니다. 아래 진행 내역에서 이 세션에 기록된 단계를 계속 확인하세요."
-                : "호스트 응답이 없어 터미널을 관전할 수 없습니다. 아래 진행 내역에서 이 세션에 기록된 단계를 계속 확인하세요."
+                ? "실행하는 컴퓨터와 연결되지 않아 터미널 관전과 라이브 화면을 볼 수 없어요. 아래 진행 내역에서 이 세션에 기록된 단계를 계속 확인해 주세요."
+                : "실행하는 컴퓨터와 연결되지 않아 터미널을 관전할 수 없어요. 아래 진행 내역에서 이 세션에 기록된 단계를 계속 확인해 주세요."
             }
             testId="work-host-offline"
           />
@@ -1225,8 +1340,8 @@ export function WorkSessionDetail({
                       : session.status === "idle"
                         ? "대기 중인"
                         : "실행된"
-                  } 세션입니다. 진행 내역 중계는 아직 검증되지 않았으므로, 아래 단계 목록에는 세션 원장에 남은 것만 나옵니다.`
-                : "이 세션의 호스트를 확인하지 못했습니다. 아래 진행 내역이 모두 도착했는지 보장할 수 없습니다."
+                  } 세션이에요. 진행 내역 중계는 아직 검증되지 않아서, 아래 단계 목록에는 세션 원장에 남은 것만 나와요.`
+                : "이 세션의 호스트를 확인하지 못했어요. 아래 진행 내역이 모두 도착했는지 보장할 수 없어요."
             }
             testId="work-host-unverified"
           />
@@ -1247,7 +1362,7 @@ export function WorkSessionDetail({
         {truncated && (
           <InlineBanner
             tone="neutral"
-            message="진행 내역이 많아 앞부분만 불러왔습니다. 최근 항목 일부는 아직 표시되지 않았고, 마지막 단계가 지금 실행 중인지도 확인할 수 없습니다."
+            message="진행 내역이 많아 앞부분만 불러왔어요. 최근 항목 일부는 아직 표시되지 않았고, 마지막 단계가 지금 실행 중인지도 확인할 수 없어요."
             testId="work-detail-truncated"
           />
         )}
@@ -1256,7 +1371,7 @@ export function WorkSessionDetail({
           folded.rows.length === 0 &&
           trust === "local" && (
             <EmptyInvite
-              headline="아직 진행 내역이 없습니다."
+              headline="아직 진행 내역이 없어요."
               detail={emptyStepsDetail(session, hosts)}
               testId="work-detail-empty"
             />
@@ -1292,12 +1407,13 @@ export function WorkSessionDetail({
           className="border-t border-line px-4 py-2 text-meta text-ink-muted"
           data-testid="work-excerpt-done"
         >
-          발췌를 세션 스레드에 공유했습니다.
+          발췌를 세션 스레드에 공유했어요.
         </p>
       )}
 
       <SessionActions
         session={session}
+        hosts={hosts}
         excerptOpen={excerptOpen}
         excerptRef={excerptRef}
         onExcerpt={() => {

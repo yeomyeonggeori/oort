@@ -1,8 +1,9 @@
-import { uuidEq, type Message } from "../../lib/api";
+import { uuidEq, type Message, type WorkSession } from "../../lib/api";
 import { payloadToMessage, type MessageNewEvent } from "../../lib/realtimeEvents";
 import { attachmentPreviewLine } from "../attachments/model";
 import { mentionsMember } from "../inbox/model";
 import { agentCardModel } from "../timeline/agentCardModel";
+import { parseWorkSessionEvent } from "../work/workSessionModel";
 
 // =============================================================================
 // Desktop notification decision (MOMO-607, ADR-0133 P2). Pure: no DOM, no Tauri,
@@ -18,10 +19,12 @@ import { agentCardModel } from "../timeline/agentCardModel";
 //     a browser tab whose user opted in and was granted permission (#3340). The
 //     rules below are the same for both; only the gate differs;
 //   - only for the events that are addressed to a person — a mention the
-//     SERVER recorded, an approval request waiting on a human decision, and (#4890)
+//     SERVER recorded, an approval request waiting on a human decision, (#4890)
 //     a new reply from someone else in a thread the SERVER says this member
-//     follows. The follow answer is handed in (`isFollowingThread`); this module
-//     never infers a thread from who wrote in it;
+//     follows, and (#5595) a permission request from a work session on this
+//     member's own Mac, to that session's owner only. The follow and the session
+//     answers are handed in (`isFollowingThread`, `workSession`); this module
+//     never infers a thread or an owner from who wrote in it;
 //   - never when the window already has focus (zero-noise: the message is on
 //     screen, or one keystroke away);
 //   - never twice for the same message, never for one's own writing, never for
@@ -77,7 +80,14 @@ export type NotifySkip =
    * A thread reply that would otherwise show, whose follow state the server has not told this device yet (#4890).
    * The caller asks the server about that one thread and decides again with the answer; nothing is shown on a guess.
    */
-  | "follow-unknown";
+  | "follow-unknown"
+  /** A work-session permission request (#5595) for a session this member does not own: only its owner decides (ADR-0188 D3·D5). */
+  | "not-owner"
+  /**
+   * A work-session permission request that would otherwise show, for a session this device has not read yet (#5595).
+   * The caller reads the server's session ledger once and decides again; nothing is shown on a guess.
+   */
+  | "owner-unknown";
 
 export interface DesktopNotification {
   kind: NotifyKind;
@@ -87,6 +97,22 @@ export interface DesktopNotification {
   title: string;
   /** One line, truncated, code and secrets removed. Absent when there is none. */
   body?: string;
+  /**
+   * Set only for a work-session permission request (#5595): the session whose approval card the banner opens.
+   * The card lives in that session's agent pane, not in the channel, so the caller routes by this id.
+   */
+  workSessionId?: string;
+  /**
+   * The name a grouped banner lists for this one, when the title is a kind word rather than a name (#5595: the
+   * session's name under the title 「응답 필요」). Absent means the title is the name.
+   */
+  summaryLabel?: string;
+  /**
+   * The OS banner family this one is grouped with, when it is not its kind's own (#5595: a work permission request is
+   * the same moment as the local pane's 「응답 필요」 banner — the agent waits for 허락 on this Mac — so they share one
+   * group and one grouped title, 「응답 필요 N건」). Absent means the kind's own group.
+   */
+  bannerGroup?: "waiting";
 }
 
 export type NotifyDecision =
@@ -190,6 +216,35 @@ export function isThreadReplyCandidate(message: Message, isDirect = false): bool
   );
 }
 
+// ---- work-session permission request (#5595, ADR-0188 D5·D8) ---------------
+
+/**
+ * A permission request from a Claude Code·Codex session on a member's Mac, as the server records it: a System line in
+ * the session thread (`work_sessions.rs` `validated_acp_event`: `props.kind = work_session_event`,
+ * `event_type = approval.requested`). The phone push picks the same line by the same shape (`momo-push` `judgment.rs`,
+ * arm `work_permission`): a System row, the request id (`event_id`), the session id (`event.work_session_id`), and at
+ * least one decidable option (`allow_once`·`reject_once`, the only kinds the bridge records). Only ids and option
+ * **kinds** are read — never the preview, the tool title or the option names (D5: notifications carry ids; the
+ * preview is the owner's to read in the app).
+ */
+export interface WorkPermissionRequest {
+  sessionId: string;
+  requestEventId: string;
+}
+
+export function workPermissionRequestOf(message: Message): WorkPermissionRequest | null {
+  if (message.type !== "system" || message.state === "deleted") return null;
+  const event = parseWorkSessionEvent(message);
+  if (event === null || event.type !== "approval.requested") return null;
+  const options = Array.isArray(event.payload.options) ? event.payload.options : [];
+  const decidable = options.some((option: unknown) => {
+    if (typeof option !== "object" || option === null) return false;
+    const kind = (option as Record<string, unknown>).kind;
+    return kind === "allow_once" || kind === "reject_once";
+  });
+  return decidable ? { sessionId: event.sessionId, requestEventId: event.eventId } : null;
+}
+
 // ---- decision --------------------------------------------------------------
 
 /**
@@ -258,6 +313,32 @@ export interface NotifyContext {
    */
   isFollowingThread?: (rootId: string) => boolean | undefined;
   /**
+   * The work session a permission request belongs to (#5595), **as the server's session ledger says it**
+   * (`GET …/work-sessions`): its owner, state and name. `undefined` = this device has not read that session yet: the
+   * decision then ends in `owner-unknown` and the caller reads the ledger once and decides again. Absent means this
+   * surface cannot open the approval card (a browser tab: allowing is the app's, ADR-0146 D-4), so a work permission
+   * request is ordinary traffic there and never a banner.
+   */
+  workSession?: (sessionId: string) => Pick<WorkSession, "memberId" | "status" | "label"> | undefined;
+  /**
+   * Is this session's approval card on screen right now (its agent pane is open in this window, #5595)? Absent means
+   * no. The channel being on screen proves nothing here: the request is a System line in the session thread and its
+   * card lives in the pane.
+   */
+  isWorkSessionVisible?: (sessionId: string) => boolean;
+  /**
+   * The title of a work permission banner: the dictionary's `desktop.notify.workPermissionTitle` (「응답 필요」, the
+   * word the local pane banner already uses for the same moment, `paneStatus.attentionCopy`). Read by the caller in
+   * the current language like `inviteLinkSentence`. Absent means the session's name is the title.
+   */
+  workPermissionTitle?: () => string;
+  /**
+   * The body of a work permission banner for one session name: the dictionary's `desktop.notify.workPermission`
+   * (「<세션 이름>: 맥에서 실행 허락을 기다려요」, the card's verb 허락 and the local pane banner's form). The message
+   * body is the server's English (`Approval requested`) and is never shown.
+   */
+  workPermissionSentence?: (session: string) => string;
+  /**
    * Is this thread what the window shows right now (its panel is open on this root)? A reply is **not** in the
    * visible main timeline, so for a thread reply the channel being on screen proves nothing (`isTargetVisible` is
    * the channel-level question and does not apply). Absent means "assume visible", like `isTargetVisible`.
@@ -296,6 +377,9 @@ export function notifyDecision(
   if (event.type !== "message.new") return { show: false, skip: "edited" };
 
   const message = payloadToMessage(event.payload);
+  // 맥 작업 세션의 권한 요청(#5595): 세션 원장을 줄 수 있는 표면에서만 승인 갈래다(카드를 열 수 있는 곳).
+  const work = context.workSession === undefined ? null : workPermissionRequestOf(message);
+  if (work !== null) return workPermissionDecision(message, work, context);
   const isDirect = context.isDirect?.(message.channelId) ?? false;
   let kind = notifiableKind(message, context.selfMemberId, isDirect);
   // 스레드 답글 갈래(#4890): 멘션·승인·DM이 아닌 스레드 답글만 후보다. 따라가는지는 맨 끝에서 읽는다.
@@ -347,6 +431,64 @@ export function notifyDecision(
     // 본문이 있으면 본문이 이긴다(위 식이 이미 답했다). 승인 카드에는 첨부가 없다.
     (kind === "approval" ? undefined : (attachmentPreviewLine(message.attachments) ?? undefined));
   if (body !== undefined) notification.body = body;
+  return { show: true, notification };
+}
+
+/**
+ * The decision for a work-session permission request (#5595). Same rules as any approval — pause, mute, this device's
+ * `approval` switch, replay, duplicate — with three differences, each from the server's own push judgment
+ * (`judgment.rs` `work_permission`):
+ *
+ * - **No self exemption.** The session speaks as its owner unless a personal agent was called, so the line's author
+ *   is very often the one person it is for. Skipping 「one's own message」 here would silence exactly the decider.
+ * - **The owner, and nobody else.** The line is broadcast to the whole channel, but only the session's owner decides
+ *   (ADR-0188 D3) and a non-owner sees the request nowhere (D5). The owner is the ledger's, never the author's (an
+ *   alias is not its owner). Asked last, so a line filtered for another reason never costs a read.
+ * - **On screen means the card.** A focused window suppresses the banner only while that session's pane is open.
+ *
+ * Copy (design-review M-1): the local pane banner's form for the same moment — title 「응답 필요」, body
+ * 「<세션 이름>: 맥에서 실행 허락을 기다려요」, with the card's verb (허락). The session's name is the owner's own words
+ * (the speaker's name when it has none). Nothing from the request itself.
+ */
+function workPermissionDecision(
+  message: Message,
+  work: WorkPermissionRequest,
+  context: NotifyContext
+): NotifyDecision {
+  if (context.paused) return { show: false, skip: "paused" };
+  if (context.isMuted(message.channelId)) return { show: false, skip: "muted" };
+  if (context.kindEnabled && !context.kindEnabled("approval")) {
+    return { show: false, skip: "kind-disabled" };
+  }
+  const maxAgeMs = context.maxAgeMs ?? MAX_AGE_MS;
+  if (message.hlcTs > 0 && context.nowMs - message.hlcTs > maxAgeMs) {
+    return { show: false, skip: "stale" };
+  }
+  if (context.isAnnounced(message.id)) return { show: false, skip: "duplicate" };
+  if (context.windowFocused && (context.isWorkSessionVisible?.(work.sessionId) ?? false)) {
+    return { show: false, skip: "focused" };
+  }
+  const session = context.workSession?.(work.sessionId);
+  if (session === undefined) return { show: false, skip: "owner-unknown" };
+  if (!uuidEq(session.memberId, context.selfMemberId)) return { show: false, skip: "not-owner" };
+  // 끝난 세션의 요청은 이미 취소됐다(D5: 종료·revoke 때 대기 중인 승인은 취소된다).
+  if (session.status !== "running" && session.status !== "idle") {
+    return { show: false, skip: "not-notifiable" };
+  }
+  const label = session.label.trim();
+  const subject = label === "" ? context.actorFor(message.authorMemberId) : label;
+  const title = context.workPermissionTitle?.() ?? "";
+  const notification: DesktopNotification = {
+    kind: "approval",
+    messageId: message.id,
+    channelId: message.channelId,
+    title: title === "" ? subject : title,
+    workSessionId: work.sessionId,
+    summaryLabel: subject,
+    bannerGroup: "waiting",
+  };
+  const body = context.workPermissionSentence?.(subject);
+  if (body !== undefined && body !== "") notification.body = notificationBody(body) ?? body;
   return { show: true, notification };
 }
 
@@ -593,4 +735,86 @@ export function openTarget(
     )}`;
   }
   return `/c/${armed.channelId}`;
+}
+
+// ---- 메뉴 막대 점·독 배지에 더하는 DM 몫 (#5660, owner 2026-11-11 「켜줘」) ------------------------------
+
+/**
+ * 안 읽은 DM은 맥의 메뉴 막대 점·독 배지도 켠다(owner 11-11). 배지의 규칙은 다른 몫(승인·응답 필요 칸·멘션)과 같다: ADR-0124 D2·D4-A
+ * 「음소거·방해 금지는 푸시만 막고 배지·안 읽음은 그대로(돌아오면 확인)」. 그래서 채널 알림 끄기와 알림 일시 중지는 여기서 보지 않는다
+ * (한 표시 안에서 몫마다 규칙이 다르면 안 된다, planner 11-11). 거르는 것은 둘뿐이다:
+ *   - **지금 앞에서 보고 있는 대화**: 화면에 있는 글은 알릴 것이 아니다(배너 판정 `notifyDecision`의 `focused`와 같은 뜻).
+ *   - **멘션과 두 번 세지 않기**: DM 안에서 나를 멘션한 글은 이미 멘션 수(`mentionCount`, 「나에게 필요한 일」)로 셌다.
+ *
+ * **수는 서버의 읽음 투영 그대로다**(`read-state`의 `unreadCount`). 이 기기가 세지 않으므로 다른 기기에서 읽으면 다음 투영에서 함께 줄어든다.
+ * 내 글은 서버의 안 읽음에 들어가지 않는다(보내면 내 읽음 위치가 함께 오른다).
+ *
+ * 따라가는 스레드의 답글은 바로 아래 `followedRepliesForBadge`가 같은 규칙으로 센다(서버 #5667의 채널 줄 값).
+ */
+export interface DmBadgeInput {
+  /** 내 대화 목록의 DM(1:1·그룹 DM). */
+  readonly dms: readonly { readonly id: string }[];
+  /** 서버 읽음 투영의 그 채널 줄. 없으면(아직 못 읽음) 세지 않는다. */
+  readonly readState: (channelId: string) => { readonly unreadCount: number; readonly mentionCount: number } | undefined;
+  /** 앞에 있는 창이 지금 보여 주는 대화. 창이 뒤에 있거나 대화가 아니면 null. */
+  readonly viewingChannelId: string | null;
+}
+
+export function dmUnreadForBadge(input: DmBadgeInput): number {
+  let total = 0;
+  for (const dm of input.dms) {
+    if (input.viewingChannelId !== null && uuidEq(input.viewingChannelId, dm.id)) continue;
+    const row = input.readState(dm.id);
+    if (row === undefined) continue;
+    const unread = Number.isFinite(row.unreadCount) ? Math.max(0, Math.trunc(row.unreadCount)) : 0;
+    const mentions = Number.isFinite(row.mentionCount) ? Math.max(0, Math.trunc(row.mentionCount)) : 0;
+    total += Math.max(0, unread - mentions);
+  }
+  return total;
+}
+
+// ---- 메뉴 막대 점·독 배지에 더하는 따라가는 스레드의 답글 몫 (#5660, owner 2026-11-11 「켜줘」) ----------------
+
+/**
+ * 따라가는 스레드에 남이 단 답글도 맥의 메뉴 막대 점·독 배지를 켠다(owner 11-11, 폰은 이 답글에 울린다: 푸시 `thread_reply`). 규칙은 DM 몫과
+ * 같다(ADR-0124 D2·D4-A): 채널 알림 끄기·알림 일시 중지는 보지 않는다. 입력에 그 값이 없다.
+ *
+ * **수는 서버 읽음 투영의 채널 줄 값 그대로다**(`followedUnreadReplyCount`, 서버 #5667: 그 채널에서 내가 따라가는 스레드들의 안 읽은 남의 답글
+ * 합, 스레드 요약의 `unread_reply_count`와 같은 정의). 다른 기기에서 스레드를 읽으면 서버가 개인 채널로 신호(`followed_unread.updated`)를 보내고,
+ * 다시 읽은 투영에서 줄어든다.
+ *
+ * - **필드가 없으면 0이다**: #5667 전 서버(셀프호스트는 서버가 늦게 올라갈 수 있다)에서는 이 몫이 없을 뿐 나머지는 그대로다.
+ * - **멘션과 두 번 세지 않기, 덜 세는 쪽으로**: 나를 멘션한 답글은 서버가 `mentionCount`와 이 값 **양쪽**에 넣는다. 채널 줄에는 그 겹침의 수가
+ *   없어서 정확히 뺄 수 없다. 그래서 채널마다 `max(답글 수 − 멘션 수, 0)`을 더한다: 그 채널의 합은 `max(멘션, 답글)`이 되어 실제(겹침을 뺀 합)보다
+ *   크지 않다. 줄어드는 만큼은 그 채널의 멘션 수 이하이고, 멘션 몫이 이미 그 채널을 세므로 **켜져야 할 때는 언제나 켜진다**(꺼짐/켜짐은 맞고 수만
+ *   ±로 작을 수 있다).
+ * - **지금 앞에서 그 스레드를 보고 있으면 세지 않는다**: 값이 채널 단위라 스레드 하나만 뺄 수 없어서, 앞에 있는 창이 스레드를 열어 둔 **그 채널의 몫
+ *   전체**를 뺀다(덜 세는 쪽). 같은 채널의 다른 따라가는 스레드는 패널을 닫거나 창이 뒤로 가면 다시 센다. 열어 둔 스레드는 읽음 신호
+ *   (`PUT …/messages/{root}/read`)로 서버 값에서도 곧 빠진다 — 여기서 빼는 것은 그 사이 점이 깜빡이지 않게 하려는 것이다.
+ * - DM은 이 몫에 없다: DM에는 따라가기가 없고(서버가 거절), DM의 답글은 DM 몫(`unreadCount`, 채널 seq 기준)이 이미 센다. 그래서 입력은 DM이
+ *   아닌 채널만 받는다.
+ */
+export interface FollowedRepliesBadgeInput {
+  /** 내 대화 목록의 채널(DM이 아닌 것). */
+  readonly channels: readonly { readonly id: string }[];
+  /** 서버 읽음 투영의 그 채널 줄. 없으면(아직 못 읽음) 세지 않는다. `followedUnreadReplyCount`가 없으면(옛 서버) 0이다. */
+  readonly readState: (
+    channelId: string
+  ) => { readonly mentionCount: number; readonly followedUnreadReplyCount?: number } | undefined;
+  /** 앞에 있는 창이 지금 열어 둔 스레드의 채널. 창이 뒤에 있거나 열린 스레드가 없으면 null. */
+  readonly viewingThreadChannelId: string | null;
+}
+
+export function followedRepliesForBadge(input: FollowedRepliesBadgeInput): number {
+  let total = 0;
+  for (const channel of input.channels) {
+    if (input.viewingThreadChannelId !== null && uuidEq(input.viewingThreadChannelId, channel.id)) continue;
+    const row = input.readState(channel.id);
+    if (row === undefined) continue;
+    const raw = row.followedUnreadReplyCount;
+    const replies = raw !== undefined && Number.isFinite(raw) ? Math.max(0, Math.trunc(raw)) : 0;
+    const mentions = Number.isFinite(row.mentionCount) ? Math.max(0, Math.trunc(row.mentionCount)) : 0;
+    total += Math.max(0, replies - mentions);
+  }
+  return total;
 }

@@ -266,7 +266,7 @@ export interface HostTier {
 
 /** ADR-0137 D5's three grades, named. `app`(맥)은 기기를 끄면 죽는다. */
 const TIER_LABELS: Record<Exclude<HostTierKey, "unknown">, string> = {
-  app: "데스크톱 앱",
+  app: "데스크탑 앱",
   workd: "상시 서버",
   cloud: "클라우드",
 };
@@ -366,7 +366,7 @@ export function sessionSurvival(
         // 가리키는 곳은 데스크톱이고, 거기 서 있는 버튼의 이름이 인수다. 화면마다
         // 다른 낱말로 같은 act 를 부르던 것이 이 티켓의 원인이라, 소비 표면이
         // 어디든 낱말은 하나여야 한다. 뜻은 그대로다.
-        "호스트와 연결이 끊겼습니다. 인수는 데스크톱에서 할 수 있습니다.",
+        "호스트와 연결이 끊겼습니다. 인수는 데스크탑에서 할 수 있습니다.",
       atRisk: false,
     };
   }
@@ -524,4 +524,4 @@ export function noSessionsDetail(runHistoryProvided: boolean): string {
  * this one deliberately cannot.
  */
 export const TERMINAL_ON_DESKTOP =
-  "터미널 화면은 데스크톱 앱에서 엽니다.";
+  "터미널 화면은 데스크탑 앱에서 엽니다.";

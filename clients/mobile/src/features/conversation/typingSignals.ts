@@ -5,7 +5,7 @@ import {
   type TypingSignal,
 } from '@momo/core/features/chat/typing';
 import type {TypingFrame} from '@momo/core/lib/realtimeEvents';
-import {useSyncExternalStore} from 'react';
+import {useEffect, useState, useSyncExternalStore} from 'react';
 
 // =============================================================================
 // 「누가 지금 작성 중인가」 — 폰의 절반 (ADR-0149, goal B3 M2).
@@ -19,18 +19,15 @@ import {useSyncExternalStore} from 'react';
 // 이 클라이언트는 `features/agents/workingSignal.ts` 에서 이미 같은 갈림을 한 번
 // 지났다 — 그 파일의 머리말이 이 파일의 머리말이기도 하다.
 //
-// ## 왜 타이머가 없나
+// ## 만료를 훑는 시계 — 치는 사람이 있을 때만 1초 (#5756)
 //
-// `workingSignal` 은 좀비를 쓸어내는 `setInterval` 을 든다. 여기에는 없다.
+// 명부 자체에는 타이머가 없다(`workingSignal` 은 좀비를 쓸어내는 인터벌을 들지만, 「작성 중」은
+// 끝났다는 신호가 없는 것이 계약이고 만료는 시각 비교 하나로 답이 난다).
 //
-// 그 차이는 두 신호의 성질에서 나온다. 「작업 중」은 **90초** 살아 있고 끝났다는
-// 프레임이 따로 오므로, 그 프레임을 놓친 항목은 누군가 쓸어내야 한다. 「작성 중」은
-// **6초** 살아 있고 끝났다는 신호가 **없는 것이 계약**이다(ADR-0149: stop 신호를
-// 만들지 않는다). 즉 만료는 언제나 시각 비교 하나로 답이 나오고, 그 비교는 화면이
-// 다시 그려질 때 어차피 한 번 일어난다.
-//
-// 그리고 이 화면에는 이미 1Hz 시계가 있다(`useNow`). 두 번째 인터벌을 세우는 것은
-// 같은 박자를 두 번 사는 일이고, 폰에서 그것은 배터리다.
+// 그 비교가 **언제** 다시 일어나는가가 문제였다. 대화 화면의 `useNow()` 는 분 눈금(60초)이라
+// 신호가 끝나도 줄이 다음 분 눈금까지 45~51초 서 있었다. 그렇다고 화면 전체를 1초로 돌리면
+// 대화 전체가 초당 한 번 다시 그려진다. 그래서 `useTypingNow` 가 **명부에 신호가 있는 동안만**
+// 1초 시계를 돌리고(없으면 인터벌 0개), 그 시계를 읽는 `TypingLiveBar` 만 다시 그려진다.
 //
 // ## 만료를 **읽을 때** 판정하고, 버리는 것은 덤이다
 //
@@ -140,4 +137,26 @@ export function useTypists(options: {
     myMemberId: options.myMemberId,
     isEligible: options.isEligible,
   });
+}
+
+/** 1초 시계의 간격. 서버 만료(6초)에서 1초 안팎으로 줄이 내려가게 하는 값이다. */
+export const TYPING_TICK_MS = 1_000;
+
+/**
+ * 「작성 중」 줄 전용 시계. 명부에 신호가 **하나라도 있을 때만** 1초 간격으로 돈다.
+ *
+ * 비어 있으면 인터벌을 걸지 않는다(배터리). 쉬는 동안의 값은 낡았지만, 낡은 값은 현재보다
+ * 이르므로 새 신호를 일찍 숨기는 일은 없고, 신호가 오면 바로 다시 잰다.
+ */
+export function useTypingNow(): number {
+  const list = useSyncExternalStore(subscribe, typingSnapshot, typingSnapshot);
+  const active = list.length > 0;
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!active) return undefined;
+    setNow(Date.now());
+    const timer = setInterval(() => setNow(Date.now()), TYPING_TICK_MS);
+    return () => clearInterval(timer);
+  }, [active]);
+  return now;
 }

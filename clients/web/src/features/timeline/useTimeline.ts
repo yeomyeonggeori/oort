@@ -65,13 +65,16 @@ import {
   discardPending,
   emptyTimeline,
   failPending,
+  pinSettledEchoes,
   reconcileMessages,
   removePending,
   unsettledPending,
+  type EchoPins,
   type PendingMessage,
   type RecoveryMarker,
   type TimelineState,
 } from "@momo/core/features/timeline/model";
+import { observeServerClock, serverClockOffsetNowMs } from "@momo/core/features/timeline/serverClock";
 import {
   MAX_CONSUMED_ARRIVAL_IDS,
   MAX_PENDING_ARRIVAL_GRANTS,
@@ -130,6 +133,18 @@ export const MAX_SIMULTANEOUS_ARRIVALS = 3;
 const HEAD_LIMIT = 50;
 const PAGE_LIMIT = 50;
 
+/** 대화를 바꾼 첫 렌더가 내주는 빈 상태(#5678). 렌더마다 새 객체를 만들지 않는다. */
+const SWITCHING_STATE: TimelineState = emptyTimeline();
+const NO_MARKERS: RecoveryMarker[] = [];
+
+/**
+ * 옛 쪽 읽기가 `failures` 번 이어 실패한 뒤, 맨 위 닿음으로 다시 읽기까지 둘 간격(#5662): 1초에서 두 배씩, 30초에서 멈춘다.
+ * 「다시 시도」 단추는 이 간격을 넘는다.
+ */
+export function olderRetryGapMs(failures: number): number {
+  return Math.min(30_000, 1_000 * 2 ** Math.max(0, failures - 1));
+}
+
 
 export interface ResumeInfo {
   /** How the last (re)subscribe resolved. */
@@ -176,6 +191,10 @@ export interface UseTimelineResult {
   recoveryMarkers: RecoveryMarker[];
   /** Local echoes awaiting their server seq (M10). Never inside `state`. */
   pending: PendingMessage[];
+  /** #5624 — 에코였던 확정본이 이 화면에서 이어 쓰는 에코의 시각. `buildTimelineItems`의 `echoPins`로 넘긴다. */
+  echoPins: EchoPins;
+  /** #5624 — 서버 시계와 이 기기 시계의 차이(ms). `buildTimelineItems`의 `serverOffsetMs`·에코의 시각 글자로 넘긴다. */
+  serverOffsetMs: number;
   /**
    * The one send path: optimistic echo now, server seq when it lands.
    * `routing` is the composer's per-request override (ADR-0134 D1) and
@@ -198,10 +217,18 @@ export interface UseTimelineResult {
   resendAll: () => Promise<void>;
   /** 실패한 행마다 원인 한 줄의 종류(#5221). 알 수 없는 오류는 항목이 없다. 되살린 행도 남겨 둔 종류가 돌아온다. */
   failureKinds: ReadonlyMap<string, SendFailureKind>;
+  /**
+   * 맨 위에 닿았을 때의 옛 쪽 읽기. 거부하지 않는다(실패는 `olderFailed`). 이미 읽는 중이면 하나 더 내지 않고, 실패가 이어지면
+   * 닿을 때마다 바로 다시 내지 않고 간격을 둔다(#5662).
+   */
   loadOlder: () => Promise<void>;
   reload: () => void;
   loadingOlder: boolean;
   reachedStart: boolean;
+  /** 마지막 옛 쪽 읽기가 실패했다(#5662). 다음 읽기가 성공하거나 대화를 바꾸면 내려간다. */
+  olderFailed: boolean;
+  /** 실패 줄의 「다시 시도」(#5662): 연속 실패 간격 없이 바로 읽는다. 읽는 중이면 아무것도 하지 않는다. */
+  retryOlder: () => void;
   /** B11 — `message id -> emoji -> member ids`, case-folded on ingest. */
   reactions: ReactionMap;
   /**
@@ -273,6 +300,10 @@ export function useTimeline(
 ): UseTimelineResult {
   const [state, setState] = useState<TimelineState>(emptyTimeline);
   const [status, setStatus] = useState<UseTimelineResult["status"]>("loading");
+  // 지금 `state`·`status` 가 어느 대화의 것인가(#5678). 대화를 바꾼 첫 렌더는 아래 읽기 효과가 비우기 **전**이라 앞 대화의 것을 들고 있다 —
+  // 그대로 내주면 새 대화의 머리 아래 앞 대화의 줄, 또는 앞 대화가 비었으면 「…님과의 대화를 시작하세요」 빈 안내가 한 프레임 그려진다
+  // (화소 실측: 누른 뒤 35~60ms 빈 안내). 그 렌더에서는 효과가 곧 만들 모양(비운 목록 · 읽는 중)을 미리 내준다(아래 `switching`).
+  const [stateChannelId, setStateChannelId] = useState(channelId);
   const [loadCause, setLoadCause] = useState<ConnectionCause | null>(null);
   const [resume, setResume] = useState<ResumeInfo>({
     lastRecovered: null,
@@ -281,8 +312,23 @@ export function useTimeline(
   });
   const [recoveryMarkers, setRecoveryMarkers] = useState<RecoveryMarker[]>([]);
   const [pending, setPending] = useState<PendingMessage[]>([]);
+  // #5624 — 에코였던 확정본이 묶음에 이어 쓸 에코의 시각(코어 `pinSettledEchoes`). 확정본이 들어오는 문(`applyBatch`)에서 적는다.
+  const [echoPins, setEchoPins] = useState<EchoPins>(() => new Map());
+  const echoPinsRef = useRef<EchoPins>(echoPins);
+  // 서버 시계와 이 기기 시계의 차이(코어 `serverClock.ts`). 에코의 묶음·시각 글자가 이 값을 더해 서버 시각의 확정본과 견준다. 상태로
+  // 두어 값이 바뀌면 화면이 다시 묶는다. ref는 「직전 렌더가 쓴 값」이다 — 장부는 그 값으로 적는다.
+  const [serverOffsetMs, setServerOffsetMs] = useState(serverClockOffsetNowMs);
+  const serverOffsetRef = useRef(serverOffsetMs);
   const [loadingOlder, setLoadingOlder] = useState(false);
   const [reachedStart, setReachedStart] = useState(false);
+  const [olderFailed, setOlderFailed] = useState(false);
+  // 옛 쪽을 읽고 있는 대화(#5662). 상태(`loadingOlder`)의 클로저로 막으면 같은 틱의 두 부름(맨 위 닿음 · 다시 시도)이 둘 다 지나간다.
+  const olderFlightRef = useRef<number | null>(null);
+  // 방문 번호(#5662): 받아 둔 글을 비우고 대화를 새로 읽을 때마다 오른다. 옛 쪽 읽기는 낸 방문에서만 합치고, 읽는 중 막기도 방문별이다 —
+  // 대화 id 만 보면 A → B → A 로 돌아온 A 에 앞 방문의 늦은 응답이 합쳐져 가운데가 비고, 돌아온 A 의 닿음은 그 읽기에 막힌다.
+  const olderVisitRef = useRef(0);
+  // 이어진 옛 쪽 실패 수와 마지막 실패 시각 — 맨 위 닿음으로 다시 읽을 때의 간격(`olderRetryGapMs`).
+  const olderFailuresRef = useRef({ count: 0, atMs: 0 });
   const [reloadNonce, setReloadNonce] = useState(0);
   // B11. Kept beside the messages rather than inside them: a reaction changes
   // far more often than the message it annotates, and folding it into the row
@@ -451,6 +497,25 @@ export function useTimeline(
       // 조용히 완결 행세를 한다. 실시간으로 온 행은 `runEnded` 를 달고 오지
       // 않으므로 여기서 아무것도 내놓지 않는다.
       seedEndedRuns(endedStreamRunIds(batch));
+      // #5624 — 이 배치가 정착시키는 에코의 시각을 확정본에 잇는다. 보내기 응답과 실시간 프레임 중 어느 쪽이 먼저 와도 이 문을
+      // 지나므로, 확정본을 처음 그리는 렌더가 이미 장부를 본다(같은 틱의 두 상태 갱신은 한 렌더로 묶인다).
+      const shownOffset = serverOffsetRef.current;
+      const pinned = pinSettledEchoes(echoPinsRef.current, batch, pendingRef.current, shownOffset);
+      if (pinned.pins !== echoPinsRef.current) {
+        echoPinsRef.current = pinned.pins;
+        setEchoPins(pinned.pins);
+      }
+      // 이은 짝마다 서버 시계를 잰다: 에코를 보낸 기기 시각과 지금 사이에 서버가 확정본을 찍었다(보내기 응답·실시간 프레임 모두).
+      // 다시 보낸 글은 창이 첫 시도부터라 넓어지고, 너무 넓은 창은 코어가 버린다.
+      const receivedAtMs = Date.now();
+      for (const { message, pending: row } of pinned.settled) {
+        observeServerClock({ sentAtMs: row.createdAtMs, receivedAtMs, serverAtMs: message.createdAtMs });
+      }
+      const measuredOffset = serverClockOffsetNowMs();
+      if (measuredOffset !== shownOffset) {
+        serverOffsetRef.current = measuredOffset;
+        setServerOffsetMs(measuredOffset);
+      }
       // 장부 ref 는 updater 밖에서 맞춘다 (`updatePending` 과 같은 이유:
       // React 는 updater 를 돌리고 결과를 버릴 수 있다).
       setState((s) => reconcileMessages(s, batch));
@@ -717,8 +782,9 @@ export function useTimeline(
         ...(carries && options?.replyToId !== undefined ? { replyToId: options.replyToId } : {}),
         ...(carries && options?.suppressUnfurl === true ? { suppressUnfurl: true } : {}),
         ...(after === undefined ? {} : { after }),
-        // Local clock, used only for grouping and the time label on a row that
-        // has not been ordered yet. Ordering still waits for seq.
+        // Local clock. The timers compare it with this device's `Date.now()`;
+        // grouping and the label add the server offset (#5624, `echoAtMs`).
+        // Ordering still waits for seq.
         createdAtMs: Date.now(),
         sinceSeq: newestSeqRef.current,
         status: "sending",
@@ -903,6 +969,7 @@ export function useTimeline(
   }, [state.messages, updatePending, forgetRow]);
 
   useEffect(() => {
+    setStateChannelId(channelId);
     if (!channelId) return;
     let cancelled = false;
     // #3676: 기록(REST 머리)은 실시간 레일과 무관하게 읽을 수 있다. 레일이 아직 없거나 끝내 안 와도
@@ -945,6 +1012,9 @@ export function useTimeline(
       setState(emptyTimeline());
       setStatus("loading");
       setReachedStart(false);
+      setOlderFailed(false);
+      olderFailuresRef.current = { count: 0, atMs: 0 };
+      olderVisitRef.current += 1;
     }
     setRecoveryMarkers([]);
     setResume({ lastRecovered: null, lastBackfillCount: 0, resubscribeCount: 0 });
@@ -1168,31 +1238,52 @@ export function useTimeline(
     if (channelId) loadPins(channelId);
   }, [channelId, loadPins]);
 
-  const loadOlder = useCallback(async () => {
-    if (!channelId || loadingOlder || reachedStart) return;
-    const oldest = state.oldestSeq;
-    if (oldest === null) return;
-    setLoadingOlder(true);
-    try {
-      const page = await fetchMessages(workspaceId, channelId, {
-        before: oldest,
-        limit: PAGE_LIMIT,
-      });
-      applyBatch(page.messages);
-      hydrateUnfurls(page.messages, channelId);
-      if (page.nextBefore === undefined) setReachedStart(true);
-    } finally {
-      setLoadingOlder(false);
-    }
-  }, [
-    workspaceId,
-    channelId,
-    state.oldestSeq,
-    loadingOlder,
-    reachedStart,
-    applyBatch,
-    hydrateUnfurls,
-  ]);
+  // 옛 쪽 읽기(#5662). 전에는 `catch` 가 없어 실패가 처리 안 된 거부로 사라지고 화면은 아무 말도 안 했다 — 그리고 가상 목록의
+  // `startReached` 는 같은 첫 줄 번호로는 다시 나가지 않으므로 그 대화에서는 다시 읽지 않았다. 지금은 실패를 `olderFailed` 로
+  // 알리고(목록 위 한 줄 + 「다시 시도」), 다시 맨 위에 닿으면(`Timeline` 의 닿음 확인) 다시 읽는다. 실패가 이어지면 닿을 때마다
+  // 바로 내지 않고 간격을 둔다(망이 끊긴 채 맨 위에서 흔들리는 손가락이 읽기를 쏟아내지 않게). 「다시 시도」(`manual`)는 간격을 넘는다.
+  const readOlder = useCallback(
+    async (manual: boolean) => {
+      const visit = olderVisitRef.current;
+      if (!channelId || reachedStart || olderFlightRef.current === visit) return;
+      const oldest = state.oldestSeq;
+      if (oldest === null) return;
+      const failures = olderFailuresRef.current;
+      if (!manual && failures.count > 0 && Date.now() - failures.atMs < olderRetryGapMs(failures.count)) return;
+      olderFlightRef.current = visit;
+      setLoadingOlder(true);
+      try {
+        const page = await fetchMessages(workspaceId, channelId, {
+          before: oldest,
+          limit: PAGE_LIMIT,
+        });
+        // 떠난 대화의 쪽은 지금 대화에 합치지 않는다(합치면 앞 대화 줄이 섞이고, 가장 옛 줄이 내려가 지금 대화의 그 사이를 건너뛴다).
+        if (channelRef.current !== channelId || olderVisitRef.current !== visit) return;
+        applyBatch(page.messages);
+        hydrateUnfurls(page.messages, channelId);
+        if (page.nextBefore === undefined) setReachedStart(true);
+        if (channelRef.current === channelId) {
+          olderFailuresRef.current = { count: 0, atMs: 0 };
+          setOlderFailed(false);
+        }
+      } catch {
+        // 떠난 대화 · 지난 방문의 실패는 지금 대화에 말하지 않는다.
+        if (channelRef.current === channelId && olderVisitRef.current === visit) {
+          olderFailuresRef.current = { count: olderFailuresRef.current.count + 1, atMs: Date.now() };
+          setOlderFailed(true);
+        }
+      } finally {
+        if (olderFlightRef.current === visit) olderFlightRef.current = null;
+        setLoadingOlder(false);
+      }
+    },
+    [workspaceId, channelId, state.oldestSeq, reachedStart, applyBatch, hydrateUnfurls]
+  );
+  // 가상 목록이 `startReached(index)` 로 부르므로 인자는 받지 않는다.
+  const loadOlder = useCallback(() => readOlder(false), [readOlder]);
+  const retryOlder = useCallback(() => {
+    void readOlder(true);
+  }, [readOlder]);
 
   const reload = useCallback(() => {
     keepOnReloadRef.current = newestSeqRef.current !== null;
@@ -1317,13 +1408,18 @@ export function useTimeline(
     [workspaceId, applyPins]
   );
 
+  // 대화를 바꾼 첫 렌더(#5678 — 위 `stateChannelId`): 효과가 비우기 전의 앞 대화 상태를 내주지 않는다. 같은 대화에서 효과만 다시 도는
+  // 때(레일이 늦게 옴 · 다시 읽기)는 대화가 그대로라 여기에 걸리지 않는다 — 그때는 받아 둔 글을 지키는 길(`keepLoaded`)이 그대로다.
+  const switching = channelId !== null && channelId !== stateChannelId;
   return {
-    state,
-    status,
-    loadCause,
+    state: switching ? SWITCHING_STATE : state,
+    status: switching ? "loading" : status,
+    loadCause: switching ? null : loadCause,
     resume,
-    recoveryMarkers,
-    pending,
+    recoveryMarkers: switching ? NO_MARKERS : recoveryMarkers,
+    pending: switching ? pending.filter((row) => row.channelId === channelId) : pending,
+    echoPins,
+    serverOffsetMs,
     send,
     resend,
     discard,
@@ -1332,7 +1428,9 @@ export function useTimeline(
     loadOlder,
     reload,
     loadingOlder,
-    reachedStart,
+    reachedStart: switching ? false : reachedStart,
+    olderFailed: switching ? false : olderFailed,
+    retryOlder,
     reactions,
     toggleReaction,
     pins,

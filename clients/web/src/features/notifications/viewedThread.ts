@@ -1,3 +1,5 @@
+import { useSyncExternalStore } from "react";
+
 // =============================================================================
 // 지금 이 창이 열어 둔 스레드 (#4890). 스레드 패널은 `ChatShell` 의 컴포넌트 상태(`thread`)라서 주소에도 없고, 전역으로
 // 도는 데스크탑 알림 판정(`DesktopNotifications`)이 읽을 길이 없었다. 「그 스레드를 보고 있으면 안 띄움」을 판정하려면
@@ -5,6 +7,8 @@
 //
 // 「창이 앞인가」는 이 저장소의 일이 아니다 — 판정(`notifyDecision`)이 따로 가진다. 여기는 **열려 있는가**만 안다.
 // 대화 표면(답글을 읽고 쓰는 패널)만 적는다: 작업 세션 패널의 행은 사건 기록이라 읽는 대화가 아니다.
+//
+// 메뉴 막대 점·독 배지의 답글 몫(#5660)도 이 값을 읽는다: 열어 둔 스레드의 채널이 바뀌면 배지를 다시 세야 해서 구독할 수 있다.
 // =============================================================================
 
 interface Viewed {
@@ -13,6 +17,13 @@ interface Viewed {
 }
 
 let viewed: Viewed | null = null;
+const listeners = new Set<() => void>();
+
+function set(next: Viewed | null): void {
+  if (viewed === next) return;
+  viewed = next;
+  for (const listener of listeners) listener();
+}
 
 /**
  * 패널이 열렸다. 돌려주는 함수는 닫힘(언마운트·루트 교체·닫는 중)이다 — 그 사이 다른 패널이 같은 자리를 이어받았으면
@@ -20,9 +31,9 @@ let viewed: Viewed | null = null;
  */
 export function viewThread(channelId: string, rootId: string): () => void {
   const mine: Viewed = { channelId, rootId };
-  viewed = mine;
+  set(mine);
   return () => {
-    if (viewed === mine) viewed = null;
+    if (viewed === mine) set(null);
   };
 }
 
@@ -31,7 +42,23 @@ export function isThreadViewed(rootId: string): boolean {
   return viewed !== null && viewed.rootId.toLowerCase() === rootId.toLowerCase();
 }
 
+function subscribe(listener: () => void): () => void {
+  listeners.add(listener);
+  return () => {
+    listeners.delete(listener);
+  };
+}
+
+function channelSnapshot(): string | null {
+  return viewed?.channelId ?? null;
+}
+
+/** 열려 있는 스레드 패널의 채널(없으면 null). 패널이 열리고 닫힐 때 다시 그린다. */
+export function useViewedThreadChannelId(): string | null {
+  return useSyncExternalStore(subscribe, channelSnapshot, channelSnapshot);
+}
+
 /** 시험용. */
 export function resetViewedThreadForTest(): void {
-  viewed = null;
+  set(null);
 }

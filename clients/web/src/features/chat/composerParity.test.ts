@@ -247,7 +247,7 @@ describe("컴포저 스페이싱 폴리시 (#1688)", () => {
     // 글 칸 인셋(px-3 py-2)과 액션 행(pb-2 pl-1 pr-2)은 두 입력창이 한 곳(`ComposerCard.tsx`)에서 받는다.
     expect(card).toMatch(/COMPOSER_TEXTAREA_CLASS =\s*"[^"]*\bpx-3\b[^"]*\bpy-2\b[^"]*"/);
     expect(card).toContain('className="flex items-center justify-between gap-2 pb-2 pl-1 pr-2"');
-    expect(channel).toMatch(/<ComposerHint[\s\S]*?<TypingLine/);
+    expect(channel).toMatch(/<ComposerHint[\s\S]*?<\/ComposerCard>[\s\S]*?<TypingLine/);
   });
 
   it("스레드도 같은 입력 인셋과 닫힌 간격 단계만 쓴다", () => {

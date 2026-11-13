@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { installCoreHost, resetCoreHost, type SessionPort } from "../runtime/host";
-import { fetchReadStates, touchChannelViewing, updateReadState } from "./api";
+import { fetchReadStates, markFollowedThreadsRead, touchChannelViewing, updateReadState } from "./api";
 
 function installHost(): void {
   const session: SessionPort = {
@@ -240,6 +240,75 @@ describe("read-state wire: DM closure fields (ADR-0177)", () => {
       ["open", null, 9],
       ["old", undefined, undefined],
     ]);
+  });
+});
+
+// #5660 · 서버 #5667(ADR-0124 증보 4): 채널 줄마다 따라가는 스레드의 안 읽은 남의 답글 합. 옛 서버·`PUT` 응답에는 없다 —
+// 없으면 키를 만들지 않는다(0으로 지어내지 않는다: 캐시 합류가 가진 값을 지켜야 해서).
+describe("read-state wire: followed_unread_reply_count (#5667)", () => {
+  it("숫자는 숫자로 옮기고, 없거나 망가졌으면 키를 만들지 않는다", async () => {
+    installHost();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        jsonResponse({
+          read_states: [
+            { ...WIRE, channel_id: "two", followed_unread_reply_count: 2 },
+            { ...WIRE, channel_id: "zero", followed_unread_reply_count: 0 },
+            { ...WIRE, channel_id: "old" },
+            { ...WIRE, channel_id: "bad", followed_unread_reply_count: -1 },
+            { ...WIRE, channel_id: "text", followed_unread_reply_count: "3" },
+          ],
+        })
+      )
+    );
+    const states = await fetchReadStates("ws");
+    expect(states.map((s) => [s.channelId, s.followedUnreadReplyCount])).toEqual([
+      ["two", 2],
+      ["zero", 0],
+      ["old", undefined],
+      ["bad", undefined],
+      ["text", undefined],
+    ]);
+    expect(states[2]).not.toHaveProperty("followedUnreadReplyCount");
+  });
+});
+
+// #5690 · 서버 #5689(ADR-0124 증보 5): 따라가는 스레드를 한 번에 읽음으로. 본문은 꼭 JSON이고 `{}`가 모든 채널이다.
+describe("markFollowedThreadsRead (#5689)", () => {
+  it("본문 {}로 POST하고, 바뀐 채널 줄·옮긴 수·hasMore를 도메인 모양으로 돌려준다", async () => {
+    installHost();
+    const fetchMock = vi.fn(async () =>
+      jsonResponse({
+        read_states: [{ ...WIRE, channel_id: "c-1", followed_unread_reply_count: 0 }, { channel_id: 5 }],
+        marked_thread_count: 3,
+        has_more: true,
+      })
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const done = await markFollowedThreadsRead("w 1");
+    const call = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+    expect(call[0]).toBe("https://oort.test/v1/workspaces/w%201/threads/read-all");
+    expect(call[1].method).toBe("POST");
+    expect(putBody(fetchMock)).toEqual({});
+    expect(done.markedThreadCount).toBe(3);
+    expect(done.hasMore).toBe(true);
+    expect(done.readStates.map((r) => [r.channelId, r.followedUnreadReplyCount])).toEqual([["c-1", 0]]);
+  });
+
+  it("채널을 좁히면 channel_ids를 보내고, 빈 응답은 아무 일 없음이다", async () => {
+    installHost();
+    const fetchMock = vi.fn(async () => jsonResponse({ read_states: [], marked_thread_count: 0, has_more: false }));
+    vi.stubGlobal("fetch", fetchMock);
+    const done = await markFollowedThreadsRead("w", ["a", "b"]);
+    expect(putBody(fetchMock)).toEqual({ channel_ids: ["a", "b"] });
+    expect(done).toEqual({ readStates: [], markedThreadCount: 0, hasMore: false });
+  });
+
+  it("옛 서버의 404는 ApiError(status 404)로 던진다", async () => {
+    installHost();
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse({ error: { message: "nf" } }, 404)));
+    await expect(markFollowedThreadsRead("w")).rejects.toMatchObject({ status: 404 });
   });
 });
 

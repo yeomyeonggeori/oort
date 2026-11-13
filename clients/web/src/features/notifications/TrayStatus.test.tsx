@@ -22,6 +22,8 @@ const hoisted = vi.hoisted(() => ({
   approvals: 0,
   panes: 0,
   readRows: [] as unknown[],
+  refetchable: false,
+  threadAnswers: [] as { status: number; body: unknown; delayMs?: number; after?: () => void }[],
   showNotification: vi.fn(async (_text: string, _body?: string, _options?: { ask?: boolean }) => true),
   items: [] as unknown[],
   adeProvided: true,
@@ -58,18 +60,42 @@ vi.mock("@/features/inbox/useNeedsMe", () => ({
     total: hoisted.needsMe,
   }),
 }));
-vi.mock("@/features/workspace/useWorkspace", () => ({
-  useChannels: () => ({ groups: { channels: [], dms: [{ id: "dm1" }, { id: "dm2" }] } }),
-  useReadStates: () => ({
-    byChannel: new Map([
-      ["dm1", { unreadCount: 2 }],
-      ["dm2", { unreadCount: 3 }],
-    ]),
-    data: hoisted.readRows,
-  }),
-  applyReadStateToCache: () => undefined,
-}));
-vi.mock("@momo/core/features/workspace/directory", () => ({
+// 읽음 투영은 실제 캐시(`["read-state", "w"]`)에 얹는다: 응답 줄을 캐시에 끼우는 길과 끝의 다시 읽기를 합계로 잴 수 있다.
+// 다시 읽기가 가짜 서버의 현재 줄(`hoisted.readRows`)을 돌려줄지는 시험이 정한다(`refetchable`).
+vi.mock("@/features/workspace/useWorkspace", async () => {
+  const actual = await vi.importActual<typeof import("@/features/workspace/useWorkspace")>("@/features/workspace/useWorkspace");
+  const { useQuery } = await import("@tanstack/react-query");
+  return {
+    applyReadStateToCache: actual.applyReadStateToCache,
+    applyFollowedThreadShareToCache: actual.applyFollowedThreadShareToCache,
+    useChannels: () => ({
+      groups: {
+        channels: [{ id: "0a1b2c3d-0000-4000-8000-0000000000c1" }, { id: "0a1b2c3d-0000-4000-8000-0000000000c3" }],
+        dms: [{ id: "dm1" }, { id: "dm2" }],
+      },
+    }),
+    useReadStates: () => {
+      const query = useQuery<ReadState[]>({
+        queryKey: ["read-state", "w"],
+        queryFn: async () => hoisted.readRows as ReadState[],
+        enabled: hoisted.refetchable,
+        initialData: hoisted.readRows as ReadState[],
+        staleTime: Infinity,
+      });
+      const data = query.data ?? [];
+      return {
+        byChannel: new Map<string, unknown>([
+          ["dm1", { unreadCount: 2 }],
+          ["dm2", { unreadCount: 3 }],
+          ...data.map((row) => [row.channelId, row] as [string, unknown]),
+        ]),
+        data,
+      };
+    },
+  };
+});
+vi.mock("@momo/core/features/workspace/directory", async (importActual) => ({
+  ...(await importActual<typeof import("@momo/core/features/workspace/directory")>()),
   unreadFor: (m: Map<string, { unreadCount: number }>, id: string) => m.get(id) ?? null,
 }));
 vi.mock("@/features/ade/useAdeControl", () => ({
@@ -81,7 +107,7 @@ vi.mock("@/features/ade/useAdeControl", () => ({
 vi.mock("@/features/capabilities/useSurfaceProvided", () => ({
   useSurfaceProvidedWhileOpen: (id: string) => id === "ade" && hoisted.adeProvided,
 }));
-vi.mock("react-router-dom", () => ({ useNavigate: () => hoisted.navigate }));
+vi.mock("react-router-dom", () => ({ useNavigate: () => hoisted.navigate, useLocation: () => ({ pathname: "/" }) }));
 vi.mock("@/features/directory/useNewDm", () => ({ useOpenNewDm: () => hoisted.openNewDm }));
 vi.mock("@/features/agents/workLogStore", () => ({
   openWorkPanel: (...args: unknown[]) => hoisted.openWorkPanel(...args),
@@ -129,16 +155,27 @@ function readRow(channelId: string, over: Partial<ReadState> = {}): ReadState {
   };
 }
 let fetchMock: ReturnType<typeof vi.fn>;
+const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
 
 beforeEach(() => {
   hoisted.needsMe = 4;
   hoisted.approvals = 0;
   hoisted.panes = 0;
   hoisted.readRows = [];
+  hoisted.refetchable = false;
+  queryClient.clear();
+  hoisted.threadAnswers = [];
   hoisted.showNotification.mockClear();
   hoisted.showNotification.mockImplementation(async () => true);
   // 모의 `/v1`: 읽음 위치를 올리는 요청(PUT read-state)에 그 채널의 새 상태로 답한다.
   fetchMock = vi.fn(async (url: unknown, init?: { body?: string }) => {
+    // 스레드 읽음 길(#5689): 시험이 `hoisted.threadAnswers`에 답을 줄줄이 넣는다. 비어 있으면 「더 없음」.
+    if (String(url).endsWith("/threads/read-all")) {
+      const answer = hoisted.threadAnswers.shift() ?? { status: 200, body: { read_states: [], marked_thread_count: 0, has_more: false } };
+      if (answer.delayMs) await new Promise((resolve) => setTimeout(resolve, answer.delayMs));
+      if (answer.status === 200) answer.after?.();
+      return new Response(JSON.stringify(answer.body), { status: answer.status, headers: { "content-type": "application/json" } });
+    }
     const channel = decodeURIComponent(String(url).split("/channels/")[1]?.split("/")[0] ?? "");
     const body = JSON.parse(init?.body ?? "{}") as { last_read_seq: number };
     return new Response(
@@ -169,6 +206,8 @@ beforeEach(() => {
     spy.mockClear();
   }
   localStorage.clear();
+  // 이 파일의 다른 장면은 메뉴·줄을 잰다: DM 몫(#5660, 기본 켬)은 첫 장면만 따로 재고 여기서는 꺼 둔다.
+  localStorage.setItem("momo.web.notifications.v1", JSON.stringify({ dockDms: false }));
   reloadDesktopNotificationKindsForTest(localStorage);
 });
 afterEach(() => {
@@ -186,8 +225,9 @@ function mount() {
   root = createRoot(host);
   render();
 }
-const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
 function render() {
+  // 시험이 `hoisted.readRows`를 바꾼 뒤 다시 그리면 그 줄이 캐시의 현재 값이 된다(누른 뒤에는 다시 그리지 않는다).
+  queryClient.setQueryData(["read-state", "w"], hoisted.readRows);
   act(() =>
     root?.render(
       createElement(
@@ -202,19 +242,21 @@ const lastStatus = () => hoisted.setTrayStatus.mock.lastCall?.[0] as TrayStatusW
 const pick = (payload: unknown) => act(() => hoisted.trayHandler?.(payload));
 
 describe("TrayStatus: 셸로 보내기 (#5193)", () => {
-  it("메뉴 막대의 수는 독 배지가 그리는 수와 늘 같다 — 기본, DM 합산, 배지 끔", () => {
+  it("메뉴 막대의 수는 독 배지가 그리는 수와 늘 같다 — 기본(안 읽은 DM 포함, #5660), DM 끔, 배지 끔", () => {
+    act(() => setDesktopNotificationKind("dockDms", true, localStorage));
     mount();
     const both = () => [
       hoisted.setDockBadge.mock.lastCall?.[0],
       lastStatus().unread,
     ];
-    expect(both()).toEqual([4, 4]);
+    // 기본은 DM 몫을 더한다(4 + 5): 안 읽은 DM이 있으면 메뉴 막대 점도 켜진다.
+    expect(both()).toEqual([9, 9]);
     hoisted.needsMe = 7;
     render();
-    expect(both()).toEqual([7, 7]);
-    // DM 합산을 켜면 둘 다 더해지고(7 + 5), 독 배지를 끄면 둘 다 0이다.
-    act(() => setDesktopNotificationKind("dockDm", true, localStorage));
     expect(both()).toEqual([12, 12]);
+    // DM 스위치를 끄면 둘 다 needsMe 그대로, 독 배지를 끄면 둘 다 0이다.
+    act(() => setDesktopNotificationKind("dockDms", false, localStorage));
+    expect(both()).toEqual([7, 7]);
     act(() => setDesktopNotificationKind("dockBadge", false, localStorage));
     expect(both()).toEqual([0, 0]);
   });
@@ -427,6 +469,143 @@ describe("TrayStatus: 모두 읽음 처리 (#5195)", () => {
       await new Promise((resolve) => setTimeout(resolve, 5));
     });
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+});
+
+// 스레드 답글 몫(#5690, 서버 #5689). 채널 읽음 위치로는 끄지 않는다(받은함 「스레드」 줄까지 읽음이 되므로): 스레드 읽음 길만 부른다.
+describe("TrayStatus: 모두 읽음 처리의 스레드 몫 (#5690)", () => {
+  const MENTION_CH = "0a1b2c3d-0000-4000-8000-0000000000c1";
+  const THREAD_CH = "0a1b2c3d-0000-4000-8000-0000000000c3";
+  const settle = async () =>
+    act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    });
+  const calls = () =>
+    fetchMock.mock.calls.map((call) => ({
+      method: (call[1] as { method?: string } | undefined)?.method ?? "GET",
+      url: decodeURIComponent(String(call[0])),
+      // 본문이 없으면 null: 본문을 안 보내는 쪽으로 깨져도 `{}`로 읽혀 초록이 되지 않게 한다.
+      body: (() => {
+        const raw = (call[1] as { body?: string } | undefined)?.body;
+        return raw === undefined ? null : (JSON.parse(raw) as Record<string, unknown>);
+      })(),
+    }));
+  const wireRow = (channelId: string, over: object) => ({
+    channel_id: channelId,
+    last_read_seq: 10,
+    latest_seq: 10,
+    unread_count: 0,
+    mention_count: 0,
+    marked_unread_before_seq: null,
+    ...over,
+  });
+  const ok = (over: object) => ({ status: 200, body: { read_states: [], marked_thread_count: 0, has_more: false, ...over } });
+
+  it("답글 몫만 있어도 항목이 켜지고, 누르면 채널 읽음 위치는 올리지 않고 스레드 길만 {}로 부르며 hasMore가 거짓이 될 때까지 되부른다", async () => {
+    hoisted.readRows = [readRow(THREAD_CH, { followedUnreadReplyCount: 3 })];
+    hoisted.threadAnswers = [ok({ marked_thread_count: 100, has_more: true }), ok({ marked_thread_count: 5 })];
+    mount();
+    expect(lastStatus().readAll).toBe(true);
+    pick({ action: "read-all" });
+    await settle();
+    expect(calls().map((c) => [c.method, c.url.replace(/^.*\/v1/, ""), c.body])).toEqual([
+      ["POST", "/workspaces/w/threads/read-all", {}],
+      ["POST", "/workspaces/w/threads/read-all", {}],
+    ]);
+  });
+
+  it("멘션 채널과 답글 몫이 같이 있으면 채널 위치와 스레드 길을 둘 다 부른다(서로 기다리지 않는다)", async () => {
+    hoisted.readRows = [
+      readRow(MENTION_CH, { latestSeq: 40, lastReadSeq: 30, unreadCount: 10, mentionCount: 2 }),
+      readRow(THREAD_CH, { followedUnreadReplyCount: 1 }),
+    ];
+    mount();
+    pick({ action: "read-all" });
+    await settle();
+    expect(calls().map((c) => c.method).sort()).toEqual(["POST", "PUT"]);
+    expect(calls().filter((c) => c.method === "PUT").map((c) => c.url.split("/channels/")[1])).toEqual([`${MENTION_CH}/read-state`]);
+  });
+
+  it("답글 몫이 없으면 스레드 길을 부르지 않는다", async () => {
+    hoisted.readRows = [readRow(MENTION_CH, { latestSeq: 40, lastReadSeq: 30, mentionCount: 1, followedUnreadReplyCount: 0 })];
+    mount();
+    pick({ action: "read-all" });
+    await settle();
+    expect(calls().map((c) => c.method)).toEqual(["PUT"]);
+  });
+
+  it("서버가 이 길을 모르는 판(404)과 실패(500)에서도 던지지 않고, 다시 누를 수 있다", async () => {
+    hoisted.readRows = [readRow(THREAD_CH, { followedUnreadReplyCount: 2 })];
+    hoisted.threadAnswers = [
+      { status: 404, body: { error: { message: "nf" } } },
+      { status: 500, body: { error: { message: "boom" } } },
+      ok({ marked_thread_count: 2 }),
+    ];
+    mount();
+    for (let press = 0; press < 3; press += 1) {
+      pick({ action: "read-all" });
+      await settle();
+    }
+    expect(calls().filter((c) => c.method === "POST")).toHaveLength(3);
+    expect(lastStatus().readAll).toBe(true); // 응답을 못 받은 동안 남은 수는 그대로라 단추도 그대로다
+    expect(lastStatus().unread).toBe(6); // 합계(응답 필요 4 + 답글 몫 2)도 그대로
+  });
+
+  // 「누른 뒤 합계 0」(#5690 검수 M2). 읽음 투영 캐시를 실제로 얹었다. 아래 둘은 한 곳씩만 0으로 만들 수 있게 짠다:
+  // 앞은 다시 읽기를 끄고(응답 줄 끼우기만), 뒤는 응답 줄을 비우고(다시 읽기만) 본다.
+  const serverReads = (rows: ReadState[]) => () => {
+    hoisted.readRows = rows;
+  };
+
+  it("누르면 응답 줄의 답글 몫이 캐시에 끼워져 합계가 줄고 「모두 읽음」 항목이 꺼진다(다시 읽기 없이도)", async () => {
+    hoisted.readRows = [readRow(THREAD_CH, { followedUnreadReplyCount: 3 })];
+    hoisted.threadAnswers = [ok({ marked_thread_count: 3, read_states: [wireRow(THREAD_CH, { followed_unread_reply_count: 0 })] })];
+    mount();
+    expect(lastStatus()).toMatchObject({ unread: 7, readAll: true });
+    pick({ action: "read-all" });
+    await settle();
+    expect(lastStatus()).toMatchObject({ unread: 4, readAll: false });
+  });
+
+  it("누르면 끝의 읽음 투영 다시 읽기가 서버의 현재 줄로 맞춘다(응답 줄이 비어도)", async () => {
+    hoisted.refetchable = true;
+    hoisted.readRows = [readRow(THREAD_CH, { followedUnreadReplyCount: 3 })];
+    hoisted.threadAnswers = [{ ...ok({ marked_thread_count: 3 }), after: serverReads([readRow(THREAD_CH, { followedUnreadReplyCount: 0 })]) }];
+    mount();
+    expect(lastStatus()).toMatchObject({ unread: 7, readAll: true });
+    pick({ action: "read-all" });
+    await settle();
+    expect(lastStatus()).toMatchObject({ unread: 4, readAll: false });
+  });
+
+  it("서버가 500이면 합계와 항목이 그대로다", async () => {
+    hoisted.readRows = [readRow(THREAD_CH, { followedUnreadReplyCount: 3 })];
+    hoisted.threadAnswers = [{ status: 500, body: { error: { message: "boom" } } }];
+    mount();
+    pick({ action: "read-all" });
+    await settle();
+    expect(lastStatus()).toMatchObject({ unread: 7, readAll: true });
+  });
+
+  it("채널 읽음 응답 뒤에 옛 위치·멘션 수를 실은 스레드 응답 줄이 늦게 와도 멘션 수가 되살아나지 않는다(답글 몫만 끼운다)", async () => {
+    hoisted.readRows = [readRow(MENTION_CH, { latestSeq: 40, lastReadSeq: 30, unreadCount: 10, mentionCount: 2, followedUnreadReplyCount: 3 })];
+    hoisted.threadAnswers = [
+      {
+        ...ok({
+          marked_thread_count: 3,
+          read_states: [wireRow(MENTION_CH, { last_read_seq: 30, latest_seq: 40, unread_count: 10, mention_count: 2, followed_unread_reply_count: 0 })],
+        }),
+        delayMs: 30,
+      },
+    ];
+    mount();
+    pick({ action: "read-all" });
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 80));
+    });
+    const row = (queryClient.getQueryData(["read-state", "w"]) as ReadState[])[0];
+    expect(row).toMatchObject({ lastReadSeq: 40, unreadCount: 0, mentionCount: 0, followedUnreadReplyCount: 0 });
+    expect(lastStatus().readAll).toBe(false);
   });
 });
 

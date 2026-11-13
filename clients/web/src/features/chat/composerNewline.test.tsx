@@ -246,6 +246,19 @@ describe("폰 셸 폭: Enter 도 줄바꿈이다", () => {
 });
 
 
+// #5661(owner 2026-11-11 「입력 중인 글이 다시 시작 뒤 그대로 남는지 확인」): 업데이트 뒤 다시 시작은 창을 새로 띄운다. 채널 입력창은 칠
+// 때마다 이 기기에 내려 두고, 다시 뜬 입력창이 그 글을 되살린다. 그래서 쓰던 글은 다시 시작을 막는 조건이 아니다(`localWork.ts`).
+it("#5661 다시 시작(새로 띄움) 뒤 채널 입력창에 쓰던 글이 돌아온다", async () => {
+  const first = await mount();
+  await type(first, "배포 전에 확인할 것\n- 피드 버전");
+  act(() => mountedRoot?.unmount());
+  mountedRoot = null;
+  host?.remove();
+  host = null;
+  const again = await mount();
+  expect(textarea(again).value).toBe("배포 전에 확인할 것\n- 피드 버전");
+});
+
 it("#4790 입력창 호출부도 다섯 줄에서 멈추고 내부 스크롤한다", async () => {
   const height = vi.spyOn(HTMLTextAreaElement.prototype, "scrollHeight", "get").mockReturnValue(600);
   try {

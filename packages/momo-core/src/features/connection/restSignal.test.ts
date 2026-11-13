@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { fetchWithDeadline, subscribeRestOutcome } from "../../lib/http";
+import { fetchWithDeadline, LATE_WAKE_MS, NetworkError, subscribeRestOutcome } from "../../lib/http";
 import { CONNECTION_KEYS as K } from "./copyKeys";
 import { deriveConnectionState, foldConnectionEvent, type ConnectionInput } from "./model";
 import { INITIAL_REST_SIGNAL } from "./restSignal";
@@ -115,5 +115,57 @@ describe("④ error.code 가 있는 503은 서버에 닿지 못함으로 세지 
       await h.hit(`/v1/z${i}`, "network");
       expect(h.view().phase).toBe("ok");
     }
+  });
+});
+
+describe("⑤ 늦게 깬 마감의 시간 초과는 「서버에 닿지 못함」으로 세지 않는다 (#5587)", () => {
+  // 지키는 것: 창이 뒤에 있는 데스크탑 앱이 잠들었다 깨면(맥 잠자기·앱 낮잠) 마감 타이머가 깨는 순간 먼저 돌아, 깨어 있는 시간을
+  // 한 번도 받지 못한 요청을 시간 초과로 끝낸다. 백그라운드 폴링 서너 건이 그렇게 함께 끝나면 서로 다른 요청 3건이라 「보낼 수
+  // 없음」이 섰다. 그 시간 초과는 세지도 풀지도 않는다. 마감이 제때 돈 시간 초과는 그대로 센다. 이 시험은 실제 `fetchWithDeadline`을
+  // 거쳐서 http.ts의 표시(`lateMs`)와 restSignal.ts의 건너뛰기 어느 쪽을 깨뜨려도 빨갛게 된다.
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  /** 답하지 않는 요청 하나를 보내고, 앱이 `asleepMs` 동안 잠든 뒤(벽시계만 흐른다) 15초 마감 타이머가 돈다. */
+  async function timeoutAfterSleep(path: string, asleepMs: number): Promise<unknown> {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        (_url: string, init: RequestInit) =>
+          new Promise<Response>((_resolve, reject) => {
+            init.signal?.addEventListener("abort", () => reject(new DOMException("aborted", "AbortError")));
+          }),
+      ),
+    );
+    const settled = fetchWithDeadline(`${SERVER}${path}`, {}, 15_000).catch((error: unknown) => error);
+    vi.setSystemTime(Date.now() + asleepMs);
+    await vi.advanceTimersByTimeAsync(15_000);
+    return settled;
+  }
+
+  it("잠든 사이 마감을 다 쓴 서로 다른 요청 3건은 선언하지 않고, 쌓인 실패를 풀지도 않는다", async () => {
+    vi.useFakeTimers();
+    const h = harness();
+    for (const path of ["/v1/a", "/v1/b", "/v1/c"]) {
+      // 호출자는 예전처럼 시간 초과를 받는다(요청 쪽 행동은 그대로다).
+      expect(await timeoutAfterSleep(path, 5 * 60_000)).toBeInstanceOf(NetworkError);
+    }
+    expect(h.view()).toMatchObject({ phase: "ok", cause: null, canSend: true });
+
+    // 제때 돈 시간 초과 2건 뒤의 늦게 깬 1건은 선언도 풀림도 만들지 않는다: 다음 제때 돈 1건이 세 번째다.
+    await timeoutAfterSleep("/v1/d", 0);
+    await timeoutAfterSleep("/v1/e", 0);
+    await timeoutAfterSleep("/v1/f", 5 * 60_000);
+    expect(h.view()).toMatchObject({ phase: "ok", canSend: true });
+    await timeoutAfterSleep("/v1/g", 0);
+    expect(h.view()).toMatchObject({ phase: "down", cause: "serverUnreachable", canSend: false });
+  });
+
+  it("문턱 바로 아래(마감이 10초 미만 늦게 돈 것)는 제때 돈 마감이라 센다", async () => {
+    vi.useFakeTimers();
+    const h = harness();
+    for (const path of ["/v1/a", "/v1/b", "/v1/c"]) await timeoutAfterSleep(path, LATE_WAKE_MS - 1_000);
+    expect(h.view()).toMatchObject({ phase: "down", cause: "serverUnreachable", canSend: false });
   });
 });

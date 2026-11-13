@@ -1,0 +1,32 @@
+{
+  "ko": {
+    "site_title": "oort 문서",
+    "skip": "본문으로 건너뛰기",
+    "toc_label": "문서 목록",
+    "status_label": "상태",
+    "status_done": "됨",
+    "status_partial": "부분",
+    "status_planned": "계획",
+    "checked_label": "확인한 날짜",
+    "sources_count": "출처 {n}개",
+    "sources_note": "이 페이지의 내용을 확인한 저장소 파일이에요. 누르면 GitHub에서 열려요.",
+    "pager_label": "이전·다음 문서",
+    "prev": "이전",
+    "next": "다음"
+  },
+  "en": {
+    "site_title": "oort docs",
+    "skip": "Skip to content",
+    "toc_label": "Docs",
+    "status_label": "Status",
+    "status_done": "Available",
+    "status_partial": "Partial",
+    "status_planned": "Planned",
+    "checked_label": "Checked",
+    "sources_count": "{n} sources",
+    "sources_note": "The repository files this page was checked against. Each opens on GitHub.",
+    "pager_label": "Previous and next page",
+    "prev": "Previous",
+    "next": "Next"
+  }
+}

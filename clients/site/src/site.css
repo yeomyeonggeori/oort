@@ -1,0 +1,341 @@
+/* oort 내려받기 페이지 (#5562). 색은 clients/web/src/design/tokens.css 의 새벽하늘 값을 옮겨 왔다.
+   하늘(--sky-*)·먼지(--dust)·혜성(--comet)은 sky.js 의 셰이더가 읽는다. 외부 글꼴·스크립트 없음. */
+:root {
+  color-scheme: light dark;
+  --page: #fffefc;
+  --surface: #fffefc;
+  --surface-muted: #f3f1ee;
+  --surface-hover: #ecebe9;
+  --line: #e7e4df;
+  --line-strong: #85837e;
+  --ink: #16171b;
+  --ink-muted: #5a5c64;
+  --icon: #7c7f88;
+  --primary: #16171b;
+  --on-primary: #fffefc;
+  --signal: #c2410c;
+  --signal-text: #af3908;
+  --agent: #2f5b8a;
+  /* 문서 상태 표지(#5590): tokens.css 의 --ok·--warn */
+  --ok: #0e7740;
+  --warn: #855900;
+  --glass: rgba(255, 254, 252, .74);
+  --veil: rgba(239, 237, 234, .78);
+  --shadow: 0 1px 2px rgba(22, 23, 27, .06), 0 24px 60px -28px rgba(47, 91, 138, .45);
+  --menu-shadow: 0 1px 2px rgba(22, 23, 27, .08), 0 16px 40px -16px rgba(22, 23, 27, .28);
+  /* 셰이더 팔레트: 새벽(위 남빛 → 지평선 살구) */
+  --sky-top: #d9e3f0;
+  --sky-mid: #efedea;
+  --sky-low: #f7eadb;
+  --dust: #2f5b8a;
+  --comet: #c2410c;
+  --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", "Apple SD Gothic Neo", "Malgun Gothic", "Hiragino Sans", "PingFang SC", "Noto Sans", sans-serif;
+  --mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --page: #14171d;
+    --surface: #1b1e25;
+    --surface-muted: #252933;
+    --surface-hover: #20232a;
+    --line: #2c3039;
+    --line-strong: #737782;
+    --ink: #f1f1f3;
+    --ink-muted: #a4a7b0;
+    --icon: #8a8e98;
+    --primary: #f1f1f3;
+    --on-primary: #16171b;
+    --signal: #ff8a4c;
+    --signal-text: #ff9a62;
+    --agent: #8db3e2;
+    --ok: #4cc47e;
+    --warn: #d4a72c;
+    --glass: rgba(32, 35, 43, .72);
+    --veil: rgba(15, 20, 28, .72);
+    --shadow: 0 1px 2px rgba(0, 0, 0, .4), 0 24px 60px -24px rgba(0, 0, 0, .8);
+    --menu-shadow: 0 1px 2px rgba(0, 0, 0, .5), 0 16px 40px -12px rgba(0, 0, 0, .8);
+    /* 밤(위 깊은 남색 → 지평선 따뜻한 어둠) */
+    --sky-top: #0b1018;
+    --sky-mid: #141922;
+    --sky-low: #231d1b;
+    --dust: #8db3e2;
+    --comet: #ff8a4c;
+  }
+}
+:lang(ko) { --sans: -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Malgun Gothic", "Segoe UI", Roboto, "Noto Sans KR", sans-serif; }
+:lang(ja) { --sans: -apple-system, BlinkMacSystemFont, "Hiragino Sans", "Hiragino Kaku Gothic ProN", "Yu Gothic", "Segoe UI", "Noto Sans JP", sans-serif; }
+:lang(zh-Hans) { --sans: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", "Segoe UI", "Noto Sans SC", sans-serif; }
+:lang(zh-Hant) { --sans: -apple-system, BlinkMacSystemFont, "PingFang TC", "Microsoft JhengHei", "Segoe UI", "Noto Sans TC", sans-serif; }
+
+* { box-sizing: border-box; }
+html { background: var(--page); -webkit-text-size-adjust: 100%; scroll-behavior: smooth; }
+body {
+  margin: 0; background: var(--page); color: var(--ink);
+  font: 16px/1.55 var(--sans); -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility;
+  overflow-wrap: anywhere;
+}
+:lang(ko) body { word-break: keep-all; }
+/* 일본어: 문구의 구절 힌트(<wbr>, build.py PHRASE_LANGS)·문장 부호·빈칸에서만 줄을 바꾼다(WebKit 에 auto-phrase 가 없다) */
+:lang(ja) body { word-break: keep-all; line-break: strict; }
+:lang(zh-Hans) body, :lang(zh-Hant) body { line-break: strict; }
+/* 중국어 제목은 구절 힌트(<wbr>)·문장 부호에서만 바꾼다(「智能/体」처럼 낱말 가운데서 끊기지 않게) */
+:lang(zh-Hans) h1, :lang(zh-Hant) h1 { word-break: keep-all; }
+a { color: inherit; }
+img, svg, canvas { display: block; }
+.sprite { position: absolute; width: 0; height: 0; overflow: hidden; }
+.i { width: 18px; height: 18px; flex: none; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.i-sm { width: 14px; height: 14px; }
+:focus-visible { outline: 2px solid var(--signal); outline-offset: 3px; border-radius: 10px; }
+
+/* 머리 줄: 하늘 위에 뜬다. 로고(마크 + 글자)는 줄지도 꺾이지도 않고, 자리가 모자라면
+   컨트롤 묶음이 아랫줄 오른쪽 끝으로 내려간다(정본 #4230). 600 아래는 컨트롤이 아이콘이라 한 줄에 든다. */
+.top {
+  position: absolute; top: 0; left: 0; right: 0; z-index: 5;
+  display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px;
+  max-width: 1200px; margin: 0 auto; padding: 16px 24px;
+}
+.brand { flex: none; display: inline-flex; align-items: center; gap: 8px; white-space: nowrap; text-decoration: none; font-weight: 700; font-size: 19px; letter-spacing: -.02em; border-radius: 10px; }
+.mark { flex: none; width: 26px; height: 26px; fill: currentColor; }
+/* 새 메시지 판(메뉴 막대 oort-tray-unread-on-* 와 같은 배색): 링(꼬리 포함)은 글자색, 위성은 신호색 */
+.mark .mark-sat { fill: var(--signal); }
+.top-nav { display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: 8px; margin-left: auto; }
+/* 폰이면 첫 화면 주 버튼이 같은 일(브라우저에서 열기)을 하므로 머리 링크는 숨긴다 */
+html[data-phone] .web-link { display: none; }
+.ghost, .pill {
+  display: inline-flex; align-items: center; gap: 8px; min-height: 36px; padding: 0 14px;
+  border: 0; border-radius: 999px; font: inherit; font-size: 14px; font-weight: 600; color: var(--ink);
+  text-decoration: none; cursor: pointer; white-space: nowrap;
+}
+.ghost { background: transparent; }
+.pill { background: var(--surface-muted); }
+.pill-quiet { background: var(--glass); -webkit-backdrop-filter: blur(18px) saturate(1.4); backdrop-filter: blur(18px) saturate(1.4); }
+.pop { position: relative; }
+.menu {
+  position: absolute; z-index: 10; margin: 0; padding: 6px; list-style: none; min-width: 200px;
+  background: var(--surface); border: 1px solid var(--line); border-radius: 14px; box-shadow: var(--menu-shadow); text-align: left;
+}
+.menu[hidden] { display: none; }
+.lang-list { right: 0; top: calc(100% + 8px); }
+.lang-list a, .chip-menu button {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px; width: 100%;
+  min-height: 40px; padding: 8px 12px; border: 0; border-radius: 10px; background: transparent;
+  font: inherit; font-size: 15px; color: var(--ink); text-decoration: none; text-align: left; cursor: pointer;
+}
+.chip-menu button:focus { background: var(--surface-hover); }
+.lang-list a:focus-visible, .chip-menu button:focus-visible { outline-offset: -2px; }
+.lang-list a { white-space: nowrap; }
+.lang-list a[aria-current] { font-weight: 700; }
+.lang-list .tick, .chip-menu .tick { color: var(--signal-text); visibility: hidden; }
+.lang-list a[aria-current] .tick, .chip-menu [aria-checked="true"] .tick { visibility: visible; }
+
+/* 첫 화면 */
+.hero {
+  position: relative; isolation: isolate; overflow: hidden;
+  min-height: clamp(600px, 94svh, 900px); padding: 128px 24px 232px;
+  display: grid; place-items: center; text-align: center;
+  /* WebGL 이 없을 때의 바탕: 같은 하늘 세 정지점 + 지평선 빛(color-mix 를 모르는 브라우저는 첫 줄) */
+  background: linear-gradient(180deg, var(--sky-top) 0%, var(--sky-mid) 58%, var(--sky-low) 100%);
+  background:
+    radial-gradient(120% 70% at 22% 100%, var(--sky-low) 0%, transparent 62%),
+    radial-gradient(70% 40% at 78% 30%, color-mix(in srgb, var(--dust) 14%, transparent) 0%, transparent 70%),
+    linear-gradient(180deg, var(--sky-top) 0%, var(--sky-mid) 58%, var(--sky-low) 100%);
+}
+.sky { position: absolute; inset: 0; width: 100%; height: 100%; z-index: -2; }
+.hero[data-webgl="off"] .sky { display: none; }
+/* 글자 뒤의 은은한 막: 움직이는 하늘이 아니라 이 색을 기준으로 대비를 잰다. 문구가 길어져(#5568, 머리글·칩) 글 덩어리 높이를 따라 첫 화면의 90%까지 */
+.hero::before {
+  content: ""; position: absolute; z-index: -1; left: 50%; top: 44%; width: min(980px, 120%); height: max(560px, 90%);
+  transform: translate(-50%, -50%); pointer-events: none;
+  background: radial-gradient(closest-side, var(--veil) 0%, var(--veil) 45%, transparent 100%);
+  background: radial-gradient(closest-side, var(--veil) 0%, color-mix(in srgb, var(--veil) 70%, transparent) 55%, transparent 100%);
+}
+.hero::after {
+  content: ""; position: absolute; z-index: -1; left: 0; right: 0; bottom: 0; height: 240px; pointer-events: none;
+  background: linear-gradient(180deg, transparent, var(--page));
+}
+.hero-in { max-width: 1120px; display: flex; flex-direction: column; align-items: center; }
+/* 머리글: 제목 위 한 줄. 신호색은 신호에만이라 글자색 보조, 대문자·자간 없이 본문 글꼴 */
+.eyebrow { margin: 0 0 18px; font-size: 15px; line-height: 1.45; font-weight: 600; color: var(--ink-muted); text-wrap: balance; }
+h1 {
+  margin: 0; font-size: clamp(30px, 4.4vw, 56px); line-height: 1.08; letter-spacing: -.03em; font-weight: 700;
+  text-wrap: balance;
+}
+h1 span { display: block; }
+:lang(ko) h1, :lang(ja) h1, :lang(zh-Hans) h1, :lang(zh-Hant) h1 { letter-spacing: -.02em; line-height: 1.16; }
+.lead { margin: 22px 0 0; max-width: 38em; font-size: clamp(16px, 1.5vw, 19px); line-height: 1.55; color: var(--ink-muted); text-wrap: balance; }
+/* 증거 칩: 단추가 아니라 표지다(반경 10, 채움 알약 아님, 누를 곳 없음). 머리카락 선만 두고 하늘을 그대로 비친다.
+   칩 줄은 리드 폭(720)을 넘지 않는다: 넓은 제목 아래로 리드·칩·주 버튼이 한 기둥에 선다 */
+.proof { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; max-width: min(100%, 720px); margin: 24px 0 0; padding: 0; list-style: none; }
+.proof li {
+  max-width: 100%; padding: 5px 12px; border: 1px solid var(--line); border-color: color-mix(in srgb, var(--line-strong) 32%, transparent); border-radius: 10px;
+  font-size: 14px; line-height: 1.45; color: var(--ink-muted); text-wrap: balance;
+}
+
+/* 주 버튼: 잉크 알약 + 칩 펼침 */
+.get { position: relative; display: inline-flex; margin-top: 32px; border-radius: 999px; box-shadow: var(--shadow); }
+.get-main, .get-more {
+  display: inline-flex; align-items: center; gap: 10px; min-height: 52px; border: 0;
+  background: var(--primary); color: var(--on-primary); font: inherit; font-weight: 600; font-size: 16px; text-decoration: none; cursor: pointer;
+}
+.get-main { padding: 0 20px 0 22px; border-radius: 999px 0 0 999px; }
+.get-more { padding: 0 16px 0 12px; border-radius: 0 999px 999px 0; position: relative; }
+.get-more::before { content: ""; position: absolute; left: 0; top: 14px; bottom: 14px; width: 1px; background: color-mix(in srgb, var(--on-primary) 26%, transparent); }
+/* M1: 포커스에도 반쪽 모서리는 그대로다(전역 :focus-visible 의 반경을 반쪽 모양으로 되돌린다) */
+.get-main:focus-visible { outline-offset: 3px; border-radius: 999px 0 0 999px; }
+.get-more:focus-visible { outline-offset: 3px; border-radius: 0 999px 999px 0; }
+/* :has 를 알면 링은 묶음 전체에 하나, 포커스 반쪽은 안쪽 링으로 가린다(모르면 위 규칙 그대로) */
+.get:has(> :focus-visible) { outline: 2px solid var(--signal); outline-offset: 3px; }
+.get:has(> :focus-visible) > :focus-visible { outline: 2px solid var(--on-primary); outline: 2px solid color-mix(in srgb, var(--on-primary) 72%, transparent); outline-offset: -6px; }
+.get-more[aria-expanded="true"] .i { transform: rotate(180deg); }
+.get-t { display: flex; flex-wrap: wrap; align-items: baseline; column-gap: 10px; text-align: left; line-height: 1.3; }
+.get-chip { font-weight: 500; font-size: 14px; opacity: .72; white-space: nowrap; }
+.chip-menu { left: 50%; top: calc(100% + 8px); transform: translateX(-50%); min-width: 248px; display: grid; gap: 2px; }
+.chip-menu.up { top: auto; bottom: calc(100% + 8px); }
+.chip-menu span { display: flex; flex-direction: column; gap: 1px; }
+.chip-menu b { font-weight: 600; }
+.chip-menu small { font-size: 13px; color: var(--ink-muted); }
+.spec { margin: 18px 0 0; font: 12px/1.6 var(--mono); color: var(--ink-muted); }
+.spec span { white-space: nowrap; }
+/* 모노는 숫자·버전에만(L3). 칩 이름은 본문 글꼴 */
+.spec .spec-w { font-family: var(--sans); }
+/* H2-b: 폰(머리의 표지 스크립트가 html[data-phone] 를 단다)이면 첫 화면은 폰에서 되는 길부터 */
+.phone-get { display: none; }
+html[data-phone] .get, html[data-phone] .spec { display: none; }
+html[data-phone] .phone-get { display: flex; flex-direction: column; align-items: center; }
+/* #5568 수리 1회차 H1: 폰은 증거 칩을 주 행동·기기 안내 뒤로 내린다. 칩 줄(긴 문구 3행)이 리드와 주 행동 사이에 서면
+   375×548(iPhone SE 첫 화면)에서 「브라우저에서 열기」가 첫 화면 밖으로 밀렸다. 읽는 순서(DOM)는 그대로다(칩은 누를 곳이 아니다) */
+html[data-phone] .proof { order: 1; margin-top: 24px; }
+.get-web {
+  display: inline-flex; align-items: center; gap: 10px; min-height: 52px; margin: 36px 0 24px; padding: 0 24px;
+  border-radius: 999px; background: var(--primary); color: var(--on-primary); box-shadow: var(--shadow);
+  font-weight: 600; font-size: 16px; text-decoration: none;
+}
+.phone-notes { display: grid; gap: 8px; justify-items: start; max-width: 30em; text-align: left; }
+.phone-note { display: flex; align-items: flex-start; gap: 8px; margin: 0; font-size: 14px; line-height: 1.5; color: var(--ink-muted); }
+.phone-note .i { width: 16px; height: 16px; margin-top: 2px; color: var(--icon); }
+
+/* 앱 화면 */
+.shot { position: relative; z-index: 1; max-width: 1180px; margin: -176px auto 0; padding: 0 24px; }
+.shot-fig { margin: 0; }
+.frame {
+  margin: 0; overflow: hidden; border-radius: 1.8% / 2.85%; background: var(--surface);
+  border: 1px solid color-mix(in srgb, var(--line-strong) 34%, transparent); box-shadow: var(--shadow);
+}
+.frame img { width: 100%; height: auto; }
+.caption { margin: 14px 0 0; text-align: center; font-size: 14px; color: var(--ink-muted); }
+.caption .note { display: block; }
+
+/* 띠: 기기 목록·설치 */
+.band {
+  max-width: 1080px; margin: 0 auto; padding: 96px 24px 0;
+  display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); gap: 48px; align-items: start;
+}
+.band-head h2 { margin: 0; font-size: clamp(26px, 3vw, 34px); line-height: 1.2; letter-spacing: -.025em; font-weight: 700; }
+.band-head p { margin: 10px 0 0; color: var(--ink-muted); max-width: 26em; }
+.rows { list-style: none; margin: 0; padding: 0; border-top: 1px solid var(--line); }
+.row { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 16px; min-height: 72px; padding: 12px 0; border-bottom: 1px solid var(--line); }
+.row-i { width: 22px; height: 22px; color: var(--icon); }
+.row-t { display: flex; flex-direction: column; min-width: 0; }
+.row-t b { font-weight: 600; }
+.row-t span { font-size: 14px; color: var(--ink-muted); }
+.row .pill { min-height: 34px; font-size: 14px; }
+.tag { font-size: 14px; color: var(--ink-muted); white-space: nowrap; }
+
+.install-art { display: flex; align-items: center; gap: 14px; margin-top: 24px !important; color: var(--icon); }
+.install-art img { border-radius: 11px; }
+.install-art .folder { display: grid; place-items: center; width: 48px; height: 48px; border-radius: 12px; background: var(--surface-muted); color: var(--agent); }
+.install-art .folder .i { width: 26px; height: 26px; }
+.steps { list-style: none; margin: 0; padding: 0; display: grid; gap: 0; border-top: 1px solid var(--line); }
+.steps li { display: grid; grid-template-columns: 40px minmax(0, 1fr); column-gap: 12px; padding: 18px 0; border-bottom: 1px solid var(--line); }
+.steps .n { grid-row: span 2; font-weight: 600; font-size: 14px; line-height: 28px; font-variant-numeric: tabular-nums; color: var(--signal-text); }
+.steps b { font-weight: 600; font-size: 17px; line-height: 28px; }
+.steps li > span:last-child { color: var(--ink-muted); font-size: 15px; }
+
+/* 꼬리 */
+.foot {
+  max-width: 1080px; margin: 120px auto 0; padding: 28px 24px 48px; border-top: 1px solid var(--line);
+  display: grid; grid-template-columns: auto 1fr; gap: 10px 32px; align-items: baseline;
+  font-size: 13px; color: var(--ink-muted);
+}
+.foot-v { margin: 0; font-family: var(--mono); font-size: 12px; }
+.foot-langs { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 4px 14px; }
+.foot-langs a { text-decoration: none; border-radius: 6px; }
+.foot-langs a[aria-current] { color: var(--ink); font-weight: 600; }
+.foot-note { grid-column: 1 / -1; margin: 6px 0 0; }
+
+@media (max-width: 860px) {
+  .band { grid-template-columns: 1fr; gap: 24px; padding-top: 72px; }
+  .install-art { display: none; }
+  .foot { grid-template-columns: 1fr; margin-top: 88px; }
+  .foot-langs { justify-content: flex-start; }
+}
+@media (max-width: 560px) {
+  .top { padding: 12px 16px; }
+  /* 판은 머리 오른쪽 안쪽 여백에 맞춘다: 언어 단추가 오른쪽 끝(폰)이나 그 옆(아이콘 하나 건너)에 서고, 판이 가장 넓게 들어가는 쪽이다 */
+  .pop { position: static; }
+  .lang-list { right: 16px; left: auto; top: calc(100% - 4px); }
+  /* 폰 첫 화면(320×568·375×548·375×629·390×664, check.mjs phone 칸)에서 주 행동이 첫 화면 안에 들도록 머리글·리드·칩 사이를 줄인다(머리 줄 높이 68) */
+  .hero { padding: 88px 20px 176px; min-height: 620px; }
+  /* 폰 폭은 글 덩어리가 첫 화면 대부분을 차지해 막을 위·옆으로 넓힌다(머리글이 셰이더의 비운 자리 밖이라) */
+  .hero::before { top: 41%; width: 170%; height: 124%; }
+  .eyebrow { margin-bottom: 12px; font-size: 14px; }
+  .lead { margin-top: 16px; }
+  /* 리드가 6줄을 넘으면 balance 가 안 걸려 끝줄에 낱말 하나가 남는다(en 「there.」, fr 「sur-le-champ.」): pretty 는 그 두 언어에만.
+     ko·ja·zh 는 balance 그대로(Chromium pretty 가 ko 를 「사람이 그 / 자리에서」로 끊었다, #5568 검수 2회차 L1). es 는 끝줄 문제가 없었고
+     WebKit pretty 에서 한 줄 늘어 balance 그대로. pretty 를 모르는 브라우저는 balance 그대로 */
+  :lang(en) .lead, :lang(fr) .lead { text-wrap: pretty; }
+  .proof { gap: 6px; margin-top: 18px; }
+  .proof li { padding: 4px 10px; font-size: 13px; }
+  .get { margin-top: 28px; }
+  .get-web { margin-top: 28px; }
+  .shot { margin-top: -132px; padding: 0 16px; }
+  .band { padding-left: 20px; padding-right: 20px; }
+  .get-main { padding: 0 16px 0 18px; }
+}
+/* 아주 좁은 폰(360 이하): 긴 문구(fr·es·ja)에서도 첫 화면 주 행동이 첫 화면 안에 들도록 글자를 한 단 줄인다(칩은 폰에서 주 행동 뒤라 그대로) */
+@media (max-width: 360px) {
+  .hero { padding-top: 80px; }
+  h1 { font-size: 28px; }
+  .lead { font-size: 15px; line-height: 1.5; }
+}
+/* M5: 600px 아래 컨트롤은 44(정본 §2.7) */
+@media (max-width: 599px) {
+  .ghost, .pill, .row .pill, .lang-list a, .chip-menu button { min-height: 44px; }
+  /* 머리 컨트롤은 아이콘 하나씩 44×44. 이름은 접근성 이름(aria-label)에, 긴 자칭은 언어 메뉴 안에만 */
+  .lang-btn, .web-link, .docs-link { width: 44px; padding: 0; justify-content: center; }
+  .lang-btn .lang-name, .lang-btn .lang-chev, .web-link .web-t, .docs-link .docs-t { display: none; }
+  .web-link .i { width: 18px; height: 18px; }
+  /* 웹 링크 아이콘은 언어 아이콘과 같은 모양(유리 원 없이 글리프만). 뜻은 툴팁(title)과 접근성 이름이 낸다 */
+  .top-nav .web-link { background: transparent; -webkit-backdrop-filter: none; backdrop-filter: none; }
+  /* 꼬리 언어 링크도 44(줄 간격은 링크 높이가 맡는다). 누르는 상자는 글자 양옆으로 7px 넓히고 같은 만큼 바깥 여백을 당겨,
+     글자 자리와 글자 사이 간격(14)은 그대로 두고 왼쪽 끝을 꼬리 다른 줄과 맞춘다(이웃 상자는 맞닿기만 한다) */
+  .foot-langs { row-gap: 0; }
+  .foot-langs a { display: inline-flex; align-items: center; min-height: 44px; min-width: 44px; padding: 0 7px; margin: 0 -7px; }
+}
+/* #5590: 600~767 은 「문서」만 아이콘(36×36, 이름은 aria-label·title). 이름이 긴 언어(es 「Documentación」 +
+   「Español (Latinoamérica)」)에서 머리 컨트롤이 두 줄로 접혀 머리 줄이 첫 화면 머리글(위 128)을 덮었다(600·640 에서 아래 149) */
+@media (min-width: 600px) and (max-width: 767px) {
+  .docs-link { width: 36px; padding: 0; justify-content: center; }
+  .docs-link .docs-t { display: none; }
+}
+/* L2: hover 는 포인터가 있는 기기에서만. 주 버튼은 두 반쪽이 함께 잉크만 옅어진다 */
+@media (hover: hover) {
+  .ghost:hover { background: var(--glass); }
+  .pill:hover { background: var(--surface-hover); }
+  .pill-quiet:hover { background: var(--surface); }
+  .lang-list a:hover, .chip-menu button:hover { background: var(--surface-hover); }
+  .get:hover > .get-main, .get:hover > .get-more, .get-web:hover { opacity: .9; }
+  .foot-langs a:hover { color: var(--ink); text-decoration: underline; text-underline-offset: 3px; }
+}
+/* 좁은 창의 웹 링크 아이콘은 마우스를 올려도 언어 단추와 같게(유리) */
+@media (hover: hover) and (max-width: 599px) {
+  .top-nav .web-link:hover { background: var(--glass); }
+}
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+  .get-more .i { transition: none; }
+}
+@media (prefers-contrast: more) {
+  :root { --veil: var(--page); }
+  .pill-quiet { background: var(--surface); }
+}

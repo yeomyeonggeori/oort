@@ -73,6 +73,11 @@ export async function createAppLocale(
     catalogBudgetMs?: number;
     /** Starts a new document. Only `retry()` after a rejected import calls it. */
     reload?: () => void;
+    /**
+     * Development/design builds only (#5589): every change renders this pseudo catalog (en-XA)
+     * instead of the chosen language's, so text that skips the dictionary stands out.
+     */
+    pseudo?: () => Promise<{ locale: string; catalog: MessageCatalog }>;
   } = {},
 ) {
   const preferences = await createLocalePreferences(port);
@@ -159,10 +164,12 @@ export async function createAppLocale(
         const context = persist
           ? resolveLocaleContext(preference, readDevice())
           : preferences.getSnapshot().context;
-        const messageLocale = catalogLocale(context);
+        const pseudo = options.pseudo ? await options.pseudo() : undefined;
+        const shipped = catalogLocale(context);
+        const messageLocale = pseudo?.locale ?? shipped;
         // English already ships in core's service. Only Korean needs a network chunk.
-        const catalog = messageLocale === "ko-KR"
-          ? await loadWithinBudget(messageLocale, ticket, preference, persist).catch((error: unknown) => {
+        const catalog = pseudo ? pseudo.catalog : shipped === "ko-KR"
+          ? await loadWithinBudget(shipped, ticket, preference, persist).catch((error: unknown) => {
             rejected = error !== CATALOG_PENDING;
             throw error;
           })

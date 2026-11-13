@@ -518,6 +518,9 @@ export function ThreadPanel({
                 // composer's own placeholder 「답글 쓰기」 is the whole invitation.
                 status="ready"
                 pending={pending}
+                // #5624 — 답글 에코도 같은 훅의 장부·시계 차이로 묶는다(확정 때 머리가 섰다 사라지지 않게).
+                echoPins={timeline.echoPins}
+                serverOffsetMs={timeline.serverOffsetMs}
                 reactions={timeline.reactions}
                 // 이슈 #1146 M1 — 채널과 **같은 지도**다. 행마다의 `pinned` 는
                 // `Timeline` 이 여기서 유도하므로, 이것 없이 `onTogglePin` 만 주면

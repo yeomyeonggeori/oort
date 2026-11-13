@@ -13,6 +13,8 @@ import { setServerPause } from "./serverPause";
 const hoisted = vi.hoisted(() => ({
   needsMe: 4,
   setDockBadge: vi.fn(async (_count: number) => true),
+  pathname: "/",
+  dm2Muted: false,
 }));
 
 vi.mock("@/lib/tauri", () => ({
@@ -21,8 +23,11 @@ vi.mock("@/lib/tauri", () => ({
 }));
 vi.mock("@/app/session", () => ({ useSession: () => ({ workspaceId: "w" }) }));
 vi.mock("@/features/inbox/useNeedsMe", () => ({ useNeedsMeCount: () => hoisted.needsMe }));
+vi.mock("react-router-dom", () => ({ useLocation: () => ({ pathname: hoisted.pathname }) }));
 vi.mock("@/features/workspace/useWorkspace", () => ({
-  useChannels: () => ({ groups: { channels: [], dms: [{ id: "dm1" }, { id: "dm2" }] } }),
+  useChannels: () => ({
+    groups: { channels: [], dms: [{ id: "dm1", muted: false }, { id: "dm2", muted: hoisted.dm2Muted }] },
+  }),
   useReadStates: () => ({
     byChannel: new Map([
       ["dm1", { unreadCount: 2 }],
@@ -43,11 +48,15 @@ beforeAll(() => {
 });
 beforeEach(() => {
   hoisted.needsMe = 4;
+  hoisted.pathname = "/";
+  hoisted.dm2Muted = false;
   hoisted.setDockBadge.mockClear();
   localStorage.clear();
   reloadDesktopNotificationKindsForTest(localStorage);
 });
 afterEach(() => {
+  // 창 앞뒤 어댑터의 「초점 잃음」은 모듈 상태다: 구독이 살아 있는 동안 되돌려 다음 시험에 새지 않게 한다.
+  act(() => void window.dispatchEvent(new Event("focus")));
   act(() => root?.unmount());
   host?.remove();
   root = null;
@@ -63,34 +72,80 @@ function mount() {
 }
 
 describe("DockBadge (#3339)", () => {
-  it("독 배지는 useNeedsMeCount와 같은 수를 그린다", () => {
+  it("독 배지는 useNeedsMeCount에 안 읽은 DM의 수를 더한 수를 그린다 (#5660)", () => {
     mount();
-    expect(hoisted.setDockBadge).toHaveBeenLastCalledWith(4);
+    expect(hoisted.setDockBadge).toHaveBeenLastCalledWith(9); // 4 + DM 2 + 3
     hoisted.needsMe = 7;
     act(() => root?.render(createElement(DockBadge)));
-    expect(hoisted.setDockBadge).toHaveBeenLastCalledWith(7);
+    expect(hoisted.setDockBadge).toHaveBeenLastCalledWith(12);
   });
 
-  it("기본값에서 안 읽은 DM(5)은 세지 않는다", () => {
+  it("DM 스위치를 끄면 needsMe 수 그대로이고, 독 배지를 끄면 0이다", () => {
     mount();
-    expect(hoisted.setDockBadge).not.toHaveBeenCalledWith(9);
+    act(() => setDesktopNotificationKind("dockDms", false, localStorage));
     expect(hoisted.setDockBadge).toHaveBeenLastCalledWith(4);
-  });
-
-  it("DM 합산을 켜면 더해지고, 독 배지를 끄면 0이다", () => {
-    mount();
-    act(() => setDesktopNotificationKind("dockDm", true, localStorage));
+    act(() => setDesktopNotificationKind("dockDms", true, localStorage));
     expect(hoisted.setDockBadge).toHaveBeenLastCalledWith(9);
     act(() => setDesktopNotificationKind("dockBadge", false, localStorage));
     expect(hoisted.setDockBadge).toHaveBeenLastCalledWith(0);
   });
 
-  it("알림 일시 중지는 독 배지를 건드리지 않는다 — 배지는 별개 원장이다 (#4197, ADR-0124 D2)", () => {
-    setServerPause(true);
+  it("예전 키(`dockDm`)는 읽지 않는다: 값이 꺼짐이든 켬이든 새 기본값(켬)이다 (#5690)", () => {
+    localStorage.setItem("momo.web.notifications.v1", JSON.stringify({ dockDm: false, dockBadge: true }));
+    reloadDesktopNotificationKindsForTest(localStorage);
+    mount();
+    expect(hoisted.setDockBadge).toHaveBeenLastCalledWith(9); // 예전의 꺼짐은 무시
+    localStorage.setItem("momo.web.notifications.v1", JSON.stringify({ dockDm: true, dockBadge: true }));
+    act(() => reloadDesktopNotificationKindsForTest(localStorage));
+    expect(hoisted.setDockBadge).toHaveBeenLastCalledWith(9);
+  });
+
+  it("새 키(`dockDms`)가 있으면 그 값을 따르고, 예전 키는 이기지 못한다 (#5690)", () => {
+    localStorage.setItem("momo.web.notifications.v1", JSON.stringify({ dockDm: true, dockDms: false }));
+    reloadDesktopNotificationKindsForTest(localStorage);
     mount();
     expect(hoisted.setDockBadge).toHaveBeenLastCalledWith(4);
+    localStorage.setItem("momo.web.notifications.v1", JSON.stringify({ dockDm: false, dockDms: true }));
+    act(() => reloadDesktopNotificationKindsForTest(localStorage));
+    expect(hoisted.setDockBadge).toHaveBeenLastCalledWith(9);
+  });
+
+  it("예전 키만 있던 기기가 한 번 끄면 새 키로 저장되고 그 뒤로 계속 꺼져 있다 (#5690)", () => {
+    localStorage.setItem("momo.web.notifications.v1", JSON.stringify({ dockDm: false }));
+    reloadDesktopNotificationKindsForTest(localStorage);
+    mount();
+    expect(hoisted.setDockBadge).toHaveBeenLastCalledWith(9);
+    act(() => setDesktopNotificationKind("dockDms", false, localStorage));
+    expect(JSON.parse(localStorage.getItem("momo.web.notifications.v1") ?? "{}").dockDms).toBe(false);
+    act(() => reloadDesktopNotificationKindsForTest(localStorage));
+    expect(hoisted.setDockBadge).toHaveBeenLastCalledWith(4);
+  });
+
+  it("창이 뒤에 있으면 주소가 가리키는 DM도 센다: 아무도 보고 있지 않다 (#5660)", () => {
+    hoisted.pathname = "/c/dm1";
+    mount();
+    expect(hoisted.setDockBadge).toHaveBeenLastCalledWith(7); // 앞: 보고 있는 dm1은 뺀다
+    act(() => void window.dispatchEvent(new Event("blur")));
+    expect(hoisted.setDockBadge).toHaveBeenLastCalledWith(9); // 뒤: dm1 2 도 센다
+    act(() => void window.dispatchEvent(new Event("focus")));
+    expect(hoisted.setDockBadge).toHaveBeenLastCalledWith(7);
+  });
+
+  it("지금 앞에서 보고 있는 DM은 세지 않는다. 알림을 끈 DM은 센다 — 배지는 별개 원장이다 (#5660, ADR-0124 D2)", () => {
+    hoisted.pathname = "/c/dm1";
+    mount();
+    expect(hoisted.setDockBadge).toHaveBeenLastCalledWith(7); // 4 + dm2 3
+    hoisted.dm2Muted = true;
+    act(() => root?.render(createElement(DockBadge)));
+    expect(hoisted.setDockBadge).toHaveBeenLastCalledWith(7);
+  });
+
+  it("알림 일시 중지는 독 배지를 건드리지 않는다 — DM 몫까지 배지는 별개 원장이다 (#4197, #5660, ADR-0124 D4-A)", () => {
+    setServerPause(true);
+    mount();
+    expect(hoisted.setDockBadge).toHaveBeenLastCalledWith(9);
     act(() => setServerPause(false));
     act(() => root?.render(createElement(DockBadge)));
-    expect(hoisted.setDockBadge).toHaveBeenLastCalledWith(4);
+    expect(hoisted.setDockBadge).toHaveBeenLastCalledWith(9);
   });
 });

@@ -76,13 +76,16 @@ import {
   emptyTimeline,
   failPending,
   isChannelListEcho,
+  pinSettledEchoes,
   reconcileMessages,
   removePending,
   unsettledPending,
+  type EchoPins,
   type PendingMessage,
   type RecoveryMarker,
   type TimelineState,
 } from '@momo/core/features/timeline/model';
+import {observeServerClock, serverClockOffsetNowMs} from '@momo/core/features/timeline/serverClock';
 import {
   applyReactionDelta,
   clearMessageReactions,
@@ -227,6 +230,10 @@ export interface UseTimelineResult {
   recoveryMarkers: RecoveryMarker[];
   /** Channel-level echoes awaiting their server seq. Never inside `state`. */
   pending: PendingMessage[];
+  /** #5624 — 에코였던 확정본이 이 화면에서 이어 쓰는 에코의 시각. `buildTimelineItems`의 `echoPins`로 넘긴다(웹과 같은 코어 장부). */
+  echoPins: EchoPins;
+  /** #5624 — 서버 시계와 이 기기 시계의 차이(ms, 코어 `serverClock.ts`). 에코의 묶음과 시각 글자가 더해 쓴다. */
+  serverOffsetMs: number;
   /**
    * The one send path: optimistic echo now, server seq when it lands.
    *
@@ -360,6 +367,12 @@ export function useTimeline(
   });
   const [recoveryMarkers, setRecoveryMarkers] = useState<RecoveryMarker[]>([]);
   const [pending, setPending] = useState<PendingMessage[]>([]);
+  // #5624 — 에코였던 확정본이 묶음에 이어 쓸 에코의 시각과, 서버 시계와의 차이. 확정본이 들어오는 문(`applyBatch`)에서 함께 고친다.
+  // ref는 「직전 렌더가 쓴 값」이다 — 장부는 그 값으로 적어야 확정본이 화면에 있던 에코와 같은 묶음을 받는다.
+  const [echoPins, setEchoPins] = useState<EchoPins>(() => new Map());
+  const echoPinsRef = useRef<EchoPins>(echoPins);
+  const [serverOffsetMs, setServerOffsetMs] = useState(serverClockOffsetNowMs);
+  const serverOffsetRef = useRef(serverOffsetMs);
   const [loadingOlder, setLoadingOlder] = useState(false);
   const [reachedStart, setReachedStart] = useState(false);
   const [reloadNonce, setReloadNonce] = useState(0);
@@ -420,6 +433,23 @@ export function useTimeline(
     // 반쪽 답만 조용히 완결 행세를 한다. 실시간으로 온 행은 `runEnded` 를 달고
     // 오지 않으므로 여기서 아무것도 내놓지 않는다.
     seedEndedRuns(endedStreamRunIds(batch));
+    // #5624 — 이 배치가 정착시키는 에코의 시각을 확정본에 잇고(보내기 응답·실시간 프레임 어느 쪽이 먼저 와도 이 문을 지난다), 이은
+    // 짝마다 서버 시계를 잰다(에코를 보낸 기기 시각과 지금 사이에 서버가 확정본을 찍었다). 판정은 코어 한 곳이고 웹과 같다.
+    const shownOffset = serverOffsetRef.current;
+    const pinned = pinSettledEchoes(echoPinsRef.current, batch, pendingRef.current, shownOffset);
+    if (pinned.pins !== echoPinsRef.current) {
+      echoPinsRef.current = pinned.pins;
+      setEchoPins(pinned.pins);
+    }
+    const receivedAtMs = Date.now();
+    for (const {message, pending: row} of pinned.settled) {
+      observeServerClock({sentAtMs: row.createdAtMs, receivedAtMs, serverAtMs: message.createdAtMs});
+    }
+    const measuredOffset = serverClockOffsetNowMs();
+    if (measuredOffset !== shownOffset) {
+      serverOffsetRef.current = measuredOffset;
+      setServerOffsetMs(measuredOffset);
+    }
     setState(s => reconcileMessages(s, batch));
     // 복구 표지는 「여기까지 복구했다」는 한 번의 알림이다(#4016). 표지보다 새 메시지가 오면 그 알림은
     // 할 일을 마쳤으므로 걷는다 — 상시로 남으면 지난 일을 계속 말하는 줄이 된다. 같은 배치로 표지가
@@ -675,8 +705,9 @@ export function useTimeline(
         channelId: channel,
         authorMemberId,
         body: rowBody,
-        // Local clock, used only for grouping and the label on a row that has
-        // not been ordered yet. Ordering still waits for seq.
+        // Local clock. The timers compare it with this device's `Date.now()`;
+        // grouping and the label add the server offset (#5624, `echoAtMs`).
+        // Ordering still waits for seq.
         createdAtMs: Date.now(),
         sinceSeq: newestSeqRef.current,
         status: 'sending',
@@ -1446,6 +1477,8 @@ export function useTimeline(
     resume,
     recoveryMarkers,
     pending: channelPending,
+    echoPins,
+    serverOffsetMs,
     send,
     ingest,
     resend,

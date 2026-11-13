@@ -98,7 +98,7 @@ function task(approvalId: string): FeedItem {
 function taskEntry(approvalId: string): MailboxEntry {
   return {
     key: `approval:${approvalId}`, kind: "task", channelId: CH, channelLabel: "#workbench", typeLabel: "처리할 일",
-    actor: "@kim-intern", actorIsAgent: true, preview: "p", atMs: NOW, timeLabel: "방금", unread: true,
+    source: { kind: "task" }, actor: "@kim-intern", actorIsAgent: true, preview: "p", atMs: NOW, timeLabel: "방금", unread: true,
     unreadCount: 0, reason: "r", task: task(approvalId),
   };
 }

@@ -50,8 +50,10 @@ import { MemberProfileProvider } from "@/features/directory/MemberProfileDialog"
 import { InboxHotkeys } from "@/features/inbox/InboxHotkeys";
 import { DesktopNotifications } from "@/features/notifications/DesktopNotifications";
 import { ApprovalsLiveSync } from "@/features/inbox/ApprovalsLiveSync";
+import { ReadStateLiveSync } from "@/features/workspace/ReadStateLiveSync";
 import { DockBadge } from "@/features/notifications/DockBadge";
 import { TrayStatus } from "@/features/notifications/TrayStatus";
+import { RestartWorkWatch } from "@/features/updates/localWorkSource";
 import { TabTitleCount } from "@/features/notifications/TabTitleCount";
 import { WorkHostNotices } from "@/features/notifications/WorkHostNotices";
 import { ActivityBeat } from "@/features/presence/ActivityBeat";
@@ -529,11 +531,15 @@ export function AppShell({
           {!stress && <DesktopNotifications />}
           {/* 새 승인 카드가 올라오면 처리할 일 목록을 바로 다시 읽는다(#3738). */}
           {!stress && <ApprovalsLiveSync />}
+          {/* 나를 부른 새 글이 오면 읽음 투영(독 배지·메뉴 막대 점·탭 제목의 수)을 바로 다시 읽는다(#5660). */}
+          {!stress && <ReadStateLiveSync />}
           {!stress && <DockBadge />}
           {/* 메뉴 막대 아이콘(#5193): 독 배지와 같은 수에 실행 중인 작업을 얹어 셸에 보내고, 메뉴에서 고른 것을 받아 간다. 아무것도 그리지 않는다. */}
           {!stress && <TrayStatus />}
           {!stress && <TabTitleCount />}
           {!stress && <WorkHostNotices />}
+          {/* 업데이트 뒤 다시 시작이 기다릴 이 맥의 작업 세션 원장을 건넨다(#5661). 새 판을 받는 동안·설치 뒤에만 읽는다. 아무것도 그리지 않는다. */}
+          {!stress && <RestartWorkWatch />}
           {/* 출석부에 세어진다(ADR-0160 ②, #4692). 아무것도 그리지 않고 받는 것도 없다. */}
           {!stress && <OnlineRollCall />}
           {/* 이 창을 쓰는 동안 서버가 폰 푸시를 늦추게 하는 신호(ADR-0206 D4, #4508). 아무것도 그리지 않는다. */}

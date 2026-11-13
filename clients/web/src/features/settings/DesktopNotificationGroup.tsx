@@ -34,13 +34,13 @@ export const DESKTOP_NOTIFICATION_ENABLE_LABEL = "알림 켜기";
 export const DESKTOP_NOTIFICATION_REQUESTING_LABEL = "요청 중";
 export const DESKTOP_NOTIFICATION_GRANTED_LABEL = "켜짐";
 export const DESKTOP_NOTIFICATION_GRANTED_DETAIL =
-  "이 기기에서 데스크톱 알림을 보낼 수 있어요.";
+  "이 기기에서 데스크탑 알림을 보낼 수 있어요.";
 export const DESKTOP_NOTIFICATION_DEFAULT_DETAIL =
   "이 앱이 앞에 없을 때 알려 주려면 알림을 켜세요.";
 export const DESKTOP_NOTIFICATION_DENIED_MESSAGE =
   "이 앱의 알림이 macOS에서 막혀 있어요. 시스템 설정 › 알림에서 oort를 허용하세요.";
 export const DESKTOP_NOTIFICATION_UNSUPPORTED_MESSAGE =
-  "이 화면에서는 데스크톱 알림을 쓸 수 없어요. 데스크톱 앱을 쓰면 알림이 와요.";
+  "이 화면에서는 데스크탑 알림을 쓸 수 없어요. 데스크탑 앱을 쓰면 알림이 와요.";
 
 // 브라우저 탭 문장(#3340). 권한은 이 단추를 누른 뒤에만 묻는다.
 export const BROWSER_NOTIFICATION_GRANTED_DETAIL =
@@ -105,13 +105,14 @@ export const DESKTOP_NOTIFICATION_KIND_ROWS: ReadonlyArray<DesktopNotificationKi
   { id: "pane-waiting", name: "응답 필요 (이 기기 세션)", description: "로컬 칸이 입력을 기다려요.", dock: "counted", phone: "desktop-only" },
   { id: "mention", name: "멘션", description: "나를 멘션한 메시지예요.", dock: "counted", phone: "phone" },
   // 따라가는 스레드의 새 답글(#4890). 폰 푸시는 서버가 이미 보내지만 폰에서 끄는 스위치는 서버 저장소(알림 설정 v2, #4494)가
-  // 생겨야 해서 이 칸은 「곧 열려요」다. 독 배지는 세지 않는다(수는 나에게 필요한 일만).
+  // 생겨야 해서 이 칸은 「곧 열려요」다. 독 배지·메뉴 막대 표시는 센다(#5660, owner 11-11 「켜줘」: 서버 #5667의 읽음 투영 값).
   {
     id: "thread-reply",
     copyKeys: {
       name: "settings.notifications.threadReplyName",
       summary: "settings.notifications.threadReplyDescription",
     },
+    dock: "counted",
   },
   { id: "work-mine-done", name: "내 작업 끝남", description: "이 기기에서 돌린 세션이 끝났어요.", dock: "never", phone: "phone" },
   { id: null, name: "팀 작업 끝남", description: "다른 사람의 세션이 끝났어요.", dock: "never", phone: "soon" },
@@ -319,7 +320,7 @@ export function DesktopNotificationGroup() {
   const dockCellText = (row: DesktopNotificationKindRow): string => {
     if (!kinds.dockBadge) return "꺼짐";
     if (row.dock === "counted") return "수에 포함";
-    if (row.dock === "dm") return kinds.dockDm ? "수에 포함" : "세지 않아요";
+    if (row.dock === "dm") return kinds.dockDms ? "수에 포함" : "세지 않아요";
     return "세지 않아요";
   };
   // 좁은 카드에서 접힌 열의 내용을 이름 아래 한 줄로 말한다.
@@ -449,14 +450,14 @@ export function DesktopNotificationGroup() {
           </SettingsRow>
           <SettingsRow
             label="새 DM도 독 배지에 세기"
-            description="1:1 대화의 새 글을 독 배지 수에 더해요. 기본은 꺼짐이에요."
+            description="DM의 새 글을 독 배지와 메뉴 막대 표시에 더해요."
             labelId={dockDmLabelId}
             descriptionId={dockDmDescId}
             keep
           >
             <Switch
               testId="desktop-notification-dock-dm"
-              checked={kinds.dockDm}
+              checked={kinds.dockDms}
               disabled={kindsLocked || !kinds.dockBadge}
               labelledBy={dockDmLabelId}
               describedBy={
@@ -466,7 +467,7 @@ export function DesktopNotificationGroup() {
                     ? `${dockDmDescId} ${dockOffReasonId}`
                     : dockDmDescId
               }
-              onCheckedChange={(next) => setDesktopNotificationKind("dockDm", next)}
+              onCheckedChange={(next) => setDesktopNotificationKind("dockDms", next)}
             />
           </SettingsRow>
           {!kinds.dockBadge && (

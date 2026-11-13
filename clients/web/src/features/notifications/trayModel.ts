@@ -14,7 +14,7 @@ import type { TrayStatusWire } from "@/lib/tauri";
 // 경로로 쓰지 않는다(`bannerClicks.ts`의 `claimBanner`와 같은 규칙).
 //
 // 「모두 읽음 처리」(#5195)의 뜻은 여기 한 곳이다(`readAllTargets`): 안 읽은 멘션이 있는 채널과 안 읽은 DM의 읽음 위치를
-// 최신으로 올린다. 메뉴 항목의 켜짐(`readAll`)과 눌렀을 때 읽는 채널 목록이 같은 함수의 답이라, 항목이 켜져 있으면 눌렀을 때
+// 최신으로 올리고, 따라가는 스레드의 답글 몫이 있으면(`hasFollowedThreadShare`, #5690) 스레드 읽음 길로 그것도 끈다. 메뉴 항목의 켜짐(`readAll`)과 눌렀을 때 읽는 채널 목록이 같은 함수의 답이라, 항목이 켜져 있으면 눌렀을 때
 // 반드시 무언가 읽힌다. 승인·응답 필요 칸은 읽음이 아니라 결정으로만 닫히므로 건드리지 않고, 남아 있는 수를 한 줄로 말한다.
 // =============================================================================
 
@@ -157,6 +157,18 @@ export function readAllTargets(input: {
     targets.push({ channelId: row.channelId, seq: row.latestSeq });
   }
   return targets;
+}
+
+/**
+ * 「모두 읽음 처리」가 끌 스레드 답글 몫이 있는가(#5690): 읽음 투영의 어느 채널 줄이든 따라가는 스레드의 안 읽은 남의 답글이 있으면 참.
+ * 이 몫은 채널 읽음 위치로 끄지 않는다 — 채널 위치를 올리면 받은함의 「스레드」 줄까지 읽음이 되어 찾아갈 길이 사라지므로
+ * 서버의 스레드 읽음 길(`POST …/threads/read-all`)로만 끈다. 값이 없는 줄(옛 서버)은 0이다.
+ */
+export function hasFollowedThreadShare(readStates: readonly ReadState[]): boolean {
+  return readStates.some((row) => {
+    const count = row.followedUnreadReplyCount;
+    return typeof count === "number" && Number.isFinite(count) && count > 0;
+  });
 }
 
 /** 메뉴에 오르는 상태: 실행 중과 대기. 유휴(호스트가 터미널을 열어 둘 뿐)는 진행 중인 작업이 아니다(`adeCounts.total`과 같은 뜻). */

@@ -30,18 +30,19 @@ import { uuidEq } from "../../lib/api";
 // |---|---|
 // | 만료 | **신호 자신** (`payload.expires_at`). 설정이 필요 없는 유일한 축이다 |
 // | 재발행 간격 | **grant 응답** (`republishIntervalMs`). 서버가 정하고 클라가 읽는다 |
-// | 뭉치는 임계 | grant 응답 (`aggregateThreshold`), 없으면 아래 미러 |
+// | 뭉치는 임계 | **화면의 고정 규칙** (1명 · 2명 · 3명부터, 아래 상수). grant의 `aggregateThreshold`는 읽지 않는다 |
 //
-// 읽는 사람은 grant를 받을 이유가 없다(grant는 **발행** 자격이다). 그래서 임계만
-// 미러가 필요하고, grant가 있으면 언제나 grant 값이 이긴다.
+// 읽는 사람은 grant를 받을 이유가 없다(grant는 **발행** 자격이다). 임계를 grant에서 읽으면 같은 채널을 보는 두 사람이 「내가
+// 쳐 본 적이 있나」에 따라 다른 꼴을 볼 수 있고, 웹 사전은 one/two/many 세 꼴뿐이라 3이 아닌 값을 그릴 문장도 없다. 그래서
+// 두 클라 모두 이 고정 규칙을 쓴다(#5582 R2-M3, `docs/design-system/typing-line.md` 「뭉치는 수」).
 // =============================================================================
 
 /**
- * 서버의 `TYPING_AGGREGATE_THRESHOLD` 미러. **grant 값이 있으면 그것이 이긴다.**
+ * 몇 명부터 「첫 이름 외 N명」으로 뭉치나 — **화면의 고정 규칙**이고 서버 `TYPING_AGGREGATE_THRESHOLD`(3, 컴파일 상수)와 같은 값이다.
  *
- * 한 번도 타이핑하지 않은 사람은 grant가 없고, 그래도 남의 작성 중은 그려야 하므로
- * 이 값이 필요하다. 서버와 갈릴 수 있는 유일한 숫자이며 갈려도 무해하다: 3명에서
- * 뭉치는 대신 4명에서 뭉치는 화면은 틀린 말을 하지 않는다.
+ * grant 응답의 `aggregateThreshold`는 화면이 읽지 않는다(#5582 R2-M3): 한 번도 타이핑하지 않은 사람은 grant가 없어서, 읽으면
+ * 같은 채널을 보는 두 사람이 다른 꼴을 볼 수 있다. 웹은 사전의 one/two/many 세 꼴이 같은 규칙을 진다(`typingLineParts`).
+ * 이름은 앞 판의 것(FALLBACK)을 그대로 둔다 — 두 클라와 시험이 이 이름으로 읽는다.
  */
 export const TYPING_AGGREGATE_THRESHOLD_FALLBACK = 3;
 
@@ -439,6 +440,40 @@ export function typingLead(
   return segments.length === 0 ? [] : segments.slice(0, -1);
 }
 
+/** 앞부분의 칸 하나. 이름 칸은 넘치면 **자기 안에서** 말줄임되고, 이름 아닌 칸은 줄지 않는다(#5582 R2-M1). */
+export interface TypingNameCell {
+  segments: TypingSegment[];
+  name: boolean;
+}
+
+/**
+ * 앞부분([`typingLead`])을 이름마다 한 칸으로 묶는다 (#5582, design-review R2-M1).
+ *
+ * 앞 판의 화면은 「A, B」를 한 줄 말줄임 하나에 담아서, 첫 이름이 길면 뒤 이름부터 잘려 둘째 사람이 줄에서 통째로 사라졌다.
+ * 이름 칸 = 이름 + 거기 붙은(빈칸 없는) 글자(「,」·「님,」)다 — 붙은 글자는 이름과 함께 잘려야 붙을 낱말을 잃지 않는다(W-3).
+ * 이름 아닌 이웃 조각(「 외 」·숫자·「명」)은 한 칸으로 이어지고 줄지 않는다. 이어 붙이면 앞부분과 한 글자도 다르지 않다.
+ */
+export function typingNameCells(lead: readonly TypingSegment[]): TypingNameCell[] {
+  const cells: TypingNameCell[] = [];
+  for (const segment of lead) {
+    if (segment.kind === "name") {
+      cells.push({ segments: [segment], name: true });
+      continue;
+    }
+    let rest = segment.text;
+    const previous = cells[cells.length - 1];
+    if (previous?.name === true) {
+      const attached = /^\S*/u.exec(rest)?.[0] ?? "";
+      if (attached !== "") previous.segments.push({ kind: segment.kind, text: attached });
+      rest = rest.slice(attached.length);
+    }
+    if (rest === "") continue;
+    if (previous !== undefined && !previous.name) previous.segments.push({ kind: segment.kind, text: rest });
+    else cells.push({ segments: [{ kind: segment.kind, text: rest }], name: false });
+  }
+  return cells;
+}
+
 /**
  * ## 나열 규칙은 하나다 (U4-4 N-1)
  *
@@ -485,7 +520,11 @@ export function typingSegments(
   return segments;
 }
 
-/** 화면용 이름 나열. 낭독 문장(`typingLabel`)의 존대·집계 규칙은 유지한다. */
+/**
+ * **폰** 화면용 이름 나열(#4797 owner 10-30: 이름 + 점 파도 + 「작성 중」, 「A, B」, 「A 외 N명」). 낭독 문장(`typingLabel`)의
+ * 존대·집계 규칙은 유지한다. 웹은 이 함수를 쓰지 않는다 — 웹 줄은 사전 문장(`timeline.typing.*`)을 나눈다(`typingLineParts`).
+ * 두 꼴이 갈린 이유와 맞출 길은 `docs/design-system/typing-line.md`.
+ */
 export function typingVisualSegments(names: string[]): TypingSegment[] {
   if (names.length === 0) return [];
   const segments: TypingSegment[] = [{ kind: "name", text: names[0] }];

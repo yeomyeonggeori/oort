@@ -121,6 +121,9 @@ export function useInvalidateReadStates(workspaceId: string) {
  * so the value the cached row already holds stays. Replacing the row wholesale would turn a closed
  * DM's `closedAtSeq` into `undefined` the moment the person opened any other conversation, and the
  * closed DM would come back. `null` is different: it IS an answer ("not closed") and replaces.
+ *
+ * `followedUnreadReplyCount` (#5667, ADR-0124 amendment 4) is the third: only a `GET` row carries it, and reading a
+ * channel does not read the threads inside it, so a `PUT` answer must not drop the menu-bar dot's thread share (#5660).
  */
 export function mergeReadStateRow(current: ReadState, incoming: ReadState): ReadState {
   const merged: ReadState = { ...incoming };
@@ -129,6 +132,9 @@ export function mergeReadStateRow(current: ReadState, incoming: ReadState): Read
   }
   if (incoming.closedAtSeq === undefined && current.closedAtSeq !== undefined) {
     merged.closedAtSeq = current.closedAtSeq;
+  }
+  if (incoming.followedUnreadReplyCount === undefined && current.followedUnreadReplyCount !== undefined) {
+    merged.followedUnreadReplyCount = current.followedUnreadReplyCount;
   }
   return merged;
 }
@@ -146,6 +152,29 @@ export function applyReadStateToCache(
       if (idKey(row.channelId) !== key) return row;
       found = true;
       return mergeReadStateRow(row, incoming);
+    });
+    return found ? next : [...next, incoming];
+  });
+}
+
+/**
+ * 스레드 모두 읽음 응답의 줄(#5690)에서는 따라가는 스레드의 답글 몫만 캐시의 채널 줄에 끼운다. 그 응답 줄은 같은 단추의
+ * 채널 `PUT`과 엇갈려 옛 위치·멘션 수를 실어 올 수 있어서, 통째로 바꾸면 방금 읽음으로 올린 채널의 수가 되살아난다.
+ * 캐시에 없는 채널이면 그 줄을 그대로 덧붙인다(지킬 값이 없다).
+ */
+export function applyFollowedThreadShareToCache(
+  client: QueryClient,
+  workspaceId: string,
+  incoming: ReadState
+): void {
+  client.setQueryData<ReadState[]>(["read-state", workspaceId], (current) => {
+    if (!current) return [incoming];
+    const key = idKey(incoming.channelId);
+    let found = false;
+    const next = current.map((row) => {
+      if (idKey(row.channelId) !== key) return row;
+      found = true;
+      return { ...row, followedUnreadReplyCount: incoming.followedUnreadReplyCount };
     });
     return found ? next : [...next, incoming];
   });

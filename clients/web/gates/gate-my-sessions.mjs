@@ -48,6 +48,7 @@ import { advanceToAccount, ONBOARDING_SURFACE } from "../e2e/advanceOnboarding.m
 import {
   openTerminalDock,
   openWorkConsole,
+  openWorkPanelByAddress,
   openWorkPanelViaConsole,
 } from "./work-openers.mjs";
 
@@ -244,7 +245,18 @@ function rootMessage(id, authorMemberId, body, seq) {
 
 const rootMessages = [
   rootMessage(offlineRootId, memberId, "세션 연속성 표면 구현", 11),
-  rootMessage(onlineRootId, memberId, "게이트 검증 정리", 12),
+  {
+    ...rootMessage(onlineRootId, memberId, "게이트 검증 정리", 12),
+    // 실제 서버는 답글이 달린 루트에 요약(`thread`)을 싣는다(`send_message_in_tx` → 롤업 갱신).
+    // 쉬는 알림 카드(아래 seq 15)는 이 루트의 답글 하나다.
+    thread: {
+      reply_count: 1,
+      last_reply_seq: 15,
+      last_reply_at: 1_785_163_200_000 + 15,
+      participant_ids: [memberId],
+      participant_count: 1,
+    },
+  },
   rootMessage(otherRootId, otherMemberId, "다른 멤버의 비공개 세션", 13),
   rootMessage(orphanedRootId, memberId, "새 호스트 계보 복구", 14),
   {
@@ -440,19 +452,17 @@ async function installRoutes(context, state) {
       });
     }
     if (path.includes("/messages/") && path.endsWith("/replies")) {
-      return json(route, { messages: [] });
+      // 실제 서버처럼 그 루트의 답글을 돌려준다(쉬는 알림 카드는 온라인 세션 루트의 답글이다).
+      const rootId = path.split("/messages/")[1].split("/")[0].toLowerCase();
+      return json(route, {
+        messages: rootMessages.filter((m) => m.rootId?.toLowerCase() === rootId),
+      });
     }
     if (path.endsWith("/messages")) {
       return json(route, { messages: rootMessages });
     }
     return json(route, {});
   });
-}
-
-async function loginAndOpenPanel(context, options = {}) {
-  const page = await loginPage(context);
-  await openWorkPanelViaConsole(page, options);
-  return page;
 }
 
 async function loginPage(context) {
@@ -464,10 +474,12 @@ async function loginPage(context) {
   // appear, skip sign-in, and then wait forever for the shell. Wait until ONE
   // of the two possible surfaces actually exists before deciding which one.
   const connect = page.locator(ONBOARDING_SURFACE);
-  const terminalToggle = page.getByTestId("open-terminal-dock");
+  // 셸이 섰다는 표지는 사이드바의 「작업」 입구다. 머리의 터미널 단추는 작업 호스트가 없으면 일부러
+  // 안 서므로(#2753, `hosts-empty` 장면) 표지로 쓸 수 없다.
+  const shellReady = page.getByTestId("nav-work");
   await Promise.race([
     connect.first().waitFor({ timeout: 30_000 }).catch(() => {}),
-    terminalToggle.waitFor({ timeout: 30_000 }).catch(() => {}),
+    shellReady.waitFor({ timeout: 30_000 }).catch(() => {}),
   ]);
   if ((await connect.count()) > 0) {
     await advanceToAccount(page);
@@ -475,7 +487,7 @@ async function loginPage(context) {
     await page.getByTestId("login-password").fill("not-a-secret");
     await page.getByTestId("login-submit").click();
   }
-  await terminalToggle.waitFor();
+  await shellReady.waitFor();
   return page;
 }
 
@@ -725,7 +737,20 @@ async function assertIdleChipVessel(page, idleCard, { shots, outDir }) {
 async function assertContinuity(context, state) {
   const page = await loginPage(context);
 
-  const idleCard = page.getByTestId("work-session-idle-card");
+  // 쉬는 알림 카드는 본류가 아니라 **스레드 답글**이다(#4888 이후 답글은 본류에 안 나온다).
+  // 본류에는 그 스레드로 가는 길(루트 아래 답글 수 줄)이 서 있어야 하고, 카드는 그 스레드를 열어 본다.
+  const rootRow = page
+    .getByTestId("timeline-message")
+    .filter({ hasText: "게이트 검증 정리" });
+  const threadAnchor = rootRow.getByTestId("thread-anchor");
+  await threadAnchor.waitFor({ timeout: 15_000 });
+  if (!/답글\s*1개|\b1\s+repl/i.test((await rootRow.getByTestId("thread-count").textContent()) ?? "")) {
+    throw new Error("main timeline root shows no reply count line for the idle-card thread");
+  }
+  await threadAnchor.click();
+  const threadPanel = page.getByTestId("thread-panel");
+  await threadPanel.waitFor();
+  const idleCard = threadPanel.getByTestId("work-session-idle-card");
   await idleCard.waitFor();
   await idleCard.getByText("현재 세션 보기", { exact: true }).waitFor();
 
@@ -760,6 +785,9 @@ async function assertContinuity(context, state) {
   await page.goto(`${origin}/#/c/${channelId}?work-panel=1`, {
     waitUntil: "domcontentloaded",
   });
+  // 스레드를 열어 카드를 보는 데 걸린 시간 동안 호스트 지연(1200ms)이 이미 지나 갔다. 해시만 바뀐
+  // 이동은 문서를 다시 읽지 않으므로, 지연을 다시 걸려면 문서를 새로 읽어야 한다(지연을 줄이지 않는다).
+  await page.reload({ waitUntil: "domcontentloaded" });
   const panel = page.getByTestId("work-panel");
   await panel.waitFor();
   await panel
@@ -851,7 +879,7 @@ async function assertContinuity(context, state) {
   }
   if (
     (await offline.getByTestId("my-work-session-status").textContent())?.trim() !==
-    "호스트 응답 없음"
+    "연결 안 됨"
   ) {
     throw new Error("offline running session lost the host-unavailable copy");
   }
@@ -1133,9 +1161,10 @@ async function assertTransitionBeforeList(context, state) {
 async function assertTerminalState(context, state, testId) {
   state.mode = testId;
   state.hostDelayMs = 0;
-  const page = await loginAndOpenPanel(context, {
-    allowHashFallback: testId === "sessions-empty" || testId === "error",
-  });
+  // 터미널 상태 장면은 패널의 상태를 잰다. 입구(작업 콘솔)는 작업 호스트가 없으면 일부러 안 서므로
+  // (`hosts-empty`, SurfaceRoute) 콘솔을 거치지 않고 패널 주소(`?work-panel=1`)로 연다.
+  const page = await loginPage(context);
+  await openWorkPanelByAddress(page, channelId);
   await page.getByTestId("work-scope-mine").click();
   if (testId === "hosts-empty") {
     const rows = page.getByTestId("my-work-session-row");

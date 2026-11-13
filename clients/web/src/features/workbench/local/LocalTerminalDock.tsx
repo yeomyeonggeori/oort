@@ -1,3 +1,4 @@
+import { uuidEq } from "@momo/core/lib/api";
 import {
   forwardRef,
   useCallback,
@@ -69,11 +70,11 @@ import {
   SESSION_STATUS_LABEL,
   type SessionListInput,
 } from "@momo/core/features/workbench/sessionList";
-import { nextWaitingPane, waitingLine } from "@momo/core/features/workbench/paneStatus";
+import { PANE_MARK_LABEL, isFailedMark, nextWaitingPane, waitingLine } from "@momo/core/features/workbench/paneStatus";
 import { createPortal } from "react-dom";
 import { useSidebarBodySlot } from "@/features/sidebar/sidebarBodySlot";
 import { SessionList, StatusMark, type SessionListHandle, type SessionRowMenuEntry } from "./SessionList";
-import { paneAttention, paneStatusOf } from "./paneAttention";
+import { paneAttention, paneMarkOf, paneSourceOf, paneStatusOf } from "./paneAttention";
 import type { PaneLaneView, PaneShareChrome, PaneStatusView } from "../WorkbenchGrid";
 import { ShareDialog, type ShareIntent } from "./share/ShareDialog";
 import type { PaneShareSource } from "./share/paneShareSource";
@@ -109,6 +110,7 @@ import { usePaneGit } from "./usePaneGit";
 import { useSessionListOpen } from "./sessionListOpen";
 import { WorkbenchGrid, type WorkbenchPaneInfo } from "../WorkbenchGrid";
 import { useWorkbenchLayout } from "../useWorkbenchLayout";
+import { focusPermissionCardWhenReady } from "../agent/focusPermissionCard";
 import { DOCK_SESSION_KEY, localSessions, type LocalSessions } from "./localSessions";
 import { HARNESS_LABEL, LocalTerminalPane, localPaneTitle, runningPaneNotice } from "./LocalTerminalPane";
 import {
@@ -144,10 +146,14 @@ function detectPlatform(): KeyPlatform {
 
 const NO_WAITING = "응답이 필요한 칸이 없습니다.";
 
+/** 칸의 프로그램 이름: 하네스 표시 이름, 셸이면 「셸」. */
+function programName(view: LocalSessionView): string {
+  return view.program.kind === "harness" ? HARNESS_LABEL[view.program.id] ?? view.program.id : "셸";
+}
+
 /** 알림·인박스에 쓰는 칸 이름: 작업 이름(OSC 제목), 없으면 프로그램 이름. */
 function paneName(view: LocalSessionView): string {
-  if (view.title) return view.title;
-  return view.program.kind === "harness" ? HARNESS_LABEL[view.program.id] ?? view.program.id : "셸";
+  return view.title || programName(view);
 }
 const SPLIT_REFUSED = "칸이 좁아 새 세션을 열 수 없습니다. 칸을 닫거나 도크를 키우세요.";
 
@@ -168,6 +174,8 @@ export function LocalTerminalDock({
   launchSource,
   startSource,
   share,
+  openAgentSession = null,
+  onAgentSessionOpened,
 }: {
   sessions?: LocalSessions;
   platform?: KeyPlatform;
@@ -206,6 +214,12 @@ export function LocalTerminalDock({
    * 골라야 켜진다.
    */
   share?: PaneShareSource;
+  /**
+   * 열어 달라는 A 세션(#5595): 작업 권한 요청 배너를 누르면 셸이 넘긴다. 이미 칸에 묶여 있으면 그 칸을 활성으로,
+   * 아니면 새 세션 메뉴와 같은 자리 규칙(`openAgent`)으로 연다. 한 번 열고 `onAgentSessionOpened`를 부른다.
+   */
+  openAgentSession?: string | null;
+  onAgentSessionOpened?: () => void;
 }) {
   const platform = platformProp ?? detectPlatform();
   const dock = useDockState();
@@ -545,6 +559,39 @@ export function LocalTerminalDock({
     [dock.open, sessions, setLayout, tab]
   );
 
+  // 작업 권한 요청 배너를 눌러 온 A 세션(#5595): 승인 카드는 그 세션의 칸에 있다. 같은 요청은 한 번만 연다.
+  // 「작업」의 「응답 필요」 줄도 같은 주소로 온다(#5640). 칸을 연 뒤 카드가 서면 카드에 초점을 둔다(`focusPermissionCardWhenReady`).
+  const openedRequestRef = useRef<string | null>(null);
+  const agentOpenedRef = useRef(onAgentSessionOpened);
+  agentOpenedRef.current = onAgentSessionOpened;
+  const stopCardFocusRef = useRef<() => void>(() => undefined);
+  useEffect(() => () => stopCardFocusRef.current(), []);
+  useEffect(() => {
+    if (openAgentSession === null) {
+      openedRequestRef.current = null;
+      return;
+    }
+    if (!agentRef.current || openedRequestRef.current === openAgentSession) return;
+    openedRequestRef.current = openAgentSession;
+    const current = layoutRef.current;
+    const boundPane = paneIds(current.root).find((id) =>
+      uuidEq(agentOfRef.current(id) ?? undefined, openAgentSession)
+    );
+    if (boundPane === undefined) {
+      openAgent(openAgentSession);
+    } else {
+      const result = focusPane(current, boundPane);
+      if (result.ok) {
+        setNotice(null);
+        layoutRef.current = result.layout;
+        setLayout(result.layout);
+      }
+    }
+    agentOpenedRef.current?.();
+    stopCardFocusRef.current();
+    stopCardFocusRef.current = focusPermissionCardWhenReady(rootRef.current, () => layoutRef.current.focused);
+  }, [openAgentSession, openAgent, setLayout]);
+
   const runDock = useCallback(
     (command: DockCommand) => {
       switch (command.type) {
@@ -703,7 +750,8 @@ export function LocalTerminalDock({
       order.flatMap((id, i) => {
         const view = sessionMap.get(id);
         const status = paneStatusOf(view);
-        return view && status ? [{ paneId: id, index: i + 1, name: paneName(view), status, signal: view.signal }] : [];
+        const mark = paneMarkOf(view);
+        return view && status ? [{ paneId: id, index: i + 1, name: paneName(view), status, mark, signal: view.signal }] : [];
       }),
       active ? layout.focused : null
     );
@@ -734,7 +782,8 @@ export function LocalTerminalDock({
     }
     const view = sessionMap.get(pane.id);
     const status = paneStatusOf(view);
-    if (!view || !status) return null;
+    const mark = paneMarkOf(view);
+    if (!view || !status || !mark) return null;
     const waiting =
       status === "waiting"
         ? {
@@ -745,8 +794,11 @@ export function LocalTerminalDock({
           }
         : null;
     return {
-      mark: <StatusMark status={status} />,
-      label: SESSION_STATUS_LABEL[status],
+      // 실패한 턴(OSC 7501 `error`)은 「끝남」이 아니라 「실패」로 그린다(design-review #5584 H1).
+      mark: <StatusMark status={mark} />,
+      label: PANE_MARK_LABEL[mark],
+      // 상태가 그 프로그램의 말이면 출처를 조용히 단다(ADR-0220, #5584 M2). 셸 칸에는 신호가 없다.
+      source: paneSourceOf(view, programName(view)),
       waiting,
     };
   };
@@ -1095,6 +1147,8 @@ export function LocalTerminalDock({
       const harness = view.program.kind === "harness" ? view.program.id : "셸";
       const programName =
         view.program.kind === "harness" ? HARNESS_LABEL[view.program.id] ?? view.program.id : "셸";
+      // 칸 머리와 같은 출처 줄(#5584 r2 M3). 프로그램의 말일 때만 있다.
+      const source = paneSourceOf(view, programName);
       return [
         {
           paneId: id,
@@ -1102,6 +1156,8 @@ export function LocalTerminalDock({
           title: view.title ?? programName,
           harness,
           status: paneStatusOf(view) ?? "idle",
+          ...(isFailedMark(paneMarkOf(view)) ? { failed: true } : {}),
+          ...(source === null ? {} : { source }),
           // L 세션 공유(ADR-0190 D4-b): 기본 꺼짐. 사람이 「채널에 공유」를 골라야 켜진다(#2867).
           shared: shareSource?.share.getState(id).kind === "on",
           // 읽기 전이면 「확인 중」(null). 시작 중이거나 PTY가 있는 칸은 곧 읽는다. PTY 없이

@@ -133,12 +133,35 @@ export function signalFromProgress(
  * 지어내지 않고, 부르는 쪽이 그 문장 조각을 통째로 뺀다.
  */
 export function elapsedSpan(sinceMs: number, nowMs: number): string | undefined {
+  const parts = elapsedParts(sinceMs, nowMs);
+  if (parts === undefined) return undefined;
+  switch (parts.unit) {
+    case "minute":
+      return `${parts.count}분`;
+    case "hour":
+      return `${parts.count}시간`;
+    case "day":
+      return `${parts.count}일`;
+  }
+}
+
+/** 1분 단위 경과의 숫자와 단위. 사전 키로 문장을 짓는 표면(#5686 채널 멤버 패널)이 읽는다. */
+export interface ElapsedParts {
+  unit: "minute" | "hour" | "day";
+  count: number;
+}
+
+/**
+ * `elapsedSpan`의 숫자 판: 같은 문턱(1분 미만은 없음, 60분부터 시간, 24시간부터 일)으로 단위와 숫자만 준다.
+ * 낱말은 부르는 쪽이 사전 키로 고른다. 두 함수가 문턱을 따로 들지 않도록 `elapsedSpan`이 이것을 읽는다.
+ */
+export function elapsedParts(sinceMs: number, nowMs: number): ElapsedParts | undefined {
   const minutes = Math.floor(Math.max(0, nowMs - sinceMs) / 60_000);
   if (minutes < 1) return undefined;
-  if (minutes < 60) return `${minutes}분`;
+  if (minutes < 60) return { unit: "minute", count: minutes };
   const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${hours}시간`;
-  return `${Math.floor(hours / 24)}일`;
+  if (hours < 24) return { unit: "hour", count: hours };
+  return { unit: "day", count: Math.floor(hours / 24) };
 }
 
 /** 요청 고리의 낱말 정본. 칩·카드·인박스가 그대로 읽어요. */

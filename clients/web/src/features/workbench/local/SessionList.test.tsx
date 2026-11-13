@@ -87,6 +87,29 @@ describe("SessionList", () => {
     expect(stops[0]!.getAttribute("data-session-pane")).toBe("p1");
   });
 
+  // design-review #5584 r2 H1 (c): 실패한 줄 위의 묶음 머리가 초록 ✓ 「끝남」이었다.
+  it("상태로 묶기: 실패한 턴은 「실패」 묶음 머리(빨간 ✕ 표지) 아래에 서고, 「끝남」 머리는 실패를 품지 않는다", () => {
+    window.localStorage.setItem("momo.web.workbench.sessionList.v1", JSON.stringify({ filter: "all", grouping: "status" }));
+    mount([input(3, { status: "done", failed: true, title: "빌드 스크립트 정리" }), input(4, { status: "done" })], "p4");
+    expect(groups().map((g) => g.textContent)).toEqual(["실패1", "끝남1"]);
+    const [failedHead, doneHead] = groups();
+    const markOf = (head: HTMLElement) => head.querySelector("[data-testid='status-mark']")?.getAttribute("data-status");
+    expect(markOf(failedHead!)).toBe("failed");
+    expect(markOf(doneHead!)).toBe("done");
+    // 실패 묶음 바로 아래 줄이 실패 칩이고, 「끝남」 머리 아래에는 실패 칩이 없다.
+    const order = [...document.querySelectorAll<HTMLElement>("[data-testid='session-list-group'], [data-testid='session-list-row']")];
+    const afterDone = order.slice(order.indexOf(doneHead!) + 1);
+    expect(afterDone.map((el) => el.querySelector("[data-testid='session-row-chip']")?.getAttribute("data-status"))).toEqual(["done"]);
+    const afterFailed = order.slice(order.indexOf(failedHead!) + 1, order.indexOf(doneHead!));
+    expect(afterFailed.map((el) => el.querySelector("[data-testid='session-row-chip']")?.textContent)).toEqual(["실패"]);
+    // 실패만 끝났을 때 「끝남」 머리는 서지 않는다.
+    act(() => root?.unmount());
+    host?.remove();
+    mount([input(3, { status: "done", failed: true })], "p3");
+    expect(groups().map((g) => g.textContent)).toEqual(["실패1"]);
+    expect(markOf(groups()[0]!)).toBe("failed");
+  });
+
   it("상태로 묶은 줄은 worktree 줄(저장소 · 브랜치)을 함께 싣고, 폴더 셸은 들여쓰지 않는다", () => {
     mount(
       [

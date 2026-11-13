@@ -106,6 +106,28 @@ describe("S1 요약은 S1 필드만 만든다 (#2861)", () => {
     expect(S1_STATES).toContain(c.snapshot().state);
   });
 
+  it("실패한 턴은 공유에서 「끝남」(성공 톤)이 아니다: 대기 + 단계 「턴 실패」 (#5584 H1)", () => {
+    const { c } = rig();
+    c.onLifecycle("running");
+    c.onSignal("working");
+    c.onSignal("turn-failed");
+    expect(c.snapshot().state).toBe("idle");
+    expect(c.snapshot().state).not.toBe("done");
+    expect(S1_STATES).toContain(c.snapshot().state);
+    expect(c.snapshot().stages.at(-1)).toBe("턴 실패");
+  });
+
+  it("거둔 보고(null)는 공유 요약도 생명주기로 돌린다, 단계는 더하지 않는다 (#5584 M3)", () => {
+    const { c } = rig();
+    c.onLifecycle("running");
+    c.onSignal("waiting-permission");
+    expect(c.snapshot().state).toBe("waiting");
+    const stages = c.snapshot().stages;
+    c.onSignal(null);
+    expect(c.snapshot().state).toBe("running");
+    expect(c.snapshot().stages).toEqual(stages);
+  });
+
   it("단계 표지는 12개까지, 같은 표지가 이어지면 합친다", () => {
     const { c } = rig();
     for (let i = 0; i < 40; i++) {

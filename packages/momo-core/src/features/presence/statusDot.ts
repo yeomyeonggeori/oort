@@ -85,6 +85,21 @@ export function agentLivenessDot(
   };
 }
 
+/** 맥 점의 낱말(#5593). 점은 낭독에서 빠지므로 줄의 접근 가능한 이름이 이 낱말로 상태를 말한다. */
+export const MAC_HOST_ON_LABEL = "연결됨";
+export const MAC_HOST_OFF_LABEL = "연결 안 됨";
+
+/**
+ * 작업 목록 세션 줄의 맥 점(#5593): 그 세션을 돌리는 맥이 지금 연결돼 있는가. 같은 Buzz식 표다 — 채운 초록 = 연결됨,
+ * 속 빈 고리 = 연결 안 됨(owner 2026-11-09 낱말 결정). 연결됨은 호스트 목록의 `online`(서버 90초 heartbeat 창)이고 해지된 호스트는 연결 안 됨이다. 호스트를 모르면
+ * 부르지 않는다(점 없음 — 「모름」을 연결 안 됨으로 그리지 않는다, 아래 `humanPresenceDot` 와 같은 이유).
+ */
+export function macHostDot(online: boolean): StatusDot {
+  return online
+    ? { tone: "ok", label: MAC_HOST_ON_LABEL }
+    : { tone: "muted", label: MAC_HOST_OFF_LABEL };
+}
+
 /** 생존 판정이 없는 에이전트: 호스트에 닿아 있을 때만 점이다. */
 export function agentHostDot(hostOnline: boolean | undefined): StatusDot | null {
   return hostOnline === true
