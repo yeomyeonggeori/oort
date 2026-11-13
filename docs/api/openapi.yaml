@@ -993,7 +993,8 @@ paths:
         phone parks in the keychain group its notification extension reads. It
         can call exactly `GET /v1/workspaces/{ws}/channels/{ch}/messages` and
         `GET /v1/workspaces/{ws}/roster` of its own workspace (403 anywhere
-        else, before any query), has no refresh half, cannot mint another, and
+        else, before any query; the roster it reads is the active one even for
+        an owner or admin), has no refresh half, cannot mint another, and
         lives 6 hours or until the session it was minted under can no longer
         rotate (logout with its refresh half, refresh-reuse sweep, password
         change, suspension, removal) - whichever is first.
@@ -1886,7 +1887,16 @@ paths:
     get:
       tags: [roster]
       operationId: getRoster
-      summary: List active workspace members (humans and agents).
+      summary: List workspace members (humans and agents).
+      description: >
+        Active members for every viewer, restricted to shared-channel members
+        for a guest. When the viewer is a person signed in with a full access
+        token whose workspace role is owner or admin, the roster also carries
+        the workspace's suspended humans (`status: suspended`) so a suspension
+        can be found and undone (ADR-0128 D3 amendment, #5814). Members,
+        guests, agents, work hosts and the notification extension's
+        `push_fetch` token get the active roster only. Suspended agents,
+        `invited` and `deleted` members are never carried.
       security:
         - bearerAuth: []
       parameters:
@@ -1909,7 +1919,9 @@ paths:
             maximum: 500
       responses:
         "200":
-          description: Active workspace roster, restricted to shared-channel members for guests.
+          description: >
+            Active workspace roster, restricted to shared-channel members for
+            guests; an owner or admin person also receives suspended humans.
           content:
             application/json:
               schema:
@@ -19762,8 +19774,12 @@ components:
             $ref: "#/components/schemas/RosterMember"
         humanCount:
           type: integer
+          description: >
+            Active human rows in `members`. A suspended row in an owner/admin
+            roster is listed but not counted (#5814).
         agentCount:
           type: integer
+          description: Active agent rows in `members`.
 
     SetPresenceRequest:
       type: object
