@@ -13,7 +13,7 @@ import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/design/
 // 조립했다(팀 키 끊기·하니스 끊기·GitHub 구독·개인 키 회수). 생김새·초점·잠김이 조금씩 달랐다. 이 파일이 그
 // 문법 하나다:
 //
-//   제목(무엇을 할지 묻는 한 문장) · 설명 · [경고 한 줄] · [오류] · [잠긴 까닭] · 취소 | 확정 단추
+//   [대상 줄] · 제목(무엇을 할지 묻는 한 문장) · 설명 · [경고 한 줄] · [오류] · [잠긴 까닭] · 취소 | 확정 단추
 //
 // ## 두 그릇, 한 몸
 //
@@ -39,6 +39,8 @@ import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/design/
 export type ConfirmTone = "default" | "destructive";
 
 export interface ConfirmBodyProps {
+  /** 제목 위의 「누구에 대한」 줄(작은 얼굴 + 이름 등). 단계가 본문을 덮어도 대상이 남게 한다. */
+  subject?: React.ReactNode;
   title: string;
   description?: React.ReactNode;
   /** 확정이 되돌릴 수 없을 때 등, 설명 뒤에 위험색으로 서는 한 줄. */
@@ -60,6 +62,7 @@ export interface ConfirmBodyProps {
 }
 
 function ConfirmBody({
+  subject,
   title,
   description,
   warning,
@@ -88,6 +91,7 @@ function ConfirmBody({
   const id = (suffix: string) => (testId ? `${testId}-${suffix}` : undefined);
   return (
     <>
+      {subject !== undefined ? subject : null}
       <div className="flex min-w-0 flex-col gap-1">
         {host === "dialog" ? (
           <DialogTitle id={titleId} className="[overflow-wrap:anywhere]">
@@ -125,7 +129,8 @@ function ConfirmBody({
           {lockedReason}
         </p>
       ) : null}
-      <div className="flex shrink-0 flex-wrap items-center justify-end gap-2 pt-1">
+      {/* 단계가 앞 본문의 높이를 덮어 설 때(#5780 검수 r1 M2) 단추 줄은 바닥에 붙는다. 높이가 내용만큼이면 차이가 없다. */}
+      <div className={cn("flex shrink-0 flex-wrap items-center justify-end gap-2 pt-1", host === "stage" && "mt-auto")}>
         <Button
           ref={cancelRef}
           type="button"

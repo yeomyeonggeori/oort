@@ -447,6 +447,17 @@ function RoleConfirm({
   return (
     <ConfirmStage
       testId="member-profile-role-stage"
+      // 단계가 본문을 덮어도 「누구의」 역할인지가 남는다: 작은 얼굴 + 이름 + 핸들(#5780 검수 r1 M2).
+      className="flex-1"
+      subject={
+        <div className="flex min-w-0 items-center gap-2" data-testid="member-profile-role-stage-subject">
+          <ProfileAvatar member={member} size="row" />
+          <span className="flex min-w-0 flex-col">
+            <span className="truncate text-body font-semibold text-ink">{member.displayName}</span>
+            <span className="truncate text-meta text-ink-muted">@{member.handle}</span>
+          </span>
+        </div>
+      }
       title={t("directory.role.confirmTitle", { name: member.displayName })}
       description={
         <div className="flex flex-col gap-2">
@@ -578,33 +589,47 @@ function ReadyProfile({
     />
   );
 
+  const stage =
+    reset.phase !== PasswordResetPhase.Idle ? (
+      <PasswordResetStage
+        member={member}
+        reset={reset}
+        offline={offline}
+        offlineReasonId={offline ? OFFLINE_REASON_ID : undefined}
+        close={close}
+      />
+    ) : roleStage.pending !== null ? (
+      <RoleConfirm
+        member={member}
+        to={roleStage.pending}
+        labels={labels}
+        offline={offline}
+        roleChange={roleChange}
+        onCancel={roleStage.cancel}
+        onDone={finishRoleStage}
+        t={t}
+      />
+    ) : null;
+
+  // 단계(역할 확인·비밀번호 재설정)는 본문을 **덮어** 선다(#5780 검수 r1 M2): 본문과 단계가 한 격자 칸에 겹치고, 본문은
+  // 단계가 서 있는 동안 자리만 지킨다(`invisible` — 보이지도, 초점이 닿지도, 보조기술에 읽히지도 않는다). 그래서 창 높이는
+  // 본문과 단계 중 큰 쪽이고, 단계가 서고 내려갈 때 창이 뛰지 않는다(전에는 548 → 157). 본문은 떼지 않으므로 스크롤 자리·
+  // 「바뀜」 낭독 자리도 그대로다.
   return (
     <>
       {offline && stageUp ? offlineBanner("band") : null}
-      {reset.phase !== PasswordResetPhase.Idle ? (
-        <PasswordResetStage
-          member={member}
-          reset={reset}
-          offline={offline}
-          offlineReasonId={offline ? OFFLINE_REASON_ID : undefined}
-          close={close}
-        />
-      ) : roleStage.pending !== null ? (
-        <RoleConfirm
-          member={member}
-          to={roleStage.pending}
-          labels={labels}
-          offline={offline}
-          roleChange={roleChange}
-          onCancel={roleStage.cancel}
-          onDone={finishRoleStage}
-          t={t}
-        />
-      ) : (
-        <div className="flex min-h-0 flex-col gap-6 overflow-y-auto px-6 pb-6 pt-8" data-testid="member-profile-body">
+      <div className="grid min-h-0 grid-cols-1 grid-rows-1" data-testid="member-profile-frame">
+        <div
+          className={cn(
+            "col-start-1 row-start-1 flex min-h-0 flex-col gap-6 overflow-y-auto px-6 pb-6 pt-8",
+            stageUp && "invisible"
+          )}
+          aria-hidden={stageUp || undefined}
+          data-testid="member-profile-body"
+        >
           <ProfileHero member={member} t={t} />
 
-          {offline ? offlineBanner("inline") : null}
+          {offline && !stageUp ? offlineBanner("inline") : null}
 
           <div className="flex flex-col items-center gap-2">
             <div className="flex flex-wrap items-center justify-center gap-2" data-testid="member-profile-actions">
@@ -731,7 +756,12 @@ function ReadyProfile({
             </ManageSection>
           )}
         </div>
-      )}
+        {stage !== null ? (
+          <div className="col-start-1 row-start-1 flex min-h-0 flex-col" data-testid="member-profile-stage-frame">
+            {stage}
+          </div>
+        ) : null}
+      </div>
     </>
   );
 }

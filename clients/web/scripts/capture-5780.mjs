@@ -207,6 +207,30 @@ async function focusReturnsTo(page, locator) {
   return { ok: false, where };
 }
 
+/** 창의 위쪽 끝·왼쪽·폭·높이. */
+const dialogBox = (page) =>
+  page.evaluate(() => {
+    const r = document.querySelector('[data-testid="member-profile-dialog"]')?.getBoundingClientRect();
+    return r ? { top: r.top, left: r.left, width: r.width, height: r.height } : null;
+  });
+const boxDelta = (a, b) => {
+  const d = { top: Math.abs(b.top - a.top), left: Math.abs(b.left - a.left), width: Math.abs(b.width - a.width), height: b.height - a.height };
+  return { ...d, max: Math.max(d.top, d.left, d.width, Math.abs(d.height)) };
+};
+
+/**
+ * 확인 단계가 서도 창이 뛰지 않는다(#5780 검수 r1 M2: 전에는 548 → 157). 위쪽 끝·왼쪽·폭은 그대로(±0.5px), 높이 변화는
+ * 단계가 본문보다 클 때만 그만큼 커진다(줄지 않는다). 잰 값은 로그에 남긴다.
+ */
+async function stageHolds(page, name, before) {
+  await settle(page);
+  const after = await dialogBox(page);
+  const d = boxDelta(before, after);
+  console.log(`measure ${name} stage-box ${JSON.stringify({ before, after, delta: d })}`);
+  check(`${name} 단계에서 창의 위쪽 끝·폭이 그대로이고 높이가 줄지 않는다`, d.top <= 0.5 && d.left <= 0.5 && d.width <= 0.5 && d.height >= -0.5, d);
+  return d;
+}
+
 const text = (page, id) => page.getByTestId(id).innerText().catch(() => null);
 const count = (page, id) => page.getByTestId(id).count();
 
@@ -281,28 +305,49 @@ async function sceneRole(browser, origin, scheme) {
   try {
     await page.goto(origin, { waitUntil: "domcontentloaded" });
     const { dialog } = await openProfile(page, MEMBER);
+    await settle(page);
+    const profileBox = await dialogBox(page);
     // 일반 확인 단계(멤버 → 관리자).
     await page.getByTestId("member-profile-role").click();
     await page.getByRole("option", { name: "관리자" }).click();
     await page.getByTestId("member-profile-role-stage").waitFor();
     check(`R ${tag} 고르면 확인 단계가 서고 요청은 없다`, patches.length === 0);
-    check(`R ${tag} 대화상자는 하나다(겹친 창 없음, §3.4)`, (await page.locator('[role="dialog"], [role="alertdialog"]').count()) === 1);
+    // 역할 목록(Radix Popover, 그 판도 role="dialog")은 고른 뒤 닫히며 사라진다. 본문은 이제 단계 아래에 남으므로(M2) 목록이 닫히는
+    // 동안 잠깐 같이 있을 수 있다: 목록이 걷힌 뒤에 센다.
+    await page.getByRole("listbox").waitFor({ state: "detached" });
+    const dialogs = await page.locator('[role="dialog"], [role="alertdialog"]').evaluateAll((els) => els.map((el) => el.getAttribute("data-testid") ?? el.tagName));
+    check(`R ${tag} 대화상자는 하나다(겹친 창 없음, §3.4)`, dialogs.length === 1, dialogs);
     check(`R ${tag} 초점은 취소에 있다`, await page.evaluate(() => document.activeElement?.getAttribute("data-testid") === "member-profile-role-stage-cancel"));
+    check(`R ${tag} 단계 위에 누구의 역할인지(작은 얼굴 + 이름)가 남는다`, ((await text(page, "member-profile-role-stage-subject")) ?? "").includes("이도현"));
     await page.mouse.move(0, 0);
     await shot(page, `R-${tag}-confirm-general`);
+    await stageHolds(page, `R ${tag} 일반`, profileBox);
+    // 덮인 본문은 Tab 에 닿지 않는다: 단계 안의 정거장은 취소 → 역할 바꾸기 뿐이다(돌아서 다시 취소).
+    const stageStops = [
+      await pressTo(page, "Tab", "member-profile-role-stage-confirm"),
+      await pressTo(page, "Tab", "member-profile-role-stage-cancel"),
+      await pressTo(page, "Shift+Tab", "member-profile-role-stage-confirm"),
+    ];
+    console.log(`measure R ${tag} stage-tab ${JSON.stringify(stageStops)}`);
+    check(`R ${tag} 단계의 Tab 정거장은 취소·역할 바꾸기 둘뿐(덮인 본문에 닿지 않음)`,
+      JSON.stringify(stageStops) === JSON.stringify(["member-profile-role-stage-confirm", "member-profile-role-stage-cancel", "member-profile-role-stage-confirm"]), stageStops);
     await page.keyboard.press("Escape");
     await page.getByTestId("member-profile-role-stage").waitFor({ state: "detached" });
     check(`R ${tag} Esc 는 단계만 내린다(요청 없음, 창 남음)`, patches.length === 0 && (await dialog.isVisible()));
+    await settle(page);
+    const backBox = await dialogBox(page);
+    check(`R ${tag} 단계가 내려가면 창이 처음 크기로 돌아온다(±0.5px)`, boxDelta(profileBox, backBox).max <= 0.5, { profileBox, backBox });
 
     // 소유자 승격 확인 단계.
     await page.getByTestId("member-profile-role").click();
     await page.getByRole("option", { name: "소유자" }).click();
     await page.getByTestId("member-profile-role-stage").waitFor();
     check(`R ${tag} 소유자 승격은 경고 + 위험 단추`,
-      ((await text(page, "member-profile-role-stage-warning")) ?? "").startsWith("되돌릴 수 없어요.") &&
+      ((await text(page, "member-profile-role-stage-warning")) ?? "").endsWith("되돌릴 수 없어요.") &&
         (await page.getByTestId("member-profile-role-stage-confirm").getAttribute("data-tone")) === "destructive");
     await page.mouse.move(0, 0);
     await shot(page, `R-${tag}-confirm-owner`);
+    await stageHolds(page, `R ${tag} 소유자`, profileBox);
     await page.getByTestId("member-profile-role-stage-cancel").click();
 
     // 실제로 바꾼다(멤버 → 관리자) → 「바뀜」. 영수증이 서도 고르개의 오른쪽 끝과 줄 높이가 움직이지 않는다(자리를 미리 잡음).
@@ -344,6 +389,7 @@ async function sceneNarrow(browser, origin, scheme) {
       await openProfile(page, ADMIN);
       await page.mouse.move(0, 0);
       await shot(page, `N-${tag}-profile`);
+      const profileBox = await dialogBox(page);
       check(`N ${tag} 페이지가 가로로 넘치지 않는다`, (await overflowX(page)) <= 0, await overflowX(page));
       check(`N ${tag} 창 안에서 넘치지 않는다`, (await dialogOverflow(page)) <= 0, await dialogOverflow(page));
       // 본문은 안에서 스크롤된다: 맨 아래 관리 묶음까지 닿는다.
@@ -356,6 +402,16 @@ async function sceneNarrow(browser, origin, scheme) {
       await page.mouse.move(0, 0);
       await shot(page, `N-${tag}-confirm-owner`);
       check(`N ${tag} 확인 단계도 넘치지 않는다`, (await dialogOverflow(page)) <= 0, await dialogOverflow(page));
+      await stageHolds(page, `N ${tag} 소유자`, profileBox);
+      check(`N ${tag} 확인 단계의 단추가 창 안에 보인다`, await page.getByTestId("member-profile-role-stage-confirm").isVisible());
+      await page.getByTestId("member-profile-role-stage-cancel").click();
+      await page.getByTestId("member-profile-role-stage").waitFor({ state: "detached" });
+      await page.getByTestId("member-profile-role").click();
+      await page.getByRole("option", { name: "멤버" }).click();
+      await page.getByTestId("member-profile-role-stage").waitFor();
+      await page.mouse.move(0, 0);
+      await shot(page, `N-${tag}-confirm-general`);
+      await stageHolds(page, `N ${tag} 일반`, profileBox);
     } finally {
       await context.close();
     }

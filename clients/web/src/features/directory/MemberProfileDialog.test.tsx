@@ -777,6 +777,35 @@ describe("역할 바꾸기 확인 단계 (수용 2)", () => {
     expect(roleSelect()?.disabled).toBe(false);
   });
 
+  // 검수 r1 M2: 단계가 본문 자리를 갈아 끼우면 창이 548 → 157 로 뛰었다. 단계는 본문을 덮어 서고, 본문은 떼지 않고 자리만
+  // 지킨다(높이는 실제 엔진에서 `capture-5780.mjs` 의 「단계에서 창의 위쪽 끝·폭이 그대로이고 높이가 줄지 않는다」가 잰다).
+  it("단계는 본문을 덮어 선다: 본문은 그대로 남아 자리만 지키고(aria-hidden·invisible), 대상 줄이 서며, 오프라인 사유 줄은 한 번만 선다", async () => {
+    mountProfile({ viewer: OWNER, targetId: MEMBER_ID });
+    await waitForDialog();
+    const body = byId("member-profile-body");
+    expect(body).not.toBeNull();
+    expect(body?.getAttribute("aria-hidden")).toBeNull();
+    await pickRole("admin");
+    await vi.waitFor(() => expect(byId("member-profile-role-stage")).not.toBeNull());
+    expect(byId("member-profile-body")).toBe(body);
+    expect(body?.getAttribute("aria-hidden")).toBe("true");
+    expect(body?.className.split(/\s+/)).toContain("invisible");
+    expect(byId("member-profile-role-stage-subject")?.textContent).toContain("김인턴");
+    expect(byId("member-profile-role-stage-subject")?.textContent).toContain("@intern-kim");
+    // 단계가 선 뒤 연결이 끊기면 사유 줄은 단계 위 띠 하나다(덮인 본문 안의 줄과 겹쳐 서지 않는다 — 같은 id 가 둘이 되지 않는다).
+    Object.defineProperty(window.navigator, "onLine", { configurable: true, value: false });
+    await act(async () => {
+      window.dispatchEvent(new Event("offline"));
+    });
+    await vi.waitFor(() => expect(document.querySelectorAll('[data-testid="member-profile-offline"]')).toHaveLength(1));
+    expect(document.querySelectorAll("#member-profile-offline-reason")).toHaveLength(1);
+    await pressEscape();
+    await vi.waitFor(() => expect(byId("member-profile-role-stage")).toBeNull());
+    expect(byId("member-profile-body")).toBe(body);
+    expect(body?.getAttribute("aria-hidden")).toBeNull();
+    expect(document.querySelectorAll("#member-profile-offline-reason")).toHaveLength(1);
+  });
+
   it("오프라인이면 고르개를 잠그고 배너 사유를 가리킨다", async () => {
     mountProfile({ viewer: OWNER, targetId: MEMBER_ID, deviceOffline: true });
     await waitForDialog();
