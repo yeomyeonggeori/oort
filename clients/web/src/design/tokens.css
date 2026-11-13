@@ -2934,9 +2934,15 @@
 }
 
 /* Radix DropdownMenu sets this on the panel. A long row must truncate inside
- * that box instead of growing the menu past the viewport (#1886 M-1). */
+ * that box instead of growing the menu past the viewport (#1886 M-1).
+ * 컨텍스트 메뉴는 같은 값을 다른 이름으로 싣는다(아래 높이 쪽과 같은 이유로 둘을 잇는다). 하위 메뉴 판(#5777)이
+ * 이것을 입는다: 720 창에서 80자 섹션 이름의 하위 판이 양쪽 다 자리가 모자라면 Radix 는 뒤집기만 하고 줄이지는
+ * 않아 창 밖으로 15px 나갔다(레인 capture-5777 E). 드롭다운 판에는 컨텍스트 변수가 없으므로 예전 값 그대로다. */
 @utility max-w-menu-available {
-  max-inline-size: var(--radix-dropdown-menu-content-available-width);
+  max-inline-size: var(
+    --radix-context-menu-content-available-width,
+    var(--radix-dropdown-menu-content-available-width)
+  );
 }
 
 /* 같은 일의 높이 쪽 (#3963 design-review B1). Radix 메뉴(컨텍스트·드롭다운)는 패널에 가용 높이를

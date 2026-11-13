@@ -59,18 +59,18 @@ import type { Channel, MembershipRole } from "../../lib/api";
 // 적용된다(바로 아래 `SURFACE_KEYS.row` 산문). 별표를 헤더에 세우면 「채널을 열지
 // 않고 조작한다」는 이 티켓의 문법이 「열어도 되고 안 열어도 되고」로 흐려진다.
 //
-// ### 왜 서브메뉴가 아닌가
+// ### 하위 메뉴로 접는 무리 (#5777, owner 2026-11-14)
 //
-// #1932 브리프의 스케치는 「섹션으로 이동 ▸」 **서브메뉴**였다. 실사해 보니 이
-// 레포에는 서브메뉴 금지가 이유와 이슈 번호까지 달려 명문화돼 있다
-// (`design/ui/dropdown-menu.tsx` 머리말, 이슈 #1383): *"Adopting submenus
-// therefore means re-arguing that rule, which is ADR work and not a component
-// change."* 그리고 그 문단이 **대체물까지 지정한다** — 「화면에 남는 행들 위의
-// 제목」(`DropdownMenuLabel`).
+// #1932 브리프의 스케치는 「섹션으로 이동 ▸」 **하위 메뉴**였지만, 그때 이 레포는 하위
+// 메뉴를 금지하고 있었다(`design/ui/dropdown-menu.tsx` 머리말, 이슈 #1383: 고를 수 없는
+// 줄은 이유와 함께 화면에 남아야 하는데 하위 메뉴가 그 이유를 한 겹 안으로 숨긴다). 그래서
+// 이 자리는 한동안 「제목 하나 + 화면에 남는 라디오 행들」이었다.
 //
-// 그래서 여기 들어온 것은 제목 하나와 그 아래 라디오 행들이다. 서브메뉴를 들이는
-// 것보다 이쪽이 「문법 동형」에 더 충실하다: 티켓 하나가 컴포넌트 변경으로 ADR급
-// 결정을 뒤집지 않고, 목적지가 열지 않아도 보인다.
+// owner 가 2026-11-14 그 규칙을 **좁혔다**: 하위 메뉴는 **고를 수 없는 줄이 없는 묶음에만**
+// 쓴다(디자인 시스템 README 「메뉴」 절). 금지의 이유는 잠긴 줄이 없는 묶음에는 생기지 않는다.
+// 이 표의 항목은 「있거나 없거나」뿐이라 잠긴 줄이 구조상 없고, 웹은 그중 복사(이름 · 링크 ·
+// ID)와 섹션 이동을 Buzz 처럼 `복사 ›` · `섹션으로 이동 ›` 하위 메뉴로 접는다
+// (`channelActionClusterSubmenu`). 폰 시트는 예전 그대로 제목 + 행이다.
 //
 // 라디오인 이유는 `PresenceControl` 과 같다: 섹션 배치는 **여럿 중 하나**라
 // 지금 속한 섹션이 `aria-checked` 로 들려야 한다. 평범한 항목 N 개는 스크린리더에
@@ -86,8 +86,14 @@ import type { Channel, MembershipRole } from "../../lib/api";
 //   복사(이름 · 링크 · ID) │ 섹션 이동 │ 읽음/읽지 않음 · 알림 · 별표 │ 닫기(DM) │ 나가기
 //
 // 헤더 ⋮ 는 같은 표를 다른 열쇠로 거른다 - `주제 │ 알림 · 기억 │ 나가기` 로 예전 그대로다.
-// 복사 무리는 서브메뉴(Buzz 의 「복사 ▸」)가 아니라 **제목 + 화면에 남는 세 행**이다. 이유는
-// 위 「왜 서브메뉴가 아닌가」와 같다.
+// 웹은 복사 무리와 섹션 이동을 하위 메뉴(Buzz 의 「복사 ›」)로 접고(위 절), 폰 시트는 제목 +
+// 행으로 편다. 무리·구분선은 둘이 같은 이 표에서 읽는다.
+//
+// ## 줄마다 아이콘 (#5777, owner 2026-11-14 「알림 아이콘 정렬 잘 맞춰줘」)
+//
+// 모든 항목이 아이콘 **뜻 낱말**(`ChannelActionIcon`) 하나를 든다. 웹 메뉴는 그것을 줄 앞
+// 16px 글리프로 그려 모든 줄의 아이콘이 한 세로 줄에 서고, 아이콘 없는 줄이 섞여 글자 시작이
+// 들쭉날쭉하지 않는다. 칸이 필수라 새 항목은 아이콘을 고르지 않고는 컴파일되지 않는다.
 // =============================================================================
 
 export type ChannelActionKey =
@@ -152,6 +158,67 @@ export function channelActionClusterTitle(
 }
 
 /**
+ * 줄 아이콘의 **뜻 낱말** (#5776 → #5777). 그림 이름이 아니라 뜻이다: 웹은 이것을 Lucide 글리프로
+ * 그리고(`channelActions.tsx`), 폰은 자기가 아는 낱말(알림 상태 `bell` · `bell-off`)만 줄 끝 상태
+ * 표지로 그리며 나머지는 그리지 않는다(`isChannelActionStatusIcon`). 이모지를 코어에 두지 않는다.
+ */
+export type ChannelActionIcon =
+  | "topic"
+  | "copy"
+  | "copy-name"
+  | "copy-link"
+  | "copy-id"
+  | "section"
+  | "mark-read"
+  | "mark-unread"
+  | "bell"
+  | "bell-off"
+  | "memory"
+  | "github"
+  | "star"
+  | "unstar"
+  | "hide"
+  | "leave";
+
+/** 알림 상태의 두 낱말인가. 폰이 줄 끝 상태 표지(`RowStatusIcon`)로 그리는 것은 이 둘뿐이다. */
+export function isChannelActionStatusIcon(
+  icon: ChannelActionIcon | undefined
+): icon is "bell" | "bell-off" {
+  return icon === "bell" || icon === "bell-off";
+}
+
+/** 하위 메뉴(›)로 접힌 무리의 얼굴: 그 줄의 이름 · 아이콘 · `data-testid` 접미사. */
+export interface ChannelActionSubmenu {
+  testKey: string;
+  label: string;
+  icon: ChannelActionIcon;
+}
+
+/**
+ * 웹 메뉴가 **하위 메뉴(›)로 접는** 무리 (#5777, owner 2026-11-14).
+ *
+ * 규칙(디자인 시스템 README 「메뉴」 절): 하위 메뉴는 **고를 수 없는 줄이 없는 묶음에만** 쓴다.
+ * 고를 수 없는 줄은 이유와 함께 화면에 남아야 하는데 하위 메뉴는 그 이유를 한 겹 안으로 숨기기
+ * 때문이다(`design/ui/dropdown-menu.tsx` 머리말, #1383). 이 표의 항목은 「있거나 없거나」뿐이라
+ * 잠긴 줄이 없다. 그래도 접는 무리를 여기 둘로 닫아 두는 것은, 잠금 칸이 이 표에 들어오는 날
+ * 그 무리를 이 목록에서 빼야 한다는 것을 한 자리에서 보이게 하려는 것이다. 부품 쪽 가드는 하위
+ * 메뉴 판에서 잠긴 줄을 만나면 개발 중 오류를 낸다(`guardSubmenuRows`).
+ *
+ * 낱말은 새로 짓지 않는다: 복사는 무리 제목(「복사」), 섹션 이동은 항목 자신의 이름(「섹션으로
+ * 이동」)이다. `testKey` 도 예전 제목 줄이 쓰던 그대로다(캡처 레인이 그 이름을 읽는다).
+ */
+const CLUSTER_SUBMENU: Partial<Record<ChannelActionCluster, ChannelActionSubmenu>> = {
+  copy: { testKey: "copy-group", label: CHANNEL_COPY_GROUP_LABEL, icon: "copy" },
+  place: { testKey: "move-to-section", label: SECTION_MOVE_GROUP_LABEL, icon: "section" },
+};
+
+export function channelActionClusterSubmenu(
+  cluster: ChannelActionCluster
+): ChannelActionSubmenu | undefined {
+  return CLUSTER_SUBMENU[cluster];
+}
+
+/**
  * 「섹션으로 이동」의 한 목적지 (ADR-0177 D4).
  *
  * `id === null` 은 기본 「채널」 섹션이다. 커스텀 섹션에서 빼는 것과 기본 섹션에
@@ -171,10 +238,11 @@ export interface ChannelActionItem {
   testKey: string;
   label: string;
   /**
-   * 알림 항목의 상태 표지 — 그림이 아니라 **뜻 낱말**이다(켜짐 `bell`, 꺼짐 `bell-off`). 폰이 자기 종 아이콘으로 그리고
-   * 웹은 이 칸을 그리지 않는다. 이모지를 코어에 두지 않는다(#5776).
+   * 이 줄의 아이콘 뜻 낱말(`ChannelActionIcon`). **모든 항목이 든다**(#5777): 웹 메뉴는 줄 앞에 그려
+   * 아이콘이 한 세로 줄에 선다. 낱말이 상태인 항목은 아이콘도 상태를 따른다(알림 `bell`/`bell-off`,
+   * 별표 `star`/`unstar`). 폰은 알림 두 낱말만 줄 끝 표지로 그린다(#5776).
    */
-  icon?: "bell" | "bell-off";
+  icon: ChannelActionIcon;
   /**
    * 왕복이 도는 동안 이 항목이 하는 말 (design-review #1937 N-1). 없으면
    * 낱말이 바뀌지 않는다 — 왕복이 없는 항목(복사·다이얼로그 인계)이 그렇다.
@@ -355,7 +423,7 @@ export function channelActionItems(
     items.push({ ...item, cluster: CLUSTER_OF[item.key] });
   };
   if (available.topic) {
-    push({ key: "topic", testKey: "topic", label: CHANNEL_TOPIC_VIEW_LABEL });
+    push({ key: "topic", testKey: "topic", label: CHANNEL_TOPIC_VIEW_LABEL, icon: "topic" });
   }
   // 복사 무리: 이름 → 링크 → ID. Buzz 의 「복사 ▸」가 든 것과 같은 세 가지다.
   if (available.copyName) {
@@ -363,6 +431,7 @@ export function channelActionItems(
       key: "copy-name",
       testKey: "copy-name",
       label: channelCopyNameLabel(state.copiedName),
+      icon: "copy-name",
     });
   }
   if (available.copyLink) {
@@ -370,6 +439,7 @@ export function channelActionItems(
       key: "copy-link",
       testKey: "copy-link",
       label: copyLinkActionLabel(state.copiedLink),
+      icon: "copy-link",
     });
   }
   if (available.copyId) {
@@ -377,6 +447,7 @@ export function channelActionItems(
       key: "copy-id",
       testKey: "copy-id",
       label: channelCopyIdLabel(state.copiedId ?? false),
+      icon: "copy-id",
     });
   }
   // 섹션 이동: 무리 하나(제목 + 라디오 행들).
@@ -385,6 +456,7 @@ export function channelActionItems(
       key: "move-to-section",
       testKey: "move-to-section",
       label: SECTION_MOVE_GROUP_LABEL,
+      icon: "section",
       sections: state.sections ?? [],
       currentSectionId: state.currentSectionId ?? null,
     });
@@ -395,6 +467,7 @@ export function channelActionItems(
       key: "mark-read",
       testKey: "mark-read",
       label: CHANNEL_MARK_READ_LABEL,
+      icon: "mark-read",
       busyLabel: CHANNEL_MARK_READ_BUSY_LABEL,
     });
   }
@@ -403,6 +476,7 @@ export function channelActionItems(
       key: "mark-unread",
       testKey: "mark-unread",
       label: CHANNEL_MARK_UNREAD_LABEL,
+      icon: "mark-unread",
       busyLabel: CHANNEL_MARK_UNREAD_BUSY_LABEL,
     });
   }
@@ -419,26 +493,29 @@ export function channelActionItems(
       key: "memory",
       testKey: "memory-settings",
       label: CHANNEL_MEMORY_SETTINGS_LABEL,
+      icon: "memory",
     });
   }
   if (available.github === true) {
-    push({ key: "github", testKey: "github-notifications", label: CHANNEL_GITHUB_LABEL });
+    push({ key: "github", testKey: "github-notifications", label: CHANNEL_GITHUB_LABEL, icon: "github" });
   }
   if (available.star) {
     push({
       key: "star",
       testKey: "star",
       label: channelStarToggleLabel(state.starred ?? false),
+      icon: state.starred ? "unstar" : "star",
     });
   }
   if (available.closeDm) {
-    push({ key: "close-dm", testKey: "close-dm", label: DM_CLOSE_LABEL });
+    push({ key: "close-dm", testKey: "close-dm", label: DM_CLOSE_LABEL, icon: "hide" });
   }
   if (available.leave) {
     push({
       key: "leave",
       testKey: "leave",
       label: CHANNEL_LEAVE_LABEL,
+      icon: "leave",
       tone: "danger",
     });
   }

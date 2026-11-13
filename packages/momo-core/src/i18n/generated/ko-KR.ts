@@ -1985,6 +1985,354 @@ export const catalog: MessageCatalog = {
       "value": "세션"
     }
   ],
+  "directory.manage.heading": [
+    {
+      "type": 0,
+      "value": "관리"
+    }
+  ],
+  "directory.manage.hint": [
+    {
+      "type": 1,
+      "value": "owner"
+    },
+    {
+      "type": 0,
+      "value": "·"
+    },
+    {
+      "type": 1,
+      "value": "admin"
+    },
+    {
+      "type": 0,
+      "value": "에게만 보여요"
+    }
+  ],
+  "directory.profile.close": [
+    {
+      "type": 0,
+      "value": "프로필 닫기"
+    }
+  ],
+  "directory.profile.copied": [
+    {
+      "type": 0,
+      "value": "복사됨"
+    }
+  ],
+  "directory.profile.copyEmail": [
+    {
+      "type": 0,
+      "value": "이메일 복사"
+    }
+  ],
+  "directory.profile.copyFailed": [
+    {
+      "type": 0,
+      "value": "복사하지 못했어요. 다시 눌러 보세요."
+    }
+  ],
+  "directory.profile.copyMention": [
+    {
+      "type": 0,
+      "value": "멘션 복사"
+    }
+  ],
+  "directory.profile.description": [
+    {
+      "type": 0,
+      "value": "멤버 정보와 연락 방법, 역할을 확인해요."
+    }
+  ],
+  "directory.profile.dmInactive": [
+    {
+      "type": 1,
+      "value": "status"
+    },
+    {
+      "type": 0,
+      "value": " 상태에서는 다이렉트 메시지를 열 수 없습니다."
+    }
+  ],
+  "directory.profile.dmSelf": [
+    {
+      "type": 0,
+      "value": "내 프로필에서는 다이렉트 메시지를 열 수 없습니다."
+    }
+  ],
+  "directory.profile.emailLabel": [
+    {
+      "type": 0,
+      "value": "이메일"
+    }
+  ],
+  "directory.profile.emptyAction": [
+    {
+      "type": 0,
+      "value": "명부 다시 불러오기"
+    }
+  ],
+  "directory.profile.emptyDetail": [
+    {
+      "type": 0,
+      "value": "명부를 다시 불러온 뒤 프로필을 확인하세요."
+    }
+  ],
+  "directory.profile.emptyHeadline": [
+    {
+      "type": 0,
+      "value": "이 멤버를 명부에서 찾을 수 없습니다."
+    }
+  ],
+  "directory.profile.kindAgent": [
+    {
+      "type": 0,
+      "value": "에이전트"
+    }
+  ],
+  "directory.profile.loading": [
+    {
+      "type": 0,
+      "value": "멤버 프로필을 불러오는 중입니다."
+    }
+  ],
+  "directory.profile.message": [
+    {
+      "type": 0,
+      "value": "메시지 보내기"
+    }
+  ],
+  "directory.profile.messageBusy": [
+    {
+      "type": 0,
+      "value": "대화 여는 중"
+    }
+  ],
+  "directory.profile.offline": [
+    {
+      "type": 0,
+      "value": "연결 끊김, 마지막으로 받은 프로필입니다. 연결이 돌아오면 새 대화를 열 수 있습니다."
+    }
+  ],
+  "directory.profile.offlineMissing": [
+    {
+      "type": 0,
+      "value": "연결 끊김, 이 멤버의 마지막 프로필을 찾지 못했습니다."
+    }
+  ],
+  "directory.profile.ownerLabel": [
+    {
+      "type": 0,
+      "value": "책임자"
+    }
+  ],
+  "directory.profile.ownerLine": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " 님이 관리"
+    }
+  ],
+  "directory.profile.ownerUnknown": [
+    {
+      "type": 0,
+      "value": "관리자 정보 없음"
+    }
+  ],
+  "directory.profile.retry": [
+    {
+      "type": 0,
+      "value": "다시 시도"
+    }
+  ],
+  "directory.profile.routing": [
+    {
+      "type": 0,
+      "value": "라우팅 설정"
+    }
+  ],
+  "directory.profile.title": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " 프로필"
+    }
+  ],
+  "directory.profile.titleUnknown": [
+    {
+      "type": 0,
+      "value": "멤버 프로필"
+    }
+  ],
+  "directory.role.cancel": [
+    {
+      "type": 0,
+      "value": "취소"
+    }
+  ],
+  "directory.role.changed": [
+    {
+      "type": 0,
+      "value": "바뀜"
+    }
+  ],
+  "directory.role.confirmAction": [
+    {
+      "type": 0,
+      "value": "역할 바꾸기"
+    }
+  ],
+  "directory.role.confirmBusy": [
+    {
+      "type": 0,
+      "value": "바꾸는 중"
+    }
+  ],
+  "directory.role.confirmGrantAdmin": [
+    {
+      "type": 1,
+      "value": "admin"
+    },
+    {
+      "type": 0,
+      "value": " 역할은 "
+    },
+    {
+      "type": 1,
+      "value": "member"
+    },
+    {
+      "type": 0,
+      "value": "·"
+    },
+    {
+      "type": 1,
+      "value": "guest"
+    },
+    {
+      "type": 0,
+      "value": "의 역할을 바꾸고, 정지하거나 내보내고, 비밀번호 재설정 링크를 만들 수 있어요. 채널을 만들고 채널에 사람을 넣고 뺄 수도 있어요."
+    }
+  ],
+  "directory.role.confirmOwnerWarning": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " 님도 나와 같은 권한을 갖게 돼요. "
+    },
+    {
+      "type": 1,
+      "value": "owner"
+    },
+    {
+      "type": 0,
+      "value": "끼리는 서로의 역할을 바꾸거나 내보낼 수 없어서, 한 번 올리면 되돌릴 수 없어요."
+    }
+  ],
+  "directory.role.confirmPair": [
+    {
+      "type": 0,
+      "value": "지금 역할 "
+    },
+    {
+      "type": 1,
+      "value": "from"
+    },
+    {
+      "type": 0,
+      "value": ", 바꿀 역할 "
+    },
+    {
+      "type": 1,
+      "value": "to"
+    }
+  ],
+  "directory.role.confirmRevokeAdmin": [
+    {
+      "type": 1,
+      "value": "member"
+    },
+    {
+      "type": 0,
+      "value": "·"
+    },
+    {
+      "type": 1,
+      "value": "guest"
+    },
+    {
+      "type": 0,
+      "value": "의 역할 바꾸기·정지·내보내기, 비밀번호 재설정 링크 만들기, 채널 만들기와 채널에 사람 넣고 빼기를 더는 할 수 없게 돼요."
+    }
+  ],
+  "directory.role.confirmTitle": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " 님의 역할을 바꿀까요?"
+    }
+  ],
+  "directory.role.label": [
+    {
+      "type": 0,
+      "value": "역할"
+    }
+  ],
+  "directory.role.lockedAdminCeiling": [
+    {
+      "type": 1,
+      "value": "admin"
+    },
+    {
+      "type": 0,
+      "value": " 역할은 "
+    },
+    {
+      "type": 1,
+      "value": "admin"
+    },
+    {
+      "type": 0,
+      "value": "·"
+    },
+    {
+      "type": 1,
+      "value": "owner"
+    },
+    {
+      "type": 0,
+      "value": "의 역할을 바꿀 수 없어요."
+    }
+  ],
+  "directory.role.lockedOwnerPeer": [
+    {
+      "type": 1,
+      "value": "owner"
+    },
+    {
+      "type": 0,
+      "value": "끼리는 서로의 역할을 바꿀 수 없어요."
+    }
+  ],
+  "directory.role.placeholder": [
+    {
+      "type": 0,
+      "value": "역할 고르기"
+    }
+  ],
   "expressions.add.adminsOnly": [
     {
       "type": 0,
@@ -3968,6 +4316,208 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "스레드"
+    }
+  ],
+  "memberList.empty.detail": [
+    {
+      "type": 0,
+      "value": "초대 링크를 만들어 팀을 부르면 여기에 명부가 쌓이고, 각 행에서 프로필과 대화를 열 수 있습니다."
+    }
+  ],
+  "memberList.empty.headline": [
+    {
+      "type": 0,
+      "value": "이 워크스페이스에 아직 다른 멤버가 없습니다."
+    }
+  ],
+  "memberList.empty.invite": [
+    {
+      "type": 0,
+      "value": "멤버 초대하기"
+    }
+  ],
+  "memberList.group.agents": [
+    {
+      "type": 0,
+      "value": "에이전트"
+    }
+  ],
+  "memberList.group.people": [
+    {
+      "type": 0,
+      "value": "사람"
+    }
+  ],
+  "memberList.newDm.close": [
+    {
+      "type": 0,
+      "value": "닫기"
+    }
+  ],
+  "memberList.newDm.continueAction": [
+    {
+      "type": 0,
+      "value": "대화 이어가기"
+    }
+  ],
+  "memberList.newDm.description": [
+    {
+      "type": 0,
+      "value": "대화할 멤버나 에이전트를 고르세요. 이미 대화 중이면 그 대화로 이동합니다."
+    }
+  ],
+  "memberList.newDm.emptyDetail": [
+    {
+      "type": 0,
+      "value": "워크스페이스에 멤버를 초대하면 여기서 바로 대화를 시작할 수 있습니다."
+    }
+  ],
+  "memberList.newDm.emptyHeadline": [
+    {
+      "type": 0,
+      "value": "대화할 다른 멤버가 없습니다."
+    }
+  ],
+  "memberList.newDm.hasDm": [
+    {
+      "type": 0,
+      "value": "대화 중"
+    }
+  ],
+  "memberList.newDm.noMatchDetail": [
+    {
+      "type": 0,
+      "value": "검색어 \""
+    },
+    {
+      "type": 1,
+      "value": "query"
+    },
+    {
+      "type": 0,
+      "value": "\"에 해당하는 이름이나 핸들이 없습니다."
+    }
+  ],
+  "memberList.newDm.placeholder": [
+    {
+      "type": 0,
+      "value": "이름이나 핸들로 검색"
+    }
+  ],
+  "memberList.newDm.startAction": [
+    {
+      "type": 0,
+      "value": "새 대화 시작"
+    }
+  ],
+  "memberList.newDm.title": [
+    {
+      "type": 0,
+      "value": "새 다이렉트 메시지"
+    }
+  ],
+  "memberList.newDm.toLabel": [
+    {
+      "type": 0,
+      "value": "받는 사람"
+    }
+  ],
+  "memberList.noMatch.clear": [
+    {
+      "type": 0,
+      "value": "검색 지우기"
+    }
+  ],
+  "memberList.noMatch.detail": [
+    {
+      "type": 0,
+      "value": "검색어 \""
+    },
+    {
+      "type": 1,
+      "value": "query"
+    },
+    {
+      "type": 0,
+      "value": "\"에 해당하는 이름, 핸들, 이메일이 없습니다. 다른 말로 찾아 보세요."
+    }
+  ],
+  "memberList.noMatch.detailGuest": [
+    {
+      "type": 0,
+      "value": "검색어 \""
+    },
+    {
+      "type": 1,
+      "value": "query"
+    },
+    {
+      "type": 0,
+      "value": "\"에 해당하는 이름이나 핸들이 없습니다. 다른 이름으로 검색하세요."
+    }
+  ],
+  "memberList.noMatch.headline": [
+    {
+      "type": 0,
+      "value": "일치하는 멤버가 없습니다."
+    }
+  ],
+  "memberList.page.title": [
+    {
+      "type": 0,
+      "value": "멤버"
+    }
+  ],
+  "memberList.row.openOwnProfile": [
+    {
+      "type": 0,
+      "value": "나, 프로필 열기"
+    }
+  ],
+  "memberList.row.openProfile": [
+    {
+      "type": 0,
+      "value": "프로필 열기"
+    }
+  ],
+  "memberList.row.ownedBy": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " 님이 관리"
+    }
+  ],
+  "memberList.row.self": [
+    {
+      "type": 0,
+      "value": "나"
+    }
+  ],
+  "memberList.search.label": [
+    {
+      "type": 0,
+      "value": "멤버 검색"
+    }
+  ],
+  "memberList.search.placeholder": [
+    {
+      "type": 0,
+      "value": "이름, 핸들, 이메일로 찾기"
+    }
+  ],
+  "memberList.search.placeholderGuest": [
+    {
+      "type": 0,
+      "value": "이름이나 핸들로 찾기"
+    }
+  ],
+  "memberList.state.offline": [
+    {
+      "type": 0,
+      "value": "연결 끊김, 재연결 중입니다. 명부는 마지막으로 받은 상태이고, 새 대화는 연결이 돌아온 뒤 열립니다."
     }
   ],
   "mobile.attachmentSave.failed": [

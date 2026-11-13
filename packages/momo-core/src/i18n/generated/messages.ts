@@ -300,6 +300,46 @@ export const messageKeys = [
   "desktop.workSession.backToListLabel",
   "desktop.workSession.listTitle",
   "desktop.workSession.pageTitle",
+  "directory.manage.heading",
+  "directory.manage.hint",
+  "directory.profile.close",
+  "directory.profile.copied",
+  "directory.profile.copyEmail",
+  "directory.profile.copyFailed",
+  "directory.profile.copyMention",
+  "directory.profile.description",
+  "directory.profile.dmInactive",
+  "directory.profile.dmSelf",
+  "directory.profile.emailLabel",
+  "directory.profile.emptyAction",
+  "directory.profile.emptyDetail",
+  "directory.profile.emptyHeadline",
+  "directory.profile.kindAgent",
+  "directory.profile.loading",
+  "directory.profile.message",
+  "directory.profile.messageBusy",
+  "directory.profile.offline",
+  "directory.profile.offlineMissing",
+  "directory.profile.ownerLabel",
+  "directory.profile.ownerLine",
+  "directory.profile.ownerUnknown",
+  "directory.profile.retry",
+  "directory.profile.routing",
+  "directory.profile.title",
+  "directory.profile.titleUnknown",
+  "directory.role.cancel",
+  "directory.role.changed",
+  "directory.role.confirmAction",
+  "directory.role.confirmBusy",
+  "directory.role.confirmGrantAdmin",
+  "directory.role.confirmOwnerWarning",
+  "directory.role.confirmPair",
+  "directory.role.confirmRevokeAdmin",
+  "directory.role.confirmTitle",
+  "directory.role.label",
+  "directory.role.lockedAdminCeiling",
+  "directory.role.lockedOwnerPeer",
+  "directory.role.placeholder",
   "expressions.add.adminsOnly",
   "expressions.add.backLabel",
   "expressions.add.import",
@@ -587,6 +627,35 @@ export const messageKeys = [
   "inbox.source.task",
   "inbox.source.thread",
   "inbox.source.threadUnknown",
+  "memberList.empty.detail",
+  "memberList.empty.headline",
+  "memberList.empty.invite",
+  "memberList.group.agents",
+  "memberList.group.people",
+  "memberList.newDm.close",
+  "memberList.newDm.continueAction",
+  "memberList.newDm.description",
+  "memberList.newDm.emptyDetail",
+  "memberList.newDm.emptyHeadline",
+  "memberList.newDm.hasDm",
+  "memberList.newDm.noMatchDetail",
+  "memberList.newDm.placeholder",
+  "memberList.newDm.startAction",
+  "memberList.newDm.title",
+  "memberList.newDm.toLabel",
+  "memberList.noMatch.clear",
+  "memberList.noMatch.detail",
+  "memberList.noMatch.detailGuest",
+  "memberList.noMatch.headline",
+  "memberList.page.title",
+  "memberList.row.openOwnProfile",
+  "memberList.row.openProfile",
+  "memberList.row.ownedBy",
+  "memberList.row.self",
+  "memberList.search.label",
+  "memberList.search.placeholder",
+  "memberList.search.placeholderGuest",
+  "memberList.state.offline",
   "mobile.attachmentSave.failed",
   "mobile.attachmentSave.photosDenied",
   "mobile.attachmentSave.savedToFiles",
@@ -1801,6 +1870,75 @@ export const argumentSpecs = {
   "desktop.workSession.backToListLabel": {},
   "desktop.workSession.listTitle": {},
   "desktop.workSession.pageTitle": {},
+  "directory.manage.heading": {},
+  "directory.manage.hint": {
+    "admin": "string",
+    "owner": "string"
+  },
+  "directory.profile.close": {},
+  "directory.profile.copied": {},
+  "directory.profile.copyEmail": {},
+  "directory.profile.copyFailed": {},
+  "directory.profile.copyMention": {},
+  "directory.profile.description": {},
+  "directory.profile.dmInactive": {
+    "status": "string"
+  },
+  "directory.profile.dmSelf": {},
+  "directory.profile.emailLabel": {},
+  "directory.profile.emptyAction": {},
+  "directory.profile.emptyDetail": {},
+  "directory.profile.emptyHeadline": {},
+  "directory.profile.kindAgent": {},
+  "directory.profile.loading": {},
+  "directory.profile.message": {},
+  "directory.profile.messageBusy": {},
+  "directory.profile.offline": {},
+  "directory.profile.offlineMissing": {},
+  "directory.profile.ownerLabel": {},
+  "directory.profile.ownerLine": {
+    "name": "string"
+  },
+  "directory.profile.ownerUnknown": {},
+  "directory.profile.retry": {},
+  "directory.profile.routing": {},
+  "directory.profile.title": {
+    "name": "string"
+  },
+  "directory.profile.titleUnknown": {},
+  "directory.role.cancel": {},
+  "directory.role.changed": {},
+  "directory.role.confirmAction": {},
+  "directory.role.confirmBusy": {},
+  "directory.role.confirmGrantAdmin": {
+    "admin": "string",
+    "guest": "string",
+    "member": "string"
+  },
+  "directory.role.confirmOwnerWarning": {
+    "name": "string",
+    "owner": "string"
+  },
+  "directory.role.confirmPair": {
+    "from": "string",
+    "to": "string"
+  },
+  "directory.role.confirmRevokeAdmin": {
+    "guest": "string",
+    "member": "string"
+  },
+  "directory.role.confirmTitle": {
+    "name": "string"
+  },
+  "directory.role.label": {},
+  "directory.role.lockedAdminCeiling": {
+    "admin": "string",
+    "owner": "string"
+  },
+  "directory.role.lockedOwnerPeer": {
+    "owner": "string"
+  },
+  "directory.role.placeholder": {},
   "expressions.add.adminsOnly": {},
   "expressions.add.backLabel": {},
   "expressions.add.import": {},
@@ -2171,6 +2309,43 @@ export const argumentSpecs = {
     "channel": "string"
   },
   "inbox.source.threadUnknown": {},
+  "memberList.empty.detail": {},
+  "memberList.empty.headline": {},
+  "memberList.empty.invite": {},
+  "memberList.group.agents": {},
+  "memberList.group.people": {},
+  "memberList.newDm.close": {},
+  "memberList.newDm.continueAction": {},
+  "memberList.newDm.description": {},
+  "memberList.newDm.emptyDetail": {},
+  "memberList.newDm.emptyHeadline": {},
+  "memberList.newDm.hasDm": {},
+  "memberList.newDm.noMatchDetail": {
+    "query": "string"
+  },
+  "memberList.newDm.placeholder": {},
+  "memberList.newDm.startAction": {},
+  "memberList.newDm.title": {},
+  "memberList.newDm.toLabel": {},
+  "memberList.noMatch.clear": {},
+  "memberList.noMatch.detail": {
+    "query": "string"
+  },
+  "memberList.noMatch.detailGuest": {
+    "query": "string"
+  },
+  "memberList.noMatch.headline": {},
+  "memberList.page.title": {},
+  "memberList.row.openOwnProfile": {},
+  "memberList.row.openProfile": {},
+  "memberList.row.ownedBy": {
+    "name": "string"
+  },
+  "memberList.row.self": {},
+  "memberList.search.label": {},
+  "memberList.search.placeholder": {},
+  "memberList.search.placeholderGuest": {},
+  "memberList.state.offline": {},
   "mobile.attachmentSave.failed": {},
   "mobile.attachmentSave.photosDenied": {},
   "mobile.attachmentSave.savedToFiles": {},
@@ -3627,6 +3802,46 @@ export interface MessageArgs {
   "desktop.workSession.backToListLabel": Record<string, never>;
   "desktop.workSession.listTitle": Record<string, never>;
   "desktop.workSession.pageTitle": Record<string, never>;
+  "directory.manage.heading": Record<string, never>;
+  "directory.manage.hint": { admin: string; owner: string };
+  "directory.profile.close": Record<string, never>;
+  "directory.profile.copied": Record<string, never>;
+  "directory.profile.copyEmail": Record<string, never>;
+  "directory.profile.copyFailed": Record<string, never>;
+  "directory.profile.copyMention": Record<string, never>;
+  "directory.profile.description": Record<string, never>;
+  "directory.profile.dmInactive": { status: string };
+  "directory.profile.dmSelf": Record<string, never>;
+  "directory.profile.emailLabel": Record<string, never>;
+  "directory.profile.emptyAction": Record<string, never>;
+  "directory.profile.emptyDetail": Record<string, never>;
+  "directory.profile.emptyHeadline": Record<string, never>;
+  "directory.profile.kindAgent": Record<string, never>;
+  "directory.profile.loading": Record<string, never>;
+  "directory.profile.message": Record<string, never>;
+  "directory.profile.messageBusy": Record<string, never>;
+  "directory.profile.offline": Record<string, never>;
+  "directory.profile.offlineMissing": Record<string, never>;
+  "directory.profile.ownerLabel": Record<string, never>;
+  "directory.profile.ownerLine": { name: string };
+  "directory.profile.ownerUnknown": Record<string, never>;
+  "directory.profile.retry": Record<string, never>;
+  "directory.profile.routing": Record<string, never>;
+  "directory.profile.title": { name: string };
+  "directory.profile.titleUnknown": Record<string, never>;
+  "directory.role.cancel": Record<string, never>;
+  "directory.role.changed": Record<string, never>;
+  "directory.role.confirmAction": Record<string, never>;
+  "directory.role.confirmBusy": Record<string, never>;
+  "directory.role.confirmGrantAdmin": { admin: string; guest: string; member: string };
+  "directory.role.confirmOwnerWarning": { name: string; owner: string };
+  "directory.role.confirmPair": { from: string; to: string };
+  "directory.role.confirmRevokeAdmin": { guest: string; member: string };
+  "directory.role.confirmTitle": { name: string };
+  "directory.role.label": Record<string, never>;
+  "directory.role.lockedAdminCeiling": { admin: string; owner: string };
+  "directory.role.lockedOwnerPeer": { owner: string };
+  "directory.role.placeholder": Record<string, never>;
   "expressions.add.adminsOnly": Record<string, never>;
   "expressions.add.backLabel": Record<string, never>;
   "expressions.add.import": Record<string, never>;
@@ -3914,6 +4129,35 @@ export interface MessageArgs {
   "inbox.source.task": Record<string, never>;
   "inbox.source.thread": { channel: string };
   "inbox.source.threadUnknown": Record<string, never>;
+  "memberList.empty.detail": Record<string, never>;
+  "memberList.empty.headline": Record<string, never>;
+  "memberList.empty.invite": Record<string, never>;
+  "memberList.group.agents": Record<string, never>;
+  "memberList.group.people": Record<string, never>;
+  "memberList.newDm.close": Record<string, never>;
+  "memberList.newDm.continueAction": Record<string, never>;
+  "memberList.newDm.description": Record<string, never>;
+  "memberList.newDm.emptyDetail": Record<string, never>;
+  "memberList.newDm.emptyHeadline": Record<string, never>;
+  "memberList.newDm.hasDm": Record<string, never>;
+  "memberList.newDm.noMatchDetail": { query: string };
+  "memberList.newDm.placeholder": Record<string, never>;
+  "memberList.newDm.startAction": Record<string, never>;
+  "memberList.newDm.title": Record<string, never>;
+  "memberList.newDm.toLabel": Record<string, never>;
+  "memberList.noMatch.clear": Record<string, never>;
+  "memberList.noMatch.detail": { query: string };
+  "memberList.noMatch.detailGuest": { query: string };
+  "memberList.noMatch.headline": Record<string, never>;
+  "memberList.page.title": Record<string, never>;
+  "memberList.row.openOwnProfile": Record<string, never>;
+  "memberList.row.openProfile": Record<string, never>;
+  "memberList.row.ownedBy": { name: string };
+  "memberList.row.self": Record<string, never>;
+  "memberList.search.label": Record<string, never>;
+  "memberList.search.placeholder": Record<string, never>;
+  "memberList.search.placeholderGuest": Record<string, never>;
+  "memberList.state.offline": Record<string, never>;
   "mobile.attachmentSave.failed": Record<string, never>;
   "mobile.attachmentSave.photosDenied": Record<string, never>;
   "mobile.attachmentSave.savedToFiles": Record<string, never>;

@@ -2,6 +2,7 @@ import type {
   ChannelActionItem,
   ChannelActionKey,
 } from '@momo/core/features/channels/actionModel';
+import {isChannelActionStatusIcon} from '@momo/core/features/channels/actionModel';
 import {
   CHANNEL_LEAVE_CONFIRM_TITLE,
   CHANNEL_LEAVE_LABEL,
@@ -102,7 +103,7 @@ export function ConversationMenuSheet({
       <ListRow
         title={busy && item.busyLabel ? item.busyLabel : item.label}
         // 알림 상태 표지는 오른쪽 값 자리다. 앞 칸·행 차례·위험색은 #4319 계약을 따른다.
-        trailing={item.icon ? <RowStatusIcon name={item.icon} /> : undefined}
+        trailing={isChannelActionStatusIcon(item.icon) ? <RowStatusIcon name={item.icon} /> : undefined}
         tone={item.tone === 'danger' ? 'danger' : 'default'}
         busy={busy}
         // 닫는 길로 보내지 않는다: 이 시트는 왕복 중의 「…하는 중」과 실패를 스스로 보이는 면이라 행동이 끝날 때까지 떠 있어야 한다.
