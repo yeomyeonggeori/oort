@@ -4300,6 +4300,12 @@ export const catalog: MessageCatalog = {
       "value": "Adds them to the channel."
     }
   ],
+  "mobile.addMember.adding": [
+    {
+      "type": 0,
+      "value": "Adding"
+    }
+  ],
   "mobile.addMember.close": [
     {
       "type": 0,

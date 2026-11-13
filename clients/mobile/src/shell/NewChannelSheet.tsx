@@ -1,4 +1,4 @@
-import {createChannel, type Channel} from '@momo/core/lib/api';
+import {createChannel, type Channel, type RosterMember} from '@momo/core/lib/api';
 import {
   channelNameIssue,
   CHANNEL_NAME_MAX,
@@ -7,6 +7,7 @@ import {
   normalizeChannelName,
   type CreateChannelFailure,
 } from '@momo/core/features/channels/model';
+import {withChannelMemberAdded} from '@momo/core/features/channels/memberAdd';
 import {upsertChannel} from '@momo/core/features/directory/model';
 import {useQueryClient} from '@tanstack/react-query';
 import React, {useState} from 'react';
@@ -25,7 +26,9 @@ import {
   useRestoredEntryDraft,
 } from '../lib/entryDrafts';
 import {workspaceKeys} from '../features/workspace/queries';
+import {useFormatMessage} from '../i18n/useFormatMessage';
 import {useSession} from '../session/useSession';
+import type {ChannelMemberAddTarget} from './ChannelMemberAddSheet';
 
 // =============================================================================
 // 새 채널 시트 — + 메뉴의 「새 채널」 (DS2-2b #2750).
@@ -54,24 +57,29 @@ interface NewChannelDraft {
   kind: 'public' | 'private';
 }
 
+// 설명은 웹 「채널 만들기」와 같은 사전 키다(#5784). 공개 채널을 「찾아서 들어오는」 길은 아직 없어서, 지금 동작(소유자·관리자가
+// 추가, 앞으로 워크스페이스에 들어오는 사람은 자동)을 그대로 말한다.
 const KINDS = [
   {
     id: 'public' as const,
     label: '공개',
-    detail: '워크스페이스의 누구나 찾아서 들어올 수 있습니다.',
+    detailKey: 'timeline.createChannel.publicDetail' as const,
   },
   {
     id: 'private' as const,
     label: '비공개',
-    detail: '추가된 멤버에게만 보입니다.',
+    detailKey: 'timeline.createChannel.privateDetail' as const,
   },
 ];
 
 export function NewChannelSheet({
   onOpenConversation,
+  onCreatedPrivate,
   onClose,
 }: {
   onOpenConversation: (channelId: string, title: string) => void;
+  /** 비공개 채널을 만들었다 — 셸이 「멤버 추가」 시트를 잇는다(#5784). */
+  onCreatedPrivate?: (target: ChannelMemberAddTarget) => void;
   onClose: () => void;
 }): React.JSX.Element {
   return (
@@ -81,20 +89,27 @@ export function NewChannelSheet({
       accessibilityLabel="새 채널"
       scrimLabel="새 채널 닫기"
       testID="new-channel-sheet">
-      <SheetBody onOpenConversation={onOpenConversation} onClose={onClose} />
+      <SheetBody
+        onOpenConversation={onOpenConversation}
+        onCreatedPrivate={onCreatedPrivate}
+        onClose={onClose}
+      />
     </PageSheet>
   );
 }
 
 function SheetBody({
   onOpenConversation,
+  onCreatedPrivate,
   onClose,
 }: {
   onOpenConversation: (channelId: string, title: string) => void;
+  onCreatedPrivate?: (target: ChannelMemberAddTarget) => void;
   onClose: () => void;
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
-  const {workspaceId} = useSession();
+  const formatMessage = useFormatMessage();
+  const {member, workspaceId} = useSession();
   const client = useQueryClient();
   const slideClose = usePageSheetClose() ?? onClose;
   const sheetGone = usePageSheetGone();
@@ -136,15 +151,23 @@ function SheetBody({
       void client.invalidateQueries({
         queryKey: workspaceKeys.channels(workspaceId),
       });
+      // 만든 사람은 서버에서 이미 멤버다 — 명부의 내 `channelIds` 에도 먼저 넣고 다시 읽는다(웹 `useCreateChannel` 과 같은 이유,
+      // #5784). 이어 뜨는 「멤버 추가」 시트와 채널 멤버 수가 다음 명부 읽기를 기다리지 않는다.
+      client.setQueryData<RosterMember[]>(workspaceKeys.roster(workspaceId), current =>
+        current ? withChannelMemberAdded(current, created.channel.id, member.id) : current,
+      );
+      void client.invalidateQueries({queryKey: workspaceKeys.roster(workspaceId)});
       // 만드는 동안 시트가 걷혔으면(알림이 착지했거나 사람이 X 로 닫았다) 채널은 만들어졌고 목록에는 들어갔다 — 여기까지다.
       // 요청이 끝났다고 사람을 새 채널로 끌고 가면 알림이 세운 목적지를 덮고, 늦은 `onClose()` 는 그 사이 사람이 새로 연
-      // 시트를 닫는다(#5058). 닫히는 슬라이드가 도는 동안도 걷힌 것으로 센다.
+      // 시트를 닫는다(#5058). 닫히는 슬라이드가 도는 동안도 걷힌 것으로 센다. 「멤버 추가」도 잇지 않는다.
       if (sheetGone()) return;
+      const title = created.channel.name ?? normalizeChannelName(name);
       onClose();
-      onOpenConversation(
-        created.channel.id,
-        created.channel.name ?? normalizeChannelName(name),
-      );
+      onOpenConversation(created.channel.id, title);
+      // 비공개 채널은 만든 사람 한 명으로 시작한다 — 새 채널 안에서 「멤버 추가」 시트를 잇는다(X 가 건너뛰기).
+      if (created.channel.kind === 'private') {
+        onCreatedPrivate?.({id: created.channel.id, name: title});
+      }
     } catch (error) {
       setFailure(createChannelFailure(error));
     } finally {
@@ -226,7 +249,7 @@ function SheetBody({
             <ChoiceRow
               key={choice.id}
               title={choice.label}
-              detail={choice.detail}
+              detail={formatMessage(choice.detailKey)}
               selected={kind === choice.id}
               onPress={() => setKind(choice.id)}
               testID={`new-channel-kind-${choice.id}`}

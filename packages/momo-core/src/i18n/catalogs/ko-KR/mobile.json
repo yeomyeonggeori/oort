@@ -14,6 +14,7 @@
   "mobile.addMember.kindAgent": "에이전트",
   "mobile.addMember.addHint": "채널에 추가해요.",
   "mobile.addMember.present": "멤버",
+  "mobile.addMember.adding": "추가하는 중",
   "mobile.addMember.loading": "멤버 목록을 불러오는 중이에요.",
   "mobile.addMember.emptyWorkspace": "이 워크스페이스에 다른 멤버가 아직 없어요.",
   "mobile.addMember.noMatch": "「{query}」에 맞는 멤버가 없어요.",

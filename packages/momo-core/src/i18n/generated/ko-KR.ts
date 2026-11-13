@@ -3976,6 +3976,12 @@ export const catalog: MessageCatalog = {
       "value": "채널에 추가해요."
     }
   ],
+  "mobile.addMember.adding": [
+    {
+      "type": 0,
+      "value": "추가하는 중"
+    }
+  ],
   "mobile.addMember.close": [
     {
       "type": 0,

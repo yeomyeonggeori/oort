@@ -588,6 +588,7 @@ export const messageKeys = [
   "inbox.source.thread",
   "inbox.source.threadUnknown",
   "mobile.addMember.addHint",
+  "mobile.addMember.adding",
   "mobile.addMember.close",
   "mobile.addMember.emptyWorkspace",
   "mobile.addMember.kindAgent",
@@ -2187,6 +2188,7 @@ export const argumentSpecs = {
   },
   "inbox.source.threadUnknown": {},
   "mobile.addMember.addHint": {},
+  "mobile.addMember.adding": {},
   "mobile.addMember.close": {},
   "mobile.addMember.emptyWorkspace": {},
   "mobile.addMember.kindAgent": {},
@@ -3949,6 +3951,7 @@ export interface MessageArgs {
   "inbox.source.thread": { channel: string };
   "inbox.source.threadUnknown": Record<string, never>;
   "mobile.addMember.addHint": Record<string, never>;
+  "mobile.addMember.adding": Record<string, never>;
   "mobile.addMember.close": Record<string, never>;
   "mobile.addMember.emptyWorkspace": Record<string, never>;
   "mobile.addMember.kindAgent": Record<string, never>;

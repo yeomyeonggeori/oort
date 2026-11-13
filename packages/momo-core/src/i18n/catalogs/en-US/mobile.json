@@ -14,6 +14,7 @@
   "mobile.addMember.kindAgent": "Agent",
   "mobile.addMember.addHint": "Adds them to the channel.",
   "mobile.addMember.present": "Member",
+  "mobile.addMember.adding": "Adding",
   "mobile.addMember.loading": "Loading members.",
   "mobile.addMember.emptyWorkspace": "No one else is in this workspace yet.",
   "mobile.addMember.noMatch": "No members match “{query}”.",
