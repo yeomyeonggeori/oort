@@ -175,6 +175,17 @@ fn body_text(response: &HttpResponse) -> String {
     String::from_utf8_lossy(response.body.as_deref().unwrap_or_default()).into_owned()
 }
 
+/// The closed refusal token a bad `clientInfo` gets in each era. Asserted beside the code because
+/// "-32602" alone cannot tell it from the Agent Port foundation view's `tools/call` answer
+/// (`unknown_tool`, also -32602), which would stay green with the `clientInfo` check gone.
+fn client_info_refusal(probe: &Probe) -> Option<&'static str> {
+    Some(if probe.version.is_some() {
+        "modern_meta"
+    } else {
+        "initialize_params"
+    })
+}
+
 fn rpc_error_code(response: &HttpResponse) -> Option<i64> {
     let value: Value = serde_json::from_slice(response.body.as_deref()?).ok()?;
     value.pointer("/error/code")?.as_i64()
@@ -239,6 +250,11 @@ fn the_known_keys_keep_their_shapes_beside_unknown_keys() {
                 let answer = response(send(&probe, &view), &context);
                 assert_eq!(answer.status, 400, "{context}: {}", body_text(&answer));
                 assert_eq!(rpc_error_code(&answer), Some(-32602), "{context}");
+                assert_eq!(
+                    momo_mcp::refusal_reason(answer.body.as_deref()),
+                    client_info_refusal(&probe),
+                    "{context}"
+                );
             }
         }
         for not_an_object in [
@@ -252,6 +268,11 @@ fn the_known_keys_keep_their_shapes_beside_unknown_keys() {
                 let answer = response(send(&probe, &view), &context);
                 assert_eq!(answer.status, 400, "{context}");
                 assert_eq!(rpc_error_code(&answer), Some(-32602), "{context}");
+                assert_eq!(
+                    momo_mcp::refusal_reason(answer.body.as_deref()),
+                    client_info_refusal(&probe),
+                    "{context}"
+                );
             }
         }
         // The limits are exactly where they were: at the limit, with unknown keys beside, it passes.
