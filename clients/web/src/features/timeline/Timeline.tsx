@@ -10,7 +10,7 @@ import {
   type MutableRefObject,
   type ReactNode,
 } from "react";
-import { Virtuoso, type VirtuosoHandle } from "react-virtuoso";
+import { Virtuoso, type SizeFunction, type VirtuosoHandle } from "react-virtuoso";
 
 /**
  * 타임라인 꼬리 행 (#2944 GC-3, brief §3.2 · Q1).
@@ -30,6 +30,14 @@ function TimelineTail() {
 }
 
 const TIMELINE_COMPONENTS = { Footer: TimelineTail };
+
+/**
+ * 줄 높이를 **소수 그대로** 잰다 (#5681). 가상 목록의 기본 잣대는 `Math.round(getBoundingClientRect().height)` 인데, 본문 줄 높이가 24.375px
+ * (15px × `leading-relaxed`) 라 줄은 거의 다 소수 높이다. 가상 목록은 반올림한 값(64)으로 위쪽 여백을 쌓고 실제 줄(64.375)과 어긋나, 바닥에
+ * 붙은 목록이 한 줄 자라 맨 위 줄이 그려진 줄에서 빠지는 프레임에 위쪽 보정(`scrollBy({ top: -1 })`)을 한 번 더 한다 — scrollTop 이 정수인 WebKit 에서
+ * 그 1px 이 마지막 줄을 움직인다(반응을 더하거나 뺄 때 1.63 · 2px).
+ */
+const measureItem: SizeFunction = (el, field) => el.getBoundingClientRect()[field === "offsetHeight" ? "height" : "width"];
 import {
   type AgentRunProgress,
   type Channel,
@@ -983,6 +991,7 @@ export function Timeline({
         // 엔진(문서상 macOS 14~26 WebKit)이 같은 길을 탄다.
         className="overscroll-contain h-full timeline-scroller"
         data={items}
+        itemSize={measureItem}
         components={TIMELINE_COMPONENTS}
         data-testid="timeline-virtuoso"
         alignToBottom
