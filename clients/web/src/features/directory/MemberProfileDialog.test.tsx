@@ -450,7 +450,7 @@ describe("네 시점의 프로필 (수용 1·3)", () => {
   const ALL = ["소유자", "관리자", "멤버", "게스트"];
   const LOW = ["멤버", "게스트"];
   const OWNER_PEER = "소유자끼리는 서로의 역할을 바꿀 수 없어요.";
-  const ADMIN_CEIL = "관리자는 관리자나 소유자의 역할을 바꿀 수 없어요.";
+  const ADMIN_CEIL = "관리자 역할은 관리자·소유자의 역할을 바꿀 수 없어요.";
   const rows: Row[] = [
     { viewer: OWNER, target: OWNER2, manage: true, options: null, text: "소유자", lock: OWNER_PEER, reset: true, email: "jiwoo@example.com" },
     { viewer: OWNER, target: ADMIN, manage: true, options: ALL, text: null, lock: null, reset: true, email: "seoyeon@example.com" },
@@ -522,7 +522,10 @@ describe("역할 바꾸기 확인 단계 (수용 2)", () => {
     expect(stage.textContent).toContain("김인턴 님의 역할을 바꿀까요?");
     expect(byId("member-profile-role-pair")?.textContent).toBe("멤버관리자");
     expect(stage.textContent).toContain("지금 역할 멤버, 바꿀 역할 관리자");
-    expect(stage.textContent).toContain("관리자는 채널을 만들고 채널에 멤버를 넣고 뺄 수 있어요.");
+    // 관리자가 실제로 할 수 있는 일을 줄이지 않고 말한다(검수 r1 M1, 서버 `workspace_authorization.rs`·`routes/channels.rs`).
+    expect(stage.textContent).toContain(
+      "관리자 역할은 멤버·게스트의 역할을 바꾸고, 정지하거나 내보내고, 비밀번호 재설정 링크를 만들 수 있어요. 채널을 만들고 채널에 사람을 넣고 뺄 수도 있어요."
+    );
     expect(byId("member-profile-role-stage-warning")).toBeNull();
     expect(byId("member-profile-role-stage-confirm")?.dataset.tone).toBe("default");
     await vi.waitFor(() => expect(document.activeElement).toBe(byId("member-profile-role-stage-cancel")));
@@ -595,7 +598,7 @@ describe("역할 바꾸기 확인 단계 (수용 2)", () => {
     await pickRole("owner");
     await vi.waitFor(() => expect(byId("member-profile-role-stage")).not.toBeNull());
     expect(byId("member-profile-role-stage-warning")?.textContent).toBe(
-      "되돌릴 수 없어요. 소유자끼리는 서로의 역할을 바꿀 수 없어서 다시 내릴 수 없어요."
+      "이서연 님도 나와 같은 권한을 갖게 돼요. 소유자끼리는 서로의 역할을 바꾸거나 내보낼 수 없어서, 한 번 올리면 되돌릴 수 없어요."
     );
     expect(byId("member-profile-role-stage-confirm")?.dataset.tone).toBe("destructive");
     await confirmStage();
@@ -616,7 +619,9 @@ describe("역할 바꾸기 확인 단계 (수용 2)", () => {
       expect(node).not.toBeNull();
       return node!;
     });
-    expect(stage.textContent).toContain("채널을 만들거나 채널에 멤버를 넣고 뺄 수 없게 돼요.");
+    expect(stage.textContent).toContain(
+      "멤버·게스트의 역할 바꾸기·정지·내보내기, 비밀번호 재설정 링크 만들기, 채널 만들기와 채널에 사람 넣고 빼기를 더는 할 수 없게 돼요."
+    );
   });
 
   it.each([
@@ -739,6 +744,30 @@ describe("역할 바꾸기 확인 단계 (수용 2)", () => {
     ]);
     await pickRole("admin");
     await vi.waitFor(() => expect(byId("member-profile-role-pair")?.textContent).toBe("동료리드"));
+    // 문장 안의 역할 이름도 바꿔 쓴 이름을 따른다: 한 화면에 「리드」와 기본 이름 「관리자」가 섞이지 않는다(검수 r1 M1).
+    const stage = byId("member-profile-role-stage")!;
+    expect(stage.textContent).toContain("리드 역할은 동료·방문의 역할을 바꾸고");
+    for (const word of ["소유자", "관리자", "멤버", "게스트"]) expect(stage.textContent).not.toContain(word);
+  });
+
+  it("role_labels 오버라이드: 관리 묶음 안내·잠김 까닭·소유자 승격 경고도 바꿔 쓴 이름을 따른다", async () => {
+    const labels = { owner: "마스터", admin: "리드", member: "동료", guest: "방문" };
+    mountProfile({ viewer: OWNER, targetId: OWNER2_ID, labels });
+    const dialog = await waitForDialog();
+    expect(byId("member-profile-role-locked")?.textContent).toBe("마스터끼리는 서로의 역할을 바꿀 수 없어요.");
+    expect(byId("member-profile-manage")?.textContent).toContain("마스터·리드에게만 보여요");
+    for (const word of ["소유자", "관리자"]) expect(dialog.textContent).not.toContain(word);
+    act(() => mountedRoot?.unmount());
+    mountedRoot = null;
+    document.body.innerHTML = "";
+    mountProfile({ viewer: OWNER, targetId: ADMIN_ID, labels });
+    await waitForDialog();
+    await pickRole("owner");
+    await vi.waitFor(() =>
+      expect(byId("member-profile-role-stage-warning")?.textContent).toBe(
+        "이서연 님도 나와 같은 권한을 갖게 돼요. 마스터끼리는 서로의 역할을 바꾸거나 내보낼 수 없어서, 한 번 올리면 되돌릴 수 없어요."
+      )
+    );
   });
 
   it("실시간만 끊겨도 고르개는 열려 있고 오프라인 배너도 없다(결정 ③)", async () => {

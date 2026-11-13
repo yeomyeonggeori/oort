@@ -94,6 +94,7 @@ import { MessageRow } from "@/features/timeline/MessageRow";
 import { PendingRow } from "@/features/timeline/PendingRow";
 import { ReactionChips } from "@/features/timeline/ReactionChips";
 import { makeDirectory } from "@momo/core/features/workspace/directory";
+import { roleKeyLabel } from "@momo/core/features/directory/model";
 import type { Message, RosterMember } from "@momo/core/lib/api";
 import type { ReactionChip } from "@momo/core/features/timeline/reactions";
 import { OnboardingGuideGallery } from "@/features/onboarding/guide/OnboardingGuideGallery";
@@ -295,7 +296,10 @@ function ConfirmSpecimens() {
               {...copy}
               autoFocus={false}
               tone="destructive"
-              warning={t("directory.role.confirmOwnerWarning")}
+              warning={t("directory.role.confirmOwnerWarning", {
+                name: galleryMember().displayName,
+                owner: roleKeyLabel("owner"),
+              })}
               onConfirm={() => undefined}
               onCancel={() => undefined}
             />

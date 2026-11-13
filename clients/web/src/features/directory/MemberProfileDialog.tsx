@@ -381,15 +381,31 @@ function RoleRow({
   );
 }
 
-function ManageSection({ children, t }: { children: ReactNode; t: Format }) {
+/**
+ * 문장 안의 역할 이름은 워크스페이스가 바꿔 쓴 이름(역할 라벨)을 따른다: 고르개·얼굴 아래 줄과 한 화면에 두 이름이 섞이지
+ * 않게(#5780 검수 r1 M1). 이름 뒤에 받침에 따라 바뀌는 조사를 붙이지 않는 문장으로 쓴다(「{admin} 역할은」·「{owner}끼리는」).
+ */
+function roleNames(labels: RoleLabels) {
+  return {
+    owner: roleKeyLabel("owner", labels),
+    admin: roleKeyLabel("admin", labels),
+    member: roleKeyLabel("member", labels),
+    guest: roleKeyLabel("guest", labels),
+  };
+}
+
+function ManageSection({ children, labels, t }: { children: ReactNode; labels: RoleLabels; t: Format }) {
   const headingId = useId();
+  const names = roleNames(labels);
   return (
     <section aria-labelledby={headingId} className="flex min-w-0 flex-col gap-2" data-testid="member-profile-manage">
       <div className="flex min-w-0 flex-wrap items-baseline justify-between gap-x-2 px-4">
         <h3 id={headingId} className="text-meta font-semibold text-ink-muted">
           {t("directory.manage.heading")}
         </h3>
-        <span className="break-keep text-meta text-ink-muted">{t("directory.manage.hint")}</span>
+        <span className="break-keep text-meta text-ink-muted">
+          {t("directory.manage.hint", { owner: names.owner, admin: names.admin })}
+        </span>
       </div>
       <Group>{children}</Group>
     </section>
@@ -419,11 +435,14 @@ function RoleConfirm({
   const kind = roleChangeKind(from, to);
   const fromLabel = from ? roleKeyLabel(from, labels) : "";
   const toLabel = roleKeyLabel(to, labels);
+  const names = roleNames(labels);
+  // 관리자가 실제로 할 수 있는 일(서버 `workspace_authorization.rs`: 멤버·게스트의 역할 바꾸기·정지·내보내기·비밀번호 재설정,
+  // `bins/momo-server/src/routes/channels.rs`: 채널 만들기·채널에 사람 넣고 빼기)을 줄이지 않고 말한다(#5780 검수 r1 M1).
   const consequence =
     kind === "grantAdmin"
-      ? t("directory.role.confirmGrantAdmin")
+      ? t("directory.role.confirmGrantAdmin", { admin: names.admin, member: names.member, guest: names.guest })
       : kind === "revokeAdmin"
-        ? t("directory.role.confirmRevokeAdmin")
+        ? t("directory.role.confirmRevokeAdmin", { member: names.member, guest: names.guest })
         : null;
   return (
     <ConfirmStage
@@ -443,7 +462,12 @@ function RoleConfirm({
           {consequence ? <p className="break-keep text-body text-ink-muted">{consequence}</p> : null}
         </div>
       }
-      warning={kind === "promoteOwner" ? t("directory.role.confirmOwnerWarning") : undefined}
+      // 소유자로 올리면 무엇을 넘기는지(나와 같은 권한, 소유자끼리는 서로의 역할을 바꾸거나 내보낼 수 없음)와 되돌릴 수 없음을 말한다.
+      warning={
+        kind === "promoteOwner"
+          ? t("directory.role.confirmOwnerWarning", { name: member.displayName, owner: names.owner })
+          : undefined
+      }
       tone={kind === "promoteOwner" ? "destructive" : "default"}
       confirmLabel={t("directory.role.confirmAction")}
       busyLabel={t("directory.role.confirmBusy")}
@@ -655,7 +679,7 @@ function ReadyProfile({
           <InfoGroup member={member} email={email} owner={owner} t={t} />
 
           {canManage && (
-            <ManageSection t={t}>
+            <ManageSection labels={labels} t={t}>
               {(assignable.length > 0 || member.role !== undefined) && (
                 <RoleRow
                   member={member}
@@ -667,9 +691,12 @@ function ReadyProfile({
                   roleRowRef={roleRowRef}
                   lockReason={
                     lock === "ownerPeer"
-                      ? t("directory.role.lockedOwnerPeer")
+                      ? t("directory.role.lockedOwnerPeer", { owner: roleKeyLabel("owner", labels) })
                       : lock === "adminCeiling"
-                        ? t("directory.role.lockedAdminCeiling")
+                        ? t("directory.role.lockedAdminCeiling", {
+                            admin: roleKeyLabel("admin", labels),
+                            owner: roleKeyLabel("owner", labels),
+                          })
                         : null
                   }
                   onPick={(role) => {

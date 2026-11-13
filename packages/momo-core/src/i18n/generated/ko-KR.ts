@@ -1993,8 +1993,20 @@ export const catalog: MessageCatalog = {
   ],
   "directory.manage.hint": [
     {
+      "type": 1,
+      "value": "owner"
+    },
+    {
       "type": 0,
-      "value": "소유자·관리자에게만 보여요"
+      "value": "·"
+    },
+    {
+      "type": 1,
+      "value": "admin"
+    },
+    {
+      "type": 0,
+      "value": "에게만 보여요"
     }
   ],
   "directory.profile.close": [
@@ -2185,14 +2197,46 @@ export const catalog: MessageCatalog = {
   ],
   "directory.role.confirmGrantAdmin": [
     {
+      "type": 1,
+      "value": "admin"
+    },
+    {
       "type": 0,
-      "value": "관리자는 채널을 만들고 채널에 멤버를 넣고 뺄 수 있어요."
+      "value": " 역할은 "
+    },
+    {
+      "type": 1,
+      "value": "member"
+    },
+    {
+      "type": 0,
+      "value": "·"
+    },
+    {
+      "type": 1,
+      "value": "guest"
+    },
+    {
+      "type": 0,
+      "value": "의 역할을 바꾸고, 정지하거나 내보내고, 비밀번호 재설정 링크를 만들 수 있어요. 채널을 만들고 채널에 사람을 넣고 뺄 수도 있어요."
     }
   ],
   "directory.role.confirmOwnerWarning": [
     {
+      "type": 1,
+      "value": "name"
+    },
+    {
       "type": 0,
-      "value": "되돌릴 수 없어요. 소유자끼리는 서로의 역할을 바꿀 수 없어서 다시 내릴 수 없어요."
+      "value": " 님도 나와 같은 권한을 갖게 돼요. "
+    },
+    {
+      "type": 1,
+      "value": "owner"
+    },
+    {
+      "type": 0,
+      "value": "끼리는 서로의 역할을 바꾸거나 내보낼 수 없어서, 한 번 올리면 되돌릴 수 없어요."
     }
   ],
   "directory.role.confirmPair": [
@@ -2215,8 +2259,20 @@ export const catalog: MessageCatalog = {
   ],
   "directory.role.confirmRevokeAdmin": [
     {
+      "type": 1,
+      "value": "member"
+    },
+    {
       "type": 0,
-      "value": "채널을 만들거나 채널에 멤버를 넣고 뺄 수 없게 돼요."
+      "value": "·"
+    },
+    {
+      "type": 1,
+      "value": "guest"
+    },
+    {
+      "type": 0,
+      "value": "의 역할 바꾸기·정지·내보내기, 비밀번호 재설정 링크 만들기, 채널 만들기와 채널에 사람 넣고 빼기를 더는 할 수 없게 돼요."
     }
   ],
   "directory.role.confirmTitle": [
@@ -2237,14 +2293,38 @@ export const catalog: MessageCatalog = {
   ],
   "directory.role.lockedAdminCeiling": [
     {
+      "type": 1,
+      "value": "admin"
+    },
+    {
       "type": 0,
-      "value": "관리자는 관리자나 소유자의 역할을 바꿀 수 없어요."
+      "value": " 역할은 "
+    },
+    {
+      "type": 1,
+      "value": "admin"
+    },
+    {
+      "type": 0,
+      "value": "·"
+    },
+    {
+      "type": 1,
+      "value": "owner"
+    },
+    {
+      "type": 0,
+      "value": "의 역할을 바꿀 수 없어요."
     }
   ],
   "directory.role.lockedOwnerPeer": [
     {
+      "type": 1,
+      "value": "owner"
+    },
+    {
       "type": 0,
-      "value": "소유자끼리는 서로의 역할을 바꿀 수 없어요."
+      "value": "끼리는 서로의 역할을 바꿀 수 없어요."
     }
   ],
   "directory.role.placeholder": [

@@ -1842,7 +1842,10 @@ export const argumentSpecs = {
   "desktop.workSession.listTitle": {},
   "desktop.workSession.pageTitle": {},
   "directory.manage.heading": {},
-  "directory.manage.hint": {},
+  "directory.manage.hint": {
+    "admin": "string",
+    "owner": "string"
+  },
   "directory.profile.close": {},
   "directory.profile.copied": {},
   "directory.profile.copyEmail": {},
@@ -1878,19 +1881,34 @@ export const argumentSpecs = {
   "directory.role.changed": {},
   "directory.role.confirmAction": {},
   "directory.role.confirmBusy": {},
-  "directory.role.confirmGrantAdmin": {},
-  "directory.role.confirmOwnerWarning": {},
+  "directory.role.confirmGrantAdmin": {
+    "admin": "string",
+    "guest": "string",
+    "member": "string"
+  },
+  "directory.role.confirmOwnerWarning": {
+    "name": "string",
+    "owner": "string"
+  },
   "directory.role.confirmPair": {
     "from": "string",
     "to": "string"
   },
-  "directory.role.confirmRevokeAdmin": {},
+  "directory.role.confirmRevokeAdmin": {
+    "guest": "string",
+    "member": "string"
+  },
   "directory.role.confirmTitle": {
     "name": "string"
   },
   "directory.role.label": {},
-  "directory.role.lockedAdminCeiling": {},
-  "directory.role.lockedOwnerPeer": {},
+  "directory.role.lockedAdminCeiling": {
+    "admin": "string",
+    "owner": "string"
+  },
+  "directory.role.lockedOwnerPeer": {
+    "owner": "string"
+  },
   "directory.role.placeholder": {},
   "expressions.add.adminsOnly": {},
   "expressions.add.backLabel": {},
@@ -3719,7 +3737,7 @@ export interface MessageArgs {
   "desktop.workSession.listTitle": Record<string, never>;
   "desktop.workSession.pageTitle": Record<string, never>;
   "directory.manage.heading": Record<string, never>;
-  "directory.manage.hint": Record<string, never>;
+  "directory.manage.hint": { admin: string; owner: string };
   "directory.profile.close": Record<string, never>;
   "directory.profile.copied": Record<string, never>;
   "directory.profile.copyEmail": Record<string, never>;
@@ -3749,14 +3767,14 @@ export interface MessageArgs {
   "directory.role.changed": Record<string, never>;
   "directory.role.confirmAction": Record<string, never>;
   "directory.role.confirmBusy": Record<string, never>;
-  "directory.role.confirmGrantAdmin": Record<string, never>;
-  "directory.role.confirmOwnerWarning": Record<string, never>;
+  "directory.role.confirmGrantAdmin": { admin: string; guest: string; member: string };
+  "directory.role.confirmOwnerWarning": { name: string; owner: string };
   "directory.role.confirmPair": { from: string; to: string };
-  "directory.role.confirmRevokeAdmin": Record<string, never>;
+  "directory.role.confirmRevokeAdmin": { guest: string; member: string };
   "directory.role.confirmTitle": { name: string };
   "directory.role.label": Record<string, never>;
-  "directory.role.lockedAdminCeiling": Record<string, never>;
-  "directory.role.lockedOwnerPeer": Record<string, never>;
+  "directory.role.lockedAdminCeiling": { admin: string; owner: string };
+  "directory.role.lockedOwnerPeer": { owner: string };
   "directory.role.placeholder": Record<string, never>;
   "expressions.add.adminsOnly": Record<string, never>;
   "expressions.add.backLabel": Record<string, never>;

@@ -2162,7 +2162,23 @@ export const catalog: MessageCatalog = {
   "directory.manage.hint": [
     {
       "type": 0,
-      "value": "Only owners and admins see this"
+      "value": "Only people with the "
+    },
+    {
+      "type": 1,
+      "value": "owner"
+    },
+    {
+      "type": 0,
+      "value": " or "
+    },
+    {
+      "type": 1,
+      "value": "admin"
+    },
+    {
+      "type": 0,
+      "value": " role see this"
     }
   ],
   "directory.profile.close": [
@@ -2358,13 +2374,49 @@ export const catalog: MessageCatalog = {
   "directory.role.confirmGrantAdmin": [
     {
       "type": 0,
-      "value": "Admins can create channels and add or remove channel members."
+      "value": "The "
+    },
+    {
+      "type": 1,
+      "value": "admin"
+    },
+    {
+      "type": 0,
+      "value": " role can change the role of "
+    },
+    {
+      "type": 1,
+      "value": "member"
+    },
+    {
+      "type": 0,
+      "value": " and "
+    },
+    {
+      "type": 1,
+      "value": "guest"
+    },
+    {
+      "type": 0,
+      "value": " people, suspend or remove them, and create password reset links for them. It can also create channels and add or remove people in channels."
     }
   ],
   "directory.role.confirmOwnerWarning": [
     {
+      "type": 1,
+      "value": "name"
+    },
+    {
       "type": 0,
-      "value": "This cannot be undone. Owners cannot change each other's roles, so this role cannot be lowered again."
+      "value": " will have the same permissions as you. People with the "
+    },
+    {
+      "type": 1,
+      "value": "owner"
+    },
+    {
+      "type": 0,
+      "value": " role cannot change each other's roles or remove each other, so this cannot be undone."
     }
   ],
   "directory.role.confirmPair": [
@@ -2388,7 +2440,23 @@ export const catalog: MessageCatalog = {
   "directory.role.confirmRevokeAdmin": [
     {
       "type": 0,
-      "value": "They will no longer be able to create channels or add or remove channel members."
+      "value": "They will no longer be able to change the role of "
+    },
+    {
+      "type": 1,
+      "value": "member"
+    },
+    {
+      "type": 0,
+      "value": " and "
+    },
+    {
+      "type": 1,
+      "value": "guest"
+    },
+    {
+      "type": 0,
+      "value": " people, suspend or remove them, create password reset links, create channels, or add and remove people in channels."
     }
   ],
   "directory.role.confirmTitle": [
@@ -2414,13 +2482,45 @@ export const catalog: MessageCatalog = {
   "directory.role.lockedAdminCeiling": [
     {
       "type": 0,
-      "value": "Admins cannot change the role of an admin or owner."
+      "value": "The "
+    },
+    {
+      "type": 1,
+      "value": "admin"
+    },
+    {
+      "type": 0,
+      "value": " role cannot change the role of someone who is "
+    },
+    {
+      "type": 1,
+      "value": "admin"
+    },
+    {
+      "type": 0,
+      "value": " or "
+    },
+    {
+      "type": 1,
+      "value": "owner"
+    },
+    {
+      "type": 0,
+      "value": "."
     }
   ],
   "directory.role.lockedOwnerPeer": [
     {
       "type": 0,
-      "value": "Owners cannot change each other's roles."
+      "value": "People with the "
+    },
+    {
+      "type": 1,
+      "value": "owner"
+    },
+    {
+      "type": 0,
+      "value": " role cannot change each other's roles."
     }
   ],
   "directory.role.placeholder": [
