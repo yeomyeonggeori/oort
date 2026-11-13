@@ -25,6 +25,7 @@
 //! | `viewer_by_state_table` | widen for every viewer; widen for nobody; drop `m.kind = 'human'`; widen the status predicate past `suspended`; count suspended rows; drop the narrow-token gate |
 //! | `other_paths_never_list_a_suspended_person` | widen the active-only roster query the team AI uses; drop `status = 'active'` from mention recording, DM open or channel add |
 //! | `suspend_list_reinstate_round_trip` | widen for nobody (the suspended row never appears) |
+//! | `rls_keeps_another_tenants_suspended_people_out` | a measurement of the RLS policy itself, not of this change: the wide read is asked for workspace B under workspace A's tenant GUC |
 
 use std::net::SocketAddr;
 use std::path::PathBuf;
@@ -789,4 +790,93 @@ async fn suspend_list_reinstate_round_trip() {
     );
     // The reinstated person signs in again.
     let _ = login(&http, &base, ws, &target.email).await;
+}
+
+// ---------------------------------------------------------------------------
+// 4 — RLS, measured on its own
+// ---------------------------------------------------------------------------
+
+/// **The wide read cannot reach another tenant's suspended people, even when it
+/// is asked to by id.** The HTTP table above cannot tell the query's own
+/// `workspace_id` predicate from RLS, since both hold there. Here the query is
+/// handed workspace B as its argument inside workspace A's tenant transaction
+/// on `momo_app` (NOBYPASSRLS), so only the row-level policy stands between it
+/// and B's rows. The superuser read beforehand proves B's rows exist.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 DB + bootstrap_roles.sql"]
+async fn rls_keeps_another_tenants_suspended_people_out() {
+    use momo_messaging::{list_workspace_roster_with_status, RosterStatusScope};
+
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = app_pool().await;
+
+    let ws_a = seed_workspace(&su).await;
+    let owner_a = seed_human(&su, ws_a, "owner", "김도현").await;
+    let ws_b = seed_workspace(&su).await;
+    let _owner_b = seed_human(&su, ws_b, "owner", "문채원").await;
+    let suspended_b = seed_human(&su, ws_b, "member", "배도윤").await;
+    set_status(&su, suspended_b.id, "suspended").await;
+
+    let present: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM member m \
+           JOIN workspace_membership wm \
+             ON wm.workspace_id = m.workspace_id AND wm.member_id = m.id \
+          WHERE m.workspace_id = $1 AND m.status IN ('active', 'suspended')",
+    )
+    .bind(ws_b)
+    .fetch_one(&su)
+    .await
+    .expect("superuser count");
+    assert_eq!(
+        present, 2,
+        "workspace B has an owner and a suspended person"
+    );
+
+    let owner = owner_a.id;
+    let leaked = momo_db::with_tenant_tx(&app, ws_a, move |conn| {
+        Box::pin(async move {
+            list_workspace_roster_with_status(
+                conn,
+                ws_b,
+                owner,
+                false,
+                None,
+                500,
+                RosterStatusScope::ActiveAndSuspendedHumans,
+            )
+            .await
+        })
+    })
+    .await
+    .expect("wide read under tenant A");
+    assert!(
+        leaked.is_empty(),
+        "tenant A's transaction read workspace B's members: {:?}",
+        leaked.iter().map(|m| (m.id, &m.status)).collect::<Vec<_>>()
+    );
+
+    // The same call under B's own GUC does return B's suspended person, so the
+    // empty answer above is the policy and not a broken query.
+    let own = momo_db::with_tenant_tx(&app, ws_b, move |conn| {
+        Box::pin(async move {
+            list_workspace_roster_with_status(
+                conn,
+                ws_b,
+                owner,
+                false,
+                None,
+                500,
+                RosterStatusScope::ActiveAndSuspendedHumans,
+            )
+            .await
+        })
+    })
+    .await
+    .expect("wide read under tenant B");
+    assert!(
+        own.iter()
+            .any(|m| m.id == suspended_b.id && m.status == "suspended"),
+        "the query itself does carry B's suspended person under B's GUC"
+    );
 }
