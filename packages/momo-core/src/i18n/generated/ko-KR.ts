@@ -8791,6 +8791,16 @@ export const catalog: MessageCatalog = {
       "value": " 채널을 만들었어요. 비공개 채널은 추가한 멤버에게만 보여요."
     }
   ],
+  "timeline.addMember.createdDescriptionPublic": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " 채널을 만들었어요. 공개 채널이라 앞으로 워크스페이스에 들어오는 사람은 자동으로 들어와요."
+    }
+  ],
   "timeline.addMember.later": [
     {
       "type": 0,

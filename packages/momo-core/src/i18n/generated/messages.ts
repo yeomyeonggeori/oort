@@ -1287,6 +1287,7 @@ export const messageKeys = [
   "teamAi.stage.setupUnverifiedDetail",
   "teamAi.stage.verifyingLine",
   "timeline.addMember.createdDescription",
+  "timeline.addMember.createdDescriptionPublic",
   "timeline.addMember.later",
   "timeline.agentRail.open",
   "timeline.agentRail.openActivity",
@@ -3055,6 +3056,9 @@ export const argumentSpecs = {
   "timeline.addMember.createdDescription": {
     "name": "string"
   },
+  "timeline.addMember.createdDescriptionPublic": {
+    "name": "string"
+  },
   "timeline.addMember.later": {},
   "timeline.agentRail.open": {
     "label": "string"
@@ -4650,6 +4654,7 @@ export interface MessageArgs {
   "teamAi.stage.setupUnverifiedDetail": Record<string, never>;
   "teamAi.stage.verifyingLine": Record<string, never>;
   "timeline.addMember.createdDescription": { name: string };
+  "timeline.addMember.createdDescriptionPublic": { name: string };
   "timeline.addMember.later": Record<string, never>;
   "timeline.agentRail.open": { label: string };
   "timeline.agentRail.openActivity": Record<string, never>;

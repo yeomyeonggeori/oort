@@ -19,7 +19,8 @@ import { useOpenCreateChannel } from "./useCreateChannel";
 // 채널을 만든 직후(#5784, QA 9·10).
 //   1. 머리의 멤버 수는 명부의 `channelIds` 로 센다(ChatShell). 만든 사람은 서버에서 이미 멤버인데 명부를 그대로 두면 다음 명부
 //      읽기까지 「멤버 0」이었다. 여기서는 명부 다시 읽기를 **붙잡아 두고** 세어, 다시 읽기 덕이 아니라 만든 순간 1임을 잰다.
-//   2. 비공개 채널을 만들면 「멤버 추가」가 이어서 뜨고 「나중에」로 건너뛴다. 공개는 잇지 않는다(이슈 범위).
+//   2. 채널을 만들면 「멤버 추가」가 이어서 뜨고 「나중에」로 건너뛴다. 공개도 잇는다(planner 결정, 검수 r1 M1) — 공개도 만든 사람
+//      한 명으로 시작하고, 설명이 그 공개 범위의 뜻을 말한다.
 //   3. 그 잇기는 셸의 순서(멤버 추가 provider 가 만들기 provider 바깥)에 기대므로 그 순서를 소스로 잰다.
 
 const WS = "00000000-0000-7000-8000-000000000001";
@@ -232,12 +233,17 @@ describe("채널을 만든 직후 머리의 멤버 수 (#5784)", () => {
   });
 });
 
-describe("비공개 채널을 만들면 「멤버 추가」가 이어서 뜬다 (#5784)", () => {
-  it("공개 채널은 잇지 않는다 — 만들기 창만 닫힌다", async () => {
+describe("채널을 만들면 「멤버 추가」가 이어서 뜬다 (#5784)", () => {
+  it("공개 채널도 「멤버 추가」를 잇는다 — 설명은 공개 채널의 뜻(앞으로 들어오는 사람은 자동)을 말한다", async () => {
     await mount();
     await createAs("public");
     expect(q("create-channel-dialog")).toBeNull();
-    expect(q("add-channel-member-dialog")).toBeNull();
+    expect(q("add-channel-member-dialog")).not.toBeNull();
+    expect(text("add-member-description")).toContain("ops-room");
+    expect(text("add-member-description")).toContain("public channel");
+    expect(text("add-member-description")).toContain("added automatically");
+    expect(text("add-member-description")).not.toContain("private");
+    expect(text("add-member-close")).toBe("Later");
   });
 
   it("비공개 채널은 만든 채널을 말하는 「멤버 추가」가 뜨고, 아무도 넣지 않았으면 닫는 단추가 「나중에」다", async () => {
@@ -249,6 +255,7 @@ describe("비공개 채널을 만들면 「멤버 추가」가 이어서 뜬다 
     // 시험 환경의 문구는 영어 사전이다(`useFormatMessage` 의 fixture). 낱말이 아니라 「만든 채널 이름을 말한다」를 잰다.
     expect(text("add-member-description")).toContain("ops-room");
     expect(text("add-member-description")).toContain("Created");
+    expect(text("add-member-description")).toContain("private channel");
     expect(text("add-member-close")).toBe("Later");
     // 캐럿은 이어 뜬 창 안에 있다.
     expect(q("add-channel-member-dialog")!.contains(document.activeElement)).toBe(true);

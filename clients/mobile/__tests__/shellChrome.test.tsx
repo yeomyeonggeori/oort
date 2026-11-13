@@ -34,6 +34,7 @@ import {
   releaseReduceMotion,
   setReduceMotion as setSheetReduceMotion,
 } from './fixtures/sheetContract';
+import {captureNativeDismiss, finishNativeDismiss, isModalDown} from './fixtures/nativeDismiss';
 import {Avatar} from '../src/features/conversation/Avatar';
 import {
   darkPalette,
@@ -588,12 +589,12 @@ describe('탭 셋과 + (ADR-0189 D1, #2750)', () => {
     expect(screen.getByTestId('new-channel-sheet')).toBeTruthy();
     // 규칙은 처음부터 칸 밑에 선다(웹과 같은 자리).
     expect(screen.getByTestId('new-channel-name-rule')).toHaveTextContent(
-      '영문, 숫자, 하이픈, 밑줄로 80자 이내, 처음과 끝은 영문이나 숫자. 대문자는 소문자로 저장됩니다.',
+      '영문, 숫자, 하이픈, 밑줄로 80자 이내, 처음과 끝은 영문이나 숫자. 대문자는 소문자로 저장돼요.',
     );
     // VoiceOver 는 같은 규칙을 힌트로 듣는다.
     expect(screen.getByTestId('new-channel-name')).toHaveProp(
       'accessibilityHint',
-      '영문, 숫자, 하이픈, 밑줄로 80자 이내, 처음과 끝은 영문이나 숫자. 대문자는 소문자로 저장됩니다.',
+      '영문, 숫자, 하이픈, 밑줄로 80자 이내, 처음과 끝은 영문이나 숫자. 대문자는 소문자로 저장돼요.',
     );
     // 빈 이름으로는 만들 수 없다.
     expect(screen.getByTestId('new-channel-create').props.accessibilityState).toMatchObject(
@@ -609,7 +610,16 @@ describe('탭 셋과 + (ADR-0189 D1, #2750)', () => {
     expect(
       screen.getByTestId('new-channel-kind-private').props.accessibilityState,
     ).toEqual({selected: true});
+    // iOS 가 새 채널 시트의 Modal 을 「다 내렸다」고 알릴 핸들러 — Modal 이 서 있을 때 잡는다(`fixtures/nativeDismiss`).
+    const signal = captureNativeDismiss('new-channel-sheet');
     fireEvent.press(screen.getByTestId('new-channel-create'));
+    // 「멤버 추가」는 다른 Modal 이다(#5417·검수 r1 B1). 슬라이드가 끝나 그릇이 새 채널 Modal 을 내린 순간(= iOS 의 신호 전)에 멤버 추가
+    // 시트가 이미 마운트돼 있으면 한 화면 갱신에 두 Modal 이 겹친 것이고, iOS 는 그 제시를 거절해 시트가 영영 안 뜬다(시뮬레이터 4/4).
+    await waitFor(() => expect(isModalDown('new-channel-sheet')).toBe(true), {timeout: 8000});
+    expect(
+      screen.queryByTestId('channel-member-add-sheet', {includeHiddenElements: true}),
+    ).toBeNull();
+    signal();
     await waitFor(() => expect(screen.getByTestId('conversation-pane')).toBeTruthy());
     const post = fetchMock.mock.calls.find(
       ([url, init]) =>
@@ -655,21 +665,31 @@ describe('탭 셋과 + (ADR-0189 D1, #2750)', () => {
     expect(screen.getByTestId('conversation-pane')).toBeTruthy();
   });
 
-  it('공개 채널은 「멤버 추가」를 잇지 않는다 — 시트가 닫히고 그 채널로만 간다 (#5784)', async () => {
+  it('공개 채널도 「멤버 추가」를 잇는다 — 안내 줄이 공개 채널의 뜻을 말한다 (#5784, planner 결정)', async () => {
     installFetch();
     await renderReady();
     openMenu();
     await waitFor(() => expect(screen.getByTestId('plus-menu-channel')).toBeTruthy());
     fireEvent.press(screen.getByTestId('plus-menu-channel'));
     // 공개 설명은 지금 동작 그대로다 — 「찾아서 들어올 수 있다」고 말하지 않는다.
-    expect(screen.getByTestId('new-channel-kind-public')).toHaveTextContent(
-      /소유자나 관리자가 추가한 멤버가 들어와요\. 앞으로 워크스페이스에 들어오는 사람은 자동으로 들어와요\./,
+    const publicDetail =
+      '소유자나 관리자가 추가한 멤버가 들어와요. 앞으로 워크스페이스에 들어오는 사람은 자동으로 들어와요.';
+    expect(screen.getByTestId('new-channel-kind-public')).toHaveTextContent(`공개${publicDetail}`);
+    // VoiceOver 도 같은 설명을 듣는다 — 이름은 「공개」, 힌트가 설명(검수 r1 M7).
+    expect(screen.getByTestId('new-channel-kind-public')).toHaveProp('accessibilityHint', publicDetail);
+    expect(screen.getByTestId('new-channel-kind-private')).toHaveProp(
+      'accessibilityHint',
+      '추가된 멤버에게만 보여요.',
     );
     fireEvent.changeText(screen.getByTestId('new-channel-name'), 'design-review');
     fireEvent.press(screen.getByTestId('new-channel-create'));
-    await waitFor(() => expect(screen.getByTestId('conversation-pane')).toBeTruthy());
+    await finishNativeDismiss('new-channel-sheet');
+    await waitFor(() => expect(screen.getByTestId('channel-member-add-sheet')).toBeTruthy());
+    expect(screen.getByTestId('channel-member-add-lead')).toHaveTextContent(
+      'design-review 채널을 만들었어요. 공개 채널이라 앞으로 워크스페이스에 들어오는 사람은 자동으로 들어와요.',
+    );
+    expect(screen.getByTestId('conversation-pane')).toBeTruthy();
     expect(screen.queryByTestId('new-channel-sheet')).toBeNull();
-    expect(screen.queryByTestId('channel-member-add-sheet')).toBeNull();
   });
 
   it('만드는 동안 ✓ 자리에 스피너가 서고 이름이 「채널 만드는 중」이며, 다시 눌러도 요청은 한 번이다', async () => {

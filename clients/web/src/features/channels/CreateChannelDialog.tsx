@@ -149,15 +149,15 @@ function CreateChannelPanel({
   draft,
   setDraft,
   onOpenChange,
-  onCreatedPrivate,
+  onCreated,
   opener,
 }: {
   open: boolean;
   draft: ChannelDraft;
   setDraft: (next: ChannelDraft) => void;
   onOpenChange: (open: boolean) => void;
-  /** 비공개 채널이 만들어졌다 — 이 다이얼로그를 닫고 「멤버 추가」로 넘긴다(#5784). */
-  onCreatedPrivate: (target: AddChannelMemberTarget) => void;
+  /** 채널이 만들어졌다 — 이 다이얼로그를 닫고 「멤버 추가」로 넘긴다(#5784, 공개·비공개 모두). */
+  onCreated: (target: AddChannelMemberTarget) => void;
   opener?: DialogFocusTarget | null;
 }) {
   const { pending, failure, create, clearFailure } = useCreateChannel();
@@ -244,18 +244,14 @@ function CreateChannelPanel({
       // 이미 걷힌 다이얼로그를 다시 닫지 않는다 — 닫기는 열었던 자리로 초점을 돌려주는데(`onOpenChange`), 그 사이 사람은 알림의 대화로
       // 가 있다. 같은 까닭으로 「멤버 추가」도 잇지 않는다: 알림이 세운 목적지 위에 창을 띄우지 않는다.
       if (closedSinceSubmit.current) return;
-      if (created.kind === "private") {
-        // 비공개 채널은 만든 사람 한 명으로 시작하고, 다른 사람은 누군가 추가해야 들어온다. 만든 그 자리에서 「멤버 추가」를
-        // 이어서 연다 — 「나중에」로 건너뛸 수 있다(#5784).
-        handedOff.current = true;
-        onCreatedPrivate({
-          id: created.id,
-          name: created.name ?? normalizeChannelName(name),
-          afterCreate: true,
-        });
-        return;
-      }
-      onOpenChange(false);
+      // 채널은 만든 사람 한 명으로 시작하고(공개도 지금은 앞으로 워크스페이스에 들어오는 사람만 자동이다), 다른 사람은 누군가
+      // 추가해야 들어온다. 만든 그 자리에서 「멤버 추가」를 이어서 연다 — 「나중에」로 건너뛸 수 있다(#5784, 공개·비공개 모두).
+      handedOff.current = true;
+      onCreated({
+        id: created.id,
+        name: created.name ?? normalizeChannelName(name),
+        afterCreate: created.kind === "private" ? "private" : "public",
+      });
     }
   }
 
@@ -471,14 +467,14 @@ function CreateChannelPanel({
 export function CreateChannelDialog({
   open,
   onOpenChange,
-  onCreatedPrivate,
+  onCreated,
   draft,
   setDraft,
   opener,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  onCreatedPrivate: (target: AddChannelMemberTarget) => void;
+  onCreated: (target: AddChannelMemberTarget) => void;
   draft: ChannelDraft;
   setDraft: (next: ChannelDraft) => void;
   opener?: DialogFocusTarget | null;
@@ -495,7 +491,7 @@ export function CreateChannelDialog({
         draft={draft}
         setDraft={setDraft}
         onOpenChange={onOpenChange}
-        onCreatedPrivate={onCreatedPrivate}
+        onCreated={onCreated}
         opener={opener}
       />
     </Dialog>
@@ -506,7 +502,7 @@ export function CreateChannelDialog({
  * Holds the one dialog for the whole signed-in shell and hands its entry points
  * the verb that opens it (sidebar header +, empty workspace, ⌘K 팔레트).
  *
- * 셸의 「멤버 추가」 provider 안에 있어야 한다(#5784): 비공개 채널을 만들면 그 창을 이어서 연다. 밖에 두면 여는 동사가 없어
+ * 셸의 「멤버 추가」 provider 안에 있어야 한다(#5784): 채널을 만들면 그 창을 이어서 연다. 밖에 두면 여는 동사가 없어
  * 렌더에서 바로 던진다 — 조용히 안 뜨는 쪽보다 낫다(`AppShell.tsx` 의 순서, 시험이 소스로 잰다).
  */
 export function CreateChannelProvider({ children }: { children: ReactNode }) {
@@ -528,7 +524,7 @@ export function CreateChannelProvider({ children }: { children: ReactNode }) {
   }, []);
   // 만들기 창을 닫고 「멤버 추가」를 연다. 캐럿은 여기서 돌려주지 않고, 이 창을 열었던 자리를 「멤버 추가」에 넘겨 그 창이 닫힐
   // 때 그리로 돌아가게 한다 — 사람에게는 만들기에서 멤버 추가까지가 한 걸음이다.
-  const onCreatedPrivate = useCallback(
+  const onCreated = useCallback(
     (target: AddChannelMemberTarget) => {
       setOpen(false);
       openAddMember({ ...target, opener: openerRef.current });
@@ -546,7 +542,7 @@ export function CreateChannelProvider({ children }: { children: ReactNode }) {
       <CreateChannelDialog
         open={open}
         onOpenChange={onOpenChange}
-        onCreatedPrivate={onCreatedPrivate}
+        onCreated={onCreated}
         draft={draft}
         setDraft={setDraft}
         opener={openerRef.current}

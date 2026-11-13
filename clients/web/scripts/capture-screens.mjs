@@ -7946,6 +7946,11 @@ async function captureScheme(browser, scheme) {
   shots.push(createPendingShot);
   await login.getByTestId("create-channel-dialog").waitFor({ state: "detached" });
   await login.unroute("**/v1/workspaces/*/channels");
+  // #5784: 채널을 만들면 「멤버 추가」가 이어서 뜬다(공개·비공개 모두). 「나중에」로 건너뛰고 다음 장면(오프라인)으로 간다 — 떠 있는 창이
+  //        사이드바의 + 를 가린다.
+  await login.getByTestId("add-channel-member-dialog").waitFor({ state: "visible" });
+  await sceneClick(login, login.getByTestId("add-member-close"));
+  await login.getByTestId("add-channel-member-dialog").waitFor({ state: "detached" });
 
   // 3a-4. 오프라인 (MOMO-614 R1 / R-1 5장): 배너 한 줄 + 만들기 버튼 disabled.
   //       레일의 disconnected는 종단 절단에서만 오므로 브라우저가 아는 오프라인도

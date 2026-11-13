@@ -219,7 +219,7 @@ function AddChannelMemberPanel({
   // 한 명이라도 들어오면 할 일을 한 것이라 평소의 「닫기」로 돌아간다. 판정은 명부의 `channelIds`(추가는 낙관적으로 먼저
   // 들어간다)라 누르는 순간 바뀐다.
   const skipping =
-    target.afterCreate === true &&
+    target.afterCreate !== undefined &&
     !directory.members.some(
       (member) =>
         !uuidEq(member.id, session.member.id) && isChannelMember(member, target.id)
@@ -383,7 +383,12 @@ function AddChannelMemberPanel({
         <DialogTitle>멤버 추가</DialogTitle>
         <DialogDescription data-testid="add-member-description">
           {target.afterCreate ? (
-            formatMessage("timeline.addMember.createdDescription", { name: target.name })
+            formatMessage(
+              target.afterCreate === "public"
+                ? "timeline.addMember.createdDescriptionPublic"
+                : "timeline.addMember.createdDescription",
+              { name: target.name }
+            )
           ) : (
             <>{target.name} 채널에 워크스페이스 멤버를 추가합니다.</>
           )}

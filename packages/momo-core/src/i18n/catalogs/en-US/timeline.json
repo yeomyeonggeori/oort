@@ -48,6 +48,7 @@
   "timeline.createChannel.publicDetail": "Owners and admins add members. People who join the workspace later are added automatically.",
   "timeline.createChannel.privateDetail": "Only members who are added can see it.",
   "timeline.addMember.createdDescription": "Created {name}. A private channel is visible only to the members you add.",
+  "timeline.addMember.createdDescriptionPublic": "Created {name}. It's a public channel, so people who join the workspace later are added automatically.",
   "timeline.addMember.later": "Later",
   "timeline.typing.one": "{name} is typing…",
   "timeline.typing.two": "{name} and {second} are typing…",

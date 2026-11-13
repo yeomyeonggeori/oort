@@ -26,10 +26,11 @@ import {useFormatMessage} from '../i18n/useFormatMessage';
 import {useSession} from '../session/useSession';
 
 // =============================================================================
-// 채널에 멤버 추가 시트 — 비공개 채널을 만든 직후 이어서 뜬다(#5784).
+// 채널에 멤버 추가 시트 — 채널을 만든 직후 이어서 뜬다(#5784, 공개·비공개 모두).
 //
-// 폰에는 채널에 사람을 넣는 화면이 없었다(홈 빈 상태가 「멤버 추가는 데스크탑에서」라고 말했다). 비공개 채널은 만든 사람 한 명으로
-// 시작하고 다른 사람은 누군가 추가해야 들어오므로, 만든 그 자리에서 이 시트를 잇는다. X 가 건너뛰기다(시트의 닫는 길 셋 그대로).
+// 폰에는 채널에 사람을 넣는 화면이 없었다(홈 빈 상태가 「멤버 추가는 데스크탑에서」라고 말했다). 채널은 만든 사람 한 명으로
+// 시작하고(공개도 지금은 앞으로 들어오는 사람만 자동이다) 다른 사람은 누군가 추가해야 들어오므로, 만든 그 자리에서 이 시트를 잇는다.
+// X 가 건너뛰기다(시트의 닫는 길 셋 그대로). 새 채널 시트가 iOS 에서 다 내려간 뒤에 선다(`NewChannelSheet` 의 넘겨주기, #5417).
 //
 // 규칙은 모두 웹 「멤버 추가」 창과 같은 코어다:
 //   누구를 보이나   `channelMemberCandidates` — 나를 뺀 명부, 이름·핸들 검색, 사람 다음 에이전트
@@ -45,6 +46,8 @@ import {useSession} from '../session/useSession';
 export interface ChannelMemberAddTarget {
   id: string;
   name: string;
+  /** 방금 만든 채널의 공개 범위 — 안내 한 줄이 달라진다(공개: 앞으로 들어오는 사람은 자동, 비공개: 추가한 멤버에게만). */
+  kind: 'public' | 'private';
 }
 
 export function ChannelMemberAddSheet({
@@ -138,7 +141,12 @@ function SheetBody({target}: {target: ChannelMemberAddTarget}): React.JSX.Elemen
   const listHeader = (
     <View style={styles.listHeader}>
       <Sentence style={styles.lead} testID="channel-member-add-lead">
-        {formatMessage('timeline.addMember.createdDescription', {name: target.name})}
+        {formatMessage(
+          target.kind === 'public'
+            ? 'timeline.addMember.createdDescriptionPublic'
+            : 'timeline.addMember.createdDescription',
+          {name: target.name},
+        )}
       </Sentence>
       <InputPill
         icon={SHELL_ICONS.search}

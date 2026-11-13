@@ -386,7 +386,7 @@ export function AppShell({
        * 하나를 연다. 채널 만들기와 같은 이유로 폼 상태가 여러 벌이 되지
        * 않는다. (낱말은 #1573 예약 · #1584 — 이 주석을 인용하는 짝은
        * `packages/momo-core/src/features/timeline/model.ts` 머리말이다.)
-       * 채널 만들기 **바깥**에 선다(#5784): 비공개 채널을 만들면 만들기 창이
+       * 채널 만들기 **바깥**에 선다(#5784): 채널을 만들면 만들기 창이
        * 이 창을 이어서 연다. */}
       <AddChannelMemberProvider>
       <CreateChannelProvider>

@@ -9277,6 +9277,20 @@ export const catalog: MessageCatalog = {
       "value": ". A private channel is visible only to the members you add."
     }
   ],
+  "timeline.addMember.createdDescriptionPublic": [
+    {
+      "type": 0,
+      "value": "Created "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": ". It's a public channel, so people who join the workspace later are added automatically."
+    }
+  ],
   "timeline.addMember.later": [
     {
       "type": 0,
