@@ -1,8 +1,9 @@
 // =============================================================================
-// 폰 홈 줄의 강조 — 「새 글이 있는 줄만 또렷하게」 (#4953, owner 10-31).
+// 사이드바 줄의 강조 — 「새 글이 있는 줄만 또렷하게」 (폰 #4953 owner 10-31, 웹·데스크탑 #5775).
 //
-// 한 줄이 말할 수 있는 상태는 넷이다. 이 파일이 그 문법 하나를 쥐고, 그리는 쪽(`SidebarScreen` 의 `Row`)은
-// 이 결과를 색 토큰으로 옮기기만 한다:
+// 한 줄이 말할 수 있는 상태는 넷이다. 이 파일이 그 문법 하나를 쥐고, 그리는 쪽(폰 `SidebarScreen` 의 `Row`,
+// 웹 `Sidebar` 의 채널·DM 줄)은 이 결과를 색 토큰으로 옮기기만 한다. 웹은 굵기를 `unreadCount` 로 이미 말하므로
+// `dim` 만 읽고, 칩 문법은 `badgeFor` 가 진다:
 //
 //   읽음    새 글 없음        이름·아이콘 회색(`textMuted`) · 칩 없음
 //   안 읽음 새 글 N           이름·아이콘 본문색(`text`) · 굵게 · 신호색 칩 `N`
@@ -19,12 +20,15 @@
 // 으로 접혀 있어(`rows.ts` 의 열린 채널 억제) 칩도 굵기도 없고, 색만 본문색으로 남는다.
 //
 // 에이전트 줄(아직 DM 이 없는 에이전트)은 대화가 아니라 **갈 곳**이라 읽음이 없다(`tracksRead` 거짓): 강조하지도
-// 흐리게도 하지 않는다.
+// 흐리게도 하지 않는다. 웹의 인박스·멤버 같은 목적지 줄과 프로필 줄도 이 함수를 부르지 않는다 — 읽음을 말하는 줄만
+// (채널·DM) 이 함수를 지난다.
 //
 // ## 이 파일에 문자열 낱말이 없는 이유
 // 직접 문구 장부(`direct-copy-baseline.json`)는 낱말 하나짜리 문자열 리터럴도 센다. 장부는 줄어들기만 하므로 새
 // 파일은 0 이어야 한다. 그래서 칩의 모양은 이름 붙은 숫자(`CHIP_TONE`)이고, 칩 글자의 `@`·`+` 는 글자가 없는 기호다.
 // =============================================================================
+
+import type { ReadProjectionPhase } from "./goneDm";
 
 /** 칩의 모양 셋. 값이 숫자인 이유는 위 머리 주석(장부)이다. */
 export const CHIP_TONE = {mention: 0, count: 1, muted: 2} as const;
@@ -61,6 +65,22 @@ export interface RowEmphasisInput {
   mayDim: boolean;
   /** 지금 열려 있는 줄. 회색이 되지 않는다. */
   selected: boolean;
+}
+
+/**
+ * 읽음 투영의 국면마다, 새 글 없는 줄을 회색(= 다 읽었다)으로 그려도 되는가(`mayDim`). 실패(`error`)면 안 읽음 수를
+ * 모르므로 회색을 칠하지 않는다. 오는 중은 조용한 쪽(회색)이다 — 새 글이 있는 줄만 나중에 떠오른다. 표로 둔 것은 직접 문구
+ * 장부가 낱말 하나짜리 비교 리터럴도 세기 때문이고, 새 국면이 생기면 이 표가 컴파일에서 빨갛게 된다.
+ */
+const READ_PHASE_MAY_DIM: Readonly<Record<ReadProjectionPhase, boolean>> = {
+  loading: true,
+  error: false,
+  ready: true,
+};
+
+/** 투영 국면을 모를 때(`undefined`)는 조용한 쪽이다. */
+export function readPhaseMayDim(phase: ReadProjectionPhase | undefined): boolean {
+  return phase === undefined || READ_PHASE_MAY_DIM[phase];
 }
 
 function positive(n: number): number {

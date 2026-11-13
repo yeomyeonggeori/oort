@@ -383,7 +383,7 @@ describe('정보 페이지 — 히어로 (#4319)', () => {
 describe('정보 페이지 — 행은 코어 표의 답이다 (#4319)', () => {
   motionOff();
 
-  it('DM(닫기를 내밂): 알림 → 복사 셋 → 대화 닫기, 낱말은 코어 것이다', () => {
+  it('DM(닫기를 내밂): 알림 → 복사 셋 → 목록에서 숨기기, 낱말은 코어 것이다', () => {
     renderPage();
     expect(rowKeys()).toEqual(['mute-toggle', 'copy-name', 'copy-link', 'copy-id', 'close-dm']);
     expect(screen.getByTestId('conversation-info-mute-toggle')).toHaveTextContent(new RegExp(channelMuteToggleLabel(false)));
@@ -395,7 +395,7 @@ describe('정보 페이지 — 행은 코어 표의 답이다 (#4319)', () => {
     expect(within(screen.getByTestId('conversation-info-copy')).getByText(CHANNEL_COPY_GROUP_LABEL)).toBeTruthy();
   });
 
-  it('DM: 닫기를 내밀지 않으면(`closeOffered` 거짓) 「대화 닫기」가 없다 — 나머지는 그대로다', () => {
+  it('DM: 닫기를 내밀지 않으면(`closeOffered` 거짓) 「목록에서 숨기기」가 없다 — 나머지는 그대로다', () => {
     renderPage({items: conversationInfoActionItems(dmTarget({closeOffered: false}))});
     expect(rowKeys()).toEqual(['mute-toggle', 'copy-name', 'copy-link', 'copy-id']);
   });
@@ -405,7 +405,7 @@ describe('정보 페이지 — 행은 코어 표의 답이다 (#4319)', () => {
     expect(screen.getByTestId('conversation-info-mute-toggle')).toHaveTextContent(new RegExp(channelMuteToggleLabel(true)));
   });
 
-  it('채널: 소유자·관리자에게는 「채널 나가기」가 선다 — 위험색이고 DM 의 「대화 닫기」는 없다', () => {
+  it('채널: 소유자·관리자에게는 「채널 나가기」가 선다 — 위험색이고 DM 의 「목록에서 숨기기」는 없다', () => {
     renderPage({kind: 'public', title: 'general', peer: null, items: conversationInfoActionItems(channelTarget())});
     expect(rowKeys()).toEqual(['mute-toggle', 'copy-name', 'copy-link', 'copy-id', 'leave']);
     const leave = screen.getByTestId('conversation-info-leave');

@@ -640,7 +640,7 @@ describe("DM 호버 X (#3963)", () => {
     const host = await mount();
     enterRow(host, DM_ID(1));
     const x = closeButton(host)!;
-    expect(x.getAttribute("aria-label")).toBe("이도현, 대화 닫기");
+    expect(x.getAttribute("aria-label")).toBe("이도현, 목록에서 숨기기");
     expect(x.tabIndex).toBe(-1);
     // 링크 안의 버튼이 아니다: 앵커 안의 상호작용 콘텐츠는 클릭이 어느 쪽인지 브라우저마다 다르다.
     expect(dmRow(host, DM_ID(1)).contains(x)).toBe(false);
@@ -767,7 +767,7 @@ describe("DM 닫기는 안 읽음이 없을 때만 (#3963, 소유자 결정 2026
     expect(closeButton(host)).toBeNull();
   });
 
-  it("우클릭 메뉴의 「대화 닫기」도 같은 규칙이다 — 안 읽음이 있으면 항목이 없고 읽은 DM 에는 있다", async () => {
+  it("우클릭 메뉴의 「목록에서 숨기기」도 같은 규칙이다 — 안 읽음이 있으면 항목이 없고 읽은 DM 에는 있다", async () => {
     setReadStates([readState(DM_ID(1), 12, 10), readState(DM_ID(2), 9)]);
     const host = await mount();
     rightClickRow(host, DM_ID(1));
@@ -778,7 +778,7 @@ describe("DM 닫기는 안 읽음이 없을 때만 (#3963, 소유자 결정 2026
     rightClickRow(host, DM_ID(2));
     await flush();
     expect(menuOpen()).toBe(true);
-    expect(menuCloseItem()?.textContent).toContain("대화 닫기");
+    expect(menuCloseItem()?.textContent).toContain("목록에서 숨기기");
   });
 
   it("지금 열려 있는 DM 은 읽고 있는 것이라 안 읽음이 있던 DM 이어도 닫을 수 있다", async () => {
@@ -919,7 +919,7 @@ describe("DM 닫기: 사라지고, 돌아온다 (#3963)", () => {
     const empty = host.querySelector('[data-testid="dm-section-empty"]');
     if (empty === null) console.log("DBG", host.querySelector('[data-testid="sidebar-section-dms"]')?.outerHTML.slice(0, 1500));
     expect(empty).not.toBeNull();
-    expect(empty!.textContent).toContain("닫은 대화는 새 메시지가 오면 다시 나타납니다");
+    expect(empty!.textContent).toContain("숨긴 대화는 새 메시지가 오면 다시 나타납니다");
     expect(empty!.textContent).not.toContain("아직 대화가 없습니다");
     // 빈 상태는 한 줄 카피와 액션 하나다: 옛 문장의 행동(⌘⇧K로 시작하세요)이 남아 있다.
     expect(empty!.textContent).toContain("⌘⇧K로 시작하세요");
@@ -1011,7 +1011,7 @@ describe("채널이 없는 멤버의 첫 DM (design-review R1 H1)", () => {
     act(() => closeButton(host)!.click());
     expect(rowIds(host)).toEqual([]);
     expect(host.querySelector('[data-testid="dm-section-empty"]')?.textContent).toContain(
-      "닫은 대화는 새 메시지가 오면 다시 나타납니다"
+      "숨긴 대화는 새 메시지가 오면 다시 나타납니다"
     );
   });
 });
@@ -1440,7 +1440,7 @@ describe("나간 멤버와의 대화 (#4252)", () => {
     channelsQuery.data = [dms[5]];
     const host = await mount("/c/none");
     expect(host.querySelector('[data-testid="dm-section-empty"]')?.textContent).toContain(
-      "닫은 대화는 새 메시지가 오면 다시 나타납니다"
+      "숨긴 대화는 새 메시지가 오면 다시 나타납니다"
     );
     expect(host.textContent).not.toContain("아직 대화가 없습니다");
     expect(closedCount(host)).toBe(1);
@@ -1463,7 +1463,7 @@ describe("나간 멤버와의 대화 (#4252)", () => {
     setReadStates([readState(DM_ID(1), 3)]);
     const host = await mount("/c/none");
     expect(host.querySelector('[data-testid="dm-section-empty"]')?.textContent).toContain(
-      "닫은 대화는 새 메시지가 오면 다시 나타납니다"
+      "숨긴 대화는 새 메시지가 오면 다시 나타납니다"
     );
     expect(closedCount(host)).toBe(2);
   });
@@ -1893,7 +1893,7 @@ describe("DM 닫기 · 서버 갈래 (#4228)", () => {
       await Promise.resolve();
     });
     await settle();
-    expect(host.querySelector('[data-testid="dm-close-error"]')?.textContent).toContain("대화를 닫지 못했어요");
+    expect(host.querySelector('[data-testid="dm-close-error"]')?.textContent).toContain("목록에서 숨기지 못했어요");
     expect(closedDmsFor(WS)).toEqual({});
   });
 
@@ -2074,5 +2074,50 @@ describe("안 읽은 채널로 가는 전역 단축키 (⌥↑·⌥↓)", () => 
     await pressAltArrow("ArrowDown");
     // 갔다: 지금 열려 있는 DM 은 읽고 있는 것이라 안 읽음 수가 없다.
     expect(unreadBadge(host)).toBeNull();
+  });
+});
+
+describe("읽은 채널·DM 줄은 한 단계 연하다 (#5775, 폰 #4953 과 같은 규칙)", () => {
+  // 주소가 `/` 이면 셸이 첫 채널(일반)을 열려 있는 줄로 친다. 이 시험들은 열려 있지 않은 줄을 재므로 다른 DM 을 연다.
+  const OPEN = `/c/${DM_ID(3)}`;
+  const dimmed = (host: HTMLElement, channelId: string) =>
+    dmRow(host, channelId).hasAttribute("data-dim");
+
+  it("새 글이 없는 줄만 연하다: 읽은 채널·읽은 DM 은 연하고, 안 읽은 DM 은 또렷하다", async () => {
+    setReadStates([readState(CH_GENERAL, 5), readState(DM_ID(1), 12, 10), readState(DM_ID(2), 3)]);
+    const host = await mount(OPEN);
+    expect(dimmed(host, CH_GENERAL)).toBe(true);
+    expect(dimmed(host, DM_ID(1))).toBe(false);
+    expect(dimmed(host, DM_ID(2))).toBe(true);
+  });
+
+  it("목적지 줄(인박스·멤버 등)과 프로필 줄은 읽음을 말하지 않아 표지가 없다 — 표지는 채널·DM 줄에만 선다", async () => {
+    setReadStates([readState(CH_GENERAL, 5), readState(DM_ID(2), 3)]);
+    const host = await mount(OPEN);
+    const marked = [...host.querySelectorAll("[data-dim]")];
+    expect(marked.length).toBeGreaterThan(0);
+    expect(marked.every((el) => el.getAttribute("data-testid") === "channel-item")).toBe(true);
+  });
+
+  it("알림을 끈 줄은 새 글이 있어도 연하다", async () => {
+    const muted = { ...general, muted: true };
+    channelsQuery.groups = { channels: [muted], dms };
+    channelsQuery.data = [muted, ...dms];
+    setReadStates([readState(CH_GENERAL, 9, 5)]);
+    const host = await mount(OPEN);
+    expect(dimmed(host, CH_GENERAL)).toBe(true);
+  });
+
+  it("지금 열려 있는 줄은 읽었어도 연하지 않다", async () => {
+    setReadStates([readState(CH_GENERAL, 5)]);
+    const host = await mount(`/c/${CH_GENERAL}`);
+    expect(dimmed(host, CH_GENERAL)).toBe(false);
+  });
+
+  it("읽음 정보를 못 받았으면 연하게 칠하지 않는다 — 다 읽었다는 거짓을 만들지 않는다", async () => {
+    readStatesQuery.isError = true;
+    readStatesQuery.data = undefined;
+    const host = await mount(OPEN);
+    expect(dimmed(host, CH_GENERAL)).toBe(false);
   });
 });

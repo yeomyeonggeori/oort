@@ -2150,6 +2150,22 @@
   &[data-unread] [data-row-icon] {
     color: var(--ink);
   }
+  /* 새 글이 없는 채널·DM 줄 (`data-dim`, #5775 · 폰 #4953 과 같은 규칙): 이름이 한 단계 연하다(`--ink-muted`,
+   * 띠 위에서는 `--on-band-muted`로 다시 묶인다). 아이콘은 `--icon` 으로 돌아가는데, 알림을 끈 줄은 새 글이 있어도
+   * 연하고(`data-unread` 의 잉크 아이콘을 이긴다) 선택 행은 이 표지를 받지 않는다. 목적지 줄(인박스·멤버)과 프로필 줄은
+   * 읽음을 말하지 않아 표지가 없다. 이름 옆 `@핸들`은 이름과 같은 색이 되지 않도록 한 번 더 옅게 · 가늘게 한다
+   * (대비는 `sidebarRowDim.contrast.test.ts` 가 모든 테마에서 4.5:1 로 잰다). */
+  &[data-dim] {
+    color: var(--ink-muted);
+    font-weight: 500;
+  }
+  &[data-dim] [data-row-icon] {
+    color: var(--icon);
+  }
+  &[data-dim] [data-row-handle] {
+    color: color-mix(in srgb, var(--ink-muted) 92%, transparent);
+    font-weight: 400;
+  }
   /* DM 행의 아바타는 24px 이고 글리프는 18px 이다. 둘이 같은 이름 시작 위치를 갖도록 아바타가
    * 글리프의 **축 위에** 앉는다: 양쪽으로 3px 씩 행 안쪽 여백으로 번진다(18 + 6 = 24). 이름은
    * 채널 행과 같은 자리에서 시작하고(실측 38px, 번지지 않으면 44px), 아바타의 중심은 글리프의

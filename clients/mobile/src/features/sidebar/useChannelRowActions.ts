@@ -299,7 +299,7 @@ export function useChannelRowActions(
               // 지금 보던 대화였으면 걷는다(웹 `closeDmRow` 의 착지와 같다). 셸이 열린 대화인지 본다.
               onLeft?.(channel.id);
             },
-            '대화를 닫았습니다.',
+            '대화를 목록에서 숨겼습니다.',
           );
           return;
         }
