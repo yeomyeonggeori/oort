@@ -18,7 +18,8 @@ import {memberNameParts} from '@momo/core/features/workspace/directory';
 import type {Directory} from '@momo/core/features/workspace/directory';
 import React, {useCallback, useMemo} from 'react';
 import {FlatList, Pressable, StyleSheet, Text, View} from 'react-native';
-import {EmptyState, ErrorState, Screen, ScreenHeader} from '../../design/atoms';
+import {EmptyState, ErrorState, Screen} from '../../design/atoms';
+import {PageHeader} from '../../design/SheetChrome';
 import {font, line, radius, SAFE_GUTTER, space, TOUCH_TARGET, type Palette} from '../../design/tokens';
 import {useStyles} from '../../design/theme';
 import {EdgeSwipeBack} from '../../nav/EdgeSwipeBack';
@@ -123,11 +124,10 @@ export function PinListPanel({
       onBack={onClose}
       testID="pin-list-pane">
       <Screen>
-        <ScreenHeader
+        <PageHeader
           title={pinListHeaderLabel(entries.length, status)}
-          onBack={onClose}
-          // 「뒤로」가 아니다. 덮고 있는 표면은 자기가 무엇을 닫는지 말한다.
-          backLabel="고정 목록 닫기"
+          // 「뒤로」가 아니다. 덮고 있는 표면은 자기가 무엇을 닫는지 말한다. 대화 위에 쌓인 안쪽 장이라 X 가 아니라 ‹ 다(`phone-sheets.md` §3).
+          back={{label: '고정 목록 닫기', onPress: onClose, testID: 'header-back'}}
           titleTestID="pin-list-title"
         />
         <FlatList

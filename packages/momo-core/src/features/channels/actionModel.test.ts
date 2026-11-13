@@ -478,7 +478,7 @@ describe("진행 낱말과 메뉴 이름 (design-review #1937)", () => {
     for (const muted of [false, true]) {
       const item = channelActionItems(ALL, { ...REST, muted }).find(i => i.key === "mute");
       expect(item?.label).toBe(muted ? "알림 꺼짐" : "알림 켜짐");
-      expect(item?.icon).toBe(muted ? "🔕" : "🔔");
+      expect(item?.icon).toBe(muted ? "bell-off" : "bell");
       expect(item?.busyLabel).toBeUndefined();
     }
   });

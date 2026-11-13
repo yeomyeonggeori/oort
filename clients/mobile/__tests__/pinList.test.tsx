@@ -7,11 +7,13 @@ import {
   type PinListStatus,
   type PinMap,
 } from '@momo/core/features/timeline/pins';
-import {cleanup, fireEvent, render, screen} from '@testing-library/react-native';
+import {cleanup, fireEvent, render, screen, within} from '@testing-library/react-native';
 import React from 'react';
+import {Image, StyleSheet} from 'react-native';
 
 import {PinListPanel} from '../src/features/conversation/PinListPanel';
 import {APP_NOTE_MARK} from '../src/features/conversation/appVoice';
+import {CONV_ICONS} from '../src/design/icons';
 import {TOUCH_TARGET} from '../src/design/tokens';
 
 // =============================================================================
@@ -252,7 +254,18 @@ describe('빈 목록도 말을 한다', () => {
     );
   });
 
-  /** 덮는 표면은 자기가 무엇을 닫는지 말한다 (`ScreenHeader.backLabel`). */
+  /** 머리는 「대화 정보」와 같은 부품이다 — 둥근 뒤로 단추와 가운데 제목 (#5776). 옛 머리의 글자 ‹ 는 없다. */
+  it('머리가 새 부품이다 — 둥근 뒤로 단추 + 가운데 제목, 글자 ‹ 는 없다', () => {
+    renderPanel(emptyPins());
+    const title = screen.getByTestId('pin-list-title');
+    expect(title.props.accessibilityRole).toBe('header');
+    expect(StyleSheet.flatten(title.props.style).textAlign).toBe('center');
+    const glyphs = within(screen.getByTestId('header-back')).UNSAFE_queryAllByType(Image);
+    expect(glyphs.map(g => g.props.source)).toEqual([CONV_ICONS.left]);
+    expect(screen.queryByText('‹')).toBeNull();
+  });
+
+  /** 덮는 표면은 자기가 무엇을 닫는지 말한다 (`PageHeader` 의 `back.label`). */
   it('뒤로가기가 「뒤로」가 아니라 무엇을 닫는지 말한다', () => {
     const {onClose} = renderPanel(emptyPins());
     const back = screen.getByTestId('header-back');

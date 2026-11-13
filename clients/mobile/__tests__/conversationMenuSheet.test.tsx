@@ -31,7 +31,7 @@ import {AccessibilityInfo, Dimensions, Image, Keyboard, StyleSheet} from 'react-
 import '../src/boot/polyfills';
 import '../src/boot/coreHost';
 
-import {SHEET_ICONS} from '../src/design/icons';
+import {CONV_ICONS, SHEET_ICONS} from '../src/design/icons';
 import {COPY_RECEIPT_MS, copyText} from '../src/features/conversation/copy';
 import {TOUCH_TARGET} from '../src/design/tokens';
 import {ConversationMenuSheet} from '../src/features/conversation/ConversationMenuSheet';
@@ -336,6 +336,27 @@ describe('시트 — 카드와 행의 차례 (#4319)', () => {
         .filter(node => node.props.source === SHEET_ICONS.chevron).length;
     for (const key of ['info', 'pins', 'delegate']) expect([key, chevrons(key)]).toEqual([key, 1]);
     for (const key of ['mute-toggle', 'close-dm']) expect([key, chevrons(key)]).toEqual([key, 0]);
+  });
+});
+
+describe('시트 — 알림 줄의 끝 표지는 종 아이콘이다 (#5776)', () => {
+  motionOff();
+
+  it('켜짐은 bell·꺼짐은 bell-off, 이모지 없이 20pt 로 서고 위 줄들의 셰브론(잉크 끝 6pt)과 같은 선에 끝이 선다', () => {
+    const muteOn = conversationMenuActionItems(target({muted: true}))[0];
+    for (const [item, source, ink] of [
+      [MUTE_OFF, CONV_ICONS.bell, 5 / 3],
+      [muteOn, CONV_ICONS.bellOff, 1],
+    ] as const) {
+      renderSheet({onOpenInfo: jest.fn(), items: [item]});
+      const row = screen.getByTestId('conversation-menu-mute-toggle');
+      const glyphs = within(row).UNSAFE_queryAllByType(Image);
+      expect(glyphs.map(node => node.props.source)).toEqual([source]);
+      const style = StyleSheet.flatten(glyphs[0].props.style);
+      expect([style.width, style.height]).toEqual([20, 20]);
+      expect(style.marginRight).toBeCloseTo(6 - ink, 5);
+      expect(row).not.toHaveTextContent(/🔔|🔕/);
+    }
   });
 });
 

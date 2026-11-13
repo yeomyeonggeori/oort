@@ -13,7 +13,7 @@ import {StyleSheet} from 'react-native';
 import {Sentence} from '../../design/atoms';
 import {PageSheet} from '../../design/PageSheet';
 import {SheetHeader} from '../../design/SheetChrome';
-import {ConfirmStep, GroupCard, ListRow, RowEmoji, SheetScroll} from '../../design/sheetParts';
+import {ConfirmStep, GroupCard, ListRow, RowStatusIcon, SheetScroll} from '../../design/sheetParts';
 import {useStyles} from '../../design/theme';
 import {font, line, type Palette} from '../../design/tokens';
 import {
@@ -102,7 +102,7 @@ export function ConversationMenuSheet({
       <ListRow
         title={busy && item.busyLabel ? item.busyLabel : item.label}
         // 알림 상태 표지는 오른쪽 값 자리다. 앞 칸·행 차례·위험색은 #4319 계약을 따른다.
-        trailing={item.icon ? <RowEmoji emoji={item.icon} /> : undefined}
+        trailing={item.icon ? <RowStatusIcon name={item.icon} align="chevron" /> : undefined}
         tone={item.tone === 'danger' ? 'danger' : 'default'}
         busy={busy}
         // 닫는 길로 보내지 않는다: 이 시트는 왕복 중의 「…하는 중」과 실패를 스스로 보이는 면이라 행동이 끝날 때까지 떠 있어야 한다.

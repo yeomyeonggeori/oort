@@ -24,6 +24,7 @@ import {PHOTO} from './profileSheet';
 //   dm          사람 DM(박서연, 사진 없음) — 이니셜 얼굴(단추 아님) · 자리 비움 칩 · 한 줄 상태 · 알림 · 복사 셋 · 대화 닫기
 //   dm-photo    사진이 있는 사람 — 같은 모양인데 큰 얼굴이 눌려 크게 보기가 된다
 //   dm-agent    에이전트 DM(달무리 도우미) — 둥근 사각 얼굴 · 생존 칩 · 「○○님이 관리」 · 「에이전트 정보 ›」
+//   muted       알림이 꺼진 사람 DM — 알림 줄의 끝 표지가 빗금 종(bell-off)이다(#5776)
 //   channel     공개 채널(# 디자인, 관리자) — 큰 `#` 얼굴 · 「6명 · 달무리 도우미 참여 중」 · 주제 · 알림 · 복사 셋 · 채널 나가기(위험색)
 //   channel-leave 같은 채널의 나가기 확인 단계
 //   viewer      사진 크게 보기(`AvatarViewer`) — 정보 페이지 위에 선 전체 화면
@@ -165,6 +166,14 @@ export function ConversationInfoPageSurface({which}: {which: string}): React.JSX
               status: {tone: 'ok', label: '응답함 3분 전'},
               onOpenAgent: noop,
             })}
+          />
+        </Frame>
+      );
+    case 'muted':
+      return (
+        <Frame>
+          <ConversationInfoPage
+            {...props({items: conversationInfoActionItems({...DM_TARGET, muted: true})})}
           />
         </Frame>
       );

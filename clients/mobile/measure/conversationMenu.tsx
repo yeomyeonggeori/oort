@@ -15,6 +15,7 @@ import {Backdrop} from './sheetKit';
 //
 //   dm             사람 DM(박서연) — 고정한 메시지 › · 알림 끄기 · 대화 닫기. 정보 행은 없다(그 화면을 가진 호출자만 문을 단다)
 //   agent          에이전트 DM(달무리 도우미) — 위에 작업 맡기기 › 가 더해진다
+//   muted          알림이 꺼진 사람 DM — 알림 줄의 끝 표지가 빗금 종(bell-off)이다(#5776)
 //   channel        채널(#디자인, 관리자) — 고정한 메시지 › · 알림 끄기 · 채널 나가기(위험색)
 //   channel-leave  같은 채널의 나가기 확인 단계(「이 채널에서 나갈까요?」 + 취소 · 채널 나가기)
 //   mute-failure   알림 끄기가 거절된 뒤 — 시트가 열린 채 그 자리에서 이유를 말한다
@@ -97,6 +98,8 @@ export function ConversationMenuSurface({which}: {which: string}): React.JSX.Ele
   switch (which) {
     case 'agent':
       return <Sheet target={AGENT_TARGET} delegate />;
+    case 'muted':
+      return <Sheet target={{...DM_TARGET, muted: true}} />;
     case 'channel':
       return <Sheet target={CHANNEL_TARGET} />;
     case 'channel-leave':

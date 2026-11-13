@@ -21,7 +21,7 @@ import {
 import {useSafeAreaInsets} from 'react-native-safe-area-context';
 
 import {ROW_GLYPH_MAX_SCALE, Sentence, STACK_PILL_SCALE} from './atoms';
-import {HOME_ICONS, HOME_ICON_SIZE, SHEET_ICON_SIZE, SHEET_ICONS} from './icons';
+import {CONV_ICONS, CONV_ICON_SIZE, HOME_ICONS, HOME_ICON_SIZE, SHEET_ICON_SIZE, SHEET_ICONS} from './icons';
 import {usePageSheetAction, usePageSheetKeyboard, usePageSheetScrollProps} from './PageSheet';
 import {cardPosition, cardRing, dividerIndent, type CardInset} from './sheetModel';
 import {useKeyboardAppearance, usePalette, useStyles, useTheme} from './theme';
@@ -182,6 +182,43 @@ export function RowEmoji({emoji}: {emoji: string}): React.JSX.Element {
       importantForAccessibility="no">
       {emoji}
     </Text>
+  );
+}
+
+/**
+ * 종 그림의 **잉크 오른쪽 끝**이 그림 칸 오른쪽 끝에서 안쪽으로 떨어진 거리(pt). `bell.png`·`bell-off.png` 의 @3x 알파 경계에서 재었다
+ * (bell 5px · bell-off 3px). 종은 칸을 꽉 채우지 않는다 — 빗금 없는 종이 더 좁아 끝이 0.67pt 더 안쪽이다.
+ */
+const STATUS_ICON_INK_GAP = {bell: 5 / 3, 'bell-off': 1} as const;
+/**
+ * 같은 줄 끝에 서는 이웃 아이콘의 잉크 오른쪽 끝 거리(pt): 복사 `copy22.png` 3px/3 = 1, 셰브론 `chevron18.png` 18px/3 = 6.
+ * 셰브론은 ‹ › 모양이라 칸 안쪽에 앉는다 — 그 줄(세로 줄)에 종의 끝을 맞추려면 종을 그만큼 안으로 들인다.
+ */
+const STATUS_COLUMN_INK_GAP = {copy: 1, chevron: 6} as const;
+
+/**
+ * 행 오른쪽 끝의 **상태 표지** 아이콘(알림 켜짐·꺼짐의 종, #5776). 20pt 그림을 키우지 않고(키우면 흐려진다) 그대로 그린다.
+ * 세로는 행의 가운데(`alignItems: 'center'`)라 그림 칸이 20이든 22든 18이든 가운데가 같다. 가로는 `align` 이 말한 이웃 줄의
+ * 끝 아이콘(`copy` 복사 · `chevron` 셰브론)과 **잉크의 오른쪽 끝**을 맞춘다(칸 끝이 아니라 보이는 선의 끝). 이웃이 없으면 칸 끝이다.
+ * 색은 줄 글자색이다. 보조기술에는 이름(「알림 켜짐」)이 이미 있으므로 읽히지 않는다.
+ */
+export function RowStatusIcon({
+  name,
+  align,
+}: {
+  name: 'bell' | 'bell-off';
+  align?: keyof typeof STATUS_COLUMN_INK_GAP;
+}): React.JSX.Element {
+  const styles = useStyles(buildStyles);
+  const marginRight =
+    align === undefined ? 0 : STATUS_COLUMN_INK_GAP[align] - STATUS_ICON_INK_GAP[name];
+  return (
+    <Image
+      source={name === 'bell-off' ? CONV_ICONS.bellOff : CONV_ICONS.bell}
+      style={[styles.statusIcon, {marginRight}]}
+      accessibilityElementsHidden
+      importantForAccessibility="no"
+    />
   );
 }
 
@@ -821,6 +858,11 @@ const buildStyles = (color: Palette) =>
       width: SHEET_ICON_SIZE.copy,
       height: SHEET_ICON_SIZE.copy,
       tintColor: color.textMuted,
+    },
+    statusIcon: {
+      width: CONV_ICON_SIZE.bell,
+      height: CONV_ICON_SIZE.bell,
+      tintColor: color.text,
     },
     rowEmoji: {fontSize: font.heading, lineHeight: line.heading, textAlign: 'center'},
     rowText: {flex: 1},
