@@ -56,12 +56,18 @@ function readMap(): Record<string, string> {
   }
 }
 
+// 로그아웃이 지운 뒤에는 다음 세션까지 새로 남기지 않는다 (#5799, 웹 `chat/draftStore.ts`의 같은 문). 세션 트리는 로그아웃 **뒤에**
+// 내려가고, 내려가는 대화는 결과를 모르는 전송을 남기며(`useTimeline` 정리 함수), 그 요청이 늦게 실패하면 또 남긴다. 이 파일의 쓰기가
+// 모두 `writeMap`을 지나므로 여기서 막는다. 지우기는 언제나 통한다. 닫는 것은 `closeFailedSendsForSignOut`, 여는 것은 `openFailedSendsForSession`.
+let closedForSignOut = false;
+
 function writeMap(map: FailedSendMap): void {
   const store = nonSecretStore();
   if (Object.keys(map).length === 0) {
     store.remove(NON_SECRET_KEYS.failedSends);
     return;
   }
+  if (closedForSignOut) return;
   store.set(NON_SECRET_KEYS.failedSends, JSON.stringify(map));
 }
 
@@ -153,4 +159,15 @@ export function clearAllFailedSends(): void {
   } catch {
     // 로그아웃 자체는 이미 진행됐다.
   }
+}
+
+/** 로그아웃(#5799): 전부 지우고, 다음 세션까지 새로 남기지 않는다 — 내려가는 대화와 늦게 실패한 전송이 지운 자리를 되살리지 못하게. */
+export function closeFailedSendsForSignOut(): void {
+  closedForSignOut = true;
+  clearAllFailedSends();
+}
+
+/** 세션이 섰다(로그인·복원). 보내지 못한 글을 다시 이 기기에 남긴다. */
+export function openFailedSendsForSession(): void {
+  closedForSignOut = false;
 }
