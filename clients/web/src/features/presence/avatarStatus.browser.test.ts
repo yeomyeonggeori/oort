@@ -8,7 +8,11 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { compile } from "tailwindcss";
 import { describe, expect, it } from "vitest";
 import type { StatusDotTone } from "@momo/core/features/presence/statusDot";
-import { WEB_STATUS_BADGE_FACES, statusBadgeGeometry } from "@momo/core/features/presence/statusBadge";
+import {
+  WEB_STATUS_BADGE_FACES,
+  statusBadgeGeometry,
+  type StatusBadgeSubject,
+} from "@momo/core/features/presence/statusBadge";
 import { browserLaunchBlocked } from "@/testing/agentSandbox";
 import { AvatarStatus } from "./AvatarStatus";
 
@@ -22,8 +26,10 @@ import { AvatarStatus } from "./AvatarStatus";
  * 무엇을 재나(크기 24·32·112 × 네 톤 × 바탕 다섯 × 밝게/어둡게, 기기 배율 2):
  *   틈    점 중심에서 「점 반지름 + 틈/2」 거리의 세 점(왼쪽·왼쪽 위·위 — 아바타 위)이 **바탕 색 그대로**다. 예전의 면색 테는
  *         가리킴·선택·띠·사진 위에서 바탕과 다른 색이었다 — 그 색 테가 없다는 것이 이 줄이다.
- *   점    톤마다 모양: ok 는 가운데가 표식, warn 은 왼쪽 위(덜어 낸 원)가 바탕이고 오른쪽 아래가 표식, danger 는 가운데(가로
- *         줄)가 바탕이고 위아래가 표식, muted 는 가운데가 바탕이고 고리 자리가 표식. 표식은 바탕과 3:1 이상.
+ *   점    모양(뜻): 사람 ok 는 가운데가 표식, 사람 warn 은 왼쪽 위(덜어 낸 원)가 바탕이고 오른쪽 아래가 표식, danger 는
+ *         가운데(가로 줄)가 바탕이고 위아래가 표식, muted 는 가운데가 바탕이고 고리 자리가 표식. **에이전트 warn 은 채운
+ *         원**이다 — 사람의 초승달이 비는 왼쪽 위까지 표식이다(r1 H2: 경고가 「자리 비움」 그림이 되지 않는다). 표식은 바탕과
+ *         3:1 이상.
  *   가장자리 도려낸 원의 반지름을 세 방향에서 재어 1 기기 px 안에서 같다(찌그러지거나 계단지지 않는다). 바탕과 아바타
  *         사이의 섞인 픽셀은 2 기기 px 이하(번지지 않는다).
  *   대조  점이 없는 아바타는 같은 자리가 아바타 색이다(이 시험이 도려냄을 실제로 본다는 증거).
@@ -75,7 +81,16 @@ async function buildCss(): Promise<string> {
     base: DESIGN,
     loadStylesheet,
   });
-  const candidates = new Set<string>(["avatar-status", "band-surface", "bg-surface", "bg-surface-hover", "bg-signal-soft"]);
+  const candidates = new Set<string>([
+    "avatar-status",
+    "status-shape-moon",
+    "status-shape-bar",
+    "status-shape-ring",
+    "band-surface",
+    "bg-surface",
+    "bg-surface-hover",
+    "bg-signal-soft",
+  ]);
   for (const cls of Object.values(FACE_CLASS)) for (const c of cls.split(" ")) candidates.add(c);
   const noeul = readFileSync(join(DESIGN, "themes/palettes/noeul.css"), "utf8");
   return `${compiler.build([...candidates])}\n${noeul}`;
@@ -84,7 +99,15 @@ async function buildCss(): Promise<string> {
 /** 바탕 다섯: 쉬는 면 · 가리킨 줄 · 짙은 색 바탕(색 테가 가장 잘 드러나는 곳) · 띠(노을, 사이드바) · 사진 아바타(쉬는 면 위). */
 const BACKDROPS = ["surface", "hover", "tinted", "band", "photo"] as const;
 type Backdrop = (typeof BACKDROPS)[number];
-const TONES: readonly (StatusDotTone | null)[] = ["ok", "warn", "danger", "muted", null];
+/** 열: 사람의 네 상태 · 점 없음 · 에이전트 경고(채운 원이어야 한다). */
+const TONES: readonly { tone: StatusDotTone | null; subject: StatusBadgeSubject }[] = [
+  { tone: "ok", subject: "human" },
+  { tone: "warn", subject: "human" },
+  { tone: "danger", subject: "human" },
+  { tone: "muted", subject: "human" },
+  { tone: null, subject: "human" },
+  { tone: "warn", subject: "agent" },
+];
 
 const CELL = 176;
 const PAD = 32;
@@ -93,6 +116,7 @@ interface Cell {
   backdrop: Backdrop;
   face: number;
   tone: StatusDotTone | null;
+  subject: StatusBadgeSubject;
   x: number;
   y: number;
 }
@@ -102,7 +126,7 @@ function layout(): Cell[] {
   let row = 0;
   for (const backdrop of BACKDROPS) {
     for (const face of WEB_STATUS_BADGE_FACES) {
-      TONES.forEach((tone, col) => cells.push({ backdrop, face, tone, x: col * CELL, y: row * CELL }));
+      TONES.forEach(({ tone, subject }, col) => cells.push({ backdrop, face, tone, subject, x: col * CELL, y: row * CELL }));
       row += 1;
     }
   }
@@ -117,7 +141,12 @@ function pageHtml(css: string, cells: Cell[]): string {
         className: cell.backdrop === "photo" ? `${faceClass} photo` : faceClass,
       });
       const avatar = renderToStaticMarkup(
-        createElement(AvatarStatus, { face: cell.face as 24 | 32 | 112, tone: cell.tone, children: face })
+        createElement(AvatarStatus, {
+          face: cell.face as 24 | 32 | 112,
+          tone: cell.tone,
+          subject: cell.subject,
+          children: face,
+        })
       );
       const inner = `<div class="at">${avatar}</div>`;
       // 띠 칸만 노을 팔레트(띠가 있는 첫 파티 테마)의 사이드바 안이다. 앱과 같은 겹: 팔레트가 바깥(앱에서는 문서 뿌리),
@@ -263,7 +292,11 @@ function measureCell(img: Image, cell: Cell, label: string): string[] {
     if (!near(got, backdrop)) problems.push(`${label} 빈 곳(${where}) ${show(got)} ≠ 바탕 ${show(backdrop)}`);
   };
   const r = dot / 2;
-  switch (cell.tone) {
+  if (cell.subject === "agent") {
+    // 에이전트 경고 = 채운 원: 가운데도, 사람의 초승달이 비는 왼쪽 위도 표식이다.
+    mark("가운데", 0, 0);
+    mark("왼쪽 위(초승달이면 빈 곳)", -r * 0.5, -r * 0.5);
+  } else switch (cell.tone) {
     case "ok":
       mark("가운데", 0, 0);
       break;
@@ -338,10 +371,13 @@ describe("아바타 상태 점 — 도려낸 틈을 픽셀로 (#5786)", () => {
               expect(band, `${engine} ${scheme} 띠`).not.toBe(surface);
               const img = decodePng(await page.screenshot({ fullPage: true, animations: "disabled" }));
               for (const cell of cells) {
-                problems.push(...measureCell(img, cell, `${engine} ${scheme} ${cell.backdrop} ${cell.face} ${cell.tone ?? "점 없음"}`));
+                problems.push(
+                  ...measureCell(img, cell, `${engine} ${scheme} ${cell.backdrop} ${cell.face} ${cell.subject} ${cell.tone ?? "점 없음"}`)
+                );
               }
               // 큰 얼굴 그림자: 점 있는 칸과 없는 칸의 아바타 바로 아래(가운데, 4px 아래)가 같다.
-              const hero = (tone: StatusDotTone | null) => cells.find((c) => c.backdrop === "surface" && c.face === 112 && c.tone === tone)!;
+              const hero = (tone: StatusDotTone | null) =>
+                cells.find((c) => c.backdrop === "surface" && c.face === 112 && c.tone === tone && c.subject === "human")!;
               const below = (cell: Cell) => px(img, cell.x + PAD + 56, cell.y + PAD + 112 + 4);
               if (!near(below(hero("ok")), below(hero(null)), 2)) {
                 problems.push(`${engine} ${scheme} 큰 얼굴 그림자가 점 때문에 달라졌다 ${show(below(hero("ok")))} / ${show(below(hero(null)))}`);

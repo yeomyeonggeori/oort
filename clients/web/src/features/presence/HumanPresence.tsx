@@ -40,6 +40,7 @@ export function AvatarWithPresence({
     <AvatarStatus
       face={face}
       tone={dot?.tone ?? null}
+      subject="human"
       className={className}
       data-testid="avatar-with-presence"
       data-presence-tone={dot?.tone}

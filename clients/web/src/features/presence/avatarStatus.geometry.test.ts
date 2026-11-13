@@ -21,7 +21,7 @@ function faceRule(face: number): Record<string, string> {
   const at = block.indexOf(`&[data-status-face="${face}"] {`);
   expect(at, `${face} 규칙이 있다`).toBeGreaterThan(-1);
   const body = block.slice(at, block.indexOf("}", at));
-  return Object.fromEntries([...body.matchAll(/--status-([a-z]+):\s*([^;]+);/g)].map((m) => [m[1]!, m[2]!.trim()]));
+  return Object.fromEntries([...body.matchAll(/--status-([a-z-]+):\s*([^;]+);/g)].map((m) => [m[1]!, m[2]!.trim()]));
 }
 
 const px = (value: string | undefined): number => {
@@ -34,7 +34,11 @@ describe("CSS 크기 표 = 코어 statusBadgeGeometry", () => {
   it.each(WEB_STATUS_BADGE_FACES.map((face) => [face]))("아바타 %ipx", (face) => {
     const rule = faceRule(face);
     const geometry = statusBadgeGeometry(face);
-    expect({ dot: px(rule.dot), gap: px(rule.gap) }).toEqual({ dot: geometry.dot, gap: geometry.gap });
+    expect({ dot: px(rule.dot), gap: px(rule.gap), glyphShift: px(rule["glyph-shift"]) }).toEqual({
+      dot: geometry.dot,
+      gap: geometry.gap,
+      glyphShift: geometry.glyphShift,
+    });
   });
 
   it("CSS 에 코어 표 밖의 크기가 없다(크기를 더하면 코어 표에도 더한다)", () => {
@@ -48,6 +52,26 @@ describe("CSS 크기 표 = 코어 statusBadgeGeometry", () => {
     expect(head).toContain(`--status-dot: ${geometry.dot}px;`);
     expect(head).toContain(`--status-gap: ${geometry.gap}px;`);
     expect(head).toContain("--status-bleed: 0px;");
+    expect(head).toContain("--status-glyph-shift: 0px;");
+  });
+
+  it("점이 있는 글자 아바타만 이니셜을 옮긴다: 사진(img)·기본 아바타(svg)는 제외, 오른쪽·아래 여백 = 옮김 × 2 (r1 B1)", () => {
+    const at = block.indexOf("&[data-status-cut] > [data-avatar-status-face] > :not(:has(img, svg)) {");
+    expect(at).toBeGreaterThan(-1);
+    const body = block.slice(at, block.indexOf("}", at));
+    expect(body).toContain("padding-right: calc(var(--status-glyph-shift) * 2);");
+    expect(body).toContain("padding-bottom: calc(var(--status-glyph-shift) * 2);");
+  });
+
+  it("「내 상태」 메뉴의 표지(status-mark)는 가장 작은 배지(24)와 같은 점 · 틈이다 (r1 M1)", () => {
+    const start = css.indexOf("@utility status-mark {");
+    expect(start).toBeGreaterThan(-1);
+    const body = css.slice(start, css.indexOf("}", start));
+    const spacing2 = /--spacing-2:\s*(\d+)px;/.exec(css);
+    expect(body).toContain("--status-dot: var(--spacing-2);");
+    const geometry = statusBadgeGeometry(24);
+    expect(Number(spacing2![1])).toBe(geometry.dot);
+    expect(px(/--status-gap:\s*([^;]+);/.exec(body)![1]!.trim())).toBe(geometry.gap);
   });
 
   it("큰 얼굴의 넓힘은 rest 그림자가 번지는 폭(밝게 0 8px 24px -10px · 어둡게 0 10px 28px -12px)보다 넓다", () => {

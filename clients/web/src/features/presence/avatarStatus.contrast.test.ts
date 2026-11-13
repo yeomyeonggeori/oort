@@ -1,6 +1,8 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { blend } from "@momo/core/design/scrim";
+import { firstPartyGlassSources, glassChrome, glassRange } from "@momo/core/design/glass";
+import { blend, worstCaseBackdrops } from "@momo/core/design/scrim";
+import { wallpaperTokensOf, wallpaperTreatment } from "@momo/core/design/wallpaper";
 import { contrast } from "@momo/core/design/color";
 import { catalogEntries, deriveCatalogMode } from "@momo/core/design/deriveCatalog";
 import {
@@ -25,6 +27,14 @@ import type { StatusDotTone } from "@momo/core/features/presence/statusDot";
 //                   `band-surface` 로 원래 역할을 되찾는다 — 그 줄은 아래 「면」 칸이 잰다.
 //   모든 테마       멤버 목록 카드·멤버 프로필 창·채널 멤버 패널·새 DM 창·선택 줄: 서는 면(surface·surface-muted·sheet)과
 //                   가리킴·눌림 면. 띠 없는 테마의 사이드바는 캔버스 위.
+//   배경화면        띠 없는 테마의 사이드바는 scrim 위에 선다(r1 H1). 바탕은 scrim 최악 합성 두 끝(순흑·순백 사진 = 가장 어두운
+//                   배경화면과 가장 밝은 배경화면)이고, 표식은 배경화면이 사이드바에 다시 묶는 보정값이다(`wallpaperTreatment`).
+//   유리            데스크탑 유리를 켠 사이드바: 바닥 세 정지점의 최악 합성(띠가 있으면 반투명 띠를 그 위에 얹은 것), 불투명도는
+//                   슬라이더 아래 끝(하한)과 위 끝. 표식은 유리가 묶는 값(`glassChrome`)이다.
+//
+// 점의 초록이 띠가 없을 때 무엇으로 떨어지는지(사이드바 묶음의 `--status-ok` 뒤 값)는 **CSS 에서 읽어** 배경화면·유리 칸에
+// 넣는다: 그 자리의 `--ok`(보정값)면 보정을 받고, 루트 값(`--status-ok-base`)이면 보정을 건너뛴다(r1 H1 — 어두운 배경화면 +
+// 밝게에서 2.35~2.57:1). 되돌리면 숫자가 붉다.
 //
 // 색은 **출하되는 CSS 에서** 읽는다: 띠 위의 주황·빨강이 어느 on-band 단계로 묶이는지, 점의 초록이 띠 위에서 무엇을
 // 섞는지, 꺼짐 고리가 어느 역할인지 — 손으로 옮긴 사본이 아니다.
@@ -55,19 +65,35 @@ const avatarStatus = ruleBody("@utility avatar-status {");
  * 묶지 않으면 띠 위 점은 섞지 않은 `--ok`(2.8:1)다.
  */
 const bandOkMix = (() => {
-  expect(sidebarScope).toContain("--status-ok: var(--band-status-ok, var(--status-ok-base));");
+  expect(sidebarScope).toMatch(/--status-ok: var\(--band-status-ok, var\(--[a-z-]+\)\);/);
   expect(css).toContain("--status-ok-base: var(--ok);");
   expect(avatarStatus).toContain("background-color: var(--status-ok, var(--ok));");
-  const match = /--band-status-ok:\s*color-mix\(in srgb, var\(--ok\) (\d+)%, var\(--on-band\)\);/.exec(sidebarScope);
+  const match = /--band-status-ok:\s*color-mix\(in srgb, var\(--(ok|status-ok-base)\) (\d+)%, var\(--on-band\)\);/.exec(sidebarScope);
   expect(match, "--band-status-ok 가 ok 와 on-band 를 섞는다").not.toBeNull();
-  return Number(match![1]) / 100;
+  return Number(match![2]) / 100;
 })();
 
-/** 꺼짐 고리의 선 역할(`--status-ring` 이 없으면 뒤 값). */
+/**
+ * 띠 위에서 섞는 초록이 어느 값인가: `status-ok-base` 면 루트 값, `ok` 면 그 자리의 `--ok`(유리를 켜면 바닥 위 보정값 — 띠
+ * 위에서는 너무 어둡다). 불투명한 띠에서는 둘이 같고 유리 띠에서 갈린다.
+ */
+const bandOkSource = /--band-status-ok:\s*color-mix\(in srgb, var\(--([a-z-]+)\)/.exec(sidebarScope)![1]!;
+
+/**
+ * 띠가 없을 때 점의 초록이 읽는 역할: `ok` 면 그 자리(사이드바)의 `--ok` — 배경화면·유리의 보정값 — 이고, `status-ok-base`
+ * 면 루트에서 굳은 원래 값이다.
+ */
+const statusOkFallback = (() => {
+  const match = /--status-ok: var\(--band-status-ok, var\(--([a-z-]+)\)\);/.exec(sidebarScope);
+  expect(match, "--status-ok 의 뒤 값").not.toBeNull();
+  return match![1]!;
+})();
+
+const shapeRule = (name: string) => ruleBody(`@utility ${name} {`);
+
+/** 꺼짐 고리의 선 역할. */
 const ringRole = (() => {
-  const match = /\[data-tone="muted"\] \{\s*border: var\(--status-gap\) solid var\(--([a-z-]+)\);/.exec(
-    avatarStatus
-  );
+  const match = /border: var\(--status-gap\) solid var\(--([a-z-]+)\);/.exec(shapeRule("status-shape-ring"));
   expect(match, "꺼짐 고리는 틈 굵기의 선이다").not.toBeNull();
   return match![1]!;
 })();
@@ -134,6 +160,70 @@ const CATALOG = catalogEntries().flatMap((entry) =>
   })
 );
 
+/**
+ * 배경화면을 켠 사이드바(띠 없는 테마만 — 띠가 있으면 배경화면은 사이드바를 보정하지 않고 띠가 불투명하다, `wallpaper.css`).
+ * 바탕 = scrim 최악 합성 두 끝, 표식 = 배경화면이 사이드바에 묶는 값.
+ */
+function wallpaperCases(label: string, t: ThemeModeTokens, mode: "light" | "dark"): Case[] {
+  if (t.band) return [];
+  const treatment = wallpaperTreatment(wallpaperTokensOf(t), mode);
+  if (treatment.verdict === "unavailable") return [];
+  const roles = treatment.roles as Record<string, string>;
+  const marks: Record<StatusDotTone, string> = {
+    ok: statusOkFallback === "ok" ? roles.ok! : t.color.ok,
+    warn: roles.warn!,
+    danger: roles.danger!,
+    muted: roles[ringRole]!,
+  };
+  const [overBlack, overWhite] = worstCaseBackdrops(t.canvas[1], treatment.alpha);
+  return [
+    { label: `${label} 배경화면(어두운 끝)`, bg: overBlack, marks },
+    { label: `${label} 배경화면(밝은 끝)`, bg: overWhite, marks },
+  ];
+}
+
+/** 유리를 켠 사이드바: 불투명도 하한·최대 × 바닥 정지점 × 최악 합성 두 끝. 띠가 있으면 반투명 띠를 그 위에 얹는다. */
+function glassCases(theme: ThemeId, mode: "light" | "dark"): Case[] {
+  const source = firstPartyGlassSources(theme)[mode];
+  if (!source) return [];
+  const range = glassRange(source);
+  if (!range.usable) return [];
+  return [range.min, range.max].flatMap((percent) => {
+    const alpha = percent / 100;
+    const chrome = glassChrome(source, mode, percent).band as Record<string, string>;
+    const band = source.band;
+    const ok = band
+      ? blend(bandOkSource === "ok" ? chrome.ok! : THEMES[theme][mode].color.ok, band["on-band"], bandOkMix)
+      : statusOkFallback === "ok"
+        ? chrome.ok!
+        : THEMES[theme][mode].color.ok;
+    const marks: Record<StatusDotTone, string> = {
+      ok,
+      warn: chrome.warn!,
+      danger: chrome.danger!,
+      muted: chrome[ringRole]!,
+    };
+    return source.canvas.flatMap((stop, i) =>
+      worstCaseBackdrops(stop, alpha).map((host, end) => ({
+        label: `${theme} ${mode} 유리 ${percent}% ${CANVAS_STOPS[i]} ${end === 0 ? "어두운 끝" : "밝은 끝"}${band ? " 띠" : ""}`,
+        bg: band ? blend(band.band, host, alpha) : host,
+        marks,
+      }))
+    );
+  });
+}
+
+const WALLPAPER = (Object.keys(THEMES) as ThemeId[]).flatMap((theme) =>
+  MODES.flatMap((mode) => wallpaperCases(`${theme} ${mode}`, THEMES[theme][mode], mode))
+);
+const WALLPAPER_CATALOG = catalogEntries().flatMap((entry) =>
+  MODES.flatMap((mode) => {
+    const derived = deriveCatalogMode(entry.id, mode);
+    return derived ? wallpaperCases(`catalog:${entry.id} ${mode}`, derived.tokens, mode) : [];
+  })
+);
+const GLASS = (Object.keys(THEMES) as ThemeId[]).flatMap((theme) => MODES.flatMap((mode) => glassCases(theme, mode)));
+
 const TONES: readonly StatusDotTone[] = ["ok", "warn", "danger", "muted"];
 
 function failures(cases: readonly Case[]): string[] {
@@ -170,6 +260,21 @@ describe("상태 점 대비 — 점이 서는 바탕 전부에서 3:1 (#5786, #4
     expect(failures(CATALOG)).toEqual([]);
   });
 
+  it("배경화면을 켠 사이드바(밝게·어둡게 × 가장 어두운·가장 밝은 배경화면): 네 상태 모두 3:1 이상 (r1 H1)", () => {
+    // 띠 없는 첫 파티 테마 둘(새벽하늘·그래파이트) × 밝게/어둡게 × 두 끝.
+    expect(WALLPAPER.length).toBeGreaterThanOrEqual(2 * 2 * 2);
+    printTable(WALLPAPER);
+    expect(failures(WALLPAPER)).toEqual([]);
+    expect(failures(WALLPAPER_CATALOG)).toEqual([]);
+  });
+
+  it("유리를 켠 사이드바(불투명도 하한·최대, 띠 테마는 반투명 띠 위): 네 상태 모두 3:1 이상", () => {
+    expect(GLASS.some((c) => c.label.includes(" 띠"))).toBe(true);
+    expect(GLASS.some((c) => !c.label.includes(" 띠"))).toBe(true);
+    printTable(GLASS);
+    expect(failures(GLASS)).toEqual([]);
+  });
+
   it("띠 위의 초록은 섞은 값이다 — 섞지 않은 --ok 는 남색 띠(밝게)에서 3:1 이 안 된다(이 시험이 지키는 까닭)", () => {
     const noeul = THEMES.noeul.light;
     expect(noeul.band).not.toBeNull();
@@ -178,23 +283,28 @@ describe("상태 점 대비 — 점이 서는 바탕 전부에서 3:1 (#5786, #4
 });
 
 describe("상태 점 모양 — 색이 아니라 모양으로 갈린다", () => {
-  const rule = (tone: StatusDotTone) => {
+  const toneRule = (tone: StatusDotTone) => {
     const at = avatarStatus.indexOf(`[data-avatar-status-dot][data-tone="${tone}"] {`);
     expect(at, tone).toBeGreaterThan(-1);
     return avatarStatus.slice(at, avatarStatus.indexOf("}", at));
   };
 
-  it("온라인은 채운 원(마스크 없음), 꺼짐은 속 빈 고리(채움 없음)", () => {
-    expect(rule("ok")).toContain("background-color");
-    expect(rule("ok")).not.toContain("mask");
-    expect(rule("muted")).not.toContain("background");
-    expect(rule("muted")).toContain("border:");
+  it("톤 규칙은 색만 칠한다(모양은 뜻이 고르는 `status-shape-*`), 꺼짐 톤에는 채움이 없다", () => {
+    for (const tone of ["ok", "warn", "danger"] as const) {
+      expect(toneRule(tone)).toContain("background-color");
+      expect(toneRule(tone)).not.toContain("mask");
+    }
+    expect(avatarStatus).not.toContain('[data-tone="muted"]');
+    expect(shapeRule("status-shape-ring")).not.toContain("background");
+    expect(shapeRule("status-shape-ring")).toContain("border:");
   });
 
   it("자리 비움은 초승달(원 하나를 덜어 냄), 방해 금지는 가로 줄을 덜어 낸 원 — 둘의 마스크가 서로 다르다", () => {
-    expect(rule("warn")).toMatch(/mask-image: radial-gradient\(\s*circle at 25% 25%/);
-    expect(rule("danger")).toContain("mask-composite: exclude");
-    expect(rule("danger")).toMatch(/mask-size: 100% 100%, calc\(var\(--status-dot\) - 2 \* var\(--status-gap\)\) var\(--status-gap\)/);
+    expect(shapeRule("status-shape-moon")).toMatch(/mask-image: radial-gradient\(\s*circle at 25% 25%/);
+    expect(shapeRule("status-shape-bar")).toContain("mask-composite: exclude");
+    expect(shapeRule("status-shape-bar")).toMatch(
+      /mask-size: 100% 100%, calc\(var\(--status-dot\) - 2 \* var\(--status-gap\)\) var\(--status-gap\)/
+    );
   });
 
   it("띠 위에서 주황·빨강은 서로 다른 on-band 단계다(색도 남지만 모양이 먼저 가른다)", () => {

@@ -60,15 +60,17 @@ import { useSelfPresenceWrite } from "./useSelfPresenceWrite";
 // =============================================================================
 
 /** The small dot beside a declared option in the menu. `auto` shows as its
- *  online color, since online is what auto renders as. */
+ *  online color, since online is what auto renders as. 모양은 아바타 배지와 같은
+ *  규칙이다(#5786 r1 M1, `tokens.css` 의 `status-mark`·`status-shape-*`): 자리 비움 =
+ *  초승달, 방해 금지 = 가로 줄 — 메뉴가 배지의 새 모양을 가르쳐 주는 자리다. */
 function optionDotClass(status: PresenceStatus): string {
   switch (status) {
     case "auto":
-      return "bg-ok";
+      return "status-mark bg-ok";
     case "away":
-      return "bg-warn";
+      return "status-mark status-shape-moon bg-warn";
     case "dnd":
-      return "bg-danger";
+      return "status-mark status-shape-bar bg-danger";
   }
 }
 
@@ -103,6 +105,7 @@ export function PresenceBadge({
     <AvatarStatus
       face={md ? 32 : 24}
       tone={effectivePresenceTone(effective)}
+      subject="human"
       dotTestId="presence-badge-dot"
       aria-hidden="true"
     >

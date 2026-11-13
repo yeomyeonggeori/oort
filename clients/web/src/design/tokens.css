@@ -1962,9 +1962,18 @@
   /* 아바타 상태 점의 초록만(#5786). `--ok` 는 띠에서 다시 묶이지 않아 남색 띠 위에서 3:1 이 안 된다(밝게 2.8:1). on-band 를
    * 섞은 값은 띠가 있을 때만 유효하고(없으면 무효 → `--ok` 로 떨어진다), 점만 이 값을 읽는다. 섞기를 루트가 아니라 이
    * 묶음에서 하는 까닭: 팔레트가 문서 뿌리가 아니라 미리보기 상자(`data-palette-preview`)에 걸린 자리에서도 그 상자의
-   * on-band 를 읽는다. */
-  --band-status-ok: color-mix(in srgb, var(--ok) 55%, var(--on-band));
-  --status-ok: var(--band-status-ok, var(--status-ok-base));
+   * on-band 를 읽는다.
+   *
+   * 띠가 없을 때의 뒤 값은 루트 값(`--status-ok-base`)이 아니라 **이 자리의 `--ok`** 다(design-review r1 H1): 배경화면·유리가
+   * 사이드바의 `--ok` 를 scrim·유리 최악 합성 위 보정값으로 다시 묶는데(`appearance/wallpaper.css`·`glass.css`), 루트 값으로
+   * 떨어지면 점이 그 보정을 건너뛰어 어두운 배경화면 위에서 2.4~2.6:1 이었다. 흰 면으로 되돌리는 쪽(`band-surface`)은 그대로
+   * 루트 값이다 — 불투명한 흰 면 위라 보정이 필요 없다.
+   *
+   * 띠 위에서 섞는 초록은 루트 값(`--status-ok-base`)이다: 유리를 켜면 사이드바의 `--ok` 가 **바닥** 위 보정값(밝게에서 더
+   * 어두운 초록)으로 묶이는데(유리는 ok 를 띠 위 역할로 보지 않는다, `glassChrome`), 그 값을 섞으면 반투명 남색 띠 위에서
+   * 2.5:1 이었다. 루트 값을 섞으면 불투명한 띠 6.1:1 · 유리 띠(하한 79%) 3.2:1 이다. */
+  --band-status-ok: color-mix(in srgb, var(--status-ok-base) 55%, var(--on-band));
+  --status-ok: var(--band-status-ok, var(--ok));
   color: var(--ink);
 }
 
@@ -3435,46 +3444,46 @@
  * 둘레만큼 마스크로 도려내고 그 자리에 점을 앉힌다: 틈이 진짜로 비어 그 자리의 바탕이 무엇이든 그대로 보인다. 새
  * `<svg>` 없이 CSS 마스크다(ADR-0172).
  *
- * 크기는 코어 `statusBadgeGeometry`(아바타 한 변 → 점 지름 ≈ 38%, 틈) 한 함수가 정하고 아래 값은 그 표를 옮긴 것이다
- * (`avatarStatus.geometry.test.ts` 가 대조한다). 인라인 스타일을 쓰지 않으므로 크기는 `data-status-face` 로 고른다.
- * 점은 아바타 상자 **안** 오른쪽 아래에 붙고, 도려낸 원은 점과 중심이 같다(두 값이 같은 변수에서 나온다).
+ * 크기는 코어 `statusBadgeGeometry`(아바타 한 변 → 점 지름·틈·이니셜 옮김) 한 함수가 정하고 아래 값은 그 표를 옮긴 것이다
+ * (`avatarStatus.geometry.test.ts` 가 대조한다): 24 → 8 · 2, 32 → 12 · 2, 112 → 28 · 4. 인라인 스타일을 쓰지 않으므로 크기는
+ * `data-status-face` 로 고른다. 점은 아바타 상자 **안** 오른쪽 아래에 붙고, 도려낸 원은 점과 중심이 같다(두 값이 같은
+ * 변수에서 나온다).
  *
  *   [data-avatar-status-face]  아바타를 감싸는 칸. 점이 있을 때만(`data-status-cut`) 도려낸다 — 점이 없으면(모름)
  *                              아바타는 온전하다. 큰 얼굴은 바깥 그림자(`avatar-hero` 의 rest 고도)가 마스크에 잘리지
  *                              않게 칸을 그림자 폭만큼 넓히고 같은 폭을 음수 여백으로 되돌린다(`--status-bleed`; 배치는
- *                              그대로다).
- *   [data-avatar-status-dot]   점. 글자가 곁에 없는 자리라 **모양이 말한다** — 색이 같아 보이는 바탕(띠 위의 주황·빨강은
- *                              둘 다 흰빛이다)과 밝기가 거의 같은 초록·주황(#4725 M3)에서도 갈린다:
- *                                ok      채운 원                      온라인 · 에이전트 살아 있음
- *                                warn    초승달(왼쪽 위를 둥글게 덜어 냄)  자리 비움 · 에이전트 경고(owner/admin)
- *                                danger  가로 줄이 빠진 원              방해 금지
- *                                muted   속 빈 고리(굵기 = 틈)          오프라인 · 에이전트 꺼짐
- *                              초승달·가로 줄·고리 속의 빈 곳도 도려낸 틈처럼 바탕이 비친다(면색 채움이 없다).
- *                              고리의 선은 `--ink-muted` 다: 예전 `--line-strong` 은 아바타 색 위에서 3:1 미만이었고(#4725
- *                              M2), 틈 안에서도 가리킨·눌린 줄 위에서 2.6~2.9:1 이었다. 띠 위에서는 on-band-muted 로 묶인다.
+ *                              그대로다). 24 의 글자 아바타는 점이 있을 때 이니셜을 구멍 반대쪽(왼쪽 위)으로
+ *                              `--status-glyph-shift` 만큼 옮긴다(r1 B1: 구멍이 받침을 먹어 「김」이 「기」로 읽혔다).
+ *                              사진(`img`)·기본 아바타(`svg`)는 옮기지 않는다.
+ *   [data-avatar-status-dot]   점. 색은 톤(`data-tone`), 모양은 뜻(`data-shape`, 코어 `statusBadgeShape`)이 고른다. 모양
+ *                              규칙은 아래 `status-shape-*` 이고 「내 상태」 메뉴의 표지도 같은 규칙을 읽는다(r1 M1).
  *
  * 색: 띠 위에서 `--warn`·`--danger` 는 이미 on-band 단계로 다시 묶인다(사이드바 묶음). 초록은 묶이지 않아 남색 띠 위에서
- * 3:1 이 안 되므로(밝게 2.8:1) 점만 `--status-ok`(띠가 있을 때 on-band 를 섞은 초록)를 읽는다. 대비는
- * `avatarStatus.contrast.test.ts` 가 테마 × 밝게/어둡게 × 바탕(띠·호버·눌림·선택·카드·창)에서 잰다. */
+ * 3:1 이 안 되므로(밝게 2.8:1) 점만 `--status-ok`(띠가 있을 때 on-band 를 섞은 초록, 없으면 그 자리의 `--ok`)를 읽는다.
+ * 대비는 `avatarStatus.contrast.test.ts` 가 테마 × 밝게/어둡게 × 바탕(띠·호버·눌림·선택·카드·창·배경화면·유리)에서 잰다. */
 @utility avatar-status {
   position: relative;
   display: inline-flex;
   flex-shrink: 0;
   --status-dot: 12px;
   --status-gap: 2px;
+  --status-glyph-shift: 0px;
   --status-bleed: 0px;
 
   &[data-status-face="24"] {
-    --status-dot: 10px;
+    --status-dot: 8px;
     --status-gap: 2px;
+    --status-glyph-shift: 1px;
   }
   &[data-status-face="32"] {
     --status-dot: 12px;
     --status-gap: 2px;
+    --status-glyph-shift: 0px;
   }
   &[data-status-face="112"] {
-    --status-dot: 42px;
-    --status-gap: 7px;
+    --status-dot: 28px;
+    --status-gap: 4px;
+    --status-glyph-shift: 0px;
     --status-bleed: var(--spacing-8);
   }
 
@@ -3492,6 +3501,11 @@
       var(--ink) calc(var(--status-hole) + 0.5px)
     );
   }
+  /* 글자 아바타의 이니셜만: 오른쪽·아래 안쪽 여백 = 옮김 × 2 → 가운데 정렬된 글자가 왼쪽 위로 옮김만큼 간다. */
+  &[data-status-cut] > [data-avatar-status-face] > :not(:has(img, svg)) {
+    padding-right: calc(var(--status-glyph-shift) * 2);
+    padding-bottom: calc(var(--status-glyph-shift) * 2);
+  }
 
   & > [data-avatar-status-dot] {
     position: absolute;
@@ -3506,23 +3520,46 @@
   }
   & > [data-avatar-status-dot][data-tone="warn"] {
     background-color: var(--warn);
-    mask-image: radial-gradient(
-      circle at 25% 25%,
-      transparent calc(var(--status-dot) * 0.375),
-      var(--ink) calc(var(--status-dot) * 0.375 + 0.5px)
-    );
   }
   & > [data-avatar-status-dot][data-tone="danger"] {
     background-color: var(--danger);
-    mask-image: linear-gradient(var(--ink) 0 0), linear-gradient(var(--ink) 0 0);
-    mask-size: 100% 100%, calc(var(--status-dot) - 2 * var(--status-gap)) var(--status-gap);
-    mask-position: center;
-    mask-repeat: no-repeat;
-    mask-composite: exclude;
   }
-  & > [data-avatar-status-dot][data-tone="muted"] {
-    border: var(--status-gap) solid var(--ink-muted);
-  }
+}
+
+/* 상태 표식의 모양 (#5786) — 아바타 모서리 점(`avatar-status`)과 「내 상태」 메뉴의 표지(`status-mark`)가 같은 규칙을 읽는다.
+ * 크기는 둘러싼 규칙의 `--status-dot`·`--status-gap` 이다. 모양은 코어 `statusBadgeShape` 가 뜻으로 고른다:
+ *
+ *   (클래스 없음)        채운 원      온라인 · 에이전트 살아 있음 · 에이전트 경고(owner/admin, 채운 주황)
+ *   status-shape-moon    초승달       자리 비움(사람만) — 왼쪽 위를 둥글게 덜어 낸다
+ *   status-shape-bar     가로 줄      방해 금지 — 가운데 줄(폭 = 점 - 틈×2, 높이 = 틈)이 빠진 원
+ *   status-shape-ring    속 빈 고리   오프라인 · 에이전트 꺼짐 — 굵기 = 틈
+ *
+ * 초승달·가로 줄·고리 속의 빈 곳도 도려낸 틈처럼 바탕이 비친다(면색 채움이 없다). 고리의 선은 `--ink-muted` 다: 예전
+ * `--line-strong` 은 아바타 색 위에서 3:1 미만이었고(#4725 M2), 틈 안에서도 가리킨·눌린 줄 위에서 2.6~2.9:1 이었다. 띠
+ * 위에서는 on-band-muted 로 묶인다. */
+@utility status-shape-moon {
+  mask-image: radial-gradient(
+    circle at 25% 25%,
+    transparent calc(var(--status-dot) * 0.375),
+    var(--ink) calc(var(--status-dot) * 0.375 + 0.5px)
+  );
+}
+@utility status-shape-bar {
+  mask-image: linear-gradient(var(--ink) 0 0), linear-gradient(var(--ink) 0 0);
+  mask-size: 100% 100%, calc(var(--status-dot) - 2 * var(--status-gap)) var(--status-gap);
+  mask-position: center;
+  mask-repeat: no-repeat;
+  mask-composite: exclude;
+}
+@utility status-shape-ring {
+  border: var(--status-gap) solid var(--ink-muted);
+}
+
+/* 「내 상태」 메뉴의 표지(`PresenceControl` 의 선택지 점, r1 M1): 배지와 같은 모양을 같은 규칙으로 그린다 — 메뉴가 새
+ * 모양(초승달·가로 줄)을 가르쳐 주는 자리다. 크기는 표지 칸(`size-2`, 8px)이고 값은 가장 작은 배지(24 얼굴: 점 8 · 틈 2)와 같다. */
+@utility status-mark {
+  --status-dot: var(--spacing-2);
+  --status-gap: 2px;
 }
 
 /* 설정 섹션의 카드 (시안 `.a-group`): 행들이 한 면에 서고 행 사이는 선 하나다. 컨테이너

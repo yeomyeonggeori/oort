@@ -44,6 +44,7 @@ export function DmAvatar({
     <AvatarStatus
       face={24}
       tone={dot?.tone ?? null}
+      subject={identity.kind === "agent" ? "agent" : "human"}
       dotTestId="dm-peer-dot"
       data-testid="dm-avatar"
       data-avatar-kind={identity.kind}

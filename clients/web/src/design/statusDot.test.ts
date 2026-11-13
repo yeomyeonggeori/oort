@@ -20,6 +20,13 @@ const avatarStatus = (() => {
   return css.slice(start, css.indexOf("\n}", start));
 })();
 
+/** 모양 규칙(`status-shape-*`, #5786 r1 — 모양은 톤이 아니라 뜻이 고른다). */
+function shapeRule(name: string): string {
+  const start = css.indexOf(`@utility ${name} {`);
+  expect(start, name).toBeGreaterThan(-1);
+  return css.slice(start, css.indexOf("\n}", start));
+}
+
 function dotRule(tone: StatusDotTone): string {
   const at = avatarStatus.indexOf(`[data-avatar-status-dot][data-tone="${tone}"] {`);
   expect(at, tone).toBeGreaterThan(-1);
@@ -39,13 +46,17 @@ describe("상태 점 색 역할 (#3964, #5786)", () => {
 
   it("Buzz식(소유자 결정 2026-10-17): 칩의 꺼짐 점은 낱말이 곁에 있어 채운 회색, 아바타의 꺼짐은 채움 없는 고리", () => {
     expect(STATUS_DOT_FILL_CLASS.muted).toBe("bg-ink-muted");
-    expect(dotRule("muted")).not.toContain("background");
-    expect(dotRule("muted")).toContain("border: var(--status-gap) solid var(--ink-muted);");
+    expect(avatarStatus).not.toContain('[data-tone="muted"]');
+    expect(shapeRule("status-shape-ring")).not.toContain("background");
+    expect(shapeRule("status-shape-ring")).toContain("border: var(--status-gap) solid var(--ink-muted);");
   });
 
   it("아바타 점에는 면색 테가 없다 — 테가 아니라 도려낸 틈이 점을 떼어 놓는다", () => {
-    for (const tone of TONES) {
+    for (const tone of TONES.filter((t) => t !== "muted")) {
       expect(dotRule(tone), tone).not.toMatch(/--surface|border-surface/);
+    }
+    for (const shape of ["status-shape-moon", "status-shape-bar", "status-shape-ring"]) {
+      expect(shapeRule(shape), shape).not.toMatch(/--surface|border-surface/);
     }
     expect(avatarStatus).toMatch(/&\[data-status-cut\] > \[data-avatar-status-face\] \{[\s\S]*?mask-image: radial-gradient\(/);
   });
