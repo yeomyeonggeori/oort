@@ -384,7 +384,8 @@ describe("agentCardModel dispatch — the reuse of the turn family", () => {
   });
 
   it("a plain agent sentence without the kind stays a plain turn", () => {
-    const card = agentCardModel(message({ usage: { model: "gpt-5" } }));
+    // #5577 — 턴 카드는 에이전트가 쓴 행에서만 선다(`serverResultAuthor.ts`).
+    const card = agentCardModel(message({ usage: { model: "gpt-5" } }), "agent");
     expect(card?.kind).toBe("turn");
   });
 

@@ -14,6 +14,8 @@ import { TeamAiDelegateStrip } from "./TeamAiDelegateStrip";
 import { teamAiDelegateFor } from "@momo/core/features/timeline/teamAi";
 import { teamAiReplyMetaFor } from "@momo/core/features/timeline/teamAiReply";
 import { AppNoticeLine, TeamAiReplyMeta } from "./TeamAiReplyMeta";
+import { TeamAiDelegationTail } from "./TeamAiDelegationTail";
+import { teamAiDelegatedAnswerOf } from "@momo/core/features/timeline/teamAiDelegationView";
 import { githubNoticeFor } from "@momo/core/features/github/model";
 import { GithubNoticeStrip } from "@/features/github/GithubNoticeStrip";
 import { useAppNotice, useAppsTailContext } from "./appsTail";
@@ -547,9 +549,11 @@ export function MessageRow({
   // parsing a 700 line patch on every scroll-driven re-render is work the
   // virtualiser would pay for over and over. The message object is replaced
   // only when the server row changes, so it is the right key.
+  // #5577 — 서버 결과 카드(턴 기록)는 작성자가 에이전트일 때만 선다: 종류는 멤버 목록에서 온다.
+  const authorKind = author?.kind;
   const { card, artifact, artifactState, keepsBody } = useMemo(
-    () => rowPresentation(message),
-    [message]
+    () => rowPresentation(message, authorKind),
+    [message, authorKind]
   );
   const idleNotice = useMemo(() => workSessionIdleNotice(message), [message]);
   // 도우미가 넘기는 줄(ADR-0201 D5). 이 키를 보내지 않는 서버에서는 늘 null 이다.
@@ -558,9 +562,11 @@ export function MessageRow({
   // 같은 꼬리에 「쓴 앱」 줄(E8·E10, #3950)이 붙는다: 보고가 있는 에이전트 답에만.
   const appsTail = useAppsTailContext(message, directory);
   const teamAiReply = useMemo(
-    () => teamAiReplyMetaFor(message, appsTail),
-    [message, appsTail]
+    () => teamAiReplyMetaFor(message, appsTail, authorKind),
+    [message, appsTail, authorKind]
   );
+  // Hermes에 맡겨 끝낸 답(서버 소유 칩 칸, ADR-0201 v4 P8 · #5375): 칩·쓴 양 줄·그림 자리. 칸이 없으면 null.
+  const delegatedAnswer = useMemo(() => teamAiDelegatedAnswerOf(message, authorKind), [message, authorKind]);
   // 앱을 쓰다 막혔을 때의 한 문장(+ 행동 하나). 칸이 없으면 null.
   const appNotice = useAppNotice(message);
   // 서버가 GitHub 앱으로 보낸 알림이면 아랫줄이 「GitHub 알림」이라고 말한다(ADR-0205, #3955).
@@ -1163,7 +1169,8 @@ export function MessageRow({
         {!deleted && <NoticeActionLink message={message} />}
         {appNotice && <AppNoticeLine notice={appNotice} />}
         {!deleted && githubNotice && <GithubNoticeStrip notice={githubNotice} />}
-        {teamAiReply && <TeamAiReplyMeta meta={teamAiReply} />}
+        {teamAiReply && delegatedAnswer === null && <TeamAiReplyMeta meta={teamAiReply} />}
+        {delegatedAnswer && <TeamAiDelegationTail meta={teamAiReply} answer={delegatedAnswer} directory={directory} />}
         {teamAiDelegate && (
           <TeamAiDelegateStrip
             delegate={teamAiDelegate}
@@ -1186,6 +1193,7 @@ export function MessageRow({
             attachments={attachments}
             senderName={name}
             sentAtMs={message.createdAtMs}
+            pictureFrame={delegatedAnswer?.picture === true}
           />
         )}
         {!deleted && unfurls.length > 0 && (
@@ -1240,7 +1248,7 @@ export function MessageRow({
         {/* Provider cascade (ADR-0135 D1). Outside the card/artifact branch on
             purpose: whichever of the two took the slot, a turn served by the
             second provider says so. Renders nothing for every other row. */}
-        <CascadeNotice runId={turnRecordRunId(message)} />
+        <CascadeNotice runId={turnRecordRunId(message, authorKind)} />
         {/* 「기억 n개 참고」(ADR-0196 D12 V2, #3165). 정착한 턴 기록 한 줄에만 단다:
             한 run이 쓴 행은 여럿이라 `run_id`만 보면 같은 칩이 세 번 나온다(위
             CascadeNotice와 같은 좁힘). 영수증이 없으면 칩도 없다. */}

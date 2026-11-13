@@ -17,17 +17,22 @@ import {
   teamAiRolesErrorKind,
   teamAiRolesNotice,
   teamAiSettingsToggleNotice,
+  TEAM_AI_ALL_BUNDLES,
   TEAM_AI_BUNDLES,
-  TEAM_AI_NOTICE_BUNDLES,
+  TEAM_AI_HERMES_BUNDLE,
+  TEAM_AI_RECORDED_NOTICE_BUNDLES,
   TEAM_AI_NOTICE_VERSION,
   TEAM_AI_SWITCHABLE_BUNDLES,
 } from "./teamAiRoles";
+import { TEAM_AI_ROLE_COPY, teamAiRoleNoticeKey } from "./teamAiCopyKeys";
+import { messageKeys } from "../../i18n/generated/messages";
+import koTeamAi from "../../i18n/catalogs/ko-KR/teamAi.json";
 
 beforeEach(() => settingsRequest.mockReset());
 
 describe("읽기: 기본은 모두 켬, 닫는 쪽은 서버와 같다", () => {
-  it("설정이 없거나 칸이 없거나 null이면 일곱 묶음이 모두 켜진다", () => {
-    expect(TEAM_AI_BUNDLES).toHaveLength(7);
+  it("설정이 없거나 칸이 없거나 null이면 여덟 묶음이 모두 켜진다", () => {
+    expect(TEAM_AI_ALL_BUNDLES).toHaveLength(8);
     for (const bag of [undefined, null, {}, { team_ai_roles: null }, { team_ai_roles: {} }, { team_ai_roles: { files: null } }]) {
       expect(readTeamAiRoles(bag), JSON.stringify(bag)).toEqual(defaultTeamAiRoles());
     }
@@ -43,10 +48,83 @@ describe("읽기: 기본은 모두 켬, 닫는 쪽은 서버와 같다", () => {
       files: false,
       memory: true,
       code: false,
+      hermes: true,
     });
     const unreadable = readTeamAiRoles({ team_ai_roles: "all" });
     expect(unreadable.chat_read).toBe(true);
     expect(TEAM_AI_SWITCHABLE_BUNDLES.every((id) => unreadable[id] === false)).toBe(true);
+  });
+});
+
+// ADR-0201 증보 v4 P10 (#5374): 일곱째 스위치 `hermes`(「Hermes 도움」). 서버 `SWITCHABLE_BUNDLES`와 같은 순서·같은
+// 읽기 규칙이고 기본은 켬이다. 역할 목록 화면의 행(`TEAM_AI_BUNDLES`)에는 아직 없다 — 그 행은 고지·이유를 함께
+// 보이는 화면(S7·S8)이 더한다.
+describe("hermes 묶음 (증보 v4 P10)", () => {
+  it("서버 SWITCHABLE_BUNDLES와 같은 일곱이고 hermes가 마지막이다", () => {
+    expect(TEAM_AI_SWITCHABLE_BUNDLES).toEqual([
+      "workspace_admin",
+      "invite_access",
+      "long_research",
+      "files",
+      "memory",
+      "code",
+      "hermes",
+    ]);
+    expect(TEAM_AI_HERMES_BUNDLE).toBe("hermes");
+    expect(defaultTeamAiRoles().hermes).toBe(true);
+  });
+
+  it("없거나 null이면 켬, false만 끄고, 불리언이 아니거나 객체가 아니면 끔이다", () => {
+    expect(readTeamAiRoles({ team_ai_roles: {} }).hermes).toBe(true);
+    expect(readTeamAiRoles({ team_ai_roles: { hermes: null } }).hermes).toBe(true);
+    expect(readTeamAiRoles({ team_ai_roles: { hermes: true } }).hermes).toBe(true);
+    expect(readTeamAiRoles({ team_ai_roles: { hermes: false } }).hermes).toBe(false);
+    expect(readTeamAiRoles({ team_ai_roles: { hermes: "on" } }).hermes).toBe(false);
+    expect(readTeamAiRoles({ team_ai_roles: "all" }).hermes).toBe(false);
+    // hermes를 꺼도 다른 칸은 움직이지 않는다
+    expect(readTeamAiRoles({ team_ai_roles: { hermes: false } })).toEqual({
+      ...defaultTeamAiRoles(),
+      hermes: false,
+    });
+  });
+
+  it("변경은 hermes 칸도 담고, PATCH 본문은 그 칸 하나다", async () => {
+    const base = defaultTeamAiRoles();
+    expect(teamAiRolesChange(base, { ...base, hermes: false })).toEqual({ hermes: false });
+    expect(teamAiRolesChange({ ...base, hermes: false }, base)).toEqual({ hermes: true });
+    settingsRequest.mockResolvedValue({});
+    await patchTeamAiRoles("00000000-0000-7000-8000-000000000001", { hermes: false });
+    const [, init] = settingsRequest.mock.calls[0] as [string, { body: string }];
+    expect(JSON.parse(init.body)).toEqual({ team_ai_roles: { hermes: false } });
+  });
+
+  it("목록 화면의 행은 그대로 일곱이고 hermes 행은 없다 — 고지 없는 hermes 행이 생기지 않는다", () => {
+    expect(TEAM_AI_BUNDLES).toEqual([
+      "chat_read",
+      "workspace_admin",
+      "invite_access",
+      "long_research",
+      "files",
+      "memory",
+      "code",
+    ]);
+    expect((TEAM_AI_BUNDLES as readonly string[]).includes("hermes")).toBe(false);
+  });
+
+  it("이름·설명·고지 키가 사전에 있고, 고지는 서버 카드(v2)의 두 사실을 한 문구에 모두 말한다", () => {
+    const keys = new Set<string>(messageKeys);
+    expect(keys.has(TEAM_AI_ROLE_COPY.hermes.name)).toBe(true);
+    expect(keys.has(TEAM_AI_ROLE_COPY.hermes.hint)).toBe(true);
+    const notice = teamAiRoleNoticeKey("hermes");
+    expect(notice).toBe("teamAi.roles.noticeHermes");
+    expect((koTeamAi as Record<string, string>)["teamAi.roles.hermesName"]).toBe("Hermes 도움");
+    // 서버 `momo_agent::team_ai_roles::NOTICE_HERMES`(NOTICE_VERSION 2026-11-06.v2)의 두 문장: ① 요청 문장이 Hermes가
+    // 쓰는 AI 회사로 간다 ② Hermes가 자기 기록(state.db)에 남기고 그 보관은 oort가 아닌 운영자 몫이다. 화면 문구는
+    // 디자인 규칙(옛 용어 「운영자 설정」 금지)에 맞춰 ②의 끝만 「서버 운영자가 정해요」로 말한다 — 뜻은 같다.
+    const text = (koTeamAi as Record<string, string>)[notice as string] ?? "";
+    expect(text.startsWith("Hermes 도움을 켜면 도우미가 맡기는 요청 문장이 Hermes가 쓰는 AI 회사(OpenAI 등)로 전달돼요. ")).toBe(true);
+    expect(text).toContain("Hermes는 맡긴 요청 문장과 결과를 자기 기록(state.db)에 남겨요.");
+    expect(text).toContain("oort가 아니라 서버 운영자가 정해요.");
   });
 });
 
@@ -96,13 +174,21 @@ describe("고지 기록: 화면이 보였다고 남기는 것", () => {
     });
     expect(teamAiRolesNotice("onboarding", ["code", "invite_access", "chat_read"])).toBeNull();
     expect(teamAiRolesNotice("onboarding", [])).toBeNull();
+    // hermes의 고지(v2)도 기록할 수 있다 — 표 순서(파일·기억·hermes)로
+    expect(teamAiRolesNotice("settings", ["hermes", "files"])).toEqual({
+      bundles: ["files", "hermes"],
+      noticeVersion: TEAM_AI_NOTICE_VERSION,
+      via: "settings",
+    });
+    expect(TEAM_AI_RECORDED_NOTICE_BUNDLES).toEqual(["files", "memory", "hermes"]);
     // 서버 `NOTICE_VERSIONS`에 있어야 기록된다(모르는 판은 400). 이 값을 올리면 서버 목록에도 더한다.
-    expect(TEAM_AI_NOTICE_VERSION).toBe("2026-11-01.v1");
+    // v2 = hermes 고지를 더한 판(서버 #5369가 먼저 올렸다). 파일·기억 줄은 v1과 같은 글자다.
+    expect(TEAM_AI_NOTICE_VERSION).toBe("2026-11-06.v2");
   });
 
-  it("설정의 스위치는 파일·기억을 켤 때만 기록을 싣는다: 끄거나 다른 묶음이면 싣지 않는다", () => {
+  it("설정의 스위치는 고지가 있는 묶음(파일·기억·hermes)을 켤 때만 기록을 싣는다: 끄거나 다른 묶음이면 싣지 않는다", () => {
     for (const bundle of TEAM_AI_SWITCHABLE_BUNDLES) {
-      const noticed = (TEAM_AI_NOTICE_BUNDLES as readonly string[]).includes(bundle);
+      const noticed = (TEAM_AI_RECORDED_NOTICE_BUNDLES as readonly string[]).includes(bundle);
       expect(teamAiSettingsToggleNotice(bundle, true), `${bundle} on`).toEqual(
         noticed ? { bundles: [bundle], noticeVersion: TEAM_AI_NOTICE_VERSION, via: "settings" } : null
       );

@@ -922,6 +922,18 @@ async fn finish_send_in_tx(
         .await?;
     }
 
+    // #5667 — the thread's followers (the ones `auto_follow_in_tx` just pulled in included) hear that
+    // their channel's followed-thread total moved. AFTER the reply's own `message.new` and
+    // `thread.updated` rows: the relay drains by outbox id, so a thread with many followers never
+    // holds the reply itself behind their personal frames.
+    crate::thread_follow::signal_followers_of_reply_in_tx(
+        &mut *conn,
+        workspace_id,
+        &message,
+        threads == ThreadPolicy::Maintain,
+    )
+    .await?;
+
     let thread = own_thread_rollup(&mut *conn, &message, threads).await?;
     Ok(SentMessage {
         message,

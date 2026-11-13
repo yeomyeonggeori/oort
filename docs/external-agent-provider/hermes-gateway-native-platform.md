@@ -14,7 +14,7 @@ Momo supports two Hermes integration paths:
 
 | Path | Owner of agent turn | When to use |
 |---|---|---|
-| agent-worker SSE | oort `agent-worker` polls `agent_job`, calls an OpenAI-compatible `/v1/chat/completions` provider, writes the final message | deterministic local gates, existing runtime path, hosted worker control |
+| agent-worker | oort `agent-worker` polls `agent_job`, calls an OpenAI-compatible `/v1/chat/completions` provider with `"stream": false` (one JSON answer, not SSE), writes the final message | deterministic local gates, existing runtime path, hosted worker control |
 | Hermes gateway native platform | Hermes treats oort as a messaging platform, receives `agent.job`, runs its provider runtime, then reports status/result to oort REST | local 1-person dogfood where Hermes should behave like Slack/Telegram adapter sync |
 
 Both paths keep the same invariant: **oort is the source of truth for the agent

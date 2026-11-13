@@ -10,7 +10,9 @@ ROOT="$(CDPATH='' cd -- "$(dirname -- "$0")/../.." && pwd)"
 COMPOSE_FILE="$ROOT/infra/rust/docker-compose.rust.yml"
 EXAMPLE_ENV="$ROOT/infra/rust/rust-smoke.env.example"
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/oort-livekit-node-ip.XXXXXX")"
-trap 'rm -rf "$TMP"' EXIT INT TERM
+# #5606: remove only the directory mktemp made (never an empty value or /).
+rm_tmp() { case "$TMP" in "${TMPDIR:-/tmp}"/oort-livekit-node-ip.*) rm -rf -- "$TMP" ;; esac; }
+trap rm_tmp EXIT INT TERM
 
 fail() { printf '[livekit-node-ip] %s\n' "$*" >&2; exit 1; }
 
@@ -154,9 +156,12 @@ else
     [ -n "$IMAGE" ] && [ "$IMAGE" != "null" ] || fail "livekit image missing from compose config"
     name="oort-1856a-nodeip-$$"
     log="$TMP/livekit-boot.log"
-    "$DOCKER_BIN" rm -f "$name" >/dev/null 2>&1 || true
+    "$DOCKER_BIN" rm -f -v "$name" >/dev/null 2>&1 || true
+    # #5606: armed before the run, by name — an interrupt mid-run must not strand it.
+    trap '"$DOCKER_BIN" rm -f -v "$name" >/dev/null 2>&1 || true; rm_tmp' EXIT INT TERM
     set +e
     "$DOCKER_BIN" run -d --name "$name" \
+      --label "com.momo.gate-run=${LOCAL_GATE_RUN_ID:-manual-$$}" \
       -e MOMO_LIVEKIT_API_KEY=devkey \
       -e MOMO_LIVEKIT_API_SECRET=devsecret-1856a-nodeip-32chars \
       -e MOMO_LIVEKIT_NODE_IP=127.0.0.1 \
@@ -167,14 +172,17 @@ else
     run_rc=$?
     set -e
     if [ "$run_rc" -ne 0 ]; then
+      # #5606: a run that created the container and failed to start it leaves it
+      # Created; remove it by name (with its volumes) before skipping.
+      "$DOCKER_BIN" rm -f -v "$name" >/dev/null 2>&1 || true
       printf '[livekit-node-ip] docker run failed (image pull/start) — boot log proof skipped:\n' >&2
       cat "$TMP/run.err" >&2 || true
     else
       cleanup_boot() {
         "$DOCKER_BIN" logs "$name" >"$log" 2>&1 || true
-        "$DOCKER_BIN" rm -f "$name" >/dev/null 2>&1 || true
+        "$DOCKER_BIN" rm -f -v "$name" >/dev/null 2>&1 || true
       }
-      trap 'cleanup_boot; rm -rf "$TMP"' EXIT INT TERM
+      trap 'cleanup_boot; rm_tmp' EXIT INT TERM
       deadline=$(( $(date -u +%s) + 45 ))
       found=0
       while [ "$(date -u +%s)" -lt "$deadline" ]; do
@@ -193,7 +201,7 @@ else
         sleep 1
       done
       cleanup_boot
-      trap 'rm -rf "$TMP"' EXIT INT TERM
+      trap rm_tmp EXIT INT TERM
       if [ "$found" -ne 1 ]; then
         printf '[livekit-node-ip] boot log did not show nodeIP=127.0.0.1\n' >&2
         tail -n 80 "$log" >&2 || true

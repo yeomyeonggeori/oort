@@ -7004,6 +7004,21 @@ export const catalog: MessageCatalog = {
       "value": "Messages are searched from 2 characters."
     }
   ],
+  "settings.aiLimits.ceilingDelegations": [
+    {
+      "type": 0,
+      "value": "The server operator limited this to "
+    },
+    {
+      "type": 2,
+      "value": "limit",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": " a day."
+    }
+  ],
   "settings.aiLimits.ceilingSearches": [
     {
       "type": 0,
@@ -7040,6 +7055,44 @@ export const catalog: MessageCatalog = {
       "value": "Limit turned off."
     }
   ],
+  "settings.aiLimits.delegationsHint": [
+    {
+      "type": 0,
+      "value": "How many times a day the helper may hand work to the team's Hermes. If you set nothing, it is 30."
+    }
+  ],
+  "settings.aiLimits.delegationsLabel": [
+    {
+      "type": 0,
+      "value": "Daily Hermes requests"
+    }
+  ],
+  "settings.aiLimits.delegationsToday": [
+    {
+      "type": 0,
+      "value": "Handed to Hermes today: "
+    },
+    {
+      "type": 2,
+      "value": "used",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "/"
+    },
+    {
+      "type": 2,
+      "value": "limit",
+      "style": null
+    }
+  ],
+  "settings.aiLimits.delegationsValueLabel": [
+    {
+      "type": 0,
+      "value": "Requests per day"
+    }
+  ],
   "settings.aiLimits.description": [
     {
       "type": 0,
@@ -7056,6 +7109,12 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "Enter a whole number of 1 or more."
+    }
+  ],
+  "settings.aiLimits.errorInvalidDelegations": [
+    {
+      "type": 0,
+      "value": "Enter a whole number from 1 to 200."
     }
   ],
   "settings.aiLimits.errorInvalidUsd": [
@@ -7680,6 +7739,298 @@ export const catalog: MessageCatalog = {
       "value": "Use device language"
     }
   ],
+  "teamAi.delegation.chipImage": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " help · picture"
+    }
+  ],
+  "teamAi.delegation.chipSearch": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " help · search"
+    }
+  ],
+  "teamAi.delegation.hermesFallbackName": [
+    {
+      "type": 0,
+      "value": "Hermes"
+    }
+  ],
+  "teamAi.delegation.reasonAmbiguous": [
+    {
+      "type": 0,
+      "value": "More than one Hermes is connected, so the helper cannot tell which one to use."
+    }
+  ],
+  "teamAi.delegation.reasonCeilingUnset": [
+    {
+      "type": 0,
+      "value": "The server operator has turned off Hermes help."
+    }
+  ],
+  "teamAi.delegation.reasonConnectionMode": [
+    {
+      "type": 0,
+      "value": "This Hermes has personal apps connected, so nothing can be handed to it."
+    }
+  ],
+  "teamAi.delegation.reasonDailyCap": [
+    {
+      "type": 0,
+      "value": "Today's Hermes requests are used up."
+    }
+  ],
+  "teamAi.delegation.reasonNotConnected": [
+    {
+      "type": 0,
+      "value": "Hermes is not connected."
+    }
+  ],
+  "teamAi.delegation.reasonPinUnresolved": [
+    {
+      "type": 0,
+      "value": "The server has no connection details for Hermes."
+    }
+  ],
+  "teamAi.delegation.reasonToolsNotLocked": [
+    {
+      "type": 0,
+      "value": "The server operator has not declared Hermes's tool lock."
+    }
+  ],
+  "teamAi.delegation.reasonUnknown": [
+    {
+      "type": 0,
+      "value": "The current status is unknown."
+    }
+  ],
+  "teamAi.delegation.spentCredits": [
+    {
+      "type": 0,
+      "value": "Credit tokens "
+    },
+    {
+      "type": 1,
+      "value": "tokens"
+    }
+  ],
+  "teamAi.delegation.spentCreditsEstimated": [
+    {
+      "type": 0,
+      "value": "Credit tokens about "
+    },
+    {
+      "type": 1,
+      "value": "tokens"
+    },
+    {
+      "type": 0,
+      "value": " (estimate)"
+    }
+  ],
+  "teamAi.delegation.spentHermes": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " time"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " times"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    },
+    {
+      "type": 0,
+      "value": " (a subscription, so oort cannot measure the cost)"
+    }
+  ],
+  "teamAi.delegation.spentLabel": [
+    {
+      "type": 0,
+      "value": "What this answer used"
+    }
+  ],
+  "teamAi.delegation.spentLine": [
+    {
+      "type": 1,
+      "value": "label"
+    },
+    {
+      "type": 0,
+      "value": ": "
+    },
+    {
+      "type": 1,
+      "value": "credits"
+    }
+  ],
+  "teamAi.delegation.spentLineWithHermes": [
+    {
+      "type": 1,
+      "value": "label"
+    },
+    {
+      "type": 0,
+      "value": ": "
+    },
+    {
+      "type": 1,
+      "value": "credits"
+    },
+    {
+      "type": 0,
+      "value": " · "
+    },
+    {
+      "type": 1,
+      "value": "hermes"
+    }
+  ],
+  "teamAi.delegation.unavailable": [
+    {
+      "type": 0,
+      "value": "Not available right now."
+    }
+  ],
+  "teamAi.delegation.waitImage": [
+    {
+      "type": 0,
+      "value": "Pictures can take up to "
+    },
+    {
+      "type": 6,
+      "value": "minutes",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " minute"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " minutes"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "teamAi.delegation.waitImageShort": [
+    {
+      "type": 0,
+      "value": "Picture: up to "
+    },
+    {
+      "type": 2,
+      "value": "minutes",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": " min"
+    }
+  ],
+  "teamAi.delegation.waitSearch": [
+    {
+      "type": 0,
+      "value": "Searches can take up to "
+    },
+    {
+      "type": 6,
+      "value": "minutes",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " minute"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " minutes"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "teamAi.delegation.waitSearchShort": [
+    {
+      "type": 0,
+      "value": "Search: up to "
+    },
+    {
+      "type": 2,
+      "value": "minutes",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": " min"
+    }
+  ],
   "teamAi.helper.aliasesLine": [
     {
       "type": 0,
@@ -7864,6 +8215,18 @@ export const catalog: MessageCatalog = {
       "value": "Files"
     }
   ],
+  "teamAi.roles.hermesHint": [
+    {
+      "type": 0,
+      "value": "Hands work the team key cannot do (a picture, or a web search on a day it cannot search) to the team's Hermes once, then writes the answer."
+    }
+  ],
+  "teamAi.roles.hermesName": [
+    {
+      "type": 0,
+      "value": "Hermes help"
+    }
+  ],
   "teamAi.roles.inviteAccessHint": [
     {
       "type": 0,
@@ -7910,6 +8273,12 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "Turning on Files sends the content of attachments the helper reads to your team AI provider (the AI company that issued the team key)."
+    }
+  ],
+  "teamAi.roles.noticeHermes": [
+    {
+      "type": 0,
+      "value": "Turning on Hermes help sends the request sentence the helper hands over to the AI company Hermes uses (OpenAI or others). Hermes keeps the request sentence and its result in its own record (state.db). The server operator, not oort, decides how long they are kept and when they are deleted."
     }
   ],
   "teamAi.roles.noticeMemory": [

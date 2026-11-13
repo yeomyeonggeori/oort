@@ -908,6 +908,9 @@ pub enum MemberWrite {
     /// of a place spend nothing). Spent in the handler, like [`MemberWrite::UnfurlProxy`], and a
     /// request turned away for want of a place gets its unit back ([`refund_member_write`]).
     UnfurlPreview,
+    /// `POST …/threads/read-all` (ADR-0124 증보 5, #5689): one request moves up to
+    /// `THREAD_READ_ALL_MAX_THREADS` of the caller's thread read positions. Human bearers only.
+    ThreadReadAll,
 }
 
 impl MemberWrite {
@@ -922,6 +925,7 @@ impl MemberWrite {
             MemberWrite::UnfurlProxy => "unfurl_proxy",
             MemberWrite::PhotoDraft => "photo_draft",
             MemberWrite::UnfurlPreview => "unfurl_preview",
+            MemberWrite::ThreadReadAll => "thread_read_all",
         }
     }
 
@@ -936,6 +940,7 @@ impl MemberWrite {
             MemberWrite::UnfurlProxy => "write:unfurl",
             MemberWrite::PhotoDraft => "write:photo",
             MemberWrite::UnfurlPreview => "write:unfurl_preview",
+            MemberWrite::ThreadReadAll => "write:thread_read_all",
         }
     }
 }
@@ -966,6 +971,7 @@ pub fn member_write_limit(
         (MemberWrite::UnfurlProxy, _) => config.unfurl_proxy_per_member_limit,
         (MemberWrite::PhotoDraft, _) => config.photo_draft_per_member_limit,
         (MemberWrite::UnfurlPreview, _) => config.unfurl_preview_per_member_limit,
+        (MemberWrite::ThreadReadAll, _) => config.thread_read_all_per_member_limit,
     }
 }
 
@@ -1779,6 +1785,7 @@ mod tests {
             photo_draft_per_member_limit: 66,
             unfurl_preview_per_member_limit: 77,
             media_write_per_member_limit: 88,
+            thread_read_all_per_member_limit: 99,
             ..RateLimitConfig::default()
         }
     }
@@ -1825,6 +1832,11 @@ mod tests {
                 88,
                 "a media write has one limit whoever asks, and it is not the upload start's"
             );
+            assert_eq!(
+                limit(MemberWrite::ThreadReadAll, kind),
+                99,
+                "the thread read-all budget is its own number"
+            );
         }
     }
 
@@ -1841,13 +1853,14 @@ mod tests {
             (MemberWrite::PhotoDraft, "photo_draft"),
             (MemberWrite::UnfurlPreview, "unfurl_preview"),
             (MemberWrite::MediaWrite, "media_write"),
+            (MemberWrite::ThreadReadAll, "thread_read_all"),
         ];
         let mut keys = std::collections::HashSet::new();
         for (surface, label) in surfaces {
             assert_eq!(surface.label(), label);
             assert!(keys.insert(member_write_key(surface, member)));
         }
-        assert_eq!(keys.len(), 7);
+        assert_eq!(keys.len(), 8);
         assert_ne!(
             member_write_key(MemberWrite::MessageSend, member),
             member_write_key(MemberWrite::MessageSend, Uuid::from_u128(8)),

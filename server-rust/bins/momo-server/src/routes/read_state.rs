@@ -47,12 +47,14 @@ fn read_state_dto(state: &ReadState) -> ReadStateDto {
 }
 
 /// A `GET` row: the cursor fields plus ADR-0177 증보 D8's `latest_readable_seq` and the caller's own
-/// `closed_at_seq` (#4227). The `PUT` response stays a plain [`ReadStateDto`].
-fn read_state_row_dto(row: &ReadStateProjection) -> ReadStateRowDto {
+/// `closed_at_seq` (#4227), and ADR-0124 증보 4's `followed_unread_reply_count` (#5667). The `PUT`
+/// response stays a plain [`ReadStateDto`].
+pub(crate) fn read_state_row_dto(row: &ReadStateProjection) -> ReadStateRowDto {
     ReadStateRowDto {
         state: read_state_dto(&row.state),
         latest_readable_seq: row.latest_readable_seq,
         closed_at_seq: row.closed_at_seq,
+        followed_unread_reply_count: row.followed_unread_reply_count,
     }
 }
 

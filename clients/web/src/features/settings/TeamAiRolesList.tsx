@@ -2,11 +2,14 @@ import { useId } from "react";
 import {
   TEAM_AI_ALWAYS_ON_BUNDLE,
   TEAM_AI_BUNDLES,
+  TEAM_AI_HERMES_BUNDLE,
   type TeamAiBundle,
   type TeamAiRoles,
   type TeamAiSwitchableBundle,
 } from "@momo/core/features/settings/teamAiRoles";
 import { TEAM_AI_ROLE_COPY, teamAiRoleNoticeKey } from "@momo/core/features/settings/teamAiCopyKeys";
+import { hermesRowUnavailable, hermesSettingsVisible } from "@momo/core/features/settings/teamAiHermesView";
+import type { TeamAiDelegationStatus } from "@momo/core/features/settings/teamAiLimits";
 import { Switch } from "@/design/ui/switch";
 import { useFormatMessage } from "@/i18n/useFormatMessage";
 
@@ -23,6 +26,11 @@ import { useFormatMessage } from "@/i18n/useFormatMessage";
 //
 // 행은 따로 둔 컴포넌트다(`RoleRow`): 행마다 `useId`로 이름·설명·고지의 id를 받고, 시험 id는
 // 머리글자와 묶음 id를 이어 짓는다.
+//
+// 「Hermes 도움」(`hermes`, ADR-0201 증보 v4 P10, #5375)은 표(`TEAM_AI_BUNDLES`)에 없다: 부르는 쪽이 위임 칸(`hermes`)을
+// 넘길 때만 목록 끝에 선다(설정만 — 온보딩은 넘기지 않는다). 서버가 위임 칸을 보냈으면 운영자 천장이 비어 있어도 선다
+// (`hermesSettingsVisible`, 증보 v4 P8). 고지 두 문장은 행에 늘 보인다(그래야 켤 때의 고지 기록이 사실이다). 켜져 있는데
+// 서버 문이 닫혀 있으면 「지금은 쓸 수 없어요.」 한 줄이 더 서고, 까닭은 코어 판정(`hermesRowUnavailable`)이 사실일 때만 붙인다.
 // =============================================================================
 
 function RoleRow({
@@ -32,6 +40,7 @@ function RoleRow({
   rowNotice,
   testIdPrefix,
   onToggle,
+  unavailable = null,
 }: {
   id: TeamAiBundle;
   checked: boolean;
@@ -39,18 +48,24 @@ function RoleRow({
   rowNotice: boolean;
   testIdPrefix: string;
   onToggle: (bundle: TeamAiSwitchableBundle, next: boolean) => void;
+  /** 켜져 있는데 지금은 쓸 수 없는 까닭의 문장(Hermes 행). 없으면 줄이 없다. */
+  unavailable?: string | null;
 }) {
   const formatMessage = useFormatMessage();
   const nameId = useId();
   const hintId = useId();
   const noticeId = useId();
+  const unavailableId = useId();
   const locked = id === TEAM_AI_ALWAYS_ON_BUNDLE;
   const copy = TEAM_AI_ROLE_COPY[id];
   const noticeKey = rowNotice ? teamAiRoleNoticeKey(id) : null;
-  const describedBy = noticeKey === null ? hintId : `${hintId} ${noticeId}`;
+  const describedBy = [hintId, noticeKey === null ? null : noticeId, unavailable === null ? null : unavailableId]
+    .filter((part): part is string => part !== null)
+    .join(" ");
   const rowTestId = `${testIdPrefix}-role-row-${id}`;
   const switchTestId = `${testIdPrefix}-role-${id}`;
   const noticeTestId = `${testIdPrefix}-role-notice-${id}`;
+  const unavailableTestId = `${testIdPrefix}-role-unavailable-${id}`;
   const hint = formatMessage(copy.hint);
   return (
     <li
@@ -67,6 +82,11 @@ function RoleRow({
         {noticeKey === null ? null : (
           <span id={noticeId} className="break-keep text-meta text-ink-muted" data-testid={noticeTestId}>
             {formatMessage(noticeKey)}
+          </span>
+        )}
+        {unavailable === null ? null : (
+          <span id={unavailableId} className="break-keep text-meta text-ink" data-testid={unavailableTestId}>
+            {unavailable}
           </span>
         )}
       </div>
@@ -92,6 +112,7 @@ export function TeamAiRolesList({
   rowNotices = false,
   testIdPrefix,
   labelledBy,
+  hermes = null,
 }: {
   roles: TeamAiRoles;
   onToggle: (bundle: TeamAiSwitchableBundle, next: boolean) => void;
@@ -103,8 +124,19 @@ export function TeamAiRolesList({
   testIdPrefix: string;
   /** 목록 머리글의 id(목록의 이름). */
   labelledBy?: string;
+  /** Hermes에 맡기기의 서버 사실(설정만). 넘기지 않거나 운영자가 열지 않았으면 「Hermes 도움」 행이 없다. */
+  hermes?: TeamAiDelegationStatus | null;
 }) {
+  const formatMessage = useFormatMessage();
   const listTestId = `${testIdPrefix}-roles`;
+  const hermesShown = hermes !== null && hermesSettingsVisible(hermes);
+  const hermesClosed = hermes === null ? null : hermesRowUnavailable(roles.hermes, hermes);
+  const hermesUnavailable =
+    hermesClosed === null
+      ? null
+      : hermesClosed.reason === null
+        ? formatMessage("teamAi.delegation.unavailable")
+        : `${formatMessage("teamAi.delegation.unavailable")} ${formatMessage(hermesClosed.reason)}`;
   return (
     <ul className="flex min-w-0 flex-col" aria-labelledby={labelledBy} data-testid={listTestId}>
       {TEAM_AI_BUNDLES.map((id) => (
@@ -118,6 +150,17 @@ export function TeamAiRolesList({
           onToggle={onToggle}
         />
       ))}
+      {hermesShown && (
+        <RoleRow
+          id={TEAM_AI_HERMES_BUNDLE}
+          checked={roles.hermes}
+          disabled={disabled || busyBundle === TEAM_AI_HERMES_BUNDLE}
+          rowNotice
+          testIdPrefix={testIdPrefix}
+          onToggle={onToggle}
+          unavailable={hermesUnavailable}
+        />
+      )}
     </ul>
   );
 }

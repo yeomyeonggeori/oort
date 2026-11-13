@@ -166,7 +166,7 @@ docker_require_absent() {
 docker_remove_and_verify() {
   local kind="$1" ref="$2"
   case "$kind" in
-    container) "$DOCKER_BIN" rm -f "$ref" >/dev/null 2>&1 || return 1 ;;
+    container) "$DOCKER_BIN" rm -f -v "$ref" >/dev/null 2>&1 || return 1 ;;  # #5606: -v takes the image VOLUME
     network) "$DOCKER_BIN" network rm "$ref" >/dev/null 2>&1 || return 1 ;;
     volume) "$DOCKER_BIN" volume rm "$ref" >/dev/null 2>&1 || return 1 ;;
     image) "$DOCKER_BIN" image rm "$ref" >/dev/null 2>&1 || return 1 ;;
@@ -292,6 +292,8 @@ if [ "${1:-}" = "--verify-cleanup-contract" ]; then
   }
   valid_fixture_id="$(printf 'a%.0s' {1..64})"
   selftest_dir="$(mktemp -d "${TMPDIR:-/tmp}/momo-openapi-docker-selftest.XXXXXX")"
+  # #5606: a failing self-test case must not strand this directory (the success path removes it itself).
+  trap 'case "$selftest_dir" in "${TMPDIR:-/tmp}"/momo-openapi-docker-selftest.*) [ ! -d "$selftest_dir" ] || rm -rf -- "$selftest_dir" ;; esac' EXIT
   large_refs="$valid_fixture_id"$'\n'"$(awk 'BEGIN { line=""; for (j=0; j<64; j++) line=line "b"; for (i=1; i<200000; i++) print line }')"
   exact_ref_membership "$large_refs" "$valid_fixture_id" || {
     echo "[openapi-rust] pipe-free membership missed an early match in a 200k-line listing" >&2

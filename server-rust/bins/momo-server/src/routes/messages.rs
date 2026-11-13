@@ -139,19 +139,128 @@ pub(crate) fn is_server_owned_props_key(key: &str) -> bool {
         // none of the three top-level names those blocks live under, so a member cannot dress
         // a message as a trusted expression card.
         || matches!(key, "action" | "result" | "expression")
+        // #5577 (ADR-0220 P1·P3, ADR-0201 증보 v2 H4·H5·H9): facts the clients draw as the
+        // server's own measure of a run. `error_code` is the worker's failure code (`failure_props`),
+        // which the core turns into our repair copy (「연결된 계정 인증이 만료되었습니다 …」);
+        // `team_ai_model`, `tools_used` and `web_citations` are the helper answer's tail (the model
+        // chip, 「찾아본 것」, the sources). Only the worker writes them, through
+        // `send_message_in_tx`; none of our clients or adapters sends one.
+        || matches!(
+            key,
+            "error_code" | "team_ai_model" | "tools_used" | "web_citations"
+        )
 }
 
 /// The value-conditioned half of the server-owned rule: a prop whose **key** is ordinary
-/// (`kind`) but whose **value** is a marker only the server writes. ADR-0201 증보 v3 B4-2 (#4965,
-/// r1 review Low-1): `team_ai_invite_link` is the helper's invite-link message — a model-bound
-/// projection hides it, the team memory skips it, a notification reads `props.preview` off it — so
-/// a person or an external sender who could write it could hide their own message from an agent's
-/// context and the team memory, or dress a line as the helper's. A REST send
+/// (`kind`) but whose **value** is a marker only the server writes ([`SERVER_ONLY_PROPS_KINDS`]).
+/// ADR-0201 증보 v3 B4-2 (#4965, r1 review Low-1) began it with `team_ai_invite_link` — a
+/// model-bound projection hides that message, the team memory skips it, a notification reads
+/// `props.preview` off it — and #5566 made it the one list of every such value. A REST send
 /// ([`props_value`]) and a webhook (`webhook_props`) are both held to it, beside
-/// [`is_server_owned_props_key`] and `dm_agent_membership` (REST only, #4980).
+/// [`is_server_owned_props_key`]: the `kind` entry is dropped, every other key is kept, and the
+/// send answers as it always did. #5577 added the provenance values
+/// ([`is_server_provenance_entry`]) under the same treatment.
 pub(crate) fn is_server_owned_props_entry(key: &str, value: &str) -> bool {
-    key == "kind" && value == momo_messaging::invite_link::PROPS_KIND
+    (key == "kind" && SERVER_ONLY_PROPS_KINDS.contains(&value))
+        || is_server_provenance_entry(key, value)
 }
+
+/// #5577 — the `source` values only the server, its worker or its sweeps put on a message.
+///
+/// The clients open a server result on these alone: `team_ai` is the closed world of the helper's
+/// answer tail (`teamAiReply`, `teamAiDelegation`), `hermes_gateway` says where a run ran
+/// (`appsRunSiteOf`), `agent_worker.final_text.v0` marks the settled turn record a cascade notice and
+/// the memory receipt hang on (`cascadeModel.turnRecordRunId`), `server.hosted_agent.notice.v1` is
+/// the hosted skip line (`noticeAction`). The prefixes are namespaces the server alone writes in:
+/// every `agent_worker.*` value is the worker's (`success_props`, `failure_props`, the welcome line),
+/// every `server.*` value a server notice (`HOSTED_SKIP_NOTICE_SOURCE`,
+/// `SUBSCRIPTION_NOTICE_SOURCE`). `github` has its own rule (`momo_webhook::is_github_owned_prop`);
+/// `external_webhook` is written by the webhook route but no reader trusts it.
+pub(crate) const SERVER_SOURCE_VALUES: [&str; 2] = ["team_ai", "hermes_gateway"];
+/// See [`SERVER_SOURCE_VALUES`].
+pub(crate) const SERVER_SOURCE_PREFIXES: [&str; 2] = ["agent_worker.", "server."];
+/// #5577 — the namespace of every `schema` value the server writes on a message
+/// (`momo.agent_gateway.timeline.v0` — the gateway's turn record, the other half of
+/// `turnRecordRunId` — and `momo.work_session.acp_event.v1`). No client or adapter sends a
+/// `schema` over REST; the Prime adapter's refinement travels as the top-level `harnessRefine`.
+pub(crate) const SERVER_SCHEMA_PREFIX: &str = "momo.";
+
+/// #5577 (ADR-0220 P1·P3; the `source: "github"` precedent, ADR-0205 H-1) — a provenance value
+/// under an ordinary key: `source` in [`SERVER_SOURCE_VALUES`] or one of
+/// [`SERVER_SOURCE_PREFIXES`], `schema` under [`SERVER_SCHEMA_PREFIX`].
+///
+/// **Why a client may not write one.** A member's REST props map is its own dictionary, and each of
+/// these values is what a client draws a result the server measured off — a turn record with its
+/// provider-cascade notice and memory receipt, the helper's 「팀 AI · 모델」 chip and tail, a server
+/// notice — while the author line still names the member. (The core also asks the author's kind
+/// before drawing, `serverResultAuthor.ts`; this is the server layer of the two.)
+///
+/// **What happens to a client's.** The entry is dropped and the send stays a 201 with every other
+/// key, as `source: "github"`, the server-only kinds and every server-owned key already were. So no
+/// adapter learns a new refusal. Matching trims and ignores ASCII case, as the GitHub rule does: the
+/// readers compare exactly today, and a spelling a later reader normalises must not reopen the door.
+/// A provenance the server never writes (`prime`, `agent_worker` without the dot, `prime.v1`) is the
+/// client's own and is kept.
+pub(crate) fn is_server_provenance_entry(key: &str, value: &str) -> bool {
+    let key = key.trim().to_ascii_lowercase();
+    let value = value.trim().to_ascii_lowercase();
+    match key.as_str() {
+        "source" => {
+            SERVER_SOURCE_VALUES.contains(&value.as_str())
+                || SERVER_SOURCE_PREFIXES
+                    .iter()
+                    .any(|prefix| value.starts_with(prefix))
+        }
+        "schema" => value.starts_with(SERVER_SCHEMA_PREFIX),
+        _ => false,
+    }
+}
+
+/// #5566 — every `props.kind` value that only the server, its worker or its sweeps put on a
+/// message: the values a client's own `kind` may not carry.
+///
+/// **Why a client may not write them.** Each is something a reader *trusts*:
+///
+/// * the clients draw a card or a system line off it. The core's `agentCardModel` draws a
+///   「작업 완료 리포트」 from `completion_report` + `summary` on a message of **any** type, and the
+///   system lines (`agent_run_cancelled`, `agent_paused`, `work_session_idle` …) are told apart by
+///   `kind` alone — `type: "system"` / `"approval_request"` is the sender's choice on this route,
+///   so the type is no proof of where a line came from. A member who could write one could post a
+///   「서버가 잰 사실」 that the server never measured (ADR-0220 P1·P3, ADR-0186 D5).
+/// * a server reader decides on it: the push judgment's arms (`resume_offer` is always sent to
+///   the `owner_member_id` the props name; `work_session_idle` and `work_session_event` pick an arm
+///   that wakes nobody else), the team memory and the model-bound projection
+///   (`team_ai_invite_link`), the DM admission state (`dm_agent_membership`).
+///
+/// **What happens to a client's.** The entry is dropped and the send stays a 201 with every other
+/// key — the treatment `team_ai_invite_link` (#4965) and `dm_agent_membership` (#4792) already had,
+/// so no client that sent one before learns a new refusal. The two other doors a member's words
+/// reach a message through carry no props at all: the Agent Port's `oort_message_post` has a
+/// closed input schema and stores `{}`, and `PATCH …/messages/{id}` rewrites the body only.
+///
+/// **Keeping it whole.** A kind the server starts writing onto a message joins this list in the
+/// same change; `every_kind_the_server_writes_is_server_only` pins each writer this list was drawn
+/// from, and the PG suite `props_kind_forgery_conformance_pg` holds its own copy of the list.
+pub(crate) const SERVER_ONLY_PROPS_KINDS: [&str; 16] = [
+    // Cards the core draws.
+    "completion_report", // the worker's report (`momo_agent_worker::completion_report`)
+    momo_agent::approval::LOGIN_HANDOFF_PROPS_KIND, // an approval card variant (LIVE-4)
+    "resume_offer", // no writer today; the approval card and the push's always-sent arm still trust it
+    "work_control_approval", // the work-spawn approval card (`work_controls.rs`)
+    // Lines the clients and the server's readers tell apart by `kind`.
+    momo_messaging::invite_link::PROPS_KIND, // the helper's invite-link message (#4965)
+    "dm_agent_membership",                   // DM admission (`dm_agents.rs`, #4792)
+    crate::routes::agent_runs::CANCEL_PROPS_KIND, // 「사람이 실행을 중단했어요」
+    "agent_paused",                          // `momo_agent::mention::paused_mention_props`
+    "work_session",                          // the session card (`momo_t3::card_props`)
+    "work_session_idle",                     // `work_sessions.rs`, the push's work_run_done arm
+    "work_session_event",                    // `work_sessions.rs`, the push's work_permission arm
+    momo_t3::work_notice::PROPS_KIND, // #5594 stop notices; the push's work_notice / resume_offer arm
+    momo_agent::HOSTED_SKIP_NOTICE_KIND, // a hosted agent's skip notice
+    "agent_run_timed_out",            // the notifier's stall sweep
+    "a2a_blocked",                    // the worker's A2A refusal line
+    "team_ai.delegate.v1",            // the helper's fallback line (`team_ai::fallback_props`)
+];
 
 /// `momo.instruction` — see [`crate::routes::work_instructions`].
 const INSTRUCTION_PROPS_KEY: &str = crate::routes::work_instructions::PROPS_KEY;
@@ -181,7 +290,6 @@ fn props_value(props: Option<&std::collections::BTreeMap<String, String>>) -> Va
             if is_server_owned_props_key(key)
                 || is_server_owned_props_entry(key, value)
                 || momo_webhook::is_github_owned_prop(key, value)
-                || (key == "kind" && value == "dm_agent_membership")
             {
                 continue;
             }
@@ -2078,6 +2186,325 @@ mod tests {
             Value::String("team_ai_invite_link".into()),
             "the value alone, under another key, is an ordinary string"
         );
+    }
+
+    /// #5566 — the worker's completion report is the case the issue found: `kind` plus a
+    /// `summary` is all the core needs to draw 「작업 완료 리포트」, and both are strings a REST
+    /// props map can carry. The `kind` entry goes, the rest of the map stays (the sender's own
+    /// words are not the server's to drop), and an exact match is what is refused — a kind that
+    /// merely starts like one of the list is the client's own.
+    #[test]
+    fn client_props_cannot_carry_a_server_only_kind() {
+        for kind in SERVER_ONLY_PROPS_KINDS {
+            let mut props = BTreeMap::new();
+            props.insert("kind".to_string(), kind.to_string());
+            props.insert(
+                "summary".to_string(),
+                "모든 게이트가 통과했어요".to_string(),
+            );
+            let value = props_value(Some(&props));
+            assert!(value.get("kind").is_none(), "{kind}: {value}");
+            assert_eq!(
+                value["summary"],
+                Value::String("모든 게이트가 통과했어요".into())
+            );
+        }
+        for own in [
+            "completion_report_v2",
+            "Completion_Report",
+            "work_session_note",
+            "",
+        ] {
+            let mut props = BTreeMap::new();
+            props.insert("kind".to_string(), own.to_string());
+            assert_eq!(
+                props_value(Some(&props))["kind"],
+                Value::String(own.into()),
+                "{own:?} is the client's own kind"
+            );
+        }
+    }
+
+    /// #5566 — [`SERVER_ONLY_PROPS_KINDS`] was drawn from the code that writes each kind onto a
+    /// message. Each writer is pinned to the list here — through its exported constant or builder
+    /// where its crate has one, through the literal in its source where the kind is written inline —
+    /// so a writer that changes its kind, or a list that loses one, is seen before a member can
+    /// dress a message as that card again.
+    #[test]
+    fn every_kind_the_server_writes_is_server_only() {
+        let id = Uuid::nil();
+        let built = [
+            (
+                "worker completion report",
+                Value::from(momo_agent_worker::completion_report::COMPLETION_REPORT_KIND),
+            ),
+            (
+                "login handoff",
+                Value::from(momo_agent::approval::LOGIN_HANDOFF_PROPS_KIND),
+            ),
+            (
+                "helper invite link",
+                momo_messaging::invite_link::props()["kind"].clone(),
+            ),
+            (
+                "paused line",
+                momo_agent::mention::paused_mention_props(id, id)["kind"].clone(),
+            ),
+            (
+                "session card",
+                momo_t3::card_props(id, "codex", "x", "running", None, None, None, None)["kind"]
+                    .clone(),
+            ),
+            (
+                "hosted skip notice",
+                momo_agent::hosted_skip_notice_props(
+                    momo_agent::HostedSkipReason::DeliveryNotEnabled,
+                    id,
+                    id,
+                    id,
+                    id,
+                )["kind"]
+                    .clone(),
+            ),
+            (
+                "helper fallback line",
+                momo_workspace_actions::team_ai::fallback_props(
+                    momo_workspace_actions::team_ai::FallbackReason::Slow,
+                    id,
+                    id,
+                    None,
+                    &[],
+                )["kind"]
+                    .clone(),
+            ),
+            (
+                "run cancel line",
+                Value::from(crate::routes::agent_runs::CANCEL_PROPS_KIND),
+            ),
+            (
+                "work session stop notice (#5594)",
+                momo_t3::work_notice::WorkNotice::Failed {
+                    session_id: id,
+                    owner_member_id: id,
+                    exit_code: 1,
+                }
+                .props()["kind"]
+                    .clone(),
+            ),
+        ];
+        for (writer, kind) in built {
+            let kind = kind
+                .as_str()
+                .unwrap_or_else(|| panic!("{writer}: a string kind"));
+            assert!(
+                is_server_owned_props_entry("kind", kind),
+                "{writer} writes {kind}, which a client could then write too"
+            );
+        }
+
+        let worker = |file: &str| -> &'static str {
+            match file {
+                "a2a.rs" => include_str!(concat!(
+                    env!("CARGO_MANIFEST_DIR"),
+                    "/../momo-agent-worker/src/a2a.rs"
+                )),
+                "run_stall_sweep.rs" => include_str!(concat!(
+                    env!("CARGO_MANIFEST_DIR"),
+                    "/../momo-notifier/src/run_stall_sweep.rs"
+                )),
+                "dm_agents.rs" => include_str!("dm_agents.rs"),
+                "work_sessions.rs" => include_str!("work_sessions.rs"),
+                "work_controls.rs" => include_str!("work_controls.rs"),
+                other => panic!("no source pinned for {other}"),
+            }
+        };
+        for (file, kind) in [
+            ("a2a.rs", "a2a_blocked"),
+            ("run_stall_sweep.rs", "agent_run_timed_out"),
+            ("dm_agents.rs", "dm_agent_membership"),
+            ("work_sessions.rs", "work_session_idle"),
+            ("work_sessions.rs", "work_session_event"),
+            ("work_controls.rs", "work_control_approval"),
+        ] {
+            let source = worker(file);
+            let compact = source.replace(' ', "");
+            assert!(
+                compact.contains(&format!("\"kind\":\"{kind}\"")),
+                "{file} no longer writes `kind: {kind}` — re-draw the list from the writers"
+            );
+            assert!(
+                is_server_owned_props_entry("kind", kind),
+                "{file} writes {kind}, which a client could then write too"
+            );
+        }
+
+        // No writer today, still trusted by readers: the push sorts it as work and its judgment
+        // sends it to `owner_member_id` whatever that person's settings say.
+        assert_eq!(
+            momo_push::category_for(
+                "approval_request",
+                Some("resume_offer"),
+                momo_push::PushReason::Dm,
+                momo_agent::actions::DecisionMode::Inline,
+            ),
+            momo_push::PushCategory::Work
+        );
+        assert!(is_server_owned_props_entry("kind", "resume_offer"));
+    }
+
+    /// #5577 — a member's REST props cannot carry a provenance the server writes: the turn record's
+    /// `source`/`schema`, the helper's `source`, a server notice's `source`, the worker's
+    /// `error_code` and the helper tail's three keys. The entry goes, the rest of the map stays, and
+    /// spellings that differ only by case or surrounding space go too. The controls make the rule the
+    /// server's values and namespaces, not a blanket on `source`/`schema`.
+    #[test]
+    fn client_props_cannot_carry_a_server_provenance() {
+        for (key, value) in [
+            ("source", "team_ai"),
+            ("source", "hermes_gateway"),
+            ("source", "agent_worker.final_text.v0"),
+            ("source", "agent_worker.provider_auth_failure.v0"),
+            ("source", "server.hosted_agent.notice.v1"),
+            ("source", " Team_AI "),
+            ("Source", "HERMES_GATEWAY"),
+            ("schema", "momo.agent_gateway.timeline.v0"),
+            ("schema", " MOMO.work_session.acp_event.v1"),
+            ("error_code", "provider_auth_failed"),
+            ("team_ai_model", "claude-sonnet-4-5"),
+            ("tools_used", "[{\"name\":\"web_search\"}]"),
+            ("web_citations", "[{\"url\":\"https://example.com\"}]"),
+        ] {
+            let mut props = BTreeMap::new();
+            props.insert(key.to_string(), value.to_string());
+            props.insert("run_id".to_string(), "kept".to_string());
+            let stored = props_value(Some(&props));
+            assert!(stored.get(key).is_none(), "{key}={value:?}: {stored}");
+            assert_eq!(stored["run_id"], Value::String("kept".into()), "{key}");
+        }
+        for (key, value) in [
+            ("source", "prime"),
+            ("source", "external_webhook"),
+            ("source", "agent_worker"),
+            ("source", "team_ai_v2"),
+            ("source", "my.server.relay"),
+            ("schema", "prime.v1"),
+            ("schema", "momo"),
+            ("kind", "team_ai"),
+            ("note", "agent_worker.final_text.v0"),
+        ] {
+            let mut props = BTreeMap::new();
+            props.insert(key.to_string(), value.to_string());
+            assert_eq!(
+                props_value(Some(&props))[key],
+                Value::String(value.into()),
+                "{key}={value:?} is the client's own"
+            );
+        }
+    }
+
+    /// #5577 — the provenance rule was drawn from the code that writes each value onto a message.
+    /// Each writer is pinned here, through its exported constant or builder where its crate has one
+    /// and through the literal in its source where it is written inline, so a writer that changes
+    /// its value, or a rule that loses one, is seen before a member can dress a message as it.
+    #[test]
+    fn every_provenance_the_server_writes_is_server_owned() {
+        let id = Uuid::nil();
+        for (writer, source) in [
+            (
+                "hosted skip notice",
+                Value::from(momo_agent::HOSTED_SKIP_NOTICE_SOURCE),
+            ),
+            (
+                "hosted skip notice props",
+                momo_agent::hosted_skip_notice_props(
+                    momo_agent::HostedSkipReason::DeliveryNotEnabled,
+                    id,
+                    id,
+                    id,
+                    id,
+                )["source"]
+                    .clone(),
+            ),
+            (
+                "subscription notice",
+                Value::from(momo_agent::SUBSCRIPTION_NOTICE_SOURCE),
+            ),
+        ] {
+            let source = source
+                .as_str()
+                .unwrap_or_else(|| panic!("{writer}: a string source"));
+            assert!(
+                is_server_owned_props_entry("source", source),
+                "{writer} writes {source}, which a client could then write too"
+            );
+        }
+
+        let file = |name: &str| -> &'static str {
+            match name {
+                "worker lib.rs" => include_str!(concat!(
+                    env!("CARGO_MANIFEST_DIR"),
+                    "/../momo-agent-worker/src/lib.rs"
+                )),
+                "worker team_ai.rs" => include_str!(concat!(
+                    env!("CARGO_MANIFEST_DIR"),
+                    "/../momo-agent-worker/src/team_ai.rs"
+                )),
+                "agent_gateway.rs" => include_str!("agent_gateway.rs"),
+                "work_sessions.rs" => include_str!("work_sessions.rs"),
+                other => panic!("no source pinned for {other}"),
+            }
+        };
+        let compact = |name: &str| file(name).replace([' ', '\n'], "");
+        for (name, key, value) in [
+            ("worker lib.rs", "source", "agent_worker.final_text.v0"),
+            (
+                "worker lib.rs",
+                "source",
+                "agent_worker.welcome.provider_required.v1",
+            ),
+            ("agent_gateway.rs", "source", "hermes_gateway"),
+            (
+                "agent_gateway.rs",
+                "schema",
+                "momo.agent_gateway.timeline.v0",
+            ),
+            (
+                "work_sessions.rs",
+                "schema",
+                "momo.work_session.acp_event.v1",
+            ),
+        ] {
+            assert!(
+                compact(name).contains(&format!("\"{key}\":\"{value}\"")),
+                "{name} no longer writes `{key}: {value}` — re-draw the rule from the writers"
+            );
+            assert!(
+                is_server_owned_props_entry(key, value),
+                "{name} writes {key}={value}, which a client could then write too"
+            );
+        }
+
+        // The worker's failure notice picks its `source` by an `if` and adds the code beside it.
+        let worker = compact("worker lib.rs");
+        for value in [
+            "agent_worker.provider_failure.v0",
+            "agent_worker.provider_auth_failure.v0",
+        ] {
+            assert!(worker.contains(&format!("\"{value}\"")), "{value}");
+            assert!(is_server_owned_props_entry("source", value), "{value}");
+        }
+        assert!(worker.contains("object.insert(\"source\".into(),json!(source));"));
+        assert!(worker.contains("object.insert(\"error_code\".into(),json!(code));"));
+        assert!(is_server_owned_props_key("error_code"));
+
+        // The helper's answer: its `source` (an ending's own is kept) and the model chip's object.
+        let helper = compact("worker team_ai.rs");
+        assert!(helper.contains("entry(\"source\").or_insert_with(||json!(\"team_ai\"))"));
+        assert!(is_server_owned_props_entry("source", "team_ai"));
+        assert!(helper.contains("object.insert(\"team_ai_model\".into(),label)"));
+        for key in ["team_ai_model", "tools_used", "web_citations"] {
+            assert!(is_server_owned_props_key(key), "{key}");
+        }
     }
 
     #[test]

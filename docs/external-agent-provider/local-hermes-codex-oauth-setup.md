@@ -15,7 +15,7 @@ OpenAI, or another GPT provider, then let oort prove one safe `@hermes`
 roundtrip through:
 
 ```text
-web (설정 › AI 연결) -> api -> agent_job -> agent-worker -> local Hermes-compatible SSE provider -> channel timeline
+web (설정 › AI 연결) -> api -> agent_job -> agent-worker -> local Hermes-compatible /v1/chat/completions provider (non-streamed) -> channel timeline
 ```
 
 The user performs OAuth login/token entry in the provider. Codex and oort only
@@ -66,13 +66,17 @@ provider on the same machine also needs `--allow-local-provider` so
    The exact command depends on the provider. Complete any Codex OAuth, OpenAI
    API key, or GPT provider login inside that provider process. Do not export
    Codex/OpenAI credentials into the oort shell. If you have no real Hermes,
-   the repo mock is an OpenAI-compatible SSE stand-in:
+   the repo mock is an OpenAI-compatible stand-in (it streams SSE only when a
+   request asks for it; `agent-worker` sends `"stream": false` and gets one
+   JSON answer):
 
    ```sh
    python3 scripts/mock_hermes.py --host 0.0.0.0 --port <provider-port>
    ```
 
-2. Confirm the provider exposes an OpenAI-compatible SSE endpoint.
+2. Confirm the provider exposes an OpenAI-compatible `/v1/chat/completions`
+   endpoint that answers a non-streamed (`"stream": false`) request, the only
+   shape `agent-worker` sends on this wire.
 
    The expected boundary is:
 
@@ -114,8 +118,11 @@ provider on the same machine also needs `--allow-local-provider` so
 
    If the env file is missing, the script exits successfully with
    `NEEDS_USER_CREDENTIAL` evidence so the local dogfood packet can say exactly
-   what is still human-owned. If you want the command to fail until the provider
-   is configured, run:
+   what is still human-owned. With the env file present, it currently stops
+   where it hands the run to the former `verify_external_agent_provider.sh`,
+   retired with the Swift stack (#2165); until a Rust-stack verifier replaces
+   it, use step 5 and check «What PASS Means» below by hand. If you want the
+   command to fail until the provider is configured, run:
 
    ```bash
    LOCAL_HERMES_REQUIRE_CREDENTIALS=1 scripts/verify_local_hermes_credentialed_smoke.sh
@@ -143,11 +150,14 @@ provider on the same machine also needs `--allow-local-provider` so
 
 ## What PASS Means
 
-- Provider SSE preflight returned `data:` stream chunks.
-- `/v1/agent-runtime/status` reported `external-hermes`, `available`,
-  `keyConfigured=true`, and a redacted endpoint label.
-- Seeded Hermes is an active `member.kind='agent'` with `#agent-lab`
-  membership.
+- Provider preflight: a non-streamed (`"stream": false`) `/chat/completions`
+  request returned one JSON completion.
+- `GET /v1/provider/link` (instance operator) reported `mode=external-hermes`,
+  `availability=available`, `keyConfigured=true`, and a redacted
+  `endpointLabel`.
+- A Hermes agent is an active `member.kind='agent'` with `#agent-lab`
+  membership (migrate seeds one only with `MOMO_AGENT_SEED_MODE=demo` or
+  `e2e`; on the default `none`, create it first).
 - `@hermes` created an `agent_run`/`agent_job`, `agent-worker` called the
   provider, usage/cost records were written, and the final agent response
   appeared in the same channel timeline.
@@ -162,7 +172,7 @@ provider on the same machine also needs `--allow-local-provider` so
 | `credential-boundary` fail | OpenAI/Codex token exported in oort shell | Unset it and configure it inside the provider runtime only |
 | `HERMES_BASE_URL must not point at localhost` | Missing local opt-in | Set `MOMO_ENV=local` and `AGENT_PROVIDER_ALLOW_LOCAL_LOOPBACK=1` |
 | `provider/network` fail | Provider is not running or wrong port/path | Check provider `/v1/chat/completions` endpoint and port |
-| `provider/protocol` fail | Provider did not stream SSE data | Enable streaming or choose an OpenAI-compatible endpoint |
+| `provider/protocol` fail | Provider did not answer with an OpenAI chat completion | Point at an OpenAI-compatible `/v1/chat/completions` endpoint that accepts `"stream": false` (`agent-worker` never asks for a stream on this wire) |
 | `runtime/status` degraded | `api` / `agent-worker` rejected provider config | Open **설정 › AI 연결**, copy the redacted reason, and rerun the script |
 | `runtime/timeout` | Provider responded too slowly or worker failed | Check redacted worker/api logs from the evidence block |
 
