@@ -835,6 +835,9 @@ export function Timeline({
       align: "end",
       behavior: timelineScrollBehavior(prefersReducedMotion()),
     });
+    // 목적지가 바닥이다: 그 스크롤이 못 미쳐 멈추면(WebKit — 이동 중 ⋯ 단추로 넘어가는 초점이 부드러운 스크롤을 끊는다) 조용해진 뒤
+    // 바닥으로 마무리한다(#5649 검수 3회차). 위 알림과 따로 두는 것은 목적지를 덧붙이는 것이라서다.
+    holdRef.current?.expectScripted("bottom");
     if (seq !== null) scheduleFocusRowStationBySeq(seq);
   }, []);
 

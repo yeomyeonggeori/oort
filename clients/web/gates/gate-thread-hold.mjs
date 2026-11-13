@@ -21,7 +21,10 @@
 //   L4 올리는 중 · 올리다 멈춘 직후 +120px — **기록만**(가상 목록의 위쪽 보정 몫, 이 칸이 바꾸지 않는 길)
 //   L5 휠로 한 번 내린 뒤 30 · 80 · 160ms 에 「최신 메시지로 이동」 → 끝 바닥 거리 ≤ 9px(휠 없이 누른 값 7px 이 상한 근거 — 검수 1·2회차)
 //   L6 휠 뒤 30 · 80 · 160ms 에 키보드 End(바닥 ≤ 9px) · PageDown(≥ 450px) — 줄에 초점을 둔 채(검수 2회차 H1)
-//   L7 누른 뒤에도 휠이 이어진다(20ms 간격 6px 세 번) → 바닥 ≤ 9px (검수 2회차 H1)
+//   L7 누른 뒤에도 휠이 이어진다(20ms 간격 6px 세 번) → 바닥 ≤ 9px (검수 2회차 H1 · 3회차 H1 — 이동 중 ⋯ 단추로 넘어가는 초점이
+//      부드러운 스크롤을 끊으면 조용해진 뒤 바닥으로 마무리)
+//   L6b 휠 뒤 80ms 에 키보드 PageDown, 그 스크롤 도중 화면 위 밖 줄이 120px 자랐다 되돌아감 → 움직인 거리 ≥ 450px(검수 3회차 M1 —
+//      키보드 스크롤을 사람의 손으로 치면 그 줄 높이 변화에서 자리를 붙들어 스크롤을 끊는다. 줄 높이가 안 바뀌면 그 길을 안 타서 L6 은 못 잡는다)
 //
 // 재는 법: 프레임마다 그려진 모양(rAF 뒤의 태스크에서 읽고, 그 사이 DOM 이 바뀐 표본은 버린다 — #5641 `still-measure` 와 같은 규칙)의
 // 보던 줄 위 끝(창 좌표) · scrollTop · 바닥 거리를 적는다. 휠 장면은 A/B 다: 같은 휠 열을 자람 없이 돌린 값이 기준이라 엔진이 휠을
@@ -815,6 +818,40 @@ async function jumpRun(page, afterMs, via = "click") {
     await wait(afterMs);
   }
   let pill = true;
+  let grew = null;
+  if (via === "pagedownGrow") {
+    // 다음 스크롤(= PageDown 의 첫 프레임)에서 화면 위 밖 줄을 120px 키우고 세 프레임 뒤 되돌린다. 그동안 그 줄이 붙어 있어야 장면이 선다.
+    grew = await page.evaluate(
+      ([selector, px]) => {
+        const H = window.__hold;
+        const picked = H.pick(selector, "[data-index]", 0);
+        H.watch = null;
+        if (picked.error) return { error: picked.error };
+        const report = { grown: false, attachedAtUngrow: false };
+        const node = H.node;
+        const onScroll = () => {
+          node.removeEventListener("scroll", onScroll);
+          H.grow(px);
+          report.grown = true;
+          let frames = 0;
+          const tick = () => {
+            frames += 1;
+            if (frames < 3) {
+              requestAnimationFrame(tick);
+              return;
+            }
+            report.attachedAtUngrow = H.grower.isConnected;
+            H.ungrow();
+          };
+          requestAnimationFrame(tick);
+        };
+        node.addEventListener("scroll", onScroll, { passive: true });
+        H.growReport = report;
+        return { aboveRows: picked.aboveRows };
+      },
+      [TIMELINE, GROW_PX]
+    );
+  }
   if (via === "click" || via === "clickWheels") {
     pill = await page.evaluate(() => {
       const button = document.querySelector('[data-testid="jump-latest"]');
@@ -832,7 +869,8 @@ async function jumpRun(page, afterMs, via = "click") {
   await wait(1800);
   const { frames } = await stop(page);
   const last = frames[frames.length - 1];
-  return { pill, focused, gap: last ? last.gap : null, moved: last ? round2(last.top - topBefore) : null, client: viewport.height };
+  if (grew !== null && !grew.error) grew = await page.evaluate(() => window.__hold.growReport);
+  return { pill, focused, grew, gap: last ? last.gap : null, moved: last ? round2(last.top - topBefore) : null, client: viewport.height };
 }
 
 /** 이동 뒤 바닥 거리 상한(px): 이 장면의 원래 값이 7px 이다(휠 없이 누른 값). 기준 실행과 견주지 않고 상한으로 단정한다(검수 2회차 M1). */
@@ -872,6 +910,16 @@ async function jumpScenes(page, rows) {
       scene: `타임라인 휠 뒤 ${afterMs}ms 에 키보드 PageDown`,
       verdict: builtPage && page_.moved >= 450 ? "PASS" : "FAIL",
       note: `${builtPage ? "" : "장면을 못 만들었다 · "}줄 초점 ${page_.focused} · 움직인 거리 ${page_.moved}px (하한 450 — 휠 30 + 한 쪽)`,
+    });
+  }
+  // L6b 키보드 스크롤 도중 줄 높이가 바뀐다(검수 3회차 M1): 키보드 스크롤을 사람의 손으로 치면 자리를 붙들어 PageDown 을 끊는다.
+  {
+    const grown = await jumpRun(page, 80, "pagedownGrow");
+    const built = grown.focused && grown.moved !== null && grown.grew !== null && !grown.grew.error && grown.grew.grown && grown.grew.attachedAtUngrow;
+    rows.push({
+      scene: "타임라인 휠 뒤 80ms 에 키보드 PageDown · 그 도중 위 밖 줄 +120px 뒤 되돌아감",
+      verdict: built && grown.moved >= 450 ? "PASS" : "FAIL",
+      note: `${built ? "" : `장면을 못 만들었다(${JSON.stringify(grown.grew)}) · `}줄 초점 ${grown.focused} · 움직인 거리 ${grown.moved}px (하한 450 — 휠 30 + 한 쪽)`,
     });
   }
   // L7 누른 뒤에도 휠이 이어진다.
