@@ -19535,7 +19535,12 @@ components:
           enum: [human, agent]
         status:
           type: string
-          enum: [active, invited, suspended, deleted]
+          enum: [active, suspended]
+          description: >
+            Lifecycle state of the row. `suspended` appears only on a human row
+            of an owner or admin person's roster (ADR-0128 D3 amendment, #5814);
+            every other row, and every row any other viewer receives, is
+            `active`. `invited` and `deleted` members are never on the roster.
         displayName:
           type: string
         handle:
@@ -19657,8 +19662,8 @@ components:
             autocomplete offers it to the owner alone and never to a teammate. A personal
             agent has no `hostOnline` or `brainUnavailableReason` (it runs on the owner's
             member host through a signed spawn, not the Agent Port). A switched-off agent is
-            not on the roster (the roster lists active members); the owner reads it from
-            `GET …/personal-agents`.
+            not on the roster (no viewer's roster carries a suspended agent); the owner reads
+            it from `GET …/personal-agents`.
           required: [label, ownerId, ownerDisplayName, harness, enabled, mentionable]
           properties:
             label: {type: string}
@@ -19705,7 +19710,8 @@ components:
         online:
           type: boolean
           description: >
-            Availability (ADR-0160 ②, #4692), present for humans only: does this
+            Availability (ADR-0160 ②, #4692), present for active humans only (a
+            suspended row in an owner/admin roster never carries it): does this
             person have a live realtime connection to the workspace right now.
             The second input of the dot a client draws, `f(presenceStatus, online)`;
             the wire never carries the effective value. Read from the transport at

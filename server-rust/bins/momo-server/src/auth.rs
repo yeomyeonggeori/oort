@@ -117,9 +117,10 @@ pub struct LegacyGatewaySecret;
 pub struct PushActionCredential;
 
 /// Marker inserted when a request authenticated with a `push_fetch` token — the
-/// notification extension's narrow credential (#3121). Its only reader is the pair
+/// notification extension's narrow credential (#3121). Its readers are the pair
 /// of token-minting routes, which refuse a narrow bearer (no self-renewal, and no
-/// narrow token mints the other kind) as a second line behind the route list.
+/// narrow token mints the other kind) as a second line behind the route list, and
+/// the roster, which gives a narrow token the active roster only (#5814).
 #[derive(Debug, Clone, Copy)]
 pub struct PushFetchCredential;
 

@@ -59,19 +59,35 @@
 //!
 //! The read runs **beside** the Postgres read (`join!`), so a slow broker costs the
 //! roster at most `PRESENCE_READ_TIMEOUT` and a healthy one costs it nothing.
+//!
+//! ## #5814 — suspended people, for an owner or admin (ADR-0128 D3 증보)
+//!
+//! An owner or admin signed in as a person also gets the workspace's **suspended
+//! humans**, each row saying `status: "suspended"`. Without them a suspension had
+//! no way back from the screen: once the profile window closed, nothing listed the
+//! person to reopen and reinstate. Everyone else — a member, a guest, an agent, a
+//! work host, the notification extension's narrow token — gets the active roster
+//! exactly as before ([`roster_status_scope`]).
+//!
+//! Seeing is not undoing: an admin sees a suspended owner too, and the reinstate
+//! route still refuses that by the role ladder. A suspended row carries no
+//! `online`, and `humanCount`/`agentCount` count active rows only, so the numbers
+//! mean the same thing for every viewer. Only this route widens; every other
+//! caller of the roster query keeps the active-only `list_workspace_roster`.
 
 use std::collections::HashSet;
 
 use axum::extract::{Path, Query, State};
 use axum::{Extension, Json};
-use momo_auth::Principal;
+use momo_auth::{Principal, PrincipalKind};
 use momo_ephemeral::OnlineRead;
 use momo_messaging::{
-    active_workspace_role, clamp_roster_limit, list_workspace_roster, parse_roster_kind_filter,
-    MemberKind, RosterMember, WorkspaceRole,
+    active_workspace_role, clamp_roster_limit, list_workspace_roster_with_status,
+    parse_roster_kind_filter, MemberKind, RosterMember, RosterStatusScope, WorkspaceRole,
 };
 use uuid::Uuid;
 
+use crate::auth::PushFetchCredential;
 use crate::dto::{RosterMemberDto, RosterQuery, WorkspaceRosterResponse};
 use crate::error::ApiError;
 use crate::routes::shared::{agent_tenant_tx, settle_db, workspace_scope, DbRejectable};
@@ -188,9 +204,28 @@ fn apply_availability(
     }
 }
 
+/// #5814 — which lifecycle states this viewer's roster carries.
+///
+/// Suspended humans only for a **person** whose workspace role is owner or admin,
+/// on a full access token. An agent or a work host never gets them whatever its
+/// membership row says, and neither does the notification extension's narrow
+/// `push_fetch` token: it reads names for a notification, not the members tab.
+fn roster_status_scope(
+    kind: PrincipalKind,
+    role: WorkspaceRole,
+    push_fetch: bool,
+) -> RosterStatusScope {
+    if kind == PrincipalKind::Human && role.is_admin() && !push_fetch {
+        RosterStatusScope::ActiveAndSuspendedHumans
+    } else {
+        RosterStatusScope::Active
+    }
+}
+
 pub async fn roster(
     State(state): State<AppState>,
     Extension(principal): Extension<Principal>,
+    push_fetch: Option<Extension<PushFetchCredential>>,
     Path(workspace): Path<String>,
     Query(query): Query<RosterQuery>,
 ) -> Result<Json<WorkspaceRosterResponse>, ApiError> {
@@ -202,6 +237,8 @@ pub async fn roster(
         .map_err(|invalid| ApiError::bad_request(invalid.to_string()))?;
     let limit = query.limit();
     let viewer = principal.member_id;
+    let viewer_kind = principal.kind;
+    let push_fetch = push_fetch.is_some();
 
     let roster_read = agent_tenant_tx(&state.pool, workspace_id, move |conn| {
         Box::pin(async move {
@@ -209,13 +246,14 @@ pub async fn roster(
             else {
                 return Ok(Err(ApiError::forbidden("not a workspace member")));
             };
-            let members = list_workspace_roster(
+            let members = list_workspace_roster_with_status(
                 conn,
                 workspace_id,
                 principal.member_id,
                 role == WorkspaceRole::Guest,
                 kind_filter,
                 limit,
+                roster_status_scope(viewer_kind, role, push_fetch),
             )
             .await?;
             // #3392 AIH-2 — the read contract for the agents this viewer may
@@ -240,13 +278,15 @@ pub async fn roster(
 
     let claude_enabled = state.agent_port.config.claude_subscription_agents_enabled;
     let (members, facts, viewer_is_guest) = settle_db("roster.list", outcome)?;
+    // Active rows only (#5814): a suspended row in an owner/admin view is listed,
+    // not counted, so the counts mean the same thing for every viewer.
     let human_count = members
         .iter()
-        .filter(|member| member.kind == MemberKind::Human)
+        .filter(|member| member.kind == MemberKind::Human && member.status == "active")
         .count();
     let agent_count = members
         .iter()
-        .filter(|member| member.kind == MemberKind::Agent)
+        .filter(|member| member.kind == MemberKind::Agent && member.status == "active")
         .count();
     Ok(Json(WorkspaceRosterResponse {
         members: members
@@ -477,6 +517,57 @@ mod tests {
         assert!(
             human.get("paused").is_none(),
             "a person is not a thing that can be paused: {human}"
+        );
+    }
+
+    /// #5814: suspended humans for an owner/admin person on a full token, and for
+    /// nobody else — every principal kind × every role × narrow or not.
+    #[test]
+    fn only_an_owner_or_admin_person_on_a_full_token_gets_suspended_rows() {
+        use WorkspaceRole::{Admin, Guest, Member, Owner};
+        for kind in [
+            PrincipalKind::Human,
+            PrincipalKind::Agent,
+            PrincipalKind::WorkHost,
+        ] {
+            for role in [Owner, Admin, Member, Guest] {
+                for push_fetch in [false, true] {
+                    let expected = if kind == PrincipalKind::Human
+                        && matches!(role, Owner | Admin)
+                        && !push_fetch
+                    {
+                        RosterStatusScope::ActiveAndSuspendedHumans
+                    } else {
+                        RosterStatusScope::Active
+                    };
+                    assert_eq!(
+                        roster_status_scope(kind, role, push_fetch),
+                        expected,
+                        "{kind:?} {role:?} push_fetch={push_fetch}"
+                    );
+                }
+            }
+        }
+    }
+
+    /// #5814: a suspended row in the owner/admin view never carries `online`,
+    /// even when the broker says the account is connected.
+    #[test]
+    fn a_suspended_row_carries_no_availability() {
+        let mut suspended = member(MemberKind::Human);
+        suspended.status = "suspended".into();
+        let connected = HashSet::from([suspended.id]);
+        let mut dto = roster_dto(&suspended);
+        apply_availability(&mut dto, &suspended, Some(&connected));
+        assert_eq!(dto.online, None);
+
+        let active = member(MemberKind::Human);
+        let mut dto = roster_dto(&active);
+        apply_availability(&mut dto, &active, Some(&connected));
+        assert_eq!(
+            dto.online,
+            Some(true),
+            "the same lookup does fill an active row"
         );
     }
 }
