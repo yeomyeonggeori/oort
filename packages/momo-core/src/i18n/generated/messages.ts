@@ -1473,6 +1473,7 @@ export const messageKeys = [
   "workspace.leave.confirm",
   "workspace.leave.lastOwner",
   "workspace.leave.title",
+  "workspace.leave.titleUnnamed",
   "workspace.menu.copiedAddress",
   "workspace.menu.copyAddress",
   "workspace.menu.copyFailed",
@@ -3396,6 +3397,7 @@ export const argumentSpecs = {
   "workspace.leave.title": {
     "name": "string"
   },
+  "workspace.leave.titleUnnamed": {},
   "workspace.menu.copiedAddress": {},
   "workspace.menu.copyAddress": {},
   "workspace.menu.copyFailed": {},
@@ -4878,6 +4880,7 @@ export interface MessageArgs {
   "workspace.leave.confirm": Record<string, never>;
   "workspace.leave.lastOwner": Record<string, never>;
   "workspace.leave.title": { name: string };
+  "workspace.leave.titleUnnamed": Record<string, never>;
   "workspace.menu.copiedAddress": Record<string, never>;
   "workspace.menu.copyAddress": Record<string, never>;
   "workspace.menu.copyFailed": Record<string, never>;

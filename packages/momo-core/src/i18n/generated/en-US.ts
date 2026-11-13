@@ -10973,7 +10973,7 @@ export const catalog: MessageCatalog = {
   "workspace.create.lead": [
     {
       "type": 0,
-      "value": "Whoever creates it becomes the owner, and it starts with a single #general channel. Only the server operator can create one."
+      "value": "Adds another workspace on this server. Whoever creates it becomes the owner, and it starts with a single #general channel. Only the server operator can create one."
     }
   ],
   "workspace.create.operatorOnly": [
@@ -11030,6 +11030,12 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "?"
+    }
+  ],
+  "workspace.leave.titleUnnamed": [
+    {
+      "type": 0,
+      "value": "Leave this workspace?"
     }
   ],
   "workspace.menu.copiedAddress": [

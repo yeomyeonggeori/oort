@@ -10286,7 +10286,7 @@ export const catalog: MessageCatalog = {
   "workspace.create.lead": [
     {
       "type": 0,
-      "value": "만든 사람이 소유자가 되고 #general 채널 하나로 시작해요. 서버 운영자만 만들 수 있어요."
+      "value": "이 서버에 새 워크스페이스를 하나 더 만들어요. 만든 사람이 소유자가 되고 #general 채널 하나로 시작해요. 서버 운영자만 만들 수 있어요."
     }
   ],
   "workspace.create.operatorOnly": [
@@ -10339,6 +10339,12 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "에서 나갈까요?"
+    }
+  ],
+  "workspace.leave.titleUnnamed": [
+    {
+      "type": 0,
+      "value": "이 워크스페이스에서 나갈까요?"
     }
   ],
   "workspace.menu.copiedAddress": [
