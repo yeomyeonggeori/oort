@@ -1,5 +1,5 @@
 import { Suspense, lazy, useState } from "react";
-import { Check, Moon, Sun, SunMoon } from "lucide-react";
+import { Moon, Sun, SunMoon } from "lucide-react";
 import { moveNotice, themeMoveForScheme, type ThemeMove } from "@momo/core/design/themeResolve";
 import {
   ACCENT_THEMES,
@@ -12,11 +12,11 @@ import {
   type AccentId,
   type ThemeChoice,
 } from "@/design/theme";
-import { cn } from "@/design/lib/cn";
 import { SegmentedControl, type SegmentOption } from "@/design/ui/segmented-control";
 import { SettingsRow } from "../shell/SettingsRow";
 import { SettingsSection } from "../shell/SettingsSection";
 import { ThemePreviewCard } from "../shell/ThemePreviewCard";
+import { AccentSwatch } from "./AccentSwatch";
 import { GlassRows } from "./GlassRows";
 import { ProminentRow } from "./ProminentRow";
 import { ThemeStyleRow } from "./ThemeStyleRow";
@@ -49,27 +49,16 @@ function StaticAccentGroup({ isDawnsky }: { isDawnsky: boolean }) {
   return (
     <fieldset data-testid="accent-choice" className="m-0 min-w-0 border-0 p-0">
       <legend className="sr-only">강조색</legend>
-      <div className="flex flex-wrap gap-4">
+      {/* 지연 청크의 칩 줄과 같은 부품·같은 줄이다(#5783): 청크가 와도 크기와 자리가 그대로다. */}
+      <div className="flex flex-wrap" data-testid="accent-chip-row">
         {ACCENT_THEMES.map((theme) => (
-          <label
+          <AccentSwatch
             key={theme.id}
-            data-accent-swatch={theme.id}
-            data-testid={`accent-swatch-${theme.id}`}
-            className="accent-swatch flex cursor-pointer flex-col items-center justify-center gap-1 text-meta text-ink press"
-          >
-            <input
-              type="radio"
-              name="appearance-accent"
-              value={theme.id}
-              checked={accent === theme.id}
-              onChange={() => setAccent(theme.id as AccentId)}
-              className="sr-only"
-            />
-            <span className="accent-swatch-chip flex items-center justify-center rounded-full" aria-hidden>
-              <Check className={cn("accent-swatch-check size-4")} aria-hidden />
-            </span>
-            {theme.id === ACCENT_THEMES[0].id && !isDawnsky ? "기본" : theme.label}
-          </label>
+            id={theme.id}
+            label={theme.id === ACCENT_THEMES[0].id && !isDawnsky ? "기본" : theme.label}
+            checked={accent === theme.id}
+            onSelect={() => setAccent(theme.id as AccentId)}
+          />
         ))}
       </div>
     </fieldset>
