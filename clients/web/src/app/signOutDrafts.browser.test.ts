@@ -18,11 +18,12 @@ import { ENGINES, type EngineName } from "@/design/appearance/compileTokensTestK
 //       이어 들어와 같은 대화를 열어도 입력창은 비어 있다.
 //   (2) 보내는 중인 글을 두고 설정에서 워크스페이스를 나간다: 그 요청이 로그아웃 **뒤에** 실패해도 0건.
 //   (3) 로그아웃하지 않는 평소 길(대화 옮기기·새로 고침)에서는 초안이 그대로 남는다 — 다음 사람의 로그인이 저장소를 다시 연다.
+//   (4) 같은 앱이 두 탭에 열려 있을 때 한 탭에서 로그아웃해도, 다른 탭이 내려가며 쓰는 글이 남지 않는다.
 //
 // 세는 것은 같은 약속 아래 있는 세 묶음(초안·답글 초안·보내지 못한 글)의 열쇠 수다. 서버는 고정 응답이고 실시간은 가짜 소켓이다.
 // 엔진은 `ENGINES`(설치된 WebKit·Chromium)이다. 하나도 없으면 건너뛴다(다른 브라우저 시험과 같은 규약).
-// 사보타주: `draftStore.ts`의 `writeRaw` 첫 줄(닫힌 동안 쓰지 않는다)을 지우면 (1)·(2)가 붉고, `session.tsx`의
-// `openDraftsForSignIn()`을 지우면 (3)이 붉다.
+// 사보타주: `draftStore.ts`의 `writeRaw` 첫 줄(닫힌 동안 쓰지 않는다)을 지우면 (1)·(2)·(4)가 붉고, `session.tsx`의
+// `openDraftsForSignIn()`을 지우면 (3)이 붉고, 닫힘 표지를 공유 저장소가 아니라 이 탭에만 두면 (4)만 붉다.
 // =============================================================================
 
 const WS = "00000000-0000-7000-8000-000000000001";
@@ -240,6 +241,33 @@ describe("로그아웃하면 이 기기에 쓰다 만 글이 남지 않는다 (#
         await page.getByTestId("workspace-current").waitFor({ state: "attached", timeout: 120_000 });
         await openChannel(page, CH1);
         await expect.poll(() => composer(page).inputValue(), { message: `${rig.engine}: 새로 고침 뒤` }).toBe("이서연의 글");
+      } finally {
+        await context.close();
+      }
+    }
+  }, 600_000);
+
+  it("같은 앱이 두 탭에 열려 있다: 한 탭에서 로그아웃하면 다른 탭이 내려가며 쓰는 글도 남지 않는다", async () => {
+    if (rigs.length === 0) return;
+    for (const rig of rigs) {
+      const { context, page } = await openApp(rig);
+      try {
+        await openChannel(page, CH1);
+        await typeInComposer(page, "쓰다 만 초안");
+        // 둘째 탭: 같은 기기·같은 저장소. 같은 대화를 열면 그 입력창이 초안을 들고 있다(대조).
+        const second = await context.newPage();
+        await second.addInitScript({ content: FAKE_SOCKET });
+        await second.goto(page.url(), { waitUntil: "domcontentloaded" });
+        await second.getByTestId("workspace-current").waitFor({ state: "attached", timeout: 120_000 });
+        await openChannel(second, CH1);
+        expect(await composer(second).inputValue(), `${rig.engine}: 둘째 탭 대조`).toBe("쓰다 만 초안");
+
+        await logoutFromProfileMenu(page);
+        await page.getByTestId("login-email").waitFor({ state: "visible" });
+        // 둘째 탭도 세션이 끝나 로그인 화면으로 간다(그 입력창이 내려가며 마지막 글을 쓰려 한다).
+        await second.getByTestId("login-email").waitFor({ state: "visible" });
+        await page.waitForTimeout(SETTLE_MS);
+        expect(await deviceDrafts(page), `${rig.engine}: 두 탭이 모두 내려간 뒤 한 박자`).toEqual([]);
       } finally {
         await context.close();
       }

@@ -149,10 +149,21 @@ function readRaw(key: string): string | null {
 // 새 입력창·늦게 끝나는 요청이 생길 때마다 다시 깨진다. 그래서 문을 쓰는 쪽(이 저장소) 하나에 둔다: 이 파일의
 // 모든 쓰기가 아래 `writeRaw`를 지나므로 여기서 막으면 초안·답글 초안·보내지 못한 글이 함께 지켜진다.
 // 지우기(`null`)는 언제나 통한다. 닫는 것은 `closeDraftsForSignOut`, 여는 것은 `openDraftsForSignIn`이다.
-let closedForSignOut = false;
+//
+// 닫힘 표지는 **탭 사이에 공유되는 값**이다(`localStorage`의 한 값). 로그아웃은 같은 기기의 다른 탭·창도 끝내고, 그쪽의
+// 입력창도 내려가며 쓴다 — 탭마다 메모리 깃발이면 그 쓰기를 막지 못한다(이모티콘 기기 캐시의 세션 세대와 같은 이유,
+// `features/expressions/disk/generation.ts`). 이 탭은 열린 순간의 표지를 들고 있고, 표지가 바뀌었으면 쓰지 않는다.
+const SIGN_OUT_MARK_KEY = "momo.drafts.signed-out-mark.v1";
+
+function readSignOutMark(): string | null {
+  return readRaw(SIGN_OUT_MARK_KEY);
+}
+
+/** 이 탭이 쓰기를 연 순간의 표지(모듈이 뜬 때·로그인한 때). 지금 표지와 다르면 그 뒤 어디선가 로그아웃했다. */
+let openedMark = readSignOutMark();
 
 function writeRaw(key: string, value: string | null): void {
-  if (value !== null && closedForSignOut) return;
+  if (value !== null && readSignOutMark() !== openedMark) return;
   try {
     if (typeof localStorage === "undefined") return;
     if (value === null) localStorage.removeItem(key);
@@ -383,13 +394,28 @@ export function clearAllDrafts(): void {
  * 늦게 실패한 전송이 지운 자리를 되살리지 못하게.
  */
 export function closeDraftsForSignOut(): void {
-  closedForSignOut = true;
+  try {
+    // 새 표지: 이 탭과 같은 기기의 다른 탭이 들고 있는 표지가 모두 낡는다.
+    localStorage.setItem(SIGN_OUT_MARK_KEY, freshMark());
+  } catch {
+    // 저장소를 못 쓰는 환경이면 초안도 저장되지 않았다.
+  }
   clearAllDrafts();
 }
 
-/** 로그인. 이 사람의 초안을 다시 남긴다. */
+/** 로그인. 이 사람의 초안을 다시 남긴다(지금 표지를 이 탭의 것으로 든다). */
 export function openDraftsForSignIn(): void {
-  closedForSignOut = false;
+  openedMark = readSignOutMark();
+}
+
+function freshMark(): string {
+  try {
+    const random = globalThis.crypto?.randomUUID?.();
+    if (random !== undefined) return random;
+  } catch {
+    // 아래의 대체 값을 쓴다.
+  }
+  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
 }
 
 /**
