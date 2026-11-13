@@ -548,6 +548,11 @@ async fn viewer_by_state_table() {
             body["humanCount"],
             rows.len()
         ));
+        // One wide body on one line, for the OpenAPI shape check
+        // (`scripts/openapi_shape_check.py`) to validate a real suspended row.
+        if *viewer == "admin" {
+            println!("ROSTER-5814 ADMIN-BODY {body}");
+        }
     }
 
     // The agent door: an agent bearer does not reach the roster at all.
