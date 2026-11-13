@@ -45,6 +45,16 @@ function revealTileInside(box: HTMLElement, tile: HTMLElement): void {
   }
 }
 
+/** 키보드로 온 초점인가(마우스로 누른 초점은 아니다). 엔진이 선택자를 모르면 키보드로 본다(`tooltip.tsx`와 같은 판단). */
+function isKeyboardFocus(target: EventTarget): target is HTMLElement {
+  if (!(target instanceof HTMLElement)) return false;
+  try {
+    return target.matches(":focus-visible");
+  } catch {
+    return true;
+  }
+}
+
 export default function ThemeGallery() {
   const { theme, scheme, signal } = useAppearance();
   const [notice, setNotice] = useState<string | null>(null);
@@ -93,7 +103,16 @@ export default function ThemeGallery() {
         </div>
         <fieldset className="m-0 min-w-0 border-0 p-0" data-testid="theme-style-group">
           <legend className="sr-only">테마 스타일</legend>
-          <div ref={scroller} className="theme-gallery-scroll" data-testid="theme-style-scroll">
+          <div
+            ref={scroller}
+            className="theme-gallery-scroll"
+            data-testid="theme-style-scroll"
+            // 키보드 초점이 타일에 닿을 때(Tab 도착)도 그 타일로 따라간다: 낮은 창·좁은 폭에서는 고른 타일이 창 아래에 있다.
+            // 브라우저가 못 하는 까닭은 위 `picked` 주석과 같다. 마우스로 누른 초점은 건드리지 않는다.
+            onFocus={(event) => {
+              if (isKeyboardFocus(event.target)) event.target.closest(".theme-tile")?.scrollIntoView?.({ block: "nearest" });
+            }}
+          >
             <div className="theme-gallery-grid" data-count={tiles.length}>
               {tiles.map((tile) => (
                 <ThemeTile

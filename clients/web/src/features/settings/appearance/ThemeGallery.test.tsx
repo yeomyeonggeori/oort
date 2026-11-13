@@ -364,6 +364,25 @@ describe("고르면 앱 전체가 바뀐다 (AC 3)", () => {
     }
   });
 
+  it("키보드 초점이 타일에 닿으면 그 타일로 따라간다 (검수 r2 Blocker: Tab으로 닿은 고른 카드가 창 밖)", async () => {
+    const host = await mountSection();
+    const seen: string[] = [];
+    const original = Element.prototype.scrollIntoView;
+    Element.prototype.scrollIntoView = function scrollIntoView(this: Element) {
+      seen.push(this.classList.contains("theme-tile") ? (this.querySelector("input")?.getAttribute("value") ?? "?") : "타일 아님");
+    };
+    try {
+      const target = radio(host, tileTestId("catalog:github"))!;
+      act(() => {
+        target.focus();
+      });
+      // jsdom 은 스크립트 초점을 키보드 초점(:focus-visible)으로 본다 — Tab 도착과 같은 갈래다.
+      expect(seen).toEqual(["catalog:github"]);
+    } finally {
+      Element.prototype.scrollIntoView = original;
+    }
+  });
+
   it("다크 단독 테마를 다크 목록에서 고르면 색 모드는 다크 그대로이고 안내는 없다 (이미 그 모드다)", async () => {
     updateAppearance({ scheme: "dark" });
     const host = await mountSection();
