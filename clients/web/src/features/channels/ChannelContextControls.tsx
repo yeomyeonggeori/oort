@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type RefObject } from "react";
-import { Users } from "lucide-react";
+import { Check, MoreHorizontal, UserMinus, Users } from "lucide-react";
 import type { RosterMember } from "@momo/core/lib/api";
 import { normalizeChannelTopic } from "@momo/core/features/channels/model";
 import {
@@ -9,6 +9,7 @@ import {
   memberPanelSnapshot,
   type MemberPanelGroup,
 } from "@momo/core/features/channels/memberPanel";
+import { canRemoveFromChannel } from "@momo/core/features/channels/memberRemove";
 import type { ChannelAgentNow } from "@momo/core/features/agents/channelAgentNow";
 import type { ElapsedParts } from "@momo/core/features/agents/runPhase";
 import { mayActOnLiveness } from "@momo/core/features/agents/liveness";
@@ -35,11 +36,20 @@ import {
   useRestoreFocusOnClose,
 } from "@/design/ui/dialog";
 import { Tooltip } from "@/design/ui/tooltip";
+import { ConfirmStage } from "@/design/ui/confirm-dialog";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/design/ui/dropdown-menu";
+import { useInlineConfirm } from "@/design/ui/inlineConfirm";
 import { Avatar } from "@/features/timeline/MessageRow";
 import { EmptyInvite, InlineBanner, Skeleton } from "@/features/common/States";
 import { channelHeaderControlClass } from "@/features/chat/channelHeaderControl";
 import { cn } from "@/design/lib/cn";
 import { BlockedReason } from "@/features/common/BlockedReason";
+import { useRemoveChannelMember } from "./useRemoveChannelMember";
 
 export type ChannelMemberListStatus = "loading" | "ready" | "failed";
 
@@ -254,7 +264,68 @@ function RowIdentity({ member }: { member: RosterMember }) {
   );
 }
 
-function HumanMemberRow({ member, group }: { member: RosterMember; group: MemberPanelGroup }) {
+/** 줄의 「채널에서 내보내기」를 부르는 손. 줄 끝 ⋯ 이 자기 자신을 넘겨 확인 단계가 닫힌 뒤 초점이 돌아올 곳이 된다. */
+type RemoveRequest = (member: RosterMember, opener: HTMLElement | null) => void;
+
+/**
+ * 줄 끝 ⋯ 메뉴(#5778). 권한이 있을 때만 선다(`canRemoveFromChannel` — 서버 사다리의 거울): 권한이 없는 사람에게는 단추도
+ * 메뉴 줄도 없다. 단추는 줄 높이를 바꾸지 않는 크기다(`size-control-sm` 28 < 두 줄 글의 높이). 행동은 지금 하나뿐이지만
+ * 줄 메뉴(#5777)와 같은 문법으로 둔다 — 아이콘 + 낱말, 위험색.
+ */
+function MemberRowMenu({
+  member,
+  onRemove,
+  formatMessage,
+}: {
+  member: RosterMember;
+  onRemove: RemoveRequest;
+  formatMessage: Format;
+}) {
+  const triggerRef = useRef<HTMLButtonElement | null>(null);
+  const label = formatMessage("timeline.memberPanel.rowActions", { name: member.displayName });
+  return (
+    <DropdownMenu>
+      <Tooltip label={label} side="top" align="end">
+        <DropdownMenuTrigger asChild>
+          <Button
+            ref={triggerRef}
+            type="button"
+            variant="ghost"
+            size="icon"
+            className="size-control-sm shrink-0 text-ink-muted"
+            aria-label={label}
+            data-testid="channel-member-row-menu"
+          >
+            <MoreHorizontal aria-hidden="true" />
+          </Button>
+        </DropdownMenuTrigger>
+      </Tooltip>
+      <DropdownMenuContent align="end">
+        <DropdownMenuItem
+          tone="danger"
+          onSelect={() => onRemove(member, triggerRef.current)}
+          data-testid="channel-member-remove"
+        >
+          <UserMinus aria-hidden="true" className="size-4 shrink-0" />
+          {formatMessage("timeline.memberPanel.remove")}
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
+function HumanMemberRow({
+  member,
+  group,
+  onRemove,
+  formatMessage,
+}: {
+  member: RosterMember;
+  group: MemberPanelGroup;
+  /** 있으면 줄 끝 ⋯ 이 선다(보는 사람이 이 사람을 내보낼 수 있을 때만). */
+  onRemove?: RemoveRequest;
+  formatMessage: Format;
+}) {
   const dot = useHumanPresenceDot(member);
   const { visible: custom, accessible } = useCustomStatusView(member);
   // 자리 비움·방해 금지는 사람이 스스로 정한 상태라 낱말로도 선다. 접속 중·접속 없음은 묶음 머리가 이미 말한다.
@@ -286,6 +357,7 @@ function HumanMemberRow({ member, group }: { member: RosterMember; group: Member
         </span>
       </span>
       <span className="sr-only">{spoken.join(", ")}</span>
+      {onRemove ? <MemberRowMenu member={member} onRemove={onRemove} formatMessage={formatMessage} /> : null}
     </li>
   );
 }
@@ -357,14 +429,17 @@ function ChannelMemberList({
   members,
   now,
   formatMessage,
+  onRemove,
 }: {
   members: RosterMember[];
   now: ChannelMemberNow;
   formatMessage: Format;
+  onRemove: RemoveRequest;
 }) {
   const { session, connStatus, workspaceId } = useSession();
   const { directory } = useDirectory(workspaceId);
-  const mayAct = mayActOnLiveness(memberFor(directory, session.member.id)?.role);
+  const viewerRole = memberFor(directory, session.member.id)?.role;
+  const mayAct = mayActOnLiveness(viewerRole);
   const connected = connStatus === "connected";
   // 일하는 에이전트: 받아 둔 「지금」 답(같은 채널을 최근에 열었음)이나 레일 신호가 아는 run. 둘 다 없으면 에이전트는
   // 한 묶음(「에이전트 N」)이다 — 패널은 「지금」 읽기를 기다리지 않는다(수리 1회차, 검수 H1).
@@ -421,7 +496,13 @@ function ChannelMemberList({
                   formatMessage={formatMessage}
                 />
               ) : (
-                <HumanMemberRow key={member.id} member={member} group={section.group} />
+                <HumanMemberRow
+                  key={member.id}
+                  member={member}
+                  group={section.group}
+                  onRemove={canRemoveFromChannel(viewerRole, session.member.id, member) ? onRemove : undefined}
+                  formatMessage={formatMessage}
+                />
               )
             )}
           </ul>
@@ -443,6 +524,9 @@ function ChannelMemberPanelBody({
   offline,
   onAddMember,
   onClose,
+  onRemove,
+  receipt,
+  listRef,
 }: {
   channelId: string;
   members: RosterMember[];
@@ -451,6 +535,10 @@ function ChannelMemberPanelBody({
   offline: boolean;
   onAddMember: () => void;
   onClose: () => void;
+  onRemove: RemoveRequest;
+  /** 방금 내보낸 사람의 한 줄 영수증(`useInlineConfirm`, 1.6초). 없으면 null. */
+  receipt: string | null;
+  listRef: RefObject<HTMLDivElement>;
 }) {
   const formatMessage = useFormatMessage();
   const showList = members.length > 0;
@@ -460,6 +548,7 @@ function ChannelMemberPanelBody({
   return (
     <>
       <div
+        ref={listRef}
         className="min-h-0 flex-1 overflow-y-auto focus-visible:focus-ring"
         data-testid="channel-member-list"
         // 목록은 길어질 수 있고 줄은 눌리지 않는다: 키보드로 굴릴 수 있게 목록 자체가 초점을 받는다. 다만 열 때의 첫
@@ -482,12 +571,28 @@ function ChannelMemberPanelBody({
             testId="channel-member-empty"
           />
         ) : showList ? (
-          <ChannelMemberList members={members} now={now} formatMessage={formatMessage} />
+          <ChannelMemberList members={members} now={now} formatMessage={formatMessage} onRemove={onRemove} />
         ) : null}
       </div>
 
       <div className="flex items-center justify-end gap-2 border-t border-line p-4">
-        {hasAgent && now.read === "failed" && (
+        {/* 내보낸 뒤의 한 줄 영수증(#5778, 토스트 금지). 낭독 영역이 미리 등록되도록 늘 서 있고, 비어 있을 때는 눈에 안 보이고
+            자리도 차지하지 않는다(`sr-only`). 서 있는 1.6초 동안은 「지금」 읽기 실패 줄의 자리를 빌린다 — 발치는 한 줄이다. */}
+        <p
+          role="status"
+          className={cn(
+            receipt ? "mr-auto flex h-control-sm min-w-0 items-center gap-1 text-meta text-ink-muted" : "sr-only"
+          )}
+          data-testid="channel-member-removed"
+        >
+          {receipt ? (
+            <>
+              <Check aria-hidden="true" className="size-4 shrink-0" />
+              <span className="min-w-0 truncate">{receipt}</span>
+            </>
+          ) : null}
+        </p>
+        {hasAgent && now.read === "failed" && receipt === null && (
           <p
             className="mr-auto flex h-control-sm min-w-0 items-center gap-2 text-meta text-ink-muted"
             data-testid="channel-member-now-failed"
@@ -588,6 +693,53 @@ export function ChannelMemberPanel({
   const [open, setOpen] = useState(false);
   useRestoreFocusOnClose(open, triggerRef);
   const label = memberListLabel(status, members.length);
+  const formatMessage = useFormatMessage();
+  // 「채널에서 내보내기」 확인 단계(#5778). 패널이 이미 떠 있는 표면이라 두 번째 대화상자가 아니라 **표면 안의 단계**다
+  // (`ConfirmStage`, 디자인 시스템 §3.4 — 표면 위에 표면을 세우면 뒤 스크림이 앞 표면 아래에 깔린다).
+  const [removing, setRemoving] = useState<{ member: RosterMember; opener: HTMLElement | null } | null>(null);
+  const removal = useRemoveChannelMember(channelId);
+  const receipt = useInlineConfirm();
+  const [removedName, setRemovedName] = useState<string | null>(null);
+  const listRef = useRef<HTMLDivElement>(null);
+  // 단계가 내려간 뒤 초점이 갈 곳: 취소면 단계를 연 ⋯, 성공이면(그 줄은 사라졌다) 목록 칸.
+  const focusAfterStage = useRef<HTMLElement | null>(null);
+  useEffect(() => {
+    if (removing !== null || focusAfterStage.current === null) return;
+    const target = focusAfterStage.current;
+    focusAfterStage.current = null;
+    (target.isConnected ? target : listRef.current)?.focus({ preventScroll: true });
+  }, [removing]);
+  // 패널이 닫히면 단계도 내려간다(다음에 열 때 목록부터).
+  useEffect(() => {
+    if (open) return;
+    setRemoving(null);
+    removal.clearError();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
+
+  const requestRemove = (member: RosterMember, opener: HTMLElement | null) => {
+    removal.clearError();
+    setRemoving({ member, opener });
+  };
+  // 취소·Esc 는 한 가드를 지난다: 요청이 나갔으면 취소는 아무것도 되돌리지 못하니 단계는 그대로 서서 결과를 기다린다.
+  const cancelRemove = () => {
+    if (removal.pending || removing === null) return;
+    focusAfterStage.current = removing.opener;
+    setRemoving(null);
+    removal.clearError();
+  };
+  const confirmRemove = () => {
+    if (removing === null) return;
+    const { member } = removing;
+    void removal.remove(member.id).then((ok) => {
+      if (!ok) return;
+      focusAfterStage.current = listRef.current;
+      setRemovedName(member.displayName);
+      receipt.confirm();
+      setRemoving(null);
+    });
+  };
+  const stageUp = removing !== null;
 
   // 두 Radix focus scope를 같은 커밋에서 교체하면 닫히는 패널의 포커스 복귀가
   // 새 다이얼로그의 auto-focus를 뒤에서 덮을 수 있다. 먼저 이 패널을 완전히
@@ -640,6 +792,15 @@ export function ChannelMemberPanel({
           event.preventDefault();
           restoreDialogOpenerFocus(triggerRef.current);
         }}
+        // Esc 는 가장 위 층의 것이다(§3.4): 확인 단계가 서 있으면 단계만 내린다(요청이 도는 동안은 아무 일 없다).
+        onEscapeKeyDown={(event) => {
+          if (!stageUp) return;
+          event.preventDefault();
+          cancelRemove();
+        }}
+        onInteractOutside={(event) => {
+          if (removal.pending) event.preventDefault();
+        }}
       >
         <div className="flex flex-col gap-1 border-b border-line p-4">
           <DialogTitle>채널 멤버</DialogTitle>
@@ -666,15 +827,60 @@ export function ChannelMemberPanel({
           />
         )}
 
-        <ChannelMemberPanelBody
-          channelId={channelId}
-          members={members}
-          showLoading={showLoading}
-          showEmpty={showEmpty}
-          offline={offline}
-          onAddMember={openAddMember}
-          onClose={() => setOpen(false)}
-        />
+        {/* 단계는 목록·발치를 **덮어** 선다(#5780 프로필 창과 같은 틀): 둘이 한 격자 칸에 겹치고, 목록은 단계가 서 있는 동안
+            자리만 지킨다(`invisible` — 보이지도, 초점이 닿지도, 읽히지도 않는다). 그래서 창 높이가 뛰지 않는다. */}
+        <div className="grid min-h-0 flex-1 grid-cols-1 grid-rows-1" data-testid="channel-member-frame">
+          <div
+            className={cn("col-start-1 row-start-1 flex min-h-0 flex-col", stageUp && "invisible")}
+            aria-hidden={stageUp || undefined}
+          >
+            <ChannelMemberPanelBody
+              channelId={channelId}
+              members={members}
+              showLoading={showLoading}
+              showEmpty={showEmpty}
+              offline={offline}
+              onAddMember={openAddMember}
+              onClose={() => setOpen(false)}
+              onRemove={requestRemove}
+              receipt={
+                receipt.confirmed && removedName !== null
+                  ? formatMessage("timeline.memberPanel.removed", { name: removedName })
+                  : null
+              }
+              listRef={listRef}
+            />
+          </div>
+          {removing !== null ? (
+            <ConfirmStage
+              testId="channel-member-remove-stage"
+              className="col-start-1 row-start-1"
+              tone="destructive"
+              subject={
+                <div className="flex min-w-0 items-center gap-2" data-testid="channel-member-remove-subject">
+                  <Avatar member={removing.member} />
+                  <span className="flex min-w-0 flex-col">
+                    <span className="truncate text-body font-semibold text-ink">{removing.member.displayName}</span>
+                    <span className="truncate text-meta text-ink-muted">@{removing.member.handle}</span>
+                  </span>
+                </div>
+              }
+              title={formatMessage("timeline.memberPanel.removeTitle", { name: removing.member.displayName })}
+              description={formatMessage("timeline.memberPanel.removeBody", {
+                channel: channelName,
+                name: removing.member.displayName,
+              })}
+              confirmLabel={formatMessage("timeline.memberPanel.removeConfirm")}
+              busyLabel={formatMessage("timeline.memberPanel.removeBusy")}
+              cancelLabel={formatMessage("timeline.memberPanel.removeCancel")}
+              busy={removal.pending}
+              error={removal.error}
+              lockedReason={offline ? <BlockedReason frame="doThis" /> : undefined}
+              onCancel={cancelRemove}
+              onConfirm={confirmRemove}
+            />
+          ) : null}
+        </div>
       </DialogContent>
     </Dialog>
   );
