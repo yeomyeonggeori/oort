@@ -84,6 +84,8 @@ import {
   PopoverTrigger,
 } from "@/design/ui/popover";
 import { ListboxSelect } from "@/design/ui/listbox-select";
+import { ConfirmDialog, ConfirmStage } from "@/design/ui/confirm-dialog";
+import { useMessages } from "@/i18n/useMessages";
 import { Select } from "@/design/ui/select";
 import { Tooltip } from "@/design/ui/tooltip";
 import { SegmentedControl } from "@/design/ui/segmented-control";
@@ -106,6 +108,7 @@ import { Avatar, MessageRow } from "@/features/timeline/MessageRow";
 import { PendingRow } from "@/features/timeline/PendingRow";
 import { ReactionChips } from "@/features/timeline/ReactionChips";
 import { makeDirectory } from "@momo/core/features/workspace/directory";
+import { roleKeyLabel } from "@momo/core/features/directory/model";
 import type { Message, RosterMember } from "@momo/core/lib/api";
 import type { ReactionChip } from "@momo/core/features/timeline/reactions";
 import { OnboardingGuideGallery } from "@/features/onboarding/guide/OnboardingGuideGallery";
@@ -278,6 +281,53 @@ function OverlayCell({
     >
       {host ? children(host) : null}
     </div>
+  );
+}
+
+/**
+ * 확인 창 견본 (#5780). 문구는 사전(`directory.role.*`)에서 읽는다 — 멤버 프로필의 역할 확인과 같은 낱말이다.
+ * `ConfirmStage` 는 떠 있는 표면 안의 단계라 견본도 표면 판 안에 세우고, 사람이 부르지 않았으니 초점을 옮기지 않는다.
+ * `ConfirmDialog` 는 처음 뜨는 창이라 단추가 연다.
+ */
+// 견본 머리는 export 이름 그대로다(다른 견본의 머리와 같은 규칙) — 화면 문구가 아니라 부품 이름이다.
+const CONFIRM_EXPORTS = ["ConfirmStage", "ConfirmDialog"] as const;
+
+function ConfirmSpecimens() {
+  const t = useMessages().formatMessage;
+  const [open, setOpen] = useState(false);
+  const copy = {
+    title: t("directory.role.confirmTitle", { name: galleryMember().displayName }),
+    confirmLabel: t("directory.role.confirmAction"),
+    busyLabel: t("directory.role.confirmBusy"),
+    cancelLabel: t("directory.role.cancel"),
+  };
+  return (
+    <section className="flex flex-col gap-3 border-b border-line py-6">
+      <h2 className="text-title font-medium text-ink">{CONFIRM_EXPORTS.join(" · ")}</h2>
+      <div className="flex flex-wrap items-start gap-4">
+        <Export name="ConfirmStage">
+          <div className="w-pane rounded-2xl border border-line bg-surface-raised">
+            <ConfirmStage
+              {...copy}
+              autoFocus={false}
+              tone="destructive"
+              warning={t("directory.role.confirmOwnerWarning", {
+                name: galleryMember().displayName,
+                owner: roleKeyLabel("owner"),
+              })}
+              onConfirm={() => undefined}
+              onCancel={() => undefined}
+            />
+          </div>
+        </Export>
+        <Export name="ConfirmDialog">
+          <Button type="button" variant="outline" size="sm" onClick={() => setOpen(true)}>
+            {copy.confirmLabel}
+          </Button>
+          <ConfirmDialog {...copy} open={open} onOpenChange={setOpen} onConfirm={() => setOpen(false)} />
+        </Export>
+      </div>
+    </section>
   );
 }
 
@@ -1137,6 +1187,8 @@ function GalleryBody() {
           </Export>
         )}
       </StateRow>
+
+      <ConfirmSpecimens />
 
       <section className="flex flex-col gap-3 border-b border-line py-6">
         <h2 className="text-title font-medium text-ink">Card</h2>

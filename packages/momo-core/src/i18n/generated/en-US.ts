@@ -2153,6 +2153,382 @@ export const catalog: MessageCatalog = {
       "value": "Session"
     }
   ],
+  "directory.manage.heading": [
+    {
+      "type": 0,
+      "value": "Manage"
+    }
+  ],
+  "directory.manage.hint": [
+    {
+      "type": 0,
+      "value": "Only people with the "
+    },
+    {
+      "type": 1,
+      "value": "owner"
+    },
+    {
+      "type": 0,
+      "value": " or "
+    },
+    {
+      "type": 1,
+      "value": "admin"
+    },
+    {
+      "type": 0,
+      "value": " role see this"
+    }
+  ],
+  "directory.profile.close": [
+    {
+      "type": 0,
+      "value": "Close profile"
+    }
+  ],
+  "directory.profile.copied": [
+    {
+      "type": 0,
+      "value": "Copied"
+    }
+  ],
+  "directory.profile.copyEmail": [
+    {
+      "type": 0,
+      "value": "Copy email"
+    }
+  ],
+  "directory.profile.copyFailed": [
+    {
+      "type": 0,
+      "value": "Could not copy. Try again."
+    }
+  ],
+  "directory.profile.copyMention": [
+    {
+      "type": 0,
+      "value": "Copy mention"
+    }
+  ],
+  "directory.profile.description": [
+    {
+      "type": 0,
+      "value": "See this member's details, how to reach them, and their role."
+    }
+  ],
+  "directory.profile.dmInactive": [
+    {
+      "type": 0,
+      "value": "You cannot open a direct message while this member is "
+    },
+    {
+      "type": 1,
+      "value": "status"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "directory.profile.dmSelf": [
+    {
+      "type": 0,
+      "value": "You cannot open a direct message from your own profile."
+    }
+  ],
+  "directory.profile.emailLabel": [
+    {
+      "type": 0,
+      "value": "Email"
+    }
+  ],
+  "directory.profile.emptyAction": [
+    {
+      "type": 0,
+      "value": "Reload roster"
+    }
+  ],
+  "directory.profile.emptyDetail": [
+    {
+      "type": 0,
+      "value": "Reload the roster, then check the profile again."
+    }
+  ],
+  "directory.profile.emptyHeadline": [
+    {
+      "type": 0,
+      "value": "This member is not on the roster."
+    }
+  ],
+  "directory.profile.kindAgent": [
+    {
+      "type": 0,
+      "value": "Agent"
+    }
+  ],
+  "directory.profile.loading": [
+    {
+      "type": 0,
+      "value": "Loading the member profile."
+    }
+  ],
+  "directory.profile.message": [
+    {
+      "type": 0,
+      "value": "Send message"
+    }
+  ],
+  "directory.profile.messageBusy": [
+    {
+      "type": 0,
+      "value": "Opening conversation"
+    }
+  ],
+  "directory.profile.offline": [
+    {
+      "type": 0,
+      "value": "Disconnected. This is the last profile we received. You can start a new conversation once the connection is back."
+    }
+  ],
+  "directory.profile.offlineMissing": [
+    {
+      "type": 0,
+      "value": "Disconnected. We could not find this member's last profile."
+    }
+  ],
+  "directory.profile.ownerLabel": [
+    {
+      "type": 0,
+      "value": "Owner"
+    }
+  ],
+  "directory.profile.ownerLine": [
+    {
+      "type": 0,
+      "value": "Managed by "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    }
+  ],
+  "directory.profile.ownerUnknown": [
+    {
+      "type": 0,
+      "value": "No owner on record"
+    }
+  ],
+  "directory.profile.retry": [
+    {
+      "type": 0,
+      "value": "Try again"
+    }
+  ],
+  "directory.profile.routing": [
+    {
+      "type": 0,
+      "value": "Routing settings"
+    }
+  ],
+  "directory.profile.title": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "'s profile"
+    }
+  ],
+  "directory.profile.titleUnknown": [
+    {
+      "type": 0,
+      "value": "Member profile"
+    }
+  ],
+  "directory.role.cancel": [
+    {
+      "type": 0,
+      "value": "Cancel"
+    }
+  ],
+  "directory.role.changed": [
+    {
+      "type": 0,
+      "value": "Changed"
+    }
+  ],
+  "directory.role.confirmAction": [
+    {
+      "type": 0,
+      "value": "Change role"
+    }
+  ],
+  "directory.role.confirmBusy": [
+    {
+      "type": 0,
+      "value": "Changing"
+    }
+  ],
+  "directory.role.confirmGrantAdmin": [
+    {
+      "type": 0,
+      "value": "The "
+    },
+    {
+      "type": 1,
+      "value": "admin"
+    },
+    {
+      "type": 0,
+      "value": " role can change the role of "
+    },
+    {
+      "type": 1,
+      "value": "member"
+    },
+    {
+      "type": 0,
+      "value": " and "
+    },
+    {
+      "type": 1,
+      "value": "guest"
+    },
+    {
+      "type": 0,
+      "value": " people, suspend or remove them, and create password reset links for them. It can also create channels and add or remove people in channels."
+    }
+  ],
+  "directory.role.confirmOwnerWarning": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " will have the same permissions as you. People with the "
+    },
+    {
+      "type": 1,
+      "value": "owner"
+    },
+    {
+      "type": 0,
+      "value": " role cannot change each other's roles or remove each other, so this cannot be undone."
+    }
+  ],
+  "directory.role.confirmPair": [
+    {
+      "type": 0,
+      "value": "Current role "
+    },
+    {
+      "type": 1,
+      "value": "from"
+    },
+    {
+      "type": 0,
+      "value": ", new role "
+    },
+    {
+      "type": 1,
+      "value": "to"
+    }
+  ],
+  "directory.role.confirmRevokeAdmin": [
+    {
+      "type": 0,
+      "value": "They will no longer be able to change the role of "
+    },
+    {
+      "type": 1,
+      "value": "member"
+    },
+    {
+      "type": 0,
+      "value": " and "
+    },
+    {
+      "type": 1,
+      "value": "guest"
+    },
+    {
+      "type": 0,
+      "value": " people, suspend or remove them, create password reset links, create channels, or add and remove people in channels."
+    }
+  ],
+  "directory.role.confirmTitle": [
+    {
+      "type": 0,
+      "value": "Change "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "'s role?"
+    }
+  ],
+  "directory.role.label": [
+    {
+      "type": 0,
+      "value": "Role"
+    }
+  ],
+  "directory.role.lockedAdminCeiling": [
+    {
+      "type": 0,
+      "value": "The "
+    },
+    {
+      "type": 1,
+      "value": "admin"
+    },
+    {
+      "type": 0,
+      "value": " role cannot change the role of someone who is "
+    },
+    {
+      "type": 1,
+      "value": "admin"
+    },
+    {
+      "type": 0,
+      "value": " or "
+    },
+    {
+      "type": 1,
+      "value": "owner"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "directory.role.lockedOwnerPeer": [
+    {
+      "type": 0,
+      "value": "People with the "
+    },
+    {
+      "type": 1,
+      "value": "owner"
+    },
+    {
+      "type": 0,
+      "value": " role cannot change each other's roles."
+    }
+  ],
+  "directory.role.placeholder": [
+    {
+      "type": 0,
+      "value": "Choose a role"
+    }
+  ],
   "expressions.add.adminsOnly": [
     {
       "type": 0,
