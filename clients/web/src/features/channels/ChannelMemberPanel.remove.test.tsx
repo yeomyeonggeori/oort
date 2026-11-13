@@ -269,6 +269,8 @@ describe("확인 단계 → 서버 → 줄과 영수증 (#5778)", () => {
 
     expect(byId("channel-member-remove-stage")).toBeNull();
     expect(rowOf(HANEUL)).toBeNull();
+    // 그 줄은 사라졌으니 초점은 목록 칸으로 간다(몸 밖으로 떨어지지 않는다).
+    expect(document.activeElement).toBe(byId("channel-member-list"));
     const receipt = byId("channel-member-removed")!;
     expect(receipt.getAttribute("role")).toBe("status");
     expect(receipt.textContent).toBe(KO["timeline.memberPanel.removed"].replace("{name}", "정하늘"));
@@ -299,12 +301,15 @@ describe("확인 단계 → 서버 → 줄과 영수증 (#5778)", () => {
     expect(api.removeChannelMember).not.toHaveBeenCalled();
   });
 
-  it("취소하면 단계가 내려가고 목록이 다시 보인다", async () => {
+  it("취소하면 단계가 내려가고 목록이 다시 보이며, 초점은 단계를 연 ⋯ 로 돌아온다", async () => {
     await mountOpen(SEOYEON);
     await openStageFor(HANEUL);
+    // 서면 초점이 안전한 쪽(취소)에 있다(§3.4).
+    expect(document.activeElement).toBe(byId("channel-member-remove-stage-cancel"));
     await press(byId("channel-member-remove-stage-cancel")!);
     expect(byId("channel-member-remove-stage")).toBeNull();
     expect(rowOf(HANEUL)).not.toBeNull();
+    expect(document.activeElement).toBe(rowOf(HANEUL)!.querySelector('[data-testid="channel-member-row-menu"]'));
     expect(api.removeChannelMember).not.toHaveBeenCalled();
   });
 });

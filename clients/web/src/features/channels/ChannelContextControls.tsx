@@ -282,6 +282,10 @@ function MemberRowMenu({
   formatMessage: Format;
 }) {
   const triggerRef = useRef<HTMLButtonElement | null>(null);
+  // 「채널에서 내보내기」를 고르면 확인 단계가 서고 그 단계가 초점을 「취소」로 옮긴다. 메뉴가 아직 떠 있는 동안 단계를 세우면
+  // 메뉴의 초점 가두기가 그 초점을 되돌리고, 닫히며 ⋯(단계 아래에 가려진 `invisible` 자리)로 돌려 초점이 몸 밖으로 떨어진다.
+  // 그래서 메뉴가 **다 닫힌 뒤에** 단계를 세우고, 그때는 ⋯ 로 되돌리지 않는다(패널의 「멤버 추가」가 패널을 먼저 닫는 것과 같은 이유).
+  const opensStage = useRef(false);
   const label = formatMessage("timeline.memberPanel.rowActions", { name: member.displayName });
   return (
     <DropdownMenu>
@@ -300,10 +304,20 @@ function MemberRowMenu({
           </Button>
         </DropdownMenuTrigger>
       </Tooltip>
-      <DropdownMenuContent align="end">
+      <DropdownMenuContent
+        align="end"
+        onCloseAutoFocus={(event) => {
+          if (!opensStage.current) return;
+          opensStage.current = false;
+          event.preventDefault();
+          onRemove(member, triggerRef.current);
+        }}
+      >
         <DropdownMenuItem
           tone="danger"
-          onSelect={() => onRemove(member, triggerRef.current)}
+          onSelect={() => {
+            opensStage.current = true;
+          }}
           data-testid="channel-member-remove"
         >
           <UserMinus aria-hidden="true" className="size-4 shrink-0" />
