@@ -583,15 +583,15 @@ const SURFACES: Record<SurfaceId, ServerSurface> = {
   },
   dmClosure: {
     id: "dmClosure",
-    label: "대화 닫기",
+    label: "목록에서 숨기기",
     // #4228(ADR-0177 증보 D6~D12, 엔진 #4227): DM 닫기를 서버가 기억해 한 기기에서 닫으면 모든 기기에서 닫힌다.
     // 이 칸은 **이 코드베이스의 서버가 경로를 싣는가**를 말한다(`githubNotifications` 와 같은 갈래). 서버가 아직 이것을
     // 싣지 않았는지는 두 겹으로 안다: ①`GET read-state` 의 모든 행에 `latest_readable_seq` 가 없다(`dmClosureProvided`,
     // 읽음 투영이 곧 탐지다 - 쓰기 없이, 첫 페인트 전에) ②닫기 경로가 404/405/501 이면 `serverSaysAbsent` 가 접는다.
     // 어느 쪽이든 클라이언트는 지금까지의 기기 로컬 원장(`sidebarDmClosure.ts`)으로 돌아간다.
     provided: true,
-    absentReason: "이 서버는 아직 닫은 대화를 기억하지 않아요.",
-    fallback: "이 기기에서만 대화를 닫아 둘 수 있어요.",
+    absentReason: "이 서버는 아직 숨긴 대화를 기억하지 않아요.",
+    fallback: "이 기기에서만 대화를 숨겨 둘 수 있어요.",
     measured:
       "2026-10-24 PR #4335(#4227) 소스 대조(runtime-unverified, track/uxui 에는 엔진이 없다): " +
       "server-rust/bins/momo-server/src/routes/dm_closure.rs가 PUT/DELETE …/channels/{ch}/closure를 " +

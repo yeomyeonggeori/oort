@@ -24,8 +24,8 @@ import {composedUnreadCount} from '@momo/core/features/readState/model';
 // 된다(코어 `withClusterSeparators` 머리말).
 //
 //   - 별표·섹션 이동: 폰 UI 가 별도 판단이다(이슈 Out of scope).
-//   - 「대화 닫기」: 서버가 기억하는 닫기(#4227/#4228)를 쓴다. 폰 사이드바가 코어 `dmVisibility` 로 DM 을 거르므로(#4367,
-//     `dmVerdicts.ts`) 닫은 DM 은 목록에서 사라지고 「⋯ › 닫은 대화」 시트에서 돌아온다. 항목을 **내미는가**는 코어
+//   - 「목록에서 숨기기」: 서버가 기억하는 닫기(#4227/#4228)를 쓴다. 폰 사이드바가 코어 `dmVisibility` 로 DM 을 거르므로(#4367,
+//     `dmVerdicts.ts`) 닫은 DM 은 목록에서 사라지고 「⋯ › 숨긴 대화」 시트에서 돌아온다. 항목을 **내미는가**는 코어
 //     `dmCloseOffered`(웹 호버 X·행 메뉴와 같은 한 함수) 한 곳이 정하고, 이 파일은 그 답(`closeOffered`)을 `canCloseDm`
 //     으로 넘길 뿐이다. 서버가 닫기를 싣지 않는 서버에서는 내밀지 않는다. **폰에 기기 로컬 닫기를 새로 만들지 않는다** - 기기마다
 //     어긋나던 문제를 되풀이한다.
@@ -56,7 +56,7 @@ export interface ChannelRowTarget {
   /** 서버 읽음 투영의 이 채널 항목. 없으면 읽음 처리·안 읽음 표시를 내놓지 않는다. */
   readState: ReadState | null;
   /**
-   * 「대화 닫기」를 내미는가. 호출부가 코어 `dmCloseOffered` 로 정하고(투영이 준비됐고·안 읽은 것이 없고·서버가 닫기를 싣는다),
+   * 「목록에서 숨기기」를 내미는가. 호출부가 코어 `dmCloseOffered` 로 정하고(투영이 준비됐고·안 읽은 것이 없고·서버가 닫기를 싣는다),
    * 생략하면 내밀지 않는다.
    */
   closeOffered?: boolean;
