@@ -561,8 +561,11 @@ export async function installBackend(context, { port, rows = history(), paged = 
 
 export const scrollerSelector = '[data-testid="chat-timeline"] [data-virtuoso-scroller]';
 
-/** DM 을 열고 기록 · 그림이 다 서고 바닥에 앉을 때까지 기다린다. `settle: false` 면 바닥으로 다시 놓지 않는다(진입 장면). */
-export async function openDm(page, backend, origin, { settle = true, minImages = 4 } = {}) {
+/**
+ * DM 을 열고 기록 · 그림이 다 서고 바닥에 앉을 때까지 기다린다. `settle: false` 면 바닥으로 다시 놓지 않는다(진입 장면).
+ * `minOverflow` 는 「기록이 다 그려졌다」로 칠 넘침(px)이다 — 줄이 적은 대화(#5717 작은 대화 진입)는 낮춰 준다.
+ */
+export async function openDm(page, backend, origin, { settle = true, minImages = 4, minOverflow = 200 } = {}) {
   await page.goto(origin, { waitUntil: "networkidle" });
   await advanceToAccount(page);
   await page.getByTestId("login-email").fill("haneul@example.test");
@@ -586,12 +589,12 @@ export async function openDm(page, backend, origin, { settle = true, minImages =
   }
   // 기록이 다 그려지고 그림이 다 서고 목록이 바닥에 앉을 때까지.
   await page.waitForFunction(
-    ({ selector, minImages }) => {
+    ({ selector, minImages, minOverflow }) => {
       const scroller = document.querySelector(selector);
-      if (!scroller || scroller.scrollHeight <= scroller.clientHeight + 200) return false;
+      if (!scroller || scroller.scrollHeight <= scroller.clientHeight + minOverflow) return false;
       return scroller.querySelectorAll("img.expression-image").length >= minImages;
     },
-    { selector: scrollerSelector, minImages },
+    { selector: scrollerSelector, minImages, minOverflow },
     { timeout: 15_000 }
   );
   if (settle) await settleToBottom(page);

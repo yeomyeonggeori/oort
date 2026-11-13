@@ -94,6 +94,7 @@ import { LoadFailureBox, LoadFailureLine } from "@/features/common/LoadFailureBo
 import { SystemLine } from "./SystemLine";
 import { isSystemLineMessage, startGroupAfterSystemLine } from "./systemLineRows";
 import { holdScrollPosition, virtualListHold, type ScrollHold } from "./scrollHold";
+import { PLACED_ATTRIBUTE, revealWhenPlaced, type EntryReveal } from "./entryReveal";
 import { JUMP_LATEST_SHOW_DELAY_MS } from "@/design/motion";
 import { chipsFor, type ReactionMap } from "@momo/core/features/timeline/reactions";
 import { isPinned, type PinMap } from "@momo/core/features/timeline/pins";
@@ -643,6 +644,8 @@ export function Timeline({
         // 끼면 목록이 두 목적지 사이에서 튄다.
         // 스크립트가 옮기는 스크롤이다: 휠 직후여도 사람의 손으로 치지 않게 자리 지키기에 알린다(#5649 검수 H1).
         holdRef.current?.expectScripted();
+        // 바닥이 목적지가 아니다: 진입 첫 그림을 기다리지 않고 지금 그린다(#5678 — 메시지 링크로 들어온 대화).
+        revealRef.current?.reveal("jump");
         ref.current?.scrollToIndex({ index, align: "center" });
         return true;
       },
@@ -826,6 +829,7 @@ export function Timeline({
   const jumpToLatest = useCallback(() => {
     const seq = newestSeqRef.current;
     holdRef.current?.expectScripted();
+    revealRef.current?.reveal("jump");
     ref.current?.scrollToIndex({
       index: "LAST",
       align: "end",
@@ -844,6 +848,7 @@ export function Timeline({
     // 실행 자체가 진입이다. IO가 늦어도 이 epoch에서 필을 다시 세우지 않는다.
     setUnreadJumpLatched(true);
     holdRef.current?.expectScripted();
+    revealRef.current?.reveal("jump");
     ref.current?.scrollToIndex({
       index,
       align: "start",
@@ -855,14 +860,30 @@ export function Timeline({
   // 창의 높이가 줄어도(DS2-6 #2718), 줄 높이가 바뀌어도(#5575) 바닥은 바닥이고, 위를 읽던 사람의 줄은
   // 제자리다. 이 목록 안에서는 브라우저 스크롤 앵커링이 돌지 않아(`timeline-scroller`) 그림 줄이 자라면 목록이 밀린다.
   // 판정·바로잡기의 규칙은 `scrollHold.ts`(스레드 답글 목록과 같은 모듈, 가상 목록용 규칙은 `virtualListHold`).
+  // 진입 첫 그림이 서기 전(`data-placed` 가 없을 때)은 지키지 않는다(#5717): 붙을 때의 맨 위 줄을 「보던 줄」로 적어 가상 목록이
+  // 바닥으로 간 것을 맨 위로 되돌렸다. 값은 보지 않는다 — 안전판(`timeout`) · 이동(`jump`)으로 보인 뒤에도 그때부터 지킨다.
   const holdRef = useRef<ScrollHold | null>(null);
   useEffect(() => {
     if (!scrollerEl) return;
-    const hold = holdScrollPosition(scrollerEl, virtualListHold(() => firstItemIndexRef.current));
+    const entering = () => !scrollerEl.hasAttribute(PLACED_ATTRIBUTE);
+    const hold = holdScrollPosition(scrollerEl, virtualListHold(() => firstItemIndexRef.current, entering));
     holdRef.current = hold;
     return () => {
       hold.stop();
       if (holdRef.current === hold) holdRef.current = null;
+    };
+  }, [scrollerEl]);
+
+  // 진입 첫 그림(#5678): 새로 선 스크롤 상자는 가장 새 줄이 바닥에 붙을 때까지 그리지 않는다(`entryReveal.ts`). 상자가 바뀌면(대화를
+  // 바꿔 목록이 다시 섬) 새 상자는 `data-placed` 없이 태어나 저절로 가려지고 여기서 다시 지켜본다.
+  const revealRef = useRef<EntryReveal | null>(null);
+  useEffect(() => {
+    if (!scrollerEl) return;
+    const reveal = revealWhenPlaced(scrollerEl, () => (itemsRef.current.length === 0 ? null : itemsRef.current.length - 1));
+    revealRef.current = reveal;
+    return () => {
+      reveal.stop();
+      if (revealRef.current === reveal) revealRef.current = null;
     };
   }, [scrollerEl]);
 
@@ -989,7 +1010,8 @@ export function Timeline({
         // `timeline-scroller` (#5638): 브라우저 스크롤 앵커링을 끈다. 스크롤 위치는 가상 목록과
         // `scrollHold` 한 길로만 움직이고, 앵커링이 있는 엔진(Chromium · macOS 27 WebKit)과 없는
         // 엔진(문서상 macOS 14~26 WebKit)이 같은 길을 탄다.
-        className="overscroll-contain h-full timeline-scroller"
+        // `data-placed` 가 없으면 보이지 않는다(#5678): 새로 선 목록은 가장 새 줄이 바닥에 붙은 뒤에 처음 그린다 — `entryReveal.ts`.
+        className="overscroll-contain h-full timeline-scroller [&:not([data-placed])]:invisible"
         data={items}
         itemSize={measureItem}
         components={TIMELINE_COMPONENTS}

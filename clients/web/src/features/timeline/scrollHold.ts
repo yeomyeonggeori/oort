@@ -92,14 +92,17 @@ const distanceToBottom = (scroller: HTMLElement) => scroller.scrollHeight - scro
  * 키보드로 내리는 스크롤(End · PageDown · 화살표 · 스페이스)은 `keydown` 이 휠 · 터치의 기억을 지워 스크립트 쪽으로 친다(예전과 같다 — 휠 직후에
  * 눌러도 그렇다, #5649 검수 2회차). 스크롤 막대 끌기도 가를 길이 없어 스크립트 쪽이다.
  */
-export function virtualListHold(firstItemIndex: () => number): ScrollHoldOptions {
+export function virtualListHold(firstItemIndex: () => number, entering: () => boolean = () => false): ScrollHoldOptions {
   return {
     rowAttribute: "data-index",
     contentBoxes: (scroller) => [scroller.firstElementChild, scroller.querySelector('[data-testid="virtuoso-item-list"]')],
     atBottom: (scroller) => distanceToBottom(scroller) <= AT_BOTTOM_SLACK_PX,
     coOwner: {
       prependToken: firstItemIndex,
-      ownsScroll: ({ sinceMs, direction, byHand }) => sinceMs <= SCROLLING_QUIET_MS && !(byHand && direction === "down"),
+      // `entering`(#5717): 새로 선 목록이 아직 자리 잡기 전이다(진입 첫 그림 — `entryReveal.ts`). 그 동안의 스크롤은 모두 목록의 몫이다:
+      // 목록은 맨 위부터 그린 뒤 스스로 바닥으로 가는데, 붙을 때 적은 맨 위 줄을 여기서 지키면 그 이동을 무른다(줄이 적어 그 줄이 DOM 에
+      // 남는 대화 — 메시지 약 9~25개 — 가 맨 위에서 열렸다). 기준은 계속 다시 적으므로 자리 잡은 뒤부터는 그 자리를 지킨다.
+      ownsScroll: ({ sinceMs, direction, byHand }) => entering() || (sinceMs <= SCROLLING_QUIET_MS && !(byHand && direction === "down")),
       settleFrames: 3,
     },
   };

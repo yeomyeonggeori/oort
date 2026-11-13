@@ -53,8 +53,11 @@ declare global {
   interface Window {
     __scrollHold: typeof import("./scrollHold");
     __lab: {
-      /** 상자를 새로 짓는다. `rows` 줄(각 50px), 상자 높이 400px. `hold` 가 거짓이면 손을 걸지 않는다(대조). */
-      build: (options: { kind: Kind; rows: number; hold: boolean }) => void;
+      /**
+       * 상자를 새로 짓는다. `rows` 줄(각 50px), 상자 높이 400px. `hold` 가 거짓이면 손을 걸지 않는다(대조). `entering` 이면 진입 첫 그림 전의
+       * 상자다(`data-placed` 없음 — `placed:<까닭>` 단계가 단다). 아니면 이미 자리 잡은 상자로 짓는다.
+       */
+      build: (options: { kind: Kind; rows: number; hold: boolean; entering?: boolean }) => void;
       token: number;
       frames: (count?: number) => Promise<void>;
       /**
@@ -99,7 +102,7 @@ function installLab() {
   const lab: Window["__lab"] = {
     token: 0,
     frames,
-    build: ({ kind, rows, hold: withHold }) => {
+    build: ({ kind, rows, hold: withHold, entering = false }) => {
       hold?.stop();
       hold = null;
       lab.token = 0;
@@ -149,8 +152,14 @@ function installLab() {
         }).observe(list);
       }
       if (!withHold) return;
+      // 진입 판정은 `Timeline.tsx` 와 같다: 상자에 `data-placed` 가 없으면 진입 중(값은 보지 않는다 — 안전판 `timeout` 도 자리 잡은 것).
+      const scroller = box;
+      if (!entering) scroller.setAttribute("data-placed", "bottom");
       const { holdScrollPosition, plainListHold, virtualListHold } = window.__scrollHold;
-      hold = holdScrollPosition(box, virtual ? virtualListHold(() => lab.token) : plainListHold(rowAttribute));
+      hold = holdScrollPosition(
+        scroller,
+        virtual ? virtualListHold(() => lab.token, () => !scroller.hasAttribute("data-placed")) : plainListHold(rowAttribute)
+      );
     },
     expectBottom: () => hold?.expectBottom(),
     expectScripted: (destination) => hold?.expectScripted(destination),
@@ -190,6 +199,7 @@ function installLab() {
             row.setAttribute(rowAttribute, `added${list.children.length}`);
             list.append(row);
           } else if (name === "wait") await new Promise((done) => setTimeout(done, amount));
+          else if (name === "placed") box.setAttribute("data-placed", value);
           else throw new Error(`모르는 단계: ${action}`);
         }
         await frames(2);
@@ -237,10 +247,10 @@ describe("scrollHold — 진짜 엔진의 배치 (#5649, Chromium)", () => {
   });
 
   /** 장면 하나: 상자를 짓고, 자리를 잡고, 단계를 돌린다. */
-  async function scene(options: { kind: Kind; rows?: number; hold: boolean; startTop: number | "bottom"; before?: string[]; steps: string[]; inFrame?: boolean }) {
-    return page.evaluate(async ({ kind, rows = 40, hold, startTop, before = [], steps, inFrame = false }) => {
+  async function scene(options: { kind: Kind; rows?: number; hold: boolean; entering?: boolean; startTop: number | "bottom"; before?: string[]; steps: string[]; inFrame?: boolean }) {
+    return page.evaluate(async ({ kind, rows = 40, hold, entering = false, startTop, before = [], steps, inFrame = false }) => {
       const lab = window.__lab;
-      lab.build({ kind, rows, hold });
+      lab.build({ kind, rows, hold, entering });
       const box = document.getElementById("box") as HTMLElement;
       box.scrollTop = startTop === "bottom" ? box.scrollHeight : startTop;
       // 처음 자리 잡는 스크롤이 「방금 한 사람의 스크롤」이 아니게 기다린다(가상 목록 규칙의 150ms 창).
@@ -403,5 +413,23 @@ describe("scrollHold — 진짜 엔진의 배치 (#5649, Chromium)", () => {
     // 모형이 정말 한 번 더 보정한다는 대조: 위로 올리는 프레임의 자람은 이 모듈이 손대지 않고 모형이 메운다(보던 줄은 스크롤한 만큼만).
     const upward = await scene({ kind: "virtualFixing", hold: true, startTop: 500, steps: ["scroll:-30+growAbove:120"] });
     expect(Math.abs(upward.moved - 30)).toBeLessThanOrEqual(1);
+  });
+
+  it.skipIf(!chromiumAvailable)("가상 목록 규칙: 진입 중(`data-placed` 전)에는 보던 줄을 붙잡지 않고, 자리 잡은 뒤에는(안전판으로 보인 뒤도) 붙잡는다 (#5717)", async () => {
+    // 가만히 위 밖 줄이 자란다: 진입 중이면 목록의 몫이라 손대지 않는다(120px 밀림), 자리 잡은 뒤면 지킨다.
+    const entering = await scene({ kind: "virtual", hold: true, entering: true, startTop: 500, steps: ["growAbove:120"] });
+    expect(entering.moved).toBe(120);
+    const placed = await scene({ kind: "virtual", hold: true, entering: true, startTop: 500, steps: ["placed:bottom", "growAbove:120"] });
+    expect(Math.abs(placed.moved)).toBeLessThanOrEqual(1);
+    const timedOut = await scene({ kind: "virtual", hold: true, entering: true, startTop: 500, steps: ["placed:timeout", "growAbove:120"] });
+    expect(Math.abs(timedOut.moved)).toBeLessThanOrEqual(1);
+    // 맨 위 진입의 길: 줄 12개(넘침 200px)가 맨 위(scrollTop 0)에서 붙고, 목록이 그리기 직전에 줄을 재고 바닥으로 간다(스크롤 이벤트는 다음
+    // 프레임 — 그 프레임의 ResizeObserver 가 먼저 돈다). 진입 중이면 바닥에 남는다.
+    const opening = await scene({ kind: "virtual", rows: 12, hold: true, entering: true, startTop: 0, steps: ["growLast:120+scrollToEnd:1"], inFrame: true });
+    expect(opening.gap).toBeLessThanOrEqual(1);
+    expect(opening.scrollTop).toBe(320);
+    // 대조: 자리 잡은 상자에서 같은 움직임은 붙을 때의 맨 위 줄을 지켜 맨 위로 되돌린다 — 수리 전 진입이 맨 위에서 열린 까닭이다.
+    const heldTop = await scene({ kind: "virtual", rows: 12, hold: true, startTop: 0, steps: ["growLast:120+scrollToEnd:1"], inFrame: true });
+    expect(heldTop.scrollTop).toBe(0);
   });
 });
