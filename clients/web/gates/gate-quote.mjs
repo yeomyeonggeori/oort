@@ -1157,7 +1157,8 @@ async function exercise(browser) {
   const profile = page.getByTestId("member-profile-dialog");
   await profile.waitFor();
   const profileText = (await profile.textContent()) ?? "";
-  for (const expected of ["이도현", "@dohyun", "사람", "활성", "멤버"]) {
+  // #5780: 「종류」·「상태」 줄은 없다 — 이름과 「@핸들 · 역할」이 그 사람을 말한다.
+  for (const expected of ["이도현", "@dohyun · 멤버"]) {
     if (!profileText.includes(expected)) {
       throw new Error(`the shared profile omitted ${expected}: ${profileText}`);
     }

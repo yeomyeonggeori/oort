@@ -27,6 +27,7 @@ import {UNKNOWN_AGENT_NAME} from '@momo/core/features/agents/turnCopy';
 import {isSurfaceProvided} from '@momo/core/features/capabilities/serverSurfaces';
 import type {ChannelActionKey} from '@momo/core/features/channels/actionModel';
 import {normalizeChannelTopic} from '@momo/core/features/channels/model';
+import {profileEmail} from '@momo/core/features/directory/model';
 import {dmCloseOffered} from '@momo/core/features/sidebar/dmVisibility';
 import {readProjectionPhase} from '@momo/core/features/sidebar/goneDm';
 import {composedUnreadCount} from '@momo/core/features/readState/model';
@@ -2699,6 +2700,8 @@ export default function ConversationScreen({
           dmError={profileDmError}
           status={profileStatus}
           nowMs={nowMs}
+          // 명부가 싣는 이메일(#5780). 게스트 시점에서는 가린다 — 웹 프로필 창과 같은 코어 판정이다.
+          email={profileEmail(memberFor(directory, member.id)?.role, profileMember) ?? undefined}
           onClose={closeMemberProfile}
           onOpenDm={() => openProfileDm(profileMember.id)}
           // 「에이전트 정보」·「설정 열기」 타일은 `closesSheet` 라 시트가 내려가며 `onClose`(= `closeMemberProfile`)를 먼저 부른다 — 여기서
