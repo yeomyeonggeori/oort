@@ -60,6 +60,8 @@ function readMap(): Record<string, string> {
 // 내려가고, 내려가는 대화는 결과를 모르는 전송을 남기며(`useTimeline` 정리 함수), 그 요청이 늦게 실패하면 또 남긴다. 이 파일의 쓰기가
 // 모두 `writeMap`을 지나므로 여기서 막는다. 지우기는 언제나 통한다. 닫는 것은 `closeFailedSendsForSignOut`, 여는 것은 `openFailedSendsForSession`.
 let closedForSignOut = false;
+/** 지금 세션의 사람(멤버 id, 소문자). 앞 사람의 요청이 다음 사람의 세션에서 늦게 실패해도 그 글은 남기지 않는다. */
+let openFor: string | null = null;
 
 function writeMap(map: FailedSendMap): void {
   const store = nonSecretStore();
@@ -90,6 +92,7 @@ export function rememberFailedSend(
   kind: SendFailureKind | null,
   nowMs: number = Date.now(),
 ): void {
+  if (openFor !== null && row.authorMemberId.toLowerCase() !== openFor) return;
   try {
     const key = keyOf(workspaceId, row.channelId, row.clientMsgId);
     if (containsSecretKey(row.body)) {
@@ -167,7 +170,18 @@ export function closeFailedSendsForSignOut(): void {
   clearAllFailedSends();
 }
 
-/** 세션이 섰다(로그인·복원). 보내지 못한 글을 다시 이 기기에 남긴다. */
-export function openFailedSendsForSession(): void {
+/** 세션이 섰다(로그인·복원). 이 사람의 보내지 못한 글을 다시 이 기기에 남기고, 다른 사람이 남긴 것은 지운다. */
+export function openFailedSendsForSession(memberId: string): void {
   closedForSignOut = false;
+  openFor = memberId.toLowerCase();
+  try {
+    const map = readMap();
+    const mine: Record<string, string> = {};
+    for (const [key, raw] of Object.entries(map)) {
+      if (parseFailedSend(raw)?.row.authorMemberId.toLowerCase() === openFor) mine[key] = raw;
+    }
+    if (Object.keys(mine).length !== Object.keys(map).length) writeMap(mine);
+  } catch {
+    // 읽을 때도 작성자로 거른다(`readFailedSends`).
+  }
 }
