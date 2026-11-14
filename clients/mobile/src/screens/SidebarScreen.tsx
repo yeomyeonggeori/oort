@@ -1,5 +1,6 @@
 import {ApiError, openDirectMessage, uuidEq} from '@momo/core/lib/api';
 import {NetworkError} from '@momo/core/lib/http';
+import {blend} from '@momo/core/design/scrim';
 import {attachParticle} from '@momo/core/lib/koreanParticle';
 import {serverSurface} from '@momo/core/features/capabilities/serverSurfaces';
 import {shellSpeaksFor} from '@momo/core/features/connection/shellStrip';
@@ -68,7 +69,7 @@ import {
   withApprovalWaits,
 } from '../features/agents/workingSignal';
 import {useWorkspaceApprovalWaits} from '../features/conversation/usePendingApprovals';
-import {StatusDot} from '../features/presence/StatusDot';
+import {FaceStatusDot} from '../features/presence/StatusDot';
 import {useCollapsedSections, visibleRows} from '../features/home/collapsedSections';
 import {
   buildWorkingCard,
@@ -1319,16 +1320,21 @@ function Row({
     lead = <View style={styles.faceBlank} />;
   }
   // 상태 점은 얼굴 모서리에 앉는다. 점이 있는 줄만 얼굴 크기의 상자로 감싸므로(점 없는 줄의 구조는 그대로다)
-  // 얼굴의 자리는 움직이지 않는다.
-  const face =
+  // 얼굴의 자리는 움직이지 않는다. 점의 고리(틈)는 줄이 서는 바탕 색이다(`homeRowGround`, #5786 r1 M3): 면색이면 바닥 위에서
+  // 흰 테로 보였다. 모양은 뜻으로 고른다(에이전트 경고 = 채운 원, r1 H2).
+  const face = (pressed: boolean) =>
     status === null ? (
       lead
     ) : (
       <View style={styles.face} testID="home-row-face">
         {lead}
-        <View style={styles.statusAnchor}>
-          <StatusDot tone={status.tone} testID="home-row-status-dot" />
-        </View>
+        <FaceStatusDot
+          face={HOME.rowFace}
+          tone={status.tone}
+          kind={row.isAgent ? 'agent' : 'human'}
+          ground={homeRowGround(palette, selected, pressed)}
+          testID="home-row-status-dot"
+        />
       </View>
     );
   return (
@@ -1356,31 +1362,49 @@ function Row({
         pressed && styles.rowPressed,
       ]}
       testID={`sidebar-row-${row.key}`}>
-      {face}
-      <View style={styles.rowName}>
-        <Text
-          style={[
-            styles.rowTitle,
-            emphasis.bold && styles.rowTitleUnread,
-            emphasis.dim && styles.rowTitleMuted,
-          ]}
-          numberOfLines={1}
-          ellipsizeMode="tail">
-          {row.title}
-        </Text>
-        {row.handle ? (
-          <Text style={styles.rowHandle} numberOfLines={1}>
-            {row.handle}
-          </Text>
-        ) : null}
-      </View>
-      {busy ? (
-        <ActivityIndicator color={palette.textMuted} testID="home-row-busy" />
-      ) : emphasis.chip !== null ? (
-        <RowChipView chip={emphasis.chip} />
-      ) : null}
+      {({pressed}) => (
+        <>
+          {face(pressed)}
+          <View style={styles.rowName}>
+            <Text
+              style={[
+                styles.rowTitle,
+                emphasis.bold && styles.rowTitleUnread,
+                emphasis.dim && styles.rowTitleMuted,
+              ]}
+              numberOfLines={1}
+              ellipsizeMode="tail">
+              {row.title}
+            </Text>
+            {row.handle ? (
+              <Text style={styles.rowHandle} numberOfLines={1}>
+                {row.handle}
+              </Text>
+            ) : null}
+          </View>
+          {busy ? (
+            <ActivityIndicator color={palette.textMuted} testID="home-row-busy" />
+          ) : emphasis.chip !== null ? (
+            <RowChipView chip={emphasis.chip} />
+          ) : null}
+        </>
+      )}
     </Pressable>
   );
+}
+
+/**
+ * 홈 줄의 점 고리 색 = 줄이 서는 바탕 (#5786 r1 M3). 쉬는 줄은 바닥(`bg`, 그라데이션의 가운데 정지점 — 위·아래 끝과는 1.06:1
+ * 이하), 눌린 줄은 눌림 면(`rowPressed`), 고른 줄은 바닥 위 유리(`rowSelected`, 반투명이라 바닥에 얹은 색). 고리는 얼굴을
+ * 가리는 틈이라 반투명이면 얼굴이 비친다 — 그래서 합성한 불투명 색이다.
+ */
+export function homeRowGround(color: Palette, selected: boolean, pressed: boolean): string {
+  if (pressed) return color.surfacePressed;
+  if (selected) {
+    const glassAlpha = color.glass.length === 9 ? parseInt(color.glass.slice(7, 9), 16) / 255 : 1;
+    return blend(color.glass.slice(0, 7), color.bg, glassAlpha);
+  }
+  return color.bg;
 }
 
 /** 칩마다의 testID. 키가 이름 붙은 숫자(`CHIP_TONE`)라 이 표에는 문자열 비교가 없다. */
@@ -1908,7 +1932,6 @@ const buildStyles = (color: Palette) => StyleSheet.create({
   },
   // 상태 점이 있는 줄의 얼굴 상자(점의 절대 위치 기준). 크기는 얼굴과 같다.
   face: {width: HOME.rowFace, height: HOME.rowFace},
-  statusAnchor: {position: 'absolute', right: -2, bottom: -2},
   agentSquare: {
     backgroundColor: color.agentSurface,
     alignItems: 'center',

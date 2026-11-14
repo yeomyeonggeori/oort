@@ -45,17 +45,32 @@ function sourcesIn(dir: string): string[] {
 }
 
 describe("채널 범위의 행위는 「추가」다 (#1573 예약 · #1584)", () => {
-  it("채널 만들기의 두 갈래가 같은 동사 가족으로 말한다", () => {
-    // 공개는 스스로 **들어오고**, 비공개는 누군가 **추가해야** 들어온다.
-    // 앞 문장은 「초대받은 멤버에게만 보입니다」였는데, 그 초대를 하는 문이
-    // 제품에 없다 — 채널에 사람을 넣는 문은 「멤버 추가」 다이얼로그뿐이다.
+  it("채널 만들기의 두 갈래가 같은 동사 가족으로, 지금 동작 그대로 말한다", () => {
+    // 비공개는 누군가 **추가해야** 들어온다. 앞 문장은 「초대받은 멤버에게만 보입니다」였는데,
+    // 그 초대를 하는 문이 제품에 없다 — 채널에 사람을 넣는 문은 「멤버 추가」 다이얼로그뿐이다.
+    // 공개도 지금은 같다(#5784): 「누구나 찾아서 들어올 수 있어요」라고 했지만 찾아보기·스스로
+    // 참여 길이 없다. 다른 점은 앞으로 워크스페이스에 들어오는 사람이 자동으로 들어온다는 것 하나다.
+    // 문장은 사전 키라(폰 「새 채널」과 같은 키) 소스의 키 이름을 읽고 한국어 사전의 값을 잰다.
     const source = readFileSync(join(HERE, "CreateChannelDialog.tsx"), "utf8");
-    const details = [...withoutProse(source).matchAll(/detail: "([^"]*)"/g)].map(
+    const keys = [...withoutProse(source).matchAll(/detailKey: "([^"]*)"/g)].map(
       (m) => m[1]
     );
-    expect(details, "채널 종류는 공개·비공개 둘이고 각각 한 줄을 갖는다").toHaveLength(2);
+    expect(keys, "채널 종류는 공개·비공개 둘이고 각각 한 줄을 갖는다").toEqual([
+      "timeline.createChannel.publicDetail",
+      "timeline.createChannel.privateDetail",
+    ]);
+    const catalog = JSON.parse(
+      readFileSync(
+        join(WEB_SRC, "..", "..", "..", "packages", "momo-core", "src", "i18n", "catalogs", "ko-KR", "timeline.json"),
+        "utf8"
+      )
+    ) as Record<string, string>;
+    const details = keys.map((key) => catalog[key]);
     for (const detail of details) expect(detail).not.toContain("초대");
-    expect(details[0]).toBe("워크스페이스의 누구나 찾아서 들어올 수 있어요.");
+    expect(details[0]).not.toContain("찾아서");
+    expect(details[0]).toBe(
+      "소유자나 관리자가 추가한 멤버가 들어와요. 앞으로 워크스페이스에 들어오는 사람은 자동으로 들어와요."
+    );
     expect(details[1]).toBe("추가된 멤버에게만 보여요.");
   });
 

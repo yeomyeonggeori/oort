@@ -1,19 +1,23 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useLocation } from "react-router-dom";
+import { Search } from "lucide-react";
 import type { RosterMember } from "@momo/core/lib/api";
 import { useSession } from "@/app/session";
 import { useOffline } from "@/features/common/useOffline";
 import { SidebarDrawerToggle } from "@/app/SidebarDrawerToggle";
 import { Input } from "@/design/ui/input";
 import { Button } from "@/design/ui/button";
+import { ListGroup, ListRowSkeleton } from "@/design/ui/list-row";
+import { useFormatMessage } from "@/i18n/useFormatMessage";
 import { EmptyInvite, InlineBanner } from "@/features/common/States";
 import { LoadFailureBox } from "@/features/common/LoadFailureBox";
 import { CONNECTION_KEYS } from "@momo/core/features/connection/copyKeys";
 import { causeOfFailure } from "@momo/core/features/connection/failure";
 import { deviceOnlineNow } from "@/lib/deviceOnline";
-import { useDirectory } from "@/features/workspace/useWorkspace";
-import { CONTENT_CLASS, MemberRow, ROW_CLASS } from "./MemberRow";
-import { countLabel, groupDirectory, hasOtherMembers } from "@momo/core/features/directory/model";
+import { memberFor, useDirectory } from "@/features/workspace/useWorkspace";
+import { MemberRow } from "./MemberRow";
+import { countLabel, hasOtherMembers } from "@momo/core/features/directory/model";
+import { canSearchByEmail, groupMemberList } from "./memberListModel";
 import { useOpenMemberProfile } from "./memberProfileContext";
 
 // =============================================================================
@@ -27,51 +31,41 @@ import { useOpenMemberProfile } from "./memberProfileContext";
 // route and a view, not another read of the same thing.
 // =============================================================================
 
-// The section label above 사람 / 에이전트. Named because the loading state below
-// has to reserve the same band it will occupy.
-const SECTION_HEADING_CLASS =
-  "border-b border-line px-4 py-1 text-meta font-medium text-ink-muted";
-
 /** A bar of dead space, in the neutral surface the other skeletons use. */
-const BAR_CLASS = "block rounded-sm bg-surface-hover";
+const BAR_CLASS = "inline-block rounded-sm bg-surface-hover align-middle";
 
 /**
- * The roster, before it arrives, in the shape it will arrive in.
+ * The roster, before it arrives, in the shape it will arrive in (#5782).
  *
- * The generic SkeletonRows was full-bleed 24px bars, so a 1600px window
- * predicted a 1328px-wide 24px row and then delivered a 640px-capped 41px one:
- * the list moved on BOTH axes at the moment of arrival, which is the jump a
- * skeleton exists to prevent (design-taste-web §5, loading is height-preserving
- * and never a light show). These placeholders are built from MemberRow's own
- * ROW_CLASS/CONTENT_CLASS, so the prediction cannot drift from the row, and the
- * band above them stands in for the 사람 heading that always precedes the first
- * row of a roster that has anyone in it.
+ * The placeholders are the shared list row's own skeleton inside the same group
+ * card, under a label band built from the label's own line box: the row height
+ * is the two line boxes (`text-body` + `text-meta`) and the 32 avatar circle in
+ * both, so the list does not move on either axis when the roster lands
+ * (design-taste-web §5, loading is height-preserving and never a light show).
+ * The old placeholder drew a 24 square beside rows whose avatar is 32.
  *
  * Person height is what is predicted, not agent height: the split between the
- * two is exactly what this client does not know yet, and 사람 is the section
- * that comes first.
+ * two is exactly what this client does not know yet, and 사람 is the group that
+ * comes first. Both kinds are two layers now, so the prediction holds for both.
  */
 function DirectorySkeleton({ rows = 6 }: { rows?: number }) {
   return (
     <div aria-hidden="true" data-testid="directory-skeleton">
-      <div className={SECTION_HEADING_CLASS}>
-        <span className={`${BAR_CLASS} h-4 w-8`} />
-      </div>
-      {Array.from({ length: rows }, (_, i) => (
-        <div key={i} className={ROW_CLASS} data-testid="skeleton-row">
-          <span className={CONTENT_CLASS}>
-            {/* Same size-6 square the shared Avatar draws. */}
-            <span className={`${BAR_CLASS} size-6 shrink-0`} />
-            <span className={`${BAR_CLASS} h-4 w-pane-sm`} />
-          </span>
-        </div>
-      ))}
+      <ListGroup
+        label={<span className={`${BAR_CLASS} h-2 w-8`} />}
+        testId="directory-skeleton-group"
+      >
+        {Array.from({ length: rows }, (_, i) => (
+          <ListRowSkeleton key={i} testId="skeleton-row" />
+        ))}
+      </ListGroup>
     </div>
   );
 }
 
 export function DirectoryRoute() {
   const { session, workspaceId } = useSession();
+  const t = useFormatMessage();
   const rosterQuery = useDirectory(workspaceId);
   const openMemberProfile = useOpenMemberProfile();
   const [query, setQuery] = useState("");
@@ -89,9 +83,12 @@ export function DirectoryRoute() {
     searchRef.current?.focus();
   }, [navKey]);
 
+  // 이 보는 사람의 역할(명부의 내 줄). 이메일을 보고 이메일로 찾는 것은 게스트가 아닐 때뿐이다(#5782).
+  const viewerRole = memberFor(rosterQuery.directory, session.member.id)?.role;
+  const byEmail = canSearchByEmail(viewerRole);
   const groups = useMemo(
-    () => groupDirectory(rosterQuery.directory.members, query),
-    [rosterQuery.directory.members, query]
+    () => groupMemberList(rosterQuery.directory.members, query, viewerRole),
+    [rosterQuery.directory.members, query, viewerRole]
   );
 
   // What this client knows about the roster, read once. The header and the list
@@ -149,25 +146,22 @@ export function DirectoryRoute() {
     [focusRow]
   );
 
-  function section(title: string, testId: string, members: RosterMember[]) {
+  function section(label: string, testId: string, members: RosterMember[]) {
     if (members.length === 0) return null;
     return (
-      <section className="flex flex-col" data-testid={testId}>
-        <h2 className={SECTION_HEADING_CLASS}>{title}</h2>
-        <ul className="flex flex-col">
-          {members.map((member) => (
-            <MemberRow
-              key={member.id}
-              member={member}
-              directory={rosterQuery.directory}
-              selfMemberId={session.member.id}
-              onOpenProfile={(target, opener) =>
-                openMemberProfile(target.id, opener)
-              }
-            />
-          ))}
-        </ul>
-      </section>
+      <ListGroup label={label} count={members.length} testId={testId}>
+        {members.map((member) => (
+          <MemberRow
+            key={member.id}
+            member={member}
+            directory={rosterQuery.directory}
+            selfMemberId={session.member.id}
+            onOpenProfile={(target, opener) =>
+              openMemberProfile(target.id, opener)
+            }
+          />
+        ))}
+      </ListGroup>
     );
   }
 
@@ -182,7 +176,7 @@ export function DirectoryRoute() {
         <div className="flex w-full items-center justify-between gap-3">
           <div className="flex min-w-0 items-center gap-2">
             <SidebarDrawerToggle />
-            <h1 className="text-body font-semibold">멤버</h1>
+            <h1 className="text-body font-semibold">{t("memberList.page.title")}</h1>
           </div>
           {/* Nothing at all while the roster is unknown: a header that counts to
               zero over a skeleton or over "명부를 불러오지 못했습니다" is the one
@@ -199,23 +193,37 @@ export function DirectoryRoute() {
         </div>
       </header>
 
-      <div className="border-b border-line px-4 py-2">
-        <Input
-          ref={searchRef}
-          type="search"
-          value={query}
-          onChange={(event) => setQuery(event.target.value)}
-          onKeyDown={onSearchKeyDown}
-          aria-label="멤버 검색"
-          placeholder="이름이나 핸들로 검색"
-          data-testid="directory-search"
-        />
+      {/* 검색 칸: 앞에 돋보기, 그릇은 공용 Input 그대로(입력 그릇의 `--line-strong`). 아이콘은 글자를 가리지
+          않게 칸 안쪽 여백(32)에 앉고 누름을 칸으로 흘린다. 폭은 줄 묶음과 같은 판 안이되 본문 판 한 칸
+          (`max-w-pane-md`)에서 멈춘다 — 화면 끝까지 늘어난 큰 칸이 옛 모양이었다(QA 13). */}
+      <div className="px-4 pb-2 pt-4">
+        <div className="relative max-w-pane-md">
+          <Search
+            aria-hidden="true"
+            className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-ink-muted"
+          />
+          <Input
+            ref={searchRef}
+            type="search"
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            onKeyDown={onSearchKeyDown}
+            aria-label={t("memberList.search.label")}
+            placeholder={t(
+              byEmail
+                ? "memberList.search.placeholder"
+                : "memberList.search.placeholderGuest"
+            )}
+            className="pl-8"
+            data-testid="directory-search"
+          />
+        </div>
       </div>
 
       {offline && (
         <InlineBanner
           tone="neutral"
-          message="연결 끊김, 재연결 중입니다. 명부는 마지막으로 받은 상태이고, 새 대화는 연결이 돌아온 뒤 열립니다."
+          message={t("memberList.state.offline")}
           testId="directory-offline"
         />
       )}
@@ -223,7 +231,7 @@ export function DirectoryRoute() {
       <div
         ref={listRef}
         onKeyDown={onListKeyDown}
-        className="min-h-0 flex-1 overflow-y-auto"
+        className="flex min-h-0 flex-1 flex-col gap-6 overflow-y-auto px-4 pb-6 pt-2"
         data-testid="directory-list"
       >
         {roster.pending && groups.total === 0 ? (
@@ -237,30 +245,33 @@ export function DirectoryRoute() {
           />
         ) : !hasOthers ? (
           <EmptyInvite
-            headline="이 워크스페이스에 아직 다른 멤버가 없습니다."
-            detail="초대 링크를 만들어 팀을 부르면 여기에 명부가 쌓이고, 각 행에서 프로필과 대화를 열 수 있습니다."
+            headline={t("memberList.empty.headline")}
+            detail={t("memberList.empty.detail")}
             actions={
               <Button size="sm" asChild>
-                <Link to="/settings?section=members">멤버 초대하기</Link>
+                <Link to="/settings?section=members">{t("memberList.empty.invite")}</Link>
               </Button>
             }
             testId="directory-empty"
           />
         ) : groups.matched === 0 ? (
           <EmptyInvite
-            headline="일치하는 멤버가 없습니다."
-            detail={`검색어 "${searched}"에 해당하는 이름이나 핸들이 없습니다. 다른 이름으로 검색하세요.`}
+            headline={t("memberList.noMatch.headline")}
+            detail={t(
+              byEmail ? "memberList.noMatch.detail" : "memberList.noMatch.detailGuest",
+              { query: searched }
+            )}
             actions={
               <Button variant="outline" size="sm" onClick={() => setQuery("")}>
-                검색 지우기
+                {t("memberList.noMatch.clear")}
               </Button>
             }
             testId="directory-no-match"
           />
         ) : (
           <>
-            {section("사람", "directory-people", groups.people)}
-            {section("에이전트", "directory-agents", groups.agents)}
+            {section(t("memberList.group.people"), "directory-people", groups.people)}
+            {section(t("memberList.group.agents"), "directory-agents", groups.agents)}
           </>
         )}
       </div>
