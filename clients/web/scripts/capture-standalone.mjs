@@ -433,7 +433,7 @@ async function captureSignedInShell(browser, { standalone, scheme = "light" }) {
   await context.route("**/v1/workspaces/*/channels", (route) =>
     json(route, { channels: CHANNELS })
   );
-  await context.route("**/v1/workspaces/*/roster", (route) =>
+  await context.route("**/v1/workspaces/*/roster*", (route) =>
     json(route, { members: [SESSION.member] })
   );
   // 포괄 목의 `{}`를 허들 파서가 "불러오지 못했습니다"로 읽는다. 없는 허들은

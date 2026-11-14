@@ -155,7 +155,7 @@ async function installMocks(context, v) {
   await context.route("**/v1/auth/realtime-token", (route) =>
     json(route, { token: "capture-only-not-a-credential", tokenType: "jwt", expiresAtMs: Date.now() + 60_000, ttlSeconds: 60, workspaceId: WORKSPACE_ID, memberId: ME }));
   await context.route("**/v1/workspaces/*/channels", (route) => json(route, { channels: CHANNELS }));
-  await context.route("**/v1/workspaces/*/roster", (route) => json(route, { members: roster(v.role ?? "member") }));
+  await context.route("**/v1/workspaces/*/roster*", (route) => json(route, { members: roster(v.role ?? "member") }));
   await context.route("**/v1/workspaces/*/read-state", (route) =>
     json(route, { read_states: [
       { channel_id: GENERAL_ID, last_read_seq: 1416, latest_seq: 1416, unread_count: 0, mention_count: 0 },

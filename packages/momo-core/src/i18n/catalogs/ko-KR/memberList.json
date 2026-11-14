@@ -5,6 +5,7 @@
   "memberList.search.placeholderGuest": "이름이나 핸들로 찾기",
   "memberList.group.people": "사람",
   "memberList.group.agents": "에이전트",
+  "memberList.group.suspended": "정지됨",
   "memberList.row.self": "나",
   "memberList.row.ownedBy": "{name} 님이 관리",
   "memberList.row.openProfile": "프로필 열기",

@@ -2031,7 +2031,7 @@ async function installMocks(context, { resetHarness = true } = {}) {
     }
     return json(route, own);
   });
-  await context.route("**/v1/workspaces/*/roster", (route) =>
+  await context.route("**/v1/workspaces/*/roster*", (route) =>
     json(route, {
       members: ROSTER.map((member) =>
         member.id === ME
@@ -7972,7 +7972,7 @@ async function captureScheme(browser, scheme) {
       ? route.fallback()
       : json(route, { channels: [] })
   );
-  await nonAdmin.route("**/v1/workspaces/*/roster", (route) =>
+  await nonAdmin.route("**/v1/workspaces/*/roster*", (route) =>
     json(route, {
       members: ROSTER.map((m) =>
         m.id === ME ? { ...m, role: "member" } : m
@@ -7993,7 +7993,7 @@ async function captureScheme(browser, scheme) {
   //       답하고, 성공 경로를 꺾어 403을 만드는 것은 억지 모킹이다. 그 문장은
   //       WorkspaceSection.test.tsx가 계약으로 붙잡는다.
   const memberSettings = await newScenePage();
-  await memberSettings.route("**/v1/workspaces/*/roster", (route) =>
+  await memberSettings.route("**/v1/workspaces/*/roster*", (route) =>
     json(route, {
       members: ROSTER.map((m) =>
         m.id === ME ? { ...m, role: "member" } : m
@@ -9468,7 +9468,7 @@ async function captureWelcomeKickoffScenes(browser, scheme) {
       reducedMotion,
     });
     await installMocks(context);
-    await context.route("**/v1/workspaces/*/roster", (route) =>
+    await context.route("**/v1/workspaces/*/roster*", (route) =>
       json(route, { members: welcomeRoster({ paused: Boolean(options.paused) }) })
     );
     await context.route("**/v1/workspaces/*/channels/*/messages*", (route) => {
@@ -10113,7 +10113,7 @@ async function captureAddMemberScenes(browser, scheme) {
         : route.fallback();
     });
     if (overrideRoster) {
-      await context.route("**/v1/workspaces/*/roster", overrideRoster);
+      await context.route("**/v1/workspaces/*/roster*", overrideRoster);
     }
 
     const page = await context.newPage();
@@ -11247,7 +11247,7 @@ async function captureAgentCredentialsScenes(browser, scheme) {
 
   const longNameRoster = async (context) => {
     await listWith(activeKim)(context);
-    await context.route("**/v1/workspaces/*/roster", (route) =>
+    await context.route("**/v1/workspaces/*/roster*", (route) =>
       json(route, {
         members: ROSTER.map((member) =>
           member.id === "019f9a01-0000-7000-8000-000000000404"

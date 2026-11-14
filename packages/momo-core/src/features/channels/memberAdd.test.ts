@@ -98,6 +98,24 @@ describe("channelMemberCandidates", () => {
   });
 });
 
+describe("정지된 사람은 채널 넣기 후보가 아니다 (#5781)", () => {
+  // 소유자·관리자의 명부는 정지된 사람도 싣는다(#5814). 서버의 채널 넣기는 활성 멤버만 받는다(정지는 404).
+  const SUSPENDED = member({ id: "00000000-0000-7000-8000-0000000007a1", displayName: "박서윤", handle: "seoyun", status: "suspended" });
+
+  it("후보 목록에 서지 않는다(사람·에이전트 어느 묶음에도, 수에도)", () => {
+    const groups = channelMemberCandidates([ME, MINSU, SUSPENDED, INTERN_AGENT], ME.id, "");
+    expect(groups.people.map((m) => m.id)).toEqual([MINSU.id]);
+    expect(groups.agents.map((m) => m.id)).toEqual([INTERN_AGENT.id]);
+    expect(groups.total).toBe(2);
+    expect(channelMemberCandidates([ME, SUSPENDED], ME.id, "seoyun").matched).toBe(0);
+  });
+
+  it("정지된 사람만 남았으면 넣을 사람이 없다", () => {
+    expect(hasAddableMembers([ME, SUSPENDED], CH, ME.id)).toBe(false);
+    expect(hasAddableMembers([ME, SUSPENDED, MINSU], CH, ME.id)).toBe(true);
+  });
+});
+
 describe("hasAddableMembers", () => {
   it("false when the only other members are already in the channel", () => {
     const minsuIn = member({ id: MINSU.id, channelIds: [CH] });

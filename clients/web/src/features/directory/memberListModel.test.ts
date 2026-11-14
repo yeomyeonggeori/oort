@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { RosterMember } from "@momo/core/lib/api";
-import { profileEmail } from "@momo/core/features/directory/model";
+import { countLabel, profileEmail } from "@momo/core/features/directory/model";
 import { canSearchByEmail, groupMemberList } from "./memberListModel";
 
 // #5782: who sees a member's email in the member tab, and who can find a member
@@ -83,5 +83,33 @@ describe("groupMemberList", () => {
     expect(groupMemberList(roster, "", "member")).toEqual(
       expect.objectContaining({ matched: 3, total: 3 })
     );
+  });
+});
+
+// #5781: 소유자·관리자의 명부는 정지된 사람도 싣는다(#5814). 멤버 탭은 그 사람을 활성 사람 사이에 섞지 않고 맨 아래
+// 「정지됨」 묶음에 세우고, 머리 수 「사람 N」은 활성 사람만 센다(서버 `humanCount` 와 같은 뜻).
+describe("groupMemberList: 정지됨 묶음 (#5781)", () => {
+  const suspended = row({ id: "a4", displayName: "박서윤", handle: "seoyun", status: "suspended" });
+  const second = row({ id: "a5", displayName: "강하늘", handle: "haneul", status: "suspended" });
+  const withSuspended = [seoyeon, suspended, dohyeon, hermes, second];
+
+  it("정지된 사람은 사람 묶음에 없고 정지됨 묶음에 이름 차례로 선다", () => {
+    const groups = groupMemberList(withSuspended, "", "owner");
+    expect(groups.people.map((m) => m.handle)).toEqual(["dohyeon", "seoyeon"]);
+    expect(groups.suspended.map((m) => m.handle)).toEqual(["haneul", "seoyun"]);
+    expect(groups.agents.map((m) => m.handle)).toEqual(["hermes"]);
+    expect(countLabel(groups, { pending: false, failed: false })).toBe("사람 2 · 에이전트 1");
+    expect(groups.total).toBe(5);
+  });
+
+  it("검색은 정지된 사람도 찾고(정지됨 묶음으로), 정지된 사람만 맞으면 찾지 못함이 아니다", () => {
+    const groups = groupMemberList(withSuspended, "seoyun", "admin");
+    expect(groups.people).toEqual([]);
+    expect(groups.suspended.map((m) => m.handle)).toEqual(["seoyun"]);
+    expect(groups.matched).toBe(1);
+  });
+
+  it("멤버 시점의 명부(활성만)에는 정지됨 묶음이 비어 있다", () => {
+    expect(groupMemberList(roster, "", "member").suspended).toEqual([]);
   });
 });
