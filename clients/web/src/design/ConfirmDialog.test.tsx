@@ -2,7 +2,7 @@
 import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
-import { ConfirmDialog, ConfirmStage } from "@/design/ui/confirm-dialog";
+import { CONFIRM_ARM_MS, ConfirmDialog, ConfirmStage } from "@/design/ui/confirm-dialog";
 
 // #5780 — 공용 확인 창의 계약: 초점은 취소로, 위험 확정은 위험 채움, 진행 중에는 한 번만·닫히지 않음,
 // 잠긴 까닭을 가리킴. 대화상자(처음 뜨는 창)와 단계(떠 있는 표면 안, §3.4)가 같은 몸이다.
@@ -119,6 +119,58 @@ describe("ConfirmStage", () => {
     );
     fireEvent.click(confirm);
     expect(onConfirm).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByTestId("c-cancel"));
+    expect(onCancel).toHaveBeenCalledTimes(1);
+  });
+});
+
+// #5781 · #5818 검수 High: 메뉴 줄·관리 줄을 누른 자리에 위험 확정 단추가 서면, 더블클릭·떨리는 손의 둘째 누름(250~400ms 뒤)이
+// 그대로 확정을 눌렀다. 확정은 선 뒤 `CONFIRM_ARM_MS` 동안 누름·Enter·Space 를 받지 않고, 취소는 처음부터 받는다.
+describe("확정의 첫 반 초 (#5781)", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it.each(["stage", "dialog"] as const)("%s: 서자마자·250·400 밀리초의 누름·Enter·Space 는 확정을 부르지 않고, 모양은 그대로이며, 시간이 지나면 받는다", (host) => {
+    vi.useFakeTimers();
+    const onConfirm = vi.fn();
+    const onCancel = vi.fn();
+    if (host === "stage") {
+      render(<ConfirmStage {...COPY} tone="destructive" onConfirm={onConfirm} onCancel={onCancel} />);
+    } else {
+      render(<DialogHarness onConfirm={onConfirm} />);
+    }
+    expect(CONFIRM_ARM_MS).toBe(500);
+    const confirm = screen.getByTestId("c-confirm");
+    const look = { className: confirm.className, disabled: confirm.getAttribute("aria-disabled") };
+    for (const at of [0, 250, 400]) {
+      act(() => {
+        vi.advanceTimersByTime(at === 0 ? 0 : at - (at === 400 ? 250 : 0));
+      });
+      fireEvent.pointerDown(confirm);
+      fireEvent.click(confirm);
+      const enter = fireEvent.keyDown(confirm, { key: "Enter" });
+      const space = fireEvent.keyUp(confirm, { key: " " });
+      expect(onConfirm).not.toHaveBeenCalled();
+      // Enter·Space 의 기본 동작(단추 누름)도 막는다.
+      expect(enter).toBe(false);
+      expect(space).toBe(false);
+      // 눈과 보조기술에는 평소 모양 그대로다(흐림·잠김 표시 없음).
+      expect({ className: confirm.className, disabled: confirm.getAttribute("aria-disabled") }).toEqual(look);
+    }
+    act(() => {
+      vi.advanceTimersByTime(CONFIRM_ARM_MS - 400);
+    });
+    expect(confirm.dataset.armed).toBe("true");
+    expect(fireEvent.keyDown(confirm, { key: "Enter" })).toBe(true);
+    fireEvent.click(confirm);
+    expect(onConfirm).toHaveBeenCalledTimes(1);
+  });
+
+  it("취소는 처음부터 받는다", () => {
+    vi.useFakeTimers();
+    const onCancel = vi.fn();
+    render(<ConfirmStage {...COPY} tone="destructive" onConfirm={() => {}} onCancel={onCancel} />);
     fireEvent.click(screen.getByTestId("c-cancel"));
     expect(onCancel).toHaveBeenCalledTimes(1);
   });

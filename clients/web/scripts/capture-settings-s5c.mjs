@@ -339,12 +339,13 @@ const DIALOGS = [
     scope: "[data-testid=add-workspace-dialog]",
     verify: async (page, tag) => {
       const t = await page.getByTestId("add-workspace-dialog").innerText();
-      check(`${tag} 안내가 해요체`, t.includes("초대 링크로 참여해요") && t.includes("사람이 읽는 이름이에요") && t.includes("하나뿐이어야 해요"), t);
+      // #5785: 첫 화면은 두 카드다(만들기 / 이미 있는 곳에 참여). 폼 문장은 만들기 걸음에 있다.
+      check(`${tag} 안내가 해요체`, t.includes("이미 있는 곳에 참여") && t.includes("서버 운영자만 만들 수 있어요") && !/습니다/.test(t), t);
     },
   },
   {
     name: "dialog-add-workspace-offline",
-    open: async (page, context) => { await opener(page, "add-workspace"); await page.getByTestId("add-workspace-dialog").waitFor({ timeout: 10_000 }); await goOffline(page, context); await page.getByTestId("add-workspace-offline").waitFor({ timeout: 10_000 }); },
+    open: async (page, context) => { await opener(page, "add-workspace"); await page.getByTestId("add-workspace-dialog").waitFor({ timeout: 10_000 }); await page.getByTestId("add-workspace-choose-create").click(); await goOffline(page, context); await page.getByTestId("add-workspace-offline").waitFor({ timeout: 10_000 }); },
     scope: "[data-testid=add-workspace-dialog]",
     verify: async (page, tag) => check(`${tag} 오프라인 문장`, (await page.getByTestId("add-workspace-offline").innerText()).includes("연결이 끊겼어요. 워크스페이스 만들기는 다시 연결된 뒤에 할 수 있어요.")),
   },
@@ -353,19 +354,21 @@ const DIALOGS = [
     open: async (page) => {
       await opener(page, "add-workspace");
       await page.getByTestId("add-workspace-dialog").waitFor({ timeout: 10_000 });
+      await page.getByTestId("add-workspace-choose-create").click();
       await page.getByTestId("add-workspace-name").fill("새 팀");
       await page.getByTestId("add-workspace-slug").fill("new-team");
       await page.getByTestId("add-workspace-submit").click();
       await waitText(page, "add-workspace-dialog", "운영자만 만들 수 있어요");
     },
     scope: "[data-testid=add-workspace-dialog]",
-    verify: async (page, tag) => check(`${tag} 운영자 안내 두 문장`, (await page.getByTestId("operator-notice").innerText()).includes("받은 초대 링크로 참여할 수 있어요")),
+    verify: async (page, tag) => check(`${tag} 운영자 안내 두 문장`, (await page.getByTestId("operator-notice").innerText()).includes("「이미 있는 곳에 참여」로 들어갈 수 있어요")),
   },
   {
     name: "dialog-add-workspace-created",
     open: async (page) => {
       await opener(page, "add-workspace");
       await page.getByTestId("add-workspace-dialog").waitFor({ timeout: 10_000 });
+      await page.getByTestId("add-workspace-choose-create").click();
       await page.getByTestId("add-workspace-name").fill("새 팀");
       await page.getByTestId("add-workspace-slug").fill("new-team");
       await page.getByTestId("add-workspace-submit").click();

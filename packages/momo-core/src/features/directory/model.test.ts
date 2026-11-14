@@ -4,6 +4,10 @@ import { NetworkError } from "../../lib/http";
 import {
   assignableWorkspaceRoles,
   canChangeWorkspaceRole,
+  canManageWorkspaceMembership,
+  canRemoveWorkspaceMember,
+  memberLifecycleFailure,
+  suspensionAction,
   canIssuePasswordReset,
   canSeeMemberManagement,
   profileEmail,
@@ -206,6 +210,82 @@ describe("assignableWorkspaceRoles", () => {
   it("역할을 모르는 대상은 소유자에게만 열린다(관리자에게 모름이 열림이 되지 않는다)", () => {
     expect(assignableWorkspaceRoles("owner", VIEWER_ID, target(undefined))).toEqual(ALL);
     expect(assignableWorkspaceRoles("admin", VIEWER_ID, target(undefined))).toEqual([]);
+  });
+});
+
+// #5781: 정지·내보내기 줄은 서버 사다리(`workspace_authorization.rs` 의 `can_suspend`·`can_remove` 와
+// `lifecycle_ladders_match_swift_require_can_manage`)의 거울이다. 표는 서버 시험의 칸과 같다.
+describe("canManageWorkspaceMembership · suspensionAction · canRemoveWorkspaceMember", () => {
+  const VIEWER_ID = "00000000-0000-7000-8000-0000000000a1";
+  const TARGET_ID = "00000000-0000-7000-8000-0000000000b2";
+  const target = (role: RosterMember["role"], over: Partial<RosterMember> = {}) =>
+    member({ id: TARGET_ID, role, status: "active", ...over });
+  type Role = "owner" | "admin" | "member" | "guest";
+  const LADDER: ReadonlyArray<readonly [Role, Role, boolean]> = [
+    ["owner", "owner", false],
+    ["owner", "admin", true],
+    ["owner", "member", true],
+    ["owner", "guest", true],
+    ["admin", "owner", false],
+    ["admin", "admin", false],
+    ["admin", "member", true],
+    ["admin", "guest", true],
+    ["member", "owner", false],
+    ["member", "admin", false],
+    ["member", "member", false],
+    ["member", "guest", false],
+    ["guest", "owner", false],
+    ["guest", "admin", false],
+    ["guest", "member", false],
+    ["guest", "guest", false],
+  ];
+
+  it.each(LADDER)("%s 가 활성 %s 를 보면 %s", (viewer, targetRole, allowed) => {
+    expect(canManageWorkspaceMembership(viewer, VIEWER_ID, target(targetRole))).toBe(allowed);
+    expect(suspensionAction(viewer, VIEWER_ID, target(targetRole))).toBe(allowed ? "suspend" : null);
+    expect(canRemoveWorkspaceMember(viewer, VIEWER_ID, target(targetRole))).toBe(allowed);
+  });
+
+  it("정지된 멤버에게는 「정지 풀기」, 초대 대기·삭제된 멤버에게는 줄이 없다", () => {
+    expect(suspensionAction("owner", VIEWER_ID, target("member", { status: "suspended" }))).toBe("reinstate");
+    expect(canRemoveWorkspaceMember("owner", VIEWER_ID, target("member", { status: "suspended" }))).toBe(true);
+    for (const status of ["invited", "deleted"] as const) {
+      expect(suspensionAction("owner", VIEWER_ID, target("member", { status }))).toBeNull();
+      expect(canRemoveWorkspaceMember("owner", VIEWER_ID, target("member", { status }))).toBe(false);
+    }
+    // 정지된 소유자·관리자도 서열이 먼저다: 관리자는 정지된 관리자를 풀지 못한다.
+    expect(suspensionAction("admin", VIEWER_ID, target("admin", { status: "suspended" }))).toBeNull();
+  });
+
+  it("자기 자신·에이전트·역할 모르는 대상·역할 모르는 보는 사람에게는 열리지 않는다", () => {
+    expect(canManageWorkspaceMembership("owner", TARGET_ID, target("member"))).toBe(false);
+    expect(canManageWorkspaceMembership("owner", TARGET_ID.toUpperCase(), target("member"))).toBe(false);
+    expect(canManageWorkspaceMembership("owner", VIEWER_ID, target("member", { kind: "agent" }))).toBe(false);
+    expect(canManageWorkspaceMembership("owner", VIEWER_ID, target(undefined))).toBe(false);
+    expect(canManageWorkspaceMembership(undefined, VIEWER_ID, target("guest"))).toBe(false);
+  });
+});
+
+describe("memberLifecycleFailure", () => {
+  // 문장은 서버 `MembershipLifecycleError::as_swift_message` 그대로다.
+  it.each([
+    [409, "member status must be active", "notActive"],
+    [409, "member status must be suspended", "notSuspended"],
+    [409, "workspace must retain at least one owner", "lastOwner"],
+    [403, "cannot manage an equal or higher role", "rank"],
+    [403, "members cannot manage themselves", "self"],
+    [403, "workspace admin required", "forbidden"],
+    [403, "membership management requires a human member", "forbidden"],
+    [404, "workspace member not found", "notFound"],
+    [429, "slow down", "rateLimited"],
+    [500, "boom", "unknown"],
+  ] as const)("%i %s → %s", (status, wire, kind) => {
+    expect(memberLifecycleFailure(new ApiError(status, wire))).toBe(kind);
+  });
+
+  it("전송이 닿지 않으면 network, 모르는 것은 unknown", () => {
+    expect(memberLifecycleFailure(new NetworkError("unreachable", 15_000))).toBe("network");
+    expect(memberLifecycleFailure(new Error("x"))).toBe("unknown");
   });
 });
 

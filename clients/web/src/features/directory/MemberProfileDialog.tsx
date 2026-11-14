@@ -8,10 +8,11 @@ import {
   type RefObject,
 } from "react";
 import { ArrowRight, AtSign, Check, Copy, Mail, MessageSquare, SlidersHorizontal, UserRound, X } from "lucide-react";
-import type { RosterMember } from "@momo/core/lib/api";
+import { uuidEq, type RosterMember, type WorkspaceMemberLifecycle } from "@momo/core/lib/api";
 import {
   assignableWorkspaceRoles,
   canIssuePasswordReset,
+  canRemoveWorkspaceMember,
   canSeeMemberManagement,
   dmAvailability,
   profileEmail,
@@ -19,11 +20,15 @@ import {
   roleKeyLabel,
   roleLabel,
   statusLabel,
+  suspensionAction,
   workspaceRoleLock,
+  type MemberLifecycleAction,
+  type MemberLifecycleFailure,
   type RoleKey,
   type RoleLabels,
+  type SuspensionAction,
 } from "@momo/core/features/directory/model";
-import type { MessageService } from "@momo/core/i18n";
+import type { MessageKey, MessageService } from "@momo/core/i18n";
 import { AvatarWithPresence } from "@/features/presence/HumanPresence";
 import { useHumanPresenceDot } from "@/features/presence/useHumanPresenceDot";
 import { useSession } from "@/app/session";
@@ -67,6 +72,7 @@ import {
   useChangeWorkspaceRole,
   type ChangeWorkspaceRoleHandle,
 } from "./useChangeWorkspaceRole";
+import { useMemberLifecycle, type MemberLifecycleHandle } from "./useMemberLifecycle";
 import { useOpenDm } from "./useOpenDm";
 import {
   OpenMemberProfileContext,
@@ -85,7 +91,7 @@ import { memberProfileViewState } from "./memberProfileModel";
 //   큰 얼굴(점) · 이름 [정지됨·초대됨 칩] · 「@핸들 · 역할」 · 접속 낱말·한 줄 상태
 //   → 행동(메시지 보내기 · 멘션 복사 · 에이전트면 라우팅 설정)
 //   → 정보(이메일 + 복사 · 에이전트면 책임자)
-//   → 관리(역할 · 비밀번호 재설정 링크 — 소유자·관리자에게만. 정지·내보내기 줄(#5781)이 이 묶음에 더해진다)
+//   → 관리(역할 · 비밀번호 재설정 링크 · 정지(정지된 멤버면 정지 풀기) · 워크스페이스에서 내보내기 — 소유자·관리자에게만)
 //
 // 옛 창의 「종류」·「상태」 키-값 줄은 없다: 종류는 얼굴 모양·이름 색·「@핸들 · 에이전트」가 말하고, 상태는 대부분 「활성」이라
 // 말할 가치가 없어(`statusLabel`) 활성이 아닐 때만 이름 옆 칩이다. 옛 창의 선 넷(머리 아래·목록 위아래·바닥 위)도 없다 —
@@ -94,11 +100,29 @@ import { memberProfileViewState } from "./memberProfileModel";
 //
 // ## 역할 바꾸기
 //
-// 줄 안 고르개(`ListboxSelect variant="inline"`)에서 고르면 **확인 단계**가 이 창의 본문 자리에 선다(`ConfirmStage`). 겹쳐 뜬
+// 줄 안 고르개(`ListboxSelect variant="inline"`)에서 고르면 **확인 단계**가 큰 얼굴 아래 자리에 선다(`ConfirmStage`). 겹쳐 뜬
 // 두 번째 대화상자가 아닌 까닭은 디자인 시스템 §3.4(#4986): 표면 위에 표면을 세우면 뒤 스크림이 앞 표면 아래에 깔린다.
 // 비밀번호 재설정 단계(`PasswordResetStage`)와 같은 자리·같은 Esc 규칙이다. 확인 뒤 요청이 성공하면 고르개 옆에 「바뀜」이
 // 1.6초 선다(`useInlineConfirm`) — 토스트는 이 앱에 없다(README §4 오류 규칙, 스킬 §8). 소유자로 올릴 때는 되돌릴 수 없다는
 // 경고와 위험 단추를 거친다. 고르개의 선택지는 서버 사다리의 거울이다(코어 `assignableWorkspaceRoles`).
+//
+// ## 정지 · 정지 풀기 · 워크스페이스에서 내보내기 (#5781)
+//
+// 관리 묶음의 맨 아래 두 줄. 줄이 서는 조건은 서버 사다리의 거울이다(코어 `suspensionAction`·`canRemoveWorkspaceMember`:
+// 자기보다 낮은 역할만 · 자기 자신 불가 · 소유자는 누구의 대상도 아님). 누르면 역할 바꾸기와 같은 확인 단계가 서고(위험 변형,
+// 요청이 나간 뒤 취소 잠김), 확인 문장은 서버가 실제로 하는 일을 말한다(`directory.lifecycle.*`).
+//
+// 소유자·관리자의 명부는 정지된 사람도 `status: "suspended"` 로 싣는다(#5814): 정지한 뒤 창을 닫아도 멤버 탭의 「정지됨」에서
+// 다시 열어 풀 수 있다. 정지·풀기가 성공하면 새 상태가 명부 캐시에 바로 들어가 창과 멤버 탭이 같은 값을 본다
+// (`useMemberLifecycle`). 내보낸 사람은 명부에서 빠지므로 창이 결과로 붙든다(`held`): 결과 한 줄과 「닫기」다.
+//
+// ## 단계의 자리 (#5780 검수 r2 N2, #5781 검수 r1 M1)
+//
+// 역할 확인·정지·내보내기 단계는 큰 얼굴 묶음을 제자리에 남기고 **그 아래 자리만** 덮어 선다. 아래 자리의 본문은 떼지 않고
+// 자리만 지키므로(`invisible`) 창의 위·폭·높이가 그대로이고, 대상은 큰 얼굴로 남는다. 비밀번호 재설정 단계만 **큰 얼굴까지**
+// 덮는다: 다섯 줄 안내 + 비밀번호 칸이 얼굴 아래 자리보다 길어 창이 118~190px 자라고 200%에서 「링크 만들기」가 접힌 아래에
+// 섰다(검수 r1 M1). 얼굴까지 덮으면 단계가 창 높이를 다 쓰고 안에서 굴러서 바닥 줄(취소·링크 만들기)이 늘 창 안이다.
+// 대상의 이름은 단계 설명 첫 줄이 말한다.
 //
 // 허들 행동은 없다: 허들은 채널 머리(`HuddleHeaderControl`)의 채널마다의 수명이고, 프로필에서 DM을 열며 곧장 허들을 거는
 // 길이 아직 없다(#5780 인계).
@@ -112,6 +136,41 @@ type Format = MessageService["formatMessage"];
 interface MemberProfileTarget {
   memberId: string;
   opener: HTMLElement | null;
+  /**
+   * 연 줄이 멤버 탭의 줄이면 닫을 때 초점을 돌릴 줄의 멤버 id 차례: 그 사람(정지되면 「정지됨」 묶음으로 옮겨 새 줄이 선다) →
+   * 열 때의 다음 줄 → 앞 줄. 연 줄이 그대로 있으면 쓰지 않는다.
+   */
+  neighbors: string[];
+}
+
+const DIRECTORY_ROW = "[data-directory-row]";
+
+/** 멤버 탭에서 연 줄 자신과 이웃(다음 줄이 먼저, 없으면 앞 줄)의 멤버 id. 다른 자리(채널·스레드·멘션)에서 열었으면 없다. */
+function openerNeighbors(opener: HTMLElement | null): string[] {
+  if (opener === null || !opener.matches(DIRECTORY_ROW)) return [];
+  const rows = Array.from(document.querySelectorAll<HTMLElement>(DIRECTORY_ROW));
+  const index = rows.indexOf(opener);
+  if (index < 0) return [];
+  return [opener, rows[index + 1], rows[index - 1]]
+    .map((row) => row?.dataset.memberId)
+    .filter((id): id is string => id !== undefined);
+}
+
+/** 연 줄이 사라진 뒤의 초점: 이웃 줄 → 멤버 탭 검색 칸. 둘 다 없으면 `false`(초점은 기본 동작). */
+function focusOpenerFallback(neighbors: string[]): boolean {
+  const rows = Array.from(document.querySelectorAll<HTMLElement>(DIRECTORY_ROW));
+  for (const id of neighbors) {
+    const row = rows.find((candidate) => candidate.dataset.memberId !== undefined && uuidEq(candidate.dataset.memberId, id));
+    if (row !== undefined) {
+      row.focus();
+      return true;
+    }
+  }
+  if (neighbors.length === 0) return false;
+  const search = document.querySelector<HTMLElement>('[data-testid="directory-search"]');
+  if (search === null) return false;
+  search.focus();
+  return true;
 }
 
 /** 역할 확인 단계. 고른 역할이 서 있으면 단계가 본문 자리를 갖는다. */
@@ -123,6 +182,42 @@ interface RoleStage {
   /** 요청이 성공한 뒤 단계를 내린다. */
   finish: () => void;
 }
+
+/** 정지·풀기·내보내기 확인 단계(#5781). 역할 단계와 같은 모양이다. */
+interface LifecycleStage {
+  pending: MemberLifecycleAction | null;
+  open: (action: MemberLifecycleAction) => void;
+  /** 취소 단추·Esc. 요청이 도는 동안에는 아무 일 없다(역할 단계와 같은 가드). */
+  cancel: () => void;
+  finish: () => void;
+}
+
+/**
+ * 창이 열린 동안 붙든 사람(#5781). 내보낸 사람은 명부에서 빠지므로 창이 결과 화면으로 붙든다(`removed`).
+ *
+ * 정지·풀기 뒤에도 붙들지만, 그때는 **명부에 그 사람이 없을 때만** 쓰인다: 정지된 사람을 싣지 않는 옛 서버(#5814 이전)에서
+ * 다시 읽은 명부가 그 사람을 빼도 창이 「명부에서 찾을 수 없음」으로 떨어지지 않게 하는 다리다. 명부에 그 사람이 있으면
+ * 명부 값이 이긴다(정지·풀기의 새 상태는 이미 명부 캐시에 들어가 있다).
+ */
+interface HeldMember {
+  member: RosterMember;
+  /** 이 창에서 내보냈다: 본문 대신 결과 한 줄과 「닫기」. */
+  removed: boolean;
+}
+
+/** 거절 종류 → 사전 키(#5781). 종류는 코어 `memberLifecycleFailure` 가 서버 상태 코드·문장으로 정한다. */
+const LIFECYCLE_ERROR_KEYS = {
+  notActive: "directory.lifecycle.errorNotActive",
+  notSuspended: "directory.lifecycle.errorNotSuspended",
+  lastOwner: "directory.lifecycle.errorLastOwner",
+  rank: "directory.lifecycle.errorRank",
+  self: "directory.lifecycle.errorSelf",
+  forbidden: "directory.lifecycle.errorForbidden",
+  notFound: "directory.lifecycle.errorNotFound",
+  rateLimited: "directory.lifecycle.errorRateLimited",
+  network: "directory.lifecycle.errorNetwork",
+  unknown: "directory.lifecycle.errorUnknown",
+} as const satisfies Record<MemberLifecycleFailure, MessageKey>;
 
 function ProfileSkeleton({ label }: { label: string }) {
   return (
@@ -155,7 +250,10 @@ function MembershipChip({ member }: { member: RosterMember }) {
   );
 }
 
-function ProfileHero({ member, t }: { member: RosterMember; t: Format }) {
+function ProfileHero({ member: shown, removed, t }: { member: RosterMember; removed: boolean; t: Format }) {
+  // 내보낸 사람은 이 워크스페이스에 더는 없다: 접속 점·낱말을 세우지 않는다(검수 r1 M5 — 코어 `humanPresenceDot` 은 활성이
+  // 아닌 사람에게 점이 없다). 칩은 세우지 않는다(「삭제됨」으로 말하지 않는다 — 결과 문장이 말한다).
+  const member: RosterMember = removed ? { ...shown, status: "deleted" } : shown;
   const { workspaceId } = useSession();
   const labels = useRoleLabels(workspaceId);
   const { visible: custom } = useCustomStatusView(member);
@@ -188,7 +286,7 @@ function ProfileHero({ member, t }: { member: RosterMember; t: Format }) {
           >
             {member.displayName}
           </p>
-          <MembershipChip member={member} />
+          {removed ? null : <MembershipChip member={member} />}
         </div>
         <p className="min-w-0 max-w-full break-all text-body text-ink-muted" data-testid="member-profile-handle">
           @{member.handle}
@@ -428,7 +526,7 @@ function RoleConfirm({
   offline: boolean;
   roleChange: ChangeWorkspaceRoleHandle;
   onCancel: () => void;
-  onDone: () => void;
+  onDone: (to: RoleKey) => void;
   t: Format;
 }) {
   const from = member.role;
@@ -446,18 +544,8 @@ function RoleConfirm({
         : null;
   return (
     <ConfirmStage
+      // 「누구의」 역할인지는 단계 위에 그대로 남은 큰 얼굴 묶음이 말한다(#5780 검수 r2 N2 — 단계 안의 작은 대상 줄은 없다).
       testId="member-profile-role-stage"
-      // 단계가 본문을 덮어도 「누구의」 역할인지가 남는다: 작은 얼굴 + 이름 + 핸들(#5780 검수 r1 M2).
-      className="flex-1"
-      subject={
-        <div className="flex min-w-0 items-center gap-2" data-testid="member-profile-role-stage-subject">
-          <ProfileAvatar member={member} size="row" />
-          <span className="flex min-w-0 flex-col">
-            <span className="truncate text-body font-semibold text-ink">{member.displayName}</span>
-            <span className="truncate text-meta text-ink-muted">@{member.handle}</span>
-          </span>
-        </div>
-      }
       title={t("directory.role.confirmTitle", { name: member.displayName })}
       description={
         <div className="flex flex-col gap-2">
@@ -489,10 +577,201 @@ function RoleConfirm({
       onCancel={onCancel}
       onConfirm={() => {
         void roleChange.apply(member, to).then((ok) => {
-          if (ok) onDone();
+          if (ok) onDone(to);
         });
       }}
     />
+  );
+}
+
+/**
+ * 관리 묶음 맨 아래의 정지(또는 정지 풀기)·내보내기 줄 (#5781). 줄 전체가 단추이고, 되돌리기 어려운 쪽(정지·내보내기)은
+ * 위험색이다. 정지 풀기는 막는 일이 아니라 여는 일이라 잉크색이다. 성공하면 정지 줄 오른쪽 끝에 그 자리 영수증이 선다
+ * (역할 줄의 「바뀜」과 같은 규칙 — 토스트는 이 앱에 없다).
+ */
+function LifecycleRows({
+  suspension,
+  removable,
+  offline,
+  receipt,
+  rowsRef,
+  onPick,
+  t,
+}: {
+  suspension: SuspensionAction | null;
+  removable: boolean;
+  offline: boolean;
+  receipt: SuspensionAction | null;
+  rowsRef: RefObject<HTMLDivElement>;
+  onPick: (action: MemberLifecycleAction) => void;
+  t: Format;
+}) {
+  // 줄 높이는 위의 역할 줄(고르개 32 + 위아래 8)과 같은 48: 글 한 줄(24) + 위아래 12. 전폭 행이라 눌림은 크기 변형(`press`)이
+  // 아니라 채움이다(ADR-0179 D5 · B4-3, `pressLedger.test.ts`).
+  const rowButton =
+    "flex min-h-control-lg w-full min-w-0 flex-1 items-center px-4 py-3 text-start text-body hover:bg-surface-hover active:bg-surface-pressed focus-visible:focus-ring disabled:opacity-50 disabled:hover:bg-transparent";
+  return (
+    <div ref={rowsRef} className="flex min-w-0 flex-col divide-y divide-line" data-testid="member-profile-lifecycle">
+      {suspension !== null ? (
+        <div className="flex min-w-0 items-center">
+          <button
+            type="button"
+            className={cn(rowButton, suspension === "suspend" ? "text-danger" : "text-ink", !removable && "rounded-b-lg")}
+            disabled={offline}
+            aria-describedby={offline ? OFFLINE_REASON_ID : undefined}
+            data-testid={suspension === "suspend" ? "member-profile-suspend" : "member-profile-reinstate"}
+            onClick={() => onPick(suspension)}
+          >
+            {suspension === "suspend" ? t("directory.lifecycle.suspend") : t("directory.lifecycle.reinstate")}
+          </button>
+          {/* 영수증 자리는 늘 서 있다(낭독 영역이 미리 등록된다). 줄 높이는 단추가 정하고, 글이 와도 줄 높이가 움직이지 않는다. */}
+          <span
+            role="status"
+            className={cn("inline-flex shrink-0 items-center gap-1 text-meta text-ink-muted", receipt !== null && "pe-4")}
+            data-testid="member-profile-lifecycle-receipt"
+          >
+            {receipt !== null ? (
+              <>
+                <Check aria-hidden="true" className="size-4" />
+                {receipt === "suspend"
+                  ? t("directory.lifecycle.suspendedReceipt")
+                  : t("directory.lifecycle.reinstatedReceipt")}
+              </>
+            ) : null}
+          </span>
+        </div>
+      ) : null}
+      {removable ? (
+        <button
+          type="button"
+          className={cn(rowButton, "rounded-b-lg text-danger")}
+          disabled={offline}
+          aria-describedby={offline ? OFFLINE_REASON_ID : undefined}
+          data-testid="member-profile-remove"
+          onClick={() => onPick("remove")}
+        >
+          {t("directory.lifecycle.remove")}
+        </button>
+      ) : null}
+    </div>
+  );
+}
+
+/**
+ * 정지·정지 풀기·내보내기 확인 단계 (#5781). 문장은 서버가 실제로 하는 일이다(`routes/member_lifecycle.rs`·
+ * `membership_lifecycle.rs`·`session_end.rs`·`join.rs` 를 읽고 맞췄다):
+ *
+ * - 정지: 모든 토큰·세션·푸시 등록이 끝나고(로그아웃, 폰 알림 멈춤), 정지된 동안 로그인은 403 이다. 글·채널 멤버십은 그대로다.
+ *   정지된 사람은 소유자·관리자의 명부에만 실린다(#5814): 그 둘에게는 글쓴이 이름이 그대로, 다른 사람에게는 「나간 멤버」다.
+ *   소유자·관리자는 멤버 탭의 「정지됨」에서 다시 열어 풀 수 있다.
+ * - 정지 풀기: 상태만 활성으로 돌린다(`credentials_restored: false`) — 다시 로그인해야 한다. 채널은 그대로다. 정지할 때 보류된
+ *   예약 메시지(`hold_member_schedules_in_tx`: `failed` + `sessions_ended`)는 풀어도 그대로라 저절로 나가지 않는다.
+ * - 내보내기: 모든 채널·DM 멤버십이 지워지고 세션이 끝나며 예약 메시지가 취소된다. 글은 남는다. 같은 이메일은 다시 들어오지 못한다
+ *   (`join.rs`: 지워진 계정의 주소는 409 `EmailUnavailable`) — 그래서 「되돌릴 수 없어요」다.
+ */
+function LifecycleConfirm({
+  member,
+  action,
+  labels,
+  offline,
+  lifecycle,
+  onCancel,
+  onApplied,
+  t,
+}: {
+  member: RosterMember;
+  action: MemberLifecycleAction;
+  labels: RoleLabels;
+  offline: boolean;
+  lifecycle: MemberLifecycleHandle;
+  onCancel: () => void;
+  onApplied: (result: WorkspaceMemberLifecycle) => void;
+  t: Format;
+}) {
+  const name = member.displayName;
+  // 정지된 사람은 소유자·관리자의 명부에만 실린다(#5814): 글쓴이 이름과 「정지됨」 묶음이 누구에게 보이는지를 역할 이름으로 말한다.
+  const viewers = { owner: roleKeyLabel("owner", labels), admin: roleKeyLabel("admin", labels) };
+  const lines =
+    action === "suspend"
+      ? [
+          t("directory.lifecycle.suspendSignOut"),
+          t("directory.lifecycle.suspendKeeps", viewers),
+          t("directory.lifecycle.suspendUndo", viewers),
+        ]
+      : action === "reinstate"
+        ? [t("directory.lifecycle.reinstateBody"), t("directory.lifecycle.reinstateSchedules")]
+        : [t("directory.lifecycle.removeLeaves"), t("directory.lifecycle.removeKeeps")];
+  // 사전 문장은 자기 인자만 받는다(남는 인자를 주면 문장 대신 「내용을 볼 수 없어요」가 선다): 소유자 이름은 그 문장에만.
+  const error =
+    lifecycle.failure === null
+      ? null
+      : lifecycle.failure === "lastOwner"
+        ? t(LIFECYCLE_ERROR_KEYS.lastOwner, { owner: roleKeyLabel("owner", labels) })
+        : t(LIFECYCLE_ERROR_KEYS[lifecycle.failure]);
+  return (
+    <ConfirmStage
+      testId="member-profile-lifecycle-stage"
+      title={
+        action === "suspend"
+          ? t("directory.lifecycle.suspendTitle", { name })
+          : action === "reinstate"
+            ? t("directory.lifecycle.reinstateTitle", { name })
+            : t("directory.lifecycle.removeTitle", { name })
+      }
+      description={
+        <div className="flex flex-col gap-2" data-testid="member-profile-lifecycle-lines">
+          {lines.map((line) => (
+            <p key={line} className="break-keep text-body text-ink-muted">
+              {line}
+            </p>
+          ))}
+        </div>
+      }
+      warning={action === "remove" ? t("directory.lifecycle.removeWarning") : undefined}
+      tone={action === "reinstate" ? "default" : "destructive"}
+      confirmLabel={
+        action === "suspend"
+          ? t("directory.lifecycle.suspend")
+          : action === "reinstate"
+            ? t("directory.lifecycle.reinstate")
+            : t("directory.lifecycle.removeAction")
+      }
+      busyLabel={
+        action === "suspend"
+          ? t("directory.lifecycle.suspendBusy")
+          : action === "reinstate"
+            ? t("directory.lifecycle.reinstateBusy")
+            : t("directory.lifecycle.removeBusy")
+      }
+      cancelLabel={t("directory.lifecycle.cancel")}
+      busy={lifecycle.pending}
+      error={error}
+      lockedReason={offline ? <BlockedReason frame="changeIt" /> : undefined}
+      onCancel={onCancel}
+      onConfirm={() => {
+        void lifecycle.run(member, action, onApplied);
+      }}
+    />
+  );
+}
+
+/** 이 창에서 내보낸 뒤(#5781): 결과 한 줄과 「닫기」. 그 사람은 명부에서 빠졌으므로 본문(행동·관리)은 서지 않는다. */
+function RemovedResult({ member, close, t }: { member: RosterMember; close: () => void; t: Format }) {
+  const closeRef = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    closeRef.current?.focus({ preventScroll: true });
+  }, []);
+  return (
+    <div className="flex min-w-0 flex-col gap-3 p-4" data-testid="member-profile-removed">
+      <p role="status" className="break-keep text-title font-semibold text-ink [overflow-wrap:anywhere]">
+        {t("directory.lifecycle.removedTitle", { name: member.displayName })}
+      </p>
+      <div className="flex justify-end pt-1">
+        <Button ref={closeRef} type="button" size="sm" className="tap-target" onClick={close} data-testid="member-profile-removed-close">
+          {t("directory.lifecycle.removedClose")}
+        </Button>
+      </div>
+    </div>
   );
 }
 
@@ -503,6 +782,10 @@ function ReadyProfile({
   reset,
   roleChange,
   roleStage,
+  lifecycle,
+  lifecycleStage,
+  held,
+  hold,
 }: {
   member: RosterMember;
   directory: Directory;
@@ -510,6 +793,11 @@ function ReadyProfile({
   reset: IssuePasswordResetHandle;
   roleChange: ChangeWorkspaceRoleHandle;
   roleStage: RoleStage;
+  lifecycle: MemberLifecycleHandle;
+  lifecycleStage: LifecycleStage;
+  /** 이 창이 붙든 사람(명부에서 빠진 뒤에도 보이는 값). 없으면 명부의 값이 그대로다. */
+  held: HeldMember | null;
+  hold: (next: HeldMember) => void;
 }) {
   const { session, workspaceId } = useSession();
   const messages = useMessages();
@@ -529,10 +817,19 @@ function ReadyProfile({
   // 「재설정 링크 만들기」(ADR-0215 D6, #4603). 서버 사다리의 거울이고 권위는 서버다.
   const canIssueReset = canIssuePasswordReset(viewerRole, session.member.id, member);
   const email = profileEmail(viewerRole, member);
+  // 정지·내보내기 줄(#5781). 서버 사다리의 거울이고 권위는 서버다.
+  const suspension = suspensionAction(viewerRole, session.member.id, member);
+  const removable = canRemoveWorkspaceMember(viewerRole, session.member.id, member);
+  const removed = held?.removed === true;
   const resetOpenRef = useRef<HTMLButtonElement | null>(null);
   const roleRowRef = useRef<HTMLDivElement>(null);
+  const lifecycleRowsRef = useRef<HTMLDivElement>(null);
+  const stageFrameRef = useRef<HTMLDivElement>(null);
   const receipt = useInlineConfirm();
+  const lifecycleReceipt = useInlineConfirm();
+  const [lifecycleDone, setLifecycleDone] = useState<SuspensionAction | null>(null);
   const wasStaged = useRef(false);
+  const wasLifecycleStaged = useRef(false);
   const mention = useClipboardCopy(`@${member.handle}`);
   const [mentionFailed, setMentionFailed] = useState(false);
   // 확인 단계를 취소하면 초점이 단계를 연 단추로 돌아온다(단추가 다시 그려진 뒤에).
@@ -552,6 +849,24 @@ function ReadyProfile({
       ?.querySelector<HTMLElement>('[data-testid="member-profile-role"], [data-testid="member-profile-role-text"]')
       ?.focus();
   }, [roleStage.pending]);
+  // 정지·풀기 단계가 내려가면(취소·Esc·성공) 초점이 정지 줄로 돌아온다(정지한 뒤에는 같은 자리의 「정지 풀기」). 내보내기를
+  // 취소하면 내보내기 줄로. 내보낸 뒤에는 결과의 「닫기」가 초점을 받는다(`RemovedResult`).
+  const lastLifecycle = useRef<MemberLifecycleAction | null>(null);
+  useEffect(() => {
+    if (lifecycleStage.pending !== null) {
+      wasLifecycleStaged.current = true;
+      lastLifecycle.current = lifecycleStage.pending;
+      return;
+    }
+    if (!wasLifecycleStaged.current) return;
+    wasLifecycleStaged.current = false;
+    if (removed) return;
+    const selector =
+      lastLifecycle.current === "remove"
+        ? '[data-testid="member-profile-remove"]'
+        : '[data-testid="member-profile-suspend"], [data-testid="member-profile-reinstate"]';
+    lifecycleRowsRef.current?.querySelector<HTMLElement>(selector)?.focus();
+  }, [lifecycleStage.pending, removed]);
   const availability = dmAvailability(member, session.member.id);
   const offline = useOffline();
   const opening = pendingMemberId === member.id;
@@ -568,13 +883,34 @@ function ReadyProfile({
         ? t("directory.profile.dmInactive", { status: availability.label })
         : null;
 
-  const finishRoleStage = () => {
+  const finishRoleStage = (to: RoleKey) => {
     roleStage.finish();
     roleChange.clearError();
     receipt.confirm();
+    // 붙든 사람(정지된 멤버 — 명부에 없다)의 역할은 다시 읽은 명부가 고쳐 주지 않는다: 붙든 값을 고친다.
+    if (held !== null) hold({ ...held, member: { ...held.member, role: to } });
   };
 
-  const stageUp = reset.phase !== PasswordResetPhase.Idle || roleStage.pending !== null;
+  // 정지·풀기·내보내기가 성공했다(#5781). 명부 캐시를 고친 뒤, 다시 읽기 전에 불린다(`useMemberLifecycle`): 단계를 내리고,
+  // 그 사람을 붙든다(정지·풀기는 명부에서 빠지는 옛 서버를 위한 다리, 내보내기는 결과 화면). 내보낸 사람은 상태를 바꾸지 않고
+  // 결과로 넘어간다.
+  const applyLifecycle = (action: MemberLifecycleAction, result: WorkspaceMemberLifecycle) => {
+    lifecycle.clearError();
+    if (action === "remove") {
+      hold({ member, removed: true });
+    } else {
+      hold({ member: { ...member, status: result.status }, removed: false });
+      setLifecycleDone(action);
+      lifecycleReceipt.confirm();
+    }
+    lifecycleStage.finish();
+  };
+
+  const stageUp =
+    reset.phase !== PasswordResetPhase.Idle ||
+    roleStage.pending !== null ||
+    lifecycleStage.pending !== null ||
+    removed;
   // 오프라인 사유 줄. 잠긴 단추들이 이 문장을 `aria-describedby` 로 가리키므로 한 번만 선다: 단계가 서 있으면 단계 위의 띠
   // (창 위 모서리를 따라 둥글게 — 창은 넘치는 것을 자르지 않는다), 프로필 본문이면 얼굴 아래·행동 위의 둥근 줄
   // (오른쪽 위 X 자리와 겹치지 않게, 그리고 잠긴 「메시지 보내기」 바로 위에서 까닭을 말하게).
@@ -589,16 +925,10 @@ function ReadyProfile({
     />
   );
 
-  const stage =
-    reset.phase !== PasswordResetPhase.Idle ? (
-      <PasswordResetStage
-        member={member}
-        reset={reset}
-        offline={offline}
-        offlineReasonId={offline ? OFFLINE_REASON_ID : undefined}
-        close={close}
-      />
-    ) : roleStage.pending !== null ? (
+  const lifecycleAction = lifecycleStage.pending;
+  const resetUp = reset.phase !== PasswordResetPhase.Idle;
+  // 얼굴 아래 자리만 덮는 단계(역할·정지·풀기·내보내기, 내보낸 결과). 재설정은 얼굴까지 덮는다(아래 `resetUp`).
+  const stage = resetUp ? null : roleStage.pending !== null ? (
       <RoleConfirm
         member={member}
         to={roleStage.pending}
@@ -609,156 +939,225 @@ function ReadyProfile({
         onDone={finishRoleStage}
         t={t}
       />
+    ) : lifecycleAction !== null ? (
+      <LifecycleConfirm
+        member={member}
+        action={lifecycleAction}
+        labels={labels}
+        offline={offline}
+        lifecycle={lifecycle}
+        onCancel={lifecycleStage.cancel}
+        onApplied={(result) => applyLifecycle(lifecycleAction, result)}
+        t={t}
+      />
+    ) : removed ? (
+      <RemovedResult member={member} close={close} t={t} />
     ) : null;
 
-  // 단계(역할 확인·비밀번호 재설정)는 본문을 **덮어** 선다(#5780 검수 r1 M2): 본문과 단계가 한 격자 칸에 겹치고, 본문은
-  // 단계가 서 있는 동안 자리만 지킨다(`invisible` — 보이지도, 초점이 닿지도, 보조기술에 읽히지도 않는다). 그래서 창 높이는
-  // 본문과 단계 중 큰 쪽이고, 단계가 서고 내려갈 때 창이 뛰지 않는다(전에는 548 → 157). 본문은 떼지 않으므로 스크롤 자리·
-  // 「바뀜」 낭독 자리도 그대로다.
+  // 단계가 서면 그 단계가 보이게 바깥 스크롤을 가장 적게 움직인다(좁은 창·200%에서 큰 얼굴 아래 단계가 접힌 아래에 서지 않게).
+  // 단계는 서는 순간 초점을 자기 안으로 가져가되 스크롤은 막는다(`ConfirmStage` 의 `preventScroll`) — 움직임은 여기 한 곳이다.
+  const stageKey =
+    roleStage.pending !== null
+      ? "role"
+      : lifecycleStage.pending !== null
+        ? "lifecycle"
+        : removed
+          ? "removed"
+          : null;
+  const underHero = stageUp && !resetUp;
+  useEffect(() => {
+    if (stageKey === null) return;
+    stageFrameRef.current?.firstElementChild?.scrollIntoView?.({ block: "nearest" });
+  }, [stageKey]);
+
+  // 역할 확인·정지·내보내기 단계는 큰 얼굴 묶음을 제자리에 남기고 **그 아래 자리만** 덮어 선다(#5780 검수 r2 N2): 아래 자리의
+  // 본문과 단계가 한 격자 칸에 겹치고, 본문은 단계가 서 있는 동안 자리만 지킨다(`invisible` — 보이지도, 초점이 닿지도,
+  // 보조기술에 읽히지도 않는다). 그래서 창 높이는 얼굴 + (본문과 단계 중 큰 쪽)이고, 단계가 서고 내려갈 때 창이 뛰지 않는다
+  // (r1 M2: 전에는 548 → 157). 본문은 떼지 않으므로 스크롤 자리·「바뀜」 낭독 자리도 그대로다. 단계의 내용과 단추는 한
+  // 덩어리로 얼굴 바로 아래에 선다(단추를 바닥에 떼어 두지 않는다 — r2 N2 의 빈 자리).
+  //
+  // 비밀번호 재설정 단계는 바깥 격자 칸에서 **얼굴을 포함한 스크롤 그릇 전체**와 겹친다(#5781 검수 r1 M1, #5780 r2 의 모양):
+  // 창 높이는 그대로이고, 단계는 그 높이 안에서 굴러 바닥 줄이 늘 창 안에 선다.
   return (
     <>
       {offline && stageUp ? offlineBanner("band") : null}
-      <div className="grid min-h-0 grid-cols-1 grid-rows-1" data-testid="member-profile-frame">
+      <div className="grid min-h-0 grid-cols-1 grid-rows-1" data-testid="member-profile-cover">
         <div
           className={cn(
             "col-start-1 row-start-1 flex min-h-0 flex-col gap-6 overflow-y-auto px-6 pb-6 pt-8",
-            stageUp && "invisible"
+            resetUp && "invisible"
           )}
-          aria-hidden={stageUp || undefined}
-          data-testid="member-profile-body"
+          aria-hidden={resetUp || undefined}
+          data-testid="member-profile-scroll"
         >
-          <ProfileHero member={member} t={t} />
+          <ProfileHero member={member} removed={removed} t={t} />
+          <div className="grid min-w-0 grid-cols-1 grid-rows-1" data-testid="member-profile-frame">
+            <div
+              className={cn("col-start-1 row-start-1 flex min-w-0 flex-col gap-6", underHero && "invisible")}
+              aria-hidden={underHero || undefined}
+              data-testid="member-profile-body"
+            >
+              {offline && !stageUp ? offlineBanner("inline") : null}
 
-          {offline && !stageUp ? offlineBanner("inline") : null}
+              <div className="flex flex-col items-center gap-2">
+                <div className="flex flex-wrap items-center justify-center gap-2" data-testid="member-profile-actions">
+                  {availability.kind === "ready" && (
+                    <Button
+                      type="button"
+                      autoFocus
+                      disabled={offline}
+                      aria-describedby={offline ? OFFLINE_REASON_ID : undefined}
+                      aria-busy={opening || undefined}
+                      data-testid="member-profile-dm"
+                      onClick={() => void startDm()}
+                    >
+                      <MessageSquare aria-hidden="true" />
+                      {opening ? t("directory.profile.messageBusy") : t("directory.profile.message")}
+                    </Button>
+                  )}
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    data-testid="member-profile-copy-mention"
+                    data-done={mention.copied ? "" : undefined}
+                    onClick={() =>
+                      void mention.copy().then((ok) => {
+                        setMentionFailed(!ok);
+                      })
+                    }
+                  >
+                    {mention.copied ? <Check aria-hidden="true" /> : <AtSign aria-hidden="true" />}
+                    {mention.copied ? t("directory.profile.copied") : t("directory.profile.copyMention")}
+                  </Button>
+                  {member.kind === "agent" && (
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      data-testid="member-profile-routing"
+                      onClick={(event) => {
+                        // WebKit does not focus a clicked button by default. Give the
+                        // nested routing dialog an explicit active opener for Esc return.
+                        event.currentTarget.focus();
+                        openAgentProfile(member.id);
+                      }}
+                    >
+                      <SlidersHorizontal aria-hidden="true" />
+                      {t("directory.profile.routing")}
+                    </Button>
+                  )}
+                </div>
+                {mentionFailed ? (
+                  <p role="alert" className="break-keep text-meta text-danger" data-testid="member-profile-copy-error">
+                    {t("directory.profile.copyFailed")}
+                  </p>
+                ) : null}
+                {dmUnavailable && (
+                  <p className="break-keep text-center text-meta text-ink-muted" data-testid="member-profile-dm-unavailable">
+                    {dmUnavailable}
+                  </p>
+                )}
+              </div>
 
-          <div className="flex flex-col items-center gap-2">
-            <div className="flex flex-wrap items-center justify-center gap-2" data-testid="member-profile-actions">
-              {availability.kind === "ready" && (
-                <Button
-                  type="button"
-                  autoFocus
-                  disabled={offline}
-                  aria-describedby={offline ? OFFLINE_REASON_ID : undefined}
-                  aria-busy={opening || undefined}
-                  data-testid="member-profile-dm"
-                  onClick={() => void startDm()}
-                >
-                  <MessageSquare aria-hidden="true" />
-                  {opening ? t("directory.profile.messageBusy") : t("directory.profile.message")}
-                </Button>
-              )}
-              <Button
-                type="button"
-                variant="secondary"
-                data-testid="member-profile-copy-mention"
-                data-done={mention.copied ? "" : undefined}
-                onClick={() =>
-                  void mention.copy().then((ok) => {
-                    setMentionFailed(!ok);
-                  })
-                }
-              >
-                {mention.copied ? <Check aria-hidden="true" /> : <AtSign aria-hidden="true" />}
-                {mention.copied ? t("directory.profile.copied") : t("directory.profile.copyMention")}
-              </Button>
-              {member.kind === "agent" && (
-                <Button
-                  type="button"
-                  variant="secondary"
-                  data-testid="member-profile-routing"
-                  onClick={(event) => {
-                    // WebKit does not focus a clicked button by default. Give the
-                    // nested routing dialog an explicit active opener for Esc return.
-                    event.currentTarget.focus();
-                    openAgentProfile(member.id);
-                  }}
-                >
-                  <SlidersHorizontal aria-hidden="true" />
-                  {t("directory.profile.routing")}
-                </Button>
-              )}
-            </div>
-            {mentionFailed ? (
-              <p role="alert" className="break-keep text-meta text-danger" data-testid="member-profile-copy-error">
-                {t("directory.profile.copyFailed")}
-              </p>
-            ) : null}
-            {dmUnavailable && (
-              <p className="break-keep text-center text-meta text-ink-muted" data-testid="member-profile-dm-unavailable">
-                {dmUnavailable}
-              </p>
-            )}
-          </div>
-
-          {error?.memberId === member.id && (
-            <InlineBanner
-              message={error.message}
-              actionLabel={t("directory.profile.retry")}
-              actionBusy={opening}
-              onAction={() => void startDm()}
-              separator={false}
-              testId="member-profile-dm-error"
-            />
-          )}
-
-          <InfoGroup member={member} email={email} owner={owner} t={t} />
-
-          {canManage && (
-            <ManageSection labels={labels} t={t}>
-              {(assignable.length > 0 || member.role !== undefined) && (
-                <RoleRow
-                  member={member}
-                  assignable={assignable}
-                  labels={labels}
-                  offline={offline}
-                  busy={roleChange.pending}
-                  receipt={receipt.confirmed}
-                  roleRowRef={roleRowRef}
-                  lockReason={
-                    lock === "ownerPeer"
-                      ? t("directory.role.lockedOwnerPeer", { owner: roleKeyLabel("owner", labels) })
-                      : lock === "adminCeiling"
-                        ? t("directory.role.lockedAdminCeiling", {
-                            admin: roleKeyLabel("admin", labels),
-                            owner: roleKeyLabel("owner", labels),
-                          })
-                        : null
-                  }
-                  onPick={(role) => {
-                    roleChange.clearError();
-                    roleStage.open(role);
-                  }}
-                  t={t}
+              {error?.memberId === member.id && (
+                <InlineBanner
+                  message={error.message}
+                  actionLabel={t("directory.profile.retry")}
+                  actionBusy={opening}
+                  onAction={() => void startDm()}
+                  separator={false}
+                  testId="member-profile-dm-error"
                 />
               )}
-              {canIssueReset && (
-                <div className={cn(ROW_CLASS, "flex-wrap justify-between")} data-testid="member-profile-reset-row">
-                  <div className="flex min-w-0 flex-1 flex-col">
-                    <span className="text-body text-ink">{t("recovery.issue.factTerm")}</span>
-                    <span className="break-keep text-meta text-ink-muted">{t("recovery.issue.entryHint")}</span>
-                  </div>
-                  <Button
-                    ref={resetOpenRef}
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    // 바탕(`bg-sheet`) 위의 보조 알약은 채움이 묻힌다(1.01): 시트 위 문법(면 + rest 그림자)으로 선다(스킬 §2).
-                    className="tap-target shrink-0 bg-surface shadow-sm"
-                    disabled={offline}
-                    aria-describedby={offline ? OFFLINE_REASON_ID : undefined}
-                    data-testid="member-profile-reset-open"
-                    onClick={reset.begin}
-                  >
-                    {t("recovery.issue.entryAction")}
-                  </Button>
-                </div>
+
+              <InfoGroup member={member} email={email} owner={owner} t={t} />
+
+              {canManage && (
+                <ManageSection labels={labels} t={t}>
+                  {(assignable.length > 0 || member.role !== undefined) && (
+                    <RoleRow
+                      member={member}
+                      assignable={assignable}
+                      labels={labels}
+                      offline={offline}
+                      busy={roleChange.pending}
+                      receipt={receipt.confirmed}
+                      roleRowRef={roleRowRef}
+                      lockReason={
+                        lock === "ownerPeer"
+                          ? t("directory.role.lockedOwnerPeer", { owner: roleKeyLabel("owner", labels) })
+                          : lock === "adminCeiling"
+                            ? t("directory.role.lockedAdminCeiling", {
+                                admin: roleKeyLabel("admin", labels),
+                                owner: roleKeyLabel("owner", labels),
+                              })
+                            : null
+                      }
+                      onPick={(role) => {
+                        roleChange.clearError();
+                        roleStage.open(role);
+                      }}
+                      t={t}
+                    />
+                  )}
+                  {canIssueReset && (
+                    <div className={cn(ROW_CLASS, "flex-wrap justify-between")} data-testid="member-profile-reset-row">
+                      <div className="flex min-w-0 flex-1 flex-col">
+                        <span className="text-body text-ink">{t("recovery.issue.factTerm")}</span>
+                        <span className="break-keep text-meta text-ink-muted">{t("recovery.issue.entryHint")}</span>
+                      </div>
+                      <Button
+                        ref={resetOpenRef}
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        // 바탕(`bg-sheet`) 위의 보조 알약은 채움이 묻힌다(1.01): 시트 위 문법(면 + rest 그림자)으로 선다(스킬 §2).
+                        className="tap-target shrink-0 bg-surface shadow-sm"
+                        disabled={offline}
+                        aria-describedby={offline ? OFFLINE_REASON_ID : undefined}
+                        data-testid="member-profile-reset-open"
+                        onClick={reset.begin}
+                      >
+                        {t("recovery.issue.entryAction")}
+                      </Button>
+                    </div>
+                  )}
+                  {suspension !== null || removable ? (
+                    <LifecycleRows
+                      suspension={suspension}
+                      removable={removable}
+                      offline={offline}
+                      receipt={lifecycleReceipt.confirmed ? lifecycleDone : null}
+                      rowsRef={lifecycleRowsRef}
+                      onPick={(action) => {
+                        lifecycle.clearError();
+                        lifecycleStage.open(action);
+                      }}
+                      t={t}
+                    />
+                  ) : null}
+                </ManageSection>
               )}
-            </ManageSection>
-          )}
+            </div>
+            {stage !== null ? (
+              <div
+                ref={stageFrameRef}
+                className="col-start-1 row-start-1 flex min-w-0 flex-col"
+                data-testid="member-profile-stage-frame"
+              >
+                {stage}
+              </div>
+            ) : null}
+          </div>
         </div>
-        {stage !== null ? (
-          <div className="col-start-1 row-start-1 flex min-h-0 flex-col" data-testid="member-profile-stage-frame">
-            {stage}
+        {resetUp ? (
+          <div className="col-start-1 row-start-1 flex min-h-0 flex-col" data-testid="member-profile-reset-frame">
+            <PasswordResetStage
+              member={member}
+              reset={reset}
+              offline={offline}
+              offlineReasonId={offline ? OFFLINE_REASON_ID : undefined}
+              close={close}
+            />
           </div>
         ) : null}
       </div>
@@ -811,8 +1210,25 @@ function MemberProfilePanel({
     cancel: cancelRoleStage,
     finish: useCallback(() => setPendingRole(null), []),
   };
+  const lifecycle = useMemberLifecycle();
+  const [pendingLifecycle, setPendingLifecycle] = useState<MemberLifecycleAction | null>(null);
+  // 정지·풀기·내보내기 단계도 같은 가드를 거친다(#5781): 요청이 나간 뒤의 취소·Esc 는 아무 일 없다.
+  const cancelLifecycleStage = () => {
+    if (lifecycle.pending) return;
+    setPendingLifecycle(null);
+    lifecycle.clearError();
+  };
+  const lifecycleStage: LifecycleStage = {
+    pending: pendingLifecycle,
+    open: setPendingLifecycle,
+    cancel: cancelLifecycleStage,
+    finish: useCallback(() => setPendingLifecycle(null), []),
+  };
+  const [held, setHeld] = useState<HeldMember | null>(null);
   const query = useDirectory(workspaceId);
-  const member = memberFor(query.directory, target.memberId);
+  const live = memberFor(query.directory, target.memberId);
+  // 내보낸 뒤에는 명부가 무엇이든 결과를 보인다. 그 밖에는 명부가 이기고, 붙든 값은 명부에 그 사람이 없을 때만(옛 서버) 쓴다.
+  const member = held?.removed === true ? held.member : (live ?? held?.member ?? null);
   const hasNoCachedRoster = query.directory.members.length === 0;
   const viewState = memberProfileViewState({
     hasMember: member !== null,
@@ -824,19 +1240,30 @@ function MemberProfilePanel({
   const title = member
     ? t("directory.profile.title", { name: member.displayName })
     : t("directory.profile.titleUnknown");
-  // X 는 단계(비밀번호 재설정·역할 확인)가 서 있지 않을 때만 선다: 링크가 선 뒤에는 「닫기」만 닫아야 하고(다시 볼 길이
-  // 없는 값), 확인 단계에서는 그 단계의 취소가 문이다(Esc 도 단계만 내린다). 단계의 제목 줄이 X 자리와 겹치지도 않는다.
-  const showClose = reset.phase === PasswordResetPhase.Idle && pendingRole === null;
+  // X 는 단계(비밀번호 재설정·역할 확인·정지·내보내기, 내보낸 결과)가 서 있지 않을 때만 선다: 링크가 선 뒤에는 「닫기」만
+  // 닫아야 하고(다시 볼 길이 없는 값), 확인 단계에서는 그 단계의 취소가 문이다(Esc 도 단계만 내린다).
+  // 그 사람이 명부에서 사라졌으면(그사이 다른 사람이 내보냄 → 다시 읽은 명부) 단계는 서지 않으니 X 가 선다.
+  const showClose =
+    member === null ||
+    (reset.phase === PasswordResetPhase.Idle && pendingRole === null && pendingLifecycle === null && held?.removed !== true);
 
   return (
     <DialogContent
       opener={target.opener}
       data-testid="member-profile-dialog"
       className="gap-0"
+      // 연 줄이 사라졌으면(내보낸 사람의 멤버 탭 줄) 초점을 문서 맨 위로 떨어뜨리지 않고 그 목록의 이웃 줄이나 검색 칸으로
+      // 돌린다(#5781 검수 r1 M3). 연 줄이 그대로 있으면 `DialogContent` 가 그 줄로 돌린다.
+      onCloseAutoFocus={(event) => {
+        if (target.opener?.isConnected) return;
+        if (focusOpenerFallback(target.neighbors)) event.preventDefault();
+      }}
       // Esc는 가장 위 층의 것이다(§3.4): 확인 단계가 서 있으면 그 단계만 닫고, 요청이 나갔거나
       // 링크가 선 뒤에는 아무것도 닫지 않는다. 링크는 다시 볼 길이 없는 값이라 Esc 한 번과
       // 바깥 누름 한 번에 사라지게 두지 않고 「닫기」만 닫는다.
       onEscapeKeyDown={(event) => {
+        // 그 사람을 그리지 못하면 단계도 없다: Esc 는 창을 닫는다.
+        if (member === null) return;
         if (reset.phase !== PasswordResetPhase.Idle) {
           event.preventDefault();
           reset.cancel();
@@ -846,13 +1273,19 @@ function MemberProfilePanel({
           event.preventDefault();
           // 단계만 내린다(요청이 도는 동안은 아무 일 없다). 초점은 `ReadyProfile` 이 역할 자리로 돌린다.
           cancelRoleStage();
+          return;
+        }
+        if (pendingLifecycle !== null) {
+          event.preventDefault();
+          cancelLifecycleStage();
         }
       }}
       onInteractOutside={(event) => {
         if (
           reset.phase === PasswordResetPhase.Issuing ||
           reset.phase === PasswordResetPhase.Issued ||
-          roleChange.pending
+          roleChange.pending ||
+          lifecycle.pending
         ) {
           event.preventDefault();
         }
@@ -879,6 +1312,10 @@ function MemberProfilePanel({
           reset={reset}
           roleChange={roleChange}
           roleStage={roleStage}
+          lifecycle={lifecycle}
+          lifecycleStage={lifecycleStage}
+          held={held}
+          hold={setHeld}
         />
       ) : viewState === "loading" ? (
         <ProfileSkeleton label={t("directory.profile.loading")} />
@@ -925,7 +1362,7 @@ function MemberProfilePanel({
 export function MemberProfileProvider({ children }: { children: ReactNode }) {
   const [target, setTarget] = useState<MemberProfileTarget | null>(null);
   const open = useCallback<OpenMemberProfile>(
-    (memberId, opener = null) => setTarget({ memberId, opener }),
+    (memberId, opener = null) => setTarget({ memberId, opener, neighbors: openerNeighbors(opener) }),
     []
   );
   const close = useCallback(() => setTarget(null), []);

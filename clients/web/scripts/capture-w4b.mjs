@@ -142,7 +142,7 @@ async function installMocks(context, { withAvatar }) {
   await context.route("**/v1/workspaces/*/channels", (route) =>
     json(route, { channels: CHANNELS })
   );
-  await context.route("**/v1/workspaces/*/roster", (route) =>
+  await context.route("**/v1/workspaces/*/roster*", (route) =>
     json(route, { members: [] })
   );
   // 아바타 바이트: 서버의 인가 프록시 자리. 클라는 베어러를 실어 부르고 dataURL 로 건다.

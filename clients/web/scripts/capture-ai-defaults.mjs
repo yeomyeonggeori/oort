@@ -174,7 +174,7 @@ async function installMocks(context, team) {
     json(route, { accessToken: SESSION.accessToken, refreshToken: SESSION.refreshToken })
   );
   await context.route("**/v1/workspaces/*/channels", (route) => json(route, { channels: CHANNELS }));
-  await context.route("**/v1/workspaces/*/roster", (route) => json(route, { members: [] }));
+  await context.route("**/v1/workspaces/*/roster*", (route) => json(route, { members: [] }));
   await context.route("**/v1/provider/default-ai", (route) => {
     if (team === "member") return json(route, { error: { code: "forbidden", message: "operator required" } }, 403);
     // 저장 중 장면: PUT 은 답하지 않는다(「저장하고 있어요」가 선 상태를 찍는다).

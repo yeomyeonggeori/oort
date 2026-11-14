@@ -19,6 +19,7 @@ import {
   sendMessage,
 } from "./api";
 import { NetworkError, REQUEST_TIMEOUT_MS } from "./http";
+import { sessionStamp } from "./sessionStamp";
 
 // =============================================================================
 // 갱신이 닿지 못한 401은 로그인 만료가 아니다 (#3993, #3926 범위 밖 발견 (a)).
@@ -659,7 +660,7 @@ describe("rotateAfterUnauthorized — 다운로드가 직접 쓰는 세 갈래 (
   it("갱신이 되면 true: 새 토큰이 저장소에 들어 있고 선언은 없다", async () => {
     const { session, paths } = stage([ROTATED()]);
 
-    await expect(rotateAfterUnauthorized()).resolves.toBe(true);
+    await expect(rotateAfterUnauthorized(sessionStamp())).resolves.toBe(true);
 
     expect(paths()).toEqual([REFRESH_PATH]);
     expect(session.access).toBe("access-new");
@@ -670,7 +671,7 @@ describe("rotateAfterUnauthorized — 다운로드가 직접 쓰는 세 갈래 (
   it("서버가 갱신을 거절하면 false: 세션이 끝났다", async () => {
     const { session, paths } = stage([REUSED()]);
 
-    await expect(rotateAfterUnauthorized()).resolves.toBe(false);
+    await expect(rotateAfterUnauthorized(sessionStamp())).resolves.toBe(false);
 
     expect(paths()).toEqual([REFRESH_PATH]);
     expect(session.expired).toBeGreaterThan(0);
@@ -680,7 +681,7 @@ describe("rotateAfterUnauthorized — 다운로드가 직접 쓰는 세 갈래 (
     const { session, paths } = stage([]);
     session.refresh = "";
 
-    await expect(rotateAfterUnauthorized()).resolves.toBe(false);
+    await expect(rotateAfterUnauthorized(sessionStamp())).resolves.toBe(false);
 
     expect(paths()).toEqual([]);
   });
@@ -688,7 +689,7 @@ describe("rotateAfterUnauthorized — 다운로드가 직접 쓰는 세 갈래 (
   it("닿지 못하면 NetworkError: 선언 없이 던지고 저장소는 그대로다", async () => {
     const { session, paths } = stage(["down"]);
 
-    const failure = await failureOf(rotateAfterUnauthorized);
+    const failure = await failureOf(() => rotateAfterUnauthorized(sessionStamp()));
 
     expectUnreachable(failure);
     expect(paths()).toEqual([REFRESH_PATH]);
@@ -702,7 +703,7 @@ describe("rotateAfterUnauthorized — 다운로드가 직접 쓰는 세 갈래 (
     async (status) => {
       const { session, paths } = stage([FAILING(status)]);
 
-      const failure = await failureOf(rotateAfterUnauthorized);
+      const failure = await failureOf(() => rotateAfterUnauthorized(sessionStamp()));
 
       expectUnreachable(failure);
       expect(paths()).toEqual([REFRESH_PATH]);

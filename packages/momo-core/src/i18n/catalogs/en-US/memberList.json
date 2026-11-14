@@ -5,6 +5,7 @@
   "memberList.search.placeholderGuest": "Find by name or handle",
   "memberList.group.people": "People",
   "memberList.group.agents": "Agents",
+  "memberList.group.suspended": "Suspended",
   "memberList.row.self": "You",
   "memberList.row.ownedBy": "Managed by {name}",
   "memberList.row.openProfile": "Open profile",

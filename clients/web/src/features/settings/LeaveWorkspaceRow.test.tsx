@@ -6,6 +6,9 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError, type Member } from "@momo/core/lib/api";
 import { SessionProvider, type SessionContextValue } from "@/app/session";
+import { LocaleContext } from "@/i18n/localeContext";
+import { koreanLocaleForTest } from "@/i18n/koreanLocaleForTest";
+import type { AppLocale } from "@/i18n/localeStore";
 import { LeaveWorkspaceRow } from "./LeaveWorkspaceRow";
 
 const leaveWorkspace = vi.hoisted(() => vi.fn());
@@ -18,9 +21,11 @@ const env = globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boole
 let root: Root | null = null;
 let host: HTMLElement | null = null;
 const logout = vi.fn();
+let korean: AppLocale;
 
-beforeAll(() => {
+beforeAll(async () => {
   env.IS_REACT_ACT_ENVIRONMENT = true;
+  korean = await koreanLocaleForTest();
 });
 beforeEach(() => {
   leaveWorkspace.mockReset().mockResolvedValue(undefined);
@@ -65,7 +70,11 @@ function mount(offline = false): HTMLElement {
         createElement(
           SessionProvider,
           { value: session },
-          createElement(LeaveWorkspaceRow, { workspaceId: "w", offline })
+          createElement(
+            LocaleContext.Provider,
+            { value: korean },
+            createElement(LeaveWorkspaceRow, { workspaceId: "w", offline })
+          )
         )
       )
     )

@@ -441,7 +441,8 @@ async function installMocks(context) {
   await context.route("**/v1/workspaces/*/channels", (route) =>
     json(route, { channels: CHANNELS })
   );
-  await context.route("**/v1/workspaces/*/roster", (route) =>
+  // 웹 명부 읽기는 `?include=suspended` 를 단다(#5781): 쿼리까지 받게 끝에 `*`.
+  await context.route("**/v1/workspaces/*/roster*", (route) =>
     json(route, { members: ROSTER })
   );
   await context.route("**/v1/workspaces/*/read-state", (route) =>
