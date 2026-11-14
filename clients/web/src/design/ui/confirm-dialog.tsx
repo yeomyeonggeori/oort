@@ -33,10 +33,17 @@ import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/design/
 //   아무 일 없다**: 요청이 이미 나갔으면 취소는 아무것도 되돌리지 못하니, 취소된 것처럼 물러서면 안 된다(#5780 검수 r1 H1).
 //   초점은 남는다(`disabled` 가 아니다). 두 그릇 모두 같다 — 대화상자는 Esc·바깥 누름도 같은 가드(`requestClose`)를 거친다.
 // - `lockedReason` 이 있으면 확정이 `aria-disabled` 로 잠기고 그 문장을 가리킨다(오프라인 등). 초점은 남는다.
+// - **확정은 서고 나서 `CONFIRM_ARM_MS`(500ms) 동안 눌림을 받지 않는다**(#5781, #5818 검수 High): 메뉴 줄·관리 줄을 누른
+//   자리에 위험 확정 단추가 서면, 더블클릭이나 떨리는 손의 둘째 누름(250~400ms 뒤)이 그대로 확정을 누른다. 그동안의 누름·
+//   Enter·Space 는 아무 일도 하지 않고, 모양은 그대로다(깜빡임·흐림 없음 — 사람이 읽고 누르는 데는 500ms 보다 오래 걸린다).
+//   취소는 처음부터 받는다. 줄인 움직임 설정과 무관하게 같은 시간이다(움직임이 아니라 입력의 문제다).
 // - 문구는 이 파일에 없다. 부르는 쪽이 사전 키로 넘긴다(직접 문구 장부).
 // =============================================================================
 
 export type ConfirmTone = "default" | "destructive";
+
+/** 확인이 선 뒤 확정 단추가 눌림을 받지 않는 시간(ms). 사람의 더블클릭 간격(대개 500ms 안)을 덮는다. */
+export const CONFIRM_ARM_MS = 500;
 
 export interface ConfirmBodyProps {
   /** 제목 위의 「누구에 대한」 줄(작은 얼굴 + 이름 등). 단계가 본문을 덮어도 대상이 남게 한다. */
@@ -88,6 +95,15 @@ function ConfirmBody({
 }) {
   const lockedId = React.useId();
   const locked = busy || lockedReason !== undefined;
+  // 선 순간부터 `CONFIRM_ARM_MS` 동안 확정은 눌림을 받지 않는다(머리말). 다시 그려져도 시계는 다시 걸리지 않는다(서는 순간 한 번).
+  const [armed, setArmed] = React.useState(false);
+  React.useEffect(() => {
+    const timer = window.setTimeout(() => setArmed(true), CONFIRM_ARM_MS);
+    return () => window.clearTimeout(timer);
+  }, []);
+  const holdKey = (event: React.KeyboardEvent) => {
+    if (!armed && (event.key === "Enter" || event.key === " ")) event.preventDefault();
+  };
   const id = (suffix: string) => (testId ? `${testId}-${suffix}` : undefined);
   return (
     <>
@@ -155,10 +171,13 @@ function ConfirmBody({
           aria-busy={busy || undefined}
           aria-describedby={lockedReason !== undefined ? lockedId : undefined}
           onClick={() => {
-            if (!locked) onConfirm();
+            if (armed && !locked) onConfirm();
           }}
+          onKeyDown={holdKey}
+          onKeyUp={holdKey}
           data-testid={id("confirm")}
           data-tone={tone}
+          data-armed={armed ? "true" : "false"}
         >
           {busy ? busyLabel : confirmLabel}
         </Button>

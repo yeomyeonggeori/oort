@@ -16,6 +16,7 @@ import { LocaleProvider } from "@/i18n/LocaleProvider";
 import type { AppLocale } from "@/i18n/localeStore";
 import { koreanLocale } from "@/testing/koLocale";
 import { workspaceIdentityKey } from "@/features/workspace/useWorkspace";
+import { CONFIRM_ARM_MS } from "@/design/ui/confirm-dialog";
 import { MemberProfileProvider } from "./MemberProfileDialog";
 import { useOpenMemberProfile } from "./memberProfileContext";
 
@@ -277,9 +278,18 @@ async function pickRole(role: MembershipRole) {
   await vi.waitFor(() => expect(document.querySelector('[role="listbox"]')).toBeNull());
 }
 
+/**
+ * 확정 단추는 단계가 선 뒤 `CONFIRM_ARM_MS`(500ms) 동안 눌림을 받지 않는다(#5781 · #5818 검수 High — 더블클릭이 줄을 누른 자리에
+ * 선 위험 확정을 누르지 않게). 사람처럼 그 시간이 지나 단추가 받을 준비가 된 뒤에 누른다.
+ */
+async function waitArmed(testId: string) {
+  await vi.waitFor(() => expect(byId(testId)?.dataset.armed).toBe("true"), { timeout: CONFIRM_ARM_MS * 3 });
+}
+
 async function confirmStage() {
   const confirm = byId<HTMLButtonElement>("member-profile-role-stage-confirm");
   expect(confirm).not.toBeNull();
+  await waitArmed("member-profile-role-stage-confirm");
   await act(async () => {
     confirm!.click();
   });
@@ -854,6 +864,7 @@ describe("정지·내보내기 (#5781)", () => {
   const click = async (testId: string) => {
     const el = byId<HTMLButtonElement>(testId);
     expect(el).not.toBeNull();
+    if (testId.endsWith("-stage-confirm")) await waitArmed(testId);
     await act(async () => {
       el!.click();
     });
