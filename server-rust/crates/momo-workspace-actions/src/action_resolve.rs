@@ -8,10 +8,12 @@
 //! rejection is a `400`-class [`ActionRejection`]; the server maps it to its HTTP
 //! error, the worker maps it to a tool failure.
 
+use momo_db::audit::{write_audit, AuditEntry};
 use momo_db::{DbError, PgConnection};
 use momo_messaging::name_guard::{
-    conflicts_with_roster, has_hidden_characters, mention_overlaps_roster, role_label_collides,
-    text_repeats_roster_name, validated_agent_proposed_display_name, validated_agent_role_label,
+    channel_names_look_alike, conflicts_with_roster, has_hidden_characters,
+    mention_overlaps_roster, role_label_collides, text_repeats_roster_name,
+    validated_agent_proposed_display_name, validated_agent_role_label,
     validated_agent_status_emoji, validated_agent_status_text, validated_agent_tagline, RosterName,
 };
 use momo_messaging::{
@@ -62,6 +64,13 @@ pub type ResolveOutcome<T> = Result<Result<T, ActionRejection>, DbError>;
 /// the door rather than the agent's: the producer answers it `Unavailable`, like every other
 /// refusal of the door, and the agent's own failures stay `InvalidArguments`.
 pub const OWNER_CANNOT_SEE: &str = "owner cannot see the target";
+
+/// The rejection of an agent's `channel.create` whose name reads like a live channel's
+/// (ADR-0225 D7, 「이미 있는 채널과 헷갈리는 이름」). Fixed on purpose: it never names the
+/// channel the proposal looks like.
+pub const CHANNEL_NAME_LOOKALIKE: &str = "channel name looks like an existing channel";
+/// The `reason` code of that refusal's `action.refused` audit row.
+pub const CHANNEL_NAME_LOOKALIKE_REASON: &str = "channel_name_lookalike";
 
 /// Whose eyes a card is drawn for — the one place a resolution rule depends on where the card
 /// will stand.
@@ -2401,6 +2410,52 @@ pub async fn resolve_visible_channel_in_tx(
     }))
 }
 
+/// ADR-0225 D7: a live public or private channel whose name is a **different** name
+/// that reads the same as the proposed `name`
+/// ([`channel_names_look_alike`]), or `None`.
+///
+/// Which channels are compared depends on when this runs — here and nowhere else:
+///
+/// * on the **proposal**, the channels the proposer can see (public, or private
+///   with the agent a live member — the [`resolve_visible_channel_in_tx`] rule). A
+///   refusal caused by a private channel the agent cannot see would tell it that
+///   channel's name, and a proposal never reveals a private channel (증보 V1-b,
+///   V11);
+/// * at the **decision**, every live public and private channel of the workspace.
+///   The tap is then refused like a name taken since the proposal
+///   (`action_args_invalid`), which tells nobody more than that, and a look-alike
+///   made between the proposal and the tap is caught.
+async fn lookalike_channel_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    proposer_member_id: Uuid,
+    name: &str,
+    origin: ArgsOrigin,
+) -> Result<Option<Uuid>, momo_db::DbError> {
+    let seen_by = match origin {
+        ArgsOrigin::Proposal => Some(proposer_member_id),
+        ArgsOrigin::Stored => None,
+    };
+    let rows: Vec<(Uuid, String)> = momo_db::sqlx::query_as(
+        "SELECT c.id, c.name FROM channel c \
+          WHERE c.workspace_id = $1 AND c.kind IN ('public', 'private') \
+            AND c.archived_at IS NULL AND c.name IS NOT NULL \
+            AND ($2::uuid IS NULL OR c.kind = 'public' OR EXISTS ( \
+                  SELECT 1 FROM membership p \
+                   WHERE p.workspace_id = c.workspace_id AND p.channel_id = c.id \
+                     AND p.member_id = $2 AND p.left_at IS NULL)) \
+          ORDER BY c.id",
+    )
+    .bind(workspace_id)
+    .bind(seen_by)
+    .fetch_all(&mut *conn)
+    .await?;
+    Ok(rows
+        .into_iter()
+        .find(|(_, existing)| channel_names_look_alike(existing, name))
+        .map(|(id, _)| id))
+}
+
 /// Look `handles` up among the workspace's active members.
 /// Every handle must resolve: one that does not is the whole call's
 /// `InvalidArguments`, with no hint which one.
@@ -3077,6 +3132,42 @@ pub async fn resolve_action_with_origin_in_tx(
         } => {
             if !proposer_is_live_agent_in_tx(conn, workspace_id, proposer_member_id).await? {
                 return Ok(Err(ActionRejection::new("proposer is not an active agent")));
+            }
+            // ADR-0225 D7: a name that reads like a live channel's is refused — on the
+            // proposal and again on the stored arguments at the decision, which also
+            // catches a look-alike made between the two.
+            if let Some(similar) =
+                lookalike_channel_in_tx(conn, workspace_id, proposer_member_id, name, origin)
+                    .await?
+            {
+                let entry = AuditEntry::new(workspace_id, "action.refused");
+                let entry = match (origin, decision_approval_id) {
+                    // At the decision the server refuses a person's tap: no member acted.
+                    (ArgsOrigin::Stored, Some(approval)) => {
+                        entry.about(proposer_member_id).target("approval", approval)
+                    }
+                    _ => entry.by(proposer_member_id),
+                };
+                write_audit(
+                    conn,
+                    &entry.with_schema(
+                        "momo.action.refused.v1",
+                        json!({
+                            "action_id": actions::ACTION_CHANNEL_CREATE,
+                            "approval_id": decision_approval_id.map(|id| id.to_string()),
+                            "reason": CHANNEL_NAME_LOOKALIKE_REASON,
+                            "stage": match origin {
+                                ArgsOrigin::Proposal => "proposal",
+                                ArgsOrigin::Stored => "decision",
+                            },
+                            // An id, never a name: who reads the audit log may not be
+                            // in that private channel.
+                            "similar_channel_id": similar.to_string(),
+                        }),
+                    ),
+                )
+                .await?;
+                return Ok(Err(ActionRejection::new(CHANNEL_NAME_LOOKALIKE)));
             }
             let Some(found) = resolve_member_handles_in_tx(conn, workspace_id, handles).await?
             else {
