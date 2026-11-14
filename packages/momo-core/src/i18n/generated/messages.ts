@@ -311,6 +311,39 @@ export const messageKeys = [
   "desktop.workSession.backToListLabel",
   "desktop.workSession.listTitle",
   "desktop.workSession.pageTitle",
+  "directory.lifecycle.cancel",
+  "directory.lifecycle.errorForbidden",
+  "directory.lifecycle.errorLastOwner",
+  "directory.lifecycle.errorNetwork",
+  "directory.lifecycle.errorNotActive",
+  "directory.lifecycle.errorNotFound",
+  "directory.lifecycle.errorNotSuspended",
+  "directory.lifecycle.errorRank",
+  "directory.lifecycle.errorRateLimited",
+  "directory.lifecycle.errorSelf",
+  "directory.lifecycle.errorUnknown",
+  "directory.lifecycle.reinstate",
+  "directory.lifecycle.reinstateBody",
+  "directory.lifecycle.reinstateBusy",
+  "directory.lifecycle.reinstatedReceipt",
+  "directory.lifecycle.reinstateSchedules",
+  "directory.lifecycle.reinstateTitle",
+  "directory.lifecycle.remove",
+  "directory.lifecycle.removeAction",
+  "directory.lifecycle.removeBusy",
+  "directory.lifecycle.removedClose",
+  "directory.lifecycle.removedTitle",
+  "directory.lifecycle.removeKeeps",
+  "directory.lifecycle.removeLeaves",
+  "directory.lifecycle.removeTitle",
+  "directory.lifecycle.removeWarning",
+  "directory.lifecycle.suspend",
+  "directory.lifecycle.suspendBusy",
+  "directory.lifecycle.suspendedReceipt",
+  "directory.lifecycle.suspendKeeps",
+  "directory.lifecycle.suspendSignOut",
+  "directory.lifecycle.suspendTitle",
+  "directory.lifecycle.suspendUndo",
   "directory.manage.heading",
   "directory.manage.hint",
   "directory.profile.close",
@@ -643,6 +676,7 @@ export const messageKeys = [
   "memberList.empty.invite",
   "memberList.group.agents",
   "memberList.group.people",
+  "memberList.group.suspended",
   "memberList.newDm.close",
   "memberList.newDm.continueAction",
   "memberList.newDm.description",
@@ -1398,6 +1432,7 @@ export const messageKeys = [
   "timeline.memberPanel.groupOnline",
   "timeline.memberPanel.groupOtherAgents",
   "timeline.memberPanel.groupPeople",
+  "timeline.memberPanel.groupSuspended",
   "timeline.memberPanel.groupWorking",
   "timeline.memberPanel.listLabel",
   "timeline.memberPanel.moreRuns",
@@ -1968,6 +2003,55 @@ export const argumentSpecs = {
   "desktop.workSession.backToListLabel": {},
   "desktop.workSession.listTitle": {},
   "desktop.workSession.pageTitle": {},
+  "directory.lifecycle.cancel": {},
+  "directory.lifecycle.errorForbidden": {},
+  "directory.lifecycle.errorLastOwner": {
+    "owner": "string"
+  },
+  "directory.lifecycle.errorNetwork": {},
+  "directory.lifecycle.errorNotActive": {},
+  "directory.lifecycle.errorNotFound": {},
+  "directory.lifecycle.errorNotSuspended": {},
+  "directory.lifecycle.errorRank": {},
+  "directory.lifecycle.errorRateLimited": {},
+  "directory.lifecycle.errorSelf": {},
+  "directory.lifecycle.errorUnknown": {},
+  "directory.lifecycle.reinstate": {},
+  "directory.lifecycle.reinstateBody": {},
+  "directory.lifecycle.reinstateBusy": {},
+  "directory.lifecycle.reinstatedReceipt": {},
+  "directory.lifecycle.reinstateSchedules": {},
+  "directory.lifecycle.reinstateTitle": {
+    "name": "string"
+  },
+  "directory.lifecycle.remove": {},
+  "directory.lifecycle.removeAction": {},
+  "directory.lifecycle.removeBusy": {},
+  "directory.lifecycle.removedClose": {},
+  "directory.lifecycle.removedTitle": {
+    "name": "string"
+  },
+  "directory.lifecycle.removeKeeps": {},
+  "directory.lifecycle.removeLeaves": {},
+  "directory.lifecycle.removeTitle": {
+    "name": "string"
+  },
+  "directory.lifecycle.removeWarning": {},
+  "directory.lifecycle.suspend": {},
+  "directory.lifecycle.suspendBusy": {},
+  "directory.lifecycle.suspendedReceipt": {},
+  "directory.lifecycle.suspendKeeps": {
+    "admin": "string",
+    "owner": "string"
+  },
+  "directory.lifecycle.suspendSignOut": {},
+  "directory.lifecycle.suspendTitle": {
+    "name": "string"
+  },
+  "directory.lifecycle.suspendUndo": {
+    "admin": "string",
+    "owner": "string"
+  },
   "directory.manage.heading": {},
   "directory.manage.hint": {
     "admin": "string",
@@ -2412,6 +2496,7 @@ export const argumentSpecs = {
   "memberList.empty.invite": {},
   "memberList.group.agents": {},
   "memberList.group.people": {},
+  "memberList.group.suspended": {},
   "memberList.newDm.close": {},
   "memberList.newDm.continueAction": {},
   "memberList.newDm.description": {},
@@ -3373,6 +3458,9 @@ export const argumentSpecs = {
   "timeline.memberPanel.groupPeople": {
     "count": "number"
   },
+  "timeline.memberPanel.groupSuspended": {
+    "count": "number"
+  },
   "timeline.memberPanel.groupWorking": {
     "count": "number"
   },
@@ -3997,6 +4085,39 @@ export interface MessageArgs {
   "desktop.workSession.backToListLabel": Record<string, never>;
   "desktop.workSession.listTitle": Record<string, never>;
   "desktop.workSession.pageTitle": Record<string, never>;
+  "directory.lifecycle.cancel": Record<string, never>;
+  "directory.lifecycle.errorForbidden": Record<string, never>;
+  "directory.lifecycle.errorLastOwner": { owner: string };
+  "directory.lifecycle.errorNetwork": Record<string, never>;
+  "directory.lifecycle.errorNotActive": Record<string, never>;
+  "directory.lifecycle.errorNotFound": Record<string, never>;
+  "directory.lifecycle.errorNotSuspended": Record<string, never>;
+  "directory.lifecycle.errorRank": Record<string, never>;
+  "directory.lifecycle.errorRateLimited": Record<string, never>;
+  "directory.lifecycle.errorSelf": Record<string, never>;
+  "directory.lifecycle.errorUnknown": Record<string, never>;
+  "directory.lifecycle.reinstate": Record<string, never>;
+  "directory.lifecycle.reinstateBody": Record<string, never>;
+  "directory.lifecycle.reinstateBusy": Record<string, never>;
+  "directory.lifecycle.reinstatedReceipt": Record<string, never>;
+  "directory.lifecycle.reinstateSchedules": Record<string, never>;
+  "directory.lifecycle.reinstateTitle": { name: string };
+  "directory.lifecycle.remove": Record<string, never>;
+  "directory.lifecycle.removeAction": Record<string, never>;
+  "directory.lifecycle.removeBusy": Record<string, never>;
+  "directory.lifecycle.removedClose": Record<string, never>;
+  "directory.lifecycle.removedTitle": { name: string };
+  "directory.lifecycle.removeKeeps": Record<string, never>;
+  "directory.lifecycle.removeLeaves": Record<string, never>;
+  "directory.lifecycle.removeTitle": { name: string };
+  "directory.lifecycle.removeWarning": Record<string, never>;
+  "directory.lifecycle.suspend": Record<string, never>;
+  "directory.lifecycle.suspendBusy": Record<string, never>;
+  "directory.lifecycle.suspendedReceipt": Record<string, never>;
+  "directory.lifecycle.suspendKeeps": { admin: string; owner: string };
+  "directory.lifecycle.suspendSignOut": Record<string, never>;
+  "directory.lifecycle.suspendTitle": { name: string };
+  "directory.lifecycle.suspendUndo": { admin: string; owner: string };
   "directory.manage.heading": Record<string, never>;
   "directory.manage.hint": { admin: string; owner: string };
   "directory.profile.close": Record<string, never>;
@@ -4329,6 +4450,7 @@ export interface MessageArgs {
   "memberList.empty.invite": Record<string, never>;
   "memberList.group.agents": Record<string, never>;
   "memberList.group.people": Record<string, never>;
+  "memberList.group.suspended": Record<string, never>;
   "memberList.newDm.close": Record<string, never>;
   "memberList.newDm.continueAction": Record<string, never>;
   "memberList.newDm.description": Record<string, never>;
@@ -5084,6 +5206,7 @@ export interface MessageArgs {
   "timeline.memberPanel.groupOnline": { count: number };
   "timeline.memberPanel.groupOtherAgents": { count: number };
   "timeline.memberPanel.groupPeople": { count: number };
+  "timeline.memberPanel.groupSuspended": { count: number };
   "timeline.memberPanel.groupWorking": { count: number };
   "timeline.memberPanel.listLabel": Record<string, never>;
   "timeline.memberPanel.moreRuns": { count: number };

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  channelHeadCount,
   memberPanelGroupOf,
   memberPanelHeadingKey,
   memberPanelSections,
@@ -9,7 +10,7 @@ import {
 
 // 채널 멤버 패널의 묶음 (#5686): 차례, 모르는 접속, 열려 있는 동안 얼어 있는 판.
 
-type M = { id: string; kind: "human" | "agent"; online?: boolean };
+type M = { id: string; kind: "human" | "agent"; online?: boolean; status?: "active" | "suspended" };
 const human = (id: string, online?: boolean): M => ({ id, kind: "human", ...(online === undefined ? {} : { online }) });
 const agent = (id: string): M => ({ id, kind: "agent" });
 
@@ -79,5 +80,27 @@ describe("memberPanel (#5686)", () => {
     expect(memberPanelHeadingKey("agents", false)).toBe("timeline.memberPanel.groupAgents");
     expect(memberPanelHeadingKey("working", true)).toBe("timeline.memberPanel.groupWorking");
     expect(memberPanelHeadingKey("people", false)).toBe("timeline.memberPanel.groupPeople");
+  });
+
+  it("정지된 사람(#5781): 접속과 무관하게 맨 아래 「정지됨」 묶음, 머리 수에는 들지 않는다", () => {
+    // 서버는 정지된 줄에 `online` 을 싣지 않지만(#5814), 실려 와도 묶음은 정지됨이다.
+    const members: M[] = [
+      { id: "h-sus-online", kind: "human", online: true, status: "suspended" },
+      human("h-on", true),
+      { id: "h-sus", kind: "human", status: "suspended" },
+      human("h-off", false),
+      agent("a"),
+    ];
+    const sections = memberPanelSections(members, (m) => memberPanelGroupOf(m, false));
+    expect(sections.map((s) => [s.group, s.members.map((m) => m.id)])).toEqual([
+      ["agents", ["a"]],
+      ["online", ["h-on"]],
+      ["offline", ["h-off"]],
+      ["suspended", ["h-sus-online", "h-sus"]],
+    ]);
+    expect(memberPanelHeadingKey("suspended", false)).toBe("timeline.memberPanel.groupSuspended");
+    expect(channelHeadCount(members)).toBe(3);
+    // 상태를 모르는 줄(옛 입력)은 활성으로 센다.
+    expect(channelHeadCount([human("x"), agent("y")])).toBe(2);
   });
 });

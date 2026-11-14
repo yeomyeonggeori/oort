@@ -122,11 +122,16 @@ export function agentHostDot(hostOnline: boolean | undefined): StatusDot | null 
  *
  * `online` 이 `undefined` 인 것은 「꺼짐」이 아니라 「모름」이다(서버가 가용성을 못 읽은 응답, 구서버, 에이전트).
  * 모름을 고리로 그리면 브로커가 잠깐 느린 것만으로 모든 동료가 꺼진 것처럼 보인다.
+ *
+ * **활성이 아닌 사람에게는 점이 없다**(#5781). 소유자·관리자의 명부는 정지된 사람도 싣고(#5814, 그 줄에는 `online` 이
+ * 없지만 선언 상태는 남는다), 정지·내보내기로 모든 세션이 끝난 사람의 「자리 비움」·「온라인」은 거짓이다. 상태를
+ * 모르는 입력(`status` 없음)은 지금처럼 판정한다.
  */
 export function humanPresenceDot(
-  member: Pick<RosterMember, "presenceStatus" | "dndUntilMs" | "online">,
+  member: Pick<RosterMember, "presenceStatus" | "dndUntilMs" | "online"> & { status?: RosterMember["status"] },
   nowMs: number
 ): StatusDot | null {
+  if (member.status !== undefined && member.status !== "active") return null;
   if (member.presenceStatus === "away") {
     return { tone: "warn", label: declaredStatusLabel("away") };
   }
@@ -186,10 +191,10 @@ export function withOwnConnection<T extends Pick<RosterMember, "id" | "online">>
  * `liveness`: 값 있음 / `null`(라벨 없음: 호스티드가 아님) / `undefined`(아직 모름). 사람에게는 쓰지 않는다.
  */
 export function dmPeerStatusDot(input: {
-  member: Pick<
+  member: (Pick<
     RosterMember,
     "kind" | "hostOnline" | "presenceStatus" | "dndUntilMs" | "online"
-  > | null;
+  > & { status?: RosterMember["status"] }) | null;
   liveness: Pick<AgentLiveness, "state" | "lastSignalAtMs"> | null | undefined;
   mayAct: boolean;
   nowMs: number;

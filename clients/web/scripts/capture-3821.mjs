@@ -52,7 +52,7 @@ async function installMocks(context, { renameStatus }) {
   await context.route("**/v1/auth/realtime-token", (route) =>
     json(route, { token: "x", tokenType: "jwt", expiresAtMs: Date.now() + 60_000, ttlSeconds: 60, workspaceId: WS, memberId: ME }));
   await context.route("**/v1/workspaces/*/channels", (route) => json(route, { channels: [{ id: CH, workspaceId: WS, kind: "public", name: "general", muted: false }] }));
-  await context.route("**/v1/workspaces/*/roster", (route) => json(route, { members: ROSTER }));
+  await context.route("**/v1/workspaces/*/roster*", (route) => json(route, { members: ROSTER }));
   await context.route("**/v1/workspaces/*/read-state", (route) => json(route, { read_states: [] }));
   await context.route("**/v1/workspaces/*/channels/*/huddles/active", (route) => json(route, { huddle: null, participants: [] }));
   await context.route("**/v1/workspaces/*/channels/*/messages*", (route) => json(route, { messages: [] }));
