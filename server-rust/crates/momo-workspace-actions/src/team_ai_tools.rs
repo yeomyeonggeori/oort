@@ -46,9 +46,9 @@ use momo_agent::tools::ToolDefinition;
 use momo_agent::{inert_display_name, RunEventInclude, RunStatus};
 use momo_db::{DbError, PgConnection};
 use momo_messaging::{
-    is_channel_member, list_channel_page, list_thread_replies, list_workspace_roster,
-    normalize_query, search_messages, validate_replies_root_in_tx, HistoryCursor, MemberKind,
-    SearchScope, SEARCH_LIMIT_MAX,
+    fold_channel_name, is_channel_member, list_channel_page, list_thread_replies,
+    list_workspace_roster, normalize_query, search_messages, validate_replies_root_in_tx,
+    HistoryCursor, MemberKind, SearchScope, CHANNEL_NAME_MAX_CHARS, SEARCH_LIMIT_MAX,
 };
 use serde_json::{json, Map, Value};
 use sqlx::Row;
@@ -534,21 +534,31 @@ fn opt_limit(object: &Map<String, Value>, max: i64) -> Result<Option<i64>, ToolO
 }
 
 /// `#name`/`name` → a channel the requester is in and the room may hear about.
+///
+/// ADR-0225 D6: the typed name is folded with the same function that folded the
+/// stored name (`fold_channel_name`: NFC, fullwidth, blanks, lowercase), so
+/// `디자인 리뷰`, `\u{FF03}디자인-리뷰` and a decomposed-Hangul spelling all find
+/// `디자인-리뷰`. Only public and private channels are candidates — a group DM's
+/// room name sits in the same column and is not a channel (ADR-0221) — and an
+/// archived channel is not found, the same condition the agent actions use.
 async fn resolve_channel(
     conn: &mut PgConnection,
     scope: &ReadScope,
     raw: &str,
 ) -> Result<Result<Uuid, ToolOutcome>, DbError> {
-    let name = raw.trim().trim_start_matches('#').trim();
-    if name.is_empty() || name.chars().count() > 80 {
+    // One run of leading `#` (ASCII or fullwidth) is how a card spells a channel.
+    let typed = raw.trim().trim_start_matches(['#', '\u{FF03}']).trim();
+    let name = fold_channel_name(typed);
+    if name.is_empty() || name.chars().count() > CHANNEL_NAME_MAX_CHARS {
         return Ok(Err(ToolOutcome::NotFound));
     }
     let found: Option<Uuid> = sqlx::query_scalar(
         "SELECT id FROM channel WHERE workspace_id = $1 AND lower(name) = lower($2) \
-          ORDER BY archived_at NULLS FIRST, created_at LIMIT 1",
+            AND kind IN ('public', 'private') AND archived_at IS NULL \
+          LIMIT 1",
     )
     .bind(scope.workspace_id)
-    .bind(name)
+    .bind(&name)
     .fetch_optional(&mut *conn)
     .await?;
     let Some(channel_id) = found else {

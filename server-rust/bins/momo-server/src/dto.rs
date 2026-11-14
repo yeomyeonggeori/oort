@@ -3568,6 +3568,11 @@ pub struct RosterQuery {
     pub member_kind: Option<String>,
     #[serde(default)]
     pub limit: Option<String>,
+    /// #5814: a comma-separated opt-in list. `suspended` asks for the workspace's
+    /// suspended humans, honoured only for an owner or admin person on a full app
+    /// session; every other value is ignored.
+    #[serde(default)]
+    pub include: Option<String>,
 }
 
 // ---------------------------------------------------------------------------

@@ -28,7 +28,10 @@ sha2.workspace = true
 aes-gcm = "0.10"
 getrandom = "0.2"
 # ADR-0186 증보 V4: NFKC for the agent display-name guard (already a workspace dep).
+# ADR-0225 D3: NFC of channel names.
 unicode-normalization.workspace = true
+# ADR-0225 D1/D4: General_Category of channel name characters.
+unicode-properties.workspace = true
 # ADR-0186 증보 2026-10-13 V3-2a: agent avatar images are decoded and re-encoded server-side.
 image.workspace = true
 

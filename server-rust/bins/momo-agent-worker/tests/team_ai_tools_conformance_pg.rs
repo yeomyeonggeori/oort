@@ -573,9 +573,12 @@ async fn an_admitted_helper_reads_only_its_current_dm_seat_through_every_message
                 ("search_messages", json!({"query":"preseatneedle"})),
                 ("read_channel", json!({"channel":dm_name})),
                 ("read_thread", json!({"channel":dm_name,"messageId":old})),
+                // ADR-0225 D6 (#5828): a DM is not a channel the name resolver finds, so
+                // the current seat's new text is read by an unnamed search.
+                ("search_messages", json!({"query":"afterseatneedle"})),
                 (
                     "search_messages",
-                    json!({"query":"afterseatneedle", "channel":dm_name}),
+                    json!({"query":"please join this conversation"}),
                 ),
             ]),
             text("확인했어요."),
@@ -596,8 +599,8 @@ async fn an_admitted_helper_reads_only_its_current_dm_seat_through_every_message
         let results = fenced(&last_user_turn(&seen, 1));
         assert_eq!(
             results.matches("검색 결과 없음").count(),
-            2,
-            "both searches exclude pre-seat text: {results}"
+            1,
+            "the unnamed search excludes pre-seat text: {results}"
         );
         assert!(
             !results.contains("preseatneedle"),
@@ -611,9 +614,10 @@ async fn an_admitted_helper_reads_only_its_current_dm_seat_through_every_message
             results.contains("please join this conversation"),
             "the one trigger exception remains visible: {results}"
         );
-        assert!(
-            results.contains("not_found"),
-            "the old thread root is not readable: {results}"
+        assert_eq!(
+            results.matches("not_found").count(),
+            3,
+            "the DM is not found by name (D6): the named search, the read and the old thread root: {results}"
         );
     }
 }
@@ -1712,5 +1716,136 @@ async fn a_run_read_says_no_outcome_word_on_an_approval_row() {
             "단계 5: failed · tool_error",
         ],
         "an approval row says no outcome word, decider or not; a row that names none keeps its code: {text}"
+    );
+}
+
+/// A channel with a chosen name (the `channel()` helper above generates one).
+async fn named_channel(
+    su: &PgPool,
+    workspace: Uuid,
+    kind: &str,
+    name: &str,
+    members: &[Uuid],
+    archived: bool,
+) -> Uuid {
+    let id = Uuid::new_v4();
+    let dm_key = (kind == "dm").then(|| id.to_string());
+    sqlx::query(
+        "INSERT INTO channel (id, workspace_id, kind, name, dm_key, archived_at) \
+         VALUES ($1, $2, $3::channel_kind, $4, $5, CASE WHEN $6 THEN now() END)",
+    )
+    .bind(id)
+    .bind(workspace)
+    .bind(kind)
+    .bind(name)
+    .bind(dm_key)
+    .bind(archived)
+    .execute(su)
+    .await
+    .expect("named channel");
+    sqlx::query("INSERT INTO channel_seq (channel_id, workspace_id, last_seq) VALUES ($1, $2, 0)")
+        .bind(id)
+        .bind(workspace)
+        .execute(su)
+        .await
+        .expect("channel_seq");
+    for member in members {
+        join(su, workspace, id, *member).await;
+    }
+    id
+}
+
+/// **ADR-0225 D6 (#5828)** — the team AI finds a Hangul channel by any spelling
+/// the same fold accepts, and a name that is not a visible public/private channel
+/// is `not_found`: a group DM's room name, an archived channel.
+///
+/// | revert that makes it red |
+/// |---|
+/// | compare `lower(name) = lower($raw)` without `fold_channel_name` (blank, fullwidth and decomposed spellings miss) |
+/// | drop `kind IN ('public','private')` (the group DM room is read) |
+/// | drop `archived_at IS NULL` (the archived channel is read) |
+#[tokio::test]
+#[ignore = "requires an isolated PostgreSQL 18 (see module docs)"]
+async fn d6_a_hangul_channel_is_found_by_every_spelling_and_only_as_a_channel_5828() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let pool = momo_worker_pool().await;
+    reset_instance(&su).await;
+    let t = seed(&su, &pool).await;
+    seed_chat_link(&su, t.owner_id).await;
+    let everyone = [t.owner_id, t.member_id, t.agent_id];
+    let design = named_channel(
+        &su,
+        t.workspace_id,
+        "public",
+        "디자인-리뷰-qa",
+        &everyone,
+        false,
+    )
+    .await;
+    post(
+        &pool,
+        t.workspace_id,
+        design,
+        t.owner_id,
+        "ALPHA-디자인-5828",
+    )
+    .await;
+    // Same column, not channels: a group DM's room name and an archived channel.
+    let room = named_channel(&su, t.workspace_id, "dm", "비밀-방-5828", &everyone, false).await;
+    post(&pool, t.workspace_id, room, t.owner_id, "BRAVO-방-5828").await;
+    let old = named_channel(
+        &su,
+        t.workspace_id,
+        "public",
+        "옛-채널-5828",
+        &everyone,
+        true,
+    )
+    .await;
+    post(&pool, t.workspace_id, old, t.owner_id, "CHARLIE-옛-5828").await;
+
+    // "디자인" in decomposed jamo (NFD), then " 리뷰 QA".
+    let nfd = "\u{1103}\u{1175}\u{110C}\u{1161}\u{110B}\u{1175}\u{11AB} 리뷰 QA";
+    let spellings = [
+        "디자인-리뷰-qa".to_string(),
+        "#디자인 리뷰 QA".to_string(),
+        "\u{FF03}디자인-리뷰-\u{FF31}\u{FF21}".to_string(),
+        format!("  #{nfd}  "),
+    ];
+    let mut calls: Vec<(&str, Value)> = spellings
+        .iter()
+        .map(|name| ("read_channel", json!({"channel": name})))
+        .collect();
+    calls.push(("read_channel", json!({"channel": "#비밀-방-5828"})));
+    calls.push(("read_channel", json!({"channel": "#옛-채널-5828"})));
+    let script = Script::new(vec![tools(&calls), text("끝")]);
+    let w = worker_with(script.clone(), |_| {}).await;
+    // Asked in the member's own DM with the helper, so the reply room's audience
+    // is the requester's whole view and only the resolver stands in the way.
+    let (dm, _) = channel(&su, t.workspace_id, "dm", &[t.member_id, t.agent_id]).await;
+    enqueue_in(&pool, &t, dm, t.member_id, "디자인 채널 읽어 줘").await;
+    drain(&w).await;
+
+    let seen = script.seen();
+    assert_eq!(seen.len(), 2, "one read round, then the answer");
+    let data = fenced(&last_user_turn(&seen, 1));
+    assert_eq!(
+        data.matches("ALPHA-디자인-5828").count(),
+        spellings.len(),
+        "every spelling reads the same channel: {data}"
+    );
+    assert!(
+        !data.contains("BRAVO-방-5828"),
+        "a group DM room was read: {data}"
+    );
+    assert!(
+        !data.contains("CHARLIE-옛-5828"),
+        "an archived channel was read: {data}"
+    );
+    assert_eq!(
+        data.matches("not_found").count(),
+        2,
+        "the room and the archived channel are each not_found: {data}"
     );
 }

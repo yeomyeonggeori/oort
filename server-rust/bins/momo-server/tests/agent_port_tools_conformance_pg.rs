@@ -8839,7 +8839,9 @@ async fn a_stale_or_unsound_channel_proposal_changes_nothing() {
         json!({"name": "ok-name", "memberHandles": ["Not A Handle"]}),
         json!({"name": "ok-name", "memberHandles": [gone_handle]}),
         json!({"name": "ok-name", "memberHandles": [Uuid::new_v4().to_string()]}),
-        json!({"name": "UPPER CASE"}),
+        // ADR-0225: a blank now folds to `-` ("UPPER CASE" is `upper-case`);
+        // a full stop is still a refused name.
+        json!({"name": "UPPER.CASE"}),
     ] {
         let (status, refused) = try_propose_action_3706(
             &client,
@@ -33177,4 +33179,151 @@ async fn approving_an_expression_card_records_the_chosen_kind_or_the_recommended
     assert_eq!(none, 0, "a refused decision registers nothing");
     let (status, _) = decide_4829(&w, &admin_jwt, approval, false, None).await;
     assert_eq!(status, 200, "the card is rejected to free the pending slot");
+}
+
+/// **ADR-0225 D5·D6·D8-4 (#5828) — a Hangul channel flows through all three
+/// channel actions.** The bytes cap used to stop at 80 (27 syllables): a 34-character
+/// name with Hangul, a blank and capitals now proposes, is approved, takes members and
+/// is granted — each time spelled differently from how it was stored — and the
+/// outcome line names the channel without gluing a particle onto it.
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn a_hangul_channel_name_flows_through_create_member_add_and_grant_5828() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let fixture = seed(&su).await;
+    let base = start_server(app, true).await;
+    let client = reqwest::Client::new();
+    let (extra, extra_handle) = seed_extra_member_3706(&su, &fixture, "hangul").await;
+    // 3 + blank + 2 + blank + 27 syllables = 102 bytes: over the old 80-byte bound.
+    let typed = format!("디자인 리뷰 {}", "나".repeat(27));
+    let stored = format!("디자인-리뷰-{}", "나".repeat(27));
+    assert!(typed.len() > 80 && typed.chars().count() <= 80);
+
+    // ---- channel.create ----------------------------------------------------
+    let (status, proposed) = try_propose_action_3706(
+        &client,
+        &base,
+        &su,
+        &fixture,
+        "channel.create",
+        json!({"name": typed}),
+    )
+    .await;
+    assert_eq!(status, 200, "a 102-byte Hangul name proposes: {proposed}");
+    let (status, _h, approved) = decide_as(
+        &client,
+        &base,
+        fixture.workspace,
+        &fixture.human_jwt,
+        proposed_approval_3706(&proposed),
+        true,
+        Uuid::new_v4(),
+    )
+    .await;
+    assert_eq!(status, 200, "{approved}");
+    let (channel_id, _kind, _by) = channel_row_3706(&su, fixture.workspace, &stored)
+        .await
+        .expect("the channel is stored under the folded name");
+
+    // ---- channel.member.add, spelled with a leading # and capitals ----------
+    let (status, proposed) = try_propose_action_3706(
+        &client,
+        &base,
+        &su,
+        &fixture,
+        "channel.member.add",
+        json!({"channel": format!("#{}", typed.to_uppercase()), "memberHandles": [extra_handle]}),
+    )
+    .await;
+    assert_eq!(status, 200, "{proposed}");
+    let (status, _h, approved) = decide_as(
+        &client,
+        &base,
+        fixture.workspace,
+        &fixture.human_jwt,
+        proposed_approval_3706(&proposed),
+        true,
+        Uuid::new_v4(),
+    )
+    .await;
+    assert_eq!(status, 200, "{approved}");
+    assert_eq!(
+        membership_role_3707(&su, channel_id, extra)
+            .await
+            .as_deref(),
+        Some("member")
+    );
+    let outcome_lines: Vec<String> = sqlx::query_scalar(
+        "SELECT body FROM message WHERE workspace_id=$1 AND body LIKE '%명을 넣었어요%'",
+    )
+    .bind(fixture.workspace)
+    .fetch_all(&su)
+    .await
+    .unwrap();
+    assert_eq!(
+        outcome_lines,
+        vec![format!("#{stored} 채널에 멤버 1명을 넣었어요")],
+        "the outcome line puts a word between the name and the particle"
+    );
+
+    // ---- hosted.channels.grant: a public Hangul channel the agent is not in ----
+    let public_name = format!("공개-{}", "라".repeat(30));
+    let (public_id, _) = seed_channel_3707(&su, &fixture, "public", &[]).await;
+    sqlx::query("UPDATE channel SET name=$2 WHERE id=$1")
+        .bind(public_id)
+        .bind(&public_name)
+        .execute(&su)
+        .await
+        .unwrap();
+    let (status, proposed) = try_propose_action_3706(
+        &client,
+        &base,
+        &su,
+        &fixture,
+        "hosted.channels.grant",
+        json!({"channels": [format!("#공개 {}", "라".repeat(30))]}),
+    )
+    .await;
+    assert_eq!(
+        status, 200,
+        "a 99-byte Hangul ref is granted a card: {proposed}"
+    );
+    let (status, _h, approved) = decide_as(
+        &client,
+        &base,
+        fixture.workspace,
+        &fixture.human_jwt,
+        proposed_approval_3706(&proposed),
+        true,
+        Uuid::new_v4(),
+    )
+    .await;
+    assert_eq!(status, 200, "{approved}");
+    assert!(hosted_approved_3706(&su, &fixture)
+        .await
+        .contains(&public_id));
+
+    // ---- the 80-character edge: 240 bytes proposes, 81 characters does not -----
+    let (status, proposed) = try_propose_action_3706(
+        &client,
+        &base,
+        &su,
+        &fixture,
+        "channel.create",
+        json!({"name": "가".repeat(80)}),
+    )
+    .await;
+    assert_eq!(status, 200, "80 Hangul characters propose: {proposed}");
+    let (status, refused) = try_propose_action_3706(
+        &client,
+        &base,
+        &su,
+        &fixture,
+        "channel.create",
+        json!({"name": "가".repeat(81)}),
+    )
+    .await;
+    assert_eq!(status, 400, "81 characters are refused: {refused}");
 }

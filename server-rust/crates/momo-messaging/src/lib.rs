@@ -155,13 +155,14 @@ pub use attachment_media::{
 };
 pub use channel::{
     add_channel_member_in_tx, clamp_channel_list_limit, create_channel,
-    create_channel_detailed_in_tx, create_channel_in_tx, list_workspace_channels,
-    list_workspace_channels_within, normalize_channel_kind, normalize_channel_name,
-    normalize_channel_topic, normalize_membership_role, remove_channel_member_in_tx,
-    set_notification_pref_in_tx, validate_channel_mute, Channel, ChannelKind, ChannelMembership,
-    ChannelMute, ChannelMuteWrite, ChannelSpecInvalid, ChannelSummary, CreatedChannel,
-    MutedUntilInvalid, NewChannel, CHANNEL_LIST_LIMIT_DEFAULT, CHANNEL_LIST_LIMIT_MAX,
-    CHANNEL_MUTE_MAX_DAYS, CHANNEL_NAME_MAX_CHARS, CHANNEL_TOPIC_MAX_CHARS,
+    create_channel_detailed_in_tx, create_channel_in_tx, fold_channel_name, judge_channel_name,
+    list_workspace_channels, list_workspace_channels_within, normalize_channel_kind,
+    normalize_channel_name, normalize_channel_topic, normalize_membership_role,
+    remove_channel_member_in_tx, set_notification_pref_in_tx, validate_channel_mute, Channel,
+    ChannelKind, ChannelMembership, ChannelMute, ChannelMuteWrite, ChannelNameRefusal,
+    ChannelSpecInvalid, ChannelSummary, CreatedChannel, MutedUntilInvalid, NewChannel,
+    CHANNEL_LIST_LIMIT_DEFAULT, CHANNEL_LIST_LIMIT_MAX, CHANNEL_MUTE_MAX_DAYS,
+    CHANNEL_NAME_MAX_CHARS, CHANNEL_TOPIC_MAX_CHARS,
 };
 pub use channel_restriction::ChannelRestriction;
 pub use channel_viewing::{touch_channel_viewing_in_tx, ViewingOutcome, VIEWING_MIN_REFRESH_SECS};
@@ -192,10 +193,10 @@ pub use huddle::{
 pub use identity::{
     active_workspace_role, can_observe_agent, clamp_roster_limit, get_member, get_workspace,
     is_active_agent, is_active_human_member, is_channel_member, list_workspace_roster,
-    parse_roster_kind_filter, read_workspace_for_active_member, resolve_member_signing_key,
-    verify_password_login, Member, MemberKind, PasswordLogin, RosterKindFilterInvalid,
-    RosterMember, Workspace, WorkspaceIdentity, WorkspaceRead, WorkspaceRole, ROSTER_LIMIT_DEFAULT,
-    ROSTER_LIMIT_MAX,
+    list_workspace_roster_with_status, parse_roster_kind_filter, read_workspace_for_active_member,
+    resolve_member_signing_key, verify_password_login, Member, MemberKind, PasswordLogin,
+    RosterKindFilterInvalid, RosterMember, RosterStatusScope, Workspace, WorkspaceIdentity,
+    WorkspaceRead, WorkspaceRole, ROSTER_LIMIT_DEFAULT, ROSTER_LIMIT_MAX,
 };
 pub use inbox::{
     clamp_inbox_limit, delete_read_inbox_items_in_tx, inbox_event_payload,
