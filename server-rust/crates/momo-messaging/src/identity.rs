@@ -241,7 +241,9 @@ pub async fn is_active_agent(
 /// someone the roster could list, and anyone the roster would never list (invited,
 /// suspended, deleted, an agent, another tenant's member) cannot appear in the
 /// roll-call. Keeping the two in step is the whole privacy argument: availability
-/// is reported only for rows the roster already shows.
+/// is reported only for rows the roster already shows. (#5814: the owner/admin
+/// view of the HTTP roster, when asked for, also carries suspended humans, but the
+/// route never reports availability on a row that is not `active`.)
 ///
 /// `conn` carries the tenant GUC (`with_tenant_tx`), so RLS already refuses another
 /// tenant's rows; `workspace_id` is bound as well because a subscribe callback is
@@ -638,6 +640,10 @@ fn decode_roster_member(row: &sqlx::postgres::PgRow) -> Result<RosterMember, sql
 /// the wire), and an **agent without a profile row** is not paused (false). One
 /// `COALESCE` over both would have told the client every human is awake, which
 /// is not a thing a human can be.
+///
+/// Active members only. Every reader but the owner/admin view of the HTTP roster
+/// calls this — the team AI's member list, the usage page's guest narrowing —
+/// so none of them can start listing a suspended person (#5814).
 pub async fn list_workspace_roster(
     conn: &mut PgConnection,
     workspace_id: Uuid,
@@ -646,6 +652,54 @@ pub async fn list_workspace_roster(
     kind_filter: Option<MemberKind>,
     limit: i64,
 ) -> Result<Vec<RosterMember>, DbError> {
+    list_workspace_roster_with_status(
+        conn,
+        workspace_id,
+        viewer_member_id,
+        viewer_is_guest,
+        kind_filter,
+        limit,
+        RosterStatusScope::Active,
+    )
+    .await
+}
+
+/// Which lifecycle states a roster read carries (#5814, ADR-0128 D3 증보).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RosterStatusScope {
+    /// `member.status = 'active'` only — what every reader but one gets.
+    Active,
+    /// Active members **plus suspended humans**: the owner/admin directory, so a
+    /// suspension can be found again and undone from the members tab. Only the
+    /// HTTP roster route asks for it, and only for a request that opted in
+    /// (`include=suspended`) from an owner/admin person on a full app session.
+    ///
+    /// Humans only: a suspended *agent* is a switched-off personal agent or a
+    /// retired subscription agent, each read and switched on its own surface
+    /// (`GET …/personal-agents`, the agent's management page), and the wire
+    /// contract says a switched-off agent is not on the roster. Never `deleted`
+    /// or `invited`, for anyone.
+    ActiveAndSuspendedHumans,
+}
+
+/// [`list_workspace_roster`] with the lifecycle scope spelled out. The SQL is
+/// one statement for both scopes, so the guest narrowing, the projection and
+/// the ordering cannot drift apart between the two views.
+///
+/// A guest viewer never gets the wider scope, whatever the caller passes: the
+/// guest narrowing and the suspended rows are not meant to meet.
+#[allow(clippy::too_many_arguments)]
+pub async fn list_workspace_roster_with_status(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    viewer_member_id: Uuid,
+    viewer_is_guest: bool,
+    kind_filter: Option<MemberKind>,
+    limit: i64,
+    status_scope: RosterStatusScope,
+) -> Result<Vec<RosterMember>, DbError> {
+    let carry_suspended_humans =
+        status_scope == RosterStatusScope::ActiveAndSuspendedHumans && !viewer_is_guest;
     let rows = sqlx::query(
         "SELECT m.id, \
                 m.workspace_id, \
@@ -751,7 +805,8 @@ pub async fn list_workspace_roster(
            ) ch ON true \
           WHERE m.workspace_id = $1 \
             AND m.deleted_at IS NULL \
-            AND m.status = 'active' \
+            AND (m.status = 'active' \
+                 OR ($6 AND m.kind = 'human' AND m.status = 'suspended')) \
             AND ($3::text IS NULL OR m.kind::text = $3::text) \
             AND (NOT $4 OR m.id = $2 OR EXISTS ( \
               SELECT 1 \
@@ -770,6 +825,7 @@ pub async fn list_workspace_roster(
     .bind(kind_filter.map(MemberKind::as_db_label))
     .bind(viewer_is_guest)
     .bind(limit)
+    .bind(carry_suspended_humans)
     .fetch_all(&mut *conn)
     .await?;
     rows.iter()
