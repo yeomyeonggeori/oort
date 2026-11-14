@@ -242,6 +242,8 @@ export function ConnectPage({
     // 그 칸을 가진 화면이 마운트될 때까지 기다린다.
     if (!node) return;
     node.focus();
+    // 「바꾸기」·「뒤로」가 앞 서버 주소를 채워 둔 칸: 골라 두면 그대로 붙여 넣기·타자가 그 글을 대신한다(#5785).
+    if (pendingFocus === "entry") entryRef.current?.select();
     setPendingFocus(null);
   }, [pendingFocus, step]);
 
@@ -256,13 +258,19 @@ export function ConnectPage({
 
   /** 서버를 이 기기의 선택으로 굳힌다. "" = 같은 출처(웹). */
   const commitServer = useCallback((base: string) => {
+    // 서버가 바뀌면 앞 서버 로그인 걸음에서 친 비밀번호는 새 서버로 가지 않는다(이메일은 남긴다).
+    const dropPasswordIfMoved = (next: string) => {
+      if ((getServerBase() ?? "") !== next) setPassword("");
+    };
     if (base === "") {
+      dropPasswordIfMoved("");
       setServerBase(null);
       setServerUrl("");
       return;
     }
     const checked = normalizeServerUrl(base);
     if (!checked.ok) return;
+    dropPasswordIfMoved(checked.base);
     setServerBase(checked.base);
     setServerUrl(checked.base);
     rememberRecentServer(checked.base);

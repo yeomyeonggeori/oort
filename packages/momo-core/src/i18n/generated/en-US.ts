@@ -10979,7 +10979,7 @@ export const catalog: MessageCatalog = {
   "workspace.add.joinPasteBody": [
     {
       "type": 0,
-      "value": "To join another server, sign out, then choose “Change” on the sign-in screen and enter this link. Copy it before you sign out."
+      "value": "To join another server, sign out, then choose “Change” on the sign-in screen and paste this link into the box that opens. Copy it before you sign out."
     }
   ],
   "workspace.add.joinPasteTitle": [

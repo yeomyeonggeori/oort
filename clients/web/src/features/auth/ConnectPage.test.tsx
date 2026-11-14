@@ -481,6 +481,57 @@ describe("D0 환영 (#2808 OB2-2)", () => {
     click("connect-server-change");
     expect(q("onboarding-welcome")).not.toBeNull();
   });
+
+  it("골라 둔 채로 칸에 선다: 그대로 붙여 넣은 링크가 앞 서버 주소를 대신한다 (#5785 H1)", () => {
+    mount();
+    submitEntry("team.example.com");
+    click("connect-server-change");
+    const box = q("connect-entry") as HTMLInputElement;
+    expect(box.value).toBe("https://team.example.com");
+    expect(focused()).toBe("connect-entry");
+    expect([box.selectionStart, box.selectionEnd]).toEqual([0, box.value.length]);
+  });
+
+  it("이어 붙은 링크는 망가진 서버 이름을 칩에 세우지 않고 마지막 링크로 간다 (#5785 H1)", () => {
+    mount();
+    submitEntry("team.example.com");
+    click("connect-server-change");
+    submitEntry(`https://team.example.comhttps://next.example.com/?code=${CODE}`);
+    expect(q("onboarding-join")).not.toBeNull();
+    expect(q("connect-server-chip-host")?.textContent).toBe("next.example.com");
+    expect(getServerBase()).toBe("https://next.example.com");
+  });
+
+  it("망가진 호스트 이름은 칩에도 저장에도 서지 않고 칸에서 거절한다 (#5785 H1)", () => {
+    mount();
+    submitEntry("team.example.com");
+    click("connect-server-change");
+    submitEntry("https://team.example.comhttps");
+    expect(q("onboarding-welcome")).not.toBeNull();
+    expect(q("connect-entry-error")).not.toBeNull();
+    expect(getServerBase()).toBe("https://team.example.com");
+  });
+
+  it("서버가 바뀌면 앞 서버에서 친 비밀번호는 비워지고 이메일은 남는다 (#5785 M1)", () => {
+    setServerBase("https://team.example.com");
+    mount();
+    fill("login-email", "dohyeon@example.test");
+    fill("login-password", "abcdefgh");
+    click("connect-server-change");
+    submitEntry("https://next.example.com");
+    expect(q("onboarding-sign-in")).not.toBeNull();
+    expect((q("login-password") as HTMLInputElement).value).toBe("");
+    expect((q("login-email") as HTMLInputElement).value).toBe("dohyeon@example.test");
+  });
+
+  it("같은 서버로 돌아오면 비밀번호를 건드리지 않는다 (#5785 M1)", () => {
+    setServerBase("https://team.example.com");
+    mount();
+    fill("login-password", "abcdefgh");
+    click("connect-server-change");
+    submitEntry("https://team.example.com");
+    expect((q("login-password") as HTMLInputElement).value).toBe("abcdefgh");
+  });
 });
 
 describe("D1 로그인 한 화면 (#2809 OB2-3)", () => {

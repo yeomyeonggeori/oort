@@ -53,16 +53,37 @@ function strip(value: string): string {
   return value.replace(INVISIBLE, "").replace(WRAPPERS, "");
 }
 
+/**
+ * 링크 낱말 안에 다른 링크의 머리가 이어 붙은 자리(`…comhttps://…`, `…:6051oort://…`, `…/oortoort://…`).
+ * 칸에 미리 채운 앞 서버 주소 뒤에 새 링크를 붙여 넣으면 생기는 모양이다. 앞 글자가 `=`·`&`·`?`·`%`인
+ * 자리(`?server=https://…`)는 한 링크의 안쪽이라 가르지 않는다.
+ */
+const GLUED_LINK_HEAD = /(?<=[A-Za-z0-9/])(?:oort|momo|https?):\/\//gi;
+
+/** 이어 붙은 링크는 마지막 온전한 링크만 남긴다(붙여 넣은 쪽이 뒤에 온다). */
+function lastGluedLink(link: string): string {
+  let start = 0;
+  for (const hit of link.matchAll(GLUED_LINK_HEAD)) start = hit.index ?? start;
+  return link.slice(start);
+}
+
+/** 호스트 이름의 마지막 마디가 다른 링크의 머리(`comhttps`)로 끝나면 이어 붙은 글이다. */
+function hostIsGlued(host: string): boolean {
+  const last = host.toLowerCase().split(".").pop() ?? "";
+  return /.(?:https?|oort|momo)$/.test(last);
+}
+
 /** 붙여 넣은 덩어리에서 판정할 낱말 하나를 고른다. 링크가 있으면 첫 링크. */
 export function pickEntryToken(raw: string): string {
   const cleaned = raw.replace(INVISIBLE, "").trim();
   if (cleaned === "") return "";
-  const links = cleaned.match(LINK_TOKEN);
+  const links = cleaned.match(LINK_TOKEN)?.map(lastGluedLink);
   if (links && links.length > 0) {
     // 초대 카드처럼 링크 여럿이 든 글이면 초대·claim 링크를 앞세운다.
     const preferred =
       links.find((link) => /^(?:oort|momo):/i.test(link)) ??
       links.find((link) => /\/claim\//i.test(link)) ??
+      links.find((link) => /[?&#/]code=|[?&]join=/i.test(link)) ??
       links[0];
     return strip(preferred);
   }
@@ -77,7 +98,9 @@ function looksLikeHost(token: string): boolean {
   const name = host.replace(/:\d+$/, "").toLowerCase();
   if (name === "localhost") return true;
   if (/^\[[0-9a-f:]+\]$/i.test(name)) return true;
-  return name.includes(".") && !name.startsWith(".") && !name.endsWith(".");
+  return (
+    name.includes(".") && !name.startsWith(".") && !name.endsWith(".") && !hostIsGlued(name)
+  );
 }
 
 function fromCustomScheme(token: string): EntryDecision | null {
@@ -103,7 +126,9 @@ function fromWebUrl(token: string): EntryDecision | null {
   } catch {
     return { kind: "invalid", message: MSG_UNKNOWN };
   }
-  if (url.hostname === "") return { kind: "invalid", message: MSG_UNKNOWN };
+  if (url.hostname === "" || hostIsGlued(url.hostname)) {
+    return { kind: "invalid", message: MSG_UNKNOWN };
+  }
   const path = url.pathname;
   const lower = path.toLowerCase();
   if (lower === "/claim" || lower.startsWith(CLAIM_PATH_PREFIX)) {

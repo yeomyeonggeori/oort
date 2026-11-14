@@ -619,7 +619,7 @@ describe("워크스페이스 추가: 이미 있는 곳에 참여 (#5785)", () =>
     );
     const dialog = text("add-workspace-dialog");
     expect(dialog).toContain("로그아웃할까요?");
-    expect(dialog).toContain("로그인 화면의 「바꾸기」에 이 링크를 넣어요");
+    expect(dialog).toContain("로그인 화면에서 「바꾸기」를 누르고, 나오는 칸에 이 링크를 붙여 넣어요");
     // 로그아웃 뒤에도 초안이 남는 기존 결함이 고쳐지기 전까지 「지워져요」는 거짓이다(#5785 수리 1회차).
     expect(dialog).not.toContain("초안");
     expect(text("add-workspace-join-paste-link")).toBe("https://team.example.com/");

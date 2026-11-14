@@ -24,7 +24,7 @@
   "workspace.add.joinTargetInviteOnly": "Continues with the invite link you received.",
   "workspace.add.joinConfirmAction": "Sign out and continue",
   "workspace.add.joinPasteTitle": "Sign out?",
-  "workspace.add.joinPasteBody": "To join another server, sign out, then choose “Change” on the sign-in screen and enter this link. Copy it before you sign out.",
+  "workspace.add.joinPasteBody": "To join another server, sign out, then choose “Change” on the sign-in screen and paste this link into the box that opens. Copy it before you sign out.",
   "workspace.add.joinPasteAction": "Sign out",
   "workspace.add.joinOpenTitle": "Open in a new tab?",
   "workspace.add.joinOpenBody": "On the web you can't switch to another server from this window. That server opens in a new tab, and this workspace stays as it is.",

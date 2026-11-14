@@ -78,4 +78,61 @@ describe("D0 한 칸 판별 표 (#2808)", () => {
       pickEntryToken(`서버 주소: https://team.example.com\n링크: oort://join?code=${CODE}`)
     ).toBe(`oort://join?code=${CODE}`);
   });
+  // #5785 H1: 「바꾸기」로 연 칸에 앞 서버 주소가 채워져 있을 때 링크를 붙여 넣으면 그 뒤에 이어 붙는다.
+  describe("앞 서버 주소 뒤에 이어 붙은 링크", () => {
+    const NEXT = `https://next.example.com/?code=${CODE}`;
+    const GLUED: readonly [label: string, input: string][] = [
+      ["포트 있는 앞 서버", `http://127.0.0.1:6051${NEXT}`],
+      ["포트 없는 https 앞 서버", `https://oort.team-a.example.com${NEXT}`],
+      ["경로가 붙은 앞 서버", `https://team-a.example.com/oort${NEXT}`],
+      ["끝 슬래시가 붙은 앞 서버", `https://team-a.example.com/${NEXT}`],
+      ["스킴 없는 앞 서버", `team-a.example.com${NEXT}`],
+      ["공백으로 이어진 앞 서버", `https://team-a.example.com ${NEXT}`],
+    ];
+
+    it.each(GLUED)("%s: 마지막 온전한 링크를 고른다", (_label, input) => {
+      expect(classifyEntry(input)).toEqual({
+        kind: "invite",
+        serverUrl: "https://next.example.com",
+        inviteCode: CODE,
+      });
+    });
+
+    it("oort:// 초대가 이어 붙어도 마지막 링크를 고른다", () => {
+      const link = `oort://join?server=https%3A%2F%2Fnext.example.com&code=${CODE}`;
+      for (const prefix of ["https://oort.team-a.example.com", "http://127.0.0.1:6051", "https://team-a.example.com/oort"]) {
+        expect(classifyEntry(`${prefix}${link}`)).toEqual({
+          kind: "invite",
+          serverUrl: "https://next.example.com",
+          inviteCode: CODE,
+        });
+      }
+    });
+
+    it("주소만 이어 붙어도 마지막 주소다", () => {
+      expect(classifyEntry("https://team-a.example.comhttps://next.example.com")).toEqual({
+        kind: "server",
+        base: "https://next.example.com",
+      });
+    });
+
+    it("링크 안의 server=https:// 는 가르지 않는다", () => {
+      const raw = `oort://join?server=https://next.example.com&code=${CODE}`;
+      expect(pickEntryToken(raw)).toBe(raw);
+    });
+
+    it("망가진 호스트 이름은 어떤 입력에서도 서버로 서지 않는다", () => {
+      for (const input of [
+        "https://oort.team-a.example.comhttps",
+        "oort.team-a.example.comhttps",
+        "https://team-a.example.comoort",
+        "team-a.example.commomo",
+        "https://127.0.0.1https",
+        "http://127.0.0.1:6051https",
+        "oort.team-a.example.comhttps//next.example.com",
+      ]) {
+        expect(classifyEntry(input).kind, input).toBe("invalid");
+      }
+    });
+  });
 });

@@ -10292,7 +10292,7 @@ export const catalog: MessageCatalog = {
   "workspace.add.joinPasteBody": [
     {
       "type": 0,
-      "value": "다른 서버에 참여하려면 로그아웃한 뒤 로그인 화면의 「바꾸기」에 이 링크를 넣어요. 로그아웃하기 전에 복사해 두세요."
+      "value": "다른 서버에 참여하려면 로그아웃한 뒤 로그인 화면에서 「바꾸기」를 누르고, 나오는 칸에 이 링크를 붙여 넣어요. 로그아웃하기 전에 복사해 두세요."
     }
   ],
   "workspace.add.joinPasteTitle": [
