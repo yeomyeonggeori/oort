@@ -129,4 +129,6 @@ export const CONNECTION_KEYS = {
   /** 환영 화면에서 오프라인일 때 QR을 찍을 수 없는 까닭 한 줄(#5262). */
   bootOfflineQrDetail: "connection.boot.offlineQrDetail",
   bootUnreachable: "connection.boot.unreachable",
+  /** 저장된 로그인이 있는 채 다른 서버로 바꿔 앞 서버의 로그인을 끝냈다(#5816). `{host}` = 앞 서버. */
+  bootServerSwitchedSignedOut: "connection.boot.serverSwitchedSignedOut",
 } as const satisfies Record<string, ConnectionKey>;

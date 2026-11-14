@@ -178,7 +178,7 @@ export function App() {
   const retryRestore = useCallback(async () => {
     const restored = await restoreSession();
     if (restored) signIn(restored);
-    else if (!hasPersistedSession()) clearSessionNotices();
+    else if (!hasPersistedSession()) clearSessionNotices({ keepServerSwitch: true });
   }, [signIn]);
   const [firstRunTick, setFirstRunTick] = useState(0);
   // GitHub 에서 돌아온 주소의 단어(`?githubApp=`·`?githubInstall=`)는 첫 렌더에 한 번만 읽어 붙든다.

@@ -1,5 +1,6 @@
 import { failPending, retryPending, type PendingMessage } from "../timeline/model";
 import { buildExpressionMessage } from "./message";
+import { isCurrentSession, sessionStamp, type SessionStamp } from "../../lib/sessionStamp";
 import type { Expression } from "./types";
 
 // =============================================================================
@@ -151,8 +152,14 @@ export interface BundlePoster {
  *   · 머리 행의 앞이 아직 목록에 있으면(`bundleMayPost`) 아무것도 하지 않고 false다: 뒤 행을 직접 다시 보내려 해도 앞지르지 못한다.
  *   · 머리 행이 실패하면 뒤 행은 **보내지 않고** `held`로 알린다. 머리 행이 확정되면 뒤 행이 이어서 나간다(같은 열쇠로, 서버가 이미 받은 것은 그대로 돌려준다).
  *   · 돌려주는 값은 **머리 행이 확정되었는가**다. 뒤 행이 실패해도 머리 행은 확정된 것이고, 그 실패는 뒤 행 자신의 `post`가 알린다.
+ *   · 뒤 행은 묶음을 시작한 세션으로만 나간다(#5816). 머리 행의 답을 기다리는 사이 그 세션이 끝났으면 뒤 행은 보내지 않는다.
  */
-export async function postBundleInOrder(head: PendingMessage, poster: BundlePoster): Promise<boolean> {
+export async function postBundleInOrder(
+  head: PendingMessage,
+  poster: BundlePoster,
+  sentAs: SessionStamp = sessionStamp()
+): Promise<boolean> {
+  if (!isCurrentSession(sentAs)) return false;
   if (!bundleMayPost(head, poster.list())) return false;
   const sent = await poster.post(head);
   const followers = bundleTail(poster.list(), head.clientMsgId).filter((row) => row.clientMsgId !== head.clientMsgId);
@@ -162,7 +169,7 @@ export async function postBundleInOrder(head: PendingMessage, poster: BundlePost
   }
   for (const follower of followers) {
     // 머리 행이 확정되어 빠졌으므로 첫 뒤 행은 나갈 수 있다. 뒤 행이 실패하면 그 뒤 행들은 위의 같은 규칙으로 멈춘다.
-    if (!(await postBundleInOrder(follower, poster))) break;
+    if (!(await postBundleInOrder(follower, poster, sentAs))) break;
   }
   return true;
 }

@@ -1,4 +1,5 @@
 import { rotateAfterUnauthorized, type MessageAttachment } from '@momo/core/lib/api';
+import { sessionStamp } from '@momo/core/lib/sessionStamp';
 import { NetworkError } from '@momo/core/lib/http';
 import { apiBase, coreSession } from '@momo/core/runtime/host';
 import { Directory, File, Paths } from 'expo-file-system';
@@ -195,6 +196,8 @@ export async function fetchToFile(
   destination: File,
   onProgress?: (progress: number | null) => void,
 ): Promise<File> {
+  // 다시 받을 때는 처음 받은 세션으로만(#5816).
+  const sentAs = sessionStamp();
   try {
     try {
       return await streamToFile(url, destination, onProgress);
@@ -209,7 +212,7 @@ export async function fetchToFile(
       // 원래의 401 이 바깥 catch 로 가 선언되고, 서버에 닿지 못했으면 코어가 연결
       // 오류를 던진다. 그 문구는 401 로 읽히지 않으므로 바깥 catch 가 선언하지 않고,
       // 이 다운로드만 실패한다(다음 요청이 다시 갱신한다).
-      if (!(await rotateAfterUnauthorized())) throw error;
+      if (!(await rotateAfterUnauthorized(sentAs))) throw error;
       return await streamToFile(url, destination, onProgress);
     }
   } catch (error: unknown) {

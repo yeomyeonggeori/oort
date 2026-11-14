@@ -1,4 +1,5 @@
 import { authedRequest, rotateAfterUnauthorized } from "@momo/core/lib/api";
+import { sessionStamp } from "@momo/core/lib/sessionStamp";
 import { apiBase, coreSession } from "@momo/core/runtime/host";
 import { createExpressionFixtureServer } from "@momo/core/features/expressions/fixtureServer";
 import { errorCodeOf } from "@momo/core/features/expressions/photo";
@@ -40,9 +41,11 @@ async function binaryRequest(path: string, init: RequestInit = {}, timeoutMs = 1
     if (token) headers.set("Authorization", `Bearer ${token}`);
     return fetch(`${apiBase()}${path}`, { ...init, headers, signal: controller.signal, cache: "no-store" });
   };
+  // Sent again only as the session that sent it (#5816).
+  const sentAs = sessionStamp();
   try {
     let response = await send();
-    if (response.status === 401 && coreSession().getRefreshToken() && await rotateAfterUnauthorized()) response = await send();
+    if (response.status === 401 && coreSession().getRefreshToken() && await rotateAfterUnauthorized(sentAs)) response = await send();
     if (response.status === 401) coreSession().markAuthExpired();
     if (!response.ok) throw new ExpressionHttpError(response.status, errorCodeOf(await response.text()));
     // Read bytes inside the request deadline as well.

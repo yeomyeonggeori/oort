@@ -266,6 +266,8 @@ export default function ConnectScreen({
   const [linkFailure, setLinkFailure] = useState<ConnectFailure | null>(null);
   const [sasWait, setSasWait] = useState<{
     session: LoginResponse;
+    /** The server that issued `session` (`DeviceLinkRedeemResult.server`). */
+    server: string;
     sas: string;
     startedAt: number;
     expired: boolean;
@@ -590,12 +592,17 @@ export default function ConnectScreen({
         if (!result.pendingSas) return;
         setSasWait({
           session: result.session,
+          server: result.server,
           sas: result.sas ?? deviceLinkSasDigits(link.token),
           startedAt: Date.now(),
           expired: false,
           unreachable: false,
         });
       } catch (error) {
+        // A newer link (or a sign-in) moved the server while this one was in the
+        // air: that one owns the server and the screen now, so this failure does
+        // not put the older choice back over it (#5816).
+        if (getServerBase() !== link.serverUrl) return;
         setServerBase(previousBase);
         setServerUrl(previousField);
         setLinkFailure(deviceLinkFailureCopy(error));
@@ -662,6 +669,7 @@ export default function ConnectScreen({
     let delay = DEVICE_LINK_POLL_MS;
     const startedAt = sasWait.startedAt;
     const session = sasWait.session;
+    const server = sasWait.server;
     const tick = async () => {
       if (Date.now() >= startedAt + DEVICE_LINK_TTL_MS) {
         setSasWait(current =>
@@ -672,6 +680,7 @@ export default function ConnectScreen({
       const outcome = await probeDeviceLinkAccess(
         session.accessToken,
         session.member.workspaceId,
+        server,
       );
       if (cancelled) return;
       if (Date.now() >= startedAt + DEVICE_LINK_TTL_MS) {
@@ -686,7 +695,14 @@ export default function ConnectScreen({
             ? {...current, unreachable: false}
             : current,
         );
-        activateDeviceLinkSession(session);
+        try {
+          activateDeviceLinkSession(session, server);
+        } catch (error) {
+          // The device points at another server now: the core ended this held
+          // session where it was issued instead of adopting it (#5816).
+          setSasWait(current => (current?.startedAt === startedAt ? null : current));
+          setLinkFailure(deviceLinkFailureCopy(error));
+        }
         return;
       }
       if (outcome === 'unreachable') {

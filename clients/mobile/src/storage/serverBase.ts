@@ -1,4 +1,6 @@
+import {logout} from '@momo/core/lib/api';
 import {normalizeServerUrl} from '@momo/core/lib/serverUrl';
+import {coreSession} from '@momo/core/runtime/host';
 import {NON_SECRET_KEYS, nonSecretStore} from './kv';
 
 // =============================================================================
@@ -83,6 +85,11 @@ export function setServerBase(base: string | null): void {
   const next = base === null || base === '' ? null : base;
   if (loaded && next === chosen) {
     return;
+  }
+  // 저장된 세션은 그것을 낸 서버의 것이다(#5816): 요청은 저장된 세션과 저장된 서버를 함께 읽는다. 세션이 저장된 채
+  // 서버를 바꾸면 그 세션을 먼저 그 서버에서 끝낸다(`logout` 은 아래에서 바뀌기 전의 서버를 읽는다).
+  if (current() !== next && coreSession().getRefreshToken() !== null) {
+    void logout();
   }
   chosen = next;
   loaded = true;
