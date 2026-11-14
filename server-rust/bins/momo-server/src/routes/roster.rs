@@ -60,14 +60,25 @@
 //! The read runs **beside** the Postgres read (`join!`), so a slow broker costs the
 //! roster at most `PRESENCE_READ_TIMEOUT` and a healthy one costs it nothing.
 //!
-//! ## #5814 — suspended people, for an owner or admin (ADR-0128 D3 증보)
+//! ## #5814 — suspended people, for an owner or admin who asks (ADR-0128 D3 증보)
 //!
-//! An owner or admin signed in as a person also gets the workspace's **suspended
-//! humans**, each row saying `status: "suspended"`. Without them a suspension had
-//! no way back from the screen: once the profile window closed, nothing listed the
-//! person to reopen and reinstate. Everyone else — a member, a guest, an agent, a
-//! work host, the notification extension's narrow token — gets the active roster
-//! exactly as before ([`roster_status_scope`]).
+//! A request that says `?include=suspended`, from an owner or admin signed in on a
+//! person's full app session, also gets the workspace's **suspended humans**, each
+//! row saying `status: "suspended"`. Without them a suspension had no way back
+//! from the screen: once the profile window closed, nothing listed the person to
+//! reopen and reinstate.
+//!
+//! Both conditions, or the active roster exactly as before ([`roster_status_scope`]):
+//!   * **The opt-in.** A request without it gets the same response as before #5814,
+//!     whoever sends it, so an app that has not been updated (and does not filter
+//!     rows by status) never meets a suspended row. Unknown `include` values are
+//!     ignored.
+//!   * **The viewer.** Only a person whose workspace role is owner or admin, read
+//!     from the database on this request, on a credential that carries
+//!     [`FullPersonSession`] — an allow list, so every narrow door (developer
+//!     cards, the lock screen, the notification extension, agents, work hosts, and
+//!     any door added later) gets the active roster. Anyone else who asks gets the
+//!     active roster silently, not an error, so a client may always send it.
 //!
 //! Seeing is not undoing: an admin sees a suspended owner too, and the reinstate
 //! route still refuses that by the role ladder. A suspended row carries no
@@ -87,7 +98,7 @@ use momo_messaging::{
 };
 use uuid::Uuid;
 
-use crate::auth::PushFetchCredential;
+use crate::auth::FullPersonSession;
 use crate::dto::{RosterMemberDto, RosterQuery, WorkspaceRosterResponse};
 use crate::error::ApiError;
 use crate::routes::shared::{agent_tenant_tx, settle_db, workspace_scope, DbRejectable};
@@ -101,6 +112,14 @@ impl RosterQuery {
 
     fn limit(&self) -> i64 {
         clamp_roster_limit(self.limit.as_deref().and_then(|raw| raw.parse().ok()))
+    }
+
+    /// #5814: did the request opt in to suspended people (`include=suspended`,
+    /// one item of a comma-separated list)? Other items are ignored.
+    fn include_suspended(&self) -> bool {
+        self.include
+            .as_deref()
+            .is_some_and(|raw| raw.split(',').any(|item| item.trim() == "suspended"))
     }
 }
 
@@ -206,16 +225,18 @@ fn apply_availability(
 
 /// #5814 — which lifecycle states this viewer's roster carries.
 ///
-/// Suspended humans only for a **person** whose workspace role is owner or admin,
-/// on a full access token. An agent or a work host never gets them whatever its
-/// membership row says, and neither does the notification extension's narrow
-/// `push_fetch` token: it reads names for a notification, not the members tab.
+/// Suspended humans only when the request **asked** (`include=suspended`) and the
+/// viewer is a **person** on a **full app session** ([`FullPersonSession`], an
+/// allow list) whose workspace role, read on this request, is owner or admin.
+/// Anything else is the active roster: no opt-in (an app that predates it), an
+/// agent or a work host whatever its membership row says, and every narrow door.
 fn roster_status_scope(
+    include_suspended: bool,
+    full_person_session: bool,
     kind: PrincipalKind,
     role: WorkspaceRole,
-    push_fetch: bool,
 ) -> RosterStatusScope {
-    if kind == PrincipalKind::Human && role.is_admin() && !push_fetch {
+    if include_suspended && full_person_session && kind == PrincipalKind::Human && role.is_admin() {
         RosterStatusScope::ActiveAndSuspendedHumans
     } else {
         RosterStatusScope::Active
@@ -225,7 +246,7 @@ fn roster_status_scope(
 pub async fn roster(
     State(state): State<AppState>,
     Extension(principal): Extension<Principal>,
-    push_fetch: Option<Extension<PushFetchCredential>>,
+    full_person_session: Option<Extension<FullPersonSession>>,
     Path(workspace): Path<String>,
     Query(query): Query<RosterQuery>,
 ) -> Result<Json<WorkspaceRosterResponse>, ApiError> {
@@ -238,7 +259,8 @@ pub async fn roster(
     let limit = query.limit();
     let viewer = principal.member_id;
     let viewer_kind = principal.kind;
-    let push_fetch = push_fetch.is_some();
+    let full_person_session = full_person_session.is_some();
+    let include_suspended = query.include_suspended();
 
     let roster_read = agent_tenant_tx(&state.pool, workspace_id, move |conn| {
         Box::pin(async move {
@@ -253,7 +275,7 @@ pub async fn roster(
                 role == WorkspaceRole::Guest,
                 kind_filter,
                 limit,
-                roster_status_scope(viewer_kind, role, push_fetch),
+                roster_status_scope(include_suspended, full_person_session, viewer_kind, role),
             )
             .await?;
             // #3392 AIH-2 — the read contract for the agents this viewer may
@@ -330,6 +352,7 @@ mod tests {
             kind: kind.map(str::to_string),
             member_kind: member_kind.map(str::to_string),
             limit: limit.map(str::to_string),
+            include: None,
         }
     }
 
@@ -520,33 +543,66 @@ mod tests {
         );
     }
 
-    /// #5814: suspended humans for an owner/admin person on a full token, and for
-    /// nobody else — every principal kind × every role × narrow or not.
+    /// #5814: suspended humans only for a request that opted in, from a person on
+    /// a full app session whose role is owner or admin — every principal kind ×
+    /// role × opt-in × full session or not.
     #[test]
-    fn only_an_owner_or_admin_person_on_a_full_token_gets_suspended_rows() {
+    fn only_an_opted_in_owner_or_admin_person_on_a_full_session_gets_suspended_rows() {
         use WorkspaceRole::{Admin, Guest, Member, Owner};
         for kind in [
             PrincipalKind::Human,
             PrincipalKind::Agent,
             PrincipalKind::WorkHost,
         ] {
+            // No `_` arm: a new principal kind fails this build until it is placed.
+            let person = match kind {
+                PrincipalKind::Human => true,
+                PrincipalKind::Agent | PrincipalKind::WorkHost => false,
+            };
             for role in [Owner, Admin, Member, Guest] {
-                for push_fetch in [false, true] {
-                    let expected = if kind == PrincipalKind::Human
-                        && matches!(role, Owner | Admin)
-                        && !push_fetch
-                    {
-                        RosterStatusScope::ActiveAndSuspendedHumans
-                    } else {
-                        RosterStatusScope::Active
-                    };
-                    assert_eq!(
-                        roster_status_scope(kind, role, push_fetch),
-                        expected,
-                        "{kind:?} {role:?} push_fetch={push_fetch}"
-                    );
+                let manages = match role {
+                    Owner | Admin => true,
+                    Member | Guest => false,
+                };
+                for include in [false, true] {
+                    for full in [false, true] {
+                        let expected = if include && full && person && manages {
+                            RosterStatusScope::ActiveAndSuspendedHumans
+                        } else {
+                            RosterStatusScope::Active
+                        };
+                        assert_eq!(
+                            roster_status_scope(include, full, kind, role),
+                            expected,
+                            "{kind:?} {role:?} include={include} full_session={full}"
+                        );
+                    }
                 }
             }
+        }
+    }
+
+    /// #5814: the opt-in is one item of a comma-separated list, matched exactly;
+    /// anything else (absent, empty, unknown, a near miss) is no opt-in.
+    #[test]
+    fn include_suspended_is_an_exact_item_of_the_list() {
+        let with = |raw: Option<&str>| RosterQuery {
+            include: raw.map(str::to_string),
+            ..RosterQuery::default()
+        };
+        for (raw, expected) in [
+            (None, false),
+            (Some(""), false),
+            (Some("suspended"), true),
+            (Some("everything,suspended"), true),
+            (Some("suspended, everything"), true),
+            (Some(" suspended "), true),
+            (Some("everything"), false),
+            (Some("Suspended"), false),
+            (Some("suspended_people"), false),
+            (Some("deleted,invited"), false),
+        ] {
+            assert_eq!(with(raw).include_suspended(), expected, "{raw:?}");
         }
     }
 

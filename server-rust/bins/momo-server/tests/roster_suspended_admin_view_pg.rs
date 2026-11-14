@@ -3,9 +3,12 @@
 //! A suspension had no way back from the screen: the roster listed active members
 //! only, so once the profile window closed nothing listed the person to reopen and
 //! reinstate. The HTTP roster now carries suspended **humans** to an owner or admin
-//! person, and to nobody else. Every other path that lists or resolves people keeps
-//! refusing them, and those are measured here too, each with an owner as the actor
-//! (a member actor would stay green even if a widening leaked).
+//! person on a full app session **who asks** (`?include=suspended`), and to nobody
+//! else: a request without the opt-in — every app that predates it — gets the
+//! active roster exactly as before, whoever sends it. Every other path that lists
+//! or resolves people keeps refusing them, and those are measured here too, each
+//! with an owner as the actor (a member actor would stay green even if a widening
+//! leaked).
 //!
 //! `#[ignore]`: needs a `pgvector/pgvector:pg18` superuser DB plus the runtime roles.
 //!
@@ -22,10 +25,12 @@
 //!
 //! | test | revert that makes it red |
 //! |---|---|
-//! | `viewer_by_state_table` | widen for every viewer; widen for nobody; drop `m.kind = 'human'`; widen the status predicate past `suspended`; count suspended rows; drop the narrow-token gate |
+//! | `viewer_by_state_table` | widen without the opt-in; widen for every viewer; widen for nobody; drop `m.kind = 'human'`; widen the status predicate past `suspended`; count suspended rows; drop the full-session gate |
 //! | `other_paths_never_list_a_suspended_person` | widen the active-only roster query the team AI uses; drop `status = 'active'` from mention recording, DM open or channel add |
 //! | `suspend_list_reinstate_round_trip` | widen for nobody (the suspended row never appears) |
 //! | `rls_keeps_another_tenants_suspended_people_out` | a measurement of the RLS policy itself, not of this change: the wide read is asked for workspace B under workspace A's tenant GUC |
+//! | `the_role_is_read_per_request_not_frozen_with_the_token` | fix a token's role the first time it is seen (a demoted admin keeps the wide roster; a promoted member never gets it) |
+//! | `no_narrow_credential_gets_suspended_people_even_when_it_asks` | put the notification extension's token on the allow list. The other narrow doors refuse the roster route before the handler, so their cells hold even then; with a door opened as well, putting that door on the allow list turns its cell red |
 
 use std::net::SocketAddr;
 use std::path::PathBuf;
@@ -338,6 +343,52 @@ async fn roster(http: &reqwest::Client, base: &str, token: &str, workspace: Uuid
     body
 }
 
+/// The opt-in an owner/admin's members tab sends (#5814).
+const INCLUDE_SUSPENDED: &str = "?include=suspended";
+
+/// `GET …/roster{query}` (`query` is `""` or starts with `?`): the status and the
+/// body **text**, so two reads can be compared byte for byte.
+async fn roster_text(
+    http: &reqwest::Client,
+    base: &str,
+    token: &str,
+    workspace: Uuid,
+    query: &str,
+) -> (u16, String) {
+    let response = http
+        .get(format!("{base}/v1/workspaces/{workspace}/roster{query}"))
+        .bearer_auth(token)
+        .send()
+        .await
+        .expect("roster");
+    let status = response.status().as_u16();
+    (status, response.text().await.expect("roster body"))
+}
+
+/// The roster read with the opt-in; 200 for anyone who may read the roster at
+/// all (the opt-in is ignored, not refused, when it does not apply).
+async fn roster_including(
+    http: &reqwest::Client,
+    base: &str,
+    token: &str,
+    workspace: Uuid,
+) -> Value {
+    let (status, text) = roster_text(http, base, token, workspace, INCLUDE_SUSPENDED).await;
+    assert_eq!(status, 200, "roster read with the opt-in: {text}");
+    serde_json::from_str(&text).expect("roster json")
+}
+
+/// `body` with its non-active rows taken out: what the same viewer's read
+/// without the opt-in must equal (same rows, same order, same fields, same counts).
+fn without_suspended_rows(body: &Value) -> Value {
+    let mut body = body.clone();
+    body["members"]
+        .as_array_mut()
+        .expect("members array")
+        .retain(|row| row["status"] == "active");
+    body
+}
+
 /// The row's `status`, or `None` when the member is not on this roster.
 fn listed_status(roster: &Value, member: Uuid) -> Option<String> {
     roster["members"]
@@ -506,6 +557,8 @@ async fn viewer_by_state_table() {
         None,
     ];
     let narrow_view = [s("active"), None, None, None, None, None, None, None];
+    // What each viewer gets when it asks (`?include=suspended`). Without the opt-in
+    // every viewer gets `narrow_view`, the roster as it was before #5814.
     let viewers: [(&str, &str, [Option<String>; 8]); 5] = [
         ("owner", owner_token.as_str(), wide.clone()),
         ("admin", admin_token.as_str(), wide.clone()),
@@ -519,42 +572,119 @@ async fn viewer_by_state_table() {
     ];
 
     let mut table = Vec::new();
-    for (viewer, token, expected) in &viewers {
-        let body = roster(&http, &base, token, ws).await;
-        let mut cells = Vec::new();
-        for ((label, target), want) in targets.iter().zip(expected.iter()) {
-            let got = listed_status(&body, *target);
-            cells.push(format!("{label}={}", got.as_deref().unwrap_or("-")));
-            assert_eq!(&got, want, "{viewer} × {label}: {body}");
+    for (viewer, token, expected_when_asked) in &viewers {
+        let (status, plain_text) = roster_text(&http, &base, token, ws, "").await;
+        assert_eq!(status, 200, "{viewer}: {plain_text}");
+        let (status, asked_text) = roster_text(&http, &base, token, ws, INCLUDE_SUSPENDED).await;
+        assert_eq!(
+            status, 200,
+            "{viewer}: the opt-in is ignored, not refused, when it does not apply: {asked_text}"
+        );
+        let plain: Value = serde_json::from_str(&plain_text).expect("roster json");
+        let asked: Value = serde_json::from_str(&asked_text).expect("roster json");
+
+        for (read, body, expected) in [
+            ("no opt-in", &plain, &narrow_view),
+            ("include=suspended", &asked, expected_when_asked),
+        ] {
+            let mut cells = Vec::new();
+            for ((label, target), want) in targets.iter().zip(expected.iter()) {
+                let got = listed_status(body, *target);
+                cells.push(format!("{label}={}", got.as_deref().unwrap_or("-")));
+                assert_eq!(&got, want, "{viewer} ({read}) × {label}: {body}");
+            }
+            // Counts are active rows only, for every viewer.
+            let rows = body["members"].as_array().expect("members");
+            let active_humans = rows
+                .iter()
+                .filter(|r| r["kind"] == "human" && r["status"] == "active")
+                .count();
+            let active_agents = rows
+                .iter()
+                .filter(|r| r["kind"] == "agent" && r["status"] == "active")
+                .count();
+            assert_eq!(
+                body["humanCount"],
+                json!(active_humans),
+                "{viewer} ({read}): {body}"
+            );
+            assert_eq!(
+                body["agentCount"],
+                json!(active_agents),
+                "{viewer} ({read}): {body}"
+            );
+            // A suspended row carries no availability key.
+            for row in rows.iter().filter(|r| r["status"] != "active") {
+                assert!(row.get("online").is_none(), "{viewer} ({read}): {row}");
+            }
+            table.push(format!(
+                "{viewer} ({read}): {} | humanCount={} rows={}",
+                cells.join(" "),
+                body["humanCount"],
+                rows.len()
+            ));
         }
-        // Counts are active rows only, for every viewer.
-        let rows = body["members"].as_array().expect("members");
-        let active_humans = rows
-            .iter()
-            .filter(|r| r["kind"] == "human" && r["status"] == "active")
-            .count();
-        let active_agents = rows
-            .iter()
-            .filter(|r| r["kind"] == "agent" && r["status"] == "active")
-            .count();
-        assert_eq!(body["humanCount"], json!(active_humans), "{viewer}: {body}");
-        assert_eq!(body["agentCount"], json!(active_agents), "{viewer}: {body}");
-        // A suspended row carries no availability key.
-        for row in rows.iter().filter(|r| r["status"] != "active") {
-            assert!(row.get("online").is_none(), "{viewer}: {row}");
+
+        // The opt-in only ever adds suspended rows: take them out and the two reads
+        // are one response (rows, order, fields, counts).
+        assert_eq!(
+            without_suspended_rows(&asked),
+            plain,
+            "{viewer}: the opt-in changed more than the suspended rows"
+        );
+        // Where it does not apply it is ignored outright: the same bytes.
+        if expected_when_asked == &narrow_view {
+            assert_eq!(
+                asked_text, plain_text,
+                "{viewer}: the ignored opt-in changed the bytes"
+            );
         }
-        table.push(format!(
-            "{viewer}: {} | humanCount={} rows={}",
-            cells.join(" "),
-            body["humanCount"],
-            rows.len()
-        ));
         // One wide body on one line, for the OpenAPI shape check
         // (`scripts/openapi_shape_check.py`) to validate a real suspended row.
         if *viewer == "admin" {
-            println!("ROSTER-5814 ADMIN-BODY {body}");
+            println!("ROSTER-5814 ADMIN-BODY {asked}");
         }
     }
+
+    // The opt-in is one exact item of a comma-separated list; an unknown item is
+    // ignored, so an owner who sends only unknown items gets the plain bytes.
+    let (_, owner_plain) = roster_text(&http, &base, &owner_token, ws, "").await;
+    let (_, owner_asked) = roster_text(&http, &base, &owner_token, ws, INCLUDE_SUSPENDED).await;
+    for (query, expected, label) in [
+        ("?include=everything", &owner_plain, "unknown item"),
+        ("?include=", &owner_plain, "empty list"),
+        ("?include=Suspended", &owner_plain, "near miss"),
+        (
+            "?include=everything,suspended",
+            &owner_asked,
+            "one item of a list",
+        ),
+    ] {
+        let (status, text) = roster_text(&http, &base, &owner_token, ws, query).await;
+        assert_eq!(status, 200, "owner {query}: {text}");
+        assert_eq!(&text, expected, "owner {query} ({label})");
+        table.push(format!(
+            "owner {query}: HTTP {status}, same bytes as the {label} rule says"
+        ));
+    }
+    // A repeated key follows the rule every key of this query already has.
+    let (repeated_include, _) = roster_text(
+        &http,
+        &base,
+        &owner_token,
+        ws,
+        "?include=suspended&include=suspended",
+    )
+    .await;
+    let (repeated_kind, _) =
+        roster_text(&http, &base, &owner_token, ws, "?kind=human&kind=human").await;
+    assert_eq!(
+        repeated_include, repeated_kind,
+        "a repeated `include` is answered like a repeated `kind`"
+    );
+    table.push(format!(
+        "owner repeated include: HTTP {repeated_include} (repeated kind: HTTP {repeated_kind})"
+    ));
 
     // The agent door: an agent bearer does not reach the roster at all.
     let (agent_status, agent_body) = roster_response(&http, &base, &bearer, ws).await;
@@ -619,7 +749,7 @@ async fn other_paths_never_list_a_suspended_person() {
         200
     );
     // The widening is live for this owner — otherwise the zeros below prove nothing.
-    let owner_roster = roster(&http, &base, &owner_token, ws).await;
+    let owner_roster = roster_including(&http, &base, &owner_token, ws).await;
     assert_eq!(
         listed_status(&owner_roster, suspended.id).as_deref(),
         Some("suspended")
@@ -761,27 +891,34 @@ async fn suspend_list_reinstate_round_trip() {
     let owner_token = login(&http, &base, ws, &owner.email).await;
     let watcher_token = login(&http, &base, ws, &watcher.email).await;
 
-    let before = roster(&http, &base, &owner_token, ws).await;
+    let before = roster_including(&http, &base, &owner_token, ws).await;
     assert_eq!(listed_status(&before, target.id).as_deref(), Some("active"));
 
     assert_eq!(
         post_lifecycle(&http, &base, &owner_token, ws, target.id, "suspend").await,
         200
     );
-    let during = roster(&http, &base, &owner_token, ws).await;
+    let during = roster_including(&http, &base, &owner_token, ws).await;
     assert_eq!(
         listed_status(&during, target.id).as_deref(),
         Some("suspended"),
-        "the owner finds the suspended person again: {during}"
+        "the owner's members tab (it asks) finds the suspended person again: {during}"
     );
-    let watcher_during = roster(&http, &base, &watcher_token, ws).await;
+    // The same owner without the opt-in — an app that predates it — does not.
+    let owner_plain = roster(&http, &base, &owner_token, ws).await;
+    assert_eq!(
+        listed_status(&owner_plain, target.id),
+        None,
+        "{owner_plain}"
+    );
+    let watcher_during = roster_including(&http, &base, &watcher_token, ws).await;
     assert_eq!(listed_status(&watcher_during, target.id), None);
 
     assert_eq!(
         post_lifecycle(&http, &base, &owner_token, ws, target.id, "reinstate").await,
         200
     );
-    let after = roster(&http, &base, &owner_token, ws).await;
+    let after = roster_including(&http, &base, &owner_token, ws).await;
     assert_eq!(listed_status(&after, target.id).as_deref(), Some("active"));
     let watcher_after = roster(&http, &base, &watcher_token, ws).await;
     assert_eq!(
@@ -879,4 +1016,376 @@ async fn rls_keeps_another_tenants_suspended_people_out() {
             .any(|m| m.id == suspended_b.id && m.status == "suspended"),
         "the query itself does carry B's suspended person under B's GUC"
     );
+}
+
+// ---------------------------------------------------------------------------
+// 5 — the role is the database's, on every request
+// ---------------------------------------------------------------------------
+
+async fn change_role(
+    http: &reqwest::Client,
+    base: &str,
+    token: &str,
+    workspace: Uuid,
+    member: Uuid,
+    role: &str,
+) -> u16 {
+    http.patch(format!(
+        "{base}/v1/workspaces/{workspace}/members/{member}/role"
+    ))
+    .bearer_auth(token)
+    .json(&json!({ "role": role }))
+    .send()
+    .await
+    .expect("role change")
+    .status()
+    .as_u16()
+}
+
+/// **A demoted admin's live token loses the suspended rows; a promoted member's
+/// member-era token gains them.** A role change does not end the person's
+/// sessions, so the old token stays valid and only the role the roster reads on
+/// each request can decide. Each token reads once before the change (the control,
+/// and the read a role fixed at first sight would remember).
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 DB + bootstrap_roles.sql"]
+async fn the_role_is_read_per_request_not_frozen_with_the_token() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = app_pool().await;
+
+    let ws = seed_workspace(&su).await;
+    let owner = seed_human(&su, ws, "owner", "김도현").await;
+    let admin = seed_human(&su, ws, "admin", "이서윤").await;
+    let member = seed_human(&su, ws, "member", "박지호").await;
+    let target = seed_human(&su, ws, "member", "강수아").await;
+
+    let base = start_server(app).await;
+    let http = reqwest::Client::new();
+    let owner_token = login(&http, &base, ws, &owner.email).await;
+    let admin_token = login(&http, &base, ws, &admin.email).await;
+    let member_token = login(&http, &base, ws, &member.email).await;
+    assert_eq!(
+        post_lifecycle(&http, &base, &owner_token, ws, target.id, "suspend").await,
+        200
+    );
+
+    let admin_before = roster_including(&http, &base, &admin_token, ws).await;
+    assert_eq!(
+        listed_status(&admin_before, target.id).as_deref(),
+        Some("suspended"),
+        "control: the admin sees the suspension"
+    );
+    let member_before = roster_including(&http, &base, &member_token, ws).await;
+    assert_eq!(
+        listed_status(&member_before, target.id),
+        None,
+        "control: the member does not"
+    );
+
+    assert_eq!(
+        change_role(&http, &base, &owner_token, ws, admin.id, "member").await,
+        200,
+        "the owner demotes the admin"
+    );
+    assert_eq!(
+        change_role(&http, &base, &owner_token, ws, member.id, "admin").await,
+        200,
+        "the owner promotes the member"
+    );
+
+    // Same tokens, no new sign-in: exactly 200 (the session survives the role
+    // change), and the rows follow the role the database holds now.
+    let demoted = roster_including(&http, &base, &admin_token, ws).await;
+    assert_eq!(
+        listed_status(&demoted, target.id),
+        None,
+        "a demoted admin's old token keeps no suspended row: {demoted}"
+    );
+    let promoted = roster_including(&http, &base, &member_token, ws).await;
+    assert_eq!(
+        listed_status(&promoted, target.id).as_deref(),
+        Some("suspended"),
+        "a promoted member's member-era token gets the suspended row: {promoted}"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// 6 — every narrow credential, enumerated
+// ---------------------------------------------------------------------------
+
+/// How a credential is presented.
+enum Presented {
+    Bearer(String),
+    /// A work host's v2 signature (`MomoHost`), with the daemon's key seed.
+    Signed {
+        host_id: String,
+        seed: [u8; 32],
+    },
+}
+
+/// **No narrow credential gets a suspended person, even when it asks.**
+///
+/// One admin holds every credential, and each asks for `?include=suspended` on
+/// `/roster` and its `/members` alias. Whatever a door answers (a refusal before
+/// the handler, or the active roster), no response may carry a suspended row. The
+/// admin's own full session, asking the same way, is the control that does.
+///
+/// The list is taken from the product's own enumerations — the principal kinds,
+/// the narrow token kinds the access middleware knows, the developer token forms
+/// and the card presets — through `match`es with **no `_` arm**, so a new kind
+/// fails this file's build until it is measured here. The status each door gave is
+/// printed, not asserted: the property is the rows, and the allow list itself is
+/// the unit truth table's (`routes::roster` tests).
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 DB + bootstrap_roles.sql"]
+async fn no_narrow_credential_gets_suspended_people_even_when_it_asks() {
+    use base64::engine::general_purpose::STANDARD as BASE64;
+    use base64::Engine as _;
+    use momo_auth::{
+        issue_dev_card_in_tx, issue_dev_login_in_tx, DevForm, DevTool, NewDevCard, NewDevLogin,
+        PrincipalKind, DEV_FIXED_POLICY, DEV_READ_ONLY_SCOPES, DEV_SCOPES,
+    };
+    use momo_db::{with_tenant_tx, DbError};
+    use momo_server::auth::NarrowToken;
+
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = app_pool().await;
+
+    let ws = seed_workspace(&su).await;
+    let owner = seed_human(&su, ws, "owner", "김도현").await;
+    let admin = seed_human(&su, ws, "admin", "이서윤").await;
+    let target = seed_human(&su, ws, "member", "강수아").await;
+    // An agent whose membership row says owner: the door, not the row, decides.
+    let agent = seed_agent(&su, ws, owner.id, "owner").await;
+    let channel = new_channel(&app, ws, owner.id, ChannelKind::Public).await;
+    for person in [&owner, &admin, &target, &agent] {
+        join_channel(&su, ws, channel, person.id).await;
+    }
+
+    let base = start_server(app.clone()).await;
+    let http = reqwest::Client::new();
+    let owner_token = login(&http, &base, ws, &owner.email).await;
+    let admin_token = login(&http, &base, ws, &admin.email).await;
+    assert_eq!(
+        post_lifecycle(&http, &base, &owner_token, ws, target.id, "suspend").await,
+        200
+    );
+    let control = roster_including(&http, &base, &admin_token, ws).await;
+    assert_eq!(
+        listed_status(&control, target.id).as_deref(),
+        Some("suspended"),
+        "control: the admin's full session, asking, sees the suspension"
+    );
+
+    // Developer credentials of the admin: three card presets and one login lineage.
+    let card = |scopes: &[&str], channel_ids: Option<Vec<Uuid>>, label: &str| {
+        let new = NewDevCard {
+            label: label.to_string(),
+            tool: DevTool::Cli,
+            scopes: scopes.iter().map(|scope| scope.to_string()).collect(),
+            channel_ids,
+            expires_in_days: 30,
+        };
+        let app = app.clone();
+        let holder = admin.id;
+        async move {
+            with_tenant_tx(&app, ws, move |conn| {
+                Box::pin(async move {
+                    Ok::<_, DbError>(
+                        issue_dev_card_in_tx(conn, ws, holder, &new, DEV_FIXED_POLICY).await?,
+                    )
+                })
+            })
+            .await
+            .expect("card transaction")
+            .expect("an admin may hold a developer card")
+            .secret
+        }
+    };
+    let login_lineage = {
+        let new = NewDevLogin {
+            label: "도현 맥북 터미널".to_string(),
+            tool: DevTool::Cli,
+            client: "oort-cli".to_string(),
+            device_name: Some("도현 맥북".to_string()),
+            scopes: DEV_SCOPES.iter().map(|scope| scope.to_string()).collect(),
+            channel_ids: None,
+        };
+        let holder = admin.id;
+        with_tenant_tx(&app, ws, move |conn| {
+            Box::pin(async move {
+                Ok::<_, DbError>(
+                    issue_dev_login_in_tx(conn, ws, holder, &new, DEV_FIXED_POLICY).await?,
+                )
+            })
+        })
+        .await
+        .expect("login lineage transaction")
+        .expect("an admin may open a developer login")
+    };
+
+    let mut credentials: Vec<(String, Presented)> = Vec::new();
+    for kind in [
+        PrincipalKind::Human,
+        PrincipalKind::Agent,
+        PrincipalKind::WorkHost,
+    ] {
+        match kind {
+            PrincipalKind::Human => {
+                for narrow in [NarrowToken::PushFetch, NarrowToken::PushAction] {
+                    let mint = match narrow {
+                        NarrowToken::PushFetch => "/v1/auth/push-fetch-token",
+                        NarrowToken::PushAction => "/v1/auth/push-action-token",
+                    };
+                    let response = http
+                        .post(format!("{base}{mint}"))
+                        .bearer_auth(&admin_token)
+                        .send()
+                        .await
+                        .expect("mint a narrow token");
+                    let minted = response.status().as_u16();
+                    let body: Value = response.json().await.expect("narrow token body");
+                    let token = body["token"]
+                        .as_str()
+                        .unwrap_or_else(|| panic!("{narrow:?} mint {minted}: {body}"))
+                        .to_string();
+                    credentials.push((format!("{narrow:?}"), Presented::Bearer(token)));
+                }
+                for form in [DevForm::Card, DevForm::Access, DevForm::Refresh] {
+                    match form {
+                        DevForm::Card => {
+                            for (preset, scopes, channel_ids) in [
+                                ("full", &DEV_SCOPES[..], None),
+                                ("read-only", &DEV_READ_ONLY_SCOPES[..], None),
+                                (
+                                    "one channel",
+                                    &DEV_READ_ONLY_SCOPES[..],
+                                    Some(vec![channel]),
+                                ),
+                            ] {
+                                let secret = card(scopes, channel_ids, preset).await;
+                                credentials.push((
+                                    format!("developer card ({preset})"),
+                                    Presented::Bearer(secret),
+                                ));
+                            }
+                        }
+                        DevForm::Access => credentials.push((
+                            "developer login access".into(),
+                            Presented::Bearer(login_lineage.access.clone()),
+                        )),
+                        DevForm::Refresh => credentials.push((
+                            "developer login refresh".into(),
+                            Presented::Bearer(login_lineage.refresh.clone()),
+                        )),
+                    }
+                }
+            }
+            PrincipalKind::Agent => {
+                let bearer = momo_auth::mint_agent_bearer(ws).expect("mint agent bearer");
+                sqlx::query(
+                    "INSERT INTO token (workspace_id, kind, actor_member_id, token_hash, scopes, label) \
+                     VALUES ($1, 'agent_bearer', $2, digest($3::text, 'sha256'), \
+                             ARRAY['agent:port:connect','agent:runs:callback','agent:messages:write'], \
+                             'roster-5814-narrow')",
+                )
+                .bind(ws)
+                .bind(agent.id)
+                .bind(&bearer)
+                .execute(&su)
+                .await
+                .expect("seed agent bearer");
+                credentials.push((
+                    "agent bearer (row says owner)".into(),
+                    Presented::Bearer(bearer),
+                ));
+            }
+            PrincipalKind::WorkHost => {
+                let mut seed = [0u8; 32];
+                seed[..16].copy_from_slice(Uuid::new_v4().as_bytes());
+                seed[16..].copy_from_slice(Uuid::new_v4().as_bytes());
+                let public = ed25519_dalek::SigningKey::from_bytes(&seed)
+                    .verifying_key()
+                    .to_bytes();
+                let response = http
+                    .post(format!("{base}/v1/workspaces/{ws}/work-hosts"))
+                    .bearer_auth(&admin_token)
+                    .json(&json!({
+                        "scope": "workspace",
+                        "type": "workd",
+                        "displayName": "도현 맥북",
+                        "publicKey": BASE64.encode(public),
+                        "capabilities": { "terminal_attach": false },
+                    }))
+                    .send()
+                    .await
+                    .expect("register a work host");
+                assert_eq!(response.status(), 201, "the admin registers a work host");
+                let body: Value = response.json().await.expect("work host body");
+                let host_id = body["workHost"]["id"]
+                    .as_str()
+                    .expect("workHost.id")
+                    .to_string();
+                credentials.push((
+                    "work host signature (registered by the admin)".into(),
+                    Presented::Signed { host_id, seed },
+                ));
+            }
+        }
+    }
+
+    let mut table = Vec::new();
+    for (label, presented) in &credentials {
+        for path in ["roster", "members"] {
+            let route = format!("/v1/workspaces/{ws}/{path}");
+            let url = format!("{base}{route}{INCLUDE_SUSPENDED}");
+            let request = match presented {
+                Presented::Bearer(token) => http.get(&url).bearer_auth(token),
+                Presented::Signed { host_id, seed } => {
+                    let digest = momo_wire::signing::sha256_hex(b"");
+                    let request_id = Uuid::new_v4();
+                    let sent_at_ms = std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .expect("clock")
+                        .as_millis() as i64;
+                    let payload = momo_wire::signing::request_payload(
+                        "GET",
+                        &route,
+                        ws,
+                        Uuid::parse_str(host_id).expect("host uuid"),
+                        sent_at_ms,
+                        &digest,
+                        request_id,
+                    );
+                    let signature = momo_wire::signing::sign_base64(seed, &payload).expect("sign");
+                    http.get(&url)
+                        .header("Authorization", format!("MomoHost {host_id}"))
+                        .header("X-Momo-Work-Host-Sent-At", sent_at_ms.to_string())
+                        .header("X-Momo-Work-Host-Signature", signature)
+                        .header("X-Momo-Work-Host-Request-ID", request_id.to_string())
+                }
+            };
+            let response = request.send().await.expect("narrow roster read");
+            let status = response.status().as_u16();
+            let body: Value = response.json().await.unwrap_or(Value::Null);
+            let rows = body["members"].as_array().cloned().unwrap_or_default();
+            let suspended_rows = rows.iter().filter(|r| r["status"] != "active").count();
+            table.push(format!(
+                "{label} → /{path}{INCLUDE_SUSPENDED}: HTTP {status}, rows {}, suspended {suspended_rows}",
+                rows.len()
+            ));
+            assert!(
+                matches!(status, 200 | 401 | 403),
+                "{label} /{path}: a door answers or refuses, never fails: {status} {body}"
+            );
+            assert_eq!(
+                suspended_rows, 0,
+                "{label} /{path}: a narrow credential got a suspended row: {body}"
+            );
+            assert_eq!(listed_status(&json!({"members": rows}), target.id), None);
+        }
+    }
+    println!("ROSTER-5814 NARROW\n{}", table.join("\n"));
 }

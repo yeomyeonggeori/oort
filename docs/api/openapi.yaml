@@ -994,7 +994,8 @@ paths:
         can call exactly `GET /v1/workspaces/{ws}/channels/{ch}/messages` and
         `GET /v1/workspaces/{ws}/roster` of its own workspace (403 anywhere
         else, before any query; the roster it reads is the active one even for
-        an owner or admin), has no refresh half, cannot mint another, and
+        an owner or admin, `include=suspended` or not), has no refresh half,
+        cannot mint another, and
         lives 6 hours or until the session it was minted under can no longer
         rotate (logout with its refresh half, refresh-reuse sweep, password
         change, suspension, removal) - whichever is first.
@@ -1890,12 +1891,15 @@ paths:
       summary: List workspace members (humans and agents).
       description: >
         Active members for every viewer, restricted to shared-channel members
-        for a guest. When the viewer is a person signed in with a full access
-        token whose workspace role is owner or admin, the roster also carries
-        the workspace's suspended humans (`status: suspended`) so a suspension
-        can be found and undone (ADR-0128 D3 amendment, #5814). Members,
-        guests, agents, work hosts and the notification extension's
-        `push_fetch` token get the active roster only. Suspended agents,
+        for a guest. A request that adds `include=suspended`, from a person
+        signed in with a full access token whose workspace role is owner or
+        admin, also carries the workspace's suspended humans (`status:
+        suspended`) so a suspension can be found and undone (ADR-0128 D3
+        amendment, #5814). Without that parameter every viewer gets the active
+        roster, so a client that does not send it never meets a suspended row.
+        Anyone else who sends it (a member, a guest, an agent, a work host, a
+        developer credential, the notification extension's `push_fetch`
+        token) gets the active roster, not an error. Suspended agents,
         `invited` and `deleted` members are never carried.
       security:
         - bearerAuth: []
@@ -1917,11 +1921,22 @@ paths:
             default: 200
             minimum: 1
             maximum: 500
+        - name: include
+          in: query
+          required: false
+          description: >
+            Comma-separated opt-in list (#5814). `suspended` adds the
+            workspace's suspended humans when the viewer is an owner or admin
+            person on a full access token, and is ignored for anyone else.
+            Unknown items are ignored.
+          schema:
+            type: string
       responses:
         "200":
           description: >
             Active workspace roster, restricted to shared-channel members for
-            guests; an owner or admin person also receives suspended humans.
+            guests; with `include=suspended` an owner or admin person also
+            receives suspended humans.
           content:
             application/json:
               schema:
@@ -1963,6 +1978,12 @@ paths:
             default: 200
             minimum: 1
             maximum: 500
+        - name: include
+          in: query
+          required: false
+          description: Same opt-in as `/roster` (`suspended`, #5814).
+          schema:
+            type: string
       responses:
         "200":
           description: Roster of active members with an active channel membership.
@@ -19550,9 +19571,10 @@ components:
           enum: [active, suspended]
           description: >
             Lifecycle state of the row. `suspended` appears only on a human row
-            of an owner or admin person's roster (ADR-0128 D3 amendment, #5814);
-            every other row, and every row any other viewer receives, is
-            `active`. `invited` and `deleted` members are never on the roster.
+            of an owner or admin person's roster read with `include=suspended`
+            (ADR-0128 D3 amendment, #5814); every other row, and every row of
+            any other read, is `active`. `invited` and `deleted` members are
+            never on the roster.
         displayName:
           type: string
         handle:
@@ -19776,7 +19798,8 @@ components:
           type: integer
           description: >
             Active human rows in `members`. A suspended row in an owner/admin
-            roster is listed but not counted (#5814).
+            roster read with `include=suspended` is listed but not counted
+            (#5814).
         agentCount:
           type: integer
           description: Active agent rows in `members`.

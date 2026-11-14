@@ -242,8 +242,8 @@ pub async fn is_active_agent(
 /// suspended, deleted, an agent, another tenant's member) cannot appear in the
 /// roll-call. Keeping the two in step is the whole privacy argument: availability
 /// is reported only for rows the roster already shows. (#5814: the owner/admin
-/// view of the HTTP roster also carries suspended humans, but the route never
-/// reports availability on a row that is not `active`.)
+/// view of the HTTP roster, when asked for, also carries suspended humans, but the
+/// route never reports availability on a row that is not `active`.)
 ///
 /// `conn` carries the tenant GUC (`with_tenant_tx`), so RLS already refuses another
 /// tenant's rows; `workspace_id` is bound as well because a subscribe callback is
@@ -671,7 +671,8 @@ pub enum RosterStatusScope {
     Active,
     /// Active members **plus suspended humans**: the owner/admin directory, so a
     /// suspension can be found again and undone from the members tab. Only the
-    /// HTTP roster route asks for it, and only for an owner/admin human viewer.
+    /// HTTP roster route asks for it, and only for a request that opted in
+    /// (`include=suspended`) from an owner/admin person on a full app session.
     ///
     /// Humans only: a suspended *agent* is a switched-off personal agent or a
     /// retired subscription agent, each read and switched on its own surface
