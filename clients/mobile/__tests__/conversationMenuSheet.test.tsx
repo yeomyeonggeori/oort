@@ -168,7 +168,7 @@ describe('항목은 코어 표의 답에서 거른다 — 새로 짓지 않는�
 
   it('이 시트가 거르는 열쇠는 폰이 실행할 줄 아는 열쇠의 부분집합이다 — 실행 못 하는 항목을 내밀지 않는다', () => {
     for (const key of CONVERSATION_MENU_ACTION_KEYS) expect([key, PHONE_CHANNEL_ACTION_KEYS.has(key)]).toEqual([key, true]);
-    expect([...CONVERSATION_MENU_ACTION_KEYS].sort()).toEqual(['close-dm', 'leave', 'mute']);
+    expect([...CONVERSATION_MENU_ACTION_KEYS].sort()).toEqual(['close-dm', 'leave', 'leave-dm', 'mute']);
   });
 
   it('머리 제목: DM 은 상대 이름, 채널은 `# 이름`, 종류를 모르는 동안은 이름만 — 모르는 것을 채널이라 부르지 않는다', () => {

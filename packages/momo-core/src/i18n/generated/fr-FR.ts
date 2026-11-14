@@ -8,6 +8,12 @@ export const catalog: MessageCatalog = {
       "value": "Quitter la conversation"
     }
   ],
+  "channels.dmLeave.busy": [
+    {
+      "type": 0,
+      "value": "Départ…"
+    }
+  ],
   "channels.dmLeave.cancel": [
     {
       "type": 0,
@@ -102,6 +108,51 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "Impossible de quitter. Veuillez réessayer."
+    }
+  ],
+  "channels.nameRule.edge": [
+    {
+      "type": 0,
+      "value": "Le nom doit commencer et se terminer par une lettre ou un chiffre. Les traits d’union et tirets bas ne peuvent être qu’au milieu."
+    }
+  ],
+  "channels.nameRule.hidden": [
+    {
+      "type": 0,
+      "value": "Le nom contient des caractères invisibles. Effacez-le et saisissez-le à nouveau."
+    }
+  ],
+  "channels.nameRule.required": [
+    {
+      "type": 0,
+      "value": "Saisissez un nom de canal."
+    }
+  ],
+  "channels.nameRule.serverRejected": [
+    {
+      "type": 0,
+      "value": "Le serveur n’a pas accepté ce nom. Seuls les lettres, chiffres, - et _ sont autorisés."
+    }
+  ],
+  "channels.nameRule.tooLong": [
+    {
+      "type": 0,
+      "value": "Le nom du canal peut contenir jusqu’à "
+    },
+    {
+      "type": 2,
+      "value": "max",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": " caractères."
+    }
+  ],
+  "channels.nameRule.unsupported": [
+    {
+      "type": 0,
+      "value": "Seuls les lettres, chiffres, traits d’union (-) et tirets bas (_) sont autorisés."
     }
   ]
 };

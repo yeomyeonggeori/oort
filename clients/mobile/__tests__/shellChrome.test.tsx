@@ -603,7 +603,7 @@ describe('탭 셋과 + (ADR-0189 D1, #2750)', () => {
     );
     fireEvent.changeText(screen.getByTestId('new-channel-name'), '-bad');
     expect(screen.getByTestId('new-channel-name-issue')).toHaveTextContent(
-      /처음과 끝은 영문이나 숫자/,
+      /처음과 끝은 글자나 숫자/,
     );
     fireEvent.changeText(screen.getByTestId('new-channel-name'), ' Design-Review ');
     expect(screen.queryByTestId('new-channel-name-issue')).toBeNull();

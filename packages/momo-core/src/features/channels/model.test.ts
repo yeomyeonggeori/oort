@@ -1,4 +1,5 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import koChannels from "../../i18n/catalogs/ko-KR/channels.json";
 import { ApiError } from "../../lib/api";
 import { NetworkError } from "../../lib/http";
 import {
@@ -17,6 +18,7 @@ import {
   CHANNEL_MARK_UNREAD_LABEL,
   CHANNEL_MUTE_LABEL,
   CHANNEL_NAME_MAX,
+  CHANNEL_NAME_SERVER_REJECTED_KEY,
   CHANNEL_TOPIC_MAX,
   CHANNEL_TOPIC_VIEW_LABEL,
   CHANNEL_UNMUTE_LABEL,
@@ -31,7 +33,9 @@ import {
   channelMenuAccessibleLabel,
   channelMuteToggleLabel,
   channelNameIssue,
+  channelNameIssueKey,
   channelNameIssueMessage,
+  judgeChannelName,
   channelTopicIssue,
   createChannelFailure,
   dmCloseButtonLabel,
@@ -39,66 +43,228 @@ import {
   normalizeChannelTopic,
 } from "./model";
 
-// The contract under test is the server's, so the cases below are the ones
-// ChannelRoutes.normalizedChannelName actually decides, not a paraphrase of it.
+// The contract under test is the server's (ADR-0225 D1-D5). The rows live in one
+// shared vectors file; the Rust server test and this one read the same bytes.
+
+// This package has no Node typings (it runs in the phone and the browser), so the
+// byte-level check loads Node's own modules by name at run time.
+interface NodeBytes {
+  toString(encoding: string): string;
+  [index: number]: number;
+  length: number;
+}
+interface NodeForThisTest {
+  readFileSync(path: string): NodeBytes;
+  createHash(algorithm: string): { update(bytes: NodeBytes): { digest(encoding: string): string } };
+  fileURLToPath(url: URL): string;
+}
+const nodeModule = (name: string): Promise<NodeForThisTest> =>
+  import(/* @vite-ignore */ name) as Promise<NodeForThisTest>;
+const { readFileSync } = await nodeModule("node:fs");
+const { createHash } = await nodeModule("node:crypto");
+const { fileURLToPath } = await nodeModule("node:url");
+const FIXTURE_PATH: string = fileURLToPath(
+  // This file runs under vitest only; Metro never loads a core test, so the
+  // bundler-only `import.meta` rule does not reach it.
+  // eslint-disable-next-line no-restricted-syntax
+  new URL("./__fixtures__/channel-name.vectors.json", (import.meta as unknown as { url: string }).url)
+);
+
+/** sha256 of the vectors copy. The server side must assert the same value (or,
+ *  better, that this file equals `docs/api/channel-name.vectors.json`). */
+const VECTORS_SHA256 =
+  "6e75fba45869ad1a9921561787441259dcbca4d0aacf456d1a65197f496a8861";
+
+interface VectorCase {
+  group: "kept" | "fixed" | "refused";
+  note: string;
+  input: string;
+  verdict: "ok" | "required" | "tooLong" | "hidden" | "unsupported" | "edge";
+  stored?: string;
+}
+const vectorBytes = readFileSync(FIXTURE_PATH);
+const vectors = JSON.parse(vectorBytes.toString("utf8")) as {
+  maxChars: number;
+  cases: VectorCase[];
+};
+
+const label = (input: string) =>
+  JSON.stringify(input).replace(/[^\x20-\x7e]/g, (c) =>
+    c.codePointAt(0)! > 0xffff
+      ? `\\u{${c.codePointAt(0)!.toString(16)}}`
+      : `\\u${c.charCodeAt(0).toString(16).padStart(4, "0")}`
+  );
+
+describe("shared vectors copy", () => {
+  it("is the file the server reads: sha256 pinned, ASCII only", () => {
+    expect(createHash("sha256").update(vectorBytes).digest("hex")).toBe(VECTORS_SHA256);
+    let nonAscii = 0;
+    for (let i = 0; i < vectorBytes.length; i += 1) if (vectorBytes[i]! > 0x7f) nonAscii += 1;
+    expect(nonAscii).toBe(0);
+  });
+
+  it("carries the 57 rows and the 80 code point ceiling", () => {
+    expect(vectors.cases).toHaveLength(57);
+    expect(vectors.maxChars).toBe(CHANNEL_NAME_MAX);
+  });
+});
+
+describe("judgeChannelName against the shared vectors", () => {
+  it.each(vectors.cases.map((c, i) => [`${i + 1} ${c.verdict} ${label(c.input).slice(0, 48)}`, c] as const))(
+    "%s",
+    (_name, c) => {
+      const judged = judgeChannelName(c.input);
+      if (c.verdict === "ok") {
+        expect(judged).toEqual({ ok: true, name: c.stored });
+        // Running the stored value again must not change it.
+        expect(normalizeChannelName(c.stored!)).toBe(c.stored);
+        expect(channelNameIssue(c.input)).toBeNull();
+      } else {
+        expect(judged).toEqual({ ok: false, verdict: c.verdict });
+        expect(channelNameIssue(c.input)).not.toBeNull();
+      }
+    }
+  );
+});
 
 describe("normalizeChannelName", () => {
-  it("stores what the server stores: trimmed and lowercased", () => {
+  it("stores what the server stores: trimmed, lowercased, blanks as hyphens", () => {
     expect(normalizeChannelName("  Release-Notes  ")).toBe("release-notes");
+    expect(normalizeChannelName("Design Review")).toBe("design-review");
+  });
+
+  it("folds with the 25 White_Space code points of ADR-0225 D2, not the regex class", () => {
+    const blanks = [
+      0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x20, 0x85, 0xa0, 0x1680,
+      ...Array.from({ length: 11 }, (_, i) => 0x2000 + i),
+      0x2028, 0x2029, 0x202f, 0x205f, 0x3000,
+    ];
+    expect(blanks).toHaveLength(25);
+    for (const cp of blanks) {
+      expect(normalizeChannelName(`a${String.fromCodePoint(cp)}b`), cp.toString(16)).toBe("a-b");
+    }
+    // U+FEFF is a format character, not a blank: it is refused as hidden, where
+    // a regex whitespace class would have turned it into a hyphen.
+    expect(judgeChannelName("a\uFEFFb")).toEqual({ ok: false, verdict: "hidden" });
+    expect(normalizeChannelName("a\uFEFFb")).toBe("a\uFEFFb");
   });
 });
 
 describe("channelNameIssue", () => {
   it("accepts a plain slug, digits, hyphen and underscore", () => {
-    expect(channelNameIssue("general")).toBeNull();
-    expect(channelNameIssue("release-notes")).toBeNull();
-    expect(channelNameIssue("wave_a2")).toBeNull();
-    expect(channelNameIssue("a")).toBeNull();
-    expect(channelNameIssue("7")).toBeNull();
+    for (const name of ["general", "release-notes", "wave_a2", "a", "7"]) {
+      expect(channelNameIssue(name), name).toBeNull();
+    }
   });
 
-  it("accepts uppercase input, because the server lowercases it", () => {
+  it("accepts names in other scripts and uppercase, because the server folds them", () => {
+    expect(channelNameIssue("엔진")).toBeNull();
     expect(channelNameIssue("Release-Notes")).toBeNull();
+    expect(channelNameIssue("with space")).toBeNull();
   });
 
-  it("reports an empty or whitespace-only name as required", () => {
+  it("reports an empty or blank-only name as required", () => {
     expect(channelNameIssue("")).toBe("required");
     expect(channelNameIssue("   ")).toBe("required");
   });
 
-  it("names an illegal character as an illegal character", () => {
-    // Korean is the case a Korean team types first, and the server refuses it.
-    expect(channelNameIssue("엔진")).toBe("unsupportedCharacters");
-    expect(channelNameIssue("with space")).toBe("unsupportedCharacters");
-    expect(channelNameIssue("dot.name")).toBe("unsupportedCharacters");
+  it("names punctuation as an illegal character", () => {
+    for (const name of ["dot.name", "v1.2", "a!", "#general", "\u{1F680}launch"]) {
+      expect(channelNameIssue(name), name).toBe("unsupportedCharacters");
+    }
+  });
+
+  it("names invisible characters as invisible, not as illegal", () => {
+    for (const name of ["a\u200Bb", "a\u200Db", "a\u202Eb", "\u3164", "a\uFE0F", "a\uE000b", "a\uFEFFb", "a\uD800b"]) {
+      expect(channelNameIssue(name), label(name)).toBe("hiddenCharacters");
+    }
   });
 
   it("names a leading or trailing separator as what it is", () => {
     // Every one of these uses only legal characters, so the alphabet sentence
     // would have told the reader to use exactly what they had already used.
-    // The rule they actually broke is where a name may begin and end.
     for (const name of ["-release", "release-", "_ops", "ops-", "-", "__"]) {
       expect(channelNameIssue(name), name).toBe("edgeSeparator");
     }
   });
 
-  it("reports length before shape, so the fixable problem is named first", () => {
-    expect(channelNameIssue("a".repeat(CHANNEL_NAME_MAX))).toBeNull();
-    expect(channelNameIssue("a".repeat(CHANNEL_NAME_MAX + 1))).toBe("tooLong");
-    // Too long AND illegal: still the length, matching the server's order.
-    expect(channelNameIssue("한".repeat(CHANNEL_NAME_MAX + 1))).toBe("tooLong");
+  it("counts a combining mark as part of the letter it leans on, never on a separator", () => {
+    expect(channelNameIssue("e\u0301quipe")).toBeNull();
+    expect(channelNameIssue("a-\u0301b")).toBe("unsupportedCharacters");
+    expect(channelNameIssue("\u0301abc")).toBe("unsupportedCharacters");
   });
 
-  it("has copy for every issue, none of it an apology", () => {
-    for (const issue of [
-      "required",
-      "tooLong",
-      "unsupportedCharacters",
-      "edgeSeparator",
-    ] as const) {
+  it("measures length in code points, before shape, so the fixable problem is named first", () => {
+    const rare = "\u{20BB7}"; // one code point, two UTF-16 units
+    expect(rare.length).toBe(2);
+    expect(channelNameIssue(rare.repeat(CHANNEL_NAME_MAX))).toBeNull();
+    expect(channelNameIssue(rare.repeat(CHANNEL_NAME_MAX + 1))).toBe("tooLong");
+    expect(channelNameIssue("a".repeat(CHANNEL_NAME_MAX))).toBeNull();
+    expect(channelNameIssue("a".repeat(CHANNEL_NAME_MAX + 1))).toBe("tooLong");
+    expect(channelNameIssue("한".repeat(CHANNEL_NAME_MAX))).toBeNull();
+    // Too long AND illegal: still the length, matching the server's order.
+    expect(channelNameIssue("!".repeat(CHANNEL_NAME_MAX + 1))).toBe("tooLong");
+  });
+
+  it("measures the folded name: blanks that fold away do not count", () => {
+    expect(channelNameIssue(`  ${"a".repeat(CHANNEL_NAME_MAX)}  `)).toBeNull();
+  });
+});
+
+describe("Unicode property patterns are built on first use (ADR-0225 D11)", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.resetModules();
+  });
+
+  it("does not construct a property regex while the module loads", async () => {
+    const RealRegExp = RegExp;
+    const built: string[] = [];
+    const Spy = new Proxy(RealRegExp, {
+      construct(target, args: [string | RegExp, string?]) {
+        built.push(String(args[0]));
+        return new target(...args);
+      },
+    });
+    vi.stubGlobal("RegExp", Spy);
+    vi.resetModules();
+    const mod = await import("./model");
+    expect(built.filter((s) => s.includes("\\p{Cc}"))).toEqual([]);
+    expect(mod.channelNameIssue("한글")).toBeNull();
+    expect(built.filter((s) => s.includes("\\p{Cc}"))).toHaveLength(1);
+    mod.channelNameIssue("another");
+    expect(built.filter((s) => s.includes("\\p{Cc}"))).toHaveLength(1);
+  });
+});
+
+describe("name rule sentences", () => {
+  const ko = koChannels as Record<string, string>;
+  const issues = [
+    "required",
+    "tooLong",
+    "hiddenCharacters",
+    "unsupportedCharacters",
+    "edgeSeparator",
+  ] as const;
+
+  it("has a dictionary key for every issue and the Korean fallback says the same words", () => {
+    for (const issue of issues) {
+      const text = ko[channelNameIssueKey(issue)].replace("{max, number}", String(CHANNEL_NAME_MAX));
+      expect(channelNameIssueMessage(issue), issue).toBe(text);
+    }
+    expect(new Set(issues.map(channelNameIssueKey)).size).toBe(5);
+  });
+
+  it("gives the invisible-character sentence of ADR-0225 D13", () => {
+    expect(channelNameIssueMessage("hiddenCharacters")).toBe(
+      "보이지 않는 글자가 들어 있어요. 이름을 지우고 다시 적어 주세요."
+    );
+  });
+
+  it("is not an apology and does not tell a Korean name to use English", () => {
+    for (const issue of issues) {
       const message = channelNameIssueMessage(issue);
-      expect(message.length).toBeGreaterThan(0);
-      expect(message).not.toMatch(/죄송|오류가 발생/);
+      expect(message).not.toMatch(/죄송|오류가 발생|영문/);
       expect(message).not.toMatch(/—|–/);
     }
   });
@@ -161,6 +327,15 @@ describe("createChannelFailure", () => {
     );
     expect(failure.field).toBe("name");
     expect(failure.message).toContain("이미 있습니다");
+  });
+
+  it("answers a 400 with the dictionary sentence, never the server's English", () => {
+    const failure = createChannelFailure(new ApiError(400, "channel name must use letters"));
+    expect(failure.messageKey).toBe(CHANNEL_NAME_SERVER_REJECTED_KEY);
+    expect(failure.message).toBe(
+      (koChannels as Record<string, string>)[CHANNEL_NAME_SERVER_REJECTED_KEY]
+    );
+    expect(failure.message).not.toMatch(/channel name/);
   });
 
   it("puts a server-side name rejection beside the name field too", () => {

@@ -12,7 +12,7 @@ import {roleLabel, type RoleLabels} from '@momo/core/features/directory/model';
 import type {StatusDot as PeerStatus} from '@momo/core/features/presence/statusDot';
 import {memberFor, type Directory} from '@momo/core/features/workspace/directory';
 import type {Channel, RosterMember} from '@momo/core/lib/api';
-import React, {useState} from 'react';
+import React, {useEffect, useRef, useState} from 'react';
 import {Image, ScrollView, StyleSheet, Text, View} from 'react-native';
 import {useSafeAreaInsets} from 'react-native-safe-area-context';
 import {AVATAR_INITIAL_MAX_SCALE, Screen, Sentence} from '../../design/atoms';
@@ -33,6 +33,8 @@ import {
 } from '../directory/profileHero';
 import {PROFILE_FACE, useFaceRing} from '../profile/ProfileFace';
 import {avatarInitialMetrics} from './Avatar';
+import {DmLeaveConfirm} from '../sidebar/DmLeaveConfirm';
+import type {DmLeaveStepView} from '../sidebar/useChannelRowActions';
 import {CONVERSATION_INFO_LABEL} from './conversationMenu';
 
 // =============================================================================
@@ -43,7 +45,8 @@ import {CONVERSATION_INFO_LABEL} from './conversationMenu';
 // 벗긴다(대화는 밑에 남는다 — 안쪽 `EdgeSwipeBack` 이 바깥을 무장 해제한다). 고정 목록(`PinListPanel`)처럼 대화 화면의 지역 상태로 서고, 층은 JSX 순서다.
 //
 //   DM       큰 얼굴(사진이 있으면 눌러 크게 보기) · 이름 · 「@핸들 · 역할」 · 상태 칩 · 한 줄 상태
-//            [에이전트: 「○○님이 관리」 · 에이전트 정보 ›] → 알림 → 복사(이름·링크·ID) → 대화 닫기
+//            [에이전트: 「○○님이 관리」 · 에이전트 정보 ›] → 알림 → 복사(이름·링크·ID) → 대화 닫기 → 대화 나가기(사람끼리 1:1, 위험색 +
+//            확인 단계 — ADR-0177 증보 2026-11-14 D21)
 //   채널     큰 `#` 얼굴(비공개는 자물쇠 배지) · 이름 · 「6명 · 김인턴 참여 중」 · 주제
 //            알림 → 복사 → 채널 나가기(확인 단계)
 //
@@ -83,6 +86,10 @@ export interface ConversationInfoPageProps {
   onRun: (key: ChannelActionKey) => void;
   onConfirmLeave: () => void;
   onCancelLeave: () => void;
+  /** 1:1 「대화 나가기」 확인 단계(훅의 `dmLeave`). 있으면 행 대신 선다. */
+  dmLeave?: DmLeaveStepView | null;
+  onConfirmDmLeave?: () => void;
+  onCancelDmLeave?: () => void;
   /** 한 겹 벗긴다 — ‹·가장자리 밀기·두 손가락 문지르기가 모두 이 길을 지난다(들어온 길의 반대로 나간 뒤 한 번). */
   onClose: () => void;
   /** DM 상대. 얼굴·핸들·상태 칩이 이 사람의 것이다. 모르면(명부가 아직 안 왔다) 얼굴이 비어 있다. */
@@ -135,6 +142,9 @@ function InfoBody({
   onRun,
   onConfirmLeave,
   onCancelLeave,
+  dmLeave = null,
+  onConfirmDmLeave,
+  onCancelDmLeave,
   onClose,
   peer = null,
   status = null,
@@ -159,12 +169,20 @@ function InfoBody({
     catch { setDmError('에이전트를 내보내지 못했어요. 연결을 확인하고 다시 시도해 주세요.'); }
     finally { setDmPending(null); }
   };
+  // 「대화 나가기」 확인 단계가 서면 맨 위로(가장 큰 글자에서 단계의 제목이 위로 밀려 안 보이지 않게 - `SheetScroll.scrollToTopWhen` 과 같은 이유).
+  const scrollRef = useRef<ScrollView>(null);
+  const dmLeaveStanding = dmLeave !== null;
+  useEffect(() => {
+    if (dmLeaveStanding) scrollRef.current?.scrollTo?.({y: 0, animated: false});
+  }, [dmLeaveStanding]);
   const isDm = kind === 'dm';
   const pageTitle = isDm ? CONVERSATION_INFO_LABEL.dm : CONVERSATION_INFO_LABEL.channel;
 
   const item = (key: ChannelActionKey) => items.find(candidate => candidate.key === key);
   const mute = item('mute');
   const leaving = item('close-dm') ?? item('leave');
+  // 「대화 나가기」는 숨기기와 따로 선다(D21) — 숨기기가 안 서는 때(안 읽음)에도 선다.
+  const leavingDm = item('leave-dm');
   const copies = (['copy-name', 'copy-link', 'copy-id'] as const)
     .map(item)
     .filter((found): found is ChannelActionItem => found !== undefined);
@@ -203,6 +221,7 @@ function InfoBody({
           testID="conversation-info-header"
         />
         <ScrollView
+          ref={scrollRef}
           contentContainerStyle={[
             styles.content,
             {paddingBottom: Math.max(insets.bottom, space.lg) + space.lg},
@@ -274,7 +293,14 @@ function InfoBody({
             />
           )}
 
-          {confirmingLeave ? (
+          {dmLeave !== null && onConfirmDmLeave && onCancelDmLeave ? (
+            <DmLeaveConfirm
+              step={dmLeave}
+              onConfirm={onConfirmDmLeave}
+              onCancel={onCancelDmLeave}
+              testID="conversation-info-dm-leave-confirm"
+            />
+          ) : confirmingLeave ? (
             <ConfirmStep
               testID="conversation-info-leave-confirm"
               headline={CHANNEL_LEAVE_CONFIRM_TITLE}
@@ -327,6 +353,7 @@ function InfoBody({
                 </GroupCard>
               ) : null}
               {leaving !== undefined ? <GroupCard>{row(leaving)}</GroupCard> : null}
+              {leavingDm !== undefined ? <GroupCard>{row(leavingDm)}</GroupCard> : null}
             </>
           )}
         </ScrollView>

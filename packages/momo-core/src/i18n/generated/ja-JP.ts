@@ -8,6 +8,12 @@ export const catalog: MessageCatalog = {
       "value": "会話から退出"
     }
   ],
+  "channels.dmLeave.busy": [
+    {
+      "type": 0,
+      "value": "退出中…"
+    }
+  ],
   "channels.dmLeave.cancel": [
     {
       "type": 0,
@@ -81,6 +87,51 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "退出できませんでした。もう一度お試しください。"
+    }
+  ],
+  "channels.nameRule.edge": [
+    {
+      "type": 0,
+      "value": "先頭と末尾は文字か数字にしてください。ハイフンとアンダースコアは途中にのみ使えます。"
+    }
+  ],
+  "channels.nameRule.hidden": [
+    {
+      "type": 0,
+      "value": "見えない文字が含まれています。名前を消してもう一度入力してください。"
+    }
+  ],
+  "channels.nameRule.required": [
+    {
+      "type": 0,
+      "value": "チャンネル名を入力してください。"
+    }
+  ],
+  "channels.nameRule.serverRejected": [
+    {
+      "type": 0,
+      "value": "サーバーがこの名前を受け付けませんでした。文字、数字、-、_のみ使えます。"
+    }
+  ],
+  "channels.nameRule.tooLong": [
+    {
+      "type": 0,
+      "value": "チャンネル名は"
+    },
+    {
+      "type": 2,
+      "value": "max",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "文字までです。"
+    }
+  ],
+  "channels.nameRule.unsupported": [
+    {
+      "type": 0,
+      "value": "文字、数字、ハイフン（-）、アンダースコア（_）のみ使えます。"
     }
   ]
 };

@@ -63,6 +63,25 @@ let closedForSignOut = false;
 /** 지금 세션의 사람(멤버 id, 소문자). 앞 사람의 요청이 다음 사람의 세션에서 늦게 실패해도 그 글은 남기지 않는다. */
 let openFor: string | null = null;
 
+// 나간 대화(1:1 「대화 나가기」, #5826)는 나간 순간 이전의 글을 다시 적지 않는다. 나가기가 성공해 정리(`forgetFailedSend`)가 돈 **뒤에** 대화가 걷히며
+// 보내는 중이던 글을 「못 보낸 글」로 적고(`useTimeline` 정리 함수), 그 요청이 늦게 실패해도 또 적는다 - 그러면 옛 글이 다시 이어진 새 대화에 「보내지 못함」으로
+// 서거나 다시 보내진다. 로그아웃 문(위)과 같은 생각으로 이 파일의 쓰기 한 곳에서 막는다: 나간 순간의 시각을 기억해 그 대화의, 그 시각까지 **쓴**
+// 글(`createdAtMs` - 같은 기기 시계)은 적지 않는다. 다시 이어진 뒤에 새로 쓴 글은 그 뒤라서 평소처럼 남는다. 세션이 바뀌면 비운다.
+const leftChannelFloors = new Map<string, number>();
+
+const channelKey = (workspaceId: string, channelId: string): string =>
+  `${workspaceId.toLowerCase()}:${channelId.toLowerCase()}`;
+
+/** 이 대화에서 나갔다: `atMs` 까지 쓴 글은 이 기기에 못 보낸 글로 적지 않는다. */
+export function blockFailedSendsBefore(
+  workspaceId: string,
+  channelId: string,
+  atMs: number = Date.now(),
+): void {
+  const key = channelKey(workspaceId, channelId);
+  leftChannelFloors.set(key, Math.max(leftChannelFloors.get(key) ?? 0, atMs));
+}
+
 function writeMap(map: FailedSendMap): void {
   const store = nonSecretStore();
   if (Object.keys(map).length === 0) {
@@ -94,6 +113,8 @@ export function rememberFailedSend(
 ): void {
   try {
     if (openFor !== null && row.authorMemberId.toLowerCase() !== openFor) return;
+    const left = leftChannelFloors.get(channelKey(workspaceId, row.channelId));
+    if (left !== undefined && row.createdAtMs <= left) return;
     const key = keyOf(workspaceId, row.channelId, row.clientMsgId);
     if (containsSecretKey(row.body)) {
       forgetFailedSend(workspaceId, row.channelId, row.clientMsgId);
@@ -167,12 +188,14 @@ export function clearAllFailedSends(): void {
 /** 로그아웃(#5799): 전부 지우고, 다음 세션까지 새로 남기지 않는다 — 내려가는 대화와 늦게 실패한 전송이 지운 자리를 되살리지 못하게. */
 export function closeFailedSendsForSignOut(): void {
   closedForSignOut = true;
+  leftChannelFloors.clear();
   clearAllFailedSends();
 }
 
 /** 세션이 섰다(로그인·복원). 이 사람의 보내지 못한 글을 다시 이 기기에 남기고, 다른 사람이 남긴 것은 지운다. */
 export function openFailedSendsForSession(memberId: string): void {
   closedForSignOut = false;
+  leftChannelFloors.clear();
   openFor = memberId.toLowerCase();
   try {
     const map = readMap();

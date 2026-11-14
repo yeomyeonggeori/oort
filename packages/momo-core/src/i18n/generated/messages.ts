@@ -172,6 +172,7 @@ export const messageKeys = [
   "blocked.workStateStale.offline",
   "blocked.workStateStale.serverUnreachable",
   "channels.dmLeave.action",
+  "channels.dmLeave.busy",
   "channels.dmLeave.cancel",
   "channels.dmLeave.confirm",
   "channels.dmLeave.confirmBody",
@@ -181,6 +182,12 @@ export const messageKeys = [
   "channels.dmLeave.confirmTitle",
   "channels.dmLeave.done",
   "channels.dmLeave.failed",
+  "channels.nameRule.edge",
+  "channels.nameRule.hidden",
+  "channels.nameRule.required",
+  "channels.nameRule.serverRejected",
+  "channels.nameRule.tooLong",
+  "channels.nameRule.unsupported",
   "common.feedback.unavailable",
   "common.invitation.received",
   "common.members.count",
@@ -1828,6 +1835,7 @@ export const argumentSpecs = {
   "blocked.workStateStale.offline": {},
   "blocked.workStateStale.serverUnreachable": {},
   "channels.dmLeave.action": {},
+  "channels.dmLeave.busy": {},
   "channels.dmLeave.cancel": {},
   "channels.dmLeave.confirm": {},
   "channels.dmLeave.confirmBody": {
@@ -1843,6 +1851,14 @@ export const argumentSpecs = {
   },
   "channels.dmLeave.done": {},
   "channels.dmLeave.failed": {},
+  "channels.nameRule.edge": {},
+  "channels.nameRule.hidden": {},
+  "channels.nameRule.required": {},
+  "channels.nameRule.serverRejected": {},
+  "channels.nameRule.tooLong": {
+    "max": "number"
+  },
+  "channels.nameRule.unsupported": {},
   "common.feedback.unavailable": {},
   "common.invitation.received": {
     "actorName": "string"
@@ -3946,6 +3962,7 @@ export interface MessageArgs {
   "blocked.workStateStale.offline": Record<string, never>;
   "blocked.workStateStale.serverUnreachable": Record<string, never>;
   "channels.dmLeave.action": Record<string, never>;
+  "channels.dmLeave.busy": Record<string, never>;
   "channels.dmLeave.cancel": Record<string, never>;
   "channels.dmLeave.confirm": Record<string, never>;
   "channels.dmLeave.confirmBody": { name: string };
@@ -3955,6 +3972,12 @@ export interface MessageArgs {
   "channels.dmLeave.confirmTitle": { name: string };
   "channels.dmLeave.done": Record<string, never>;
   "channels.dmLeave.failed": Record<string, never>;
+  "channels.nameRule.edge": Record<string, never>;
+  "channels.nameRule.hidden": Record<string, never>;
+  "channels.nameRule.required": Record<string, never>;
+  "channels.nameRule.serverRejected": Record<string, never>;
+  "channels.nameRule.tooLong": { max: number };
+  "channels.nameRule.unsupported": Record<string, never>;
   "common.feedback.unavailable": Record<string, never>;
   "common.invitation.received": { actorName: string };
   "common.members.count": { count: number };

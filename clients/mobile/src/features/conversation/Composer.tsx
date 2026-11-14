@@ -1403,6 +1403,9 @@ export function Composer({
 
   const attachmentWorkspaceId = attachmentTarget?.workspaceId;
   const attachmentChannelId = attachmentTarget?.channelId;
+  // 초안에 대화를 적는다(스레드 초안은 열쇠에 채널이 없다 - `Draft.channelId`). 키스트로크 콜백이 낡은 값을 안 읽게 거울로 든다.
+  const draftChannelRef = useRef(attachmentChannelId);
+  draftChannelRef.current = attachmentChannelId;
   const attachmentRootId = attachmentTarget?.rootId;
   const stableAttachmentTarget = useMemo(
     () =>
@@ -1668,7 +1671,7 @@ export function Composer({
     // 저장을 다는 대신 매 글자를 적어 두면 잃는 경로 자체가 없어진다
     // (`drafts.ts` 머리말).
     if (draftKeyRef.current !== undefined) {
-      saveDraft(draftKeyRef.current, next);
+      saveDraft(draftKeyRef.current, next, undefined, draftChannelRef.current);
     }
     onTypingRef.current?.();
   }, [setKeyBlocked]);
@@ -1761,7 +1764,7 @@ export function Composer({
       // 멘션 수락도 글자를 바꾼 것이다. 여기서 안 적으면 「@김인턴 」까지 쓰고
       // 나간 사람은 그 낱말만 잃는다.
       if (draftKeyRef.current !== undefined) {
-        saveDraft(draftKeyRef.current, next.text);
+        saveDraft(draftKeyRef.current, next.text, undefined, draftChannelRef.current);
       }
     },
     [query, text, caret],

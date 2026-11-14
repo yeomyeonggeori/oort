@@ -8,6 +8,12 @@ export const catalog: MessageCatalog = {
       "value": "Salir de la conversación"
     }
   ],
+  "channels.dmLeave.busy": [
+    {
+      "type": 0,
+      "value": "Saliendo…"
+    }
+  ],
   "channels.dmLeave.cancel": [
     {
       "type": 0,
@@ -110,6 +116,51 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "No se pudo salir. Vuelve a intentarlo."
+    }
+  ],
+  "channels.nameRule.edge": [
+    {
+      "type": 0,
+      "value": "El nombre debe empezar y terminar con una letra o un número. Los guiones y guiones bajos solo van en medio."
+    }
+  ],
+  "channels.nameRule.hidden": [
+    {
+      "type": 0,
+      "value": "El nombre contiene caracteres invisibles. Bórralo y vuelve a escribirlo."
+    }
+  ],
+  "channels.nameRule.required": [
+    {
+      "type": 0,
+      "value": "Escribe un nombre para el canal."
+    }
+  ],
+  "channels.nameRule.serverRejected": [
+    {
+      "type": 0,
+      "value": "El servidor no aceptó este nombre. Solo se pueden usar letras, números, - y _."
+    }
+  ],
+  "channels.nameRule.tooLong": [
+    {
+      "type": 0,
+      "value": "El nombre del canal puede tener hasta "
+    },
+    {
+      "type": 2,
+      "value": "max",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": " caracteres."
+    }
+  ],
+  "channels.nameRule.unsupported": [
+    {
+      "type": 0,
+      "value": "Solo se pueden usar letras, números, guiones (-) y guiones bajos (_)."
     }
   ]
 };

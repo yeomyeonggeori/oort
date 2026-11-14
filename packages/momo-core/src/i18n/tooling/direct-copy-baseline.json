@@ -678,6 +678,7 @@
     "clients/web/src/features/work/WorkSessionDetail.tsx": {"ko": 49, "en": 6},
     "clients/web/src/features/workConsole/WorkConsoleRoute.tsx": {"ko": 35, "en": 0},
     "clients/web/src/features/workspace/AddWorkspaceDialog.tsx": {"ko": 13, "en": 1},
+    "packages/momo-core/src/features/channels/model.ts": {"ko": 38, "en": 0},
     "packages/momo-core/src/features/sidebar/sidebarSections.ts": {"ko": 32, "en": 0},
     "packages/momo-core/src/features/work/workSessionModel.ts": {"ko": 59, "en": 0}
   },

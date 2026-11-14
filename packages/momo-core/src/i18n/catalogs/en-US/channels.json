@@ -7,6 +7,13 @@
   "channels.dmLeave.confirmScheduled": "{count, plural, one {# scheduled message will also be canceled.} other {# scheduled messages will also be canceled.}}",
   "channels.dmLeave.cancel": "Cancel",
   "channels.dmLeave.confirm": "Leave",
+  "channels.dmLeave.busy": "Leaving…",
   "channels.dmLeave.done": "You left the conversation.",
-  "channels.dmLeave.failed": "Couldn't leave. Please try again."
+  "channels.dmLeave.failed": "Couldn't leave. Please try again.",
+  "channels.nameRule.required": "Enter a channel name.",
+  "channels.nameRule.tooLong": "Channel names can be up to {max, number} characters.",
+  "channels.nameRule.hidden": "The name contains invisible characters. Clear it and type the name again.",
+  "channels.nameRule.unsupported": "Use only letters, numbers, hyphens (-) and underscores (_).",
+  "channels.nameRule.edge": "The name must start and end with a letter or number. Hyphens and underscores can only go in the middle.",
+  "channels.nameRule.serverRejected": "The server did not accept this name. Use only letters, numbers, - and _."
 }
