@@ -12,11 +12,12 @@
 //   C 키보드: Shift+F10 → End → Enter, 창 안 Tab 가둠, Esc 뒤 캐럿이 연 줄로.
 //   D 두 번 누름 자리: 메뉴 줄 가운데에 창이 서는가 · 창이 닫힌 뒤 확정 단추 가운데에 무엇이 있는가(좌표).
 //   E 영수증: 서는 순간과 걷히는 순간 아래 줄의 y(프레임마다), 포인터가 목록 안 / 밖.
-//   F 정리: 나간 대화의 초안 0 · 다른 대화 초안 그대로. 머리 ⋮ 로 나갈 때 입력칸에 쓰던 글이 내려가며 다시 적히지 않는다.
-//   G 하한: 나간 뒤 다시 연 대화에 하한 아래 발행물(새 글 · 반응)을 밀어도 그려지지 않고, 하한 위 새 글은 그려진다. 새 글이 온 대화는 줄이 다시 선다.
+//   F 정리(D17 기기 줄): 나간 대화의 초안 0 · 다른 대화 초안 그대로 - 줄 메뉴와 머리 ⋮ 둘 다.
+//   G 하한(D18·D22): 하한 아래 seq 의 발행물(새 글 · 고정)은 그려지지 않고, 하한 위는 그려진다. 새 글이 온 대화는 줄이 다시 선다.
 //   H 첫 페인트: 투영이 늦게 오는 동안 나간 대화(별표 없음)가 목록에도 「숨긴 대화」에도 없다.
 //   I 머리 ⋮ 가 늦게 설 때 머리 단추들의 x 변화. J 예약 목록이 늦거나 실패할 때.
 //   K 좁은 폭 390 · 200%: 창이 화면 안, 가로 넘침 0.
+//   L 머리 ⋮ 길: 390(서랍 닫힘 - 끝나면 서랍이 열리고 영수증이 보임) · 1280 목록 접힘(⌘B): 캐럿이 <body> 가 아니고 낭독 영역이 말한다.
 // =============================================================================
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
@@ -494,7 +495,8 @@ async function trackRows(page, ids, ms) {
     const frames = [];
     const t0 = performance.now();
     const tick = () => {
-      const f = { t: Math.round(performance.now() - t0), receipt: document.querySelector('[data-testid="dm-leave-receipt"]') !== null };
+      const receiptEl = document.querySelector('[data-testid="dm-leave-receipt"]');
+      const f = { t: Math.round(performance.now() - t0), receipt: receiptEl !== null, receiptH: receiptEl ? Math.round(receiptEl.getBoundingClientRect().height * 100) / 100 : null };
       for (const id of ids) {
         const el = document.querySelector(`[data-testid="channel-item"][data-channel-id="${id}"]`);
         f[id.slice(-2)] = el ? Math.round(el.getBoundingClientRect().top * 100) / 100 : null;
@@ -530,10 +532,11 @@ async function sceneReceipt(browser, origin, engine, viewport = { width: 1280, h
         const frames = await tracking;
         const shown = frames.filter((f) => f.receipt);
         const ys = shown.map((f) => f["02"]);
-        const receiptBox = await page.getByTestId("dm-leave-receipt").boundingBox().catch(() => null);
+
         check(scene, `영수증이 서는 순간: 아래 줄(박지호) y 그대로 [${pointer}]`, shown.length > 0 && ys.every((y) => Math.abs(y - before.y) <= 0.5), { before: before.y, ys: [...new Set(ys)] });
         if (pointer === "outside") {
-          check(scene, "영수증 상자 = 원래 줄 상자(높이 ±0.5)", receiptBox === null || Math.abs(receiptBox.height - receiptSlot.height) <= 0.5, { receiptBox, receiptSlot });
+          const heights = [...new Set(shown.map((f) => f.receiptH))];
+          check(scene, "영수증 상자 = 원래 줄 상자(프레임마다 높이 ±0.5)", heights.length > 0 && heights.every((h) => Math.abs(h - receiptSlot.height) <= 0.5), { heights, slot: receiptSlot.height });
           const gone = frames.find((f) => !f.receipt && f.t > 200);
           check(scene, "포인터가 목록 밖이면 1.6초 뒤 걷힌다", gone !== undefined && gone.t >= 1_550, gone);
         } else {
@@ -588,7 +591,7 @@ async function sceneCleanup(browser, origin, engine) {
       const hash = await page.evaluate(() => window.location.hash);
       const draft = await page.evaluate((k) => localStorage.getItem(k), draftKey(DM_SEOYEON));
       check(scene, "머리 ⋮: 그 대화를 떠나 `/` 로", !hash.toLowerCase().includes(DM_SEOYEON), hash);
-      check(scene, "머리 ⋮: 입력칸이 내려가며 쓴 글이 다시 적히지 않는다(초안 0)", draft === null, draft);
+      check(scene, "머리 ⋮: 나간 대화 초안 0(입력칸에 쓰던 중)", draft === null, draft);
       const focus = await focusInfo(page);
       check(scene, "머리 ⋮: 캐럿이 <body> 가 아니다", focus.tag !== "body", focus);
       await shot(page, engine, "after-header-leave");
@@ -620,12 +623,30 @@ async function sceneFloor(browser, origin, engine) {
       await page.waitForTimeout(800);
       const first = await count();
       check(scene, "다시 연 대화: 하한 위 글(11)만 보인다", first === 1, first);
-      await page.evaluate(([c, f]) => window.__push(c, f), [chan, frame(5, "나가기 전 글(다시 보낸 것)")]);
-      await page.evaluate(([c, f]) => window.__push(c, f), [chan, { type: "reaction.added", v: 1, ts: Date.now(), seq: 4, payload: { message_id: `${DM_SEOYEON.slice(0, 30)}000004`, member_id: P("11"), emoji: "👍", action: "add" } }]);
+      const pinned = (seq, body) => ({
+        type: "message.pinned", v: 1, ts: Date.now(), seq,
+        payload: { message_id: `${DM_SEOYEON.slice(0, 30)}${String(seq).padStart(6, "0")}`, channel_id: DM_SEOYEON, seq, author_member_id: P("11"), type: "text", state: "sent", body, created_at_ms: Date.now() - 600_000, pinned_by: P("11"), pinned_at_ms: Date.now() },
+      });
+      const pinItems = async () => {
+        await page.getByTestId("open-pin-list").click();
+        await page.getByTestId("pin-list").waitFor({ timeout: 3_000 });
+        await page.waitForTimeout(150);
+        const n = await page.getByTestId("pin-list-item").count();
+        await page.keyboard.press("Escape");
+        await page.waitForTimeout(150);
+        return n;
+      };
+      await page.evaluate(([c, f]) => window.__push(c, f), [chan, frame(5, "하한 아래 글 다섯")]);
+      await page.evaluate(([c, f]) => window.__push(c, f), [chan, pinned(3, "하한 아래 고정 글")]);
       await page.waitForTimeout(300);
       const afterOld = await count();
-      const oldText = await page.evaluate(() => document.body.textContent.includes("나가기 전 글(다시 보낸 것)"));
-      check(scene, "하한 아래 발행물(새 글 5 · 반응 4)은 그려지지 않는다", afterOld === 1 && !oldText, { afterOld, oldText });
+      const oldText = await page.evaluate(() => document.body.textContent.includes("하한 아래 글 다섯"));
+      const oldPins = await pinItems();
+      check(scene, "하한 아래 발행물(새 글 5 · 고정 3)은 그려지지 않는다(이력 · 머리 고정 목록)", afterOld === 1 && !oldText && oldPins === 0, { afterOld, oldText, oldPins });
+      await page.evaluate(([c, f]) => window.__push(c, f), [chan, pinned(11, "새로 시작해요, 내일 봐요")]);
+      await page.waitForTimeout(300);
+      const newPins = await pinItems();
+      check(scene, "대조: 하한 위 고정(11)은 고정 목록에 선다", newPins === 1, newPins);
       await page.evaluate(([c, f]) => window.__push(c, f), [chan, frame(12, "하한 위 새 글")]);
       await page.waitForTimeout(300);
       const afterNew = await count();
@@ -661,9 +682,11 @@ async function sceneFloor(browser, origin, engine) {
         seen.push(await row(page, DM_SEOYEON).count());
         await page.waitForTimeout(150);
       }
-      const closedCount = await page.evaluate(() => document.querySelector('[data-testid="dm-section-menu"]')?.getAttribute("data-closed-count") ?? "0");
+      await page.getByTestId("sidebar-section-dms-header").hover();
+      await page.waitForTimeout(200);
+      const closedCount = await page.evaluate(() => document.querySelector('[data-testid="dm-section-menu"]')?.getAttribute("data-closed-count") ?? "(문 없음 = 0)");
       check(`H-firstpaint-${engine}`, "투영이 오기 전(첫 페인트)부터 나간 대화가 목록에 없다", seen.every((n) => n === 0), seen);
-      check(`H-firstpaint-${engine}`, "「숨긴 대화」 수에 들지 않는다", closedCount === "0", closedCount);
+      check(`H-firstpaint-${engine}`, "「숨긴 대화」 수에 들지 않는다(머리에 호버해 문을 세운 뒤 읽음)", closedCount === "(문 없음 = 0)" || closedCount === "0", closedCount);
     });
   } finally {
     await cold.context.close();
@@ -759,6 +782,48 @@ async function sceneZoom(browser, origin, engine) {
   }
 }
 
+// ---- L · 머리 ⋮ 길: 390 서랍 닫힘 · 1280 목록 접힘 ---------------------------------------------------------------
+
+async function sceneHeaderPath(browser, origin, engine) {
+  for (const [label, viewport] of [["390", { width: 390, height: 844 }], ["1280-collapsed", { width: 1280, height: 800 }]]) {
+    const scene = `L-header-${label}-${engine}`;
+    const { context, page } = await boot(browser, origin, { viewport });
+    try {
+      await attempt(scene, async () => {
+        if (label === "1280-collapsed") {
+          await page.getByTestId("sidebar-toggle").click();
+          await page.waitForTimeout(500);
+        }
+        await page.evaluate((p) => { window.location.hash = p; }, `/c/${DM_SEOYEON}`);
+        await page.getByTestId("channel-title-menu").waitFor({ timeout: 5_000 });
+        await page.getByTestId("channel-title-menu").click();
+        await page.getByTestId("channel-leave-dm").click();
+        await page.getByTestId("dm-leave-confirm").waitFor({ timeout: 5_000 });
+        await page.waitForTimeout(250);
+        check(scene, "확인 창이 서고 초점은 「취소」", (await focusInfo(page)).testid === "dm-leave-confirm-cancel", await focusInfo(page));
+        await page.getByTestId("dm-leave-confirm-confirm").click();
+        await page.waitForTimeout(700);
+        const after = await page.evaluate(() => ({
+          hash: window.location.hash,
+          drawerOpen: document.getElementById("sidebar-drawer")?.hasAttribute("data-open") ?? null,
+          receiptVisible: (() => {
+            const r = document.querySelector('[data-testid="dm-leave-receipt"]')?.getBoundingClientRect();
+            return r ? r.width > 0 && r.right > 0 && r.left < window.innerWidth : false;
+          })(),
+          announce: document.querySelector('[data-testid="dm-leave-announce"]')?.textContent ?? null,
+          focus: { tag: document.activeElement?.tagName.toLowerCase(), testid: document.activeElement?.getAttribute("data-testid") },
+        }));
+        check(scene, "그 대화를 떠나 `/` 로 · 낭독 영역이 「대화에서 나갔어요.」", !after.hash.toLowerCase().includes(DM_SEOYEON) && after.announce === "대화에서 나갔어요.", after);
+        check(scene, "캐럿이 <body> 가 아니다", after.focus.tag !== "body", after.focus);
+        if (label === "390") check(scene, "좁은 폭: 서랍(목록)이 열리고 영수증이 보인다", after.drawerOpen === true && after.receiptVisible, after);
+        await shot(page, engine, `after-header-${label}`);
+      });
+    } finally {
+      await context.close();
+    }
+  }
+}
+
 async function main() {
   mkdirSync(OUT_DIR, { recursive: true });
   const preview = await startGuardedPreview({
@@ -778,6 +843,7 @@ async function main() {
         await run("G", () => sceneFloor(browser, preview.origin, engine));
         await run("I", () => sceneLate(browser, preview.origin, engine));
         await run("K", () => sceneZoom(browser, preview.origin, engine));
+        await run("L", () => sceneHeaderPath(browser, preview.origin, engine));
       } finally {
         await browser.close();
       }

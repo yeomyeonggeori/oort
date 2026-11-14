@@ -1180,7 +1180,7 @@ export function useTimeline(
       // `message.pinned` payload IS the list entry, so nothing here re-reads
       // the list to find out what was pinned.
       onPin: (event) => {
-        if (cancelled || belowFloor(event.seq)) return;
+        if (cancelled || belowFloor(event.type === "message.pinned" ? event.payload.seq : event.seq)) return;
         if (event.type === "message.pinned") {
           applyPins(
             applyPinned(pinsRef.current, pinnedPayloadToWire(event.payload))

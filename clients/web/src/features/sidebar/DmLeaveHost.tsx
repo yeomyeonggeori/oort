@@ -229,6 +229,8 @@ export function DmLeaveHost({
       seenSeq,
       rootIds,
     });
+    // 이 행보다 먼저 떠난 투영 읽기가 하한 없는 행으로 덮지 않게 다시 읽는다(나가는 중인 읽기는 버리고 새로 받는다).
+    void client.invalidateQueries({ queryKey: ["read-state", workspaceId] });
     // 4. 보고 있던 대화면 떠난다.
     if (openId !== null && uuidEq(openId, req.channelId)) navigate("/");
     // 6. 주소가 바뀐 뒤의 둘째 정리.
