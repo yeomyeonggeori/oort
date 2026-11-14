@@ -180,6 +180,39 @@ describe("dmVerdict · server 갈래", () => {
   });
 });
 
+// ADR-0177 증보 2026-11-14 D18·D21: 나간 대화(3a). 웹은 행의 하한을 「나가기를 싣는 서버」에서만 코어에 넣는다.
+describe("dmVerdict · 나간 대화 (3a)", () => {
+  // 나간 직후 서버 값(하한 11, 숨김 10)에 별표 - 숨김(7)만으로는 별표(4)가 이겨 보인다. 3a 가 먼저 숨긴다.
+  const left = row(dm(1), { historyFromSeq: 11, closedAtSeq: 10, latestReadableSeq: 10 });
+
+  it("나가기를 싣는 서버: 별표한 나간 대화도 숨는다(3a) - 「숨긴 대화」 목록에 드는 7 이 아니다", () => {
+    expect(dmVerdict({ ...BASE, serverCarriesLeave: true, starredOrSectioned: true, read: left })).toEqual({
+      state: "hidden",
+      rule: "3a",
+    });
+  });
+
+  it("나가기를 모르는 서버(생략): 하한을 읽지 않는다 - 지금까지와 같다(별표면 4)", () => {
+    expect(dmVerdict({ ...BASE, starredOrSectioned: true, read: left })).toEqual({ state: "shown", rule: 4 });
+  });
+
+  it("하한을 말하지 않은 행(undefined)은 하한 없음이 아니다: 사본이 닫았다고 하면 숨은 채, 사본이 없으면 보인다", () => {
+    const unsaid = row(dm(1), { closedAtSeq: null, latestReadableSeq: 10 }); // historyFromSeq 키 없음
+    expect(
+      dmVerdict({ ...BASE, serverCarriesLeave: true, read: unsaid, cache: { [dm(1)]: [10, 10, 10, 0] } })
+    ).toEqual({ state: "hidden", rule: 7 });
+    expect(dmVerdict({ ...BASE, serverCarriesLeave: true, read: unsaid, cache: {} }).state).toBe("shown");
+  });
+
+  it("하한 위에 새 글이 오면 원래 자리로 돌아온다(별표 4)", () => {
+    const revived = { ...left, latestReadableSeq: 11, latestSeq: 11 };
+    expect(dmVerdict({ ...BASE, serverCarriesLeave: true, starredOrSectioned: true, read: revived })).toEqual({
+      state: "shown",
+      rule: 4,
+    });
+  });
+});
+
 describe("dmVerdict · 콜드 스타트 (AC 10)", () => {
   const loading = { ...BASE, phase: "loading" as const, read: undefined };
 

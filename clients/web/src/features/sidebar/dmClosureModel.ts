@@ -141,6 +141,11 @@ export interface DmVerdict {
 
 export interface DmFactsInput {
   mode: DmClosureMode;
+  /**
+   * 이 서버가 「대화 나가기」를 싣는가(코어 `dmLeaveMode` 가 `server`, ADR-0177 증보 2026-11-14 D21). 참이면 server·ready 행의
+   * 하한(`historyFromSeq`)을 그대로 코어 3a 에 넣는다. 아니면(생략 포함) 하한이 없다 - 옛 서버에서 3a 는 아무것도 바꾸지 않는다.
+   */
+  serverCarriesLeave?: boolean;
   phase: ReadProjectionPhase;
   counterpart: DmCounterpart;
   starredOrSectioned: boolean;
@@ -262,7 +267,8 @@ function factsFor(input: DmFactsInput): Facts | "pending" {
   return {
     ...base,
     closedAtSeq: read.closedAtSeq,
-    historyFromSeq: null,
+    // 하한을 말하지 않은 행(undefined)은 코어 3a 자리에서 직전 판정 유지다(위 `hold` 풀이가 사본으로 푼다).
+    historyFromSeq: input.serverCarriesLeave === true ? read.historyFromSeq : null,
     // 이 행이 읽을 seq 를 말하지 않았다(옛 행): 전체 seq 로 대신한다 - 더 많이 보이는 쪽이다.
     latestReadableSeq: read.latestReadableSeq ?? read.latestSeq,
     lastReadSeq: read.lastReadSeq,
