@@ -1,4 +1,8 @@
 import { DmAgentsMenu } from "./DmAgentsMenu";
+import { dmLeaveMode, dmLeaveOffered, higherHistoryFloor } from "@momo/core/features/channels/dmLeave";
+import { idKey } from "@momo/core/features/workspace/directory";
+import { readProjectionPhase } from "@momo/core/features/sidebar/goneDm";
+import { requestDmLeave, useDmLeaveStore } from "@/features/sidebar/dmLeaveStore";
 import {
   useCallback,
   useEffect,
@@ -279,11 +283,20 @@ export function ChatShell() {
     ? dmAutoReplyAgent(channel, directory, session.member.id)
     : null;
 
+  // 실시간 하한(ADR-0177 증보 2026-11-14 D22 한계 3 가운데 기기 몫, #5825): 나간 1:1 의 하한 아래 발행물(다시 보내기로 온 것 포함)은 그리지
+  // 않는다. 하한은 읽음 투영(캐시가 바뀌면 이 화면이 다시 그려진다)에서 이벤트가 온 순간 읽는다.
+  const readRowsRef = useRef(readStates.byChannel);
+  readRowsRef.current = readStates.byChannel;
+  const historyFloorOf = useCallback(
+    (forChannel: string) => higherHistoryFloor(readRowsRef.current?.get(idKey(forChannel))?.historyFromSeq, null),
+    []
+  );
   const timeline = useTimeline(
     realtime,
     workspaceId,
     stressCount > 0 ? null : channelId,
-    session.member.id
+    session.member.id,
+    { historyFloorOf }
   );
   const personalCall = usePersonalCall({
     workspaceId,
@@ -1135,6 +1148,21 @@ export function ChatShell() {
   const offline = stressCount === 0 && isOffline;
   const hasChannel = stressCount > 0 || channelId !== null;
 
+  // 대화 머리의 「대화 나가기」(ADR-0177 증보 2026-11-14 D21, #5825): 사람끼리의 1:1 · 나가기를 싣는 서버 · 투영 준비일 때만 DM 머리에 ⋮ 가
+  // 선다(D20). 다른 DM 에는 ⋮ 를 세우지 않는다 - 에이전트가 앉은 DM 은 이미 「대화 멤버 관리」 ⋮ 를 든다. 저장소의 판은 나가기 경로가
+  // 이 워크스페이스에서 접혔을 때(405·501) 다시 읽게 한다.
+  useDmLeaveStore();
+  const leaveOffered =
+    stressCount === 0 &&
+    channel?.kind === "dm" &&
+    dmLeaveOffered({
+      mode: dmLeaveMode({ workspaceId, rows: readStates.data }),
+      phase: readProjectionPhase(readStates),
+      channel,
+      directory,
+      selfMemberId: session.member.id,
+    });
+
   // 멤버 수 · 허들 · ⋮ (컨트롤 묶음의 끝). **⋮는 혼자 한 줄에 서지 않는다** (#5206): 컨트롤 묶음이 줄을 바꿀 때(판이 좁은 600대)
   // 맨 끝의 ⋮가 혼자 셋째 줄에 서지 않게, ⋮를 바로 앞 컨트롤과 줄바꿈 한 덩어리(`flex-nowrap`)로 묶는다. 앞 컨트롤은 허들 컨트롤이고,
   // 허들 컨트롤이 아무것도 안 그리면(허들 없는 서버, 오프라인) 멤버 수다. 단추 순서(멤버 수 → 허들 → ⋮)와 크기는 그대로다.
@@ -1159,13 +1187,28 @@ export function ChatShell() {
       <HuddleHeaderControl huddle={huddle} offline={offline} />
     ) : null;
     const menu =
-      stressCount === 0 && channel && channel.kind !== "dm" ? (
+      stressCount === 0 && channel && (channel.kind !== "dm" || leaveOffered) ? (
         <ChannelHeaderMenu
           workspaceId={workspaceId}
           channel={channel}
           title={labelParts?.text ?? label}
           selfMemberId={session.member.id}
           selfRole={memberFor(directory, session.member.id)?.role}
+          onLeaveDm={
+            leaveOffered
+              ? (opener) =>
+                  requestDmLeave({
+                    workspaceId,
+                    channelId: channel.id,
+                    name: peer?.displayName ?? labelParts?.text ?? label,
+                    via: "header",
+                    opener,
+                    observedSeq: timeline.state.newestSeq,
+                    // 열려 있는 이력의 글 id - 답글 초안을 찾는 뿌리 후보(#5824 검수 r1 M4).
+                    rootIds: timeline.state.messages.map((message) => message.id),
+                  })
+              : undefined
+          }
         />
       ) : null;
     return huddle && huddleControlShown(huddle, offline) ? (

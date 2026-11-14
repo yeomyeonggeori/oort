@@ -114,6 +114,7 @@ export function SidebarRowContextMenu({
   starred = false,
   onToggleStar,
   onCloseDm,
+  onLeaveDm,
 }: {
   /** 이 행의 링크. 트리거 상자가 이것을 감싼다. */
   children: ReactElement;
@@ -144,6 +145,11 @@ export function SidebarRowContextMenu({
    * 닫는 일의 실행(원장 · 착지 · 이웃 행 캐럿)은 사이드바가 지고, 이 파일은 그릇과 입력만 정한다.
    */
   onCloseDm?: () => void;
+  /**
+   * 사람끼리의 1:1 DM 줄의 「대화 나가기」 (ADR-0177 증보 2026-11-14 D21, #5825). 손이 없으면(채널·에이전트 DM·그룹 DM·옛 서버·터치)
+   * 항목이 서지 않는다. 받는 쪽(사이드바)이 확인 창을 세운다 - 이 메뉴는 닫히고 요청만 넘긴다.
+   */
+  onLeaveDm?: () => void;
 }) {
   const [open, setOpen] = useState(false);
   // 이 메뉴를 **누가** 열었는가 (#3963, design-review R1 N1). 열림 윤곽(`tokens.css` 「포인터로 연
@@ -186,6 +192,7 @@ export function SidebarRowContextMenu({
     // 닫으면 이 행이 사라지므로 캐럿은 **이웃 행**으로 가야 한다. 이웃은 지우기 전에 잡아야 해서
     // `handOffFocus`(옮겨간 그 행으로)와 다른 규칙이고, 그 계산은 사이드바의 `closeDmRow` 가 한다.
     onCloseDm,
+    onLeaveDm,
   });
   // 층을 세우지만, **이 층의 handle 은 결코 불리지 않는다** (design-review
   // #1937 N-2). 아래 층(폰 서랍·작업 패널)을 실제로 지키는 것은 이 줄이 아니라
@@ -298,6 +305,7 @@ export function SidebarRowContextMenu({
             onHandOff={(key) => {
               setOpen(false);
               if (key === "leave") actions.leave.open();
+              if (key === "leave-dm") onLeaveDm?.();
             }}
           />
         </ContextMenuContent>

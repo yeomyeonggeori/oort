@@ -1,5 +1,6 @@
 import { missingMemberLabel } from "@momo/core/features/workspace/directory";
 import { dismissTemporarySurfaces } from "@momo/core/features/notifications/entryDismiss";
+import { isBelowHistoryFloor } from "@momo/core/features/channels/dmLeave";
 import { useCallback, useEffect, useMemo, useRef, type MutableRefObject } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
@@ -11,6 +12,7 @@ import { fetchWorkSessions, uuidEq, type WorkSession } from "@momo/core/lib/api"
 import { agentPanePath } from "@momo/core/features/workbench/workTab";
 import { workSessionsKey } from "@/features/work/useWorkSessions";
 import {
+  historyFloorFromCache,
   useChannels,
   useDirectory,
   memberFor,
@@ -185,6 +187,16 @@ export function DesktopNotifications() {
 
   const handle = useCallback(function handleEvent(event: MessageNewEvent, answered = false): void {
     const current = contextRef.current;
+    // 1:1 대화에서 나간 사람의 하한 아래 발행물(실시간 서버가 끊긴 구간을 다시 보내며 온 나가기 전 글)은 알리지 않는다
+    // (ADR-0177 증보 2026-11-14 D22 한계 3 가운데 기기 몫, #5825). 하한 위의 새 글은 평소처럼 알린다(owner D-2).
+    if (
+      isBelowHistoryFloor(
+        event.payload.seq,
+        historyFloorFromCache(current.queryClient, current.workspaceId, event.payload.channel_id)
+      )
+    ) {
+      return;
+    }
     const nowMs = Date.now();
     const decision = notifyThisDevice(event, {
       isDesktop: canNotifyRef.current,
