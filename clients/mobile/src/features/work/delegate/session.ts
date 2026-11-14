@@ -36,6 +36,11 @@ export function clearDraft(workspaceId: string): void {
   drafts.delete(workspaceId);
 }
 
+/** 로그아웃(#5799): 이 실행의 메모리에 남은 글을 모두 버린다 — 같은 실행에서 다음 사람이 같은 워크스페이스로 들어와도 보이지 않게. */
+export function clearAllDelegateDrafts(): void {
+  drafts.clear();
+}
+
 /** Test seam. */
 export function __resetDelegateDrafts(): void {
   drafts.clear();
