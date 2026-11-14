@@ -14,6 +14,7 @@ tenant-isolation momo-server dm_leave_conformance_pg
 tenant-isolation momo-server dm_leave_copies_pg
 tenant-isolation momo-messaging conformance_pg
 tenant-isolation momo-relay relay_conformance_pg
+tenant-isolation momo-relay room_floor_routing_pg
 auth momo-server claim_conformance_pg
 auth momo-server refresh_proof_conformance_pg
 auth momo-server login_relay_conformance_pg

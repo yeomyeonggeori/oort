@@ -21,8 +21,15 @@ use momo_relay::audience::ROOM_EVENTS;
 /// pairs it can publish). Namespace `ch` is a room channel and is judged by the relay; every other
 /// namespace (`user` personal, `agent` progress rail, `agentwork` job doorbell, `expressions`) is
 /// published as it is. An empty list marks a mention that is not an emit site.
+type Site = (
+    &'static str,
+    &'static str,
+    usize,
+    &'static [(&'static str, &'static str)],
+);
+
 #[rustfmt::skip]
-const SITES: &[(&str, &str, usize, &[(&str, &str)])] = &[
+const SITES: &[Site] = &[
     ("bins/momo-agent-worker/src/a2a.rs", "route_a2a_mentions_in_tx", 1, &[("agentwork", "agent.job")]),
     ("bins/momo-agent-worker/src/lib.rs", "emit_rail_frame", 1, &[("agent", "agent.status"), ("agent", "agent.partial")]),
     ("bins/momo-agent-worker/src/partial.rs", "flush", 2, &[("agent", "agent.status"), ("agent", "agent.partial")]),
@@ -125,9 +132,38 @@ fn item_name(line: &str) -> Option<String> {
 
 const NEEDLE: &str = "OutboxKind::Broadcast";
 
+/// Helpers whose event type is an argument chosen by the caller (a new call can publish a new
+/// type without a new `OutboxKind::Broadcast` site), with the number of calls the server has.
+/// `fn NAME(` definitions are not calls. A changed number is red: list the call's types in the
+/// SITES row of the site it reaches, then update the number here.
+#[rustfmt::skip]
+const TYPE_CHOOSING_HELPERS: &[(&str, usize)] = &[
+    ("emit_huddle_event(", 3),
+    ("emit_control_event(", 3),
+    ("control_event_payload(", 3),
+    ("lifecycle_payload(", 7),
+    ("tool_lifecycle_payload(", 1),
+    ("acp_event_payload(", 1),
+];
+
+/// Occurrences of `needle` in `code` that are not the tail of a longer identifier.
+fn occurrences(code: &str, needle: &str) -> usize {
+    let bytes = code.as_bytes();
+    code.match_indices(needle)
+        .filter(|(at, _)| {
+            *at == 0 || !(bytes[at - 1].is_ascii_alphanumeric() || bytes[at - 1] == b'_')
+        })
+        .count()
+}
+
 /// Every `OutboxKind::Broadcast` of one source file by enclosing item. Comments and `#[cfg(test)]`
 /// modules are not sites.
 fn scan_source(text: &str) -> BTreeMap<String, usize> {
+    scan_source_for(text, NEEDLE)
+}
+
+/// [`scan_source`] for any needle; a `fn NEEDLE` definition line does not count.
+fn scan_source_for(text: &str, needle: &str) -> BTreeMap<String, usize> {
     let mut out = BTreeMap::new();
     let mut item = String::from("<module>");
     let mut depth: i64 = 0;
@@ -171,7 +207,10 @@ fn scan_source(text: &str) -> BTreeMap<String, usize> {
             continue;
         }
         let code = line.split("//").next().unwrap_or("");
-        let count = code.matches(NEEDLE).count();
+        if code.contains(&format!("fn {needle}")) {
+            continue;
+        }
+        let count = occurrences(code, needle);
         if count > 0 {
             *out.entry(item.clone()).or_insert(0) += count;
         }
@@ -191,6 +230,25 @@ fn rust_files(dir: &Path, out: &mut Vec<PathBuf>) {
             out.push(path);
         }
     }
+}
+
+/// Total calls of `needle` across `server-rust/{bins,crates}/<crate>/src/**/*.rs`.
+fn count_tree(root: &Path, needle: &str) -> usize {
+    let mut total = 0;
+    for group in ["bins", "crates"] {
+        for krate in std::fs::read_dir(root.join(group))
+            .expect("readable")
+            .flatten()
+        {
+            let mut files = Vec::new();
+            rust_files(&krate.path().join("src"), &mut files);
+            for file in files {
+                let text = std::fs::read_to_string(&file).expect("read a source file");
+                total += scan_source_for(&text, needle).values().sum::<usize>();
+            }
+        }
+    }
+    total
 }
 
 /// `server-rust/{bins,crates}/<crate>/src/**/*.rs`.
@@ -420,6 +478,33 @@ fn every_broadcast_site_in_the_server_is_listed() {
         problems.is_empty(),
         "every OutboxKind::Broadcast site needs a row in SITES (ADR-0177 D17):\n{}",
         problems.join("\n")
+    );
+}
+
+#[test]
+fn every_call_of_a_type_choosing_helper_is_counted() {
+    let root = server_rust_root();
+    let mut problems = Vec::new();
+    for (needle, listed) in TYPE_CHOOSING_HELPERS {
+        let found = count_tree(&root, needle);
+        if found != *listed {
+            problems.push(format!(
+                "{needle}: source {found}, table {listed} — a new call may publish a new type; \
+                 list it in SITES and ROOM_EVENTS (ADR-0177 D17)"
+            ));
+        }
+    }
+    assert!(problems.is_empty(), "{}", problems.join("\n"));
+    // The boundary: `tool_lifecycle_payload(` is not a `lifecycle_payload(` call, a definition is
+    // not a call, a comment is not a call.
+    let sample = "fn lifecycle_payload(a: u8) {}\n\
+                  fn x() { lifecycle_payload(1); tool_lifecycle_payload(2); }\n\
+                  // lifecycle_payload(3)\n";
+    assert_eq!(
+        scan_source_for(sample, "lifecycle_payload(")
+            .values()
+            .sum::<usize>(),
+        1
     );
 }
 
