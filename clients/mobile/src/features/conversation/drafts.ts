@@ -74,6 +74,11 @@ export interface Draft {
   savedAtMs: number;
   /** 쓴 사람(멤버 id, 소문자). 없으면 작성자를 모르는 값이다(아래 「누구의 초안인가」). */
   author?: string;
+  /**
+   * 이 초안이 속한 대화(채널 id, 소문자). 스레드 초안의 열쇠(`thread:<뿌리 id>`)는 채널을 안 싣는데, 대화 나가기(#5826 · 증보 D17)가 그 대화의
+   * 스레드 초안을 열쇠만으로 다 찾아 지워야 해서 적는다. 없으면(이 칸 전에 저장된 값) 채널을 모르는 초안이다.
+   */
+  channelId?: string;
 }
 
 // 누구의 초안인가 (#5799, 웹 `chat/draftStore.ts`의 같은 규칙). 토큰 만료로 나가면 초안은 남는다 — 같은 사람이 다시 들어와 이어 쓰게.
@@ -139,9 +144,19 @@ export function readDrafts(): DraftMap {
       // 모양을 확인하고 담는다. 옛 판이나 손으로 고쳐진 값이 `body.length` 에서
       // 터지게 두지 않는다.
       if (value === null || typeof value !== 'object') continue;
-      const {body, savedAtMs, author} = value as {body?: unknown; savedAtMs?: unknown; author?: unknown};
+      const {body, savedAtMs, author, channelId} = value as {
+        body?: unknown;
+        savedAtMs?: unknown;
+        author?: unknown;
+        channelId?: unknown;
+      };
       if (typeof body !== 'string' || typeof savedAtMs !== 'number') continue;
-      out[key] = typeof author === 'string' && author !== '' ? {body, savedAtMs, author} : {body, savedAtMs};
+      out[key] = {
+        body,
+        savedAtMs,
+        ...(typeof author === 'string' && author !== '' ? {author} : null),
+        ...(typeof channelId === 'string' && channelId !== '' ? {channelId} : null),
+      };
     }
     return out;
   } catch {
@@ -183,6 +198,8 @@ export function saveDraft(
   key: string,
   body: string,
   nowMs: number = Date.now(),
+  /** 이 초안이 속한 대화. 스레드 초안이 채널을 들고 있게 한다(`Draft.channelId`). 생략하면 그 자리에 이미 적힌 값을 이어 간다. */
+  channelId?: string,
 ): void {
   // API 키 모양이 든 글은 저장소에 남기지 않는다 (#2945 GC-4, 웹 `draftStore.ts`
   // #2942와 같은 문). 이 저장소는 `NON_SECRET_KEYS` — 이름 그대로 비밀이 아닌 것만
@@ -194,8 +211,18 @@ export function saveDraft(
   }
   try {
     const author = currentAuthor();
+    const all = readDrafts();
+    const channel = (channelId ?? all[key]?.channelId)?.toLowerCase();
     const next = pruneDrafts(
-      {...readDrafts(), [key]: author === null ? {body, savedAtMs: nowMs} : {body, savedAtMs: nowMs, author}},
+      {
+        ...all,
+        [key]: {
+          body,
+          savedAtMs: nowMs,
+          ...(author === null ? null : {author}),
+          ...(channel === undefined ? null : {channelId: channel}),
+        },
+      },
       nowMs,
     );
     writeDrafts(next);
@@ -249,6 +276,7 @@ export function seedDraft(
   key: string,
   text: string,
   nowMs: number = Date.now(),
+  channelId?: string,
 ): boolean {
   if (text.trim() === '') return false;
   const mounted = [...(seedListeners.get(key) ?? [])];
@@ -256,7 +284,7 @@ export function seedDraft(
     mounted.length > 0
       ? mounted.map(listener => listener(text)).some(Boolean)
       : readDraft(key, nowMs).trim() === '';
-  if (accepted) saveDraft(key, text, nowMs);
+  if (accepted) saveDraft(key, text, nowMs, channelId);
   return accepted;
 }
 
@@ -269,6 +297,26 @@ export function clearDraft(key: string, nowMs: number = Date.now()): void {
     writeDrafts(pruneDrafts(map, nowMs));
   } catch {
     // 위와 같다.
+  }
+}
+
+/**
+ * 이 대화에 속한 초안을 **열쇠로 다** 지운다(대화 나가기, #5826). 채널 초안(`channel:<id>`)과 채널을 적어 둔 스레드 초안(`Draft.channelId`)이 대상이고,
+ * 다른 대화의 것은 그대로다. 지운 열쇠를 돌려준다.
+ */
+export function clearDraftsOfChannel(channelId: string, nowMs: number = Date.now()): string[] {
+  try {
+    const wanted = channelId.toLowerCase();
+    const map = {...readDrafts()};
+    const gone = Object.keys(map).filter(
+      key => key === channelDraftKey(channelId) || map[key].channelId === wanted,
+    );
+    if (gone.length === 0) return [];
+    for (const key of gone) delete map[key];
+    writeDrafts(pruneDrafts(map, nowMs));
+    return gone;
+  } catch {
+    return [];
   }
 }
 
