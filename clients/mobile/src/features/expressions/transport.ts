@@ -1,5 +1,6 @@
 import {File, Paths, UploadType} from 'expo-file-system';
 import {authedResponse, rotateAfterUnauthorized} from '@momo/core/lib/api';
+import {sessionStamp} from '@momo/core/lib/sessionStamp';
 import {REQUEST_TIMEOUT_MS} from '@momo/core/lib/http';
 import {apiBase, coreSession} from '@momo/core/runtime/host';
 import type {
@@ -102,12 +103,14 @@ async function uploadFile(
       task.release();
     }
   };
+  // 다시 보낼 때는 처음 보낸 세션으로만(#5816).
+  const sentAs = sessionStamp();
   try {
     let result = await send();
     if (
       result.status === 401 &&
       coreSession().getRefreshToken() &&
-      (await rotateAfterUnauthorized())
+      (await rotateAfterUnauthorized(sentAs))
     ) {
       result = await send();
     }
@@ -170,6 +173,8 @@ export const expressionTransport: ExpressionTransport = {
         throw new Error('Expression image too large');
       return {status: 200, bytes: await file.bytes()};
     };
+    // 다시 받을 때는 처음 받은 세션으로만(#5816).
+    const sentAs = sessionStamp();
     try {
       try {
         return await send();
@@ -183,7 +188,7 @@ export const expressionTransport: ExpressionTransport = {
         }
         if (
           coreSession().getRefreshToken() &&
-          (await rotateAfterUnauthorized())
+          (await rotateAfterUnauthorized(sentAs))
         ) {
           try {
             return await send();

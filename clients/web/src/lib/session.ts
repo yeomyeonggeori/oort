@@ -155,6 +155,9 @@ function isShellHandle(token: string): boolean {
 function writeStorage(value: PersistedSession | null): void {
   if (storageMode === "keychain") {
     writeRaw(DESKTOP_METADATA_KEY, value ? JSON.stringify(sessionMetadataOf(value)) : null);
+    // The token's server, read with the token (#5816): the queued write may run
+    // after the stored server has moved on.
+    const origin = apiBase();
     queueKeychain(async () => {
       if (!value) return desktopKeychain.clear();
       // The shell rotated and already stored the successor; a handle is not
@@ -163,7 +166,7 @@ function writeStorage(value: PersistedSession | null): void {
         writeRaw(DESKTOP_ROTATED_KEY, `${Date.now()}:${Math.random()}`);
         return true;
       }
-      if (await desktopKeychain.store(value.refreshToken, apiBase())) {
+      if (await desktopKeychain.store(value.refreshToken, origin)) {
         writeRaw(DESKTOP_ROTATED_KEY, `${Date.now()}:${Math.random()}`);
         return true;
       }
@@ -487,7 +490,9 @@ export async function refreshThroughHost(
   // Anything still queued (a clear) lands first.
   await flushKeychain();
   if (storageMode !== "keychain") return null;
-  return desktopSession.refreshAttempt({ apiBase: apiBase(), ...request });
+  // `request.apiBase` is the server the core read with the session; the store's
+  // current choice may already name another (#5816). Never re-read here.
+  return desktopSession.refreshAttempt(request);
 }
 
 /**
@@ -500,10 +505,10 @@ export async function revokeThroughHost(request: HostRevokeRequest): Promise<boo
   // A raw token is one the core itself rotated to (the keychain never
   // confirmed the session) — it is not in the shell; revoke it directly.
   if (request.refreshToken && !isShellHandle(request.refreshToken)) return false;
-  const { accessToken, workspaceId, memberId } = request;
+  const { accessToken, workspaceId, memberId, apiBase: base } = request;
   try {
     await within(
-      desktopSession.revoke({ apiBase: apiBase(), accessToken, workspaceId, memberId }),
+      desktopSession.revoke({ apiBase: base, accessToken, workspaceId, memberId }),
       20_000,
       false
     );

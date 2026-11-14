@@ -18,6 +18,7 @@ import {
 } from "@momo/core/features/attachments/model";
 import { declareImageSize } from "@momo/core/features/attachments/declareImageSize";
 import { completeAttachmentUpload, createAttachmentUpload } from "@momo/core/lib/api";
+import { isCurrentSession, sessionStamp, type SessionStamp } from "@momo/core/lib/sessionStamp";
 import { canDeclareImageSize } from "@momo/core/lib/attachmentMedia";
 import {
   verdictForRequestFailure,
@@ -163,7 +164,8 @@ interface UploadTarget {
 async function uploadOne(
   key: string,
   target: UploadTarget,
-  draft: AttachmentDraft
+  draft: AttachmentDraft,
+  startedAs: SessionStamp
 ): Promise<void> {
   const file = files.get(draft.localId);
   if (file === undefined) {
@@ -194,6 +196,11 @@ async function uploadOne(
   inflight.set(draft.localId, handle);
   const result = await handle.done;
   inflight.delete(draft.localId);
+  // 이어지는 요청(완료 · 크기 선언)은 올리기를 시작한 세션으로만 간다(#5816).
+  if (!isCurrentSession(startedAs)) {
+    update(key, (list) => failUpload(list, draft.localId, "unavailable"));
+    return;
+  }
 
   if (!result.ok) {
     if (result.failure === "aborted") {
@@ -221,6 +228,10 @@ async function uploadOne(
   } catch (error) {
     const verdict = verdictForRequestFailure(error, deviceOnlineNow());
     update(key, (list) => failUpload(list, draft.localId, verdict.issue, verdict.cause));
+    return;
+  }
+  if (!isCurrentSession(startedAs)) {
+    update(key, (list) => failUpload(list, draft.localId, "unavailable"));
     return;
   }
   // 완료 뒤, 「올림」으로 바꾸기 전: 아직 메시지에 안 묶였을 때만 서버가 받는다(위 「사진·GIF 의 가로세로 선언」).
@@ -260,11 +271,23 @@ async function declareSize(
 async function pump(key: string, target: UploadTarget): Promise<void> {
   if (pumping.has(key)) return;
   pumping.add(key);
+  // 다음 건도 이 차례를 시작한 세션으로만 올린다(#5816).
+  const startedAs = sessionStamp();
   try {
     for (;;) {
+      if (!isCurrentSession(startedAs)) {
+        // 이 차례에 남은 건은 시작한 세션의 것이다: 다른 세션으로 올리지 않고 실패로 둔다.
+        update(key, (list) =>
+          list.reduce(
+            (rows, draft) => (draft.status === "ready" ? failUpload(rows, draft.localId, "unavailable") : rows),
+            list
+          )
+        );
+        return;
+      }
       const next = read(key).drafts.find((draft) => draft.status === "ready");
       if (next === undefined) return;
-      await uploadOne(key, target, next);
+      await uploadOne(key, target, next, startedAs);
     }
   } finally {
     pumping.delete(key);

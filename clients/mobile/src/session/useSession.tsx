@@ -289,8 +289,8 @@ export function SessionProvider({
       deviceId === null
         ? {}
         : {
-            beforeRevoke: accessToken =>
-              revokeDevice(workspaceId, deviceId, accessToken),
+            beforeRevoke: (accessToken, base) =>
+              revokeDevice(workspaceId, deviceId, accessToken, base),
           },
     );
     // Every cached answer in here was fetched with the credential that was just

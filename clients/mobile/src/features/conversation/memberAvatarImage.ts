@@ -1,6 +1,7 @@
 import {isApprovalAvatarPreviewPath} from '@momo/core/features/approvals/avatarPreview';
 import {memberAvatarContentPath} from '@momo/core/features/workspace/avatar';
 import {rotateAfterUnauthorized} from '@momo/core/lib/api';
+import {sessionStamp} from '@momo/core/lib/sessionStamp';
 import {apiBase, coreSession} from '@momo/core/runtime/host';
 import {Directory, File, Paths} from 'expo-file-system';
 import {useEffect, useState} from 'react';
@@ -188,6 +189,8 @@ async function download(path: string, destination: File): Promise<File> {
       idempotent: true,
     });
   };
+  // 다시 받을 때는 처음 받은 세션으로만(#5816).
+  const sentAs = sessionStamp();
   try {
     return await send();
   } catch (error: unknown) {
@@ -200,7 +203,7 @@ async function download(path: string, destination: File): Promise<File> {
     //                    (이니셜이 서고, 잠금 화면에서 돌아와 무선이 깨는 사이의 끊김이
     //                    로그아웃이 되지 않는다. 다음 요청이 다시 갱신한다. 같은 아바타는
     //                    실패 기억 `FAILURE_TTL_MS` 가 지난 뒤에 다시 묻는다).
-    if (coreSession().getRefreshToken() !== null && (await rotateAfterUnauthorized())) {
+    if (coreSession().getRefreshToken() !== null && (await rotateAfterUnauthorized(sentAs))) {
       try {
         return await send();
       } catch (retried: unknown) {

@@ -12,6 +12,8 @@ import type { LoginResponse } from "@momo/core/lib/api";
 
 const mocks = vi.hoisted(() => ({
   desktop: false,
+  /** The stored server choice; a test may move it. */
+  server: "https://oort.test",
   keychain: {
     available: vi.fn(async () => true),
     handle: vi.fn(async (): Promise<string | null> => null),
@@ -47,7 +49,7 @@ vi.mock("./tauri", () => ({
 }));
 
 const SERVER = "https://oort.test";
-vi.mock("./serverBase", () => ({ apiBase: () => SERVER }));
+vi.mock("./serverBase", () => ({ apiBase: () => mocks.server }));
 
 const WEB_KEY = "momo.web.session.v1";
 const DESKTOP_KEY = "momo.desktop.session.v1";
@@ -93,6 +95,7 @@ function loadStore(seed: Record<string, string> = {}) {
 
 beforeEach(() => {
   mocks.desktop = false;
+  mocks.server = SERVER;
   mocks.keychain.available.mockResolvedValue(true);
   mocks.keychain.handle.mockResolvedValue(null);
   mocks.keychain.store.mockResolvedValue(true);
@@ -235,12 +238,12 @@ describe("desktop runtime with a working keychain", () => {
       written.done ? "shell:0123456789abcdef0123456789abcdef" : null
     );
     session.applyLogin(login);
-    const request = { workspaceId: member.workspaceId, memberId: member.id, skewMs: 0 };
+    const request = { workspaceId: member.workspaceId, memberId: member.id, skewMs: 0, apiBase: SERVER };
 
     // The rotation's re-read waits for the queued write, then adopts the handle.
     const answer = await session.exclusiveRotation(() => session.refreshThroughHost(request));
     expect(answer?.status).toBe(200);
-    expect(mocks.shell.refreshAttempt).toHaveBeenCalledWith({ apiBase: SERVER, ...request });
+    expect(mocks.shell.refreshAttempt).toHaveBeenCalledWith(request);
   });
 
   // A raw token in memory = the keychain never confirmed it (a stuck write, a
@@ -255,6 +258,7 @@ describe("desktop runtime with a working keychain", () => {
       workspaceId: member.workspaceId,
       memberId: member.id,
       skewMs: 0,
+      apiBase: SERVER,
     });
     expect(answer).toBeNull();
     expect(mocks.shell.refreshAttempt).not.toHaveBeenCalled();
@@ -265,6 +269,7 @@ describe("desktop runtime with a working keychain", () => {
         memberId: member.id,
         skewMs: 0,
         bind: true,
+        apiBase: SERVER,
       })
     ).rejects.toThrow("not confirmed");
   });
@@ -280,6 +285,7 @@ describe("desktop runtime with a working keychain", () => {
         refreshToken: "shell:0123456789abcdef0123456789abcdef",
         workspaceId: member.workspaceId,
         memberId: member.id,
+        apiBase: SERVER,
       })
     ).resolves.toBe(true);
     expect(mocks.shell.revoke).toHaveBeenCalledWith({
@@ -288,6 +294,64 @@ describe("desktop runtime with a working keychain", () => {
       workspaceId: member.workspaceId,
       memberId: member.id,
     });
+  });
+
+  // #5816: the shell sends where the core read the session, not to whatever the
+  // store names by the time the call arrives. Sabotage: read `apiBase()` here
+  // again — both calls go to SERVER. RED.
+  it("sends the shell's refresh and revocation to the server the core named", async () => {
+    const session = await loadStore();
+    await session.initSessionStore();
+    const written = { done: false };
+    mocks.keychain.store.mockImplementation(async () => {
+      await flush();
+      written.done = true;
+      return true;
+    });
+    mocks.keychain.handle.mockImplementation(async () =>
+      written.done ? "shell:0123456789abcdef0123456789abcdef" : null
+    );
+    session.applyLogin(login);
+    const earlier = "https://earlier.oort.test";
+    await session.exclusiveRotation(() =>
+      session.refreshThroughHost({
+        workspaceId: member.workspaceId,
+        memberId: member.id,
+        skewMs: 0,
+        apiBase: earlier,
+      })
+    );
+    expect(mocks.shell.refreshAttempt).toHaveBeenCalledWith(
+      expect.objectContaining({ apiBase: earlier })
+    );
+    await session.revokeThroughHost({
+      accessToken: "access.token",
+      refreshToken: "shell:0123456789abcdef0123456789abcdef",
+      workspaceId: member.workspaceId,
+      memberId: member.id,
+      apiBase: earlier,
+    });
+    expect(mocks.shell.revoke).toHaveBeenCalledWith(
+      expect.objectContaining({ apiBase: earlier })
+    );
+  });
+
+  // #5816: a queued keychain write records the server the token came from, read
+  // with the token — not whatever the store names when the queue reaches it.
+  it("stores a queued refresh token under the server it was adopted at", async () => {
+    const session = await loadStore();
+    await session.initSessionStore();
+    let release = () => {};
+    const held = new Promise<boolean>((resolve) => {
+      release = () => resolve(true);
+    });
+    mocks.keychain.store.mockImplementationOnce(() => held);
+    session.applyLogin(login); // its write holds the queue
+    session.applyLogin({ ...login, refreshToken: "refresh.second" }); // queued behind it
+    mocks.server = "https://next.oort.test";
+    release();
+    await vi.waitFor(() => expect(mocks.keychain.store).toHaveBeenCalledTimes(2));
+    expect(mocks.keychain.store).toHaveBeenNthCalledWith(2, "refresh.second", SERVER);
   });
 
   it("erases the credential store on logout", async () => {
