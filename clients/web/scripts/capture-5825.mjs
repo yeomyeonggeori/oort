@@ -689,10 +689,12 @@ async function sceneLate(browser, origin, engine) {
         await page.waitForTimeout(120);
       }
       const menuSeen = samples.findIndex((s) => s.some((b) => b.id === "channel-title-menu"));
-      const beforeMenu = samples[Math.max(0, menuSeen - 1)];
-      const afterMenu = samples.at(-1);
-      const moved = beforeMenu.filter((b) => afterMenu.some((a) => a.id === b.id && a.x !== b.x)).map((b) => ({ id: b.id, before: b.x, after: afterMenu.find((a) => a.id === b.id).x }));
-      check(scene, "투영이 늦을 때 머리 ⋮ 가 서며 움직인 단추(기록)", true, { menuSeenAtSample: menuSeen, moved });
+      const firstControls = samples.findIndex((s) => s.length > 0);
+      // 단추마다 서 있던 동안의 x 흩어짐(최대 − 최소). 0 이면 늦게 오는 것이 머리 단추를 밀지 않았다.
+      const drift = {};
+      for (const sample of samples) for (const b of sample) (drift[b.id] ??= []).push(b.x);
+      const moved = Object.entries(drift).map(([id, xs]) => ({ id, spread: Math.max(...xs) - Math.min(...xs), seen: xs.length })).filter((d) => d.spread > 0);
+      check(scene, "투영이 늦어도 머리 단추가 옆으로 밀리지 않는다(단추마다 x 흩어짐 0)", moved.length === 0, { firstControlsAtSample: firstControls, menuSeenAtSample: menuSeen, moved, ids: Object.keys(drift) });
     });
   } finally {
     await context.close();
