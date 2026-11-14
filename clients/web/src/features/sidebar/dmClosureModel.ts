@@ -141,6 +141,11 @@ export interface DmVerdict {
 
 export interface DmFactsInput {
   mode: DmClosureMode;
+  /**
+   * 읽음 투영이 하한을 싣는가(코어 `readProjectionCarriesLeave`, ADR-0177 증보 2026-11-14 D18). 참이면 server·ready 행의
+   * 하한(`historyFromSeq`)을 그대로 코어 3a 에 넣는다. 아니면(생략 포함) 하한이 없다 - 옛 서버에서 3a 는 아무것도 바꾸지 않는다.
+   */
+  serverCarriesLeave?: boolean;
   phase: ReadProjectionPhase;
   counterpart: DmCounterpart;
   starredOrSectioned: boolean;
@@ -198,6 +203,9 @@ function cachedFacts(input: DmFactsInput, cached: CachedDmFacts): Facts {
   return {
     starredOrSectioned: input.starredOrSectioned,
     closedAtSeq: cached[0],
+    // 사본은 하한을 적어 두지 않는다. 별표·섹션이 없는 나간 대화는 서버가 같이 올린 숨김 행(ADR-0177 증보 D16-5)으로 7번에 숨고,
+    // 별표·섹션이 있는 나간 대화는 투영이 올 때까지 4번으로 보인다(첫 페인트 한정).
+    historyFromSeq: null,
     latestReadableSeq: cached[1],
     lastReadSeq: cached[2],
     // 신호는 「있다/없다」 한 비트만 적어 둔다: 값은 판정이 읽지 않는다(`!== null`).
@@ -238,6 +246,7 @@ function factsFor(input: DmFactsInput): Facts | "pending" {
     return {
       ...base,
       closedAtSeq: closedAt,
+      historyFromSeq: null,
       latestReadableSeq: readable,
       lastReadSeq: lastRead,
       markedUnreadBeforeSeq: read === undefined ? null : read.markedUnreadBeforeSeq,
@@ -250,15 +259,17 @@ function factsFor(input: DmFactsInput): Facts | "pending" {
     if (input.cache === null) return "pending";
     // 사본이 있는 워크스페이스에서 사본에 없는 DM 은 지난 세션 뒤에 생긴 DM 이다 - 안 닫았다.
     return cached === undefined
-      ? { ...base, phase: "ready", closedAtSeq: null, latestReadableSeq: 0, lastReadSeq: 0, markedUnreadBeforeSeq: null, mentionCount: 0 }
+      ? { ...base, phase: "ready", closedAtSeq: null, historyFromSeq: null, latestReadableSeq: 0, lastReadSeq: 0, markedUnreadBeforeSeq: null, mentionCount: 0 }
       : { ...cachedFacts(input, cached), phase: "ready" };
   }
   if (read === undefined) {
-    return { ...base, closedAtSeq: null, latestReadableSeq: 0, lastReadSeq: 0, markedUnreadBeforeSeq: null, mentionCount: 0 };
+    return { ...base, closedAtSeq: null, historyFromSeq: null, latestReadableSeq: 0, lastReadSeq: 0, markedUnreadBeforeSeq: null, mentionCount: 0 };
   }
   return {
     ...base,
     closedAtSeq: read.closedAtSeq,
+    // 하한을 말하지 않은 행(undefined)은 코어 3a 자리에서 직전 판정 유지다(위 `hold` 풀이가 사본으로 푼다).
+    historyFromSeq: input.serverCarriesLeave === true ? read.historyFromSeq : null,
     // 이 행이 읽을 seq 를 말하지 않았다(옛 행): 전체 seq 로 대신한다 - 더 많이 보이는 쪽이다.
     latestReadableSeq: read.latestReadableSeq ?? read.latestSeq,
     lastReadSeq: read.lastReadSeq,

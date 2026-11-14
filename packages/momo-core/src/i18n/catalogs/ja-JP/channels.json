@@ -1,0 +1,12 @@
+{
+  "channels.dmLeave.action": "会話から退出",
+  "channels.dmLeave.confirmTitle": "{name}さんとの会話から退出しますか？",
+  "channels.dmLeave.confirmBody": "これまでの会話があなたの画面から消えます。{name}さんの画面にはそのまま残ります。",
+  "channels.dmLeave.confirmRevive": "新しいメッセージが届くと、そのメッセージから新しい会話として表示されます。",
+  "channels.dmLeave.confirmFinal": "退出すると元に戻せません。",
+  "channels.dmLeave.confirmScheduled": "予約したメッセージ{count, number}件もキャンセルされます。",
+  "channels.dmLeave.cancel": "キャンセル",
+  "channels.dmLeave.confirm": "退出",
+  "channels.dmLeave.done": "会話から退出しました。",
+  "channels.dmLeave.failed": "退出できませんでした。もう一度お試しください。"
+}

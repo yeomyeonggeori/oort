@@ -1,5 +1,6 @@
 import {containsSecretKey} from '@momo/core/features/chat/secretKey';
 import {NON_SECRET_KEYS, nonSecretStore} from '../../storage/kv';
+import {getPersistedSession} from '../../storage/secureSession';
 
 // =============================================================================
 // 아직 보내지 않은 글은 사라지지 않는다 (감사 H-10)
@@ -71,6 +72,22 @@ export interface Draft {
   body: string;
   /** 마지막으로 글자가 바뀐 시각. 청소는 이 값만 본다. */
   savedAtMs: number;
+  /** 쓴 사람(멤버 id, 소문자). 없으면 작성자를 모르는 값이다(아래 「누구의 초안인가」). */
+  author?: string;
+}
+
+// 누구의 초안인가 (#5799, 웹 `chat/draftStore.ts`의 같은 규칙). 토큰 만료로 나가면 초안은 남는다 — 같은 사람이 다시 들어와 이어 쓰게.
+// 그래서 쓴 사람을 적고, 읽을 때 지금 사람과 다르면 돌려주지 않으며, 다른 사람이 들어오면 그때 앞 사람 것을 지운다(`keepOnlyDraftsOf`).
+// 작성자를 모르는 값(이 규칙 전에 저장된 것)은 누구의 것으로도 치지 않는다 — 한 번의 초안 손실보다 다른 사람에게 보이는 쪽이 크다.
+//
+// 지금 사람은 세션 저장소가 든 사람이다. 폰은 키를 누를 때만 적고(머리말) 그때는 언제나 세션이 서 있다. 그리고 입력창의 첫 렌더가
+// 초안을 읽는 순간에 이미 그 사람이 들어 있다 — 세션 provider 의 효과는 그보다 늦게 돈다.
+function currentAuthor(): string | null {
+  return getPersistedSession()?.member.id.toLowerCase() ?? null;
+}
+
+function writtenByNow(author: string | undefined): boolean {
+  return (author ?? null) === currentAuthor();
 }
 
 export type DraftMap = Readonly<Record<string, Draft>>;
@@ -122,9 +139,9 @@ export function readDrafts(): DraftMap {
       // 모양을 확인하고 담는다. 옛 판이나 손으로 고쳐진 값이 `body.length` 에서
       // 터지게 두지 않는다.
       if (value === null || typeof value !== 'object') continue;
-      const {body, savedAtMs} = value as {body?: unknown; savedAtMs?: unknown};
+      const {body, savedAtMs, author} = value as {body?: unknown; savedAtMs?: unknown; author?: unknown};
       if (typeof body !== 'string' || typeof savedAtMs !== 'number') continue;
-      out[key] = {body, savedAtMs};
+      out[key] = typeof author === 'string' && author !== '' ? {body, savedAtMs, author} : {body, savedAtMs};
     }
     return out;
   } catch {
@@ -142,6 +159,7 @@ export function readDraft(key: string, nowMs: number = Date.now()): string {
   const draft = readDrafts()[key];
   if (draft === undefined) return '';
   if (nowMs - draft.savedAtMs >= DRAFT_TTL_MS) return '';
+  if (!writtenByNow(draft.author)) return '';
   return draft.body;
 }
 
@@ -175,8 +193,9 @@ export function saveDraft(
     return;
   }
   try {
+    const author = currentAuthor();
     const next = pruneDrafts(
-      {...readDrafts(), [key]: {body, savedAtMs: nowMs}},
+      {...readDrafts(), [key]: author === null ? {body, savedAtMs: nowMs} : {body, savedAtMs: nowMs, author}},
       nowMs,
     );
     writeDrafts(next);
@@ -250,6 +269,21 @@ export function clearDraft(key: string, nowMs: number = Date.now()): void {
     writeDrafts(pruneDrafts(map, nowMs));
   } catch {
     // 위와 같다.
+  }
+}
+
+/**
+ * 세션이 섰다(#5799). 이 사람이 쓴 초안만 남기고 다른 사람의 것(작성자를 모르는 값 포함)은 지운다. 같은 사람이 만료 뒤 다시 들어오면 그대로
+ * 이어 쓴다.
+ */
+export function keepOnlyDraftsOf(memberId: string): void {
+  try {
+    const me = memberId.toLowerCase();
+    const map = readDrafts();
+    const mine = Object.fromEntries(Object.entries(map).filter(([, draft]) => draft.author === me));
+    if (Object.keys(mine).length !== Object.keys(map).length) writeDrafts(mine);
+  } catch {
+    // 위와 같다. 읽을 때도 거르므로(`readDraft`) 다른 사람에게 보이지는 않는다.
   }
 }
 

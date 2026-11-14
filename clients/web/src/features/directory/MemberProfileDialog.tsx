@@ -172,8 +172,8 @@ function ProfileHero({ member, t }: { member: RosterMember; t: Format }) {
       {isAgent ? (
         face
       ) : (
-        // 점은 112 원의 가장자리(45°)에 앉는다: 상자 모서리에서 16px 안이 원의 테두리라 24px 점을 4px 들인다.
-        <AvatarWithPresence member={member} dotClassName="bottom-1 right-1 size-6 border-2">
+        // 점의 크기·자리는 아바타 점 한 부품이 큰 얼굴(112)의 비율로 정한다(#5786).
+        <AvatarWithPresence member={member} face={112}>
           {face}
         </AvatarWithPresence>
       )}
