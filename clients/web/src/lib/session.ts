@@ -232,9 +232,7 @@ async function hydrate(): Promise<void> {
   if (!isDesktop()) return;
 
   // The server the stored session belongs to, read before the first await
-  // (#5816): the login screen (a link, a server pick) can move the stored server
-  // while the credential store answers, and a session is never adopted under
-  // another server than its own.
+  // (#5816): a session is never adopted under another server than its own.
   const base = apiBase();
   // A record left by a browser-mode run of this same bundle: an earlier build, or
   // a run where the keychain was unavailable.
