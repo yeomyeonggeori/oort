@@ -1883,6 +1883,13 @@ fn channel_page_sql(cursor: HistoryCursor) -> String {
     )
 }
 
+/// The statement [`list_channel_page`] sends for the newest page. Public so a plan test can look
+/// at the read the history route really runs (ADR-0177 증보 D17: the read floor is looked up once
+/// per statement, however many floors the table holds).
+pub fn newest_channel_page_sql() -> String {
+    channel_page_sql(HistoryCursor::Newest)
+}
+
 /// The thread-replies page's statement, as a value — same reason as
 /// [`channel_page_sql`].
 fn thread_replies_sql() -> String {

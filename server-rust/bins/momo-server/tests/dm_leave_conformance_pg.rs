@@ -1472,3 +1472,126 @@ async fn write_paths_below_the_floor_answer_without_a_500() {
         .await;
     assert_eq!(status, 201, "{body}");
 }
+
+// ---------------------------------------------------------------------------
+// the policy's plan (#5857 M3) — the floor is read once per statement
+// ---------------------------------------------------------------------------
+
+/// Where the `membership` reads of one EXPLAIN (FORMAT JSON) plan sit: `(under an InitPlan, under a
+/// SubPlan)` for every node that scans `membership`.
+fn membership_reads(plan: &Value) -> Vec<(bool, bool)> {
+    fn walk(node: &Value, init: bool, sub: bool, out: &mut Vec<(bool, bool)>) {
+        let relationship = node["Parent Relationship"].as_str().unwrap_or("");
+        let init = init || relationship == "InitPlan";
+        let sub = sub || relationship == "SubPlan";
+        if node["Relation Name"] == json!("membership") {
+            out.push((init, sub));
+        }
+        if let Some(children) = node["Plans"].as_array() {
+            for child in children {
+                walk(child, init, sub, out);
+            }
+        }
+    }
+    let mut out = Vec::new();
+    walk(&plan[0]["Plan"], false, false, &mut out);
+    out
+}
+
+/// The statement the history route sends (with its quote join), planned for a requester with a
+/// floor while the table holds many floors: every read the floor policy makes of `membership` is an
+/// InitPlan — once per statement — and none is a SubPlan, which runs per row or is rebuilt on every
+/// re-read of an inner `message` scan. That per-re-read cost is what made the planner read a whole
+/// room for one page once floors accumulated.
+#[tokio::test]
+#[ignore = "needs a dedicated real Postgres"]
+async fn the_floor_is_read_once_per_statement_however_many_floors_exist() {
+    let _guard = test_lock().await;
+    let w = World::new().await;
+    let ws = w.workspace("plan").await;
+    let a = w.human(ws, "kim").await;
+    let b = w.human(ws, "lee").await;
+    let dm = w.dm(ws, &a, &b).await;
+    let open = w.channel(ws, "public", None, &[a.id, b.id]).await;
+    let (first, _) = w.say(&b, ws, open, "인용될 글").await;
+    let (quoting, _) = w.say(&b, ws, open, "인용한 글").await;
+    sqlx::query("UPDATE message SET reply_to_id = $1 WHERE id = $2")
+        .bind(first)
+        .bind(quoting)
+        .execute(&w.su)
+        .await
+        .expect("a quote on the page");
+    sqlx::query(
+        "UPDATE membership SET history_from_seq = 2 WHERE member_id = $1 AND channel_id = $2",
+    )
+    .bind(a.id)
+    .bind(dm)
+    .execute(&w.su)
+    .await
+    .expect("the requester's floor");
+    // Many floors in the table: 30 other members with 30 floored rooms each.
+    let mut tx = w.su.begin().await.expect("bulk tx");
+    sqlx::query("SET LOCAL session_replication_role = replica")
+        .execute(&mut *tx)
+        .await
+        .expect("replica");
+    sqlx::query(
+        "WITH people AS ( \
+           INSERT INTO member (id, workspace_id, kind, display_name, handle) \
+           SELECT gen_random_uuid(), $1, 'human', 'p' || g, 'plan-' || g || '-' || left(md5($1::text), 6) \
+             FROM generate_series(1, 30) g RETURNING id), \
+         rooms AS ( \
+           INSERT INTO channel (id, workspace_id, kind, name, topic, created_by) \
+           SELECT gen_random_uuid(), $1, 'public', 'plan-room-' || g || '-' || left(md5($1::text), 6), '', $2 \
+             FROM generate_series(1, 30) g RETURNING id) \
+         INSERT INTO membership (workspace_id, channel_id, member_id, history_from_seq) \
+         SELECT $1, r.id, p.id, 5 FROM people p CROSS JOIN rooms r",
+    )
+    .bind(ws)
+    .bind(a.id)
+    .execute(&mut *tx)
+    .await
+    .expect("floors in bulk");
+    tx.commit().await.expect("commit bulk");
+    sqlx::query("ANALYZE membership")
+        .execute(&w.su)
+        .await
+        .expect("analyze");
+
+    let sql = format!(
+        "EXPLAIN (FORMAT JSON) {}",
+        momo_messaging::newest_channel_page_sql()
+    );
+    for requester in [Some(a.id), None] {
+        let sql = sql.clone();
+        let explain = with_tenant_tx(&w.app, ws, move |conn| {
+            Box::pin(async move {
+                let plan: Value = sqlx::query_scalar(&sql)
+                    .bind(open)
+                    .bind(51_i64)
+                    .fetch_one(&mut *conn)
+                    .await
+                    .map_err(DbError::from)?;
+                Ok(plan)
+            })
+        });
+        let plan = match requester {
+            Some(member) => {
+                momo_db::tenant::REQUEST_HUMAN_MEMBER
+                    .scope(member, explain)
+                    .await
+            }
+            None => explain.await,
+        }
+        .expect("explain the history page");
+        let reads = membership_reads(&plan);
+        assert!(
+            reads.len() >= 2,
+            "the policy reads membership for both message scans (page and quote): {plan}"
+        );
+        assert!(
+            reads.iter().all(|(init, sub)| *init && !*sub),
+            "every floor read is an InitPlan, none a SubPlan ({requester:?}): {reads:?}\n{plan}"
+        );
+    }
+}
