@@ -7,7 +7,11 @@ import {shellSpeaksFor} from '@momo/core/features/connection/shellStrip';
 import {channelLabel, channelLabelParts, idKey, memberFor} from '@momo/core/features/workspace/directory';
 import {readProjectionPhase, rosterLoaded} from '@momo/core/features/sidebar/goneDm';
 import {DM_CLOSED_LIST_LABEL, dmCloseOffered} from '@momo/core/features/sidebar/dmVisibility';
-import {readProjectionCarriesLeave} from '@momo/core/features/channels/dmLeave';
+import {
+  dmLeaveMode,
+  dmLeaveOffered,
+  readProjectionCarriesLeave,
+} from '@momo/core/features/channels/dmLeave';
 import {mayActOnLiveness} from '@momo/core/features/agents/liveness';
 import {isUntakenHumanRun} from '@momo/core/features/agents/runWaiting';
 import {
@@ -108,8 +112,11 @@ import {
   channelRowAccessibilityActions,
   channelRowActionItems,
   channelRowActionKeyOf,
+  NOTHING_COPIED,
   type ChannelRowTarget,
 } from '../features/sidebar/channelRowActions';
+import {useFormatMessage} from '../i18n/useFormatMessage';
+import {useNoticeDismissGuard} from '../features/sidebar/noticeDismissGuard';
 import {useChannelRowActions} from '../features/sidebar/useChannelRowActions';
 import {
   AppUpdateBanner,
@@ -302,6 +309,9 @@ export default function SidebarScreen({
   onOpenWorkList,
   onOpenSettings,
   onChannelLeft,
+  onDmLeftReceipt,
+  dmLeftReceipt = null,
+  onDismissDmLeftReceipt,
   notificationNotice = null,
   onDismissNotificationNotice,
   active = true,
@@ -309,6 +319,11 @@ export default function SidebarScreen({
   openChannelId: string | null;
   /** 채널을 나간 뒤·DM 을 닫은 뒤. 열려 있던 그 대화를 걷는다(웹은 `/` 로 착지한다). */
   onChannelLeft?: (channelId: string) => void;
+  /** 1:1 대화에서 나간 뒤(204) 그 한 줄 알림을 셸의 영수증 자리에 세운다(ADR-0177 증보 2026-11-14 D21). */
+  onDmLeftReceipt?: (message: string) => void;
+  /** 「대화에서 나갔어요.」 영수증 - 사람이 닫을 때까지 목록 위에 선다(되돌리기 단추 없음, D21). */
+  dmLeftReceipt?: string | null;
+  onDismissDmLeftReceipt?: () => void;
   onOpenConversation: (channelId: string, title: string) => void;
   /**
    * Open 메시지 검색, optionally carrying what was already typed here.
@@ -377,6 +392,12 @@ export default function SidebarScreen({
   // 투영이 하한을 싣는가(ADR-0177 증보 2026-11-14 D18): GET 행에 `history_from_seq` 키가 있다. 코어 3a 가 나간 대화를 숨긴다. 나가기
   // 경로의 접기는 메뉴만 닫으므로 여기서 보지 않는다(`dmLeaveMode` 가 아니라 이것).
   const serverCarriesLeave = readProjectionCarriesLeave(readStates.data);
+  // 영수증을 닫으면 그 아래 단추가 X 자리로 올라온다 - 닫은 직후 잠깐 그 자리의 눌림을 받지 않는다(M5).
+  const dismissGuard = useNoticeDismissGuard();
+  // 「대화 나가기」를 **내미는가**(D21): 투영 키 + 이 워크스페이스에서 경로가 접히지 않았나. 접기는 모듈 상태라 렌더마다 다시 읽는다 - 실패
+  // 답(404·405·501)이 확인 단계에 서는 렌더에서 메뉴 항목이 같이 빠진다.
+  const leaveMode = dmLeaveMode({workspaceId, rows: readStates.data});
+  const formatMessage = useFormatMessage();
 
   // Synchronous. See the note above.
   const [query, setQuery] = useState('');
@@ -571,7 +592,7 @@ export default function SidebarScreen({
   );
 
   // 행을 길게 누르면 열리는 시트(#4229). 항목은 코어 표가 정하고(`channelRowActionItems`), 시트는 화면에 하나다.
-  const rowActions = useChannelRowActions(workspaceId, member.id, onChannelLeft);
+  const rowActions = useChannelRowActions(workspaceId, member.id, onChannelLeft, onDmLeftReceipt);
   const channelById = useMemo(
     () =>
       new Map(
@@ -605,9 +626,28 @@ export default function SidebarScreen({
             mentionCount: row.mentionCount,
             starredOrSectioned: false,
           }),
+        // 「대화 나가기」: 코어 `dmLeaveOffered` 한 함수(웹 줄 메뉴와 같다) - 사람끼리 1:1 · 나가기를 싣는 서버 · 투영 준비. 안 읽음과 무관하다.
+        leaveOffered:
+          row.kind === 'dm' &&
+          dmLeaveOffered({
+            mode: leaveMode,
+            phase: readPhase,
+            channel,
+            directory: directoryQuery.directory,
+            selfMemberId: member.id,
+          }),
       };
     },
-    [channelById, selfRole, readStates.byChannel, closureMode, readPhase],
+    [
+      channelById,
+      selfRole,
+      readStates.byChannel,
+      closureMode,
+      readPhase,
+      leaveMode,
+      directoryQuery.directory,
+      member.id,
+    ],
   );
 
   // 「⋯ › 숨긴 대화」 시트(ADR-0177 증보 D11, #4367). 내가 닫은 대화와 상대가 나간 대화를 다시 연다.
@@ -816,13 +856,28 @@ export default function SidebarScreen({
     <>
       {/* 알림 탭의 영수증 (#2569). 방금 한 행동에 대한 답이라 닫을 수 있고,
           다른 고지보다 위에 선다 — 사람이 이 화면에 온 이유가 이것이다. */}
-      {notificationNotice ? (
-        <NoticeBlock
-          headline={notificationNotice}
-          onDismiss={onDismissNotificationNotice}
-          testID="notification-tap-notice"
-        />
-      ) : null}
+      {notificationNotice
+        ? dismissGuard.measured(
+            'notification-tap-notice',
+            <NoticeBlock
+              headline={notificationNotice}
+              onDismiss={dismissGuard.dismissing('notification-tap-notice', onDismissNotificationNotice)}
+              testID="notification-tap-notice"
+            />,
+          )
+        : null}
+
+      {/* 1:1 대화에서 나간 영수증(ADR-0177 증보 2026-11-14 D21). 방금 한 행동에 대한 답이라 같은 문법(닫을 수 있음)이고 되돌리기 단추가 없다. */}
+      {dmLeftReceipt
+        ? dismissGuard.measured(
+            'dm-left-receipt',
+            <NoticeBlock
+              headline={dmLeftReceipt}
+              onDismiss={dismissGuard.dismissing('dm-left-receipt', onDismissDmLeftReceipt)}
+              testID="dm-left-receipt"
+            />,
+          )
+        : null}
 
       {/* 셸 띠(#5222): 기기 오프라인·서버에 닿지 못함이면 홈에서도 말한다. 아래의 읽기 실패 고지는 대개 이 띠가 말하는 원인의 결과라
           그 위에 선다. 실시간만 끊긴 것은 홈이 말하지 않는다(대화 화면 띠가 말한다). */}
@@ -905,7 +960,11 @@ export default function SidebarScreen({
 
       {/* 고지는 목록 상태와 무관하게 선다 — 알림 탭이 막힌 이유는 목록이 실패했을 때
           가장 필요하다(#2584 M-1, 목록 자리의 오류 상자 제목 `connection.load.channelListTitle` 이 두 곳에서 말한다). */}
-      <View style={styles.noticeWrap}>{notices}</View>
+      <View style={styles.noticeWrap} {...dismissGuard.wrapProps}>
+        {notices}
+      </View>
+      {/* 영수증을 닫은 직후 그 자리로 올라온 단추를 손가락이 두 번째로 누르지 않게 잠깐 덮는다(`noticeDismissGuard.tsx`). */}
+      {dismissGuard.guard}
 
       {loading ? (
         <LoadingState label="채널 목록을 불러오는 중입니다." testID="channels-loading" />
@@ -1051,7 +1110,15 @@ export default function SidebarScreen({
       {rowActions.active !== null ? (
         <ChannelActionSheet
           target={rowActions.active}
-          items={channelRowActionItems(rowActions.active, rowActions.copied)}
+          // 시트가 든 대상은 연 순간의 것이다. 「대화 나가기」만 지금 판정으로 다시 거른다 — 경로가 접히면(404·405·501) 열린 시트에서도 빠진다.
+          items={channelRowActionItems(
+            {
+              ...rowActions.active,
+              leaveOffered: rowActions.active.leaveOffered === true && leaveMode === 'server',
+            },
+            rowActions.copied,
+            formatMessage,
+          )}
           confirmingLeave={rowActions.confirmingLeave}
           isPending={rowActions.isPending}
           error={rowActions.error}
@@ -1059,6 +1126,9 @@ export default function SidebarScreen({
           onRun={key => rowActions.run(rowActions.active as ChannelRowTarget, key)}
           onConfirmLeave={rowActions.confirmLeave}
           onCancelLeave={rowActions.cancelLeave}
+          dmLeave={rowActions.dmLeave}
+          onConfirmDmLeave={rowActions.confirmDmLeave}
+          onCancelDmLeave={rowActions.cancelDmLeave}
           onClose={rowActions.close}
         />
       ) : null}
@@ -1284,9 +1354,11 @@ function Row({
   const palette = usePalette();
   const status = useRowStatusDot(row, directory);
   // 길게 누르기와 VoiceOver 로터가 **같은 항목 배열**을 쓴다(코어 표의 답). 손가락에만 있는 동작은 없다.
+  const formatMessage = useFormatMessage();
   const actionItems = useMemo(
-    () => (actionTarget === null ? [] : channelRowActionItems(actionTarget)),
-    [actionTarget],
+    () =>
+      actionTarget === null ? [] : channelRowActionItems(actionTarget, NOTHING_COPIED, formatMessage),
+    [actionTarget, formatMessage],
   );
   const accessibilityActions = useMemo(
     () => channelRowAccessibilityActions(actionItems),

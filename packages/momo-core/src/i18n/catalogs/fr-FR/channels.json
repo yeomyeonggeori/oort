@@ -7,6 +7,13 @@
   "channels.dmLeave.confirmScheduled": "{count, plural, one {# message programmé sera aussi annulé.} other {# messages programmés seront aussi annulés.}}",
   "channels.dmLeave.cancel": "Annuler",
   "channels.dmLeave.confirm": "Quitter",
+  "channels.dmLeave.busy": "Départ…",
   "channels.dmLeave.done": "Vous avez quitté la conversation.",
-  "channels.dmLeave.failed": "Impossible de quitter. Veuillez réessayer."
+  "channels.dmLeave.failed": "Impossible de quitter. Veuillez réessayer.",
+  "channels.nameRule.required": "Saisissez un nom de canal.",
+  "channels.nameRule.tooLong": "Le nom du canal peut contenir jusqu’à {max, number} caractères.",
+  "channels.nameRule.hidden": "Le nom contient des caractères invisibles. Effacez-le et saisissez-le à nouveau.",
+  "channels.nameRule.unsupported": "Seuls les lettres, chiffres, traits d’union (-) et tirets bas (_) sont autorisés.",
+  "channels.nameRule.edge": "Le nom doit commencer et se terminer par une lettre ou un chiffre. Les traits d’union et tirets bas ne peuvent être qu’au milieu.",
+  "channels.nameRule.serverRejected": "Le serveur n’a pas accepté ce nom. Seuls les lettres, chiffres, - et _ sont autorisés."
 }

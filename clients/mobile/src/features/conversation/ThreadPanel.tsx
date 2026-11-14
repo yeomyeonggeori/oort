@@ -343,7 +343,7 @@ export function ThreadPanel({
       onOpenMessage,
       // 닫힌 승인 카드의 「다시 요청」은 **이 스레드의** 입력창에 초안을 넣는다(#5171). 채널 입력창은 이 화면 뒤에 있어서 거기에 넣으면
       // 결과가 눈에 안 보인다(바로 아래 `onQuote` 의 부재와 같은 이유).
-      onRepropose: (draft: string) => seedDraft(threadDraftKey(root.id), draft),
+      onRepropose: (draft: string) => seedDraft(threadDraftKey(root.id), draft, undefined, channelId),
       ...(onOpenWorkRequest !== undefined ? {onOpenWorkRequest} : {}),
       // No `onOpenThread`: see the header. Every row here is already in one.
       //
@@ -370,6 +370,7 @@ export function ThreadPanel({
       onOpenMessage,
       onOpenWorkRequest,
       root.id,
+      channelId,
     ],
   );
 

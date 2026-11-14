@@ -1146,6 +1146,12 @@ export const catalog: MessageCatalog = {
       "value": "Leave conversation"
     }
   ],
+  "channels.dmLeave.busy": [
+    {
+      "type": 0,
+      "value": "Leaving…"
+    }
+  ],
   "channels.dmLeave.cancel": [
     {
       "type": 0,
@@ -1240,6 +1246,51 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "Couldn't leave. Please try again."
+    }
+  ],
+  "channels.nameRule.edge": [
+    {
+      "type": 0,
+      "value": "The name must start and end with a letter or number. Hyphens and underscores can only go in the middle."
+    }
+  ],
+  "channels.nameRule.hidden": [
+    {
+      "type": 0,
+      "value": "The name contains invisible characters. Clear it and type the name again."
+    }
+  ],
+  "channels.nameRule.required": [
+    {
+      "type": 0,
+      "value": "Enter a channel name."
+    }
+  ],
+  "channels.nameRule.serverRejected": [
+    {
+      "type": 0,
+      "value": "The server did not accept this name. Use only letters, numbers, - and _."
+    }
+  ],
+  "channels.nameRule.tooLong": [
+    {
+      "type": 0,
+      "value": "Channel names can be up to "
+    },
+    {
+      "type": 2,
+      "value": "max",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": " characters."
+    }
+  ],
+  "channels.nameRule.unsupported": [
+    {
+      "type": 0,
+      "value": "Use only letters, numbers, hyphens (-) and underscores (_)."
     }
   ],
   "common.feedback.unavailable": [
@@ -1348,6 +1399,20 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "Once you're connected to a network, you can scan the QR code."
+    }
+  ],
+  "connection.boot.serverSwitchedSignedOut": [
+    {
+      "type": 0,
+      "value": "You switched servers, so you're signed out of the previous one ("
+    },
+    {
+      "type": 1,
+      "value": "host"
+    },
+    {
+      "type": 0,
+      "value": "). Sign in again to go back."
     }
   ],
   "connection.boot.unreachable": [

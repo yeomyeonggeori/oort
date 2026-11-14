@@ -715,6 +715,7 @@ export function ConfirmStep({
   pending = false,
   confirmDisabled = false,
   confirmArmMs = 0,
+  cancelDisabled = false,
   cancelLabel = '취소',
   onCancel,
   onConfirm,
@@ -744,6 +745,11 @@ export function ConfirmStep({
    * 읽고 누르는 데는 이보다 오래 걸린다). 취소는 처음부터 받는다. 기본 0 = 지금까지처럼 바로 받는다.
    */
   confirmArmMs?: number;
+  /**
+   * 「취소」를 잠근다 - 되돌릴 수 없는 요청이 떠 있어 취소가 소용없는 동안(1:1 대화 나가기 진행 중, #5826). 단추가 흐려지고
+   * `accessibilityState.disabled` 가 서며 눌려도 `onCancel` 이 불리지 않는다. 진행은 위험 단추의 낱말·`busy` 가 말한다.
+   */
+  cancelDisabled?: boolean;
   cancelLabel?: string;
   onCancel: () => void;
   onConfirm: () => void;
@@ -790,8 +796,14 @@ export function ConfirmStep({
         <Pressable
           accessibilityRole="button"
           accessibilityLabel={cancelLabel}
+          accessibilityState={cancelDisabled ? {disabled: true} : undefined}
+          disabled={cancelDisabled}
           onPress={onCancel}
-          style={({pressed}) => [styles.secondary, pressed && styles.confirmPressed]}
+          style={({pressed}) => [
+            styles.secondary,
+            pressed && styles.confirmPressed,
+            cancelDisabled && styles.rowDisabled,
+          ]}
           testID={cancelTestID}>
           <Sentence style={styles.secondaryLabel}>{cancelLabel}</Sentence>
         </Pressable>
@@ -841,8 +853,17 @@ export function SheetScroll({
   onMomentumScrollEnd,
   scrollEnabled = true,
   contentContainerStyle,
+  scrollToTopWhen,
   ...scroll
-}: ScrollViewProps & {children: React.ReactNode; testID?: string}): React.JSX.Element {
+}: ScrollViewProps & {
+  children: React.ReactNode;
+  testID?: string;
+  /**
+   * 이 값이 **바뀔 때** 스크롤을 맨 위로 돌린다. 가장 큰 글자에서는 메뉴 아래쪽 줄을 누르려고 밀어 둔 위치가 그대로 남아, 확인 단계가 서면
+   * 제목이 위로 밀려 본문 중간부터 보인다(#5826 design-review r1 M2) - 단계가 설 때 제목부터 보이게 한다. 생략하면 건드리지 않는다.
+   */
+  scrollToTopWhen?: unknown;
+}): React.JSX.Element {
   const styles = useStyles(buildStyles);
   const {scheme} = useTheme();
   const insets = useSafeAreaInsets();
@@ -850,6 +871,10 @@ export function SheetScroll({
   const bottom =
     (keyboardHeight > 0 ? 0 : Math.max(insets.bottom, space.lg)) + space.lg;
   const ref = useRef<ScrollView>(null);
+  useEffect(() => {
+    if (scrollToTopWhen === undefined) return;
+    ref.current?.scrollTo?.({y: 0, animated: false});
+  }, [scrollToTopWhen]);
   const measured = useRef({viewport: 0, content: 0, flashed: false});
   const flashWhenCut = () => {
     const sizes = measured.current;

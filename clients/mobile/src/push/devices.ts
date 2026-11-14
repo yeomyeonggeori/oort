@@ -1,6 +1,7 @@
 import {ApiError, authedRequest, rotateAfterUnauthorized} from '@momo/core/lib/api';
 import {fetchWithDeadline, type HttpResponse} from '@momo/core/lib/http';
 import {apiBase, coreSession} from '@momo/core/runtime/host';
+import {sessionStamp} from '@momo/core/lib/sessionStamp';
 
 import {PUSH_TOPIC} from './contract';
 import type {ApnsEnvironment} from './native';
@@ -67,6 +68,8 @@ export async function registerDevice(
   });
 
   const url = `${apiBase()}/v1/workspaces/${input.workspaceId}/devices`;
+  // 다시 보낼 때는 처음 보낸 세션으로만(#5816).
+  const sentAs = sessionStamp();
   let response: HttpResponse;
   try {
     response = await fetchWithDeadline(url, {
@@ -84,7 +87,7 @@ export async function registerDevice(
     if (
       response.status === 401 &&
       coreSession().getRefreshToken() !== null &&
-      (await rotateAfterUnauthorized())
+      (await rotateAfterUnauthorized(sentAs))
     ) {
       response = await fetchWithDeadline(url, {
         method: 'POST',
@@ -138,15 +141,20 @@ export const REVOKE_DEVICE_TIMEOUT_MS = 4_000;
  *
  * Bounded by {@link REVOKE_DEVICE_TIMEOUT_MS}, not the shared 15-second
  * deadline, because the server revocation waits for it.
+ *
+ * `base` is the server that issued `accessToken`, as the core hands it to
+ * `beforeRevoke` (#5816). The stored server is not read here: by the time this
+ * runs it may already name another one.
  */
 export async function revokeDevice(
   workspaceId: string,
   deviceId: string,
   accessToken: string,
+  base: string,
 ): Promise<boolean> {
   try {
     const response = await fetchWithDeadline(
-      `${apiBase()}/v1/workspaces/${workspaceId}/devices/${deviceId}`,
+      `${base}/v1/workspaces/${workspaceId}/devices/${deviceId}`,
       {method: 'DELETE', headers: {Authorization: `Bearer ${accessToken}`}},
       REVOKE_DEVICE_TIMEOUT_MS,
     );

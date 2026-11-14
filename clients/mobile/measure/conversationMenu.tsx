@@ -1,11 +1,14 @@
 import {CHANNEL_MUTE_FAILURE} from '@momo/core/features/channels/model';
+import {DM_LEAVE_KEYS} from '@momo/core/features/channels/dmLeave';
 import {pinListHeaderLabel} from '@momo/core/features/timeline/pins';
 import React from 'react';
 
 import {ConversationMenuSheet} from '../src/features/conversation/ConversationMenuSheet';
 import {conversationMenuActionItems} from '../src/features/conversation/conversationMenu';
 import type {ChannelRowTarget} from '../src/features/sidebar/channelRowActions';
-import {Backdrop} from './sheetKit';
+import type {DmLeaveStepView} from '../src/features/sidebar/useChannelRowActions';
+import {useFormatMessage} from '../src/i18n/useFormatMessage';
+import {Backdrop, dmLeaveStep} from './sheetKit';
 
 // =============================================================================
 // 대화 머리 ⋮ 시트의 캡처 표면 (#4319). 배송되는 `ConversationMenuSheet` 에 고정 데이터를 건넨다 — 항목은 화면과 같은 길(`conversationMenuActionItems`,
@@ -19,6 +22,8 @@ import {Backdrop} from './sheetKit';
 //   channel        채널(#디자인, 관리자) — 고정한 메시지 › · 알림 끄기 · 채널 나가기(위험색)
 //   channel-leave  같은 채널의 나가기 확인 단계(「이 채널에서 나갈까요?」 + 취소 · 채널 나가기)
 //   mute-failure   알림 끄기가 거절된 뒤 — 시트가 열린 채 그 자리에서 이유를 말한다
+//   dm-leave       사람끼리 1:1 — 맨 아래 따로 선 카드에 「대화 나가기」(위험색, ADR-0177 증보 2026-11-14 D21)
+//   dm-leave-confirm / -pending / -failed   그 확인 단계(예약 2개) · 진행 중 · 실패
 //
 // 시트는 `Modal` 이라 한 프레임에 하나만 선다 — 표면 하나가 시트 하나다. 모든 이름은 가상 인물이다(이도현·박서연, 에이전트 달무리 도우미,
 // 회사 달무리 스튜디오).
@@ -64,12 +69,15 @@ function Sheet({
   delegate = false,
   confirmingLeave = false,
   error = null,
+  dmLeave = null,
 }: {
   target: ChannelRowTarget;
   delegate?: boolean;
   confirmingLeave?: boolean;
   error?: string | null;
+  dmLeave?: DmLeaveStepView | null;
 }): React.JSX.Element {
+  const formatMessage = useFormatMessage();
   return (
     <Backdrop>
       <ConversationMenuSheet
@@ -80,7 +88,7 @@ function Sheet({
         onOpenInfo={noop}
         onOpenPins={noop}
         onDelegateWork={delegate ? noop : undefined}
-        items={conversationMenuActionItems(target)}
+        items={conversationMenuActionItems(target, formatMessage)}
         confirmingLeave={confirmingLeave}
         isPending={() => false}
         error={error}
@@ -88,6 +96,9 @@ function Sheet({
         onRun={noop}
         onConfirmLeave={noop}
         onCancelLeave={noop}
+        dmLeave={dmLeave}
+        onConfirmDmLeave={noop}
+        onCancelDmLeave={noop}
         onClose={noop}
       />
     </Backdrop>
@@ -95,6 +106,15 @@ function Sheet({
 }
 
 export function ConversationMenuSurface({which}: {which: string}): React.JSX.Element {
+  const dmLeaveFailed = useFormatMessage()(DM_LEAVE_KEYS.failed);
+  if (which === 'dm-leave' || which.startsWith('dm-leave-')) {
+    return (
+      <Sheet
+        target={{...DM_TARGET, leaveOffered: true}}
+        dmLeave={dmLeaveStep(which.slice('dm-leave-'.length), dmLeaveFailed)}
+      />
+    );
+  }
   switch (which) {
     case 'agent':
       return <Sheet target={AGENT_TARGET} delegate />;

@@ -90,7 +90,7 @@ describe("logout — beforeRevoke 는 로컬 삭제와 서버 폐기 사이에�
     await logout({ beforeRevoke: hook });
 
     expect(hook).toHaveBeenCalledTimes(1);
-    expect(hook).toHaveBeenCalledWith("access-1");
+    expect(hook).toHaveBeenCalledWith("access-1", "http://server.test");
     // 순서가 계약이다: 사람은 먼저 나가고(wipe), 기기 정리는 토큰이 아직 살아
     // 있을 때(hook), 세션은 그 다음에 죽는다(POST /v1/auth/logout).
     expect(events).toEqual(["wipe", "hook:access-1", "POST /v1/auth/logout"]);
@@ -266,7 +266,7 @@ describe("logout — 진행 중인 회전에 합류한다 (#2677 리뷰 M1)", ()
     await Promise.all([rotation, leaving]);
 
     expect(hook).toHaveBeenCalledTimes(1);
-    expect.soft(hook).toHaveBeenCalledWith("access-2");
+    expect.soft(hook).toHaveBeenCalledWith("access-2", "http://server.test");
     expect.soft(wire.revocation()?.authorization).toBe("Bearer access-2");
     expect.soft(JSON.parse(wire.revocation()?.body ?? "null")).toEqual({
       refreshToken: "refresh-2",
@@ -313,7 +313,7 @@ describe("logout — 진행 중인 회전에 합류한다 (#2677 리뷰 M1)", ()
     wire.answerRotation(answer);
     await Promise.all([rotation, leaving]);
 
-    expect(hook).toHaveBeenCalledWith("access-1");
+    expect(hook).toHaveBeenCalledWith("access-1", "http://server.test");
     expect(wire.revocation()?.authorization).toBe("Bearer access-1");
     expect(JSON.parse(wire.revocation()?.body ?? "null")).toEqual({
       refreshToken: "refresh-1",

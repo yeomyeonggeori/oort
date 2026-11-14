@@ -1125,6 +1125,12 @@ export const catalog: MessageCatalog = {
       "value": "대화 나가기"
     }
   ],
+  "channels.dmLeave.busy": [
+    {
+      "type": 0,
+      "value": "나가는 중…"
+    }
+  ],
   "channels.dmLeave.cancel": [
     {
       "type": 0,
@@ -1198,6 +1204,51 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "나가지 못했어요. 다시 시도해 주세요."
+    }
+  ],
+  "channels.nameRule.edge": [
+    {
+      "type": 0,
+      "value": "처음과 끝은 글자나 숫자여야 해요. 하이픈과 밑줄은 가운데에만 쓸 수 있어요."
+    }
+  ],
+  "channels.nameRule.hidden": [
+    {
+      "type": 0,
+      "value": "보이지 않는 글자가 들어 있어요. 이름을 지우고 다시 적어 주세요."
+    }
+  ],
+  "channels.nameRule.required": [
+    {
+      "type": 0,
+      "value": "채널 이름을 입력해 주세요."
+    }
+  ],
+  "channels.nameRule.serverRejected": [
+    {
+      "type": 0,
+      "value": "서버가 이 이름을 받지 않았어요. 글자, 숫자, -, _만 쓸 수 있어요."
+    }
+  ],
+  "channels.nameRule.tooLong": [
+    {
+      "type": 0,
+      "value": "채널 이름은 "
+    },
+    {
+      "type": 2,
+      "value": "max",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "자까지 쓸 수 있어요."
+    }
+  ],
+  "channels.nameRule.unsupported": [
+    {
+      "type": 0,
+      "value": "글자, 숫자, 하이픈(-), 밑줄(_)만 쓸 수 있어요."
     }
   ],
   "common.feedback.unavailable": [
@@ -1285,6 +1336,20 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "네트워크가 연결되면 QR을 찍을 수 있어요."
+    }
+  ],
+  "connection.boot.serverSwitchedSignedOut": [
+    {
+      "type": 0,
+      "value": "다른 서버로 바꿔서 앞 서버("
+    },
+    {
+      "type": 1,
+      "value": "host"
+    },
+    {
+      "type": 0,
+      "value": ")의 로그인은 끝났어요. 돌아가려면 다시 로그인해 주세요."
     }
   ],
   "connection.boot.unreachable": [

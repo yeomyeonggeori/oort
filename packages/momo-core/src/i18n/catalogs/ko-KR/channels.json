@@ -7,6 +7,13 @@
   "channels.dmLeave.confirmScheduled": "예약해 둔 메시지 {count, number}개도 취소돼요.",
   "channels.dmLeave.cancel": "취소",
   "channels.dmLeave.confirm": "나가기",
+  "channels.dmLeave.busy": "나가는 중…",
   "channels.dmLeave.done": "대화에서 나갔어요.",
-  "channels.dmLeave.failed": "나가지 못했어요. 다시 시도해 주세요."
+  "channels.dmLeave.failed": "나가지 못했어요. 다시 시도해 주세요.",
+  "channels.nameRule.required": "채널 이름을 입력해 주세요.",
+  "channels.nameRule.tooLong": "채널 이름은 {max, number}자까지 쓸 수 있어요.",
+  "channels.nameRule.hidden": "보이지 않는 글자가 들어 있어요. 이름을 지우고 다시 적어 주세요.",
+  "channels.nameRule.unsupported": "글자, 숫자, 하이픈(-), 밑줄(_)만 쓸 수 있어요.",
+  "channels.nameRule.edge": "처음과 끝은 글자나 숫자여야 해요. 하이픈과 밑줄은 가운데에만 쓸 수 있어요.",
+  "channels.nameRule.serverRejected": "서버가 이 이름을 받지 않았어요. 글자, 숫자, -, _만 쓸 수 있어요."
 }
