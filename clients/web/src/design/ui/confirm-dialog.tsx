@@ -214,6 +214,8 @@ export function ConfirmDialog({
         <DialogContent
           role="alertdialog"
           opener={opener ?? null}
+          // 제목이 자기 id 를 쓰므로(`titleId`) Radix 가 자동으로 거는 이름 연결은 없는 요소를 가리킨다 → 창의 이름이 비었다(#5818 검수 r2).
+          aria-labelledby={titleId}
           aria-describedby={body.description !== undefined ? descriptionId : undefined}
           className="gap-3 p-4"
           data-testid={body.testId}

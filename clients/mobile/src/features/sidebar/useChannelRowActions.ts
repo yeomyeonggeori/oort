@@ -1,7 +1,8 @@
 import {
+  ApiError,
   closeDm,
+  leaveChannel,
   leaveDm,
-  removeChannelMember,
   setChannelNotificationPref,
   uuidEq,
   type Channel,
@@ -21,7 +22,7 @@ import {
   CHANNEL_MARK_UNREAD_FAILURE,
   CHANNEL_MUTE_FAILURE,
   DM_CLOSE_FAILURE,
-  channelLeaveFailureMessage,
+  channelLeaveFailure,
 } from '@momo/core/features/channels/model';
 import {channelShareUrlFromServerBase} from '@momo/core/features/channels/shareLink';
 import {useQueryClient} from '@tanstack/react-query';
@@ -149,6 +150,7 @@ function announce(message: string): void {
 
 export function useChannelRowActions(
   workspaceId: string,
+  /** 나가기가 본인 길(`…/members/me`)이 된 뒤로(#5778) 읽지 않는다 — 부르는 쪽(셸)의 모양만 남았다. */
   selfMemberId: string,
   /** 채널을 나간 뒤·DM 을 닫은 뒤(서버가 답한 뒤)에 부른다. 열려 있던 대화를 걷는 일은 부르는 쪽(셸)이 한다. */
   onLeft?: (channelId: string) => void,
@@ -434,28 +436,40 @@ export function useChannelRowActions(
     if (target === null || leavePending) return;
     setLeavePending(true);
     setLeaveError(null);
-    void removeChannelMember(workspaceId, target.channel.id, selfMemberId)
+    // 본인 나가기 길(#5778). 관리자 전용 `removeChannelMember` 로 자기를 지우면 일반 멤버는 403 이다.
+    // 나간 뒤의 정리: 성공과 「이미 나간 것」(404)이 같은 길이다(웹 `leftChannel` 과 같다, #5818 검수 r2).
+    const left = () => {
+      // 서버가 답한 **뒤에** 목록에서 지운다(웹과 같다).
+      client.setQueryData<Channel[]>(workspaceKeys.channels(workspaceId), current =>
+        current?.filter(known => !uuidEq(known.id, target.channel.id)),
+      );
+      void client.invalidateQueries({queryKey: workspaceKeys.channels(workspaceId)});
+      void client.invalidateQueries({queryKey: workspaceKeys.roster(workspaceId)});
+      succeeded('채널에서 나갔습니다.');
+      onLeft?.(target.channel.id);
+    };
+    void leaveChannel(workspaceId, target.channel.id)
       .then(() => {
         if (!mounted.current) return;
-        // 서버가 답한 **뒤에** 목록에서 지운다(웹과 같다).
-        client.setQueryData<Channel[]>(workspaceKeys.channels(workspaceId), current =>
-          current?.filter(known => !uuidEq(known.id, target.channel.id)),
-        );
-        void client.invalidateQueries({queryKey: workspaceKeys.channels(workspaceId)});
-        void client.invalidateQueries({queryKey: workspaceKeys.roster(workspaceId)});
-        succeeded('채널에서 나갔습니다.');
-        onLeft?.(target.channel.id);
+        left();
       })
       .catch(cause => {
         if (!mounted.current) return;
+        // 404 = 서버가 「이미 멤버가 아니다」라고 했다(다른 기기에서 먼저 나갔거나 채널이 보관됨). 낡은 화면이 모르는 사실이므로
+        // 나간 것과 같게 줄을 걷고 시트를 닫는다 - 문장을 세우지 않는다(웹과 같다).
+        if (cause instanceof ApiError && cause.status === 404) {
+          left();
+          return;
+        }
         haptics.error();
         // 목록을 건드리지 않았으므로 되돌릴 것이 없다. 확인 단계는 그대로 서 있고 이유를 말한다.
-        setLeaveError(channelLeaveFailureMessage(cause));
+        const failure = channelLeaveFailure(cause);
+        setLeaveError(formatMessage(failure.key, failure.values as never));
       })
       .finally(() => {
         if (mounted.current) setLeavePending(false);
       });
-  }, [active, client, leavePending, onLeft, selfMemberId, succeeded, workspaceId]);
+  }, [active, client, formatMessage, leavePending, onLeft, succeeded, workspaceId]);
 
   const cancelLeave = useCallback(() => {
     setConfirmingLeave(false);

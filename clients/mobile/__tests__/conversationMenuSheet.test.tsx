@@ -1,18 +1,19 @@
 import {
   CHANNEL_COPY_FAILURE,
-  CHANNEL_LEAVE_CONFIRM_TITLE,
   CHANNEL_LEAVE_LABEL,
   CHANNEL_MUTE_FAILURE,
   DM_CLOSE_FAILURE,
   DM_CLOSE_LABEL,
   channelCopyIdLabel,
   channelCopyNameLabel,
-  channelLeaveConfirmBody,
+  channelLeaveConfirmBodyKey,
   channelMuteToggleLabel,
 } from '@momo/core/features/channels/model';
 import {channelShareUrlFromServerBase} from '@momo/core/features/channels/shareLink';
 import {copyLinkActionLabel} from '@momo/core/features/timeline/copyLabels';
 import type {ChannelActionItem} from '@momo/core/features/channels/actionModel';
+import {catalog as koCatalog} from '@momo/core/i18n/generated/ko-KR';
+import {createMessageService} from '@momo/core/i18n/service';
 import {pinListHeaderLabel} from '@momo/core/features/timeline/pins';
 import type {Member} from '@momo/core/lib/api';
 import {QueryClient, QueryClientProvider} from '@tanstack/react-query';
@@ -25,6 +26,7 @@ import {
   waitFor,
   within,
 } from '@testing-library/react-native';
+import {CONFIRM_ARM_MS} from '../src/design/sheetParts';
 import React from 'react';
 import {AccessibilityInfo, Dimensions, Image, Keyboard, PixelRatio, StyleSheet} from 'react-native';
 
@@ -58,6 +60,24 @@ import {finger, pane} from './fixtures/finger';
 import {installAppClock, SHELL_WAIT_TEST_TIMEOUT_MS} from './fixtures/fakeClock';
 import {pinReduceMotion} from './fixtures/reduceMotion';
 import {describeCloseContract} from './fixtures/sheetContract';
+
+/**
+ * 확인 단계의 위험 단추는 서고 나서 `CONFIRM_ARM_MS` 동안 눌림을 받지 않는다(#5818 검수 High): 사람이 읽고 누르는 것처럼
+ * 그 시간이 지난 뒤에 누른다. 가짜 시계가 켜져 있으면 시계를 옮기고, 아니면 실제로 기다린다.
+ */
+async function armedPress(testID: string, options?: Parameters<typeof screen.getByTestId>[1]) {
+  const faked = typeof (setTimeout as unknown as {clock?: unknown}).clock !== 'undefined';
+  if (faked) {
+    act(() => {
+      jest.advanceTimersByTime(CONFIRM_ARM_MS + 40);
+    });
+  } else {
+    await act(async () => {
+      await new Promise<void>(resolve => setTimeout(resolve, CONFIRM_ARM_MS + 40));
+    });
+  }
+  fireEvent.press(screen.getByTestId(testID, options));
+}
 
 // =============================================================================
 // 대화 머리 ⋮ 가 여는 공용 행동 시트 (#4319, owner 10-27). 옛 ⋮ 는 시스템 액션 시트(제목 + 「취소」 + 「고정한 메시지」)였다.
@@ -127,11 +147,8 @@ describe('항목은 코어 표의 답에서 거른다 — 새로 짓지 않는�
     expect(keysOf(conversationMenuActionItems(target()))).toEqual(['mute', 'leave']);
   });
 
-  it('채널 나가기는 소유자·관리자에게만 선다(`canLeaveChannel`) — 일반 멤버·손님에게는 서버가 403 으로 답할 막다른 길이다', () => {
-    for (const selfRole of ['member', 'guest'] as const) {
-      expect([selfRole, keysOf(conversationMenuActionItems(target({selfRole})))]).toEqual([selfRole, ['mute']]);
-    }
-    for (const selfRole of ['owner', 'admin'] as const) {
+  it('채널 나가기는 역할과 무관하게 선다(`canLeaveChannel`) — 본인 나가기 길이다 (#5778)', () => {
+    for (const selfRole of ['member', 'guest', 'owner', 'admin'] as const) {
       expect([selfRole, keysOf(conversationMenuActionItems(target({selfRole})))]).toEqual([
         selfRole,
         ['mute', 'leave'],
@@ -440,14 +457,16 @@ describe('시트 — 닫는 길: 문은 시트를 먼저 내리고, 행동은 �
 describe('시트 — 채널 나가기의 확인 단계 (#4319)', () => {
   motionOff();
 
+  // 제공자 없이 세운 시트는 한국어 사전으로 읽는다(`useFormatMessage` 의 대체) — 같은 사전으로 기대값을 짓는다.
+  const ko = createMessageService({messageLocale: 'ko-KR', catalog: koCatalog});
   const channelSheet = (over: Partial<SheetProps> = {}) =>
     renderSheet({kind: 'public', title: 'general', items: [MUTE_OFF, LEAVE], confirmingLeave: true, ...over});
 
   it('확인 단계는 코어 문장 그대로이고, 항목 카드는 사라진다', () => {
     channelSheet();
-    expect(screen.getByTestId('conversation-menu-leave-confirm-headline')).toHaveTextContent(CHANNEL_LEAVE_CONFIRM_TITLE);
+    expect(screen.getByTestId('conversation-menu-leave-confirm-headline')).toHaveTextContent(ko.formatMessage('timeline.channelLeave.title'));
     expect(screen.getByTestId('conversation-menu-leave-confirm-detail')).toHaveTextContent(
-      channelLeaveConfirmBody('general'),
+      ko.formatMessage(channelLeaveConfirmBodyKey('public'), {name: 'general'}),
     );
     expect(screen.getByTestId('conversation-menu-leave-confirm-button')).toHaveTextContent(CHANNEL_LEAVE_LABEL);
     for (const key of ['pins', 'mute-toggle', 'leave']) {
@@ -455,12 +474,15 @@ describe('시트 — 채널 나가기의 확인 단계 (#4319)', () => {
     }
   });
 
-  it('「취소」와 「채널 나가기」가 제 일을 한 번씩 부른다', () => {
+  it('「취소」와 「채널 나가기」가 제 일을 한 번씩 부른다', async () => {
     const props = channelSheet();
     fireEvent.press(screen.getByTestId('conversation-menu-leave-cancel'));
     expect(props.onCancelLeave).toHaveBeenCalledTimes(1);
     expect(props.onConfirmLeave).not.toHaveBeenCalled();
+    // 서자마자의 누름(목록 줄을 누른 자리의 더블탭)은 확정을 누르지 못한다(#5818 검수 High).
     fireEvent.press(screen.getByTestId('conversation-menu-leave-confirm-button'));
+    expect(props.onConfirmLeave).not.toHaveBeenCalled();
+    await armedPress('conversation-menu-leave-confirm-button');
     expect(props.onConfirmLeave).toHaveBeenCalledTimes(1);
   });
 
@@ -685,11 +707,23 @@ function installFetch(routes: Routes = {}) {
         mention_count: 0,
       });
     }
+    // 본인 나가기 길(#5778). 서버처럼 역할을 보지 않는다.
+    const self = /\/channels\/([^/]+)\/members\/me$/.exec(url);
+    if (self && method === 'DELETE') {
+      await gate('leave');
+      if ((routes.leaveStatus ?? 200) !== 200) {
+        return jsonResponse(routes.leaveStatus as number, {error: {message: 'direct message channels cannot be left'}});
+      }
+      left.add(self[1]);
+      return jsonResponse(200, {channelId: self[1], memberId: SELF_ID, archived: false});
+    }
+    // 관리자 전용 길(`…/members/{id}`). 서버처럼 소유자·관리자만 받는다 — 일반 멤버의 나가기가 이 길로 새면 403 이다.
     const member = /\/channels\/([^/]+)\/members\/[^/]+$/.exec(url);
     if (member && method === 'DELETE') {
       await gate('leave');
-      if ((routes.leaveStatus ?? 200) !== 200) {
-        return jsonResponse(routes.leaveStatus as number, {error: {message: 'forbidden'}});
+      const role = routes.selfRole ?? 'admin';
+      if (role !== 'owner' && role !== 'admin') {
+        return jsonResponse(403, {error: {message: 'workspace owner or admin role required'}});
       }
       left.add(member[1]);
       return jsonResponse(200, {
@@ -813,11 +847,11 @@ describe('셸 — ⋮ 시트의 항목은 대화마다 다르다 (#4319)', () =>
     expect(screen.getByTestId('conversation-menu-leave')).toHaveTextContent(CHANNEL_LEAVE_LABEL);
   });
 
-  it('일반 멤버에게는 채널 나가기가 없다', async () => {
+  it('일반 멤버에게도 채널 나가기가 선다 (#5778)', async () => {
     await mountShell({selfRole: 'member'});
     await openConversation(ROW.general);
     await openConversationMenu();
-    expect(menuKeys()).toEqual(['info', 'pins', 'mute-toggle']);
+    expect(menuKeys()).toEqual(['info', 'pins', 'mute-toggle', 'leave']);
   });
 
   it('알림이 꺼진 채널은 「알림 켜기」다', async () => {
@@ -885,11 +919,12 @@ describe('셸 — ⋮ 시트의 항목은 대화마다 다르다 (#4319)', () =>
     expect(menuKeys()).toEqual(['info', 'pins', 'mute-toggle']);
   });
 
-  it('채널에는 서버가 닫기를 실어도 닫기가 없다 — 나가기가 없는 일반 멤버라도(나가기가 있으면 한 자리를 먼저 차지해 가린다)', async () => {
+  it('채널에는 서버가 닫기를 실어도 닫기가 없다 — 일반 멤버도(표의 차례가 닫기 → 나가기라, 새면 닫기가 나가기 자리를 먼저 차지한다)', async () => {
     await mountShell({serverClosure: true, selfRole: 'member'});
     await openConversation(ROW.general);
     await openConversationMenu();
-    expect(menuKeys()).toEqual(['info', 'pins', 'mute-toggle']);
+    expect(menuKeys()).toEqual(['info', 'pins', 'mute-toggle', 'leave']);
+    expect(screen.queryByTestId('conversation-menu-close-dm')).toBeNull();
   });
 
   it('고정 행의 낱말은 고정 읽기가 끝나면 개수를 말한다 — 코어 `pinListHeaderLabel`', async () => {
@@ -1072,10 +1107,10 @@ describe('셸 — 채널 나가기는 확인 단계를 지난다 (#4319)', () =>
   it('확인하면 내 멤버십을 지우고, 서버가 답한 뒤에 시트가 걷히고 열려 있던 대화도 걷힌다', async () => {
     const spoken = announce();
     await toConfirm();
-    fireEvent.press(screen.getByTestId('conversation-menu-leave-confirm-button'));
+    await armedPress('conversation-menu-leave-confirm-button');
     await waitFor(() => expect(calls.some(call => call.method === 'DELETE')).toBe(true));
     const del = calls.find(call => call.method === 'DELETE')!;
-    expect(del.url).toContain(`/channels/ch-general/members/${SELF_ID}`);
+    expect(del.url).toMatch(/\/channels\/ch-general\/members\/me$/);
     await waitFor(() => expect(screen.queryByTestId('conversation-pane')).toBeNull());
     expect(screen.queryByTestId('conversation-menu-sheet')).toBeNull();
     expect(spoken).toHaveBeenCalledWith('채널에서 나갔습니다.');
@@ -1085,20 +1120,20 @@ describe('셸 — 채널 나가기는 확인 단계를 지난다 (#4319)', () =>
 
   it('403: 확인 단계가 그대로 서서 이유를 말한다 — 시트도 대화도 사라지지 않는다', async () => {
     await toConfirm({leaveStatus: 403});
-    fireEvent.press(screen.getByTestId('conversation-menu-leave-confirm-button'));
+    await armedPress('conversation-menu-leave-confirm-button');
     await waitFor(() => expect(screen.getByTestId('conversation-menu-leave-error')).toBeTruthy());
-    expect(screen.getByTestId('conversation-menu-leave-error')).toHaveTextContent(/나갈 권한이 없습니다/);
+    expect(screen.getByTestId('conversation-menu-leave-error')).toHaveTextContent(/나갈 수 없어요/);
     expect(screen.getByTestId('conversation-menu-leave-confirm')).toBeTruthy();
     expect(screen.getByTestId('conversation-pane')).toBeTruthy();
   });
 
   it('도는 중에는 위험 단추가 잠겨 두 번 눌러도 DELETE 는 한 번이다', async () => {
     await toConfirm({hold: ['leave']});
-    fireEvent.press(screen.getByTestId('conversation-menu-leave-confirm-button'));
+    await armedPress('conversation-menu-leave-confirm-button');
     await waitFor(() =>
       expect(screen.getByTestId('conversation-menu-leave-confirm-button')).toHaveTextContent('나가는 중…'),
     );
-    fireEvent.press(screen.getByTestId('conversation-menu-leave-confirm-button'));
+    await armedPress('conversation-menu-leave-confirm-button');
     await act(async () => releaseHeld());
     await waitFor(() => expect(screen.queryByTestId('conversation-pane')).toBeNull());
     expect(calls.filter(call => call.method === 'DELETE')).toHaveLength(1);
@@ -1552,11 +1587,9 @@ describe('셸 — 정보 페이지의 채널 나가기 (#4319)', () => {
   it('확인하면 내 멤버십을 지우고, 서버가 답한 뒤 열려 있던 대화가 페이지째 걷힌다', async () => {
     const spoken = announce();
     await toConfirm();
-    fireEvent.press(screen.getByTestId('conversation-info-leave-confirm-button'));
+    await armedPress('conversation-info-leave-confirm-button');
     await waitFor(() => expect(calls.some(call => call.method === 'DELETE')).toBe(true));
-    expect(calls.find(call => call.method === 'DELETE')!.url).toContain(
-      `/channels/ch-general/members/${SELF_ID}`,
-    );
+    expect(calls.find(call => call.method === 'DELETE')!.url).toMatch(/\/channels\/ch-general\/members\/me$/);
     await waitFor(() => expect(screen.queryByTestId('conversation-pane')).toBeNull());
     expect(screen.queryByTestId('conversation-info-page')).toBeNull();
     expect(spoken).toHaveBeenCalledWith('채널에서 나갔습니다.');
@@ -1565,9 +1598,9 @@ describe('셸 — 정보 페이지의 채널 나가기 (#4319)', () => {
 
   it('403: 확인 단계가 그대로 서서 이유를 말한다 — 페이지도 대화도 사라지지 않는다', async () => {
     await toConfirm({leaveStatus: 403});
-    fireEvent.press(screen.getByTestId('conversation-info-leave-confirm-button'));
+    await armedPress('conversation-info-leave-confirm-button');
     await waitFor(() => expect(screen.getByTestId('conversation-info-leave-error')).toBeTruthy());
-    expect(screen.getByTestId('conversation-info-leave-error')).toHaveTextContent(/나갈 권한이 없습니다/);
+    expect(screen.getByTestId('conversation-info-leave-error')).toHaveTextContent(/나갈 수 없어요/);
     expect(screen.getByTestId('conversation-info-leave-confirm')).toBeTruthy();
     expect(screen.getByTestId('conversation-info-page')).toBeTruthy();
     expect(screen.getByTestId('conversation-pane')).toBeTruthy();
@@ -1575,11 +1608,11 @@ describe('셸 — 정보 페이지의 채널 나가기 (#4319)', () => {
 
   it('도는 중에는 위험 단추가 잠겨 두 번 눌러도 DELETE 는 한 번이다', async () => {
     await toConfirm({hold: ['leave']});
-    fireEvent.press(screen.getByTestId('conversation-info-leave-confirm-button'));
+    await armedPress('conversation-info-leave-confirm-button');
     await waitFor(() =>
       expect(screen.getByTestId('conversation-info-leave-confirm-button')).toHaveTextContent('나가는 중…'),
     );
-    fireEvent.press(screen.getByTestId('conversation-info-leave-confirm-button'));
+    await armedPress('conversation-info-leave-confirm-button');
     await act(async () => releaseHeld());
     await waitFor(() => expect(screen.queryByTestId('conversation-pane')).toBeNull());
     expect(calls.filter(call => call.method === 'DELETE')).toHaveLength(1);
@@ -1595,11 +1628,18 @@ describe('셸 — 정보 페이지의 채널 나가기 (#4319)', () => {
     expect(calls.filter(call => call.method === 'DELETE')).toHaveLength(0);
   });
 
-  it('일반 멤버에게는 나가기가 없다 — 알림 · 복사만 선다', async () => {
+  it('일반 멤버도 나가기가 서고, 확인하면 본인 나가기 길로 나간다 — 관리자 길이면 서버가 403 이다 (#5778)', async () => {
     await mountShell({selfRole: 'member'});
     await openConversation(ROW.general);
     await openInfoPage();
-    expect(infoKeys()).toEqual(['mute-toggle', 'copy-name', 'copy-link', 'copy-id']);
+    expect(infoKeys()).toEqual(['mute-toggle', 'copy-name', 'copy-link', 'copy-id', 'leave']);
+    fireEvent.press(screen.getByTestId('conversation-info-leave'));
+    await armedPress('conversation-info-leave-confirm-button');
+    await waitFor(() => expect(screen.queryByTestId('conversation-pane')).toBeNull());
+    expect(screen.queryByTestId('conversation-info-leave-error')).toBeNull();
+    expect(calls.filter(call => call.method === 'DELETE').map(call => call.url.replace(/^.*\/channels\//, ''))).toEqual([
+      'ch-general/members/me',
+    ]);
   });
 });
 

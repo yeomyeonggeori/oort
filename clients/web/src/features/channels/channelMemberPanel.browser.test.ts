@@ -343,6 +343,17 @@ describe("채널 멤버 패널의 줄은 상태가 바뀌어도 밀리지 않는
                     }
                   }
                 }
+                // 폰 폭(600 미만)에서 줄 끝 ⋯ 은 눌리는 상자가 44 이상이어야 하고(§2.7, #5818 검수 M6) 줄 높이는 그대로다(위 검사).
+                if (vp.width < 600) {
+                  const boxes = await p.evaluate(() =>
+                    [...document.querySelectorAll('[data-testid="channel-member-row-menu"]')].map((b) => {
+                      const r = b.getBoundingClientRect();
+                      return Math.min(r.width, r.height);
+                    })
+                  );
+                  if (boxes.length === 0) problems.push(`${at("처음")}: 줄 끝 ⋯ 이 하나도 없다(검사가 헛돈다)`);
+                  if (boxes.some((size) => size < 43.99)) problems.push(`${at("처음")}: ⋯ 눌리는 상자 ${boxes.join(",")}px (44 미만)`);
+                }
                 report.push(
                   `${engine} ${colorScheme} ${vp.name}: 줄 높이 ${[...heights].join(",")}px, 둘째 줄 ${[...new Set(base.map((r) => r.lineHeight))].join(",")}px, 장면 ${measured.size}개 × 줄 ${base.length}개`
                 );
