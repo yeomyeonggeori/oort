@@ -110,7 +110,9 @@ export function DmLeaveHost({
   const [busy, setBusy] = useState(false);
   const [failed, setFailed] = useState(false);
   // 닫힌 뒤 캐럿이 갈 곳. 성공이면 이웃 줄(또는 본문), 아니면 연 자리.
-  const outcomeRef = useRef<{ kind: "left"; neighborId: string | null } | null>(null);
+  const outcomeRef = useRef<{ kind: "left"; neighborId: string | null; openDrawer: boolean } | null>(null);
+  const shellNavRef = useRef(shellNav);
+  shellNavRef.current = shellNav;
   const openerRef = useRef<HTMLElement | null>(null);
   const flightRef = useRef(0);
   const [secondPass, setSecondPass] = useState<PendingSecondPass | null>(null);
@@ -178,6 +180,12 @@ export function DmLeaveHost({
           else focusMainLanding();
           return;
         }
+        if (outcome.openDrawer) {
+          // 좁은 창에서 머리 ⋮ 로 나갔다: 직전 화면인 목록(서랍)을 연다. 주소가 바뀐 커밋이 서랍을 닫은 **뒤**에 연다(다음 프레임).
+          // 캐럿은 서랍이 열리며 스스로 잡는다(첫 정거장 = 닫기 단추) - 닫힌 서랍 안의 줄이나 가려질 본문으로 보내지 않는다.
+          requestAnimationFrame(() => shellNavRef.current.openDrawer());
+          return;
+        }
         requestAnimationFrame(() => {
           const landed =
             outcome.neighborId !== null && focusSidebarChannelRow(document, outcome.neighborId) && document.activeElement !== document.body;
@@ -235,11 +243,14 @@ export function DmLeaveHost({
     if (openId !== null && uuidEq(openId, req.channelId)) navigate("/");
     // 6. 주소가 바뀐 뒤의 둘째 정리.
     setSecondPass({ channelId: req.channelId, rootIds });
-    // 5. 닫는다. 좁은 창에서 머리 ⋮ 로 나갔으면 서랍(목록)을 연다 - 직전 화면이고, 영수증이 서는 자리다.
-    outcomeRef.current = { kind: "left", neighborId };
+    // 5. 닫는다. 좁은 창에서 머리 ⋮ 로 나갔으면 서랍(목록)을 연다 - 직전 화면이고, 영수증이 서는 자리다(캐럿 복귀에서).
+    outcomeRef.current = {
+      kind: "left",
+      neighborId,
+      openDrawer: req.via === "header" && shellNav.isMobile && !shellNav.drawerOpen,
+    };
     setBusy(false);
     endDmLeaveRequest();
-    if (req.via === "header" && shellNav.isMobile && !shellNav.drawerOpen) shellNav.openDrawer();
   };
 
   return (
