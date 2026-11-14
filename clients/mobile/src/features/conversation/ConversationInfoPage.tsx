@@ -4,9 +4,7 @@ import type {
 } from '@momo/core/features/channels/actionModel';
 import {channelActionClusterTitle, isChannelActionStatusIcon} from '@momo/core/features/channels/actionModel';
 import {
-  CHANNEL_LEAVE_CONFIRM_TITLE,
-  CHANNEL_LEAVE_LABEL,
-  channelLeaveConfirmBody,
+  channelLeaveConfirmBodyKey,
 } from '@momo/core/features/channels/model';
 import {roleLabel, type RoleLabels} from '@momo/core/features/directory/model';
 import type {StatusDot as PeerStatus} from '@momo/core/features/presence/statusDot';
@@ -18,9 +16,10 @@ import {useSafeAreaInsets} from 'react-native-safe-area-context';
 import {AVATAR_INITIAL_MAX_SCALE, Screen, Sentence} from '../../design/atoms';
 import {HOME_ICON_SIZE, HOME_ICONS} from '../../design/icons';
 import {PageHeader} from '../../design/SheetChrome';
-import {ConfirmStep, GroupCard, ListRow, RowStatusIcon} from '../../design/sheetParts';
+import {CONFIRM_ARM_MS, ConfirmStep, GroupCard, ListRow, RowStatusIcon} from '../../design/sheetParts';
 import {useStyles} from '../../design/theme';
 import {font, line, SAFE_GUTTER, space, type Palette} from '../../design/tokens';
+import {useFormatMessage} from '../../i18n/useFormatMessage';
 import {EdgeSwipeBack, useLayerClose} from '../../nav/EdgeSwipeBack';
 import {
   BigFace,
@@ -156,6 +155,7 @@ function InfoBody({
   onEnlargeAvatar,
 }: ConversationInfoPageProps): React.JSX.Element {
   const styles = useStyles(buildStyles);
+  const formatMessage = useFormatMessage();
   const insets = useSafeAreaInsets();
   // ‹ · VoiceOver escape 는 같은 길로 한 겹만 벗긴다: 들어온 길의 반대로 물러난 뒤 `onClose`(층 밖에서는 곧바로 `onClose`).
   const closeLayer = useLayerClose();
@@ -303,12 +303,14 @@ function InfoBody({
           ) : confirmingLeave ? (
             <ConfirmStep
               testID="conversation-info-leave-confirm"
-              headline={CHANNEL_LEAVE_CONFIRM_TITLE}
-              detail={channelLeaveConfirmBody(title)}
+              confirmArmMs={CONFIRM_ARM_MS}
+              headline={formatMessage('timeline.channelLeave.title')}
+              detail={formatMessage(channelLeaveConfirmBodyKey(kind), {name: title})}
               error={leave.error}
               errorTestID="conversation-info-leave-error"
-              confirmLabel={CHANNEL_LEAVE_LABEL}
-              pendingLabel="나가는 중…"
+              confirmLabel={formatMessage('timeline.channelLeave.confirm')}
+              pendingLabel={formatMessage('timeline.channelLeave.busy')}
+              cancelLabel={formatMessage('timeline.channelLeave.cancel')}
               pending={leave.pending}
               onCancel={onCancelLeave}
               onConfirm={onConfirmLeave}

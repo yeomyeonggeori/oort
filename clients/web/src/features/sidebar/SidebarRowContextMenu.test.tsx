@@ -41,6 +41,7 @@ const CHANNEL_ID = "00000000-0000-7000-8000-000000000201";
 const setChannelNotificationPref = vi.hoisted(() => vi.fn());
 const updateReadState = vi.hoisted(() => vi.fn());
 const removeChannelMember = vi.hoisted(() => vi.fn());
+const leaveChannel = vi.hoisted(() => vi.fn());
 
 vi.mock("@momo/core/lib/api", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@momo/core/lib/api")>();
@@ -56,6 +57,7 @@ vi.mock("@momo/core/lib/api", async (importOriginal) => {
     ) => updateReadState(ws, ch, seq, options) as Promise<unknown>,
     removeChannelMember: (ws: string, ch: string, member: string) =>
       removeChannelMember(ws, ch, member) as Promise<unknown>,
+    leaveChannel: (ws: string, ch: string) => leaveChannel(ws, ch) as Promise<unknown>,
   };
 });
 
@@ -107,6 +109,8 @@ beforeEach(() => {
   updateReadState.mockResolvedValue({});
   removeChannelMember.mockReset();
   removeChannelMember.mockResolvedValue({});
+  leaveChannel.mockReset();
+  leaveChannel.mockResolvedValue({ channelId: CHANNEL_ID, memberId: ME, archived: false });
   stubPointerSurface();
 });
 
@@ -550,16 +554,22 @@ describe("나가기", () => {
     rightClick();
     clickItem("leave");
     await flush();
-    expect(removeChannelMember).not.toHaveBeenCalled();
+    expect(leaveChannel).not.toHaveBeenCalled();
     expect(
       document.querySelector('[data-testid="channel-row-leave-confirm"]')
     ).not.toBeNull();
     const confirm = document.querySelector<HTMLElement>(
-      '[data-testid="channel-row-leave-confirm-action"]'
+      '[data-testid="channel-row-leave-confirm-confirm"]'
     );
+    // 확정은 서고 나서 500ms 동안 눌림을 받지 않는다(공용 확인 창): 사람이 읽고 누르는 뒤에 누른다.
+    await act(async () => {
+      await new Promise((done) => setTimeout(done, 540));
+    });
     act(() => confirm?.click());
     await flush();
-    expect(removeChannelMember).toHaveBeenCalledWith(WS, CHANNEL_ID, ME);
+    // 본인 나가기 길(#5778). 관리자 길(`removeChannelMember`)이면 일반 멤버는 403 이다.
+    expect(leaveChannel).toHaveBeenCalledWith(WS, CHANNEL_ID);
+    expect(removeChannelMember).not.toHaveBeenCalled();
   });
 
   it("DM 행에는 나가기가 없다 — 서버에 그 문이 없다", () => {
@@ -583,10 +593,10 @@ describe("나가기", () => {
     ).toEqual(["이름 복사하기", COPY_LINK_ACTION_LABEL, CHANNEL_COPY_ID_LABEL]);
   });
 
-  it("일반 멤버에게는 막다른 길을 내놓지 않는다", () => {
+  it("일반 멤버에게도 나가기가 선다 — 본인 나가기 길이다 (#5778)", () => {
     mountRow({ selfRole: "member" });
     rightClick();
-    expect(item("leave")).toBeNull();
+    expect(item("leave")).not.toBeNull();
   });
 });
 
@@ -1518,6 +1528,7 @@ describe("DM 닫기 (#3963)", () => {
     expect(menu()).toBeNull();
     // 대화 삭제도 나가기도 아니다: 어느 서버 표면도 부르지 않는다.
     expect(removeChannelMember).not.toHaveBeenCalled();
+    expect(leaveChannel).not.toHaveBeenCalled();
     expect(setChannelNotificationPref).not.toHaveBeenCalled();
     expect(updateReadState).not.toHaveBeenCalled();
   });

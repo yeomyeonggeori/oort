@@ -91,12 +91,10 @@ describe('채널 행', () => {
     expect(label(true)).toBe(CHANNEL_UNMUTE_LABEL);
   });
 
-  it('일반 멤버에게는 「채널 나가기」가 없다 — 서버가 403 으로 막는 막다른 길', () => {
-    expect(keys(target({selfRole: 'member'}))).not.toContain('leave');
-    expect(keys(target({selfRole: 'guest'}))).not.toContain('leave');
-    expect(keys(target({selfRole: 'owner'}))).toContain('leave');
-    // 역할을 모르면 내놓고 서버가 답한다(코어 규칙).
-    expect(keys(target({selfRole: undefined}))).toContain('leave');
+  it('「채널 나가기」는 역할과 무관하게 선다 — 본인 나가기 길이다 (#5778)', () => {
+    for (const selfRole of ['member', 'guest', 'owner', 'admin', undefined] as const) {
+      expect([selfRole, keys(target({selfRole})).includes('leave')]).toEqual([selfRole, true]);
+    }
   });
 
   it('나가기는 위험 톤이고 마지막이다', () => {

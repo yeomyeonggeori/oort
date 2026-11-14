@@ -1,19 +1,21 @@
 import {
   CHANNEL_COPY_GROUP_LABEL,
-  CHANNEL_LEAVE_CONFIRM_TITLE,
   CHANNEL_LEAVE_LABEL,
   DM_CLOSE_LABEL,
   channelCopyIdLabel,
   channelCopyNameLabel,
-  channelLeaveConfirmBody,
+  channelLeaveConfirmBodyKey,
   channelMuteToggleLabel,
 } from '@momo/core/features/channels/model';
 import type {ChannelActionKey} from '@momo/core/features/channels/actionModel';
+import {catalog as koCatalog} from '@momo/core/i18n/generated/ko-KR';
+import {createMessageService} from '@momo/core/i18n/service';
 import {copyLinkActionLabel} from '@momo/core/features/timeline/copyLabels';
 import type {StatusDot as PeerStatus} from '@momo/core/features/presence/statusDot';
 import {makeDirectory} from '@momo/core/features/workspace/directory';
 import type {RosterMember} from '@momo/core/lib/api';
 import {act, cleanup, fireEvent, render, screen, waitFor, within} from '@testing-library/react-native';
+import {CONFIRM_ARM_MS} from '../src/design/sheetParts';
 import React from 'react';
 import {Animated, Dimensions, Image, PixelRatio, StyleSheet} from 'react-native';
 
@@ -35,6 +37,24 @@ import {endGlyphInk} from './fixtures/endGlyphInk';
 import {finger, pane} from './fixtures/finger';
 import {pinReduceMotion} from './fixtures/reduceMotion';
 import {releaseReduceMotion, setReduceMotion} from './fixtures/sheetContract';
+
+/**
+ * 확인 단계의 위험 단추는 서고 나서 `CONFIRM_ARM_MS` 동안 눌림을 받지 않는다(#5818 검수 High): 사람이 읽고 누르는 것처럼
+ * 그 시간이 지난 뒤에 누른다. 가짜 시계가 켜져 있으면 시계를 옮기고, 아니면 실제로 기다린다.
+ */
+async function armedPress(testID: string, options?: Parameters<typeof screen.getByTestId>[1]) {
+  const faked = typeof (setTimeout as unknown as {clock?: unknown}).clock !== 'undefined';
+  if (faked) {
+    act(() => {
+      jest.advanceTimersByTime(CONFIRM_ARM_MS + 40);
+    });
+  } else {
+    await act(async () => {
+      await new Promise<void>(resolve => setTimeout(resolve, CONFIRM_ARM_MS + 40));
+    });
+  }
+  fireEvent.press(screen.getByTestId(testID, options));
+}
 
 // =============================================================================
 // 대화·채널 정보 페이지 (#4319, owner 10-27 — 머리 가운데 이름·상태 알약이 여는 곳).
@@ -416,7 +436,7 @@ describe('정보 페이지 — 행은 코어 표의 답이다 (#4319)', () => {
     expect(color('conversation-info-leave')).not.toBe(color('conversation-info-mute-toggle'));
   });
 
-  it('채널: 일반 멤버·손님에게는 「채널 나가기」가 없다(`canLeaveChannel`) — 서버가 403 으로 답할 막다른 길이다', () => {
+  it('채널: 일반 멤버·손님에게도 「채널 나가기」가 선다(`canLeaveChannel`) — 본인 나가기 길은 역할을 보지 않는다 (#5778)', () => {
     for (const selfRole of ['member', 'guest'] as const) {
       renderPage({
         kind: 'public',
@@ -424,7 +444,7 @@ describe('정보 페이지 — 행은 코어 표의 답이다 (#4319)', () => {
         peer: null,
         items: conversationInfoActionItems(channelTarget({selfRole})),
       });
-      expect([selfRole, rowKeys()]).toEqual([selfRole, ['mute-toggle', 'copy-name', 'copy-link', 'copy-id']]);
+      expect([selfRole, rowKeys()]).toEqual([selfRole, ['mute-toggle', 'copy-name', 'copy-link', 'copy-id', 'leave']]);
     }
   });
 
@@ -573,6 +593,8 @@ describe('정보 페이지 — 행은 코어 표의 답이다 (#4319)', () => {
 describe('정보 페이지 — 채널 나가기의 확인 단계 (#4319)', () => {
   motionOff();
 
+  // 제공자 없이 세운 화면은 한국어 사전으로 읽는다(`useFormatMessage` 의 대체) — 같은 사전으로 기대값을 짓는다.
+  const ko = createMessageService({messageLocale: 'ko-KR', catalog: koCatalog});
   const confirming = (over: Partial<ConversationInfoPageProps> = {}) =>
     renderPage({
       kind: 'public',
@@ -586,10 +608,10 @@ describe('정보 페이지 — 채널 나가기의 확인 단계 (#4319)', () =>
   it('확인 단계는 코어 문장 그대로이고, 항목 카드는 사라진다 — 머리·히어로는 그대로다', () => {
     confirming();
     expect(screen.getByTestId('conversation-info-leave-confirm-headline')).toHaveTextContent(
-      CHANNEL_LEAVE_CONFIRM_TITLE,
+      ko.formatMessage('timeline.channelLeave.title'),
     );
     expect(screen.getByTestId('conversation-info-leave-confirm-detail')).toHaveTextContent(
-      channelLeaveConfirmBody('general'),
+      ko.formatMessage(channelLeaveConfirmBodyKey('public'), {name: 'general'}),
     );
     expect(screen.getByTestId('conversation-info-leave-confirm-button')).toHaveTextContent(CHANNEL_LEAVE_LABEL);
     expect(rowKeys()).toEqual([]);
@@ -597,12 +619,15 @@ describe('정보 페이지 — 채널 나가기의 확인 단계 (#4319)', () =>
     expect(screen.getByTestId('conversation-info-back')).toBeTruthy();
   });
 
-  it('「취소」와 「채널 나가기」가 제 일을 한 번씩 부르고 페이지는 닫히지 않는다', () => {
+  it('「취소」와 「채널 나가기」가 제 일을 한 번씩 부르고 페이지는 닫히지 않는다', async () => {
     const props = confirming();
     fireEvent.press(screen.getByTestId('conversation-info-leave-cancel'));
     expect(props.onCancelLeave).toHaveBeenCalledTimes(1);
     expect(props.onConfirmLeave).not.toHaveBeenCalled();
+    // 서자마자의 누름(목록 줄을 누른 자리의 더블탭)은 확정을 누르지 못한다(#5818 검수 High).
     fireEvent.press(screen.getByTestId('conversation-info-leave-confirm-button'));
+    expect(props.onConfirmLeave).not.toHaveBeenCalled();
+    await armedPress('conversation-info-leave-confirm-button');
     expect(props.onConfirmLeave).toHaveBeenCalledTimes(1);
     expect(props.onClose).not.toHaveBeenCalled();
   });

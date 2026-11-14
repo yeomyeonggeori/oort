@@ -2306,6 +2306,40 @@ export async function removeChannelMember(
   );
 }
 
+/** What `DELETE …/channels/{ch}/members/me` answers: whose membership ended, and whether it archived the channel. */
+export interface ChannelLeaveResult {
+  channelId: string;
+  memberId: string;
+  /** A private channel is archived in the same transaction when its last active member leaves. */
+  archived: boolean;
+}
+
+/**
+ * Leave a channel yourself (#5778). Any human member may: this is the self route, not the
+ * owner/admin `removeChannelMember`. A DM answers 403 (DMs cannot be left), no live membership
+ * — or an archived channel — answers 404.
+ */
+export async function leaveChannel(
+  workspaceId: string,
+  channelId: string
+): Promise<ChannelLeaveResult> {
+  const source = responseRecord(
+    await request<unknown>(
+      `/v1/workspaces/${encodeURIComponent(
+        workspaceId
+      )}/channels/${encodeURIComponent(channelId)}/members/me`,
+      { method: "DELETE" }
+    )
+  );
+  const leftChannelId = str(source, "channelId");
+  const memberId = str(source, "memberId");
+  const archived = bool(source, "archived");
+  if (leftChannelId === undefined || memberId === undefined || archived === undefined) {
+    throw new WireShapeError();
+  }
+  return { channelId: leftChannelId, memberId, archived };
+}
+
 /**
  * Decode the `{ muted }` body the notification-pref write answers with. Pulled
  * out so the wire shape is asserted in one place rather than only inside the

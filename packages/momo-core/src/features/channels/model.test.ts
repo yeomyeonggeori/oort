@@ -2,6 +2,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import koChannels from "../../i18n/catalogs/ko-KR/channels.json";
 import { ApiError } from "../../lib/api";
 import { NetworkError } from "../../lib/http";
+import { createMessageService } from "../../i18n/service";
+import { catalog as ko } from "../../i18n/generated/ko-KR";
 import {
   CHANNEL_COPY_FAILURE,
   CHANNEL_COPY_GROUP_LABEL,
@@ -28,8 +30,8 @@ import {
   canLeaveChannel,
   channelCopyIdLabel,
   channelCopyNameLabel,
-  channelLeaveConfirmBody,
-  channelLeaveFailureMessage,
+  channelLeaveConfirmBodyKey,
+  channelLeaveFailure,
   channelMenuAccessibleLabel,
   channelMuteToggleLabel,
   channelNameIssue,
@@ -373,49 +375,63 @@ describe("channelMuteToggleLabel", () => {
 });
 
 describe("canLeaveChannel", () => {
-  it("offers leaving only to owner/admin, the roles the server lets remove a membership", () => {
-    // remove_member는 `role_of_actor.is_admin()`를 요구한다(channels.rs). 일반
-    // 멤버에게 내놓으면 확인 뒤 403으로 끝나는 막다른 길이다.
-    expect(canLeaveChannel("owner")).toBe(true);
-    expect(canLeaveChannel("admin")).toBe(true);
-    expect(canLeaveChannel("member")).toBe(false);
-    expect(canLeaveChannel("guest")).toBe(false);
+  it("offers leaving every public and private channel, whatever the role (#5778 — the self route)", () => {
+    // 본인 나가기(`…/members/me`)는 사람이면 역할을 보지 않는다(2026-11-14 로컬 스택: 멤버·게스트 200).
+    expect(canLeaveChannel("public")).toBe(true);
+    expect(canLeaveChannel("private")).toBe(true);
   });
 
-  it("offers it when the role has not arrived, and lets the server have the last word", () => {
-    // canCreateChannel과 같은 규율: 필드가 늦게 온다고 유일한 길을 숨기지 않는다.
-    expect(canLeaveChannel(undefined)).toBe(true);
+  it("never offers it on a DM, which the server refuses with 403", () => {
+    expect(canLeaveChannel("dm")).toBe(false);
   });
 });
 
-describe("channelLeaveFailureMessage", () => {
-  it("maps the admin-only 403 to a next step rather than echoing the server", () => {
-    const message = channelLeaveFailureMessage(new ApiError(403, "forbidden"));
-    expect(message).toContain("관리자");
-    expect(message).not.toContain("forbidden");
+describe("channelLeaveFailure", () => {
+  const messages = createMessageService({ messageLocale: "ko-KR", catalog: ko });
+  const say = (error: unknown) => {
+    const failure = channelLeaveFailure(error);
+    return messages.formatMessage(failure.key, failure.values as never);
+  };
+
+  it("does not send a member to an admin: leaving is their own route", () => {
+    const failure = channelLeaveFailure(new ApiError(403, "forbidden"));
+    expect(failure.key).toBe("timeline.channelLeave.errorForbidden");
+    expect(say(new ApiError(403, "forbidden"))).not.toMatch(/관리자|forbidden/);
   });
 
-  it("reads a 404 as 'already not a member' rather than a failure", () => {
-    expect(channelLeaveFailureMessage(new ApiError(404, "not found"))).toContain(
-      "이미"
-    );
+  it("reads a 404 as 'already not a member', which includes an archived channel", () => {
+    expect(channelLeaveFailure(new ApiError(404, "not found")).key).toBe("timeline.channelLeave.errorNotFound");
+    expect(say(new ApiError(404, "not found"))).toContain("이미");
   });
 
   it("reuses the transport's measured copy when nothing answered, and never apologises", () => {
-    expect(
-      channelLeaveFailureMessage(new NetworkError("timeout", 15_000))
-    ).toContain("15초");
-    const generic = channelLeaveFailureMessage(new Error("boom"));
+    expect(say(new NetworkError("timeout", 15_000))).toContain("15초");
+    const generic = say(new Error("boom"));
     expect(generic).toContain("다시 시도");
     expect(generic).not.toMatch(/죄송/);
   });
 });
 
-describe("channelLeaveConfirmBody", () => {
-  it("names the channel and states that re-entry needs an admin", () => {
-    const body = channelLeaveConfirmBody("release-2026-08");
+describe("channelLeaveConfirmBodyKey", () => {
+  const messages = createMessageService({ messageLocale: "ko-KR", catalog: ko });
+
+  it("names the channel and the only way back today: an owner or admin adds you", () => {
+    const body = messages.formatMessage(channelLeaveConfirmBodyKey("public"), { name: "release-2026-08" });
     expect(body).toContain("release-2026-08");
     expect(body).toContain("관리자");
+    // 채널 둘러보기·스스로 참여는 아직 없다(결정 문서 단계): 약속하지 않는다.
+    expect(body).not.toMatch(/찾아|둘러보|스스로/);
+  });
+
+  it("tells a private channel's leaver that re-entry needs an invitation and that the last one out archives it", () => {
+    expect(channelLeaveConfirmBodyKey("private")).toBe("timeline.channelLeave.bodyPrivate");
+    const body = messages.formatMessage(channelLeaveConfirmBodyKey("private"), { name: "design-room" });
+    expect(body).toContain("초대");
+    expect(body).toContain("보관");
+  });
+
+  it("falls back to the public sentence when the kind is unknown", () => {
+    expect(channelLeaveConfirmBodyKey(undefined)).toBe("timeline.channelLeave.bodyPublic");
   });
 });
 
