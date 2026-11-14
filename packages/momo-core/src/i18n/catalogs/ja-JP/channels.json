@@ -14,5 +14,8 @@
   "channels.nameRule.hidden": "見えない文字が含まれています。名前を消してもう一度入力してください。",
   "channels.nameRule.unsupported": "文字、数字、ハイフン（-）、アンダースコア（_）のみ使えます。",
   "channels.nameRule.edge": "先頭と末尾は文字か数字にしてください。ハイフンとアンダースコアは途中にのみ使えます。",
-  "channels.nameRule.serverRejected": "サーバーがこの名前を受け付けませんでした。文字、数字、-、_のみ使えます。"
+  "channels.nameRule.serverRejected": "サーバーがこの名前を受け付けませんでした。文字、数字、-、_のみ使えます。",
+  "channels.nameRule.hint": "文字、数字、ハイフン（-）、アンダースコア（_）で{max, number}文字まで。空白は-に変わり、英字の大文字は小文字で保存されます。",
+  "channels.nameRule.placeholder": "デザイン-レビュー",
+  "channels.nameRule.preview": "{name} という名前で作成されます"
 }

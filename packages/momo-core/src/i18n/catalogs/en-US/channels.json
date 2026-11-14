@@ -14,5 +14,8 @@
   "channels.nameRule.hidden": "The name contains invisible characters. Clear it and type the name again.",
   "channels.nameRule.unsupported": "Use only letters, numbers, hyphens (-) and underscores (_).",
   "channels.nameRule.edge": "The name must start and end with a letter or number. Hyphens and underscores can only go in the middle.",
-  "channels.nameRule.serverRejected": "The server did not accept this name. Use only letters, numbers, - and _."
+  "channels.nameRule.serverRejected": "The server did not accept this name. Use only letters, numbers, - and _.",
+  "channels.nameRule.hint": "Letters, numbers, hyphens (-) and underscores (_), up to {max, number} characters. Spaces become -, and uppercase letters are saved as lowercase.",
+  "channels.nameRule.placeholder": "design-review",
+  "channels.nameRule.preview": "Will be created as {name}"
 }

@@ -14,5 +14,8 @@
   "channels.nameRule.hidden": "名稱中含有看不見的字元。請清空後重新輸入。",
   "channels.nameRule.unsupported": "只能使用文字、數字、連字號（-）和底線（_）。",
   "channels.nameRule.edge": "名稱必須以文字或數字開頭和結尾。連字號和底線只能放在中間。",
-  "channels.nameRule.serverRejected": "伺服器不接受這個名稱。只能使用文字、數字、- 和 _。"
+  "channels.nameRule.serverRejected": "伺服器不接受這個名稱。只能使用文字、數字、- 和 _。",
+  "channels.nameRule.hint": "可使用文字、數字、連字號（-）和底線（_），最多 {max, number} 個字元。空格會變成 -，英文大寫字母會以小寫儲存。",
+  "channels.nameRule.placeholder": "設計-評審",
+  "channels.nameRule.preview": "將建立為 {name}"
 }

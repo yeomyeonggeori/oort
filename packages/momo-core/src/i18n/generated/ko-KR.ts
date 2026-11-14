@@ -1212,6 +1212,37 @@ export const catalog: MessageCatalog = {
       "value": "보이지 않는 글자가 들어 있어요. 이름을 지우고 다시 적어 주세요."
     }
   ],
+  "channels.nameRule.hint": [
+    {
+      "type": 0,
+      "value": "글자, 숫자, 하이픈(-), 밑줄(_)로 "
+    },
+    {
+      "type": 2,
+      "value": "max",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "자까지. 빈칸은 -로 바뀌고 영문 대문자는 소문자로 저장돼요."
+    }
+  ],
+  "channels.nameRule.placeholder": [
+    {
+      "type": 0,
+      "value": "디자인-리뷰"
+    }
+  ],
+  "channels.nameRule.preview": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " 이름으로 만들어져요"
+    }
+  ],
   "channels.nameRule.required": [
     {
       "type": 0,

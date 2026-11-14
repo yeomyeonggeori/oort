@@ -99,6 +99,37 @@ export const catalog: MessageCatalog = {
       "value": "名称中含有不可见字符。请清空后重新输入。"
     }
   ],
+  "channels.nameRule.hint": [
+    {
+      "type": 0,
+      "value": "可使用文字、数字、连字符（-）和下划线（_），最多 "
+    },
+    {
+      "type": 2,
+      "value": "max",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": " 个字符。空格会变成 -，英文大写字母会以小写保存。"
+    }
+  ],
+  "channels.nameRule.placeholder": [
+    {
+      "type": 0,
+      "value": "设计-评审"
+    }
+  ],
+  "channels.nameRule.preview": [
+    {
+      "type": 0,
+      "value": "将创建为 "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    }
+  ],
   "channels.nameRule.required": [
     {
       "type": 0,

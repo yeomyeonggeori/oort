@@ -14,5 +14,8 @@
   "channels.nameRule.hidden": "Le nom contient des caractères invisibles. Effacez-le et saisissez-le à nouveau.",
   "channels.nameRule.unsupported": "Seuls les lettres, chiffres, traits d’union (-) et tirets bas (_) sont autorisés.",
   "channels.nameRule.edge": "Le nom doit commencer et se terminer par une lettre ou un chiffre. Les traits d’union et tirets bas ne peuvent être qu’au milieu.",
-  "channels.nameRule.serverRejected": "Le serveur n’a pas accepté ce nom. Seuls les lettres, chiffres, - et _ sont autorisés."
+  "channels.nameRule.serverRejected": "Le serveur n’a pas accepté ce nom. Seuls les lettres, chiffres, - et _ sont autorisés.",
+  "channels.nameRule.hint": "Lettres, chiffres, traits d’union (-) et tirets bas (_), jusqu’à {max, number} caractères. Les espaces deviennent - et les majuscules sont enregistrées en minuscules.",
+  "channels.nameRule.placeholder": "revue-de-design",
+  "channels.nameRule.preview": "Sera créé sous le nom {name}"
 }

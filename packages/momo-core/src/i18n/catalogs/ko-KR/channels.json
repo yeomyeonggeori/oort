@@ -14,5 +14,8 @@
   "channels.nameRule.hidden": "보이지 않는 글자가 들어 있어요. 이름을 지우고 다시 적어 주세요.",
   "channels.nameRule.unsupported": "글자, 숫자, 하이픈(-), 밑줄(_)만 쓸 수 있어요.",
   "channels.nameRule.edge": "처음과 끝은 글자나 숫자여야 해요. 하이픈과 밑줄은 가운데에만 쓸 수 있어요.",
-  "channels.nameRule.serverRejected": "서버가 이 이름을 받지 않았어요. 글자, 숫자, -, _만 쓸 수 있어요."
+  "channels.nameRule.serverRejected": "서버가 이 이름을 받지 않았어요. 글자, 숫자, -, _만 쓸 수 있어요.",
+  "channels.nameRule.hint": "글자, 숫자, 하이픈(-), 밑줄(_)로 {max, number}자까지. 빈칸은 -로 바뀌고 영문 대문자는 소문자로 저장돼요.",
+  "channels.nameRule.placeholder": "디자인-리뷰",
+  "channels.nameRule.preview": "{name} 이름으로 만들어져요"
 }

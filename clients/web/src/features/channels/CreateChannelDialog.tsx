@@ -21,13 +21,18 @@ import { useOffline } from "@/features/common/useOffline";
 import { cn } from "@/design/lib/cn";
 import { PRIMARY_ACTION_SHORTCUT } from "@/app/keyboardShortcuts";
 import {
+  CHANNEL_NAME_ISSUE_KEYS,
+  CHANNEL_NAME_MAX,
+  CHANNEL_NAME_SERVER_REJECTED_KEY,
   channelNameIssue,
-  channelNameIssueMessage,
   channelTopicIssue,
   channelTopicIssueMessage,
+  createChannelFailure,
   normalizeChannelName,
   normalizeChannelTopic,
+  type ChannelNameIssue,
 } from "@momo/core/features/channels/model";
+import { ApiError } from "@momo/core/lib/api";
 import type { MessageKey } from "@momo/core/i18n";
 import { useFormatMessage } from "@/i18n/useFormatMessage";
 import {
@@ -144,6 +149,64 @@ function DialogField({
   );
 }
 
+/** 미리보기 줄의 이름 자리를 문장에서 떼어 내는 표시. 사전 문장은 `{name}`이 앞·뒤 어디에 서든 그대로 두고(언어마다 다르다), 이름만 한 줄에서 줄여 보인다. */
+const PREVIEW_NAME_MARK = "\uE000";
+
+/** 칸 아래 한 줄: 규칙 안내 · 저장될 이름 · 거절 문장 중 하나만 선다. 서는 자리는 하나이고, 서지 않은 문장들이 같은 칸에 보이지 않게 겹쳐 있어 줄 수가 가장 긴 문장으로 정해진다(칸이 문장에 따라 오르내리지 않는다). */
+function NameStatus({
+  fieldId,
+  hint,
+  preview,
+  error,
+  reserve,
+}: {
+  fieldId: string;
+  hint: string;
+  /** 저장될 이름(접은 값, `#` 없이). 칸에 친 것과 같거나 거절이면 null. */
+  preview: { name: string; before: string; after: string } | null;
+  error: string | null;
+  /** 이 자리에 설 수 있는 모든 문장(안내·거절·서버 응답). 높이만 정하고 보이지 않는다. */
+  reserve: string[];
+}) {
+  return (
+    <div className="grid min-w-0" data-testid={`${fieldId}-status`}>
+      <div aria-hidden="true" className="invisible col-start-1 row-start-1 grid">
+        {reserve.map((text) => (
+          <p key={text} className="col-start-1 row-start-1 text-meta">
+            {text}
+          </p>
+        ))}
+      </div>
+      <div className="col-start-1 row-start-1 min-w-0">
+        {/* 낭독은 오류에만 건다(polite): 안내와 미리보기는 글자를 칠 때마다 바뀌어 조합 중 낭독이 쏟아진다. */}
+        <div aria-live="polite" aria-atomic="true">
+          {error ? (
+            <p className="text-meta text-danger" id={`${fieldId}-error`} data-testid={`${fieldId}-error`}>
+              {error}
+            </p>
+          ) : null}
+        </div>
+        {!error && preview ? (
+          <p
+            className="flex min-w-0 whitespace-pre text-meta text-ink-muted"
+            id={`${fieldId}-preview`}
+            data-testid={`${fieldId}-preview`}
+          >
+            <span className="shrink-0">{preview.before}</span>
+            <span className="min-w-0 truncate text-ink">#{preview.name}</span>
+            <span className="shrink-0">{preview.after}</span>
+          </p>
+        ) : null}
+        {!error && !preview ? (
+          <p className="text-meta text-ink-muted" id={`${fieldId}-hint`} data-testid={`${fieldId}-hint`}>
+            {hint}
+          </p>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
 function CreateChannelPanel({
   open,
   draft,
@@ -169,6 +232,9 @@ function CreateChannelPanel({
 
   const { kind, name, topic } = draft;
   const [attempted, setAttempted] = useState(false);
+  // 한글·일본어·중국어 입력기는 글자를 확정하기 전의 「조합 중」 글자를 칸에 넣는다(병음의 `ni'h`, 풀어쓴 자모). 그 글자는 아직 이름이 아니라서
+  // 거절하거나 미리 보이면 틀린 말을 한다. 조합이 시작될 때의 값을 쥐고 있다가 끝나면 놓는다 — 칸의 값은 그대로 두고 아래 줄만 머문다.
+  const [composingFrom, setComposingFrom] = useState<string | null>(null);
   const nameRef = useRef<HTMLInputElement>(null);
   const topicRef = useRef<HTMLInputElement>(null);
   const formRef = useRef<HTMLFormElement>(null);
@@ -187,20 +253,53 @@ function CreateChannelPanel({
     }
     handedOff.current = false;
     setAttempted(false);
+    setComposingFrom(null);
     clearFailure();
   }, [open, clearFailure]);
 
   const nameIssue = channelNameIssue(name);
   const topicIssue = channelTopicIssue(topic);
 
+  // 칸 아래 줄이 말하는 이름은 조합 중이면 조합 전의 값이다(위 `composingFrom`).
+  const shownName = composingFrom ?? name;
+  const shownIssue = channelNameIssue(shownName);
+  const issueMessage = (issue: ChannelNameIssue) => {
+    if (issue === "tooLong") return formatMessage(CHANNEL_NAME_ISSUE_KEYS.tooLong, { max: CHANNEL_NAME_MAX });
+    return formatMessage(CHANNEL_NAME_ISSUE_KEYS[issue]);
+  };
+  const hint = formatMessage("channels.nameRule.hint", { max: CHANNEL_NAME_MAX });
+
   // A rule is only worth stating once the reader has done something it applies
   // to: an untouched empty field is not a mistake, it is a field.
   const localNameError =
-    nameIssue !== null && (attempted || name.trim() !== "")
-      ? channelNameIssueMessage(nameIssue)
+    shownIssue !== null && (attempted || shownName.trim() !== "")
+      ? issueMessage(shownIssue)
       : null;
-  const nameError =
-    localNameError ?? (failure?.field === "name" ? failure.message : null);
+  const serverNameError =
+    failure?.field === "name"
+      ? failure.messageKey !== undefined
+        ? formatMessage(failure.messageKey)
+        : failure.message
+      : null;
+  const nameError = localNameError ?? serverNameError;
+  // 거절이면 미리보기 대신 오류다. 친 것과 저장될 이름이 다를 때만 선다(「Design Review」 → #design-review).
+  const savedName = shownIssue === null ? normalizeChannelName(shownName) : null;
+  const previewName = savedName !== null && savedName !== shownName ? savedName : null;
+  const previewParts = (() => {
+    if (previewName === null) return null;
+    const [before = "", after = ""] = formatMessage("channels.nameRule.preview", {
+      name: PREVIEW_NAME_MARK,
+    }).split(PREVIEW_NAME_MARK);
+    return { name: previewName, before, after };
+  })();
+  // 이 자리에 설 수 있는 문장 전부(줄 수가 가장 긴 것이 자리의 높이를 정한다). 409 문장은 코어가 말하는 그대로다.
+  const nameReserve = [
+    hint,
+    ...(Object.keys(CHANNEL_NAME_ISSUE_KEYS) as ChannelNameIssue[]).map(issueMessage),
+    formatMessage(CHANNEL_NAME_SERVER_REJECTED_KEY),
+    createChannelFailure(new ApiError(409, "")).message,
+    ...(serverNameError !== null ? [serverNameError] : []),
+  ].filter((text, at, all) => all.indexOf(text) === at);
   const topicError =
     topicIssue !== null && (attempted || topic.trim() !== "")
       ? channelTopicIssueMessage(topicIssue)
@@ -319,29 +418,40 @@ function CreateChannelPanel({
             첫 tabbable이라, 보이는 순서와 Tab 순서와 시작 위치가 하나로 맞는다.
             공개 범위가 위에 있던 동안에는 정방향 Tab이 액션 버튼을 지나야 그
             선택지에 닿았다. 순서는 mac 시트(이름, 주제)를 잇는다. */}
-        <DialogField
-          label="채널 이름"
-          htmlFor="create-channel-name"
-          hint="영문, 숫자, 하이픈, 밑줄로 80자 이내, 처음과 끝은 영문이나 숫자. 대문자는 소문자로 저장돼요."
-          error={nameError}
-        >
+        <div className="flex min-w-0 flex-col gap-1">
+          <label htmlFor="create-channel-name" className="text-meta text-ink-muted">
+            채널 이름
+          </label>
           <Input
             id="create-channel-name"
             ref={nameRef}
             name="name"
             value={name}
             onChange={onInput("name")}
-            placeholder="product-planning"
+            onCompositionStart={(event) => setComposingFrom(event.currentTarget.value)}
+            onCompositionEnd={() => setComposingFrom(null)}
+            placeholder={formatMessage("channels.nameRule.placeholder")}
             autoComplete="off"
             spellCheck={false}
             disabled={pending}
             aria-invalid={nameError ? true : undefined}
             aria-describedby={
-              nameError ? "create-channel-name-error" : "create-channel-name-hint"
+              nameError
+                ? "create-channel-name-error"
+                : previewParts
+                  ? "create-channel-name-preview"
+                  : "create-channel-name-hint"
             }
             data-testid="create-channel-name"
           />
-        </DialogField>
+          <NameStatus
+            fieldId="create-channel-name"
+            hint={hint}
+            preview={previewParts}
+            error={nameError}
+            reserve={nameReserve}
+          />
+        </div>
 
         <DialogField
           label="주제"
