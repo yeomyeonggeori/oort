@@ -8,7 +8,10 @@
 //!
 //! This test scans the server source (`server-rust/{bins,crates}/*/src`, outside `#[cfg(test)]`
 //! modules and comments) for every SQL read of `message` and of the content copies that are read by
-//! id (`message_unfurl`, `attachment`, `attachment_media`), keyed by file, enclosing item and table,
+//! id (`message_unfurl`, `attachment`, `attachment_media`) — a table named after `FROM`, `JOIN`,
+//! `TABLE` or `UPDATE` (with `ONLY`, a `public.` schema or double quotes), each table of a
+//! comma-separated `FROM` list, across a line break inside a (raw) string or between the pieces of
+//! a `concat!` — keyed by file, enclosing item and table,
 //! and holds the result **equal** to the table [`PATHS`]: a read with no row is red, a row whose read
 //! is gone is red, a changed count is red. Every row carries a class and the reason it is covered.
 //! The other copies (tables that reference `message` by a foreign key, and the definer functions
@@ -19,7 +22,7 @@
 //! | proof | test |
 //! |---|---|
 //! | every read in the source has a row, every row has a read, counts equal | `every_message_read_in_the_server_source_is_classified` |
-//! | an unclassified read (also one split across a line continuation) turns the comparison red; comments, test modules and look-alike tables do not count | `an_unclassified_read_turns_the_inventory_red` |
+//! | an unclassified read (also one split across a line continuation) turns the comparison red; comments, test modules and look-alike tables do not count; each wider shape is one read, and a table name passed as a `format!` argument (or chosen at run time) is not seen | `an_unclassified_read_turns_the_inventory_red` |
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -59,6 +62,7 @@ const PATHS: &[(&str, &str, &str, usize, Class, &str)] = &[
     ("bins/momo-relay/src/audience.rs", "APPROVAL_CARD_SEQ_SQL", "message", 1, Machine, "relay: the seq of a room frame's target, never sent (D17)"),
     ("bins/momo-relay/src/audience.rs", "MESSAGE_SEQ_SQL", "message", 1, Machine, "relay: the seq of a room frame's target, never sent (D17)"),
     ("bins/momo-relay/src/audience.rs", "SESSION_CARD_SEQ_SQL", "message", 1, Machine, "relay: the seq of a room frame's target, never sent (D17)"),
+    ("bins/momo-server/src/routes/expressions.rs", "replace_candidate", "message", 1, Write, "expression candidate props on the caller's own card"),
     ("bins/momo-server/src/routes/work_controls.rs", "card_thread_root_in_tx", "message", 1, Floor, "work control route"),
     ("bins/momo-server/src/routes/work_instructions.rs", "replay_in_tx", "message", 2, Floor, "work instruction route"),
     ("bins/momo-server/src/routes/work_sessions.rs", "signed_agent_matches_source_in_tx", "message", 1, Floor, "signed host or agent check in a work-session route"),
@@ -96,9 +100,10 @@ const PATHS: &[(&str, &str, &str, usize, Class, &str)] = &[
     ("crates/momo-messaging/src/agent_avatar.rs", "find_visible_image_attachment_in_tx", "message", 1, Machine, "Agent Port"),
     ("crates/momo-messaging/src/agent_avatar.rs", "requester_of_run_in_tx", "message", 1, Machine, "Agent Port and agent tools"),
     ("crates/momo-messaging/src/agent_picture.rs", "agent_picture_binding_in_tx", "message", 1, Machine, "agent picture"),
+    ("crates/momo-messaging/src/approval_card.rs", "settle_approval_card_in_tx", "message", 1, Write, "approval card settle; returns ids only"),
     ("crates/momo-messaging/src/attachment.rs", "PAGED_ATTACHMENT_JOIN", "attachment", 1, Gated, "joined onto a page of readable messages"),
     ("crates/momo-messaging/src/attachment.rs", "PAGED_ATTACHMENT_JOIN", "attachment_media", 1, Gated, "joined onto a page of readable messages"),
-    ("crates/momo-messaging/src/attachment.rs", "link_attachments_in_tx", "attachment", 1, Write, "binding the sender's uploads"),
+    ("crates/momo-messaging/src/attachment.rs", "link_attachments_in_tx", "attachment", 2, Write, "binding the sender's uploads"),
     ("crates/momo-messaging/src/attachment.rs", "load_attachment_in_tx", "attachment", 1, Write, "the uploader's own file"),
     ("crates/momo-messaging/src/attachment.rs", "load_readable_attachment_in_tx", "attachment", 1, Floor, "LEFT JOIN message in the same statement"),
     ("crates/momo-messaging/src/attachment.rs", "load_readable_attachment_in_tx", "message", 1, Floor, "content and poster routes"),
@@ -107,6 +112,7 @@ const PATHS: &[(&str, &str, &str, usize, Class, &str)] = &[
     ("crates/momo-messaging/src/attachment.rs", "message_attachments_in_tx", "message", 1, Write, "projection of a message just written"),
     ("crates/momo-messaging/src/attachment.rs", "message_attachments_without_media_in_tx", "attachment", 1, Write, "projection of a message just written"),
     ("crates/momo-messaging/src/attachment.rs", "message_attachments_without_media_in_tx", "message", 1, Write, "projection of a message just written"),
+    ("crates/momo-messaging/src/attachment.rs", "settle_upload_in_tx", "attachment", 2, Write, "the uploader's own upload status"),
     ("crates/momo-messaging/src/attachment_media.rs", "load_poster_in_tx", "attachment_media", 1, Gated, "after load_readable_attachment_in_tx"),
     ("crates/momo-messaging/src/attachment_media.rs", "set_attachment_media_in_tx", "attachment_media", 1, Write, "the uploader's unsent file"),
     ("crates/momo-messaging/src/attachment_reclaim.rs", "candidate_ids_sql", "attachment", 1, Machine, "reclaim sweeper"),
@@ -119,12 +125,14 @@ const PATHS: &[(&str, &str, &str, usize, Class, &str)] = &[
     ("crates/momo-messaging/src/inbox.rs", "VISIBLE_FROM_WHERE", "message", 2, Floor, "inbox list and count"),
     ("crates/momo-messaging/src/interaction.rs", "channel_pins", "message", 1, Floor, "pin list"),
     ("crates/momo-messaging/src/interaction.rs", "channel_reaction_snapshot", "message", 1, Floor, "reaction list"),
-    ("crates/momo-messaging/src/interaction.rs", "delete_message_in_tx", "message", 1, Write, "delete target"),
+    ("crates/momo-messaging/src/interaction.rs", "delete_message_in_tx", "message", 2, Write, "delete target"),
+    ("crates/momo-messaging/src/interaction.rs", "edit_message_in_tx", "message", 1, Write, "edit write after lock_message_in_tx"),
     ("crates/momo-messaging/src/interaction.rs", "lock_message_in_tx", "message", 1, Write, "edit, reaction and pin target"),
     ("crates/momo-messaging/src/interaction.rs", "message_props_in_tx", "message", 1, Write, "card props write"),
     ("crates/momo-messaging/src/interaction.rs", "open_stream_message_for_run_in_tx", "message", 1, Floor, "agent run stream; also read by the deliver and message routes"),
     ("crates/momo-messaging/src/interaction.rs", "reread_interaction_in_tx", "message", 1, Write, "re-read after a write"),
     ("crates/momo-messaging/src/interaction.rs", "set_pin_in_tx", "message", 1, Write, "pin target"),
+    ("crates/momo-messaging/src/interaction.rs", "stream_message_body_in_tx", "message", 1, Write, "an agent run writing its own message"),
     ("crates/momo-messaging/src/memory.rs", "attach_evidence", "message", 1, Floor, "memory route; a human 1:1 is not memory-eligible"),
     ("crates/momo-messaging/src/memory.rs", "evidence_for_digests_in_tx", "message", 1, Floor, "memory route"),
     ("crates/momo-messaging/src/memory.rs", "evidence_for_items_in_tx", "message", 1, Floor, "memory route"),
@@ -138,9 +146,11 @@ const PATHS: &[(&str, &str, &str, usize, Class, &str)] = &[
     ("crates/momo-messaging/src/message.rs", "find_message_in_tx", "message", 1, Floor, "approval and mention routes"),
     ("crates/momo-messaging/src/message.rs", "insert_message_in_tx", "message", 1, Write, "send retry re-read (409 below the floor)"),
     ("crates/momo-messaging/src/message.rs", "list_messages", "message", 1, Floor, "history"),
+    ("crates/momo-messaging/src/message.rs", "patch_and_prune_message_props_in_tx", "message", 1, Write, "card props write"),
+    ("crates/momo-messaging/src/message.rs", "patch_message_props_in_tx", "message", 1, Write, "card props write"),
     ("crates/momo-messaging/src/message.rs", "thread_replies_sql", "message", 1, Floor, "thread replies"),
     ("crates/momo-messaging/src/message.rs", "thread_root_state_in_tx", "message", 1, Write, "reply root check (404 below the floor)"),
-    ("crates/momo-messaging/src/read_state.rs", "record_mentions_in_tx", "message", 1, Write, "quoted author at send"),
+    ("crates/momo-messaging/src/read_state.rs", "record_mentions_in_tx", "message", 2, Write, "quoted author and mention list at send"),
     ("crates/momo-messaging/src/read_state.rs", "update_read_cursor_with_intent_in_tx", "message", 2, Floor, "mention recount on read"),
     ("crates/momo-messaging/src/reminder.rs", "authorize_reminder_message_in_tx", "message", 1, Write, "reminder target"),
     ("crates/momo-messaging/src/scheduled.rs", "reserve_attachments_in_tx", "attachment", 1, Write, "the author's own schedule"),
@@ -153,9 +163,11 @@ const PATHS: &[(&str, &str, &str, usize, Class, &str)] = &[
     ("crates/momo-messaging/src/thread_follow.rs", "thread_follow_views_in_tx", "message", 1, Floor, "followed thread list"),
     ("crates/momo-push/src/judgment.rs", "judge_targets_for_source", "message", 4, Machine, "notifier; a push carries ids only"),
     ("crates/momo-push/src/refine.rs", "refine_targets", "message", 1, Floor, "notifier and the presence route"),
+    ("crates/momo-t3/src/display_control.rs", "stamp_control_window_on_cards_in_tx", "message", 1, Write, "work card stamp; returns ids only"),
     ("crates/momo-t3/src/lifecycle.rs", "create_local_pty_work_session_with_id_in_tx", "message", 1, Write, "work session create"),
     ("crates/momo-t3/src/lifecycle.rs", "create_work_session_with_id_in_tx", "message", 1, Write, "work session create"),
     ("crates/momo-t3/src/lifecycle.rs", "lock_work_session_detail_in_tx", "message", 1, Write, "work session lock"),
+    ("crates/momo-t3/src/lifecycle.rs", "update_session_card_props_in_tx", "message", 1, Write, "work card props write"),
     ("crates/momo-t3/src/reattach.rs", "list_session_events_in_tx", "message", 1, Floor, "session events"),
     ("crates/momo-t3/src/reattach.rs", "load_session_reattach_state_in_tx", "message", 1, Floor, "session reattach"),
     ("crates/momo-t3/src/reattach.rs", "reattach_columns", "message", 1, Floor, "session reattach"),
@@ -166,6 +178,7 @@ const PATHS: &[(&str, &str, &str, usize, Class, &str)] = &[
     ("crates/momo-unfurl/src/store.rs", "load_message", "message", 1, Machine, "unfurl worker"),
     ("crates/momo-unfurl/src/store.rs", "load_unfurl_in_tx", "message", 1, Floor, "card picture and icon (D17)"),
     ("crates/momo-unfurl/src/store.rs", "load_unfurl_in_tx", "message_unfurl", 1, Floor, "EXISTS message in the same statement"),
+    ("crates/momo-unfurl/src/store.rs", "record_measured_size", "message_unfurl", 1, Write, "measured picture size after load_unfurl_in_tx; returns nothing"),
     ("crates/momo-workspace-actions/src/action_resolve.rs", "resolve_pin_target_scoped_in_tx", "attachment", 2, Floor, "the same statement joins message"),
     ("crates/momo-workspace-actions/src/action_resolve.rs", "resolve_pin_target_scoped_in_tx", "message", 1, Floor, "workspace action target"),
     ("crates/momo-workspace-actions/src/team_ai.rs", "recent_requests_by_in_tx", "message", 1, Machine, "team AI"),
@@ -218,13 +231,84 @@ fn is_word(byte: u8) -> bool {
     byte.is_ascii_alphanumeric() || byte == b'_'
 }
 
-/// Tracked tables named right after a `FROM` or `JOIN` keyword and whitespace, in one (already
-/// joined) line. `String::from(message)` is not a read: the keyword must be followed by whitespace.
+/// The keywords a table reference follows. `UPDATE` reads the rows its `WHERE`/`RETURNING` touch
+/// (the `SELECT` policy applies), `TABLE x` is `SELECT * FROM x`.
+const TABLE_KEYWORDS: &[&str] = &["from", "join", "table", "update"];
+
+/// A table reference starting at `cursor`: an optional `ONLY`, an optional `public.` schema, and
+/// the name, each optionally double-quoted (`"message"`, also escaped as `\"message\"` inside a Rust
+/// string). Returns the name (lower case, unquoted) and where it ends.
+fn table_ref(lower: &str, mut cursor: usize) -> Option<(String, usize)> {
+    let bytes = lower.as_bytes();
+    let skip_space = |mut at: usize| {
+        while at < bytes.len() && bytes[at].is_ascii_whitespace() {
+            at += 1;
+        }
+        at
+    };
+    let word = |at: usize| -> (String, usize) {
+        let mut at = at;
+        while at < bytes.len() && (bytes[at] == b'\\' || bytes[at] == b'"') {
+            at += 1;
+        }
+        let end = (at..bytes.len())
+            .find(|&i| !is_word(bytes[i]))
+            .unwrap_or(bytes.len());
+        let name = lower[at..end].to_string();
+        let mut after = end;
+        while after < bytes.len() && (bytes[after] == b'\\' || bytes[after] == b'"') {
+            after += 1;
+        }
+        (name, after)
+    };
+    cursor = skip_space(cursor);
+    let (mut name, mut end) = word(cursor);
+    if name == "only" {
+        let (next, next_end) = word(skip_space(end));
+        name = next;
+        end = next_end;
+    }
+    if name == "public" && bytes.get(end) == Some(&b'.') {
+        let (next, next_end) = word(end + 1);
+        name = next;
+        end = next_end;
+    }
+    (!name.is_empty()).then_some((name, end))
+}
+
+/// Skip a balanced `( … )` at `at` (a function call or a subquery in a `FROM` list).
+fn skip_parens(bytes: &[u8], mut at: usize) -> usize {
+    let mut depth = 0i32;
+    while at < bytes.len() {
+        match bytes[at] {
+            b'(' => depth += 1,
+            b')' => {
+                depth -= 1;
+                if depth == 0 {
+                    return at + 1;
+                }
+            }
+            _ => {}
+        }
+        at += 1;
+    }
+    at
+}
+
+/// Tracked tables in one (already joined) line: named right after `FROM`, `JOIN`, `TABLE` or
+/// `UPDATE` (with `ONLY`, a `public.` schema or double quotes), and every further table of a
+/// comma-separated `FROM` list (`FROM channel c, message m`). `String::from(message)` is not a read:
+/// the keyword must be followed by whitespace.
 fn reads_in(line: &str) -> Vec<&'static str> {
     let lower = line.to_ascii_lowercase();
     let bytes = lower.as_bytes();
     let mut found = Vec::new();
-    for keyword in ["from", "join"] {
+    let mut push = |name: &str| {
+        if let Some(tracked) = TRACKED.iter().find(|tracked| **tracked == name) {
+            found.push(*tracked);
+        }
+    };
+    for keyword in TABLE_KEYWORDS {
         let mut start = 0;
         while let Some(offset) = lower[start..].find(keyword) {
             let at = start + offset;
@@ -232,26 +316,215 @@ fn reads_in(line: &str) -> Vec<&'static str> {
             if at > 0 && is_word(bytes[at - 1]) {
                 continue;
             }
-            let mut cursor = start;
-            while cursor < bytes.len() && bytes[cursor].is_ascii_whitespace() {
-                cursor += 1;
-            }
-            if cursor == start {
+            if start >= bytes.len() || !bytes[start].is_ascii_whitespace() {
                 continue;
             }
-            if lower[cursor..].starts_with("public.") {
-                cursor += "public.".len();
+            let Some((name, mut end)) = table_ref(&lower, start) else {
+                continue;
+            };
+            push(&name);
+            if *keyword != "from" {
+                continue;
             }
-            let end = (cursor..bytes.len())
-                .find(|&i| !is_word(bytes[i]))
-                .unwrap_or(bytes.len());
-            let table = &lower[cursor..end];
-            if let Some(tracked) = TRACKED.iter().find(|tracked| **tracked == table) {
-                found.push(*tracked);
+            // A comma-separated FROM list: after each reference (a call or subquery in parentheses,
+            // an optional `AS` alias and column list), a comma starts the next reference.
+            loop {
+                let mut at = end;
+                while at < bytes.len() && bytes[at].is_ascii_whitespace() {
+                    at += 1;
+                }
+                if bytes.get(at) == Some(&b'(') {
+                    at = skip_parens(bytes, at);
+                }
+                let (alias, alias_end) = table_ref(&lower, at).unwrap_or_default();
+                if alias == "as" {
+                    at = table_ref(&lower, alias_end).map_or(alias_end, |(_, e)| e);
+                } else if !alias.is_empty()
+                    && !matches!(
+                        alias.as_str(),
+                        "where"
+                            | "join"
+                            | "left"
+                            | "right"
+                            | "inner"
+                            | "full"
+                            | "cross"
+                            | "on"
+                            | "group"
+                            | "order"
+                            | "limit"
+                            | "for"
+                            | "union"
+                            | "natural"
+                            | "lateral"
+                            | "returning"
+                            | "having"
+                            | "window"
+                            | "offset"
+                    )
+                {
+                    at = alias_end;
+                }
+                while at < bytes.len() && bytes[at].is_ascii_whitespace() {
+                    at += 1;
+                }
+                if bytes.get(at) == Some(&b'(') {
+                    at = skip_parens(bytes, at);
+                    while at < bytes.len() && bytes[at].is_ascii_whitespace() {
+                        at += 1;
+                    }
+                }
+                if bytes.get(at) != Some(&b',') {
+                    break;
+                }
+                let Some((next, next_end)) = table_ref(&lower, at + 1) else {
+                    break;
+                };
+                if next == "lateral" {
+                    break;
+                }
+                push(&next);
+                end = next_end;
             }
         }
     }
     found
+}
+
+/// Where a source line ends, lexically: in code, inside a `"…"` string, or inside a raw string
+/// `r#…"…"#…` (with its number of `#`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Lex {
+    Code,
+    Str,
+    Raw(usize),
+}
+
+/// The lexical state at the end of `line`, starting from `state`. A `//` comment in code ends the
+/// line; char literals (`'"'`) and lifetimes are not strings.
+fn lex_line(line: &str, mut state: Lex) -> Lex {
+    let bytes = line.as_bytes();
+    let mut at = 0;
+    while at < bytes.len() {
+        match state {
+            Lex::Str => match bytes[at] {
+                b'\\' => at += 2,
+                b'"' => {
+                    state = Lex::Code;
+                    at += 1;
+                }
+                _ => at += 1,
+            },
+            Lex::Raw(hashes) => {
+                if bytes[at] == b'"'
+                    && bytes.len() >= at + 1 + hashes
+                    && bytes[at + 1..at + 1 + hashes].iter().all(|b| *b == b'#')
+                {
+                    state = Lex::Code;
+                    at += 1 + hashes;
+                } else {
+                    at += 1;
+                }
+            }
+            Lex::Code => match bytes[at] {
+                b'/' if bytes.get(at + 1) == Some(&b'/') => return Lex::Code,
+                b'"' => {
+                    state = Lex::Str;
+                    at += 1;
+                }
+                b'r' if (at == 0 || !is_word(bytes[at - 1]))
+                    && matches!(bytes.get(at + 1), Some(b'"') | Some(b'#')) =>
+                {
+                    let mut hashes = 0;
+                    let mut cursor = at + 1;
+                    while bytes.get(cursor) == Some(&b'#') {
+                        hashes += 1;
+                        cursor += 1;
+                    }
+                    if bytes.get(cursor) == Some(&b'"') {
+                        state = Lex::Raw(hashes);
+                        at = cursor + 1;
+                    } else {
+                        at += 1;
+                    }
+                }
+                b'\'' => {
+                    // '"', '\'' and '\\' are char literals; anything else here is a lifetime.
+                    if bytes.get(at + 1) == Some(&b'\\') {
+                        at += 2;
+                        while at < bytes.len() && bytes[at] != b'\'' {
+                            at += 1;
+                        }
+                        at += 1;
+                    } else if bytes.get(at + 2) == Some(&b'\'') {
+                        at += 3;
+                    } else {
+                        at += 1;
+                    }
+                }
+                _ => at += 1,
+            },
+        }
+    }
+    state
+}
+
+/// Does `text` end with a keyword a table name follows (at a word boundary)?
+fn ends_with_keyword(text: &str) -> bool {
+    let tail = text.trim_end().to_ascii_lowercase();
+    TABLE_KEYWORDS.iter().chain(["only"].iter()).any(|keyword| {
+        tail.ends_with(keyword)
+            && tail[..tail.len() - keyword.len()]
+                .bytes()
+                .last()
+                .is_none_or(|b| !is_word(b))
+    })
+}
+
+/// Is the table name of this line's last SQL keyword on the next line? Either the line ends inside
+/// a (raw) string right after the keyword, or a string closes right after it (`"… FROM ",` — the
+/// next piece of a `concat!` or of an adjacent literal).
+fn continues_on_next_line(line: &str, end: Lex) -> bool {
+    let text = line.trim_end().trim_end_matches('\\');
+    match end {
+        Lex::Str | Lex::Raw(_) => ends_with_keyword(text),
+        Lex::Code => {
+            let before = text.trim_end_matches(',').trim_end();
+            before
+                .strip_suffix('"')
+                .is_some_and(|inside| !inside.ends_with('\\') && ends_with_keyword(inside))
+        }
+    }
+}
+
+/// The gap between two Rust string literals of one SQL text (`"… FROM ", "message …"` in a
+/// `concat!`, or `"… FROM " "message"` once two lines are joined) read as one space.
+fn close_literal_gaps(line: &str) -> String {
+    let bytes = line.as_bytes();
+    let mut out = String::with_capacity(line.len());
+    let mut index = 0;
+    while index < bytes.len() {
+        if bytes[index] == b'"' && (index == 0 || bytes[index - 1] != b'\\') {
+            let mut next = index + 1;
+            while next < bytes.len() && bytes[next].is_ascii_whitespace() {
+                next += 1;
+            }
+            if next < bytes.len() && bytes[next] == b',' {
+                next += 1;
+                while next < bytes.len() && bytes[next].is_ascii_whitespace() {
+                    next += 1;
+                }
+            }
+            if next > index + 1 && next < bytes.len() && bytes[next] == b'"' {
+                out.push(' ');
+                index = next + 1;
+                continue;
+            }
+        }
+        out.push(bytes[index] as char);
+        index += 1;
+    }
+    out
 }
 
 /// Every tracked read of one source file, by enclosing item and table. A string continued with a
@@ -264,13 +537,19 @@ fn scan_source(text: &str) -> BTreeMap<(String, String), usize> {
     let mut skip_until: Option<i64> = None;
     let mut cfg_test = false;
     let mut index = 0;
+    let mut lex = Lex::Code;
     while index < raw.len() {
         let mut line = raw[index].to_string();
-        while line.trim_end().ends_with('\\') && index + 1 < raw.len() {
+        lex = lex_line(raw[index], lex);
+        while (line.trim_end().ends_with('\\') || continues_on_next_line(&line, lex))
+            && index + 1 < raw.len()
+        {
             index += 1;
+            lex = lex_line(raw[index], lex);
             let kept = line.trim_end().trim_end_matches('\\').to_string();
             line = format!("{kept} {}", raw[index].trim());
         }
+        let line = close_literal_gaps(&line);
         index += 1;
         let trimmed = line.trim();
         let opens = line.matches('{').count() as i64;
@@ -459,6 +738,59 @@ fn an_unclassified_read_turns_the_inventory_red() {
     let problems = differences(&found, &listed);
     assert_eq!(problems.len(), 3, "{problems:#?}");
     assert!(problems.iter().all(|p| p.starts_with("unclassified")));
+
+    // The other shapes a read can take: a comma join, `ONLY` with a quoted name, the pieces of a
+    // `concat!`, a raw string split after `FROM`, `UPDATE … RETURNING`, `TABLE x`, and a copy table in
+    // a comma join. A table name passed as a `format!` argument is NOT seen — the claim's scope
+    // says so, and this control pins that limit.
+    let shapes = r##"
+pub async fn comma_join_in_tx() {
+    sqlx::query("SELECT m.body FROM channel c, message m WHERE m.channel_id = c.id");
+}
+pub fn only_and_quoted() {
+    let _ = "SELECT body FROM ONLY \"message\" WHERE id = $1";
+}
+pub fn split_concat() {
+    let _ = concat!(
+        "SELECT title FROM ",
+        "message_unfurl WHERE id = $1",
+    );
+}
+pub fn raw_multiline() {
+    let _ = r#"SELECT a.name
+        FROM
+        attachment a"#;
+}
+pub fn update_returning() {
+    let _ = "UPDATE message SET body = $2 WHERE id = $1 RETURNING body";
+}
+pub fn table_statement() {
+    let _ = "TABLE attachment_media";
+}
+pub fn copy_in_a_list() {
+    let _ = "SELECT a.name FROM unnest($1::uuid[]) AS r (id), attachment a WHERE a.id = r.id";
+}
+pub fn format_argument() {
+    let _ = format!("SELECT body FROM {} WHERE id = $1", "message");
+}
+"##;
+    let expected: BTreeMap<(String, String), usize> = [
+        (("comma_join_in_tx", "message"), 1),
+        (("only_and_quoted", "message"), 1),
+        (("split_concat", "message_unfurl"), 1),
+        (("raw_multiline", "attachment"), 1),
+        (("update_returning", "message"), 1),
+        (("table_statement", "attachment_media"), 1),
+        (("copy_in_a_list", "attachment"), 1),
+    ]
+    .into_iter()
+    .map(|((item, table), n)| ((item.to_string(), table.to_string()), n))
+    .collect();
+    assert_eq!(
+        scan_source(shapes),
+        expected,
+        "each shape is one read; a format argument is not seen"
+    );
 
     // A read that disappears leaves a stale row, and a second read in a listed function changes
     // its count: both are red too.
