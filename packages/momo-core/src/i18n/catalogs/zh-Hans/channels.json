@@ -9,5 +9,11 @@
   "channels.dmLeave.confirm": "退出",
   "channels.dmLeave.busy": "正在退出…",
   "channels.dmLeave.done": "你已退出对话。",
-  "channels.dmLeave.failed": "无法退出。请重试。"
+  "channels.dmLeave.failed": "无法退出。请重试。",
+  "channels.nameRule.required": "请输入频道名称。",
+  "channels.nameRule.tooLong": "频道名称最多 {max, number} 个字符。",
+  "channels.nameRule.hidden": "名称中含有不可见字符。请清空后重新输入。",
+  "channels.nameRule.unsupported": "只能使用文字、数字、连字符（-）和下划线（_）。",
+  "channels.nameRule.edge": "名称必须以文字或数字开头和结尾。连字符和下划线只能放在中间。",
+  "channels.nameRule.serverRejected": "服务器不接受这个名称。只能使用文字、数字、- 和 _。"
 }

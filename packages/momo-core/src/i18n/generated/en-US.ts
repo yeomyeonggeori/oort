@@ -1248,6 +1248,51 @@ export const catalog: MessageCatalog = {
       "value": "Couldn't leave. Please try again."
     }
   ],
+  "channels.nameRule.edge": [
+    {
+      "type": 0,
+      "value": "The name must start and end with a letter or number. Hyphens and underscores can only go in the middle."
+    }
+  ],
+  "channels.nameRule.hidden": [
+    {
+      "type": 0,
+      "value": "The name contains invisible characters. Clear it and type the name again."
+    }
+  ],
+  "channels.nameRule.required": [
+    {
+      "type": 0,
+      "value": "Enter a channel name."
+    }
+  ],
+  "channels.nameRule.serverRejected": [
+    {
+      "type": 0,
+      "value": "The server did not accept this name. Use only letters, numbers, - and _."
+    }
+  ],
+  "channels.nameRule.tooLong": [
+    {
+      "type": 0,
+      "value": "Channel names can be up to "
+    },
+    {
+      "type": 2,
+      "value": "max",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": " characters."
+    }
+  ],
+  "channels.nameRule.unsupported": [
+    {
+      "type": 0,
+      "value": "Use only letters, numbers, hyphens (-) and underscores (_)."
+    }
+  ],
   "common.feedback.unavailable": [
     {
       "type": 0,

@@ -92,5 +92,50 @@ export const catalog: MessageCatalog = {
       "type": 0,
       "value": "無法退出。請再試一次。"
     }
+  ],
+  "channels.nameRule.edge": [
+    {
+      "type": 0,
+      "value": "名稱必須以文字或數字開頭和結尾。連字號和底線只能放在中間。"
+    }
+  ],
+  "channels.nameRule.hidden": [
+    {
+      "type": 0,
+      "value": "名稱中含有看不見的字元。請清空後重新輸入。"
+    }
+  ],
+  "channels.nameRule.required": [
+    {
+      "type": 0,
+      "value": "請輸入頻道名稱。"
+    }
+  ],
+  "channels.nameRule.serverRejected": [
+    {
+      "type": 0,
+      "value": "伺服器不接受這個名稱。只能使用文字、數字、- 和 _。"
+    }
+  ],
+  "channels.nameRule.tooLong": [
+    {
+      "type": 0,
+      "value": "頻道名稱最多 "
+    },
+    {
+      "type": 2,
+      "value": "max",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": " 個字元。"
+    }
+  ],
+  "channels.nameRule.unsupported": [
+    {
+      "type": 0,
+      "value": "只能使用文字、數字、連字號（-）和底線（_）。"
+    }
   ]
 };

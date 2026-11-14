@@ -9,5 +9,11 @@
   "channels.dmLeave.confirm": "Salir",
   "channels.dmLeave.busy": "Saliendo…",
   "channels.dmLeave.done": "Saliste de la conversación.",
-  "channels.dmLeave.failed": "No se pudo salir. Vuelve a intentarlo."
+  "channels.dmLeave.failed": "No se pudo salir. Vuelve a intentarlo.",
+  "channels.nameRule.required": "Escribe un nombre para el canal.",
+  "channels.nameRule.tooLong": "El nombre del canal puede tener hasta {max, number} caracteres.",
+  "channels.nameRule.hidden": "El nombre contiene caracteres invisibles. Bórralo y vuelve a escribirlo.",
+  "channels.nameRule.unsupported": "Solo se pueden usar letras, números, guiones (-) y guiones bajos (_).",
+  "channels.nameRule.edge": "El nombre debe empezar y terminar con una letra o un número. Los guiones y guiones bajos solo van en medio.",
+  "channels.nameRule.serverRejected": "El servidor no aceptó este nombre. Solo se pueden usar letras, números, - y _."
 }
