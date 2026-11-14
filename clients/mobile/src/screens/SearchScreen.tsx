@@ -24,6 +24,8 @@ import {InputPill} from '../design/sheetParts';
 import {useStyles} from '../design/theme';
 import {font, radius, SAFE_GUTTER, space, TOUCH_TARGET, type Palette} from '../design/tokens';
 import {useFormatMessage} from '../i18n/useFormatMessage';
+import {useLocaleService} from '../i18n/useLocaleService';
+import {compareChannelNames} from '@momo/core/features/channels/nameCollation';
 import {ConversationPickerSheet, type PickerItem} from '../features/search/ConversationPickerSheet';
 import {
   matchChannels,
@@ -122,6 +124,8 @@ export default function SearchScreen({
 }): React.JSX.Element {
   const {workspaceId, member} = useSession();
   const formatMessage = useFormatMessage();
+  const displayLocale = useLocaleService().context.messageLocale;
+  const byChannelName = useMemo(() => compareChannelNames(displayLocale), [displayLocale]);
   const [kind, setKind] = useState<SearchKind>('all');
   const [scopeId, setScopeId] = useState<string | null>(null);
   const [pickerOpen, setPickerOpen] = useState(false);
@@ -154,8 +158,8 @@ export default function SearchScreen({
 
   const trimmed = search.query.trim();
   const channelMatches = useMemo(
-    () => (trimmed === '' ? [] : matchChannels(groups.channels, trimmed)),
-    [groups.channels, trimmed],
+    () => (trimmed === '' ? [] : matchChannels(groups.channels, trimmed, displayLocale)),
+    [groups.channels, trimmed, displayLocale],
   );
   const peopleMatches = useMemo(
     () => (trimmed === '' ? [] : matchPeople(directory.members, member.id, trimmed)),
@@ -189,7 +193,7 @@ export default function SearchScreen({
         kind: channel.kind === 'private' ? ('private' as const) : ('channel' as const),
         peerId: null,
       }))
-      .sort((a, b) => a.title.localeCompare(b.title, 'ko'));
+      .sort((a, b) => byChannelName(a.title, b.title));
     const dms: PickerItem[] = groups.dms
       .map(dm => {
         const peer = dmPeer(dm, directory, member.id);
@@ -203,7 +207,7 @@ export default function SearchScreen({
       })
       .sort((a, b) => a.title.localeCompare(b.title, 'ko'));
     return [...channels, ...dms];
-  }, [groups, directory, member.id, formatMessage]);
+  }, [groups, directory, member.id, formatMessage, byChannelName]);
 
   const scope = useMemo(() => {
     if (scopeId === null) return null;

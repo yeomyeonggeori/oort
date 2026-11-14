@@ -246,6 +246,19 @@ describe("`#` 채널 자동완성 (#1930)", () => {
     expect(matchChannels(CHANNELS, "옛채널")).toEqual([]);
   });
 
+  // ADR-0225 D12: 「디자인」을 치는 입력기의 중간 상태에서도 줄이 남는다.
+  it.each(["디", "디ㅈ", "디자", "디장", "디자이", "디자인"])(
+    "한글 조합 중 `%s` 에서도 「디자인」 채널이 남고, 무관한 「디저트」는 `디자`부터 빠진다",
+    (query) => {
+      const hangul = ["디자인", "디저트"].map(
+        (name, i) => ({ ...CHANNELS[0], id: `h${i}`, name }) as Channel
+      );
+      const names = matchChannels(hangul, query).map((c) => c.name);
+      expect(names).toContain("디자인");
+      expect(names.includes("디저트")).toBe(query === "디" || query === "디ㅈ");
+    }
+  );
+
   it("대소문자를 가리지 않고 부분 일치로 좁힌다", () => {
     expect(matchChannels(CHANNELS, "RELEASE").map((c) => c.name)).toEqual([
       "release-notes",
