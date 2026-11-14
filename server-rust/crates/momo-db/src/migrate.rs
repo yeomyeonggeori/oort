@@ -839,12 +839,16 @@ mod tests {
     /// 181 is #5823's partial index for that policy: `membership (member_id) WHERE history_from_seq
     /// IS NOT NULL`, so the policy's 「channels where the requester has a floor」 set is an index scan
     /// over the rows that have one. No new table, policy or grant.
+    ///
+    /// 182 is #5857's partial index for the relay's floor judgment (ADR-0177 증보 D17): `membership
+    /// (channel_id) WHERE history_from_seq IS NOT NULL`, so 「does this room have a floor?」 is an index
+    /// probe over the rows that have one. No new table, policy or grant.
     #[test]
-    fn discovers_contiguous_migrations_001_to_181() {
+    fn discovers_contiguous_migrations_001_to_182() {
         let dir = default_migrations_dir();
         let migrations = discover_migrations(&dir).expect("migrations directory readable");
 
-        let expected: Vec<i64> = (1..=181).collect();
+        let expected: Vec<i64> = (1..=182).collect();
         let found: Vec<i64> = migrations
             .iter()
             .map(|migration| migration.version)
@@ -852,7 +856,7 @@ mod tests {
         assert_eq!(
             found,
             expected,
-            "expected contiguous 001..=181 under {}",
+            "expected contiguous 001..=182 under {}",
             dir.display()
         );
         assert!(migrations.first().unwrap().name.starts_with("001_init"));
@@ -860,7 +864,7 @@ mod tests {
             .last()
             .unwrap()
             .name
-            .starts_with("181_dm_leave_floor_index"));
+            .starts_with("182_dm_leave_floor_channel_index"));
     }
 
     #[test]

@@ -12,6 +12,7 @@
 
 use chrono::{DateTime, Utc};
 use sqlx::PgPool;
+use uuid::Uuid;
 
 /// A claimed outbox row, flipped to `processing` and ready to publish.
 #[derive(Debug, Clone)]
@@ -21,6 +22,10 @@ pub struct ClaimedRow {
     pub attempts: i32,
     pub payload: String,
     pub created_at: DateTime<Utc>,
+    /// The tenant the row was written in (`outbox.workspace_id`, set inside the writer's RLS
+    /// transaction). The relay judges a room frame against this workspace only, never against one
+    /// named inside the payload (ADR-0177 증보 D17).
+    pub workspace_id: Uuid,
 }
 
 /// Claim up to `batch_size` pending broadcast/webhook rows and flip them to
@@ -29,8 +34,9 @@ pub struct ClaimedRow {
 /// Skeleton: the query is the real ADR-parity claim; the caller loop, publish,
 /// and settlement land in B1.
 pub async fn claim_batch(pool: &PgPool, batch_size: i64) -> Result<Vec<ClaimedRow>, sqlx::Error> {
-    let rows: Vec<ClaimedRow> = sqlx::query_as::<_, (i64, String, i32, String, DateTime<Utc>)>(
-        "WITH claimed AS ( \
+    let rows: Vec<ClaimedRow> =
+        sqlx::query_as::<_, (i64, String, i32, String, DateTime<Utc>, Uuid)>(
+            "WITH claimed AS ( \
              SELECT id FROM outbox \
               WHERE kind IN ('broadcast', 'webhook_delivery') \
                 AND status = 'pending' \
@@ -43,20 +49,23 @@ pub async fn claim_batch(pool: &PgPool, batch_size: i64) -> Result<Vec<ClaimedRo
             SET status = 'processing', attempts = o.attempts + 1 \
            FROM claimed c \
           WHERE o.id = c.id \
-          RETURNING o.id, o.kind::text, o.attempts, o.payload::text, o.created_at",
-    )
-    .bind(batch_size)
-    .fetch_all(pool)
-    .await?
-    .into_iter()
-    .map(|(id, kind, attempts, payload, created_at)| ClaimedRow {
-        id,
-        kind,
-        attempts,
-        payload,
-        created_at,
-    })
-    .collect();
+          RETURNING o.id, o.kind::text, o.attempts, o.payload::text, o.created_at, o.workspace_id",
+        )
+        .bind(batch_size)
+        .fetch_all(pool)
+        .await?
+        .into_iter()
+        .map(
+            |(id, kind, attempts, payload, created_at, workspace_id)| ClaimedRow {
+                id,
+                kind,
+                attempts,
+                payload,
+                created_at,
+                workspace_id,
+            },
+        )
+        .collect();
     Ok(rows)
 }
 
@@ -85,8 +94,9 @@ pub async fn claim_broadcast_batch(
     pool: &PgPool,
     batch_size: i64,
 ) -> Result<Vec<ClaimedRow>, sqlx::Error> {
-    let rows: Vec<ClaimedRow> = sqlx::query_as::<_, (i64, String, i32, String, DateTime<Utc>)>(
-        "WITH claimed AS ( \
+    let rows: Vec<ClaimedRow> =
+        sqlx::query_as::<_, (i64, String, i32, String, DateTime<Utc>, Uuid)>(
+            "WITH claimed AS ( \
              SELECT id FROM outbox \
               WHERE kind = 'broadcast' \
                 AND status = 'pending' \
@@ -99,20 +109,23 @@ pub async fn claim_broadcast_batch(
             SET status = 'processing', attempts = o.attempts + 1 \
            FROM claimed c \
           WHERE o.id = c.id \
-          RETURNING o.id, o.kind::text, o.attempts, o.payload::text, o.created_at",
-    )
-    .bind(batch_size)
-    .fetch_all(pool)
-    .await?
-    .into_iter()
-    .map(|(id, kind, attempts, payload, created_at)| ClaimedRow {
-        id,
-        kind,
-        attempts,
-        payload,
-        created_at,
-    })
-    .collect();
+          RETURNING o.id, o.kind::text, o.attempts, o.payload::text, o.created_at, o.workspace_id",
+        )
+        .bind(batch_size)
+        .fetch_all(pool)
+        .await?
+        .into_iter()
+        .map(
+            |(id, kind, attempts, payload, created_at, workspace_id)| ClaimedRow {
+                id,
+                kind,
+                attempts,
+                payload,
+                created_at,
+                workspace_id,
+            },
+        )
+        .collect();
     Ok(rows)
 }
 

@@ -25,10 +25,16 @@
 //! * **no outbox SQL.** Every statement lives in `momo-outbox`; this crate calls
 //!   its API (invariant #3 stays a single-crate chokepoint).
 //! * **the only Centrifugo writer in the workspace** (invariant #2).
+//! * **one judgment for a room with a read floor** (ADR-0177 증보 D17, [`audience`]):
+//!   a room frame whose target is below a live member's floor goes to the
+//!   personal channels of the members who can see the target instead of the
+//!   room. Nothing else about the row changes.
 
+pub mod audience;
 pub mod centrifugo;
 pub mod config;
 
+use std::collections::HashSet;
 use std::future::Future;
 
 use momo_db::sqlx::postgres::PgListener;
@@ -39,6 +45,9 @@ use momo_outbox::{
 };
 use momo_wire::payload::BroadcastPayload;
 use tokio::sync::mpsc;
+use uuid::Uuid;
+
+use crate::audience::{diverted_data, personal_channel, room_channel_id, Route};
 
 pub use centrifugo::{CentrifugoClient, PublishOutcome};
 pub use config::RelayConfig;
@@ -58,6 +67,9 @@ pub struct DrainStats {
     pub published: usize,
     pub requeued: usize,
     pub failed: usize,
+    /// Of `published`: room frames that went to personal channels instead of the room
+    /// (ADR-0177 증보 D17). A frame with no audience left counts here too.
+    pub diverted: usize,
 }
 
 pub struct Relay {
@@ -103,14 +115,59 @@ impl Relay {
             claimed: claimed.len(),
             ..DrainStats::default()
         };
-        for row in claimed {
-            match self.process(row).await {
+        let decoded: Vec<(ClaimedRow, Result<BroadcastPayload, serde_json::Error>)> = claimed
+            .into_iter()
+            .map(|row| {
+                let payload = serde_json::from_str(&row.payload);
+                (row, payload)
+            })
+            .collect();
+        // ADR-0177 증보 D17: which of this batch's rooms have a live member with a floor, asked once
+        // for the whole batch. Unanswered means unjudged, so the batch goes back (closed, and
+        // loss-free: every row is requeued, none is left in `processing`).
+        let floored = match self.floored_rooms(&decoded).await {
+            Ok(floored) => floored,
+            Err(error) => {
+                tracing::error!(error = %error, "room floor check failed; requeueing the batch");
+                for (row, _) in decoded {
+                    self.settle_transient(&row, &format!("room floor check: {error}"))
+                        .await;
+                    stats.requeued += 1;
+                }
+                return Ok(stats);
+            }
+        };
+        for (row, payload) in decoded {
+            match self.process(row, payload, &floored).await {
                 Settlement::Published => stats.published += 1,
+                Settlement::Diverted => {
+                    stats.published += 1;
+                    stats.diverted += 1;
+                }
                 Settlement::Requeued => stats.requeued += 1,
                 Settlement::Failed => stats.failed += 1,
             }
         }
         Ok(stats)
+    }
+
+    /// The `(workspace, room)` pairs of `rows` with a live member that has a read floor. The
+    /// workspace is the outbox row's own (written inside its tenant transaction), never the one
+    /// spelled in the channel name.
+    async fn floored_rooms(
+        &self,
+        rows: &[(ClaimedRow, Result<BroadcastPayload, serde_json::Error>)],
+    ) -> Result<HashSet<(Uuid, Uuid)>, momo_db::sqlx::Error> {
+        let mut rooms: Vec<(Uuid, Uuid)> = rows
+            .iter()
+            .filter_map(|(row, payload)| {
+                let channel = &payload.as_ref().ok()?.channel;
+                Some((row.workspace_id, room_channel_id(channel)?))
+            })
+            .collect();
+        rooms.sort();
+        rooms.dedup();
+        audience::rooms_with_floor(&self.pool, &rooms).await
     }
 
     /// Drain until a claim comes back short of a full batch (nothing left for
@@ -124,6 +181,7 @@ impl Relay {
                     total.published += stats.published;
                     total.requeued += stats.requeued;
                     total.failed += stats.failed;
+                    total.diverted += stats.diverted;
                     if (stats.claimed as i64) < self.config.claim_batch_size {
                         return total;
                     }
@@ -137,8 +195,13 @@ impl Relay {
     }
 
     /// Publish one claimed row and settle its status.
-    async fn process(&self, row: ClaimedRow) -> Settlement {
-        let payload: BroadcastPayload = match serde_json::from_str(&row.payload) {
+    async fn process(
+        &self,
+        row: ClaimedRow,
+        payload: Result<BroadcastPayload, serde_json::Error>,
+        floored: &HashSet<(Uuid, Uuid)>,
+    ) -> Settlement {
+        let payload = match payload {
             Ok(payload) => payload,
             Err(error) => {
                 // A malformed payload can never succeed — fail it permanently
@@ -150,7 +213,73 @@ impl Relay {
             }
         };
 
-        match self.publisher.publish(&payload).await {
+        let room = room_channel_id(&payload.channel)
+            .map(|channel_id| (row.workspace_id, channel_id))
+            .filter(|room| floored.contains(room));
+        if let Some((workspace_id, channel_id)) = room {
+            let route = audience::route_in_floored_room(
+                &self.pool,
+                workspace_id,
+                channel_id,
+                &payload.data,
+            )
+            .await;
+            match route {
+                Ok(Route::Room) => {}
+                Ok(Route::Members(members)) => return self.divert(row, &payload, &members).await,
+                Err(error) => {
+                    tracing::error!(outbox_id = row.id, error = %error, "room audience read failed");
+                    return self
+                        .settle_transient(&row, &format!("room audience: {error}"))
+                        .await;
+                }
+            }
+        }
+
+        let outcome = self.publisher.publish(&payload).await;
+        self.settle(&row, outcome, Settlement::Published, &payload.channel)
+            .await
+    }
+
+    /// Publish a room frame to its audience's personal channels instead of the room (ADR-0177
+    /// 증보 D17). Same `data` plus the room's name, same idempotency key, no `version`. An empty
+    /// audience publishes nothing and settles the row as done.
+    async fn divert(
+        &self,
+        row: ClaimedRow,
+        payload: &BroadcastPayload,
+        members: &[Uuid],
+    ) -> Settlement {
+        if members.is_empty() {
+            if let Err(error) = mark_done(&self.pool, row.id, Some("no audience")).await {
+                tracing::error!(outbox_id = row.id, error = %error, "mark_done failed");
+            }
+            return Settlement::Diverted;
+        }
+        let Some(data) = diverted_data(&payload.data, &payload.channel) else {
+            tracing::error!(outbox_id = row.id, "room frame data is not an object");
+            self.settle_failed(row.id, "room frame data is not an object")
+                .await;
+            return Settlement::Failed;
+        };
+        let channels: Vec<String> = members.iter().copied().map(personal_channel).collect();
+        let outcome = self
+            .publisher
+            .broadcast(&channels, &data, payload.idempotency_key.as_deref())
+            .await;
+        self.settle(&row, outcome, Settlement::Diverted, &payload.channel)
+            .await
+    }
+
+    /// Settle a row by its publish outcome. `ok` is what a success counts as.
+    async fn settle(
+        &self,
+        row: &ClaimedRow,
+        outcome: PublishOutcome,
+        ok: Settlement,
+        channel: &str,
+    ) -> Settlement {
+        match outcome {
             PublishOutcome::Ok => {
                 if let Err(error) = mark_done(&self.pool, row.id, None).await {
                     // At-least-once: a lost status write means a re-publish,
@@ -159,45 +288,48 @@ impl Relay {
                 }
                 tracing::debug!(
                     outbox_id = row.id,
-                    channel = %payload.channel,
-                    version = payload.version.unwrap_or(-1),
+                    channel = %channel,
+                    diverted = matches!(ok, Settlement::Diverted),
                     "published"
                 );
-                Settlement::Published
+                ok
             }
             PublishOutcome::Permanent(reason) => {
                 tracing::error!(outbox_id = row.id, reason, "permanent publish failure");
                 self.settle_failed(row.id, &reason).await;
                 Settlement::Failed
             }
-            PublishOutcome::Transient(reason) => {
-                // `attempts` was incremented by the claim, so the retry count is
-                // deterministic and the give-up point is exact.
-                if row.attempts >= self.config.max_attempts {
-                    tracing::error!(
-                        outbox_id = row.id,
-                        attempts = row.attempts,
-                        reason,
-                        "max attempts reached"
-                    );
-                    self.settle_failed(row.id, &format!("max attempts: {reason}"))
-                        .await;
-                    return Settlement::Failed;
-                }
-                let backoff = backoff_seconds(row.attempts);
-                tracing::warn!(
-                    outbox_id = row.id,
-                    attempts = row.attempts,
-                    backoff_seconds = backoff,
-                    reason,
-                    "transient publish failure; requeueing"
-                );
-                if let Err(error) = requeue(&self.pool, row.id, backoff, &reason).await {
-                    tracing::error!(outbox_id = row.id, error = %error, "requeue failed");
-                }
-                Settlement::Requeued
-            }
+            PublishOutcome::Transient(reason) => self.settle_transient(row, &reason).await,
         }
+    }
+
+    /// A retryable failure: back to `pending` with backoff, or `failed` at the attempt limit.
+    async fn settle_transient(&self, row: &ClaimedRow, reason: &str) -> Settlement {
+        // `attempts` was incremented by the claim, so the retry count is
+        // deterministic and the give-up point is exact.
+        if row.attempts >= self.config.max_attempts {
+            tracing::error!(
+                outbox_id = row.id,
+                attempts = row.attempts,
+                reason,
+                "max attempts reached"
+            );
+            self.settle_failed(row.id, &format!("max attempts: {reason}"))
+                .await;
+            return Settlement::Failed;
+        }
+        let backoff = backoff_seconds(row.attempts);
+        tracing::warn!(
+            outbox_id = row.id,
+            attempts = row.attempts,
+            backoff_seconds = backoff,
+            reason,
+            "transient publish failure; requeueing"
+        );
+        if let Err(error) = requeue(&self.pool, row.id, backoff, reason).await {
+            tracing::error!(outbox_id = row.id, error = %error, "requeue failed");
+        }
+        Settlement::Requeued
     }
 
     async fn settle_failed(&self, id: i64, reason: &str) {
@@ -241,6 +373,8 @@ impl Relay {
 #[derive(Debug, Clone, Copy)]
 enum Settlement {
     Published,
+    /// Published to personal channels instead of the room (or to nobody), ADR-0177 증보 D17.
+    Diverted,
     Requeued,
     Failed,
 }

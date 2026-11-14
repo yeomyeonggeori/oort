@@ -56,6 +56,9 @@ const TRACKED: &[&str] = &[
 const PATHS: &[(&str, &str, &str, usize, Class, &str)] = &[
     ("bins/momo-agent-worker/src/team_ai.rs", "read", "message", 1, Machine, "team AI worker"),
     ("bins/momo-agent-worker/src/team_ai.rs", "sqlx_body", "message", 1, Machine, "team AI worker"),
+    ("bins/momo-relay/src/audience.rs", "APPROVAL_CARD_SEQ_SQL", "message", 1, Machine, "relay: the seq of a room frame's target, never sent (D17)"),
+    ("bins/momo-relay/src/audience.rs", "MESSAGE_SEQ_SQL", "message", 1, Machine, "relay: the seq of a room frame's target, never sent (D17)"),
+    ("bins/momo-relay/src/audience.rs", "SESSION_CARD_SEQ_SQL", "message", 1, Machine, "relay: the seq of a room frame's target, never sent (D17)"),
     ("bins/momo-server/src/routes/work_controls.rs", "card_thread_root_in_tx", "message", 1, Floor, "work control route"),
     ("bins/momo-server/src/routes/work_instructions.rs", "replay_in_tx", "message", 2, Floor, "work instruction route"),
     ("bins/momo-server/src/routes/work_sessions.rs", "signed_agent_matches_source_in_tx", "message", 1, Floor, "signed host or agent check in a work-session route"),
