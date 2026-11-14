@@ -34,6 +34,7 @@ import { attachmentMediaFromWire } from "./attachmentMedia";
 import { parseExecutionPlan, type SpawnExecutionPlan } from "./executionPlan";
 import { restoredLoginResponse } from "./sessionModel";
 import { tokenExpiresAtMs } from "./tokenLifetime";
+import { anotherSessionStored, nextSessionEpoch, sessionStamp, type SessionStamp } from "./sessionStamp";
 import {
   isUnfurlProxyPath,
   messageUnfurlFromWire,
@@ -919,15 +920,21 @@ interface RefreshResponse {
 // cannot reach the server fails as a `NetworkError` within seconds instead of
 // pending forever, which is what made a `.local` address look like a hung app
 // rather than a wrong address (MOMO-609 / G-1).
+//
+// `base` is the server the credential in `token` (or in the body) belongs to. A
+// caller that read the credential and then awaits anything before sending passes
+// the base it read in the same tick: the stored server can change in between
+// (#5816), and the request must still go where the credential came from.
 function rawRequest(
   path: string,
   init: RequestInit,
-  token: string | null
+  token: string | null,
+  base: string = apiBase()
 ): Promise<HttpResponse> {
   const headers = new Headers(init.headers);
   headers.set("Content-Type", "application/json");
   if (token) headers.set("Authorization", `Bearer ${token}`);
-  return fetchWithDeadline(`${apiBase()}${path}`, { ...init, headers });
+  return fetchWithDeadline(`${base}${path}`, { ...init, headers });
 }
 
 function parseError(res: HttpResponse): ApiError {
@@ -986,6 +993,8 @@ interface Rotation {
    * through the host.
    */
   handle?: boolean;
+  /** The server that minted `pair` (#5816): a pair is revoked there and nowhere else. */
+  base?: string;
 }
 
 // ---- refresh proof (#3106, ADR-0146 D-7 증보 #3079) ----------------------------
@@ -1085,11 +1094,17 @@ async function refreshAttempt(
   refreshToken: string,
   identity: { workspaceId: string; memberId: string } | null,
   skewMs: number,
-  bind = false
+  bind: boolean,
+  base: string
 ): Promise<RefreshAttempt> {
   const session = coreSession();
   if (identity && session.refreshThroughHost) {
-    const answer = await session.refreshThroughHost({ ...identity, skewMs, ...(bind ? { bind } : {}) });
+    const answer = await session.refreshThroughHost({
+      ...identity,
+      skewMs,
+      apiBase: base,
+      ...(bind ? { bind } : {}),
+    });
     if (answer) {
       const pair =
         answer.status === 200 && answer.accessToken && answer.refreshToken
@@ -1127,7 +1142,8 @@ async function refreshAttempt(
       method: "POST",
       body: JSON.stringify(deviceProof ? { refreshToken, deviceProof } : { refreshToken }),
     },
-    null
+    null,
+    base
   );
   if (res.ok) {
     return {
@@ -1157,12 +1173,13 @@ async function refreshAttempt(
 async function refreshWithRetries(
   refreshToken: string,
   identity: { workspaceId: string; memberId: string } | null,
-  bind = false
+  bind: boolean,
+  base: string
 ): Promise<{ pair: RefreshResponse; handle: boolean } | null> {
   let skewMs = 0;
   let plainRetried = false;
   for (let attempt = 1; attempt <= MAX_REFRESH_ATTEMPTS; attempt++) {
-    const answer = await refreshAttempt(refreshToken, identity, skewMs, bind);
+    const answer = await refreshAttempt(refreshToken, identity, skewMs, bind, base);
     if (answer.pair) return { pair: answer.pair, handle: answer.handle };
     const retry = refreshRetry(answer.status, answer.code, answer.proved, plainRetried);
     if (retry === "sign-out") return null;
@@ -1226,13 +1243,16 @@ function rotateSession(): Promise<Rotation> {
  */
 async function rotateOnce(): Promise<Rotation> {
   const refreshToken = coreSession().getRefreshToken();
+  // The server that token belongs to, read in the same tick: every attempt of
+  // this rotation (and the revocation of a pair nobody holds) goes there.
+  const base = apiBase();
   // Having no token to present is not a network problem: there is nothing
   // to rotate and nothing to keep waiting for.
   if (!refreshToken) return { outcome: "rejected", pair: null };
   rotationPosted = true;
   const bind = nextRotationBinds;
   nextRotationBinds = false;
-  const rotated = await refreshWithRetries(refreshToken, identityOf(), bind);
+  const rotated = await refreshWithRetries(refreshToken, identityOf(), bind, base);
   if (!rotated) {
     coreSession().markAuthExpired();
     return { outcome: "rejected", pair: null };
@@ -1248,12 +1268,19 @@ async function rotateOnce(): Promise<Rotation> {
     // Nobody will hold this pair. A logout that joined this rotation revokes it
     // itself; otherwise end it here so it does not live on the server for 30
     // days (#3072 review M1).
-    if (!rotationJoinedByLogout) void revokePair(pair, handle);
+    if (!rotationJoinedByLogout) void revokePair(pair, handle, base);
     // Nothing is proven about the session now in the store — it is not ours.
-    return { outcome: "unreachable", pair, handle };
+    return { outcome: "unreachable", pair, handle, base };
+  }
+  if (apiBase() !== base) {
+    // The stored session always belongs to the stored server (#5816): a pair
+    // minted by another one is ended there and not kept.
+    void revokePair(pair, handle, base);
+    coreSession().clearSession();
+    return { outcome: "rejected", pair, handle, base };
   }
   coreSession().applyRotation(pair.accessToken, pair.refreshToken);
-  return { outcome: "rotated", pair, handle };
+  return { outcome: "rotated", pair, handle, base };
 }
 
 /**
@@ -1261,7 +1288,7 @@ async function rotateOnce(): Promise<Rotation> {
  * token: the server would refuse the whole logout over it (it validates the
  * refresh half first), so only the access half goes.
  */
-async function revokePair(pair: RefreshResponse, handle = false): Promise<void> {
+async function revokePair(pair: RefreshResponse, handle: boolean, base: string): Promise<void> {
   try {
     await rawRequest(
       "/v1/auth/logout",
@@ -1269,7 +1296,8 @@ async function revokePair(pair: RefreshResponse, handle = false): Promise<void> 
         method: "POST",
         body: JSON.stringify(handle ? {} : { refreshToken: pair.refreshToken }),
       },
-      pair.accessToken
+      pair.accessToken,
+      base
     );
   } catch {
     // The pair expires on its own; there is no one to tell.
@@ -1299,10 +1327,27 @@ export const BIND_RETRIES = 3;
  * `require`'s protection — until the next sign-in. A bind that nothing
  * answered is retried a few times while the first token is still the stored
  * one. A browser (no key) is unchanged: no extra refresh.
+ *
+ * `base` is the server the sign-in's credential went to (#5816): its answer is
+ * a session of that server and is adopted only while this device still points
+ * there (see `refuseIfServerMoved`).
  */
-function adoptSignIn(response: LoginResponse): void {
+function adoptSignIn(response: LoginResponse, base: string): void {
+  refuseIfServerMoved(response, base);
+  nextSessionEpoch();
   coreSession().applyLogin(response);
   bindRefreshKey(0);
+}
+
+/**
+ * A session is adopted only under the server that issued it (#5816): the
+ * stored session always belongs to the stored server. Otherwise the pair is
+ * ended where it was minted and the sign-in fails the way an unanswered one does.
+ */
+function refuseIfServerMoved(response: LoginResponse, base: string): void {
+  if (apiBase() === base) return;
+  void revokePair(response, false, base);
+  throw new NetworkError("unreachable", REQUEST_TIMEOUT_MS);
 }
 
 function hostProvesRefresh(): boolean {
@@ -1361,9 +1406,14 @@ function bindRefreshKey(retry: number): void {
  *                  reach the server, check the connection and try again"); the
  *                  next request, or the reconnect, rotates again.
  */
-export async function rotateAfterUnauthorized(): Promise<boolean> {
+export async function rotateAfterUnauthorized(sentAs: SessionStamp): Promise<boolean> {
+  // A request is retried only as the session that sent it (`sentAs`, read with
+  // the token it carried, #5816). Another stored session's credentials are never
+  // spent on it: the request fails like an unanswered one, and that session is
+  // not declared over.
+  if (anotherSessionStored(sentAs)) throw new NetworkError("unreachable", REQUEST_TIMEOUT_MS);
   const outcome = await refreshSessionOutcome();
-  if (outcome === "unreachable") {
+  if (outcome === "unreachable" || anotherSessionStored(sentAs)) {
     throw new NetworkError("unreachable", REQUEST_TIMEOUT_MS);
   }
   return outcome === "rotated";
@@ -1395,9 +1445,12 @@ export async function authedResponse(
   path: string,
   init: RequestInit = {}
 ): Promise<HttpResponse> {
+  // The session this request goes out as (#5816): it is sent again only as that
+  // session.
+  const sentAs = sessionStamp();
   let res = await rawRequest(path, init, coreSession().getAccessToken());
   if (res.status === 401 && coreSession().getRefreshToken()) {
-    if (await rotateAfterUnauthorized()) {
+    if (await rotateAfterUnauthorized(sentAs)) {
       res = await rawRequest(path, init, coreSession().getAccessToken());
     }
   }
@@ -1502,14 +1555,16 @@ export async function login(
 ): Promise<LoginResponse> {
   const body: Record<string, string> = { email: normalizeEmail(email), password };
   if (workspace && workspace.trim()) body.workspace = workspace.trim();
+  const base = apiBase();
   const res = await rawRequest(
     "/v1/auth/login",
     { method: "POST", body: JSON.stringify(body) },
-    null
+    null,
+    base
   );
   if (!res.ok) throw parseError(res);
   const loginResponse = loginResponseFromWire(res.json<unknown>());
-  adoptSignIn(loginResponse);
+  adoptSignIn(loginResponse, base);
   return loginResponse;
 }
 
@@ -1568,6 +1623,7 @@ export async function joinWithInvite(
   // display name from any other spelling would name the account after a string
   // it does not contain (`ADA@…` had been shouting "ADA" back at people).
   const normalizedEmail = normalizeEmail(email);
+  const base = apiBase();
   const res = await rawRequest(
     "/v1/join",
     {
@@ -1584,11 +1640,12 @@ export async function joinWithInvite(
         timeZone: browserTimeZone(),
       }),
     },
-    null
+    null,
+    base
   );
   if (!res.ok) throw parseError(res);
   const joinResponse = joinResponseFromWire(res.json<unknown>());
-  adoptSignIn(joinResponse);
+  adoptSignIn(joinResponse, base);
   return joinResponse;
 }
 
@@ -1641,18 +1698,20 @@ export async function claimOwnerPassword(
   token: string,
   password: string
 ): Promise<ClaimedSession> {
+  const base = apiBase();
   const res = await rawRequest(
     "/v1/claim",
     {
       method: "POST",
       body: JSON.stringify({ token: token.trim(), password }),
     },
-    null
+    null,
+    base
   );
   if (!res.ok) throw claimErrorFromResponse(res);
   const body = res.json<unknown>();
   const claimResponse = loginResponseFromWire(body);
-  adoptSignIn(claimResponse);
+  adoptSignIn(claimResponse, base);
   const claimKind = parseClaimKind(str(responseRecord(body), "claimKind"));
   return claimKind === undefined ? claimResponse : { ...claimResponse, claimKind };
 }
@@ -1668,6 +1727,11 @@ export interface DeviceLinkRedeemResult {
   pendingSas: boolean;
   /** Four-digit SAS when the server sent one. Null when omitted (OpenAPI). */
   sas: string | null;
+  /**
+   * The server that redeemed the voucher and issued `session` (#5816). A held
+   * session is probed and activated against this server only.
+   */
+  server: string;
 }
 
 export type DeviceLinkProbe = "active" | "pending" | "unreachable";
@@ -1676,7 +1740,7 @@ function fourDigitSas(value: string | undefined): string | null {
   return value !== undefined && /^\d{4}$/.test(value) ? value : null;
 }
 
-function deviceLinkRedeemFromWire(value: unknown): DeviceLinkRedeemResult {
+function deviceLinkRedeemFromWire(value: unknown, server: string): DeviceLinkRedeemResult {
   const source = responseRecord(value);
   const pendingSas = bool(source, "pendingSas");
   if (pendingSas === undefined) throw new WireShapeError();
@@ -1684,6 +1748,7 @@ function deviceLinkRedeemFromWire(value: unknown): DeviceLinkRedeemResult {
     session: loginResponseFromWire(source),
     pendingSas,
     sas: fourDigitSas(str(source, "sas")),
+    server,
   };
 }
 
@@ -1691,6 +1756,7 @@ export async function redeemDeviceLink(
   token: string,
   device: { name: string; platform: string }
 ): Promise<DeviceLinkRedeemResult> {
+  const base = apiBase();
   const res = await rawRequest(
     "/v1/auth/device-link/redeem",
     {
@@ -1703,35 +1769,47 @@ export async function redeemDeviceLink(
         },
       }),
     },
-    null
+    null,
+    base
   );
   if (!res.ok) throw parseError(res);
-  const result = deviceLinkRedeemFromWire(res.json<unknown>());
-  if (!result.pendingSas) {
-    adoptSignIn(result.session);
+  const result = deviceLinkRedeemFromWire(res.json<unknown>(), base);
+  if (result.pendingSas) {
+    // A held session is not adopted yet, but it is the redeeming server's all
+    // the same: when the device already points elsewhere it is never activated.
+    refuseIfServerMoved(result.session, base);
+  } else {
+    adoptSignIn(result.session, base);
   }
   return result;
 }
 
-/** Land the redeemed session after SAS confirm (or immediately if no hold). */
-export function activateDeviceLinkSession(session: LoginResponse): void {
-  adoptSignIn(session);
+/**
+ * Land the redeemed session after SAS confirm (or immediately if no hold).
+ * `server` is `DeviceLinkRedeemResult.server`: the session is adopted only
+ * while this device still points there (#5816).
+ */
+export function activateDeviceLinkSession(session: LoginResponse, server: string): void {
+  adoptSignIn(session, server);
 }
 
 /**
  * Ask whether a redeemed access token is usable yet. Does not touch the
  * session store and does not treat 401 as "signed out" — pending SAS is 401
- * until the issuer confirms.
+ * until the issuer confirms. Sent to `server` (`DeviceLinkRedeemResult.server`),
+ * the one that issued the token, whatever this device points at by now (#5816).
  */
 export async function probeDeviceLinkAccess(
   accessToken: string,
-  workspaceId: string
+  workspaceId: string,
+  server: string
 ): Promise<DeviceLinkProbe> {
   try {
     const res = await rawRequest(
       `/v1/workspaces/${encodeURIComponent(workspaceId)}/channels`,
       { method: "GET" },
-      accessToken
+      accessToken,
+      server
     );
     if (res.ok) return "active";
     if (res.status === 401) return "pending";
@@ -1776,8 +1854,11 @@ export interface LogoutOptions {
    * revocation waits until it settles, so its request is answered before the
    * token dies; bound its own deadline accordingly. A rejection is swallowed —
    * it never stops the revocation.
+   *
+   * `apiBase` is the server that issued that token (#5816). Send there, never
+   * to the stored server read later: it may already name another one.
    */
-  beforeRevoke?: (accessToken: string) => Promise<unknown>;
+  beforeRevoke?: (accessToken: string, apiBase: string) => Promise<unknown>;
 }
 
 /**
@@ -1794,8 +1875,19 @@ export interface LogoutOptions {
  * captured access half, so `beforeRevoke` would be refused too. So the network
  * half joins the rotation and uses what it minted (#2677 review M1). When the
  * rotation fails, the captured pair is all there is, as before.
+ *
+ * Every request this makes — `beforeRevoke`'s, the revocation, the host's
+ * revocation, the rotation an expired access token needs — goes to the server
+ * that issued the leaving pair, read in the same tick as the tokens (#5816).
+ * Changing the stored server afterwards never redirects them.
  */
 export async function logout(options: LogoutOptions = {}): Promise<void> {
+  // Whatever this session still has in the air is no longer sent again (#5816).
+  nextSessionEpoch();
+  // The server this session belongs to. Read first, with the tokens below, in
+  // the same tick: nothing after an `await` re-reads it. A pair a joined
+  // rotation minted is revoked where that rotation sent its refresh.
+  let base = apiBase();
   // Join only a rotation that has actually presented its token. One still
   // waiting for another tab's lock has spent nothing: once the store is wiped
   // below it finds no token and never posts (#3072 review M1).
@@ -1808,16 +1900,17 @@ export async function logout(options: LogoutOptions = {}): Promise<void> {
   coreSession().clearSession();
   if (rotation) {
     // Never rejects: the rotation turns its own failures into an outcome.
-    const { pair } = await rotation;
+    const { pair, base: mintedAt } = await rotation;
     if (pair) {
       access = pair.accessToken;
       refresh = pair.refreshToken;
+      if (mintedAt !== undefined) base = mintedAt;
     }
   }
   if (!access) return; // nothing the server will accept a revocation for
   if (options.beforeRevoke) {
     try {
-      await options.beforeRevoke(access);
+      await options.beforeRevoke(access, base);
     } catch {
       // Best effort by contract: the session still has to end.
     }
@@ -1827,7 +1920,14 @@ export async function logout(options: LogoutOptions = {}): Promise<void> {
   const session = coreSession();
   if (session.revokeThroughHost && identity) {
     try {
-      if (await session.revokeThroughHost({ accessToken: access, refreshToken: refresh, ...identity }))
+      if (
+        await session.revokeThroughHost({
+          accessToken: access,
+          refreshToken: refresh,
+          ...identity,
+          apiBase: base,
+        })
+      )
         return;
     } catch {
       // Best effort, like every revocation here.
@@ -1841,7 +1941,8 @@ export async function logout(options: LogoutOptions = {}): Promise<void> {
         method: "POST",
         body: JSON.stringify(refreshToken ? { refreshToken } : {}),
       },
-      accessToken
+      accessToken,
+      base
     );
   try {
     const res = await revoke(access, refresh);
@@ -1852,7 +1953,7 @@ export async function logout(options: LogoutOptions = {}): Promise<void> {
       // is already wiped, so this rotation is carried by locals only — with
       // the refresh key's proof like every refresh (#3106): under `require`
       // an unproven one would be refused and the lineage would live on.
-      const rotated = await refreshWithRetries(refresh, identity);
+      const rotated = await refreshWithRetries(refresh, identity, false, base);
       if (rotated && !rotated.handle) {
         await revoke(rotated.pair.accessToken, rotated.pair.refreshToken);
       }
@@ -1879,7 +1980,7 @@ export async function fetchRealtimeToken(): Promise<string> {
 export async function fetchFreshRealtimeToken(nowMs = Date.now()): Promise<string> {
   const expiresAt = tokenExpiresAtMs(coreSession().getAccessToken());
   if (expiresAt === null || expiresAt - nowMs <= 120_000) {
-    if (!(await rotateAfterUnauthorized())) throw new ApiError(401, "Session expired");
+    if (!(await rotateAfterUnauthorized(sessionStamp()))) throw new ApiError(401, "Session expired");
   }
   return fetchRealtimeToken();
 }
@@ -3116,9 +3217,10 @@ export async function fetchUnfurlImage(
       ...(signal ? { signal } : {}),
     });
   };
+  const sentAs = sessionStamp();
   let res = await send(coreSession().getAccessToken());
   if (res.status === 401 && coreSession().getRefreshToken()) {
-    if (await rotateAfterUnauthorized()) res = await send(coreSession().getAccessToken());
+    if (await rotateAfterUnauthorized(sentAs)) res = await send(coreSession().getAccessToken());
   }
   if (res.status === 401) coreSession().markAuthExpired();
   // A 429 from the proxy says when to come back (#4956); keep it so a screen can wait that long
@@ -3748,9 +3850,10 @@ export async function fetchAttachmentContent(
       ...(signal ? { signal } : {}),
     });
   };
+  const sentAs = sessionStamp();
   let res = await send(coreSession().getAccessToken());
   if (res.status === 401 && coreSession().getRefreshToken()) {
-    if (await rotateAfterUnauthorized()) res = await send(coreSession().getAccessToken());
+    if (await rotateAfterUnauthorized(sentAs)) res = await send(coreSession().getAccessToken());
   }
   if (res.status === 401) coreSession().markAuthExpired();
   if (!res.ok) throw new ApiError(res.status, `HTTP ${res.status}`);
@@ -3901,9 +4004,10 @@ async function fetchAvatarBlob(
     if (token) headers.set("Authorization", `Bearer ${token}`);
     return fetch(`${apiBase()}${avatarUrl}`, { headers });
   };
+  const sentAs = sessionStamp();
   let res = await send(coreSession().getAccessToken());
   if (res.status === 401 && coreSession().getRefreshToken()) {
-    if (await rotateAfterUnauthorized()) res = await send(coreSession().getAccessToken());
+    if (await rotateAfterUnauthorized(sentAs)) res = await send(coreSession().getAccessToken());
   }
   if (res.status === 401) coreSession().markAuthExpired();
   if (!res.ok) throw new ApiError(res.status, `HTTP ${res.status}`);

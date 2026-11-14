@@ -1287,6 +1287,20 @@ export const catalog: MessageCatalog = {
       "value": "네트워크가 연결되면 QR을 찍을 수 있어요."
     }
   ],
+  "connection.boot.serverSwitchedSignedOut": [
+    {
+      "type": 0,
+      "value": "다른 서버로 바꿔서 앞 서버("
+    },
+    {
+      "type": 1,
+      "value": "host"
+    },
+    {
+      "type": 0,
+      "value": ")의 로그인은 끝났어요. 돌아가려면 다시 로그인해 주세요."
+    }
+  ],
   "connection.boot.unreachable": [
     {
       "type": 0,
