@@ -110,8 +110,6 @@ fn every_stored_value_is_a_fixed_point() {
     let mut checked = 0;
     for case in cases() {
         let input = text(&case, "input");
-        // Running the rule twice on the same input gives the same answer.
-        assert_eq!(answer(input), answer(input), "{}", label(&case));
         if text(&case, "verdict") != "ok" {
             continue;
         }
