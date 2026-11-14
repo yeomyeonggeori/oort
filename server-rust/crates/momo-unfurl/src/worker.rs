@@ -19,9 +19,9 @@ use crate::fetch::{FetchError, FetchKind, Fetched, UnfurlHttp};
 use crate::proxy::{icon_path, image_path};
 use crate::settings::workspace_fetch_allowed;
 use crate::store::{
-    cache_lookup, cent_channel, claim_job_batch, finish_job, image_proxy_key, list_unfurls_in_tx,
-    load_message, requeue_job, tombstone_exists, upsert_unfurl_and_cache, ClaimedJob, UnfurlRecord,
-    UpsertSpec,
+    author_is_agent, cache_lookup, cent_channel, claim_job_batch, finish_job, image_proxy_key,
+    list_unfurls_in_tx, load_message, requeue_job, tombstone_exists, upsert_unfurl_and_cache,
+    ClaimedJob, UnfurlRecord, UpsertSpec,
 };
 
 pub const NOTIFY_CHANNEL: &str = "unfurl";
@@ -233,6 +233,12 @@ impl<T: UnfurlHttp + 'static> UnfurlWorker<T> {
                 let Some(message) = load_message(conn, message_id).await? else {
                     return Ok(Prepared::Skip("message missing"));
                 };
+                // ADR-0170 증보 2026-11-14 (#5872): the one place the rule is judged. Every fetch
+                // for a message starts here, so it covers a job queued by any writer, a send and
+                // an edit alike, and one queued before the rule existed.
+                if author_is_agent(conn, message.author_member_id).await? {
+                    return Ok(Prepared::Skip("agent author"));
+                }
                 let urls = extract_urls(message.body.as_deref().unwrap_or(""));
                 if urls.is_empty() {
                     return Ok(Prepared::Skip("no urls"));
