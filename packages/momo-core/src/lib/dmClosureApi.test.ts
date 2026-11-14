@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { installCoreHost, resetCoreHost, type SessionPort } from "../runtime/host";
-import { ApiError, closeDm, reopenDm } from "./api";
+import { ApiError, closeDm, leaveDm, reopenDm } from "./api";
 
 function installHost(): void {
   const session: SessionPort = {
@@ -61,5 +61,32 @@ describe("DM 닫기 경로 (ADR-0177 D7, #4227)", () => {
     const caught = await closeDm("w-1", "c-1", 1).catch((error: unknown) => error);
     expect(caught).toBeInstanceOf(ApiError);
     expect((caught as ApiError).status).toBe(404);
+  });
+});
+
+describe("1:1 대화 나가기 경로 (ADR-0177 증보 2026-11-14 D16)", () => {
+  it("나가기는 PUT …/dm-leave 에 seenSeq 를 싣는다", async () => {
+    installHost();
+    const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 204 }));
+    vi.stubGlobal("fetch", fetchMock);
+    await leaveDm("w-1", "c-1", 42);
+    const call = fetchMock.mock.calls[0];
+    expect(String(call?.[0])).toBe("https://oort.test/v1/workspaces/w-1/channels/c-1/dm-leave");
+    expect(call?.[1]?.method).toBe("PUT");
+    expect(JSON.parse(String(call?.[1]?.body))).toEqual({ seenSeq: 42 });
+  });
+
+  it("409 는 코드를 실은 ApiError 로 던진다 - dmLeaveFailure 가 코드로 가른다", async () => {
+    installHost();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        jsonResponse({ error: { code: "dm_leave_unavailable", message: "not a person-to-person dm" } }, 409)
+      )
+    );
+    const caught = await leaveDm("w-1", "c-1", 1).catch((error: unknown) => error);
+    expect(caught).toBeInstanceOf(ApiError);
+    expect((caught as ApiError).status).toBe(409);
+    expect((caught as ApiError).code).toBe("dm_leave_unavailable");
   });
 });

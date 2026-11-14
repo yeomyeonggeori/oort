@@ -1,0 +1,12 @@
+{
+  "channels.dmLeave.action": "Quitter la conversation",
+  "channels.dmLeave.confirmTitle": "Quitter votre conversation avec {name} ?",
+  "channels.dmLeave.confirmBody": "La conversation jusqu'ici disparaît de votre écran. Elle reste telle quelle sur l'écran de {name}.",
+  "channels.dmLeave.confirmRevive": "Si un nouveau message arrive, il s'affiche comme une nouvelle conversation à partir de ce message.",
+  "channels.dmLeave.confirmFinal": "Vous ne pourrez pas annuler après avoir quitté.",
+  "channels.dmLeave.confirmScheduled": "{count, plural, one {# message programmé sera aussi annulé.} other {# messages programmés seront aussi annulés.}}",
+  "channels.dmLeave.cancel": "Annuler",
+  "channels.dmLeave.confirm": "Quitter",
+  "channels.dmLeave.done": "Vous avez quitté la conversation.",
+  "channels.dmLeave.failed": "Impossible de quitter. Veuillez réessayer."
+}

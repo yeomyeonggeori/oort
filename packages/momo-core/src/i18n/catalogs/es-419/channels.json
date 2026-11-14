@@ -1,0 +1,12 @@
+{
+  "channels.dmLeave.action": "Salir de la conversación",
+  "channels.dmLeave.confirmTitle": "¿Salir de tu conversación con {name}?",
+  "channels.dmLeave.confirmBody": "La conversación hasta ahora desaparece de tu pantalla. Sigue igual en la pantalla de {name}.",
+  "channels.dmLeave.confirmRevive": "Si llega un mensaje nuevo, se mostrará como una conversación nueva a partir de ese mensaje.",
+  "channels.dmLeave.confirmFinal": "No podrás deshacerlo después de salir.",
+  "channels.dmLeave.confirmScheduled": "{count, plural, one {También se cancelará # mensaje programado.} other {También se cancelarán # mensajes programados.}}",
+  "channels.dmLeave.cancel": "Cancelar",
+  "channels.dmLeave.confirm": "Salir",
+  "channels.dmLeave.done": "Saliste de la conversación.",
+  "channels.dmLeave.failed": "No se pudo salir. Vuelve a intentarlo."
+}

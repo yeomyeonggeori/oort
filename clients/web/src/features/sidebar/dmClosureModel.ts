@@ -198,6 +198,8 @@ function cachedFacts(input: DmFactsInput, cached: CachedDmFacts): Facts {
   return {
     starredOrSectioned: input.starredOrSectioned,
     closedAtSeq: cached[0],
+    // 사본은 하한을 적어 두지 않는다(나간 대화는 서버가 숨김 행도 같이 올려 7번으로 숨는다, ADR-0177 증보 D16-5).
+    historyFromSeq: null,
     latestReadableSeq: cached[1],
     lastReadSeq: cached[2],
     // 신호는 「있다/없다」 한 비트만 적어 둔다: 값은 판정이 읽지 않는다(`!== null`).
@@ -238,6 +240,7 @@ function factsFor(input: DmFactsInput): Facts | "pending" {
     return {
       ...base,
       closedAtSeq: closedAt,
+      historyFromSeq: null,
       latestReadableSeq: readable,
       lastReadSeq: lastRead,
       markedUnreadBeforeSeq: read === undefined ? null : read.markedUnreadBeforeSeq,
@@ -250,15 +253,16 @@ function factsFor(input: DmFactsInput): Facts | "pending" {
     if (input.cache === null) return "pending";
     // 사본이 있는 워크스페이스에서 사본에 없는 DM 은 지난 세션 뒤에 생긴 DM 이다 - 안 닫았다.
     return cached === undefined
-      ? { ...base, phase: "ready", closedAtSeq: null, latestReadableSeq: 0, lastReadSeq: 0, markedUnreadBeforeSeq: null, mentionCount: 0 }
+      ? { ...base, phase: "ready", closedAtSeq: null, historyFromSeq: null, latestReadableSeq: 0, lastReadSeq: 0, markedUnreadBeforeSeq: null, mentionCount: 0 }
       : { ...cachedFacts(input, cached), phase: "ready" };
   }
   if (read === undefined) {
-    return { ...base, closedAtSeq: null, latestReadableSeq: 0, lastReadSeq: 0, markedUnreadBeforeSeq: null, mentionCount: 0 };
+    return { ...base, closedAtSeq: null, historyFromSeq: null, latestReadableSeq: 0, lastReadSeq: 0, markedUnreadBeforeSeq: null, mentionCount: 0 };
   }
   return {
     ...base,
     closedAtSeq: read.closedAtSeq,
+    historyFromSeq: null,
     // 이 행이 읽을 seq 를 말하지 않았다(옛 행): 전체 seq 로 대신한다 - 더 많이 보이는 쪽이다.
     latestReadableSeq: read.latestReadableSeq ?? read.latestSeq,
     lastReadSeq: read.lastReadSeq,
