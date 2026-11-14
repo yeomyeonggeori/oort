@@ -15,5 +15,8 @@
   "channels.nameRule.hidden": "名称中含有不可见字符。请清空后重新输入。",
   "channels.nameRule.unsupported": "只能使用文字、数字、连字符（-）和下划线（_）。",
   "channels.nameRule.edge": "名称必须以文字或数字开头和结尾。连字符和下划线只能放在中间。",
-  "channels.nameRule.serverRejected": "服务器不接受这个名称。只能使用文字、数字、- 和 _。"
+  "channels.nameRule.serverRejected": "服务器不接受这个名称。只能使用文字、数字、- 和 _。",
+  "channels.nameRule.hint": "可使用文字、数字、连字符（-）和下划线（_），最多 {max, number} 个字符。空格会变成 -，英文大写字母会以小写保存。",
+  "channels.nameRule.placeholder": "设计-评审",
+  "channels.nameRule.preview": "将创建为 {name}"
 }

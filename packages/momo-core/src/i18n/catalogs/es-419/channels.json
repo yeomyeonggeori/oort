@@ -15,5 +15,8 @@
   "channels.nameRule.hidden": "El nombre contiene caracteres invisibles. Bórralo y vuelve a escribirlo.",
   "channels.nameRule.unsupported": "Solo se pueden usar letras, números, guiones (-) y guiones bajos (_).",
   "channels.nameRule.edge": "El nombre debe empezar y terminar con una letra o un número. Los guiones y guiones bajos solo van en medio.",
-  "channels.nameRule.serverRejected": "El servidor no aceptó este nombre. Solo se pueden usar letras, números, - y _."
+  "channels.nameRule.serverRejected": "El servidor no aceptó este nombre. Solo se pueden usar letras, números, - y _.",
+  "channels.nameRule.hint": "Letras, números, guiones (-) y guiones bajos (_), hasta {max, number} caracteres. Los espacios se convierten en - y las mayúsculas se guardan en minúscula.",
+  "channels.nameRule.placeholder": "revisión-de-diseño",
+  "channels.nameRule.preview": "Se creará como {name}"
 }

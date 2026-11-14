@@ -130,6 +130,37 @@ export const catalog: MessageCatalog = {
       "value": "El nombre contiene caracteres invisibles. Bórralo y vuelve a escribirlo."
     }
   ],
+  "channels.nameRule.hint": [
+    {
+      "type": 0,
+      "value": "Letras, números, guiones (-) y guiones bajos (_), hasta "
+    },
+    {
+      "type": 2,
+      "value": "max",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": " caracteres. Los espacios se convierten en - y las mayúsculas se guardan en minúscula."
+    }
+  ],
+  "channels.nameRule.placeholder": [
+    {
+      "type": 0,
+      "value": "revisión-de-diseño"
+    }
+  ],
+  "channels.nameRule.preview": [
+    {
+      "type": 0,
+      "value": "Se creará como "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    }
+  ],
   "channels.nameRule.required": [
     {
       "type": 0,

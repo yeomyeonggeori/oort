@@ -105,6 +105,37 @@ export const catalog: MessageCatalog = {
       "value": "名稱中含有看不見的字元。請清空後重新輸入。"
     }
   ],
+  "channels.nameRule.hint": [
+    {
+      "type": 0,
+      "value": "可使用文字、數字、連字號（-）和底線（_），最多 "
+    },
+    {
+      "type": 2,
+      "value": "max",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": " 個字元。空格會變成 -，英文大寫字母會以小寫儲存。"
+    }
+  ],
+  "channels.nameRule.placeholder": [
+    {
+      "type": 0,
+      "value": "設計-評審"
+    }
+  ],
+  "channels.nameRule.preview": [
+    {
+      "type": 0,
+      "value": "將建立為 "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    }
+  ],
   "channels.nameRule.required": [
     {
       "type": 0,

@@ -101,6 +101,37 @@ export const catalog: MessageCatalog = {
       "value": "見えない文字が含まれています。名前を消してもう一度入力してください。"
     }
   ],
+  "channels.nameRule.hint": [
+    {
+      "type": 0,
+      "value": "文字、数字、ハイフン（-）、アンダースコア（_）で"
+    },
+    {
+      "type": 2,
+      "value": "max",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "文字まで。空白は-に変わり、英字の大文字は小文字で保存されます。"
+    }
+  ],
+  "channels.nameRule.placeholder": [
+    {
+      "type": 0,
+      "value": "デザイン-レビュー"
+    }
+  ],
+  "channels.nameRule.preview": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " という名前で作成されます"
+    }
+  ],
   "channels.nameRule.required": [
     {
       "type": 0,

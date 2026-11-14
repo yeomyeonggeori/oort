@@ -1260,6 +1260,37 @@ export const catalog: MessageCatalog = {
       "value": "The name contains invisible characters. Clear it and type the name again."
     }
   ],
+  "channels.nameRule.hint": [
+    {
+      "type": 0,
+      "value": "Letters, numbers, hyphens (-) and underscores (_), up to "
+    },
+    {
+      "type": 2,
+      "value": "max",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": " characters. Spaces become -, and uppercase letters are saved as lowercase."
+    }
+  ],
+  "channels.nameRule.placeholder": [
+    {
+      "type": 0,
+      "value": "design-review"
+    }
+  ],
+  "channels.nameRule.preview": [
+    {
+      "type": 0,
+      "value": "Will be created as "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    }
+  ],
   "channels.nameRule.required": [
     {
       "type": 0,
