@@ -235,10 +235,14 @@ export function PresenceStatusItems({
                 );
               }}
             >
+              {/* 점은 16px 칸의 가운데에 선다: 같은 메뉴의 아이콘 줄(`size-4`)과 아이콘 x·글자 x가 한 세로 줄이다(#5785). */}
               <span
                 aria-hidden="true"
-                className={cn("size-2 shrink-0 rounded-full", optionDotClass(status))}
-              />
+                className="flex size-4 shrink-0 items-center justify-center"
+                data-testid={`presence-dot-slot-${status}`}
+              >
+                <span className={cn("size-2 rounded-full", optionDotClass(status))} />
+              </span>
               {dndNote ? (
                 <span className="flex min-w-0 flex-1 flex-col">
                   <span>{declaredStatusLabel(status)}</span>

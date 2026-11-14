@@ -10897,5 +10897,335 @@ export const catalog: MessageCatalog = {
       "type": 0,
       "value": "oort 도구"
     }
+  ],
+  "workspace.add.back": [
+    {
+      "type": 0,
+      "value": "뒤로"
+    }
+  ],
+  "workspace.add.cancel": [
+    {
+      "type": 0,
+      "value": "취소"
+    }
+  ],
+  "workspace.add.createLead": [
+    {
+      "type": 0,
+      "value": "이 서버에 새 워크스페이스를 열어요. 서버 운영자만 만들 수 있어요."
+    }
+  ],
+  "workspace.add.createLeadNotOperator": [
+    {
+      "type": 0,
+      "value": "이 서버의 운영자만 만들 수 있어요. 이 계정으로는 만들 수 없어요."
+    }
+  ],
+  "workspace.add.createTitle": [
+    {
+      "type": 0,
+      "value": "새 워크스페이스 만들기"
+    }
+  ],
+  "workspace.add.joinChecking": [
+    {
+      "type": 0,
+      "value": "확인 중"
+    }
+  ],
+  "workspace.add.joinClaim": [
+    {
+      "type": 0,
+      "value": "첫 소유자 링크와 재설정 링크는 여기서 받지 않아요. 로그아웃한 뒤 로그인 화면에 붙여 넣으세요."
+    }
+  ],
+  "workspace.add.joinConfirmAction": [
+    {
+      "type": 0,
+      "value": "로그아웃하고 넘어가기"
+    }
+  ],
+  "workspace.add.joinConfirmBody": [
+    {
+      "type": 0,
+      "value": "이 앱은 한 번에 워크스페이스 하나에만 로그인해요. 지금 워크스페이스에서 로그아웃돼요. 로그인 화면에는 넣은 주소를 채워 둘게요."
+    }
+  ],
+  "workspace.add.joinConfirmTitle": [
+    {
+      "type": 0,
+      "value": "로그아웃하고 넘어갈까요?"
+    }
+  ],
+  "workspace.add.joinEmpty": [
+    {
+      "type": 0,
+      "value": "주소나 초대 링크를 넣으세요."
+    }
+  ],
+  "workspace.add.joinField": [
+    {
+      "type": 0,
+      "value": "주소나 초대 링크"
+    }
+  ],
+  "workspace.add.joinHint": [
+    {
+      "type": 0,
+      "value": "받은 그대로 붙여 넣어요. 예: https://team.example.com"
+    }
+  ],
+  "workspace.add.joinLead": [
+    {
+      "type": 0,
+      "value": "주소나 초대 링크로 들어가요. 다른 서버는 로그아웃한 뒤 로그인 화면에서 그 링크를 넣고, 이 서버의 초대는 로그아웃한 뒤 로그인 화면에서 이어 가요."
+    }
+  ],
+  "workspace.add.joinLeadWeb": [
+    {
+      "type": 0,
+      "value": "주소나 초대 링크로 들어가요. 다른 서버는 새 탭에서 열고, 이 서버의 초대는 로그아웃한 뒤 로그인 화면에서 이어 가요."
+    }
+  ],
+  "workspace.add.joinNext": [
+    {
+      "type": 0,
+      "value": "계속"
+    }
+  ],
+  "workspace.add.joinOpenAction": [
+    {
+      "type": 0,
+      "value": "새 탭에서 열기"
+    }
+  ],
+  "workspace.add.joinOpenBody": [
+    {
+      "type": 0,
+      "value": "웹에서는 이 창에서 다른 서버로 넘어갈 수 없어요. 그 서버를 새 탭에서 열고, 지금 워크스페이스는 그대로 있어요."
+    }
+  ],
+  "workspace.add.joinOpenInvite": [
+    {
+      "type": 1,
+      "value": "server"
+    },
+    {
+      "type": 0,
+      "value": "의 초대를 새 탭에서 열어요."
+    }
+  ],
+  "workspace.add.joinOpenServer": [
+    {
+      "type": 1,
+      "value": "server"
+    },
+    {
+      "type": 0,
+      "value": "의 로그인 화면을 새 탭에서 열어요."
+    }
+  ],
+  "workspace.add.joinOpenTitle": [
+    {
+      "type": 0,
+      "value": "새 탭에서 열까요?"
+    }
+  ],
+  "workspace.add.joinPasteAction": [
+    {
+      "type": 0,
+      "value": "로그아웃"
+    }
+  ],
+  "workspace.add.joinPasteBody": [
+    {
+      "type": 0,
+      "value": "다른 서버에 참여하려면 로그아웃한 뒤 로그인 화면에서 「바꾸기」를 누르고, 나오는 칸에 이 링크를 붙여 넣어요. 로그아웃하기 전에 복사해 두세요."
+    }
+  ],
+  "workspace.add.joinPasteTitle": [
+    {
+      "type": 0,
+      "value": "로그아웃할까요?"
+    }
+  ],
+  "workspace.add.joinSameServer": [
+    {
+      "type": 0,
+      "value": "이미 이 서버에 있어요. 같은 서버의 다른 워크스페이스는 로그아웃한 뒤 로그인 화면의 「다른 워크스페이스로 로그인」에서 워크스페이스 ID로 들어가요."
+    }
+  ],
+  "workspace.add.joinTargetInvite": [
+    {
+      "type": 1,
+      "value": "server"
+    },
+    {
+      "type": 0,
+      "value": "의 초대로 넘어가요."
+    }
+  ],
+  "workspace.add.joinTargetInviteOnly": [
+    {
+      "type": 0,
+      "value": "받은 초대 링크로 넘어가요."
+    }
+  ],
+  "workspace.add.joinTargetServer": [
+    {
+      "type": 1,
+      "value": "server"
+    },
+    {
+      "type": 0,
+      "value": "의 로그인 화면으로 넘어가요."
+    }
+  ],
+  "workspace.add.joinTitle": [
+    {
+      "type": 0,
+      "value": "이미 있는 곳에 참여"
+    }
+  ],
+  "workspace.add.joinUnreachable": [
+    {
+      "type": 1,
+      "value": "server"
+    },
+    {
+      "type": 0,
+      "value": "에 닿지 않아서 로그아웃하지 않았어요. 주소를 다시 확인하세요."
+    }
+  ],
+  "workspace.add.lead": [
+    {
+      "type": 0,
+      "value": "새 워크스페이스를 만들거나, 이미 있는 워크스페이스에 들어가요."
+    }
+  ],
+  "workspace.add.operatorContact": [
+    {
+      "type": 0,
+      "value": "초대를 받았다면 「이미 있는 곳에 참여」로 들어갈 수 있어요. 없다면 이 서버를 운영하는 사람에게 문의하세요."
+    }
+  ],
+  "workspace.add.title": [
+    {
+      "type": 0,
+      "value": "워크스페이스 추가"
+    }
+  ],
+  "workspace.create.lead": [
+    {
+      "type": 0,
+      "value": "이 서버에 새 워크스페이스를 하나 더 만들어요. 만든 사람이 소유자가 되고 #general 채널 하나로 시작해요. 서버 운영자만 만들 수 있어요."
+    }
+  ],
+  "workspace.create.operatorOnly": [
+    {
+      "type": 0,
+      "value": "새 워크스페이스는 이 서버의 운영자만 만들 수 있어요."
+    }
+  ],
+  "workspace.create.slugHint": [
+    {
+      "type": 0,
+      "value": "영문 소문자, 숫자, 하이픈만 쓸 수 있어요. 서버 전체에서 하나뿐이어야 해요."
+    }
+  ],
+  "workspace.leave.body": [
+    {
+      "type": 0,
+      "value": "나가면 멤버십이 끝나고, 확인하면 바로 로그아웃돼요. 보낸 메시지는 남아요. 다시 들어오려면 초대가 필요해요."
+    }
+  ],
+  "workspace.leave.busy": [
+    {
+      "type": 0,
+      "value": "나가는 중"
+    }
+  ],
+  "workspace.leave.cancel": [
+    {
+      "type": 0,
+      "value": "취소"
+    }
+  ],
+  "workspace.leave.confirm": [
+    {
+      "type": 0,
+      "value": "나가기"
+    }
+  ],
+  "workspace.leave.lastOwner": [
+    {
+      "type": 0,
+      "value": "마지막 소유자는 나갈 수 없어요. 먼저 다른 사람에게 소유자를 넘기세요."
+    }
+  ],
+  "workspace.leave.lastOwnerNext": [
+    {
+      "type": 0,
+      "value": "멤버 탭에서 그 사람의 프로필을 열어 역할을 소유자로 바꾼 뒤 다시 나가세요."
+    }
+  ],
+  "workspace.leave.title": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "에서 나갈까요?"
+    }
+  ],
+  "workspace.leave.titleUnnamed": [
+    {
+      "type": 0,
+      "value": "이 워크스페이스에서 나갈까요?"
+    }
+  ],
+  "workspace.menu.copiedAddress": [
+    {
+      "type": 0,
+      "value": "서버 주소 복사됨"
+    }
+  ],
+  "workspace.menu.copyAddress": [
+    {
+      "type": 0,
+      "value": "서버 주소 복사"
+    }
+  ],
+  "workspace.menu.copyAddressNote": [
+    {
+      "type": 0,
+      "value": "기본이 아닌 워크스페이스는 ID도 필요해요."
+    }
+  ],
+  "workspace.menu.copyFailed": [
+    {
+      "type": 0,
+      "value": "복사하지 못했어요"
+    }
+  ],
+  "workspace.menu.fallbackTitle": [
+    {
+      "type": 0,
+      "value": "워크스페이스"
+    }
+  ],
+  "workspace.menu.leave": [
+    {
+      "type": 0,
+      "value": "워크스페이스 나가기"
+    }
+  ],
+  "workspace.menu.settings": [
+    {
+      "type": 0,
+      "value": "워크스페이스 설정"
+    }
   ]
 };
