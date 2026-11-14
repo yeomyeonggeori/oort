@@ -1,4 +1,4 @@
-import {refreshSessionOutcome} from '@momo/core/lib/api';
+import {refreshSessionOutcome, restoreSession} from '@momo/core/lib/api';
 import {QueryClient, QueryClientProvider} from '@tanstack/react-query';
 import {act, render, screen, waitFor} from '@testing-library/react-native';
 import React from 'react';
@@ -13,6 +13,8 @@ import {__setNonSecretStore, NON_SECRET_KEYS} from '../src/storage/kv';
 import {
   __resetSessionStore,
   getAccessToken,
+  getRefreshToken,
+  initSessionStore,
   keychainSettled,
   sessionPort,
 } from '../src/storage/secureSession';
@@ -233,6 +235,67 @@ describe('세션이 저장된 채 서버 주소를 바꾸면 그 세션을 먼�
     await new Promise(resolve => setTimeout(resolve, 0));
     expect(calls).toEqual([]);
     expect(getServerBase()).toBe(B);
+  });
+
+  /** 앱을 다시 연다: 메모리를 잊고 저장소(메타데이터·키체인)에서 다시 읽는다. access 값은 메모리 전용이라 없다. */
+  async function reopenWithSessionOfA(): Promise<void> {
+    sessionPort.applyLogin(SESSION_OF_A);
+    await keychainSettled();
+    __resetSessionStore();
+    await initSessionStore();
+    expect(getAccessToken()).toBeNull();
+    expect(getRefreshToken()).toBe('refresh-A1');
+  }
+
+  it('다시 연 뒤 refresh만 저장된 세션이어도 기기에서 끝나고, 뒤이은 복원은 다음 서버로 아무 값도 보내지 않는다', async () => {
+    await reopenWithSessionOfA();
+    stubFetch(call => (call.path === '/v1/auth/refresh' ? jsonResponse({error: {message: 'busy'}}, 503) : undefined));
+    expect(await restoreSession()).toBeNull();
+    expect(getRefreshToken()).toBe('refresh-A1');
+    expect(calls.map(call => `${call.method} ${call.origin}${call.path}`)).toEqual([`POST ${A}/v1/auth/refresh`]);
+
+    calls = [];
+    stubFetch(call =>
+      call.path === '/v1/auth/refresh' ? jsonResponse({accessToken: 'access-B1', refreshToken: 'refresh-B1'}) : undefined,
+    );
+    setServerBase(B);
+    expect(getRefreshToken()).toBeNull();
+    expect(getAccessToken()).toBeNull();
+    // 다시 시도, 그리고 앱을 다시 연 뒤의 복원.
+    expect(await restoreSession()).toBeNull();
+    await keychainSettled();
+    __resetSessionStore();
+    await initSessionStore();
+    expect(getRefreshToken()).toBeNull();
+    expect(await restoreSession()).toBeNull();
+    expect(calls.filter(call => call.origin === B)).toEqual([]);
+    expect(leaksOfA()).toEqual([]);
+  });
+
+  it('다시 연 뒤 복원이 떠 있는 동안 바꾸면 그 복원이 받은 짝을 앞 서버에서 끝내고, 다음 서버로는 아무 값도 보내지 않는다', async () => {
+    await reopenWithSessionOfA();
+    let answerRefresh = () => {};
+    const refreshAnswered = new Promise<void>(resolve => {
+      answerRefresh = resolve;
+    });
+    stubFetch(async call => {
+      if (call.path !== '/v1/auth/refresh') return undefined;
+      await refreshAnswered;
+      return jsonResponse({accessToken: 'access-A2', refreshToken: 'refresh-A2'});
+    });
+    const restoring = restoreSession();
+    await waitFor(() => expect(calls.some(call => call.path === '/v1/auth/refresh')).toBe(true));
+    setServerBase(B);
+    expect(getRefreshToken()).toBeNull();
+    answerRefresh();
+    expect(await restoring).toBeNull();
+    await waitFor(() => expect(calls.some(call => call.path === LOGOUT_PATH)).toBe(true));
+    expect(calls.map(call => `${call.method} ${call.origin}${call.path}`)).toEqual([
+      `POST ${A}/v1/auth/refresh`,
+      `POST ${A}${LOGOUT_PATH}`,
+    ]);
+    expect(leaksOfA()).toEqual([]);
+    expect(getRefreshToken()).toBeNull();
   });
 });
 
