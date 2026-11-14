@@ -114,6 +114,9 @@ fn failure_of_refusal(refusal: &DeliverRefusal) -> ScheduleFailure {
         DeliverRefusal::ThreadRoot(_) => ScheduleFailure::RootUnavailable,
         DeliverRefusal::Send(SendRejected::Attachment(_)) => ScheduleFailure::AttachmentUnavailable,
         DeliverRefusal::Send(SendRejected::Provenance(_))
+        // The scheduler runs without a requester (ADR-0177 증보 D17), so no row is hidden from it
+        // by a read floor; named so the match stays exhaustive.
+        | DeliverRefusal::Send(SendRejected::BeforeHistoryFloor)
         | DeliverRefusal::QuoteTarget(_)
         | DeliverRefusal::RunBinding(_)
         | DeliverRefusal::NoSigningKey

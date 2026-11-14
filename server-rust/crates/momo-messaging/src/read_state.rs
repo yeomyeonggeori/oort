@@ -99,6 +99,12 @@ pub struct ReadStateProjection {
     /// ([`crate::thread_follow::followed_unread_by_channel_in_tx`]). `0` when they follow nothing here
     /// or have read it all. Like the two fields above, only the list projection says it.
     pub followed_unread_reply_count: i64,
+    /// ADR-0177 증보 D18 (#5822): the **requester's own** `membership.history_from_seq` — "I read this
+    /// channel from this seq on" after leaving a 1:1 — or `None` (full history). Read off the
+    /// requester's own membership row, which is the row this projection is built from, so another
+    /// member's floor can never ride it. Like the closure watermark, only the list projection says
+    /// it (no frame, no PUT response).
+    pub history_from_seq: Option<i64>,
 }
 
 /// Why a read-state advertisement was sent (ADR-0178 D4).
@@ -317,7 +323,8 @@ pub async fn list_read_state_projection(
                 COALESCE(rs.mention_count, 0)::int AS mention_count, \
                 rs.marked_unread_before_seq, \
                 COALESCE(cs.last_readable_seq, 0)::bigint AS latest_readable_seq, \
-                dc.closed_at_seq \
+                dc.closed_at_seq, \
+                ms.history_from_seq \
            FROM membership ms \
            JOIN channel c \
              ON c.id = ms.channel_id \
@@ -355,6 +362,7 @@ pub async fn list_read_state_projection(
                 latest_readable_seq: row.try_get("latest_readable_seq")?,
                 closed_at_seq: row.try_get("closed_at_seq")?,
                 followed_unread_reply_count,
+                history_from_seq: row.try_get("history_from_seq")?,
             })
         })
         .collect::<Result<_, sqlx::Error>>()

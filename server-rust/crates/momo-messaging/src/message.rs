@@ -672,6 +672,31 @@ pub enum SendRejected {
     Provenance(#[from] ProvenanceRejected),
     #[error("{0}")]
     Attachment(#[from] AttachmentLinkRejected),
+    /// ADR-0177 증보 D17 (#5822): a retry whose `client_msg_id` names a message this sender can no
+    /// longer read — it is below the floor they set by leaving the 1:1. Nothing was inserted (the
+    /// idempotency conflict proves the row exists), and the bumped seq must roll back with the
+    /// transaction like every other refusal.
+    #[error("the retried message is from before this conversation was left")]
+    BeforeHistoryFloor,
+}
+
+/// What the idempotent insert found.
+enum Inserted {
+    /// The row — freshly written (`false`) or the earlier send of the same `client_msg_id` (`true`).
+    Row(StoredMessage, bool),
+    /// The `client_msg_id` conflicted with a row the transaction cannot read (ADR-0177 증보 D17).
+    HiddenDuplicate,
+}
+
+impl Inserted {
+    /// The paths that have no rejection channel keep the answer they always gave for an unreadable
+    /// duplicate: `RowNotFound`.
+    fn into_row(self) -> Result<(StoredMessage, bool), DbError> {
+        match self {
+            Inserted::Row(message, deduped) => Ok((message, deduped)),
+            Inserted::HiddenDuplicate => Err(DbError::from(sqlx::Error::RowNotFound)),
+        }
+    }
 }
 
 /// Steps 1+2 of the spine: row-locked seq bump and idempotent insert, in one
@@ -699,7 +724,7 @@ async fn insert_message_in_tx(
     input: NewMessage,
     sent_via: Option<SentVia>,
     also_in_channel: bool,
-) -> Result<(StoredMessage, bool), DbError> {
+) -> Result<Inserted, DbError> {
     let hlc_ts = input
         .hlc_ts
         .unwrap_or_else(|| Utc::now().timestamp_millis());
@@ -740,8 +765,8 @@ async fn insert_message_in_tx(
         .fetch_optional(&mut *conn)
         .await?;
 
-    let (message, deduped) = match inserted {
-        Some(row) => (decode_stored(&row)?, false),
+    let inserted = match inserted {
+        Some(row) => Inserted::Row(decode_stored(&row)?, false),
         None => {
             // 0 rows → idempotency hit: re-select the prior message and return
             // its original seq (exactly-once effect). Only reachable with a
@@ -757,15 +782,28 @@ async fn insert_message_in_tx(
                 .fetch_optional(&mut *conn)
                 .await?;
             match existing {
-                Some(row) => (decode_stored(&row)?, true),
-                // No prior row and no insert → the channel_seq row was absent
-                // (unknown channel). Surface as a not-found DB error.
-                None => return Err(DbError::from(sqlx::Error::RowNotFound)),
+                Some(row) => Inserted::Row(decode_stored(&row)?, true),
+                None => {
+                    // No visible prior row and no insert. Either the channel_seq row was absent
+                    // (unknown channel — nothing was attempted), or the insert DID conflict and the
+                    // earlier row is hidden from this transaction by a `message` read policy
+                    // (ADR-0177 증보 D17: a retry from before the sender left the 1:1).
+                    let channel_known: bool = sqlx::query_scalar(
+                        "SELECT EXISTS (SELECT 1 FROM channel_seq WHERE channel_id = $1)",
+                    )
+                    .bind(input.channel_id)
+                    .fetch_one(&mut *conn)
+                    .await?;
+                    if !channel_known {
+                        return Err(DbError::from(sqlx::Error::RowNotFound));
+                    }
+                    Inserted::HiddenDuplicate
+                }
             }
         }
     };
 
-    Ok((message, deduped))
+    Ok(inserted)
 }
 
 /// Step 3 (+ the optional B1.2 mention pass): finish a send by enqueuing the
@@ -965,7 +1003,9 @@ pub async fn send_message_in_tx(
     workspace_id: Uuid,
     input: NewMessage,
 ) -> Result<SentMessage, DbError> {
-    let (message, deduped) = insert_message_in_tx(conn, workspace_id, input, None, false).await?;
+    let (message, deduped) = insert_message_in_tx(conn, workspace_id, input, None, false)
+        .await?
+        .into_row()?;
     finish_send_in_tx(
         conn,
         workspace_id,
@@ -1007,7 +1047,9 @@ pub async fn send_thread_notice_in_tx(
     workspace_id: Uuid,
     input: NewMessage,
 ) -> Result<SentMessage, DbError> {
-    let (message, deduped) = insert_message_in_tx(conn, workspace_id, input, None, false).await?;
+    let (message, deduped) = insert_message_in_tx(conn, workspace_id, input, None, false)
+        .await?
+        .into_row()?;
     finish_send_in_tx(
         conn,
         workspace_id,
@@ -1042,7 +1084,9 @@ pub async fn send_thread_notice_with_run_pictures_in_tx(
     let run_id = input.run_id;
     let channel_id = input.channel_id;
     let author_member_id = input.author_member_id;
-    let (message, deduped) = insert_message_in_tx(conn, workspace_id, input, None, false).await?;
+    let (message, deduped) = insert_message_in_tx(conn, workspace_id, input, None, false)
+        .await?
+        .into_row()?;
     if !deduped {
         if let Some(run_id) = run_id {
             let attachment_ids =
@@ -1211,7 +1255,10 @@ pub async fn send_message_with_mentions_via_in_tx(
     let channel_id = input.channel_id;
     let author_member_id = input.author_member_id;
     let (message, deduped) =
-        insert_message_in_tx(conn, workspace_id, input, sent_via, also_in_channel).await?;
+        match insert_message_in_tx(conn, workspace_id, input, sent_via, also_in_channel).await? {
+            Inserted::Row(message, deduped) => (message, deduped),
+            Inserted::HiddenDuplicate => return Ok(Err(SendRejected::BeforeHistoryFloor)),
+        };
 
     if let Some(signature) = signature {
         // `client_msg_id` was checked above; the stored row is the digest's

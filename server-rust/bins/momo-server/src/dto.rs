@@ -4124,6 +4124,10 @@ pub struct ReadStateRowDto {
     /// ADR-0124 증보 4 (#5667): unread replies in the threads the caller follows in this channel (the
     /// sum of the thread summaries' `unread_reply_count`). Always present, `0` when there are none.
     pub followed_unread_reply_count: i64,
+    /// ADR-0177 증보 D18 (#5822): the **caller's own** read floor after leaving a 1:1 (`membership.
+    /// history_from_seq`), `null` = full history. Always present like `closed_at_seq`: a client tells
+    /// a server that carries 「대화 나가기」 from an older one by the key being there (D21).
+    pub history_from_seq: Option<i64>,
 }
 
 /// Swift `ReadStateListResponseDTO` (:317-322).
@@ -7532,6 +7536,7 @@ mod tests {
                 latest_readable_seq: 2,
                 closed_at_seq: None,
                 followed_unread_reply_count: 3,
+                history_from_seq: None,
             }],
         })
         .expect("serialize");
@@ -7574,6 +7579,8 @@ mod tests {
                 "latest_readable_seq": 2,
                 "closed_at_seq": null,
                 "followed_unread_reply_count": 3,
+                // ADR-0177 증보 D18 (#5822): an explicit null, never an omitted key (D21).
+                "history_from_seq": null,
             }),
         );
     }

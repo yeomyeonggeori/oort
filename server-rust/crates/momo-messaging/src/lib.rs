@@ -65,6 +65,8 @@ pub mod channel_viewing;
 pub mod dm;
 /// ADR-0177 증보 D6·D7 / #4227 — a member's own DM closure watermark (no outbox fan-out, D10).
 pub mod dm_closure;
+/// ADR-0177 증보 2026-11-14 D15~D17 / #5822 — 1:1 「대화 나가기」: the requester's own read floor.
+pub mod dm_leave;
 pub mod error;
 pub mod hosted_inbox;
 pub mod huddle;
@@ -170,6 +172,10 @@ pub use dm::{
     DM_LIST_LIMIT,
 };
 pub use dm_closure::{close_dm_in_tx, reopen_dm_in_tx, DmClosureOutcome};
+pub use dm_leave::{
+    clear_own_items_below_in_tx, dm_leave_participant_in_tx, lock_and_classify_in_tx,
+    next_history_floor, raise_history_floor_in_tx, DmLeaveClass, DmLeaveCleanup,
+};
 pub use error::{MessagingError, ProvenanceRejected};
 pub use hosted_inbox::{
     append_job_reference_in_tx, append_message_reference_in_tx, append_run_reference_in_tx,
