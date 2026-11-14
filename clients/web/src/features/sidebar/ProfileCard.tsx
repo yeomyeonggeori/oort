@@ -1,6 +1,14 @@
-import { useRef, useState } from "react";
+import { useId, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { LogOut, Plus, Settings, Smile } from "lucide-react";
+import {
+  Copy,
+  DoorOpen,
+  LogOut,
+  Plus,
+  Settings,
+  SlidersHorizontal,
+  Smile,
+} from "lucide-react";
 import { effectivePresence, type RosterMember } from "@momo/core/lib/api";
 import { CUSTOM_STATUS_MENU_LABEL } from "@momo/core/features/presence/customStatus";
 import { presenceTriggerLabel } from "@momo/core/features/presence/model";
@@ -8,6 +16,10 @@ import { useSession } from "@/app/session";
 import { useOpenAddWorkspace } from "@/features/workspace/useAddWorkspace";
 import { rememberSettingsOpener } from "@/features/settings/settingsFocus";
 import { useRecheckWhenElapsed } from "@/features/settings/useRecheckWhenElapsed";
+import { LeaveWorkspaceDialog } from "@/features/settings/LeaveWorkspaceDialog";
+import { useClipboardCopy } from "@/design/hooks/useClipboardCopy";
+import { useFormatMessage } from "@/i18n/useFormatMessage";
+import { absoluteApiBase } from "@/lib/serverBase";
 import { Button } from "@/design/ui/button";
 import {
   Dialog,
@@ -18,6 +30,7 @@ import {
 import {
   DropdownMenu,
   DropdownMenuContent,
+  DropdownMenuGroup,
   DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuSeparator,
@@ -55,6 +68,17 @@ import { useCustomStatusView } from "./useCustomStatusView";
 // identity row, which sits *below* the channel-list scroller, so the collision
 // boundary is the viewport (Radix default) rather than that list — flipping
 // against the list would pin the card inside a box the trigger is not in.
+//
+// #5785 (QA 14 1단, Buzz의 프로필 메뉴): 내 상태 → **워크스페이스 이름**(머리글) 아래 펼친 줄
+// 「서버 주소 복사」 · 「워크스페이스 설정」 · 「워크스페이스 나가기」(위험색, 확인 창) · 「워크스페이스 추가」.
+// 하위 메뉴가 아니라 머리글 + 보이는 줄이다(#1383, 하위 메뉴 부품은 따로 들어오는 중). 머리글은 자기 id를
+// 갖고 줄 묶음이 `aria-labelledby`로 되짚는다(`DropdownMenuLabel` 머리말).
+//   * 서버 주소 복사는 이 기기가 붙은 서버 주소(`absoluteApiBase`)다. 로그인 화면의 첫 칸이 그 글을 그대로
+//     받는다. 워크스페이스 ID는 싣지 않는다: 로그인 화면의 그 칸이 ID를 읽지 않고, 클라이언트는 지금
+//     워크스페이스가 서버의 기본 워크스페이스인지 모른다. 메뉴는 열린 채 줄 글이 「주소 복사됨」으로 바뀐다
+//     (채널 메뉴의 복사 줄과 같은 문법, 토스트 없음).
+//   * 아이콘은 README §2.8의 정본 낱말을 따른다(복사 = `Copy`). 나가기는 `DoorOpen`이다: 같은 메뉴 두 줄
+//     아래 「로그아웃」이 `LogOut`이라, 두 다른 행동이 같은 글리프를 쓰지 않게 한다.
 // =============================================================================
 
 export function ProfileCard({
@@ -83,6 +107,7 @@ export function ProfileCard({
   compact?: boolean;
 }) {
   const navigate = useNavigate();
+  const formatMessage = useFormatMessage();
   const { logout } = useSession();
   const openAddWorkspace = useOpenAddWorkspace();
   const triggerRef = useRef<HTMLButtonElement>(null);
@@ -91,6 +116,16 @@ export function ProfileCard({
   const [confirmLogout, setConfirmLogout] = useState(false);
   const [setStatusOpen, setSetStatusOpen] = useState(false);
   const [dndOpen, setDndOpen] = useState(false);
+  const [leaveOpen, setLeaveOpen] = useState(false);
+  const [copyFailed, setCopyFailed] = useState(false);
+  const workspaceHeadId = useId();
+  const copyNoteId = useId();
+  const addressCopy = useClipboardCopy(absoluteApiBase());
+  const addressLabel = copyFailed
+    ? formatMessage("workspace.menu.copyFailed")
+    : addressCopy.copied
+      ? formatMessage("workspace.menu.copiedAddress")
+      : formatMessage("workspace.menu.copyAddress");
   // 방해 금지의 기한이 지나면 서버에 다시 묻는다(아바타 점·메뉴가 서버의 새 답을 그린다, #2899 H3).
   useRecheckWhenElapsed(workspaceId, selfMember?.dndUntilMs);
   const effective = effectivePresence(selfMember?.presenceStatus, connected);
@@ -105,7 +140,14 @@ export function ProfileCard({
 
   return (
     <>
-      <DropdownMenu open={open} onOpenChange={setOpen}>
+      <DropdownMenu
+        open={open}
+        onOpenChange={(next) => {
+          // 다시 열 때 앞의 복사 실패 글이 남지 않는다.
+          if (next) setCopyFailed(false);
+          setOpen(next);
+        }}
+      >
         <DropdownMenuTrigger asChild>
           {/* #3276: no `press` here. `.press:active` is `scale(0.98)`, and on a
               row that holds an avatar, a name and a status emoji it shrank the
@@ -164,7 +206,9 @@ export function ProfileCard({
           // Menu measure is the menu's (pane-sm), not the user's status
           // sentence. Without a cap the head's wrap never fires and an
           // 80-char status pushes the panel past a 390 viewport (#1889 R2-B1).
-          className="max-w-pane-sm"
+          // #5785: 워크스페이스 줄 넷이 더해져 메뉴가 길어졌다. 낮은 창(200% 확대 640×400)에서 위쪽
+          // 「내 상태」가 창 밖으로 잘리던 것을 판 안 스크롤로 받는다(컨텍스트 메뉴와 같은 유틸, #3963).
+          className="max-w-pane-sm max-h-menu-available overscroll-contain scrollbar-visible"
           onCloseAutoFocus={(event) => {
             // The add-workspace item hands the next layer a dialog. If this
             // menu yanks focus back to the card, Esc lands on the trigger and
@@ -204,22 +248,87 @@ export function ProfileCard({
             {CUSTOM_STATUS_MENU_LABEL}
           </DropdownMenuItem>
           <DropdownMenuSeparator />
-          {/* Title over a visible row, not a submenu (#1383). The one real
-              verb is the rail's 추가; switching workspaces is accrued. */}
-          <DropdownMenuLabel>워크스페이스</DropdownMenuLabel>
-          <DropdownMenuItem
-            data-testid="profile-add-workspace"
-            onSelect={() => {
-              openingWorkspaceRef.current = true;
-              const trigger =
-                triggerRef.current ??
-                document.querySelector<HTMLElement>('[data-testid="profile-card"]');
-              openAddWorkspace(trigger);
-            }}
+          {/* Title over visible rows, not a submenu (#1383). The title is this
+              workspace's own name (Buzz: the community name heads its rows);
+              switching workspaces is accrued (ADR-0161 4b-3). */}
+          <DropdownMenuLabel
+            id={workspaceHeadId}
+            data-testid="profile-workspace-head"
+            className="max-w-full min-w-0 break-keep [overflow-wrap:anywhere] whitespace-normal"
           >
-            <Plus className="size-4" aria-hidden="true" />
-            워크스페이스 추가
-          </DropdownMenuItem>
+            {workspaceName ?? formatMessage("workspace.menu.fallbackTitle")}
+          </DropdownMenuLabel>
+          <DropdownMenuGroup aria-labelledby={workspaceHeadId}>
+            <DropdownMenuItem
+              data-testid="profile-copy-address"
+              aria-describedby={copyNoteId}
+              onSelect={(event) => {
+                // 메뉴를 열어 둔 채 줄 글이 결과를 말한다(복사됨 / 복사하지 못했어요).
+                event.preventDefault();
+                setCopyFailed(false);
+                void addressCopy.copy().then((ok) => {
+                  if (!ok) setCopyFailed(true);
+                });
+              }}
+            >
+              <Copy className="size-4" aria-hidden="true" />
+              {addressLabel}
+            </DropdownMenuItem>
+            {/* 서버 주소만으로는 같은 서버의 기본이 아닌 워크스페이스에 못 들어온다(로그인 화면이 따로 ID를 받는다,
+                `loginWorkspaceEntry.ts`). 클라이언트는 지금 워크스페이스가 기본인지 몰라서 늘 말한다.
+                낭독용 설명(`sr-only`)으로만 둔다: 보이는 줄로 두면 메뉴 높이가 바뀐다. 복사의 영수증은 줄 글 하나
+                (「서버 주소 복사됨」)뿐이라 메뉴의 높이·줄 위치는 복사 전·직후·영수증이 걷힌 뒤 모두 같다(#5785 r3 H1:
+                보였다 사라지는 안내가 포인터 밑의 줄을 옮겼다). */}
+            <p
+              id={copyNoteId}
+              className="sr-only"
+              data-testid="profile-copy-address-note"
+            >
+              {formatMessage("workspace.menu.copyAddressNote")}
+            </p>
+            <DropdownMenuItem
+              data-testid="profile-workspace-settings"
+              onSelect={() => {
+                rememberSettingsOpener(
+                  triggerRef.current ??
+                    document.querySelector<HTMLElement>(
+                      '[data-testid="profile-card"]'
+                    )
+                );
+                navigate("/settings?section=workspace");
+              }}
+            >
+              <SlidersHorizontal className="size-4" aria-hidden="true" />
+              {formatMessage("workspace.menu.settings")}
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              tone="danger"
+              data-testid="profile-leave-workspace"
+              onSelect={(event) => {
+                // 파괴적 액션은 한 번의 무방비 클릭으로 발화하지 않는다(§6). 로그아웃과 같은 자리:
+                // 메뉴를 닫고 확인 창으로 넘긴다.
+                event.preventDefault();
+                setOpen(false);
+                setLeaveOpen(true);
+              }}
+            >
+              <DoorOpen className="size-4" aria-hidden="true" />
+              {formatMessage("workspace.menu.leave")}
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              data-testid="profile-add-workspace"
+              onSelect={() => {
+                openingWorkspaceRef.current = true;
+                const trigger =
+                  triggerRef.current ??
+                  document.querySelector<HTMLElement>('[data-testid="profile-card"]');
+                openAddWorkspace(trigger);
+              }}
+            >
+              <Plus className="size-4" aria-hidden="true" />
+              {formatMessage("workspace.add.title")}
+            </DropdownMenuItem>
+          </DropdownMenuGroup>
           <DropdownMenuSeparator />
           <DropdownMenuItem
             data-testid="nav-settings"
@@ -261,6 +370,14 @@ export function ProfileCard({
         workspaceId={workspaceId}
         selfMemberId={selfMemberId}
         selfMember={selfMember}
+        opener={triggerRef.current}
+      />
+
+      <LeaveWorkspaceDialog
+        open={leaveOpen}
+        onOpenChange={setLeaveOpen}
+        workspaceId={workspaceId}
+        workspaceName={workspaceName}
         opener={triggerRef.current}
       />
 
