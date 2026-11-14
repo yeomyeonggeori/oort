@@ -239,7 +239,8 @@ pub async fn create_channel_in_tx(
 // channel spec validation (B4.1 — Swift `ChannelRoutes.normalized*`, :391-424)
 // ---------------------------------------------------------------------------
 
-/// Swift `normalizedChannelName` bounds, counted in characters.
+/// Channel name bound, counted in Unicode code points after normalization
+/// (ADR-0225 D5) — not bytes: 80 Hangul syllables are 240 bytes.
 pub const CHANNEL_NAME_MAX_CHARS: usize = 80;
 /// Swift `normalizedTopic` bound.
 pub const CHANNEL_TOPIC_MAX_CHARS: usize = 280;
@@ -252,7 +253,9 @@ pub enum ChannelSpecInvalid {
     Kind,
     #[error("channel name must be 1-80 characters")]
     NameLength,
-    #[error("channel name must use lowercase letters, numbers, hyphen, or underscore")]
+    #[error(
+        "channel name must use letters, numbers, hyphen, or underscore, and start with a letter or number"
+    )]
     NameCharset,
     #[error("channel topic must be 280 characters or fewer")]
     TopicLength,
@@ -272,33 +275,178 @@ pub fn normalize_channel_kind(raw: &str) -> Result<ChannelKind, ChannelSpecInval
     }
 }
 
-/// Swift's `^[a-z0-9][a-z0-9_-]*[a-z0-9]$|^[a-z0-9]$` after trim + lowercase,
-/// spelled out rather than pulled through a regex dependency.
+/// Why [`judge_channel_name`] refused a name — the five reasons of the shared
+/// vectors (`docs/api/channel-name.vectors.json`, ADR-0225 D11).
 ///
-/// Length is checked **before** the charset, matching Swift, so an 81-character
-/// valid-looking name is told it is too long rather than told it has bad
-/// characters.
-pub fn normalize_channel_name(raw: &str) -> Result<String, ChannelSpecInvalid> {
-    let value = raw.trim().to_lowercase();
+/// The HTTP and agent paths still answer with two errors (length, characters):
+/// [`ChannelNameRefusal::spec_invalid`] is that mapping. The five exist so the
+/// vectors can pin every check on its own — a hidden character that the charset
+/// check would also refuse must still be refused *as hidden*, or deleting the
+/// hidden check would stay green.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ChannelNameRefusal {
+    /// Nothing left after the blanks are dropped.
+    Required,
+    /// More than [`CHANNEL_NAME_MAX_CHARS`] code points after normalization.
+    TooLong,
+    /// A control, format, private-use or surrogate code point, or a letter/mark
+    /// that renders as nothing (ADR-0225 D4).
+    Hidden,
+    /// Something that is not a letter, number, `-` or `_`, or a combining mark
+    /// with no letter/number before it (D1).
+    Unsupported,
+    /// Starts or ends with `-` or `_` (D1).
+    Edge,
+}
+
+impl ChannelNameRefusal {
+    /// The `verdict` label this refusal carries in the shared vectors.
+    pub fn vector_label(self) -> &'static str {
+        match self {
+            ChannelNameRefusal::Required => "required",
+            ChannelNameRefusal::TooLong => "tooLong",
+            ChannelNameRefusal::Hidden => "hidden",
+            ChannelNameRefusal::Unsupported => "unsupported",
+            ChannelNameRefusal::Edge => "edge",
+        }
+    }
+
+    /// The server's answer: one length error, one character error (ADR-0225
+    /// 「시험 벡터」 — telling the five apart is the screen's job).
+    pub fn spec_invalid(self) -> ChannelSpecInvalid {
+        match self {
+            ChannelNameRefusal::Required | ChannelNameRefusal::TooLong => {
+                ChannelSpecInvalid::NameLength
+            }
+            ChannelNameRefusal::Hidden
+            | ChannelNameRefusal::Unsupported
+            | ChannelNameRefusal::Edge => ChannelSpecInvalid::NameCharset,
+        }
+    }
+}
+
+/// Letters and marks that render as nothing (ADR-0225 D4, second bullet). The
+/// control/format/private-use/surrogate half of D4 is decided by general
+/// category instead, so it cannot miss a `Cf` code point the way a hand list can.
+fn is_invisible_letter_or_mark(c: char) -> bool {
+    matches!(
+        u32::from(c),
+        // Hangul fillers (Lo).
+        0x115F | 0x1160 | 0x3164 | 0xFFA0
+        // Combining grapheme joiner, Khmer inherent vowels, Mongolian free
+        // variation selectors (Mn).
+        | 0x034F | 0x17B4 | 0x17B5 | 0x180B..=0x180D | 0x180F
+        // Variation selectors (Mn).
+        | 0xFE00..=0xFE0F | 0xE0100..=0xE01EF
+    )
+}
+
+/// ADR-0225 D3 steps 1-5: the value a name is stored and looked up as, with
+/// no accept/refuse decision. [`judge_channel_name`] checks this value; a path
+/// that only needs to *find* a channel by a typed name (the CLI, B3) folds with
+/// this and compares.
+///
+/// 1. NFC — decomposed Hangul from a Mac composes.
+/// 2. Fullwidth U+FF01..=U+FF5E → U+0021..=U+007E. Only this block: NFKC would
+///    also turn compatibility jamo into conjoining ones.
+/// 3. Blanks are Unicode `White_Space` (`char::is_whitespace`, the same set the
+///    old `trim()` dropped). Edge runs go; an inner run becomes one `-`, or
+///    nothing when a `-` or `_` already sits next to it.
+/// 4. Lowercase the whole string (default rules, not per char: a final capital
+///    sigma becomes `ς`).
+/// 5. NFC again, for the rare lowercase mapping that leaves a decomposed pair.
+pub fn fold_channel_name(raw: &str) -> String {
+    use unicode_normalization::UnicodeNormalization as _;
+
+    let folded: Vec<char> = raw
+        .nfc()
+        .map(|c| match u32::from(c) {
+            code @ 0xFF01..=0xFF5E => char::from_u32(code - 0xFEE0).unwrap_or(c),
+            _ => c,
+        })
+        .collect();
+    let is_separator = |c: char| c == '-' || c == '_';
+    let mut spaced = String::with_capacity(raw.len());
+    let mut index = 0;
+    while index < folded.len() {
+        let c = folded[index];
+        if !c.is_whitespace() {
+            spaced.push(c);
+            index += 1;
+            continue;
+        }
+        let run_start = index;
+        while index < folded.len() && folded[index].is_whitespace() {
+            index += 1;
+        }
+        let Some(&next) = folded.get(index) else {
+            break; // a trailing run: dropped
+        };
+        if run_start == 0 {
+            continue; // a leading run: dropped
+        }
+        let beside_separator =
+            spaced.chars().next_back().is_some_and(is_separator) || is_separator(next);
+        if !beside_separator {
+            spaced.push('-');
+        }
+    }
+    spaced.to_lowercase().nfc().collect()
+}
+
+/// ADR-0225 D1-D5: fold the name ([`fold_channel_name`]) and decide. Checks run
+/// length → hidden → characters → edges, so an over-long name is told it is too
+/// long and a name with a zero-width space is told that, not "bad character".
+pub fn judge_channel_name(raw: &str) -> Result<String, ChannelNameRefusal> {
+    use unicode_properties::{GeneralCategory, GeneralCategoryGroup, UnicodeGeneralCategory as _};
+
+    let value = fold_channel_name(raw);
     let length = value.chars().count();
-    if length == 0 || length > CHANNEL_NAME_MAX_CHARS {
-        return Err(ChannelSpecInvalid::NameLength);
+    if length == 0 {
+        return Err(ChannelNameRefusal::Required);
     }
-    let is_edge = |c: char| c.is_ascii_lowercase() || c.is_ascii_digit();
-    let is_inner = |c: char| is_edge(c) || c == '_' || c == '-';
-    let mut chars = value.chars();
-    let first = chars.next().expect("non-empty");
-    if !is_edge(first) {
-        return Err(ChannelSpecInvalid::NameCharset);
+    if length > CHANNEL_NAME_MAX_CHARS {
+        return Err(ChannelNameRefusal::TooLong);
     }
-    let last = value.chars().next_back().expect("non-empty");
-    if !is_edge(last) {
-        return Err(ChannelSpecInvalid::NameCharset);
+    let hidden = |c: char| {
+        matches!(
+            c.general_category(),
+            GeneralCategory::Control
+                | GeneralCategory::Format
+                | GeneralCategory::PrivateUse
+                | GeneralCategory::Surrogate
+        ) || is_invisible_letter_or_mark(c)
+    };
+    if value.chars().any(hidden) {
+        return Err(ChannelNameRefusal::Hidden);
     }
-    if !value.chars().all(is_inner) {
-        return Err(ChannelSpecInvalid::NameCharset);
+    // A combining mark must lean on a letter or number (directly, or through
+    // other marks) — never on `-`, `_` or the start of the name.
+    let mut after_base = false;
+    for c in value.chars() {
+        match c.general_category_group() {
+            GeneralCategoryGroup::Letter | GeneralCategoryGroup::Number => after_base = true,
+            GeneralCategoryGroup::Mark if after_base => {}
+            _ if c == '-' || c == '_' => after_base = false,
+            _ => return Err(ChannelNameRefusal::Unsupported),
+        }
+    }
+    let at_edge = |c: Option<char>| c.is_some_and(|c| c == '-' || c == '_');
+    if at_edge(value.chars().next()) || at_edge(value.chars().next_back()) {
+        return Err(ChannelNameRefusal::Edge);
     }
     Ok(value)
+}
+
+/// The channel name rule every path that stores or looks up a public/private
+/// channel by name goes through (ADR-0225): REST create, the agent actions
+/// (`channel.create`, `channel.member.add`, `hosted.channels.grant`). Letters
+/// and numbers of any script, `-` and `_`; blanks become `-`; lowercase; at
+/// most 80 code points. [`judge_channel_name`] is the same decision with the
+/// five reasons the shared vectors name; this answers with the two errors the
+/// API has always had.
+pub fn normalize_channel_name(raw: &str) -> Result<String, ChannelSpecInvalid> {
+    judge_channel_name(raw).map_err(ChannelNameRefusal::spec_invalid)
 }
 
 /// Trim a topic; an empty one is `None`, not `Some("")` — Swift reads a blank
@@ -903,8 +1051,10 @@ mod tests {
         );
     }
 
+    /// The old-rule edges the shared vectors (`tests/channel_name_vectors.rs`)
+    /// do not list, plus the two answers ADR-0225 changed.
     #[test]
-    fn channel_names_follow_the_swift_charset_and_edges() {
+    fn channel_names_keep_the_old_edges_and_take_any_script() {
         assert_eq!(normalize_channel_name("  General  "), Ok("general".into()));
         assert_eq!(normalize_channel_name("a"), Ok("a".into()));
         assert_eq!(normalize_channel_name("9"), Ok("9".into()));
@@ -913,7 +1063,7 @@ mod tests {
             Ok("eng-team_2".into())
         );
 
-        // Edges must be alphanumeric; the middle may carry - and _.
+        // Edges must be a letter or number; the middle may carry - and _.
         for rejected in ["-lead", "lead-", "_x", "x_", "-", "_"] {
             assert_eq!(
                 normalize_channel_name(rejected),
@@ -921,14 +1071,20 @@ mod tests {
                 "{rejected} must be refused"
             );
         }
+        // ADR-0225 D1: letters of any script (the old rule refused this).
+        assert_eq!(normalize_channel_name("도그푸딩"), Ok("도그푸딩".into()));
+        // ADR-0225 D2: an inner blank becomes `-` (the old rule refused this).
+        assert_eq!(normalize_channel_name("a b"), Ok("a-b".into()));
+        // ADR-0225 D3 step 5: a pair only the fullwidth fold and lowercasing
+        // make composable (fullwidth E + combining acute) is composed again.
+        // No row of the shared vectors needs step 5, so it is pinned here.
         assert_eq!(
-            normalize_channel_name("도그푸딩"),
-            Err(ChannelSpecInvalid::NameCharset),
-            "the charset is ASCII; a non-ASCII name is refused by name, not silently mangled"
+            normalize_channel_name("\u{FF25}\u{301}quipe"),
+            Ok("\u{E9}quipe".into())
         );
         assert_eq!(
-            normalize_channel_name("a b"),
-            Err(ChannelSpecInvalid::NameCharset)
+            normalize_channel_name("a!").unwrap_err().to_string(),
+            "channel name must use letters, numbers, hyphen, or underscore, and start with a letter or number"
         );
 
         // Length is answered before the charset, so an over-long name is told
