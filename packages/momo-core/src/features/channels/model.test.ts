@@ -48,11 +48,25 @@ import {
 
 // This package has no Node typings (it runs in the phone and the browser), so the
 // byte-level check loads Node's own modules by name at run time.
-const nodeModule = (name: string): Promise<any> => import(/* @vite-ignore */ name);
+interface NodeBytes {
+  toString(encoding: string): string;
+  [index: number]: number;
+  length: number;
+}
+interface NodeForThisTest {
+  readFileSync(path: string): NodeBytes;
+  createHash(algorithm: string): { update(bytes: NodeBytes): { digest(encoding: string): string } };
+  fileURLToPath(url: URL): string;
+}
+const nodeModule = (name: string): Promise<NodeForThisTest> =>
+  import(/* @vite-ignore */ name) as Promise<NodeForThisTest>;
 const { readFileSync } = await nodeModule("node:fs");
 const { createHash } = await nodeModule("node:crypto");
 const { fileURLToPath } = await nodeModule("node:url");
 const FIXTURE_PATH: string = fileURLToPath(
+  // This file runs under vitest only; Metro never loads a core test, so the
+  // bundler-only `import.meta` rule does not reach it.
+  // eslint-disable-next-line no-restricted-syntax
   new URL("./__fixtures__/channel-name.vectors.json", (import.meta as unknown as { url: string }).url)
 );
 
@@ -68,7 +82,7 @@ interface VectorCase {
   verdict: "ok" | "required" | "tooLong" | "hidden" | "unsupported" | "edge";
   stored?: string;
 }
-const vectorBytes: { toString(encoding: string): string } = readFileSync(FIXTURE_PATH);
+const vectorBytes = readFileSync(FIXTURE_PATH);
 const vectors = JSON.parse(vectorBytes.toString("utf8")) as {
   maxChars: number;
   cases: VectorCase[];
@@ -84,7 +98,9 @@ const label = (input: string) =>
 describe("shared vectors copy", () => {
   it("is the file the server reads: sha256 pinned, ASCII only", () => {
     expect(createHash("sha256").update(vectorBytes).digest("hex")).toBe(VECTORS_SHA256);
-    expect(/^[\x00-\x7f]*$/.test(vectorBytes.toString("latin1"))).toBe(true);
+    let nonAscii = 0;
+    for (let i = 0; i < vectorBytes.length; i += 1) if (vectorBytes[i]! > 0x7f) nonAscii += 1;
+    expect(nonAscii).toBe(0);
   });
 
   it("carries the 57 rows and the 80 code point ceiling", () => {
