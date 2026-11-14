@@ -1,5 +1,5 @@
 import { DmAgentsMenu } from "./DmAgentsMenu";
-import { dmLeaveMode, dmLeaveOffered, higherHistoryFloor } from "@momo/core/features/channels/dmLeave";
+import { dmLeaveMode, dmLeaveOffered, higherHistoryFloor, isPersonToPersonDm } from "@momo/core/features/channels/dmLeave";
 import { idKey } from "@momo/core/features/workspace/directory";
 import { readProjectionPhase } from "@momo/core/features/sidebar/goneDm";
 import { requestDmLeave, setOpenTimeline, useDmLeaveStore } from "@/features/sidebar/dmLeaveStore";
@@ -1166,16 +1166,25 @@ export function ChatShell() {
   // 선다(D20). 다른 DM 에는 ⋮ 를 세우지 않는다 - 에이전트가 앉은 DM 은 이미 「대화 멤버 관리」 ⋮ 를 든다. 저장소의 판은 나가기 경로가
   // 이 워크스페이스에서 접혔을 때(405·501) 다시 읽게 한다.
   useDmLeaveStore();
+  const readPhaseNow = readProjectionPhase(readStates);
   const leaveOffered =
     stressCount === 0 &&
     channel?.kind === "dm" &&
     dmLeaveOffered({
       mode: dmLeaveMode({ workspaceId, rows: readStates.data }),
-      phase: readProjectionPhase(readStates),
+      phase: readPhaseNow,
       channel,
       directory,
       selfMemberId: session.member.id,
     });
+  // 투영이 오는 중인 사람끼리 1:1 에는 ⋮ 자리를 미리 세운다(알림 줄만, 「대화 나가기」는 투영이 준비되면 선다): 늦게 서는 ⋮ 가 머리 단추들을
+  // 왼쪽으로 밀지 않게. 투영이 옛 서버라고 답하면 그때 걷힌다(옛 서버의 첫 진입 한 번).
+  const headerMenuForDm =
+    leaveOffered ||
+    (stressCount === 0 &&
+      channel?.kind === "dm" &&
+      readPhaseNow === "loading" &&
+      isPersonToPersonDm(channel, directory, session.member.id));
 
   // 멤버 수 · 허들 · ⋮ (컨트롤 묶음의 끝). **⋮는 혼자 한 줄에 서지 않는다** (#5206): 컨트롤 묶음이 줄을 바꿀 때(판이 좁은 600대)
   // 맨 끝의 ⋮가 혼자 셋째 줄에 서지 않게, ⋮를 바로 앞 컨트롤과 줄바꿈 한 덩어리(`flex-nowrap`)로 묶는다. 앞 컨트롤은 허들 컨트롤이고,
@@ -1201,7 +1210,7 @@ export function ChatShell() {
       <HuddleHeaderControl huddle={huddle} offline={offline} />
     ) : null;
     const menu =
-      stressCount === 0 && channel && (channel.kind !== "dm" || leaveOffered) ? (
+      stressCount === 0 && channel && (channel.kind !== "dm" || headerMenuForDm) ? (
         <ChannelHeaderMenu
           workspaceId={workspaceId}
           channel={channel}
