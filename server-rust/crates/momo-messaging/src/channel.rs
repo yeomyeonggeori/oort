@@ -1226,4 +1226,51 @@ mod tests {
         );
         assert!(normalize_channel_topic(Some(&"긴".repeat(CHANNEL_TOPIC_MAX_CHARS))).is_ok());
     }
+
+    /// ADR-0225 D4, second bullet: every letter or mark that renders as nothing
+    /// is refused *as hidden*, one code point at a time. The list is a `matches!`
+    /// of ranges, so a test over whole names cannot tell which entry is missing;
+    /// this walks each listed code point and each end of each range. Each one is
+    /// a letter or a mark, so without its entry the charset check would take it
+    /// — dropping any single entry makes its row below accept the name.
+    #[test]
+    fn every_listed_invisible_letter_or_mark_is_refused_as_hidden() {
+        let listed: Vec<u32> = [
+            0x115F_u32, 0x1160, 0x3164, 0xFFA0, 0x034F, 0x17B4, 0x17B5, 0x180F,
+        ]
+        .into_iter()
+        .chain(0x180B..=0x180D)
+        .chain(0xFE00..=0xFE0F)
+        .chain(0xE0100..=0xE01EF)
+        .collect();
+        assert_eq!(listed.len(), 8 + 3 + 16 + 240);
+        for code in listed {
+            let c = char::from_u32(code).expect("a scalar value");
+            let name = format!("가{c}나");
+            assert_eq!(
+                judge_channel_name(&name),
+                Err(ChannelNameRefusal::Hidden),
+                "U+{code:04X} must be refused as hidden"
+            );
+        }
+    }
+
+    /// The neighbours of each listed range are *not* hidden: the list is exact,
+    /// so a range widened by one (U+FE10, U+E01F0, U+1161 …) is caught too.
+    /// U+180E is left out: it is a format character, hidden by category rather than by
+    /// the list.
+    #[test]
+    fn the_code_points_next_to_the_invisible_list_are_ordinary() {
+        for code in [
+            0x115E_u32, 0x1161, 0x3163, 0x3165, 0xFF9F, 0xFFA1, 0x034E, 0x0350, 0x17B3, 0x17B6,
+            0x180A, 0xFE10, 0xE00FF, 0xE01F0,
+        ] {
+            let c = char::from_u32(code).expect("a scalar value");
+            assert_ne!(
+                judge_channel_name(&format!("가{c}나")),
+                Err(ChannelNameRefusal::Hidden),
+                "U+{code:04X} is not on the invisible list"
+            );
+        }
+    }
 }

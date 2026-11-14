@@ -1108,9 +1108,10 @@ pub const CHANNEL_CREATE_KINDS: [&str; 2] = ["public", "private"];
 /// What `kind` means when a proposal names none: **private**. An agent that wants
 /// a public channel has to say so, and the card shows it.
 pub const CHANNEL_CREATE_DEFAULT_KIND: &str = "private";
-/// `name` bound in UTF-8 bytes (the domain's 80 is characters, but the accepted
-/// alphabet is ASCII, so the two coincide for every legal name).
-pub const CHANNEL_NAME_MAX_BYTES: u64 = 80;
+/// `name` bound in UTF-8 bytes: the domain's 80 characters (ADR-0225 D5) at the
+/// 4-byte worst case. The domain normaliser still enforces the 80 characters;
+/// this only keeps a 27-syllable Hangul name from being refused as "too long".
+pub const CHANNEL_NAME_MAX_BYTES: u64 = 320;
 /// `topic` bound in UTF-8 bytes: the domain's 280 characters at the 4-byte
 /// worst case. The domain normaliser still enforces the 280 characters.
 pub const CHANNEL_TOPIC_MAX_BYTES: u64 = 1_120;
@@ -1550,8 +1551,9 @@ fn hosted_channels_grant_args_schema() -> Value {
     })
 }
 
-/// A channel reference: `#` + the 80-character name.
-pub const CHANNEL_REF_MAX_BYTES: u64 = 81;
+/// A channel reference: `#` + the 80-character name, at the 4-byte worst case
+/// (ADR-0225 D5).
+pub const CHANNEL_REF_MAX_BYTES: u64 = 321;
 
 /// `team_ai.roles.set` arguments (ADR-0201 증보 v3 B3-T, #4964): one bundle and the switch.
 /// The enum is the six **switchable** bundles — `chat_read` is not on it, and the
@@ -2584,9 +2586,9 @@ pub fn channel_member_add_result_body(
     already_in: usize,
 ) -> String {
     if already_in > 0 {
-        format!("#{channel_name}에 멤버 {added}명을 넣었어요(이미 있던 {already_in}명)")
+        format!("#{channel_name} 채널에 멤버 {added}명을 넣었어요(이미 있던 {already_in}명)")
     } else {
-        format!("#{channel_name}에 멤버 {added}명을 넣었어요")
+        format!("#{channel_name} 채널에 멤버 {added}명을 넣었어요")
     }
 }
 
@@ -3286,6 +3288,33 @@ pub fn last_attempt_patch(last_attempt: &str) -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// ADR-0225 D5: the bytes bounds are the 80-character name at the 4-byte
+    /// worst case (`#` and a name for the reference), and a legal 80-syllable
+    /// Hangul name (240 bytes) fits under both. The MCP tool's copy of the numbers
+    /// is measured against these by the catalog drift test in `momo-server`.
+    #[test]
+    fn the_channel_name_bounds_fit_eighty_hangul_characters() {
+        assert_eq!(CHANNEL_NAME_MAX_BYTES, 4 * 80);
+        assert_eq!(CHANNEL_REF_MAX_BYTES, CHANNEL_NAME_MAX_BYTES + 1);
+        let name = "가".repeat(80);
+        assert!(name.len() as u64 <= CHANNEL_NAME_MAX_BYTES);
+        assert!(format!("#{name}").len() as u64 <= CHANNEL_REF_MAX_BYTES);
+    }
+
+    /// ADR-0225 D8-4: the member-add outcome puts the word `채널` between the name
+    /// and the particle, so an agent re-reading it cannot take `이름에` for a name.
+    #[test]
+    fn the_member_add_outcome_does_not_glue_a_particle_to_the_name() {
+        assert_eq!(
+            channel_member_add_result_body("디자인-리뷰", 2, 0),
+            "#디자인-리뷰 채널에 멤버 2명을 넣었어요"
+        );
+        assert_eq!(
+            channel_member_add_result_body("디자인-리뷰", 1, 3),
+            "#디자인-리뷰 채널에 멤버 1명을 넣었어요(이미 있던 3명)"
+        );
+    }
 
     #[test]
     fn the_executable_and_declared_lists_are_what_the_batch_opened() {
