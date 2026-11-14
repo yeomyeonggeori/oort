@@ -33327,3 +33327,625 @@ async fn a_hangul_channel_name_flows_through_create_member_add_and_grant_5828() 
     .await;
     assert_eq!(status, 400, "81 characters are refused: {refused}");
 }
+
+// ---------------------------------------------------------------------------
+// ADR-0225 D7 (#5830) — an agent's channel name that reads like a live one
+// ---------------------------------------------------------------------------
+
+/// `latin` with its first `e` replaced by the Cyrillic U+0435: the same name to a
+/// reader, a different one to the database.
+fn lookalike_5830(latin: &str) -> String {
+    assert!(latin.contains('e'), "{latin} has no e to swap");
+    latin.replacen('e', "\u{435}", 1)
+}
+
+/// A channel of `kind` named `name`, with `members` seated (a `dm` gets its own
+/// `dm_key`, as a group DM room does).
+async fn named_channel_5830(
+    su: &PgPool,
+    workspace: Uuid,
+    kind: &str,
+    name: &str,
+    members: &[Uuid],
+    archived: bool,
+) -> Uuid {
+    let id = Uuid::new_v4();
+    let dm_key = (kind == "dm").then(|| id.to_string());
+    sqlx::query(
+        "INSERT INTO channel (id, workspace_id, kind, name, dm_key, archived_at) \
+         VALUES ($1, $2, $3::channel_kind, $4, $5, CASE WHEN $6 THEN now() END)",
+    )
+    .bind(id)
+    .bind(workspace)
+    .bind(kind)
+    .bind(name)
+    .bind(dm_key)
+    .bind(archived)
+    .execute(su)
+    .await
+    .expect("named channel");
+    sqlx::query("INSERT INTO channel_seq (channel_id, workspace_id, last_seq) VALUES ($1, $2, 0)")
+        .bind(id)
+        .bind(workspace)
+        .execute(su)
+        .await
+        .expect("channel_seq");
+    for member in members {
+        sqlx::query(
+            "INSERT INTO membership (workspace_id, channel_id, member_id, role) \
+             VALUES ($1, $2, $3, 'member')",
+        )
+        .bind(workspace)
+        .bind(id)
+        .bind(member)
+        .execute(su)
+        .await
+        .expect("seat member");
+    }
+    id
+}
+
+/// The `action.refused` rows of the D7 refusal, oldest first, with the row's actor
+/// and subject.
+async fn lookalike_refusals_5830(
+    su: &PgPool,
+    workspace: Uuid,
+) -> Vec<(Option<Uuid>, Option<Uuid>, Value)> {
+    sqlx::query_as(
+        "SELECT actor_member_id, subject_member_id, detail FROM audit_log \
+          WHERE workspace_id = $1 AND action = 'action.refused' \
+            AND detail->>'reason' = 'channel_name_lookalike' \
+          ORDER BY created_at, id",
+    )
+    .bind(workspace)
+    .fetch_all(su)
+    .await
+    .expect("look-alike refusals")
+}
+
+async fn approval_count_5830(su: &PgPool, workspace: Uuid) -> i64 {
+    sqlx::query_scalar("SELECT count(*) FROM approval WHERE workspace_id = $1")
+        .bind(workspace)
+        .fetch_one(su)
+        .await
+        .expect("approval count")
+}
+
+async fn approval_status_5830(su: &PgPool, approval: Uuid) -> String {
+    sqlx::query_scalar("SELECT status::text FROM approval WHERE id = $1")
+        .bind(approval)
+        .fetch_one(su)
+        .await
+        .expect("approval status")
+}
+
+/// A person (the fixture's admin) makes a channel through REST.
+async fn rest_create_channel_5830(
+    client: &reqwest::Client,
+    base: &str,
+    fixture: &Fixture,
+    name: &str,
+) -> (u16, Value) {
+    let response = client
+        .post(format!(
+            "{base}/v1/workspaces/{}/channels",
+            fixture.workspace
+        ))
+        .bearer_auth(&fixture.human_jwt)
+        .json(&json!({"kind": "public", "name": name}))
+        .send()
+        .await
+        .expect("channel create responds");
+    let status = response.status().as_u16();
+    (status, response.json().await.expect("channel create body"))
+}
+
+/// **ADR-0225 D7 (#5830) — at the proposal.** An agent's `channel.create` whose name
+/// reads like a channel the agent can see — a public one, a private one it sits in —
+/// is refused before any card exists, with the same answer as any refused argument,
+/// and audited by reason and channel id, never by name. A person makes the very same
+/// look-alike through REST: D7 leaves the people's path alone.
+///
+/// | revert that makes it red |
+/// |---|
+/// | drop the D7 check from `resolve_action_with_origin_in_tx` |
+/// | run it only on the stored arguments (the decision) |
+/// | drop the `action.refused` row |
+/// | put the channel's name into the rejection message |
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn an_agents_lookalike_of_a_channel_it_can_see_is_refused_at_the_proposal_5830() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let fixture = seed(&su).await;
+    let base = start_server(app.clone(), true).await;
+    let client = reqwest::Client::new();
+    let s = Uuid::new_v4().simple().to_string()[..8].to_string();
+    let public_name = format!("general-{s}");
+    let private_name = format!("release-{s}");
+    let public =
+        named_channel_5830(&su, fixture.workspace, "public", &public_name, &[], false).await;
+    let private = named_channel_5830(
+        &su,
+        fixture.workspace,
+        "private",
+        &private_name,
+        &[fixture.hosted_agent],
+        false,
+    )
+    .await;
+    let approvals_before = approval_count_5830(&su, fixture.workspace).await;
+
+    // Any refused argument answers the same: the look-alike is not singled out.
+    let (status, malformed) = try_propose_action_3706(
+        &client,
+        &base,
+        &su,
+        &fixture,
+        "channel.create",
+        json!({"name": "not.a.name"}),
+    )
+    .await;
+    assert_eq!(status, 400, "{malformed}");
+    for (lookalike, live) in [
+        (lookalike_5830(&public_name), &public_name),
+        (lookalike_5830(&private_name), &private_name),
+    ] {
+        let (status, refused) = try_propose_action_3706(
+            &client,
+            &base,
+            &su,
+            &fixture,
+            "channel.create",
+            json!({"name": lookalike}),
+        )
+        .await;
+        assert_eq!(status, 400, "{lookalike}: {refused}");
+        assert_eq!(error_code(&refused), error_code(&malformed), "{refused}");
+        assert!(!refused.to_string().contains(live.as_str()), "{refused}");
+    }
+    assert_eq!(
+        approval_count_5830(&su, fixture.workspace).await,
+        approvals_before,
+        "no card was raised"
+    );
+
+    let rows = lookalike_refusals_5830(&su, fixture.workspace).await;
+    assert_eq!(rows.len(), 2, "{rows:?}");
+    for ((actor, subject, detail), similar) in rows.iter().zip([public, private]) {
+        assert_eq!(*actor, Some(fixture.hosted_agent));
+        assert_eq!(*subject, Some(fixture.hosted_agent));
+        assert_eq!(detail["schema"], json!("momo.action.refused.v1"));
+        assert_eq!(detail["action_id"], json!("channel.create"));
+        assert_eq!(detail["stage"], json!("proposal"));
+        assert_eq!(detail["approval_id"], Value::Null);
+        assert_eq!(detail["similar_channel_id"], json!(similar.to_string()));
+        let text = detail.to_string();
+        assert!(!text.contains(&public_name) && !text.contains(&private_name));
+        assert!(!text.contains(&s), "no name, not even in part: {text}");
+    }
+
+    // The rejection itself is the fixed sentence (a REST caller of the resolver
+    // reads `message`): it names no channel.
+    let action =
+        momo_agent::actions::action_by_id("channel.create").expect("channel.create registered");
+    let (workspace, agent) = (fixture.workspace, fixture.hosted_agent);
+    let proposed = json!({"name": lookalike_5830(&private_name)});
+    let outcome = momo_db::with_tenant_tx(&app, workspace, move |conn| {
+        Box::pin(async move {
+            momo_workspace_actions::action_resolve::resolve_action_in_tx(
+                conn, workspace, agent, None, action, &proposed, 0,
+            )
+            .await
+        })
+    })
+    .await
+    .expect("resolver transaction");
+    match outcome {
+        Ok(resolved) => panic!("a look-alike resolved: {resolved:?}"),
+        Err(rejection) => assert_eq!(
+            rejection.message,
+            momo_workspace_actions::action_resolve::CHANNEL_NAME_LOOKALIKE
+        ),
+    }
+
+    // A person may make it: the REST path is not D7's.
+    let (status, created) =
+        rest_create_channel_5830(&client, &base, &fixture, &lookalike_5830(&public_name)).await;
+    assert_eq!(status, 201, "{created}");
+    assert_eq!(
+        created["channel"]["name"],
+        json!(lookalike_5830(&public_name))
+    );
+}
+
+/// **ADR-0225 D7 (#5830) — a private channel the agent cannot see.** Refusing at the
+/// proposal would tell the agent that the channel exists (증보 V11), so the proposal
+/// is answered exactly like a clean name. The decision compares with every live
+/// channel and refuses the tap as stale — the same 409 as a name taken since the
+/// proposal — with the approval pending and no channel made. A member who may not
+/// decide is refused before anything is compared, and leaves no audit row.
+///
+/// | revert that makes it red |
+/// |---|
+/// | compare every channel at the proposal too (the private name leaks) |
+/// | run the check only on the proposal (the tap makes the look-alike) |
+/// | drop the `action.refused` row |
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn a_lookalike_of_a_private_channel_the_agent_cannot_see_is_refused_at_the_decision_5830() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let fixture = seed(&su).await;
+    let base = start_server(app, true).await;
+    let client = reqwest::Client::new();
+    let plain_jwt = seed_plain_member(&su, &fixture).await;
+    let s = Uuid::new_v4().simple().to_string()[..8].to_string();
+    let secret_name = format!("secret-{s}");
+    let secret = named_channel_5830(
+        &su,
+        fixture.workspace,
+        "private",
+        &secret_name,
+        &[fixture.human],
+        false,
+    )
+    .await;
+    let lookalike = lookalike_5830(&secret_name);
+
+    let (status, clean) = try_propose_action_3706(
+        &client,
+        &base,
+        &su,
+        &fixture,
+        "channel.create",
+        json!({"name": format!("plain-{s}")}),
+    )
+    .await;
+    assert_eq!(status, 200, "{clean}");
+    let (status, proposed) = try_propose_action_3706(
+        &client,
+        &base,
+        &su,
+        &fixture,
+        "channel.create",
+        json!({"name": lookalike}),
+    )
+    .await;
+    assert_eq!(status, 200, "the agent learns nothing: {proposed}");
+    let keys = |answer: &Value| {
+        let mut keys: Vec<String> = structured(answer)
+            .as_object()
+            .expect("an object answer")
+            .keys()
+            .cloned()
+            .collect();
+        keys.sort();
+        keys
+    };
+    assert_eq!(
+        keys(&proposed),
+        keys(&clean),
+        "the same shape as a clean name"
+    );
+    assert!(lookalike_refusals_5830(&su, fixture.workspace)
+        .await
+        .is_empty());
+    let approval = proposed_approval_3706(&proposed);
+
+    // A member who may not decide: refused by role, nothing compared, nothing written.
+    let (status, _h, refused) = decide_as(
+        &client,
+        &base,
+        fixture.workspace,
+        &plain_jwt,
+        approval,
+        true,
+        Uuid::new_v4(),
+    )
+    .await;
+    assert_eq!(status, 403, "{refused}");
+    assert_eq!(refused["status"], "role_required");
+    assert!(lookalike_refusals_5830(&su, fixture.workspace)
+        .await
+        .is_empty());
+
+    // The admin's tap: stale, like a name taken since the proposal.
+    let (status, _h, stale) = decide_as(
+        &client,
+        &base,
+        fixture.workspace,
+        &fixture.human_jwt,
+        approval,
+        true,
+        Uuid::new_v4(),
+    )
+    .await;
+    assert_eq!(status, 409, "{stale}");
+    assert_eq!(stale["status"], "action_args_invalid");
+    assert!(!stale.to_string().contains(&secret_name), "{stale}");
+    assert_eq!(approval_status_5830(&su, approval).await, "pending");
+    assert!(channel_row_3706(&su, fixture.workspace, &lookalike)
+        .await
+        .is_none());
+
+    let rows = lookalike_refusals_5830(&su, fixture.workspace).await;
+    assert_eq!(rows.len(), 1, "{rows:?}");
+    let (actor, subject, detail) = &rows[0];
+    assert_eq!(*actor, None, "the server refused a person's tap");
+    assert_eq!(*subject, Some(fixture.hosted_agent));
+    assert_eq!(detail["stage"], json!("decision"));
+    assert_eq!(detail["approval_id"], json!(approval.to_string()));
+    assert_eq!(detail["similar_channel_id"], json!(secret.to_string()));
+    assert!(!detail.to_string().contains(&s), "{detail}");
+}
+
+/// **ADR-0225 D7 (#5830) — the race.** A card whose name was clean when it was
+/// proposed is refused at the tap once a person has made the channel it reads like
+/// in between; the person's own create goes through (201).
+///
+/// | revert that makes it red |
+/// |---|
+/// | run the check only on the proposal |
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn a_lookalike_made_between_the_proposal_and_the_tap_is_refused_at_the_tap_5830() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let fixture = seed(&su).await;
+    let base = start_server(app, true).await;
+    let client = reqwest::Client::new();
+    let s = Uuid::new_v4().simple().to_string()[..8].to_string();
+    let latin = format!("elder-{s}");
+    let lookalike = lookalike_5830(&latin);
+
+    let (status, proposed) = try_propose_action_3706(
+        &client,
+        &base,
+        &su,
+        &fixture,
+        "channel.create",
+        json!({"name": lookalike}),
+    )
+    .await;
+    assert_eq!(status, 200, "nothing reads like it yet: {proposed}");
+    let approval = proposed_approval_3706(&proposed);
+
+    let (status, created) = rest_create_channel_5830(&client, &base, &fixture, &latin).await;
+    assert_eq!(status, 201, "{created}");
+    let latin_id = Uuid::parse_str(created["channel"]["id"].as_str().expect("an id")).unwrap();
+
+    let (status, _h, stale) = decide_as(
+        &client,
+        &base,
+        fixture.workspace,
+        &fixture.human_jwt,
+        approval,
+        true,
+        Uuid::new_v4(),
+    )
+    .await;
+    assert_eq!(status, 409, "{stale}");
+    assert_eq!(stale["status"], "action_args_invalid");
+    assert_eq!(approval_status_5830(&su, approval).await, "pending");
+    assert!(channel_row_3706(&su, fixture.workspace, &lookalike)
+        .await
+        .is_none());
+    let rows = lookalike_refusals_5830(&su, fixture.workspace).await;
+    assert_eq!(rows.len(), 1, "{rows:?}");
+    assert_eq!(rows[0].2["stage"], json!("decision"));
+    assert_eq!(rows[0].2["similar_channel_id"], json!(latin_id.to_string()));
+}
+
+/// **ADR-0225 D7 (#5830) — what is not compared.** An archived channel, a group DM
+/// room (same `name` column, not a channel), another workspace's channel, and a name
+/// that differs only by a digit or a separator: each card is raised and approved.
+///
+/// | revert that makes it red |
+/// |---|
+/// | drop `archived_at IS NULL` |
+/// | drop `kind IN ('public', 'private')` |
+/// | compare with `skeleton` (digits, separators and `1`/`l` folded) |
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn archived_rooms_other_workspaces_and_distinct_names_are_not_lookalikes_5830() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let fixture = seed(&su).await;
+    let other = seed(&su).await;
+    let base = start_server(app, true).await;
+    let client = reqwest::Client::new();
+    let s = Uuid::new_v4().simple().to_string()[..8].to_string();
+    let archived = format!("legacy-{s}");
+    let room = format!("people-{s}");
+    let elsewhere = format!("general-{s}");
+    let digit = format!("team-l-{s}");
+    let separator = format!("dev_ops-{s}");
+    named_channel_5830(&su, fixture.workspace, "public", &archived, &[], true).await;
+    named_channel_5830(
+        &su,
+        fixture.workspace,
+        "dm",
+        &room,
+        &[fixture.human, fixture.hosted_agent],
+        false,
+    )
+    .await;
+    named_channel_5830(&su, other.workspace, "public", &elsewhere, &[], false).await;
+    named_channel_5830(&su, fixture.workspace, "public", &digit, &[], false).await;
+    named_channel_5830(&su, fixture.workspace, "public", &separator, &[], false).await;
+
+    for name in [
+        lookalike_5830(&archived),
+        lookalike_5830(&room),
+        lookalike_5830(&elsewhere),
+        format!("team-1-{s}"),
+        format!("devops-{s}"),
+    ] {
+        let (status, proposed) = try_propose_action_3706(
+            &client,
+            &base,
+            &su,
+            &fixture,
+            "channel.create",
+            json!({"name": name}),
+        )
+        .await;
+        assert_eq!(status, 200, "{name}: {proposed}");
+        let (status, _h, approved) = decide_as(
+            &client,
+            &base,
+            fixture.workspace,
+            &fixture.human_jwt,
+            proposed_approval_3706(&proposed),
+            true,
+            Uuid::new_v4(),
+        )
+        .await;
+        assert_eq!(status, 200, "{name}: {approved}");
+        assert!(
+            channel_row_3706(&su, fixture.workspace, &name)
+                .await
+                .is_some(),
+            "{name} was made"
+        );
+    }
+    assert!(lookalike_refusals_5830(&su, fixture.workspace)
+        .await
+        .is_empty());
+}
+
+/// **ADR-0225 D7 (#5830) — a private channel the agent has left.** Seen from the
+/// proposal, a private channel is the proposer's only while its membership is live:
+/// a look-alike of one it has left is answered like a clean name (the refusal would
+/// tell it the room still stands under that name), and the decision refuses it.
+///
+/// | revert that makes it red |
+/// |---|
+/// | count a membership that has ended as seeing the channel |
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn a_private_channel_the_agent_has_left_is_not_compared_at_the_proposal_5830() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let fixture = seed(&su).await;
+    let base = start_server(app, true).await;
+    let client = reqwest::Client::new();
+    let s = Uuid::new_v4().simple().to_string()[..8].to_string();
+    let left_name = format!("retreat-{s}");
+    let left = named_channel_5830(
+        &su,
+        fixture.workspace,
+        "private",
+        &left_name,
+        &[fixture.human],
+        false,
+    )
+    .await;
+    sqlx::query(
+        "INSERT INTO membership (workspace_id, channel_id, member_id, role, left_at) \
+         VALUES ($1, $2, $3, 'member', now())",
+    )
+    .bind(fixture.workspace)
+    .bind(left)
+    .bind(fixture.hosted_agent)
+    .execute(&su)
+    .await
+    .expect("a membership that has ended");
+
+    let (status, proposed) = try_propose_action_3706(
+        &client,
+        &base,
+        &su,
+        &fixture,
+        "channel.create",
+        json!({"name": lookalike_5830(&left_name)}),
+    )
+    .await;
+    assert_eq!(
+        status, 200,
+        "a room the agent left is not its to see: {proposed}"
+    );
+    assert!(lookalike_refusals_5830(&su, fixture.workspace)
+        .await
+        .is_empty());
+    let (status, _h, stale) = decide_as(
+        &client,
+        &base,
+        fixture.workspace,
+        &fixture.human_jwt,
+        proposed_approval_3706(&proposed),
+        true,
+        Uuid::new_v4(),
+    )
+    .await;
+    assert_eq!(status, 409, "{stale}");
+    let rows = lookalike_refusals_5830(&su, fixture.workspace).await;
+    assert_eq!(rows.len(), 1, "{rows:?}");
+    assert_eq!(rows[0].2["stage"], json!("decision"));
+    assert_eq!(rows[0].2["similar_channel_id"], json!(left.to_string()));
+}
+
+/// **ADR-0225 D5 (#5830 수리) — the agent's byte bound is the text as sent.** An
+/// 80-syllable Hangul name sent decomposed (three jamo per syllable, as a Mac may
+/// send it) is proposed and stored composed; 81 syllables are refused.
+///
+/// | revert that makes it red |
+/// |---|
+/// | bound the name at 4 bytes per character of the composed form (320) |
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn an_eighty_syllable_hangul_name_sent_decomposed_is_proposed_5830() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let fixture = seed(&su).await;
+    let base = start_server(app, true).await;
+    let client = reqwest::Client::new();
+    // "한" decomposed: U+1112 U+1161 U+11AB, nine bytes.
+    let decomposed = "\u{1112}\u{1161}\u{11AB}";
+
+    let (status, proposed) = try_propose_action_3706(
+        &client,
+        &base,
+        &su,
+        &fixture,
+        "channel.create",
+        json!({"name": decomposed.repeat(80)}),
+    )
+    .await;
+    assert_eq!(
+        status, 200,
+        "720 bytes, 80 letters once composed: {proposed}"
+    );
+    let (status, _h, approved) = decide_as(
+        &client,
+        &base,
+        fixture.workspace,
+        &fixture.human_jwt,
+        proposed_approval_3706(&proposed),
+        true,
+        Uuid::new_v4(),
+    )
+    .await;
+    assert_eq!(status, 200, "{approved}");
+    assert!(channel_row_3706(&su, fixture.workspace, &"한".repeat(80))
+        .await
+        .is_some());
+
+    let (status, refused) = try_propose_action_3706(
+        &client,
+        &base,
+        &su,
+        &fixture,
+        "channel.create",
+        json!({"name": decomposed.repeat(81)}),
+    )
+    .await;
+    assert_eq!(status, 400, "81 letters are refused: {refused}");
+}

@@ -1108,10 +1108,13 @@ pub const CHANNEL_CREATE_KINDS: [&str; 2] = ["public", "private"];
 /// What `kind` means when a proposal names none: **private**. An agent that wants
 /// a public channel has to say so, and the card shows it.
 pub const CHANNEL_CREATE_DEFAULT_KIND: &str = "private";
-/// `name` bound in UTF-8 bytes: the domain's 80 characters (ADR-0225 D5) at the
-/// 4-byte worst case. The domain normaliser still enforces the 80 characters;
-/// this only keeps a 27-syllable Hangul name from being refused as "too long".
-pub const CHANNEL_NAME_MAX_BYTES: u64 = 320;
+/// `name` bound in UTF-8 bytes, measured on the text **as sent** — before the
+/// domain normaliser composes it (ADR-0225 D5): 80 characters at 9 bytes, the
+/// size of one Hangul syllable sent decomposed (three 3-byte jamo, as a Mac may
+/// send it). It only cuts an absurd input early; the exact judgement — at most 80
+/// characters after normalisation, so at most 320 stored bytes — is the
+/// normaliser's.
+pub const CHANNEL_NAME_MAX_BYTES: u64 = 9 * 80;
 /// `topic` bound in UTF-8 bytes: the domain's 280 characters at the 4-byte
 /// worst case. The domain normaliser still enforces the 280 characters.
 pub const CHANNEL_TOPIC_MAX_BYTES: u64 = 1_120;
@@ -1551,9 +1554,8 @@ fn hosted_channels_grant_args_schema() -> Value {
     })
 }
 
-/// A channel reference: `#` + the 80-character name, at the 4-byte worst case
-/// (ADR-0225 D5).
-pub const CHANNEL_REF_MAX_BYTES: u64 = 321;
+/// A channel reference: `#` + the name, as sent (see [`CHANNEL_NAME_MAX_BYTES`]).
+pub const CHANNEL_REF_MAX_BYTES: u64 = CHANNEL_NAME_MAX_BYTES + 1;
 
 /// `team_ai.roles.set` arguments (ADR-0201 증보 v3 B3-T, #4964): one bundle and the switch.
 /// The enum is the six **switchable** bundles — `chat_read` is not on it, and the
@@ -3289,17 +3291,25 @@ pub fn last_attempt_patch(last_attempt: &str) -> Value {
 mod tests {
     use super::*;
 
-    /// ADR-0225 D5: the bytes bounds are the 80-character name at the 4-byte
-    /// worst case (`#` and a name for the reference), and a legal 80-syllable
-    /// Hangul name (240 bytes) fits under both. The MCP tool's copy of the numbers
-    /// is measured against these by the catalog drift test in `momo-server`.
+    /// ADR-0225 D5: the bytes bounds are measured on the text as sent, so an
+    /// 80-syllable Hangul name fits under both whether it is sent composed
+    /// (240 bytes) or decomposed (720 bytes), with `#` for the reference. The MCP
+    /// tool's copy of the numbers is measured against these by the catalog drift
+    /// test in `momo-server`.
     #[test]
     fn the_channel_name_bounds_fit_eighty_hangul_characters() {
-        assert_eq!(CHANNEL_NAME_MAX_BYTES, 4 * 80);
         assert_eq!(CHANNEL_REF_MAX_BYTES, CHANNEL_NAME_MAX_BYTES + 1);
-        let name = "가".repeat(80);
-        assert!(name.len() as u64 <= CHANNEL_NAME_MAX_BYTES);
-        assert!(format!("#{name}").len() as u64 <= CHANNEL_REF_MAX_BYTES);
+        // "한" decomposed: three conjoining jamo of three bytes each.
+        let decomposed = "\u{1112}\u{1161}\u{11AB}";
+        for name in ["가".repeat(80), "한".repeat(80), decomposed.repeat(80)] {
+            assert!(
+                name.len() as u64 <= CHANNEL_NAME_MAX_BYTES,
+                "{}",
+                name.len()
+            );
+            assert!(format!("#{name}").len() as u64 <= CHANNEL_REF_MAX_BYTES);
+        }
+        assert!(decomposed.repeat(81).len() as u64 > CHANNEL_NAME_MAX_BYTES);
     }
 
     /// ADR-0225 D8-4: the member-add outcome puts the word `채널` between the name
