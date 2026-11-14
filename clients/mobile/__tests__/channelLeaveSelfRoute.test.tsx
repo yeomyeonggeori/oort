@@ -59,13 +59,24 @@ it.each(['member', 'guest'] as const)('%s 가 나가면 관리자 길이 아니�
   hook.unmount(); client.clear();
 });
 
-it('거절되면 확인 단계가 서서 사전의 사유 문장을 말하고 목록은 그대로예요', async () => {
+it('거절(403)되면 확인 단계가 서서 사전의 사유 문장을 말하고 목록은 그대로예요', async () => {
   const {client, target, hook, rows} = setup('member');
-  jest.mocked(leaveChannel).mockRejectedValue(new ApiError(404, 'active channel membership not found'));
+  jest.mocked(leaveChannel).mockRejectedValue(new ApiError(403, 'active channel membership required'));
   act(() => { hook.result.current.open(target); hook.result.current.run(target, 'leave'); });
   await act(async () => { hook.result.current.confirmLeave(); });
   expect(hook.result.current.confirmingLeave).toBe(true);
-  expect(hook.result.current.leave.error).toBe(ko.formatMessage('timeline.channelLeave.errorNotFound'));
+  expect(hook.result.current.leave.error).toBe(ko.formatMessage('timeline.channelLeave.errorForbidden'));
   expect(rows()).toEqual(['c1', 'c2']);
+  hook.unmount(); client.clear();
+});
+
+it('404 는 「이미 나간 것」이에요: 문장을 세우지 않고 줄을 걷고 나간 뒤처럼 이어져요 (#5818 검수 r2, 웹과 같음)', async () => {
+  const {client, target, hook, rows, left} = setup('member');
+  jest.mocked(leaveChannel).mockRejectedValue(new ApiError(404, 'active channel membership not found'));
+  act(() => { hook.result.current.open(target); hook.result.current.run(target, 'leave'); });
+  await act(async () => { hook.result.current.confirmLeave(); });
+  expect(hook.result.current.leave.error).toBeNull();
+  expect(rows()).toEqual(['c2']);
+  expect(left).toEqual(['c1']);
   hook.unmount(); client.clear();
 });

@@ -621,6 +621,16 @@ describe('채널 나가기는 확인 단계를 지난다', () => {
     expect(screen.getByTestId('channel-leave-error')).toHaveTextContent(/나갈 수 없어요/);
     expect(screen.getByTestId('channel-leave-confirm')).toBeTruthy();
   });
+
+  it('404: 이미 나간 채널이다 — 문장을 세우지 않고 시트를 닫는다(웹과 같다) (#5818 검수 r2)', async () => {
+    await mount({leaveStatus: 404});
+    longPress('sidebar-row-channel:ch-general');
+    fireEvent.press(screen.getByTestId('channel-sheet-leave'));
+    await armedPress('channel-leave-confirm-button');
+    await waitFor(() => expect(screen.queryByTestId('channel-action-sheet')).toBeNull());
+    expect(screen.queryByTestId('channel-leave-error')).toBeNull();
+    expect(calls.filter(call => call.method === 'DELETE')).toHaveLength(1);
+  });
 });
 
 describe('DM 의 「목록에서 숨기기」 (#4367, ADR-0177 증보 D7)', () => {

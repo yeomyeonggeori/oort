@@ -337,6 +337,16 @@ for (const surface of SURFACES) {
       expect(leaveChannel).toHaveBeenCalledTimes(1);
     });
 
+    it("나가기 확인 창은 「이 채널에서 나갈까요?」라는 이름으로 찾아진다 — 낭독 이름이 비지 않는다 (#5818 검수 r2)", async () => {
+      surface.mount();
+      click(surface.leaveItem);
+      await flush();
+      const dialog = byId(surface.confirm);
+      expect(dialog?.getAttribute("role")).toBe("alertdialog");
+      const target = document.getElementById(dialog?.getAttribute("aria-labelledby") ?? "");
+      expect(target?.textContent).toBe(EN["timeline.channelLeave.title"]);
+    });
+
     it("이미 나간 채널(404)을 낡은 화면에서 또 나가면 줄을 걷고 확인 창을 닫는다 (#5818 검수 M2)", async () => {
       const pending = deferred<unknown>();
       leaveChannel.mockReturnValue(pending.promise);
@@ -477,6 +487,24 @@ describe("나간 뒤 초점", () => {
     await flush();
     expect(document.activeElement).toBe(region);
     expect(document.activeElement).not.toBe(document.body);
+    region.remove();
+  });
+
+  it("본문 자리가 잠깐 `inert` 라 첫 시도를 거절해도(폰 폭 서랍) 풀리면 거기서 받는다 (#5818 검수 r2 N2)", async () => {
+    const { region, opener } = setup(false);
+    // 서랍이 열려 있는 동안 본문은 `inert` 라 `focus()` 가 조용히 거절된다. 몇 프레임 뒤 풀린다.
+    let blocked = true;
+    const realFocus = region.focus.bind(region);
+    region.focus = (options?: FocusOptions) => {
+      if (!blocked) realFocus(options);
+    };
+    render(true, opener);
+    await flush();
+    render(false, opener);
+    await flush();
+    expect(document.activeElement).not.toBe(region);
+    blocked = false;
+    await vi.waitFor(() => expect(document.activeElement).toBe(region));
     region.remove();
   });
 

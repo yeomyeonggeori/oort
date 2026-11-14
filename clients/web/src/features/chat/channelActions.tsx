@@ -921,8 +921,20 @@ export function ChannelLeaveConfirmDialog({
       return (opener?.isConnected ?? false) || document.getElementById(ROUTE_REGION_DOM_ID) !== null;
     },
     focus: () => {
-      if (opener?.isConnected) opener.focus();
-      else document.getElementById(ROUTE_REGION_DOM_ID)?.focus({ preventScroll: true });
+      if (opener?.isConnected) {
+        opener.focus();
+        return;
+      }
+      // 폰 폭에서는 줄 메뉴가 서랍 안에 있고, 서랍이 열려 있는 동안 본문 자리는 `inert` 라 `focus()` 가 조용히 거절된다
+      // (그 뒤 서랍이 닫히며 초점은 몸통으로 떨어진다, #5818 검수 r2 N2). 받을 때까지 몇 프레임 다시 시도한다.
+      let tries = 30;
+      const land = () => {
+        const region = document.getElementById(ROUTE_REGION_DOM_ID);
+        if (region === null) return;
+        region.focus({ preventScroll: true });
+        if (document.activeElement !== region && (tries -= 1) > 0) requestAnimationFrame(land);
+      };
+      land();
     },
   };
   // 공용 확인 창(`ConfirmDialog`)의 몸을 쓴다: 확정은 서고 나서 500ms 동안 눌림을 받지 않는다(메뉴 줄을 누른 자리에 위험 확정이
