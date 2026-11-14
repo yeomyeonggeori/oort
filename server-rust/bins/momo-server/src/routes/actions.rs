@@ -1179,7 +1179,8 @@ mod tests {
             json!({"channel": "plans", "memberHandles": []}),
             json!({"channel": "plans", "memberHandles": null}),
             json!({"channel": "plans", "memberHandles": ["a"]}),
-            json!({"channel": "Has Space", "memberHandles": ["bob"]}),
+            // ADR-0225: a blank now folds to `-`; a full stop is still refused.
+            json!({"channel": "has.dot", "memberHandles": ["bob"]}),
             json!({"channel": "", "memberHandles": ["bob"]}),
             // The role is fixed; ids are never accepted.
             json!({"channel": "plans", "memberHandles": ["bob"], "role": "admin"}),
