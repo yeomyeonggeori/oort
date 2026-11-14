@@ -142,7 +142,7 @@ export const catalog: MessageCatalog = {
   "channels.nameRule.placeholder": [
     {
       "type": 0,
-      "value": "revision-de-diseno"
+      "value": "revisión-de-diseño"
     }
   ],
   "channels.nameRule.preview": [

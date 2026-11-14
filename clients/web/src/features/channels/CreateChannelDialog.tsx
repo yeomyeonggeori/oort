@@ -1,6 +1,7 @@
 import {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useRef,
   useState,
   type ReactNode,
@@ -152,6 +153,12 @@ function DialogField({
 /** 미리보기 줄의 이름 자리를 문장에서 떼어 내는 표시. 사전 문장은 `{name}`이 앞·뒤 어디에 서든 그대로 두고(언어마다 다르다), 이름만 한 줄에서 줄여 보인다. */
 const PREVIEW_NAME_MARK = "\uE000";
 
+/** 조합 중인 글자 가운데 한글(음절·자모)과 빈칸이 아닌 것이 있으면 아직 이름이 아니다(병음의 라틴 글자·`'`, 변환 전 가나). */
+const NOT_YET_NAME = /[^\p{Script=Hangul}\s]/u;
+
+/** 보이는 줄 수에 맞춰 미리보기를 말줄임하는 클래스(Tailwind가 글자 그대로 읽어야 해서 목록으로 둔다). */
+const CLAMP = ["line-clamp-1", "line-clamp-2", "line-clamp-3", "line-clamp-4", "line-clamp-5", "line-clamp-6", "line-clamp-7", "line-clamp-8"];
+
 /** 칸 아래 한 줄: 규칙 안내 · 저장될 이름 · 거절 문장 중 하나만 선다. 서는 자리는 하나이고, 서지 않은 문장들이 같은 칸에 보이지 않게 겹쳐 있어 줄 수가 가장 긴 문장으로 정해진다(칸이 문장에 따라 오르내리지 않는다). */
 function NameStatus({
   fieldId,
@@ -168,9 +175,26 @@ function NameStatus({
   /** 이 자리에 설 수 있는 모든 문장(안내·거절·서버 응답). 높이만 정하고 보이지 않는다. */
   reserve: string[];
 }) {
+  // 자리에 예약된 줄 수. 미리보기는 그 안에서 줄바꿈하고(큰 글자에서 이름이 잘리지 않게), 넘치면 말줄임한다 — 높이는 예약이 정하므로 안 움직인다.
+  const reserveRef = useRef<HTMLDivElement>(null);
+  const [lines, setLines] = useState(1);
+  useLayoutEffect(() => {
+    const box = reserveRef.current;
+    if (box === null) return;
+    const measure = () => {
+      const lineHeight = Number.parseFloat(getComputedStyle(box).lineHeight);
+      const next = lineHeight > 0 ? Math.round(box.getBoundingClientRect().height / lineHeight) : 1;
+      setLines(Math.min(CLAMP.length, Math.max(1, next)));
+    };
+    measure();
+    if (typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(measure);
+    observer.observe(box);
+    return () => observer.disconnect();
+  }, [reserve]);
   return (
     <div className="grid min-w-0" data-testid={`${fieldId}-status`}>
-      <div aria-hidden="true" className="invisible col-start-1 row-start-1 grid">
+      <div ref={reserveRef} aria-hidden="true" className="invisible col-start-1 row-start-1 grid text-meta">
         {reserve.map((text) => (
           <p key={text} className="col-start-1 row-start-1 text-meta">
             {text}
@@ -188,13 +212,13 @@ function NameStatus({
         </div>
         {!error && preview ? (
           <p
-            className="flex min-w-0 whitespace-pre text-meta text-ink-muted"
+            className={cn("text-meta text-ink-muted", CLAMP[lines - 1])}
             id={`${fieldId}-preview`}
             data-testid={`${fieldId}-preview`}
           >
-            <span className="shrink-0">{preview.before}</span>
-            <span className="min-w-0 truncate text-ink">#{preview.name}</span>
-            <span className="shrink-0">{preview.after}</span>
+            {preview.before}
+            <span className="break-all text-ink">#{preview.name}</span>
+            {preview.after}
           </p>
         ) : null}
         {!error && !preview ? (
@@ -232,9 +256,10 @@ function CreateChannelPanel({
 
   const { kind, name, topic } = draft;
   const [attempted, setAttempted] = useState(false);
-  // 한글·일본어·중국어 입력기는 글자를 확정하기 전의 「조합 중」 글자를 칸에 넣는다(병음의 `ni'h`, 풀어쓴 자모). 그 글자는 아직 이름이 아니라서
-  // 거절하거나 미리 보이면 틀린 말을 한다. 조합이 시작될 때의 값을 쥐고 있다가 끝나면 놓는다 — 칸의 값은 그대로 두고 아래 줄만 머문다.
-  const [composingFrom, setComposingFrom] = useState<string | null>(null);
+  // 입력기는 글자를 확정하기 전의 「조합 중」 글자를 칸에 넣는다. 병음의 `ni'h`나 변환 전 가나는 아직 이름이 아니라서 거절하거나 미리 보이면
+  // 틀린 말을 한다 — 조합이 시작될 때의 값을 쥐고 있다가 끝나면 놓는다(칸의 값은 그대로 두고 아래 줄만 머문다). 한글은 달라서, 조합 중인
+  // 음절이 곧 사람이 친 글자다: 한글(음절·자모)뿐인 조합은 붙들지 않고 지금 칸 값을 그대로 말한다(붙들면 마지막 음절이 늘 빠진다).
+  const [composition, setComposition] = useState<{ from: string; text: string } | null>(null);
   const nameRef = useRef<HTMLInputElement>(null);
   const topicRef = useRef<HTMLInputElement>(null);
   const formRef = useRef<HTMLFormElement>(null);
@@ -253,15 +278,15 @@ function CreateChannelPanel({
     }
     handedOff.current = false;
     setAttempted(false);
-    setComposingFrom(null);
+    setComposition(null);
     clearFailure();
   }, [open, clearFailure]);
 
   const nameIssue = channelNameIssue(name);
   const topicIssue = channelTopicIssue(topic);
 
-  // 칸 아래 줄이 말하는 이름은 조합 중이면 조합 전의 값이다(위 `composingFrom`).
-  const shownName = composingFrom ?? name;
+  // 칸 아래 줄이 말하는 이름: 아직 글자가 아닌 것(라틴 글자·작은따옴표·가나)을 조합 중이면 조합 전의 값, 아니면 지금 칸 값.
+  const shownName = composition !== null && NOT_YET_NAME.test(composition.text) ? composition.from : name;
   const shownIssue = channelNameIssue(shownName);
   const issueMessage = (issue: ChannelNameIssue) => {
     if (issue === "tooLong") return formatMessage(CHANNEL_NAME_ISSUE_KEYS.tooLong, { max: CHANNEL_NAME_MAX });
@@ -428,8 +453,12 @@ function CreateChannelPanel({
             name="name"
             value={name}
             onChange={onInput("name")}
-            onCompositionStart={(event) => setComposingFrom(event.currentTarget.value)}
-            onCompositionEnd={() => setComposingFrom(null)}
+            onCompositionStart={(event) => setComposition({ from: event.currentTarget.value, text: "" })}
+            onCompositionUpdate={(event) => {
+              const text = event.data;
+              setComposition((current) => (current === null ? current : { from: current.from, text }));
+            }}
+            onCompositionEnd={() => setComposition(null)}
             placeholder={formatMessage("channels.nameRule.placeholder")}
             autoComplete="off"
             spellCheck={false}

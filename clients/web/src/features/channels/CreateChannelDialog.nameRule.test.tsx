@@ -6,7 +6,7 @@ import { MemoryRouter } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError } from "@momo/core/lib/api";
-import { channelNameIssue } from "@momo/core/features/channels/model";
+import { channelNameIssue, normalizeChannelName } from "@momo/core/features/channels/model";
 import { SessionProvider, type SessionContextValue } from "@/app/session";
 import { LocaleProvider } from "@/i18n/LocaleProvider";
 import { createAppLocale, type AppLocale } from "@/i18n/localeStore";
@@ -90,6 +90,16 @@ const composition = (phase: "start" | "end", data = "") =>
   act(async () => {
     input().dispatchEvent(new CompositionEvent(`composition${phase}`, { bubbles: true, data }));
   });
+/** 입력기가 지금 조합 중인 글자를 알린다(`compositionupdate`). 칸 값은 `setValue`가 따로 넣는다. */
+const update = (data: string) =>
+  act(async () => {
+    input().dispatchEvent(new CompositionEvent("compositionupdate", { bubbles: true, data }));
+  });
+/** 조합 중 한 걸음: 입력기가 값을 넣고 조합 글자를 알리는 순서. */
+const step = async (value: string, composing: string) => {
+  await setValue(value, { inputType: "insertCompositionText", isComposing: true });
+  await update(composing);
+};
 const submit = () =>
   act(async () => {
     q("create-channel-submit")!.click();
@@ -247,18 +257,18 @@ describe("거절", () => {
   });
 });
 
-describe("조합 중에는 아래 줄이 조합 전의 값에 머문다", () => {
+describe("조합 중인 글자가 아직 글자가 아니면 아래 줄은 조합 전의 값에 머문다", () => {
   it("병음 조합 글자(`ni'h`)는 거절하지 않고, 조합이 끝나면 그 이름을 말한다", async () => {
     await mount();
     await composition("start");
-    for (const step of ["n", "ni", "ni'", "ni'h"]) {
-      await setValue(step, { inputType: "insertCompositionText", isComposing: true });
-      expect(input().value).toBe(step);
+    for (const text of ["n", "ni", "ni'", "ni'h"]) {
+      await step(text, text);
+      expect(input().value).toBe(text);
       expect(q("create-channel-name-error")).toBeNull();
       expect(q("create-channel-name-preview")).toBeNull();
       expect(q("create-channel-name-hint")).not.toBeNull();
     }
-    await setValue("你好", { inputType: "insertCompositionText", isComposing: true });
+    await step("你好", "你好");
     await composition("end", "你好");
     expect(input().value).toBe("你好");
     expect(q("create-channel-name-error")).toBeNull();
@@ -267,15 +277,89 @@ describe("조합 중에는 아래 줄이 조합 전의 값에 머문다", () => 
     expect(q("create-channel-name-error")).not.toBeNull();
   });
 
-  it("조합 중에는 미리보기가 조합 전 이름에 머문다", async () => {
+  it("변환 전 가나도 조합 전 줄에 머물고, 확정되면 저장될 이름을 말한다", async () => {
+    await mount();
+    await type("team");
+    await composition("start");
+    for (const text of ["で", "でざ", "でざいん"]) {
+      await step(`team ${text}`, text);
+      expect(q("create-channel-name-error")).toBeNull();
+      expect(q("create-channel-name-preview")).toBeNull();
+      expect(q("create-channel-name-hint")).not.toBeNull();
+    }
+    await composition("end", "設計");
+    await type("team 設計");
+    expect(q("create-channel-name-preview")!.textContent).toBe("#team-設計 이름으로 만들어져요");
+  });
+
+  it("병음 조합 중에는 미리보기가 조합 전 이름에 머문다", async () => {
     await mount();
     await type("design");
     await composition("start");
-    await setValue("design 리", { inputType: "insertCompositionText", isComposing: true });
+    await step("design ni", "ni");
     expect(q("create-channel-name-hint")).not.toBeNull();
     expect(q("create-channel-name-preview")).toBeNull();
-    await setValue("design 리뷰", { inputType: "insertCompositionText", isComposing: true });
-    await composition("end", "리뷰");
-    expect(q("create-channel-name-preview")!.textContent).toBe("#design-리뷰 이름으로 만들어져요");
+    await step("design 你好", "你好");
+    await composition("end", "你好");
+    expect(q("create-channel-name-preview")!.textContent).toBe("#design-你好 이름으로 만들어져요");
+  });
+});
+
+describe("한글은 조합 중인 음절이 곧 친 글자라서 아래 줄이 칸 값을 그대로 따라간다 (검수 r1 H1)", () => {
+  // 2벌식으로 `디자인 리뷰`를 치는 17걸음: [칸 값, 조합 중인 글자(조합이 아닐 때는 null)]. 마지막 음절 `뷰`는 확정 전이다.
+  const STEPS: [string, string | null][] = [
+    ["ㄷ", "ㄷ"], ["디", "디"], ["딪", "딪"], ["디자", "자"], ["디잔", "잔"], ["디자니", "니"], ["디자인", "인"],
+    ["디자인 ", null], ["디자인 ㄹ", "ㄹ"], ["디자인 리", "리"], ["디자인 립", "립"], ["디자인 리ㅂ", "ㅂ"], ["디자인 리뷰", "뷰"],
+  ];
+  const expected = (value: string) => {
+    const folded = normalizeChannelName(value);
+    return folded !== value ? `#${folded} 이름으로 만들어져요` : null;
+  };
+
+  it("걸음마다 아래 줄 = 그때 칸 값을 접은 이름이고, 다 치고 멈춘 화면도 `#디자인-리뷰`다", async () => {
+    await mount();
+    let composing = false;
+    const seen: string[] = [];
+    for (const [value, text] of STEPS) {
+      if (text === null) {
+        await composition("end");
+        composing = false;
+        await type(value);
+      } else {
+        if (!composing) {
+          await composition("start");
+          composing = true;
+        }
+        await step(value, text);
+      }
+      expect(input().value).toBe(value);
+      expect(q("create-channel-name-error"), `${value}: 조합 중 거절 없음`).toBeNull();
+      const want = expected(value);
+      expect(q("create-channel-name-preview")?.textContent ?? null, `「${value}」`).toBe(want);
+      if (want === null) expect(q("create-channel-name-hint")).not.toBeNull();
+      seen.push(`${value}→${q("create-channel-name-preview")?.textContent ?? "안내"}`);
+    }
+    // 마지막 음절이 확정되지 않은 채 멈춘 화면.
+    expect(composing).toBe(true);
+    expect(q("create-channel-name-preview")!.textContent).toBe("#디자인-리뷰 이름으로 만들어져요");
+    expect(input().getAttribute("aria-describedby")).toBe("create-channel-name-preview");
+    expect(seen.length).toBe(STEPS.length);
+  });
+
+  it("81번째 음절이 조합 중이어도 「80자까지」 거절이 선다", async () => {
+    await mount();
+    await type("가".repeat(80));
+    expect(q("create-channel-name-error")).toBeNull();
+    await composition("start");
+    await step("가".repeat(80) + "ㄴ", "ㄴ");
+    expect(q("create-channel-name-error")!.textContent).toBe("채널 이름은 80자까지 쓸 수 있어요.");
+    expect(input().getAttribute("aria-invalid")).toBe("true");
+  });
+
+  it("한글 조합 중 미리보기는 낭독 영역 밖이다(음절마다 읽지 않는다)", async () => {
+    await mount();
+    await composition("start");
+    await step("디자인 리뷰", "뷰");
+    expect(q("create-channel-name-preview")!.closest("[aria-live]")).toBeNull();
   });
 });
