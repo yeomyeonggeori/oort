@@ -394,13 +394,15 @@ fn light_skeleton(raw: &str) -> String {
 /// compared with the workspace's live public and private channel names: two
 /// different names with the same fold read as one name on an approval card.
 ///
-/// Only the **Cyrillic and Greek** rows of [`confusable`] are borrowed — a letter
-/// of those scripts drawn like a Latin one becomes that Latin letter. Nothing else
-/// of [`skeleton`] applies, because a channel name is not a person's name: `-`
-/// and `_` stay, digits stay (no `0`/`o`, `1`/`l`), combining marks stay (`é` is
-/// not `e`), `rn`/`vv` stay, and the table's Hangul-jamo and Latin rows are not
-/// used. So `team-1`/`team-l`, `dev_ops`/`devops`, `résumé`/`resume` and a
-/// doubled jamo U+3147 / `oo` stay different channels.
+/// Only **Cyrillic and Greek** letters are folded: a letter of those scripts drawn
+/// like a lowercase Latin letter or a digit becomes that Latin text — the Unicode
+/// look-alike data ([`channel_lookalike_row`]) first, then the Cyrillic and Greek
+/// rows of [`confusable`]. Nothing else of [`skeleton`] applies, because a channel
+/// name is not a person's name: `-` and `_` stay, digits stay (no `0`/`o`,
+/// `1`/`l`), combining marks stay (`é` is not `e`), `rn`/`vv` stay, and the
+/// table's Hangul-jamo and Latin rows are not used. So `team-1`/`team-l`,
+/// `dev_ops`/`devops`, `résumé`/`resume` and a doubled jamo U+3147 / `oo` stay
+/// different channels.
 ///
 /// The input is a name `fold_channel_name` already folded (NFC, lower case). It is
 /// decomposed first so a precomposed Cyrillic or Greek letter with a mark (U+0451,
@@ -409,16 +411,69 @@ fn light_skeleton(raw: &str) -> String {
 /// letter comes back unchanged (canonical decomposition then composition of an NFC
 /// string is that string).
 pub fn channel_name_lookalike_fold(name: &str) -> String {
-    name.nfd()
-        .map(|c| {
-            if is_cyrillic(c) || is_greek(c) {
-                confusable(c)
-            } else {
-                c
-            }
-        })
-        .nfc()
-        .collect()
+    let mut mapped = String::with_capacity(name.len());
+    for c in name.nfd() {
+        if let Some(latin) = channel_lookalike_row(c) {
+            mapped.push_str(latin);
+        } else if is_cyrillic(c) || is_greek(c) {
+            mapped.push(confusable(c));
+        } else {
+            mapped.push(c);
+        }
+    }
+    mapped.nfc().collect()
+}
+
+/// The Cyrillic and Greek letters (any block) that the Unicode look-alike data
+/// gives a lowercase Latin or digit prototype for, as that prototype, where
+/// [`confusable`] has no such row. Source: UTS #39 `confusables.txt`, version
+/// dated 2026-08-06, © Unicode, Inc., Unicode License v3
+/// (<https://www.unicode.org/license.txt>) — rows whose source is a Cyrillic or
+/// Greek code point a channel name can hold (lowercase or caseless; a capital is
+/// lowercased before it is folded) and whose prototype, decomposed, is ASCII
+/// lowercase letters or digits with combining marks. Channel names only: this is
+/// not part of [`skeleton`], so the person-name checks do not change.
+fn channel_lookalike_row(c: char) -> Option<&'static str> {
+    Some(match c {
+        // Greek and Coptic, Phonetic Extensions, Ancient Greek Numbers.
+        '\u{3B3}' => "y",
+        '\u{3C3}' => "o",
+        '\u{3F1}' => "p",
+        '\u{3F2}' => "c",
+        '\u{3F3}' => "j",
+        '\u{3F8}' => "p",
+        '\u{1D26}' => "r",
+        '\u{1018B}' => "d",
+        // Cyrillic and Cyrillic Supplement.
+        '\u{431}' => "6",
+        '\u{433}' => "r",
+        '\u{448}' => "w",
+        '\u{45B}' => "h\u{335}",
+        '\u{45F}' => "u\u{329}",
+        '\u{461}' => "w",
+        '\u{463}' => "b\u{335}",
+        '\u{473}' => "o\u{335}",
+        '\u{475}' => "v",
+        '\u{479}' => "oy",
+        '\u{47D}' => "w\u{486}\u{487}",
+        '\u{48D}' => "b\u{335}",
+        '\u{493}' => "r\u{335}",
+        '\u{4AB}' => "c\u{326}",
+        '\u{4AF}' => "y",
+        '\u{4B1}' => "y\u{335}",
+        '\u{4BD}' => "e",
+        '\u{4BF}' => "e\u{328}",
+        '\u{4D5}' => "ae",
+        '\u{4E9}' => "o\u{335}",
+        // Cyrillic Extended-C and Extended-B.
+        '\u{1C82}' => "o",
+        '\u{1C83}' => "c",
+        '\u{1C84}' => "7",
+        '\u{A647}' => "i",
+        '\u{A695}' => "h\u{314}",
+        '\u{A699}' => "oo",
+        _ => return None,
+    })
 }
 
 /// ADR-0225 D7: whether `proposed` is a **different** channel name that reads the
@@ -2081,5 +2136,215 @@ mod tests {
             checked += 1;
         }
         assert!(checked > 39_000, "only {checked} names were checked");
+    }
+
+    /// Every Cyrillic or Greek letter a channel name can hold that the Unicode
+    /// look-alike data (UTS #39 `confusables.txt`, 2026-08-06, Unicode License v3)
+    /// draws as lowercase Latin letters or digits, with what the D7 fold gives it.
+    /// The prototype is the data's, decomposed; the one difference is U+03B7, whose
+    /// data prototype carries a mark below and which the fold maps to the bare `n`.
+    const D7_SCRIPT_LOOKALIKES: &[(u32, &str)] = &[
+        (0x3B1, "a"),
+        (0x3B3, "y"),
+        (0x3B7, "n"),
+        (0x3B9, "i"),
+        (0x3BD, "v"),
+        (0x3BF, "o"),
+        (0x3C1, "p"),
+        (0x3C3, "o"),
+        (0x3C5, "u"),
+        (0x3F1, "p"),
+        (0x3F2, "c"),
+        (0x3F3, "j"),
+        (0x3F8, "p"),
+        (0x430, "a"),
+        (0x431, "6"),
+        (0x433, "r"),
+        (0x435, "e"),
+        (0x43E, "o"),
+        (0x440, "p"),
+        (0x441, "c"),
+        (0x443, "y"),
+        (0x445, "x"),
+        (0x448, "w"),
+        (0x455, "s"),
+        (0x456, "i"),
+        (0x458, "j"),
+        (0x45B, "h\u{335}"),
+        (0x45F, "u\u{329}"),
+        (0x461, "w"),
+        (0x463, "b\u{335}"),
+        (0x473, "o\u{335}"),
+        (0x475, "v"),
+        (0x479, "oy"),
+        (0x47D, "w\u{486}\u{487}"),
+        (0x48D, "b\u{335}"),
+        (0x493, "r\u{335}"),
+        (0x4AB, "c\u{326}"),
+        (0x4AF, "y"),
+        (0x4B1, "y\u{335}"),
+        (0x4BB, "h"),
+        (0x4BD, "e"),
+        (0x4BF, "e\u{328}"),
+        (0x4CF, "l"),
+        (0x4D5, "ae"),
+        (0x4E9, "o\u{335}"),
+        (0x501, "d"),
+        (0x51B, "q"),
+        (0x51D, "w"),
+        (0x1C82, "o"),
+        (0x1C83, "c"),
+        (0x1C84, "7"),
+        (0x1D26, "r"),
+        (0xA647, "i"),
+        (0xA695, "h\u{314}"),
+        (0xA699, "oo"),
+        (0x1018B, "d"),
+    ];
+
+    /// Every look-alike letter of the data above folds onto its Latin prototype,
+    /// so a name spelled with it is refused beside the Latin name.
+    #[test]
+    fn every_cyrillic_or_greek_lookalike_of_latin_text_folds_onto_it() {
+        for (code, latin) in D7_SCRIPT_LOOKALIKES {
+            let c = char::from_u32(*code).expect("a scalar");
+            let name = format!("a{c}");
+            assert_eq!(
+                crate::channel::normalize_channel_name(&name).as_deref(),
+                Ok(name.as_str()),
+                "U+{code:04X} is a letter a channel name holds as itself"
+            );
+            let plain: String = format!("a{latin}").nfc().collect();
+            assert_eq!(
+                channel_name_lookalike_fold(&name),
+                plain,
+                "U+{code:04X} folds onto its prototype"
+            );
+            assert!(
+                channel_names_look_alike(&plain, &name),
+                "U+{code:04X} beside {plain:?}"
+            );
+        }
+    }
+
+    /// Latin names beside a Cyrillic or Greek spelling of them: refused.
+    const D7_SCRIPT_PAIRS: &[(&str, &str)] = &[
+        ("docs", "do\u{3f2}s"),
+        ("security", "se\u{3f2}urity"),
+        ("project", "pro\u{3f3}ect"),
+        ("dev", "de\u{475}"),
+        ("deploy", "deplo\u{4af}"),
+        ("yes", "\u{4ae}es"),
+        ("yaml", "\u{3b3}aml"),
+        ("release", "r\u{4bd}lease"),
+        ("random", "\u{433}andom"),
+        ("web", "\u{448}eb"),
+        ("web", "\u{461}eb"),
+        ("ops", "\u{3c3}ps"),
+        ("api", "a\u{3f1}i"),
+        ("api", "a\u{3f8}i"),
+        ("ops", "\u{1c82}ps"),
+        ("core", "\u{1c83}ore"),
+        ("infra", "\u{a647}nfra"),
+        ("random", "\u{1d26}andom"),
+        ("boy", "b\u{479}"),
+        ("sprint-6", "sprint-\u{431}"),
+        ("team-7", "team-\u{1c84}"),
+        ("caesar", "c\u{4d5}sar"),
+        ("zoom", "z\u{a699}m"),
+        ("\u{119}xport", "\u{4bf}xport"),
+    ];
+
+    #[test]
+    fn a_latin_name_spelled_with_cyrillic_or_greek_lookalikes_is_refused() {
+        for (live, proposed) in D7_SCRIPT_PAIRS {
+            let proposed = crate::channel::normalize_channel_name(proposed)
+                .unwrap_or_else(|why| panic!("{proposed:?} is a valid name: {why}"));
+            assert!(
+                channel_names_look_alike(live, &proposed),
+                "{live:?} / {proposed:?}"
+            );
+            assert!(
+                channel_names_look_alike(&proposed, live),
+                "{proposed:?} / {live:?}"
+            );
+        }
+    }
+
+    /// Ordinary different names in the first languages (Korean, English,
+    /// Japanese, Chinese, Spanish, French) and digits: none is a look-alike.
+    const D7_ORDINARY: &[(&str, &str)] = &[
+        ("general", "general-2"),
+        ("general", "generals"),
+        ("design", "design-review"),
+        ("qa", "qa-\u{d53c}\u{b4dc}\u{bc31}"),
+        ("\u{acf5}\u{c9c0}", "\u{acf5}\u{c9c0}-2"),
+        (
+            "\u{b514}\u{c790}\u{c778}",
+            "\u{b514}\u{c790}\u{c778}-\u{b9ac}\u{bdf0}",
+        ),
+        (
+            "\u{b514}\u{c790}\u{c778}-\u{b9ac}\u{bdf0}",
+            "\u{b514}\u{c790}\u{c778}_\u{b9ac}\u{bdf0}",
+        ),
+        ("\u{ac1c}\u{bc1c}", "\u{ac1c}\u{bc1c}\u{d300}"),
+        ("\u{ac00}\u{b098}", "\u{ac00}\u{b2e4}"),
+        ("\u{c77c}\u{c815}", "\u{c77c}\u{c9c0}"),
+        ("dev", "dev-ops"),
+        ("dev1", "devl"),
+        ("o0", "00"),
+        ("team-a", "team-b"),
+        ("sprint-1", "sprint-10"),
+        ("2026", "2025"),
+        ("a", "b"),
+        (
+            "\u{30c7}\u{30b6}\u{30a4}\u{30f3}",
+            "\u{30c7}\u{30b6}\u{30a4}\u{30f3}-2",
+        ),
+        (
+            "\u{3067}\u{3056}\u{3044}\u{3093}",
+            "\u{30c7}\u{30b6}\u{30a4}\u{30f3}",
+        ),
+        ("\u{8bbe}\u{8ba1}", "\u{8a2d}\u{8a08}"),
+        ("\u{8bbe}\u{8ba1}", "\u{8bbe}\u{8ba1}\u{8bc4}\u{5ba1}"),
+        ("\u{e9}quipe", "equipe"),
+        ("dise\u{f1}o", "diseno"),
+        ("caf\u{e9}", "cafe"),
+        ("stra\u{df}e", "strasse"),
+        ("resume", "r\u{e9}sum\u{e9}"),
+        ("ma\u{f1}ana", "manana"),
+        ("qa-feedback", "qa_feedback"),
+        ("marketing", "marketing-kr"),
+        ("\u{b9c8}\u{cf00}\u{d305}", "marketing"),
+        ("\u{d68c}\u{c758}", "\u{d68c}\u{c758}\u{b85d}"),
+        ("\u{3147}\u{3147}", "oo"),
+        ("\u{3163}\u{3163}", "ii"),
+        ("\u{c774}", "oi"),
+        ("io", "\u{c774}"),
+        ("\u{4e00}", "\u{4e8c}"),
+        ("\u{2460}\u{acf5}\u{c9c0}", "1\u{acf5}\u{c9c0}"),
+        ("\u{2460}", "1"),
+        ("vv", "w"),
+        ("rn", "m"),
+        ("cl", "d"),
+    ];
+
+    #[test]
+    fn ordinary_names_in_the_first_languages_are_never_lookalikes() {
+        assert_eq!(D7_ORDINARY.len(), 41);
+        for (live, proposed) in D7_ORDINARY {
+            let proposed = crate::channel::normalize_channel_name(proposed)
+                .unwrap_or_else(|why| panic!("{proposed:?} is a valid name: {why}"));
+            let live = crate::channel::normalize_channel_name(live)
+                .unwrap_or_else(|why| panic!("{live:?} is a valid name: {why}"));
+            assert!(
+                !channel_names_look_alike(&live, &proposed),
+                "{live:?} / {proposed:?}"
+            );
+            assert!(
+                !channel_names_look_alike(&proposed, &live),
+                "{proposed:?} / {live:?}"
+            );
+        }
     }
 }

@@ -33818,3 +33818,134 @@ async fn archived_rooms_other_workspaces_and_distinct_names_are_not_lookalikes_5
         .await
         .is_empty());
 }
+
+/// **ADR-0225 D7 (#5830) — a private channel the agent has left.** Seen from the
+/// proposal, a private channel is the proposer's only while its membership is live:
+/// a look-alike of one it has left is answered like a clean name (the refusal would
+/// tell it the room still stands under that name), and the decision refuses it.
+///
+/// | revert that makes it red |
+/// |---|
+/// | count a membership that has ended as seeing the channel |
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn a_private_channel_the_agent_has_left_is_not_compared_at_the_proposal_5830() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let fixture = seed(&su).await;
+    let base = start_server(app, true).await;
+    let client = reqwest::Client::new();
+    let s = Uuid::new_v4().simple().to_string()[..8].to_string();
+    let left_name = format!("retreat-{s}");
+    let left = named_channel_5830(
+        &su,
+        fixture.workspace,
+        "private",
+        &left_name,
+        &[fixture.human],
+        false,
+    )
+    .await;
+    sqlx::query(
+        "INSERT INTO membership (workspace_id, channel_id, member_id, role, left_at) \
+         VALUES ($1, $2, $3, 'member', now())",
+    )
+    .bind(fixture.workspace)
+    .bind(left)
+    .bind(fixture.hosted_agent)
+    .execute(&su)
+    .await
+    .expect("a membership that has ended");
+
+    let (status, proposed) = try_propose_action_3706(
+        &client,
+        &base,
+        &su,
+        &fixture,
+        "channel.create",
+        json!({"name": lookalike_5830(&left_name)}),
+    )
+    .await;
+    assert_eq!(
+        status, 200,
+        "a room the agent left is not its to see: {proposed}"
+    );
+    assert!(lookalike_refusals_5830(&su, fixture.workspace)
+        .await
+        .is_empty());
+    let (status, _h, stale) = decide_as(
+        &client,
+        &base,
+        fixture.workspace,
+        &fixture.human_jwt,
+        proposed_approval_3706(&proposed),
+        true,
+        Uuid::new_v4(),
+    )
+    .await;
+    assert_eq!(status, 409, "{stale}");
+    let rows = lookalike_refusals_5830(&su, fixture.workspace).await;
+    assert_eq!(rows.len(), 1, "{rows:?}");
+    assert_eq!(rows[0].2["stage"], json!("decision"));
+    assert_eq!(rows[0].2["similar_channel_id"], json!(left.to_string()));
+}
+
+/// **ADR-0225 D5 (#5830 수리) — the agent's byte bound is the text as sent.** An
+/// 80-syllable Hangul name sent decomposed (three jamo per syllable, as a Mac may
+/// send it) is proposed and stored composed; 81 syllables are refused.
+///
+/// | revert that makes it red |
+/// |---|
+/// | bound the name at 4 bytes per character of the composed form (320) |
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn an_eighty_syllable_hangul_name_sent_decomposed_is_proposed_5830() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let fixture = seed(&su).await;
+    let base = start_server(app, true).await;
+    let client = reqwest::Client::new();
+    // "한" decomposed: U+1112 U+1161 U+11AB, nine bytes.
+    let decomposed = "\u{1112}\u{1161}\u{11AB}";
+
+    let (status, proposed) = try_propose_action_3706(
+        &client,
+        &base,
+        &su,
+        &fixture,
+        "channel.create",
+        json!({"name": decomposed.repeat(80)}),
+    )
+    .await;
+    assert_eq!(
+        status, 200,
+        "720 bytes, 80 letters once composed: {proposed}"
+    );
+    let (status, _h, approved) = decide_as(
+        &client,
+        &base,
+        fixture.workspace,
+        &fixture.human_jwt,
+        proposed_approval_3706(&proposed),
+        true,
+        Uuid::new_v4(),
+    )
+    .await;
+    assert_eq!(status, 200, "{approved}");
+    assert!(channel_row_3706(&su, fixture.workspace, &"한".repeat(80))
+        .await
+        .is_some());
+
+    let (status, refused) = try_propose_action_3706(
+        &client,
+        &base,
+        &su,
+        &fixture,
+        "channel.create",
+        json!({"name": decomposed.repeat(81)}),
+    )
+    .await;
+    assert_eq!(status, 400, "81 letters are refused: {refused}");
+}
