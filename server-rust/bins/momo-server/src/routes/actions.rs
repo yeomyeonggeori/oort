@@ -1116,7 +1116,8 @@ mod tests {
         for refused in [
             json!({}),
             json!({"name": ""}),
-            json!({"name": "Has Space"}),
+            // ADR-0225: a blank now folds to `-`; a full stop is still refused.
+            json!({"name": "has.dot"}),
             json!({"name": "-leading"}),
             json!({"name": "a".repeat(81)}),
             json!({"name": 7}),
@@ -1255,7 +1256,8 @@ mod tests {
             json!({"channels": null}),
             json!({"channels": "plans"}),
             json!({"channels": [1]}),
-            json!({"channels": ["Has Space"]}),
+            // ADR-0225: a blank now folds to `-`; a full stop is still refused.
+            json!({"channels": ["has.dot"]}),
             json!({"channels": ["a", "b", "c", "d", "e", "f"]}),
             json!({"channels": ["ok"], "connectionId": Uuid::new_v4()}),
             json!({"channels": ["ok"], "connection": Uuid::new_v4().to_string()}),
