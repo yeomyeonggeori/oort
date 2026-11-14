@@ -174,7 +174,8 @@ pub use dm::{
 pub use dm_closure::{close_dm_in_tx, reopen_dm_in_tx, DmClosureOutcome};
 pub use dm_leave::{
     clear_own_items_below_in_tx, dm_leave_participant_in_tx, lock_and_classify_in_tx,
-    next_history_floor, raise_history_floor_in_tx, DmLeaveClass, DmLeaveCleanup,
+    lock_own_open_schedules_in_tx, next_history_floor, raise_history_floor_in_tx, DmLeaveClass,
+    DmLeaveCleanup,
 };
 pub use error::{MessagingError, ProvenanceRejected};
 pub use hosted_inbox::{

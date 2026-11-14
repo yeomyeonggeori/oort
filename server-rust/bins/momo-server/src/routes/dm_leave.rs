@@ -46,8 +46,9 @@ use momo_auth::Principal;
 use momo_db::audit::{write_audit, AuditEntry};
 use momo_messaging::{
     clear_own_items_below_in_tx, close_dm_in_tx, dm_leave_participant_in_tx,
-    lock_and_classify_in_tx, next_history_floor, raise_history_floor_in_tx,
-    update_read_cursor_with_intent_in_tx, DmLeaveClass, MarkUnreadWrite, ReadIntent, ScheduleActor,
+    lock_and_classify_in_tx, lock_own_open_schedules_in_tx, next_history_floor,
+    raise_history_floor_in_tx, update_read_cursor_with_intent_in_tx, DmLeaveClass, MarkUnreadWrite,
+    ReadIntent, ScheduleActor,
 };
 use serde_json::json;
 
@@ -105,6 +106,8 @@ pub async fn put(
             // 1. locks and scope
             super::dm_agents::lock_pending_admission_cards_in_tx(conn, workspace_id, channel_id)
                 .await?;
+            // A schedule send locks its row and then `channel_seq`: same order here (#5823).
+            lock_own_open_schedules_in_tx(conn, workspace_id, channel_id, member_id).await?;
             let (last_seq, existing) =
                 match lock_and_classify_in_tx(conn, workspace_id, channel_id, member_id).await? {
                     DmLeaveClass::NotFound => return Ok(Err(ApiError::not_found(NOT_FOUND))),

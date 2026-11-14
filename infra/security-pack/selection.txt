@@ -10,6 +10,8 @@ tenant-isolation momo-db tenant_catalog_pg
 tenant-isolation momo-server http_smoke_pg
 tenant-isolation momo-server search_scope_conformance_pg
 tenant-isolation momo-server workspace_membership_pg
+tenant-isolation momo-server dm_leave_conformance_pg
+tenant-isolation momo-server dm_leave_copies_pg
 tenant-isolation momo-messaging conformance_pg
 tenant-isolation momo-relay relay_conformance_pg
 auth momo-server claim_conformance_pg

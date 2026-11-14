@@ -90,6 +90,36 @@ pub async fn dm_leave_participant_in_tx(
     Ok(row.is_some())
 }
 
+/// Lock the requester's open schedules in this room (`pending`, `failed`) **before** the
+/// `channel_seq` row. Sending a schedule — 「지금 보내기」 or the background loop — locks the schedule
+/// row and then `channel_seq`; the leave cancels those rows after `channel_seq`, so without this the
+/// two take the same pair of locks in opposite orders and deadlock. Taken here, a send that already
+/// holds a row makes the leave wait for it, and a send that comes later waits for the leave (or, for
+/// the loop's `SKIP LOCKED`, passes the row by). Owner-scoped table: bound and cleared like the
+/// clean-up below.
+pub async fn lock_own_open_schedules_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    channel_id: Uuid,
+    member_id: Uuid,
+) -> Result<(), DbError> {
+    bind_owner_guc(conn, member_id).await?;
+    sqlx::query(
+        "SELECT id FROM scheduled_message \
+          WHERE workspace_id = $1 AND author_member_id = $2 AND channel_id = $3 \
+            AND status IN ('pending', 'failed') \
+          ORDER BY id \
+          FOR UPDATE",
+    )
+    .bind(workspace_id)
+    .bind(member_id)
+    .bind(channel_id)
+    .fetch_all(&mut *conn)
+    .await?;
+    clear_owner_guc(conn).await?;
+    Ok(())
+}
+
 /// Take the D16 locks — the `channel_seq` row `FOR UPDATE`, then the live `membership` rows
 /// `FOR SHARE` — and judge the D20 scope under them.
 ///

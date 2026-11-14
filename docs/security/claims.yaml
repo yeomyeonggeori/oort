@@ -70,6 +70,23 @@ claims:
     proofs:
       - "server-rust/bins/momo-server/tests/search_scope_conformance_pg.rs#a_channel_the_caller_may_not_read_is_the_same_404_as_one_that_is_not_there"
       - "server-rust/bins/momo-server/tests/search_scope_conformance_pg.rs#a_cursor_may_not_be_replayed_under_a_different_scope"
+  - id: TEN-6
+    claim: "After a person leaves a one-to-one conversation with another person, the server returns none of the messages from before the leave to that person through history, threads, search, pins, reactions, the inbox, attachment content and posters, link card lists and pictures, push fetch, a developer token or the personal MCP read, and the subscribe proxy turns off replay of the kept realtime publications for that person's subscription."
+    scope: "ADR-0177 amendment 2026-11-14 (D17). Real PostgreSQL as the non-bypass API role, two workspaces; the proxy decision is tested over HTTP and its effect was measured once against the pinned Centrifugo v6.9.1 image, not in CI. Not proven here: realtime delivery other than the replay of kept publications (ADR-0177 D17, D22), pushes already delivered to a device and a screen already open on another device (D22 limits), and conversations with an agent (out of scope, D20). The read-path inventory proves that every message read in the server source has a classification, not that each classification is right."
+    priority: P0
+    runs: pr-ci
+    proofs:
+      - "server-rust/bins/momo-server/tests/dm_leave_conformance_pg.rs#the_leaver_reads_nothing_below_the_floor_through_any_door"
+      - "server-rust/bins/momo-server/tests/dm_leave_conformance_pg.rs#every_human_door_binds_the_requester"
+      - "server-rust/bins/momo-server/tests/dm_leave_copies_pg.rs#files_below_the_floor_answer_like_an_unknown_id"
+      - "server-rust/bins/momo-server/tests/dm_leave_copies_pg.rs#link_cards_below_the_floor_answer_like_an_unknown_id"
+      - "server-rust/bins/momo-server/tests/dm_leave_copies_pg.rs#counts_and_lists_hold_nothing_below_the_floor"
+      - "server-rust/bins/momo-server/tests/dm_leave_copies_pg.rs#the_subscribe_proxy_turns_recovery_off_for_a_floor_only"
+      - "server-rust/bins/momo-server/tests/dm_leave_copies_pg.rs#every_copy_of_message_in_the_catalog_is_classified"
+      - "server-rust/bins/momo-server/tests/dm_leave_read_paths.rs#every_message_read_in_the_server_source_is_classified"
+    sabotage:
+      how: "Dropping the read policy, the requester binding of a door, the message check of the card load or the proxy override turns the matching proof red (the sabotage table of the pull request for issue #5823); adding a message read the inventory does not classify, or leaving a stale row, turns the inventory red, and the control test feeds both shapes to the same comparison."
+      evidence: "server-rust/bins/momo-server/tests/dm_leave_read_paths.rs#an_unclassified_read_turns_the_inventory_red"
 
   # ---- 인증·세션 -------------------------------------------------------------------
   - id: AUTH-1

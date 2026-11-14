@@ -835,12 +835,16 @@ mod tests {
     /// `membership.history_from_seq` (nullable, `> 0`) and one `RESTRICTIVE FOR SELECT` policy on
     /// `message` (`dm_leave_history_floor`) that reads the request-local `app.requester_member_id`.
     /// No new table, so no new RLS target.
+    ///
+    /// 181 is #5823's partial index for that policy: `membership (member_id) WHERE history_from_seq
+    /// IS NOT NULL`, so the policy's 「channels where the requester has a floor」 set is an index scan
+    /// over the rows that have one. No new table, policy or grant.
     #[test]
-    fn discovers_contiguous_migrations_001_to_180() {
+    fn discovers_contiguous_migrations_001_to_181() {
         let dir = default_migrations_dir();
         let migrations = discover_migrations(&dir).expect("migrations directory readable");
 
-        let expected: Vec<i64> = (1..=180).collect();
+        let expected: Vec<i64> = (1..=181).collect();
         let found: Vec<i64> = migrations
             .iter()
             .map(|migration| migration.version)
@@ -848,7 +852,7 @@ mod tests {
         assert_eq!(
             found,
             expected,
-            "expected contiguous 001..=180 under {}",
+            "expected contiguous 001..=181 under {}",
             dir.display()
         );
         assert!(migrations.first().unwrap().name.starts_with("001_init"));
@@ -856,7 +860,7 @@ mod tests {
             .last()
             .unwrap()
             .name
-            .starts_with("180_dm_leave_history_floor"));
+            .starts_with("181_dm_leave_floor_index"));
     }
 
     #[test]

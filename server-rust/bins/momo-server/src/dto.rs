@@ -3847,7 +3847,23 @@ pub struct SubscribeProxyResponse {
 }
 
 #[derive(Debug, Serialize)]
-pub struct SubscribeProxyResult {}
+pub struct SubscribeProxyResult {
+    /// Per-subscription channel options (the Centrifugo v6 proxy protocol's `override`). Absent
+    /// for every subscription but one whose subscriber has a history floor in that channel.
+    #[serde(rename = "override", skip_serializing_if = "Option::is_none")]
+    pub override_options: Option<SubscribeProxyOverride>,
+}
+
+/// The one option this server overrides: `force_recovery`, as a protocol `BoolValue`.
+#[derive(Debug, Serialize)]
+pub struct SubscribeProxyOverride {
+    pub force_recovery: SubscribeProxyBool,
+}
+
+#[derive(Debug, Serialize)]
+pub struct SubscribeProxyBool {
+    pub value: bool,
+}
 
 #[derive(Debug, Serialize)]
 pub struct SubscribeProxyError {
@@ -3858,7 +3874,23 @@ pub struct SubscribeProxyError {
 impl SubscribeProxyResponse {
     pub fn allow() -> Self {
         SubscribeProxyResponse {
-            result: Some(SubscribeProxyResult {}),
+            result: Some(SubscribeProxyResult {
+                override_options: None,
+            }),
+            error: None,
+        }
+    }
+
+    /// Allow, with the stream's recovery switched off for this one subscription (ADR-0177 증보
+    /// D17·D22): the publications the channel keeps are not replayed to it, whatever position the
+    /// client asks to recover from.
+    pub fn allow_without_recovery() -> Self {
+        SubscribeProxyResponse {
+            result: Some(SubscribeProxyResult {
+                override_options: Some(SubscribeProxyOverride {
+                    force_recovery: SubscribeProxyBool { value: false },
+                }),
+            }),
             error: None,
         }
     }
