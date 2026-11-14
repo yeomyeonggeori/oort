@@ -20,6 +20,7 @@ import {
   isMessageBeforeLeave,
   isPersonToPersonDm,
   pendingAfterSendFailure,
+  readProjectionCarriesLeave,
   readStateAfterLeave,
   resetDmLeaveFoldForTest,
   runDmLeaveCleanup,
@@ -421,5 +422,23 @@ describe("보내기 재시도의 409 message_before_leave (D17 쓰기 길 표)",
       expect(settled.dropped).toBe(false);
       expect(settled.list).toEqual([{ ...pending("a"), status: "failed" }]);
     }
+  });
+});
+
+describe("접기는 메뉴만 닫는다 (D18·D21)", () => {
+  it("나가기 경로가 접혀도 투영이 하한을 싣는 한 보임 판정은 하한을 계속 읽는다 - 이미 나간 대화가 되살아나지 않는다", () => {
+    const rows = [row({ historyFromSeq: 11, closedAtSeq: 10 })];
+    settleDmLeaveFailure(WS, new ApiError(404, "not found"));
+    expect(dmLeaveMode({ workspaceId: WS, rows })).toBe("legacy");
+    expect(dmLeaveOffered({ mode: dmLeaveMode({ workspaceId: WS, rows }), phase: "ready", channel: dm(), directory: makeDirectory(ROSTER), selfMemberId: ME })).toBe(false);
+    expect(readProjectionCarriesLeave(rows)).toBe(true);
+  });
+
+  it("투영이 하한 키를 싣지 않으면(옛 서버) 보임 판정도 하한을 읽지 않는다", () => {
+    const { historyFromSeq: _omit, ...old } = row();
+    void _omit;
+    expect(readProjectionCarriesLeave([old])).toBe(false);
+    expect(readProjectionCarriesLeave([])).toBe(false);
+    expect(readProjectionCarriesLeave(undefined)).toBe(false);
   });
 });

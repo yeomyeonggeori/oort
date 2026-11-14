@@ -83,8 +83,18 @@ export function resetDmLeaveFoldForTest(): void {
 }
 
 /**
- * 읽음 투영 행들로 이 서버가 나가기를 싣는지 가른다. 판별은 키의 **있음**이다: `history_from_seq: null` 도 새 서버다. `PUT
- * read-state` 응답과 실시간 프레임에는 이 키가 없으므로 `GET` 행으로만 가른다(호출부의 병합이 값을 지켜야 한다).
+ * 읽음 투영이 하한을 싣는가 - **보임 판정의 입력**(`dmReadFacts` 의 `serverCarriesLeave`)은 이것으로 정한다. 판별은 키의 **있음**이다:
+ * `history_from_seq: null` 도 싣는 것이다. `PUT read-state` 응답과 실시간 프레임에는 이 키가 없으므로 `GET` 행으로만 가른다(호출부의
+ * 병합이 값을 지켜야 한다). 나가기 경로의 접기(`foldDmLeaveAbsent`)를 보지 **않는다**: 접기는 메뉴를 내밀지 않게 할 뿐이고, 이미 나간
+ * 대화의 하한은 투영이 싣는 한 계속 판정에 들어가야 한다(D18).
+ */
+export function readProjectionCarriesLeave(rows: readonly ReadState[] | undefined): boolean {
+  return rows !== undefined && rows.some((row) => row.historyFromSeq !== undefined);
+}
+
+/**
+ * 이 서버에 나가기를 **내미는가**의 판별(D21). 투영이 하한을 싣고(`readProjectionCarriesLeave`), 이 워크스페이스에서 나가기 경로가
+ * 접히지 않았을 때 `server` 다. 보임 판정에는 이것이 아니라 `readProjectionCarriesLeave` 를 쓴다.
  */
 export function dmLeaveMode(input: {
   workspaceId: string;
@@ -93,7 +103,7 @@ export function dmLeaveMode(input: {
   if (dmLeaveFolded(input.workspaceId)) return "legacy";
   const rows = input.rows;
   if (rows === undefined || rows.length === 0) return "unknown";
-  return rows.some((row) => row.historyFromSeq !== undefined) ? "server" : "legacy";
+  return readProjectionCarriesLeave(rows) ? "server" : "legacy";
 }
 
 // ---- 내미는가 (D20·D21) ----------------------------------------------------------------------------------------
@@ -183,9 +193,8 @@ export function higherHistoryFloor(
 }
 
 /**
- * 실시간으로 온 프레임을 버리는가(D22 한계 3 가운데 클라이언트 몫). 나간 뒤에도 그 방 구독은 그대로라, 끊긴 구간 다시 보내기가
- * 나가기 전 발행물을 다시 실어 올 수 있다. 하한 아래 seq 는 화면에 그리지 않는다. 반응·고정·링크 카드·지움 프레임은 대상
- * 메시지의 seq 를 다시 쓰므로 같은 판정을 받는다. seq 가 없는 프레임(입력 중 표시 등)과 하한이 없는 대화는 통과한다.
+ * 실시간 프레임을 그리지 않는가(D22 한계 3 가운데 클라이언트 몫): 하한 아래 seq 는 화면에 그리지 않는다. 반응·고정·링크 카드·지움
+ * 프레임은 대상 메시지의 seq 를 다시 쓰므로 같은 판정을 받는다. seq 가 없는 프레임과 하한이 없는 대화는 통과한다.
  */
 export function isBelowHistoryFloor(
   seq: number | null | undefined,
@@ -306,7 +315,7 @@ export interface DmLeaveCleanupPort {
   dropInboxItems(channelId: string): void;
   /** 그 대화에 쓰던 초안(대화 입력칸과 그 대화의 스레드 입력칸)을 지운다. */
   clearDrafts(channelId: string): void;
-  /** 그 대화의 보내지 못한 글(실패 행과 그 기록)을 지운다. 나가기 전에 쓴 글이라 남기면 다시 열 때 지난 대화가 보인다. */
+  /** 그 대화의 보내지 못한 글(실패 행과 그 기록)을 지운다(D17 기기 줄 - 나가기 전 대화의 글이다). */
   forgetFailedSends(channelId: string): void;
 }
 

@@ -142,7 +142,7 @@ export interface DmVerdict {
 export interface DmFactsInput {
   mode: DmClosureMode;
   /**
-   * 이 서버가 「대화 나가기」를 싣는가(코어 `dmLeaveMode` 가 `server`, ADR-0177 증보 2026-11-14 D21). 참이면 server·ready 행의
+   * 읽음 투영이 하한을 싣는가(코어 `readProjectionCarriesLeave`, ADR-0177 증보 2026-11-14 D18). 참이면 server·ready 행의
    * 하한(`historyFromSeq`)을 그대로 코어 3a 에 넣는다. 아니면(생략 포함) 하한이 없다 - 옛 서버에서 3a 는 아무것도 바꾸지 않는다.
    */
   serverCarriesLeave?: boolean;
@@ -203,7 +203,8 @@ function cachedFacts(input: DmFactsInput, cached: CachedDmFacts): Facts {
   return {
     starredOrSectioned: input.starredOrSectioned,
     closedAtSeq: cached[0],
-    // 사본은 하한을 적어 두지 않는다(나간 대화는 서버가 숨김 행도 같이 올려 7번으로 숨는다, ADR-0177 증보 D16-5).
+    // 사본은 하한을 적어 두지 않는다. 별표·섹션이 없는 나간 대화는 서버가 같이 올린 숨김 행(ADR-0177 증보 D16-5)으로 7번에 숨고,
+    // 별표·섹션이 있는 나간 대화는 투영이 올 때까지 4번으로 보인다(첫 페인트 한정).
     historyFromSeq: null,
     latestReadableSeq: cached[1],
     lastReadSeq: cached[2],

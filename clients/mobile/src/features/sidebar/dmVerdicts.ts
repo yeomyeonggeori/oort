@@ -68,7 +68,7 @@ export interface DmVerdictsInput {
   rosterReady?: boolean;
   mode: DmClosureMode;
   /**
-   * 이 서버가 「대화 나가기」를 싣는가(코어 `dmLeaveMode`, ADR-0177 증보 2026-11-14 D21). 참이면 행의 하한이 코어 3a 로 간다.
+   * 읽음 투영이 하한을 싣는가(코어 `readProjectionCarriesLeave`, ADR-0177 증보 2026-11-14 D18). 참이면 행의 하한이 코어 3a 로 간다.
    * 생략하면 하한이 없다(옛 서버와 같다).
    */
   serverCarriesLeave?: boolean;
