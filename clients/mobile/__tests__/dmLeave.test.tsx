@@ -19,6 +19,7 @@ import AppShell from '../src/shell/AppShell';
 import {__resetSessionStore, sessionPort} from '../src/storage/secureSession';
 import {NON_SECRET_KEYS} from '../src/storage/kv';
 import {__resetServerBaseCache, setServerBase} from '../src/storage/serverBase';
+import {centrifugoChannelName} from '@momo/core/lib/realtimeEvents';
 import {openConversationMenu} from './fixtures/conversationMenu';
 import {installAppClock, SHELL_WAIT_TEST_TIMEOUT_MS} from './fixtures/fakeClock';
 import {pinReduceMotion} from './fixtures/reduceMotion';
@@ -99,6 +100,8 @@ interface Routes {
   holdLeave?: boolean;
   /** 대화 이력 - 사람 DM 의 글 seq 들(투영 최신 2 보다 높게 줄 수 있다). */
   humanMessages?: number[];
+  /** 김도현과의 DM 을 전에 나갔고(하한 3) 그 뒤 새 글(최신 4)이 와 목록에 다시 섰다. */
+  human2Floor?: boolean;
 }
 
 interface Call {
@@ -153,7 +156,10 @@ function readStates(routes: Routes) {
 function installFetch(routes: Routes = {}) {
   calls = [];
   held = [];
-  floors = new Map(routes.alreadyLeft ? [['ch-dm-human', 3]] : []);
+  floors = new Map([
+    ...(routes.alreadyLeft ? ([['ch-dm-human', 3]] as const) : []),
+    ...(routes.human2Floor ? ([['ch-dm-human2', 3]] as const) : []),
+  ]);
   globalThis.fetch = jest.fn(async (url: string, init?: {method?: string; body?: string}) => {
     const method = init?.method ?? 'GET';
     const body = init?.body ? (JSON.parse(init.body) as Record<string, unknown>) : null;
@@ -351,6 +357,21 @@ describe('행 시트 — 누구에게 서는가 (D20·D21, 코어 `dmLeaveOffere
   });
 });
 
+describe('VoiceOver 로터 — 시트와 같은 항목, 같은 확인 단계', () => {
+  it('사람 DM 행의 로터에 「대화 나가기」가 있고, 고르면 시트가 확인 단계로 열린다(요청은 아직 없다)', async () => {
+    await mountShell();
+    await waitFor(() => {
+      const actions = screen.getByTestId(ROW.human).props.accessibilityActions as {name: string; label: string}[];
+      expect(actions.map(action => action.name)).toContain('momoChannel:leave-dm');
+    });
+    const actions = screen.getByTestId(ROW.human).props.accessibilityActions as {name: string; label: string}[];
+    expect(actions.find(action => action.name === 'momoChannel:leave-dm')?.label).toBe(ko(DM_LEAVE_KEYS.action));
+    fireEvent(screen.getByTestId(ROW.human), 'accessibilityAction', {nativeEvent: {actionName: 'momoChannel:leave-dm'}});
+    await screen.findByTestId('channel-dm-leave-confirm');
+    expect(leaveCalls()).toHaveLength(0);
+  });
+});
+
 describe('행 시트 — 확인 단계 (D21)', () => {
   it('문장은 코어 사전의 D21 그대로이고 예약 줄은 그 방의 pending+failed 를 센다 · 「취소」가 앞에 선다', async () => {
     await mountShell({scheduled: true});
@@ -519,6 +540,55 @@ describe('이음매 — 홈 화면이 투영의 하한을 보임 판정에 넘�
     const offered = dmSectionMenuOptions();
     expect(offered.length).toBeGreaterThan(0);
     expect(offered).not.toContain(DM_CLOSED_LIST_LABEL);
+  });
+});
+
+interface FakeSubscription {
+  __subscribed: (o?: {recovered?: boolean; publications?: unknown[]}) => void;
+}
+const centrifugeMock = jest.requireMock('centrifuge') as {
+  __clients: Array<{getSubscription: (name: string) => FakeSubscription | null}>;
+};
+
+function publication(seq: number) {
+  return {
+    type: 'message.new',
+    v: 1,
+    ts: 1,
+    seq,
+    payload: {
+      id: `rt-${seq}`,
+      channel_id: 'ch-dm-human2',
+      seq,
+      type: 'text',
+      body: `실시간 ${seq}`,
+      author_member_id: HUMAN2_ID,
+      state: 'sent',
+      created_at_ms: 1_700_000_000_000 + seq,
+    },
+  };
+}
+
+describe('대화 화면 — 투영의 하한을 실시간 거름에 넘긴다 (D22 한계 3)', () => {
+  it('다시 이어진 대화(하한 3)를 열면, 다시 보내기로 온 하한 아래 글은 그리지 않고 하한 위 글만 그린다', async () => {
+    await mountShell({human2Floor: true});
+    await waitFor(() => expect(screen.getByTestId(ROW.human2)).toBeTruthy());
+    fireEvent.press(screen.getByTestId(ROW.human2));
+    await screen.findByTestId('conversation-menu');
+    let sub: FakeSubscription | null = null;
+    await waitFor(() => {
+      const clients = centrifugeMock.__clients;
+      sub = clients[clients.length - 1]?.getSubscription(centrifugoChannelName(WS, 'ch-dm-human2')) ?? null;
+      expect(sub).not.toBeNull();
+    });
+    await act(async () => {
+      (sub as unknown as FakeSubscription).__subscribed({
+        recovered: true,
+        publications: [publication(2), publication(4)],
+      });
+    });
+    await screen.findByText('실시간 4');
+    expect(screen.queryByText('실시간 2')).toBeNull();
   });
 });
 

@@ -151,6 +151,32 @@ describe('실시간 하한 — 하한 아래 발행물은 그리지 않는다 (D
     expect(Object.keys(view.result.current.reactions)).toEqual(['m-6']);
     expect(Object.keys(view.result.current.pins)).toEqual([]);
 
+    const card = (messageId: string) => ({
+      id: `u-${messageId}`,
+      messageId,
+      url: 'https://example.com/a',
+      status: 'ok' as const,
+      title: '카드',
+    });
+    act(() => {
+      handlers?.onUnfurl?.({
+        type: 'message.unfurl',
+        v: 1,
+        ts: 1,
+        seq: 3,
+        payload: {message_id: 'm-3', channel_id: CH, unfurls: [card('m-3')]},
+      });
+      handlers?.onUnfurl?.({
+        type: 'message.unfurl',
+        v: 1,
+        ts: 1,
+        seq: 6,
+        payload: {message_id: 'm-6', channel_id: CH, unfurls: [card('m-6')]},
+      });
+    });
+    await settle();
+    expect(Object.keys(view.result.current.unfurls).map(key => key.toLowerCase())).toEqual(['m-6']);
+
     // 하한 아래 글의 지움 프레임은 그려진 줄(5)을 건드리지 않는다 — 대상이 하한 위면 그대로 지운다.
     act(() => {
       handlers?.onMessageDeleted?.({type: 'message.deleted', v: 1, ts: 9, seq: 4, payload: {message_id: 'm-5'}});
