@@ -554,6 +554,8 @@ describe('영수증을 닫을 때 — 올라온 단추를 둘째 탭이 누르�
     expect(screen.queryByTestId('dm-left-receipt')).toBeNull();
     const guard = screen.getByTestId('notice-dismiss-guard', {includeHiddenElements: true});
     expect(StyleSheet.flatten(guard.props.style)).toMatchObject({position: 'absolute', top: 12, height: 70});
+    // 막은 목록보다 먼저 그려진다 - 겹침 순서를 올려야 목록 머리의 단추보다 눌림을 먼저 받는다(기기 측정: r2).
+    expect(StyleSheet.flatten(guard.props.style).zIndex).toBeGreaterThanOrEqual(1);
     await act(() => {
       jest.advanceTimersByTime(NOTICE_DISMISS_GUARD_MS - 1);
     });

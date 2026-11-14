@@ -15,7 +15,8 @@ import {View, type LayoutChangeEvent} from 'react-native';
 /** 영수증을 닫은 뒤 그 자리가 눌림을 받지 않는 시간(ms). 두 번 누름의 간격(대개 300ms 안)보다 길고 일부러 다시 누르는 데보다 짧다. */
 export const NOTICE_DISMISS_GUARD_MS = 450;
 
-const COVER = {position: 'absolute', left: 0, right: 0} as const;
+// 막은 목록보다 먼저 그려지는 형제라, 겹침 순서를 올리지 않으면 목록 머리의 단추가 눌림을 먼저 받는다(design-review r2).
+const COVER = {position: 'absolute', left: 0, right: 0, zIndex: 1} as const;
 
 interface Rect {
   y: number;
