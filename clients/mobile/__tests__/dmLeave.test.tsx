@@ -531,7 +531,7 @@ describe('행 시트 — 실패 (D21)', () => {
   });
 });
 
-describe('이음매 — 홈 화면이 투영의 하한을 보임 판정에 넘긴다 (D18, 코어 검수 M1)', () => {
+describe('이음매 — 홈 화면이 투영의 하한을 보임 판정에 넘긴다 (D18)', () => {
   it('이미 나간 대화(하한 3 · 숨김 2 · 최신 2)는 목록에도 「숨긴 대화」에도 없다', async () => {
     await mountShell({alreadyLeft: true});
     await waitFor(() => expect(screen.getByTestId(ROW.human2)).toBeTruthy());
@@ -612,6 +612,43 @@ describe('대화 ⋮ 시트와 정보 페이지 — 같은 판정·낱말·단�
     expect(leaveCalls()[0].body).toEqual({seenSeq: 5});
     await waitFor(() => expect(screen.queryByTestId('conversation-pane')).toBeNull());
     expect(screen.getByTestId('dm-left-receipt')).toHaveTextContent(ko(DM_LEAVE_KEYS.done));
+  });
+
+  it('열린 대화에서 나가면: 입력칸에 쓰던 글과 그 방의 못 보낸 글이 대화가 걷힌 뒤에도 다시 적히지 않는다', async () => {
+    await mountShell();
+    rememberFailedSend(
+      WS,
+      {
+        clientMsgId: 'c-open',
+        channelId: 'ch-dm-human',
+        authorMemberId: SELF_ID,
+        body: '나가기 전에 못 보낸 글',
+        createdAtMs: 1,
+        sinceSeq: null,
+        status: 'failed',
+      },
+      null,
+    );
+    fireEvent.press(screen.getByTestId(ROW.human));
+    await screen.findByTestId('conversation-menu');
+    // 다시 연 대화가 못 보낸 글을 실패 행으로 되살린다 — 그 행과 입력칸의 글이 마운트된 채로 정리가 돈다.
+    await screen.findByText('나가기 전에 못 보낸 글');
+    fireEvent.changeText(screen.getByTestId('composer-input'), '쓰다 만 인사');
+    expect(readDrafts()[channelDraftKey('ch-dm-human')]?.body).toBe('쓰다 만 인사');
+    await waitFor(async () => {
+      await openConversationMenu();
+      expect(screen.getByTestId('conversation-menu-leave-dm')).toBeTruthy();
+    });
+    fireEvent.press(screen.getByTestId('conversation-menu-leave-dm'));
+    await screen.findByTestId('conversation-menu-dm-leave-confirm');
+    await arm();
+    fireEvent.press(screen.getByTestId('conversation-menu-dm-leave-confirm-button'));
+    await waitFor(() => expect(screen.queryByTestId('conversation-pane')).toBeNull());
+    await act(() => {
+      jest.advanceTimersByTime(5_000);
+    });
+    expect(readDrafts()[channelDraftKey('ch-dm-human')]).toBeUndefined();
+    expect(readFailedSends(WS, 'ch-dm-human', SELF_ID)).toHaveLength(0);
   });
 
   it('⋮ 시트: 에이전트 DM 에는 없다', async () => {

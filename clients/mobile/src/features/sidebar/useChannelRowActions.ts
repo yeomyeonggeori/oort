@@ -168,6 +168,8 @@ export function useChannelRowActions(
   const [dmLeave, setDmLeave] = useState<DmLeaveStep | null>(null);
   // 예약 수를 세는 사이 시트가 닫히거나 다른 행이 열리면 늦게 온 답이 단계를 세우지 않게 한다.
   const dmLeaveAsk = useRef(0);
+  // 세는 중에 다시 눌러도 한 번만 센다. ref 라서 `run` 의 신원이 진행 상태와 함께 바뀌지 않는다(행마다 넘기는 함수다).
+  const dmLeaveCounting = useRef(false);
   const receiptTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const mounted = useRef(true);
   const muteInFlight = useRef(new Set<string>());
@@ -390,14 +392,16 @@ export function useChannelRowActions(
         case 'leave-dm': {
           // 1:1 「대화 나가기」(D21): 확인 단계로 간다. 내밀지 않은 대상(옛 서버·에이전트·그룹)은 로터로 와도 아무 일이 없다.
           if (target.leaveOffered !== true || target.channel.kind !== 'dm') return;
-          if (pending.has(key)) return;
+          if (dmLeaveCounting.current) return;
           reset();
+          dmLeaveCounting.current = true;
           const ask = dmLeaveAsk.current;
           // D16: 이 기기가 그 대화에 대해 든 가장 큰 seq - 단계가 설 때 얼린다(머리말 2).
           const seenSeq = dmLeaveSeenSeq(target.readState ?? undefined, target.held?.().maxSeq);
           setActive(target);
           setPending(previous => new Set(previous).add(key));
           void scheduledCountWithin(workspaceId, channel.id, DM_LEAVE_COUNT_WAIT_MS).then(count => {
+            dmLeaveCounting.current = false;
             if (!mounted.current) return;
             setPending(previous => {
               const next = new Set(previous);
@@ -422,7 +426,7 @@ export function useChannelRowActions(
           return;
       }
     },
-    [client, failed, flashCopied, markRead, onLeft, pending, reset, track, workspaceId],
+    [client, failed, flashCopied, markRead, onLeft, reset, track, workspaceId],
   );
 
   const confirmLeave = useCallback(() => {
