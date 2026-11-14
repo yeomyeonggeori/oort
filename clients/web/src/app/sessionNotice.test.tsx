@@ -8,8 +8,10 @@ import { applyLogin, clearSession, markAuthExpired } from "@/lib/session";
 import {
   clearSessionNotices,
   getBootUnreachableNotice,
+  getServerSwitchSignedOutNotice,
   getSessionExpiredNotice,
   markBootUnreachableNotice,
+  markServerSwitchSignedOutNotice,
   markSessionExpiredNotice,
 } from "@/lib/sessionNotice";
 import { SessionNotice } from "@/app/SessionNotice";
@@ -224,5 +226,35 @@ describe("SessionNotice: 로그인 화면 위의 한 줄", () => {
     await mountNode(notice());
     expect(q("session-expired-notice")).not.toBeNull();
     expect(q("boot-unreachable-notice")).toBeNull();
+  });
+
+  // 지키는 것(#5816): 서버를 바꿔 앞 서버의 로그인을 끝냈으면 어느 서버의 로그인이 끝났는지 말하고(호스트만), 단추는 없다.
+  // 「저장된 로그인은 그대로」는 걷히고, 뒤에 서는 만료·서버 안 닿음 안내보다 이 문장이 이긴다.
+  it("서버를 바꿔 앞 서버의 로그인을 끝냈으면 그 서버 이름과 함께 말하고, 다른 두 안내보다 앞선다", async () => {
+    markBootUnreachableNotice();
+    markServerSwitchSignedOutNotice("https://old.oort.test/momo");
+    expect(getBootUnreachableNotice()).toBe(false);
+    markSessionExpiredNotice();
+    markBootUnreachableNotice();
+    await mountNode(notice());
+    const banner = q("server-switch-signed-out-notice");
+    expect(banner?.textContent).toBe(
+      "다른 서버로 바꿔서 앞 서버(old.oort.test)의 로그인은 끝났어요. 돌아가려면 다시 로그인해 주세요."
+    );
+    expect(banner?.querySelector("button")).toBeNull();
+    expect(q("session-expired-notice")).toBeNull();
+    expect(q("boot-unreachable-notice")).toBeNull();
+  });
+
+  // 지키는 것(#5816): 그 사실은 아무것도 남지 않은 복원이 끝나도 남고, 다시 로그인하면 걷힌다.
+  it("서버를 바꿔 끝낸 사실은 빈 복원 뒤에도 남고 다시 로그인하면 걷힌다", async () => {
+    markServerSwitchSignedOutNotice("https://old.oort.test");
+    clearSessionNotices({ keepServerSwitch: true });
+    expect(getServerSwitchSignedOutNotice()).toBe("https://old.oort.test");
+    await mountNode(createElement(Probe));
+    await act(async () => {
+      lifecycle?.signIn(LOGIN);
+    });
+    expect(getServerSwitchSignedOutNotice()).toBeNull();
   });
 });

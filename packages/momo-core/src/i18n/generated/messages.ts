@@ -194,6 +194,7 @@ export const messageKeys = [
   "connection.approval.serverUnreachable",
   "connection.boot.offlineDetail",
   "connection.boot.offlineQrDetail",
+  "connection.boot.serverSwitchedSignedOut",
   "connection.boot.unreachable",
   "connection.card.connecting",
   "connection.card.lastSynced",
@@ -1773,6 +1774,9 @@ export const argumentSpecs = {
   "connection.approval.serverUnreachable": {},
   "connection.boot.offlineDetail": {},
   "connection.boot.offlineQrDetail": {},
+  "connection.boot.serverSwitchedSignedOut": {
+    "host": "string"
+  },
   "connection.boot.unreachable": {},
   "connection.card.connecting": {},
   "connection.card.lastSynced": {
@@ -3762,6 +3766,7 @@ export interface MessageArgs {
   "connection.approval.serverUnreachable": Record<string, never>;
   "connection.boot.offlineDetail": Record<string, never>;
   "connection.boot.offlineQrDetail": Record<string, never>;
+  "connection.boot.serverSwitchedSignedOut": { host: string };
   "connection.boot.unreachable": Record<string, never>;
   "connection.card.connecting": Record<string, never>;
   "connection.card.lastSynced": { relativeTime: string };

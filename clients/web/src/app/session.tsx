@@ -155,7 +155,9 @@ export function useRestoredSession(): SessionLifecycle {
         setSession(restored);
         setStatus(restored ? "signed-in" : "anonymous");
         // 응답이 없어 복원하지 못했다면 자격은 그대로 남아 있다(위 `restoreSession`). 죽은 토큰이면 이미 지워졌다.
-        if (restored || !hasPersistedSession()) clearSessionNotices();
+        // 서버를 바꿔 끝낸 로그인이라는 사실(#5816)은 복원이 아무것도 남기지 않고 끝나도 그대로다.
+        if (restored) clearSessionNotices();
+        else if (!hasPersistedSession()) clearSessionNotices({ keepServerSwitch: true });
         else markBootUnreachableNotice();
       })
       .catch(() => {

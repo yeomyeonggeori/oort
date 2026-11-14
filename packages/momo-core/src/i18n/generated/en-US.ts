@@ -1350,6 +1350,20 @@ export const catalog: MessageCatalog = {
       "value": "Once you're connected to a network, you can scan the QR code."
     }
   ],
+  "connection.boot.serverSwitchedSignedOut": [
+    {
+      "type": 0,
+      "value": "You switched servers, so you're signed out of the previous one ("
+    },
+    {
+      "type": 1,
+      "value": "host"
+    },
+    {
+      "type": 0,
+      "value": "). Sign in again to go back."
+    }
+  ],
   "connection.boot.unreachable": [
     {
       "type": 0,
