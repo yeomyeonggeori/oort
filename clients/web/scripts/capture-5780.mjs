@@ -1113,7 +1113,12 @@ async function sceneGuard(browser, origin, scheme) {
         const tries = [];
         for (const ms of [250, 400]) {
           await page.waitForTimeout(Math.max(0, ms - (Date.now() - t0)));
-          const box = await confirm.boundingBox();
+          // 확정이 이미 눌려 단계가 내려갔으면(가드가 없을 때) 더 누를 단추가 없다 — 기록하고 멈춘다.
+          const box = await confirm.boundingBox({ timeout: 1_000 }).catch(() => null);
+          if (box === null) {
+            tries.push({ ms: Date.now() - t0, gone: true });
+            break;
+          }
           // 둘째 누름 둘: 같은 좌표(줄을 누른 자리)와 확정 단추 한가운데.
           await page.mouse.click(at.x, at.y);
           await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
@@ -1122,8 +1127,8 @@ async function sceneGuard(browser, origin, scheme) {
         await page.waitForTimeout(150);
         const early = { calls: lifecycleCalls.length, stage: await count(page, "member-profile-lifecycle-stage"), tries };
         await page.waitForTimeout(Math.max(0, 650 - (Date.now() - t0)));
-        const box = await confirm.boundingBox();
-        await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+        const box = await confirm.boundingBox({ timeout: 1_000 }).catch(() => null);
+        if (box !== null) await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
         await page.waitForFunction((n) => n, null, { timeout: 100 }).catch(() => undefined);
         await page.getByTestId("member-profile-lifecycle-stage").waitFor({ state: "detached", timeout: 10_000 }).catch(() => undefined);
         const late = { calls: [...lifecycleCalls] };
@@ -1135,7 +1140,7 @@ async function sceneGuard(browser, origin, scheme) {
           roster = roster.map((m) => (m.id === MEMBER ? { ...m, status: "active" } : m));
           lifecycleCalls.length = 0;
           await page.keyboard.press("Escape").catch(() => undefined);
-          await page.getByTestId("member-profile-close").click().catch(() => undefined);
+          await page.getByTestId("member-profile-close").click({ timeout: 2_000 }).catch(() => undefined);
           await page.getByTestId("member-profile-dialog").waitFor({ state: "detached", timeout: 5_000 }).catch(() => undefined);
           await page.reload({ waitUntil: "domcontentloaded" });
           await openProfile(page, MEMBER);
