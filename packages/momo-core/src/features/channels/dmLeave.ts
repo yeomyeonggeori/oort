@@ -1,7 +1,6 @@
 import { ApiError, type Channel, type ReadState } from "../../lib/api";
 import type { MessageKey } from "../../i18n/generated/messages";
 import type { MessageService } from "../../i18n/types";
-import { ABSENT_STATUSES } from "../capabilities/serverSurfaces";
 import type { ScheduledMessage } from "../scheduled/types";
 import type { ReadProjectionPhase } from "../sidebar/goneDm";
 import { failPending, removePending, type PendingMessage } from "../timeline/model";
@@ -16,9 +15,9 @@ import { idKey, memberFor, type Directory } from "../workspace/directory";
 //   옛 서버 판별(D21)        `dmLeaveMode`         GET 읽음 투영 행에 `history_from_seq` 키가 있는가(값이 null 이어도)
 //   내미는가(D20·D21)        `dmLeaveOffered`      사람끼리의 1:1 + 새 서버 + 투영 준비. 안 읽음·별표와 무관
 //   내가 본 seq(D16)         `dmLeaveSeenSeq`      투영의 latest_seq 와 실시간으로 받은 seq 중 큰 쪽
-//   응답 갈래(D16·D21)       `settleDmLeaveFailure` 404·405·501 은 이 워크스페이스에서 접고, 무엇이든 실패 문장 하나
+//   응답 갈래(D16·D21)       `settleDmLeaveFailure` 405·501 은 이 워크스페이스에서 접고(404 는 그 대화 하나), 무엇이든 실패 문장 하나
 //   확인 창(D21)             `dmLeaveConfirmCopy`  제목 · 줄들(예약 N개 줄은 N>0 일 때만) · 단추 둘
-//   성공 뒤(D17 기기 줄)     `runDmLeaveCleanup`   투영 행에 하한 쓰기 → 이력·스레드·검색·받은함 캐시 → 초안 → 못 보낸 글
+//   성공 뒤(D17 기기 줄)     `runDmLeaveCleanup`   투영 행에 하한 쓰기 → 이력·스레드·검색·받은함 캐시 → 초안·답글 초안 → 첨부 트레이 → 못 보낸 글
 //   하한 아래 발행물(D22-3)  `isBelowHistoryFloor` 실시간으로 다시 온 나가기 전 발행물을 버린다
 //   보내기 재시도(D17)       `pendingAfterSendFailure` 409 `message_before_leave` 는 실패 행이 아니라 조용히 지운다
 // =============================================================================
@@ -60,7 +59,7 @@ export const DM_LEAVE_KEYS = {
 
 /**
  *   server   이 서버가 나가기를 싣는다(GET 행에 `history_from_seq` 키가 있다).
- *   legacy   행은 있는데 아무도 그 키를 말하지 않는다, 또는 나가기 경로가 404·405·501 로 접혔다.
+ *   legacy   행은 있는데 아무도 그 키를 말하지 않는다, 또는 나가기 경로가 405·501 로 접혔다(404 는 접지 않는다 - 아래 `dmLeaveFailure`).
  *   unknown  투영이 없거나 행이 0 개다 - 증거가 없다.
  * 되돌릴 수 없는 동작이라 `server` 일 때만 내민다(모르면 닫힌다).
  */
@@ -230,22 +229,31 @@ export function readStateAfterLeave(row: ReadState, seenSeq: number): ReadState 
 export const DM_LEAVE_UNAVAILABLE_CODE = "dm_leave_unavailable";
 
 /**
- *   absent       404·405·501 - D21 대로 `serverSaysAbsent` 와 같은 집합이다. 이 워크스페이스에서 메뉴를 접는다.
+ *   absent       405·501 - 이 서버에 나가기 경로가 없다. 이 워크스페이스에서 메뉴를 접는다(닫기 경로의 `closureRouteAbsent` 와 같은 집합).
+ *   missing      404 - 그 대화가 없다(참여자 아님·DM 아님·보관됨). 메뉴는 이 투영이 키로 경로를 증명한 뒤에만 서므로, 그 뒤의 404 는
+ *                「경로 없음」이 아니라 그 대화 하나의 실패다. 접지 않는다 - 호출부가 채널·투영을 다시 받는다(#5824 검수 r1 M3).
  *   unavailable  409 `dm_leave_unavailable` - 서버가 본 그 방은 사람끼리 1:1 이 아니다(이 기기의 사실이 낡았다).
  *   failed       그 밖(네트워크·5xx·403·400). 아무것도 바뀌지 않았다.
- * 셋 모두 화면에는 같은 한 줄(`DM_LEAVE_KEYS.failed`)이다.
+ * 넷 모두 화면에는 같은 한 줄(`DM_LEAVE_KEYS.failed`)이다.
  */
-export type DmLeaveFailure = "absent" | "unavailable" | "failed";
+export type DmLeaveFailure = "absent" | "missing" | "unavailable" | "failed";
+
+/** 나가기 경로가 「이 서버에 그런 경로 없다」고 답하는 상태 코드. 404 는 들지 않는다(위 `missing`). */
+const DM_LEAVE_ROUTE_ABSENT_STATUSES: readonly number[] = [405, 501];
 
 export function dmLeaveFailure(error: unknown): DmLeaveFailure {
   if (error instanceof ApiError) {
-    if (ABSENT_STATUSES.includes(error.status)) return "absent";
+    if (DM_LEAVE_ROUTE_ABSENT_STATUSES.includes(error.status)) return "absent";
+    if (error.status === 404) return "missing";
     if (error.status === 409 && error.code === DM_LEAVE_UNAVAILABLE_CODE) return "unavailable";
   }
   return "failed";
 }
 
-/** 실패를 갈라 적용한다: `absent` 면 이 워크스페이스의 나가기를 접는다(메뉴 항목이 사라진다). 화면 문구는 늘 `failed` 키다. */
+/**
+ * 실패를 갈라 적용한다: `absent`(405·501) 면 이 워크스페이스의 나가기를 접는다(메뉴 항목이 사라진다). `missing`(404)은 접지 않는다.
+ * 화면 문구는 늘 `failed` 키다.
+ */
 export function settleDmLeaveFailure(workspaceId: string, error: unknown): DmLeaveFailure {
   const failure = dmLeaveFailure(error);
   if (failure === "absent") foldDmLeaveAbsent(workspaceId);
@@ -303,6 +311,10 @@ export function dmLeaveConfirmCopy(
 /**
  * 나가기 204 뒤 이 기기가 지우는 것. 코어는 저장소를 만지지 않는다 - 화면이 자기 캐시·초안 저장소로 이 문을 채운다(웹 초안은
  * `features/chat/draftStore.ts` 의 API). 이 대화의 것만 지운다.
+ *
+ * 답글 초안·스레드의 첨부 트레이는 열쇠가 뿌리 글 id 라서 채널 id 하나로는 찾을 수 없다(#5824 검수 r1 M4). 그래서 입력에
+ * `rootIds` - 화면이 `PUT` **전에** 모은 그 대화의 뿌리 글 id(열려 있던 이력·스레드 캐시·저장소가 채널과 함께 적어 둔 것) - 를
+ * 받아 두 단계에 넘긴다. `PUT` 뒤에는 서버가 하한 아래 뿌리를 내려 주지 않아 다시 모을 길이 없다.
  */
 export interface DmLeaveCleanupPort {
   /** 읽음 투영 캐시의 그 행을 바꾼다(`readStateAfterLeave`). 행이 없으면 아무것도 하지 않는다. */
@@ -313,8 +325,10 @@ export interface DmLeaveCleanupPort {
   dropSearchResults(channelId: string): void;
   /** 받은함 캐시에서 그 대화의 항목을 버린다. */
   dropInboxItems(channelId: string): void;
-  /** 그 대화에 쓰던 초안(대화 입력칸과 그 대화의 스레드 입력칸)을 지운다. */
-  clearDrafts(channelId: string): void;
+  /** 그 대화에 쓰던 초안(대화 입력칸)과 그 대화의 답글 초안(`rootIds` 마다)을 지운다. */
+  clearDrafts(channelId: string, rootIds: readonly string[]): void;
+  /** 그 대화의 첨부 트레이(대화 입력칸 · 스레드 입력칸)를 비운다. */
+  clearAttachmentTrays(channelId: string, rootIds: readonly string[]): void;
   /** 그 대화의 보내지 못한 글(실패 행과 그 기록)을 지운다(D17 기기 줄 - 나가기 전 대화의 글이다). */
   forgetFailedSends(channelId: string): void;
 }
@@ -328,22 +342,30 @@ export const DM_LEAVE_CLEANUP_STEPS: readonly DmLeaveCleanupStep[] = [
   "dropSearchResults",
   "dropInboxItems",
   "clearDrafts",
+  "clearAttachmentTrays",
   "forgetFailedSends",
 ];
+
+export interface DmLeaveCleanupInput {
+  channelId: string;
+  seenSeq: number;
+  /** `PUT` 전에 모은 그 대화의 뿌리 글 id. 없으면 빈 목록(대화 입력칸의 것만 지운다). */
+  rootIds?: readonly string[];
+}
 
 /**
  * 나가기 성공 뒤 정리를 차례대로 돌린다. 한 단계가 던져도 나머지는 돈다(저장소 하나의 오류가 캐시를 남기지 않게). 던진 단계를
  * 돌려준다 - 비어 있으면 다 지웠다. 서버 쪽은 이미 끝났으므로(204) 이 결과로 실패 문장을 내지 않는다.
  */
-export function runDmLeaveCleanup(
-  port: DmLeaveCleanupPort,
-  input: { channelId: string; seenSeq: number }
-): DmLeaveCleanupStep[] {
+export function runDmLeaveCleanup(port: DmLeaveCleanupPort, input: DmLeaveCleanupInput): DmLeaveCleanupStep[] {
   const failed: DmLeaveCleanupStep[] = [];
+  const rootIds = [...new Set((input.rootIds ?? []).map((id) => id.toLowerCase()))];
   for (const step of DM_LEAVE_CLEANUP_STEPS) {
     try {
       if (step === "updateReadRow") {
         port.updateReadRow(input.channelId, (row) => readStateAfterLeave(row, input.seenSeq));
+      } else if (step === "clearDrafts" || step === "clearAttachmentTrays") {
+        port[step](input.channelId, rootIds);
       } else {
         port[step](input.channelId);
       }
