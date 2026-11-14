@@ -442,6 +442,20 @@ export function centrifugoChannelName(
   return `ch:ws${workspaceId.toUpperCase()}.${channelId.toUpperCase()}`;
 }
 
+/**
+ * 개인 채널(`user:read-state#<나>`)로 옮겨 온 방 프레임이 원래 속한 방 채널 이름, 아니면 `null` (ADR-0177 증보 2026-11-14 D17, #5825).
+ *
+ * 1:1 에서 한 사람이 나간 방의 하한 아래 옛 글에 대한 뒤늦은 이벤트(고침·지움·반응·고정·링크 카드 등)는 방 채널 대신 그 글을 볼 수 있는
+ * 멤버의 개인 채널로 온다. 프레임은 방 프레임과 바이트까지 같고 `room_channel` 칸 하나가 더해진다. 받는 쪽은 이 이름이 자기가 구독한 방
+ * 채널과 같으면(대소문자 무시) 그 방 구독의 처리로 넘긴다. `room_channel` 이 없는 프레임(받은함·예약·팔로우 신호, 그리고 이런 프레임을
+ * 보내지 않는 옛 서버)은 `null` 이라 지금까지와 같다.
+ */
+export function relayedRoomChannel(data: unknown): string | null {
+  if (data === null || typeof data !== "object") return null;
+  const room = (data as { room_channel?: unknown }).room_channel;
+  return typeof room === "string" && room.startsWith("ch:") ? room : null;
+}
+
 // ---- 휘발 신호 레일 (ADR-0149 / goal B3 W2) ---------------------------------
 // `typing:ws<workspace>.<channel>` 는 **영속 채널과 이름만으로 구별되는** 별도
 // 네임스페이스다(가드 1). 그 분리에 얹힌 사실 셋:

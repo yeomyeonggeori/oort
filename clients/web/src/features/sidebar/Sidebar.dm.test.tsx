@@ -2171,6 +2171,23 @@ describe("대화 나가기 · 보임 판정이 실제 사이드바에 닿는다 
   });
 });
 
+/**
+ * 확인 창의 확정을 누른다. 공용 확인 단계의 「선 뒤 500ms 눌림 무시」 가드(#5813)가 있는 판이면 `data-armed="true"` 를 기다리고, 그 속성이
+ * 없는 판(가드 전)이면 바로 누른다 - 두 판에서 같은 시험이 돈다.
+ */
+async function pressLeaveConfirm(): Promise<void> {
+  const button = () => document.querySelector<HTMLElement>('[data-testid="dm-leave-confirm-confirm"]')!;
+  for (let waited = 0; button().getAttribute("data-armed") === "false" && waited < 2_000; waited += 50) {
+    await act(async () => {
+      await new Promise<void>((resolve) => setTimeout(resolve, 50));
+    });
+  }
+  await act(async () => {
+    button().click();
+    await Promise.resolve();
+  });
+}
+
 describe("대화 나가기 · 줄 메뉴 (D21)", () => {
   beforeAll(() => {
     HTMLElement.prototype.scrollIntoView = () => undefined;
@@ -2258,10 +2275,7 @@ describe("대화 나가기 · 줄 메뉴 (D21)", () => {
       // 확인 창을 보는 사이에 투영이 새 글(18)을 실어 와도 연 순간의 seq 로 보낸다(D16).
       setReadStates(newServer().map((row) => (row.channelId === DM_ID(1) ? { ...row, latestSeq: 18, lastReadSeq: 17 } : row)));
       await rerender();
-      await act(async () => {
-        document.querySelector<HTMLElement>('[data-testid="dm-leave-confirm-confirm"]')!.click();
-        await Promise.resolve();
-      });
+      await pressLeaveConfirm();
       await settle();
       expect(leave.calls).toEqual([{ channelId: DM_ID(1), seenSeq: 17 }]);
       expect(document.querySelector('[data-testid="dm-leave-confirm"]')).toBeNull();
@@ -2289,10 +2303,7 @@ describe("대화 나가기 · 줄 메뉴 (D21)", () => {
       act(() => document.querySelector<HTMLElement>('[data-testid="channel-row-leave-dm"]')!.click());
       await settle();
       await settle();
-      await act(async () => {
-        document.querySelector<HTMLElement>('[data-testid="dm-leave-confirm-confirm"]')!.click();
-        await Promise.resolve();
-      });
+      await pressLeaveConfirm();
       await settle();
     };
     leave.fail = 404;

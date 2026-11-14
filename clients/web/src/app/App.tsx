@@ -139,14 +139,16 @@ function FirstRunSession({
   useEffect(() => {
     const handle = createRealtime(
       resolveSpikeRealtimeUrl(session.realtimeWebSocketUrl),
-      setConnStatus
+      setConnStatus,
+      // 방 구독이 개인 채널로 옮겨 온 그 방의 프레임도 받는다(ADR-0177 증보 2026-11-14 D17).
+      session.member.id
     );
     setRealtime(handle);
     return () => {
       handle.dispose();
       setRealtime(null);
     };
-  }, [session.realtimeWebSocketUrl]);
+  }, [session.realtimeWebSocketUrl, session.member.id]);
 
   return (
     <SessionProvider

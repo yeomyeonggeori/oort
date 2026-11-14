@@ -21,6 +21,7 @@ import {
   asWorkSessionShareChangedFrame,
   centrifugoAgentChannelName,
   centrifugoChannelName,
+  relayedRoomChannel,
   centrifugoOnlineChannelName,
   centrifugoTypingChannelName,
   createReplayGate,
@@ -169,7 +170,12 @@ function heardWebSocket(onHeard: () => void): typeof WebSocket | null {
 
 export function createRealtime(
   realtimeWebSocketUrl: string,
-  onStatus: (status: RealtimeStatus) => void
+  onStatus: (status: RealtimeStatus) => void,
+  /**
+   * 로그인한 멤버(ADR-0177 증보 2026-11-14 D17, #5825). 있으면 방 구독이 개인 채널로 옮겨 온 그 방의 프레임(`room_channel`)도 받는다.
+   * 없으면(시험·스트레스 도구) 지금까지처럼 방 채널만 듣는다.
+   */
+  selfMemberId?: string
 ): RealtimeHandle {
   let heardAt: number | null = null;
   const websocket = heardWebSocket(() => {
@@ -259,54 +265,78 @@ export function createRealtime(
       onUnfurl?: (event: UnfurlEvent) => void;
     }
   ): () => void {
-    return attach(
-      centrifugoChannelName(workspaceId, channelId),
+    const roomName = centrifugoChannelName(workspaceId, channelId);
+    const detachRoom = attach(
+      roomName,
       { recoverable: true, positioned: true },
       (sub) => {
         const onSubscribed = (ctx: SubscribedRecoveryContext) =>
           handlers.onSubscribed(ctx);
-        const onPublication = (ctx: { data?: unknown }) => {
-          const event = ctx.data as MessageNewEvent | undefined;
-          if (
-            event &&
-            (event.type === "message.new" || event.type === "message.edited") &&
-            event.payload
-          ) {
-            handlers.onMessage(event);
-            return;
-          }
-          // B11 — the two interaction frames. They ride the same channel as the
-          // message they annotate and reuse its `seq`, so they arrive here in
-          // order behind it rather than on a rail of their own.
-          const tombstone = asMessageDeletedFrame(ctx.data);
-          if (tombstone) {
-            handlers.onMessageDeleted?.(tombstone);
-            return;
-          }
-          const reaction = asReactionFrame(ctx.data);
-          if (reaction) {
-            handlers.onReaction?.(reaction);
-            return;
-          }
-          // 이슈 #1112 — pin rides the same channel for the same reason, and
-          // reuses the target's `seq` too, so the header list and the timeline
-          // never disagree about which message a frame is about.
-          const pin = asPinFrame(ctx.data);
-          if (pin) {
-            handlers.onPin?.(pin);
-            return;
-          }
-          const unfurl = asUnfurlFrame(ctx.data);
-          if (unfurl) handlers.onUnfurl?.(unfurl);
-        };
         sub.on("subscribed", onSubscribed);
-        sub.on("publication", onPublication);
+        sub.on("publication", onRoomPublication);
         return () => {
           sub.off("subscribed", onSubscribed);
-          sub.off("publication", onPublication);
+          sub.off("publication", onRoomPublication);
         };
       }
     );
+    // 개인 채널로 옮겨 온 이 방의 프레임(ADR-0177 증보 2026-11-14 D17, #5825): 1:1 에서 상대가 나간 방의 하한 아래 옛 글에 대한 뒤늦은
+    // 이벤트는 방 채널이 아니라 볼 수 있는 멤버의 개인 채널로 온다. `room_channel` 이 이 방이면 방 채널로 온 것과 같이 처리한다(적용은 seq·id
+    // 기준이라 멱등). 개인 채널 구독은 받은함·예약 신호와 하나를 나눠 쓴다(`attach` 의 셈). 그런 프레임을 보내지 않는 옛 서버에서는 아무 일도 없다.
+    const detachRelay =
+      selfMemberId === undefined
+        ? null
+        : attach(
+            readStateRailChannelName(selfMemberId),
+            { recoverable: true, positioned: true },
+            (sub) => {
+              const onRelayed = (ctx: { data?: unknown }) => {
+                const room = relayedRoomChannel(ctx.data);
+                if (room !== null && room.toUpperCase() === roomName.toUpperCase()) onRoomPublication(ctx);
+              };
+              sub.on("publication", onRelayed);
+              return () => sub.off("publication", onRelayed);
+            }
+          );
+    return () => {
+      detachRoom();
+      detachRelay?.();
+    };
+
+    function onRoomPublication(ctx: { data?: unknown }): void {
+      const event = ctx.data as MessageNewEvent | undefined;
+      if (
+        event &&
+        (event.type === "message.new" || event.type === "message.edited") &&
+        event.payload
+      ) {
+        handlers.onMessage(event);
+        return;
+      }
+      // B11 — the two interaction frames. They ride the same channel as the
+      // message they annotate and reuse its `seq`, so they arrive here in
+      // order behind it rather than on a rail of their own.
+      const tombstone = asMessageDeletedFrame(ctx.data);
+      if (tombstone) {
+        handlers.onMessageDeleted?.(tombstone);
+        return;
+      }
+      const reaction = asReactionFrame(ctx.data);
+      if (reaction) {
+        handlers.onReaction?.(reaction);
+        return;
+      }
+      // 이슈 #1112 — pin rides the same channel for the same reason, and
+      // reuses the target's `seq` too, so the header list and the timeline
+      // never disagree about which message a frame is about.
+      const pin = asPinFrame(ctx.data);
+      if (pin) {
+        handlers.onPin?.(pin);
+        return;
+      }
+      const unfurl = asUnfurlFrame(ctx.data);
+      if (unfurl) handlers.onUnfurl?.(unfurl);
+    }
   }
 
   function subscribeAgent(

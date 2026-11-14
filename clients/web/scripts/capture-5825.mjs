@@ -17,6 +17,8 @@
 //   H 첫 페인트: 투영이 늦게 오는 동안 나간 대화(별표 없음)가 목록에도 「숨긴 대화」에도 없다.
 //   I 머리 ⋮ 가 늦게 설 때 머리 단추들의 x 변화. J 예약 목록이 늦거나 실패할 때.
 //   K 좁은 폭 390 · 200%: 창이 화면 안, 가로 넘침 0.
+//   M 개인 채널로 옮겨 온 방 프레임(D17, 서버 셋째 칸): 상대가 나간 1:1 에 남은 내가 받는 옛 글의 수정이 열린 대화에 반영된다. 다른 방
+//     이름을 단 것은 반영되지 않는다.
 //   L 머리 ⋮ 길: 390(서랍 닫힘 - 끝나면 서랍이 열리고 영수증이 보임) · 1280 목록 접힘(⌘B): 캐럿이 <body> 가 아니고 낭독 영역이 말한다.
 // =============================================================================
 import { mkdirSync, writeFileSync } from "node:fs";
@@ -277,6 +279,18 @@ const whatIsAt = (page, pt) =>
 const focusInfo = (page) =>
   page.evaluate(() => ({ tag: document.activeElement?.tagName.toLowerCase(), testid: document.activeElement?.getAttribute("data-testid"), channel: document.activeElement?.getAttribute("data-channel-id") }));
 
+/**
+ * 확정을 누른다. 공용 확인 단계의 「선 뒤 500ms 눌림 무시」 가드(#5813)가 있는 판이면 `data-armed="true"` 를 기다리고, 그 속성이 없는 판
+ * (가드 전)이면 바로 누른다 - 두 판에서 같은 장면이 돈다.
+ */
+async function clickConfirm(page) {
+  await page.waitForFunction(() => {
+    const button = document.querySelector('[data-testid="dm-leave-confirm-confirm"]');
+    return button !== null && button.getAttribute("data-armed") !== "false";
+  }, null, { timeout: 5_000 });
+  await page.getByTestId("dm-leave-confirm-confirm").click();
+}
+
 async function openLeaveFromRow(page, id) {
   await row(page, id).click({ button: "right" });
   await page.locator(MENU).waitFor({ timeout: 3_000 });
@@ -379,7 +393,7 @@ async function sceneStates(browser, origin, engine, scheme) {
       await shot(page, engine, `dialog-idle-${scheme}`);
       // 진행 중
       const confirmPt = await center(page.getByTestId("dm-leave-confirm-confirm"));
-      await page.getByTestId("dm-leave-confirm-confirm").click();
+      await clickConfirm(page);
       await page.waitForTimeout(200);
       const busy = await page.evaluate(() => ({
         confirm: document.querySelector('[data-testid="dm-leave-confirm-confirm"]')?.getAttribute("aria-busy"),
@@ -416,7 +430,7 @@ async function sceneStates(browser, origin, engine, scheme) {
     await attempt(scene, async () => {
       const { page } = failing;
       await openLeaveFromRow(page, DM_SEOYEON);
-      await page.getByTestId("dm-leave-confirm-confirm").click();
+      await clickConfirm(page);
       await page.getByTestId("dm-leave-confirm-error").waitFor({ timeout: 5_000 });
       const err = await page.evaluate(() => ({
         text: document.querySelector('[data-testid="dm-leave-confirm-error"]')?.textContent,
@@ -426,7 +440,7 @@ async function sceneStates(browser, origin, engine, scheme) {
       check(scene, "실패: 창 안 alert 한 줄 · 확정은 다시 누를 수 있다", err.text === "나가지 못했어요. 다시 시도해 주세요." && err.role === "alert" && err.busy === null, err);
       check(scene, "실패: 줄은 그대로 · 영수증 없음", (await row(page, DM_SEOYEON).count()) === 1 && (await page.getByTestId("dm-leave-receipt").count()) === 0, null);
       await shot(page, engine, `dialog-failed-${scheme}`);
-      await page.getByTestId("dm-leave-confirm-confirm").click();
+      await clickConfirm(page);
       await page.waitForTimeout(400);
       check(scene, "실패 뒤 다시 시도: PUT 이 한 번 더 나간다", failing.state.leaveCalls.length === 2, failing.state.leaveCalls.length);
       await page.getByTestId("dm-leave-confirm-cancel").click();
@@ -476,6 +490,8 @@ async function sceneKeyboard(browser, origin, engine) {
       await page.keyboard.press("Shift+F10");
       await page.locator(MENU).waitFor({ timeout: 3_000 });
       await page.keyboard.press("End");
+      // 캐럿이 「대화 나가기」에 선 뒤에 Enter(첫 회와 같은 차례 - 기다리지 않으면 Enter 가 앞 줄에 떨어진다).
+      await page.waitForFunction(() => document.activeElement?.getAttribute("data-testid") === "channel-row-leave-dm", null, { timeout: 3_000 });
       await page.keyboard.press("Enter");
       await page.getByTestId("dm-leave-confirm").waitFor({ timeout: 5_000 });
       await page.waitForTimeout(250);
@@ -523,7 +539,7 @@ async function sceneReceipt(browser, origin, engine, viewport = { width: 1280, h
         const receiptSlot = await row(page, DM_SEOYEON).boundingBox();
         await openLeaveFromRow(page, DM_SEOYEON);
         const tracking = trackRows(page, [DM_JIHO, DM_MINJI], 3_200);
-        await page.getByTestId("dm-leave-confirm-confirm").click();
+        await clickConfirm(page);
         if (pointer === "inside") {
           await page.waitForTimeout(300);
           const target = await center(row(page, DM_JIHO));
@@ -566,7 +582,7 @@ async function sceneCleanup(browser, origin, engine) {
         localStorage.setItem(b, JSON.stringify({ text: "다른 대화에 쓰던 글", atMs: Date.now(), author: me }));
       }, [draftKey(DM_SEOYEON), draftKey(DM_JIHO), ME]);
       await openLeaveFromRow(page, DM_SEOYEON);
-      await page.getByTestId("dm-leave-confirm-confirm").click();
+      await clickConfirm(page);
       await page.waitForTimeout(500);
       const left = await page.evaluate(([a, b]) => [localStorage.getItem(a), localStorage.getItem(b)], [draftKey(DM_SEOYEON), draftKey(DM_JIHO)]);
       check(scene, "줄 메뉴: 나간 대화 초안 0 · 다른 대화 초안 그대로", left[0] === null && left[1] !== null, left);
@@ -586,7 +602,7 @@ async function sceneCleanup(browser, origin, engine) {
       await page.getByTestId("channel-leave-dm").click();
       await page.getByTestId("dm-leave-confirm").waitFor({ timeout: 5_000 });
       await page.waitForTimeout(250);
-      await page.getByTestId("dm-leave-confirm-confirm").click();
+      await clickConfirm(page);
       await page.waitForTimeout(800);
       const hash = await page.evaluate(() => window.location.hash);
       const draft = await page.evaluate((k) => localStorage.getItem(k), draftKey(DM_SEOYEON));
@@ -615,7 +631,7 @@ async function sceneFloor(browser, origin, engine) {
   try {
     await attempt(scene, async () => {
       await openLeaveFromRow(page, DM_SEOYEON);
-      await page.getByTestId("dm-leave-confirm-confirm").click();
+      await clickConfirm(page);
       await page.waitForTimeout(400);
       // 상대가 새 글(11)을 보낸다.
       state.extra[DM_SEOYEON.toLowerCase()] = [msg(DM_SEOYEON, 11, P("11"), "새로 시작해요, 내일 봐요")];
@@ -668,7 +684,7 @@ async function sceneFloor(browser, origin, engine) {
     await attempt(`H-firstpaint-${engine}`, async () => {
       const { page, state: s } = cold;
       await openLeaveFromRow(page, DM_SEOYEON);
-      await page.getByTestId("dm-leave-confirm-confirm").click();
+      await clickConfirm(page);
       await page.waitForTimeout(2_200);
       // 사본이 하한을 적도록 한 번 다시 읽힌 뒤(30초 폴링을 기다리지 않고 새로고침) 투영을 늦춘다.
       await page.reload({ waitUntil: "domcontentloaded" });
@@ -769,7 +785,7 @@ async function sceneZoom(browser, origin, engine) {
           const onConfirm = itemPt && confirmBox && itemPt.x >= confirmBox.x && itemPt.x <= confirmBox.x + confirmBox.width && itemPt.y >= confirmBox.y && itemPt.y <= confirmBox.y + confirmBox.height;
           check(scene, `두 번 누름: 메뉴 줄 자리에 확정 단추가 없다 [${scheme}]`, !onConfirm, { itemPt, confirmBox });
           await shot(page, engine, `dialog-${label}-${scheme}`);
-          await page.getByTestId("dm-leave-confirm-confirm").click();
+          await clickConfirm(page);
           await page.waitForTimeout(500);
           const focus = await focusInfo(page);
           check(scene, `성공 뒤 캐럿이 <body> 가 아니다 [${scheme}]`, focus.tag !== "body", focus);
@@ -779,6 +795,36 @@ async function sceneZoom(browser, origin, engine) {
         await context.close();
       }
     }
+  }
+}
+
+// ---- M · 개인 채널로 옮겨 온 방 프레임 -------------------------------------------------------------------------
+
+async function sceneRelayed(browser, origin, engine) {
+  const scene = `M-relayed-${engine}`;
+  const { context, page } = await boot(browser, origin, { path: `/c/${DM_JIHO}` });
+  const personal = `user:read-state#${ME.toUpperCase()}`;
+  const room = (ch) => `ch:ws${workspaceId.toUpperCase()}.${ch.toUpperCase()}`;
+  const target = BASE_MESSAGES[DM_JIHO][1];
+  const edited = (body, roomChannel) => ({
+    type: "message.edited", v: 1, ts: Date.now(), seq: target.seq,
+    payload: { id: target.id, channel_id: DM_JIHO, seq: target.seq, type: "text", body, author_member_id: target.authorMemberId, hlc_ts: target.hlcTs, hlc_count: 0, created_at_ms: target.createdAtMs, state: "sent", edited_at_ms: Date.now() },
+    room_channel: roomChannel,
+  });
+  const hasText = (text) => page.evaluate((t) => document.querySelector('[data-testid="timeline-virtuoso"]')?.textContent?.includes(t) ?? false, text);
+  try {
+    await attempt(scene, async () => {
+      await page.waitForFunction((t) => document.querySelector('[data-testid="timeline-virtuoso"]')?.textContent?.includes(t), target.body, { timeout: 8_000 });
+      await page.evaluate(([c, f]) => window.__push(c, f), [personal, edited("다른 방 이름을 단 수정", room(DM_MINJI))]);
+      await page.waitForTimeout(300);
+      check(scene, "다른 방 이름(room_channel)을 단 프레임은 이 대화에 반영되지 않는다", !(await hasText("다른 방 이름을 단 수정")) && (await hasText(target.body)), null);
+      await page.evaluate(([c, f]) => window.__push(c, f), [personal, edited("오후 4시로 바꿀게요", room(DM_JIHO))]);
+      await page.waitForTimeout(400);
+      check(scene, "개인 채널로 온 이 방의 수정이 열린 대화에 반영된다", (await hasText("오후 4시로 바꿀게요")) && !(await hasText(target.body)), null);
+      await shot(page, engine, "relayed-edit");
+    });
+  } finally {
+    await context.close();
   }
 }
 
@@ -801,7 +847,7 @@ async function sceneHeaderPath(browser, origin, engine) {
         await page.getByTestId("dm-leave-confirm").waitFor({ timeout: 5_000 });
         await page.waitForTimeout(250);
         check(scene, "확인 창이 서고 초점은 「취소」", (await focusInfo(page)).testid === "dm-leave-confirm-cancel", await focusInfo(page));
-        await page.getByTestId("dm-leave-confirm-confirm").click();
+        await clickConfirm(page);
         await page.waitForTimeout(700);
         const after = await page.evaluate(() => ({
           hash: window.location.hash,
@@ -844,6 +890,7 @@ async function main() {
         await run("I", () => sceneLate(browser, preview.origin, engine));
         await run("K", () => sceneZoom(browser, preview.origin, engine));
         await run("L", () => sceneHeaderPath(browser, preview.origin, engine));
+        await run("M", () => sceneRelayed(browser, preview.origin, engine));
       } finally {
         await browser.close();
       }
