@@ -26,6 +26,11 @@ const profileCard = readFileSync(
   new URL("./ProfileCard.tsx", import.meta.url),
   "utf8"
 );
+const avatarStatusCss = (() => {
+  const css = readFileSync(new URL("../../design/tokens.css", import.meta.url), "utf8");
+  const start = css.indexOf("@utility avatar-status {");
+  return css.slice(start, css.indexOf("\n}", start));
+})();
 
 describe("연결 막대는 카드로 옮겼다 (#5220)", () => {
   it("사이드바에 12x4 막대가 더는 없고, 카드는 코어의 한 규칙으로만 선다", () => {
@@ -37,8 +42,11 @@ describe("연결 막대는 카드로 옮겼다 (#5220)", () => {
 
 describe("프레즌스 표시의 모양 (H1)", () => {
   it("프레즌스는 원이다 — 그리고 연결 표시는 더 이상 원이 아니다", () => {
-    expect(presenceControl).toContain("absolute bottom-0 right-0 rounded-full border");
-    expect(presenceControl).toContain('size === "md" ? "size-3" : "size-2"');
+    // 배지는 모든 아바타 점이 쓰는 한 부품(`AvatarStatus`, #5786)이 그린다: 아바타 크기(24·32)를 넘기면 점의 크기·
+    // 모양(원 · 초승달 · 가로 줄 · 속 빈 고리)이 `tokens.css` 의 `avatar-status` 규칙에서 정해진다. 점은 원이다.
+    expect(presenceControl).toContain("<AvatarStatus");
+    expect(presenceControl).toContain("face={md ? 32 : 24}");
+    expect(avatarStatusCss).toMatch(/& > \[data-avatar-status-dot\] \{[^}]*border-radius: 9999px;/);
     // 8px 상자 + `rounded-sm`(6px)은 클램프되어 원이 된다. 연결 표시가 그
     // 조합으로 돌아가면 두 원이 다시 한 줄에 선다.
     expect(sidebar).not.toMatch(/size-2[^"]*rounded-sm/);
@@ -56,12 +64,16 @@ describe("상태 트리거는 이웃과 같은 크기로 눌린다 (H2)", () => 
   it("배지는 버튼이 아니라 안쪽 아바타에 붙는다", () => {
     // 이것이 H2의 함정이다: 버튼만 44px로 키우면 버튼 모서리에 앵커된 배지가
     // 24px 아바타에서 떨어져 허공에 뜬다. 앵커는 아바타 span 이어야 한다.
+    // #5786: 앵커는 아바타 면만 감싸는 `AvatarStatus` 칸이다(칸 = 아바타 크기, `position: relative`). 점은 그 칸의
+    // 오른쪽 아래에 절대 배치된다. 트리거 버튼(`tap-target`)은 그 바깥이라 버튼을 키워도 점이 아바타에 붙어 있다.
     expect(presenceControl).toContain(
-      // #4162: 아바타 면은 공용 문법(테두리 + 색조 채움). 앵커(relative)는 그대로.
-      '"relative flex shrink-0 items-center justify-center rounded-full font-semibold"'
+      // #4162: 아바타 면은 공용 문법(테두리 + 색조 채움).
+      '"flex shrink-0 items-center justify-center rounded-full font-semibold"'
     );
-    expect(presenceControl).toContain('size === "md" ? "size-8 text-body" : "size-6 text-meta"');
-    expect(presenceControl).toContain("absolute bottom-0 right-0 rounded-full border");
+    expect(presenceControl).toContain('md ? "size-8 text-body" : "size-6 text-meta"');
+    expect(presenceControl).not.toMatch(/<AvatarStatus[^>]*tap-target/);
+    expect(avatarStatusCss).toMatch(/@utility avatar-status \{\s*position: relative;/);
+    expect(avatarStatusCss).toMatch(/& > \[data-avatar-status-dot\] \{\s*position: absolute;\s*right: 0;\s*bottom: 0;/);
   });
 });
 

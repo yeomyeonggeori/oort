@@ -19,7 +19,8 @@ import {
 import { useSession } from "@/app/session";
 import { useFormatMessage } from "@/i18n/useFormatMessage";
 import { memberFor, useDirectory } from "@/features/workspace/useWorkspace";
-import { AvatarWithPresence, PresenceBadgeDot } from "@/features/presence/HumanPresence";
+import { AvatarStatus } from "@/features/presence/AvatarStatus";
+import { AvatarWithPresence } from "@/features/presence/HumanPresence";
 import { useHumanPresenceDot } from "@/features/presence/useHumanPresenceDot";
 import { CustomStatusMark } from "@/features/sidebar/CustomStatusMark";
 import { useCustomStatusView } from "@/features/sidebar/useCustomStatusView";
@@ -323,15 +324,17 @@ function AgentMemberRow({
       data-member-kind={member.kind}
       data-member-group={group}
     >
-      <span
-        className="relative inline-flex shrink-0"
+      <AvatarStatus
+        face={32}
+        tone={dot?.tone ?? null}
+        kind="agent"
+        dotTestId="agent-liveness-dot"
         data-testid="avatar-with-liveness"
         data-status-tone={dot?.tone}
         title={dot ? statusDotTooltip(dot) : undefined}
       >
         <Avatar member={member} />
-        <PresenceBadgeDot dot={dot} testId="agent-liveness-dot" />
-      </span>
+      </AvatarStatus>
       <span className="@container flex min-w-0 flex-1 flex-col" aria-hidden="true">
         <RowIdentity member={member} />
         {line !== undefined ? (

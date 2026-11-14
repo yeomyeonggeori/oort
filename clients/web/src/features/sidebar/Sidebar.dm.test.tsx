@@ -1175,20 +1175,23 @@ describe("DM 행의 상태 점 (#3964)", () => {
   it("에이전트: 생존 판정이 점이 된다 — 응답함·살아 있음은 채운 초록, 꺼짐은 속이 빈 회색 고리 (Buzz식, 소유자 결정 2026-10-17)", async () => {
     // 모양이 말한다(낱말이 없는 자리): 채운 초록 = 살아 있음, 속 빈 고리 = 꺼짐. 「살아 있지만 일이 없는」 에이전트와
     // 「꺼진」 에이전트가 한 점이면 점이 질문에 답하지 못한다 (#3964 H1). 응답함과 살아 있음·대기는 낱말이 가른다.
-    const cases: Array<[string, string, string[], string[]]> = [
-      ["responsive", "ok", ["bg-ok", "border-surface"], ["bg-surface", "bg-ink-muted"]],
-      ["alive_idle", "ok", ["bg-ok", "border-surface"], ["bg-surface", "bg-ink-muted"]],
-      ["inactive", "muted", ["bg-surface", "border-line-strong"], ["bg-ok", "bg-ink-muted"]],
-      ["quiet", "muted", ["bg-surface", "border-line-strong"], ["bg-ok", "bg-ink-muted"]],
+    // 모양·색은 `data-tone` 을 읽는 CSS 한 곳(`avatar-status`, #5786)이 그린다: ok = 채운 원, muted = 속 빈 고리.
+    const cases: Array<[string, string]> = [
+      ["responsive", "ok"],
+      ["alive_idle", "ok"],
+      ["inactive", "muted"],
+      ["quiet", "muted"],
     ];
-    for (const [state, tone, has, lacks] of cases) {
+    for (const [state, tone] of cases) {
       liveness.byAgent.set(PEER_AGENT, state);
       const host = await mount();
       await settle();
       const dot = dotOf(host, AGENT_DM)!;
       expect(dot.getAttribute("data-tone"), state).toBe(tone);
-      for (const cls of has) expect(dot.className, `${state}: ${cls}`).toContain(cls);
-      for (const cls of lacks) expect(dot.className, `${state}: !${cls}`).not.toContain(cls);
+      // 점이 있으면 아바타가 도려내진다(24 칸).
+      const avatar = dmRow(host, AGENT_DM).querySelector('[data-testid="dm-avatar"]')!;
+      expect(avatar.hasAttribute("data-status-cut"), state).toBe(true);
+      expect(avatar.getAttribute("data-status-face"), state).toBe("24");
       act(() => mountedRoot?.unmount());
       mountedHost?.remove();
     }
@@ -1207,12 +1210,11 @@ describe("DM 행의 상태 점 (#3964)", () => {
     expect(dmRow(host, AGENT_DM).textContent).toMatch(/김인턴, 연결이 꺼져 있어요/);
   });
 
-  it("사람: 자리 비움은 주황 채움 점이고, 낱말은 숨은 글에 있다", async () => {
+  it("사람: 자리 비움은 주황 초승달 점이고, 낱말은 숨은 글에 있다", async () => {
     const host = await mount();
     await settle();
     const dot = dotOf(host, DM_ID(3))!;
     expect(dot.getAttribute("data-tone")).toBe("warn");
-    expect(dot.className).toContain("bg-warn");
     expect(dmRow(host, DM_ID(3)).querySelector(".sr-only")?.textContent).toBe(", 자리 비움");
   });
 
@@ -1223,18 +1225,14 @@ describe("DM 행의 상태 점 (#3964)", () => {
 
     const on = dotOf(host, DM_ID(1))!;
     expect(on.getAttribute("data-tone")).toBe("ok");
-    expect(on.className).toContain("bg-ok");
     expect(dmRow(host, DM_ID(1)).querySelector(".sr-only")?.textContent).toBe(", 온라인");
     expect(
       dmRow(host, DM_ID(1)).querySelector('[data-testid="dm-avatar"]')?.getAttribute("title")
     ).toBe("온라인");
 
     const off = dotOf(host, DM_ID(2))!;
+    // 속이 빈 고리(muted): 채운 점과 한 점이 되지 않는다(살아 있음과 꺼짐은 모양이 다르다 — CSS 가 톤으로 그린다).
     expect(off.getAttribute("data-tone")).toBe("muted");
-    // 속이 빈 고리: 채운 점과 한 점이 되지 않는다(살아 있음과 꺼짐은 모양이 다르다).
-    expect(off.className).toContain("bg-surface");
-    expect(off.className).toContain("border-line-strong");
-    expect(off.className).not.toContain("bg-ok");
     expect(dmRow(host, DM_ID(2)).querySelector(".sr-only")?.textContent).toBe(", 오프라인");
   });
 
