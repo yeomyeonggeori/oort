@@ -67,10 +67,15 @@ function lastGluedLink(link: string): string {
   return link.slice(start);
 }
 
-/** 호스트 이름의 마지막 마디가 다른 링크의 머리(`comhttps`)로 끝나면 이어 붙은 글이다. */
+/**
+ * 점이 든 호스트 이름의 마지막 마디가 `http`·`https`로 끝나면(`…comhttps`) 앞 주소 뒤에 링크 머리가 이어
+ * 붙다 잘린 글이다. 그런 최상위 이름은 없다. 점 없는 이름(`team-oort`, `localhttp`)과 제품 이름으로 끝나는
+ * 이름(`corp.teamoort`)은 사내 주소로 흔해서 가르지 않는다 — 온전한 링크가 이어 붙은 글은 `://`로 이미 갈린다.
+ */
 function hostIsGlued(host: string): boolean {
-  const last = host.toLowerCase().split(".").pop() ?? "";
-  return /.(?:https?|oort|momo)$/.test(last);
+  const labels = host.toLowerCase().split(".");
+  if (labels.length < 2) return false;
+  return /.https?$/.test(labels[labels.length - 1] ?? "");
 }
 
 /** 붙여 넣은 덩어리에서 판정할 낱말 하나를 고른다. 링크가 있으면 첫 링크. */

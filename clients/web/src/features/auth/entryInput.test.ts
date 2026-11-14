@@ -125,14 +125,33 @@ describe("D0 한 칸 판별 표 (#2808)", () => {
       for (const input of [
         "https://oort.team-a.example.comhttps",
         "oort.team-a.example.comhttps",
-        "https://team-a.example.comoort",
-        "team-a.example.commomo",
         "https://127.0.0.1https",
         "http://127.0.0.1:6051https",
         "oort.team-a.example.comhttps//next.example.com",
       ]) {
         expect(classifyEntry(input).kind, input).toBe("invalid");
       }
+    });
+
+    it("제품 이름이나 http로 끝나는 사내 주소는 그대로 서버다", () => {
+      for (const [input, base] of [
+        ["http://team-oort:8080", "http://team-oort:8080"],
+        ["http://my-momo", "http://my-momo"],
+        ["http://localhttp:3000", "http://localhttp:3000"],
+        ["https://chat.teamoort", "https://chat.teamoort"],
+        ["chat.corp-momo", "https://chat.corp-momo"],
+      ] as const) {
+        const decision = classifyEntry(input);
+        expect(decision.kind, input).toBe("server");
+        if (decision.kind === "server") expect(decision.base, input).toBe(base);
+      }
+    });
+
+    it("초대 링크의 서버가 제품 이름으로 끝나도 초대로 읽는다", () => {
+      const code = "A".repeat(32);
+      const decision = classifyEntry(`http://team-oort:8080/join?code=${code}`);
+      expect(decision.kind).toBe("invite");
+      if (decision.kind === "invite") expect(decision.serverUrl).toBe("http://team-oort:8080");
     });
   });
 });
