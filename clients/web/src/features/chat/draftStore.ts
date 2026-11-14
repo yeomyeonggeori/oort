@@ -63,6 +63,8 @@ interface StoredDraft {
   text: string;
   /** 마지막으로 손댄 시각. 수명과 정원 판정의 유일한 기준이다. */
   atMs: number;
+  /** 쓴 사람(멤버 id, 소문자). 없으면 작성자를 모르는 값이다(아래 「누구의 초안인가」). */
+  author?: string;
 }
 
 /**
@@ -159,8 +161,10 @@ function readSignOutMark(): string | null {
   return readRaw(SIGN_OUT_MARK_KEY);
 }
 
+/** 이 탭이 로그아웃했다: 공유 표지를 쓰지 못했어도 이 탭은 닫혀 있다(어떤 저장값과도 같지 않은 값). */
+const CLOSED_HERE: unique symbol = Symbol("drafts-closed-here");
 /** 이 탭이 쓰기를 연 순간의 표지(모듈이 뜬 때·로그인한 때). 지금 표지와 다르면 그 뒤 어디선가 로그아웃했다. */
-let openedMark = readSignOutMark();
+let openedMark: string | null | typeof CLOSED_HERE = readSignOutMark();
 
 function writeRaw(key: string, value: string | null): void {
   if (value !== null && readSignOutMark() !== openedMark) return;
@@ -206,14 +210,31 @@ function parse(raw: string | null): StoredDraft | null {
   try {
     const value: unknown = JSON.parse(raw);
     if (typeof value !== "object" || value === null) return null;
-    const { text, atMs } = value as Record<string, unknown>;
+    const { text, atMs, author } = value as Record<string, unknown>;
     if (typeof text !== "string" || text === "") return null;
     if (typeof atMs !== "number" || !Number.isFinite(atMs)) return null;
-    return { text, atMs };
+    return typeof author === "string" && author !== "" ? { text, atMs, author } : { text, atMs };
   } catch {
     // 손으로 고쳐졌거나 옛 판이다. 읽을 수 없는 초안은 초안이 아니다.
     return null;
   }
+}
+
+// 누구의 초안인가 (#5799). 토큰 만료로 나가면 초안은 남는다 — 같은 사람이 다시 들어와 이어 쓰게. 그래서 초안·답글 초안에 쓴 사람을
+// 적고, 읽을 때 이 탭의 지금 사람과 다르면 돌려주지 않으며, 다른 사람이 로그인하면 그때 앞 사람 것을 지운다(`adoptDraftAuthor`).
+// 보내지 못한 글은 행이 이미 작성자를 든다(`row.authorMemberId`). 작성자를 모르는 값(이 규칙 전에 저장된 것)은 누구의 것으로도 치지
+// 않는다: 로그인·복원 때 지우고, 그 전에도 사람이 든 탭에서는 읽지 않는다 — 한 번의 초안 손실보다 다른 사람에게 보이는 쪽이 크다.
+//
+// 지금 사람은 **이 탭이 든 값**이다(로그인·복원이 정한다). 공유 세션 기록을 쓰는 순간에 읽지 않는 까닭: 만료로 나갈 때 입력창은 세션이
+// 비워진 뒤에 내려가며 쓰고, 다른 탭에서 다른 계정이 들어오면 공유 기록이 먼저 바뀐 뒤 이 탭이 새로 뜬다.
+let draftAuthor: string | null = null;
+
+function writtenBy(author: string | undefined): boolean {
+  return (author ?? null) === draftAuthor;
+}
+
+function stamped(text: string, atMs: number): StoredDraft {
+  return draftAuthor === null ? { text, atMs } : { text, atMs, author: draftAuthor };
 }
 
 /**
@@ -235,6 +256,7 @@ export function readDraft(
     emitDraftsChanged();
     return "";
   }
+  if (!writtenBy(draft.author)) return "";
   return draft.text;
 }
 
@@ -260,7 +282,7 @@ export function writeDraft(
     emitDraftsChanged();
     return;
   }
-  writeRaw(key, JSON.stringify({ text, atMs: nowMs } satisfies StoredDraft));
+  writeRaw(key, JSON.stringify(stamped(text, nowMs)));
   pruneDrafts(nowMs);
   emitDraftsChanged();
 }
@@ -359,7 +381,7 @@ export function writeThreadDraft(
     writeRaw(key, null);
     return;
   }
-  writeRaw(key, JSON.stringify({ text, atMs: nowMs } satisfies StoredDraft));
+  writeRaw(key, JSON.stringify(stamped(text, nowMs)));
 }
 
 export function readThreadDraft(
@@ -374,6 +396,7 @@ export function readThreadDraft(
     writeRaw(key, null);
     return "";
   }
+  if (!writtenBy(draft.author)) return "";
   return draft.text;
 }
 
@@ -394,18 +417,49 @@ export function clearAllDrafts(): void {
  * 늦게 실패한 전송이 지운 자리를 되살리지 못하게.
  */
 export function closeDraftsForSignOut(): void {
-  try {
-    // 새 표지: 이 탭과 같은 기기의 다른 탭이 들고 있는 표지가 모두 낡는다.
-    localStorage.setItem(SIGN_OUT_MARK_KEY, freshMark());
-  } catch {
-    // 저장소를 못 쓰는 환경이면 초안도 저장되지 않았다.
-  }
+  // 이 탭은 공유 표지와 상관없이 닫는다: 표지를 못 써도 이 탭의 쓰기는 열린 채로 남지 않는다.
+  openedMark = CLOSED_HERE;
+  // 새 표지: 이 탭과 같은 기기의 다른 탭이 들고 있는 표지가 모두 낡는다. 저장소가 가득 차 못 쓰면 지운 뒤(자리가 난 뒤) 한 번 더.
+  const marked = writeSignOutMark();
   clearAllDrafts();
+  if (!marked) writeSignOutMark();
 }
 
-/** 로그인. 이 사람의 초안을 다시 남긴다(지금 표지를 이 탭의 것으로 든다). */
-export function openDraftsForSignIn(): void {
+function writeSignOutMark(): boolean {
+  try {
+    localStorage.setItem(SIGN_OUT_MARK_KEY, freshMark());
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** 로그인. 이 사람의 초안을 다시 남긴다(지금 표지를 이 탭의 것으로 들고, 이 사람을 이 탭의 작성자로 든다). */
+export function openDraftsForSignIn(memberId: string): void {
   openedMark = readSignOutMark();
+  adoptDraftAuthor(memberId);
+}
+
+/**
+ * 이 탭의 작성자를 정한다(로그인·복원). 다른 사람이 쓴 것(작성자를 모르는 값 포함)은 이때 이 기기에서 지운다 — 초안·답글 초안·보내지
+ * 못한 글 모두. 같은 사람이면 그대로 남아 이어 쓴다.
+ */
+export function adoptDraftAuthor(memberId: string): void {
+  draftAuthor = memberId.toLowerCase();
+  let removed = false;
+  for (const key of [...draftKeys(), ...threadDraftKeys()]) {
+    const draft = parse(readRaw(key));
+    if (draft !== null && writtenBy(draft.author)) continue;
+    writeRaw(key, null);
+    removed = true;
+  }
+  for (const key of failedSendKeys()) {
+    const stored = parseFailedSend(readRaw(key));
+    if (stored !== null && stored.row.authorMemberId.toLowerCase() === draftAuthor) continue;
+    writeRaw(key, null);
+    removed = true;
+  }
+  if (removed) emitDraftsChanged();
 }
 
 function freshMark(): string {
@@ -459,6 +513,7 @@ export function listDrafts(nowMs: number = Date.now()): DraftRecord[] {
     const draft = parse(readRaw(key));
     if (draft === null) continue;
     if (nowMs - draft.atMs > DRAFT_TTL_MS) continue;
+    if (!writtenBy(draft.author)) continue;
     out.push({
       key,
       workspaceId: ids.workspaceId,
@@ -530,6 +585,8 @@ export function rememberFailedSend(
     writeRaw(key, null);
     return;
   }
+  // 이 탭의 지금 사람이 쓴 글만 남긴다: 앞 사람의 요청이 다음 사람이 들어온 뒤에 늦게 실패해도 그 글은 이 기기에 남지 않는다.
+  if (draftAuthor !== null && row.authorMemberId.toLowerCase() !== draftAuthor) return;
   writeRaw(key, serializeFailedSend(row, kind, nowMs));
   pruneFailedSends(nowMs);
 }

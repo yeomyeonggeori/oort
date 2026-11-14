@@ -27,9 +27,11 @@ import {
   subscribeSessionRestoreHold,
 } from "@/features/auth/onboardingSessionHold";
 import {
+  adoptDraftAuthor,
   closeDraftsForSignOut,
   openDraftsForSignIn,
 } from "@/features/chat/draftStore";
+import { clearAllAttachmentTrays } from "@/features/attachments/draftStore";
 import {
   clearSessionNotices,
   markBootUnreachableNotice,
@@ -148,6 +150,8 @@ export function useRestoredSession(): SessionLifecycle {
       .then((restored) => {
         settled = true;
         if (cancelled) return;
+        // 이 탭의 초안 작성자를 복원된 사람으로 든다(#5799). 다른 사람이 남긴 것·작성자를 모르는 것은 이때 지운다.
+        if (restored) adoptDraftAuthor(restored.member.id);
         setSession(restored);
         setStatus(restored ? "signed-in" : "anonymous");
         // 응답이 없어 복원하지 못했다면 자격은 그대로 남아 있다(위 `restoreSession`). 죽은 토큰이면 이미 지워졌다.
@@ -186,6 +190,7 @@ export function useRestoredSession(): SessionLifecycle {
     clearApprovalAvatarPreviews(); // 본인 전용 사진: 계정 경계를 넘어 남지 않게.
     clearDownloadHistory(); // 받은 파일의 이름도 다음 사람에게 남지 않게(디스크의 파일은 그대로).
     clearEntryDrafts(); // 알림 클릭이 걷어 간 대화상자의 입력도: 같은 페이지에서 다음 사람이 이어 들어와도 보이지 않게(#5058).
+    clearAllAttachmentTrays(); // 올리던 첨부(메모리)도: 같은 페이지에서 다음 사람이 같은 대화를 열어도 앞 사람의 파일이 보이지 않게(#5799).
     setSession(null);
     setStatus("anonymous");
   }, [expired]);
@@ -209,7 +214,7 @@ export function useRestoredSession(): SessionLifecycle {
     // not `/v1/auth/refresh`, so this hidden rotation escaped to a real backend,
     // came back 401, and bounced the app to the login card mid-run.
     attempted.current = true;
-    openDraftsForSignIn(); // 로그아웃이 닫은 초안 저장소를 이 사람에게 다시 연다(#5799).
+    openDraftsForSignIn(next.member.id); // 로그아웃이 닫은 초안 저장소를 이 사람에게 다시 연다. 다른 사람의 것은 이때 지운다(#5799).
     clearSessionNotices();
     clearApprovalAvatarPreviews();
     setSession(next);
@@ -241,6 +246,7 @@ export function useRestoredSession(): SessionLifecycle {
     // 알림 클릭이 걷어 간 대화상자의 입력(`lib/entryDrafts.ts`)도 같은 이유로 지운다 — 메모리에만 있지만, 같은 페이지에서 같은
     // 워크스페이스로 다른 사람이 이어 들어오면 앞 사람의 검색어·상태 문구가 그 사람의 대화상자에 나타난다(#5058).
     clearEntryDrafts();
+    clearAllAttachmentTrays(); // 올리던 첨부도 같은 이유로 비운다(#5799).
     setSession(null);
     setStatus("anonymous");
   }, []);

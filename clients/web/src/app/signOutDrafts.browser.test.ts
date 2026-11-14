@@ -18,12 +18,20 @@ import { ENGINES, type EngineName } from "@/design/appearance/compileTokensTestK
 //       이어 들어와 같은 대화를 열어도 입력창은 비어 있다.
 //   (2) 보내는 중인 글을 두고 설정에서 워크스페이스를 나간다: 그 요청이 로그아웃 **뒤에** 실패해도 0건.
 //   (3) 로그아웃하지 않는 평소 길(대화 옮기기·새로 고침)에서는 초안이 그대로 남는다 — 다음 사람의 로그인이 저장소를 다시 연다.
-//   (4) 같은 앱이 두 탭에 열려 있을 때 한 탭에서 로그아웃해도, 다른 탭이 내려가며 쓰는 글이 남지 않는다.
+//   (4) 같은 앱이 두 탭에 열려 있을 때 한 탭에서 로그아웃해도, 다른 탭이 내려가며 쓰는 글이 남지 않는다. 다시 들어와 한 번 더
+//       로그아웃해도 같다(로그아웃마다 닫힘 표지가 새로 바뀐다).
+//   (5) 다른 사람이 같은 탭에 들어온 뒤에 앞 사람의 보내기가 끝나도(500 · 끊김 · 시간 제한) 남지 않는다. 같은 사람이 다시 들어왔으면
+//       평소처럼 「못 보낸 글」로 남는다.
+//   (6) 토큰 만료로 나간 뒤: 같은 사람이 다시 들어오면 초안이 그대로, 다른 사람이 들어오면 입력창이 비고 저장소에서도 지워진다.
+//   (7) 올리던 첨부(메모리)도 다음 사람의 같은 대화에 보이지 않는다.
+//   (8) 닫힘 표지를 쓰지 못해도(저장소가 막힘·가득 참) 로그아웃한 탭은 닫히고, 가득 찬 경우에도 표지가 바뀐다.
 //
 // 세는 것은 같은 약속 아래 있는 세 묶음(초안·답글 초안·보내지 못한 글)의 열쇠 수다. 서버는 고정 응답이고 실시간은 가짜 소켓이다.
 // 엔진은 `ENGINES`(설치된 WebKit·Chromium)이다. 하나도 없으면 건너뛴다(다른 브라우저 시험과 같은 규약).
 // 사보타주: `draftStore.ts`의 `writeRaw` 첫 줄(닫힌 동안 쓰지 않는다)을 지우면 (1)·(2)·(4)가 붉고, `session.tsx`의
-// `openDraftsForSignIn()`을 지우면 (3)이 붉고, 닫힘 표지를 공유 저장소가 아니라 이 탭에만 두면 (4)만 붉다.
+// `openDraftsForSignIn()`을 지우면 (3)이 붉고, 닫힘 표지를 공유 저장소가 아니라 이 탭에만 두면 (4)만 붉다. 표지를 늘 같은 값으로 쓰면
+// (4)의 둘째 로그아웃이, 보내지 못한 글의 작성자 확인을 걷으면 (5)가, 초안의 작성자 거르기·지우기를 걷으면 (6)이, 첨부 비우기를
+// 걷으면 (7)이, 이 탭을 닫는 줄·가득 찼을 때 다시 쓰는 줄을 걷으면 (8)의 각 장면이 붉다.
 // =============================================================================
 
 const WS = "00000000-0000-7000-8000-000000000001";
@@ -32,6 +40,9 @@ const CH2 = "00000000-0000-7000-8000-000000000202";
 const DOHYEON = "019f94e3-7a10-79cd-9dee-208f47edd9a8";
 const SEOYEON = "019f94e3-7a10-79cd-9dee-208f47edd9b9";
 const FAMILIES = ["momo.draft.v1:", "momo.thread-draft.v1:", "momo.failed-send.v1:"];
+const MARK_KEY = "momo.drafts.signed-out-mark.v1";
+/** 앱의 요청 시간 제한(`REQUEST_TIMEOUT_MS`, 15초)을 넘기는 기다림. */
+const PAST_REQUEST_TIMEOUT_MS = 17_000;
 /** 로그인 화면이 선 뒤 기다리는 한 박자. 입력창 저장에 미룸이 생겨도 이 안에 끝난다. */
 const SETTLE_MS = 1_500;
 
@@ -57,7 +68,9 @@ const roster = people.map((person) => ({
 }));
 
 type Rig = { engine: EngineName; browser: Browser };
-type Fixture = { context: BrowserContext; page: Page; heldPosts: Route[] };
+/** `expire`가 켜지면 로그인 말고 모든 요청이 401 이다(토큰 만료). 로그인하면 꺼진다. */
+type ServerState = { expire: boolean };
+type Fixture = { context: BrowserContext; page: Page; heldPosts: Route[]; server: ServerState };
 const rigs: Rig[] = [];
 let vite: ViteDevServer | null = null;
 let http: Server | null = null;
@@ -116,16 +129,19 @@ const json = (route: Route, body: unknown, status = 200) =>
 async function openApp(rig: Rig, { holdPosts = false } = {}): Promise<Fixture> {
   const context = await rig.browser.newContext({ viewport: { width: 1280, height: 800 }, locale: "ko-KR", reducedMotion: "reduce", serviceWorkers: "block" });
   const heldPosts: Route[] = [];
-  let logins = 0;
+  const server: ServerState = { expire: false };
   await context.route("**/v1/**", async (route) => {
     const request = route.request();
     const path = new URL(request.url()).pathname;
     const method = request.method();
     if (path === "/v1/auth/login") {
-      const person = people[Math.min(logins, people.length - 1)];
-      logins += 1;
+      // 고른 이메일의 사람으로 들어온다(`<핸들>@example.test`).
+      const email = String((request.postDataJSON() as { email?: unknown } | null)?.email ?? "");
+      const person = people.find((p) => email.startsWith(`${p.handle}@`)) ?? people[0];
+      server.expire = false;
       return json(route, { accessToken: "fixture", refreshToken: "fixture", member: { ...person, workspaceId: WS, kind: "human" }, realtimeWebSocketUrl: "ws://fixture.invalid/connection/websocket" });
     }
+    if (server.expire) return json(route, { error: "unauthorized" }, 401);
     if (path === "/v1/auth/refresh") return json(route, { accessToken: "fixture", refreshToken: "fixture" });
     if (path === "/v1/auth/logout") return json(route, {});
     if (path === "/v1/auth/realtime-token") return json(route, { token: "fixture", tokenType: "Bearer", expiresAtMs: Date.now() + 600_000, ttlSeconds: 60, workspaceId: WS, memberId: DOHYEON });
@@ -160,7 +176,7 @@ async function openApp(rig: Rig, { holdPosts = false } = {}): Promise<Fixture> {
   }, origin);
   await page.goto(origin, { waitUntil: "domcontentloaded" });
   await signIn(page, "dohyeon");
-  return { context, page, heldPosts };
+  return { context, page, heldPosts, server };
 }
 
 async function signIn(page: Page, who: string): Promise<void> {
@@ -190,6 +206,11 @@ async function typeInComposer(page: Page, text: string): Promise<void> {
 /** 같은 약속 아래 있는 세 묶음의 열쇠: 초안 · 답글 초안 · 보내지 못한 글. */
 function deviceDrafts(page: Page): Promise<string[]> {
   return page.evaluate((families) => Object.keys(localStorage).filter((key) => families.some((family) => key.startsWith(family))), FAMILIES);
+}
+
+/** 저장소에 남은 값 가운데 이 글을 든 열쇠. */
+function keysHolding(page: Page, needle: string): Promise<string[]> {
+  return page.evaluate((text) => Object.keys(localStorage).filter((key) => (localStorage.getItem(key) ?? "").includes(text)), needle);
 }
 
 function readDraftText(page: Page, channelId: string): Promise<string | null> {
@@ -268,6 +289,22 @@ describe("로그아웃하면 이 기기에 쓰다 만 글이 남지 않는다 (#
         await second.getByTestId("login-email").waitFor({ state: "visible" });
         await page.waitForTimeout(SETTLE_MS);
         expect(await deviceDrafts(page), `${rig.engine}: 두 탭이 모두 내려간 뒤 한 박자`).toEqual([]);
+
+        // 다시 들어와(같은 탭, 그리고 로그인 화면에 남은 둘째 탭) 쓴 뒤 한 번 더 로그아웃한다: 둘째 로그아웃도 두 탭 모두 0건.
+        const firstMark = await page.evaluate((key) => localStorage.getItem(key), MARK_KEY);
+        await signIn(page, "dohyeon");
+        await openChannel(page, CH1);
+        await typeInComposer(page, "다시 쓴 초안");
+        await signIn(second, "dohyeon");
+        await openChannel(second, CH2);
+        await typeInComposer(second, "둘째 탭의 다시 쓴 초안");
+        expect((await deviceDrafts(page)).length, `${rig.engine}: 둘째 로그아웃 전 대조`).toBe(2);
+        await logoutFromProfileMenu(page);
+        await page.getByTestId("login-email").waitFor({ state: "visible" });
+        await second.getByTestId("login-email").waitFor({ state: "visible" });
+        await page.waitForTimeout(SETTLE_MS);
+        expect(await deviceDrafts(page), `${rig.engine}: 둘째 로그아웃 뒤 두 탭이 모두 내려간 뒤 한 박자`).toEqual([]);
+        expect(await page.evaluate((key) => localStorage.getItem(key), MARK_KEY), `${rig.engine}: 로그아웃마다 새 표지`).not.toBe(firstMark);
       } finally {
         await context.close();
       }
@@ -300,6 +337,197 @@ describe("로그아웃하면 이 기기에 쓰다 만 글이 남지 않는다 (#
         expect(await deviceDrafts(page), `${rig.engine}: 늦은 실패 뒤 한 박자`).toEqual([]);
       } finally {
         await context.close();
+      }
+    }
+  }, 600_000);
+  it("다른 사람이 같은 탭에 들어온 뒤에 끝난 앞 사람의 보내기는 남지 않는다 — 같은 사람이면 평소처럼 남는다", async () => {
+    if (rigs.length === 0) return;
+    for (const rig of rigs) {
+      // 대조: 같은 사람이 다시 들어온 뒤에 실패하면 평소처럼 「못 보낸 글」 1건이고, 그 대화를 다시 열면 실패 행이 보인다.
+      {
+        const { context, page, heldPosts } = await openApp(rig, { holdPosts: true });
+        try {
+          await openChannel(page, CH1);
+          await typeInComposer(page, "같은 사람의 글");
+          await page.keyboard.press("Enter");
+          await expect.poll(() => heldPosts.length, { message: `${rig.engine}: 같은 사람 보내기` }).toBe(1);
+          await logoutFromProfileMenu(page);
+          await page.getByTestId("login-email").waitFor({ state: "visible" });
+          await signIn(page, "dohyeon");
+          for (const route of heldPosts.splice(0)) await route.fulfill({ status: 500, contentType: "application/json", body: "{}" });
+          await page.waitForTimeout(SETTLE_MS);
+          expect((await deviceDrafts(page)).length, `${rig.engine}: 같은 사람이 다시 들어온 뒤 실패`).toBe(1);
+          await openChannel(page, CH2);
+          await openChannel(page, CH1);
+          await expect.poll(() => page.getByText("같은 사람의 글").count(), { message: `${rig.engine}: 실패 행` }).toBeGreaterThan(0);
+        } finally {
+          await context.close();
+        }
+      }
+      // 다른 사람이 들어온 뒤에 세 가지로 끝난다: 서버 오류, 연결 끊김, 앱의 요청 시간 제한.
+      {
+        const { context, page, heldPosts } = await openApp(rig, { holdPosts: true });
+        try {
+          await openChannel(page, CH1);
+          for (const body of ["앞 사람의 글 하나", "앞 사람의 글 둘", "앞 사람의 글 셋"]) {
+            await typeInComposer(page, body);
+            await page.keyboard.press("Enter");
+          }
+          await expect.poll(() => heldPosts.length, { message: `${rig.engine}: 보내기 셋` }).toBe(3);
+          const sentAt = Date.now();
+          await logoutFromProfileMenu(page);
+          await page.getByTestId("login-email").waitFor({ state: "visible" });
+          await signIn(page, "seoyeon");
+          const [failed, dropped] = heldPosts.splice(0, 2);
+          await failed.fulfill({ status: 500, contentType: "application/json", body: "{}" });
+          await dropped.abort("connectionreset");
+          await page.waitForTimeout(Math.max(SETTLE_MS, PAST_REQUEST_TIMEOUT_MS - (Date.now() - sentAt)));
+          expect(await deviceDrafts(page), `${rig.engine}: 다른 사람이 들어온 뒤 늦은 실패`).toEqual([]);
+          expect(await keysHolding(page, "앞 사람의 글"), `${rig.engine}: 앞 사람의 글`).toEqual([]);
+        } finally {
+          await context.close();
+        }
+      }
+      // 둘째 탭이 보내던 중 첫 탭에서 로그아웃하고, 둘째 탭에서 다른 사람이 들어온 뒤 실패한다.
+      {
+        const { context, page, heldPosts } = await openApp(rig, { holdPosts: true });
+        try {
+          await openChannel(page, CH1);
+          const second = await context.newPage();
+          await second.addInitScript({ content: FAKE_SOCKET });
+          await second.goto(page.url(), { waitUntil: "domcontentloaded" });
+          await second.getByTestId("workspace-current").waitFor({ state: "attached", timeout: 120_000 });
+          await openChannel(second, CH2);
+          await typeInComposer(second, "둘째 탭에서 보내던 글");
+          await second.keyboard.press("Enter");
+          await expect.poll(() => heldPosts.length, { message: `${rig.engine}: 둘째 탭 보내기` }).toBe(1);
+          await logoutFromProfileMenu(page);
+          await second.getByTestId("login-email").waitFor({ state: "visible" });
+          await signIn(second, "seoyeon");
+          for (const route of heldPosts.splice(0)) await route.fulfill({ status: 500, contentType: "application/json", body: "{}" });
+          await second.waitForTimeout(SETTLE_MS);
+          expect(await deviceDrafts(second), `${rig.engine}: 둘째 탭에서 다른 사람이 들어온 뒤 실패`).toEqual([]);
+        } finally {
+          await context.close();
+        }
+      }
+    }
+  }, 900_000);
+
+  it("토큰 만료로 나간 뒤: 같은 사람이 다시 들어오면 초안이 그대로, 다른 사람이 들어오면 입력창이 비고 저장소에도 남지 않는다", async () => {
+    if (rigs.length === 0) return;
+    for (const rig of rigs) {
+      const { context, page, server } = await openApp(rig);
+      try {
+        /** 만료: 서버가 이 세션을 받지 않는다 → 새로 고침의 복원이 거절돼 로그인 화면으로 간다(로그아웃을 거치지 않는다). */
+        const expire = async () => {
+          server.expire = true;
+          await page.reload({ waitUntil: "domcontentloaded" });
+          await page.getByTestId("login-email").waitFor({ state: "visible", timeout: 120_000 });
+        };
+        await openChannel(page, CH1);
+        await typeInComposer(page, "만료 전에 쓰던 글");
+        await expire();
+        expect(await readDraftText(page, CH1), `${rig.engine}: 대조 — 만료는 초안을 남긴다`).toBe("만료 전에 쓰던 글");
+
+        await signIn(page, "dohyeon");
+        await openChannel(page, CH1);
+        expect(await composer(page).inputValue(), `${rig.engine}: 같은 사람이 다시 들어온 입력창`).toBe("만료 전에 쓰던 글");
+
+        await expire();
+        await signIn(page, "seoyeon");
+        await openChannel(page, CH1);
+        expect(await composer(page).inputValue(), `${rig.engine}: 다른 사람의 입력창`).toBe("");
+        expect(await keysHolding(page, "만료 전에 쓰던 글"), `${rig.engine}: 다른 사람이 들어온 뒤 저장소`).toEqual([]);
+      } finally {
+        await context.close();
+      }
+    }
+  }, 600_000);
+
+  it("올리던 첨부는 로그아웃 뒤 다음 사람의 같은 대화에 보이지 않는다", async () => {
+    if (rigs.length === 0) return;
+    const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==", "base64");
+    for (const rig of rigs) {
+      const { context, page } = await openApp(rig);
+      try {
+        await openChannel(page, CH1);
+        await page.locator('input[type="file"]').first().setInputFiles({ name: "앞-사람-첨부.png", mimeType: "image/png", buffer: png });
+        const chip = page.locator('[data-testid="attachment-chip-name"][title="앞-사람-첨부.png"]');
+        await expect.poll(() => chip.count(), { message: `${rig.engine}: 대조 — 칩` }).toBe(1);
+        await logoutFromProfileMenu(page);
+        await page.getByTestId("login-email").waitFor({ state: "visible" });
+        await signIn(page, "seoyeon");
+        await openChannel(page, CH1);
+        await page.waitForTimeout(SETTLE_MS);
+        expect(await chip.count(), `${rig.engine}: 다음 사람의 같은 대화에 앞 사람의 첨부`).toBe(0);
+        expect(await page.getByTestId("attachment-chip-name").count(), `${rig.engine}: 다음 사람의 첨부 칩`).toBe(0);
+      } finally {
+        await context.close();
+      }
+    }
+  }, 600_000);
+
+  it("닫힘 표지를 쓰지 못해도 로그아웃한 탭은 닫히고, 저장소가 가득 찬 첫 로그아웃에도 표지가 바뀐다", async () => {
+    if (rigs.length === 0) return;
+    for (const rig of rigs) {
+      // 표지 쓰기만 실패한다: 이 탭은 그래도 닫혀 있다.
+      {
+        const { context, page } = await openApp(rig);
+        try {
+          await openChannel(page, CH1);
+          await typeInComposer(page, "쓰다 만 초안");
+          await page.evaluate((key) => {
+            const original = Storage.prototype.setItem;
+            Storage.prototype.setItem = function (name: string, value: string) {
+              if (name === key) throw new DOMException("막힌 저장소", "QuotaExceededError");
+              original.call(this, name, value);
+            };
+          }, MARK_KEY);
+          await logoutFromProfileMenu(page);
+          await page.getByTestId("login-email").waitFor({ state: "visible" });
+          await page.waitForTimeout(SETTLE_MS);
+          expect(await page.evaluate((key) => localStorage.getItem(key), MARK_KEY), `${rig.engine}: 대조 — 표지를 못 씀`).toBeNull();
+          expect(await deviceDrafts(page), `${rig.engine}: 표지를 못 쓴 로그아웃`).toEqual([]);
+        } finally {
+          await context.close();
+        }
+      }
+      // 저장소가 가득 찬 이 기기의 첫 로그아웃: 초안을 지운 자리에 표지가 들어간다.
+      {
+        const { context, page } = await openApp(rig);
+        try {
+          await openChannel(page, CH1);
+          await typeInComposer(page, `가득 찬 저장소의 초안 ${"가".repeat(60)}`);
+          const markBefore = await page.evaluate((key) => localStorage.getItem(key), MARK_KEY);
+          const full = await page.evaluate(() => {
+            let chunk = "x".repeat(256 * 1024);
+            let i = 0;
+            while (chunk.length >= 1) {
+              try {
+                localStorage.setItem(`fixture.fill.${i}`, chunk);
+                i += 1;
+              } catch {
+                chunk = chunk.slice(0, Math.floor(chunk.length / 2));
+              }
+            }
+            try {
+              localStorage.setItem("fixture.canary", "x".repeat(80));
+              return false;
+            } catch {
+              return true;
+            }
+          });
+          expect(full, `${rig.engine}: 대조 — 저장소가 가득 참`).toBe(true);
+          await logoutFromProfileMenu(page);
+          await page.getByTestId("login-email").waitFor({ state: "visible" });
+          await page.waitForTimeout(SETTLE_MS);
+          expect(markBefore, `${rig.engine}: 대조 — 첫 로그아웃`).toBeNull();
+          expect(await page.evaluate((key) => localStorage.getItem(key), MARK_KEY), `${rig.engine}: 가득 찬 첫 로그아웃의 표지`).not.toBeNull();
+          expect(await deviceDrafts(page), `${rig.engine}: 가득 찬 첫 로그아웃`).toEqual([]);
+        } finally {
+          await context.close();
+        }
       }
     }
   }, 600_000);

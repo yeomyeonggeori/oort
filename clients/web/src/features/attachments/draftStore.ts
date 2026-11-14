@@ -184,6 +184,8 @@ async function uploadOne(
     update(key, (list) => failUpload(list, draft.localId, verdict.issue, verdict.cause));
     return;
   }
+  // 기다리는 사이 트레이가 비워졌다(지운 칩·로그아웃, #5799): 놓은 파일의 바이트를 보내지 않는다.
+  if (!files.has(draft.localId)) return;
 
   const handle = putAttachmentBytes(
     session.uploadUrl,
@@ -400,6 +402,17 @@ export function dropClaimed(key: string, attachmentIds: readonly string[]): void
     files.delete(draft.localId);
   }
   update(key, (list) => list.filter((draft) => !isClaimed(draft)));
+}
+
+/**
+ * 세션이 끝났다(로그아웃·토큰 만료, #5799). 모든 트레이를 비우고 올리던 것을 멈춘다. 열쇠에 사람이 없어서, 비우지 않으면 같은 페이지에서
+ * 다음 사람이 같은 대화를 열 때 앞 사람이 올리던 파일이 보인다(폰은 세션 provider 가 내려갈 때 같은 일을 한다).
+ */
+export function clearAllAttachmentTrays(): void {
+  for (const handle of inflight.values()) handle.abort();
+  inflight.clear();
+  files.clear();
+  emit(new Map());
 }
 
 /** 테스트 전용 초기화. 모듈 전역이 테스트 사이를 넘어가지 않게 한다. */
