@@ -7,6 +7,7 @@
   "channels.dmLeave.confirmScheduled": "{count, plural, one {# message programmé sera aussi annulé.} other {# messages programmés seront aussi annulés.}}",
   "channels.dmLeave.cancel": "Annuler",
   "channels.dmLeave.confirm": "Quitter",
+  "channels.dmLeave.busy": "Départ…",
   "channels.dmLeave.done": "Vous avez quitté la conversation.",
   "channels.dmLeave.failed": "Impossible de quitter. Veuillez réessayer."
 }

@@ -5,15 +5,16 @@ import type {Member} from '@momo/core/lib/api';
 import {QueryClient, QueryClientProvider} from '@tanstack/react-query';
 import {act, cleanup, fireEvent, render, screen, waitFor, within} from '@testing-library/react-native';
 import React from 'react';
-import {AccessibilityInfo, ActionSheetIOS} from 'react-native';
+import {AccessibilityInfo, ActionSheetIOS, ScrollView, StyleSheet} from 'react-native';
 import {DM_CLOSED_LIST_LABEL} from '@momo/core/features/sidebar/dmVisibility';
 
 import '../src/boot/polyfills';
 import '../src/boot/coreHost';
 
 import {channelDraftKey, readDrafts, saveDraft, threadDraftKey} from '../src/features/conversation/drafts';
-import {readFailedSends, rememberFailedSend} from '../src/features/conversation/failedSends';
+import {openFailedSendsForSession, readFailedSends, rememberFailedSend} from '../src/features/conversation/failedSends';
 import {DM_LEAVE_CONFIRM_ARM_MS} from '../src/features/sidebar/useChannelRowActions';
+import {NOTICE_DISMISS_GUARD_MS} from '../src/features/sidebar/noticeDismissGuard';
 import {parseDmClosedCache} from '../src/features/sidebar/dmClosedCache';
 import AppShell from '../src/shell/AppShell';
 import {__resetSessionStore, sessionPort} from '../src/storage/secureSession';
@@ -98,6 +99,10 @@ interface Routes {
   leaveStatus?: number;
   /** `PUT …/dm-leave` 가 `releaseHeld()` 전까지 끝나지 않는다. */
   holdLeave?: boolean;
+  /** 내 예약 목록 응답(`GET …/scheduled-messages`)이 `releaseHeld()` 전까지 끝나지 않는다(예약 수를 세는 중). */
+  holdScheduled?: boolean;
+  /** 사람 DM 의 글 보내기(`POST …/messages`)가 `releaseHeld()` 전까지 끝나지 않고, 풀리면 500 으로 실패한다. */
+  holdSend?: boolean;
   /** 대화 이력 - 사람 DM 의 글 seq 들(투영 최신 2 보다 높게 줄 수 있다). */
   humanMessages?: number[];
   /** 김도현과의 DM 을 전에 나갔고(하한 3) 그 뒤 새 글(최신 4)이 와 목록에 다시 섰다. */
@@ -172,7 +177,12 @@ function installFetch(routes: Routes = {}) {
       floors.set(leave[1], Math.max(floors.get(leave[1]) ?? 0, Number(body?.seenSeq) + 1));
       return jsonResponse(204, {});
     }
+    if (routes.holdSend && method === 'POST' && /\/channels\/ch-dm-human\/messages$/.test(url)) {
+      await new Promise<void>(resolve => held.push(resolve));
+      return jsonResponse(500, {error: {message: 'late failure'}});
+    }
     if (url.includes('/scheduled-messages')) {
+      if (routes.holdScheduled) await new Promise<void>(resolve => held.push(resolve));
       const row = (id: string, channelId: string, status: string) => ({
         id,
         workspaceId: WS,
@@ -289,6 +299,7 @@ beforeEach(async () => {
   installAppClock();
   releaseMotion = await pinReduceMotion(true);
   mmkvStore.clear();
+  openFailedSendsForSession(SELF_ID);
   resetDmLeaveFoldForTest();
   __resetSessionStore();
   __resetServerBaseCache();
@@ -425,6 +436,50 @@ describe('행 시트 — 확인 단계 (D21)', () => {
     await waitFor(() => expect(leaveCalls()).toHaveLength(1));
     expect(leaveCalls()[0].body).toEqual({seenSeq: 2});
   });
+
+  it('가드의 경계는 500ms 다: 499ms 에는 눌림을 받지 않고 500ms 부터 받는다(브리프가 숫자로 정한 값)', async () => {
+    await mountShell();
+    await openRowSheet(ROW.human);
+    await waitFor(() => expect(screen.getByTestId('channel-sheet-leave-dm')).toBeTruthy());
+    fireEvent.press(screen.getByTestId('channel-sheet-leave-dm'));
+    await screen.findByTestId('channel-dm-leave-confirm');
+    expect(DM_LEAVE_CONFIRM_ARM_MS).toBe(500);
+    await act(() => {
+      jest.advanceTimersByTime(499);
+    });
+    fireEvent.press(screen.getByTestId('channel-dm-leave-confirm-button'));
+    expect(leaveCalls()).toHaveLength(0);
+    await act(() => {
+      jest.advanceTimersByTime(1);
+    });
+    fireEvent.press(screen.getByTestId('channel-dm-leave-confirm-button'));
+    await waitFor(() => expect(leaveCalls()).toHaveLength(1));
+  });
+
+  it('예약 수를 세는 중에 정보 페이지를 닫았다 다시 열어도, 늦게 온 답이 누르지 않은 확인 단계를 세우지 않는다', async () => {
+    await mountShell({holdScheduled: true});
+    fireEvent.press(screen.getByTestId(ROW.human));
+    await screen.findByTestId('conversation-menu');
+    await waitFor(async () => {
+      await openConversationMenu();
+      expect(screen.getByTestId('conversation-menu-leave-dm')).toBeTruthy();
+    });
+    fireEvent.press(screen.getByTestId('conversation-menu-info'));
+    await screen.findByTestId('conversation-info-page');
+    fireEvent.press(screen.getByTestId('conversation-info-leave-dm'));
+    // 셈이 도는 중(예약 응답이 안 왔다) - 사람이 페이지를 닫는다.
+    fireEvent.press(screen.getByTestId('conversation-info-back'));
+    await waitFor(() => expect(screen.queryByTestId('conversation-info-page')).toBeNull());
+    releaseHeld();
+    await act(() => {
+      jest.advanceTimersByTime(100);
+    });
+    await openConversationMenu();
+    fireEvent.press(screen.getByTestId('conversation-menu-info'));
+    await screen.findByTestId('conversation-info-page');
+    expect(screen.queryByTestId('conversation-info-dm-leave-confirm')).toBeNull();
+    expect(screen.getByTestId('conversation-info-leave-dm')).toBeTruthy();
+  });
 });
 
 describe('행 시트 — 성공 뒤 (D21 · D17 기기 줄)', () => {
@@ -480,6 +535,36 @@ describe('행 시트 — 성공 뒤 (D21 · D17 기기 줄)', () => {
   });
 });
 
+describe('영수증을 닫을 때 — 올라온 단추를 둘째 탭이 누르지 않는다 (design-review r1 M5)', () => {
+  it('닫으면 영수증이 있던 칸을 투명한 막이 잠깐 덮고(홈 화면 좌표), 그 시간이 지나면 걷힌다', async () => {
+    await mountShell();
+    await openRowSheet(ROW.human);
+    await waitFor(() => expect(screen.getByTestId('channel-sheet-leave-dm')).toBeTruthy());
+    fireEvent.press(screen.getByTestId('channel-sheet-leave-dm'));
+    await screen.findByTestId('channel-dm-leave-confirm');
+    await arm();
+    fireEvent.press(screen.getByTestId('channel-dm-leave-confirm-button'));
+    await screen.findByTestId('dm-left-receipt');
+    expect(screen.queryByTestId('notice-dismiss-guard', {includeHiddenElements: true})).toBeNull();
+    // 기기가 알려 주는 영수증 칸의 자리(테스트에는 레이아웃이 없다).
+    fireEvent(screen.getByTestId('dm-left-receipt-slot'), 'layout', {
+      nativeEvent: {layout: {x: 0, y: 12, width: 402, height: 70}},
+    });
+    fireEvent.press(screen.getByTestId('dm-left-receipt-dismiss'));
+    expect(screen.queryByTestId('dm-left-receipt')).toBeNull();
+    const guard = screen.getByTestId('notice-dismiss-guard', {includeHiddenElements: true});
+    expect(StyleSheet.flatten(guard.props.style)).toMatchObject({position: 'absolute', top: 12, height: 70});
+    await act(() => {
+      jest.advanceTimersByTime(NOTICE_DISMISS_GUARD_MS - 1);
+    });
+    expect(screen.getByTestId('notice-dismiss-guard', {includeHiddenElements: true})).toBeTruthy();
+    await act(() => {
+      jest.advanceTimersByTime(1);
+    });
+    expect(screen.queryByTestId('notice-dismiss-guard', {includeHiddenElements: true})).toBeNull();
+  });
+});
+
 describe('행 시트 — 실패 (D21)', () => {
   it('서버 오류: 단계 안에서 코어 실패 문장을 말하고 아무것도 바뀌지 않으며, 「나가기」를 다시 누르면 다시 보낸다', async () => {
     await mountShell({leaveStatus: 500});
@@ -507,10 +592,37 @@ describe('행 시트 — 실패 (D21)', () => {
     await waitFor(() => expect(leaveCalls()).toHaveLength(1));
     const confirm = screen.getByTestId('channel-dm-leave-confirm-button');
     expect(confirm.props.accessibilityState).toMatchObject({busy: true, disabled: true});
-    fireEvent.press(screen.getByTestId('channel-dm-leave-confirm-cancel'));
+    // 진행 낱말은 코어 사전 키다(「나가기…」로 임시 조립하지 않는다).
+    expect(within(confirm).getByText(ko(DM_LEAVE_KEYS.busy))).toBeTruthy();
+    // 「취소」는 눌려도 소용없다 - 살아 있는 모양으로 두지 않는다: 잠긴 모양(흐림)과 낭독 상태(disabled).
+    const cancel = screen.getByTestId('channel-dm-leave-confirm-cancel');
+    expect(cancel.props.accessibilityState).toMatchObject({disabled: true});
+    expect(StyleSheet.flatten(cancel.props.style)).toMatchObject({opacity: 0.55});
+    fireEvent.press(cancel);
     expect(screen.getByTestId('channel-dm-leave-confirm')).toBeTruthy();
     releaseHeld();
     await waitFor(() => expect(screen.queryByTestId(ROW.human)).toBeNull());
+  });
+
+  it('진행이 실패로 끝나면 「취소」가 다시 풀려 눌린다 · 쉬는 동안은 잠기지 않는다', async () => {
+    await mountShell({holdLeave: true, leaveStatus: 500});
+    await openRowSheet(ROW.human);
+    await waitFor(() => expect(screen.getByTestId('channel-sheet-leave-dm')).toBeTruthy());
+    fireEvent.press(screen.getByTestId('channel-sheet-leave-dm'));
+    await screen.findByTestId('channel-dm-leave-confirm');
+    await arm();
+    const cancel = () => screen.getByTestId('channel-dm-leave-confirm-cancel');
+    expect(cancel().props.accessibilityState?.disabled ?? false).toBe(false);
+    expect(StyleSheet.flatten(cancel().props.style)?.opacity).toBeUndefined();
+    fireEvent.press(screen.getByTestId('channel-dm-leave-confirm-button'));
+    await waitFor(() => expect(leaveCalls()).toHaveLength(1));
+    expect(cancel().props.accessibilityState).toMatchObject({disabled: true});
+    releaseHeld();
+    await screen.findByTestId('channel-dm-leave-confirm-error');
+    expect(cancel().props.accessibilityState?.disabled ?? false).toBe(false);
+    expect(StyleSheet.flatten(cancel().props.style)?.opacity).toBeUndefined();
+    fireEvent.press(cancel());
+    expect(screen.queryByTestId('channel-dm-leave-confirm')).toBeNull();
   });
 
   it('경로 없음(404): 실패 문장 뒤 「취소」하면 그 워크스페이스의 「대화 나가기」가 사라진다(다른 사람 DM 에서도)', async () => {
@@ -649,6 +761,158 @@ describe('대화 ⋮ 시트와 정보 페이지 — 같은 판정·낱말·단�
     });
     expect(readDrafts()[channelDraftKey('ch-dm-human')]).toBeUndefined();
     expect(readFailedSends(WS, 'ch-dm-human', SELF_ID)).toHaveLength(0);
+  });
+
+  it('⋮ 시트: 요청이 가는 동안 「취소」와 확정이 잠긴 모양이고 진행 낱말이 사전 낱말이다', async () => {
+    await mountShell({holdLeave: true});
+    fireEvent.press(screen.getByTestId(ROW.human));
+    await screen.findByTestId('conversation-menu');
+    await waitFor(async () => {
+      await openConversationMenu();
+      expect(screen.getByTestId('conversation-menu-leave-dm')).toBeTruthy();
+    });
+    const expectLocked = (head: string) => {
+      const cancel = screen.getByTestId(`${head}-cancel`);
+      const confirm = screen.getByTestId(`${head}-button`);
+      expect(cancel.props.accessibilityState).toMatchObject({disabled: true});
+      expect(StyleSheet.flatten(cancel.props.style)).toMatchObject({opacity: 0.55});
+      expect(confirm.props.accessibilityState).toMatchObject({busy: true, disabled: true});
+      expect(within(confirm).getByText(ko(DM_LEAVE_KEYS.busy))).toBeTruthy();
+      fireEvent.press(cancel);
+      expect(screen.getByTestId(head)).toBeTruthy();
+    };
+    // ⋮ 시트
+    fireEvent.press(screen.getByTestId('conversation-menu-leave-dm'));
+    await screen.findByTestId('conversation-menu-dm-leave-confirm');
+    await arm();
+    fireEvent.press(screen.getByTestId('conversation-menu-dm-leave-confirm-button'));
+    await waitFor(() => expect(leaveCalls()).toHaveLength(1));
+    expectLocked('conversation-menu-dm-leave-confirm');
+    releaseHeld();
+    await waitFor(() => expect(screen.queryByTestId('conversation-pane')).toBeNull());
+  });
+
+  it('정보 페이지: 요청이 가는 동안 「취소」와 확정이 잠긴 모양이다', async () => {
+    await mountShell({holdLeave: true});
+    fireEvent.press(screen.getByTestId(ROW.human));
+    await screen.findByTestId('conversation-menu');
+    await waitFor(async () => {
+      await openConversationMenu();
+      expect(screen.getByTestId('conversation-menu-leave-dm')).toBeTruthy();
+    });
+    fireEvent.press(screen.getByTestId('conversation-menu-info'));
+    await screen.findByTestId('conversation-info-page');
+    fireEvent.press(screen.getByTestId('conversation-info-leave-dm'));
+    await screen.findByTestId('conversation-info-dm-leave-confirm');
+    await arm();
+    fireEvent.press(screen.getByTestId('conversation-info-dm-leave-confirm-button'));
+    await waitFor(() => expect(leaveCalls()).toHaveLength(1));
+    const cancel = screen.getByTestId('conversation-info-dm-leave-confirm-cancel');
+    expect(cancel.props.accessibilityState).toMatchObject({disabled: true});
+    expect(StyleSheet.flatten(cancel.props.style)).toMatchObject({opacity: 0.55});
+    expect(within(screen.getByTestId('conversation-info-dm-leave-confirm-button')).getByText(ko(DM_LEAVE_KEYS.busy))).toBeTruthy();
+    fireEvent.press(cancel);
+    expect(screen.getByTestId('conversation-info-dm-leave-confirm')).toBeTruthy();
+    releaseHeld();
+    await waitFor(() => expect(screen.queryByTestId('conversation-pane')).toBeNull());
+  });
+
+  it('보내는 중이던 글: 나가기가 성공해 대화가 걷힌 뒤 요청이 늦게 실패해도 못 보낸 글로 다시 적히지 않는다', async () => {
+    await mountShell({holdSend: true});
+    fireEvent.press(screen.getByTestId(ROW.human));
+    await screen.findByTestId('conversation-menu');
+    fireEvent.changeText(screen.getByTestId('composer-input'), '나가기 전에 보내던 글');
+    fireEvent.press(screen.getByTestId('composer-send'));
+    await waitFor(() => expect(calls.some(call => call.method === 'POST' && call.url.endsWith('/messages'))).toBe(true));
+    await waitFor(async () => {
+      await openConversationMenu();
+      expect(screen.getByTestId('conversation-menu-leave-dm')).toBeTruthy();
+    });
+    fireEvent.press(screen.getByTestId('conversation-menu-leave-dm'));
+    await screen.findByTestId('conversation-menu-dm-leave-confirm');
+    await arm();
+    fireEvent.press(screen.getByTestId('conversation-menu-dm-leave-confirm-button'));
+    await waitFor(() => expect(screen.queryByTestId('conversation-pane')).toBeNull());
+    // 대화가 걷히며 보내는 중이던 글을 적으려 했다 - 정리 뒤라서 막혔다.
+    expect(readFailedSends(WS, 'ch-dm-human', SELF_ID)).toHaveLength(0);
+    // 그 요청이 이제 늦게 실패한다 - 그래도 다시 적히지 않는다.
+    releaseHeld();
+    await act(() => {
+      jest.advanceTimersByTime(5_000);
+    });
+    expect(readFailedSends(WS, 'ch-dm-human', SELF_ID)).toHaveLength(0);
+  });
+
+  it('확인 단계가 서면 스크롤이 맨 위로 돌아간다 — 가장 큰 글자에서 제목이 위로 밀려 안 보이지 않게(⋮ 시트 · 정보 페이지 · 행 시트)', async () => {
+    await mountShell();
+    const scrollTo = ScrollView.prototype.scrollTo as jest.Mock;
+    // 행 시트
+    await openRowSheet(ROW.human);
+    await waitFor(() => expect(screen.getByTestId('channel-sheet-leave-dm')).toBeTruthy());
+    scrollTo.mockClear();
+    fireEvent.press(screen.getByTestId('channel-sheet-leave-dm'));
+    await screen.findByTestId('channel-dm-leave-confirm');
+    expect(scrollTo).toHaveBeenCalledWith({y: 0, animated: false});
+    fireEvent.press(screen.getByTestId('channel-sheet-close'));
+    await waitFor(() => expect(screen.queryByTestId('channel-action-sheet')).toBeNull());
+    // ⋮ 시트와 정보 페이지
+    fireEvent.press(screen.getByTestId(ROW.human));
+    await screen.findByTestId('conversation-menu');
+    await waitFor(async () => {
+      await openConversationMenu();
+      expect(screen.getByTestId('conversation-menu-leave-dm')).toBeTruthy();
+    });
+    scrollTo.mockClear();
+    fireEvent.press(screen.getByTestId('conversation-menu-leave-dm'));
+    await screen.findByTestId('conversation-menu-dm-leave-confirm');
+    expect(scrollTo).toHaveBeenCalledWith({y: 0, animated: false});
+    fireEvent.press(screen.getByTestId('conversation-menu-dm-leave-confirm-cancel'));
+    fireEvent.press(screen.getByTestId('conversation-menu-info'));
+    await screen.findByTestId('conversation-info-page');
+    scrollTo.mockClear();
+    fireEvent.press(screen.getByTestId('conversation-info-leave-dm'));
+    await screen.findByTestId('conversation-info-dm-leave-confirm');
+    expect(scrollTo).toHaveBeenCalledWith({y: 0, animated: false});
+  });
+
+  it('확정하고 곧바로 뒤로 가도(204 가 화면이 걷힌 뒤에 와도) 정리가 돈다 — 쓰던 글·못 보낸 글이 남지 않는다', async () => {
+    await mountShell({holdLeave: true});
+    rememberFailedSend(
+      WS,
+      {
+        clientMsgId: 'c-back',
+        channelId: 'ch-dm-human',
+        authorMemberId: SELF_ID,
+        body: '곧바로 뒤로 가기 전 못 보낸 글',
+        createdAtMs: 1,
+        sinceSeq: null,
+        status: 'failed',
+      },
+      null,
+    );
+    fireEvent.press(screen.getByTestId(ROW.human));
+    await screen.findByTestId('conversation-menu');
+    await screen.findByText('곧바로 뒤로 가기 전 못 보낸 글');
+    fireEvent.changeText(screen.getByTestId('composer-input'), '쓰다 만 인사');
+    await waitFor(async () => {
+      await openConversationMenu();
+      expect(screen.getByTestId('conversation-menu-leave-dm')).toBeTruthy();
+    });
+    fireEvent.press(screen.getByTestId('conversation-menu-leave-dm'));
+    await screen.findByTestId('conversation-menu-dm-leave-confirm');
+    await arm();
+    fireEvent.press(screen.getByTestId('conversation-menu-dm-leave-confirm-button'));
+    await waitFor(() => expect(leaveCalls()).toHaveLength(1));
+    // 요청이 떠 있는 채 사람이 뒤로 간다 - 이 훅의 화면이 사라진다.
+    fireEvent.press(screen.getAllByTestId('header-back')[0]);
+    await waitFor(() => expect(screen.queryByTestId('conversation-pane')).toBeNull());
+    releaseHeld();
+    await act(() => {
+      jest.advanceTimersByTime(5_000);
+    });
+    expect(readDrafts()[channelDraftKey('ch-dm-human')]).toBeUndefined();
+    expect(readFailedSends(WS, 'ch-dm-human', SELF_ID)).toHaveLength(0);
+    await waitFor(() => expect(screen.queryByTestId(ROW.human)).toBeNull());
   });
 
   it('⋮ 시트: 에이전트 DM 에는 없다', async () => {

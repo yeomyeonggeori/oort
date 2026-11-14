@@ -7,6 +7,7 @@
   "channels.dmLeave.confirmScheduled": "已預約的{count, number}則訊息也會被取消。",
   "channels.dmLeave.cancel": "取消",
   "channels.dmLeave.confirm": "退出",
+  "channels.dmLeave.busy": "正在退出…",
   "channels.dmLeave.done": "你已退出對話。",
   "channels.dmLeave.failed": "無法退出。請再試一次。"
 }

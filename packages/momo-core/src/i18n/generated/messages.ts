@@ -172,6 +172,7 @@ export const messageKeys = [
   "blocked.workStateStale.offline",
   "blocked.workStateStale.serverUnreachable",
   "channels.dmLeave.action",
+  "channels.dmLeave.busy",
   "channels.dmLeave.cancel",
   "channels.dmLeave.confirm",
   "channels.dmLeave.confirmBody",
@@ -1741,6 +1742,7 @@ export const argumentSpecs = {
   "blocked.workStateStale.offline": {},
   "blocked.workStateStale.serverUnreachable": {},
   "channels.dmLeave.action": {},
+  "channels.dmLeave.busy": {},
   "channels.dmLeave.cancel": {},
   "channels.dmLeave.confirm": {},
   "channels.dmLeave.confirmBody": {
@@ -3740,6 +3742,7 @@ export interface MessageArgs {
   "blocked.workStateStale.offline": Record<string, never>;
   "blocked.workStateStale.serverUnreachable": Record<string, never>;
   "channels.dmLeave.action": Record<string, never>;
+  "channels.dmLeave.busy": Record<string, never>;
   "channels.dmLeave.cancel": Record<string, never>;
   "channels.dmLeave.confirm": Record<string, never>;
   "channels.dmLeave.confirmBody": { name: string };

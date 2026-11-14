@@ -13,6 +13,7 @@ import {
 } from '../src/features/attachments/draftStore';
 import {channelDraftKey, readDrafts, saveDraft, threadDraftKey} from '../src/features/conversation/drafts';
 import {useTimeline} from '../src/features/conversation/useTimeline';
+import {openFailedSendsForSession, readFailedSends, rememberFailedSend} from '../src/features/conversation/failedSends';
 import {heldThreadRoots, phoneDmLeaveCleanupPort} from '../src/features/sidebar/dmLeaveCleanup';
 import type {ChannelRail} from '../src/realtime/channelRail';
 import {__setNonSecretStore} from '../src/storage/kv';
@@ -89,6 +90,7 @@ beforeEach(() => {
   jest.mocked(fetchReactionSnapshot).mockReset().mockResolvedValue({} as never);
   jest.mocked(fetchChannelPins).mockReset().mockResolvedValue([] as never);
   resetAttachmentDraftsForTest();
+  openFailedSendsForSession(ME);
 });
 
 afterEach(() => {
@@ -270,6 +272,44 @@ describe('성공 뒤 정리 문 — 그 방의 것만 (D17 기기 줄)', () => {
     expect(surface(mine)).toBeNull();
     expect(surface(mineThread)).toBeNull();
     expect(surface(theirs)).not.toBeNull();
+  });
+
+  it('스레드 초안: 이 기기가 뿌리를 연 적이 없어도 그 대화에 속한 것은 열쇠로 다 지우고 다른 대화 것은 그대로다', () => {
+    const client = new QueryClient();
+    // 입력칸이 채널을 적어 둔 초안(`saveDraft` 의 넷째 인자). 뿌리는 이 기기가 든 메시지 id 에 없다.
+    saveDraft(threadDraftKey('root-never-opened'), '든 적 없는 뿌리의 답글', undefined, CH);
+    saveDraft(threadDraftKey('root-other-room'), '다른 대화의 스레드 답글', undefined, OTHER);
+    saveDraft(threadDraftKey('root-legacy-held'), '채널을 안 적은 옛 초안', undefined);
+    const roots = heldThreadRoots(client, WS, CH, ['root-legacy-held']);
+    expect(roots).toEqual(['root-legacy-held']);
+    phoneDmLeaveCleanupPort({client, workspaceId: WS, selfMemberId: ME, threadRootIds: roots}).clearDrafts(CH);
+    expect(Object.keys(readDrafts())).toEqual([threadDraftKey('root-other-room')]);
+  });
+
+  it('못 보낸 글: 나간 순간까지 쓴 글은 정리 뒤에 다시 적히지 않고, 다시 이어진 뒤 쓴 글·다른 대화 글은 평소처럼 남는다', () => {
+    const client = new QueryClient();
+    const row = (clientMsgId: string, channelId: string, createdAtMs: number) => ({
+      clientMsgId,
+      channelId,
+      authorMemberId: ME,
+      body: clientMsgId,
+      createdAtMs,
+      sinceSeq: null,
+      status: 'failed' as const,
+    });
+    const port = phoneDmLeaveCleanupPort({client, workspaceId: WS, selfMemberId: ME, threadRootIds: []});
+    const before = Date.now();
+    port.forgetFailedSends(CH);
+    // 대화가 걷히며 보내는 중이던 글을 적는다 · 그 요청이 늦게 실패해 또 적는다.
+    rememberFailedSend(WS, row('sending-at-leave', CH, before - 5), null);
+    rememberFailedSend(WS, row('late-failure', CH, before), null);
+    expect(readFailedSends(WS, CH, ME)).toHaveLength(0);
+    // 다른 대화는 그대로 적힌다.
+    rememberFailedSend(WS, row('other-room', OTHER, before - 5), null);
+    expect(readFailedSends(WS, OTHER, ME)).toHaveLength(1);
+    // 다시 이어진 뒤(나간 순간 이후)에 새로 쓴 글의 실패는 평소처럼 남는다.
+    rememberFailedSend(WS, row('after-rejoin', CH, Date.now() + 1), null);
+    expect(readFailedSends(WS, CH, ME).map(item => item.row.clientMsgId)).toEqual(['after-rejoin']);
   });
 
   it('투영 행: 그 방의 행만 `update` 로 바꾼다', () => {

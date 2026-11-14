@@ -7,6 +7,7 @@
   "channels.dmLeave.confirmScheduled": "예약해 둔 메시지 {count, number}개도 취소돼요.",
   "channels.dmLeave.cancel": "취소",
   "channels.dmLeave.confirm": "나가기",
+  "channels.dmLeave.busy": "나가는 중…",
   "channels.dmLeave.done": "대화에서 나갔어요.",
   "channels.dmLeave.failed": "나가지 못했어요. 다시 시도해 주세요."
 }

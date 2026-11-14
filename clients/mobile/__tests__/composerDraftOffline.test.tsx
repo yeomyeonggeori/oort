@@ -45,6 +45,7 @@ import {
   DRAFT_TTL_MS,
   pruneDrafts,
   readDraft,
+  readDrafts,
   saveDraft,
   threadDraftKey,
 } from '../src/features/conversation/drafts';
@@ -170,6 +171,18 @@ describe('초안 — 화면이 사라져도 글은 남는다', () => {
     expect(readDraft(CH)).toBe('금');
     fireEvent.changeText(input, '금요일');
     expect(readDraft(CH)).toBe('금요일');
+  });
+
+  it('스레드 입력칸은 초안에 속한 대화를 적는다 — 대화 나가기가 그 대화의 스레드 초안을 열쇠로 다 찾게(#5826)', () => {
+    composer({
+      draftKey: threadDraftKey('root-1'),
+      attachmentTarget: {workspaceId: 'ws', channelId: 'Ch-Dm-1', rootId: 'root-1'},
+    });
+    fireEvent.changeText(screen.getByTestId('composer-input'), '스레드 답글');
+    expect(readDrafts()[threadDraftKey('root-1')]).toMatchObject({body: '스레드 답글', channelId: 'ch-dm-1'});
+    // 같은 자리에 다시 적어도 대화는 이어진다(채널을 모르는 호출이 지우지 않는다).
+    saveDraft(threadDraftKey('root-1'), '고친 글');
+    expect(readDrafts()[threadDraftKey('root-1')]).toMatchObject({body: '고친 글', channelId: 'ch-dm-1'});
   });
 
   it('보내면 지워진다 — 다음에 열 때 방금 보낸 글이 되살아나지 않는다', () => {

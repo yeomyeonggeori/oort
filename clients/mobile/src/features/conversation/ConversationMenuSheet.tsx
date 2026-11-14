@@ -140,7 +140,7 @@ export function ConversationMenuSheet({
         closeLabel="대화 메뉴 닫기"
         closeTestID="conversation-menu-close"
       />
-      <SheetScroll testID="conversation-menu-scroll">
+      <SheetScroll testID="conversation-menu-scroll" scrollToTopWhen={dmLeave !== null}>
         {dmLeave !== null && onConfirmDmLeave && onCancelDmLeave ? (
           <DmLeaveConfirm
             step={dmLeave}

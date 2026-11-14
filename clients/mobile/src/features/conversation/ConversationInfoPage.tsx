@@ -12,7 +12,7 @@ import {roleLabel, type RoleLabels} from '@momo/core/features/directory/model';
 import type {StatusDot as PeerStatus} from '@momo/core/features/presence/statusDot';
 import {memberFor, type Directory} from '@momo/core/features/workspace/directory';
 import type {Channel, RosterMember} from '@momo/core/lib/api';
-import React, {useState} from 'react';
+import React, {useEffect, useRef, useState} from 'react';
 import {Image, ScrollView, StyleSheet, Text, View} from 'react-native';
 import {useSafeAreaInsets} from 'react-native-safe-area-context';
 import {AVATAR_INITIAL_MAX_SCALE, Screen, Sentence} from '../../design/atoms';
@@ -169,6 +169,12 @@ function InfoBody({
     catch { setDmError('에이전트를 내보내지 못했어요. 연결을 확인하고 다시 시도해 주세요.'); }
     finally { setDmPending(null); }
   };
+  // 「대화 나가기」 확인 단계가 서면 맨 위로(가장 큰 글자에서 단계의 제목이 위로 밀려 안 보이지 않게 - `SheetScroll.scrollToTopWhen` 과 같은 이유).
+  const scrollRef = useRef<ScrollView>(null);
+  const dmLeaveStanding = dmLeave !== null;
+  useEffect(() => {
+    if (dmLeaveStanding) scrollRef.current?.scrollTo?.({y: 0, animated: false});
+  }, [dmLeaveStanding]);
   const isDm = kind === 'dm';
   const pageTitle = isDm ? CONVERSATION_INFO_LABEL.dm : CONVERSATION_INFO_LABEL.channel;
 
@@ -215,6 +221,7 @@ function InfoBody({
           testID="conversation-info-header"
         />
         <ScrollView
+          ref={scrollRef}
           contentContainerStyle={[
             styles.content,
             {paddingBottom: Math.max(insets.bottom, space.lg) + space.lg},

@@ -113,7 +113,7 @@ export function ChannelActionSheet({
         closeLabel="대화 액션 닫기"
         closeTestID="channel-sheet-close"
       />
-      <SheetScroll testID="channel-sheet-scroll">
+      <SheetScroll testID="channel-sheet-scroll" scrollToTopWhen={dmLeave !== null}>
         {dmLeave !== null && onConfirmDmLeave && onCancelDmLeave ? (
           <DmLeaveConfirm
             step={dmLeave}

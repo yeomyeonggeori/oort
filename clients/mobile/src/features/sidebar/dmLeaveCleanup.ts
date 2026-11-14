@@ -5,8 +5,8 @@ import type {Message, MessageSearchPage, ReadState} from '@momo/core/lib/api';
 import type {InfiniteData, QueryClient} from '@tanstack/react-query';
 
 import {clearChannelSurfaces} from '../attachments/draftStore';
-import {channelDraftKey, clearDraft, readDrafts, threadDraftKey} from '../conversation/drafts';
-import {forgetFailedSend, readFailedSends} from '../conversation/failedSends';
+import {clearDraft, clearDraftsOfChannel, readDrafts, threadDraftKey} from '../conversation/drafts';
+import {blockFailedSendsBefore, forgetFailedSend, readFailedSends} from '../conversation/failedSends';
 import {workspaceKeys} from '../workspace/queries';
 
 // =============================================================================
@@ -21,13 +21,14 @@ import {workspaceKeys} from '../workspace/queries';
 //   dropSearchResults 메시지 검색 결과(`message-search`, 홈·대화 안 같은 키)의 쪽마다 그 방의 결과를 뺀다. 검색 탭은 숨어도 마운트돼 있어
 //                     캐시를 지우지 않고 걸러 쓴다(다시 읽기 없이 화면에서 바로 빠진다).
 //   dropInboxItems    받은함 목록(`inbox`)의 그 방 항목을 빼고 다시 읽게 하며, 그 방의 멘션·대화·스레드 미리보기 캐시를 버린다.
-//   clearDrafts       대화 입력칸 초안 · 그 방의 스레드 초안 · 첨부 트레이(대화·스레드 모두).
-//   forgetFailedSends 이 기기에 남은 그 방의 못 보낸 글(지금 사람이 쓴 것).
+//   clearDrafts       대화 입력칸 초안 · 그 방의 스레드 초안(열쇠로 다 — 초안 기록이 채널을 든다) · 첨부 트레이(대화·스레드 모두).
+//   forgetFailedSends 이 기기에 남은 그 방의 못 보낸 글(지금 사람이 쓴 것) + 나간 순간 이전의 글은 다시 적지 않는 하한(보내는 중이던 글의 늦은 실패).
 //
 // ## 스레드 초안을 찾는 길
 //
-// 폰의 스레드 초안 열쇠는 `thread:<뿌리 id>` 라 채널이 없고(코어 문 `clearDrafts(channelId)` 의 모양으로는 못 찾는다), 나간 뒤에는 서버가
-// 하한 아래 뿌리를 내려 주지 않는다. 그래서 **나가기 요청 전에** 이 기기가 든 그 방의 메시지 id 를 모은다(`heldThreadRoots` — 열린 대화의
+// 폰의 스레드 초안 열쇠는 `thread:<뿌리 id>` 라 채널이 없어서, 초안 기록이 속한 채널을 함께 든다(`Draft.channelId` - 입력칸이 적는다). 그 대화의
+// 스레드 초안은 열쇠를 훑어 다 지운다 - 뿌리를 연 적이 없어도. **이 칸 전에 저장돼 채널을 안 든 초안**만 아래 길로 찾는다: 나간 뒤에는 서버가
+// 하한 아래 뿌리를 내려 주지 않으므로 **나가기 요청 전에** 이 기기가 든 그 방의 메시지 id 를 모은다(`heldThreadRoots` — 열린 대화의
 // 이력 + 받은함 캐시). 기기에 남은 스레드 초안은 많아야 20개(`DRAFT_LIMIT`)라 그 열쇠 중 모은 id 에 드는 것만 지운다.
 // =============================================================================
 
@@ -148,7 +149,8 @@ export function phoneDmLeaveCleanupPort({
       void client.invalidateQueries({queryKey: ['inbox', workspaceId]});
     },
     clearDrafts(channelId) {
-      clearDraft(channelDraftKey(channelId));
+      // 채널 초안 + 채널을 적어 둔 스레드 초안은 열쇠로 다 지운다(뿌리를 연 적 없는 것도). 채널을 안 적은 옛 스레드 초안만 이 기기가 든 뿌리로 찾는다.
+      clearDraftsOfChannel(channelId);
       for (const root of threadRootIds) clearDraft(threadDraftKey(root));
       clearChannelSurfaces(workspaceId, channelId);
     },
@@ -156,6 +158,8 @@ export function phoneDmLeaveCleanupPort({
       for (const {row} of readFailedSends(workspaceId, channelId, selfMemberId)) {
         forgetFailedSend(workspaceId, row.channelId, row.clientMsgId);
       }
+      // 보내는 중이던 글이 정리 **뒤에** 못 보낸 글로 다시 적히지 않게 문을 닫는다(대화가 걷힐 때·늦은 실패 - `failedSends.ts`).
+      blockFailedSendsBefore(workspaceId, channelId);
     },
   };
 }

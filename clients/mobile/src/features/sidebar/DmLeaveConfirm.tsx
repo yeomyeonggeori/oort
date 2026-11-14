@@ -1,4 +1,4 @@
-import {dmLeaveConfirmCopy} from '@momo/core/features/channels/dmLeave';
+import {DM_LEAVE_KEYS, dmLeaveConfirmCopy} from '@momo/core/features/channels/dmLeave';
 import React from 'react';
 
 import {ConfirmStep} from '../../design/sheetParts';
@@ -12,7 +12,7 @@ import type {DmLeaveStepView} from './useChannelRowActions';
 // 카드 + 「취소」·위험 단추)이고, 문장은 코어 사전의 D21 문장 그대로다(`dmLeaveConfirmCopy`: 제목 · 본문 · 다시 이어짐 · 되돌릴 수 없음 ·
 // 예약 N개는 N>0 일 때만). 줄마다 한 문단으로 선다.
 //
-// 「취소」가 앞(왼쪽)이다. 확정은 단계가 선 뒤 잠깐 눌림을 받지 않고(훅 `DM_LEAVE_CONFIRM_ARM_MS`), 진행 중에는 잠기며 낱말 끝에 「…」가 붙는다.
+// 「취소」가 앞(왼쪽)이다. 확정은 단계가 선 뒤 잠깐 눌림을 받지 않고(훅 `DM_LEAVE_CONFIRM_ARM_MS`), 진행 중에는 확정과 「취소」가 모두 잠기고(흐림·`disabled`) 확정 낱말이 사전의 「나가는 중…」(`DM_LEAVE_KEYS.busy`)로 바뀐다.
 // =============================================================================
 
 export function DmLeaveConfirm({
@@ -40,7 +40,8 @@ export function DmLeaveConfirm({
       error={step.error}
       errorTestID={`${testID}-error`}
       confirmLabel={copy.confirm}
-      pendingLabel={`${copy.confirm}…`}
+      pendingLabel={formatMessage(DM_LEAVE_KEYS.busy)}
+      cancelDisabled={step.pending}
       cancelLabel={copy.cancel}
       pending={step.pending}
       onCancel={onCancel}
