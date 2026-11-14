@@ -1140,6 +1140,108 @@ export const catalog: MessageCatalog = {
       "value": "We can't reach the server. Below is the work state as last confirmed."
     }
   ],
+  "channels.dmLeave.action": [
+    {
+      "type": 0,
+      "value": "Leave conversation"
+    }
+  ],
+  "channels.dmLeave.cancel": [
+    {
+      "type": 0,
+      "value": "Cancel"
+    }
+  ],
+  "channels.dmLeave.confirm": [
+    {
+      "type": 0,
+      "value": "Leave"
+    }
+  ],
+  "channels.dmLeave.confirmBody": [
+    {
+      "type": 0,
+      "value": "The conversation so far disappears from your screen. It stays as it is on "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "'s screen."
+    }
+  ],
+  "channels.dmLeave.confirmFinal": [
+    {
+      "type": 0,
+      "value": "You can't undo this after you leave."
+    }
+  ],
+  "channels.dmLeave.confirmRevive": [
+    {
+      "type": 0,
+      "value": "If a new message arrives, it starts a new conversation from that message."
+    }
+  ],
+  "channels.dmLeave.confirmScheduled": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " scheduled message will also be canceled."
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " scheduled messages will also be canceled."
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "channels.dmLeave.confirmTitle": [
+    {
+      "type": 0,
+      "value": "Leave your conversation with "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "?"
+    }
+  ],
+  "channels.dmLeave.done": [
+    {
+      "type": 0,
+      "value": "You left the conversation."
+    }
+  ],
+  "channels.dmLeave.failed": [
+    {
+      "type": 0,
+      "value": "Couldn't leave. Please try again."
+    }
+  ],
   "common.feedback.unavailable": [
     {
       "type": 0,
@@ -5142,6 +5244,86 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "Disconnected, reconnecting. The roster is as last received, and new conversations open once the connection is back."
+    }
+  ],
+  "mobile.addMember.addHint": [
+    {
+      "type": 0,
+      "value": "Adds them to the channel."
+    }
+  ],
+  "mobile.addMember.adding": [
+    {
+      "type": 0,
+      "value": "Adding"
+    }
+  ],
+  "mobile.addMember.close": [
+    {
+      "type": 0,
+      "value": "Close Add members"
+    }
+  ],
+  "mobile.addMember.emptyWorkspace": [
+    {
+      "type": 0,
+      "value": "No one else is in this workspace yet."
+    }
+  ],
+  "mobile.addMember.kindAgent": [
+    {
+      "type": 0,
+      "value": "Agent"
+    }
+  ],
+  "mobile.addMember.kindHuman": [
+    {
+      "type": 0,
+      "value": "Person"
+    }
+  ],
+  "mobile.addMember.loading": [
+    {
+      "type": 0,
+      "value": "Loading members."
+    }
+  ],
+  "mobile.addMember.noMatch": [
+    {
+      "type": 0,
+      "value": "No results for “"
+    },
+    {
+      "type": 1,
+      "value": "query"
+    },
+    {
+      "type": 0,
+      "value": "”."
+    }
+  ],
+  "mobile.addMember.present": [
+    {
+      "type": 0,
+      "value": "Member"
+    }
+  ],
+  "mobile.addMember.searchLabel": [
+    {
+      "type": 0,
+      "value": "Find members to add"
+    }
+  ],
+  "mobile.addMember.searchPlaceholder": [
+    {
+      "type": 0,
+      "value": "Name or @handle"
+    }
+  ],
+  "mobile.addMember.title": [
+    {
+      "type": 0,
+      "value": "Add members"
     }
   ],
   "mobile.attachmentSave.failed": [
@@ -10033,6 +10215,40 @@ export const catalog: MessageCatalog = {
       "value": "Checking the key."
     }
   ],
+  "timeline.addMember.createdDescription": [
+    {
+      "type": 0,
+      "value": "Created "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": ". A private channel is visible only to the members you add."
+    }
+  ],
+  "timeline.addMember.createdDescriptionPublic": [
+    {
+      "type": 0,
+      "value": "Created "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": ". It's a public channel, so people who join the workspace later are added automatically."
+    }
+  ],
+  "timeline.addMember.later": [
+    {
+      "type": 0,
+      "value": "Later"
+    }
+  ],
   "timeline.agentRail.open": [
     {
       "type": 1,
@@ -10091,6 +10307,18 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "If you do not decide, the agent has to propose it again."
+    }
+  ],
+  "timeline.createChannel.privateDetail": [
+    {
+      "type": 0,
+      "value": "Only members who are added can see it."
+    }
+  ],
+  "timeline.createChannel.publicDetail": [
+    {
+      "type": 0,
+      "value": "Owners and admins add members. People who join the workspace later are added automatically."
     }
   ],
   "timeline.edited.atDate": [

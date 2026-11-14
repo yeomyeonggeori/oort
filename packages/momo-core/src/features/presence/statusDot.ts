@@ -34,7 +34,12 @@
 // 툴팁이 말한다(웹 `DmAvatar`, 폰 `Row`). muted 는 웹에서 속이 빈 고리로 그려 모양으로도 갈린다.
 // =============================================================================
 
-import { uuidEq, type AgentLiveness, type RosterMember } from "../../lib/api";
+import {
+  uuidEq,
+  type AgentLiveness,
+  type EffectivePresence,
+  type RosterMember,
+} from "../../lib/api";
 import {
   livenessToneFor,
   livenessView,
@@ -143,6 +148,24 @@ export function humanPresenceDot(
     return { tone: "muted", label: effectivePresenceLabel("offline") };
   }
   return null;
+}
+
+/**
+ * 이미 판정된 실효 상태(내 프로필 줄의 배지: `effectivePresence(선언, 연결됨)`) → 점의 톤. 위 `humanPresenceDot` 과 같은
+ * 대응이다(온라인 = ok · 자리 비움 = warn · 방해 금지 = danger · 오프라인 = muted). 웹이 이 대응을 따로 적던 자리
+ * (`PresenceControl` 의 클래스 함수)를 여기로 모았다(#5786).
+ */
+export function effectivePresenceTone(effective: EffectivePresence): StatusDotTone {
+  switch (effective) {
+    case "online":
+      return "ok";
+    case "away":
+      return "warn";
+    case "dnd":
+      return "danger";
+    case "offline":
+      return "muted";
+  }
 }
 
 /**

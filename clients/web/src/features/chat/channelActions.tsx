@@ -1,8 +1,28 @@
 import { isSurfaceProvided } from "@momo/core/features/capabilities/serverSurfaces";
-import { Fragment, useId, useMemo, useState } from "react";
+import { Fragment, useMemo, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { Bell, BellOff, Check, Loader2 } from "lucide-react";
+import {
+  Bell,
+  BellOff,
+  BookOpen,
+  Check,
+  Copy,
+  EyeOff,
+  Fingerprint,
+  FolderInput,
+  GitPullRequest,
+  Info,
+  Link,
+  Loader2,
+  DoorOpen,
+  Mail,
+  MailOpen,
+  Star,
+  StarOff,
+  Type,
+  type LucideIcon,
+} from "lucide-react";
 import {
   removeChannelMember,
   setChannelNotificationPref,
@@ -27,20 +47,22 @@ import {
   CHANNEL_MUTE_FAILURE,
 } from "@momo/core/features/channels/model";
 import {
-  DropdownMenuGroup,
   DropdownMenuItem,
-  DropdownMenuLabel,
   DropdownMenuRadioGroup,
   DropdownMenuRadioItem,
   DropdownMenuSeparator,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
 } from "@/design/ui/dropdown-menu";
 import {
-  ContextMenuGroup,
   ContextMenuItem,
-  ContextMenuLabel,
   ContextMenuRadioGroup,
   ContextMenuRadioItem,
   ContextMenuSeparator,
+  ContextMenuSub,
+  ContextMenuSubContent,
+  ContextMenuSubTrigger,
 } from "@/design/ui/context-menu";
 import {
   Dialog,
@@ -62,10 +84,11 @@ import {
 } from "@/features/workspace/useWorkspace";
 import {
   channelActionAvailability,
-  channelActionClusterTitle,
+  channelActionClusterSubmenu,
   channelActionItemsForSurface,
   channelActionKeepsMenuOpen,
   type ChannelActionAvailability,
+  type ChannelActionIcon,
   type ChannelActionItem,
   type ChannelActionKey,
   type ChannelActionState,
@@ -142,6 +165,12 @@ export interface ChannelActions {
   isPending: (key: ChannelActionKey) => boolean;
   /** 항목 자리에서 하는 말(§5, 토스트가 아니다). 메뉴가 열려 있어야 읽힌다. */
   error: string | null;
+  /**
+   * 복사 실패는 배너가 아니라 **누른 그 줄**이 말한다(#5777 검수 M1). 배너가 판 맨 위에 서면 위 판이
+   * 192 → 331px 로 넓어져 방금 누른 자리를 다른 줄이 차지했고, 「다시 눌러 보세요」대로 누르면 읽음·알림이
+   * 실행됐다. 줄은 높이도 위치도 그대로이고 글자만 바뀐다(「복사됨」 영수증과 같은 자리).
+   */
+  copyFailure: { key: ChannelActionKey; message: string } | null;
   clearError: () => void;
   run: (key: ChannelActionKey) => void;
   /** 「섹션으로 이동」의 라디오 행이 고른 목적지. 표면이 없으면 아무 일도 없다. */
@@ -175,7 +204,16 @@ export function useChannelActions({
   const navigate = useNavigate();
   const location = useLocation();
   const invalidateReadStates = useInvalidateReadStates(workspaceId);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setErrorState] = useState<string | null>(null);
+  const [copyFailure, setCopyFailure] = useState<{
+    key: ChannelActionKey;
+    message: string;
+  } | null>(null);
+  // 배너 쪽 오류를 비우거나 새로 세울 때 복사 실패 줄도 같이 쉰다 - 두 말이 한 메뉴에 겹치지 않는다.
+  const setError = (next: string | null) => {
+    setCopyFailure(null);
+    setErrorState(next);
+  };
   const [confirmLeave, setConfirmLeave] = useState(false);
   const [leaveError, setLeaveError] = useState<string | null>(null);
 
@@ -348,16 +386,16 @@ export function useChannelActions({
     currentSectionId,
   };
 
-  function runCopy(copy: () => Promise<boolean>) {
+  function runCopy(key: ChannelActionKey, copy: () => Promise<boolean>) {
     // 클립보드 API 자체가 없으면 다시 눌러도 같다. 「다시 시도」라고 말하지
     // 않는 이유이고, `MessageRow.onCopyLink` 가 이미 하는 판정이다.
     if (typeof navigator.clipboard?.writeText !== "function") {
-      setError(CHANNEL_COPY_UNAVAILABLE);
+      setCopyFailure({ key, message: CHANNEL_COPY_UNAVAILABLE });
       return;
     }
     setError(null);
     void copy().then((ok) => {
-      if (!ok) setError(CHANNEL_COPY_FAILURE);
+      if (!ok) setCopyFailure({ key, message: CHANNEL_COPY_FAILURE });
     });
   }
 
@@ -392,13 +430,13 @@ export function useChannelActions({
         markUnreadMutation.mutate();
         return;
       case "copy-link":
-        runCopy(linkCopy.copy);
+        runCopy(key, linkCopy.copy);
         return;
       case "copy-name":
-        runCopy(nameCopy.copy);
+        runCopy(key, nameCopy.copy);
         return;
       case "copy-id":
-        runCopy(idCopy.copy);
+        runCopy(key, idCopy.copy);
         return;
       case "close-dm":
         // 왕복이 없다. 닫기는 이 기기의 원장 한 칸이고(`sidebarDmClosure.ts`), 서버도 상대 쪽
@@ -437,6 +475,7 @@ export function useChannelActions({
     items: (surface) => channelActionItemsForSurface(surface, available, state),
     isPending,
     error,
+    copyFailure,
     clearError: () => setError(null),
     run,
     moveToSection: (sectionId) => {
@@ -461,27 +500,69 @@ export function useChannelActions({
 }
 
 /**
- * 「섹션으로 이동」 — 제목 하나와 그 아래 라디오 행들 (ADR-0177 D4 / BT-4 #1932).
+ * 아이콘 뜻 낱말 → Lucide 글리프 (#5777, owner 2026-11-14 「알림 아이콘 정렬 잘 맞춰줘」).
  *
- * 서브메뉴가 아닌 이유는 코어 `channels/actionModel.ts` 머리말에 있다(요약: 이 레포는
- * 서브메뉴를 이슈 번호까지 달아 금지하고, 그 문단이 대체물로 「화면에 남는 행들
- * 위의 제목」을 지정한다). 라디오인 이유는 배치가 **여럿 중 하나**라서다 -
- * 지금 속한 섹션이 `aria-checked` 로 들려야 하고, 그것은 체크 표시가 눈에
- * 말하는 것과 같은 사실이다.
- *
- * 제목은 `useId` 로 자기 id 를 갖고 그룹이 `aria-labelledby` 로 되짚는다.
- * Radix 의 Label 은 aria 를 하나도 걸어 주지 않으므로(`DropdownMenuLabel`
- * 독스트링), 이 두 줄이 없으면 무리가 스크린리더에 이름 없이 선다.
- *
- * 그릇은 **표면이 고른다** (design-review #1932 N-1). 오늘 이 무리는 행 메뉴에만
- * 서고(`SURFACE_KEYS.header` 가 이 열쇠를 주지 않는다) 그래서 컨텍스트 메뉴를
- * 하드코딩해도 안전했다. 그런데 이 파일의 형제 컴포넌트는 전부 `surface` 로 갈라
- * 그릇을 고르고, 코어 `channels/actionModel.ts` 는 확장점을 「열쇠 하나·분기 하나·
- * SURFACE_KEYS 항목 하나」라고 광고한다. 그 한 줄을 믿고 헤더에 이 열쇠를 넣는
- * 사람은 Radix 루트 없는 컨텍스트 메뉴 조각을 렌더하게 된다 - 광고한 확장점이
- * 실제로 그만큼만 드는 것이 이 분기의 값이다.
+ * 모든 줄이 줄 앞에 16px(`size-4`, README §2.8) 글리프 하나를 든다. 줄의 안쪽 여백(`px-2`)과 간격(`gap-2`)이
+ * 같으므로 아이콘은 한 세로 줄에, 글자는 그 오른쪽 한 세로 줄에 선다 - 아이콘 없는 줄이 섞이면 그 줄의 글자만
+ * 왼쪽으로 24px 당겨져 들쭉날쭉해진다(예전 알림 줄만 아이콘이 있던 메뉴). 표가 낱말마다 하나를 요구하므로
+ * (`Record<ChannelActionIcon, …>`) 새 낱말은 글리프를 고르지 않고는 컴파일되지 않는다. 고른 이유:
+ *   topic        Info            채널에 대한 설명을 본다(헤더 전용)
+ *   copy         Copy            복사 하위 메뉴(메시지 메뉴의 「메시지 복사」와 같은 글리프)
+ *   copy-name    Type            글자(이름)를 가져간다
+ *   copy-link    Link            메시지 메뉴의 「링크 복사하기」와 같다
+ *   copy-id      Fingerprint     하나뿐인 식별값
+ *   section      FolderInput     폴더(섹션)로 넣는다. 사이드바의 「새 섹션」이 `FolderPlus` 다
+ *   mark-read    MailOpen        열린 봉투 = 읽음. 메시지 메뉴의 「여기부터 안 읽음」(닫힌 봉투 `Mail`)과 짝
+ *   mark-unread  Mail            닫힌 봉투 = 안 읽음(BT-6 의 읽음 상태 문법, README §6 Buzz 대응표)
+ *   bell(-off)   Bell / BellOff  알림 상태 그대로(낱말 「알림 켜짐 / 꺼짐」과 같은 상태를 그린다)
+ *   memory       BookOpen        기억 표지(`MemoryReceiptChip`)와 같다
+ *   github       GitPullRequest  앱이 GitHub 를 그리는 글리프(작업 보드 · 실행 보고)
+ *   star/unstar  Star / StarOff  별표 붙이기 / 떼기
+ *   hide         EyeOff          「목록에서 숨기기」(대화를 지우지 않고 목록에서 안 보이게 한다)
+ *   leave        DoorOpen        나가기. 위험 줄이라 글자와 함께 `--danger` 를 입는다(`currentColor`)
+ * 색은 따로 주지 않는다: 메시지 메뉴(`MessageActions.tsx` `actionIcon`)처럼 줄 글자색을 물려받는다.
  */
-function ChannelSectionMoveGroup({
+const ACTION_ICON: Record<ChannelActionIcon, LucideIcon> = {
+  topic: Info,
+  copy: Copy,
+  "copy-name": Type,
+  "copy-link": Link,
+  "copy-id": Fingerprint,
+  section: FolderInput,
+  "mark-read": MailOpen,
+  "mark-unread": Mail,
+  bell: Bell,
+  "bell-off": BellOff,
+  memory: BookOpen,
+  github: GitPullRequest,
+  star: Star,
+  unstar: StarOff,
+  hide: EyeOff,
+  leave: DoorOpen,
+};
+
+function ActionIcon({ name }: { name: ChannelActionIcon }) {
+  const Glyph = ACTION_ICON[name];
+  return (
+    <Glyph className="size-4 shrink-0" aria-hidden="true" data-menu-icon={name} />
+  );
+}
+
+/**
+ * 「섹션으로 이동 ›」 하위 판의 목적지들 — 라디오 행 (ADR-0177 D4 / BT-4 #1932 → #5777).
+ *
+ * 이 무리는 웹에서 하위 메뉴로 접힌다(코어 `channelActionClusterSubmenu`, 규칙은 「고를 수 없는 줄이 없는
+ * 묶음에만」). 목적지는 언제나 고를 수 있는 줄이라 그 규칙 안에 든다. 예전의 제목 줄(「섹션으로 이동」)은
+ * 하위 메뉴를 여는 줄이 되었고, 하위 판은 Radix 가 그 줄을 이름으로 단다(`aria-labelledby`). 라디오인
+ * 이유는 배치가 **여럿 중 하나**라서다 - 지금 속한 섹션이 `aria-checked` 로 들려야 하고, 그것은 체크
+ * 표시가 눈에 말하는 것과 같은 사실이다.
+ *
+ * 그릇은 **표면이 고른다** (design-review #1932 N-1). 오늘 이 무리는 행 메뉴에만 서고(`SURFACE_KEYS.header`
+ * 가 이 열쇠를 주지 않는다), 그런데도 갈라 두는 것은 코어가 확장점을 「열쇠 하나·분기 하나·SURFACE_KEYS 항목
+ * 하나」라고 광고하기 때문이다. 그 한 줄을 믿고 헤더에 이 열쇠를 넣는 사람이 Radix 루트 없는 컨텍스트 메뉴
+ * 조각을 렌더하지 않게 한다.
+ */
+function ChannelSectionMoveChoices({
   surface,
   prefix,
   item,
@@ -494,72 +575,74 @@ function ChannelSectionMoveGroup({
   actions: ChannelActions;
   onHandOff: (key: ChannelActionKey) => void;
 }) {
-  const labelId = useId();
   const choices = item.sections ?? [];
   // 값은 문자열이어야 한다(Radix RadioGroup). 기본 섹션의 `null` 은 채널 id 가
   // 될 수 없는 낱말 하나로 적는다 - 커스텀 섹션 id 는 `sec-<수>` 꼴이라 절대
   // 겹치지 않는다.
   const BASE = "\u0000base";
   const current = item.currentSectionId ?? BASE;
-  const Label = surface === "header" ? DropdownMenuLabel : ContextMenuLabel;
   const RadioGroup =
     surface === "header" ? DropdownMenuRadioGroup : ContextMenuRadioGroup;
   const RadioItem =
     surface === "header" ? DropdownMenuRadioItem : ContextMenuRadioItem;
   return (
-    <>
-      <Label id={labelId} data-testid={`${prefix}-${item.testKey}`}>
-        {item.label}
-      </Label>
-      <RadioGroup
-        aria-labelledby={labelId}
-        value={current}
-        onValueChange={(next) => {
-          onHandOff(item.key);
-          actions.moveToSection(next === BASE ? null : next);
-        }}
-      >
-        {[{ id: null, label: SECTION_MOVE_TO_BASE_LABEL }, ...choices].map(
-          (choice) => {
-            const value = choice.id ?? BASE;
-            return (
-              <RadioItem
-                key={value}
-                value={value}
-                data-testid={`${prefix}-section-${choice.id ?? "base"}`}
+    <RadioGroup
+      value={current}
+      onValueChange={(next) => {
+        onHandOff(item.key);
+        actions.moveToSection(next === BASE ? null : next);
+      }}
+    >
+      {[{ id: null, label: SECTION_MOVE_TO_BASE_LABEL }, ...choices].map(
+        (choice) => {
+          const value = choice.id ?? BASE;
+          return (
+            <RadioItem
+              key={value}
+              value={value}
+              data-testid={`${prefix}-section-${choice.id ?? "base"}`}
+            >
+              {/* 긴 한글 섹션 이름(최대 80자)이 판을 창 밖으로 밀지 않는다.
+                  `max-w-pane`(320) 은 이 레포가 이미 목록 하나의 폭으로 들고
+                  있는 수이고, 자른 자리의 전체 이름은 title 이 든다 - 사이드바
+                  행이 같은 축에서 같은 것을 한다. */}
+              <span
+                className="min-w-0 max-w-pane flex-1 truncate"
+                title={choice.label}
               >
-                {/* 긴 한글 섹션 이름(최대 80자)이 메뉴를 창 밖으로 밀지 않는다.
-                    `max-w-pane`(320) 은 이 레포가 이미 목록 하나의 폭으로 들고
-                    있는 수이고, 자른 자리의 전체 이름은 title 이 든다 - 사이드바
-                    행이 같은 축에서 같은 것을 한다. */}
-                <span
-                  className="min-w-0 max-w-pane flex-1 truncate"
-                  title={choice.label}
-                >
-                  {choice.label}
-                </span>
-                {/* 체크는 **캘러가 그린다** (`DropdownMenuRadioItem` 독스트링:
-                    "It does NOT reserve an indicator gutter"). `aria-checked` 가
-                    귀에 말하는 것과 같은 사실을 눈에 말하는 자리이고, 없으면
-                    스크린리더만 지금 자리를 안다. `PresenceControl` 이 같은 것을
-                    같은 아이콘·같은 잉크로 그린다. */}
-                {value === current && (
-                  <Check
-                    className="size-4 shrink-0 text-ink-muted"
-                    aria-hidden="true"
-                  />
-                )}
-              </RadioItem>
-            );
-          }
-        )}
-      </RadioGroup>
-    </>
+                {choice.label}
+              </span>
+              {/* 체크는 **캘러가 그린다** (`DropdownMenuRadioItem` 독스트링:
+                  "It does NOT reserve an indicator gutter"). `aria-checked` 가
+                  귀에 말하는 것과 같은 사실을 눈에 말하는 자리이고, 없으면
+                  스크린리더만 지금 자리를 안다. `PresenceControl` 이 같은 것을
+                  같은 아이콘·같은 잉크로 그린다. 하위 판 안의 줄은 모두 아이콘이
+                  없어 글자 시작이 한 세로 줄이다. */}
+              {value === current && (
+                <Check
+                  className="size-4 shrink-0 text-ink-muted"
+                  aria-hidden="true"
+                />
+              )}
+            </RadioItem>
+          );
+        }
+      )}
+    </RadioGroup>
   );
 }
 
 /**
- * 한 메뉴의 항목 전량. 그릇만 다르고(드롭다운 / 컨텍스트) 나머지는 같다 —
+ * 복사 실패 문장의 첫 문장(「복사하지 못했습니다」). 줄은 한 줄·32px 로 고정이라 전체 문장은 `title` 과
+ * 스크린리더용 알림이 맡는다. 새 문구를 코드에 적지 않고 코어가 가진 문장에서 가져온다.
+ */
+function copyFailureRowLabel(message: string): string {
+  const first = message.split(". ")[0];
+  return first.endsWith(".") ? first.slice(0, -1) : first;
+}
+
+/**
+ * 한 줄. 아이콘(`ActionIcon`) + 낱말. 그릇만 다르고(드롭다운 / 컨텍스트) 나머지는 같다 —
  * `MessageActionMenuItems` 와 같은 갈래이고, 같은 이유다.
  */
 function ChannelActionMenuRow({
@@ -576,11 +659,16 @@ function ChannelActionMenuRow({
   onHandOff: (key: ChannelActionKey) => void;
 }) {
   const busy = actions.isPending(item.key);
+  const failure =
+    actions.copyFailure?.key === item.key ? actions.copyFailure : null;
   const props = {
     "data-testid": `${prefix}-${item.testKey}`,
     "data-muted":
       item.key === "mute" && actions.state.muted ? "" : undefined,
-    tone: item.tone,
+    tone: failure ? ("danger" as const) : item.tone,
+    // 눌린 줄이 실패를 말할 때 전체 문장(다시 눌러 보세요 / 클립보드를 쓸 수 없습니다)은 title 에 둔다.
+    title: failure?.message,
+    "data-copy-failed": failure ? "" : undefined,
     // 왕복 중에도 잠그지도 흐리지도 않는다 (design-review #1937 N-1).
     // `States.tsx` 가 같은 축에 「`aria-busy` 와 바뀐 낱말, never `disabled`
     // and never dimmed」라 적어 두었다 — 회색이 된 컨트롤은 「지금 일어나는
@@ -602,14 +690,16 @@ function ChannelActionMenuRow({
       if (!channelActionKeepsMenuOpen(item.key)) onHandOff(item.key);
       actions.run(item.key);
     },
-    children: item.key === "mute" ? (
+    children: (
       <>
-        {actions.state.muted
-          ? <BellOff className="size-4 shrink-0" aria-hidden="true" />
-          : <Bell className="size-4 shrink-0" aria-hidden="true" />}
-        {item.label}
+        <ActionIcon name={item.icon} />
+        {failure
+          ? copyFailureRowLabel(failure.message)
+          : busy
+            ? item.busyLabel ?? item.label
+            : item.label}
       </>
-    ) : busy ? item.busyLabel ?? item.label : item.label,
+    ),
   };
   return surface === "header" ? (
     <DropdownMenuItem {...props} />
@@ -633,13 +723,15 @@ function clusterRuns(items: ChannelActionItem[]): ChannelActionItem[][] {
 }
 
 /**
- * 한 무리의 행들. 제목이 있는 무리(「복사」)는 제목 + 그룹으로, 없는 무리는 행만 선다.
+ * 한 무리의 줄들. 하위 메뉴로 접는 무리(복사 · 섹션 이동, 코어 `channelActionClusterSubmenu`)는 **여는 줄
+ * 하나 + 하위 판**으로, 나머지는 줄만 선다 (#5777, owner 2026-11-14 「버즈에선 우클릭했을 때 라벨 섹션없이」).
  *
- * 제목은 서브메뉴가 아니라 **화면에 남는 행들 위의 제목**이다(위 `ChannelSectionMoveGroup` 과
- * 같은 문법, 이유는 코어 `channels/actionModel.ts` 머리말). 제목은 `useId` 로 자기 id 를 갖고 그룹이
- * `aria-labelledby` 로 되짚는다 - Radix 의 Label 은 aria 를 하나도 걸어 주지 않는다.
- * 그릇은 `ChannelSectionMoveGroup` 처럼 **표면이 고른다**: 오늘 이 무리는 행 메뉴에만 서지만
- * 열쇠 하나를 헤더에 더하는 사람이 Radix 루트 없는 조각을 렌더하지 않게.
+ * 예전에는 복사가 「제목 + 화면에 남는 세 줄」이었다(하위 메뉴 금지, #1383). 그 규칙은 「고를 수 없는 줄이
+ * 없는 묶음에만 하위 메뉴」로 좁혀졌고(`dropdown-menu.tsx` 머리말), 이 두 무리는 잠긴 줄이 없다. 여는 줄은
+ * 다른 줄처럼 아이콘을 앞에 들어 아이콘 세로 줄이 끊기지 않고, 끝에 › 가 선다(`submenuChevron`).
+ *
+ * 하위 판의 접근 이름은 여는 줄의 글자다(Radix 가 판에 `aria-labelledby` 로 단다). 복사 줄은 「복사됨」
+ * 영수증 동안 두 판이 다 열려 있고(`channelActionKeepsMenuOpen`), 목적지를 고르면 표면이 메뉴를 통째로 닫는다.
  */
 function ChannelActionClusterRows({
   surface,
@@ -654,11 +746,9 @@ function ChannelActionClusterRows({
   actions: ChannelActions;
   onHandOff: (key: ChannelActionKey) => void;
 }) {
-  const labelId = useId();
-  const title = channelActionClusterTitle(run[0].cluster);
   const rows = run.map((item) =>
     item.sections ? (
-      <ChannelSectionMoveGroup
+      <ChannelSectionMoveChoices
         key={item.key}
         surface={surface}
         prefix={prefix}
@@ -677,16 +767,41 @@ function ChannelActionClusterRows({
       />
     )
   );
-  if (title === undefined) return <>{rows}</>;
-  const Group = surface === "header" ? DropdownMenuGroup : ContextMenuGroup;
-  const Label = surface === "header" ? DropdownMenuLabel : ContextMenuLabel;
+  const submenu = channelActionClusterSubmenu(run[0].cluster);
+  if (submenu === undefined) return <>{rows}</>;
+  const Sub = surface === "header" ? DropdownMenuSub : ContextMenuSub;
+  const SubTrigger =
+    surface === "header" ? DropdownMenuSubTrigger : ContextMenuSubTrigger;
+  const SubContent =
+    surface === "header" ? DropdownMenuSubContent : ContextMenuSubContent;
   return (
-    <>
-      <Label id={labelId} data-testid={`${prefix}-${run[0].cluster}-group`}>
-        {title}
-      </Label>
-      <Group aria-labelledby={labelId}>{rows}</Group>
-    </>
+    <Sub>
+      <SubTrigger data-testid={`${prefix}-${submenu.testKey}`}>
+        <ActionIcon name={submenu.icon} />
+        {submenu.label}
+      </SubTrigger>
+      <SubContent data-testid={`${prefix}-${submenu.testKey}-menu`}>
+        {rows}
+      </SubContent>
+    </Sub>
+  );
+}
+
+/**
+ * 이 무리 위에 구분선을 세우는가. 코어가 무리가 바뀌는 자리에 단 `separatorBefore` 를 따르되, **하위 메뉴를
+ * 여는 줄끼리는 한 띠로 붙인다**(#5777): Buzz 의 행 메뉴처럼 `복사 ›` 바로 아래 `섹션으로 이동 ›` 이 선다.
+ * 여는 줄 하나짜리 무리마다 선이 서면 줄 하나를 선 둘이 감싸 메뉴가 토막 난다. 폰 시트는 무리마다 카드라
+ * 이 규칙을 쓰지 않는다(코어의 구분선 값은 그대로다).
+ */
+function separatesFrom(
+  previous: ChannelActionItem[] | undefined,
+  run: ChannelActionItem[]
+): boolean {
+  if (!run[0].separatorBefore) return false;
+  return !(
+    previous !== undefined &&
+    channelActionClusterSubmenu(previous[0].cluster) !== undefined &&
+    channelActionClusterSubmenu(run[0].cluster) !== undefined
   );
 }
 
@@ -712,10 +827,14 @@ export function ChannelActionMenuItems({
 }) {
   const Separator =
     surface === "header" ? DropdownMenuSeparator : ContextMenuSeparator;
+  const runs = clusterRuns(actions.items(surface));
   return (
     <>
       {/* 실패는 항목 위에 그 자리에서 선다(§5, 토스트가 아니다). 메뉴가 열려
-          있어야 읽히므로, 아래 항목들은 왕복 중에 메뉴를 닫지 않는다.
+          있어야 읽히므로, 아래 항목들은 왕복 중에 메뉴를 닫지 않는다. 하위 판의
+          복사 줄이 실패해도 이 배너는 위 판 맨 위에 선다 - 복사 영수증 동안 두
+          판이 다 열려 있으므로 보이고, `role="alert"` 라 초점이 하위 판에 있어도
+          읽힌다(#5777).
 
           `role="group"` 으로 한 겹 감싼다 (design-review #1937 N-5): `menu` 의
           직계 자식은 menuitem/group/separator 여야 하는데 `InlineBanner` 는
@@ -726,6 +845,19 @@ export function ChannelActionMenuItems({
 
           `px-2`: 배너의 기본 `px-4` 는 메뉴 행(`px-2`)과 다른 축이라 첫 글자가
           8px 오른쪽으로 밀려 섰다(실측 21px 대 13px, N-3). 같은 왼쪽 자를 쓴다. */}
+      {actions.copyFailure && (
+        // 눈에는 누른 줄이 말하고(위 `ChannelActionMenuRow`), 귀에는 여기가 문장 전체를 읽는다. `sr-only`
+        // 는 자리를 차지하지 않으므로 판의 폭도 줄 위치도 움직이지 않는다.
+        <div role="group" aria-label={CHANNEL_ACTION_ERROR_GROUP_LABEL}>
+          <p
+            role="alert"
+            className="sr-only"
+            data-testid={`${prefix}-action-error`}
+          >
+            {actions.copyFailure.message}
+          </p>
+        </div>
+      )}
       {actions.error && (
         <div role="group" aria-label={CHANNEL_ACTION_ERROR_GROUP_LABEL}>
           <InlineBanner
@@ -735,9 +867,9 @@ export function ChannelActionMenuItems({
           />
         </div>
       )}
-      {clusterRuns(actions.items(surface)).map((run) => (
+      {runs.map((run, index) => (
         <Fragment key={run[0].cluster}>
-          {run[0].separatorBefore && <Separator />}
+          {separatesFrom(runs[index - 1], run) && <Separator />}
           <ChannelActionClusterRows
             surface={surface}
             prefix={prefix}

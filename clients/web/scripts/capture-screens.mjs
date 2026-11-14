@@ -2742,13 +2742,10 @@ async function captureSidebarRowMenu(page, scheme, shots) {
   // BT-5(#1933)가 「별표」를 사이드바 정리 무리의 첫 항목으로 들여놨다. 배치
   // (「섹션으로 이동」)는 커스텀 섹션이 하나도 없는 이 시점에는 서지 않는다 —
   // 목적지가 없는 라디오 무리는 선택지가 아니기 때문이다(BT-4).
-  // 복사 무리(이름·링크·ID)가 맨 앞에 서고 접히지 않는다(SidebarRowContextMenu 시험이 같은 차례를 못박는다).
-  // `channel-row-copy-group`은 그 무리의 상자라 접두사 선택자에 함께 잡힌다(#5048).
+  // 「복사 ›」(이름·링크·ID 의 하위 메뉴, #5777)가 맨 앞에 선다(SidebarRowContextMenu 시험이 같은 차례를
+  // 못박는다). 이름·링크·ID 는 하위 판 안이라 위 판에는 여는 줄 하나뿐이다.
   const expected = [
     "channel-row-copy-group",
-    "channel-row-copy-name",
-    "channel-row-copy-link",
-    "channel-row-copy-id",
     "channel-row-mark-read",
     "channel-row-mute-toggle",
     "channel-row-star",
@@ -2783,12 +2780,10 @@ async function captureSidebarRowMenu(page, scheme, shots) {
   await row.focus();
   await page.keyboard.press("Shift+F10");
   await menu.waitFor({ state: "visible" });
-  // 복사 무리(이름·링크·ID)가 메뉴 맨 앞이라 첫 정거장은 「이름 복사」다(SidebarRowContextMenu 시험이 같은 차례를
+  // 「복사 ›」가 메뉴 맨 앞이라 첫 정거장은 그 여는 줄이다(#5777, SidebarRowContextMenu 시험이 같은 차례를
   // 못박는다). 알림 항목까지 ↓로 걸어가는 동안 메뉴는 살아 있어야 한다 — 한 걸음마다 정거장을 단정한다(#5048).
   const kbdWalk = [
-    "channel-row-copy-name",
-    "channel-row-copy-link",
-    "channel-row-copy-id",
+    "channel-row-copy-group",
     "channel-row-mark-read",
     "channel-row-mute-toggle",
   ];
@@ -3342,7 +3337,8 @@ async function captureCustomSection(page, scheme, shots) {
     throw new Error(`새 섹션이 비어 있지 않다 ${scheme}: ${emptyRows}`);
   }
 
-  // 행 우클릭 → 「섹션으로 이동」. 서브메뉴가 아니라 제목 + 라디오 무리다.
+  // 행 우클릭 → 「섹션으로 이동 ›」. 잠긴 줄이 없는 묶음이라 하위 메뉴로 접힌다(#5777): 여는 줄을 눌러 하위
+  // 판을 열고, 목적지 라디오는 그 판에 선다.
   const row = page
     .getByTestId("sidebar-section-channels")
     .locator('[data-testid="channel-item"]')
@@ -3352,8 +3348,12 @@ async function captureCustomSection(page, scheme, shots) {
   await page
     .getByTestId("channel-row-move-to-section")
     .waitFor({ state: "visible" });
+  await sceneClick(page, page.getByTestId("channel-row-move-to-section"));
+  await page
+    .getByTestId("channel-row-move-to-section-menu")
+    .waitFor({ state: "visible" });
   const radios = await page
-    .getByTestId("channel-row-menu")
+    .getByTestId("channel-row-move-to-section-menu")
     .locator('[role="menuitemradio"]')
     .count();
   if (radios !== 2) {
@@ -3369,9 +3369,9 @@ async function captureCustomSection(page, scheme, shots) {
       `배치 전 기본 섹션이 체크가 아니다 ${scheme}: ${baseChecked}`
     );
   }
-  // 80자 이름이 메뉴를 창 밖으로 밀지 않는다.
+  // 80자 이름이 하위 판을 창 밖으로 밀지 않는다.
   const menuBox = await page.evaluate(`(() => {
-    const el = document.querySelector('[data-testid="channel-row-menu"]');
+    const el = document.querySelector('[data-testid="channel-row-move-to-section-menu"]');
     const r = el.getBoundingClientRect();
     return { right: Math.round(r.right), width: Math.round(r.width), view: window.innerWidth };
   })()`);
@@ -3396,6 +3396,10 @@ async function captureCustomSection(page, scheme, shots) {
     button: "right",
   });
   await page.getByTestId("channel-row-menu").waitFor({ state: "visible" });
+  await sceneClick(page, page.getByTestId("channel-row-move-to-section"));
+  await page
+    .getByTestId("channel-row-move-to-section-menu")
+    .waitFor({ state: "visible" });
   const nowChecked = await page
     .getByTestId("channel-row-section-sec-1")
     .getAttribute("aria-checked");
@@ -7921,6 +7925,11 @@ async function captureScheme(browser, scheme) {
   shots.push(createPendingShot);
   await login.getByTestId("create-channel-dialog").waitFor({ state: "detached" });
   await login.unroute("**/v1/workspaces/*/channels");
+  // #5784: 채널을 만들면 「멤버 추가」가 이어서 뜬다(공개·비공개 모두). 「나중에」로 건너뛰고 다음 장면(오프라인)으로 간다 — 떠 있는 창이
+  //        사이드바의 + 를 가린다.
+  await login.getByTestId("add-channel-member-dialog").waitFor({ state: "visible" });
+  await sceneClick(login, login.getByTestId("add-member-close"));
+  await login.getByTestId("add-channel-member-dialog").waitFor({ state: "detached" });
 
   // 3a-4. 오프라인 (MOMO-614 R1 / R-1 5장): 배너 한 줄 + 만들기 버튼 disabled.
   //       레일의 disconnected는 종단 절단에서만 오므로 브라우저가 아는 오프라인도
@@ -8389,7 +8398,7 @@ async function captureScheme(browser, scheme) {
   await notificationsPage.close();
 
   // BF-A5 (#1901): 크로스채널 초안 패널. signIn이 localStorage를 비우므로
-  // 로그인한 뒤에 심고, 같은 탭 구독이 다시 읽도록 사건을 낸다.
+  // 로그인한 뒤에 심고, 같은 탭 구독이 다시 읽도록 사건을 낸다. 초안은 쓴 사람을 든다(#5799: 다른 사람·모르는 사람의 초안은 읽지 않는다).
   const draftsPage = await newScenePage();
   await draftsPage.goto(ORIGIN, { waitUntil: "networkidle" });
   await signIn(draftsPage);
@@ -8399,14 +8408,17 @@ async function captureScheme(browser, scheme) {
     localStorage.setItem(prefix + "${GENERAL_ID}", JSON.stringify({
       text: "배포 롤백 근거를 정리하면",
       atMs: now,
+      author: "${ME}",
     }));
     localStorage.setItem(prefix + "00000000-0000-7000-8000-000000000202", JSON.stringify({
       text: "PR 본문에 게이트 증거를 붙이고\\n두 번째 줄은 미리보기에서 한 줄로 접힌다",
       atMs: now - 60_000,
+      author: "${ME}",
     }));
     localStorage.setItem(prefix + "${DM_ID}", JSON.stringify({
       text: "hermes 온보딩 문구를 이어서",
       atMs: now - 3_600_000,
+      author: "${ME}",
     }));
     window.dispatchEvent(new Event("${DRAFTS_CHANGED_EVENT}"));
     window.dispatchEvent(new CustomEvent("momo:composer-seed", {

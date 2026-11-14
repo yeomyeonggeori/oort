@@ -2,10 +2,17 @@ import { createContext, useCallback, useContext, useState } from "react";
 import type { DialogFocusTarget } from "@/design/ui/dialog";
 import { useNavigate } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
-import { createChannel, type Channel, type CreateChannelInput } from "@momo/core/lib/api";
+import {
+  createChannel,
+  type Channel,
+  type CreateChannelInput,
+  type RosterMember,
+} from "@momo/core/lib/api";
 import { useSession } from "@/app/session";
 import { upsertChannel } from "@momo/core/features/directory/model";
 import { createChannelFailure, type CreateChannelFailure } from "@momo/core/features/channels/model";
+import { withChannelMemberAdded } from "@momo/core/features/channels/memberAdd";
+import { rosterQueryKey } from "@/features/workspace/useWorkspace";
 
 // =============================================================================
 // 채널 만들기 (AX-1a / MOMO-614): one place creates a channel, so the sidebar
@@ -24,7 +31,7 @@ export interface CreateChannelHandle {
   /** The last rejection, addressed to a field or to the form. */
   failure: CreateChannelFailure | null;
   /**
-   * Resolves true when the channel was created. It also moves the route to the new channel, unless `navigateIf`
+   * Resolves the created channel (null when it was not created). It also moves the route to the new channel, unless `navigateIf`
    * says no at the moment the answer arrives (#5058): a notification click that landed while the request was out
    * closed the dialog and put the person on its own destination, and a late answer must not pull them off it.
    * The channel is still in the list either way.
@@ -32,13 +39,14 @@ export interface CreateChannelHandle {
   create: (
     input: CreateChannelInput,
     options?: { navigateIf?: () => boolean }
-  ) => Promise<boolean>;
+  ) => Promise<Channel | null>;
   /** Drop the rejection because the input it was about has changed. */
   clearFailure: () => void;
 }
 
 export function useCreateChannel(): CreateChannelHandle {
-  const { workspaceId } = useSession();
+  const { session, workspaceId } = useSession();
+  const selfId = session.member.id;
   const client = useQueryClient();
   const navigate = useNavigate();
   const [pending, setPending] = useState(false);
@@ -48,7 +56,7 @@ export function useCreateChannel(): CreateChannelHandle {
     async (
       input: CreateChannelInput,
       options?: { navigateIf?: () => boolean }
-    ): Promise<boolean> => {
+    ): Promise<Channel | null> => {
       setPending(true);
       setFailure(null);
       try {
@@ -61,16 +69,24 @@ export function useCreateChannel(): CreateChannelHandle {
           current ? upsertChannel(current, created.channel) : [created.channel]
         );
         void client.invalidateQueries({ queryKey: ["channels", workspaceId] });
+        // 만든 사람은 서버에서 이미 이 채널의 멤버다. 머리의 멤버 수는 명부의 `channelIds` 로 세므로(ChatShell), 명부를
+        // 그대로 두면 다음 명부 읽기(30초 주기)까지 「멤버 0」으로 보였다(#5784). 채널 목록과 같은 순서로 명부에도 나를 먼저
+        // 넣고 다시 읽는다 — 다시 읽기가 늦거나 실패해도 만든 직후의 수는 1이다. 무효화는 진행 중인 옛 읽기를 취소하고 새로
+        // 읽으므로, 만들기 전에 나간 읽기가 늦게 와서 이 값을 덮지 않는다.
+        client.setQueryData<RosterMember[]>(rosterQueryKey(workspaceId), (current) =>
+          current ? withChannelMemberAdded(current, created.channel.id, selfId) : current
+        );
+        void client.invalidateQueries({ queryKey: rosterQueryKey(workspaceId) });
         if (options?.navigateIf?.() ?? true) navigate(`/c/${created.channel.id}`);
-        return true;
+        return created.channel;
       } catch (error) {
         setFailure(createChannelFailure(error));
-        return false;
+        return null;
       } finally {
         setPending(false);
       }
     },
-    [workspaceId, client, navigate]
+    [workspaceId, selfId, client, navigate]
   );
 
   const clearFailure = useCallback(() => setFailure(null), []);

@@ -126,6 +126,10 @@ export function useInvalidateReadStates(workspaceId: string) {
  *
  * `followedUnreadReplyCount` (#5667, ADR-0124 amendment 4) is the third: only a `GET` row carries it, and reading a
  * channel does not read the threads inside it, so a `PUT` answer must not drop the menu-bar dot's thread share (#5660).
+ *
+ * `historyFromSeq` (ADR-0177 amendment 2026-11-14 D18/D21) is the fourth: only a `GET` row carries the caller's read
+ * floor. Dropping it would turn a left DM's floor into "did not say" (the core holds its verdict) and, if every row lost
+ * it, make the server look like one without 「대화 나가기」.
  */
 export function mergeReadStateRow(current: ReadState, incoming: ReadState): ReadState {
   const merged: ReadState = { ...incoming };
@@ -137,6 +141,9 @@ export function mergeReadStateRow(current: ReadState, incoming: ReadState): Read
   }
   if (incoming.followedUnreadReplyCount === undefined && current.followedUnreadReplyCount !== undefined) {
     merged.followedUnreadReplyCount = current.followedUnreadReplyCount;
+  }
+  if (incoming.historyFromSeq === undefined && current.historyFromSeq !== undefined) {
+    merged.historyFromSeq = current.historyFromSeq;
   }
   return merged;
 }

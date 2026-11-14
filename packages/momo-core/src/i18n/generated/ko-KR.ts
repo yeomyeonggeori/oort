@@ -1119,6 +1119,87 @@ export const catalog: MessageCatalog = {
       "value": "서버에 닿지 못했어요. 아래는 마지막으로 확인된 작업 상태예요."
     }
   ],
+  "channels.dmLeave.action": [
+    {
+      "type": 0,
+      "value": "대화 나가기"
+    }
+  ],
+  "channels.dmLeave.cancel": [
+    {
+      "type": 0,
+      "value": "취소"
+    }
+  ],
+  "channels.dmLeave.confirm": [
+    {
+      "type": 0,
+      "value": "나가기"
+    }
+  ],
+  "channels.dmLeave.confirmBody": [
+    {
+      "type": 0,
+      "value": "내 화면에서 지금까지의 대화가 사라져요. "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " 님의 화면에는 그대로 남아요."
+    }
+  ],
+  "channels.dmLeave.confirmFinal": [
+    {
+      "type": 0,
+      "value": "나간 뒤에는 되돌릴 수 없어요."
+    }
+  ],
+  "channels.dmLeave.confirmRevive": [
+    {
+      "type": 0,
+      "value": "다시 글이 오면 그 글부터 새 대화로 보여요."
+    }
+  ],
+  "channels.dmLeave.confirmScheduled": [
+    {
+      "type": 0,
+      "value": "예약해 둔 메시지 "
+    },
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "개도 취소돼요."
+    }
+  ],
+  "channels.dmLeave.confirmTitle": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " 님과의 대화에서 나갈까요?"
+    }
+  ],
+  "channels.dmLeave.done": [
+    {
+      "type": 0,
+      "value": "대화에서 나갔어요."
+    }
+  ],
+  "channels.dmLeave.failed": [
+    {
+      "type": 0,
+      "value": "나가지 못했어요. 다시 시도해 주세요."
+    }
+  ],
   "common.feedback.unavailable": [
     {
       "type": 0,
@@ -4778,6 +4859,86 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "연결 끊김, 재연결 중입니다. 명부는 마지막으로 받은 상태이고, 새 대화는 연결이 돌아온 뒤 열립니다."
+    }
+  ],
+  "mobile.addMember.addHint": [
+    {
+      "type": 0,
+      "value": "채널에 추가해요."
+    }
+  ],
+  "mobile.addMember.adding": [
+    {
+      "type": 0,
+      "value": "추가 중"
+    }
+  ],
+  "mobile.addMember.close": [
+    {
+      "type": 0,
+      "value": "멤버 추가 닫기"
+    }
+  ],
+  "mobile.addMember.emptyWorkspace": [
+    {
+      "type": 0,
+      "value": "이 워크스페이스에 다른 멤버가 아직 없어요."
+    }
+  ],
+  "mobile.addMember.kindAgent": [
+    {
+      "type": 0,
+      "value": "에이전트"
+    }
+  ],
+  "mobile.addMember.kindHuman": [
+    {
+      "type": 0,
+      "value": "사람"
+    }
+  ],
+  "mobile.addMember.loading": [
+    {
+      "type": 0,
+      "value": "멤버 목록을 불러오는 중이에요."
+    }
+  ],
+  "mobile.addMember.noMatch": [
+    {
+      "type": 0,
+      "value": "「"
+    },
+    {
+      "type": 1,
+      "value": "query"
+    },
+    {
+      "type": 0,
+      "value": "」 검색 결과가 없어요."
+    }
+  ],
+  "mobile.addMember.present": [
+    {
+      "type": 0,
+      "value": "멤버"
+    }
+  ],
+  "mobile.addMember.searchLabel": [
+    {
+      "type": 0,
+      "value": "추가할 멤버 찾기"
+    }
+  ],
+  "mobile.addMember.searchPlaceholder": [
+    {
+      "type": 0,
+      "value": "이름이나 @핸들"
+    }
+  ],
+  "mobile.addMember.title": [
+    {
+      "type": 0,
+      "value": "멤버 추가"
     }
   ],
   "mobile.attachmentSave.failed": [
@@ -9511,6 +9672,32 @@ export const catalog: MessageCatalog = {
       "value": "키를 확인하는 중이에요."
     }
   ],
+  "timeline.addMember.createdDescription": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " 채널을 만들었어요. 비공개 채널은 추가한 멤버에게만 보여요."
+    }
+  ],
+  "timeline.addMember.createdDescriptionPublic": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " 채널을 만들었어요. 공개 채널이라 앞으로 워크스페이스에 들어오는 사람은 자동으로 들어와요."
+    }
+  ],
+  "timeline.addMember.later": [
+    {
+      "type": 0,
+      "value": "나중에"
+    }
+  ],
   "timeline.agentRail.open": [
     {
       "type": 1,
@@ -9565,6 +9752,18 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "결정하지 않으면 에이전트가 다시 제안해야 해요."
+    }
+  ],
+  "timeline.createChannel.privateDetail": [
+    {
+      "type": 0,
+      "value": "추가된 멤버에게만 보여요."
+    }
+  ],
+  "timeline.createChannel.publicDetail": [
+    {
+      "type": 0,
+      "value": "소유자나 관리자가 추가한 멤버가 들어와요. 앞으로 워크스페이스에 들어오는 사람은 자동으로 들어와요."
     }
   ],
   "timeline.edited.atDate": [
