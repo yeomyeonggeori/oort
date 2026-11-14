@@ -23194,8 +23194,19 @@ components:
           enum: [public, private]
         name:
           type: string
-          pattern: "^[a-z0-9][a-z0-9_-]*[a-z0-9]$|^[a-z0-9]$"
-          description: 1..80 chars; lowercased server-side.
+          description: >-
+            Normalized server-side, and the response carries the stored name
+            (ADR-0225 D1-D5): NFC; fullwidth U+FF01-U+FF5E folded to ASCII;
+            edge blanks (Unicode White_Space) dropped and each inner run of
+            blanks turned into one `-` (or dropped next to `-`/`_`); lowercased;
+            NFC again. The result must be 1..80 code points of letters,
+            numbers and combining marks of any script plus `-` and `_`,
+            starting with a letter or number and not ending with `-` or `_`;
+            control, format, private-use and invisible filler characters are
+            refused. A refusal is a 400 with one of two messages (length or
+            characters). No `pattern` is given because OpenAPI 3.0 cannot
+            state a Unicode-aware one; the shared test vectors are
+            docs/api/channel-name.vectors.json.
         topic:
           type: string
           description: At most 280 chars; blank collapses to absent.

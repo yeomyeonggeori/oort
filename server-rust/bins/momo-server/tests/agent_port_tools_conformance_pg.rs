@@ -8839,7 +8839,9 @@ async fn a_stale_or_unsound_channel_proposal_changes_nothing() {
         json!({"name": "ok-name", "memberHandles": ["Not A Handle"]}),
         json!({"name": "ok-name", "memberHandles": [gone_handle]}),
         json!({"name": "ok-name", "memberHandles": [Uuid::new_v4().to_string()]}),
-        json!({"name": "UPPER CASE"}),
+        // ADR-0225: a blank now folds to `-` ("UPPER CASE" is `upper-case`);
+        // a full stop is still a refused name.
+        json!({"name": "UPPER.CASE"}),
     ] {
         let (status, refused) = try_propose_action_3706(
             &client,
