@@ -919,21 +919,15 @@ interface RefreshResponse {
 // cannot reach the server fails as a `NetworkError` within seconds instead of
 // pending forever, which is what made a `.local` address look like a hung app
 // rather than a wrong address (MOMO-609 / G-1).
-//
-// `base` is the server the credential in `token` (or in the body) belongs to. A
-// caller that read the credential and then awaits anything before sending passes
-// the base it read in the same tick: the stored server can change in between
-// (#5785), and the request must still go where the credential came from.
 function rawRequest(
   path: string,
   init: RequestInit,
-  token: string | null,
-  base: string = apiBase()
+  token: string | null
 ): Promise<HttpResponse> {
   const headers = new Headers(init.headers);
   headers.set("Content-Type", "application/json");
   if (token) headers.set("Authorization", `Bearer ${token}`);
-  return fetchWithDeadline(`${base}${path}`, { ...init, headers });
+  return fetchWithDeadline(`${apiBase()}${path}`, { ...init, headers });
 }
 
 function parseError(res: HttpResponse): ApiError {
@@ -992,8 +986,6 @@ interface Rotation {
    * through the host.
    */
   handle?: boolean;
-  /** The server that minted `pair` (#5785): a pair is revoked there and nowhere else. */
-  base?: string;
 }
 
 // ---- refresh proof (#3106, ADR-0146 D-7 증보 #3079) ----------------------------
@@ -1093,17 +1085,11 @@ async function refreshAttempt(
   refreshToken: string,
   identity: { workspaceId: string; memberId: string } | null,
   skewMs: number,
-  bind: boolean,
-  base: string
+  bind = false
 ): Promise<RefreshAttempt> {
   const session = coreSession();
   if (identity && session.refreshThroughHost) {
-    const answer = await session.refreshThroughHost({
-      ...identity,
-      skewMs,
-      apiBase: base,
-      ...(bind ? { bind } : {}),
-    });
+    const answer = await session.refreshThroughHost({ ...identity, skewMs, ...(bind ? { bind } : {}) });
     if (answer) {
       const pair =
         answer.status === 200 && answer.accessToken && answer.refreshToken
@@ -1141,8 +1127,7 @@ async function refreshAttempt(
       method: "POST",
       body: JSON.stringify(deviceProof ? { refreshToken, deviceProof } : { refreshToken }),
     },
-    null,
-    base
+    null
   );
   if (res.ok) {
     return {
@@ -1172,13 +1157,12 @@ async function refreshAttempt(
 async function refreshWithRetries(
   refreshToken: string,
   identity: { workspaceId: string; memberId: string } | null,
-  bind: boolean,
-  base: string
+  bind = false
 ): Promise<{ pair: RefreshResponse; handle: boolean } | null> {
   let skewMs = 0;
   let plainRetried = false;
   for (let attempt = 1; attempt <= MAX_REFRESH_ATTEMPTS; attempt++) {
-    const answer = await refreshAttempt(refreshToken, identity, skewMs, bind, base);
+    const answer = await refreshAttempt(refreshToken, identity, skewMs, bind);
     if (answer.pair) return { pair: answer.pair, handle: answer.handle };
     const retry = refreshRetry(answer.status, answer.code, answer.proved, plainRetried);
     if (retry === "sign-out") return null;
@@ -1242,16 +1226,13 @@ function rotateSession(): Promise<Rotation> {
  */
 async function rotateOnce(): Promise<Rotation> {
   const refreshToken = coreSession().getRefreshToken();
-  // The server that token belongs to, read in the same tick: every attempt of
-  // this rotation (and the revocation of a pair nobody holds) goes there.
-  const base = apiBase();
   // Having no token to present is not a network problem: there is nothing
   // to rotate and nothing to keep waiting for.
   if (!refreshToken) return { outcome: "rejected", pair: null };
   rotationPosted = true;
   const bind = nextRotationBinds;
   nextRotationBinds = false;
-  const rotated = await refreshWithRetries(refreshToken, identityOf(), bind, base);
+  const rotated = await refreshWithRetries(refreshToken, identityOf(), bind);
   if (!rotated) {
     coreSession().markAuthExpired();
     return { outcome: "rejected", pair: null };
@@ -1267,12 +1248,12 @@ async function rotateOnce(): Promise<Rotation> {
     // Nobody will hold this pair. A logout that joined this rotation revokes it
     // itself; otherwise end it here so it does not live on the server for 30
     // days (#3072 review M1).
-    if (!rotationJoinedByLogout) void revokePair(pair, handle, base);
+    if (!rotationJoinedByLogout) void revokePair(pair, handle);
     // Nothing is proven about the session now in the store — it is not ours.
-    return { outcome: "unreachable", pair, handle, base };
+    return { outcome: "unreachable", pair, handle };
   }
   coreSession().applyRotation(pair.accessToken, pair.refreshToken);
-  return { outcome: "rotated", pair, handle, base };
+  return { outcome: "rotated", pair, handle };
 }
 
 /**
@@ -1280,7 +1261,7 @@ async function rotateOnce(): Promise<Rotation> {
  * token: the server would refuse the whole logout over it (it validates the
  * refresh half first), so only the access half goes.
  */
-async function revokePair(pair: RefreshResponse, handle: boolean, base: string): Promise<void> {
+async function revokePair(pair: RefreshResponse, handle = false): Promise<void> {
   try {
     await rawRequest(
       "/v1/auth/logout",
@@ -1288,8 +1269,7 @@ async function revokePair(pair: RefreshResponse, handle: boolean, base: string):
         method: "POST",
         body: JSON.stringify(handle ? {} : { refreshToken: pair.refreshToken }),
       },
-      pair.accessToken,
-      base
+      pair.accessToken
     );
   } catch {
     // The pair expires on its own; there is no one to tell.
@@ -1814,43 +1794,8 @@ export interface LogoutOptions {
  * captured access half, so `beforeRevoke` would be refused too. So the network
  * half joins the rotation and uses what it minted (#2677 review M1). When the
  * rotation fails, the captured pair is all there is, as before.
- *
- * Every request this makes — the revocation, the host's revocation, the
- * rotation an expired access token needs — goes to the server the session
- * belonged to when `logout()` was called, read before the first `await`
- * (#5785). Whatever changes the stored server afterwards (the sign-in screen
- * a hand-off opens) never redirects them.
  */
-export function logout(options: LogoutOptions = {}): Promise<void> {
-  const run = endSession(options);
-  logoutsInFlight.add(run);
-  const done = () => {
-    logoutsInFlight.delete(run);
-  };
-  void run.then(done, done);
-  return run;
-}
-
-const logoutsInFlight = new Set<Promise<void>>();
-
-/**
- * The server half of every `logout()` still running, or null when none is.
- * Never rejects. Whoever is about to point this device at another server waits
- * on it first (#5785): the leaving session's requests finish where they began.
- */
-export function pendingLogout(): Promise<void> | null {
-  if (logoutsInFlight.size === 0) return null;
-  return Promise.all([...logoutsInFlight]).then(
-    () => undefined,
-    () => undefined
-  );
-}
-
-async function endSession(options: LogoutOptions): Promise<void> {
-  // The server this session belongs to. Read first, with the tokens below, in
-  // the same tick: nothing after an `await` re-reads it. A pair a joined
-  // rotation minted is revoked where that rotation sent its refresh.
-  let base = apiBase();
+export async function logout(options: LogoutOptions = {}): Promise<void> {
   // Join only a rotation that has actually presented its token. One still
   // waiting for another tab's lock has spent nothing: once the store is wiped
   // below it finds no token and never posts (#3072 review M1).
@@ -1863,11 +1808,10 @@ async function endSession(options: LogoutOptions): Promise<void> {
   coreSession().clearSession();
   if (rotation) {
     // Never rejects: the rotation turns its own failures into an outcome.
-    const { pair, base: mintedAt } = await rotation;
+    const { pair } = await rotation;
     if (pair) {
       access = pair.accessToken;
       refresh = pair.refreshToken;
-      if (mintedAt !== undefined) base = mintedAt;
     }
   }
   if (!access) return; // nothing the server will accept a revocation for
@@ -1883,14 +1827,7 @@ async function endSession(options: LogoutOptions): Promise<void> {
   const session = coreSession();
   if (session.revokeThroughHost && identity) {
     try {
-      if (
-        await session.revokeThroughHost({
-          accessToken: access,
-          refreshToken: refresh,
-          ...identity,
-          apiBase: base,
-        })
-      )
+      if (await session.revokeThroughHost({ accessToken: access, refreshToken: refresh, ...identity }))
         return;
     } catch {
       // Best effort, like every revocation here.
@@ -1904,8 +1841,7 @@ async function endSession(options: LogoutOptions): Promise<void> {
         method: "POST",
         body: JSON.stringify(refreshToken ? { refreshToken } : {}),
       },
-      accessToken,
-      base
+      accessToken
     );
   try {
     const res = await revoke(access, refresh);
@@ -1916,7 +1852,7 @@ async function endSession(options: LogoutOptions): Promise<void> {
       // is already wiped, so this rotation is carried by locals only — with
       // the refresh key's proof like every refresh (#3106): under `require`
       // an unproven one would be refused and the lineage would live on.
-      const rotated = await refreshWithRetries(refresh, identity, false, base);
+      const rotated = await refreshWithRetries(refresh, identity);
       if (rotated && !rotated.handle) {
         await revoke(rotated.pair.accessToken, rotated.pair.refreshToken);
       }

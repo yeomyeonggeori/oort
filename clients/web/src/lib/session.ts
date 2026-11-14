@@ -487,9 +487,7 @@ export async function refreshThroughHost(
   // Anything still queued (a clear) lands first.
   await flushKeychain();
   if (storageMode !== "keychain") return null;
-  // `request.apiBase` is the server the core read with the session; the store's
-  // current choice may already name another (#5785).
-  return desktopSession.refreshAttempt({ ...request, apiBase: request.apiBase });
+  return desktopSession.refreshAttempt({ apiBase: apiBase(), ...request });
 }
 
 /**
@@ -502,10 +500,10 @@ export async function revokeThroughHost(request: HostRevokeRequest): Promise<boo
   // A raw token is one the core itself rotated to (the keychain never
   // confirmed the session) — it is not in the shell; revoke it directly.
   if (request.refreshToken && !isShellHandle(request.refreshToken)) return false;
-  const { accessToken, workspaceId, memberId, apiBase: base } = request;
+  const { accessToken, workspaceId, memberId } = request;
   try {
     await within(
-      desktopSession.revoke({ apiBase: base, accessToken, workspaceId, memberId }),
+      desktopSession.revoke({ apiBase: apiBase(), accessToken, workspaceId, memberId }),
       20_000,
       false
     );

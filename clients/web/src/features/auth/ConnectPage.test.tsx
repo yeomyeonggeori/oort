@@ -6,7 +6,6 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vite
 import {
   ApiError,
   logout,
-  pendingLogout,
   type JoinResponse,
   type LoginResponse,
   type Member,
@@ -391,7 +390,6 @@ describe("D0 환영 (#2808 OB2-2)", () => {
       )
     );
     const leaving = logout();
-    expect(pendingLogout()).not.toBeNull();
     window.history.replaceState(
       null,
       "",
