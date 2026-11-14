@@ -17,6 +17,8 @@ import {SheetHeader} from '../../design/SheetChrome';
 import {ConfirmStep, GroupCard, ListRow, RowStatusIcon, SheetScroll} from '../../design/sheetParts';
 import {useStyles} from '../../design/theme';
 import {font, line, type Palette} from '../../design/tokens';
+import {DmLeaveConfirm} from '../sidebar/DmLeaveConfirm';
+import type {DmLeaveStepView} from '../sidebar/useChannelRowActions';
 import {
   CONVERSATION_DELEGATE_LABEL,
   CONVERSATION_INFO_LABEL,
@@ -32,6 +34,8 @@ import {
 //                     정보는 `onOpenInfo` 가 있을 때만, 작업 맡기기는 일대일 에이전트 DM 에서만 선다. 고정은 늘 선다.
 //   카드 2 (알림)     알림 켜짐 / 알림 꺼짐 — 코어 표의 낱말.
 //   카드 3 (떠나기)   DM 은 대화 닫기, 채널은 채널 나가기 — 둘은 한 대화에 함께 서지 않는다. 채널 나가기만 위험색이고 확인 단계를 지난다.
+//   카드 4 (대화 나가기) 사람끼리의 1:1 에만 — 맨 아래 따로 선 카드, 위험색, 확인 단계(ADR-0177 증보 2026-11-14 D21). 「목록에서 숨기기」가
+//                     안 서는 때(안 읽음이 있다)에도 선다.
 //
 // ## 닫는 길이 행마다 다르다 (`phone-sheets.md` §2 「행동은 시트가 내려간 뒤에」)
 //
@@ -63,6 +67,9 @@ export function ConversationMenuSheet({
   onRun,
   onConfirmLeave,
   onCancelLeave,
+  dmLeave = null,
+  onConfirmDmLeave,
+  onCancelDmLeave,
   onClose,
 }: {
   /** 대화의 이름 — DM 은 상대 이름, 채널은 `#` 없는 이름(머리의 `# ` 는 여기서 붙인다). */
@@ -89,6 +96,10 @@ export function ConversationMenuSheet({
   onRun: (key: ChannelActionKey) => void;
   onConfirmLeave: () => void;
   onCancelLeave: () => void;
+  /** 1:1 「대화 나가기」 확인 단계(훅의 `dmLeave`). 있으면 메뉴 대신 선다. */
+  dmLeave?: DmLeaveStepView | null;
+  onConfirmDmLeave?: () => void;
+  onCancelDmLeave?: () => void;
   onClose: () => void;
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
@@ -96,6 +107,8 @@ export function ConversationMenuSheet({
   const mute = items.find(item => item.key === 'mute');
   // DM 은 「목록에서 숨기기」, 채널은 「채널 나가기」 — 코어 표가 한 대화에 둘을 함께 내지 않는다(`isDm`).
   const leaving = items.find(item => item.key === 'close-dm' || item.key === 'leave');
+  // 「대화 나가기」는 숨기기와 따로 선다(D21) — 숨기기가 안 서는 때(안 읽음)에도 선다.
+  const leavingDm = items.find(item => item.key === 'leave-dm');
 
   const actionRow = (item: ChannelActionItem): React.JSX.Element => {
     const busy = isPending(item.key);
@@ -128,7 +141,14 @@ export function ConversationMenuSheet({
         closeTestID="conversation-menu-close"
       />
       <SheetScroll testID="conversation-menu-scroll">
-        {confirmingLeave ? (
+        {dmLeave !== null && onConfirmDmLeave && onCancelDmLeave ? (
+          <DmLeaveConfirm
+            step={dmLeave}
+            onConfirm={onConfirmDmLeave}
+            onCancel={onCancelDmLeave}
+            testID="conversation-menu-dm-leave-confirm"
+          />
+        ) : confirmingLeave ? (
           <ConfirmStep
             testID="conversation-menu-leave-confirm"
             headline={CHANNEL_LEAVE_CONFIRM_TITLE}
@@ -185,6 +205,7 @@ export function ConversationMenuSheet({
             </GroupCard>
             {mute !== undefined ? <GroupCard>{actionRow(mute)}</GroupCard> : null}
             {leaving !== undefined ? <GroupCard>{actionRow(leaving)}</GroupCard> : null}
+            {leavingDm !== undefined ? <GroupCard>{actionRow(leavingDm)}</GroupCard> : null}
           </>
         )}
       </SheetScroll>

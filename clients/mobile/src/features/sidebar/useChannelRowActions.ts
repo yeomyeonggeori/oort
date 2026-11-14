@@ -1,11 +1,20 @@
 import {
   closeDm,
+  leaveDm,
   removeChannelMember,
   setChannelNotificationPref,
   uuidEq,
   type Channel,
 } from '@momo/core/lib/api';
 import type {ChannelActionKey} from '@momo/core/features/channels/actionModel';
+import {
+  DM_LEAVE_KEYS,
+  dmLeaveScheduledCount,
+  dmLeaveSeenSeq,
+  runDmLeaveCleanup,
+  settleDmLeaveFailure,
+} from '@momo/core/features/channels/dmLeave';
+import {listAllScheduledMessages} from '@momo/core/features/scheduled/api';
 import {
   CHANNEL_COPY_FAILURE,
   CHANNEL_MARK_READ_FAILURE,
@@ -22,7 +31,9 @@ import {copyText, COPY_RECEIPT_MS} from '../conversation/copy';
 import {useMarkRead} from '../inbox/useInbox';
 import {applyClosureToReadStates, workspaceKeys} from '../workspace/queries';
 import {haptics} from '../../lib/haptics';
+import {useFormatMessage} from '../../i18n/useFormatMessage';
 import {apiBase} from '../../storage/serverBase';
+import {heldThreadRoots, phoneDmLeaveCleanupPort} from './dmLeaveCleanup';
 import {
   NOTHING_COPIED,
   PHONE_CHANNEL_ACTION_KEYS,
@@ -45,7 +56,60 @@ import {
 // 알림은 채널을 제거하지 않으므로 먼저 상태를 바꾸고 실패하면 되돌린다. 읽음·안 읽음·나가기는 서버가 답한 **뒤에** 캐시를 건드린다. 웹 `leaveMutation`
 // 머리말이 적은 이유가 그대로다: 시트를 이고 있는 행이 낙관 편집으로 언마운트되면 「나가는 중」과
 // 실패 문장이 화면에 도달하지 못한다.
+//
+// ## 1:1 「대화 나가기」 (ADR-0177 증보 2026-11-14 D16·D21, #5826)
+//
+// 채널 나가기와 같은 자리(시트 안 확인 단계)지만 상태는 따로 든다(`dmLeave`) — 문장·요청·성공 뒤 정리가 다르다.
+//
+//   1. 행을 누르면 예약 메시지 수를 **먼저** 센다(행이 진행 중으로 선다, 늦어도 `DM_LEAVE_COUNT_WAIT_MS`). 단계가 선 뒤에 「예약 N개」 줄이
+//      늦게 와서 단추가 손가락 밑에서 밀리지 않게 한다. 세지 못하면 그 줄 없이 선다(서버는 그래도 취소한다).
+//   2. `seenSeq` 는 단계가 **설 때** 얼린다(D16): 확인 단계를 보는 사이에 온 글은 하한 위에 남아 새 대화의 첫 글이 된다.
+//   3. 단계가 선 뒤 `DM_LEAVE_CONFIRM_ARM_MS` 동안은 확정 단추의 눌림을 받지 않는다 — 폰은 두 번 누름이 흔하고, 메뉴 행을 누른 자리에
+//      확정 단추가 설 수 있다. 진행 중에는 취소·확정 모두 잠긴다.
+//   4. 204 뒤의 정리(`runDmLeaveCleanup`)는 화면이 그 사이 사라졌어도 돈다 — 서버는 이미 끝났다. 화면 상태만 마운트를 본다.
+//   5. 실패는 확인 단계 안에서 코어 문장 한 줄이고 아무것도 바뀌지 않는다. 404·405·501 은 코어가 이 워크스페이스의 메뉴를 접는다.
 // =============================================================================
+
+/** 예약 메시지 수를 기다리는 상한. 넘으면 그 줄 없이 확인 단계가 선다. */
+export const DM_LEAVE_COUNT_WAIT_MS = 1500;
+
+/** 확인 단계가 선 뒤 확정 단추가 눌림을 받기 시작하기까지(두 번 누름이 확정을 누르지 않게). */
+export const DM_LEAVE_CONFIRM_ARM_MS = 500;
+
+/** 화면이 그리는 「대화 나가기」 확인 단계. */
+export interface DmLeaveStepView {
+  /** 확인 창 제목·본문의 이름(상대의 표시 이름). */
+  name: string;
+  /** 그 방의 내 예약(`pending`+`failed`) 수. 0 이면 그 줄이 없다. */
+  scheduledCount: number;
+  pending: boolean;
+  error: string | null;
+}
+
+interface DmLeaveStep extends DmLeaveStepView {
+  target: ChannelRowTarget;
+  seenSeq: number;
+  shownAtMs: number;
+}
+
+async function scheduledCountWithin(
+  workspaceId: string,
+  channelId: string,
+  waitMs: number,
+): Promise<number> {
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  const count = listAllScheduledMessages(workspaceId, {channelId, status: 'open'})
+    .then(rows => dmLeaveScheduledCount(rows, channelId))
+    .catch(() => 0);
+  const timeout = new Promise<number>(resolve => {
+    timer = setTimeout(() => resolve(0), waitMs);
+  });
+  try {
+    return await Promise.race([count, timeout]);
+  } finally {
+    if (timer !== null) clearTimeout(timer);
+  }
+}
 
 /**
  * 시트를 연 손짓. 행을 **길게 누르기**는 「잡혔다」는 무거운 한 번(`medium`)이고, 단추 **탭**(대화 머리의 ⋮, #4319)은 + 메뉴·AI
@@ -63,12 +127,16 @@ export interface ChannelRowActions {
   /** 항목 자리에서 하는 말. 토스트가 아니다. */
   error: string | null;
   leave: {pending: boolean; error: string | null};
+  /** 1:1 「대화 나가기」 확인 단계(D21). 없으면 `null`. */
+  dmLeave: DmLeaveStepView | null;
   /** `gesture` 를 생략하면 길게 누르기다(사이드바 행이 그대로 `onOpenActions={open}` 으로 넘긴다). */
   open: (target: ChannelRowTarget, gesture?: RowActionsOpenGesture) => void;
   close: () => void;
   run: (target: ChannelRowTarget, key: ChannelActionKey) => void;
   confirmLeave: () => void;
   cancelLeave: () => void;
+  confirmDmLeave: () => void;
+  cancelDmLeave: () => void;
 }
 
 function announce(message: string): void {
@@ -84,8 +152,11 @@ export function useChannelRowActions(
   selfMemberId: string,
   /** 채널을 나간 뒤·DM 을 닫은 뒤(서버가 답한 뒤)에 부른다. 열려 있던 대화를 걷는 일은 부르는 쪽(셸)이 한다. */
   onLeft?: (channelId: string) => void,
+  /** 1:1 대화에서 나간 뒤(204) 그 한 줄 알림(D21 「대화에서 나갔어요.」)을 셸의 영수증 자리에 세운다. */
+  onDmLeftReceipt?: (message: string) => void,
 ): ChannelRowActions {
   const client = useQueryClient();
+  const formatMessage = useFormatMessage();
   const markRead = useMarkRead();
   const [active, setActive] = useState<ChannelRowTarget | null>(null);
   const [confirmingLeave, setConfirmingLeave] = useState(false);
@@ -94,6 +165,9 @@ export function useChannelRowActions(
   const [error, setError] = useState<string | null>(null);
   const [leavePending, setLeavePending] = useState(false);
   const [leaveError, setLeaveError] = useState<string | null>(null);
+  const [dmLeave, setDmLeave] = useState<DmLeaveStep | null>(null);
+  // 예약 수를 세는 사이 시트가 닫히거나 다른 행이 열리면 늦게 온 답이 단계를 세우지 않게 한다.
+  const dmLeaveAsk = useRef(0);
   const receiptTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const mounted = useRef(true);
   const muteInFlight = useRef(new Set<string>());
@@ -115,6 +189,8 @@ export function useChannelRowActions(
     setCopied(NOTHING_COPIED);
     setError(null);
     setLeaveError(null);
+    dmLeaveAsk.current += 1;
+    setDmLeave(null);
   }, []);
 
   const open = useCallback(
@@ -311,11 +387,42 @@ export function useChannelRowActions(
           setConfirmingLeave(true);
           return;
         }
+        case 'leave-dm': {
+          // 1:1 「대화 나가기」(D21): 확인 단계로 간다. 내밀지 않은 대상(옛 서버·에이전트·그룹)은 로터로 와도 아무 일이 없다.
+          if (target.leaveOffered !== true || target.channel.kind !== 'dm') return;
+          if (pending.has(key)) return;
+          reset();
+          const ask = dmLeaveAsk.current;
+          // D16: 이 기기가 그 대화에 대해 든 가장 큰 seq - 단계가 설 때 얼린다(머리말 2).
+          const seenSeq = dmLeaveSeenSeq(target.readState ?? undefined, target.held?.().maxSeq);
+          setActive(target);
+          setPending(previous => new Set(previous).add(key));
+          void scheduledCountWithin(workspaceId, channel.id, DM_LEAVE_COUNT_WAIT_MS).then(count => {
+            if (!mounted.current) return;
+            setPending(previous => {
+              const next = new Set(previous);
+              next.delete(key);
+              return next;
+            });
+            if (dmLeaveAsk.current !== ask) return;
+            haptics.warning();
+            setDmLeave({
+              target,
+              name: target.title,
+              seenSeq,
+              scheduledCount: count,
+              pending: false,
+              error: null,
+              shownAtMs: Date.now(),
+            });
+          });
+          return;
+        }
         default:
           return;
       }
     },
-    [client, failed, flashCopied, markRead, onLeft, reset, track, workspaceId],
+    [client, failed, flashCopied, markRead, onLeft, pending, reset, track, workspaceId],
   );
 
   const confirmLeave = useCallback(() => {
@@ -351,6 +458,55 @@ export function useChannelRowActions(
     setLeaveError(null);
   }, []);
 
+  const confirmDmLeave = useCallback(() => {
+    const step = dmLeave;
+    if (step === null || step.pending) return;
+    // 머리말 3: 단계가 선 직후의 눌림(메뉴 행을 누른 손가락의 둘째 누름)은 확정이 아니다.
+    if (Date.now() - step.shownAtMs < DM_LEAVE_CONFIRM_ARM_MS) return;
+    const {target, seenSeq} = step;
+    const channelId = target.channel.id;
+    // 스레드 초안의 뿌리는 요청 **전에** 모은다 - 나간 뒤에는 서버가 하한 아래 뿌리를 내려 주지 않는다(`dmLeaveCleanup.ts`).
+    const threadRootIds = heldThreadRoots(
+      client,
+      workspaceId,
+      channelId,
+      target.held?.().messageIds ?? [],
+    );
+    setDmLeave({...step, pending: true, error: null});
+    void leaveDm(workspaceId, channelId, seenSeq)
+      .then(() => {
+        // 서버는 끝났다(204). 정리는 화면이 사라졌어도 돈다(머리말 4).
+        runDmLeaveCleanup(
+          phoneDmLeaveCleanupPort({client, workspaceId, selfMemberId, threadRootIds}),
+          {channelId, seenSeq},
+        );
+        void client.invalidateQueries({queryKey: workspaceKeys.readState(workspaceId)});
+        const done = formatMessage(DM_LEAVE_KEYS.done);
+        onDmLeftReceipt?.(done);
+        if (mounted.current) succeeded(done);
+        // 보고 있던 대화를 걷는다(셸·대화 화면이 열린 대화인지 본다).
+        onLeft?.(channelId);
+      })
+      .catch(cause => {
+        settleDmLeaveFailure(workspaceId, cause);
+        if (!mounted.current) return;
+        haptics.error();
+        // 아무것도 바뀌지 않았다. 단계는 그대로 서 있고 이유를 말한다 - 「나가기」를 다시 누르면 다시 시도한다.
+        setDmLeave(previous =>
+          previous === null
+            ? previous
+            : {...previous, pending: false, error: formatMessage(DM_LEAVE_KEYS.failed)},
+        );
+      });
+  }, [client, dmLeave, formatMessage, onDmLeftReceipt, onLeft, selfMemberId, succeeded, workspaceId]);
+
+  const cancelDmLeave = useCallback(() => {
+    // 진행 중에는 취소가 잠긴다 - 요청은 이미 나갔다.
+    if (dmLeave === null || dmLeave.pending) return;
+    dmLeaveAsk.current += 1;
+    setDmLeave(null);
+  }, [dmLeave]);
+
   const isPending = useCallback((key: ChannelActionKey) => pending.has(key), [pending]);
 
   return {
@@ -360,10 +516,21 @@ export function useChannelRowActions(
     isPending,
     error,
     leave: {pending: leavePending, error: leaveError},
+    dmLeave:
+      dmLeave === null
+        ? null
+        : {
+            name: dmLeave.name,
+            scheduledCount: dmLeave.scheduledCount,
+            pending: dmLeave.pending,
+            error: dmLeave.error,
+          },
     open,
     close,
     run,
     confirmLeave,
     cancelLeave,
+    confirmDmLeave,
+    cancelDmLeave,
   };
 }
