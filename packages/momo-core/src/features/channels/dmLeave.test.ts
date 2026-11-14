@@ -119,8 +119,8 @@ describe("옛 서버 판별 (D21)", () => {
     expect(dmLeaveMode({ workspaceId: WS, rows: [row()] })).toBe("legacy");
   });
 
-  it("나가기 경로가 404·405·501 로 접힌 워크스페이스는 투영이 뭐라 하든 옛 서버다 - 그 워크스페이스만", () => {
-    for (const status of [404, 405, 501]) {
+  it("나가기 경로가 405·501 로 접힌 워크스페이스는 투영이 뭐라 하든 옛 서버다 - 그 워크스페이스만", () => {
+    for (const status of [405, 501]) {
       resetDmLeaveFoldForTest();
       expect(settleDmLeaveFailure(WS.toUpperCase(), new ApiError(status, "gone"))).toBe("absent");
       expect(dmLeaveFolded(WS)).toBe(true);
@@ -257,8 +257,8 @@ describe("내가 본 seq 와 하한 (D16·D22)", () => {
 });
 
 describe("응답 갈래 (D16·D21)", () => {
-  it("404·405·501 은 absent, 409 dm_leave_unavailable 은 unavailable, 그 밖은 failed", () => {
-    expect(dmLeaveFailure(new ApiError(404, "x"))).toBe("absent");
+  it("405·501 은 absent, 404 는 missing, 409 dm_leave_unavailable 은 unavailable, 그 밖은 failed", () => {
+    expect(dmLeaveFailure(new ApiError(404, "x"))).toBe("missing");
     expect(dmLeaveFailure(new ApiError(405, "x"))).toBe("absent");
     expect(dmLeaveFailure(new ApiError(501, "x"))).toBe("absent");
     expect(dmLeaveFailure(new ApiError(409, "x", "dm_leave_unavailable"))).toBe("unavailable");
@@ -268,11 +268,21 @@ describe("응답 갈래 (D16·D21)", () => {
     expect(dmLeaveFailure(new TypeError("network"))).toBe("failed");
   });
 
-  it("접는 것은 absent 뿐이다 - 409·5xx·네트워크 뒤에도 메뉴는 그대로", () => {
+  it("접는 것은 absent 뿐이다 - 404·409·5xx·네트워크 뒤에도 메뉴는 그대로", () => {
     settleDmLeaveFailure(WS, new ApiError(409, "x", "dm_leave_unavailable"));
+    settleDmLeaveFailure(WS, new ApiError(404, "x"));
     settleDmLeaveFailure(WS, new ApiError(503, "x"));
     settleDmLeaveFailure(WS, new TypeError("network"));
     expect(dmLeaveFolded(WS)).toBe(false);
+  });
+
+  it("한 대화의 404 는 같은 워크스페이스의 다른 DM 메뉴를 닫지 않는다 (#5824 검수 r1 M3)", () => {
+    const rows = [row()];
+    expect(settleDmLeaveFailure(WS, new ApiError(404, "not found"))).toBe("missing");
+    expect(dmLeaveMode({ workspaceId: WS, rows })).toBe("server");
+    expect(
+      dmLeaveOffered({ mode: dmLeaveMode({ workspaceId: WS, rows }), phase: "ready", channel: dm(), directory: makeDirectory(ROSTER), selfMemberId: ME })
+    ).toBe(true);
   });
 });
 
@@ -330,7 +340,7 @@ describe("확인 창 (D21)", () => {
 
 /** 성공 뒤 정리를 기록하는 가짜 문. 단계마다 이 대화의 것만 지우는지 본다. */
 function recordingPort(throwAt?: DmLeaveCleanupStep) {
-  const calls: [DmLeaveCleanupStep, string][] = [];
+  const calls: ([DmLeaveCleanupStep, string] | [DmLeaveCleanupStep, string, readonly string[]])[] = [];
   let readRow: ReadState = row({ latestSeq: 10, lastReadSeq: 3, unreadCount: 7 });
   const port: DmLeaveCleanupPort = {
     updateReadRow(channelId, update) {
@@ -350,9 +360,13 @@ function recordingPort(throwAt?: DmLeaveCleanupStep) {
       calls.push(["dropInboxItems", channelId]);
       if (throwAt === "dropInboxItems") throw new Error("boom");
     },
-    clearDrafts: (channelId) => {
-      calls.push(["clearDrafts", channelId]);
+    clearDrafts: (channelId, rootIds) => {
+      calls.push(["clearDrafts", channelId, rootIds]);
       if (throwAt === "clearDrafts") throw new Error("boom");
+    },
+    clearAttachmentTrays: (channelId, rootIds) => {
+      calls.push(["clearAttachmentTrays", channelId, rootIds]);
+      if (throwAt === "clearAttachmentTrays") throw new Error("boom");
     },
     forgetFailedSends: (channelId) => {
       calls.push(["forgetFailedSends", channelId]);
@@ -363,15 +377,17 @@ function recordingPort(throwAt?: DmLeaveCleanupStep) {
 }
 
 describe("나가기 성공 뒤 정리 (D17 기기 캐시·쓰던 초안 줄)", () => {
-  it("투영 행 → 이력·스레드 → 검색 → 받은함 → 초안 → 못 보낸 글을 그 대화에 대해서만 차례대로 지운다", () => {
+  it("투영 행 → 이력·스레드 → 검색 → 받은함 → 초안·답글 초안 → 첨부 트레이 → 못 보낸 글을 그 대화에 대해서만 차례대로 지운다", () => {
     const { port, calls, readRow } = recordingPort();
-    expect(runDmLeaveCleanup(port, { channelId: DM_ID, seenSeq: 10 })).toEqual([]);
+    expect(runDmLeaveCleanup(port, { channelId: DM_ID, seenSeq: 10, rootIds: ["ROOT-A", "root-b", "root-a"] })).toEqual([]);
     expect(calls).toEqual([
       ["updateReadRow", DM_ID],
       ["dropTimeline", DM_ID],
       ["dropSearchResults", DM_ID],
       ["dropInboxItems", DM_ID],
-      ["clearDrafts", DM_ID],
+      // 답글 초안·스레드 트레이는 뿌리 글 id 로만 찾는다(#5824 검수 r1 M4): 화면이 PUT 전에 모은 id 가 그대로 닿는다(중복·대소문자 정리).
+      ["clearDrafts", DM_ID, ["root-a", "root-b"]],
+      ["clearAttachmentTrays", DM_ID, ["root-a", "root-b"]],
       ["forgetFailedSends", DM_ID],
     ]);
     expect(calls.map(([step]) => step)).toEqual([...DM_LEAVE_CLEANUP_STEPS]);
@@ -428,7 +444,7 @@ describe("보내기 재시도의 409 message_before_leave (D17 쓰기 길 표)",
 describe("접기는 메뉴만 닫는다 (D18·D21)", () => {
   it("나가기 경로가 접혀도 투영이 하한을 싣는 한 보임 판정은 하한을 계속 읽는다 - 이미 나간 대화가 되살아나지 않는다", () => {
     const rows = [row({ historyFromSeq: 11, closedAtSeq: 10 })];
-    settleDmLeaveFailure(WS, new ApiError(404, "not found"));
+    settleDmLeaveFailure(WS, new ApiError(405, "no route"));
     expect(dmLeaveMode({ workspaceId: WS, rows })).toBe("legacy");
     expect(dmLeaveOffered({ mode: dmLeaveMode({ workspaceId: WS, rows }), phase: "ready", channel: dm(), directory: makeDirectory(ROSTER), selfMemberId: ME })).toBe(false);
     expect(readProjectionCarriesLeave(rows)).toBe(true);

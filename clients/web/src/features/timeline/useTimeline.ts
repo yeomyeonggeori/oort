@@ -28,7 +28,7 @@ import {
 } from "@/lib/realtime";
 import { subscribeRestOutcome } from "@momo/core/lib/http";
 import { causeOfFailure } from "@momo/core/features/connection/failure";
-import { isMessageBeforeLeave, pendingAfterSendFailure } from "@momo/core/features/channels/dmLeave";
+import { isBelowHistoryFloor, isMessageBeforeLeave, pendingAfterSendFailure } from "@momo/core/features/channels/dmLeave";
 import type { ConnectionCause } from "@momo/core/features/connection/model";
 import { deviceOnlineNow } from "@/lib/deviceOnline";
 import {
@@ -293,12 +293,24 @@ export interface UseTimelineResult {
  * back. The judgement is core's (`judgeRecoveryMarker`, #4328), shared with the
  * phone; this hook only keeps the ids it has held and the replay window.
  */
+export interface UseTimelineOptions {
+  /**
+   * 이 대화의 읽기 하한(ADR-0177 증보 2026-11-14 D18·D22, #5825). 하한 아래 seq 의 실시간 발행물(새 글 · 고침 · 지움 · 반응 · 고정 ·
+   * 링크 카드 - 모두 대상 메시지의 seq 를 싣는다)은 그리지 않는다. 이벤트가 온 순간 부른다(의존으로 두지 않는다).
+   */
+  historyFloorOf?: (channelId: string) => number | null;
+}
+
 export function useTimeline(
   realtime: RealtimeHandle | null,
   workspaceId: string,
   channelId: string | null,
-  authorMemberId: string
+  authorMemberId: string,
+  options: UseTimelineOptions = {}
 ): UseTimelineResult {
+  // 하한을 읽는 손. 렌더마다 바뀌어도 구독을 다시 세우지 않게 ref 로 든다.
+  const historyFloorOfRef = useRef(options.historyFloorOf);
+  historyFloorOfRef.current = options.historyFloorOf;
   const [state, setState] = useState<TimelineState>(emptyTimeline);
   const [status, setStatus] = useState<UseTimelineResult["status"]>("loading");
   // 지금 `state`·`status` 가 어느 대화의 것인가(#5678). 대화를 바꾼 첫 렌더는 아래 읽기 효과가 비우기 **전**이라 앞 대화의 것을 들고 있다 —
@@ -1078,6 +1090,9 @@ export function useTimeline(
       };
     }
     const replayGate = createReplayGate();
+    // 하한 아래 발행물은 그리지 않는다(위 `historyFloorOf`). 대상 메시지의 seq 가 하한보다 작으면 버린다.
+    const belowFloor = (seq: number | undefined): boolean =>
+      isBelowHistoryFloor(seq, historyFloorOfRef.current?.(channelId) ?? null);
     const unsub = realtime.subscribeChannel(workspaceId, channelId, {
       onSubscribed: (ctx) => {
         if (cancelled) return;
@@ -1118,7 +1133,7 @@ export function useTimeline(
         }
       },
       onMessage: (event) => {
-        if (cancelled) return;
+        if (cancelled || belowFloor(event.payload.seq)) return;
         const message = payloadToMessage(event.payload);
         // 편집 투영은 든 줄만 갱신한다(#4450): `applyEdited` 가 코어 판정을 지난다.
         if (event.type === "message.edited") {
@@ -1134,7 +1149,7 @@ export function useTimeline(
       // `applyBatch`: the frame carries only an id (by design, so a delete
       // never re-broadcasts the body it erased), and the row must keep its seq.
       onMessageDeleted: (event) => {
-        if (cancelled) return;
+        if (cancelled || belowFloor(event.seq)) return;
         const messageId = event.payload.message_id;
         setState((s) => applyTombstone(s, messageId, event.ts));
         // The server deleted the rows with the message; drop the chips so they
@@ -1151,7 +1166,7 @@ export function useTimeline(
         applyUnfurls(clearMessageUnfurls(unfurlsRef.current, messageId));
       },
       onReaction: (event) => {
-        if (cancelled) return;
+        if (cancelled || belowFloor(event.seq)) return;
         // Idempotent both ways, which is what lets the echo of my own optimistic
         // click land harmlessly on top of it.
         applyReaction({
@@ -1165,7 +1180,7 @@ export function useTimeline(
       // `message.pinned` payload IS the list entry, so nothing here re-reads
       // the list to find out what was pinned.
       onPin: (event) => {
-        if (cancelled) return;
+        if (cancelled || belowFloor(event.type === "message.pinned" ? event.payload.seq : event.seq)) return;
         if (event.type === "message.pinned") {
           applyPins(
             applyPinned(pinsRef.current, pinnedPayloadToWire(event.payload))
@@ -1175,7 +1190,7 @@ export function useTimeline(
         }
       },
       onUnfurl: (event) => {
-        if (cancelled) return;
+        if (cancelled || belowFloor(event.seq)) return;
         const messageId = event.payload.message_id;
         unfurlReadsRef.current.add(messageId.toLowerCase());
         applyUnfurls(

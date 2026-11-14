@@ -65,6 +65,11 @@ interface StoredDraft {
   atMs: number;
   /** 쓴 사람(멤버 id, 소문자). 없으면 작성자를 모르는 값이다(아래 「누구의 초안인가」). */
   author?: string;
+  /**
+   * 답글 초안이 속한 대화(채널 id, 소문자). 열쇠가 뿌리 글 id 뿐이라 대화 단위로 찾으려면 같이 적는다(ADR-0177 증보 2026-11-14 D17).
+   * 없으면 이 칸 전에 쓴 값이다.
+   */
+  channelId?: string;
 }
 
 /**
@@ -210,10 +215,12 @@ function parse(raw: string | null): StoredDraft | null {
   try {
     const value: unknown = JSON.parse(raw);
     if (typeof value !== "object" || value === null) return null;
-    const { text, atMs, author } = value as Record<string, unknown>;
+    const { text, atMs, author, channelId } = value as Record<string, unknown>;
     if (typeof text !== "string" || text === "") return null;
     if (typeof atMs !== "number" || !Number.isFinite(atMs)) return null;
-    return typeof author === "string" && author !== "" ? { text, atMs, author } : { text, atMs };
+    const draft: StoredDraft = typeof author === "string" && author !== "" ? { text, atMs, author } : { text, atMs };
+    if (typeof channelId === "string" && channelId !== "") draft.channelId = channelId;
+    return draft;
   } catch {
     // 손으로 고쳐졌거나 옛 판이다. 읽을 수 없는 초안은 초안이 아니다.
     return null;
@@ -372,14 +379,34 @@ export function writeThreadDraft(
   workspaceId: string,
   rootId: string,
   text: string,
-  nowMs: number = Date.now()
+  nowMs: number = Date.now(),
+  /** 이 답글 초안이 속한 대화. 적어 두면 그 대화에서 나갈 때 찾아 지운다(`threadDraftRootsInChannel`). */
+  channelId?: string
 ): void {
   const key = threadDraftKey(workspaceId, rootId);
   if (text.trim() === "" || containsSecretKey(text)) {
     writeRaw(key, null);
     return;
   }
-  writeRaw(key, JSON.stringify(stamped(text, nowMs)));
+  const draft = stamped(text, nowMs);
+  if (channelId !== undefined && channelId !== "") draft.channelId = channelId.toLowerCase();
+  writeRaw(key, JSON.stringify(draft));
+}
+
+/**
+ * 이 대화의 답글 초안이 걸린 뿌리 글 id(소문자). 대화를 적어 둔 초안만 찾는다 - 적지 않은 옛 값은 대화를 알 수 없다. 작성자는 보지 않는다:
+ * 1:1 대화에서 나갈 때 그 대화의 것을 지우는 데 쓴다(ADR-0177 증보 2026-11-14 D17, #5825).
+ */
+export function threadDraftRootsInChannel(workspaceId: string, channelId: string): string[] {
+  const prefix = threadDraftKey(workspaceId, "");
+  const channel = channelId.toLowerCase();
+  const roots: string[] = [];
+  for (const key of threadDraftKeys()) {
+    if (!key.startsWith(prefix)) continue;
+    const draft = parse(readRaw(key));
+    if (draft?.channelId === channel) roots.push(key.slice(prefix.length));
+  }
+  return roots;
 }
 
 export function readThreadDraft(

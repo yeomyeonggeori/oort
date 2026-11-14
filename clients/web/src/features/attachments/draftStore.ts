@@ -336,6 +336,17 @@ export function clearSurface(key: string): void {
   write(key, EMPTY);
 }
 
+/**
+ * 한 대화의 트레이를 모두 비운다 - 대화 입력칸과 그 대화의 스레드 입력칸들(ADR-0177 증보 2026-11-14 D17 기기 줄, #5825). 1:1 대화에서
+ * 나간 뒤 그 대화의 올리던 파일이 새 대화로 다시 나가지 않게 한다. 열쇠가 (워크스페이스, 채널, 뿌리)라 다른 대화의 트레이는 남는다.
+ */
+export function clearChannelSurfaces(workspaceId: string, channelId: string): void {
+  const prefix = surfaceKey(workspaceId, channelId, "");
+  for (const key of [...surfaces.keys()]) {
+    if (key.toLowerCase().startsWith(prefix.toLowerCase())) clearSurface(key);
+  }
+}
+
 /** 받지 못한 것들에 대한 고지를 사람이 읽고 나면 지운다. */
 export function acknowledgeNotices(key: string): void {
   const surface = read(key);

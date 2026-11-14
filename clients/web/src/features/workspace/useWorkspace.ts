@@ -148,6 +148,17 @@ export function mergeReadStateRow(current: ReadState, incoming: ReadState): Read
   return merged;
 }
 
+/**
+ * 이 대화의 읽기 하한(ADR-0177 증보 2026-11-14 D18·D22, #5825): 읽음 투영 캐시의 그 행이 든 `historyFromSeq`. 없거나 하한이 없으면
+ * `null`. 이벤트가 온 순간 부른다.
+ */
+export function historyFloorFromCache(client: QueryClient, workspaceId: string, channelId: string): number | null {
+  const key = idKey(channelId);
+  const row = client.getQueryData<ReadState[]>(["read-state", workspaceId])?.find((candidate) => idKey(candidate.channelId) === key);
+  const floor = row?.historyFromSeq;
+  return typeof floor === "number" && floor > 0 ? floor : null;
+}
+
 export function applyReadStateToCache(
   client: QueryClient,
   workspaceId: string,

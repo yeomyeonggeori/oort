@@ -121,6 +121,10 @@ import {
   useDmVisibility,
 } from "./useDmVisibility";
 import { DmClosedMenu } from "./DmClosedList";
+import { DmLeaveHost, DmLeaveReceiptRow } from "./DmLeaveHost";
+import { requestDmLeave, useDmLeaveStore } from "./dmLeaveStore";
+import { findSidebarChannelRow } from "./sidebarRowFocus";
+import { dmLeaveMode, dmLeaveOffered } from "@momo/core/features/channels/dmLeave";
 import { dmCloseOffered } from "@momo/core/features/sidebar/dmVisibility";
 import { rosterLoaded } from "@momo/core/features/sidebar/goneDm";
 import { useHoverNone } from "@/features/emoji/useHoverNone";
@@ -392,6 +396,15 @@ export function Sidebar({
     mode: dmVisibility.mode,
     byChannel: readStates.byChannel,
   });
+  // 1:1 「대화 나가기」(ADR-0177 증보 2026-11-14 D21, #5825). 내밀지 말지는 투영이 하한 칸을 싣는가(옛 서버 판별)와 이 워크스페이스의
+  // 접힘(`dmLeaveMode`)이 정하고, 접힘은 이 저장소의 판이 바뀌어 다시 읽힌다. 끝난 뒤의 영수증도 여기서 온다.
+  const { receipts: allLeaveReceipts } = useDmLeaveStore();
+  const leaveMode = dmLeaveMode({ workspaceId, rows: readStates.data });
+  const leaveReceipts = useMemo(
+    () => allLeaveReceipts.filter((receipt) => uuidEq(receipt.workspaceId, workspaceId)),
+    [allLeaveReceipts, workspaceId]
+  );
+  const receiptFor = (channelId: string) => leaveReceipts.find((receipt) => uuidEq(receipt.channelId, channelId));
   const openId = openChannelId(
     routePath,
     indexFallbackChannelId({
@@ -403,12 +416,15 @@ export function Sidebar({
   // 닫기는 행마다 `dmCloseOffered`(코어) 가 정한다(호버 X 와 메뉴 항목이 같은 함수를 읽는다): **읽음 투영이 준비된 뒤에만**(닫을
   // 때 `seenSeq` 로 서버의 최신 seq 를 적는데, 투영이 오기 전에는 그 기준이 없다), **안 읽은 메시지(멘션 포함)가 없을 때만**(소유자
   // 결정 2026-10-17), **별표·섹션 DM 이 아닐 때만**(ADR-0177 D7). 읽고 나면 다시 보인다.
+  // 나간 대화의 영수증이 서 있는 동안은 그 대화가 자리를 지킨다: 줄 대신 영수증이 같은 자리·같은 높이에 선다(`DmLeaveReceiptRow`).
   const shownDms = useMemo(
     () =>
-      dms.filter((channel) =>
-        dmShownNow(dmVisibility.verdictOf(channel.id), channel.id, openId)
+      dms.filter(
+        (channel) =>
+          dmShownNow(dmVisibility.verdictOf(channel.id), channel.id, openId) ||
+          leaveReceipts.some((receipt) => uuidEq(receipt.channelId, channel.id))
       ),
-    [dms, dmVisibility, openId]
+    [dms, dmVisibility, openId, leaveReceipts]
   );
   // 「⋯ › 숨긴 대화」 목록(D11): 내가 닫았거나 상대가 나간 DM. 지금 열려 있는 DM 은 보이는 대화라 넣지 않는다.
   const closedListItems = useMemo(
@@ -717,6 +733,10 @@ export function Sidebar({
     channel: Channel,
     options: { inStarredSection?: boolean } = {}
   ) {
+    const leaveReceipt = receiptFor(channel.id);
+    if (leaveReceipt !== undefined) {
+      return <DmLeaveReceiptRow key={channel.id} receipt={leaveReceipt} paneRef={listPaneRef} />;
+    }
     const counts = unreadCountFor(channel);
     const closeOffered =
       channel.kind === "dm" &&
@@ -744,6 +764,17 @@ export function Sidebar({
         ? dmPeer(channel, directoryQuery.directory, session.member.id)
         : null;
     const dmPeerMember = label.kind === "self" ? (selfMember ?? null) : peer;
+    // 「대화 나가기」: 사람끼리의 1:1 · 새 서버 · 투영 준비(D20·D21). 안 읽음·별표와 무관하다(확인 창이 있어서). 터치에는 줄 메뉴가 없다.
+    const leaveOffered =
+      channel.kind === "dm" &&
+      !touchSurface &&
+      dmLeaveOffered({
+        mode: leaveMode,
+        phase: readPhase,
+        channel,
+        directory: directoryQuery.directory,
+        selfMemberId: session.member.id,
+      });
     const rowTurns = applyApprovalWaits(
       agentTurnsInChannel(turnSignals, channel.id, nowMs),
       channel.id,
@@ -849,6 +880,20 @@ export function Sidebar({
                 : undefined
             }
             onCloseDm={closeOffered ? () => closeDmRow(channel) : undefined}
+            onLeaveDm={
+              leaveOffered
+                ? () =>
+                    requestDmLeave({
+                      workspaceId,
+                      channelId: channel.id,
+                      name: peer?.displayName ?? label.text,
+                      via: "row",
+                      opener: navRef.current === null ? null : findSidebarChannelRow(navRef.current, channel.id),
+                      observedSeq: null,
+                      rootIds: [],
+                    })
+                : undefined
+            }
           >
             {link}
           </SidebarRowContextMenu>
@@ -1519,6 +1564,13 @@ export function Sidebar({
               sidebarPrefs.createSection(name);
             }
           }}
+        />
+        <DmLeaveHost
+          workspaceId={workspaceId}
+          selfMemberId={session.member.id}
+          readRows={readStates.data}
+          openId={openId}
+          navRef={navRef}
         />
         <SectionDeleteConfirmDialog
           open={deleteDialog !== null}

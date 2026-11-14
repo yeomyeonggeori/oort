@@ -246,14 +246,14 @@ export function ThreadComposer({
   useEffect(() => {
     const flush = () => {
       try {
-        writeThreadDraft(workspaceId, rootId, draftRef.current);
+        writeThreadDraft(workspaceId, rootId, draftRef.current, Date.now(), channelId);
       } catch {
         /* 저장소가 막힌 환경에서도 다시 실행은 막지 않는다. */
       }
     };
     window.addEventListener(BEFORE_RELAUNCH_EVENT, flush);
     return () => window.removeEventListener(BEFORE_RELAUNCH_EVENT, flush);
-  }, [workspaceId, rootId]);
+  }, [workspaceId, rootId, channelId]);
   useEffect(() => {
     const onSeed = (event: Event) => {
       const detail = (event as CustomEvent<ThreadComposerSeed>).detail;

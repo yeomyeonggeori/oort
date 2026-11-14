@@ -60,12 +60,16 @@ import {
 // 목록을 훑는 사람의 물음이다. 표면별 열쇠 집합은 모델의 표 하나에 있다.
 // =============================================================================
 
+/** 「대화 나가기」 항목을 세우는 표지. 실행은 메뉴가 내려간 뒤 `onLeaveDm` 이 한다(#2741 과 같은 넘김). */
+const LEAVE_DM_HANDED_OFF = () => undefined;
+
 export function ChannelHeaderMenu({
   workspaceId,
   channel,
   title,
   selfMemberId,
   selfRole,
+  onLeaveDm,
 }: {
   workspaceId: string;
   channel: Channel;
@@ -76,6 +80,11 @@ export function ChannelHeaderMenu({
   /** 로그인 멤버의 워크스페이스 역할. undefined면 아직 안 온 것이고, 그때는
    *  나가기를 내놓고 서버가 답하게 둔다(`canLeaveChannel`). */
   selfRole: MembershipRole | undefined;
+  /**
+   * 대화 머리의 「대화 나가기」 (ADR-0177 증보 2026-11-14 D21, #5825). 사람끼리의 1:1 에만 부르는 쪽이 넘긴다. 메뉴가 다 내려간 뒤
+   * (#2741) ⋮ 단추를 들려 부른다 - 확인 창은 사이드바의 `DmLeaveHost` 가 세우고, 취소하면 캐럿이 이 단추로 돌아온다.
+   */
+  onLeaveDm?: (opener: HTMLElement | null) => void;
 }) {
   const triggerRef = useRef<HTMLButtonElement | null>(null);
   // 메뉴가 넘겨 준 항목. 다이얼로그는 메뉴가 **다 내려간 뒤**에 연다 (#2741).
@@ -107,6 +116,8 @@ export function ChannelHeaderMenu({
     selfMemberId,
     selfRole,
     onActionSucceeded: () => setOpen(false),
+    // 항목을 세우는 손만 넘긴다: 실제로 부르는 것은 메뉴가 다 내려간 뒤(아래 `onCloseAutoFocus`)다.
+    onLeaveDm: onLeaveDm ? LEAVE_DM_HANDED_OFF : undefined,
   });
 
   return (
@@ -152,6 +163,7 @@ export function ChannelHeaderMenu({
             if (pending === "memory") setMemoryOpen(true);
             if (pending === "github") setGithubOpen(true);
             if (pending === "leave") actions.leave.open();
+            if (pending === "leave-dm") onLeaveDm?.(triggerRef.current);
           }}
         >
           <ChannelActionMenuItems
