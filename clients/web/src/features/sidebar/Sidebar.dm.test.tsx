@@ -2269,6 +2269,10 @@ describe("대화 나가기 · 줄 메뉴 (D21)", () => {
       expect(receipt.textContent).toContain("대화에서 나갔어요.");
       expect(receipt.dataset.channelId).toBe(DM_ID(1));
       expect(rowIds(host)).not.toContain(DM_ID(1));
+      // 캐럿은 <body> 로 떨어지지 않고 이웃 줄(다음 DM)로 간다.
+      await nextFrame();
+      await nextFrame();
+      expect(document.activeElement).toBe(dmRow(host, DM_ID(2)));
     } finally {
       koreanLocaleForTest = null;
     }

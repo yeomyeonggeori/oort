@@ -24,6 +24,7 @@ import {
   clearDmLeaveReceipt,
   endDmLeaveRequest,
   noteDmLeaveFolded,
+  openTimelineFor,
   showDmLeaveReceipt,
   useDmLeaveStore,
   type DmLeaveReceipt,
@@ -56,12 +57,19 @@ import { focusSidebarChannelRow, neighborSidebarChannelRowId } from "./sidebarRo
 //   3. 정리(`runDmLeaveCleanup`): 투영 행이 먼저라 이 대화는 곧바로 3a 로 숨는다.
 //   4. 보고 있었으면 `/` 로. 3 이 먼저여야 한다: 인덱스 폴백이 숨지 않은 이 대화를 다시 고르지 않게.
 //   5. 창을 닫는다. 캐럿은 이웃 줄로(사이드바가 보일 때), 아니면 본문의 입력칸으로 - `<body>` 로 떨어지지 않는다.
+//   6. 주소가 바뀐 뒤(그 대화의 화면이 내려간 뒤) 초안·답글 초안·트레이·못 보낸 글을 한 번 더 지운다. 정리 범위는 D17 기기 줄이다.
 // =============================================================================
 
-/** 확인 창을 연 순간의 `seenSeq`(D16 - 확인 창을 보는 사이에 온 글은 묻히지 않는다). 다시 시도도 같은 값을 쓴다. */
+/** 확인 창을 연 순간의 `seenSeq`(D16). 다시 시도도 같은 값을 쓴다. */
 interface OpenedLeave {
   request: DmLeaveRequest;
   seenSeq: number;
+}
+
+/** 이 기기에만 있는 것의 둘째 정리를 기다리는 대화(아래 「성공의 차례」 6). */
+interface PendingSecondPass {
+  channelId: string;
+  rootIds: string[];
 }
 
 function readRowOf(rows: readonly ReadState[] | undefined, channelId: string): ReadState | undefined {
@@ -105,22 +113,35 @@ export function DmLeaveHost({
   const outcomeRef = useRef<{ kind: "left"; neighborId: string | null } | null>(null);
   const openerRef = useRef<HTMLElement | null>(null);
   const flightRef = useRef(0);
+  const [secondPass, setSecondPass] = useState<PendingSecondPass | null>(null);
 
-  // 요청이 바뀌면 그 순간의 seq 를 적는다(확인 창이 열린 때). 예약 수를 모르면 한 번 다시 읽는다.
-  const requestKey = request ? `${request.workspaceId}:${request.channelId}`.toLowerCase() : null;
+  // 요청이 오면 그 순간의 seq 를 적는다(확인 창이 열린 때). 줄 메뉴로 왔어도 그 대화가 열려 있으면 이력이 본 가장 큰 seq 를 함께 본다.
   useEffect(() => {
     // 요청이 끝나도 앞 판을 들고 있는다: 창이 `open=false` 로 닫혀야 닫힘 캐럿 복귀(`opener`)가 돈다.
     if (request === null || !uuidEq(request.workspaceId, workspaceId)) return;
     const row = readRowOf(client.getQueryData<ReadState[]>(["read-state", workspaceId]) ?? readRows, request.channelId);
+    const open = openTimelineFor(workspaceId, request.channelId);
+    const observed = Math.max(request.observedSeq ?? 0, open?.newestSeq ?? 0);
     openerRef.current = request.opener;
     outcomeRef.current = null;
     setFailed(false);
     setBusy(false);
-    setOpened({ request, seenSeq: dmLeaveSeenSeq(row, request.observedSeq) });
+    setOpened({ request, seenSeq: dmLeaveSeenSeq(row, observed) });
     if (scheduled.surface === "unknown") scheduled.refetch();
     // 요청이 바뀔 때만: 투영이 새로 와도 연 순간의 seq 를 바꾸지 않는다(D16).
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [requestKey, workspaceId]);
+  }, [request, workspaceId]);
+
+  // 6. 둘째 정리: 그 대화가 열려 있지 않게 된 뒤(주소가 바뀐 커밋 뒤)에 이 기기에만 있는 것을 한 번 더 지운다.
+  useEffect(() => {
+    if (secondPass === null) return;
+    if (openId !== null && uuidEq(openId, secondPass.channelId)) return;
+    const port = webDmLeaveCleanupPort(client, workspaceId, selfMemberId);
+    port.clearDrafts(secondPass.channelId, secondPass.rootIds);
+    port.clearAttachmentTrays(secondPass.channelId, secondPass.rootIds);
+    port.forgetFailedSends(secondPass.channelId);
+    setSecondPass(null);
+  }, [secondPass, openId, client, workspaceId, selfMemberId]);
 
   // 예약 N 개(D21). 서버는 그 방의 내 `pending`·`failed` 를 같이 취소한다. 「모름」을 0 으로 읽지 않는다: 첫 목록이 오기 전에는 창을 열지
   // 않고(사이드바가 앱을 열 때 이미 읽어 두어 보통은 바로다), 못 읽었으면 그 까닭을 말하고 확정을 잠근다.
@@ -175,8 +196,11 @@ export function DmLeaveHost({
   const confirm = async () => {
     if (opened === null || busy) return;
     const { request: req, seenSeq } = opened;
-    // 뿌리 글 id 는 PUT 전에 모은다(#5824 검수 r1 M4): 뒤에는 서버가 하한 아래 뿌리를 내려 주지 않는다.
-    const rootIds = collectDmLeaveRootIds(client, workspaceId, req.channelId, req.rootIds);
+    // 뿌리 글 후보는 PUT 전에 모은다(#5824 검수 r1 M4).
+    const rootIds = collectDmLeaveRootIds(client, workspaceId, req.channelId, [
+      ...req.rootIds,
+      ...(openTimelineFor(workspaceId, req.channelId)?.messageIds ?? []),
+    ]);
     const flight = ++flightRef.current;
     setBusy(true);
     setFailed(false);
@@ -207,6 +231,8 @@ export function DmLeaveHost({
     });
     // 4. 보고 있던 대화면 떠난다.
     if (openId !== null && uuidEq(openId, req.channelId)) navigate("/");
+    // 6. 주소가 바뀐 뒤의 둘째 정리.
+    setSecondPass({ channelId: req.channelId, rootIds });
     // 5. 닫는다. 좁은 창에서 머리 ⋮ 로 나갔으면 서랍(목록)을 연다 - 직전 화면이고, 영수증이 서는 자리다.
     outcomeRef.current = { kind: "left", neighborId };
     setBusy(false);
@@ -218,7 +244,7 @@ export function DmLeaveHost({
     <>
       {copy !== null && opened !== null && (
         <ConfirmDialog
-          open={ready && request !== null}
+          open={ready && request !== null && opened.request === request}
           onOpenChange={(next) => {
             if (!next) close();
           }}

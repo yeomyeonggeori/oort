@@ -2,7 +2,7 @@ import { DmAgentsMenu } from "./DmAgentsMenu";
 import { dmLeaveMode, dmLeaveOffered, higherHistoryFloor } from "@momo/core/features/channels/dmLeave";
 import { idKey } from "@momo/core/features/workspace/directory";
 import { readProjectionPhase } from "@momo/core/features/sidebar/goneDm";
-import { requestDmLeave, useDmLeaveStore } from "@/features/sidebar/dmLeaveStore";
+import { requestDmLeave, setOpenTimeline, useDmLeaveStore } from "@/features/sidebar/dmLeaveStore";
 import {
   useCallback,
   useEffect,
@@ -283,8 +283,8 @@ export function ChatShell() {
     ? dmAutoReplyAgent(channel, directory, session.member.id)
     : null;
 
-  // 실시간 하한(ADR-0177 증보 2026-11-14 D22 한계 3 가운데 기기 몫, #5825): 나간 1:1 의 하한 아래 발행물(다시 보내기로 온 것 포함)은 그리지
-  // 않는다. 하한은 읽음 투영(캐시가 바뀌면 이 화면이 다시 그려진다)에서 이벤트가 온 순간 읽는다.
+  // 읽기 하한(ADR-0177 증보 2026-11-14 D18·D22, #5825): 하한 아래 seq 의 실시간 발행물은 그리지 않는다. 하한은 읽음 투영에서 이벤트가 온
+  // 순간 읽는다.
   const readRowsRef = useRef(readStates.byChannel);
   readRowsRef.current = readStates.byChannel;
   const historyFloorOf = useCallback(
@@ -1148,6 +1148,20 @@ export function ChatShell() {
   const offline = stressCount === 0 && isOffline;
   const hasChannel = stressCount > 0 || channelId !== null;
 
+  // 열려 있는 대화의 이력이 아는 것(가장 큰 seq · 글 id)을 「대화 나가기」가 읽는 자리에 적는다(D16 `seenSeq` · 답글 초안 뿌리 후보).
+  const openNewestSeq = timeline.state.newestSeq;
+  const openMessages = timeline.state.messages;
+  useEffect(() => {
+    if (stressCount > 0 || channelId === null) return;
+    setOpenTimeline({
+      workspaceId,
+      channelId,
+      newestSeq: openNewestSeq,
+      messageIds: openMessages.map((message) => message.id),
+    });
+    return () => setOpenTimeline(null);
+  }, [stressCount, workspaceId, channelId, openNewestSeq, openMessages]);
+
   // 대화 머리의 「대화 나가기」(ADR-0177 증보 2026-11-14 D21, #5825): 사람끼리의 1:1 · 나가기를 싣는 서버 · 투영 준비일 때만 DM 머리에 ⋮ 가
   // 선다(D20). 다른 DM 에는 ⋮ 를 세우지 않는다 - 에이전트가 앉은 DM 은 이미 「대화 멤버 관리」 ⋮ 를 든다. 저장소의 판은 나가기 경로가
   // 이 워크스페이스에서 접혔을 때(405·501) 다시 읽게 한다.
@@ -1203,9 +1217,9 @@ export function ChatShell() {
                     name: peer?.displayName ?? labelParts?.text ?? label,
                     via: "header",
                     opener,
-                    observedSeq: timeline.state.newestSeq,
-                    // 열려 있는 이력의 글 id - 답글 초안을 찾는 뿌리 후보(#5824 검수 r1 M4).
-                    rootIds: timeline.state.messages.map((message) => message.id),
+                    // 열려 있는 이력의 seq·글 id 는 위 `setOpenTimeline` 이 넘긴다(줄 메뉴와 같은 길).
+                    observedSeq: null,
+                    rootIds: [],
                   })
               : undefined
           }

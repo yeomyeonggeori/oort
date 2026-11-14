@@ -187,8 +187,7 @@ export function DesktopNotifications() {
 
   const handle = useCallback(function handleEvent(event: MessageNewEvent, answered = false): void {
     const current = contextRef.current;
-    // 1:1 대화에서 나간 사람의 하한 아래 발행물(실시간 서버가 끊긴 구간을 다시 보내며 온 나가기 전 글)은 알리지 않는다
-    // (ADR-0177 증보 2026-11-14 D22 한계 3 가운데 기기 몫, #5825). 하한 위의 새 글은 평소처럼 알린다(owner D-2).
+    // 읽기 하한 아래 seq 는 알리지 않는다(ADR-0177 증보 2026-11-14 D18·D22, #5825). 하한 위의 새 글은 평소처럼 알린다(D19).
     if (
       isBelowHistoryFloor(
         event.payload.seq,

@@ -148,7 +148,7 @@ export function mergeReadStateRow(current: ReadState, incoming: ReadState): Read
 
 /**
  * 이 대화의 읽기 하한(ADR-0177 증보 2026-11-14 D18·D22, #5825): 읽음 투영 캐시의 그 행이 든 `historyFromSeq`. 없거나 하한이 없으면
- * `null`. 실시간 손잡이가 **이벤트가 온 순간** 부른다 - 훅 의존으로 두면 투영이 바뀔 때마다 그 대화를 다시 읽는다.
+ * `null`. 이벤트가 온 순간 부른다.
  */
 export function historyFloorFromCache(client: QueryClient, workspaceId: string, channelId: string): number | null {
   const key = idKey(channelId);

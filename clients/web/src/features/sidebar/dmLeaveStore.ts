@@ -78,8 +78,35 @@ export function useDmLeaveStore(): Snapshot {
   return useSyncExternalStore(subscribe, () => snapshot, () => snapshot);
 }
 
+/**
+ * 지금 열려 있는 대화의 이력이 아는 것(가장 큰 seq · 글 id). 대화 화면이 바뀔 때마다 적고, 나가기가 연 순간·확정한 순간에 읽는다 - 줄 메뉴로
+ * 나가도 그 대화가 열려 있으면 머리 ⋮ 와 같은 `seenSeq`·뿌리 후보를 쓴다. 구독 알림을 내지 않는다(글이 올 때마다 사이드바를 다시 그리지 않게).
+ */
+interface OpenTimeline {
+  workspaceId: string;
+  channelId: string;
+  newestSeq: number | null;
+  messageIds: readonly string[];
+}
+
+let openTimeline: OpenTimeline | null = null;
+
+export function setOpenTimeline(next: OpenTimeline | null): void {
+  openTimeline = next;
+}
+
+export function openTimelineFor(workspaceId: string, channelId: string): OpenTimeline | null {
+  const current = openTimeline;
+  if (current === null) return null;
+  return current.workspaceId.toLowerCase() === workspaceId.toLowerCase() &&
+    current.channelId.toLowerCase() === channelId.toLowerCase()
+    ? current
+    : null;
+}
+
 /** 시험 전용. */
 export function resetDmLeaveStoreForTest(): void {
+  openTimeline = null;
   snapshot = { request: null, receipt: null, version: 0 };
   for (const listener of listeners) listener();
 }
