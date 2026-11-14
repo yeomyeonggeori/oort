@@ -32,6 +32,7 @@
     {"group": "fixed", "note": "fullwidth letters and digits fold", "input": "\uff31\uff21\uff11\uff12\uff13", "verdict": "ok", "stored": "qa123"},
     {"group": "fixed", "note": "fullwidth hyphen U+FF0D folds too", "input": "\uff24\uff45\uff53\uff49\uff47\uff4e\uff0d\uff32\uff45\uff56\uff49\uff45\uff57", "verdict": "ok", "stored": "design-review"},
     {"group": "fixed", "note": "e + combining acute and capitals become U+00E9", "input": "E\u0301QUIPE", "verdict": "ok", "stored": "\u00e9quipe"},
+    {"group": "fixed", "note": "fullwidth E + combining acute: only the NFC after the fullwidth fold (step 5) composes U+00E9", "input": "\uff25\u0301quipe", "verdict": "ok", "stored": "\u00e9quipe"},
     {"group": "fixed", "note": "Greek final sigma (whole-string lowercasing)", "input": "\u039f\u0394\u039f\u03a3", "verdict": "ok", "stored": "\u03bf\u03b4\u03bf\u03c2"},
     {"group": "fixed", "note": "Turkish U+0130 lowercases to i + U+0307", "input": "\u0130stanbul", "verdict": "ok", "stored": "i\u0307stanbul"},
     {"group": "fixed", "note": "Kelvin sign U+212A lowercases to k", "input": "\u212aelvin", "verdict": "ok", "stored": "kelvin"},
