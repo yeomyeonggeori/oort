@@ -34,10 +34,13 @@
 ### D4. self-service
 - `DELETE .../channels/:ch/members/me` (채널 leave — private/dm 규칙: dm은 불가, private은 가능하되 마지막 멤버면 채널 archive).
   - 증보(Accepted, 2026-11-05 owner 결정, #5332): 「dm은 불가」는 1:1에만 남는다. 그룹 DM은 참여자 누구나 나갈 수 있고 같은 트랜잭션에서 대기 중 입장 요청 취소·시스템 줄을 함께 한다. 그룹은 만들 때마다 새 방이라 나가기가 방 키를 바꾸지 않는다([ADR-0221](0221-group-dm.md) D2·D9).
+  - 증보(Accepted, 2026-11-14 owner 결정, #5820): 1:1의 **참여 빼기**(이 라우트)는 계속 거절한다. 사람끼리의 1:1에서 「대화 나가기」는 참여를 빼지 않고 나간 사람의 읽기 하한만 올리는 별도 동작이다([ADR-0177](0177-sidebar-sections-member-owned.md) 2026-11-14 증보 D14~D22).
+  - 증보(Accepted, 2026-11-14 owner 결정, #5820): 짝 `POST .../channels/:ch/members/me`(스스로 참여)가 생긴다. 정식 멤버(게스트·에이전트 제외)는 「둘러보기에 보이기」가 켜진 공개 채널에 스스로 들어온다. 꺼진 공개 채널과 비공개 채널은 지금처럼 관리자의 추가로만 들어온다. 초대 수락의 자동 참여는 공개 채널 전부에서 기본 채널만으로 줄었다. D1의 게스트 「초대된 채널만」은 그대로다([ADR-0224](0224-public-channel-browse-and-self-join.md)).
 - `DELETE .../members/me` (워크스페이스 leave — 마지막 owner 409).
 
 ### D5. audit 일관화
 - D2~D4 전 행위를 audit 원장에 기록(`role.changed`/`member.suspended`/`member.removed`/`ban.created`... — actor/target/이전값/이후값). 기존 agent.created audit 문법 재사용. 관리자 조회 REST는 v1.5(UXUI 표면과 함께).
+  - 증보(Accepted, 2026-11-14, #5820): 감사 대상에 `dm.left`([ADR-0177](0177-sidebar-sections-member-owned.md) 2026-11-14 증보), `channel.joined`·`channel.browse_listed`·`channel.default`([ADR-0224](0224-public-channel-browse-and-self-join.md)), `channel.renamed`([ADR-0225](0225-channel-name-rule-all-scripts.md))를 더한다.
 
 ### D6. 에이전트 대칭
 - suspend/remove가 agent member에 동일 적용 + **agent credential 즉시 revoke** + 진행 중 run 종료 신호(AgentWorker가 credential 실패로 자연 정지하는 기존 경로 재사용). 에이전트 ban은 handle 기준.
