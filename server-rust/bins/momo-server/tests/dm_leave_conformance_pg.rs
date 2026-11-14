@@ -749,6 +749,25 @@ async fn the_leaver_reads_nothing_below_the_floor_through_any_door() {
     let old = [root, reply_id, mine];
     let fetch = mint(&w, &a, "/v1/auth/push-fetch-token").await;
     let card = dev_card(&w, &a, ws).await;
+    for path in [
+        format!("/v1/workspaces/{ws}/messages/{root}/pin"),
+        format!("/v1/workspaces/{ws}/messages/{root}/reactions/%F0%9F%91%8D"),
+    ] {
+        let response = w
+            .http
+            .put(w.url(path.clone()))
+            .bearer_auth(&b.token)
+            .send()
+            .await
+            .expect("pin/react");
+        assert!(
+            response.status().is_success(),
+            "{path}: {}",
+            response.status()
+        );
+    }
+    let pins = format!("/v1/workspaces/{ws}/channels/{dm}/pins");
+    let reactions = format!("/v1/workspaces/{ws}/channels/{dm}/reactions");
 
     let history = format!("/v1/workspaces/{ws}/channels/{dm}/messages");
     let replies = format!("/v1/workspaces/{ws}/channels/{dm}/messages/{root}/replies");
@@ -775,6 +794,15 @@ async fn the_leaver_reads_nothing_below_the_floor_through_any_door() {
         ids_in(&text, &old) >= 1,
         "inbox control holds the DM items: {text}"
     );
+    for (what, path) in [("pins", &pins), ("reactions", &reactions)] {
+        let (status, text) = w.get_text(&a.token, path.clone()).await;
+        assert_eq!(status, 200, "{what}: {text}");
+        assert_eq!(
+            ids_in(&text, &[root]),
+            1,
+            "{what} control shows the old root: {text}"
+        );
+    }
 
     let (status, body) = w.leave(&a, ws, dm, json!(head)).await;
     assert_eq!(status, 204, "{body}");
@@ -792,6 +820,17 @@ async fn the_leaver_reads_nothing_below_the_floor_through_any_door() {
             ids_in(&text, &old),
             0,
             "{door} returns nothing below the floor: {text}"
+        );
+    }
+    for (what, path) in [("pins", &pins), ("reactions", &reactions)] {
+        let (status, text) = w.get_text(&a.token, path.clone()).await;
+        assert_eq!(status, 200, "{what}: {text}");
+        assert_eq!(ids_in(&text, &[root]), 0, "{what} below the floor: {text}");
+        let (status, text) = w.get_text(&b.token, path.clone()).await;
+        assert_eq!(
+            (status, ids_in(&text, &[root])),
+            (200, 1),
+            "{what} for the other participant: {text}"
         );
     }
     let (status, text) = w.get_text(&a.token, replies.clone()).await;
@@ -899,6 +938,39 @@ async fn the_floor_is_the_clients_seen_seq_and_only_moves_up() {
         );
     }
     assert_eq!(w.count(audits, a.id, dm).await, 1, "one audit row per move");
+    // A repeat that does not move the floor undoes nothing written after the leave: a schedule in
+    // this room and a mark-unread signal set afterwards both survive it.
+    sqlx::query(
+        "INSERT INTO scheduled_message (workspace_id, channel_id, author_member_id, body, send_at, client_request_id) \
+         VALUES ($1, $2, $3, '나간 뒤 예약', now() + interval '1 day', $4)",
+    )
+    .bind(ws)
+    .bind(dm)
+    .bind(a.id)
+    .bind(Uuid::new_v4())
+    .execute(&w.su)
+    .await
+    .expect("seed schedule after leaving");
+    let response = w
+        .http
+        .put(w.url(format!("/v1/workspaces/{ws}/channels/{dm}/read-state")))
+        .bearer_auth(&a.token)
+        .json(&json!({"last_read_seq": seen, "mark_unread_before_seq": late_seq}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 200, "mark unread after leaving");
+    let (status, _) = w.leave(&a, ws, dm, json!(seen)).await;
+    assert_eq!(status, 204);
+    assert_eq!(
+        w.count("SELECT count(*) FROM scheduled_message WHERE author_member_id = $1 AND channel_id = $2 AND status = 'pending'", a.id, dm).await,
+        1,
+        "a repeat cancels nothing written after the leave"
+    );
+    assert_eq!(
+        w.read_row(&a, ws, dm).await["marked_unread_before_seq"],
+        json!(late_seq)
+    );
     // A seenSeq past the head is clamped by it.
     let (status, _) = w.leave(&a, ws, dm, json!(9_999)).await;
     assert_eq!(status, 204);

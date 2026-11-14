@@ -15,6 +15,8 @@
 //! 1. Lock the still-pending admission cards of the room (the order a vote takes them), then the
 //!    `channel_seq` row, then the `membership` rows (the send path's order), and judge the D20
 //!    scope: 409 `dm_leave_unavailable` outside it.
+//!    A request whose floor would not move (a repeat, a late retransmit) stops after this step with
+//!    `204` and changes nothing — it must not undo anything written after the leave.
 //! 2. The caller's own things first ([`momo_messaging::clear_own_items_below_in_tx`]): schedules in
 //!    this channel, and reminders / thread follows / inbox items below the new floor. Before step 4,
 //!    because the reminder and follow rows are found through a `message` join the floor hides.
@@ -116,6 +118,12 @@ pub async fn put(
                     DmLeaveClass::Eligible { last_seq, floor } => (last_seq, floor),
                 };
             let floor = next_history_floor(seen_seq, last_seq, existing);
+            // A repeat, or a late retransmit whose floor does not move, changes nothing at all:
+            // it must not cancel a schedule written after the leave, clear a newer mark-unread
+            // signal or cancel a newer agent request (D16 「같은 요청 두 번은 결과가 같고」).
+            if existing == Some(floor) {
+                return Ok(Ok(()));
+            }
             // 2. the caller's own things, while the messages they point at are still readable
             clear_own_items_below_in_tx(
                 conn,
@@ -148,18 +156,16 @@ pub async fn put(
             .await?;
             // 6. the closure watermark, for a device that does not know the floor yet
             close_dm_in_tx(conn, workspace_id, channel_id, member_id, stored - 1).await?;
-            // 7. audit, once per move of the floor
-            if existing != Some(stored) {
-                write_audit(
-                    conn,
-                    &AuditEntry::new(workspace_id, AUDIT_ACTION)
-                        .by(member_id)
-                        .via_token(via_token_id)
-                        .target("channel", channel_id)
-                        .with_schema("momo.dm.left.v1", json!({ "history_from_seq": stored })),
-                )
-                .await?;
-            }
+            // 7. audit (only reached when the floor moved)
+            write_audit(
+                conn,
+                &AuditEntry::new(workspace_id, AUDIT_ACTION)
+                    .by(member_id)
+                    .via_token(via_token_id)
+                    .target("channel", channel_id)
+                    .with_schema("momo.dm.left.v1", json!({ "history_from_seq": stored })),
+            )
+            .await?;
             Ok(Ok(()))
         })
     })

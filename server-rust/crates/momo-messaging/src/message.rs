@@ -683,7 +683,7 @@ pub enum SendRejected {
 /// What the idempotent insert found.
 enum Inserted {
     /// The row — freshly written (`false`) or the earlier send of the same `client_msg_id` (`true`).
-    Row(StoredMessage, bool),
+    Row(Box<StoredMessage>, bool),
     /// The `client_msg_id` conflicted with a row the transaction cannot read (ADR-0177 증보 D17).
     HiddenDuplicate,
 }
@@ -693,7 +693,7 @@ impl Inserted {
     /// duplicate: `RowNotFound`.
     fn into_row(self) -> Result<(StoredMessage, bool), DbError> {
         match self {
-            Inserted::Row(message, deduped) => Ok((message, deduped)),
+            Inserted::Row(message, deduped) => Ok((*message, deduped)),
             Inserted::HiddenDuplicate => Err(DbError::from(sqlx::Error::RowNotFound)),
         }
     }
@@ -766,7 +766,7 @@ async fn insert_message_in_tx(
         .await?;
 
     let inserted = match inserted {
-        Some(row) => Inserted::Row(decode_stored(&row)?, false),
+        Some(row) => Inserted::Row(Box::new(decode_stored(&row)?), false),
         None => {
             // 0 rows → idempotency hit: re-select the prior message and return
             // its original seq (exactly-once effect). Only reachable with a
@@ -782,7 +782,7 @@ async fn insert_message_in_tx(
                 .fetch_optional(&mut *conn)
                 .await?;
             match existing {
-                Some(row) => Inserted::Row(decode_stored(&row)?, true),
+                Some(row) => Inserted::Row(Box::new(decode_stored(&row)?), true),
                 None => {
                     // No visible prior row and no insert. Either the channel_seq row was absent
                     // (unknown channel — nothing was attempted), or the insert DID conflict and the
@@ -1256,7 +1256,7 @@ pub async fn send_message_with_mentions_via_in_tx(
     let author_member_id = input.author_member_id;
     let (message, deduped) =
         match insert_message_in_tx(conn, workspace_id, input, sent_via, also_in_channel).await? {
-            Inserted::Row(message, deduped) => (message, deduped),
+            Inserted::Row(message, deduped) => (*message, deduped),
             Inserted::HiddenDuplicate => return Ok(Err(SendRejected::BeforeHistoryFloor)),
         };
 
