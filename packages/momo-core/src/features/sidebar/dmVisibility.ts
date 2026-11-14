@@ -11,6 +11,7 @@ import type { ReadProjectionPhase } from "./goneDm";
 //   1 isOpen                                                       보임 (보는 대화는 목록에서 사라지지 않는다)
 //   2 phase = error                                                보임 (모를 때 숨기는 쪽이 최악이다)
 //   3 phase = loading                                              직전 판정 유지 (hold)
+//  3a historyFromSeq ≠ null 이고 latestReadableSeq < historyFromSeq 숨김 (나간 대화, 그 뒤 읽을 글 없음 - 「숨긴 대화」에도 없다)
 //   4 starredOrSectioned                                           보임 (D1 의 명시적 의도. 이런 DM 에는 닫기를 내밀지 않는다)
 //   5 markedUnreadBeforeSeq ≠ null 또는 mentionCount > 0           보임 (사람이 직접 남긴 신호)
 //   6 counterpart = gone 이고 latestReadableSeq ≤ lastReadSeq      숨김 (나간 상대, 안 읽은 것 없음 - 명시적 닫기·되살림보다 먼저)
@@ -30,6 +31,13 @@ import type { ReadProjectionPhase } from "./goneDm";
 // `counterpart = unknown`(명부 미완·미수신)이면 6번을 적용하지 않는다. 비어 있는 명부 앞에서 모든 DM 이 「나간 멤버」가
 // 되는 것을 막는다.
 //
+// ## 3a - 나간 대화 (ADR-0177 증보 2026-11-14 D18)
+//
+// `historyFromSeq` 도 `closedAtSeq` 와 같은 세 상태다. `undefined`(이 응답이 말하지 않았다)는 3a 자리에서 **직전 판정 유지**
+// (`hold`, 3번)다 - `null` 로 읽으면 별표한 나간 대화가 4번으로 깜빡 보인다. 나가기를 싣지 않는 서버에서는 호출부가 `null` 을
+// 넘긴다(`dmReadFacts` 의 `serverCarriesLeave`). 그래서 옛 서버에서 이 줄은 아무것도 바꾸지 않는다.
+// 하한 위에 읽을 글이 하나라도 생기면 3a 를 지나 4~9번의 보통 판정을 받는다(원래 섹션에 다시 선다).
+//
 // ## 결과가 `hold` 인 이유
 //
 // 이 함수는 순수하다: 「직전」이 무엇인지 모른다. 호출부가 마지막 판정(또는 마지막 투영의 캐시로 다시 돌린 판정)을 들고 있다가
@@ -40,8 +48,11 @@ export type DmCounterpart = "present" | "gone" | "unknown";
 
 export type DmVisibility = "shown" | "hidden" | "hold";
 
-/** D8 표의 줄 번호. 「숨긴 대화」 목록이 6(나간 상대)과 7(명시적 닫기)을 가르는 데도 쓴다. */
-export type DmVisibilityRule = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9;
+/**
+ * D8 표의 줄 번호(+ D18 의 3a). 「숨긴 대화」 목록이 6(나간 상대)과 7(명시적 닫기)을 가르는 데도 쓴다. 3a(나간 대화)는 그
+ * 목록에 들지 않는다.
+ */
+export type DmVisibilityRule = 1 | 2 | 3 | "3a" | 4 | 5 | 6 | 7 | 8 | 9;
 
 export interface DmVisibilityInput {
   /** 지금 보고 있는 DM 인가. */
@@ -50,6 +61,11 @@ export interface DmVisibilityInput {
   starredOrSectioned: boolean;
   /** 내가 닫은 seq. 세 상태(위 머리말). */
   closedAtSeq: number | null | undefined;
+  /**
+   * 내 읽기 하한(D18 - 이 seq 이상만 보인다). 세 상태(위 3a 절). 나가기를 싣지 않는 서버면 `null` 이다. 키를 빠뜨릴 수 없게
+   * 필수 칸이다: 「말하지 않음」(`undefined`)과 「옛 서버」(`null`)를 호출부가 골라 넘긴다.
+   */
+  historyFromSeq: number | null | undefined;
   /** 사람이 읽을 마지막 seq(기계 메시지는 세지 않는다). */
   latestReadableSeq: number;
   lastReadSeq: number;
@@ -73,6 +89,11 @@ export function dmVisibility(input: DmVisibilityInput): DmVisibilityVerdict {
   if (input.isOpen) return verdict("shown", 1);
   if (input.phase === "error") return verdict("shown", 2);
   if (input.phase === "loading") return verdict("hold", 3);
+  // 3a 자리에서 하한을 말하지 않은 응답은 직전 판정 유지다(`null` 로 읽으면 별표한 나간 대화가 4번으로 깜빡 보인다).
+  if (input.historyFromSeq === undefined) return verdict("hold", 3);
+  if (input.historyFromSeq !== null && input.latestReadableSeq < input.historyFromSeq) {
+    return verdict("hidden", "3a");
+  }
   if (input.starredOrSectioned) return verdict("shown", 4);
   if (input.markedUnreadBeforeSeq !== null || input.mentionCount > 0) {
     return verdict("shown", 5);
@@ -88,10 +109,15 @@ export function dmVisibility(input: DmVisibilityInput): DmVisibilityVerdict {
   return verdict("shown", 9);
 }
 
-/** `dmVisibility` 입력 중 읽음 투영 한 행에서 오는 다섯 사실. */
+/** `dmVisibility` 입력 중 읽음 투영 한 행에서 오는 여섯 사실. */
 export type DmReadFacts = Pick<
   DmVisibilityInput,
-  "closedAtSeq" | "latestReadableSeq" | "lastReadSeq" | "markedUnreadBeforeSeq" | "mentionCount"
+  | "closedAtSeq"
+  | "historyFromSeq"
+  | "latestReadableSeq"
+  | "lastReadSeq"
+  | "markedUnreadBeforeSeq"
+  | "mentionCount"
 >;
 
 /**
@@ -102,11 +128,18 @@ export type DmReadFacts = Pick<
  *   * `serverCarriesClosure`: 서버가 닫기를 싣는다. 행 그대로다. 행이 읽을 seq 를 말하지 않았으면(옛 행) 전체 seq 로 대신한다 -
  *     더 많이 보이는 쪽이다. `closedAtSeq` 는 `undefined` 를 `null` 로 바꾸지 않는다(위 머리말).
  *   * 그렇지 않다(옛 서버): 닫힘이 없고(`null`) 읽을 seq 는 전체 seq 다.
+ *   * `serverCarriesLeave`(D18·D21, `dmLeaveMode` 가 `server`): 하한은 행 그대로다 - 말하지 않았으면 `undefined`(3a 자리에서 직전
+ *     판정 유지). 아니면(기본값) 하한이 없다(`null`) - 나가기를 모르는 서버에서 3a 는 아무것도 바꾸지 않는다.
  */
-export function dmReadFacts(read: ReadState | undefined, serverCarriesClosure: boolean): DmReadFacts {
+export function dmReadFacts(
+  read: ReadState | undefined,
+  serverCarriesClosure: boolean,
+  serverCarriesLeave = false
+): DmReadFacts {
   if (read === undefined) {
     return {
       closedAtSeq: null,
+      historyFromSeq: null,
       latestReadableSeq: 0,
       lastReadSeq: 0,
       markedUnreadBeforeSeq: null,
@@ -115,6 +148,7 @@ export function dmReadFacts(read: ReadState | undefined, serverCarriesClosure: b
   }
   return {
     closedAtSeq: serverCarriesClosure ? read.closedAtSeq : null,
+    historyFromSeq: serverCarriesLeave ? read.historyFromSeq : null,
     latestReadableSeq: serverCarriesClosure ? (read.latestReadableSeq ?? read.latestSeq) : read.latestSeq,
     lastReadSeq: read.lastReadSeq,
     markedUnreadBeforeSeq: read.markedUnreadBeforeSeq,

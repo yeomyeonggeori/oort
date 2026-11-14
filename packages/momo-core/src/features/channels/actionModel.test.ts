@@ -789,3 +789,75 @@ describe("줄 아이콘과 하위 메뉴 (#5777)", () => {
     expect(isChannelActionStatusIcon(undefined)).toBe(false);
   });
 });
+
+// =============================================================================
+// 「대화 나가기」 (ADR-0177 증보 2026-11-14 D21, #5824)
+// =============================================================================
+
+describe("대화 나가기 항목 leave-dm (D21)", () => {
+  /** 사전 키를 그대로 돌려주는 가짜 낱말 함수. 항목 이름이 사전 키에서 온다는 것을 잰다. */
+  const format = ((key: string) => `«${key}»`) as Parameters<typeof channelActionItems>[2];
+  const DM = channel({ kind: "dm", name: undefined });
+
+  function rowItems(over: Partial<Parameters<typeof channelActionAvailability>[0]> = {}, withFormat = true) {
+    const available = channelActionAvailability({
+      channel: DM,
+      selfRole: "member",
+      unreadCount: 0,
+      canCloseDm: true,
+      canLeaveDm: true,
+      ...over,
+    });
+    return channelActionItemsForSurface("row", available, REST, withFormat ? format : undefined);
+  }
+
+  it("사람끼리 1:1 이라고 넘기면 맨 아래에 위험색으로 서고, 숨기기와 구분선으로 갈린다", () => {
+    const items = rowItems();
+    const last = items.at(-1);
+    expect(last).toMatchObject({
+      key: "leave-dm",
+      testKey: "leave-dm",
+      label: "«channels.dmLeave.action»",
+      icon: "leave",
+      tone: "danger",
+      cluster: "danger",
+      separatorBefore: true,
+    });
+    expect(keysOf(items).slice(-2)).toEqual(["close-dm", "leave-dm"]);
+  });
+
+  it("안 읽음이 있어도 내민다(숨기기와 달리 확인 창이 있어서)", () => {
+    const items = rowItems({ unreadCount: 4, canCloseDm: false });
+    expect(keysOf(items)).toContain("leave-dm");
+    expect(keysOf(items)).not.toContain("close-dm");
+  });
+
+  it("내밀지 않는다고 넘기면(옛 서버·에이전트 DM·그룹 DM 등은 dmLeaveOffered 가 거짓) 항목이 없다", () => {
+    expect(keysOf(rowItems({ canLeaveDm: false }))).not.toContain("leave-dm");
+    expect(keysOf(rowItems({ canLeaveDm: undefined }))).not.toContain("leave-dm");
+  });
+
+  it("채널에는 없다 - 채널의 나가기는 leave 다", () => {
+    const items = rowItems({ channel: channel(), selfRole: "owner" });
+    expect(keysOf(items)).not.toContain("leave-dm");
+    expect(keysOf(items)).toContain("leave");
+  });
+
+  it("낱말 함수가 없으면 빈 이름의 줄을 그리지 않고 항목을 세우지 않는다", () => {
+    expect(keysOf(rowItems({}, false))).not.toContain("leave-dm");
+  });
+
+  it("대화 머리 메뉴(header)에도 선다", () => {
+    const available = channelActionAvailability({
+      channel: DM,
+      selfRole: "member",
+      unreadCount: 0,
+      canLeaveDm: true,
+    });
+    expect(keysOf(channelActionItemsForSurface("header", available, REST, format))).toContain("leave-dm");
+  });
+
+  it("확인 창으로 넘기므로 메뉴를 닫는다", () => {
+    expect(channelActionKeepsMenuOpen("leave-dm")).toBe(false);
+  });
+});

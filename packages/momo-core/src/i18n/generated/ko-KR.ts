@@ -1119,6 +1119,87 @@ export const catalog: MessageCatalog = {
       "value": "서버에 닿지 못했어요. 아래는 마지막으로 확인된 작업 상태예요."
     }
   ],
+  "channels.dmLeave.action": [
+    {
+      "type": 0,
+      "value": "대화 나가기"
+    }
+  ],
+  "channels.dmLeave.cancel": [
+    {
+      "type": 0,
+      "value": "취소"
+    }
+  ],
+  "channels.dmLeave.confirm": [
+    {
+      "type": 0,
+      "value": "나가기"
+    }
+  ],
+  "channels.dmLeave.confirmBody": [
+    {
+      "type": 0,
+      "value": "내 화면에서 지금까지의 대화가 사라져요. "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " 님의 화면에는 그대로 남아요."
+    }
+  ],
+  "channels.dmLeave.confirmFinal": [
+    {
+      "type": 0,
+      "value": "나간 뒤에는 되돌릴 수 없어요."
+    }
+  ],
+  "channels.dmLeave.confirmRevive": [
+    {
+      "type": 0,
+      "value": "다시 글이 오면 그 글부터 새 대화로 보여요."
+    }
+  ],
+  "channels.dmLeave.confirmScheduled": [
+    {
+      "type": 0,
+      "value": "예약해 둔 메시지 "
+    },
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "개도 취소돼요."
+    }
+  ],
+  "channels.dmLeave.confirmTitle": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " 님과의 대화에서 나갈까요?"
+    }
+  ],
+  "channels.dmLeave.done": [
+    {
+      "type": 0,
+      "value": "대화에서 나갔어요."
+    }
+  ],
+  "channels.dmLeave.failed": [
+    {
+      "type": 0,
+      "value": "나가지 못했어요. 다시 시도해 주세요."
+    }
+  ],
   "common.feedback.unavailable": [
     {
       "type": 0,

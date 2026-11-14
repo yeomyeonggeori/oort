@@ -548,3 +548,31 @@ describe("실패한 글 지키기 (채널 이동·새로고침)", () => {
     expect(JSON.stringify(Object.entries(localStorage))).not.toContain(key);
   });
 });
+
+// ADR-0177 증보 2026-11-14 D17: 나가기 전에 이미 저장된 글을 같은 키로 다시 보내면 서버가 409 `message_before_leave` 로 답한다.
+// 그 글은 나가기 전 대화의 것이라 실패 행으로 남기지 않는다.
+describe("보내기 재시도의 409 message_before_leave (D17)", () => {
+  const beforeLeave = () => new ApiError(409, "message before leave", "message_before_leave");
+
+  it("다시 보낸 글이 409 message_before_leave 면 실패 행·원인·이 기기의 못 보낸 글 없이 조용히 사라진다", async () => {
+    const id = await sendFailing("나가기 전에 쓴 글");
+    expect(out.pending.map((p) => p.status)).toEqual(["failed"]);
+    expect(readFailedSends(WS, CH, ME).map((entry) => entry.row.clientMsgId)).toEqual([id]);
+
+    api.sendMessage.mockRejectedValueOnce(beforeLeave());
+    await act(async () => {
+      await out.resend!(id);
+    });
+
+    expect(api.sendMessage.mock.calls[1]?.[2]).toBe(id);
+    expect(out.pending).toEqual([]);
+    expect(out.failureKinds.size).toBe(0);
+    expect(readFailedSends(WS, CH, ME)).toEqual([]);
+  });
+
+  it("다른 409 는 지금처럼 실패 행이다(서버 거절)", async () => {
+    await sendFailing("다른 거절", new ApiError(409, "conflict", "other_conflict"));
+    expect(out.pending.map((p) => p.status)).toEqual(["failed"]);
+    expect([...out.failureKinds.values()]).toEqual(["rejected"]);
+  });
+});

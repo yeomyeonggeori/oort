@@ -1140,6 +1140,108 @@ export const catalog: MessageCatalog = {
       "value": "We can't reach the server. Below is the work state as last confirmed."
     }
   ],
+  "channels.dmLeave.action": [
+    {
+      "type": 0,
+      "value": "Leave conversation"
+    }
+  ],
+  "channels.dmLeave.cancel": [
+    {
+      "type": 0,
+      "value": "Cancel"
+    }
+  ],
+  "channels.dmLeave.confirm": [
+    {
+      "type": 0,
+      "value": "Leave"
+    }
+  ],
+  "channels.dmLeave.confirmBody": [
+    {
+      "type": 0,
+      "value": "The conversation so far disappears from your screen. It stays as it is on "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "'s screen."
+    }
+  ],
+  "channels.dmLeave.confirmFinal": [
+    {
+      "type": 0,
+      "value": "You can't undo this after you leave."
+    }
+  ],
+  "channels.dmLeave.confirmRevive": [
+    {
+      "type": 0,
+      "value": "If a new message arrives, it starts a new conversation from that message."
+    }
+  ],
+  "channels.dmLeave.confirmScheduled": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " scheduled message will also be canceled."
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " scheduled messages will also be canceled."
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "channels.dmLeave.confirmTitle": [
+    {
+      "type": 0,
+      "value": "Leave your conversation with "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "?"
+    }
+  ],
+  "channels.dmLeave.done": [
+    {
+      "type": 0,
+      "value": "You left the conversation."
+    }
+  ],
+  "channels.dmLeave.failed": [
+    {
+      "type": 0,
+      "value": "Couldn't leave. Please try again."
+    }
+  ],
   "common.feedback.unavailable": [
     {
       "type": 0,

@@ -8,6 +8,7 @@ import {
   type Channel,
   type ReadState,
 } from "@momo/core/lib/api";
+import { readProjectionCarriesLeave } from "@momo/core/features/channels/dmLeave";
 import {
   dmClosedListReason,
   type DmCounterpart,
@@ -150,6 +151,9 @@ export function useDmVisibility(input: {
             : "unknown"
         : "unknown";
   const legacy = mode !== "server";
+  // 투영이 하한을 싣는가(D18): GET 행에 `history_from_seq` 키가 있다. 코어 3a 가 나간 대화를 숨긴다. 나가기 경로의 접기는 메뉴만
+  // 닫으므로 여기서 보지 않는다(`dmLeaveMode` 가 아니라 이것).
+  const serverCarriesLeave = readProjectionCarriesLeave(rows);
 
   // legacy 갈래의 되살림·안 읽음 판정은 서버가 닫기를 기억하면 **읽지 않는다**: 후보가 비도록 원장은 비우고 국면은 오는 중으로 준다.
   const revivalLatestSeqOf = useDmRevival({
@@ -184,6 +188,7 @@ export function useDmVisibility(input: {
         id,
         dmVerdict({
           mode,
+          serverCarriesLeave,
           phase,
           counterpart,
           starredOrSectioned:
@@ -199,7 +204,7 @@ export function useDmVisibility(input: {
       );
     }
     return out;
-  }, [dms, directory, selfMemberId, rosterReady, rosterComplete, mode, phase, prefs, readStates.byChannel, cache, revivalLatestSeqOf, goneVerdicts, ledger]);
+  }, [dms, directory, selfMemberId, rosterReady, rosterComplete, mode, serverCarriesLeave, phase, prefs, readStates.byChannel, cache, revivalLatestSeqOf, goneVerdicts, ledger]);
 
   const verdictOf = useCallback(
     (channelId: string): DmVerdict => verdicts.get(idKey(channelId)) ?? { state: "shown", rule: 9 },

@@ -51,6 +51,14 @@ describe('parse / closedIdsOf', () => {
     ]);
     expect(closedIdsOf(map)).toEqual(['a', 'b']);
   });
+  it('내가 나가 숨은 DM(3a, ADR-0177 증보 D18)도 적는다: 콜드 스타트 첫 프레임에 나간 대화가 잠깐 보이지 않게', () => {
+    const map = new Map<string, DmVerdict>([
+      ['left', verdict(false, '3a')],
+      ['closed', verdict(false, 7)],
+      ['back', verdict(true, 9)],
+    ]);
+    expect(closedIdsOf(map)).toEqual(['closed', 'left']);
+  });
 });
 
 describe('읽기·쓰기', () => {
