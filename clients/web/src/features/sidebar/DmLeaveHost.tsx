@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type RefObject } from "react";
 import { createPortal } from "react-dom";
-import { useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
 import { DoorOpen } from "lucide-react";
 import { leaveDm, uuidEq, type ReadState } from "@momo/core/lib/api";
@@ -103,6 +103,9 @@ export function DmLeaveHost({
   const { request } = useDmLeaveStore();
   const client = useQueryClient();
   const navigate = useNavigate();
+  const pathname = useLocation().pathname;
+  const pathnameRef = useRef(pathname);
+  pathnameRef.current = pathname;
   const shellNav = useShellNav();
   const messages = useMessages();
   const scheduled = useScheduled();
@@ -110,12 +113,16 @@ export function DmLeaveHost({
   const [busy, setBusy] = useState(false);
   const [failed, setFailed] = useState(false);
   // 닫힌 뒤 캐럿이 갈 곳. 성공이면 이웃 줄(또는 본문), 아니면 연 자리.
-  const outcomeRef = useRef<{ kind: "left"; neighborId: string | null; openDrawer: boolean } | null>(null);
+  // `drawerFrom`: 좁은 창에서 머리 ⋮ 로 나갔으면 서랍(목록)을 연다. 주소가 그 자리(`drawerFrom`)를 떠난 뒤에 연다 - `null` 이면 주소가 안 바뀐다.
+  const outcomeRef = useRef<
+    { kind: "left"; neighborId: string | null; openDrawer: boolean; drawerFrom: string | null } | null
+  >(null);
   const shellNavRef = useRef(shellNav);
   shellNavRef.current = shellNav;
   const openerRef = useRef<HTMLElement | null>(null);
   const flightRef = useRef(0);
   const [secondPass, setSecondPass] = useState<PendingSecondPass | null>(null);
+  const [drawerAfterRoute, setDrawerAfterRoute] = useState<string | null>(null);
 
   // 요청이 오면 그 순간의 seq 를 적는다(확인 창이 열린 때). 줄 메뉴로 왔어도 그 대화가 열려 있으면 이력이 본 가장 큰 seq 를 함께 본다.
   useEffect(() => {
@@ -144,6 +151,14 @@ export function DmLeaveHost({
     port.forgetFailedSends(secondPass.channelId);
     setSecondPass(null);
   }, [secondPass, openId, client, workspaceId, selfMemberId]);
+
+  // 좁은 창 머리 ⋮ 로 나간 뒤의 서랍. 셸은 주소가 바뀐 커밋의 효과에서 서랍을 닫는다(같은 커밋의 효과는 자식 → 부모 차례라 이 효과가
+  // 먼저 돈다). 그래서 주소가 떠난 것을 본 뒤 **다음 프레임**에 연다 - 주소 커밋이 확인 창 닫힘보다 늦게 와도 서랍이 다시 닫히지 않는다.
+  useEffect(() => {
+    if (drawerAfterRoute === null || pathname === drawerAfterRoute) return;
+    setDrawerAfterRoute(null);
+    requestAnimationFrame(() => shellNavRef.current.openDrawer());
+  }, [drawerAfterRoute, pathname]);
 
   // 예약 N 개(D21). 서버는 그 방의 내 `pending`·`failed` 를 같이 취소한다. 「모름」을 0 으로 읽지 않는다: 첫 목록이 오기 전에는 창을 열지
   // 않고(사이드바가 앱을 열 때 이미 읽어 두어 보통은 바로다), 못 읽었으면 그 까닭을 말하고 확정을 잠근다.
@@ -181,9 +196,10 @@ export function DmLeaveHost({
           return;
         }
         if (outcome.openDrawer) {
-          // 좁은 창에서 머리 ⋮ 로 나갔다: 직전 화면인 목록(서랍)을 연다. 주소가 바뀐 커밋이 서랍을 닫은 **뒤**에 연다(다음 프레임).
+          // 좁은 창에서 머리 ⋮ 로 나갔다: 직전 화면인 목록(서랍)을 연다. 주소가 바뀐 커밋이 서랍을 닫은 **뒤**에 연다(위 효과).
           // 캐럿은 서랍이 열리며 스스로 잡는다(첫 정거장 = 닫기 단추) - 닫힌 서랍 안의 줄이나 가려질 본문으로 보내지 않는다.
-          requestAnimationFrame(() => shellNavRef.current.openDrawer());
+          if (outcome.drawerFrom === null) requestAnimationFrame(() => shellNavRef.current.openDrawer());
+          else setDrawerAfterRoute(outcome.drawerFrom);
           return;
         }
         requestAnimationFrame(() => {
@@ -240,6 +256,8 @@ export function DmLeaveHost({
     // 이 행보다 먼저 떠난 투영 읽기가 하한 없는 행으로 덮지 않게 다시 읽는다(나가는 중인 읽기는 버리고 새로 받는다).
     void client.invalidateQueries({ queryKey: ["read-state", workspaceId] });
     // 4. 보고 있던 대화면 떠난다.
+    const fromPath = pathnameRef.current;
+    const moves = openId !== null && uuidEq(openId, req.channelId) && fromPath !== "/";
     if (openId !== null && uuidEq(openId, req.channelId)) navigate("/");
     // 6. 주소가 바뀐 뒤의 둘째 정리.
     setSecondPass({ channelId: req.channelId, rootIds });
@@ -248,6 +266,7 @@ export function DmLeaveHost({
       kind: "left",
       neighborId,
       openDrawer: req.via === "header" && shellNav.isMobile && !shellNav.drawerOpen,
+      drawerFrom: moves ? fromPath : null,
     };
     setBusy(false);
     endDmLeaveRequest();
