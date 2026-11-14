@@ -503,6 +503,35 @@ async fn the_policy_hides_only_the_requesters_rows_below_their_floor() {
         0,
         "and still cannot see this one"
     );
+
+    // 6b: re-pointing the owner scope (`app.member_id`, what a foreign binding does) inside the
+    // requester's transaction changes nothing — the policy reads the requester value only.
+    let seen_with_owner_moved = momo_db::tenant::REQUEST_HUMAN_MEMBER
+        .scope(
+            a.id,
+            with_tenant_tx(&w.app, ws, move |conn| {
+                Box::pin(async move {
+                    sqlx::query("SELECT set_config('app.member_id', $1, true)")
+                        .bind(b.id.to_string())
+                        .execute(&mut *conn)
+                        .await
+                        .map_err(DbError::from)?;
+                    let n: i64 =
+                        sqlx::query_scalar("SELECT count(*) FROM message WHERE channel_id = $1")
+                            .bind(dm)
+                            .fetch_one(&mut *conn)
+                            .await
+                            .map_err(DbError::from)?;
+                    Ok(n)
+                })
+            }),
+        )
+        .await
+        .expect("count with the owner scope moved");
+    assert_eq!(
+        seen_with_owner_moved, 2,
+        "the owner scope is not the requester"
+    );
 }
 
 #[tokio::test]

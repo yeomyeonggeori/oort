@@ -12960,7 +12960,20 @@ paths:
           description: >
             Channel/root not found or not provisioned, or a quote target that is
             not in this channel (a target in another channel or workspace is
-            answered identically to one that does not exist).
+            answered identically to one that does not exist). A root or quote
+            target below the sender's own read floor (ADR-0177 amendment
+            2026-11-14 D17, after leaving a 1:1) is answered the same way.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: >
+            `code: message_before_leave` (ADR-0177 amendment 2026-11-14 D17):
+            a retry whose `clientMsgId` names a message the sender sent before
+            leaving this 1:1, which is below the sender's own read floor.
+            Nothing is stored and no seq is spent; the client drops that
+            pending send. Other conflicts of this route keep their own codes.
           content:
             application/json:
               schema:
@@ -13477,6 +13490,9 @@ paths:
         revives. The `PUT .../read-state` response and the realtime
         `read_state` frame do not carry them (ADR-0177 D10: no closure event);
         other devices pick a closure up on their next read of this list.
+        ADR-0177 amendment 2026-11-14 D18 (#5822) adds `history_from_seq` to
+        every row (always present): the caller's own read floor after leaving
+        a one-to-one conversation, JSON null for full history.
         ADR-0124 amendment 4 (#5667) adds `followed_unread_reply_count` to every
         row (always present, `0` when none): the unread replies in the threads
         the caller follows in that channel. When it may have changed - a new
@@ -13667,6 +13683,92 @@ paths:
         "404":
           description: >
             Not an unarchived DM the caller is a live participant of.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
+  /v1/workspaces/{workspaceId}/channels/{channelId}/dm-leave:
+    put:
+      tags: [dms]
+      operationId: leaveDm
+      summary: Leave a one-to-one conversation between two people, having seen up to `seenSeq`.
+      description: >
+        ADR-0177 amendment 2026-11-14 D14-D18 (#5822). Participation and
+        messages stay; the caller's own read floor
+        (`membership.history_from_seq`) rises to
+        `GREATEST(existing, LEAST(seenSeq, channel head) + 1)`, and from then
+        on the server returns none of this conversation's messages below it to
+        the caller - history, threads, search, pins, reactions, inbox,
+        attachments and push fetches are all closed by one `message` read
+        policy. `seenSeq` is the largest seq the client holds for this DM (the
+        read-state row's `latest_seq` or a newer realtime message), so a
+        message that arrived while the confirmation was on screen stays above
+        the floor. The floor never goes down: a repeat is the same `204`, a
+        late retransmit lowers nothing, and there is no `DELETE`. In the same
+        transaction the caller's own schedules in this channel are cancelled,
+        their reminders, thread follows and inbox items below the floor are
+        removed, a pending agent admission request in the room is cancelled
+        (each person's card becomes `cancelled`), the caller's read position
+        moves to `floor - 1` (unread, mentions and the mark-unread signal
+        settle; one `read_state` frame goes to the caller's own personal
+        channel), the caller's DM closure watermark moves to `floor - 1`, and
+        one `dm.left` audit row is written when the floor moved. No message is
+        written and the other participant sees no line. A new message from
+        either side is above the floor and is delivered as usual. The owner is
+        always the authenticated principal. Human bearers only: the path is
+        absent from every agent bearer's route allow-list, and the handler
+        refuses a non-human principal again.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/ChannelId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PutDmClosureRequest"
+      responses:
+        "204":
+          description: Left (or the floor was already at least this high).
+        "400":
+          description: >
+            `seenSeq` is missing, negative, not an integer or past int64, the
+            body has an unknown key or is not JSON, or an id is invalid.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: >
+            An agent bearer or any other non-human credential (human bearers
+            only), or workspace scope mismatch.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: >
+            Not an unarchived DM the caller is a live participant of (any other
+            channel kind, a DM of other members, an archived DM, an unknown id).
+            Checked before anything else, so the answer never reveals what kind
+            of room another member's DM is.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: >
+            `code: dm_leave_unavailable` - a DM the caller is in, but not a
+            one-to-one conversation between two people (D20): an agent is a
+            participant, a group or agent-admitted room, or no live counterpart.
+            Nothing is written.
           content:
             application/json:
               schema:
@@ -27661,6 +27763,7 @@ components:
         - latest_readable_seq
         - closed_at_seq
         - followed_unread_reply_count
+        - history_from_seq
       properties:
         channel_id:
           type: string
@@ -27728,6 +27831,20 @@ components:
             ignores channel mute and the notification pause (ADR-0124 D2,
             D4-A). The `followed_unread.updated` frame on the caller's personal
             channel says when to read it again.
+        history_from_seq:
+          type: integer
+          format: int64
+          minimum: 1
+          nullable: true
+          description: >
+            ADR-0177 amendment 2026-11-14 D18 (#5822). The **requesting
+            member's own** read floor in this channel after leaving a
+            one-to-one conversation (`PUT .../dm-leave`): the server returns
+            only messages with `seq >= history_from_seq` to this member. JSON
+            null = full history. Always present; a client tells a server that
+            supports leaving from an older one by the key being there (D21).
+            Another member's floor is never returned. Not on the `PUT
+            .../read-state` response or the `read_state` frame.
 
     ReadStateListResponse:
       type: object
