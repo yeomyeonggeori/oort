@@ -7,7 +7,9 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Channel, MembershipRole, ReadState } from "@momo/core/lib/api";
 import {
+  CHANNEL_COPY_FAILURE,
   CHANNEL_COPY_ID_DONE_LABEL,
+  CHANNEL_COPY_UNAVAILABLE,
   CHANNEL_COPY_ID_LABEL,
   CHANNEL_LEAVE_LABEL,
   CHANNEL_MARK_READ_LABEL,
@@ -348,22 +350,34 @@ function clickItem(testKey: string) {
   });
 }
 
+/** 하위 판(포털로 따로 뜬다). 여는 줄의 testid 에 `-menu` 를 붙인 이름이다(#5777). */
+function subMenu(triggerKey: "copy-group" | "move-to-section"): HTMLElement | null {
+  return document.querySelector<HTMLElement>(
+    `[data-testid="channel-row-${triggerKey}-menu"]`
+  );
+}
+
+/** 「복사 ›」·「섹션으로 이동 ›」을 눌러 하위 판을 연다(Radix 의 여는 줄은 클릭으로 연다). */
+function openSub(triggerKey: "copy-group" | "move-to-section") {
+  clickItem(triggerKey);
+  if (!subMenu(triggerKey)) throw new Error(`하위 판이 열리지 않았다: ${triggerKey}`);
+}
+
 describe("사이드바 행 우클릭 (BT-1 / #1929)", () => {
   it("우클릭이 이 행의 메뉴를 연다", () => {
     mountRow();
     expect(menu()).toBeNull();
     rightClick();
     expect(menu()).not.toBeNull();
-    // Buzz 의 차례다(#3963): 복사(제목 + 이름·링크·ID) │ 읽음 · 알림 │ 나가기.
+    // Buzz 의 차례다(#3963 → #5777): 「복사 ›」(하위 메뉴) │ 읽음 · 알림 │ 나가기. 이름·링크·ID 는
+    // 하위 판 안에 있고, 머리글 줄은 없다.
     expect(labels()).toEqual([
       "복사",
-      "이름 복사하기",
-      COPY_LINK_ACTION_LABEL,
-      CHANNEL_COPY_ID_LABEL,
       CHANNEL_MARK_READ_LABEL,
       CHANNEL_MUTE_LABEL,
       CHANNEL_LEAVE_LABEL,
     ]);
+    expect(item("copy-name")).toBeNull();
     // 메뉴가 열려 있는 동안 행 자리가 그것을 말한다: 포털로 떠 있는 패널이
     // 어느 행의 것인지 아는 유일한 표식.
     expect(trigger().getAttribute("data-state")).toBe("open");
@@ -491,12 +505,15 @@ describe("링크·이름 복사", () => {
     vi.stubGlobal("navigator", { clipboard: { writeText } });
     mountRow();
     rightClick();
+    openSub("copy-group");
     clickItem("copy-link");
     await flush();
     expect(writeText).toHaveBeenCalledTimes(1);
     expect(String(writeText.mock.calls[0][0])).toContain(`#/c/${CHANNEL_ID}`);
     expect(String(writeText.mock.calls[0][0])).not.toContain("msg=");
+    // 영수증 동안 두 판이 다 열려 있다(위 판 · 하위 판).
     expect(menu()).not.toBeNull();
+    expect(subMenu("copy-group")).not.toBeNull();
     expect(item("copy-link")?.textContent?.trim()).toBe(COPY_LINK_DONE_LABEL);
   });
 
@@ -505,6 +522,7 @@ describe("링크·이름 복사", () => {
     vi.stubGlobal("navigator", { clipboard: { writeText } });
     mountRow({ title: "김인턴" });
     rightClick();
+    openSub("copy-group");
     clickItem("copy-name");
     await flush();
     expect(writeText).toHaveBeenCalledWith("김인턴");
@@ -514,11 +532,15 @@ describe("링크·이름 복사", () => {
     vi.stubGlobal("navigator", {});
     mountRow();
     rightClick();
+    openSub("copy-group");
     clickItem("copy-link");
     await flush();
     const banner = document.querySelector('[data-testid="channel-row-action-error"]');
     expect(banner?.textContent).toContain("클립보드");
     expect(banner?.textContent).not.toContain("다시");
+    // 배너는 위 판 맨 위에 서고(#5777), 하위 판은 열린 채라 무엇을 하다 실패했는지 그 자리에 남는다.
+    expect(menu()?.contains(banner)).toBe(true);
+    expect(subMenu("copy-group")).not.toBeNull();
   });
 });
 
@@ -547,14 +569,18 @@ describe("나가기", () => {
     });
     rightClick();
     expect(item("leave")).toBeNull();
+    // 「복사 ›」(하위 메뉴) │ 읽음 · 알림 (#5777). 복사 셋은 하위 판 안에 있다.
     expect(labels()).toEqual([
       "복사",
-      "이름 복사하기",
-      COPY_LINK_ACTION_LABEL,
-      CHANNEL_COPY_ID_LABEL,
       CHANNEL_MARK_READ_LABEL,
       CHANNEL_MUTE_LABEL,
     ]);
+    openSub("copy-group");
+    expect(
+      Array.from(subMenu("copy-group")?.querySelectorAll('[role="menuitem"]') ?? []).map(
+        (el) => el.textContent?.trim()
+      )
+    ).toEqual(["이름 복사하기", COPY_LINK_ACTION_LABEL, CHANNEL_COPY_ID_LABEL]);
   });
 
   it("일반 멤버에게는 막다른 길을 내놓지 않는다", () => {
@@ -644,11 +670,11 @@ describe("메뉴 안의 화살표 순회 (design-review #1937 B-1)", () => {
     pressKey(link, "F10", { shiftKey: true });
     expect(menu()).not.toBeNull();
     await flush();
-    // Radix 는 열면서 첫 항목에 캐럿을 둔다. 첫 항목은 복사 무리의 첫 행이다(#3963).
-    expect(document.activeElement).toBe(item("copy-name"));
+    // Radix 는 열면서 첫 항목에 캐럿을 둔다. 첫 항목은 「복사 ›」 여는 줄이다(#5777).
+    expect(document.activeElement).toBe(item("copy-group"));
 
-    // 복사 셋과 읽음 처리를 지나 알림에 선다. 제목(「복사」)은 항목이 아니라서 걸리지 않는다.
-    for (let step = 0; step < 4; step += 1) await arrow("ArrowDown");
+    // 「복사 ›」와 읽음 처리를 지나 알림에 선다. ↓ 는 하위 판을 열지 않는다(→ 가 연다).
+    for (let step = 0; step < 2; step += 1) await arrow("ArrowDown");
     expect(menu()).not.toBeNull();
     expect(document.activeElement).toBe(item("mute-toggle"));
 
@@ -658,7 +684,7 @@ describe("메뉴 안의 화살표 순회 (design-review #1937 B-1)", () => {
     expect(setChannelNotificationPref).toHaveBeenCalledWith(WS, CHANNEL_ID, true);
   });
 
-  it("↓ 로 여섯 항목을 끝까지 걸어도 메뉴가 살아 있다", async () => {
+  it("↓ 로 네 항목을 끝까지 걸어도 메뉴가 살아 있다", async () => {
     mountRow();
     const link = row();
     act(() => link.focus());
@@ -667,19 +693,19 @@ describe("메뉴 안의 화살표 순회 (design-review #1937 B-1)", () => {
     const walked = [
       document.activeElement?.getAttribute("data-testid"),
     ];
-    for (let step = 0; step < 5; step += 1) {
+    for (let step = 0; step < 3; step += 1) {
       await arrow("ArrowDown");
       walked.push(document.activeElement?.getAttribute("data-testid") ?? null);
     }
     expect(walked).toEqual([
-      "channel-row-copy-name",
-      "channel-row-copy-link",
-      "channel-row-copy-id",
+      "channel-row-copy-group",
       "channel-row-mark-read",
       "channel-row-mute-toggle",
       "channel-row-leave",
     ]);
     expect(menu()).not.toBeNull();
+    // ↓ 만으로는 하위 판이 열리지 않는다.
+    expect(subMenu("copy-group")).toBeNull();
   });
 
   it("↑ 도 메뉴 밖으로 나가지 않는다", async () => {
@@ -719,6 +745,100 @@ describe("메뉴 안의 화살표 순회 (design-review #1937 B-1)", () => {
     expect(document.activeElement).toBe(
       document.querySelector('[data-testid="nav-activity"]')
     );
+  });
+});
+
+describe("하위 메뉴의 키보드 (#5777)", () => {
+  async function key(name: string) {
+    pressKey(document.activeElement, name);
+    await flush();
+  }
+
+  async function openByKeyboard() {
+    mountRow({
+      sections: [{ id: "sec-1", label: "출시 준비" }],
+      onMoveToSection: () => undefined,
+    });
+    const link = row();
+    act(() => link.focus());
+    pressKey(link, "F10", { shiftKey: true });
+    await flush();
+    expect(document.activeElement).toBe(item("copy-group"));
+    return link;
+  }
+
+  it("→ 가 「복사 ›」를 열고 첫 줄에 캐럿을 두고, ← 가 닫고 여는 줄로 돌아온다", async () => {
+    await openByKeyboard();
+    await key("ArrowRight");
+    expect(subMenu("copy-group")).not.toBeNull();
+    expect(document.activeElement).toBe(item("copy-name"));
+    expect(item("copy-group")?.getAttribute("aria-expanded")).toBe("true");
+    await key("ArrowDown");
+    expect(document.activeElement).toBe(item("copy-link"));
+    await key("ArrowLeft");
+    expect(subMenu("copy-group")).toBeNull();
+    expect(menu()).not.toBeNull();
+    expect(document.activeElement).toBe(item("copy-group"));
+  });
+
+  it("Enter 도 하위 메뉴를 연다, 그리고 하위 판의 Enter 가 그 줄을 실행한다", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    vi.stubGlobal("navigator", { clipboard: { writeText } });
+    await openByKeyboard();
+    await key("Enter");
+    expect(document.activeElement).toBe(item("copy-name"));
+    await key("ArrowDown");
+    await key("ArrowDown");
+    expect(document.activeElement).toBe(item("copy-id"));
+    await key("Enter");
+    expect(writeText).toHaveBeenCalledWith(CHANNEL_ID);
+  });
+
+  it("하위 판 안의 ↓ · ← 는 사이드바 행 순회를 깨우지 않는다 (포털 키, #1937 B-1 의 둘째 포털)", async () => {
+    const link = await openByKeyboard();
+    await key("ArrowRight");
+    for (let step = 0; step < 4; step += 1) await key("ArrowDown");
+    const activity = document.querySelector('[data-testid="nav-activity"]');
+    expect(document.activeElement).not.toBe(activity);
+    expect(document.activeElement).not.toBe(link);
+    expect(subMenu("copy-group")?.contains(document.activeElement)).toBe(true);
+    await key("ArrowLeft");
+    expect(document.activeElement).not.toBe(activity);
+    expect(menu()?.contains(document.activeElement)).toBe(true);
+  });
+
+  it("하위 판의 Esc 는 메뉴를 통째로 닫고 캐럿을 그 행으로 돌린다", async () => {
+    const link = await openByKeyboard();
+    await key("ArrowDown");
+    expect(document.activeElement).toBe(item("move-to-section"));
+    await key("ArrowRight");
+    expect(subMenu("move-to-section")).not.toBeNull();
+    expect(document.activeElement).toBe(item("section-base"));
+    pressKey(document.activeElement, "Escape");
+    expect(subMenu("move-to-section")).toBeNull();
+    expect(menu()).toBeNull();
+    await flush();
+    expect(document.activeElement).toBe(link);
+  });
+
+  it("하위 판에서 목적지를 고르면 메뉴가 통째로 닫히고 배치가 한 번 불린다", async () => {
+    const moved: (string | null)[] = [];
+    mountRow({
+      sections: [{ id: "sec-1", label: "출시 준비" }],
+      onMoveToSection: (id) => moved.push(id),
+    });
+    const link = row();
+    act(() => link.focus());
+    pressKey(link, "F10", { shiftKey: true });
+    await flush();
+    await key("ArrowDown");
+    await key("ArrowRight");
+    await key("ArrowDown");
+    expect(document.activeElement).toBe(item("section-sec-1"));
+    await key("Enter");
+    expect(moved).toEqual(["sec-1"]);
+    expect(menu()).toBeNull();
+    expect(subMenu("move-to-section")).toBeNull();
   });
 });
 
@@ -928,15 +1048,21 @@ describe("섹션으로 이동", () => {
     expect(item("move-to-section")).toBeNull();
   });
 
-  it("제목 하나와 목적지들이 라디오로 선다 (서브메뉴가 아니다)", () => {
+  it("「섹션으로 이동 ›」 하위 메뉴를 열면 목적지가 라디오로 선다 (#5777)", () => {
     mountRow({ sections: SECTIONS, onMoveToSection: () => undefined });
     rightClick();
-    const label = item("move-to-section");
-    expect(label?.textContent).toBe("섹션으로 이동");
-    // 이 레포는 서브메뉴를 이슈 번호까지 달아 금지한다(dropdown-menu.tsx 머리말).
-    // 그 대체물이 「화면에 남는 행들 위의 제목」이고, 그래서 목적지는 열지 않아도
-    // 전부 보인다.
-    expect(menu()?.querySelectorAll('[role="menuitemradio"]').length).toBe(3);
+    const trigger = item("move-to-section");
+    expect(trigger?.textContent).toBe("섹션으로 이동");
+    // 목적지는 잠긴 줄이 없는 묶음이라 하위 메뉴로 접는다(dropdown-menu.tsx 머리말의 좁힌 규칙).
+    expect(trigger?.getAttribute("role")).toBe("menuitem");
+    expect(trigger?.getAttribute("aria-haspopup")).toBe("menu");
+    expect(trigger?.getAttribute("aria-expanded")).toBe("false");
+    expect(menu()?.querySelectorAll('[role="menuitemradio"]').length).toBe(0);
+    openSub("move-to-section");
+    expect(trigger?.getAttribute("aria-expanded")).toBe("true");
+    expect(
+      subMenu("move-to-section")?.querySelectorAll('[role="menuitemradio"]').length
+    ).toBe(3);
     expect(
       document.querySelector('[data-testid="channel-row-section-base"]')
         ?.textContent
@@ -954,6 +1080,7 @@ describe("섹션으로 이동", () => {
       onMoveToSection: () => undefined,
     });
     rightClick();
+    openSub("move-to-section");
     expect(
       document
         .querySelector('[data-testid="channel-row-section-sec-1"]')
@@ -969,6 +1096,7 @@ describe("섹션으로 이동", () => {
   it("배치가 없으면 기본 섹션이 체크다", () => {
     mountRow({ sections: SECTIONS, onMoveToSection: () => undefined });
     rightClick();
+    openSub("move-to-section");
     expect(
       document
         .querySelector('[data-testid="channel-row-section-base"]')
@@ -983,6 +1111,7 @@ describe("섹션으로 이동", () => {
       onMoveToSection: (id) => moved.push(id),
     });
     rightClick();
+    openSub("move-to-section");
     act(() => {
       document
         .querySelector<HTMLElement>('[data-testid="channel-row-section-sec-2"]')
@@ -1002,6 +1131,7 @@ describe("섹션으로 이동", () => {
       onMoveToSection: (id) => moved.push(id),
     });
     rightClick();
+    openSub("move-to-section");
     act(() => {
       document
         .querySelector<HTMLElement>('[data-testid="channel-row-section-base"]')
@@ -1010,24 +1140,25 @@ describe("섹션으로 이동", () => {
     expect(moved).toEqual([null]);
   });
 
-  it("무리는 이름을 갖는다", () => {
-    // Radix 의 Label 은 aria 를 하나도 걸어 주지 않는다. 제목이 그냥 장식이면
-    // 스크린리더에는 이름 없는 라디오 무리가 선다.
+  it("하위 판은 여는 줄의 글자를 이름으로 갖는다", () => {
+    // 예전 제목 줄(Radix Label)은 aria 를 걸어 주지 않아 `aria-labelledby` 를 손으로 이었다. 하위 판은
+    // Radix 가 여는 줄을 이름으로 단다. 두 판 다 본다 - 하나만 보면 다른 하나가 이름 없이 서도 초록이다.
     mountRow({ sections: SECTIONS, onMoveToSection: () => undefined });
     rightClick();
-    // 이 메뉴에는 이름을 가진 무리가 둘이다: 「복사」(#3963)와 「섹션으로 이동」. 무리마다
-    // 이름이 풀리는지 전부 본다 - 하나만 보면 다른 하나가 이름 없이 서도 초록이다.
-    const groups = Array.from(
-      menu()?.querySelectorAll('[role="group"][aria-labelledby]') ?? []
-    );
-    const named = groups.map((group) =>
-      document.getElementById(group.getAttribute("aria-labelledby") ?? "")?.textContent
-    );
+    // 한 번에 하위 판 하나만 선다(다른 여는 줄을 누르면 앞 판이 닫힌다). 그래서 하나씩 열어 본다.
+    const named = (["copy-group", "move-to-section"] as const).map((key) => {
+      openSub(key);
+      const panel = subMenu(key);
+      expect(panel?.getAttribute("role")).toBe("menu");
+      return document.getElementById(panel?.getAttribute("aria-labelledby") ?? "")
+        ?.textContent;
+    });
     expect(named).toEqual(["복사", "섹션으로 이동"]);
-    // 라디오 행은 「섹션으로 이동」 무리 안에 선다.
-    const move = groups[1];
-    expect(move.querySelectorAll('[role="menuitemradio"]').length).toBe(3);
-    expect(groups[0].querySelectorAll('[role="menuitemradio"]').length).toBe(0);
+    // 라디오 행은 「섹션으로 이동」 판 안에 서고, 복사 판에는 없다.
+    expect(
+      subMenu("move-to-section")?.querySelectorAll('[role="menuitemradio"]').length
+    ).toBe(3);
+    expect(subMenu("copy-group")).toBeNull();
   });
 });
 
@@ -1110,28 +1241,82 @@ describe("별표", () => {
 // =============================================================================
 
 describe("복사 무리 (#3963)", () => {
-  it("제목 하나와 세 행이 서브메뉴가 아니라 화면에 남는다", () => {
+  it("머리글 줄 대신 「복사 ›」 하나가 서고, 열면 세 줄이 하위 판에 선다 (#5777)", () => {
     mountRow();
     rightClick();
-    const title = item("copy-group");
-    expect(title?.textContent).toBe("복사");
-    const group = menu()?.querySelector('[role="group"][aria-labelledby]');
-    expect(group).not.toBeNull();
-    expect(document.getElementById(group?.getAttribute("aria-labelledby") ?? "")).toBe(
-      title
-    );
-    // 이름 · 링크 · ID, 이 차례. 접히지 않고 전부 보인다.
+    const trigger = item("copy-group");
+    expect(trigger?.textContent).toBe("복사");
+    expect(trigger?.getAttribute("role")).toBe("menuitem");
+    expect(trigger?.getAttribute("aria-haspopup")).toBe("menu");
+    // 머리글(제목) 줄이 없다: 위 판에는 무리 제목도 이름 붙은 묶음도 없다.
+    expect(menu()?.querySelector('[role="group"][aria-labelledby]')).toBeNull();
+    expect(trigger?.querySelector("[data-submenu-chevron]")).not.toBeNull();
+    openSub("copy-group");
+    // 이름 · 링크 · ID, 이 차례.
     expect(
-      Array.from(group?.querySelectorAll('[role="menuitem"]') ?? []).map((el) =>
-        el.getAttribute("data-testid")
+      Array.from(subMenu("copy-group")?.querySelectorAll('[role="menuitem"]') ?? []).map(
+        (el) => el.getAttribute("data-testid")
       )
     ).toEqual([
       "channel-row-copy-name",
       "channel-row-copy-link",
       "channel-row-copy-id",
     ]);
-    // 이 레포는 서브메뉴를 금지한다(dropdown-menu.tsx 머리말, 이슈 #1383).
-    expect(menu()?.querySelector('[aria-haspopup="menu"]')).toBeNull();
+  });
+
+  it("하위 메뉴를 여는 줄끼리는 선 없이 붙는다 (Buzz 의 `복사 ›` · `섹션으로 이동 ›`)", () => {
+    mountRow({
+      sections: [{ id: "sec-1", label: "출시 준비" }],
+      onMoveToSection: () => undefined,
+    });
+    rightClick();
+    const children = Array.from(menu()?.children ?? []);
+    expect(children[0]).toBe(item("copy-group"));
+    expect(children[1]).toBe(item("move-to-section"));
+    expect(children[2].getAttribute("role")).toBe("separator");
+  });
+
+  it("모든 줄이 첫 자식으로 아이콘 하나를 든다 — 아이콘 세로 줄이 끊기지 않는다 (#5777)", () => {
+    // 위치(px)는 jsdom 이 재지 못한다(레인 `capture-5777.mjs` 가 잰다). 여기서는 그 전제를 잠근다:
+    // 위 판과 복사 판의 모든 줄(여는 줄 포함)이 맨 앞에 16px 아이콘을 하나 들고, 낱말이 서로 다르다.
+    mountRow({
+      sections: [{ id: "sec-1", label: "출시 준비" }],
+      onMoveToSection: () => undefined,
+      onToggleStar: () => undefined,
+    });
+    rightClick();
+    openSub("copy-group");
+    const rows = [
+      ...Array.from(menu()?.querySelectorAll('[role="menuitem"]') ?? []),
+      ...Array.from(subMenu("copy-group")?.querySelectorAll('[role="menuitem"]') ?? []),
+    ];
+    expect(rows.length).toBe(9);
+    const icons = rows.map((row) => {
+      const first = row.firstElementChild;
+      expect(first?.tagName.toLowerCase()).toBe("svg");
+      expect(first?.getAttribute("class")).toContain("size-4");
+      expect(first?.getAttribute("aria-hidden")).toBe("true");
+      return first?.getAttribute("data-menu-icon");
+    });
+    expect(icons).toEqual([
+      "copy",
+      "section",
+      "mark-read",
+      "bell",
+      "star",
+      "leave",
+      "copy-name",
+      "copy-link",
+      "copy-id",
+    ]);
+  });
+
+  it("「나가기」는 문 글리프이고 로그아웃 글리프가 아니다 (#5777 M2)", () => {
+    mountRow();
+    rightClick();
+    const glyph = item("leave")?.querySelector("svg")?.getAttribute("class") ?? "";
+    expect(glyph).toContain("lucide-door-open");
+    expect(glyph).not.toContain("lucide-log-out");
   });
 
   it("구분선이 복사 무리와 다음 무리 사이에만 선다", () => {
@@ -1151,6 +1336,7 @@ describe("ID 복사 (#3963)", () => {
     vi.stubGlobal("navigator", { clipboard: { writeText } });
     mountRow();
     rightClick();
+    openSub("copy-group");
     expect(item("copy-id")?.textContent?.trim()).toBe(CHANNEL_COPY_ID_LABEL);
     clickItem("copy-id");
     await flush();
@@ -1165,9 +1351,50 @@ describe("ID 복사 (#3963)", () => {
     vi.stubGlobal("navigator", { clipboard: { writeText } });
     mountRow({ channel: channelFixture({ kind: "dm", name: undefined }), title: "이도현" });
     rightClick();
+    openSub("copy-group");
     clickItem("copy-id");
     await flush();
     expect(writeText).toHaveBeenCalledWith(CHANNEL_ID);
+  });
+});
+
+describe("복사 실패는 누른 줄이 말한다 (#5777 M1)", () => {
+  it("쓰기가 거절되면 배너가 서지 않고 그 줄의 글자만 바뀐다", async () => {
+    const writeText = vi.fn().mockRejectedValue(new Error("denied"));
+    vi.stubGlobal("navigator", { clipboard: { writeText } });
+    mountRow();
+    rightClick();
+    openSub("copy-group");
+    const before = Array.from(menu()?.children ?? []).length;
+    clickItem("copy-id");
+    await flush();
+    expect(menu()).not.toBeNull();
+    // 판의 자식 수가 늘지 않는다 = 위 판 맨 위에 보이는 줄이 서지 않았다(보이지 않는 알림은 sr-only).
+    expect(
+      document.querySelector('[data-testid="channel-row-action-error"]')?.className
+    ).toContain("sr-only");
+    expect(Array.from(menu()?.children ?? []).length).toBe(before + 1);
+    expect(item("copy-id")?.hasAttribute("data-copy-failed")).toBe(true);
+    expect(item("copy-id")?.textContent?.trim()).toBe("복사하지 못했습니다");
+    expect(item("copy-id")?.getAttribute("title")).toBe(CHANNEL_COPY_FAILURE);
+    // 같은 줄을 다시 누르면 다시 복사한다(다른 줄이 아니다).
+    clickItem("copy-id");
+    await flush();
+    expect(writeText).toHaveBeenCalledTimes(2);
+  });
+
+  it("클립보드 API 가 없는 주소에서도 같은 길이다", async () => {
+    vi.stubGlobal("navigator", {});
+    mountRow();
+    rightClick();
+    openSub("copy-group");
+    clickItem("copy-link");
+    await flush();
+    expect(item("copy-link")?.hasAttribute("data-copy-failed")).toBe(true);
+    expect(item("copy-link")?.getAttribute("title")).toBe(CHANNEL_COPY_UNAVAILABLE);
+    expect(
+      document.querySelector('[data-testid="channel-row-action-error"]')?.textContent
+    ).toBe(CHANNEL_COPY_UNAVAILABLE);
   });
 });
 

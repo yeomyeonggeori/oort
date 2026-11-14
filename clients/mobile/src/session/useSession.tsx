@@ -19,8 +19,12 @@ import {
 } from '../storage/secureSession';
 import {authGate, type AuthGate} from './authGate';
 import {forgetDeviceKeyOnSignOut} from '../deviceKey/enrollment';
-import {clearAllDrafts} from '../features/conversation/drafts';
-import {clearAllFailedSends} from '../features/conversation/failedSends';
+import {clearAllDrafts, keepOnlyDraftsOf} from '../features/conversation/drafts';
+import {clearAllDelegateDrafts} from '../features/work/delegate/session';
+import {
+  closeFailedSendsForSignOut,
+  openFailedSendsForSession,
+} from '../features/conversation/failedSends';
 import {clearAllSearchRecents} from '../features/search/searchRecents';
 import {clearAllAttachmentDrafts} from '../features/attachments/draftStore';
 import {forgetBackgroundOnSignOut} from '../design/background/store';
@@ -265,6 +269,14 @@ export function SessionProvider({
     };
   }, [attachmentSessionKey]);
 
+  // 세션이 섰다: 로그아웃이 닫은 「보내지 못한 글」 저장을 이 사람에게 다시 열고, 다른 사람이 남긴 초안·보내지 못한 글은 지운다(#5799).
+  // provider 는 로그인마다 새로 선다(`App.tsx` Gate).
+  const memberId = member.id;
+  useEffect(() => {
+    openFailedSendsForSession(memberId);
+    keepOnlyDraftsOf(memberId);
+  }, [memberId]);
+
   // 세션 provider 가 내려갈 때(로그아웃·토큰 만료) 내 사진 배경을 지운다 (ADR-0189 증보 2).
   // 위 효과처럼 workspace/member 키에 묶지 않는다 — 그러면 같은 사람이 워크스페이스를
   // 바꿀 때마다 사진이 사라진다. 사진은 계정이 아니라 **세션의 끝**에서 지운다.
@@ -305,7 +317,8 @@ export function SessionProvider({
     // 일을 한다(`clients/web/src/app/session.tsx`).
     clearAllDrafts();
     // 보내지 못한 글도 같은 이유로 지운다(#5222): 안 보낸 글은 보낸 메시지보다 사적이고 이 기기에만 있다. 다음 사람의 같은 채널에서 되살아나지 않게.
-    clearAllFailedSends();
+    // 지운 뒤 다음 세션까지 닫는다(#5799): 세션 트리는 이 함수 **뒤에** 내려가며 날아가던 전송을 다시 남기려 한다.
+    closeFailedSendsForSignOut();
     // 최근 검색(홈 검색과 대화 안 검색이 한 목록, #5384)·최근 연 대화도 지운다(#5364·#5365): 앞 사람이 친 말이 이 폰에 들어온 다음 사람의 검색 첫 화면에 비치면 안 된다.
     // 옮기기 전의 옛 대화 안 검색 저장이 남아 있어도 같은 호출이 함께 지운다.
     clearAllSearchRecents();
@@ -318,6 +331,8 @@ export function SessionProvider({
     // 알림이 걷어 간 시트의 글(`lib/entryDrafts.ts`)도 같은 이유로 지운다 (#5058). 메모리에만 있어 프로세스와 함께 사라지지만,
     // 같은 실행에서 같은 워크스페이스로 다른 사람이 이어 들어오면 앞 사람의 새 채널 이름·내 맥 질문이 그 사람의 시트에 나타난다.
     clearEntryDrafts();
+    // 「작업 맡기기」 시트의 글(메모리, 열쇠 = 워크스페이스)도 같은 이유로 지운다(#5799).
+    clearAllDelegateDrafts();
     // 지시 기기 키도 지운다 (#3026, ADR-0146 개정 D-7). 서버는 이 로그인 계보가
     // 끝나며 키 행을 폐기하고, 어떤 행도 받아 주지 않는 키가 다음 사람의 로그인까지
     // 남을 까닭이 없다. 다음 QR 연결이 새 키를 만들고 맥이 다시 승인한다.

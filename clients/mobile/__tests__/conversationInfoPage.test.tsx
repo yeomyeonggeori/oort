@@ -15,9 +15,9 @@ import {makeDirectory} from '@momo/core/features/workspace/directory';
 import type {RosterMember} from '@momo/core/lib/api';
 import {act, cleanup, fireEvent, render, screen, waitFor, within} from '@testing-library/react-native';
 import React from 'react';
-import {Animated, Dimensions, Image, StyleSheet} from 'react-native';
+import {Animated, Dimensions, Image, PixelRatio, StyleSheet} from 'react-native';
 
-import {SHEET_ICONS} from '../src/design/icons';
+import {CONV_ICONS, SHEET_ICONS} from '../src/design/icons';
 import {EASE_OUT, LAYER_POP_MS, LAYER_PUSH_MS} from '../src/design/motion';
 import {FixedScheme} from '../src/design/theme';
 import {TOUCH_TARGET} from '../src/design/tokens';
@@ -31,6 +31,7 @@ import {
 } from '../src/features/conversation/conversationMenu';
 import {PROFILE_FACE_SQUARE_RING_RADIUS} from '../src/features/profile/ProfileFace';
 import type {ChannelRowTarget} from '../src/features/sidebar/channelRowActions';
+import {endGlyphInk} from './fixtures/endGlyphInk';
 import {finger, pane} from './fixtures/finger';
 import {pinReduceMotion} from './fixtures/reduceMotion';
 import {releaseReduceMotion, setReduceMotion} from './fixtures/sheetContract';
@@ -383,7 +384,7 @@ describe('정보 페이지 — 히어로 (#4319)', () => {
 describe('정보 페이지 — 행은 코어 표의 답이다 (#4319)', () => {
   motionOff();
 
-  it('DM(닫기를 내밂): 알림 → 복사 셋 → 대화 닫기, 낱말은 코어 것이다', () => {
+  it('DM(닫기를 내밂): 알림 → 복사 셋 → 목록에서 숨기기, 낱말은 코어 것이다', () => {
     renderPage();
     expect(rowKeys()).toEqual(['mute-toggle', 'copy-name', 'copy-link', 'copy-id', 'close-dm']);
     expect(screen.getByTestId('conversation-info-mute-toggle')).toHaveTextContent(new RegExp(channelMuteToggleLabel(false)));
@@ -395,7 +396,7 @@ describe('정보 페이지 — 행은 코어 표의 답이다 (#4319)', () => {
     expect(within(screen.getByTestId('conversation-info-copy')).getByText(CHANNEL_COPY_GROUP_LABEL)).toBeTruthy();
   });
 
-  it('DM: 닫기를 내밀지 않으면(`closeOffered` 거짓) 「대화 닫기」가 없다 — 나머지는 그대로다', () => {
+  it('DM: 닫기를 내밀지 않으면(`closeOffered` 거짓) 「목록에서 숨기기」가 없다 — 나머지는 그대로다', () => {
     renderPage({items: conversationInfoActionItems(dmTarget({closeOffered: false}))});
     expect(rowKeys()).toEqual(['mute-toggle', 'copy-name', 'copy-link', 'copy-id']);
   });
@@ -405,7 +406,7 @@ describe('정보 페이지 — 행은 코어 표의 답이다 (#4319)', () => {
     expect(screen.getByTestId('conversation-info-mute-toggle')).toHaveTextContent(new RegExp(channelMuteToggleLabel(true)));
   });
 
-  it('채널: 소유자·관리자에게는 「채널 나가기」가 선다 — 위험색이고 DM 의 「대화 닫기」는 없다', () => {
+  it('채널: 소유자·관리자에게는 「채널 나가기」가 선다 — 위험색이고 DM 의 「목록에서 숨기기」는 없다', () => {
     renderPage({kind: 'public', title: 'general', peer: null, items: conversationInfoActionItems(channelTarget())});
     expect(rowKeys()).toEqual(['mute-toggle', 'copy-name', 'copy-link', 'copy-id', 'leave']);
     const leave = screen.getByTestId('conversation-info-leave');
@@ -518,6 +519,39 @@ describe('정보 페이지 — 행은 코어 표의 답이다 (#4319)', () => {
         .UNSAFE_queryAllByType(Image)
         .filter(node => node.props.source === SHEET_ICONS.copy);
       expect([key, glyphs.length]).toEqual([key, 1]);
+    }
+  });
+
+  it('알림 줄의 끝 표지는 종 아이콘이다 — 켜짐은 bell·꺼짐은 bell-off, 이모지가 없고 20pt 그대로 줄 끝에 선다 (#5776)', () => {
+    for (const muted of [false, true]) {
+      renderPage({items: conversationInfoActionItems(dmTarget({muted}))});
+      const row = screen.getByTestId('conversation-info-mute-toggle');
+      const glyphs = within(row).UNSAFE_queryAllByType(Image);
+      expect([muted, glyphs.length]).toEqual([muted, 1]);
+      expect(glyphs[0].props.source).toBe(muted ? CONV_ICONS.bellOff : CONV_ICONS.bell);
+      const style = StyleSheet.flatten(glyphs[0].props.style);
+      expect([style.width, style.height]).toEqual([20, 20]);
+      expect(row).not.toHaveTextContent(/🔔|🔕/);
+    }
+  });
+
+  it('에이전트 DM 의 줄 끝(「에이전트 정보 ›」·알림 종·복사 셋)은 그림에서 잰 잉크가 한 열에 선다 — 2배·3배 (#5791)', () => {
+    const KEYS = ['agent-open', 'mute-toggle', 'copy-name', 'copy-link', 'copy-id'];
+    for (const scale of [2, 3] as const) {
+      const ratio = jest.spyOn(PixelRatio, 'get').mockReturnValue(scale);
+      for (const muted of [false, true]) {
+        renderPage({
+          peer: AGENT_MEMBER,
+          title: '달무리 도우미',
+          onOpenAgent: jest.fn(),
+          items: conversationInfoActionItems(dmTarget({muted})),
+        });
+        // 그린 그림 파일을 디스크에서 읽어 잰 잉크 끝(줄 안쪽 여백 끝에서 몇 화소 안쪽인가). 셰브론은 칸 안에 6pt 들어가 앉는 그림이라
+        // 칸 끝을 맞추면 5pt 안쪽에 섰다(#5776 검수 M4).
+        const insets = KEYS.map(key => endGlyphInk(screen.getByTestId(`conversation-info-${key}`), scale).insetPx);
+        expect([scale, muted, insets]).toEqual([scale, muted, KEYS.map(() => insets[0])]);
+      }
+      ratio.mockRestore();
     }
   });
 

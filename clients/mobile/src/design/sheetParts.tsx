@@ -3,6 +3,7 @@ import {
   AccessibilityInfo,
   ActivityIndicator,
   Image,
+  PixelRatio,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -12,6 +13,7 @@ import {
   View,
   useWindowDimensions,
   type ImageSourcePropType,
+  type ImageStyle,
   type LayoutChangeEvent,
   type ScrollViewProps,
   type StyleProp,
@@ -21,7 +23,7 @@ import {
 import {useSafeAreaInsets} from 'react-native-safe-area-context';
 
 import {ROW_GLYPH_MAX_SCALE, Sentence, STACK_PILL_SCALE} from './atoms';
-import {HOME_ICONS, HOME_ICON_SIZE, SHEET_ICON_SIZE, SHEET_ICONS} from './icons';
+import {CONV_ICONS, CONV_ICON_SIZE, HOME_ICONS, HOME_ICON_SIZE, SHEET_ICON_SIZE, SHEET_ICONS} from './icons';
 import {usePageSheetAction, usePageSheetKeyboard, usePageSheetScrollProps} from './PageSheet';
 import {cardPosition, cardRing, dividerIndent, type CardInset} from './sheetModel';
 import {useKeyboardAppearance, usePalette, useStyles, useTheme} from './theme';
@@ -185,6 +187,113 @@ export function RowEmoji({emoji}: {emoji: string}): React.JSX.Element {
   );
 }
 
+// ---- 줄 끝 열 (#5791) ---------------------------------------------------------
+// 줄 끝 글리프(셰브론 › · 펼침 ⌄ · 복사 · ✓ · 종 · 빗금 종)는 **그림 칸이 아니라 잉크**로 한 세로 줄에 선다: 잉크 오른쪽 끝은 줄
+// 안쪽 여백 끝에서 `ROW_END_INK_INSET` 안쪽, 잉크 세로 가운데는 줄 가운데다. 그림마다 칸 안의 잉크 여백이 달라서(셰브론 18 칸의 오른쪽
+// 6pt · 복사 1pt …) 칸 끝을 맞추면 잉크가 최대 5pt 어긋났다(에이전트 DM 「대화 정보」, #5776 검수 M4). 부르는 쪽은 이웃 줄의
+// 글리프를 몰라도 된다 — 부품이 글리프마다의 여백을 들고 스스로 선다.
+
+/** 줄 끝 열: 잉크 오른쪽 끝이 줄 안쪽 여백 끝에서 안쪽으로 떨어진 거리(pt). 글자의 옆 여백과 비슷하고, 복사 줄이 원래 서던 자리다. */
+export const ROW_END_INK_INSET = 1;
+
+type AssetScale = 2 | 3;
+/** 그림 칸 가장자리에서 잉크(알파 ≥ 50%)까지의 거리, 화소. */
+type InkGapsPx = {left: number; right: number; top: number; bottom: number};
+
+/**
+ * 줄 끝 글리프와 그 그림의 잉크 여백(@2x·@3x, 화소). **그림 파일에서 잰 값**이다 — `__tests__/endGlyphColumn.test.tsx` 가 PNG 를
+ * 디스크에서 읽어 알파 경계를 재고 이 표와 화소 단위로 대조한다(그림을 다시 구우면 이 표를 같이 고치기 전까지 붉다). 배율별로 두는
+ * 까닭: 같은 그림도 2배·3배 래스터의 가장자리가 1/6~1/3pt 다르다(종 2배 2.0 · 3배 1.67pt).
+ */
+export const ROW_END_GLYPHS = {
+  chevron: {
+    source: SHEET_ICONS.chevron,
+    ink: {2: {left: 12, right: 12, top: 8, bottom: 8}, 3: {left: 18, right: 18, top: 11, bottom: 11}},
+  },
+  expand: {
+    source: HOME_ICONS.down,
+    ink: {2: {left: 9, right: 9, top: 14, bottom: 14}, 3: {left: 13, right: 13, top: 20, bottom: 20}},
+  },
+  copy: {
+    source: SHEET_ICONS.copy,
+    ink: {2: {left: 2, right: 2, top: 2, bottom: 2}, 3: {left: 3, right: 3, top: 3, bottom: 3}},
+  },
+  check: {
+    source: SHEET_ICONS.check,
+    ink: {2: {left: 6, right: 6, top: 9, bottom: 11}, 3: {left: 8, right: 8, top: 14, bottom: 17}},
+  },
+  bell: {
+    source: CONV_ICONS.bell,
+    ink: {2: {left: 4, right: 4, top: 2, bottom: 2}, 3: {left: 5, right: 5, top: 3, bottom: 3}},
+  },
+  'bell-off': {
+    source: CONV_ICONS.bellOff,
+    ink: {2: {left: 2, right: 2, top: 2, bottom: 2}, 3: {left: 3, right: 3, top: 3, bottom: 3}},
+  },
+} as const satisfies Record<string, {source: ImageSourcePropType; ink: Record<AssetScale, InkGapsPx>}>;
+
+export type RowEndGlyph = keyof typeof ROW_END_GLYPHS;
+
+/**
+ * 줄 끝 글리프를 열에 세우는 여백·이동(pt). 그림 배율은 RN 이 고르는 그림과 같다(기기 배율 이상 중 가장 작은 것 — iOS 는 2배·3배뿐).
+ * 값은 화소의 정수배라 그림이 화소 격자를 벗어나지 않는다(흐려지지 않는다). 180° 돈 그림(펼친 ⌃)은 왼쪽·오른쪽, 위·아래 여백이 바뀐다.
+ */
+function rowEndPlacement(glyph: RowEndGlyph, flipped = false): {marginRight: number; translateY: number} {
+  const scale: AssetScale = PixelRatio.get() > 2 ? 3 : 2;
+  const ink = ROW_END_GLYPHS[glyph].ink[scale];
+  const right = flipped ? ink.left : ink.right;
+  const top = flipped ? ink.bottom : ink.top;
+  const bottom = flipped ? ink.top : ink.bottom;
+  return {
+    marginRight: (ROW_END_INK_INSET * scale - right) / scale,
+    translateY: Math.round((bottom - top) / 2) / scale,
+  };
+}
+
+/**
+ * 줄 끝 열에 서는 글리프 그림. `transform` 은 움직일 것이 있을 때만 둔다(접힌 ⌄ 에는 없다). 줄의 **마지막 요소**로 둔다 — 보정은 줄
+ * 안쪽 여백 끝에 붙어 선 자리를 전제한다. 공용 줄 밖에서 같은 줄을 그리는 얇은 부품(설정의 `ActionRow`)도 이것으로 그린다.
+ */
+export function RowEndImage({
+  glyph,
+  style,
+  flipped = false,
+  importantForAccessibility,
+  testID,
+}: {
+  glyph: RowEndGlyph;
+  style: StyleProp<ImageStyle>;
+  flipped?: boolean;
+  importantForAccessibility?: 'no';
+  testID?: string;
+}): React.JSX.Element {
+  const {marginRight, translateY} = rowEndPlacement(glyph, flipped);
+  const transform = [
+    ...(translateY !== 0 ? [{translateY}] : []),
+    ...(flipped ? [{rotate: '180deg'}] : []),
+  ];
+  return (
+    <Image
+      source={ROW_END_GLYPHS[glyph].source}
+      style={[style, transform.length > 0 ? {marginRight, transform} : {marginRight}]}
+      accessibilityElementsHidden
+      importantForAccessibility={importantForAccessibility}
+      testID={testID}
+    />
+  );
+}
+
+/**
+ * 행 오른쪽 끝의 **상태 표지** 아이콘(알림 켜짐·꺼짐의 종, #5776). 20pt 그림을 키우지 않고(키우면 흐려진다) 그대로 그린다.
+ * `ListRow` 의 `trailing` 으로 주고 뒤에 `accessory` 를 두지 않는다 — 줄의 마지막 요소로서 줄 끝 열에 스스로 선다(#5791). 부르는 쪽은
+ * 이웃 줄의 글리프(셰브론·복사)를 알 필요가 없다. 색은 줄 끝의 다른 글리프와 같은 아이콘 색이다. 보조기술에는 이름(「알림 켜짐」)이
+ * 이미 있으므로 읽히지 않는다.
+ */
+export function RowStatusIcon({name}: {name: 'bell' | 'bell-off'}): React.JSX.Element {
+  const styles = useStyles(buildStyles);
+  return <RowEndImage glyph={name} style={styles.statusIcon} importantForAccessibility="no" />;
+}
+
 export type RowAccessory = 'none' | 'chevron' | 'expand' | 'copy' | 'toggle';
 
 /**
@@ -314,20 +423,17 @@ export function ListRow({
         </Text>
       ) : null}
       {trailing}
-      {accessory === 'chevron' ? (
-        <Image source={SHEET_ICONS.chevron} style={styles.chevron} accessibilityElementsHidden />
-      ) : null}
+      {accessory === 'chevron' ? <RowEndImage glyph="chevron" style={styles.chevron} /> : null}
       {accessory === 'expand' ? (
-        <Image
-          source={HOME_ICONS.down}
-          style={[styles.expand, expanded === true && styles.expandFlipped]}
-          accessibilityElementsHidden
+        // 펼친 행의 ⌄ 는 뒤집힌다(⌃) — 눌렀을 때 무슨 일이 일어났는지 눈에도 말한다.
+        <RowEndImage
+          glyph="expand"
+          style={styles.expand}
+          flipped={expanded === true}
           testID={testID ? `${testID}-expand` : undefined}
         />
       ) : null}
-      {accessory === 'copy' ? (
-        <Image source={SHEET_ICONS.copy} style={styles.copy} accessibilityElementsHidden />
-      ) : null}
+      {accessory === 'copy' ? <RowEndImage glyph="copy" style={styles.copy} /> : null}
       {isToggle ? (
         <View accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
           <Switch
@@ -426,6 +532,8 @@ export function ChoiceRow({
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
   const firstLine = leadingAlign === 'first-line';
+  // ✓ 도 줄 끝 열에 선다(#5791). 여백은 늘 서는 칸이 진다 — 고르지 않은 줄도 같은 자리를 지켜 고를 때 제목 폭이 움찔하지 않는다.
+  const check = rowEndPlacement('check');
   return (
     <Pressable
       accessibilityRole="radio"
@@ -464,13 +572,16 @@ export function ChoiceRow({
         </Text>
         {detail ? <Sentence style={styles.rowDetail}>{detail}</Sentence> : null}
       </View>
-      <View style={styles.choiceCheckSlot}>
+      <View style={[styles.choiceCheckSlot, {marginRight: check.marginRight}]}>
         {selected ? (
           // 장식이다 — 행 자신이 접근성 요소(`radio`)라 안의 글리프는 따로 읽히지 않는다. `accessibilityElementsHidden` 은
           // 주지 않는다: 시험이 `getByTestId` 로 「고른 줄에만 ✓ 가 선다」를 잴 수 있어야 한다.
           <Image
-            source={SHEET_ICONS.check}
-            style={styles.choiceCheck}
+            source={ROW_END_GLYPHS.check.source}
+            style={[
+              styles.choiceCheck,
+              check.translateY !== 0 ? {transform: [{translateY: check.translateY}]} : null,
+            ]}
             importantForAccessibility="no"
             testID={checkTestID}
           />
@@ -822,6 +933,12 @@ const buildStyles = (color: Palette) =>
       height: SHEET_ICON_SIZE.copy,
       tintColor: color.textMuted,
     },
+    statusIcon: {
+      width: CONV_ICON_SIZE.bell,
+      height: CONV_ICON_SIZE.bell,
+      // 줄 끝의 다른 글리프(셰브론·복사)와 같은 아이콘 색 — 상태는 제목 글자(「알림 켜짐/꺼짐」)와 모양(빗금)이 말한다(#5776 검수 M1).
+      tintColor: color.icon,
+    },
     rowEmoji: {fontSize: font.heading, lineHeight: line.heading, textAlign: 'center'},
     rowText: {flex: 1},
     rowTitle: {fontSize: font.body, lineHeight: line.body, color: color.text},
@@ -876,8 +993,6 @@ const buildStyles = (color: Palette) =>
       height: HOME_ICON_SIZE.down,
       tintColor: color.icon,
     },
-    // 펼친 행의 ⌄ 는 뒤집힌다(⌃) — 눌렀을 때 무슨 일이 일어났는지 눈에도 말한다.
-    expandFlipped: {transform: [{rotate: '180deg'}]},
     copy: {
       width: SHEET_ICON_SIZE.copy,
       height: SHEET_ICON_SIZE.copy,

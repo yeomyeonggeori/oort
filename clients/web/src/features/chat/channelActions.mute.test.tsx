@@ -43,7 +43,7 @@ it('웹 두 메뉴는 응답 전 현재 상태를 바꾸고 실패는 해당 채
     expect(actions.state.muted).toBe(true);
     for (const surface of ['header', 'row'] as const) {
       const item = channelActionItemsForSurface(surface, actions.available, actions.state).find(row => row.key === 'mute');
-      expect(item).toMatchObject({label: '알림 꺼짐', icon: '🔕'});
+      expect(item).toMatchObject({label: '알림 꺼짐', icon: 'bell-off'});
       expect(item?.busyLabel).toBeUndefined();
     }
     act(() => actions.run('mute')); expect(api).toHaveBeenCalledTimes(1);

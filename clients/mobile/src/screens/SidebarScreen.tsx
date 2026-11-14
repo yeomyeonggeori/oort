@@ -1,11 +1,13 @@
 import {ApiError, openDirectMessage, uuidEq} from '@momo/core/lib/api';
 import {NetworkError} from '@momo/core/lib/http';
+import {blend} from '@momo/core/design/scrim';
 import {attachParticle} from '@momo/core/lib/koreanParticle';
 import {serverSurface} from '@momo/core/features/capabilities/serverSurfaces';
 import {shellSpeaksFor} from '@momo/core/features/connection/shellStrip';
 import {channelLabel, channelLabelParts, idKey, memberFor} from '@momo/core/features/workspace/directory';
 import {readProjectionPhase, rosterLoaded} from '@momo/core/features/sidebar/goneDm';
 import {DM_CLOSED_LIST_LABEL, dmCloseOffered} from '@momo/core/features/sidebar/dmVisibility';
+import {readProjectionCarriesLeave} from '@momo/core/features/channels/dmLeave';
 import {mayActOnLiveness} from '@momo/core/features/agents/liveness';
 import {isUntakenHumanRun} from '@momo/core/features/agents/runWaiting';
 import {
@@ -68,7 +70,7 @@ import {
   withApprovalWaits,
 } from '../features/agents/workingSignal';
 import {useWorkspaceApprovalWaits} from '../features/conversation/usePendingApprovals';
-import {StatusDot} from '../features/presence/StatusDot';
+import {FaceStatusDot} from '../features/presence/StatusDot';
 import {useCollapsedSections, visibleRows} from '../features/home/collapsedSections';
 import {
   buildWorkingCard,
@@ -84,7 +86,7 @@ import {
   type SidebarRow,
   type SidebarSection,
 } from '../features/sidebar/rows';
-import {CHIP_TONE, type ChipTone, type RowChip} from '../features/sidebar/rowEmphasis';
+import {CHIP_TONE, type ChipTone, type RowChip} from '@momo/core/features/sidebar/rowEmphasis';
 import {useGoneUnreadVerdicts} from '../features/sidebar/useGoneUnreadVerdicts';
 import {dmClosedEntries, dmClosureMode, dmVerdicts} from '../features/sidebar/dmVerdicts';
 import {DmClosedSheet} from '../features/sidebar/DmClosedSheet';
@@ -372,6 +374,9 @@ export default function SidebarScreen({
   const rosterReady = rosterLoaded(directoryQuery);
   // 서버가 닫기를 싣는가(읽음 투영 행이 말한다). 싣지 않는 서버에서는 닫기를 내밀지 않는다(폰에는 기기 로컬 닫기가 없다).
   const closureMode = dmClosureMode(readStates.data);
+  // 투영이 하한을 싣는가(ADR-0177 증보 2026-11-14 D18): GET 행에 `history_from_seq` 키가 있다. 코어 3a 가 나간 대화를 숨긴다. 나가기
+  // 경로의 접기는 메뉴만 닫으므로 여기서 보지 않는다(`dmLeaveMode` 가 아니라 이것).
+  const serverCarriesLeave = readProjectionCarriesLeave(readStates.data);
 
   // Synchronous. See the note above.
   const [query, setQuery] = useState('');
@@ -404,7 +409,7 @@ export default function SidebarScreen({
   // 마지막 투영의 닫힘 id: 첫 프레임에만 쓰는 캐시(원장 아님, `dmClosedCache.ts`).
   const cachedClosed = useDmClosedCacheInitial(workspaceId);
 
-  // DM 이 목록에 서는가: 코어 `dmVisibility` 한 함수(웹과 같다). 숨은 DM 은 「⋯ › 닫은 대화」가 연다.
+  // DM 이 목록에 서는가: 코어 `dmVisibility` 한 함수(웹과 같다). 숨은 DM 은 「⋯ › 숨긴 대화」가 연다.
   const verdicts = useMemo(
     () =>
       dmVerdicts({
@@ -416,6 +421,7 @@ export default function SidebarScreen({
         phase: readPhase,
         rosterReady,
         mode: closureMode,
+        serverCarriesLeave,
         goneVerdicts: goneUnreadVerdicts,
         cachedClosed,
       }),
@@ -428,6 +434,7 @@ export default function SidebarScreen({
       readPhase,
       rosterReady,
       closureMode,
+      serverCarriesLeave,
       goneUnreadVerdicts,
       cachedClosed,
     ],
@@ -588,7 +595,7 @@ export default function SidebarScreen({
         muted: row.muted,
         selfRole,
         readState: readStates.byChannel.get(idKey(row.targetId)) ?? null,
-        // 「대화 닫기」: 코어 `dmCloseOffered` 한 함수(웹 호버 X·행 메뉴와 같다) + 서버가 닫기를 싣는 동안만(기기 로컬 닫기는 없다).
+        // 「목록에서 숨기기」: 코어 `dmCloseOffered` 한 함수(웹 호버 X·행 메뉴와 같다) + 서버가 닫기를 싣는 동안만(기기 로컬 닫기는 없다).
         closeOffered:
           row.kind === 'dm' &&
           closureMode === 'server' &&
@@ -603,7 +610,7 @@ export default function SidebarScreen({
     [channelById, selfRole, readStates.byChannel, closureMode, readPhase],
   );
 
-  // 「⋯ › 닫은 대화」 시트(ADR-0177 증보 D11, #4367). 내가 닫은 대화와 상대가 나간 대화를 다시 연다.
+  // 「⋯ › 숨긴 대화」 시트(ADR-0177 증보 D11, #4367). 내가 닫은 대화와 상대가 나간 대화를 다시 연다.
   const [closedListOpen, setClosedListOpen] = useState(false);
   const closedItems = useMemo(
     () =>
@@ -1319,16 +1326,21 @@ function Row({
     lead = <View style={styles.faceBlank} />;
   }
   // 상태 점은 얼굴 모서리에 앉는다. 점이 있는 줄만 얼굴 크기의 상자로 감싸므로(점 없는 줄의 구조는 그대로다)
-  // 얼굴의 자리는 움직이지 않는다.
-  const face =
+  // 얼굴의 자리는 움직이지 않는다. 점의 고리(틈)는 줄이 서는 바탕 색이다(`homeRowGround`, #5786 r1 M3): 면색이면 바닥 위에서
+  // 흰 테로 보였다. 모양은 뜻으로 고른다(에이전트 경고 = 채운 원, r1 H2).
+  const face = (pressed: boolean) =>
     status === null ? (
       lead
     ) : (
       <View style={styles.face} testID="home-row-face">
         {lead}
-        <View style={styles.statusAnchor}>
-          <StatusDot tone={status.tone} testID="home-row-status-dot" />
-        </View>
+        <FaceStatusDot
+          face={HOME.rowFace}
+          tone={status.tone}
+          kind={row.isAgent ? 'agent' : 'human'}
+          ground={homeRowGround(palette, selected, pressed)}
+          testID="home-row-status-dot"
+        />
       </View>
     );
   return (
@@ -1356,31 +1368,49 @@ function Row({
         pressed && styles.rowPressed,
       ]}
       testID={`sidebar-row-${row.key}`}>
-      {face}
-      <View style={styles.rowName}>
-        <Text
-          style={[
-            styles.rowTitle,
-            emphasis.bold && styles.rowTitleUnread,
-            emphasis.dim && styles.rowTitleMuted,
-          ]}
-          numberOfLines={1}
-          ellipsizeMode="tail">
-          {row.title}
-        </Text>
-        {row.handle ? (
-          <Text style={styles.rowHandle} numberOfLines={1}>
-            {row.handle}
-          </Text>
-        ) : null}
-      </View>
-      {busy ? (
-        <ActivityIndicator color={palette.textMuted} testID="home-row-busy" />
-      ) : emphasis.chip !== null ? (
-        <RowChipView chip={emphasis.chip} />
-      ) : null}
+      {({pressed}) => (
+        <>
+          {face(pressed)}
+          <View style={styles.rowName}>
+            <Text
+              style={[
+                styles.rowTitle,
+                emphasis.bold && styles.rowTitleUnread,
+                emphasis.dim && styles.rowTitleMuted,
+              ]}
+              numberOfLines={1}
+              ellipsizeMode="tail">
+              {row.title}
+            </Text>
+            {row.handle ? (
+              <Text style={styles.rowHandle} numberOfLines={1}>
+                {row.handle}
+              </Text>
+            ) : null}
+          </View>
+          {busy ? (
+            <ActivityIndicator color={palette.textMuted} testID="home-row-busy" />
+          ) : emphasis.chip !== null ? (
+            <RowChipView chip={emphasis.chip} />
+          ) : null}
+        </>
+      )}
     </Pressable>
   );
+}
+
+/**
+ * 홈 줄의 점 고리 색 = 줄이 서는 바탕 (#5786 r1 M3). 쉬는 줄은 바닥(`bg`, 그라데이션의 가운데 정지점 — 위·아래 끝과는 1.06:1
+ * 이하), 눌린 줄은 눌림 면(`rowPressed`), 고른 줄은 바닥 위 유리(`rowSelected`, 반투명이라 바닥에 얹은 색). 고리는 얼굴을
+ * 가리는 틈이라 반투명이면 얼굴이 비친다 — 그래서 합성한 불투명 색이다.
+ */
+export function homeRowGround(color: Palette, selected: boolean, pressed: boolean): string {
+  if (pressed) return color.surfacePressed;
+  if (selected) {
+    const glassAlpha = color.glass.length === 9 ? parseInt(color.glass.slice(7, 9), 16) / 255 : 1;
+    return blend(color.glass.slice(0, 7), color.bg, glassAlpha);
+  }
+  return color.bg;
 }
 
 /** 칩마다의 testID. 키가 이름 붙은 숫자(`CHIP_TONE`)라 이 표에는 문자열 비교가 없다. */
@@ -1908,7 +1938,6 @@ const buildStyles = (color: Palette) => StyleSheet.create({
   },
   // 상태 점이 있는 줄의 얼굴 상자(점의 절대 위치 기준). 크기는 얼굴과 같다.
   face: {width: HOME.rowFace, height: HOME.rowFace},
-  statusAnchor: {position: 'absolute', right: -2, bottom: -2},
   agentSquare: {
     backgroundColor: color.agentSurface,
     alignItems: 'center',

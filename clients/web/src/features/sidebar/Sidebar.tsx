@@ -43,7 +43,12 @@ import {
   type Directory,
 } from "@/features/workspace/useWorkspace";
 import {
+  readPhaseMayDim,
+  rowEmphasis,
+} from "@momo/core/features/sidebar/rowEmphasis";
+import {
   canCreateChannelNow,
+  DM_CLOSE_FAILURE,
   dmCloseButtonLabel,
 } from "@momo/core/features/channels/model";
 import {
@@ -89,7 +94,6 @@ import {
   SectionDeleteConfirmDialog,
   SectionNameDialog,
   SidebarSectionMenu,
-  SidebarSortMenu,
 } from "./SidebarSectionDialogs";
 import {
   deriveSidebarSections,
@@ -406,7 +410,7 @@ export function Sidebar({
       ),
     [dms, dmVisibility, openId]
   );
-  // 「⋯ › 닫은 대화」 목록(D11): 내가 닫았거나 상대가 나간 DM. 지금 열려 있는 DM 은 보이는 대화라 넣지 않는다.
+  // 「⋯ › 숨긴 대화」 목록(D11): 내가 닫았거나 상대가 나간 DM. 지금 열려 있는 DM 은 보이는 대화라 넣지 않는다.
   const closedListItems = useMemo(
     () =>
       dmVisibility.closedList
@@ -450,7 +454,7 @@ export function Sidebar({
       ),
     [readPhase, rosterReady, dms, directoryQuery.directory, session.member.id, selfName]
   );
-  // 닫아 둔 DM 이 **열리는** 순간(주소 · ⌘K · 새 DM · 「닫은 대화」)이 곧 다시 연다는 뜻이다(ADR-0177 D8). 다시 열지 않으면 사람이
+  // 닫아 둔 DM 이 **열리는** 순간(주소 · ⌘K · 새 DM · 「숨긴 대화」)이 곧 다시 연다는 뜻이다(ADR-0177 D8). 다시 열지 않으면 사람이
   // 일부러 연 대화가 다른 곳으로 옮겨 가는 순간 도로 사라진다. 서버가 닫기를 기억하면 `DELETE` 를 보내고(**닫은 적이 있을 때만**:
   // 나간 상대의 DM 은 연다고 아무것도 쓰지 않는다 - 열려 있는 동안만 보인다), 옛 서버에서는 원장 항목을 지운다.
   //
@@ -669,7 +673,7 @@ export function Sidebar({
   }, []);
 
   /**
-   * DM 을 닫는다 (#3963, ADR-0177 D7). 호버 X 와 행 메뉴의 「대화 닫기」가 이 한 길을 지난다. 서버가 닫기를 기억하면 서버에 쓰고(그
+   * DM 을 닫는다 (#3963, ADR-0177 D7). 호버 X 와 행 메뉴의 「목록에서 숨기기」가 이 한 길을 지난다. 서버가 닫기를 기억하면 서버에 쓰고(그
    * 기기에서 닫으면 모든 기기에서 닫힌다), 옛 서버에서는 이 기기의 원장에 쓴다.
    *
    * 순서가 일이다. ①이웃 행은 **지우기 전에** 잡는다(지운 뒤에는 DOM 에서 자리를 못 찾는다) ②닫을 때의 최신 seq(`seenSeq`: 화면이
@@ -692,7 +696,7 @@ export function Sidebar({
     if (neighborId !== null) scheduleSidebarChannelRowFocus(neighborId);
   };
 
-  /** 「닫은 대화」 목록의 「다시 열기」: 서버에 닫힘이 있으면 풀고, 그 대화를 연다. 나간 상대의 DM 은 쓰는 것 없이 연다(D8). */
+  /** 「숨긴 대화」 목록의 「다시 열기」: 서버에 닫힘이 있으면 풀고, 그 대화를 연다. 나간 상대의 DM 은 쓰는 것 없이 연다(D8). */
   const reopenClosedDm = (item: { id: string }) => {
     void dmClosure.reopen(item.id);
     navigate(`/c/${item.id}`);
@@ -780,6 +784,16 @@ export function Sidebar({
         label={label.text}
         handle={label.handle}
         agent={label.isAgent}
+        dim={
+          rowEmphasis({
+            unreadCount: counts.unreadCount,
+            mentionCount: counts.mentionCount,
+            muted: channel.muted,
+            tracksRead: true,
+            mayDim: readPhaseMayDim(readPhase),
+            selected: openId !== null && uuidEq(channel.id, openId),
+          }).dim
+        }
         iconKind={channel.kind === "dm" ? "avatar" : "glyph"}
         // 호버 X 는 포인터 표면의 문이다: 터치에는 호버가 없고, 그 표면의 길은 (아직) 없다 -
         // 폰 길게 누르기 메뉴는 BT-1 이 서랍 스크롤과의 충돌로 닫아 둔 자리다.
@@ -1157,37 +1171,6 @@ export function Sidebar({
                         <FolderPlus className="size-4" aria-hidden="true" />
                       </button>
                     )}
-                    {/* 정렬의 문은 **여기 하나**다 (BT-5 #1933). 값이 사이드바 전체에
-                        하나뿐이라(payload 의 `sectionSort` 한 칸) 섹션마다 같은
-                        라디오를 세우면 「이 섹션의 정렬」로 읽히고, 하나를 바꿀 때
-                        전부 바뀌는 것이 결함이 된다. 이 헤더인 이유는 그것이 이미
-                        **사이드바의 선반**이기 때문이다 - 「새 섹션」도 채널 섹션의
-                        일이 아니라 사이드바의 일이고 같은 자리에 산다.
-
-                        커스텀 섹션이 하나도 없어도 서야 한다: 정렬은 섹션을 만들어야
-                        열리는 설정이 아니다.
-
-                        **자기 글리프와 자기 이름을 갖는다**(design-review R1 M-2):
-                        섹션 ⋮ 안에 들어 있던 동안에는 스크린리더가 「채널 섹션 메뉴」로
-                        읽었고, 같은 ⋯ 이 섹션마다 다른 메뉴를 열었다. 근거는
-                        `SidebarSortMenu` 머리말에 있다.
-
-                        **터치에는 없다** — BT-4 H-1 의 규율을 그대로 승계한다. 정렬
-                        자체는 손가락으로도 멀쩡히 동작하므로 이것은 「없는 문」이
-                        아니라 **밀도 판정**이다: `hover: none` 에서는 헤더의 액션이
-                        상시 마운트라(`shouldShowSectionActions`) 240px 서랍의 머리글에
-                        아이콘이 하나 더 영구히 서고, 그 값을 두 번째 순위의 설정이
-                        치를 이유가 없다. 폰이 정렬을 갖게 되는 날의 자리는 이 헤더가
-                        아니라 폰의 설정 표면이다. */}
-                    {canEditSections && (
-                      <SidebarSortMenu
-                        mode={sidebarPrefs.sortMode}
-                        onChange={sidebarPrefs.setSortMode}
-                        onOpenChange={(open) =>
-                          setOpenSectionMenu(open ? baseChannelSection.id : null)
-                        }
-                      />
-                    )}
                   </>
                 }
               >
@@ -1362,7 +1345,7 @@ export function Sidebar({
                 overlayOpen={openDmMenu}
                 action={
                   <>
-                    {/* 「⋯ › 닫은 대화」(ADR-0177 D11): 닫은 대화와 나간 멤버와의 대화를 다시 열 문. 닫은 대화가 없으면 문이 서지 않는다. */}
+                    {/* 「⋯ › 숨긴 대화」(ADR-0177 D11): 숨긴 대화와 나간 멤버와의 대화를 다시 열 문. 닫은 대화가 없으면 문이 서지 않는다. */}
                     <DmClosedMenu
                       items={closedListItems}
                       onOpenChange={setOpenDmMenu}
@@ -1419,7 +1402,7 @@ export function Sidebar({
                   <li>
                     <InlineBanner
                       tone="neutral"
-                      message="대화를 닫지 못했어요. 잠시 뒤에 다시 시도해 주세요."
+                      message={DM_CLOSE_FAILURE}
                       actionLabel="확인"
                       onAction={() => setDmCloseFailed(false)}
                       separator={false}

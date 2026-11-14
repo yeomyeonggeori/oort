@@ -17,14 +17,19 @@ import {
 import type { Channel } from "../../lib/api";
 import {
   channelActionAvailability,
+  channelActionClusterSubmenu,
   channelActionClusterTitle,
   channelActionItems,
   channelActionItemsForSurface,
   channelActionKeepsMenuOpen,
   channelActionMenuLabel,
+  isChannelActionStatusIcon,
+  type ChannelActionAvailability,
+  type ChannelActionCluster,
   type ChannelActionKey,
   type ChannelActionState,
 } from "./actionModel";
+import { SECTION_MOVE_GROUP_LABEL } from "../sidebar/sidebarSections";
 
 const WS = "00000000-0000-7000-8000-000000000001";
 
@@ -369,7 +374,7 @@ describe("channelActionItemsForSurface", () => {
       ["mute", false],
       ["close-dm", true],
     ]);
-    expect(items.find((i) => i.key === "close-dm")?.label).toBe("대화 닫기");
+    expect(items.find((i) => i.key === "close-dm")?.label).toBe("목록에서 숨기기");
     // 닫기는 파괴적이지 않다(대화가 지워지지 않는다): 빨강 행이 아니다.
     expect(items.find((i) => i.key === "close-dm")?.tone).toBeUndefined();
   });
@@ -478,7 +483,7 @@ describe("진행 낱말과 메뉴 이름 (design-review #1937)", () => {
     for (const muted of [false, true]) {
       const item = channelActionItems(ALL, { ...REST, muted }).find(i => i.key === "mute");
       expect(item?.label).toBe(muted ? "알림 꺼짐" : "알림 켜짐");
-      expect(item?.icon).toBe(muted ? "🔕" : "🔔");
+      expect(item?.icon).toBe(muted ? "bell-off" : "bell");
       expect(item?.busyLabel).toBeUndefined();
     }
   });
@@ -662,5 +667,197 @@ describe("기억 설정 항목 (ADR-0196 D9, #3165)", () => {
 
   it("다이얼로그로 넘기는 항목이라 고르면 메뉴가 닫힌다", () => {
     expect(channelActionKeepsMenuOpen("memory")).toBe(false);
+  });
+});
+
+// =============================================================================
+// 줄마다 아이콘 · 하위 메뉴로 접는 무리 (#5777, owner 2026-11-14)
+// =============================================================================
+
+describe("줄 아이콘과 하위 메뉴 (#5777)", () => {
+  /** 표의 열쇠를 전부 내놓는 자리. 실제로는 함께 서지 않는 쌍(읽음/안 읽음, 닫기/나가기)도 여기서는 같이 본다. */
+  const EVERY: ChannelActionAvailability = {
+    topic: true,
+    markRead: true,
+    markUnread: true,
+    mute: true,
+    memory: true,
+    github: true,
+    star: true,
+    moveToSection: true,
+    copyLink: true,
+    copyName: true,
+    copyId: true,
+    closeDm: true,
+    leave: true,
+  };
+  const WITH_SECTIONS: ChannelActionState = {
+    ...REST,
+    sections: [{ id: "sec-1", label: "출시 준비" }],
+  };
+
+  it("모든 항목이 아이콘 뜻 낱말을 하나씩 들고, 낱말이 서로 다르다", () => {
+    const items = channelActionItems(EVERY, WITH_SECTIONS);
+    // 열쇠 13개가 다 섰는지 먼저 본다 - 덜 서면 아래 단정이 적은 줄로 초록이 된다.
+    expect(items).toHaveLength(13);
+    expect(items.map((i) => [i.key, i.icon])).toEqual([
+      ["topic", "topic"],
+      ["copy-name", "copy-name"],
+      ["copy-link", "copy-link"],
+      ["copy-id", "copy-id"],
+      ["move-to-section", "section"],
+      ["mark-read", "mark-read"],
+      ["mark-unread", "mark-unread"],
+      ["mute", "bell"],
+      ["memory", "memory"],
+      ["github", "github"],
+      ["star", "star"],
+      ["close-dm", "hide"],
+      ["leave", "leave"],
+    ]);
+    expect(new Set(items.map((i) => i.icon)).size).toBe(items.length);
+  });
+
+  it("낱말이 상태인 항목은 아이콘도 상태를 따른다: 알림 꺼짐 · 별표 떼기", () => {
+    const items = channelActionItems(EVERY, {
+      ...WITH_SECTIONS,
+      muted: true,
+      starred: true,
+    });
+    expect(items.find((i) => i.key === "mute")?.icon).toBe("bell-off");
+    expect(items.find((i) => i.key === "star")?.icon).toBe("unstar");
+  });
+
+  it("두 표면이 거른 뒤에도 아이콘 없는 줄이 없다 (아이콘 세로 줄이 끊기지 않는다)", () => {
+    for (const surface of ["header", "row"] as const) {
+      for (const kind of ["public", "dm"] as const) {
+        const available = channelActionAvailability({
+          channel: channel({ kind, topic: "주제" }),
+          selfRole: "owner",
+          unreadCount: 3,
+          sectionCount: 1,
+          canStar: true,
+          canCloseDm: true,
+          hasMemorySettings: true,
+          hasGithubNotifications: true,
+        });
+        const items = channelActionItemsForSurface(surface, available, WITH_SECTIONS);
+        expect(items.length).toBeGreaterThan(0);
+        expect(items.filter((i) => !i.icon)).toEqual([]);
+      }
+    }
+  });
+
+  it("하위 메뉴로 접는 무리는 복사와 섹션 이동 둘뿐이고, 낱말은 이미 쓰는 이름이다", () => {
+    const clusters: ChannelActionCluster[] = [
+      "info",
+      "copy",
+      "place",
+      "state",
+      "close",
+      "danger",
+    ];
+    expect(
+      clusters.filter((cluster) => channelActionClusterSubmenu(cluster) !== undefined)
+    ).toEqual(["copy", "place"]);
+    // 새 낱말을 짓지 않는다: 복사는 무리 제목, 섹션 이동은 항목 이름 그대로다(직접 문구 장부가 늘지 않는다).
+    expect(channelActionClusterSubmenu("copy")).toEqual({
+      testKey: "copy-group",
+      label: CHANNEL_COPY_GROUP_LABEL,
+      icon: "copy",
+    });
+    expect(channelActionClusterSubmenu("place")).toEqual({
+      testKey: "move-to-section",
+      label: SECTION_MOVE_GROUP_LABEL,
+      icon: "section",
+    });
+    const move = channelActionItems(EVERY, WITH_SECTIONS).find(
+      (i) => i.key === "move-to-section"
+    );
+    expect(move?.label).toBe(channelActionClusterSubmenu("place")?.label);
+    // 폰 시트의 무리 제목은 그대로다(폰 시트 모양은 이 이슈 밖).
+    expect(channelActionClusterTitle("copy")).toBe(CHANNEL_COPY_GROUP_LABEL);
+  });
+
+  it("폰이 줄 끝 상태 표지로 그리는 낱말은 알림 둘뿐이다", () => {
+    const drawn = channelActionItems(EVERY, WITH_SECTIONS)
+      .map((i) => i.icon)
+      .filter(isChannelActionStatusIcon);
+    expect(drawn).toEqual(["bell"]);
+    expect(isChannelActionStatusIcon("bell-off")).toBe(true);
+    expect(isChannelActionStatusIcon("star")).toBe(false);
+    expect(isChannelActionStatusIcon(undefined)).toBe(false);
+  });
+});
+
+// =============================================================================
+// 「대화 나가기」 (ADR-0177 증보 2026-11-14 D21, #5824)
+// =============================================================================
+
+describe("대화 나가기 항목 leave-dm (D21)", () => {
+  /** 사전 키를 그대로 돌려주는 가짜 낱말 함수. 항목 이름이 사전 키에서 온다는 것을 잰다. */
+  const format = ((key: string) => `«${key}»`) as Parameters<typeof channelActionItems>[2];
+  const DM = channel({ kind: "dm", name: undefined });
+
+  function rowItems(over: Partial<Parameters<typeof channelActionAvailability>[0]> = {}, withFormat = true) {
+    const available = channelActionAvailability({
+      channel: DM,
+      selfRole: "member",
+      unreadCount: 0,
+      canCloseDm: true,
+      canLeaveDm: true,
+      ...over,
+    });
+    return channelActionItemsForSurface("row", available, REST, withFormat ? format : undefined);
+  }
+
+  it("사람끼리 1:1 이라고 넘기면 맨 아래에 위험색으로 서고, 숨기기와 구분선으로 갈린다", () => {
+    const items = rowItems();
+    const last = items.at(-1);
+    expect(last).toMatchObject({
+      key: "leave-dm",
+      testKey: "leave-dm",
+      label: "«channels.dmLeave.action»",
+      icon: "leave",
+      tone: "danger",
+      cluster: "danger",
+      separatorBefore: true,
+    });
+    expect(keysOf(items).slice(-2)).toEqual(["close-dm", "leave-dm"]);
+  });
+
+  it("안 읽음이 있어도 내민다(숨기기와 달리 확인 창이 있어서)", () => {
+    const items = rowItems({ unreadCount: 4, canCloseDm: false });
+    expect(keysOf(items)).toContain("leave-dm");
+    expect(keysOf(items)).not.toContain("close-dm");
+  });
+
+  it("내밀지 않는다고 넘기면(옛 서버·에이전트 DM·그룹 DM 등은 dmLeaveOffered 가 거짓) 항목이 없다", () => {
+    expect(keysOf(rowItems({ canLeaveDm: false }))).not.toContain("leave-dm");
+    expect(keysOf(rowItems({ canLeaveDm: undefined }))).not.toContain("leave-dm");
+  });
+
+  it("채널에는 없다 - 채널의 나가기는 leave 다", () => {
+    const items = rowItems({ channel: channel(), selfRole: "owner" });
+    expect(keysOf(items)).not.toContain("leave-dm");
+    expect(keysOf(items)).toContain("leave");
+  });
+
+  it("낱말 함수가 없으면 빈 이름의 줄을 그리지 않고 항목을 세우지 않는다", () => {
+    expect(keysOf(rowItems({}, false))).not.toContain("leave-dm");
+  });
+
+  it("대화 머리 메뉴(header)에도 선다", () => {
+    const available = channelActionAvailability({
+      channel: DM,
+      selfRole: "member",
+      unreadCount: 0,
+      canLeaveDm: true,
+    });
+    expect(keysOf(channelActionItemsForSurface("header", available, REST, format))).toContain("leave-dm");
+  });
+
+  it("확인 창으로 넘기므로 메뉴를 닫는다", () => {
+    expect(channelActionKeepsMenuOpen("leave-dm")).toBe(false);
   });
 });

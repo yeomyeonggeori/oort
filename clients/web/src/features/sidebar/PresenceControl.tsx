@@ -10,6 +10,7 @@ import {
   PRESENCE_MENU_LABEL,
   PRESENCE_OPTIONS,
 } from "@momo/core/features/presence/model";
+import { effectivePresenceTone } from "@momo/core/features/presence/statusDot";
 import {
   PAUSE_UNTIL_NONE_ACTION_LABEL,
   pauseUntilLabel,
@@ -22,6 +23,7 @@ import {
 import { InlineBanner } from "@/features/common/States";
 import { cn } from "@/design/lib/cn";
 import { avatarSurfaceClass } from "@/features/common/avatarTone";
+import { AvatarStatus } from "@/features/presence/AvatarStatus";
 import {
   memberAvatarContentPath,
   renderableAvatarUrl,
@@ -57,33 +59,18 @@ import { useSelfPresenceWrite } from "./useSelfPresenceWrite";
 // intent and is not offered as a radio (ADR-0160 D2/D3).
 // =============================================================================
 
-/** The badge color for an effective value. Filled for a live status, a hollow
- *  muted ring for offline (which is a real state, not missing data). */
-function effectiveBadgeClass(effective: EffectivePresence): string {
-  switch (effective) {
-    case "online":
-      return "bg-ok border-surface";
-    case "away":
-      return "bg-warn border-surface";
-    case "dnd":
-      return "bg-danger border-surface";
-    case "offline":
-      // No fill, a muted outline: reads as "offline", distinct from a filled dot
-      // and from nothing at all.
-      return "bg-surface border-line-strong";
-  }
-}
-
 /** The small dot beside a declared option in the menu. `auto` shows as its
- *  online color, since online is what auto renders as. */
+ *  online color, since online is what auto renders as. 모양은 아바타 배지와 같은
+ *  규칙이다(#5786 r1 M1, `tokens.css` 의 `status-mark`·`status-shape-*`): 자리 비움 =
+ *  초승달, 방해 금지 = 가로 줄 — 메뉴가 배지의 새 모양을 가르쳐 주는 자리다. */
 function optionDotClass(status: PresenceStatus): string {
   switch (status) {
     case "auto":
-      return "bg-ok";
+      return "status-mark bg-ok";
     case "away":
-      return "bg-warn";
+      return "status-mark status-shape-moon bg-warn";
     case "dnd":
-      return "bg-danger";
+      return "status-mark status-shape-bar bg-danger";
   }
 }
 
@@ -109,47 +96,47 @@ export function PresenceBadge({
   );
   const uploaded = useMemberAvatar(memberAvatarContentPath(avatarUrl) ?? undefined);
   const imageSrc = direct ?? uploaded;
+  const md = size === "md";
+  // 점은 아바타를 도려낸 자리에 앉는다(#5786): 크기·틈·모양은 모든 아바타 점이 쓰는 한 부품(`AvatarStatus`)이 정한다.
+  // 예전에는 이 배지가 점을 아바타 위에 얹고 사이드바 면색 테를 둘러 「뚫린 구멍이 아니라 얹힌 배지」로 보이게 했는데,
+  // 프로필 줄을 가리키거나 메뉴를 열면(호버 채움) 그 테가 색 테로 드러났다. 점의 자리는 여전히 **아바타**에 묶여
+  // 있다(트리거를 넓혀도 점이 떠다니지 않는다, presence 6b H2).
   return (
-    <span
-      data-testid="presence-control"
-      data-effective={effective}
-      // #4162: 목록·타임라인 아바타와 같은 문법이다 - 얇은 테두리 + 멤버 id 가 고르는 색조 채움. 사이드바 바닥에
-      // 녹던 DS2-6 의 옅은 채움 대신 테두리가 윤곽을 지키고, 채움·글자가 한 쌍(4.5:1)이라 띠 위에서도 읽힌다.
-      className={cn(
-        "relative flex shrink-0 items-center justify-center rounded-full font-semibold",
-        avatarSurfaceClass("human", memberId, imageSrc !== null),
-        size === "md" ? "size-8 text-body" : "size-6 text-meta",
-        // 이 배지는 늘 나(사람)다: 원(AVATAR_SHAPE.human). 사진을 지워 이니셜로
-        // 돌아가도 모양이 바뀌지 않는다.
-      )}
+    <AvatarStatus
+      face={md ? 32 : 24}
+      tone={effectivePresenceTone(effective)}
+      kind="human"
+      dotTestId="presence-badge-dot"
       aria-hidden="true"
     >
-      {imageSrc !== null ? (
-        // 배지 점은 이 span 에 붙어 있으므로(위 주석) 이미지는 그 안쪽 자리만 채운다.
-        // 상자는 size-6 으로 고정이라 사진이 들어와도 레이아웃은 움직이지 않는다.
-        <img
-          src={imageSrc}
-          alt=""
-          referrerPolicy="no-referrer"
-          className="size-full rounded-full object-cover"
-          data-testid="presence-avatar-image"
-        />
-      ) : (
-        selfName.slice(0, 1)
-      )}
-      {/* The presence badge. Bound to `effective`, ringed in the sidebar
-          surface so it reads as a badge sitting on the avatar rather than a
-          hole punched through it. Anchored to THIS span, not to the profile
-          trigger: enlarging the hit area must not float the dot off the
-          avatar (presence 6b H2). */}
       <span
+        // #4162: 목록·타임라인 아바타와 같은 문법이다 - 얇은 테두리 + 멤버 id 가 고르는 색조 채움. 사이드바 바닥에
+        // 녹던 DS2-6 의 옅은 채움 대신 테두리가 윤곽을 지키고, 채움·글자가 한 쌍(4.5:1)이라 띠 위에서도 읽힌다.
+        // 이 배지는 늘 나(사람)다: 원(AVATAR_SHAPE.human). 사진을 지워 이니셜로 돌아가도 모양이 바뀌지 않는다.
         className={cn(
-          "absolute bottom-0 right-0 rounded-full border",
-          size === "md" ? "size-3" : "size-2",
-          effectiveBadgeClass(effective)
+          "flex shrink-0 items-center justify-center rounded-full font-semibold",
+          avatarSurfaceClass("human", memberId, imageSrc !== null),
+          md ? "size-8 text-body" : "size-6 text-meta"
         )}
-      />
-    </span>
+        // 정본 testid(`presence-control`)와 실효 상태(`data-effective`)는 예전처럼 아바타 면에 있다(시험·캡처가 이 면의
+        // 테두리·채움을 읽는다).
+        data-testid="presence-control"
+        data-effective={effective}
+      >
+        {imageSrc !== null ? (
+          // 상자는 크기가 고정이라 사진이 들어와도 레이아웃은 움직이지 않는다.
+          <img
+            src={imageSrc}
+            alt=""
+            referrerPolicy="no-referrer"
+            className="size-full rounded-full object-cover"
+            data-testid="presence-avatar-image"
+          />
+        ) : (
+          selfName.slice(0, 1)
+        )}
+      </span>
+    </AvatarStatus>
   );
 }
 

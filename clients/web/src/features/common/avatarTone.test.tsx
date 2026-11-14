@@ -52,7 +52,9 @@ function mount(node: ReturnType<typeof createElement>): HTMLElement {
 }
 
 const dm = (m: RosterMember | null) => createElement(DmAvatar, { member: m, nowMs: 0, viewerMayAct: false });
-const box = (h: HTMLElement) => h.querySelector<HTMLElement>('[data-testid="dm-avatar"]')!.firstElementChild as HTMLElement;
+// 아바타 면: 점 부품(`AvatarStatus`, #5786)이 도려내는 칸 안의 첫 상자다.
+const box = (h: HTMLElement) =>
+  h.querySelector<HTMLElement>('[data-testid="dm-avatar"] > [data-avatar-status-face]')!.firstElementChild as HTMLElement;
 
 describe("avatarToneIndex", () => {
   it("같은 id 는 언제나 같은 색조이고(대소문자 무관) 범위 안이다", () => {

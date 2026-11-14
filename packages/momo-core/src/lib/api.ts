@@ -136,6 +136,12 @@ export interface RosterMember {
   avatarUrl?: string;
   /** Workspace role, as the roster projection reports it. */
   role?: MembershipRole;
+  /**
+   * Humans only (openapi `RosterMember.email`): the sign-in address. The server sends it to every
+   * reader of the roster today; who may SEE it is the client gate `profileEmail` (guests do not, #5780).
+   * Absent for agents and on servers that predate the column; a non-string drops the column.
+   */
+  email?: string;
   channelCount: number;
   channelIds: string[];
   capabilities: string[];
@@ -281,8 +287,8 @@ function sanitizeRosterMember(value: unknown): unknown {
     const { statusText: _bad, ...rest } = row;
     row = rest;
   }
-  // v3 agent profile text: a non-string drops the column, never the member.
-  for (const key of ["tagline", "roleLabel", "avatarPreset"] as const) {
+  // v3 agent profile text, and the human's email (#5780): a non-string drops the column, never the member.
+  for (const key of ["tagline", "roleLabel", "avatarPreset", "email"] as const) {
     if (key in row && typeof row[key] !== "string") {
       const { [key]: _bad, ...rest } = row;
       row = rest;
@@ -399,6 +405,20 @@ export interface ReadState {
    * the cached value; a reader treats a value it never had as `0`.
    */
   followedUnreadReplyCount?: number;
+  /**
+   * ADR-0177 amendment 2026-11-14 D15/D18. The **requesting member's own** read floor: after
+   * 「대화 나가기」 only messages with `seq >= historyFromSeq` reach the caller. Wire name
+   * `history_from_seq`. Three states, like `closedAtSeq`:
+   *
+   * - `number` (≥ 1): the caller left this 1:1 and the floor is here;
+   * - `null`: a `GET read-state` row said there is no floor (full history);
+   * - `undefined`: this response did not say (a server without the leave route, the `PUT
+   *   read-state` response, the realtime frame). Keep what you had — `null` would show a left DM.
+   *
+   * D21: the key's **presence** on a `GET` row (even with `null`) is how a client knows the server
+   * carries 「대화 나가기」 (`dmLeaveMode`).
+   */
+  historyFromSeq?: number | null;
 }
 
 /** ADR-0178 D6. Only `"explicit_open"` is sent; absence means background. */
@@ -2766,6 +2786,8 @@ interface WireReadState {
   closed_at_seq?: number | null;
   /** ADR-0124 amendment 4 (#5667). Absent on an older server and on a `PUT read-state` response. */
   followed_unread_reply_count?: number;
+  /** ADR-0177 D15/D18 (2026-11-14). `null` = no floor (GET), absent = the response did not say. */
+  history_from_seq?: number | null;
 }
 
 function markedUnreadBeforeSeqFromWire(
@@ -2797,6 +2819,18 @@ function closedAtSeqFromWire(wire: WireReadState): number | null | undefined {
   return seqFromWire(value);
 }
 
+/**
+ * ADR-0177 D15/D18 (2026-11-14): `null` stays `null` ("no floor"), a positive integer is the floor
+ * (the column is `CHECK (history_from_seq > 0)`), anything else — absent, zero, negative, fractional,
+ * not a number — is "did not say". A malformed value is neither a floor nor a claim that there is none.
+ */
+function historyFromSeqFromWire(wire: WireReadState): number | null | undefined {
+  const value = wire.history_from_seq;
+  if (value === null) return null;
+  const seq = seqFromWire(value);
+  return seq !== undefined && seq > 0 ? seq : undefined;
+}
+
 function toReadState(wire: WireReadState): ReadState {
   const state: ReadState = {
     channelId: wire.channel_id,
@@ -2815,6 +2849,8 @@ function toReadState(wire: WireReadState): ReadState {
   // A count, not a seq, but the same shape: a non-negative integer, anything else is "did not say".
   const followedUnreadReplyCount = seqFromWire(wire.followed_unread_reply_count);
   if (followedUnreadReplyCount !== undefined) state.followedUnreadReplyCount = followedUnreadReplyCount;
+  const historyFromSeq = historyFromSeqFromWire(wire);
+  if (historyFromSeq !== undefined) state.historyFromSeq = historyFromSeq;
   return state;
 }
 
@@ -2852,6 +2888,22 @@ export async function closeDm(
 ): Promise<void> {
   await authedRequest(
     `/v1/workspaces/${encodeURIComponent(workspaceId)}/channels/${encodeURIComponent(channelId)}/closure`,
+    { method: "PUT", body: JSON.stringify({ seenSeq }) }
+  );
+}
+
+/**
+ * 사람끼리의 1:1 에서 나간다 (ADR-0177 증보 2026-11-14 D16). `seenSeq` 는 이 대화에서 클라이언트가 **들고 있는 가장 큰 seq**
+ * (`dmLeaveSeenSeq`)다. 서버는 하한을 `GREATEST(기존, LEAST(seenSeq, 마지막 seq) + 1)` 로 올리고 내리지 않는다. 204 - 본문이 없고
+ * 하한 값도 싣지 않는다(다음 `GET read-state` 가 싣는다). 되돌리는 경로는 없다. 응답 갈래는 `dmLeaveOutcome` 이 가른다.
+ */
+export async function leaveDm(
+  workspaceId: string,
+  channelId: string,
+  seenSeq: number
+): Promise<void> {
+  await authedRequest(
+    `/v1/workspaces/${encodeURIComponent(workspaceId)}/channels/${encodeURIComponent(channelId)}/dm-leave`,
     { method: "PUT", body: JSON.stringify({ seenSeq }) }
   );
 }

@@ -232,7 +232,9 @@ async function runScheme(origin, scheme) {
       await dialog.waitFor({ timeout: 10_000 });
       const text = await dialog.innerText();
       const dot = await dotOf(dialog, '[data-testid="presence-dot"]');
-      check(scheme, "E1 프로필: 「@dohyun · 온라인」과 채운 초록 점", text.includes("@dohyun · 온라인") && dot?.tone === "ok" && dot.bg === c.ok, { dot, text: text.split("\n").slice(0, 3) });
+      // #5780: 접속 낱말은 「@핸들 · 역할」 아래 제 줄이다(`member-profile-presence`).
+      const presence = await dialog.getByTestId("member-profile-presence").innerText().catch(() => "");
+      check(scheme, "E1 프로필: 「온라인」 낱말과 채운 초록 점", presence === "온라인" && dot?.tone === "ok" && dot.bg === c.ok, { dot, presence, text: text.split("\n").slice(0, 3) });
       if (SHOTS) await page.screenshot({ path: resolve(OUT_DIR, `web-profile-${scheme}.png`) });
     });
   } finally {
