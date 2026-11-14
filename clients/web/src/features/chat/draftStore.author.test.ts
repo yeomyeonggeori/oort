@@ -15,7 +15,7 @@ import {
 
 // 누구의 초안인가 (#5799). 실제 엔진 시험(`app/signOutDrafts.browser.test.ts`)이 로그인·만료 길 전체를 재고, 이 파일은 그 밑의 규칙을
 // 하나씩 잠근다: 쓴 사람을 적고, 다른 사람·모르는 사람의 것은 읽지 않으며, 작성자를 정할 때 다른 사람의 것을 지우고, 다른 사람의
-// 보내지 못한 글은 남기지 않는다. 다른 탭이 늦게 쓴 값처럼 지운 뒤에 들어온 값은 읽을 때 거르는 쪽만 막는다.
+// 보내지 못한 글은 남기지 않는다.
 
 const WS = "00000000-0000-7000-8000-000000000001";
 const CH = "00000000-0000-7000-8000-000000000201";
@@ -46,7 +46,7 @@ describe("초안의 작성자 (#5799)", () => {
     expect(readDraft(WS, CH)).toBe("도현의 초안");
 
     adoptDraftAuthor(SEOYEON);
-    // 지운 뒤에 들어온 앞 사람의 값(다른 탭의 늦은 저장)과 작성자를 모르는 옛 값.
+    // 다른 사람의 값과 작성자를 모르는 값.
     localStorage.setItem(draftKey(WS, CH), JSON.stringify({ text: "앞 사람의 글", atMs: Date.now(), author: DOHYEON }));
     localStorage.setItem(draftKey(WS, "옛-대화"), JSON.stringify({ text: "옛 글", atMs: Date.now() }));
     localStorage.setItem(`momo.thread-draft.v1:${WS}:뿌리`, JSON.stringify({ text: "앞 사람의 답글", atMs: Date.now(), author: DOHYEON }));

@@ -92,8 +92,8 @@ export function rememberFailedSend(
   kind: SendFailureKind | null,
   nowMs: number = Date.now(),
 ): void {
-  if (openFor !== null && row.authorMemberId.toLowerCase() !== openFor) return;
   try {
+    if (openFor !== null && row.authorMemberId.toLowerCase() !== openFor) return;
     const key = keyOf(workspaceId, row.channelId, row.clientMsgId);
     if (containsSecretKey(row.body)) {
       forgetFailedSend(workspaceId, row.channelId, row.clientMsgId);
