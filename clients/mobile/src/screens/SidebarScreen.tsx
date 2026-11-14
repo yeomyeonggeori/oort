@@ -7,6 +7,7 @@ import {shellSpeaksFor} from '@momo/core/features/connection/shellStrip';
 import {channelLabel, channelLabelParts, idKey, memberFor} from '@momo/core/features/workspace/directory';
 import {readProjectionPhase, rosterLoaded} from '@momo/core/features/sidebar/goneDm';
 import {DM_CLOSED_LIST_LABEL, dmCloseOffered} from '@momo/core/features/sidebar/dmVisibility';
+import {readProjectionCarriesLeave} from '@momo/core/features/channels/dmLeave';
 import {mayActOnLiveness} from '@momo/core/features/agents/liveness';
 import {isUntakenHumanRun} from '@momo/core/features/agents/runWaiting';
 import {
@@ -373,6 +374,9 @@ export default function SidebarScreen({
   const rosterReady = rosterLoaded(directoryQuery);
   // 서버가 닫기를 싣는가(읽음 투영 행이 말한다). 싣지 않는 서버에서는 닫기를 내밀지 않는다(폰에는 기기 로컬 닫기가 없다).
   const closureMode = dmClosureMode(readStates.data);
+  // 투영이 하한을 싣는가(ADR-0177 증보 2026-11-14 D18): GET 행에 `history_from_seq` 키가 있다. 코어 3a 가 나간 대화를 숨긴다. 나가기
+  // 경로의 접기는 메뉴만 닫으므로 여기서 보지 않는다(`dmLeaveMode` 가 아니라 이것).
+  const serverCarriesLeave = readProjectionCarriesLeave(readStates.data);
 
   // Synchronous. See the note above.
   const [query, setQuery] = useState('');
@@ -417,6 +421,7 @@ export default function SidebarScreen({
         phase: readPhase,
         rosterReady,
         mode: closureMode,
+        serverCarriesLeave,
         goneVerdicts: goneUnreadVerdicts,
         cachedClosed,
       }),
@@ -429,6 +434,7 @@ export default function SidebarScreen({
       readPhase,
       rosterReady,
       closureMode,
+      serverCarriesLeave,
       goneUnreadVerdicts,
       cachedClosed,
     ],

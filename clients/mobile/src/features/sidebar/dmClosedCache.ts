@@ -28,11 +28,14 @@ export function parseDmClosedCache(raw: string | undefined): Record<string, stri
   }
 }
 
-/** 판정 표에서 캐시에 적을 닫힘 id(7번 = 내가 닫았다). 나간 상대(6번)는 명부가 정하므로 적지 않는다. */
+/**
+ * 판정 표에서 캐시에 적을 닫힘 id(7번 = 내가 닫았다, 3a = 내가 나갔다 - ADR-0177 증보 2026-11-14 D18). 나간 상대(6번)는 명부가
+ * 정하므로 적지 않는다. 3a 를 적지 않으면 콜드 스타트 첫 프레임에 나간 대화가 잠깐 보였다 사라진다.
+ */
 export function closedIdsOf(verdicts: ReadonlyMap<string, DmVerdict>): string[] {
   const out: string[] = [];
   for (const [id, verdict] of verdicts) {
-    if (verdict.rule === 7 && !verdict.shown) out.push(id);
+    if ((verdict.rule === 7 || verdict.rule === '3a') && !verdict.shown) out.push(id);
   }
   return out.sort();
 }

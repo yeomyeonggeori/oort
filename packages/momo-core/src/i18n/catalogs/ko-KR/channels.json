@@ -1,0 +1,12 @@
+{
+  "channels.dmLeave.action": "대화 나가기",
+  "channels.dmLeave.confirmTitle": "{name} 님과의 대화에서 나갈까요?",
+  "channels.dmLeave.confirmBody": "내 화면에서 지금까지의 대화가 사라져요. {name} 님의 화면에는 그대로 남아요.",
+  "channels.dmLeave.confirmRevive": "다시 글이 오면 그 글부터 새 대화로 보여요.",
+  "channels.dmLeave.confirmFinal": "나간 뒤에는 되돌릴 수 없어요.",
+  "channels.dmLeave.confirmScheduled": "예약해 둔 메시지 {count, number}개도 취소돼요.",
+  "channels.dmLeave.cancel": "취소",
+  "channels.dmLeave.confirm": "나가기",
+  "channels.dmLeave.done": "대화에서 나갔어요.",
+  "channels.dmLeave.failed": "나가지 못했어요. 다시 시도해 주세요."
+}

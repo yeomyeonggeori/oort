@@ -22,6 +22,8 @@ import {
 import { CHANNEL_MEMORY_SETTINGS_LABEL } from "../memory/presentation";
 import { CHANNEL_GITHUB_LABEL } from "../github/model";
 import type { Channel, MembershipRole } from "../../lib/api";
+import type { MessageService } from "../../i18n/types";
+import { DM_LEAVE_KEYS } from "./dmLeave";
 
 // =============================================================================
 // 채널 액션 인벤토리 (BT-1 / #1929).
@@ -83,7 +85,7 @@ import type { Channel, MembershipRole } from "../../lib/api";
 // 이제 모든 항목이 자기 무리를 들고(`CLUSTER_OF`), 구분선은 **거른 뒤의 이웃이 다른 무리일
 // 때** 선다(`withClusterSeparators`). 정본 차례는 Buzz 의 우클릭 메뉴를 따른다:
 //
-//   복사(이름 · 링크 · ID) │ 섹션 이동 │ 읽음/읽지 않음 · 알림 · 별표 │ 닫기(DM) │ 나가기
+//   복사(이름 · 링크 · ID) │ 섹션 이동 │ 읽음/읽지 않음 · 알림 · 별표 │ 닫기(DM) │ 나가기(채널) · 대화 나가기(DM)
 //
 // 헤더 ⋮ 는 같은 표를 다른 열쇠로 거른다 - `주제 │ 알림 · 기억 │ 나가기` 로 예전 그대로다.
 // 웹은 복사 무리와 섹션 이동을 하위 메뉴(Buzz 의 「복사 ›」)로 접고(위 절), 폰 시트는 제목 +
@@ -94,6 +96,14 @@ import type { Channel, MembershipRole } from "../../lib/api";
 // 모든 항목이 아이콘 **뜻 낱말**(`ChannelActionIcon`) 하나를 든다. 웹 메뉴는 그것을 줄 앞
 // 16px 글리프로 그려 모든 줄의 아이콘이 한 세로 줄에 서고, 아이콘 없는 줄이 섞여 글자 시작이
 // 들쭉날쭉하지 않는다. 칸이 필수라 새 항목은 아이콘을 고르지 않고는 컴파일되지 않는다.
+//
+// ## 「대화 나가기」 (ADR-0177 증보 2026-11-14 D21, #5824)
+//
+// 사람끼리의 1:1 에만 서는 되돌릴 수 없는 비우기다(`leave-dm`). 「목록에서 숨기기」(`close-dm`)와 나란히 서고, 메뉴 **맨 아래**
+// 위험 무리(`danger`)에 위험색으로 선다 - 무리가 바뀌므로 구분선이 그 위에 선다. 채널의 `leave` 와 같은 무리지만 둘은 한 메뉴에
+// 같이 서지 않는다(채널 / DM). 내밀지 말지는 `dmLeave.ts` 의 `dmLeaveOffered` 가 정하고 호출부가 `canLeaveDm` 으로 넘긴다.
+// 낱말은 사전 키(`DM_LEAVE_KEYS.action`)라서 이 표가 문구를 만들려면 `formatMessage` 가 있어야 한다 - 없으면 항목을 세우지
+// 않는다(빈 이름의 줄을 그리지 않는다).
 // =============================================================================
 
 export type ChannelActionKey =
@@ -109,7 +119,8 @@ export type ChannelActionKey =
   | "copy-name"
   | "copy-id"
   | "close-dm"
-  | "leave";
+  | "leave"
+  | "leave-dm";
 
 /**
  * 구분선의 단위. 정본 차례도 이 이름들의 차례다.
@@ -119,7 +130,7 @@ export type ChannelActionKey =
  *   place  섹션으로 이동 (행 전용, 채널만)
  *   state  읽음 · 읽지 않음 · 알림 · 기억 · 별표
  *   close  목록에서 숨기기 (행 전용, DM 만)
- *   danger 채널 나가기
+ *   danger 채널 나가기 · 대화 나가기(DM, D21)
  */
 export type ChannelActionCluster =
   | "info"
@@ -144,6 +155,7 @@ const CLUSTER_OF: Record<ChannelActionKey, ChannelActionCluster> = {
   star: "state",
   "close-dm": "close",
   leave: "danger",
+  "leave-dm": "danger",
 };
 
 /** 제목을 이고 서는 무리. 나머지는 제목 없이 행만 선다(`place` 는 항목이 자기 제목을 든다). */
@@ -302,6 +314,11 @@ export interface ChannelActionAvailability {
   /** DM 을 이 기기의 사이드바에서 닫는다 (#3963). DM 이고 닫을 손이 있을 때만. */
   closeDm: boolean;
   leave: boolean;
+  /**
+   * 사람끼리의 1:1 에서 「대화 나가기」(ADR-0177 증보 2026-11-14 D21). DM 이고 호출부가 `dmLeaveOffered` 로 내민다고 했을 때만.
+   * 선택 칸이다: 채워 넣지 않은 호출부는 그대로 없다.
+   */
+  leaveDm?: boolean;
 }
 
 /** 낱말이 상태인 항목들이 읽는 지금. */
@@ -360,6 +377,11 @@ export function channelActionAvailability(input: {
   canMarkUnread?: boolean;
   /** DM 을 닫을 손이 있는가 (#3963). 없으면 눌러도 아무 일이 없는 항목이 된다. */
   canCloseDm?: boolean;
+  /**
+   * 이 DM 에 「대화 나가기」를 내미는가(D21): `dmLeaveOffered(...)` 가 참이고 나갈 손(확인 창)이 있을 때만 참으로 넘긴다.
+   * 옛 서버·에이전트 DM·그룹 DM·나간 상대의 DM 은 `dmLeaveOffered` 가 거짓이다.
+   */
+  canLeaveDm?: boolean;
 }): ChannelActionAvailability {
   const isDm = input.channel.kind === "dm";
   return {
@@ -389,6 +411,7 @@ export function channelActionAvailability(input: {
     copyId: true,
     closeDm: isDm && (input.canCloseDm ?? false),
     leave: !isDm && canLeaveChannel(input.selfRole),
+    leaveDm: isDm && (input.canLeaveDm ?? false),
   };
 }
 
@@ -413,10 +436,13 @@ function withClusterSeparators(items: ChannelActionItem[]): ChannelActionItem[] 
  *
  * 차례는 무리의 차례다(위 머리말): 주제 │ 복사 │ 섹션 이동 │ 상태(읽음·읽지 않음·알림·
  * 기억·별표) │ 닫기 │ 나가기. 구분선은 `withClusterSeparators` 가 무리가 바뀌는 자리에 세운다.
+ *
+ * `formatMessage` 는 사전 키로 이름을 짓는 항목(`leave-dm`)이 쓴다. 없으면 그 항목은 서지 않는다.
  */
 export function channelActionItems(
   available: ChannelActionAvailability,
-  state: ChannelActionState
+  state: ChannelActionState,
+  formatMessage?: MessageService["formatMessage"]
 ): ChannelActionItem[] {
   const items: ChannelActionItem[] = [];
   const push = (item: Omit<ChannelActionItem, "cluster" | "separatorBefore">) => {
@@ -519,6 +545,16 @@ export function channelActionItems(
       tone: "danger",
     });
   }
+  // 「대화 나가기」(D21): 맨 아래, 위험색. 확인 창으로 넘기는 항목이다.
+  if (available.leaveDm === true && formatMessage !== undefined) {
+    push({
+      key: "leave-dm",
+      testKey: "leave-dm",
+      label: formatMessage(DM_LEAVE_KEYS.action),
+      icon: "leave",
+      tone: "danger",
+    });
+  }
   return withClusterSeparators(items);
 }
 
@@ -529,7 +565,8 @@ export function channelActionItems(
 const SURFACE_KEYS: Record<ChannelActionSurface, ReadonlySet<ChannelActionKey>> = {
   // 헤더 ⋮ 는 BZ-2 가 세운 그대로다. 이 티켓은 헤더의 항목을 늘리지 않는다:
   // 채널을 열어 둔 사람에게 「읽음 처리」와 「이름 복사」는 다른 물음이다.
-  header: new Set<ChannelActionKey>(["topic", "mute", "memory", "github", "leave"]),
+  // 「대화 나가기」(D21)는 대화 머리 메뉴에도 선다(DM 의 머리 메뉴를 세우는 것은 화면 칸의 일이다).
+  header: new Set<ChannelActionKey>(["topic", "mute", "memory", "github", "leave", "leave-dm"]),
   // 행 우클릭은 「열지 않고 조작한다」가 전부다. BT-4 의 섹션 배치가 여기 사는
   // 이유도 그것이다 - 채널을 어디에 둘지는 그 채널을 **보지 않고** 정하는 일이고,
   // 헤더 ⋮ 는 정의상 이미 그 안에 들어와 있는 사람의 것이다. 복사 셋과 DM 닫기(#3963)도
@@ -545,18 +582,20 @@ const SURFACE_KEYS: Record<ChannelActionSurface, ReadonlySet<ChannelActionKey>> 
     "star",
     "close-dm",
     "leave",
+    "leave-dm",
   ]),
 };
 
 export function channelActionItemsForSurface(
   surface: ChannelActionSurface,
   available: ChannelActionAvailability,
-  state: ChannelActionState
+  state: ChannelActionState,
+  formatMessage?: MessageService["formatMessage"]
 ): ChannelActionItem[] {
   const keys = SURFACE_KEYS[surface];
   // 구분선은 거른 **뒤에** 다시 센다 (`withClusterSeparators`).
   return withClusterSeparators(
-    channelActionItems(available, state).filter((item) => keys.has(item.key))
+    channelActionItems(available, state, formatMessage).filter((item) => keys.has(item.key))
   );
 }
 
@@ -582,8 +621,10 @@ export function channelActionKeepsMenuOpen(key: ChannelActionKey): boolean {
   // `close-dm` (#3963) 도 닫는 쪽이다: 닫는 순간 이 행이 사라지고, 메뉴를 이고 있던 트리거가
   // 함께 언마운트되므로 열린 채로 둘 수 없다(`star` 와 같은 이유). `mark-unread` 는 읽음
   // 처리와 같은 왕복이라 실패 배너를 읽도록 열어 둔다.
+  // `leave-dm` (D21)은 확인 창으로 넘기고, 성공하면 그 행이 사라진다(`close-dm` 과 같은 이유).
   return (
     key !== "leave" &&
+    key !== "leave-dm" &&
     key !== "topic" &&
     key !== "memory" &&
     key !== "github" &&

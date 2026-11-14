@@ -30,6 +30,7 @@ import {
   type PinMap,
 } from '@momo/core/features/timeline/pins';
 import {applyThreadReadState} from '@momo/core/features/timeline/threadSummary';
+import {isMessageBeforeLeave, pendingAfterSendFailure} from '@momo/core/features/channels/dmLeave';
 import {
   pruneRecoveryMarkers,
   RECOVERY_MARKER_TTL_MS,
@@ -589,6 +590,13 @@ export function useTimeline(
         forgetRow(row);
         return true;
       } catch (error: unknown) {
+        // ADR-0177 증보 2026-11-14 D17: 같은 키의 글이 이미 내 읽기 하한 아래에 저장돼 있다(나가기 전 대화의 글). 실패 행·실패
+        // 기록·이 기기의 못 보낸 글·진동 없이 조용히 지운다.
+        if (isMessageBeforeLeave(error)) {
+          updatePending(list => pendingAfterSendFailure(list, row.clientMsgId, error).list);
+          forgetRow(row);
+          return false;
+        }
         // The row stays where it is and states 전송 실패 with a retry, in place.
         // No toast: a failure reported far from the message it belongs to makes
         // the person hunt for which message failed.

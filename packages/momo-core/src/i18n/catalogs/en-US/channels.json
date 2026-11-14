@@ -1,0 +1,12 @@
+{
+  "channels.dmLeave.action": "Leave conversation",
+  "channels.dmLeave.confirmTitle": "Leave your conversation with {name}?",
+  "channels.dmLeave.confirmBody": "The conversation so far disappears from your screen. It stays as it is on {name}'s screen.",
+  "channels.dmLeave.confirmRevive": "If a new message arrives, it starts a new conversation from that message.",
+  "channels.dmLeave.confirmFinal": "You can't undo this after you leave.",
+  "channels.dmLeave.confirmScheduled": "{count, plural, one {# scheduled message will also be canceled.} other {# scheduled messages will also be canceled.}}",
+  "channels.dmLeave.cancel": "Cancel",
+  "channels.dmLeave.confirm": "Leave",
+  "channels.dmLeave.done": "You left the conversation.",
+  "channels.dmLeave.failed": "Couldn't leave. Please try again."
+}

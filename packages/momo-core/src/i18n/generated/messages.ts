@@ -171,6 +171,16 @@ export const messageKeys = [
   "blocked.workStateNone.serverUnreachable",
   "blocked.workStateStale.offline",
   "blocked.workStateStale.serverUnreachable",
+  "channels.dmLeave.action",
+  "channels.dmLeave.cancel",
+  "channels.dmLeave.confirm",
+  "channels.dmLeave.confirmBody",
+  "channels.dmLeave.confirmFinal",
+  "channels.dmLeave.confirmRevive",
+  "channels.dmLeave.confirmScheduled",
+  "channels.dmLeave.confirmTitle",
+  "channels.dmLeave.done",
+  "channels.dmLeave.failed",
   "common.feedback.unavailable",
   "common.invitation.received",
   "common.members.count",
@@ -1730,6 +1740,22 @@ export const argumentSpecs = {
   "blocked.workStateNone.serverUnreachable": {},
   "blocked.workStateStale.offline": {},
   "blocked.workStateStale.serverUnreachable": {},
+  "channels.dmLeave.action": {},
+  "channels.dmLeave.cancel": {},
+  "channels.dmLeave.confirm": {},
+  "channels.dmLeave.confirmBody": {
+    "name": "string"
+  },
+  "channels.dmLeave.confirmFinal": {},
+  "channels.dmLeave.confirmRevive": {},
+  "channels.dmLeave.confirmScheduled": {
+    "count": "number"
+  },
+  "channels.dmLeave.confirmTitle": {
+    "name": "string"
+  },
+  "channels.dmLeave.done": {},
+  "channels.dmLeave.failed": {},
   "common.feedback.unavailable": {},
   "common.invitation.received": {
     "actorName": "string"
@@ -3713,6 +3739,16 @@ export interface MessageArgs {
   "blocked.workStateNone.serverUnreachable": Record<string, never>;
   "blocked.workStateStale.offline": Record<string, never>;
   "blocked.workStateStale.serverUnreachable": Record<string, never>;
+  "channels.dmLeave.action": Record<string, never>;
+  "channels.dmLeave.cancel": Record<string, never>;
+  "channels.dmLeave.confirm": Record<string, never>;
+  "channels.dmLeave.confirmBody": { name: string };
+  "channels.dmLeave.confirmFinal": Record<string, never>;
+  "channels.dmLeave.confirmRevive": Record<string, never>;
+  "channels.dmLeave.confirmScheduled": { count: number };
+  "channels.dmLeave.confirmTitle": { name: string };
+  "channels.dmLeave.done": Record<string, never>;
+  "channels.dmLeave.failed": Record<string, never>;
   "common.feedback.unavailable": Record<string, never>;
   "common.invitation.received": { actorName: string };
   "common.members.count": { count: number };
