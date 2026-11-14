@@ -559,8 +559,12 @@ describe("나가기", () => {
       document.querySelector('[data-testid="channel-row-leave-confirm"]')
     ).not.toBeNull();
     const confirm = document.querySelector<HTMLElement>(
-      '[data-testid="channel-row-leave-confirm-action"]'
+      '[data-testid="channel-row-leave-confirm-confirm"]'
     );
+    // 확정은 서고 나서 500ms 동안 눌림을 받지 않는다(공용 확인 창): 사람이 읽고 누르는 뒤에 누른다.
+    await act(async () => {
+      await new Promise((done) => setTimeout(done, 540));
+    });
     act(() => confirm?.click());
     await flush();
     // 본인 나가기 길(#5778). 관리자 길(`removeChannelMember`)이면 일반 멤버는 403 이다.

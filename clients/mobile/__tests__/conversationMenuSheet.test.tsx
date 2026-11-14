@@ -26,6 +26,7 @@ import {
   waitFor,
   within,
 } from '@testing-library/react-native';
+import {CONFIRM_ARM_MS} from '../src/design/sheetParts';
 import React from 'react';
 import {AccessibilityInfo, Dimensions, Image, Keyboard, PixelRatio, StyleSheet} from 'react-native';
 
@@ -59,6 +60,24 @@ import {finger, pane} from './fixtures/finger';
 import {installAppClock, SHELL_WAIT_TEST_TIMEOUT_MS} from './fixtures/fakeClock';
 import {pinReduceMotion} from './fixtures/reduceMotion';
 import {describeCloseContract} from './fixtures/sheetContract';
+
+/**
+ * 확인 단계의 위험 단추는 서고 나서 `CONFIRM_ARM_MS` 동안 눌림을 받지 않는다(#5818 검수 High): 사람이 읽고 누르는 것처럼
+ * 그 시간이 지난 뒤에 누른다. 가짜 시계가 켜져 있으면 시계를 옮기고, 아니면 실제로 기다린다.
+ */
+async function armedPress(testID: string, options?: Parameters<typeof screen.getByTestId>[1]) {
+  const faked = typeof (setTimeout as unknown as {clock?: unknown}).clock !== 'undefined';
+  if (faked) {
+    act(() => {
+      jest.advanceTimersByTime(CONFIRM_ARM_MS + 40);
+    });
+  } else {
+    await act(async () => {
+      await new Promise<void>(resolve => setTimeout(resolve, CONFIRM_ARM_MS + 40));
+    });
+  }
+  fireEvent.press(screen.getByTestId(testID, options));
+}
 
 // =============================================================================
 // 대화 머리 ⋮ 가 여는 공용 행동 시트 (#4319, owner 10-27). 옛 ⋮ 는 시스템 액션 시트(제목 + 「취소」 + 「고정한 메시지」)였다.
@@ -455,12 +474,15 @@ describe('시트 — 채널 나가기의 확인 단계 (#4319)', () => {
     }
   });
 
-  it('「취소」와 「채널 나가기」가 제 일을 한 번씩 부른다', () => {
+  it('「취소」와 「채널 나가기」가 제 일을 한 번씩 부른다', async () => {
     const props = channelSheet();
     fireEvent.press(screen.getByTestId('conversation-menu-leave-cancel'));
     expect(props.onCancelLeave).toHaveBeenCalledTimes(1);
     expect(props.onConfirmLeave).not.toHaveBeenCalled();
+    // 서자마자의 누름(목록 줄을 누른 자리의 더블탭)은 확정을 누르지 못한다(#5818 검수 High).
     fireEvent.press(screen.getByTestId('conversation-menu-leave-confirm-button'));
+    expect(props.onConfirmLeave).not.toHaveBeenCalled();
+    await armedPress('conversation-menu-leave-confirm-button');
     expect(props.onConfirmLeave).toHaveBeenCalledTimes(1);
   });
 
@@ -1085,7 +1107,7 @@ describe('셸 — 채널 나가기는 확인 단계를 지난다 (#4319)', () =>
   it('확인하면 내 멤버십을 지우고, 서버가 답한 뒤에 시트가 걷히고 열려 있던 대화도 걷힌다', async () => {
     const spoken = announce();
     await toConfirm();
-    fireEvent.press(screen.getByTestId('conversation-menu-leave-confirm-button'));
+    await armedPress('conversation-menu-leave-confirm-button');
     await waitFor(() => expect(calls.some(call => call.method === 'DELETE')).toBe(true));
     const del = calls.find(call => call.method === 'DELETE')!;
     expect(del.url).toMatch(/\/channels\/ch-general\/members\/me$/);
@@ -1098,7 +1120,7 @@ describe('셸 — 채널 나가기는 확인 단계를 지난다 (#4319)', () =>
 
   it('403: 확인 단계가 그대로 서서 이유를 말한다 — 시트도 대화도 사라지지 않는다', async () => {
     await toConfirm({leaveStatus: 403});
-    fireEvent.press(screen.getByTestId('conversation-menu-leave-confirm-button'));
+    await armedPress('conversation-menu-leave-confirm-button');
     await waitFor(() => expect(screen.getByTestId('conversation-menu-leave-error')).toBeTruthy());
     expect(screen.getByTestId('conversation-menu-leave-error')).toHaveTextContent(/나갈 수 없어요/);
     expect(screen.getByTestId('conversation-menu-leave-confirm')).toBeTruthy();
@@ -1107,11 +1129,11 @@ describe('셸 — 채널 나가기는 확인 단계를 지난다 (#4319)', () =>
 
   it('도는 중에는 위험 단추가 잠겨 두 번 눌러도 DELETE 는 한 번이다', async () => {
     await toConfirm({hold: ['leave']});
-    fireEvent.press(screen.getByTestId('conversation-menu-leave-confirm-button'));
+    await armedPress('conversation-menu-leave-confirm-button');
     await waitFor(() =>
       expect(screen.getByTestId('conversation-menu-leave-confirm-button')).toHaveTextContent('나가는 중…'),
     );
-    fireEvent.press(screen.getByTestId('conversation-menu-leave-confirm-button'));
+    await armedPress('conversation-menu-leave-confirm-button');
     await act(async () => releaseHeld());
     await waitFor(() => expect(screen.queryByTestId('conversation-pane')).toBeNull());
     expect(calls.filter(call => call.method === 'DELETE')).toHaveLength(1);
@@ -1565,7 +1587,7 @@ describe('셸 — 정보 페이지의 채널 나가기 (#4319)', () => {
   it('확인하면 내 멤버십을 지우고, 서버가 답한 뒤 열려 있던 대화가 페이지째 걷힌다', async () => {
     const spoken = announce();
     await toConfirm();
-    fireEvent.press(screen.getByTestId('conversation-info-leave-confirm-button'));
+    await armedPress('conversation-info-leave-confirm-button');
     await waitFor(() => expect(calls.some(call => call.method === 'DELETE')).toBe(true));
     expect(calls.find(call => call.method === 'DELETE')!.url).toMatch(/\/channels\/ch-general\/members\/me$/);
     await waitFor(() => expect(screen.queryByTestId('conversation-pane')).toBeNull());
@@ -1576,7 +1598,7 @@ describe('셸 — 정보 페이지의 채널 나가기 (#4319)', () => {
 
   it('403: 확인 단계가 그대로 서서 이유를 말한다 — 페이지도 대화도 사라지지 않는다', async () => {
     await toConfirm({leaveStatus: 403});
-    fireEvent.press(screen.getByTestId('conversation-info-leave-confirm-button'));
+    await armedPress('conversation-info-leave-confirm-button');
     await waitFor(() => expect(screen.getByTestId('conversation-info-leave-error')).toBeTruthy());
     expect(screen.getByTestId('conversation-info-leave-error')).toHaveTextContent(/나갈 수 없어요/);
     expect(screen.getByTestId('conversation-info-leave-confirm')).toBeTruthy();
@@ -1586,11 +1608,11 @@ describe('셸 — 정보 페이지의 채널 나가기 (#4319)', () => {
 
   it('도는 중에는 위험 단추가 잠겨 두 번 눌러도 DELETE 는 한 번이다', async () => {
     await toConfirm({hold: ['leave']});
-    fireEvent.press(screen.getByTestId('conversation-info-leave-confirm-button'));
+    await armedPress('conversation-info-leave-confirm-button');
     await waitFor(() =>
       expect(screen.getByTestId('conversation-info-leave-confirm-button')).toHaveTextContent('나가는 중…'),
     );
-    fireEvent.press(screen.getByTestId('conversation-info-leave-confirm-button'));
+    await armedPress('conversation-info-leave-confirm-button');
     await act(async () => releaseHeld());
     await waitFor(() => expect(screen.queryByTestId('conversation-pane')).toBeNull());
     expect(calls.filter(call => call.method === 'DELETE')).toHaveLength(1);
@@ -1612,7 +1634,7 @@ describe('셸 — 정보 페이지의 채널 나가기 (#4319)', () => {
     await openInfoPage();
     expect(infoKeys()).toEqual(['mute-toggle', 'copy-name', 'copy-link', 'copy-id', 'leave']);
     fireEvent.press(screen.getByTestId('conversation-info-leave'));
-    fireEvent.press(screen.getByTestId('conversation-info-leave-confirm-button'));
+    await armedPress('conversation-info-leave-confirm-button');
     await waitFor(() => expect(screen.queryByTestId('conversation-pane')).toBeNull());
     expect(screen.queryByTestId('conversation-info-leave-error')).toBeNull();
     expect(calls.filter(call => call.method === 'DELETE').map(call => call.url.replace(/^.*\/channels\//, ''))).toEqual([

@@ -16,7 +16,7 @@ import {useSafeAreaInsets} from 'react-native-safe-area-context';
 import {AVATAR_INITIAL_MAX_SCALE, Screen, Sentence} from '../../design/atoms';
 import {HOME_ICON_SIZE, HOME_ICONS} from '../../design/icons';
 import {PageHeader} from '../../design/SheetChrome';
-import {ConfirmStep, GroupCard, ListRow, RowStatusIcon} from '../../design/sheetParts';
+import {CONFIRM_ARM_MS, ConfirmStep, GroupCard, ListRow, RowStatusIcon} from '../../design/sheetParts';
 import {useStyles} from '../../design/theme';
 import {font, line, SAFE_GUTTER, space, type Palette} from '../../design/tokens';
 import {useFormatMessage} from '../../i18n/useFormatMessage';
@@ -277,6 +277,7 @@ function InfoBody({
           {confirmingLeave ? (
             <ConfirmStep
               testID="conversation-info-leave-confirm"
+              confirmArmMs={CONFIRM_ARM_MS}
               headline={formatMessage('timeline.channelLeave.title')}
               detail={formatMessage(channelLeaveConfirmBodyKey(kind), {name: title})}
               error={leave.error}

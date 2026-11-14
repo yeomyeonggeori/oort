@@ -12,7 +12,7 @@ import {StyleSheet} from 'react-native';
 import {Sentence} from '../../design/atoms';
 import {PageSheet} from '../../design/PageSheet';
 import {SheetHeader} from '../../design/SheetChrome';
-import {ConfirmStep, GroupCard, ListRow, RowStatusIcon, SheetScroll} from '../../design/sheetParts';
+import {CONFIRM_ARM_MS, ConfirmStep, GroupCard, ListRow, RowStatusIcon, SheetScroll} from '../../design/sheetParts';
 import {useStyles} from '../../design/theme';
 import {useFormatMessage} from '../../i18n/useFormatMessage';
 import {font, line, type Palette} from '../../design/tokens';
@@ -131,6 +131,7 @@ export function ConversationMenuSheet({
         {confirmingLeave ? (
           <ConfirmStep
             testID="conversation-menu-leave-confirm"
+            confirmArmMs={CONFIRM_ARM_MS}
             headline={formatMessage('timeline.channelLeave.title')}
             detail={formatMessage(channelLeaveConfirmBodyKey(kind), {name: title})}
             error={leave.error}

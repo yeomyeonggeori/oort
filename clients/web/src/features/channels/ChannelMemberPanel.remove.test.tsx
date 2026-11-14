@@ -7,6 +7,7 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vite
 import { ApiError, type MembershipRole, type RosterMember } from "@momo/core/lib/api";
 import { SessionProvider, type SessionContextValue } from "@/app/session";
 import { LocaleProvider } from "@/i18n/LocaleProvider";
+import { CONFIRM_ARM_MS } from "@/design/ui/confirm-dialog";
 import type { AppLocale } from "@/i18n/localeStore";
 import { koreanLocaleForTest } from "@/i18n/koreanLocaleForTest";
 import koTimeline from "../../../../../packages/momo-core/src/i18n/catalogs/ko-KR/timeline.json";
@@ -165,6 +166,15 @@ async function press(target: HTMLElement) {
   await settle();
 }
 
+/** 확정은 서고 나서 500ms 동안 눌림을 받지 않는다(공용 확인 몸): 사람이 읽고 누르는 것처럼 그 뒤에 누른다. */
+async function pressConfirm() {
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, CONFIRM_ARM_MS + 40));
+  });
+  expect(byId("channel-member-remove-stage-confirm")!.getAttribute("data-armed")).toBe("true");
+  await press(byId("channel-member-remove-stage-confirm")!);
+}
+
 async function openStageFor(id: string) {
   const trigger = rowOf(id)!.querySelector<HTMLElement>('[data-testid="channel-member-row-menu"]')!;
   await press(trigger);
@@ -249,7 +259,7 @@ describe("확인 단계 → 서버 → 줄과 영수증 (#5778)", () => {
     expect(stage.textContent).toContain(KO["timeline.memberPanel.removeTitle"].replace("{name}", "정하늘"));
     expect(api.removeChannelMember).not.toHaveBeenCalled();
 
-    await press(byId("channel-member-remove-stage-confirm")!);
+    await pressConfirm();
     expect(api.removeChannelMember).toHaveBeenCalledWith(WS, CH, HANEUL);
     expect(byId("channel-member-remove-stage-confirm")!.getAttribute("aria-busy")).toBe("true");
     expect(byId("channel-member-remove-stage-cancel")!.getAttribute("aria-disabled")).toBe("true");
@@ -280,11 +290,88 @@ describe("확인 단계 → 서버 → 줄과 영수증 (#5778)", () => {
     expect(roster.find((m) => m.id === SERIN)!.channelIds).toEqual([CH]);
   });
 
+  it("Esc: 단계가 서 있으면 단계만 내리고 패널은 그대로, 요청이 도는 동안은 아무 일도 없다 (#5818 검수 M4)", async () => {
+    const pending = deferred<unknown>();
+    api.removeChannelMember.mockReturnValue(pending.promise);
+    await mountOpen(SEOYEON);
+    const escape = async () => {
+      await act(async () => {
+        // 실제 키 입력처럼 초점 요소에서 올라간다(단계가 서면 초점은 취소로 들어가 있다).
+        (document.activeElement ?? document.body).dispatchEvent(
+          new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true })
+        );
+      });
+      await settle();
+    };
+    // 대조: 요청이 나가기 전의 Esc 는 단계만 내린다(이 시험이 Esc 를 실제로 보낸다는 증거).
+    await openStageFor(HANEUL);
+    await escape();
+    expect(byId("channel-member-remove-stage")).toBeNull();
+    expect(byId("channel-member-panel")).not.toBeNull();
+
+    await openStageFor(HANEUL);
+    await pressConfirm();
+    expect(api.removeChannelMember).toHaveBeenCalledTimes(1);
+    expect(byId("channel-member-remove-stage-confirm")!.getAttribute("aria-busy")).toBe("true");
+    await escape();
+    // 요청이 이미 나갔다: 단계도 패널도 그대로 서서 결과를 기다린다.
+    expect(byId("channel-member-remove-stage")).not.toBeNull();
+    expect(byId("channel-member-panel")).not.toBeNull();
+    await act(async () => {
+      pending.resolve({});
+      await Promise.resolve();
+    });
+    await settle();
+  });
+
+  it("바깥 누름: 요청이 도는 동안은 패널이 닫히지 않고, 돌지 않을 때는 닫힌다 (#5818 검수 M4)", async () => {
+    const pending = deferred<unknown>();
+    api.removeChannelMember.mockReturnValue(pending.promise);
+    const outsidePress = async () => {
+      const overlay = document.querySelector<HTMLElement>("[data-overlay-layer], [data-state='open'].fixed.inset-0") ?? document.body;
+      await act(async () => {
+        overlay.dispatchEvent(new MouseEvent("pointerdown", { bubbles: true, button: 0 }));
+        overlay.dispatchEvent(new MouseEvent("pointerup", { bubbles: true, button: 0 }));
+        overlay.dispatchEvent(new MouseEvent("click", { bubbles: true, button: 0 }));
+      });
+      await settle();
+    };
+    await mountOpen(SEOYEON);
+    await openStageFor(HANEUL);
+    await pressConfirm();
+    expect(byId("channel-member-remove-stage-confirm")!.getAttribute("aria-busy")).toBe("true");
+    await outsidePress();
+    expect(byId("channel-member-panel")).not.toBeNull();
+    expect(byId("channel-member-remove-stage")).not.toBeNull();
+    await act(async () => {
+      pending.resolve({});
+      await Promise.resolve();
+    });
+    await settle();
+  });
+
+  it("영수증: 이름만 말줄임이고 앞뒤 낱말은 줄지 않으며, 낭독은 전체 문장이다 (#5818 검수 M5)", async () => {
+    api.removeChannelMember.mockResolvedValue({});
+    await mountOpen(SEOYEON);
+    await openStageFor(HANEUL);
+    await pressConfirm();
+    await settle();
+    const receipt = byId("channel-member-removed")!;
+    const name = byId("channel-member-removed-name")!;
+    expect(name.textContent).toBe("정하늘");
+    expect(name.className).toContain("truncate");
+    // 서술어(「 님을 채널에서 내보냈어요.」)는 줄지 않는 조각이다: 이름 칸이 좁아져도 행동이 남는다.
+    const after = name.nextElementSibling as HTMLElement;
+    expect(after.textContent).toBe(" 님을 채널에서 내보냈어요.");
+    expect(after.className).toContain("shrink-0");
+    expect(receipt.textContent).toBe(KO["timeline.memberPanel.removed"].replace("{name}", "정하늘"));
+  });
+
   it("거절되면 단계 안에서 사전의 사유 문장을 말하고 줄은 그대로다", async () => {
     api.removeChannelMember.mockRejectedValue(new ApiError(403, "workspace owner or admin role required"));
     await mountOpen(SEOYEON);
     await openStageFor(SERIN);
-    await press(byId("channel-member-remove-stage-confirm")!);
+    await pressConfirm();
     await settle();
     expect(byId("channel-member-remove-stage-error")!.textContent).toBe(KO["timeline.memberPanel.removeErrorForbidden"]);
     expect(byId("channel-member-remove-stage")).not.toBeNull();

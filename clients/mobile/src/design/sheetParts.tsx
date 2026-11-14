@@ -1,4 +1,4 @@
-import React, {useEffect, useRef} from 'react';
+import React, {useEffect, useRef, useState} from 'react';
 import {
   AccessibilityInfo,
   ActivityIndicator,
@@ -703,6 +703,9 @@ export function ActionTileRow({children}: {children: React.ReactNode}): React.JS
  *   - 머리말·설명·실패는 모두 문장이라 어절 가운데서 끊기지 않는다(`Sentence`). 단 `hangul-word` 는 **닫는 괄호 뒤의
  *     조사**를 못 붙잡는다(「…」가 → 줄 머리의 「가」) — 문구에 「괄호 + 조사」 조합을 쓰지 않는다(시험이 렌더된 문장을 훑는다).
  */
+/** 확인 단계가 선 뒤 위험 단추가 눌림을 받지 않는 시간(ms). 웹 공용 확인 창의 `CONFIRM_ARM_MS` 와 같은 값이다. */
+export const CONFIRM_ARM_MS = 500;
+
 export function ConfirmStep({
   headline,
   detail,
@@ -711,6 +714,7 @@ export function ConfirmStep({
   pendingLabel,
   pending = false,
   confirmDisabled = false,
+  confirmArmMs = 0,
   cancelLabel = '취소',
   onCancel,
   onConfirm,
@@ -734,6 +738,12 @@ export function ConfirmStep({
    * 두지 않는다).
    */
   confirmDisabled?: boolean;
+  /**
+   * 단계가 선 뒤 이 시간(ms) 동안 위험 단추는 눌림을 받지 않는다(#5818 검수 High). 목록 줄을 누른 자리에 위험 단추가 서면
+   * 더블탭이나 떨리는 손의 둘째 누름(250~400ms 뒤)이 읽기 전에 확정을 누른다. 모양은 그대로다(흐림·잠김 표시 없음 —
+   * 읽고 누르는 데는 이보다 오래 걸린다). 취소는 처음부터 받는다. 기본 0 = 지금까지처럼 바로 받는다.
+   */
+  confirmArmMs?: number;
   cancelLabel?: string;
   onCancel: () => void;
   onConfirm: () => void;
@@ -744,6 +754,14 @@ export function ConfirmStep({
   confirmTestID?: string;
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
+  // 서는 순간 한 번 시계를 건다(다시 그려져도 다시 걸리지 않는다).
+  const [armed, setArmed] = useState(confirmArmMs <= 0);
+  useEffect(() => {
+    if (confirmArmMs <= 0) return undefined;
+    const timer = setTimeout(() => setArmed(true), confirmArmMs);
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- 서는 순간 한 번만
+  }, []);
   // 실패 문장이 새로 서면 읽어 준다. iOS 에는 live region 이 없어 `accessibilityRole="alert"` 만으로는 나타날 때
   // 낭독되지 않는다(`DeviceKeyPanel` 이 같은 이유로 같은 호출을 한다). 같은 문장이 남아 있는 동안은 다시 읽지 않는다.
   useEffect(() => {
@@ -782,7 +800,9 @@ export function ConfirmStep({
           accessibilityLabel={confirmLabel}
           accessibilityState={{busy: pending, disabled: pending || confirmDisabled}}
           disabled={pending || confirmDisabled}
-          onPress={onConfirm}
+          onPress={() => {
+            if (armed) onConfirm();
+          }}
           style={({pressed}) => [
             styles.destructive,
             pressed && styles.confirmPressed,

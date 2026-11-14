@@ -122,8 +122,10 @@ describe("한 곳의 수리가 두 표면을 함께 닫는다 (design-review #19
     expect(canon).not.toMatch(/onMutate/);
     expect(canon).not.toMatch(/cancelQueries/);
     // 목록 편집은 서버가 답한 뒤다.
+    // 성공(과 「이미 나간 것」 404)이 같은 정리 `leftChannel` 을 부르고, 목록 편집(`setQueryData`)은 거기 한 곳에만 있다.
     const success = canon.slice(canon.indexOf("leaveMutation"));
-    expect(success).toMatch(/onSuccess[\s\S]{0,600}setQueryData/);
+    expect(success).toMatch(/onSuccess[\s\S]{0,300}leftChannel\(\)/);
+    expect(canon).toMatch(/const leftChannel = \(\) => \{[\s\S]{0,500}setQueryData/);
   });
 
   it("표면 어느 쪽도 자기 나가기 흐름을 갖지 않는다", () => {

@@ -651,7 +651,9 @@ async function exercise(browser) {
   if (traffic.memberDeletes.length !== 0) {
     throw new Error("leaving fired before the confirmation was answered");
   }
-  await page.getByTestId("channel-leave-confirm-action").click();
+  // 확정은 서고 나서 500ms 동안 눌림을 받지 않는다(공용 확인 창): 읽고 누르는 사람처럼 풀린 뒤에 누른다.
+  await page.locator('[data-testid="channel-leave-confirm-confirm"][data-armed="true"]').waitFor();
+  await page.getByTestId("channel-leave-confirm-confirm").click();
   await page.waitForFunction(
     () => document.querySelectorAll('[data-testid="channel-item"]').length === 0,
     undefined,

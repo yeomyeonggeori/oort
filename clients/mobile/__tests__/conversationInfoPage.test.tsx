@@ -15,6 +15,7 @@ import type {StatusDot as PeerStatus} from '@momo/core/features/presence/statusD
 import {makeDirectory} from '@momo/core/features/workspace/directory';
 import type {RosterMember} from '@momo/core/lib/api';
 import {act, cleanup, fireEvent, render, screen, waitFor, within} from '@testing-library/react-native';
+import {CONFIRM_ARM_MS} from '../src/design/sheetParts';
 import React from 'react';
 import {Animated, Dimensions, Image, PixelRatio, StyleSheet} from 'react-native';
 
@@ -36,6 +37,24 @@ import {endGlyphInk} from './fixtures/endGlyphInk';
 import {finger, pane} from './fixtures/finger';
 import {pinReduceMotion} from './fixtures/reduceMotion';
 import {releaseReduceMotion, setReduceMotion} from './fixtures/sheetContract';
+
+/**
+ * 확인 단계의 위험 단추는 서고 나서 `CONFIRM_ARM_MS` 동안 눌림을 받지 않는다(#5818 검수 High): 사람이 읽고 누르는 것처럼
+ * 그 시간이 지난 뒤에 누른다. 가짜 시계가 켜져 있으면 시계를 옮기고, 아니면 실제로 기다린다.
+ */
+async function armedPress(testID: string, options?: Parameters<typeof screen.getByTestId>[1]) {
+  const faked = typeof (setTimeout as unknown as {clock?: unknown}).clock !== 'undefined';
+  if (faked) {
+    act(() => {
+      jest.advanceTimersByTime(CONFIRM_ARM_MS + 40);
+    });
+  } else {
+    await act(async () => {
+      await new Promise<void>(resolve => setTimeout(resolve, CONFIRM_ARM_MS + 40));
+    });
+  }
+  fireEvent.press(screen.getByTestId(testID, options));
+}
 
 // =============================================================================
 // 대화·채널 정보 페이지 (#4319, owner 10-27 — 머리 가운데 이름·상태 알약이 여는 곳).
@@ -599,12 +618,15 @@ describe('정보 페이지 — 채널 나가기의 확인 단계 (#4319)', () =>
     expect(screen.getByTestId('conversation-info-back')).toBeTruthy();
   });
 
-  it('「취소」와 「채널 나가기」가 제 일을 한 번씩 부르고 페이지는 닫히지 않는다', () => {
+  it('「취소」와 「채널 나가기」가 제 일을 한 번씩 부르고 페이지는 닫히지 않는다', async () => {
     const props = confirming();
     fireEvent.press(screen.getByTestId('conversation-info-leave-cancel'));
     expect(props.onCancelLeave).toHaveBeenCalledTimes(1);
     expect(props.onConfirmLeave).not.toHaveBeenCalled();
+    // 서자마자의 누름(목록 줄을 누른 자리의 더블탭)은 확정을 누르지 못한다(#5818 검수 High).
     fireEvent.press(screen.getByTestId('conversation-info-leave-confirm-button'));
+    expect(props.onConfirmLeave).not.toHaveBeenCalled();
+    await armedPress('conversation-info-leave-confirm-button');
     expect(props.onConfirmLeave).toHaveBeenCalledTimes(1);
     expect(props.onClose).not.toHaveBeenCalled();
   });

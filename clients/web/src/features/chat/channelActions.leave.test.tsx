@@ -9,7 +9,10 @@ import { ApiError, type Channel } from "@momo/core/lib/api";
 import { channelLeaveFailure } from "@momo/core/features/channels/model";
 import enTimeline from "../../../../../packages/momo-core/src/i18n/catalogs/en-US/timeline.json";
 import { resetEscapeLayers } from "@/design/ui/escapeLayer";
+import { CONFIRM_ARM_MS } from "@/design/ui/confirm-dialog";
 import { ChannelHeaderMenu } from "./ChannelHeaderMenu";
+import { ChannelLeaveConfirmDialog, type ChannelActions } from "./channelActions";
+import { ROUTE_REGION_DOM_ID } from "@/app/shellNav";
 import { SidebarRowContextMenu } from "@/features/sidebar/SidebarRowContextMenu";
 
 // =============================================================================
@@ -146,6 +149,16 @@ function mount(tree: ReactElement) {
   });
 }
 
+/** 확정은 서고 나서 `CONFIRM_ARM_MS` 동안 눌림을 받지 않는다(공용 확인 창). 시험은 사람이 읽고 누르는 것처럼 그 뒤에 누른다. */
+async function armedClick(id: string) {
+  await act(async () => {
+    await new Promise((done) => setTimeout(done, CONFIRM_ARM_MS + 40));
+  });
+  expect(byId(id)?.getAttribute("data-armed")).toBe("true");
+  click(id);
+  await flush();
+}
+
 function cachedChannels(): Channel[] {
   return client?.getQueryData<Channel[]>(["channels", WS]) ?? [];
 }
@@ -239,14 +252,13 @@ for (const surface of SURFACES) {
       expect(byId(surface.confirm)).not.toBeNull();
       expect(leaveChannel).not.toHaveBeenCalled();
 
-      click(`${surface.confirm}-action`);
-      await flush();
+      await armedClick(`${surface.confirm}-confirm`);
 
       // 이 세 줄이 결함이 삼켰던 것 전부다.
       expect(leaveChannel).toHaveBeenCalledWith(WS, CHANNEL_ID);
       expect(removeChannelMember).not.toHaveBeenCalled();
       expect(byId(surface.confirm)).not.toBeNull();
-      const action = byId(`${surface.confirm}-action`);
+      const action = byId(`${surface.confirm}-confirm`);
       expect(action?.getAttribute("aria-busy")).toBe("true");
       // 사전 없이 띄운 시험이라 영어 사전이 말한다(`useFormatMessage` 의 대체). 확인 단계의 낱말은 모두 한 사전 묶음이다.
       expect(action?.textContent).toContain(EN["timeline.channelLeave.busy"]);
@@ -263,8 +275,7 @@ for (const surface of SURFACES) {
       surface.mount();
       click(surface.leaveItem);
       await flush();
-      click(`${surface.confirm}-action`);
-      await flush();
+      await armedClick(`${surface.confirm}-confirm`);
 
       const denied = new ApiError(403, "forbidden");
       await act(async () => {
@@ -284,9 +295,9 @@ for (const surface of SURFACES) {
       expect(cachedChannels()).toHaveLength(1);
       // 다시 눌러 볼 수 있는 상태로 돌아온다.
       expect(
-        byId(`${surface.confirm}-action`)?.getAttribute("aria-busy")
+        byId(`${surface.confirm}-confirm`)?.getAttribute("aria-busy")
       ).toBeNull();
-      expect(byId(`${surface.confirm}-action`)?.textContent).toContain(
+      expect(byId(`${surface.confirm}-confirm`)?.textContent).toContain(
         EN["timeline.channelLeave.confirm"]
       );
     });
@@ -297,8 +308,7 @@ for (const surface of SURFACES) {
       surface.mount();
       click(surface.leaveItem);
       await flush();
-      click(`${surface.confirm}-action`);
-      await flush();
+      await armedClick(`${surface.confirm}-confirm`);
       expect(cachedChannels()).toHaveLength(1);
 
       await act(async () => {
@@ -311,6 +321,84 @@ for (const surface of SURFACES) {
       expect(byId(surface.confirm)).toBeNull();
     });
 
+    it("확인이 선 직후의 확정 누름은 아무 일도 하지 않고, 읽을 시간이 지나면 받는다 (#5818 검수 High)", async () => {
+      leaveChannel.mockResolvedValue({});
+      surface.mount();
+      click(surface.leaveItem);
+      await flush();
+      const confirmId = `${surface.confirm}-confirm`;
+      // 메뉴 줄을 누른 자리에 확정이 서서 둘째 누름이 거기 떨어지는 장면: 서자마자의 누름은 받지 않는다.
+      expect(byId(confirmId)?.getAttribute("data-armed")).toBe("false");
+      click(confirmId);
+      await flush();
+      expect(leaveChannel).not.toHaveBeenCalled();
+      expect(byId(surface.confirm)).not.toBeNull();
+      await armedClick(confirmId);
+      expect(leaveChannel).toHaveBeenCalledTimes(1);
+    });
+
+    it("이미 나간 채널(404)을 낡은 화면에서 또 나가면 줄을 걷고 확인 창을 닫는다 (#5818 검수 M2)", async () => {
+      const pending = deferred<unknown>();
+      leaveChannel.mockReturnValue(pending.promise);
+      surface.mount();
+      click(surface.leaveItem);
+      await flush();
+      await armedClick(`${surface.confirm}-confirm`);
+      expect(cachedChannels()).toHaveLength(1);
+      await act(async () => {
+        pending.reject(new ApiError(404, "not a member"));
+        await Promise.resolve();
+      });
+      await flush();
+      // 서버가 「이미 멤버가 아니다」라고 했다: 나간 것과 같게 목록에서 걷고 창은 남기지 않는다. 같은 404 를 사람이 다시 누르게 두지 않는다.
+      expect(cachedChannels()).toHaveLength(0);
+      expect(byId(surface.confirm)).toBeNull();
+    });
+
+    it("요청이 도는 동안 Esc·바깥 누름·취소는 확인 창을 닫지 않는다 (#5818 검수 M4)", async () => {
+      const pending = deferred<unknown>();
+      leaveChannel.mockReturnValue(pending.promise);
+      surface.mount();
+      click(surface.leaveItem);
+      await flush();
+      await armedClick(`${surface.confirm}-confirm`);
+      expect(byId(`${surface.confirm}-confirm`)?.getAttribute("aria-busy")).toBe("true");
+
+      await act(async () => {
+        document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+      });
+      await flush();
+      expect(byId(surface.confirm)).not.toBeNull();
+
+      await act(async () => {
+        document.body.dispatchEvent(new MouseEvent("pointerdown", { bubbles: true }));
+        document.body.dispatchEvent(new MouseEvent("pointerup", { bubbles: true }));
+        document.body.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      });
+      await flush();
+      expect(byId(surface.confirm)).not.toBeNull();
+
+      click(`${surface.confirm}-cancel`);
+      await flush();
+      expect(byId(surface.confirm)).not.toBeNull();
+
+      pending.resolve({});
+      await flush();
+    });
+
+    it("요청이 돌지 않을 때는 Esc 가 확인 창을 닫는다 (위 잠금 시험이 실패할 수 있다는 대조)", async () => {
+      surface.mount();
+      click(surface.leaveItem);
+      await flush();
+      expect(byId(surface.confirm)).not.toBeNull();
+      await act(async () => {
+        document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+      });
+      await flush();
+      expect(byId(surface.confirm)).toBeNull();
+      expect(leaveChannel).not.toHaveBeenCalled();
+    });
+
     for (const role of ["member", "guest"] as const) {
       it(`${role} 도 나가기를 보고, 누르면 관리자 길이 아니라 본인 나가기 길을 부른다 (#5778)`, async () => {
         const pending = deferred<unknown>();
@@ -319,8 +407,7 @@ for (const surface of SURFACES) {
         expect(byId(surface.leaveItem)).not.toBeNull();
         click(surface.leaveItem);
         await flush();
-        click(`${surface.confirm}-action`);
-        await flush();
+        await armedClick(`${surface.confirm}-confirm`);
         expect(leaveChannel).toHaveBeenCalledWith(WS, CHANNEL_ID);
         expect(removeChannelMember).not.toHaveBeenCalled();
         await act(async () => {
@@ -333,3 +420,75 @@ for (const surface of SURFACES) {
     }
   });
 }
+
+// =============================================================================
+// 나간 뒤 초점 (#5818 검수 M3): 연 단추·줄이 나가며 사라졌으면 문서 몸통(body)이 아니라 옮겨 간 화면의 본문 자리로 간다.
+// 진짜 확인 창을 열고 닫으며, 돌려줄 곳(opener)이 붙어 있는 경우와 떨어진 경우를 모두 잰다.
+// =============================================================================
+
+describe("나간 뒤 초점", () => {
+  function fakeActions(confirmOpen: boolean): ChannelActions {
+    return {
+      leave: {
+        kind: "public",
+        confirmOpen,
+        open: () => undefined,
+        close: () => undefined,
+        error: null,
+        pending: false,
+        confirm: () => undefined,
+      },
+    } as unknown as ChannelActions;
+  }
+
+  function render(confirmOpen: boolean, opener: HTMLElement | null) {
+    act(() => {
+      mountedRoot?.render(
+        createElement(ChannelLeaveConfirmDialog, {
+          actions: fakeActions(confirmOpen),
+          title: "general",
+          testId: "focus-leave",
+          opener,
+        })
+      );
+    });
+  }
+
+  function setup(attachOpener: boolean) {
+    const region = document.createElement("div");
+    region.id = ROUTE_REGION_DOM_ID;
+    region.tabIndex = -1;
+    document.body.append(region);
+    const opener = document.createElement("button");
+    if (attachOpener) document.body.append(opener);
+    const host = document.createElement("div");
+    document.body.append(host);
+    mountedHost = host;
+    mountedRoot = createRoot(host);
+    return { region, opener };
+  }
+
+  it("돌려줄 단추가 나가며 사라졌으면 본문 자리가 초점을 받는다 (body 로 떨어지지 않는다)", async () => {
+    const { region, opener } = setup(false);
+    render(true, opener);
+    await flush();
+    render(false, opener);
+    await flush();
+    await flush();
+    expect(document.activeElement).toBe(region);
+    expect(document.activeElement).not.toBe(document.body);
+    region.remove();
+  });
+
+  it("돌려줄 단추가 아직 있으면(나가지 못했을 때) 그 단추가 초점을 받는다", async () => {
+    const { region, opener } = setup(true);
+    render(true, opener);
+    await flush();
+    render(false, opener);
+    await flush();
+    await flush();
+    expect(document.activeElement).toBe(opener);
+    region.remove();
+    opener.remove();
+  });
+});

@@ -13,7 +13,7 @@ import {StyleSheet} from 'react-native';
 import {Sentence} from '../../design/atoms';
 import {PageSheet} from '../../design/PageSheet';
 import {SheetHeader} from '../../design/SheetChrome';
-import {ConfirmStep, GroupCard, ListRow, RowStatusIcon, SheetScroll} from '../../design/sheetParts';
+import {CONFIRM_ARM_MS, ConfirmStep, GroupCard, ListRow, RowStatusIcon, SheetScroll} from '../../design/sheetParts';
 import {font, line, type Palette} from '../../design/tokens';
 import {useStyles} from '../../design/theme';
 import {useFormatMessage} from '../../i18n/useFormatMessage';
@@ -107,6 +107,7 @@ export function ChannelActionSheet({
         {confirmingLeave ? (
           <ConfirmStep
             testID="channel-leave-confirm"
+            confirmArmMs={CONFIRM_ARM_MS}
             headline={formatMessage('timeline.channelLeave.title')}
             detail={formatMessage(channelLeaveConfirmBodyKey(target.channel.kind), {name: target.title})}
             error={leave.error}

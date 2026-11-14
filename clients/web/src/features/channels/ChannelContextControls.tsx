@@ -267,11 +267,27 @@ function RowIdentity({ member }: { member: RosterMember }) {
 }
 
 /** 줄의 「채널에서 내보내기」를 부르는 손. 줄 끝 ⋯ 이 자기 자신을 넘겨 확인 단계가 닫힌 뒤 초점이 돌아올 곳이 된다. */
+/** 영수증 문장을 이름 앞·이름·이름 뒤로 가른 것. 문장은 사전이 지고(`timeline.memberPanel.removed`), 이름 자리만 표지로 두고 쪼갠다. */
+interface RemovedReceipt {
+  before: string;
+  name: string;
+  after: string;
+}
+
+const RECEIPT_NAME_MARK = "\u0000";
+
+function removedReceipt(formatMessage: Format, name: string): RemovedReceipt {
+  const [before = "", after = ""] = formatMessage("timeline.memberPanel.removed", { name: RECEIPT_NAME_MARK }).split(
+    RECEIPT_NAME_MARK
+  );
+  return { before, name, after };
+}
+
 type RemoveRequest = (member: RosterMember, opener: HTMLElement | null) => void;
 
 /**
  * 줄 끝 ⋯ 메뉴(#5778). 권한이 있을 때만 선다(`canRemoveFromChannel` — 서버 사다리의 거울): 권한이 없는 사람에게는 단추도
- * 메뉴 줄도 없다. 단추는 줄 높이를 바꾸지 않는 크기다(`size-control-sm` 28 < 두 줄 글의 높이). 행동은 지금 하나뿐이지만
+ * 메뉴 줄도 없다. 단추는 줄 높이를 바꾸지 않는 크기다(`size-control-sm` 28 < 두 줄 글의 높이; 600px 미만에서는 `tap-target` 44 로 자라되 위·아래 -8px 여백으로 줄에 내는 키는 28 그대로다 — 안 그러면 ⋯ 이 있는 줄만 60 이 되어 줄 높이가 사람마다 갈린다(#5686). 눌리는 상자 44 는 줄 56 안에 든다, #5818 검수 M6). 행동은 지금 하나뿐이지만
  * 줄 메뉴(#5777)와 같은 문법으로 둔다 — 아이콘 + 낱말, 위험색.
  */
 function MemberRowMenu({
@@ -298,7 +314,7 @@ function MemberRowMenu({
             type="button"
             variant="ghost"
             size="icon"
-            className="size-control-sm shrink-0 text-ink-muted"
+            className="tap-target -my-2 size-control-sm shrink-0 text-ink-muted"
             aria-label={label}
             data-testid="channel-member-row-menu"
           >
@@ -554,8 +570,8 @@ function ChannelMemberPanelBody({
   onAddMember: () => void;
   onClose: () => void;
   onRemove: RemoveRequest;
-  /** 방금 내보낸 사람의 한 줄 영수증(`useInlineConfirm`, 1.6초). 없으면 null. */
-  receipt: string | null;
+  /** 방금 내보낸 사람의 한 줄 영수증(`useInlineConfirm`, 1.6초). 없으면 null. 이름만 말줄임하고 서술어는 늘 보인다. */
+  receipt: RemovedReceipt | null;
   listRef: RefObject<HTMLDivElement>;
 }) {
   const formatMessage = useFormatMessage();
@@ -606,7 +622,13 @@ function ChannelMemberPanelBody({
           {receipt ? (
             <>
               <Check aria-hidden="true" className="size-4 shrink-0" />
-              <span className="min-w-0 truncate">{receipt}</span>
+              {/* 문장 전체가 한 `truncate` 칸이면 긴 이름에서 끝(「내보냈어요」)이 먼저 잘려 행동이 사라진다(#5818 검수 M5). 이름만
+                  말줄임하고 앞뒤 낱말은 줄지 않는다. 세 조각이 붙어 있어 낭독(`role=status`)은 전체 문장 한 번이다. */}
+              <span className="flex min-w-0 items-baseline">
+                {receipt.before !== "" ? <span className="shrink-0 whitespace-pre">{receipt.before}</span> : null}
+                <span className="min-w-0 truncate" data-testid="channel-member-removed-name">{receipt.name}</span>
+                {receipt.after !== "" ? <span className="shrink-0 whitespace-pre">{receipt.after}</span> : null}
+              </span>
             </>
           ) : null}
         </p>
@@ -781,9 +803,7 @@ function ChannelMemberPanelFrame({
           onClose={onClose}
           onRemove={requestRemove}
           receipt={
-            receipt.confirmed && removedName !== null
-              ? formatMessage("timeline.memberPanel.removed", { name: removedName })
-              : null
+            receipt.confirmed && removedName !== null ? removedReceipt(formatMessage, removedName) : null
           }
           listRef={listRef}
         />
