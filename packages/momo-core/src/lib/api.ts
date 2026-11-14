@@ -1948,10 +1948,22 @@ export function openDirectMessage(
   );
 }
 
-/** Active workspace members, humans and agents alike (agents are members). */
-export async function fetchRoster(workspaceId: string): Promise<RosterMember[]> {
+/**
+ * Active workspace members, humans and agents alike (agents are members).
+ *
+ * `includeSuspended` asks for the suspended humans as well (`?include=suspended`, #5814): the server honours it only for
+ * an owner or admin person on a full session and ignores it for everyone else, and a server older than #5814 ignores the
+ * unknown query key (`RosterQuery` has no `deny_unknown_fields`) and keeps returning the active roster. Only the web
+ * roster query that feeds the member tab and the profile's 「정지 풀기」 asks (#5781); every other caller — the phone,
+ * one-off reads — keeps the active roster, so a suspended person cannot leak into a picker that never expected one.
+ */
+export async function fetchRoster(
+  workspaceId: string,
+  options: { includeSuspended?: boolean } = {}
+): Promise<RosterMember[]> {
+  const query = options.includeSuspended === true ? "?include=suspended" : "";
   const res = await request<{ members: RosterMember[] }>(
-    `/v1/workspaces/${encodeURIComponent(workspaceId)}/roster`
+    `/v1/workspaces/${encodeURIComponent(workspaceId)}/roster${query}`
   );
   return (arrayField(res, "members") ?? [])
     .map(sanitizeRosterMember)

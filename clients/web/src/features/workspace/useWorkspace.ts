@@ -52,7 +52,9 @@ export function useRoleLabels(workspaceId: string): RoleLabels {
 export function useDirectory(workspaceId: string) {
   const query = useQuery({
     queryKey: rosterQueryKey(workspaceId),
-    queryFn: () => fetchRoster(workspaceId),
+    // 정지된 사람도 달라고 한다(#5781): 소유자·관리자에게만 실리고(#5814), 멤버 탭의 「정지됨」 묶음과 프로필의 「정지 풀기」가
+    // 그 줄을 쓴다. 이 명부를 받는 모든 웹 자리는 정지된 사람을 후보·접속 표시로 쓰지 않는다(#5781 인계의 훑기 표).
+    queryFn: () => fetchRoster(workspaceId, { includeSuspended: true }),
     // 접속 여부(`online`)는 서버가 명부를 읽을 때 전송에서 읽어 싣는 값이라 점은 마지막 명부 읽기만큼만
     // 신선하다(#4692, ADR-0160 ②). 보이는 동안만 이 주기로 다시 읽는다(백그라운드 탭에서는 멈춘다).
     refetchInterval: AVAILABILITY_REFRESH_MS,

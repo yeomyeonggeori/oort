@@ -93,3 +93,28 @@ describe("fetchRoster email", () => {
     expect("email" in (roster[2] ?? {})).toBe(false);
   });
 });
+
+// #5781: 정지된 사람은 `?include=suspended` 를 단 요청에만 실린다(#5814). 인자는 부르는 쪽이 고른다 — 기본은 달지 않는다.
+describe("fetchRoster include=suspended", () => {
+  it("includeSuspended 일 때만 쿼리 인자를 단다", async () => {
+    installHost();
+    const urls: string[] = [];
+    vi.stubGlobal("fetch", async (input: RequestInfo | URL) => {
+      urls.push(String(input instanceof Request ? input.url : input));
+      return new Response(JSON.stringify({ members: [row("a", {}), row("b", { kind: "human", status: "suspended" })] }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    });
+    await fetchRoster(WS);
+    const wide = await fetchRoster(WS, { includeSuspended: true });
+    expect(urls).toEqual([
+      `https://oort.test/v1/workspaces/${WS}/roster`,
+      `https://oort.test/v1/workspaces/${WS}/roster?include=suspended`,
+    ]);
+    expect(wide.map((member) => [member.id, member.status])).toEqual([
+      ["a", "active"],
+      ["b", "suspended"],
+    ]);
+  });
+});
