@@ -72,7 +72,7 @@ async function installMocks(context, v) {
     json(route, { token: "capture-only-not-a-credential", tokenType: "jwt", expiresAtMs: Date.now() + 60_000, ttlSeconds: 60, workspaceId: WORKSPACE_ID, memberId: ME }));
   await context.route("**/v1/workspaces/*/channels", (route) =>
     json(route, { channels: [{ id: GENERAL_ID, workspaceId: WORKSPACE_ID, kind: "public", name: "결제-개발", muted: false }] }));
-  await context.route("**/v1/workspaces/*/roster", (route) => json(route, { members: roster(v.role ?? "owner") }));
+  await context.route("**/v1/workspaces/*/roster*", (route) => json(route, { members: roster(v.role ?? "owner") }));
   await context.route("**/v1/workspaces/*/read-state", (route) => json(route, { read_states: [] }));
   await context.route("**/v1/workspaces/*/memory/settings", (route) => {
     if (route.request().method() === "GET") return json(route, v.settings ?? settings());

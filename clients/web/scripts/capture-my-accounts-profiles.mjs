@@ -60,7 +60,7 @@ async function installMocks(context) {
     json(route, { accessToken: SESSION.accessToken, refreshToken: SESSION.refreshToken })
   );
   await context.route("**/v1/workspaces/*/channels", (route) => json(route, { channels: CHANNELS }));
-  await context.route("**/v1/workspaces/*/roster", (route) => json(route, { members: [] }));
+  await context.route("**/v1/workspaces/*/roster*", (route) => json(route, { members: [] }));
   // 운영자가 아닌 사람의 팀 연결(403 → 운영자 안내). 내 계정 절만 본다.
   await context.route("**/v1/provider/link**", (route) =>
     json(route, { error: { code: "forbidden", message: "operator required" } }, 403)
