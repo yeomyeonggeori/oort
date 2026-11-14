@@ -167,6 +167,22 @@ pub async fn load_message(
     }))
 }
 
+/// Whether the message's author is an agent (`member.kind = 'agent'`).
+///
+/// ADR-0170 증보 2026-11-14 (#5872): the server never fetches an address an agent wrote. A member
+/// row that cannot be read counts as an agent, so a lookup that finds nothing stops the fetch.
+pub async fn author_is_agent(
+    conn: &mut PgConnection,
+    author_member_id: Uuid,
+) -> Result<bool, DbError> {
+    let is_human: Option<bool> =
+        sqlx::query_scalar("SELECT kind = 'human' FROM member WHERE id = $1")
+            .bind(author_member_id)
+            .fetch_optional(&mut *conn)
+            .await?;
+    Ok(!is_human.unwrap_or(false))
+}
+
 pub async fn tombstone_exists(conn: &mut PgConnection, message_id: Uuid) -> Result<bool, DbError> {
     let exists: bool = sqlx::query_scalar(
         "SELECT EXISTS(SELECT 1 FROM message_unfurl_tombstone WHERE message_id = $1)",

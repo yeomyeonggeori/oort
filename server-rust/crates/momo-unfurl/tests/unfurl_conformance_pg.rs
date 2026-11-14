@@ -1355,3 +1355,151 @@ async fn a_fetch_this_server_had_no_room_for_is_tried_again_like_a_timeout() {
     assert_eq!(job().await.0, "done");
     assert_eq!(asks.load(Ordering::SeqCst), 3);
 }
+
+// ---------------------------------------------------------------------------
+// ADR-0170 증보 2026-11-14 (#5872) — an agent's message is never fetched by the server
+// ---------------------------------------------------------------------------
+
+struct RecordingHttp {
+    asked: Arc<Mutex<Vec<String>>>,
+}
+
+#[async_trait::async_trait]
+impl UnfurlHttp for RecordingHttp {
+    async fn fetch(&self, url: &str, _kind: FetchKind) -> Result<Fetched, FetchError> {
+        self.asked.lock().unwrap().push(url.to_string());
+        Ok(Fetched {
+            final_url: url.to_string(),
+            content_type: "text/html".into(),
+            body: br#"<meta property="og:title" content="a title">"#.to_vec(),
+        })
+    }
+}
+
+/// A second member of the tenant, of the given kind (`agent` rows are not needed: the rule reads
+/// `member.kind` only, which is also what a webhook's service member carries).
+async fn add_member_of_kind(su: &PgPool, tenant: &Tenant, kind: &str) -> Tenant {
+    let member = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO member (id, workspace_id, kind, display_name, handle) \
+         VALUES ($1, $2, $3::member_kind, $4, $4)",
+    )
+    .bind(member)
+    .bind(tenant.workspace)
+    .bind(kind)
+    .bind(member.to_string())
+    .execute(su)
+    .await
+    .expect("member");
+    Tenant {
+        workspace: tenant.workspace,
+        member,
+        channel: tenant.channel,
+    }
+}
+
+/// What the author of a message can still do to its body: the same statement the edit path runs.
+async fn edit_body(su: &PgPool, message: Uuid, body: &str) {
+    sqlx::query(
+        "UPDATE message SET body = $2, state = 'edited', edited_at = clock_timestamp() \
+          WHERE id = $1",
+    )
+    .bind(message)
+    .bind(body)
+    .execute(su)
+    .await
+    .expect("edit");
+}
+
+async fn card_rows(su: &PgPool, message: Uuid) -> i64 {
+    sqlx::query_scalar("SELECT count(*) FROM message_unfurl WHERE message_id = $1")
+        .bind(message)
+        .fetch_one(su)
+        .await
+        .unwrap()
+}
+
+/// 불변식: 사람이 누르지 않았는데 에이전트가 쓴 주소로 서버가 나가는 요청이 없다.
+/// 에이전트가 보낸 글·고친 글의 주소로는 요청 0건·카드 0행이고, 사람이 쓴 글은 그대로 1건이다.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 DB"]
+async fn an_agent_authored_message_is_never_fetched_and_a_human_one_still_is() {
+    let _guard = test_lock().await;
+    ensure_schema();
+    let su = superuser_pool().await;
+    skip_leftover_jobs(&su).await;
+    let person = seed(&su).await;
+    let agent = add_member_of_kind(&su, &person, "agent").await;
+
+    let sent_by_agent = insert_message(&su, &agent, "see https://sent-by-agent.example/a").await;
+    let edited_by_agent = insert_message(&su, &agent, "no link yet").await;
+    edit_body(
+        &su,
+        edited_by_agent,
+        "now https://edited-by-agent.example/b",
+    )
+    .await;
+    let sent_by_person = insert_message(&su, &person, "see https://sent-by-person.example/c").await;
+
+    let asked = Arc::new(Mutex::new(Vec::new()));
+    let worker = UnfurlWorker::new(
+        su.clone(),
+        Arc::new(RecordingHttp {
+            asked: asked.clone(),
+        }),
+        UnfurlConfig::for_tests(database_url(), true),
+    );
+    worker.drain_to_empty().await;
+
+    assert_eq!(
+        *asked.lock().unwrap(),
+        vec!["https://sent-by-person.example/c".to_string()],
+        "the server asked for the person's link and for nothing an agent wrote"
+    );
+    assert_eq!(card_rows(&su, sent_by_agent).await, 0);
+    assert_eq!(card_rows(&su, edited_by_agent).await, 0);
+    assert_eq!(card_rows(&su, sent_by_person).await, 1);
+}
+
+/// A job that was already queued for an agent's message (a row written before the rule, or by a
+/// writer that never saw it) ends as skipped: the rule is the worker's, so the fetch is where it
+/// is stopped, whoever queued it.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 DB"]
+async fn a_job_already_queued_for_an_agent_message_is_skipped_before_any_fetch() {
+    let _guard = test_lock().await;
+    ensure_schema();
+    let su = superuser_pool().await;
+    skip_leftover_jobs(&su).await;
+    let person = seed(&su).await;
+    let agent = add_member_of_kind(&su, &person, "agent").await;
+    let message = insert_message(&su, &agent, "https://queued-before.example/x").await;
+    // The trigger's own row stands in for the older one; make sure there is exactly one.
+    let jobs: i64 = sqlx::query_scalar("SELECT count(*) FROM unfurl_job WHERE message_id = $1")
+        .bind(message)
+        .fetch_one(&su)
+        .await
+        .unwrap();
+    assert_eq!(jobs, 1);
+
+    let asked = Arc::new(Mutex::new(Vec::new()));
+    let worker = UnfurlWorker::new(
+        su.clone(),
+        Arc::new(RecordingHttp {
+            asked: asked.clone(),
+        }),
+        UnfurlConfig::for_tests(database_url(), true),
+    );
+    let stats = worker.drain_once().await.expect("drain");
+    assert_eq!((stats.claimed, stats.skipped, stats.fetched), (1, 1, 0));
+    assert!(asked.lock().unwrap().is_empty());
+    let (status, why): (String, Option<String>) =
+        sqlx::query_as("SELECT status, last_error FROM unfurl_job WHERE message_id = $1")
+            .bind(message)
+            .fetch_one(&su)
+            .await
+            .unwrap();
+    assert_eq!(status, "skipped");
+    assert_eq!(why.as_deref(), Some("agent author"));
+    assert_eq!(card_rows(&su, message).await, 0);
+}

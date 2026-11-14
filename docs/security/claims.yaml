@@ -140,6 +140,14 @@ claims:
     proofs:
       - "server-rust/crates/momo-unfurl/src/fetch.rs#private_literals_are_blocked_before_connect"
       - "server-rust/crates/momo-unfurl/src/fetch.rs#a_private_dns_answer_is_blocked"
+  - id: NET-4
+    claim: "The server makes no link-preview request for an address in a message whose author is an agent (member kind agent), whether the message was sent or edited, and a message written by a person is still fetched."
+    scope: "Real PostgreSQL with a counting fetch double, link previews (unfurl) only. The rule is the preview worker's own check, so it also stops a job queued earlier. Other paths that fetch an address a member supplies on purpose (the composer preview, a picture import) are not covered. A webhook's service member is of kind agent too."
+    priority: P1
+    runs: nightly
+    proofs:
+      - "server-rust/crates/momo-unfurl/tests/unfurl_conformance_pg.rs#an_agent_authored_message_is_never_fetched_and_a_human_one_still_is"
+      - "server-rust/crates/momo-unfurl/tests/unfurl_conformance_pg.rs#a_job_already_queued_for_an_agent_message_is_skipped_before_any_fetch"
   - id: NET-3
     claim: "The agent worker's outbound client refuses a hostname that resolves to a private address before connecting."
     scope: "The agent worker egress helper. Other outbound paths have their own claims (NET-1, NET-2)."
