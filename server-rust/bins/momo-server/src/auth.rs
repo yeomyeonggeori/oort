@@ -123,12 +123,27 @@ pub struct PushActionCredential;
 #[derive(Debug, Clone, Copy)]
 pub struct PushFetchCredential;
 
+/// Marker inserted when a request authenticated with a person's **full app
+/// session** — an ordinary access token, no narrow `typ` (#5814).
+///
+/// The positive half of an allow list: only the arm of `require_principal` that
+/// verified a plain access token inserts it. The developer door, an agent bearer,
+/// a work host's signature, the legacy gateway secret, both [`NarrowToken`]s, and
+/// any door added later leave it out, so a handler that widens a read on its
+/// presence fails closed for a credential nobody thought about. Like the other
+/// markers it is inserted only here, so a request cannot carry it in. Its reader
+/// is the roster's opt-in for suspended people.
+#[derive(Debug, Clone, Copy)]
+pub struct FullPersonSession;
+
 /// The narrow, lineage-bound tokens `require_principal` is taught to accept
 /// besides an access token. Each has its own `typ`, its own closed route list
 /// (judged before the database) and the same derived life: valid only while its
-/// session lineage holds a live refresh row.
+/// session lineage holds a live refresh row. Public so a conformance test can
+/// enumerate it exhaustively (a new kind fails that test's build until it is
+/// measured, #5814).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum NarrowToken {
+pub enum NarrowToken {
     /// The notification extension's two reads (#3121, ADR-0188 §8.7).
     PushFetch,
     /// The lock screen's one decision (#3927, ADR-0204 D6).
@@ -830,7 +845,10 @@ pub async fn require_principal(
         Some(NarrowToken::PushFetch) => {
             request.extensions_mut().insert(PushFetchCredential);
         }
-        None => {}
+        // A plain access token: a person's full app session (#5814).
+        None => {
+            request.extensions_mut().insert(FullPersonSession);
+        }
     }
     let agent_member_id = (principal.kind == PrincipalKind::Agent).then_some(principal.member_id);
     request.extensions_mut().insert(principal);
