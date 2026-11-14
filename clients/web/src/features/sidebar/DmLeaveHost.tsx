@@ -299,12 +299,14 @@ export function DmLeaveHost({
  * 영역 하나가 읽는다. 영역은 늘 서 있고 글자만 바뀐다(처음부터 있어야 낭독기가 바뀜을 듣는다).
  */
 function DmLeaveAnnouncer() {
-  const { receipt } = useDmLeaveStore();
+  const { receipts } = useDmLeaveStore();
+  const latest = receipts.at(-1);
   const messages = useMessages();
   if (typeof document === "undefined") return null;
   return createPortal(
     <p role="status" className="sr-only" data-testid="dm-leave-announce">
-      {receipt === null ? "" : messages.formatMessage(DM_LEAVE_KEYS.done)}
+      {/* 영역은 늘 서 있고, 영수증마다 새 글 마디를 넣는다(같은 문장이 두 번 와도 다시 읽힌다). */}
+      {latest === undefined ? null : <span key={latest.id}>{messages.formatMessage(DM_LEAVE_KEYS.done)}</span>}
     </p>,
     document.body
   );

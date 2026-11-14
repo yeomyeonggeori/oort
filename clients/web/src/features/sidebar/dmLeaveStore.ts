@@ -35,12 +35,16 @@ export interface DmLeaveReceipt {
 
 interface Snapshot {
   request: DmLeaveRequest | null;
-  receipt: DmLeaveReceipt | null;
+  /**
+   * 서 있는 영수증들. 하나만 들면 첫 영수증이 붙들린 동안(포인터가 목록 위) 두 번째로 나갈 때 첫 자리가 빠져 아래 줄이 포인터 밑에서
+   * 움직인다 - 그래서 영수증마다 제 시계로 걷힌다.
+   */
+  receipts: readonly DmLeaveReceipt[];
   /** 바뀔 때마다 오른다. 나가기 경로가 접힌 뒤(`settleDmLeaveFailure` 의 `absent`) 메뉴를 다시 그리게 하는 데도 쓴다. */
   version: number;
 }
 
-let snapshot: Snapshot = { request: null, receipt: null, version: 0 };
+let snapshot: Snapshot = { request: null, receipts: [], version: 0 };
 const listeners = new Set<() => void>();
 
 function publish(patch: Partial<Omit<Snapshot, "version">>): void {
@@ -57,11 +61,16 @@ export function endDmLeaveRequest(): void {
 }
 
 export function showDmLeaveReceipt(workspaceId: string, channelId: string): void {
-  publish({ receipt: { workspaceId, channelId: channelId.toLowerCase(), id: snapshot.version + 1 } });
+  const channel = channelId.toLowerCase();
+  const next = { workspaceId, channelId: channel, id: snapshot.version + 1 };
+  // 같은 대화의 앞 영수증은 새 것이 대신한다(자리는 하나다).
+  publish({ receipts: [...snapshot.receipts.filter((receipt) => receipt.channelId !== channel), next] });
 }
 
 export function clearDmLeaveReceipt(id: number): void {
-  if (snapshot.receipt?.id === id) publish({ receipt: null });
+  if (snapshot.receipts.some((receipt) => receipt.id === id)) {
+    publish({ receipts: snapshot.receipts.filter((receipt) => receipt.id !== id) });
+  }
 }
 
 /** 나가기 경로가 이 워크스페이스에서 접혔다: 메뉴를 그리는 쪽이 판별(`dmLeaveMode`)을 다시 읽게 한다. */
@@ -107,6 +116,6 @@ export function openTimelineFor(workspaceId: string, channelId: string): OpenTim
 /** 시험 전용. */
 export function resetDmLeaveStoreForTest(): void {
   openTimeline = null;
-  snapshot = { request: null, receipt: null, version: 0 };
+  snapshot = { request: null, receipts: [], version: 0 };
   for (const listener of listeners) listener();
 }

@@ -130,6 +130,8 @@ async function installMocks(context, opts = {}) {
     leaveStatus: opts.leaveStatus ?? 204,
     leaveCalls: [],
     readDelayMs: opts.readDelayMs ?? 0,
+    rosterDelayMs: opts.rosterDelayMs ?? 0,
+    starred: opts.starred ?? [],
     scheduledDelayMs: opts.scheduledDelayMs ?? 0,
     scheduledStatus: opts.scheduledStatus ?? 200,
   };
@@ -169,10 +171,13 @@ async function installMocks(context, opts = {}) {
         ],
       });
     }
-    if (path.endsWith("/members/me/sidebar-prefs")) return json(route, { prefs: { version: 1, sections: [], starredChannelIds: [] } });
+    if (path.endsWith("/members/me/sidebar-prefs")) return json(route, { prefs: { version: 1, sections: [], starredChannelIds: state.starred } });
     if (/\/agents\/[^/]+\/liveness$/.test(path)) return json(route, { agentMemberId: P("14"), state: "inactive" });
     if (path.endsWith("/channels")) return json(route, { channels: [...channels, ...dms] });
-    if (path.endsWith("/roster")) return json(route, { members: roster });
+    if (path.endsWith("/roster")) {
+      if (state.rosterDelayMs > 0) await sleep(state.rosterDelayMs);
+      return json(route, { members: roster });
+    }
     if (path.endsWith("/huddles/active")) return json(route, { huddle: null });
     if (path.endsWith(`/workspaces/${workspaceId}`)) return json(route, { workspace: { id: workspaceId, name: "새벽거리" } });
     const list = /\/channels\/([^/]+)\/messages$/.exec(path);
@@ -335,13 +340,28 @@ async function sceneMenus(browser, origin, engine, scheme) {
       await page.waitForTimeout(150);
       const items = await page.evaluate(() => Array.from(document.querySelector('[data-testid="channel-title-menu-content"]').children).map((el) => el.getAttribute("data-testid") ?? el.getAttribute("role")));
       check(scene, "대화 머리 ⋮: 알림 · 구분선 · 「대화 나가기」(맨 아래)", items.at(-1) === "channel-leave-dm" && items.at(-2) === "separator", items);
+      // 그룹 DM 머리에는 이 ⋮ 가 서지 않는다(그룹은 다른 기능, D20).
+      await closeMenus(page);
+      await page.evaluate((p) => { window.location.hash = p; }, `/c/${DM_GROUP}`);
+      await page.waitForTimeout(600);
+      check(scene, "그룹 DM 머리: 이 ⋮ 없음", (await page.getByTestId("channel-title-menu").count()) === 0, null);
+      await page.evaluate((p) => { window.location.hash = p; }, `/c/${DM_SEOYEON}`);
+      await page.getByTestId("channel-title-menu").waitFor({ timeout: 5_000 });
+      await page.getByTestId("channel-title-menu").click();
+      await page.getByTestId("channel-title-menu-content").waitFor();
+      await page.waitForTimeout(150);
       const label = await page.getByTestId("channel-title-menu").getAttribute("aria-label");
       check(scene, "머리 ⋮ 낭독 이름", label === "이서연 다이렉트 메시지 메뉴", label);
       await shot(page, engine, `header-menu-${scheme}`);
       await closeMenus(page);
       await page.evaluate((p) => { window.location.hash = p; }, `/c/${DM_AGENT}`);
-      await page.waitForTimeout(500);
-      check(scene, "에이전트 DM 머리에는 ⋮ 없음", (await page.getByTestId("channel-title-menu").count()) === 0, null);
+      await page.getByTestId("channel-title-menu").waitFor({ timeout: 5_000 });
+      await page.getByTestId("channel-title-menu").click();
+      await page.getByTestId("channel-title-menu-content").waitFor();
+      await page.waitForTimeout(150);
+      const agentItems = await page.evaluate(() => Array.from(document.querySelector('[data-testid="channel-title-menu-content"]').children).map((el) => el.getAttribute("data-testid") ?? el.getAttribute("role")));
+      check(scene, "에이전트 DM 머리 ⋮: 「알림」만, 「대화 나가기」 없음", !agentItems.includes("channel-leave-dm") && agentItems.includes("channel-mute-toggle"), agentItems);
+      await closeMenus(page);
     });
   } finally {
     await context.close();
@@ -354,8 +374,12 @@ async function sceneMenus(browser, origin, engine, scheme) {
       check(scene, "옛 서버(투영에 하한 칸 없음): 줄 메뉴에 「대화 나가기」 0", !items.some((i) => i.testid === "channel-row-leave-dm") && items.some((i) => i.testid === "channel-row-close-dm"), items.map((i) => i.testid ?? i.role));
       await closeMenus(legacy.page);
       await legacy.page.evaluate((p) => { window.location.hash = p; }, `/c/${DM_SEOYEON}`);
-      await legacy.page.waitForTimeout(600);
-      check(scene, "옛 서버: 대화 머리 ⋮ 없음", (await legacy.page.getByTestId("channel-title-menu").count()) === 0, null);
+      await legacy.page.getByTestId("channel-title-menu").waitFor({ timeout: 5_000 });
+      await legacy.page.getByTestId("channel-title-menu").click();
+      await legacy.page.getByTestId("channel-title-menu-content").waitFor();
+      await legacy.page.waitForTimeout(150);
+      const legacyItems = await legacy.page.evaluate(() => Array.from(document.querySelector('[data-testid="channel-title-menu-content"]').children).map((el) => el.getAttribute("data-testid") ?? el.getAttribute("role")));
+      check(scene, "옛 서버: 대화 머리 ⋮ 에 「대화 나가기」 없음(「알림」만)", !legacyItems.includes("channel-leave-dm") && legacyItems.includes("channel-mute-toggle"), legacyItems);
     });
   } finally {
     await legacy.context.close();
@@ -678,31 +702,39 @@ async function sceneFloor(browser, origin, engine) {
   } finally {
     await context.close();
   }
-  // H 첫 페인트: 나간 대화(새 글 없음)가 투영이 늦게 와도 목록에 서지 않는다.
-  const cold = await boot(browser, origin, {});
+  // H 첫 페인트(#5824 검수 r1 M2): 나간 대화(새 글 없음)가 투영이 늦게 와도 목록에도 「숨긴 대화」에도 서지 않는다. 판별력: 이서연 DM 은
+  // 다른 기기가 별표를 적어 둔 대화라(사본에 하한이 없으면 4번으로 보인다) 줄 단정이 갈리고, 박지호 DM 은 별표가 없어(사본에 하한이 없으면
+  // 숨김 행 7번으로 「숨긴 대화」에 든다) 수 단정이 갈린다. 둘 다 투영이 오기 **전**에 읽는다.
+  const cold = await boot(browser, origin, { starred: [DM_SEOYEON] });
   try {
     await attempt(`H-firstpaint-${engine}`, async () => {
       const { page, state: s } = cold;
       await openLeaveFromRow(page, DM_SEOYEON);
+      await clickConfirm(page);
+      await page.waitForTimeout(400);
+      await page.mouse.move(1200, 400);
+      await openLeaveFromRow(page, DM_JIHO);
       await clickConfirm(page);
       await page.waitForTimeout(2_200);
       // 사본이 하한을 적도록 한 번 다시 읽힌 뒤(30초 폴링을 기다리지 않고 새로고침) 투영을 늦춘다.
       await page.reload({ waitUntil: "domcontentloaded" });
       await page.locator(`[data-testid="channel-item"][data-channel-id="${chId(1)}"]`).waitFor({ timeout: 30_000 });
       await page.waitForTimeout(600);
-      s.readDelayMs = 2_000;
+      s.readDelayMs = 6_000;
       await page.reload({ waitUntil: "domcontentloaded" });
       await page.locator(`[data-testid="channel-item"][data-channel-id="${chId(1)}"]`).waitFor({ timeout: 30_000 });
+      const t0 = Date.now();
       const seen = [];
-      for (let i = 0; i < 12; i++) {
-        seen.push(await row(page, DM_SEOYEON).count());
+      for (let i = 0; i < 8; i++) {
+        seen.push((await row(page, DM_SEOYEON).count()) + (await row(page, DM_JIHO).count()));
         await page.waitForTimeout(150);
       }
       await page.getByTestId("sidebar-section-dms-header").hover();
       await page.waitForTimeout(200);
       const closedCount = await page.evaluate(() => document.querySelector('[data-testid="dm-section-menu"]')?.getAttribute("data-closed-count") ?? "(문 없음 = 0)");
-      check(`H-firstpaint-${engine}`, "투영이 오기 전(첫 페인트)부터 나간 대화가 목록에 없다", seen.every((n) => n === 0), seen);
-      check(`H-firstpaint-${engine}`, "「숨긴 대화」 수에 들지 않는다(머리에 호버해 문을 세운 뒤 읽음)", closedCount === "(문 없음 = 0)" || closedCount === "0", closedCount);
+      const readAtMs = Date.now() - t0;
+      check(`H-firstpaint-${engine}`, "투영이 오기 전(첫 페인트): 나간 대화 둘(별표 있음·없음)이 목록에 없다", seen.every((n) => n === 0) && readAtMs < 6_000, { seen, readAtMs });
+      check(`H-firstpaint-${engine}`, "투영이 오기 전: 「숨긴 대화」 수에 들지 않는다(머리에 호버해 문을 세운 뒤 읽음)", (closedCount === "(문 없음 = 0)" || closedCount === "0") && readAtMs < 6_000, { closedCount, readAtMs });
     });
   } finally {
     await cold.context.close();
@@ -712,11 +744,19 @@ async function sceneFloor(browser, origin, engine) {
 // ---- I · 머리 ⋮ 가 늦게 설 때 / J 예약 목록 ------------------------------------------------------------------------
 
 async function sceneLate(browser, origin, engine) {
+  for (const [label, delays] of [["투영 1.5초", { readDelayMs: 1_500 }], ["투영 1.5초 + 명부 0.8초", { readDelayMs: 1_500, rosterDelayMs: 800 }]]) {
+    await sceneLateOne(browser, origin, engine, label, delays);
+  }
+  await sceneScheduledLate(browser, origin, engine);
+}
+
+async function sceneLateOne(browser, origin, engine, label, delays) {
   const scene = `I-late-${engine}`;
   const { context, page, state } = await boot(browser, origin, {});
   try {
     await attempt(scene, async () => {
-      state.readDelayMs = 1_500;
+      state.readDelayMs = delays.readDelayMs ?? 0;
+      state.rosterDelayMs = delays.rosterDelayMs ?? 0;
       await page.reload({ waitUntil: "domcontentloaded" });
       await page.evaluate((p) => { window.location.hash = p; }, `/c/${DM_SEOYEON}`);
       const samples = [];
@@ -733,11 +773,14 @@ async function sceneLate(browser, origin, engine) {
       const drift = {};
       for (const sample of samples) for (const b of sample) (drift[b.id] ??= []).push(b.x);
       const moved = Object.entries(drift).map(([id, xs]) => ({ id, spread: Math.max(...xs) - Math.min(...xs), seen: xs.length })).filter((d) => d.spread > 0);
-      check(scene, "투영이 늦어도 머리 단추가 옆으로 밀리지 않는다(단추마다 x 흩어짐 0)", moved.length === 0, { firstControlsAtSample: firstControls, menuSeenAtSample: menuSeen, moved, ids: Object.keys(drift) });
+      check(scene, `${label}: 머리 단추가 옆으로 밀리지 않는다(단추마다 x 흩어짐 0)`, moved.length === 0, { firstControlsAtSample: firstControls, menuSeenAtSample: menuSeen, moved, ids: Object.keys(drift) });
     });
   } finally {
     await context.close();
   }
+}
+
+async function sceneScheduledLate(browser, origin, engine) {
   for (const [label, opts] of [["느림 1.5초", { scheduledDelayMs: 1_500 }], ["실패 500", { scheduledStatus: 500 }]]) {
     const late = await boot(browser, origin, opts);
     try {

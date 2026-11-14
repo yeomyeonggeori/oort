@@ -1,5 +1,5 @@
 import { DmAgentsMenu } from "./DmAgentsMenu";
-import { dmLeaveMode, dmLeaveOffered, higherHistoryFloor, isPersonToPersonDm } from "@momo/core/features/channels/dmLeave";
+import { dmLeaveMode, dmLeaveOffered, higherHistoryFloor } from "@momo/core/features/channels/dmLeave";
 import { idKey } from "@momo/core/features/workspace/directory";
 import { readProjectionPhase } from "@momo/core/features/sidebar/goneDm";
 import { requestDmLeave, setOpenTimeline, useDmLeaveStore } from "@/features/sidebar/dmLeaveStore";
@@ -187,6 +187,18 @@ export function canAddChannelMemberNow(
 ): boolean {
   if (kind == null || kind === "dm") return false;
   return canCreateChannelNow(rosterSettled, role);
+}
+
+/** 둘만의 DM 인가(참여자 둘 · 나 포함 · 그룹·에이전트가 앉은 키가 아님). 상대가 사람인지는 묻지 않는다 - 명부 없이 정해지는 모양이다. */
+function isOneToOneDm(channel: { memberIds?: string[]; dmKey?: string }, selfMemberId: string): boolean {
+  const ids = channel.memberIds ?? [];
+  const key = channel.dmKey ?? "";
+  return (
+    ids.length === 2 &&
+    ids.some((id) => uuidEq(id, selfMemberId)) &&
+    !key.startsWith("group:") &&
+    !key.startsWith("admitted:")
+  );
 }
 
 export function ChatShell() {
@@ -1162,29 +1174,22 @@ export function ChatShell() {
     return () => setOpenTimeline(null);
   }, [stressCount, workspaceId, channelId, openNewestSeq, openMessages]);
 
-  // 대화 머리의 「대화 나가기」(ADR-0177 증보 2026-11-14 D21, #5825): 사람끼리의 1:1 · 나가기를 싣는 서버 · 투영 준비일 때만 DM 머리에 ⋮ 가
-  // 선다(D20). 다른 DM 에는 ⋮ 를 세우지 않는다 - 에이전트가 앉은 DM 은 이미 「대화 멤버 관리」 ⋮ 를 든다. 저장소의 판은 나가기 경로가
-  // 이 워크스페이스에서 접혔을 때(405·501) 다시 읽게 한다.
+  // 대화 머리의 「대화 나가기」(ADR-0177 증보 2026-11-14 D21, #5825): 사람끼리의 1:1 · 나가기를 싣는 서버 · 투영 준비일 때만 메뉴에 선다(D20).
+  // ⋮ 자체는 **모든 1:1**(참여자 둘, `group:`·`admitted:` 키가 아님)의 머리에 늘 선다(「알림」 + 내밀 때만 「대화 나가기」). 명부·투영이
+  // 늦게 와도 ⋮ 가 나중에 서거나 걷히며 다른 머리 단추를 밀지 않게 하려는 것이다(사람인지 에이전트인지는 명부가 와야 안다). 그룹·에이전트가
+  // 앉은 DM 은 기존 「대화 멤버 관리」 ⋮ 그대로다. 저장소의 판은 나가기 경로가 이 워크스페이스에서 접혔을 때(405·501) 다시 읽게 한다.
   useDmLeaveStore();
-  const readPhaseNow = readProjectionPhase(readStates);
   const leaveOffered =
     stressCount === 0 &&
     channel?.kind === "dm" &&
     dmLeaveOffered({
       mode: dmLeaveMode({ workspaceId, rows: readStates.data }),
-      phase: readPhaseNow,
+      phase: readProjectionPhase(readStates),
       channel,
       directory,
       selfMemberId: session.member.id,
     });
-  // 투영이 오는 중인 사람끼리 1:1 에는 ⋮ 자리를 미리 세운다(알림 줄만, 「대화 나가기」는 투영이 준비되면 선다): 늦게 서는 ⋮ 가 머리 단추들을
-  // 왼쪽으로 밀지 않게. 투영이 옛 서버라고 답하면 그때 걷힌다(옛 서버의 첫 진입 한 번).
-  const headerMenuForDm =
-    leaveOffered ||
-    (stressCount === 0 &&
-      channel?.kind === "dm" &&
-      readPhaseNow === "loading" &&
-      isPersonToPersonDm(channel, directory, session.member.id));
+  const headerMenuForDm = stressCount === 0 && channel?.kind === "dm" && isOneToOneDm(channel, session.member.id);
 
   // 멤버 수 · 허들 · ⋮ (컨트롤 묶음의 끝). **⋮는 혼자 한 줄에 서지 않는다** (#5206): 컨트롤 묶음이 줄을 바꿀 때(판이 좁은 600대)
   // 맨 끝의 ⋮가 혼자 셋째 줄에 서지 않게, ⋮를 바로 앞 컨트롤과 줄바꿈 한 덩어리(`flex-nowrap`)로 묶는다. 앞 컨트롤은 허들 컨트롤이고,

@@ -398,10 +398,13 @@ export function Sidebar({
   });
   // 1:1 「대화 나가기」(ADR-0177 증보 2026-11-14 D21, #5825). 내밀지 말지는 투영이 하한 칸을 싣는가(옛 서버 판별)와 이 워크스페이스의
   // 접힘(`dmLeaveMode`)이 정하고, 접힘은 이 저장소의 판이 바뀌어 다시 읽힌다. 끝난 뒤의 영수증도 여기서 온다.
-  const { receipt: leaveReceipt } = useDmLeaveStore();
+  const { receipts: allLeaveReceipts } = useDmLeaveStore();
   const leaveMode = dmLeaveMode({ workspaceId, rows: readStates.data });
-  const receiptChannelId =
-    leaveReceipt !== null && uuidEq(leaveReceipt.workspaceId, workspaceId) ? leaveReceipt.channelId : null;
+  const leaveReceipts = useMemo(
+    () => allLeaveReceipts.filter((receipt) => uuidEq(receipt.workspaceId, workspaceId)),
+    [allLeaveReceipts, workspaceId]
+  );
+  const receiptFor = (channelId: string) => leaveReceipts.find((receipt) => uuidEq(receipt.channelId, channelId));
   const openId = openChannelId(
     routePath,
     indexFallbackChannelId({
@@ -419,9 +422,9 @@ export function Sidebar({
       dms.filter(
         (channel) =>
           dmShownNow(dmVisibility.verdictOf(channel.id), channel.id, openId) ||
-          (receiptChannelId !== null && uuidEq(channel.id, receiptChannelId))
+          leaveReceipts.some((receipt) => uuidEq(receipt.channelId, channel.id))
       ),
-    [dms, dmVisibility, openId, receiptChannelId]
+    [dms, dmVisibility, openId, leaveReceipts]
   );
   // 「⋯ › 숨긴 대화」 목록(D11): 내가 닫았거나 상대가 나간 DM. 지금 열려 있는 DM 은 보이는 대화라 넣지 않는다.
   const closedListItems = useMemo(
@@ -730,7 +733,8 @@ export function Sidebar({
     channel: Channel,
     options: { inStarredSection?: boolean } = {}
   ) {
-    if (leaveReceipt !== null && receiptChannelId !== null && uuidEq(channel.id, receiptChannelId)) {
+    const leaveReceipt = receiptFor(channel.id);
+    if (leaveReceipt !== undefined) {
       return <DmLeaveReceiptRow key={channel.id} receipt={leaveReceipt} paneRef={listPaneRef} />;
     }
     const counts = unreadCountFor(channel);
