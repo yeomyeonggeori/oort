@@ -82,7 +82,7 @@ function PickerBody({
 
   const shown = useMemo(() => {
     const needle = filter.trim();
-    return needle === '' ? items : items.filter(item => matchName(needle, item.title) !== null);
+    return needle === '' ? items : items.filter(item => matchName(needle, item.title, true) !== null);
   }, [items, filter]);
   // 「모든 대화」는 걸러지지 않는 첫 줄이다 — 이름으로 찾는 중에는 숨긴다(찾는 대상이 대화 이름이다).
   const withAll = filter.trim() === '';

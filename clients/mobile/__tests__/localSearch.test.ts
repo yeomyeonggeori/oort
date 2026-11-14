@@ -88,6 +88,53 @@ describe('이름 찾기의 글자 규칙', () => {
   });
 });
 
+describe('한글 조합 중 채널 찾기 · 정렬 자 (ADR-0225 D12)', () => {
+  const hangul = [channel('h1', '디자인'), channel('h2', '디저트')];
+
+  it.each(['디', '디ㅈ', '디자', '디장', '디자이', '디자인'])(
+    '`%s` 를 칠 때 「디자인」은 남고 「디저트」는 `디자`부터 빠진다',
+    query => {
+      const names = matchChannels(hangul, query, 'ko-KR').map(match => match.name);
+      expect(names).toContain('디자인');
+      expect(names.includes('디저트')).toBe(query === '디' || query === '디ㅈ');
+    },
+  );
+
+  it('느슨하게 맞은 줄의 강조는 이름 안의 글자 구간이다', () => {
+    const [hit] = matchChannels(hangul, '디장', 'ko-KR');
+    expect(hit.rank).toBe(1);
+    expect(hit.ranges).toEqual([[0, 3]]);
+  });
+
+  it('사람 이름은 느슨하게 보지 않는다 (채널 이름에만 켠다)', () => {
+    expect(matchName('디장', '디자인')).toBeNull();
+    expect(matchName('디장', '디자인', true)).not.toBeNull();
+  });
+
+  it('같은 순위끼리는 숫자를 값으로 세운다: sprint-2 가 sprint-10 앞', () => {
+    const sprints = [channel('s1', 'sprint-10'), channel('s2', 'sprint-2'), channel('s3', 'sprint-1')];
+    expect(matchChannels(sprints, 'sprint', 'ko-KR').map(match => match.name)).toEqual([
+      'sprint-1',
+      'sprint-2',
+      'sprint-10',
+    ]);
+  });
+
+  it('화면 언어로 센다: 같은 순위의 섞인 이름이 ko·en·ja 에서 다른 차례다', () => {
+    const mixed = ['漢字', '가나', 'かな', 'abc'].map((name, i) => channel(`m${i}`, name));
+    // 모두 같은 순위(앞부분)로 걸리게 `x-` 를 붙여 질의한다.
+    const all = (locale: string) =>
+      matchChannels(
+        mixed.map((c, i) => ({...c, name: `x-${c.name}`, id: `n${i}`})),
+        'x-',
+        locale,
+      ).map(match => match.name.slice(2));
+    expect(all('ko-KR')).toEqual(['가나', '漢字', 'abc', 'かな']);
+    expect(all('en-US')).toEqual(['abc', '가나', 'かな', '漢字']);
+    expect(all('ja-JP')).toEqual(['abc', 'かな', '漢字', '가나']);
+  });
+});
+
 describe('채널·사람 걸러내기', () => {
   it('채널은 내 채널의 이름으로만, 사람은 나·비활성을 빼고 이름이나 핸들로 — 글자 규칙 순서다', () => {
     // 채널: DM·이름 없는 채널은 빠지고, 순서는 글자 규칙 뒤 가나다다.
@@ -98,7 +145,7 @@ describe('채널·사람 걸러내기', () => {
       channel('c4', undefined),
       channel('c5', '루나', 'dm'),
     ];
-    expect(matchChannels(channels, '루나').map(match => match.name)).toEqual([
+    expect(matchChannels(channels, '루나', 'ko-KR').map(match => match.name)).toEqual([
       '루나-디자인',
       '루나-프로젝트',
       '프로젝트-루나',

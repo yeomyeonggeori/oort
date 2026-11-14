@@ -9,6 +9,7 @@ import type {
   LocalCardArgs,
 } from "@momo/core/features/commands/registry";
 import { mentionAnnotation } from "@momo/core/features/ai/aiMention";
+import { looseTailIncludes } from "@momo/core/features/channels/nameSearch";
 import {
   aliasHint,
   matchedAlias,
@@ -390,7 +391,11 @@ export function matchChannels(
       (channel.name ?? "") !== ""
   );
   const matched = needle
-    ? open.filter((channel) => (channel.name ?? "").toLowerCase().includes(needle))
+    ? open.filter((channel) => {
+        const name = (channel.name ?? "").toLowerCase();
+        // 한글을 치는 도중(`디장`·`디ㅈ`)에도 줄이 남게 마지막 글자만 느슨하게 본다 (ADR-0225 D12).
+        return name.includes(needle) || looseTailIncludes(needle, name);
+      })
     : open;
   return matched.slice(0, limit);
 }

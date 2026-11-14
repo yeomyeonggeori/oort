@@ -1,3 +1,5 @@
+import {looseTailMatches} from '@momo/core/features/channels/nameSearch';
+import {compareChannelNames} from '@momo/core/features/channels/nameCollation';
 import {uuidEq, type Channel, type RosterMember} from '@momo/core/lib/api';
 
 // =============================================================================
@@ -48,7 +50,7 @@ function foldedChars(text: string): string[] {
 }
 
 /** 글자 규칙으로 `text` 가 `query` 에 얼마나 맞는지. 맞지 않으면 `null`이다. */
-export function matchName(query: string, text: string): NameMatch | null {
+export function matchName(query: string, text: string, loose = false): NameMatch | null {
   const needle = foldedChars(query.trim().normalize('NFC'));
   const hay = foldedChars(text);
   const size = needle.length;
@@ -64,6 +66,17 @@ export function matchName(query: string, text: string): NameMatch | null {
   }
   for (let from = 1; from + size <= hay.length; from += 1) {
     if (startsAt(from)) return {rank: 3, ranges: [[from, from + size]]};
+  }
+  // 한글을 치는 도중의 마지막 글자만 느슨하게(`디장` ↔ `디자인`, ADR-0225 D12). 채널 이름에만 켠다.
+  if (loose) {
+    const hits = looseTailMatches(query, text);
+    const at = (predicate: (start: number) => boolean) => hits.find(hit => predicate(hit.start));
+    const hit =
+      at(start => start === 0) ?? at(start => WORD_BREAKS.has(hay[start - 1])) ?? hits[0];
+    if (hit !== undefined) {
+      const rank: NameRank = hit.start === 0 ? 1 : WORD_BREAKS.has(hay[hit.start - 1]) ? 2 : 3;
+      return {rank, ranges: [[hit.start, hit.end]]};
+    }
   }
   if (size < 2) return null;
 
@@ -139,14 +152,20 @@ export interface ChannelMatch {
  * 내가 든 채널(공개·비공개) 중에서 이름으로 찾는다. DM 은 「사람」 묶음의 몫이라 여기에 없다.
  * 이름이 없는 채널은 걸 글자가 없어 뺀다.
  */
-export function matchChannels(channels: readonly Channel[], query: string): ChannelMatch[] {
+export function matchChannels(
+  channels: readonly Channel[],
+  query: string,
+  /** 보는 사람의 화면 언어(`messageLocale`). 같은 순위끼리 이 언어의 차례로 세우고 숫자는 값으로 센다. */
+  locale: string,
+): ChannelMatch[] {
   const found: ChannelMatch[] = [];
   for (const channel of channels) {
     if (channel.kind === 'dm' || channel.name === undefined || channel.name === '') continue;
-    const match = matchName(query, channel.name);
+    const match = matchName(query, channel.name, true);
     if (match !== null) found.push({channel, name: channel.name, ...match});
   }
-  return found.sort((a, b) => a.rank - b.rank || a.name.localeCompare(b.name, 'ko'));
+  const byName = compareChannelNames(locale);
+  return found.sort((a, b) => a.rank - b.rank || byName(a.name, b.name));
 }
 
 export interface PersonMatch {

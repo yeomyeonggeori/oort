@@ -12,6 +12,8 @@
 // 「dpl」로 `deploy`를 찾는 길을 이번 수리가 끊지 않는다.
 // =============================================================================
 
+import { looseTailMatches } from "@momo/core/features/channels/nameSearch";
+
 const WORD_SPLIT = /[\s·:/._-]+/;
 
 function words(text: string): string[] {
@@ -33,6 +35,17 @@ function tokenScore(token: string, parts: readonly string[]): number {
     }
   });
   return best;
+}
+
+function looseScore(token: string, lowered: string): number {
+  const chars = Array.from(lowered);
+  const hits = looseTailMatches(token, lowered);
+  if (hits.length === 0) return 0;
+  return hits.some(
+    (hit) => hit.start === 0 || WORD_SPLIT.test(chars[hit.start - 1])
+  )
+    ? 1
+    : 0.6;
 }
 
 function subsequence(needle: string, haystack: string): boolean {
@@ -69,11 +82,17 @@ export function paletteFilter(
   // 채널·사람 줄: 앞머리 > 부분 문자열 > 부분수열.
   const lowered = value.toLowerCase();
   let total = 0;
-  for (const token of tokens) {
+  tokens.forEach((token, index) => {
     if (words(lowered).some((word) => word.startsWith(token))) total += 1;
     else if (lowered.includes(token)) total += 0.6;
-    else if (subsequence(token, lowered)) total += 0.1;
-    else return 0;
-  }
-  return total / tokens.length;
+    else {
+      // 한글을 치는 도중에는 **마지막 낱말의 마지막 글자만** 느슨하게 본다 (ADR-0225 D12) —
+      // 앞 낱말은 이미 끝낸 것이다. 낱말 앞머리에서 맞으면 앞머리 점수다.
+      const loose = index === tokens.length - 1 ? looseScore(token, lowered) : 0;
+      if (loose > 0) total += loose;
+      else if (subsequence(token, lowered)) total += 0.1;
+      else total = Number.NaN;
+    }
+  });
+  return Number.isNaN(total) ? 0 : total / tokens.length;
 }
