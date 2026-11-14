@@ -3,6 +3,7 @@ import { Users } from "lucide-react";
 import type { RosterMember } from "@momo/core/lib/api";
 import { normalizeChannelTopic } from "@momo/core/features/channels/model";
 import {
+  channelHeadCount,
   memberPanelGroupOf,
   memberPanelHeadingKey,
   memberPanelSections,
@@ -587,7 +588,9 @@ export function ChannelMemberPanel({
   const addAfterClose = useRef(false);
   const [open, setOpen] = useState(false);
   useRestoreFocusOnClose(open, triggerRef);
-  const label = memberListLabel(status, members.length);
+  // 머리 수는 활성 멤버만(#5781): 정지된 사람은 패널 맨 아래 「정지됨」 묶음에 따로 선다.
+  const headCount = channelHeadCount(members);
+  const label = memberListLabel(status, headCount);
 
   // 두 Radix focus scope를 같은 커밋에서 교체하면 닫히는 패널의 포커스 복귀가
   // 새 다이얼로그의 auto-focus를 뒤에서 덮을 수 있다. 먼저 이 패널을 완전히
@@ -623,8 +626,8 @@ export function ChannelMemberPanel({
         >
           <Users className="size-4" aria-hidden="true" />
           {status === "ready" && (
-            <span data-numeric aria-label={`멤버 ${members.length}명`}>
-              {members.length}
+            <span data-numeric aria-label={`멤버 ${headCount}명`}>
+              {headCount}
             </span>
           )}
         </button>
@@ -645,7 +648,7 @@ export function ChannelMemberPanel({
           <DialogTitle>채널 멤버</DialogTitle>
           <DialogDescription>
             {status === "ready"
-              ? `${channelName} 채널의 멤버 ${members.length}명입니다.`
+              ? `${channelName} 채널의 멤버 ${headCount}명입니다.`
               : `${channelName} 채널의 멤버 목록을 확인합니다.`}
           </DialogDescription>
         </div>

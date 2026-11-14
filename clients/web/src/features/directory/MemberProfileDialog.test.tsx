@@ -172,11 +172,15 @@ function workspace(labels: RoleLabels): WorkspaceIdentity {
   };
 }
 
-function OpenOnMount({ memberId }: { memberId: string }) {
+function OpenOnMount({ memberId, openerRow }: { memberId: string; openerRow?: string }) {
   const open = useOpenMemberProfile();
   useEffect(() => {
-    open(memberId);
-  }, [memberId, open]);
+    const opener =
+      openerRow === undefined
+        ? null
+        : document.querySelector<HTMLElement>(`[data-directory-row][data-member-id="${openerRow}"]`);
+    open(memberId, opener);
+  }, [memberId, open, openerRow]);
   return null;
 }
 
@@ -190,6 +194,8 @@ function mountProfile(options: {
   deviceOffline?: boolean;
   /** 명부를 읽지 못하게 한다(받아 둔 명부 없음, #5242). */
   rosterFailure?: { error: Error };
+  /** 멤버 탭의 줄(`data-directory-row`)에서 연다: 그 멤버 id 의 줄이 문서에 미리 있어야 한다(#5781 M3). */
+  openerRow?: string;
 }): { host: HTMLElement; client: QueryClient } {
   Object.defineProperty(window.navigator, "onLine", { configurable: true, value: options.deviceOffline !== true });
   const roster = options.roster ?? ROSTER;
@@ -226,7 +232,7 @@ function mountProfile(options: {
           createElement(
             MemberProfileProvider,
             null,
-            createElement(OpenOnMount, { memberId: options.targetId })
+            createElement(OpenOnMount, { memberId: options.targetId, openerRow: options.openerRow })
           )
         )
       )
@@ -891,6 +897,7 @@ describe("정지·내보내기 (#5781)", () => {
     }
   );
 
+  // 이 시험의 명부는 정지된 사람을 싣지 않는 옛 서버(#5814 이전)다: 다시 읽은 명부에서 빠져도 창은 붙든 값으로 남는다.
   it("정지: 확인 단계가 서고(요청 없음·초점 취소·위험 단추), 확정하면 한 번 보내고, 명부에서 빠져도 「정지됨」 칩과 「정지 풀기」가 그 자리에 선다", async () => {
     suspendWorkspaceMember.mockResolvedValue({ memberId: MEMBER_ID, status: "suspended" });
     mountProfile({ viewer: OWNER, targetId: MEMBER_ID });
@@ -904,8 +911,8 @@ describe("정지·내보내기 (#5781)", () => {
     expect(stage.textContent).toContain("김인턴 님을 정지할까요?");
     expect(byId("member-profile-lifecycle-lines")?.textContent).toBe(
       "모든 기기에서 바로 로그아웃되고, 정지가 풀릴 때까지 다시 로그인할 수 없어요. 폰 알림도 더는 가지 않아요." +
-        "쓴 글과 들어가 있던 채널은 그대로 남아요. 다만 정지된 동안에는 그 글의 글쓴이 이름이 「나간 멤버」 표시로 바뀌어요." +
-        "정지는 이 창에서 바로 풀 수 있어요. 창을 닫으면 정지된 멤버는 명부에 보이지 않아요."
+        "쓴 글과 들어가 있던 채널은 그대로 남아요. 정지된 동안 그 글의 글쓴이는 소유자·관리자에게는 이름 그대로, 다른 사람에게는 「나간 멤버」로 보여요." +
+        "정지된 멤버는 멤버 탭의 「정지됨」에서 다시 찾아 언제든 풀 수 있어요. 「정지됨」은 소유자·관리자에게만 보여요."
     );
     expect(byId("member-profile-lifecycle-stage-confirm")?.dataset.tone).toBe("destructive");
     expect(byId("member-profile-lifecycle-stage-confirm")?.textContent).toBe("정지");
@@ -944,7 +951,8 @@ describe("정지·내보내기 (#5781)", () => {
     await vi.waitFor(() => expect(byId("member-profile-lifecycle-stage")).not.toBeNull());
     expect(byId("member-profile-lifecycle-stage")?.textContent).toContain("김인턴 님의 정지를 풀까요?");
     expect(byId("member-profile-lifecycle-lines")?.textContent).toBe(
-      "다시 로그인할 수 있게 돼요. 정지 전의 로그인은 되살아나지 않아서 새로 로그인해야 해요. 들어가 있던 채널은 그대로예요."
+      "다시 로그인할 수 있게 돼요. 정지 전의 로그인은 되살아나지 않아서 새로 로그인해야 해요. 들어가 있던 채널은 그대로예요." +
+        "정지할 때 보류된 예약 메시지는 풀어도 저절로 나가지 않아요. 본인이 다시 예약하거나 바로 보내야 해요."
     );
     expect(byId("member-profile-lifecycle-stage-confirm")?.dataset.tone).toBe("default");
     await click("member-profile-lifecycle-stage-confirm");
@@ -1055,6 +1063,181 @@ describe("정지·내보내기 (#5781)", () => {
     await vi.waitFor(() => expect(document.activeElement).toBe(byId("member-profile-removed-close")));
     await click("member-profile-removed-close");
     await vi.waitFor(() => expect(byId("member-profile-dialog")).toBeNull());
+  });
+
+  // ── #5814 의 명부(소유자·관리자에게 정지된 사람이 `status: "suspended"` 로, `online` 없이 실림) ──────────────────────
+  const suspendedRow = (row: RosterMember): RosterMember => {
+    const next: RosterMember = { ...row, status: "suspended" };
+    delete next.online;
+    return next;
+  };
+  const with5819 = (id: string) => ROSTER.map((row) => (row.id === id ? suspendedRow(row) : row));
+  /** 큰 얼굴 모서리 점의 톤(점이 없으면 null). 점의 생김새가 바뀌어도(#5786) 이 속성은 남는다. */
+  const heroTone = () =>
+    document.querySelector('[data-testid="member-profile-hero"] [data-testid="avatar-with-presence"]')?.getAttribute("data-presence-tone") ?? null;
+
+  it("#5814 명부: 정지가 성공하면 명부 캐시가 바로 새 상태다 — 다시 읽기가 오기 전에도 「정지」 줄이 다시 서지 않고, 접속 낱말·점이 없다", async () => {
+    suspendWorkspaceMember.mockResolvedValue({ memberId: MEMBER_ID, status: "suspended" });
+    const online = ROSTER.map((row) => (row.id === MEMBER_ID ? { ...row, online: true } : row));
+    const { client } = mountProfile({ viewer: OWNER, targetId: MEMBER_ID, roster: online });
+    await waitForDialog();
+    expect(byId("member-profile-presence")?.textContent).toBe("온라인");
+    expect(heroTone()).toBe("ok");
+    // 다시 읽기는 붙든 채 돌려주지 않는다: 그동안 화면이 무엇을 말하는지만 본다.
+    let answer: (rows: RosterMember[]) => void = () => undefined;
+    fetchRoster.mockImplementation(() => new Promise<RosterMember[]>((done) => (answer = done)));
+    await click("member-profile-suspend");
+    await click("member-profile-lifecycle-stage-confirm");
+    await vi.waitFor(() => expect(byId("member-profile-lifecycle-stage")).toBeNull());
+    expect(byId("member-profile-status-chip")?.textContent).toBe("정지됨");
+    expect(byId("member-profile-suspend")).toBeNull();
+    expect(byId("member-profile-reinstate")?.textContent).toBe("정지 풀기");
+    expect(byId("member-profile-presence")).toBeNull();
+    expect(heroTone()).toBeNull();
+    const cached = client.getQueryData<RosterMember[]>(["roster", WS])?.find((row) => row.id === MEMBER_ID);
+    expect(cached?.status).toBe("suspended");
+    expect(cached && "online" in cached).toBe(false);
+    await act(async () => {
+      answer(with5819(MEMBER_ID));
+    });
+    expect(byId("member-profile-reinstate")?.textContent).toBe("정지 풀기");
+    expect(byId("member-profile-empty")).toBeNull();
+  });
+
+  it("#5814 명부: 창을 닫았다 다시 열어도 정지된 사람의 「정지됨」 칩과 「정지 풀기」가 선다(붙든 값 없이 명부만으로)", async () => {
+    mountProfile({ viewer: ADMIN, targetId: MEMBER_ID, roster: with5819(MEMBER_ID) });
+    await waitForDialog();
+    expect(byId("member-profile-status-chip")?.textContent).toBe("정지됨");
+    expect(byId("member-profile-reinstate")?.textContent).toBe("정지 풀기");
+    expect(byId("member-profile-suspend")).toBeNull();
+    expect(byId("member-profile-presence")).toBeNull();
+  });
+
+  it("409(그사이 다른 사람이 정지함) 뒤에는 명부를 다시 읽어, 취소하면 창이 새 상태(「정지됨」·「정지 풀기」)를 보인다", async () => {
+    suspendWorkspaceMember.mockRejectedValue(new ApiError(409, "member status must be active"));
+    mountProfile({ viewer: ADMIN, targetId: MEMBER_ID });
+    fetchRoster.mockResolvedValue(with5819(MEMBER_ID));
+    await waitForDialog();
+    const reads = fetchRoster.mock.calls.length;
+    await click("member-profile-suspend");
+    await click("member-profile-lifecycle-stage-confirm");
+    await vi.waitFor(() => expect(byId("member-profile-lifecycle-stage-error")).not.toBeNull());
+    await vi.waitFor(() => expect(fetchRoster.mock.calls.length).toBeGreaterThan(reads));
+    await click("member-profile-lifecycle-stage-cancel");
+    await vi.waitFor(() => expect(byId("member-profile-status-chip")?.textContent).toBe("정지됨"));
+    expect(byId("member-profile-reinstate")?.textContent).toBe("정지 풀기");
+    expect(byId("member-profile-suspend")).toBeNull();
+  });
+
+  it("404(그사이 내보내짐) 뒤 다시 읽은 명부에 그 사람이 없으면 「찾을 수 없음」이고, 관리 줄은 없으며 X·Esc 가 닫는다", async () => {
+    removeWorkspaceMember.mockRejectedValue(new ApiError(404, "workspace member not found"));
+    mountProfile({ viewer: OWNER, targetId: GUEST_ID });
+    fetchRoster.mockResolvedValue(without(GUEST_ID));
+    await waitForDialog();
+    await click("member-profile-remove");
+    await click("member-profile-lifecycle-stage-confirm");
+    await vi.waitFor(() => expect(byId("member-profile-empty")).not.toBeNull());
+    expect(byId("member-profile-suspend")).toBeNull();
+    expect(byId("member-profile-remove")).toBeNull();
+    expect(byId("member-profile-close")).not.toBeNull();
+    await pressEscape();
+    await vi.waitFor(() => expect(byId("member-profile-dialog")).toBeNull());
+  });
+
+  it("요청이 도는 동안 바깥을 눌러도 창이 닫히지 않는다 — 끝나면 결과(「정지됨」)를 그 자리에 보인다(검수 r1 M4·S3)", async () => {
+    let resolve: (value: unknown) => void = () => undefined;
+    suspendWorkspaceMember.mockImplementation(() => new Promise((done) => (resolve = done)));
+    mountProfile({ viewer: OWNER, targetId: MEMBER_ID });
+    fetchRoster.mockResolvedValue(with5819(MEMBER_ID));
+    await waitForDialog();
+    await click("member-profile-suspend");
+    await click("member-profile-lifecycle-stage-confirm");
+    await vi.waitFor(() => expect(byId("member-profile-lifecycle-stage-confirm")?.getAttribute("aria-busy")).toBe("true"));
+    await act(async () => {
+      document.body.dispatchEvent(new MouseEvent("pointerdown", { bubbles: true, cancelable: true }));
+      document.body.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    await new Promise((done) => setTimeout(done, 20));
+    expect(byId("member-profile-dialog")).not.toBeNull();
+    expect(byId("member-profile-lifecycle-stage")).not.toBeNull();
+    await act(async () => {
+      resolve({ memberId: MEMBER_ID, status: "suspended" });
+    });
+    await vi.waitFor(() => expect(byId("member-profile-status-chip")?.textContent).toBe("정지됨"));
+  });
+
+  it("요청이 없을 때 바깥을 누르면 창이 닫힌다(위 시험의 대조군 — 바깥 누름이 실제로 닿는다)", async () => {
+    mountProfile({ viewer: OWNER, targetId: MEMBER_ID });
+    await waitForDialog();
+    await new Promise((done) => setTimeout(done, 20));
+    await act(async () => {
+      document.body.dispatchEvent(new MouseEvent("pointerdown", { bubbles: true, cancelable: true }));
+      document.body.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    await vi.waitFor(() => expect(byId("member-profile-dialog")).toBeNull());
+  });
+
+  /** 멤버 탭의 줄 흉내(`data-directory-row`) + 검색 칸. 줄은 키보드 초점을 받는다. */
+  function directoryRows(ids: string[]) {
+    const list = document.createElement("div");
+    const search = document.createElement("input");
+    search.dataset.testid = "directory-search";
+    list.append(search);
+    for (const id of ids) {
+      const row = document.createElement("button");
+      row.dataset.directoryRow = "";
+      row.dataset.memberId = id;
+      list.append(row);
+    }
+    document.body.append(list);
+    const row = (id: string) => list.querySelector<HTMLElement>(`[data-member-id="${id}"]`)!;
+    return { row, search };
+  }
+
+  it("내보낸 뒤 닫으면 초점이 사라진 줄의 다음 줄로 간다(문서 맨 위가 아니다, 검수 r1 M3)", async () => {
+    removeWorkspaceMember.mockResolvedValue({ memberId: GUEST_ID, status: "deleted" });
+    const { row } = directoryRows([ADMIN2_ID, GUEST_ID, AGENT_ID]);
+    row(GUEST_ID).focus();
+    mountProfile({ viewer: OWNER, targetId: GUEST_ID, openerRow: GUEST_ID });
+    fetchRoster.mockResolvedValue(without(GUEST_ID));
+    await waitForDialog();
+    await click("member-profile-remove");
+    await click("member-profile-lifecycle-stage-confirm");
+    await vi.waitFor(() => expect(byId("member-profile-removed")).not.toBeNull());
+    row(GUEST_ID).remove(); // 멤버 탭이 다시 그려지며 그 줄이 사라진다.
+    await click("member-profile-removed-close");
+    await vi.waitFor(() => expect(byId("member-profile-dialog")).toBeNull());
+    await vi.waitFor(() => expect(document.activeElement).toBe(row(AGENT_ID)));
+  });
+
+  it("이웃 줄도 없으면 멤버 탭 검색 칸으로, 연 줄이 그대로면 그 줄로 돌아온다", async () => {
+    const { row, search } = directoryRows([GUEST_ID]);
+    removeWorkspaceMember.mockResolvedValue({ memberId: GUEST_ID, status: "deleted" });
+    mountProfile({ viewer: OWNER, targetId: GUEST_ID, openerRow: GUEST_ID });
+    fetchRoster.mockResolvedValue(without(GUEST_ID));
+    await waitForDialog();
+    await click("member-profile-remove");
+    await click("member-profile-lifecycle-stage-confirm");
+    await vi.waitFor(() => expect(byId("member-profile-removed")).not.toBeNull());
+    row(GUEST_ID).remove();
+    await click("member-profile-removed-close");
+    await vi.waitFor(() => expect(byId("member-profile-dialog")).toBeNull());
+    await vi.waitFor(() => expect(document.activeElement).toBe(search));
+  });
+
+  it("내보낸 결과 화면에는 접속 낱말·점과 상태 칩이 없다(검수 r1 M5·L3)", async () => {
+    removeWorkspaceMember.mockResolvedValue({ memberId: GUEST_ID, status: "deleted" });
+    const online = with5819(ADMIN2_ID).map((row) => (row.id === GUEST_ID ? { ...row, online: true } : row));
+    mountProfile({ viewer: OWNER, targetId: GUEST_ID, roster: online });
+    await waitForDialog();
+    expect(byId("member-profile-presence")?.textContent).toBe("온라인");
+    expect(heroTone()).toBe("ok");
+    await click("member-profile-remove");
+    await click("member-profile-lifecycle-stage-confirm");
+    await vi.waitFor(() => expect(byId("member-profile-removed")).not.toBeNull());
+    expect(byId("member-profile-presence")).toBeNull();
+    expect(heroTone()).toBeNull();
+    expect(byId("member-profile-status-chip")).toBeNull();
   });
 
   it("오프라인이면 정지·내보내기 줄이 잠기고 배너 사유를 가리킨다", async () => {

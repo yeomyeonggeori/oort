@@ -35,19 +35,22 @@ export function isChannelMember(
  * 커서 밑에서 사라지는 대신 그 자리에서 "멤버"로 바뀌게 하려는 것이고(낙관적
  * 갱신), 그래야 누가 이미 있는지도 한눈에 보인다. 행 각각이 이미-멤버인지는
  * `isChannelMember`로 판정한다.
+ *
+ * 활성 멤버만 후보다(#5781): 소유자·관리자의 명부는 정지된 사람도 싣지만(#5814), 서버의 채널 넣기는 활성 멤버만
+ * 받는다(정지된 사람은 404). 늘 거절될 [추가]를 세우지 않는다.
  */
 export function channelMemberCandidates(
   members: RosterMember[],
   selfMemberId: string,
   query: string
 ): DirectoryGroups {
-  const others = members.filter((m) => !uuidEq(m.id, selfMemberId));
+  const others = members.filter((m) => m.status === "active" && !uuidEq(m.id, selfMemberId));
   return groupDirectory(others, query);
 }
 
 /**
  * 내가 이 채널에 넣을 수 있는 사람이 하나라도 있나(내가 아니고, 아직 채널에
- * 없는 사람). 빈 상태를 두 갈래로 가르는 데 쓴다: 워크스페이스에 다른 멤버가
+ * 없는 활성 멤버). 빈 상태를 두 갈래로 가르는 데 쓴다: 워크스페이스에 다른 멤버가
  * 아예 없는 경우와, 있지만 전부 이미 이 채널에 있는 경우.
  */
 export function hasAddableMembers(
@@ -56,7 +59,7 @@ export function hasAddableMembers(
   selfMemberId: string
 ): boolean {
   return members.some(
-    (m) => !uuidEq(m.id, selfMemberId) && !isChannelMember(m, channelId)
+    (m) => m.status === "active" && !uuidEq(m.id, selfMemberId) && !isChannelMember(m, channelId)
   );
 }
 

@@ -2083,6 +2083,12 @@ export const catalog: MessageCatalog = {
       "value": "풀림"
     }
   ],
+  "directory.lifecycle.reinstateSchedules": [
+    {
+      "type": 0,
+      "value": "정지할 때 보류된 예약 메시지는 풀어도 저절로 나가지 않아요. 본인이 다시 예약하거나 바로 보내야 해요."
+    }
+  ],
   "directory.lifecycle.reinstateTitle": [
     {
       "type": 1,
@@ -2176,7 +2182,23 @@ export const catalog: MessageCatalog = {
   "directory.lifecycle.suspendKeeps": [
     {
       "type": 0,
-      "value": "쓴 글과 들어가 있던 채널은 그대로 남아요. 다만 정지된 동안에는 그 글의 글쓴이 이름이 「나간 멤버」 표시로 바뀌어요."
+      "value": "쓴 글과 들어가 있던 채널은 그대로 남아요. 정지된 동안 그 글의 글쓴이는 "
+    },
+    {
+      "type": 1,
+      "value": "owner"
+    },
+    {
+      "type": 0,
+      "value": "·"
+    },
+    {
+      "type": 1,
+      "value": "admin"
+    },
+    {
+      "type": 0,
+      "value": "에게는 이름 그대로, 다른 사람에게는 「나간 멤버」로 보여요."
     }
   ],
   "directory.lifecycle.suspendSignOut": [
@@ -2198,7 +2220,23 @@ export const catalog: MessageCatalog = {
   "directory.lifecycle.suspendUndo": [
     {
       "type": 0,
-      "value": "정지는 이 창에서 바로 풀 수 있어요. 창을 닫으면 정지된 멤버는 명부에 보이지 않아요."
+      "value": "정지된 멤버는 멤버 탭의 「정지됨」에서 다시 찾아 언제든 풀 수 있어요. 「정지됨」은 "
+    },
+    {
+      "type": 1,
+      "value": "owner"
+    },
+    {
+      "type": 0,
+      "value": "·"
+    },
+    {
+      "type": 1,
+      "value": "admin"
+    },
+    {
+      "type": 0,
+      "value": "에게만 보여요."
     }
   ],
   "directory.manage.heading": [
@@ -4562,6 +4600,12 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "사람"
+    }
+  ],
+  "memberList.group.suspended": [
+    {
+      "type": 0,
+      "value": "정지됨"
     }
   ],
   "memberList.newDm.close": [
@@ -9698,6 +9742,17 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "접속 확인 안 됨 "
+    },
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    }
+  ],
+  "timeline.memberPanel.groupSuspended": [
+    {
+      "type": 0,
+      "value": "정지됨 "
     },
     {
       "type": 2,

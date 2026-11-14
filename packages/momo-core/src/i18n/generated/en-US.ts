@@ -2251,6 +2251,12 @@ export const catalog: MessageCatalog = {
       "value": "Lifted"
     }
   ],
+  "directory.lifecycle.reinstateSchedules": [
+    {
+      "type": 0,
+      "value": "Scheduled messages held when they were suspended do not go out on their own after the suspension is lifted. They need to reschedule them or send them now."
+    }
+  ],
   "directory.lifecycle.reinstateTitle": [
     {
       "type": 0,
@@ -2352,7 +2358,23 @@ export const catalog: MessageCatalog = {
   "directory.lifecycle.suspendKeeps": [
     {
       "type": 0,
-      "value": "Their messages and channels stay as they are. While they are suspended, the author name on their messages is replaced with a former-member label."
+      "value": "Their messages and channels stay as they are. While they are suspended, the "
+    },
+    {
+      "type": 1,
+      "value": "owner"
+    },
+    {
+      "type": 0,
+      "value": " and "
+    },
+    {
+      "type": 1,
+      "value": "admin"
+    },
+    {
+      "type": 0,
+      "value": " roles still see their name on their messages; everyone else sees a former-member label."
     }
   ],
   "directory.lifecycle.suspendSignOut": [
@@ -2378,7 +2400,23 @@ export const catalog: MessageCatalog = {
   "directory.lifecycle.suspendUndo": [
     {
       "type": 0,
-      "value": "You can lift the suspension right here. Once you close this window, suspended members do not appear in the roster."
+      "value": "Suspended members stay under Suspended on the Members tab, where you can lift the suspension at any time. Only the "
+    },
+    {
+      "type": 1,
+      "value": "owner"
+    },
+    {
+      "type": 0,
+      "value": " and "
+    },
+    {
+      "type": 1,
+      "value": "admin"
+    },
+    {
+      "type": 0,
+      "value": " roles see that group."
     }
   ],
   "directory.manage.heading": [
@@ -4926,6 +4964,12 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "People"
+    }
+  ],
+  "memberList.group.suspended": [
+    {
+      "type": 0,
+      "value": "Suspended"
     }
   ],
   "memberList.newDm.close": [
@@ -10224,6 +10268,17 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "Presence unknown "
+    },
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    }
+  ],
+  "timeline.memberPanel.groupSuspended": [
+    {
+      "type": 0,
+      "value": "Suspended "
     },
     {
       "type": 2,
