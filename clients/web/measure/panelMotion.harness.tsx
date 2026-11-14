@@ -250,9 +250,10 @@ export function Harness() {
     <QueryClientProvider client={client}>
       <SessionProvider value={sessionValue()}>
         <MemoryRouter>
+          {/* 셸과 같은 순서(#5784): 멤버 추가가 채널 만들기 바깥 — 만들기 창이 비공개 채널 뒤에 그 창을 잇는다. */}
+          <AddChannelMemberProvider>
           <CreateChannelProvider>
           <AddWorkspaceProvider>
-          <AddChannelMemberProvider>
           <NewDmProvider>
           <AgentProfileProvider>
           <MemberProfileProvider>
@@ -266,9 +267,9 @@ export function Harness() {
           </MemberProfileProvider>
           </AgentProfileProvider>
           </NewDmProvider>
-          </AddChannelMemberProvider>
           </AddWorkspaceProvider>
           </CreateChannelProvider>
+          </AddChannelMemberProvider>
         </MemoryRouter>
       </SessionProvider>
     </QueryClientProvider>

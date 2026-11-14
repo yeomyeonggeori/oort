@@ -41,6 +41,7 @@ import {ChannelActionSheet} from '../src/features/sidebar/ChannelActionSheet';
 import {workspaceKeys} from '../src/features/workspace/queries';
 import {useSession} from '../src/session/useSession';
 import {NewMessageSheet} from '../src/shell/NewMessageSheet';
+import {ChannelMemberAddSheet} from '../src/shell/ChannelMemberAddSheet';
 import {SettingsOverlay} from './settingsOverlay';
 
 // =============================================================================
@@ -61,6 +62,8 @@ import {SettingsOverlay} from './settingsOverlay';
 //   message[-delete]       메시지 행동 시트(배송되는 것) · 삭제 확인 단계
 //   channel[-leave|-dm]    대화 행 시트(배송되는 것) · 나가기 확인 · DM 행
 //   newdm[-empty]          새 DM 시트(배송되는 것, 씨앗을 뿌린 명부)
+//   memberadd[-public|-empty|-fail]  채널에 멤버 추가 시트(#5784, 배송되는 것). 비공개·공개 안내 줄 · 나 혼자인 워크스페이스 · 추가를
+//                          서버가 403 으로 거절(사람 줄을 누르면 실패 배너). 추가 POST 는 하네스의 가짜 `fetch` 가 답한다(실패가 아니면 201)
 //
 // 모든 이름은 가상 인물이다(이도현·박서연·최민수·정하윤, 회사 「달무리 스튜디오」). 시트는 `Modal` 이라
 // 한 프레임에 하나만 선다 - 표면 하나가 시트 하나다.
@@ -505,6 +508,9 @@ const DM_TARGET: ChannelRowTarget = {
   closeOffered: true,
 };
 
+// 알림을 끈 채널(#5791) - 알림 줄의 끝 표지가 빗금 종(bell-off)이다. 켜짐(`channel`)과 한 쌍으로 찍어 두 종의 잉크 끝을 잰다.
+const CHANNEL_MUTED_TARGET: ChannelRowTarget = {...CHANNEL_TARGET, muted: true};
+
 function ChannelSheetSurface({
   target,
   confirmingLeave,
@@ -578,6 +584,65 @@ function NewDmSurface({people}: {people: boolean}): React.JSX.Element {
     <QueryClientProvider client={client}>
       <Backdrop>
         <NewMessageSheet onOpenConversation={noop} onClose={noop} />
+      </Backdrop>
+    </QueryClientProvider>
+  );
+}
+
+const MEMBER_ADD_CHANNEL = '00000000-0000-7000-8000-0000000043f1';
+
+/**
+ * 채널에 멤버 추가 시트(#5784). 명부는 씨앗이고, 추가 POST 하나에만 가짜 `fetch` 가 서버처럼 답한다 — `fail` 이면 403(「권한이 없습니다」),
+ * 아니면 멤버십 한 줄(201). 그 밖의 요청은 원래 `fetch` 로 흘려보낸다(쿼리는 씨앗이라 실제로 나가지 않는다).
+ */
+function MemberAddSurface({
+  people,
+  kind,
+  fail,
+}: {
+  people: boolean;
+  kind: 'public' | 'private';
+  fail: boolean;
+}): React.JSX.Element {
+  const {workspaceId, member} = useSession();
+  useState(() => {
+    const original = globalThis.fetch;
+    globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input).endsWith('/members') && init?.method === 'POST') {
+        const body = JSON.parse(String(init.body)) as {memberId: string};
+        const status = fail ? 403 : 201;
+        const payload = fail
+          ? {error: 'forbidden'}
+          : {
+              membership: {
+                id: `m-${body.memberId}`,
+                workspaceId,
+                channelId: MEMBER_ADD_CHANNEL,
+                memberId: body.memberId,
+                role: 'member',
+                joinedAtMs: 0,
+              },
+            };
+        return {status, ok: !fail, text: async () => JSON.stringify(payload)} as unknown as Response;
+      }
+      return original(input, init);
+    }) as typeof fetch;
+    return null;
+  });
+  const client = useMemo(() => {
+    const seeded = new QueryClient({
+      defaultOptions: {queries: {staleTime: Infinity, gcTime: Infinity, retry: false}},
+    });
+    seeded.setQueryData(workspaceKeys.roster(workspaceId), roster(workspaceId, member.id, people));
+    return seeded;
+  }, [workspaceId, member.id, people]);
+  return (
+    <QueryClientProvider client={client}>
+      <Backdrop>
+        <ChannelMemberAddSheet
+          target={{id: MEMBER_ADD_CHANNEL, name: 'release-notes', kind}}
+          onClose={noop}
+        />
       </Backdrop>
     </QueryClientProvider>
   );
@@ -722,6 +787,8 @@ export function SheetKitSurface({which}: {which: string}): React.JSX.Element {
       return <ChannelSheetSurface target={CHANNEL_TARGET} confirmingLeave />;
     case 'channel-dm':
       return <ChannelSheetSurface target={DM_TARGET} confirmingLeave={false} />;
+    case 'channel-muted':
+      return <ChannelSheetSurface target={CHANNEL_MUTED_TARGET} confirmingLeave={false} />;
     case 'devicekey-pending':
       return <DeviceKeySheetSurface which="pending" />;
     case 'devicekey-approved':
@@ -734,6 +801,14 @@ export function SheetKitSurface({which}: {which: string}): React.JSX.Element {
       return <NewDmSurface people />;
     case 'newdm-empty':
       return <NewDmSurface people={false} />;
+    case 'memberadd':
+      return <MemberAddSurface people kind="private" fail={false} />;
+    case 'memberadd-public':
+      return <MemberAddSurface people kind="public" fail={false} />;
+    case 'memberadd-empty':
+      return <MemberAddSurface people={false} kind="private" fail={false} />;
+    case 'memberadd-fail':
+      return <MemberAddSurface people kind="private" fail />;
     default:
       return <PageKit lead={false} />;
   }

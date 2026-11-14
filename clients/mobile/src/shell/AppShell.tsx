@@ -65,6 +65,7 @@ import {haptics} from '../lib/haptics';
 import type {HarnessKey} from '../features/work/ask/model';
 import {DelegateWorkSheet, type DelegatePrefill} from './DelegateWorkSheet';
 import {NewChannelSheet} from './NewChannelSheet';
+import {ChannelMemberAddSheet, type ChannelMemberAddTarget} from './ChannelMemberAddSheet';
 import {NewMessageSheet} from './NewMessageSheet';
 import {PlusMenu, type PlusMenuItem} from './PlusMenu';
 import {
@@ -173,6 +174,9 @@ export function Shell({
   // + 가 여는 것: 메뉴, 또는 메뉴에서 고른 무거운 시트 하나. 한 번에 하나만 선다.
   const [create, setCreate] = useState<CreateStep>(initialCreate);
   const closeCreate = useCallback(() => setCreate(null), []);
+  // 채널을 만든 직후 잇는 「멤버 추가」 시트(#5784, 공개·비공개). 새 채널 시트가 iOS 에서 다 내려간 뒤 새 채널로 들어가고 그 위에 선다.
+  const [addMembersTo, setAddMembersTo] = useState<ChannelMemberAddTarget | null>(null);
+  const closeAddMembers = useCallback(() => setAddMembersTo(null), []);
   // 「작업 맡기기」 시트(#3588). `create` 와 따로 둔다: 진입점이 에이전트·채널을 미리
   // 정해 넘기고, `CreateStep` 은 캡처 하네스의 시작값으로도 쓰이는 닫힌 집합이다.
   const [delegate, setDelegate] = useState<DelegatePrefill | null>(null);
@@ -708,8 +712,12 @@ export function Shell({
       {create === 'channel' ? (
         <NewChannelSheet
           onOpenConversation={onOpenConversation}
+          onCreated={setAddMembersTo}
           onClose={closeCreate}
         />
+      ) : null}
+      {addMembersTo ? (
+        <ChannelMemberAddSheet target={addMembersTo} onClose={closeAddMembers} />
       ) : null}
       {ai ? (
         <AiSheet

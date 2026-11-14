@@ -15,7 +15,7 @@ import {makeDirectory} from '@momo/core/features/workspace/directory';
 import type {RosterMember} from '@momo/core/lib/api';
 import {act, cleanup, fireEvent, render, screen, waitFor, within} from '@testing-library/react-native';
 import React from 'react';
-import {Animated, Dimensions, Image, StyleSheet} from 'react-native';
+import {Animated, Dimensions, Image, PixelRatio, StyleSheet} from 'react-native';
 
 import {CONV_ICONS, SHEET_ICONS} from '../src/design/icons';
 import {EASE_OUT, LAYER_POP_MS, LAYER_PUSH_MS} from '../src/design/motion';
@@ -31,6 +31,7 @@ import {
 } from '../src/features/conversation/conversationMenu';
 import {PROFILE_FACE_SQUARE_RING_RADIUS} from '../src/features/profile/ProfileFace';
 import type {ChannelRowTarget} from '../src/features/sidebar/channelRowActions';
+import {endGlyphInk} from './fixtures/endGlyphInk';
 import {finger, pane} from './fixtures/finger';
 import {pinReduceMotion} from './fixtures/reduceMotion';
 import {releaseReduceMotion, setReduceMotion} from './fixtures/sheetContract';
@@ -530,9 +531,27 @@ describe('정보 페이지 — 행은 코어 표의 답이다 (#4319)', () => {
       expect(glyphs[0].props.source).toBe(muted ? CONV_ICONS.bellOff : CONV_ICONS.bell);
       const style = StyleSheet.flatten(glyphs[0].props.style);
       expect([style.width, style.height]).toEqual([20, 20]);
-      // 이웃 줄의 복사 아이콘(잉크 끝 1pt)과 같은 선에 선다: 종은 잉크 끝이 칸에서 5/3pt(bell)·1pt(bell-off) 안쪽이라 0.67pt/0 만큼 밖으로 민다.
-      expect(style.marginRight).toBeCloseTo(muted ? 0 : 1 - 5 / 3, 5);
       expect(row).not.toHaveTextContent(/🔔|🔕/);
+    }
+  });
+
+  it('에이전트 DM 의 줄 끝(「에이전트 정보 ›」·알림 종·복사 셋)은 그림에서 잰 잉크가 한 열에 선다 — 2배·3배 (#5791)', () => {
+    const KEYS = ['agent-open', 'mute-toggle', 'copy-name', 'copy-link', 'copy-id'];
+    for (const scale of [2, 3] as const) {
+      const ratio = jest.spyOn(PixelRatio, 'get').mockReturnValue(scale);
+      for (const muted of [false, true]) {
+        renderPage({
+          peer: AGENT_MEMBER,
+          title: '달무리 도우미',
+          onOpenAgent: jest.fn(),
+          items: conversationInfoActionItems(dmTarget({muted})),
+        });
+        // 그린 그림 파일을 디스크에서 읽어 잰 잉크 끝(줄 안쪽 여백 끝에서 몇 화소 안쪽인가). 셰브론은 칸 안에 6pt 들어가 앉는 그림이라
+        // 칸 끝을 맞추면 5pt 안쪽에 섰다(#5776 검수 M4).
+        const insets = KEYS.map(key => endGlyphInk(screen.getByTestId(`conversation-info-${key}`), scale).insetPx);
+        expect([scale, muted, insets]).toEqual([scale, muted, KEYS.map(() => insets[0])]);
+      }
+      ratio.mockRestore();
     }
   });
 
