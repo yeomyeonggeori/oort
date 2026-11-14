@@ -1,5 +1,5 @@
 //! ADR-0225 D11 (#5827): the channel name rule against the **shared vectors**,
-//! `docs/api/channel-name.vectors.json` — the ADR's 56-row table moved into a
+//! `docs/api/channel-name.vectors.json` — the ADR's 57-row table moved into a
 //! file the server, the shared core and the `oort` CLI all read, so the three
 //! cannot drift apart. The expected values came from a reference implementation
 //! on Unicode 14.0.0 (Python `unicodedata`); the server's tables are newer
@@ -14,9 +14,9 @@
 //!
 //! | test | proves | goes red if |
 //! |---|---|---|
-//! | `every_vector_gives_the_tables_answer` | all 56 rows: the stored value or the exact one of five refusals, and the server's two-error mapping | any one check (NFC, fullwidth fold, a blank, lowercase, length, hidden, letters, marks, edges) changes one row's answer |
+//! | `every_vector_gives_the_tables_answer` | all 57 rows: the stored value or the exact one of five refusals, and the server's two-error mapping | any one check (NFC, fullwidth fold, a blank, lowercase, length, hidden, letters, marks, edges) changes one row's answer |
 //! | `every_stored_value_is_a_fixed_point` | an `ok` row's stored value folds to itself and is accepted again | normalizing twice moves a name |
-//! | `the_file_is_the_adr_table` | 56 rows in the ADR's three groups, every refusal reason present, ASCII only | the table loses a row or a reason, or a raw non-ASCII character lands in it |
+//! | `the_file_is_the_adr_table` | 57 rows in the ADR's three groups, every refusal reason present, ASCII only | the table loses a row or a reason, or a raw non-ASCII character lands in it |
 //! | `every_old_rule_name_is_kept_unchanged` | every name over `[az09_-]` up to 5 chars (and 80/81) is accepted by the new rule exactly when the old one took it, with the same stored value | the new rule refuses or rewrites a name the old one stored |
 //! | `the_servers_unicode_tables_are_not_older_than_the_vectors` | the server's General_Category, normalization and `std` tables are at least the vectors' version | a dependency is downgraded below the table the expected values came from |
 
@@ -102,7 +102,7 @@ fn every_vector_gives_the_tables_answer() {
         }
         checked += 1;
     }
-    assert_eq!(checked, 56);
+    assert_eq!(checked, 57);
 }
 
 #[test]
@@ -121,7 +121,7 @@ fn every_stored_value_is_a_fixed_point() {
         assert_eq!(fold_channel_name(input), stored, "{}", label(&case));
         checked += 1;
     }
-    assert_eq!(checked, 33, "16 kept + 17 fixed rows are ok");
+    assert_eq!(checked, 34, "16 kept + 18 fixed rows are ok");
 }
 
 #[test]
@@ -136,17 +136,17 @@ fn the_file_is_the_adr_table() {
         Some(CHANNEL_NAME_MAX_CHARS as u64)
     );
     let cases = cases();
-    assert_eq!(cases.len(), 56);
+    assert_eq!(cases.len(), 57);
     let count = |group: &str| cases.iter().filter(|c| text(c, "group") == group).count();
     assert_eq!(
         (count("kept"), count("fixed"), count("refused")),
-        (16, 17, 23)
+        (16, 18, 23)
     );
 
     let mut inputs: Vec<&str> = cases.iter().map(|c| text(c, "input")).collect();
     inputs.sort_unstable();
     inputs.dedup();
-    assert_eq!(inputs.len(), 56, "no two rows share an input");
+    assert_eq!(inputs.len(), 57, "no two rows share an input");
 
     for case in &cases {
         let verdict = text(case, "verdict");
