@@ -272,6 +272,9 @@ export function DirectoryRoute() {
           <>
             {section(t("memberList.group.people"), "directory-people", groups.people)}
             {section(t("memberList.group.agents"), "directory-agents", groups.agents)}
+            {/* 정지된 사람(#5781): 소유자·관리자의 명부에만 실리고(#5814) 활성 사람 사이에 섞지 않는다. 줄을 누르면 프로필에서
+                「정지 풀기」에 닿는다. 머리 수(「사람 N」)에는 들지 않는다. */}
+            {section(t("memberList.group.suspended"), "directory-suspended", groups.suspended)}
           </>
         )}
       </div>

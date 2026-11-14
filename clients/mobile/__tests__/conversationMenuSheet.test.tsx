@@ -27,7 +27,7 @@ import {
   within,
 } from '@testing-library/react-native';
 import React from 'react';
-import {AccessibilityInfo, Dimensions, Image, Keyboard, StyleSheet} from 'react-native';
+import {AccessibilityInfo, Dimensions, Image, Keyboard, PixelRatio, StyleSheet} from 'react-native';
 
 import '../src/boot/polyfills';
 import '../src/boot/coreHost';
@@ -54,6 +54,7 @@ import AppShell from '../src/shell/AppShell';
 import {__resetSessionStore, sessionPort} from '../src/storage/secureSession';
 import {__resetServerBaseCache, setServerBase} from '../src/storage/serverBase';
 import {openConversationMenu} from './fixtures/conversationMenu';
+import {endGlyphInk} from './fixtures/endGlyphInk';
 import {finger, pane} from './fixtures/finger';
 import {installAppClock, SHELL_WAIT_TEST_TIMEOUT_MS} from './fixtures/fakeClock';
 import {pinReduceMotion} from './fixtures/reduceMotion';
@@ -340,20 +341,27 @@ describe('시트 — 카드와 행의 차례 (#4319)', () => {
 describe('시트 — 알림 줄의 끝 표지는 종 아이콘이다 (#5776)', () => {
   motionOff();
 
-  it('켜짐은 bell·꺼짐은 bell-off, 이모지 없이 20pt 로 서고 위 줄들의 셰브론(잉크 끝 6pt)과 같은 선에 끝이 선다', () => {
+  it('켜짐은 bell·꺼짐은 bell-off, 이모지 없이 20pt 로 서고 위 줄들의 셰브론과 잉크가 한 열에 선다 — 2배·3배 (#5791)', () => {
     const muteOn = conversationMenuActionItems(target({muted: true}))[0];
-    for (const [item, source, ink] of [
-      [MUTE_OFF, CONV_ICONS.bell, 5 / 3],
-      [muteOn, CONV_ICONS.bellOff, 1],
-    ] as const) {
-      renderSheet({onOpenInfo: jest.fn(), items: [item]});
-      const row = screen.getByTestId('conversation-menu-mute-toggle');
-      const glyphs = within(row).UNSAFE_queryAllByType(Image);
-      expect(glyphs.map(node => node.props.source)).toEqual([source]);
-      const style = StyleSheet.flatten(glyphs[0].props.style);
-      expect([style.width, style.height]).toEqual([20, 20]);
-      expect(style.marginRight).toBeCloseTo(6 - ink, 5);
-      expect(row).not.toHaveTextContent(/🔔|🔕/);
+    for (const scale of [2, 3] as const) {
+      const ratio = jest.spyOn(PixelRatio, 'get').mockReturnValue(scale);
+      for (const [item, source] of [
+        [MUTE_OFF, CONV_ICONS.bell],
+        [muteOn, CONV_ICONS.bellOff],
+      ] as const) {
+        renderSheet({onOpenInfo: jest.fn(), onDelegateWork: jest.fn(), items: [item]});
+        const row = screen.getByTestId('conversation-menu-mute-toggle');
+        const glyphs = within(row).UNSAFE_queryAllByType(Image);
+        expect(glyphs.map(node => node.props.source)).toEqual([source]);
+        const style = StyleSheet.flatten(glyphs[0].props.style);
+        expect([style.width, style.height]).toEqual([20, 20]);
+        expect(row).not.toHaveTextContent(/🔔|🔕/);
+        // 그린 그림 파일을 디스크에서 읽어 잰 잉크 끝 — 문 셋의 셰브론과 알림 종이 같은 화소에 선다(부르는 쪽은 이웃을 모른다).
+        const keys = ['info', 'pins', 'delegate', 'mute-toggle'];
+        const insets = keys.map(key => endGlyphInk(screen.getByTestId(`conversation-menu-${key}`), scale).insetPx);
+        expect([scale, source, insets]).toEqual([scale, source, keys.map(() => insets[0])]);
+      }
+      ratio.mockRestore();
     }
   });
 });

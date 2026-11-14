@@ -2031,7 +2031,7 @@ async function installMocks(context, { resetHarness = true } = {}) {
     }
     return json(route, own);
   });
-  await context.route("**/v1/workspaces/*/roster", (route) =>
+  await context.route("**/v1/workspaces/*/roster*", (route) =>
     json(route, {
       members: ROSTER.map((member) =>
         member.id === ME
@@ -7972,7 +7972,7 @@ async function captureScheme(browser, scheme) {
       ? route.fallback()
       : json(route, { channels: [] })
   );
-  await nonAdmin.route("**/v1/workspaces/*/roster", (route) =>
+  await nonAdmin.route("**/v1/workspaces/*/roster*", (route) =>
     json(route, {
       members: ROSTER.map((m) =>
         m.id === ME ? { ...m, role: "member" } : m
@@ -7993,7 +7993,7 @@ async function captureScheme(browser, scheme) {
   //       답하고, 성공 경로를 꺾어 403을 만드는 것은 억지 모킹이다. 그 문장은
   //       WorkspaceSection.test.tsx가 계약으로 붙잡는다.
   const memberSettings = await newScenePage();
-  await memberSettings.route("**/v1/workspaces/*/roster", (route) =>
+  await memberSettings.route("**/v1/workspaces/*/roster*", (route) =>
     json(route, {
       members: ROSTER.map((m) =>
         m.id === ME ? { ...m, role: "member" } : m
@@ -8398,7 +8398,7 @@ async function captureScheme(browser, scheme) {
   await notificationsPage.close();
 
   // BF-A5 (#1901): 크로스채널 초안 패널. signIn이 localStorage를 비우므로
-  // 로그인한 뒤에 심고, 같은 탭 구독이 다시 읽도록 사건을 낸다.
+  // 로그인한 뒤에 심고, 같은 탭 구독이 다시 읽도록 사건을 낸다. 초안은 쓴 사람을 든다(#5799: 다른 사람·모르는 사람의 초안은 읽지 않는다).
   const draftsPage = await newScenePage();
   await draftsPage.goto(ORIGIN, { waitUntil: "networkidle" });
   await signIn(draftsPage);
@@ -8408,14 +8408,17 @@ async function captureScheme(browser, scheme) {
     localStorage.setItem(prefix + "${GENERAL_ID}", JSON.stringify({
       text: "배포 롤백 근거를 정리하면",
       atMs: now,
+      author: "${ME}",
     }));
     localStorage.setItem(prefix + "00000000-0000-7000-8000-000000000202", JSON.stringify({
       text: "PR 본문에 게이트 증거를 붙이고\\n두 번째 줄은 미리보기에서 한 줄로 접힌다",
       atMs: now - 60_000,
+      author: "${ME}",
     }));
     localStorage.setItem(prefix + "${DM_ID}", JSON.stringify({
       text: "hermes 온보딩 문구를 이어서",
       atMs: now - 3_600_000,
+      author: "${ME}",
     }));
     window.dispatchEvent(new Event("${DRAFTS_CHANGED_EVENT}"));
     window.dispatchEvent(new CustomEvent("momo:composer-seed", {
@@ -9465,7 +9468,7 @@ async function captureWelcomeKickoffScenes(browser, scheme) {
       reducedMotion,
     });
     await installMocks(context);
-    await context.route("**/v1/workspaces/*/roster", (route) =>
+    await context.route("**/v1/workspaces/*/roster*", (route) =>
       json(route, { members: welcomeRoster({ paused: Boolean(options.paused) }) })
     );
     await context.route("**/v1/workspaces/*/channels/*/messages*", (route) => {
@@ -10110,7 +10113,7 @@ async function captureAddMemberScenes(browser, scheme) {
         : route.fallback();
     });
     if (overrideRoster) {
-      await context.route("**/v1/workspaces/*/roster", overrideRoster);
+      await context.route("**/v1/workspaces/*/roster*", overrideRoster);
     }
 
     const page = await context.newPage();
@@ -11244,7 +11247,7 @@ async function captureAgentCredentialsScenes(browser, scheme) {
 
   const longNameRoster = async (context) => {
     await listWith(activeKim)(context);
-    await context.route("**/v1/workspaces/*/roster", (route) =>
+    await context.route("**/v1/workspaces/*/roster*", (route) =>
       json(route, {
         members: ROSTER.map((member) =>
           member.id === "019f9a01-0000-7000-8000-000000000404"

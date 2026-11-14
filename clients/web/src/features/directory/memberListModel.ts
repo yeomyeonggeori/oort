@@ -23,6 +23,15 @@ export function canSearchByEmail(viewerRole: MembershipRole | undefined): boolea
   return viewerRole !== undefined && viewerRole !== "guest";
 }
 
+/** 멤버 탭의 묶음. 코어 묶음(사람·에이전트)에 「정지됨」이 더해진다(#5781). */
+export interface MemberListGroups extends DirectoryGroups {
+  /**
+   * 정지된 사람, 이름 차례. 소유자·관리자의 명부에만 실린다(#5814) — 멤버·게스트 시점에는 늘 비어 있다. 활성 사람 사이에
+   * 섞지 않고 맨 아래 따로 선다: `people` 과 머리 수(`countLabel`의 「사람 N」)는 활성 사람만이다(서버 `humanCount` 와 같은 뜻).
+   */
+  suspended: RosterMember[];
+}
+
 /**
  * 멤버 탭의 묶음: 이름·핸들(코어 `matchesQuery`) **또는** 이 보는 사람에게 보이는 이메일로 찾는다.
  * 이메일 찾기는 `profileEmail` 을 거친다 — 게스트가 남의 주소를 쳐서 줄이 걸리면 화면에서 가린 주소가
@@ -34,13 +43,21 @@ export function groupMemberList(
   members: RosterMember[],
   rawQuery: string,
   viewerRole: MembershipRole | undefined
-): DirectoryGroups {
+): MemberListGroups {
   const query = normalizeQuery(rawQuery);
-  if (query === "") return groupDirectory(members, "");
-  const hit = members.filter(
-    (member) =>
-      matchesQuery(member, query) ||
-      (profileEmail(viewerRole, member)?.toLowerCase().includes(query) ?? false)
-  );
-  return { ...groupDirectory(hit, ""), total: members.length };
+  const hit =
+    query === ""
+      ? members
+      : members.filter(
+          (member) =>
+            matchesQuery(member, query) ||
+            (profileEmail(viewerRole, member)?.toLowerCase().includes(query) ?? false)
+        );
+  const groups = groupDirectory(hit, "");
+  return {
+    ...groups,
+    people: groups.people.filter((member) => member.status !== "suspended"),
+    suspended: groups.people.filter((member) => member.status === "suspended"),
+    total: members.length,
+  };
 }

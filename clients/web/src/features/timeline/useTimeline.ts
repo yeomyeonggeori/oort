@@ -28,6 +28,7 @@ import {
 } from "@/lib/realtime";
 import { subscribeRestOutcome } from "@momo/core/lib/http";
 import { causeOfFailure } from "@momo/core/features/connection/failure";
+import { isMessageBeforeLeave, pendingAfterSendFailure } from "@momo/core/features/channels/dmLeave";
 import type { ConnectionCause } from "@momo/core/features/connection/model";
 import { deviceOnlineNow } from "@/lib/deviceOnline";
 import {
@@ -694,6 +695,13 @@ export function useTimeline(
         }
         return true;
       } catch (error) {
+        // ADR-0177 증보 2026-11-14 D17: 같은 키의 글이 이미 내 읽기 하한 아래에 저장돼 있다(나가기 전 대화의 글). 실패 행·실패
+        // 기록·이 기기의 못 보낸 글로 남기지 않고 조용히 지운다.
+        if (isMessageBeforeLeave(error)) {
+          updatePending((list) => pendingAfterSendFailure(list, row.clientMsgId, error).list);
+          forgetRow(row);
+          return false;
+        }
         // The row stays where it is and states 전송 실패 with a retry (R-1 §3),
         // which is the same inline failure path a server-stored `failed`
         // message row uses. No toast, no banner far from the message.

@@ -52,7 +52,9 @@ export function useRoleLabels(workspaceId: string): RoleLabels {
 export function useDirectory(workspaceId: string) {
   const query = useQuery({
     queryKey: rosterQueryKey(workspaceId),
-    queryFn: () => fetchRoster(workspaceId),
+    // 정지된 사람도 달라고 한다(#5781): 소유자·관리자에게만 실리고(#5814), 멤버 탭의 「정지됨」 묶음과 프로필의 「정지 풀기」가
+    // 그 줄을 쓴다. 이 명부를 받는 모든 웹 자리는 정지된 사람을 후보·접속 표시로 쓰지 않는다(#5781 인계의 훑기 표).
+    queryFn: () => fetchRoster(workspaceId, { includeSuspended: true }),
     // 접속 여부(`online`)는 서버가 명부를 읽을 때 전송에서 읽어 싣는 값이라 점은 마지막 명부 읽기만큼만
     // 신선하다(#4692, ADR-0160 ②). 보이는 동안만 이 주기로 다시 읽는다(백그라운드 탭에서는 멈춘다).
     refetchInterval: AVAILABILITY_REFRESH_MS,
@@ -124,6 +126,10 @@ export function useInvalidateReadStates(workspaceId: string) {
  *
  * `followedUnreadReplyCount` (#5667, ADR-0124 amendment 4) is the third: only a `GET` row carries it, and reading a
  * channel does not read the threads inside it, so a `PUT` answer must not drop the menu-bar dot's thread share (#5660).
+ *
+ * `historyFromSeq` (ADR-0177 amendment 2026-11-14 D18/D21) is the fourth: only a `GET` row carries the caller's read
+ * floor. Dropping it would turn a left DM's floor into "did not say" (the core holds its verdict) and, if every row lost
+ * it, make the server look like one without 「대화 나가기」.
  */
 export function mergeReadStateRow(current: ReadState, incoming: ReadState): ReadState {
   const merged: ReadState = { ...incoming };
@@ -135,6 +141,9 @@ export function mergeReadStateRow(current: ReadState, incoming: ReadState): Read
   }
   if (incoming.followedUnreadReplyCount === undefined && current.followedUnreadReplyCount !== undefined) {
     merged.followedUnreadReplyCount = current.followedUnreadReplyCount;
+  }
+  if (incoming.historyFromSeq === undefined && current.historyFromSeq !== undefined) {
+    merged.historyFromSeq = current.historyFromSeq;
   }
   return merged;
 }

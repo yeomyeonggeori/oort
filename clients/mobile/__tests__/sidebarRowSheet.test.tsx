@@ -7,19 +7,24 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from '@testing-library/react-native';
 import React from 'react';
+import {Image, PixelRatio} from 'react-native';
 
 import '../src/boot/polyfills';
 import '../src/boot/coreHost';
 
 import {DM_CLOSE_FAILURE, DM_CLOSE_LABEL} from '@momo/core/features/channels/model';
 import {LONG_PRESS_MS} from '@momo/core/features/timeline/longPressModel';
+import {CONV_ICONS} from '../src/design/icons';
 import {PRESS_VISUAL_DELAY_MS} from '../src/design/motion';
+import {ROW_END_INK_INSET} from '../src/design/sheetParts';
 import {AGENT_LIST_ACTION} from '../src/screens/SidebarScreen';
 import AppShell from '../src/shell/AppShell';
 import {__resetSessionStore, sessionPort} from '../src/storage/secureSession';
 import {__resetServerBaseCache, setServerBase} from '../src/storage/serverBase';
+import {endGlyphInk} from './fixtures/endGlyphInk';
 import {installAppClock} from './fixtures/fakeClock';
 import {flat} from './testkit';
 
@@ -388,6 +393,29 @@ describe('길게 누르기가 시트를 연다', () => {
     expect(sheetKeys()).not.toContain('mark-read');
     expect(screen.getByTestId('channel-sheet-mute-toggle')).toHaveTextContent(/알림 꺼짐/);
   });
+
+  it.each([
+    ['켜짐 — 종(bell)', 'ch-general', CONV_ICONS.bell, 2],
+    ['꺼짐 — 빗금 종(bell-off)', 'ch-quiet', CONV_ICONS.bellOff, 3],
+  ] as const)(
+    '알림 줄 끝 표지 %s: 이모지 없이 20pt 그대로, 그림에서 잰 잉크가 줄 끝 열에 선다 (#5776·#5791)',
+    async (_name, channelId, source, scale) => {
+      const ratio = jest.spyOn(PixelRatio, 'get').mockReturnValue(scale);
+      try {
+        await mount();
+        longPress(`sidebar-row-channel:${channelId}`);
+        const row = screen.getByTestId('channel-sheet-mute-toggle');
+        const glyphs = within(row).UNSAFE_queryAllByType(Image);
+        expect(glyphs.map(glyph => glyph.props.source)).toEqual([source]);
+        expect(flat(glyphs[0].props.style)).toMatchObject({width: 20, height: 20});
+        expect(row).not.toHaveTextContent(/🔔|🔕/);
+        // 이 시트의 다른 줄은 끝 글리프가 없다 — 그래도 종은 다른 시트·페이지의 셰브론·복사와 같은 열(줄 안쪽 여백 끝에서 1pt)에 선다.
+        expect(endGlyphInk(row, scale).insetPx).toBe(ROW_END_INK_INSET * scale);
+      } finally {
+        ratio.mockRestore();
+      }
+    },
+  );
 
   it('DM 이 아직 없는 에이전트 줄은 시트를 열지 않는다 — 누르면 DM 을 여는 줄이다', async () => {
     await mount();

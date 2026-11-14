@@ -1119,6 +1119,87 @@ export const catalog: MessageCatalog = {
       "value": "서버에 닿지 못했어요. 아래는 마지막으로 확인된 작업 상태예요."
     }
   ],
+  "channels.dmLeave.action": [
+    {
+      "type": 0,
+      "value": "대화 나가기"
+    }
+  ],
+  "channels.dmLeave.cancel": [
+    {
+      "type": 0,
+      "value": "취소"
+    }
+  ],
+  "channels.dmLeave.confirm": [
+    {
+      "type": 0,
+      "value": "나가기"
+    }
+  ],
+  "channels.dmLeave.confirmBody": [
+    {
+      "type": 0,
+      "value": "내 화면에서 지금까지의 대화가 사라져요. "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " 님의 화면에는 그대로 남아요."
+    }
+  ],
+  "channels.dmLeave.confirmFinal": [
+    {
+      "type": 0,
+      "value": "나간 뒤에는 되돌릴 수 없어요."
+    }
+  ],
+  "channels.dmLeave.confirmRevive": [
+    {
+      "type": 0,
+      "value": "다시 글이 오면 그 글부터 새 대화로 보여요."
+    }
+  ],
+  "channels.dmLeave.confirmScheduled": [
+    {
+      "type": 0,
+      "value": "예약해 둔 메시지 "
+    },
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "개도 취소돼요."
+    }
+  ],
+  "channels.dmLeave.confirmTitle": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " 님과의 대화에서 나갈까요?"
+    }
+  ],
+  "channels.dmLeave.done": [
+    {
+      "type": 0,
+      "value": "대화에서 나갔어요."
+    }
+  ],
+  "channels.dmLeave.failed": [
+    {
+      "type": 0,
+      "value": "나가지 못했어요. 다시 시도해 주세요."
+    }
+  ],
   "common.feedback.unavailable": [
     {
       "type": 0,
@@ -1985,6 +2066,260 @@ export const catalog: MessageCatalog = {
       "value": "세션"
     }
   ],
+  "directory.lifecycle.cancel": [
+    {
+      "type": 0,
+      "value": "취소"
+    }
+  ],
+  "directory.lifecycle.errorForbidden": [
+    {
+      "type": 0,
+      "value": "이 워크스페이스에서 멤버를 정지하거나 내보낼 권한이 없어요."
+    }
+  ],
+  "directory.lifecycle.errorLastOwner": [
+    {
+      "type": 0,
+      "value": "워크스페이스에는 "
+    },
+    {
+      "type": 1,
+      "value": "owner"
+    },
+    {
+      "type": 0,
+      "value": " 역할인 사람이 한 명은 있어야 해서 정지하거나 내보낼 수 없어요."
+    }
+  ],
+  "directory.lifecycle.errorNetwork": [
+    {
+      "type": 0,
+      "value": "서버에 닿지 못했어요. 연결을 확인한 뒤 다시 시도하세요."
+    }
+  ],
+  "directory.lifecycle.errorNotActive": [
+    {
+      "type": 0,
+      "value": "이 멤버는 지금 활성 상태가 아니에요. 그사이 다른 사람이 정지했을 수 있어요."
+    }
+  ],
+  "directory.lifecycle.errorNotFound": [
+    {
+      "type": 0,
+      "value": "이 멤버를 찾지 못했어요. 이미 워크스페이스에서 나갔을 수 있어요."
+    }
+  ],
+  "directory.lifecycle.errorNotSuspended": [
+    {
+      "type": 0,
+      "value": "이 멤버는 지금 정지된 상태가 아니에요. 그사이 다른 사람이 정지를 풀었을 수 있어요."
+    }
+  ],
+  "directory.lifecycle.errorRank": [
+    {
+      "type": 0,
+      "value": "같거나 높은 역할의 멤버는 정지하거나 내보낼 수 없어요. 그사이 역할이 바뀌었을 수 있어요."
+    }
+  ],
+  "directory.lifecycle.errorRateLimited": [
+    {
+      "type": 0,
+      "value": "요청이 너무 잦아요. 잠시 뒤에 다시 시도하세요."
+    }
+  ],
+  "directory.lifecycle.errorSelf": [
+    {
+      "type": 0,
+      "value": "자기 자신은 정지하거나 내보낼 수 없어요."
+    }
+  ],
+  "directory.lifecycle.errorUnknown": [
+    {
+      "type": 0,
+      "value": "처리하지 못했어요. 다시 시도하세요."
+    }
+  ],
+  "directory.lifecycle.reinstate": [
+    {
+      "type": 0,
+      "value": "정지 풀기"
+    }
+  ],
+  "directory.lifecycle.reinstateBody": [
+    {
+      "type": 0,
+      "value": "다시 로그인할 수 있게 돼요. 정지 전의 로그인은 되살아나지 않아서 새로 로그인해야 해요. 들어가 있던 채널은 그대로예요."
+    }
+  ],
+  "directory.lifecycle.reinstateBusy": [
+    {
+      "type": 0,
+      "value": "푸는 중"
+    }
+  ],
+  "directory.lifecycle.reinstatedReceipt": [
+    {
+      "type": 0,
+      "value": "풀림"
+    }
+  ],
+  "directory.lifecycle.reinstateSchedules": [
+    {
+      "type": 0,
+      "value": "정지할 때 보류된 예약 메시지는 풀어도 저절로 나가지 않아요. 본인이 다시 예약하거나 바로 보내야 해요."
+    }
+  ],
+  "directory.lifecycle.reinstateTitle": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " 님의 정지를 풀까요?"
+    }
+  ],
+  "directory.lifecycle.remove": [
+    {
+      "type": 0,
+      "value": "워크스페이스에서 내보내기"
+    }
+  ],
+  "directory.lifecycle.removeAction": [
+    {
+      "type": 0,
+      "value": "내보내기"
+    }
+  ],
+  "directory.lifecycle.removeBusy": [
+    {
+      "type": 0,
+      "value": "내보내는 중"
+    }
+  ],
+  "directory.lifecycle.removedClose": [
+    {
+      "type": 0,
+      "value": "닫기"
+    }
+  ],
+  "directory.lifecycle.removedTitle": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " 님을 워크스페이스에서 내보냈어요."
+    }
+  ],
+  "directory.lifecycle.removeKeeps": [
+    {
+      "type": 0,
+      "value": "쓴 글과 DM 기록은 남고, 글쓴이 이름은 「나간 멤버」 표시로 바뀌어요."
+    }
+  ],
+  "directory.lifecycle.removeLeaves": [
+    {
+      "type": 0,
+      "value": "모든 채널과 DM에서 빠지고, 모든 기기에서 바로 로그아웃돼요. 예약해 둔 메시지는 취소돼요."
+    }
+  ],
+  "directory.lifecycle.removeTitle": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " 님을 워크스페이스에서 내보낼까요?"
+    }
+  ],
+  "directory.lifecycle.removeWarning": [
+    {
+      "type": 0,
+      "value": "되돌릴 수 없어요. 다시 초대해도 같은 이메일로는 이 워크스페이스에 들어올 수 없어요."
+    }
+  ],
+  "directory.lifecycle.suspend": [
+    {
+      "type": 0,
+      "value": "정지"
+    }
+  ],
+  "directory.lifecycle.suspendBusy": [
+    {
+      "type": 0,
+      "value": "정지 중"
+    }
+  ],
+  "directory.lifecycle.suspendedReceipt": [
+    {
+      "type": 0,
+      "value": "정지함"
+    }
+  ],
+  "directory.lifecycle.suspendKeeps": [
+    {
+      "type": 0,
+      "value": "쓴 글과 들어가 있던 채널은 그대로 남아요. 정지된 동안 그 글의 글쓴이는 "
+    },
+    {
+      "type": 1,
+      "value": "owner"
+    },
+    {
+      "type": 0,
+      "value": "·"
+    },
+    {
+      "type": 1,
+      "value": "admin"
+    },
+    {
+      "type": 0,
+      "value": "에게는 이름 그대로, 다른 사람에게는 「나간 멤버」로 보여요."
+    }
+  ],
+  "directory.lifecycle.suspendSignOut": [
+    {
+      "type": 0,
+      "value": "모든 기기에서 바로 로그아웃되고, 정지가 풀릴 때까지 다시 로그인할 수 없어요. 폰 알림도 더는 가지 않아요."
+    }
+  ],
+  "directory.lifecycle.suspendTitle": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " 님을 정지할까요?"
+    }
+  ],
+  "directory.lifecycle.suspendUndo": [
+    {
+      "type": 0,
+      "value": "정지된 멤버는 멤버 탭의 「정지됨」에서 다시 찾아 언제든 풀 수 있어요. 「정지됨」은 "
+    },
+    {
+      "type": 1,
+      "value": "owner"
+    },
+    {
+      "type": 0,
+      "value": "·"
+    },
+    {
+      "type": 1,
+      "value": "admin"
+    },
+    {
+      "type": 0,
+      "value": "에게만 보여요."
+    }
+  ],
   "directory.manage.heading": [
     {
       "type": 0,
@@ -2236,7 +2571,7 @@ export const catalog: MessageCatalog = {
     },
     {
       "type": 0,
-      "value": "끼리는 서로의 역할을 바꾸거나 내보낼 수 없어서, 한 번 올리면 되돌릴 수 없어요."
+      "value": "끼리는 서로의 역할을 바꾸거나 서로를 정지하고 내보낼 수 없지만, 서로의 비밀번호 재설정 링크는 만들 수 있어요. 한 번 올리면 되돌릴 수 없어요."
     }
   ],
   "directory.role.confirmPair": [
@@ -4346,6 +4681,12 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "사람"
+    }
+  ],
+  "memberList.group.suspended": [
+    {
+      "type": 0,
+      "value": "정지됨"
     }
   ],
   "memberList.newDm.close": [
@@ -9679,6 +10020,17 @@ export const catalog: MessageCatalog = {
       "style": null
     }
   ],
+  "timeline.memberPanel.groupSuspended": [
+    {
+      "type": 0,
+      "value": "정지됨 "
+    },
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    }
+  ],
   "timeline.memberPanel.groupWorking": [
     {
       "type": 0,
@@ -10987,6 +11339,336 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "oort 도구"
+    }
+  ],
+  "workspace.add.back": [
+    {
+      "type": 0,
+      "value": "뒤로"
+    }
+  ],
+  "workspace.add.cancel": [
+    {
+      "type": 0,
+      "value": "취소"
+    }
+  ],
+  "workspace.add.createLead": [
+    {
+      "type": 0,
+      "value": "이 서버에 새 워크스페이스를 열어요. 서버 운영자만 만들 수 있어요."
+    }
+  ],
+  "workspace.add.createLeadNotOperator": [
+    {
+      "type": 0,
+      "value": "이 서버의 운영자만 만들 수 있어요. 이 계정으로는 만들 수 없어요."
+    }
+  ],
+  "workspace.add.createTitle": [
+    {
+      "type": 0,
+      "value": "새 워크스페이스 만들기"
+    }
+  ],
+  "workspace.add.joinChecking": [
+    {
+      "type": 0,
+      "value": "확인 중"
+    }
+  ],
+  "workspace.add.joinClaim": [
+    {
+      "type": 0,
+      "value": "첫 소유자 링크와 재설정 링크는 여기서 받지 않아요. 로그아웃한 뒤 로그인 화면에 붙여 넣으세요."
+    }
+  ],
+  "workspace.add.joinConfirmAction": [
+    {
+      "type": 0,
+      "value": "로그아웃하고 넘어가기"
+    }
+  ],
+  "workspace.add.joinConfirmBody": [
+    {
+      "type": 0,
+      "value": "이 앱은 한 번에 워크스페이스 하나에만 로그인해요. 지금 워크스페이스에서 로그아웃돼요. 로그인 화면에는 넣은 주소를 채워 둘게요."
+    }
+  ],
+  "workspace.add.joinConfirmTitle": [
+    {
+      "type": 0,
+      "value": "로그아웃하고 넘어갈까요?"
+    }
+  ],
+  "workspace.add.joinEmpty": [
+    {
+      "type": 0,
+      "value": "주소나 초대 링크를 넣으세요."
+    }
+  ],
+  "workspace.add.joinField": [
+    {
+      "type": 0,
+      "value": "주소나 초대 링크"
+    }
+  ],
+  "workspace.add.joinHint": [
+    {
+      "type": 0,
+      "value": "받은 그대로 붙여 넣어요. 예: https://team.example.com"
+    }
+  ],
+  "workspace.add.joinLead": [
+    {
+      "type": 0,
+      "value": "주소나 초대 링크로 들어가요. 다른 서버는 로그아웃한 뒤 로그인 화면에서 그 링크를 넣고, 이 서버의 초대는 로그아웃한 뒤 로그인 화면에서 이어 가요."
+    }
+  ],
+  "workspace.add.joinLeadWeb": [
+    {
+      "type": 0,
+      "value": "주소나 초대 링크로 들어가요. 다른 서버는 새 탭에서 열고, 이 서버의 초대는 로그아웃한 뒤 로그인 화면에서 이어 가요."
+    }
+  ],
+  "workspace.add.joinNext": [
+    {
+      "type": 0,
+      "value": "계속"
+    }
+  ],
+  "workspace.add.joinOpenAction": [
+    {
+      "type": 0,
+      "value": "새 탭에서 열기"
+    }
+  ],
+  "workspace.add.joinOpenBody": [
+    {
+      "type": 0,
+      "value": "웹에서는 이 창에서 다른 서버로 넘어갈 수 없어요. 그 서버를 새 탭에서 열고, 지금 워크스페이스는 그대로 있어요."
+    }
+  ],
+  "workspace.add.joinOpenInvite": [
+    {
+      "type": 1,
+      "value": "server"
+    },
+    {
+      "type": 0,
+      "value": "의 초대를 새 탭에서 열어요."
+    }
+  ],
+  "workspace.add.joinOpenServer": [
+    {
+      "type": 1,
+      "value": "server"
+    },
+    {
+      "type": 0,
+      "value": "의 로그인 화면을 새 탭에서 열어요."
+    }
+  ],
+  "workspace.add.joinOpenTitle": [
+    {
+      "type": 0,
+      "value": "새 탭에서 열까요?"
+    }
+  ],
+  "workspace.add.joinPasteAction": [
+    {
+      "type": 0,
+      "value": "로그아웃"
+    }
+  ],
+  "workspace.add.joinPasteBody": [
+    {
+      "type": 0,
+      "value": "다른 서버에 참여하려면 로그아웃한 뒤 로그인 화면에서 「바꾸기」를 누르고, 나오는 칸에 이 링크를 붙여 넣어요. 로그아웃하기 전에 복사해 두세요."
+    }
+  ],
+  "workspace.add.joinPasteTitle": [
+    {
+      "type": 0,
+      "value": "로그아웃할까요?"
+    }
+  ],
+  "workspace.add.joinSameServer": [
+    {
+      "type": 0,
+      "value": "이미 이 서버에 있어요. 같은 서버의 다른 워크스페이스는 로그아웃한 뒤 로그인 화면의 「다른 워크스페이스로 로그인」에서 워크스페이스 ID로 들어가요."
+    }
+  ],
+  "workspace.add.joinTargetInvite": [
+    {
+      "type": 1,
+      "value": "server"
+    },
+    {
+      "type": 0,
+      "value": "의 초대로 넘어가요."
+    }
+  ],
+  "workspace.add.joinTargetInviteOnly": [
+    {
+      "type": 0,
+      "value": "받은 초대 링크로 넘어가요."
+    }
+  ],
+  "workspace.add.joinTargetServer": [
+    {
+      "type": 1,
+      "value": "server"
+    },
+    {
+      "type": 0,
+      "value": "의 로그인 화면으로 넘어가요."
+    }
+  ],
+  "workspace.add.joinTitle": [
+    {
+      "type": 0,
+      "value": "이미 있는 곳에 참여"
+    }
+  ],
+  "workspace.add.joinUnreachable": [
+    {
+      "type": 1,
+      "value": "server"
+    },
+    {
+      "type": 0,
+      "value": "에 닿지 않아서 로그아웃하지 않았어요. 주소를 다시 확인하세요."
+    }
+  ],
+  "workspace.add.lead": [
+    {
+      "type": 0,
+      "value": "새 워크스페이스를 만들거나, 이미 있는 워크스페이스에 들어가요."
+    }
+  ],
+  "workspace.add.operatorContact": [
+    {
+      "type": 0,
+      "value": "초대를 받았다면 「이미 있는 곳에 참여」로 들어갈 수 있어요. 없다면 이 서버를 운영하는 사람에게 문의하세요."
+    }
+  ],
+  "workspace.add.title": [
+    {
+      "type": 0,
+      "value": "워크스페이스 추가"
+    }
+  ],
+  "workspace.create.lead": [
+    {
+      "type": 0,
+      "value": "이 서버에 새 워크스페이스를 하나 더 만들어요. 만든 사람이 소유자가 되고 #general 채널 하나로 시작해요. 서버 운영자만 만들 수 있어요."
+    }
+  ],
+  "workspace.create.operatorOnly": [
+    {
+      "type": 0,
+      "value": "새 워크스페이스는 이 서버의 운영자만 만들 수 있어요."
+    }
+  ],
+  "workspace.create.slugHint": [
+    {
+      "type": 0,
+      "value": "영문 소문자, 숫자, 하이픈만 쓸 수 있어요. 서버 전체에서 하나뿐이어야 해요."
+    }
+  ],
+  "workspace.leave.body": [
+    {
+      "type": 0,
+      "value": "나가면 멤버십이 끝나고, 확인하면 바로 로그아웃돼요. 보낸 메시지는 남아요. 다시 들어오려면 초대가 필요해요."
+    }
+  ],
+  "workspace.leave.busy": [
+    {
+      "type": 0,
+      "value": "나가는 중"
+    }
+  ],
+  "workspace.leave.cancel": [
+    {
+      "type": 0,
+      "value": "취소"
+    }
+  ],
+  "workspace.leave.confirm": [
+    {
+      "type": 0,
+      "value": "나가기"
+    }
+  ],
+  "workspace.leave.lastOwner": [
+    {
+      "type": 0,
+      "value": "마지막 소유자는 나갈 수 없어요. 먼저 다른 사람에게 소유자를 넘기세요."
+    }
+  ],
+  "workspace.leave.lastOwnerNext": [
+    {
+      "type": 0,
+      "value": "멤버 탭에서 그 사람의 프로필을 열어 역할을 소유자로 바꾼 뒤 다시 나가세요."
+    }
+  ],
+  "workspace.leave.title": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "에서 나갈까요?"
+    }
+  ],
+  "workspace.leave.titleUnnamed": [
+    {
+      "type": 0,
+      "value": "이 워크스페이스에서 나갈까요?"
+    }
+  ],
+  "workspace.menu.copiedAddress": [
+    {
+      "type": 0,
+      "value": "서버 주소 복사됨"
+    }
+  ],
+  "workspace.menu.copyAddress": [
+    {
+      "type": 0,
+      "value": "서버 주소 복사"
+    }
+  ],
+  "workspace.menu.copyAddressNote": [
+    {
+      "type": 0,
+      "value": "기본이 아닌 워크스페이스는 ID도 필요해요."
+    }
+  ],
+  "workspace.menu.copyFailed": [
+    {
+      "type": 0,
+      "value": "복사하지 못했어요"
+    }
+  ],
+  "workspace.menu.fallbackTitle": [
+    {
+      "type": 0,
+      "value": "워크스페이스"
+    }
+  ],
+  "workspace.menu.leave": [
+    {
+      "type": 0,
+      "value": "워크스페이스 나가기"
+    }
+  ],
+  "workspace.menu.settings": [
+    {
+      "type": 0,
+      "value": "워크스페이스 설정"
     }
   ]
 };

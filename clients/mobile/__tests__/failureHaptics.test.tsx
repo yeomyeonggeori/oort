@@ -1,11 +1,12 @@
 import React from 'react';
 import {AppState} from 'react-native';
 import {act, cleanup, fireEvent, render, renderHook, screen} from '@testing-library/react-native';
-import {sendMessage, sendThreadReply, type Message} from '@momo/core/lib/api';
+import {ApiError, sendMessage, sendThreadReply, type Message} from '@momo/core/lib/api';
 import {makeDirectory} from '@momo/core/features/workspace/directory';
 import '../src/boot/polyfills';
 import {MessageRow, type MessageRowActions} from '../src/features/conversation/MessageRow';
 import {useTimeline} from '../src/features/conversation/useTimeline';
+import {readFailedSends} from '../src/features/conversation/failedSends';
 import {__resetHapticClockForTests, setHapticMode, type HapticMode} from '../src/lib/haptics';
 
 jest.mock('@momo/core/lib/api', () => ({
@@ -166,5 +167,38 @@ describe('보내기 실패 햅틱 (#4298 High 2)', () => {
     await Promise.all([first, second]);
     expect(result.current.pending.map(p => p.status)).toEqual(['failed', 'failed']);
     expect(nativeCalls).toEqual(['notification:error']);
+  });
+});
+
+// ADR-0177 증보 2026-11-14 D17: 나가기 전에 이미 저장된 글을 같은 키로 다시 보내면 서버가 409 `message_before_leave` 로 답한다.
+describe('보내기 재시도의 409 message_before_leave (D17)', () => {
+  it('다시 보낸 글이 409 message_before_leave 면 실패 행·이 기기의 못 보낸 글·진동 없이 조용히 사라진다', async () => {
+    const view = renderHook(() => useTimeline(null, 'workspace', 'channel', 'self'));
+    const first = deferred();
+    jest.mocked(sendMessage).mockReturnValueOnce(first.promise);
+    let sending!: Promise<void>;
+    act(() => { sending = view.result.current.send('나가기 전에 쓴 글'); });
+    await fail(first);
+    await sending;
+    const id = view.result.current.pending[0].clientMsgId;
+    // 이 파일의 앞 시험들도 같은 저장소에 실패한 글을 남겼다 - 이 글의 키만 본다.
+    const stored = () => readFailedSends('workspace', 'channel', 'self').map(entry => entry.row.clientMsgId);
+    expect(stored()).toContain(id);
+    nativeCalls.length = 0;
+
+    jest.mocked(sendMessage).mockRejectedValueOnce(new ApiError(409, 'message before leave', 'message_before_leave'));
+    await act(async () => { await view.result.current.resend(id); });
+
+    expect(jest.mocked(sendMessage).mock.calls[1][2]).toBe(id);
+    expect(view.result.current.pending).toEqual([]);
+    expect(stored()).not.toContain(id);
+    expect(nativeCalls).toEqual([]);
+  });
+
+  it('다른 409 는 지금처럼 실패 행이다', async () => {
+    const view = renderHook(() => useTimeline(null, 'workspace', 'channel', 'self'));
+    jest.mocked(sendMessage).mockRejectedValueOnce(new ApiError(409, 'conflict', 'other_conflict'));
+    await act(async () => { await view.result.current.send('다른 거절'); });
+    expect(view.result.current.pending.map(p => p.status)).toEqual(['failed']);
   });
 });

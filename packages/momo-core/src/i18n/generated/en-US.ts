@@ -1140,6 +1140,108 @@ export const catalog: MessageCatalog = {
       "value": "We can't reach the server. Below is the work state as last confirmed."
     }
   ],
+  "channels.dmLeave.action": [
+    {
+      "type": 0,
+      "value": "Leave conversation"
+    }
+  ],
+  "channels.dmLeave.cancel": [
+    {
+      "type": 0,
+      "value": "Cancel"
+    }
+  ],
+  "channels.dmLeave.confirm": [
+    {
+      "type": 0,
+      "value": "Leave"
+    }
+  ],
+  "channels.dmLeave.confirmBody": [
+    {
+      "type": 0,
+      "value": "The conversation so far disappears from your screen. It stays as it is on "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "'s screen."
+    }
+  ],
+  "channels.dmLeave.confirmFinal": [
+    {
+      "type": 0,
+      "value": "You can't undo this after you leave."
+    }
+  ],
+  "channels.dmLeave.confirmRevive": [
+    {
+      "type": 0,
+      "value": "If a new message arrives, it starts a new conversation from that message."
+    }
+  ],
+  "channels.dmLeave.confirmScheduled": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " scheduled message will also be canceled."
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " scheduled messages will also be canceled."
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "channels.dmLeave.confirmTitle": [
+    {
+      "type": 0,
+      "value": "Leave your conversation with "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "?"
+    }
+  ],
+  "channels.dmLeave.done": [
+    {
+      "type": 0,
+      "value": "You left the conversation."
+    }
+  ],
+  "channels.dmLeave.failed": [
+    {
+      "type": 0,
+      "value": "Couldn't leave. Please try again."
+    }
+  ],
   "common.feedback.unavailable": [
     {
       "type": 0,
@@ -2153,6 +2255,272 @@ export const catalog: MessageCatalog = {
       "value": "Session"
     }
   ],
+  "directory.lifecycle.cancel": [
+    {
+      "type": 0,
+      "value": "Cancel"
+    }
+  ],
+  "directory.lifecycle.errorForbidden": [
+    {
+      "type": 0,
+      "value": "You do not have permission to suspend or remove members in this workspace."
+    }
+  ],
+  "directory.lifecycle.errorLastOwner": [
+    {
+      "type": 0,
+      "value": "The workspace needs at least one person with the "
+    },
+    {
+      "type": 1,
+      "value": "owner"
+    },
+    {
+      "type": 0,
+      "value": " role, so this person cannot be suspended or removed."
+    }
+  ],
+  "directory.lifecycle.errorNetwork": [
+    {
+      "type": 0,
+      "value": "Could not reach the server. Check your connection and try again."
+    }
+  ],
+  "directory.lifecycle.errorNotActive": [
+    {
+      "type": 0,
+      "value": "This member is no longer active. Someone else may have suspended them in the meantime."
+    }
+  ],
+  "directory.lifecycle.errorNotFound": [
+    {
+      "type": 0,
+      "value": "We could not find this member. They may have already left the workspace."
+    }
+  ],
+  "directory.lifecycle.errorNotSuspended": [
+    {
+      "type": 0,
+      "value": "This member is not suspended any more. Someone else may have lifted the suspension in the meantime."
+    }
+  ],
+  "directory.lifecycle.errorRank": [
+    {
+      "type": 0,
+      "value": "You cannot suspend or remove a member whose role is the same as or higher than yours. Their role may have changed in the meantime."
+    }
+  ],
+  "directory.lifecycle.errorRateLimited": [
+    {
+      "type": 0,
+      "value": "Too many requests. Try again in a moment."
+    }
+  ],
+  "directory.lifecycle.errorSelf": [
+    {
+      "type": 0,
+      "value": "You cannot suspend or remove yourself."
+    }
+  ],
+  "directory.lifecycle.errorUnknown": [
+    {
+      "type": 0,
+      "value": "That did not go through. Try again."
+    }
+  ],
+  "directory.lifecycle.reinstate": [
+    {
+      "type": 0,
+      "value": "Lift suspension"
+    }
+  ],
+  "directory.lifecycle.reinstateBody": [
+    {
+      "type": 0,
+      "value": "They will be able to sign in again. Their earlier sign-ins are not restored, so they need to sign in again. Their channels are unchanged."
+    }
+  ],
+  "directory.lifecycle.reinstateBusy": [
+    {
+      "type": 0,
+      "value": "Lifting"
+    }
+  ],
+  "directory.lifecycle.reinstatedReceipt": [
+    {
+      "type": 0,
+      "value": "Lifted"
+    }
+  ],
+  "directory.lifecycle.reinstateSchedules": [
+    {
+      "type": 0,
+      "value": "Scheduled messages held when they were suspended do not go out on their own after the suspension is lifted. They need to reschedule them or send them now."
+    }
+  ],
+  "directory.lifecycle.reinstateTitle": [
+    {
+      "type": 0,
+      "value": "Lift "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "'s suspension?"
+    }
+  ],
+  "directory.lifecycle.remove": [
+    {
+      "type": 0,
+      "value": "Remove from workspace"
+    }
+  ],
+  "directory.lifecycle.removeAction": [
+    {
+      "type": 0,
+      "value": "Remove"
+    }
+  ],
+  "directory.lifecycle.removeBusy": [
+    {
+      "type": 0,
+      "value": "Removing"
+    }
+  ],
+  "directory.lifecycle.removedClose": [
+    {
+      "type": 0,
+      "value": "Close"
+    }
+  ],
+  "directory.lifecycle.removedTitle": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " was removed from the workspace."
+    }
+  ],
+  "directory.lifecycle.removeKeeps": [
+    {
+      "type": 0,
+      "value": "Their messages and direct message history stay, with a former-member label in place of their name."
+    }
+  ],
+  "directory.lifecycle.removeLeaves": [
+    {
+      "type": 0,
+      "value": "They leave every channel and direct message and are signed out on every device right away. Their scheduled messages are cancelled."
+    }
+  ],
+  "directory.lifecycle.removeTitle": [
+    {
+      "type": 0,
+      "value": "Remove "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " from the workspace?"
+    }
+  ],
+  "directory.lifecycle.removeWarning": [
+    {
+      "type": 0,
+      "value": "This cannot be undone. Even with a new invite, the same email address cannot join this workspace again."
+    }
+  ],
+  "directory.lifecycle.suspend": [
+    {
+      "type": 0,
+      "value": "Suspend"
+    }
+  ],
+  "directory.lifecycle.suspendBusy": [
+    {
+      "type": 0,
+      "value": "Suspending"
+    }
+  ],
+  "directory.lifecycle.suspendedReceipt": [
+    {
+      "type": 0,
+      "value": "Suspended"
+    }
+  ],
+  "directory.lifecycle.suspendKeeps": [
+    {
+      "type": 0,
+      "value": "Their messages and channels stay as they are. While they are suspended, the "
+    },
+    {
+      "type": 1,
+      "value": "owner"
+    },
+    {
+      "type": 0,
+      "value": " and "
+    },
+    {
+      "type": 1,
+      "value": "admin"
+    },
+    {
+      "type": 0,
+      "value": " roles still see their name on their messages; everyone else sees a former-member label."
+    }
+  ],
+  "directory.lifecycle.suspendSignOut": [
+    {
+      "type": 0,
+      "value": "They are signed out on every device right away and cannot sign in again until the suspension is lifted. Phone notifications stop as well."
+    }
+  ],
+  "directory.lifecycle.suspendTitle": [
+    {
+      "type": 0,
+      "value": "Suspend "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "?"
+    }
+  ],
+  "directory.lifecycle.suspendUndo": [
+    {
+      "type": 0,
+      "value": "Suspended members stay under Suspended on the Members tab, where you can lift the suspension at any time. Only the "
+    },
+    {
+      "type": 1,
+      "value": "owner"
+    },
+    {
+      "type": 0,
+      "value": " and "
+    },
+    {
+      "type": 1,
+      "value": "admin"
+    },
+    {
+      "type": 0,
+      "value": " roles see that group."
+    }
+  ],
   "directory.manage.heading": [
     {
       "type": 0,
@@ -2416,7 +2784,7 @@ export const catalog: MessageCatalog = {
     },
     {
       "type": 0,
-      "value": " role cannot change each other's roles or remove each other, so this cannot be undone."
+      "value": " role cannot change each other's roles, suspend each other, or remove each other, but they can create password reset links for each other. This cannot be undone."
     }
   ],
   "directory.role.confirmPair": [
@@ -4698,6 +5066,12 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "People"
+    }
+  ],
+  "memberList.group.suspended": [
+    {
+      "type": 0,
+      "value": "Suspended"
     }
   ],
   "memberList.newDm.close": [
@@ -10201,6 +10575,17 @@ export const catalog: MessageCatalog = {
       "style": null
     }
   ],
+  "timeline.memberPanel.groupSuspended": [
+    {
+      "type": 0,
+      "value": "Suspended "
+    },
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    }
+  ],
   "timeline.memberPanel.groupWorking": [
     {
       "type": 0,
@@ -11710,6 +12095,360 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "oort tool"
+    }
+  ],
+  "workspace.add.back": [
+    {
+      "type": 0,
+      "value": "Back"
+    }
+  ],
+  "workspace.add.cancel": [
+    {
+      "type": 0,
+      "value": "Cancel"
+    }
+  ],
+  "workspace.add.createLead": [
+    {
+      "type": 0,
+      "value": "Opens a new workspace on this server. Only the server operator can create one."
+    }
+  ],
+  "workspace.add.createLeadNotOperator": [
+    {
+      "type": 0,
+      "value": "Only this server's operator can create one. This account can't."
+    }
+  ],
+  "workspace.add.createTitle": [
+    {
+      "type": 0,
+      "value": "Create a new workspace"
+    }
+  ],
+  "workspace.add.joinChecking": [
+    {
+      "type": 0,
+      "value": "Checking"
+    }
+  ],
+  "workspace.add.joinClaim": [
+    {
+      "type": 0,
+      "value": "First-owner and reset links can't be used here. Sign out and paste it on the sign-in screen."
+    }
+  ],
+  "workspace.add.joinConfirmAction": [
+    {
+      "type": 0,
+      "value": "Sign out and continue"
+    }
+  ],
+  "workspace.add.joinConfirmBody": [
+    {
+      "type": 0,
+      "value": "This app signs in to one workspace at a time. You'll be signed out of this workspace. The sign-in screen will be filled in with what you entered."
+    }
+  ],
+  "workspace.add.joinConfirmTitle": [
+    {
+      "type": 0,
+      "value": "Sign out and continue?"
+    }
+  ],
+  "workspace.add.joinEmpty": [
+    {
+      "type": 0,
+      "value": "Enter an address or an invite link."
+    }
+  ],
+  "workspace.add.joinField": [
+    {
+      "type": 0,
+      "value": "Address or invite link"
+    }
+  ],
+  "workspace.add.joinHint": [
+    {
+      "type": 0,
+      "value": "Paste it as you received it. For example: https://team.example.com"
+    }
+  ],
+  "workspace.add.joinLead": [
+    {
+      "type": 0,
+      "value": "Use an address or an invite link. For another server, sign out and enter it on the sign-in screen; an invite to this server signs you out and continues on the sign-in screen."
+    }
+  ],
+  "workspace.add.joinLeadWeb": [
+    {
+      "type": 0,
+      "value": "Use an address or an invite link. Another server opens in a new tab; an invite to this server signs you out and continues on the sign-in screen."
+    }
+  ],
+  "workspace.add.joinNext": [
+    {
+      "type": 0,
+      "value": "Continue"
+    }
+  ],
+  "workspace.add.joinOpenAction": [
+    {
+      "type": 0,
+      "value": "Open in a new tab"
+    }
+  ],
+  "workspace.add.joinOpenBody": [
+    {
+      "type": 0,
+      "value": "On the web you can't switch to another server from this window. That server opens in a new tab, and this workspace stays as it is."
+    }
+  ],
+  "workspace.add.joinOpenInvite": [
+    {
+      "type": 0,
+      "value": "Opens the invite to "
+    },
+    {
+      "type": 1,
+      "value": "server"
+    },
+    {
+      "type": 0,
+      "value": " in a new tab."
+    }
+  ],
+  "workspace.add.joinOpenServer": [
+    {
+      "type": 0,
+      "value": "Opens the sign-in screen of "
+    },
+    {
+      "type": 1,
+      "value": "server"
+    },
+    {
+      "type": 0,
+      "value": " in a new tab."
+    }
+  ],
+  "workspace.add.joinOpenTitle": [
+    {
+      "type": 0,
+      "value": "Open in a new tab?"
+    }
+  ],
+  "workspace.add.joinPasteAction": [
+    {
+      "type": 0,
+      "value": "Sign out"
+    }
+  ],
+  "workspace.add.joinPasteBody": [
+    {
+      "type": 0,
+      "value": "To join another server, sign out, then choose “Change” on the sign-in screen and paste this link into the box that opens. Copy it before you sign out."
+    }
+  ],
+  "workspace.add.joinPasteTitle": [
+    {
+      "type": 0,
+      "value": "Sign out?"
+    }
+  ],
+  "workspace.add.joinSameServer": [
+    {
+      "type": 0,
+      "value": "You're already on this server. For another workspace on it, sign out and use “Sign in to another workspace” on the sign-in screen with its workspace ID."
+    }
+  ],
+  "workspace.add.joinTargetInvite": [
+    {
+      "type": 0,
+      "value": "Continues with an invite to "
+    },
+    {
+      "type": 1,
+      "value": "server"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "workspace.add.joinTargetInviteOnly": [
+    {
+      "type": 0,
+      "value": "Continues with the invite link you received."
+    }
+  ],
+  "workspace.add.joinTargetServer": [
+    {
+      "type": 0,
+      "value": "Continues on the sign-in screen of "
+    },
+    {
+      "type": 1,
+      "value": "server"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "workspace.add.joinTitle": [
+    {
+      "type": 0,
+      "value": "Join one that already exists"
+    }
+  ],
+  "workspace.add.joinUnreachable": [
+    {
+      "type": 0,
+      "value": "Couldn't reach "
+    },
+    {
+      "type": 1,
+      "value": "server"
+    },
+    {
+      "type": 0,
+      "value": ", so you weren't signed out. Check the address."
+    }
+  ],
+  "workspace.add.lead": [
+    {
+      "type": 0,
+      "value": "Create a new workspace, or get into one that already exists."
+    }
+  ],
+  "workspace.add.operatorContact": [
+    {
+      "type": 0,
+      "value": "If you have an invite, use “Join one that already exists”. Otherwise, ask the person who runs this server."
+    }
+  ],
+  "workspace.add.title": [
+    {
+      "type": 0,
+      "value": "Add a workspace"
+    }
+  ],
+  "workspace.create.lead": [
+    {
+      "type": 0,
+      "value": "Adds another workspace on this server. Whoever creates it becomes the owner, and it starts with a single #general channel. Only the server operator can create one."
+    }
+  ],
+  "workspace.create.operatorOnly": [
+    {
+      "type": 0,
+      "value": "Only this server's operator can create a new workspace."
+    }
+  ],
+  "workspace.create.slugHint": [
+    {
+      "type": 0,
+      "value": "Lowercase letters, numbers and hyphens only. It must be unique on the whole server."
+    }
+  ],
+  "workspace.leave.body": [
+    {
+      "type": 0,
+      "value": "Your membership ends and you're signed out right away. Messages you sent stay. You'll need an invite to come back."
+    }
+  ],
+  "workspace.leave.busy": [
+    {
+      "type": 0,
+      "value": "Leaving"
+    }
+  ],
+  "workspace.leave.cancel": [
+    {
+      "type": 0,
+      "value": "Cancel"
+    }
+  ],
+  "workspace.leave.confirm": [
+    {
+      "type": 0,
+      "value": "Leave"
+    }
+  ],
+  "workspace.leave.lastOwner": [
+    {
+      "type": 0,
+      "value": "The last owner can't leave. Make someone else an owner first."
+    }
+  ],
+  "workspace.leave.lastOwnerNext": [
+    {
+      "type": 0,
+      "value": "In the Members tab, open that person's profile and change their role to owner, then leave again."
+    }
+  ],
+  "workspace.leave.title": [
+    {
+      "type": 0,
+      "value": "Leave "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "?"
+    }
+  ],
+  "workspace.leave.titleUnnamed": [
+    {
+      "type": 0,
+      "value": "Leave this workspace?"
+    }
+  ],
+  "workspace.menu.copiedAddress": [
+    {
+      "type": 0,
+      "value": "Server address copied"
+    }
+  ],
+  "workspace.menu.copyAddress": [
+    {
+      "type": 0,
+      "value": "Copy server address"
+    }
+  ],
+  "workspace.menu.copyAddressNote": [
+    {
+      "type": 0,
+      "value": "A non-default workspace needs its ID too."
+    }
+  ],
+  "workspace.menu.copyFailed": [
+    {
+      "type": 0,
+      "value": "Couldn't copy"
+    }
+  ],
+  "workspace.menu.fallbackTitle": [
+    {
+      "type": 0,
+      "value": "Workspace"
+    }
+  ],
+  "workspace.menu.leave": [
+    {
+      "type": 0,
+      "value": "Leave workspace"
+    }
+  ],
+  "workspace.menu.settings": [
+    {
+      "type": 0,
+      "value": "Workspace settings"
     }
   ]
 };

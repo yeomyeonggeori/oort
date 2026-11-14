@@ -1929,6 +1929,7 @@
   --on-primary-base: var(--on-primary);
   --surface-hover-base: var(--surface-hover);
   --surface-pressed-base: var(--surface-pressed);
+  --status-ok-base: var(--ok);
   --band-fill: color-mix(in srgb, var(--on-band) 10%, transparent);
   --band-fill-strong: color-mix(in srgb, var(--on-band) 16%, transparent);
   --band-line: color-mix(in srgb, var(--on-band) 12%, transparent);
@@ -1958,6 +1959,21 @@
   --surface-hover: var(--band-fill, var(--surface-hover-base));
   --surface-pressed: var(--band-fill-strong, var(--surface-pressed-base));
   --glass: var(--band-glass, var(--glass-base));
+  /* 아바타 상태 점의 초록만(#5786). `--ok` 는 띠에서 다시 묶이지 않아 남색 띠 위에서 3:1 이 안 된다(밝게 2.8:1). on-band 를
+   * 섞은 값은 띠가 있을 때만 유효하고(없으면 무효 → `--ok` 로 떨어진다), 점만 이 값을 읽는다. 섞기를 루트가 아니라 이
+   * 묶음에서 하는 까닭: 팔레트가 문서 뿌리가 아니라 미리보기 상자(`data-palette-preview`)에 걸린 자리에서도 그 상자의
+   * on-band 를 읽는다.
+   *
+   * 띠가 없을 때의 뒤 값은 루트 값(`--status-ok-base`)이 아니라 **이 자리의 `--ok`** 다(design-review r1 H1): 배경화면·유리가
+   * 사이드바의 `--ok` 를 scrim·유리 최악 합성 위 보정값으로 다시 묶는데(`appearance/wallpaper.css`·`glass.css`), 루트 값으로
+   * 떨어지면 점이 그 보정을 건너뛰어 어두운 배경화면 위에서 2.4~2.6:1 이었다. 흰 면으로 되돌리는 쪽(`band-surface`)은 그대로
+   * 루트 값이다 — 불투명한 흰 면 위라 보정이 필요 없다.
+   *
+   * 띠 위에서 섞는 초록은 루트 값(`--status-ok-base`)이다: 유리를 켜면 사이드바의 `--ok` 가 **바닥** 위 보정값(밝게에서 더
+   * 어두운 초록)으로 묶이는데(유리는 ok 를 띠 위 역할로 보지 않는다, `glassChrome`), 그 값을 섞으면 반투명 남색 띠 위에서
+   * 2.5:1 이었다. 루트 값을 섞으면 불투명한 띠 6.1:1 · 유리 띠(하한 79%) 3.2:1 이다. */
+  --band-status-ok: color-mix(in srgb, var(--status-ok-base) 55%, var(--on-band));
+  --status-ok: var(--band-status-ok, var(--ok));
   color: var(--ink);
 }
 
@@ -1974,6 +1990,7 @@
   --on-primary: var(--on-primary-base);
   --surface-hover: var(--surface-hover-base);
   --surface-pressed: var(--surface-pressed-base);
+  --status-ok: var(--status-ok-base);
 }
 
 /* 흰 면 채움을 가진 자식은 클래스로 알 수 있다: 사이드바 안에서 그 채움을 든
@@ -1993,6 +2010,7 @@
   --on-primary: var(--on-primary-base);
   --surface-hover: var(--surface-hover-base);
   --surface-pressed: var(--surface-pressed-base);
+  --status-ok: var(--status-ok-base);
 }
 
 /* 레일의 「현재」 마커. 타일 밖 바닥 위에 서므로 바닥의 글자 역할을 쓴다: 띠가
@@ -3250,6 +3268,32 @@
   }
 }
 
+/* 보이지 않는 라디오가 눈에 보이는 칸(라벨) 전체를 덮는다 (#5783, 설정 › 모양 검수 r1~r3). `sr-only` 대신 라벨에 쓴다.
+ *
+ * `sr-only` 라디오는 1×1 절대 배치라 그 포함 블록이 라벨이 아니라 먼 조상이다(위 MOMO-628과 같은 원리). 초점이 든 상자가 눈에 보이는
+ * 칸과 다른 자리·다른 크기에 있어서, 키보드로 닿을 때 브라우저가 스스로 하는 초점 따라가기가 격자도 페이지도 움직이지 못하거나(테마
+ * 타일·색 모드 세그먼트) 엉뚱한 1×1을 기준으로 멈춘다(강조색 칩이 창 아래로 잘림). 손으로 `scrollIntoView`를 다는 길은 손이 닿지 않은
+ * 순간과 옆 컨트롤에서 다시 깨졌다(검수 r3 B-1c). 라벨을 포함 블록으로 삼고 라디오를 그 크기로 깔면 키보드로 닿을 때의 따라가기는
+ * 브라우저가 한다. 다만 WebKit은 방향키·누름으로 **일부만 보이는** 칸을 고를 때 따라오지 않는다: 테마 타일과 강조색 칩은 고른 순간
+ * (change)에만 따로 데려온다(`ThemeTile`의 `followPick` · `AccentSwatch`, 검수 r4 B-1d).
+ *
+ * 라디오는 투명하고(불투명도 0이라 UA 모양·링이 보이지 않는다) 포인터를 받지 않는다: 누름·가리킴·툴팁·커서·글자 선택·누르는 자리는
+ * 전처럼 라벨이 받고, 라벨을 누르면 브라우저가 라디오를 고른다. 비활성 라디오가 가리킴을 삼키지 않는다(흐린 강조색 칩의 툴팁).
+ * 모양은 그대로 라벨이 그린다(`:has(:focus-visible)` · `.peer:focus-visible ~ *`). 라디오는 라벨의 바로 아래 자식이어야 한다. */
+@utility radio-cover {
+  position: relative;
+
+  & > input[type="radio"] {
+    position: absolute;
+    inset: 0;
+    inline-size: 100%;
+    block-size: 100%;
+    margin: 0;
+    opacity: 0;
+    pointer-events: none;
+  }
+}
+
 /* 길게 누르기의 자리를 비운다 (B11). 터치 화면에는 hover가 없으므로 메시지
  * 액션은 길게 누르기로 연다. 그런데 iOS Safari는 텍스트 위 길게 누르기에 자기
  * 선택 콜아웃을 띄우고, 그게 우리 시트 위로 올라온다 — 한 제스처를 두고 두
@@ -3423,6 +3467,132 @@
     var(--elevation-rest),
     inset 0 0 0 1px var(--line),
     inset 0 0 0 1px var(--selected-edge);
+}
+
+/* 아바타 상태 점 — 도려낸 자리에 앉는 점 (#5786, owner 2026-11-13 QA 15). 부품은 `features/presence/AvatarStatus.tsx`.
+ *
+ * 예전에는 점 둘레에 면색 테(`border-surface`)를 둘러 아바타에서 떨어져 보이게 했다. 테의 색이 줄 바탕과 같을 때만
+ * 틈처럼 보였고, 줄을 가리키거나 고르면, 띠 테마·사진 위에서는 바탕과 다른 **색 테**로 드러났다. 이제 아바타 쪽을 점
+ * 둘레만큼 마스크로 도려내고 그 자리에 점을 앉힌다: 틈이 진짜로 비어 그 자리의 바탕이 무엇이든 그대로 보인다. 새
+ * `<svg>` 없이 CSS 마스크다(ADR-0172).
+ *
+ * 크기는 코어 `statusBadgeGeometry`(아바타 한 변 → 점 지름·틈·이니셜 옮김) 한 함수가 정하고 아래 값은 그 표를 옮긴 것이다
+ * (`avatarStatus.geometry.test.ts` 가 대조한다): 24 → 8 · 2, 32 → 12 · 2, 112 → 28 · 4. 인라인 스타일을 쓰지 않으므로 크기는
+ * `data-status-face` 로 고른다. 점은 아바타 상자 **안** 오른쪽 아래에 붙고, 도려낸 원은 점과 중심이 같다(두 값이 같은
+ * 변수에서 나온다).
+ *
+ *   [data-avatar-status-face]  아바타를 감싸는 칸. 점이 있을 때만(`data-status-cut`) 도려낸다 — 점이 없으면(모름)
+ *                              아바타는 온전하다. 큰 얼굴은 바깥 그림자(`avatar-hero` 의 rest 고도)가 마스크에 잘리지
+ *                              않게 칸을 그림자 폭만큼 넓히고 같은 폭을 음수 여백으로 되돌린다(`--status-bleed`; 배치는
+ *                              그대로다). 24 의 글자 아바타는 점이 있을 때 이니셜을 구멍 반대쪽(왼쪽 위)으로
+ *                              `--status-glyph-shift` 만큼 옮긴다(r1 B1: 구멍이 받침을 먹어 「김」이 「기」로 읽혔다).
+ *                              사진(`img`)·기본 아바타(`svg`)는 옮기지 않는다.
+ *   [data-avatar-status-dot]   점. 색은 톤(`data-tone`), 모양은 뜻(`data-shape`, 코어 `statusBadgeShape`)이 고른다. 모양
+ *                              규칙은 아래 `status-shape-*` 이고 「내 상태」 메뉴의 표지도 같은 규칙을 읽는다(r1 M1).
+ *
+ * 색: 띠 위에서 `--warn`·`--danger` 는 이미 on-band 단계로 다시 묶인다(사이드바 묶음). 초록은 묶이지 않아 남색 띠 위에서
+ * 3:1 이 안 되므로(밝게 2.8:1) 점만 `--status-ok`(띠가 있을 때 on-band 를 섞은 초록, 없으면 그 자리의 `--ok`)를 읽는다.
+ * 대비는 `avatarStatus.contrast.test.ts` 가 테마 × 밝게/어둡게 × 바탕(띠·호버·눌림·선택·카드·창·배경화면·유리)에서 잰다. */
+@utility avatar-status {
+  position: relative;
+  display: inline-flex;
+  flex-shrink: 0;
+  --status-dot: 12px;
+  --status-gap: 2px;
+  --status-glyph-shift: 0px;
+  --status-bleed: 0px;
+
+  &[data-status-face="24"] {
+    --status-dot: 8px;
+    --status-gap: 2px;
+    --status-glyph-shift: 1px;
+  }
+  &[data-status-face="32"] {
+    --status-dot: 12px;
+    --status-gap: 2px;
+    --status-glyph-shift: 0px;
+  }
+  &[data-status-face="112"] {
+    --status-dot: 28px;
+    --status-gap: 4px;
+    --status-glyph-shift: 0px;
+    --status-bleed: var(--spacing-8);
+  }
+
+  & > [data-avatar-status-face] {
+    display: flex;
+  }
+  &[data-status-cut] > [data-avatar-status-face] {
+    --status-at: calc(100% - var(--status-bleed) - var(--status-dot) / 2);
+    --status-hole: calc(var(--status-dot) / 2 + var(--status-gap));
+    padding: var(--status-bleed);
+    margin: calc(var(--status-bleed) * -1);
+    mask-image: radial-gradient(
+      circle at var(--status-at) var(--status-at),
+      transparent var(--status-hole),
+      var(--ink) calc(var(--status-hole) + 0.5px)
+    );
+  }
+  /* 글자 아바타의 이니셜만: 오른쪽·아래 안쪽 여백 = 옮김 × 2 → 가운데 정렬된 글자가 왼쪽 위로 옮김만큼 간다. 옮김이 있는
+   * 크기(24)에만 건다 — 다른 크기의 아바타가 가진 여백을 0 으로 덮지 않는다. */
+  &[data-status-face="24"][data-status-cut] > [data-avatar-status-face] > :not(:has(img, svg)) {
+    padding-right: calc(var(--status-glyph-shift) * 2);
+    padding-bottom: calc(var(--status-glyph-shift) * 2);
+  }
+
+  & > [data-avatar-status-dot] {
+    position: absolute;
+    right: 0;
+    bottom: 0;
+    inline-size: var(--status-dot);
+    block-size: var(--status-dot);
+    border-radius: 9999px;
+  }
+  & > [data-avatar-status-dot][data-tone="ok"] {
+    background-color: var(--status-ok, var(--ok));
+  }
+  & > [data-avatar-status-dot][data-tone="warn"] {
+    background-color: var(--warn);
+  }
+  & > [data-avatar-status-dot][data-tone="danger"] {
+    background-color: var(--danger);
+  }
+}
+
+/* 상태 표식의 모양 (#5786) — 아바타 모서리 점(`avatar-status`)과 「내 상태」 메뉴의 표지(`status-mark`)가 같은 규칙을 읽는다.
+ * 크기는 둘러싼 규칙의 `--status-dot`·`--status-gap` 이다. 모양은 코어 `statusBadgeShape` 가 뜻으로 고른다:
+ *
+ *   (클래스 없음)        채운 원      온라인 · 에이전트 살아 있음 · 에이전트 경고(owner/admin, 채운 주황)
+ *   status-shape-moon    초승달       자리 비움(사람만) — 왼쪽 위를 둥글게 덜어 낸다
+ *   status-shape-bar     가로 줄      방해 금지 — 가운데 줄(폭 = 점 - 틈×2, 높이 = 틈)이 빠진 원
+ *   status-shape-ring    속 빈 고리   오프라인 · 에이전트 꺼짐 — 굵기 = 틈
+ *
+ * 초승달·가로 줄·고리 속의 빈 곳도 도려낸 틈처럼 바탕이 비친다(면색 채움이 없다). 고리의 선은 `--ink-muted` 다: 예전
+ * `--line-strong` 은 아바타 색 위에서 3:1 미만이었고(#4725 M2), 틈 안에서도 가리킨·눌린 줄 위에서 2.6~2.9:1 이었다. 띠
+ * 위에서는 on-band-muted 로 묶인다. */
+@utility status-shape-moon {
+  mask-image: radial-gradient(
+    circle at 25% 25%,
+    transparent calc(var(--status-dot) * 0.375),
+    var(--ink) calc(var(--status-dot) * 0.375 + 0.5px)
+  );
+}
+@utility status-shape-bar {
+  mask-image: linear-gradient(var(--ink) 0 0), linear-gradient(var(--ink) 0 0);
+  mask-size: 100% 100%, calc(var(--status-dot) - 2 * var(--status-gap)) var(--status-gap);
+  mask-position: center;
+  mask-repeat: no-repeat;
+  mask-composite: exclude;
+}
+@utility status-shape-ring {
+  border: var(--status-gap) solid var(--ink-muted);
+}
+
+/* 「내 상태」 메뉴의 표지(`PresenceControl` 의 선택지 점, r1 M1): 배지와 같은 모양을 같은 규칙으로 그린다 — 메뉴가 새
+ * 모양(초승달·가로 줄)을 가르쳐 주는 자리다. 크기는 표지 칸(`size-2`, 8px)이고 값은 가장 작은 배지(24 얼굴: 점 8 · 틈 2)와 같다. */
+@utility status-mark {
+  --status-dot: var(--spacing-2);
+  --status-gap: 2px;
 }
 
 /* 설정 섹션의 카드 (시안 `.a-group`): 행들이 한 면에 서고 행 사이는 선 하나다. 컨테이너

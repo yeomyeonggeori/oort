@@ -4,7 +4,7 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { act, createElement, type ReactElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { MemoryRouter } from "react-router-dom";
+import { MemoryRouter, useLocation } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { PresenceWrite, RosterMember } from "@momo/core/lib/api";
@@ -12,6 +12,12 @@ import { PRESENCE_WRITE_FAILED } from "@momo/core/features/presence/model";
 import type { NotificationRulesPatch } from "@momo/core/features/settings/notificationRules";
 import { SessionProvider, type SessionContextValue } from "@/app/session";
 import { AddWorkspaceOpenContext } from "@/features/workspace/useAddWorkspace";
+import { ApiError } from "@momo/core/lib/api";
+import { classifyEntry } from "@/features/auth/entryInput";
+import { absoluteApiBase } from "@/lib/serverBase";
+import { LocaleContext } from "@/i18n/localeContext";
+import { koreanLocaleForTest } from "@/i18n/koreanLocaleForTest";
+import type { AppLocale } from "@/i18n/localeStore";
 import { ProfileCard } from "./ProfileCard";
 
 const WS = "00000000-0000-7000-8000-000000000001";
@@ -21,6 +27,8 @@ const MEMBER_ID = "00000000-0000-7000-8000-000000000101";
 // 하나로만 쓰고, 알림 규칙(`notification-rules`)은 PUT 도 PATCH 도 보내지 않아야 한다.
 // 서버가 방해 금지를 고를 때 같은 트랜잭션에서 일시 중지를 묶어 켜기 때문이다.
 const setPresenceStatus = vi.hoisted(() => vi.fn());
+const leaveWorkspace = vi.hoisted(() => vi.fn());
+const openAddWorkspace = vi.hoisted(() => vi.fn());
 const putNotificationRules = vi.hoisted(() => vi.fn());
 const patchNotificationRules = vi.hoisted(() => vi.fn());
 
@@ -30,6 +38,7 @@ vi.mock("@momo/core/lib/api", async (importOriginal) => {
     ...actual,
     setPresenceStatus: (workspaceId: string, write: PresenceWrite) =>
       setPresenceStatus(workspaceId, write) as Promise<unknown>,
+    leaveWorkspace: (...args: unknown[]) => leaveWorkspace(...args) as Promise<unknown>,
   };
 });
 
@@ -53,8 +62,18 @@ const reactActEnvironment = globalThis as typeof globalThis & {
 };
 let mountedRoot: Root | null = null;
 let mountedHost: HTMLElement | null = null;
+let korean: AppLocale;
+/** 메뉴의 「워크스페이스 설정」이 옮겨 간 자리(MemoryRouter 안에서 읽는다). */
+let lastLocation = "";
 
-beforeAll(() => {
+function LocationProbe() {
+  const location = useLocation();
+  lastLocation = `${location.pathname}${location.search}`;
+  return null;
+}
+
+beforeAll(async () => {
+  korean = await koreanLocaleForTest();
   reactActEnvironment.IS_REACT_ACT_ENVIRONMENT = true;
   HTMLElement.prototype.scrollIntoView = () => undefined;
   HTMLElement.prototype.hasPointerCapture = () => false;
@@ -85,6 +104,10 @@ beforeAll(() => {
 beforeEach(() => {
   setPresenceStatus.mockReset();
   setPresenceStatus.mockResolvedValue({ status: "dnd" });
+  leaveWorkspace.mockReset();
+  leaveWorkspace.mockResolvedValue(undefined);
+  openAddWorkspace.mockReset();
+  lastLocation = "";
   putNotificationRules.mockReset();
   patchNotificationRules.mockReset();
   vi.stubGlobal("matchMedia", (query: string) => ({
@@ -173,20 +196,25 @@ function mountCard(
       SessionProvider,
       { value: sessionValue(logout) },
       createElement(
-        MemoryRouter,
-        null,
+        LocaleContext.Provider,
+        { value: korean },
         createElement(
-          AddWorkspaceOpenContext.Provider,
-          { value: () => undefined },
-          createElement(ProfileCard, {
-            workspaceId: WS,
-            selfMemberId: MEMBER_ID,
-            selfMember,
-            selfName: extra.selfName ?? "곽성재",
-            connected: true,
-            workspaceName: extra.workspaceName,
-            compact: extra.compact,
-          })
+          MemoryRouter,
+          null,
+          createElement(LocationProbe),
+          createElement(
+            AddWorkspaceOpenContext.Provider,
+            { value: openAddWorkspace },
+            createElement(ProfileCard, {
+              workspaceId: WS,
+              selfMemberId: MEMBER_ID,
+              selfMember,
+              selfName: extra.selfName ?? "곽성재",
+              connected: true,
+              workspaceName: extra.workspaceName,
+              compact: extra.compact,
+            })
+          )
         )
       )
     )
@@ -221,6 +249,10 @@ function menuRowIds(): string[] {
       id === "presence-option-away" ||
       id === "presence-option-dnd" ||
       id === "profile-set-status" ||
+      id === "profile-workspace-head" ||
+      id === "profile-copy-address" ||
+      id === "profile-workspace-settings" ||
+      id === "profile-leave-workspace" ||
       id === "profile-add-workspace" ||
       id === "nav-settings" ||
       id === "profile-logout"
@@ -259,6 +291,10 @@ describe("ProfileCard 로그아웃 (#1858)", () => {
       "presence-option-away",
       "presence-option-dnd",
       "profile-set-status",
+      "profile-workspace-head",
+      "profile-copy-address",
+      "profile-workspace-settings",
+      "profile-leave-workspace",
       "profile-add-workspace",
       "nav-settings",
       "profile-logout",
@@ -523,6 +559,8 @@ describe("ProfileCard 커스텀 상태 (#1889)", () => {
     );
     const menu = await openMenu();
     expect(menu.className).toContain("max-w-pane-sm");
+    // #5785: 줄이 늘어 낮은 창(200% 640×400)에서 위가 잘렸다. 높이도 가용 높이 안에서 스크롤한다.
+    expect(menu.className).toContain("max-h-menu-available");
     expect(
       menu.querySelector('[data-testid="profile-card-status-head"]')?.className
     ).toMatch(/break-words/);
@@ -887,4 +925,204 @@ describe("ProfileCard 트리거는 눌러도 움직이지 않는다 (#3276)", ()
     expect(trigger.getAttribute("data-state")).toBe("open");
     expect((trigger.getAttribute("class") ?? "").split(/\s+/).filter(Boolean)).toEqual(before);
   });
+});
+
+// #5785 (QA 14 1단, Buzz): 내 상태 → 워크스페이스 이름(머리글) 아래 펼친 줄 넷.
+describe("ProfileCard 워크스페이스 줄 묶음 (#5785)", () => {
+  const q = (testId: string) =>
+    document.querySelector<HTMLElement>(`[data-testid="${testId}"]`);
+  const writeText = vi.fn();
+
+  beforeEach(() => {
+    writeText.mockReset();
+    writeText.mockResolvedValue(undefined);
+    Object.defineProperty(window.navigator, "clipboard", {
+      configurable: true,
+      value: { writeText },
+    });
+  });
+  afterEach(() => {
+    Reflect.deleteProperty(window.navigator, "clipboard");
+  });
+
+  async function chooseRow(testId: string) {
+    await openMenu();
+    await act(async () => {
+      q(testId)!.click();
+    });
+  }
+
+  it("머리글은 이 워크스페이스의 이름이고, 네 줄이 그 이름으로 묶인다(하위 메뉴가 아니다)", async () => {
+    mountCard(() => undefined, rosterMember(), { workspaceName: "새벽팀" });
+    const menu = await openMenu();
+    const head = q("profile-workspace-head")!;
+    expect(head.textContent).toBe("새벽팀");
+    const group = menu.querySelector(`[aria-labelledby="${head.id}"]`);
+    expect(group?.getAttribute("role")).toBe("group");
+    const rows = [...(group?.querySelectorAll('[role="menuitem"]') ?? [])].map((row) =>
+      row.getAttribute("data-testid")
+    );
+    expect(rows).toEqual([
+      "profile-copy-address",
+      "profile-workspace-settings",
+      "profile-leave-workspace",
+      "profile-add-workspace",
+    ]);
+    // 줄마다 아이콘이 붙는다(한 세로 줄).
+    for (const id of rows) {
+      expect(q(id!)?.querySelector("svg")).not.toBeNull();
+    }
+    expect(text("profile-leave-workspace")).toBe("워크스페이스 나가기");
+    expect(q("profile-leave-workspace")?.className).toContain("text-danger");
+    expect(menu.querySelector('[aria-haspopup="menu"]')).toBeNull();
+  });
+
+  it("「내 상태」 줄의 점은 아이콘 줄과 같은 16px 칸에 서서 글자 시작이 한 세로 줄이다(실측은 capture-5785)", async () => {
+    mountCard();
+    await openMenu();
+    for (const status of ["auto", "away", "dnd"]) {
+      const slot = q(`presence-dot-slot-${status}`);
+      expect(slot?.className).toContain("size-4");
+      expect(slot?.className).toContain("justify-center");
+    }
+    // 아이콘 줄의 아이콘도 같은 size-4다.
+    expect(q("profile-set-status")?.querySelector("svg")?.getAttribute("class")).toContain("size-4");
+  });
+
+  it("「서버 주소 복사」 줄 아래 글이 기본이 아닌 워크스페이스는 ID가 더 필요하다고 말하고, 줄이 그 글을 설명으로 가진다", async () => {
+    mountCard();
+    await openMenu();
+    const note = q("profile-copy-address-note")!;
+    expect(note.textContent).toBe("기본이 아닌 워크스페이스는 ID도 필요해요.");
+    expect(q("profile-copy-address")?.getAttribute("aria-describedby")).toBe(note.id);
+    // 보이는 줄이 아니다(낭독 전용): 메뉴의 높이를 바꾸지 않는다.
+    expect(note.className).toContain("sr-only");
+    // 줄이 아니다: 초점도 선택도 받지 않는다.
+    expect(note.getAttribute("role")).toBeNull();
+    expect(note.hasAttribute("tabindex")).toBe(false);
+  });
+
+  it("이름이 아직 없으면 머리글은 「워크스페이스」다", async () => {
+    mountCard();
+    await openMenu();
+    expect(text("profile-workspace-head")).toBe("워크스페이스");
+  });
+
+  it("「서버 주소 복사」는 서버 주소를 쓰고, 메뉴를 연 채 「서버 주소 복사됨」으로 바뀐다. 로그인 화면이 그 글을 그대로 받는다", async () => {
+    mountCard(() => undefined, rosterMember(), { workspaceName: "새벽팀" });
+    await chooseRow("profile-copy-address");
+    expect(writeText).toHaveBeenCalledTimes(1);
+    const copied = writeText.mock.calls[0]![0] as string;
+    expect(copied).toBe(absoluteApiBase());
+    await vi.waitFor(() => expect(text("profile-copy-address")).toBe("서버 주소 복사됨"));
+    expect(q("profile-card-menu")).not.toBeNull();
+    // 영수증은 줄 글뿐이다: 안내 글은 복사 뒤에도 낭독 전용이라 메뉴가 자라지 않는다(#5785 r3 H1).
+    expect(q("profile-copy-address-note")?.className).toContain("sr-only");
+    // 로그인 화면의 첫 칸이 이 글을 서버 주소로 읽는다(같은 판정 함수).
+    const decision = classifyEntry(copied);
+    expect(decision.kind).toBe("server");
+    expect(decision.kind === "server" ? decision.base : "").toBe(copied);
+  });
+
+  it("복사가 실패하면 그 줄이 「복사하지 못했어요」라고 말한다", async () => {
+    writeText.mockRejectedValue(new Error("denied"));
+    mountCard();
+    await chooseRow("profile-copy-address");
+    await vi.waitFor(() => expect(text("profile-copy-address")).toBe("복사하지 못했어요"));
+  });
+
+  it("「워크스페이스 설정」은 설정 › 워크스페이스로 간다", async () => {
+    mountCard();
+    await chooseRow("profile-workspace-settings");
+    await vi.waitFor(() => expect(lastLocation).toBe("/settings?section=workspace"));
+  });
+
+  it("「워크스페이스 추가」는 추가 창을 연다", async () => {
+    mountCard();
+    await chooseRow("profile-add-workspace");
+    expect(openAddWorkspace).toHaveBeenCalledTimes(1);
+  });
+
+  it("「워크스페이스 나가기」는 바로 나가지 않고 확인 창을 연다. 확인하면 나가고 로그아웃한다", async () => {
+    const logout = vi.fn();
+    mountCard(logout, rosterMember(), { workspaceName: "새벽팀" });
+    await chooseRow("profile-leave-workspace");
+    await vi.waitFor(() => expect(q("workspace-leave-dialog")).not.toBeNull());
+    expect(leaveWorkspace).not.toHaveBeenCalled();
+    const dialog = q("workspace-leave-dialog")!;
+    expect(dialog.textContent).toContain("새벽팀에서 나갈까요?");
+    expect(dialog.textContent).toContain("다시 들어오려면 초대가 필요해요");
+    // 초점은 위험 단추가 아니라 「취소」로 들어간다.
+    await vi.waitFor(() =>
+      expect(document.activeElement).toBe(q("workspace-leave-dialog-cancel"))
+    );
+    await act(async () => q("workspace-leave-dialog-confirm")!.click());
+    await vi.waitFor(() => expect(logout).toHaveBeenCalledTimes(1));
+    expect(leaveWorkspace).toHaveBeenCalledWith(WS);
+  });
+
+  it("마지막 소유자 409는 창 안에서 이유를 말하고 로그아웃하지 않는다(창은 열린 채)", async () => {
+    leaveWorkspace.mockRejectedValue(new ApiError(409, "last owner"));
+    const logout = vi.fn();
+    mountCard(logout, rosterMember(), { workspaceName: "새벽팀" });
+    await chooseRow("profile-leave-workspace");
+    await vi.waitFor(() => expect(q("workspace-leave-dialog-confirm")).not.toBeNull());
+    await act(async () => q("workspace-leave-dialog-confirm")!.click());
+    await vi.waitFor(() =>
+      expect(text("workspace-leave-dialog-last-owner")).toBe(
+        "마지막 소유자는 나갈 수 없어요. 먼저 다른 사람에게 소유자를 넘기세요. 멤버 탭에서 그 사람의 프로필을 열어 역할을 소유자로 바꾼 뒤 다시 나가세요."
+      )
+    );
+    expect(q("workspace-leave-dialog-last-owner")?.getAttribute("role")).toBe("alert");
+    // 같은 거절을 또 부르지 않게 「나가기」가 잠기고, 초점은 「취소」로 간다(M7).
+    expect(q("workspace-leave-dialog-confirm")?.hasAttribute("disabled")).toBe(true);
+    expect(document.activeElement).toBe(q("workspace-leave-dialog-cancel"));
+    await act(async () => q("workspace-leave-dialog-confirm")!.click());
+    expect(leaveWorkspace).toHaveBeenCalledTimes(1);
+    expect(q("workspace-leave-dialog")).not.toBeNull();
+    expect(logout).not.toHaveBeenCalled();
+  });
+
+  it("나가는 동안 「취소」는 잠긴 모양(aria-disabled)이고 눌러도 창이 그대로다(M1)", async () => {
+    let finish: () => void = () => undefined;
+    leaveWorkspace.mockReturnValue(new Promise<void>((resolve) => (finish = resolve)));
+    const logout = vi.fn();
+    mountCard(logout);
+    await chooseRow("profile-leave-workspace");
+    await vi.waitFor(() => expect(q("workspace-leave-dialog-confirm")).not.toBeNull());
+    expect(q("workspace-leave-dialog-cancel")?.getAttribute("aria-disabled")).toBeNull();
+    await act(async () => q("workspace-leave-dialog-confirm")!.click());
+    await vi.waitFor(() =>
+      expect(q("workspace-leave-dialog-cancel")?.getAttribute("aria-disabled")).toBe("true")
+    );
+    const cancel = q("workspace-leave-dialog-cancel")!;
+    expect(cancel.className).toContain("cursor-not-allowed");
+    expect(cancel.className).toContain("opacity-50");
+    await act(async () => cancel.click());
+    expect(q("workspace-leave-dialog")).not.toBeNull();
+    await act(async () => finish());
+    await vi.waitFor(() => expect(logout).toHaveBeenCalledTimes(1));
+  });
+
+  it("나가기 창은 보낸 메시지가 남는다고 말한다(L7)", async () => {
+    mountCard(vi.fn());
+    await chooseRow("profile-leave-workspace");
+    await vi.waitFor(() => expect(q("workspace-leave-dialog")).not.toBeNull());
+    expect(text("workspace-leave-dialog")).toContain("보낸 메시지는 남아요");
+  });
+
+  it("취소하면 아무것도 쓰지 않는다", async () => {
+    const logout = vi.fn();
+    mountCard(logout);
+    await chooseRow("profile-leave-workspace");
+    await vi.waitFor(() => expect(q("workspace-leave-dialog-cancel")).not.toBeNull());
+    await act(async () => q("workspace-leave-dialog-cancel")!.click());
+    await vi.waitFor(() => expect(q("workspace-leave-dialog")).toBeNull());
+    expect(leaveWorkspace).not.toHaveBeenCalled();
+    expect(logout).not.toHaveBeenCalled();
+  });
+
+  function text(testId: string) {
+    return q(testId)?.textContent ?? "";
+  }
 });

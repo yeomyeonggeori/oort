@@ -515,7 +515,8 @@ describe('탭 셋과 + (ADR-0189 D1, #2750)', () => {
       await waitFor(() => expect(dotOf()).toBeTruthy());
       const style = StyleSheet.flatten(dotOf()!.props.style);
       expect([lightPalette.surface, darkPalette.surface]).toContain(style.backgroundColor);
-      expect([lightPalette.textFaint, darkPalette.textFaint]).toContain(style.borderColor);
+      // 얼굴 점의 꺼짐 고리 선은 웹과 같은 textMuted(#5786 r1 수리: textFaint 는 눌린 줄 위 3:1 미만).
+      expect([lightPalette.textMuted, darkPalette.textMuted]).toContain(style.borderColor);
       expect(screen.getByTestId('new-dm-person-seeun')).toHaveProp(
         'accessibilityLabel',
         '박세은, @seeun, 사람, 오프라인',

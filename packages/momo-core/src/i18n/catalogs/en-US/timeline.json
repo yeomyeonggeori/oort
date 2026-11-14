@@ -31,6 +31,7 @@
   "timeline.memberPanel.groupOnline": "Online {count, number}",
   "timeline.memberPanel.groupPeople": "Presence unknown {count, number}",
   "timeline.memberPanel.groupOffline": "Offline {count, number}",
+  "timeline.memberPanel.groupSuspended": "Suspended {count, number}",
   "timeline.memberPanel.request": "“{text}”",
   "timeline.memberPanel.stageSpoken": "{stage} (agent report)",
   "timeline.memberPanel.requestSpoken": "Request: {text}",

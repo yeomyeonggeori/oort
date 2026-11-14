@@ -3,6 +3,7 @@ import { Check, MoreHorizontal, UserMinus, Users } from "lucide-react";
 import type { RosterMember } from "@momo/core/lib/api";
 import { normalizeChannelTopic } from "@momo/core/features/channels/model";
 import {
+  channelHeadCount,
   memberPanelGroupOf,
   memberPanelHeadingKey,
   memberPanelSections,
@@ -20,7 +21,8 @@ import {
 import { useSession } from "@/app/session";
 import { useFormatMessage } from "@/i18n/useFormatMessage";
 import { memberFor, useDirectory } from "@/features/workspace/useWorkspace";
-import { AvatarWithPresence, PresenceBadgeDot } from "@/features/presence/HumanPresence";
+import { AvatarStatus } from "@/features/presence/AvatarStatus";
+import { AvatarWithPresence } from "@/features/presence/HumanPresence";
 import { useHumanPresenceDot } from "@/features/presence/useHumanPresenceDot";
 import { CustomStatusMark } from "@/features/sidebar/CustomStatusMark";
 import { useCustomStatusView } from "@/features/sidebar/useCustomStatusView";
@@ -409,15 +411,17 @@ function AgentMemberRow({
       data-member-kind={member.kind}
       data-member-group={group}
     >
-      <span
-        className="relative inline-flex shrink-0"
+      <AvatarStatus
+        face={32}
+        tone={dot?.tone ?? null}
+        kind="agent"
+        dotTestId="agent-liveness-dot"
         data-testid="avatar-with-liveness"
         data-status-tone={dot?.tone}
         title={dot ? statusDotTooltip(dot) : undefined}
       >
         <Avatar member={member} />
-        <PresenceBadgeDot dot={dot} testId="agent-liveness-dot" />
-      </span>
+      </AvatarStatus>
       <span className="@container flex min-w-0 flex-1 flex-col" aria-hidden="true">
         <RowIdentity member={member} />
         {line !== undefined ? (
@@ -838,7 +842,9 @@ export function ChannelMemberPanel({
   const addAfterClose = useRef(false);
   const [open, setOpen] = useState(false);
   useRestoreFocusOnClose(open, triggerRef);
-  const label = memberListLabel(status, members.length);
+  // 머리 수는 활성 멤버만(#5781): 정지된 사람은 패널 맨 아래 「정지됨」 묶음에 따로 선다.
+  const headCount = channelHeadCount(members);
+  const label = memberListLabel(status, headCount);
   // 안의 확인 단계(#5778)가 매 그림마다 적어 두는 지금. 닫혀 있으면 단계도 없다.
   const stageControl = useRef<RemoveStageControl>({ up: false, pending: false, cancel: () => undefined });
 
@@ -876,8 +882,8 @@ export function ChannelMemberPanel({
         >
           <Users className="size-4" aria-hidden="true" />
           {status === "ready" && (
-            <span data-numeric aria-label={`멤버 ${members.length}명`}>
-              {members.length}
+            <span data-numeric aria-label={`멤버 ${headCount}명`}>
+              {headCount}
             </span>
           )}
         </button>
@@ -907,7 +913,7 @@ export function ChannelMemberPanel({
           <DialogTitle>채널 멤버</DialogTitle>
           <DialogDescription>
             {status === "ready"
-              ? `${channelName} 채널의 멤버 ${members.length}명입니다.`
+              ? `${channelName} 채널의 멤버 ${headCount}명입니다.`
               : `${channelName} 채널의 멤버 목록을 확인합니다.`}
           </DialogDescription>
         </div>

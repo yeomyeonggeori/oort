@@ -405,6 +405,20 @@ export interface ReadState {
    * the cached value; a reader treats a value it never had as `0`.
    */
   followedUnreadReplyCount?: number;
+  /**
+   * ADR-0177 amendment 2026-11-14 D15/D18. The **requesting member's own** read floor: after
+   * 「대화 나가기」 only messages with `seq >= historyFromSeq` reach the caller. Wire name
+   * `history_from_seq`. Three states, like `closedAtSeq`:
+   *
+   * - `number` (≥ 1): the caller left this 1:1 and the floor is here;
+   * - `null`: a `GET read-state` row said there is no floor (full history);
+   * - `undefined`: this response did not say (a server without the leave route, the `PUT
+   *   read-state` response, the realtime frame). Keep what you had — `null` would show a left DM.
+   *
+   * D21: the key's **presence** on a `GET` row (even with `null`) is how a client knows the server
+   * carries 「대화 나가기」 (`dmLeaveMode`).
+   */
+  historyFromSeq?: number | null;
 }
 
 /** ADR-0178 D6. Only `"explicit_open"` is sent; absence means background. */
@@ -1948,10 +1962,22 @@ export function openDirectMessage(
   );
 }
 
-/** Active workspace members, humans and agents alike (agents are members). */
-export async function fetchRoster(workspaceId: string): Promise<RosterMember[]> {
+/**
+ * Active workspace members, humans and agents alike (agents are members).
+ *
+ * `includeSuspended` asks for the suspended humans as well (`?include=suspended`, #5814): the server honours it only for
+ * an owner or admin person on a full session and ignores it for everyone else, and a server older than #5814 ignores the
+ * unknown query key (`RosterQuery` has no `deny_unknown_fields`) and keeps returning the active roster. Only the web
+ * roster query that feeds the member tab and the profile's 「정지 풀기」 asks (#5781); every other caller — the phone,
+ * one-off reads — keeps the active roster, so a suspended person cannot leak into a picker that never expected one.
+ */
+export async function fetchRoster(
+  workspaceId: string,
+  options: { includeSuspended?: boolean } = {}
+): Promise<RosterMember[]> {
+  const query = options.includeSuspended === true ? "?include=suspended" : "";
   const res = await request<{ members: RosterMember[] }>(
-    `/v1/workspaces/${encodeURIComponent(workspaceId)}/roster`
+    `/v1/workspaces/${encodeURIComponent(workspaceId)}/roster${query}`
   );
   return (arrayField(res, "members") ?? [])
     .map(sanitizeRosterMember)
@@ -2742,6 +2768,8 @@ interface WireReadState {
   closed_at_seq?: number | null;
   /** ADR-0124 amendment 4 (#5667). Absent on an older server and on a `PUT read-state` response. */
   followed_unread_reply_count?: number;
+  /** ADR-0177 D15/D18 (2026-11-14). `null` = no floor (GET), absent = the response did not say. */
+  history_from_seq?: number | null;
 }
 
 function markedUnreadBeforeSeqFromWire(
@@ -2773,6 +2801,18 @@ function closedAtSeqFromWire(wire: WireReadState): number | null | undefined {
   return seqFromWire(value);
 }
 
+/**
+ * ADR-0177 D15/D18 (2026-11-14): `null` stays `null` ("no floor"), a positive integer is the floor
+ * (the column is `CHECK (history_from_seq > 0)`), anything else — absent, zero, negative, fractional,
+ * not a number — is "did not say". A malformed value is neither a floor nor a claim that there is none.
+ */
+function historyFromSeqFromWire(wire: WireReadState): number | null | undefined {
+  const value = wire.history_from_seq;
+  if (value === null) return null;
+  const seq = seqFromWire(value);
+  return seq !== undefined && seq > 0 ? seq : undefined;
+}
+
 function toReadState(wire: WireReadState): ReadState {
   const state: ReadState = {
     channelId: wire.channel_id,
@@ -2791,6 +2831,8 @@ function toReadState(wire: WireReadState): ReadState {
   // A count, not a seq, but the same shape: a non-negative integer, anything else is "did not say".
   const followedUnreadReplyCount = seqFromWire(wire.followed_unread_reply_count);
   if (followedUnreadReplyCount !== undefined) state.followedUnreadReplyCount = followedUnreadReplyCount;
+  const historyFromSeq = historyFromSeqFromWire(wire);
+  if (historyFromSeq !== undefined) state.historyFromSeq = historyFromSeq;
   return state;
 }
 
@@ -2828,6 +2870,22 @@ export async function closeDm(
 ): Promise<void> {
   await authedRequest(
     `/v1/workspaces/${encodeURIComponent(workspaceId)}/channels/${encodeURIComponent(channelId)}/closure`,
+    { method: "PUT", body: JSON.stringify({ seenSeq }) }
+  );
+}
+
+/**
+ * 사람끼리의 1:1 에서 나간다 (ADR-0177 증보 2026-11-14 D16). `seenSeq` 는 이 대화에서 클라이언트가 **들고 있는 가장 큰 seq**
+ * (`dmLeaveSeenSeq`)다. 서버는 하한을 `GREATEST(기존, LEAST(seenSeq, 마지막 seq) + 1)` 로 올리고 내리지 않는다. 204 - 본문이 없고
+ * 하한 값도 싣지 않는다(다음 `GET read-state` 가 싣는다). 되돌리는 경로는 없다. 응답 갈래는 `dmLeaveOutcome` 이 가른다.
+ */
+export async function leaveDm(
+  workspaceId: string,
+  channelId: string,
+  seenSeq: number
+): Promise<void> {
+  await authedRequest(
+    `/v1/workspaces/${encodeURIComponent(workspaceId)}/channels/${encodeURIComponent(channelId)}/dm-leave`,
     { method: "PUT", body: JSON.stringify({ seenSeq }) }
   );
 }
@@ -4130,6 +4188,71 @@ export async function changeWorkspaceMemberRole(
       )}/members/${encodeURIComponent(memberId)}/role`,
       { method: "PATCH", body: JSON.stringify({ role }) }
     )
+  );
+}
+
+// ---- 워크스페이스 멤버 정지·정지 풀기·내보내기 (#5781 / ADR-0128 D2·D3) --------
+// POST   /v1/workspaces/{ws}/members/{member}/suspend
+// POST   /v1/workspaces/{ws}/members/{member}/reinstate
+// DELETE /v1/workspaces/{ws}/members/{member}   { ban, reason }
+//
+// 서열(자기보다 낮은 역할만 · 자기 자신 불가 · 마지막 소유자 보호)과 상태(정지는 활성만, 풀기는 정지된 멤버만)는
+// 서버가 판정한다. 이 클라이언트는 요청을 보내고 서버가 말한 새 상태를 돌려줄 뿐이다. 차단(`ban`)은 이 화면의 범위가
+// 아니라 늘 `false` 로 보낸다(차단 목록 화면은 따로).
+
+/** `MembershipLifecycleResponse`(`memberId`, `status`). `status` 는 서버가 적은 새 멤버 상태다. */
+export interface WorkspaceMemberLifecycle {
+  memberId: string;
+  status: RosterMember["status"];
+}
+
+export function workspaceMemberLifecycleFromWire(value: unknown): WorkspaceMemberLifecycle {
+  const source = responseRecord(value);
+  const memberId = str(source, "memberId");
+  const status = str(source, "status");
+  if (
+    memberId === undefined ||
+    (status !== "active" && status !== "invited" && status !== "suspended" && status !== "deleted")
+  ) {
+    throw new WireShapeError();
+  }
+  return { memberId: memberId.toLowerCase(), status };
+}
+
+function memberLifecyclePath(workspaceId: string, memberId: string): string {
+  return `/v1/workspaces/${encodeURIComponent(workspaceId)}/members/${encodeURIComponent(memberId)}`;
+}
+
+/** 멤버를 정지한다. 서버가 그 멤버의 모든 세션·푸시 등록을 끝낸다. 활성이 아니면 409. */
+export async function suspendWorkspaceMember(
+  workspaceId: string,
+  memberId: string
+): Promise<WorkspaceMemberLifecycle> {
+  return workspaceMemberLifecycleFromWire(
+    await request<unknown>(`${memberLifecyclePath(workspaceId, memberId)}/suspend`, { method: "POST" })
+  );
+}
+
+/** 정지를 푼다. 끝난 세션은 되살아나지 않는다(다시 로그인). 정지된 멤버가 아니면 409. */
+export async function reinstateWorkspaceMember(
+  workspaceId: string,
+  memberId: string
+): Promise<WorkspaceMemberLifecycle> {
+  return workspaceMemberLifecycleFromWire(
+    await request<unknown>(`${memberLifecyclePath(workspaceId, memberId)}/reinstate`, { method: "POST" })
+  );
+}
+
+/** 워크스페이스에서 내보낸다(모든 채널·DM 에서 빠지고 세션이 끝난다). 차단은 하지 않는다. */
+export async function removeWorkspaceMember(
+  workspaceId: string,
+  memberId: string
+): Promise<WorkspaceMemberLifecycle> {
+  return workspaceMemberLifecycleFromWire(
+    await request<unknown>(memberLifecyclePath(workspaceId, memberId), {
+      method: "DELETE",
+      body: JSON.stringify({ ban: false }),
+    })
   );
 }
 

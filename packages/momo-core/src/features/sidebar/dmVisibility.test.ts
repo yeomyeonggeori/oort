@@ -21,6 +21,7 @@ const BASE: DmVisibilityInput = {
   isOpen: false,
   starredOrSectioned: false,
   closedAtSeq: null,
+  historyFromSeq: null,
   latestReadableSeq: 10,
   lastReadSeq: 10,
   markedUnreadBeforeSeq: null,
@@ -77,8 +78,31 @@ const MATRIX: Row[] = [
   { name: "undefined 는 안 닫음이 아니다 -> 직전 판정 유지", input: { closedAtSeq: undefined }, visibility: "hold", rule: 3 },
 ];
 
-describe("DM 보임 판정 (ADR-0177 D8)", () => {
-  for (const row of MATRIX) {
+// 3a (증보 2026-11-14 D18) - 나간 대화. 나간 직후 서버 값: 하한 s+1, 읽음·숨김 s. 위 표(하한 없음)와 따로 두는 까닭은 아래
+// 「하한이 없으면 표가 그대로다」 시험이 위 표 전부를 null 하한으로 다시 돌리기 때문이다.
+const LEAVE_MATRIX: Row[] = [
+  { name: "3a 나간 대화, 그 뒤 읽을 글 없음", input: { historyFromSeq: 11, closedAtSeq: 10 }, visibility: "hidden", rule: "3a" },
+  { name: "3a 경계: 읽을 seq 가 하한 바로 아래", input: { historyFromSeq: 11, latestReadableSeq: 10 }, visibility: "hidden", rule: "3a" },
+  { name: "3a 가 별표·섹션(4)보다 먼저", input: { historyFromSeq: 11, starredOrSectioned: true }, visibility: "hidden", rule: "3a" },
+  { name: "3a 가 멘션·안 읽음 표시(5)보다 먼저", input: { historyFromSeq: 11, mentionCount: 3, markedUnreadBeforeSeq: 4 }, visibility: "hidden", rule: "3a" },
+  { name: "3a 가 나간 상대(6)보다 먼저", input: { historyFromSeq: 11, counterpart: "gone" }, visibility: "hidden", rule: "3a" },
+  { name: "3a 는 숨김 기록을 몰라도(undefined) 숨긴다", input: { historyFromSeq: 11, closedAtSeq: undefined }, visibility: "hidden", rule: "3a" },
+  { name: "3a 처음부터 0 에서 나감(하한 1)", input: { historyFromSeq: 1, closedAtSeq: 0, latestReadableSeq: 0, lastReadSeq: 0 }, visibility: "hidden", rule: "3a" },
+  { name: "3a 열림(1)이 먼저: 다시 쓰려고 연 빈 대화는 열려 있는 동안 보인다", input: { isOpen: true, historyFromSeq: 11 }, visibility: "shown", rule: 1 },
+  { name: "3a 오류(2)가 먼저", input: { phase: "error", historyFromSeq: 11 }, visibility: "shown", rule: 2 },
+  { name: "3a 로딩(3)이 먼저", input: { phase: "loading", historyFromSeq: 11 }, visibility: "hold", rule: 3 },
+  // 새 글이 하한 위에 오면 3a 를 지나 보통 판정 - 별표면 원래 섹션(4), 숨김 뒤 새 글이면 되살림(8).
+  { name: "3a 지남: 하한 위 새 글 + 별표 -> 원래 섹션(4)", input: { historyFromSeq: 11, latestReadableSeq: 11, starredOrSectioned: true }, visibility: "shown", rule: 4 },
+  { name: "3a 지남: 하한 위 새 글, 숨김 s -> 되살림(8)", input: { historyFromSeq: 11, closedAtSeq: 10, latestReadableSeq: 11 }, visibility: "shown", rule: 8 },
+  { name: "3a 지남: 새 글을 다 읽은 뒤 숨기면 7 로 숨는다", input: { historyFromSeq: 11, closedAtSeq: 12, latestReadableSeq: 12, lastReadSeq: 12 }, visibility: "hidden", rule: 7 },
+  // `undefined`(응답이 하한을 말하지 않음)는 3a 자리에서 직전 판정 유지 - null 로 읽으면 별표한 나간 대화가 4 로 깜빡 보인다.
+  { name: "3a undefined 는 하한 없음이 아니다 -> 직전 판정 유지(별표여도)", input: { historyFromSeq: undefined, starredOrSectioned: true }, visibility: "hold", rule: 3 },
+  { name: "3a undefined, 멘션이 있어도 직전 판정 유지", input: { historyFromSeq: undefined, mentionCount: 1 }, visibility: "hold", rule: 3 },
+  { name: "3a undefined 여도 열림(1)은 먼저", input: { historyFromSeq: undefined, isOpen: true }, visibility: "shown", rule: 1 },
+];
+
+describe("DM 보임 판정 (ADR-0177 D8 + 증보 D18 3a)", () => {
+  for (const row of [...MATRIX, ...LEAVE_MATRIX]) {
     it(row.name, () => {
       const got = dmVisibility({ ...BASE, ...row.input });
       expect({ visibility: got.visibility, rule: got.rule }).toEqual({
@@ -88,9 +112,9 @@ describe("DM 보임 판정 (ADR-0177 D8)", () => {
     });
   }
 
-  it("표의 아홉 줄이 모두 행렬에 있다(줄을 하나 빼면 이 시험이 먼저 빨개진다)", () => {
-    const covered = new Set(MATRIX.map((row) => row.rule));
-    for (const rule of [1, 2, 3, 4, 5, 6, 7, 8, 9] as const) {
+  it("표의 열 줄(3a 포함)이 모두 행렬에 있다(줄을 하나 빼면 이 시험이 먼저 빨개진다)", () => {
+    const covered = new Set([...MATRIX, ...LEAVE_MATRIX].map((row) => row.rule));
+    for (const rule of [1, 2, 3, "3a", 4, 5, 6, 7, 8, 9] as const) {
       expect(covered.has(rule)).toBe(true);
     }
   });
@@ -99,6 +123,17 @@ describe("DM 보임 판정 (ADR-0177 D8)", () => {
     expect(new Set(MATRIX.map((row) => row.visibility))).toEqual(
       new Set(["shown", "hidden", "hold"])
     );
+  });
+
+  it("하한이 null 이면(옛 서버·나가지 않은 대화) D8 표가 그대로다: 기존 행렬 전부가 같은 답", () => {
+    for (const row of MATRIX) {
+      const got = dmVisibility({ ...BASE, ...row.input, historyFromSeq: null });
+      expect({ name: row.name, visibility: got.visibility, rule: got.rule }).toEqual({
+        name: row.name,
+        visibility: row.visibility,
+        rule: row.rule,
+      });
+    }
   });
 });
 
@@ -130,9 +165,15 @@ describe("「숨긴 대화」 목록에 드는 줄 (D11)", () => {
   it("명시적 닫기(7)와 나간 상대(6)만 든다", () => {
     expect(dmClosedListReason(7)).toBe("closed");
     expect(dmClosedListReason(6)).toBe("gone");
-    for (const rule of [1, 2, 3, 4, 5, 8, 9] as const) {
+    for (const rule of [1, 2, 3, "3a", 4, 5, 8, 9] as const) {
       expect(dmClosedListReason(rule)).toBeNull();
     }
+  });
+
+  it("나간 대화(3a)는 「숨긴 대화」에 없다 - 서버가 같이 올린 숨김 기록(closedAtSeq)이 있어도 (D18)", () => {
+    const left = dmVisibility({ ...BASE, historyFromSeq: 11, closedAtSeq: 10 });
+    expect(left).toEqual({ visibility: "hidden", rule: "3a" });
+    expect(dmClosedListReason(left.rule)).toBeNull();
   });
 });
 
@@ -170,6 +211,7 @@ describe("읽음 투영 행에서 판정 입력 뽑기 (dmReadFacts, #4367)", ()
   it("서버가 닫기를 싣는 동안은 행 그대로다", () => {
     expect(dmReadFacts(row, true)).toEqual({
       closedAtSeq: 5,
+      historyFromSeq: null,
       latestReadableSeq: 6,
       lastReadSeq: 4,
       markedUnreadBeforeSeq: 3,
@@ -193,12 +235,24 @@ describe("읽음 투영 행에서 판정 입력 뽑기 (dmReadFacts, #4367)", ()
   });
 
   it("행이 없는 DM: 닫을 것도 읽을 것도 없다", () => {
-    expect(dmReadFacts(undefined, true)).toEqual({
+    expect(dmReadFacts(undefined, true, true)).toEqual({
       closedAtSeq: null,
+      historyFromSeq: null,
       latestReadableSeq: 0,
       lastReadSeq: 0,
       markedUnreadBeforeSeq: null,
       mentionCount: 0,
     });
+  });
+
+  it("나가기를 싣는 서버: 하한의 세 상태를 그대로 옮긴다 (D18)", () => {
+    expect(dmReadFacts({ ...row, historyFromSeq: 7 }, true, true).historyFromSeq).toBe(7);
+    expect(dmReadFacts({ ...row, historyFromSeq: null }, true, true).historyFromSeq).toBeNull();
+    expect(dmReadFacts({ ...row, historyFromSeq: undefined }, true, true).historyFromSeq).toBeUndefined();
+  });
+
+  it("나가기를 모르는 서버(기본값): 하한은 null 이다 - 행이 뭐라 하든, 그래서 3a 가 아무것도 바꾸지 않는다", () => {
+    expect(dmReadFacts({ ...row, historyFromSeq: 7 }, true).historyFromSeq).toBeNull();
+    expect(dmReadFacts({ ...row, historyFromSeq: undefined }, true, false).historyFromSeq).toBeNull();
   });
 });

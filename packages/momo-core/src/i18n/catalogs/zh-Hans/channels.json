@@ -1,0 +1,12 @@
+{
+  "channels.dmLeave.action": "退出对话",
+  "channels.dmLeave.confirmTitle": "要退出与{name}的对话吗？",
+  "channels.dmLeave.confirmBody": "到目前为止的对话将从你的屏幕上消失。{name}的屏幕上会保持不变。",
+  "channels.dmLeave.confirmRevive": "如果有新消息，将从该消息开始显示为新对话。",
+  "channels.dmLeave.confirmFinal": "退出后无法撤销。",
+  "channels.dmLeave.confirmScheduled": "已预约的{count, number}条消息也会被取消。",
+  "channels.dmLeave.cancel": "取消",
+  "channels.dmLeave.confirm": "退出",
+  "channels.dmLeave.done": "你已退出对话。",
+  "channels.dmLeave.failed": "无法退出。请重试。"
+}

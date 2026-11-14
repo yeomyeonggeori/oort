@@ -33,7 +33,9 @@ let korean: AppLocale;
 beforeAll(async () => {
   reactActEnvironment.IS_REACT_ACT_ENVIRONMENT = true;
   korean = await koreanLocaleForTest();
-});
+  // 테마 갤러리·강조색 칩의 지연 청크는 첫 `import()`가 느리다(카탈로그·엔진 변환). 시험마다 기다리지 않게 미리 데운다.
+  await Promise.all([import("./appearance/ThemeGallery"), import("./appearance/AccentGroup")]);
+}, 60_000);
 
 beforeEach(() => {
   localStorage.clear();
@@ -435,13 +437,24 @@ describe("AppearanceSection: 글자 크기와 대화 밀도 (AP-2a #4189)", () =
 });
 
 describe("AppearanceSection: S3b 컨트롤 중 아직 열리지 않은 것 (R4)", () => {
-  it("offers exactly the six live groups and no switch, slider, or text field", () => {
+  it("offers exactly the seven live groups and no switch, slider, or text field", async () => {
     const host = mount(createElement(AppearanceSection));
+    // 테마 스타일 격자는 늘 펴져 있다(#5783): 지연 청크가 도착한 뒤에 센다(앞 시험이 청크를 이미 받았는지에 따라 갈리지 않게).
+    reactActEnvironment.IS_REACT_ACT_ENVIRONMENT = false;
+    try {
+      await vi.waitFor(() => expect(host.querySelector('[data-testid="theme-style-group"]')).not.toBeNull(), {
+        timeout: 15_000,
+        interval: 10,
+      });
+    } finally {
+      reactActEnvironment.IS_REACT_ACT_ENVIRONMENT = true;
+    }
     const groups = [...host.querySelectorAll("fieldset")].map((f) => f.getAttribute("data-testid"));
     // 글자 크기·대화 밀도는 AP-2a(#4189)가 소비자(타임라인·미리보기)와 같은 PR에서 열었고, 배경화면(AP-4 #4191)은
     // 카드 「배경」의 라디오 묶음 하나를 더했다(카드 순서: 색상 → 배경 → 대화 표시).
     expect(groups).toEqual([
       "theme-choice",
+      "theme-style-group",
       "accent-choice",
       "wallpaper-choice",
       "font-size-choice",

@@ -171,6 +171,16 @@ export const messageKeys = [
   "blocked.workStateNone.serverUnreachable",
   "blocked.workStateStale.offline",
   "blocked.workStateStale.serverUnreachable",
+  "channels.dmLeave.action",
+  "channels.dmLeave.cancel",
+  "channels.dmLeave.confirm",
+  "channels.dmLeave.confirmBody",
+  "channels.dmLeave.confirmFinal",
+  "channels.dmLeave.confirmRevive",
+  "channels.dmLeave.confirmScheduled",
+  "channels.dmLeave.confirmTitle",
+  "channels.dmLeave.done",
+  "channels.dmLeave.failed",
   "common.feedback.unavailable",
   "common.invitation.received",
   "common.members.count",
@@ -300,6 +310,39 @@ export const messageKeys = [
   "desktop.workSession.backToListLabel",
   "desktop.workSession.listTitle",
   "desktop.workSession.pageTitle",
+  "directory.lifecycle.cancel",
+  "directory.lifecycle.errorForbidden",
+  "directory.lifecycle.errorLastOwner",
+  "directory.lifecycle.errorNetwork",
+  "directory.lifecycle.errorNotActive",
+  "directory.lifecycle.errorNotFound",
+  "directory.lifecycle.errorNotSuspended",
+  "directory.lifecycle.errorRank",
+  "directory.lifecycle.errorRateLimited",
+  "directory.lifecycle.errorSelf",
+  "directory.lifecycle.errorUnknown",
+  "directory.lifecycle.reinstate",
+  "directory.lifecycle.reinstateBody",
+  "directory.lifecycle.reinstateBusy",
+  "directory.lifecycle.reinstatedReceipt",
+  "directory.lifecycle.reinstateSchedules",
+  "directory.lifecycle.reinstateTitle",
+  "directory.lifecycle.remove",
+  "directory.lifecycle.removeAction",
+  "directory.lifecycle.removeBusy",
+  "directory.lifecycle.removedClose",
+  "directory.lifecycle.removedTitle",
+  "directory.lifecycle.removeKeeps",
+  "directory.lifecycle.removeLeaves",
+  "directory.lifecycle.removeTitle",
+  "directory.lifecycle.removeWarning",
+  "directory.lifecycle.suspend",
+  "directory.lifecycle.suspendBusy",
+  "directory.lifecycle.suspendedReceipt",
+  "directory.lifecycle.suspendKeeps",
+  "directory.lifecycle.suspendSignOut",
+  "directory.lifecycle.suspendTitle",
+  "directory.lifecycle.suspendUndo",
   "directory.manage.heading",
   "directory.manage.hint",
   "directory.profile.close",
@@ -632,6 +675,7 @@ export const messageKeys = [
   "memberList.empty.invite",
   "memberList.group.agents",
   "memberList.group.people",
+  "memberList.group.suspended",
   "memberList.newDm.close",
   "memberList.newDm.continueAction",
   "memberList.newDm.description",
@@ -1397,6 +1441,7 @@ export const messageKeys = [
   "timeline.memberPanel.groupOnline",
   "timeline.memberPanel.groupOtherAgents",
   "timeline.memberPanel.groupPeople",
+  "timeline.memberPanel.groupSuspended",
   "timeline.memberPanel.groupWorking",
   "timeline.memberPanel.listLabel",
   "timeline.memberPanel.moreRuns",
@@ -1550,7 +1595,58 @@ export const messageKeys = [
   "timeline.workTool.ping",
   "timeline.workTool.runComplete",
   "timeline.workTool.runEvent",
-  "timeline.workTool.unknown"
+  "timeline.workTool.unknown",
+  "workspace.add.back",
+  "workspace.add.cancel",
+  "workspace.add.createLead",
+  "workspace.add.createLeadNotOperator",
+  "workspace.add.createTitle",
+  "workspace.add.joinChecking",
+  "workspace.add.joinClaim",
+  "workspace.add.joinConfirmAction",
+  "workspace.add.joinConfirmBody",
+  "workspace.add.joinConfirmTitle",
+  "workspace.add.joinEmpty",
+  "workspace.add.joinField",
+  "workspace.add.joinHint",
+  "workspace.add.joinLead",
+  "workspace.add.joinLeadWeb",
+  "workspace.add.joinNext",
+  "workspace.add.joinOpenAction",
+  "workspace.add.joinOpenBody",
+  "workspace.add.joinOpenInvite",
+  "workspace.add.joinOpenServer",
+  "workspace.add.joinOpenTitle",
+  "workspace.add.joinPasteAction",
+  "workspace.add.joinPasteBody",
+  "workspace.add.joinPasteTitle",
+  "workspace.add.joinSameServer",
+  "workspace.add.joinTargetInvite",
+  "workspace.add.joinTargetInviteOnly",
+  "workspace.add.joinTargetServer",
+  "workspace.add.joinTitle",
+  "workspace.add.joinUnreachable",
+  "workspace.add.lead",
+  "workspace.add.operatorContact",
+  "workspace.add.title",
+  "workspace.create.lead",
+  "workspace.create.operatorOnly",
+  "workspace.create.slugHint",
+  "workspace.leave.body",
+  "workspace.leave.busy",
+  "workspace.leave.cancel",
+  "workspace.leave.confirm",
+  "workspace.leave.lastOwner",
+  "workspace.leave.lastOwnerNext",
+  "workspace.leave.title",
+  "workspace.leave.titleUnnamed",
+  "workspace.menu.copiedAddress",
+  "workspace.menu.copyAddress",
+  "workspace.menu.copyAddressNote",
+  "workspace.menu.copyFailed",
+  "workspace.menu.fallbackTitle",
+  "workspace.menu.leave",
+  "workspace.menu.settings"
 ] as const;
 
 export type MessageKey = typeof messageKeys[number];
@@ -1752,6 +1848,22 @@ export const argumentSpecs = {
   "blocked.workStateNone.serverUnreachable": {},
   "blocked.workStateStale.offline": {},
   "blocked.workStateStale.serverUnreachable": {},
+  "channels.dmLeave.action": {},
+  "channels.dmLeave.cancel": {},
+  "channels.dmLeave.confirm": {},
+  "channels.dmLeave.confirmBody": {
+    "name": "string"
+  },
+  "channels.dmLeave.confirmFinal": {},
+  "channels.dmLeave.confirmRevive": {},
+  "channels.dmLeave.confirmScheduled": {
+    "count": "number"
+  },
+  "channels.dmLeave.confirmTitle": {
+    "name": "string"
+  },
+  "channels.dmLeave.done": {},
+  "channels.dmLeave.failed": {},
   "common.feedback.unavailable": {},
   "common.invitation.received": {
     "actorName": "string"
@@ -1909,6 +2021,55 @@ export const argumentSpecs = {
   "desktop.workSession.backToListLabel": {},
   "desktop.workSession.listTitle": {},
   "desktop.workSession.pageTitle": {},
+  "directory.lifecycle.cancel": {},
+  "directory.lifecycle.errorForbidden": {},
+  "directory.lifecycle.errorLastOwner": {
+    "owner": "string"
+  },
+  "directory.lifecycle.errorNetwork": {},
+  "directory.lifecycle.errorNotActive": {},
+  "directory.lifecycle.errorNotFound": {},
+  "directory.lifecycle.errorNotSuspended": {},
+  "directory.lifecycle.errorRank": {},
+  "directory.lifecycle.errorRateLimited": {},
+  "directory.lifecycle.errorSelf": {},
+  "directory.lifecycle.errorUnknown": {},
+  "directory.lifecycle.reinstate": {},
+  "directory.lifecycle.reinstateBody": {},
+  "directory.lifecycle.reinstateBusy": {},
+  "directory.lifecycle.reinstatedReceipt": {},
+  "directory.lifecycle.reinstateSchedules": {},
+  "directory.lifecycle.reinstateTitle": {
+    "name": "string"
+  },
+  "directory.lifecycle.remove": {},
+  "directory.lifecycle.removeAction": {},
+  "directory.lifecycle.removeBusy": {},
+  "directory.lifecycle.removedClose": {},
+  "directory.lifecycle.removedTitle": {
+    "name": "string"
+  },
+  "directory.lifecycle.removeKeeps": {},
+  "directory.lifecycle.removeLeaves": {},
+  "directory.lifecycle.removeTitle": {
+    "name": "string"
+  },
+  "directory.lifecycle.removeWarning": {},
+  "directory.lifecycle.suspend": {},
+  "directory.lifecycle.suspendBusy": {},
+  "directory.lifecycle.suspendedReceipt": {},
+  "directory.lifecycle.suspendKeeps": {
+    "admin": "string",
+    "owner": "string"
+  },
+  "directory.lifecycle.suspendSignOut": {},
+  "directory.lifecycle.suspendTitle": {
+    "name": "string"
+  },
+  "directory.lifecycle.suspendUndo": {
+    "admin": "string",
+    "owner": "string"
+  },
   "directory.manage.heading": {},
   "directory.manage.hint": {
     "admin": "string",
@@ -2353,6 +2514,7 @@ export const argumentSpecs = {
   "memberList.empty.invite": {},
   "memberList.group.agents": {},
   "memberList.group.people": {},
+  "memberList.group.suspended": {},
   "memberList.newDm.close": {},
   "memberList.newDm.continueAction": {},
   "memberList.newDm.description": {},
@@ -3330,6 +3492,9 @@ export const argumentSpecs = {
   "timeline.memberPanel.groupPeople": {
     "count": "number"
   },
+  "timeline.memberPanel.groupSuspended": {
+    "count": "number"
+  },
   "timeline.memberPanel.groupWorking": {
     "count": "number"
   },
@@ -3599,7 +3764,70 @@ export const argumentSpecs = {
   "timeline.workTool.ping": {},
   "timeline.workTool.runComplete": {},
   "timeline.workTool.runEvent": {},
-  "timeline.workTool.unknown": {}
+  "timeline.workTool.unknown": {},
+  "workspace.add.back": {},
+  "workspace.add.cancel": {},
+  "workspace.add.createLead": {},
+  "workspace.add.createLeadNotOperator": {},
+  "workspace.add.createTitle": {},
+  "workspace.add.joinChecking": {},
+  "workspace.add.joinClaim": {},
+  "workspace.add.joinConfirmAction": {},
+  "workspace.add.joinConfirmBody": {},
+  "workspace.add.joinConfirmTitle": {},
+  "workspace.add.joinEmpty": {},
+  "workspace.add.joinField": {},
+  "workspace.add.joinHint": {},
+  "workspace.add.joinLead": {},
+  "workspace.add.joinLeadWeb": {},
+  "workspace.add.joinNext": {},
+  "workspace.add.joinOpenAction": {},
+  "workspace.add.joinOpenBody": {},
+  "workspace.add.joinOpenInvite": {
+    "server": "string"
+  },
+  "workspace.add.joinOpenServer": {
+    "server": "string"
+  },
+  "workspace.add.joinOpenTitle": {},
+  "workspace.add.joinPasteAction": {},
+  "workspace.add.joinPasteBody": {},
+  "workspace.add.joinPasteTitle": {},
+  "workspace.add.joinSameServer": {},
+  "workspace.add.joinTargetInvite": {
+    "server": "string"
+  },
+  "workspace.add.joinTargetInviteOnly": {},
+  "workspace.add.joinTargetServer": {
+    "server": "string"
+  },
+  "workspace.add.joinTitle": {},
+  "workspace.add.joinUnreachable": {
+    "server": "string"
+  },
+  "workspace.add.lead": {},
+  "workspace.add.operatorContact": {},
+  "workspace.add.title": {},
+  "workspace.create.lead": {},
+  "workspace.create.operatorOnly": {},
+  "workspace.create.slugHint": {},
+  "workspace.leave.body": {},
+  "workspace.leave.busy": {},
+  "workspace.leave.cancel": {},
+  "workspace.leave.confirm": {},
+  "workspace.leave.lastOwner": {},
+  "workspace.leave.lastOwnerNext": {},
+  "workspace.leave.title": {
+    "name": "string"
+  },
+  "workspace.leave.titleUnnamed": {},
+  "workspace.menu.copiedAddress": {},
+  "workspace.menu.copyAddress": {},
+  "workspace.menu.copyAddressNote": {},
+  "workspace.menu.copyFailed": {},
+  "workspace.menu.fallbackTitle": {},
+  "workspace.menu.leave": {},
+  "workspace.menu.settings": {}
 } as const;
 
 export interface MessageArgs {
@@ -3774,6 +4002,16 @@ export interface MessageArgs {
   "blocked.workStateNone.serverUnreachable": Record<string, never>;
   "blocked.workStateStale.offline": Record<string, never>;
   "blocked.workStateStale.serverUnreachable": Record<string, never>;
+  "channels.dmLeave.action": Record<string, never>;
+  "channels.dmLeave.cancel": Record<string, never>;
+  "channels.dmLeave.confirm": Record<string, never>;
+  "channels.dmLeave.confirmBody": { name: string };
+  "channels.dmLeave.confirmFinal": Record<string, never>;
+  "channels.dmLeave.confirmRevive": Record<string, never>;
+  "channels.dmLeave.confirmScheduled": { count: number };
+  "channels.dmLeave.confirmTitle": { name: string };
+  "channels.dmLeave.done": Record<string, never>;
+  "channels.dmLeave.failed": Record<string, never>;
   "common.feedback.unavailable": Record<string, never>;
   "common.invitation.received": { actorName: string };
   "common.members.count": { count: number };
@@ -3903,6 +4141,39 @@ export interface MessageArgs {
   "desktop.workSession.backToListLabel": Record<string, never>;
   "desktop.workSession.listTitle": Record<string, never>;
   "desktop.workSession.pageTitle": Record<string, never>;
+  "directory.lifecycle.cancel": Record<string, never>;
+  "directory.lifecycle.errorForbidden": Record<string, never>;
+  "directory.lifecycle.errorLastOwner": { owner: string };
+  "directory.lifecycle.errorNetwork": Record<string, never>;
+  "directory.lifecycle.errorNotActive": Record<string, never>;
+  "directory.lifecycle.errorNotFound": Record<string, never>;
+  "directory.lifecycle.errorNotSuspended": Record<string, never>;
+  "directory.lifecycle.errorRank": Record<string, never>;
+  "directory.lifecycle.errorRateLimited": Record<string, never>;
+  "directory.lifecycle.errorSelf": Record<string, never>;
+  "directory.lifecycle.errorUnknown": Record<string, never>;
+  "directory.lifecycle.reinstate": Record<string, never>;
+  "directory.lifecycle.reinstateBody": Record<string, never>;
+  "directory.lifecycle.reinstateBusy": Record<string, never>;
+  "directory.lifecycle.reinstatedReceipt": Record<string, never>;
+  "directory.lifecycle.reinstateSchedules": Record<string, never>;
+  "directory.lifecycle.reinstateTitle": { name: string };
+  "directory.lifecycle.remove": Record<string, never>;
+  "directory.lifecycle.removeAction": Record<string, never>;
+  "directory.lifecycle.removeBusy": Record<string, never>;
+  "directory.lifecycle.removedClose": Record<string, never>;
+  "directory.lifecycle.removedTitle": { name: string };
+  "directory.lifecycle.removeKeeps": Record<string, never>;
+  "directory.lifecycle.removeLeaves": Record<string, never>;
+  "directory.lifecycle.removeTitle": { name: string };
+  "directory.lifecycle.removeWarning": Record<string, never>;
+  "directory.lifecycle.suspend": Record<string, never>;
+  "directory.lifecycle.suspendBusy": Record<string, never>;
+  "directory.lifecycle.suspendedReceipt": Record<string, never>;
+  "directory.lifecycle.suspendKeeps": { admin: string; owner: string };
+  "directory.lifecycle.suspendSignOut": Record<string, never>;
+  "directory.lifecycle.suspendTitle": { name: string };
+  "directory.lifecycle.suspendUndo": { admin: string; owner: string };
   "directory.manage.heading": Record<string, never>;
   "directory.manage.hint": { admin: string; owner: string };
   "directory.profile.close": Record<string, never>;
@@ -4235,6 +4506,7 @@ export interface MessageArgs {
   "memberList.empty.invite": Record<string, never>;
   "memberList.group.agents": Record<string, never>;
   "memberList.group.people": Record<string, never>;
+  "memberList.group.suspended": Record<string, never>;
   "memberList.newDm.close": Record<string, never>;
   "memberList.newDm.continueAction": Record<string, never>;
   "memberList.newDm.description": Record<string, never>;
@@ -5000,6 +5272,7 @@ export interface MessageArgs {
   "timeline.memberPanel.groupOnline": { count: number };
   "timeline.memberPanel.groupOtherAgents": { count: number };
   "timeline.memberPanel.groupPeople": { count: number };
+  "timeline.memberPanel.groupSuspended": { count: number };
   "timeline.memberPanel.groupWorking": { count: number };
   "timeline.memberPanel.listLabel": Record<string, never>;
   "timeline.memberPanel.moreRuns": { count: number };
@@ -5154,4 +5427,55 @@ export interface MessageArgs {
   "timeline.workTool.runComplete": Record<string, never>;
   "timeline.workTool.runEvent": Record<string, never>;
   "timeline.workTool.unknown": Record<string, never>;
+  "workspace.add.back": Record<string, never>;
+  "workspace.add.cancel": Record<string, never>;
+  "workspace.add.createLead": Record<string, never>;
+  "workspace.add.createLeadNotOperator": Record<string, never>;
+  "workspace.add.createTitle": Record<string, never>;
+  "workspace.add.joinChecking": Record<string, never>;
+  "workspace.add.joinClaim": Record<string, never>;
+  "workspace.add.joinConfirmAction": Record<string, never>;
+  "workspace.add.joinConfirmBody": Record<string, never>;
+  "workspace.add.joinConfirmTitle": Record<string, never>;
+  "workspace.add.joinEmpty": Record<string, never>;
+  "workspace.add.joinField": Record<string, never>;
+  "workspace.add.joinHint": Record<string, never>;
+  "workspace.add.joinLead": Record<string, never>;
+  "workspace.add.joinLeadWeb": Record<string, never>;
+  "workspace.add.joinNext": Record<string, never>;
+  "workspace.add.joinOpenAction": Record<string, never>;
+  "workspace.add.joinOpenBody": Record<string, never>;
+  "workspace.add.joinOpenInvite": { server: string };
+  "workspace.add.joinOpenServer": { server: string };
+  "workspace.add.joinOpenTitle": Record<string, never>;
+  "workspace.add.joinPasteAction": Record<string, never>;
+  "workspace.add.joinPasteBody": Record<string, never>;
+  "workspace.add.joinPasteTitle": Record<string, never>;
+  "workspace.add.joinSameServer": Record<string, never>;
+  "workspace.add.joinTargetInvite": { server: string };
+  "workspace.add.joinTargetInviteOnly": Record<string, never>;
+  "workspace.add.joinTargetServer": { server: string };
+  "workspace.add.joinTitle": Record<string, never>;
+  "workspace.add.joinUnreachable": { server: string };
+  "workspace.add.lead": Record<string, never>;
+  "workspace.add.operatorContact": Record<string, never>;
+  "workspace.add.title": Record<string, never>;
+  "workspace.create.lead": Record<string, never>;
+  "workspace.create.operatorOnly": Record<string, never>;
+  "workspace.create.slugHint": Record<string, never>;
+  "workspace.leave.body": Record<string, never>;
+  "workspace.leave.busy": Record<string, never>;
+  "workspace.leave.cancel": Record<string, never>;
+  "workspace.leave.confirm": Record<string, never>;
+  "workspace.leave.lastOwner": Record<string, never>;
+  "workspace.leave.lastOwnerNext": Record<string, never>;
+  "workspace.leave.title": { name: string };
+  "workspace.leave.titleUnnamed": Record<string, never>;
+  "workspace.menu.copiedAddress": Record<string, never>;
+  "workspace.menu.copyAddress": Record<string, never>;
+  "workspace.menu.copyAddressNote": Record<string, never>;
+  "workspace.menu.copyFailed": Record<string, never>;
+  "workspace.menu.fallbackTitle": Record<string, never>;
+  "workspace.menu.leave": Record<string, never>;
+  "workspace.menu.settings": Record<string, never>;
 }
