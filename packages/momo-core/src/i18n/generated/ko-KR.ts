@@ -1125,6 +1125,12 @@ export const catalog: MessageCatalog = {
       "value": "대화 나가기"
     }
   ],
+  "channels.dmLeave.busy": [
+    {
+      "type": 0,
+      "value": "나가는 중…"
+    }
+  ],
   "channels.dmLeave.cancel": [
     {
       "type": 0,

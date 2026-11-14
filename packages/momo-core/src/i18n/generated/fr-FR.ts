@@ -8,6 +8,12 @@ export const catalog: MessageCatalog = {
       "value": "Quitter la conversation"
     }
   ],
+  "channels.dmLeave.busy": [
+    {
+      "type": 0,
+      "value": "Départ…"
+    }
+  ],
   "channels.dmLeave.cancel": [
     {
       "type": 0,

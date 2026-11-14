@@ -1146,6 +1146,12 @@ export const catalog: MessageCatalog = {
       "value": "Leave conversation"
     }
   ],
+  "channels.dmLeave.busy": [
+    {
+      "type": 0,
+      "value": "Leaving…"
+    }
+  ],
   "channels.dmLeave.cancel": [
     {
       "type": 0,

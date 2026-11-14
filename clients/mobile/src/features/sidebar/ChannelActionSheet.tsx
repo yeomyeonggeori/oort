@@ -19,6 +19,8 @@ import {ConfirmStep, GroupCard, ListRow, RowStatusIcon, SheetScroll} from '../..
 import {font, line, type Palette} from '../../design/tokens';
 import {useStyles} from '../../design/theme';
 import type {ChannelRowTarget} from './channelRowActions';
+import {DmLeaveConfirm} from './DmLeaveConfirm';
+import type {DmLeaveStepView} from './useChannelRowActions';
 
 // =============================================================================
 // 행을 길게 누르면 열리는 시트 (#4229, Buzz식). 그릇·머리·행은 #4318 의 공용 부품이다.
@@ -37,6 +39,7 @@ import type {ChannelRowTarget} from './channelRowActions';
 //
 // 되돌릴 길이 없는 일(다시 들어오려면 관리자가 추가해야 한다)이라 한 단계를 더 둔다 — 메시지 시트의
 // 지우기 확인과 같은 모양이다. 실패는 확인 단계 **안에서** 말한다(시트를 닫지 않는다).
+// 1:1 「대화 나가기」(ADR-0177 증보 2026-11-14 D21)도 같은 자리의 확인 단계다(`DmLeaveConfirm`, 문장은 코어 사전).
 // =============================================================================
 
 interface Group {
@@ -73,6 +76,9 @@ export function ChannelActionSheet({
   onRun,
   onConfirmLeave,
   onCancelLeave,
+  dmLeave = null,
+  onConfirmDmLeave,
+  onCancelDmLeave,
   onClose,
 }: {
   target: ChannelRowTarget;
@@ -84,6 +90,10 @@ export function ChannelActionSheet({
   onRun: (key: ChannelActionKey) => void;
   onConfirmLeave: () => void;
   onCancelLeave: () => void;
+  /** 1:1 「대화 나가기」 확인 단계(훅의 `dmLeave`). 있으면 메뉴 대신 선다. */
+  dmLeave?: DmLeaveStepView | null;
+  onConfirmDmLeave?: () => void;
+  onCancelDmLeave?: () => void;
   onClose: () => void;
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
@@ -103,8 +113,15 @@ export function ChannelActionSheet({
         closeLabel="대화 액션 닫기"
         closeTestID="channel-sheet-close"
       />
-      <SheetScroll testID="channel-sheet-scroll">
-        {confirmingLeave ? (
+      <SheetScroll testID="channel-sheet-scroll" scrollToTopWhen={dmLeave !== null}>
+        {dmLeave !== null && onConfirmDmLeave && onCancelDmLeave ? (
+          <DmLeaveConfirm
+            step={dmLeave}
+            onConfirm={onConfirmDmLeave}
+            onCancel={onCancelDmLeave}
+            testID="channel-dm-leave-confirm"
+          />
+        ) : confirmingLeave ? (
           <ConfirmStep
             testID="channel-leave-confirm"
             headline={CHANNEL_LEAVE_CONFIRM_TITLE}

@@ -52,6 +52,7 @@ export const DM_LEAVE_KEYS = {
   confirmScheduled: "channels.dmLeave.confirmScheduled",
   cancel: "channels.dmLeave.cancel",
   confirm: "channels.dmLeave.confirm",
+  busy: "channels.dmLeave.busy",
   done: "channels.dmLeave.done",
   failed: "channels.dmLeave.failed",
 } as const satisfies Record<string, DmLeaveKey>;
