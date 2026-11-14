@@ -15,6 +15,7 @@ import { forgetWallpaperOnSignOut } from "../design/wallpaper/signOut";
 import { forgetExpressionDiskOnSignOut } from "../features/expressions/disk/signOut";
 import { withRotationLock } from "./rotationLock";
 import { apiBase } from "./serverBase";
+import { markServerSwitchSignedOutNotice } from "./sessionNotice";
 import { desktopKeychain, desktopRotationHold, desktopSession, isDesktop } from "./tauri";
 
 export {
@@ -230,6 +231,11 @@ export function initSessionStore(): Promise<void> {
 async function hydrate(): Promise<void> {
   if (!isDesktop()) return;
 
+  // The server the stored session belongs to, read before the first await
+  // (#5816): the login screen (a link, a server pick) can move the stored server
+  // while the credential store answers, and a session is never adopted under
+  // another server than its own.
+  const base = apiBase();
   // A record left by a browser-mode run of this same bundle: an earlier build, or
   // a run where the keychain was unavailable.
   const legacy = persisted;
@@ -254,7 +260,15 @@ async function hydrate(): Promise<void> {
   // here would sign someone out for no reason, and leaving it behind would
   // defeat the point of moving it at all.
   if (legacy) {
+    // Moving the server ends the stored session (#5816); an ended one is never
+    // moved into the keychain, and one that ended while it was being moved is
+    // taken back out.
+    if (persisted !== legacy) return;
     if (!(await desktopKeychain.store(legacy.refreshToken, apiBase()))) return;
+    if (persisted !== legacy) {
+      queueKeychain(() => desktopKeychain.clear());
+      return;
+    }
     storageMode = "keychain";
     writeRaw(DESKTOP_METADATA_KEY, JSON.stringify(sessionMetadataOf(legacy)));
     writeRaw(STORAGE_KEY, null);
@@ -263,6 +277,18 @@ async function hydrate(): Promise<void> {
 
   storageMode = "keychain";
   const refreshToken = await desktopKeychain.handle();
+  if (metadata && refreshToken && apiBase() !== base) {
+    // The stored server moved while the keychain answered (#5816). The session it
+    // read belongs to the previous server: end it on this device instead of
+    // adopting it under the next one, and say so on the login screen. A session
+    // signed in meanwhile is the next server's own and is left alone.
+    if (persisted === null) {
+      writeRaw(DESKTOP_METADATA_KEY, null);
+      queueKeychain(() => desktopKeychain.clear());
+      if (base) markServerSwitchSignedOutNotice(base);
+    }
+    return;
+  }
   if (metadata && refreshToken) {
     persisted = { refreshToken, ...metadata };
     notify();

@@ -368,6 +368,91 @@ describe("desktop runtime with a working keychain", () => {
     expect(session.hasPersistedSession()).toBe(false);
   });
 
+  // #5816: a session belongs to the server it was stored under. When the stored
+  // server moves while the keychain answers, the session it read is ended on this
+  // device rather than adopted under the next server, and the login screen says
+  // which server's sign-in ended.
+  describe("when the stored server moves while the keychain is read", () => {
+    const NEXT = "https://next.oort.test";
+    const metadataOnly = () => ({
+      [DESKTOP_KEY]: JSON.stringify({ realtimeWebSocketUrl: login.realtimeWebSocketUrl, member }),
+    });
+
+    it("ends the session it read instead of adopting it under the next server", async () => {
+      let answer: (handle: string | null) => void = () => undefined;
+      mocks.keychain.handle.mockImplementationOnce(() => new Promise((resolve) => (answer = resolve)));
+      const session = await loadStore(metadataOnly());
+      const notice = await import("./sessionNotice");
+      const hydrating = session.initSessionStore();
+      await vi.waitFor(() => expect(mocks.keychain.handle).toHaveBeenCalledTimes(1));
+      mocks.server = NEXT;
+      answer("shell:stored");
+      await hydrating;
+      await flush();
+
+      expect(session.hasPersistedSession()).toBe(false);
+      expect(session.getRefreshToken()).toBeNull();
+      expect(store.has(DESKTOP_KEY)).toBe(false);
+      expect(mocks.keychain.clear).toHaveBeenCalledTimes(1);
+      expect(notice.getServerSwitchSignedOutNotice()).toBe(SERVER);
+    });
+
+    it("leaves a session signed in meanwhile alone", async () => {
+      let answer: (handle: string | null) => void = () => undefined;
+      mocks.keychain.handle.mockImplementationOnce(() => new Promise((resolve) => (answer = resolve)));
+      const session = await loadStore(metadataOnly());
+      const hydrating = session.initSessionStore();
+      await vi.waitFor(() => expect(mocks.keychain.handle).toHaveBeenCalledTimes(1));
+      mocks.server = NEXT;
+      session.applyLogin(login);
+      answer("shell:stored");
+      await hydrating;
+      await flush();
+
+      expect(session.getRefreshToken()).toBe("refresh.token");
+      expect(store.has(DESKTOP_KEY)).toBe(true);
+      expect(mocks.keychain.clear).not.toHaveBeenCalled();
+      expect(mocks.keychain.store).toHaveBeenCalledWith("refresh.token", NEXT);
+    });
+
+    it("never moves a web-storage session that ended before the move into the keychain", async () => {
+      let answer: (available: boolean) => void = () => undefined;
+      mocks.keychain.available.mockImplementationOnce(() => new Promise((resolve) => (answer = resolve)));
+      const session = await loadStore({ [WEB_KEY]: webRecord("legacy.refresh") });
+      const hydrating = session.initSessionStore();
+      await vi.waitFor(() => expect(mocks.keychain.available).toHaveBeenCalledTimes(1));
+      // What a server change does to a stored session on this device.
+      session.clearSession();
+      mocks.server = NEXT;
+      answer(true);
+      await hydrating;
+      await flush();
+
+      expect(mocks.keychain.store).not.toHaveBeenCalled();
+      expect(store.has(DESKTOP_KEY)).toBe(false);
+      expect(store.has(WEB_KEY)).toBe(false);
+      expect(session.hasPersistedSession()).toBe(false);
+    });
+
+    it("takes a web-storage session that ended during the move back out of the keychain", async () => {
+      let answer: (stored: boolean) => void = () => undefined;
+      mocks.keychain.store.mockImplementationOnce(() => new Promise((resolve) => (answer = resolve)));
+      const session = await loadStore({ [WEB_KEY]: webRecord("legacy.refresh") });
+      const hydrating = session.initSessionStore();
+      await vi.waitFor(() => expect(mocks.keychain.store).toHaveBeenCalledWith("legacy.refresh", SERVER));
+      session.clearSession();
+      mocks.server = NEXT;
+      answer(true);
+      await hydrating;
+      await flush();
+
+      expect(mocks.keychain.clear).toHaveBeenCalledTimes(1);
+      expect(store.has(DESKTOP_KEY)).toBe(false);
+      expect(store.has(WEB_KEY)).toBe(false);
+      expect(session.hasPersistedSession()).toBe(false);
+    });
+  });
+
   it("discards metadata left without its token instead of half-resuming", async () => {
     mocks.keychain.handle.mockResolvedValue(null);
     const session = await loadStore({
