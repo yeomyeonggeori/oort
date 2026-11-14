@@ -23,10 +23,16 @@
 --
 -- 술어
 --   보인다 ⇔ 요청자 값이 비었거나, 요청자의 그 채널 membership 행이 없거나, 그 행의 하한이 NULL 이거나
---   message.seq ≥ 하한. 아래는 그 부정(「하한이 이 seq 보다 큰 내 행이 있다」)이 없음을 묻는다.
---   NULL 하한은 `>` 가 거짓이라 걸리지 않는다. membership 행의 조회는 유일 제약 membership_uniq
---   (channel_id, member_id) 를 쓴다 — 새 인덱스 없음. 이 정책을 읽는 비우회 역할(momo_app·
---   momo_helper_read·mem_definer)은 모두 membership 의 표 단위 SELECT 를 이미 갖는다.
+--   message.seq ≥ 하한. 세 갈래를 그 차례로 쓴다:
+--     ① 요청자 값 — 스칼라 부분질의라 문장마다 한 번(InitPlan)만 읽는다.
+--     ② 「요청자가 하한을 가진 채널」 집합에 없다 — 상관없는 부분질의라 한 번 만들어 해시로 찾는다
+--        (hashed SubPlan). 하한이 없는 보통 채널의 행은 여기서 끝난다.
+--     ③ 그 집합의 채널이면 그 행의 하한과 seq 를 비교한다 — 유일 제약 membership_uniq
+--        (channel_id, member_id) 로 한 행. 새 인덱스 없음.
+--   한 갈래씩의 상관 부분질의(행마다 membership 조회)는 검색처럼 많은 행을 훑는 읽기에서 비용이 행 수에
+--   비례해서 이 모양을 골랐다(EXPLAIN 앞뒤는 PR 본문).
+--   이 정책을 읽는 비우회 역할(momo_app·momo_helper_read·mem_definer)은 모두 membership 의 표 단위
+--   SELECT 를 이미 갖는다.
 -- =============================================================================
 
 ALTER TABLE membership
@@ -38,12 +44,17 @@ COMMENT ON COLUMN membership.history_from_seq IS
 
 CREATE POLICY dm_leave_history_floor ON message AS RESTRICTIVE FOR SELECT
   USING (
-    NULLIF(current_setting('app.requester_member_id', true), '') IS NULL
-    OR NOT EXISTS (
-      SELECT 1
+    (SELECT NULLIF(current_setting('app.requester_member_id', true), '')) IS NULL
+    OR message.channel_id NOT IN (
+      SELECT ms.channel_id
+        FROM membership ms
+       WHERE ms.member_id = (SELECT NULLIF(current_setting('app.requester_member_id', true), '')::uuid)
+         AND ms.history_from_seq IS NOT NULL
+    )
+    OR message.seq >= (
+      SELECT ms.history_from_seq
         FROM membership ms
        WHERE ms.channel_id = message.channel_id
-         AND ms.member_id = NULLIF(current_setting('app.requester_member_id', true), '')::uuid
-         AND ms.history_from_seq > message.seq
+         AND ms.member_id = (SELECT NULLIF(current_setting('app.requester_member_id', true), '')::uuid)
     )
   );
