@@ -256,16 +256,16 @@
 - **사람 요청자를 DB가 알 길이 지금은 없어요.**
   - 테넌트 트랜잭션이 첫머리에 묶는 값은 `app.workspace_id`와 에이전트용 `app.agent_member_id` 둘이에요(`server-rust/crates/momo-db/src/tenant.rs:21-24`, `:33-43`). 묶는 함수 `bind_workspace_guc`를 트랜잭션 도우미 여섯이 모두 불러요(`tenant.rs:95,152,185,215,308,340`). 에이전트 값은 `bins/momo-server/src/auth.rs:734-736`·`:835-840`과 Agent Port·팀 AI의 몇 곳이 넣어요.
   - **`app.member_id`라는 값은 이미 있지만 요청자가 아니에요.** 주인 범위(owner scope) 값이라 부를 때마다 묶고(`server-rust/crates/momo-messaging/src/owner_scope.rs:31-47`), 보내기의 정본 길은 일부러 비우고, 남의 일을 대신할 때는 **다른 멤버의 id**를 넣어요(`owner_scope.rs:68-82`). 리마인더·예약 메시지·팀 기억 같은 표의 정책이 이 값을 읽어요.
-  - 사람 principal이 들어오는 문은 둘이에요: `require_principal`(`auth.rs:826-843` — 세션·푸시 가져오기·푸시 동작 토큰이 모두 여기를 지나요)과 `require_dev_principal`(`bins/momo-server/src/dev_access.rs:281-336` — CLI·사람 MCP).
+  - 사람 principal이 들어오는 문은 둘이에요: `require_principal`(`auth.rs:826-843` — 세션·푸시 가져오기·푸시 동작 토큰이 모두 여기를 지나요)과 `require_dev_principal`(`server-rust/bins/momo-server/src/dev_access.rs:281-336` — CLI·사람 MCP).
   - 에이전트 값으로 메시지 읽기를 좁히는 정책 선례가 있어요(`server/Migrations/156_dm_agent_admission.sql:29-53`의 `dm_agent_read_boundary`). 이 정책 때문에 팀 AI(도우미)는 자기가 들지 않은 DM의 메시지를 지금도 못 읽어요.
 - **메시지를 읽는 쿼리는 많아요.** `server-rust`에서 `FROM message`·`JOIN message`가 `tests/`를 빼고 41개 파일 106곳이에요(이력·스레드·검색·받은함·푸시·리마인더·스레드 팔로우·링크 카드·팀 AI 읽기…, 사람 요청이 아닌 것도 섞여 있어요).
-- **`message`를 거치는지 길마다 본 것**: 반응(`server-rust/crates/momo-messaging/src/interaction.rs:1416-1423`)·고정(`:1722-1729`)·받은함 목록과 개수(`server-rust/crates/momo-messaging/src/inbox.rs:214-226`, `:427`)·링크 카드 목록·첨부 내용과 썸네일(`server-rust/crates/momo-messaging/src/attachment.rs:443-447`의 `LEFT JOIN message`)은 `message`를 거쳐요. **거치지 않는 것**: 리마인더 목록(`server-rust/crates/momo-messaging/src/reminder.rs:215-235`), 스레드 팔로우 행 자체(안 읽음 셈만 `message`를 읽어요, `thread_follow.rs:375-386`), 링크 카드 그림·아이콘(`server-rust/crates/momo-unfurl/src/store.rs:342-347`, 채널 멤버십만 봐요 `server-rust/bins/momo-server/src/routes/unfurl.rs:240`).
+- **`message`를 거치는지 길마다 본 것**: 반응(`server-rust/crates/momo-messaging/src/interaction.rs:1416-1423`)·고정(`:1722-1729`)·받은함 목록과 개수(`server-rust/crates/momo-messaging/src/inbox.rs:214-226`, `:427`)·링크 카드 목록·첨부 내용과 썸네일(`server-rust/crates/momo-messaging/src/attachment.rs:443-447`의 `LEFT JOIN message`)은 `message`를 거쳐요. **거치지 않는 것**: 리마인더 목록(`server-rust/crates/momo-messaging/src/reminder.rs:215-235`), 스레드 팔로우 행 자체(안 읽음 셈만 `message`를 읽어요, `server-rust/crates/momo-messaging/src/thread_follow.rs:375-386`), 링크 카드 그림·아이콘(`server-rust/crates/momo-unfurl/src/store.rs:342-347`, 채널 멤버십만 봐요 `server-rust/bins/momo-server/src/routes/unfurl.rs:240`).
 - **안 읽음 숫자는 산수예요.** `마지막 seq − 내가 읽은 seq`라 메시지 표를 세지 않아요(`server-rust/crates/momo-messaging/src/read_state.rs:9-11`, `:313-320`). 읽음을 올리면 나 자신의 실시간 채널 `user:read-state#<나>`로 프레임이 나가요(`read_state.rs:199-204`, `:575-596`). 상대에게는 가지 않아요. 투영은 요청자 본인의 행만 내려요(`read_state.rs:337`).
 - **멤버마다의 실시간 채널은 이미 있어요.** `user` 네임스페이스(`infra/centrifugo.json:59-66`, `allow_user_limited_channels`)를 읽음·받은함·스레드 팔로우·예약 메시지가 써요. (D10과 위 「기각 대안」의 「개인 실시간 채널은 새 채널 종류」는 이 점에서 사실과 달라요. D10의 결정 — 닫기 이벤트 없음 — 은 그대로예요.)
 - **실시간 서버는 채널마다 최근 발행물 300건을 30일 보관하고 끊긴 구간을 다시 보내 줘요**(`infra/centrifugo.json:17-27`의 `ch` 네임스페이스, `force_recovery`·`force_positioning`. DM도 `ch:`로 나가요 — `server-rust/crates/momo-messaging/src/message.rs:460-465`). 운영의 네임스페이스는 `infra/railway/railway.json`에 한 벌 더 있어요(`:59`). 구독 프록시는 허락·거절만 답하고(`server-rust/bins/momo-server/src/routes/realtime.rs:334-436`, 응답 본문이 빈 구조체), 클라이언트는 늘 복구·위치 지정을 달라고 구독해요.
 - **사람끼리의 DM은 팀 기억 대상이 아니에요.** 기억은 「사람 1 + 에이전트 1」 DM만 받아요(`server/Migrations/102_mem_worker.sql:92-108`).
 - **예약 메시지를 채널 하나만 취소하는 함수는 없어요.** 있는 것은 워크스페이스를 떠날 때 그 사람의 예약 전부를 취소하는 `cancel_member_schedules_in_tx`(`server-rust/crates/momo-messaging/src/scheduled.rs:1345-1356`, 사유 `RevocationCause::Left` `:1232`)예요.
-- **대기 중 에이전트 입장 요청을 취소하는 함수도 따로 없어요.** 거절·만료 때의 처리(형제 승인 카드 `cancelled`·카드 props 고침과 수정 이벤트·입장 행 `revoked_at`·run 취소)가 `vote_in_tx` 안에 있어요(`server-rust/bins/momo-server/src/routes/dm_agents.rs:270-285`). 키에 `admitted:`를 붙이는 것은 마지막 허락 때뿐이에요(`dm_agents.rs:321-328`). 만료는 알림 프로세스가 거둬요(`server-rust/crates/momo-notifier/src/approval_sweep.rs:184-201`).
+- **대기 중 에이전트 입장 요청을 취소하는 함수도 따로 없어요.** 거절·만료 때의 처리(형제 승인 카드 `cancelled`·카드 props 고침과 수정 이벤트·입장 행 `revoked_at`·run 취소)가 `vote_in_tx` 안에 있어요(`server-rust/bins/momo-server/src/routes/dm_agents.rs:270-285`). 키에 `admitted:`를 붙이는 것은 마지막 허락 때뿐이에요(`dm_agents.rs:321-328`). 만료는 알림 프로세스가 거둬요(`server-rust/bins/momo-notifier/src/approval_sweep.rs:184-201`).
 - **보내기 재시도의 되읽기**는 행이 안 보이면 지금 `RowNotFound`예요(`message.rs:759-763`).
 - **화면의 「이 서버가 싣는 표면」 판정은 클라이언트에 굳은 정적 표예요**(`packages/momo-core/src/features/capabilities/serverSurfaces.ts`, `isSurfaceProvided` `:643-645`). 서버가 켜고 끄는 능력 응답은 없어요. `dmClosure`는 표에 `provided: true`로 있고(`:584-592`), 실제로는 읽음 투영 행에 `latest_readable_seq`가 있는지와 404 접기(`serverSaysAbsent` `:62-71`)로 알아요(웹 `dmClosureModel.ts:59-69`, 폰 `dmVerdicts.ts:47-49`).
 - **상대에게 내 읽음 위치가 보이는 화면은 없어요**(코어·웹·폰·데스크탑에 읽음 표시 없음).
@@ -316,7 +316,7 @@
 
 ### D17. 읽기 — 메시지 표의 정책 하나 + 사본 목록
 
-- **사람 요청자 값을 새로 묶어요.** `momo_db`가 사람 principal의 테넌트 트랜잭션 첫머리에 새 값 `app.requester_member_id`(가칭, 엔진-1이 확정)를 묶어요. 에이전트 값이 묶이는 방식(`tenant.rs:21-24`의 task-local, `bind_workspace_guc` 한 곳)과 같아요. 넣는 곳은 사람 principal의 두 문 — `require_principal`의 사람 갈래(`auth.rs:841-843`, 세션·푸시 가져오기·푸시 동작 토큰을 한 번에 덮어요)와 `require_dev_principal`(`dev_access.rs:322-336`) — 이고, 백그라운드 작업은 필요하면 명시로 묶어요.
+- **사람 요청자 값을 새로 묶어요.** `momo_db`가 사람 principal의 테넌트 트랜잭션 첫머리에 새 값 `app.requester_member_id`(가칭, 엔진-1이 확정)를 묶어요. 에이전트 값이 묶이는 방식(`tenant.rs:21-24`의 task-local, `bind_workspace_guc` 한 곳)과 같아요. 넣는 곳은 사람 principal의 두 문 — `require_principal`의 사람 갈래(`auth.rs:841-843`, 세션·푸시 가져오기·푸시 동작 토큰을 한 번에 덮어요)와 `require_dev_principal`(`server-rust/bins/momo-server/src/dev_access.rs:322-336`) — 이고, 백그라운드 작업은 필요하면 명시로 묶어요.
   - **`app.member_id`를 쓰지 않는 까닭**: 그 값은 주인 범위 값이라 보내기 정본 길이 비우고 남의 id를 넣기도 해요(확인한 사실). 요청자 값이 그 사이에 바뀌면 정책이 엉뚱한 사람의 하한을 봐요.
 - **정책 하나**: `message`에 `AS RESTRICTIVE FOR SELECT` — 「요청자 값이 비었거나, 요청자의 그 채널 `membership` 행이 없거나 그 행의 `history_from_seq`가 NULL이거나 이 메시지의 `seq` 이하」. 이력·스레드·검색·고정·반응·받은함·첨부·푸시 가져오기처럼 `message`를 거치는 읽기가 한 번에 덮여요(`156`의 `dm_agent_read_boundary`와 같은 모양).
   - 요청자의 멤버십 행이 없는 채널(예: [ADR-0224](0224-public-channel-browse-and-self-join.md)의 참여 전 미리 보기)은 하한이 없는 것으로 봐요.
@@ -331,7 +331,7 @@
 | 링크 카드 그림·아이콘 | 카드 id로 읽고 채널 멤버십만 봐요(`unfurl.rs:240`). 카드가 달린 메시지의 seq에 같은 하한을 더해요 | 하한 아래 메시지의 카드 그림 → 없는 id와 같은 404 |
 | 안 읽음·멘션 숫자 | 산수라 정책 밖. D16-4가 읽음 위치를 올려서 맞춰요 | 나간 직후 투영의 숫자가 0 |
 | 푸시 | 가져오기는 보통 이력 라우트(`bins/momo-server/src/routes/messages.rs:1216-1243`)라 `message` 읽기이고, 그 토큰은 `require_principal`을 지나서 요청자 값이 묶여요. 하한 아래 글에 달린 반응·수정 알림은 나간 사람에게 만들지 않아요 | 하한 아래 메시지 가져오기 → 404, 새 알림 0 |
-| 사람의 인증 길 | 정책은 값이 비면 통과하므로 사람의 길은 **모두** 값을 묶어야 해요. 문은 둘(`require_principal`·`require_dev_principal`)이에요. 사람 읽기용 첨부 미디어 토큰은 없어요. 자기 미디어 토큰은 에이전트 전용이라(`self_media.rs:610-631`) 사람끼리 1:1에 닿지 않아요 | 사람 쪽 인증 길마다 「값이 묶였다」 시험. 하나라도 비면 빨강 |
+| 사람의 인증 길 | 정책은 값이 비면 통과하므로 사람의 길은 **모두** 값을 묶어야 해요. 문은 둘(`require_principal`·`require_dev_principal`)이에요. 사람 읽기용 첨부 미디어 토큰은 없어요. 자기 미디어 토큰은 에이전트 전용이라(`server-rust/crates/momo-messaging/src/self_media.rs:610-631`) 사람끼리 1:1에 닿지 않아요 | 사람 쪽 인증 길마다 「값이 묶였다」 시험. 하나라도 비면 빨강 |
 | 실시간 서버 보관분 | 구독 프록시가 지난 구간 다시 보내기를 끌 수 있는지는 [확인 필요](프록시가 지금은 허락·거절만 답함). 코어는 하한 아래 발행물을 버려요. 네임스페이스 설정을 바꾸면 `infra/centrifugo.json`과 `infra/railway/railway.json` 둘 다예요 | 하한 아래 발행물이 화면에 안 그려진다. 실 Centrifugo는 `runtime-unverified`로 적고 스택 줄에서 재요 |
 | 팀 AI 읽기 | 해당 없음 — 도우미는 자기가 들지 않은 DM의 메시지를 지금도 못 읽어요(`dm_agent_read_boundary`, 확인한 사실) | 범위 판정 시험 한 줄 |
 | 기기 캐시·쓰던 초안 | 코어가 나가기 성공 때 그 대화의 캐시와 초안을 지워요 | 앱을 껐다 켜도 지난 글이 안 보인다 |
@@ -504,7 +504,7 @@
 | ⑥ 폰 | uxui | 길게 누르기 시트 · ⋮ 시트 · 정보 페이지 · 확인 단계 · 캡처 | M | ④ | 세 자리에서 같은 낱말·확인 · 캡처 못 돌린 곳은 미검증으로 적음 |
 
 - **차례**: ② → (③ ∥ ④) → (⑤ ∥ ⑥). ②가 API 모양을 먼저 굳히면 ④~⑥은 ③을 기다리지 않고 나란히 가요.
-- **승격 조건(owner D-4)**: ②~⑥은 **한 승격 핀에 함께** 들어가요. ②·③의 독립 보안 검수(멤버 경계·길 누락)가 **Blocker 0·High 0**이고 ⑤·⑥의 design-review가 Blocker 0·High 0이어야 그 승격이 나가요. ③의 검수가 그 승격에 못 맞추면 **메뉴를 닫은 채 내보내지 않고 승격을 늦춰요.** 트랙에서 main으로는 승격 때만 가므로(AGENTS) ②만 착륙한 서버는 승격 전까지 트랙과 검증 줄에만 있고, 사람이 쓰는 판에서 `PUT …/dm-leave`를 부를 화면은 ②~⑥과 함께만 나가요.
+- **승격 조건(owner D-4)**: ②~⑥은 **한 승격 핀에 함께** 들어가요. ②·③의 독립 보안 검수(멤버 경계·길 누락)가 **Blocker 0·High 0**이고 ⑤·⑥의 design-review가 Blocker 0·High 0이어야 그 승격이 나가요. ③의 검수가 그 승격에 못 맞추면 **메뉴를 닫은 채 내보내지 않고 승격을 늦춰요.** 그리고 **②만 실린 서버 판은 ③의 검수가 통과하기 전에 사람이 쓰는 인스턴스에 배포하지 않아요**(검증 줄·격리 시험 환경만). 트랙에서 main으로는 승격 때만 가므로(AGENTS) 승격 핀이 이 조건을 지키는 자리이고, 따로 배포할 때도 같은 조건이에요. `PUT …/dm-leave`를 부르는 화면(④~⑥)은 ②~③과 함께만 나가요.
 - **S-1과 만나는 곳**: 「준비된 것부터 승격」은 세 결정 사이의 말이에요. 나가기 묶음이 검수를 기다리는 동안 한글 이름(ADR-0225) 칸이 준비되면 그쪽은 먼저 승격할 수 있어요. 나가기 묶음 안에서는 D-4가 이겨서 다섯 칸이 함께 나가요.
 - **워커 고르기**: ②·③은 보안 경계를 만지는 새 기능이라 Opus, ④~⑥은 닫힌 범위예요.
 - **이 증보가 덜어 주는 일**: ADR-0219의 GS-12(열 만들기)와 GS-17(사람 요청자 값 묶기)이 각각 한 덩이씩 줄어요. 두 칸의 이슈는 아직 없어요(게스트 초대는 GS-0(#5199, 닫힘)의 스위치로 멈춘 상태예요).

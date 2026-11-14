@@ -101,7 +101,7 @@
 
 - **정규화한 뒤의 글자 수(코드포인트) 1~80.** 바이트가 아니에요. 한글 80자는 240바이트예요. DB 칸은 길이 제한 없는 `text`라 그대로 둬요.
 - 공유 코어는 지금 `name.length`(UTF-16 단위)로 세요(`model.ts:49`). 서버는 `chars().count()`(코드포인트)예요(`channel.rs:283`). 코어를 코드포인트로 맞춰요. BMP 밖 글자(드문 한자 등)에서만 차이가 나요.
-- **에이전트 쪽 바이트 상한을 같이 올려요.** 에이전트 행동과 MCP 도구는 글자가 아니라 UTF-8 바이트로 상한을 재요(`server-rust/crates/momo-mcp/src/tools.rs:267`, 재는 곳 `:2091-2100`). 이름 상한이 80바이트(`server-rust/crates/momo-agent/src/actions.rs:1111-1113`, `tools.rs:807`)이고 채널 참조 상한이 81바이트(`actions.rs:1553-1554`, `tools.rs:809`)예요. 그대로 두면 한글 27자부터 걸려요. 같은 파일들의 전례(글자당 4바이트 — 주제 280자 = `1_120`바이트 `actions.rs:1114-1116`, `tools.rs:657-658`)대로 **320·321바이트**로 올려요. 80자 검사는 정규화 함수가 계속 해요.
+- **에이전트 쪽 바이트 상한을 같이 올려요.** 에이전트 행동과 MCP 도구는 글자가 아니라 UTF-8 바이트로 상한을 재요(`server-rust/crates/momo-mcp/src/tools.rs:267`, 재는 곳 `:2091-2100`). 이름 상한이 80바이트(`server-rust/crates/momo-agent/src/actions.rs:1111-1113`, `tools.rs:807`)이고 채널 참조 상한이 81바이트(`server-rust/crates/momo-agent/src/actions.rs:1553-1554`, `tools.rs:809`)예요. 그대로 두면 한글 27자부터 걸려요. 같은 파일들의 전례(글자당 4바이트 — 주제 280자 = `1_120`바이트 `server-rust/crates/momo-agent/src/actions.rs:1114-1116`, `tools.rs:657-658`)대로 **320·321바이트**로 올려요. 80자 검사는 정규화 함수가 계속 해요.
 
 ### D6. 같은 이름 판정
 
@@ -131,7 +131,7 @@
 1. 이 ADR은 본문 속 `#채널`을 링크로 만들지 않아요. 지금처럼 평문이에요.
 2. 나중에 링크로 그릴 때는 **자동 완성으로 고른 것만 채널 id 토큰으로 넣고, 손으로 친 `#이름`은 풀지 않아요.** 한글은 이름 뒤에 조사가 띄어쓰기 없이 붙고(「#공지에서」), 조사도 「글자」라서 글자 종류로는 이름의 끝을 알 수 없어요. 채널 목록에서 가장 길게 맞는 이름을 찾는 방법은 `공지`와 `공지에서`라는 채널이 둘 다 있을 때 틀려요.
 3. 에이전트가 채널을 가리키는 `#이름`은 **인자 한 칸 전체**예요(문장 속에서 뽑아내지 않아요). 한 칸 전체를 D3로 접어 정확히 같은 이름을 찾아요. 조사 문제가 없어요.
-4. 서버가 만드는 문장에서 채널 이름 뒤에 조사를 바로 붙이지 않아요. 지금 결과 줄이 `#{이름}에 멤버 …`예요(`actions.rs:2587-2589`). 에이전트가 이 줄을 다시 읽으면 「디자인-리뷰에」를 이름으로 볼 수 있어요. `#이름 채널에 …`로 바꿔요. 승인 문장은 이미 「이름 뒤에 조사를 붙이지 않는다」를 시험으로 지키고 있어요(`server-rust/crates/momo-agent/src/approval_sentence.rs:725`).
+4. 서버가 만드는 문장에서 채널 이름 뒤에 조사를 바로 붙이지 않아요. 지금 결과 줄이 `#{이름}에 멤버 …`예요(`server-rust/crates/momo-agent/src/actions.rs:2587-2589`). 에이전트가 이 줄을 다시 읽으면 「디자인-리뷰에」를 이름으로 볼 수 있어요. `#이름 채널에 …`로 바꿔요. 승인 문장은 이미 「이름 뒤에 조사를 붙이지 않는다」를 시험으로 지키고 있어요(`server-rust/crates/momo-agent/src/approval_sentence.rs:725`).
 5. 이름을 바꾸면(D10) 이미 보낸 글 속의 `#옛-이름`은 평문이라 옛 이름으로 남아요.
 
 ### D9. 주소·딥링크·CLI·MCP
@@ -172,7 +172,7 @@
 - 서버 구현: 유니코드 범주가 필요한데 Rust 표준 라이브러리에는 없어요(`is_alphabetic()`은 `L*`과 같지 않아요). `unicode-properties` 크레이트(0.1.4, MIT/Apache-2.0, `general-category` 기능)가 이미 `Cargo.lock`에 간접 의존으로 있어요(`server-rust/Cargo.lock:4394`, `stringprep`을 거쳐 `sqlx-postgres`가 씀). 직접 의존으로 올리고 NOTICE를 확인해요. NFC는 이미 쓰는 `unicode-normalization`(`server-rust/Cargo.toml:83`, 잠금 판 0.1.25)이에요.
 - 코어 구현: `\p{L}`·`\p{N}`·`\p{M}`과 `normalize("NFC")`. 폰이 이미 돌리는 코드에는 `\p{L}\p{N}`(`packages/momo-core/src/features/auth/personalAgentCall.ts:148`, 폰이 부르는 곳 `clients/mobile/src/features/conversation/personalAgentCallModel.ts:218`)과 `normalize("NFC")`(`clients/mobile/src/features/search/localSearch.ts:52`)가 있어요. **`\p{M}`은 폰에서 돌아간 적이 없어요** — 코어에서 쓰는 곳은 글꼴 이름 검사(`packages/momo-core/src/design/fontName.ts:27`) 하나이고, 그 파일은 「`\p{…}`를 모르는 엔진에서는 앱이 시작도 못 한다」며 정규식을 처음 쓸 때 만들고 폰은 그 길을 타지 않는다고 적어요(`:17-20`). 그래서 같은 조심(처음 쓸 때 만들기)을 하고, P1이 실제 폰 엔진에서 `\p{M}`을 확인해요.
 - **남는 어긋남**: 유니코드 표의 판이 서버(잠긴 Rust 크레이트 둘은 17.0.0)와 기준 구현(파이썬 `unicodedata` 14.0.0), 브라우저·폰 엔진마다 달라요. 아주 새로 생긴 문자는 서버가 받고 화면이 막을 수 있어요. 7개 언어의 글자는 오래전에 들어온 것이라 해당이 없고, 벡터에는 판에 따라 갈리지 않는 글자만 넣어요(14.0.0과 17.0.0이 같은 답을 내는지는 E1의 시험이 확인해요).
-- API 문서: OpenAPI 3.0.3의 `pattern`은 `\p{…}`를 믿고 쓸 수 없어요(유니코드 플래그를 적을 자리가 없어요). `pattern`을 빼고, 설명에 규칙과 벡터 파일 경로를 적어요. 에이전트 행동 스키마의 `maxLength`(`actions.rs:1129`)도 D5대로 바꿔요.
+- API 문서: OpenAPI 3.0.3의 `pattern`은 `\p{…}`를 믿고 쓸 수 없어요(유니코드 플래그를 적을 자리가 없어요). `pattern`을 빼고, 설명에 규칙과 벡터 파일 경로를 적어요. 에이전트 행동 스키마의 `maxLength`(`server-rust/crates/momo-agent/src/actions.rs:1129`)도 D5대로 바꿔요.
 
 ### D12. 정렬과 검색
 
@@ -313,7 +313,7 @@
 | E3 CLI | engine | `oort` CLI가 `'#이름'`을 걸음 1~5로 접은 뒤 견주고 같은 벡터로 시험(`unicode-normalization` 의존 추가) | S | E1 | 풀어쓴 한글·빈칸 든 `'#이름'`이 같은 채널을 찾음 |
 | E4 닮은꼴 | engine | 에이전트가 제안한 이름이 이미 있는 채널과 닮으면 거절(닮은꼴 표만 쓰는 새 함수, 제안 때와 결정 때)(D7) | S~M | E2 | `g\u0435neral` 제안 → 거절, `team-1`·`team-l` 같은 다른 이름은 통과, 사람 만들기는 그대로 받음 |
 | R1 이름 바꾸기 서버 | engine | `PATCH …/channels/{ch}`의 `name`(소유자·관리자, 사람 전용, 같은 함수, 409, `general` 잠금, 감사 `channel.renamed`, openapi)(D10). 라우트를 처음 만드는 칸이면 ADR-0224 칸이 그 위에 칸을 더해요 | M | E1 | 멤버·게스트·에이전트 403/404, 겹치는 이름 409, `general` 바꾸기와 `general`로 바꾸기 409, 다른 워크스페이스 채널 404 |
-| C1 코어 거울 | uxui | `model.ts`의 정규식·`normalizeChannelName`·`channelNameIssue`를 새 규칙으로, 길이를 코드포인트로, 문구 넷과 400 문장, 벡터 사본으로 시험. 옛 시험(`model.test.ts:69-74`)을 바꿔요 | S~M | E1 | 코어 사본이 서버 벡터와 바이트까지 같음 · 벡터 전부 통과 |
+| C1 코어 거울 | uxui | `model.ts`의 정규식·`normalizeChannelName`·`channelNameIssue`를 새 규칙으로, 길이를 코드포인트로, 문구 넷과 400 문장, 벡터 사본으로 시험. 옛 시험(`packages/momo-core/src/features/channels/model.test.ts:69-74`)을 바꿔요 | S~M | E1 | 코어 사본이 서버 벡터와 바이트까지 같음 · 벡터 전부 통과 |
 | W1 웹·데스크탑 만들기 | uxui | 안내 글·자리표시자·「`#…`로 만들어져요」 미리보기 줄(D13). 표면 게이트와 design-review | S | C1 | 조합 중에 칸 값이 바뀌지 않음 · design-review Blocker 0·High 0 |
 | P1 폰 만들기 | uxui | 같은 안내 글·미리보기, `shellChrome.test.tsx:572,577` 갱신. **실제 폰 엔진에서 벡터를 한 번 돌려요**(폰 시험은 노드에서 돌아서 엔진 차이를 못 잡아요) | S | C1 | 실제 기기 또는 시뮬레이터 엔진에서 벡터 전부 통과(못 돌리면 `runtime-unverified`) |
 | R2 이름 바꾸기 화면 | uxui | 채널 메뉴의 「이름 바꾸기」(웹·데스크탑·폰), 소유자·관리자에게만, `general`에는 서지 않음. QA 6번(채널 관리) 묶음과 겹치면 그쪽으로 합쳐요 | S~M | R1, C1 | 바꾼 이름이 사이드바·머리에 바로 보임, 409 문장 · design-review Blocker 0·High 0 |
