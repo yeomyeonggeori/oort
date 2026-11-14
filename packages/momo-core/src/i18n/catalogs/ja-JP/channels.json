@@ -8,5 +8,11 @@
   "channels.dmLeave.cancel": "キャンセル",
   "channels.dmLeave.confirm": "退出",
   "channels.dmLeave.done": "会話から退出しました。",
-  "channels.dmLeave.failed": "退出できませんでした。もう一度お試しください。"
+  "channels.dmLeave.failed": "退出できませんでした。もう一度お試しください。",
+  "channels.nameRule.required": "チャンネル名を入力してください。",
+  "channels.nameRule.tooLong": "チャンネル名は{max, number}文字までです。",
+  "channels.nameRule.hidden": "見えない文字が含まれています。名前を消してもう一度入力してください。",
+  "channels.nameRule.unsupported": "文字、数字、ハイフン（-）、アンダースコア（_）のみ使えます。",
+  "channels.nameRule.edge": "先頭と末尾は文字か数字にしてください。ハイフンとアンダースコアは途中にのみ使えます。",
+  "channels.nameRule.serverRejected": "サーバーがこの名前を受け付けませんでした。文字、数字、-、_のみ使えます。"
 }

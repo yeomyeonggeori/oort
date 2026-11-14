@@ -1,39 +1,144 @@
 import { ApiError, type MembershipRole } from "../../lib/api";
 import { NetworkError } from "../../lib/http";
+import koChannels from "../../i18n/catalogs/ko-KR/channels.json";
+import type { MessageKey } from "../../i18n/generated/messages";
 
 // =============================================================================
 // 채널 만들기 model (AX-1a / MOMO-614). Everything the dialog decides without
 // React lives here, so the rules are under test rather than inside a component.
 //
-// The name rule is not invented: it is `ChannelRoutes.normalizedChannelName`,
-// character for character, and the mac sheet
-// (MomoChannelCreationSheet.MomoChannelCreationValidation) already carries the
-// same one. A client that accepts what the server rejects turns a typo into an
-// English 400 the reader cannot act on, and a client that rejects what the
-// server accepts makes a legal name look broken. Both are the same bug.
+// The name rule is the server's, and since ADR-0225 it is not ascii any more:
+// letters and numbers of every script, `-` and `_`, blanks become `-`, at most
+// 80 code points. The single source of truth is the shared vectors file
+// (`docs/api/channel-name.vectors.json`); `__fixtures__/channel-name.vectors.json`
+// is this package's byte-identical copy and `model.test.ts` runs every row of
+// it. A client that accepts what the server rejects turns a typo into a 400 the
+// reader cannot act on, and a client that rejects what the server accepts makes
+// a legal name look broken. Both are the same bug. The server is the authority;
+// this is the quick hint.
 // =============================================================================
 
 export const CHANNEL_NAME_MAX = 80;
 export const CHANNEL_TOPIC_MAX = 280;
 
-/** Server regex, verbatim: a name is ascii, and it never starts or ends on a
- *  separator. Anchored on both sides, so a Korean name fails here rather than
- *  at the server. */
-const NAME_RE = /^[a-z0-9][a-z0-9_-]*[a-z0-9]$|^[a-z0-9]$/;
+/** Unicode `White_Space` (ADR-0225 D2), the 25 code points Rust's
+ *  `char::is_whitespace` knows. Deliberately not the regex class for spaces:
+ *  that adds U+FEFF and lacks U+0085. */
+const BLANKS = new Set<number>([
+  0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x20, 0x85, 0xa0, 0x1680,
+  0x2000, 0x2001, 0x2002, 0x2003, 0x2004, 0x2005, 0x2006, 0x2007, 0x2008,
+  0x2009, 0x200a, 0x2028, 0x2029, 0x202f, 0x205f, 0x3000,
+]);
 
-/** The alphabet by itself, without the rule about where a name may begin. */
-const NAME_ALPHABET_RE = /^[a-z0-9_-]+$/;
+/** Letters and marks that draw nothing (ADR-0225 D4, second list). The
+ *  control/format/private-use/surrogate half is decided by category instead. */
+function isInvisibleLetterOrMark(cp: number): boolean {
+  return (
+    cp === 0x115f || cp === 0x1160 || cp === 0x3164 || cp === 0xffa0 ||
+    cp === 0x034f || cp === 0x17b4 || cp === 0x17b5 ||
+    (cp >= 0x180b && cp <= 0x180d) || cp === 0x180f ||
+    (cp >= 0xfe00 && cp <= 0xfe0f) || (cp >= 0xe0100 && cp <= 0xe01ef)
+  );
+}
+
+// The Unicode-property regexes are built the first time a name is judged, never
+// at module load: an engine that does not know the syntax would otherwise fail
+// to start the whole app (ADR-0225 D11; the same care as `design/fontName.ts`).
+interface CategoryPatterns {
+  letter: RegExp;
+  number: RegExp;
+  mark: RegExp;
+  unseen: RegExp;
+}
+let categoryPatterns: CategoryPatterns | null = null;
+function categories(): CategoryPatterns {
+  categoryPatterns ??= {
+    letter: new RegExp("^\\p{L}$", "u"),
+    number: new RegExp("^\\p{N}$", "u"),
+    mark: new RegExp("^\\p{M}$", "u"),
+    unseen: new RegExp("^[\\p{Cc}\\p{Cf}\\p{Co}\\p{Cs}]$", "u"),
+  };
+  return categoryPatterns;
+}
+
+/** Why a name was refused: the five labels of the shared vectors. The server
+ *  answers with two errors (length, characters); telling the five apart is the
+ *  screen's job. */
+export type ChannelNameVerdict =
+  | "required"
+  | "tooLong"
+  | "hidden"
+  | "unsupported"
+  | "edge";
+
+export type ChannelNameJudgement =
+  | { ok: true; name: string }
+  | { ok: false; verdict: ChannelNameVerdict };
 
 export type ChannelNameIssue =
   | "required"
   | "tooLong"
+  | "hiddenCharacters"
   | "unsupportedCharacters"
   | "edgeSeparator";
 export type ChannelTopicIssue = "tooLong";
 
-/** What the server stores: trimmed and lowercased. */
+/** What the server stores, ADR-0225 D3 steps 1-5 (no accept/refuse decision):
+ *  NFC, fullwidth to halfwidth, blanks, lowercase, NFC. */
 export function normalizeChannelName(raw: string): string {
-  return raw.trim().toLowerCase();
+  const folded: number[] = [];
+  for (const ch of raw.normalize("NFC")) {
+    const cp = ch.codePointAt(0)!;
+    folded.push(cp >= 0xff01 && cp <= 0xff5e ? cp - 0xfee0 : cp);
+  }
+  const isSeparator = (cp: number | undefined) => cp === 0x2d || cp === 0x5f;
+  const out: number[] = [];
+  let i = 0;
+  while (i < folded.length) {
+    if (!BLANKS.has(folded[i])) {
+      out.push(folded[i]);
+      i += 1;
+      continue;
+    }
+    const runStart = i;
+    while (i < folded.length && BLANKS.has(folded[i])) i += 1;
+    if (i >= folded.length) break; // a trailing run: dropped
+    if (runStart === 0) continue; // a leading run: dropped
+    if (!isSeparator(out[out.length - 1]) && !isSeparator(folded[i])) out.push(0x2d);
+  }
+  return out
+    .map((cp) => String.fromCodePoint(cp))
+    .join("")
+    .toLowerCase()
+    .normalize("NFC");
+}
+
+/** ADR-0225 D1-D5, the server's `judge_channel_name`: fold, then length (code
+ *  points) -> hidden -> characters -> edges, so an over-long name hears "too
+ *  long" and a zero-width space hears "invisible". */
+export function judgeChannelName(raw: string): ChannelNameJudgement {
+  const name = normalizeChannelName(raw);
+  const chars = Array.from(name);
+  if (chars.length === 0) return { ok: false, verdict: "required" };
+  if (chars.length > CHANNEL_NAME_MAX) return { ok: false, verdict: "tooLong" };
+  const re = categories();
+  if (chars.some((c) => re.unseen.test(c) || isInvisibleLetterOrMark(c.codePointAt(0)!))) {
+    return { ok: false, verdict: "hidden" };
+  }
+  // A combining mark must lean on a letter or number (directly, or through
+  // other marks), never on `-`, `_` or the start of the name.
+  let afterBase = false;
+  for (const c of chars) {
+    if (re.letter.test(c) || re.number.test(c)) afterBase = true;
+    else if (re.mark.test(c) && afterBase) continue;
+    else if (c === "-" || c === "_") afterBase = false;
+    else return { ok: false, verdict: "unsupported" };
+  }
+  const edge = (c: string) => c === "-" || c === "_";
+  if (edge(chars[0]) || edge(chars[chars.length - 1])) {
+    return { ok: false, verdict: "edge" };
+  }
+  return { ok: true, name };
 }
 
 /** Topic keeps its case; only the edges go. Empty means "no topic". */
@@ -42,16 +147,20 @@ export function normalizeChannelTopic(raw: string): string {
 }
 
 export function channelNameIssue(raw: string): ChannelNameIssue | null {
-  const name = normalizeChannelName(raw);
-  if (name === "") return "required";
-  // Length before shape, same order as the server: "80자를 넘었다"는 말이
-  // "쓸 수 없는 글자가 있다"보다 고치기 쉬운 안내다.
-  if (name.length > CHANNEL_NAME_MAX) return "tooLong";
-  if (NAME_RE.test(name)) return null;
-  // The server's regex refuses two different things and one message for both
-  // told `-release` to use only the characters it had already used. Which half
-  // of the rule was broken decides which sentence the reader gets.
-  return NAME_ALPHABET_RE.test(name) ? "edgeSeparator" : "unsupportedCharacters";
+  const judged = judgeChannelName(raw);
+  if (judged.ok) return null;
+  switch (judged.verdict) {
+    case "required":
+      return "required";
+    case "tooLong":
+      return "tooLong";
+    case "hidden":
+      return "hiddenCharacters";
+    case "unsupported":
+      return "unsupportedCharacters";
+    case "edge":
+      return "edgeSeparator";
+  }
 }
 
 export function channelTopicIssue(raw: string): ChannelTopicIssue | null {
@@ -60,18 +169,39 @@ export function channelTopicIssue(raw: string): ChannelTopicIssue | null {
     : null;
 }
 
-/** Field copy, inherited from the mac sheet so both clients say one thing. */
+/** Dictionary keys of the name-rule sentences (`i18n/catalogs/<언어>/channels.json`,
+ *  seven languages). Screens format these with their message service; `tooLong`
+ *  takes `{max}` (`CHANNEL_NAME_MAX`). `serverRejected` is what a 400 on create
+ *  or rename shows instead of the server's English. */
+export const CHANNEL_NAME_ISSUE_KEYS = {
+  required: "channels.nameRule.required",
+  tooLong: "channels.nameRule.tooLong",
+  hiddenCharacters: "channels.nameRule.hidden",
+  unsupportedCharacters: "channels.nameRule.unsupported",
+  edgeSeparator: "channels.nameRule.edge",
+} as const satisfies Record<ChannelNameIssue, MessageKey>;
+
+export const CHANNEL_NAME_SERVER_REJECTED_KEY =
+  "channels.nameRule.serverRejected" as const satisfies MessageKey;
+
+export function channelNameIssueKey(
+  issue: ChannelNameIssue
+): (typeof CHANNEL_NAME_ISSUE_KEYS)[ChannelNameIssue] {
+  return CHANNEL_NAME_ISSUE_KEYS[issue];
+}
+
+/** Korean sentences for callers that have no message service yet. They are
+ *  read from the ko catalog itself, so there is one copy of the words. New
+ *  screens format `channelNameIssueKey` with their message service instead. */
+function koSentence(key: MessageKey): string {
+  return (koChannels as Record<string, string>)[key].replace(
+    "{max, number}",
+    String(CHANNEL_NAME_MAX)
+  );
+}
+
 export function channelNameIssueMessage(issue: ChannelNameIssue): string {
-  switch (issue) {
-    case "required":
-      return "채널 이름을 입력하세요.";
-    case "tooLong":
-      return `채널 이름은 ${CHANNEL_NAME_MAX}자 이내여야 합니다.`;
-    case "unsupportedCharacters":
-      return "영문, 숫자, 하이픈, 밑줄만 사용할 수 있습니다.";
-    case "edgeSeparator":
-      return "처음과 끝은 영문이나 숫자여야 합니다. 하이픈과 밑줄은 가운데에만 쓸 수 있습니다.";
-  }
+  return koSentence(CHANNEL_NAME_ISSUE_KEYS[issue]);
 }
 
 export function channelTopicIssueMessage(issue: ChannelTopicIssue): string {
@@ -311,6 +441,9 @@ export function canCreateChannelNow(
 export interface CreateChannelFailure {
   field: "name" | null;
   message: string;
+  /** Set when the sentence has a dictionary key (a 400 on the name); screens
+   *  with a message service format it instead of `message`. */
+  messageKey?: typeof CHANNEL_NAME_SERVER_REJECTED_KEY;
 }
 
 export function createChannelFailure(error: unknown): CreateChannelFailure {
@@ -322,12 +455,12 @@ export function createChannelFailure(error: unknown): CreateChannelFailure {
       };
     }
     if (error.status === 400) {
-      // The form validates with the server's own rule, so a 400 means the two
+      // The form judges with the server's own rule, so a 400 means the two
       // drifted. Say what the server will take rather than echoing its English.
       return {
         field: "name",
-        message:
-          "서버가 이 이름을 거절했습니다. 영문 소문자, 숫자, 하이픈, 밑줄만 쓸 수 있고 처음과 끝은 영문이나 숫자여야 합니다.",
+        message: koSentence(CHANNEL_NAME_SERVER_REJECTED_KEY),
+        messageKey: CHANNEL_NAME_SERVER_REJECTED_KEY,
       };
     }
     if (error.status === 403) {

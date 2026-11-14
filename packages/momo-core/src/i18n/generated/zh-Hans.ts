@@ -86,5 +86,50 @@ export const catalog: MessageCatalog = {
       "type": 0,
       "value": "无法退出。请重试。"
     }
+  ],
+  "channels.nameRule.edge": [
+    {
+      "type": 0,
+      "value": "名称必须以文字或数字开头和结尾。连字符和下划线只能放在中间。"
+    }
+  ],
+  "channels.nameRule.hidden": [
+    {
+      "type": 0,
+      "value": "名称中含有不可见字符。请清空后重新输入。"
+    }
+  ],
+  "channels.nameRule.required": [
+    {
+      "type": 0,
+      "value": "请输入频道名称。"
+    }
+  ],
+  "channels.nameRule.serverRejected": [
+    {
+      "type": 0,
+      "value": "服务器不接受这个名称。只能使用文字、数字、- 和 _。"
+    }
+  ],
+  "channels.nameRule.tooLong": [
+    {
+      "type": 0,
+      "value": "频道名称最多 "
+    },
+    {
+      "type": 2,
+      "value": "max",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": " 个字符。"
+    }
+  ],
+  "channels.nameRule.unsupported": [
+    {
+      "type": 0,
+      "value": "只能使用文字、数字、连字符（-）和下划线（_）。"
+    }
   ]
 };
