@@ -339,12 +339,19 @@ pub async fn list_unfurls_in_tx(
     Ok(rows.into_iter().map(decode_record).collect())
 }
 
+/// One card by its id, **only while the transaction can read the message it hangs on**
+/// (ADR-0177 증보 D17). The card goes where its message goes: the `message` read policies
+/// (`dm_leave_history_floor`, `dm_agent_read_boundary`) decide in the same statement, so a card
+/// whose message this reader cannot see is the same `None` as an id that never existed. A deleted
+/// message's row still exists, so this adds nothing about deletion.
 pub async fn load_unfurl_in_tx(
     conn: &mut PgConnection,
     unfurl_id: Uuid,
 ) -> Result<Option<UnfurlRecord>, DbError> {
     let row = sqlx::query(&format!(
-        "SELECT {RECORD_COLUMNS} FROM message_unfurl WHERE id = $1"
+        "SELECT {RECORD_COLUMNS} FROM message_unfurl \
+          WHERE id = $1 \
+            AND EXISTS (SELECT 1 FROM message m WHERE m.id = message_unfurl.message_id)"
     ))
     .bind(unfurl_id)
     .fetch_optional(&mut *conn)

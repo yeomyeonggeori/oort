@@ -332,8 +332,13 @@ pub(crate) async fn require_dev_principal(
                 scopes: identity.scopes.clone(),
                 channel_ids: identity.channel_ids.clone(),
             });
+            let member_id = identity.member_id;
             request.extensions_mut().insert(identity);
-            Ok(next.run(request).await)
+            // ADR-0177 증보 D17: a developer token speaks for its human; every tenant transaction
+            // the request opens (CLI routes and the human MCP alike) binds that requester.
+            Ok(momo_db::tenant::REQUEST_HUMAN_MEMBER
+                .scope(member_id, next.run(request))
+                .await)
         }
         DoorVerdict::Unknown => Err(invalid_token()),
         DoorVerdict::Refused { holder, refusal } => {

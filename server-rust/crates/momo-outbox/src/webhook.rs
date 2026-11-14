@@ -43,7 +43,17 @@ pub async fn claim_webhook_delivery_batch(
     pool: &PgPool,
     batch_size: i64,
 ) -> Result<Vec<ClaimedRow>, sqlx::Error> {
-    let rows = sqlx::query_as::<_, (i64, String, i32, String, chrono::DateTime<chrono::Utc>)>(
+    let rows = sqlx::query_as::<
+        _,
+        (
+            i64,
+            String,
+            i32,
+            String,
+            chrono::DateTime<chrono::Utc>,
+            uuid::Uuid,
+        ),
+    >(
         "WITH claimed AS ( \
              SELECT id FROM outbox \
               WHERE kind = 'webhook_delivery' \
@@ -57,19 +67,22 @@ pub async fn claim_webhook_delivery_batch(
             SET status = 'processing', attempts = o.attempts + 1 \
            FROM claimed c \
           WHERE o.id = c.id \
-          RETURNING o.id, o.kind::text, o.attempts, o.payload::text, o.created_at",
+          RETURNING o.id, o.kind::text, o.attempts, o.payload::text, o.created_at, o.workspace_id",
     )
     .bind(batch_size)
     .fetch_all(pool)
     .await?
     .into_iter()
-    .map(|(id, kind, attempts, payload, created_at)| ClaimedRow {
-        id,
-        kind,
-        attempts,
-        payload,
-        created_at,
-    })
+    .map(
+        |(id, kind, attempts, payload, created_at, workspace_id)| ClaimedRow {
+            id,
+            kind,
+            attempts,
+            payload,
+            created_at,
+            workspace_id,
+        },
+    )
     .collect();
     Ok(rows)
 }

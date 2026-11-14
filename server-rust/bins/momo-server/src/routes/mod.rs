@@ -53,6 +53,7 @@ pub mod display_attach;
 pub mod dm_agents;
 /// ADR-0177 증보 D7 / #4227 — `PUT|DELETE …/channels/{ch}/closure`: the member's own DM closure watermark.
 pub mod dm_closure;
+pub mod dm_leave;
 pub mod dms;
 /// 휘발 신호 — the one route family with no Swift ancestor (ADR-0149).
 pub mod ephemeral;

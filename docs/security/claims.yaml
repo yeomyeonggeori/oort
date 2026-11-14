@@ -70,6 +70,27 @@ claims:
     proofs:
       - "server-rust/bins/momo-server/tests/search_scope_conformance_pg.rs#a_channel_the_caller_may_not_read_is_the_same_404_as_one_that_is_not_there"
       - "server-rust/bins/momo-server/tests/search_scope_conformance_pg.rs#a_cursor_may_not_be_replayed_under_a_different_scope"
+  - id: TEN-6
+    claim: "After a person leaves a one-to-one conversation with another person, the server returns none of the messages from before the leave to that person through history, threads, search, pins, reactions, the inbox, attachment content and posters, link card lists and pictures, push fetch, a developer token or the personal MCP read; the subscribe proxy turns off replay of the kept room publications for that person's subscription; and the relay publishes no later frame about such a message to the room or to that person: it goes only to the personal channels of the members who can see the message, is not kept for replay, and is held back while the room's floors or the frame's target cannot be read."
+    scope: "ADR-0177 amendment 2026-11-14 (D17). Real PostgreSQL as the non-bypass API role and the bypass relay role, two workspaces. The relay's publishes are asserted against a stand-in Centrifugo (the request bodies, including that a diverted frame asks not to be kept) and the proxy decision over HTTP; both were measured once against the pinned Centrifugo v6.9.1 image, not in CI. Not proven here: pushes already delivered to a device and a screen already open on another device (D22 limits 1 and 2), that the other participant cannot infer the leave from the channel a late frame arrives on (D22 limit 4, accepted), and conversations with an agent (out of scope, D20). The read-path inventory proves that every read of message or of a content copy whose table name is written in the server's SQL text (after FROM, JOIN, TABLE or UPDATE, in a comma-separated FROM list, across a line break in a string or between concat! pieces) has a classification; a table name chosen at run time, such as a format! argument, is not seen, and the inventory does not prove that each classification is right."
+    priority: P0
+    runs: pr-ci
+    proofs:
+      - "server-rust/bins/momo-server/tests/dm_leave_conformance_pg.rs#the_leaver_reads_nothing_below_the_floor_through_any_door"
+      - "server-rust/bins/momo-server/tests/dm_leave_conformance_pg.rs#every_human_door_binds_the_requester"
+      - "server-rust/bins/momo-server/tests/dm_leave_copies_pg.rs#files_below_the_floor_answer_like_an_unknown_id"
+      - "server-rust/bins/momo-server/tests/dm_leave_copies_pg.rs#link_cards_below_the_floor_answer_like_an_unknown_id"
+      - "server-rust/bins/momo-server/tests/dm_leave_copies_pg.rs#counts_and_lists_hold_nothing_below_the_floor"
+      - "server-rust/bins/momo-server/tests/dm_leave_copies_pg.rs#the_subscribe_proxy_turns_recovery_off_for_a_floor_only"
+      - "server-rust/bins/momo-server/tests/dm_leave_copies_pg.rs#every_copy_of_message_in_the_catalog_is_classified"
+      - "server-rust/bins/momo-server/tests/dm_leave_read_paths.rs#every_message_read_in_the_server_source_is_classified"
+      - "server-rust/bins/momo-relay/tests/room_floor_routing_pg.rs#late_events_below_a_floor_reach_only_those_who_can_see_the_target"
+      - "server-rust/bins/momo-relay/tests/room_floor_routing_pg.rs#a_frame_nobody_can_see_goes_nowhere"
+      - "server-rust/bins/momo-relay/tests/room_floor_routing_pg.rs#an_unanswered_floor_check_sends_nothing_and_loses_nothing"
+      - "server-rust/bins/momo-relay/tests/room_floor_routing_pg.rs#an_unreadable_target_sends_nothing_and_loses_nothing"
+    sabotage:
+      how: "Dropping the read policy, the requester binding of a door, the message check of the card load or the proxy override turns the matching proof red (the sabotage table of the pull request for issue #5823); removing the relay's judgment, its hold-back on an unanswered read, the no-keep flag on a diverted frame or the empty-audience rule turns the matching relay proof red (the sabotage table of the pull request for issue #5857); adding a message read the inventory does not classify, or leaving a stale row, turns the inventory red, and the control test feeds the read shapes, and one it does not see, to the same scanner."
+      evidence: "server-rust/bins/momo-server/tests/dm_leave_read_paths.rs#an_unclassified_read_turns_the_inventory_red"
 
   # ---- 인증·세션 -------------------------------------------------------------------
   - id: AUTH-1

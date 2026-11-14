@@ -1375,6 +1375,53 @@ pub async fn cancel_member_schedules_in_tx(
     Ok(cancelled)
 }
 
+/// The audit `cause` of a schedule cancelled because its author left that 1:1 conversation
+/// (ADR-0177 증보 D16-1). A channel-level reason, so it is not a [`RevocationCause`] — those end a
+/// member's presence or credentials, and `session_end` decides each of them.
+pub const DM_LEFT_CAUSE: &str = "dm_left";
+
+/// ADR-0177 증보 D16-1 (#5822): the author left one 1:1 conversation — their `pending` and `failed`
+/// schedules **in that channel only** are cancelled (body erased, attachments released, one
+/// `cancelled` audit row each with `cause = dm_left`). Schedules in every other channel stay.
+///
+/// The author is the request's own caller, so this binds the caller's own owner scope
+/// ([`bind_owner_guc`]) — not a foreign binding — and leaves it bound; the caller unbinds when its
+/// owner-scoped work is done.
+pub async fn cancel_channel_schedules_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    member_id: Uuid,
+    channel_id: Uuid,
+    actor: ScheduleActor,
+) -> Result<HeldSchedules, DbError> {
+    bind_owner_guc(conn, member_id).await?;
+    let rows = sqlx::query(&format!(
+        "UPDATE scheduled_message SET {CANCEL_SET} \
+          WHERE workspace_id = $1 AND author_member_id = $2 AND channel_id = $3 \
+            AND status IN ('pending', 'failed') \
+          RETURNING {SCHEDULE_COLS}"
+    ))
+    .bind(workspace_id)
+    .bind(member_id)
+    .bind(channel_id)
+    .fetch_all(&mut *conn)
+    .await?;
+    let cancelled = decode_all(&rows)?;
+    let ids: Vec<Uuid> = cancelled.iter().map(|row| row.id).collect();
+    release_reservations_in_tx(conn, &ids).await?;
+    for row in &cancelled {
+        record_transition_in_tx(
+            conn,
+            row,
+            ScheduleAudit::Cancelled,
+            actor,
+            json!({ "cause": DM_LEFT_CAUSE }),
+        )
+        .await?;
+    }
+    Ok(cancelled)
+}
+
 fn decode_all(rows: &[PgRow]) -> Result<Vec<ScheduledMessage>, DbError> {
     rows.iter()
         .map(decode_schedule)
