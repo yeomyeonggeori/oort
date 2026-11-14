@@ -458,7 +458,7 @@ async function installMocks(context, support, probes = { count: 0, puts: [] }) {
   await context.route("**/v1/workspaces/*/channels", (route) =>
     json(route, { channels: CHANNELS })
   );
-  await context.route("**/v1/workspaces/*/roster", (route) =>
+  await context.route("**/v1/workspaces/*/roster*", (route) =>
     json(route, { members: rosterFor(support) })
   );
   await context.route("**/v1/workspaces/*/read-state", (route) =>

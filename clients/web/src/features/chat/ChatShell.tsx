@@ -1110,7 +1110,9 @@ export function ChatShell() {
   // 필터링하면 헤더가 「3명」이라고 말하는 동안 패널에는 2행이 서는 드리프트가
   // 생긴다. 서버 count 필드가 없으므로 roster의 channelIds를 한 번만 읽고,
   // 사람·에이전트를 함께 센다. DM은 상대가 제목에 이미 있으므로 이 패널을 내지
-  // 않는다.
+  // 않는다. 정지된 사람(소유자·관리자의 명부에만, #5814)도 채널 멤버십이 남아
+  // 이 배열에 들지만, 머리 수는 활성만 세고(`channelHeadCount`) 패널은 그 사람을
+  // 맨 아래 「정지됨」 묶음에 따로 세운다(#5781) — 활성 묶음들의 합이 머리 수다.
   const channelMembers = useMemo(() => {
     if (!channel || channel.kind === "dm") return [];
     return directory.members.filter((member) =>

@@ -2255,6 +2255,272 @@ export const catalog: MessageCatalog = {
       "value": "Session"
     }
   ],
+  "directory.lifecycle.cancel": [
+    {
+      "type": 0,
+      "value": "Cancel"
+    }
+  ],
+  "directory.lifecycle.errorForbidden": [
+    {
+      "type": 0,
+      "value": "You do not have permission to suspend or remove members in this workspace."
+    }
+  ],
+  "directory.lifecycle.errorLastOwner": [
+    {
+      "type": 0,
+      "value": "The workspace needs at least one person with the "
+    },
+    {
+      "type": 1,
+      "value": "owner"
+    },
+    {
+      "type": 0,
+      "value": " role, so this person cannot be suspended or removed."
+    }
+  ],
+  "directory.lifecycle.errorNetwork": [
+    {
+      "type": 0,
+      "value": "Could not reach the server. Check your connection and try again."
+    }
+  ],
+  "directory.lifecycle.errorNotActive": [
+    {
+      "type": 0,
+      "value": "This member is no longer active. Someone else may have suspended them in the meantime."
+    }
+  ],
+  "directory.lifecycle.errorNotFound": [
+    {
+      "type": 0,
+      "value": "We could not find this member. They may have already left the workspace."
+    }
+  ],
+  "directory.lifecycle.errorNotSuspended": [
+    {
+      "type": 0,
+      "value": "This member is not suspended any more. Someone else may have lifted the suspension in the meantime."
+    }
+  ],
+  "directory.lifecycle.errorRank": [
+    {
+      "type": 0,
+      "value": "You cannot suspend or remove a member whose role is the same as or higher than yours. Their role may have changed in the meantime."
+    }
+  ],
+  "directory.lifecycle.errorRateLimited": [
+    {
+      "type": 0,
+      "value": "Too many requests. Try again in a moment."
+    }
+  ],
+  "directory.lifecycle.errorSelf": [
+    {
+      "type": 0,
+      "value": "You cannot suspend or remove yourself."
+    }
+  ],
+  "directory.lifecycle.errorUnknown": [
+    {
+      "type": 0,
+      "value": "That did not go through. Try again."
+    }
+  ],
+  "directory.lifecycle.reinstate": [
+    {
+      "type": 0,
+      "value": "Lift suspension"
+    }
+  ],
+  "directory.lifecycle.reinstateBody": [
+    {
+      "type": 0,
+      "value": "They will be able to sign in again. Their earlier sign-ins are not restored, so they need to sign in again. Their channels are unchanged."
+    }
+  ],
+  "directory.lifecycle.reinstateBusy": [
+    {
+      "type": 0,
+      "value": "Lifting"
+    }
+  ],
+  "directory.lifecycle.reinstatedReceipt": [
+    {
+      "type": 0,
+      "value": "Lifted"
+    }
+  ],
+  "directory.lifecycle.reinstateSchedules": [
+    {
+      "type": 0,
+      "value": "Scheduled messages held when they were suspended do not go out on their own after the suspension is lifted. They need to reschedule them or send them now."
+    }
+  ],
+  "directory.lifecycle.reinstateTitle": [
+    {
+      "type": 0,
+      "value": "Lift "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "'s suspension?"
+    }
+  ],
+  "directory.lifecycle.remove": [
+    {
+      "type": 0,
+      "value": "Remove from workspace"
+    }
+  ],
+  "directory.lifecycle.removeAction": [
+    {
+      "type": 0,
+      "value": "Remove"
+    }
+  ],
+  "directory.lifecycle.removeBusy": [
+    {
+      "type": 0,
+      "value": "Removing"
+    }
+  ],
+  "directory.lifecycle.removedClose": [
+    {
+      "type": 0,
+      "value": "Close"
+    }
+  ],
+  "directory.lifecycle.removedTitle": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " was removed from the workspace."
+    }
+  ],
+  "directory.lifecycle.removeKeeps": [
+    {
+      "type": 0,
+      "value": "Their messages and direct message history stay, with a former-member label in place of their name."
+    }
+  ],
+  "directory.lifecycle.removeLeaves": [
+    {
+      "type": 0,
+      "value": "They leave every channel and direct message and are signed out on every device right away. Their scheduled messages are cancelled."
+    }
+  ],
+  "directory.lifecycle.removeTitle": [
+    {
+      "type": 0,
+      "value": "Remove "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " from the workspace?"
+    }
+  ],
+  "directory.lifecycle.removeWarning": [
+    {
+      "type": 0,
+      "value": "This cannot be undone. Even with a new invite, the same email address cannot join this workspace again."
+    }
+  ],
+  "directory.lifecycle.suspend": [
+    {
+      "type": 0,
+      "value": "Suspend"
+    }
+  ],
+  "directory.lifecycle.suspendBusy": [
+    {
+      "type": 0,
+      "value": "Suspending"
+    }
+  ],
+  "directory.lifecycle.suspendedReceipt": [
+    {
+      "type": 0,
+      "value": "Suspended"
+    }
+  ],
+  "directory.lifecycle.suspendKeeps": [
+    {
+      "type": 0,
+      "value": "Their messages and channels stay as they are. While they are suspended, the "
+    },
+    {
+      "type": 1,
+      "value": "owner"
+    },
+    {
+      "type": 0,
+      "value": " and "
+    },
+    {
+      "type": 1,
+      "value": "admin"
+    },
+    {
+      "type": 0,
+      "value": " roles still see their name on their messages; everyone else sees a former-member label."
+    }
+  ],
+  "directory.lifecycle.suspendSignOut": [
+    {
+      "type": 0,
+      "value": "They are signed out on every device right away and cannot sign in again until the suspension is lifted. Phone notifications stop as well."
+    }
+  ],
+  "directory.lifecycle.suspendTitle": [
+    {
+      "type": 0,
+      "value": "Suspend "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "?"
+    }
+  ],
+  "directory.lifecycle.suspendUndo": [
+    {
+      "type": 0,
+      "value": "Suspended members stay under Suspended on the Members tab, where you can lift the suspension at any time. Only the "
+    },
+    {
+      "type": 1,
+      "value": "owner"
+    },
+    {
+      "type": 0,
+      "value": " and "
+    },
+    {
+      "type": 1,
+      "value": "admin"
+    },
+    {
+      "type": 0,
+      "value": " roles see that group."
+    }
+  ],
   "directory.manage.heading": [
     {
       "type": 0,
@@ -2518,7 +2784,7 @@ export const catalog: MessageCatalog = {
     },
     {
       "type": 0,
-      "value": " role cannot change each other's roles or remove each other, so this cannot be undone."
+      "value": " role cannot change each other's roles, suspend each other, or remove each other, but they can create password reset links for each other. This cannot be undone."
     }
   ],
   "directory.role.confirmPair": [
@@ -4800,6 +5066,12 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "People"
+    }
+  ],
+  "memberList.group.suspended": [
+    {
+      "type": 0,
+      "value": "Suspended"
     }
   ],
   "memberList.newDm.close": [
@@ -10224,6 +10496,17 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "Presence unknown "
+    },
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    }
+  ],
+  "timeline.memberPanel.groupSuspended": [
+    {
+      "type": 0,
+      "value": "Suspended "
     },
     {
       "type": 2,
