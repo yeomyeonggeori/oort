@@ -115,10 +115,19 @@ pub fn target_of(event_type: &str) -> Option<Target> {
 /// The workspace inside the name is not trusted: the caller judges against the outbox row's own
 /// `workspace_id`.
 pub fn room_channel_id(channel: &str) -> Option<Uuid> {
+    room_channel_ids(channel).map(|(_, channel_id)| channel_id)
+}
+
+/// The `(workspace, channel)` a room channel's name spells; `None` for every other channel. The
+/// relay publishes a room frame only when the spelled workspace is the outbox row's own (a row
+/// that names another workspace's room is never judged against that room, so it is not sent).
+pub fn room_channel_ids(channel: &str) -> Option<(Uuid, Uuid)> {
     let rest = channel.strip_prefix("ch:ws")?;
     let (workspace, channel_id) = rest.split_once('.')?;
-    Uuid::parse_str(workspace).ok()?;
-    Uuid::parse_str(channel_id).ok()
+    Some((
+        Uuid::parse_str(workspace).ok()?,
+        Uuid::parse_str(channel_id).ok()?,
+    ))
 }
 
 /// A member's personal channel — the one the read-state, inbox and scheduled-message frames
@@ -319,6 +328,7 @@ mod tests {
             ch.to_string().to_uppercase()
         );
         assert_eq!(room_channel_id(&room), Some(ch));
+        assert_eq!(room_channel_ids(&room), Some((ws, ch)));
         for other in [
             format!("user:read-state#{}", ch.to_string().to_uppercase()),
             format!("typing:ws{}.{}", ws, ch),

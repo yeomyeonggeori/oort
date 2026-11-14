@@ -30,7 +30,7 @@ use axum::routing::post;
 use axum::{Json, Router};
 use momo_db::migrate::{default_migrations_dir, run_migrations, SeedMode};
 use momo_db::sqlx::postgres::{PgConnectOptions, PgPoolOptions};
-use momo_db::sqlx::{self};
+use momo_db::sqlx::{self, Executor};
 use momo_db::{with_tenant_tx, PgPool};
 use momo_messaging::{
     cent_channel, delete_message_in_tx, edit_message_in_tx, open_direct_message_in_tx,
@@ -366,6 +366,90 @@ async fn drain(relay: &Relay) -> momo_relay::DrainStats {
     relay.drain_to_empty().await
 }
 
+/// A relay whose database role cannot read `table`: BYPASSRLS like `momo_relay` and able to claim
+/// and settle outbox rows, so only the judgment's read of `table` fails. The role is this suite's
+/// own (made by the superuser, kept between runs).
+async fn relay_that_cannot_read(su: &PgPool, table: &str, api_url: &str) -> Relay {
+    let role = format!("relay_fault_no_{table}");
+    su.execute(
+        format!(
+            "DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '{role}') THEN \
+               CREATE ROLE {role} NOLOGIN BYPASSRLS; END IF; END $$"
+        )
+        .as_str(),
+    )
+    .await
+    .expect("fault role");
+    su.execute(
+        format!(
+            "GRANT USAGE ON SCHEMA public TO {role}; GRANT SELECT, UPDATE ON outbox TO {role};"
+        )
+        .as_str(),
+    )
+    .await
+    .expect("grant outbox");
+    for other in ["membership", "message", "work_session", "approval"] {
+        let grant = if other == table {
+            "REVOKE ALL ON"
+        } else {
+            "GRANT SELECT ON"
+        };
+        let direction = if other == table { "FROM" } else { "TO" };
+        su.execute(format!("{grant} {other} {direction} {role}").as_str())
+            .await
+            .expect("grant judgment reads");
+    }
+    let set_role = format!("SET ROLE {role}");
+    let pool = PgPoolOptions::new()
+        .max_connections(2)
+        .after_connect(move |conn, _meta| {
+            let set_role = set_role.clone();
+            Box::pin(async move {
+                conn.execute(set_role.as_str()).await?;
+                Ok(())
+            })
+        })
+        .connect(&database_url())
+        .await
+        .expect("connect the fault pool");
+    relay_for(pool, api_url)
+}
+
+/// `(status, attempts, last_error)` of this workspace's broadcast rows, by status.
+async fn rows_of(su: &PgPool, ws: Uuid) -> Vec<(String, i32, Option<String>)> {
+    sqlx::query_as(
+        "SELECT status::text, attempts, last_error FROM outbox \
+          WHERE workspace_id = $1 AND kind = 'broadcast' ORDER BY id",
+    )
+    .bind(ws)
+    .fetch_all(su)
+    .await
+    .expect("rows")
+}
+
+/// Make this workspace's requeued rows due now (the backoff is not this suite's subject).
+async fn due_now(su: &PgPool, ws: Uuid) {
+    sqlx::query(
+        "UPDATE outbox SET available_at = now() \
+          WHERE workspace_id = $1 AND kind = 'broadcast' AND status = 'pending'",
+    )
+    .bind(ws)
+    .execute(su)
+    .await
+    .expect("due now");
+}
+
+/// Every delivery the mock holds, room or personal, of one event type.
+fn everywhere(mock: &Mock, kind: &str) -> Vec<Delivery> {
+    mock.deliveries
+        .lock()
+        .unwrap()
+        .iter()
+        .filter(|d| d.data["type"] == json!(kind))
+        .cloned()
+        .collect()
+}
+
 fn types(deliveries: &[Delivery]) -> BTreeMap<String, usize> {
     let mut out = BTreeMap::new();
     for delivery in deliveries {
@@ -503,12 +587,23 @@ async fn late_events_below_a_floor_reach_only_those_who_can_see_the_target() {
             delivery.body.get("version").is_none(),
             "no version on a personal channel"
         );
+        assert_eq!(
+            delivery.body["skip_history"],
+            json!(true),
+            "a diverted frame is not kept for recovery"
+        );
         assert!(delivery.body["idempotency_key"]
             .as_str()
             .is_some_and(|k| k.starts_with(&room)));
         let mut room_shape = delivery.data.clone();
         room_shape.as_object_mut().unwrap().remove(ROOM_CHANNEL_KEY);
         assert!(room_shape.get("type").is_some() && room_shape.get("payload").is_some());
+    }
+    for delivery in mock.on(&room) {
+        assert!(
+            delivery.body.get("skip_history").is_none(),
+            "a room frame keeps its history as before"
+        );
     }
     // The reply on the old root is a room message (it is above the floor) and carries the root's
     // id only.
@@ -860,4 +955,337 @@ async fn a_row_of_another_workspace_is_never_judged_against_this_room() {
     );
     assert!(mock.on(&personal_channel(dm.stayer)).is_empty());
     assert!(mock.on(&personal_channel(dm.leaver)).is_empty());
+}
+
+/// 닫힘으로 실패 (ADR-0177 증보 D17): when the batch's floor check cannot be answered, nothing of the
+/// batch is sent — not to the room, not to anyone — and no row is lost: every row goes back to
+/// pending, and once the check answers again each frame is sent once, to the right place.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
+async fn an_unanswered_floor_check_sends_nothing_and_loses_nothing() {
+    let _guard = relay_test_lock().await;
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    settle_residual_broadcasts(&su).await;
+    let dm = dm_fixture(&su).await;
+    let (mock, api) = start_mock().await;
+    let relay = relay_for(momo_relay_pool().await, &api);
+
+    let (old, old_seq) = say(&dm, dm.stayer, "지난 글").await;
+    drain(&relay).await;
+    mock.clear();
+    leave(&dm, old_seq + 1).await;
+    let (ws, stayer) = (dm.ws, dm.stayer);
+    with_tenant_tx(&dm.app, ws, move |conn| {
+        Box::pin(async move {
+            edit_message_in_tx(conn, ws, old, stayer, "나간 뒤에 고친 지난 글")
+                .await?
+                .expect("edit");
+            Ok(())
+        })
+    })
+    .await
+    .expect("late edit");
+    let (_, fresh_seq) = say(&dm, dm.stayer, "나간 뒤의 새 글").await;
+    assert!(fresh_seq > old_seq);
+
+    let blind = relay_that_cannot_read(&su, "membership", &api).await;
+    let stats = drain(&blind).await;
+    assert_eq!(stats.claimed, 3, "the claim itself works: {stats:?}");
+    assert_eq!(stats.published, 0, "{stats:?}");
+    assert_eq!(stats.requeued, stats.claimed, "{stats:?}");
+    assert!(
+        mock.deliveries.lock().unwrap().is_empty(),
+        "nothing is sent while the floor check cannot answer"
+    );
+    let rows = rows_of(&su, dm.ws).await;
+    let waiting: Vec<_> = rows.iter().filter(|r| r.0 == "pending").collect();
+    assert_eq!(
+        waiting.len(),
+        stats.claimed,
+        "every claimed row waits (the leave's own frame, the edit, the new message): {rows:?}"
+    );
+    for (_, attempts, error) in &waiting {
+        assert_eq!(*attempts, 1);
+        assert!(error
+            .as_deref()
+            .is_some_and(|e| e.starts_with("room floor check")));
+    }
+
+    due_now(&su, dm.ws).await;
+    let stats = drain(&relay).await;
+    assert_eq!((stats.published, stats.failed), (3, 0), "{stats:?}");
+    assert_eq!(
+        types(&mock.on(&personal_channel(dm.stayer))),
+        counted(&[("message.edited", 1)])
+    );
+    assert_eq!(types(&mock.on(&dm.room())), counted(&[("message.new", 1)]));
+    assert!(mock.on(&personal_channel(dm.leaver)).is_empty());
+    assert!(rows_of(&su, dm.ws).await.iter().all(|r| r.0 == "done"));
+}
+
+/// 닫힘으로 실패: a frame whose target cannot be read is not sent to the room (nor to anyone) and
+/// its row waits; the rest of the batch goes out as usual.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
+async fn an_unreadable_target_sends_nothing_and_loses_nothing() {
+    let _guard = relay_test_lock().await;
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    settle_residual_broadcasts(&su).await;
+    let dm = dm_fixture(&su).await;
+    let (mock, api) = start_mock().await;
+    let relay = relay_for(momo_relay_pool().await, &api);
+
+    let (old_root, old_seq) = say(&dm, dm.stayer, "지난 스레드").await;
+    drain(&relay).await;
+    mock.clear();
+    leave(&dm, old_seq + 1).await;
+    // A new reply on the old root: `message.new` (above the floor, the room) and `thread.updated`
+    // (its target is the root, read from `message`).
+    let (ws, stayer, channel) = (dm.ws, dm.stayer, dm.channel);
+    with_tenant_tx(&dm.app, ws, move |conn| {
+        Box::pin(async move {
+            let mut reply = NewMessage::text(channel, stayer, "지난 글에 단 새 답글")
+                .with_client_msg_id(Uuid::new_v4());
+            reply.root_id = Some(old_root);
+            send_message_with_mentions_in_tx(conn, ws, reply, SendExtras::default())
+                .await?
+                .expect("reply");
+            Ok(())
+        })
+    })
+    .await
+    .expect("reply");
+
+    let blind = relay_that_cannot_read(&su, "message", &api).await;
+    let stats = drain(&blind).await;
+    // The leave's own frame, the reply's `message.new` and the root's `thread.updated`.
+    assert_eq!(stats.claimed, 3, "{stats:?}");
+    assert_eq!((stats.published, stats.requeued), (2, 1), "{stats:?}");
+    assert!(
+        everywhere(&mock, "thread.updated").is_empty(),
+        "the unjudged frame is sent nowhere"
+    );
+    assert_eq!(types(&mock.on(&dm.room())), counted(&[("message.new", 1)]));
+    let rows = rows_of(&su, dm.ws).await;
+    let waiting: Vec<_> = rows.iter().filter(|r| r.0 == "pending").collect();
+    assert_eq!(waiting.len(), 1, "{rows:?}");
+    assert!(waiting[0]
+        .2
+        .as_deref()
+        .is_some_and(|e| e.starts_with("room audience")));
+
+    due_now(&su, dm.ws).await;
+    let stats = drain(&relay).await;
+    assert_eq!((stats.published, stats.failed), (1, 0), "{stats:?}");
+    let sent = everywhere(&mock, "thread.updated");
+    assert_eq!(sent.len(), 1, "once, after the read answers: {sent:?}");
+    assert_eq!(sent[0].channel, personal_channel(dm.stayer));
+    assert!(rows_of(&su, dm.ws).await.iter().all(|r| r.0 == "done"));
+}
+
+/// When both members have a floor: a frame below both floors goes to nobody (not the room), one
+/// between the floors only to the member whose floor is at or below it, one above both to the room.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
+async fn a_frame_nobody_can_see_goes_nowhere() {
+    let _guard = relay_test_lock().await;
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    settle_residual_broadcasts(&su).await;
+    let dm = dm_fixture(&su).await;
+    let (mock, api) = start_mock().await;
+    let relay = relay_for(momo_relay_pool().await, &api);
+
+    let mut seqs = Vec::new();
+    for n in 0..6 {
+        seqs.push(say(&dm, dm.stayer, &format!("글 {n}")).await.1);
+    }
+    drain(&relay).await;
+    mock.clear();
+    // 김도현 sees from seqs[2], 이서연 from seqs[4].
+    leave(&dm, seqs[2]).await;
+    let (ws, channel, stayer) = (dm.ws, dm.channel, dm.stayer);
+    let floor = seqs[4];
+    with_tenant_tx(&dm.app, ws, move |conn| {
+        Box::pin(async move { raise_history_floor_in_tx(conn, ws, channel, stayer, floor).await })
+    })
+    .await
+    .expect("the other leaves too");
+
+    for (seq, tag) in [
+        (seqs[1], "below both"),
+        (seqs[3], "between"),
+        (seqs[5], "above both"),
+    ] {
+        emit_frame(
+            &dm,
+            json!({"type": "message.edited", "v": 1, "ts": 1, "seq": seq, "payload": {"tag": tag}}),
+        )
+        .await;
+    }
+    let stats = drain(&relay).await;
+    assert_eq!(stats.failed, 0, "{stats:?}");
+
+    let tags = |deliveries: Vec<Delivery>| -> Vec<String> {
+        deliveries
+            .iter()
+            .map(|d| d.data["payload"]["tag"].as_str().unwrap_or("?").to_string())
+            .collect()
+    };
+    assert_eq!(tags(mock.on(&dm.room())), vec!["above both"]);
+    assert_eq!(
+        tags(mock.on(&personal_channel(dm.leaver))),
+        vec!["between"],
+        "only the member whose floor is at or below the target"
+    );
+    assert!(mock.on(&personal_channel(dm.stayer)).is_empty());
+    let mut sent = tags(everywhere(&mock, "message.edited"));
+    sent.sort();
+    assert_eq!(
+        sent,
+        vec!["above both", "between"],
+        "the frame nobody can see is sent nowhere"
+    );
+    let done_without_audience: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM outbox WHERE workspace_id = $1 AND kind = 'broadcast' \
+            AND status = 'done' AND last_error = 'no audience'",
+    )
+    .bind(dm.ws)
+    .fetch_one(&su)
+    .await
+    .unwrap();
+    assert_eq!(done_without_audience, 1);
+}
+
+/// A participation that has left the room (`left_at`) is not part of a diverted frame's audience.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
+async fn a_member_who_left_the_room_is_not_in_the_audience() {
+    let _guard = relay_test_lock().await;
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    settle_residual_broadcasts(&su).await;
+    let dm = dm_fixture(&su).await;
+    let (mock, api) = start_mock().await;
+    let relay = relay_for(momo_relay_pool().await, &api);
+
+    // A third participation that has left (only the predicate is this test's subject: inserted
+    // with the replica role so the room's own rules do not stop it).
+    let gone = seed_human(&su, dm.ws, "박지우").await;
+    let mut tx = su.begin().await.unwrap();
+    sqlx::query("SET LOCAL session_replication_role = replica")
+        .execute(&mut *tx)
+        .await
+        .unwrap();
+    sqlx::query(
+        "INSERT INTO membership (workspace_id, channel_id, member_id, left_at) \
+         VALUES ($1, $2, $3, now())",
+    )
+    .bind(dm.ws)
+    .bind(dm.channel)
+    .bind(gone)
+    .execute(&mut *tx)
+    .await
+    .expect("seed a left participation");
+    tx.commit().await.unwrap();
+
+    let (_, seq) = say(&dm, dm.stayer, "지난 글").await;
+    drain(&relay).await;
+    mock.clear();
+    leave(&dm, seq + 1).await;
+    emit_frame(
+        &dm,
+        json!({"type": "message.edited", "v": 1, "ts": 1, "seq": seq, "payload": {}}),
+    )
+    .await;
+    let stats = drain(&relay).await;
+    assert_eq!((stats.diverted, stats.failed), (1, 0), "{stats:?}");
+    assert_eq!(mock.on(&personal_channel(dm.stayer)).len(), 1);
+    assert!(
+        mock.on(&personal_channel(gone)).is_empty(),
+        "a participation that left hears nothing"
+    );
+    assert!(mock.on(&dm.room()).is_empty());
+}
+
+/// A row whose room channel spells another workspace than the row's own is not sent (closed),
+/// whatever that room's floors are.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
+async fn a_row_naming_another_workspaces_room_is_not_sent() {
+    let _guard = relay_test_lock().await;
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    settle_residual_broadcasts(&su).await;
+    let dm = dm_fixture(&su).await;
+    let other = dm_fixture(&su).await;
+    let (mock, api) = start_mock().await;
+    let relay = relay_for(momo_relay_pool().await, &api);
+
+    let (_, seq) = say(&dm, dm.stayer, "지난 글").await;
+    drain(&relay).await;
+    mock.clear();
+    leave(&dm, seq + 1).await;
+
+    // Written in the other workspace's transaction, naming this workspace's floored room.
+    let payload = json!({
+        "channel": dm.room(),
+        "data": {"type": "message.edited", "v": 1, "ts": 1, "seq": seq, "payload": {}},
+        "idempotency_key": format!("mismatch:{}", Uuid::new_v4()),
+    });
+    let other_ws = other.ws;
+    let room_id = dm.channel;
+    with_tenant_tx(&other.app, other_ws, move |conn| {
+        Box::pin(async move {
+            emit_outbox(
+                conn,
+                other_ws,
+                OutboxKind::Broadcast,
+                "publish",
+                &payload,
+                Some(room_id),
+            )
+            .await
+            .map_err(Into::into)
+        })
+    })
+    .await
+    .expect("emit");
+
+    let stats = drain(&relay).await;
+    assert_eq!((stats.published, stats.failed), (0, 1), "{stats:?}");
+    assert!(mock.deliveries.lock().unwrap().is_empty(), "sent nowhere");
+    let rows = rows_of(&su, other.ws).await;
+    assert_eq!(rows.len(), 1, "{rows:?}");
+    assert_eq!(rows[0].0, "failed");
+}
+
+/// The two partial indexes the floor reads stand on (migrations 181, 182) are exactly what the
+/// migrations make: only the rows with a floor, by member and by channel.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
+async fn the_floor_indexes_are_the_ones_the_migrations_make() {
+    let _guard = relay_test_lock().await;
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    for (name, definition) in [
+        (
+            "membership_history_floor_member_idx",
+            "CREATE INDEX membership_history_floor_member_idx ON public.membership USING btree (member_id) WHERE (history_from_seq IS NOT NULL)",
+        ),
+        (
+            "membership_history_floor_channel_idx",
+            "CREATE INDEX membership_history_floor_channel_idx ON public.membership USING btree (channel_id) WHERE (history_from_seq IS NOT NULL)",
+        ),
+    ] {
+        let found: Option<String> =
+            sqlx::query_scalar("SELECT indexdef FROM pg_indexes WHERE indexname = $1")
+                .bind(name)
+                .fetch_optional(&su)
+                .await
+                .unwrap();
+        assert_eq!(found.as_deref(), Some(definition), "{name}");
+    }
 }

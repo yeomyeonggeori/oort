@@ -45,13 +45,16 @@ struct PublishRequest<'a> {
 
 /// `POST /api/broadcast` — one frame to several channels (ADR-0177 증보 D17: a room frame
 /// diverted to its audience's personal channels). No `version`: a personal channel carries frames
-/// of many rooms, so a room's seq is not an order there.
+/// of many rooms, so a room's seq is not an order there. `skip_history` is always set: a diverted
+/// frame reaches the subscribers that are live now and is not kept in the channel's history, so a
+/// recovering subscription of that channel never replays it.
 #[derive(Debug, Serialize)]
 struct BroadcastRequest<'a> {
     channels: &'a [String],
     data: &'a serde_json::Value,
     #[serde(skip_serializing_if = "Option::is_none")]
     idempotency_key: Option<&'a str>,
+    skip_history: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -100,6 +103,7 @@ impl CentrifugoClient {
             channels,
             data,
             idempotency_key,
+            skip_history: true,
         };
         self.send(&self.broadcast_url, &body, broadcast_error).await
     }
@@ -288,13 +292,14 @@ mod tests {
     }
 
     #[test]
-    fn a_broadcast_body_has_no_version() {
+    fn a_broadcast_body_has_no_version_and_is_not_kept() {
         let data = json!({"type": "message.edited", "seq": 3});
         let channels = vec!["user:read-state#A".to_string()];
         let body = serde_json::to_value(BroadcastRequest {
             channels: &channels,
             data: &data,
             idempotency_key: Some("ch:wsA.B:message.edited:K"),
+            skip_history: true,
         })
         .expect("serialize");
         assert_eq!(
@@ -303,7 +308,75 @@ mod tests {
                 "channels": ["user:read-state#A"],
                 "data": {"type": "message.edited", "seq": 3},
                 "idempotency_key": "ch:wsA.B:message.edited:K",
+                "skip_history": true,
             })
+        );
+    }
+
+    /// The bodies `broadcast` and `publish` send, read back from a listener: a diverted frame is
+    /// never kept for recovery (ADR-0177 증보 D17), and the room path is unchanged.
+    #[tokio::test]
+    async fn a_diverted_frame_is_sent_without_history_and_a_room_frame_with_it() {
+        use axum::extract::State;
+        use axum::routing::post;
+        use axum::{Json, Router};
+        use std::sync::{Arc, Mutex};
+
+        type Seen = Arc<Mutex<Vec<(&'static str, serde_json::Value)>>>;
+        async fn on_broadcast(
+            State(seen): State<Seen>,
+            Json(body): Json<serde_json::Value>,
+        ) -> Json<serde_json::Value> {
+            seen.lock().unwrap().push(("broadcast", body));
+            Json(json!({"result": {"responses": [{"result": {}}]}}))
+        }
+        async fn on_publish(
+            State(seen): State<Seen>,
+            Json(body): Json<serde_json::Value>,
+        ) -> Json<serde_json::Value> {
+            seen.lock().unwrap().push(("publish", body));
+            Json(json!({"result": {}}))
+        }
+        let seen: Seen = Arc::default();
+        let app = Router::new()
+            .route("/api/broadcast", post(on_broadcast))
+            .route("/api/publish", post(on_publish))
+            .with_state(seen.clone());
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind");
+        let address = listener.local_addr().expect("address");
+        tokio::spawn(async move {
+            let _ = axum::serve(listener, app).await;
+        });
+
+        let client = CentrifugoClient::new(&format!("http://{address}/api"), "k").expect("client");
+        let data = json!({"type": "message.edited", "seq": 3});
+        let channels = vec!["user:read-state#A".to_string()];
+        assert_eq!(
+            client.broadcast(&channels, &data, Some("ch:wsA.B:3")).await,
+            PublishOutcome::Ok
+        );
+        let room = BroadcastPayload {
+            channel: "ch:wsA.B".to_string(),
+            data: data.clone(),
+            version: Some(3),
+            idempotency_key: Some("ch:wsA.B:3".to_string()),
+        };
+        assert_eq!(client.publish(&room).await, PublishOutcome::Ok);
+
+        let seen = seen.lock().unwrap().clone();
+        assert_eq!(seen.len(), 2, "{seen:?}");
+        assert_eq!(seen[0].0, "broadcast");
+        assert_eq!(
+            seen[0].1["skip_history"],
+            json!(true),
+            "a diverted frame is not kept for recovery"
+        );
+        assert_eq!(seen[1].0, "publish");
+        assert!(
+            seen[1].1.get("skip_history").is_none(),
+            "the room path keeps its history as before"
         );
     }
 

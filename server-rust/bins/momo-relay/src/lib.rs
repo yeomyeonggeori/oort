@@ -47,7 +47,7 @@ use momo_wire::payload::BroadcastPayload;
 use tokio::sync::mpsc;
 use uuid::Uuid;
 
-use crate::audience::{diverted_data, personal_channel, room_channel_id, Route};
+use crate::audience::{diverted_data, personal_channel, room_channel_id, room_channel_ids, Route};
 
 pub use centrifugo::{CentrifugoClient, PublishOutcome};
 pub use config::RelayConfig;
@@ -213,6 +213,20 @@ impl Relay {
             }
         };
 
+        // A room channel that spells another workspace than the row's own is never judged against
+        // that room and never sent (closed). The app writes the name from the row's own tenant
+        // transaction, so such a row is not one of its frames.
+        if let Some((named_workspace, _)) = room_channel_ids(&payload.channel) {
+            if named_workspace != row.workspace_id {
+                tracing::error!(
+                    outbox_id = row.id,
+                    "room channel names another workspace than its outbox row"
+                );
+                self.settle_failed(row.id, "room channel names another workspace")
+                    .await;
+                return Settlement::Failed;
+            }
+        }
         let room = room_channel_id(&payload.channel)
             .map(|channel_id| (row.workspace_id, channel_id))
             .filter(|room| floored.contains(room));
