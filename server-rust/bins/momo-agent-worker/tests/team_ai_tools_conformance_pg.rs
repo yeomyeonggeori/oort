@@ -1849,3 +1849,54 @@ async fn d6_a_hangul_channel_is_found_by_every_spelling_and_only_as_a_channel_58
         "the room and the archived channel are each not_found: {data}"
     );
 }
+
+/// **ADR-0225 D6 (#5830 수리)** — a channel whose name was stored with capitals
+/// (the database never enforced the rule) is still found by its folded spelling:
+/// the stored side of the comparison is lower-cased too.
+///
+/// | revert that makes it red |
+/// |---|
+/// | compare the stored `name` as it is, without `lower()` |
+#[tokio::test]
+#[ignore = "requires an isolated PostgreSQL 18 (see module docs)"]
+async fn d6_a_channel_stored_with_capitals_is_found_by_its_folded_name_5830() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let pool = momo_worker_pool().await;
+    reset_instance(&su).await;
+    let t = seed(&su, &pool).await;
+    seed_chat_link(&su, t.owner_id).await;
+    let everyone = [t.owner_id, t.member_id, t.agent_id];
+    let legacy = named_channel(
+        &su,
+        t.workspace_id,
+        "public",
+        "Legacy-Room-5830",
+        &everyone,
+        false,
+    )
+    .await;
+    post(
+        &pool,
+        t.workspace_id,
+        legacy,
+        t.owner_id,
+        "DELTA-legacy-5830",
+    )
+    .await;
+
+    let calls = vec![("read_channel", json!({"channel": "#legacy room 5830"}))];
+    let script = Script::new(vec![tools(&calls), text("끝")]);
+    let w = worker_with(script.clone(), |_| {}).await;
+    let (dm, _) = channel(&su, t.workspace_id, "dm", &[t.member_id, t.agent_id]).await;
+    enqueue_in(&pool, &t, dm, t.member_id, "옛 채널 읽어 줘").await;
+    drain(&w).await;
+
+    let seen = script.seen();
+    assert_eq!(seen.len(), 2, "one read round, then the answer");
+    let data = fenced(&last_user_turn(&seen, 1));
+    assert!(
+        data.contains("DELTA-legacy-5830"),
+        "the capitalised channel is read: {data}"
+    );
+}
