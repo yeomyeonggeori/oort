@@ -1,4 +1,5 @@
 import type {DeviceKey} from '@momo/core/features/auth/deviceKeys';
+import {DM_LEAVE_KEYS} from '@momo/core/features/channels/dmLeave';
 import {makeDirectory} from '@momo/core/features/workspace/directory';
 import type {Message, ReadState, RosterMember} from '@momo/core/lib/api';
 import {QUICK_REACTIONS, type ReactionChip} from '@momo/core/features/timeline/reactions';
@@ -38,6 +39,8 @@ import {
   type ChannelRowTarget,
 } from '../src/features/sidebar/channelRowActions';
 import {ChannelActionSheet} from '../src/features/sidebar/ChannelActionSheet';
+import type {DmLeaveStepView} from '../src/features/sidebar/useChannelRowActions';
+import {useFormatMessage} from '../src/i18n/useFormatMessage';
 import {workspaceKeys} from '../src/features/workspace/queries';
 import {useSession} from '../src/session/useSession';
 import {NewMessageSheet} from '../src/shell/NewMessageSheet';
@@ -511,18 +514,33 @@ const DM_TARGET: ChannelRowTarget = {
 // 알림을 끈 채널(#5791) - 알림 줄의 끝 표지가 빗금 종(bell-off)이다. 켜짐(`channel`)과 한 쌍으로 찍어 두 종의 잉크 끝을 잰다.
 const CHANNEL_MUTED_TARGET: ChannelRowTarget = {...CHANNEL_TARGET, muted: true};
 
+// 1:1 「대화 나가기」(ADR-0177 증보 2026-11-14 D21, #5826) - 사람끼리의 1:1 이고 나가기를 싣는 서버라 맨 아래 위험 카드가 선다.
+const DM_LEAVE_TARGET: ChannelRowTarget = {...DM_TARGET, leaveOffered: true};
+
+/** `…dm-leave-<단계>`: 확인 단계(예약 2개) · 진행 중 · 실패(코어 사전의 실패 문장). 세 자리의 캡처 표면이 같이 쓴다. */
+export function dmLeaveStep(which: string, failed: string): DmLeaveStepView | null {
+  const base = {name: '박서연', scheduledCount: 2, pending: false, error: null};
+  if (which === 'confirm') return base;
+  if (which === 'pending') return {...base, pending: true};
+  if (which === 'failed') return {...base, error: failed};
+  return null;
+}
+
 function ChannelSheetSurface({
   target,
   confirmingLeave,
+  dmLeave = null,
 }: {
   target: ChannelRowTarget;
   confirmingLeave: boolean;
+  dmLeave?: DmLeaveStepView | null;
 }): React.JSX.Element {
+  const formatMessage = useFormatMessage();
   return (
     <Backdrop>
       <ChannelActionSheet
         target={target}
-        items={channelRowActionItems(target, NOTHING_COPIED)}
+        items={channelRowActionItems(target, NOTHING_COPIED, formatMessage)}
         confirmingLeave={confirmingLeave}
         isPending={() => false}
         error={null}
@@ -530,6 +548,9 @@ function ChannelSheetSurface({
         onRun={noop}
         onConfirmLeave={noop}
         onCancelLeave={noop}
+        dmLeave={dmLeave}
+        onConfirmDmLeave={noop}
+        onCancelDmLeave={noop}
         onClose={noop}
       />
     </Backdrop>
@@ -762,6 +783,7 @@ function ProfileDeviceSurface(): React.JSX.Element {
 }
 
 export function SheetKitSurface({which}: {which: string}): React.JSX.Element {
+  const dmLeaveFailed = useFormatMessage()(DM_LEAVE_KEYS.failed);
   switch (which) {
     case 'page-lead':
       return <PageKit lead />;
@@ -789,6 +811,17 @@ export function SheetKitSurface({which}: {which: string}): React.JSX.Element {
       return <ChannelSheetSurface target={DM_TARGET} confirmingLeave={false} />;
     case 'channel-muted':
       return <ChannelSheetSurface target={CHANNEL_MUTED_TARGET} confirmingLeave={false} />;
+    case 'channel-dm-leave':
+    case 'channel-dm-leave-confirm':
+    case 'channel-dm-leave-pending':
+    case 'channel-dm-leave-failed':
+      return (
+        <ChannelSheetSurface
+          target={DM_LEAVE_TARGET}
+          confirmingLeave={false}
+          dmLeave={dmLeaveStep(which.slice('channel-dm-leave-'.length), dmLeaveFailed)}
+        />
+      );
     case 'devicekey-pending':
       return <DeviceKeySheetSurface which="pending" />;
     case 'devicekey-approved':

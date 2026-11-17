@@ -29,6 +29,11 @@ import type {ChannelActionKey} from '@momo/core/features/channels/actionModel';
 import {normalizeChannelTopic} from '@momo/core/features/channels/model';
 import {profileEmail} from '@momo/core/features/directory/model';
 import {dmCloseOffered} from '@momo/core/features/sidebar/dmVisibility';
+import {
+  dmLeaveMode,
+  dmLeaveOffered,
+  higherHistoryFloor,
+} from '@momo/core/features/channels/dmLeave';
 import {readProjectionPhase} from '@momo/core/features/sidebar/goneDm';
 import {composedUnreadCount} from '@momo/core/features/readState/model';
 import {
@@ -157,7 +162,7 @@ import {usePersonalAgentCall} from '../features/conversation/usePersonalAgentCal
 import {useTimeline} from '../features/conversation/useTimeline';
 import {useMarkRead} from '../features/inbox/useInbox';
 import {dmClosureMode} from '../features/sidebar/dmVerdicts';
-import type {ChannelRowTarget} from '../features/sidebar/channelRowActions';
+import type {ChannelRowTarget, DmLeaveHeld} from '../features/sidebar/channelRowActions';
 import {useChannelRowActions} from '../features/sidebar/useChannelRowActions';
 import {visitFlushReason} from '../features/readState/advertise';
 import {useAppForeground, useViewingBeat} from '../features/readState/useViewingBeat';
@@ -351,6 +356,7 @@ export default function ConversationScreen({
   onOpenWorkList,
   onOpenSettings,
   onOpenSearch,
+  onDmLeftReceipt,
 }: {
   channelId: string;
   title: string;
@@ -414,6 +420,8 @@ export default function ConversationScreen({
    * (뒤로가기는 검색 탭에서 홈 탭으로 돌아가는 X 와 같은 길). 없으면(셸이 아닌 곳에서 쓰는 호출자) 문이 서지 않는다.
    */
   onOpenSearch?: (initialQuery: string) => void;
+  /** 1:1 대화에서 나간 뒤(204) 그 한 줄 알림을 셸의 영수증 자리에 세운다(ADR-0177 증보 2026-11-14 D21). */
+  onDmLeftReceipt?: (message: string) => void;
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
   const {member, workspaceId} = useSession();
@@ -438,7 +446,13 @@ export default function ConversationScreen({
   const roleLabels = useRoleLabels(workspaceId);
   const markRead = useMarkRead();
 
-  const timeline = useTimeline(rail, workspaceId, channelId, member.id);
+  // 하한 아래 실시간 발행물(다시 보내기로 온 나가기 전 글과 그 반응·고정·카드·지움)을 그리지 않는다 - ADR-0177 증보 2026-11-14 D22 한계 3 의
+  // 클라이언트 몫. 하한은 읽음 투영 행에서만 온다(코어 `higherHistoryFloor`).
+  const historyFloor = higherHistoryFloor(
+    unreadFor(readStates.byChannel, channelId)?.historyFromSeq,
+    null,
+  );
+  const timeline = useTimeline(rail, workspaceId, channelId, member.id, historyFloor);
   /**
    * 타임라인이 **이 방의** 첫 페이지를 들고 있다 (#2569).
    *
@@ -1024,7 +1038,12 @@ export default function ConversationScreen({
     },
     [onBack],
   );
-  const rowActions = useChannelRowActions(workspaceId, member.id, onMenuChannelLeft);
+  const rowActions = useChannelRowActions(
+    workspaceId,
+    member.id,
+    onMenuChannelLeft,
+    onDmLeftReceipt,
+  );
   const {
     open: openRowActions,
     close: closeMenu,
@@ -1041,7 +1060,12 @@ export default function ConversationScreen({
   // 페이지의 알림·복사·닫기·나가기는 같은 훅의 **둘째 인스턴스**가 실행한다 — 첫째(`rowActions`)의 `active` 가 ⋮ 시트의 열림이라, 정보 페이지의 복사
   // 영수증·알림 실패·나가기 확인이 같은 인스턴스를 쓰면 ⋮ 시트가 페이지 위에 뜬다(`flashCopied`·`failed`·`run(leave)` 가 모두 `active` 를 세운다). 둘째는
   // `active` 를 그리는 데 쓰지 않으므로 그럴 일이 없고, 훅이 영수증 뒤 `close()` 를 불러도 페이지는 안 사라진다(페이지의 열림은 `infoOpen` 이다).
-  const infoActions = useChannelRowActions(workspaceId, member.id, onMenuChannelLeft);
+  const infoActions = useChannelRowActions(
+    workspaceId,
+    member.id,
+    onMenuChannelLeft,
+    onDmLeftReceipt,
+  );
   const {
     close: closeInfoActions,
     run: runInfoAction,
@@ -1066,6 +1090,22 @@ export default function ConversationScreen({
   const selfRole = memberFor(directory, member.id)?.role;
   // 이 채널의 **지금** 읽음 투영 행이다. 방문 때 얼려 둔 구분선 기준(`boundary`)이 아니다 — 닫기 판정은 서버가 지금 말하는 안 읽음을 본다.
   const liveReadState = unreadFor(readStates.byChannel, channelId);
+  // 「대화 나가기」를 내미는가(D21): 투영 키 + 경로 접기(모듈 상태라 렌더마다 다시 읽는다 - 실패 답이 서는 렌더에서 항목이 같이 빠진다).
+  const leaveMode = dmLeaveMode({workspaceId, rows: readStates.data});
+  const formatMenuMessage = useFormatMessage();
+  // 확인 단계가 설 때 한 번 읽는다(D16 `seenSeq` 의 관측 쪽 · 스레드 초안을 찾을 메시지 id). 이 방의 첫 쪽을 아직 안 들었으면 비어 있다.
+  const timelineRef = useRef(timeline);
+  timelineRef.current = timeline;
+  const heldInConversation = useCallback((): DmLeaveHeld => {
+    const current = timelineRef.current;
+    if (!uuidEq(current.loadedChannelId ?? undefined, channelIdRef.current)) {
+      return {maxSeq: null, messageIds: []};
+    }
+    return {
+      maxSeq: current.state.newestSeq,
+      messageIds: current.state.messages.map(message => message.id),
+    };
+  }, []);
   const menuTarget = useMemo<ChannelRowTarget>(
     () => ({
       // 채널 목록이 오기 전에도 ⋮ 는 열린다(고정 목록은 채널 없이 열린다). 훅은 id 만 읽고, 알림·닫기·나가기 행은 채널을 알 때만 선다(`menuItems`).
@@ -1086,16 +1126,42 @@ export default function ConversationScreen({
           mentionCount: liveReadState.mentionCount,
           starredOrSectioned: false,
         }),
+      // 「대화 나가기」: 코어 `dmLeaveOffered` 한 함수(사이드바 행 시트·웹 머리 메뉴와 같다). 채널 목록을 모르면 서지 않는다.
+      leaveOffered:
+        channel !== null &&
+        dmLeaveOffered({
+          mode: leaveMode,
+          phase: readPhase,
+          channel,
+          directory,
+          selfMemberId: member.id,
+        }),
+      held: heldInConversation,
     }),
-    [channel, channelId, title, selfRole, liveReadState, closureMode, readPhase],
+    [
+      channel,
+      channelId,
+      title,
+      selfRole,
+      liveReadState,
+      closureMode,
+      readPhase,
+      leaveMode,
+      directory,
+      member.id,
+      heldInConversation,
+    ],
   );
   const menuItems = useMemo(
-    () => (channel === null ? [] : conversationMenuActionItems(menuTarget)),
-    [channel, menuTarget],
+    () => (channel === null ? [] : conversationMenuActionItems(menuTarget, formatMenuMessage)),
+    [channel, menuTarget, formatMenuMessage],
   );
   const infoItems = useMemo(
-    () => (channel === null ? [] : conversationInfoActionItems(menuTarget, infoActions.copied)),
-    [channel, menuTarget, infoActions.copied],
+    () =>
+      channel === null
+        ? []
+        : conversationInfoActionItems(menuTarget, infoActions.copied, formatMenuMessage),
+    [channel, menuTarget, infoActions.copied, formatMenuMessage],
   );
   const runInfo = useCallback(
     (key: ChannelActionKey) => {
@@ -2640,6 +2706,9 @@ export default function ConversationScreen({
           onRun={runInfo}
           onConfirmLeave={infoActions.confirmLeave}
           onCancelLeave={infoActions.cancelLeave}
+          dmLeave={infoActions.dmLeave}
+          onConfirmDmLeave={infoActions.confirmDmLeave}
+          onCancelDmLeave={infoActions.cancelDmLeave}
           onClose={closeInfo}
           peer={peer}
           status={peerStatus}
@@ -2686,6 +2755,9 @@ export default function ConversationScreen({
           onRun={runMenuAction}
           onConfirmLeave={rowActions.confirmLeave}
           onCancelLeave={rowActions.cancelLeave}
+          dmLeave={rowActions.dmLeave}
+          onConfirmDmLeave={rowActions.confirmDmLeave}
+          onCancelDmLeave={rowActions.cancelDmLeave}
           onClose={closeMenu}
         />
       ) : null}

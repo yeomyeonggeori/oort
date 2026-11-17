@@ -307,6 +307,7 @@ describe("확인 창 (D21)", () => {
     );
     expect(format(DM_LEAVE_KEYS.action)).toBe("대화 나가기");
     expect(format(DM_LEAVE_KEYS.done)).toBe("대화에서 나갔어요.");
+    expect(format(DM_LEAVE_KEYS.busy)).toBe("나가는 중…");
     expect(format(DM_LEAVE_KEYS.failed)).toBe("나가지 못했어요. 다시 시도해 주세요.");
   });
 
@@ -317,7 +318,8 @@ describe("확인 창 (D21)", () => {
     const many = dmLeaveConfirmCopy(format, { name: "Seoyeon", scheduledCount: 3 });
     expect(one.lines.at(-1)).toBe("1 scheduled message will also be canceled.");
     expect(many.lines.at(-1)).toBe("3 scheduled messages will also be canceled.");
-    for (const text of [one.title, ...one.lines, one.cancel, one.confirm]) {
+    expect(format(DM_LEAVE_KEYS.busy)).toBe("Leaving…");
+    for (const text of [one.title, ...one.lines, one.cancel, one.confirm, format(DM_LEAVE_KEYS.busy)]) {
       expect(text).not.toMatch(/[가-힯]/);
     }
   });
