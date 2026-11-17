@@ -1,4 +1,8 @@
 import { DmAgentsMenu } from "./DmAgentsMenu";
+import { dmLeaveMode, dmLeaveOffered, higherHistoryFloor } from "@momo/core/features/channels/dmLeave";
+import { idKey } from "@momo/core/features/workspace/directory";
+import { readProjectionPhase } from "@momo/core/features/sidebar/goneDm";
+import { requestDmLeave, setOpenTimeline, useDmLeaveStore } from "@/features/sidebar/dmLeaveStore";
 import {
   useCallback,
   useEffect,
@@ -185,6 +189,18 @@ export function canAddChannelMemberNow(
   return canCreateChannelNow(rosterSettled, role);
 }
 
+/** 둘만의 DM 인가(참여자 둘 · 나 포함 · 그룹·에이전트가 앉은 키가 아님). 상대가 사람인지는 묻지 않는다 - 명부 없이 정해지는 모양이다. */
+function isOneToOneDm(channel: { memberIds?: string[]; dmKey?: string }, selfMemberId: string): boolean {
+  const ids = channel.memberIds ?? [];
+  const key = channel.dmKey ?? "";
+  return (
+    ids.length === 2 &&
+    ids.some((id) => uuidEq(id, selfMemberId)) &&
+    !key.startsWith("group:") &&
+    !key.startsWith("admitted:")
+  );
+}
+
 export function ChatShell() {
   const { session, workspaceId, realtime, connStatus } = useSession();
   const isOffline = useOffline();
@@ -279,11 +295,20 @@ export function ChatShell() {
     ? dmAutoReplyAgent(channel, directory, session.member.id)
     : null;
 
+  // 읽기 하한(ADR-0177 증보 2026-11-14 D18·D22, #5825): 하한 아래 seq 의 실시간 발행물은 그리지 않는다. 하한은 읽음 투영에서 이벤트가 온
+  // 순간 읽는다.
+  const readRowsRef = useRef(readStates.byChannel);
+  readRowsRef.current = readStates.byChannel;
+  const historyFloorOf = useCallback(
+    (forChannel: string) => higherHistoryFloor(readRowsRef.current?.get(idKey(forChannel))?.historyFromSeq, null),
+    []
+  );
   const timeline = useTimeline(
     realtime,
     workspaceId,
     stressCount > 0 ? null : channelId,
-    session.member.id
+    session.member.id,
+    { historyFloorOf }
   );
   const personalCall = usePersonalCall({
     workspaceId,
@@ -1137,6 +1162,37 @@ export function ChatShell() {
   const offline = stressCount === 0 && isOffline;
   const hasChannel = stressCount > 0 || channelId !== null;
 
+  // 열려 있는 대화의 이력이 아는 것(가장 큰 seq · 글 id)을 「대화 나가기」가 읽는 자리에 적는다(D16 `seenSeq` · 답글 초안 뿌리 후보).
+  const openNewestSeq = timeline.state.newestSeq;
+  const openMessages = timeline.state.messages;
+  useEffect(() => {
+    if (stressCount > 0 || channelId === null) return;
+    setOpenTimeline({
+      workspaceId,
+      channelId,
+      newestSeq: openNewestSeq,
+      messageIds: openMessages.map((message) => message.id),
+    });
+    return () => setOpenTimeline(null);
+  }, [stressCount, workspaceId, channelId, openNewestSeq, openMessages]);
+
+  // 대화 머리의 「대화 나가기」(ADR-0177 증보 2026-11-14 D21, #5825): 사람끼리의 1:1 · 나가기를 싣는 서버 · 투영 준비일 때만 메뉴에 선다(D20).
+  // ⋮ 자체는 **모든 1:1**(참여자 둘, `group:`·`admitted:` 키가 아님)의 머리에 늘 선다(「알림」 + 내밀 때만 「대화 나가기」). 명부·투영이
+  // 늦게 와도 ⋮ 가 나중에 서거나 걷히며 다른 머리 단추를 밀지 않게 하려는 것이다(사람인지 에이전트인지는 명부가 와야 안다). 그룹·에이전트가
+  // 앉은 DM 은 기존 「대화 멤버 관리」 ⋮ 그대로다. 저장소의 판은 나가기 경로가 이 워크스페이스에서 접혔을 때(405·501) 다시 읽게 한다.
+  useDmLeaveStore();
+  const leaveOffered =
+    stressCount === 0 &&
+    channel?.kind === "dm" &&
+    dmLeaveOffered({
+      mode: dmLeaveMode({ workspaceId, rows: readStates.data }),
+      phase: readProjectionPhase(readStates),
+      channel,
+      directory,
+      selfMemberId: session.member.id,
+    });
+  const headerMenuForDm = stressCount === 0 && channel?.kind === "dm" && isOneToOneDm(channel, session.member.id);
+
   // 멤버 수 · 허들 · ⋮ (컨트롤 묶음의 끝). **⋮는 혼자 한 줄에 서지 않는다** (#5206): 컨트롤 묶음이 줄을 바꿀 때(판이 좁은 600대)
   // 맨 끝의 ⋮가 혼자 셋째 줄에 서지 않게, ⋮를 바로 앞 컨트롤과 줄바꿈 한 덩어리(`flex-nowrap`)로 묶는다. 앞 컨트롤은 허들 컨트롤이고,
   // 허들 컨트롤이 아무것도 안 그리면(허들 없는 서버, 오프라인) 멤버 수다. 단추 순서(멤버 수 → 허들 → ⋮)와 크기는 그대로다.
@@ -1161,13 +1217,28 @@ export function ChatShell() {
       <HuddleHeaderControl huddle={huddle} offline={offline} />
     ) : null;
     const menu =
-      stressCount === 0 && channel && channel.kind !== "dm" ? (
+      stressCount === 0 && channel && (channel.kind !== "dm" || headerMenuForDm) ? (
         <ChannelHeaderMenu
           workspaceId={workspaceId}
           channel={channel}
           title={labelParts?.text ?? label}
           selfMemberId={session.member.id}
           selfRole={memberFor(directory, session.member.id)?.role}
+          onLeaveDm={
+            leaveOffered
+              ? (opener) =>
+                  requestDmLeave({
+                    workspaceId,
+                    channelId: channel.id,
+                    name: peer?.displayName ?? labelParts?.text ?? label,
+                    via: "header",
+                    opener,
+                    // 열려 있는 이력의 seq·글 id 는 위 `setOpenTimeline` 이 넘긴다(줄 메뉴와 같은 길).
+                    observedSeq: null,
+                    rootIds: [],
+                  })
+              : undefined
+          }
         />
       ) : null;
     return huddle && huddleControlShown(huddle, offline) ? (

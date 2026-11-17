@@ -1,5 +1,6 @@
 import { missingMemberLabel } from "@momo/core/features/workspace/directory";
 import { dismissTemporarySurfaces } from "@momo/core/features/notifications/entryDismiss";
+import { isBelowHistoryFloor } from "@momo/core/features/channels/dmLeave";
 import { useCallback, useEffect, useMemo, useRef, type MutableRefObject } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
@@ -11,6 +12,7 @@ import { fetchWorkSessions, uuidEq, type WorkSession } from "@momo/core/lib/api"
 import { agentPanePath } from "@momo/core/features/workbench/workTab";
 import { workSessionsKey } from "@/features/work/useWorkSessions";
 import {
+  historyFloorFromCache,
   useChannels,
   useDirectory,
   memberFor,
@@ -185,6 +187,15 @@ export function DesktopNotifications() {
 
   const handle = useCallback(function handleEvent(event: MessageNewEvent, answered = false): void {
     const current = contextRef.current;
+    // 읽기 하한 아래 seq 는 알리지 않는다(ADR-0177 증보 2026-11-14 D18·D22, #5825). 하한 위의 새 글은 평소처럼 알린다(D19).
+    if (
+      isBelowHistoryFloor(
+        event.payload.seq,
+        historyFloorFromCache(current.queryClient, current.workspaceId, event.payload.channel_id)
+      )
+    ) {
+      return;
+    }
     const nowMs = Date.now();
     const decision = notifyThisDevice(event, {
       isDesktop: canNotifyRef.current,

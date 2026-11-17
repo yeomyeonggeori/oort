@@ -144,6 +144,12 @@ export interface ChannelActionTarget {
    * 행으로 캐럿)은 사이드바가 지고, 여기서는 항목을 내고 부르기만 한다.
    */
   onCloseDm?: () => void;
+  /**
+   * 사람끼리의 1:1 에서 「대화 나가기」 (ADR-0177 증보 2026-11-14 D21, #5825). 손이 없으면 항목이 서지 않는다 - 숨기기와 같은 규율이다.
+   * 내밀지 말지(새 서버 · 사람끼리 1:1 · 투영 준비)는 부르는 쪽이 코어 `dmLeaveOffered` 로 정하고, 확인 창은 사이드바의 `DmLeaveHost`
+   * 가 진다(줄·머리 안에 두면 성공하는 순간 같이 사라진다). 여기서는 항목을 내고 표면이 메뉴를 닫은 뒤 부른다.
+   */
+  onLeaveDm?: () => void;
 }
 
 export interface ChannelActions {
@@ -195,6 +201,7 @@ export function useChannelActions({
   starred = false,
   onToggleStar,
   onCloseDm,
+  onLeaveDm,
 }: ChannelActionTarget): ChannelActions {
   const client = useQueryClient();
   const navigate = useNavigate();
@@ -375,6 +382,7 @@ export function useChannelActions({
           readState.latestSeq > 0 &&
           composedUnreadCount(readState) === 0,
         canCloseDm: Boolean(onCloseDm),
+        canLeaveDm: Boolean(onLeaveDm),
       }),
     [
       channel,
@@ -384,6 +392,7 @@ export function useChannelActions({
       onMoveToSection,
       onToggleStar,
       onCloseDm,
+      onLeaveDm,
     ]
   );
 
@@ -466,6 +475,7 @@ export function useChannelActions({
       case "memory":
       case "github":
       case "leave":
+      case "leave-dm":
       case "move-to-section":
         // 다이얼로그로 넘어가는 항목과 무리 항목은 표면이 자기 복귀를 챙긴다.
         // 「섹션으로 이동」은 **행 하나가 아니라 무리**라 고를 것이 여기 없다 -
@@ -484,7 +494,7 @@ export function useChannelActions({
   return {
     available,
     state,
-    items: (surface) => channelActionItemsForSurface(surface, available, state),
+    items: (surface) => channelActionItemsForSurface(surface, available, state, formatMessage),
     isPending,
     error,
     copyFailure,

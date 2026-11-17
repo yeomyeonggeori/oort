@@ -10,6 +10,8 @@
   "channels.dmLeave.busy": "Saliendo…",
   "channels.dmLeave.done": "Saliste de la conversación.",
   "channels.dmLeave.failed": "No se pudo salir. Vuelve a intentarlo.",
+  "channels.dmLeave.checking": "Verificando…",
+  "channels.dmLeave.unavailable": "No puedes salir de esta conversación.",
   "channels.nameRule.required": "Escribe un nombre para el canal.",
   "channels.nameRule.tooLong": "El nombre del canal puede tener hasta {max, number} caracteres.",
   "channels.nameRule.hidden": "El nombre contiene caracteres invisibles. Bórralo y vuelve a escribirlo.",

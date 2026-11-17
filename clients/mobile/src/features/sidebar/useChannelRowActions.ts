@@ -506,7 +506,18 @@ export function useChannelRowActions(
         onLeft?.(channelId);
       })
       .catch(cause => {
-        settleDmLeaveFailure(workspaceId, cause);
+        const failure = settleDmLeaveFailure(workspaceId, cause);
+        if (failure === 'missing') {
+          // 404 = 이미 나갔거나 없는 대화. 다시 눌러도 같은 답이라 나간 것과 같게 정리하고 시트를 닫는다 - 문장 없이(웹·채널 나가기와 같다).
+          runDmLeaveCleanup(
+            phoneDmLeaveCleanupPort({client, workspaceId, selfMemberId, threadRootIds}),
+            {channelId, seenSeq},
+          );
+          void client.invalidateQueries({queryKey: workspaceKeys.readState(workspaceId)});
+          if (mounted.current) close();
+          onLeft?.(channelId);
+          return;
+        }
         if (!mounted.current) return;
         haptics.error();
         // 아무것도 바뀌지 않았다. 단계는 그대로 서 있고 이유를 말한다 - 「나가기」를 다시 누르면 다시 시도한다.
@@ -516,7 +527,7 @@ export function useChannelRowActions(
             : {...previous, pending: false, error: formatMessage(DM_LEAVE_KEYS.failed)},
         );
       });
-  }, [client, dmLeave, formatMessage, onDmLeftReceipt, onLeft, selfMemberId, succeeded, workspaceId]);
+  }, [client, close, dmLeave, formatMessage, onDmLeftReceipt, onLeft, selfMemberId, succeeded, workspaceId]);
 
   const cancelDmLeave = useCallback(() => {
     // 진행 중에는 취소가 잠긴다 - 요청은 이미 나갔다.

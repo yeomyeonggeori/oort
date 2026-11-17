@@ -10,6 +10,8 @@
   "channels.dmLeave.busy": "Leaving…",
   "channels.dmLeave.done": "You left the conversation.",
   "channels.dmLeave.failed": "Couldn't leave. Please try again.",
+  "channels.dmLeave.checking": "Checking…",
+  "channels.dmLeave.unavailable": "You can't leave this conversation.",
   "channels.nameRule.required": "Enter a channel name.",
   "channels.nameRule.tooLong": "Channel names can be up to {max, number} characters.",
   "channels.nameRule.hidden": "The name contains invisible characters. Clear it and type the name again.",

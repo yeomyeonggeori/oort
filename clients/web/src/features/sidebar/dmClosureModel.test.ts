@@ -82,11 +82,21 @@ describe("첫 페인트 사본 (D8, 원장이 아니다)", () => {
   ];
   const ids = new Set([dm(1), dm(2), dm(3)]);
 
-  it("닫힘을 말한 행만, 판정에 쓰는 네 칸으로 적는다", () => {
+  it("닫힘을 말한 행만, 판정에 쓰는 다섯 칸으로 적는다(다섯째는 읽기 하한)", () => {
     expect(dmClosureCacheOf(rows, ids)).toEqual({
-      [dm(1)]: [10, 10, 10, 0],
-      [dm(2)]: [null, 4, 2, 1],
+      [dm(1)]: [10, 10, 10, 0, null],
+      [dm(2)]: [null, 4, 2, 1, null],
     });
+    expect(dmClosureCacheOf([row(dm(5), { closedAtSeq: 10, latestReadableSeq: 10, historyFromSeq: 11 })], new Set([dm(5)]))).toEqual({
+      [dm(5)]: [10, 10, 10, 0, 11],
+    });
+  });
+
+  it("네 칸짜리 옛 항목은 하한 없음으로 읽고, 하한 칸이 0·음수·소수면 항목째 버린다", () => {
+    const raw = JSON.stringify({
+      [WS]: { [dm(1)]: [10, 10, 10, 0], [dm(2)]: [10, 10, 10, 0, 11], [dm(3)]: [10, 10, 10, 0, 0], [dm(4)]: [10, 10, 10, 0, 1.5] },
+    });
+    expect(parseDmClosureCache(raw, WS)).toEqual({ [dm(1)]: [10, 10, 10, 0, null], [dm(2)]: [10, 10, 10, 0, 11] });
   });
 
   it("DM 이 아닌 채널의 행은 적지 않는다", () => {
@@ -106,7 +116,7 @@ describe("첫 페인트 사본 (D8, 원장이 아니다)", () => {
     const raw = JSON.stringify({
       [WS]: { [dm(1)]: [-1, 3, 3, 0], [dm(2)]: [null, 1.5, 0, 0], [dm(3)]: [null, 4, 2, 2], [dm(4)]: [5, 5, 5, 0] },
     });
-    expect(parseDmClosureCache(raw, WS)).toEqual({ [dm(4)]: [5, 5, 5, 0] });
+    expect(parseDmClosureCache(raw, WS)).toEqual({ [dm(4)]: [5, 5, 5, 0, null] });
   });
 
   it("키 이름이 원장과 다르다(원장을 사본으로 읽지 않는다)", () => {
@@ -168,7 +178,7 @@ describe("dmVerdict · server 갈래", () => {
   it("닫힘을 말하지 않은 행(undefined)은 안 닫음이 아니다: 사본이 닫았다고 하면 숨은 채, 사본이 없으면 보인다", () => {
     const unsaid = row(dm(1), { latestReadableSeq: 10 }); // closedAtSeq 키 없음
     expect(
-      dmVerdict({ ...BASE, read: unsaid, cache: { [dm(1)]: [10, 10, 10, 0] } })
+      dmVerdict({ ...BASE, read: unsaid, cache: { [dm(1)]: [10, 10, 10, 0, null] } })
     ).toEqual({ state: "hidden", rule: 7 });
     expect(dmVerdict({ ...BASE, read: unsaid, cache: {} }).state).toBe("shown");
   });
@@ -199,7 +209,7 @@ describe("dmVerdict · 나간 대화 (3a)", () => {
   it("하한을 말하지 않은 행(undefined)은 하한 없음이 아니다: 사본이 닫았다고 하면 숨은 채, 사본이 없으면 보인다", () => {
     const unsaid = row(dm(1), { closedAtSeq: null, latestReadableSeq: 10 }); // historyFromSeq 키 없음
     expect(
-      dmVerdict({ ...BASE, serverCarriesLeave: true, read: unsaid, cache: { [dm(1)]: [10, 10, 10, 0] } })
+      dmVerdict({ ...BASE, serverCarriesLeave: true, read: unsaid, cache: { [dm(1)]: [10, 10, 10, 0, null] } })
     ).toEqual({ state: "hidden", rule: 7 });
     expect(dmVerdict({ ...BASE, serverCarriesLeave: true, read: unsaid, cache: {} }).state).toBe("shown");
   });
@@ -216,15 +226,22 @@ describe("dmVerdict · 나간 대화 (3a)", () => {
 describe("dmVerdict · 콜드 스타트 (AC 10)", () => {
   const loading = { ...BASE, phase: "loading" as const, read: undefined };
 
+  // #5824 검수 r1 M2: 사본이 하한을 들고 있으면 첫 페인트도 D18 표와 같다 - 나간 대화는 별표가 있어도 숨고(3a), 「숨긴 대화」(7)가 아니다.
+  it("사본의 하한: 나간 대화는 투영이 오기 전에도 3a 로 숨는다 - 별표가 있어도, 없어도", () => {
+    const left = { [dm(1)]: [10, 10, 10, 0, 11] as const };
+    expect(dmVerdict({ ...loading, starredOrSectioned: true, cache: left })).toEqual({ state: "hidden", rule: "3a" });
+    expect(dmVerdict({ ...loading, cache: left })).toEqual({ state: "hidden", rule: "3a" });
+  });
+
   it("사본이 있으면 닫은 DM 이 깜빡이지 않는다: 투영이 오기 전에도 숨어 있다", () => {
-    expect(dmVerdict({ ...loading, cache: { [dm(1)]: [10, 10, 10, 0] } })).toEqual({
+    expect(dmVerdict({ ...loading, cache: { [dm(1)]: [10, 10, 10, 0, null] } })).toEqual({
       state: "hidden",
       rule: 7,
     });
   });
 
   it("사본에 없는 DM(지난 세션 뒤에 생긴 DM)은 보인다", () => {
-    expect(dmVerdict({ ...loading, cache: { [dm(2)]: [10, 10, 10, 0] } }).state).toBe("shown");
+    expect(dmVerdict({ ...loading, cache: { [dm(2)]: [10, 10, 10, 0, null] } }).state).toBe("shown");
   });
 
   it("저장소를 지운 뒤(재설치 모사)에는 판정을 미룬다 - 그리고 투영이 오면 닫혀 있다", () => {
@@ -242,7 +259,7 @@ describe("dmVerdict · 콜드 스타트 (AC 10)", () => {
 
   it("사본이 가리는 동안에도 별표 DM 은 보인다(4)", () => {
     expect(
-      dmVerdict({ ...loading, starredOrSectioned: true, cache: { [dm(1)]: [10, 10, 10, 0] } }).state
+      dmVerdict({ ...loading, starredOrSectioned: true, cache: { [dm(1)]: [10, 10, 10, 0, null] } }).state
     ).toBe("shown");
   });
 });
