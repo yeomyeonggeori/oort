@@ -517,12 +517,24 @@ const CHANNEL_MUTED_TARGET: ChannelRowTarget = {...CHANNEL_TARGET, muted: true};
 // 1:1 「대화 나가기」(ADR-0177 증보 2026-11-14 D21, #5826) - 사람끼리의 1:1 이고 나가기를 싣는 서버라 맨 아래 위험 카드가 선다.
 const DM_LEAVE_TARGET: ChannelRowTarget = {...DM_TARGET, leaveOffered: true};
 
-/** `…dm-leave-<단계>`: 확인 단계(예약 2개) · 진행 중 · 실패(코어 사전의 실패 문장). 세 자리의 캡처 표면이 같이 쓴다. */
-export function dmLeaveStep(which: string, failed: string): DmLeaveStepView | null {
-  const base = {name: '박서연', scheduledCount: 2, pending: false, error: null};
+/**
+ * `…dm-leave-<단계>`: 확인 단계(예약 2개) · 확인 중(예약 목록을 아직 모름) · 진행 중 · 실패(코어 사전의 실패 문장) · 나갈 수 없음(409·405, 확정 잠금).
+ * 세 자리의 캡처 표면이 같이 쓴다.
+ */
+export function dmLeaveStep(which: string, formatMessage: (key: typeof DM_LEAVE_KEYS.failed | typeof DM_LEAVE_KEYS.unavailable) => string): DmLeaveStepView | null {
+  const base: DmLeaveStepView = {
+    name: '박서연',
+    scheduledCount: 2,
+    scheduled: 'known',
+    pending: false,
+    error: null,
+    unavailable: false,
+  };
   if (which === 'confirm') return base;
+  if (which === 'checking') return {...base, scheduled: 'checking', scheduledCount: 0};
   if (which === 'pending') return {...base, pending: true};
-  if (which === 'failed') return {...base, error: failed};
+  if (which === 'failed') return {...base, error: formatMessage(DM_LEAVE_KEYS.failed)};
+  if (which === 'unavailable') return {...base, unavailable: true, error: formatMessage(DM_LEAVE_KEYS.unavailable)};
   return null;
 }
 
@@ -783,7 +795,7 @@ function ProfileDeviceSurface(): React.JSX.Element {
 }
 
 export function SheetKitSurface({which}: {which: string}): React.JSX.Element {
-  const dmLeaveFailed = useFormatMessage()(DM_LEAVE_KEYS.failed);
+  const formatDmLeave = useFormatMessage();
   switch (which) {
     case 'page-lead':
       return <PageKit lead />;
@@ -815,11 +827,13 @@ export function SheetKitSurface({which}: {which: string}): React.JSX.Element {
     case 'channel-dm-leave-confirm':
     case 'channel-dm-leave-pending':
     case 'channel-dm-leave-failed':
+    case 'channel-dm-leave-checking':
+    case 'channel-dm-leave-unavailable':
       return (
         <ChannelSheetSurface
           target={DM_LEAVE_TARGET}
           confirmingLeave={false}
-          dmLeave={dmLeaveStep(which.slice('channel-dm-leave-'.length), dmLeaveFailed)}
+          dmLeave={dmLeaveStep(which.slice('channel-dm-leave-'.length), formatDmLeave)}
         />
       );
     case 'devicekey-pending':

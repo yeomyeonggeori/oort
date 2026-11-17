@@ -283,8 +283,17 @@ export function dmLeaveScheduledCount(
 
 export interface DmLeaveConfirmCopy {
   title: string;
-  /** 본문 줄들, 차례대로. 예약 줄은 N > 0 일 때만 끝에 선다. */
+  /**
+   * 본문 줄들, 화면에 서는 차례 그대로(웹·폰 공통, #5876): 본문 · 되살림 · 예약 N개(N > 0 일 때만) · 마지막에 경고. 화면이 다시
+   * 줄 세우지 않는다 - 웹처럼 자리를 나눠 그리는 쪽은 아래 이름 있는 조각을 쓴다(`lines` 는 이 조각들을 이은 것이다).
+   */
   lines: string[];
+  /** 본문 · 되살림 두 줄. */
+  body: string[];
+  /** 「예약해 둔 메시지 N개도 취소돼요.」. N = 0 이면 `null`. */
+  scheduled: string | null;
+  /** 맨 끝의 경고 「나간 뒤에는 되돌릴 수 없어요.」. */
+  warning: string;
   cancel: string;
   /** 위험색 단추. */
   confirm: string;
@@ -295,17 +304,19 @@ export function dmLeaveConfirmCopy(
   format: Format,
   input: { name: string; scheduledCount: number }
 ): DmLeaveConfirmCopy {
-  const lines = [
+  const body = [
     format(DM_LEAVE_KEYS.confirmBody, { name: input.name }),
     format(DM_LEAVE_KEYS.confirmRevive),
-    format(DM_LEAVE_KEYS.confirmFinal),
   ];
-  if (input.scheduledCount > 0) {
-    lines.push(format(DM_LEAVE_KEYS.confirmScheduled, { count: input.scheduledCount }));
-  }
+  const scheduled =
+    input.scheduledCount > 0 ? format(DM_LEAVE_KEYS.confirmScheduled, { count: input.scheduledCount }) : null;
+  const warning = format(DM_LEAVE_KEYS.confirmFinal);
   return {
     title: format(DM_LEAVE_KEYS.confirmTitle, { name: input.name }),
-    lines,
+    lines: scheduled === null ? [...body, warning] : [...body, scheduled, warning],
+    body,
+    scheduled,
+    warning,
     cancel: format(DM_LEAVE_KEYS.cancel),
     confirm: format(DM_LEAVE_KEYS.confirm),
   };

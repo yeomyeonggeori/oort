@@ -1,5 +1,4 @@
 import {CHANNEL_MUTE_FAILURE} from '@momo/core/features/channels/model';
-import {DM_LEAVE_KEYS} from '@momo/core/features/channels/dmLeave';
 import {makeDirectory} from '@momo/core/features/workspace/directory';
 import type {RosterMember} from '@momo/core/lib/api';
 import React from 'react';
@@ -32,7 +31,7 @@ import {dmLeaveStep} from './sheetKit';
 //   channel-leave 같은 채널의 나가기 확인 단계
 //   viewer      사진 크게 보기(`AvatarViewer`) — 정보 페이지 위에 선 전체 화면
 //   dm-leave    사람 DM 에 「대화 나가기」(맨 아래 따로 선 카드, 위험색 — ADR-0177 증보 2026-11-14 D21)
-//   dm-leave-confirm / -pending / -failed   그 확인 단계(예약 2개) · 진행 중 · 실패
+//   dm-leave-confirm / -checking / -pending / -failed / -unavailable   그 확인 단계(예약 2개) · 확인 중 · 진행 중 · 실패 · 나갈 수 없음
 //
 // 페이지는 `EdgeSwipeBack` 층(`enter="push"`)이라 들어올 때 오른쪽에서 밀려 들어온다 — 캡처는 멎은 뒤를 찍는다.
 // 사진은 **합성 그라데이션**(`profileSheet.tsx` 의 `PHOTO`)이다. 모든 이름은 가상 인물이다(이도현·박서연·최민수, 에이전트 달무리 도우미,
@@ -158,7 +157,7 @@ export function ConversationInfoPageSurface({which}: {which: string}): React.JSX
         <ConversationInfoPage
           {...props({
             items: conversationInfoActionItems({...DM_TARGET, leaveOffered: true}, undefined, formatMessage),
-            dmLeave: dmLeaveStep(which.slice('dm-leave-'.length), formatMessage(DM_LEAVE_KEYS.failed)),
+            dmLeave: dmLeaveStep(which.slice('dm-leave-'.length), formatMessage),
             onConfirmDmLeave: noop,
             onCancelDmLeave: noop,
           })}

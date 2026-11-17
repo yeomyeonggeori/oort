@@ -16,7 +16,7 @@ import {CONFIRM_ARM_MS, ConfirmStep, GroupCard, ListRow, RowStatusIcon, SheetScr
 import {useStyles} from '../../design/theme';
 import {useFormatMessage} from '../../i18n/useFormatMessage';
 import {font, line, type Palette} from '../../design/tokens';
-import {DmLeaveConfirm} from '../sidebar/DmLeaveConfirm';
+import {DmLeaveConfirm, ignoreDiscard} from '../sidebar/DmLeaveConfirm';
 import type {DmLeaveStepView} from '../sidebar/useChannelRowActions';
 import {
   CONVERSATION_DELEGATE_LABEL,
@@ -133,6 +133,9 @@ export function ConversationMenuSheet({
       accessibilityLabel={conversationMenuAccessibleLabel(title, kind)}
       scrimLabel="대화 메뉴 닫기"
       scrimTestID="conversation-menu-backdrop"
+      // 1:1 나가기 요청이 가는 동안은 몸짓으로 닫히지 않는다(요청은 이미 나갔다).
+      dirty={dmLeave?.pending === true}
+      onDiscardPrompt={ignoreDiscard}
       testID="conversation-menu-sheet">
       <SheetHeader
         title={conversationMenuTitle(title, kind)}
