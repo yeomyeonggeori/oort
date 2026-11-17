@@ -282,6 +282,8 @@ const OUTCOME_REFUSED_AFTER_READ: &str = "refused_after_read";
 const OUTCOME_REFUSED_INVITE_ROLE: &str = "refused_invite_role";
 /// `team_ai.turn`'s `outcome` for a turn that ended with a `card_suggest` card (B8 C1, #4972).
 const OUTCOME_SUGGESTED_CARD: &str = "suggested_card";
+/// `team_ai.turn`'s `outcome` for a turn that ended with an approval card (#5873).
+const OUTCOME_PROPOSED: &str = "proposed";
 
 /// How a settled team-AI turn ends the run.
 enum Ending {
@@ -1251,6 +1253,11 @@ impl AgentWorker {
         let ledger = ledger_report(usage, &model, payload);
         let fallback_model = model.clone();
         let searches = trace.web_searches;
+        // #5873: a turn that ends in a card writes no `team_ai.turn` row of its own (the card's
+        // `team_ai.proposed` row carries `via_ai`, which is also the approval card's payload and
+        // must never name the channels that were read). The turn row is written here, in the same
+        // transaction as the card, so the channels read are on the record for this ending too.
+        let turn_detail = trace.audit_detail(usage, OUTCOME_PROPOSED);
         let proposed = with_tenant_tx(&self.pool, workspace_id, move |conn| {
             let via = via.clone();
             let action_id = action_id.clone();
@@ -1258,6 +1265,7 @@ impl AgentWorker {
             let rationale = rationale.clone();
             let ledger = ledger.clone();
             let fallback_model = fallback_model.clone();
+            let turn_detail = turn_detail.clone();
             Box::pin(async move {
                 let context = ProposalContext {
                     workspace_id,
@@ -1282,6 +1290,14 @@ impl AgentWorker {
                 // before the card and either returns `ProposalOk` or errors, so `Ok` is exactly
                 // "parked"): the rail is told in this same transaction, after the card.
                 if let Ok(ok) = &outcome {
+                    audit::write_audit(
+                        conn,
+                        &AuditEntry::new(workspace_id, "team_ai.turn")
+                            .by(agent)
+                            .run(run_id)
+                            .with_schema("momo.team_ai_turn.v1", turn_detail),
+                    )
+                    .await?;
                     emit_awaiting_approval_agent_status(
                         conn,
                         momo_agent::AgentRunAddress {
@@ -2494,6 +2510,72 @@ mod answer_props_tests_5600 {
                 "source": "team_ai",
                 "team_ai_model": {"model": "gpt-4o", "wire": "responses"},
             })
+        );
+    }
+}
+
+/// #5873: the largest `team_ai.turn` row a turn can write is bounded — the whole row, not only the
+/// `reads` value. The reads are capped (six calls, 32 channel ids), tool names come from a closed
+/// list and the model label is a short name.
+#[cfg(test)]
+mod audit_row_size_tests_5873 {
+    use super::*;
+    use momo_workspace_actions::team_ai_tools::{ReadAudit, AUDIT_READ_CHANNELS_MAX};
+
+    /// The most the whole row may weigh. The test below measures the biggest row there can be and
+    /// must stay under it; a new key that grows the row past it is a decision, not an accident.
+    const AUDIT_ROW_BYTES_MAX: usize = 2_600;
+
+    #[test]
+    fn the_biggest_turn_row_stays_under_its_bound() {
+        let mut reads = ReadAudit::default();
+        let ids: Vec<Uuid> = (0..(AUDIT_READ_CHANNELS_MAX as u128 + 8))
+            .map(|n| Uuid::from_u128(u128::MAX - n))
+            .collect();
+        reads.record(&ToolOutcome::Data("x".into()), &ids);
+        for _ in 0..3 {
+            reads.record(&ToolOutcome::NotFound, &[]);
+            reads.record(&ToolOutcome::NotVisibleHere, &[]);
+        }
+        let trace = TurnTrace {
+            model: "m".repeat(120),
+            wire: "anthropic_messages",
+            tools: (0..team_ai::MAX_TOOL_CALLS)
+                .map(|_| team_ai_tools::TOOL_READ_ATTACHMENT.to_string())
+                .collect(),
+            tool_codes: vec!["invalid_arguments"; team_ai::MAX_TOOL_CALLS],
+            reads,
+            model_calls: i32::MAX,
+            web_searches: i32::MAX,
+            latency_ms: i64::MAX,
+            refused_action: Some("workspace.settings.update.longest-known-id"),
+            task_step: Some(i32::MAX),
+            suggested_command: Some("work.request.open"),
+            hermes: Some(HermesTrace {
+                offered: vec!["image", "web_search"],
+                results: vec!["invalid_arguments"; 8],
+                settle: None,
+            }),
+        };
+        let spend = Spend {
+            usage: ChatUsage {
+                prompt_tokens: i32::MAX,
+                completion_tokens: i32::MAX,
+                ..ChatUsage::default()
+            },
+            estimated: true,
+        };
+        let row = trace
+            .audit_detail(Some(spend), "refused_after_read")
+            .to_string();
+        assert!(
+            row.len() <= AUDIT_ROW_BYTES_MAX,
+            "the biggest team_ai.turn row is {} bytes",
+            row.len()
+        );
+        assert!(
+            row.contains("\"truncated\":true"),
+            "anti-vacuity: the cap was reached"
         );
     }
 }
