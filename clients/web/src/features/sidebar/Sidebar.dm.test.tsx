@@ -2491,6 +2491,10 @@ describe("대화 나가기 · 줄 메뉴 (D21)", () => {
       expect(dialogText()).toContain("확인 중…");
       expect(dialogText()).not.toContain("예약해 둔");
       expect(confirmButton().getAttribute("aria-disabled")).toBe("true");
+      // 낭독: 잠긴 확정이 가리키는 설명 글이 「확인 중…」이다(눈에 보이는 줄은 aria-hidden 이라 이 글이 낭독을 맡는다).
+      const lockId = confirmButton().getAttribute("aria-describedby");
+      expect(lockId).not.toBeNull();
+      expect(document.getElementById(lockId!)?.textContent).toBe("확인 중…");
       expect(document.querySelector('[data-testid="dm-leave-confirm-slot"]')?.getAttribute("data-state")).toBe("checking");
       // 잠긴 확정을 눌러도 아무것도 나가지 않는다.
       await pressLeaveConfirm();
@@ -2587,16 +2591,14 @@ describe("대화 나가기 · 줄 메뉴 (D21)", () => {
     await settle();
     expect(isDmLeaveListHeld()).toBe(false);
     rightClick(host, DM_ID(2));
-    await settle();
-    expect(document.querySelector('[data-testid="channel-row-menu"]')).not.toBeNull();
+    // 메뉴가 뜨는 박자(부하에 따라 달라진다)를 세지 않고 뜰 때까지 조건으로 기다린다.
+    await vi.waitFor(() => expect(document.querySelector('[data-testid="channel-row-menu"]')).not.toBeNull(), { timeout: 5000 });
     expect(isDmLeaveListHeld()).toBe(true);
     act(() => {
       document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
     });
-    await settle();
-    await settle();
-    expect(document.querySelector('[data-testid="channel-row-menu"]')).toBeNull();
-    expect(isDmLeaveListHeld()).toBe(false);
+    await vi.waitFor(() => expect(document.querySelector('[data-testid="channel-row-menu"]')).toBeNull(), { timeout: 5000 });
+    await vi.waitFor(() => expect(isDmLeaveListHeld()).toBe(false), { timeout: 5000 });
   });
 
   it("seenSeq 는 투영의 최신 seq 와 열려 있는 이력이 아는 가장 큰 seq 중 큰 쪽이다 (D16, V11)", async () => {
