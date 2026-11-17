@@ -627,7 +627,7 @@ describe('행 시트 — 실패 (D21)', () => {
     expect(screen.queryByTestId('channel-dm-leave-confirm')).toBeNull();
   });
 
-  it('경로 없음(404): 실패 문장 뒤 「취소」하면 그 워크스페이스의 「대화 나가기」가 사라진다(다른 사람 DM 에서도)', async () => {
+  it('경로 없음(404): 문장 없이 시트가 닫히고 정리가 돌며(줄은 서버의 투영이 걷는다), 메뉴는 접히지 않는다(다른 사람 DM 에서도) (D21)', async () => {
     await mountShell({leaveStatus: 404});
     await openRowSheet(ROW.human);
     await waitFor(() => expect(screen.getByTestId('channel-sheet-leave-dm')).toBeTruthy());
@@ -635,13 +635,13 @@ describe('행 시트 — 실패 (D21)', () => {
     await screen.findByTestId('channel-dm-leave-confirm');
     await arm();
     fireEvent.press(screen.getByTestId('channel-dm-leave-confirm-button'));
-    await screen.findByTestId('channel-dm-leave-confirm-error');
-    fireEvent.press(screen.getByTestId('channel-dm-leave-confirm-cancel'));
-    expect(sheetKeys('channel-sheet')).not.toContain('leave-dm');
-    fireEvent.press(screen.getByTestId('channel-sheet-close'));
-    await waitFor(() => expect(screen.queryByTestId('channel-action-sheet')).toBeNull());
-    longPress(ROW.human2);
-    expect(sheetKeys('channel-sheet')).not.toContain('leave-dm');
+    await waitFor(() => expect(screen.queryByTestId('channel-dm-leave-confirm')).toBeNull());
+    expect(screen.queryByTestId('channel-dm-leave-confirm-error')).toBeNull();
+    expect(screen.queryByTestId('channel-action-sheet')).toBeNull();
+    expect(leaveCalls()).toHaveLength(1);
+    // 404 는 이 워크스페이스의 나가기를 접지 않는다: 다른 사람 DM 의 시트에 「대화 나가기」가 그대로다.
+    await openRowSheet(ROW.human2);
+    await waitFor(() => expect(sheetKeys('channel-sheet')).toContain('leave-dm'));
   });
 });
 

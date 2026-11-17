@@ -152,6 +152,9 @@ export function phoneDmLeaveCleanupPort({
       // 채널 초안 + 채널을 적어 둔 스레드 초안은 열쇠로 다 지운다(뿌리를 연 적 없는 것도). 채널을 안 적은 옛 스레드 초안만 이 기기가 든 뿌리로 찾는다.
       clearDraftsOfChannel(channelId);
       for (const root of threadRootIds) clearDraft(threadDraftKey(root));
+    },
+    clearAttachmentTrays(channelId) {
+      // 트레이 열쇠는 (워크스페이스, 채널, 뿌리)라 채널 하나로 그 대화의 스레드 트레이까지 찾는다(웹과 같은 문 — 코어 차례의 한 걸음).
       clearChannelSurfaces(workspaceId, channelId);
     },
     forgetFailedSends(channelId) {

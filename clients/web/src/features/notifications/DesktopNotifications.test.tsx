@@ -219,6 +219,9 @@ function sessionValue(): SessionContextValue {
   };
 }
 
+/** 마지막으로 세운 판의 쿼리 캐시(읽음 투영을 심는 시험이 쓴다). */
+let railClient: QueryClient | null = null;
+
 function mountRail(path = "/"): HTMLElement {
   const host = document.createElement("div");
   document.body.append(host);
@@ -229,7 +232,7 @@ function mountRail(path = "/"): HTMLElement {
     { initialEntries: [path] },
     createElement(
       QueryClientProvider,
-      { client: new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } }) },
+      { client: (railClient = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } })) },
       createElement(
         SessionProvider,
         { value: sessionValue() },
@@ -325,6 +328,30 @@ describe("DesktopNotifications", () => {
 
     await act(async () => {
       onMessage?.(approvalEvent());
+      osNotifier().flush();
+      await Promise.resolve();
+    });
+    expect(showNotification).toHaveBeenCalledTimes(1);
+  });
+
+  it("읽기 하한 아래 seq 는 알리지 않고, 하한 이상은 알린다 (ADR-0177 증보 2026-11-14 D18·D22, #5825)", async () => {
+    mountRail();
+    act(() => {
+      railClient?.setQueryData(["read-state", IDS.ws], [
+        { channelId: IDS.channel, lastReadSeq: 49, latestSeq: 49, unreadCount: 0, mentionCount: 0, markedUnreadBeforeSeq: null, historyFromSeq: 50 },
+      ]);
+    });
+    await act(async () => {
+      onMessage?.(mentionEvent("019F96A4-E717-7F82-9750-58B2D7D28301"));
+      osNotifier().flush();
+      await Promise.resolve();
+    });
+    expect(showNotification).not.toHaveBeenCalled();
+    const above = mentionEvent("019F96A4-E717-7F82-9750-58B2D7D28302");
+    above.seq = 50;
+    above.payload.seq = 50;
+    await act(async () => {
+      onMessage?.(above);
       osNotifier().flush();
       await Promise.resolve();
     });

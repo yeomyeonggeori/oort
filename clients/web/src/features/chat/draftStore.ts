@@ -65,6 +65,11 @@ interface StoredDraft {
   atMs: number;
   /** 쓴 사람(멤버 id, 소문자). 없으면 작성자를 모르는 값이다(아래 「누구의 초안인가」). */
   author?: string;
+  /**
+   * 답글 초안이 속한 대화(채널 id, 소문자). 열쇠가 뿌리 글 id 뿐이라 대화 단위로 찾으려면 같이 적는다(ADR-0177 증보 2026-11-14 D17).
+   * 없으면 이 칸 전에 쓴 값이다.
+   */
+  channelId?: string;
 }
 
 /**
@@ -210,10 +215,12 @@ function parse(raw: string | null): StoredDraft | null {
   try {
     const value: unknown = JSON.parse(raw);
     if (typeof value !== "object" || value === null) return null;
-    const { text, atMs, author } = value as Record<string, unknown>;
+    const { text, atMs, author, channelId } = value as Record<string, unknown>;
     if (typeof text !== "string" || text === "") return null;
     if (typeof atMs !== "number" || !Number.isFinite(atMs)) return null;
-    return typeof author === "string" && author !== "" ? { text, atMs, author } : { text, atMs };
+    const draft: StoredDraft = typeof author === "string" && author !== "" ? { text, atMs, author } : { text, atMs };
+    if (typeof channelId === "string" && channelId !== "") draft.channelId = channelId;
+    return draft;
   } catch {
     // 손으로 고쳐졌거나 옛 판이다. 읽을 수 없는 초안은 초안이 아니다.
     return null;
@@ -372,14 +379,34 @@ export function writeThreadDraft(
   workspaceId: string,
   rootId: string,
   text: string,
-  nowMs: number = Date.now()
+  nowMs: number = Date.now(),
+  /** 이 답글 초안이 속한 대화. 적어 두면 그 대화에서 나갈 때 찾아 지운다(`threadDraftRootsInChannel`). */
+  channelId?: string
 ): void {
   const key = threadDraftKey(workspaceId, rootId);
   if (text.trim() === "" || containsSecretKey(text)) {
     writeRaw(key, null);
     return;
   }
-  writeRaw(key, JSON.stringify(stamped(text, nowMs)));
+  const draft = stamped(text, nowMs);
+  if (channelId !== undefined && channelId !== "") draft.channelId = channelId.toLowerCase();
+  writeRaw(key, JSON.stringify(draft));
+}
+
+/**
+ * 이 대화의 답글 초안이 걸린 뿌리 글 id(소문자). 대화를 적어 둔 초안만 찾는다 - 적지 않은 옛 값은 대화를 알 수 없다. 작성자는 보지 않는다:
+ * 1:1 대화에서 나갈 때 그 대화의 것을 지우는 데 쓴다(ADR-0177 증보 2026-11-14 D17, #5825).
+ */
+export function threadDraftRootsInChannel(workspaceId: string, channelId: string): string[] {
+  const prefix = threadDraftKey(workspaceId, "");
+  const channel = channelId.toLowerCase();
+  const roots: string[] = [];
+  for (const key of threadDraftKeys()) {
+    if (!key.startsWith(prefix)) continue;
+    const draft = parse(readRaw(key));
+    if (draft?.channelId === channel) roots.push(key.slice(prefix.length));
+  }
+  return roots;
 }
 
 export function readThreadDraft(
@@ -404,6 +431,7 @@ export function clearThreadDraft(workspaceId: string, rootId: string): void {
 
 /** 로그아웃. 이 기기에 남은 초안과 보내지 못한 글을 전부 지운다. */
 export function clearAllDrafts(): void {
+  leftChannelFloors.clear();
   for (const key of draftKeys()) writeRaw(key, null);
   for (const key of threadDraftKeys()) writeRaw(key, null);
   for (const key of failedSendKeys()) writeRaw(key, null);
@@ -571,6 +599,22 @@ function failedSendKeys(): string[] {
   }
 }
 
+// 나간 대화(1:1 「대화 나가기」, #5825)는 나간 순간 이전의 글을 다시 적지 않는다. 정리(`forgetFailedSends`)가 돈 **뒤에** 보내는 중이던 글의
+// 요청이 늦게 실패하면 그 글이 「못 보낸 글」로 되살아나, 다시 이어진 새 대화에 옛 글이 「서버가 받지 못했어요」로 선다. 이 파일의 쓰기 한 곳에서 막는다:
+// 나간 순간의 시각을 기억해 그 대화의, 그 시각까지 **쓴** 글(`createdAtMs` - 같은 기기 시계)은 적지 않는다. 다시 이어진 뒤에 새로 쓴 글은 그 뒤라
+// 평소처럼 남는다(폰 `failedSends.ts` 와 같은 모양). 로그아웃(`clearAllDrafts`)이 비운다.
+const leftChannelFloors = new Map<string, number>();
+
+function leftChannelKey(workspaceId: string, channelId: string): string {
+  return `${workspaceId.toLowerCase()}:${channelId.toLowerCase()}`;
+}
+
+/** 이 대화에서 나갔다: `atMs` 까지 쓴 글은 이 기기에 못 보낸 글로 적지 않는다. */
+export function blockFailedSendsBefore(workspaceId: string, channelId: string, atMs: number = Date.now()): void {
+  const key = leftChannelKey(workspaceId, channelId);
+  leftChannelFloors.set(key, Math.max(leftChannelFloors.get(key) ?? 0, atMs));
+}
+
 /** 보내지 못한 글을 이 기기에 남긴다(이미 있으면 갱신). 키 모양이 든 글은 남기지 않고 있던 것도 지운다. */
 export function rememberFailedSend(
   workspaceId: string,
@@ -585,6 +629,8 @@ export function rememberFailedSend(
   }
   // 이 탭의 지금 사람이 쓴 글만 남긴다: 앞 사람의 요청이 다음 사람이 들어온 뒤에 늦게 실패해도 그 글은 이 기기에 남지 않는다.
   if (draftAuthor !== null && row.authorMemberId.toLowerCase() !== draftAuthor) return;
+  const left = leftChannelFloors.get(leftChannelKey(workspaceId, row.channelId));
+  if (left !== undefined && row.createdAtMs <= left) return;
   writeRaw(key, serializeFailedSend(row, kind, nowMs));
   pruneFailedSends(nowMs);
 }
