@@ -2,7 +2,7 @@
 // GATE: #5836 (ADR-0225 D12) — 한글 이름 채널을 찾는 동안 입력기의 조합 중간 상태에서도 줄이 한 프레임도 사라지지 않는다.
 //
 // 실제 걸러내기 함수(작성창 `#` 의 `matchChannels` · 빠른 이동의 `paletteFilter`)를 번들해 Chromium 과 WebKit 에서 돌린다.
-// 「디자인」을 치는 입력기의 단계(`디` · `디ㅈ` · `디자` · `디장` · `디자이` · `디자인`)를 `compositionupdate` → `input` 차례로
+// 「디자인」을 치는 입력기의 단계(`ㄷ` · `디` · `딪` · `디자` · `디장` · `디자이` · `디자인`)를 `compositionupdate` → `input` 차례로
 // 보내고, 단계마다 두 프레임을 기다리며 **프레임마다** 목록에 「디자인」 줄이 있는지 기록한다(있어야 하고, 「디저트」는 `디자`부터 없어야 한다).
 // Chromium 은 실제 입력기 조합(CDP `Input.imeSetComposition`)으로도 한 번 더 돈다. WebKit 은 입력기를 흉내 낼 길이 없어
 // 이벤트를 손으로 보낸다 — 진짜 입력기 조합은 미검증이다.
@@ -23,9 +23,11 @@ const here = dirname(fileURLToPath(import.meta.url));
 const src = resolve(here, "../src");
 const core = resolve(here, "../../../packages/momo-core/src");
 const work = mkdtempSync(join(tmpdir(), "hangul-compose-"));
+// 어떻게 끝나도(예외 포함) 임시 폴더를 남기지 않는다.
+process.on("exit", () => rmSync(work, { recursive: true, force: true }));
 const noLoose = process.env.HANGUL_COMPOSE_NO_LOOSE === "1";
 
-const STEPS = ["디", "디ㅈ", "디자", "디장", "디자이", "디자인"];
+const STEPS = ["ㄷ", "디", "딪", "디자", "디장", "디자이", "디자인"]; // 실제 두벌식 차례
 const NAMES = ["디자인", "디저트"];
 
 writeFileSync(
@@ -42,7 +44,7 @@ const channels = ${JSON.stringify(NAMES)}.map((name, i) => ({ id: "c" + i, name,
 if (noLoose) {
   writeFileSync(
     join(work, "stub.ts"),
-    "export const looseTailMatches = () => []; export const looseTailIncludes = () => false;\n"
+    "export const looseTailMatches = () => []; export const looseTailIncludes = () => false; export const nameMatchTier = (literal) => (literal ? \"strict\" : null);\n"
   );
 }
 await build({
@@ -126,7 +128,7 @@ for (const name of engines) {
     record[label] = frames;
     const lost = frames.filter((f) => !f.composer.includes("디자인") || !f.palette.includes("디자인"));
     const dessertEarly = frames.filter(
-      (f) => !["디", "디ㅈ"].includes(f.step) && (f.composer.includes("디저트") || f.palette.includes("디저트"))
+      (f) => !["ㄷ", "디", "딪"].includes(f.step) && (f.composer.includes("디저트") || f.palette.includes("디저트"))
     );
     const bySteps = STEPS.map((s) => frames.filter((f) => f.step === s).length);
     console.log(`${label}: 프레임 ${frames.length} (단계별 ${bySteps.join("/")}), 「디자인」이 사라진 프레임 ${lost.length}, 「디저트」가 남은 프레임(디자 이후) ${dessertEarly.length}`);
@@ -139,7 +141,6 @@ if (process.env.HANGUL_COMPOSE_OUT) {
   mkdirSync(process.env.HANGUL_COMPOSE_OUT, { recursive: true });
   writeFileSync(join(process.env.HANGUL_COMPOSE_OUT, "frames.json"), JSON.stringify(record));
 }
-rmSync(work, { recursive: true });
 if (failures > 0) {
   console.error(`FAIL: ${failures}개 장면`);
   process.exit(1);

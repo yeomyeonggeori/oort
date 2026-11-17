@@ -74,24 +74,55 @@ function foldChars(text: string): number[] {
   });
 }
 
+const jongUnit = (compat: number): number => JONG + JONG_COMPAT.indexOf(compat) + 1;
+const jungUnit = (compat: number): number => JUNG + compat;
+
+/** 겹모음 도중: 가운뎃소리 하나(ㅗ·ㅜ·ㅡ)를 치면 그 뒤에 이어 붙어 겹모음이 되는 가운뎃소리들 (ㅗ→ㅘㅙㅚ, ㅜ→ㅝㅞㅟ, ㅡ→ㅢ). 가운뎃소리 위치 번호. */
+const VOWEL_GROWS: Readonly<Record<number, readonly number[]>> = {
+  8: [9, 10, 11],
+  13: [14, 15, 16],
+  18: [19],
+};
+/** 겹받침 도중: 홑받침(호환 자모)을 치면 그 뒤에 이어 붙어 겹받침이 되는 받침들. */
+const TAIL_GROWS: Readonly<Record<number, readonly number[]>> = {
+  0x3131: [0x3133],
+  0x3134: [0x3135, 0x3136],
+  0x3139: [0x313a, 0x313b, 0x313c, 0x313d, 0x313e, 0x313f, 0x3140],
+  0x3142: [0x3144],
+};
+
 /** 질의 마지막 글자가 만들 수 있는 자모열들 (정확히 맞는 것 포함). 한글이 아니면 빈 목록. */
 function tailForms(cp: number): number[][] {
   if (cp >= HANGUL_BASE && cp <= HANGUL_LAST) {
     const own = unitsOf(cp);
     const forms = [own];
-    const jong = (cp - HANGUL_BASE) % 28;
+    const s = cp - HANGUL_BASE;
+    const jong = s % 28;
+    const jungIndex = Math.floor((s % 588) / 28);
     if (jong > 0) {
       const [stays, moves] = JONG_SPLIT[jong];
       const open = own.slice(0, 2);
       if (stays !== null) open.push(stays);
       if (moves !== null) open.push(moves);
       forms.push(open);
+      // 홑받침 → 겹받침 사이 (`달` ↔ 닭갈비).
+      for (const grown of TAIL_GROWS[JONG_COMPAT[jong - 1]] ?? []) {
+        forms.push([...own.slice(0, 2), jongUnit(grown)]);
+      }
+    } else {
+      // 겹모음 도중 (`호` ↔ 회의, `고` ↔ 관리, `으` ↔ 의견).
+      for (const grown of VOWEL_GROWS[jungIndex] ?? []) {
+        forms.push([own[0], jungUnit(grown)]);
+      }
     }
     return forms;
   }
   const lone = CHO_COMPAT.indexOf(cp);
   return lone >= 0 ? [[cp], [CHO + lone]] : [];
 }
+
+/** 낱말이 시작하는 자리로 읽는 글자 (폰 검색의 낱말 경계와 같다). */
+const WORD_BREAKS = new Set([" ", "-", "_", ".", "/", "\u00b7", ":"]);
 
 /**
  * `name` 안에서 `query` 가 (마지막 글자만 느슨하게) 맞는 곳 전부, 왼쪽부터.
@@ -115,6 +146,10 @@ export function looseTailMatches(query: string, name: string): NameTailMatch[] {
     }
   });
 
+  // 홀로 선 자음 하나만 친 질의(`ㄱ`)는 이름의 첫 글자(또는 낱말 첫 글자)의 첫소리에만 맞는다 — 초성 검색이 아니다.
+  const loneOnly = folded.length === 1;
+  const nameChars = foldChars(name);
+
   const found = new Map<number, number>();
   for (const tail of forms) {
     const needle = [...head, ...tail];
@@ -124,6 +159,7 @@ export function looseTailMatches(query: string, name: string): NameTailMatch[] {
       const unit = hay[from];
       if (unit >= JUNG && unit < JONG + 28) continue;
       const start = origin[from];
+      if (loneOnly && start > 0 && !WORD_BREAKS.has(String.fromCodePoint(nameChars[start - 1]))) continue;
       const end = origin[from + needle.length - 1] + 1;
       const known = found.get(start);
       if (known === undefined || end > known) found.set(start, end);
@@ -134,4 +170,16 @@ export function looseTailMatches(query: string, name: string): NameTailMatch[] {
 
 export function looseTailIncludes(query: string, name: string): boolean {
   return looseTailMatches(query, name).length > 0;
+}
+
+/**
+ * 이름이 질의에 맞는 등급. `strict` 는 호출처가 쓰는 글자 그대로의 견줌(`literalHit`)이 맞은 경우,
+ * `loose` 는 마지막 글자만 느슨하게 맞은 경우, 맞지 않으면 `null`.
+ * 작성창·빠른 이동·폰 검색이 같은 규칙으로 쓴다: **`strict` 가 늘 `loose` 앞**에 선다.
+ */
+export type NameMatchTier = "strict" | "loose";
+
+export function nameMatchTier(literalHit: boolean, query: string, name: string): NameMatchTier | null {
+  if (literalHit) return "strict";
+  return looseTailIncludes(query, name) ? "loose" : null;
 }

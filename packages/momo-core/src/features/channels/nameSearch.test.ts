@@ -1,10 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { looseTailIncludes, looseTailMatches } from "./nameSearch";
+import { looseTailIncludes, looseTailMatches, nameMatchTier } from "./nameSearch";
 
 // ADR-0225 D12: 「디자인」을 치는 여섯 단계에서 이름이 목록에 남는다.
 describe("looseTailMatches — 한글 조합 중 마지막 글자만 느슨하게", () => {
   it.each([
+    ["ㄷ", true],
     ["디", true],
+    ["딪", true],
     ["디ㅈ", true],
     ["디자", true],
     ["디장", true],
@@ -15,7 +17,9 @@ describe("looseTailMatches — 한글 조합 중 마지막 글자만 느슨하�
   });
 
   it.each([
+    ["ㄷ", true],
     ["디", true],
+    ["딪", true],
     ["디ㅈ", true],
     ["디자", false],
     ["디장", false],
@@ -72,5 +76,46 @@ describe("looseTailMatches — 한글 조합 중 마지막 글자만 느슨하�
   it("이름 한가운데도 찾는다", () => {
     expect(looseTailMatches("리뷰", "디자인-리뷰")).toEqual([{ start: 4, end: 6 }]);
     expect(looseTailMatches("-리", "디자인-리뷰")).toEqual([{ start: 3, end: 5 }]);
+  });
+
+  it("앞 글자는 받침까지 글자 그대로다 (마지막 글자 앞의 받침은 느슨하지 않다)", () => {
+    expect(looseTailIncludes("가시", "갑시다")).toBe(false);
+    expect(looseTailIncludes("디자이", "딘자인")).toBe(false);
+  });
+
+  it.each([
+    ["호", "회의"], ["호", "화면"], ["고", "관리"], ["우", "원격"], ["으", "의견"],
+    ["회으", "회의"], ["기호", "기획"],
+  ])("겹모음을 치는 도중 `%s` 에서 「%s」가 남는다", (query, name) => {
+    expect(looseTailIncludes(query, name)).toBe(true);
+  });
+
+  it.each([
+    ["달", "닭갈비"], ["갑", "값어치"], ["안", "앉은자리"], ["업", "없는것"], ["일", "읽을거리"],
+  ])("홑받침에서 겹받침으로 가는 도중 `%s` 에서 「%s」가 남는다", (query, name) => {
+    expect(looseTailIncludes(query, name)).toBe(true);
+  });
+
+  it("겹모음·겹받침 느슨함은 이어 붙는 자모에만 열린다", () => {
+    expect(looseTailIncludes("호", "해외")).toBe(false);
+    expect(looseTailIncludes("달", "딸기")).toBe(false);
+    expect(looseTailIncludes("고", "구름")).toBe(false);
+  });
+
+  it("낱자 하나는 이름의 첫 글자(또는 낱말 첫 글자)의 첫소리에만 맞는다", () => {
+    expect(looseTailIncludes("ㄱ", "공지")).toBe(true);
+    expect(looseTailIncludes("ㄱ", "기획-공지")).toBe(true);
+    expect(looseTailIncludes("ㄱ", "디자인")).toBe(false);
+    expect(looseTailIncludes("ㄱ", "회고")).toBe(false); // 이름 가운데 글자의 첫소리
+    // 두 글자부터는 이름 가운데도 맞는다 (`디ㅈ` ↔ 디자인).
+    expect(looseTailIncludes("디ㅈ", "새디자인")).toBe(true);
+  });
+});
+
+describe("nameMatchTier — 글자 그대로가 느슨함 앞", () => {
+  it("글자 그대로 맞으면 strict, 느슨하게만 맞으면 loose, 아니면 null", () => {
+    expect(nameMatchTier(true, "복", "복지")).toBe("strict");
+    expect(nameMatchTier(false, "복", "보고")).toBe("loose");
+    expect(nameMatchTier(false, "복", "디자인")).toBeNull();
   });
 });

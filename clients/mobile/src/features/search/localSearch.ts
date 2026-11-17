@@ -11,6 +11,7 @@ import {uuidEq, type Channel, type RosterMember} from '@momo/core/lib/api';
 // ## 순서는 글자 규칙이 정한다 (Buzz 모바일의 같은 화면에서 모양만 읽었다)
 //
 //   0 이름이 그대로   1 앞부분   2 단어 시작   3 중간   4 글자가 차례대로 들어 있음
+//   5 한글을 치는 도중 마지막 글자만 느슨하게 맞음 (글자 그대로 맞은 줄이 늘 앞이다)
 //
 // 낮은 숫자가 위다. 같은 숫자끼리는 이름 가나다 순이다. 4번(차례대로)은 두 글자부터 센다: 한 글자는 3번과 같다.
 //
@@ -31,7 +32,7 @@ export const PREVIEW_COUNT = {channels: 3, people: 3, messages: 3} as const;
 /** 단어의 경계로 읽는 글자. 이름 가운데의 `-`·공백·`_` 뒤에서 시작하는 일치가 「단어 시작」이다. */
 const WORD_BREAKS = new Set([' ', '-', '_', '.', '/', '·', ':']);
 
-export type NameRank = 0 | 1 | 2 | 3 | 4;
+export type NameRank = 0 | 1 | 2 | 3 | 4 | 5;
 /** `[시작, 끝)` 코드포인트 위치. 오름차순이고 서로 겹치지 않는다. */
 export type MatchRanges = ReadonlyArray<readonly [number, number]>;
 export interface NameMatch {
@@ -67,6 +68,8 @@ export function matchName(query: string, text: string, loose = false): NameMatch
   for (let from = 1; from + size <= hay.length; from += 1) {
     if (startsAt(from)) return {rank: 3, ranges: [[from, from + size]]};
   }
+  const subsequence = size < 2 ? null : subsequenceMatch(needle, hay);
+  if (subsequence !== null) return subsequence;
   // 한글을 치는 도중의 마지막 글자만 느슨하게(`디장` ↔ `디자인`, ADR-0225 D12). 채널 이름에만 켠다.
   if (loose) {
     const hits = looseTailMatches(query, text);
@@ -74,12 +77,13 @@ export function matchName(query: string, text: string, loose = false): NameMatch
     const hit =
       at(start => start === 0) ?? at(start => WORD_BREAKS.has(hay[start - 1])) ?? hits[0];
     if (hit !== undefined) {
-      const rank: NameRank = hit.start === 0 ? 1 : WORD_BREAKS.has(hay[hit.start - 1]) ? 2 : 3;
-      return {rank, ranges: [[hit.start, hit.end]]};
+      return {rank: 5, ranges: [[hit.start, hit.end]]};
     }
   }
-  if (size < 2) return null;
+  return null;
+}
 
+function subsequenceMatch(needle: string[], hay: string[]): NameMatch | null {
   // 글자가 차례대로만 들어 있는 경우: 왼쪽부터 가장 빨리 닿는 자리를 잡는다.
   const spots: number[] = [];
   let cursor = 0;

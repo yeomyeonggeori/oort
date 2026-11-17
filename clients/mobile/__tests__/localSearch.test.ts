@@ -91,19 +91,25 @@ describe('이름 찾기의 글자 규칙', () => {
 describe('한글 조합 중 채널 찾기 · 정렬 자 (ADR-0225 D12)', () => {
   const hangul = [channel('h1', '디자인'), channel('h2', '디저트')];
 
-  it.each(['디', '디ㅈ', '디자', '디장', '디자이', '디자인'])(
+  it.each(['ㄷ', '디', '딪', '디ㅈ', '디자', '디장', '디자이', '디자인'])(
     '`%s` 를 칠 때 「디자인」은 남고 「디저트」는 `디자`부터 빠진다',
     query => {
       const names = matchChannels(hangul, query, 'ko-KR').map(match => match.name);
       expect(names).toContain('디자인');
-      expect(names.includes('디저트')).toBe(query === '디' || query === '디ㅈ');
+      expect(names.includes('디저트')).toBe(['ㄷ', '디', '딪', '디ㅈ'].includes(query));
     },
   );
 
   it('느슨하게 맞은 줄의 강조는 이름 안의 글자 구간이다', () => {
     const [hit] = matchChannels(hangul, '디장', 'ko-KR');
-    expect(hit.rank).toBe(1);
+    expect(hit.rank).toBe(5); // 글자 그대로의 순위(0~4) 뒤
     expect(hit.ranges).toEqual([[0, 3]]);
+  });
+
+  it('글자 그대로 맞은 줄이 느슨하게만 맞은 줄보다 늘 앞이다: `복` → 복지 > 보고, `갑` → 갑판 > 가방', () => {
+    const rows = [channel('o1', '보고'), channel('o2', '복지'), channel('o3', '가방'), channel('o4', '갑판')];
+    expect(matchChannels(rows, '복', 'ko-KR').map(match => match.name)).toEqual(['복지', '보고']);
+    expect(matchChannels(rows, '갑', 'ko-KR').map(match => match.name)).toEqual(['갑판', '가방']);
   });
 
   it('사람 이름은 느슨하게 보지 않는다 (채널 이름에만 켠다)', () => {

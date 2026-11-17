@@ -37,6 +37,13 @@ function tokenScore(token: string, parts: readonly string[]): number {
   return best;
 }
 
+/**
+ * 느슨하게만 맞은 줄의 점수. 글자 그대로의 가장 낮은 점수(부분 문자열 0.6)보다 **아래**,
+ * 띄엄띄엄(0.1)보다는 위다 — 글자 그대로 맞은 줄이 늘 앞에 선다 (ADR-0225 D12).
+ */
+export const LOOSE_WORD_SCORE = 0.5;
+export const LOOSE_INNER_SCORE = 0.4;
+
 function looseScore(token: string, lowered: string): number {
   const chars = Array.from(lowered);
   const hits = looseTailMatches(token, lowered);
@@ -44,8 +51,8 @@ function looseScore(token: string, lowered: string): number {
   return hits.some(
     (hit) => hit.start === 0 || WORD_SPLIT.test(chars[hit.start - 1])
   )
-    ? 1
-    : 0.6;
+    ? LOOSE_WORD_SCORE
+    : LOOSE_INNER_SCORE;
 }
 
 function subsequence(needle: string, haystack: string): boolean {
@@ -87,7 +94,7 @@ export function paletteFilter(
     else if (lowered.includes(token)) total += 0.6;
     else {
       // 한글을 치는 도중에는 **마지막 낱말의 마지막 글자만** 느슨하게 본다 (ADR-0225 D12) —
-      // 앞 낱말은 이미 끝낸 것이다. 낱말 앞머리에서 맞으면 앞머리 점수다.
+      // 앞 낱말은 이미 끝낸 것이다. 점수는 글자 그대로 맞은 어떤 줄보다 낮다.
       const loose = index === tokens.length - 1 ? looseScore(token, lowered) : 0;
       if (loose > 0) total += loose;
       else if (subsequence(token, lowered)) total += 0.1;
