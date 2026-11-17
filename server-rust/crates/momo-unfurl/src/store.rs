@@ -169,11 +169,12 @@ pub async fn load_message(
 
 /// Whether the server must not fetch the addresses this author wrote.
 ///
-/// ADR-0170 증보 2026-11-14 (#5872): the server never fetches an address an agent wrote. The one
-/// exception is a webhook's service member: the member a `webhook_installation` row names as its
-/// `author_member_id` (an admin-installed inbound path that reads no channel). That row is the
-/// only thing that sets the exception — not "has no `agent` row", which other service members
-/// (the GitHub author) share. A member row that cannot be read counts as barred.
+/// ADR-0170 증보 2026-11-14 (#5872): the server never fetches an address an agent wrote. Two
+/// exceptions, both an admin-installed inbound path that reads no channel, and both named by a
+/// stored row, never by a handle or by "has no `agent` row": the service member a
+/// `webhook_installation` names as its `author_member_id`, and the member
+/// `github_workspace_author` names as its workspace's author. A member row that cannot be read
+/// counts as barred.
 pub async fn author_is_agent(
     conn: &mut PgConnection,
     author_member_id: Uuid,
@@ -182,6 +183,8 @@ pub async fn author_is_agent(
         "SELECT m.kind = 'human' \
              OR EXISTS (SELECT 1 FROM webhook_installation w \
                          WHERE w.workspace_id = m.workspace_id AND w.author_member_id = m.id) \
+             OR EXISTS (SELECT 1 FROM github_workspace_author g \
+                         WHERE g.workspace_id = m.workspace_id AND g.author_member_id = m.id) \
            FROM member m WHERE m.id = $1",
     )
     .bind(author_member_id)

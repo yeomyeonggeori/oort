@@ -1480,13 +1480,29 @@ async fn add_webhook_author(su: &PgPool, tenant: &Tenant) -> Tenant {
     }
 }
 
+/// The GitHub integration's author: a member of kind `agent` with no `agent` row that
+/// `github_workspace_author` names for the workspace (what `ensure_workspace_author` stores).
+async fn add_github_author(su: &PgPool, tenant: &Tenant) -> Tenant {
+    let author = add_member_of_kind(su, tenant, "agent").await;
+    sqlx::query(
+        "INSERT INTO github_workspace_author (workspace_id, author_member_id) VALUES ($1, $2)",
+    )
+    .bind(author.workspace)
+    .bind(author.member)
+    .execute(su)
+    .await
+    .expect("github author");
+    author
+}
+
 /// 불변식: 사람이 누르지 않았는데 에이전트가 쓴 주소로 서버가 나가는 요청이 없다. 단 하나의 예외는
-/// 웹훅 설치가 가리키는 서비스 멤버의 글이다. 에이전트 종류마다 한 경우씩: 채널에 앉은 에이전트 ·
+/// 웹훅 설치가 가리키는 서비스 멤버와 GitHub 연동의 작성자 글이다. 에이전트 종류마다 한 경우씩: 채널에 앉은 에이전트 ·
 /// 팀 AI 모양(`agent` 행) · 외부 에이전트(`agent_profile` 있음) · `agent` 행이 없는 서비스 멤버
-/// (웹훅 설치에 묶이지 않은 것)는 요청 0건·카드 0행, 사람과 웹훅 글은 1건·카드 1행.
+/// (웹훅·GitHub 어느 쪽에도 묶이지 않은 것)는 요청 0건·카드 0행, 사람·웹훅·GitHub 글은 1건·카드 1행.
 #[tokio::test]
 #[ignore = "needs DATABASE_URL to a pgvector/pg18 DB"]
-async fn an_agent_authored_message_is_never_fetched_except_a_webhooks_and_a_human_one_is() {
+async fn an_agent_authored_message_is_never_fetched_except_an_inbound_integrations_and_a_human_one_is(
+) {
     let _guard = test_lock().await;
     ensure_schema();
     let su = superuser_pool().await;
@@ -1497,6 +1513,7 @@ async fn an_agent_authored_message_is_never_fetched_except_a_webhooks_and_a_huma
     let external_agent = add_agent_with_row(&su, &person, true).await;
     let rowless_service = add_member_of_kind(&su, &person, "agent").await;
     let webhook = add_webhook_author(&su, &person).await;
+    let github = add_github_author(&su, &person).await;
 
     let by_channel_agent = insert_message(
         &su,
@@ -1525,6 +1542,7 @@ async fn an_agent_authored_message_is_never_fetched_except_a_webhooks_and_a_huma
     )
     .await;
     let by_webhook = insert_message(&su, &webhook, "see https://by-webhook.example/f").await;
+    let by_github = insert_message(&su, &github, "see https://by-github.example/h").await;
     let by_person = insert_message(&su, &person, "see https://by-person.example/g").await;
 
     let asked = Arc::new(Mutex::new(Vec::new()));
@@ -1542,10 +1560,11 @@ async fn an_agent_authored_message_is_never_fetched_except_a_webhooks_and_a_huma
     assert_eq!(
         got,
         vec![
+            "https://by-github.example/h".to_string(),
             "https://by-person.example/g".to_string(),
             "https://by-webhook.example/f".to_string()
         ],
-        "the server asked for a person's link and a webhook's, and for nothing another agent wrote"
+        "the server asked for a person's, a webhook's and GitHub's link, and nothing another agent wrote"
     );
     for (name, message) in [
         ("channel agent", by_channel_agent),
@@ -1557,6 +1576,7 @@ async fn an_agent_authored_message_is_never_fetched_except_a_webhooks_and_a_huma
         assert_eq!(card_rows(&su, message).await, 0, "{name}");
     }
     assert_eq!(card_rows(&su, by_webhook).await, 1);
+    assert_eq!(card_rows(&su, by_github).await, 1);
     assert_eq!(card_rows(&su, by_person).await, 1);
 }
 
