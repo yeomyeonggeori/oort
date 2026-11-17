@@ -431,6 +431,7 @@ export function clearThreadDraft(workspaceId: string, rootId: string): void {
 
 /** 로그아웃. 이 기기에 남은 초안과 보내지 못한 글을 전부 지운다. */
 export function clearAllDrafts(): void {
+  leftChannelFloors.clear();
   for (const key of draftKeys()) writeRaw(key, null);
   for (const key of threadDraftKeys()) writeRaw(key, null);
   for (const key of failedSendKeys()) writeRaw(key, null);
@@ -598,6 +599,22 @@ function failedSendKeys(): string[] {
   }
 }
 
+// 나간 대화(1:1 「대화 나가기」, #5825)는 나간 순간 이전의 글을 다시 적지 않는다. 정리(`forgetFailedSends`)가 돈 **뒤에** 보내는 중이던 글의
+// 요청이 늦게 실패하면 그 글이 「못 보낸 글」로 되살아나, 다시 이어진 새 대화에 옛 글이 「서버가 받지 못했어요」로 선다. 이 파일의 쓰기 한 곳에서 막는다:
+// 나간 순간의 시각을 기억해 그 대화의, 그 시각까지 **쓴** 글(`createdAtMs` - 같은 기기 시계)은 적지 않는다. 다시 이어진 뒤에 새로 쓴 글은 그 뒤라
+// 평소처럼 남는다(폰 `failedSends.ts` 와 같은 모양). 로그아웃(`clearAllDrafts`)이 비운다.
+const leftChannelFloors = new Map<string, number>();
+
+function leftChannelKey(workspaceId: string, channelId: string): string {
+  return `${workspaceId.toLowerCase()}:${channelId.toLowerCase()}`;
+}
+
+/** 이 대화에서 나갔다: `atMs` 까지 쓴 글은 이 기기에 못 보낸 글로 적지 않는다. */
+export function blockFailedSendsBefore(workspaceId: string, channelId: string, atMs: number = Date.now()): void {
+  const key = leftChannelKey(workspaceId, channelId);
+  leftChannelFloors.set(key, Math.max(leftChannelFloors.get(key) ?? 0, atMs));
+}
+
 /** 보내지 못한 글을 이 기기에 남긴다(이미 있으면 갱신). 키 모양이 든 글은 남기지 않고 있던 것도 지운다. */
 export function rememberFailedSend(
   workspaceId: string,
@@ -612,6 +629,8 @@ export function rememberFailedSend(
   }
   // 이 탭의 지금 사람이 쓴 글만 남긴다: 앞 사람의 요청이 다음 사람이 들어온 뒤에 늦게 실패해도 그 글은 이 기기에 남지 않는다.
   if (draftAuthor !== null && row.authorMemberId.toLowerCase() !== draftAuthor) return;
+  const left = leftChannelFloors.get(leftChannelKey(workspaceId, row.channelId));
+  if (left !== undefined && row.createdAtMs <= left) return;
   writeRaw(key, serializeFailedSend(row, kind, nowMs));
   pruneFailedSends(nowMs);
 }

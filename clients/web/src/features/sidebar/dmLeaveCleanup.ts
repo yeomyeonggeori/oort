@@ -2,6 +2,7 @@ import type { Query, QueryClient } from "@tanstack/react-query";
 import type { ReadState } from "@momo/core/lib/api";
 import type { DmLeaveCleanupPort } from "@momo/core/features/channels/dmLeave";
 import {
+  blockFailedSendsBefore,
   clearDraft,
   clearThreadDraft,
   forgetFailedSend,
@@ -116,6 +117,8 @@ export function webDmLeaveCleanupPort(
       clearChannelSurfaces(workspaceId, channelId);
     },
     forgetFailedSends(channelId) {
+      // 이 뒤에 늦게 실패하는 보내기(나갈 때 날아가던 글)가 못 보낸 글로 되살아나지 않게 한다(검수 r1 M3).
+      blockFailedSendsBefore(workspaceId, channelId);
       for (const { row } of readFailedSends(workspaceId, channelId, selfMemberId)) {
         forgetFailedSend(workspaceId, channelId, row.clientMsgId);
       }

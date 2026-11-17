@@ -19,6 +19,8 @@
 //   K 좁은 폭 390 · 200%: 창이 화면 안, 가로 넘침 0.
 //   M 개인 채널로 옮겨 온 방 프레임(D17, 서버 셋째 칸): 상대가 나간 1:1 에 남은 내가 받는 옛 글의 수정이 열린 대화에 반영된다. 다른 방
 //     이름을 단 것은 반영되지 않는다.
+//   N 수리 1회차(검수 r1): 진행 낱말 · 예약 목록 모를 때 창이 바로 서고 움직이지 않음 · 보내는 중이던 글이 늦게 실패해도 안 적힘 · 붙들린 영수증과 다른 줄 메뉴 ·
+//     404 는 닫고 걷기 / 409·405 는 「나갈 수 없어요」 + 확정 잠금.
 //   L 머리 ⋮ 길: 390(서랍 닫힘 - 끝나면 서랍이 열리고 영수증이 보임) · 1280 목록 접힘(⌘B): 캐럿이 <body> 가 아니고 낭독 영역이 말한다.
 // =============================================================================
 import { mkdirSync, writeFileSync } from "node:fs";
@@ -128,6 +130,11 @@ async function installMocks(context, opts = {}) {
     extra: {},
     leaveDelayMs: opts.leaveDelayMs ?? 0,
     leaveStatus: opts.leaveStatus ?? 204,
+    leaveCode: opts.leaveCode ?? "x",
+    gone: new Set(),
+    sendGate: null,
+    sendStatus: 500,
+    sendCalls: [],
     leaveCalls: [],
     readDelayMs: opts.readDelayMs ?? 0,
     rosterDelayMs: opts.rosterDelayMs ?? 0,
@@ -152,7 +159,8 @@ async function installMocks(context, opts = {}) {
       const body = JSON.parse(req.postData() ?? "{}");
       state.leaveCalls.push({ channelId: leave[1], seenSeq: body.seenSeq, at: Date.now() });
       if (state.leaveDelayMs > 0) await sleep(state.leaveDelayMs);
-      if (state.leaveStatus !== 204) return json(route, { error: { code: "x", message: "x" } }, state.leaveStatus);
+      if (state.leaveStatus === 404) state.gone.add(leave[1].toLowerCase());
+      if (state.leaveStatus !== 204) return json(route, { error: { code: state.leaveCode, message: "x" } }, state.leaveStatus);
       state.left.set(leave[1].toLowerCase(), Math.max(state.left.get(leave[1].toLowerCase()) ?? 0, body.seenSeq + 1));
       return route.fulfill({ status: 204, body: "" });
     }
@@ -173,13 +181,19 @@ async function installMocks(context, opts = {}) {
     }
     if (path.endsWith("/members/me/sidebar-prefs")) return json(route, { prefs: { version: 1, sections: [], starredChannelIds: state.starred } });
     if (/\/agents\/[^/]+\/liveness$/.test(path)) return json(route, { agentMemberId: P("14"), state: "inactive" });
-    if (path.endsWith("/channels")) return json(route, { channels: [...channels, ...dms] });
+    if (path.endsWith("/channels")) return json(route, { channels: [...channels, ...dms.filter((d) => !state.gone.has(d.id.toLowerCase()))] });
     if (path.endsWith("/roster")) {
       if (state.rosterDelayMs > 0) await sleep(state.rosterDelayMs);
       return json(route, { members: roster });
     }
     if (path.endsWith("/huddles/active")) return json(route, { huddle: null });
     if (path.endsWith(`/workspaces/${workspaceId}`)) return json(route, { workspace: { id: workspaceId, name: "새벽거리" } });
+    if (/\/channels\/[^/]+\/messages$/.test(path) && req.method() === "POST") {
+      const sent = JSON.parse(req.postData() ?? "{}");
+      state.sendCalls.push({ channelId: path.split("/").at(-2), body: sent.body ?? null, at: Date.now() });
+      if (state.sendGate !== null) await state.sendGate;
+      return json(route, { error: { code: "x", message: "x" } }, state.sendStatus);
+    }
     const list = /\/channels\/([^/]+)\/messages$/.exec(path);
     if (list) {
       const id = list[1].toLowerCase();
@@ -913,6 +927,270 @@ async function sceneHeaderPath(browser, origin, engine) {
   }
 }
 
+// ---- N · 수리 1회차(검수 r1 M1~M5) -----------------------------------------------------------------------------
+
+/** 프레임마다 확인 창의 위치·크기와 확정 단추의 y. */
+async function trackDialog(page, ms) {
+  return page.evaluate((ms) => new Promise((resolve) => {
+    const frames = [];
+    const t0 = performance.now();
+    const tick = () => {
+      const d = document.querySelector('[data-testid="dm-leave-confirm"]');
+      const c = document.querySelector('[data-testid="dm-leave-confirm-confirm"]');
+      const slot = document.querySelector('[data-testid="dm-leave-confirm-slot"]');
+      const r = d?.getBoundingClientRect();
+      frames.push({
+        t: Math.round(performance.now() - t0),
+        dialog: d !== null,
+        top: r ? Math.round(r.top * 100) / 100 : null,
+        height: r ? Math.round(r.height * 100) / 100 : null,
+        confirmY: c ? Math.round(c.getBoundingClientRect().top * 100) / 100 : null,
+        slot: slot?.getAttribute("data-state") ?? null,
+        locked: c?.getAttribute("aria-disabled") ?? null,
+      });
+      if (performance.now() - t0 < ms) requestAnimationFrame(tick);
+      else resolve(frames);
+    };
+    requestAnimationFrame(tick);
+  }), ms);
+}
+
+async function sceneFix1(browser, origin, engine) {
+  // M1 진행 낱말
+  for (const scheme of ["light", "dark"]) {
+    const scene = `N1-busy-${engine}-${scheme}`;
+    const { context, page } = await boot(browser, origin, { scheme, leaveDelayMs: 1_500 });
+    try {
+      await attempt(scene, async () => {
+        await openLeaveFromRow(page, DM_SEOYEON);
+        await clickConfirm(page);
+        await page.waitForTimeout(300);
+        const info = await page.evaluate(() => {
+          const c = document.querySelector('[data-testid="dm-leave-confirm-confirm"]');
+          return { text: c?.textContent, busy: c?.getAttribute("aria-busy") };
+        });
+        check(scene, "진행 중: 확정 낱말 = 「나가는 중…」 · aria-busy", info.text === "나가는 중…" && info.busy === "true", info);
+        await shot(page, engine, `fix1-busy-${scheme}`);
+      });
+    } finally {
+      await context.close();
+    }
+  }
+  // M2 예약 목록을 모를 때: 창은 바로 서고, 알게 되어도 움직이지 않는다
+  for (const [label, id, expectCount] of [["예약 2개", DM_SEOYEON, 2], ["예약 0개", DM_JIHO, 0]]) {
+    const scene = `N2-checking-${engine}-${label}`;
+    const { context, page } = await boot(browser, origin, { scheduledDelayMs: 5_000 });
+    try {
+      await attempt(scene, async () => {
+        await row(page, id).click({ button: "right" });
+        await page.locator(MENU).waitFor({ timeout: 3_000 });
+        await page.getByTestId("channel-row-leave-dm").click();
+        const tracking = trackDialog(page, 5_900);
+        await page.waitForTimeout(500);
+        const early = await page.evaluate(() => {
+          const c = document.querySelector('[data-testid="dm-leave-confirm-confirm"]');
+          return { dialog: document.querySelector('[data-testid="dm-leave-confirm"]') !== null, locked: c?.getAttribute("aria-disabled"), text: document.querySelector('[data-testid="dm-leave-confirm"]')?.textContent ?? "" };
+        });
+        check(scene, "0.5초 시점: 창이 서 있고 확정은 잠겨 「확인 중…」을 말한다", early.dialog && early.locked === "true" && early.text.includes("확인 중…"), early);
+        if (label === "예약 2개") await shot(page, engine, "fix1-checking-light");
+        const frames = await tracking;
+        writeFileSync(resolve(OUT_DIR, `frames-fix1-checking-${engine}-${expectCount}.json`), JSON.stringify(frames));
+        const shown = frames.filter((f) => f.dialog);
+        const resolvedAt = shown.find((f) => f.slot === "known");
+        const ys = [...new Set(shown.map((f) => f.confirmY))];
+        const tops = [...new Set(shown.map((f) => f.top))];
+        check(scene, "알게 되는 순간을 지나도 창 위치·단추 줄 y 변화 0px(프레임마다)", resolvedAt !== undefined && Math.max(...ys) - Math.min(...ys) <= 0.5 && Math.max(...tops) - Math.min(...tops) <= 0.5, { resolvedAt: resolvedAt?.t, ys, tops, frames: shown.length });
+        const final = await page.evaluate(() => ({ text: document.querySelector('[data-testid="dm-leave-confirm"]')?.textContent ?? "", locked: document.querySelector('[data-testid="dm-leave-confirm-confirm"]')?.getAttribute("aria-disabled") }));
+        check(scene, "알게 된 뒤: 확정이 살아나고 예약 문장이 선다", final.locked === null && (expectCount > 0 ? final.text.includes(`${expectCount}개도 취소돼요`) : !final.text.includes("예약해 둔")), final);
+      });
+    } finally {
+      await context.close();
+    }
+  }
+  {
+    const scene = `N2-late-${engine}`;
+    const { context, page } = await boot(browser, origin, { scheduledDelayMs: 3_000 });
+    try {
+      await attempt(scene, async () => {
+        await row(page, DM_SEOYEON).click({ button: "right" });
+        await page.locator(MENU).waitFor({ timeout: 3_000 });
+        await page.getByTestId("channel-row-leave-dm").click();
+        await page.waitForTimeout(400);
+        await page.keyboard.press("Escape");
+        await page.waitForTimeout(300);
+        await row(page, DM_JIHO).click();
+        await page.waitForTimeout(3_600);
+        const dialogs = await page.getByTestId("dm-leave-confirm").count();
+        check(scene, "취소하고 다른 대화로 간 뒤에 뒤늦게 뜨는 창 0건", dialogs === 0 && /\/c\//i.test(await page.evaluate(() => window.location.hash)), { dialogs });
+      });
+    } finally {
+      await context.close();
+    }
+  }
+  // M3 보내는 중이던 글이 늦게 실패해도 다시 적히지 않는다
+  {
+    const scene = `N3-inflight-${engine}`;
+    const { context, page, state } = await boot(browser, origin, { path: `/c/${DM_JIHO}` });
+    try {
+      await attempt(scene, async () => {
+        let release;
+        state.sendGate = new Promise((r) => { release = r; });
+        await page.getByTestId("composer-input").click();
+        await page.keyboard.type("나가기 직전에 보낸 글");
+        await page.keyboard.press("Enter");
+        await page.waitForFunction(() => true);
+        await page.waitForTimeout(400);
+        check(scene, "보내기 요청이 붙들려 있다", state.sendCalls.length === 1, state.sendCalls);
+        await page.getByTestId("channel-title-menu").click();
+        await page.getByTestId("channel-leave-dm").click();
+        await page.getByTestId("dm-leave-confirm").waitFor({ timeout: 5_000 });
+        await clickConfirm(page);
+        await page.waitForFunction(() => document.querySelector('[data-testid="dm-leave-confirm"]') === null, null, { timeout: 5_000 });
+        await page.waitForTimeout(500);
+        const stored = () => page.evaluate(() => Object.keys(localStorage).filter((k) => k.startsWith("momo.failed-send.v1:")).length);
+        const before = await stored();
+        release();
+        await page.waitForTimeout(800);
+        const after = await stored();
+        check(scene, "늦은 실패(500) 뒤 이 기기의 못 보낸 글 0건", before === 0 && after === 0, { before, after });
+        // 상대가 새 글을 써서 대화가 다시 이어진다 - 그 대화에 「못 보낸 글」 줄이 없다.
+        state.extra[DM_JIHO] = [msg(DM_JIHO, 5, P("12"), "새로 이어진 대화의 첫 글")];
+        await page.evaluate((p) => { window.location.hash = p; }, `/c/${DM_JIHO}`);
+        await page.waitForFunction(() => document.querySelector('[data-testid="timeline-virtuoso"]')?.textContent?.includes("새로 이어진 대화의 첫 글"), null, { timeout: 8_000 });
+        const text = await page.evaluate(() => document.querySelector('[data-testid="timeline-virtuoso"]')?.textContent ?? "");
+        check(scene, "다시 이어진 대화에 나가기 직전 글·실패 줄 0건", !text.includes("나가기 직전에 보낸 글"), text.slice(0, 120));
+        await shot(page, engine, "fix1-inflight-reopened");
+      });
+    } finally {
+      await context.close();
+    }
+  }
+  // M4 영수증이 붙들린 동안 다른 줄 메뉴를 열어도 줄이 올라오지 않는다
+  {
+    const scene = `N4-held-${engine}`;
+    const { context, page } = await boot(browser, origin, {});
+    try {
+      await attempt(scene, async () => {
+        const before = await row(page, DM_MINJI).boundingBox();
+        await openLeaveFromRow(page, DM_SEOYEON);
+        await clickConfirm(page);
+        await page.waitForTimeout(300);
+        const target = await center(row(page, DM_JIHO));
+        await page.mouse.move(target.x, target.y);
+        await page.waitForTimeout(1_700);
+        const stillThere = await page.getByTestId("dm-leave-receipt").count();
+        const tracking = trackRows(page, [DM_JIHO, DM_MINJI], 2_400);
+        await page.waitForTimeout(100);
+        const minji = await center(row(page, DM_MINJI));
+        await page.mouse.click(minji.x, minji.y, { button: "right" });
+        await page.locator(MENU).waitFor({ timeout: 3_000 });
+        // 사람이 메뉴 항목으로 포인터를 옮긴다(메뉴 판은 포털 - 목록 판에서 포인터가 나간다).
+        const menuBox = await page.locator(MENU).boundingBox();
+        await page.mouse.move(menuBox.x + 30, menuBox.y + 20, { steps: 3 });
+        const frames = await tracking;
+        const menuOpen = await page.locator(MENU).count();
+        const afterMenu = frames.filter((f) => f.t > 150);
+        check(scene, "붙들린 영수증: 1.8초 시점에 아직 서 있다", stillThere === 1, { stillThere });
+        const ys = [...new Set(afterMenu.map((f) => f["05"]))];
+        check(scene, "아래 줄(최민지) 우클릭 메뉴가 열려 있는 내내 그 줄 y 변화 0px(프레임마다)", menuOpen === 1 && afterMenu.every((f) => f.receipt) && Math.max(...ys) - Math.min(...ys) <= 0.5, { before: before.y, ys, receiptAlways: afterMenu.every((f) => f.receipt), menuOpen });
+        writeFileSync(resolve(OUT_DIR, `frames-fix1-held-${engine}.json`), JSON.stringify(frames));
+        await page.keyboard.press("Escape");
+        await page.mouse.move(1_270, 400);
+        await page.waitForTimeout(500);
+        check(scene, "메뉴가 닫히고 포인터가 목록 밖이면 걷힌다", (await page.getByTestId("dm-leave-receipt").count()) === 0, null);
+      });
+    } finally {
+      await context.close();
+    }
+  }
+  // M5 다시 눌러도 같은 답인 실패
+  for (const [status, code] of [[404, "x"], [409, "dm_leave_unavailable"], [405, "x"]]) {
+    const scene = `N5-${status}-${engine}`;
+    const { context, page, state } = await boot(browser, origin, { leaveStatus: status, leaveCode: code });
+    try {
+      await attempt(scene, async () => {
+        await openLeaveFromRow(page, DM_SEOYEON);
+        await clickConfirm(page);
+        await page.waitForTimeout(900);
+        const info = await page.evaluate((id) => {
+          const c = document.querySelector('[data-testid="dm-leave-confirm-confirm"]');
+          return {
+            dialog: document.querySelector('[data-testid="dm-leave-confirm"]') !== null,
+            text: document.querySelector('[data-testid="dm-leave-confirm"]')?.textContent ?? "",
+            locked: c?.getAttribute("aria-disabled") ?? null,
+            retryLine: document.querySelector('[data-testid="dm-leave-confirm-error"]') !== null,
+            row: document.querySelector(`[data-testid="channel-item"][data-channel-id="${id}"]`) !== null,
+            receipt: document.querySelector('[data-testid="dm-leave-receipt"]') !== null,
+          };
+        }, DM_SEOYEON);
+        if (status === 404) {
+          check(scene, "404: 창이 닫히고 줄이 걷힌다(문장 없이 · 영수증 없음 · 다시 시도 줄 없음)", !info.dialog && !info.row && !info.receipt && !info.retryLine, info);
+        } else {
+          check(scene, `${status}: 「이 대화에서는 나갈 수 없어요.」 + 확정 잠금(다시 시도 줄 없음)`, info.dialog && info.text.includes("이 대화에서는 나갈 수 없어요.") && info.locked === "true" && !info.retryLine && !info.text.includes("다시 시도"), info);
+          const calls = state.leaveCalls.length;
+          await page.getByTestId("dm-leave-confirm-confirm").click({ force: true });
+          await page.waitForTimeout(300);
+          check(scene, `${status}: 잠긴 확정을 눌러도 PUT 이 더 나가지 않는다`, state.leaveCalls.length === calls, { calls, now: state.leaveCalls.length });
+          if (status === 409) await shot(page, engine, "fix1-unavailable-409-light");
+        }
+      });
+    } finally {
+      await context.close();
+    }
+  }
+  // 어둡게: 확인 중 · 409
+  {
+    const scene = `N7-dark-${engine}`;
+    const a = await boot(browser, origin, { scheme: "dark", scheduledDelayMs: 3_000 });
+    try {
+      await attempt(scene, async () => {
+        await row(a.page, DM_SEOYEON).click({ button: "right" });
+        await a.page.locator(MENU).waitFor({ timeout: 3_000 });
+        await a.page.getByTestId("channel-row-leave-dm").click();
+        await a.page.getByTestId("dm-leave-confirm").waitFor({ timeout: 3_000 });
+        await a.page.waitForTimeout(300);
+        await shot(a.page, engine, "fix1-checking-dark");
+        check(scene, "어둡게 확인 중: 확정 잠금", (await a.page.getByTestId("dm-leave-confirm-confirm").getAttribute("aria-disabled")) === "true", null);
+      });
+    } finally {
+      await a.context.close();
+    }
+    const b = await boot(browser, origin, { scheme: "dark", leaveStatus: 409, leaveCode: "dm_leave_unavailable" });
+    try {
+      await attempt(scene, async () => {
+        await openLeaveFromRow(b.page, DM_SEOYEON);
+        await clickConfirm(b.page);
+        await b.page.waitForTimeout(700);
+        await shot(b.page, engine, "fix1-unavailable-409-dark");
+        check(scene, "어둡게 409: 문장 + 잠금", (await b.page.getByTestId("dm-leave-confirm").textContent()).includes("이 대화에서는 나갈 수 없어요."), null);
+      });
+    } finally {
+      await b.context.close();
+    }
+  }
+  // 390 에서 확인 중
+  {
+    const scene = `N6-narrow-${engine}`;
+    const { context, page } = await boot(browser, origin, { viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, scheduledDelayMs: 4_000 });
+    try {
+      await attempt(scene, async () => {
+        await page.getByTestId("open-sidebar-drawer").click();
+        await page.waitForTimeout(400);
+        await row(page, DM_SEOYEON).click({ button: "right" });
+        await page.locator(MENU).waitFor({ timeout: 3_000 });
+        await page.getByTestId("channel-row-leave-dm").click();
+        await page.getByTestId("dm-leave-confirm").waitFor({ timeout: 3_000 });
+        await page.waitForTimeout(300);
+        const geo = await page.evaluate(() => { const d = document.querySelector('[data-testid="dm-leave-confirm"]').getBoundingClientRect(); return { left: d.left, right: d.right, vw: window.innerWidth, overflow: document.documentElement.scrollWidth - document.documentElement.clientWidth }; });
+        check(scene, "390 확인 중: 창이 화면 안 · 가로 넘침 0", geo.left >= 0 && geo.right <= geo.vw && geo.overflow <= 0, geo);
+        await shot(page, engine, "fix1-checking-390");
+      });
+    } finally {
+      await context.close();
+    }
+  }
+}
+
 async function main() {
   mkdirSync(OUT_DIR, { recursive: true });
   const preview = await startGuardedPreview({
@@ -934,6 +1212,7 @@ async function main() {
         await run("K", () => sceneZoom(browser, preview.origin, engine));
         await run("L", () => sceneHeaderPath(browser, preview.origin, engine));
         await run("M", () => sceneRelayed(browser, preview.origin, engine));
+        await run("N", () => sceneFix1(browser, preview.origin, engine));
       } finally {
         await browser.close();
       }

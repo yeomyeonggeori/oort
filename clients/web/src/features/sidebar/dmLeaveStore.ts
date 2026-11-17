@@ -83,6 +83,31 @@ function subscribe(listener: () => void): () => void {
   return () => listeners.delete(listener);
 }
 
+/** 저장소의 바뀜을 React 밖에서 듣는다(영수증 걷기가 메뉴·창이 닫히는 순간을 본다). */
+export function subscribeDmLeaveStore(listener: () => void): () => void {
+  return subscribe(listener);
+}
+
+// 사이드바 목록에서 연 메뉴(줄 우클릭 메뉴 등)의 열림 수. 영수증은 이것이 0 이고 확인 창도 없을 때만 걷힌다(검수 r1 M4).
+let listMenusOpen = 0;
+
+/** 목록에서 연 메뉴가 열려 있는 동안 영수증 걷기를 미룬다. 돌려받은 함수가 풀어 준다(한 번만 듣는다). */
+export function holdDmLeaveReceipts(): () => void {
+  listMenusOpen += 1;
+  let released = false;
+  return () => {
+    if (released) return;
+    released = true;
+    listMenusOpen -= 1;
+    publish({});
+  };
+}
+
+/** 영수증 걷기를 미뤄야 하나: 목록에서 연 메뉴가 열려 있거나 나가기 확인 창이 서 있다. */
+export function isDmLeaveListHeld(): boolean {
+  return listMenusOpen > 0 || snapshot.request !== null;
+}
+
 export function useDmLeaveStore(): Snapshot {
   return useSyncExternalStore(subscribe, () => snapshot, () => snapshot);
 }
@@ -116,6 +141,7 @@ export function openTimelineFor(workspaceId: string, channelId: string): OpenTim
 /** 시험 전용. */
 export function resetDmLeaveStoreForTest(): void {
   openTimeline = null;
+  listMenusOpen = 0;
   snapshot = { request: null, receipts: [], version: 0 };
   for (const listener of listeners) listener();
 }

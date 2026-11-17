@@ -1146,10 +1146,22 @@ export const catalog: MessageCatalog = {
       "value": "Leave conversation"
     }
   ],
+  "channels.dmLeave.busy": [
+    {
+      "type": 0,
+      "value": "Leaving…"
+    }
+  ],
   "channels.dmLeave.cancel": [
     {
       "type": 0,
       "value": "Cancel"
+    }
+  ],
+  "channels.dmLeave.checking": [
+    {
+      "type": 0,
+      "value": "Checking…"
     }
   ],
   "channels.dmLeave.confirm": [
@@ -1240,6 +1252,12 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "Couldn't leave. Please try again."
+    }
+  ],
+  "channels.dmLeave.unavailable": [
+    {
+      "type": 0,
+      "value": "You can't leave this conversation."
     }
   ],
   "common.feedback.unavailable": [

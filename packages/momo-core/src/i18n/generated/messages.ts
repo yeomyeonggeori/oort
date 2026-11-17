@@ -172,7 +172,9 @@ export const messageKeys = [
   "blocked.workStateStale.offline",
   "blocked.workStateStale.serverUnreachable",
   "channels.dmLeave.action",
+  "channels.dmLeave.busy",
   "channels.dmLeave.cancel",
+  "channels.dmLeave.checking",
   "channels.dmLeave.confirm",
   "channels.dmLeave.confirmBody",
   "channels.dmLeave.confirmFinal",
@@ -181,6 +183,7 @@ export const messageKeys = [
   "channels.dmLeave.confirmTitle",
   "channels.dmLeave.done",
   "channels.dmLeave.failed",
+  "channels.dmLeave.unavailable",
   "common.feedback.unavailable",
   "common.invitation.received",
   "common.members.count",
@@ -1828,7 +1831,9 @@ export const argumentSpecs = {
   "blocked.workStateStale.offline": {},
   "blocked.workStateStale.serverUnreachable": {},
   "channels.dmLeave.action": {},
+  "channels.dmLeave.busy": {},
   "channels.dmLeave.cancel": {},
+  "channels.dmLeave.checking": {},
   "channels.dmLeave.confirm": {},
   "channels.dmLeave.confirmBody": {
     "name": "string"
@@ -1843,6 +1848,7 @@ export const argumentSpecs = {
   },
   "channels.dmLeave.done": {},
   "channels.dmLeave.failed": {},
+  "channels.dmLeave.unavailable": {},
   "common.feedback.unavailable": {},
   "common.invitation.received": {
     "actorName": "string"
@@ -3946,7 +3952,9 @@ export interface MessageArgs {
   "blocked.workStateStale.offline": Record<string, never>;
   "blocked.workStateStale.serverUnreachable": Record<string, never>;
   "channels.dmLeave.action": Record<string, never>;
+  "channels.dmLeave.busy": Record<string, never>;
   "channels.dmLeave.cancel": Record<string, never>;
+  "channels.dmLeave.checking": Record<string, never>;
   "channels.dmLeave.confirm": Record<string, never>;
   "channels.dmLeave.confirmBody": { name: string };
   "channels.dmLeave.confirmFinal": Record<string, never>;
@@ -3955,6 +3963,7 @@ export interface MessageArgs {
   "channels.dmLeave.confirmTitle": { name: string };
   "channels.dmLeave.done": Record<string, never>;
   "channels.dmLeave.failed": Record<string, never>;
+  "channels.dmLeave.unavailable": Record<string, never>;
   "common.feedback.unavailable": Record<string, never>;
   "common.invitation.received": { actorName: string };
   "common.members.count": { count: number };

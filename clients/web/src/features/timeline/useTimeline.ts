@@ -697,7 +697,13 @@ export function useTimeline(
         // merging it is not optimistic rendering: it is the same reconcile the
         // realtime frame gets, and whichever arrives second dedupes by seq.
         expressionStore?.recordSuccess(row.body, confirmed.id);
-        if (channelRef.current === row.channelId) applyBatch([confirmed]);
+        // 나가기 전 글의 늦은 성공이 나간 뒤의 화면에 되살아나지 않게: 하한 아래 seq 는 그리지 않는다(`historyFloorOf`).
+        if (
+          channelRef.current === row.channelId &&
+          !isBelowHistoryFloor(confirmed.seq, historyFloorOfRef.current?.(row.channelId) ?? null)
+        ) {
+          applyBatch([confirmed]);
+        }
         updatePending((list) => removePending(list, row.clientMsgId));
         forgetRow(row);
         if (spec && callResult) {

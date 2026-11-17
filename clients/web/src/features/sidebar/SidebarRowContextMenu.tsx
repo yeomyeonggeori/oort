@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState, type ReactElement } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactElement } from "react";
 import type { Channel, MembershipRole, ReadState } from "@momo/core/lib/api";
 import {
   ContextMenu,
@@ -16,6 +16,7 @@ import {
   channelActionMenuLabel,
   type ChannelSectionChoice,
 } from "@momo/core/features/channels/actionModel";
+import { holdDmLeaveReceipts } from "./dmLeaveStore";
 import { scheduleSidebarChannelRowFocus } from "./sidebarRowFocus";
 
 // =============================================================================
@@ -206,6 +207,8 @@ export function SidebarRowContextMenu({
   // 는 스택 길이도 함께 읽는다. 이 줄은 그 원장의 한 항목이고, 앞 문단이 그
   // 사실을 적어 두는 자리다. `MessageActions.tsx` 가 같은 줄을 갖고 있다.
   useEscapeLayer(open, () => setOpen(false));
+  // 메뉴가 열려 있는 동안 영수증은 걷히지 않는다(메뉴 판은 포털이라 포인터가 목록을 나간 것으로 치기 때문 - #5825 검수 r1 M4).
+  useEffect(() => (open ? holdDmLeaveReceipts() : undefined), [open]);
 
   return (
     <>

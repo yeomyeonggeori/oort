@@ -41,6 +41,8 @@ export type DmLeaveKey = Extract<MessageKey, `channels.dmLeave.${string}`>;
  *   cancel · confirm  단추 둘. 「나가기」는 위험색, 기본 초점은 「취소」(화면 몫)
  *   done              성공 뒤 한 줄 알림(되돌리기 단추 없음)
  *   failed            실패 한 줄. 아무것도 바뀌지 않는다
+ *   checking          예약 목록을 아직 모를 때 확정 자리의 낱말(확정은 잠긴다)
+ *   unavailable       다시 눌러도 같은 답인 실패(404 는 창을 닫고 걷으므로 409·405)의 한 줄. 확정은 잠긴다
  */
 export const DM_LEAVE_KEYS = {
   action: "channels.dmLeave.action",
@@ -51,8 +53,11 @@ export const DM_LEAVE_KEYS = {
   confirmScheduled: "channels.dmLeave.confirmScheduled",
   cancel: "channels.dmLeave.cancel",
   confirm: "channels.dmLeave.confirm",
+  busy: "channels.dmLeave.busy",
   done: "channels.dmLeave.done",
   failed: "channels.dmLeave.failed",
+  checking: "channels.dmLeave.checking",
+  unavailable: "channels.dmLeave.unavailable",
 } as const satisfies Record<string, DmLeaveKey>;
 
 // ---- 옛 서버 판별 (D21) ----------------------------------------------------------------------------------------

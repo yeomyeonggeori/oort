@@ -8,10 +8,22 @@ export const catalog: MessageCatalog = {
       "value": "退出对话"
     }
   ],
+  "channels.dmLeave.busy": [
+    {
+      "type": 0,
+      "value": "正在退出…"
+    }
+  ],
   "channels.dmLeave.cancel": [
     {
       "type": 0,
       "value": "取消"
+    }
+  ],
+  "channels.dmLeave.checking": [
+    {
+      "type": 0,
+      "value": "正在确认…"
     }
   ],
   "channels.dmLeave.confirm": [
@@ -85,6 +97,12 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "无法退出。请重试。"
+    }
+  ],
+  "channels.dmLeave.unavailable": [
+    {
+      "type": 0,
+      "value": "无法退出此对话。"
     }
   ]
 };

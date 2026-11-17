@@ -146,3 +146,18 @@ describe("나가기 성공 뒤 정리 - 그 대화의 것만", () => {
     expect(readSurface(surfaceKey(WS, KEEP)).folders).toBe(1);
   });
 });
+
+describe("나간 뒤 늦게 실패하는 보내기 (검수 r1 M3)", () => {
+  it("정리 뒤에 나가기 전에 쓴 글이 못 보낸 글로 다시 적히려 해도 0 이고, 나간 뒤에 쓴 글은 적힌다", () => {
+    const sending = (id: string, createdAtMs: number) => ({
+      clientMsgId: id, channelId: LEFT, authorMemberId: ME, body: `본문 ${id}`, createdAtMs, sinceSeq: 7, status: "failed" as const,
+    });
+    runDmLeaveCleanup(webDmLeaveCleanupPort(client, WS, ME), { channelId: LEFT, seenSeq: 10, rootIds: [] });
+    // 나갈 때 날아가던 글의 요청이 이제야 실패한다: 훅의 실패 갈래가 이 저장을 부른다.
+    rememberFailedSend(WS, sending("in-flight", NOW - 5_000), "server");
+    expect(readFailedSends(WS, LEFT, ME)).toEqual([]);
+    // 상대가 새 글을 써서 이어진 대화에서 내가 새로 쓴 글이 실패하면 평소처럼 남는다.
+    rememberFailedSend(WS, sending("revived", NOW + 5_000), "server");
+    expect(readFailedSends(WS, LEFT, ME).map(({ row }) => row.clientMsgId)).toEqual(["revived"]);
+  });
+});

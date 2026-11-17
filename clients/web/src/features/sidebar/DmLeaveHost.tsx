@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type RefObject } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
 import { createPortal } from "react-dom";
 import { useLocation, useNavigate } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
@@ -23,9 +23,11 @@ import { useHoverNone } from "@/features/emoji/useHoverNone";
 import {
   clearDmLeaveReceipt,
   endDmLeaveRequest,
+  isDmLeaveListHeld,
   noteDmLeaveFolded,
   openTimelineFor,
   showDmLeaveReceipt,
+  subscribeDmLeaveStore,
   useDmLeaveStore,
   type DmLeaveReceipt,
   type DmLeaveRequest,
@@ -45,9 +47,13 @@ import { focusSidebarChannelRow, neighborSidebarChannelRowId } from "./sidebarRo
 // ## 네 상태
 //
 //   쉼      공용 `ConfirmDialog` 위험 변형. 초점은 「취소」. 문장은 코어 사전(D21): 제목 · 본문 · 되살림 · (예약 N개) · 경고(되돌릴 수 없음).
-//   진행 중  확정 단추가 `aria-busy`, 취소·Esc·바깥 누름은 잠김(요청이 이미 나갔다). 진행 낱말 키가 사전에 없어 확정 낱말 그대로다.
-//   실패    창 안 한 줄(`role="alert"`, 사전 `failed`), 단추는 다시 살아난다 - 「나가기」가 곧 다시 시도다. 아무것도 바뀌지 않았다.
-//           405·501 은 이 워크스페이스의 메뉴를 접고, 404·409 는 채널·투영을 다시 받는다(그 대화가 이 기기의 생각과 다르다).
+//   진행 중  확정 단추가 `aria-busy` + 「나가는 중…」(사전 `busy`), 취소·Esc·바깥 누름은 잠김(요청이 이미 나갔다).
+//   실패    다시 누르면 달라질 수 있는 것(망·5xx·403·400)은 창 안 한 줄(`role="alert"`, 사전 `failed`) + 살아 있는 확정 - 「나가기」가 곧 다시
+//           시도다. 다시 눌러도 같은 답인 것은 다르게 닫는다(검수 r1 M5): 404(이미 나갔거나 없는 대화)는 「이미 나간 것」으로 보고 창을 닫고 줄을
+//           걷는다(문장 없이 - 채널 나가기와 같다). 409 `dm_leave_unavailable`·405·501 은 「이 대화에서는 나갈 수 없어요.」(사전 `unavailable`) +
+//           확정 잠금(405·501 은 이 워크스페이스의 메뉴도 접는다, 409 는 채널·투영을 다시 받는다).
+//   확인 중  예약 목록을 아직 모를 때(M2): 창은 바로 서고 확정만 잠긴 채 「확인 중…」(사전 `checking`). 알게 되면 그 자리의 문장만 바뀐다 -
+//           설명 끝의 한 칸(`SCHEDULED_SLOT`)을 미리 잡아 두어 창의 높이·단추 줄이 움직이지 않는다.
 //   성공    창이 닫히고, 그 대화의 줄 자리에 한 줄 영수증(「대화에서 나갔어요.」, `DmLeaveReceiptRow`). 보고 있었으면 `/` 로 간다.
 //
 // ## 성공의 차례 (줄 · 주소 · 캐럿)
@@ -111,7 +117,8 @@ export function DmLeaveHost({
   const scheduled = useScheduled();
   const [opened, setOpened] = useState<OpenedLeave | null>(null);
   const [busy, setBusy] = useState(false);
-  const [failed, setFailed] = useState(false);
+  // 실패의 갈래: `retry` = 다시 누르면 달라질 수 있다(확정이 살아 있다) · `unavailable` = 다시 눌러도 같은 답이다(확정 잠금).
+  const [failed, setFailed] = useState<"retry" | "unavailable" | null>(null);
   // 닫힌 뒤 캐럿이 갈 곳. 성공이면 이웃 줄(또는 본문), 아니면 연 자리.
   // `drawerFrom`: 좁은 창에서 머리 ⋮ 로 나갔으면 서랍(목록)을 연다. 주소가 그 자리(`drawerFrom`)를 떠난 뒤에 연다 - `null` 이면 주소가 안 바뀐다.
   const outcomeRef = useRef<
@@ -133,7 +140,7 @@ export function DmLeaveHost({
     const observed = Math.max(request.observedSeq ?? 0, open?.newestSeq ?? 0);
     openerRef.current = request.opener;
     outcomeRef.current = null;
-    setFailed(false);
+    setFailed(null);
     setBusy(false);
     setOpened({ request, seenSeq: dmLeaveSeenSeq(row, observed) });
     if (scheduled.surface === "unknown") scheduled.refetch();
@@ -160,8 +167,8 @@ export function DmLeaveHost({
     requestAnimationFrame(() => shellNavRef.current.openDrawer());
   }, [drawerAfterRoute, pathname]);
 
-  // 예약 N 개(D21). 서버는 그 방의 내 `pending`·`failed` 를 같이 취소한다. 「모름」을 0 으로 읽지 않는다: 첫 목록이 오기 전에는 창을 열지
-  // 않고(사이드바가 앱을 열 때 이미 읽어 두어 보통은 바로다), 못 읽었으면 그 까닭을 말하고 확정을 잠근다.
+  // 예약 N 개(D21). 서버는 그 방의 내 `pending`·`failed` 를 같이 취소한다. 「모름」을 0 으로 읽지 않는다: 첫 목록이 오기 전에는 창을 먼저 세우고
+  // 확정을 잠근 채 「확인 중…」을 말하며(M2), 못 읽었으면 그 까닭을 말하고 잠근 채로 둔다.
   const scheduledCount =
     opened === null
       ? 0
@@ -171,7 +178,7 @@ export function DmLeaveHost({
           ? 0
           : null;
   const scheduledFailed = scheduledCount === null && scheduled.isError;
-  const ready = opened !== null && (scheduledCount !== null || scheduledFailed);
+  const scheduledChecking = scheduledCount === null && !scheduledFailed;
 
   const copy = useMemo(
     () =>
@@ -217,36 +224,15 @@ export function DmLeaveHost({
     endDmLeaveRequest();
   };
 
-  const confirm = async () => {
-    if (opened === null || busy) return;
-    const { request: req, seenSeq } = opened;
-    // 뿌리 글 후보는 PUT 전에 모은다(#5824 검수 r1 M4).
-    const rootIds = collectDmLeaveRootIds(client, workspaceId, req.channelId, [
-      ...req.rootIds,
-      ...(openTimelineFor(workspaceId, req.channelId)?.messageIds ?? []),
-    ]);
-    const flight = ++flightRef.current;
-    setBusy(true);
-    setFailed(false);
-    try {
-      await leaveDm(workspaceId, req.channelId, seenSeq);
-    } catch (error) {
-      if (flight !== flightRef.current) return;
-      const failure = settleDmLeaveFailure(workspaceId, error);
-      if (failure === "absent") noteDmLeaveFolded();
-      if (failure === "missing" || failure === "unavailable") {
-        void client.invalidateQueries({ queryKey: ["channels", workspaceId] });
-        void client.invalidateQueries({ queryKey: ["read-state", workspaceId] });
-      }
-      setBusy(false);
-      setFailed(true);
-      return;
-    }
-    if (flight !== flightRef.current) return;
+  /**
+   * 나가기가 끝난 대화의 뒤처리(성공과 404 가 같이 쓴다): 이웃 줄 잡기 → (영수증) → 정리 → 보던 대화면 `/` → 둘째 정리 → 창 닫기.
+   * 404 는 영수증이 없다 - 「이미 나간 것」이라 말할 문장이 없다(M5).
+   */
+  const finishLeft = (req: DmLeaveRequest, seenSeq: number, rootIds: string[], withReceipt: boolean) => {
     // 1. 이웃 줄(지우기 전에).
     const neighborId = navRef.current === null ? null : neighborSidebarChannelRowId(navRef.current, req.channelId);
     // 2. 영수증이 그 줄 자리를 받는다.
-    showDmLeaveReceipt(workspaceId, req.channelId);
+    if (withReceipt) showDmLeaveReceipt(workspaceId, req.channelId);
     // 3. 이 기기의 사본 정리(투영 행 → 캐시 → 초안·답글 초안 → 트레이 → 못 보낸 글).
     runDmLeaveCleanup(webDmLeaveCleanupPort(client, workspaceId, selfMemberId), {
       channelId: req.channelId,
@@ -272,11 +258,46 @@ export function DmLeaveHost({
     endDmLeaveRequest();
   };
 
+  const confirm = async () => {
+    // 예약 목록을 아직 모르거나 다시 눌러도 같은 답인 창은 확정이 잠겨 있다(공용 부품의 잠금과 같은 조건을 한 번 더 막는다).
+    if (opened === null || busy || scheduledCount === null || failed === "unavailable") return;
+    const { request: req, seenSeq } = opened;
+    // 뿌리 글 후보는 PUT 전에 모은다(#5824 검수 r1 M4).
+    const rootIds = collectDmLeaveRootIds(client, workspaceId, req.channelId, [
+      ...req.rootIds,
+      ...(openTimelineFor(workspaceId, req.channelId)?.messageIds ?? []),
+    ]);
+    const flight = ++flightRef.current;
+    setBusy(true);
+    setFailed(null);
+    try {
+      await leaveDm(workspaceId, req.channelId, seenSeq);
+    } catch (error) {
+      if (flight !== flightRef.current) return;
+      const failure = settleDmLeaveFailure(workspaceId, error);
+      if (failure === "absent") noteDmLeaveFolded();
+      if (failure === "missing" || failure === "unavailable") {
+        void client.invalidateQueries({ queryKey: ["channels", workspaceId] });
+        void client.invalidateQueries({ queryKey: ["read-state", workspaceId] });
+      }
+      if (failure === "missing") {
+        // 404: 이미 나갔거나 없는 대화다. 다시 눌러도 같은 답이라 「이미 나간 것」으로 보고 창을 닫고 줄을 걷는다(문장 없이).
+        finishLeft(req, seenSeq, rootIds, false);
+        return;
+      }
+      setBusy(false);
+      setFailed(failure === "failed" ? "retry" : "unavailable");
+      return;
+    }
+    if (flight !== flightRef.current) return;
+    finishLeft(req, seenSeq, rootIds, true);
+  };
+
   return (
     <>
       {copy !== null && opened !== null && (
         <ConfirmDialog
-          open={ready && request !== null && opened.request === request}
+          open={request !== null && opened.request === request}
           onOpenChange={(next) => {
             if (!next) close();
           }}
@@ -290,26 +311,82 @@ export function DmLeaveHost({
               {copy.lines.slice(0, 2).map((line) => (
                 <p key={line}>{line}</p>
               ))}
-              {copy.lines.slice(3).map((line) => (
-                <p key={line} data-testid="dm-leave-confirm-scheduled">
-                  {line}
-                </p>
-              ))}
+              <ScheduledSlot
+                state={scheduledFailed ? "failed" : scheduledChecking ? "checking" : "known"}
+                checking={messages.formatMessage(DM_LEAVE_KEYS.checking)}
+                failedText={SCHEDULED_COPY.load.error}
+              >
+                {copy.lines.slice(3).map((line) => (
+                  <p key={line} data-testid="dm-leave-confirm-scheduled">
+                    {line}
+                  </p>
+                ))}
+              </ScheduledSlot>
             </>
           }
           warning={copy.lines[2]}
           confirmLabel={copy.confirm}
-          busyLabel={copy.confirm}
+          busyLabel={messages.formatMessage(DM_LEAVE_KEYS.busy)}
           cancelLabel={copy.cancel}
           busy={busy}
-          error={failed ? messages.formatMessage(DM_LEAVE_KEYS.failed) : null}
-          lockedReason={scheduledFailed ? SCHEDULED_COPY.load.error : undefined}
+          error={failed === "retry" ? messages.formatMessage(DM_LEAVE_KEYS.failed) : null}
+          lockedReason={
+            failed === "unavailable" ? (
+              <span role="alert">{messages.formatMessage(DM_LEAVE_KEYS.unavailable)}</span>
+            ) : scheduledFailed ? (
+              <span className="sr-only">{SCHEDULED_COPY.load.error}</span>
+            ) : scheduledChecking ? (
+              <span className="sr-only">{messages.formatMessage(DM_LEAVE_KEYS.checking)}</span>
+            ) : undefined
+          }
           onConfirm={() => void confirm()}
           testId="dm-leave-confirm"
         />
       )}
       <DmLeaveAnnouncer />
     </>
+  );
+}
+
+/**
+ * 확인 창 설명 끝의 「예약 N개」 칸(M2). 예약 목록을 아직 모를 때 「확인 중…」, 못 읽었을 때 까닭, 알았을 때 「예약해 둔 메시지 N개도 취소돼요.」(없으면 빈
+ * 칸)가 **같은 자리**에 선다. 높이를 미리 잡아 두는 셈: 칸의 최소 높이는 본문 한 줄(`1lh`)이고, 확정이 잠겨 있는 동안(모름·못 읽음)에는 공용 부품이
+ * 잠금 문장 줄(빈 줄이라도 `gap-3` 한 칸)을 더 세우므로, 알게 되어 그 줄이 걷히는 순간 같은 만큼(`0.75rem`)을 이 칸의 최소 높이가 받는다 - 창의 높이·단추 줄의 y 가
+ * 움직이지 않는다. 낭독은 잠금 문장(`lockedReason`)이 맡아서 눈에 보이는 글은 `aria-hidden` 이다.
+ */
+const SCHEDULED_SLOT_CLASS = "min-h-[1lh]";
+/** 알았을 때: 본문 한 줄 + 걷힌 잠금 줄의 `gap-3`(상자 크기가 border-box 라 padding 이 아니라 최소 높이에 더한다). */
+const SCHEDULED_SLOT_KNOWN_CLASS = "min-h-[calc(1lh+0.75rem)]";
+
+function ScheduledSlot({
+  state,
+  checking,
+  failedText,
+  children,
+}: {
+  state: "checking" | "failed" | "known";
+  checking: string;
+  failedText: string;
+  children: ReactNode;
+}) {
+  return (
+    <div
+      className={state === "known" ? SCHEDULED_SLOT_KNOWN_CLASS : SCHEDULED_SLOT_CLASS}
+      data-testid="dm-leave-confirm-slot"
+      data-state={state}
+    >
+      {state === "checking" ? (
+        <p aria-hidden="true" data-testid="dm-leave-confirm-checking">
+          {checking}
+        </p>
+      ) : state === "failed" ? (
+        <p aria-hidden="true" data-testid="dm-leave-confirm-scheduled-failed">
+          {failedText}
+        </p>
+      ) : (
+        children
+      )}
+    </div>
   );
 }
 
@@ -331,13 +408,18 @@ function DmLeaveAnnouncer() {
   );
 }
 
+/** 메뉴·창이 닫힌 뒤 `:hover` 가 갱신되기를 기다리는 시간(ms). */
+const HOVER_SETTLE_MS = 120;
+
 /**
  * 나간 대화의 줄 자리에 서는 한 줄 영수증(D21 「대화에서 나갔어요.」, 되돌리기 단추 없음). 토스트가 아니라 그 자리의 한 줄이다
  * (`useInlineConfirm` 과 같은 1.6초).
  *
  * **걷힐 때 포인터 밑의 줄이 움직이지 않는다.** 줄과 같은 상자(`sidebar-row`)라 서는 순간에는 아무것도 움직이지 않고, 걷히면 아래 줄이
  * 한 칸 올라온다. 그래서 1.6초가 지나도 포인터가 목록 위에 있으면 걷지 않고, 포인터가 목록을 떠나는 순간 걷는다 - 사람이 겨눈 줄이
- * 다른 줄로 바뀌지 않는다. 손가락 표면(`hover: none`)에는 머무는 포인터가 없어 시간만 본다.
+ * 다른 줄로 바뀌지 않는다. 목록에서 연 메뉴·창이 열려 있는 동안에도 걷지 않는다(M4: 메뉴 판은 포털이라 메뉴를 열면 포인터가 목록을 나간 것으로
+ * 치는데, 그 순간 걷으면 메뉴를 연 줄이 한 칸 올라온다) - 메뉴가 닫히고 포인터가 정말 목록 밖일 때 걷는다. 손가락 표면(`hover: none`)에는 머무는
+ * 포인터가 없어 시간과 메뉴·창만 본다.
  */
 export function DmLeaveReceiptRow({
   receipt,
@@ -351,19 +433,33 @@ export function DmLeaveReceiptRow({
   const touch = useHoverNone();
   useEffect(() => {
     const pane = paneRef.current;
-    const done = () => clearDmLeaveReceipt(receipt.id);
-    let waiting = false;
+    let elapsed = false;
+    let disposed = false;
+    let release: number | undefined;
+    // 걷어도 되는 때: 시간이 찼고, 포인터가 목록 밖이고, 목록에서 연 메뉴·창이 없다(M4 - 메뉴 판은 포털이라 메뉴가 열리면 포인터가 목록을
+    // 나간 것으로 치므로, 「목록 밖」만 보면 메뉴를 연 순간 영수증이 걷히며 아래 줄이 올라온다).
+    const settle = () => {
+      if (disposed || !elapsed) return;
+      if (!touch && pane !== null && pane.matches(":hover")) return;
+      if (isDmLeaveListHeld()) return;
+      clearDmLeaveReceipt(receipt.id);
+    };
     const timer = window.setTimeout(() => {
-      if (!touch && pane !== null && pane.matches(":hover")) {
-        waiting = true;
-        pane.addEventListener("pointerleave", done, { once: true });
-        return;
-      }
-      done();
+      elapsed = true;
+      settle();
     }, INLINE_CONFIRM_MS);
+    pane?.addEventListener("pointerleave", settle);
+    // 메뉴·창이 닫히면 다시 본다. 닫힌 직후에는 브라우저가 `:hover` 를 아직 갱신하지 않았을 수 있어 한 박자 뒤에 본다.
+    const unsubscribe = subscribeDmLeaveStore(() => {
+      window.clearTimeout(release);
+      release = window.setTimeout(settle, HOVER_SETTLE_MS);
+    });
     return () => {
+      disposed = true;
       window.clearTimeout(timer);
-      if (waiting) pane?.removeEventListener("pointerleave", done);
+      window.clearTimeout(release);
+      pane?.removeEventListener("pointerleave", settle);
+      unsubscribe();
     };
   }, [receipt.id, paneRef, touch]);
   return (

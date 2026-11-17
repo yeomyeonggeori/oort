@@ -8,10 +8,22 @@ export const catalog: MessageCatalog = {
       "value": "会話から退出"
     }
   ],
+  "channels.dmLeave.busy": [
+    {
+      "type": 0,
+      "value": "退出中…"
+    }
+  ],
   "channels.dmLeave.cancel": [
     {
       "type": 0,
       "value": "キャンセル"
+    }
+  ],
+  "channels.dmLeave.checking": [
+    {
+      "type": 0,
+      "value": "確認中…"
     }
   ],
   "channels.dmLeave.confirm": [
@@ -81,6 +93,12 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "退出できませんでした。もう一度お試しください。"
+    }
+  ],
+  "channels.dmLeave.unavailable": [
+    {
+      "type": 0,
+      "value": "この会話からは退出できません。"
     }
   ]
 };

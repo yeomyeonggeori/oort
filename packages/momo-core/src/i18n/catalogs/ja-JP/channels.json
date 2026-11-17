@@ -7,6 +7,9 @@
   "channels.dmLeave.confirmScheduled": "予約したメッセージ{count, number}件もキャンセルされます。",
   "channels.dmLeave.cancel": "キャンセル",
   "channels.dmLeave.confirm": "退出",
+  "channels.dmLeave.busy": "退出中…",
   "channels.dmLeave.done": "会話から退出しました。",
-  "channels.dmLeave.failed": "退出できませんでした。もう一度お試しください。"
+  "channels.dmLeave.failed": "退出できませんでした。もう一度お試しください。",
+  "channels.dmLeave.checking": "確認中…",
+  "channels.dmLeave.unavailable": "この会話からは退出できません。"
 }

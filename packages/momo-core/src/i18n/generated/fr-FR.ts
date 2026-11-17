@@ -8,10 +8,22 @@ export const catalog: MessageCatalog = {
       "value": "Quitter la conversation"
     }
   ],
+  "channels.dmLeave.busy": [
+    {
+      "type": 0,
+      "value": "Départ…"
+    }
+  ],
   "channels.dmLeave.cancel": [
     {
       "type": 0,
       "value": "Annuler"
+    }
+  ],
+  "channels.dmLeave.checking": [
+    {
+      "type": 0,
+      "value": "Vérification…"
     }
   ],
   "channels.dmLeave.confirm": [
@@ -102,6 +114,12 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "Impossible de quitter. Veuillez réessayer."
+    }
+  ],
+  "channels.dmLeave.unavailable": [
+    {
+      "type": 0,
+      "value": "Vous ne pouvez pas quitter cette conversation."
     }
   ]
 };
