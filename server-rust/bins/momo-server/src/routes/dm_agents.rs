@@ -185,6 +185,65 @@ pub(crate) async fn propose_in_tx(
     Ok(true)
 }
 
+/// An admission that will not be granted: every still-pending card of it becomes `cancelled` (props
+/// patched and an edit event emitted, so each human's card redraws), the admission row is revoked
+/// and the held run is cancelled. Shared by a rejecting or expired vote ([`vote_in_tx`]) and by a
+/// 1:1 leave with a pending request (ADR-0177 증보 D16-2) — the same result in both.
+pub(crate) async fn cancel_unadmitted_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    admission_id: Uuid,
+    run_ids: &[Uuid],
+) -> Result<(), DbError> {
+    let sibling_cards: Vec<Uuid> = sqlx::query_scalar("UPDATE approval SET status='cancelled', decided_at=now() WHERE workspace_id=$1 AND payload->>'dm_admission_id'=$2 AND status='pending' RETURNING request_message_id")
+        .bind(workspace_id).bind(admission_id.to_string()).fetch_all(&mut *conn).await?;
+    for message in sibling_cards {
+        momo_messaging::patch_message_props_in_tx(
+            conn,
+            workspace_id,
+            message,
+            &json!({"status":"cancelled", "decided_at_ms":Utc::now().timestamp_millis()}),
+        )
+        .await?;
+        momo_messaging::emit_message_edited_in_tx(conn, workspace_id, message).await?;
+    }
+    sqlx::query("UPDATE dm_agent_admission SET revoked_at = clock_timestamp() WHERE workspace_id = $1 AND id = $2").bind(workspace_id).bind(admission_id).execute(&mut *conn).await?;
+    sqlx::query("UPDATE agent_run SET status = 'cancelled', finished_at = now(), updated_at = now() WHERE workspace_id = $1 AND id = ANY($2) AND status = 'awaiting_approval'").bind(workspace_id).bind(run_ids).execute(&mut *conn).await?;
+    Ok(())
+}
+
+/// ADR-0177 증보 D16-2, first half: take the row locks of the still-pending cards of every pending
+/// admission in this DM **before** the `channel_seq` row — the order a vote takes them (the decision
+/// route locks its card, then [`vote_in_tx`] locks the room) — so a leave and a vote never wait on
+/// each other in opposite orders. Called only after the participant check.
+pub(crate) async fn lock_pending_admission_cards_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    channel_id: Uuid,
+) -> Result<(), DbError> {
+    sqlx::query("SELECT a.id FROM approval a JOIN dm_agent_admission d ON d.workspace_id = a.workspace_id AND a.payload->>'dm_admission_id' = d.id::text WHERE a.workspace_id = $1 AND d.channel_id = $2 AND d.admitted_at IS NULL AND d.revoked_at IS NULL AND a.status = 'pending' ORDER BY a.id FOR UPDATE OF a")
+        .bind(workspace_id).bind(channel_id).fetch_all(&mut *conn).await?;
+    Ok(())
+}
+
+/// ADR-0177 증보 D16-2, second half (under the room lock): cancel every admission of this DM that is
+/// neither granted nor revoked — including one past its expiry the sweep has not reached — exactly
+/// as a rejection would. Returns how many were cancelled.
+pub(crate) async fn cancel_pending_admissions_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    channel_id: Uuid,
+) -> Result<usize, DbError> {
+    let pending: Vec<Uuid> = sqlx::query_scalar("SELECT id FROM dm_agent_admission WHERE workspace_id = $1 AND channel_id = $2 AND admitted_at IS NULL AND revoked_at IS NULL ORDER BY id FOR UPDATE")
+        .bind(workspace_id).bind(channel_id).fetch_all(&mut *conn).await?;
+    for admission_id in &pending {
+        let run_ids: Vec<Uuid> = sqlx::query_scalar("SELECT DISTINCT run_id FROM approval WHERE workspace_id = $1 AND payload->>'dm_admission_id' = $2 AND run_id IS NOT NULL")
+            .bind(workspace_id).bind(admission_id.to_string()).fetch_all(&mut *conn).await?;
+        cancel_unadmitted_in_tx(conn, workspace_id, *admission_id, &run_ids).await?;
+    }
+    Ok(pending.len())
+}
+
 /// A vote only settles this person's card. Admission requires every card, the
 /// same human audience, a live caller/agent/runtime, and an unexpired request.
 pub(crate) async fn vote_in_tx(
@@ -268,20 +327,7 @@ pub(crate) async fn vote_in_tx(
         .await?;
     }
     if status != "approved" {
-        let sibling_cards: Vec<Uuid> = sqlx::query_scalar("UPDATE approval SET status='cancelled', decided_at=now() WHERE workspace_id=$1 AND payload->>'dm_admission_id'=$2 AND status='pending' RETURNING request_message_id")
-            .bind(approval.workspace_id).bind(id.to_string()).fetch_all(&mut *conn).await?;
-        for message in sibling_cards {
-            momo_messaging::patch_message_props_in_tx(
-                conn,
-                approval.workspace_id,
-                message,
-                &json!({"status":"cancelled", "decided_at_ms":Utc::now().timestamp_millis()}),
-            )
-            .await?;
-            momo_messaging::emit_message_edited_in_tx(conn, approval.workspace_id, message).await?;
-        }
-        sqlx::query("UPDATE dm_agent_admission SET revoked_at = clock_timestamp() WHERE workspace_id = $1 AND id = $2").bind(approval.workspace_id).bind(id).execute(&mut *conn).await?;
-        sqlx::query("UPDATE agent_run SET status = 'cancelled', finished_at = now(), updated_at = now() WHERE workspace_id = $1 AND id = $2 AND status = 'awaiting_approval'").bind(approval.workspace_id).bind(approval.run_id).execute(&mut *conn).await?;
+        cancel_unadmitted_in_tx(conn, approval.workspace_id, id, &[approval.run_id]).await?;
         return Ok(Ok(status));
     }
     let complete: bool = sqlx::query_scalar("SELECT NOT EXISTS (SELECT 1 FROM unnest($2::uuid[]) AS p(member_id) WHERE NOT EXISTS (SELECT 1 FROM approval a WHERE a.workspace_id = $1 AND a.payload->>'dm_admission_id' = $3 AND a.payload->'action'->'pins'->>'target' = p.member_id::text AND a.status = 'approved' AND a.expires_at > now()))")

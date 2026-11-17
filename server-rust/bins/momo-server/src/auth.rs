@@ -850,14 +850,27 @@ pub async fn require_principal(
             request.extensions_mut().insert(FullPersonSession);
         }
     }
-    let agent_member_id = (principal.kind == PrincipalKind::Agent).then_some(principal.member_id);
+    let kind = principal.kind;
+    let member_id = principal.member_id;
     request.extensions_mut().insert(principal);
-    Ok(if let Some(agent) = agent_member_id {
-        momo_db::tenant::REQUEST_AGENT_MEMBER
-            .scope(agent, next.run(request))
-            .await
-    } else {
-        next.run(request).await
+    Ok(match kind {
+        PrincipalKind::Agent => {
+            momo_db::tenant::REQUEST_AGENT_MEMBER
+                .scope(member_id, next.run(request))
+                .await
+        }
+        // ADR-0177 증보 D17: every human credential that reaches this point — a session access
+        // token, the push-fetch token and the push-action token alike — binds the requester value
+        // for every tenant transaction the request opens.
+        PrincipalKind::Human => {
+            momo_db::tenant::REQUEST_HUMAN_MEMBER
+                .scope(member_id, next.run(request))
+                .await
+        }
+        // A work host is not a person and holds no conversation of its own (it never reaches this
+        // branch today — `authenticate_signed_host` answers first). Named, not a wildcard, so a new
+        // principal kind must decide here.
+        PrincipalKind::WorkHost => next.run(request).await,
     })
 }
 

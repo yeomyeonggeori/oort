@@ -1632,6 +1632,13 @@ pub fn build_app(state: AppState) -> Router {
             "/v1/workspaces/{ws}/channels/{ch}/closure",
             put(routes::dm_closure::put).delete(routes::dm_closure::delete),
         )
+        // 1:1 「대화 나가기」 (ADR-0177 증보 2026-11-14 D16, #5822): the caller's own read floor.
+        // Human-only twice over, exactly like the closure route (absent from `required_agent_scope`,
+        // `require_human` first). No DELETE: the floor is never lowered through the API.
+        .route(
+            "/v1/workspaces/{ws}/channels/{ch}/dm-leave",
+            put(routes::dm_leave::put),
+        )
         // inbox (ADR-0199, #3681): the member's own "to me" list. Humans only;
         // the member is the bearer, never a request field.
         .route("/v1/workspaces/{ws}/inbox", get(routes::inbox::list))
