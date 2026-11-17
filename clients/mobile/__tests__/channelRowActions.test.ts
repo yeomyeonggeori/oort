@@ -16,6 +16,10 @@ import {
   type ChannelRowTarget,
 } from '../src/features/sidebar/channelRowActions';
 import {readIntentWire} from '../src/features/readState/advertise';
+import {catalog as koCatalog} from '@momo/core/i18n/generated/ko-KR';
+import {createMessageService} from '@momo/core/i18n/service';
+
+const koFormat = createMessageService({messageLocale: 'ko-KR', catalog: koCatalog}).formatMessage;
 
 // =============================================================================
 // 행 길게 누르기 시트의 **항목 판정** (#4229). 표는 코어(`channels/actionModel`)의 것이고,
@@ -87,12 +91,10 @@ describe('채널 행', () => {
     expect(label(true)).toBe(CHANNEL_UNMUTE_LABEL);
   });
 
-  it('일반 멤버에게는 「채널 나가기」가 없다 — 서버가 403 으로 막는 막다른 길', () => {
-    expect(keys(target({selfRole: 'member'}))).not.toContain('leave');
-    expect(keys(target({selfRole: 'guest'}))).not.toContain('leave');
-    expect(keys(target({selfRole: 'owner'}))).toContain('leave');
-    // 역할을 모르면 내놓고 서버가 답한다(코어 규칙).
-    expect(keys(target({selfRole: undefined}))).toContain('leave');
+  it('「채널 나가기」는 역할과 무관하게 선다 — 본인 나가기 길이다 (#5778)', () => {
+    for (const selfRole of ['member', 'guest', 'owner', 'admin', undefined] as const) {
+      expect([selfRole, keys(target({selfRole})).includes('leave')]).toEqual([selfRole, true]);
+    }
   });
 
   it('나가기는 위험 톤이고 마지막이다', () => {
@@ -176,18 +178,23 @@ describe('죽은 항목이 없다', () => {
         for (const readState of reads) {
           for (const muted of [false, true]) {
             for (const closeOffered of [false, true]) {
-              for (const item of channelRowActionItems(
-                target({kind, selfRole, readState, muted, closeOffered}),
-              )) {
-                seen.add(item.key);
-                expect(PHONE_CHANNEL_ACTION_KEYS.has(item.key)).toBe(true);
+              // 「대화 나가기」(ADR-0177 증보 D21)는 내밀 때만, 사전으로 이름을 지을 손(`formatMessage`)이 있을 때만 선다.
+              for (const leaveOffered of [false, true]) {
+                for (const item of channelRowActionItems(
+                  target({kind, selfRole, readState, muted, closeOffered, leaveOffered}),
+                  undefined,
+                  koFormat,
+                )) {
+                  seen.add(item.key);
+                  expect(PHONE_CHANNEL_ACTION_KEYS.has(item.key)).toBe(true);
+                }
               }
             }
           }
         }
       }
     }
-    // 실행할 줄 아는 여덟 가지가 모두 어딘가에서는 나온다 — 허용 목록이 헛돌지 않는다.
+    // 실행할 줄 아는 아홉 가지가 모두 어딘가에서는 나온다 — 허용 목록이 헛돌지 않는다.
     expect([...seen].sort()).toEqual([...PHONE_CHANNEL_ACTION_KEYS].sort());
   });
 

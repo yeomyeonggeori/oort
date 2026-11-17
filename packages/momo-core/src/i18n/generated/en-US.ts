@@ -1260,6 +1260,51 @@ export const catalog: MessageCatalog = {
       "value": "You can't leave this conversation."
     }
   ],
+  "channels.nameRule.edge": [
+    {
+      "type": 0,
+      "value": "The name must start and end with a letter or number. Hyphens and underscores can only go in the middle."
+    }
+  ],
+  "channels.nameRule.hidden": [
+    {
+      "type": 0,
+      "value": "The name contains invisible characters. Clear it and type the name again."
+    }
+  ],
+  "channels.nameRule.required": [
+    {
+      "type": 0,
+      "value": "Enter a channel name."
+    }
+  ],
+  "channels.nameRule.serverRejected": [
+    {
+      "type": 0,
+      "value": "The server did not accept this name. Use only letters, numbers, - and _."
+    }
+  ],
+  "channels.nameRule.tooLong": [
+    {
+      "type": 0,
+      "value": "Channel names can be up to "
+    },
+    {
+      "type": 2,
+      "value": "max",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": " characters."
+    }
+  ],
+  "channels.nameRule.unsupported": [
+    {
+      "type": 0,
+      "value": "Use only letters, numbers, hyphens (-) and underscores (_)."
+    }
+  ],
   "common.feedback.unavailable": [
     {
       "type": 0,
@@ -10341,6 +10386,78 @@ export const catalog: MessageCatalog = {
       "value": "If you do not decide, the agent has to propose it again."
     }
   ],
+  "timeline.channelLeave.bodyPrivate": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " will disappear from your sidebar. It's a private channel, so you'll need an invitation from an owner or admin to come back. If the last member leaves, the channel is archived and no one can join it again."
+    }
+  ],
+  "timeline.channelLeave.bodyPublic": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " will disappear from your sidebar. To come back, an owner or admin has to add you again."
+    }
+  ],
+  "timeline.channelLeave.busy": [
+    {
+      "type": 0,
+      "value": "Leaving…"
+    }
+  ],
+  "timeline.channelLeave.cancel": [
+    {
+      "type": 0,
+      "value": "Cancel"
+    }
+  ],
+  "timeline.channelLeave.confirm": [
+    {
+      "type": 0,
+      "value": "Leave channel"
+    }
+  ],
+  "timeline.channelLeave.errorForbidden": [
+    {
+      "type": 0,
+      "value": "You can't leave this channel."
+    }
+  ],
+  "timeline.channelLeave.errorGeneric": [
+    {
+      "type": 0,
+      "value": "Couldn't leave the channel. Try again in a moment."
+    }
+  ],
+  "timeline.channelLeave.errorNetwork": [
+    {
+      "type": 0,
+      "value": "Couldn't leave the channel. "
+    },
+    {
+      "type": 1,
+      "value": "reason"
+    }
+  ],
+  "timeline.channelLeave.errorNotFound": [
+    {
+      "type": 0,
+      "value": "You're no longer a member of this channel. It may have been archived."
+    }
+  ],
+  "timeline.channelLeave.title": [
+    {
+      "type": 0,
+      "value": "Leave this channel?"
+    }
+  ],
   "timeline.createChannel.privateDetail": [
     {
       "type": 0,
@@ -10609,6 +10726,104 @@ export const catalog: MessageCatalog = {
       "value": "Reload"
     }
   ],
+  "timeline.memberPanel.remove": [
+    {
+      "type": 0,
+      "value": "Remove from channel"
+    }
+  ],
+  "timeline.memberPanel.removeBody": [
+    {
+      "type": 1,
+      "value": "channel"
+    },
+    {
+      "type": 0,
+      "value": " will disappear from "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "'s sidebar. To come back, an owner or admin has to add them again."
+    }
+  ],
+  "timeline.memberPanel.removeBusy": [
+    {
+      "type": 0,
+      "value": "Removing"
+    }
+  ],
+  "timeline.memberPanel.removeCancel": [
+    {
+      "type": 0,
+      "value": "Cancel"
+    }
+  ],
+  "timeline.memberPanel.removeConfirm": [
+    {
+      "type": 0,
+      "value": "Remove"
+    }
+  ],
+  "timeline.memberPanel.removed": [
+    {
+      "type": 0,
+      "value": "Removed "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " from the channel."
+    }
+  ],
+  "timeline.memberPanel.removeErrorForbidden": [
+    {
+      "type": 0,
+      "value": "You don't have permission to remove this member from the channel."
+    }
+  ],
+  "timeline.memberPanel.removeErrorGeneric": [
+    {
+      "type": 0,
+      "value": "Couldn't remove them. Try again in a moment."
+    }
+  ],
+  "timeline.memberPanel.removeErrorNetwork": [
+    {
+      "type": 0,
+      "value": "Couldn't remove them. "
+    },
+    {
+      "type": 1,
+      "value": "reason"
+    }
+  ],
+  "timeline.memberPanel.removeErrorNotFound": [
+    {
+      "type": 0,
+      "value": "This person is no longer a member of this channel."
+    }
+  ],
+  "timeline.memberPanel.removeTitle": [
+    {
+      "type": 0,
+      "value": "Remove "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " from this channel?"
+    }
+  ],
   "timeline.memberPanel.request": [
     {
       "type": 0,
@@ -10631,6 +10846,16 @@ export const catalog: MessageCatalog = {
     {
       "type": 1,
       "value": "text"
+    }
+  ],
+  "timeline.memberPanel.rowActions": [
+    {
+      "type": 0,
+      "value": "Manage "
+    },
+    {
+      "type": 1,
+      "value": "name"
     }
   ],
   "timeline.memberPanel.stageSpoken": [

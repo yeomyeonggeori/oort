@@ -1,4 +1,5 @@
 import {CHANNEL_MUTE_FAILURE} from '@momo/core/features/channels/model';
+import {DM_LEAVE_KEYS} from '@momo/core/features/channels/dmLeave';
 import {makeDirectory} from '@momo/core/features/workspace/directory';
 import type {RosterMember} from '@momo/core/lib/api';
 import React from 'react';
@@ -13,7 +14,9 @@ import {
 import {conversationInfoActionItems} from '../src/features/conversation/conversationMenu';
 import {AvatarViewer} from '../src/features/directory/AvatarViewer';
 import type {ChannelRowTarget} from '../src/features/sidebar/channelRowActions';
+import {useFormatMessage} from '../src/i18n/useFormatMessage';
 import {PHOTO} from './profileSheet';
+import {dmLeaveStep} from './sheetKit';
 
 // =============================================================================
 // 대화·채널 정보 페이지의 캡처 표면 (#4319). 배송되는 `ConversationInfoPage` 에 고정 데이터를 건넨다 — 항목은 화면과 같은 길
@@ -28,6 +31,8 @@ import {PHOTO} from './profileSheet';
 //   channel     공개 채널(# 디자인, 관리자) — 큰 `#` 얼굴 · 「6명 · 달무리 도우미 참여 중」 · 주제 · 알림 · 복사 셋 · 채널 나가기(위험색)
 //   channel-leave 같은 채널의 나가기 확인 단계
 //   viewer      사진 크게 보기(`AvatarViewer`) — 정보 페이지 위에 선 전체 화면
+//   dm-leave    사람 DM 에 「대화 나가기」(맨 아래 따로 선 카드, 위험색 — ADR-0177 증보 2026-11-14 D21)
+//   dm-leave-confirm / -pending / -failed   그 확인 단계(예약 2개) · 진행 중 · 실패
 //
 // 페이지는 `EdgeSwipeBack` 층(`enter="push"`)이라 들어올 때 오른쪽에서 밀려 들어온다 — 캡처는 멎은 뒤를 찍는다.
 // 사진은 **합성 그라데이션**(`profileSheet.tsx` 의 `PHOTO`)이다. 모든 이름은 가상 인물이다(이도현·박서연·최민수, 에이전트 달무리 도우미,
@@ -146,6 +151,21 @@ function Frame({children}: {children: React.ReactNode}): React.JSX.Element {
 }
 
 export function ConversationInfoPageSurface({which}: {which: string}): React.JSX.Element {
+  const formatMessage = useFormatMessage();
+  if (which === 'dm-leave' || which.startsWith('dm-leave-')) {
+    return (
+      <Frame>
+        <ConversationInfoPage
+          {...props({
+            items: conversationInfoActionItems({...DM_TARGET, leaveOffered: true}, undefined, formatMessage),
+            dmLeave: dmLeaveStep(which.slice('dm-leave-'.length), formatMessage(DM_LEAVE_KEYS.failed)),
+            onConfirmDmLeave: noop,
+            onCancelDmLeave: noop,
+          })}
+        />
+      </Frame>
+    );
+  }
   switch (which) {
     case 'dm-photo':
       return (

@@ -19,7 +19,7 @@ import {DM_CLOSE_FAILURE, DM_CLOSE_LABEL} from '@momo/core/features/channels/mod
 import {LONG_PRESS_MS} from '@momo/core/features/timeline/longPressModel';
 import {CONV_ICONS} from '../src/design/icons';
 import {PRESS_VISUAL_DELAY_MS} from '../src/design/motion';
-import {ROW_END_INK_INSET} from '../src/design/sheetParts';
+import {CONFIRM_ARM_MS, ROW_END_INK_INSET} from '../src/design/sheetParts';
 import {AGENT_LIST_ACTION} from '../src/screens/SidebarScreen';
 import AppShell from '../src/shell/AppShell';
 import {__resetSessionStore, sessionPort} from '../src/storage/secureSession';
@@ -27,6 +27,24 @@ import {__resetServerBaseCache, setServerBase} from '../src/storage/serverBase';
 import {endGlyphInk} from './fixtures/endGlyphInk';
 import {installAppClock} from './fixtures/fakeClock';
 import {flat} from './testkit';
+
+/**
+ * 확인 단계의 위험 단추는 서고 나서 `CONFIRM_ARM_MS` 동안 눌림을 받지 않는다(#5818 검수 High): 사람이 읽고 누르는 것처럼
+ * 그 시간이 지난 뒤에 누른다. 가짜 시계가 켜져 있으면 시계를 옮기고, 아니면 실제로 기다린다.
+ */
+async function armedPress(testID: string, options?: Parameters<typeof screen.getByTestId>[1]) {
+  const faked = typeof (setTimeout as unknown as {clock?: unknown}).clock !== 'undefined';
+  if (faked) {
+    act(() => {
+      jest.advanceTimersByTime(CONFIRM_ARM_MS + 40);
+    });
+  } else {
+    await act(async () => {
+      await new Promise<void>(resolve => setTimeout(resolve, CONFIRM_ARM_MS + 40));
+    });
+  }
+  fireEvent.press(screen.getByTestId(testID, options));
+}
 
 // =============================================================================
 // 사이드바 행 길게 누르기 → 시트 (#4229, Buzz식). 행 → 시트 → 서버 요청까지 **실제 화면**으로 잰다:
@@ -173,9 +191,18 @@ function installFetch(routes: Routes = {}) {
         mention_count: 0,
       });
     }
-    if (method === 'DELETE' && url.includes('/members/')) {
+    // 본인 나가기 길(#5778). 서버처럼 역할을 보지 않는다.
+    if (method === 'DELETE' && url.endsWith('/members/me')) {
       if ((routes.leaveStatus ?? 200) !== 200) {
-        return jsonResponse(routes.leaveStatus as number, {error: {message: 'forbidden'}});
+        return jsonResponse(routes.leaveStatus as number, {error: {message: 'direct message channels cannot be left'}});
+      }
+      return jsonResponse(200, {channelId: 'ch-general', memberId: SELF_ID, archived: false});
+    }
+    // 관리자 전용 길(`…/members/{id}`). 서버처럼 소유자·관리자만 받는다 — 일반 멤버의 나가기가 이 길로 새면 403 이다.
+    if (method === 'DELETE' && url.includes('/members/')) {
+      const role = routes.selfRole ?? 'admin';
+      if (role !== 'owner' && role !== 'admin') {
+        return jsonResponse(403, {error: {message: 'workspace owner or admin role required'}});
       }
       return jsonResponse(200, {
         membership: {
@@ -414,10 +441,33 @@ describe('길게 누르기가 시트를 연다', () => {
     expect(screen.queryByTestId('channel-action-sheet')).toBeNull();
   });
 
-  it('일반 멤버에게는 나가기가 없다', async () => {
+  it('일반 멤버도 나가기가 서고, 확인하면 본인 나가기 길로 나간다 — 관리자 길이면 서버가 403 이다 (#5778)', async () => {
     await mount({selfRole: 'member'});
     longPress('sidebar-row-channel:ch-general');
-    expect(sheetKeys()).not.toContain('leave');
+    expect(sheetKeys()).toContain('leave');
+    fireEvent.press(screen.getByTestId('channel-sheet-leave'));
+    await armedPress('channel-leave-confirm-button');
+    await waitFor(() => expect(screen.queryByTestId('channel-action-sheet')).toBeNull());
+    expect(calls.filter(call => call.method === 'DELETE').map(call => call.url.replace(/^.*\/channels\//, ''))).toEqual([
+      'ch-general/members/me',
+    ]);
+  });
+
+  it('나가기 확인이 선 직후의 누름은 확정을 누르지 못하고, 지나면 받는다 — 목록 줄을 누른 자리에 위험 단추가 선다 (#5818 검수 High)', async () => {
+    await mount({selfRole: 'member'});
+    longPress('sidebar-row-channel:ch-general');
+    fireEvent.press(screen.getByTestId('channel-sheet-leave'));
+    // 같은 자리를 250ms·400ms 뒤에 한 번 더 누르는 더블탭: 확정은 받지 않는다(DELETE 0, 시트는 그대로).
+    fireEvent.press(screen.getByTestId('channel-leave-confirm-button'));
+    act(() => {
+      jest.advanceTimersByTime(250);
+    });
+    fireEvent.press(screen.getByTestId('channel-leave-confirm-button'));
+    expect(calls.filter(call => call.method === 'DELETE')).toEqual([]);
+    expect(screen.getByTestId('channel-action-sheet')).toBeTruthy();
+    // 읽을 만큼 지난 뒤에는 받는다.
+    await armedPress('channel-leave-confirm-button');
+    await waitFor(() => expect(calls.filter(call => call.method === 'DELETE')).toHaveLength(1));
   });
 
   it('머리의 원형 X 와 배경이 시트를 닫는다 — 글자 「닫기」 줄은 없다 (#4318)', async () => {
@@ -527,10 +577,10 @@ describe('채널 나가기는 확인 단계를 지난다', () => {
     await mount();
     longPress('sidebar-row-channel:ch-general');
     fireEvent.press(screen.getByTestId('channel-sheet-leave'));
-    fireEvent.press(screen.getByTestId('channel-leave-confirm-button'));
+    await armedPress('channel-leave-confirm-button');
     await waitFor(() => expect(calls.some(call => call.method === 'DELETE')).toBe(true));
     const del = calls.find(call => call.method === 'DELETE')!;
-    expect(del.url).toContain(`/channels/ch-general/members/${SELF_ID}`);
+    expect(del.url).toMatch(/\/channels\/ch-general\/members\/me$/);
     await waitFor(() => expect(screen.queryByTestId('channel-action-sheet')).toBeNull());
   });
 
@@ -542,7 +592,7 @@ describe('채널 나가기는 확인 단계를 지난다', () => {
     // 시트는 덮인 탭 판(사이드바) 안에서 그려지는 RN `Modal` 이다. 기기에서는 다른 창이라 틀의 숨김이 닿지 않지만 RNTL 은 리액트 조상을
     // 따라 숨김을 물려받으므로, 지름길로 연 이 시트 안의 찾기·「없다」 단정은 숨은 것까지 본다(#5546).
     fireEvent.press(screen.getByTestId('channel-sheet-leave', BEHIND));
-    fireEvent.press(screen.getByTestId('channel-leave-confirm-button', BEHIND));
+    await armedPress('channel-leave-confirm-button', BEHIND);
     // DELETE 가 나간 뒤에 걷힘을 기다린다. 확인 버튼 직후 곧장 「걷힘」 만 기다리면 waitFor 가 그 조건이
     // 첫 검사에서 거짓인 채 제한 시간 끝의 마지막 검사에서야 참이 되어(로컬에서도 ~1.1s), 부하가 걸린 CI 에서는
     // 그 마지막 검사마저 넘긴다. 같은 파일의 형제 시험처럼 요청 발송을 먼저 기다리면 즉시 걷힌다.
@@ -556,7 +606,7 @@ describe('채널 나가기는 확인 단계를 지난다', () => {
     await waitFor(() => expect(screen.getByTestId('conversation-pane')).toBeTruthy());
     longPress('sidebar-row-channel:ch-general', {behindLayer: true});
     fireEvent.press(screen.getByTestId('channel-sheet-leave', BEHIND));
-    fireEvent.press(screen.getByTestId('channel-leave-confirm-button', BEHIND));
+    await armedPress('channel-leave-confirm-button', BEHIND);
     await waitFor(() => expect(calls.some(call => call.method === 'DELETE')).toBe(true));
     await waitFor(() => expect(screen.queryByTestId('channel-action-sheet', BEHIND)).toBeNull());
     expect(screen.getByTestId('conversation-pane')).toBeTruthy();
@@ -566,10 +616,20 @@ describe('채널 나가기는 확인 단계를 지난다', () => {
     await mount({leaveStatus: 403});
     longPress('sidebar-row-channel:ch-general');
     fireEvent.press(screen.getByTestId('channel-sheet-leave'));
-    fireEvent.press(screen.getByTestId('channel-leave-confirm-button'));
+    await armedPress('channel-leave-confirm-button');
     await waitFor(() => expect(screen.getByTestId('channel-leave-error')).toBeTruthy());
-    expect(screen.getByTestId('channel-leave-error')).toHaveTextContent(/나갈 권한이 없습니다/);
+    expect(screen.getByTestId('channel-leave-error')).toHaveTextContent(/나갈 수 없어요/);
     expect(screen.getByTestId('channel-leave-confirm')).toBeTruthy();
+  });
+
+  it('404: 이미 나간 채널이다 — 문장을 세우지 않고 시트를 닫는다(웹과 같다) (#5818 검수 r2)', async () => {
+    await mount({leaveStatus: 404});
+    longPress('sidebar-row-channel:ch-general');
+    fireEvent.press(screen.getByTestId('channel-sheet-leave'));
+    await armedPress('channel-leave-confirm-button');
+    await waitFor(() => expect(screen.queryByTestId('channel-action-sheet')).toBeNull());
+    expect(screen.queryByTestId('channel-leave-error')).toBeNull();
+    expect(calls.filter(call => call.method === 'DELETE')).toHaveLength(1);
   });
 });
 

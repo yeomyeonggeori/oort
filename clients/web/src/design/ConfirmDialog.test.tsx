@@ -50,6 +50,15 @@ describe("ConfirmDialog", () => {
     expect(screen.getByTestId("c-warning").textContent).toBe("되돌릴 수 없어요.");
   });
 
+  it("창의 접근 가능한 이름은 제목이다(aria-labelledby 가 실제 제목 요소를 가리킨다) (#5818 검수 r2)", () => {
+    render(<DialogHarness />);
+    // 이름으로 찾아져야 한다: 가리키는 요소가 없으면 이름이 비어 0건이다.
+    expect(screen.getByRole("alertdialog", { name: COPY.title })).toBeTruthy();
+    const dialog = screen.getByRole("alertdialog");
+    const target = document.getElementById(dialog.getAttribute("aria-labelledby") ?? "");
+    expect(target?.textContent).toBe(COPY.title);
+  });
+
   it("취소는 닫는다", () => {
     render(<DialogHarness />);
     fireEvent.click(screen.getByTestId("c-cancel"));

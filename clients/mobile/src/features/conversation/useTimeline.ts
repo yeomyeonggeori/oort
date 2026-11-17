@@ -98,6 +98,7 @@ import {
 } from '@momo/core/features/timeline/reactions';
 import {endedStreamRunIds} from '@momo/core/features/timeline/streamStop';
 import type {UnfurlMap} from '@momo/core/features/timeline/unfurl';
+import {isBelowHistoryFloor} from '@momo/core/features/channels/dmLeave';
 import {seedEndedRuns} from '../agents/endedRuns';
 import {useMessageUnfurls} from './useMessageUnfurls';
 import {useCallback, useEffect, useMemo, useRef, useState} from 'react';
@@ -356,8 +357,16 @@ export function useTimeline(
   workspaceId: string,
   channelId: string | null,
   authorMemberId: string,
+  /**
+   * 이 방의 읽기 하한(ADR-0177 증보 2026-11-14 D18 `historyFromSeq`). 그보다 낮은 seq 의 실시간 프레임 - 새 글·수정·지움·반응·고정·
+   * 링크 카드 - 은 그리지 않는다(D22 한계 3 의 클라이언트 몫: 끊긴 구간 다시 보내기로 온 나가기 전 발행물). 없으면 거르지 않는다.
+   */
+  historyFloor: number | null = null,
 ): UseTimelineResult {
   const expressionStore = useExpressionStore();
+  // 구독을 다시 세우지 않고 지금 하한을 읽는다(하한은 나가기 뒤에만 오르고 내려가지 않는다).
+  const historyFloorRef = useRef(historyFloor);
+  historyFloorRef.current = historyFloor;
   const [state, setState] = useState<TimelineState>(emptyTimeline);
   const [status, setStatus] = useState<UseTimelineResult['status']>('loading');
   const [loadedChannelId, setLoadedChannelId] = useState<string | null>(null);
@@ -1293,6 +1302,7 @@ export function useTimeline(
       onMessage: (event: MessageNewEvent) => {
         if (cancelled) return;
         const message = payloadToMessage(event.payload);
+        if (isBelowHistoryFloor(message.seq, historyFloorRef.current)) return;
         // 편집 투영은 든 줄만 갱신한다(#4450): `applyEdited` 가 코어 판정을 지난다.
         if (event.type === 'message.edited') {
           applyEdited(message);
@@ -1305,6 +1315,8 @@ export function useTimeline(
       // re-broadcasts the body it erased) and the row must keep its seq.
       onMessageDeleted: event => {
         if (cancelled) return;
+        // 이 프레임의 seq 는 대상 메시지의 것이다(코어 `realtimeEvents`) - 하한 아래 대상은 화면에 없는 글이다.
+        if (isBelowHistoryFloor(event.seq, historyFloorRef.current)) return;
         const messageId = event.payload.message_id;
         setState(s => applyTombstone(s, messageId, event.ts));
         reactionsRef.current = clearMessageReactions(
@@ -1320,6 +1332,7 @@ export function useTimeline(
       },
       onReaction: event => {
         if (cancelled) return;
+        if (isBelowHistoryFloor(event.seq, historyFloorRef.current)) return;
         reactionsRef.current = applyReactionDelta(reactionsRef.current, {
           messageId: event.payload.message_id,
           memberId: event.payload.member_id,
@@ -1333,6 +1346,8 @@ export function useTimeline(
       // the list to find out what was pinned.
       onPin: event => {
         if (cancelled) return;
+        // 고정 목록은 프레임 자체가 목록 항목이라, 하한 아래 글의 고정이 목록에 서지 않게 여기서 거른다.
+        if (isBelowHistoryFloor(event.seq, historyFloorRef.current)) return;
         if (event.type === 'message.pinned') {
           applyPins(
             applyPinned(pinsRef.current, pinnedPayloadToWire(event.payload)),
@@ -1344,6 +1359,7 @@ export function useTimeline(
       // ADR-0170 D5 — 서버가 만든 카드(또는 작성자의 지우기)가 같은 레일로 온다. 전체 투영이라 통째로 바꾼다.
       onUnfurl: event => {
         if (cancelled) return;
+        if (isBelowHistoryFloor(event.seq, historyFloorRef.current)) return;
         applyUnfurlFrame(event);
       },
     });

@@ -1,39 +1,144 @@
-import { ApiError, type MembershipRole } from "../../lib/api";
+import { ApiError, type Channel, type MembershipRole } from "../../lib/api";
 import { NetworkError } from "../../lib/http";
+import koChannels from "../../i18n/catalogs/ko-KR/channels.json";
+import type { MessageKey } from "../../i18n/generated/messages";
 
 // =============================================================================
 // 채널 만들기 model (AX-1a / MOMO-614). Everything the dialog decides without
 // React lives here, so the rules are under test rather than inside a component.
 //
-// The name rule is not invented: it is `ChannelRoutes.normalizedChannelName`,
-// character for character, and the mac sheet
-// (MomoChannelCreationSheet.MomoChannelCreationValidation) already carries the
-// same one. A client that accepts what the server rejects turns a typo into an
-// English 400 the reader cannot act on, and a client that rejects what the
-// server accepts makes a legal name look broken. Both are the same bug.
+// The name rule is the server's, and since ADR-0225 it is not ascii any more:
+// letters and numbers of every script, `-` and `_`, blanks become `-`, at most
+// 80 code points. The single source of truth is the shared vectors file
+// (`docs/api/channel-name.vectors.json`); `__fixtures__/channel-name.vectors.json`
+// is this package's byte-identical copy and `model.test.ts` runs every row of
+// it. A client that accepts what the server rejects turns a typo into a 400 the
+// reader cannot act on, and a client that rejects what the server accepts makes
+// a legal name look broken. Both are the same bug. The server is the authority;
+// this is the quick hint.
 // =============================================================================
 
 export const CHANNEL_NAME_MAX = 80;
 export const CHANNEL_TOPIC_MAX = 280;
 
-/** Server regex, verbatim: a name is ascii, and it never starts or ends on a
- *  separator. Anchored on both sides, so a Korean name fails here rather than
- *  at the server. */
-const NAME_RE = /^[a-z0-9][a-z0-9_-]*[a-z0-9]$|^[a-z0-9]$/;
+/** Unicode `White_Space` (ADR-0225 D2), the 25 code points Rust's
+ *  `char::is_whitespace` knows. Deliberately not the regex class for spaces:
+ *  that adds U+FEFF and lacks U+0085. */
+const BLANKS = new Set<number>([
+  0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x20, 0x85, 0xa0, 0x1680,
+  0x2000, 0x2001, 0x2002, 0x2003, 0x2004, 0x2005, 0x2006, 0x2007, 0x2008,
+  0x2009, 0x200a, 0x2028, 0x2029, 0x202f, 0x205f, 0x3000,
+]);
 
-/** The alphabet by itself, without the rule about where a name may begin. */
-const NAME_ALPHABET_RE = /^[a-z0-9_-]+$/;
+/** Letters and marks that draw nothing (ADR-0225 D4, second list). The
+ *  control/format/private-use/surrogate half is decided by category instead. */
+function isInvisibleLetterOrMark(cp: number): boolean {
+  return (
+    cp === 0x115f || cp === 0x1160 || cp === 0x3164 || cp === 0xffa0 ||
+    cp === 0x034f || cp === 0x17b4 || cp === 0x17b5 ||
+    (cp >= 0x180b && cp <= 0x180d) || cp === 0x180f ||
+    (cp >= 0xfe00 && cp <= 0xfe0f) || (cp >= 0xe0100 && cp <= 0xe01ef)
+  );
+}
+
+// The Unicode-property regexes are built the first time a name is judged, never
+// at module load: an engine that does not know the syntax would otherwise fail
+// to start the whole app (ADR-0225 D11; the same care as `design/fontName.ts`).
+interface CategoryPatterns {
+  letter: RegExp;
+  number: RegExp;
+  mark: RegExp;
+  unseen: RegExp;
+}
+let categoryPatterns: CategoryPatterns | null = null;
+function categories(): CategoryPatterns {
+  categoryPatterns ??= {
+    letter: new RegExp("^\\p{L}$", "u"),
+    number: new RegExp("^\\p{N}$", "u"),
+    mark: new RegExp("^\\p{M}$", "u"),
+    unseen: new RegExp("^[\\p{Cc}\\p{Cf}\\p{Co}\\p{Cs}]$", "u"),
+  };
+  return categoryPatterns;
+}
+
+/** Why a name was refused: the five labels of the shared vectors. The server
+ *  answers with two errors (length, characters); telling the five apart is the
+ *  screen's job. */
+export type ChannelNameVerdict =
+  | "required"
+  | "tooLong"
+  | "hidden"
+  | "unsupported"
+  | "edge";
+
+export type ChannelNameJudgement =
+  | { ok: true; name: string }
+  | { ok: false; verdict: ChannelNameVerdict };
 
 export type ChannelNameIssue =
   | "required"
   | "tooLong"
+  | "hiddenCharacters"
   | "unsupportedCharacters"
   | "edgeSeparator";
 export type ChannelTopicIssue = "tooLong";
 
-/** What the server stores: trimmed and lowercased. */
+/** What the server stores, ADR-0225 D3 steps 1-5 (no accept/refuse decision):
+ *  NFC, fullwidth to halfwidth, blanks, lowercase, NFC. */
 export function normalizeChannelName(raw: string): string {
-  return raw.trim().toLowerCase();
+  const folded: number[] = [];
+  for (const ch of raw.normalize("NFC")) {
+    const cp = ch.codePointAt(0)!;
+    folded.push(cp >= 0xff01 && cp <= 0xff5e ? cp - 0xfee0 : cp);
+  }
+  const isSeparator = (cp: number | undefined) => cp === 0x2d || cp === 0x5f;
+  const out: number[] = [];
+  let i = 0;
+  while (i < folded.length) {
+    if (!BLANKS.has(folded[i])) {
+      out.push(folded[i]);
+      i += 1;
+      continue;
+    }
+    const runStart = i;
+    while (i < folded.length && BLANKS.has(folded[i])) i += 1;
+    if (i >= folded.length) break; // a trailing run: dropped
+    if (runStart === 0) continue; // a leading run: dropped
+    if (!isSeparator(out[out.length - 1]) && !isSeparator(folded[i])) out.push(0x2d);
+  }
+  return out
+    .map((cp) => String.fromCodePoint(cp))
+    .join("")
+    .toLowerCase()
+    .normalize("NFC");
+}
+
+/** ADR-0225 D1-D5, the server's `judge_channel_name`: fold, then length (code
+ *  points) -> hidden -> characters -> edges, so an over-long name hears "too
+ *  long" and a zero-width space hears "invisible". */
+export function judgeChannelName(raw: string): ChannelNameJudgement {
+  const name = normalizeChannelName(raw);
+  const chars = Array.from(name);
+  if (chars.length === 0) return { ok: false, verdict: "required" };
+  if (chars.length > CHANNEL_NAME_MAX) return { ok: false, verdict: "tooLong" };
+  const re = categories();
+  if (chars.some((c) => re.unseen.test(c) || isInvisibleLetterOrMark(c.codePointAt(0)!))) {
+    return { ok: false, verdict: "hidden" };
+  }
+  // A combining mark must lean on a letter or number (directly, or through
+  // other marks), never on `-`, `_` or the start of the name.
+  let afterBase = false;
+  for (const c of chars) {
+    if (re.letter.test(c) || re.number.test(c)) afterBase = true;
+    else if (re.mark.test(c) && afterBase) continue;
+    else if (c === "-" || c === "_") afterBase = false;
+    else return { ok: false, verdict: "unsupported" };
+  }
+  const edge = (c: string) => c === "-" || c === "_";
+  if (edge(chars[0]) || edge(chars[chars.length - 1])) {
+    return { ok: false, verdict: "edge" };
+  }
+  return { ok: true, name };
 }
 
 /** Topic keeps its case; only the edges go. Empty means "no topic". */
@@ -42,16 +147,20 @@ export function normalizeChannelTopic(raw: string): string {
 }
 
 export function channelNameIssue(raw: string): ChannelNameIssue | null {
-  const name = normalizeChannelName(raw);
-  if (name === "") return "required";
-  // Length before shape, same order as the server: "80자를 넘었다"는 말이
-  // "쓸 수 없는 글자가 있다"보다 고치기 쉬운 안내다.
-  if (name.length > CHANNEL_NAME_MAX) return "tooLong";
-  if (NAME_RE.test(name)) return null;
-  // The server's regex refuses two different things and one message for both
-  // told `-release` to use only the characters it had already used. Which half
-  // of the rule was broken decides which sentence the reader gets.
-  return NAME_ALPHABET_RE.test(name) ? "edgeSeparator" : "unsupportedCharacters";
+  const judged = judgeChannelName(raw);
+  if (judged.ok) return null;
+  switch (judged.verdict) {
+    case "required":
+      return "required";
+    case "tooLong":
+      return "tooLong";
+    case "hidden":
+      return "hiddenCharacters";
+    case "unsupported":
+      return "unsupportedCharacters";
+    case "edge":
+      return "edgeSeparator";
+  }
 }
 
 export function channelTopicIssue(raw: string): ChannelTopicIssue | null {
@@ -60,18 +169,39 @@ export function channelTopicIssue(raw: string): ChannelTopicIssue | null {
     : null;
 }
 
-/** Field copy, inherited from the mac sheet so both clients say one thing. */
+/** Dictionary keys of the name-rule sentences (`i18n/catalogs/<언어>/channels.json`,
+ *  seven languages). Screens format these with their message service; `tooLong`
+ *  takes `{max}` (`CHANNEL_NAME_MAX`). `serverRejected` is what a 400 on create
+ *  or rename shows instead of the server's English. */
+export const CHANNEL_NAME_ISSUE_KEYS = {
+  required: "channels.nameRule.required",
+  tooLong: "channels.nameRule.tooLong",
+  hiddenCharacters: "channels.nameRule.hidden",
+  unsupportedCharacters: "channels.nameRule.unsupported",
+  edgeSeparator: "channels.nameRule.edge",
+} as const satisfies Record<ChannelNameIssue, MessageKey>;
+
+export const CHANNEL_NAME_SERVER_REJECTED_KEY =
+  "channels.nameRule.serverRejected" as const satisfies MessageKey;
+
+export function channelNameIssueKey(
+  issue: ChannelNameIssue
+): (typeof CHANNEL_NAME_ISSUE_KEYS)[ChannelNameIssue] {
+  return CHANNEL_NAME_ISSUE_KEYS[issue];
+}
+
+/** Korean sentences for callers that have no message service yet. They are
+ *  read from the ko catalog itself, so there is one copy of the words. New
+ *  screens format `channelNameIssueKey` with their message service instead. */
+function koSentence(key: MessageKey): string {
+  return (koChannels as Record<string, string>)[key].replace(
+    "{max, number}",
+    String(CHANNEL_NAME_MAX)
+  );
+}
+
 export function channelNameIssueMessage(issue: ChannelNameIssue): string {
-  switch (issue) {
-    case "required":
-      return "채널 이름을 입력하세요.";
-    case "tooLong":
-      return `채널 이름은 ${CHANNEL_NAME_MAX}자 이내여야 합니다.`;
-    case "unsupportedCharacters":
-      return "영문, 숫자, 하이픈, 밑줄만 사용할 수 있습니다.";
-    case "edgeSeparator":
-      return "처음과 끝은 영문이나 숫자여야 합니다. 하이픈과 밑줄은 가운데에만 쓸 수 있습니다.";
-  }
+  return koSentence(CHANNEL_NAME_ISSUE_KEYS[issue]);
 }
 
 export function channelTopicIssueMessage(issue: ChannelTopicIssue): string {
@@ -105,52 +235,55 @@ export function channelMuteToggleLabel(muted: boolean): string {
 }
 
 /**
- * 이 사람에게 「채널 나가기」를 내놓는가.
+ * 이 채널에 「채널 나가기」를 내놓는가 (#5778).
  *
- * 서버의 `remove_member`는 워크스페이스 소유자/관리자만 멤버십을 지울 수 있게
- * 막는다(2026-08-10 실측, `channels.rs:378` `role_of_actor.is_admin()`) — 자기
- * 자신을 지우는 것도 포함이다. 그래서 일반 멤버에게 「나가기」를 내놓으면 확인
- * 다이얼로그 뒤에서 403으로 끝나는 막다른 길이 된다. 채널 만들기가 같은 이유로
- * `canCreateChannel`을 두는 것과 같은 규율이고, role이 아직 안 온 경우는(roster의
- * 선택 필드) 내놓고 서버가 마지막 말을 하게 둔다.
+ * 나가기는 **본인 길**(`DELETE …/channels/{ch}/members/me`, `leaveChannel`)이다. 서버는 사람이면 역할과 무관하게
+ * 받고(소유자·관리자·멤버·게스트, 만든 사람, `general`, 마지막 멤버 모두 200 — 2026-11-14 로컬 스택 실측), DM 만
+ * 403으로 거절한다. 그래서 가르는 것은 역할이 아니라 채널 종류다. 예전에는 관리자 전용 `remove_member` 로 자기를
+ * 지웠고, 그래서 이 함수가 소유자·관리자에게만 열었다 — 일반 멤버는 채널을 나갈 길이 없었다.
  */
-export function canLeaveChannel(role: MembershipRole | undefined): boolean {
-  if (role === undefined) return true;
-  return role === "owner" || role === "admin";
+export function canLeaveChannel(kind: Channel["kind"]): boolean {
+  return kind !== "dm";
 }
 
 /** 알림 설정을 바꾸지 못했을 때, 그 항목 자리에서 하는 말(토스트가 아니다). */
 export const CHANNEL_MUTE_FAILURE =
   "알림 설정을 바꾸지 못했어요. 잠시 뒤에 다시 시도해 주세요.";
 
-/** 나가기 확인 다이얼로그의 제목. */
-export const CHANNEL_LEAVE_CONFIRM_TITLE = "이 채널에서 나갈까요?";
-
 /**
- * 확인 다이얼로그의 본문. 「관리자가 다시 추가해야」가 참인 이유: 채널에 멤버를
- * 넣는 라우트(`add_member`)도 소유자/관리자 권한이라, 나간 뒤 스스로 다시 들어올
- * 길이 없다.
+ * 확인 단계의 본문 사전 키(`{name}` = 채널 이름). 문장은 사전이 진다(`timeline.channelLeave.*` — 제목·단추·진행 낱말도
+ * 같은 묶음이라, 한 확인 단계 안에서 본문만 기기 언어로 서고 나머지가 한국어로 남는 섞임이 없다).
+ *
+ * 「다시 들어오는 길」은 지금 있는 길만 말한다: 채널에 사람을 넣는 라우트(`add_member`)가 소유자·관리자 권한이라, 나간
+ * 뒤 스스로 다시 들어올 길이 없다. 공개 채널도 같다 — 채널 둘러보기·스스로 참여는 아직 없으니 약속하지 않는다.
+ * 비공개 채널은 하나를 더 말한다: 마지막 멤버가 나가면 서버가 같은 tx 에서 채널을 보관하고(`archived: true`), 보관된
+ * 채널에는 아무도 다시 넣을 수 없다(`add_member` 404, 2026-11-14 실측).
  */
-export function channelLeaveConfirmBody(name: string): string {
-  return `${name} 채널이 사이드바에서 사라집니다. 다시 들어오려면 워크스페이스 관리자가 다시 추가해야 합니다.`;
+export type ChannelLeaveConfirmBodyKey = Extract<MessageKey, `timeline.channelLeave.body${string}`>;
+
+export function channelLeaveConfirmBodyKey(kind: Channel["kind"] | undefined): ChannelLeaveConfirmBodyKey {
+  return kind === "private" ? "timeline.channelLeave.bodyPrivate" : "timeline.channelLeave.bodyPublic";
 }
 
-/** 나가기가 실패했을 때, 그 자리에서 하는 말. `createChannelFailure`와 같은 결. */
-export function channelLeaveFailureMessage(error: unknown): string {
+export type ChannelLeaveFailureKey = Extract<MessageKey, `timeline.channelLeave.error${string}`>;
+
+/**
+ * 나가기가 실패했을 때 그 자리에서 하는 말(사전 키, `{reason}` 은 전송 계층의 문장). 본인 길의 거절은 둘뿐이다:
+ * 403 은 DM(표면이 내놓지 않는다)이거나 활성 멤버가 아닐 때, 404 는 이미 멤버가 아니거나 채널이 보관됐을 때.
+ */
+export function channelLeaveFailure(error: unknown): {
+  key: ChannelLeaveFailureKey;
+  values?: { reason: string };
+} {
   if (error instanceof ApiError) {
-    if (error.status === 403) {
-      // remove_member는 소유자/관리자만 허용한다. `canLeaveChannel`이 앞에서
-      // 걸러도, role이 늦게 왔거나 도중에 강등된 경우 서버가 여기로 답한다.
-      return "채널에서 나갈 권한이 없습니다. 워크스페이스 관리자에게 요청하세요.";
-    }
-    if (error.status === 404) {
-      return "이미 이 채널의 멤버가 아닙니다.";
-    }
+    if (error.status === 403) return { key: "timeline.channelLeave.errorForbidden" };
+    if (error.status === 404) return { key: "timeline.channelLeave.errorNotFound" };
   }
   if (error instanceof NetworkError) {
-    return `채널에서 나가지 못했습니다. ${error.message}`;
+    // 전송 계층이 이미 「아무도 답하지 않았다」의 문구(시간 초과 대 도달 불가)를 쓴다. 한 실패에 두 어휘를 두지 않는다.
+    return { key: "timeline.channelLeave.errorNetwork", values: { reason: error.message } };
   }
-  return "채널에서 나가지 못했습니다. 잠시 뒤에 다시 시도하세요.";
+  return { key: "timeline.channelLeave.errorGeneric" };
 }
 
 // ---- 행에서 채널을 조작하는 낱말 (BT-1 / #1929) ------------------------------
@@ -311,6 +444,9 @@ export function canCreateChannelNow(
 export interface CreateChannelFailure {
   field: "name" | null;
   message: string;
+  /** Set when the sentence has a dictionary key (a 400 on the name); screens
+   *  with a message service format it instead of `message`. */
+  messageKey?: typeof CHANNEL_NAME_SERVER_REJECTED_KEY;
 }
 
 export function createChannelFailure(error: unknown): CreateChannelFailure {
@@ -322,12 +458,12 @@ export function createChannelFailure(error: unknown): CreateChannelFailure {
       };
     }
     if (error.status === 400) {
-      // The form validates with the server's own rule, so a 400 means the two
+      // The form judges with the server's own rule, so a 400 means the two
       // drifted. Say what the server will take rather than echoing its English.
       return {
         field: "name",
-        message:
-          "서버가 이 이름을 거절했습니다. 영문 소문자, 숫자, 하이픈, 밑줄만 쓸 수 있고 처음과 끝은 영문이나 숫자여야 합니다.",
+        message: koSentence(CHANNEL_NAME_SERVER_REJECTED_KEY),
+        messageKey: CHANNEL_NAME_SERVER_REJECTED_KEY,
       };
     }
     if (error.status === 403) {
