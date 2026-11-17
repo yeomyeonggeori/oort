@@ -363,3 +363,109 @@ describe("한글은 조합 중인 음절이 곧 친 글자라서 아래 줄이 �
     expect(q("create-channel-name-preview")!.closest("[aria-live]")).toBeNull();
   });
 });
+
+describe("조합 중에 붙여 넣거나 잘라 내면 아래 줄은 조합 밖의 값을 따라간다 (검수 r2 H2)", () => {
+  // 엔진은 붙여 넣은 뒤에도 조합을 열어 둔 채 `compositionend`를 안 내기도 한다. 칸 = `Team ni'hOps Room`이면 조합 밖의 글자는 `Team Ops Room`이다.
+  const paste = (value: string) => setValue(value, { inputType: "insertFromPaste", isComposing: false });
+  const cut = (value: string) => setValue(value, { inputType: "deleteByCut", isComposing: false });
+
+  it("병음 조합 중 붙여 넣기: 멈춘 화면의 미리보기 = 조합 구간을 뺀 값을 접은 이름이고, 거절은 서지 않는다", async () => {
+    await mount();
+    await type("Team ");
+    await composition("start");
+    await step("Team ni'h", "ni'h");
+    expect(q("create-channel-name-error")).toBeNull();
+    await paste("Team ni'hOps Room");
+    expect(input().value).toBe("Team ni'hOps Room");
+    expect(q("create-channel-name-error")).toBeNull();
+    expect(q("create-channel-name-preview")!.textContent).toBe("#team-ops-room 이름으로 만들어져요");
+    expect(input().getAttribute("aria-describedby")).toBe("create-channel-name-preview");
+  });
+
+  it("가나 조합 중 붙여 넣기도 같다", async () => {
+    await mount();
+    await type("Team ");
+    await composition("start");
+    await step("Team せっけい", "せっけい");
+    await paste("Team せっけいOps Room");
+    expect(q("create-channel-name-preview")!.textContent).toBe("#team-ops-room 이름으로 만들어져요");
+  });
+
+  it("붙여 넣은 뒤 이어서 조합해도 조합 글자는 아래 줄에 서지 않고, 확정되면 칸 값을 그대로 말한다", async () => {
+    await mount();
+    await type("Team ");
+    await composition("start");
+    await step("Team ni'h", "ni'h");
+    await paste("Team ni'hOps Room");
+    await step("Team haoOps Room", "hao");
+    expect(q("create-channel-name-preview")!.textContent).toBe("#team-ops-room 이름으로 만들어져요");
+    await step("Team 好Ops Room", "好");
+    await composition("end", "好");
+    expect(q("create-channel-name-preview")!.textContent).toBe("#team-好ops-room 이름으로 만들어져요");
+  });
+
+  it("조합 중 전체 잘라 내기: 칸이 비면 안내 글이 선다", async () => {
+    await mount();
+    await type("Team ");
+    await composition("start");
+    await step("Team ni'h", "ni'h");
+    await cut("");
+    expect(input().value).toBe("");
+    expect(q("create-channel-name-preview")).toBeNull();
+    expect(q("create-channel-name-hint")).not.toBeNull();
+    // 조합 글자만 잘라 낸 경우도 칸 값을 따라간다.
+    await type("");
+    await type("Team ");
+    await composition("start");
+    await step("Team せっけい", "せっけい");
+    await cut("Team ");
+    expect(q("create-channel-name-preview")!.textContent).toBe("#team 이름으로 만들어져요");
+  });
+
+  it("조합 중 입력기를 거치지 않은 글쇠(insertText, isComposing 거짓)도 조합 밖의 변화다", async () => {
+    await mount();
+    await type("Team ");
+    await composition("start");
+    await step("Team せっけい", "せっけい");
+    await setValue("Team せっけいx", { inputType: "insertText", isComposing: false });
+    expect(q("create-channel-name-preview")!.textContent).toBe("#team-x 이름으로 만들어져요");
+  });
+
+  it("조합 자신의 input(insertCompositionText·deleteCompositionText)은 붙든 값을 바꾸지 않는다", async () => {
+    await mount();
+    await type("Team ");
+    await composition("start");
+    await step("Team ni", "ni");
+    await setValue("Team n", { inputType: "deleteCompositionText", isComposing: true });
+    await update("n");
+    expect(q("create-channel-name-preview")!.textContent).toBe("#team 이름으로 만들어져요");
+    expect(q("create-channel-name-error")).toBeNull();
+  });
+
+  it("한글 조합 중 붙여 넣기는 칸 값을 그대로 따라간다(1회차 갈래 그대로)", async () => {
+    await mount();
+    await composition("start");
+    await step("디자인 뷰", "뷰");
+    await paste("디자인 뷰Ops Room");
+    expect(q("create-channel-name-preview")!.textContent).toBe("#디자인-뷰ops-room 이름으로 만들어져요");
+  });
+});
+
+describe("미리보기 문장은 부분마다 따로 선다: 이름만 줄고 앞말·뒷말은 늘 있다 (검수 r2 M1)", () => {
+  it("한국어는 이름 + 뒷말, 영어는 앞말 + 이름이고, 글자 전체는 한 문장으로 읽힌다", async () => {
+    await mount();
+    await type("Design Review");
+    expect(q("create-channel-name-preview-name")!.textContent).toBe("#design-review");
+    expect(q("create-channel-name-preview-before")).toBeNull();
+    expect(q("create-channel-name-preview-after")!.textContent).toBe(" 이름으로 만들어져요");
+    expect(q("create-channel-name-preview")!.textContent).toBe("#design-review 이름으로 만들어져요");
+  });
+
+  it("영어는 앞말만 있다", async () => {
+    await mount(english);
+    await type("Design Review");
+    expect(q("create-channel-name-preview-before")!.textContent).toBe("Will be created as ");
+    expect(q("create-channel-name-preview-after")).toBeNull();
+    expect(q("create-channel-name-preview")!.textContent).toBe("Will be created as #design-review");
+  });
+});

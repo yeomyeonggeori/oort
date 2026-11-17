@@ -15,7 +15,7 @@ import { normalizeChannelName } from "@momo/core/features/channels/model";
 // 창 위치·창 높이·단추 줄 y·공개 범위 y·주제 y·이름 아래 줄 높이를 적고, 모든 프레임의 값이 같음(0px 차이)을 본다. 그 사이 칸 값은 치는 대로여야 하고,
 // 값이 같다는 것이 「줄이 아예 안 섰다」는 뜻이 아니도록 장면마다 보인 문장도 같이 적어 기대한 문장이 모두 섰는지 본다.
 // 부하에 흔들리지 않게: 시간(ms)이나 한 프레임 표본에 기대지 않는다. 상태가 선 것을 `waitForFunction`으로 기다린 뒤 「그 뒤 세 프레임」을 더 받아 적고, 좌표는 누르는 동안 모양이 바뀌는 단추가 아니라 단추 줄(그릇)에서 잰다.
-// 사보타주(각각 이 시험이 붉어진다): 칸 값을 onChange에서 접기 · 자리 예약 층 빼기 · 보낼 때 접기 빼기 · 조합 가드 빼기 · 한글 갈래 빼기 · 예약 층의 `aria-hidden`/`invisible` 빼기.
+// 사보타주(각각 이 시험이 붉어진다): 조합 밖 변화에 붙든 값 다시 잡기 빼기 · 미리보기 문장 통째 말줄임으로 되돌리기 · 칸 값을 onChange에서 접기 · 자리 예약 층 빼기 · 보낼 때 접기 빼기 · 조합 가드 빼기 · 한글 갈래 빼기 · 예약 층의 `aria-hidden`/`invisible` 빼기.
 // =============================================================================
 
 type Rig = { engine: EngineName; browser: Browser; origin: string };
@@ -48,7 +48,7 @@ afterAll(async () => {
   for (const rig of rigs) await rig.browser.close();
   await server?.close();
   if (cacheDir) rmSync(cacheDir, { recursive: true, force: true });
-});
+}, 120_000); // 부하에서 브라우저를 닫는 데 기본 10초가 모자라 「Hook timed out」로 빨개진 적이 있다(5번 중 2번).
 
 type Frame = { dlgTop: number; dlgH: number; btnY: number; kindY: number; topicY: number; slotH: number; text: string };
 type Opened = { page: Page; errors: string[]; posted: { name: string }[]; setMode: (mode: "409" | "400") => void; close: () => Promise<void> };
@@ -56,8 +56,8 @@ type Opened = { page: Page; errors: string[]; posted: { name: string }[]; setMod
 const INPUT = '[data-testid="create-channel-name"]';
 const SLOT = '[data-testid="create-channel-name-status"]';
 
-async function open(rig: Rig, vp: { width: number; height: number; rootFontPx: number }, lang: "ko-KR" | "en-US"): Promise<Opened> {
-  const context = await rig.browser.newContext({ viewport: { width: vp.width, height: vp.height }, locale: lang, reducedMotion: "reduce" });
+async function open(rig: Rig, vp: { width: number; height: number; rootFontPx: number }, lang: "ko-KR" | "en-US", clipboard = false): Promise<Opened> {
+  const context = await rig.browser.newContext({ viewport: { width: vp.width, height: vp.height }, locale: lang, reducedMotion: "reduce", ...(clipboard ? { permissions: ["clipboard-read", "clipboard-write"] } : {}) });
   const page = await context.newPage();
   page.setDefaultTimeout(60_000);
   const errors: string[] = [];
@@ -212,8 +212,8 @@ describe("채널 만들기 창의 이름 아래 줄은 서고 걷혀도 창이 �
             await waitSaid(page, ko ? "처음과 끝은 글자나 숫자여야 해요." : "The name must start and end with a letter or number.");
             await fillThenWait(page, "a".repeat(81));
             await waitSaid(page, ko ? "채널 이름은 80자까지 쓸 수 있어요." : "Channel names can be up to 80 characters.");
-            await fillThenWait(page, "A".repeat(80));
-            await waitSaid(page, "#aaaaaaaa");
+            await fillThenWait(page, "Q".repeat(80));
+            await waitSaid(page, "#qqqqqqqq");
             await fillThenWait(page, LONG_FOLDED);
             await waitSaid(page, "#디자인-디자인");
             await fillThenWait(page, "Ops Room");
@@ -270,9 +270,10 @@ describe("채널 만들기 창의 이름 아래 줄은 서고 걷혀도 창이 �
         await waitSaid(page, "#디자인-리뷰-회의록-모음-정리-목록");
         const probe = () => page.evaluate(() => {
           const preview = document.querySelector<HTMLElement>('[data-testid="create-channel-name-preview"]')!;
+          const nameBox = document.querySelector<HTMLElement>('[data-testid="create-channel-name-preview-name"]')!;
           const slot = document.querySelector<HTMLElement>('[data-testid="create-channel-name-status"]')!;
           const lineHeight = Number.parseFloat(getComputedStyle(preview).lineHeight);
-          return { previewH: preview.getBoundingClientRect().height, slotH: slot.getBoundingClientRect().height, lineHeight, clipped: preview.scrollHeight - preview.clientHeight, right: preview.getBoundingClientRect().right, slotRight: slot.getBoundingClientRect().right, nameRight: preview.querySelector("span")!.getBoundingClientRect().right, text: preview.innerText.replace(/\s+/g, "") };
+          return { previewH: preview.getBoundingClientRect().height, slotH: slot.getBoundingClientRect().height, lineHeight, clipped: nameBox.scrollHeight - nameBox.clientHeight, right: preview.getBoundingClientRect().right, slotRight: slot.getBoundingClientRect().right, nameRight: nameBox.getBoundingClientRect().right, text: preview.innerText.replace(/\s+/g, "") };
         });
         const normal = await probe();
         expect(normal.text, `[${rig.engine}] 이름이 전부 보인다`).toContain("#디자인-리뷰-회의록-모음-정리-목록");
@@ -349,5 +350,109 @@ describe("채널 만들기 창의 이름 아래 줄은 서고 걷혀도 창이 �
       expect(spread(frameList), "실제 입력기로 치는 내내 창이 움직이지 않았다").toEqual({ dlgTop: 0, dlgH: 0, btnY: 0, kindY: 0, topicY: 0, slotH: 0 });
       expect(errors).toEqual([]);
     } finally { await close(); }
+  }, 240_000);
+  // 미리보기 문장은 이름만 줄어든다 (검수 r2 M1): 뒷말(「이름으로 만들어져요」)·앞말(`Will be created as`)은 어떤 이름·크기에서도 서 있고 자리를 넘지 않는다.
+  const LONG_NAMES: [string, string][] = [
+    ["80자 한글(빈칸 있음)", "디자인 리뷰 회의 ".repeat(11).slice(0, 80)],
+    ["80자 영문(빈칸 있음)", "Design Review Meeting ".repeat(4).slice(0, 80)],
+    ["빈칸 없는 긴 낱말(대문자로 시작해 접힘)", "A" + "가나다라마바사".repeat(12).slice(0, 79)],
+  ];
+  for (const vp of VIEWPORTS) {
+    for (const lang of vp.langs) {
+      it.skipIf(ENGINES.length === 0)(`${vp.name} · ${lang}: 긴 이름이면 이름만 …로 줄고 앞말·뒷말은 늘 서 있으며 창·단추 줄은 안 움직인다`, async () => {
+        for (const rig of rigs) {
+          const { page, close } = await open(rig, vp, lang);
+          const ko = lang === "ko-KR";
+          try {
+            await startRecording(page);
+            for (const [label, value] of LONG_NAMES) {
+              const at = `[${rig.engine} ${vp.name} ${lang} ${label}]`;
+              await fillThenWait(page, value);
+              await waitSaid(page, ko ? "이름으로 만들어져요" : "Will be created as");
+              const probe = await page.evaluate(() => {
+                const rect = (selector: string) => { const node = document.querySelector<HTMLElement>(selector); return node ? { top: node.getBoundingClientRect().top, bottom: node.getBoundingClientRect().bottom, left: node.getBoundingClientRect().left, right: node.getBoundingClientRect().right, text: node.textContent ?? "", overflowX: node.scrollWidth - node.clientWidth, overflowY: node.scrollHeight - node.clientHeight } : null; };
+                const preview = document.querySelector<HTMLElement>('[data-testid="create-channel-name-preview"]')!;
+                const name = document.querySelector<HTMLElement>('[data-testid="create-channel-name-preview-name"]')!;
+                return {
+                  slot: rect('[data-testid="create-channel-name-status"]')!,
+                  preview: rect('[data-testid="create-channel-name-preview"]')!,
+                  name: rect('[data-testid="create-channel-name-preview-name"]')!,
+                  before: rect('[data-testid="create-channel-name-preview-before"]'),
+                  after: rect('[data-testid="create-channel-name-preview-after"]'),
+                  nameFull: name.textContent ?? "",
+                  nameCut: name.scrollHeight > name.clientHeight + 1 || name.scrollWidth > name.clientWidth + 1,
+                  lineHeight: Number.parseFloat(getComputedStyle(preview).lineHeight),
+                };
+              });
+              const tail = ko ? probe.after : probe.before;
+              expect(tail, `${at} ${ko ? "뒷말" : "앞말"}이 서 있다`).not.toBeNull();
+              expect(tail!.text.trim(), `${at} 문장 부분 글자`).toBe(ko ? "이름으로 만들어져요" : "Will be created as");
+              for (const [part, box] of [["앞말", probe.before], ["뒷말", probe.after]] as const) {
+                if (box === null) continue;
+                expect(box.overflowX, `${at} ${part}가 안 잘린다(가로)`).toBeLessThanOrEqual(1);
+                expect(box.overflowY, `${at} ${part}가 안 잘린다(세로)`).toBeLessThanOrEqual(1);
+                expect(box.right, `${at} ${part}가 칸 오른쪽 안`).toBeLessThanOrEqual(probe.slot.right + 0.5);
+                expect(box.left, `${at} ${part}가 칸 왼쪽 안`).toBeGreaterThanOrEqual(probe.slot.left - 0.5);
+                expect(box.bottom, `${at} ${part}가 예약된 자리 안(아래)`).toBeLessThanOrEqual(probe.slot.bottom + 0.5);
+                expect(box.top, `${at} ${part}가 예약된 자리 안(위)`).toBeGreaterThanOrEqual(probe.slot.top - 0.5);
+              }
+              expect(probe.name.right, `${at} 이름이 칸 오른쪽 안`).toBeLessThanOrEqual(probe.slot.right + 0.5);
+              expect(probe.preview.bottom, `${at} 문장이 예약된 자리 안`).toBeLessThanOrEqual(probe.slot.bottom + 0.5);
+              // 낭독은 전체 이름: 보이는 것은 줄었어도 글자(접근 가능한 글)는 저장될 이름 전부다.
+              expect(probe.nameFull, `${at} 접근 가능한 글은 이름 전부`).toBe(`#${normalizeChannelName(value)}`);
+              // 줄어든다면 줄어든 것은 이름이다(뒷말·앞말은 위에서 안 잘렸음을 봤다). 이름이 자리에 다 들어가면 안 줄어도 된다.
+              // 예약이 한 줄인 넓은 창(한국어 1280·720)에서는 80자 이름이 한 줄에 못 들어가니 이름이 …로 줄어야 하고, 그러고도 뒷말이 서 있다(위).
+              if (ko && vp.width >= 720 && vp.rootFontPx === 16) expect(probe.nameCut, `${at} 이름이 한 줄에 맞춰 줄었다`).toBe(true);
+            }
+            const frameList = await stopRecording(page);
+            expect(spread(frameList), `[${rig.engine} ${vp.name} ${lang}] 긴 이름들을 지나는 모든 프레임에서 창이 안 움직인다`).toEqual({ dlgTop: 0, dlgH: 0, btnY: 0, kindY: 0, topicY: 0, slotH: 0 });
+          } finally { await close(); }
+        }
+      }, 300_000);
+    }
+  }
+
+  // 조합 중 붙여 넣기·잘라 내기 (검수 r2 H2): 엔진은 붙여 넣은 뒤에도 조합을 열어 둔 채 `compositionend`를 안 낸다.
+  it.skipIf(!ENGINES.includes("chromium"))("실제 입력기(Chromium CDP): 병음·가나 조합 중 붙여 넣기·잘라 내기 뒤 멈춘 화면의 미리보기가 조합 밖의 값을 접은 이름이고, 거절은 한 번도 안 선다", async () => {
+    const rig = rigs.find((candidate) => candidate.engine === "chromium")!;
+    const scene = async (composing: string, check: (page: Page, cdp: import("playwright").CDPSession, errors: string[]) => Promise<void>) => {
+      const { page, errors, close } = await open(rig, { width: 1280, height: 800, rootFontPx: 16 }, "ko-KR", true);
+      try {
+        const cdp = await page.context().newCDPSession(page);
+        await fillThenWait(page, "Team ");
+        await page.locator(INPUT).focus();
+        await page.keyboard.press("End");
+        await startRecording(page);
+        await cdp.send("Input.imeSetComposition", { text: composing, selectionStart: composing.length, selectionEnd: composing.length });
+        await expectField(page, `Team ${composing}`, null, `조합 ${composing}`);
+        await check(page, cdp, errors);
+        const seen = (await stopRecording(page)).map((frame) => frame.text);
+        expect(seen.filter((text) => text.includes("쓸 수 있어요")), `${composing}: 조합 중 거절 문장이 한 프레임도 서지 않았다`).toEqual([]);
+      } finally { await close(); }
+    };
+    const paste = async (page: Page, text: string) => {
+      await page.evaluate((value) => navigator.clipboard.writeText(value), text);
+      await page.keyboard.press("ControlOrMeta+V");
+    };
+    // 병음: 칸 = `Team ni'hOps Room`(받지 않는 작은따옴표가 든 값)인데 아래 줄은 `#team-ops-room`이어야 한다.
+    await scene("ni'h", async (page, cdp) => {
+      await paste(page, "Ops Room");
+      await expectField(page, "Team ni'hOps Room", "#team-ops-room", "병음 붙여 넣기");
+      expect(await page.locator(INPUT).getAttribute("aria-describedby"), "병음 붙여 넣기 describedby").toBe("create-channel-name-preview");
+      // 이어서 조합해도 조합 글자는 아래 줄에 서지 않는다.
+      await cdp.send("Input.imeSetComposition", { text: "hao", selectionStart: 3, selectionEnd: 3 });
+      await expectField(page, "Team haoOps Room", "#team-ops-room", "붙여 넣은 뒤 이어서 조합");
+    });
+    await scene("せっけい", async (page) => {
+      await paste(page, "Ops Room");
+      await expectField(page, "Team せっけいOps Room", "#team-ops-room", "가나 붙여 넣기");
+    });
+    await scene("ni'h", async (page) => {
+      await page.keyboard.press("ControlOrMeta+A");
+      await page.keyboard.press("ControlOrMeta+X");
+      await page.waitForFunction((selector) => (document.querySelector(selector) as HTMLInputElement).value === "", INPUT);
+      await waitSaid(page, "글자, 숫자, 하이픈(-)");
+      expect(await page.locator('[data-testid="create-channel-name-preview"]').count(), "잘라 낸 뒤 미리보기 없음").toBe(0);
+    });
   }, 240_000);
 });
