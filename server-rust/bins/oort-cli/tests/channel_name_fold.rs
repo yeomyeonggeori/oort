@@ -237,6 +237,26 @@ fn two_old_names_that_fold_together_are_ambiguous_never_guessed() {
 }
 
 #[test]
+fn a_named_room_that_is_not_a_channel_is_never_found_by_hash_name() {
+    let mut room = channel("55555555-5555-4555-8555-555555555555", "Eng Team");
+    room.kind = "dm".to_string();
+    // Alone, the room is not found: `#eng-team` must not post into a private room.
+    let error = pick_channel(std::slice::from_ref(&room), "eng-team").unwrap_err();
+    assert_eq!(error.code, "channel_not_found");
+    // Next to the channel of that name, it does not make the name ambiguous either.
+    let named = channel("66666666-6666-4666-8666-666666666666", "eng-team");
+    let both = vec![room, named.clone()];
+    assert_eq!(pick_channel(&both, "Eng Team").unwrap(), named.id);
+    // A private channel is a channel.
+    let mut private = channel("77777777-7777-4777-8777-777777777777", "ops");
+    private.kind = "private".to_string();
+    assert_eq!(
+        pick_channel(std::slice::from_ref(&private), "OPS").unwrap(),
+        private.id
+    );
+}
+
+#[test]
 fn a_name_the_server_would_refuse_finds_no_channel_by_the_ordinary_road() {
     let stored: Vec<String> = cases()
         .iter()
