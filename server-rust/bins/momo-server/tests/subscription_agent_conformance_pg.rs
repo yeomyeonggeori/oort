@@ -369,6 +369,12 @@ async fn seed_with_harness(pool: &PgPool, harness: &str) -> Fixture {
 
     let channel = insert_channel(pool, workspace, "public", Some("team")).await;
     let general = insert_channel(pool, workspace, "public", Some("general")).await;
+    // The welcome speaks in the default channel, found by its mark (ADR-0224 D6).
+    sqlx::query("UPDATE channel SET is_default = true WHERE id = $1")
+        .bind(general)
+        .execute(pool)
+        .await
+        .expect("general is the default channel");
     let dm = insert_channel(pool, workspace, "dm", None).await;
     for room in [channel, general] {
         for member in [owner, teammate, agent] {
