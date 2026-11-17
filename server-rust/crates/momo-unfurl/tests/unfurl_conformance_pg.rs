@@ -1355,3 +1355,270 @@ async fn a_fetch_this_server_had_no_room_for_is_tried_again_like_a_timeout() {
     assert_eq!(job().await.0, "done");
     assert_eq!(asks.load(Ordering::SeqCst), 3);
 }
+
+// ---------------------------------------------------------------------------
+// ADR-0170 증보 2026-11-14 (#5872) — an agent's message is never fetched by the server
+// ---------------------------------------------------------------------------
+
+struct RecordingHttp {
+    asked: Arc<Mutex<Vec<String>>>,
+}
+
+#[async_trait::async_trait]
+impl UnfurlHttp for RecordingHttp {
+    async fn fetch(&self, url: &str, _kind: FetchKind) -> Result<Fetched, FetchError> {
+        self.asked.lock().unwrap().push(url.to_string());
+        Ok(Fetched {
+            final_url: url.to_string(),
+            content_type: "text/html".into(),
+            body: br#"<meta property="og:title" content="a title">"#.to_vec(),
+        })
+    }
+}
+
+/// A second member of the tenant, of the given kind (`agent` rows are not needed: the rule reads
+/// `member.kind` only, which is also what a webhook's service member carries).
+async fn add_member_of_kind(su: &PgPool, tenant: &Tenant, kind: &str) -> Tenant {
+    let member = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO member (id, workspace_id, kind, display_name, handle) \
+         VALUES ($1, $2, $3::member_kind, $4, $4)",
+    )
+    .bind(member)
+    .bind(tenant.workspace)
+    .bind(kind)
+    .bind(member.to_string())
+    .execute(su)
+    .await
+    .expect("member");
+    Tenant {
+        workspace: tenant.workspace,
+        member,
+        channel: tenant.channel,
+    }
+}
+
+/// What the author of a message can still do to its body: the same statement the edit path runs.
+async fn edit_body(su: &PgPool, message: Uuid, body: &str) {
+    sqlx::query(
+        "UPDATE message SET body = $2, state = 'edited', edited_at = clock_timestamp() \
+          WHERE id = $1",
+    )
+    .bind(message)
+    .bind(body)
+    .execute(su)
+    .await
+    .expect("edit");
+}
+
+async fn card_rows(su: &PgPool, message: Uuid) -> i64 {
+    sqlx::query_scalar("SELECT count(*) FROM message_unfurl WHERE message_id = $1")
+        .bind(message)
+        .fetch_one(su)
+        .await
+        .unwrap()
+}
+
+/// A member of kind `agent` with the rows that make it a working agent (what a channel agent, the
+/// team AI and an Agent Port connection all have in common: an `agent` row; the connection adds an
+/// `agent_profile`).
+async fn add_agent_with_row(su: &PgPool, tenant: &Tenant, profile: bool) -> Tenant {
+    let agent = add_member_of_kind(su, tenant, "agent").await;
+    sqlx::query(
+        "INSERT INTO agent (member_id, workspace_id, model, base_url) \
+         VALUES ($1, $2, 'test-model', 'https://gateway.invalid/v1')",
+    )
+    .bind(agent.member)
+    .bind(agent.workspace)
+    .execute(su)
+    .await
+    .expect("agent row");
+    if profile {
+        sqlx::query(
+            "INSERT INTO agent_profile (agent_member_id, workspace_id, updated_by) \
+             VALUES ($1, $2, $3)",
+        )
+        .bind(agent.member)
+        .bind(agent.workspace)
+        .bind(tenant.member)
+        .execute(su)
+        .await
+        .expect("agent profile");
+    }
+    agent
+}
+
+/// The webhook install, made by the real create path: its service member is what the installation
+/// row names as its author.
+async fn add_webhook_author(su: &PgPool, tenant: &Tenant) -> Tenant {
+    let secret_ref = momo_webhook::random_reference();
+    let (workspace, admin, channel) = (tenant.workspace, tenant.member, tenant.channel);
+    let created = with_tenant_tx(su, workspace, move |conn| {
+        Box::pin(async move {
+            momo_webhook::create_installation(
+                conn,
+                workspace,
+                momo_webhook::NewInstallation {
+                    channel_id: channel,
+                    mode: momo_webhook::WebhookMode::Native,
+                    label: "build alerts",
+                    secret_ref: Some(&secret_ref),
+                    token_hash: None,
+                    actor_member_id: admin,
+                    via_token_id: None,
+                },
+            )
+            .await
+        })
+    })
+    .await
+    .expect("webhook install");
+    Tenant {
+        workspace,
+        member: created.installation.author_member_id,
+        channel,
+    }
+}
+
+/// The GitHub integration's author: a member of kind `agent` with no `agent` row that
+/// `github_workspace_author` names for the workspace (what `ensure_workspace_author` stores).
+async fn add_github_author(su: &PgPool, tenant: &Tenant) -> Tenant {
+    let author = add_member_of_kind(su, tenant, "agent").await;
+    sqlx::query(
+        "INSERT INTO github_workspace_author (workspace_id, author_member_id) VALUES ($1, $2)",
+    )
+    .bind(author.workspace)
+    .bind(author.member)
+    .execute(su)
+    .await
+    .expect("github author");
+    author
+}
+
+/// 불변식: 사람이 누르지 않았는데 에이전트가 쓴 주소로 서버가 나가는 요청이 없다. 단 하나의 예외는
+/// 웹훅 설치가 가리키는 서비스 멤버와 GitHub 연동의 작성자 글이다. 에이전트 종류마다 한 경우씩: 채널에 앉은 에이전트 ·
+/// 팀 AI 모양(`agent` 행) · 외부 에이전트(`agent_profile` 있음) · `agent` 행이 없는 서비스 멤버
+/// (웹훅·GitHub 어느 쪽에도 묶이지 않은 것)는 요청 0건·카드 0행, 사람·웹훅·GitHub 글은 1건·카드 1행.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 DB"]
+async fn an_agent_authored_message_is_never_fetched_except_an_inbound_integrations_and_a_human_one_is(
+) {
+    let _guard = test_lock().await;
+    ensure_schema();
+    let su = superuser_pool().await;
+    skip_leftover_jobs(&su).await;
+    let person = seed(&su).await;
+    let channel_agent = add_agent_with_row(&su, &person, false).await;
+    let team_ai_shaped = add_agent_with_row(&su, &person, false).await;
+    let external_agent = add_agent_with_row(&su, &person, true).await;
+    let rowless_service = add_member_of_kind(&su, &person, "agent").await;
+    let webhook = add_webhook_author(&su, &person).await;
+    let github = add_github_author(&su, &person).await;
+
+    let by_channel_agent = insert_message(
+        &su,
+        &channel_agent,
+        "see https://by-channel-agent.example/a",
+    )
+    .await;
+    let by_team_ai = insert_message(&su, &team_ai_shaped, "see https://by-team-ai.example/b").await;
+    let by_external = insert_message(
+        &su,
+        &external_agent,
+        "see https://by-external-agent.example/c",
+    )
+    .await;
+    let by_rowless = insert_message(
+        &su,
+        &rowless_service,
+        "see https://by-rowless-service.example/d",
+    )
+    .await;
+    let edited_by_agent = insert_message(&su, &channel_agent, "no link yet").await;
+    edit_body(
+        &su,
+        edited_by_agent,
+        "now https://edited-by-agent.example/e",
+    )
+    .await;
+    let by_webhook = insert_message(&su, &webhook, "see https://by-webhook.example/f").await;
+    let by_github = insert_message(&su, &github, "see https://by-github.example/h").await;
+    let by_person = insert_message(&su, &person, "see https://by-person.example/g").await;
+
+    let asked = Arc::new(Mutex::new(Vec::new()));
+    let worker = UnfurlWorker::new(
+        su.clone(),
+        Arc::new(RecordingHttp {
+            asked: asked.clone(),
+        }),
+        UnfurlConfig::for_tests(database_url(), true),
+    );
+    worker.drain_to_empty().await;
+
+    let mut got = asked.lock().unwrap().clone();
+    got.sort();
+    assert_eq!(
+        got,
+        vec![
+            "https://by-github.example/h".to_string(),
+            "https://by-person.example/g".to_string(),
+            "https://by-webhook.example/f".to_string()
+        ],
+        "the server asked for a person's, a webhook's and GitHub's link, and nothing another agent wrote"
+    );
+    for (name, message) in [
+        ("channel agent", by_channel_agent),
+        ("team AI shaped", by_team_ai),
+        ("external agent", by_external),
+        ("row-less service member", by_rowless),
+        ("edited by agent", edited_by_agent),
+    ] {
+        assert_eq!(card_rows(&su, message).await, 0, "{name}");
+    }
+    assert_eq!(card_rows(&su, by_webhook).await, 1);
+    assert_eq!(card_rows(&su, by_github).await, 1);
+    assert_eq!(card_rows(&su, by_person).await, 1);
+}
+
+/// A job that was already queued for an agent's message (a row written before the rule, or by a
+/// writer that never saw it) ends as skipped: the rule is the worker's, so the fetch is where it
+/// is stopped, whoever queued it.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 DB"]
+async fn a_job_already_queued_for_an_agent_message_is_skipped_before_any_fetch() {
+    let _guard = test_lock().await;
+    ensure_schema();
+    let su = superuser_pool().await;
+    skip_leftover_jobs(&su).await;
+    let person = seed(&su).await;
+    let agent = add_member_of_kind(&su, &person, "agent").await;
+    let message = insert_message(&su, &agent, "https://queued-before.example/x").await;
+    // The trigger's own row stands in for the older one; make sure there is exactly one.
+    let jobs: i64 = sqlx::query_scalar("SELECT count(*) FROM unfurl_job WHERE message_id = $1")
+        .bind(message)
+        .fetch_one(&su)
+        .await
+        .unwrap();
+    assert_eq!(jobs, 1);
+
+    let asked = Arc::new(Mutex::new(Vec::new()));
+    let worker = UnfurlWorker::new(
+        su.clone(),
+        Arc::new(RecordingHttp {
+            asked: asked.clone(),
+        }),
+        UnfurlConfig::for_tests(database_url(), true),
+    );
+    let stats = worker.drain_once().await.expect("drain");
+    assert_eq!((stats.claimed, stats.skipped, stats.fetched), (1, 1, 0));
+    assert!(asked.lock().unwrap().is_empty());
+    let (status, why): (String, Option<String>) =
+        sqlx::query_as("SELECT status, last_error FROM unfurl_job WHERE message_id = $1")
+            .bind(message)
+            .fetch_one(&su)
+            .await
+            .unwrap();
+    assert_eq!(status, "skipped");
+    assert_eq!(why.as_deref(), Some("agent author"));
+    assert_eq!(card_rows(&su, message).await, 0);
+}

@@ -830,12 +830,28 @@ mod tests {
     /// DELETE; nobody else holds anything, `agent-picture-mark-lockdown`). The same migration re-issues
     /// 175's `attachment-write-token-lockdown` block (`momo_worker` loses DELETE, `momo_app` gains it for the
     /// api-side sweep): the same text in this migration and both role bootstraps.
+    ///
+    /// 180 is #5822's 「1:1 대화 나가기」 읽기 하한 (ADR-0177 증보 2026-11-14 D15·D17):
+    /// `membership.history_from_seq` (nullable, `> 0`) and one `RESTRICTIVE FOR SELECT` policy on
+    /// `message` (`dm_leave_history_floor`) that reads the request-local `app.requester_member_id`.
+    /// No new table, so no new RLS target.
+    ///
+    /// 181 is #5823's partial index for that policy: `membership (member_id) WHERE history_from_seq
+    /// IS NOT NULL`, so the policy's 「channels where the requester has a floor」 set is an index scan
+    /// over the rows that have one. No new table, policy or grant.
+    ///
+    /// 182 is #5857's partial index for the relay's floor judgment (ADR-0177 증보 D17): `membership
+    /// (channel_id) WHERE history_from_seq IS NOT NULL`, so 「does this room have a floor?」 is an index
+    /// probe over the rows that have one. No new table, policy or grant.
+    ///
+    /// 183 changes only the shape of 180's policy (ADR-0177 증보 D17): the requester's floors are read
+    /// once per statement instead of per scan, with the same visibility. No new table or grant.
     #[test]
-    fn discovers_contiguous_migrations_001_to_179() {
+    fn discovers_contiguous_migrations_001_to_183() {
         let dir = default_migrations_dir();
         let migrations = discover_migrations(&dir).expect("migrations directory readable");
 
-        let expected: Vec<i64> = (1..=179).collect();
+        let expected: Vec<i64> = (1..=183).collect();
         let found: Vec<i64> = migrations
             .iter()
             .map(|migration| migration.version)
@@ -843,7 +859,7 @@ mod tests {
         assert_eq!(
             found,
             expected,
-            "expected contiguous 001..=179 under {}",
+            "expected contiguous 001..=183 under {}",
             dir.display()
         );
         assert!(migrations.first().unwrap().name.starts_with("001_init"));
@@ -851,7 +867,7 @@ mod tests {
             .last()
             .unwrap()
             .name
-            .starts_with("179_agent_picture_mark"));
+            .starts_with("183_dm_leave_floor_policy_once_per_statement"));
     }
 
     #[test]

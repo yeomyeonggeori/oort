@@ -991,3 +991,69 @@ async fn dm_admission_consent_cards_do_not_consume_the_agents_action_ceiling() {
         Ok(())
     })).await.unwrap();
 }
+
+/// ADR-0177 증보 D16-2 (#5822): leaving a 1:1 that has a pending agent request cancels it exactly as
+/// a rejection would — every card `cancelled`, the admission revoked, the held run cancelled — and the
+/// other person's late decision on their card is answered, never a 500, and seats nobody.
+#[tokio::test]
+#[ignore = "dedicated real PG"]
+async fn dm_admission_a_one_to_one_leave_cancels_the_pending_request() {
+    let f = Fixture::new().await;
+    f.propose().await;
+    let card = f.card_for(f.peer).await;
+    let head: i64 = sqlx::query_scalar("SELECT last_seq FROM channel_seq WHERE channel_id = $1")
+        .bind(f.channel)
+        .fetch_one(&f.su)
+        .await
+        .unwrap();
+    let r = f
+        .http
+        .put(format!(
+            "{}/v1/workspaces/{}/channels/{}/dm-leave",
+            f.base, f.tenant.workspace, f.channel
+        ))
+        .bearer_auth(&f.caller_token)
+        .json(&json!({ "seenSeq": head }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(r.status(), 204, "{}", r.text().await.unwrap_or_default());
+    let (status, props): (String, Value) = sqlx::query_as(
+        "SELECT a.status::text, m.props FROM approval a JOIN message m ON m.id = a.request_message_id WHERE a.id = $1",
+    )
+    .bind(card)
+    .fetch_one(&f.su)
+    .await
+    .unwrap();
+    assert_eq!(status, "cancelled");
+    assert_eq!(
+        props["status"],
+        json!("cancelled"),
+        "the card redraws as cancelled"
+    );
+    let open: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM dm_agent_admission WHERE channel_id = $1 AND revoked_at IS NULL",
+    )
+    .bind(f.channel)
+    .fetch_one(&f.su)
+    .await
+    .unwrap();
+    assert_eq!(open, 0, "the admission is revoked");
+    let held: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM agent_run WHERE channel_id = $1 AND status = 'awaiting_approval'",
+    )
+    .bind(f.channel)
+    .fetch_one(&f.su)
+    .await
+    .unwrap();
+    assert_eq!(held, 0, "the held run is cancelled");
+    let late = f.decide(card, true, &f.peer_token).await;
+    let late_status = late.status();
+    assert_ne!(
+        late_status,
+        500,
+        "{}",
+        late.text().await.unwrap_or_default()
+    );
+    assert_eq!(f.seats().await, 0, "a late yes seats nobody");
+}
