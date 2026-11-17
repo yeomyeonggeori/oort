@@ -42,6 +42,8 @@ import {
 } from "@/features/workspace/useWorkspace";
 import { switcherPeople } from "@momo/core/features/directory/model";
 import { useOpenDm } from "@/features/directory/useOpenDm";
+import { useChannelNameLocale } from "@/i18n/useChannelNameLocale";
+import { compareChannelNames } from "@momo/core/features/channels/nameCollation";
 import { canCreateChannelNow } from "@momo/core/features/channels/model";
 import {
   useCreateChannelOpen,
@@ -456,6 +458,17 @@ export function QuickSwitcher({
   const location = useLocation();
   const { showNav: showDrafts } = useDraftsPanel();
   const { groups } = useChannels(workspaceId);
+  // 빠른 이동의 채널 줄은 클라이언트가 차례를 정한다(같은 점수끼리 이 차례): 화면 언어·숫자는 값으로 (ADR-0225 D12).
+  const channelLocale = useChannelNameLocale();
+  const channelRows = useMemo(
+    () =>
+      channelLocale === undefined
+        ? groups.channels
+        : [...groups.channels].sort((a, b) =>
+            compareChannelNames(channelLocale)(a.name ?? "", b.name ?? "")
+          ),
+    [groups.channels, channelLocale]
+  );
   const directoryQuery = useDirectory(workspaceId);
   const { directory } = directoryQuery;
   const dm = useOpenDm();
@@ -1016,7 +1029,7 @@ export function QuickSwitcher({
         )}
 
         <Command.Group heading="채널">
-          {groups.channels.map((channel) => (
+          {channelRows.map((channel) => (
             <Command.Item role="option"
               key={channel.id}
               value={`${channel.name ?? ""} ${channel.id}`}
