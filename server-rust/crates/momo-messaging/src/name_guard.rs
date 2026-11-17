@@ -409,12 +409,20 @@ fn light_skeleton(raw: &str) -> String {
 /// U+03CC) reaches the table as its base letter, and composed again after so the
 /// result equals the precomposed Latin letter. A name without a Cyrillic or Greek
 /// letter comes back unchanged (canonical decomposition then composition of an NFC
-/// string is that string).
+/// string is that string), except that the Latin ligature letter U+00E6 reads as
+/// `ae`: the fold of a look-alike must meet the Latin letter a person can store,
+/// not only the data's prototype text. The Greek-only combining marks (U+0342,
+/// U+0345) are folded to the Latin mark they are drawn as, so the Cyrillic and
+/// Greek letters built on them reach the accented Latin letters too.
 pub fn channel_name_lookalike_fold(name: &str) -> String {
     let mut mapped = String::with_capacity(name.len());
     for c in name.nfd() {
         if let Some(latin) = channel_lookalike_row(c) {
             mapped.push_str(latin);
+        } else if c == '\u{e6}' {
+            // The Latin ligature letter reads as the two letters the Cyrillic
+            // ligature's prototype is, so both sides of that pair meet.
+            mapped.push_str("ae");
         } else if is_cyrillic(c) || is_greek(c) {
             mapped.push(confusable(c));
         } else {
@@ -424,7 +432,7 @@ pub fn channel_name_lookalike_fold(name: &str) -> String {
     mapped.nfc().collect()
 }
 
-/// The Cyrillic and Greek letters (any block) that the Unicode look-alike data
+/// The Cyrillic and Greek letters and Greek-only combining marks (any block) that the Unicode look-alike data
 /// gives a lowercase Latin or digit prototype for, as that prototype, where
 /// [`confusable`] has no such row. Source: UTS #39 `confusables.txt`, version
 /// dated 2026-08-06, © Unicode, Inc., Unicode License v3
@@ -436,6 +444,8 @@ pub fn channel_name_lookalike_fold(name: &str) -> String {
 fn channel_lookalike_row(c: char) -> Option<&'static str> {
     Some(match c {
         // Greek and Coptic, Phonetic Extensions, Ancient Greek Numbers.
+        '\u{342}' => "\u{303}",
+        '\u{345}' => "\u{328}",
         '\u{3B3}' => "y",
         '\u{3C3}' => "o",
         '\u{3F1}' => "p",
@@ -458,7 +468,7 @@ fn channel_lookalike_row(c: char) -> Option<&'static str> {
         '\u{47D}' => "w\u{486}\u{487}",
         '\u{48D}' => "b\u{335}",
         '\u{493}' => "r\u{335}",
-        '\u{4AB}' => "c\u{326}",
+        '\u{4AB}' => "c\u{327}",
         '\u{4AF}' => "y",
         '\u{4B1}' => "y\u{335}",
         '\u{4BD}' => "e",
@@ -2107,9 +2117,12 @@ mod tests {
 
     /// A name with no Cyrillic or Greek letter folds to itself, so two such names
     /// are look-alikes only when they are the same name: no Hangul, kana, Han,
-    /// accented Latin or ASCII channel name can be refused by D7.
+    /// accented Latin or ASCII channel name can be refused by D7. The one change is
+    /// the Latin ligature letter U+00E6 (and the letters built on it: capital, with
+    /// macron, with acute), which reads as `ae` so it meets the Cyrillic ligature
+    /// drawn like it; every other code point is unchanged.
     #[test]
-    fn a_name_without_cyrillic_or_greek_folds_to_itself() {
+    fn a_name_without_cyrillic_or_greek_folds_to_itself_except_the_ae_ligature() {
         let ranges = [
             0x21..=0x7E,     // ASCII
             0xC0..=0x24F,    // Latin-1 and Latin Extended-A/B
@@ -2121,6 +2134,7 @@ mod tests {
             0xAC00..=0xD7A3, // Hangul syllables
         ];
         let mut checked = 0usize;
+        let mut changed = Vec::new();
         for code in ranges.into_iter().flatten() {
             let Some(c) = char::from_u32(code) else {
                 continue;
@@ -2128,13 +2142,21 @@ mod tests {
             let Ok(name) = crate::channel::normalize_channel_name(&format!("{c}a{c}")) else {
                 continue;
             };
-            assert_eq!(
-                channel_name_lookalike_fold(&name),
-                name,
-                "U+{code:04X} changed under the D7 fold"
-            );
+            if channel_name_lookalike_fold(&name) != name {
+                changed.push(code);
+            }
             checked += 1;
         }
+        assert_eq!(
+            changed,
+            vec![0xC6, 0xE6, 0x1E2, 0x1E3, 0x1FC, 0x1FD],
+            "code points changed by the D7 fold"
+        );
+        assert_eq!(
+            channel_name_lookalike_fold("\u{e6}a\u{e6}"),
+            "aeaae",
+            "the ligature reads as two letters"
+        );
         assert!(checked > 39_000, "only {checked} names were checked");
     }
 
@@ -2145,6 +2167,8 @@ mod tests {
     /// data prototype carries a mark below and which the fold maps to the bare `n`.
     const D7_SCRIPT_LOOKALIKES: &[(u32, &str)] = &[
         (0x3B1, "a"),
+        (0x342, "\u{303}"),
+        (0x345, "\u{328}"),
         (0x3B3, "y"),
         (0x3B7, "n"),
         (0x3B9, "i"),
@@ -2180,7 +2204,7 @@ mod tests {
         (0x47D, "w\u{486}\u{487}"),
         (0x48D, "b\u{335}"),
         (0x493, "r\u{335}"),
-        (0x4AB, "c\u{326}"),
+        (0x4AB, "c\u{327}"),
         (0x4AF, "y"),
         (0x4B1, "y\u{335}"),
         (0x4BB, "h"),
@@ -2269,6 +2293,59 @@ mod tests {
                 "{proposed:?} / {live:?}"
             );
         }
+    }
+
+    /// Names as a person types them in the first languages (accented Latin
+    /// letters, as stored: NFC) beside a Cyrillic or Greek spelling of the same
+    /// letters: refused. The fold must meet the Latin letter a person can actually
+    /// store, not only the look-alike data's own prototype text.
+    const D7_LATIN_LETTER_PAIRS: &[(&str, &str)] = &[
+        ("fran\u{e7}ais", "fran\u{4ab}ais"),
+        ("gar\u{e7}on", "gar\u{4ab}on"),
+        ("re\u{e7}u", "re\u{4aa}u"),
+        ("c\u{e6}sar", "c\u{4d5}sar"),
+        ("espa\u{f1}ol", "espan\u{342}ol"),
+        ("a\u{f1}o", "an\u{342}o"),
+        ("dise\u{f1}o", "disen\u{342}o"),
+        ("ni\u{f1}os", "nin\u{342}os"),
+        ("espa\u{f1}ol", "espa\u{1fc6}ol"),
+        ("a\u{f1}o", "a\u{1fc6}o"),
+        ("s\u{e3}o", "sa\u{342}o"),
+        ("s\u{e3}o", "s\u{1fb6}o"),
+        // The look-alikes of the other accented letters of the first languages
+        // (French, Spanish) meet them as stored: precomposed Cyrillic and Greek
+        // letters, and a Cyrillic or Greek base under a Latin mark.
+        ("a\u{e0}b", "a\u{1f70}b"),
+        ("a\u{e1}b", "a\u{3ac}b"),
+        ("a\u{ed}b", "a\u{3af}b"),
+        ("a\u{ef}b", "a\u{457}b"),
+        ("a\u{fc}b", "a\u{3cb}b"),
+        ("a\u{f3}b", "a\u{3cc}b"),
+        ("a\u{fa}b", "a\u{3cd}b"),
+        ("a\u{f9}b", "a\u{1f7a}b"),
+        ("a\u{e8}b", "a\u{450}b"),
+        ("a\u{eb}b", "a\u{451}b"),
+        ("a\u{ff}b", "a\u{4f1}b"),
+        ("a\u{f1}b", "a\u{3b7}\u{303}b"),
+        ("a\u{e7}b", "a\u{441}\u{327}b"),
+        ("a\u{e9}b", "a\u{435}\u{301}b"),
+    ];
+
+    #[test]
+    fn a_latin_letter_a_person_types_is_met_by_its_cyrillic_or_greek_look_alike() {
+        let mut missed = Vec::new();
+        for (live, proposed) in D7_LATIN_LETTER_PAIRS {
+            let live = crate::channel::normalize_channel_name(live)
+                .unwrap_or_else(|why| panic!("{live:?} is a valid name: {why}"));
+            let proposed = crate::channel::normalize_channel_name(proposed)
+                .unwrap_or_else(|why| panic!("{proposed:?} is a valid name: {why}"));
+            if !(channel_names_look_alike(&live, &proposed)
+                && channel_names_look_alike(&proposed, &live))
+            {
+                missed.push(format!("{live:?} / {proposed:?}"));
+            }
+        }
+        assert!(missed.is_empty(), "not refused: {missed:?}");
     }
 
     /// Ordinary different names in the first languages (Korean, English,
