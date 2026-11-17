@@ -41,6 +41,12 @@ uuid.workspace = true
 # momo-mcp already use; already in the lock).
 getrandom = "0.2"
 
+# ADR-0225 D9/D11: the typed `'#이름'` is folded the way the server folds a channel name. Same
+# crate/version momo-messaging already uses (already in the lock), MIT/Apache-2.0. The server
+# crate itself stays out of `[dependencies]`; `tests/channel_name_fold.rs` holds the two folds
+# together with it as a dev-dependency.
+unicode-normalization.workspace = true
+
 # Advisory file lock (`flock`) that serialises refresh-token rotation across processes, the
 # effective uid for the credential-file ownership check, and `O_NOFOLLOW`. rustix is already in
 # the lock (tempfile -> rustix); its `fs`/`process` calls are safe functions, which is what
@@ -61,6 +67,8 @@ momo-server = { path = "../momo-server" }
 momo-db = { path = "../../crates/momo-db" }
 momo-auth = { path = "../../crates/momo-auth" }
 momo-mcp = { path = "../../crates/momo-mcp" }
+# `tests/channel_name_fold.rs`: the server's `fold_channel_name` is the reference for the CLI's copy.
+momo-messaging = { path = "../../crates/momo-messaging" }
 # `tests/server_e2e_pg.rs` reuses momo-server's PostgreSQL fixtures (`tests/common/apps_pg.rs`), which
 # build the app state from these three.
 momo-provider-probe = { path = "../../crates/momo-provider-probe" }

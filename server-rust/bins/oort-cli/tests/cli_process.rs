@@ -482,6 +482,18 @@ fn every_command_prints_its_json_document_and_no_secret() {
     // a channel by name is the same read
     let by_name = run("read by name", &["read", "#general", "--json"], None);
     assert_eq!(stdout(&by_name), stdout(&out));
+    // ...and so is another spelling of that name: the real command folds what was typed
+    // (fullwidth, capitals, a trailing blank) before it looks the channel up.
+    let by_folded_name = run(
+        "read by folded name",
+        &["read", "#\u{ff27}ENERAL ", "--json"],
+        None,
+    );
+    assert_eq!(stdout(&by_folded_name), stdout(&out));
+    // Only one `#` comes off: `##general` is not the channel.
+    let doubled = run("read doubled hash", &["read", "##general", "--json"], None);
+    let said = format!("{}{}", stdout(&doubled), stderr(&doubled));
+    assert!(said.contains("channel_not_found"), "{said}");
     // newer than a seq: ascending already, and the cursor to continue
     let out = run(
         "read since",
