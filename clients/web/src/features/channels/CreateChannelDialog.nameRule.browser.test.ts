@@ -447,6 +447,12 @@ describe("채널 만들기 창의 이름 아래 줄은 서고 걷혀도 창이 �
       await page.evaluate((value) => navigator.clipboard.writeText(value), text);
       await page.keyboard.press("ControlOrMeta+V");
     };
+    // 확정: 입력기는 `insertCompositionText` 뒤 `compositionend`만 낸다 — 그 사건에서 곧바로 녹아 칸 값의 줄이 서고 만들기가 풀린다.
+    await scene("Team ", "せっけい", async (page, cdp) => {
+      await cdp.send("Input.insertText", { text: "設計" });
+      await expectLine(page, "Team 設計", "#team-設計 이름으로 만들어져요", "확정");
+      expect(await locked(page), "확정되면 만들기가 풀린다").toBe(false);
+    });
     // r3 H1: 조합 구간을 포함해 전체 선택한 뒤, 조합 글자가 든 글을 붙여 넣는다. 엔진은 `compositionend`를 내지 않는다.
     await scene("Team ", "n", async (page) => {
       await page.keyboard.press("ControlOrMeta+A");
@@ -512,6 +518,14 @@ describe("채널 만들기 창의 이름 아래 줄은 서고 걷혀도 창이 �
         await page.evaluate((selector) => document.querySelector<HTMLInputElement>(selector)!.blur(), INPUT);
         await frames(page, 3);
         expect(await text(), `[${rig.engine}] blur 뒤`).toBe("#design 이름으로 만들어져요");
+        // 엔진이 `compositionend` 없이 초점을 잃어도 blur가 녹인다: 조합 글자가 섞인 칸 값 그대로(`Designn`).
+        await composeStep(page, "Designn", "n", true);
+        await page.waitForFunction((selector) => (document.querySelector(selector) as HTMLInputElement).value === "Designn", INPUT);
+        await frames(page, 3);
+        expect(await text(), `[${rig.engine}] 다시 조합 중 얼린 줄`).toBe("#design 이름으로 만들어져요");
+        await page.evaluate((selector) => document.querySelector<HTMLInputElement>(selector)!.blur(), INPUT);
+        await frames(page, 3);
+        expect(await text(), `[${rig.engine}] compositionend 없이 blur`).toBe("#designn 이름으로 만들어져요");
       } finally { await close(); }
     }
   }, 240_000);
