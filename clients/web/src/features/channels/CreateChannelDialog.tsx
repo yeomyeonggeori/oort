@@ -243,39 +243,17 @@ function NameStatus({
   );
 }
 
+/** 이름 칸 아래 줄이 말하는 것: 거절(서버 응답 포함)이나 저장될 이름. 둘 다 없으면 안내 글이 선다. */
+type NameLine = { error: string | null; preview: { name: string; before: string; after: string } | null };
+
 /**
- * 조합이 붙든 「조합 전 값」(`from`)과 조합 중인 글자(`text`), 조합이 시작된 자리(`at`).
- * `from`은 칸 값에서 조합 중인 구간을 뺀 것(= 조합 밖의 글자)이라, 조합 밖에서 칸이 바뀌면 다시 잡아야 한다.
+ * 진행 중인 조합(`compositionstart`부터). `text`는 조합 중인 글자, `frozen`은 한글이 아닌 글자가 조합에 든 순간 얼려 둔 줄이다.
+ * 아래 줄은 「칸에 실제로 든 값으로 계산한 줄」이거나 이 얼린 줄, 둘 중 하나다 — 조합 글자를 칸 값에서 찾아 빼서 이름을 짐작하지 않는다.
  */
-type Composition = { from: string; text: string; at: number };
+type Composition = { text: string; frozen: NameLine | null };
 
-/** 조합이 스스로 내는 input 종류. 이것들은 조합 구간만 바꾸므로 붙든 값을 그대로 둔다. */
-const COMPOSITION_INPUT_TYPES = new Set(["insertCompositionText", "deleteCompositionText", "insertFromComposition"]);
-/** 입력기를 거치지 않고 칸을 바꾸는 종류: 조합이 열려 있어도(엔진이 `compositionend`를 안 내기도 한다) 조합 밖의 변화다. */
-const OUTSIDE_INPUT_TYPES = new Set([
-  "insertFromPaste", "insertFromPasteAsQuotation", "insertFromDrop", "insertFromYank", "insertReplacementText",
-  "deleteByCut", "deleteByDrag", "historyUndo", "historyRedo",
-]);
-
-/** 이 input이 조합 밖에서 칸 값을 바꿨는가(붙여 넣기·잘라 내기·끌어 놓기·조합 아닌 글쇠·지우기). `inputType`을 모르면(빈 값) 조합 안으로 본다. */
-function changesOutsideComposition(event: InputEvent): boolean {
-  const type = event.inputType;
-  if (!type || COMPOSITION_INPUT_TYPES.has(type)) return false;
-  return OUTSIDE_INPUT_TYPES.has(type) || event.isComposing !== true;
-}
-
-/** 조합 밖에서 칸이 `value`가 됐다: 붙든 값을 「지금 칸 값에서 조합 중 구간을 뺀 값」으로 다시 잡는다. 조합 글자가 칸에서 사라졌으면(잘라 냄) 지금 칸 값 전체다. */
-function regrip(current: Composition, value: string, caret: number): Composition {
-  const { text } = current;
-  if (text === "") return { from: value, text, at: caret };
-  // 조합 글자가 칸에 여러 번 나오면 조합이 시작된 자리에 가장 가까운 것을 조합 구간으로 본다.
-  let found = -1;
-  for (let at = value.indexOf(text); at !== -1; at = value.indexOf(text, at + 1)) {
-    if (found === -1 || Math.abs(at - current.at) < Math.abs(found - current.at)) found = at;
-  }
-  if (found === -1) return { from: value, text: "", at: caret };
-  return { from: value.slice(0, found) + value.slice(found + text.length), text, at: found };
-}
+/** 조합이 스스로 내는 input 종류. 이것만 얼린 줄을 그대로 두고, 그 밖의 input(붙여 넣기·잘라 내기·끌어 놓기·실행 취소·다시 실행·지우기, 종류를 모르는 것)은 곧바로 녹인다. */
+const COMPOSITION_INPUT_TYPES = new Set(["insertCompositionText", "deleteCompositionText", "insertFromComposition", "deleteByComposition"]);
 
 function CreateChannelPanel({
   open,
@@ -303,8 +281,10 @@ function CreateChannelPanel({
   const { kind, name, topic } = draft;
   const [attempted, setAttempted] = useState(false);
   // 입력기는 글자를 확정하기 전의 「조합 중」 글자를 칸에 넣는다. 병음의 `ni'h`나 변환 전 가나는 아직 이름이 아니라서 거절하거나 미리 보이면
-  // 틀린 말을 한다 — 조합이 시작될 때의 값을 쥐고 있다가 끝나면 놓는다(칸의 값은 그대로 두고 아래 줄만 머문다). 한글은 달라서, 조합 중인
-  // 음절이 곧 사람이 친 글자다: 한글(음절·자모)뿐인 조합은 붙들지 않고 지금 칸 값을 그대로 말한다(붙들면 마지막 음절이 늘 빠진다).
+  // 틀린 말을 한다 — 그런 조합이 진행되는 동안에는 아래 줄을 얼려 둔다(칸의 값은 그대로다). 한글은 달라서, 조합 중인 음절이 곧 사람이 친
+  // 글자다: 한글(음절·자모)뿐인 조합은 얼리지 않고 지금 칸 값을 그대로 말한다(얼리면 마지막 음절이 늘 빠진다).
+  // 녹이는 때: `compositionend` · 조합 종류가 아닌 input · 칸의 blur · 제출 · 창을 다시 엶. 녹으면 곧바로 칸 값으로 다시 계산한다 — 조합 중
+  // 글자가 섞여 있으면 그 값 그대로(`Designn` → `#designn`). 칸에 보이는 것과 줄이 말하는 것이 같다.
   const [composition, setComposition] = useState<Composition | null>(null);
   const nameRef = useRef<HTMLInputElement>(null);
   const topicRef = useRef<HTMLInputElement>(null);
@@ -331,45 +311,48 @@ function CreateChannelPanel({
   const nameIssue = channelNameIssue(name);
   const topicIssue = channelTopicIssue(topic);
 
-  // 칸 아래 줄이 말하는 이름: 아직 글자가 아닌 것(라틴 글자·작은따옴표·가나)을 조합 중이면 조합 전의 값, 아니면 지금 칸 값.
-  const shownName = composition !== null && NOT_YET_NAME.test(composition.text) ? composition.from : name;
-  const shownIssue = channelNameIssue(shownName);
   const issueMessage = (issue: ChannelNameIssue) => {
     if (issue === "tooLong") return formatMessage(CHANNEL_NAME_ISSUE_KEYS.tooLong, { max: CHANNEL_NAME_MAX });
     return formatMessage(CHANNEL_NAME_ISSUE_KEYS[issue]);
   };
   const hint = formatMessage("channels.nameRule.hint", { max: CHANNEL_NAME_MAX });
-
-  // A rule is only worth stating once the reader has done something it applies
-  // to: an untouched empty field is not a mistake, it is a field.
-  const localNameError =
-    shownIssue !== null && (attempted || shownName.trim() !== "")
-      ? issueMessage(shownIssue)
-      : null;
   const serverNameError =
     failure?.field === "name"
       ? failure.messageKey !== undefined
         ? formatMessage(failure.messageKey)
         : failure.message
       : null;
-  const nameError = localNameError ?? serverNameError;
-  // 거절이면 미리보기 대신 오류다. 친 것과 저장될 이름이 다를 때만 선다(「Design Review」 → #design-review).
-  const savedName = shownIssue === null ? normalizeChannelName(shownName) : null;
-  const previewName = savedName !== null && savedName !== shownName ? savedName : null;
-  const previewParts = (() => {
-    if (previewName === null) return null;
+  /** 칸에 실제로 든 값으로 계산한 줄. */
+  const lineFor = (value: string): NameLine => {
+    const issue = channelNameIssue(value);
+    // A rule is only worth stating once the reader has done something it applies
+    // to: an untouched empty field is not a mistake, it is a field.
+    const localError = issue !== null && (attempted || value.trim() !== "") ? issueMessage(issue) : null;
+    // 거절이면 미리보기 대신 오류다. 친 것과 저장될 이름이 다를 때만 선다(「Design Review」 → #design-review).
+    const saved = issue === null ? normalizeChannelName(value) : null;
+    if (saved === null || saved === value) return { error: localError ?? serverNameError, preview: null };
     const [before = "", after = ""] = formatMessage("channels.nameRule.preview", {
       name: PREVIEW_NAME_MARK,
     }).split(PREVIEW_NAME_MARK);
-    return { name: previewName, before, after };
-  })();
+    return { error: localError ?? serverNameError, preview: { name: saved, before, after } };
+  };
+  // 아래 줄: 한글이 아닌 조합이 진행 중이면 얼려 둔 줄, 아니면 지금 칸 값의 줄. 둘 말고는 없다.
+  const frozenLine = composition?.frozen ?? null;
+  const liveLine = lineFor(name);
+  const { error: nameError, preview: previewParts } = frozenLine ?? liveLine;
+  // 마지막으로 그린 「칸 값의 줄」. 얼리는 순간 이 줄을 그대로 쥔다 — 엔진이 조합 글자를 칸에 언제 넣든(사건 앞이든 뒤든) 얼린 줄은 화면에 있던 줄이다.
+  const drawnLine = useRef<NameLine>(liveLine);
+  useLayoutEffect(() => {
+    if (frozenLine === null) drawnLine.current = liveLine;
+  });
   // 이 자리에 설 수 있는 문장 전부(줄 수가 가장 긴 것이 자리의 높이를 정한다). 409 문장은 코어가 말하는 그대로다.
+  // 서 있는 오류도 넣는다: 얼린 줄이 쥔 서버 문장은 편집으로 `failure`가 지워져도 녹을 때까지 서 있다.
   const nameReserve = [
     hint,
     ...(Object.keys(CHANNEL_NAME_ISSUE_KEYS) as ChannelNameIssue[]).map(issueMessage),
     formatMessage(CHANNEL_NAME_SERVER_REJECTED_KEY),
     createChannelFailure(new ApiError(409, "")).message,
-    ...(serverNameError !== null ? [serverNameError] : []),
+    ...[serverNameError, nameError].filter((text): text is string => text !== null),
   ].filter((text, at, all) => all.indexOf(text) === at);
   const topicError =
     topicIssue !== null && (attempted || topic.trim() !== "")
@@ -386,6 +369,10 @@ function CreateChannelPanel({
 
   async function submit(event: React.FormEvent) {
     event.preventDefault();
+    // 제출은 얼린 줄을 녹인다. 한글이 아닌 조합이 진행 중이었으면 만들지 않는다: 얼린 줄이 말하던 이름과 칸 값으로 만들어질 이름이
+    // 다를 수 있다. 녹은 줄이 칸 값을 말하고 단추가 풀리니, 다시 누르면 줄이 말하는 그 이름으로 만들어진다(⌘↵는 잠긴 단추를 거치지 않는다).
+    setComposition(null);
+    if (frozenLine !== null) return;
     setAttempted(true);
     if (pending || offline) return;
     if (nameIssue !== null || topicIssue !== null) {
@@ -499,22 +486,22 @@ function CreateChannelPanel({
             name="name"
             value={name}
             onChange={(event) => {
-              const native = event.nativeEvent as InputEvent;
-              if (changesOutsideComposition(native)) {
-                const value = event.target.value;
-                const caret = event.target.selectionStart ?? value.length;
-                setComposition((current) => (current === null ? current : regrip(current, value, caret)));
-              }
+              // 조합이 스스로 낸 input이 아니면(붙여 넣기·잘라 내기·끌어 놓기·실행 취소·다시 실행·지우기) 녹인다. 엔진은 조합 구간을 덮어쓴
+              // 붙여 넣기 뒤에 `compositionend` 없이 조합을 버리기도 한다 — 다음 `compositionstart`까지 줄은 칸 값을 따른다.
+              if (!COMPOSITION_INPUT_TYPES.has((event.nativeEvent as InputEvent).inputType ?? "")) setComposition(null);
               onInput("name")(event);
             }}
-            onCompositionStart={(event) =>
-              setComposition({ from: event.currentTarget.value, text: "", at: event.currentTarget.selectionStart ?? event.currentTarget.value.length })
-            }
+            onCompositionStart={() => setComposition({ text: "", frozen: null })}
             onCompositionUpdate={(event) => {
               const text = event.data;
-              setComposition((current) => (current === null ? current : { ...current, text }));
+              // 한글이 아닌 글자가 조합에 든 순간, 그때까지 그린 줄을 얼린다. 한글·빈칸뿐이면 얼리지 않는다.
+              const drawn = drawnLine.current;
+              setComposition((current) =>
+                current === null ? null : { text, frozen: NOT_YET_NAME.test(text) ? (current.frozen ?? drawn) : null }
+              );
             }}
             onCompositionEnd={() => setComposition(null)}
+            onBlur={() => setComposition(null)}
             placeholder={formatMessage("channels.nameRule.placeholder")}
             autoComplete="off"
             spellCheck={false}
@@ -643,11 +630,13 @@ function CreateChannelPanel({
             `disabled:pointer-events-none` 때문에 hover 자체가 도달하지 않아
             영원히 뜨지 않는 툴팁이었다(R2 M2). 같은 사실을 두 번 약속하느니
             한 번 지킨다. */}
+        {/* 한글이 아닌 조합이 진행 중인 동안(아래 줄이 얼어 있는 동안)도 잠근다: 얼린 줄이 말하는 이름과 칸 값으로 만들어질 이름이
+            다를 수 있다. 잠긴 까닭은 칸에 보이는 조합 글자이고, 줄이 녹는 때(조합 끝·붙여 넣기 같은 input·blur)에 함께 풀린다. */}
         <Button
           type="submit"
           form={FORM_ID}
           size="sm"
-          disabled={offline}
+          disabled={offline || frozenLine !== null}
           aria-busy={pending || undefined}
           data-testid="create-channel-submit"
         >

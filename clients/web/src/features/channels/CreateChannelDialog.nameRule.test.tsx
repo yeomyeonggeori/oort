@@ -17,7 +17,8 @@ import { CreateChannelDialog, type ChannelDraft } from "./CreateChannelDialog";
 //   1. 칸 값은 치는 도중에 바꾸지 않는다(한글 조합이 깨진다). 친 그대로이고, 접는 것은 보낼 때뿐이다.
 //   2. 친 것과 저장될 이름이 다를 때만 「#이름 이름으로 만들어져요」 한 줄이 선다. 거절이면 미리보기 대신 오류다.
 //   3. 거절 문장은 사전 키로, 화면 언어를 따른다. 낭독(aria-live)은 오류에만 걸린다.
-//   4. 조합 중(compositionstart~compositionend)에는 아래 줄이 조합 전의 값에 머문다 — 병음 `ni'h` 같은 조합 글자는 아직 이름이 아니다.
+//   4. 아래 줄은 「칸에 실제로 든 값으로 계산한 줄」이거나 「얼려 둔 줄」이다. 한글이 아닌 조합(병음 `ni'h`·변환 전 가나) 중에만 얼고,
+//      compositionend·조합 종류가 아닌 input·blur·제출에서 곧바로 녹는다. 얼어 있는 동안은 만들기도 잠긴다.
 // 높이·y가 움직이지 않는 것은 실제 엔진에서 잰다(`CreateChannelDialog.nameRule.browser.test.ts`).
 
 const WS = "00000000-0000-7000-8000-000000000001";
@@ -95,10 +96,10 @@ const update = (data: string) =>
   act(async () => {
     input().dispatchEvent(new CompositionEvent("compositionupdate", { bubbles: true, data }));
   });
-/** 조합 중 한 걸음: 입력기가 값을 넣고 조합 글자를 알리는 순서. */
+/** 조합 중 한 걸음: 엔진이 내는 순서 그대로 — 조합 글자를 알리고(`compositionupdate`, 칸은 아직 앞 값) 그다음 칸에 넣는다(input). */
 const step = async (value: string, composing: string) => {
-  await setValue(value, { inputType: "insertCompositionText", isComposing: true });
   await update(composing);
+  await setValue(value, { inputType: "insertCompositionText", isComposing: true });
 };
 const submit = () =>
   act(async () => {
@@ -364,90 +365,111 @@ describe("한글은 조합 중인 음절이 곧 친 글자라서 아래 줄이 �
   });
 });
 
-describe("조합 중에 붙여 넣거나 잘라 내면 아래 줄은 조합 밖의 값을 따라간다 (검수 r2 H2)", () => {
-  // 엔진은 붙여 넣은 뒤에도 조합을 열어 둔 채 `compositionend`를 안 내기도 한다. 칸 = `Team ni'hOps Room`이면 조합 밖의 글자는 `Team Ops Room`이다.
-  const paste = (value: string) => setValue(value, { inputType: "insertFromPaste", isComposing: false });
-  const cut = (value: string) => setValue(value, { inputType: "deleteByCut", isComposing: false });
-
-  it("병음 조합 중 붙여 넣기: 멈춘 화면의 미리보기 = 조합 구간을 뺀 값을 접은 이름이고, 거절은 서지 않는다", async () => {
+describe("아래 줄은 「칸 값으로 계산한 줄」이거나 「얼려 둔 줄」 둘 중 하나다: 얼림·녹임의 상태 표 (수리 3회차)", () => {
+  // 얼리는 때: 한글이 아닌 조합이 진행 중일 때만(그 순간까지 그린 줄 그대로). 녹이는 때: compositionend · 조합 종류가 아닌 input · blur · 제출.
+  // 녹으면 곧바로 칸 값으로 다시 계산한다 — 조합 글자가 섞여 있으면 그 값 그대로. 조합 글자를 칸 값에서 찾아 빼는 짐작은 없다.
+  type Op =
+    | ["type" | "paste" | "cut" | "drop" | "undo" | "redo" | "delete" | "unknown" | "compositionInput", string]
+    | ["start" | "end" | "blur" | "submit"]
+    | ["compose", string, string];
+  const KIND: Record<string, InputEventInit> = {
+    type: { inputType: "insertText" },
+    paste: { inputType: "insertFromPaste" },
+    cut: { inputType: "deleteByCut" },
+    drop: { inputType: "insertFromDrop" },
+    undo: { inputType: "historyUndo" },
+    redo: { inputType: "historyRedo" },
+    delete: { inputType: "deleteContentBackward" },
+    unknown: {},
+    compositionInput: { inputType: "deleteCompositionText", isComposing: true },
+  };
+  const run = async (op: Op) => {
+    if (op[0] === "start" || op[0] === "end") return composition(op[0]);
+    if (op[0] === "blur") return act(async () => { input().focus(); input().blur(); });
+    if (op[0] === "submit") return act(async () => { (document.getElementById("create-channel-form") as HTMLFormElement).requestSubmit(); await Promise.resolve(); });
+    if (op[0] === "compose") return step(op[1], op[2]);
+    return setValue(op[1] as string, KIND[op[0]]!);
+  };
+  /** 지금 아래 줄: 미리보기면 `#이름`, 거절이면 `거절:문장`, 아니면 `안내`. */
+  const line = () => {
+    const error = q("create-channel-name-error");
+    if (error) return `거절:${error.textContent}`;
+    const preview = q("create-channel-name-preview-name");
+    return preview ? preview.textContent : "안내";
+  };
+  const locked = () => (q("create-channel-submit") as HTMLButtonElement).disabled;
+  const UNSUPPORTED = "거절:글자, 숫자, 하이픈(-), 밑줄(_)만 쓸 수 있어요.";
+  // [장면, 사건 차례, 끝난 뒤 줄, 끝난 뒤 만들기 잠김]
+  const TABLE: [string, Op[], string, boolean][] = [
+    ["병음 조합 중: 시작 때 줄에 얼고 거절하지 않는다", [["type", "Team "], ["start"], ["compose", "Team n", "n"], ["compose", "Team ni'", "ni'"], ["compose", "Team ni'h", "ni'h"]], "#team", true],
+    ["compositionend: 녹아서 칸 값의 줄", [["type", "Team "], ["start"], ["compose", "Team ni'h", "ni'h"], ["compose", "Team 你好", "你好"], ["end"]], "#team-你好", false],
+    ["전체 선택 뒤 조합 글자가 든 글 붙여 넣기(검수 r3 H1): 칸 값 그대로", [["type", "Team "], ["start"], ["compose", "Team n", "n"], ["paste", "Design"]], "#design", false],
+    ["그 뒤 blur해도 칸 값 그대로", [["type", "Team "], ["start"], ["compose", "Team n", "n"], ["paste", "Design"], ["blur"]], "#design", false],
+    ["조합 뒤에 붙여 넣기: 조합 글자가 섞인 값 그대로 계산", [["type", "Team "], ["start"], ["compose", "Team ni'h", "ni'h"], ["paste", "Team ni'hOps Room"]], UNSUPPORTED, false],
+    ["가나 조합 뒤에 붙여 넣기", [["type", "Team "], ["start"], ["compose", "Team せっけい", "せっけい"], ["paste", "Team せっけいOps Room"]], "#team-せっけいops-room", false],
+    ["붙여 넣어 녹은 뒤 이어지는 조합은 다음 compositionstart까지 칸 값", [["type", "Team "], ["start"], ["compose", "Team ni'h", "ni'h"], ["paste", "Team ni'hOps Room"], ["compose", "Team haoOps Room", "hao"]], "#team-haoops-room", false],
+    ["조합 중 blur: 조합 글자가 섞인 값 그대로(Designn)", [["type", "Design"], ["start"], ["compose", "Designn", "n"], ["blur"]], "#designn", false],
+    ["조합 중 전체 잘라 내기: 안내", [["type", "Team "], ["start"], ["compose", "Team ni'h", "ni'h"], ["cut", ""]], "안내", false],
+    ["조합 중 실행 취소", [["type", "Team "], ["start"], ["compose", "Team ni'h", "ni'h"], ["undo", "T"]], "#t", false],
+    ["조합 중 다시 실행", [["type", "Team "], ["start"], ["compose", "Team ni'h", "ni'h"], ["redo", "Team Ops ni'h"]], UNSUPPORTED, false],
+    ["조합 중 일반 지우기", [["type", "Team "], ["start"], ["compose", "Team ni'h", "ni'h"], ["delete", "Team ni'"]], UNSUPPORTED, false],
+    ["조합 중 끌어 놓기", [["type", "Team "], ["start"], ["compose", "Team せ", "せ"], ["drop", "Ops Team せ"]], "#ops-team-せ", false],
+    ["종류를 모르는 input도 녹인다", [["type", "Team "], ["start"], ["compose", "Team せ", "せ"], ["unknown", "Team せx"]], "#team-せx", false],
+    ["조합 자신의 input(deleteCompositionText)은 얼린 줄 그대로", [["type", "Team "], ["start"], ["compose", "Team ni", "ni"], ["compositionInput", "Team n"]], "#team", true],
+    ["입력기 쪽 취소(빈 조합 → compositionend)", [["type", "Team "], ["start"], ["compose", "Team ni'h", "ni'h"], ["compose", "Team ", ""], ["end"]], "#team", false],
+    ["한글 조합은 얼리지 않는다", [["start"], ["compose", "디자인 리뷰", "뷰"]], "#디자인-리뷰", false],
+    ["한글로 시작해 한자로 바뀐 조합: 그 순간까지 그린 줄(조합 시작 때 줄이 아니다)", [["type", "디자인 "], ["start"], ["compose", "디자인 리", "리"], ["compose", "디자인 利", "利"]], "#디자인-리", true],
+    ["제출: 얼린 줄을 녹이고 만들지 않는다", [["type", "Team "], ["start"], ["compose", "Team せっけい", "せっけい"], ["submit"]], "#team-せっけい", false],
+  ];
+  it.each(TABLE)("%s", async (_scene, ops, want, wantLocked) => {
     await mount();
-    await type("Team ");
-    await composition("start");
-    await step("Team ni'h", "ni'h");
-    expect(q("create-channel-name-error")).toBeNull();
-    await paste("Team ni'hOps Room");
-    expect(input().value).toBe("Team ni'hOps Room");
-    expect(q("create-channel-name-error")).toBeNull();
-    expect(q("create-channel-name-preview")!.textContent).toBe("#team-ops-room 이름으로 만들어져요");
-    expect(input().getAttribute("aria-describedby")).toBe("create-channel-name-preview");
+    for (const op of ops) await run(op);
+    expect(line()).toBe(want);
+    expect(locked(), "만들기 잠김").toBe(wantLocked);
+    expect(api.createChannel).not.toHaveBeenCalled();
   });
 
-  it("가나 조합 중 붙여 넣기도 같다", async () => {
+  it("얼어 있는 동안 줄·낭독 영역·describedby가 한 번도 안 바뀐다", async () => {
+    await mount();
+    await type("Team ");
+    const live = () => q("create-channel-name-status")!.querySelector("[aria-live]")!.textContent;
+    await composition("start");
+    const seen = new Set<string>();
+    for (const [value, text] of [["Team n", "n"], ["Team ni'", "ni'"], ["Team ni'h", "ni'h"], ["Team でざ", "でざ"]] as const) {
+      await step(value, text);
+      seen.add(`${line()}|${live()}|${input().getAttribute("aria-describedby")}|${input().getAttribute("aria-invalid")}`);
+    }
+    expect([...seen]).toEqual(["#team||create-channel-name-preview|null"]);
+  });
+
+  it("제출로 녹인 뒤 다시 누르면 줄이 말하는 그 이름이 나간다", async () => {
+    api.createChannel.mockRejectedValue(new ApiError(409, "exists"));
     await mount();
     await type("Team ");
     await composition("start");
     await step("Team せっけい", "せっけい");
-    await paste("Team せっけいOps Room");
-    expect(q("create-channel-name-preview")!.textContent).toBe("#team-ops-room 이름으로 만들어져요");
+    await run(["submit"]);
+    expect(api.createChannel).not.toHaveBeenCalled();
+    expect(line()).toBe("#team-せっけい");
+    await run(["submit"]);
+    expect(api.createChannel).toHaveBeenCalledTimes(1);
+    expect(api.createChannel.mock.calls[0]![1]).toMatchObject({ name: "team-せっけい" });
   });
 
-  it("붙여 넣은 뒤 이어서 조합해도 조합 글자는 아래 줄에 서지 않고, 확정되면 칸 값을 그대로 말한다", async () => {
+  it("서버 거절이 선 채 조합을 시작하면 그 줄에 얼고(자리 예약에 남는다), 녹으면 칸 값의 줄", async () => {
+    api.createChannel.mockRejectedValueOnce(new ApiError(409, "exists"));
     await mount();
-    await type("Team ");
+    await type("ops-room");
+    await submit();
+    const conflict = "거절:같은 이름의 채널이 이미 있습니다. 다른 이름으로 다시 시도하세요.";
+    expect(line()).toBe(conflict);
     await composition("start");
-    await step("Team ni'h", "ni'h");
-    await paste("Team ni'hOps Room");
-    await step("Team haoOps Room", "hao");
-    expect(q("create-channel-name-preview")!.textContent).toBe("#team-ops-room 이름으로 만들어져요");
-    await step("Team 好Ops Room", "好");
-    await composition("end", "好");
-    expect(q("create-channel-name-preview")!.textContent).toBe("#team-好ops-room 이름으로 만들어져요");
-  });
-
-  it("조합 중 전체 잘라 내기: 칸이 비면 안내 글이 선다", async () => {
-    await mount();
-    await type("Team ");
-    await composition("start");
-    await step("Team ni'h", "ni'h");
-    await cut("");
-    expect(input().value).toBe("");
-    expect(q("create-channel-name-preview")).toBeNull();
-    expect(q("create-channel-name-hint")).not.toBeNull();
-    // 조합 글자만 잘라 낸 경우도 칸 값을 따라간다.
-    await type("");
-    await type("Team ");
-    await composition("start");
-    await step("Team せっけい", "せっけい");
-    await cut("Team ");
-    expect(q("create-channel-name-preview")!.textContent).toBe("#team 이름으로 만들어져요");
-  });
-
-  it("조합 중 입력기를 거치지 않은 글쇠(insertText, isComposing 거짓)도 조합 밖의 변화다", async () => {
-    await mount();
-    await type("Team ");
-    await composition("start");
-    await step("Team せっけい", "せっけい");
-    await setValue("Team せっけいx", { inputType: "insertText", isComposing: false });
-    expect(q("create-channel-name-preview")!.textContent).toBe("#team-x 이름으로 만들어져요");
-  });
-
-  it("조합 자신의 input(insertCompositionText·deleteCompositionText)은 붙든 값을 바꾸지 않는다", async () => {
-    await mount();
-    await type("Team ");
-    await composition("start");
-    await step("Team ni", "ni");
-    await setValue("Team n", { inputType: "deleteCompositionText", isComposing: true });
-    await update("n");
-    expect(q("create-channel-name-preview")!.textContent).toBe("#team 이름으로 만들어져요");
-    expect(q("create-channel-name-error")).toBeNull();
-  });
-
-  it("한글 조합 중 붙여 넣기는 칸 값을 그대로 따라간다(1회차 갈래 그대로)", async () => {
-    await mount();
-    await composition("start");
-    await step("디자인 뷰", "뷰");
-    await paste("디자인 뷰Ops Room");
-    expect(q("create-channel-name-preview")!.textContent).toBe("#디자인-뷰ops-room 이름으로 만들어져요");
+    await step("ops-roomn", "n");
+    expect(line()).toBe(conflict);
+    const reserved = [...q("create-channel-name-status")!.children[0]!.children].map((p) => `거절:${p.textContent}`);
+    expect(reserved).toContain(conflict);
+    await composition("end");
+    expect(line()).toBe("안내");
   });
 });
 

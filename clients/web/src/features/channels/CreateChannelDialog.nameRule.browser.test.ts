@@ -15,7 +15,7 @@ import { normalizeChannelName } from "@momo/core/features/channels/model";
 // 창 위치·창 높이·단추 줄 y·공개 범위 y·주제 y·이름 아래 줄 높이를 적고, 모든 프레임의 값이 같음(0px 차이)을 본다. 그 사이 칸 값은 치는 대로여야 하고,
 // 값이 같다는 것이 「줄이 아예 안 섰다」는 뜻이 아니도록 장면마다 보인 문장도 같이 적어 기대한 문장이 모두 섰는지 본다.
 // 부하에 흔들리지 않게: 시간(ms)이나 한 프레임 표본에 기대지 않는다. 상태가 선 것을 `waitForFunction`으로 기다린 뒤 「그 뒤 세 프레임」을 더 받아 적고, 좌표는 누르는 동안 모양이 바뀌는 단추가 아니라 단추 줄(그릇)에서 잰다.
-// 사보타주(각각 이 시험이 붉어진다): 조합 밖 변화에 붙든 값 다시 잡기 빼기 · 미리보기 문장 통째 말줄임으로 되돌리기 · 칸 값을 onChange에서 접기 · 자리 예약 층 빼기 · 보낼 때 접기 빼기 · 조합 가드 빼기 · 한글 갈래 빼기 · 예약 층의 `aria-hidden`/`invisible` 빼기.
+// 사보타주(각각 이 시험이 붉어진다): 조합 종류가 아닌 input·blur·compositionend에서 녹이기 빼기 · 한글도 얼리기 · 조합 글자를 칸 값에서 찾아 빼는 짐작 되살리기 · 미리보기 문장 통째 말줄임으로 되돌리기 · 칸 값을 onChange에서 접기 · 자리 예약 층 빼기 · 보낼 때 접기 빼기 · 조합 가드 빼기 · 한글 갈래 빼기 · 예약 층의 `aria-hidden`/`invisible` 빼기.
 // =============================================================================
 
 type Rig = { engine: EngineName; browser: Browser; origin: string };
@@ -412,47 +412,107 @@ describe("채널 만들기 창의 이름 아래 줄은 서고 걷혀도 창이 �
     }
   }
 
-  // 조합 중 붙여 넣기·잘라 내기 (검수 r2 H2): 엔진은 붙여 넣은 뒤에도 조합을 열어 둔 채 `compositionend`를 안 낸다.
-  it.skipIf(!ENGINES.includes("chromium"))("실제 입력기(Chromium CDP): 병음·가나 조합 중 붙여 넣기·잘라 내기 뒤 멈춘 화면의 미리보기가 조합 밖의 값을 접은 이름이고, 거절은 한 번도 안 선다", async () => {
+  // 조합 중 붙여 넣기·잘라 내기·글쇠 (검수 r2 H2 · r3 H1, 수리 3회차 규칙): 아래 줄은 「칸 값으로 계산한 줄」이거나 「얼려 둔 줄」이다.
+  // 엔진은 붙여 넣은 뒤에도 조합을 열어 두거나, 조합 구간을 덮어쓴 붙여 넣기 뒤에 `compositionend` 없이 조합을 버린다 — 조합 종류가 아닌 input이 오면 곧바로 녹아 칸 값을 말한다.
+  it.skipIf(!ENGINES.includes("chromium"))("실제 입력기(Chromium CDP): 조합 중 줄은 얼고 만들기는 잠기며, 붙여 넣기·잘라 내기·초점 이동 뒤에는 줄이 칸 값을 접은 이름이다", async () => {
     const rig = rigs.find((candidate) => candidate.engine === "chromium")!;
-    const scene = async (composing: string, check: (page: Page, cdp: import("playwright").CDPSession, errors: string[]) => Promise<void>) => {
-      const { page, errors, close } = await open(rig, { width: 1280, height: 800, rootFontPx: 16 }, "ko-KR", true);
+    const said = (page: Page) => page.evaluate((selector) => (document.querySelector(selector)!.children[1] as HTMLElement).innerText.replace(/\s+/g, " ").trim(), SLOT);
+    const locked = (page: Page) => page.locator('[data-testid="create-channel-submit"]').isDisabled();
+    /** 칸 값이 `value`가 될 때까지 기다린 뒤 줄을 바로 본다(줄은 같은 그리기에서 바뀐다 — 문장을 기다리지 않는다). */
+    const expectLine = async (page: Page, value: string, line: string, what: string) => {
+      await page.waitForFunction(([selector, wanted]) => (document.querySelector(selector!) as HTMLInputElement).value === wanted, [INPUT, value] as const);
+      await frames(page, 3);
+      expect(await said(page), `${what}: 칸 「${value}」의 줄`).toBe(line);
+    };
+    const scene = async (start: string, composing: string, check: (page: Page, cdp: import("playwright").CDPSession, posted: { name: string }[]) => Promise<void>) => {
+      const { page, errors, posted, close } = await open(rig, { width: 1280, height: 800, rootFontPx: 16 }, "ko-KR", true);
       try {
         const cdp = await page.context().newCDPSession(page);
-        await fillThenWait(page, "Team ");
+        await fillThenWait(page, start);
+        const before = await said(page);
         await page.locator(INPUT).focus();
         await page.keyboard.press("End");
         await startRecording(page);
         await cdp.send("Input.imeSetComposition", { text: composing, selectionStart: composing.length, selectionEnd: composing.length });
-        await expectField(page, `Team ${composing}`, null, `조합 ${composing}`);
-        await check(page, cdp, errors);
-        const seen = (await stopRecording(page)).map((frame) => frame.text);
-        expect(seen.filter((text) => text.includes("쓸 수 있어요")), `${composing}: 조합 중 거절 문장이 한 프레임도 서지 않았다`).toEqual([]);
+        // 조합 중: 줄은 조합 전 줄에 얼고(바뀐 프레임 0, 거절 0), 만들기는 잠긴다.
+        await expectLine(page, `${start}${composing}`, before, `조합 ${composing}`);
+        expect(await locked(page), `${composing}: 조합 중 만들기 잠김`).toBe(true);
+        const frozenFrames = (await stopRecording(page)).map((frame) => frame.text.replace(/\s+/g, " ").trim());
+        expect(new Set(frozenFrames), `${composing}: 얼어 있는 동안 줄이 한 번도 안 바뀌었다`).toEqual(new Set([before]));
+        await check(page, cdp, posted);
+        expect(errors).toEqual([]);
       } finally { await close(); }
     };
     const paste = async (page: Page, text: string) => {
       await page.evaluate((value) => navigator.clipboard.writeText(value), text);
       await page.keyboard.press("ControlOrMeta+V");
     };
-    // 병음: 칸 = `Team ni'hOps Room`(받지 않는 작은따옴표가 든 값)인데 아래 줄은 `#team-ops-room`이어야 한다.
-    await scene("ni'h", async (page, cdp) => {
+    // r3 H1: 조합 구간을 포함해 전체 선택한 뒤, 조합 글자가 든 글을 붙여 넣는다. 엔진은 `compositionend`를 내지 않는다.
+    await scene("Team ", "n", async (page) => {
+      await page.keyboard.press("ControlOrMeta+A");
+      await paste(page, "Design");
+      await expectLine(page, "Design", "#design 이름으로 만들어져요", "전체 선택 뒤 Design 붙여 넣기");
+      expect(await locked(page), "붙여 넣어 녹으면 만들기가 풀린다").toBe(false);
+      await page.keyboard.press("Tab");
+      await expectLine(page, "Design", "#design 이름으로 만들어져요", "초점이 나간 뒤");
+    });
+    await scene("Team ", "せ", async (page) => {
+      await page.keyboard.press("ControlOrMeta+A");
+      await paste(page, "せっけい Room");
+      await expectLine(page, "せっけい Room", "#せっけい-room 이름으로 만들어져요", "가나: 전체 선택 뒤 붙여 넣기");
+    });
+    // 조합 뒤에 붙여 넣기: 칸에 조합 글자가 섞인 값 그대로 계산한다(병음의 `'`는 거절, 가나는 그대로 이름).
+    await scene("Team ", "ni'h", async (page, cdp) => {
       await paste(page, "Ops Room");
-      await expectField(page, "Team ni'hOps Room", "#team-ops-room", "병음 붙여 넣기");
-      expect(await page.locator(INPUT).getAttribute("aria-describedby"), "병음 붙여 넣기 describedby").toBe("create-channel-name-preview");
-      // 이어서 조합해도 조합 글자는 아래 줄에 서지 않는다.
+      await expectLine(page, "Team ni'hOps Room", "글자, 숫자, 하이픈(-), 밑줄(_)만 쓸 수 있어요.", "병음 뒤에 붙여 넣기");
+      // 녹은 뒤 이어지는 조합은 다음 compositionstart까지 칸 값을 따른다.
       await cdp.send("Input.imeSetComposition", { text: "hao", selectionStart: 3, selectionEnd: 3 });
-      await expectField(page, "Team haoOps Room", "#team-ops-room", "붙여 넣은 뒤 이어서 조합");
+      await expectLine(page, "Team haoOps Room", "#team-haoops-room 이름으로 만들어져요", "붙여 넣은 뒤 이어서 조합");
     });
-    await scene("せっけい", async (page) => {
+    await scene("Team ", "せっけい", async (page) => {
       await paste(page, "Ops Room");
-      await expectField(page, "Team せっけいOps Room", "#team-ops-room", "가나 붙여 넣기");
+      await expectLine(page, "Team せっけいOps Room", "#team-せっけいops-room 이름으로 만들어져요", "가나 뒤에 붙여 넣기");
     });
-    await scene("ni'h", async (page) => {
+    await scene("Team ", "ni'h", async (page) => {
       await page.keyboard.press("ControlOrMeta+A");
       await page.keyboard.press("ControlOrMeta+X");
-      await page.waitForFunction((selector) => (document.querySelector(selector) as HTMLInputElement).value === "", INPUT);
-      await waitSaid(page, "글자, 숫자, 하이픈(-)");
-      expect(await page.locator('[data-testid="create-channel-name-preview"]').count(), "잘라 낸 뒤 미리보기 없음").toBe(0);
+      await expectLine(page, "", "글자, 숫자, 하이픈(-), 밑줄(_)로 80자까지. 빈칸은 -로 바뀌고 영문 대문자는 소문자로 저장돼요.", "전체 잘라 내기");
     });
+    // 조합 중 Enter·⌘↵: 만들지 않는다(줄이 말하던 이름과 만들어질 이름이 다를 수 있다). ⌘↵는 제출이라 줄을 녹인다.
+    await scene("Team ", "せっけい", async (page, _cdp, posted) => {
+      await page.keyboard.press("Enter");
+      await frames(page, 6);
+      expect(posted, "조합 중 Enter로는 만들지 않는다").toEqual([]);
+      await page.keyboard.press("ControlOrMeta+Enter");
+      await frames(page, 6);
+      expect(posted, "조합 중 ⌘↵로도 만들지 않는다").toEqual([]);
+      expect(await said(page), "⌘↵가 줄을 녹인다").toBe("#team-せっけい 이름으로 만들어져요");
+      expect(await locked(page), "녹으면 풀린다").toBe(false);
+    });
+  }, 300_000);
+
+  it.skipIf(ENGINES.length === 0)("조합 이벤트 흉내(두 엔진): 조합 중 전체 선택 뒤 붙여 넣으면 줄이 칸 값을 접은 이름이고, blur 뒤에도 같다", async () => {
+    for (const rig of rigs) {
+      const { page, close } = await open(rig, { width: 1280, height: 800, rootFontPx: 16 }, "ko-KR");
+      try {
+        await fillThenWait(page, "Team ");
+        await composeStep(page, "Team n", "n", true);
+        await page.waitForFunction((selector) => (document.querySelector(selector) as HTMLInputElement).value === "Team n", INPUT);
+        await frames(page, 3);
+        const text = () => page.evaluate((selector) => (document.querySelector(selector)!.children[1] as HTMLElement).innerText.replace(/\s+/g, " ").trim(), SLOT);
+        expect(await text(), `[${rig.engine}] 조합 중 얼린 줄`).toBe("#team 이름으로 만들어져요");
+        await page.evaluate((selector) => {
+          const input = document.querySelector<HTMLInputElement>(selector)!;
+          Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(input, "Design");
+          input.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertFromPaste", data: "Design" }));
+        }, INPUT);
+        await page.waitForFunction((selector) => (document.querySelector(selector) as HTMLInputElement).value === "Design", INPUT);
+        await frames(page, 3);
+        expect(await text(), `[${rig.engine}] 붙여 넣은 뒤`).toBe("#design 이름으로 만들어져요");
+        await page.evaluate((selector) => document.querySelector<HTMLInputElement>(selector)!.blur(), INPUT);
+        await frames(page, 3);
+        expect(await text(), `[${rig.engine}] blur 뒤`).toBe("#design 이름으로 만들어져요");
+      } finally { await close(); }
+    }
   }, 240_000);
 });
