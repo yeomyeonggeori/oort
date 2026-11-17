@@ -121,18 +121,26 @@ afterEach(() => {
   resetEscapeLayers();
 });
 
-function mountMenu() {
+function mountMenu(options: { dm?: boolean; onLeaveDm?: (opener: HTMLElement | null) => void } = {}) {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false, staleTime: Infinity } },
   });
-  const channel: Channel = {
-    id: CHANNEL_ID,
-    workspaceId: WS,
-    kind: "public",
-    name: "general",
-    muted: false,
-    topic: "릴리스 전 점검 채널",
-  };
+  const channel: Channel = options.dm
+    ? {
+        id: CHANNEL_ID,
+        workspaceId: WS,
+        kind: "dm",
+        muted: false,
+        memberIds: [ME, "00000000-0000-7000-8000-000000000102"],
+      }
+    : {
+        id: CHANNEL_ID,
+        workspaceId: WS,
+        kind: "public",
+        name: "general",
+        muted: false,
+        topic: "릴리스 전 점검 채널",
+      };
   client.setQueryData<Channel[]>(["channels", WS], [channel]);
   const host = document.createElement("div");
   document.body.append(host);
@@ -152,6 +160,7 @@ function mountMenu() {
             title: "general",
             selfMemberId: ME,
             selfRole: "owner" as const,
+            ...(options.onLeaveDm ? { onLeaveDm: options.onLeaveDm } : {}),
           })
         )
       )
@@ -195,5 +204,34 @@ describe("ChannelHeaderMenu handoff (#2741)", () => {
     click("channel-title-menu");
     contentUnmounts();
     expect(topicDialogOpen()).toBe(false);
+  });
+});
+
+// #5825 검수 r1 M6 V2: 1:1 머리 ⋮ 의 「대화 나가기」는 메뉴가 다 내려간 뒤에 ⋮ 단추를 들려 넘긴다(확인 창은 사이드바 호스트가 세운다).
+describe("ChannelHeaderMenu · 1:1 「대화 나가기」 넘김 (#5825)", () => {
+  it("고르면 메뉴가 내려간 뒤에 한 번, 이 ⋮ 단추를 들려 넘긴다 - 내려가기 전에는 부르지 않는다", () => {
+    const onLeaveDm = vi.fn();
+    mountMenu({ dm: true, onLeaveDm });
+    click("channel-title-menu");
+    click("channel-leave-dm");
+    expect(onLeaveDm).not.toHaveBeenCalled();
+    contentUnmounts();
+    expect(onLeaveDm).toHaveBeenCalledTimes(1);
+    expect(onLeaveDm.mock.calls[0]?.[0]).toBe(document.querySelector('[data-testid="channel-title-menu"]'));
+  });
+
+  it("선택 없이 닫으면 넘기지 않고, 넘기는 손이 없으면 항목이 서지 않는다", () => {
+    const onLeaveDm = vi.fn();
+    mountMenu({ dm: true, onLeaveDm });
+    click("channel-title-menu");
+    click("channel-title-menu");
+    contentUnmounts();
+    expect(onLeaveDm).not.toHaveBeenCalled();
+  });
+
+  it("손을 안 넘기면(에이전트와의 1:1 · 옛 서버) 항목이 없다", () => {
+    mountMenu({ dm: true });
+    click("channel-title-menu");
+    expect(document.querySelector('[data-testid="channel-leave-dm"]')).toBeNull();
   });
 });

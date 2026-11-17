@@ -10,6 +10,8 @@
   "channels.dmLeave.busy": "Départ…",
   "channels.dmLeave.done": "Vous avez quitté la conversation.",
   "channels.dmLeave.failed": "Impossible de quitter. Veuillez réessayer.",
+  "channels.dmLeave.checking": "Vérification…",
+  "channels.dmLeave.unavailable": "Vous ne pouvez pas quitter cette conversation.",
   "channels.nameRule.required": "Saisissez un nom de canal.",
   "channels.nameRule.tooLong": "Le nom du canal peut contenir jusqu’à {max, number} caractères.",
   "channels.nameRule.hidden": "Le nom contient des caractères invisibles. Effacez-le et saisissez-le à nouveau.",

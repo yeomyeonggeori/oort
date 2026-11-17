@@ -1158,6 +1158,12 @@ export const catalog: MessageCatalog = {
       "value": "Cancel"
     }
   ],
+  "channels.dmLeave.checking": [
+    {
+      "type": 0,
+      "value": "Checking…"
+    }
+  ],
   "channels.dmLeave.confirm": [
     {
       "type": 0,
@@ -1246,6 +1252,12 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "Couldn't leave. Please try again."
+    }
+  ],
+  "channels.dmLeave.unavailable": [
+    {
+      "type": 0,
+      "value": "You can't leave this conversation."
     }
   ],
   "channels.nameRule.edge": [

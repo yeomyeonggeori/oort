@@ -10,6 +10,8 @@
   "channels.dmLeave.busy": "正在退出…",
   "channels.dmLeave.done": "你已退出對話。",
   "channels.dmLeave.failed": "無法退出。請再試一次。",
+  "channels.dmLeave.checking": "正在確認…",
+  "channels.dmLeave.unavailable": "無法退出此對話。",
   "channels.nameRule.required": "請輸入頻道名稱。",
   "channels.nameRule.tooLong": "頻道名稱最多 {max, number} 個字元。",
   "channels.nameRule.hidden": "名稱中含有看不見的字元。請清空後重新輸入。",

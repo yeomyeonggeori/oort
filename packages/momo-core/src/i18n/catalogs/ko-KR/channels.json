@@ -10,6 +10,8 @@
   "channels.dmLeave.busy": "나가는 중…",
   "channels.dmLeave.done": "대화에서 나갔어요.",
   "channels.dmLeave.failed": "나가지 못했어요. 다시 시도해 주세요.",
+  "channels.dmLeave.checking": "확인 중…",
+  "channels.dmLeave.unavailable": "이 대화에서는 나갈 수 없어요.",
   "channels.nameRule.required": "채널 이름을 입력해 주세요.",
   "channels.nameRule.tooLong": "채널 이름은 {max, number}자까지 쓸 수 있어요.",
   "channels.nameRule.hidden": "보이지 않는 글자가 들어 있어요. 이름을 지우고 다시 적어 주세요.",

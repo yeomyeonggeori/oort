@@ -264,7 +264,10 @@ describe('성공 뒤 정리 문 — 그 방의 것만 (D17 기기 줄)', () => {
 
     const roots = heldThreadRoots(client, WS, CH, ['root-in', 'm-1']);
     expect(roots.sort()).toEqual(['root-in', 'root-inbox']);
-    phoneDmLeaveCleanupPort({client, workspaceId: WS, selfMemberId: ME, threadRootIds: roots}).clearDrafts(CH);
+    const port = phoneDmLeaveCleanupPort({client, workspaceId: WS, selfMemberId: ME, threadRootIds: roots});
+    port.clearDrafts(CH, roots);
+    // 첨부 트레이는 코어 차례의 다음 걸음이 비운다(웹과 같은 문).
+    port.clearAttachmentTrays(CH, roots);
 
     const drafts = readDrafts();
     expect(Object.keys(drafts).sort()).toEqual([channelDraftKey(OTHER), threadDraftKey('root-out')].sort());
@@ -282,7 +285,7 @@ describe('성공 뒤 정리 문 — 그 방의 것만 (D17 기기 줄)', () => {
     saveDraft(threadDraftKey('root-legacy-held'), '채널을 안 적은 옛 초안', undefined);
     const roots = heldThreadRoots(client, WS, CH, ['root-legacy-held']);
     expect(roots).toEqual(['root-legacy-held']);
-    phoneDmLeaveCleanupPort({client, workspaceId: WS, selfMemberId: ME, threadRootIds: roots}).clearDrafts(CH);
+    phoneDmLeaveCleanupPort({client, workspaceId: WS, selfMemberId: ME, threadRootIds: roots}).clearDrafts(CH, roots);
     expect(Object.keys(readDrafts())).toEqual([threadDraftKey('root-other-room')]);
   });
 
