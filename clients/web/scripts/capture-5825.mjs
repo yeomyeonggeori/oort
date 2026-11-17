@@ -591,7 +591,9 @@ async function sceneReceipt(browser, origin, engine, viewport = { width: 1280, h
         if (pointer === "outside") {
           const heights = [...new Set(shown.map((f) => f.receiptH))];
           check(scene, "영수증 상자 = 원래 줄 상자(프레임마다 높이 ±0.5)", heights.length > 0 && heights.every((h) => Math.abs(h - receiptSlot.height) <= 0.5), { heights, slot: receiptSlot.height });
-          const gone = frames.find((f) => !f.receipt && f.t > 200);
+          // 영수증이 선 **뒤에** 처음 사라진 프레임: 누르기 전(부하로 늦어지면 200ms 를 넘길 수 있다)의 「영수증 없음」 프레임을 걷힘으로 읽지 않는다.
+          const firstShownAt = frames.findIndex((f) => f.receipt);
+          const gone = firstShownAt < 0 ? undefined : frames.slice(firstShownAt).find((f) => !f.receipt);
           check(scene, "포인터가 목록 밖이면 1.6초 뒤 걷힌다", gone !== undefined && gone.t >= 1_550, gone);
         } else {
           check(scene, "포인터가 목록 안이면 1.6초가 지나도 걷히지 않는다(포인터 밑 줄이 그대로)", frames.at(-1).receipt === true && frames.filter((f) => f.t > 300).every((f) => Math.abs(f["02"] - before.y) <= 0.5), frames.at(-1));
@@ -810,7 +812,18 @@ async function sceneScheduledLate(browser, origin, engine) {
           text: document.querySelector('[data-testid="dm-leave-confirm"]')?.textContent ?? "",
           disabled: document.querySelector('[data-testid="dm-leave-confirm-confirm"]')?.getAttribute("aria-disabled"),
         }));
-        check(`J-scheduled-${engine}`, `예약 목록 ${label}: 창이 서기까지(ms, 기록) · 내용`, opts.scheduledStatus === 500 ? info.disabled === "true" && info.text.includes("예약 목록을 불러오지 못했어요") : info.text.includes("2개"), { waited, ...info, text: info.text.slice(-60) });
+        if (opts.scheduledStatus === 500) {
+          check(`J-scheduled-${engine}`, `예약 목록 ${label}: 창이 서기까지(ms, 기록) · 내용`, info.disabled === "true" && info.text.includes("예약 목록을 불러오지 못했어요"), { waited, ...info, text: info.text.slice(-60) });
+        } else {
+          // M2: 창은 바로 서고(목록을 기다리지 않는다) 「확인 중…」 + 확정 잠금, 알게 되면 같은 창에서 「2개」 문장으로 바뀌고 확정이 살아난다.
+          check(`J-scheduled-${engine}`, `예약 목록 ${label}: 창이 바로 선다(ms, 기록) · 확인 중 · 확정 잠금`, waited < 1_000 && info.text.includes("확인 중…") && info.disabled === "true", { waited, ...info, text: info.text.slice(-60) });
+          await page.waitForFunction(() => document.querySelector('[data-testid="dm-leave-confirm"]')?.textContent?.includes("2개"), null, { timeout: 4_000 });
+          const after = await page.evaluate(() => ({
+            text: document.querySelector('[data-testid="dm-leave-confirm"]')?.textContent ?? "",
+            disabled: document.querySelector('[data-testid="dm-leave-confirm-confirm"]')?.getAttribute("aria-disabled"),
+          }));
+          check(`J-scheduled-${engine}`, `예약 목록 ${label}: 알게 되면 같은 창에서 「2개」 문장 · 확정이 살아난다`, !after.text.includes("확인 중…") && after.disabled !== "true", { ...after, text: after.text.slice(-60) });
+        }
         if (opts.scheduledStatus === 500) await shot(page, engine, "dialog-scheduled-failed");
       });
     } finally {
