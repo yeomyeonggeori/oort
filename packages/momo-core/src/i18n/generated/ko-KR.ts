@@ -1137,6 +1137,12 @@ export const catalog: MessageCatalog = {
       "value": "취소"
     }
   ],
+  "channels.dmLeave.checking": [
+    {
+      "type": 0,
+      "value": "확인 중…"
+    }
+  ],
   "channels.dmLeave.confirm": [
     {
       "type": 0,
@@ -1204,6 +1210,12 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "나가지 못했어요. 다시 시도해 주세요."
+    }
+  ],
+  "channels.dmLeave.unavailable": [
+    {
+      "type": 0,
+      "value": "이 대화에서는 나갈 수 없어요."
     }
   ],
   "channels.nameRule.edge": [
