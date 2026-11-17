@@ -50,6 +50,13 @@ ignore = [
     # Reaches us only through tokenizers 0.23 <- fastembed 7.1 <- momo-embed (#3173).
     { id = "RUSTSEC-2024-0436", reason = "paste unmaintained proc-macro, no vulnerability; only via tokenizers <- fastembed <- momo-embed (#3173); revisit when tokenizers moves to pastey; expires=2026-12-31" },
 
+    # chrono 0.4 (RUSTSEC-2026-0543, issued 2026-11-17: "unmaintained", informational; no
+    # vulnerability, no CVE, no patched version; the advisory points to `jiff` and `time`).
+    # Unlike the entries around it this is a DIRECT workspace dependency (seven binaries and
+    # sqlx's `chrono` feature), so it cannot be dropped by a lockfile repair. Moving off it is
+    # tracked in #5890; the date below is when that plan (or a reasoned extension) is due.
+    { id = "RUSTSEC-2026-0543", reason = "chrono unmaintained notice, no vulnerability; direct workspace dependency (server binaries + sqlx chrono feature), migration to time/jiff tracked in #5890; expires=2027-02-15" },
+
     # unic-* 0.9.0 (five RUSTSEC-2025 "unmaintained" notices, no vulnerability). The whole family
     # comes from one edge: tauri-utils 2.9.3 -> urlpattern 0.3.0 -> unic-ucd-ident/unic-char-range/
     # unic-common/unic-char-property/unic-ucd-version. Fix is upstream (Tauri/urlpattern).
