@@ -1419,27 +1419,113 @@ async fn card_rows(su: &PgPool, message: Uuid) -> i64 {
         .unwrap()
 }
 
-/// 불변식: 사람이 누르지 않았는데 에이전트가 쓴 주소로 서버가 나가는 요청이 없다.
-/// 에이전트가 보낸 글·고친 글의 주소로는 요청 0건·카드 0행이고, 사람이 쓴 글은 그대로 1건이다.
+/// A member of kind `agent` with the rows that make it a working agent (what a channel agent, the
+/// team AI and an Agent Port connection all have in common: an `agent` row; the connection adds an
+/// `agent_profile`).
+async fn add_agent_with_row(su: &PgPool, tenant: &Tenant, profile: bool) -> Tenant {
+    let agent = add_member_of_kind(su, tenant, "agent").await;
+    sqlx::query(
+        "INSERT INTO agent (member_id, workspace_id, model, base_url) \
+         VALUES ($1, $2, 'test-model', 'https://gateway.invalid/v1')",
+    )
+    .bind(agent.member)
+    .bind(agent.workspace)
+    .execute(su)
+    .await
+    .expect("agent row");
+    if profile {
+        sqlx::query(
+            "INSERT INTO agent_profile (agent_member_id, workspace_id, updated_by) \
+             VALUES ($1, $2, $3)",
+        )
+        .bind(agent.member)
+        .bind(agent.workspace)
+        .bind(tenant.member)
+        .execute(su)
+        .await
+        .expect("agent profile");
+    }
+    agent
+}
+
+/// The webhook install, made by the real create path: its service member is what the installation
+/// row names as its author.
+async fn add_webhook_author(su: &PgPool, tenant: &Tenant) -> Tenant {
+    let secret_ref = momo_webhook::random_reference();
+    let (workspace, admin, channel) = (tenant.workspace, tenant.member, tenant.channel);
+    let created = with_tenant_tx(su, workspace, move |conn| {
+        Box::pin(async move {
+            momo_webhook::create_installation(
+                conn,
+                workspace,
+                momo_webhook::NewInstallation {
+                    channel_id: channel,
+                    mode: momo_webhook::WebhookMode::Native,
+                    label: "build alerts",
+                    secret_ref: Some(&secret_ref),
+                    token_hash: None,
+                    actor_member_id: admin,
+                    via_token_id: None,
+                },
+            )
+            .await
+        })
+    })
+    .await
+    .expect("webhook install");
+    Tenant {
+        workspace,
+        member: created.installation.author_member_id,
+        channel,
+    }
+}
+
+/// 불변식: 사람이 누르지 않았는데 에이전트가 쓴 주소로 서버가 나가는 요청이 없다. 단 하나의 예외는
+/// 웹훅 설치가 가리키는 서비스 멤버의 글이다. 에이전트 종류마다 한 경우씩: 채널에 앉은 에이전트 ·
+/// 팀 AI 모양(`agent` 행) · 외부 에이전트(`agent_profile` 있음) · `agent` 행이 없는 서비스 멤버
+/// (웹훅 설치에 묶이지 않은 것)는 요청 0건·카드 0행, 사람과 웹훅 글은 1건·카드 1행.
 #[tokio::test]
 #[ignore = "needs DATABASE_URL to a pgvector/pg18 DB"]
-async fn an_agent_authored_message_is_never_fetched_and_a_human_one_still_is() {
+async fn an_agent_authored_message_is_never_fetched_except_a_webhooks_and_a_human_one_is() {
     let _guard = test_lock().await;
     ensure_schema();
     let su = superuser_pool().await;
     skip_leftover_jobs(&su).await;
     let person = seed(&su).await;
-    let agent = add_member_of_kind(&su, &person, "agent").await;
+    let channel_agent = add_agent_with_row(&su, &person, false).await;
+    let team_ai_shaped = add_agent_with_row(&su, &person, false).await;
+    let external_agent = add_agent_with_row(&su, &person, true).await;
+    let rowless_service = add_member_of_kind(&su, &person, "agent").await;
+    let webhook = add_webhook_author(&su, &person).await;
 
-    let sent_by_agent = insert_message(&su, &agent, "see https://sent-by-agent.example/a").await;
-    let edited_by_agent = insert_message(&su, &agent, "no link yet").await;
+    let by_channel_agent = insert_message(
+        &su,
+        &channel_agent,
+        "see https://by-channel-agent.example/a",
+    )
+    .await;
+    let by_team_ai = insert_message(&su, &team_ai_shaped, "see https://by-team-ai.example/b").await;
+    let by_external = insert_message(
+        &su,
+        &external_agent,
+        "see https://by-external-agent.example/c",
+    )
+    .await;
+    let by_rowless = insert_message(
+        &su,
+        &rowless_service,
+        "see https://by-rowless-service.example/d",
+    )
+    .await;
+    let edited_by_agent = insert_message(&su, &channel_agent, "no link yet").await;
     edit_body(
         &su,
         edited_by_agent,
-        "now https://edited-by-agent.example/b",
+        "now https://edited-by-agent.example/e",
     )
     .await;
-    let sent_by_person = insert_message(&su, &person, "see https://sent-by-person.example/c").await;
+    let by_webhook = insert_message(&su, &webhook, "see https://by-webhook.example/f").await;
+    let by_person = insert_message(&su, &person, "see https://by-person.example/g").await;
 
     let asked = Arc::new(Mutex::new(Vec::new()));
     let worker = UnfurlWorker::new(
@@ -1451,14 +1537,27 @@ async fn an_agent_authored_message_is_never_fetched_and_a_human_one_still_is() {
     );
     worker.drain_to_empty().await;
 
+    let mut got = asked.lock().unwrap().clone();
+    got.sort();
     assert_eq!(
-        *asked.lock().unwrap(),
-        vec!["https://sent-by-person.example/c".to_string()],
-        "the server asked for the person's link and for nothing an agent wrote"
+        got,
+        vec![
+            "https://by-person.example/g".to_string(),
+            "https://by-webhook.example/f".to_string()
+        ],
+        "the server asked for a person's link and a webhook's, and for nothing another agent wrote"
     );
-    assert_eq!(card_rows(&su, sent_by_agent).await, 0);
-    assert_eq!(card_rows(&su, edited_by_agent).await, 0);
-    assert_eq!(card_rows(&su, sent_by_person).await, 1);
+    for (name, message) in [
+        ("channel agent", by_channel_agent),
+        ("team AI shaped", by_team_ai),
+        ("external agent", by_external),
+        ("row-less service member", by_rowless),
+        ("edited by agent", edited_by_agent),
+    ] {
+        assert_eq!(card_rows(&su, message).await, 0, "{name}");
+    }
+    assert_eq!(card_rows(&su, by_webhook).await, 1);
+    assert_eq!(card_rows(&su, by_person).await, 1);
 }
 
 /// A job that was already queued for an agent's message (a row written before the rule, or by a

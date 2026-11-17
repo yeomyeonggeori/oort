@@ -233,7 +233,8 @@ impl<T: UnfurlHttp + 'static> UnfurlWorker<T> {
                 let Some(message) = load_message(conn, message_id).await? else {
                     return Ok(Prepared::Skip("message missing"));
                 };
-                // ADR-0170 증보 2026-11-14 (#5872): the one place the rule is judged. Every fetch
+                // ADR-0170 증보 2026-11-14 (#5872): the one place the rule is judged (a webhook's service
+                // member is the one agent author let through, see `author_is_agent`). Every fetch
                 // for a message starts here, so it covers a job queued by any writer, a send and
                 // an edit alike, and one queued before the rule existed.
                 if author_is_agent(conn, message.author_member_id).await? {

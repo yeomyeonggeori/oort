@@ -167,20 +167,27 @@ pub async fn load_message(
     }))
 }
 
-/// Whether the message's author is an agent (`member.kind = 'agent'`).
+/// Whether the server must not fetch the addresses this author wrote.
 ///
-/// ADR-0170 증보 2026-11-14 (#5872): the server never fetches an address an agent wrote. A member
-/// row that cannot be read counts as an agent, so a lookup that finds nothing stops the fetch.
+/// ADR-0170 증보 2026-11-14 (#5872): the server never fetches an address an agent wrote. The one
+/// exception is a webhook's service member: the member a `webhook_installation` row names as its
+/// `author_member_id` (an admin-installed inbound path that reads no channel). That row is the
+/// only thing that sets the exception — not "has no `agent` row", which other service members
+/// (the GitHub author) share. A member row that cannot be read counts as barred.
 pub async fn author_is_agent(
     conn: &mut PgConnection,
     author_member_id: Uuid,
 ) -> Result<bool, DbError> {
-    let is_human: Option<bool> =
-        sqlx::query_scalar("SELECT kind = 'human' FROM member WHERE id = $1")
-            .bind(author_member_id)
-            .fetch_optional(&mut *conn)
-            .await?;
-    Ok(!is_human.unwrap_or(false))
+    let may_fetch: Option<bool> = sqlx::query_scalar(
+        "SELECT m.kind = 'human' \
+             OR EXISTS (SELECT 1 FROM webhook_installation w \
+                         WHERE w.workspace_id = m.workspace_id AND w.author_member_id = m.id) \
+           FROM member m WHERE m.id = $1",
+    )
+    .bind(author_member_id)
+    .fetch_optional(&mut *conn)
+    .await?;
+    Ok(!may_fetch.unwrap_or(false))
 }
 
 pub async fn tombstone_exists(conn: &mut PgConnection, message_id: Uuid) -> Result<bool, DbError> {
