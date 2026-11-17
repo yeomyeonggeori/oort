@@ -209,6 +209,8 @@ struct TurnTrace {
     wire: &'static str,
     tools: Vec<String>,
     tool_codes: Vec<&'static str>,
+    /// #5873: the channels this request read (ids) and how many reads were refused, by kind.
+    reads: team_ai_tools::ReadAudit,
     model_calls: i32,
     web_searches: i32,
     latency_ms: i64,
@@ -238,6 +240,7 @@ impl TurnTrace {
             "wire": self.wire,
             "tools": self.tools,
             "tool_results": self.tool_codes,
+            "reads": self.reads.to_json(),
             "model_calls": self.model_calls,
             "web_searches": self.web_searches,
             "latency_ms": self.latency_ms,
@@ -983,7 +986,7 @@ impl AgentWorker {
                         // The `files` bundle's tool (#4970). A request that was not offered it does not
                         // get it by naming it (B13-I5); the lookup re-reads the switch as well.
                         if !roles.tool_allowed(team_ai_tools::TOOL_READ_ATTACHMENT) {
-                            Ok(team_ai_files::FILES_OFF)
+                            Ok((team_ai_files::FILES_OFF, Vec::new()))
                         } else {
                             match self
                                 .team_ai_read_attachment(
@@ -1004,7 +1007,7 @@ impl AgentWorker {
                                     if let Some(image) = read.image {
                                         attached.push(image);
                                     }
-                                    Ok(read.outcome)
+                                    Ok((read.outcome, Vec::new()))
                                 }
                                 Err(error) => Err(error),
                             }
@@ -1021,7 +1024,10 @@ impl AgentWorker {
                         .await
                     };
                 let outcome = match read {
-                    Ok(outcome) => outcome,
+                    Ok((outcome, channels)) => {
+                        trace.reads.record(&outcome, &channels);
+                        outcome
+                    }
                     Err(error) => {
                         return Some(
                             self.settle_retryable(
@@ -1378,7 +1384,7 @@ impl AgentWorker {
         reply_channel: Uuid,
         tool: &str,
         args: &Value,
-    ) -> Result<ToolOutcome, DbError> {
+    ) -> Result<(ToolOutcome, Vec<Uuid>), DbError> {
         let tool = tool.to_string();
         let args = args.clone();
         momo_db::tenant::REQUEST_AGENT_MEMBER
@@ -1395,7 +1401,8 @@ impl AgentWorker {
                             reply_channel,
                         )
                         .await?;
-                        team_ai_tools::execute_read_tool_in_tx(conn, &scope, &tool, &args).await
+                        team_ai_tools::execute_read_tool_traced_in_tx(conn, &scope, &tool, &args)
+                            .await
                     })
                 }),
             )
