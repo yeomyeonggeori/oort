@@ -35,9 +35,9 @@ import {
 //                       설정이라 권한을 묻지 않는다. 한 번의 왕복 동안 메뉴를
 //                       열어 두고(실패를 그 자리에서 말해야 하므로), 성공하면
 //                       닫는다. 낱말은 상태다: 켜져 있으면 「끄기」.
-//   * 채널 나가기     — 소유자/관리자에게만(`canLeaveChannel`). 서버 `remove_member`가
-//                       소유자/관리자만 멤버십을 지울 수 있게 막으므로, 일반 멤버에게
-//                       내놓으면 확인 뒤 403으로 끝나는 막다른 길이다. 파괴적이라
+//   * 채널 나가기     — 누구나(`canLeaveChannel`, DM 제외). 본인 나가기 길(`…/members/me`)이라
+//                       역할을 보지 않는다(#5778 — 그 전에는 관리자 전용 `remove_member`로
+//                       자기를 지워서 소유자/관리자에게만 내놓았다). 파괴적이라
 //                       확인 다이얼로그를 거치고, 그 다이얼로그가 왕복 내내 서서
 //                       「나가는 중」과 실패를 말한다(design-review #1937 H-1).
 //
@@ -73,8 +73,7 @@ export function ChannelHeaderMenu({
    *  나가기 확인 다이얼로그가 이름을 넣어 문장을 짓는 값. */
   title: string;
   selfMemberId: string;
-  /** 로그인 멤버의 워크스페이스 역할. undefined면 아직 안 온 것이고, 그때는
-   *  나가기를 내놓고 서버가 답하게 둔다(`canLeaveChannel`). */
+  /** 로그인 멤버의 워크스페이스 역할(GitHub 알림처럼 역할을 보는 항목이 읽는다). undefined면 아직 안 온 것이다. */
   selfRole: MembershipRole | undefined;
 }) {
   const triggerRef = useRef<HTMLButtonElement | null>(null);

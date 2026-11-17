@@ -14,7 +14,6 @@ import {
   GitPullRequest,
   Info,
   Link,
-  Loader2,
   DoorOpen,
   Mail,
   MailOpen,
@@ -24,9 +23,10 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import {
-  removeChannelMember,
+  leaveChannel,
   setChannelNotificationPref,
   uuidEq,
+  ApiError,
   type Channel,
   type MembershipRole,
   type ReadState,
@@ -35,13 +35,11 @@ import { composedUnreadCount } from "@momo/core/features/readState/model";
 import { useChannelNotificationMutation } from "./useChannelNotificationMutation";
 import { advertiseReadState } from "@/features/chat/advertiseReadState";
 import {
-  channelLeaveConfirmBody,
-  channelLeaveFailureMessage,
+  channelLeaveConfirmBodyKey,
+  channelLeaveFailure,
   CHANNEL_ACTION_ERROR_GROUP_LABEL,
   CHANNEL_COPY_FAILURE,
   CHANNEL_COPY_UNAVAILABLE,
-  CHANNEL_LEAVE_CONFIRM_TITLE,
-  CHANNEL_LEAVE_LABEL,
   CHANNEL_MARK_READ_FAILURE,
   CHANNEL_MARK_UNREAD_FAILURE,
   CHANNEL_MUTE_FAILURE,
@@ -64,20 +62,16 @@ import {
   ContextMenuSubContent,
   ContextMenuSubTrigger,
 } from "@/design/ui/context-menu";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogTitle,
-  type DialogFocusTarget,
-} from "@/design/ui/dialog";
-import { Button } from "@/design/ui/button";
+import { type DialogFocusTarget } from "@/design/ui/dialog";
 import { InlineBanner } from "@/features/common/States";
+import { ConfirmDialog } from "@/design/ui/confirm-dialog";
+import { ROUTE_REGION_DOM_ID } from "@/app/shellNav";
 import { useClipboardCopy } from "@/design/hooks/useClipboardCopy";
 import { channelShareUrl } from "@/features/inbox/anchor";
 import { openChannelId } from "@/features/sidebar/openChannel";
 import { SECTION_MOVE_TO_BASE_LABEL } from "@momo/core/features/sidebar/sidebarSections";
 import { absoluteApiBase } from "@/lib/serverBase";
+import { useFormatMessage } from "@/i18n/useFormatMessage";
 import {
   applyReadStateToCache,
   useInvalidateReadStates,
@@ -116,6 +110,7 @@ export interface ChannelActionTarget {
   channel: Channel;
   /** 화면에 보이는 채널 이름(labelParts.text ?? label). 확인 문장·이름 복사가 쓴다. */
   title: string;
+  /** 로그인 멤버. 나가기가 본인 길(`…/members/me`)이 된 뒤로(#5778) 이 훅은 읽지 않는다 — 부르는 쪽의 모양만 남았다. */
   selfMemberId: string;
   /** 로그인 멤버의 워크스페이스 역할. undefined 면 내놓고 서버가 답하게 둔다. */
   selfRole: MembershipRole | undefined;
@@ -176,6 +171,8 @@ export interface ChannelActions {
   /** 「섹션으로 이동」의 라디오 행이 고른 목적지. 표면이 없으면 아무 일도 없다. */
   moveToSection: (sectionId: string | null) => void;
   leave: {
+    /** 확인 문장이 공개·비공개로 갈린다(`channelLeaveConfirmBodyKey`). */
+    kind: Channel["kind"];
     confirmOpen: boolean;
     open: () => void;
     close: () => void;
@@ -189,7 +186,6 @@ export function useChannelActions({
   workspaceId,
   channel,
   title,
-  selfMemberId,
   selfRole,
   readState = null,
   onActionSucceeded,
@@ -203,6 +199,7 @@ export function useChannelActions({
   const client = useQueryClient();
   const navigate = useNavigate();
   const location = useLocation();
+  const formatMessage = useFormatMessage();
   const invalidateReadStates = useInvalidateReadStates(workspaceId);
   const [error, setErrorState] = useState<string | null>(null);
   const [copyFailure, setCopyFailure] = useState<{
@@ -318,30 +315,45 @@ export function useChannelActions({
   // 사라지는 것 자체는 남고, ③은 「지워졌다」와 「지우는 중」이라는 두 개의 참을
   // 한 행에 겹쳐 그린다. 스냅샷·롤백이 함께 사라지는 것은 덤이다 — 되돌릴 것을
   // 만들지 않으면 되돌리기가 필요 없다.
+  // 이 채널이 내 것이 아니게 된 뒤의 정리 - 나가기 성공과 「이미 나간 것」(404)이 같은 길이다.
+  const leftChannel = () => {
+    // 서버가 답한 **뒤에** 목록에서 지운다. 무효화만 걸면 재조회가 도착할
+    // 때까지 방금 나온 채널이 남아 있으므로, 캐시를 지금 한 번 편집하고
+    // 서버가 마지막 말을 하게 둔다.
+    client.setQueryData<Channel[]>(["channels", workspaceId], (current) =>
+      current?.filter((c) => !uuidEq(c.id, channel.id))
+    );
+    void client.invalidateQueries({ queryKey: ["channels", workspaceId] });
+    // 명부의 channelIds 도 이 편집으로 바뀌었다.
+    void client.invalidateQueries({ queryKey: ["roster", workspaceId] });
+    // 방금 나온 채널에 머무를 수 없다 — 열려 있었다면. 사이드바에서 **읽고
+    // 있지 않은** 채널을 나갈 때까지 인덱스로 튕기면, 사람은 자기가 보고 있던
+    // 대화를 잃는다. 헤더 메뉴는 정의상 열린 채널이라 예전 그대로 착지한다.
+    const open = openChannelId(location.pathname, null);
+    if (open !== null && uuidEq(open, channel.id)) navigate("/");
+  };
   const leaveMutation = useMutation({
-    mutationFn: () => removeChannelMember(workspaceId, channel.id, selfMemberId),
+    // 본인 나가기 길(#5778). 관리자 전용 `removeChannelMember` 로 자기를 지우면 일반 멤버는 403 이다.
+    mutationFn: () => leaveChannel(workspaceId, channel.id),
     onSuccess: () => {
       setLeaveError(null);
       setConfirmLeave(false);
-      // 서버가 답한 **뒤에** 목록에서 지운다. 무효화만 걸면 재조회가 도착할
-      // 때까지 방금 나온 채널이 남아 있으므로, 캐시를 지금 한 번 편집하고
-      // 서버가 마지막 말을 하게 둔다.
-      client.setQueryData<Channel[]>(["channels", workspaceId], (current) =>
-        current?.filter((c) => !uuidEq(c.id, channel.id))
-      );
-      void client.invalidateQueries({ queryKey: ["channels", workspaceId] });
-      // 명부의 channelIds 도 이 편집으로 바뀌었다.
-      void client.invalidateQueries({ queryKey: ["roster", workspaceId] });
-      // 방금 나온 채널에 머무를 수 없다 — 열려 있었다면. 사이드바에서 **읽고
-      // 있지 않은** 채널을 나갈 때까지 인덱스로 튕기면, 사람은 자기가 보고 있던
-      // 대화를 잃는다. 헤더 메뉴는 정의상 열린 채널이라 예전 그대로 착지한다.
-      const open = openChannelId(location.pathname, null);
-      if (open !== null && uuidEq(open, channel.id)) navigate("/");
+      leftChannel();
     },
     onError: (mutationError) => {
+      // 404 = 서버가 「이미 이 채널의 멤버가 아니다」(다른 탭·기기에서 먼저 나갔거나 채널이 보관됨)라고 답한 것이다. 낡은 화면이
+      // 한 사실을 아직 모르는 것이므로 나간 것과 같게 거둔다: 줄을 걷고, 열려 있으면 옮기고, 초점을 돌려준다(#5818 검수 M2).
+      // 확인 창은 닫는다 - 줄이 사라지면 그 서브트리의 창도 함께 죽는데(위 시간축), 사라지는 창 안에 문장을 세워 둘 이유가 없다.
+      if (mutationError instanceof ApiError && mutationError.status === 404) {
+        setLeaveError(null);
+        setConfirmLeave(false);
+        leftChannel();
+        return;
+      }
       // 목록을 건드리지 않았으므로 되돌릴 것이 없다. 다이얼로그는 그대로 서
       // 있고, 그 안에서 이유를 말한다.
-      setLeaveError(channelLeaveFailureMessage(mutationError));
+      const failure = channelLeaveFailure(mutationError);
+      setLeaveError(formatMessage(failure.key, failure.values as never));
     },
   });
 
@@ -483,6 +495,7 @@ export function useChannelActions({
       onMoveToSection?.(sectionId);
     },
     leave: {
+      kind: channel.kind,
       confirmOpen: confirmLeave,
       open: () => {
         setLeaveError(null);
@@ -895,67 +908,55 @@ export function ChannelLeaveConfirmDialog({
 }: {
   actions: ChannelActions;
   title: string;
-  /** 표면별 접두사를 붙인 id. 게이트가 표면을 구별해 누른다. */
+  /** 표면별 접두사를 붙인 id. 게이트가 표면을 구별해 누른다(`<id>`·`<id>-confirm`·`<id>-cancel`·`<id>-error`). */
   testId: string;
   opener?: DialogFocusTarget | null;
 }) {
   const { leave } = actions;
+  const formatMessage = useFormatMessage();
+  // 닫힐 때 초점을 돌려줄 곳: 연 단추·줄이 아직 있으면 그곳, 나가서 사라졌으면 옮겨 간 화면의 본문 자리(`ROUTE_REGION_DOM_ID`,
+  // `tabIndex=-1`) - 문서 몸통으로 떨어지지 않게(#5818 검수 M3). 닫히는 순간(퇴장 모션 뒤)에 읽으므로 그때의 사실로 정한다.
+  const focusLanding: DialogFocusTarget = {
+    get isConnected() {
+      return (opener?.isConnected ?? false) || document.getElementById(ROUTE_REGION_DOM_ID) !== null;
+    },
+    focus: () => {
+      if (opener?.isConnected) {
+        opener.focus();
+        return;
+      }
+      // 폰 폭에서는 줄 메뉴가 서랍 안에 있고, 서랍이 열려 있는 동안 본문 자리는 `inert` 라 `focus()` 가 조용히 거절된다
+      // (그 뒤 서랍이 닫히며 초점은 몸통으로 떨어진다, #5818 검수 r2 N2). 받을 때까지 몇 프레임 다시 시도한다.
+      let tries = 30;
+      const land = () => {
+        const region = document.getElementById(ROUTE_REGION_DOM_ID);
+        if (region === null) return;
+        region.focus({ preventScroll: true });
+        if (document.activeElement !== region && (tries -= 1) > 0) requestAnimationFrame(land);
+      };
+      land();
+    },
+  };
+  // 공용 확인 창(`ConfirmDialog`)의 몸을 쓴다: 확정은 서고 나서 500ms 동안 눌림을 받지 않는다(메뉴 줄을 누른 자리에 위험 확정이
+  // 서도 둘째 누름이 확정을 누르지 못한다, #5818 검수 High), 진행 중에는 Esc·바깥 누름·취소가 잠긴다. 자기 단추를 따로 그리지 않는다.
   return (
-    <Dialog
+    <ConfirmDialog
       open={leave.confirmOpen}
       onOpenChange={(next) => {
         if (!next) leave.close();
       }}
-    >
-      <DialogContent
-        opener={opener}
-        className="gap-4 p-4"
-        data-testid={testId}
-          onEscapeKeyDown={(event) => {
-            if (leave.pending) event.preventDefault();
-          }}
-          onInteractOutside={(event) => {
-            if (leave.pending) event.preventDefault();
-          }}
-        >
-          <div className="flex flex-col gap-1">
-            <DialogTitle>{CHANNEL_LEAVE_CONFIRM_TITLE}</DialogTitle>
-            <DialogDescription>{channelLeaveConfirmBody(title)}</DialogDescription>
-          </div>
-          {leave.error && (
-            <InlineBanner
-              separator={false}
-              message={leave.error}
-              testId={`${testId}-error`}
-            />
-          )}
-          {/* 표준 테두리 버튼, 후행 정렬, 기본(파괴) 액션이 마지막(§8). */}
-          <div className="flex items-center justify-end gap-2">
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              disabled={leave.pending}
-              onClick={() => leave.close()}
-              data-testid={`${testId}-cancel`}
-            >
-              취소
-            </Button>
-            <Button
-              type="button"
-              variant="destructive"
-              size="sm"
-              aria-busy={leave.pending || undefined}
-              onClick={() => leave.confirm()}
-              data-testid={`${testId}-action`}
-            >
-              {leave.pending && (
-                <Loader2 aria-hidden="true" className="spinner-busy" />
-              )}
-              {leave.pending ? "나가는 중" : CHANNEL_LEAVE_LABEL}
-            </Button>
-          </div>
-      </DialogContent>
-    </Dialog>
+      // `ConfirmDialog` 는 `HTMLElement` 로 받지만 `DialogContent` 가 쓰는 것은 `isConnected`·`focus` 둘뿐이다(`DialogFocusTarget`).
+      opener={focusLanding as unknown as HTMLElement}
+      testId={testId}
+      tone="destructive"
+      title={formatMessage("timeline.channelLeave.title")}
+      description={formatMessage(channelLeaveConfirmBodyKey(leave.kind), { name: title })}
+      cancelLabel={formatMessage("timeline.channelLeave.cancel")}
+      confirmLabel={formatMessage("timeline.channelLeave.confirm")}
+      busyLabel={formatMessage("timeline.channelLeave.busy")}
+      busy={leave.pending}
+      error={leave.error}
+      onConfirm={() => leave.confirm()}
+    />
   );
 }

@@ -89,23 +89,16 @@ describe("channelActionAvailability", () => {
     ).toBe(true);
   });
 
-  it("일반 멤버에게 나가기는 막다른 길이라 그리지 않는다", () => {
-    // 서버 remove_member 는 소유자/관리자만 통과시킨다. 확인 다이얼로그 뒤의
-    // 403 은 없는 항목보다 나쁘다.
-    expect(
-      channelActionAvailability({
-        channel: channel(),
-        selfRole: "member",
-        unreadCount: 0,
-      }).leave
-    ).toBe(false);
-    expect(
-      channelActionAvailability({
-        channel: channel(),
-        selfRole: undefined,
-        unreadCount: 0,
-      }).leave
-    ).toBe(true);
+  it("나가기는 역할과 무관하게 공개·비공개 채널에 선다 — 본인 나가기 길이다 (#5778)", () => {
+    // 예전에는 관리자 전용 remove_member 로 자기를 지워서 소유자·관리자에게만 내놓았다. 일반 멤버·게스트는 나갈 길이 없었다.
+    for (const selfRole of ["owner", "admin", "member", "guest", undefined] as const) {
+      for (const kind of ["public", "private"] as const) {
+        expect(
+          channelActionAvailability({ channel: channel({ kind }), selfRole, unreadCount: 0 }).leave,
+          `${selfRole ?? "unknown"} · ${kind}`
+        ).toBe(true);
+      }
+    }
   });
 
   it("DM 에는 나가기도 주제도 없다 — 서버에 그 문이 없다", () => {

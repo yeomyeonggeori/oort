@@ -250,6 +250,11 @@ export function Shell({
     (channelId: string) => dispatch({type: 'channelLeft', channelId}),
     [],
   );
+  // 1:1 대화에서 나간 영수증(ADR-0177 증보 2026-11-14 D21 「대화에서 나갔어요.」). 홈 목록 위의 고지(알림 탭 영수증과 같은 `NoticeBlock`)로
+  // 서고, 사람이 닫을 때까지 남는다(타이머로 걷지 않는다 - 걷힐 때 목록이 손가락 밑에서 움직이지 않게). 사이드바 행 시트와 대화 화면의 ⋮ 시트·
+  // 정보 페이지가 같은 자리에 세운다.
+  const [dmLeftReceipt, setDmLeftReceipt] = useState<string | null>(null);
+  const dismissDmLeftReceipt = useCallback(() => setDmLeftReceipt(null), []);
   const onOpenSearch = useCallback(
     (initialQuery?: string) => dispatch({type: 'openSearch', initialQuery}),
     [],
@@ -463,6 +468,9 @@ export function Shell({
               onOpenWorkList={onOpenWorkList}
               onOpenSettings={onOpenSettings}
               onChannelLeft={onChannelLeft}
+              onDmLeftReceipt={setDmLeftReceipt}
+              dmLeftReceipt={dmLeftReceipt}
+              onDismissDmLeftReceipt={dismissDmLeftReceipt}
               notificationNotice={tapRouting.notice}
               onDismissNotificationNotice={tapRouting.dismissNotice}
             />
@@ -699,6 +707,7 @@ export function Shell({
             onOpenSettings={onOpenSettingsFromConversation}
             // 대화 안 검색의 「모든 대화에서 ›」(#5384): 같은 말로 검색 탭을 연다.
             onOpenSearch={onOpenSearch}
+            onDmLeftReceipt={setDmLeftReceipt}
           />
         </EdgeSwipeBack>
       ) : null}

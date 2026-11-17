@@ -3,6 +3,7 @@ import {
   type ChannelActionKey,
 } from '@momo/core/features/channels/actionModel';
 import {channelMenuAccessibleLabel} from '@momo/core/features/channels/model';
+import type {MessageService} from '@momo/core/i18n/types';
 import type {Channel} from '@momo/core/lib/api';
 import {
   channelRowActionItems,
@@ -19,16 +20,15 @@ import {
 //   1. **이 앱(폰)이 가진 문** — 대화 정보 · 고정한 메시지 · 작업 맡기기. 코어 표(`channelActionItems`)에 없다: 코어 `header` 표면은
 //      웹 채널 헤더의 열쇠(`topic·mute·memory·github·leave`)라 정보 화면·고정 목록·작업 시트로 가는 문이 없고, 그 문들은 폰 화면의 것이다.
 //      그래서 시트가 직접 그린다(`ConversationMenuSheet`).
-//   2. **서버에 닿는 행동** — 알림 끄기·켜기 · 대화 닫기 · 채널 나가기. 낱말·**내밀지 말지**(`canLeaveChannel`·`dmCloseOffered`)·위험색·
-//      진행 낱말까지 코어 `row` 표가 이미 답하고, 사이드바 행 시트(#4229)가 쓰는 같은 표다. 여기서는 그 답에서 이 시트가 쓰는 셋만
+//   2. **서버에 닿는 행동** — 알림 끄기·켜기 · 대화 닫기 · 채널 나가기 · 대화 나가기. 낱말·**내밀지 말지**(`canLeaveChannel`·`dmCloseOffered`·`dmLeaveOffered`)·위험색·
+//      진행 낱말까지 코어 `row` 표가 이미 답하고, 사이드바 행 시트(#4229)가 쓰는 같은 표다. 여기서는 그 답에서 이 시트가 쓰는 넷만
 //      **거를 뿐** 새로 짓지 않는다 — 같은 행동에 두 번째 이름·두 번째 판정을 만들지 않는다. 실행도 같은 훅(`useChannelRowActions`)이다.
 //
-// ## DM 의 「목록에서 숨기기」 — 「대화 나가기」가 아니다
+// ## DM 의 「목록에서 숨기기」와 「대화 나가기」는 다른 행동이다 (ADR-0177 증보 2026-11-14 D21)
 //
-// owner 의 10-27 문장은 DM 에 「대화 나가기」가 서야 한다고 적었다. 코어·ADR-0177 D13·사이드바 시트는 같은 행동을 「목록에서 숨기기」라고 부른다:
-// 서버가 기억하는 **되돌릴 수 있는 닫기**(멤버십도 상대 쪽도 건드리지 않고, 새 메시지가 오면 다시 나타난다)이고 그래서 확인 단계가 없다.
-// 코어 시험이 `DM_CLOSE_LABEL` 에 「나가기」가 들지 않음을 잠가 두었다 — 채널의 「나가기」(관리자가 다시 추가해야 한다)와 섞이지 않게.
-// 한 행동에 이름을 둘 만들지 않으려고 코어 낱말을 그대로 쓴다. 낱말을 바꾸려면 코어 `DM_CLOSE_LABEL` 한 줄이고, 웹·사이드바까지 같이 바뀐다.
+// 「목록에서 숨기기」는 서버가 기억하는 **되돌릴 수 있는 닫기**(멤버십도 상대 쪽도 건드리지 않고, 새 메시지가 오면 지난 글과 함께 다시 나타난다)라
+// 확인 단계가 없다. 「대화 나가기」(`leave-dm`)는 사람끼리의 1:1 에서 내 읽기 하한을 올리는 **되돌릴 수 없는 비우기**라 확인 단계를 지나고
+// 위험색으로 맨 아래에 선다. 둘은 한 DM 에 함께 설 수 있다(나가기는 안 읽음이 있어도 선다). 낱말·내밀지 말지는 둘 다 코어 표의 답이다.
 // =============================================================================
 
 /** 이 시트가 코어 표에서 가져오는 열쇠. 폰이 실행할 줄 아는 열쇠(`PHONE_CHANNEL_ACTION_KEYS`)의 부분집합이다. */
@@ -36,15 +36,24 @@ export const CONVERSATION_MENU_ACTION_KEYS: ReadonlySet<ChannelActionKey> = new 
   'mute',
   'close-dm',
   'leave',
+  'leave-dm',
 ]);
 
-/** 코어 `row` 표의 답에서 이 시트의 셋만(알림 · DM 닫기 · 채널 나가기) — 차례·낱말·위험색·진행 낱말은 표의 것 그대로다. */
-export function conversationMenuActionItems(target: ChannelRowTarget): ChannelActionItem[] {
-  return channelRowActionItems(target).filter(item => CONVERSATION_MENU_ACTION_KEYS.has(item.key));
+/**
+ * 코어 `row` 표의 답에서 이 시트의 넷만(알림 · DM 닫기 · 채널 나가기 · 대화 나가기) — 차례·낱말·위험색·진행 낱말은 표의 것 그대로다.
+ * `formatMessage` 가 없으면 「대화 나가기」가 서지 않는다(코어 표의 규칙).
+ */
+export function conversationMenuActionItems(
+  target: ChannelRowTarget,
+  formatMessage?: MessageService['formatMessage'],
+): ChannelActionItem[] {
+  return channelRowActionItems(target, NOTHING_COPIED, formatMessage).filter(item =>
+    CONVERSATION_MENU_ACTION_KEYS.has(item.key),
+  );
 }
 
 /**
- * 대화·채널 **정보 페이지**(#4319)가 내놓는 열쇠 — 이름·링크·ID 복사 · 알림 · 대화 닫기 · 채널 나가기. 사이드바 행 시트(`channelRowActionItems`)가 쓰는 같은
+ * 대화·채널 **정보 페이지**(#4319)가 내놓는 열쇠 — 이름·링크·ID 복사 · 알림 · 대화 닫기 · 채널 나가기 · 대화 나가기(D21). 사이드바 행 시트(`channelRowActionItems`)가 쓰는 같은
  * 코어 표에서 읽음 처리·읽지 않음 표시만 뺀 것이다(읽음은 지금 읽고 있는 대화에 건네는 말이 아니다 — 코어 `header` 표면과 같은 판단).
  * **별표·섹션 이동은 없다**: 폰에 그 손이 없어서(`channelRowActions.ts` 의 「죽은 항목 금지」) 코어 표가 입력으로 이미 막는다.
  */
@@ -55,6 +64,7 @@ export const CONVERSATION_INFO_ACTION_KEYS: ReadonlySet<ChannelActionKey> = new 
   'mute',
   'close-dm',
   'leave',
+  'leave-dm',
 ]);
 
 /**
@@ -64,8 +74,11 @@ export const CONVERSATION_INFO_ACTION_KEYS: ReadonlySet<ChannelActionKey> = new 
 export function conversationInfoActionItems(
   target: ChannelRowTarget,
   copied: ChannelRowCopied = NOTHING_COPIED,
+  formatMessage?: MessageService['formatMessage'],
 ): ChannelActionItem[] {
-  return channelRowActionItems(target, copied).filter(item => CONVERSATION_INFO_ACTION_KEYS.has(item.key));
+  return channelRowActionItems(target, copied, formatMessage).filter(item =>
+    CONVERSATION_INFO_ACTION_KEYS.has(item.key),
+  );
 }
 
 /** 「정보」 행의 낱말. 코어에 없는 폰의 문이다(위 머리말 1). DM 은 대화, 채널은 채널. */
