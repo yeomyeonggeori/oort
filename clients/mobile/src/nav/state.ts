@@ -274,6 +274,19 @@ export interface NavState {
    * 참여하거나 이미 든 채널을 고르면 이 층을 걷고 그 대화를 연다(`openChannelFromBrowse` — 웹 창이 닫히고 그 채널로 가는 것과 같다).
    */
   channelBrowse: {initialQuery: string; seq: number} | null;
+  /**
+   * 「채널 미리 보기」 (ADR-0224 D5, #5847). 둘러보기 위에 서는 층이다 — 참여하지 않은 줄의 글자 칸이 연다. 이름 · 멤버 수 · 주제는
+   * 둘러보기 줄에서 이미 아는 값이라 같이 실어 머리가 글을 읽기 전에 서 있게 한다(불러오는 중 → 글 목록에서 머리가 움직이지 않게).
+   * 참여하면 둘러보기와 함께 걷히고 그 대화가 열린다(`openChannelFromBrowse`).
+   */
+  channelPreview: OpenChannelPreview | null;
+}
+
+export interface OpenChannelPreview {
+  channelId: string;
+  name: string;
+  topic?: string;
+  memberCount: number;
 }
 
 /** 탭 위에 아무 층도 없는 상태. 탭 전환과 알림 입구가 이것으로 시작한다. */
@@ -287,6 +300,7 @@ const NO_LAYERS = {
   apps: null,
   settings: false,
   channelBrowse: null,
+  channelPreview: null,
 } as const;
 
 export const INITIAL_NAV: NavState = {
@@ -313,6 +327,7 @@ export type NavAction =
   | {type: 'openSettings'}
   | {type: 'openSettingsFromConversation'}
   | {type: 'openChannelBrowse'; initialQuery?: string}
+  | {type: 'openChannelPreview'; preview: OpenChannelPreview}
   | {type: 'openChannelFromBrowse'; conversation: OpenConversation}
   | {type: 'channelLeft'; channelId: string}
   | {type: 'back'}
@@ -328,7 +343,8 @@ function hasLayers(state: NavState): boolean {
     state.hosted !== null ||
     state.apps !== null ||
     state.settings ||
-    state.channelBrowse !== null
+    state.channelBrowse !== null ||
+    state.channelPreview !== null
   );
 }
 
@@ -484,9 +500,18 @@ export function navReducer(state: NavState, action: NavAction): NavState {
           seq: (state.channelBrowse?.seq ?? 0) + 1,
         },
       };
+    case 'openChannelPreview':
+      // 둘러보기가 서 있을 때만 문이 있다. 미리 보기는 그 위의 층이라 뒤로 한 번이면 둘러보기(그 목록 · 거르기 칸 그대로)다.
+      if (state.channelBrowse === null) return state;
+      return {...state, channelPreview: action.preview};
     case 'openChannelFromBrowse':
       // 참여했거나 이미 든 채널: 둘러보기를 걷고 그 대화를 연다. 뒤로 한 번이면 홈이다.
-      return {...state, channelBrowse: null, conversation: action.conversation};
+      return {
+        ...state,
+        channelBrowse: null,
+        channelPreview: null,
+        conversation: action.conversation,
+      };
     case 'channelLeft':
       // 열려 있는 채널을 **내가 나갔다** (#4229). 웹은 `/` 로 착지한다. 폰의 같은 자리는 그 대화 층을 걷어
       // 아래 화면(사이드바)으로 돌아가는 것이다. 다른 채널이 열려 있으면 건드리지 않는다.
@@ -513,6 +538,7 @@ export function navReducer(state: NavState, action: NavAction): NavState {
       if (state.workSession !== null) return {...state, workSession: null};
       if (state.agentList) return {...state, agentList: false};
       if (state.workList) return {...state, workList: false};
+      if (state.channelPreview !== null) return {...state, channelPreview: null};
       if (state.channelBrowse !== null) return {...state, channelBrowse: null};
       // 설정은 가장 아래 층이다 — 위에 무엇이 얹혀 있든 그것들이 먼저 벗겨진 뒤에 닫힌다.
       if (state.settings) return {...state, settings: false};

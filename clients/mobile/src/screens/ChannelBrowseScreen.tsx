@@ -9,7 +9,16 @@ import {
 import {looseTailIncludes} from '@momo/core/features/channels/nameSearch';
 import {memberFor} from '@momo/core/features/workspace/directory';
 import React, {useCallback, useMemo, useState} from 'react';
-import {SectionList, StyleSheet, Text, useWindowDimensions, View} from 'react-native';
+import {
+  Pressable,
+  SectionList,
+  StyleSheet,
+  Text,
+  useWindowDimensions,
+  View,
+  type StyleProp,
+  type ViewStyle,
+} from 'react-native';
 
 import {
   EmptyState,
@@ -34,6 +43,7 @@ import {
 import {useOnline} from '../features/inbox/useOnline';
 import {useDirectory} from '../features/workspace/queries';
 import {useFormatMessage} from '../i18n/useFormatMessage';
+import type {OpenChannelPreview} from '../nav/state';
 import {useSession} from '../session/useSession';
 
 // =============================================================================
@@ -63,12 +73,15 @@ export default function ChannelBrowseScreen({
   initialQuery = '',
   onClose,
   onOpenChannel,
+  onPreview,
 }: {
   /** 홈 이름 검색에서 고른 이름 — 거르기 칸에 미리 넣는다. */
   initialQuery?: string;
   onClose: () => void;
   /** 참여한 채널 · 이미 든 채널로 간다. 셸이 이 층을 걷고 그 대화를 연다. */
   onOpenChannel: (channelId: string, title: string) => void;
+  /** 참여하지 않은 줄의 글자 칸을 눌렀다 — 셸이 둘러보기 위에 미리 보기를 세운다(#5847). */
+  onPreview: (preview: OpenChannelPreview) => void;
 }): React.JSX.Element {
   const {member, workspaceId} = useSession();
   const directoryQuery = useDirectory(workspaceId);
@@ -113,6 +126,9 @@ export default function ChannelBrowseScreen({
       failures={join.failures}
       onJoin={channelId => void join.join(channelId)}
       onOpen={row => onOpenChannel(row.id, row.name)}
+      onPreview={row =>
+        onPreview({channelId: row.id, name: row.name, topic: row.topic, memberCount: row.memberCount})
+      }
       hasMore={list.hasNextPage}
       loadingMore={list.isFetchingNextPage}
       moreFailed={list.isFetchNextPageError}
@@ -150,6 +166,7 @@ export function ChannelBrowseView({
   failures,
   onJoin,
   onOpen,
+  onPreview,
   hasMore,
   loadingMore,
   moreFailed,
@@ -168,6 +185,7 @@ export function ChannelBrowseView({
   failures: ReadonlyMap<string, ChannelBrowseFailure>;
   onJoin: (channelId: string) => void;
   onOpen: (row: BrowseChannel) => void;
+  onPreview: (row: BrowseChannel) => void;
   hasMore: boolean;
   loadingMore: boolean;
   moreFailed: boolean;
@@ -239,6 +257,7 @@ export function ChannelBrowseView({
             failure={failures.get(item.id)}
             onJoin={onJoin}
             onOpen={onOpen}
+            onPreview={onPreview}
           />
         )}
         ListFooterComponent={
@@ -315,6 +334,7 @@ export function BrowseRow({
   failure,
   onJoin,
   onOpen,
+  onPreview,
 }: {
   row: BrowseChannel;
   index: number;
@@ -323,6 +343,7 @@ export function BrowseRow({
   failure: ChannelBrowseFailure | undefined;
   onJoin: (channelId: string) => void;
   onOpen: (row: BrowseChannel) => void;
+  onPreview: (row: BrowseChannel) => void;
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
   const formatMessage = useFormatMessage();
@@ -330,6 +351,7 @@ export function BrowseRow({
   const stacked = fontScale >= STACK_PILL_SCALE;
   const gone = failure?.kind === 'notFound';
   const failed = failure !== undefined && !gone;
+  const canPreview = !row.isMember && !gone;
   const meta = [formatMessage('channels.browse.memberCount', {count: row.memberCount}), row.topic]
     .filter((part): part is string => part !== undefined && part !== '')
     .join(' · ');
@@ -342,11 +364,12 @@ export function BrowseRow({
   return (
     <GroupCardItem index={index} count={count} inset="icon" testID={`channel-browse-row-${row.id}`}>
       <View style={[styles.row, stacked && styles.rowStacked]}>
-        {/* #5847(미리 보기)이 이 칸을 누르는 면으로 바꾼다. 지금은 읽히기만 한다. */}
-        <View
+        {/* 참여하지 않은 줄은 이 칸이 누르는 면이다 — 누르면 미리 보기(#5847). 이미 든 줄 · 그 사이 꺼진 줄은 읽히기만 한다. */}
+        <RowMain
           style={styles.rowMain}
-          accessible
-          accessibilityLabel={spoken}
+          label={spoken}
+          onPress={canPreview ? () => onPreview(row) : undefined}
+          hint={canPreview ? formatMessage('channels.preview.openHint') : undefined}
           testID={`channel-browse-row-text-${row.id}`}>
           <RowIcon source={HOME_ICONS.hash} />
           <View style={styles.rowText}>
@@ -372,7 +395,7 @@ export function BrowseRow({
               {second}
             </Sentence>
           </View>
-        </View>
+        </RowMain>
         {gone ? null : (
           <View style={[styles.action, stacked && styles.actionStacked]}>
             {row.isMember ? (
@@ -397,6 +420,43 @@ export function BrowseRow({
         )}
       </View>
     </GroupCardItem>
+  );
+}
+
+/** 줄의 글자 칸. 눌리는 줄(참여하지 않은 채널)만 누름 면이고 낭독은 어느 쪽이든 한 덩어리 이름 하나다. */
+function RowMain({
+  style,
+  label,
+  hint,
+  onPress,
+  testID,
+  children,
+}: {
+  style: StyleProp<ViewStyle>;
+  label: string;
+  hint?: string;
+  onPress?: () => void;
+  testID: string;
+  children: React.ReactNode;
+}): React.JSX.Element {
+  if (onPress === undefined) {
+    return (
+      <View style={style} accessible accessibilityLabel={label} testID={testID}>
+        {children}
+      </View>
+    );
+  }
+  return (
+    <Pressable
+      style={style}
+      accessible
+      accessibilityRole="button"
+      accessibilityLabel={label}
+      accessibilityHint={hint}
+      onPress={onPress}
+      testID={testID}>
+      {children}
+    </Pressable>
   );
 }
 
