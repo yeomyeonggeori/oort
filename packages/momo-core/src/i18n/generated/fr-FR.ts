@@ -62,6 +62,12 @@ export const catalog: MessageCatalog = {
       "value": "Canaux que vous n'avez pas rejoints"
     }
   ],
+  "channels.browse.hiddenGroup": [
+    {
+      "type": 0,
+      "value": "Canaux publics masqués dans le navigateur"
+    }
+  ],
   "channels.browse.homeRowHint": [
     {
       "type": 0,
@@ -272,6 +278,60 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "Rechercher par nom ou sujet"
+    }
+  ],
+  "channels.browse.switchForbidden": [
+    {
+      "type": 0,
+      "value": "Seuls les propriétaires et les administrateurs peuvent le modifier."
+    }
+  ],
+  "channels.browse.switchGeneric": [
+    {
+      "type": 0,
+      "value": "Impossible d'enregistrer la modification. Réessayez."
+    }
+  ],
+  "channels.browse.switchLabel": [
+    {
+      "type": 0,
+      "value": "Afficher dans le navigateur de canaux"
+    }
+  ],
+  "channels.browse.switchNetwork": [
+    {
+      "type": 0,
+      "value": "Impossible d'enregistrer la modification. "
+    },
+    {
+      "type": 1,
+      "value": "reason"
+    }
+  ],
+  "channels.browse.switchNotFound": [
+    {
+      "type": 0,
+      "value": "Ce canal n'est plus disponible."
+    }
+  ],
+  "channels.browse.switchNotListable": [
+    {
+      "type": 0,
+      "value": "Seuls les canaux publics peuvent être affichés dans le navigateur."
+    }
+  ],
+  "channels.browse.switchShowAria": [
+    {
+      "type": 0,
+      "value": "Afficher "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " dans le navigateur de canaux"
     }
   ],
   "channels.browse.title": [

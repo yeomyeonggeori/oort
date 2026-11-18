@@ -62,6 +62,12 @@ export const catalog: MessageCatalog = {
       "value": "未加入的频道"
     }
   ],
+  "channels.browse.hiddenGroup": [
+    {
+      "type": 0,
+      "value": "未在浏览中显示的公开频道"
+    }
+  ],
   "channels.browse.homeRowHint": [
     {
       "type": 0,
@@ -251,6 +257,56 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "按名称或主题搜索"
+    }
+  ],
+  "channels.browse.switchForbidden": [
+    {
+      "type": 0,
+      "value": "只有所有者和管理员可以更改。"
+    }
+  ],
+  "channels.browse.switchGeneric": [
+    {
+      "type": 0,
+      "value": "未能保存更改，请重试。"
+    }
+  ],
+  "channels.browse.switchLabel": [
+    {
+      "type": 0,
+      "value": "在浏览中显示"
+    }
+  ],
+  "channels.browse.switchNetwork": [
+    {
+      "type": 0,
+      "value": "未能保存更改。"
+    },
+    {
+      "type": 1,
+      "value": "reason"
+    }
+  ],
+  "channels.browse.switchNotFound": [
+    {
+      "type": 0,
+      "value": "此频道已不可用。"
+    }
+  ],
+  "channels.browse.switchNotListable": [
+    {
+      "type": 0,
+      "value": "只有公开频道可以在浏览中显示。"
+    }
+  ],
+  "channels.browse.switchShowAria": [
+    {
+      "type": 0,
+      "value": "在浏览中显示 "
+    },
+    {
+      "type": 1,
+      "value": "name"
     }
   ],
   "channels.browse.title": [

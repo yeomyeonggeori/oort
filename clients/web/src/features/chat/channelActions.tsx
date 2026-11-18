@@ -14,6 +14,8 @@ import {
   GitPullRequest,
   Info,
   Link,
+  Loader2,
+  Compass,
   DoorOpen,
   Mail,
   MailOpen,
@@ -44,7 +46,10 @@ import {
   CHANNEL_MARK_UNREAD_FAILURE,
   CHANNEL_MUTE_FAILURE,
 } from "@momo/core/features/channels/model";
+import { canSetBrowseListed } from "@momo/core/features/channels/browse";
+import { useSetBrowseListed } from "@/features/channels/useSetBrowseListed";
 import {
+  DropdownMenuCheckboxItem,
   DropdownMenuItem,
   DropdownMenuRadioGroup,
   DropdownMenuRadioItem,
@@ -220,6 +225,7 @@ export function useChannelActions({
     setCopyFailure(null);
     setErrorState(next);
   };
+  const browseSwitch = useSetBrowseListed(workspaceId);
   const [confirmLeave, setConfirmLeave] = useState(false);
   const [leaveError, setLeaveError] = useState<string | null>(null);
 
@@ -385,6 +391,8 @@ export function useChannelActions({
           composedUnreadCount(readState) === 0,
         canCloseDm: Boolean(onCloseDm),
         canLeaveDm: Boolean(onLeaveDm),
+        // 소유자 · 관리자가 든 공개 채널, 그리고 이 서버가 표시를 싣는 동안만(옛 서버 · 역할 모름은 문을 세우지 않는다).
+        canSetBrowseListed: canSetBrowseListed(channel, selfRole),
       }),
     [
       channel,
@@ -404,6 +412,7 @@ export function useChannelActions({
     copiedLink: linkCopy.copied,
     copiedName: nameCopy.copied,
     copiedId: idCopy.copied,
+    browseListed: channel.browseListed === true,
     starred,
     sections,
     currentSectionId,
@@ -439,11 +448,23 @@ export function useChannelActions({
     if (key === "mute" && muteMutation.isPending) return;
     if (key === "mark-read" && markReadMutation.isPending) return;
     if (key === "mark-unread" && markUnreadMutation.isPending) return;
+    if (key === "browse-listed" && browseSwitch.pending.has(channel.id)) return;
     switch (key) {
       case "mute": {
         const previousMuted = client.getQueryData<Channel[]>(["channels", workspaceId])
           ?.find((row) => uuidEq(row.id, channel.id))?.muted ?? channel.muted;
         muteMutation.mutate({ workspaceId, channelId: channel.id, previousMuted, muted: !previousMuted });
+        return;
+      }
+      case "browse-listed": {
+        // 낙관 갱신 없이 서버의 답으로 캐시를 고친다(`useSetBrowseListed`). 켜진 값은 캐시의 가장 최근 줄에서 읽는다.
+        const current = client.getQueryData<Channel[]>(["channels", workspaceId])
+          ?.find((row) => uuidEq(row.id, channel.id))?.browseListed ?? channel.browseListed;
+        setError(null);
+        void browseSwitch.run(channel.id, current !== true).then((result) => {
+          if (result === null || result.ok) return;
+          setError(formatMessage(result.failure.key, result.failure.values as never));
+        });
         return;
       }
       case "mark-read":
@@ -490,6 +511,7 @@ export function useChannelActions({
     if (key === "mute") return muteMutation.isPending;
     if (key === "mark-read") return markReadMutation.isPending;
     if (key === "mark-unread") return markUnreadMutation.isPending;
+    if (key === "browse-listed") return browseSwitch.pending.has(channel.id);
     return false;
   }
 
@@ -543,6 +565,7 @@ export function useChannelActions({
  *   bell(-off)   Bell / BellOff  알림 상태 그대로(낱말 「알림 켜짐 / 꺼짐」과 같은 상태를 그린다)
  *   memory       BookOpen        기억 표지(`MemoryReceiptChip`)와 같다
  *   github       GitPullRequest  앱이 GitHub 를 그리는 글리프(작업 보드 · 실행 보고)
+ *   browse       Compass         채널 둘러보기에 보이기(#5843)
  *   star/unstar  Star / StarOff  별표 붙이기 / 떼기
  *   hide         EyeOff          「목록에서 숨기기」(대화를 지우지 않고 목록에서 안 보이게 한다)
  *   leave        DoorOpen        나가기. 위험 줄이라 글자와 함께 `--danger` 를 입는다(`currentColor`)
@@ -561,6 +584,7 @@ const ACTION_ICON: Record<ChannelActionIcon, LucideIcon> = {
   "bell-off": BellOff,
   memory: BookOpen,
   github: GitPullRequest,
+  browse: Compass,
   star: Star,
   unstar: StarOff,
   hide: EyeOff,
@@ -727,6 +751,24 @@ function ChannelActionMenuRow({
       </>
     ),
   };
+  // 켜고 끄는 줄(#5843): 켜짐이 체크와 `aria-checked` 로 함께 읽힌다. 끝자리 16px 은 늘 잡혀 있어(진행 중 돌림 · 체크 · 빈칸이 같은 자리)
+  // 줄 폭이 변하지 않는다. 진행 중에는 그 줄만 `aria-busy` 와 돌림으로 말하고 값은 서버가 답할 때까지 그대로다.
+  if (item.checked !== undefined && surface === "header") {
+    const { tone: _tone, children: _children, ...rest } = props;
+    return (
+      <DropdownMenuCheckboxItem {...rest} checked={item.checked}>
+        <ActionIcon name={item.icon} />
+        <span className="min-w-0 flex-1 truncate">{item.label}</span>
+        <span className="flex size-4 shrink-0 items-center justify-center" aria-hidden="true">
+          {busy ? (
+            <Loader2 className="spinner-busy size-4" />
+          ) : item.checked ? (
+            <Check className="size-4 text-ink-muted" />
+          ) : null}
+        </span>
+      </DropdownMenuCheckboxItem>
+    );
+  }
   return surface === "header" ? (
     <DropdownMenuItem {...props} />
   ) : (
