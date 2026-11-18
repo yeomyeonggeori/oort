@@ -55,13 +55,24 @@ const LAUNCH = {id: 'ch-launch', name: '출시-준비', memberCount: 5, isMember
 const GENERAL = {id: 'ch-general', name: 'general', memberCount: 12, isMember: true, isDefault: true};
 const BROWSE = [DESIGN, GENERAL, LAUNCH];
 
+// E3(#5840) 인계 0절의 모양 — 최신 먼저. 링크 · 멘션 · 첨부 · 답글 · 지워진 글 · 고친 글 · 이름 없는 글쓴이가 모두 든다.
+const PREVIEW_NEWEST_FIRST = [
+  {id: 'p4', body: '@박서연 https://example.com/x 확인했어요', author: {displayName: '김도현', kind: 'human'}, createdAtMs: 4_000, edited: true, deleted: false, replyCount: 0, attachmentNames: []},
+  {id: 'p3', author: {kind: 'human'}, createdAtMs: 3_000, edited: false, deleted: true, replyCount: 0, attachmentNames: []},
+  {id: 'p2', body: '회의록 올려요', author: {displayName: '박서연', kind: 'human'}, createdAtMs: 2_000, edited: false, deleted: false, replyCount: 0, attachmentNames: ['회의록.pdf']},
+  {id: 'p1', body: '이번 주 리뷰는 목요일이에요', author: {kind: 'human'}, createdAtMs: 1_000, edited: false, deleted: false, replyCount: 3, attachmentNames: []},
+];
+
 function jsonResponse(status: number, body: unknown): Response {
   return {status, ok: status >= 200 && status < 300, text: async () => JSON.stringify(body)} as unknown as Response;
 }
 
 type JoinAnswer = 'ok' | 404 | 429 | 'network' | 'hold';
 
+type PreviewAnswer = 'ok' | 'empty' | 404 | 429;
+
 interface Routes {
+  preview?: PreviewAnswer;
   role?: string;
   browse?: unknown[];
   join?: JoinAnswer;
@@ -78,6 +89,12 @@ function installFetch(routes: Routes): jest.Mock {
     const method = init?.method ?? 'GET';
     if (url.includes('/channels/browse')) {
       return jsonResponse(200, {channels: routes.browse ?? BROWSE});
+    }
+    if (/\/channels\/[^/]+\/preview$/.test(url)) {
+      const answer = routes.preview ?? 'ok';
+      if (answer === 404) return jsonResponse(404, {error: {message: 'channel not found'}});
+      if (answer === 429) return jsonResponse(429, {error: {message: 'rate limited'}});
+      return jsonResponse(200, {channel: {id: 'ch-design-review', name: '디자인-리뷰', topic: '주간 시안 리뷰', memberCount: 8, isMember: false}, messages: answer === 'empty' ? [] : PREVIEW_NEWEST_FIRST});
     }
     const join = /\/channels\/([^/]+)\/members\/me$/.exec(url);
     if (join && method === 'POST') {
@@ -292,5 +309,90 @@ describe('홈 이름 검색 — 「참여하지 않은 공개 채널」 묶음',
     await waitFor(() => expect(screen.getByTestId('channels-no-match')).toBeTruthy());
     expect(screen.queryByTestId('home-not-joined-group')).toBeNull();
     expect(fetchMock.mock.calls.some(call => String(call[0]).includes('/channels/browse'))).toBe(false);
+  });
+});
+
+describe('미리 보기 — 글자 칸을 누르면 읽기 전용 층(#5847, ADR-0224 D5)', () => {
+  const openPreview = async (routes: Routes = {role: 'member'}): Promise<jest.Mock> => {
+    const fetchMock = await mountHome(routes);
+    await openBrowse();
+    fireEvent.press(screen.getByTestId('channel-browse-row-text-ch-design-review'));
+    await waitFor(() => expect(screen.getByTestId('channel-preview-pane')).toBeTruthy());
+    return fetchMock;
+  };
+  const subscribedTo = (): string[] => {
+    const clients = (jest.requireMock('centrifuge') as {__clients: {subs: Map<string, unknown>}[]}).__clients;
+    return clients.flatMap(client => [...client.subs.keys()]);
+  };
+
+  it('서버 글이 대화 차례(오래된 글이 위)로 서고, 누를 수 있는 것은 닫기와 「참여」뿐이며, 쓰기 · 읽음 · 구독이 0이다', async () => {
+    const fetchMock = await openPreview();
+    const pane = within(screen.getByTestId('channel-preview-pane'));
+    await waitFor(() => expect(pane.getByTestId('channel-preview-list')).toBeTruthy());
+    const order = pane.getAllByTestId(/^channel-preview-message-/).map(node => String(node.props.testID).replace('channel-preview-message-', ''));
+    expect(order).toEqual(['p1', 'p2', 'p3', 'p4']);
+    // 머리: #이름 · 멤버 수 · 주제. 글: 지워진 글 · 고친 표시 · 답글 수(누르지 못함) · 첨부 이름 + 잠금 문장 · 이름 없는 글쓴이.
+    expect(pane.getByTestId('channel-preview-title').props.children).toBe('#디자인-리뷰');
+    expect(pane.getByTestId('channel-preview-meta').props.children).toBe('멤버 8명 · 주간 시안 리뷰');
+    expect(pane.getByTestId('tombstone').props.children).toBe('삭제된 메시지');
+    expect(pane.getByText('수정됨')).toBeTruthy();
+    expect(pane.getByText('답글 3개')).toBeTruthy();
+    expect(pane.getByText('회의록.pdf')).toBeTruthy();
+    expect(pane.getByText('참여하면 볼 수 있어요')).toBeTruthy();
+    expect(pane.getAllByText('나간 멤버').length).toBe(2);
+    // 누를 수 있는 것: 닫기 · 참여. (입력창 · 반응 · 스레드 · 첨부 · 링크 · 멘션 · 길게 누르기는 없다.)
+    expect(pane.getAllByRole('button').map(node => String(node.props.testID))).toEqual(['channel-preview-close', 'channel-preview-join']);
+    expect(pane.queryByTestId('composer-input')).toBeNull();
+    // 미리 보기는 읽기 하나다: 그 호출 하나, GET 만, 읽음 · 참여 없음, 그 채널의 실시간 구독 없음.
+    expect(fetchMock.mock.calls.filter(call => String(call[0]).includes('/preview'))).toHaveLength(1);
+    expect(fetchMock.mock.calls.filter(call => call[1]?.method && call[1].method !== 'GET' && !String(call[0]).includes('/v1/auth/'))).toHaveLength(0);
+    expect(subscribedTo().some(name => name.includes('ch-design-review'))).toBe(false);
+  });
+
+  it('「참여」를 두 번 눌러도 요청 하나, 성공하면 미리 보기와 둘러보기가 걷히고 그 대화가 열린다', async () => {
+    const fetchMock = await openPreview({role: 'member', join: 'hold'});
+    const join = await screen.findByTestId('channel-preview-join');
+    fireEvent.press(join);
+    fireEvent.press(join);
+    await waitFor(() => expect(releaseJoin).not.toBeNull());
+    expect(joinCalls(fetchMock)).toHaveLength(1);
+    await act(async () => {
+      releaseJoin?.();
+      await new Promise(resolve => setTimeout(resolve, 100));
+    });
+    await waitFor(() => expect(screen.queryByTestId('channel-preview-pane')).toBeNull());
+    expect(screen.queryByTestId('channel-browse-pane')).toBeNull();
+    expect(screen.getByTestId('conversation-pane')).toBeTruthy();
+    expect(joinCalls(fetchMock)).toHaveLength(1);
+  });
+
+  it('404(그 사이 꺼졌거나 보관됨)는 「이 채널을 찾을 수 없어요」, 다시 시도도 참여도 없다', async () => {
+    await openPreview({role: 'member', preview: 404});
+    const error = await screen.findByTestId('channel-preview-error');
+    expect(within(error).getByText('이 채널을 찾을 수 없어요')).toBeTruthy();
+    expect(within(error).queryByText('다시 시도')).toBeNull();
+    expect(screen.queryByTestId('channel-preview-join')).toBeNull();
+    expect(screen.getByTestId('channel-preview-bar')).toBeTruthy();
+  });
+
+  it('429는 까닭과 「다시 시도」, 비어 있는 채널은 「아직 글이 없어요」', async () => {
+    await openPreview({role: 'member', preview: 429});
+    const error = await screen.findByTestId('channel-preview-error');
+    expect(within(error).getByText('요청이 너무 잦아요. 잠시 뒤에 다시 시도해 주세요.')).toBeTruthy();
+    expect(within(error).getByText('다시 시도')).toBeTruthy();
+  });
+
+  it('비어 있는 채널은 「아직 글이 없어요」 — 참여 띠는 그대로다', async () => {
+    await openPreview({role: 'member', preview: 'empty'});
+    expect(await screen.findByText('아직 글이 없어요')).toBeTruthy();
+    expect(screen.getByTestId('channel-preview-join')).toBeTruthy();
+  });
+
+  it('이미 든 줄의 글자 칸은 누름 면이 아니다(지금처럼 「참여 중」 단추만)', async () => {
+    await mountHome();
+    await openBrowse();
+    expect(screen.getByTestId('channel-browse-row-text-ch-general').props.accessibilityRole).toBeUndefined();
+    fireEvent.press(screen.getByTestId('channel-browse-row-text-ch-general'));
+    expect(screen.queryByTestId('channel-preview-pane')).toBeNull();
   });
 });

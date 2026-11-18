@@ -32,6 +32,7 @@ import {
   navReducer,
   workConsoleAvailable,
   type OpenAgent,
+  type OpenChannelPreview,
   type OpenHostedConnection,
   type Tab,
 } from '../nav/state';
@@ -44,6 +45,7 @@ import {RealtimeProvider} from '../realtime/RealtimeProvider';
 import AgentDetailScreen from '../screens/AgentDetailScreen';
 import AgentsScreen from '../screens/AgentsScreen';
 import ChannelBrowseScreen from '../screens/ChannelBrowseScreen';
+import ChannelPreviewScreen from '../screens/ChannelPreviewScreen';
 import ConversationScreen from '../screens/ConversationScreen';
 import HostedConnectionDetailScreen from '../screens/HostedConnectionDetailScreen';
 import HostedConnectionsScreen from '../screens/HostedConnectionsScreen';
@@ -276,6 +278,10 @@ export function Shell({
     (initialQuery?: string) => dispatch({type: 'openChannelBrowse', initialQuery}),
     [],
   );
+  const onOpenChannelPreview = useCallback(
+    (preview: OpenChannelPreview) => dispatch({type: 'openChannelPreview', preview}),
+    [],
+  );
   const onOpenChannelFromBrowse = useCallback(
     (channelId: string, title: string) =>
       dispatch({type: 'openChannelFromBrowse', conversation: {channelId, title}}),
@@ -415,7 +421,8 @@ export function Shell({
     nav.hosted !== null ||
     nav.apps !== null ||
     nav.settings ||
-    nav.channelBrowse !== null;
+    nav.channelBrowse !== null ||
+    nav.channelPreview !== null;
   // 설정 위에 다른 층이 얹히면(알림 입구 등) 설정은 더 이상 VoiceOver 의 모달 경계가 아니다.
   const settingsOnTop =
     nav.settings &&
@@ -426,7 +433,8 @@ export function Shell({
     nav.workSession === null &&
     nav.hosted === null &&
     nav.apps === null &&
-    nav.channelBrowse === null;
+    nav.channelBrowse === null &&
+    nav.channelPreview === null;
   // 대화 밑에 탭 판 말고 다른 층(작업 목록·작업 상세·에이전트 목록·에이전트 상세 등)이 깔려 있는가 (#5546). 그 층들은 탭 판처럼 따로
   // 숨기지 않으므로 이때는 대화 판이 VoiceOver 의 모달 경계다 — 작업 상세 위의 대화(#1292)와 같은 이유. 탭 위에 바로 연 대화는 그대로
   // 모달이 아니다: 그 밑의 탭 판과 크롬은 `covered` 한 쌍이 뺀다.
@@ -438,7 +446,8 @@ export function Shell({
     nav.hosted !== null ||
     nav.apps !== null ||
     nav.settings ||
-    nav.channelBrowse !== null;
+    nav.channelBrowse !== null ||
+    nav.channelPreview !== null;
   // 메뉴가 열린 채 다른 길(알림 탭 등)로 층이 서면 메뉴를 **접는다**. 숨기기만 하면
   // 층이 닫힐 때 아무도 부르지 않은 메뉴가 다시 뜬다(design-review L1).
   useEffect(() => {
@@ -691,13 +700,30 @@ export function Shell({
       {/* 「채널 둘러보기」(#5846). 닫히면 언마운트한다 — 열 때마다 다시 읽는다. 대화는 이 층을 걷고 열린다(`openChannelFromBrowse`). */}
       {nav.channelBrowse ? (
         <EdgeSwipeBack
-          accessibilityViewIsModal={nav.conversation === null}
+          accessibilityViewIsModal={nav.conversation === null && nav.channelPreview === null}
           style={styles.overlay}
           onBack={onBack}
           testID="channel-browse-pane">
           <ChannelBrowseScreen
             key={nav.channelBrowse.seq}
             initialQuery={nav.channelBrowse.initialQuery}
+            onClose={onBack}
+            onOpenChannel={onOpenChannelFromBrowse}
+            onPreview={onOpenChannelPreview}
+          />
+        </EdgeSwipeBack>
+      ) : null}
+
+      {/* 「채널 미리 보기」(#5847): 둘러보기 위의 층. 참여하면 `openChannelFromBrowse` 가 둘 다 걷고 그 대화를 연다. */}
+      {nav.channelPreview ? (
+        <EdgeSwipeBack
+          accessibilityViewIsModal={nav.conversation === null}
+          style={styles.overlay}
+          onBack={onBack}
+          testID="channel-preview-pane">
+          <ChannelPreviewScreen
+            key={nav.channelPreview.channelId}
+            channel={nav.channelPreview}
             onClose={onBack}
             onOpenChannel={onOpenChannelFromBrowse}
           />
