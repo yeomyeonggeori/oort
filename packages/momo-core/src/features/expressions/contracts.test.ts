@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { assertExpressionContract, matchesExpressionContract } from "./contracts";
 import { FIXTURE_AI_APPROVAL, FIXTURE_APPROVAL, FIXTURE_CHANNEL_ID, FIXTURE_EXPRESSIONS, FIXTURE_HIDDEN_DELTA, FIXTURE_LIST, FIXTURE_MEDIA_SET, FIXTURE_READY_DRAFT, FIXTURE_RESULT, fixtureManualDraft } from "./fixtures";
 import { expressionChoice } from "./cards";
-import { EXPRESSION_FAILURE_CODES, MANUAL_UPLOAD_CODES } from "./types";
+import { EXPRESSION_FAILURE_CODES, LINK_AWAITING_APPROVAL_CODE, MANUAL_UPLOAD_CODES } from "./types";
 
 const choice = expressionChoice(FIXTURE_READY_DRAFT, 0)!;
 const metadata = { name: "happy_dance", displayName: "신나는 춤", tags: ["축하"], subjectMemberId: null };
@@ -19,6 +19,10 @@ describe("ADR-0218 closed wire-schema fixture assertions", () => {
     assertExpressionContract("Draft", FIXTURE_READY_DRAFT);
     // `Draft.code` is the link-import codes followed by the six G3.8 card codes (G7, merged on #4820 C2b).
     for (const code of [...MANUAL_UPLOAD_CODES, ...EXPRESSION_FAILURE_CODES]) assertExpressionContract("Draft", fixtureManualDraft(code));
+    // ADR-0218 §18 (#5899): an agent's link waits for a person with no picture, and the decision approves it without a hash.
+    assertExpressionContract("Draft", { ...fixtureManualDraft(), code: LINK_AWAITING_APPROVAL_CODE });
+    assertExpressionContract("Decision", { expressionChoice: { draftId: choice.draftId, revision: choice.revision } });
+    assertExpressionContract("Decision", { expressionChoice: { draftId: choice.draftId, revision: choice.revision, kind: "emoji" } });
     assertExpressionContract("Approval", FIXTURE_APPROVAL);
     assertExpressionContract("Result", FIXTURE_RESULT);
     assertExpressionContract("Choice", choice);
@@ -72,6 +76,10 @@ describe("ADR-0218 closed wire-schema fixture assertions", () => {
     expect(matchesExpressionContract("Expression", { ...FIXTURE_EXPRESSIONS[0], media: null })).toBe(false);
     expect(matchesExpressionContract("Draft", { ...FIXTURE_READY_DRAFT, state: "manual_upload_required" })).toBe(false);
     expect(matchesExpressionContract("Draft", { ...fixtureManualDraft(), code: "unknown" })).toBe(false);
+    // The hash stays required everywhere else: registering a direct upload, and a hash-less choice with anything extra.
+    expect(matchesExpressionContract("Choice", { draftId: choice.draftId, revision: choice.revision })).toBe(false);
+    expect(matchesExpressionContract("Decision", { expressionChoice: { draftId: choice.draftId, revision: choice.revision, sha256: "nope" } })).toBe(false);
+    expect(matchesExpressionContract("Decision", { expressionChoice: { draftId: choice.draftId, revision: choice.revision, url: "https://media.example.com/a.gif" } })).toBe(false);
     expect(matchesExpressionContract("Draft", { ...FIXTURE_READY_DRAFT, downloadUrl: "https://bad.example" })).toBe(false);
     expect(matchesExpressionContract("Expression", { ...FIXTURE_EXPRESSIONS[0], name: "UpperCase" })).toBe(false);
     expect(matchesExpressionContract("Metadata", { ...metadata, name: "a".repeat(31) })).toBe(false);

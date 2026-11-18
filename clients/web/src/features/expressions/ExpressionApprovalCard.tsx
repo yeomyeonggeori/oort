@@ -1,15 +1,15 @@
 import { record, expressionResultPayload } from "./cards";
 import { useEffect, useRef, useState } from "react";
 import { authedResponse } from "@momo/core/lib/api";
-import { expressionApprovalSummary } from "@momo/core/features/expressions/cards";
+import { expressionApprovalSummary, expressionLinkDecision } from "@momo/core/features/expressions/cards";
 import { expressionResultMessage } from "@momo/core/features/expressions/message";
-import type { ExpressionApproval, ExpressionChoice, ExpressionDraft, ExpressionResult } from "@momo/core/features/expressions/types";
+import type { ExpressionApproval, ExpressionChoice, ExpressionDraft, ExpressionLinkChoice, ExpressionResult } from "@momo/core/features/expressions/types";
 import { interpretReceipt, newDecisionId, type ApprovalDecisionReceipt } from "@momo/core/features/timeline/approvalDecision";
 import type { AgentApprovalCard } from "@momo/core/features/timeline/agentCardModel";
 import { useSettledApproval, rememberSettledApproval } from "@/features/timeline/settledApprovals";
 import { seedComposerText } from "@/features/chat/draftStore";
 import { Button } from "@/design/ui/button";
-import { ExpressionDraftCard } from "./ExpressionDraftCard";
+import { ExpressionDraftCard, type ExpressionDecisionNote } from "./ExpressionDraftCard";
 import { ExpressionSourceRow } from "./ExpressionSourceRow";
 import { useExpressions } from "./context";
 
@@ -51,7 +51,7 @@ export function ExpressionApprovalCard({ card, payload, result }: { card: AgentA
   // The head says what the candidates below say, so it is not made when they are not shown.
   const head = validScope ? expressionApprovalSummary(drafts) : null;
   const pending = status === "pending" && (!card.expiresAtMs || now < card.expiresAtMs);
-  async function decide(choice?: ExpressionChoice) {
+  async function decide(choice?: ExpressionChoice | ExpressionLinkChoice): Promise<ExpressionDecisionNote | void> {
     if (!store || !card.approvalId || !pending || lock.current || offline || (choice && !validScope)) return;
     const selected = drafts.find((draft) => draft.draftId === choice?.draftId);
     if (choice && selected?.subjectMemberId && selected.subjectMemberId !== store.memberId) throw new Error("subject");
@@ -61,6 +61,16 @@ export function ExpressionApprovalCard({ card, payload, result }: { card: AgentA
     try {
       const response = await authedResponse(`${store.base}/approvals/${card.approvalId}/decision`, { method: "POST", body: JSON.stringify({ approval_id: card.approvalId, approve: !!choice, client_decision_id: key, ...(choice ? { expressionChoice: choice } : {}) }) });
       const receipt = response.json<ApprovalDecisionReceipt>();
+      // ADR-0218 §18 (#5934): a link approval answers in two ways of its own before the usual reading. A fetch
+      // that failed puts its reason on that candidate and leaves the card pending; a busy server took nothing.
+      const link = choice && !("sha256" in choice) ? expressionLinkDecision(response.status, receipt.status) : null;
+      if (link !== null) {
+        keys.current.delete(pin);
+        if (link.kind === "busy") return "link_busy";
+        const failed = link.code;
+        setDrafts((items) => items.map((item): ExpressionDraft => item.draftId === choice?.draftId ? { ...item, state: "manual_upload_required", code: failed, media: null } : item));
+        return "link_failed";
+      }
       const outcome = interpretReceipt(response.status, receipt);
       if (outcome.kind === "error") { if (outcome.errorCode === "idempotency_conflict") keys.current.delete(pin); throw new Error("decision"); }
       if (!outcome.status || outcome.status === "pending") throw new Error("pending");
