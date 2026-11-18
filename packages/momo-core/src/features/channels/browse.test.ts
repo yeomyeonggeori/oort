@@ -5,7 +5,11 @@ import { WireShapeError } from "../../lib/wire";
 import {
   browseChannelsPageFromWire,
   canBrowseChannelsNow,
+  canSetBrowseListed,
   channelBrowseLoadFailure,
+  channelBrowseSwitchFailure,
+  hiddenPublicChannels,
+  setChannelBrowseListed,
   channelJoinFailure,
   joinChannelResultFromWire,
   splitBrowseRows,
@@ -111,5 +115,84 @@ describe("failures by status", () => {
     expect(failure.key).toBe("channels.browse.joinNetwork");
     expect(failure.values?.reason).toContain("15초");
     expect(channelBrowseLoadFailure(new NetworkError("unreachable", 15_000)).key).toBe("channels.browse.loadNetwork");
+  });
+});
+
+// 「둘러보기에 보이기」 스위치 (ADR-0224 D2, #5843). 서버 계약은 #5839 인계 0절: PATCH 한 칸, 답은 목록 줄과 같은 Channel.
+describe("setChannelBrowseListed on the wire", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("PATCHes only the browseListed field and hands the answered channel through", async () => {
+    const seen: { url: string; method: string; body: unknown }[] = [];
+    const answered = { id: "c1", workspaceId: "w1", kind: "public", name: "dump-alpha", memberIds: [], browseListed: false, isDefault: false, muted: false };
+    vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
+      seen.push({ url: String(url), method: init?.method ?? "GET", body: JSON.parse(String(init?.body ?? "null")) });
+      return new Response(JSON.stringify({ channel: answered }), { status: 200, headers: { "Content-Type": "application/json" } });
+    }));
+    const channel = await setChannelBrowseListed("w1", "c1", false);
+    expect(seen).toHaveLength(1);
+    expect(seen[0]).toMatchObject({ method: "PATCH", body: { browseListed: false } });
+    expect(seen[0].url).toMatch(/\/v1\/workspaces\/w1\/channels\/c1$/);
+    expect(channel).toEqual(answered);
+  });
+
+  it("refuses an answer that is not a channel row", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ channel: { name: "x" } }), { status: 200, headers: { "Content-Type": "application/json" } })));
+    await expect(setChannelBrowseListed("w1", "c1", true)).rejects.toThrow(WireShapeError);
+  });
+});
+
+describe("canSetBrowseListed", () => {
+  const live = { kind: "public", browseListed: true } as const;
+  it.each([
+    ["owner", live, true],
+    ["admin", { kind: "public", browseListed: false }, true],
+    // 멤버 · 게스트 · 역할 모름에게는 문이 서지 않는다.
+    ["member", live, false],
+    ["guest", live, false],
+    [undefined, live, false],
+    // 공개가 아니면 서지 않는다(서버도 409 channel_not_listable).
+    ["owner", { kind: "private", browseListed: false }, false],
+    ["owner", { kind: "dm", browseListed: false }, false],
+    // 표시를 싣지 않는 옛 서버: 문을 세우지 않는다.
+    ["owner", { kind: "public" }, false],
+    ["owner", { kind: "public", browseListed: true, archivedAtMs: 1 }, false],
+  ] as const)("%s, %o -> %s", (role, channel, expected) => {
+    expect(canSetBrowseListed(channel, role)).toBe(expected);
+  });
+});
+
+describe("hiddenPublicChannels", () => {
+  it("keeps only live public channels that are explicitly off, in the caller's order", () => {
+    const rows = [
+      { id: "a", kind: "public", browseListed: false },
+      { id: "b", kind: "public", browseListed: true },
+      { id: "c", kind: "public" },
+      { id: "d", kind: "private", browseListed: false },
+      { id: "e", kind: "public", browseListed: false, archivedAtMs: 5 },
+      { id: "f", kind: "public", browseListed: false },
+    ] as const;
+    expect(hiddenPublicChannels(rows).map((r) => r.id)).toEqual(["a", "f"]);
+  });
+});
+
+describe("channelBrowseSwitchFailure", () => {
+  it.each([
+    [new ApiError(403, "only a human member can edit a channel"), "forbidden", "channels.browse.switchForbidden"],
+    [new ApiError(404, "channel not found"), "notFound", "channels.browse.switchNotFound"],
+    [new ApiError(409, "only a live public channel can be shown in channel browse", "channel_not_listable"), "notListable", "channels.browse.switchNotListable"],
+    // 다른 409(이름 겹침 따위)는 이 스위치의 말이 아니다.
+    [new ApiError(409, "channel name already exists"), "generic", "channels.browse.switchGeneric"],
+    [new ApiError(429, "rate limited", undefined, 30), "rateLimited", "channels.browse.rateLimited"],
+    [new ApiError(500, "boom"), "generic", "channels.browse.switchGeneric"],
+  ] as const)("%o -> %s", (error, kind, key) => {
+    expect(channelBrowseSwitchFailure(error)).toEqual({ kind, key });
+  });
+
+  it("carries the transport's own sentence for a network failure", () => {
+    const failure = channelBrowseSwitchFailure(new NetworkError("timeout", 15_000));
+    expect(failure.kind).toBe("network");
+    expect(failure.key).toBe("channels.browse.switchNetwork");
+    expect(failure.values?.reason).toContain("15초");
   });
 });

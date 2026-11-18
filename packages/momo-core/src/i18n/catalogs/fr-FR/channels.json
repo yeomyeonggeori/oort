@@ -57,5 +57,13 @@
   "channels.browse.offline": "Vous êtes hors ligne et ne pouvez pas rejoindre pour l'instant. Réessayez une fois connecté.",
   "channels.browse.menuLabel": "Ajouter un canal",
   "channels.browse.menuCreate": "Créer un canal",
-  "channels.browse.paletteGroup": "Canaux publics que vous n'avez pas rejoints"
+  "channels.browse.paletteGroup": "Canaux publics que vous n'avez pas rejoints",
+  "channels.browse.switchLabel": "Afficher dans le navigateur de canaux",
+  "channels.browse.switchShowAria": "Afficher {name} dans le navigateur de canaux",
+  "channels.browse.hiddenGroup": "Canaux publics masqués dans le navigateur",
+  "channels.browse.switchForbidden": "Seuls les propriétaires et les administrateurs peuvent le modifier.",
+  "channels.browse.switchNotFound": "Ce canal n'est plus disponible.",
+  "channels.browse.switchNotListable": "Seuls les canaux publics peuvent être affichés dans le navigateur.",
+  "channels.browse.switchNetwork": "Impossible d'enregistrer la modification. {reason}",
+  "channels.browse.switchGeneric": "Impossible d'enregistrer la modification. Réessayez."
 }

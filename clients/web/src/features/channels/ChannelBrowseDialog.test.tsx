@@ -22,15 +22,17 @@ import { useOpenChannelBrowse } from "./useChannelBrowse";
 //   4. 조합 중인 글자는 서버에 보내지 않고(확정된 글자만), 받은 줄을 화면에서 좁힌다.
 
 const EN = enChannels as Record<string, string>;
+const EN_HIDDEN_HEADING = EN["channels.browse.hiddenGroup"];
 const WS = "00000000-0000-7000-8000-000000000001";
 const ME = "00000000-0000-7000-8000-000000000101";
 const id = (n: number) => `00000000-0000-7000-8000-0000000002${String(n).padStart(2, "0")}`;
 
-const core = vi.hoisted(() => ({ browseChannels: vi.fn(), joinChannel: vi.fn(), fetchRoster: vi.fn() }));
+const core = vi.hoisted(() => ({ browseChannels: vi.fn(), joinChannel: vi.fn(), setChannelBrowseListed: vi.fn(), fetchRoster: vi.fn() }));
 vi.mock("@momo/core/features/channels/browse", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@momo/core/features/channels/browse")>()),
   browseChannels: (...args: unknown[]) => core.browseChannels(...args),
   joinChannel: (...args: unknown[]) => core.joinChannel(...args),
+  setChannelBrowseListed: (...args: unknown[]) => core.setChannelBrowseListed(...args),
 }));
 vi.mock("@momo/core/lib/api", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@momo/core/lib/api")>()),
@@ -154,6 +156,7 @@ beforeEach(() => {
   client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   core.browseChannels.mockReset();
   core.joinChannel.mockReset();
+  core.setChannelBrowseListed.mockReset();
   core.fetchRoster.mockReset();
   core.fetchRoster.mockResolvedValue([SELF]);
   vi.stubGlobal("matchMedia", (query: string) => ({
@@ -283,5 +286,81 @@ describe("채널 둘러보기 창", () => {
     await flush(400);
     expect(core.browseChannels).toHaveBeenCalledTimes(2);
     expect(core.browseChannels.mock.calls[1][1]).toMatchObject({ q: "디장" });
+  });
+
+  // #5843 — 소유자 · 관리자 묶음 「둘러보기에 안 보이는 공개 채널」.
+  describe("관리자 묶음", () => {
+    const asAdmin = () => core.fetchRoster.mockResolvedValue([{ ...SELF, role: "admin" }]);
+    const mine = (): Channel[] => [
+      { id: id(1), workspaceId: WS, kind: "public", name: "general", muted: false, browseListed: true },
+      { id: id(21), workspaceId: WS, kind: "public", name: "숨은-공개", muted: false, browseListed: false },
+      { id: id(22), workspaceId: WS, kind: "public", name: "숨은-둘", muted: false, browseListed: false },
+      { id: id(23), workspaceId: WS, kind: "private", name: "리더-회의", muted: false, browseListed: false },
+      // 값을 싣지 않는 옛 서버의 줄은 꺼진 것으로 읽지 않는다.
+      { id: id(24), workspaceId: WS, kind: "public", name: "옛-서버-줄", muted: false },
+    ];
+    const hiddenIds = () =>
+      Array.from(document.querySelectorAll('[data-testid="channel-browse-hidden-row"]')).map((node) => node.getAttribute("data-channel-id"));
+    const showButton = (n: number) =>
+      document.querySelector<HTMLButtonElement>(`[data-testid="channel-browse-hidden-row"][data-channel-id="${id(n)}"] [data-testid="channel-browse-hidden-show"]`);
+
+    it("관리자에게만 서고, 내가 든 꺼진 공개 채널만 담는다(비공개 · 값 없는 줄 · 서버 목록은 아니다)", async () => {
+      asAdmin();
+      client.setQueryData<Channel[]>(["channels", WS], mine());
+      core.browseChannels.mockResolvedValue({ channels: [row(1, "general", true)] });
+      await mountAndOpen();
+      expect(hiddenIds()).toEqual([id(21), id(22)]);
+      expect(document.querySelector('[data-testid="channel-browse-hidden-group"] h3')?.textContent).toBe(EN_HIDDEN_HEADING);
+    });
+
+    it("일반 멤버에게는 묶음이 서지 않는다", async () => {
+      client.setQueryData<Channel[]>(["channels", WS], mine());
+      core.browseChannels.mockResolvedValue({ channels: [row(1, "general", true)] });
+      await mountAndOpen();
+      expect(document.querySelector('[data-testid="channel-browse-hidden-group"]')).toBeNull();
+    });
+
+    it("켜면 요청이 나가고 그 줄이 빠지며 위 서버 목록을 다시 읽는다 — 다 켜면 묶음이 사라진다", async () => {
+      asAdmin();
+      client.setQueryData<Channel[]>(["channels", WS], mine());
+      core.browseChannels.mockResolvedValue({ channels: [row(1, "general", true)] });
+      core.setChannelBrowseListed.mockImplementation(async (_ws: string, channelId: string) => ({
+        ...mine().find((c) => c.id === channelId)!,
+        browseListed: true,
+      }));
+      await mountAndOpen();
+      const reads = core.browseChannels.mock.calls.length;
+      await act(async () => {
+        showButton(21)?.click();
+        await Promise.resolve();
+      });
+      await flush();
+      expect(core.setChannelBrowseListed).toHaveBeenCalledWith(WS, id(21), true);
+      expect(hiddenIds()).toEqual([id(22)]);
+      expect(core.browseChannels.mock.calls.length).toBeGreaterThan(reads);
+      await act(async () => {
+        showButton(22)?.click();
+        await Promise.resolve();
+      });
+      await flush();
+      expect(document.querySelector('[data-testid="channel-browse-hidden-group"]')).toBeNull();
+    });
+
+    it("실패는 그 줄이 문장으로 말하고 줄은 남아 다시 시도를 받는다", async () => {
+      asAdmin();
+      client.setQueryData<Channel[]>(["channels", WS], mine());
+      core.browseChannels.mockResolvedValue({ channels: [row(1, "general", true)] });
+      core.setChannelBrowseListed.mockRejectedValue(new ApiError(404, "channel not found"));
+      await mountAndOpen();
+      await act(async () => {
+        showButton(21)?.click();
+        await Promise.resolve();
+      });
+      await flush();
+      const failedRow = document.querySelector(`[data-testid="channel-browse-hidden-row"][data-channel-id="${id(21)}"]`);
+      expect(failedRow?.querySelector('[data-testid="channel-browse-hidden-error"]')?.textContent).toBe(EN["channels.browse.switchNotFound"]);
+      expect(failedRow?.querySelector('[data-testid="channel-browse-hidden-show"]')?.textContent).toBe(EN["channels.browse.retry"]);
+      expect(hiddenIds()).toEqual([id(21), id(22)]);
+    });
   });
 });

@@ -50,6 +50,12 @@ export const catalog: MessageCatalog = {
       "value": "Canales a los que no te has unido"
     }
   ],
+  "channels.browse.hiddenGroup": [
+    {
+      "type": 0,
+      "value": "Canales públicos ocultos al explorar"
+    }
+  ],
   "channels.browse.join": [
     {
       "type": 0,
@@ -242,6 +248,60 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "Buscar por nombre o tema"
+    }
+  ],
+  "channels.browse.switchForbidden": [
+    {
+      "type": 0,
+      "value": "Solo propietarios y administradores pueden cambiarlo."
+    }
+  ],
+  "channels.browse.switchGeneric": [
+    {
+      "type": 0,
+      "value": "No se pudo guardar el cambio. Inténtalo de nuevo."
+    }
+  ],
+  "channels.browse.switchLabel": [
+    {
+      "type": 0,
+      "value": "Mostrar al explorar"
+    }
+  ],
+  "channels.browse.switchNetwork": [
+    {
+      "type": 0,
+      "value": "No se pudo guardar el cambio. "
+    },
+    {
+      "type": 1,
+      "value": "reason"
+    }
+  ],
+  "channels.browse.switchNotFound": [
+    {
+      "type": 0,
+      "value": "Este canal ya no está disponible."
+    }
+  ],
+  "channels.browse.switchNotListable": [
+    {
+      "type": 0,
+      "value": "Solo los canales públicos pueden mostrarse al explorar."
+    }
+  ],
+  "channels.browse.switchShowAria": [
+    {
+      "type": 0,
+      "value": "Mostrar "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " al explorar"
     }
   ],
   "channels.browse.title": [
