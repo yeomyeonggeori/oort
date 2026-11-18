@@ -686,7 +686,8 @@ impl AgentWorker {
                     )
                     .await
                 {
-                    Ok(outcome) => {
+                    Ok((outcome, channels)) => {
+                        trace.reads.record(&outcome, &channels);
                         trace.tools.push(name.clone());
                         trace.tool_codes.push(outcome.code());
                         results.push(outcome.render(&name));

@@ -1281,6 +1281,11 @@ async fn x1_a_delegation_calls_hermes_once_and_the_helper_writes_the_answer() {
     let turns = audit_rows(&w.su, &w.t, "team_ai.turn", run).await;
     assert_eq!(turns.len(), 2);
     assert_eq!(turns[0]["outcome"], json!("delegation_started"));
+    assert!(
+        turns[0]["reads"]["channels"].is_array(),
+        "#5873: the delegation step's row carries the reads: {}",
+        turns[0]
+    );
     assert_eq!(
         turns[0]["hermes"],
         json!({"offered": ["web_search"], "results": ["accepted"]})

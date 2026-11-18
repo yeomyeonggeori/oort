@@ -264,6 +264,58 @@ impl Audience {
     }
 }
 
+/// Most channel ids one `team_ai.turn` audit row names (#5873). Past it `truncated` is set.
+pub const AUDIT_READ_CHANNELS_MAX: usize = 32;
+
+/// What a turn's reads did, for the audit row: the channels whose content was read (ids only) and,
+/// for the refused reads, **how many of each kind and nothing else** — a channel the requester may
+/// not see must never leave its id in the row. No text, no query, no argument, no channel name.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ReadAudit {
+    channels: Vec<Uuid>,
+    truncated: bool,
+    not_found: u32,
+    not_visible_here: u32,
+}
+
+impl ReadAudit {
+    /// One finished call of a tool: `channels` is what [`execute_read_tool_traced_in_tx`] returned
+    /// (empty for a tool that read no channel).
+    pub fn record(&mut self, outcome: &ToolOutcome, channels: &[Uuid]) {
+        match outcome {
+            ToolOutcome::NotFound => self.not_found = self.not_found.saturating_add(1),
+            ToolOutcome::NotVisibleHere => {
+                self.not_visible_here = self.not_visible_here.saturating_add(1)
+            }
+            ToolOutcome::Data(_) | ToolOutcome::Document { .. } => {
+                for id in channels {
+                    if self.channels.contains(id) {
+                        continue;
+                    }
+                    if self.channels.len() >= AUDIT_READ_CHANNELS_MAX {
+                        self.truncated = true;
+                    } else {
+                        self.channels.push(*id);
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// The audit row's `reads` value.
+    pub fn to_json(&self) -> Value {
+        serde_json::json!({
+            "channels": self.channels,
+            "truncated": self.truncated,
+            "denied": {
+                "not_found": self.not_found,
+                "not_visible_here": self.not_visible_here,
+            },
+        })
+    }
+}
+
 /// Everything a read needs, decided by the server.
 #[derive(Debug, Clone)]
 pub struct ReadScope {
@@ -634,19 +686,48 @@ pub async fn execute_read_tool_in_tx(
     tool: &str,
     raw_args: &Value,
 ) -> Result<ToolOutcome, DbError> {
+    Ok(execute_read_tool_traced_in_tx(conn, scope, tool, raw_args)
+        .await?
+        .0)
+}
+
+/// [`execute_read_tool_in_tx`] plus the channels whose content this read actually returned
+/// (ADR-0201 증보 2026-11-14, #5873): ids only, in the order they were read, possibly with repeats;
+/// empty for every refusal. A search names only the channels of the hits it kept.
+pub async fn execute_read_tool_traced_in_tx(
+    conn: &mut PgConnection,
+    scope: &ReadScope,
+    tool: &str,
+    raw_args: &Value,
+) -> Result<(ToolOutcome, Vec<Uuid>), DbError> {
+    let mut seen: Vec<Uuid> = Vec::new();
+    let outcome = execute_read_tool_inner(conn, scope, tool, raw_args, &mut seen).await?;
+    if !matches!(outcome, ToolOutcome::Data(_) | ToolOutcome::Document { .. }) {
+        seen.clear();
+    }
+    Ok((outcome, seen))
+}
+
+async fn execute_read_tool_inner(
+    conn: &mut PgConnection,
+    scope: &ReadScope,
+    tool: &str,
+    raw_args: &Value,
+    seen: &mut Vec<Uuid>,
+) -> Result<ToolOutcome, DbError> {
     let name = momo_agent::tools::normalize(tool);
     let outcome = if name == TOOL_SEARCH_MESSAGES {
-        search(conn, scope, raw_args).await?
+        search(conn, scope, raw_args, seen).await?
     } else if name == TOOL_READ_CHANNEL {
-        read_channel(conn, scope, raw_args).await?
+        read_channel(conn, scope, raw_args, seen).await?
     } else if name == TOOL_READ_THREAD {
-        read_thread(conn, scope, raw_args).await?
+        read_thread(conn, scope, raw_args, seen).await?
     } else if name == TOOL_LIST_MEMBERS {
-        list_members(conn, scope, raw_args).await?
+        list_members(conn, scope, raw_args, seen).await?
     } else if name == TOOL_LIST_AGENT_RUNS {
-        list_agent_runs(conn, scope, raw_args).await?
+        list_agent_runs(conn, scope, raw_args, seen).await?
     } else if name == TOOL_GET_AGENT_RUN {
-        get_agent_run(conn, scope, raw_args).await?
+        get_agent_run(conn, scope, raw_args, seen).await?
     } else if name == TOOL_LIST_PLUGINS {
         list_plugins(conn, scope, raw_args).await?
     } else if name == TOOL_READ_WORKSPACE_SETTINGS {
@@ -674,6 +755,7 @@ async fn search(
     conn: &mut PgConnection,
     scope: &ReadScope,
     raw: &Value,
+    seen: &mut Vec<Uuid>,
 ) -> Result<ToolOutcome, DbError> {
     let args = try_outcome!(args_object(raw, &["query", "channel", "limit"]));
     let query_raw = try_outcome!(opt_str(args, "query")).unwrap_or("");
@@ -714,6 +796,7 @@ async fn search(
     }
     let authors: Vec<Uuid> = hits.iter().map(|hit| hit.author_member_id).collect();
     let channels: Vec<Uuid> = hits.iter().map(|hit| hit.channel_id).collect();
+    seen.extend(channels.iter().copied());
     let author_names = names_of(conn, scope.workspace_id, &authors).await?;
     let channel_name = channel_names(conn, scope.workspace_id, &channels).await?;
     let mut lines = Vec::with_capacity(hits.len());
@@ -747,6 +830,7 @@ async fn read_channel(
     conn: &mut PgConnection,
     scope: &ReadScope,
     raw: &Value,
+    seen: &mut Vec<Uuid>,
 ) -> Result<ToolOutcome, DbError> {
     let args = try_outcome!(args_object(raw, &["channel", "limit", "before"]));
     let Some(channel) = try_outcome!(opt_str(args, "channel")) else {
@@ -779,6 +863,7 @@ async fn read_channel(
     page.reverse();
     let authors: Vec<Uuid> = page.iter().map(|m| m.message.author_member_id).collect();
     let names = names_of(conn, scope.workspace_id, &authors).await?;
+    seen.push(channel_id);
     if page.is_empty() {
         return Ok(ToolOutcome::Data("메시지 없음".into()));
     }
@@ -817,6 +902,7 @@ async fn read_thread(
     conn: &mut PgConnection,
     scope: &ReadScope,
     raw: &Value,
+    seen: &mut Vec<Uuid>,
 ) -> Result<ToolOutcome, DbError> {
     let args = try_outcome!(args_object(raw, &["channel", "messageId"]));
     let Some(channel) = try_outcome!(opt_str(args, "channel")) else {
@@ -859,6 +945,7 @@ async fn read_thread(
     let root_body: Option<String> = root.try_get("body").map_err(DbError::from)?;
     let root_deleted: Option<DateTime<Utc>> = root.try_get("deleted_at").map_err(DbError::from)?;
     let root_at: DateTime<Utc> = root.try_get("created_at").map_err(DbError::from)?;
+    seen.push(channel_id);
     let mut lines = vec![format!(
         "[첫 메시지] {} · {}: {}",
         stamp(root_at),
@@ -892,6 +979,7 @@ async fn list_members(
     conn: &mut PgConnection,
     scope: &ReadScope,
     raw: &Value,
+    seen: &mut Vec<Uuid>,
 ) -> Result<ToolOutcome, DbError> {
     let args = try_outcome!(args_object(raw, &["channel"]));
     let channel = match try_outcome!(opt_str(args, "channel")) {
@@ -952,6 +1040,7 @@ async fn list_members(
             .collect()
         }
     };
+    seen.extend(channel);
     if members.is_empty() {
         return Ok(ToolOutcome::Data("멤버 없음".into()));
     }
@@ -975,6 +1064,7 @@ async fn list_agent_runs(
     conn: &mut PgConnection,
     scope: &ReadScope,
     raw: &Value,
+    seen: &mut Vec<Uuid>,
 ) -> Result<ToolOutcome, DbError> {
     let args = try_outcome!(args_object(raw, &["channel", "agent", "status"]));
     let status = match try_outcome!(opt_str(args, "status")) {
@@ -1061,6 +1151,7 @@ async fn list_agent_runs(
     }
     let agents: Vec<Uuid> = rows.iter().map(|row| row.1).collect();
     let channels: Vec<Uuid> = rows.iter().map(|row| row.2).collect();
+    seen.extend(channels.iter().copied());
     let agent_names = names_of(conn, scope.workspace_id, &agents).await?;
     let channel_name = channel_names(conn, scope.workspace_id, &channels).await?;
     Ok(ToolOutcome::Data(
@@ -1089,6 +1180,7 @@ async fn get_agent_run(
     conn: &mut PgConnection,
     scope: &ReadScope,
     raw: &Value,
+    seen: &mut Vec<Uuid>,
 ) -> Result<ToolOutcome, DbError> {
     let args = try_outcome!(args_object(raw, &["runId"]));
     let Some(raw_id) = try_outcome!(opt_str(args, "runId")) else {
@@ -1121,6 +1213,7 @@ async fn get_agent_run(
         RunEventInclude::default(),
     )
     .await?;
+    seen.push(run.channel_id);
     let names = names_of(conn, scope.workspace_id, &[run.agent_member_id]).await?;
     let channel_name = channel_names(conn, scope.workspace_id, &[run.channel_id]).await?;
     let error_code = run
@@ -1496,5 +1589,59 @@ mod tests {
         assert!(!room.is_reply_channel_only(reply));
         assert!(Audience::Channels(BTreeSet::from([reply])).is_reply_channel_only(reply));
         assert!(Audience::RequesterView.allows(private));
+    }
+}
+
+#[cfg(test)]
+mod read_audit_tests {
+    use super::*;
+
+    fn data() -> ToolOutcome {
+        ToolOutcome::Data("x".into())
+    }
+
+    #[test]
+    fn channels_are_listed_once_in_reading_order() {
+        let (a, b) = (Uuid::from_u128(1), Uuid::from_u128(2));
+        let mut audit = ReadAudit::default();
+        audit.record(&data(), &[b, a, b]);
+        audit.record(&data(), &[a]);
+        assert_eq!(audit.to_json()["channels"], serde_json::json!([b, a]));
+    }
+
+    #[test]
+    fn a_refused_read_adds_a_count_and_never_an_id() {
+        let hidden = Uuid::from_u128(7);
+        let mut audit = ReadAudit::default();
+        // even if a caller handed ids along with a refusal, none may be kept
+        audit.record(&ToolOutcome::NotVisibleHere, &[hidden]);
+        audit.record(&ToolOutcome::NotFound, &[hidden]);
+        audit.record(&ToolOutcome::NotFound, &[hidden]);
+        let json = audit.to_json();
+        assert_eq!(json["channels"], serde_json::json!([]));
+        assert_eq!(
+            json["denied"],
+            serde_json::json!({"not_found": 2, "not_visible_here": 1})
+        );
+        assert!(!json.to_string().contains(&hidden.to_string()));
+    }
+
+    #[test]
+    fn past_the_cap_the_list_stops_and_says_so_and_the_row_stays_small() {
+        let mut audit = ReadAudit::default();
+        let many: Vec<Uuid> = (0..(AUDIT_READ_CHANNELS_MAX as u128 + 10))
+            .map(Uuid::from_u128)
+            .collect();
+        audit.record(&data(), &many);
+        audit.record(&ToolOutcome::NotFound, &[]);
+        let json = audit.to_json();
+        assert_eq!(
+            json["channels"].as_array().unwrap().len(),
+            AUDIT_READ_CHANNELS_MAX
+        );
+        assert_eq!(json["truncated"], serde_json::json!(true));
+        // the largest this value can be: 32 uuids (38 bytes each with quotes and comma) + fixed keys
+        let bytes = json.to_string().len();
+        assert!(bytes <= 1_400, "reads value is {bytes} bytes");
     }
 }
