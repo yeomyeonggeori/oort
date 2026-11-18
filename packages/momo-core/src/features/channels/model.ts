@@ -278,14 +278,23 @@ export const CHANNEL_MUTE_FAILURE =
  * 같은 묶음이라, 한 확인 단계 안에서 본문만 기기 언어로 서고 나머지가 한국어로 남는 섞임이 없다).
  *
  * 「다시 들어오는 길」은 지금 있는 길만 말한다: 채널에 사람을 넣는 라우트(`add_member`)가 소유자·관리자 권한이라, 나간
- * 뒤 스스로 다시 들어올 길이 없다. 공개 채널도 같다 — 채널 둘러보기·스스로 참여는 아직 없으니 약속하지 않는다.
+ * 뒤 스스로 다시 들어올 길이 없다. 공개 채널은 「둘러보기에 보이기」가 켜졌을 때만 채널 둘러보기로 돌아오는 길이 있다
+ * (ADR-0224 D4, `bodyPublicBrowse`). 꺼진 공개 채널은 비공개처럼 관리자의 추가뿐이라 그 길을 약속하지 않는다.
  * 비공개 채널은 하나를 더 말한다: 마지막 멤버가 나가면 서버가 같은 tx 에서 채널을 보관하고(`archived: true`), 보관된
  * 채널에는 아무도 다시 넣을 수 없다(`add_member` 404, 2026-11-14 실측).
  */
 export type ChannelLeaveConfirmBodyKey = Extract<MessageKey, `timeline.channelLeave.body${string}`>;
 
-export function channelLeaveConfirmBodyKey(kind: Channel["kind"] | undefined): ChannelLeaveConfirmBodyKey {
-  return kind === "private" ? "timeline.channelLeave.bodyPrivate" : "timeline.channelLeave.bodyPublic";
+export function channelLeaveConfirmBodyKey(
+  kind: Channel["kind"] | undefined,
+  browseListed?: boolean
+): ChannelLeaveConfirmBodyKey {
+  if (kind === "private") return "timeline.channelLeave.bodyPrivate";
+  // 「둘러보기에 보이기」가 켜진 공개 채널만 둘러보기로 돌아온다(ADR-0224 「#5778과 맞물리는 곳」). 꺼졌거나 표시를
+  // 모르면(옛 서버) 관리자의 추가가 유일한 길이라 지금 문장 그대로다.
+  return kind === "public" && browseListed === true
+    ? "timeline.channelLeave.bodyPublicBrowse"
+    : "timeline.channelLeave.bodyPublic";
 }
 
 export type ChannelLeaveFailureKey = Extract<MessageKey, `timeline.channelLeave.error${string}`>;

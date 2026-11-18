@@ -2,6 +2,233 @@
 import type { MessageCatalog } from "../types";
 
 export const catalog: MessageCatalog = {
+  "channels.browse.clearSearch": [
+    {
+      "type": 0,
+      "value": "清除搜索"
+    }
+  ],
+  "channels.browse.close": [
+    {
+      "type": 0,
+      "value": "关闭"
+    }
+  ],
+  "channels.browse.default": [
+    {
+      "type": 0,
+      "value": "默认"
+    }
+  ],
+  "channels.browse.description": [
+    {
+      "type": 0,
+      "value": "查找并加入公开频道。"
+    }
+  ],
+  "channels.browse.emptyAdminDetail": [
+    {
+      "type": 0,
+      "value": "在频道菜单中打开“在浏览中显示”，现有频道就会出现在这里。"
+    }
+  ],
+  "channels.browse.emptyHeadline": [
+    {
+      "type": 0,
+      "value": "还没有你未加入的公开频道。"
+    }
+  ],
+  "channels.browse.groupJoined": [
+    {
+      "type": 0,
+      "value": "已加入的频道"
+    }
+  ],
+  "channels.browse.groupNotJoined": [
+    {
+      "type": 0,
+      "value": "未加入的频道"
+    }
+  ],
+  "channels.browse.join": [
+    {
+      "type": 0,
+      "value": "加入"
+    }
+  ],
+  "channels.browse.joinAria": [
+    {
+      "type": 0,
+      "value": "加入 "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    }
+  ],
+  "channels.browse.joined": [
+    {
+      "type": 0,
+      "value": "已加入"
+    }
+  ],
+  "channels.browse.joinForbidden": [
+    {
+      "type": 0,
+      "value": "此账号无法加入此频道。"
+    }
+  ],
+  "channels.browse.joinGeneric": [
+    {
+      "type": 0,
+      "value": "无法加入。请重试。"
+    }
+  ],
+  "channels.browse.joinNetwork": [
+    {
+      "type": 0,
+      "value": "无法加入。"
+    },
+    {
+      "type": 1,
+      "value": "reason"
+    }
+  ],
+  "channels.browse.joinNotFound": [
+    {
+      "type": 0,
+      "value": "此频道已不在浏览列表中。"
+    }
+  ],
+  "channels.browse.loadForbidden": [
+    {
+      "type": 0,
+      "value": "此账号无法浏览频道。"
+    }
+  ],
+  "channels.browse.loadGeneric": [
+    {
+      "type": 0,
+      "value": "无法加载频道列表。请稍后再试。"
+    }
+  ],
+  "channels.browse.loadMore": [
+    {
+      "type": 0,
+      "value": "加载更多"
+    }
+  ],
+  "channels.browse.loadNetwork": [
+    {
+      "type": 0,
+      "value": "无法加载频道列表。"
+    },
+    {
+      "type": 1,
+      "value": "reason"
+    }
+  ],
+  "channels.browse.loadUnsupported": [
+    {
+      "type": 0,
+      "value": "此服务器暂不支持浏览频道。"
+    }
+  ],
+  "channels.browse.memberCount": [
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": " 位成员"
+    }
+  ],
+  "channels.browse.menuCreate": [
+    {
+      "type": 0,
+      "value": "创建新频道"
+    }
+  ],
+  "channels.browse.menuLabel": [
+    {
+      "type": 0,
+      "value": "添加频道"
+    }
+  ],
+  "channels.browse.noMatch": [
+    {
+      "type": 0,
+      "value": "没有与“"
+    },
+    {
+      "type": 1,
+      "value": "query"
+    },
+    {
+      "type": 0,
+      "value": "”匹配的公开频道。"
+    }
+  ],
+  "channels.browse.offline": [
+    {
+      "type": 0,
+      "value": "当前离线，暂时无法加入。连接后请重试。"
+    }
+  ],
+  "channels.browse.open": [
+    {
+      "type": 0,
+      "value": "打开"
+    }
+  ],
+  "channels.browse.openAria": [
+    {
+      "type": 0,
+      "value": "打开 "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    }
+  ],
+  "channels.browse.paletteGroup": [
+    {
+      "type": 0,
+      "value": "未加入的公开频道"
+    }
+  ],
+  "channels.browse.rateLimited": [
+    {
+      "type": 0,
+      "value": "请求过于频繁。请稍后再试。"
+    }
+  ],
+  "channels.browse.retry": [
+    {
+      "type": 0,
+      "value": "重试"
+    }
+  ],
+  "channels.browse.searchLabel": [
+    {
+      "type": 0,
+      "value": "查找频道"
+    }
+  ],
+  "channels.browse.searchPlaceholder": [
+    {
+      "type": 0,
+      "value": "按名称或主题搜索"
+    }
+  ],
+  "channels.browse.title": [
+    {
+      "type": 0,
+      "value": "浏览频道"
+    }
+  ],
   "channels.createFailure.duplicate": [
     {
       "type": 0,
@@ -203,6 +430,22 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "只能使用文字、数字、连字符（-）和下划线（_）。"
+    }
+  ],
+  "timeline.channelLeave.bodyPublicBrowse": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " 将从侧边栏消失。你可以随时通过浏览频道重新加入。"
+    }
+  ],
+  "timeline.createChannel.publicDetail": [
+    {
+      "type": 0,
+      "value": "工作区的任何正式成员都可以在浏览频道中找到并加入。"
     }
   ]
 };

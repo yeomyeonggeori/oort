@@ -42,6 +42,7 @@ import {
 import { useSidebarShortcut } from "@/app/useSidebarShortcut";
 import { Sidebar } from "@/features/sidebar/Sidebar";
 import { CreateChannelProvider } from "@/features/channels/CreateChannelDialog";
+import { ChannelBrowseProvider } from "@/features/channels/ChannelBrowseDialog";
 import { AddWorkspaceProvider } from "@/features/workspace/AddWorkspaceDialog";
 import { AddChannelMemberProvider } from "@/features/channels/AddChannelMemberDialog";
 import { NewDmProvider } from "@/features/directory/NewDmDialog";
@@ -392,6 +393,8 @@ export function AppShell({
        * 이 창을 이어서 연다. */}
       <AddChannelMemberProvider>
       <CreateChannelProvider>
+      {/* 채널 둘러보기 창도 셸에 한 벌만 있다(ADR-0224, #5842): 사이드바 「채널」 머리의 +와 ⌘K 가 같은 하나를 연다. */}
+      <ChannelBrowseProvider>
       {/* 워크스페이스 추가도 같은 규칙이다 (검수 피드백 #4a-2). 레일의 [+]가
        * 설정으로 새던 것을 하나의 다이얼로그로 모으고, 스위처·인박스 단축키가
        * 이 모달 위에서 물러설 수 있게 열림 상태를 함께 내린다. */}
@@ -577,6 +580,7 @@ export function AppShell({
         </AgentProfileProvider>
         </NewDmProvider>
       </AddWorkspaceProvider>
+      </ChannelBrowseProvider>
       </CreateChannelProvider>
       </AddChannelMemberProvider>
       </ShellNavProvider>

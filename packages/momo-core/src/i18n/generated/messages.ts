@@ -171,6 +171,39 @@ export const messageKeys = [
   "blocked.workStateNone.serverUnreachable",
   "blocked.workStateStale.offline",
   "blocked.workStateStale.serverUnreachable",
+  "channels.browse.clearSearch",
+  "channels.browse.close",
+  "channels.browse.default",
+  "channels.browse.description",
+  "channels.browse.emptyAdminDetail",
+  "channels.browse.emptyHeadline",
+  "channels.browse.groupJoined",
+  "channels.browse.groupNotJoined",
+  "channels.browse.join",
+  "channels.browse.joinAria",
+  "channels.browse.joined",
+  "channels.browse.joinForbidden",
+  "channels.browse.joinGeneric",
+  "channels.browse.joinNetwork",
+  "channels.browse.joinNotFound",
+  "channels.browse.loadForbidden",
+  "channels.browse.loadGeneric",
+  "channels.browse.loadMore",
+  "channels.browse.loadNetwork",
+  "channels.browse.loadUnsupported",
+  "channels.browse.memberCount",
+  "channels.browse.menuCreate",
+  "channels.browse.menuLabel",
+  "channels.browse.noMatch",
+  "channels.browse.offline",
+  "channels.browse.open",
+  "channels.browse.openAria",
+  "channels.browse.paletteGroup",
+  "channels.browse.rateLimited",
+  "channels.browse.retry",
+  "channels.browse.searchLabel",
+  "channels.browse.searchPlaceholder",
+  "channels.browse.title",
   "channels.createFailure.duplicate",
   "channels.createFailure.forbidden",
   "channels.createFailure.rateLimited",
@@ -1429,6 +1462,7 @@ export const messageKeys = [
   "timeline.approvalExpiry.soon",
   "timeline.channelLeave.bodyPrivate",
   "timeline.channelLeave.bodyPublic",
+  "timeline.channelLeave.bodyPublicBrowse",
   "timeline.channelLeave.busy",
   "timeline.channelLeave.cancel",
   "timeline.channelLeave.confirm",
@@ -1865,6 +1899,51 @@ export const argumentSpecs = {
   "blocked.workStateNone.serverUnreachable": {},
   "blocked.workStateStale.offline": {},
   "blocked.workStateStale.serverUnreachable": {},
+  "channels.browse.clearSearch": {},
+  "channels.browse.close": {},
+  "channels.browse.default": {},
+  "channels.browse.description": {},
+  "channels.browse.emptyAdminDetail": {},
+  "channels.browse.emptyHeadline": {},
+  "channels.browse.groupJoined": {},
+  "channels.browse.groupNotJoined": {},
+  "channels.browse.join": {},
+  "channels.browse.joinAria": {
+    "name": "string"
+  },
+  "channels.browse.joined": {},
+  "channels.browse.joinForbidden": {},
+  "channels.browse.joinGeneric": {},
+  "channels.browse.joinNetwork": {
+    "reason": "string"
+  },
+  "channels.browse.joinNotFound": {},
+  "channels.browse.loadForbidden": {},
+  "channels.browse.loadGeneric": {},
+  "channels.browse.loadMore": {},
+  "channels.browse.loadNetwork": {
+    "reason": "string"
+  },
+  "channels.browse.loadUnsupported": {},
+  "channels.browse.memberCount": {
+    "count": "number"
+  },
+  "channels.browse.menuCreate": {},
+  "channels.browse.menuLabel": {},
+  "channels.browse.noMatch": {
+    "query": "string"
+  },
+  "channels.browse.offline": {},
+  "channels.browse.open": {},
+  "channels.browse.openAria": {
+    "name": "string"
+  },
+  "channels.browse.paletteGroup": {},
+  "channels.browse.rateLimited": {},
+  "channels.browse.retry": {},
+  "channels.browse.searchLabel": {},
+  "channels.browse.searchPlaceholder": {},
+  "channels.browse.title": {},
   "channels.createFailure.duplicate": {},
   "channels.createFailure.forbidden": {},
   "channels.createFailure.rateLimited": {},
@@ -3479,6 +3558,9 @@ export const argumentSpecs = {
   "timeline.channelLeave.bodyPublic": {
     "name": "string"
   },
+  "timeline.channelLeave.bodyPublicBrowse": {
+    "name": "string"
+  },
   "timeline.channelLeave.busy": {},
   "timeline.channelLeave.cancel": {},
   "timeline.channelLeave.confirm": {},
@@ -4044,6 +4126,39 @@ export interface MessageArgs {
   "blocked.workStateNone.serverUnreachable": Record<string, never>;
   "blocked.workStateStale.offline": Record<string, never>;
   "blocked.workStateStale.serverUnreachable": Record<string, never>;
+  "channels.browse.clearSearch": Record<string, never>;
+  "channels.browse.close": Record<string, never>;
+  "channels.browse.default": Record<string, never>;
+  "channels.browse.description": Record<string, never>;
+  "channels.browse.emptyAdminDetail": Record<string, never>;
+  "channels.browse.emptyHeadline": Record<string, never>;
+  "channels.browse.groupJoined": Record<string, never>;
+  "channels.browse.groupNotJoined": Record<string, never>;
+  "channels.browse.join": Record<string, never>;
+  "channels.browse.joinAria": { name: string };
+  "channels.browse.joined": Record<string, never>;
+  "channels.browse.joinForbidden": Record<string, never>;
+  "channels.browse.joinGeneric": Record<string, never>;
+  "channels.browse.joinNetwork": { reason: string };
+  "channels.browse.joinNotFound": Record<string, never>;
+  "channels.browse.loadForbidden": Record<string, never>;
+  "channels.browse.loadGeneric": Record<string, never>;
+  "channels.browse.loadMore": Record<string, never>;
+  "channels.browse.loadNetwork": { reason: string };
+  "channels.browse.loadUnsupported": Record<string, never>;
+  "channels.browse.memberCount": { count: number };
+  "channels.browse.menuCreate": Record<string, never>;
+  "channels.browse.menuLabel": Record<string, never>;
+  "channels.browse.noMatch": { query: string };
+  "channels.browse.offline": Record<string, never>;
+  "channels.browse.open": Record<string, never>;
+  "channels.browse.openAria": { name: string };
+  "channels.browse.paletteGroup": Record<string, never>;
+  "channels.browse.rateLimited": Record<string, never>;
+  "channels.browse.retry": Record<string, never>;
+  "channels.browse.searchLabel": Record<string, never>;
+  "channels.browse.searchPlaceholder": Record<string, never>;
+  "channels.browse.title": Record<string, never>;
   "channels.createFailure.duplicate": Record<string, never>;
   "channels.createFailure.forbidden": Record<string, never>;
   "channels.createFailure.rateLimited": Record<string, never>;
@@ -5302,6 +5417,7 @@ export interface MessageArgs {
   "timeline.approvalExpiry.soon": Record<string, never>;
   "timeline.channelLeave.bodyPrivate": { name: string };
   "timeline.channelLeave.bodyPublic": { name: string };
+  "timeline.channelLeave.bodyPublicBrowse": { name: string };
   "timeline.channelLeave.busy": Record<string, never>;
   "timeline.channelLeave.cancel": Record<string, never>;
   "timeline.channelLeave.confirm": Record<string, never>;

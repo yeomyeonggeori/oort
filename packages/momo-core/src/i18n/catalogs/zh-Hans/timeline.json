@@ -1,1 +1,4 @@
-{}
+{
+  "timeline.createChannel.publicDetail": "工作区的任何正式成员都可以在浏览频道中找到并加入。",
+  "timeline.channelLeave.bodyPublicBrowse": "{name} 将从侧边栏消失。你可以随时通过浏览频道重新加入。"
+}

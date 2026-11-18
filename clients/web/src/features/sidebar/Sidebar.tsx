@@ -55,6 +55,18 @@ import {
   useCreateChannelOpen,
   useOpenCreateChannel,
 } from "@/features/channels/useCreateChannel";
+import {
+  useChannelBrowseOpen,
+  useOpenChannelBrowse,
+} from "@/features/channels/useChannelBrowse";
+import { canBrowseChannelsNow } from "@momo/core/features/channels/browse";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/design/ui/dropdown-menu";
+import { useFormatMessage } from "@/i18n/useFormatMessage";
 import { EmptyInvite, InlineBanner, Skeleton } from "@/features/common/States";
 import { LoadFailureLine, LoadFailureNote } from "@/features/common/LoadFailureBox";
 import { loadCauseOf } from "@/features/common/loadFailure";
@@ -348,6 +360,15 @@ export function Sidebar({
   const newChannelRef = useRef<HTMLButtonElement>(null);
   const rosterSettled = !directoryQuery.isPending;
   const canCreate = canCreateChannelNow(rosterSettled, selfMember?.role);
+  // 채널 둘러보기의 문(ADR-0224 화면 ①, #5842): 정식 멤버 모두에게 같은 + 가 선다. 만들 수 있는 사람에게는 「채널 둘러보기」
+  // 「새 채널 만들기」 두 줄의 메뉴이고, 일반 멤버는 줄이 하나라 바로 둘러보기가 열린다. 게스트에게는 서지 않는다(D8).
+  // 셸 밖(창이 없는 화면)에서는 둘러보기 문이 없고 + 는 예전대로 만들기다.
+  const formatMessage = useFormatMessage();
+  const openChannelBrowse = useOpenChannelBrowse();
+  const channelBrowseOpen = useChannelBrowseOpen();
+  const canBrowse =
+    openChannelBrowse !== null && canBrowseChannelsNow(rosterSettled, selfMember?.role);
+  const [channelAddMenuOpen, setChannelAddMenuOpen] = useState(false);
 
   // 지금 읽고 있는 채널 (goal B8 H10). ChatShell이 커서를 올리는 PUT은 왕복이
   // 걸리고 실패할 수도 있으므로, 그 사이 사이드바는 화면에 떠 있는 그 채널에
@@ -1146,6 +1167,8 @@ export function Sidebar({
                 dropProps={drag.dropProps({ kind: "channels", sectionId: null })}
                 overlayOpen={
                   createChannelOpen ||
+                  channelBrowseOpen ||
+                  channelAddMenuOpen ||
                   nameDialog?.mode === "create" ||
                   openSectionMenu === baseChannelSection.id
                 }
@@ -1154,7 +1177,58 @@ export function Sidebar({
                 wrapList={false}
                 action={
                   <>
-                    {canCreate ? (
+                    {canBrowse && canCreate ? (
+                      /* 두 줄 메뉴. 고른 창은 한 프레임 뒤에 연다: 메뉴가 먼저 캐럿을 + 로 돌려놓아야 창이 「무엇이 나를
+                         열었나」로 + 를 잡고, Esc 로 닫을 때 그리로 돌아간다(⌘K 가 폼을 여는 것과 같은 까닭). */
+                      <DropdownMenu onOpenChange={setChannelAddMenuOpen}>
+                        <DropdownMenuTrigger asChild>
+                          <button
+                            ref={newChannelRef}
+                            type="button"
+                            aria-label={formatMessage("channels.browse.menuLabel")}
+                            title={formatMessage("channels.browse.menuLabel")}
+                            data-testid="new-channel"
+                            data-section-action=""
+                            className="tap-target flex size-control-sm items-center justify-center rounded-sm text-ink-muted press hover:bg-surface-hover focus-visible:focus-ring"
+                          >
+                            <Plus className="size-4" aria-hidden="true" />
+                          </button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end" data-testid="new-channel-menu">
+                          <DropdownMenuItem
+                            data-testid="new-channel-browse"
+                            onSelect={() =>
+                              requestAnimationFrame(() =>
+                                openChannelBrowse?.({ opener: newChannelRef.current })
+                              )
+                            }
+                          >
+                            {formatMessage("channels.browse.title")}
+                          </DropdownMenuItem>
+                          <DropdownMenuItem
+                            data-testid="new-channel-create"
+                            onSelect={() =>
+                              requestAnimationFrame(() => openCreateChannel(newChannelRef.current))
+                            }
+                          >
+                            {formatMessage("channels.browse.menuCreate")}
+                          </DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    ) : canBrowse ? (
+                      <button
+                        ref={newChannelRef}
+                        type="button"
+                        onClick={() => openChannelBrowse?.({ opener: newChannelRef.current })}
+                        aria-label={formatMessage("channels.browse.title")}
+                        title={formatMessage("channels.browse.title")}
+                        data-testid="new-channel"
+                        data-section-action=""
+                        className="tap-target flex size-control-sm items-center justify-center rounded-sm text-ink-muted press hover:bg-surface-hover focus-visible:focus-ring"
+                      >
+                        <Plus className="size-4" aria-hidden="true" />
+                      </button>
+                    ) : canCreate ? (
                     /* size-control-sm(28px): WCAG 2.2 최소 타깃 24px에 딱 걸치던
                        크기를 하우스 컨트롤 높이로 올린다. 사이드바의 아이콘 버튼
                        셋(+ · 새 DM)이 같은 규격이다. 설정은 프로필 카드 행으로
