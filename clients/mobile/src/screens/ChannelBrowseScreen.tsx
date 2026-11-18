@@ -81,7 +81,8 @@ export default function ChannelBrowseScreen({
   const list = useChannelBrowseList(workspaceId, serverQuery);
 
   const onJoined = useCallback(
-    (channel: Channel) => onOpenChannel(channel.id, `#${channel.name ?? ''}`),
+    // 제목은 홈 줄 · 새 채널 시트와 같은 맨 이름이다(`#` 은 대화 머리가 붙인다).
+    (channel: Channel) => onOpenChannel(channel.id, channel.name ?? ''),
     [onOpenChannel],
   );
   const join = useJoinBrowsedChannel(workspaceId, member.id, onJoined);
@@ -111,7 +112,7 @@ export default function ChannelBrowseScreen({
       pending={join.pending}
       failures={join.failures}
       onJoin={channelId => void join.join(channelId)}
-      onOpen={row => onOpenChannel(row.id, `#${row.name}`)}
+      onOpen={row => onOpenChannel(row.id, row.name)}
       hasMore={list.hasNextPage}
       loadingMore={list.isFetchingNextPage}
       moreFailed={list.isFetchNextPageError}

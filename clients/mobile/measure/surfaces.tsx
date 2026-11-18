@@ -4923,9 +4923,9 @@ export function Surface({name}: {name: string}): React.JSX.Element {
     // 셸을 **그대로** 세운다(`Shell`). 탭·시트가 열린 판은 시작값으로 고른다 —
     // 시뮬레이터는 누를 수 없으므로(하네스 머리 주석). 캡션을 달지 않는다: 시안과
     // 나란히 놓는 사진이라 화면 위에 글자가 한 줄이라도 더 서면 대조가 흐려진다.
+    // #5846 `shell-home-browse`: 정식 멤버(역할 member)의 홈 — 「채널」 섹션 ⋯ 메뉴에 「채널 둘러보기」가 선다(기본 명부에는 역할 칸이 없어 문이 없다).
     case 'shell-home':
     case 'shell-home-idle':
-    // #5846: 정식 멤버(역할 member)의 홈 — 「채널」 섹션 ⋯ 메뉴에 「채널 둘러보기」가 선다(기본 명부에는 역할 칸이 없어 문이 없다).
     case 'shell-home-browse':
     case 'shell-home-approval':
     case 'shell-home-loading':
