@@ -8631,7 +8631,7 @@ export const catalog: MessageCatalog = {
   "releaseNotes.v0147.agentLinksChanged": [
     {
       "type": 0,
-      "value": "The server no longer opens links in messages written by agents to build previews, so agent messages get no link preview cards, even after the agent edits them. Messages posted by webhooks and the GitHub integration still get previews as before. When an agent suggests an emoticon with a link to a picture, the approval card on web and desktop shows, instead of the picture, one line naming the site the picture would come from. Only the site name is shown, not the whole address. The server fetches the picture once to check it only after someone presses “Fetch and register in team library”, and if that fails, the reason appears on that row. If a card arrives with a candidate the app does not recognize, only that row steps back and the other candidates still show."
+      "value": "From now on, the server no longer builds link preview cards on its own for links in messages agents write or edit. Cards already attached and opening a link by clicking it stay the same. Messages posted by webhooks and the GitHub integration still get previews as before. When an agent suggests an emoticon with a link to a picture, the approval card on web and desktop shows, instead of the picture, one line naming the site the picture would come from. Only the site name is shown, not the whole address. The server fetches the picture once to check it only after someone presses “Fetch and register in team library”, and if that fails, the reason appears on that row."
     }
   ],
   "releaseNotes.v0147.agentLinksTitle": [
@@ -8643,7 +8643,7 @@ export const catalog: MessageCatalog = {
   "releaseNotes.v0147.agentLinksTryIt": [
     {
       "type": 0,
-      "value": "Ask an agent to write a message with a link in it. That message gets no link preview card, while the same link in a message you write still gets one."
+      "value": "Ask an agent to write a message with a link in it. No link preview card is added to it automatically, while the same link in a message you write still gets one."
     }
   ],
   "releaseNotes.v0147.agentsLine1": [
@@ -8697,7 +8697,7 @@ export const catalog: MessageCatalog = {
   "releaseNotes.v0147.channelNamesChanged": [
     {
       "type": 0,
-      "value": "Channel names can now use letters and numbers from any language, including Korean. Before, only lowercase English letters, numbers, hyphens (-) and underscores (_) were accepted. Spaces become hyphens and capital English letters are saved in lowercase, so when what you typed differs from the name that will be saved, the create window shows the saved name first. The phone's new channel sheet uses the same guidance and brings up the Korean keyboard. Owners and admins can rename an existing channel with Rename channel. On web and desktop, it is in the channel header's ⋮ menu; on the phone, in the sheet you get by pressing and holding the channel row and in the chat's ⋮ sheet. The general channel cannot be renamed. The new name shows right away in your sidebar and the channel header."
+      "value": "Channel names can now use letters and numbers from any language, including Korean. Before, only lowercase English letters, numbers, hyphens (-) and underscores (_) were accepted. Spaces become hyphens and capital English letters are saved in lowercase, so when what you typed differs from the name that will be saved, the create window shows the saved name first. The phone's new channel sheet uses the same guidance and no longer limits you to an English keyboard. Owners and admins can rename an existing channel with Rename channel. On web and desktop, it is in the channel header's ⋮ menu; on the phone, in the sheet you get by pressing and holding the channel row and in the chat's ⋮ sheet. The general channel cannot be renamed. The new name shows right away in your sidebar and the channel header."
     }
   ],
   "releaseNotes.v0147.channelNamesTitle": [
@@ -8859,7 +8859,7 @@ export const catalog: MessageCatalog = {
   "releaseNotes.v0147.tooltipsTryIt": [
     {
       "type": 0,
-      "value": "On web or desktop, hover over an icon button at the top of the sidebar, or move focus to it with Tab. Its name appears right away."
+      "value": "On web or desktop, hover over the + button in the sidebar's Channels header, or move focus to it with Tab. Its name appears right away."
     }
   ],
   "releaseNotes.version.current": [
