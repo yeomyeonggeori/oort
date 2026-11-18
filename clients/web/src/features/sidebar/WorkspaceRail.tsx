@@ -12,6 +12,7 @@ import {
   workspaceRailTile,
   type WorkspaceNameState,
 } from "./workspaceRailModel";
+import { Tooltip } from "@/design/ui/tooltip";
 
 // 앱 레일 (#3280 → #3334). 이 파일의 컴포넌트가 하나의 레일(56px)이다: 워크스페이스 타일과
 // 「+」, 아래 프로필. 펼친 동안 레일은 **워크스페이스 전용**이다(성재 2026-10-02): 목적지
@@ -95,70 +96,72 @@ export function WorkspaceRail({
           what the marker competes inside, so the tile owns the context. It does
           not clip (that was the 3R regression the comment below records);
           `isolation` only scopes z. */}
-      <span
-        aria-current="true"
-        aria-busy={tile.loading || undefined}
-        // 현재 타일은 흰 면 + rest 그림자로 뜬다(DS2-6, 사이드바 선택 행과 같은
-        // 문법 — owner 결정 2026-09-26: 선택을 호박색으로 칠하지 않는다). 띠
-        // 위에서도 흰 면이라 원래 글자 역할을 쓴다.
-        className="band-surface relative isolate flex size-rail-tile items-center justify-center rounded-md bg-surface text-title font-semibold text-ink rail-tile-current"
-        title={tile.label}
-        aria-label={tile.label}
-        data-testid="workspace-current"
-      >
-        {/* 마커는 타일 상자 **밖**(-left-1 → x −4..−2px)에 선다. 그래서 이 상자는
-            자르면 안 된다 — 3R design-review 실측: 아바타 모서리를 자르려 타일에
-            overflow-hidden 을 얹었더니 마커가 전량 클리핑돼(가시 폭 0px, 두 스킴)
-            아바타가 걸린 워크스페이스에서 「현재」 신호가 사라졌다. 앞 판 주석이
-            말한 "온전히 선다"의 기준은 뷰포트였는데, 클리핑 상자가 부모로 바뀌면서
-            그 문장이 거짓이 된 것이다.
-            자르는 일은 이미지가 자기 border-radius 로 한다(아래 img 의 rounded-md).
-            부모가 자를 이유는 처음부터 없었다.
-            56px 레일 안 44px 타일은 좌우 인셋이 6px이라 −4px 는 레일 **안쪽**
-            (x 2..4px)에 떨어진다. 높이는 타일보다 짧은 pill
-            (--spacing-rail-marker 24px)이라 「선택됨」을 말하되 타일을 다 덮지
-            않는다 — R-1 §1 현재 WS 액센트 바. z 순서는 아바타 위. */}
+      <Tooltip label={tile.label} side="bottom">
         <span
-          aria-hidden="true"
-          className="rail-marker absolute -left-1 z-10 h-rail-marker w-marker rounded-sm"
-        />
-        {avatarDataUrl ? (
-          // 아바타가 있으면 이미지가 타일을 채운다(object-cover). 모서리는 이미지
-          // 자신의 rounded-md 가 자른다(부모는 자르지 않는다 — 위 마커 주석).
-          // 없거나 아직 받는 중이면 아래 이니셜이 designed empty state 다
-          // (D5 "없으면 이니셜").
-          <img
-            src={avatarDataUrl}
-            alt=""
-            // #4162: 거의 흰 사진이 흰 현재 타일에 녹지 않게 사진 아바타와 같은 윤곽(--avatar-edge)을 두른다.
-            className="size-full rounded-md border border-avatar-edge object-cover"
-            data-testid="workspace-avatar-image"
+          aria-current="true"
+          aria-busy={tile.loading || undefined}
+          // 현재 타일은 흰 면 + rest 그림자로 뜬다(DS2-6, 사이드바 선택 행과 같은
+          // 문법 — owner 결정 2026-09-26: 선택을 호박색으로 칠하지 않는다). 띠
+          // 위에서도 흰 면이라 원래 글자 역할을 쓴다.
+          className="band-surface relative isolate flex size-rail-tile items-center justify-center rounded-md bg-surface text-title font-semibold text-ink rail-tile-current"
+          aria-label={tile.label}
+          data-testid="workspace-current"
+        >
+          {/* 마커는 타일 상자 **밖**(-left-1 → x −4..−2px)에 선다. 그래서 이 상자는
+              자르면 안 된다 — 3R design-review 실측: 아바타 모서리를 자르려 타일에
+              overflow-hidden 을 얹었더니 마커가 전량 클리핑돼(가시 폭 0px, 두 스킴)
+              아바타가 걸린 워크스페이스에서 「현재」 신호가 사라졌다. 앞 판 주석이
+              말한 "온전히 선다"의 기준은 뷰포트였는데, 클리핑 상자가 부모로 바뀌면서
+              그 문장이 거짓이 된 것이다.
+              자르는 일은 이미지가 자기 border-radius 로 한다(아래 img 의 rounded-md).
+              부모가 자를 이유는 처음부터 없었다.
+              56px 레일 안 44px 타일은 좌우 인셋이 6px이라 −4px 는 레일 **안쪽**
+              (x 2..4px)에 떨어진다. 높이는 타일보다 짧은 pill
+              (--spacing-rail-marker 24px)이라 「선택됨」을 말하되 타일을 다 덮지
+              않는다 — R-1 §1 현재 WS 액센트 바. z 순서는 아바타 위. */}
+          <span
+            aria-hidden="true"
+            className="rail-marker absolute -left-1 z-10 h-rail-marker w-marker rounded-sm"
           />
-        ) : (
-          // 이름이 오기 전에는 글자를 그리지 않는다 (#4a-1): 근처의 아무 문자열이나
-          // 첫 글자로 세우던 것이 이 결함의 시작이었다. 이름이 없으면 빈 타일이지
-          // 대체 글자가 아니다.
-          tile.initial
-        )}
-      </span>
+          {avatarDataUrl ? (
+            // 아바타가 있으면 이미지가 타일을 채운다(object-cover). 모서리는 이미지
+            // 자신의 rounded-md 가 자른다(부모는 자르지 않는다 — 위 마커 주석).
+            // 없거나 아직 받는 중이면 아래 이니셜이 designed empty state 다
+            // (D5 "없으면 이니셜").
+            <img
+              src={avatarDataUrl}
+              alt=""
+              // #4162: 거의 흰 사진이 흰 현재 타일에 녹지 않게 사진 아바타와 같은 윤곽(--avatar-edge)을 두른다.
+              className="size-full rounded-md border border-avatar-edge object-cover"
+              data-testid="workspace-avatar-image"
+            />
+          ) : (
+            // 이름이 오기 전에는 글자를 그리지 않는다 (#4a-1): 근처의 아무 문자열이나
+            // 첫 글자로 세우던 것이 이 결함의 시작이었다. 이름이 없으면 빈 타일이지
+            // 대체 글자가 아니다.
+            tile.initial
+          )}
+        </span>
+      </Tooltip>
 
       {/* [+] 는 워크스페이스를 추가한다 (#4a-2). 셸이 소유한 다이얼로그를 액션
           자리에서 연다. 윤곽선은 컨트롤 윤곽선이라 --line 이 아니라 --line-strong(3:1)
           을 쓰고, 현재 타일과 같은 44px 사각형이되 액센트 바도 채운 표면도 없어
           "현재"로 오인되지 않는다. 패널 접기는 타이틀바에 한 자리만 산다 (#1864). */}
-      <button
-        ref={addWorkspaceRef}
-        type="button"
-        onClick={() => openAddWorkspace(addWorkspaceRef.current)}
-        aria-label="워크스페이스 추가"
-        title="워크스페이스 추가"
-        data-testid="add-workspace"
-        // DS2-6: 손으로 그린 3:1 테두리 대신 채움 문법(ADR-0189 D6 「버튼은 채움,
-        // 테두리는 입력 그릇에만」). 쉴 때는 옅은 채움, 호버에서 한 단 짙다.
-        className="flex size-rail-tile items-center justify-center rounded-md bg-surface-hover text-ink-muted press hover:bg-surface-pressed focus-visible:focus-ring"
-      >
-        <Plus className="size-6" aria-hidden="true" />
-      </button>
+      <Tooltip label="워크스페이스 추가" side="bottom">
+        <button
+          ref={addWorkspaceRef}
+          type="button"
+          onClick={() => openAddWorkspace(addWorkspaceRef.current)}
+          aria-label="워크스페이스 추가"
+          data-testid="add-workspace"
+          // DS2-6: 손으로 그린 3:1 테두리 대신 채움 문법(ADR-0189 D6 「버튼은 채움,
+          // 테두리는 입력 그릇에만」). 쉴 때는 옅은 채움, 호버에서 한 단 짙다.
+          className="flex size-rail-tile items-center justify-center rounded-md bg-surface-hover text-ink-muted press hover:bg-surface-pressed focus-visible:focus-ring"
+        >
+          <Plus className="size-6" aria-hidden="true" />
+        </button>
+      </Tooltip>
 
       {/* 연결 상태 점은 하단 프로필 패널로 옮겨졌다(검수 #6 / 프레즌스 6a).
           "내가 붙어 있는가"는 "내가 누구인가"의 자리 옆이 더 맞는 집이고,

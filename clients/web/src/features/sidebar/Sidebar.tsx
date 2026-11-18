@@ -156,6 +156,7 @@ import { ShortcutHelpDialog } from "@/app/ShortcutHelpDialog";
 import { useOpenNewDm } from "@/features/directory/useNewDm";
 import { mayActOnLiveness } from "@momo/core/features/agents/liveness";
 import { DmAvatar, DmStatusText } from "./DmAvatar";
+import { Tooltip } from "@/design/ui/tooltip";
 
 // =============================================================================
 // Sidebar (R-1 §1): workspace header, the two global surfaces (인박스 / 활동),
@@ -980,17 +981,18 @@ export function Sidebar({
             </span>
             {/* 폰에서만 서는 닫기 (goal B6). 넓은 창에서 사이드바는 닫히는 것이
                 아니라 그냥 거기 있으므로, 이 버튼은 그때 아무 일도 하지 않는다. */}
-            <button
-              ref={closeRef}
-              type="button"
-              onClick={closeDrawer}
-              aria-label="채널 목록 닫기"
-              title="채널 목록 닫기"
-              data-testid="close-sidebar-drawer"
-              className="mobile-only tap-target flex size-control shrink-0 items-center justify-center rounded-md text-ink-muted press hover:bg-surface-hover focus-visible:focus-ring"
-            >
-              <X className="size-4" aria-hidden="true" />
-            </button>
+            <Tooltip label="채널 목록 닫기" side="bottom" className="mobile-only">
+              <button
+                ref={closeRef}
+                type="button"
+                onClick={closeDrawer}
+                aria-label="채널 목록 닫기"
+                data-testid="close-sidebar-drawer"
+                className="mobile-only tap-target flex size-control shrink-0 items-center justify-center rounded-md text-ink-muted press hover:bg-surface-hover focus-visible:focus-ring"
+              >
+                <X className="size-4" aria-hidden="true" />
+              </button>
+            </Tooltip>
           </div>
           <div className="flex items-center">
             {/* 데스크톱 접기 토글은 타이틀바에 한 자리만 산다 (#1864). 여기 두면
@@ -1181,19 +1183,20 @@ export function Sidebar({
                       /* 두 줄 메뉴. 고른 창은 한 프레임 뒤에 연다: 메뉴가 먼저 캐럿을 + 로 돌려놓아야 창이 「무엇이 나를
                          열었나」로 + 를 잡고, Esc 로 닫을 때 그리로 돌아간다(⌘K 가 폼을 여는 것과 같은 까닭). */
                       <DropdownMenu onOpenChange={setChannelAddMenuOpen}>
-                        <DropdownMenuTrigger asChild>
-                          <button
-                            ref={newChannelRef}
-                            type="button"
-                            aria-label={formatMessage("channels.browse.menuLabel")}
-                            title={formatMessage("channels.browse.menuLabel")}
-                            data-testid="new-channel"
-                            data-section-action=""
-                            className="tap-target flex size-control-sm items-center justify-center rounded-sm text-ink-muted press hover:bg-surface-hover focus-visible:focus-ring"
-                          >
-                            <Plus className="size-4" aria-hidden="true" />
-                          </button>
-                        </DropdownMenuTrigger>
+                        <Tooltip label={formatMessage("channels.browse.menuLabel")} side="bottom">
+                          <DropdownMenuTrigger asChild>
+                            <button
+                              ref={newChannelRef}
+                              type="button"
+                              aria-label={formatMessage("channels.browse.menuLabel")}
+                              data-testid="new-channel"
+                              data-section-action=""
+                              className="tap-target flex size-control-sm items-center justify-center rounded-sm text-ink-muted press hover:bg-surface-hover focus-visible:focus-ring"
+                            >
+                              <Plus className="size-4" aria-hidden="true" />
+                            </button>
+                          </DropdownMenuTrigger>
+                        </Tooltip>
                         <DropdownMenuContent align="end" data-testid="new-channel-menu">
                           <DropdownMenuItem
                             data-testid="new-channel-browse"
@@ -1216,35 +1219,37 @@ export function Sidebar({
                         </DropdownMenuContent>
                       </DropdownMenu>
                     ) : canBrowse ? (
+                      <Tooltip label={formatMessage("channels.browse.title")} side="bottom">
+                        <button
+                          ref={newChannelRef}
+                          type="button"
+                          onClick={() => openChannelBrowse?.({ opener: newChannelRef.current })}
+                          aria-label={formatMessage("channels.browse.title")}
+                          data-testid="new-channel"
+                          data-section-action=""
+                          className="tap-target flex size-control-sm items-center justify-center rounded-sm text-ink-muted press hover:bg-surface-hover focus-visible:focus-ring"
+                        >
+                          <Plus className="size-4" aria-hidden="true" />
+                        </button>
+                      </Tooltip>
+                    ) : canCreate ? (
+                    /* size-control-sm(28px): WCAG 2.2 최소 타깃 24px에 딱 걸치던
+                       크기를 하우스 컨트롤 높이로 올린다. 사이드바의 아이콘 버튼
+                       셋(+ · 새 DM)이 같은 규격이다. 설정은 프로필 카드 행으로
+                       이사했다. */
+                    <Tooltip label="새 채널 만들기" side="bottom">
                       <button
                         ref={newChannelRef}
                         type="button"
-                        onClick={() => openChannelBrowse?.({ opener: newChannelRef.current })}
-                        aria-label={formatMessage("channels.browse.title")}
-                        title={formatMessage("channels.browse.title")}
+                        onClick={() => openCreateChannel(newChannelRef.current)}
+                        aria-label="새 채널 만들기"
                         data-testid="new-channel"
                         data-section-action=""
                         className="tap-target flex size-control-sm items-center justify-center rounded-sm text-ink-muted press hover:bg-surface-hover focus-visible:focus-ring"
                       >
                         <Plus className="size-4" aria-hidden="true" />
                       </button>
-                    ) : canCreate ? (
-                    /* size-control-sm(28px): WCAG 2.2 최소 타깃 24px에 딱 걸치던
-                       크기를 하우스 컨트롤 높이로 올린다. 사이드바의 아이콘 버튼
-                       셋(+ · 새 DM)이 같은 규격이다. 설정은 프로필 카드 행으로
-                       이사했다. */
-                    <button
-                      ref={newChannelRef}
-                      type="button"
-                      onClick={() => openCreateChannel(newChannelRef.current)}
-                      aria-label="새 채널 만들기"
-                      title="새 채널 만들기"
-                      data-testid="new-channel"
-                      data-section-action=""
-                      className="tap-target flex size-control-sm items-center justify-center rounded-sm text-ink-muted press hover:bg-surface-hover focus-visible:focus-ring"
-                    >
-                      <Plus className="size-4" aria-hidden="true" />
-                    </button>
+                    </Tooltip>
                     ) : rosterSettled ? null : (
                       /* 명부를 기다리는 동안 자리만 지킨다. 호버 클러스터가 열렸을
                          때만 마운트되므로 rest 헤더 높이는 흔들리지 않는다. */
@@ -1261,34 +1266,34 @@ export function Sidebar({
                         비활성으로 남기고 **사유를 이름으로 든다**(M-3). 사라진 문과
                         아직 못 찾은 문을 사람은 구분하지 못한다. */}
                     {canEditSections && (
-                      <button
-                        ref={newSectionRef}
-                        type="button"
-                        disabled={!sidebarPrefs.canCreate}
-                        onClick={() =>
-                          setNameDialog({
-                            mode: "create",
-                            sectionId: null,
-                            name: "",
-                            opener: newSectionRef.current,
-                          })
-                        }
-                        aria-label={
-                          sidebarPrefs.canCreate
-                            ? SECTION_CREATE_TITLE
-                            : sidebarSectionCapMessage()
-                        }
-                        title={
-                          sidebarPrefs.canCreate
-                            ? SECTION_CREATE_TITLE
-                            : sidebarSectionCapMessage()
-                        }
-                        data-testid="new-section"
-                        data-section-action=""
-                        className="tap-target flex size-control-sm items-center justify-center rounded-sm text-ink-muted press hover:bg-surface-hover focus-visible:focus-ring disabled:pointer-events-none disabled:opacity-50"
+                      <Tooltip
+                        label={sidebarPrefs.canCreate ? SECTION_CREATE_TITLE : sidebarSectionCapMessage()}
+                        side="bottom"
                       >
-                        <FolderPlus className="size-4" aria-hidden="true" />
-                      </button>
+                        <button
+                          ref={newSectionRef}
+                          type="button"
+                          disabled={!sidebarPrefs.canCreate}
+                          onClick={() =>
+                            setNameDialog({
+                              mode: "create",
+                              sectionId: null,
+                              name: "",
+                              opener: newSectionRef.current,
+                            })
+                          }
+                          aria-label={
+                            sidebarPrefs.canCreate
+                              ? SECTION_CREATE_TITLE
+                              : sidebarSectionCapMessage()
+                          }
+                          data-testid="new-section"
+                          data-section-action=""
+                          className="tap-target flex size-control-sm items-center justify-center rounded-sm text-ink-muted press hover:bg-surface-hover focus-visible:focus-ring disabled:pointer-events-none disabled:opacity-50"
+                        >
+                          <FolderPlus className="size-4" aria-hidden="true" />
+                        </button>
+                      </Tooltip>
                     )}
                   </>
                 }
@@ -1470,17 +1475,18 @@ export function Sidebar({
                       onOpenChange={setOpenDmMenu}
                       onReopen={reopenClosedDm}
                     />
-                    <button
-                      type="button"
-                      aria-label="새 다이렉트 메시지 시작"
-                      title="새 다이렉트 메시지 (⌘⇧K)"
-                      data-testid="new-dm"
-                      data-section-action=""
-                      onClick={(event) => openNewDm(event.currentTarget)}
-                      className="tap-target flex size-control-sm items-center justify-center rounded-sm text-ink-muted press hover:bg-surface-hover focus-visible:focus-ring"
-                    >
-                      <Plus className="size-4" aria-hidden="true" />
-                    </button>
+                    <Tooltip label="새 다이렉트 메시지 (⌘⇧K)" side="bottom">
+                      <button
+                        type="button"
+                        aria-label="새 다이렉트 메시지 시작"
+                        data-testid="new-dm"
+                        data-section-action=""
+                        onClick={(event) => openNewDm(event.currentTarget)}
+                        className="tap-target flex size-control-sm items-center justify-center rounded-sm text-ink-muted press hover:bg-surface-hover focus-visible:focus-ring"
+                      >
+                        <Plus className="size-4" aria-hidden="true" />
+                      </button>
+                    </Tooltip>
                   </>
                 }
               >
