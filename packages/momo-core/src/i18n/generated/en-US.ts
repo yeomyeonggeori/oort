@@ -3466,7 +3466,7 @@ export const catalog: MessageCatalog = {
   "expressions.draft.linkFrom": [
     {
       "type": 0,
-      "value": "Fetched from "
+      "value": "Will be fetched from "
     },
     {
       "type": 1,

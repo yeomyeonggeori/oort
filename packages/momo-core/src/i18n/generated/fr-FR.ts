@@ -581,7 +581,7 @@ export const catalog: MessageCatalog = {
   "expressions.draft.linkFrom": [
     {
       "type": 0,
-      "value": "Récupérée depuis "
+      "value": "Sera récupérée depuis "
     },
     {
       "type": 1,

@@ -589,7 +589,7 @@ export const catalog: MessageCatalog = {
   "expressions.draft.linkFrom": [
     {
       "type": 0,
-      "value": "Se obtiene de "
+      "value": "Se obtendrá de "
     },
     {
       "type": 1,
