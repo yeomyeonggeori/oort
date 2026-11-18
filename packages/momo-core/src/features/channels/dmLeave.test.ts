@@ -309,12 +309,20 @@ describe("확인 창 (D21)", () => {
         "다시 글이 오면 그 글부터 새 대화로 보여요.",
         "나간 뒤에는 되돌릴 수 없어요.",
       ],
+      body: [
+        "내 화면에서 지금까지의 대화가 사라져요. 이서연 님의 화면에는 그대로 남아요.",
+        "다시 글이 오면 그 글부터 새 대화로 보여요.",
+      ],
+      scheduled: null,
+      warning: "나간 뒤에는 되돌릴 수 없어요.",
       cancel: "취소",
       confirm: "나가기",
     });
-    expect(dmLeaveConfirmCopy(format, { name: "이서연", scheduledCount: 2 }).lines.at(-1)).toBe(
-      "예약해 둔 메시지 2개도 취소돼요."
-    );
+    // 차례(#5876): 본문 · 되살림 · 예약 N개 · 마지막에 경고. 웹·폰이 같은 한 차례를 쓴다.
+    const withScheduled = dmLeaveConfirmCopy(format, { name: "이서연", scheduledCount: 2 });
+    expect(withScheduled.lines.slice(2)).toEqual(["예약해 둔 메시지 2개도 취소돼요.", "나간 뒤에는 되돌릴 수 없어요."]);
+    expect(withScheduled.scheduled).toBe("예약해 둔 메시지 2개도 취소돼요.");
+    expect(withScheduled.lines).toEqual([...withScheduled.body, withScheduled.scheduled, withScheduled.warning]);
     expect(format(DM_LEAVE_KEYS.action)).toBe("대화 나가기");
     expect(format(DM_LEAVE_KEYS.done)).toBe("대화에서 나갔어요.");
     expect(format(DM_LEAVE_KEYS.busy)).toBe("나가는 중…");
@@ -326,8 +334,8 @@ describe("확인 창 (D21)", () => {
     const format = service.formatMessage.bind(service);
     const one = dmLeaveConfirmCopy(format, { name: "Seoyeon", scheduledCount: 1 });
     const many = dmLeaveConfirmCopy(format, { name: "Seoyeon", scheduledCount: 3 });
-    expect(one.lines.at(-1)).toBe("1 scheduled message will also be canceled.");
-    expect(many.lines.at(-1)).toBe("3 scheduled messages will also be canceled.");
+    expect(one.scheduled).toBe("1 scheduled message will also be canceled.");
+    expect(many.scheduled).toBe("3 scheduled messages will also be canceled.");
     expect(format(DM_LEAVE_KEYS.busy)).toBe("Leaving…");
     for (const text of [one.title, ...one.lines, one.cancel, one.confirm, format(DM_LEAVE_KEYS.busy)]) {
       expect(text).not.toMatch(/[가-힯]/);

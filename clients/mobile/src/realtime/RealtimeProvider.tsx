@@ -120,7 +120,7 @@ export function RealtimeProvider({
       onSocketEvent: event => feedRef.current(event),
       onPolicy: state => setSubscriptionsWanted(socketWanted(state)),
     });
-    setRail(createChannelRail(transport.client));
+    setRail(createChannelRail(transport.client, () => getPersistedSession()?.member.id ?? null));
     setReconnect(() => transport.reconnect);
     transport.start();
     return () => {

@@ -108,6 +108,8 @@ export interface ConversationInfoPageProps {
   onEnlargeAvatar?: (photo: ProfilePhoto) => void;
 }
 
+function noop(): void {}
+
 export function ConversationInfoPage({
   onClose,
   ...rest
@@ -119,6 +121,8 @@ export function ConversationInfoPage({
       accessibilityViewIsModal
       style={styles.overlay}
       onBack={onClose}
+      // 1:1 나가기 요청이 가는 동안은 가장자리 밀기로 물러나지 않는다(요청은 이미 나갔다). 꺼도 겹침 계산에는 남아 바깥 대화의 밀기가 대신 받지 않는다.
+      enabled={rest.dmLeave?.pending !== true}
       // 스택의 push 처럼 오른쪽에서 밀려 들어오고, ‹ 는 오른쪽으로 물러난다(동작 줄이기면 즉시).
       enter="push"
       testID="conversation-info-pane">
@@ -159,7 +163,9 @@ function InfoBody({
   const insets = useSafeAreaInsets();
   // ‹ · VoiceOver escape 는 같은 길로 한 겹만 벗긴다: 들어온 길의 반대로 물러난 뒤 `onClose`(층 밖에서는 곧바로 `onClose`).
   const closeLayer = useLayerClose();
-  const goBack = closeLayer ?? onClose;
+  const leaveGoing = dmLeave?.pending === true;
+  // 「대화 나가기」 요청이 가는 동안 ‹ · escape 는 아무 일도 하지 않는다(요청은 이미 나갔다, 끝나면 영수증이 선다).
+  const goBack = leaveGoing ? noop : (closeLayer ?? onClose);
   const [dmPending, setDmPending] = useState<string | null>(null);
   const [dmError, setDmError] = useState<string | null>(null);
   const removeAgent = async (id: string) => {

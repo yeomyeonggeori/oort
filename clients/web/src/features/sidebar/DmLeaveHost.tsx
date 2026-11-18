@@ -308,7 +308,7 @@ export function DmLeaveHost({
           title={copy.title}
           description={
             <>
-              {copy.lines.slice(0, 2).map((line) => (
+              {copy.body.map((line) => (
                 <p key={line}>{line}</p>
               ))}
               <ScheduledSlot
@@ -316,15 +316,13 @@ export function DmLeaveHost({
                 checking={messages.formatMessage(DM_LEAVE_KEYS.checking)}
                 failedText={SCHEDULED_COPY.load.error}
               >
-                {copy.lines.slice(3).map((line) => (
-                  <p key={line} data-testid="dm-leave-confirm-scheduled">
-                    {line}
-                  </p>
-                ))}
+                {copy.scheduled === null ? null : (
+                  <p data-testid="dm-leave-confirm-scheduled">{copy.scheduled}</p>
+                )}
               </ScheduledSlot>
             </>
           }
-          warning={copy.lines[2]}
+          warning={copy.warning}
           confirmLabel={copy.confirm}
           busyLabel={messages.formatMessage(DM_LEAVE_KEYS.busy)}
           cancelLabel={copy.cancel}

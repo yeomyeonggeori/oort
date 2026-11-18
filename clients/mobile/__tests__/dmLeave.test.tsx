@@ -1,4 +1,5 @@
 import {DM_LEAVE_KEYS, resetDmLeaveFoldForTest} from '@momo/core/features/channels/dmLeave';
+import {SCHEDULED_COPY} from '@momo/core/features/scheduled/copy';
 import {catalog as koCatalog} from '@momo/core/i18n/generated/ko-KR';
 import {createMessageService} from '@momo/core/i18n/service';
 import type {Member} from '@momo/core/lib/api';
@@ -97,6 +98,10 @@ interface Routes {
   scheduled?: boolean;
   /** `PUT …/dm-leave` 의 응답 상태. 기본 204. */
   leaveStatus?: number;
+  /** `PUT …/dm-leave` 실패 응답의 `error.code`(409 `dm_leave_unavailable`). */
+  leaveCode?: string;
+  /** `GET …/scheduled-messages` 의 응답 상태(기본 200). 404 는 「이 서버에 예약 없음」, 500 은 못 읽음. */
+  scheduledStatus?: number;
   /** `PUT …/dm-leave` 가 `releaseHeld()` 전까지 끝나지 않는다. */
   holdLeave?: boolean;
   /** 내 예약 목록 응답(`GET …/scheduled-messages`)이 `releaseHeld()` 전까지 끝나지 않는다(예약 수를 세는 중). */
@@ -173,7 +178,7 @@ function installFetch(routes: Routes = {}) {
     if (leave && method === 'PUT') {
       if (routes.holdLeave) await new Promise<void>(resolve => held.push(resolve));
       const status = routes.leaveStatus ?? 204;
-      if (status !== 204) return jsonResponse(status, {error: {message: 'nope'}});
+      if (status !== 204) return jsonResponse(status, {error: {message: 'nope', ...(routes.leaveCode === undefined ? {} : {code: routes.leaveCode})}});
       floors.set(leave[1], Math.max(floors.get(leave[1]) ?? 0, Number(body?.seenSeq) + 1));
       return jsonResponse(204, {});
     }
@@ -183,6 +188,9 @@ function installFetch(routes: Routes = {}) {
     }
     if (url.includes('/scheduled-messages')) {
       if (routes.holdScheduled) await new Promise<void>(resolve => held.push(resolve));
+      if (routes.scheduledStatus !== undefined && routes.scheduledStatus !== 200) {
+        return jsonResponse(routes.scheduledStatus, {error: {message: 'nope'}});
+      }
       const row = (id: string, channelId: string, status: string) => ({
         id,
         workspaceId: WS,
@@ -397,8 +405,8 @@ describe('행 시트 — 확인 단계 (D21)', () => {
       [
         ko(DM_LEAVE_KEYS.confirmBody, {name: '박서연'}),
         ko(DM_LEAVE_KEYS.confirmRevive),
-        ko(DM_LEAVE_KEYS.confirmFinal),
         ko(DM_LEAVE_KEYS.confirmScheduled, {count: 2}),
+        ko(DM_LEAVE_KEYS.confirmFinal),
       ].join('\n'),
     );
     // 항목 카드는 사라진다.
@@ -420,6 +428,7 @@ describe('행 시트 — 확인 단계 (D21)', () => {
     await waitFor(() => expect(screen.getByTestId('channel-sheet-leave-dm')).toBeTruthy());
     fireEvent.press(screen.getByTestId('channel-sheet-leave-dm'));
     await screen.findByTestId('channel-dm-leave-confirm');
+    await waitFor(() => expect(detailLines('channel-dm-leave-confirm')[2]).toBe('\u00A0'));
     expect(screen.getByTestId('channel-dm-leave-confirm-detail')).not.toHaveTextContent(/예약/);
   });
 
@@ -950,5 +959,233 @@ describe('대화 ⋮ 시트와 정보 페이지 — 같은 판정·낱말·단�
     await waitFor(() => expect(screen.queryByTestId('conversation-pane')).toBeNull());
     expect(leaveCalls()).toHaveLength(1);
     expect(screen.getByTestId('dm-left-receipt')).toBeTruthy();
+  });
+});
+
+// =============================================================================
+// 웹과 같은 말·같은 처리 (ADR-0177 증보 2026-11-14 D17·D21, #5876) — 세 자리(행 시트 · ⋮ 시트 · 정보 페이지) 모두.
+// =============================================================================
+
+type LeaveSite = 'row' | 'menu' | 'info';
+const SITES: LeaveSite[] = ['row', 'menu', 'info'];
+const STEP_HEAD: Record<LeaveSite, string> = {
+  row: 'channel-dm-leave-confirm',
+  menu: 'conversation-menu-dm-leave-confirm',
+  info: 'conversation-info-dm-leave-confirm',
+};
+
+/** 그 자리에서 「대화 나가기」를 눌러 확인 단계가 서기까지(예약 목록 응답은 기다리지 않는다). */
+async function openLeaveStep(site: LeaveSite): Promise<string> {
+  if (site === 'row') {
+    await openRowSheet(ROW.human);
+    await waitFor(() => expect(screen.getByTestId('channel-sheet-leave-dm')).toBeTruthy());
+    fireEvent.press(screen.getByTestId('channel-sheet-leave-dm'));
+  } else {
+    fireEvent.press(screen.getByTestId(ROW.human));
+    await screen.findByTestId('conversation-menu');
+    await waitFor(async () => {
+      await openConversationMenu();
+      expect(screen.getByTestId('conversation-menu-leave-dm')).toBeTruthy();
+    });
+    if (site === 'menu') {
+      fireEvent.press(screen.getByTestId('conversation-menu-leave-dm'));
+    } else {
+      fireEvent.press(screen.getByTestId('conversation-menu-info'));
+      await screen.findByTestId('conversation-info-page');
+      fireEvent.press(screen.getByTestId('conversation-info-leave-dm'));
+    }
+  }
+  await screen.findByTestId(STEP_HEAD[site]);
+  return STEP_HEAD[site];
+}
+
+/** 단계의 설명 줄들(화면에 서는 차례 그대로). */
+function detailLines(head: string): string[] {
+  const children = screen.getByTestId(`${head}-detail`).props.children as unknown;
+  return String(Array.isArray(children) ? children.join('') : children).split('\n');
+}
+
+const confirmState = (head: string) => screen.getByTestId(`${head}-button`).props.accessibilityState as {disabled?: boolean} | undefined;
+
+describe('확인 단계의 문장 차례 — 웹과 같다 (#5876)', () => {
+  it.each(SITES)('%s: 본문 · 되살림 · 예약 N개 · 마지막에 「되돌릴 수 없어요」', async site => {
+    await mountShell({scheduled: true});
+    const head = await openLeaveStep(site);
+    await waitFor(() => expect(detailLines(head)[2]).toBe(ko(DM_LEAVE_KEYS.confirmScheduled, {count: 2})));
+    expect(detailLines(head)).toEqual([
+      ko(DM_LEAVE_KEYS.confirmBody, {name: '박서연'}),
+      ko(DM_LEAVE_KEYS.confirmRevive),
+      ko(DM_LEAVE_KEYS.confirmScheduled, {count: 2}),
+      ko(DM_LEAVE_KEYS.confirmFinal),
+    ]);
+  });
+});
+
+describe('예약 목록을 아직 모를 때 — 「확인 중…」 (#5876)', () => {
+  it.each(SITES)('%s: 단계가 바로 서고 확정이 잠긴 채 「확인 중…」, 알게 되면 같은 자리의 문장만 바뀐다(줄 수 그대로)', async site => {
+    await mountShell({scheduled: true, holdScheduled: true});
+    const head = await openLeaveStep(site);
+    const checking = detailLines(head);
+    expect(checking).toEqual([
+      ko(DM_LEAVE_KEYS.confirmBody, {name: '박서연'}),
+      ko(DM_LEAVE_KEYS.confirmRevive),
+      ko(DM_LEAVE_KEYS.checking),
+      ko(DM_LEAVE_KEYS.confirmFinal),
+    ]);
+    expect(confirmState(head)).toMatchObject({disabled: true});
+    await arm();
+    fireEvent.press(screen.getByTestId(`${head}-button`));
+    expect(leaveCalls()).toHaveLength(0);
+
+    releaseHeld();
+    await waitFor(() => expect(detailLines(head)[2]).toBe(ko(DM_LEAVE_KEYS.confirmScheduled, {count: 2})));
+    // 같은 줄 수 - 시트 높이·단추 자리가 줄 수로는 움직이지 않는다.
+    expect(detailLines(head)).toHaveLength(checking.length);
+    expect(confirmState(head)?.disabled ?? false).toBe(false);
+    // 풀린 단추도 알게 된 순간부터 500ms 는 눌림을 받지 않는다(손가락 밑에서 풀릴 수 있다).
+    fireEvent.press(screen.getByTestId(`${head}-button`));
+    expect(leaveCalls()).toHaveLength(0);
+    await arm();
+    fireEvent.press(screen.getByTestId(`${head}-button`));
+    await waitFor(() => expect(leaveCalls()).toHaveLength(1));
+  });
+
+  it('예약이 없다고 알게 되어도 그 자리는 한 줄을 지킨다(줄 수 그대로)', async () => {
+    await mountShell({holdScheduled: true});
+    const head = await openLeaveStep('row');
+    expect(detailLines(head)).toHaveLength(4);
+    releaseHeld();
+    await waitFor(() => expect(detailLines(head)[2]).toBe(' '));
+    expect(detailLines(head)).toHaveLength(4);
+    expect(confirmState(head)?.disabled ?? false).toBe(false);
+  });
+
+  it('목록을 못 읽으면(404 아닌 오류) 모름을 0 으로 읽지 않는다: 까닭을 말하고 확정은 잠근 채, 「취소」는 먹는다', async () => {
+    await mountShell({scheduledStatus: 500});
+    const head = await openLeaveStep('row');
+    await waitFor(() => expect(detailLines(head)[2]).toBe(SCHEDULED_COPY.load.error));
+    expect(confirmState(head)).toMatchObject({disabled: true});
+    await arm();
+    fireEvent.press(screen.getByTestId(`${head}-button`));
+    expect(leaveCalls()).toHaveLength(0);
+    fireEvent.press(screen.getByTestId(`${head}-cancel`));
+    expect(screen.queryByTestId(head)).toBeNull();
+  });
+
+  it('목록이 404(이 서버에 예약이 없다)면 0 개로 알고 확정이 풀린다', async () => {
+    await mountShell({scheduledStatus: 404});
+    const head = await openLeaveStep('row');
+    await waitFor(() => expect(detailLines(head)[2]).toBe(' '));
+    expect(confirmState(head)?.disabled ?? false).toBe(false);
+  });
+});
+
+describe('나갈 수 없는 대화 — 409·405 (#5876)', () => {
+  it.each(SITES)('%s: 409 dm_leave_unavailable 는 「이 대화에서는 나갈 수 없어요.」 + 확정 잠금, 요청은 한 번뿐이고 「취소」만 남는다', async site => {
+    await mountShell({leaveStatus: 409, leaveCode: 'dm_leave_unavailable'});
+    const head = await openLeaveStep(site);
+    await waitFor(() => expect(confirmState(head)?.disabled ?? false).toBe(false));
+    await arm();
+    fireEvent.press(screen.getByTestId(`${head}-button`));
+    expect(await screen.findByTestId(`${head}-error`)).toHaveTextContent(ko(DM_LEAVE_KEYS.unavailable));
+    expect(screen.queryByText(ko(DM_LEAVE_KEYS.failed))).toBeNull();
+    expect(confirmState(head)).toMatchObject({disabled: true});
+    fireEvent.press(screen.getByTestId(`${head}-button`));
+    await act(() => {
+      jest.advanceTimersByTime(DM_LEAVE_CONFIRM_ARM_MS);
+    });
+    expect(leaveCalls()).toHaveLength(1);
+    // 「취소」는 먹고 단계가 걷힌다.
+    expect(screen.getByTestId(`${head}-cancel`).props.accessibilityState?.disabled ?? false).toBe(false);
+    fireEvent.press(screen.getByTestId(`${head}-cancel`));
+    expect(screen.queryByTestId(head)).toBeNull();
+  });
+
+  it.each(SITES)('%s: 405 도 같다 - 이 워크스페이스의 메뉴는 접히지만 서 있는 단계와 그 문장은 그대로다', async site => {
+    await mountShell({leaveStatus: 405});
+    const head = await openLeaveStep(site);
+    await waitFor(() => expect(confirmState(head)?.disabled ?? false).toBe(false));
+    await arm();
+    fireEvent.press(screen.getByTestId(`${head}-button`));
+    expect(await screen.findByTestId(`${head}-error`)).toHaveTextContent(ko(DM_LEAVE_KEYS.unavailable));
+    expect(screen.getByTestId(head)).toBeTruthy();
+    expect(confirmState(head)).toMatchObject({disabled: true});
+    fireEvent.press(screen.getByTestId(`${head}-cancel`));
+    expect(screen.queryByTestId(head)).toBeNull();
+    // 접힌 메뉴: 다시 열어도 「대화 나가기」가 없다.
+    if (site === 'row') {
+      await waitFor(() => {
+        longPress(ROW.human);
+        expect(sheetKeys('channel-sheet')).not.toContain('leave-dm');
+      });
+    } else if (site === 'menu') {
+      expect(screen.queryByTestId('conversation-menu-leave-dm')).toBeNull();
+    } else {
+      expect(screen.queryByTestId('conversation-info-leave-dm')).toBeNull();
+    }
+  });
+
+  it('망·서버 오류(500)는 지금처럼 「나가지 못했어요」 + 살아 있는 확정이다(잠그지 않는다)', async () => {
+    await mountShell({leaveStatus: 500});
+    const head = await openLeaveStep('menu');
+    await waitFor(() => expect(confirmState(head)?.disabled ?? false).toBe(false));
+    await arm();
+    fireEvent.press(screen.getByTestId(`${head}-button`));
+    expect(await screen.findByTestId(`${head}-error`)).toHaveTextContent(ko(DM_LEAVE_KEYS.failed));
+    expect(confirmState(head)?.disabled ?? false).toBe(false);
+  });
+});
+
+describe('진행 중에는 시트가 몸짓으로 닫히지 않는다 (#5876)', () => {
+  const DISMISS: Record<LeaveSite, string[]> = {
+    row: ['channel-sheet-close', 'channel-sheet-backdrop'],
+    menu: ['conversation-menu-close', 'conversation-menu-backdrop'],
+    info: ['conversation-info-back'],
+  };
+
+  it.each(SITES)('%s: 요청이 가는 동안 닫는 몸짓은 아무 일도 하지 않고, 끝나면 평소처럼 걷힌다', async site => {
+    await mountShell({holdLeave: true});
+    const head = await openLeaveStep(site);
+    await waitFor(() => expect(confirmState(head)?.disabled ?? false).toBe(false));
+    await arm();
+    fireEvent.press(screen.getByTestId(`${head}-button`));
+    await waitFor(() => expect(leaveCalls()).toHaveLength(1));
+    for (const gesture of DISMISS[site]) {
+      fireEvent.press(screen.getByTestId(gesture, {includeHiddenElements: true}));
+      await act(() => {
+        jest.advanceTimersByTime(600);
+      });
+      expect(screen.getByTestId(head)).toBeTruthy();
+    }
+    if (site === 'info') {
+      // VoiceOver 두 손가락 문지르기(escape)도 같다.
+      fireEvent(screen.getByTestId('conversation-info-page'), 'accessibilityEscape');
+      expect(screen.getByTestId(head)).toBeTruthy();
+    }
+    releaseHeld();
+    if (site === 'row') await waitFor(() => expect(screen.queryByTestId(ROW.human)).toBeNull());
+    else await waitFor(() => expect(screen.queryByTestId('conversation-pane')).toBeNull());
+    expect(screen.queryByTestId(head)).toBeNull();
+  });
+
+  it.each(SITES)('%s: 쉬는 동안(요청 전)은 닫는 몸짓이 먹는다 - 잠금은 진행 중에만 걸린다', async site => {
+    await mountShell({holdLeave: true});
+    const head = await openLeaveStep(site);
+    fireEvent.press(screen.getByTestId(DISMISS[site][0]));
+    await waitFor(() => expect(screen.queryByTestId(head)).toBeNull());
+    expect(leaveCalls()).toHaveLength(0);
+  });
+});
+
+describe('개인 채널 이음매 — 열린 대화가 그 방의 옮겨 온 프레임을 듣는다 (D17, #5876)', () => {
+  it('대화를 열면 로그인한 멤버의 개인 채널(user:read-state#<나>)을 구독한다', async () => {
+    await mountShell();
+    fireEvent.press(screen.getByTestId(ROW.human));
+    await screen.findByTestId('conversation-menu');
+    const centrifuge = jest.requireMock('centrifuge') as {__clients: Array<{subs: Map<string, unknown>}>};
+    await waitFor(() => {
+      const names = centrifuge.__clients.flatMap(client => [...client.subs.keys()]);
+      expect(names).toContain(`user:read-state#${SELF_ID.toUpperCase()}`);
+    });
   });
 });
