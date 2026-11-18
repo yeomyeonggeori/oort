@@ -812,6 +812,16 @@ export const catalog: MessageCatalog = {
       "value": "En approuvant, l’image est récupérée une fois, vérifiée, puis enregistrée dans la bibliothèque de l’équipe."
     }
   ],
+  "timeline.addMember.createdDescriptionPublic": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " a été créé. Tout membre à part entière de l'espace de travail peut le trouver dans le navigateur de canaux et le rejoindre."
+    }
+  ],
   "timeline.approval.channelAgentIn": [
     {
       "type": 0,

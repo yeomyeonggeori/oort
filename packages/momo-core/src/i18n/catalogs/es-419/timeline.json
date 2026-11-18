@@ -1,5 +1,6 @@
 {
   "timeline.createChannel.publicDetail": "Cualquier miembro completo del espacio de trabajo puede encontrarlo al explorar canales y unirse.",
+  "timeline.addMember.createdDescriptionPublic": "Se creó {name}. Cualquier miembro completo del espacio de trabajo puede encontrarlo al explorar canales y unirse.",
   "timeline.channelLeave.bodyPublicBrowse": "{name} desaparecerá de tu barra lateral. Puedes volver cuando quieras desde Explorar canales.",
   "timeline.approval.channelNeedsMember": "Primero agrega este agente como miembro de este canal.",
   "timeline.approval.channelAgentIn": "Este agente ya está en este canal.",

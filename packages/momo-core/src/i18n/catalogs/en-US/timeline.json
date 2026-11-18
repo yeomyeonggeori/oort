@@ -49,7 +49,7 @@
   "timeline.createChannel.publicDetail": "Any full member of the workspace can find it in the channel browser and join.",
   "timeline.createChannel.privateDetail": "Only members who are added can see it.",
   "timeline.addMember.createdDescription": "Created {name}. A private channel is visible only to the members you add.",
-  "timeline.addMember.createdDescriptionPublic": "Created {name}. It's a public channel, so people who join the workspace later are added automatically.",
+  "timeline.addMember.createdDescriptionPublic": "Created {name}. Any full member of the workspace can find it in the channel browser and join.",
   "timeline.addMember.later": "Later",
   "timeline.channelLeave.title": "Leave this channel?",
   "timeline.channelLeave.confirm": "Leave channel",

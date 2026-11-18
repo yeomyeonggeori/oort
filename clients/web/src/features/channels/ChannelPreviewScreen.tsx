@@ -17,8 +17,8 @@ import { Button } from "@/design/ui/button";
 import { cn } from "@/design/lib/cn";
 import { EmptyInvite, InlineBanner, Skeleton } from "@/features/common/States";
 import { useOffline } from "@/features/common/useOffline";
-import { timeLabel } from "@/features/timeline/timeLabel";
 import { useFormatMessage } from "@/i18n/useFormatMessage";
+import { useLocaleService } from "@/i18n/useLocaleService";
 import { useJoinBrowsedChannel } from "./useChannelBrowse";
 
 // =============================================================================
@@ -46,11 +46,24 @@ function authorLabel(message: PreviewMessage): string {
   return message.author.displayName ?? GONE_MEMBER_LABEL;
 }
 
+/** 오늘이면 시각만, 아니면 날짜와 시각 — 폰 미리 보기(`ChannelPreviewScreen` 의 `useStamp`)와 같은 판단, 같은 언어 서비스(#5958). */
+function usePreviewStamp(): (ms: number) => string {
+  const locale = useLocaleService();
+  return useCallback(
+    (ms: number) => {
+      const time = locale.formatTime(ms);
+      return locale.formatDate(ms) === locale.formatDate(Date.now()) ? time : `${locale.formatDate(ms)} ${time}`;
+    },
+    [locale]
+  );
+}
+
 /** 글 한 줄(읽기 전용). 낭독은 줄 전체가 한 덩어리 — 글쓴이, 시각, 수정됨, 본문, 첨부 이름, 잠김 문장, 답글 수 차례다. */
 export function PreviewRow({ message }: { message: PreviewMessage }) {
   const formatMessage = useFormatMessage();
   const author = authorLabel(message);
-  const time = timeLabel(message.createdAtMs);
+  const stamp = usePreviewStamp();
+  const time = stamp(message.createdAtMs);
   const edited = message.edited && !message.deleted ? formatMessage("timeline.edited.mark") : undefined;
   const locked = message.attachmentNames.length > 0 ? formatMessage("channels.preview.attachmentLocked") : undefined;
   const replies =
