@@ -173,6 +173,11 @@ export interface SidebarInput {
    * DM 마다의 보임 판정(소문자 id -> 판정, `dmVerdicts`). 생략하거나 없는 id 는 보인다: 모를 때 숨기는 쪽이 최악이다.
    */
   dmVerdicts?: ReadonlyMap<string, DmVerdict>;
+  /**
+   * 참이면 채널이 하나도 없어도(검색 중이 아닐 때) 「채널」 섹션이 선다(#5846, ADR-0224 D10). 기본 채널까지 나간 정식 멤버가 둘러보기로
+   * 돌아오는 문(섹션 머리 ⋯ · 섹션 아래 「채널 둘러보기」 줄)이 그 섹션에 있다. 화면이 「둘러보기 문을 세우는가」로 준다. 생략하면 거짓.
+   */
+  keepEmptyChannels?: boolean;
 }
 
 /**
@@ -407,7 +412,10 @@ export function buildSidebarSections(input: SidebarInput): SidebarSection[] {
     {key: 'channels' as const, label: '채널', data: channels},
     {key: 'dms' as const, label: 'DM', data: dmSection},
   ].filter(
-    section => section.data.length > 0 || (section.key === 'dms' && hasHiddenDm),
+    section =>
+      section.data.length > 0 ||
+      (section.key === 'dms' && hasHiddenDm) ||
+      (section.key === 'channels' && input.keepEmptyChannels === true && needle === ''),
   );
 }
 

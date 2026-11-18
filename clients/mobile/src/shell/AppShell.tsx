@@ -43,6 +43,7 @@ import {useNotificationTapRouting} from '../push/useNotificationTapRouting';
 import {RealtimeProvider} from '../realtime/RealtimeProvider';
 import AgentDetailScreen from '../screens/AgentDetailScreen';
 import AgentsScreen from '../screens/AgentsScreen';
+import ChannelBrowseScreen from '../screens/ChannelBrowseScreen';
 import ConversationScreen from '../screens/ConversationScreen';
 import HostedConnectionDetailScreen from '../screens/HostedConnectionDetailScreen';
 import HostedConnectionsScreen from '../screens/HostedConnectionsScreen';
@@ -270,6 +271,16 @@ export function Shell({
     () => dispatch({type: 'openAgentList'}),
     [],
   );
+  // 「채널 둘러보기」 페이지(#5846): 홈 「채널」 섹션 ⋯ 메뉴 · 이름 검색 묶음이 연다.
+  const onOpenChannelBrowse = useCallback(
+    (initialQuery?: string) => dispatch({type: 'openChannelBrowse', initialQuery}),
+    [],
+  );
+  const onOpenChannelFromBrowse = useCallback(
+    (channelId: string, title: string) =>
+      dispatch({type: 'openChannelFromBrowse', conversation: {channelId, title}}),
+    [],
+  );
   // 설정을 처음 어느 장으로 여는가(#4937). 보통은 첫 장이고, 「업데이트 소식」 시트의 「자세히 보기」만 소식 장으로 연다.
   // 설정은 닫히면 언마운트되고 `initialPage` 는 마운트 때 한 번만 읽히므로, 다른 입구는 열기 전에 첫 장으로 되돌린다.
   // `undefined` 가 첫 장이다(`SettingsPage` 의 기본값): 직접 문구 장부가 낱말 하나짜리 문자열을 문구로 세므로 이름을 다시 적지 않는다.
@@ -403,7 +414,8 @@ export function Shell({
     nav.workSession !== null ||
     nav.hosted !== null ||
     nav.apps !== null ||
-    nav.settings;
+    nav.settings ||
+    nav.channelBrowse !== null;
   // 설정 위에 다른 층이 얹히면(알림 입구 등) 설정은 더 이상 VoiceOver 의 모달 경계가 아니다.
   const settingsOnTop =
     nav.settings &&
@@ -413,7 +425,8 @@ export function Shell({
     !nav.workList &&
     nav.workSession === null &&
     nav.hosted === null &&
-    nav.apps === null;
+    nav.apps === null &&
+    nav.channelBrowse === null;
   // 대화 밑에 탭 판 말고 다른 층(작업 목록·작업 상세·에이전트 목록·에이전트 상세 등)이 깔려 있는가 (#5546). 그 층들은 탭 판처럼 따로
   // 숨기지 않으므로 이때는 대화 판이 VoiceOver 의 모달 경계다 — 작업 상세 위의 대화(#1292)와 같은 이유. 탭 위에 바로 연 대화는 그대로
   // 모달이 아니다: 그 밑의 탭 판과 크롬은 `covered` 한 쌍이 뺀다.
@@ -424,7 +437,8 @@ export function Shell({
     nav.workSession !== null ||
     nav.hosted !== null ||
     nav.apps !== null ||
-    nav.settings;
+    nav.settings ||
+    nav.channelBrowse !== null;
   // 메뉴가 열린 채 다른 길(알림 탭 등)로 층이 서면 메뉴를 **접는다**. 숨기기만 하면
   // 층이 닫힐 때 아무도 부르지 않은 메뉴가 다시 뜬다(design-review L1).
   useEffect(() => {
@@ -465,6 +479,7 @@ export function Shell({
               onOpenConversation={onOpenConversation}
               onOpenSearch={onOpenSearch}
               onOpenAgentList={onOpenAgentList}
+              onOpenChannelBrowse={onOpenChannelBrowse}
               onOpenWorkList={onOpenWorkList}
               onOpenSettings={onOpenSettings}
               onChannelLeft={onChannelLeft}
@@ -669,6 +684,22 @@ export function Shell({
             pluginId={nav.apps.pluginId}
             name={nav.apps.name}
             onBack={onBack}
+          />
+        </EdgeSwipeBack>
+      ) : null}
+
+      {/* 「채널 둘러보기」(#5846). 닫히면 언마운트한다 — 열 때마다 다시 읽는다. 대화는 이 층을 걷고 열린다(`openChannelFromBrowse`). */}
+      {nav.channelBrowse ? (
+        <EdgeSwipeBack
+          accessibilityViewIsModal={nav.conversation === null}
+          style={styles.overlay}
+          onBack={onBack}
+          testID="channel-browse-pane">
+          <ChannelBrowseScreen
+            key={nav.channelBrowse.seq}
+            initialQuery={nav.channelBrowse.initialQuery}
+            onClose={onBack}
+            onOpenChannel={onOpenChannelFromBrowse}
           />
         </EdgeSwipeBack>
       ) : null}

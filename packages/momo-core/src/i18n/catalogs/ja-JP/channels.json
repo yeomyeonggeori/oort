@@ -65,5 +65,10 @@
   "channels.browse.switchNotFound": "このチャンネルは利用できなくなりました。",
   "channels.browse.switchNotListable": "公開チャンネルのみ一覧に表示できます。",
   "channels.browse.switchNetwork": "変更できませんでした。{reason}",
-  "channels.browse.switchGeneric": "変更できませんでした。もう一度お試しください。"
+  "channels.browse.switchGeneric": "変更できませんでした。もう一度お試しください。",
+  "channels.browse.closeAria": "チャンネル一覧を閉じる",
+  "channels.browse.loading": "チャンネル一覧を読み込んでいます。",
+  "channels.browse.joining": "参加しています",
+  "channels.browse.emptyAdminDetailPhone": "既存のチャンネルは、Web またはデスクトップのチャンネルメニューで「チャンネル一覧に表示」をオンにするとここに表示されます。",
+  "channels.browse.homeRowHint": "この名前でチャンネル一覧を開きます。"
 }

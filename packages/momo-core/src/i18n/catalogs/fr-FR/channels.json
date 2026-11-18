@@ -65,5 +65,10 @@
   "channels.browse.switchNotFound": "Ce canal n'est plus disponible.",
   "channels.browse.switchNotListable": "Seuls les canaux publics peuvent être affichés dans le navigateur.",
   "channels.browse.switchNetwork": "Impossible d'enregistrer la modification. {reason}",
-  "channels.browse.switchGeneric": "Impossible d'enregistrer la modification. Réessayez."
+  "channels.browse.switchGeneric": "Impossible d'enregistrer la modification. Réessayez.",
+  "channels.browse.closeAria": "Fermer le navigateur de canaux",
+  "channels.browse.loading": "Chargement des canaux.",
+  "channels.browse.joining": "Adhésion en cours",
+  "channels.browse.emptyAdminDetailPhone": "Pour afficher ici un canal existant, activez « Afficher dans le navigateur de canaux » dans son menu, sur le web ou dans l’application de bureau.",
+  "channels.browse.homeRowHint": "Ouvre le navigateur de canaux avec ce nom."
 }

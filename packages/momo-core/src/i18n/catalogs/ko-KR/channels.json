@@ -65,5 +65,10 @@
   "channels.browse.switchNotFound": "이 채널은 이제 찾을 수 없어요.",
   "channels.browse.switchNotListable": "공개 채널만 둘러보기에 보일 수 있어요.",
   "channels.browse.switchNetwork": "바꾸지 못했어요. {reason}",
-  "channels.browse.switchGeneric": "바꾸지 못했어요. 다시 시도해 주세요."
+  "channels.browse.switchGeneric": "바꾸지 못했어요. 다시 시도해 주세요.",
+  "channels.browse.closeAria": "채널 둘러보기 닫기",
+  "channels.browse.loading": "채널 목록을 불러오는 중이에요.",
+  "channels.browse.joining": "참여 요청 중",
+  "channels.browse.emptyAdminDetailPhone": "이미 있는 채널은 웹이나 데스크탑의 채널 메뉴에서 「둘러보기에 보이기」를 켜면 여기에 보여요.",
+  "channels.browse.homeRowHint": "채널 둘러보기를 이 이름으로 열어요."
 }

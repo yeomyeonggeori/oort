@@ -14,6 +14,12 @@ export const catalog: MessageCatalog = {
       "value": "關閉"
     }
   ],
+  "channels.browse.closeAria": [
+    {
+      "type": 0,
+      "value": "關閉頻道瀏覽"
+    }
+  ],
   "channels.browse.default": [
     {
       "type": 0,
@@ -30,6 +36,12 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "在頻道選單中開啟「在瀏覽中顯示」，現有頻道就會出現在這裡。"
+    }
+  ],
+  "channels.browse.emptyAdminDetailPhone": [
+    {
+      "type": 0,
+      "value": "在網頁版或桌面版的頻道選單中開啟「在瀏覽中顯示」，現有頻道就會出現在這裡。"
     }
   ],
   "channels.browse.emptyHeadline": [
@@ -54,6 +66,12 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "未在瀏覽中顯示的公開頻道"
+    }
+  ],
+  "channels.browse.homeRowHint": [
+    {
+      "type": 0,
+      "value": "用這個名稱開啟頻道瀏覽。"
     }
   ],
   "channels.browse.join": [
@@ -90,6 +108,12 @@ export const catalog: MessageCatalog = {
       "value": "無法加入。請再試一次。"
     }
   ],
+  "channels.browse.joining": [
+    {
+      "type": 0,
+      "value": "正在加入"
+    }
+  ],
   "channels.browse.joinNetwork": [
     {
       "type": 0,
@@ -116,6 +140,12 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "無法載入頻道清單。請稍後再試。"
+    }
+  ],
+  "channels.browse.loading": [
+    {
+      "type": 0,
+      "value": "正在載入頻道列表。"
     }
   ],
   "channels.browse.loadMore": [

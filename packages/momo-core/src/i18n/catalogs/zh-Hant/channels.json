@@ -65,5 +65,10 @@
   "channels.browse.switchNotFound": "此頻道已無法使用。",
   "channels.browse.switchNotListable": "只有公開頻道可以在瀏覽中顯示。",
   "channels.browse.switchNetwork": "無法儲存變更。{reason}",
-  "channels.browse.switchGeneric": "無法儲存變更，請再試一次。"
+  "channels.browse.switchGeneric": "無法儲存變更，請再試一次。",
+  "channels.browse.closeAria": "關閉頻道瀏覽",
+  "channels.browse.loading": "正在載入頻道列表。",
+  "channels.browse.joining": "正在加入",
+  "channels.browse.emptyAdminDetailPhone": "在網頁版或桌面版的頻道選單中開啟「在瀏覽中顯示」，現有頻道就會出現在這裡。",
+  "channels.browse.homeRowHint": "用這個名稱開啟頻道瀏覽。"
 }
