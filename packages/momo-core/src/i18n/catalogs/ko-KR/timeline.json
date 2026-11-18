@@ -196,5 +196,8 @@
   "timeline.workRequest.openTools": "내 도구 열기",
   "timeline.workRequest.openSheet": "작업 요청 열기",
   "timeline.workRequest.openSheetLabel": "{label}: 작업 요청 열기",
-  "timeline.workRequest.sheetHint": "열린 시트에서 글을 확인하고 직접 보내 주세요."
+  "timeline.workRequest.sheetHint": "열린 시트에서 글을 확인하고 직접 보내 주세요.",
+  "timeline.approval.channelNeedsMember": "먼저 이 채널에 에이전트를 멤버로 추가해 주세요.",
+  "timeline.approval.channelAgentIn": "이 에이전트가 이미 이 채널에 들어가 있어요.",
+  "timeline.approval.channelsRefused": "고른 채널 가운데 지금은 연결할 수 없는 채널이 있어요. 목록을 다시 확인해 주세요."
 }

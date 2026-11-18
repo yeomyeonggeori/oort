@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vitest";
+import { ApiError, type Channel } from "../../lib/api";
 import { HOSTED_AGENT_SCOPES, type HostedAgentConnection } from "./model";
 import {
   approvableChannelIds,
+  approvalChannelInputs,
+  approvalChannelsRefusedKey,
   approvalConsequence,
   APPROVAL_SECURITY_NOTE,
   buildConfirmApproval,
@@ -322,5 +325,101 @@ describe("RED PROOF ③ 결과 문장은 닫히는 쪽도 말한다", () => {
   it("승인이 사람의 보안 결정이라는 사실을 감추지 않는다", () => {
     expect(APPROVAL_SECURITY_NOTE).toContain("사람만 내릴 수 있는 보안 결정");
     expect(APPROVAL_SECURITY_NOTE).toContain("감지됐다는 사실은 권한의 근거가 아니고");
+  });
+});
+
+// =============================================================================
+// #5919 — 승인 후보는 서버 판정(ADR-0224 D13)과 같은 뜻이다: 둘러보기에 보이는 공개 채널이거나
+// 그 에이전트가 이미 든 채널. 하나라도 어긋나면 서버가 요청 전체를 400 으로 돌려준다.
+// =============================================================================
+describe("D13 서버 판정과 같은 후보", () => {
+  const wire = (id: string, kind: Channel["kind"], browseListed?: boolean): Channel => ({
+    id,
+    workspaceId: "ws",
+    kind,
+    name: id,
+    muted: false,
+    ...(browseListed === undefined ? {} : { browseListed }),
+  });
+  const label = (channel: Channel) => channel.name ?? "";
+  const rows = [
+    wire("listed", "public", true),
+    wire("hidden-public", "public", false),
+    wire("private-in", "private", false),
+    wire("private-out", "private", false),
+    wire("hidden-public-in", "public", false),
+  ];
+  const ids = (agent: string[] | null) =>
+    channelApprovalChoices(approvalChannelInputs(rows, label, agent)).map((row) => [
+      row.id,
+      row.disabled,
+    ]);
+
+  it("꺼진 공개 · 에이전트 없는 비공개는 잠기고 든 채널은 열린다", () => {
+    expect(ids(["private-in", "hidden-public-in"])).toEqual([
+      ["listed", false],
+      ["private-in", false],
+      ["hidden-public-in", false],
+      ["hidden-public", true],
+      ["private-out", true],
+    ]);
+  });
+
+  it("에이전트의 멤버십을 모르면(명부 전) 켜진 공개 채널만 열린다", () => {
+    expect(ids(null).filter(([, locked]) => !locked)).toEqual([["listed", false]]);
+  });
+
+  it("잠긴 줄은 까닭 키를 달고 낭독 문장도 한국어 기본값이 있다", () => {
+    const locked = channelApprovalChoices(approvalChannelInputs(rows, label, null)).filter(
+      (row) => row.disabled
+    );
+    expect(locked).toHaveLength(4);
+    for (const row of locked) {
+      expect(row.detailKey).toBe("timeline.approval.channelNeedsMember");
+      expect(row.detail).toBe("먼저 이 채널에 에이전트를 멤버로 추가해 주세요.");
+    }
+  });
+
+  it("에이전트가 이미 든 채널은 멤버가 된다고 말하지 않고 이미 들어가 있다고 말한다", () => {
+    const choices = channelApprovalChoices(approvalChannelInputs(rows, label, ["private-in"]));
+    const byId = (id: string) => choices.find((row) => row.id === id);
+    expect(byId("private-in")?.detailKey).toBe("timeline.approval.channelAgentIn");
+    expect(byId("private-in")?.detail).toBe("이 에이전트가 이미 이 채널에 들어가 있어요.");
+    expect(byId("listed")?.detail).toContain("승인하면 이 채널의 멤버가 돼요");
+    expect(byId("listed")?.detailKey).toBeUndefined();
+  });
+
+  it("잠긴 채널은 골라도 본문에 실리지 않는다", () => {
+    const inputs = approvalChannelInputs(rows, label, ["private-in"]);
+    expect(
+      approvableChannelIds(inputs, ["listed", "hidden-public", "private-in", "private-out"])
+    ).toEqual(["listed", "private-in"]);
+  });
+
+  it("옛 서버(어느 줄도 표시를 싣지 않음)는 지금 규칙 그대로 모두 열린다", () => {
+    const legacy = [wire("a", "public"), wire("b", "private")];
+    expect(
+      channelApprovalChoices(approvalChannelInputs(legacy, label, null)).map((row) => row.disabled)
+    ).toEqual([false, false]);
+  });
+
+  it("새 서버인데 표시가 빠진 줄은 꺼짐으로 읽어 잠근다", () => {
+    const mixed = [wire("a", "public", true), wire("b", "public")];
+    expect(
+      channelApprovalChoices(approvalChannelInputs(mixed, label, null)).map((row) => [row.id, row.disabled])
+    ).toEqual([["a", false], ["b", true]]);
+  });
+
+  it("보관 · DM 은 표시와 상관없이 닫힌다", () => {
+    expect(isApprovableChannel({ id: "x", label: "x", kind: "public", browseListed: true, archivedAtMs: 1 })).toBe(false);
+    expect(isApprovableChannel({ id: "x", label: "x", kind: "dm", browseListed: true, agentIsMember: true })).toBe(false);
+  });
+
+  it("서버의 400 은 사전 문장으로, 다른 상태는 그대로 둔다", () => {
+    expect(approvalChannelsRefusedKey(new ApiError(400, "approved channels are not eligible"))).toBe(
+      "timeline.approval.channelsRefused"
+    );
+    expect(approvalChannelsRefusedKey(new ApiError(409, "x"))).toBeNull();
+    expect(approvalChannelsRefusedKey(new Error("x"))).toBeNull();
   });
 });

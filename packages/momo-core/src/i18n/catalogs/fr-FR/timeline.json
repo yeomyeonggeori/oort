@@ -1,4 +1,7 @@
 {
   "timeline.createChannel.publicDetail": "Tout membre à part entière de l'espace de travail peut le trouver dans le navigateur de canaux et le rejoindre.",
-  "timeline.channelLeave.bodyPublicBrowse": "{name} disparaîtra de votre barre latérale. Vous pourrez revenir à tout moment depuis le navigateur de canaux."
+  "timeline.channelLeave.bodyPublicBrowse": "{name} disparaîtra de votre barre latérale. Vous pourrez revenir à tout moment depuis le navigateur de canaux.",
+  "timeline.approval.channelNeedsMember": "Ajoutez d'abord cet agent comme membre de ce canal.",
+  "timeline.approval.channelAgentIn": "Cet agent est déjà dans ce canal.",
+  "timeline.approval.channelsRefused": "Certains des canaux choisis ne peuvent pas être connectés pour le moment. Vérifiez à nouveau la liste."
 }

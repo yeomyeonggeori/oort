@@ -10941,6 +10941,24 @@ export const catalog: MessageCatalog = {
       "value": "Working agents"
     }
   ],
+  "timeline.approval.channelAgentIn": [
+    {
+      "type": 0,
+      "value": "This agent is already in this channel."
+    }
+  ],
+  "timeline.approval.channelNeedsMember": [
+    {
+      "type": 0,
+      "value": "First add this agent to this channel as a member."
+    }
+  ],
+  "timeline.approval.channelsRefused": [
+    {
+      "type": 0,
+      "value": "Some of the channels you picked can't be connected right now. Please check the list again."
+    }
+  ],
   "timeline.approval.reproposeBusy": [
     {
       "type": 0,

@@ -1,4 +1,7 @@
+import { ApiError, type Channel } from "../../lib/api";
 import { attachParticle } from "../../lib/koreanParticle";
+import koTimeline from "../../i18n/catalogs/ko-KR/timeline.json";
+import type { MessageKey } from "../../i18n/generated/messages";
 import {
   boundedLabel,
   hostedAgentLabel,
@@ -189,25 +192,107 @@ export interface ApprovalChannelInput {
   label: string;
   kind: "public" | "private" | "dm";
   archivedAtMs?: number;
+  /**
+   * 「둘러보기에 보이기」(ADR-0224 D2). 없으면 이 서버는 그 표시를 모르는 옛 서버다 —
+   * 옛 서버는 지금 규칙(DM 아님 · 보관 안 됨)을 그대로 받으므로 그대로 고를 수 있다.
+   * 한 목록의 줄이 하나라도 이 값을 실으면 새 서버이고 빠진 줄은 꺼짐이다(`approvalChannelInputs`).
+   */
+  browseListed?: boolean;
+  /**
+   * 이 에이전트가 이미 든 채널인가(명부의 `channelIds`). 모르면(명부 전 · 에이전트를 못 찾음) 없음 —
+   * 모르는 것은 든 것이 아니라서 둘러보기에 보이는 공개 채널만 고를 수 있다.
+   */
+  agentIsMember?: boolean;
 }
+
+/** 서버가 승인을 거절하는 까닭을 화면이 사전 키로 말한다. 없으면 일반 줄이다. */
+export type ApprovalChannelDetailKey = Extract<
+  MessageKey,
+  `timeline.approval.channelNeedsMember` | `timeline.approval.channelAgentIn`
+>;
 
 export interface ApprovalChannelChoice {
   id: string;
   label: string;
   /** 이 줄이 무엇인지, 또는 왜 고를 수 없는지. 상시 노출된다. */
   detail: string;
+  /** 있으면 화면은 `detail` 대신 이 키의 문장을 보인다(7개 언어). `detail` 은 한국어 기본값이다. */
+  detailKey?: ApprovalChannelDetailKey;
   disabled: boolean;
 }
 
 /**
- * 서버가 승인 대상으로 받는 채널인가.
+ * 서버가 승인 대상으로 받는 채널인가 — ADR-0224 D13 「요청자에게 열린 채널」 그대로.
  *
- * `confirm_hosted_connection_in_tx` 의 `valid_channels` 그대로다:
- * `archived_at IS NULL AND kind <> 'dm'`. 여기서 규칙이 갈라지면 화면이 고르게 해
- * 놓고 서버가 400 으로 거절한다.
+ * 서버(`confirm_hosted_connection_in_tx` · OAuth 동의)는 보관 안 됨 · DM 아님에 더해
+ * 「둘러보기에 보이는 공개 채널」이거나 「그 에이전트가 이미 든 채널」만 받고, 하나라도 섞이면
+ * 요청 전체를 400 으로 돌려준다. 여기서 규칙이 갈라지면 화면이 고르게 해 놓고 서버가 거절한다.
  */
 export function isApprovableChannel(channel: ApprovalChannelInput): boolean {
-  return channel.kind !== "dm" && channel.archivedAtMs === undefined;
+  if (channel.kind === "dm" || channel.archivedAtMs !== undefined) return false;
+  if (channel.browseListed === undefined) return true;
+  if (channel.agentIsMember === true) return true;
+  return channel.kind === "public" && channel.browseListed;
+}
+
+/**
+ * 채널 목록을 승인 화면의 줄 입력으로. 판정에 필요한 두 사실을 여기서 한 번에 얹는다.
+ *
+ * - `browseListed`: 목록의 어느 줄도 값을 싣지 않으면 옛 서버(없음 그대로), 하나라도 실으면 새 서버라서
+ *   빠진 줄은 꺼짐으로 읽는다(새 서버인데 한 줄이 비어 있다고 열어 두면 그 줄이 400 으로 돌아온다).
+ * - `agentChannelIds`: 그 에이전트의 채널 멤버십. `null` 은 모른다(명부 전 · 에이전트 없음).
+ */
+export function approvalChannelInputs(
+  channels: readonly Channel[],
+  labelOf: (channel: Channel) => string,
+  agentChannelIds: readonly string[] | null
+): ApprovalChannelInput[] {
+  const serverKnowsBrowse = channels.some(
+    (channel) => typeof channel.browseListed === "boolean"
+  );
+  const member = new Set((agentChannelIds ?? []).map((id) => id.toLowerCase()));
+  return channels.map((channel) => ({
+    id: channel.id,
+    label: labelOf(channel),
+    kind: channel.kind,
+    ...(channel.archivedAtMs === undefined
+      ? {}
+      : { archivedAtMs: channel.archivedAtMs }),
+    ...(serverKnowsBrowse ? { browseListed: channel.browseListed === true } : {}),
+    ...(member.has(channel.id.toLowerCase()) ? { agentIsMember: true } : {}),
+  }));
+}
+
+/**
+ * 서버가 채널 승인 요청을 통째로 거절했는가(400).
+ *
+ * 화면은 고를 수 있는 채널만 싣고 권한은 닫힌 목록에서만 싣기 때문에, 이 400 은 그 사이 채널의 표시나
+ * 에이전트의 멤버십이 바뀌었다는 뜻이다. 서버가 채널 거절과 권한 거절을 같은 400 으로 답하고(`code` 도
+ * 갈리지 않는다) 영어 원문을 글자로 가르는 것은 믿을 수 없어 400 전체를 이 뜻으로 읽는다.
+ */
+export function approvalChannelsRefusedKey(
+  error: unknown
+): Extract<MessageKey, "timeline.approval.channelsRefused"> | null {
+  return error instanceof ApiError && error.status === 400
+    ? "timeline.approval.channelsRefused"
+    : null;
+}
+
+const NEEDS_MEMBER_DETAIL = koTimeline["timeline.approval.channelNeedsMember"];
+const AGENT_IN_DETAIL = koTimeline["timeline.approval.channelAgentIn"];
+
+/** 고를 수 있는 줄 가운데 에이전트가 이미 든 채널 — 「승인하면 멤버가 돼요」가 맞지 않다. */
+function isAgentIn(channel: ApprovalChannelInput): boolean {
+  return channel.agentIsMember === true && isApprovableChannel(channel);
+}
+
+/** DM · 보관이 아닌데 D13 때문에 잠긴 줄 — 까닭이 「멤버로 먼저 추가」인 줄. */
+function needsMember(channel: ApprovalChannelInput): boolean {
+  return (
+    channel.kind !== "dm" &&
+    channel.archivedAtMs === undefined &&
+    !isApprovableChannel(channel)
+  );
 }
 
 function channelDetail(channel: ApprovalChannelInput): string {
@@ -217,6 +302,8 @@ function channelDetail(channel: ApprovalChannelInput): string {
   if (channel.archivedAtMs !== undefined) {
     return "보관된 채널이에요. 다시 열면 승인할 수 있어요.";
   }
+  if (!isApprovableChannel(channel)) return NEEDS_MEMBER_DETAIL;
+  if (isAgentIn(channel)) return AGENT_IN_DETAIL;
   return channel.kind === "private"
     ? "비공개 채널이에요. 승인하면 이 채널의 멤버가 돼요."
     : "공개 채널이에요. 승인하면 이 채널의 멤버가 돼요.";
@@ -240,6 +327,8 @@ export function channelApprovalChoices(
       detail: channelDetail(channel),
       disabled: !isApprovableChannel(channel),
     };
+    if (needsMember(channel)) row.detailKey = "timeline.approval.channelNeedsMember";
+    else if (isAgentIn(channel)) row.detailKey = "timeline.approval.channelAgentIn";
     (row.disabled ? blocked : eligible).push(row);
   }
   return [...eligible, ...blocked];

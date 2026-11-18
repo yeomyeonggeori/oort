@@ -1,4 +1,7 @@
 {
   "timeline.createChannel.publicDetail": "工作区的任何正式成员都可以在浏览频道中找到并加入。",
-  "timeline.channelLeave.bodyPublicBrowse": "{name} 将从侧边栏消失。你可以随时通过浏览频道重新加入。"
+  "timeline.channelLeave.bodyPublicBrowse": "{name} 将从侧边栏消失。你可以随时通过浏览频道重新加入。",
+  "timeline.approval.channelNeedsMember": "请先将此智能体添加为该频道的成员。",
+  "timeline.approval.channelAgentIn": "此智能体已在该频道中。",
+  "timeline.approval.channelsRefused": "所选频道中有当前无法连接的频道。请重新检查列表。"
 }
