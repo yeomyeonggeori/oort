@@ -102,13 +102,14 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-function channelFixture(): Channel {
+function channelFixture(over: Partial<Channel> = {}): Channel {
   return {
     id: CHANNEL_ID,
     workspaceId: WS,
     kind: "public",
     name: "general",
     muted: false,
+    ...over,
   };
 }
 
@@ -435,6 +436,30 @@ for (const surface of SURFACES) {
 // 나간 뒤 초점 (#5818 검수 M3): 연 단추·줄이 나가며 사라졌으면 문서 몸통(body)이 아니라 옮겨 간 화면의 본문 자리로 간다.
 // 진짜 확인 창을 열고 닫으며, 돌려줄 곳(opener)이 붙어 있는 경우와 떨어진 경우를 모두 잰다.
 // =============================================================================
+
+// ADR-0224 (#5842): 켜진 공개 채널은 둘러보기로 돌아오는 길을, 꺼진(또는 표시를 모르는) 공개 채널은 관리자의 추가를 말한다.
+// 표시는 채널 줄(`browseListed`)에서 오고, 그 값이 확인 문장까지 닿는지를 진짜 헤더 메뉴로 잰다.
+describe("나가기 확인 문장은 「둘러보기에 보이기」를 따른다", () => {
+  it.each([
+    [true, "timeline.channelLeave.bodyPublicBrowse"],
+    [false, "timeline.channelLeave.bodyPublic"],
+  ] as const)("browseListed %s → %s", async (browseListed, key) => {
+    mount(
+      createElement(ChannelHeaderMenu, {
+        workspaceId: WS,
+        channel: channelFixture({ browseListed }),
+        title: "general",
+        selfMemberId: ME,
+        selfRole: "member",
+      })
+    );
+    click("channel-title-menu");
+    click("channel-leave");
+    await flush();
+    const text = byId("channel-leave-confirm")?.textContent ?? "";
+    expect(text).toContain(EN[key].replace("{name}", "general"));
+  });
+});
 
 describe("나간 뒤 초점", () => {
   function fakeActions(confirmOpen: boolean): ChannelActions {

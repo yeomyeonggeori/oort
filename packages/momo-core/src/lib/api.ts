@@ -350,6 +350,13 @@ export interface Channel {
   memberIds?: string[];
   muted: boolean;
   archivedAtMs?: number;
+  /**
+   * ADR-0224 D2 (#5837, additive). 정식 멤버가 「채널 둘러보기」에서 찾아 스스로 들어올 수 있는 공개 채널인가.
+   * 옛 서버는 싣지 않는다 — 없으면 꺼짐으로 읽는다(지금 동작 그대로).
+   */
+  browseListed?: boolean;
+  /** ADR-0224 D6 (#5837, additive). 새로 합류하는 사람이 자동으로 들어가는 기본 채널인가. 없으면 아니다. */
+  isDefault?: boolean;
 }
 
 /**

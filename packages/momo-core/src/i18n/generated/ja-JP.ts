@@ -2,6 +2,237 @@
 import type { MessageCatalog } from "../types";
 
 export const catalog: MessageCatalog = {
+  "channels.browse.clearSearch": [
+    {
+      "type": 0,
+      "value": "検索をクリア"
+    }
+  ],
+  "channels.browse.close": [
+    {
+      "type": 0,
+      "value": "閉じる"
+    }
+  ],
+  "channels.browse.default": [
+    {
+      "type": 0,
+      "value": "既定"
+    }
+  ],
+  "channels.browse.description": [
+    {
+      "type": 0,
+      "value": "公開チャンネルを見つけて参加できます。"
+    }
+  ],
+  "channels.browse.emptyAdminDetail": [
+    {
+      "type": 0,
+      "value": "既存のチャンネルは、チャンネルメニューで「チャンネル一覧に表示」をオンにするとここに表示されます。"
+    }
+  ],
+  "channels.browse.emptyHeadline": [
+    {
+      "type": 0,
+      "value": "まだ参加していない公開チャンネルはありません。"
+    }
+  ],
+  "channels.browse.groupJoined": [
+    {
+      "type": 0,
+      "value": "参加中のチャンネル"
+    }
+  ],
+  "channels.browse.groupNotJoined": [
+    {
+      "type": 0,
+      "value": "参加していないチャンネル"
+    }
+  ],
+  "channels.browse.join": [
+    {
+      "type": 0,
+      "value": "参加"
+    }
+  ],
+  "channels.browse.joinAria": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " に参加"
+    }
+  ],
+  "channels.browse.joined": [
+    {
+      "type": 0,
+      "value": "参加中"
+    }
+  ],
+  "channels.browse.joinForbidden": [
+    {
+      "type": 0,
+      "value": "このアカウントではこのチャンネルに参加できません。"
+    }
+  ],
+  "channels.browse.joinGeneric": [
+    {
+      "type": 0,
+      "value": "参加できませんでした。もう一度お試しください。"
+    }
+  ],
+  "channels.browse.joinNetwork": [
+    {
+      "type": 0,
+      "value": "参加できませんでした。"
+    },
+    {
+      "type": 1,
+      "value": "reason"
+    }
+  ],
+  "channels.browse.joinNotFound": [
+    {
+      "type": 0,
+      "value": "このチャンネルはもう一覧にありません。"
+    }
+  ],
+  "channels.browse.loadForbidden": [
+    {
+      "type": 0,
+      "value": "このアカウントではチャンネルを探せません。"
+    }
+  ],
+  "channels.browse.loadGeneric": [
+    {
+      "type": 0,
+      "value": "チャンネル一覧を読み込めませんでした。しばらくしてからもう一度お試しください。"
+    }
+  ],
+  "channels.browse.loadMore": [
+    {
+      "type": 0,
+      "value": "さらに読み込む"
+    }
+  ],
+  "channels.browse.loadNetwork": [
+    {
+      "type": 0,
+      "value": "チャンネル一覧を読み込めませんでした。"
+    },
+    {
+      "type": 1,
+      "value": "reason"
+    }
+  ],
+  "channels.browse.loadUnsupported": [
+    {
+      "type": 0,
+      "value": "このサーバーはまだチャンネルの一覧表示に対応していません。"
+    }
+  ],
+  "channels.browse.memberCount": [
+    {
+      "type": 0,
+      "value": "メンバー"
+    },
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "人"
+    }
+  ],
+  "channels.browse.menuCreate": [
+    {
+      "type": 0,
+      "value": "新しいチャンネルを作成"
+    }
+  ],
+  "channels.browse.menuLabel": [
+    {
+      "type": 0,
+      "value": "チャンネルを追加"
+    }
+  ],
+  "channels.browse.noMatch": [
+    {
+      "type": 0,
+      "value": "「"
+    },
+    {
+      "type": 1,
+      "value": "query"
+    },
+    {
+      "type": 0,
+      "value": "」に一致する公開チャンネルはありません。"
+    }
+  ],
+  "channels.browse.offline": [
+    {
+      "type": 0,
+      "value": "オフラインのため今は参加できません。接続したらもう一度お試しください。"
+    }
+  ],
+  "channels.browse.open": [
+    {
+      "type": 0,
+      "value": "開く"
+    }
+  ],
+  "channels.browse.openAria": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " を開く"
+    }
+  ],
+  "channels.browse.paletteGroup": [
+    {
+      "type": 0,
+      "value": "参加していない公開チャンネル"
+    }
+  ],
+  "channels.browse.rateLimited": [
+    {
+      "type": 0,
+      "value": "リクエストが多すぎます。しばらくしてからもう一度お試しください。"
+    }
+  ],
+  "channels.browse.retry": [
+    {
+      "type": 0,
+      "value": "再試行"
+    }
+  ],
+  "channels.browse.searchLabel": [
+    {
+      "type": 0,
+      "value": "チャンネルを検索"
+    }
+  ],
+  "channels.browse.searchPlaceholder": [
+    {
+      "type": 0,
+      "value": "名前やトピックで検索"
+    }
+  ],
+  "channels.browse.title": [
+    {
+      "type": 0,
+      "value": "チャンネルを探す"
+    }
+  ],
   "channels.createFailure.duplicate": [
     {
       "type": 0,
@@ -199,6 +430,22 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "文字、数字、ハイフン（-）、アンダースコア（_）のみ使えます。"
+    }
+  ],
+  "timeline.channelLeave.bodyPublicBrowse": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " がサイドバーから消えます。チャンネル一覧からいつでも戻れます。"
+    }
+  ],
+  "timeline.createChannel.publicDetail": [
+    {
+      "type": 0,
+      "value": "ワークスペースの正式メンバーなら誰でも、チャンネル一覧から見つけて参加できます。"
     }
   ]
 };

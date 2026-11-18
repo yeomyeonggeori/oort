@@ -531,6 +531,23 @@ describe("channelLeaveConfirmBodyKey", () => {
   it("falls back to the public sentence when the kind is unknown", () => {
     expect(channelLeaveConfirmBodyKey(undefined)).toBe("timeline.channelLeave.bodyPublic");
   });
+
+  // ADR-0224: 켜진 공개 채널만 둘러보기로 돌아온다. 꺼졌거나 표시를 모르는(옛 서버) 공개 채널, 비공개 채널은 그 길을 약속하지 않는다.
+  it.each([
+    ["public", true, "timeline.channelLeave.bodyPublicBrowse"],
+    ["public", false, "timeline.channelLeave.bodyPublic"],
+    ["public", undefined, "timeline.channelLeave.bodyPublic"],
+    ["private", true, "timeline.channelLeave.bodyPrivate"],
+  ] as const)("kind %s with browseListed %s says %s", (kind, browseListed, key) => {
+    expect(channelLeaveConfirmBodyKey(kind, browseListed)).toBe(key);
+  });
+
+  it("promises the channel browser only in the sentence for a listed public channel", () => {
+    const listed = messages.formatMessage(channelLeaveConfirmBodyKey("public", true), { name: "release-2026-08" });
+    expect(listed).toContain("release-2026-08");
+    expect(listed).toContain("채널 둘러보기");
+    expect(listed).not.toContain("관리자");
+  });
 });
 
 describe("channel header menu labels", () => {

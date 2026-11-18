@@ -672,9 +672,8 @@ describe('탭 셋과 + (ADR-0189 D1, #2750)', () => {
     openMenu();
     await waitFor(() => expect(screen.getByTestId('plus-menu-channel')).toBeTruthy());
     fireEvent.press(screen.getByTestId('plus-menu-channel'));
-    // 공개 설명은 지금 동작 그대로다 — 「찾아서 들어올 수 있다」고 말하지 않는다.
-    const publicDetail =
-      '소유자나 관리자가 추가한 멤버가 들어와요. 앞으로 워크스페이스에 들어오는 사람은 자동으로 들어와요.';
+    // 공개 설명은 웹과 같은 사전 키다 — 채널 둘러보기에서 찾아 참여한다(ADR-0224, #5842).
+    const publicDetail = '워크스페이스의 정식 멤버 누구나 채널 둘러보기에서 찾아 참여할 수 있어요.';
     expect(screen.getByTestId('new-channel-kind-public')).toHaveTextContent(`공개${publicDetail}`);
     // VoiceOver 도 같은 설명을 듣는다 — 이름은 「공개」, 힌트가 설명(검수 r1 M7).
     expect(screen.getByTestId('new-channel-kind-public')).toHaveProp('accessibilityHint', publicDetail);
