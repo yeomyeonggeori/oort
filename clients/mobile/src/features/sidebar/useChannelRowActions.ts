@@ -16,6 +16,7 @@ import {
   settleDmLeaveFailure,
 } from '@momo/core/features/channels/dmLeave';
 import {listAllScheduledMessages} from '@momo/core/features/scheduled/api';
+import {isScheduledAbsent} from '@momo/core/features/scheduled/errors';
 import {
   CHANNEL_COPY_FAILURE,
   CHANNEL_MARK_READ_FAILURE,
@@ -62,29 +63,37 @@ import {
 //
 // 채널 나가기와 같은 자리(시트 안 확인 단계)지만 상태는 따로 든다(`dmLeave`) — 문장·요청·성공 뒤 정리가 다르다.
 //
-//   1. 행을 누르면 예약 메시지 수를 **먼저** 센다(행이 진행 중으로 선다, 늦어도 `DM_LEAVE_COUNT_WAIT_MS`). 단계가 선 뒤에 「예약 N개」 줄이
-//      늦게 와서 단추가 손가락 밑에서 밀리지 않게 한다. 세지 못하면 그 줄 없이 선다(서버는 그래도 취소한다).
+//   1. 행을 누르면 단계가 **바로** 선다(웹과 같다, #5876). 예약 목록을 아직 모르는 동안은 확정이 잠기고 그 자리에 「확인 중…」이 선다 —
+//      모름을 0 으로 읽지 않는다: 못 읽으면(404 가 아닌 오류) 그 까닭을 말하고 잠근 채 둔다. 알게 되면 같은 자리의 문장만 바뀐다
+//      (`DmLeaveConfirm` 이 그 줄을 늘 한 줄 잡아 둔다). 알게 된 순간부터 `DM_LEAVE_CONFIRM_ARM_MS` 를 센다(풀린 단추가 손가락 밑에 있을 수 있다).
 //   2. `seenSeq` 는 단계가 **설 때** 얼린다(D16): 확인 단계를 보는 사이에 온 글은 하한 위에 남아 새 대화의 첫 글이 된다.
 //   3. 단계가 선 뒤 `DM_LEAVE_CONFIRM_ARM_MS` 동안은 확정 단추의 눌림을 받지 않는다 — 폰은 두 번 누름이 흔하고, 메뉴 행을 누른 자리에
 //      확정 단추가 설 수 있다. 진행 중에는 취소·확정 모두 잠긴다.
 //   4. 204 뒤의 정리(`runDmLeaveCleanup`)는 화면이 그 사이 사라졌어도 돈다 — 서버는 이미 끝났다. 화면 상태만 마운트를 본다.
-//   5. 실패는 확인 단계 안에서 코어 문장 한 줄이고 아무것도 바뀌지 않는다. 404·405·501 은 코어가 이 워크스페이스의 메뉴를 접는다.
+//   5. 실패는 확인 단계 안에서 코어 문장 한 줄이고 아무것도 바뀌지 않는다. 다시 누르면 달라질 수 있는 것(망·5xx)은 「나가지 못했어요」 + 살아 있는
+//      확정, 다시 눌러도 같은 답인 것(409 `dm_leave_unavailable`·405·501)은 「이 대화에서는 나갈 수 없어요.」 + 확정 잠금(닫기만 남는다).
+//      405·501 은 코어가 이 워크스페이스의 메뉴를 접는다. 404 는 문장 없이 닫는다.
+//   6. 진행 중에는 시트가 몸짓(X·바깥 누름·끌어내리기·escape)으로 닫히지 않는다(`ChannelActionSheet`·`ConversationMenuSheet` 의 `dirty`,
+//      정보 페이지의 ‹·가장자리 밀기) — 요청이 이미 나갔고 되돌릴 수 없다.
 // =============================================================================
-
-/** 예약 메시지 수를 기다리는 상한. 넘으면 그 줄 없이 확인 단계가 선다. */
-export const DM_LEAVE_COUNT_WAIT_MS = 1500;
 
 /** 확인 단계가 선 뒤 확정 단추가 눌림을 받기 시작하기까지(두 번 누름이 확정을 누르지 않게). */
 export const DM_LEAVE_CONFIRM_ARM_MS = 500;
+
+/** 예약 목록을 아는 정도: 모름(`checking`) · 못 읽음(`failed`) · 앎(`known`). 앞의 둘은 확정이 잠긴다. */
+export type DmLeaveScheduledState = 'checking' | 'failed' | 'known';
 
 /** 화면이 그리는 「대화 나가기」 확인 단계. */
 export interface DmLeaveStepView {
   /** 확인 창 제목·본문의 이름(상대의 표시 이름). */
   name: string;
-  /** 그 방의 내 예약(`pending`+`failed`) 수. 0 이면 그 줄이 없다. */
+  /** 그 방의 내 예약(`pending`+`failed`) 수. `scheduled` 가 `known` 일 때만 뜻이 있다. 0 이면 그 줄이 없다. */
   scheduledCount: number;
+  scheduled: DmLeaveScheduledState;
   pending: boolean;
   error: string | null;
+  /** 다시 눌러도 같은 답(409·405·501)이라 확정이 잠겼다. 「취소」만 남는다. */
+  unavailable: boolean;
 }
 
 interface DmLeaveStep extends DmLeaveStepView {
@@ -93,22 +102,16 @@ interface DmLeaveStep extends DmLeaveStepView {
   shownAtMs: number;
 }
 
-async function scheduledCountWithin(
-  workspaceId: string,
-  channelId: string,
-  waitMs: number,
-): Promise<number> {
-  let timer: ReturnType<typeof setTimeout> | null = null;
-  const count = listAllScheduledMessages(workspaceId, {channelId, status: 'open'})
-    .then(rows => dmLeaveScheduledCount(rows, channelId))
-    .catch(() => 0);
-  const timeout = new Promise<number>(resolve => {
-    timer = setTimeout(() => resolve(0), waitMs);
-  });
+/**
+ * 그 방의 내 예약 수. 읽지 못하면 `null` - 「모름」을 0 으로 읽지 않는다(웹 `DmLeaveHost` 와 같다). 목록 404 만 「이 서버에 예약이 없다」라
+ * 0 이다(`isScheduledAbsent`).
+ */
+async function scheduledCountOrNull(workspaceId: string, channelId: string): Promise<number | null> {
   try {
-    return await Promise.race([count, timeout]);
-  } finally {
-    if (timer !== null) clearTimeout(timer);
+    const rows = await listAllScheduledMessages(workspaceId, {channelId, status: 'open'});
+    return dmLeaveScheduledCount(rows, channelId);
+  } catch (cause) {
+    return isScheduledAbsent(cause) ? 0 : null;
   }
 }
 
@@ -168,10 +171,8 @@ export function useChannelRowActions(
   const [leavePending, setLeavePending] = useState(false);
   const [leaveError, setLeaveError] = useState<string | null>(null);
   const [dmLeave, setDmLeave] = useState<DmLeaveStep | null>(null);
-  // 예약 수를 세는 사이 시트가 닫히거나 다른 행이 열리면 늦게 온 답이 단계를 세우지 않게 한다.
+  // 예약 목록을 읽는 사이 시트가 닫히거나 다른 행이 열리면 늦게 온 답이 다른 단계에 닿지 않게 한다(ref 라서 `run` 의 신원이 안 바뀐다).
   const dmLeaveAsk = useRef(0);
-  // 세는 중에 다시 눌러도 한 번만 센다. ref 라서 `run` 의 신원이 진행 상태와 함께 바뀌지 않는다(행마다 넘기는 함수다).
-  const dmLeaveCounting = useRef(false);
   const receiptTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const mounted = useRef(true);
   const muteInFlight = useRef(new Set<string>());
@@ -394,33 +395,33 @@ export function useChannelRowActions(
         case 'leave-dm': {
           // 1:1 「대화 나가기」(D21): 확인 단계로 간다. 내밀지 않은 대상(옛 서버·에이전트·그룹)은 로터로 와도 아무 일이 없다.
           if (target.leaveOffered !== true || target.channel.kind !== 'dm') return;
-          if (dmLeaveCounting.current) return;
           reset();
-          dmLeaveCounting.current = true;
           const ask = dmLeaveAsk.current;
           // D16: 이 기기가 그 대화에 대해 든 가장 큰 seq - 단계가 설 때 얼린다(머리말 2).
           const seenSeq = dmLeaveSeenSeq(target.readState ?? undefined, target.held?.().maxSeq);
           setActive(target);
-          setPending(previous => new Set(previous).add(key));
-          void scheduledCountWithin(workspaceId, channel.id, DM_LEAVE_COUNT_WAIT_MS).then(count => {
-            dmLeaveCounting.current = false;
-            if (!mounted.current) return;
-            setPending(previous => {
-              const next = new Set(previous);
-              next.delete(key);
-              return next;
-            });
-            if (dmLeaveAsk.current !== ask) return;
-            haptics.warning();
-            setDmLeave({
-              target,
-              name: target.title,
-              seenSeq,
-              scheduledCount: count,
-              pending: false,
-              error: null,
-              shownAtMs: Date.now(),
-            });
+          haptics.warning();
+          // 단계는 바로 서고 예약 목록을 아직 모르는 동안 확정이 잠긴다(머리말 1).
+          setDmLeave({
+            target,
+            name: target.title,
+            seenSeq,
+            scheduledCount: 0,
+            scheduled: 'checking',
+            pending: false,
+            error: null,
+            unavailable: false,
+            shownAtMs: Date.now(),
+          });
+          void scheduledCountOrNull(workspaceId, channel.id).then(count => {
+            if (!mounted.current || dmLeaveAsk.current !== ask) return;
+            setDmLeave(previous =>
+              previous === null
+                ? previous
+                : count === null
+                  ? {...previous, scheduled: 'failed'}
+                  : {...previous, scheduled: 'known', scheduledCount: count, shownAtMs: Date.now()},
+            );
           });
           return;
         }
@@ -478,7 +479,7 @@ export function useChannelRowActions(
 
   const confirmDmLeave = useCallback(() => {
     const step = dmLeave;
-    if (step === null || step.pending) return;
+    if (step === null || step.pending || step.scheduled !== 'known' || step.unavailable) return;
     // 머리말 3: 단계가 선 직후의 눌림(메뉴 행을 누른 손가락의 둘째 누름)은 확정이 아니다.
     if (Date.now() - step.shownAtMs < DM_LEAVE_CONFIRM_ARM_MS) return;
     const {target, seenSeq} = step;
@@ -518,13 +519,25 @@ export function useChannelRowActions(
           onLeft?.(channelId);
           return;
         }
+        // 다시 눌러도 같은 답: 409 `dm_leave_unavailable`(그 방은 사람끼리 1:1 이 아니다)·405·501(경로 없음 - 코어가 메뉴를 접었다). 이 기기의
+        // 사실이 낡았을 수 있어 채널·읽음 투영을 다시 받는다(웹과 같다).
+        const unavailable = failure === 'unavailable' || failure === 'absent';
+        if (unavailable) {
+          void client.invalidateQueries({queryKey: workspaceKeys.channels(workspaceId)});
+          void client.invalidateQueries({queryKey: workspaceKeys.readState(workspaceId)});
+        }
         if (!mounted.current) return;
         haptics.error();
-        // 아무것도 바뀌지 않았다. 단계는 그대로 서 있고 이유를 말한다 - 「나가기」를 다시 누르면 다시 시도한다.
+        // 아무것도 바뀌지 않았다. 단계는 그대로 서 있고 이유를 말한다 - 다시 시도해 볼 만한 실패는 「나가기」가 살아 있고, 아니면 잠긴다.
         setDmLeave(previous =>
           previous === null
             ? previous
-            : {...previous, pending: false, error: formatMessage(DM_LEAVE_KEYS.failed)},
+            : {
+                ...previous,
+                pending: false,
+                unavailable,
+                error: formatMessage(unavailable ? DM_LEAVE_KEYS.unavailable : DM_LEAVE_KEYS.failed),
+              },
         );
       });
   }, [client, close, dmLeave, formatMessage, onDmLeftReceipt, onLeft, selfMemberId, succeeded, workspaceId]);
@@ -551,8 +564,10 @@ export function useChannelRowActions(
         : {
             name: dmLeave.name,
             scheduledCount: dmLeave.scheduledCount,
+            scheduled: dmLeave.scheduled,
             pending: dmLeave.pending,
             error: dmLeave.error,
+            unavailable: dmLeave.unavailable,
           },
     open,
     close,

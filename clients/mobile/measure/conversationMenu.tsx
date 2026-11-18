@@ -1,5 +1,4 @@
 import {CHANNEL_MUTE_FAILURE} from '@momo/core/features/channels/model';
-import {DM_LEAVE_KEYS} from '@momo/core/features/channels/dmLeave';
 import {pinListHeaderLabel} from '@momo/core/features/timeline/pins';
 import React from 'react';
 
@@ -23,7 +22,7 @@ import {Backdrop, dmLeaveStep} from './sheetKit';
 //   channel-leave  같은 채널의 나가기 확인 단계(「이 채널에서 나갈까요?」 + 취소 · 채널 나가기)
 //   mute-failure   알림 끄기가 거절된 뒤 — 시트가 열린 채 그 자리에서 이유를 말한다
 //   dm-leave       사람끼리 1:1 — 맨 아래 따로 선 카드에 「대화 나가기」(위험색, ADR-0177 증보 2026-11-14 D21)
-//   dm-leave-confirm / -pending / -failed   그 확인 단계(예약 2개) · 진행 중 · 실패
+//   dm-leave-confirm / -checking / -pending / -failed / -unavailable   그 확인 단계(예약 2개) · 확인 중 · 진행 중 · 실패 · 나갈 수 없음
 //
 // 시트는 `Modal` 이라 한 프레임에 하나만 선다 — 표면 하나가 시트 하나다. 모든 이름은 가상 인물이다(이도현·박서연, 에이전트 달무리 도우미,
 // 회사 달무리 스튜디오).
@@ -106,12 +105,12 @@ function Sheet({
 }
 
 export function ConversationMenuSurface({which}: {which: string}): React.JSX.Element {
-  const dmLeaveFailed = useFormatMessage()(DM_LEAVE_KEYS.failed);
+  const formatDmLeave = useFormatMessage();
   if (which === 'dm-leave' || which.startsWith('dm-leave-')) {
     return (
       <Sheet
         target={{...DM_TARGET, leaveOffered: true}}
-        dmLeave={dmLeaveStep(which.slice('dm-leave-'.length), dmLeaveFailed)}
+        dmLeave={dmLeaveStep(which.slice('dm-leave-'.length), formatDmLeave)}
       />
     );
   }
