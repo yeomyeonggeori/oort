@@ -799,7 +799,15 @@ async fn decide(
     // On its own task: the candidate is already taken, so the fetch and the decision that writes
     // its outcome finish even when the person's connection goes away mid-way — a dropped request
     // must not leave the card saying "not fetched" over a candidate nobody can take again.
-    let settled = tokio::spawn({
+    //
+    // A new task does not inherit the request's task-locals, and the second decision reads and
+    // patches `message`: the person who decides is carried over and bound again, so that
+    // transaction sets `app.requester_member_id` exactly as the first one did (ADR-0177 증보 D17
+    // — a human request's reads are judged as that person's).
+    let requester = momo_db::tenant::REQUEST_HUMAN_MEMBER
+        .try_with(|member| *member)
+        .ok();
+    let settle = {
         let state = state.clone();
         let parts = parts.clone();
         async move {
@@ -815,8 +823,13 @@ async fn decide(
             )
             .await
         }
-    })
-    .await;
+    };
+    let settled = match requester {
+        Some(member) => {
+            tokio::spawn(momo_db::tenant::REQUEST_HUMAN_MEMBER.scope(member, settle)).await
+        }
+        None => tokio::spawn(settle).await,
+    };
     let outcome =
         settled.unwrap_or_else(|_| Err(protocol_error("the approved link's fetch did not finish")));
     let decision = match outcome {

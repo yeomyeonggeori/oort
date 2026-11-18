@@ -62,6 +62,7 @@ const PATHS: &[(&str, &str, &str, usize, Class, &str)] = &[
     ("bins/momo-relay/src/audience.rs", "APPROVAL_CARD_SEQ_SQL", "message", 1, Machine, "relay: the seq of a room frame's target, never sent (D17)"),
     ("bins/momo-relay/src/audience.rs", "MESSAGE_SEQ_SQL", "message", 1, Machine, "relay: the seq of a room frame's target, never sent (D17)"),
     ("bins/momo-relay/src/audience.rs", "SESSION_CARD_SEQ_SQL", "message", 1, Machine, "relay: the seq of a room frame's target, never sent (D17)"),
+    ("bins/momo-server/src/routes/approvals.rs", "settle_link_then_decide_in_tx", "message", 1, Write, "expression candidate props on the card being decided; the decider is bound again in the spawned task"),
     ("bins/momo-server/src/routes/expressions.rs", "replace_candidate", "message", 1, Write, "expression candidate props on the caller's own card"),
     ("bins/momo-server/src/routes/work_controls.rs", "card_thread_root_in_tx", "message", 1, Floor, "work control route"),
     ("bins/momo-server/src/routes/work_instructions.rs", "replay_in_tx", "message", 2, Floor, "work instruction route"),
