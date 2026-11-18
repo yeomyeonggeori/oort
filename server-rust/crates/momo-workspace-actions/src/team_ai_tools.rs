@@ -331,7 +331,8 @@ pub struct ReadScope {
 /// * the helper's 1:1 DM with the requester → the requester's whole view;
 /// * a room with any guest in it (workspace or channel role) → the reply channel
 ///   only;
-/// * otherwise → the reply channel plus every unarchived public channel.
+/// * otherwise → the reply channel plus every channel open to people (ADR-0224 D13:
+///   [`momo_auth::channel_open_to_people_sql`] — a live public channel listed in channel browse).
 pub async fn load_scope_in_tx(
     conn: &mut PgConnection,
     workspace_id: Uuid,
@@ -339,18 +340,7 @@ pub async fn load_scope_in_tx(
     requester: Uuid,
     reply_channel: Uuid,
 ) -> Result<ReadScope, DbError> {
-    let audience = momo_agent::load_dm_audience_in_tx(conn, reply_channel).await?;
-    let one_to_one = audience.is_dm
-        && audience.participants.len() == 2
-        && audience
-            .participants
-            .iter()
-            .any(|p| p.member_id == helper_member_id)
-        && audience
-            .participants
-            .iter()
-            .any(|p| p.member_id == requester);
-    if one_to_one {
+    if is_helper_dm_with_in_tx(conn, helper_member_id, requester, reply_channel).await? {
         return Ok(ReadScope {
             workspace_id,
             requester,
@@ -372,14 +362,15 @@ pub async fn load_scope_in_tx(
     .await?;
     let mut allowed = BTreeSet::from([reply_channel]);
     if !has_guest {
-        let public: Vec<Uuid> = sqlx::query_scalar(
-            "SELECT id FROM channel \
-              WHERE workspace_id = $1 AND kind = 'public' AND archived_at IS NULL",
-        )
-        .bind(workspace_id)
-        .fetch_all(&mut *conn)
-        .await?;
-        allowed.extend(public);
+        let sql = format!(
+            "SELECT c.id FROM channel c WHERE c.workspace_id = $1 AND {}",
+            momo_auth::channel_open_to_people_sql("c"),
+        );
+        let open: Vec<Uuid> = sqlx::query_scalar(&sql)
+            .bind(workspace_id)
+            .fetch_all(&mut *conn)
+            .await?;
+        allowed.extend(open);
     }
     Ok(ReadScope {
         workspace_id,
@@ -387,6 +378,29 @@ pub async fn load_scope_in_tx(
         reply_channel,
         audience: Audience::Channels(allowed),
     })
+}
+
+/// Whether `reply_channel` is the team AI's own 1:1 DM with `requester` — the one room where the
+/// requester's whole view may be used (H4-3). [`load_scope_in_tx`] and the channel-name list
+/// ([`crate::team_ai::load_roster_in_tx`]) judge the room with this one function, so the two never
+/// see the same room differently (ADR-0224 D13).
+pub async fn is_helper_dm_with_in_tx(
+    conn: &mut PgConnection,
+    helper_member_id: Uuid,
+    requester: Uuid,
+    reply_channel: Uuid,
+) -> Result<bool, DbError> {
+    let audience = momo_agent::load_dm_audience_in_tx(conn, reply_channel).await?;
+    Ok(audience.is_dm
+        && audience.participants.len() == 2
+        && audience
+            .participants
+            .iter()
+            .any(|p| p.member_id == helper_member_id)
+        && audience
+            .participants
+            .iter()
+            .any(|p| p.member_id == requester))
 }
 
 /// What a read produced. [`ToolOutcome::Data`] and [`ToolOutcome::Document`] carry workspace

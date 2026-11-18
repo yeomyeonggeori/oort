@@ -209,9 +209,11 @@ async fn channel(su: &PgPool, t_ws: Uuid, kind: &str, members: &[Uuid]) -> (Uuid
         ids.sort();
         ids.join(":")
     });
+    // A public channel is listed in channel browse, as a new one is (ADR-0224 D2), so it stays one
+    // the room may hear about (D13).
     sqlx::query(
-        "INSERT INTO channel (id, workspace_id, kind, name, dm_key) \
-         VALUES ($1, $2, $3::channel_kind, $4, $5)",
+        "INSERT INTO channel (id, workspace_id, kind, name, dm_key, browse_listed) \
+         VALUES ($1, $2, $3::channel_kind, $4, $5, $3::channel_kind = 'public')",
     )
     .bind(id)
     .bind(t_ws)

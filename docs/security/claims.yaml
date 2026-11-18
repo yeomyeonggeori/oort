@@ -91,6 +91,53 @@ claims:
     sabotage:
       how: "Dropping the read policy, the requester binding of a door, the message check of the card load or the proxy override turns the matching proof red (the sabotage table of the pull request for issue #5823); removing the relay's judgment, its hold-back on an unanswered read, the no-keep flag on a diverted frame or the empty-audience rule turns the matching relay proof red (the sabotage table of the pull request for issue #5857); adding a message read the inventory does not classify, or leaving a stale row, turns the inventory red, and the control test feeds the read shapes, and one it does not see, to the same scanner."
       evidence: "server-rust/bins/momo-server/tests/dm_leave_read_paths.rs#an_unclassified_read_turns_the_inventory_red"
+  - id: TEN-7
+    claim: "The public-channel browse list never contains a private channel, a direct-message channel, a public channel that is not listed in browse, an archived channel or another workspace's channel: their names and topics appear nowhere in the response body, for a workspace owner, an admin or a member, including one who sits in those channels."
+    scope: "ADR-0224 D3·D11, GET /v1/workspaces/{ws}/channels/browse only. Real PostgreSQL as the non-bypass API role, two workspaces. Row-level security bounds the workspace; the channel boundary is one judgment (momo_auth::channel_open_to_people_sql: public, not archived, listed in browse) that the list and the join embed through momo-messaging's CHANNEL_OPEN_TO_PEOPLE_SQL, which calls it and states no condition of its own, and it keeps private channels and DMs out even with the table check that forbids them from being listed dropped. Not covered by this claim: the preview route (a later piece of ADR-0224). The channel PATCH switch is TEN-11 and the agent-side paths (ADR-0224 D13) are AGT-5 and AGT-6."
+    priority: P0
+    runs: pr-ci
+    proofs:
+      - "server-rust/bins/momo-server/tests/channel_browse_pg.rs#the_browse_list_holds_only_channels_open_to_people"
+      - "server-rust/bins/momo-server/tests/channel_browse_pg.rs#the_channel_piece_keeps_hidden_channels_out_even_without_the_table_check"
+    sabotage:
+      how: "Dropping any one of the piece's three conditions (public, not archived, listed in browse) lets a hidden channel through; the control test runs the piece with each condition removed against the same rows and requires a leak each time. Removing a condition from the shipped piece turns the proofs red (the sabotage table of the pull request for issue #5838)."
+      evidence: "server-rust/bins/momo-server/tests/channel_browse_pg.rs#control_a_piece_missing_a_condition_lets_a_hidden_channel_through"
+  - id: TEN-8
+    claim: "Joining a private channel, a direct-message channel, a public channel that is not listed in browse, an archived channel, another workspace's channel or an unknown id answers the same 404 with the same body bytes, writes no membership and no audit row, and does so even for a caller who already sits in that channel."
+    scope: "ADR-0224 D4·D11, POST /v1/workspaces/{ws}/channels/{ch}/members/me only. Real PostgreSQL as the non-bypass API role, two workspaces. The join statement embeds the same channel piece as the browse list; there is no separate pre-check."
+    priority: P0
+    runs: pr-ci
+    proofs:
+      - "server-rust/bins/momo-server/tests/channel_browse_pg.rs#every_channel_that_is_not_open_answers_the_join_like_an_unknown_id"
+      - "server-rust/bins/momo-server/tests/channel_browse_pg.rs#the_channel_piece_keeps_hidden_channels_out_even_without_the_table_check"
+    sabotage:
+      how: "Dropping any one of the piece's three conditions, or answering a seated caller before the piece is applied, turns the 404 proof red (the sabotage table of the pull request for issue #5838); the control test shows each weakened piece lets a hidden channel through."
+      evidence: "server-rust/bins/momo-server/tests/channel_browse_pg.rs#control_a_piece_missing_a_condition_lets_a_hidden_channel_through"
+  - id: TEN-9
+    claim: "A guest (a member demoted through the role route), a suspended person and an agent credential are refused by both the browse list and the join with an answer that does not depend on the channel named, and none of them gets a membership."
+    scope: "ADR-0224 D8·D11. Real PostgreSQL. A person suspended through the route is refused at sign-in level (their token is revoked, 401); one whose status changed underneath a live token is refused by the route (403). An agent bearer is refused by the agent route table before the handler, and the handler refuses any non-human bearer as well. Developer tokens and signed work hosts have no row for either route (unit tests on those tables)."
+    priority: P1
+    runs: pr-ci
+    proofs:
+      - "server-rust/bins/momo-server/tests/channel_browse_pg.rs#guests_suspended_people_and_agents_are_refused_before_any_channel_is_read"
+  - id: TEN-10
+    claim: "An archived channel is neither listed in the public-channel browse list nor joinable, even when it is public and listed in browse."
+    scope: "ADR-0224 D3·D4·D11. Real PostgreSQL. Archived channels are seeded directly (there is no route that archives a public channel today)."
+    priority: P1
+    runs: pr-ci
+    proofs:
+      - "server-rust/bins/momo-server/tests/channel_browse_pg.rs#the_browse_list_holds_only_channels_open_to_people"
+      - "server-rust/bins/momo-server/tests/channel_browse_pg.rs#every_channel_that_is_not_open_answers_the_join_like_an_unknown_id"
+  - id: TEN-11
+    claim: "Only a human workspace owner or admin can switch a channel's browse listing: a member, a guest and an agent credential are refused with 403 and nothing changes. A private channel, a direct-message channel and an archived channel cannot be listed: an admin who sits in one gets 409 and nothing of the request is applied. The channel edit answers a public channel with browse listing off or a private channel that the admin does not sit in, another workspace's channel and an unknown id with the same 404 body, for the name and for the browse listing alike, and changes nothing."
+    scope: "ADR-0224 D2·D11 (claim 5, browse listing only — the default-channel field is a later piece), PATCH /v1/workspaces/{ws}/channels/{ch}. Real PostgreSQL as the non-bypass API role, two workspaces. The route reaches a channel the caller sits in or one open to people, decided by one locking statement that embeds the same channel piece as the browse list and the join. Switching the listing off keeps every membership. Developer tokens and signed work hosts have no row for this route (unit tests on those tables), not covered here."
+    priority: P1
+    runs: pr-ci
+    proofs:
+      - "server-rust/bins/momo-server/tests/channel_rename_pg.rs#member_guest_and_agent_are_refused"
+      - "server-rust/bins/momo-server/tests/channel_rename_pg.rs#browse_listing_is_refused_on_channels_that_cannot_be_listed"
+      - "server-rust/bins/momo-server/tests/channel_rename_pg.rs#an_admin_outside_a_hidden_channel_gets_the_unknown_id_404_for_every_field"
+      - "server-rust/bins/momo-server/tests/channel_rename_pg.rs#switching_browse_listing_moves_only_the_self_join_door"
 
   # ---- 인증·세션 -------------------------------------------------------------------
   - id: AUTH-1
@@ -320,6 +367,23 @@ claims:
     proofs:
       - "server-rust/crates/momo-agent/src/tools.rs#no_grant_can_pre_approve_a_login_handoff"
       - "server-rust/crates/momo-agent/src/app_tool_grants.rs#the_host_loads_the_intersection_and_the_server_cannot_widen_it"
+  - id: AGT-5
+    claim: "The team AI's read tools read a channel only when the person who asked is a live member of it; a public channel listed in channel browse that the person is not in is not read, even in their own direct message with the team AI."
+    scope: "ADR-0201 H4 and ADR-0224 D13 (#5870). Real PostgreSQL, the read tools called directly as the worker's role. The rule the tools apply is tested, not the model: what the model would write about a channel it was refused is not."
+    priority: P1
+    runs: nightly
+    proofs:
+      - "server-rust/crates/momo-workspace-actions/tests/agent_channel_open_pg.rs#the_team_ai_reads_only_channels_the_requester_is_in"
+      - "server-rust/bins/momo-agent-worker/tests/team_ai_tools_conformance_pg.rs#a6_a_requester_without_access_gets_nothing"
+  - id: AGT-6
+    claim: "In a room with people, the team AI may answer from the room itself and from live public channels listed in channel browse only: a public channel that is not listed, a private channel and an archived channel are refused there even for a person who is in them. In the person's own direct message with the team AI it may answer from what that person can read, and in a room with a guest from the room alone. The channel names the team AI is given are the room and the channels open to people (live, public, listed in channel browse); only in the person's own direct message with the team AI does it also get the public channels that person is in."
+    scope: "ADR-0224 D13 (#5870). Real PostgreSQL with two workspaces; the scope, the name list and a read_channel call are checked as the worker's role, which bypasses row-level security, so the other-workspace checks prove the statements' own workspace filter. The model is not run: the claim is what the server hands the model, not what the model writes."
+    priority: P1
+    runs: nightly
+    proofs:
+      - "server-rust/crates/momo-workspace-actions/tests/agent_channel_open_pg.rs#a_room_hears_only_itself_and_channels_open_to_people"
+      - "server-rust/crates/momo-workspace-actions/tests/agent_channel_open_pg.rs#the_helper_dm_and_a_guest_room_keep_their_rules"
+      - "server-rust/crates/momo-workspace-actions/tests/agent_channel_open_pg.rs#the_team_ai_names_a_closed_channel_only_in_a_members_own_dm"
 
   # ---- 자격증명 ---------------------------------------------------------------------
   - id: CRED-1

@@ -3481,6 +3481,41 @@ paths:
                 $ref: "#/components/schemas/ErrorResponse"
 
   /v1/workspaces/{workspaceId}/channels/{channelId}/members/me:
+    post:
+      tags: [membership]
+      operationId: joinChannel
+      summary: Join a public channel from the browse list (ADR-0224 D4).
+      description: >
+        The pair of the leave below. Only a channel that `GET …/channels/browse`
+        would list can be joined: a private channel, a DM, a public channel with
+        `browseListed` off, an archived channel, an unknown id and another
+        workspace's channel all answer the same 404 (status and body), even for a
+        caller who already sits in that channel. A new or left membership becomes a
+        live channel `member` (a former channel owner comes back as `member`), the
+        read position moves to the channel's end so it starts with nothing unread,
+        and `channel.joined` is audited. A caller who is already a member gets 200
+        with `newlyJoined: false` and nothing is written (role, read position and
+        audit stay). Human members only: a guest, a suspended person and any agent
+        or developer-token credential are refused before the channel is read.
+        Per-member budget `RATE_LIMIT_CHANNEL_JOIN_PER_MEMBER` (default 60 per
+        window).
+      security: [{bearerAuth: []}]
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/ChannelId"
+      responses:
+        "200":
+          description: The caller is a member; `channel` is the row the channel list shows for it.
+          content: {application/json: {schema: {$ref: "#/components/schemas/ChannelJoinResponse"}}}
+        "400": {description: Malformed channel id, content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403":
+          description: >
+            Not a human bearer, workspace scope mismatch, not an active member of
+            the workspace (suspended included), or a guest.
+          content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}
+        "404": {description: Not a channel open to people (one answer for every kind), content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}}
+        "429": {$ref: "#/components/responses/RateLimited"}
     delete:
       tags: [membership]
       operationId: leaveChannel
@@ -5824,25 +5859,92 @@ paths:
         "429":
           $ref: "#/components/responses/RateLimited"
 
+  /v1/workspaces/{workspaceId}/channels/browse:
+    get:
+      tags: [channels]
+      operationId: browseChannels
+      summary: List the public channels a full member may find and join (ADR-0224 D3).
+      description: >
+        Every public channel of the workspace that is not archived and has
+        `browseListed` on, whether or not the caller is in it (`isMember`).
+        Private channels, DMs, public channels with `browseListed` off and
+        archived channels never appear, for any role — owners and admins get the
+        same list as everyone else. Ordered by lower-cased name, then id; a
+        screen groups joined and not-joined rows itself. `q` keeps the rows
+        whose name or topic contains it (case-insensitive, plain text: `%` and
+        `_` are characters). Human members only: a guest, a suspended person and
+        any agent or developer-token credential are refused before a channel is
+        read.
+      security: [{bearerAuth: []}]
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: q
+          in: query
+          required: false
+          description: Text to look for in the name or topic. Trimmed; blank means no filter; at most 100 characters.
+          schema: {type: string, maxLength: 100}
+        - name: cursor
+          in: query
+          required: false
+          description: The `nextCursor` of the previous page. Opaque; a malformed one is 400.
+          schema: {type: string}
+        - name: limit
+          in: query
+          required: false
+          description: Page size, clamped to 1..200; an unusable value falls back to the default.
+          schema: {type: integer, default: 100, minimum: 1, maximum: 200}
+      responses:
+        "200":
+          description: One page of browsable channels.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/BrowseChannelsResponse"}
+        "400": {description: Malformed `q` or `cursor`, content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403":
+          description: >
+            Not a human bearer, workspace scope mismatch, not an active member of
+            the workspace (suspended included), or a guest.
+          content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}
+        "429": {$ref: "#/components/responses/RateLimited"}
+
   /v1/workspaces/{workspaceId}/channels/{channelId}:
     patch:
       tags: [channels]
       operationId: updateChannel
-      summary: Rename a public/private channel (workspace admin only, humans only).
+      summary: Rename a channel or switch its browse listing (workspace admin only, humans only).
       description: >
-        ADR-0225 D10. A partial update: only the fields present change. Today
-        the one field is `name`; an unknown field is a 400 (never ignored) and a
-        body with no known field is a 400. The name goes through the same
-        normalisation and rules as `createChannel`, and the response carries the
-        stored name.
+        ADR-0225 D10 and ADR-0224 D2. A partial update: only the fields present
+        change. The fields are `name` and `browseListed`; an unknown field is a
+        400 (never ignored) and a body with no known field is a 400. Both fields
+        in one body are applied in one transaction, and every field is judged
+        before anything is written, so a refused body changes nothing. The
+        name goes through the same normalisation and rules as `createChannel`.
+        The response is the channel as the edit left it, in the same `Channel`
+        shape as the channel list.
 
 
         Human owners and admins only. Agent credentials, developer tokens and
-        the narrow push tokens never reach this route. Targets are live public
-        and private channels of the workspace. A direct message, a group
-        message, an archived channel, a channel of another workspace, an unknown
-        id and a private channel the caller is not a live member of all answer
-        the same 404. A name that already belongs to a live channel
+        the narrow push tokens never reach this route. The route reaches a
+        channel of the workspace that the caller is a live member of, or a
+        public channel that is not archived and is listed in browse. Every other
+        id (a private channel or a public channel with `browseListed` off that
+        the caller does not sit in, a channel of another workspace, an unknown
+        id) answers the same 404, for every field. For `name`, a direct
+        message, a group message and an archived channel are that 404 as well.
+
+
+        `browseListed` (ADR-0224 D2) shows or hides a live public channel in
+        channel browse. A private channel, a direct message or an archived
+        channel the caller sits in is a 409 with `error.code`
+        `channel_not_listable`, whichever value is sent. Switching it off does
+        not change anyone's membership. Each switch writes the audit record
+        `channel.browse_listed` (`old`, `new`); sending the value the channel
+        already has is a 200 and writes nothing. An admin who is not in the
+        channel and switches it off can no longer reach it through this route.
+
+
+        A name that already belongs to a live channel
         (case-insensitive, any non-DM kind) is a 409. `general` is locked in both
         directions: renaming it, or renaming another channel to it, is a 409
         with `error.code` `general_channel_locked`. Sending the name the channel
@@ -5872,8 +5974,8 @@ paths:
         "400":
           description: >
             Invalid channel id, a body that is not an object, an unknown field,
-            no known field, or a name the rules refuse (the same two messages as
-            `createChannel`).
+            no known field, a `browseListed` that is not a boolean, or a name the
+            rules refuse (the same two messages as `createChannel`).
           content:
             application/json:
               schema:
@@ -5889,15 +5991,20 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
         "404":
-          description: Not a live public/private channel the caller may rename.
+          description: >
+            Outside the route's reach (see above), or a direct message, group
+            message or archived channel for `name`. The same body as an unknown
+            id.
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
         "409":
           description: >
-            The name already belongs to a live channel (no `error.code`), or the
-            `general` lock (`error.code` `general_channel_locked`).
+            The name already belongs to a live channel (no `error.code`), the
+            `general` lock (`error.code` `general_channel_locked`), or
+            `browseListed` on a channel that is not a live public channel
+            (`error.code` `channel_not_listable`).
           content:
             application/json:
               schema:
@@ -16551,7 +16658,9 @@ components:
         default 60; starts of a picture from a
         photo (`POST …/expressions/photo-drafts`, ADR-0218 §8 H11), default 10; marking every
         followed thread read (`POST …/threads/read-all`, ADR-0124 amendment 5,
-        `RATE_LIMIT_THREAD_READ_ALL_PER_MEMBER`), default 60. Cancelling a scheduled
+        `RATE_LIMIT_THREAD_READ_ALL_PER_MEMBER`), default 60; joining a public channel
+        (`POST …/channels/{ch}/members/me`, ADR-0224 D4,
+        `RATE_LIMIT_CHANNEL_JOIN_PER_MEMBER`), default 60. Cancelling a scheduled
         message, editing a message (`PATCH …/messages/{id}`, which streaming answers
         use) and every read except the two below are not budgeted. Retrying with the
         same `clientMsgId` after a 429 is safe. The link-card proxies
@@ -22193,6 +22302,51 @@ components:
           items:
             $ref: "#/components/schemas/Channel"
 
+    BrowseChannel:
+      type: object
+      required: [id, name, memberCount, isMember, isDefault]
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        topic:
+          type: string
+          description: Absent when the channel has no topic.
+        memberCount:
+          type: integer
+          format: int64
+          description: Live members who are active and not removed — people and agents together.
+        isMember:
+          type: boolean
+          description: The caller is a member of this channel.
+        isDefault:
+          type: boolean
+          description: A default channel (ADR-0224 D6).
+
+    BrowseChannelsResponse:
+      type: object
+      required: [channels]
+      properties:
+        channels:
+          type: array
+          items:
+            $ref: "#/components/schemas/BrowseChannel"
+        nextCursor:
+          type: string
+          description: Present when another page follows; pass it back as `cursor`.
+
+    ChannelJoinResponse:
+      type: object
+      required: [channel, newlyJoined]
+      properties:
+        channel:
+          $ref: "#/components/schemas/Channel"
+        newlyJoined:
+          type: boolean
+          description: False when the caller was already a member and nothing was written.
+
     UpdateNotificationPrefRequest:
       type: object
       additionalProperties: false
@@ -23509,28 +23663,18 @@ components:
           description: >-
             The new name, normalised and judged exactly like
             `CreateChannelRequest.name` (ADR-0225 D1-D5).
+        browseListed:
+          type: boolean
+          description: >-
+            Show (`true`) or hide (`false`) a live public channel in channel
+            browse (ADR-0224 D2). Memberships are not changed.
 
     UpdateChannelResponse:
       type: object
       required: [channel]
       properties:
         channel:
-          type: object
-          required: [id, workspaceId, kind, name]
-          properties:
-            id:
-              type: string
-              format: uuid
-            workspaceId:
-              type: string
-              format: uuid
-            kind:
-              type: string
-              enum: [public, private]
-            name:
-              type: string
-            topic:
-              type: string
+          $ref: "#/components/schemas/Channel"
 
     MembershipRole:
       type: string

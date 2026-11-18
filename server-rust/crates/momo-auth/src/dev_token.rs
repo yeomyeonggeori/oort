@@ -2322,4 +2322,17 @@ mod tests {
             None
         );
     }
+
+    /// ADR-0224 D8: a developer token cannot browse or join public channels — the closed
+    /// table has neither row.
+    #[test]
+    fn a_developer_token_cannot_browse_or_join_channels() {
+        for (method, path) in [
+            ("GET", "/v1/workspaces/{ws}/channels/browse"),
+            ("POST", "/v1/workspaces/{ws}/channels/{ch}/members/me"),
+            ("DELETE", "/v1/workspaces/{ws}/channels/{ch}/members/me"),
+        ] {
+            assert_eq!(required_dev_scope(method, path), None, "{method} {path}");
+        }
+    }
 }

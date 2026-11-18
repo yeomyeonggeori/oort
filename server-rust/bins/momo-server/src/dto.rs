@@ -2919,6 +2919,51 @@ pub struct WorkspaceChannelsResponse {
     pub channels: Vec<ChannelDto>,
 }
 
+/// ADR-0224 D3 — `GET …/channels/browse?q=&cursor=&limit=`. Lenient like the channel
+/// list: a garbage `limit` falls back to the default; `cursor` is strict (400) because a
+/// bad cursor cannot be read as "the first page".
+#[derive(Debug, Deserialize)]
+pub struct BrowseChannelsQuery {
+    #[serde(default)]
+    pub q: Option<String>,
+    #[serde(default)]
+    pub cursor: Option<String>,
+    #[serde(default)]
+    pub limit: Option<String>,
+}
+
+/// One row of the browse list (ADR-0224 D3). `topic` is omitted when the channel has none.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BrowseChannelDto {
+    pub id: String,
+    pub name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub topic: Option<String>,
+    pub member_count: i64,
+    pub is_member: bool,
+    pub is_default: bool,
+}
+
+/// ADR-0224 D3 — the browse page. `nextCursor` is omitted on the last page.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BrowseChannelsResponse {
+    pub channels: Vec<BrowseChannelDto>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub next_cursor: Option<String>,
+}
+
+/// ADR-0224 D4 — `POST …/channels/{ch}/members/me`. `channel` is the same `Channel` row
+/// the channel list carries, so a client can put it in the sidebar as it is.
+/// `newlyJoined` is false when the caller was already a member (nothing was written).
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ChannelJoinResponse {
+    pub channel: ChannelDto,
+    pub newly_joined: bool,
+}
+
 // ---------------------------------------------------------------------------
 // channel writes (B4.1 — Swift `ChannelRoutes.create` + `updateNotificationPref`)
 // ---------------------------------------------------------------------------
@@ -2965,24 +3010,14 @@ pub struct CreateChannelResponse {
     pub creator_membership: ChannelMembershipDto,
 }
 
-/// `PATCH /v1/workspaces/{ws}/channels/{ch}` response (ADR-0225 D10): the
-/// channel as the rename left it. No per-caller fields (`muted`, roster) — the
-/// next channel list carries those.
+/// `PATCH /v1/workspaces/{ws}/channels/{ch}` response (ADR-0225 D10, ADR-0224
+/// D2): the channel as the edit left it, in the same `Channel` shape as the
+/// channel list, create and join answers (`browseListed`, `isDefault` and the
+/// caller's own `muted` included).
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UpdateChannelResponse {
-    pub channel: UpdatedChannelDto,
-}
-
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct UpdatedChannelDto {
-    pub id: String,
-    pub workspace_id: String,
-    pub kind: String,
-    pub name: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub topic: Option<String>,
+    pub channel: ChannelDto,
 }
 
 /// `PUT …/channels/{ch}/notification-pref` request (Swift

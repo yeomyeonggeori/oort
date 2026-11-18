@@ -1112,6 +1112,12 @@ pub fn build_app(state: AppState) -> Router {
         )
         // ADR-0225 D10 — rename (the first channel-editing route; later pieces
         // add fields to the same PATCH).
+        // ADR-0224 D3 — the public channels a person may find. A literal segment beats
+        // `{ch}`, so this GET never reaches the channel routes below.
+        .route(
+            "/v1/workspaces/{ws}/channels/browse",
+            get(routes::channels::browse),
+        )
         .route(
             "/v1/workspaces/{ws}/channels/{ch}",
             patch(routes::channels::update),
@@ -1133,9 +1139,13 @@ pub fn build_app(state: AppState) -> Router {
             "/v1/workspaces/{ws}/channels/{ch}/members/{member}",
             delete(routes::channels::remove_member),
         )
+        // ADR-0224 D4 — joining from the browse list spends a per-member budget; leaving
+        // does not (it is the safety action).
         .route(
             "/v1/workspaces/{ws}/channels/{ch}/members/me",
-            delete(routes::member_lifecycle::leave_channel),
+            post(routes::channels::join_channel)
+                .route_layer(member_write(rate_limit::MemberWrite::ChannelJoin))
+                .delete(routes::member_lifecycle::leave_channel),
         )
         .route(
             "/v1/workspaces/{ws}/channels/{ch}/members/{member}/role",

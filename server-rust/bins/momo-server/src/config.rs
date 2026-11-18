@@ -540,6 +540,12 @@ pub struct RateLimitConfig {
     /// budgets: a person presses 「모두 읽음」 a few times a minute at most, and a client that is told
     /// `has_more` calls again once per 100 threads.
     pub thread_read_all_per_member_limit: u32,
+    /// `RATE_LIMIT_CHANNEL_JOIN_PER_MEMBER` (default 60 per window). 0 disables.
+    /// `POST …/channels/{ch}/members/me` (ADR-0224 D4, #5838): a person joins a public channel
+    /// from the browse list. [추정] the 60 of the other per-member write budgets: a person joins
+    /// a few channels a minute at most when setting up, and joining a channel one is already in
+    /// spends a unit too (the gate runs before the handler).
+    pub channel_join_per_member_limit: u32,
 }
 
 impl Default for RateLimitConfig {
@@ -563,6 +569,7 @@ impl Default for RateLimitConfig {
             photo_draft_per_member_limit: 10,
             unfurl_preview_per_member_limit: 60,
             thread_read_all_per_member_limit: 60,
+            channel_join_per_member_limit: 60,
         }
     }
 }
@@ -639,6 +646,9 @@ impl RateLimitConfig {
             thread_read_all_per_member_limit: lookup("RATE_LIMIT_THREAD_READ_ALL_PER_MEMBER")
                 .and_then(|value| value.trim().parse::<u32>().ok())
                 .unwrap_or(defaults.thread_read_all_per_member_limit),
+            channel_join_per_member_limit: lookup("RATE_LIMIT_CHANNEL_JOIN_PER_MEMBER")
+                .and_then(|value| value.trim().parse::<u32>().ok())
+                .unwrap_or(defaults.channel_join_per_member_limit),
         }
     }
 }
@@ -4444,8 +4454,9 @@ mod tests {
                 defaults.unfurl_preview_per_member_limit,
                 defaults.media_write_per_member_limit,
                 defaults.thread_read_all_per_member_limit,
+                defaults.channel_join_per_member_limit,
             ),
-            (120, 600, 60, 60, 240, 10, 60, 60, 60),
+            (120, 600, 60, 60, 240, 10, 60, 60, 60, 60),
             "a default changed: update ADR-0208 증보 1 (ADR-0170 증보 D13 and 2026-11-01 D20 for the unfurl ones, ADR-0218 §8 H11 for the photo one, ADR-0151 증보 5 D5 for the media write, ADR-0124 증보 5 for the thread read-all), docs/api/openapi.yaml and infra/.env.example with it"
         );
         for (name, limit) in [
@@ -4461,6 +4472,7 @@ mod tests {
             ("unfurl preview", defaults.unfurl_preview_per_member_limit),
             ("media write", defaults.media_write_per_member_limit),
             ("thread read-all", defaults.thread_read_all_per_member_limit),
+            ("channel join", defaults.channel_join_per_member_limit),
         ] {
             assert!(
                 limit > 0,
@@ -4571,6 +4583,14 @@ mod tests {
                 ..defaults
             },
             "the thread read-all name moves its own field and nothing else"
+        );
+        assert_eq!(
+            RateLimitConfig::from_lookup(lookup("RATE_LIMIT_CHANNEL_JOIN_PER_MEMBER", "16")),
+            RateLimitConfig {
+                channel_join_per_member_limit: 16,
+                ..defaults
+            },
+            "the channel join name moves its own field and nothing else"
         );
         // 0 is the operator's off switch; a value that is not a number is not one.
         assert_eq!(

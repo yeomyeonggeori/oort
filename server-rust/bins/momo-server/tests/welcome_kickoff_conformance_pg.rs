@@ -250,8 +250,9 @@ async fn seed(su: &PgPool, hint: &str, with_agent: bool) -> Fixture {
 
     let channel = Uuid::new_v4();
     sqlx::query(
-        "INSERT INTO channel (id, workspace_id, kind, name, topic, created_by, is_default) \
-         VALUES ($1, $2, 'public', 'general', 'Team general channel', $3, true)",
+        "INSERT INTO channel (id, workspace_id, kind, name, topic, created_by, is_default, \
+                              browse_listed) \
+         VALUES ($1, $2, 'public', 'general', 'Team general channel', $3, true, true)",
     )
     .bind(channel)
     .bind(workspace)
