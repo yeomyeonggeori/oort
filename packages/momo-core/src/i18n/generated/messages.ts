@@ -1213,6 +1213,45 @@ export const messageKeys = [
   "releaseNotes.v0146.whoIsDoingChanged",
   "releaseNotes.v0146.whoIsDoingTitle",
   "releaseNotes.v0146.whoIsDoingTryIt",
+  "releaseNotes.v0147.agentLinksChanged",
+  "releaseNotes.v0147.agentLinksTitle",
+  "releaseNotes.v0147.agentLinksTryIt",
+  "releaseNotes.v0147.agentsLine1",
+  "releaseNotes.v0147.agentsLine2",
+  "releaseNotes.v0147.channelBrowseChanged",
+  "releaseNotes.v0147.channelBrowseTitle",
+  "releaseNotes.v0147.channelBrowseTryIt",
+  "releaseNotes.v0147.channelMembersChanged",
+  "releaseNotes.v0147.channelMembersTitle",
+  "releaseNotes.v0147.channelMembersTryIt",
+  "releaseNotes.v0147.channelNamesChanged",
+  "releaseNotes.v0147.channelNamesTitle",
+  "releaseNotes.v0147.channelNamesTryIt",
+  "releaseNotes.v0147.channelsLine1",
+  "releaseNotes.v0147.channelsLine2",
+  "releaseNotes.v0147.channelsLine3",
+  "releaseNotes.v0147.channelsLine4",
+  "releaseNotes.v0147.channelsLine5",
+  "releaseNotes.v0147.channelsLine6",
+  "releaseNotes.v0147.channelsTopic",
+  "releaseNotes.v0147.dmLeaveChanged",
+  "releaseNotes.v0147.dmLeaveTitle",
+  "releaseNotes.v0147.dmLeaveTryIt",
+  "releaseNotes.v0147.lookLine1",
+  "releaseNotes.v0147.lookLine2",
+  "releaseNotes.v0147.lookLine3",
+  "releaseNotes.v0147.lookLine4",
+  "releaseNotes.v0147.lookLine5",
+  "releaseNotes.v0147.lookLine6",
+  "releaseNotes.v0147.lookTopic",
+  "releaseNotes.v0147.reconnectSyncChanged",
+  "releaseNotes.v0147.reconnectSyncTitle",
+  "releaseNotes.v0147.reconnectSyncTryIt",
+  "releaseNotes.v0147.settingsLine1",
+  "releaseNotes.v0147.summary",
+  "releaseNotes.v0147.tooltipsChanged",
+  "releaseNotes.v0147.tooltipsTitle",
+  "releaseNotes.v0147.tooltipsTryIt",
   "releaseNotes.version.current",
   "releaseNotes.version.label",
   "releaseNotes.version.releasedOn",
@@ -3245,6 +3284,45 @@ export const argumentSpecs = {
   "releaseNotes.v0146.whoIsDoingChanged": {},
   "releaseNotes.v0146.whoIsDoingTitle": {},
   "releaseNotes.v0146.whoIsDoingTryIt": {},
+  "releaseNotes.v0147.agentLinksChanged": {},
+  "releaseNotes.v0147.agentLinksTitle": {},
+  "releaseNotes.v0147.agentLinksTryIt": {},
+  "releaseNotes.v0147.agentsLine1": {},
+  "releaseNotes.v0147.agentsLine2": {},
+  "releaseNotes.v0147.channelBrowseChanged": {},
+  "releaseNotes.v0147.channelBrowseTitle": {},
+  "releaseNotes.v0147.channelBrowseTryIt": {},
+  "releaseNotes.v0147.channelMembersChanged": {},
+  "releaseNotes.v0147.channelMembersTitle": {},
+  "releaseNotes.v0147.channelMembersTryIt": {},
+  "releaseNotes.v0147.channelNamesChanged": {},
+  "releaseNotes.v0147.channelNamesTitle": {},
+  "releaseNotes.v0147.channelNamesTryIt": {},
+  "releaseNotes.v0147.channelsLine1": {},
+  "releaseNotes.v0147.channelsLine2": {},
+  "releaseNotes.v0147.channelsLine3": {},
+  "releaseNotes.v0147.channelsLine4": {},
+  "releaseNotes.v0147.channelsLine5": {},
+  "releaseNotes.v0147.channelsLine6": {},
+  "releaseNotes.v0147.channelsTopic": {},
+  "releaseNotes.v0147.dmLeaveChanged": {},
+  "releaseNotes.v0147.dmLeaveTitle": {},
+  "releaseNotes.v0147.dmLeaveTryIt": {},
+  "releaseNotes.v0147.lookLine1": {},
+  "releaseNotes.v0147.lookLine2": {},
+  "releaseNotes.v0147.lookLine3": {},
+  "releaseNotes.v0147.lookLine4": {},
+  "releaseNotes.v0147.lookLine5": {},
+  "releaseNotes.v0147.lookLine6": {},
+  "releaseNotes.v0147.lookTopic": {},
+  "releaseNotes.v0147.reconnectSyncChanged": {},
+  "releaseNotes.v0147.reconnectSyncTitle": {},
+  "releaseNotes.v0147.reconnectSyncTryIt": {},
+  "releaseNotes.v0147.settingsLine1": {},
+  "releaseNotes.v0147.summary": {},
+  "releaseNotes.v0147.tooltipsChanged": {},
+  "releaseNotes.v0147.tooltipsTitle": {},
+  "releaseNotes.v0147.tooltipsTryIt": {},
   "releaseNotes.version.current": {},
   "releaseNotes.version.label": {
     "version": "string"
@@ -5292,6 +5370,45 @@ export interface MessageArgs {
   "releaseNotes.v0146.whoIsDoingChanged": Record<string, never>;
   "releaseNotes.v0146.whoIsDoingTitle": Record<string, never>;
   "releaseNotes.v0146.whoIsDoingTryIt": Record<string, never>;
+  "releaseNotes.v0147.agentLinksChanged": Record<string, never>;
+  "releaseNotes.v0147.agentLinksTitle": Record<string, never>;
+  "releaseNotes.v0147.agentLinksTryIt": Record<string, never>;
+  "releaseNotes.v0147.agentsLine1": Record<string, never>;
+  "releaseNotes.v0147.agentsLine2": Record<string, never>;
+  "releaseNotes.v0147.channelBrowseChanged": Record<string, never>;
+  "releaseNotes.v0147.channelBrowseTitle": Record<string, never>;
+  "releaseNotes.v0147.channelBrowseTryIt": Record<string, never>;
+  "releaseNotes.v0147.channelMembersChanged": Record<string, never>;
+  "releaseNotes.v0147.channelMembersTitle": Record<string, never>;
+  "releaseNotes.v0147.channelMembersTryIt": Record<string, never>;
+  "releaseNotes.v0147.channelNamesChanged": Record<string, never>;
+  "releaseNotes.v0147.channelNamesTitle": Record<string, never>;
+  "releaseNotes.v0147.channelNamesTryIt": Record<string, never>;
+  "releaseNotes.v0147.channelsLine1": Record<string, never>;
+  "releaseNotes.v0147.channelsLine2": Record<string, never>;
+  "releaseNotes.v0147.channelsLine3": Record<string, never>;
+  "releaseNotes.v0147.channelsLine4": Record<string, never>;
+  "releaseNotes.v0147.channelsLine5": Record<string, never>;
+  "releaseNotes.v0147.channelsLine6": Record<string, never>;
+  "releaseNotes.v0147.channelsTopic": Record<string, never>;
+  "releaseNotes.v0147.dmLeaveChanged": Record<string, never>;
+  "releaseNotes.v0147.dmLeaveTitle": Record<string, never>;
+  "releaseNotes.v0147.dmLeaveTryIt": Record<string, never>;
+  "releaseNotes.v0147.lookLine1": Record<string, never>;
+  "releaseNotes.v0147.lookLine2": Record<string, never>;
+  "releaseNotes.v0147.lookLine3": Record<string, never>;
+  "releaseNotes.v0147.lookLine4": Record<string, never>;
+  "releaseNotes.v0147.lookLine5": Record<string, never>;
+  "releaseNotes.v0147.lookLine6": Record<string, never>;
+  "releaseNotes.v0147.lookTopic": Record<string, never>;
+  "releaseNotes.v0147.reconnectSyncChanged": Record<string, never>;
+  "releaseNotes.v0147.reconnectSyncTitle": Record<string, never>;
+  "releaseNotes.v0147.reconnectSyncTryIt": Record<string, never>;
+  "releaseNotes.v0147.settingsLine1": Record<string, never>;
+  "releaseNotes.v0147.summary": Record<string, never>;
+  "releaseNotes.v0147.tooltipsChanged": Record<string, never>;
+  "releaseNotes.v0147.tooltipsTitle": Record<string, never>;
+  "releaseNotes.v0147.tooltipsTryIt": Record<string, never>;
   "releaseNotes.version.current": Record<string, never>;
   "releaseNotes.version.label": { version: string };
   "releaseNotes.version.releasedOn": { date: string };
