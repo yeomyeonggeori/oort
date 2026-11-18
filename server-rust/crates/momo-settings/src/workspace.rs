@@ -218,10 +218,13 @@ pub async fn create_workspace_in_tx(
 
     // 7) The default #general channel, its gapless seq counter, and the owner's
     //    membership. All three together: a channel without `channel_seq` is a
-    //    channel the send path answers 404 for (invariant #4).
+    //    channel the send path answers 404 for (invariant #4). It is born the
+    //    workspace's default channel and listed in channel browse (ADR-0224 D2·D6):
+    //    invite joins land in it, and someone who left can find it again.
     sqlx::query(
-        "INSERT INTO channel (id, workspace_id, kind, name, topic, created_by) \
-         VALUES ($1, $2, 'public', 'general', 'Team general channel', $3)",
+        "INSERT INTO channel (id, workspace_id, kind, name, topic, created_by, \
+                              is_default, browse_listed) \
+         VALUES ($1, $2, 'public', 'general', 'Team general channel', $3, true, true)",
     )
     .bind(channel_id)
     .bind(new_workspace_id)

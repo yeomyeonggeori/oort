@@ -114,6 +114,8 @@ fn channel_dto(channel: &ChannelSummary) -> ChannelDto {
         ),
         created_by: channel.created_by.map(|id| id.to_string()),
         archived_at_ms: channel.archived_at_ms,
+        browse_listed: channel.browse_listed,
+        is_default: channel.is_default,
         muted: channel.muted,
         muted_until_ms: channel.muted_until_ms,
     }
@@ -497,6 +499,8 @@ mod tests {
             member_ids: vec![],
             created_by: Some(Uuid::from_u128(3)),
             archived_at_ms: None,
+            browse_listed: true,
+            is_default: true,
             muted: false,
             muted_until_ms: None,
         };
@@ -505,6 +509,9 @@ mod tests {
         assert_eq!(json["name"], "general");
         assert_eq!(json["memberIds"].as_array().expect("array").len(), 0);
         assert_eq!(json["muted"], false);
+        // ADR-0224 D2·D6: both marks travel on every row, by these names.
+        assert_eq!(json["browseListed"], true);
+        assert_eq!(json["isDefault"], true);
         assert!(json.get("topic").is_none(), "null optionals are omitted");
         assert!(json.get("dmKey").is_none());
         assert!(
@@ -533,6 +540,8 @@ mod tests {
             member_ids: vec![],
             created_by: Some(Uuid::from_u128(7)),
             archived_at_ms: None,
+            browse_listed: false,
+            is_default: false,
             muted: false,
             muted_until_ms: None,
         };
@@ -772,6 +781,8 @@ mod tests {
             member_ids: vec![Uuid::from_u128(5), Uuid::from_u128(6)],
             created_by: None,
             archived_at_ms: None,
+            browse_listed: false,
+            is_default: false,
             muted: true,
             muted_until_ms: Some(1_800_000_000_000),
         };
@@ -780,6 +791,11 @@ mod tests {
         assert_eq!(json["dmKey"], "deadbeef");
         assert_eq!(json["memberIds"].as_array().expect("array").len(), 2);
         assert_eq!(json["muted"], true);
+        assert_eq!(
+            json["browseListed"], false,
+            "present and false, never omitted: {json}"
+        );
+        assert_eq!(json["isDefault"], false, "present and false: {json}");
         assert_eq!(
             json["mutedUntilMs"],
             serde_json::json!(1_800_000_000_000_i64),

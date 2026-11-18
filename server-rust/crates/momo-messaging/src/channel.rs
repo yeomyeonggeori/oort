@@ -129,6 +129,12 @@ fn decode_channel_membership(
 /// RETURNING`s it), and a channel without its creator's membership is one
 /// nobody can read — either half-state would be a channel that exists and does
 /// not work.
+///
+/// A new **public** channel is created listed in channel browse
+/// (`browse_listed`, ADR-0224 D2); a private one never is (the table's CHECK
+/// says so too). It is never a default channel — that is an explicit choice made
+/// elsewhere (D6). Every creator of a public/private channel goes through here:
+/// the REST create route and the agent `channel.create` approval alike.
 pub async fn create_channel_detailed_in_tx(
     conn: &mut PgConnection,
     workspace_id: Uuid,
@@ -136,15 +142,16 @@ pub async fn create_channel_detailed_in_tx(
 ) -> Result<Option<CreatedChannel>, DbError> {
     let row = sqlx::query(
         "WITH inserted_channel AS ( \
-           INSERT INTO channel (workspace_id, kind, name, topic, created_by) \
-           SELECT $1, $2::channel_kind, $3, $4, $5 \
+           INSERT INTO channel (workspace_id, kind, name, topic, created_by, browse_listed) \
+           SELECT $1, $2::channel_kind, $3, $4, $5, ($2::channel_kind = 'public') \
             WHERE NOT EXISTS ( \
                   SELECT 1 FROM channel existing \
                    WHERE existing.workspace_id = $1 \
                      AND existing.kind <> 'dm' \
                      AND existing.archived_at IS NULL \
                      AND lower(existing.name) = lower($3)) \
-           RETURNING id, workspace_id, kind, name, topic, dm_key, created_by, archived_at \
+           RETURNING id, workspace_id, kind, name, topic, dm_key, created_by, archived_at, \
+                     browse_listed, is_default \
          ), \
          inserted_seq AS ( \
            INSERT INTO channel_seq (channel_id, workspace_id, last_seq) \
@@ -166,6 +173,8 @@ pub async fn create_channel_detailed_in_tx(
                 CASE WHEN c.archived_at IS NULL THEN NULL \
                      ELSE floor(extract(epoch from c.archived_at) * 1000)::bigint \
                 END AS archived_at_ms, \
+                c.browse_listed, \
+                c.is_default, \
                 m.id AS membership_id, \
                 m.member_id, \
                 m.role::text AS membership_role, \
@@ -205,6 +214,8 @@ pub async fn create_channel_detailed_in_tx(
         member_ids: Vec::new(),
         created_by: row.try_get("created_by").map_err(DbError::from)?,
         archived_at_ms: row.try_get("archived_at_ms").map_err(DbError::from)?,
+        browse_listed: row.try_get("browse_listed").map_err(DbError::from)?,
+        is_default: row.try_get("is_default").map_err(DbError::from)?,
         // Nobody can have muted a channel that did not exist a statement ago.
         muted: false,
         muted_until_ms: None,
@@ -860,6 +871,12 @@ pub struct ChannelSummary {
     pub created_by: Option<Uuid>,
     /// Milliseconds since the epoch, or `None` for a live channel.
     pub archived_at_ms: Option<i64>,
+    /// `channel.browse_listed` — listed in channel browse (ADR-0224 D2). Only a
+    /// public channel can carry `true`.
+    pub browse_listed: bool,
+    /// `channel.is_default` — a person joining by invite lands here (ADR-0224
+    /// D6·D7). Only a public channel can carry `true`.
+    pub is_default: bool,
     /// The CALLING member's push-suppression preference for this channel.
     pub muted: bool,
     /// End of the CALLING member's timed mute, epoch ms — set **only while a timed mute is in
@@ -882,6 +899,8 @@ fn decode_channel_summary(row: &sqlx::postgres::PgRow) -> Result<ChannelSummary,
         member_ids: row.try_get("member_ids")?,
         created_by: row.try_get("created_by")?,
         archived_at_ms: row.try_get("archived_at_ms")?,
+        browse_listed: row.try_get("browse_listed")?,
+        is_default: row.try_get("is_default")?,
         muted: row.try_get("muted")?,
         muted_until_ms: row.try_get("muted_until_ms")?,
     })
@@ -951,6 +970,8 @@ pub async fn list_workspace_channels_within(
                 CASE WHEN c.archived_at IS NULL THEN NULL \
                      ELSE floor(extract(epoch from c.archived_at) * 1000)::bigint \
                 END AS archived_at_ms, \
+                c.browse_listed, \
+                c.is_default, \
                 CASE WHEN c.kind = 'dm' THEN COALESCE(( \
                        SELECT array_agg(participant.member_id ORDER BY participant.member_id::text) \
                          FROM membership participant \

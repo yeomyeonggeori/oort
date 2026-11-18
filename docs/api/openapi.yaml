@@ -1322,9 +1322,19 @@ paths:
       summary: Join a workspace with an invite code (public, no auth).
       description: >
         Redeems a high-entropy invite code, creating (201) a human member or
-        resuming (200) an existing one, granting membership in every joinable
-        public channel, and issuing a session token pair. Snake-case body
+        resuming (200) an existing one, granting membership in the workspace's
+        default channels, and issuing a session token pair. Snake-case body
         aliases accepted by the server: `display_name`, `time_zone`/`tz`.
+
+        The join puts the person in every live default channel (`isDefault`,
+        ADR-0224 D6·D7) — or, in a workspace that has none, its oldest live
+        public channel — and nowhere else; a workspace with no live public
+        channel refuses the join (409). The same holds for an existing member
+        spending another link: it never adds them to a public channel that is
+        not a default one. A default channel the join adds or restores starts
+        read up to its newest message (D9); one the person was already in keeps
+        its read position. `memberships` lists the default channels, whether
+        added now or already held.
 
         An invite code names a workspace and a role, not a person, so an
         address that already has an account is resumed only with proof (#4625,
@@ -22027,7 +22037,7 @@ components:
     # ---- Channels ----------------------------------------------------------------
     Channel:
       type: object
-      required: [id, workspaceId, kind, muted]
+      required: [id, workspaceId, kind, browseListed, isDefault, muted]
       properties:
         id:
           type: string
@@ -22059,6 +22069,21 @@ components:
           type: integer
           format: int64
           description: Present only when the channel is archived.
+        browseListed:
+          type: boolean
+          description: >
+            Listed in channel browse — full members may find and join it
+            themselves (ADR-0224 D2). Always present; only a public channel can
+            be `true` (private channels and DMs are always `false`). A public
+            channel created through `POST …/channels` starts `true`; public
+            channels that existed before this field start `false`, except the
+            workspace's default channel.
+        isDefault:
+          type: boolean
+          description: >
+            A default channel — a person joining the workspace by invite is
+            added to it (ADR-0224 D6·D7). Independent of `browseListed`. Always
+            present; only a public channel can be `true`.
         muted:
           type: boolean
           description: Whether push dispatch is suppressed for the authenticated member.

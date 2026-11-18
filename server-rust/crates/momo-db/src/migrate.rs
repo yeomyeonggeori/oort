@@ -846,12 +846,16 @@ mod tests {
     ///
     /// 183 changes only the shape of 180's policy (ADR-0177 증보 D17): the requester's floors are read
     /// once per statement instead of per scan, with the same visibility. No new table or grant.
+    ///
+    /// 184 is #5837's two `channel` marks (ADR-0224 D2·D6): `browse_listed` and `is_default`, each
+    /// public-only by CHECK, and the per-workspace default-channel fill (that row also starts
+    /// listed). No new table, so no new RLS target.
     #[test]
-    fn discovers_contiguous_migrations_001_to_183() {
+    fn discovers_contiguous_migrations_001_to_184() {
         let dir = default_migrations_dir();
         let migrations = discover_migrations(&dir).expect("migrations directory readable");
 
-        let expected: Vec<i64> = (1..=183).collect();
+        let expected: Vec<i64> = (1..=184).collect();
         let found: Vec<i64> = migrations
             .iter()
             .map(|migration| migration.version)
@@ -859,7 +863,7 @@ mod tests {
         assert_eq!(
             found,
             expected,
-            "expected contiguous 001..=183 under {}",
+            "expected contiguous 001..=184 under {}",
             dir.display()
         );
         assert!(migrations.first().unwrap().name.starts_with("001_init"));
@@ -867,7 +871,7 @@ mod tests {
             .last()
             .unwrap()
             .name
-            .starts_with("183_dm_leave_floor_policy_once_per_statement"));
+            .starts_with("184_channel_browse_listed_and_default"));
     }
 
     #[test]
