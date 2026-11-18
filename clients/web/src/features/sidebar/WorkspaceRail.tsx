@@ -96,7 +96,7 @@ export function WorkspaceRail({
           what the marker competes inside, so the tile owns the context. It does
           not clip (that was the 3R regression the comment below records);
           `isolation` only scopes z. */}
-      <Tooltip label={tile.label} side="bottom">
+      <Tooltip label={tile.label} side="right">
         <span
           aria-current="true"
           aria-busy={tile.loading || undefined}
@@ -148,7 +148,7 @@ export function WorkspaceRail({
           자리에서 연다. 윤곽선은 컨트롤 윤곽선이라 --line 이 아니라 --line-strong(3:1)
           을 쓰고, 현재 타일과 같은 44px 사각형이되 액센트 바도 채운 표면도 없어
           "현재"로 오인되지 않는다. 패널 접기는 타이틀바에 한 자리만 산다 (#1864). */}
-      <Tooltip label="워크스페이스 추가" side="bottom">
+      <Tooltip label="워크스페이스 추가" side="right">
         <button
           ref={addWorkspaceRef}
           type="button"

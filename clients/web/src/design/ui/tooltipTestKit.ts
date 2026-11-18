@@ -24,6 +24,7 @@ export function tooltipTextOf(trigger: Element): string | null {
         break;
       }
     }
+    if (text === null) text = element.ownerDocument.querySelector('body > [data-testid="tooltip"]')?.textContent ?? null;
     act(() => {
       element.dispatchEvent(new FocusEvent("focusout", { bubbles: true }));
     });

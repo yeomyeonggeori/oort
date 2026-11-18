@@ -72,11 +72,6 @@ const ALLOWED: readonly Allowed[] = [
     reason: "이모지 + 개수가 보이는 반응 칩이고 title은 「누가 눌렀는지」 이름 목록이다(툴팁이 이름을 말하는 단추가 아니라 정보를 푸는 칩).",
   },
   {
-    file: "features/updates/UpdateButton.tsx",
-    title: "{rail && tooltip ? tooltip : undefined}",
-    reason: "「업데이트」 글이 보이는 알약 단추다. 레일(overflow-x 숨김)에서만 설명 title을 쓴다: 레일이 가로로 넘친 것을 잘라 포털 없는 Tooltip이 잘린다.",
-  },
-  {
     file: "features/work/ObserverTerminal.tsx",
     title: "{OBSERVER_COUNT_NOTE}",
     reason: "보는 사람 수 숫자가 보이는 span이고 title은 그 숫자의 뜻 풀이다. 단추가 아니다.",

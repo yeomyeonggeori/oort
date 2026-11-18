@@ -151,7 +151,7 @@ export function ProfileCard({
       >
         <Tooltip
           label={compact ? triggerName : undefined}
-          side="top"
+          side={compact ? "right" : "top"}
           className={compact ? "shrink-0" : "min-w-0 flex-1"}
         >
           <DropdownMenuTrigger asChild>
