@@ -220,6 +220,11 @@ export const messageKeys = [
   "channels.createFailure.duplicate",
   "channels.createFailure.forbidden",
   "channels.createFailure.rateLimited",
+  "channels.default.description",
+  "channels.default.label",
+  "channels.default.lastDefault",
+  "channels.default.lastHint",
+  "channels.default.notDefaultable",
   "channels.dmLeave.action",
   "channels.dmLeave.busy",
   "channels.dmLeave.cancel",
@@ -1992,6 +1997,11 @@ export const argumentSpecs = {
   "channels.createFailure.duplicate": {},
   "channels.createFailure.forbidden": {},
   "channels.createFailure.rateLimited": {},
+  "channels.default.description": {},
+  "channels.default.label": {},
+  "channels.default.lastDefault": {},
+  "channels.default.lastHint": {},
+  "channels.default.notDefaultable": {},
   "channels.dmLeave.action": {},
   "channels.dmLeave.busy": {},
   "channels.dmLeave.cancel": {},
@@ -4241,6 +4251,11 @@ export interface MessageArgs {
   "channels.createFailure.duplicate": Record<string, never>;
   "channels.createFailure.forbidden": Record<string, never>;
   "channels.createFailure.rateLimited": Record<string, never>;
+  "channels.default.description": Record<string, never>;
+  "channels.default.label": Record<string, never>;
+  "channels.default.lastDefault": Record<string, never>;
+  "channels.default.lastHint": Record<string, never>;
+  "channels.default.notDefaultable": Record<string, never>;
   "channels.dmLeave.action": Record<string, never>;
   "channels.dmLeave.busy": Record<string, never>;
   "channels.dmLeave.cancel": Record<string, never>;
