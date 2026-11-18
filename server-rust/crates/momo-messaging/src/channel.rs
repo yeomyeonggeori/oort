@@ -460,8 +460,9 @@ pub fn normalize_channel_name(raw: &str) -> Result<String, ChannelSpecInvalid> {
     judge_channel_name(raw).map_err(ChannelNameRefusal::spec_invalid)
 }
 
-/// The channel name that the welcome message looks up by name (ADR-0225 D10).
-/// Locked in both directions: it cannot be renamed and nothing becomes it.
+/// The channel name locked in both directions (ADR-0225 D10): it cannot be renamed and
+/// nothing becomes it. The welcome message no longer looks the channel up by this name
+/// (it follows the default-channel flag, ADR-0224 D6); the lock stays as decided.
 pub const LOCKED_CHANNEL_NAME: &str = "general";
 
 /// A channel as a rename leaves it.
@@ -611,8 +612,10 @@ pub async fn rename_channel_in_tx(
     if old_name == new_name {
         return Ok(ChannelRenameOutcome::Unchanged(channel(&old_name)));
     }
-    if old_name.to_lowercase() == LOCKED_CHANNEL_NAME
-        || new_name.to_lowercase() == LOCKED_CHANNEL_NAME
+    // Both names go through the create route's own fold, so a stored legacy
+    // spelling (capitals, fullwidth, padded) is locked like the plain one.
+    if fold_channel_name(&old_name) == LOCKED_CHANNEL_NAME
+        || fold_channel_name(new_name) == LOCKED_CHANNEL_NAME
     {
         return Ok(ChannelRenameOutcome::GeneralLocked);
     }

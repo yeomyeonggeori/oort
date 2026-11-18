@@ -5965,7 +5965,9 @@ paths:
         record `channel.renamed` (`old`, `new`); it posts no message and
         publishes no realtime event, so other devices see the new name on their
         next channel list. A `#old-name` already written in a message stays as
-        written.
+        written. Per-member budget `RATE_LIMIT_CHANNEL_EDIT_PER_MEMBER` (default 60
+        per window; 0 turns it off); the budget is checked after sign-in and
+        before the body is read, so a refused body spends a unit too.
       security:
         - bearerAuth: []
       parameters:
@@ -16675,7 +16677,9 @@ components:
         followed thread read (`POST …/threads/read-all`, ADR-0124 amendment 5,
         `RATE_LIMIT_THREAD_READ_ALL_PER_MEMBER`), default 60; joining a public channel
         (`POST …/channels/{ch}/members/me`, ADR-0224 D4,
-        `RATE_LIMIT_CHANNEL_JOIN_PER_MEMBER`), default 60. Cancelling a scheduled
+        `RATE_LIMIT_CHANNEL_JOIN_PER_MEMBER`), default 60; editing a channel
+        (`PATCH …/channels/{ch}`, ADR-0225 D10,
+        `RATE_LIMIT_CHANNEL_EDIT_PER_MEMBER`), default 60. Cancelling a scheduled
         message, editing a message (`PATCH …/messages/{id}`, which streaming answers
         use) and every read except the two below are not budgeted. Retrying with the
         same `clientMsgId` after a 429 is safe. The link-card proxies
@@ -18404,7 +18408,14 @@ components:
                 `invalid_time_zone`, `invalid_schedule`, `unknown_sound`,
                 `level_not_applicable`, `keyword_too_short`,
                 `keyword_too_long`, `too_many_keywords`; 409 `no_device`; 429
-                `rate_limited` (the test push only); ADR-0215 D2 (#4593, the
+                `rate_limited` (the test push only); ADR-0225 D10 and ADR-0224 D2·D6
+                (channel edit, `PATCH …/channels/{channelId}`): 409
+                `general_channel_locked` (the `general` channel cannot be renamed
+                and no channel can take its name), `channel_not_listable`
+                (`browseListed` on a channel that is not a live public channel),
+                `channel_not_defaultable` (`isDefault` on one) and
+                `last_default_channel` (it would turn off the last live default
+                channel); ADR-0215 D2 (#4593, the
                 password a person is choosing: `POST /v1/join`, `POST /v1/claim`,
                 `PATCH …/members/me/password`): 400 `password_too_short` (fewer
                 than 10 characters), `password_too_long` (more than 72 bytes of

@@ -277,13 +277,13 @@ fn parse_channel_patch(body: &serde_json::Value) -> Result<ChannelPatch, ApiErro
     let Some(object) = body.as_object() else {
         return Err(ApiError::bad_request("request body must be a JSON object"));
     };
-    if let Some(unknown) = object
+    // The key is the caller's own text: it is not sent back (the repo's other
+    // unknown-field refusals name no key either).
+    if object
         .keys()
-        .find(|key| !KNOWN_CHANNEL_PATCH_FIELDS.contains(&key.as_str()))
+        .any(|key| !KNOWN_CHANNEL_PATCH_FIELDS.contains(&key.as_str()))
     {
-        return Err(ApiError::bad_request(format!(
-            "unknown channel field '{unknown}'"
-        )));
+        return Err(ApiError::bad_request("unknown channel field"));
     }
     let mut patch = ChannelPatch {
         name: None,

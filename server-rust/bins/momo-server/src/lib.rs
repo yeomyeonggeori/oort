@@ -1120,7 +1120,8 @@ pub fn build_app(state: AppState) -> Router {
         )
         .route(
             "/v1/workspaces/{ws}/channels/{ch}",
-            patch(routes::channels::update),
+            patch(routes::channels::update)
+                .route_layer(member_write(rate_limit::MemberWrite::ChannelEdit)),
         )
         .route(
             "/v1/workspaces/{ws}/channels/{ch}/notification-pref",
