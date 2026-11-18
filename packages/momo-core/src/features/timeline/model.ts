@@ -438,9 +438,10 @@ export function reprojectHeldRows(
   return next === null ? state : { ...state, messages: next };
 }
 
-/** JSON 모양 값의 같음. `undefined` 칸은 없는 칸과 같다(투영마다 빈 칸을 싣는 방식이 달라도 같은 줄이다). */
+/** JSON 모양 값의 같음. `undefined` · `null` 칸은 없는 칸과 같다(투영마다 빈 칸을 싣는 방식이 달라도 같은 줄이다). */
 export function sameProjection(a: unknown, b: unknown): boolean {
   if (a === b) return true;
+  if ((a === null || a === undefined) && (b === null || b === undefined)) return true;
   if (typeof a !== "object" || typeof b !== "object" || a === null || b === null) return false;
   if (Array.isArray(a) !== Array.isArray(b)) return false;
   if (Array.isArray(a) && Array.isArray(b)) {

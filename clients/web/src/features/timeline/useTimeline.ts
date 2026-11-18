@@ -1426,6 +1426,8 @@ export function useTimeline(
       applyReaction(change);
       try {
         await setReaction(workspaceId, message.id, emoji, action);
+        // 다시 읽기가 이 요청보다 먼저 읽기 시작했으면 그 답에는 이 반응이 없다 — 그 답이 덮지 않게 한 번 더 알린다(#5885).
+        touchResync(message.id);
         if (action === "added") expressionStore?.recordSuccess(emoji, crypto.randomUUID());
       } catch (error) {
         applyReaction({
@@ -1435,7 +1437,7 @@ export function useTimeline(
         throw error;
       }
     },
-    [workspaceId, authorMemberId, applyReaction, expressionStore]
+    [workspaceId, authorMemberId, applyReaction, expressionStore, touchResync]
   );
 
   /**
@@ -1506,9 +1508,11 @@ export function useTimeline(
           applyPins(previous);
           throw error;
         }
+        touchResync(message.id);
         return;
       }
       const delta = await setPin(workspaceId, message.id, "pinned");
+      touchResync(message.id);
       if (delta.pinned) applyPins(applyPinned(pinsRef.current, delta.pinned));
     },
     [workspaceId, applyPins, touchResync]

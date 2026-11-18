@@ -7,7 +7,7 @@
 
 import { act, createElement, useEffect, type ReactElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Message, MessageQuery, PinnedMessageWire } from "@momo/core/lib/api";
 import type { PinMap } from "@momo/core/features/timeline/pins";
 import type { ReactionMap } from "@momo/core/features/timeline/reactions";
@@ -89,8 +89,13 @@ beforeAll(() => {
   }
 });
 
+beforeEach(() => {
+  vi.useFakeTimers();
+});
+
 afterEach(() => {
   if (root) act(() => root?.unmount());
+  vi.useRealTimers();
   root = null;
   host?.remove();
   host = null;
@@ -155,7 +160,7 @@ async function mount(): Promise<void> {
 }
 async function settle(ms: number): Promise<void> {
   await act(async () => {
-    await new Promise((r) => setTimeout(r, ms));
+    await vi.advanceTimersByTimeAsync(ms);
     await Promise.resolve();
     await Promise.resolve();
   });
