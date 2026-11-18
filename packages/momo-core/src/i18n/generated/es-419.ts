@@ -586,6 +586,22 @@ export const catalog: MessageCatalog = {
       "value": "Aún no hay mensajes"
     }
   ],
+  "channels.preview.joinBand": [
+    {
+      "type": 0,
+      "value": "Únete para escribir y responder."
+    }
+  ],
+  "channels.preview.listAria": [
+    {
+      "type": 0,
+      "value": "Mensajes recientes de "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    }
+  ],
   "channels.preview.loadForbidden": [
     {
       "type": 0,

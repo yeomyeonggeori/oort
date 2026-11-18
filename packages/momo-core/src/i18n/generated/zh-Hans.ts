@@ -536,6 +536,22 @@ export const catalog: MessageCatalog = {
       "value": "还没有消息"
     }
   ],
+  "channels.preview.joinBand": [
+    {
+      "type": 0,
+      "value": "加入后即可发言和回复。"
+    }
+  ],
+  "channels.preview.listAria": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " 的最近消息"
+    }
+  ],
   "channels.preview.loadForbidden": [
     {
       "type": 0,

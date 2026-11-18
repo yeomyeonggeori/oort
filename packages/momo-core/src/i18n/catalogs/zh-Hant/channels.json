@@ -79,5 +79,7 @@
   "channels.preview.loadForbidden": "此帳號無法預覽該頻道。",
   "channels.preview.notFound": "找不到此頻道",
   "channels.preview.loadNetwork": "無法載入頻道訊息。{reason}",
-  "channels.preview.loadGeneric": "無法載入頻道訊息。請稍後再試。"
+  "channels.preview.loadGeneric": "無法載入頻道訊息。請稍後再試。",
+  "channels.preview.joinBand": "加入後即可發言與回覆。",
+  "channels.preview.listAria": "{name} 的最近訊息"
 }

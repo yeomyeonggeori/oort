@@ -1653,6 +1653,22 @@ export const catalog: MessageCatalog = {
       "value": "아직 글이 없어요"
     }
   ],
+  "channels.preview.joinBand": [
+    {
+      "type": 0,
+      "value": "참여하면 글을 쓰고 답할 수 있어요."
+    }
+  ],
+  "channels.preview.listAria": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " 채널의 최근 글"
+    }
+  ],
   "channels.preview.loadForbidden": [
     {
       "type": 0,

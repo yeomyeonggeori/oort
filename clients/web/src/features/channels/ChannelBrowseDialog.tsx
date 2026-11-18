@@ -1,6 +1,7 @@
 import {
   useCallback,
   useEffect,
+  useId,
   useMemo,
   useRef,
   useState,
@@ -65,6 +66,42 @@ const QUERY_SETTLE_MS = 250;
 
 const GROUP_HEADING_CLASS = "border-b border-line px-4 py-1 text-meta font-medium text-ink-muted";
 
+/**
+ * 참여하지 않은 줄의 글자 칸은 미리 보기의 문이다(ADR-0224 D5, #5844): 누르면 창을 닫고 `/c/{id}` — 거기서 `ChannelRoute` 가 미리 보기를
+ * 세운다. 「참여」 단추는 줄에 그대로다. 이미 든 줄 · 그 사이 꺼진 줄 · 실패 문장이 선 줄은 읽히기만 한다(실패 줄은 「다시 시도」가 문이다).
+ * 방향 글쇠 순서(`data-browse-action`)에는 넣지 않는다 — 단추가 줄마다 둘이 되면 ↓ 이 두 칸씩 걷는다. Tab 은 닿는다.
+ * 모듈 바닥의 컴포넌트다(줄 안에서 만들면 다시 그릴 때마다 새 컴포넌트라 자식이 다시 서고 초점이 빠진다).
+ */
+function TextCell({
+  previewable,
+  hint,
+  onPreview,
+  children,
+}: {
+  previewable: boolean;
+  hint: string;
+  onPreview: () => void;
+  children: ReactNode;
+}) {
+  const hintId = useId();
+  const cellClass = "flex min-w-0 flex-1 flex-col";
+  if (!previewable) return <span className={cellClass}>{children}</span>;
+  return (
+    <button
+      type="button"
+      className={cn(cellClass, "-mx-2 rounded-md px-2 text-left row-hover active:bg-surface-pressed focus-visible:focus-ring")}
+      aria-describedby={hintId}
+      onClick={onPreview}
+      data-testid="channel-browse-preview"
+    >
+      {children}
+      <span id={hintId} hidden>
+        {hint}
+      </span>
+    </button>
+  );
+}
+
 /** 화면에서 좁히기: 이름 · 주제에 그대로 들어 있거나, 조합 중인 마지막 글자까지 느슨하게 맞으면 남는다. */
 function rowMatches(row: BrowseChannel, typed: string): boolean {
   const needle = typed.trim().toLowerCase();
@@ -111,6 +148,8 @@ function BrowseRow({
           .filter((part) => part !== undefined && part !== "")
           .join(" · ");
 
+  const previewable = !row.isMember && !gone && !failed;
+
   return (
     <li
       className="flex flex-col border-b border-line last:border-b-0"
@@ -121,7 +160,7 @@ function BrowseRow({
     >
       <div className="flex items-center gap-3 px-4 py-2">
         <Hash className="size-4 shrink-0 text-ink-muted" aria-hidden="true" />
-        <span className="flex min-w-0 flex-1 flex-col">
+        <TextCell previewable={previewable} hint={formatMessage("channels.preview.openHint")} onPreview={() => onOpen(row.id)}>
           <span className="flex min-w-0 items-center gap-2 text-body">
             <span className={cn("min-w-0 truncate font-semibold", gone ? "text-ink-muted" : "text-ink")}>
               {row.name}
@@ -145,7 +184,7 @@ function BrowseRow({
           >
             {second}
           </span>
-        </span>
+        </TextCell>
         {gone ? null : row.isMember ? (
           <span className="flex shrink-0 items-center gap-2">
             <span className="inline-flex items-center gap-1 text-meta text-ink-muted" data-testid="channel-browse-joined">
