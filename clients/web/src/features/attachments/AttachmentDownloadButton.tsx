@@ -21,6 +21,7 @@ export function AttachmentDownloadButton({
   joinsMessageRow = false,
   busy: controlledBusy,
   tapTarget = false,
+  tooltipSide = "bottom",
   className,
   onBusyChange,
   onStarted,
@@ -35,6 +36,8 @@ export function AttachmentDownloadButton({
   busy?: boolean;
   /** 좁은 화면에서도 독립 조작점인 경우 44px 터치 타깃을 보장한다. */
   tapTarget?: boolean;
+  /** 툴팁 방향. 아래에 알약 높이만큼의 자리가 없는 자리(타임라인 맨 아래 글의 파일 카드)는 위로 돌린다(#5965). */
+  tooltipSide?: "top" | "bottom";
   /** 이 버튼이 선 표면이 모양을 바꿀 때(라이트박스의 둥근 유리 버튼). 기본 모양 뒤에 합쳐지므로 같은 축은 이쪽이 이긴다. */
   className?: string;
   onBusyChange?: (busy: boolean) => void;
@@ -49,7 +52,7 @@ export function AttachmentDownloadButton({
   };
 
   return (
-    <Tooltip label={busy ? ATTACH_COPY.downloading : ATTACH_COPY.download} side="bottom">
+    <Tooltip label={busy ? ATTACH_COPY.downloading : ATTACH_COPY.download} side={tooltipSide}>
       <button
         type="button"
         aria-busy={busy || undefined}

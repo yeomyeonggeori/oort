@@ -191,7 +191,7 @@ export function ExpressionGrid({ sections, empty, cellLabel, disabled, onPick, m
             const Icon = SECTION_ICON[section.kind];
             const first = section.items[0];
             return (
-              <Tooltip key={section.id} label={nameOf(section)} side="bottom">
+              <Tooltip key={section.id} label={nameOf(section)} side="top">
                 <button
                   type="button"
                   aria-label={nameOf(section)}
