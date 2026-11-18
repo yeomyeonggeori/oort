@@ -108,6 +108,7 @@ import { DM_LEAVE_KEYS } from "./dmLeave";
 
 export type ChannelActionKey =
   | "topic"
+  | "rename"
   | "mark-read"
   | "mark-unread"
   | "mute"
@@ -144,6 +145,7 @@ export type ChannelActionCluster =
 /** 열쇠 → 무리. 새 항목은 여기 한 줄을 적어야 구분선이 제자리에 선다. */
 const CLUSTER_OF: Record<ChannelActionKey, ChannelActionCluster> = {
   topic: "info",
+  rename: "info",
   "copy-name": "copy",
   "copy-link": "copy",
   "copy-id": "copy",
@@ -178,6 +180,7 @@ export function channelActionClusterTitle(
  */
 export type ChannelActionIcon =
   | "topic"
+  | "rename"
   | "copy"
   | "copy-name"
   | "copy-link"
@@ -318,6 +321,11 @@ export interface ChannelActionAvailability {
    * (`canSetBrowseListed`). 채워 넣지 않은 호출부(폰 포함)는 그대로 없다.
    */
   browseListed?: boolean;
+  /**
+   * 「이름 바꾸기」(ADR-0225 D10, #5835). 선택 칸이다: 소유자 · 관리자가 든 공개 · 비공개 채널이고 이름이 `general` 이 아닐 때만
+   * (`canRenameChannel`). 채워 넣지 않은 호출부(폰의 다른 표면 포함)는 그대로 없다.
+   */
+  rename?: boolean;
   star: boolean;
   moveToSection: boolean;
   copyLink: boolean;
@@ -390,6 +398,11 @@ export function channelActionAvailability(input: {
    */
   canSetBrowseListed?: boolean;
   /**
+   * 이 채널에 「이름 바꾸기」를 내미는가(#5835): `canRenameChannel`(소유자 · 관리자 · 공개/비공개 · `general` 아님)이 참이고 다이얼로그로
+   * 넘길 손이 있을 때만 참으로 넘긴다. 역할을 모르면 거짓이다.
+   */
+  canRename?: boolean;
+  /**
    * 「읽지 않음으로 표시」를 받을 수 있는 채널인가 (#3963): 서버 투영이 있고 다 읽었고
    * 메시지가 하나라도 있다. 판정은 투영을 든 호출부가 한다(`composedUnreadCount`). 여기서는
    * `unreadCount` 와 겹치지 않는지만 한 번 더 막는다.
@@ -422,6 +435,7 @@ export function channelActionAvailability(input: {
       (input.hasGithubNotifications ?? false) &&
       (input.selfRole === undefined || input.selfRole === "owner" || input.selfRole === "admin"),
     browseListed: input.canSetBrowseListed ?? false,
+    rename: !isDm && (input.canRename ?? false),
     // **DM 은 옮기지 않는다** (ADR-0177 D4). 기본 섹션 두 종은 「채널」과 「DM」
     // 이고 DM 은 그 중 하나에 고정이다 - 커스텀 섹션에 DM 을 넣는 문을 열면
     // 코어의 파생이 그것을 무시하므로(`deriveSidebarSections`), 눌러도 아무 일도
@@ -474,6 +488,9 @@ export function channelActionItems(
     push({ key: "topic", testKey: "topic", label: CHANNEL_TOPIC_VIEW_LABEL, icon: "topic" });
   }
   // 복사 무리: 이름 → 링크 → ID. Buzz 의 「복사 ▸」가 든 것과 같은 세 가지다.
+  if (available.rename === true && formatMessage !== undefined) {
+    push({ key: "rename", testKey: "rename", label: formatMessage("channels.rename.action"), icon: "rename" });
+  }
   if (available.copyName) {
     push({
       key: "copy-name",
@@ -598,12 +615,14 @@ const SURFACE_KEYS: Record<ChannelActionSurface, ReadonlySet<ChannelActionKey>> 
   // 헤더 ⋮ 는 BZ-2 가 세운 그대로다. 이 티켓은 헤더의 항목을 늘리지 않는다:
   // 채널을 열어 둔 사람에게 「읽음 처리」와 「이름 복사」는 다른 물음이다.
   // 「대화 나가기」(D21)는 대화 머리 메뉴에도 선다(DM 의 머리 메뉴를 세우는 것은 화면 칸의 일이다).
-  header: new Set<ChannelActionKey>(["topic", "mute", "memory", "github", "browse-listed", "leave", "leave-dm"]),
+  header: new Set<ChannelActionKey>(["topic", "rename", "mute", "memory", "github", "browse-listed", "leave", "leave-dm"]),
   // 행 우클릭은 「열지 않고 조작한다」가 전부다. BT-4 의 섹션 배치가 여기 사는
   // 이유도 그것이다 - 채널을 어디에 둘지는 그 채널을 **보지 않고** 정하는 일이고,
   // 헤더 ⋮ 는 정의상 이미 그 안에 들어와 있는 사람의 것이다. 복사 셋과 DM 닫기(#3963)도
   // 같은 갈래다. 「읽지 않음으로 표시」는 읽음 처리의 반대 방향이라 같은 이유로 여기에만 선다.
   row: new Set<ChannelActionKey>([
+    // 「이름 바꾸기」(#5835)는 `canRename` 을 넘긴 표면에만 선다: 폰의 행 시트 · 대화 ⋮ 시트(웹 행 메뉴는 넘기지 않으므로 서지 않는다).
+    "rename",
     "copy-name",
     "copy-link",
     "copy-id",
@@ -658,6 +677,7 @@ export function channelActionKeepsMenuOpen(key: ChannelActionKey): boolean {
     key !== "leave" &&
     key !== "leave-dm" &&
     key !== "topic" &&
+    key !== "rename" &&
     key !== "memory" &&
     key !== "github" &&
     key !== "star" &&

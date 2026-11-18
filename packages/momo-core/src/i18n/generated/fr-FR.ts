@@ -634,6 +634,108 @@ export const catalog: MessageCatalog = {
       "value": "Ouvre un aperçu en lecture seule des messages récents."
     }
   ],
+  "channels.rename.action": [
+    {
+      "type": 0,
+      "value": "Renommer le canal"
+    }
+  ],
+  "channels.rename.aria": [
+    {
+      "type": 0,
+      "value": "Renommer le canal "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    }
+  ],
+  "channels.rename.busy": [
+    {
+      "type": 0,
+      "value": "Renommage…"
+    }
+  ],
+  "channels.rename.cancel": [
+    {
+      "type": 0,
+      "value": "Annuler"
+    }
+  ],
+  "channels.rename.description": [
+    {
+      "type": 0,
+      "value": "Le nouveau nom apparaît tout de suite dans la barre latérale et l'en-tête du canal."
+    }
+  ],
+  "channels.rename.done": [
+    {
+      "type": 0,
+      "value": "Canal renommé."
+    }
+  ],
+  "channels.rename.fieldLabel": [
+    {
+      "type": 0,
+      "value": "Nom du canal"
+    }
+  ],
+  "channels.rename.forbidden": [
+    {
+      "type": 0,
+      "value": "Seuls les propriétaires et les administrateurs peuvent renommer un canal."
+    }
+  ],
+  "channels.rename.generalLocked": [
+    {
+      "type": 0,
+      "value": "Le nom du canal general ne peut pas être modifié."
+    }
+  ],
+  "channels.rename.generic": [
+    {
+      "type": 0,
+      "value": "Impossible de renommer le canal. Réessayez."
+    }
+  ],
+  "channels.rename.network": [
+    {
+      "type": 0,
+      "value": "Impossible de renommer le canal. "
+    },
+    {
+      "type": 1,
+      "value": "reason"
+    }
+  ],
+  "channels.rename.notFound": [
+    {
+      "type": 0,
+      "value": "Ce canal est introuvable."
+    }
+  ],
+  "channels.rename.preview": [
+    {
+      "type": 0,
+      "value": "Sera renommé en "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    }
+  ],
+  "channels.rename.submit": [
+    {
+      "type": 0,
+      "value": "Renommer"
+    }
+  ],
+  "channels.rename.title": [
+    {
+      "type": 0,
+      "value": "Renommer le canal"
+    }
+  ],
   "timeline.channelLeave.bodyPublicBrowse": [
     {
       "type": 1,
