@@ -85,5 +85,16 @@
   "channels.browse.loading": "正在加载频道列表。",
   "channels.browse.joining": "正在加入",
   "channels.browse.emptyAdminDetailPhone": "在网页版或桌面版的频道菜单中打开“在浏览中显示”，现有频道就会出现在这里。",
-  "channels.browse.homeRowHint": "用这个名称打开频道浏览。"
+  "channels.browse.homeRowHint": "用这个名称打开频道浏览。",
+  "channels.preview.closeAria": "关闭频道预览",
+  "channels.preview.loading": "正在加载此频道的最新消息。",
+  "channels.preview.empty": "还没有消息",
+  "channels.preview.attachmentLocked": "加入后即可查看",
+  "channels.preview.openHint": "点按即可只读预览最近的消息。",
+  "channels.preview.loadForbidden": "此账号无法预览该频道。",
+  "channels.preview.notFound": "找不到此频道",
+  "channels.preview.loadNetwork": "无法加载频道消息。{reason}",
+  "channels.preview.loadGeneric": "无法加载频道消息。请稍后再试。",
+  "channels.preview.joinBand": "加入后即可发言和回复。",
+  "channels.preview.listAria": "{name} 的最近消息"
 }

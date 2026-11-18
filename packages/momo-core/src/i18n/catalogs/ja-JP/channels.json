@@ -85,5 +85,16 @@
   "channels.browse.loading": "チャンネル一覧を読み込んでいます。",
   "channels.browse.joining": "参加しています",
   "channels.browse.emptyAdminDetailPhone": "既存のチャンネルは、Web またはデスクトップのチャンネルメニューで「チャンネル一覧に表示」をオンにするとここに表示されます。",
-  "channels.browse.homeRowHint": "この名前でチャンネル一覧を開きます。"
+  "channels.browse.homeRowHint": "この名前でチャンネル一覧を開きます。",
+  "channels.preview.closeAria": "チャンネルのプレビューを閉じる",
+  "channels.preview.loading": "チャンネルの最近の投稿を読み込んでいます。",
+  "channels.preview.empty": "まだ投稿がありません",
+  "channels.preview.attachmentLocked": "参加すると見られます",
+  "channels.preview.openHint": "タップすると最近の投稿を読み取り専用で確認できます。",
+  "channels.preview.loadForbidden": "このアカウントではこのチャンネルをプレビューできません。",
+  "channels.preview.notFound": "このチャンネルが見つかりません",
+  "channels.preview.loadNetwork": "チャンネルの投稿を読み込めませんでした。{reason}",
+  "channels.preview.loadGeneric": "チャンネルの投稿を読み込めませんでした。しばらくしてからもう一度お試しください。",
+  "channels.preview.joinBand": "参加すると投稿や返信ができます。",
+  "channels.preview.listAria": "{name} の最近の投稿"
 }

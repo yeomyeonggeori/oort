@@ -218,6 +218,7 @@ import {UncollectedSurface, isUncollectedSurface, seedUncollected} from './uncol
 import {WorkTimelineSurface, isWorkTimelineSurface, seedWorkTimeline} from './workTimeline';
 import {AppsSurface} from './apps';
 import {ChannelBrowseSurface} from './channelBrowse';
+import {ChannelPreviewSurface} from './channelPreview';
 import {AppsTailSurface} from './appsTail';
 import {OortLoaderSurface} from './oortLoader';
 import {ConnectionStripSurface} from './connectionStrip';
@@ -2273,6 +2274,10 @@ export function Surface({name}: {name: string}): React.JSX.Element {
     return <SheetDragSurface which={name.slice('sheetdrag'.length).replace(/^-/, '')} />;
   }
   // #5846: 폰 「채널 둘러보기」 페이지(`measure/channelBrowse.tsx`, 배송되는 표현부 + 고정 데이터, 가상 채널 이름).
+  // #5847: 폰 「채널 미리 보기」(`measure/channelPreview.tsx`, 배송되는 표현부 + 고정 데이터, 가상 채널 · 사람 이름).
+  if (name === 'channelpreview' || name.startsWith('channelpreview-')) {
+    return <ChannelPreviewSurface which={name.slice('channelpreview'.length).replace(/^-/, '') || 'list'} />;
+  }
   if (name === 'channelbrowse' || name.startsWith('channelbrowse-')) {
     return <ChannelBrowseSurface which={name.slice('channelbrowse'.length).replace(/^-/, '') || 'list'} />;
   }

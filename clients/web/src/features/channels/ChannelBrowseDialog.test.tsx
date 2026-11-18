@@ -198,6 +198,19 @@ describe("채널 둘러보기 창", () => {
     expect(rowOf(12)?.textContent).toContain("문의 정리");
   });
 
+  it("참여하지 않은 줄의 글자 칸을 누르면 창이 닫히고 /c/{id} 로 간다(참여 요청 0) — 든 줄에는 그 칸이 없다", async () => {
+    core.browseChannels.mockResolvedValue({ channels: [row(1, "general", true), row(11, "출시-준비")] });
+    await mountAndOpen();
+    expect(rowOf(1)?.querySelector('[data-testid="channel-browse-preview"]')).toBeNull();
+    await act(async () => {
+      rowOf(11)?.querySelector<HTMLButtonElement>('[data-testid="channel-browse-preview"]')?.click();
+      await Promise.resolve();
+    });
+    expect(document.querySelector('[data-testid="where"]')?.textContent).toBe(`/c/${id(11)}`);
+    expect(document.querySelector('[data-testid="channel-browse-dialog"]')).toBeNull();
+    expect(core.joinChannel).not.toHaveBeenCalled();
+  });
+
   it("참여하면 응답의 채널이 사이드바 캐시와 명부에 서고 그 채널로 간다 — 두 번 눌러도 요청은 하나", async () => {
     client.setQueryData<Channel[]>(["channels", WS], [{ id: id(1), workspaceId: WS, kind: "public", name: "general", muted: false }]);
     const target = row(11, "출시-준비");

@@ -1106,7 +1106,7 @@ export function QuickSwitcher({
                 className={itemClass}
                 data-testid="switcher-browse-channel"
                 data-channel-id={row.id}
-                onSelect={() => openBrowseFromPalette(row.name)}
+                onSelect={() => go(`/c/${row.id}`)}
               >
                 <Hash className="size-4 opacity-70" />
                 <span className="min-w-0 truncate">{row.name}</span>
