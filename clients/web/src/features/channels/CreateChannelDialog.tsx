@@ -1,6 +1,7 @@
 import {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useRef,
   useState,
   type ReactNode,
@@ -21,13 +22,18 @@ import { useOffline } from "@/features/common/useOffline";
 import { cn } from "@/design/lib/cn";
 import { PRIMARY_ACTION_SHORTCUT } from "@/app/keyboardShortcuts";
 import {
+  CHANNEL_NAME_ISSUE_KEYS,
+  CHANNEL_NAME_MAX,
+  CHANNEL_NAME_SERVER_REJECTED_KEY,
   channelNameIssue,
-  channelNameIssueMessage,
   channelTopicIssue,
   channelTopicIssueMessage,
+  createChannelFailure,
   normalizeChannelName,
   normalizeChannelTopic,
+  type ChannelNameIssue,
 } from "@momo/core/features/channels/model";
+import { ApiError } from "@momo/core/lib/api";
 import type { MessageKey } from "@momo/core/i18n";
 import { useFormatMessage } from "@/i18n/useFormatMessage";
 import {
@@ -144,6 +150,111 @@ function DialogField({
   );
 }
 
+/** 미리보기 줄의 이름 자리를 문장에서 떼어 내는 표시. 사전 문장은 `{name}`이 앞·뒤 어디에 서든 그대로 두고(언어마다 다르다), 이름만 한 줄에서 줄여 보인다. */
+const PREVIEW_NAME_MARK = "\uE000";
+
+/** 조합 중인 글자 가운데 한글(음절·자모)과 빈칸이 아닌 것이 있으면 아직 이름이 아니다(병음의 라틴 글자·`'`, 변환 전 가나). */
+const NOT_YET_NAME = /[^\p{Script=Hangul}\s]/u;
+
+/** 보이는 줄 수에 맞춰 미리보기를 말줄임하는 클래스(Tailwind가 글자 그대로 읽어야 해서 목록으로 둔다). */
+const CLAMP = ["line-clamp-1", "line-clamp-2", "line-clamp-3", "line-clamp-4", "line-clamp-5", "line-clamp-6", "line-clamp-7", "line-clamp-8"];
+
+/** 칸 아래 한 줄: 규칙 안내 · 저장될 이름 · 거절 문장 중 하나만 선다. 서는 자리는 하나이고, 서지 않은 문장들이 같은 칸에 보이지 않게 겹쳐 있어 줄 수가 가장 긴 문장으로 정해진다(칸이 문장에 따라 오르내리지 않는다). */
+function NameStatus({
+  fieldId,
+  hint,
+  preview,
+  error,
+  reserve,
+}: {
+  fieldId: string;
+  hint: string;
+  /** 저장될 이름(접은 값, `#` 없이). 칸에 친 것과 같거나 거절이면 null. */
+  preview: { name: string; before: string; after: string } | null;
+  error: string | null;
+  /** 이 자리에 설 수 있는 모든 문장(안내·거절·서버 응답). 높이만 정하고 보이지 않는다. */
+  reserve: string[];
+}) {
+  // 자리에 예약된 줄 수. 미리보기는 그 안에서 줄바꿈하고(큰 글자에서 이름이 잘리지 않게), 넘치면 말줄임한다 — 높이는 예약이 정하므로 안 움직인다.
+  const reserveRef = useRef<HTMLDivElement>(null);
+  const [lines, setLines] = useState(1);
+  useLayoutEffect(() => {
+    const box = reserveRef.current;
+    if (box === null) return;
+    const measure = () => {
+      const lineHeight = Number.parseFloat(getComputedStyle(box).lineHeight);
+      const next = lineHeight > 0 ? Math.round(box.getBoundingClientRect().height / lineHeight) : 1;
+      setLines(Math.min(CLAMP.length, Math.max(1, next)));
+    };
+    measure();
+    if (typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(measure);
+    observer.observe(box);
+    return () => observer.disconnect();
+  }, [reserve]);
+  return (
+    <div className="grid min-w-0" data-testid={`${fieldId}-status`}>
+      <div ref={reserveRef} aria-hidden="true" className="invisible col-start-1 row-start-1 grid text-meta">
+        {reserve.map((text) => (
+          <p key={text} className="col-start-1 row-start-1 text-meta">
+            {text}
+          </p>
+        ))}
+      </div>
+      <div className="col-start-1 row-start-1 min-w-0">
+        {/* 낭독은 오류에만 건다(polite): 안내와 미리보기는 글자를 칠 때마다 바뀌어 조합 중 낭독이 쏟아진다. */}
+        <div aria-live="polite" aria-atomic="true">
+          {error ? (
+            <p className="text-meta text-danger" id={`${fieldId}-error`} data-testid={`${fieldId}-error`}>
+              {error}
+            </p>
+          ) : null}
+        </div>
+        {!error && preview ? (
+          // 이름 쪽만 줄어든다: 앞말·뒷말은 줄지 않는 칸(shrink-0), 이름은 줄어드는 칸(min-w-0 + 예약된 줄 수만큼 말줄임).
+          // 앞뒤 빈칸은 글자에 그대로 두고(낭독·복사는 한 문장) 눈에 보이는 간격은 gap이 만든다.
+          <p
+            className="flex min-w-0 items-end gap-x-1 text-meta text-ink-muted"
+            id={`${fieldId}-preview`}
+            data-testid={`${fieldId}-preview`}
+          >
+            {preview.before ? (
+              <span className="max-w-full shrink-0 self-start" data-testid={`${fieldId}-preview-before`}>
+                {preview.before}
+              </span>
+            ) : null}
+            <span className={cn("min-w-0 break-all text-ink", CLAMP[lines - 1])} data-testid={`${fieldId}-preview-name`}>
+              #{preview.name}
+            </span>
+            {preview.after ? (
+              <span className="max-w-full shrink-0" data-testid={`${fieldId}-preview-after`}>
+                {preview.after}
+              </span>
+            ) : null}
+          </p>
+        ) : null}
+        {!error && !preview ? (
+          <p className="text-meta text-ink-muted" id={`${fieldId}-hint`} data-testid={`${fieldId}-hint`}>
+            {hint}
+          </p>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+/** 이름 칸 아래 줄이 말하는 것: 거절(서버 응답 포함)이나 저장될 이름. 둘 다 없으면 안내 글이 선다. */
+type NameLine = { error: string | null; preview: { name: string; before: string; after: string } | null };
+
+/**
+ * 진행 중인 조합(`compositionstart`부터). `text`는 조합 중인 글자, `frozen`은 한글이 아닌 글자가 조합에 든 순간 얼려 둔 줄이다.
+ * 아래 줄은 「칸에 실제로 든 값으로 계산한 줄」이거나 이 얼린 줄, 둘 중 하나다 — 조합 글자를 칸 값에서 찾아 빼서 이름을 짐작하지 않는다.
+ */
+type Composition = { text: string; frozen: NameLine | null };
+
+/** 조합이 스스로 내는 input 종류. 이것만 얼린 줄을 그대로 두고, 그 밖의 input(붙여 넣기·잘라 내기·끌어 놓기·실행 취소·다시 실행·지우기, 종류를 모르는 것)은 곧바로 녹인다. */
+const COMPOSITION_INPUT_TYPES = new Set(["insertCompositionText", "deleteCompositionText", "insertFromComposition", "deleteByComposition"]);
+
 function CreateChannelPanel({
   open,
   draft,
@@ -169,6 +280,12 @@ function CreateChannelPanel({
 
   const { kind, name, topic } = draft;
   const [attempted, setAttempted] = useState(false);
+  // 입력기는 글자를 확정하기 전의 「조합 중」 글자를 칸에 넣는다. 병음의 `ni'h`나 변환 전 가나는 아직 이름이 아니라서 거절하거나 미리 보이면
+  // 틀린 말을 한다 — 그런 조합이 진행되는 동안에는 아래 줄을 얼려 둔다(칸의 값은 그대로다). 한글은 달라서, 조합 중인 음절이 곧 사람이 친
+  // 글자다: 한글(음절·자모)뿐인 조합은 얼리지 않고 지금 칸 값을 그대로 말한다(얼리면 마지막 음절이 늘 빠진다).
+  // 녹이는 때: `compositionend` · 조합 종류가 아닌 input · 칸의 blur · 제출 · 창을 다시 엶. 녹으면 곧바로 칸 값으로 다시 계산한다 — 조합 중
+  // 글자가 섞여 있으면 그 값 그대로(`Designn` → `#designn`). 칸에 보이는 것과 줄이 말하는 것이 같다.
+  const [composition, setComposition] = useState<Composition | null>(null);
   const nameRef = useRef<HTMLInputElement>(null);
   const topicRef = useRef<HTMLInputElement>(null);
   const formRef = useRef<HTMLFormElement>(null);
@@ -187,20 +304,56 @@ function CreateChannelPanel({
     }
     handedOff.current = false;
     setAttempted(false);
+    setComposition(null);
     clearFailure();
   }, [open, clearFailure]);
 
   const nameIssue = channelNameIssue(name);
   const topicIssue = channelTopicIssue(topic);
 
-  // A rule is only worth stating once the reader has done something it applies
-  // to: an untouched empty field is not a mistake, it is a field.
-  const localNameError =
-    nameIssue !== null && (attempted || name.trim() !== "")
-      ? channelNameIssueMessage(nameIssue)
+  const issueMessage = (issue: ChannelNameIssue) => {
+    if (issue === "tooLong") return formatMessage(CHANNEL_NAME_ISSUE_KEYS.tooLong, { max: CHANNEL_NAME_MAX });
+    return formatMessage(CHANNEL_NAME_ISSUE_KEYS[issue]);
+  };
+  const hint = formatMessage("channels.nameRule.hint", { max: CHANNEL_NAME_MAX });
+  const serverNameError =
+    failure?.field === "name"
+      ? failure.messageKey !== undefined
+        ? formatMessage(failure.messageKey)
+        : failure.message
       : null;
-  const nameError =
-    localNameError ?? (failure?.field === "name" ? failure.message : null);
+  /** 칸에 실제로 든 값으로 계산한 줄. */
+  const lineFor = (value: string): NameLine => {
+    const issue = channelNameIssue(value);
+    // A rule is only worth stating once the reader has done something it applies
+    // to: an untouched empty field is not a mistake, it is a field.
+    const localError = issue !== null && (attempted || value.trim() !== "") ? issueMessage(issue) : null;
+    // 거절이면 미리보기 대신 오류다. 친 것과 저장될 이름이 다를 때만 선다(「Design Review」 → #design-review).
+    const saved = issue === null ? normalizeChannelName(value) : null;
+    if (saved === null || saved === value) return { error: localError ?? serverNameError, preview: null };
+    const [before = "", after = ""] = formatMessage("channels.nameRule.preview", {
+      name: PREVIEW_NAME_MARK,
+    }).split(PREVIEW_NAME_MARK);
+    return { error: localError ?? serverNameError, preview: { name: saved, before, after } };
+  };
+  // 아래 줄: 한글이 아닌 조합이 진행 중이면 얼려 둔 줄, 아니면 지금 칸 값의 줄. 둘 말고는 없다.
+  const frozenLine = composition?.frozen ?? null;
+  const liveLine = lineFor(name);
+  const { error: nameError, preview: previewParts } = frozenLine ?? liveLine;
+  // 마지막으로 그린 「칸 값의 줄」. 얼리는 순간 이 줄을 그대로 쥔다 — 엔진이 조합 글자를 칸에 언제 넣든(사건 앞이든 뒤든) 얼린 줄은 화면에 있던 줄이다.
+  const drawnLine = useRef<NameLine>(liveLine);
+  useLayoutEffect(() => {
+    if (frozenLine === null) drawnLine.current = liveLine;
+  });
+  // 이 자리에 설 수 있는 문장 전부(줄 수가 가장 긴 것이 자리의 높이를 정한다). 409 문장은 코어가 말하는 그대로다.
+  // 서 있는 오류도 넣는다: 얼린 줄이 쥔 서버 문장은 편집으로 `failure`가 지워져도 녹을 때까지 서 있다.
+  const nameReserve = [
+    hint,
+    ...(Object.keys(CHANNEL_NAME_ISSUE_KEYS) as ChannelNameIssue[]).map(issueMessage),
+    formatMessage(CHANNEL_NAME_SERVER_REJECTED_KEY),
+    createChannelFailure(new ApiError(409, "")).message,
+    ...[serverNameError, nameError].filter((text): text is string => text !== null),
+  ].filter((text, at, all) => all.indexOf(text) === at);
   const topicError =
     topicIssue !== null && (attempted || topic.trim() !== "")
       ? channelTopicIssueMessage(topicIssue)
@@ -216,6 +369,10 @@ function CreateChannelPanel({
 
   async function submit(event: React.FormEvent) {
     event.preventDefault();
+    // 제출은 얼린 줄을 녹인다. 한글이 아닌 조합이 진행 중이었으면 만들지 않는다: 얼린 줄이 말하던 이름과 칸 값으로 만들어질 이름이
+    // 다를 수 있다. 녹은 줄이 칸 값을 말하고 단추가 풀리니, 다시 누르면 줄이 말하는 그 이름으로 만들어진다(⌘↵는 잠긴 단추를 거치지 않는다).
+    setComposition(null);
+    if (frozenLine !== null) return;
     setAttempted(true);
     if (pending || offline) return;
     if (nameIssue !== null || topicIssue !== null) {
@@ -319,29 +476,54 @@ function CreateChannelPanel({
             첫 tabbable이라, 보이는 순서와 Tab 순서와 시작 위치가 하나로 맞는다.
             공개 범위가 위에 있던 동안에는 정방향 Tab이 액션 버튼을 지나야 그
             선택지에 닿았다. 순서는 mac 시트(이름, 주제)를 잇는다. */}
-        <DialogField
-          label="채널 이름"
-          htmlFor="create-channel-name"
-          hint="영문, 숫자, 하이픈, 밑줄로 80자 이내, 처음과 끝은 영문이나 숫자. 대문자는 소문자로 저장돼요."
-          error={nameError}
-        >
+        <div className="flex min-w-0 flex-col gap-1">
+          <label htmlFor="create-channel-name" className="text-meta text-ink-muted">
+            채널 이름
+          </label>
           <Input
             id="create-channel-name"
             ref={nameRef}
             name="name"
             value={name}
-            onChange={onInput("name")}
-            placeholder="product-planning"
+            onChange={(event) => {
+              // 조합이 스스로 낸 input이 아니면(붙여 넣기·잘라 내기·끌어 놓기·실행 취소·다시 실행·지우기) 녹인다. 엔진은 조합 구간을 덮어쓴
+              // 붙여 넣기 뒤에 `compositionend` 없이 조합을 버리기도 한다 — 다음 `compositionstart`까지 줄은 칸 값을 따른다.
+              if (!COMPOSITION_INPUT_TYPES.has((event.nativeEvent as InputEvent).inputType ?? "")) setComposition(null);
+              onInput("name")(event);
+            }}
+            onCompositionStart={() => setComposition({ text: "", frozen: null })}
+            onCompositionUpdate={(event) => {
+              const text = event.data;
+              // 한글이 아닌 글자가 조합에 든 순간, 그때까지 그린 줄을 얼린다. 한글·빈칸뿐이면 얼리지 않는다.
+              const drawn = drawnLine.current;
+              setComposition((current) =>
+                current === null ? null : { text, frozen: NOT_YET_NAME.test(text) ? (current.frozen ?? drawn) : null }
+              );
+            }}
+            onCompositionEnd={() => setComposition(null)}
+            onBlur={() => setComposition(null)}
+            placeholder={formatMessage("channels.nameRule.placeholder")}
             autoComplete="off"
             spellCheck={false}
             disabled={pending}
             aria-invalid={nameError ? true : undefined}
             aria-describedby={
-              nameError ? "create-channel-name-error" : "create-channel-name-hint"
+              nameError
+                ? "create-channel-name-error"
+                : previewParts
+                  ? "create-channel-name-preview"
+                  : "create-channel-name-hint"
             }
             data-testid="create-channel-name"
           />
-        </DialogField>
+          <NameStatus
+            fieldId="create-channel-name"
+            hint={hint}
+            preview={previewParts}
+            error={nameError}
+            reserve={nameReserve}
+          />
+        </div>
 
         <DialogField
           label="주제"
@@ -448,11 +630,13 @@ function CreateChannelPanel({
             `disabled:pointer-events-none` 때문에 hover 자체가 도달하지 않아
             영원히 뜨지 않는 툴팁이었다(R2 M2). 같은 사실을 두 번 약속하느니
             한 번 지킨다. */}
+        {/* 한글이 아닌 조합이 진행 중인 동안(아래 줄이 얼어 있는 동안)도 잠근다: 얼린 줄이 말하는 이름과 칸 값으로 만들어질 이름이
+            다를 수 있다. 잠긴 까닭은 칸에 보이는 조합 글자이고, 줄이 녹는 때(조합 끝·붙여 넣기 같은 input·blur)에 함께 풀린다. */}
         <Button
           type="submit"
           form={FORM_ID}
           size="sm"
-          disabled={offline}
+          disabled={offline || frozenLine !== null}
           aria-busy={pending || undefined}
           data-testid="create-channel-submit"
         >
