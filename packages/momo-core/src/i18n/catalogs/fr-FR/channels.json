@@ -62,5 +62,14 @@
   "channels.browse.loading": "Chargement des canaux.",
   "channels.browse.joining": "Adhésion en cours",
   "channels.browse.emptyAdminDetailPhone": "Pour afficher ici un canal existant, activez « Afficher dans le navigateur de canaux » dans son menu, sur le web ou dans l’application de bureau.",
-  "channels.browse.homeRowHint": "Ouvre le navigateur de canaux avec ce nom."
+  "channels.browse.homeRowHint": "Ouvre le navigateur de canaux avec ce nom.",
+  "channels.preview.closeAria": "Fermer l'aperçu du canal",
+  "channels.preview.loading": "Chargement des derniers messages du canal.",
+  "channels.preview.empty": "Aucun message pour le moment",
+  "channels.preview.attachmentLocked": "Rejoignez le canal pour le voir",
+  "channels.preview.openHint": "Ouvre un aperçu en lecture seule des messages récents.",
+  "channels.preview.loadForbidden": "Ce compte ne peut pas afficher l'aperçu de ce canal.",
+  "channels.preview.notFound": "Ce canal est introuvable",
+  "channels.preview.loadNetwork": "Impossible de charger les messages du canal. {reason}",
+  "channels.preview.loadGeneric": "Impossible de charger les messages du canal. Réessayez dans un instant."
 }

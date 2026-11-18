@@ -1,6 +1,7 @@
 import type {Channel, RosterMember} from '@momo/core/lib/api';
 import {
   browseChannels,
+  previewChannel,
   channelJoinFailure,
   joinChannel,
   type BrowseChannel,
@@ -28,6 +29,8 @@ export const CHANNEL_BROWSE_SETTLE_MS = 250;
 export const HOME_BROWSE_LIMIT = 200;
 
 export const channelBrowseKeys = {
+  preview: (workspaceId: string, channelId: string) =>
+    ['channel-preview', workspaceId, channelId] as const,
   list: (workspaceId: string, q: string) => ['channel-browse', workspaceId, q] as const,
   home: (workspaceId: string) => ['channel-browse', workspaceId, 'home-search'] as const,
 };
@@ -168,4 +171,22 @@ export function useJoinBrowsedChannel(
   );
 
   return useMemo(() => ({pending, failures, join}), [pending, failures, join]);
+}
+
+/**
+ * 참여 전 미리 보기(ADR-0224 D5, #5847). **열 때 한 번** 읽고, 다시 읽는 길은 당겨서 새로 고침 · 「다시 시도」뿐이다 — 다시 연결됨 ·
+ * 앱으로 돌아옴 · 타이머로 저절로 읽지 않는다. 실시간 구독도 읽음 위치도 건드리지 않는다(서버가 쓰지 않는 읽기다).
+ * 화면이 걷히면 캐시도 걷힌다(`gcTime: 0`). 불러오는 중 표시는 `isPending` 으로 정한다 — 당겨서 새로 고치는 동안 본문이 바뀌지 않게.
+ */
+export function useChannelPreviewQuery(workspaceId: string, channelId: string) {
+  return useQuery({
+    queryKey: channelBrowseKeys.preview(workspaceId, channelId),
+    queryFn: () => previewChannel(workspaceId, channelId),
+    retry: false,
+    gcTime: 0,
+    staleTime: Infinity,
+    refetchOnMount: false,
+    refetchOnReconnect: false,
+    refetchOnWindowFocus: false,
+  });
 }

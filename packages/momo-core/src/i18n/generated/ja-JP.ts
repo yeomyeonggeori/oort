@@ -462,6 +462,64 @@ export const catalog: MessageCatalog = {
       "value": "文字、数字、ハイフン（-）、アンダースコア（_）のみ使えます。"
     }
   ],
+  "channels.preview.attachmentLocked": [
+    {
+      "type": 0,
+      "value": "参加すると見られます"
+    }
+  ],
+  "channels.preview.closeAria": [
+    {
+      "type": 0,
+      "value": "チャンネルのプレビューを閉じる"
+    }
+  ],
+  "channels.preview.empty": [
+    {
+      "type": 0,
+      "value": "まだ投稿がありません"
+    }
+  ],
+  "channels.preview.loadForbidden": [
+    {
+      "type": 0,
+      "value": "このアカウントではこのチャンネルをプレビューできません。"
+    }
+  ],
+  "channels.preview.loadGeneric": [
+    {
+      "type": 0,
+      "value": "チャンネルの投稿を読み込めませんでした。しばらくしてからもう一度お試しください。"
+    }
+  ],
+  "channels.preview.loading": [
+    {
+      "type": 0,
+      "value": "チャンネルの最近の投稿を読み込んでいます。"
+    }
+  ],
+  "channels.preview.loadNetwork": [
+    {
+      "type": 0,
+      "value": "チャンネルの投稿を読み込めませんでした。"
+    },
+    {
+      "type": 1,
+      "value": "reason"
+    }
+  ],
+  "channels.preview.notFound": [
+    {
+      "type": 0,
+      "value": "このチャンネルが見つかりません"
+    }
+  ],
+  "channels.preview.openHint": [
+    {
+      "type": 0,
+      "value": "タップすると最近の投稿を読み取り専用で確認できます。"
+    }
+  ],
   "timeline.channelLeave.bodyPublicBrowse": [
     {
       "type": 1,

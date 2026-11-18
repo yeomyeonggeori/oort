@@ -1638,6 +1638,64 @@ export const catalog: MessageCatalog = {
       "value": "Use only letters, numbers, hyphens (-) and underscores (_)."
     }
   ],
+  "channels.preview.attachmentLocked": [
+    {
+      "type": 0,
+      "value": "Join to see this"
+    }
+  ],
+  "channels.preview.closeAria": [
+    {
+      "type": 0,
+      "value": "Close channel preview"
+    }
+  ],
+  "channels.preview.empty": [
+    {
+      "type": 0,
+      "value": "No messages yet"
+    }
+  ],
+  "channels.preview.loadForbidden": [
+    {
+      "type": 0,
+      "value": "This account cannot preview this channel."
+    }
+  ],
+  "channels.preview.loadGeneric": [
+    {
+      "type": 0,
+      "value": "Could not load the channel messages. Try again in a moment."
+    }
+  ],
+  "channels.preview.loading": [
+    {
+      "type": 0,
+      "value": "Loading the latest messages in this channel."
+    }
+  ],
+  "channels.preview.loadNetwork": [
+    {
+      "type": 0,
+      "value": "Could not load the channel messages. "
+    },
+    {
+      "type": 1,
+      "value": "reason"
+    }
+  ],
+  "channels.preview.notFound": [
+    {
+      "type": 0,
+      "value": "This channel could not be found"
+    }
+  ],
+  "channels.preview.openHint": [
+    {
+      "type": 0,
+      "value": "Opens a read-only preview of recent messages."
+    }
+  ],
   "common.feedback.unavailable": [
     {
       "type": 0,

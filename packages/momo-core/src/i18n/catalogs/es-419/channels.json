@@ -62,5 +62,14 @@
   "channels.browse.loading": "Cargando canales.",
   "channels.browse.joining": "Uniéndote",
   "channels.browse.emptyAdminDetailPhone": "Para que un canal existente aparezca aquí, activa «Mostrar al explorar» en el menú del canal en la web o en la app de escritorio.",
-  "channels.browse.homeRowHint": "Abre la exploración de canales con este nombre."
+  "channels.browse.homeRowHint": "Abre la exploración de canales con este nombre.",
+  "channels.preview.closeAria": "Cerrar la vista previa del canal",
+  "channels.preview.loading": "Cargando los mensajes más recientes del canal.",
+  "channels.preview.empty": "Aún no hay mensajes",
+  "channels.preview.attachmentLocked": "Únete para verlo",
+  "channels.preview.openHint": "Abre una vista previa de solo lectura de los mensajes recientes.",
+  "channels.preview.loadForbidden": "Esta cuenta no puede ver una vista previa de este canal.",
+  "channels.preview.notFound": "No se encontró este canal",
+  "channels.preview.loadNetwork": "No se pudieron cargar los mensajes del canal. {reason}",
+  "channels.preview.loadGeneric": "No se pudieron cargar los mensajes del canal. Inténtalo de nuevo en un momento."
 }

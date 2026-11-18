@@ -62,5 +62,14 @@
   "channels.browse.loading": "Loading channels.",
   "channels.browse.joining": "Joining",
   "channels.browse.emptyAdminDetailPhone": "To list an existing channel here, turn on “Show in channel browser” in its channel menu on the web or desktop app.",
-  "channels.browse.homeRowHint": "Opens the channel browser with this name."
+  "channels.browse.homeRowHint": "Opens the channel browser with this name.",
+  "channels.preview.closeAria": "Close channel preview",
+  "channels.preview.loading": "Loading the latest messages in this channel.",
+  "channels.preview.empty": "No messages yet",
+  "channels.preview.attachmentLocked": "Join to see this",
+  "channels.preview.openHint": "Opens a read-only preview of recent messages.",
+  "channels.preview.loadForbidden": "This account cannot preview this channel.",
+  "channels.preview.notFound": "This channel could not be found",
+  "channels.preview.loadNetwork": "Could not load the channel messages. {reason}",
+  "channels.preview.loadGeneric": "Could not load the channel messages. Try again in a moment."
 }

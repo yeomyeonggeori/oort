@@ -462,6 +462,64 @@ export const catalog: MessageCatalog = {
       "value": "只能使用文字、數字、連字號（-）和底線（_）。"
     }
   ],
+  "channels.preview.attachmentLocked": [
+    {
+      "type": 0,
+      "value": "加入後即可查看"
+    }
+  ],
+  "channels.preview.closeAria": [
+    {
+      "type": 0,
+      "value": "關閉頻道預覽"
+    }
+  ],
+  "channels.preview.empty": [
+    {
+      "type": 0,
+      "value": "還沒有訊息"
+    }
+  ],
+  "channels.preview.loadForbidden": [
+    {
+      "type": 0,
+      "value": "此帳號無法預覽該頻道。"
+    }
+  ],
+  "channels.preview.loadGeneric": [
+    {
+      "type": 0,
+      "value": "無法載入頻道訊息。請稍後再試。"
+    }
+  ],
+  "channels.preview.loading": [
+    {
+      "type": 0,
+      "value": "正在載入此頻道的最新訊息。"
+    }
+  ],
+  "channels.preview.loadNetwork": [
+    {
+      "type": 0,
+      "value": "無法載入頻道訊息。"
+    },
+    {
+      "type": 1,
+      "value": "reason"
+    }
+  ],
+  "channels.preview.notFound": [
+    {
+      "type": 0,
+      "value": "找不到此頻道"
+    }
+  ],
+  "channels.preview.openHint": [
+    {
+      "type": 0,
+      "value": "點一下即可唯讀預覽最近的訊息。"
+    }
+  ],
   "timeline.channelLeave.bodyPublicBrowse": [
     {
       "type": 1,

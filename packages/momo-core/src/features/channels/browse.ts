@@ -218,3 +218,139 @@ export function channelBrowseLoadFailure(error: unknown): ChannelBrowseFailure {
 export function channelJoinFailure(error: unknown): ChannelBrowseFailure {
   return failureOf(error, JOIN_KEYS);
 }
+
+// =============================================================================
+// 참여 전 미리 보기 (ADR-0224 D5, 서버 E3 #5840). 웹(#5844)과 폰(#5847)이 같이 쓴다.
+//
+//   GET /v1/workspaces/{ws}/channels/{ch}/preview   켜진 공개 채널만. 최상위 글 최신 50개, **최신 먼저**, 쪽 나눔 없음.
+//
+// 읽기만 한다 — 읽음 위치 · 멤버십 · 실시간 구독을 건드리지 않고, 첨부는 이름만 온다(내용은 참여해야 열린다).
+// 오류는 참여(`joinChannel`)와 같은 갈래라 실패 갈래(`ChannelBrowseFailureKind`)를 그대로 쓴다.
+// =============================================================================
+
+export interface PreviewAuthor {
+  /** 글쓴이가 지금 활성 멤버가 아니면(정지 · 삭제) 서버가 이름을 빼서 없다. 화면은 기존 「나간 멤버」 말씨로 그린다. */
+  displayName?: string;
+  kind: "human" | "agent";
+}
+
+export interface PreviewMessage {
+  id: string;
+  /** 지워진 글이면 없다. */
+  body?: string;
+  author: PreviewAuthor;
+  createdAtMs: number;
+  edited: boolean;
+  deleted: boolean;
+  /** 스레드 답글 수(답글 자체는 오지 않는다). */
+  replyCount: number;
+  /** 첨부는 이름만 온다. 빈 배열일 수 있다. */
+  attachmentNames: string[];
+}
+
+export interface ChannelPreview {
+  channel: { id: string; name: string; topic?: string; memberCount: number; isMember: boolean };
+  /** 서버 차례 그대로: 0번이 가장 최근. 화면은 `previewInReadingOrder` 로 뒤집는다. */
+  messages: PreviewMessage[];
+}
+
+function previewMessageFromWire(value: unknown): PreviewMessage {
+  const source = record(value);
+  if (source === null) throw new WireShapeError();
+  const id = str(source, "id");
+  const author = record(source.author);
+  const kind = author === null ? undefined : str(author, "kind");
+  const createdAtMs = num(source, "createdAtMs");
+  const edited = bool(source, "edited");
+  const deleted = bool(source, "deleted");
+  const replyCount = num(source, "replyCount");
+  const names = arrayField(source, "attachmentNames");
+  if (
+    id === undefined ||
+    author === null ||
+    (kind !== "human" && kind !== "agent") ||
+    createdAtMs === undefined ||
+    edited === undefined ||
+    deleted === undefined ||
+    replyCount === undefined ||
+    names === null
+  ) {
+    throw new WireShapeError();
+  }
+  const displayName = str(author, "displayName");
+  const body = str(source, "body");
+  return {
+    id,
+    ...(!deleted && body !== undefined ? { body } : {}),
+    author: { ...(displayName !== undefined && displayName !== "" ? { displayName } : {}), kind },
+    createdAtMs,
+    edited,
+    deleted,
+    replyCount,
+    attachmentNames: names.filter((name): name is string => typeof name === "string"),
+  };
+}
+
+export function channelPreviewFromWire(value: unknown): ChannelPreview {
+  const source = responseRecord(value);
+  const channel = record(source.channel);
+  const rows = arrayField(source, "messages");
+  const id = channel === null ? undefined : str(channel, "id");
+  const name = channel === null ? undefined : str(channel, "name");
+  const memberCount = channel === null ? undefined : num(channel, "memberCount");
+  const isMember = channel === null ? undefined : bool(channel, "isMember");
+  if (
+    channel === null ||
+    rows === null ||
+    id === undefined ||
+    name === undefined ||
+    memberCount === undefined ||
+    isMember === undefined
+  ) {
+    throw new WireShapeError();
+  }
+  const topic = str(channel, "topic");
+  return {
+    channel: { id, name, ...(topic !== undefined && topic !== "" ? { topic } : {}), memberCount, isMember },
+    messages: rows.map(previewMessageFromWire),
+  };
+}
+
+/** 미리 보기 한 번. 쪽 나눔 · 실시간이 없어 호출 하나가 전부다. */
+export async function previewChannel(workspaceId: string, channelId: string): Promise<ChannelPreview> {
+  const res = await authedRequest(
+    `/v1/workspaces/${encodeURIComponent(workspaceId)}/channels/${encodeURIComponent(channelId)}/preview`
+  );
+  return channelPreviewFromWire(res.json<unknown>());
+}
+
+/** 대화 화면과 같은 차례(오래된 글이 위, 최신이 아래). 서버는 최신 먼저 준다. */
+export function previewInReadingOrder(messages: readonly PreviewMessage[]): PreviewMessage[] {
+  return [...messages].reverse();
+}
+
+export type ChannelPreviewFailureKey = Extract<MessageKey, `channels.preview.${string}` | "channels.browse.rateLimited">;
+
+export interface ChannelPreviewFailure {
+  kind: ChannelBrowseFailureKind;
+  key: ChannelPreviewFailureKey;
+  values?: { reason: string };
+}
+
+const PREVIEW_KEYS: Record<ChannelBrowseFailureKind, ChannelPreviewFailureKey> = {
+  forbidden: "channels.preview.loadForbidden",
+  // 그 사이 꺼졌거나 보관된 채널(둘러보기의 404 와 같다). 다시 시도로 낫지 않는다.
+  notFound: "channels.preview.notFound",
+  rateLimited: "channels.browse.rateLimited",
+  network: "channels.preview.loadNetwork",
+  generic: "channels.preview.loadGeneric",
+};
+
+/** 미리 보기를 못 읽었을 때 화면이 하는 말. `notFound` 만 다시 시도 없이 끝난다. */
+export function channelPreviewFailure(error: unknown): ChannelPreviewFailure {
+  const kind = failureKind(error);
+  if (kind === "network") {
+    return { kind, key: PREVIEW_KEYS.network, values: { reason: (error as NetworkError).message } };
+  }
+  return { kind, key: PREVIEW_KEYS[kind] };
+}
