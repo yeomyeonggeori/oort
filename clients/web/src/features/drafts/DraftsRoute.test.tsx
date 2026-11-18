@@ -14,7 +14,6 @@ import {
 import { makeDirectory } from "@/features/workspace/useWorkspace";
 import { DraftsRoute } from "./DraftsRoute";
 import { DraftsNavItem } from "./DraftsNavItem";
-import { tooltipTextOf } from "@/design/ui/tooltipTestKit";
 
 const WS = "00000000-0000-7000-8000-000000000001";
 const MEMBER_ID = "00000000-0000-7000-8000-000000000101";

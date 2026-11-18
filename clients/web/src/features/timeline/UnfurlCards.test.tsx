@@ -162,9 +162,9 @@ describe("UnfurlCards", () => {
     expect(composer[0]).toContain("rounded-full");
     expect(composer[0]).not.toContain("border");
     // 자리(오른쪽 위 모서리)는 단추가 아니라 툴팁 감싸개가 잡는다: 두 곳이 같은 자리 클래스를 쓴다.
-    const place = (source: string) => [...source.matchAll(/<Tooltip[^>]*className="(absolute right-1 top-1)"/g)].map((m) => m[1]);
-    expect(place(componentSource)).toHaveLength(1);
-    expect(place(composerSource)).toHaveLength(1);
+    const place = (source: string) => source.split('side="bottom" className="absolute right-1 top-1"').length - 1 + source.split('side="top" className="absolute right-1 top-1"').length - 1;
+    expect(place(componentSource)).toBe(1);
+    expect(place(composerSource)).toBe(1);
   });
 
   it("withholds removal from non-authors", () => {
