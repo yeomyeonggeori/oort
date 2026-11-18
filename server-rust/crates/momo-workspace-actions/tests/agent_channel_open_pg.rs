@@ -591,16 +591,27 @@ async fn the_team_ai_reads_only_channels_the_requester_is_in() {
 
 // --- ② the names in the team AI's context ------------------------------------------
 
-/// D13 row 2: the channel names given to the team AI are the ones open to the requester (and the
-/// room itself). A requester who is not in the closed channel does not get its name.
+/// D13 row 2 with the owner's rule first: in a room with other people the team AI is given only
+/// the names of channels open to people (and the room itself); only in the requester's own 1:1 DM
+/// with the team AI does it also get the public channels the requester is in. A requester who is
+/// not in the closed channel never gets its name.
 #[tokio::test]
 #[ignore]
-async fn the_team_ai_is_told_only_names_open_to_the_requester() {
+async fn the_team_ai_names_a_closed_channel_only_in_a_members_own_dm() {
     let p = pools().await;
     let f = seed(&p).await;
-    let names_for = |requester: Uuid| {
+    let tag = &f.ws.simple().to_string()[..8];
+    let outsider_dm = channel(
+        &p.su,
+        f.ws,
+        &format!("dm-out-{tag}"),
+        Kind::Dm,
+        &[f.outsider, f.helper],
+    )
+    .await;
+    let names_in = |requester: Uuid, room: Uuid| {
         let worker = p.worker.clone();
-        let (ws, room) = (f.ws, f.room);
+        let ws = f.ws;
         async move {
             let mut tx = worker.begin().await.expect("begin");
             let roster = team_ai::load_roster_in_tx(&mut tx, ws, requester, room)
@@ -610,22 +621,49 @@ async fn the_team_ai_is_told_only_names_open_to_the_requester() {
             roster.channels
         }
     };
-    let outsider = names_for(f.outsider).await;
-    assert!(!outsider.contains(&f.names.closed), "not a member: no name");
-    assert!(outsider.contains(&f.names.listed));
-    assert!(outsider.contains(&f.names.lobby), "listed: named to anyone");
-    assert!(outsider.contains(&f.names.room), "the room itself");
-    for absent in [&f.names.private, &f.names.archived, &f.names.elsewhere] {
-        assert!(!outsider.contains(absent), "{absent} is never named");
-    }
+    let closed_count = |names: &[String]| names.iter().filter(|n| **n == f.names.closed).count();
 
-    let insider = names_for(f.insider).await;
-    assert!(insider.contains(&f.names.closed), "a member keeps the name");
+    // A room with other people: the closed channel is not named, even to a member of it.
+    let insider_room = names_in(f.insider, f.room).await;
+    assert_eq!(
+        closed_count(&insider_room),
+        0,
+        "a member, in a room with others"
+    );
+    assert!(insider_room.contains(&f.names.listed));
     assert!(
-        !insider.contains(&f.names.private),
+        insider_room.contains(&f.names.lobby),
+        "listed: named to anyone"
+    );
+    assert!(insider_room.contains(&f.names.room), "the room itself");
+    let insider_guests = names_in(f.insider, f.guest_room).await;
+    assert_eq!(
+        closed_count(&insider_guests),
+        0,
+        "a member, in a room with a guest"
+    );
+
+    // The member's own DM with the team AI: their view, public channels only.
+    let insider_dm = names_in(f.insider, f.helper_dm).await;
+    assert_eq!(closed_count(&insider_dm), 1, "a member, in their own DM");
+    assert!(insider_dm.contains(&f.names.lobby));
+    assert!(
+        !insider_dm.contains(&f.names.private),
         "a private name is not added"
     );
-    assert!(!insider.contains(&f.names.archived));
+
+    // Not a member: nowhere.
+    for room in [f.room, outsider_dm] {
+        let outsider = names_in(f.outsider, room).await;
+        assert_eq!(closed_count(&outsider), 0, "not a member");
+        for absent in [&f.names.private, &f.names.archived, &f.names.elsewhere] {
+            assert!(!outsider.contains(absent), "{absent} is never named");
+        }
+    }
+    for names in [&insider_room, &insider_dm] {
+        assert!(!names.contains(&f.names.archived));
+        assert!(!names.contains(&f.names.elsewhere));
+    }
 }
 
 // --- ③ an agent's name lookup --------------------------------------------------------
