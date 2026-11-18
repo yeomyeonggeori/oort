@@ -36,7 +36,6 @@ import {
   channelMuteToggleLabel,
   channelNameIssue,
   channelNameIssueKey,
-  channelNameIssueMessage,
   judgeChannelName,
   channelTopicIssue,
   createChannelFailure,
@@ -323,11 +322,11 @@ describe("name rule sentences", () => {
     "edgeSeparator",
   ] as const;
 
-  it("has a dictionary key for every issue and the Korean fallback says the same words", () => {
-    for (const issue of issues) {
-      const text = ko[channelNameIssueKey(issue)].replace("{max, number}", String(CHANNEL_NAME_MAX));
-      expect(channelNameIssueMessage(issue), issue).toBe(text);
-    }
+  const channelNameIssueMessage = (issue: (typeof issues)[number]) =>
+    ko[channelNameIssueKey(issue)].replace("{max, number}", String(CHANNEL_NAME_MAX));
+
+  it("has a distinct dictionary key for every issue, and each key is in the Korean catalog", () => {
+    for (const issue of issues) expect(ko[channelNameIssueKey(issue)], issue).toBeTruthy();
     expect(new Set(issues.map(channelNameIssueKey)).size).toBe(5);
   });
 

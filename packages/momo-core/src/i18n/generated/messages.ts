@@ -181,6 +181,7 @@ export const messageKeys = [
   "channels.browse.emptyHeadline",
   "channels.browse.groupJoined",
   "channels.browse.groupNotJoined",
+  "channels.browse.hiddenGroup",
   "channels.browse.homeRowHint",
   "channels.browse.join",
   "channels.browse.joinAria",
@@ -208,6 +209,13 @@ export const messageKeys = [
   "channels.browse.retry",
   "channels.browse.searchLabel",
   "channels.browse.searchPlaceholder",
+  "channels.browse.switchForbidden",
+  "channels.browse.switchGeneric",
+  "channels.browse.switchLabel",
+  "channels.browse.switchNetwork",
+  "channels.browse.switchNotFound",
+  "channels.browse.switchNotListable",
+  "channels.browse.switchShowAria",
   "channels.browse.title",
   "channels.createFailure.duplicate",
   "channels.createFailure.forbidden",
@@ -1923,6 +1931,7 @@ export const argumentSpecs = {
   "channels.browse.emptyHeadline": {},
   "channels.browse.groupJoined": {},
   "channels.browse.groupNotJoined": {},
+  "channels.browse.hiddenGroup": {},
   "channels.browse.homeRowHint": {},
   "channels.browse.join": {},
   "channels.browse.joinAria": {
@@ -1962,6 +1971,17 @@ export const argumentSpecs = {
   "channels.browse.retry": {},
   "channels.browse.searchLabel": {},
   "channels.browse.searchPlaceholder": {},
+  "channels.browse.switchForbidden": {},
+  "channels.browse.switchGeneric": {},
+  "channels.browse.switchLabel": {},
+  "channels.browse.switchNetwork": {
+    "reason": "string"
+  },
+  "channels.browse.switchNotFound": {},
+  "channels.browse.switchNotListable": {},
+  "channels.browse.switchShowAria": {
+    "name": "string"
+  },
   "channels.browse.title": {},
   "channels.createFailure.duplicate": {},
   "channels.createFailure.forbidden": {},
@@ -4166,6 +4186,7 @@ export interface MessageArgs {
   "channels.browse.emptyHeadline": Record<string, never>;
   "channels.browse.groupJoined": Record<string, never>;
   "channels.browse.groupNotJoined": Record<string, never>;
+  "channels.browse.hiddenGroup": Record<string, never>;
   "channels.browse.homeRowHint": Record<string, never>;
   "channels.browse.join": Record<string, never>;
   "channels.browse.joinAria": { name: string };
@@ -4193,6 +4214,13 @@ export interface MessageArgs {
   "channels.browse.retry": Record<string, never>;
   "channels.browse.searchLabel": Record<string, never>;
   "channels.browse.searchPlaceholder": Record<string, never>;
+  "channels.browse.switchForbidden": Record<string, never>;
+  "channels.browse.switchGeneric": Record<string, never>;
+  "channels.browse.switchLabel": Record<string, never>;
+  "channels.browse.switchNetwork": { reason: string };
+  "channels.browse.switchNotFound": Record<string, never>;
+  "channels.browse.switchNotListable": Record<string, never>;
+  "channels.browse.switchShowAria": { name: string };
   "channels.browse.title": Record<string, never>;
   "channels.createFailure.duplicate": Record<string, never>;
   "channels.createFailure.forbidden": Record<string, never>;

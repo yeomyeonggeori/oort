@@ -219,6 +219,95 @@ export function channelJoinFailure(error: unknown): ChannelBrowseFailure {
   return failureOf(error, JOIN_KEYS);
 }
 
+// ---- 「둘러보기에 보이기」 스위치 (ADR-0224 D2, #5843) -------------------------------
+
+/**
+ * 한 공개 채널을 둘러보기에 보이거나 숨긴다. `PATCH …/channels/{ch}` 의 `browseListed` 한 칸이고 소유자 · 관리자만 부른다
+ * (서버 계약: #5839 인계 0절). 답의 `channel` 은 `GET …/channels` 의 줄과 같은 모양이라 캐시에 그대로 세운다.
+ * 이미 그 값이면 서버가 아무것도 쓰지 않고 200 으로 같은 줄을 돌려준다.
+ */
+export async function setChannelBrowseListed(
+  workspaceId: string,
+  channelId: string,
+  listed: boolean
+): Promise<Channel> {
+  const res = await authedRequest(
+    `/v1/workspaces/${encodeURIComponent(workspaceId)}/channels/${encodeURIComponent(channelId)}`,
+    { method: "PATCH", body: JSON.stringify({ browseListed: listed }) }
+  );
+  const source = responseRecord(res.json<unknown>());
+  const channel = record(source.channel);
+  if (
+    channel === null ||
+    str(channel, "id") === undefined ||
+    str(channel, "workspaceId") === undefined ||
+    str(channel, "kind") === undefined
+  ) {
+    throw new WireShapeError();
+  }
+  return channel as unknown as Channel;
+}
+
+/**
+ * 스위치를 세울 채널인가: 소유자 · 관리자가 든 **공개** 채널이고, 이 서버가 표시를 싣는다(`browseListed` 가 있다).
+ * 옛 서버는 칸을 싣지 않으므로 문을 세우지 않는다(켜 봐야 서버가 모르는 칸이다). 역할을 모르면 세우지 않는다.
+ */
+export function canSetBrowseListed(
+  channel: Pick<Channel, "kind" | "browseListed" | "archivedAtMs">,
+  role: MembershipRole | undefined
+): boolean {
+  return (
+    (role === "owner" || role === "admin") &&
+    channel.kind === "public" &&
+    channel.archivedAtMs === undefined &&
+    channel.browseListed !== undefined
+  );
+}
+
+/** 둘러보기 창 관리자 묶음의 줄: 내가 든 꺼진 공개 채널. 서버의 둘러보기 목록이 아니라 내 채널 목록에서 거른다. */
+export function hiddenPublicChannels<T extends Pick<Channel, "kind" | "browseListed" | "archivedAtMs">>(
+  channels: readonly T[]
+): T[] {
+  return channels.filter(
+    (channel) => channel.kind === "public" && channel.browseListed === false && channel.archivedAtMs === undefined
+  );
+}
+
+export type ChannelBrowseSwitchFailureKind =
+  | "forbidden"
+  | "notFound"
+  | "notListable"
+  | "rateLimited"
+  | "network"
+  | "generic";
+
+export interface ChannelBrowseSwitchFailure {
+  kind: ChannelBrowseSwitchFailureKind;
+  key: ChannelBrowseFailureKey;
+  /** `network` 의 `{reason}` (`ChannelBrowseFailure.values` 와 같다). */
+  values?: { reason: string };
+}
+
+/**
+ * 스위치가 실패했을 때 하는 말. 403 은 소유자 · 관리자가 아니거나 사람이 아닌 토큰, 404 는 닿지 않는 채널(보관 · 사라짐),
+ * 409 `channel_not_listable` 은 그 사이 공개가 아니게 된 경합(스위치는 공개 채널에만 서므로 보통 오지 않는다). 다른 409 는 그 밖이다.
+ */
+export function channelBrowseSwitchFailure(error: unknown): ChannelBrowseSwitchFailure {
+  if (error instanceof ApiError) {
+    if (error.status === 403) return { kind: "forbidden", key: "channels.browse.switchForbidden" };
+    if (error.status === 404) return { kind: "notFound", key: "channels.browse.switchNotFound" };
+    if (error.status === 409 && error.code === "channel_not_listable") {
+      return { kind: "notListable", key: "channels.browse.switchNotListable" };
+    }
+    if (error.status === 429) return { kind: "rateLimited", key: "channels.browse.rateLimited" };
+    return { kind: "generic", key: "channels.browse.switchGeneric" };
+  }
+  if (error instanceof NetworkError) {
+    return { kind: "network", key: "channels.browse.switchNetwork", values: { reason: error.message } };
+  }
+  return { kind: "generic", key: "channels.browse.switchGeneric" };
+}
+
 // =============================================================================
 // 참여 전 미리 보기 (ADR-0224 D5, 서버 E3 #5840). 웹(#5844)과 폰(#5847)이 같이 쓴다.
 //

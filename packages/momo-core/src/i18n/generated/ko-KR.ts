@@ -1179,6 +1179,12 @@ export const catalog: MessageCatalog = {
       "value": "참여하지 않은 채널"
     }
   ],
+  "channels.browse.hiddenGroup": [
+    {
+      "type": 0,
+      "value": "둘러보기에 안 보이는 공개 채널"
+    }
+  ],
   "channels.browse.homeRowHint": [
     {
       "type": 0,
@@ -1222,7 +1228,7 @@ export const catalog: MessageCatalog = {
   "channels.browse.joining": [
     {
       "type": 0,
-      "value": "참여하는 중"
+      "value": "참여 요청 중"
     }
   ],
   "channels.browse.joinNetwork": [
@@ -1372,6 +1378,56 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "이름이나 주제로 찾기"
+    }
+  ],
+  "channels.browse.switchForbidden": [
+    {
+      "type": 0,
+      "value": "소유자와 관리자만 바꿀 수 있어요."
+    }
+  ],
+  "channels.browse.switchGeneric": [
+    {
+      "type": 0,
+      "value": "바꾸지 못했어요. 다시 시도해 주세요."
+    }
+  ],
+  "channels.browse.switchLabel": [
+    {
+      "type": 0,
+      "value": "둘러보기에 보이기"
+    }
+  ],
+  "channels.browse.switchNetwork": [
+    {
+      "type": 0,
+      "value": "바꾸지 못했어요. "
+    },
+    {
+      "type": 1,
+      "value": "reason"
+    }
+  ],
+  "channels.browse.switchNotFound": [
+    {
+      "type": 0,
+      "value": "이 채널은 이제 찾을 수 없어요."
+    }
+  ],
+  "channels.browse.switchNotListable": [
+    {
+      "type": 0,
+      "value": "공개 채널만 둘러보기에 보일 수 있어요."
+    }
+  ],
+  "channels.browse.switchShowAria": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " 채널을 둘러보기에 보이기"
     }
   ],
   "channels.browse.title": [

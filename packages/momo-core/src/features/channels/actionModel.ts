@@ -114,6 +114,7 @@ export type ChannelActionKey =
   | "memory"
   | "github"
   | "star"
+  | "browse-listed"
   | "move-to-section"
   | "copy-link"
   | "copy-name"
@@ -152,6 +153,7 @@ const CLUSTER_OF: Record<ChannelActionKey, ChannelActionCluster> = {
   mute: "state",
   memory: "state",
   github: "state",
+  "browse-listed": "state",
   star: "state",
   "close-dm": "close",
   leave: "danger",
@@ -187,6 +189,7 @@ export type ChannelActionIcon =
   | "bell-off"
   | "memory"
   | "github"
+  | "browse"
   | "star"
   | "unstar"
   | "hide"
@@ -263,6 +266,11 @@ export interface ChannelActionItem {
   busyLabel?: string;
   /** 파괴적 액션. 메뉴 행이 --danger 를 입는다. */
   tone?: "danger";
+  /**
+   * 켜고 끄는 줄의 지금 값(#5843 `browse-listed`). 값이 있는 항목만 체크 줄(`menuitemcheckbox`, `aria-checked`)로 그린다.
+   * 없으면 평범한 줄이다 — 기존 항목은 이 칸을 싣지 않는다.
+   */
+  checked?: boolean;
   /** 이 항목 위에 구분선을 세운다. 거른 뒤의 이웃이 다른 무리일 때만(`withClusterSeparators`). */
   separatorBefore?: boolean;
   /**
@@ -305,6 +313,11 @@ export interface ChannelActionAvailability {
    * 소유자·관리자만 하므로 역할도 본다(서버가 마지막 말을 한다).
    */
   github?: boolean;
+  /**
+   * 「둘러보기에 보이기」(ADR-0224 D2, #5843). 선택 칸이다: 소유자 · 관리자가 든 공개 채널이고 이 서버가 표시를 실을 때만
+   * (`canSetBrowseListed`). 채워 넣지 않은 호출부(폰 포함)는 그대로 없다.
+   */
+  browseListed?: boolean;
   star: boolean;
   moveToSection: boolean;
   copyLink: boolean;
@@ -328,6 +341,8 @@ export interface ChannelActionState {
   copiedName: boolean;
   /** ID 가 방금 클립보드에 올라갔는가 (#3963). 없으면 아직이다. */
   copiedId?: boolean;
+  /** 이 채널이 지금 둘러보기에 보이는가(#5843). 없으면 꺼짐. */
+  browseListed?: boolean;
   /** 이 채널에 별표가 붙어 있는가 (ADR-0177 / BT-5). 낱말이 이 값으로 뒤집힌다. */
   starred?: boolean;
   /**
@@ -370,6 +385,11 @@ export function channelActionAvailability(input: {
   /** 이 서버가 GitHub 알림을 싣는가(#3955). DM 에는 알림을 보낼 수 없어 여기서도 뺀다. */
   hasGithubNotifications?: boolean;
   /**
+   * 이 채널에 「둘러보기에 보이기」를 내미는가(#5843): `canSetBrowseListed`(소유자 · 관리자 · 공개 · 이 서버가 표시를 실음)가 참이고
+   * 켜고 끌 손(왕복)이 있을 때만 참으로 넘긴다. 옛 서버나 역할을 모를 때는 거짓이다.
+   */
+  canSetBrowseListed?: boolean;
+  /**
    * 「읽지 않음으로 표시」를 받을 수 있는 채널인가 (#3963): 서버 투영이 있고 다 읽었고
    * 메시지가 하나라도 있다. 판정은 투영을 든 호출부가 한다(`composedUnreadCount`). 여기서는
    * `unreadCount` 와 겹치지 않는지만 한 번 더 막는다.
@@ -401,6 +421,7 @@ export function channelActionAvailability(input: {
       !isDm &&
       (input.hasGithubNotifications ?? false) &&
       (input.selfRole === undefined || input.selfRole === "owner" || input.selfRole === "admin"),
+    browseListed: input.canSetBrowseListed ?? false,
     // **DM 은 옮기지 않는다** (ADR-0177 D4). 기본 섹션 두 종은 「채널」과 「DM」
     // 이고 DM 은 그 중 하나에 고정이다 - 커스텀 섹션에 DM 을 넣는 문을 열면
     // 코어의 파생이 그것을 무시하므로(`deriveSidebarSections`), 눌러도 아무 일도
@@ -526,6 +547,16 @@ export function channelActionItems(
   if (available.github === true) {
     push({ key: "github", testKey: "github-notifications", label: CHANNEL_GITHUB_LABEL, icon: "github" });
   }
+  // 「둘러보기에 보이기」(#5843): 켜짐 · 꺼짐이 체크로 읽히는 줄. 낱말이 사전 키라 `formatMessage` 가 없으면 서지 않는다.
+  if (available.browseListed === true && formatMessage !== undefined) {
+    push({
+      key: "browse-listed",
+      testKey: "browse-listed",
+      label: formatMessage("channels.browse.switchLabel"),
+      icon: "browse",
+      checked: state.browseListed === true,
+    });
+  }
   if (available.star) {
     push({
       key: "star",
@@ -567,7 +598,7 @@ const SURFACE_KEYS: Record<ChannelActionSurface, ReadonlySet<ChannelActionKey>> 
   // 헤더 ⋮ 는 BZ-2 가 세운 그대로다. 이 티켓은 헤더의 항목을 늘리지 않는다:
   // 채널을 열어 둔 사람에게 「읽음 처리」와 「이름 복사」는 다른 물음이다.
   // 「대화 나가기」(D21)는 대화 머리 메뉴에도 선다(DM 의 머리 메뉴를 세우는 것은 화면 칸의 일이다).
-  header: new Set<ChannelActionKey>(["topic", "mute", "memory", "github", "leave", "leave-dm"]),
+  header: new Set<ChannelActionKey>(["topic", "mute", "memory", "github", "browse-listed", "leave", "leave-dm"]),
   // 행 우클릭은 「열지 않고 조작한다」가 전부다. BT-4 의 섹션 배치가 여기 사는
   // 이유도 그것이다 - 채널을 어디에 둘지는 그 채널을 **보지 않고** 정하는 일이고,
   // 헤더 ⋮ 는 정의상 이미 그 안에 들어와 있는 사람의 것이다. 복사 셋과 DM 닫기(#3963)도
