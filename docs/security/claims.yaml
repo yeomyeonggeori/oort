@@ -216,6 +216,7 @@ claims:
     proofs:
       - "server-rust/crates/momo-unfurl/tests/unfurl_conformance_pg.rs#an_agent_authored_message_is_never_fetched_except_an_inbound_integrations_and_a_human_one_is"
       - "server-rust/crates/momo-unfurl/tests/unfurl_conformance_pg.rs#a_job_already_queued_for_an_agent_message_is_skipped_before_any_fetch"
+      - "server-rust/crates/momo-unfurl/tests/unfurl_conformance_pg.rs#another_workspaces_rows_never_open_a_fetch_for_this_workspaces_agent"
   - id: NET-3
     claim: "The agent worker's outbound client refuses a hostname that resolves to a private address before connecting."
     scope: "The agent worker egress helper. Other outbound paths have their own claims (NET-1, NET-2)."

@@ -237,7 +237,7 @@ impl<T: UnfurlHttp + 'static> UnfurlWorker<T> {
                 // member is the one agent author let through, see `author_is_agent`). Every fetch
                 // for a message starts here, so it covers a job queued by any writer, a send and
                 // an edit alike, and one queued before the rule existed.
-                if author_is_agent(conn, message.author_member_id).await? {
+                if author_is_agent(conn, workspace_id, message.author_member_id).await? {
                     return Ok(Prepared::Skip("agent author"));
                 }
                 let urls = extract_urls(message.body.as_deref().unwrap_or(""));
