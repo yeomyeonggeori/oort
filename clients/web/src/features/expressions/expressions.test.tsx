@@ -2,7 +2,7 @@
 import { act, useRef, useState } from "react";
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, waitFor, within } from "@testing-library/react";
-import { FIXTURE_LIST, FIXTURE_EXPRESSIONS, FIXTURE_MEMBER_ID, FIXTURE_WORKSPACE_ID } from "@momo/core/features/expressions/fixtures";
+import { FIXTURE_AI_APPROVAL, FIXTURE_LIST, FIXTURE_EXPRESSIONS, FIXTURE_MEMBER_ID, FIXTURE_WORKSPACE_ID } from "@momo/core/features/expressions/fixtures";
 import { expressionChoice } from "@momo/core/features/expressions/cards";
 import { MANUAL_UPLOAD_CODES, type ExpressionDraft } from "@momo/core/features/expressions/types";
 import { expressionMessageModel } from "@momo/core/features/expressions/message";
@@ -318,6 +318,19 @@ describe("team expressions web/desktop port", () => {
     expect(validExpressionFile(new File([new Uint8Array(5 * 1024 * 1024 + 1)], "big.gif", { type: "image/gif" }))).toBe(false);
     expect(expressionApprovalPayload({ action: { id: "other", expression: { v: 1, candidates: [] } } })).toBeNull();
     expect(expressionApprovalPayload({ action: { id: "expression.create", expression: { v: 1, candidates: [] } } })).toBeNull();
+  });
+  it("keeps every other candidate of a card that carries an agent's link, or a code from a newer server (#5934)", () => {
+    // Before #5934 one code this build did not know made the whole card unreadable: 0 of 3 candidates were shown.
+    const link = { ...FIXTURE_AI_APPROVAL.candidates[3], draftId: "00000000-0000-4000-8000-000000000199", code: "source_awaiting_approval", origin: { kind: "url", sourceUrl: "https://media.example.com/", prompt: null } };
+    for (const odd of [link, { ...link, code: "a_code_from_later" }]) {
+      const expression = { v: 1, candidates: [FIXTURE_AI_APPROVAL.candidates[0], FIXTURE_AI_APPROVAL.candidates[1], odd] };
+      const payload = expressionApprovalPayload({ action: { id: "expression.create", expression } });
+      expect(payload?.candidates.map((draft) => draft.draftId)).toEqual(expression.candidates.map((draft) => draft.draftId));
+      // The same value, not a copy: the timeline reads it on every render and the card resets its candidates when it changes.
+      expect(payload).toBe(expression);
+    }
+    // The allowance is the code alone: a candidate that is wrong in any other way still leaves the card unreadable.
+    expect(expressionApprovalPayload({ action: { id: "expression.create", expression: { v: 1, candidates: [FIXTURE_AI_APPROVAL.candidates[0], { ...link, media: FIXTURE_AI_APPROVAL.candidates[0].media }] } } })).toBeNull();
   });
   it("sends the chosen draft revision/hash through the existing approval decision route", async () => {
     const store = makeStore(); await store.refresh(); const draft = await prepare(store);

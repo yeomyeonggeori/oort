@@ -518,6 +518,40 @@ export const catalog: MessageCatalog = {
       "value": "文字、数字、ハイフン（-）、アンダースコア（_）のみ使えます。"
     }
   ],
+  "expressions.draft.linkApprove": [
+    {
+      "type": 0,
+      "value": "取得してチームライブラリに登録"
+    }
+  ],
+  "expressions.draft.linkBusy": [
+    {
+      "type": 0,
+      "value": "いま取得中の画像が多いです。少し待ってからもう一度押してください。"
+    }
+  ],
+  "expressions.draft.linkFetching": [
+    {
+      "type": 0,
+      "value": "取得中"
+    }
+  ],
+  "expressions.draft.linkFrom": [
+    {
+      "type": 1,
+      "value": "host"
+    },
+    {
+      "type": 0,
+      "value": " から取得します"
+    }
+  ],
+  "expressions.draft.linkHint": [
+    {
+      "type": 0,
+      "value": "承認すると画像を一度取得して確認し、チームライブラリに登録します。"
+    }
+  ],
   "timeline.channelLeave.bodyPublicBrowse": [
     {
       "type": 1,

@@ -3195,6 +3195,40 @@ export const catalog: MessageCatalog = {
       "value": "등록 중"
     }
   ],
+  "expressions.draft.linkApprove": [
+    {
+      "type": 0,
+      "value": "가져와서 팀 보관함에 등록"
+    }
+  ],
+  "expressions.draft.linkBusy": [
+    {
+      "type": 0,
+      "value": "지금 가져오는 그림이 많아요. 잠시 뒤 다시 눌러 주세요."
+    }
+  ],
+  "expressions.draft.linkFetching": [
+    {
+      "type": 0,
+      "value": "가져오는 중"
+    }
+  ],
+  "expressions.draft.linkFrom": [
+    {
+      "type": 1,
+      "value": "host"
+    },
+    {
+      "type": 0,
+      "value": "에서 가져와요"
+    }
+  ],
+  "expressions.draft.linkHint": [
+    {
+      "type": 0,
+      "value": "승인하면 그림을 한 번 가져와 확인한 뒤 팀 보관함에 등록해요."
+    }
+  ],
   "expressions.draft.previewLabel": [
     {
       "type": 0,

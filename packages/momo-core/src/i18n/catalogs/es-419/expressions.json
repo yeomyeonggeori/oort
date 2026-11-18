@@ -1,1 +1,7 @@
-{}
+{
+  "expressions.draft.linkFrom": "Se obtiene de {host}",
+  "expressions.draft.linkHint": "Al aprobar, la imagen se obtiene una vez, se revisa y se registra en la biblioteca del equipo.",
+  "expressions.draft.linkApprove": "Obtener y registrar en la biblioteca",
+  "expressions.draft.linkFetching": "Obteniendo",
+  "expressions.draft.linkBusy": "Se están obteniendo muchas imágenes. Vuelve a pulsar en un momento."
+}
