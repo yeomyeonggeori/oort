@@ -851,6 +851,9 @@ mod tests {
     /// public-only by CHECK, and the per-workspace default-channel fill (that row also starts
     /// listed). No new table, so no new RLS target.
     ///
+    /// 185 is #5899's one more `expression_draft.code` (`source_awaiting_approval`: an agent's link
+    /// candidate that is fetched only after a person approves it). Same constraint, one more word.
+    /// No new table, column or grant.
     /// 186 is #5909's safety net for 184's fill (ADR-0224 D6·D10): the same per-workspace default
     /// channel fill, re-run with the row-security switch set inside its own `DO` block so it holds
     /// whether the file runs in one transaction or not, and a role that cannot bypass row security

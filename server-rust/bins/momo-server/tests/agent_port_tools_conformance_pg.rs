@@ -28393,15 +28393,8 @@ async fn expression_create_offers_three_sources_and_registers_exactly_the_one_ch
     ])).await;
     assert_eq!(status, 200, "{proposed}");
     let approval = proposed_approval_3706(&proposed);
-    assert!(
-        w.mock
-            .calls
-            .lock()
-            .unwrap()
-            .iter()
-            .any(|c| c.contains("Q-SECRET")),
-        "the query is used to fetch"
-    );
+    // #5899: an address the agent chose is not requested while the card waits for a person.
+    assert_eq!(fetches_4829(&w), 0, "a proposal fetches no link");
 
     // ---- what was stored: drafts behind the approval, never bytes/prompt/query in args ----
     let rows: Vec<(String, Option<String>, i32, bool)> = sqlx::query_as(
@@ -28413,8 +28406,8 @@ async fn expression_create_offers_three_sources_and_registers_exactly_the_one_ch
             .collect::<Vec<_>>(),
         [
             ("ready", None),
-            ("ready", None),
-            ("manual_upload_required", Some("source_blocked")),
+            ("manual_upload_required", Some("source_awaiting_approval")),
+            ("manual_upload_required", Some("source_awaiting_approval")),
             ("ready", None)
         ]
     );
@@ -28445,7 +28438,7 @@ async fn expression_create_offers_three_sources_and_registers_exactly_the_one_ch
     let audits: String = sqlx::query_scalar("SELECT COALESCE(string_agg(detail::text, ' '), '') FROM audit_log WHERE workspace_id=$1 AND action IN ('expression.staged')")
         .bind(ws).fetch_one(&w.su).await.unwrap();
     assert!(
-        audits.contains("source_blocked") && audits.contains("cdn.example.test"),
+        audits.contains("source_awaiting_approval") && audits.contains("cdn.example.test"),
         "{audits}"
     );
     for secret in ["PROMPT-SECRET", "Q-SECRET", "dataBase64"] {
@@ -28458,9 +28451,13 @@ async fn expression_create_offers_three_sources_and_registers_exactly_the_one_ch
         .clone();
     assert_eq!(candidates.len(), 4);
     assert_eq!(candidates[2]["state"], "manual_upload_required");
-    assert_eq!(
-        candidates[2]["origin"]["sourceUrl"],
-        "https://cdn.example.test/blocked.gif"
+    // #5899: the card names the link's host and nothing after it.
+    for link in [&candidates[1], &candidates[2]] {
+        assert_eq!(link["origin"]["sourceUrl"], "https://cdn.example.test/");
+    }
+    assert!(
+        !card.to_string().contains(".gif"),
+        "no path of an agent's link on the card: {card}"
     );
     assert_eq!(
         candidates[3]["origin"]["prompt"], prompt,
@@ -28541,12 +28538,26 @@ async fn expression_create_offers_three_sources_and_registers_exactly_the_one_ch
             (403, "role_required"),
         ),
         (
-            "the failed link",
+            "a link with a hash",
             &w.requester_jwt,
             true,
             Some(
                 json!({"draftId": candidates[2]["draftId"], "revision": "1", "sha256": "0".repeat(64)}),
             ),
+            (409, "expression_preview_stale"),
+        ),
+        (
+            "a guest, on the agent's link",
+            &w.guest_jwt,
+            true,
+            Some(json!({"draftId": candidates[1]["draftId"], "revision": "1"})),
+            (403, "role_required"),
+        ),
+        (
+            "a picture without its hash",
+            &w.requester_jwt,
+            true,
+            Some(json!({"draftId": ready["draftId"], "revision": "1"})),
             (409, "expression_preview_stale"),
         ),
         (
@@ -28690,8 +28701,17 @@ async fn expression_create_offers_three_sources_and_registers_exactly_the_one_ch
         200
     );
 
-    // ---- two decisions race (an admin and the requester): exactly one registers -----------
-    let pick = choice_4829(&card2, 1);
+    assert_eq!(fetches_4829(&w), 0, "no refusal above fetched the link");
+
+    // ---- two decisions race (an admin and the requester) on the agent's link: it is fetched once,
+    // after the approval, and exactly one registers (#5899). The link candidate has no picture, so
+    // its choice has no hash.
+    let draft = &card2["action"]["expression"]["candidates"][1];
+    assert_eq!(draft["code"], "source_awaiting_approval");
+    let pick = json!({"draftId": draft["draftId"], "revision": draft["revision"]});
+    w.mock
+        .delay_ms
+        .store(300, std::sync::atomic::Ordering::Relaxed);
     let (a, b) = tokio::join!(
         decide_4829(&w, &admin_jwt, approval, true, Some(pick.clone())),
         decide_4829(&w, &w.requester_jwt, approval, true, Some(pick.clone())),
@@ -28710,6 +28730,11 @@ async fn expression_create_offers_three_sources_and_registers_exactly_the_one_ch
             .await
             .unwrap();
     assert_eq!(registered, 1, "a row lock registers it once");
+    assert_eq!(
+        w.mock.calls.lock().unwrap().clone(),
+        vec!["https://cdn.example.test/ok.gif".to_string()],
+        "one request, after the approval, for the stored address (the query was never kept)"
+    );
     let (name, created_by, proposed_by): (String, Uuid, Uuid) =
         sqlx::query_as("SELECT name, created_by, proposed_by FROM expression WHERE approval_id=$1")
             .bind(approval)
@@ -28833,6 +28858,152 @@ async fn expression_create_offers_three_sources_and_registers_exactly_the_one_ch
         );
     }
     assert_eq!(forged["type"].as_str().unwrap_or("text"), "text");
+}
+
+/// #5899 (ADR-0170 증보 2026-11-14's invariant): a link an agent put on a card that a person rejects,
+/// or that runs out, is never requested — not by the proposal, not by the ending, not by a late
+/// approval of it.
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn an_agent_link_on_a_rejected_or_expired_card_is_never_fetched() {
+    let w = world_4829().await;
+    w.mock
+        .replies
+        .lock()
+        .unwrap()
+        .insert("https://cdn.example.test/ok.gif".into(), Ok(gif_4829()));
+    let link = json!({"source": "url", "url": "https://cdn.example.test/ok.gif"});
+    for ending in ["rejected", "expired"] {
+        let (status, proposed) = propose_4829(
+            &w,
+            json!([candidate_4829(
+                &format!("link_{ending}"),
+                Value::Null,
+                link.clone()
+            )]),
+        )
+        .await;
+        assert_eq!(status, 200, "{proposed}");
+        let approval = proposed_approval_3706(&proposed);
+        let draft = card_4829(&w, approval).await["action"]["expression"]["candidates"][0].clone();
+        let pick = json!({"draftId": draft["draftId"], "revision": draft["revision"]});
+        if ending == "rejected" {
+            let (status, receipt) = decide_4829(&w, &w.requester_jwt, approval, false, None).await;
+            assert_eq!(status, 200, "{receipt}");
+        } else {
+            sqlx::query("UPDATE approval SET expires_at = now() - interval '1 minute' WHERE id=$1")
+                .bind(approval)
+                .execute(&w.su)
+                .await
+                .unwrap();
+        }
+        let (status, receipt) = decide_4829(&w, &w.requester_jwt, approval, true, Some(pick)).await;
+        assert!(
+            (400..500).contains(&status),
+            "{ending}: a late approval of the link: {status} {receipt}"
+        );
+        assert_eq!(approval_status_4385(&w.su, approval).await, ending);
+        assert_eq!(
+            fetches_4829(&w),
+            0,
+            "{ending}: the link was never requested"
+        );
+    }
+}
+
+/// #5899: a link fetched after its approval and found wanting tells the card why, in the link's own
+/// closed reasons (ADR-0218 appendix C), and the request stays open (the person may upload a file
+/// or choose another candidate). The address is requested once: a second tap requests nothing.
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn an_agent_link_that_fails_after_its_approval_says_why_on_the_card() {
+    let w = world_4829().await;
+    type Reply = Result<Vec<u8>, momo_unfurl::FetchError>;
+    let rows: Vec<(&str, Reply, &str)> = vec![
+        (
+            "blocked",
+            Err(momo_unfurl::FetchError::Blocked),
+            "source_blocked",
+        ),
+        // The name resolves to a private address by the time it is fetched.
+        (
+            "inside",
+            Err(momo_unfurl::FetchError::OriginBlocked),
+            "source_blocked",
+        ),
+        (
+            "declared_big",
+            Err(momo_unfurl::FetchError::TooLarge),
+            "source_too_large",
+        ),
+        // A body over 5 MiB that a transport let through is still refused.
+        (
+            "streamed_big",
+            Ok(vec![0x47; momo_unfurl::SOURCE_MAX_BYTES + 1]),
+            "source_too_large",
+        ),
+        (
+            "page",
+            Ok(b"<!doctype html><html><body>x</body></html>".to_vec()),
+            "source_unsupported",
+        ),
+    ];
+    for (name, reply, want) in rows {
+        let url = format!("https://cdn.example.test/{name}.gif");
+        w.mock.replies.lock().unwrap().insert(url.clone(), reply);
+        let before = fetches_4829(&w);
+        let (status, proposed) = propose_4829(
+            &w,
+            json!([candidate_4829(
+                name,
+                Value::Null,
+                json!({"source": "url", "url": url})
+            )]),
+        )
+        .await;
+        assert_eq!(status, 200, "{name}: {proposed}");
+        let approval = proposed_approval_3706(&proposed);
+        let draft = card_4829(&w, approval).await["action"]["expression"]["candidates"][0].clone();
+        let pick = json!({"draftId": draft["draftId"], "revision": draft["revision"]});
+        let (status, receipt) =
+            decide_4829(&w, &w.requester_jwt, approval, true, Some(pick.clone())).await;
+        assert_eq!(
+            (status, receipt["status"].as_str().unwrap_or("")),
+            (409, want),
+            "{name}: {receipt}"
+        );
+        assert_eq!(
+            fetches_4829(&w),
+            before + 1,
+            "{name}: requested once, after the approval"
+        );
+        assert_eq!(
+            approval_status_4385(&w.su, approval).await,
+            "pending",
+            "{name}: the request stays open"
+        );
+        let card = card_4829(&w, approval).await;
+        let shown = &card["action"]["expression"]["candidates"][0];
+        assert_eq!(
+            (shown["state"].as_str(), shown["code"].as_str()),
+            (Some("manual_upload_required"), Some(want)),
+            "{name}: {card}"
+        );
+        assert_eq!(shown["origin"]["sourceUrl"], "https://cdn.example.test/");
+        let (status, receipt) = decide_4829(&w, &w.requester_jwt, approval, true, Some(pick)).await;
+        assert_eq!(
+            (status, receipt["status"].as_str().unwrap_or("")),
+            (409, "expression_preview_stale"),
+            "{name}: {receipt}"
+        );
+        assert_eq!(
+            fetches_4829(&w),
+            before + 1,
+            "{name}: a second tap requests nothing"
+        );
+        let (status, _) = decide_4829(&w, &w.requester_jwt, approval, false, None).await;
+        assert_eq!(status, 200, "{name}: rejected, to free the agent's places");
+    }
 }
 
 async fn set_policy_4829(w: &World4829, policy: &str) {
@@ -29160,10 +29331,6 @@ async fn expression_create_refuses_bad_proposals_and_keeps_its_budget_to_itself(
         "complete",
     )
     .await;
-    w.mock.replies.lock().unwrap().insert(
-        "https://inside.example.test/x.gif".into(),
-        Err(momo_unfurl::FetchError::OriginBlocked),
-    );
     let outsider: Uuid =
         sqlx::query_scalar("SELECT id FROM member WHERE workspace_id=$1 AND handle LIKE 'out-%'")
             .bind(ws)
@@ -29198,10 +29365,6 @@ async fn expression_create_refuses_bad_proposals_and_keeps_its_budget_to_itself(
         (
             "a port other than 443",
             one(json!({"source": "url", "url": "https://cdn.example.test:8443/x.gif"})),
-        ),
-        (
-            "a name that resolves private at the first hop",
-            one(json!({"source": "url", "url": "https://inside.example.test/x.gif"})),
         ),
         (
             "credentials in the link",
@@ -31790,13 +31953,13 @@ async fn expression_create_refuses_the_cheap_things_before_it_fetches_or_decodes
         0
     );
 
-    // (2) The live lease proposes: one fetch, and the run is parked. A parked run refuses
-    // every further proposal on its handle, and it does so before any outside request or
-    // decode: five repeats at once, each carrying a link and a heavy picture, fetch nothing
+    // (2) The live lease proposes (its link waits for a person, unfetched — #5899), and the run is
+    // parked. A parked run refuses every further proposal on its handle, and it does so before
+    // any decode: five repeats at once, each carrying a link and a heavy picture, fetch nothing
     // and leave a person's own upload (sent meanwhile) unhindered.
     let (status, proposed) = propose_with_4829(&w, &fresh, json!([link("first")])).await;
     assert_eq!(status, 200, "{proposed}");
-    assert_eq!(fetches_4829(&w), 1);
+    assert_eq!(fetches_4829(&w), 0);
     let approvals = count_4829(&w, "SELECT count(*) FROM approval WHERE workspace_id=$1").await;
     let drafts = count_4829(
         &w,
@@ -31835,7 +31998,7 @@ async fn expression_create_refuses_the_cheap_things_before_it_fetches_or_decodes
     }
     assert_eq!(
         fetches_4829(&w),
-        1,
+        0,
         "five refused repeats of a parked run made no outside request"
     );
     assert_eq!(
@@ -32042,8 +32205,9 @@ async fn expression_create_refuses_what_the_request_shows_before_it_reads_fetche
         "no draft was stored"
     );
 
-    // The controls: the same two sources, with nothing wrong, ARE read and fetched (so the zeros
-    // above are measurements), and a face that is in this conversation is not refused.
+    // The controls: the same file, with nothing wrong, IS read (so the zeros above are
+    // measurements; a link is never fetched by a proposal at all — #5899), and a face that is in
+    // this conversation is not refused.
     let (fetched, read) = (fetches_4829(&w), reads());
     let (status, proposed) = propose_4829(
         &w,
@@ -32053,8 +32217,8 @@ async fn expression_create_refuses_what_the_request_shows_before_it_reads_fetche
     assert_eq!(status, 200, "{proposed}");
     assert_eq!(
         (fetches_4829(&w), reads()),
-        (fetched + 1, read + 1),
-        "a good proposal reads its file and fetches its link"
+        (fetched, read + 1),
+        "a good proposal reads its file and leaves its link for a person"
     );
     let (fetched, read) = (fetches_4829(&w), reads());
     let (status, proposed) =
@@ -32063,7 +32227,7 @@ async fn expression_create_refuses_what_the_request_shows_before_it_reads_fetche
         status, 200,
         "a person who is in this conversation can be the face: {proposed}"
     );
-    assert_eq!((fetches_4829(&w), reads()), (fetched + 1, read));
+    assert_eq!((fetches_4829(&w), reads()), (fetched, read));
 }
 
 /// #4900: a video attachment is the manual card because of what it IS, decided from its first
@@ -32131,35 +32295,23 @@ async fn expression_create_makes_a_video_attachment_a_card_while_every_decoder_s
     drop(held);
 }
 
-/// **One preparation per agent at a time.** Two runs of one agent propose at once with a slow
-/// link: one is prepared, the other is told to come back (409 / -32004) without a request of its
-/// own; when the first is done the agent prepares again at once.
+/// **One preparation per agent at a time.** Two runs of one agent propose at once with a picture
+/// that is slow to decode (a link is no longer slow: a proposal does not fetch it, #5899): one is
+/// prepared, the other is told to come back (409 / -32004) with nothing stored; when the first is
+/// done the agent prepares again at once.
 #[tokio::test]
 #[ignore = "needs verifier-owned isolated PostgreSQL 18"]
 async fn expression_create_prepares_one_proposal_per_agent_at_a_time() {
     let w = world_4829().await;
-    w.mock
-        .replies
-        .lock()
-        .unwrap()
-        .insert("https://cdn.example.test/ok.gif".into(), Ok(gif_4829()));
-    w.mock
-        .delay_ms
-        .store(700, std::sync::atomic::Ordering::Relaxed);
     mention_4829(&w).await;
     mention_4829(&w).await;
     let handles = claim_handles_4829(&w).await;
     assert_eq!(handles.len(), 2, "two mentions, two jobs");
-    let link = |name: &str| {
-        candidate_4829(
-            name,
-            Value::Null,
-            json!({"source": "url", "url": "https://cdn.example.test/ok.gif"}),
-        )
-    };
+    let heavy = heavy_png_4829();
+    let slow = |name: &str| candidate_4829(name, Value::Null, generated_4829(&heavy, "p"));
     let (a, b) = tokio::join!(
-        propose_with_4829(&w, &handles[0], json!([link("slow_one")])),
-        propose_with_4829(&w, &handles[1], json!([link("slow_two")])),
+        propose_with_4829(&w, &handles[0], json!([slow("slow_one")])),
+        propose_with_4829(&w, &handles[1], json!([slow("slow_two")])),
     );
     let code = |answer: &Value| answer["error"]["code"].as_i64().unwrap_or(0);
     let mut answers = vec![(a.0, code(&a.1)), (b.0, code(&b.1))];
@@ -32168,11 +32320,6 @@ async fn expression_create_prepares_one_proposal_per_agent_at_a_time() {
         answers,
         vec![(200, 0), (409, -32004)],
         "one proposal is prepared, the other is told to come back: {a:?} {b:?}"
-    );
-    assert_eq!(
-        fetches_4829(&w),
-        1,
-        "the one that was told to come back made no outside request"
     );
     assert_eq!(
         count_4829(&w, "SELECT count(*) FROM approval WHERE workspace_id=$1").await,
@@ -32188,9 +32335,6 @@ async fn expression_create_prepares_one_proposal_per_agent_at_a_time() {
     );
 
     // The place went back with the first preparation: the same agent prepares again at once.
-    w.mock
-        .delay_ms
-        .store(0, std::sync::atomic::Ordering::Relaxed);
     let (status, proposed) = propose_4829(
         &w,
         json!([candidate_4829(
@@ -32622,7 +32766,8 @@ async fn expression_create_takes_a_gif_and_a_video_attachment_as_sources() {
 /// **A link's fetch slot goes back as soon as the bytes are here**, before the wait for a decoder
 /// slot. The eight fetch slots are process-wide and a person's `/import` needs one; holding one
 /// through somebody else's decoding queue would let a slow picture starve them. The picture
-/// here is tiny on the wire and slow to decode, and the slot count is read while it decodes.
+/// here is tiny on the wire and slow to decode, and the slot count is read while it decodes. An
+/// agent's link is fetched by the decision that approves it (#5899), so that is where it is read.
 #[tokio::test]
 #[ignore = "needs verifier-owned isolated PostgreSQL 18"]
 async fn expression_create_gives_the_fetch_slot_back_before_it_waits_for_the_decoder() {
@@ -32631,21 +32776,27 @@ async fn expression_create_gives_the_fetch_slot_back_before_it_waits_for_the_dec
         "https://cdn.example.test/heavy.png".into(),
         Ok(heavy_png_4829()),
     );
+    let (status, proposed) = propose_4829(
+        &w,
+        json!([candidate_4829(
+            "heavy_link",
+            Value::Null,
+            json!({"source": "url", "url": "https://cdn.example.test/heavy.png"})
+        )]),
+    )
+    .await;
+    assert_eq!(status, 200, "{proposed}");
+    let approval = proposed_approval_3706(&proposed);
+    let draft = card_4829(&w, approval).await["action"]["expression"]["candidates"][0].clone();
+    let pick = json!({"draftId": draft["draftId"], "revision": draft["revision"]});
     let slots = momo_expressions::intake::import_slots();
     assert_eq!(
         slots.available_permits(),
         momo_expressions::intake::IMPORTS_IN_FLIGHT,
         "no fetch is in flight when the test starts"
     );
-    let ((status, proposed), (during_fetch_done, took_after_fetch)) = tokio::join!(
-        propose_4829(
-            &w,
-            json!([candidate_4829(
-                "heavy_link",
-                Value::Null,
-                json!({"source": "url", "url": "https://cdn.example.test/heavy.png"})
-            )])
-        ),
+    let ((status, receipt), (during_fetch_done, took_after_fetch)) = tokio::join!(
+        decide_4829(&w, &w.requester_jwt, approval, true, Some(pick)),
         async {
             // The fetch is made at once (the mock answers at once); what follows is the decode.
             while fetches_4829(&w) == 0 {
@@ -32656,11 +32807,9 @@ async fn expression_create_gives_the_fetch_slot_back_before_it_waits_for_the_dec
             (slots.available_permits(), fetched_at.elapsed())
         }
     );
-    assert_eq!(status, 200, "{proposed}");
-    let card = card_4829(&w, proposed_approval_3706(&proposed)).await;
     assert_eq!(
-        card["action"]["expression"]["candidates"][0]["state"], "ready",
-        "the picture was really decoded: {card}"
+        status, 200,
+        "the picture was really decoded and registered: {receipt}"
     );
     assert!(
         took_after_fetch >= std::time::Duration::from_millis(250),

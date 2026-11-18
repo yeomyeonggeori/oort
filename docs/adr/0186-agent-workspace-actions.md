@@ -1373,6 +1373,8 @@ V3-2a·V4의 매직/치수/할당 한도·재인코딩·서버 PG 보관·불변
 
 사람은 후보 하나를 고른 뒤 기존 결정 요청에 `expressionChoice:{draftId,revision,sha256}`(`Decision`; 사람이 고른 종류 `kind?`가 선택 키로 더해졌다: ADR-0218 증보 4 §10)를 더한다. 이 행동 외 decision에는 이 입력을 받지 않는다. 결정 tx에서 approval pending·TTL·현재 멤버십/정책/당사자·후보 소속·revision·저장 바이트 재해시·이름/quota를 다시 증명한다. 실패는 기존 receipt/409 경로이고 승인 소모·부분 등록이 없다. 성공은 한 표현만 active로 만들고 나머지 draft 바이트를 회수한다. 거절·만료·취소·TTL sweep도 바이트를 회수한다.
 
+**예외 — 아직 가져오지 않은 링크 후보(2026-11-19, #5899, [ADR-0218 증보 12 §18](0218-workspace-expressions.md))**: 에이전트가 올린 그림 링크는 사람이 승인한 뒤에 가져온다. 그 후보는 그림이 없어서 사람이 호스트를 보고 승인하고, 결정 요청은 `expressionChoice:{draftId,revision,kind?}`(해시 없음)다. 서버가 가져와 검사한 뒤 자기가 계산한 해시로 위의 증명을 처음부터 다시 지난다. 그림이 있는 후보는 지금처럼 해시가 필수다.
+
 ### X8-3. 새 승인 역할 `expression_adder`
 
 이 역할은 영구 멤버 역할이 아닌 **동적 판정 이름**이다. 현재 카드 채널의 사람 멤버이며 게스트가 아니고, 추가 정책이 members이면 일반 멤버도, admins이면 admin만 충족한다. 정책을 제안 뒤 좁혔으면 결정/푸시/미리보기 때 현재 사실을 다시 읽는다. 기존 admin/agent_editor/requesting_member/workspace_operator에 이 역할을 더하고 `gate_plan`·결정 허용·승인 푸시 대상이 같은 술어를 쓰게 한다.
