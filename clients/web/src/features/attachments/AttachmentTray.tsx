@@ -48,6 +48,7 @@ import {
   type CardKind,
   type StripFade,
 } from "./trayModel";
+import { Tooltip } from "@/design/ui/tooltip";
 
 // =====================================================================
 // 입력창 안 첨부 줄 (ADR-0151 D2 / #1202 · #3820 · #5200 Codex 입력창).
@@ -403,19 +404,20 @@ export function AttachButton({
           onPick(picked);
         }}
       />
-      <Button
-        type="button"
-        variant="ghost"
-        size="icon"
-        className={cn("tap-target", className)}
-        disabled={disabled ?? false}
-        onClick={() => inputRef.current?.click()}
-        aria-label={ATTACH_COPY.attach}
-        title={ATTACH_COPY.attach}
-        data-testid="composer-attach"
-      >
-        <Plus />
-      </Button>
+      <Tooltip label={ATTACH_COPY.attach} side="bottom">
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
+          className={cn("tap-target", className)}
+          disabled={disabled ?? false}
+          onClick={() => inputRef.current?.click()}
+          aria-label={ATTACH_COPY.attach}
+          data-testid="composer-attach"
+        >
+          <Plus />
+        </Button>
+      </Tooltip>
     </>
   );
 }

@@ -12,6 +12,7 @@ import {
 import { memberFor, type Directory } from "@/features/workspace/useWorkspace";
 import { useFormatMessage } from "@/i18n/useFormatMessage";
 import { cn } from "@/design/lib/cn";
+import { Tooltip } from "@/design/ui/tooltip";
 
 // =============================================================================
 // 인용 = 답장 카드의 **윗칸 머리** (ADR-0148 · goal B3 W1 → #5381 Q4, owner 2026-11-05).
@@ -346,16 +347,17 @@ export function QuoteChip({
       <div className="flex min-w-0 flex-1 flex-col text-left text-meta text-ink-muted">
         <QuoteHeadContent block={block} directory={directory} />
       </div>
-      <button
-        type="button"
-        onClick={onCancel}
-        aria-label={QUOTE_CANCEL_LABEL}
-        title={QUOTE_CANCEL_LABEL}
-        data-testid="composer-quote-cancel"
-        className="flex size-control-sm shrink-0 items-center justify-center rounded-sm text-ink-muted press hover:bg-surface-hover hover:text-ink focus-visible:focus-ring"
-      >
-        <X className="size-4" aria-hidden="true" />
-      </button>
+      <Tooltip label={QUOTE_CANCEL_LABEL} side="bottom">
+        <button
+          type="button"
+          onClick={onCancel}
+          aria-label={QUOTE_CANCEL_LABEL}
+          data-testid="composer-quote-cancel"
+          className="flex size-control-sm shrink-0 items-center justify-center rounded-sm text-ink-muted press hover:bg-surface-hover hover:text-ink focus-visible:focus-ring"
+        >
+          <X className="size-4" aria-hidden="true" />
+        </button>
+      </Tooltip>
     </div>
   );
 }
