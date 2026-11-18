@@ -403,6 +403,60 @@ export function applyTombstone(
   return { ...state, messages: next };
 }
 
+/**
+ * 다시 읽은 기록 쪽을 **이미 든 줄에만** 다시 투영한다 (#5885, ADR-0177 증보 2026-11-14 D17 「보관하지 않아요」 · D22 한계 5).
+ *
+ * 재연결한 기기가 끊긴 사이 개인 채널로만 간 수정·지움을 맞추는 문이다. {@link reconcileMessages} 와 다른 점 셋:
+ * - **줄을 들이지 않는다.** seq 와 id 가 둘 다 같은 든 줄만 바꾼다. 들이면 `oldestSeq`·`newestSeq` 커서가 움직인다
+ *   ({@link applyEditedMessage} 의 까닭과 같다). 새 글은 꼬리 읽기·실시간이 들인다.
+ * - **같으면 그대로.** 바꿀 줄이 없으면 같은 state 를, 바뀐 줄만 새 객체로, 나머지 줄은 같은 객체로 돌려준다 —
+ *   다시 읽은 결과가 같으면 그리기가 0이다.
+ * - **묘비는 되살리지 않는다.** 든 줄이 이미 지워졌으면 그대로 둔다(서버에 「지운 뒤 고침」은 없다). 기록 쪽의 묘비
+ *   (`state: "deleted"`)는 든 줄을 묘비로 바꾼다 — 기록 라우트는 묘비를 그대로 싣는다.
+ *
+ * `skip` 은 다시 읽는 동안 실시간으로 바뀐 줄의 id(소문자)다. 그 줄은 읽은 답보다 새것이라 덮지 않는다.
+ */
+export function reprojectHeldRows(
+  state: TimelineState,
+  page: readonly Message[],
+  skip: ReadonlySet<string> = new Set()
+): TimelineState {
+  let next: Message[] | null = null;
+  for (const incoming of page) {
+    const list = next ?? state.messages;
+    const idx = lowerBound(list, incoming.seq);
+    const held = list[idx];
+    if (held === undefined || held.seq !== incoming.seq) continue;
+    if (!uuidEq(held.id, incoming.id)) continue;
+    if (skip.has(held.id.toLowerCase())) continue;
+    if (held.state === "deleted") continue;
+    const merged = keepHeldProjection(held, incoming);
+    if (sameProjection(merged, held)) continue;
+    next ??= state.messages.slice();
+    next[idx] = merged;
+  }
+  return next === null ? state : { ...state, messages: next };
+}
+
+/** JSON 모양 값의 같음. `undefined` · `null` 칸은 없는 칸과 같다(투영마다 빈 칸을 싣는 방식이 달라도 같은 줄이다). */
+export function sameProjection(a: unknown, b: unknown): boolean {
+  if (a === b) return true;
+  if ((a === null || a === undefined) && (b === null || b === undefined)) return true;
+  if (typeof a !== "object" || typeof b !== "object" || a === null || b === null) return false;
+  if (Array.isArray(a) !== Array.isArray(b)) return false;
+  if (Array.isArray(a) && Array.isArray(b)) {
+    if (a.length !== b.length) return false;
+    return a.every((item, i) => sameProjection(item, b[i]));
+  }
+  const left = a as Record<string, unknown>;
+  const right = b as Record<string, unknown>;
+  const keys = new Set([...Object.keys(left), ...Object.keys(right)]);
+  for (const key of keys) {
+    if (!sameProjection(left[key], right[key])) return false;
+  }
+  return true;
+}
+
 // ---- message action affordances (B11) --------------------------------------
 //
 // The server is the authority: it answers 403 to anyone but the author and 400

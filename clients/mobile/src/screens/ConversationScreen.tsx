@@ -2418,6 +2418,7 @@ export default function ConversationScreen({
               working={working}
               reactions={timeline.reactions}
               pins={timeline.pins}
+              onVisibleSeqRange={timeline.noteVisibleRange}
               // 링크 카드(#4883) — 목록이 줄마다 자기 메시지의 카드를 유도한다.
               unfurls={timeline.unfurls}
               myMemberId={member.id}

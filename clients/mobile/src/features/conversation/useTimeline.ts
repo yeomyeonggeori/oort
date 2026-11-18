@@ -30,6 +30,16 @@ import {
   type PinMap,
 } from '@momo/core/features/timeline/pins';
 import {applyThreadReadState} from '@momo/core/features/timeline/threadSummary';
+import {reprojectHeldRows} from '@momo/core/features/timeline/model';
+import {
+  createReconnectResync,
+  readOpenConversation,
+  resyncHistoryQuery,
+  resyncPinMap,
+  resyncReactionMap,
+  type ReconnectResync,
+  type VisibleSeqRange,
+} from '@momo/core/features/timeline/reconnectResync';
 import {isMessageBeforeLeave, pendingAfterSendFailure} from '@momo/core/features/channels/dmLeave';
 import {
   pruneRecoveryMarkers,
@@ -337,6 +347,10 @@ export interface UseTimelineResult {
   /** Read the channel's pins again. The retry behind the failure sentence. */
   reloadPins: () => void;
   /**
+   * 화면에 보이는 메시지 줄의 seq 범위를 알린다(#5885). 재연결 뒤 다시 읽기가 이 구간을 읽는다. `null` 이면 가장 새 쪽을 읽는다.
+   */
+  noteVisibleRange: (range: VisibleSeqRange | null) => void;
+  /**
    * Pin or unpin one message. **Throws** on failure, after having put the list
    * back where it was — the caller turns the error into the sentence.
    */
@@ -397,6 +411,17 @@ export function useTimeline(
   const [pinsStatus, setPinsStatus] = useState<PinListStatus>('loading');
   /** Which read owns the answer. See `loadPins`. */
   const pinReadRef = useRef(0);
+  // 재연결 뒤 다시 읽기(#5885, 코어 `reconnectResync` — 웹과 같은 판정). 구독 효과가 대화마다 하나 만든다. 프레임 · 내 낙관 적용이 바꾼
+  // 글은 `touch` 로 알려서, 읽는 동안 바뀐 글을 읽은 답(더 옛것)이 덮지 않게 한다.
+  const resyncRef = useRef<ReconnectResync | null>(null);
+  const touchResync = useCallback((messageId: string) => {
+    resyncRef.current?.touch(messageId);
+  }, []);
+  // 화면에 보이는 줄의 seq 범위(`Timeline` 이 알린다). 렌더를 일으키지 않게 ref 로 든다.
+  const visibleRangeRef = useRef<VisibleSeqRange | null>(null);
+  const noteVisibleRange = useCallback((range: VisibleSeqRange | null) => {
+    visibleRangeRef.current = range;
+  }, []);
 
   // Authoritative newest-seq cursor, updated at MERGE time rather than at render
   // time, so a resubscribe firing between renders still reads truth. A send that
@@ -472,8 +497,9 @@ export function useTimeline(
   // 지나지 않는다. 지나면 못 찾은 줄의 편집이 꼬리 커서를 앞세우고 「든 줄」로 등록된다. 든 줄에 대한
   // 장부는 모두 이미 되어 있다. 판정은 코어 한 곳이다.
   const applyEdited = useCallback((edited: Message) => {
+    touchResync(edited.id);
     setState(s => applyEditedMessage(s, edited));
-  }, []);
+  }, [touchResync]);
 
   // 새 메시지가 오지 않아도 표지는 오래 남지 않는다 — 일정 시간 뒤에 스스로 걷힌다.
   const markerTimersRef = useRef<Set<ReturnType<typeof setTimeout>>>(new Set());
@@ -891,9 +917,10 @@ export function useTimeline(
   // ---- message actions (goal RN-C5) -----------------------------------------
 
   const applyReaction = useCallback((change: ReactionChange) => {
+    touchResync(change.messageId);
     reactionsRef.current = applyReactionDelta(reactionsRef.current, change);
     setReactions(reactionsRef.current);
-  }, []);
+  }, [touchResync]);
 
   const applyPins = useCallback((next: PinMap) => {
     pinsRef.current = next;
@@ -946,6 +973,7 @@ export function useTimeline(
    */
   const togglePin = useCallback(
     async (message: Message) => {
+      touchResync(message.id);
       if (isPinned(pinsRef.current, message.id)) {
         const previous = pinsRef.current;
         applyPins(removePin(previous, message.id));
@@ -955,12 +983,14 @@ export function useTimeline(
           applyPins(previous);
           throw error;
         }
+        touchResync(message.id);
         return;
       }
       const delta = await setPin(workspaceId, message.id, 'pinned');
+      touchResync(message.id);
       if (delta.pinned) applyPins(applyPinned(pinsRef.current, delta.pinned));
     },
-    [workspaceId, applyPins],
+    [workspaceId, applyPins, touchResync],
   );
 
   const toggleReaction = useCallback(
@@ -982,6 +1012,8 @@ export function useTimeline(
       applyReaction(change);
       try {
         await setReaction(workspaceId, message.id, emoji, action);
+        // 다시 읽기가 이 요청보다 먼저 읽기 시작했으면 그 답에는 이 반응이 없다 — 그 답이 덮지 않게 한 번 더 알린다(#5885).
+        touchResync(message.id);
         if (action === 'added') expressionStore?.recordSuccess(`reaction:${message.id}:${emoji}:${Date.now()}`, emoji);
       } catch (error) {
         // Put it back, and say so on the row. The inverse is safe even if the
@@ -995,7 +1027,7 @@ export function useTimeline(
         throw error;
       }
     },
-    [workspaceId, authorMemberId, applyReaction, expressionStore],
+    [workspaceId, authorMemberId, applyReaction, expressionStore, touchResync],
   );
 
   const editBody = useCallback(
@@ -1011,6 +1043,7 @@ export function useTimeline(
   const removeMessage = useCallback(
     async (message: Message) => {
       const tombstone = await deleteMessageRequest(workspaceId, message.id);
+      touchResync(message.id);
       applyBatch([tombstone]);
       // The server deletes the reaction rows with the message, so chips for a
       // tombstone would be counts for rows that no longer exist.
@@ -1022,7 +1055,7 @@ export function useTimeline(
       applyPins(removePin(pinsRef.current, message.id));
       clearUnfurls(message.id);
     },
-    [workspaceId, applyBatch, applyPins, clearUnfurls],
+    [workspaceId, applyBatch, applyPins, clearUnfurls, touchResync],
   );
 
   const loadReplies = useCallback(
@@ -1180,6 +1213,7 @@ export function useTimeline(
     setReactions(reactionsRef.current);
     applyPins(emptyPins());
     resetUnfurls();
+    visibleRangeRef.current = null;
 
     // 복구되지 않은 (재)구독은 REST 로 꼬리를 메운다. 머리 페이지가 이미 왔으면
     // 곧바로, 아직이면 **머리가 온 뒤** 그 끝에서(#2633).
@@ -1257,6 +1291,44 @@ export function useTimeline(
     // 이슈 #1146 M2 — 「absent」 is now something the list can say out loud.
     loadPins(channelId);
 
+    // 재연결 뒤 다시 읽기(#5885, ADR-0177 증보 D17 「보관하지 않아요」 · D22 한계 5). 개인 채널로 돌려진 프레임은 복구로 다시 오지 않으므로,
+    // 다시 붙으면(복구 여부와 무관하게, 앱이 앞으로 돌아온 재연결 포함) 화면에 든 구간의 이력 · 반응 · 고정을 한 번 읽어 **든 줄만** 맞춘다.
+    // 같으면 같은 객체라 그리기 0, 실패는 조용히(코어 `readOpenConversation`). 언제 · 몇 번은 코어 `createReconnectResync` 가 정한다(웹과 같다).
+    const resync = createReconnectResync(async () => {
+      const read = await readOpenConversation({
+        query: resyncHistoryQuery(newestSeqRef.current, visibleRangeRef.current),
+        fetchMessages: query => fetchMessages(workspaceId, channelId, query),
+        fetchReactions: () => fetchReactionSnapshot(workspaceId, channelId),
+        fetchPins: () => fetchChannelPins(workspaceId, channelId),
+      });
+      if (cancelled) return;
+      const skip = resync.touched();
+      if (read.messages !== null) {
+        const rows = read.messages.filter(
+          m => !isBelowHistoryFloor(m.seq, historyFloorRef.current),
+        );
+        setState(s => reprojectHeldRows(s, rows, skip));
+        for (const m of rows) {
+          if (m.state === 'deleted' && !skip.has(m.id.toLowerCase())) clearUnfurls(m.id);
+        }
+      }
+      if (read.reactions !== null) {
+        const next = resyncReactionMap(reactionsRef.current, read.reactions, skip);
+        if (next !== reactionsRef.current) {
+          reactionsRef.current = next;
+          setReactions(next);
+        }
+      }
+      if (read.pins !== null) {
+        const next = resyncPinMap(pinsRef.current, read.pins, skip);
+        if (next !== pinsRef.current) applyPins(next);
+      }
+    });
+    resyncRef.current = resync;
+    // 이 구독에서 첫 `subscribed` 를 지났는가(또는 이미 살아 있는 구독에 붙었는가). 그 뒤의 `subscribed` 는 모두 재연결이다. 첫 구독은 위
+    // 머리 · 반응 · 고정 읽기가 이미 읽는다.
+    let resyncArmed = false;
+
     // 2) The realtime rail, with resume healing.
     const unsub = rail.subscribeChannel(workspaceId, channelId, {
       onSubscribed: ctx => {
@@ -1264,6 +1336,8 @@ export function useTimeline(
         const recovered = ctx.recovered === true;
         const isFirst = firstSubscribeRef.current;
         firstSubscribeRef.current = false;
+        if (resyncArmed) resync.reconnected();
+        resyncArmed = true;
         setResume(r => ({
           ...r,
           lastRecovered: recovered,
@@ -1318,6 +1392,7 @@ export function useTimeline(
         // 이 프레임의 seq 는 대상 메시지의 것이다(코어 `realtimeEvents`) - 하한 아래 대상은 화면에 없는 글이다.
         if (isBelowHistoryFloor(event.seq, historyFloorRef.current)) return;
         const messageId = event.payload.message_id;
+        touchResync(messageId);
         setState(s => applyTombstone(s, messageId, event.ts));
         reactionsRef.current = clearMessageReactions(
           reactionsRef.current,
@@ -1333,6 +1408,7 @@ export function useTimeline(
       onReaction: event => {
         if (cancelled) return;
         if (isBelowHistoryFloor(event.seq, historyFloorRef.current)) return;
+        touchResync(event.payload.message_id);
         reactionsRef.current = applyReactionDelta(reactionsRef.current, {
           messageId: event.payload.message_id,
           memberId: event.payload.member_id,
@@ -1348,6 +1424,7 @@ export function useTimeline(
         if (cancelled) return;
         // 고정 목록은 프레임 자체가 목록 항목이라, 하한 아래 글의 고정이 목록에 서지 않게 여기서 거른다.
         if (isBelowHistoryFloor(event.seq, historyFloorRef.current)) return;
+        touchResync(event.payload.message_id);
         if (event.type === 'message.pinned') {
           applyPins(
             applyPinned(pinsRef.current, pinnedPayloadToWire(event.payload)),
@@ -1355,6 +1432,9 @@ export function useTimeline(
         } else {
           applyPins(removePin(pinsRef.current, event.payload.message_id));
         }
+      },
+      onAttachedLive: () => {
+        resyncArmed = true;
       },
       // ADR-0170 D5 — 서버가 만든 카드(또는 작성자의 지우기)가 같은 레일로 온다. 전체 투영이라 통째로 바꾼다.
       onUnfurl: event => {
@@ -1366,6 +1446,8 @@ export function useTimeline(
 
     return () => {
       cancelled = true;
+      resync.dispose();
+      if (resyncRef.current === resync) resyncRef.current = null;
       unsub();
     };
   }, [
@@ -1386,6 +1468,7 @@ export function useTimeline(
     reloadNonce,
     authorMemberId,
     syncFailureKinds,
+    touchResync,
   ]);
 
   /**
@@ -1525,6 +1608,7 @@ export function useTimeline(
     pins,
     pinsStatus,
     reloadPins,
+    noteVisibleRange,
     togglePin,
     unfurls,
     removeUnfurls,

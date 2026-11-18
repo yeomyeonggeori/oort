@@ -1657,6 +1657,7 @@ export function ChatShell() {
               reactions={stressCount > 0 ? undefined : timeline.reactions}
               pins={stressCount > 0 ? undefined : timeline.pins}
               unfurls={stressCount > 0 ? undefined : timeline.unfurls}
+              onVisibleSeqRange={stressCount > 0 ? undefined : timeline.noteVisibleRange}
               actions={
                 stressCount > 0
                   ? undefined
