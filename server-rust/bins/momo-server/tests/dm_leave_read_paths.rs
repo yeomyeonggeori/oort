@@ -120,6 +120,8 @@ const PATHS: &[(&str, &str, &str, usize, Class, &str)] = &[
     ("crates/momo-messaging/src/attachment_reclaim.rs", "reclaim_unbound_attachment_in_tx", "attachment", 2, Machine, "reclaim sweeper"),
     ("crates/momo-messaging/src/attachment_reclaim.rs", "tally_sql", "attachment", 1, Machine, "reclaim sweeper"),
     ("crates/momo-messaging/src/attachment_reclaim.rs", "workspaces_sql", "attachment", 1, Machine, "reclaim sweeper"),
+    ("crates/momo-messaging/src/channel_preview.rs", "preview_channel_in_tx", "attachment", 1, Floor, "the same statement joins message"),
+    ("crates/momo-messaging/src/channel_preview.rs", "preview_channel_in_tx", "message", 1, Floor, "channel preview route (human only, open public channels)"),
     ("crates/momo-messaging/src/hosted_inbox.rs", "append_message_reference_in_tx", "message", 1, Machine, "hosted agent inbox"),
     ("crates/momo-messaging/src/hosted_inbox.rs", "list_hosted_inbox_in_tx", "message", 1, Machine, "hosted agent inbox"),
     ("crates/momo-messaging/src/inbox.rs", "VISIBLE_FROM_WHERE", "message", 2, Floor, "inbox list and count"),
