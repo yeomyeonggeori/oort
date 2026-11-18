@@ -36,6 +36,7 @@
   "channels.rename.network": "无法重命名。{reason}",
   "channels.rename.generic": "无法重命名。请重试。",
   "channels.rename.aria": "重命名 {name} 频道",
+  "channels.rename.done": "已重命名频道。",
   "channels.createFailure.duplicate": "已有同名频道。请换一个名称再试。",
   "channels.createFailure.forbidden": "你没有创建频道的权限。请联系工作区所有者或管理员。",
   "channels.createFailure.rateLimited": "请求过于频繁，请稍后再试。",

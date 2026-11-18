@@ -526,6 +526,12 @@ export const catalog: MessageCatalog = {
       "value": "新名稱會立即顯示在側邊欄和頻道標題中。"
     }
   ],
+  "channels.rename.done": [
+    {
+      "type": 0,
+      "value": "已重新命名頻道。"
+    }
+  ],
   "channels.rename.fieldLabel": [
     {
       "type": 0,

@@ -36,6 +36,7 @@
   "channels.rename.network": "Couldn't rename the channel. {reason}",
   "channels.rename.generic": "Couldn't rename the channel. Try again.",
   "channels.rename.aria": "Rename the {name} channel",
+  "channels.rename.done": "Channel renamed.",
   "channels.createFailure.duplicate": "A channel with this name already exists. Try a different name.",
   "channels.createFailure.forbidden": "You don't have permission to create channels. Ask a workspace owner or admin.",
   "channels.createFailure.rateLimited": "Too many requests. Try again in a moment.",

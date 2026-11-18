@@ -243,6 +243,7 @@ export const messageKeys = [
   "channels.rename.busy",
   "channels.rename.cancel",
   "channels.rename.description",
+  "channels.rename.done",
   "channels.rename.fieldLabel",
   "channels.rename.forbidden",
   "channels.rename.generalLocked",
@@ -2023,6 +2024,7 @@ export const argumentSpecs = {
   "channels.rename.busy": {},
   "channels.rename.cancel": {},
   "channels.rename.description": {},
+  "channels.rename.done": {},
   "channels.rename.fieldLabel": {},
   "channels.rename.forbidden": {},
   "channels.rename.generalLocked": {},
@@ -4252,6 +4254,7 @@ export interface MessageArgs {
   "channels.rename.busy": Record<string, never>;
   "channels.rename.cancel": Record<string, never>;
   "channels.rename.description": Record<string, never>;
+  "channels.rename.done": Record<string, never>;
   "channels.rename.fieldLabel": Record<string, never>;
   "channels.rename.forbidden": Record<string, never>;
   "channels.rename.generalLocked": Record<string, never>;

@@ -1639,6 +1639,12 @@ export const catalog: MessageCatalog = {
       "value": "새 이름은 사이드바와 채널 머리에 바로 보여요."
     }
   ],
+  "channels.rename.done": [
+    {
+      "type": 0,
+      "value": "채널 이름을 바꿨어요."
+    }
+  ],
   "channels.rename.fieldLabel": [
     {
       "type": 0,

@@ -572,6 +572,12 @@ export const catalog: MessageCatalog = {
       "value": "El nuevo nombre se muestra de inmediato en la barra lateral y en el encabezado del canal."
     }
   ],
+  "channels.rename.done": [
+    {
+      "type": 0,
+      "value": "Se cambió el nombre del canal."
+    }
+  ],
   "channels.rename.fieldLabel": [
     {
       "type": 0,

@@ -621,6 +621,8 @@ const SURFACE_KEYS: Record<ChannelActionSurface, ReadonlySet<ChannelActionKey>> 
   // 헤더 ⋮ 는 정의상 이미 그 안에 들어와 있는 사람의 것이다. 복사 셋과 DM 닫기(#3963)도
   // 같은 갈래다. 「읽지 않음으로 표시」는 읽음 처리의 반대 방향이라 같은 이유로 여기에만 선다.
   row: new Set<ChannelActionKey>([
+    // 「이름 바꾸기」(#5835)는 `canRename` 을 넘긴 표면에만 선다: 폰의 행 시트 · 대화 ⋮ 시트(웹 행 메뉴는 넘기지 않으므로 서지 않는다).
+    "rename",
     "copy-name",
     "copy-link",
     "copy-id",

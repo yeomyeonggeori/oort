@@ -36,6 +36,7 @@
   "channels.rename.network": "No se pudo cambiar el nombre. {reason}",
   "channels.rename.generic": "No se pudo cambiar el nombre. Inténtalo de nuevo.",
   "channels.rename.aria": "Cambiar el nombre del canal {name}",
+  "channels.rename.done": "Se cambió el nombre del canal.",
   "channels.createFailure.duplicate": "Ya existe un canal con ese nombre. Prueba con otro nombre.",
   "channels.createFailure.forbidden": "No tienes permiso para crear canales. Pídelo a un propietario o administrador del espacio de trabajo.",
   "channels.createFailure.rateLimited": "Hay demasiadas solicitudes. Inténtalo de nuevo en unos momentos.",

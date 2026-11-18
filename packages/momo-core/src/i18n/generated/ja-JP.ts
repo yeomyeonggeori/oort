@@ -522,6 +522,12 @@ export const catalog: MessageCatalog = {
       "value": "新しい名前はサイドバーとチャンネルヘッダーにすぐ反映されます。"
     }
   ],
+  "channels.rename.done": [
+    {
+      "type": 0,
+      "value": "チャンネル名を変更しました。"
+    }
+  ],
   "channels.rename.fieldLabel": [
     {
       "type": 0,

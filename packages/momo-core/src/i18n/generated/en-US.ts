@@ -1706,6 +1706,12 @@ export const catalog: MessageCatalog = {
       "value": "The new name shows in the sidebar and channel header right away."
     }
   ],
+  "channels.rename.done": [
+    {
+      "type": 0,
+      "value": "Channel renamed."
+    }
+  ],
   "channels.rename.fieldLabel": [
     {
       "type": 0,

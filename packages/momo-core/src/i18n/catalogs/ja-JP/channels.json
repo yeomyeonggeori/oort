@@ -36,6 +36,7 @@
   "channels.rename.network": "変更できませんでした。{reason}",
   "channels.rename.generic": "変更できませんでした。もう一度お試しください。",
   "channels.rename.aria": "{name} チャンネルの名前を変更",
+  "channels.rename.done": "チャンネル名を変更しました。",
   "channels.createFailure.duplicate": "同じ名前のチャンネルがすでにあります。別の名前でもう一度お試しください。",
   "channels.createFailure.forbidden": "チャンネルを作成する権限がありません。ワークスペースのオーナーまたは管理者に依頼してください。",
   "channels.createFailure.rateLimited": "リクエストが多すぎます。しばらくしてからもう一度お試しください。",

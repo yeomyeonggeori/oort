@@ -36,6 +36,7 @@
   "channels.rename.network": "바꾸지 못했어요. {reason}",
   "channels.rename.generic": "바꾸지 못했어요. 다시 시도해 주세요.",
   "channels.rename.aria": "{name} 채널의 이름 바꾸기",
+  "channels.rename.done": "채널 이름을 바꿨어요.",
   "channels.createFailure.duplicate": "같은 이름의 채널이 이미 있습니다. 다른 이름으로 다시 시도하세요.",
   "channels.createFailure.forbidden": "채널을 만들 권한이 없습니다. 워크스페이스 소유자나 관리자에게 요청하세요.",
   "channels.createFailure.rateLimited": "요청이 너무 잦습니다. 잠시 뒤에 다시 시도하세요.",

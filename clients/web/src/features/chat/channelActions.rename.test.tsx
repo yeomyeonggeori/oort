@@ -73,8 +73,6 @@ it.each([
     if (shown) {
       expect(header.find((item) => item.key === "rename")).toMatchObject({ label: (enChannels as Record<string, string>)["channels.rename.action"] });
     }
-    // 행 우클릭 메뉴에는 이 줄이 없다.
-    expect(view.actions().items("row").some((item) => item.key === "rename")).toBe(false);
   } finally {
     view.cleanup();
   }
@@ -84,6 +82,8 @@ it("다이얼로그를 세울 손이 없는 표면에는 줄이 서지 않는다
   const view = mountActions(channelRow(), "owner", false);
   try {
     expect(view.actions().items("header").some((item) => item.key === "rename")).toBe(false);
+    // 사이드바 행 우클릭 메뉴는 이 손을 넘기지 않는다 — 폰 시트만 같은 열쇠를 읽는다.
+    expect(view.actions().items("row").some((item) => item.key === "rename")).toBe(false);
   } finally {
     view.cleanup();
   }

@@ -36,6 +36,7 @@
   "channels.rename.network": "無法重新命名。{reason}",
   "channels.rename.generic": "無法重新命名。請再試一次。",
   "channels.rename.aria": "重新命名 {name} 頻道",
+  "channels.rename.done": "已重新命名頻道。",
   "channels.createFailure.duplicate": "已有同名頻道。請換一個名稱再試。",
   "channels.createFailure.forbidden": "你沒有建立頻道的權限。請聯絡工作區擁有者或管理員。",
   "channels.createFailure.rateLimited": "請求過於頻繁，請稍後再試。",
