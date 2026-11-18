@@ -43,7 +43,9 @@ pub struct PreviewMessage {
     pub id: Uuid,
     /// `None` on a deleted message.
     pub body: Option<String>,
-    pub author_display_name: String,
+    /// `None` when the author is no longer an active member (suspended, removed): the
+    /// people list a member reads names active members only, so the preview names no one else.
+    pub author_display_name: Option<String>,
     /// `human` or `agent`.
     pub author_kind: String,
     pub created_at_ms: i64,
@@ -127,7 +129,8 @@ pub async fn preview_channel_in_tx(
         "SELECT m.id, \
                 CASE WHEN m.state = 'deleted' OR m.deleted_at IS NOT NULL THEN NULL \
                      ELSE m.body END AS body, \
-                a.display_name AS author_display_name, \
+                CASE WHEN a.status = 'active' AND a.deleted_at IS NULL \
+                     THEN a.display_name END AS author_display_name, \
                 a.kind::text AS author_kind, \
                 floor(extract(epoch from m.created_at) * 1000)::bigint AS created_at_ms, \
                 (m.edited_at IS NOT NULL \

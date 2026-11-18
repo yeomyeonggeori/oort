@@ -22427,9 +22427,13 @@ components:
     PreviewAuthor:
       type: object
       additionalProperties: false
-      required: [displayName, kind]
+      required: [kind]
       properties:
-        displayName: {type: string}
+        displayName:
+          type: string
+          description: >
+            Omitted when the author is no longer an active member (suspended or
+            removed) — the roster a member reads names active members only.
         kind: {type: string, enum: [human, agent]}
 
     UpdateNotificationPrefRequest:

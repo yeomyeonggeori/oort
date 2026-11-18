@@ -3002,11 +3002,15 @@ pub struct PreviewMessageDto {
     pub attachment_names: Vec<String>,
 }
 
-/// Who wrote a preview message: the name to show and whether it is a person or an agent.
+/// Who wrote a preview message: the name to show (an active member's only) and whether it
+/// is a person or an agent.
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PreviewAuthorDto {
-    pub display_name: String,
+    /// Omitted when the author is no longer an active member (the roster names active
+    /// members only).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub display_name: Option<String>,
     pub kind: String,
 }
 

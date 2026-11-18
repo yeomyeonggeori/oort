@@ -917,6 +917,12 @@ async fn the_preview_carries_only_the_narrow_shape_of_the_newest_top_level_messa
     mark_left(&r.su, ch, left.id).await;
     let suspended = seed_human(&r.su, r.ws.id, "member", "서하은").await;
     seat(&r.su, r.ws.id, ch, suspended.id, "member").await;
+    let suspended_token = login(&r.http, &r.base, r.ws.id, &suspended).await;
+    for n in 0..50 {
+        send_ok(&r, ch, &r.owner, &format!("filler {n}")).await;
+    }
+    // Written while active; its author is suspended afterwards.
+    send_ok(&r, ch, &suspended_token, "from-a-suspended-author").await;
     sqlx::query("UPDATE member SET status = 'suspended' WHERE id = $1")
         .bind(suspended.id)
         .execute(&r.su)
@@ -930,10 +936,7 @@ async fn the_preview_carries_only_the_narrow_shape_of_the_newest_top_level_messa
         .await
         .expect("delete member");
 
-    // 50 older top-level messages, then four that carry what the preview must narrow.
-    for n in 0..50 {
-        send_ok(&r, ch, &r.owner, &format!("filler {n}")).await;
-    }
+    // Then four that carry what the preview must narrow.
     let root = send_ok(&r, ch, &r.owner, "root-text").await;
     let (status, sent) = call(
         &r.http,
@@ -1024,8 +1027,8 @@ async fn the_preview_carries_only_the_narrow_shape_of_the_newest_top_level_messa
         PROPS_MARK,
         &attachment.to_string(),
         "x-preview-mime-b81c",
-        "4242",
         &r.ws.owner.id.to_string(),
+        "서하은",
         "gone-text-0d6a",
         "before-edit",
     ] {
@@ -1076,21 +1079,26 @@ async fn the_preview_carries_only_the_narrow_shape_of_the_newest_top_level_messa
             expected.insert("body".to_string());
         }
         assert_eq!(keys(message), expected, "{message}");
-        assert_eq!(keys(&message["author"]), key_set(&["displayName", "kind"]));
+        let mut author = key_set(&["kind"]);
+        if message["body"] != "from-a-suspended-author" {
+            author.insert("displayName".to_string());
+        }
+        assert_eq!(keys(&message["author"]), author, "{message}");
     }
     let bodies: Vec<Option<&str>> = messages.iter().map(|m| m["body"].as_str()).collect();
     assert_eq!(
-        &bodies[..5],
+        &bodies[..6],
         &[
             Some("with-file"),
             None,
             Some("after-edit"),
             Some("root-text"),
+            Some("from-a-suspended-author"),
             Some("filler 49")
         ],
         "newest first, the reply left in its thread"
     );
-    assert_eq!(bodies[49], Some("filler 4"), "the oldest that fits");
+    assert_eq!(bodies[49], Some("filler 5"), "the oldest that fits");
     assert_eq!(messages[0]["id"], carrier.to_string());
     assert_eq!(messages[0]["attachmentNames"], json!([FILE_NAME]));
     assert_eq!(messages[0]["author"]["displayName"], "이도현");
@@ -1099,8 +1107,10 @@ async fn the_preview_carries_only_the_narrow_shape_of_the_newest_top_level_messa
     assert_eq!(messages[1]["edited"], false);
     assert_eq!(messages[2]["edited"], true);
     assert_eq!(messages[3]["replyCount"], 1);
-    assert_eq!(messages[4]["replyCount"], 0);
-    assert_eq!(messages[4]["attachmentNames"], json!([]));
+    // A suspended author is not named: a member's roster names active members only.
+    assert_eq!(messages[4]["author"], json!({"kind": "human"}));
+    assert_eq!(messages[5]["replyCount"], 0);
+    assert_eq!(messages[5]["attachmentNames"], json!([]));
 
     // A member of the channel gets the same narrow shape; only isMember differs.
     let (_, mine) = preview(&r, ch, &r.owner).await;
