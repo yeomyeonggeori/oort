@@ -40,7 +40,26 @@ describe('the three tabs (ADR-0189 D1)', () => {
       hosted: null,
       apps: null,
       settings: false,
+      channelBrowse: null,
     });
+  });
+
+  it('채널 둘러보기(#5846): 뒤로 한 번에 걷히고, 참여한 채널은 둘러보기를 걷고 그 대화로, 알림 입구는 걷는다', () => {
+    const open = navReducer(INITIAL_NAV, {type: 'openChannelBrowse', initialQuery: '디자인'});
+    expect(open.channelBrowse).toEqual({initialQuery: '디자인', seq: 1});
+    expect(navReducer(open, {type: 'back'}).channelBrowse).toBeNull();
+    const entered = navReducer(open, {
+      type: 'openChannelFromBrowse',
+      conversation: {channelId: 'ch-design-review', title: '#디자인-리뷰'},
+    });
+    expect(entered.channelBrowse).toBeNull();
+    expect(entered.conversation?.channelId).toBe('ch-design-review');
+    expect(navReducer(entered, {type: 'back'})).toEqual(INITIAL_NAV);
+    const pushed = navReducer(open, {
+      type: 'openFromNotification',
+      conversation: {channelId: 'ch-general', title: '#general'},
+    });
+    expect(pushed.channelBrowse).toBeNull();
   });
 
   it('is exactly 홈·인박스·검색 — the 에이전트 and 작업 tabs are gone', () => {

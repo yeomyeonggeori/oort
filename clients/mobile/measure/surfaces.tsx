@@ -217,6 +217,7 @@ import {SteadySurface, seedSteady} from './steady';
 import {UncollectedSurface, isUncollectedSurface, seedUncollected} from './uncollected';
 import {WorkTimelineSurface, isWorkTimelineSurface, seedWorkTimeline} from './workTimeline';
 import {AppsSurface} from './apps';
+import {ChannelBrowseSurface} from './channelBrowse';
 import {AppsTailSurface} from './appsTail';
 import {OortLoaderSurface} from './oortLoader';
 import {ConnectionStripSurface} from './connectionStrip';
@@ -2270,6 +2271,10 @@ export function Surface({name}: {name: string}): React.JSX.Element {
   // #4612: 시트 끌어내려 닫기 계측(`measure/sheetDrag.tsx`, 배송되는 시트 + 결정 2 probe, 가상 인물).
   if (name === 'sheetdrag' || name.startsWith('sheetdrag-')) {
     return <SheetDragSurface which={name.slice('sheetdrag'.length).replace(/^-/, '')} />;
+  }
+  // #5846: 폰 「채널 둘러보기」 페이지(`measure/channelBrowse.tsx`, 배송되는 표현부 + 고정 데이터, 가상 채널 이름).
+  if (name === 'channelbrowse' || name.startsWith('channelbrowse-')) {
+    return <ChannelBrowseSurface which={name.slice('channelbrowse'.length).replace(/^-/, '') || 'list'} />;
   }
   // #3951: 폰 「앱」 읽기 화면(목록·상세·네 상태).
   if (name.startsWith('apps-') && !name.startsWith('apps-tail')) {
@@ -4923,8 +4928,11 @@ export function Surface({name}: {name: string}): React.JSX.Element {
     // 셸을 **그대로** 세운다(`Shell`). 탭·시트가 열린 판은 시작값으로 고른다 —
     // 시뮬레이터는 누를 수 없으므로(하네스 머리 주석). 캡션을 달지 않는다: 시안과
     // 나란히 놓는 사진이라 화면 위에 글자가 한 줄이라도 더 서면 대조가 흐려진다.
+    // #5846 `shell-home-browse`: 정식 멤버(역할 member)의 홈 — 「채널」 섹션 ⋯ 메뉴에 「채널 둘러보기」가 선다(기본 명부에는 역할 칸이 없어 문이 없다).
     case 'shell-home':
     case 'shell-home-idle':
+    case 'shell-home-browse':
+    case 'shell-home-browse-empty':
     case 'shell-home-approval':
     case 'shell-home-loading':
     case 'shell-home-empty':
@@ -7556,6 +7564,22 @@ function seedShell(surface: string): void {
   }
 
   if (surface === 'shell-home-idle') return;
+  if (surface === 'shell-home-browse' || surface === 'shell-home-browse-empty') {
+    harnessClient.setQueryData(
+      ['roster', ADE_WS],
+      SHELL_ROSTER.map(member => (member.id === SELF ? {...member, role: 'member'} : member)),
+    );
+    // 채널이 하나도 없는 정식 멤버(기본 채널까지 나감): 빈 「채널」 섹션과 둘러보기 줄(ADR-0224 D10). DM 은 그대로 둔다.
+    if (surface === 'shell-home-browse-empty') {
+      harnessClient.setQueryData(
+        ['channels', ADE_WS],
+        (harnessClient.getQueryData<{kind: string}[]>(['channels', ADE_WS]) ?? []).filter(
+          channel => channel.kind === 'dm',
+        ),
+      );
+    }
+    return;
+  }
   // 시안의 카드: 김인턴이 #agent-lab 에서 PR 초안을 쓰는 중.
   const nowMs = Date.now();
   markAgentWorking({

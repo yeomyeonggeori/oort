@@ -7,6 +7,7 @@ import {shellSpeaksFor} from '@momo/core/features/connection/shellStrip';
 import {channelLabel, channelLabelParts, idKey, memberFor} from '@momo/core/features/workspace/directory';
 import {readProjectionPhase, rosterLoaded} from '@momo/core/features/sidebar/goneDm';
 import {DM_CLOSED_LIST_LABEL, dmCloseOffered} from '@momo/core/features/sidebar/dmVisibility';
+import {canBrowseChannelsNow} from '@momo/core/features/channels/browse';
 import {
   dmLeaveMode,
   dmLeaveOffered,
@@ -76,6 +77,11 @@ import {
 import {useWorkspaceApprovalWaits} from '../features/conversation/usePendingApprovals';
 import {FaceStatusDot} from '../features/presence/StatusDot';
 import {useCollapsedSections, visibleRows} from '../features/home/collapsedSections';
+import {
+  notJoinedMatches,
+  useHomeBrowseCandidates,
+} from '../features/channelBrowse/useChannelBrowse';
+import {GroupCard, ListRow, RowIcon} from '../design/sheetParts';
 import {
   buildWorkingCard,
   cardCancelRunId,
@@ -306,6 +312,7 @@ export default function SidebarScreen({
   onOpenConversation,
   onOpenSearch,
   onOpenAgentList,
+  onOpenChannelBrowse,
   onOpenWorkList,
   onOpenSettings,
   onChannelLeft,
@@ -342,6 +349,11 @@ export default function SidebarScreen({
    * 에서는 없을 수 있고, 그때 그 문들은 서지 않는다.
    */
   onOpenAgentList?: () => void;
+  /**
+   * 「채널 둘러보기」 페이지를 연다(ADR-0224 화면 폰 줄, #5846) — 「채널」 섹션 ⋯ 메뉴와 이름 검색의 「참여하지 않은 공개 채널」 줄.
+   * 이름 검색에서 고르면 그 이름을 넘긴다. 셸 밖(하네스)에서는 없고, 그때 두 문은 서지 않는다.
+   */
+  onOpenChannelBrowse?: (initialQuery?: string) => void;
   /**
    * 「작업」 층을 연다(ADR-0202 D6, U1 #3842): 「작업 중」 카드 머리의 「모두 보기」. + 메뉴의
    * 「작업」과 같은 화면·같은 줄이다. 작업 표면이 없는 서버·셸 밖(하네스)에서는 없고, 그때 이
@@ -387,6 +399,11 @@ export default function SidebarScreen({
   const readPhase = readProjectionPhase(readStates);
   // 행 이름과 보임 판정이 같은 답을 읽는다(`rows.ts` `rosterReady`).
   const rosterReady = rosterLoaded(directoryQuery);
+  const selfRole = memberFor(directoryQuery.directory, member.id)?.role;
+  // 둘러보기 문(⋯ 메뉴 · 빈 채널 섹션의 줄 · 이름 검색 묶음)은 정식 멤버에게만 선다 — 명부 전 · 역할 모름 · 게스트는 없음(코어 판정, 웹과
+  // 같다, ADR-0224 D8). 채널이 0개여도 이 사람에게는 「채널」 섹션이 선다(`keepEmptyChannels`, D10 — 기본 채널을 나간 사람이 돌아오는 문).
+  const browseOffered =
+    onOpenChannelBrowse !== undefined && canBrowseChannelsNow(rosterReady, selfRole);
   // 서버가 닫기를 싣는가(읽음 투영 행이 말한다). 싣지 않는 서버에서는 닫기를 내밀지 않는다(폰에는 기기 로컬 닫기가 없다).
   const closureMode = dmClosureMode(readStates.data);
   // 투영이 하한을 싣는가(ADR-0177 증보 2026-11-14 D18): GET 행에 `history_from_seq` 키가 있다. 코어 3a 가 나간 대화를 숨긴다. 나가기
@@ -479,6 +496,7 @@ export default function SidebarScreen({
         readPhase,
         rosterReady,
         dmVerdicts: verdicts,
+        keepEmptyChannels: browseOffered,
       }),
     [
       channelsQuery.groups,
@@ -491,6 +509,7 @@ export default function SidebarScreen({
       readPhase,
       rosterReady,
       verdicts,
+      browseOffered,
     ],
   );
 
@@ -603,7 +622,20 @@ export default function SidebarScreen({
       ),
     [channelsQuery.groups],
   );
-  const selfRole = memberFor(directoryQuery.directory, member.id)?.role;
+  // 이름 검색의 「참여하지 않은 공개 채널」 묶음(웹 ⌘K 와 같은 결정): 거르기 칸이 열려 있는 동안 서버 목록 한 쪽을 한 번 읽고, 친 글자로는
+  // 동기로만 거른다(위 「The search field is synchronous」). 내 채널 목록에 있는 id 는 뺀다. 읽기가 실패하면 묶음이 없다.
+  const homeBrowse = useHomeBrowseCandidates(workspaceId, browseOffered && filterVisible);
+  const myChannelIds = useMemo(
+    () => new Set((channelsQuery.data ?? []).map(channel => idKey(channel.id))),
+    [channelsQuery.data],
+  );
+  const notJoinedFound = useMemo(
+    () =>
+      browseOffered && homeBrowse.data !== undefined
+        ? notJoinedMatches(homeBrowse.data.channels, myChannelIds, query)
+        : [],
+    [browseOffered, homeBrowse.data, myChannelIds, query],
+  );
   const actionTargetFor = useCallback(
     (row: SidebarRow): ChannelRowTarget | null => {
       // 아직 DM 이 없는 에이전트 줄은 채널이 아니다(누르면 DM 을 연다) — 열 시트가 없다.
@@ -689,6 +721,13 @@ export default function SidebarScreen({
       ];
       if (section.key === 'channels') {
         items.push({label: SEARCH_SURFACE_NAME, run: () => onOpenSearch()});
+        // 「채널 둘러보기」(#5846): 정식 멤버에게만. DM 섹션이 에이전트 목록 · 숨긴 대화로 가는 것과 같은 문이다.
+        if (browseOffered && onOpenChannelBrowse) {
+          items.push({
+            label: formatMessage('channels.browse.title'),
+            run: () => onOpenChannelBrowse(),
+          });
+        }
       } else {
         if (onOpenAgentList) {
           items.push({label: AGENT_LIST_ACTION, run: onOpenAgentList});
@@ -707,7 +746,7 @@ export default function SidebarScreen({
         index => items[index]?.run(),
       );
     },
-    [closedEntries.length, onOpenAgentList, onOpenSearch],
+    [closedEntries.length, onOpenAgentList, onOpenSearch, browseOffered, onOpenChannelBrowse, formatMessage],
   );
 
   const shownSections = useMemo(
@@ -1044,7 +1083,30 @@ export default function SidebarScreen({
               {filterField}
             </>
           }
+          ListFooterComponent={
+            notJoinedFound.length > 0 && searching ? (
+              <GroupCard
+                label={formatMessage('channels.browse.paletteGroup')}
+                inset="icon"
+                style={styles.notJoinedGroup}
+                testID="home-not-joined-group">
+                {notJoinedFound.map(row => (
+                  <ListRow
+                    key={row.id}
+                    leading={<RowIcon source={HOME_ICONS.hash} />}
+                    title={row.name}
+                    detail={formatMessage('channels.browse.memberCount', {count: row.memberCount})}
+                    accessory="chevron"
+                    accessibilityHint={formatMessage('channels.browse.homeRowHint')}
+                    onPress={() => onOpenChannelBrowse?.(row.name)}
+                    testID={`home-not-joined-${row.id}`}
+                  />
+                ))}
+              </GroupCard>
+            ) : null
+          }
           ListEmptyComponent={
+            notJoinedFound.length > 0 ? null : (
             <View>
               <EmptyState
                 headline={`'${query.trim()}' 검색 결과가 없습니다.`}
@@ -1054,6 +1116,7 @@ export default function SidebarScreen({
               {/* 같은 문이므로 같은 이름을 쓴다 (이슈 #1146 N4). */}
               <SearchFallthrough query={query} onPress={() => onOpenSearch(query)} />
             </View>
+            )
           }
           renderSectionHeader={({section}) => (
             <SectionHead
@@ -1065,6 +1128,23 @@ export default function SidebarScreen({
           )}
           renderSectionFooter={({section}) => (
             <View>
+              {/* 채널이 하나도 없는 정식 멤버(기본 채널까지 나간 사람, ADR-0224 D10): 빈 「채널」 섹션 아래 둘러보기로 가는 줄 하나(#5846).
+                  머리만 서고 아래가 비면 빈 화면처럼 읽혀서 문을 줄로도 세운다. 접어도 이 줄은 남는다(문이라서). */}
+              {section.key === 'channels' &&
+              browseOffered &&
+              !searching &&
+              channelsQuery.groups.channels.length === 0 ? (
+                <GroupCard style={styles.emptyChannelsDoor} testID="home-channels-browse-door">
+                  <ListRow
+                    leading={<RowIcon source={HOME_ICONS.hash} />}
+                    title={formatMessage('channels.browse.title')}
+                    detail={formatMessage('channels.browse.description')}
+                    accessory="chevron"
+                    onPress={() => onOpenChannelBrowse?.()}
+                    testID="home-channels-browse-row"
+                  />
+                </GroupCard>
+              ) : null}
               <View style={styles.sectionGap} />
               {section.key !== shownSections[shownSections.length - 1]?.key ? (
                 <View style={styles.divider} testID="home-divider" />
@@ -1957,6 +2037,10 @@ const buildStyles = (color: Palette) => StyleSheet.create({
   pressedGlyph: {opacity: 0.5},
   chevronCollapsed: {transform: [{rotate: '-90deg'}]},
   sectionGap: {height: HOME.secBelow},
+  // 이름 검색의 「참여하지 않은 공개 채널」 묶음(#5846) — 목록 끝, 섹션 사이 숨과 같은 간격.
+  notJoinedGroup: {marginTop: HOME.secBelow},
+  // 빈 「채널」 섹션의 둘러보기 줄(#5846) — 섹션 머리 바로 아래.
+  emptyChannelsDoor: {marginTop: space.xs},
   divider: {
     height: 1,
     backgroundColor: alpha(color.text, 0.1),
