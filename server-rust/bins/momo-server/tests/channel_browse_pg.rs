@@ -466,6 +466,38 @@ async fn join_raw(
     .await
 }
 
+/// [`join_raw`] with the response headers, minus `date`, sorted — what a caller could
+/// compare between two answers besides the status and the body.
+async fn join_raw_headed(
+    http: &reqwest::Client,
+    base: &str,
+    workspace: Uuid,
+    channel: Uuid,
+    token: &str,
+) -> (StatusCode, String, Vec<(String, String)>) {
+    let response = http
+        .post(join_url(base, workspace, channel))
+        .bearer_auth(token)
+        .send()
+        .await
+        .expect("http call");
+    let status = response.status();
+    let mut headers: Vec<(String, String)> = response
+        .headers()
+        .iter()
+        .filter(|(name, _)| name.as_str() != "date")
+        .map(|(name, value)| {
+            (
+                name.as_str().to_string(),
+                value.to_str().unwrap_or("<binary>").to_string(),
+            )
+        })
+        .collect();
+    headers.sort();
+    let body = response.text().await.expect("body text");
+    (status, body, headers)
+}
+
 fn row_names(page: &Value) -> Vec<String> {
     page["channels"]
         .as_array()
@@ -800,14 +832,15 @@ async fn every_channel_that_is_not_open_answers_the_join_like_an_unknown_id() {
             k.foreign,
             Uuid::new_v4(),
         ] {
-            let (status, body) = join_raw(&r.http, &r.base, r.ws.id, target, token).await;
+            let (status, body, headers) =
+                join_raw_headed(&r.http, &r.base, r.ws.id, target, token).await;
             assert_eq!(status, 404, "{who} {target}: {body}");
-            answers.insert(body);
+            answers.insert((body, headers));
         }
         assert_eq!(
             answers.len(),
             1,
-            "{who}: every miss must be the same bytes: {answers:?}"
+            "{who}: every miss must be the same bytes and headers: {answers:?}"
         );
     }
     assert_eq!(
@@ -895,9 +928,10 @@ async fn guests_suspended_people_and_agents_are_refused_before_any_channel_is_re
         // The answer must not depend on which channel was named.
         let mut answers = BTreeSet::new();
         for target in [k.open, k.private, k.off, Uuid::new_v4()] {
-            let (status, body) = join_raw(&r.http, &r.base, r.ws.id, target, token).await;
+            let (status, body, headers) =
+                join_raw_headed(&r.http, &r.base, r.ws.id, target, token).await;
             assert_eq!(status, expected, "{who} join {target}: {body}");
-            answers.insert(body);
+            answers.insert((body, headers));
         }
         assert_eq!(answers.len(), 1, "{who}: {answers:?}");
     }

@@ -1352,8 +1352,10 @@ async fn browse_listing_is_refused_on_channels_that_cannot_be_listed() {
 /// The one target condition of the channel PATCH: a channel the admin sits in, or one
 /// open to people. A browse-off public channel and a private channel the admin is not
 /// in, another workspace's channel and an unknown id give the same 404 bytes for every
-/// field and change nothing. An unseated admin may edit a listed channel (the answer is
-/// still the full channel), and loses it once it is switched off.
+/// field and change nothing — so do an archived channel that is still marked listed, and
+/// the two hidden channels for an admin who sat in them and left. An unseated admin may
+/// edit a listed channel (the answer is still the full channel), and loses it once it is
+/// switched off.
 #[tokio::test]
 #[ignore = "needs DATABASE_URL"]
 async fn an_admin_outside_a_hidden_channel_gets_the_unknown_id_404_for_every_field() {
@@ -1388,8 +1390,32 @@ async fn an_admin_outside_a_hidden_channel_gets_the_unknown_id_404_for_every_fie
     )
     .await;
     set_browse_listed(&r.su, foreign, true).await;
+    let archived_listed = insert_channel(
+        &r.su,
+        r.ws.id,
+        "public",
+        Some("old-lobby"),
+        true,
+        r.ws.owner.id,
+    )
+    .await;
+    set_browse_listed(&r.su, archived_listed, true).await;
     for ch in [off_public, private] {
         join(&r.su, r.ws.id, ch, r.ws.owner.id).await;
+    }
+    // An admin who sat in both hidden channels and has left them.
+    let left_admin = seed_human(&r.su, r.ws.id, "admin", "윤가람").await;
+    let left_token = login(&r.http, &r.base, r.ws.id, &left_admin).await;
+    for ch in [off_public, private] {
+        join(&r.su, r.ws.id, ch, left_admin.id).await;
+        sqlx::query(
+            "UPDATE membership SET left_at = now() WHERE channel_id = $1 AND member_id = $2",
+        )
+        .bind(ch)
+        .bind(left_admin.id)
+        .execute(&r.su)
+        .await
+        .expect("leave");
     }
     for field in [
         json!({"name": "taken-over"}),
@@ -1399,12 +1425,15 @@ async fn an_admin_outside_a_hidden_channel_gets_the_unknown_id_404_for_every_fie
         let (status, unknown) =
             patch(&r.http, &r.base, r.ws.id, Uuid::new_v4(), &r.admin, &field).await;
         assert_eq!(status, 404, "{field} {unknown}");
-        for (label, ch) in [
-            ("off_public", off_public),
-            ("private", private),
-            ("foreign", foreign),
+        for (label, ch, token) in [
+            ("off_public", off_public, &r.admin),
+            ("private", private, &r.admin),
+            ("foreign", foreign, &r.admin),
+            ("archived_listed", archived_listed, &r.admin),
+            ("off_public after leaving", off_public, &left_token),
+            ("private after leaving", private, &left_token),
         ] {
-            let (status, body) = patch(&r.http, &r.base, r.ws.id, ch, &r.admin, &field).await;
+            let (status, body) = patch(&r.http, &r.base, r.ws.id, ch, token, &field).await;
             assert_eq!(
                 (status, &body),
                 (StatusCode::NOT_FOUND, &unknown),
@@ -1412,6 +1441,7 @@ async fn an_admin_outside_a_hidden_channel_gets_the_unknown_id_404_for_every_fie
             );
         }
     }
+    assert_eq!(channel_name(&r.su, archived_listed).await, "old-lobby");
     assert_eq!(channel_name(&r.su, off_public).await, "quiet-room");
     assert_eq!(channel_name(&r.su, private).await, "secret-room");
     assert_eq!(channel_name(&r.su, foreign).await, "foreign");

@@ -93,7 +93,7 @@ claims:
       evidence: "server-rust/bins/momo-server/tests/dm_leave_read_paths.rs#an_unclassified_read_turns_the_inventory_red"
   - id: TEN-7
     claim: "The public-channel browse list never contains a private channel, a direct-message channel, a public channel that is not listed in browse, an archived channel or another workspace's channel: their names and topics appear nowhere in the response body, for a workspace owner, an admin or a member, including one who sits in those channels."
-    scope: "ADR-0224 D3·D11, GET /v1/workspaces/{ws}/channels/browse only. Real PostgreSQL as the non-bypass API role, two workspaces. Row-level security bounds the workspace; the channel boundary is one named SQL piece (CHANNEL_OPEN_TO_PEOPLE_SQL in momo-messaging) that the list and the join embed, and it keeps private channels and DMs out even with the table check that forbids them from being listed dropped. Not covered: the preview route and the channel PATCH switches (later pieces of ADR-0224), and the agent-side paths (ADR-0224 D13)."
+    scope: "ADR-0224 D3·D11, GET /v1/workspaces/{ws}/channels/browse only. Real PostgreSQL as the non-bypass API role, two workspaces. Row-level security bounds the workspace; the channel boundary is one judgment (momo_auth::channel_open_to_people_sql: public, not archived, listed in browse) that the list and the join embed through momo-messaging's CHANNEL_OPEN_TO_PEOPLE_SQL, which calls it and states no condition of its own, and it keeps private channels and DMs out even with the table check that forbids them from being listed dropped. Not covered: the preview route and the channel PATCH switches (later pieces of ADR-0224), and the agent-side paths (ADR-0224 D13)."
     priority: P0
     runs: pr-ci
     proofs:
