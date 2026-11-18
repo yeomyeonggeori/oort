@@ -179,6 +179,8 @@ export interface ChannelActions {
   leave: {
     /** 확인 문장이 공개·비공개로 갈린다(`channelLeaveConfirmBodyKey`). */
     kind: Channel["kind"];
+    /** 켜진 공개 채널은 「둘러보기에서 다시 들어올 수 있어요」로 말한다(ADR-0224, #5842). 옛 서버는 싣지 않는다 — 꺼짐. */
+    browseListed: boolean;
     confirmOpen: boolean;
     open: () => void;
     close: () => void;
@@ -506,6 +508,7 @@ export function useChannelActions({
     },
     leave: {
       kind: channel.kind,
+      browseListed: channel.browseListed === true,
       confirmOpen: confirmLeave,
       open: () => {
         setLeaveError(null);
@@ -960,7 +963,7 @@ export function ChannelLeaveConfirmDialog({
       testId={testId}
       tone="destructive"
       title={formatMessage("timeline.channelLeave.title")}
-      description={formatMessage(channelLeaveConfirmBodyKey(leave.kind), { name: title })}
+      description={formatMessage(channelLeaveConfirmBodyKey(leave.kind, leave.browseListed), { name: title })}
       cancelLabel={formatMessage("timeline.channelLeave.cancel")}
       confirmLabel={formatMessage("timeline.channelLeave.confirm")}
       busyLabel={formatMessage("timeline.channelLeave.busy")}

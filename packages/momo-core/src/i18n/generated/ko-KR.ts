@@ -1119,6 +1119,237 @@ export const catalog: MessageCatalog = {
       "value": "서버에 닿지 못했어요. 아래는 마지막으로 확인된 작업 상태예요."
     }
   ],
+  "channels.browse.clearSearch": [
+    {
+      "type": 0,
+      "value": "찾기 지우기"
+    }
+  ],
+  "channels.browse.close": [
+    {
+      "type": 0,
+      "value": "닫기"
+    }
+  ],
+  "channels.browse.default": [
+    {
+      "type": 0,
+      "value": "기본"
+    }
+  ],
+  "channels.browse.description": [
+    {
+      "type": 0,
+      "value": "공개 채널을 찾아 참여할 수 있어요."
+    }
+  ],
+  "channels.browse.emptyAdminDetail": [
+    {
+      "type": 0,
+      "value": "이미 있는 채널은 채널 메뉴에서 「둘러보기에 보이기」를 켜면 여기에 보여요."
+    }
+  ],
+  "channels.browse.emptyHeadline": [
+    {
+      "type": 0,
+      "value": "아직 참여하지 않은 공개 채널이 없어요."
+    }
+  ],
+  "channels.browse.groupJoined": [
+    {
+      "type": 0,
+      "value": "참여 중인 채널"
+    }
+  ],
+  "channels.browse.groupNotJoined": [
+    {
+      "type": 0,
+      "value": "참여하지 않은 채널"
+    }
+  ],
+  "channels.browse.join": [
+    {
+      "type": 0,
+      "value": "참여"
+    }
+  ],
+  "channels.browse.joinAria": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " 채널에 참여"
+    }
+  ],
+  "channels.browse.joined": [
+    {
+      "type": 0,
+      "value": "참여 중"
+    }
+  ],
+  "channels.browse.joinForbidden": [
+    {
+      "type": 0,
+      "value": "이 계정으로는 이 채널에 참여할 수 없어요."
+    }
+  ],
+  "channels.browse.joinGeneric": [
+    {
+      "type": 0,
+      "value": "참여하지 못했어요. 다시 시도해 주세요."
+    }
+  ],
+  "channels.browse.joinNetwork": [
+    {
+      "type": 0,
+      "value": "참여하지 못했어요. "
+    },
+    {
+      "type": 1,
+      "value": "reason"
+    }
+  ],
+  "channels.browse.joinNotFound": [
+    {
+      "type": 0,
+      "value": "이 채널은 이제 둘러보기에 없어요."
+    }
+  ],
+  "channels.browse.loadForbidden": [
+    {
+      "type": 0,
+      "value": "이 계정으로는 채널을 둘러볼 수 없어요."
+    }
+  ],
+  "channels.browse.loadGeneric": [
+    {
+      "type": 0,
+      "value": "채널 목록을 불러오지 못했어요. 잠시 뒤에 다시 시도해 주세요."
+    }
+  ],
+  "channels.browse.loadMore": [
+    {
+      "type": 0,
+      "value": "더 불러오기"
+    }
+  ],
+  "channels.browse.loadNetwork": [
+    {
+      "type": 0,
+      "value": "채널 목록을 불러오지 못했어요. "
+    },
+    {
+      "type": 1,
+      "value": "reason"
+    }
+  ],
+  "channels.browse.loadUnsupported": [
+    {
+      "type": 0,
+      "value": "이 서버는 아직 채널 둘러보기를 지원하지 않아요."
+    }
+  ],
+  "channels.browse.memberCount": [
+    {
+      "type": 0,
+      "value": "멤버 "
+    },
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "명"
+    }
+  ],
+  "channels.browse.menuCreate": [
+    {
+      "type": 0,
+      "value": "새 채널 만들기"
+    }
+  ],
+  "channels.browse.menuLabel": [
+    {
+      "type": 0,
+      "value": "채널 추가"
+    }
+  ],
+  "channels.browse.noMatch": [
+    {
+      "type": 0,
+      "value": "「"
+    },
+    {
+      "type": 1,
+      "value": "query"
+    },
+    {
+      "type": 0,
+      "value": "」와 맞는 공개 채널이 없어요."
+    }
+  ],
+  "channels.browse.offline": [
+    {
+      "type": 0,
+      "value": "오프라인이라 지금은 참여할 수 없어요. 연결되면 다시 시도해 주세요."
+    }
+  ],
+  "channels.browse.open": [
+    {
+      "type": 0,
+      "value": "열기"
+    }
+  ],
+  "channels.browse.openAria": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " 채널 열기"
+    }
+  ],
+  "channels.browse.paletteGroup": [
+    {
+      "type": 0,
+      "value": "참여하지 않은 공개 채널"
+    }
+  ],
+  "channels.browse.rateLimited": [
+    {
+      "type": 0,
+      "value": "요청이 너무 잦아요. 잠시 뒤에 다시 시도해 주세요."
+    }
+  ],
+  "channels.browse.retry": [
+    {
+      "type": 0,
+      "value": "다시 시도"
+    }
+  ],
+  "channels.browse.searchLabel": [
+    {
+      "type": 0,
+      "value": "채널 찾기"
+    }
+  ],
+  "channels.browse.searchPlaceholder": [
+    {
+      "type": 0,
+      "value": "이름이나 주제로 찾기"
+    }
+  ],
+  "channels.browse.title": [
+    {
+      "type": 0,
+      "value": "채널 둘러보기"
+    }
+  ],
   "channels.createFailure.duplicate": [
     {
       "type": 0,
@@ -9906,6 +10137,16 @@ export const catalog: MessageCatalog = {
       "value": " 채널이 사이드바에서 사라져요. 다시 들어오려면 소유자나 관리자가 다시 추가해야 해요."
     }
   ],
+  "timeline.channelLeave.bodyPublicBrowse": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " 채널이 사이드바에서 사라져요. 채널 둘러보기에서 언제든 다시 들어올 수 있어요."
+    }
+  ],
   "timeline.channelLeave.busy": [
     {
       "type": 0,
@@ -9967,7 +10208,7 @@ export const catalog: MessageCatalog = {
   "timeline.createChannel.publicDetail": [
     {
       "type": 0,
-      "value": "소유자나 관리자가 추가한 멤버가 들어와요. 앞으로 워크스페이스에 들어오는 사람은 자동으로 들어와요."
+      "value": "워크스페이스의 정식 멤버 누구나 채널 둘러보기에서 찾아 참여할 수 있어요."
     }
   ],
   "timeline.edited.atDate": [

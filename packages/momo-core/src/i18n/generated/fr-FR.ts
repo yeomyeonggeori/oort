@@ -2,6 +2,254 @@
 import type { MessageCatalog } from "../types";
 
 export const catalog: MessageCatalog = {
+  "channels.browse.clearSearch": [
+    {
+      "type": 0,
+      "value": "Effacer la recherche"
+    }
+  ],
+  "channels.browse.close": [
+    {
+      "type": 0,
+      "value": "Fermer"
+    }
+  ],
+  "channels.browse.default": [
+    {
+      "type": 0,
+      "value": "Par défaut"
+    }
+  ],
+  "channels.browse.description": [
+    {
+      "type": 0,
+      "value": "Trouvez des canaux publics et rejoignez-les."
+    }
+  ],
+  "channels.browse.emptyAdminDetail": [
+    {
+      "type": 0,
+      "value": "Pour afficher ici un canal existant, activez « Afficher dans le navigateur de canaux » dans son menu."
+    }
+  ],
+  "channels.browse.emptyHeadline": [
+    {
+      "type": 0,
+      "value": "Il n'y a pas encore de canal public que vous n'avez pas rejoint."
+    }
+  ],
+  "channels.browse.groupJoined": [
+    {
+      "type": 0,
+      "value": "Vos canaux"
+    }
+  ],
+  "channels.browse.groupNotJoined": [
+    {
+      "type": 0,
+      "value": "Canaux que vous n'avez pas rejoints"
+    }
+  ],
+  "channels.browse.join": [
+    {
+      "type": 0,
+      "value": "Rejoindre"
+    }
+  ],
+  "channels.browse.joinAria": [
+    {
+      "type": 0,
+      "value": "Rejoindre "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    }
+  ],
+  "channels.browse.joined": [
+    {
+      "type": 0,
+      "value": "Rejoint"
+    }
+  ],
+  "channels.browse.joinForbidden": [
+    {
+      "type": 0,
+      "value": "Ce compte ne peut pas rejoindre ce canal."
+    }
+  ],
+  "channels.browse.joinGeneric": [
+    {
+      "type": 0,
+      "value": "Impossible de rejoindre. Réessayez."
+    }
+  ],
+  "channels.browse.joinNetwork": [
+    {
+      "type": 0,
+      "value": "Impossible de rejoindre. "
+    },
+    {
+      "type": 1,
+      "value": "reason"
+    }
+  ],
+  "channels.browse.joinNotFound": [
+    {
+      "type": 0,
+      "value": "Ce canal n'apparaît plus dans le navigateur de canaux."
+    }
+  ],
+  "channels.browse.loadForbidden": [
+    {
+      "type": 0,
+      "value": "Ce compte ne peut pas parcourir les canaux."
+    }
+  ],
+  "channels.browse.loadGeneric": [
+    {
+      "type": 0,
+      "value": "Impossible de charger la liste des canaux. Réessayez dans un instant."
+    }
+  ],
+  "channels.browse.loadMore": [
+    {
+      "type": 0,
+      "value": "Charger plus"
+    }
+  ],
+  "channels.browse.loadNetwork": [
+    {
+      "type": 0,
+      "value": "Impossible de charger la liste des canaux. "
+    },
+    {
+      "type": 1,
+      "value": "reason"
+    }
+  ],
+  "channels.browse.loadUnsupported": [
+    {
+      "type": 0,
+      "value": "Ce serveur ne permet pas encore de parcourir les canaux."
+    }
+  ],
+  "channels.browse.memberCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " membre"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " membres"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "channels.browse.menuCreate": [
+    {
+      "type": 0,
+      "value": "Créer un canal"
+    }
+  ],
+  "channels.browse.menuLabel": [
+    {
+      "type": 0,
+      "value": "Ajouter un canal"
+    }
+  ],
+  "channels.browse.noMatch": [
+    {
+      "type": 0,
+      "value": "Aucun canal public ne correspond à « "
+    },
+    {
+      "type": 1,
+      "value": "query"
+    },
+    {
+      "type": 0,
+      "value": " »."
+    }
+  ],
+  "channels.browse.offline": [
+    {
+      "type": 0,
+      "value": "Vous êtes hors ligne et ne pouvez pas rejoindre pour l'instant. Réessayez une fois connecté."
+    }
+  ],
+  "channels.browse.open": [
+    {
+      "type": 0,
+      "value": "Ouvrir"
+    }
+  ],
+  "channels.browse.openAria": [
+    {
+      "type": 0,
+      "value": "Ouvrir "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    }
+  ],
+  "channels.browse.paletteGroup": [
+    {
+      "type": 0,
+      "value": "Canaux publics que vous n'avez pas rejoints"
+    }
+  ],
+  "channels.browse.rateLimited": [
+    {
+      "type": 0,
+      "value": "Trop de requêtes. Réessayez dans un instant."
+    }
+  ],
+  "channels.browse.retry": [
+    {
+      "type": 0,
+      "value": "Réessayer"
+    }
+  ],
+  "channels.browse.searchLabel": [
+    {
+      "type": 0,
+      "value": "Trouver un canal"
+    }
+  ],
+  "channels.browse.searchPlaceholder": [
+    {
+      "type": 0,
+      "value": "Rechercher par nom ou sujet"
+    }
+  ],
+  "channels.browse.title": [
+    {
+      "type": 0,
+      "value": "Parcourir les canaux"
+    }
+  ],
   "channels.createFailure.duplicate": [
     {
       "type": 0,
@@ -220,6 +468,22 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "Utilisez uniquement des lettres, des chiffres, des traits d'union (-) et des tirets bas (_)."
+    }
+  ],
+  "timeline.channelLeave.bodyPublicBrowse": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " disparaîtra de votre barre latérale. Vous pourrez revenir à tout moment depuis le navigateur de canaux."
+    }
+  ],
+  "timeline.createChannel.publicDetail": [
+    {
+      "type": 0,
+      "value": "Tout membre à part entière de l'espace de travail peut le trouver dans le navigateur de canaux et le rejoindre."
     }
   ]
 };

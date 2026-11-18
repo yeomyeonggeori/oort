@@ -2,6 +2,233 @@
 import type { MessageCatalog } from "../types";
 
 export const catalog: MessageCatalog = {
+  "channels.browse.clearSearch": [
+    {
+      "type": 0,
+      "value": "清除搜尋"
+    }
+  ],
+  "channels.browse.close": [
+    {
+      "type": 0,
+      "value": "關閉"
+    }
+  ],
+  "channels.browse.default": [
+    {
+      "type": 0,
+      "value": "預設"
+    }
+  ],
+  "channels.browse.description": [
+    {
+      "type": 0,
+      "value": "尋找並加入公開頻道。"
+    }
+  ],
+  "channels.browse.emptyAdminDetail": [
+    {
+      "type": 0,
+      "value": "在頻道選單中開啟「在瀏覽中顯示」，現有頻道就會出現在這裡。"
+    }
+  ],
+  "channels.browse.emptyHeadline": [
+    {
+      "type": 0,
+      "value": "還沒有你尚未加入的公開頻道。"
+    }
+  ],
+  "channels.browse.groupJoined": [
+    {
+      "type": 0,
+      "value": "已加入的頻道"
+    }
+  ],
+  "channels.browse.groupNotJoined": [
+    {
+      "type": 0,
+      "value": "尚未加入的頻道"
+    }
+  ],
+  "channels.browse.join": [
+    {
+      "type": 0,
+      "value": "加入"
+    }
+  ],
+  "channels.browse.joinAria": [
+    {
+      "type": 0,
+      "value": "加入 "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    }
+  ],
+  "channels.browse.joined": [
+    {
+      "type": 0,
+      "value": "已加入"
+    }
+  ],
+  "channels.browse.joinForbidden": [
+    {
+      "type": 0,
+      "value": "此帳號無法加入此頻道。"
+    }
+  ],
+  "channels.browse.joinGeneric": [
+    {
+      "type": 0,
+      "value": "無法加入。請再試一次。"
+    }
+  ],
+  "channels.browse.joinNetwork": [
+    {
+      "type": 0,
+      "value": "無法加入。"
+    },
+    {
+      "type": 1,
+      "value": "reason"
+    }
+  ],
+  "channels.browse.joinNotFound": [
+    {
+      "type": 0,
+      "value": "此頻道已不在瀏覽清單中。"
+    }
+  ],
+  "channels.browse.loadForbidden": [
+    {
+      "type": 0,
+      "value": "此帳號無法瀏覽頻道。"
+    }
+  ],
+  "channels.browse.loadGeneric": [
+    {
+      "type": 0,
+      "value": "無法載入頻道清單。請稍後再試。"
+    }
+  ],
+  "channels.browse.loadMore": [
+    {
+      "type": 0,
+      "value": "載入更多"
+    }
+  ],
+  "channels.browse.loadNetwork": [
+    {
+      "type": 0,
+      "value": "無法載入頻道清單。"
+    },
+    {
+      "type": 1,
+      "value": "reason"
+    }
+  ],
+  "channels.browse.loadUnsupported": [
+    {
+      "type": 0,
+      "value": "此伺服器尚不支援瀏覽頻道。"
+    }
+  ],
+  "channels.browse.memberCount": [
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": " 位成員"
+    }
+  ],
+  "channels.browse.menuCreate": [
+    {
+      "type": 0,
+      "value": "建立新頻道"
+    }
+  ],
+  "channels.browse.menuLabel": [
+    {
+      "type": 0,
+      "value": "新增頻道"
+    }
+  ],
+  "channels.browse.noMatch": [
+    {
+      "type": 0,
+      "value": "沒有符合「"
+    },
+    {
+      "type": 1,
+      "value": "query"
+    },
+    {
+      "type": 0,
+      "value": "」的公開頻道。"
+    }
+  ],
+  "channels.browse.offline": [
+    {
+      "type": 0,
+      "value": "目前離線，暫時無法加入。連線後請再試一次。"
+    }
+  ],
+  "channels.browse.open": [
+    {
+      "type": 0,
+      "value": "開啟"
+    }
+  ],
+  "channels.browse.openAria": [
+    {
+      "type": 0,
+      "value": "開啟 "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    }
+  ],
+  "channels.browse.paletteGroup": [
+    {
+      "type": 0,
+      "value": "尚未加入的公開頻道"
+    }
+  ],
+  "channels.browse.rateLimited": [
+    {
+      "type": 0,
+      "value": "請求過於頻繁。請稍後再試。"
+    }
+  ],
+  "channels.browse.retry": [
+    {
+      "type": 0,
+      "value": "重試"
+    }
+  ],
+  "channels.browse.searchLabel": [
+    {
+      "type": 0,
+      "value": "尋找頻道"
+    }
+  ],
+  "channels.browse.searchPlaceholder": [
+    {
+      "type": 0,
+      "value": "依名稱或主題搜尋"
+    }
+  ],
+  "channels.browse.title": [
+    {
+      "type": 0,
+      "value": "瀏覽頻道"
+    }
+  ],
   "channels.createFailure.duplicate": [
     {
       "type": 0,
@@ -203,6 +430,22 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "只能使用文字、數字、連字號（-）和底線（_）。"
+    }
+  ],
+  "timeline.channelLeave.bodyPublicBrowse": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " 將從側邊欄消失。你可以隨時透過瀏覽頻道重新加入。"
+    }
+  ],
+  "timeline.createChannel.publicDetail": [
+    {
+      "type": 0,
+      "value": "工作區的任何正式成員都可以在瀏覽頻道中找到並加入。"
     }
   ]
 };

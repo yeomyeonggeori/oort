@@ -1140,6 +1140,254 @@ export const catalog: MessageCatalog = {
       "value": "We can't reach the server. Below is the work state as last confirmed."
     }
   ],
+  "channels.browse.clearSearch": [
+    {
+      "type": 0,
+      "value": "Clear search"
+    }
+  ],
+  "channels.browse.close": [
+    {
+      "type": 0,
+      "value": "Close"
+    }
+  ],
+  "channels.browse.default": [
+    {
+      "type": 0,
+      "value": "Default"
+    }
+  ],
+  "channels.browse.description": [
+    {
+      "type": 0,
+      "value": "Find public channels and join them."
+    }
+  ],
+  "channels.browse.emptyAdminDetail": [
+    {
+      "type": 0,
+      "value": "To list an existing channel here, turn on “Show in channel browser” in its channel menu."
+    }
+  ],
+  "channels.browse.emptyHeadline": [
+    {
+      "type": 0,
+      "value": "There are no public channels you haven't joined yet."
+    }
+  ],
+  "channels.browse.groupJoined": [
+    {
+      "type": 0,
+      "value": "Channels you're in"
+    }
+  ],
+  "channels.browse.groupNotJoined": [
+    {
+      "type": 0,
+      "value": "Channels you haven't joined"
+    }
+  ],
+  "channels.browse.join": [
+    {
+      "type": 0,
+      "value": "Join"
+    }
+  ],
+  "channels.browse.joinAria": [
+    {
+      "type": 0,
+      "value": "Join "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    }
+  ],
+  "channels.browse.joined": [
+    {
+      "type": 0,
+      "value": "Joined"
+    }
+  ],
+  "channels.browse.joinForbidden": [
+    {
+      "type": 0,
+      "value": "This account can't join this channel."
+    }
+  ],
+  "channels.browse.joinGeneric": [
+    {
+      "type": 0,
+      "value": "Couldn't join. Try again."
+    }
+  ],
+  "channels.browse.joinNetwork": [
+    {
+      "type": 0,
+      "value": "Couldn't join. "
+    },
+    {
+      "type": 1,
+      "value": "reason"
+    }
+  ],
+  "channels.browse.joinNotFound": [
+    {
+      "type": 0,
+      "value": "This channel is no longer in the channel browser."
+    }
+  ],
+  "channels.browse.loadForbidden": [
+    {
+      "type": 0,
+      "value": "This account can't browse channels."
+    }
+  ],
+  "channels.browse.loadGeneric": [
+    {
+      "type": 0,
+      "value": "Couldn't load the channel list. Try again in a moment."
+    }
+  ],
+  "channels.browse.loadMore": [
+    {
+      "type": 0,
+      "value": "Load more"
+    }
+  ],
+  "channels.browse.loadNetwork": [
+    {
+      "type": 0,
+      "value": "Couldn't load the channel list. "
+    },
+    {
+      "type": 1,
+      "value": "reason"
+    }
+  ],
+  "channels.browse.loadUnsupported": [
+    {
+      "type": 0,
+      "value": "This server doesn't support browsing channels yet."
+    }
+  ],
+  "channels.browse.memberCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " member"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " members"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "channels.browse.menuCreate": [
+    {
+      "type": 0,
+      "value": "Create a channel"
+    }
+  ],
+  "channels.browse.menuLabel": [
+    {
+      "type": 0,
+      "value": "Add a channel"
+    }
+  ],
+  "channels.browse.noMatch": [
+    {
+      "type": 0,
+      "value": "No public channel matches “"
+    },
+    {
+      "type": 1,
+      "value": "query"
+    },
+    {
+      "type": 0,
+      "value": "”."
+    }
+  ],
+  "channels.browse.offline": [
+    {
+      "type": 0,
+      "value": "You're offline, so you can't join right now. Try again once you're connected."
+    }
+  ],
+  "channels.browse.open": [
+    {
+      "type": 0,
+      "value": "Open"
+    }
+  ],
+  "channels.browse.openAria": [
+    {
+      "type": 0,
+      "value": "Open "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    }
+  ],
+  "channels.browse.paletteGroup": [
+    {
+      "type": 0,
+      "value": "Public channels you haven't joined"
+    }
+  ],
+  "channels.browse.rateLimited": [
+    {
+      "type": 0,
+      "value": "Too many requests. Try again in a moment."
+    }
+  ],
+  "channels.browse.retry": [
+    {
+      "type": 0,
+      "value": "Try again"
+    }
+  ],
+  "channels.browse.searchLabel": [
+    {
+      "type": 0,
+      "value": "Find a channel"
+    }
+  ],
+  "channels.browse.searchPlaceholder": [
+    {
+      "type": 0,
+      "value": "Search by name or topic"
+    }
+  ],
+  "channels.browse.title": [
+    {
+      "type": 0,
+      "value": "Browse channels"
+    }
+  ],
   "channels.createFailure.duplicate": [
     {
       "type": 0,
@@ -10461,6 +10709,16 @@ export const catalog: MessageCatalog = {
       "value": " will disappear from your sidebar. To come back, an owner or admin has to add you again."
     }
   ],
+  "timeline.channelLeave.bodyPublicBrowse": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " will disappear from your sidebar. You can come back any time from the channel browser."
+    }
+  ],
   "timeline.channelLeave.busy": [
     {
       "type": 0,
@@ -10522,7 +10780,7 @@ export const catalog: MessageCatalog = {
   "timeline.createChannel.publicDetail": [
     {
       "type": 0,
-      "value": "Owners and admins add members. People who join the workspace later are added automatically."
+      "value": "Any full member of the workspace can find it in the channel browser and join."
     }
   ],
   "timeline.edited.atDate": [
