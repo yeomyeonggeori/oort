@@ -186,6 +186,9 @@ export const messageKeys = [
   "channels.dmLeave.unavailable",
   "channels.nameRule.edge",
   "channels.nameRule.hidden",
+  "channels.nameRule.hint",
+  "channels.nameRule.placeholder",
+  "channels.nameRule.preview",
   "channels.nameRule.required",
   "channels.nameRule.serverRejected",
   "channels.nameRule.tooLong",
@@ -1879,6 +1882,13 @@ export const argumentSpecs = {
   "channels.dmLeave.unavailable": {},
   "channels.nameRule.edge": {},
   "channels.nameRule.hidden": {},
+  "channels.nameRule.hint": {
+    "max": "number"
+  },
+  "channels.nameRule.placeholder": {},
+  "channels.nameRule.preview": {
+    "name": "string"
+  },
   "channels.nameRule.required": {},
   "channels.nameRule.serverRejected": {},
   "channels.nameRule.tooLong": {
@@ -4041,6 +4051,9 @@ export interface MessageArgs {
   "channels.dmLeave.unavailable": Record<string, never>;
   "channels.nameRule.edge": Record<string, never>;
   "channels.nameRule.hidden": Record<string, never>;
+  "channels.nameRule.hint": { max: number };
+  "channels.nameRule.placeholder": Record<string, never>;
+  "channels.nameRule.preview": { name: string };
   "channels.nameRule.required": Record<string, never>;
   "channels.nameRule.serverRejected": Record<string, never>;
   "channels.nameRule.tooLong": { max: number };

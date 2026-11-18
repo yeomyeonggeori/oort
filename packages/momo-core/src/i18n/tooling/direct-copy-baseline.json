@@ -663,7 +663,7 @@
     "clients/mobile/src/features/sidebar/ChannelActionSheet.tsx": {"ko": 2, "en": 0},
     "clients/mobile/src/shell/NewChannelSheet.tsx": {"ko": 13, "en": 1},
     "clients/web/src/features/channels/ChannelContextControls.tsx": {"ko": 19, "en": 0},
-    "clients/web/src/features/channels/CreateChannelDialog.tsx": {"ko": 13, "en": 1},
+    "clients/web/src/features/channels/CreateChannelDialog.tsx": {"ko": 12, "en": 0},
     "clients/web/src/features/chat/channelActions.tsx": {"ko": 0, "en": 0},
     "clients/web/src/features/directory/DirectoryRoute.tsx": {"ko": 0, "en": 0},
     "clients/web/src/features/directory/MemberProfileDialog.tsx": {"ko": 0, "en": 0},
