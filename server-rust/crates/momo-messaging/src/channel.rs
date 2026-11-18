@@ -474,12 +474,91 @@ pub struct RenamedChannel {
     pub topic: Option<String>,
 }
 
+/// A channel `PATCH …/channels/{ch}` may touch, read and row-locked by
+/// [`lock_channel_edit_target_in_tx`]. Each field piece (`name`, `browseListed`)
+/// judges its own kind rule on this one row.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ChannelEditTarget {
+    pub id: Uuid,
+    pub workspace_id: Uuid,
+    pub kind: ChannelKind,
+    pub name: String,
+    pub topic: Option<String>,
+    pub archived: bool,
+    pub browse_listed: bool,
+}
+
+impl ChannelEditTarget {
+    /// The `name` piece's rule: a live public or private channel.
+    pub fn renamable(&self) -> bool {
+        matches!(self.kind, ChannelKind::Public | ChannelKind::Private) && !self.archived
+    }
+
+    /// The `browseListed` piece's rule (ADR-0224 D2): a live public channel.
+    pub fn listable(&self) -> bool {
+        self.kind == ChannelKind::Public && !self.archived
+    }
+}
+
+/// The one target condition of `PATCH …/channels/{ch}` (ADR-0224 D2, ADR-0225
+/// D10): a channel of this workspace that the actor is a live member of, **or**
+/// one open to people ([`crate::CHANNEL_OPEN_TO_PEOPLE_SQL`] — public, not
+/// archived, listed in browse). Anything else — a private channel or a public
+/// channel with browse off that the actor does not sit in, another workspace's
+/// channel, an unknown id — is `None`, so the route answers it exactly like an
+/// unknown id and an admin cannot learn of, or change, a channel they could not
+/// see. The row is locked (`FOR UPDATE`) for the pieces that follow.
+pub async fn lock_channel_edit_target_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    channel_id: Uuid,
+    actor: Uuid,
+) -> Result<Option<ChannelEditTarget>, DbError> {
+    let sql = format!(
+        "SELECT c.kind::text AS kind, c.name, c.topic, \
+                c.archived_at IS NOT NULL AS archived, c.browse_listed \
+           FROM channel c \
+          WHERE c.id = $1 AND c.workspace_id = $2 \
+            AND (EXISTS ( \
+                   SELECT 1 FROM membership m \
+                    WHERE m.channel_id = c.id AND m.workspace_id = c.workspace_id \
+                      AND m.member_id = $3 AND m.left_at IS NULL) \
+                 OR ({open})) \
+          FOR UPDATE OF c",
+        open = crate::channel_browse::CHANNEL_OPEN_TO_PEOPLE_SQL,
+    );
+    let row = sqlx::query(&sql)
+        .bind(channel_id)
+        .bind(workspace_id)
+        .bind(actor)
+        .fetch_optional(&mut *conn)
+        .await?;
+    let Some(row) = row else {
+        return Ok(None);
+    };
+    let kind_label: String = row.try_get("kind").map_err(DbError::from)?;
+    let kind = ChannelKind::from_db_label(&kind_label).ok_or_else(|| {
+        DbError::from(sqlx::Error::Decode(
+            format!("unknown channel_kind '{kind_label}'").into(),
+        ))
+    })?;
+    let name: Option<String> = row.try_get("name").map_err(DbError::from)?;
+    Ok(Some(ChannelEditTarget {
+        id: channel_id,
+        workspace_id,
+        kind,
+        name: name.unwrap_or_default(),
+        topic: row.try_get("topic").map_err(DbError::from)?,
+        archived: row.try_get("archived").map_err(DbError::from)?,
+        browse_listed: row.try_get("browse_listed").map_err(DbError::from)?,
+    }))
+}
+
 /// What [`rename_channel_in_tx`] decided.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ChannelRenameOutcome {
-    /// Missing, other workspace, DM / group DM, archived, or a private channel
-    /// the actor is not a live member of. One answer for all of them so the
-    /// route never says which.
+    /// The target is a DM / group DM or archived. The route answers it with the
+    /// same 404 as a channel outside the target condition.
     NotFound,
     /// The channel is `general`, or the new name is `general` (ADR-0225 D10).
     GeneralLocked,
@@ -493,61 +572,32 @@ pub enum ChannelRenameOutcome {
     },
 }
 
-/// Rename a public or private channel (ADR-0225 D10). `new_name` must already
-/// have passed [`normalize_channel_name`]. The caller has checked that the actor
-/// is a workspace owner or admin; this decides everything about the channel.
+/// Rename a public or private channel (ADR-0225 D10). `target` comes from
+/// [`lock_channel_edit_target_in_tx`] in the same transaction (the row is locked
+/// and inside the target condition); `new_name` must already have passed
+/// [`normalize_channel_name`]. The caller has checked that the actor is a
+/// workspace owner or admin. Every refusal comes before the only write.
 ///
-/// A private channel is visible to the actor only through a live membership
-/// (the list inner-joins membership), so the rename follows the list: an admin
-/// who is not in a private channel gets [`ChannelRenameOutcome::NotFound`]
-/// rather than a way to learn it exists.
-///
-/// The row is locked (`FOR UPDATE`) before the checks. Two renames that race to
-/// the same name both pass the pre-check; the loser fails at the
-/// `channel_name_uniq` index with SQLSTATE 23505, which
+/// Two renames that race to the same name both pass the pre-check; the loser
+/// fails at the `channel_name_uniq` index with SQLSTATE 23505, which
 /// [`is_channel_name_conflict`] recognises so the route can answer 409.
 pub async fn rename_channel_in_tx(
     conn: &mut PgConnection,
-    workspace_id: Uuid,
-    channel_id: Uuid,
-    actor: Uuid,
+    target: &ChannelEditTarget,
     new_name: &str,
 ) -> Result<ChannelRenameOutcome, DbError> {
-    let row = sqlx::query(
-        "SELECT c.kind::text AS kind, c.name, c.topic \
-           FROM channel c \
-          WHERE c.id = $1 AND c.workspace_id = $2 \
-            AND c.kind IN ('public', 'private') \
-            AND c.archived_at IS NULL \
-            AND (c.kind = 'public' OR EXISTS ( \
-                  SELECT 1 FROM membership m \
-                   WHERE m.channel_id = c.id AND m.workspace_id = c.workspace_id \
-                     AND m.member_id = $3 AND m.left_at IS NULL)) \
-          FOR UPDATE OF c",
-    )
-    .bind(channel_id)
-    .bind(workspace_id)
-    .bind(actor)
-    .fetch_optional(&mut *conn)
-    .await?;
-    let Some(row) = row else {
+    if !target.renamable() {
         return Ok(ChannelRenameOutcome::NotFound);
-    };
-    let kind_label: String = row.try_get("kind").map_err(DbError::from)?;
-    let kind = ChannelKind::from_db_label(&kind_label).ok_or_else(|| {
-        DbError::from(sqlx::Error::Decode(
-            format!("unknown channel_kind '{kind_label}'").into(),
-        ))
-    })?;
-    let old_name: Option<String> = row.try_get("name").map_err(DbError::from)?;
-    let old_name = old_name.unwrap_or_default();
-    let topic: Option<String> = row.try_get("topic").map_err(DbError::from)?;
+    }
+    let channel_id = target.id;
+    let workspace_id = target.workspace_id;
+    let old_name = target.name.clone();
     let channel = |name: &str| RenamedChannel {
         id: channel_id,
         workspace_id,
-        kind,
+        kind: target.kind,
         name: name.to_string(),
-        topic: topic.clone(),
+        topic: target.topic.clone(),
     };
 
     if old_name == new_name {
@@ -582,6 +632,44 @@ pub async fn rename_channel_in_tx(
     Ok(ChannelRenameOutcome::Renamed {
         previous_name: old_name,
         channel: channel(new_name),
+    })
+}
+
+/// What [`set_channel_browse_listed_in_tx`] decided.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BrowseListedChange {
+    /// Not a live public channel (private, DM or archived): nothing written.
+    NotListable,
+    /// The flag already has that value: nothing written.
+    Unchanged,
+    /// The flag was switched.
+    Changed { previous: bool },
+}
+
+/// Switch `channel.browse_listed` (ADR-0224 D2) on a target from
+/// [`lock_channel_edit_target_in_tx`]. The kind rule is judged before the
+/// "already that value" shortcut, so a private channel is refused whichever
+/// value is asked. Memberships are not touched: people already in a channel
+/// stay in it when it leaves browse.
+pub async fn set_channel_browse_listed_in_tx(
+    conn: &mut PgConnection,
+    target: &ChannelEditTarget,
+    listed: bool,
+) -> Result<BrowseListedChange, DbError> {
+    if !target.listable() {
+        return Ok(BrowseListedChange::NotListable);
+    }
+    if target.browse_listed == listed {
+        return Ok(BrowseListedChange::Unchanged);
+    }
+    sqlx::query("UPDATE channel SET browse_listed = $3 WHERE id = $1 AND workspace_id = $2")
+        .bind(target.id)
+        .bind(target.workspace_id)
+        .bind(listed)
+        .execute(&mut *conn)
+        .await?;
+    Ok(BrowseListedChange::Changed {
+        previous: target.browse_listed,
     })
 }
 
@@ -1042,6 +1130,70 @@ fn decode_channel_summary(row: &sqlx::postgres::PgRow) -> Result<ChannelSummary,
     })
 }
 
+/// The columns of one [`ChannelSummary`] row over the channel alias `c`, with the
+/// viewing member bound as `$2` (their own mute). Shared by the channel list and
+/// [`channel_summary_in_tx`] so the two answers cannot drift apart.
+const CHANNEL_SUMMARY_COLUMNS: &str = "c.id, \
+                c.workspace_id, \
+                c.kind::text AS kind, \
+                c.name, \
+                c.topic, \
+                c.dm_key, \
+                c.created_by, \
+                CASE WHEN c.archived_at IS NULL THEN NULL \
+                     ELSE floor(extract(epoch from c.archived_at) * 1000)::bigint \
+                END AS archived_at_ms, \
+                c.browse_listed, \
+                c.is_default, \
+                CASE WHEN c.kind = 'dm' THEN COALESCE(( \
+                       SELECT array_agg(participant.member_id ORDER BY participant.member_id::text) \
+                         FROM membership participant \
+                        WHERE participant.channel_id = c.id \
+                          AND participant.left_at IS NULL \
+                     ), '{}'::uuid[]) \
+                     ELSE '{}'::uuid[] \
+                END AS member_ids, \
+                EXISTS ( \
+                  SELECT 1 FROM notification_pref np \
+                   WHERE np.workspace_id = c.workspace_id \
+                     AND np.channel_id = c.id \
+                     AND np.member_id = $2 \
+                     AND (np.muted_until IS NULL OR np.muted_until > now()) \
+                ) AS muted, \
+                ( SELECT floor(extract(epoch from np.muted_until) * 1000)::bigint \
+                    FROM notification_pref np \
+                   WHERE np.workspace_id = c.workspace_id \
+                     AND np.channel_id = c.id \
+                     AND np.member_id = $2 \
+                     AND np.muted_until > now() \
+                ) AS muted_until_ms";
+
+/// One channel of `workspace_id` in the channel list's row shape, **without** the
+/// list's membership join: the caller has already decided the viewer may see it
+/// (`PATCH …/channels/{ch}` answers an admin who edits a channel open to people
+/// without sitting in it). `muted` is the viewer's own preference.
+pub async fn channel_summary_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    viewer_member_id: Uuid,
+    channel_id: Uuid,
+) -> Result<Option<ChannelSummary>, DbError> {
+    let sql = format!(
+        "SELECT {columns} FROM channel c WHERE c.workspace_id = $1 AND c.id = $3",
+        columns = CHANNEL_SUMMARY_COLUMNS,
+    );
+    let row = sqlx::query(&sql)
+        .bind(workspace_id)
+        .bind(viewer_member_id)
+        .bind(channel_id)
+        .fetch_optional(&mut *conn)
+        .await?;
+    row.as_ref()
+        .map(decode_channel_summary)
+        .transpose()
+        .map_err(DbError::from)
+}
+
 /// Every channel `member_id` currently belongs to in `workspace_id`, ordered the
 /// way Swift orders them: public, then private, then DM, each group by
 /// case-folded name.
@@ -1096,40 +1248,7 @@ pub async fn list_workspace_channels_within(
         ""
     };
     let sql = format!(
-        "SELECT c.id, \
-                c.workspace_id, \
-                c.kind::text AS kind, \
-                c.name, \
-                c.topic, \
-                c.dm_key, \
-                c.created_by, \
-                CASE WHEN c.archived_at IS NULL THEN NULL \
-                     ELSE floor(extract(epoch from c.archived_at) * 1000)::bigint \
-                END AS archived_at_ms, \
-                c.browse_listed, \
-                c.is_default, \
-                CASE WHEN c.kind = 'dm' THEN COALESCE(( \
-                       SELECT array_agg(participant.member_id ORDER BY participant.member_id::text) \
-                         FROM membership participant \
-                        WHERE participant.channel_id = c.id \
-                          AND participant.left_at IS NULL \
-                     ), '{{}}'::uuid[]) \
-                     ELSE '{{}}'::uuid[] \
-                END AS member_ids, \
-                EXISTS ( \
-                  SELECT 1 FROM notification_pref np \
-                   WHERE np.workspace_id = c.workspace_id \
-                     AND np.channel_id = c.id \
-                     AND np.member_id = $2 \
-                     AND (np.muted_until IS NULL OR np.muted_until > now()) \
-                ) AS muted, \
-                ( SELECT floor(extract(epoch from np.muted_until) * 1000)::bigint \
-                    FROM notification_pref np \
-                   WHERE np.workspace_id = c.workspace_id \
-                     AND np.channel_id = c.id \
-                     AND np.member_id = $2 \
-                     AND np.muted_until > now() \
-                ) AS muted_until_ms \
+        "SELECT {columns} \
            FROM channel c \
            JOIN membership actor_membership \
              ON actor_membership.channel_id = c.id \
@@ -1144,7 +1263,8 @@ pub async fn list_workspace_channels_within(
                    END, \
                    lower(COALESCE(c.name, '')), \
                    c.id \
-          LIMIT $4"
+          LIMIT $4",
+        columns = CHANNEL_SUMMARY_COLUMNS,
     );
     let mut query = sqlx::query(&sql)
         .bind(workspace_id)

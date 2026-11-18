@@ -3060,24 +3060,14 @@ pub struct CreateChannelResponse {
     pub creator_membership: ChannelMembershipDto,
 }
 
-/// `PATCH /v1/workspaces/{ws}/channels/{ch}` response (ADR-0225 D10): the
-/// channel as the rename left it. No per-caller fields (`muted`, roster) — the
-/// next channel list carries those.
+/// `PATCH /v1/workspaces/{ws}/channels/{ch}` response (ADR-0225 D10, ADR-0224
+/// D2): the channel as the edit left it, in the same `Channel` shape as the
+/// channel list, create and join answers (`browseListed`, `isDefault` and the
+/// caller's own `muted` included).
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UpdateChannelResponse {
-    pub channel: UpdatedChannelDto,
-}
-
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct UpdatedChannelDto {
-    pub id: String,
-    pub workspace_id: String,
-    pub kind: String,
-    pub name: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub topic: Option<String>,
+    pub channel: ChannelDto,
 }
 
 /// `PUT …/channels/{ch}/notification-pref` request (Swift

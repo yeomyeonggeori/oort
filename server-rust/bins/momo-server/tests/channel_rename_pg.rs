@@ -511,6 +511,52 @@ async fn renamed_audit(su: &PgPool, workspace: Uuid) -> i64 {
     audit_count(su, workspace, "channel.renamed").await
 }
 
+async fn browse_listed_audit(su: &PgPool, workspace: Uuid) -> i64 {
+    audit_count(su, workspace, "channel.browse_listed").await
+}
+
+async fn browse_listed(su: &PgPool, channel: Uuid) -> bool {
+    sqlx::query_scalar("SELECT browse_listed FROM channel WHERE id = $1")
+        .bind(channel)
+        .fetch_one(su)
+        .await
+        .expect("read browse_listed")
+}
+
+async fn set_browse_listed(su: &PgPool, channel: Uuid, listed: bool) {
+    sqlx::query("UPDATE channel SET browse_listed = $2 WHERE id = $1")
+        .bind(channel)
+        .bind(listed)
+        .execute(su)
+        .await
+        .expect("set browse_listed");
+}
+
+/// `(actor, detail)` of every `channel.browse_listed` row, oldest first.
+async fn browse_listed_rows(su: &PgPool, workspace: Uuid) -> Vec<(Uuid, Value)> {
+    sqlx::query_as(
+        "SELECT actor_member_id, detail FROM audit_log \
+          WHERE workspace_id = $1 AND action = 'channel.browse_listed' \
+          ORDER BY created_at, id",
+    )
+    .bind(workspace)
+    .fetch_all(su)
+    .await
+    .expect("read browse_listed audit rows")
+}
+
+/// The ADR-0224 D4 self-join of the caller.
+async fn self_join(
+    http: &reqwest::Client,
+    base: &str,
+    workspace: Uuid,
+    channel: Uuid,
+    token: &str,
+) -> (StatusCode, Value) {
+    let url = format!("{}/me", members_url(base, workspace, channel));
+    call(http, Method::POST, &url, token, None).await
+}
+
 async fn message_total(su: &PgPool, workspace: Uuid) -> i64 {
     sqlx::query_scalar("SELECT count(*)::bigint FROM message WHERE workspace_id = $1")
         .bind(workspace)
@@ -638,6 +684,8 @@ async fn owner_and_admin_rename_with_folding_and_one_audit_row() {
     )
     .await;
     join(&r.su, r.ws.id, ch, r.ws.owner.id).await;
+    // The channel is browse-off: only a seated admin may edit it (ADR-0224 D2).
+    join(&r.su, r.ws.id, ch, r.ws.admin.id).await;
     let (status, body) = patch(
         &r.http,
         &r.base,
@@ -755,24 +803,20 @@ async fn member_guest_and_agent_are_refused() {
     let guest = seed_human(&r.su, r.ws.id, "guest", "정하늘").await;
     let guest_token = login(&r.http, &r.base, r.ws.id, &guest).await;
     let agent_token = bearer_for_agent(&r.su, r.ws.id, r.ws.agent).await;
-    for (who, token) in [
-        ("member", &r.member),
-        ("guest", &guest_token),
-        ("agent", &agent_token),
-    ] {
-        let (status, body) = patch(
-            &r.http,
-            &r.base,
-            r.ws.id,
-            ch,
-            token,
-            &json!({"name": "taken-over"}),
-        )
-        .await;
-        assert_eq!(status, 403, "{who} {body}");
+    for field in [json!({"name": "taken-over"}), json!({"browseListed": true})] {
+        for (who, token) in [
+            ("member", &r.member),
+            ("guest", &guest_token),
+            ("agent", &agent_token),
+        ] {
+            let (status, body) = patch(&r.http, &r.base, r.ws.id, ch, token, &field).await;
+            assert_eq!(status, 403, "{who} {field} {body}");
+        }
     }
     assert_eq!(channel_name(&r.su, ch).await, "keep-me");
+    assert!(!browse_listed(&r.su, ch).await);
     assert_eq!(renamed_audit(&r.su, r.ws.id).await, 0);
+    assert_eq!(browse_listed_audit(&r.su, r.ws.id).await, 0);
 }
 
 /// Other workspace's channel, DM, group DM, archived, unknown id: the same 404.
@@ -952,6 +996,7 @@ async fn a_live_name_clash_is_409_and_an_archived_one_is_not() {
         r.ws.owner.id,
     )
     .await;
+    join(&r.su, r.ws.id, a, r.ws.owner.id).await;
     let (status, body) = patch(
         &r.http,
         &r.base,
@@ -1002,6 +1047,8 @@ async fn two_requests_racing_for_one_name_give_one_200_and_one_409() {
             r.ws.owner.id,
         )
         .await;
+        join(&r.su, r.ws.id, a, r.ws.owner.id).await;
+        join(&r.su, r.ws.id, b, r.ws.admin.id).await;
         let name = format!("경합-{round}");
         let body = json!({"name": name});
         let (first, second) = tokio::join!(
@@ -1047,6 +1094,8 @@ async fn general_is_locked_in_both_directions() {
         r.ws.owner.id,
     )
     .await;
+    join(&r.su, r.ws.id, general, r.ws.owner.id).await;
+    join(&r.su, r.ws.id, other, r.ws.owner.id).await;
     let (status, body) = patch(
         &r.http,
         &r.base,
@@ -1084,4 +1133,402 @@ async fn general_is_locked_in_both_directions() {
     assert_eq!(channel_name(&r.su, general).await, "general");
     assert_eq!(channel_name(&r.su, other).await, "lounge");
     assert_eq!(renamed_audit(&r.su, r.ws.id).await, 0);
+}
+
+// ---------------------------------------------------------------------------
+// ADR-0224 D2 — the `browseListed` switch and the one target condition
+// ---------------------------------------------------------------------------
+
+/// Owner and admin switch the browse listing. Each switch is one audit row (who,
+/// which channel, old and new); the same value again writes nothing; switching off
+/// moves no membership and makes the self-join answer like an unknown id; switching
+/// on opens it again. The answer is the channel in the channel list's shape.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL"]
+async fn switching_browse_listing_moves_only_the_self_join_door() {
+    let _guard = test_lock().await;
+    let r = rig("bl-door").await;
+    let ch = insert_channel(
+        &r.su,
+        r.ws.id,
+        "public",
+        Some("open-room"),
+        false,
+        r.ws.owner.id,
+    )
+    .await;
+    set_browse_listed(&r.su, ch, true).await;
+    join(&r.su, r.ws.id, ch, r.ws.owner.id).await;
+    join(&r.su, r.ws.id, ch, r.ws.member.id).await;
+    let seated = live_member_ids(&r.su, ch).await;
+    let newcomer = seed_human(&r.su, r.ws.id, "member", "한지우").await;
+    let newcomer_token = login(&r.http, &r.base, r.ws.id, &newcomer).await;
+    let (status, unknown_join) =
+        self_join(&r.http, &r.base, r.ws.id, Uuid::new_v4(), &newcomer_token).await;
+    assert_eq!(status, 404);
+
+    let (status, body) = patch(
+        &r.http,
+        &r.base,
+        r.ws.id,
+        ch,
+        &r.owner,
+        &json!({"browseListed": false}),
+    )
+    .await;
+    assert_eq!(status, 200, "{body}");
+    let channel = &body["channel"];
+    assert_eq!(channel["id"], ch.to_string());
+    assert_eq!(channel["workspaceId"], r.ws.id.to_string());
+    assert_eq!(channel["kind"], "public");
+    assert_eq!(channel["name"], "open-room");
+    assert_eq!(channel["browseListed"], false);
+    assert_eq!(channel["isDefault"], false);
+    assert_eq!(channel["muted"], false);
+    assert!(!browse_listed(&r.su, ch).await);
+    assert_eq!(
+        live_member_ids(&r.su, ch).await,
+        seated,
+        "switching off moves no membership"
+    );
+    let (status, body) = self_join(&r.http, &r.base, r.ws.id, ch, &newcomer_token).await;
+    assert_eq!(
+        (status, &body),
+        (StatusCode::NOT_FOUND, &unknown_join),
+        "browse-off joins like an unknown id"
+    );
+
+    // the same value again: 200, nothing written
+    let (status, body) = patch(
+        &r.http,
+        &r.base,
+        r.ws.id,
+        ch,
+        &r.owner,
+        &json!({"browseListed": false}),
+    )
+    .await;
+    assert_eq!(status, 200, "{body}");
+    assert_eq!(browse_listed_audit(&r.su, r.ws.id).await, 1);
+
+    // a seated admin switches it back on; the door opens again
+    join(&r.su, r.ws.id, ch, r.ws.admin.id).await;
+    let (status, body) = patch(
+        &r.http,
+        &r.base,
+        r.ws.id,
+        ch,
+        &r.admin,
+        &json!({"browseListed": true}),
+    )
+    .await;
+    assert_eq!(status, 200, "{body}");
+    assert_eq!(body["channel"]["browseListed"], true);
+    assert!(browse_listed(&r.su, ch).await);
+    let (status, body) = self_join(&r.http, &r.base, r.ws.id, ch, &newcomer_token).await;
+    assert_eq!(status, 200, "{body}");
+    assert_eq!(body["newlyJoined"], true);
+
+    let rows = browse_listed_rows(&r.su, r.ws.id).await;
+    assert_eq!(rows.len(), 2, "{rows:?}");
+    assert_eq!(rows[0].0, r.ws.owner.id);
+    assert_eq!(
+        (&rows[0].1["old"], &rows[0].1["new"]),
+        (&json!(true), &json!(false)),
+        "{rows:?}"
+    );
+    assert_eq!(rows[1].0, r.ws.admin.id);
+    assert_eq!(
+        (&rows[1].1["old"], &rows[1].1["new"]),
+        (&json!(false), &json!(true)),
+        "{rows:?}"
+    );
+    let targets: Vec<Uuid> = sqlx::query_scalar(
+        "SELECT target_id FROM audit_log WHERE workspace_id = $1 AND action = 'channel.browse_listed'",
+    )
+    .bind(r.ws.id)
+    .fetch_all(&r.su)
+    .await
+    .expect("audit targets");
+    assert_eq!(targets, vec![ch, ch]);
+}
+
+/// A private channel, a DM and an archived channel the admin sits in cannot be
+/// listed (409 `channel_not_listable`, whichever value is asked). Judged before any
+/// write: a rename sent in the same body is not applied. `name` and
+/// `browseListed` that both pass are applied together.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL"]
+async fn browse_listing_is_refused_on_channels_that_cannot_be_listed() {
+    let _guard = test_lock().await;
+    let r = rig("bl-kind").await;
+    let private = insert_channel(
+        &r.su,
+        r.ws.id,
+        "private",
+        Some("secret-room"),
+        false,
+        r.ws.owner.id,
+    )
+    .await;
+    let dm = insert_channel(&r.su, r.ws.id, "dm", None, false, r.ws.owner.id).await;
+    let archived = insert_channel(
+        &r.su,
+        r.ws.id,
+        "public",
+        Some("old-archive"),
+        true,
+        r.ws.owner.id,
+    )
+    .await;
+    for ch in [private, dm, archived] {
+        join(&r.su, r.ws.id, ch, r.ws.admin.id).await;
+    }
+    for (label, ch) in [("private", private), ("dm", dm), ("archived", archived)] {
+        for listed in [true, false] {
+            let (status, body) = patch(
+                &r.http,
+                &r.base,
+                r.ws.id,
+                ch,
+                &r.admin,
+                &json!({"browseListed": listed}),
+            )
+            .await;
+            assert_eq!(status, 409, "{label} {listed} {body}");
+            assert_eq!(
+                body["error"]["code"], "channel_not_listable",
+                "{label} {body}"
+            );
+        }
+        assert!(!browse_listed(&r.su, ch).await, "{label}");
+    }
+    let (status, body) = patch(
+        &r.http,
+        &r.base,
+        r.ws.id,
+        private,
+        &r.admin,
+        &json!({"name": "renamed-room", "browseListed": true}),
+    )
+    .await;
+    assert_eq!(status, 409, "{body}");
+    assert_eq!(
+        channel_name(&r.su, private).await,
+        "secret-room",
+        "nothing of a refused body is applied"
+    );
+    assert_eq!(renamed_audit(&r.su, r.ws.id).await, 0);
+    assert_eq!(browse_listed_audit(&r.su, r.ws.id).await, 0);
+
+    let quiet = insert_channel(
+        &r.su,
+        r.ws.id,
+        "public",
+        Some("quiet-room"),
+        false,
+        r.ws.owner.id,
+    )
+    .await;
+    join(&r.su, r.ws.id, quiet, r.ws.admin.id).await;
+    let (status, body) = patch(
+        &r.http,
+        &r.base,
+        r.ws.id,
+        quiet,
+        &r.admin,
+        &json!({"name": "lobby", "browseListed": true}),
+    )
+    .await;
+    assert_eq!(status, 200, "{body}");
+    assert_eq!(body["channel"]["name"], "lobby");
+    assert_eq!(body["channel"]["browseListed"], true);
+    assert_eq!(channel_name(&r.su, quiet).await, "lobby");
+    assert!(browse_listed(&r.su, quiet).await);
+    assert_eq!(renamed_audit(&r.su, r.ws.id).await, 1);
+    assert_eq!(browse_listed_audit(&r.su, r.ws.id).await, 1);
+}
+
+/// The one target condition of the channel PATCH: a channel the admin sits in, or one
+/// open to people. A browse-off public channel and a private channel the admin is not
+/// in, another workspace's channel and an unknown id give the same 404 bytes for every
+/// field and change nothing — so do an archived channel that is still marked listed, and
+/// the two hidden channels for an admin who sat in them and left. An unseated admin may
+/// edit a listed channel (the answer is still the full channel), and loses it once it is
+/// switched off.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL"]
+async fn an_admin_outside_a_hidden_channel_gets_the_unknown_id_404_for_every_field() {
+    let _guard = test_lock().await;
+    let r = rig("bl-target").await;
+    let other = seed(&r.su, "bl-target-other").await;
+    let off_public = insert_channel(
+        &r.su,
+        r.ws.id,
+        "public",
+        Some("quiet-room"),
+        false,
+        r.ws.owner.id,
+    )
+    .await;
+    let private = insert_channel(
+        &r.su,
+        r.ws.id,
+        "private",
+        Some("secret-room"),
+        false,
+        r.ws.owner.id,
+    )
+    .await;
+    let foreign = insert_channel(
+        &r.su,
+        other.id,
+        "public",
+        Some("foreign"),
+        false,
+        other.owner.id,
+    )
+    .await;
+    set_browse_listed(&r.su, foreign, true).await;
+    let archived_listed = insert_channel(
+        &r.su,
+        r.ws.id,
+        "public",
+        Some("old-lobby"),
+        true,
+        r.ws.owner.id,
+    )
+    .await;
+    set_browse_listed(&r.su, archived_listed, true).await;
+    for ch in [off_public, private] {
+        join(&r.su, r.ws.id, ch, r.ws.owner.id).await;
+    }
+    // An admin who sat in both hidden channels and has left them.
+    let left_admin = seed_human(&r.su, r.ws.id, "admin", "윤가람").await;
+    let left_token = login(&r.http, &r.base, r.ws.id, &left_admin).await;
+    for ch in [off_public, private] {
+        join(&r.su, r.ws.id, ch, left_admin.id).await;
+        sqlx::query(
+            "UPDATE membership SET left_at = now() WHERE channel_id = $1 AND member_id = $2",
+        )
+        .bind(ch)
+        .bind(left_admin.id)
+        .execute(&r.su)
+        .await
+        .expect("leave");
+    }
+    for field in [
+        json!({"name": "taken-over"}),
+        json!({"browseListed": true}),
+        json!({"browseListed": false}),
+    ] {
+        let (status, unknown) =
+            patch(&r.http, &r.base, r.ws.id, Uuid::new_v4(), &r.admin, &field).await;
+        assert_eq!(status, 404, "{field} {unknown}");
+        for (label, ch, token) in [
+            ("off_public", off_public, &r.admin),
+            ("private", private, &r.admin),
+            ("foreign", foreign, &r.admin),
+            ("archived_listed", archived_listed, &r.admin),
+            ("off_public after leaving", off_public, &left_token),
+            ("private after leaving", private, &left_token),
+        ] {
+            let (status, body) = patch(&r.http, &r.base, r.ws.id, ch, token, &field).await;
+            assert_eq!(
+                (status, &body),
+                (StatusCode::NOT_FOUND, &unknown),
+                "{label} {field}"
+            );
+        }
+    }
+    assert_eq!(channel_name(&r.su, archived_listed).await, "old-lobby");
+    assert_eq!(channel_name(&r.su, off_public).await, "quiet-room");
+    assert_eq!(channel_name(&r.su, private).await, "secret-room");
+    assert_eq!(channel_name(&r.su, foreign).await, "foreign");
+    assert!(!browse_listed(&r.su, off_public).await);
+    assert!(browse_listed(&r.su, foreign).await);
+    assert_eq!(renamed_audit(&r.su, r.ws.id).await, 0);
+    assert_eq!(browse_listed_audit(&r.su, r.ws.id).await, 0);
+    assert_eq!(browse_listed_audit(&r.su, other.id).await, 0);
+
+    // a listed channel the admin does not sit in: editable, and the answer is whole
+    let listed = insert_channel(
+        &r.su,
+        r.ws.id,
+        "public",
+        Some("open-room"),
+        false,
+        r.ws.owner.id,
+    )
+    .await;
+    set_browse_listed(&r.su, listed, true).await;
+    join(&r.su, r.ws.id, listed, r.ws.owner.id).await;
+    let (status, body) = patch(
+        &r.http,
+        &r.base,
+        r.ws.id,
+        listed,
+        &r.admin,
+        &json!({"name": "lobby"}),
+    )
+    .await;
+    assert_eq!(status, 200, "{body}");
+    let (status, body) = patch(
+        &r.http,
+        &r.base,
+        r.ws.id,
+        listed,
+        &r.admin,
+        &json!({"browseListed": false}),
+    )
+    .await;
+    assert_eq!(status, 200, "{body}");
+    assert_eq!(body["channel"]["name"], "lobby");
+    assert_eq!(body["channel"]["browseListed"], false);
+    assert_eq!(body["channel"]["isDefault"], false);
+    // switched off, it is outside the admin's reach again
+    let (status, unknown) = patch(
+        &r.http,
+        &r.base,
+        r.ws.id,
+        Uuid::new_v4(),
+        &r.admin,
+        &json!({"browseListed": true}),
+    )
+    .await;
+    assert_eq!(status, 404);
+    let (status, body) = patch(
+        &r.http,
+        &r.base,
+        r.ws.id,
+        listed,
+        &r.admin,
+        &json!({"browseListed": true}),
+    )
+    .await;
+    assert_eq!((status, &body), (StatusCode::NOT_FOUND, &unknown));
+
+    // seated, the same admin edits a browse-off public channel and a private one
+    join(&r.su, r.ws.id, off_public, r.ws.admin.id).await;
+    join(&r.su, r.ws.id, private, r.ws.admin.id).await;
+    let (status, body) = patch(
+        &r.http,
+        &r.base,
+        r.ws.id,
+        off_public,
+        &r.admin,
+        &json!({"browseListed": true}),
+    )
+    .await;
+    assert_eq!(status, 200, "{body}");
+    let (status, body) = patch(
+        &r.http,
+        &r.base,
+        r.ws.id,
+        private,
+        &r.admin,
+        &json!({"name": "open-secret"}),
+    )
+    .await;
+    assert_eq!(status, 200, "{body}");
 }

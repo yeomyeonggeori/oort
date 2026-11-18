@@ -93,7 +93,7 @@ claims:
       evidence: "server-rust/bins/momo-server/tests/dm_leave_read_paths.rs#an_unclassified_read_turns_the_inventory_red"
   - id: TEN-7
     claim: "The public-channel browse list never contains a private channel, a direct-message channel, a public channel that is not listed in browse, an archived channel or another workspace's channel: their names and topics appear nowhere in the response body, for a workspace owner, an admin or a member, including one who sits in those channels."
-    scope: "ADR-0224 D3·D11, GET /v1/workspaces/{ws}/channels/browse only. Real PostgreSQL as the non-bypass API role, two workspaces. Row-level security bounds the workspace; the channel boundary is one named SQL piece (CHANNEL_OPEN_TO_PEOPLE_SQL in momo-messaging) that the list and the join embed, and it keeps private channels and DMs out even with the table check that forbids them from being listed dropped. Not covered: the preview route and the channel PATCH switches (later pieces of ADR-0224), and the agent-side paths (ADR-0224 D13)."
+    scope: "ADR-0224 D3·D11, GET /v1/workspaces/{ws}/channels/browse only. Real PostgreSQL as the non-bypass API role, two workspaces. Row-level security bounds the workspace; the channel boundary is one judgment (momo_auth::channel_open_to_people_sql: public, not archived, listed in browse) that the list and the join embed through momo-messaging's CHANNEL_OPEN_TO_PEOPLE_SQL, which calls it and states no condition of its own, and it keeps private channels and DMs out even with the table check that forbids them from being listed dropped. The preview route is TEN-12 to TEN-14, the channel PATCH switch is TEN-11 and the agent-side paths (ADR-0224 D13) are AGT-5 and AGT-6."
     priority: P0
     runs: pr-ci
     proofs:
@@ -128,6 +128,16 @@ claims:
     proofs:
       - "server-rust/bins/momo-server/tests/channel_browse_pg.rs#the_browse_list_holds_only_channels_open_to_people"
       - "server-rust/bins/momo-server/tests/channel_browse_pg.rs#every_channel_that_is_not_open_answers_the_join_like_an_unknown_id"
+  - id: TEN-11
+    claim: "Only a human workspace owner or admin can switch a channel's browse listing: a member, a guest and an agent credential are refused with 403 and nothing changes. A private channel, a direct-message channel and an archived channel cannot be listed: an admin who sits in one gets 409 and nothing of the request is applied. The channel edit answers a public channel with browse listing off or a private channel that the admin does not sit in, another workspace's channel and an unknown id with the same 404 body, for the name and for the browse listing alike, and changes nothing."
+    scope: "ADR-0224 D2·D11 (claim 5, browse listing only — the default-channel field is a later piece), PATCH /v1/workspaces/{ws}/channels/{ch}. Real PostgreSQL as the non-bypass API role, two workspaces. The route reaches a channel the caller sits in or one open to people, decided by one locking statement that embeds the same channel piece as the browse list and the join. Switching the listing off keeps every membership. Developer tokens and signed work hosts have no row for this route (unit tests on those tables), not covered here."
+    priority: P1
+    runs: pr-ci
+    proofs:
+      - "server-rust/bins/momo-server/tests/channel_rename_pg.rs#member_guest_and_agent_are_refused"
+      - "server-rust/bins/momo-server/tests/channel_rename_pg.rs#browse_listing_is_refused_on_channels_that_cannot_be_listed"
+      - "server-rust/bins/momo-server/tests/channel_rename_pg.rs#an_admin_outside_a_hidden_channel_gets_the_unknown_id_404_for_every_field"
+      - "server-rust/bins/momo-server/tests/channel_rename_pg.rs#switching_browse_listing_moves_only_the_self_join_door"
   - id: TEN-12
     claim: "Previewing a private channel, a direct-message channel, a public channel that is not listed in browse, an archived channel, another workspace's channel or an unknown id answers the self-join's 404 with the same body bytes, even for a caller who sits in that channel."
     scope: "ADR-0224 D5·D11, GET /v1/workspaces/{ws}/channels/{ch}/preview only. Real PostgreSQL as the non-bypass API role, two workspaces. Both preview statements (the channel and its messages) embed the same channel piece as the browse list and the join; there is no separate pre-check."
