@@ -116,6 +116,7 @@ export type ChannelActionKey =
   | "github"
   | "star"
   | "browse-listed"
+  | "default-channel"
   | "move-to-section"
   | "copy-link"
   | "copy-name"
@@ -156,6 +157,7 @@ const CLUSTER_OF: Record<ChannelActionKey, ChannelActionCluster> = {
   memory: "state",
   github: "state",
   "browse-listed": "state",
+  "default-channel": "state",
   star: "state",
   "close-dm": "close",
   leave: "danger",
@@ -193,6 +195,7 @@ export type ChannelActionIcon =
   | "memory"
   | "github"
   | "browse"
+  | "default"
   | "star"
   | "unstar"
   | "hide"
@@ -274,6 +277,11 @@ export interface ChannelActionItem {
    * 없으면 평범한 줄이다 — 기존 항목은 이 칸을 싣지 않는다.
    */
   checked?: boolean;
+  /**
+   * 줄 아래에 한 줄로 붙는 설명(#5845 `default-channel`). 있는 항목만 둘째 줄을 그린다. 상태가 말을 바꿀 때도 한 줄이다 —
+   * 켜고 끌 때 줄 높이가 움직이지 않는다.
+   */
+  description?: string;
   /** 이 항목 위에 구분선을 세운다. 거른 뒤의 이웃이 다른 무리일 때만(`withClusterSeparators`). */
   separatorBefore?: boolean;
   /**
@@ -322,6 +330,11 @@ export interface ChannelActionAvailability {
    */
   browseListed?: boolean;
   /**
+   * 「기본 채널로 지정」(ADR-0224 D6, #5845). 선택 칸이다: 소유자 · 관리자가 든 공개 채널이고 이 서버가 기본 채널 표시를 실을 때만
+   * (`canSetChannelDefault`). 채워 넣지 않은 호출부(폰 포함)는 그대로 없다.
+   */
+  defaultChannel?: boolean;
+  /**
    * 「이름 바꾸기」(ADR-0225 D10, #5835). 선택 칸이다: 소유자 · 관리자가 든 공개 · 비공개 채널이고 이름이 `general` 이 아닐 때만
    * (`canRenameChannel`). 채워 넣지 않은 호출부(폰의 다른 표면 포함)는 그대로 없다.
    */
@@ -351,6 +364,10 @@ export interface ChannelActionState {
   copiedId?: boolean;
   /** 이 채널이 지금 둘러보기에 보이는가(#5843). 없으면 꺼짐. */
   browseListed?: boolean;
+  /** 이 채널이 지금 기본 채널인가(#5845). 없으면 꺼짐. */
+  defaultChannel?: boolean;
+  /** 이 채널이 내 목록에서 보이는 유일한 기본 채널인가(#5845). 줄이 「하나 이상 있어야 해요」 까닭을 먼저 말한다 - 누르는 것은 막지 않는다. */
+  onlyDefault?: boolean;
   /** 이 채널에 별표가 붙어 있는가 (ADR-0177 / BT-5). 낱말이 이 값으로 뒤집힌다. */
   starred?: boolean;
   /**
@@ -397,6 +414,8 @@ export function channelActionAvailability(input: {
    * 켜고 끌 손(왕복)이 있을 때만 참으로 넘긴다. 옛 서버나 역할을 모를 때는 거짓이다.
    */
   canSetBrowseListed?: boolean;
+  /** 이 채널에 「기본 채널로 지정」을 내미는가(#5845): `canSetChannelDefault` 가 참이고 켜고 끌 손(왕복)이 있을 때만 참으로 넘긴다. */
+  canSetDefault?: boolean;
   /**
    * 이 채널에 「이름 바꾸기」를 내미는가(#5835): `canRenameChannel`(소유자 · 관리자 · 공개/비공개 · `general` 아님)이 참이고 다이얼로그로
    * 넘길 손이 있을 때만 참으로 넘긴다. 역할을 모르면 거짓이다.
@@ -435,6 +454,7 @@ export function channelActionAvailability(input: {
       (input.hasGithubNotifications ?? false) &&
       (input.selfRole === undefined || input.selfRole === "owner" || input.selfRole === "admin"),
     browseListed: input.canSetBrowseListed ?? false,
+    defaultChannel: input.canSetDefault ?? false,
     rename: !isDm && (input.canRename ?? false),
     // **DM 은 옮기지 않는다** (ADR-0177 D4). 기본 섹션 두 종은 「채널」과 「DM」
     // 이고 DM 은 그 중 하나에 고정이다 - 커스텀 섹션에 DM 을 넣는 문을 열면
@@ -574,6 +594,20 @@ export function channelActionItems(
       checked: state.browseListed === true,
     });
   }
+  // 「기본 채널로 지정」(#5845): 「둘러보기에 보이기」 바로 옆의 같은 모양의 체크 줄. 아래 한 줄은 「새로 합류하는 사람」에게만 적용된다는 뜻이고,
+  // 내 목록에서 유일한 기본 채널이면 같은 자리에서 「하나 이상 있어야 해요」로 바뀐다(둘 다 한 줄).
+  if (available.defaultChannel === true && formatMessage !== undefined) {
+    push({
+      key: "default-channel",
+      testKey: "default-channel",
+      label: formatMessage("channels.default.label"),
+      icon: "default",
+      checked: state.defaultChannel === true,
+      description: formatMessage(
+        state.onlyDefault === true ? "channels.default.lastHint" : "channels.default.description"
+      ),
+    });
+  }
   if (available.star) {
     push({
       key: "star",
@@ -615,7 +649,7 @@ const SURFACE_KEYS: Record<ChannelActionSurface, ReadonlySet<ChannelActionKey>> 
   // 헤더 ⋮ 는 BZ-2 가 세운 그대로다. 이 티켓은 헤더의 항목을 늘리지 않는다:
   // 채널을 열어 둔 사람에게 「읽음 처리」와 「이름 복사」는 다른 물음이다.
   // 「대화 나가기」(D21)는 대화 머리 메뉴에도 선다(DM 의 머리 메뉴를 세우는 것은 화면 칸의 일이다).
-  header: new Set<ChannelActionKey>(["topic", "rename", "mute", "memory", "github", "browse-listed", "leave", "leave-dm"]),
+  header: new Set<ChannelActionKey>(["topic", "rename", "mute", "memory", "github", "browse-listed", "default-channel", "leave", "leave-dm"]),
   // 행 우클릭은 「열지 않고 조작한다」가 전부다. BT-4 의 섹션 배치가 여기 사는
   // 이유도 그것이다 - 채널을 어디에 둘지는 그 채널을 **보지 않고** 정하는 일이고,
   // 헤더 ⋮ 는 정의상 이미 그 안에 들어와 있는 사람의 것이다. 복사 셋과 DM 닫기(#3963)도
