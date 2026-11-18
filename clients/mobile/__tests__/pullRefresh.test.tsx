@@ -1476,7 +1476,8 @@ describe('모든 화면이 scrollProps 를 펼친다 (소스 스캔, src 전수)
 
   // Owner 2026-10-30 (#4783): 「대화 화면 당겨서 새로고침 = 다시 맞추기」.
   // 기존 대화 화면 제외 결정을 뒤집었으므로 Timeline 이 아홉 번째 호출 화면이다.
-  it('스캔이 훅을 부르는 아홉 화면을 모두 찾는다', () => {
+  // #5847: 채널 미리 보기(참여 전 읽기 화면)가 열 번째 호출 화면이다 — 새 화면 등록이다(천장 변경이 아니다).
+  it('스캔이 훅을 부르는 열 화면을 모두 찾는다', () => {
     expect(callers.map(u => u.rel).sort()).toEqual(
       [
         'src/screens/InboxScreen.tsx',
@@ -1488,6 +1489,7 @@ describe('모든 화면이 scrollProps 를 펼친다 (소스 스캔, src 전수)
         'src/screens/WorkSessionDetailScreen.tsx',
         'src/screens/AppsScreen.tsx', // U-4 #3951
         'src/features/conversation/Timeline.tsx', // owner 10-30 #4783
+        'src/screens/ChannelPreviewScreen.tsx', // #5847
       ].sort(),
     );
   });

@@ -11,6 +11,9 @@ import {
   hiddenPublicChannels,
   setChannelBrowseListed,
   channelJoinFailure,
+  channelPreviewFailure,
+  channelPreviewFromWire,
+  previewInReadingOrder,
   joinChannelResultFromWire,
   splitBrowseRows,
   type BrowseChannel,
@@ -194,5 +197,50 @@ describe("channelBrowseSwitchFailure", () => {
     expect(failure.kind).toBe("network");
     expect(failure.key).toBe("channels.browse.switchNetwork");
     expect(failure.values?.reason).toContain("15초");
+  });
+});
+
+// 미리 보기(E3 #5840 인계 0절의 응답 예 그대로: 지워진 글은 body 없음, 글쓴이 이름이 빠질 수 있음, 최신 먼저).
+describe("channelPreviewFromWire", () => {
+  const wire = {
+    channel: { id: "d3b22eb3", name: "pv-lounge", topic: "pv-topic", memberCount: 3, isMember: false },
+    messages: [
+      { id: "m3", body: "with-file", author: { displayName: "이도현", kind: "human" }, createdAtMs: 3, edited: false, deleted: false, replyCount: 0, attachmentNames: ["회의록.pdf"] },
+      { id: "m2", author: { kind: "agent" }, createdAtMs: 2, edited: false, deleted: true, replyCount: 0, attachmentNames: [] },
+      { id: "m1", body: "root-text", author: { displayName: "이도현", kind: "human" }, createdAtMs: 1, edited: true, deleted: false, replyCount: 1, attachmentNames: [] },
+    ],
+  };
+
+  it("keeps the dropped keys dropped and flips the server's newest-first into reading order", () => {
+    const preview = channelPreviewFromWire(wire);
+    expect(preview.channel).toEqual({ id: "d3b22eb3", name: "pv-lounge", topic: "pv-topic", memberCount: 3, isMember: false });
+    expect(preview.messages[1]).not.toHaveProperty("body");
+    expect(preview.messages[1].author).toEqual({ kind: "agent" });
+    expect(previewInReadingOrder(preview.messages).map((m) => m.id)).toEqual(["m1", "m2", "m3"]);
+    expect(preview.messages.map((m) => m.id)).toEqual(["m3", "m2", "m1"]);
+  });
+
+  it("refuses a message without the always-present keys", () => {
+    expect(() =>
+      channelPreviewFromWire({ ...wire, messages: [{ id: "x", author: { kind: "human" }, createdAtMs: 1 }] })
+    ).toThrow(WireShapeError);
+  });
+});
+
+describe("channelPreviewFailure", () => {
+  it.each([
+    [new ApiError(403, "guests cannot browse or join public channels"), "forbidden", "channels.preview.loadForbidden"],
+    [new ApiError(404, "channel not found"), "notFound", "channels.preview.notFound"],
+    [new ApiError(429, "rate limited", undefined, 30), "rateLimited", "channels.browse.rateLimited"],
+    [new ApiError(500, "boom"), "generic", "channels.preview.loadGeneric"],
+  ] as const)("%s", (error, kind, key) => {
+    expect(channelPreviewFailure(error)).toEqual({ kind, key });
+  });
+
+  it("carries the transport's reason for a network failure", () => {
+    expect(channelPreviewFailure(new NetworkError("timeout", 15_000))).toMatchObject({
+      kind: "network",
+      key: "channels.preview.loadNetwork",
+    });
   });
 });

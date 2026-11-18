@@ -518,6 +518,64 @@ export const catalog: MessageCatalog = {
       "value": "只能使用文字、数字、连字符（-）和下划线（_）。"
     }
   ],
+  "channels.preview.attachmentLocked": [
+    {
+      "type": 0,
+      "value": "加入后即可查看"
+    }
+  ],
+  "channels.preview.closeAria": [
+    {
+      "type": 0,
+      "value": "关闭频道预览"
+    }
+  ],
+  "channels.preview.empty": [
+    {
+      "type": 0,
+      "value": "还没有消息"
+    }
+  ],
+  "channels.preview.loadForbidden": [
+    {
+      "type": 0,
+      "value": "此账号无法预览该频道。"
+    }
+  ],
+  "channels.preview.loadGeneric": [
+    {
+      "type": 0,
+      "value": "无法加载频道消息。请稍后再试。"
+    }
+  ],
+  "channels.preview.loading": [
+    {
+      "type": 0,
+      "value": "正在加载此频道的最新消息。"
+    }
+  ],
+  "channels.preview.loadNetwork": [
+    {
+      "type": 0,
+      "value": "无法加载频道消息。"
+    },
+    {
+      "type": 1,
+      "value": "reason"
+    }
+  ],
+  "channels.preview.notFound": [
+    {
+      "type": 0,
+      "value": "找不到此频道"
+    }
+  ],
+  "channels.preview.openHint": [
+    {
+      "type": 0,
+      "value": "点按即可只读预览最近的消息。"
+    }
+  ],
   "timeline.channelLeave.bodyPublicBrowse": [
     {
       "type": 1,

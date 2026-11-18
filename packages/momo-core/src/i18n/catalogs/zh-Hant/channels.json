@@ -70,5 +70,14 @@
   "channels.browse.loading": "正在載入頻道列表。",
   "channels.browse.joining": "正在加入",
   "channels.browse.emptyAdminDetailPhone": "在網頁版或桌面版的頻道選單中開啟「在瀏覽中顯示」，現有頻道就會出現在這裡。",
-  "channels.browse.homeRowHint": "用這個名稱開啟頻道瀏覽。"
+  "channels.browse.homeRowHint": "用這個名稱開啟頻道瀏覽。",
+  "channels.preview.closeAria": "關閉頻道預覽",
+  "channels.preview.loading": "正在載入此頻道的最新訊息。",
+  "channels.preview.empty": "還沒有訊息",
+  "channels.preview.attachmentLocked": "加入後即可查看",
+  "channels.preview.openHint": "點一下即可唯讀預覽最近的訊息。",
+  "channels.preview.loadForbidden": "此帳號無法預覽該頻道。",
+  "channels.preview.notFound": "找不到此頻道",
+  "channels.preview.loadNetwork": "無法載入頻道訊息。{reason}",
+  "channels.preview.loadGeneric": "無法載入頻道訊息。請稍後再試。"
 }
