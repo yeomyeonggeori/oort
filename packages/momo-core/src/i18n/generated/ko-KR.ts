@@ -1635,6 +1635,182 @@ export const catalog: MessageCatalog = {
       "value": "글자, 숫자, 하이픈(-), 밑줄(_)만 쓸 수 있어요."
     }
   ],
+  "channels.preview.attachmentLocked": [
+    {
+      "type": 0,
+      "value": "참여하면 볼 수 있어요"
+    }
+  ],
+  "channels.preview.closeAria": [
+    {
+      "type": 0,
+      "value": "채널 미리 보기 닫기"
+    }
+  ],
+  "channels.preview.empty": [
+    {
+      "type": 0,
+      "value": "아직 글이 없어요"
+    }
+  ],
+  "channels.preview.joinBand": [
+    {
+      "type": 0,
+      "value": "참여하면 글을 쓰고 답할 수 있어요."
+    }
+  ],
+  "channels.preview.listAria": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " 채널의 최근 글"
+    }
+  ],
+  "channels.preview.loadForbidden": [
+    {
+      "type": 0,
+      "value": "이 계정으로는 이 채널을 미리 볼 수 없어요."
+    }
+  ],
+  "channels.preview.loadGeneric": [
+    {
+      "type": 0,
+      "value": "채널 글을 불러오지 못했어요. 잠시 뒤에 다시 시도해 주세요."
+    }
+  ],
+  "channels.preview.loading": [
+    {
+      "type": 0,
+      "value": "채널의 최근 글을 불러오는 중이에요."
+    }
+  ],
+  "channels.preview.loadNetwork": [
+    {
+      "type": 0,
+      "value": "채널 글을 불러오지 못했어요. "
+    },
+    {
+      "type": 1,
+      "value": "reason"
+    }
+  ],
+  "channels.preview.notFound": [
+    {
+      "type": 0,
+      "value": "이 채널을 찾을 수 없어요"
+    }
+  ],
+  "channels.preview.openHint": [
+    {
+      "type": 0,
+      "value": "누르면 최근 글을 읽기만 할 수 있게 미리 봐요."
+    }
+  ],
+  "channels.rename.action": [
+    {
+      "type": 0,
+      "value": "이름 바꾸기"
+    }
+  ],
+  "channels.rename.aria": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " 채널의 이름 바꾸기"
+    }
+  ],
+  "channels.rename.busy": [
+    {
+      "type": 0,
+      "value": "바꾸는 중…"
+    }
+  ],
+  "channels.rename.cancel": [
+    {
+      "type": 0,
+      "value": "취소"
+    }
+  ],
+  "channels.rename.description": [
+    {
+      "type": 0,
+      "value": "새 이름은 사이드바와 채널 머리에 바로 보여요."
+    }
+  ],
+  "channels.rename.done": [
+    {
+      "type": 0,
+      "value": "채널 이름을 바꿨어요."
+    }
+  ],
+  "channels.rename.fieldLabel": [
+    {
+      "type": 0,
+      "value": "채널 이름"
+    }
+  ],
+  "channels.rename.forbidden": [
+    {
+      "type": 0,
+      "value": "소유자와 관리자만 채널 이름을 바꿀 수 있어요."
+    }
+  ],
+  "channels.rename.generalLocked": [
+    {
+      "type": 0,
+      "value": "general 채널의 이름은 바꿀 수 없어요."
+    }
+  ],
+  "channels.rename.generic": [
+    {
+      "type": 0,
+      "value": "바꾸지 못했어요. 다시 시도해 주세요."
+    }
+  ],
+  "channels.rename.network": [
+    {
+      "type": 0,
+      "value": "바꾸지 못했어요. "
+    },
+    {
+      "type": 1,
+      "value": "reason"
+    }
+  ],
+  "channels.rename.notFound": [
+    {
+      "type": 0,
+      "value": "이 채널을 찾을 수 없어요."
+    }
+  ],
+  "channels.rename.preview": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " 이름으로 바뀌어요"
+    }
+  ],
+  "channels.rename.submit": [
+    {
+      "type": 0,
+      "value": "바꾸기"
+    }
+  ],
+  "channels.rename.title": [
+    {
+      "type": 0,
+      "value": "채널 이름 바꾸기"
+    }
+  ],
   "common.feedback.unavailable": [
     {
       "type": 0,

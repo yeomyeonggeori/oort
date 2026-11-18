@@ -560,6 +560,182 @@ export const catalog: MessageCatalog = {
       "value": "Utilisez uniquement des lettres, des chiffres, des traits d'union (-) et des tirets bas (_)."
     }
   ],
+  "channels.preview.attachmentLocked": [
+    {
+      "type": 0,
+      "value": "Rejoignez le canal pour le voir"
+    }
+  ],
+  "channels.preview.closeAria": [
+    {
+      "type": 0,
+      "value": "Fermer l'aperçu du canal"
+    }
+  ],
+  "channels.preview.empty": [
+    {
+      "type": 0,
+      "value": "Aucun message pour le moment"
+    }
+  ],
+  "channels.preview.joinBand": [
+    {
+      "type": 0,
+      "value": "Rejoignez le canal pour écrire et répondre."
+    }
+  ],
+  "channels.preview.listAria": [
+    {
+      "type": 0,
+      "value": "Messages récents de "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    }
+  ],
+  "channels.preview.loadForbidden": [
+    {
+      "type": 0,
+      "value": "Ce compte ne peut pas afficher l'aperçu de ce canal."
+    }
+  ],
+  "channels.preview.loadGeneric": [
+    {
+      "type": 0,
+      "value": "Impossible de charger les messages du canal. Réessayez dans un instant."
+    }
+  ],
+  "channels.preview.loading": [
+    {
+      "type": 0,
+      "value": "Chargement des derniers messages du canal."
+    }
+  ],
+  "channels.preview.loadNetwork": [
+    {
+      "type": 0,
+      "value": "Impossible de charger les messages du canal. "
+    },
+    {
+      "type": 1,
+      "value": "reason"
+    }
+  ],
+  "channels.preview.notFound": [
+    {
+      "type": 0,
+      "value": "Ce canal est introuvable"
+    }
+  ],
+  "channels.preview.openHint": [
+    {
+      "type": 0,
+      "value": "Ouvre un aperçu en lecture seule des messages récents."
+    }
+  ],
+  "channels.rename.action": [
+    {
+      "type": 0,
+      "value": "Renommer le canal"
+    }
+  ],
+  "channels.rename.aria": [
+    {
+      "type": 0,
+      "value": "Renommer le canal "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    }
+  ],
+  "channels.rename.busy": [
+    {
+      "type": 0,
+      "value": "Renommage…"
+    }
+  ],
+  "channels.rename.cancel": [
+    {
+      "type": 0,
+      "value": "Annuler"
+    }
+  ],
+  "channels.rename.description": [
+    {
+      "type": 0,
+      "value": "Le nouveau nom apparaît tout de suite dans la barre latérale et l'en-tête du canal."
+    }
+  ],
+  "channels.rename.done": [
+    {
+      "type": 0,
+      "value": "Canal renommé."
+    }
+  ],
+  "channels.rename.fieldLabel": [
+    {
+      "type": 0,
+      "value": "Nom du canal"
+    }
+  ],
+  "channels.rename.forbidden": [
+    {
+      "type": 0,
+      "value": "Seuls les propriétaires et les administrateurs peuvent renommer un canal."
+    }
+  ],
+  "channels.rename.generalLocked": [
+    {
+      "type": 0,
+      "value": "Le nom du canal general ne peut pas être modifié."
+    }
+  ],
+  "channels.rename.generic": [
+    {
+      "type": 0,
+      "value": "Impossible de renommer le canal. Réessayez."
+    }
+  ],
+  "channels.rename.network": [
+    {
+      "type": 0,
+      "value": "Impossible de renommer le canal. "
+    },
+    {
+      "type": 1,
+      "value": "reason"
+    }
+  ],
+  "channels.rename.notFound": [
+    {
+      "type": 0,
+      "value": "Ce canal est introuvable."
+    }
+  ],
+  "channels.rename.preview": [
+    {
+      "type": 0,
+      "value": "Sera renommé en "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    }
+  ],
+  "channels.rename.submit": [
+    {
+      "type": 0,
+      "value": "Renommer"
+    }
+  ],
+  "channels.rename.title": [
+    {
+      "type": 0,
+      "value": "Renommer le canal"
+    }
+  ],
   "expressions.draft.linkApprove": [
     {
       "type": 0,

@@ -19,7 +19,8 @@ import {useStyles} from '../../design/theme';
 import {useFormatMessage} from '../../i18n/useFormatMessage';
 import type {ChannelRowTarget} from './channelRowActions';
 import {DmLeaveConfirm, ignoreDiscard} from './DmLeaveConfirm';
-import type {DmLeaveStepView} from './useChannelRowActions';
+import {RenameChannelBody} from './RenameChannelBody';
+import type {ChannelRowActions, DmLeaveStepView} from './useChannelRowActions';
 
 // =============================================================================
 // 행을 길게 누르면 열리는 시트 (#4229, Buzz식). 그릇·머리·행은 #4318 의 공용 부품이다.
@@ -78,6 +79,9 @@ export function ChannelActionSheet({
   dmLeave = null,
   onConfirmDmLeave,
   onCancelDmLeave,
+  rename = null,
+  onConfirmRename,
+  onClearRenameFailure,
   onClose,
 }: {
   target: ChannelRowTarget;
@@ -93,6 +97,10 @@ export function ChannelActionSheet({
   dmLeave?: DmLeaveStepView | null;
   onConfirmDmLeave?: () => void;
   onCancelDmLeave?: () => void;
+  /** 「이름 바꾸기」 단계(훅의 `rename`, ADR-0225 D10 · #5835). 있으면 머리까지 이 단계의 것으로 바뀐다. */
+  rename?: ChannelRowActions['rename'];
+  onConfirmRename?: (name: string) => void;
+  onClearRenameFailure?: () => void;
   onClose: () => void;
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
@@ -107,9 +115,20 @@ export function ChannelActionSheet({
       scrimLabel="대화 액션 닫기"
       scrimTestID="channel-sheet-backdrop"
       // 1:1 나가기 요청이 가는 동안은 몸짓으로 닫히지 않는다(요청은 이미 나갔다).
-      dirty={dmLeave?.pending === true}
+      dirty={dmLeave?.pending === true || rename?.pending === true}
       onDiscardPrompt={ignoreDiscard}
       testID="channel-action-sheet">
+      {rename !== null && onConfirmRename ? (
+        <RenameChannelBody
+          current={target.channel.name ?? target.title}
+          pending={rename.pending}
+          failure={rename.failure}
+          onSubmit={onConfirmRename}
+          onEdit={onClearRenameFailure ?? ignoreDiscard}
+          testIDPrefix="channel-sheet-rename"
+        />
+      ) : (
+      <>
       <SheetHeader
         title={isDm ? target.title : `# ${target.title}`}
         titleTestID="channel-sheet-title"
@@ -174,6 +193,8 @@ export function ChannelActionSheet({
           </>
         )}
       </SheetScroll>
+      </>
+      )}
     </PageSheet>
   );
 }

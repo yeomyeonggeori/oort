@@ -31,6 +31,7 @@ import { RestoringScreen } from "@/app/RestoringScreen";
 import { Skeleton } from "@/features/common/States";
 import { RenderErrorBoundary } from "@/features/common/RenderErrorBoundary";
 import { ChatShell } from "@/features/chat/ChatShell";
+import { ChannelRoute } from "@/features/channels/ChannelRoute";
 import { InboxRoute } from "@/features/inbox/InboxRoute";
 import { DraftsRoute } from "@/features/drafts/DraftsRoute";
 import { ScheduledRoute } from "@/features/scheduled/ScheduledRoute";
@@ -383,7 +384,7 @@ export function App() {
           }
         >
           <Route index element={<ChatShell />} />
-          <Route path="c/:channelId" element={<ChatShell />} />
+          <Route path="c/:channelId" element={<ChannelRoute />} />
           <Route path="inbox" element={<InboxRoute />} />
           <Route path="drafts" element={<DraftsRoute />} />
           <Route path="scheduled" element={<ScheduledRoute />} />

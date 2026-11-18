@@ -9,6 +9,7 @@ import {
 } from "@/design/ui/dropdown-menu";
 import { Tooltip } from "@/design/ui/tooltip";
 import { ChannelTopicDialog } from "@/features/channels/ChannelContextControls";
+import { RenameChannelDialog } from "@/features/channels/RenameChannelDialog";
 import { ChannelMemoryDialog } from "@/features/memory/ChannelMemoryDialog";
 import { ChannelGithubDialog } from "@/features/github/ChannelGithubDialog";
 import { canChangeWorkspaceMemory } from "@momo/core/features/memory/presentation";
@@ -41,9 +42,8 @@ import {
 //                       확인 다이얼로그를 거치고, 그 다이얼로그가 왕복 내내 서서
 //                       「나가는 중」과 실패를 말한다(design-review #1937 H-1).
 //
-// 「이름 수정」은 없다. 서버에 채널 이름을 바꾸는 라우트가 없어(2026-08-10 실측)
-// 누를 수 없는 항목을 그리지 않는다 — 코어 model.ts 머리말에 그 실측을 남겨 두었고
-// 별도 티켓으로 뺀다.
+//   * 이름 바꾸기    — 소유자 · 관리자에게만, 이름이 `general` 인 채널에는 없다(ADR-0225 D10, #5835). 이름 칸이 있는 다이얼로그를
+//                       연다(주제 · 기억 설정과 같은 넘김). 서버 라우트가 없던 때(2026-08-10 실측)의 「이름 수정은 없다」는 이 줄로 닫혔다.
 //
 // ## 이 파일에 실행부가 없는 이유 (BT-1 / #1929)
 //
@@ -62,6 +62,9 @@ import {
 
 /** 「대화 나가기」 항목을 세우는 표지. 실행은 메뉴가 내려간 뒤 `onLeaveDm` 이 한다(#2741 과 같은 넘김). */
 const LEAVE_DM_HANDED_OFF = () => undefined;
+
+/** 「이름 바꾸기」 항목을 세우는 표지. 다이얼로그는 메뉴가 다 내려간 뒤 연다(아래 `onCloseAutoFocus`). */
+const RENAME_HANDED_OFF = () => undefined;
 
 export function ChannelHeaderMenu({
   workspaceId,
@@ -105,6 +108,7 @@ export function ChannelHeaderMenu({
   const [topicOpen, setTopicOpen] = useState(false);
   const [memoryOpen, setMemoryOpen] = useState(false);
   const [githubOpen, setGithubOpen] = useState(false);
+  const [renameOpen, setRenameOpen] = useState(false);
   const topic = normalizeChannelTopic(channel.topic ?? "");
   const menuLabel = channelActionMenuLabel(title, channel);
 
@@ -117,6 +121,7 @@ export function ChannelHeaderMenu({
     onActionSucceeded: () => setOpen(false),
     // 항목을 세우는 손만 넘긴다: 실제로 부르는 것은 메뉴가 다 내려간 뒤(아래 `onCloseAutoFocus`)다.
     onLeaveDm: onLeaveDm ? LEAVE_DM_HANDED_OFF : undefined,
+    onRename: RENAME_HANDED_OFF,
   });
 
   return (
@@ -161,6 +166,7 @@ export function ChannelHeaderMenu({
             if (pending === "topic") setTopicOpen(true);
             if (pending === "memory") setMemoryOpen(true);
             if (pending === "github") setGithubOpen(true);
+            if (pending === "rename") setRenameOpen(true);
             if (pending === "leave") actions.leave.open();
             if (pending === "leave-dm") onLeaveDm?.(triggerRef.current);
           }}
@@ -210,6 +216,17 @@ export function ChannelHeaderMenu({
             if (!next) window.requestAnimationFrame(() => triggerRef.current?.focus());
           }}
           opener={triggerRef}
+        />
+      )}
+
+      {/* 소유자 · 관리자에게 문이 서는 채널에만 세운다. 닫히면 Radix 가 ⋮ 로 초점을 돌려준다(`opener`). */}
+      {actions.available.rename === true && (
+        <RenameChannelDialog
+          workspaceId={workspaceId}
+          channel={channel}
+          open={renameOpen}
+          onOpenChange={setRenameOpen}
+          opener={triggerRef.current}
         />
       )}
 

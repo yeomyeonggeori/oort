@@ -518,6 +518,186 @@ export const catalog: MessageCatalog = {
       "value": "只能使用文字、數字、連字號（-）和底線（_）。"
     }
   ],
+  "channels.preview.attachmentLocked": [
+    {
+      "type": 0,
+      "value": "加入後即可查看"
+    }
+  ],
+  "channels.preview.closeAria": [
+    {
+      "type": 0,
+      "value": "關閉頻道預覽"
+    }
+  ],
+  "channels.preview.empty": [
+    {
+      "type": 0,
+      "value": "還沒有訊息"
+    }
+  ],
+  "channels.preview.joinBand": [
+    {
+      "type": 0,
+      "value": "加入後即可發言與回覆。"
+    }
+  ],
+  "channels.preview.listAria": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " 的最近訊息"
+    }
+  ],
+  "channels.preview.loadForbidden": [
+    {
+      "type": 0,
+      "value": "此帳號無法預覽該頻道。"
+    }
+  ],
+  "channels.preview.loadGeneric": [
+    {
+      "type": 0,
+      "value": "無法載入頻道訊息。請稍後再試。"
+    }
+  ],
+  "channels.preview.loading": [
+    {
+      "type": 0,
+      "value": "正在載入此頻道的最新訊息。"
+    }
+  ],
+  "channels.preview.loadNetwork": [
+    {
+      "type": 0,
+      "value": "無法載入頻道訊息。"
+    },
+    {
+      "type": 1,
+      "value": "reason"
+    }
+  ],
+  "channels.preview.notFound": [
+    {
+      "type": 0,
+      "value": "找不到此頻道"
+    }
+  ],
+  "channels.preview.openHint": [
+    {
+      "type": 0,
+      "value": "點一下即可唯讀預覽最近的訊息。"
+    }
+  ],
+  "channels.rename.action": [
+    {
+      "type": 0,
+      "value": "重新命名頻道"
+    }
+  ],
+  "channels.rename.aria": [
+    {
+      "type": 0,
+      "value": "重新命名 "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " 頻道"
+    }
+  ],
+  "channels.rename.busy": [
+    {
+      "type": 0,
+      "value": "正在重新命名…"
+    }
+  ],
+  "channels.rename.cancel": [
+    {
+      "type": 0,
+      "value": "取消"
+    }
+  ],
+  "channels.rename.description": [
+    {
+      "type": 0,
+      "value": "新名稱會立即顯示在側邊欄和頻道標題中。"
+    }
+  ],
+  "channels.rename.done": [
+    {
+      "type": 0,
+      "value": "已重新命名頻道。"
+    }
+  ],
+  "channels.rename.fieldLabel": [
+    {
+      "type": 0,
+      "value": "頻道名稱"
+    }
+  ],
+  "channels.rename.forbidden": [
+    {
+      "type": 0,
+      "value": "只有擁有者和管理員可以重新命名頻道。"
+    }
+  ],
+  "channels.rename.generalLocked": [
+    {
+      "type": 0,
+      "value": "無法變更 general 頻道的名稱。"
+    }
+  ],
+  "channels.rename.generic": [
+    {
+      "type": 0,
+      "value": "無法重新命名。請再試一次。"
+    }
+  ],
+  "channels.rename.network": [
+    {
+      "type": 0,
+      "value": "無法重新命名。"
+    },
+    {
+      "type": 1,
+      "value": "reason"
+    }
+  ],
+  "channels.rename.notFound": [
+    {
+      "type": 0,
+      "value": "找不到此頻道。"
+    }
+  ],
+  "channels.rename.preview": [
+    {
+      "type": 0,
+      "value": "將重新命名為 "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    }
+  ],
+  "channels.rename.submit": [
+    {
+      "type": 0,
+      "value": "重新命名"
+    }
+  ],
+  "channels.rename.title": [
+    {
+      "type": 0,
+      "value": "重新命名頻道"
+    }
+  ],
   "expressions.draft.linkApprove": [
     {
       "type": 0,

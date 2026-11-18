@@ -1209,6 +1209,9 @@ export default function SidebarScreen({
           dmLeave={rowActions.dmLeave}
           onConfirmDmLeave={rowActions.confirmDmLeave}
           onCancelDmLeave={rowActions.cancelDmLeave}
+          rename={rowActions.rename}
+          onConfirmRename={rowActions.confirmRename}
+          onClearRenameFailure={rowActions.clearRenameFailure}
           onClose={rowActions.close}
         />
       ) : null}
