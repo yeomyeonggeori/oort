@@ -2160,6 +2160,7 @@ dependencies = [
  "futures",
  "getrandom 0.2.17",
  "image",
+ "momo-auth",
  "momo-db",
  "momo-outbox",
  "momo-settings",

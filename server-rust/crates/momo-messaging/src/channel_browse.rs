@@ -24,28 +24,32 @@ use uuid::Uuid;
 use crate::identity::WorkspaceRole;
 use crate::read_state::update_read_cursor_in_tx;
 
-/// The channel half of the D11 judgment as a SQL boolean over the channel row `$alias`:
-/// public, not archived, shown in browse. A `&'static str` (built with `concat!`), so it
-/// can sit inside another `concat!` or a `format!`.
+/// The channel half of the D11 judgment — public, not archived, shown in browse — over the
+/// channel row `alias`. The three conditions are written once, in
+/// [`momo_auth::channel_open_to_people_sql`] (ADR-0224 D13 shares them with the agent-side
+/// rules); this is that function's answer, ready to sit in a `format!` (it is `Display`).
 ///
 /// `kind = 'public'` is also implied by the table check `channel_browse_listed_public_ck`
-/// (migration 184); it stays here so the boundary does not rest on a constraint alone.
+/// (migration 184); it stays in the piece so the boundary does not rest on a constraint alone.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ChannelOpenToPeople(pub &'static str);
+
+impl std::fmt::Display for ChannelOpenToPeople {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&momo_auth::channel_open_to_people_sql(self.0))
+    }
+}
+
+/// [`ChannelOpenToPeople`] over the row alias `$alias` (a string literal).
 #[macro_export]
 macro_rules! channel_open_to_people_sql {
     ($alias:literal) => {
-        concat!(
-            $alias,
-            ".kind = 'public' AND ",
-            $alias,
-            ".archived_at IS NULL AND ",
-            $alias,
-            ".browse_listed"
-        )
+        $crate::channel_browse::ChannelOpenToPeople($alias)
     };
 }
 
 /// [`channel_open_to_people_sql!`] over the alias `c`.
-pub const CHANNEL_OPEN_TO_PEOPLE_SQL: &str = channel_open_to_people_sql!("c");
+pub const CHANNEL_OPEN_TO_PEOPLE_SQL: ChannelOpenToPeople = channel_open_to_people_sql!("c");
 
 /// Why the person half refused. Each maps onto the refusal the rest of the API already
 /// gives for that standing (403).
@@ -302,15 +306,16 @@ pub async fn self_join_channel_in_tx(
 mod tests {
     use super::*;
 
+    /// One place: the piece is momo-auth's judgment, not a second copy of it.
     #[test]
-    fn the_channel_piece_names_all_three_conditions_on_its_alias() {
+    fn the_channel_piece_is_the_one_people_judgment_in_momo_auth() {
         assert_eq!(
-            CHANNEL_OPEN_TO_PEOPLE_SQL,
-            "c.kind = 'public' AND c.archived_at IS NULL AND c.browse_listed"
+            CHANNEL_OPEN_TO_PEOPLE_SQL.to_string(),
+            momo_auth::channel_open_to_people_sql("c")
         );
         assert_eq!(
-            channel_open_to_people_sql!("ch"),
-            "ch.kind = 'public' AND ch.archived_at IS NULL AND ch.browse_listed"
+            channel_open_to_people_sql!("ch").to_string(),
+            momo_auth::channel_open_to_people_sql("ch")
         );
     }
 

@@ -168,8 +168,9 @@ pub use channel::{
 };
 pub use channel_browse::{
     clamp_browse_limit, judge_browse_person, list_browsable_channels_in_tx,
-    self_join_channel_in_tx, BrowsableChannel, BrowseAfter, BrowsePersonRefusal, SelfJoin,
-    BROWSE_LIMIT_DEFAULT, BROWSE_LIMIT_MAX, CHANNEL_OPEN_TO_PEOPLE_SQL,
+    self_join_channel_in_tx, BrowsableChannel, BrowseAfter, BrowsePersonRefusal,
+    ChannelOpenToPeople, SelfJoin, BROWSE_LIMIT_DEFAULT, BROWSE_LIMIT_MAX,
+    CHANNEL_OPEN_TO_PEOPLE_SQL,
 };
 pub use channel_restriction::ChannelRestriction;
 pub use channel_viewing::{touch_channel_viewing_in_tx, ViewingOutcome, VIEWING_MIN_REFRESH_SECS};
