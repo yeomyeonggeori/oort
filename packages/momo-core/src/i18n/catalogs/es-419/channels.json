@@ -20,5 +20,8 @@
   "channels.nameRule.serverRejected": "El servidor no aceptó este nombre. Solo se pueden usar letras, números, - y _.",
   "channels.nameRule.hint": "Letras, números, guiones (-) y guiones bajos (_), hasta {max, number} caracteres. Los espacios se convierten en - y las mayúsculas se guardan en minúscula.",
   "channels.nameRule.placeholder": "revisión-de-diseño",
-  "channels.nameRule.preview": "Se creará como {name}"
+  "channels.nameRule.preview": "Se creará como {name}",
+  "channels.createFailure.duplicate": "Ya existe un canal con ese nombre. Prueba con otro nombre.",
+  "channels.createFailure.forbidden": "No tienes permiso para crear canales. Pídelo a un propietario o administrador del espacio de trabajo.",
+  "channels.createFailure.rateLimited": "Hay demasiadas solicitudes. Inténtalo de nuevo en unos momentos."
 }

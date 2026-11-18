@@ -2,6 +2,24 @@
 import type { MessageCatalog } from "../types";
 
 export const catalog: MessageCatalog = {
+  "channels.createFailure.duplicate": [
+    {
+      "type": 0,
+      "value": "Ya existe un canal con ese nombre. Prueba con otro nombre."
+    }
+  ],
+  "channels.createFailure.forbidden": [
+    {
+      "type": 0,
+      "value": "No tienes permiso para crear canales. Pídelo a un propietario o administrador del espacio de trabajo."
+    }
+  ],
+  "channels.createFailure.rateLimited": [
+    {
+      "type": 0,
+      "value": "Hay demasiadas solicitudes. Inténtalo de nuevo en unos momentos."
+    }
+  ],
   "channels.dmLeave.action": [
     {
       "type": 0,

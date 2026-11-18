@@ -72,6 +72,11 @@ const FIXTURE_PATH: string = fileURLToPath(
   new URL("./__fixtures__/channel-name.vectors.json", (import.meta as unknown as { url: string }).url)
 );
 
+const MODEL_PATH: string = fileURLToPath(
+  // eslint-disable-next-line no-restricted-syntax
+  new URL("./model.ts", (import.meta as unknown as { url: string }).url)
+);
+
 /** sha256 of the vectors copy. The server side must assert the same value (or,
  *  better, that this file equals `docs/api/channel-name.vectors.json`). */
 const VECTORS_SHA256 =
@@ -135,6 +140,11 @@ describe("normalizeChannelName", () => {
     expect(normalizeChannelName("Design Review")).toBe("design-review");
   });
 
+  it("folds fullwidth first and blanks second: a fullwidth hyphen between blanks is one hyphen, not three", () => {
+    expect(normalizeChannelName("a\u0020\uFF0D\u0020b")).toBe("a-b");
+    expect(judgeChannelName("a\u0020\uFF0D\u0020b")).toEqual({ ok: true, name: "a-b" });
+  });
+
   it("folds with the 25 White_Space code points of ADR-0225 D2, not the regex class", () => {
     const blanks = [
       0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x20, 0x85, 0xa0, 0x1680,
@@ -182,6 +192,14 @@ describe("channelNameIssue", () => {
     }
   });
 
+  it("tells the reasons in the server's order: characters before edges, length before invisible", () => {
+    // `-!` has an edge separator AND an illegal character: the character sentence comes first.
+    expect(channelNameIssue("-!")).toBe("unsupportedCharacters");
+    // 81 zero-width spaces are too long AND invisible: the length comes first.
+    expect(channelNameIssue("\u200B".repeat(81))).toBe("tooLong");
+    expect(channelNameIssue("\u200B".repeat(80))).toBe("hiddenCharacters");
+  });
+
   it("names a leading or trailing separator as what it is", () => {
     // Every one of these uses only legal characters, so the alphabet sentence
     // would have told the reader to use exactly what they had already used.
@@ -219,7 +237,9 @@ describe("Unicode property patterns are built on first use (ADR-0225 D11)", () =
     vi.resetModules();
   });
 
-  it("does not construct a property regex while the module loads", async () => {
+  const hasProperty = (s: string) => s.includes("\\p{");
+
+  it("does not construct any property regex while the module loads, and builds them once, on first use", async () => {
     const RealRegExp = RegExp;
     const built: string[] = [];
     const Spy = new Proxy(RealRegExp, {
@@ -231,11 +251,65 @@ describe("Unicode property patterns are built on first use (ADR-0225 D11)", () =
     vi.stubGlobal("RegExp", Spy);
     vi.resetModules();
     const mod = await import("./model");
-    expect(built.filter((s) => s.includes("\\p{Cc}"))).toEqual([]);
-    expect(mod.channelNameIssue("한글")).toBeNull();
-    expect(built.filter((s) => s.includes("\\p{Cc}"))).toHaveLength(1);
+    // Every property escape counts (letters, numbers, marks and the unseen set), not one of them.
+    expect(built.filter(hasProperty)).toEqual([]);
+    expect(mod.channelNameIssue("\uD55C\uAE00")).toBeNull();
+    const afterFirst = built.filter(hasProperty);
+    expect(afterFirst.length).toBeGreaterThanOrEqual(4);
     mod.channelNameIssue("another");
-    expect(built.filter((s) => s.includes("\\p{Cc}"))).toHaveLength(1);
+    expect(built.filter(hasProperty)).toEqual(afterFirst);
+  });
+
+  it("keeps no property regex literal in the module (a literal is built at load and no spy can see it)", () => {
+    const source = readFileSync(MODEL_PATH).toString("utf8");
+    expect(source).toContain('new RegExp("^\\\\p{L}$"');
+    expect(source).not.toMatch(/(?<!\\)\\[pP]\{/);
+  });
+});
+
+describe("an engine that cannot build property regexes (ADR-0225 D11, review M1)", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.resetModules();
+  });
+
+  async function loadWithoutPropertyEscapes() {
+    const RealRegExp = RegExp;
+    const attempts: string[] = [];
+    const Broken = new Proxy(RealRegExp, {
+      construct(target, args: [string | RegExp, string?]) {
+        if (String(args[0]).includes("\\p{")) {
+          attempts.push(String(args[0]));
+          throw new SyntaxError("Invalid property name");
+        }
+        return new target(...args);
+      },
+    });
+    vi.stubGlobal("RegExp", Broken);
+    vi.resetModules();
+    return { mod: await import("./model"), attempts };
+  }
+
+  it("never throws while rendering: length and the hand list of invisible letters still answer, the rest is the server's", async () => {
+    const { mod } = await loadWithoutPropertyEscapes();
+    expect(() => mod.channelNameIssue("general")).not.toThrow();
+    expect(mod.judgeChannelName("general")).toEqual({ ok: true, name: "general" });
+    expect(mod.judgeChannelName("")).toEqual({ ok: false, verdict: "required" });
+    expect(mod.judgeChannelName("a".repeat(81))).toEqual({ ok: false, verdict: "tooLong" });
+    expect(mod.judgeChannelName("a\u3164b")).toEqual({ ok: false, verdict: "hidden" });
+    // What only a category can tell apart is left to the server's 400.
+    expect(mod.judgeChannelName("a.b")).toEqual({ ok: true, name: "a.b" });
+    expect(mod.normalizeChannelName("Design Review")).toBe("design-review");
+  });
+
+  it("remembers that it cannot: one try, not one per keystroke", async () => {
+    const { mod, attempts } = await loadWithoutPropertyEscapes();
+    mod.channelNameIssue("a");
+    const afterFirst = attempts.length;
+    expect(afterFirst).toBeGreaterThan(0);
+    mod.channelNameIssue("ab");
+    mod.judgeChannelName("abc");
+    expect(attempts).toHaveLength(afterFirst);
   });
 });
 
@@ -255,6 +329,14 @@ describe("name rule sentences", () => {
       expect(channelNameIssueMessage(issue), issue).toBe(text);
     }
     expect(new Set(issues.map(channelNameIssueKey)).size).toBe(5);
+  });
+
+  it("says the length in the sentence: 80 is in it and no placeholder is left", () => {
+    const text = channelNameIssueMessage("tooLong");
+    expect(text).toContain(String(CHANNEL_NAME_MAX));
+    expect(CHANNEL_NAME_MAX).toBe(80);
+    expect(text).not.toContain("{");
+    expect(text).toBe("채널 이름은 80자까지 쓸 수 있어요.");
   });
 
   it("gives the invisible-character sentence of ADR-0225 D13", () => {
@@ -334,10 +416,26 @@ describe("createChannelFailure", () => {
   it("answers a 400 with the dictionary sentence, never the server's English", () => {
     const failure = createChannelFailure(new ApiError(400, "channel name must use letters"));
     expect(failure.messageKey).toBe(CHANNEL_NAME_SERVER_REJECTED_KEY);
-    expect(failure.message).toBe(
-      (koChannels as Record<string, string>)[CHANNEL_NAME_SERVER_REJECTED_KEY]
-    );
+    // Literal on purpose: ADR-0225 D11 fixes these words, so a dictionary edit cannot move the test with it.
+    expect(failure.message).toBe("서버가 이 이름을 받지 않았어요. 글자, 숫자, -, _만 쓸 수 있어요.");
     expect(failure.message).not.toMatch(/channel name/);
+  });
+
+  it("gives every refusal a dictionary key, and the Korean fallback says the same words", () => {
+    const cases: [number, string, string][] = [
+      [409, "channels.createFailure.duplicate", "같은 이름의 채널이 이미 있습니다. 다른 이름으로 다시 시도하세요."],
+      [403, "channels.createFailure.forbidden", "채널을 만들 권한이 없습니다. 워크스페이스 소유자나 관리자에게 요청하세요."],
+      [429, "channels.createFailure.rateLimited", "요청이 너무 잦습니다. 잠시 뒤에 다시 시도하세요."],
+    ];
+    for (const [status, key, sentence] of cases) {
+      const failure = createChannelFailure(new ApiError(status, "x"));
+      expect(failure.messageKey, String(status)).toBe(key);
+      expect(failure.message, String(status)).toBe(sentence);
+      expect((koChannels as Record<string, string>)[key], String(status)).toBe(sentence);
+    }
+    // No key for what nothing in the dictionary says yet: the transport's own words.
+    expect(createChannelFailure(new NetworkError("timeout", 15_000)).messageKey).toBeUndefined();
+    expect(createChannelFailure(new Error("boom")).messageKey).toBeUndefined();
   });
 
   it("puts a server-side name rejection beside the name field too", () => {

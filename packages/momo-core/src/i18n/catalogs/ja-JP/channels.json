@@ -20,5 +20,8 @@
   "channels.nameRule.serverRejected": "サーバーがこの名前を受け付けませんでした。文字、数字、-、_のみ使えます。",
   "channels.nameRule.hint": "文字、数字、ハイフン（-）、アンダースコア（_）で{max, number}文字まで。空白は-に変わり、英字の大文字は小文字で保存されます。",
   "channels.nameRule.placeholder": "デザイン-レビュー",
-  "channels.nameRule.preview": "{name} という名前で作成されます"
+  "channels.nameRule.preview": "{name} という名前で作成されます",
+  "channels.createFailure.duplicate": "同じ名前のチャンネルがすでにあります。別の名前でもう一度お試しください。",
+  "channels.createFailure.forbidden": "チャンネルを作成する権限がありません。ワークスペースのオーナーまたは管理者に依頼してください。",
+  "channels.createFailure.rateLimited": "リクエストが多すぎます。しばらくしてからもう一度お試しください。"
 }

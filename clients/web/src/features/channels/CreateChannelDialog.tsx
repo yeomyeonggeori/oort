@@ -24,16 +24,16 @@ import { PRIMARY_ACTION_SHORTCUT } from "@/app/keyboardShortcuts";
 import {
   CHANNEL_NAME_ISSUE_KEYS,
   CHANNEL_NAME_MAX,
+  CHANNEL_CREATE_FAILURE_KEYS,
   CHANNEL_NAME_SERVER_REJECTED_KEY,
   channelNameIssue,
   channelTopicIssue,
   channelTopicIssueMessage,
-  createChannelFailure,
+  type CreateChannelFailure,
   normalizeChannelName,
   normalizeChannelTopic,
   type ChannelNameIssue,
 } from "@momo/core/features/channels/model";
-import { ApiError } from "@momo/core/lib/api";
 import type { MessageKey } from "@momo/core/i18n";
 import { useFormatMessage } from "@/i18n/useFormatMessage";
 import {
@@ -316,12 +316,9 @@ function CreateChannelPanel({
     return formatMessage(CHANNEL_NAME_ISSUE_KEYS[issue]);
   };
   const hint = formatMessage("channels.nameRule.hint", { max: CHANNEL_NAME_MAX });
-  const serverNameError =
-    failure?.field === "name"
-      ? failure.messageKey !== undefined
-        ? formatMessage(failure.messageKey)
-        : failure.message
-      : null;
+  // 거절 문장은 사전 키로 화면 언어를 따른다(400·409·403·429). 키가 없는 실패(망·알 수 없음)만 코어가 준 문장 그대로다.
+  const failureText = (f: CreateChannelFailure) => (f.messageKey !== undefined ? formatMessage(f.messageKey) : f.message);
+  const serverNameError = failure?.field === "name" ? failureText(failure) : null;
   /** 칸에 실제로 든 값으로 계산한 줄. */
   const lineFor = (value: string): NameLine => {
     const issue = channelNameIssue(value);
@@ -345,20 +342,20 @@ function CreateChannelPanel({
   useLayoutEffect(() => {
     if (frozenLine === null) drawnLine.current = liveLine;
   });
-  // 이 자리에 설 수 있는 문장 전부(줄 수가 가장 긴 것이 자리의 높이를 정한다). 409 문장은 코어가 말하는 그대로다.
+  // 이 자리에 설 수 있는 문장 전부(줄 수가 가장 긴 것이 자리의 높이를 정한다). 409 문장도 사전 키다.
   // 서 있는 오류도 넣는다: 얼린 줄이 쥔 서버 문장은 편집으로 `failure`가 지워져도 녹을 때까지 서 있다.
   const nameReserve = [
     hint,
     ...(Object.keys(CHANNEL_NAME_ISSUE_KEYS) as ChannelNameIssue[]).map(issueMessage),
     formatMessage(CHANNEL_NAME_SERVER_REJECTED_KEY),
-    createChannelFailure(new ApiError(409, "")).message,
+    formatMessage(CHANNEL_CREATE_FAILURE_KEYS.duplicate),
     ...[serverNameError, nameError].filter((text): text is string => text !== null),
   ].filter((text, at, all) => all.indexOf(text) === at);
   const topicError =
     topicIssue !== null && (attempted || topic.trim() !== "")
       ? channelTopicIssueMessage(topicIssue)
       : null;
-  const formError = failure && failure.field === null ? failure.message : null;
+  const formError = failure && failure.field === null ? failureText(failure) : null;
 
   // A rejection about the name is a request to change the name, so the caret
   // goes there. Editing clears the failure, so this fires once per rejection

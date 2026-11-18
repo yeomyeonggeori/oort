@@ -2,6 +2,24 @@
 import type { MessageCatalog } from "../types";
 
 export const catalog: MessageCatalog = {
+  "channels.createFailure.duplicate": [
+    {
+      "type": 0,
+      "value": "已有同名频道。请换一个名称再试。"
+    }
+  ],
+  "channels.createFailure.forbidden": [
+    {
+      "type": 0,
+      "value": "你没有创建频道的权限。请联系工作区所有者或管理员。"
+    }
+  ],
+  "channels.createFailure.rateLimited": [
+    {
+      "type": 0,
+      "value": "请求过于频繁，请稍后再试。"
+    }
+  ],
   "channels.dmLeave.action": [
     {
       "type": 0,
