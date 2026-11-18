@@ -1322,7 +1322,7 @@ fn expression_create_args_schema() -> Value {
                 "type": "array",
                 "minItems": 1,
                 "maxItems": EXPRESSION_CANDIDATES_MAX,
-                "description": "1-4 candidates for ONE expression; every candidate names the same subjectMemberId. A person picks one after seeing the stored picture.",
+                "description": "1-4 candidates for ONE expression; every candidate names the same subjectMemberId. A person picks one after seeing the stored picture (a 'url' candidate: its host; the link is fetched only once a person approves it).",
                 "items": {
                     "type": "object",
                     "additionalProperties": false,

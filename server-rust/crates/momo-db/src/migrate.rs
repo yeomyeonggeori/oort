@@ -850,12 +850,20 @@ mod tests {
     /// 184 is #5837's two `channel` marks (ADR-0224 D2·D6): `browse_listed` and `is_default`, each
     /// public-only by CHECK, and the per-workspace default-channel fill (that row also starts
     /// listed). No new table, so no new RLS target.
+    ///
+    /// 185 is #5899's one more `expression_draft.code` (`source_awaiting_approval`: an agent's link
+    /// candidate that is fetched only after a person approves it). Same constraint, one more word.
+    /// No new table, column or grant.
+    /// 186 is #5909's safety net for 184's fill (ADR-0224 D6·D10): the same per-workspace default
+    /// channel fill, re-run with the row-security switch set inside its own `DO` block so it holds
+    /// whether the file runs in one transaction or not, and a role that cannot bypass row security
+    /// stops loudly instead of filling nothing. Data only — no DDL. (185 is #5899's.)
     #[test]
-    fn discovers_contiguous_migrations_001_to_184() {
+    fn discovers_contiguous_migrations_001_to_186() {
         let dir = default_migrations_dir();
         let migrations = discover_migrations(&dir).expect("migrations directory readable");
 
-        let expected: Vec<i64> = (1..=184).collect();
+        let expected: Vec<i64> = (1..=186).collect();
         let found: Vec<i64> = migrations
             .iter()
             .map(|migration| migration.version)
@@ -863,7 +871,7 @@ mod tests {
         assert_eq!(
             found,
             expected,
-            "expected contiguous 001..=184 under {}",
+            "expected contiguous 001..=186 under {}",
             dir.display()
         );
         assert!(migrations.first().unwrap().name.starts_with("001_init"));
@@ -871,7 +879,7 @@ mod tests {
             .last()
             .unwrap()
             .name
-            .starts_with("184_channel_browse_listed_and_default"));
+            .starts_with("186_channel_default_fill_safety_net"));
     }
 
     #[test]

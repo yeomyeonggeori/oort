@@ -2046,17 +2046,10 @@ async fn existing_account_requires_proof() {
         );
         let after = footprint(&su, fixture.workspace, account.id, invite).await;
         assert_eq!(
-            AccountState {
-                channel_memberships: before.account.channel_memberships,
-                ..after.account.clone()
-            },
-            before.account,
-            "{label}: password, name, time zone, status and role are exactly as they were — \
-             the request's displayName and timeZone are never written"
-        );
-        assert!(
-            after.account.channel_memberships >= 1,
-            "{label}: the resumed account is in the workspace's public channel"
+            after.account, before.account,
+            "{label}: password, name, time zone, status, role and channel memberships are exactly \
+             as they were — the request's displayName and timeZone are never written, and an \
+             existing account spending a link is put in no channel (ADR-0224 D7)"
         );
         assert_eq!(after.tokens, before.tokens + 2, "{label}: one session pair");
         assert_eq!(after.used_count, before.used_count + 1, "{label}");

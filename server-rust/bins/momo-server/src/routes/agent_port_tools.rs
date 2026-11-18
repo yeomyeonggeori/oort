@@ -2747,7 +2747,7 @@ async fn action_propose(
 /// `expression.create`'s preparation (ADR-0186 v8 X8-1, ADR-0218 D3/D5), all of it **before**
 /// any transaction that writes. One short read transaction proves who may propose and which
 /// attachments are the requester's (V4's own judgement); then each candidate, in turn and inside
-/// one deadline, is fetched and decoded.
+/// one deadline, is read and decoded (a link is not fetched here — #5899, below).
 ///
 /// **The cheap refusals come first, the expensive work last** (#4829 review round 1). The pending
 /// ceiling of three is the one flood defence this door has, and it only defends if the work that
@@ -2755,8 +2755,8 @@ async fn action_propose(
 /// the proposal's own predicates — a lease that is stale, a run that is parked, settled or
 /// paused, and an agent that already has three cards waiting; (2) one preparation per agent at a
 /// time; (3) a candidate stands in the decoder's line for a few seconds at most, in a line of two
-/// at most (`media::process_waiting`); (4) a link's fetch slot is given back as soon as the
-/// bytes are here, before any wait for the decoder.
+/// at most (`media::process_waiting`). A link costs nothing here: it is fetched only by the
+/// decision that approves it (#5899).
 ///
 /// **What the request itself already shows comes before any candidate is touched** (#4900): the
 /// face is a live human of this conversation (the resolver's own function), every link parses and
@@ -2769,9 +2769,10 @@ async fn action_propose(
 ///   full-frame check like any other source; a video is a manual card
 ///   (`video_processing_unavailable`, D4 on hold) decided from its first bytes, with no decoder
 ///   slot, no place in the line and no child process.
-/// * `url`: the link through `momo-unfurl`'s guard (HTTPS, 443, address pin, hops, 5 s, 5 MiB).
-///   A link that is private **from the start** refuses the whole proposal; every other
-///   failure is a manual card with its closed reason and the safe source link.
+/// * `url`: judged by its shape only (HTTPS, 443, no credential or fragment, not private from the
+///   start — that refuses the whole proposal) and **not fetched** (#5899): the candidate waits,
+///   with no picture, until a person approves it; the decision then fetches it through
+///   `momo-unfurl`'s guard (address pin, hops, 5 s, 5 MiB).
 /// * `generated`: strict base64, at most 1 MiB, then the decoder. Bad bytes are the agent's
 ///   own fault: `InvalidArguments`, not a card.
 ///
@@ -3029,35 +3030,15 @@ async fn prepare_expression(
                     // The instance's outgoing-request switch is off: no request is made.
                     (origin, (None, Some("source_unavailable")), None)
                 } else {
-                    // The fetch slot (eight at a time, process-wide) is held for the fetch
-                    // and **given back as soon as the bytes are here** — before the wait for
-                    // a decoder slot, which is somebody else's queue and must not keep a
-                    // fetch slot (and so a person's `/import`) hostage.
-                    let fetched = {
-                        let permit = intake::import_slots()
-                            .clone()
-                            .try_acquire_owned()
-                            .map_err(|_| ToolFailure::Unavailable)?;
-                        let deadline = remaining().min(momo_unfurl::SOURCE_DEADLINE);
-                        let fetched =
-                            momo_unfurl::fetch_source(&*state.unfurl_http, &url, deadline).await;
-                        drop(permit);
-                        fetched
-                    };
-                    let outcome = match fetched {
-                        Ok(bytes) => {
-                            match intake::picture_or_reason(bytes, Some(remaining())).await {
-                                Ok(intake::Picture::Ready(processed)) => (Some(*processed), None),
-                                Ok(intake::Picture::Manual(code)) => (None, Some(code)),
-                                Err(intake::DecoderBusy) => return Err(ToolFailure::Unavailable),
-                            }
-                        }
-                        Err(refused) if refused.is_private_origin() => {
-                            return Err(ToolFailure::InvalidArguments)
-                        }
-                        Err(refused) => (None, Some(refused.code())),
-                    };
-                    (origin, outcome, None)
+                    // **No request now** (#5899, ADR-0170 증보 2026-11-14's invariant): an address
+                    // an agent chose is fetched only after a person approves this candidate, by
+                    // the decision (`routes::approvals`). Until then it is a candidate with no
+                    // picture, and the card shows its host alone.
+                    (
+                        origin,
+                        (None, Some(momo_expressions::LINK_AWAITING_APPROVAL)),
+                        None,
+                    )
                 }
             }
             ExpressionImageSpec::Generated { prompt, .. } => {

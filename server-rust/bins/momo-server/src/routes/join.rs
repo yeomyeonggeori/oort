@@ -221,7 +221,7 @@ pub async fn join(
                 )
                 .await?;
                 // ADR-0224 D9: a person counts from the moment they join. Each default
-                // channel this join inserted or restored starts read up to its newest
+                // channel this join inserted starts read up to its newest
                 // message, so the first day does not open on the channel's whole history
                 // as unread. A membership that was already live is left alone (an existing
                 // member spending another link keeps their unread). Same transaction, after
