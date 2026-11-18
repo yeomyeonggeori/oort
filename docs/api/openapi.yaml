@@ -14449,7 +14449,11 @@ paths:
             before the first write), and `run_not_parked` — the run left its
             hold between the execution and the transition, so the whole
             transaction was rolled back and nothing was minted. None of them
-            consumes the approval.
+            consumes the approval. On an `expression.create` card also
+            `expression_preview_stale`, `expression_name_reserved`,
+            `expression_quota`, and — after an approved link not fetched yet gave no
+            picture (#5899) — that link's closed `source_*` reason; the approval stays
+            `pending`.
           headers:
             Cache-Control:
               description: Always `no-store` (ADR-0186 D4).
@@ -14465,6 +14469,24 @@ paths:
                 $ref: "#/components/schemas/ApprovalDecisionReceipt"
         "429":
           $ref: "#/components/responses/RateLimited"
+        "503":
+          description: >
+            Receipt-shaped `expression_link_busy` (#5899): approving a link not fetched
+            yet found no free fetch place. Nothing was taken or decided; the approval
+            stays `pending` and the same request may be sent again.
+          headers:
+            Cache-Control:
+              description: Always `no-store` (ADR-0186 D4).
+              schema:
+                type: string
+            Pragma:
+              description: Always `no-cache` (ADR-0186 D4).
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApprovalDecisionReceipt"
 
   /v1/workspaces/{workspaceId}/approvals/{approvalId}/avatar-preview:
     get:
@@ -17530,6 +17552,7 @@ components:
             - assembly_output_too_large
             - assembly_timeout
             - assembly_busy
+            - source_awaiting_approval
           media:
             nullable: true
             enum:
@@ -29395,23 +29418,54 @@ components:
             decision is judged on the host the card points at. Not part of the
             idempotency key: a replayed decision answers the original receipt.
         expressionChoice:
-          type: object
-          additionalProperties: false
-          required: [draftId, revision, sha256]
-          properties:
-            draftId: {type: string, format: uuid}
-            revision: {type: string, pattern: '^(0|[1-9][0-9]*)$'}
-            sha256: {type: string, pattern: '^[a-f0-9]{64}$'}
-            kind:
-              type: string
-              enum: [emoji, sticker]
-              description: >
-                ADR-0218 addendum 4 section 10 J3. The kind the person picked; absent means
-                the server applies its recommendation (J4) to the stored large picture.
+          oneOf:
+            - type: object
+              title: picture
+              additionalProperties: false
+              required: [draftId, revision, sha256]
+              properties:
+                draftId: {type: string, format: uuid}
+                revision: {type: string, pattern: '^(0|[1-9][0-9]*)$'}
+                sha256: {type: string, pattern: '^[a-f0-9]{64}$'}
+                kind:
+                  type: string
+                  enum: [emoji, sticker]
+                  description: >
+                    ADR-0218 addendum 4 section 10 J3. The kind the person picked; absent means
+                    the server applies its recommendation (J4) to the stored large picture.
+            - type: object
+              title: link not fetched yet
+              additionalProperties: false
+              required: [draftId, revision]
+              properties:
+                draftId: {type: string, format: uuid}
+                revision: {type: string, pattern: '^(0|[1-9][0-9]*)$'}
+                kind:
+                  type: string
+                  enum: [emoji, sticker]
+                  description: As in the picture shape.
           description: >
-            ADR-0186 addendum v8 X8-2 / ADR-0218 `Decision`. The one picture chosen on
-            an `expression.create` card, exactly as shown (draft id, revision, large
-            sha256). **Required when approving that action and a 400 receipt
+            ADR-0186 addendum v8 X8-2 / ADR-0218 `Decision`. The one candidate chosen on
+            an `expression.create` card, in one of two shapes. **A picture** (a candidate
+            whose `state` is `ready`): exactly as shown (draft id, revision, large
+            sha256). **A link not fetched yet** (#5899, ADR-0170 addendum 2026-11-14,
+            ADR-0218 addendum 12): a candidate whose `state` is `manual_upload_required`
+            and `code` is `source_awaiting_approval` — an address an agent proposed, which
+            the server has not requested and of which the card shows only the host — is
+            approved by draft id and revision alone, with no `sha256` (there is no picture
+            to pin yet). The server then requests that address once (the stored
+            `https://host/path`, never a query), through the same guard as a link import,
+            and registers the picture that came after proving everything below again with
+            the server's own hash of it. A picture shape on such a candidate, or the link
+            shape on any other candidate, is a 409 `expression_preview_stale`. When the
+            fetch gives no picture the receipt is a 409 whose `status` is the link's closed
+            reason (`source_blocked`, `source_unavailable`, `source_too_large`,
+            `source_unsupported`, `source_timeout`, `source_invalid_media`,
+            `video_processing_unavailable`), the candidate shows that same `code`, and the
+            approval stays `pending` (the person may upload a file or choose another
+            candidate); the address is never requested a second time, whoever approves it
+            again or however close together. A 503 `expression_link_busy` means no fetch
+            place was free: nothing was taken, and the same request may be sent again. **Required when approving that action and a 400 receipt
             (`expression_choice_required`) without it; a 400 receipt
             (`expression_choice_not_allowed`) on anything else** (another action, a
             rejection, a non-workspace approval, an `expression.set.create` card, or
@@ -29421,7 +29475,7 @@ components:
             they are the person shown, the candidate's membership of this card, its
             revision, the stored bytes hashed again, the name and the quota; a failure is
             a 409 receipt (`expression_preview_stale`, `expression_name_reserved`,
-            `expression_quota`) that spends nothing. Success registers that one picture,
+            `expression_quota`, or a link's `source_*` reason) that spends nothing. Success registers that one picture,
             reclaims every other candidate's bytes and writes `props.result.expression`
             (`{id,name,token}`) on the card.
         expressionChoices:
@@ -29501,7 +29555,10 @@ components:
         not_found, bad_request, expired,
         action_unavailable, action_args_invalid, public_origin_unavailable,
         run_not_parked, opens_in_app (a `push_action` token on an approval that
-        must be decided in the app), or the approval's current status on a 409).
+        must be decided in the app), on an `expression.create` card
+        expression_preview_stale, expression_name_reserved, expression_quota, a
+        link's `source_*` reason or expression_link_busy (#5899), or the
+        approval's current status on a 409).
 
 
         NOTATION (SRV-B5c): camelCase, matching the deployed Rust server. See
