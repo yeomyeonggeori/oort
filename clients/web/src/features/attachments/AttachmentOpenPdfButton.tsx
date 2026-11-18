@@ -39,7 +39,7 @@ export function AttachmentOpenPdfButton({
     onFailed?.(error instanceof PdfOpenError ? error.reason : "failed");
 
   return (
-    <Tooltip label={busy ? ATTACH_COPY.openingPdf : label} side="bottom">
+    <Tooltip label={busy ? ATTACH_COPY.openingPdf : label} side="top">
       <button
         type="button"
         aria-busy={busy || undefined}

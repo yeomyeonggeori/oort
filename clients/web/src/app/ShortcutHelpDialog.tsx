@@ -111,7 +111,7 @@ export function ShortcutHelpDialog() {
 
   return (
     <Dialog open={open} onOpenChange={setDialogOpen}>
-      <Tooltip label="단축키 도움말 (?)" side="bottom">
+      <Tooltip label="단축키 도움말 (?)" side="top">
         <button
           ref={triggerRef}
           type="button"

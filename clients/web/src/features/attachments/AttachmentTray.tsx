@@ -404,7 +404,7 @@ export function AttachButton({
           onPick(picked);
         }}
       />
-      <Tooltip label={ATTACH_COPY.attach} side="bottom">
+      <Tooltip label={ATTACH_COPY.attach} side="top">
         <Button
           type="button"
           variant="ghost"
