@@ -50,6 +50,12 @@ export const catalog: MessageCatalog = {
       "value": "参加していないチャンネル"
     }
   ],
+  "channels.browse.hiddenGroup": [
+    {
+      "type": 0,
+      "value": "チャンネル一覧に表示されていない公開チャンネル"
+    }
+  ],
   "channels.browse.join": [
     {
       "type": 0,
@@ -225,6 +231,56 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "名前やトピックで検索"
+    }
+  ],
+  "channels.browse.switchForbidden": [
+    {
+      "type": 0,
+      "value": "オーナーと管理者のみ変更できます。"
+    }
+  ],
+  "channels.browse.switchGeneric": [
+    {
+      "type": 0,
+      "value": "変更できませんでした。もう一度お試しください。"
+    }
+  ],
+  "channels.browse.switchLabel": [
+    {
+      "type": 0,
+      "value": "チャンネル一覧に表示"
+    }
+  ],
+  "channels.browse.switchNetwork": [
+    {
+      "type": 0,
+      "value": "変更できませんでした。"
+    },
+    {
+      "type": 1,
+      "value": "reason"
+    }
+  ],
+  "channels.browse.switchNotFound": [
+    {
+      "type": 0,
+      "value": "このチャンネルは利用できなくなりました。"
+    }
+  ],
+  "channels.browse.switchNotListable": [
+    {
+      "type": 0,
+      "value": "公開チャンネルのみ一覧に表示できます。"
+    }
+  ],
+  "channels.browse.switchShowAria": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " をチャンネル一覧に表示"
     }
   ],
   "channels.browse.title": [

@@ -57,5 +57,13 @@
   "channels.browse.offline": "オフラインのため今は参加できません。接続したらもう一度お試しください。",
   "channels.browse.menuLabel": "チャンネルを追加",
   "channels.browse.menuCreate": "新しいチャンネルを作成",
-  "channels.browse.paletteGroup": "参加していない公開チャンネル"
+  "channels.browse.paletteGroup": "参加していない公開チャンネル",
+  "channels.browse.switchLabel": "チャンネル一覧に表示",
+  "channels.browse.switchShowAria": "{name} をチャンネル一覧に表示",
+  "channels.browse.hiddenGroup": "チャンネル一覧に表示されていない公開チャンネル",
+  "channels.browse.switchForbidden": "オーナーと管理者のみ変更できます。",
+  "channels.browse.switchNotFound": "このチャンネルは利用できなくなりました。",
+  "channels.browse.switchNotListable": "公開チャンネルのみ一覧に表示できます。",
+  "channels.browse.switchNetwork": "変更できませんでした。{reason}",
+  "channels.browse.switchGeneric": "変更できませんでした。もう一度お試しください。"
 }
