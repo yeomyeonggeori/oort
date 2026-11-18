@@ -327,6 +327,18 @@ export const catalog: MessageCatalog = {
       "value": "你沒有建立頻道的權限。請聯絡工作區擁有者或管理員。"
     }
   ],
+  "channels.createFailure.generic": [
+    {
+      "type": 0,
+      "value": "無法建立頻道。請稍後再試。"
+    }
+  ],
+  "channels.createFailure.network": [
+    {
+      "type": 0,
+      "value": "無法建立頻道。無法連線到伺服器。請檢查網路連線後再試。"
+    }
+  ],
   "channels.createFailure.rateLimited": [
     {
       "type": 0,

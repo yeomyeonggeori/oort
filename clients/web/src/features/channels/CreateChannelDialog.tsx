@@ -170,8 +170,8 @@ function CreateChannelPanel({
 
   const { kind, name, topic } = draft;
   const [attempted, setAttempted] = useState(false);
-  // 거절 문장은 사전 키로 화면 언어를 따른다(400·409·403·429). 키가 없는 실패(망·알 수 없음)만 코어가 준 문장 그대로다.
-  const failureText = (f: CreateChannelFailure) => (f.messageKey !== undefined ? formatMessage(f.messageKey) : f.message);
+  // 실패 문장은 모두 사전 키로 화면 언어를 따른다(400·409·403·429·망·그 밖).
+  const failureText = (f: CreateChannelFailure) => formatMessage(f.messageKey);
   const serverNameError = failure?.field === "name" ? failureText(failure) : null;
   const nameField = useChannelNameField({
     name,

@@ -1,6 +1,5 @@
 import { ApiError, type Channel, type MembershipRole } from "../../lib/api";
 import { NetworkError } from "../../lib/http";
-import koChannels from "../../i18n/catalogs/ko-KR/channels.json";
 import type { MessageKey } from "../../i18n/generated/messages";
 
 // =============================================================================
@@ -208,24 +207,15 @@ export function channelNameIssueKey(
   return CHANNEL_NAME_ISSUE_KEYS[issue];
 }
 
-/** Dictionary keys of the sentences a refused create shows (409, 403, 429; a
- *  400 uses `CHANNEL_NAME_SERVER_REJECTED_KEY`). */
+/** Dictionary keys of the sentences a failed create shows (409, 403, 429,
+ *  nothing answered, anything else; a 400 uses `CHANNEL_NAME_SERVER_REJECTED_KEY`). */
 export const CHANNEL_CREATE_FAILURE_KEYS = {
   duplicate: "channels.createFailure.duplicate",
   forbidden: "channels.createFailure.forbidden",
   rateLimited: "channels.createFailure.rateLimited",
+  network: "channels.createFailure.network",
+  generic: "channels.createFailure.generic",
 } as const satisfies Record<string, MessageKey>;
-
-/** The Korean words of `CreateChannelFailure.message`, read from the ko catalog
- *  itself so there is one copy. Both screens (web, phone) format `messageKey`
- *  with their message service and read `message` only for the failures that have
- *  no key (network, unknown). */
-function koSentence(key: MessageKey): string {
-  return (koChannels as Record<string, string>)[key].replace(
-    "{max, number}",
-    String(CHANNEL_NAME_MAX)
-  );
-}
 
 export function channelTopicIssueMessage(issue: ChannelTopicIssue): string {
   switch (issue) {
@@ -475,10 +465,9 @@ export function canCreateChannelNow(
  */
 export interface CreateChannelFailure {
   field: "name" | null;
-  message: string;
-  /** Set when the sentence has a dictionary key (a 400 on the name); screens
-   *  with a message service format it instead of `message`. */
-  messageKey?:
+  /** Every failure is a dictionary key; the screen formats it with its message
+   *  service so the sentence follows the screen language. */
+  messageKey:
     | typeof CHANNEL_NAME_SERVER_REJECTED_KEY
     | (typeof CHANNEL_CREATE_FAILURE_KEYS)[keyof typeof CHANNEL_CREATE_FAILURE_KEYS];
 }
@@ -486,44 +475,25 @@ export interface CreateChannelFailure {
 export function createChannelFailure(error: unknown): CreateChannelFailure {
   if (error instanceof ApiError) {
     if (error.status === 409) {
-      return {
-        field: "name",
-        message: koSentence(CHANNEL_CREATE_FAILURE_KEYS.duplicate),
-        messageKey: CHANNEL_CREATE_FAILURE_KEYS.duplicate,
-      };
+      return { field: "name", messageKey: CHANNEL_CREATE_FAILURE_KEYS.duplicate };
     }
     if (error.status === 400) {
       // The form judges with the server's own rule, so a 400 means the two
       // drifted. Say what the server will take rather than echoing its English.
-      return {
-        field: "name",
-        message: koSentence(CHANNEL_NAME_SERVER_REJECTED_KEY),
-        messageKey: CHANNEL_NAME_SERVER_REJECTED_KEY,
-      };
+      return { field: "name", messageKey: CHANNEL_NAME_SERVER_REJECTED_KEY };
     }
     if (error.status === 403) {
-      return {
-        field: null,
-        message: koSentence(CHANNEL_CREATE_FAILURE_KEYS.forbidden),
-        messageKey: CHANNEL_CREATE_FAILURE_KEYS.forbidden,
-      };
+      return { field: null, messageKey: CHANNEL_CREATE_FAILURE_KEYS.forbidden };
     }
     if (error.status === 429) {
-      return {
-        field: null,
-        message: koSentence(CHANNEL_CREATE_FAILURE_KEYS.rateLimited),
-        messageKey: CHANNEL_CREATE_FAILURE_KEYS.rateLimited,
-      };
+      return { field: null, messageKey: CHANNEL_CREATE_FAILURE_KEYS.rateLimited };
     }
   }
+  // Nothing answered, or a 5xx / anything unknown: fixed dictionary sentences.
+  // The transport's own message is not shown (it is one fixed language and
+  // would break the screen language, the same way the server's English would).
   if (error instanceof NetworkError) {
-    // The transport already writes measured copy for "nothing answered"
-    // (timeout vs unreachable, with the deadline in seconds); a second
-    // vocabulary for one failure is how two screens start disagreeing.
-    return { field: null, message: `채널을 만들지 못했습니다. ${error.message}` };
+    return { field: null, messageKey: CHANNEL_CREATE_FAILURE_KEYS.network };
   }
-  return {
-    field: null,
-    message: "채널을 만들지 못했습니다. 잠시 뒤에 다시 시도하세요.",
-  };
+  return { field: null, messageKey: CHANNEL_CREATE_FAILURE_KEYS.generic };
 }

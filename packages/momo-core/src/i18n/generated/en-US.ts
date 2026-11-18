@@ -1490,6 +1490,18 @@ export const catalog: MessageCatalog = {
       "value": "You don't have permission to create channels. Ask a workspace owner or admin."
     }
   ],
+  "channels.createFailure.generic": [
+    {
+      "type": 0,
+      "value": "Couldn't create the channel. Try again in a moment."
+    }
+  ],
+  "channels.createFailure.network": [
+    {
+      "type": 0,
+      "value": "Couldn't create the channel. Could not reach the server. Check your connection and try again."
+    }
+  ],
   "channels.createFailure.rateLimited": [
     {
       "type": 0,

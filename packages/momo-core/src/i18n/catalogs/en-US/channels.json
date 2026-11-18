@@ -40,6 +40,8 @@
   "channels.createFailure.duplicate": "A channel with this name already exists. Try a different name.",
   "channels.createFailure.forbidden": "You don't have permission to create channels. Ask a workspace owner or admin.",
   "channels.createFailure.rateLimited": "Too many requests. Try again in a moment.",
+  "channels.createFailure.network": "Couldn't create the channel. Could not reach the server. Check your connection and try again.",
+  "channels.createFailure.generic": "Couldn't create the channel. Try again in a moment.",
   "channels.browse.title": "Browse channels",
   "channels.browse.description": "Find public channels and join them.",
   "channels.browse.searchLabel": "Find a channel",

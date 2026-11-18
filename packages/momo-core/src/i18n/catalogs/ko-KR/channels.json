@@ -40,6 +40,8 @@
   "channels.createFailure.duplicate": "같은 이름의 채널이 이미 있습니다. 다른 이름으로 다시 시도하세요.",
   "channels.createFailure.forbidden": "채널을 만들 권한이 없습니다. 워크스페이스 소유자나 관리자에게 요청하세요.",
   "channels.createFailure.rateLimited": "요청이 너무 잦습니다. 잠시 뒤에 다시 시도하세요.",
+  "channels.createFailure.network": "채널을 만들지 못했습니다. 서버에 연결하지 못했어요. 연결을 확인한 뒤 다시 시도하세요.",
+  "channels.createFailure.generic": "채널을 만들지 못했습니다. 잠시 뒤에 다시 시도하세요.",
   "channels.browse.title": "채널 둘러보기",
   "channels.browse.description": "공개 채널을 찾아 참여할 수 있어요.",
   "channels.browse.searchLabel": "채널 찾기",

@@ -1448,6 +1448,18 @@ export const catalog: MessageCatalog = {
       "value": "채널을 만들 권한이 없습니다. 워크스페이스 소유자나 관리자에게 요청하세요."
     }
   ],
+  "channels.createFailure.generic": [
+    {
+      "type": 0,
+      "value": "채널을 만들지 못했습니다. 잠시 뒤에 다시 시도하세요."
+    }
+  ],
+  "channels.createFailure.network": [
+    {
+      "type": 0,
+      "value": "채널을 만들지 못했습니다. 서버에 연결하지 못했어요. 연결을 확인한 뒤 다시 시도하세요."
+    }
+  ],
   "channels.createFailure.rateLimited": [
     {
       "type": 0,

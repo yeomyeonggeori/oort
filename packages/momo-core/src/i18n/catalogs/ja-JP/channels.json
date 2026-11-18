@@ -40,6 +40,8 @@
   "channels.createFailure.duplicate": "同じ名前のチャンネルがすでにあります。別の名前でもう一度お試しください。",
   "channels.createFailure.forbidden": "チャンネルを作成する権限がありません。ワークスペースのオーナーまたは管理者に依頼してください。",
   "channels.createFailure.rateLimited": "リクエストが多すぎます。しばらくしてからもう一度お試しください。",
+  "channels.createFailure.network": "チャンネルを作成できませんでした。サーバーに接続できませんでした。接続を確認してもう一度お試しください。",
+  "channels.createFailure.generic": "チャンネルを作成できませんでした。しばらくしてからもう一度お試しください。",
   "channels.browse.title": "チャンネルを探す",
   "channels.browse.description": "公開チャンネルを見つけて参加できます。",
   "channels.browse.searchLabel": "チャンネルを検索",

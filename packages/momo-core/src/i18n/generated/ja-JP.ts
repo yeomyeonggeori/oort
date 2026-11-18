@@ -331,6 +331,18 @@ export const catalog: MessageCatalog = {
       "value": "チャンネルを作成する権限がありません。ワークスペースのオーナーまたは管理者に依頼してください。"
     }
   ],
+  "channels.createFailure.generic": [
+    {
+      "type": 0,
+      "value": "チャンネルを作成できませんでした。しばらくしてからもう一度お試しください。"
+    }
+  ],
+  "channels.createFailure.network": [
+    {
+      "type": 0,
+      "value": "チャンネルを作成できませんでした。サーバーに接続できませんでした。接続を確認してもう一度お試しください。"
+    }
+  ],
   "channels.createFailure.rateLimited": [
     {
       "type": 0,

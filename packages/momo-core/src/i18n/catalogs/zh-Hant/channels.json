@@ -40,6 +40,8 @@
   "channels.createFailure.duplicate": "已有同名頻道。請換一個名稱再試。",
   "channels.createFailure.forbidden": "你沒有建立頻道的權限。請聯絡工作區擁有者或管理員。",
   "channels.createFailure.rateLimited": "請求過於頻繁，請稍後再試。",
+  "channels.createFailure.network": "無法建立頻道。無法連線到伺服器。請檢查網路連線後再試。",
+  "channels.createFailure.generic": "無法建立頻道。請稍後再試。",
   "channels.browse.title": "瀏覽頻道",
   "channels.browse.description": "尋找並加入公開頻道。",
   "channels.browse.searchLabel": "尋找頻道",

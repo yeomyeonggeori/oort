@@ -40,6 +40,8 @@
   "channels.createFailure.duplicate": "已有同名频道。请换一个名称再试。",
   "channels.createFailure.forbidden": "你没有创建频道的权限。请联系工作区所有者或管理员。",
   "channels.createFailure.rateLimited": "请求过于频繁，请稍后再试。",
+  "channels.createFailure.network": "无法创建频道。无法连接到服务器。请检查网络连接后再试。",
+  "channels.createFailure.generic": "无法创建频道。请稍后再试。",
   "channels.browse.title": "浏览频道",
   "channels.browse.description": "查找并加入公开频道。",
   "channels.browse.searchLabel": "查找频道",

@@ -327,6 +327,18 @@ export const catalog: MessageCatalog = {
       "value": "你没有创建频道的权限。请联系工作区所有者或管理员。"
     }
   ],
+  "channels.createFailure.generic": [
+    {
+      "type": 0,
+      "value": "无法创建频道。请稍后再试。"
+    }
+  ],
+  "channels.createFailure.network": [
+    {
+      "type": 0,
+      "value": "无法创建频道。无法连接到服务器。请检查网络连接后再试。"
+    }
+  ],
   "channels.createFailure.rateLimited": [
     {
       "type": 0,
