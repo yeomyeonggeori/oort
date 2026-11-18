@@ -19,6 +19,7 @@ import {
   DoorOpen,
   Mail,
   MailOpen,
+  Pencil,
   Star,
   StarOff,
   Type,
@@ -47,6 +48,7 @@ import {
   CHANNEL_MUTE_FAILURE,
 } from "@momo/core/features/channels/model";
 import { canSetBrowseListed } from "@momo/core/features/channels/browse";
+import { canRenameChannel } from "@momo/core/features/channels/rename";
 import { useSetBrowseListed } from "@/features/channels/useSetBrowseListed";
 import {
   DropdownMenuCheckboxItem,
@@ -155,6 +157,11 @@ export interface ChannelActionTarget {
    * 가 진다(줄·머리 안에 두면 성공하는 순간 같이 사라진다). 여기서는 항목을 내고 표면이 메뉴를 닫은 뒤 부른다.
    */
   onLeaveDm?: () => void;
+  /**
+   * 「이름 바꾸기」 (ADR-0225 D10, #5835). 이름 칸이 있는 다이얼로그는 표면이 세운다(헤더 ⋮ 의 `RenameChannelDialog`) - 손이 없으면 항목이 서지
+   * 않는다. 여기서는 항목을 내고 표면이 메뉴를 닫은 뒤 다이얼로그를 연다(주제 · 기억 설정과 같은 넘김).
+   */
+  onRename?: () => void;
 }
 
 export interface ChannelActions {
@@ -209,6 +216,7 @@ export function useChannelActions({
   onToggleStar,
   onCloseDm,
   onLeaveDm,
+  onRename,
 }: ChannelActionTarget): ChannelActions {
   const client = useQueryClient();
   const navigate = useNavigate();
@@ -393,6 +401,8 @@ export function useChannelActions({
         canLeaveDm: Boolean(onLeaveDm),
         // 소유자 · 관리자가 든 공개 채널, 그리고 이 서버가 표시를 싣는 동안만(옛 서버 · 역할 모름은 문을 세우지 않는다).
         canSetBrowseListed: canSetBrowseListed(channel, selfRole),
+        // 소유자 · 관리자가 든 보관 안 된 공개/비공개 채널, 이름이 general 이 아닐 때, 그리고 다이얼로그를 세울 손이 있을 때(역할 모름은 세우지 않는다).
+        canRename: Boolean(onRename) && canRenameChannel(channel, selfRole),
       }),
     [
       channel,
@@ -403,6 +413,7 @@ export function useChannelActions({
       onToggleStar,
       onCloseDm,
       onLeaveDm,
+      onRename,
     ]
   );
 
@@ -495,6 +506,7 @@ export function useChannelActions({
         onToggleStar?.();
         return;
       case "topic":
+      case "rename":
       case "memory":
       case "github":
       case "leave":
@@ -566,6 +578,7 @@ export function useChannelActions({
  *   memory       BookOpen        기억 표지(`MemoryReceiptChip`)와 같다
  *   github       GitPullRequest  앱이 GitHub 를 그리는 글리프(작업 보드 · 실행 보고)
  *   browse       Compass         채널 둘러보기에 보이기(#5843)
+ *   rename       Pencil          이름 바꾸기(#5835)
  *   star/unstar  Star / StarOff  별표 붙이기 / 떼기
  *   hide         EyeOff          「목록에서 숨기기」(대화를 지우지 않고 목록에서 안 보이게 한다)
  *   leave        DoorOpen        나가기. 위험 줄이라 글자와 함께 `--danger` 를 입는다(`currentColor`)
@@ -585,6 +598,7 @@ const ACTION_ICON: Record<ChannelActionIcon, LucideIcon> = {
   memory: BookOpen,
   github: GitPullRequest,
   browse: Compass,
+  rename: Pencil,
   star: Star,
   unstar: StarOff,
   hide: EyeOff,

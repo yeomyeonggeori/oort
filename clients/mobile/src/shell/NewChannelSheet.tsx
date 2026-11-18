@@ -13,17 +13,8 @@ import {
 import {withChannelMemberAdded} from '@momo/core/features/channels/memberAdd';
 import {upsertChannel} from '@momo/core/features/directory/model';
 import {useQueryClient} from '@tanstack/react-query';
-import React, {useRef, useState} from 'react';
-import {
-  StyleSheet,
-  Text,
-  View,
-  type LayoutChangeEvent,
-  type NativeSyntheticEvent,
-  type StyleProp,
-  type TextLayoutEventData,
-  type TextStyle,
-} from 'react-native';
+import React, {useState} from 'react';
+import {StyleSheet, View} from 'react-native';
 
 import {FailureBanner} from '../design/atoms';
 import {HOME_ICONS} from '../design/icons';
@@ -36,12 +27,13 @@ import {
 import {SheetHeader} from '../design/SheetChrome';
 import {ChoiceRow, GroupCard, GroupLabel, InputPill, SheetScroll} from '../design/sheetParts';
 import {useStyles} from '../design/theme';
-import {font, space, type Palette} from '../design/tokens';
+import {space} from '../design/tokens';
 import {
   newChannelDraftKey,
   useHoldDraftOnEntry,
   useRestoredEntryDraft,
 } from '../lib/entryDrafts';
+import {ChannelNameStatus as NameStatus} from '../features/sidebar/ChannelNameStatus';
 import {workspaceKeys} from '../features/workspace/queries';
 import {useFormatMessage} from '../i18n/useFormatMessage';
 import {useSession} from '../session/useSession';
@@ -282,8 +274,7 @@ function SheetBody({
             preview={namePreview}
             hint={nameRule}
             reserve={nameReserve}
-            ruleStyle={styles.rule}
-            issueStyle={styles.issue}
+            testIDPrefix="new-channel-name"
           />
         </View>
 
@@ -315,88 +306,8 @@ function SheetBody({
   );
 }
 
-/**
- * 칸 아래 한 줄: 거절 문장 · 저장될 이름 · 안내 가운데 **하나만** 선다(위에서부터). 서는 자리는 하나이고, 서지 않은 문장들이 같은 폭으로 보이지 않게
- * 깔려 가장 큰 높이를 자리의 최소 높이로 삼는다 — 줄이 서고 걷혀도 아래 공개 범위 카드와 머리 단추가 움직이지 않는다(웹 `NameStatus` 와 같은 약속, #5833).
- * 실제로 화면이 꺾은 높이를 `onLayout` 으로 읽는다(줄 수를 어림하지 않는다). 미리보기는 예약된 줄 수 안에서 접는다 — 80자 이름이 시트를 밀지 않는다.
- * 「대 / 문자는」처럼 어절 가운데서 갈리지 않게 어절 단위로 접는다(design-review r1a M1·r1c M1).
- */
-function NameStatus({
-  error,
-  preview,
-  hint,
-  reserve,
-  ruleStyle,
-  issueStyle,
-}: {
-  error: string | null;
-  preview: string | null;
-  hint: string;
-  reserve: readonly string[];
-  ruleStyle: StyleProp<TextStyle>;
-  issueStyle: StyleProp<TextStyle>;
-}): React.JSX.Element {
-  const styles = useStyles(buildStyles);
-  const heights = useRef<Record<number, number>>({});
-  const lineCounts = useRef<Record<number, number>>({});
-  const [reserved, setReserved] = useState(0);
-  const [lines, setLines] = useState<number | undefined>(undefined);
-  const onReserveLayout = (index: number) => (event: LayoutChangeEvent) => {
-    heights.current[index] = event.nativeEvent.layout.height;
-    const tallest = Math.max(0, ...Object.values(heights.current));
-    setReserved(prev => (prev === tallest ? prev : tallest));
-  };
-  // 줄 수는 높이를 줄 높이로 나눠 어림하지 않고 화면이 꺾은 줄 수를 그대로 쓴다 — 가장 큰 접근성 글자에서는 줄 높이가 토큰(18)보다 커서 어림이 틀린다.
-  const onReserveText = (index: number) => (event: NativeSyntheticEvent<TextLayoutEventData>) => {
-    lineCounts.current[index] = event.nativeEvent.lines.length;
-    const most = Math.max(1, ...Object.values(lineCounts.current));
-    setLines(prev => (prev === most ? prev : most));
-  };
-  const shown = error ?? preview ?? hint;
-  const kind = error !== null ? 'issue' : preview !== null ? 'preview' : 'rule';
-  return (
-    <View>
-      <Text
-        accessibilityLiveRegion={kind === 'issue' ? 'polite' : 'none'}
-        style={[kind === 'issue' ? issueStyle : ruleStyle, reserved > 0 && {minHeight: reserved}]}
-        lineBreakStrategyIOS="hangul-word"
-        numberOfLines={kind === 'preview' ? lines : undefined}
-        testID={`new-channel-name-${kind}`}>
-        {shown}
-      </Text>
-      {reserve.map((candidate, index) => (
-        <Text
-          key={index}
-          accessibilityElementsHidden
-          importantForAccessibility="no-hide-descendants"
-          pointerEvents="none"
-          onLayout={onReserveLayout(index)}
-          onTextLayout={onReserveText(index)}
-          style={[ruleStyle, styles.reserveCopy]}
-          lineBreakStrategyIOS="hangul-word"
-          testID={`new-channel-name-reserve-${index}`}>
-          {candidate}
-        </Text>
-      ))}
-    </View>
-  );
-}
-
-const buildStyles = (color: Palette) =>
+const buildStyles = () =>
   StyleSheet.create({
     // 라벨 + 입력 + 규칙·오류 줄 한 묶음(안쪽 간격 `space.sm` — 작업 맡기기·내 맥에 보내기의 `field` 와 같은 값).
     field: {gap: space.sm},
-    // 입력 알약 아래의 한 줄 — 섹션 라벨과 같은 안쪽 여백에서 시작한다.
-    rule: {
-      paddingHorizontal: space.xs,
-      fontSize: font.label,
-      color: color.textMuted,
-    },
-    issue: {
-      paddingHorizontal: space.xs,
-      fontSize: font.label,
-      color: color.dangerText,
-    },
-    // 높이만 재는 숨은 사본 — 같은 폭의 겹친 층이라 레이아웃 높이를 더하지 않는다.
-    reserveCopy: {position: 'absolute', top: 0, left: 0, right: 0, opacity: 0},
   });

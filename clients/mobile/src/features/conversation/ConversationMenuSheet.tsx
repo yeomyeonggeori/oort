@@ -17,7 +17,8 @@ import {useStyles} from '../../design/theme';
 import {useFormatMessage} from '../../i18n/useFormatMessage';
 import {font, line, type Palette} from '../../design/tokens';
 import {DmLeaveConfirm, ignoreDiscard} from '../sidebar/DmLeaveConfirm';
-import type {DmLeaveStepView} from '../sidebar/useChannelRowActions';
+import {RenameChannelBody} from '../sidebar/RenameChannelBody';
+import type {ChannelRowActions, DmLeaveStepView} from '../sidebar/useChannelRowActions';
 import {
   CONVERSATION_DELEGATE_LABEL,
   CONVERSATION_INFO_LABEL,
@@ -69,6 +70,9 @@ export function ConversationMenuSheet({
   dmLeave = null,
   onConfirmDmLeave,
   onCancelDmLeave,
+  rename = null,
+  onConfirmRename,
+  onClearRenameFailure,
   onClose,
 }: {
   /** 대화의 이름 — DM 은 상대 이름, 채널은 `#` 없는 이름(머리의 `# ` 는 여기서 붙인다). */
@@ -99,11 +103,16 @@ export function ConversationMenuSheet({
   dmLeave?: DmLeaveStepView | null;
   onConfirmDmLeave?: () => void;
   onCancelDmLeave?: () => void;
+  /** 「이름 바꾸기」 단계(훅의 `rename`, ADR-0225 D10 · #5835). 있으면 머리까지 이 단계의 것으로 바뀐다. */
+  rename?: ChannelRowActions['rename'];
+  onConfirmRename?: (name: string) => void;
+  onClearRenameFailure?: () => void;
   onClose: () => void;
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
   const formatMessage = useFormatMessage();
   const infoLabel = kind === 'dm' ? CONVERSATION_INFO_LABEL.dm : CONVERSATION_INFO_LABEL.channel;
+  const renameItem = items.find(item => item.key === 'rename');
   const mute = items.find(item => item.key === 'mute');
   // DM 은 「목록에서 숨기기」, 채널은 「채널 나가기」 — 코어 표가 한 대화에 둘을 함께 내지 않는다(`isDm`).
   const leaving = items.find(item => item.key === 'close-dm' || item.key === 'leave');
@@ -134,9 +143,20 @@ export function ConversationMenuSheet({
       scrimLabel="대화 메뉴 닫기"
       scrimTestID="conversation-menu-backdrop"
       // 1:1 나가기 요청이 가는 동안은 몸짓으로 닫히지 않는다(요청은 이미 나갔다).
-      dirty={dmLeave?.pending === true}
+      dirty={dmLeave?.pending === true || rename?.pending === true}
       onDiscardPrompt={ignoreDiscard}
       testID="conversation-menu-sheet">
+      {rename !== null && onConfirmRename ? (
+        <RenameChannelBody
+          current={title}
+          pending={rename.pending}
+          failure={rename.failure}
+          onSubmit={onConfirmRename}
+          onEdit={onClearRenameFailure ?? ignoreDiscard}
+          testIDPrefix="conversation-menu-rename"
+        />
+      ) : (
+      <>
       <SheetHeader
         title={conversationMenuTitle(title, kind)}
         titleTestID="conversation-menu-title"
@@ -209,12 +229,15 @@ export function ConversationMenuSheet({
                 />
               ) : null}
             </GroupCard>
+            {renameItem !== undefined ? <GroupCard>{actionRow(renameItem)}</GroupCard> : null}
             {mute !== undefined ? <GroupCard>{actionRow(mute)}</GroupCard> : null}
             {leaving !== undefined ? <GroupCard>{actionRow(leaving)}</GroupCard> : null}
             {leavingDm !== undefined ? <GroupCard>{actionRow(leavingDm)}</GroupCard> : null}
           </>
         )}
       </SheetScroll>
+      </>
+      )}
     </PageSheet>
   );
 }

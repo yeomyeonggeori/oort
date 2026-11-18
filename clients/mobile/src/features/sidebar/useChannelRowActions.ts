@@ -9,6 +9,13 @@ import {
 } from '@momo/core/lib/api';
 import type {ChannelActionKey} from '@momo/core/features/channels/actionModel';
 import {
+  canRenameChannel,
+  channelRenameFailure,
+  renameChannel,
+  type ChannelRenameFailure,
+} from '@momo/core/features/channels/rename';
+import {upsertChannel} from '@momo/core/features/directory/model';
+import {
   DM_LEAVE_KEYS,
   dmLeaveScheduledCount,
   dmLeaveSeenSeq,
@@ -133,6 +140,8 @@ export interface ChannelRowActions {
   leave: {pending: boolean; error: string | null};
   /** 1:1 「대화 나가기」 확인 단계(D21). 없으면 `null`. */
   dmLeave: DmLeaveStepView | null;
+  /** 「이름 바꾸기」 단계(ADR-0225 D10, #5835). 없으면 `null`. 보내는 중에는 시트의 닫는 길이 잠긴다. */
+  rename: {pending: boolean; failure: ChannelRenameFailure | null} | null;
   /** `gesture` 를 생략하면 길게 누르기다(사이드바 행이 그대로 `onOpenActions={open}` 으로 넘긴다). */
   open: (target: ChannelRowTarget, gesture?: RowActionsOpenGesture) => void;
   close: () => void;
@@ -141,6 +150,9 @@ export interface ChannelRowActions {
   cancelLeave: () => void;
   confirmDmLeave: () => void;
   cancelDmLeave: () => void;
+  /** 접은 이름으로 바꾼다. 성공하면 채널 목록 캐시에 응답의 줄이 서고(홈 줄 · 대화 머리가 같은 캐시를 읽는다) 시트가 닫힌다. */
+  confirmRename: (name: string) => void;
+  clearRenameFailure: () => void;
 }
 
 function announce(message: string): void {
@@ -171,6 +183,10 @@ export function useChannelRowActions(
   const [leavePending, setLeavePending] = useState(false);
   const [leaveError, setLeaveError] = useState<string | null>(null);
   const [dmLeave, setDmLeave] = useState<DmLeaveStep | null>(null);
+  const [renaming, setRenaming] = useState(false);
+  const [renamePending, setRenamePending] = useState(false);
+  const [renameFailure, setRenameFailure] = useState<ChannelRenameFailure | null>(null);
+  const renameInFlight = useRef(false);
   // 예약 목록을 읽는 사이 시트가 닫히거나 다른 행이 열리면 늦게 온 답이 다른 단계에 닿지 않게 한다(ref 라서 `run` 의 신원이 안 바뀐다).
   const dmLeaveAsk = useRef(0);
   const receiptTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -196,6 +212,8 @@ export function useChannelRowActions(
     setLeaveError(null);
     dmLeaveAsk.current += 1;
     setDmLeave(null);
+    setRenaming(false);
+    setRenameFailure(null);
   }, []);
 
   const open = useCallback(
@@ -392,6 +410,15 @@ export function useChannelRowActions(
           setConfirmingLeave(true);
           return;
         }
+        case 'rename': {
+          const name = target.channel.name ?? target.title;
+          if (!canRenameChannel({kind: target.channel.kind, name, archivedAtMs: target.channel.archivedAtMs}, target.selfRole)) return;
+          reset();
+          haptics.light();
+          setActive(target);
+          setRenaming(true);
+          return;
+        }
         case 'leave-dm': {
           // 1:1 「대화 나가기」(D21): 확인 단계로 간다. 내밀지 않은 대상(옛 서버·에이전트·그룹)은 로터로 와도 아무 일이 없다.
           if (target.leaveOffered !== true || target.channel.kind !== 'dm') return;
@@ -542,6 +569,36 @@ export function useChannelRowActions(
       });
   }, [client, close, dmLeave, formatMessage, onDmLeftReceipt, onLeft, selfMemberId, succeeded, workspaceId]);
 
+  const confirmRename = useCallback(
+    (name: string) => {
+      const target = active;
+      if (target === null || renameInFlight.current) return;
+      renameInFlight.current = true;
+      setRenamePending(true);
+      setRenameFailure(null);
+      void renameChannel(workspaceId, target.channel.id, name)
+        .then(renamed => {
+          client.setQueryData<Channel[]>(workspaceKeys.channels(workspaceId), current =>
+            current ? upsertChannel(current, renamed) : [renamed],
+          );
+          void client.invalidateQueries({queryKey: workspaceKeys.channels(workspaceId)});
+          if (mounted.current) succeeded(formatMessage('channels.rename.done'));
+        })
+        .catch(cause => {
+          if (!mounted.current) return;
+          haptics.error();
+          setRenameFailure(channelRenameFailure(cause));
+        })
+        .finally(() => {
+          renameInFlight.current = false;
+          if (mounted.current) setRenamePending(false);
+        });
+    },
+    [active, client, formatMessage, succeeded, workspaceId],
+  );
+
+  const clearRenameFailure = useCallback(() => setRenameFailure(null), []);
+
   const cancelDmLeave = useCallback(() => {
     // 진행 중에는 취소가 잠긴다 - 요청은 이미 나갔다.
     if (dmLeave === null || dmLeave.pending) return;
@@ -569,9 +626,12 @@ export function useChannelRowActions(
             error: dmLeave.error,
             unavailable: dmLeave.unavailable,
           },
+    rename: renaming ? {pending: renamePending, failure: renameFailure} : null,
     open,
     close,
     run,
+    confirmRename,
+    clearRenameFailure,
     confirmLeave,
     cancelLeave,
     confirmDmLeave,

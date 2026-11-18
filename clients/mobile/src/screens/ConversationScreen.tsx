@@ -344,7 +344,7 @@ interface Visit {
 
 export default function ConversationScreen({
   channelId,
-  title,
+  title: openedTitle,
   anchor,
   notification,
   onBack,
@@ -516,6 +516,9 @@ export default function ConversationScreen({
       ) ?? null,
     [groups, channelId],
   );
+
+  // 채널 이름은 목록 캐시가 말한다 — 이름을 바꾸면(#5835) 열려 있는 대화의 머리가 바로 새 이름이다. DM 의 제목은 상대 이름이라 연 때의 것이다.
+  const title = channel !== null && channel.kind !== 'dm' && channel.name ? channel.name : openedTitle;
 
   const peer = useMemo(
     () => (channel ? dmPeer(channel, directory, member.id) : null),
@@ -2758,6 +2761,9 @@ export default function ConversationScreen({
           dmLeave={rowActions.dmLeave}
           onConfirmDmLeave={rowActions.confirmDmLeave}
           onCancelDmLeave={rowActions.cancelDmLeave}
+          rename={rowActions.rename}
+          onConfirmRename={rowActions.confirmRename}
+          onClearRenameFailure={rowActions.clearRenameFailure}
           onClose={closeMenu}
         />
       ) : null}

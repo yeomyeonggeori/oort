@@ -1772,6 +1772,112 @@ export const catalog: MessageCatalog = {
       "value": "Opens a read-only preview of recent messages."
     }
   ],
+  "channels.rename.action": [
+    {
+      "type": 0,
+      "value": "Rename channel"
+    }
+  ],
+  "channels.rename.aria": [
+    {
+      "type": 0,
+      "value": "Rename the "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " channel"
+    }
+  ],
+  "channels.rename.busy": [
+    {
+      "type": 0,
+      "value": "Renaming…"
+    }
+  ],
+  "channels.rename.cancel": [
+    {
+      "type": 0,
+      "value": "Cancel"
+    }
+  ],
+  "channels.rename.description": [
+    {
+      "type": 0,
+      "value": "The new name shows in the sidebar and channel header right away."
+    }
+  ],
+  "channels.rename.done": [
+    {
+      "type": 0,
+      "value": "Channel renamed."
+    }
+  ],
+  "channels.rename.fieldLabel": [
+    {
+      "type": 0,
+      "value": "Channel name"
+    }
+  ],
+  "channels.rename.forbidden": [
+    {
+      "type": 0,
+      "value": "Only workspace owners and admins can rename channels."
+    }
+  ],
+  "channels.rename.generalLocked": [
+    {
+      "type": 0,
+      "value": "The name of the general channel can't be changed."
+    }
+  ],
+  "channels.rename.generic": [
+    {
+      "type": 0,
+      "value": "Couldn't rename the channel. Try again."
+    }
+  ],
+  "channels.rename.network": [
+    {
+      "type": 0,
+      "value": "Couldn't rename the channel. "
+    },
+    {
+      "type": 1,
+      "value": "reason"
+    }
+  ],
+  "channels.rename.notFound": [
+    {
+      "type": 0,
+      "value": "This channel can't be found."
+    }
+  ],
+  "channels.rename.preview": [
+    {
+      "type": 0,
+      "value": "Will be renamed to "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    }
+  ],
+  "channels.rename.submit": [
+    {
+      "type": 0,
+      "value": "Rename"
+    }
+  ],
+  "channels.rename.title": [
+    {
+      "type": 0,
+      "value": "Rename channel"
+    }
+  ],
   "common.feedback.unavailable": [
     {
       "type": 0,

@@ -254,6 +254,21 @@ export const messageKeys = [
   "channels.preview.loadNetwork",
   "channels.preview.notFound",
   "channels.preview.openHint",
+  "channels.rename.action",
+  "channels.rename.aria",
+  "channels.rename.busy",
+  "channels.rename.cancel",
+  "channels.rename.description",
+  "channels.rename.done",
+  "channels.rename.fieldLabel",
+  "channels.rename.forbidden",
+  "channels.rename.generalLocked",
+  "channels.rename.generic",
+  "channels.rename.network",
+  "channels.rename.notFound",
+  "channels.rename.preview",
+  "channels.rename.submit",
+  "channels.rename.title",
   "common.feedback.unavailable",
   "common.invitation.received",
   "common.members.count",
@@ -2038,6 +2053,27 @@ export const argumentSpecs = {
   },
   "channels.preview.notFound": {},
   "channels.preview.openHint": {},
+  "channels.rename.action": {},
+  "channels.rename.aria": {
+    "name": "string"
+  },
+  "channels.rename.busy": {},
+  "channels.rename.cancel": {},
+  "channels.rename.description": {},
+  "channels.rename.done": {},
+  "channels.rename.fieldLabel": {},
+  "channels.rename.forbidden": {},
+  "channels.rename.generalLocked": {},
+  "channels.rename.generic": {},
+  "channels.rename.network": {
+    "reason": "string"
+  },
+  "channels.rename.notFound": {},
+  "channels.rename.preview": {
+    "name": "string"
+  },
+  "channels.rename.submit": {},
+  "channels.rename.title": {},
   "common.feedback.unavailable": {},
   "common.invitation.received": {
     "actorName": "string"
@@ -4265,6 +4301,21 @@ export interface MessageArgs {
   "channels.preview.loadNetwork": { reason: string };
   "channels.preview.notFound": Record<string, never>;
   "channels.preview.openHint": Record<string, never>;
+  "channels.rename.action": Record<string, never>;
+  "channels.rename.aria": { name: string };
+  "channels.rename.busy": Record<string, never>;
+  "channels.rename.cancel": Record<string, never>;
+  "channels.rename.description": Record<string, never>;
+  "channels.rename.done": Record<string, never>;
+  "channels.rename.fieldLabel": Record<string, never>;
+  "channels.rename.forbidden": Record<string, never>;
+  "channels.rename.generalLocked": Record<string, never>;
+  "channels.rename.generic": Record<string, never>;
+  "channels.rename.network": { reason: string };
+  "channels.rename.notFound": Record<string, never>;
+  "channels.rename.preview": { name: string };
+  "channels.rename.submit": Record<string, never>;
+  "channels.rename.title": Record<string, never>;
   "common.feedback.unavailable": Record<string, never>;
   "common.invitation.received": { actorName: string };
   "common.members.count": { count: number };

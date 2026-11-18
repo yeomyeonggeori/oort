@@ -5,7 +5,7 @@ import React from 'react';
 import {ConversationMenuSheet} from '../src/features/conversation/ConversationMenuSheet';
 import {conversationMenuActionItems} from '../src/features/conversation/conversationMenu';
 import type {ChannelRowTarget} from '../src/features/sidebar/channelRowActions';
-import type {DmLeaveStepView} from '../src/features/sidebar/useChannelRowActions';
+import type {ChannelRowActions, DmLeaveStepView} from '../src/features/sidebar/useChannelRowActions';
 import {useFormatMessage} from '../src/i18n/useFormatMessage';
 import {Backdrop, dmLeaveStep} from './sheetKit';
 
@@ -69,12 +69,17 @@ function Sheet({
   confirmingLeave = false,
   error = null,
   dmLeave = null,
+  rename = null,
+  hideRename = false,
 }: {
   target: ChannelRowTarget;
   delegate?: boolean;
   confirmingLeave?: boolean;
   error?: string | null;
   dmLeave?: DmLeaveStepView | null;
+  rename?: ChannelRowActions['rename'];
+  /** 이름 바꾸기 줄이 서기 전의 모양(#5835 캡처의 「전」). */
+  hideRename?: boolean;
 }): React.JSX.Element {
   const formatMessage = useFormatMessage();
   return (
@@ -87,7 +92,7 @@ function Sheet({
         onOpenInfo={noop}
         onOpenPins={noop}
         onDelegateWork={delegate ? noop : undefined}
-        items={conversationMenuActionItems(target, formatMessage)}
+        items={conversationMenuActionItems(target, formatMessage).filter(item => !(hideRename && item.key === 'rename'))}
         confirmingLeave={confirmingLeave}
         isPending={() => false}
         error={error}
@@ -98,6 +103,9 @@ function Sheet({
         dmLeave={dmLeave}
         onConfirmDmLeave={noop}
         onCancelDmLeave={noop}
+        rename={rename}
+        onConfirmRename={noop}
+        onClearRenameFailure={noop}
         onClose={noop}
       />
     </Backdrop>
@@ -121,6 +129,27 @@ export function ConversationMenuSurface({which}: {which: string}): React.JSX.Ele
       return <Sheet target={{...DM_TARGET, muted: true}} />;
     case 'channel':
       return <Sheet target={CHANNEL_TARGET} />;
+    // 「이름 바꾸기」(#5835): 줄이 서기 전 · 선 뒤 · 단계 · 서버의 거절(general 잠금) · 보내는 중.
+    case 'channel-before':
+      return <Sheet target={CHANNEL_TARGET} hideRename />;
+    case 'channel-rename':
+      return <Sheet target={CHANNEL_TARGET} rename={{pending: false, failure: null}} />;
+    case 'channel-rename-409':
+      return (
+        <Sheet
+          target={CHANNEL_TARGET}
+          rename={{pending: false, failure: {kind: 'generalLocked', key: 'channels.rename.generalLocked'}}}
+        />
+      );
+    case 'channel-rename-dup':
+      return (
+        <Sheet
+          target={CHANNEL_TARGET}
+          rename={{pending: false, failure: {kind: 'duplicate', key: 'channels.createFailure.duplicate'}}}
+        />
+      );
+    case 'channel-rename-busy':
+      return <Sheet target={CHANNEL_TARGET} rename={{pending: true, failure: null}} />;
     case 'channel-leave':
       return <Sheet target={CHANNEL_TARGET} confirmingLeave />;
     case 'mute-failure':
