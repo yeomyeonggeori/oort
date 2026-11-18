@@ -1469,7 +1469,7 @@ export const catalog: MessageCatalog = {
   "channels.default.description": [
     {
       "type": 0,
-      "value": "새로 참여하는 사람이 자동으로 들어가요"
+      "value": "새 멤버가 자동으로 들어가요"
     }
   ],
   "channels.default.label": [
@@ -10390,7 +10390,7 @@ export const catalog: MessageCatalog = {
     },
     {
       "type": 0,
-      "value": " 채널을 만들었어요. 공개 채널이라 앞으로 워크스페이스에 들어오는 사람은 자동으로 들어와요."
+      "value": " 채널을 만들었어요. 워크스페이스의 정식 멤버 누구나 채널 둘러보기에서 찾아 참여할 수 있어요."
     }
   ],
   "timeline.addMember.later": [

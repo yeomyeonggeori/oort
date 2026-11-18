@@ -778,6 +778,20 @@ export const catalog: MessageCatalog = {
       "value": "核准後會取得一次圖片，檢查後登記到團隊素材庫。"
     }
   ],
+  "timeline.addMember.createdDescriptionPublic": [
+    {
+      "type": 0,
+      "value": "已建立 "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " 頻道。工作區的任何正式成員都可以在瀏覽頻道中找到並加入。"
+    }
+  ],
   "timeline.approval.channelAgentIn": [
     {
       "type": 0,

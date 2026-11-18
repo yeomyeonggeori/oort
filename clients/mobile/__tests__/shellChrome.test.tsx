@@ -686,7 +686,7 @@ describe('탭 셋과 + (ADR-0189 D1, #2750)', () => {
     await finishNativeDismiss('new-channel-sheet');
     await waitFor(() => expect(screen.getByTestId('channel-member-add-sheet')).toBeTruthy());
     expect(screen.getByTestId('channel-member-add-lead')).toHaveTextContent(
-      'design-review 채널을 만들었어요. 공개 채널이라 앞으로 워크스페이스에 들어오는 사람은 자동으로 들어와요.',
+      'design-review 채널을 만들었어요. 워크스페이스의 정식 멤버 누구나 채널 둘러보기에서 찾아 참여할 수 있어요.',
     );
     expect(screen.getByTestId('conversation-pane')).toBeTruthy();
     expect(screen.queryByTestId('new-channel-sheet')).toBeNull();
