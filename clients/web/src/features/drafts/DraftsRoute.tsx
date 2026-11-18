@@ -40,6 +40,7 @@ import { BlockedReason } from "@/features/common/BlockedReason";
 import { LoadFailureNote } from "@/features/common/LoadFailureBox";
 import { loadCauseOf } from "@/features/common/loadFailure";
 import { CONNECTION_KEYS } from "@momo/core/features/connection/copyKeys";
+import { Tooltip } from "@/design/ui/tooltip";
 
 // =============================================================================
 // 크로스채널 초안 패널 (#1901). 쓰다 만 글은 이미 draftStore에 있고, 여기는
@@ -162,17 +163,18 @@ export function DraftRow({
       {showOverflow ? (
         <div className={overflowBowlClass}>
           <DropdownMenu open={menuOpen} onOpenChange={setMenuOpen} modal={false}>
-            <DropdownMenuTrigger asChild>
-              <button
-                type="button"
-                aria-label="초안 메뉴"
-                title="초안 메뉴"
-                data-testid="draft-row-menu"
-                className={overflowTriggerClass}
-              >
-                <MoreHorizontal className="size-4" aria-hidden="true" />
-              </button>
-            </DropdownMenuTrigger>
+            <Tooltip label="초안 메뉴" side="bottom">
+              <DropdownMenuTrigger asChild>
+                <button
+                  type="button"
+                  aria-label="초안 메뉴"
+                  data-testid="draft-row-menu"
+                  className={overflowTriggerClass}
+                >
+                  <MoreHorizontal className="size-4" aria-hidden="true" />
+                </button>
+              </DropdownMenuTrigger>
+            </Tooltip>
             <DropdownMenuContent
               align="end"
               data-testid="draft-row-menu-panel"

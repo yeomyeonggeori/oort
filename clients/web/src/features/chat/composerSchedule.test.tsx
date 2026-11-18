@@ -56,6 +56,7 @@ import { resetSchedulerDisabledForTest } from "@/features/scheduled/useScheduled
 import { clearDraft, readDraft, writeDraft } from "@/features/chat/draftStore";
 import { Composer } from "./Composer";
 import { usePersonalCall } from "./usePersonalCall";
+import { tooltipTextOf } from "@/design/ui/tooltipTestKit";
 
 const NOW = new Date("2026-10-22T14:30:00+09:00").getTime();
 const TOMORROW_9 = new Date("2026-10-23T09:00:00+09:00").getTime();
@@ -390,7 +391,7 @@ describe("막힌 ▾는 눌러서 이유를 듣는다 (UI 명세 0.4: 한 번에
     await mount({ quote: { targetId: "m1", targetSeq: 1, authorMemberId: ME, block: { kind: "ready", targetId: "m1", targetSeq: 1, authorMemberId: ME, lines: ["원본"], truncated: false, quotesAnother: false, edited: false } } });
     await type("인용에 답해요");
     expect(triggerEl().getAttribute("aria-disabled")).toBe("true");
-    expect(triggerEl().getAttribute("title")).toBe("인용 답장은 예약할 수 없어요. 인용을 지우면 예약할 수 있어요.");
+    expect(tooltipTextOf(triggerEl())).toBe("인용 답장은 예약할 수 없어요. 인용을 지우면 예약할 수 있어요.");
     const reasonId = triggerEl().getAttribute("aria-describedby") ?? "";
     expect(document.getElementById(reasonId)?.textContent).toBe("인용 답장은 예약할 수 없어요. 인용을 지우면 예약할 수 있어요.");
     // 눈에 보이는 줄은 한 줄 슬롯이므로 이유 줄만 말한다.
@@ -453,7 +454,7 @@ describe("막힌 ▾는 눌러서 이유를 듣는다 (UI 명세 0.4: 한 번에
     });
     expect(triggerEl().getAttribute("aria-disabled")).toBe("true");
     expect(byId("composer-offline")).not.toBeNull();
-    expect(triggerEl().getAttribute("title")).toBe(need("composer-offline").textContent);
+    expect(tooltipTextOf(triggerEl())).toBe(need("composer-offline").textContent);
     // 오프라인 사유에는 낭독용 이유 줄이 따로 없다.
     await pressBlockedTrigger();
     expect(byId("composer-status-line")).toBeNull();
@@ -489,11 +490,11 @@ describe("막힌 ▾는 눌러서 이유를 듣는다 (UI 명세 0.4: 한 번에
     await act(async () => {
       window.dispatchEvent(new Event("offline"));
     });
-    expect(triggerEl().getAttribute("title")).toBe(need("composer-offline").textContent);
+    expect(tooltipTextOf(triggerEl())).toBe(need("composer-offline").textContent);
     await act(async () => {
       window.dispatchEvent(new Event("online"));
     });
-    expect(triggerEl().getAttribute("title")).toBe("명령은 예약할 수 없어요. 명령을 지우면 예약할 수 있어요.");
+    expect(tooltipTextOf(triggerEl())).toBe("명령은 예약할 수 없어요. 명령을 지우면 예약할 수 있어요.");
   });
 });
 

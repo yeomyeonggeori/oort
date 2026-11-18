@@ -23,8 +23,7 @@ import {
 //     링은 잰 값으로 12칸이고, 길이를 모르면 도는 호다. 어느 쪽도 인라인 style이 없다.
 //   · 툴팁은 공용 `Tooltip`이다(owner 요청, 아래 방향 · 오른쪽 끝 맞춤). 네이티브 `title`은 두지 않는다: 둘이 같이 뜬다.
 //     띠 안에서는 글자 역할이 on-band로 다시 묶이므로 알약의 글자는 `--ink-base`로 되찾는다(`tooltip-surface`,
-//     tokens.css). 문구는 접근성 이름과 같은 한 문자열이다. 상단 줄의 토글은 아직 `title`이다(이 PR의 범위 밖).
-//   · 패널은 포털로 뜨는 `Popover`라 띠의 글자 역할 묶음 밖에서 기본 역할로 그려진다.
+//     tokens.css). 문구는 접근성 이름과 같은 한 문자열이다.//   · 패널은 포털로 뜨는 `Popover`라 띠의 글자 역할 묶음 밖에서 기본 역할로 그려진다.
 
 /** 한 행의 행동 결과를 그 행 아래의 한 줄 문장으로. 성공과 「지워짐」은 문장이 없다(행이 말한다). */
 function rowNotice(action: RowAction, result: RowActionResult): string | null {

@@ -23,6 +23,7 @@ import {
   type DesktopEffectsDeps,
 } from "./desktopEffects";
 import { FakeMedia, fromChannels } from "./desktopEffectsTestKit";
+import { tooltipTextOf } from "@/design/ui/tooltipTestKit";
 
 // =============================================================================
 // AP-3(#4190) AC 3·4·5·9 — 설정 > 모양의 「유리 배경」 행. 행은 창 쪽 일과 **같은 판정**(`resolveGlass`)을 읽는다.
@@ -239,8 +240,8 @@ describe("지원되는 맥 데스크탑: 켜기·슬라이더 (AC 3·4)", () => 
     mount();
     await settled();
     const reset = q("glass-opacity-reset") as HTMLButtonElement;
-    expect(reset.getAttribute("title")).toBe("기본값으로 되돌리기");
-    expect(reset.getAttribute("aria-label")).toBe(reset.getAttribute("title"));
+    expect(tooltipTextOf(reset)).toBe("기본값으로 되돌리기");
+    expect(reset.getAttribute("aria-label")).toBe(tooltipTextOf(reset));
   });
 
   it("끄면 슬라이더가 사라지고 불투명도는 남는다(다시 켜면 돌아온다)", async () => {

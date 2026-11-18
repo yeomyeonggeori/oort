@@ -151,7 +151,7 @@ describe("UnfurlCards", () => {
     // 두 단추는 서로 다른 파일에 있지만 같은 규칙(카드 호버·키보드 초점에서만 서는 테두리 없는 원)을 지킨다. 한쪽만 고치면 갈라진다.
     const composerSource = readFileSync(new URL("../chat/ComposerLinkPreview.tsx", import.meta.url), "utf8");
     const pick = (source: string) =>
-      [...source.matchAll(/className="(tap-target absolute right-1 top-1[^"]*)"/g)]
+      [...source.matchAll(/className="(tap-target layer-content-float[^"]*)"/g)]
         .map((m) => m[1]);
     const timeline = pick(componentSource);
     const composer = pick(composerSource);
@@ -161,6 +161,10 @@ describe("UnfurlCards", () => {
     expect(composer[0]).toContain("pointer-hover:opacity-0");
     expect(composer[0]).toContain("rounded-full");
     expect(composer[0]).not.toContain("border");
+    // 자리(오른쪽 위 모서리)는 단추가 아니라 툴팁 감싸개가 잡는다: 두 곳이 같은 자리 클래스를 쓴다.
+    const place = (source: string) => source.split('side="bottom" className="absolute right-1 top-1"').length - 1 + source.split('side="top" className="absolute right-1 top-1"').length - 1;
+    expect(place(componentSource)).toBe(1);
+    expect(place(composerSource)).toBe(1);
   });
 
   it("withholds removal from non-authors", () => {

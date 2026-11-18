@@ -24,6 +24,7 @@ import {
   type DownloadList,
   type RowAction,
 } from "./downloadsModel";
+import { Tooltip } from "@/design/ui/tooltip";
 
 // 상단 오른쪽 다운로드 단추의 패널 (#4587). 표시만 한다: 상태는 스토어가, 행동은 부모가 쥔다.
 //
@@ -109,17 +110,17 @@ function DownloadRow({
           const ActionIcon = ACTION_ICON[action];
           const label = rowActionLabel(action);
           return (
-            <button
-              key={action}
-              type="button"
-              onClick={() => onAction(item, action)}
-              aria-label={`${title} ${label}`}
-              title={label}
-              data-testid={`download-action-${action}`}
-              className={ROW_BUTTON_CLASS}
-            >
-              <ActionIcon aria-hidden="true" className="size-4" />
-            </button>
+            <Tooltip key={action} label={label} side="bottom">
+              <button
+                type="button"
+                onClick={() => onAction(item, action)}
+                aria-label={`${title} ${label}`}
+                data-testid={`download-action-${action}`}
+                className={ROW_BUTTON_CLASS}
+              >
+                <ActionIcon aria-hidden="true" className="size-4" />
+              </button>
+            </Tooltip>
           );
         })}
       </div>

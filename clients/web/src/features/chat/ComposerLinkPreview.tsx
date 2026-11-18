@@ -5,6 +5,7 @@ import { unfurlDrawsCards, type UnfurlPreviewCard } from "@momo/core/features/ti
 import { useFormatMessage } from "@/i18n/useFormatMessage";
 import { useLinkPreviewPreference } from "@/features/timeline/linkPreviewPreference";
 import { UnfurlCard } from "@/features/timeline/UnfurlCards";
+import { Tooltip } from "@/design/ui/tooltip";
 
 // =============================================================================
 // 입력칸 위의 링크 미리보기 (#5005). 카드 한 장은 타임라인 카드와 같은 컴포넌트(`UnfurlCard`)이고,
@@ -80,16 +81,17 @@ export function ComposerLinkPreview({
               >
                 <UnfurlCard unfurl={card} preference={preference} />
                 {index === 0 ? (
-                  <button
-                    type="button"
-                    aria-label={dismissLabel}
-                    title={dismissLabel}
-                    className="tap-target absolute right-1 top-1 layer-content-float flex size-control-sm items-center justify-center rounded-full bg-surface-raised text-ink-muted shadow-sm press hover:bg-surface-hover hover:text-ink focus-visible:focus-ring pointer-hover:opacity-0 pointer-hover:group-hover/unfurl:opacity-100 pointer-hover:group-has-[:focus-visible]/unfurl:opacity-100 pointer-hover:focus-visible:opacity-100"
-                    onClick={onDismiss}
-                    data-testid={dismissTestId}
-                  >
-                    <X className="size-4" aria-hidden="true" />
-                  </button>
+                  <Tooltip label={dismissLabel} side="top" className="absolute right-1 top-1">
+                    <button
+                      type="button"
+                      aria-label={dismissLabel}
+                      className="tap-target layer-content-float flex size-control-sm items-center justify-center rounded-full bg-surface-raised text-ink-muted shadow-sm press hover:bg-surface-hover hover:text-ink focus-visible:focus-ring pointer-hover:opacity-0 pointer-hover:group-hover/unfurl:opacity-100 pointer-hover:group-has-[:focus-visible]/unfurl:opacity-100 pointer-hover:focus-visible:opacity-100"
+                      onClick={onDismiss}
+                      data-testid={dismissTestId}
+                    >
+                      <X className="size-4" aria-hidden="true" />
+                    </button>
+                  </Tooltip>
                 ) : null}
               </div>
             ))}

@@ -23,6 +23,7 @@ import type {
   SidebarDragHandleProps,
   SidebarDropZoneProps,
 } from "./sidebarDnd";
+import { Tooltip } from "@/design/ui/tooltip";
 
 // Flat rows with a hover background, not one rounded "web card" per list item
 // (design-taste-web §8). Everything interactive is a real link/button with a
@@ -314,19 +315,20 @@ export function SidebarRow({
     );
 
   const closeButton = showClose ? (
-    <button
-      type="button"
-      tabIndex={-1}
-      onClick={onClose}
-      aria-label={closeLabel ?? DM_CLOSE_LABEL}
-      title={DM_CLOSE_LABEL}
-      data-testid="dm-close"
-      // 자리: 오른쪽 8px(`right-2`) × 24px(`size-6`). `tokens.css` 의 `sidebar-row` 가 같은 숫자에서 이름의
-      // 오른쪽 끝(36px = 24 + 8 + 간격 4)을 도출하므로 둘은 함께 움직인다(소스 시험이 36 을 잰다).
-      className="press absolute right-2 top-1/2 flex size-6 -translate-y-1/2 items-center justify-center rounded-sm text-ink-muted hover:bg-surface-pressed hover:text-ink focus-visible:focus-ring"
-    >
-      <X className="size-4" aria-hidden="true" />
-    </button>
+    <Tooltip label={DM_CLOSE_LABEL} side="bottom" className="absolute right-2 top-1/2 -translate-y-1/2">
+      <button
+        type="button"
+        tabIndex={-1}
+        onClick={onClose}
+        aria-label={closeLabel ?? DM_CLOSE_LABEL}
+        data-testid="dm-close"
+        // 자리: 오른쪽 8px(`right-2`) × 24px(`size-6`). `tokens.css` 의 `sidebar-row` 가 같은 숫자에서 이름의
+        // 오른쪽 끝(36px = 24 + 8 + 간격 4)을 도출하므로 둘은 함께 움직인다(소스 시험이 36 을 잰다).
+        className="press flex size-6 items-center justify-center rounded-sm text-ink-muted hover:bg-surface-pressed hover:text-ink focus-visible:focus-ring"
+      >
+        <X className="size-4" aria-hidden="true" />
+      </button>
+    </Tooltip>
   ) : null;
   // 링크와 X 는 **같은 트리거 상자 안**에 선다: X 위의 우클릭도 행 메뉴를 연다.
   const body = closeButton ? (
@@ -493,18 +495,19 @@ export function SidebarSection({
         onBlurCapture={onHeaderBlur}
       >
         <h2 className="min-w-0 flex-1">
-          <button
-            type="button"
-            onClick={() => onCollapsedChange(!collapsed)}
-            aria-expanded={!collapsed}
-            aria-controls={collapsed ? undefined : listId}
-            title={`${title} 섹션 ${collapsed ? "펼치기" : "접기"}`}
-            data-testid={`section-collapse-${sectionId}`}
-            className="sidebar-section-label w-full min-w-0 rounded-md text-left active:bg-surface-pressed focus-visible:focus-ring"
-          >
-            <Chevron className="size-4 shrink-0" aria-hidden="true" />
-            <span className="min-w-0 truncate">{title}</span>
-          </button>
+          <Tooltip label={`${title} 섹션 ${collapsed ? "펼치기" : "접기"}`} side="bottom" className="flex w-full min-w-0">
+            <button
+              type="button"
+              onClick={() => onCollapsedChange(!collapsed)}
+              aria-expanded={!collapsed}
+              aria-controls={collapsed ? undefined : listId}
+              data-testid={`section-collapse-${sectionId}`}
+              className="sidebar-section-label w-full min-w-0 rounded-md text-left active:bg-surface-pressed focus-visible:focus-ring"
+            >
+              <Chevron className="size-4 shrink-0" aria-hidden="true" />
+              <span className="min-w-0 truncate">{title}</span>
+            </button>
+          </Tooltip>
         </h2>
         {collapsed && sectionPill ? (
           <AttentionPill spec={sectionPill} testId={`section-unread-${sectionId}`} />

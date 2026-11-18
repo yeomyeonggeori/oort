@@ -51,6 +51,7 @@ import { resolveWorkbenchKey, type KeyPlatform } from "@momo/core/features/workb
 import { PANE_MARK_LABEL, rowMark, type PaneMark } from "@momo/core/features/workbench/paneStatus";
 import { SessionStateChip } from "@/features/sidebar/SessionStateChip";
 import "./sessionList.css";
+import { Tooltip } from "@/design/ui/tooltip";
 
 // Reading this as: 작업 탭 세션 목록(시안 ① `.slist`) for internal team users on
 // Tauri desktop, density 7/10, motion 1/10.
@@ -368,17 +369,18 @@ export const SessionList = forwardRef<SessionListHandle, SessionListProps>(funct
             <Search />
           </button>
           <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <button
-                type="button"
-                className="sl-ibtn press focus-visible:focus-ring"
-                aria-label={`묶기: ${SESSION_GROUPING_LABEL[prefs.grouping]}`}
-                title={`묶기: ${SESSION_GROUPING_LABEL[prefs.grouping]}`}
-                data-testid="session-list-grouping"
-              >
-                <Layers />
-              </button>
-            </DropdownMenuTrigger>
+            <Tooltip label={`묶기: ${SESSION_GROUPING_LABEL[prefs.grouping]}`} side="bottom">
+              <DropdownMenuTrigger asChild>
+                <button
+                  type="button"
+                  className="sl-ibtn press focus-visible:focus-ring"
+                  aria-label={`묶기: ${SESSION_GROUPING_LABEL[prefs.grouping]}`}
+                  data-testid="session-list-grouping"
+                >
+                  <Layers />
+                </button>
+              </DropdownMenuTrigger>
+            </Tooltip>
             <DropdownMenuContent align="end" data-testid="session-list-grouping-menu">
               <DropdownMenuLabel id="session-list-grouping-label">묶기</DropdownMenuLabel>
               <DropdownMenuRadioGroup

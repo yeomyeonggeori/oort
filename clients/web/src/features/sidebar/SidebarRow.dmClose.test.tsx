@@ -7,6 +7,7 @@ import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { resetPointerTrailForTest } from "./pointerTrail";
 import { SidebarRow } from "./SidebarRow";
+import { tooltipTextOf } from "@/design/ui/tooltipTestKit";
 
 // =============================================================================
 // DM 행의 호버 X (#3963). SidebarRow 가 지는 것만 잰다: 언제 서고 언제 내려가는가, 무엇을
@@ -124,7 +125,7 @@ describe("호버 X 가 말하는 것", () => {
     mount({ onClose: () => undefined, closeLabel: "이도현, 목록에서 숨기기" });
     enter();
     expect(x()?.getAttribute("aria-label")).toBe("이도현, 목록에서 숨기기");
-    expect(x()?.getAttribute("title")).toBe("목록에서 숨기기");
+    expect(tooltipTextOf(x()!)).toBe("목록에서 숨기기");
     expect(x()?.tabIndex).toBe(-1);
     expect(link().contains(x())).toBe(false);
   });

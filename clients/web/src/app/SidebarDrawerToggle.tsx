@@ -1,5 +1,6 @@
 import { Menu } from "lucide-react";
 import { useShellNav } from "@/app/shellNav";
+import { Tooltip } from "@/design/ui/tooltip";
 
 /**
  * 표면 헤더의 첫 컨트롤 (폰 전용). 여는 것만 한다: 열려 있는 동안 이 버튼은
@@ -13,17 +14,18 @@ import { useShellNav } from "@/app/shellNav";
 export function SidebarDrawerToggle() {
   const { drawerOpen, openDrawer } = useShellNav();
   return (
-    <button
-      type="button"
-      className="mobile-only tap-target -ml-2 flex size-control shrink-0 items-center justify-center rounded-sm text-ink-muted press hover:bg-surface-hover focus-visible:focus-ring"
-      onClick={(event) => openDrawer(event.currentTarget)}
-      aria-label="채널 목록 열기"
-      title="채널 목록 열기"
-      aria-expanded={drawerOpen}
-      aria-controls="sidebar-drawer"
-      data-testid="open-sidebar-drawer"
-    >
-      <Menu className="size-4" aria-hidden="true" />
-    </button>
+    <Tooltip label="채널 목록 열기" side="bottom" className="mobile-only">
+      <button
+        type="button"
+        className="mobile-only tap-target -ml-2 flex size-control shrink-0 items-center justify-center rounded-sm text-ink-muted press hover:bg-surface-hover focus-visible:focus-ring"
+        onClick={(event) => openDrawer(event.currentTarget)}
+        aria-label="채널 목록 열기"
+        aria-expanded={drawerOpen}
+        aria-controls="sidebar-drawer"
+        data-testid="open-sidebar-drawer"
+      >
+        <Menu className="size-4" aria-hidden="true" />
+      </button>
+    </Tooltip>
   );
 }

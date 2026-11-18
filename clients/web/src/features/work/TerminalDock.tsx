@@ -20,6 +20,7 @@ import { useSession } from "@/app/session";
 import { useSurfaceProvided } from "@/features/capabilities/useSurfaceProvided";
 import { WORK_CONSOLE_VIEW_PATH } from "@momo/core/features/workbench/workTab";
 import { BlockedReason } from "@/features/common/BlockedReason";
+import { Tooltip } from "@/design/ui/tooltip";
 
 function readPx(name: string): number {
   const raw = getComputedStyle(document.documentElement).getPropertyValue(name);
@@ -309,21 +310,22 @@ export function TerminalDock({
             터미널
           </p>
         )}
-        <button
-          type="button"
-          disabled={!canExpand}
-          onClick={() => {
-            if (!canExpand) return;
-            setExpanded((current) => !current);
-          }}
-          aria-pressed={shownExpanded}
-          aria-label="터미널 크게 보기"
-          title={expandTitle}
-          data-testid="terminal-dock-expand"
-          className="tap-target flex size-control-sm shrink-0 items-center justify-center rounded-sm text-ink-muted press hover:bg-surface-hover focus-visible:focus-ring disabled:pointer-events-none disabled:opacity-50"
-        >
-          <ChevronsUpDown aria-hidden="true" className="size-4" />
-        </button>
+        <Tooltip label={expandTitle} side="top">
+          <button
+            type="button"
+            disabled={!canExpand}
+            onClick={() => {
+              if (!canExpand) return;
+              setExpanded((current) => !current);
+            }}
+            aria-pressed={shownExpanded}
+            aria-label="터미널 크게 보기"
+            data-testid="terminal-dock-expand"
+            className="tap-target flex size-control-sm shrink-0 items-center justify-center rounded-sm text-ink-muted press hover:bg-surface-hover focus-visible:focus-ring disabled:pointer-events-none disabled:opacity-50"
+          >
+            <ChevronsUpDown aria-hidden="true" className="size-4" />
+          </button>
+        </Tooltip>
         <button
           type="button"
           onClick={onClose}

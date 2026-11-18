@@ -33,6 +33,7 @@ import {
   showsInlinePreview,
   type MessageAttachment,
 } from "@momo/core/features/attachments/model";
+import { Tooltip } from "@/design/ui/tooltip";
 
 // =============================================================================
 // 타임라인의 첨부 (ADR-0151 D2 / #1202 · #3820 Buzz 식 재배치).
@@ -274,17 +275,18 @@ function ImageTile({
             onStarted={() => setFailed(false)}
             onFailed={() => setFailed(true)}
           />
-          <button
-            type="button"
-            data-row-action=""
-            data-testid="attachment-expand"
-            onClick={(event) => onOpen(event.currentTarget)}
-            aria-label={actionName}
-            title={ATTACH_COPY.expandImage}
-            className="touch-target flex size-control shrink-0 items-center justify-center rounded-sm text-ink-muted press hover:bg-surface-hover hover:text-ink focus-visible:focus-ring"
-          >
-            <Expand aria-hidden="true" className="size-4" />
-          </button>
+          <Tooltip label={ATTACH_COPY.expandImage} side="bottom">
+            <button
+              type="button"
+              data-row-action=""
+              data-testid="attachment-expand"
+              onClick={(event) => onOpen(event.currentTarget)}
+              aria-label={actionName}
+              className="touch-target flex size-control shrink-0 items-center justify-center rounded-sm text-ink-muted press hover:bg-surface-hover hover:text-ink focus-visible:focus-ring"
+            >
+              <Expand aria-hidden="true" className="size-4" />
+            </button>
+          </Tooltip>
         </div>
       )}
       {failed && (

@@ -152,6 +152,7 @@ import { CommandSuggestSlot, ThreadSurfaceRoot } from "./commandSuggestSlot";
 import { MessageRunStatus } from "@/features/agents/MessageRunStatus";
 import { GutterTriggerChip, MessageTriggerChip, ThreadWorkChip } from "@/features/agents/TriggerChip";
 import type { AgentRunProgress } from "@momo/core/lib/api";
+import { Tooltip } from "@/design/ui/tooltip";
 
 // =============================================================================
 // One message row (R-1 §3). Humans and agents share the SAME grid and the same
@@ -975,22 +976,23 @@ export function MessageRow({
       <div className={cn("relative shrink-0", MESSAGE_AVATAR_GUTTER_CLASS)}>
         {startsGroup ? (
           author ? (
-            <button
-              type="button"
-              data-testid="row-avatar-profile"
-              data-row-action=""
-              aria-label={`${author.displayName} @${author.handle} 프로필 열기`}
-              title={`${author.displayName} @${author.handle} 프로필 열기`}
-              onClick={(event) =>
-                openMemberProfile(author.id, event.currentTarget)
-              }
-              className={cn(
-                "press focus-visible:focus-ring",
-                isAgent ? "rounded-sm" : "rounded-full"
-              )}
-            >
-              <Avatar member={author} className={MESSAGE_AVATAR_SIZE_CLASS} />
-            </button>
+            <Tooltip label={`${author.displayName} @${author.handle} 프로필 열기`} side="bottom">
+              <button
+                type="button"
+                data-testid="row-avatar-profile"
+                data-row-action=""
+                aria-label={`${author.displayName} @${author.handle} 프로필 열기`}
+                onClick={(event) =>
+                  openMemberProfile(author.id, event.currentTarget)
+                }
+                className={cn(
+                  "press focus-visible:focus-ring",
+                  isAgent ? "rounded-sm" : "rounded-full"
+                )}
+              >
+                <Avatar member={author} className={MESSAGE_AVATAR_SIZE_CLASS} />
+              </button>
+            </Tooltip>
           ) : (
             <Avatar member={author} className={MESSAGE_AVATAR_SIZE_CLASS} />
           )

@@ -13,6 +13,7 @@ import {
   shouldOpenShortcutHelp,
 } from "@/app/keyboardShortcuts";
 import { useShortcutBindingsVersion } from "@/app/shortcutBindings";
+import { Tooltip } from "@/design/ui/tooltip";
 
 /**
  * 키캡 상자. 글꼴·모서리·그릇·색이 한 벌로 여기 한 번만 적힌다.
@@ -110,17 +111,18 @@ export function ShortcutHelpDialog() {
 
   return (
     <Dialog open={open} onOpenChange={setDialogOpen}>
-      <button
-        ref={triggerRef}
-        type="button"
-        onClick={() => openFrom(triggerRef.current)}
-        aria-label="단축키 도움말 열기"
-        title="단축키 도움말 (?)"
-        data-testid="shortcut-help-trigger"
-        className="tap-target flex size-control-sm items-center justify-center rounded-sm text-ink-muted press hover:bg-surface-hover focus-visible:focus-ring"
-      >
-        <CircleHelp className="size-4" aria-hidden="true" />
-      </button>
+      <Tooltip label="단축키 도움말 (?)" side="bottom">
+        <button
+          ref={triggerRef}
+          type="button"
+          onClick={() => openFrom(triggerRef.current)}
+          aria-label="단축키 도움말 열기"
+          data-testid="shortcut-help-trigger"
+          className="tap-target flex size-control-sm items-center justify-center rounded-sm text-ink-muted press hover:bg-surface-hover focus-visible:focus-ring"
+        >
+          <CircleHelp className="size-4" aria-hidden="true" />
+        </button>
+      </Tooltip>
 
       <DialogContent
         opener={openerRef.current}

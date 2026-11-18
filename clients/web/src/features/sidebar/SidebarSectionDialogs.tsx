@@ -33,6 +33,7 @@ import {
   sidebarSectionNameIssueMessage,
   SIDEBAR_SECTION_NAME_MAX,
 } from "@momo/core/features/sidebar/sidebarSections";
+import { Tooltip } from "@/design/ui/tooltip";
 
 // =============================================================================
 // 섹션 CRUD 의 그릇 (ADR-0177 D4 / BT-4 #1932).
@@ -287,19 +288,20 @@ export function SidebarSectionMenu({
   const trigger = useRef<HTMLButtonElement>(null);
   return (
     <DropdownMenu onOpenChange={onOpenChange}>
-      <DropdownMenuTrigger asChild>
-        <button
-          ref={trigger}
-          type="button"
-          aria-label={`${title} 섹션 메뉴`}
-          title={`${title} 섹션 메뉴`}
-          data-section-action=""
-          data-testid={`section-menu-${sectionId}`}
-          className="tap-target flex size-control-sm items-center justify-center rounded-sm text-ink-muted press hover:bg-surface-hover focus-visible:focus-ring"
-        >
-          <MoreHorizontal className="size-4" aria-hidden="true" />
-        </button>
-      </DropdownMenuTrigger>
+      <Tooltip label={`${title} 섹션 메뉴`} side="bottom">
+        <DropdownMenuTrigger asChild>
+          <button
+            ref={trigger}
+            type="button"
+            aria-label={`${title} 섹션 메뉴`}
+            data-section-action=""
+            data-testid={`section-menu-${sectionId}`}
+            className="tap-target flex size-control-sm items-center justify-center rounded-sm text-ink-muted press hover:bg-surface-hover focus-visible:focus-ring"
+          >
+            <MoreHorizontal className="size-4" aria-hidden="true" />
+          </button>
+        </DropdownMenuTrigger>
+      </Tooltip>
       <DropdownMenuContent align="end" data-testid={`section-menu-${sectionId}-content`}>
         {order && (
           <>

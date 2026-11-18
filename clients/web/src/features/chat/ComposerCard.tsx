@@ -5,6 +5,7 @@ import { cn } from "@/design/lib/cn";
 import { AttachButton } from "@/features/attachments/AttachmentTray";
 import { ComposerFormatButton } from "@/features/chat/ComposerFormatButton";
 import { ScheduleSendMenu, type ScheduleSendMenuProps } from "@/features/scheduled/ScheduleSendMenu";
+import { Tooltip } from "@/design/ui/tooltip";
 
 // =============================================================================
 // 입력창의 카드 (#5324, owner 2026-11-05). 채널 입력창(`Composer`)과 스레드 패널 답글 입력창(`ThreadComposer`)이 **같은 카드**다.
@@ -124,32 +125,34 @@ export function ComposerTools({
     <div className="flex items-center gap-1">
       {/* 「+」는 도구 줄의 맨 왼쪽이다. 첨부이고, 앱 피커(#4315)가 서면 이 자리의 메뉴가 된다. */}
       <AttachButton onPick={onPickFiles} disabled={attachDisabled} className={settled} />
-      <Button
-        type="button"
-        variant="ghost"
-        size="icon"
-        className={cn("tap-target shrink-0", settled)}
-        disabled={toolsDisabled}
-        aria-label="멘션 넣기"
-        title="멘션 넣기"
-        data-testid={`${testIdPrefix}-mention-trigger`}
-        onClick={onInsertMention}
-      >
-        <AtSign aria-hidden="true" />
-      </Button>
-      <Button
-        type="button"
-        variant="ghost"
-        size="icon"
-        className={cn("tap-target shrink-0", settled)}
-        disabled={toolsDisabled}
-        aria-label="이모티콘 넣기"
-        title="이모티콘 넣기"
-        data-testid={`${testIdPrefix}-emoji-trigger`}
-        onClick={(event) => onOpenEmoji(event.currentTarget)}
-      >
-        <Smile aria-hidden="true" />
-      </Button>
+      <Tooltip label="멘션 넣기" side="top">
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
+          className={cn("tap-target shrink-0", settled)}
+          disabled={toolsDisabled}
+          aria-label="멘션 넣기"
+          data-testid={`${testIdPrefix}-mention-trigger`}
+          onClick={onInsertMention}
+        >
+          <AtSign aria-hidden="true" />
+        </Button>
+      </Tooltip>
+      <Tooltip label="이모티콘 넣기" side="top">
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
+          className={cn("tap-target shrink-0", settled)}
+          disabled={toolsDisabled}
+          aria-label="이모티콘 넣기"
+          data-testid={`${testIdPrefix}-emoji-trigger`}
+          onClick={(event) => onOpenEmoji(event.currentTarget)}
+        >
+          <Smile aria-hidden="true" />
+        </Button>
+      </Tooltip>
       <ComposerFormatButton
         available={format.available}
         open={format.open}
@@ -195,24 +198,25 @@ export function ComposerSend({
 }) {
   return (
     <div className="flex shrink-0 items-center gap-px">
-      <Button
-        type={type}
-        size="icon"
-        className={cn(
-          "tap-target shrink-0",
-          showsSchedule && "rounded-r-none",
-          settledWhenDisabled && "disabled:opacity-100"
-        )}
-        // 오프라인에서는 보낼 수 없다 (진단 H-10). 누르면 실패 행 하나를 만들고 끝나므로, 막고 **왜**를 위 한 줄이 말한다.
-        disabled={disabled}
-        aria-busy={busy || undefined}
-        aria-label={label}
-        title={title}
-        data-testid={`${testIdPrefix}-send`}
-        onClick={onClick}
-      >
-        <SendHorizontal />
-      </Button>
+      <Tooltip label={title} side="top">
+        <Button
+          type={type}
+          size="icon"
+          className={cn(
+            "tap-target shrink-0",
+            showsSchedule && "rounded-r-none",
+            settledWhenDisabled && "disabled:opacity-100"
+          )}
+          // 오프라인에서는 보낼 수 없다 (진단 H-10). 누르면 실패 행 하나를 만들고 끝나므로, 막고 **왜**를 위 한 줄이 말한다.
+          disabled={disabled}
+          aria-busy={busy || undefined}
+          aria-label={label}
+          data-testid={`${testIdPrefix}-send`}
+          onClick={onClick}
+        >
+          <SendHorizontal />
+        </Button>
+      </Tooltip>
       <ScheduleSendMenu {...schedule} />
     </div>
   );

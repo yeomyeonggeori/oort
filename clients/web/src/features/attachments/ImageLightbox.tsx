@@ -33,6 +33,7 @@ import {
   attachmentDisplayName,
   type MessageAttachment,
 } from "@momo/core/features/attachments/model";
+import { Tooltip } from "@/design/ui/tooltip";
 
 // =============================================================================
 // 이미지 미리보기 (#1686 · #3820 · #4751 · #4770 · #5190).
@@ -272,23 +273,24 @@ function LightboxCopyButton({
   const label = formatMessage(confirmed ? "timeline.lightbox.copied" : "timeline.lightbox.copy");
   return (
     <>
-      <Button
-        type="button"
-        variant="ghost"
-        size="icon"
-        className={GLASS_ROUND_BUTTON}
-        aria-label={label}
-        aria-disabled={dataUrl === undefined ? true : undefined}
-        title={label}
-        data-testid="image-lightbox-copy"
-        onClick={() => {
-          if (dataUrl === undefined) return;
-          onStarted();
-          copyImageToClipboard(dataUrl).then(confirm, onFailed);
-        }}
-      >
-        {confirmed ? <Check aria-hidden="true" /> : <Copy aria-hidden="true" />}
-      </Button>
+      <Tooltip label={label} side="bottom">
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
+          className={GLASS_ROUND_BUTTON}
+          aria-label={label}
+          aria-disabled={dataUrl === undefined ? true : undefined}
+          data-testid="image-lightbox-copy"
+          onClick={() => {
+            if (dataUrl === undefined) return;
+            onStarted();
+            copyImageToClipboard(dataUrl).then(confirm, onFailed);
+          }}
+        >
+          {confirmed ? <Check aria-hidden="true" /> : <Copy aria-hidden="true" />}
+        </Button>
+      </Tooltip>
       {/* 단추의 이름이 바뀌는 것만으로는 보조 기술이 읽지 않는다. 결과는 따로 읽어 준다. */}
       <span role="status" className="sr-only">
         {confirmed ? label : ""}
@@ -613,51 +615,54 @@ export function ImageLightbox({
                 }
               />
             ) : null}
-            <Button
-              ref={closeRef}
-              type="button"
-              variant="ghost"
-              size="icon"
-              className={GLASS_ROUND_BUTTON}
-              onClick={requestClose}
-              aria-label="닫기"
-              title="닫기"
-              data-testid="image-lightbox-close"
-            >
-              <X aria-hidden="true" />
-            </Button>
+            <Tooltip label="닫기" side="bottom">
+              <Button
+                ref={closeRef}
+                type="button"
+                variant="ghost"
+                size="icon"
+                className={GLASS_ROUND_BUTTON}
+                onClick={requestClose}
+                aria-label="닫기"
+                data-testid="image-lightbox-close"
+              >
+                <X aria-hidden="true" />
+              </Button>
+            </Tooltip>
           </div>
         </div>
 
         {multi ? (
           <>
             <div className={cn("lightbox-side", !interactive && "invisible")} data-side="start">
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon"
-                className={GLASS_ROUND_BUTTON}
-                onClick={() => move("ArrowLeft")}
-                aria-label="이전 이미지"
-                title="이전 이미지"
-                data-testid="image-lightbox-previous"
-              >
-                <ChevronLeft aria-hidden="true" />
-              </Button>
+              <Tooltip label="이전 이미지" side="bottom">
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  className={GLASS_ROUND_BUTTON}
+                  onClick={() => move("ArrowLeft")}
+                  aria-label="이전 이미지"
+                  data-testid="image-lightbox-previous"
+                >
+                  <ChevronLeft aria-hidden="true" />
+                </Button>
+              </Tooltip>
             </div>
             <div className={cn("lightbox-side", !interactive && "invisible")} data-side="end">
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon"
-                className={GLASS_ROUND_BUTTON}
-                onClick={() => move("ArrowRight")}
-                aria-label="다음 이미지"
-                title="다음 이미지"
-                data-testid="image-lightbox-next"
-              >
-                <ChevronRight aria-hidden="true" />
-              </Button>
+              <Tooltip label="다음 이미지" side="bottom">
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  className={GLASS_ROUND_BUTTON}
+                  onClick={() => move("ArrowRight")}
+                  aria-label="다음 이미지"
+                  data-testid="image-lightbox-next"
+                >
+                  <ChevronRight aria-hidden="true" />
+                </Button>
+              </Tooltip>
             </div>
           </>
         ) : null}
@@ -696,19 +701,20 @@ export function ImageLightbox({
               className="glass lightbox-capsule rounded-full"
             >
               <div className="lightbox-zoom-group">
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon"
-                  className="aria-disabled:opacity-50"
-                  aria-label={formatMessage("timeline.lightbox.zoomOut")}
-                  aria-disabled={photoNode !== null && zoom.zoomed ? undefined : true}
-                  title={formatMessage("timeline.lightbox.zoomOut")}
-                  data-testid="image-lightbox-zoom-out"
-                  onClick={() => zoom.step(-1)}
-                >
-                  <Minus aria-hidden="true" />
-                </Button>
+                <Tooltip label={formatMessage("timeline.lightbox.zoomOut")} side="bottom">
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    className="aria-disabled:opacity-50"
+                    aria-label={formatMessage("timeline.lightbox.zoomOut")}
+                    aria-disabled={photoNode !== null && zoom.zoomed ? undefined : true}
+                    data-testid="image-lightbox-zoom-out"
+                    onClick={() => zoom.step(-1)}
+                  >
+                    <Minus aria-hidden="true" />
+                  </Button>
+                </Tooltip>
                 <span
                   role="status"
                   data-numeric
@@ -717,19 +723,20 @@ export function ImageLightbox({
                 >
                   {zoom.label}
                 </span>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon"
-                  className="aria-disabled:opacity-50"
-                  aria-label={formatMessage("timeline.lightbox.zoomIn")}
-                  aria-disabled={photoNode === null || zoom.maxed ? true : undefined}
-                  title={formatMessage("timeline.lightbox.zoomIn")}
-                  data-testid="image-lightbox-zoom-in"
-                  onClick={() => zoom.step(1)}
-                >
-                  <Plus aria-hidden="true" />
-                </Button>
+                <Tooltip label={formatMessage("timeline.lightbox.zoomIn")} side="bottom">
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    className="aria-disabled:opacity-50"
+                    aria-label={formatMessage("timeline.lightbox.zoomIn")}
+                    aria-disabled={photoNode === null || zoom.maxed ? true : undefined}
+                    data-testid="image-lightbox-zoom-in"
+                    onClick={() => zoom.step(1)}
+                  >
+                    <Plus aria-hidden="true" />
+                  </Button>
+                </Tooltip>
                 {multi ? <span aria-hidden="true" className="mx-1 h-4 w-px bg-line-strong" /> : null}
               </div>
               {multi ? (

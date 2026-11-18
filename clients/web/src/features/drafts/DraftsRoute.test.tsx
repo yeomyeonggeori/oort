@@ -257,7 +257,7 @@ describe("초안 패널 (#1901)", () => {
     expect(host.querySelector('[role="toolbar"]')).toBeNull();
     const menu = host.querySelector('[data-testid="draft-row-menu"]');
     expect(menu?.className).toContain("hover:text-ink");
-    expect(menu?.parentElement?.className).toContain("bg-surface-raised");
+    expect(menu?.closest("div")?.className).toContain("bg-surface-raised");
   });
 
   it("행을 누르면 그 채널로 가고 컴포저가 초안을 읽는다", async () => {

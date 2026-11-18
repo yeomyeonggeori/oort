@@ -11,6 +11,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/design/ui/dropdown-menu";
+import { Tooltip } from "@/design/ui/tooltip";
 
 // =============================================================================
 // 보내기 옆 ▾ 반쪽과 예약 메뉴 (UI 명세 1.1·1.3, ADR-0208 D16, #4215).
@@ -116,33 +117,34 @@ export function ScheduleSendMenu({
         }}
         modal={false}
       >
-        <DropdownMenuTrigger asChild>
-          <button
-            ref={triggerRef}
-            type="button"
-            className={triggerClass}
-            aria-label={SCHEDULED_COPY.trigger.label}
-            aria-haspopup="menu"
-            aria-expanded={open}
-            aria-disabled={blocked || undefined}
-            aria-busy={busy || undefined}
-            aria-describedby={blocked ? reasonId : undefined}
-            title={blocked ? (blockedTitle ?? undefined) : undefined}
-            data-testid={`${testIdPrefix}-schedule-trigger`}
-            onKeyDown={(event: KeyboardEvent<HTMLButtonElement>) => {
-              // 키보드의 누름이 이유를 말한다(Radix가 같은 키로 열려 하지만 `onOpenChange`가 막았다).
-              if (!blocked) return;
-              if (event.key !== "Enter" && event.key !== " " && event.key !== "ArrowDown") return;
-              onBlockedPress();
-            }}
-            onClick={(event) => {
-              // 마우스·손가락의 누름만 센다. 키보드의 클릭(detail 0)은 위 `onKeyDown`이 이미 말했다.
-              if (blocked && event.detail > 0) onBlockedPress();
-            }}
-          >
-            <ChevronDown className="size-4" aria-hidden="true" />
-          </button>
-        </DropdownMenuTrigger>
+        <Tooltip label={blocked ? (blockedTitle ?? undefined) : undefined} side="bottom">
+          <DropdownMenuTrigger asChild>
+            <button
+              ref={triggerRef}
+              type="button"
+              className={triggerClass}
+              aria-label={SCHEDULED_COPY.trigger.label}
+              aria-haspopup="menu"
+              aria-expanded={open}
+              aria-disabled={blocked || undefined}
+              aria-busy={busy || undefined}
+              aria-describedby={blocked ? reasonId : undefined}
+              data-testid={`${testIdPrefix}-schedule-trigger`}
+              onKeyDown={(event: KeyboardEvent<HTMLButtonElement>) => {
+                // 키보드의 누름이 이유를 말한다(Radix가 같은 키로 열려 하지만 `onOpenChange`가 막았다).
+                if (!blocked) return;
+                if (event.key !== "Enter" && event.key !== " " && event.key !== "ArrowDown") return;
+                onBlockedPress();
+              }}
+              onClick={(event) => {
+                // 마우스·손가락의 누름만 센다. 키보드의 클릭(detail 0)은 위 `onKeyDown`이 이미 말했다.
+                if (blocked && event.detail > 0) onBlockedPress();
+              }}
+            >
+              <ChevronDown className="size-4" aria-hidden="true" />
+            </button>
+          </DropdownMenuTrigger>
+        </Tooltip>
         <DropdownMenuContent
           ref={contentRef}
           side="top"

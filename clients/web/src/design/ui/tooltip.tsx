@@ -1,8 +1,9 @@
 import * as React from "react";
+import { createPortal } from "react-dom";
 import { cn } from "@/design/lib/cn";
 import { tooltipGroup } from "./tooltipGroup";
 import { TOOLTIP_DELAY_MS, TOOLTIP_MOTION } from "@/design/motion";
-import { fitTooltipElement } from "./tooltipFit";
+import { fitTooltipElement, TOOLTIP_EDGE_PAD } from "./tooltipFit";
 
 // 공용 툴팁 (#4324). Buzz `shared/ui/tooltip.tsx`의 동작을 우리 토큰으로 옮긴 것이다.
 //
@@ -30,13 +31,18 @@ import { fitTooltipElement } from "./tooltipFit";
 //   · 자기를 가둔 판 안에 머문다(#4230). 툴팁은 포털이 아니라 이 자리에 그려지므로 판이 `overflow: clip`이면 가장자리를 넘는 글자가
 //     잘린다. 열릴 때 한 번 재서 판(과 창) 안으로 밀어 넣고, 판보다 넓으면 판 폭에서 줄바꿈한다(`tooltipFit.ts`).
 
-export type TooltipSide = "top" | "bottom";
+/**
+ * `right`는 트리거 오른쪽 바깥에 한 줄로 서고, 자르는 조상(좁은 레일의 `overflow-x-hidden` 등) 밖으로 나가려고 `document.body`로 그린다(#5779).
+ * 위치는 열릴 때 한 번 재어 CSS 변수로 넘긴다(`--tooltip-x`·`--tooltip-y`, `tooltip-surface[data-fixed]`가 읽는다). `top`·`bottom`의 동작은 그대로다.
+ */
+export type TooltipSide = "top" | "bottom" | "right";
 
 /** 트리거 기준 가로 정렬. `end`는 오른쪽 끝을 트리거 오른쪽 끝에 맞춘다(가장자리 단추의 툴팁이 잘리지 않게). */
 export type TooltipAlign = "center" | "end";
 
 interface TooltipProps {
-  label: string;
+  /** 비었거나(`undefined`·`""`) 없으면 툴팁은 뜨지 않고 감싸개만 남는다(이유가 있을 때만 이름이 있는 단추: 막힘 사유 등). */
+  label: string | undefined;
   side?: TooltipSide;
   align?: TooltipAlign;
   /** 처음부터 떠 있게 한다(갤러리·캡처 전용). 평소는 가리키거나 키보드 초점일 때만 뜬다. */
@@ -57,6 +63,7 @@ export const TOOLTIP_END_CLASS = "left-auto right-0 translate-x-0";
 export const TOOLTIP_SIDE_CLASS: Record<TooltipSide, string> = {
   top: "bottom-full mb-1",
   bottom: "top-full mt-1",
+  right: "",
 };
 
 function isKeyboardFocus(target: EventTarget): boolean {
@@ -77,16 +84,31 @@ export function Tooltip({
   className,
   children,
 }: TooltipProps) {
-  const [open, setOpen] = React.useState(defaultOpen);
+  const enabled = label !== undefined && label !== "";
+  const [open, setOpen] = React.useState(defaultOpen && enabled);
   // 초점이 나가며 닫힌 툴팁이 숨긴 채 남아 있는 한 박자(머리말 「보이는 닫힘은 즉시다」). 보이는지는 `open`만 정한다.
   const [leaving, setLeaving] = React.useState(false);
   const timer = React.useRef<ReturnType<typeof setTimeout> | null>(null);
   const tipRef = React.useRef<HTMLSpanElement>(null);
+  const wrapRef = React.useRef<HTMLSpanElement>(null);
 
   // 그려진 뒤 칠하기 전에 잰다: 한 프레임도 가장자리를 넘은 채로 보이지 않는다.
   React.useLayoutEffect(() => {
-    if (open && tipRef.current !== null) fitTooltipElement(tipRef.current, align);
-  }, [open, label, align]);
+    const tip = tipRef.current;
+    if (!open || tip === null) return;
+    if (side !== "right") {
+      fitTooltipElement(tip, align);
+      return;
+    }
+    const anchor = wrapRef.current;
+    if (anchor === null) return;
+    const box = anchor.getBoundingClientRect();
+    const pad = TOOLTIP_EDGE_PAD;
+    const x = Math.min(box.right + pad, Math.max(pad, window.innerWidth - tip.offsetWidth - pad));
+    const y = Math.min(Math.max(pad, box.top + box.height / 2 - tip.offsetHeight / 2), Math.max(pad, window.innerHeight - tip.offsetHeight - pad));
+    tip.style.setProperty("--tooltip-x", String(Math.round(x)));
+    tip.style.setProperty("--tooltip-y", String(Math.round(y)));
+  }, [open, label, align, side]);
 
   const clear = React.useCallback(() => {
     if (timer.current !== null) {
@@ -122,11 +144,36 @@ export function Tooltip({
   }, [open]);
   React.useEffect(() => tooltipGroup.attach(), []);
 
+  const renderTip = () => {
+    const fixed = side === "right";
+    const tip = (
+      <span
+        ref={tipRef}
+        hidden={!open}
+        aria-hidden="true"
+        // 숨긴 채 남은 한 박자의 노드는 「툴팁」으로 세지 않는다: 시험·게이트·캡처의 `[data-testid="tooltip"]`은 보이는 것만 본다.
+        data-testid={open ? "tooltip" : undefined}
+        data-tooltip-leaving={open ? undefined : ""}
+        data-side={side}
+        data-fixed={fixed ? "" : undefined}
+        className={
+          fixed
+            ? cn("tooltip-surface layer-content-float text-meta", TOOLTIP_MOTION)
+            : cn(TOOLTIP_CLASS, TOOLTIP_SIDE_CLASS[side], TOOLTIP_MOTION, align === "end" && TOOLTIP_END_CLASS)
+        }
+      >
+        {label}
+      </span>
+    );
+    return fixed ? createPortal(tip, document.body) : tip;
+  };
+
   return (
     <span
+      ref={wrapRef}
       className={cn("relative inline-flex", className)}
       onPointerEnter={(event) => {
-        if (event.pointerType === "touch") return;
+        if (event.pointerType === "touch" || !enabled) return;
         clear();
         const wait = tooltipGroup.delayFor(delayMs);
         if (wait <= 0) {
@@ -141,7 +188,7 @@ export function Tooltip({
       onPointerLeave={close}
       onPointerDown={close}
       onFocus={(event) => {
-        if (!isKeyboardFocus(event.target)) return;
+        if (!enabled || !isKeyboardFocus(event.target)) return;
         clear();
         setOpen(true);
       }}
@@ -151,20 +198,7 @@ export function Tooltip({
       }}
     >
       {children}
-      {(open || leaving) && (
-        <span
-          ref={tipRef}
-          hidden={!open}
-          aria-hidden="true"
-          // 숨긴 채 남은 한 박자의 노드는 「툴팁」으로 세지 않는다: 시험·게이트·캡처의 `[data-testid="tooltip"]`은 보이는 것만 본다.
-          data-testid={open ? "tooltip" : undefined}
-          data-tooltip-leaving={open ? undefined : ""}
-          data-side={side}
-          className={cn(TOOLTIP_CLASS, TOOLTIP_SIDE_CLASS[side], TOOLTIP_MOTION, align === "end" && TOOLTIP_END_CLASS)}
-        >
-          {label}
-        </span>
-      )}
+      {enabled && (open || leaving) && renderTip()}
     </span>
   );
 }

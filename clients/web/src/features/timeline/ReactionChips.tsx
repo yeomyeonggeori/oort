@@ -8,6 +8,7 @@ import {
   formatReactionNames,
   reactionChipAccessibleName,
 } from "@momo/core/features/timeline/reactionNames";
+import { Tooltip } from "@/design/ui/tooltip";
 
 // =============================================================================
 // Reaction chips (B11) — the row of 👍 3 under a message.
@@ -66,19 +67,20 @@ export function ReactionChips({
         // with no reactions the entry point is the action bar (or the long-press
         // sheet); putting a permanent 「+」 under every message would draw a
         // control on every row of the channel to serve the rare one.
-        <button
-          type="button"
-          disabled={disabled}
-          data-testid="reaction-add"
-          data-row-action=""
-          aria-label="다른 반응 고르기"
-          title="다른 반응 고르기"
-          onClick={(event) => onOpenPicker(event.currentTarget)}
-          // 칩과 같은 높이(`control-sm` 28)의 원, 흐린 바탕, 테두리 없음 (#4879).
-          className="tap-target flex size-control-sm items-center justify-center rounded-full bg-surface-muted text-ink-muted press hover:bg-surface-hover focus-visible:focus-ring disabled:opacity-50"
-        >
-          <Smile className="size-4" aria-hidden="true" />
-        </button>
+        <Tooltip label="다른 반응 고르기" side="bottom">
+          <button
+            type="button"
+            disabled={disabled}
+            data-testid="reaction-add"
+            data-row-action=""
+            aria-label="다른 반응 고르기"
+            onClick={(event) => onOpenPicker(event.currentTarget)}
+            // 칩과 같은 높이(`control-sm` 28)의 원, 흐린 바탕, 테두리 없음 (#4879).
+            className="tap-target flex size-control-sm items-center justify-center rounded-full bg-surface-muted text-ink-muted press hover:bg-surface-hover focus-visible:focus-ring disabled:opacity-50"
+          >
+            <Smile className="size-4" aria-hidden="true" />
+          </button>
+        </Tooltip>
       )}
     </div>
   );

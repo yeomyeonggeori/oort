@@ -121,6 +121,7 @@ import {
   toggleDockFullscreen,
   useDockState,
 } from "./dockState";
+import { Tooltip } from "@/design/ui/tooltip";
 
 // Reading this as: 로컬 터미널 도크(⌃`) for internal team users on Tauri desktop,
 // density 7/10, motion 0/10.
@@ -1278,19 +1279,20 @@ const DockIconButton = forwardRef<HTMLButtonElement, DockIconButtonProps>(functi
   ref
 ) {
   return (
-    <button
-      ref={ref}
-      type="button"
-      aria-label={label}
-      aria-keyshortcuts={aria}
-      aria-pressed={pressed}
-      title={`${label} (${keycap})`}
-      data-testid={testId}
-      className="inline-flex size-control-sm shrink-0 items-center justify-center rounded-md text-ink-muted press hover:bg-surface-hover hover:text-ink focus-visible:focus-ring [&_svg]:size-4"
-      {...rest}
-    >
-      {children}
-    </button>
+    <Tooltip label={`${label} (${keycap})`} side="top">
+      <button
+        ref={ref}
+        type="button"
+        aria-label={label}
+        aria-keyshortcuts={aria}
+        aria-pressed={pressed}
+        data-testid={testId}
+        className="inline-flex size-control-sm shrink-0 items-center justify-center rounded-md text-ink-muted press hover:bg-surface-hover hover:text-ink focus-visible:focus-ring [&_svg]:size-4"
+        {...rest}
+      >
+        {children}
+      </button>
+    </Tooltip>
   );
 });
 
