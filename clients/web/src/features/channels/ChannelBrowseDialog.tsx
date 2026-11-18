@@ -121,7 +121,7 @@ function BrowseRow({
               {row.name}
             </span>
             {row.isDefault && !gone && (
-              <span className={cn(CHIP_CLASS, "bg-surface-muted text-ink-muted")} data-testid="channel-browse-default">
+              <span className={cn(CHIP_CLASS, "bg-muted-soft text-ink-muted")} data-testid="channel-browse-default">
                 {formatMessage("channels.browse.default")}
               </span>
             )}
