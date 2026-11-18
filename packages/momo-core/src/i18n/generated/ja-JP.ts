@@ -770,6 +770,16 @@ export const catalog: MessageCatalog = {
       "value": "承認すると画像を一度取得して確認し、チームライブラリに登録します。"
     }
   ],
+  "timeline.addMember.createdDescriptionPublic": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " チャンネルを作成しました。ワークスペースの正式メンバーなら誰でも、チャンネル一覧から見つけて参加できます。"
+    }
+  ],
   "timeline.approval.channelAgentIn": [
     {
       "type": 0,

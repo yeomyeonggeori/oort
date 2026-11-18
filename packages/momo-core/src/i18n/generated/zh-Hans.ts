@@ -778,6 +778,20 @@ export const catalog: MessageCatalog = {
       "value": "批准后会获取一次图片，检查后登记到团队素材库。"
     }
   ],
+  "timeline.addMember.createdDescriptionPublic": [
+    {
+      "type": 0,
+      "value": "已创建 "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " 频道。工作区的任何正式成员都可以在浏览频道中找到并加入。"
+    }
+  ],
   "timeline.approval.channelAgentIn": [
     {
       "type": 0,

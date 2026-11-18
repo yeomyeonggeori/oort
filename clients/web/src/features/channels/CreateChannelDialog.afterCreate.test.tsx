@@ -234,14 +234,14 @@ describe("채널을 만든 직후 머리의 멤버 수 (#5784)", () => {
 });
 
 describe("채널을 만들면 「멤버 추가」가 이어서 뜬다 (#5784)", () => {
-  it("공개 채널도 「멤버 추가」를 잇는다 — 설명은 공개 채널의 뜻(앞으로 들어오는 사람은 자동)을 말한다", async () => {
+  it("공개 채널도 「멤버 추가」를 잇는다 — 설명은 공개 채널의 뜻(정식 멤버가 채널 둘러보기에서 찾아 참여)을 말하고 「자동으로 들어온다」고 하지 않는다", async () => {
     await mount();
     await createAs("public");
     expect(q("create-channel-dialog")).toBeNull();
     expect(q("add-channel-member-dialog")).not.toBeNull();
     expect(text("add-member-description")).toContain("ops-room");
-    expect(text("add-member-description")).toContain("public channel");
-    expect(text("add-member-description")).toContain("added automatically");
+    expect(text("add-member-description")).toContain("channel browser");
+    expect(text("add-member-description")).not.toContain("automatically");
     expect(text("add-member-description")).not.toContain("private");
     expect(text("add-member-close")).toBe("Later");
   });

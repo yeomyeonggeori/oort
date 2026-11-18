@@ -1,5 +1,6 @@
 {
   "timeline.createChannel.publicDetail": "ワークスペースの正式メンバーなら誰でも、チャンネル一覧から見つけて参加できます。",
+  "timeline.addMember.createdDescriptionPublic": "{name} チャンネルを作成しました。ワークスペースの正式メンバーなら誰でも、チャンネル一覧から見つけて参加できます。",
   "timeline.channelLeave.bodyPublicBrowse": "{name} がサイドバーから消えます。チャンネル一覧からいつでも戻れます。",
   "timeline.approval.channelNeedsMember": "先にこのチャンネルにエージェントをメンバーとして追加してください。",
   "timeline.approval.channelAgentIn": "このエージェントはすでにこのチャンネルに入っています。",

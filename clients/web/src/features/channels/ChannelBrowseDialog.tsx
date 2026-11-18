@@ -26,6 +26,7 @@ import { Button } from "@/design/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/design/ui/dialog";
 import { Input } from "@/design/ui/input";
 import { cn } from "@/design/lib/cn";
+import { applyKeyboardModality } from "@/design/focusModality";
 import { CHIP_CLASS } from "@/features/common/chip";
 import { EmptyInvite, InlineBanner, Skeleton } from "@/features/common/States";
 import { useOffline } from "@/features/common/useOffline";
@@ -394,6 +395,8 @@ function ChannelBrowsePanel({
     const next = event.key === "ArrowDown" ? Math.min(at + 1, stops.length - 1) : Math.max(at - 1, 0);
     if (next === at) return;
     event.preventDefault();
+    // 글 입력 칸 안의 화살표는 키보드 이동으로 치지 않으므로(focusModality.ts), 이 창이 초점을 직접 옮기는 자리에서 스탬프를 올려요(#5958).
+    applyKeyboardModality(document);
     stops[next].focus();
   }, []);
 

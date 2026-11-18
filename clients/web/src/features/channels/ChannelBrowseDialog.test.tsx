@@ -11,6 +11,7 @@ import type { BrowseChannel } from "@momo/core/features/channels/browse";
 import enChannels from "@momo/core/i18n/catalogs/en-US/channels.json";
 import { SessionProvider, type SessionContextValue } from "@/app/session";
 import { rosterQueryKey } from "@/features/workspace/useWorkspace";
+import { FOCUS_MODALITY_ATTRIBUTE, applyFocusModality } from "@/design/focusModality";
 import { ChannelBrowseProvider } from "./ChannelBrowseDialog";
 import { useOpenChannelBrowse } from "./useChannelBrowse";
 
@@ -274,6 +275,21 @@ describe("채널 둘러보기 창", () => {
       await Promise.resolve();
     });
     expect(core.joinChannel).toHaveBeenCalledWith(WS, id(12));
+  });
+
+  // #5958 (5842-H1): 입력 방식 스탬프는 글 입력 칸 안의 화살표를 키보드 이동으로 치지 않는다(focusModality.ts). 이 창이 ↑↓ 로 초점을
+  // 줄 단추에 옮기는 자리에서 스탬프를 올리지 않으면, 마우스로 연 뒤 첫 ↓ 의 단추에는 고리가 서지 않는다(`outline-style: none`).
+  it("마우스로 연 창에서 찾기 칸의 ↓ 가 초점을 줄 단추로 옮기면 입력 방식이 keyboard 로 올라간다", async () => {
+    core.browseChannels.mockResolvedValue({ channels: [row(11, "출시-준비")] });
+    await mountAndOpen();
+    applyFocusModality(document, "pointer");
+    const input = document.querySelector<HTMLInputElement>('[data-testid="channel-browse-search"]')!;
+    input.focus();
+    act(() => {
+      input.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true, cancelable: true }));
+    });
+    expect(document.activeElement?.getAttribute("data-testid")).toBe("channel-browse-join");
+    expect(document.documentElement.getAttribute(FOCUS_MODALITY_ATTRIBUTE)).toBe("keyboard");
   });
 
   it("조합 중인 글자는 서버에 보내지 않고, 받은 줄을 마지막 글자까지 느슨하게 좁힌다", async () => {

@@ -10966,7 +10966,7 @@ export const catalog: MessageCatalog = {
     },
     {
       "type": 0,
-      "value": ". It's a public channel, so people who join the workspace later are added automatically."
+      "value": ". Any full member of the workspace can find it in the channel browser and join."
     }
   ],
   "timeline.addMember.later": [

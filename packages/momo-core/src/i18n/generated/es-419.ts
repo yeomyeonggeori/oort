@@ -820,6 +820,20 @@ export const catalog: MessageCatalog = {
       "value": "Al aprobar, la imagen se obtiene una vez, se revisa y se registra en la biblioteca del equipo."
     }
   ],
+  "timeline.addMember.createdDescriptionPublic": [
+    {
+      "type": 0,
+      "value": "Se creó "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": ". Cualquier miembro completo del espacio de trabajo puede encontrarlo al explorar canales y unirse."
+    }
+  ],
   "timeline.approval.channelAgentIn": [
     {
       "type": 0,
