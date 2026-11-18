@@ -15,6 +15,7 @@ import type { Expression } from "@momo/core/features/expressions/types";
 import { ContextMenu, ContextMenuContent, ContextMenuTrigger } from "@/design/ui/context-menu";
 import { useFormatMessage } from "@/i18n/useFormatMessage";
 import { ExpressionImage } from "./ExpressionImage";
+import { Tooltip } from "@/design/ui/tooltip";
 
 // =============================================================================
 // 이모티콘·GIF 탭의 그림 격자와 세트 띠 (owner 2026-11-07, #5453). 카카오톡처럼 **그림만** 보인다: 이름·`:코드:`·안내 글이 격자에 없다
@@ -153,28 +154,29 @@ export function ExpressionGrid({ sections, empty, cellLabel, disabled, onPick, m
                 const isHere = here.section === sectionIndex && here.index === index;
                 return (
                   <ContextMenu key={item.id}>
-                    <ContextMenuTrigger asChild>
-                      <button
-                        type="button"
-                        disabled={disabled}
-                        tabIndex={isHere ? 0 : -1}
-                        aria-label={cellLabel(item)}
-                        title={item.displayName}
-                        data-manage={item.id}
-                        data-pos={`${position.section}:${position.index}`}
-                        className="expression-grid-cell tap-target flex aspect-square w-full items-center justify-center overflow-hidden rounded-sm p-1 press hover:bg-surface-hover focus-visible:focus-ring disabled:opacity-50"
-                        onFocus={() => setActive(position)}
-                        onClick={() => onPick(item)}
-                        onKeyDown={(event) => {
-                          if (!isContextMenuSummonKey(event)) return;
-                          // 브라우저의 네이티브 소환을 막고 같은 문으로 들어간다. 막지 않으면 같은 한 번의 키가 메뉴를 두 번 연다.
-                          event.preventDefault();
-                          summonAt(event.currentTarget);
-                        }}
-                      >
-                        <ExpressionImage item={item} size="medium" still />
-                      </button>
-                    </ContextMenuTrigger>
+                    <Tooltip label={item.displayName} side="bottom" className="flex w-full">
+                      <ContextMenuTrigger asChild>
+                        <button
+                          type="button"
+                          disabled={disabled}
+                          tabIndex={isHere ? 0 : -1}
+                          aria-label={cellLabel(item)}
+                          data-manage={item.id}
+                          data-pos={`${position.section}:${position.index}`}
+                          className="expression-grid-cell tap-target flex aspect-square w-full items-center justify-center overflow-hidden rounded-sm p-1 press hover:bg-surface-hover focus-visible:focus-ring disabled:opacity-50"
+                          onFocus={() => setActive(position)}
+                          onClick={() => onPick(item)}
+                          onKeyDown={(event) => {
+                            if (!isContextMenuSummonKey(event)) return;
+                            // 브라우저의 네이티브 소환을 막고 같은 문으로 들어간다. 막지 않으면 같은 한 번의 키가 메뉴를 두 번 연다.
+                            event.preventDefault();
+                            summonAt(event.currentTarget);
+                          }}
+                        >
+                          <ExpressionImage item={item} size="medium" still />
+                        </button>
+                      </ContextMenuTrigger>
+                    </Tooltip>
                     <ContextMenuContent onCloseAutoFocus={onMenuCloseAutoFocus}>{menu(item)}</ContextMenuContent>
                   </ContextMenu>
                 );
@@ -189,18 +191,18 @@ export function ExpressionGrid({ sections, empty, cellLabel, disabled, onPick, m
             const Icon = SECTION_ICON[section.kind];
             const first = section.items[0];
             return (
-              <button
-                key={section.id}
-                type="button"
-                aria-label={nameOf(section)}
-                title={nameOf(section)}
-                aria-current={markedId === section.id}
-                data-strip={section.id}
-                className="expression-set-button tap-target flex size-control shrink-0 items-center justify-center overflow-hidden rounded-sm p-1 press hover:bg-surface-hover focus-visible:focus-ring"
-                onClick={() => jump(section.id)}
-              >
-                {Icon ? <Icon aria-hidden="true" className="size-4" /> : first ? <ExpressionImage item={first} size="medium" still /> : null}
-              </button>
+              <Tooltip key={section.id} label={nameOf(section)} side="bottom">
+                <button
+                  type="button"
+                  aria-label={nameOf(section)}
+                  aria-current={markedId === section.id}
+                  data-strip={section.id}
+                  className="expression-set-button tap-target flex size-control shrink-0 items-center justify-center overflow-hidden rounded-sm p-1 press hover:bg-surface-hover focus-visible:focus-ring"
+                  onClick={() => jump(section.id)}
+                >
+                  {Icon ? <Icon aria-hidden="true" className="size-4" /> : first ? <ExpressionImage item={first} size="medium" still /> : null}
+                </button>
+              </Tooltip>
             );
           })}
         </div>

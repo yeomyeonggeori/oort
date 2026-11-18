@@ -7,6 +7,7 @@ import {
   attachmentDisplayName,
   type MessageAttachment,
 } from "@momo/core/features/attachments/model";
+import { Tooltip } from "@/design/ui/tooltip";
 
 // 타임라인 카드와 라이트박스가 같은 내려받기 상태를 쓴다. 바쁜 동안에도 버튼을
 // 비활성화하지 않는 이유는 AttachmentList의 기존 계약 그대로다: 비활성은
@@ -48,36 +49,37 @@ export function AttachmentDownloadButton({
   };
 
   return (
-    <button
-      type="button"
-      aria-busy={busy || undefined}
-      onClick={() => {
-        // 두 번 누르면 두 번 받는다. 막는 대신 같은 요청을 다시 보내지 않게만
-        // 한다. 비활성화는 포커스를 <body>로 던지고 돌려주지 않는다.
-        if (busy) return;
-        onStarted?.();
-        setBusy(true);
-        void downloadAttachment(workspaceId, channelId, attachment)
-          .catch(() => onFailed?.())
-          .finally(() => setBusy(false));
-      }}
-      aria-label={`${attachmentDisplayName(attachment)} ${ATTACH_COPY.download}`}
-      title={busy ? ATTACH_COPY.downloading : ATTACH_COPY.download}
-      data-testid="attachment-download"
-      data-busy={busy ? "" : undefined}
-      data-row-action={joinsMessageRow ? "" : undefined}
-      className={cn(
-        tapTarget ? "tap-target" : "touch-target",
-        "flex size-control shrink-0 items-center justify-center rounded-sm text-ink-muted",
-        "press hover:bg-surface-hover hover:text-ink focus-visible:focus-ring",
-        className
-      )}
-    >
-      {busy ? (
-        <Loader2 aria-hidden="true" className="size-4 spinner-busy" />
-      ) : (
-        <Download aria-hidden="true" className="size-4" />
-      )}
-    </button>
+    <Tooltip label={busy ? ATTACH_COPY.downloading : ATTACH_COPY.download} side="bottom">
+      <button
+        type="button"
+        aria-busy={busy || undefined}
+        onClick={() => {
+          // 두 번 누르면 두 번 받는다. 막는 대신 같은 요청을 다시 보내지 않게만
+          // 한다. 비활성화는 포커스를 <body>로 던지고 돌려주지 않는다.
+          if (busy) return;
+          onStarted?.();
+          setBusy(true);
+          void downloadAttachment(workspaceId, channelId, attachment)
+            .catch(() => onFailed?.())
+            .finally(() => setBusy(false));
+        }}
+        aria-label={`${attachmentDisplayName(attachment)} ${ATTACH_COPY.download}`}
+        data-testid="attachment-download"
+        data-busy={busy ? "" : undefined}
+        data-row-action={joinsMessageRow ? "" : undefined}
+        className={cn(
+          tapTarget ? "tap-target" : "touch-target",
+          "flex size-control shrink-0 items-center justify-center rounded-sm text-ink-muted",
+          "press hover:bg-surface-hover hover:text-ink focus-visible:focus-ring",
+          className
+        )}
+      >
+        {busy ? (
+          <Loader2 aria-hidden="true" className="size-4 spinner-busy" />
+        ) : (
+          <Download aria-hidden="true" className="size-4" />
+        )}
+      </button>
+    </Tooltip>
   );
 }

@@ -7,6 +7,7 @@ import {
   titlebarDragProps,
 } from "@/app/sidebarPane";
 import { keyPlatformOf } from "@momo/core/features/workbench/keymap";
+import { Tooltip } from "@/design/ui/tooltip";
 
 /**
  * 앱 상단 줄 (#1864). 토글은 사이드바 안이 아니라 여기 한 자리에 산다: 접혀도
@@ -59,23 +60,24 @@ export function AppTitlebar({
     >
       {/* 접기 단추는 모든 탭에서 같은 자리·같은 모양이다(#3280): 「내 작업」에서 단추를 숨기던
           예외가 없다. 상태는 아이콘이 아니라 aria-expanded와 툴팁 문구가 말한다. */}
-      <button
-        ref={toggleRef}
-        type="button"
-        onClick={handleToggle}
-        onFocus={onToggleFocus}
-        onBlur={onToggleBlur}
-        onPointerDown={(event) => event.stopPropagation()}
-        aria-label={copy.label}
-        aria-expanded={copy.expanded}
-        aria-controls={controls}
-        title={`${copy.label} (${keyHint})`}
-        aria-keyshortcuts={platformIsMac ? "Meta+B" : "Control+B"}
-        data-testid="sidebar-toggle"
-        className="flex size-control-sm shrink-0 items-center justify-center rounded-md text-ink-muted press hover:bg-surface-hover focus-visible:focus-ring"
-      >
-        <PanelLeft className="size-4" aria-hidden="true" />
-      </button>
+      <Tooltip label={`${copy.label} (${keyHint})`} side="bottom">
+        <button
+          ref={toggleRef}
+          type="button"
+          onClick={handleToggle}
+          onFocus={onToggleFocus}
+          onBlur={onToggleBlur}
+          onPointerDown={(event) => event.stopPropagation()}
+          aria-label={copy.label}
+          aria-expanded={copy.expanded}
+          aria-controls={controls}
+          aria-keyshortcuts={platformIsMac ? "Meta+B" : "Control+B"}
+          data-testid="sidebar-toggle"
+          className="flex size-control-sm shrink-0 items-center justify-center rounded-md text-ink-muted press hover:bg-surface-hover focus-visible:focus-ring"
+        >
+          <PanelLeft className="size-4" aria-hidden="true" />
+        </button>
+      </Tooltip>
       {/* 오른쪽 끝 자리(#4591): 칸 자신도 끌기 영역이라 단추 사이 틈도 창을 옮긴다. 단추는 속성이 없다. */}
       {IS_TAURI && (
         <div

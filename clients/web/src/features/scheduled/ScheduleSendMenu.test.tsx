@@ -8,6 +8,7 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vite
 import { scheduleGate, type ScheduleGate } from "@momo/core/features/scheduled/gate";
 import { scheduledPresets, scheduledZoneLine } from "@momo/core/features/scheduled/presets";
 import { ScheduleSendMenu, type ScheduleSendMenuProps } from "./ScheduleSendMenu";
+import { tooltipTextOf } from "@/design/ui/tooltipTestKit";
 
 const copy = createCopy(SCHEDULED_COPY);
 
@@ -221,7 +222,7 @@ describe("막힌 ▾는 눌러서 이유를 듣는다", () => {
     await mount(blocked());
     expect(trigger().getAttribute("aria-disabled")).toBe("true");
     expect(trigger().hasAttribute("disabled")).toBe(false);
-    expect(trigger().getAttribute("title")).toBe(`${copy("disabled.quote.reason")}. ${copy("disabled.quote.next")}.`);
+    expect(tooltipTextOf(trigger())).toBe(`${copy("disabled.quote.reason")}. ${copy("disabled.quote.next")}.`);
     const reason = document.getElementById(trigger().getAttribute("aria-describedby") ?? "");
     expect(reason?.textContent).toBe(`${copy("disabled.quote.reason")}. ${copy("disabled.quote.next")}.`);
     expect(reason?.className).toContain("sr-only");
@@ -256,7 +257,7 @@ describe("막힌 ▾는 눌러서 이유를 듣는다", () => {
   it("오프라인처럼 이유 줄이 없는 사유는 앱의 오프라인 문장을 title에 싣고 낭독 노드를 따로 만들지 않는다", async () => {
     await mount(propsOf({ gate: gateOf({ offline: true }), blockedTitle: "연결이 끊겨 지금은 보낼 수 없습니다" }));
     expect(trigger().getAttribute("aria-disabled")).toBe("true");
-    expect(trigger().getAttribute("title")).toBe("연결이 끊겨 지금은 보낼 수 없습니다");
+    expect(tooltipTextOf(trigger())).toBe("연결이 끊겨 지금은 보낼 수 없습니다");
   });
 
   it("요청이 나는 동안(busy)은 aria-busy이고 열리지 않으며 이유도 말하지 않는다", async () => {

@@ -7,6 +7,7 @@ import { DesktopDownloadError } from "@/lib/tauri";
 import { DownloadButton } from "./DownloadButton";
 import { createDownloadsStore, type DownloadsStore } from "./downloadsStore";
 import { ATTACHMENT, bytes, fake, type Fake } from "./downloadsTestKit";
+import { tooltipTextOf } from "@/design/ui/tooltipTestKit";
 
 // =============================================================================
 // 상단 오른쪽 다운로드 단추와 패널 (#4587). 시험 대상: 단추 상태(없음·진행·완료 점), 웹에서 숨김,
@@ -317,7 +318,7 @@ describe("패널", () => {
     expect(row.getAttribute("data-phase")).toBe("done");
     expect(row.textContent).toContain("2분기 예산안 (1).pdf");
     expect(q("download-row-status", row)?.textContent).toBe("1000 B");
-    expect([...row.querySelectorAll("button")].map((b) => b.getAttribute("title"))).toEqual([
+    expect([...row.querySelectorAll("button")].map((b) => tooltipTextOf(b))).toEqual([
       "열기",
       "Finder에서 보기",
       "다시 다운로드",
@@ -359,7 +360,7 @@ describe("패널", () => {
     const row = qa("download-row")[0] as HTMLElement;
     expect(row.getAttribute("data-present")).toBe("false");
     expect(q("download-row-status", row)?.textContent).toBe("파일이 지워졌어요");
-    expect([...row.querySelectorAll("button")].map((b) => b.getAttribute("title"))).toEqual(["다시 다운로드"]);
+    expect([...row.querySelectorAll("button")].map((b) => tooltipTextOf(b))).toEqual(["다시 다운로드"]);
   });
 
   it("다시 다운로드는 같은 요청으로 새 건을 시작한다", async () => {
@@ -394,7 +395,7 @@ describe("패널", () => {
     const row = qa("download-row")[0] as HTMLElement;
     expect(row.getAttribute("data-phase")).toBe("failed");
     expect(q("download-row-status", row)?.textContent).toBe("연결이 끊겨 받지 못했어요. 연결을 확인하고 다시 시도하세요");
-    expect([...row.querySelectorAll("button")].map((b) => b.getAttribute("title"))).toEqual(["다시 시도"]);
+    expect([...row.querySelectorAll("button")].map((b) => tooltipTextOf(b))).toEqual(["다시 시도"]);
     await act(async () => {
       (q("download-action-retry") as HTMLElement).click();
       await Promise.resolve();

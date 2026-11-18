@@ -27,6 +27,7 @@ import {
   useRelaunchHold,
   useUpdateState,
 } from "./store";
+import { Tooltip } from "@/design/ui/tooltip";
 
 // =============================================================================
 // 프로필 줄의 「업데이트」 알약 + 진행 카드 (성재 결재 2026-10-16, Cursor 방식).
@@ -221,28 +222,27 @@ export function UpdateButton({ placement = "row" }: { placement?: "row" | "rail"
     >
       <PopoverAnchor virtualRef={rowRef} />
       <div className="group relative shrink-0" data-testid="update-pill-wrap">
-          <Button
-            ref={buttonRef}
-            type="button"
-            size="sm"
-            variant="secondary"
-            onClick={onPill}
-            aria-label={label}
-            aria-describedby={tooltip && !open && !rail ? tooltipId : undefined}
-            // 레일은 가로로 넘친 것을 자른다(`overflow-x-hidden`): 직접 그린 툴팁이 잘리므로 레일의 다른 타일처럼 `title`을 쓴다.
-            // 같은 문장은 접근 가능한 이름(`label`)에도 있다.
-            title={rail && tooltip ? tooltip : undefined}
-            aria-expanded={open}
-            aria-haspopup="dialog"
-            data-testid="update-pill"
-            data-placement={placement}
-            data-update-state={state.kind}
-            // 레일(56px)에서는 같은 채움 알약·같은 낱말을 레일 글자 크기(11px, 목적지 이름과 같다)로 줄여 세운다. 아이콘만 두면
-            // 창 오른쪽 위의 「내려받기」(같은 화살표)와 헷갈린다.
-            className={rail ? "h-control-sm px-1.5 text-timestamp" : "tap-target"}
-          >
-            업데이트
-          </Button>
+          <Tooltip label={rail ? (tooltip ?? undefined) : undefined} side="right">
+            <Button
+              ref={buttonRef}
+              type="button"
+              size="sm"
+              variant="secondary"
+              onClick={onPill}
+              aria-label={label}
+              aria-describedby={tooltip && !open && !rail ? tooltipId : undefined}
+              aria-expanded={open}
+              aria-haspopup="dialog"
+              data-testid="update-pill"
+              data-placement={placement}
+              data-update-state={state.kind}
+              // 레일(56px)에서는 같은 채움 알약·같은 낱말을 레일 글자 크기(11px, 목적지 이름과 같다)로 줄여 세운다. 아이콘만 두면
+              // 창 오른쪽 위의 「내려받기」(같은 화살표)와 헷갈린다.
+              className={rail ? "h-control-sm px-1.5 text-timestamp" : "tap-target"}
+            >
+              업데이트
+            </Button>
+          </Tooltip>
           {tooltip && !open && !rail && (
             <span
               id={tooltipId}

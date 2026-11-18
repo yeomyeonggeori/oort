@@ -727,7 +727,8 @@ async function assertDesktopSidebarFocusMode(page, size) {
       before.sidebarWidth === SIDEBAR_WIDTH &&
       before.titlebarHoldsToggle === true &&
       before.buttonName === "탐색 패널 접기" &&
-      before.buttonTitle === "탐색 패널 접기 (⌘B)" &&
+      before.buttonTitle === null && // 네이티브 title 없음(#5779): 눈으로 보는 이름은 공용 Tooltip이고 글은 AppTitlebar.test.tsx가 잰다
+      
       before.buttonHasIcon === true &&
       before.buttonControls === "sidebar-channel-pane" &&
       before.buttonExpanded === "true",
@@ -855,7 +856,8 @@ async function assertDesktopSidebarFocusMode(page, size) {
       collapsed.sidebarInert === false &&
       collapsed.focus === "sidebar-toggle" &&
       collapsed.buttonName === "탐색 패널 열기" &&
-      collapsed.buttonTitle === "탐색 패널 열기 (⌘B)" &&
+      collapsed.buttonTitle === null && // 위와 같다(#5779)
+      
       collapsed.buttonHasIcon === true &&
       collapsed.buttonControls === "sidebar-channel-pane" &&
       collapsed.buttonExpanded === "false",

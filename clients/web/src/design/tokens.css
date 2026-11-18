@@ -3148,6 +3148,14 @@
 
   /* 줄바꿈 상태: 한국어는 어절에서 꺾는다(`keep-all`, 「채/널」로 끊지 않는다). 끊을 곳 없는 긴 영문 이름은 앱 전체의 기본 규칙
    * (`:where(p, span, …) { overflow-wrap: anywhere }`, 툴팁도 span이라 상속한다)이 어디서든 꺾는다: 여기서 다시 적지 않는다. */
+  /* 오른쪽 바깥(#5779): 자르는 조상 밖(`document.body`)에서 창 기준으로 선다. 자리는 `Tooltip`이 열릴 때 잰 `--tooltip-x`·`--tooltip-y`(단위 없는 px). */
+  &[data-fixed] {
+    position: fixed;
+    left: calc(var(--tooltip-x, 0) * 1px);
+    top: calc(var(--tooltip-y, 0) * 1px);
+    margin-inline: 0;
+  }
+
   &[data-capped] {
     inline-size: max-content;
     max-inline-size: calc(var(--tooltip-max) * 1px);

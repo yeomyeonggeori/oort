@@ -53,6 +53,7 @@ import {
 } from "@momo/core/features/reminders/presets";
 import { RemindDialog } from "./RemindDialog";
 import { useReminderMutations, useReminders } from "./useReminders";
+import { Tooltip } from "@/design/ui/tooltip";
 
 // Reading this as: inbox docked reminder list for internal team users on
 // web+Tauri, density 7/10, motion 2/10. A5 draft-row grammar: flat rows,
@@ -436,18 +437,19 @@ function ReminderRow({
                   onOpenChange={setMenuOpen}
                   modal={false}
                 >
-                  <DropdownMenuTrigger asChild>
-                    <button
-                      type="button"
-                      aria-label="알림 메뉴"
-                      title="알림 메뉴"
-                      data-testid="reminder-row-menu"
-                      data-row-action="primary"
-                      className={overflowTriggerClass}
-                    >
-                      <MoreHorizontal className="size-4" />
-                    </button>
-                  </DropdownMenuTrigger>
+                  <Tooltip label="알림 메뉴" side="bottom">
+                    <DropdownMenuTrigger asChild>
+                      <button
+                        type="button"
+                        aria-label="알림 메뉴"
+                        data-testid="reminder-row-menu"
+                        data-row-action="primary"
+                        className={overflowTriggerClass}
+                      >
+                        <MoreHorizontal className="size-4" />
+                      </button>
+                    </DropdownMenuTrigger>
+                  </Tooltip>
                   <DropdownMenuContent
                     align="end"
                     data-testid="reminder-row-menu-panel"

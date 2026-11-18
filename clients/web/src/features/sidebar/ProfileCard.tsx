@@ -44,6 +44,7 @@ import {
 import { PresenceDndDialog } from "./PresenceDndDialog";
 import { SetStatusDialog } from "./SetStatusDialog";
 import { useCustomStatusView } from "./useCustomStatusView";
+import { Tooltip } from "@/design/ui/tooltip";
 
 // =============================================================================
 // Bottom identity card (UX-D4 #1756, buzz 36; #3574 Buzz-style foot). The trigger is
@@ -148,56 +149,61 @@ export function ProfileCard({
           setOpen(next);
         }}
       >
-        <DropdownMenuTrigger asChild>
-          {/* #3276: no `press` here. `.press:active` is `scale(0.98)`, and on a
-              row that holds an avatar, a name and a status emoji it shrank the
-              whole identity cluster by up to 4px on every click (measured with
-              scripts/capture-profile-jitter.mjs: hover, focus ring, menu open
-              and close are all 0px; the press is the only mover). The pressed
-              state is a fill (`press-instant-fill`), never geometry.
-              `tap-target` (44px under 600px) is the whole row now: the old
-              24×24 avatar-only hit sat next to a 44px gear (6b H2). The avatar
-              is 32px in the list-end row (24px in the rail); the badge stays on that span. */}
-          <button
-            ref={triggerRef}
-            type="button"
-            data-testid="profile-card"
-            aria-label={triggerName}
-            title={triggerName}
-            className={
-              compact
-                ? "flex size-rail-tile shrink-0 items-center justify-center rounded-md press-instant-fill hover:bg-surface-hover focus-visible:focus-ring"
-                : "sidebar-row tap-target min-w-0 flex-1 py-2 text-left press-instant-fill hover:bg-surface-hover data-[state=open]:bg-surface-hover focus-visible:focus-ring"
-            }
-          >
-            <PresenceBadge
-              selfName={selfName}
-              effective={effective}
-              avatarUrl={selfMember?.avatarUrl}
-              memberId={selfMember?.id}
-              size={compact ? "sm" : "md"}
-            />
-            <span className={compact ? "hidden" : "flex min-w-0 flex-1 flex-col"}>
-              <span className="truncate font-semibold" data-testid="self-name">
-                {selfName}
-              </span>
-              {/* 둘째 줄: 상태 메시지(이모지+글)가 있으면 그것, 없으면 워크스페이스 이름. */}
-              {custom ? (
-                <CustomStatusMark
-                  status={custom}
-                  className="text-meta text-ink-muted"
-                />
-              ) : workspaceName ? (
-                <span
-                  className="truncate text-meta text-ink-muted"
-                  data-testid="self-subline"
-                >
-                  {workspaceName}
+        <Tooltip
+          label={compact ? triggerName : undefined}
+          side={compact ? "right" : "top"}
+          className={compact ? "shrink-0" : "min-w-0 flex-1"}
+        >
+          <DropdownMenuTrigger asChild>
+            {/* #3276: no `press` here. `.press:active` is `scale(0.98)`, and on a
+                row that holds an avatar, a name and a status emoji it shrank the
+                whole identity cluster by up to 4px on every click (measured with
+                scripts/capture-profile-jitter.mjs: hover, focus ring, menu open
+                and close are all 0px; the press is the only mover). The pressed
+                state is a fill (`press-instant-fill`), never geometry.
+                `tap-target` (44px under 600px) is the whole row now: the old
+                24×24 avatar-only hit sat next to a 44px gear (6b H2). The avatar
+                is 32px in the list-end row (24px in the rail); the badge stays on that span. */}
+            <button
+              ref={triggerRef}
+              type="button"
+              data-testid="profile-card"
+              aria-label={triggerName}
+                className={
+                compact
+                  ? "flex size-rail-tile shrink-0 items-center justify-center rounded-md press-instant-fill hover:bg-surface-hover focus-visible:focus-ring"
+                  : "sidebar-row tap-target min-w-0 flex-1 py-2 text-left press-instant-fill hover:bg-surface-hover data-[state=open]:bg-surface-hover focus-visible:focus-ring"
+              }
+            >
+              <PresenceBadge
+                selfName={selfName}
+                effective={effective}
+                avatarUrl={selfMember?.avatarUrl}
+                memberId={selfMember?.id}
+                size={compact ? "sm" : "md"}
+              />
+              <span className={compact ? "hidden" : "flex min-w-0 flex-1 flex-col"}>
+                <span className="truncate font-semibold" data-testid="self-name">
+                  {selfName}
                 </span>
-              ) : null}
-            </span>
-          </button>
-        </DropdownMenuTrigger>
+                {/* 둘째 줄: 상태 메시지(이모지+글)가 있으면 그것, 없으면 워크스페이스 이름. */}
+                {custom ? (
+                  <CustomStatusMark
+                    status={custom}
+                    className="text-meta text-ink-muted"
+                  />
+                ) : workspaceName ? (
+                  <span
+                    className="truncate text-meta text-ink-muted"
+                    data-testid="self-subline"
+                  >
+                    {workspaceName}
+                  </span>
+                ) : null}
+              </span>
+            </button>
+          </DropdownMenuTrigger>
+        </Tooltip>
         <DropdownMenuContent
           align="start"
           side="top"

@@ -80,6 +80,7 @@ import {
 import { TakeoverBlock } from "./TakeoverBlock";
 import { WorkSessionDetail } from "./WorkSessionDetail";
 import { BlockedReason } from "@/features/common/BlockedReason";
+import { Tooltip } from "@/design/ui/tooltip";
 
 // =============================================================================
 // 작업 세션 패널 (AX-3 / MOMO-618). The web sibling of the mac Work Console
@@ -982,19 +983,20 @@ export function WorkPanel({
           {/* Icon only, so it carries its own name, and `aria-pressed` because
               it is a state and not a one-way action. Hidden below 900px, where
               the pane is already the whole surface (tokens.css). */}
-          <button
-            type="button"
-            onClick={() => setWide((current) => !current)}
-            aria-pressed={wide}
-            aria-label="패널 넓게 보기"
-            title={wide ? "패널 좁게 보기" : "패널 넓게 보기"}
-            data-testid="work-panel-wide"
-            // 좌측 사이드바 접기 단추(제목줄)와 같은 28px 계열이다(#3280). 아이콘은 하나이고
-            // 상태는 aria-pressed·툴팁이 말한다(이름이 상태마다 바뀌면 pressed와 겹쳐 두 번 말한다).
-            className="pane-wide-toggle flex size-control-sm shrink-0 items-center justify-center rounded-md text-ink-muted press hover:bg-surface-hover focus-visible:focus-ring"
-          >
-            <PanelRight className="size-4" />
-          </button>
+          <Tooltip label={wide ? "패널 좁게 보기" : "패널 넓게 보기"} side="bottom" className="pane-wide-toggle">
+            <button
+              type="button"
+              onClick={() => setWide((current) => !current)}
+              aria-pressed={wide}
+              aria-label="패널 넓게 보기"
+              data-testid="work-panel-wide"
+              // 좌측 사이드바 접기 단추(제목줄)와 같은 28px 계열이다(#3280). 아이콘은 하나이고
+              // 상태는 aria-pressed·툴팁이 말한다(이름이 상태마다 바뀌면 pressed와 겹쳐 두 번 말한다).
+              className="pane-wide-toggle flex size-control-sm shrink-0 items-center justify-center rounded-md text-ink-muted press hover:bg-surface-hover focus-visible:focus-ring"
+            >
+              <PanelRight className="size-4" />
+            </button>
+          </Tooltip>
           <button
             type="button"
             onClick={closePanel}

@@ -21,6 +21,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/design/ui/dropdown-menu";
+import { Tooltip } from "@/design/ui/tooltip";
 
 // =============================================================================
 // DM 구역 머리 「⋯ › 숨긴 대화」 (ADR-0177 증보 D11, #4228). 「나간 멤버와의 대화 N개」 줄을 대신한다: 줄은 지울 수 없는 채로
@@ -52,20 +53,21 @@ export function DmClosedMenu({
   return (
     <>
       <DropdownMenu onOpenChange={onOpenChange}>
-        <DropdownMenuTrigger asChild>
-          <button
-            ref={trigger}
-            type="button"
-            aria-label="다이렉트 메시지 메뉴"
-            title="다이렉트 메시지 메뉴"
-            data-section-action=""
-            data-testid="dm-section-menu"
-            data-closed-count={items.length}
-            className="tap-target flex size-control-sm items-center justify-center rounded-sm text-ink-muted press hover:bg-surface-hover focus-visible:focus-ring"
-          >
-            <MoreHorizontal className="size-4" aria-hidden="true" />
-          </button>
-        </DropdownMenuTrigger>
+        <Tooltip label="다이렉트 메시지 메뉴" side="bottom">
+          <DropdownMenuTrigger asChild>
+            <button
+              ref={trigger}
+              type="button"
+              aria-label="다이렉트 메시지 메뉴"
+              data-section-action=""
+              data-testid="dm-section-menu"
+              data-closed-count={items.length}
+              className="tap-target flex size-control-sm items-center justify-center rounded-sm text-ink-muted press hover:bg-surface-hover focus-visible:focus-ring"
+            >
+              <MoreHorizontal className="size-4" aria-hidden="true" />
+            </button>
+          </DropdownMenuTrigger>
+        </Tooltip>
         <DropdownMenuContent align="end" data-testid="dm-section-menu-content">
           <DropdownMenuItem
             data-testid="dm-closed-list-open"
