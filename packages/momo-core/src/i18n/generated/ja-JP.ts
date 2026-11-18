@@ -536,6 +536,22 @@ export const catalog: MessageCatalog = {
       "value": "まだ投稿がありません"
     }
   ],
+  "channels.preview.joinBand": [
+    {
+      "type": 0,
+      "value": "参加すると投稿や返信ができます。"
+    }
+  ],
+  "channels.preview.listAria": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " の最近の投稿"
+    }
+  ],
   "channels.preview.loadForbidden": [
     {
       "type": 0,

@@ -1716,6 +1716,22 @@ export const catalog: MessageCatalog = {
       "value": "No messages yet"
     }
   ],
+  "channels.preview.joinBand": [
+    {
+      "type": 0,
+      "value": "Join to write and reply."
+    }
+  ],
+  "channels.preview.listAria": [
+    {
+      "type": 0,
+      "value": "Recent messages in "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    }
+  ],
   "channels.preview.loadForbidden": [
     {
       "type": 0,

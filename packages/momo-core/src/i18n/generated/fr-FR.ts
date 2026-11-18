@@ -578,6 +578,22 @@ export const catalog: MessageCatalog = {
       "value": "Aucun message pour le moment"
     }
   ],
+  "channels.preview.joinBand": [
+    {
+      "type": 0,
+      "value": "Rejoignez le canal pour écrire et répondre."
+    }
+  ],
+  "channels.preview.listAria": [
+    {
+      "type": 0,
+      "value": "Messages récents de "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    }
+  ],
   "channels.preview.loadForbidden": [
     {
       "type": 0,
