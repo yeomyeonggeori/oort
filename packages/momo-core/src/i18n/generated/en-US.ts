@@ -8847,7 +8847,7 @@ export const catalog: MessageCatalog = {
   "releaseNotes.v0147.tooltipsChanged": [
     {
       "type": 0,
-      "value": "On web and desktop, hovering over a button that shows only an icon now brings up the app's own tooltip after 0.12 seconds instead of the browser's default one. Buttons in the sidebar, the left rail, the composer, the attachment viewer, the emoticon picker and the work dock all use the same tooltip. It also appears right away when you move focus with the keyboard, and it does not appear when you tap."
+      "value": "On web and desktop, hovering over a button that shows only an icon now brings up the app's own tooltip almost at once instead of the browser's default one. Buttons in the sidebar, the left rail, the composer, the attachment viewer, the emoticon picker and the work dock all use the same tooltip. It also appears right away when you move focus with the keyboard, and it does not appear when you tap."
     }
   ],
   "releaseNotes.v0147.tooltipsTitle": [
