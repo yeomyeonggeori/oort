@@ -3533,6 +3533,45 @@ paths:
         "403": {description: Direct-message leave is forbidden, content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}}
         "404": {description: Active channel membership not found, content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}}
 
+  /v1/workspaces/{workspaceId}/channels/{channelId}/preview:
+    get:
+      tags: [channels]
+      operationId: previewChannel
+      summary: Read a public channel before joining it (ADR-0224 D5).
+      description: >
+        The channel's name, topic and member count and its newest top-level
+        messages (at most 50, newest first; thread replies stay in their
+        thread). Per message only the body, the author's display name and
+        kind, the time, the edited and deleted marks, the reply count and the
+        attachment names travel — no reactions, replies, quotes, link cards,
+        cards or props, read state, attachment address or media. Read-only: no
+        read position, membership, audit or outbox row is written and no
+        realtime subscription is granted; the attachment content route and the
+        realtime subscription still need a membership. Only a channel that
+        `GET …/channels/browse` would list can be previewed: every other id
+        answers the join's 404 (status and body), even for a caller who sits in
+        that channel. A member of the channel gets the same shape, with
+        `isMember: true`. Human members only: a guest, a suspended person and
+        any agent or developer-token credential are refused before the channel
+        is read, with the join's answers.
+      security: [{bearerAuth: []}]
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/ChannelId"
+      responses:
+        "200":
+          description: The preview.
+          content: {application/json: {schema: {$ref: "#/components/schemas/ChannelPreviewResponse"}}}
+        "400": {description: Malformed channel id, content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403":
+          description: >
+            Not a human bearer, workspace scope mismatch, not an active member of
+            the workspace (suspended included), or a guest.
+          content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}
+        "404": {description: Not a channel open to people (one answer for every kind; the join's), content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}}
+        "429": {$ref: "#/components/responses/RateLimited"}
+
   /v1/workspaces/{workspaceId}/channels/{channelId}/members/{memberId}/role:
     patch:
       tags: [membership-admin]
@@ -22395,6 +22434,79 @@ components:
         newlyJoined:
           type: boolean
           description: False when the caller was already a member and nothing was written.
+
+    ChannelPreviewResponse:
+      type: object
+      additionalProperties: false
+      description: >
+        ADR-0224 D5. An allow-list: nothing else of the channel or its
+        messages travels. The shape does not depend on whether the caller is a
+        member of the channel.
+      required: [channel, messages]
+      properties:
+        channel:
+          $ref: "#/components/schemas/PreviewChannel"
+        messages:
+          type: array
+          maxItems: 50
+          description: The newest top-level messages, newest first.
+          items:
+            $ref: "#/components/schemas/PreviewMessage"
+
+    PreviewChannel:
+      type: object
+      additionalProperties: false
+      required: [id, name, memberCount, isMember]
+      properties:
+        id: {type: string, format: uuid}
+        name: {type: string}
+        topic:
+          type: string
+          description: Omitted when the channel has none.
+        memberCount:
+          type: integer
+          format: int64
+          description: The browse list's count — live memberships of active members, people and agents.
+        isMember:
+          type: boolean
+          description: The caller has a live membership in the channel.
+
+    PreviewMessage:
+      type: object
+      additionalProperties: false
+      required: [id, author, createdAtMs, edited, deleted, replyCount, attachmentNames]
+      properties:
+        id: {type: string, format: uuid}
+        body:
+          type: string
+          description: Omitted on a deleted message.
+        author:
+          $ref: "#/components/schemas/PreviewAuthor"
+        createdAtMs: {type: integer, format: int64}
+        edited:
+          type: boolean
+          description: Rewritten by its author (false on a deleted message).
+        deleted: {type: boolean}
+        replyCount:
+          type: integer
+          format: int64
+          description: Replies under it; the replies themselves are not in the preview.
+        attachmentNames:
+          type: array
+          description: Names of its attachments, oldest first; empty on a deleted message. No address, type or size.
+          items: {type: string}
+
+    PreviewAuthor:
+      type: object
+      additionalProperties: false
+      required: [kind]
+      properties:
+        displayName:
+          type: string
+          description: >
+            Omitted when the author is no longer an active member (suspended or
+            removed) — the roster a member reads names active members only.
+        kind: {type: string, enum: [human, agent]}
 
     UpdateNotificationPrefRequest:
       type: object

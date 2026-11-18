@@ -790,6 +790,85 @@ pub async fn join_channel(
     }))
 }
 
+/// `GET /v1/workspaces/{ws}/channels/{ch}/preview` — read a public channel before joining it
+/// (ADR-0224 D5): the channel's name, topic and member count and its newest top-level
+/// messages, each with only body, author name and kind, time, edited/deleted marks, reply
+/// count and attachment names. Read-only: no read position, membership, audit or outbox
+/// row is written, and no realtime subscription is granted.
+///
+/// The gate is the join's, in the join's order: 403 non-human bearer, 403 workspace scope,
+/// 400 malformed id, 403 not an active member, 403 guest — all before the channel is read —
+/// then the join's one 404 for every id that is not a channel open to people (private, DM,
+/// browse off, archived, unknown, another workspace's), even for a caller seated there. A
+/// caller who is already a member gets the same narrow shape, with `isMember: true`.
+pub async fn preview(
+    State(state): State<AppState>,
+    Extension(principal): Extension<Principal>,
+    Path((workspace, channel)): Path<(String, String)>,
+) -> Result<Json<crate::dto::ChannelPreviewResponse>, ApiError> {
+    require_human(&principal, BROWSE_HUMAN_ONLY)?;
+    let workspace_id = workspace_scope(&workspace, &principal)?;
+    let channel_id = path_uuid(&channel, "invalid channel id")?;
+    let member_id = principal.member_id;
+
+    let outcome: DbRejectable<(
+        momo_messaging::PreviewChannel,
+        Vec<momo_messaging::PreviewMessage>,
+    )> = momo_db::with_tenant_tx_prelude(
+        &state.pool,
+        workspace_id,
+        |conn| Box::pin(momo_messaging::begin_preview_snapshot(conn)),
+        |_conn| Box::pin(async move { Ok(()) }),
+        move |conn| {
+            Box::pin(async move {
+                let role = active_workspace_role(conn, workspace_id, member_id).await?;
+                if let Err(refusal) = judge_browse_person(role) {
+                    return Ok(Err(browse_person_http(refusal)));
+                }
+                match momo_messaging::preview_channel_in_tx(
+                    conn,
+                    workspace_id,
+                    channel_id,
+                    member_id,
+                )
+                .await?
+                {
+                    None => Ok(Err(ApiError::not_found(BROWSE_CHANNEL_NOT_FOUND))),
+                    Some(preview) => Ok(Ok(preview)),
+                }
+            })
+        },
+    )
+    .await;
+
+    let (channel, messages) = settle_db("channels.preview", outcome)?;
+    Ok(Json(crate::dto::ChannelPreviewResponse {
+        channel: crate::dto::PreviewChannelDto {
+            id: channel.id.to_string(),
+            name: channel.name,
+            topic: channel.topic,
+            member_count: channel.member_count,
+            is_member: channel.is_member,
+        },
+        messages: messages
+            .into_iter()
+            .map(|message| crate::dto::PreviewMessageDto {
+                id: message.id.to_string(),
+                body: message.body,
+                author: crate::dto::PreviewAuthorDto {
+                    display_name: message.author_display_name,
+                    kind: message.author_kind,
+                },
+                created_at_ms: message.created_at_ms,
+                edited: message.edited,
+                deleted: message.deleted,
+                reply_count: message.reply_count,
+                attachment_names: message.attachment_names,
+            })
+            .collect(),
+    }))
+}
+
 /// A refused mute window as the wire says it: 400, with the machine code a client branches on
 /// when the refusal has one (`muted_until_in_past`, `muted_until_too_far`; ADR-0206 D12).
 fn muted_until_error(invalid: MutedUntilInvalid) -> ApiError {

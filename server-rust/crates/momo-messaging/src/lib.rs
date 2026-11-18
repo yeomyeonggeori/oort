@@ -60,6 +60,7 @@ pub mod attachment_reclaim;
 pub mod avatar_reclaim;
 pub mod channel;
 pub mod channel_browse;
+pub mod channel_preview;
 /// ADR-0216 D4 (#4660) — a developer token's channel restriction, as a domain argument.
 pub mod channel_restriction;
 pub mod channel_viewing;
@@ -173,6 +174,10 @@ pub use channel_browse::{
     self_join_channel_in_tx, BrowsableChannel, BrowseAfter, BrowsePersonRefusal,
     ChannelOpenToPeople, SelfJoin, BROWSE_LIMIT_DEFAULT, BROWSE_LIMIT_MAX,
     CHANNEL_OPEN_TO_PEOPLE_SQL,
+};
+pub use channel_preview::{
+    begin_preview_snapshot, preview_channel_in_tx, PreviewChannel, PreviewMessage,
+    PREVIEW_MESSAGE_LIMIT,
 };
 pub use channel_restriction::ChannelRestriction;
 pub use channel_viewing::{touch_channel_viewing_in_tx, ViewingOutcome, VIEWING_MIN_REFRESH_SECS};

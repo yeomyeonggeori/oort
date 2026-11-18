@@ -93,7 +93,7 @@ claims:
       evidence: "server-rust/bins/momo-server/tests/dm_leave_read_paths.rs#an_unclassified_read_turns_the_inventory_red"
   - id: TEN-7
     claim: "The public-channel browse list never contains a private channel, a direct-message channel, a public channel that is not listed in browse, an archived channel or another workspace's channel: their names and topics appear nowhere in the response body, for a workspace owner, an admin or a member, including one who sits in those channels."
-    scope: "ADR-0224 D3·D11, GET /v1/workspaces/{ws}/channels/browse only. Real PostgreSQL as the non-bypass API role, two workspaces. Row-level security bounds the workspace; the channel boundary is one judgment (momo_auth::channel_open_to_people_sql: public, not archived, listed in browse) that the list and the join embed through momo-messaging's CHANNEL_OPEN_TO_PEOPLE_SQL, which calls it and states no condition of its own, and it keeps private channels and DMs out even with the table check that forbids them from being listed dropped. Not covered by this claim: the preview route (a later piece of ADR-0224). The channel PATCH switch is TEN-11 and the agent-side paths (ADR-0224 D13) are AGT-5 and AGT-6."
+    scope: "ADR-0224 D3·D11, GET /v1/workspaces/{ws}/channels/browse only. Real PostgreSQL as the non-bypass API role, two workspaces. Row-level security bounds the workspace; the channel boundary is one judgment (momo_auth::channel_open_to_people_sql: public, not archived, listed in browse) that the list and the join embed through momo-messaging's CHANNEL_OPEN_TO_PEOPLE_SQL, which calls it and states no condition of its own, and it keeps private channels and DMs out even with the table check that forbids them from being listed dropped. The preview route is TEN-12 to TEN-14, the channel PATCH switch is TEN-11 and the agent-side paths (ADR-0224 D13) are AGT-5 and AGT-6."
     priority: P0
     runs: pr-ci
     proofs:
@@ -140,6 +140,31 @@ claims:
       - "server-rust/bins/momo-server/tests/channel_rename_pg.rs#switching_browse_listing_moves_only_the_self_join_door"
       - "server-rust/bins/momo-server/tests/channel_rename_pg.rs#the_default_switch_keeps_one_default_and_changes_nothing_else"
       - "server-rust/bins/momo-server/tests/channel_rename_pg.rs#two_requests_turning_off_the_two_defaults_leave_one"
+  - id: TEN-12
+    claim: "Previewing a private channel, a direct-message channel, a public channel that is not listed in browse, an archived channel, another workspace's channel or an unknown id answers the self-join's 404 with the same body bytes, even for a caller who sits in that channel."
+    scope: "ADR-0224 D5·D11, GET /v1/workspaces/{ws}/channels/{ch}/preview only. Real PostgreSQL as the non-bypass API role, two workspaces. Both preview statements (the channel and its messages) embed the same channel piece as the browse list and the join; there is no separate pre-check."
+    priority: P0
+    runs: pr-ci
+    proofs:
+      - "server-rust/bins/momo-server/tests/channel_preview_pg.rs#every_channel_that_is_not_open_answers_the_preview_with_the_joins_404"
+    sabotage:
+      how: "Replacing the channel piece in the preview statements with an always-true condition answers a private channel's preview with 200 and turns the proof red (the sabotage table of the pull request for issue #5840); the browse control test shows each weakened piece lets a hidden channel through."
+      evidence: "server-rust/bins/momo-server/tests/channel_browse_pg.rs#control_a_piece_missing_a_condition_lets_a_hidden_channel_through"
+  - id: TEN-13
+    claim: "A channel preview carries no attachment address and no attachment content, no reaction, no thread reply and no message props, writes no read position, membership, audit or outbox row, and leaves the attachment content route and the realtime subscription closed to the person who previewed until they join."
+    scope: "ADR-0224 D5. Real PostgreSQL; the realtime subscription is judged by the server's subscribe proxy (Centrifugo itself is not run). A planted reaction, thread reply, props value and completed attachment are shown to be present in the seated owner's own reads and absent from the preview's raw body. Attachment names are carried by design. The preview runs in a read-only transaction."
+    priority: P1
+    runs: pr-ci
+    proofs:
+      - "server-rust/bins/momo-server/tests/channel_preview_pg.rs#the_preview_carries_only_the_narrow_shape_of_the_newest_top_level_messages"
+      - "server-rust/bins/momo-server/tests/channel_preview_pg.rs#a_preview_writes_nothing_and_opens_neither_the_file_nor_the_live_channel"
+  - id: TEN-14
+    claim: "A guest (a member demoted through the role route), a person suspended underneath a live token and an agent credential are refused the channel preview with the same answer the self-join gives them, whichever channel they name."
+    scope: "ADR-0224 D5·D8·D11. Real PostgreSQL. The person half of the judgment runs before any channel is read. A person suspended through the route has their token revoked (401 at sign-in level), as for the browse list and the join (TEN-9)."
+    priority: P1
+    runs: pr-ci
+    proofs:
+      - "server-rust/bins/momo-server/tests/channel_preview_pg.rs#guests_suspended_people_and_agents_are_refused_the_preview_like_the_join"
 
   # ---- 인증·세션 -------------------------------------------------------------------
   - id: AUTH-1
