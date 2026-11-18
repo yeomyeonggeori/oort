@@ -40,6 +40,8 @@
   "channels.createFailure.duplicate": "Ya existe un canal con ese nombre. Prueba con otro nombre.",
   "channels.createFailure.forbidden": "No tienes permiso para crear canales. Pídelo a un propietario o administrador del espacio de trabajo.",
   "channels.createFailure.rateLimited": "Hay demasiadas solicitudes. Inténtalo de nuevo en unos momentos.",
+  "channels.createFailure.network": "No se pudo crear el canal. No se pudo conectar con el servidor. Revisa tu conexión e inténtalo de nuevo.",
+  "channels.createFailure.generic": "No se pudo crear el canal. Inténtalo de nuevo en unos momentos.",
   "channels.browse.title": "Explorar canales",
   "channels.browse.description": "Encuentra canales públicos y únete.",
   "channels.browse.searchLabel": "Buscar un canal",

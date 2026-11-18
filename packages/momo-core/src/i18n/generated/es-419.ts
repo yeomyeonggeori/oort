@@ -352,6 +352,18 @@ export const catalog: MessageCatalog = {
       "value": "No tienes permiso para crear canales. Pídelo a un propietario o administrador del espacio de trabajo."
     }
   ],
+  "channels.createFailure.generic": [
+    {
+      "type": 0,
+      "value": "No se pudo crear el canal. Inténtalo de nuevo en unos momentos."
+    }
+  ],
+  "channels.createFailure.network": [
+    {
+      "type": 0,
+      "value": "No se pudo crear el canal. No se pudo conectar con el servidor. Revisa tu conexión e inténtalo de nuevo."
+    }
+  ],
   "channels.createFailure.rateLimited": [
     {
       "type": 0,
@@ -772,6 +784,40 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "Cambiar nombre del canal"
+    }
+  ],
+  "expressions.draft.linkApprove": [
+    {
+      "type": 0,
+      "value": "Obtener y registrar en la biblioteca"
+    }
+  ],
+  "expressions.draft.linkBusy": [
+    {
+      "type": 0,
+      "value": "Se están obteniendo muchas imágenes. Vuelve a pulsar en un momento."
+    }
+  ],
+  "expressions.draft.linkFetching": [
+    {
+      "type": 0,
+      "value": "Obteniendo"
+    }
+  ],
+  "expressions.draft.linkFrom": [
+    {
+      "type": 0,
+      "value": "Se obtendrá de "
+    },
+    {
+      "type": 1,
+      "value": "host"
+    }
+  ],
+  "expressions.draft.linkHint": [
+    {
+      "type": 0,
+      "value": "Al aprobar, la imagen se obtiene una vez, se revisa y se registra en la biblioteca del equipo."
     }
   ],
   "timeline.approval.channelAgentIn": [

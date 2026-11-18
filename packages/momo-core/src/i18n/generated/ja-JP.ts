@@ -331,6 +331,18 @@ export const catalog: MessageCatalog = {
       "value": "チャンネルを作成する権限がありません。ワークスペースのオーナーまたは管理者に依頼してください。"
     }
   ],
+  "channels.createFailure.generic": [
+    {
+      "type": 0,
+      "value": "チャンネルを作成できませんでした。しばらくしてからもう一度お試しください。"
+    }
+  ],
+  "channels.createFailure.network": [
+    {
+      "type": 0,
+      "value": "チャンネルを作成できませんでした。サーバーに接続できませんでした。接続を確認してもう一度お試しください。"
+    }
+  ],
   "channels.createFailure.rateLimited": [
     {
       "type": 0,
@@ -722,6 +734,40 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "チャンネル名を変更"
+    }
+  ],
+  "expressions.draft.linkApprove": [
+    {
+      "type": 0,
+      "value": "取得してチームライブラリに登録"
+    }
+  ],
+  "expressions.draft.linkBusy": [
+    {
+      "type": 0,
+      "value": "いま取得中の画像が多いです。少し待ってからもう一度押してください。"
+    }
+  ],
+  "expressions.draft.linkFetching": [
+    {
+      "type": 0,
+      "value": "取得中"
+    }
+  ],
+  "expressions.draft.linkFrom": [
+    {
+      "type": 1,
+      "value": "host"
+    },
+    {
+      "type": 0,
+      "value": " から取得します"
+    }
+  ],
+  "expressions.draft.linkHint": [
+    {
+      "type": 0,
+      "value": "承認すると画像を一度取得して確認し、チームライブラリに登録します。"
     }
   ],
   "timeline.approval.channelAgentIn": [

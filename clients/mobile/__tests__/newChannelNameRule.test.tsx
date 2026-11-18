@@ -139,6 +139,7 @@ describe('영어 화면에는 한글이 없다', () => {
     [409, 'new-channel-name-issue', /already exists/i],
     [403, 'new-channel-error', /permission|owner|admin/i],
     [429, 'new-channel-error', /too many|again/i],
+    [500, 'new-channel-error', /couldn't create the channel\. try again/i],
   ])('서버가 %i 로 거절하면 그 문장도 영어다', async (status, testID, wording) => {
     globalThis.fetch = jest.fn(async () => response(status, {error: 'refused'})) as unknown as typeof fetch;
     await mount('en-US');
@@ -146,6 +147,18 @@ describe('영어 화면에는 한글이 없다', () => {
     fireEvent.press(screen.getByTestId('new-channel-create'));
     const shown = await screen.findByTestId(testID);
     expect(shown).toHaveTextContent(wording);
+    expect(shown).not.toHaveTextContent(HANGUL);
+  });
+
+  it('망이 끊겨 답이 없어도 그 문장은 영어이고, 전송 계층의 한국어 까닭이 새지 않는다', async () => {
+    globalThis.fetch = jest.fn(async () => {
+      throw new TypeError('Network request failed');
+    }) as unknown as typeof fetch;
+    await mount('en-US');
+    type('ops-room');
+    fireEvent.press(screen.getByTestId('new-channel-create'));
+    const shown = await screen.findByTestId('new-channel-error');
+    expect(shown).toHaveTextContent(/couldn't create the channel\. could not reach the server/i);
     expect(shown).not.toHaveTextContent(HANGUL);
   });
 });

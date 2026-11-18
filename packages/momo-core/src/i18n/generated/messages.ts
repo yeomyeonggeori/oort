@@ -219,6 +219,8 @@ export const messageKeys = [
   "channels.browse.title",
   "channels.createFailure.duplicate",
   "channels.createFailure.forbidden",
+  "channels.createFailure.generic",
+  "channels.createFailure.network",
   "channels.createFailure.rateLimited",
   "channels.default.description",
   "channels.default.label",
@@ -490,6 +492,11 @@ export const messageKeys = [
   "expressions.draft.approve",
   "expressions.draft.approveFailed",
   "expressions.draft.approving",
+  "expressions.draft.linkApprove",
+  "expressions.draft.linkBusy",
+  "expressions.draft.linkFetching",
+  "expressions.draft.linkFrom",
+  "expressions.draft.linkHint",
   "expressions.draft.previewLabel",
   "expressions.draft.replaceFailed",
   "expressions.draft.replacing",
@@ -2010,6 +2017,8 @@ export const argumentSpecs = {
   "channels.browse.title": {},
   "channels.createFailure.duplicate": {},
   "channels.createFailure.forbidden": {},
+  "channels.createFailure.generic": {},
+  "channels.createFailure.network": {},
   "channels.createFailure.rateLimited": {},
   "channels.default.description": {},
   "channels.default.label": {},
@@ -2378,6 +2387,13 @@ export const argumentSpecs = {
   "expressions.draft.approve": {},
   "expressions.draft.approveFailed": {},
   "expressions.draft.approving": {},
+  "expressions.draft.linkApprove": {},
+  "expressions.draft.linkBusy": {},
+  "expressions.draft.linkFetching": {},
+  "expressions.draft.linkFrom": {
+    "host": "string"
+  },
+  "expressions.draft.linkHint": {},
   "expressions.draft.previewLabel": {
     "name": "string"
   },
@@ -4282,6 +4298,8 @@ export interface MessageArgs {
   "channels.browse.title": Record<string, never>;
   "channels.createFailure.duplicate": Record<string, never>;
   "channels.createFailure.forbidden": Record<string, never>;
+  "channels.createFailure.generic": Record<string, never>;
+  "channels.createFailure.network": Record<string, never>;
   "channels.createFailure.rateLimited": Record<string, never>;
   "channels.default.description": Record<string, never>;
   "channels.default.label": Record<string, never>;
@@ -4553,6 +4571,11 @@ export interface MessageArgs {
   "expressions.draft.approve": Record<string, never>;
   "expressions.draft.approveFailed": Record<string, never>;
   "expressions.draft.approving": Record<string, never>;
+  "expressions.draft.linkApprove": Record<string, never>;
+  "expressions.draft.linkBusy": Record<string, never>;
+  "expressions.draft.linkFetching": Record<string, never>;
+  "expressions.draft.linkFrom": { host: string };
+  "expressions.draft.linkHint": Record<string, never>;
   "expressions.draft.previewLabel": { name: string };
   "expressions.draft.replaceFailed": Record<string, never>;
   "expressions.draft.replacing": Record<string, never>;

@@ -919,7 +919,8 @@
                 "assembly_source_too_large",
                 "assembly_output_too_large",
                 "assembly_timeout",
-                "assembly_busy"
+                "assembly_busy",
+                "source_awaiting_approval"
               ]
             },
             "media": {
@@ -1074,6 +1075,34 @@
           "minLength": 64,
           "maxLength": 64,
           "pattern": "^[a-f0-9]{64}$"
+        },
+        "kind": {
+          "enum": [
+            "emoji",
+            "sticker"
+          ]
+        }
+      }
+    },
+    "LinkChoice": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "draftId",
+        "revision"
+      ],
+      "properties": {
+        "draftId": {
+          "type": "string",
+          "minLength": 36,
+          "maxLength": 36,
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+        },
+        "revision": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 19,
+          "pattern": "^(0|[1-9][0-9]*)$"
         },
         "kind": {
           "enum": [
@@ -1369,7 +1398,14 @@
       ],
       "properties": {
         "expressionChoice": {
-          "$ref": "#/$defs/Choice"
+          "oneOf": [
+            {
+              "$ref": "#/$defs/Choice"
+            },
+            {
+              "$ref": "#/$defs/LinkChoice"
+            }
+          ]
         }
       }
     },

@@ -1490,6 +1490,18 @@ export const catalog: MessageCatalog = {
       "value": "You don't have permission to create channels. Ask a workspace owner or admin."
     }
   ],
+  "channels.createFailure.generic": [
+    {
+      "type": 0,
+      "value": "Couldn't create the channel. Try again in a moment."
+    }
+  ],
+  "channels.createFailure.network": [
+    {
+      "type": 0,
+      "value": "Couldn't create the channel. Could not reach the server. Check your connection and try again."
+    }
+  ],
   "channels.createFailure.rateLimited": [
     {
       "type": 0,
@@ -3653,6 +3665,40 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "Registering"
+    }
+  ],
+  "expressions.draft.linkApprove": [
+    {
+      "type": 0,
+      "value": "Fetch and register in team library"
+    }
+  ],
+  "expressions.draft.linkBusy": [
+    {
+      "type": 0,
+      "value": "Many pictures are being fetched right now. Press again in a moment."
+    }
+  ],
+  "expressions.draft.linkFetching": [
+    {
+      "type": 0,
+      "value": "Fetching"
+    }
+  ],
+  "expressions.draft.linkFrom": [
+    {
+      "type": 0,
+      "value": "Will be fetched from "
+    },
+    {
+      "type": 1,
+      "value": "host"
+    }
+  ],
+  "expressions.draft.linkHint": [
+    {
+      "type": 0,
+      "value": "Approving fetches the picture once, checks it, then registers it in the team library."
     }
   ],
   "expressions.draft.previewLabel": [

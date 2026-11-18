@@ -1,9 +1,10 @@
 import { EXPRESSION_FILE_ACCEPT, validExpressionFile } from "./media";
-import { useEffect, useRef, useState } from "react";
-import { expressionChoice, expressionDraftCard } from "@momo/core/features/expressions/cards";
+import { useEffect, useId, useRef, useState } from "react";
+import { LoaderCircle } from "lucide-react";
+import { expressionChoice, expressionDraftCard, expressionLinkChoice } from "@momo/core/features/expressions/cards";
 import type { MessageKey } from "@momo/core/i18n";
 import { LEGACY_EXPRESSION_KIND, recommendedKindForDraft } from "@momo/core/features/expressions/kind";
-import { EXPRESSION_KINDS, type ExpressionChoice, type ExpressionDraft, type ExpressionKind } from "@momo/core/features/expressions/types";
+import { EXPRESSION_KINDS, type ExpressionChoice, type ExpressionDraft, type ExpressionKind, type ExpressionLinkChoice } from "@momo/core/features/expressions/types";
 import { Button } from "@/design/ui/button";
 import { SegmentedControl } from "@/design/ui/segmented-control";
 import { GithubExternalLink } from "@/features/github/GithubExternalLink";
@@ -16,6 +17,13 @@ import { ExpressionImage } from "./ExpressionImage";
 const KIND_LABEL = { emoji: "expressions.kind.emoji", sticker: "expressions.kind.sticker" } as const satisfies Record<ExpressionKind, MessageKey>;
 const KIND_HINT = { emoji: "expressions.kind.hintEmoji", sticker: "expressions.kind.hintSticker" } as const satisfies Record<ExpressionKind, MessageKey>;
 
+/**
+ * What a link approval came back with when it did not register (ADR-0218 §18, #5934). `link_failed`: the fetch
+ * failed and the card has already put the reason on this candidate. `link_busy`: the server took nothing and
+ * the person presses again later.
+ */
+export type ExpressionDecisionNote = "link_failed" | "link_busy";
+
 export function ExpressionDraftCard({ draft, onReplace, onApprove, busy = false, pending = true, promptLabel }: {
   draft: ExpressionDraft;
   /**
@@ -25,7 +33,7 @@ export function ExpressionDraftCard({ draft, onReplace, onApprove, busy = false,
    */
   promptLabel?: string;
   onReplace: (draft: ExpressionDraft) => void;
-  onApprove: (choice: ExpressionChoice) => Promise<void>;
+  onApprove: (choice: ExpressionChoice | ExpressionLinkChoice) => Promise<ExpressionDecisionNote | void>;
   busy?: boolean;
   pending?: boolean;
 }) {
@@ -42,7 +50,15 @@ export function ExpressionDraftCard({ draft, onReplace, onApprove, busy = false,
   const lock = useRef(false);
   const [error, setError] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+  const uploadRef = useRef<HTMLButtonElement>(null);
+  const lineId = useId();
+  const linkNoteId = useId();
+  // ADR-0218 §18: an agent's link has no picture to look at; the person approves it by its host.
+  const [linkBusy, setLinkBusy] = useState(false);
+  const [fetching, setFetching] = useState(false);
+  const [focusUpload, setFocusUpload] = useState(false);
   const card = expressionDraftCard(draft, now, pending);
+  const linkChoice = expressionLinkChoice(draft, now);
   const base = expressionChoice(draft, now);
   const pin = base ? `${base.draftId}:${base.revision}:${base.sha256}` : null;
   const explicit = chosen !== null && chosen.pin === pin ? chosen.kind : null;
@@ -52,7 +68,13 @@ export function ExpressionDraftCard({ draft, onReplace, onApprove, busy = false,
     const timer = window.setTimeout(() => setNow(Date.now()), Math.max(0, Math.min(2147483647, draft.expiresAtMs - Date.now())));
     return () => window.clearTimeout(timer);
   }, [draft.expiresAtMs]);
-  const blocked = busy || working || offline;
+  const blocked = busy || working || fetching || offline;
+  // The approve control goes away when the fetch fails; the next thing to do is the upload, so focus goes there.
+  useEffect(() => {
+    if (!focusUpload || card.canFetch) return;
+    uploadRef.current?.focus();
+    setFocusUpload(false);
+  }, [focusUpload, card.canFetch]);
   async function upload(file: File) {
     if (!store || blocked || lock.current) return;
     if (!validExpressionFile(file)) { setError("5MB 이하의 PNG, JPG, WebP 또는 GIF를 골라 주세요."); return; }
@@ -68,11 +90,22 @@ export function ExpressionDraftCard({ draft, onReplace, onApprove, busy = false,
     catch { setError("등록하지 못했어요. 이름, 권한과 미리보기를 확인하고 다시 시도해 주세요."); }
     finally { lock.current = false; setWorking(false); }
   }
-  return <section className="flex flex-col gap-2 border-t border-line py-3" aria-label={draft.displayName} data-testid="expression-draft" data-state={card.state}>
+  async function fetchLink() {
+    if (!linkChoice || !rights || blocked || lock.current) return;
+    lock.current = true; setFetching(true); setError(null); setLinkBusy(false);
+    try {
+      const note = await onApprove(linkChoice);
+      if (note === "link_busy") setLinkBusy(true);
+      if (note === "link_failed") setFocusUpload(true);
+    }
+    catch { setError(formatMessage("expressions.draft.approveFailed")); }
+    finally { lock.current = false; setFetching(false); }
+  }
+  return <section className="flex flex-col gap-2 border-t border-line py-3" aria-label={draft.displayName} data-testid="expression-draft" data-state={card.state} data-link-state={card.canFetch ? (fetching ? "fetching" : linkBusy ? "busy" : "awaiting") : undefined}>
     <p className="text-body font-semibold">{draft.displayName} <span className="font-mono text-meta text-ink-muted">:{draft.name}:</span></p>
     <p className="text-meta text-ink-muted">{draft.tags.join(" · ")}</p>
-    <p className="text-body" role="status">{card.line}</p>
-    {card.sourceLink && <GithubExternalLink href={card.sourceLink} className="text-signal-text underline focus-visible:focus-ring">출처: {new URL(card.sourceLink).hostname}</GithubExternalLink>}
+    <p className="text-body" role="status" id={lineId}>{card.canFetch && card.linkHost !== null ? formatMessage("expressions.draft.linkFrom", { host: card.linkHost }) : card.line}</p>
+    {card.sourceLink && !card.canFetch && <GithubExternalLink href={card.sourceLink} className="text-signal-text underline focus-visible:focus-ring">출처: {new URL(card.sourceLink).hostname}</GithubExternalLink>}
     {draft.origin.prompt && <p className="break-words text-meta text-ink-muted" data-testid="expression-draft-prompt">{promptLabel ?? "에이전트가 쓴 설명:"} {draft.origin.prompt}</p>}
     {card.preview && <ExpressionImage key={`${draft.draftId}:${draft.revision}`} item={draft} size="large" onReady={() => setViewed(pin)} />}
     {card.canApprove && <>
@@ -87,9 +120,19 @@ export function ExpressionDraftCard({ draft, onReplace, onApprove, busy = false,
       <Button type="button" disabled={blocked || !rights || !pin || viewed !== pin} onClick={() => void approve()} className="self-end">{working ? "등록 중" : "팀 보관함에 등록"}</Button>
       {viewed !== pin && <p className="text-meta text-ink-muted">그림을 불러오는 중이에요. 새 미리보기를 본 뒤 등록해 주세요.</p>}
     </>}
+    {card.canFetch && <>
+      <label className="flex items-start gap-2 text-meta active:bg-surface-pressed"><input type="checkbox" checked={rights} onChange={(event) => setRights(event.target.checked)} className="mt-1 focus-visible:focus-ring" />{formatMessage("expressions.draft.rights")}</label>
+      {/* While its own fetch runs the button stays focusable (aria-disabled) so focus and the spoken state stay put; the lock stops a second press. */}
+      <Button type="button" className="self-end" data-testid="expression-draft-link-approve" aria-describedby={`${lineId} ${linkNoteId}`}
+        aria-disabled={fetching || undefined} disabled={!fetching && (blocked || !rights)} onClick={() => void fetchLink()}>
+        {fetching && <LoaderCircle aria-hidden="true" className="animate-spin motion-reduce:animate-none" />}
+        {formatMessage(fetching ? "expressions.draft.linkFetching" : "expressions.draft.linkApprove")}
+      </Button>
+      <p id={linkNoteId} className="text-meta text-ink-muted" aria-live="polite" data-testid="expression-draft-link-note">{formatMessage(linkBusy ? "expressions.draft.linkBusy" : "expressions.draft.linkHint")}</p>
+    </>}
     {card.canUpload && <>
       <input ref={fileRef} type="file" accept={EXPRESSION_FILE_ACCEPT} className="sr-only" tabIndex={-1} aria-label="대신 올릴 그림" onChange={(event) => { const file = event.target.files?.item(0); event.target.value = ""; if (file) void upload(file); }} />
-      <Button type="button" variant="secondary" className="self-start" disabled={blocked} onClick={() => fileRef.current?.click()}>{working ? "올리는 중" : card.uploadLabel}</Button>
+      <Button ref={uploadRef} type="button" variant="secondary" className="self-start" disabled={blocked} onClick={() => fileRef.current?.click()}>{working ? "올리는 중" : card.uploadLabel}</Button>
     </>}
     {offline && <p role="status" className="text-meta text-ink-muted">연결되면 다시 시도해 주세요.</p>}
     {error && <p role="alert" className="text-meta text-danger">{error}</p>}
