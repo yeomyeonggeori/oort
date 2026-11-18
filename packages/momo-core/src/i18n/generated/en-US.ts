@@ -8628,6 +8628,240 @@ export const catalog: MessageCatalog = {
       "value": "On web or desktop, open a channel where an agent is working and press the members button in the channel header. Working agents are listed first, each with a line about what it is doing now."
     }
   ],
+  "releaseNotes.v0147.agentLinksChanged": [
+    {
+      "type": 0,
+      "value": "From now on, the server no longer builds link preview cards on its own for links in messages agents write or edit. Cards already attached and opening a link by clicking it stay the same. Messages posted by webhooks and the GitHub integration still get previews as before. When an agent suggests an emoticon with a link to a picture, the approval card on web and desktop shows, instead of the picture, one line naming the site the picture would come from. Only the site name is shown, not the whole address. The server fetches the picture once to check it only after someone presses “Fetch and register in team library”, and if that fails, the reason appears on that row."
+    }
+  ],
+  "releaseNotes.v0147.agentLinksTitle": [
+    {
+      "type": 0,
+      "value": "The server no longer opens links from agents on its own"
+    }
+  ],
+  "releaseNotes.v0147.agentLinksTryIt": [
+    {
+      "type": 0,
+      "value": "Ask an agent to write a message with a link in it. No link preview card is added to it automatically, while the same link in a message you write still gets one."
+    }
+  ],
+  "releaseNotes.v0147.agentsLine1": [
+    {
+      "type": 0,
+      "value": "Claude Code now connects to the personal MCP server right away when you follow the command line and AI tools settings."
+    }
+  ],
+  "releaseNotes.v0147.agentsLine2": [
+    {
+      "type": 0,
+      "value": "Agent connection and OAuth consent screens offer only channels the agent can enter, and say why for the rest."
+    }
+  ],
+  "releaseNotes.v0147.channelBrowseChanged": [
+    {
+      "type": 0,
+      "value": "A new Browse channels view lets you find public channels and join them yourself. On web and desktop, open it from the + in the sidebar's Channels header; on the phone, from the ⋯ menu in the Channels section header on Home. Each row shows the channel name, a Default tag, the member count and the topic, and Join takes you straight into the channel. Before joining, tap the name in a row to preview recent messages without being able to post. ⌘K on web and desktop and the name search on the phone also list public channels you haven't joined. In a channel you join, only messages after you joined count as unread. New public channels show up in Browse channels from the start. Of the public channels that already existed, only the default channel shows up; the rest appear once an owner or admin turns on “Show in channel browser” in the channel menu on web or desktop. “Make default channel” in the same menu adds more default channels. People who join the workspace now go only into the default channels instead of every public channel. Existing members are not added to or removed from any channel."
+    }
+  ],
+  "releaseNotes.v0147.channelBrowseTitle": [
+    {
+      "type": 0,
+      "value": "Browse public channels and join on your own"
+    }
+  ],
+  "releaseNotes.v0147.channelBrowseTryIt": [
+    {
+      "type": 0,
+      "value": "If you are an owner or admin, open a public channel your team shares on web or desktop and turn on “Show in channel browser” in the channel header's ⋮ menu. Other members then see it in Browse channels and can come in with Join."
+    }
+  ],
+  "releaseNotes.v0147.channelMembersChanged": [
+    {
+      "type": 0,
+      "value": "Members can now leave public and private channels themselves. On web and desktop, Leave channel is in the channel row's menu and the channel header's ⋮ menu; on the phone, in the channel row sheet, the chat's ⋮ sheet and the chat info page. A public channel shown in Browse channels can be rejoined from there at any time; other channels need an owner or admin to add you back. On web and desktop, the member profile window was redrawn with a large face, Send message, Copy mention and the email address. In that window's management section, owners and admins change roles and use Suspend, Lift suspension and Remove from workspace. Each one first shows a confirmation step that says what will change. Suspended members are listed under Suspended in the Members tab, where they can be found again and their suspension lifted. In the channel members panel, the ⋯ on a person's row offers Remove from channel."
+    }
+  ],
+  "releaseNotes.v0147.channelMembersTitle": [
+    {
+      "type": 0,
+      "value": "Anyone can leave a channel, and admins can manage members"
+    }
+  ],
+  "releaseNotes.v0147.channelMembersTryIt": [
+    {
+      "type": 0,
+      "value": "On web or desktop, click a person in the Members tab to open their profile window. If you are an owner or admin, picking a new role there does not change it right away; a confirmation step comes first."
+    }
+  ],
+  "releaseNotes.v0147.channelNamesChanged": [
+    {
+      "type": 0,
+      "value": "Channel names can now use letters and numbers from any language, including Korean. Before, only lowercase English letters, numbers, hyphens (-) and underscores (_) were accepted. Spaces become hyphens and capital English letters are saved in lowercase, so when what you typed differs from the name that will be saved, the create window shows the saved name first. The phone's new channel sheet uses the same guidance and no longer limits you to an English keyboard. Owners and admins can rename an existing channel with Rename channel. On web and desktop, it is in the channel header's ⋮ menu; on the phone, in the sheet you get by pressing and holding the channel row and in the chat's ⋮ sheet. The general channel cannot be renamed. The new name shows right away in your sidebar and the channel header."
+    }
+  ],
+  "releaseNotes.v0147.channelNamesTitle": [
+    {
+      "type": 0,
+      "value": "Name and rename channels in any language"
+    }
+  ],
+  "releaseNotes.v0147.channelNamesTryIt": [
+    {
+      "type": 0,
+      "value": "If you are an owner or admin, type “Design Review” in the new channel window. A line under the field shows the name that will be saved, #design-review."
+    }
+  ],
+  "releaseNotes.v0147.channelsLine1": [
+    {
+      "type": 0,
+      "value": "The web and desktop sidebar drops the channel sort button; accounts set to A to Z now show the order you arranged."
+    }
+  ],
+  "releaseNotes.v0147.channelsLine2": [
+    {
+      "type": 0,
+      "value": "In the web and desktop sidebar, channels and DMs with nothing new now show their names one step lighter."
+    }
+  ],
+  "releaseNotes.v0147.channelsLine3": [
+    {
+      "type": 0,
+      "value": "A new channel shows 1 member right away, then a window opens to add members. The phone does the same."
+    }
+  ],
+  "releaseNotes.v0147.channelsLine4": [
+    {
+      "type": 0,
+      "value": "Typing a Korean channel name no longer makes it flicker out of # in the composer, ⌘K or phone search."
+    }
+  ],
+  "releaseNotes.v0147.channelsLine5": [
+    {
+      "type": 0,
+      "value": "In # in the composer, ⌘K and phone search, channel names follow your app language and numbers sort by value."
+    }
+  ],
+  "releaseNotes.v0147.channelsLine6": [
+    {
+      "type": 0,
+      "value": "Errors when creating a channel now appear in your app language, with no Korean on English screens."
+    }
+  ],
+  "releaseNotes.v0147.channelsTopic": [
+    {
+      "type": 0,
+      "value": "Channels"
+    }
+  ],
+  "releaseNotes.v0147.dmLeaveChanged": [
+    {
+      "type": 0,
+      "value": "One-to-one chats between people now have Leave conversation. On web and desktop, it is in the right-click menu of the chat row in the sidebar and in the ⋮ menu of the chat header; on the phone, in the sheet you get by pressing and holding the chat row, the chat's ⋮ sheet and the chat info page. Leaving removes the conversation so far from your screen, while it stays on the other person's screen. If they write again, the chat starts fresh from that message. Messages you scheduled in that chat are cancelled too, and leaving cannot be undone, so you are asked to confirm first. Chats with agents and chats with more than two people do not have this item. The item that only takes a chat off the list is still there under a new name, and chats hidden that way can be brought back from the list of hidden conversations."
+    }
+  ],
+  "releaseNotes.v0147.dmLeaveTitle": [
+    {
+      "type": 0,
+      "value": "Leave a one-to-one chat"
+    }
+  ],
+  "releaseNotes.v0147.dmLeaveTryIt": [
+    {
+      "type": 0,
+      "value": "Right-click a one-to-one chat with a person in the sidebar (on the phone, press and hold it). Leave conversation is at the bottom, and it first tells you what will go away. Cancel takes you back."
+    }
+  ],
+  "releaseNotes.v0147.lookLine1": [
+    {
+      "type": 0,
+      "value": "On web and desktop, channel and DM menus show an icon on every item, and copy and section moves open as submenus."
+    }
+  ],
+  "releaseNotes.v0147.lookLine2": [
+    {
+      "type": 0,
+      "value": "On web and desktop, the Members tab shows each email and can search by it. Guests do not see email addresses."
+    }
+  ],
+  "releaseNotes.v0147.lookLine3": [
+    {
+      "type": 0,
+      "value": "Presence dots differ by shape: filled for online, a crescent for away, a bar for do not disturb, a ring for offline."
+    }
+  ],
+  "releaseNotes.v0147.lookLine4": [
+    {
+      "type": 0,
+      "value": "On web and desktop, Add a workspace now offers two cards: create a new workspace, or join one that already exists."
+    }
+  ],
+  "releaseNotes.v0147.lookLine5": [
+    {
+      "type": 0,
+      "value": "On web and desktop, the profile menu can copy the server address, open workspace settings, leave or add a workspace."
+    }
+  ],
+  "releaseNotes.v0147.lookLine6": [
+    {
+      "type": 0,
+      "value": "On the phone, icons at the end of rows in sheets and chat info line up, and notification rows use a bell icon."
+    }
+  ],
+  "releaseNotes.v0147.lookTopic": [
+    {
+      "type": 0,
+      "value": "Look and layout"
+    }
+  ],
+  "releaseNotes.v0147.reconnectSyncChanged": [
+    {
+      "type": 0,
+      "value": "When the connection drops and comes back, the chat you have open reads the messages on screen once more and catches up on edits, deletions, added or removed reactions, and pins and unpins made in between. On the phone, the same happens when the app comes back to the front and reconnects. Only messages already on screen are updated, and chats that are not open are not read again at that moment. This works the same on web, desktop and phone."
+    }
+  ],
+  "releaseNotes.v0147.reconnectSyncTitle": [
+    {
+      "type": 0,
+      "value": "Edits and reactions catch up after reconnecting"
+    }
+  ],
+  "releaseNotes.v0147.reconnectSyncTryIt": [
+    {
+      "type": 0,
+      "value": "Open a chat on the phone, turn on airplane mode for a moment, and add a reaction to a message in that chat from another device. When you turn airplane mode off, the reaction catches up."
+    }
+  ],
+  "releaseNotes.v0147.settingsLine1": [
+    {
+      "type": 0,
+      "value": "On web and desktop, the theme picker is always an open grid, with text-free previews and unlabeled accent dots."
+    }
+  ],
+  "releaseNotes.v0147.summary": [
+    {
+      "type": 0,
+      "value": "Browse public channels and join them yourself, leave a one-to-one chat with a person, and name or rename channels in Korean and other languages."
+    }
+  ],
+  "releaseNotes.v0147.tooltipsChanged": [
+    {
+      "type": 0,
+      "value": "On web and desktop, hovering over a button that shows only an icon now brings up the app's own tooltip almost at once instead of the browser's default one. Buttons in the sidebar, the left rail, the composer, the attachment viewer, the emoticon picker and the work dock all use the same tooltip. It also appears right away when you move focus with the keyboard, and it does not appear when you tap."
+    }
+  ],
+  "releaseNotes.v0147.tooltipsTitle": [
+    {
+      "type": 0,
+      "value": "Icon buttons show their names right away"
+    }
+  ],
+  "releaseNotes.v0147.tooltipsTryIt": [
+    {
+      "type": 0,
+      "value": "On web or desktop, hover over the + button in the sidebar's Channels header, or move focus to it with Tab. Its name appears right away."
+    }
+  ],
   "releaseNotes.version.current": [
     {
       "type": 0,
