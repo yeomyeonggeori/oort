@@ -1496,6 +1496,9 @@ export const messageKeys = [
   "timeline.agentRail.openRecord",
   "timeline.agentRail.sheetClose",
   "timeline.agentRail.sheetTitle",
+  "timeline.approval.channelAgentIn",
+  "timeline.approval.channelNeedsMember",
+  "timeline.approval.channelsRefused",
   "timeline.approval.reproposeBusy",
   "timeline.approval.reproposeSeeded",
   "timeline.approvalExpiry.soon",
@@ -3641,6 +3644,9 @@ export const argumentSpecs = {
   },
   "timeline.agentRail.sheetClose": {},
   "timeline.agentRail.sheetTitle": {},
+  "timeline.approval.channelAgentIn": {},
+  "timeline.approval.channelNeedsMember": {},
+  "timeline.approval.channelsRefused": {},
   "timeline.approval.reproposeBusy": {},
   "timeline.approval.reproposeSeeded": {},
   "timeline.approvalExpiry.soon": {},
@@ -5543,6 +5549,9 @@ export interface MessageArgs {
   "timeline.agentRail.openRecord": { name: string };
   "timeline.agentRail.sheetClose": Record<string, never>;
   "timeline.agentRail.sheetTitle": Record<string, never>;
+  "timeline.approval.channelAgentIn": Record<string, never>;
+  "timeline.approval.channelNeedsMember": Record<string, never>;
+  "timeline.approval.channelsRefused": Record<string, never>;
   "timeline.approval.reproposeBusy": Record<string, never>;
   "timeline.approval.reproposeSeeded": Record<string, never>;
   "timeline.approvalExpiry.soon": Record<string, never>;

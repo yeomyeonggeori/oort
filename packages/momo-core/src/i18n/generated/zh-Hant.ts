@@ -698,6 +698,24 @@ export const catalog: MessageCatalog = {
       "value": "重新命名頻道"
     }
   ],
+  "timeline.approval.channelAgentIn": [
+    {
+      "type": 0,
+      "value": "此代理已在該頻道中。"
+    }
+  ],
+  "timeline.approval.channelNeedsMember": [
+    {
+      "type": 0,
+      "value": "請先將此代理加入為該頻道的成員。"
+    }
+  ],
+  "timeline.approval.channelsRefused": [
+    {
+      "type": 0,
+      "value": "所選頻道中有目前無法連線的頻道。請重新檢查清單。"
+    }
+  ],
   "timeline.channelLeave.bodyPublicBrowse": [
     {
       "type": 1,
