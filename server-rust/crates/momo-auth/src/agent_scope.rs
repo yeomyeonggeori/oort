@@ -726,4 +726,14 @@ mod tests {
             Some(SCOPE_AGENT_RUNS_CALLBACK)
         );
     }
+
+    /// ADR-0225 D10: renaming a channel is a person's act. `PATCH …/channels/{ch}`
+    /// is on no agent table, with any verb, so no agent bearer reaches it.
+    #[test]
+    fn no_agent_credential_reaches_the_channel_edit_route() {
+        let path = format!("/v1/workspaces/{WS}/channels/{RUN}");
+        for method in ["PATCH", "PUT", "POST", "DELETE", "GET"] {
+            assert_eq!(required_agent_scope(method, &path), None, "{method}");
+        }
+    }
 }

@@ -449,6 +449,142 @@ pub fn normalize_channel_name(raw: &str) -> Result<String, ChannelSpecInvalid> {
     judge_channel_name(raw).map_err(ChannelNameRefusal::spec_invalid)
 }
 
+/// The channel name that the welcome message looks up by name (ADR-0225 D10).
+/// Locked in both directions: it cannot be renamed and nothing becomes it.
+pub const LOCKED_CHANNEL_NAME: &str = "general";
+
+/// A channel as a rename leaves it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RenamedChannel {
+    pub id: Uuid,
+    pub workspace_id: Uuid,
+    pub kind: ChannelKind,
+    pub name: String,
+    pub topic: Option<String>,
+}
+
+/// What [`rename_channel_in_tx`] decided.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ChannelRenameOutcome {
+    /// Missing, other workspace, DM / group DM, archived, or a private channel
+    /// the actor is not a live member of. One answer for all of them so the
+    /// route never says which.
+    NotFound,
+    /// The channel is `general`, or the new name is `general` (ADR-0225 D10).
+    GeneralLocked,
+    /// A live non-DM channel already carries the name.
+    NameTaken,
+    /// The folded name equals the stored one: nothing written.
+    Unchanged(RenamedChannel),
+    Renamed {
+        previous_name: String,
+        channel: RenamedChannel,
+    },
+}
+
+/// Rename a public or private channel (ADR-0225 D10). `new_name` must already
+/// have passed [`normalize_channel_name`]. The caller has checked that the actor
+/// is a workspace owner or admin; this decides everything about the channel.
+///
+/// A private channel is visible to the actor only through a live membership
+/// (the list inner-joins membership), so the rename follows the list: an admin
+/// who is not in a private channel gets [`ChannelRenameOutcome::NotFound`]
+/// rather than a way to learn it exists.
+///
+/// The row is locked (`FOR UPDATE`) before the checks. Two renames that race to
+/// the same name both pass the pre-check; the loser fails at the
+/// `channel_name_uniq` index with SQLSTATE 23505, which
+/// [`is_channel_name_conflict`] recognises so the route can answer 409.
+pub async fn rename_channel_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    channel_id: Uuid,
+    actor: Uuid,
+    new_name: &str,
+) -> Result<ChannelRenameOutcome, DbError> {
+    let row = sqlx::query(
+        "SELECT c.kind::text AS kind, c.name, c.topic \
+           FROM channel c \
+          WHERE c.id = $1 AND c.workspace_id = $2 \
+            AND c.kind IN ('public', 'private') \
+            AND c.archived_at IS NULL \
+            AND (c.kind = 'public' OR EXISTS ( \
+                  SELECT 1 FROM membership m \
+                   WHERE m.channel_id = c.id AND m.workspace_id = c.workspace_id \
+                     AND m.member_id = $3 AND m.left_at IS NULL)) \
+          FOR UPDATE OF c",
+    )
+    .bind(channel_id)
+    .bind(workspace_id)
+    .bind(actor)
+    .fetch_optional(&mut *conn)
+    .await?;
+    let Some(row) = row else {
+        return Ok(ChannelRenameOutcome::NotFound);
+    };
+    let kind_label: String = row.try_get("kind").map_err(DbError::from)?;
+    let kind = ChannelKind::from_db_label(&kind_label).ok_or_else(|| {
+        DbError::from(sqlx::Error::Decode(
+            format!("unknown channel_kind '{kind_label}'").into(),
+        ))
+    })?;
+    let old_name: Option<String> = row.try_get("name").map_err(DbError::from)?;
+    let old_name = old_name.unwrap_or_default();
+    let topic: Option<String> = row.try_get("topic").map_err(DbError::from)?;
+    let channel = |name: &str| RenamedChannel {
+        id: channel_id,
+        workspace_id,
+        kind,
+        name: name.to_string(),
+        topic: topic.clone(),
+    };
+
+    if old_name == new_name {
+        return Ok(ChannelRenameOutcome::Unchanged(channel(&old_name)));
+    }
+    if old_name.to_lowercase() == LOCKED_CHANNEL_NAME
+        || new_name.to_lowercase() == LOCKED_CHANNEL_NAME
+    {
+        return Ok(ChannelRenameOutcome::GeneralLocked);
+    }
+    let taken: bool = sqlx::query_scalar(
+        "SELECT EXISTS ( \
+           SELECT 1 FROM channel other \
+            WHERE other.workspace_id = $1 AND other.kind <> 'dm' \
+              AND other.archived_at IS NULL AND other.id <> $2 \
+              AND lower(other.name) = lower($3))",
+    )
+    .bind(workspace_id)
+    .bind(channel_id)
+    .bind(new_name)
+    .fetch_one(&mut *conn)
+    .await?;
+    if taken {
+        return Ok(ChannelRenameOutcome::NameTaken);
+    }
+    sqlx::query("UPDATE channel SET name = $3 WHERE id = $1 AND workspace_id = $2")
+        .bind(channel_id)
+        .bind(workspace_id)
+        .bind(new_name)
+        .execute(&mut *conn)
+        .await?;
+    Ok(ChannelRenameOutcome::Renamed {
+        previous_name: old_name,
+        channel: channel(new_name),
+    })
+}
+
+/// Whether a rename failed on the `channel_name_uniq` index (two requests
+/// racing for one name).
+pub fn is_channel_name_conflict(error: &DbError) -> bool {
+    match error {
+        DbError::Sqlx(sqlx::Error::Database(db)) => {
+            db.is_unique_violation() && db.constraint() == Some("channel_name_uniq")
+        }
+        _ => false,
+    }
+}
+
 /// Trim a topic; an empty one is `None`, not `Some("")` — Swift reads a blank
 /// topic as "no topic" rather than storing an empty string.
 pub fn normalize_channel_topic(raw: Option<&str>) -> Result<Option<String>, ChannelSpecInvalid> {

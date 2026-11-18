@@ -46,11 +46,12 @@ use axum::{Extension, Json};
 use momo_auth::Principal;
 use momo_messaging::{
     active_workspace_role, add_channel_member_in_tx, clamp_channel_list_limit,
-    create_channel_detailed_in_tx, db_now_in_tx, list_workspace_channels_within,
-    normalize_channel_kind, normalize_channel_name, normalize_channel_topic,
-    normalize_membership_role, remove_channel_member_in_tx, set_notification_pref_in_tx,
-    validate_channel_mute, ChannelMembership, ChannelMute, ChannelRestriction, ChannelSummary,
-    CreatedChannel, MutedUntilInvalid, NewChannel,
+    create_channel_detailed_in_tx, db_now_in_tx, is_channel_name_conflict,
+    list_workspace_channels_within, normalize_channel_kind, normalize_channel_name,
+    normalize_channel_topic, normalize_membership_role, remove_channel_member_in_tx,
+    rename_channel_in_tx, set_notification_pref_in_tx, validate_channel_mute, ChannelMembership,
+    ChannelMute, ChannelRenameOutcome, ChannelRestriction, ChannelSummary, CreatedChannel,
+    MutedUntilInvalid, NewChannel,
 };
 use serde::Deserialize;
 use uuid::Uuid;
@@ -58,12 +59,13 @@ use uuid::Uuid;
 use crate::dev_credential::DevCredential;
 use crate::dto::{
     AddChannelMemberRequest, ChannelDto, ChannelMembershipDto, ChannelMembershipResponse,
-    CreateChannelRequest, CreateChannelResponse, NotificationPrefResponse,
-    UpdateNotificationPrefRequest, WorkspaceChannelsResponse,
+    CreateChannelRequest, CreateChannelResponse, NotificationPrefResponse, UpdateChannelResponse,
+    UpdateNotificationPrefRequest, UpdatedChannelDto, WorkspaceChannelsResponse,
 };
 use crate::error::ApiError;
 use crate::routes::shared::{
-    agent_tenant_tx, audit_via_token_id, path_uuid, settle_db, workspace_scope, DbRejectable,
+    agent_tenant_tx, audit_via_token_id, path_uuid, require_human, settle_db, workspace_scope,
+    DbRejectable,
 };
 use crate::AppState;
 
@@ -246,6 +248,152 @@ pub async fn create(
             creator_membership: membership_dto(&created.creator_membership),
         }),
     ))
+}
+
+/// The fields `PATCH …/channels/{ch}` knows. A body is a partial update: only
+/// the keys present change, an unknown key is a 400 (never silently ignored),
+/// and a body with no known key is a 400. Later pieces add their key to
+/// [`KNOWN_CHANNEL_PATCH_FIELDS`], to [`ChannelPatch`] and to the transaction in
+/// [`update`] — one piece each.
+const KNOWN_CHANNEL_PATCH_FIELDS: &[&str] = &["name"];
+
+struct ChannelPatch {
+    /// Already folded and judged by the same function the create route uses.
+    name: Option<String>,
+}
+
+fn parse_channel_patch(body: &serde_json::Value) -> Result<ChannelPatch, ApiError> {
+    let Some(object) = body.as_object() else {
+        return Err(ApiError::bad_request("request body must be a JSON object"));
+    };
+    if let Some(unknown) = object
+        .keys()
+        .find(|key| !KNOWN_CHANNEL_PATCH_FIELDS.contains(&key.as_str()))
+    {
+        return Err(ApiError::bad_request(format!(
+            "unknown channel field '{unknown}'"
+        )));
+    }
+    let mut patch = ChannelPatch { name: None };
+    if let Some(raw) = object.get("name") {
+        let raw = raw
+            .as_str()
+            .ok_or_else(|| ApiError::bad_request("channel name must be a string"))?;
+        patch.name = Some(
+            normalize_channel_name(raw)
+                .map_err(|invalid| ApiError::bad_request(invalid.to_string()))?,
+        );
+    }
+    if patch.name.is_none() {
+        return Err(ApiError::bad_request("no channel field to update"));
+    }
+    Ok(patch)
+}
+
+/// `PATCH /v1/workspaces/{ws}/channels/{ch}` — rename a public or private
+/// channel (ADR-0225 D10). Human only (`require_human`, and the route is on no
+/// agent / developer-token / narrow-token table), workspace owner or admin
+/// only (ADR-0128). Refusals, in order: 400 (body shape, name rule — before
+/// any DB access, same messages as create), 403 (not admin), 404 (not a live
+/// public/private channel of this workspace, or a private channel the admin is
+/// not in), 409 `general_channel_locked`, 409 `channel name already exists`.
+/// The same name again is a 200 with no audit row. Writes audit
+/// `channel.renamed`; no message, no realtime event.
+pub async fn update(
+    State(state): State<AppState>,
+    Extension(principal): Extension<Principal>,
+    Path((workspace, channel)): Path<(String, String)>,
+    Json(body): Json<serde_json::Value>,
+) -> Result<Json<UpdateChannelResponse>, ApiError> {
+    require_human(&principal, "only a human member can edit a channel")?;
+    let workspace_id = workspace_scope(&workspace, &principal)?;
+    let channel_id = path_uuid(&channel, "invalid channel id")?;
+    let patch = parse_channel_patch(&body)?;
+    let via_token_id = audit_via_token_id(&principal);
+
+    let outcome: DbRejectable<momo_messaging::RenamedChannel> =
+        agent_tenant_tx(&state.pool, workspace_id, move |conn| {
+            Box::pin(async move {
+                let Some(role) =
+                    active_workspace_role(conn, workspace_id, principal.member_id).await?
+                else {
+                    return Ok(Err(ApiError::forbidden("not a workspace member")));
+                };
+                if !role.is_admin() {
+                    return Ok(Err(ApiError::forbidden(
+                        "workspace owner or admin role required",
+                    )));
+                }
+                // The `name` piece. A later field adds its own piece beside it.
+                let Some(new_name) = patch.name.as_deref() else {
+                    return Ok(Err(ApiError::bad_request("no channel field to update")));
+                };
+                match rename_channel_in_tx(
+                    conn,
+                    workspace_id,
+                    channel_id,
+                    principal.member_id,
+                    new_name,
+                )
+                .await?
+                {
+                    ChannelRenameOutcome::NotFound => {
+                        Ok(Err(ApiError::not_found("channel not found")))
+                    }
+                    ChannelRenameOutcome::GeneralLocked => Ok(Err(ApiError::coded(
+                        StatusCode::CONFLICT,
+                        "general_channel_locked",
+                        "the general channel cannot be renamed or taken as a name",
+                    ))),
+                    ChannelRenameOutcome::NameTaken => Ok(Err(ApiError::new(
+                        StatusCode::CONFLICT,
+                        "channel name already exists",
+                    ))),
+                    ChannelRenameOutcome::Unchanged(channel) => Ok(Ok(channel)),
+                    ChannelRenameOutcome::Renamed {
+                        previous_name,
+                        channel,
+                    } => {
+                        momo_db::audit::write_audit(
+                            conn,
+                            &momo_db::audit::AuditEntry::new(workspace_id, "channel.renamed")
+                                .by(principal.member_id)
+                                .target("channel", channel_id)
+                                .via_token(via_token_id)
+                                .with_schema(
+                                    "momo.channel.renamed.v1",
+                                    serde_json::json!({
+                                        "old": previous_name,
+                                        "new": channel.name,
+                                    }),
+                                ),
+                        )
+                        .await?;
+                        Ok(Ok(channel))
+                    }
+                }
+            })
+        })
+        .await;
+
+    // Two requests racing for one name: the loser fails at the unique index.
+    let outcome = match outcome {
+        Err(error) if is_channel_name_conflict(&error) => Ok(Err(ApiError::new(
+            StatusCode::CONFLICT,
+            "channel name already exists",
+        ))),
+        other => other,
+    };
+    let renamed = settle_db("channels.update", outcome)?;
+    Ok(Json(UpdateChannelResponse {
+        channel: UpdatedChannelDto {
+            id: renamed.id.to_string(),
+            workspace_id: renamed.workspace_id.to_string(),
+            kind: renamed.kind.as_db_label().to_string(),
+            name: renamed.name,
+            topic: renamed.topic,
+        },
+    }))
 }
 
 /// A refused mute window as the wire says it: 400, with the machine code a client branches on
