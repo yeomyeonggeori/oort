@@ -1140,6 +1140,24 @@ export const catalog: MessageCatalog = {
       "value": "We can't reach the server. Below is the work state as last confirmed."
     }
   ],
+  "channels.createFailure.duplicate": [
+    {
+      "type": 0,
+      "value": "A channel with this name already exists. Try a different name."
+    }
+  ],
+  "channels.createFailure.forbidden": [
+    {
+      "type": 0,
+      "value": "You don't have permission to create channels. Ask a workspace owner or admin."
+    }
+  ],
+  "channels.createFailure.rateLimited": [
+    {
+      "type": 0,
+      "value": "Too many requests. Try again in a moment."
+    }
+  ],
   "channels.dmLeave.action": [
     {
       "type": 0,

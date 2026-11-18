@@ -44,20 +44,30 @@ function isInvisibleLetterOrMark(cp: number): boolean {
 // The Unicode-property regexes are built the first time a name is judged, never
 // at module load: an engine that does not know the syntax would otherwise fail
 // to start the whole app (ADR-0225 D11; the same care as `design/fontName.ts`).
+// An engine that cannot build them at all is remembered as `null` (one try, not
+// one per keystroke): the judgement then stops at length and the hand list of
+// invisible letters, and the server, which is the last word and has its own 400
+// sentence, decides the rest. Rendering never throws.
 interface CategoryPatterns {
   letter: RegExp;
   number: RegExp;
   mark: RegExp;
   unseen: RegExp;
 }
-let categoryPatterns: CategoryPatterns | null = null;
-function categories(): CategoryPatterns {
-  categoryPatterns ??= {
-    letter: new RegExp("^\\p{L}$", "u"),
-    number: new RegExp("^\\p{N}$", "u"),
-    mark: new RegExp("^\\p{M}$", "u"),
-    unseen: new RegExp("^[\\p{Cc}\\p{Cf}\\p{Co}\\p{Cs}]$", "u"),
-  };
+let categoryPatterns: CategoryPatterns | null | undefined;
+function categories(): CategoryPatterns | null {
+  if (categoryPatterns === undefined) {
+    try {
+      categoryPatterns = {
+        letter: new RegExp("^\\p{L}$", "u"),
+        number: new RegExp("^\\p{N}$", "u"),
+        mark: new RegExp("^\\p{M}$", "u"),
+        unseen: new RegExp("^[\\p{Cc}\\p{Cf}\\p{Co}\\p{Cs}]$", "u"),
+      };
+    } catch {
+      categoryPatterns = null;
+    }
+  }
   return categoryPatterns;
 }
 
@@ -122,6 +132,14 @@ export function judgeChannelName(raw: string): ChannelNameJudgement {
   if (chars.length === 0) return { ok: false, verdict: "required" };
   if (chars.length > CHANNEL_NAME_MAX) return { ok: false, verdict: "tooLong" };
   const re = categories();
+  if (re === null) {
+    // No property regexes in this engine: the hand list is all that can be told
+    // apart here, and anything else is left to the server's answer.
+    if (chars.some((c) => isInvisibleLetterOrMark(c.codePointAt(0)!))) {
+      return { ok: false, verdict: "hidden" };
+    }
+    return { ok: true, name };
+  }
   if (chars.some((c) => re.unseen.test(c) || isInvisibleLetterOrMark(c.codePointAt(0)!))) {
     return { ok: false, verdict: "hidden" };
   }
@@ -189,6 +207,14 @@ export function channelNameIssueKey(
 ): (typeof CHANNEL_NAME_ISSUE_KEYS)[ChannelNameIssue] {
   return CHANNEL_NAME_ISSUE_KEYS[issue];
 }
+
+/** Dictionary keys of the sentences a refused create shows (409, 403, 429; a
+ *  400 uses `CHANNEL_NAME_SERVER_REJECTED_KEY`). */
+export const CHANNEL_CREATE_FAILURE_KEYS = {
+  duplicate: "channels.createFailure.duplicate",
+  forbidden: "channels.createFailure.forbidden",
+  rateLimited: "channels.createFailure.rateLimited",
+} as const satisfies Record<string, MessageKey>;
 
 /** Korean sentences for callers that have no message service yet. They are
  *  read from the ko catalog itself, so there is one copy of the words. New
@@ -446,7 +472,9 @@ export interface CreateChannelFailure {
   message: string;
   /** Set when the sentence has a dictionary key (a 400 on the name); screens
    *  with a message service format it instead of `message`. */
-  messageKey?: typeof CHANNEL_NAME_SERVER_REJECTED_KEY;
+  messageKey?:
+    | typeof CHANNEL_NAME_SERVER_REJECTED_KEY
+    | (typeof CHANNEL_CREATE_FAILURE_KEYS)[keyof typeof CHANNEL_CREATE_FAILURE_KEYS];
 }
 
 export function createChannelFailure(error: unknown): CreateChannelFailure {
@@ -454,7 +482,8 @@ export function createChannelFailure(error: unknown): CreateChannelFailure {
     if (error.status === 409) {
       return {
         field: "name",
-        message: "같은 이름의 채널이 이미 있습니다. 다른 이름으로 다시 시도하세요.",
+        message: koSentence(CHANNEL_CREATE_FAILURE_KEYS.duplicate),
+        messageKey: CHANNEL_CREATE_FAILURE_KEYS.duplicate,
       };
     }
     if (error.status === 400) {
@@ -469,14 +498,15 @@ export function createChannelFailure(error: unknown): CreateChannelFailure {
     if (error.status === 403) {
       return {
         field: null,
-        message:
-          "채널을 만들 권한이 없습니다. 워크스페이스 소유자나 관리자에게 요청하세요.",
+        message: koSentence(CHANNEL_CREATE_FAILURE_KEYS.forbidden),
+        messageKey: CHANNEL_CREATE_FAILURE_KEYS.forbidden,
       };
     }
     if (error.status === 429) {
       return {
         field: null,
-        message: "요청이 너무 잦습니다. 잠시 뒤에 다시 시도하세요.",
+        message: koSentence(CHANNEL_CREATE_FAILURE_KEYS.rateLimited),
+        messageKey: CHANNEL_CREATE_FAILURE_KEYS.rateLimited,
       };
     }
   }

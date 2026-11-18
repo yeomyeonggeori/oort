@@ -171,6 +171,9 @@ export const messageKeys = [
   "blocked.workStateNone.serverUnreachable",
   "blocked.workStateStale.offline",
   "blocked.workStateStale.serverUnreachable",
+  "channels.createFailure.duplicate",
+  "channels.createFailure.forbidden",
+  "channels.createFailure.rateLimited",
   "channels.dmLeave.action",
   "channels.dmLeave.busy",
   "channels.dmLeave.cancel",
@@ -1861,6 +1864,9 @@ export const argumentSpecs = {
   "blocked.workStateNone.serverUnreachable": {},
   "blocked.workStateStale.offline": {},
   "blocked.workStateStale.serverUnreachable": {},
+  "channels.createFailure.duplicate": {},
+  "channels.createFailure.forbidden": {},
+  "channels.createFailure.rateLimited": {},
   "channels.dmLeave.action": {},
   "channels.dmLeave.busy": {},
   "channels.dmLeave.cancel": {},
@@ -4036,6 +4042,9 @@ export interface MessageArgs {
   "blocked.workStateNone.serverUnreachable": Record<string, never>;
   "blocked.workStateStale.offline": Record<string, never>;
   "blocked.workStateStale.serverUnreachable": Record<string, never>;
+  "channels.createFailure.duplicate": Record<string, never>;
+  "channels.createFailure.forbidden": Record<string, never>;
+  "channels.createFailure.rateLimited": Record<string, never>;
   "channels.dmLeave.action": Record<string, never>;
   "channels.dmLeave.busy": Record<string, never>;
   "channels.dmLeave.cancel": Record<string, never>;

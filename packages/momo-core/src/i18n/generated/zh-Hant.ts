@@ -2,6 +2,24 @@
 import type { MessageCatalog } from "../types";
 
 export const catalog: MessageCatalog = {
+  "channels.createFailure.duplicate": [
+    {
+      "type": 0,
+      "value": "已有同名頻道。請換一個名稱再試。"
+    }
+  ],
+  "channels.createFailure.forbidden": [
+    {
+      "type": 0,
+      "value": "你沒有建立頻道的權限。請聯絡工作區擁有者或管理員。"
+    }
+  ],
+  "channels.createFailure.rateLimited": [
+    {
+      "type": 0,
+      "value": "請求過於頻繁，請稍後再試。"
+    }
+  ],
   "channels.dmLeave.action": [
     {
       "type": 0,

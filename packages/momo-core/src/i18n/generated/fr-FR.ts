@@ -2,6 +2,24 @@
 import type { MessageCatalog } from "../types";
 
 export const catalog: MessageCatalog = {
+  "channels.createFailure.duplicate": [
+    {
+      "type": 0,
+      "value": "Un canal portant ce nom existe déjà. Essayez un autre nom."
+    }
+  ],
+  "channels.createFailure.forbidden": [
+    {
+      "type": 0,
+      "value": "Vous n'avez pas la permission de créer des canaux. Demandez à un propriétaire ou à un administrateur de l'espace de travail."
+    }
+  ],
+  "channels.createFailure.rateLimited": [
+    {
+      "type": 0,
+      "value": "Trop de requêtes. Réessayez dans un instant."
+    }
+  ],
   "channels.dmLeave.action": [
     {
       "type": 0,
@@ -125,7 +143,7 @@ export const catalog: MessageCatalog = {
   "channels.nameRule.edge": [
     {
       "type": 0,
-      "value": "Le nom doit commencer et se terminer par une lettre ou un chiffre. Les traits d’union et tirets bas ne peuvent être qu’au milieu."
+      "value": "Le nom doit commencer et se terminer par une lettre ou un chiffre. Les traits d'union et tirets bas ne peuvent être qu'au milieu."
     }
   ],
   "channels.nameRule.hidden": [
@@ -137,7 +155,7 @@ export const catalog: MessageCatalog = {
   "channels.nameRule.hint": [
     {
       "type": 0,
-      "value": "Lettres, chiffres, traits d’union (-) et tirets bas (_), jusqu’à "
+      "value": "Lettres, chiffres, traits d'union (-) et tirets bas (_), jusqu'à "
     },
     {
       "type": 2,
@@ -174,13 +192,13 @@ export const catalog: MessageCatalog = {
   "channels.nameRule.serverRejected": [
     {
       "type": 0,
-      "value": "Le serveur n’a pas accepté ce nom. Seuls les lettres, chiffres, - et _ sont autorisés."
+      "value": "Le serveur n'a pas accepté ce nom. Seuls les lettres, chiffres, - et _ sont autorisés."
     }
   ],
   "channels.nameRule.tooLong": [
     {
       "type": 0,
-      "value": "Le nom du canal peut contenir jusqu’à "
+      "value": "Le nom du canal peut contenir jusqu'à "
     },
     {
       "type": 2,
@@ -195,7 +213,7 @@ export const catalog: MessageCatalog = {
   "channels.nameRule.unsupported": [
     {
       "type": 0,
-      "value": "Seuls les lettres, chiffres, traits d’union (-) et tirets bas (_) sont autorisés."
+      "value": "Utilisez uniquement des lettres, des chiffres, des traits d'union (-) et des tirets bas (_)."
     }
   ]
 };
