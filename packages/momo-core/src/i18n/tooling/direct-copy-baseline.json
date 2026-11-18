@@ -677,6 +677,7 @@
     "clients/web/src/features/sidebar/Sidebar.tsx": {"ko": 18, "en": 1},
     "clients/web/src/features/sidebar/SidebarDestinations.tsx": {"ko": 9, "en": 0},
     "clients/web/src/features/sidebar/WorkspaceRail.tsx": {"ko": 10, "en": 0},
+    "clients/web/src/features/timeline/MessageRow.tsx": {"ko": 12, "en": 0},
     "clients/web/src/features/updates/UpdateSection.tsx": {"ko": 33, "en": 0},
     "clients/web/src/features/work/WorkPanel.tsx": {"ko": 39, "en": 0},
     "clients/web/src/features/work/WorkSessionDetail.tsx": {"ko": 49, "en": 6},

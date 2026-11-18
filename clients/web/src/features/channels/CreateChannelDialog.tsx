@@ -184,6 +184,7 @@ function CreateChannelPanel({
   const nameRef = useRef<HTMLInputElement>(null);
   const topicRef = useRef<HTMLInputElement>(null);
   const formRef = useRef<HTMLFormElement>(null);
+  const formErrorRef = useRef<HTMLParagraphElement>(null);
   // 이 다이얼로그가 닫힌 적이 있는가 — 마지막 제출 이후로(#5058). 만드는 동안 알림 클릭이 착지하면 다이얼로그는 걷히고(Esc 와 바깥
   // 클릭을 막는 것은 Radix 의 입력이라 방송은 그 규칙을 지나지 않는다) 요청은 계속 간다. 늦은 응답이 알림이 세운 목적지를
   // 덮어쓰지 않게 이 값으로 이동을 가른다. 다시 열렸어도 「닫힌 적 있음」은 남는다 — 새로 연 다이얼로그를 이 요청이 닫지 않는다.
@@ -211,6 +212,12 @@ function CreateChannelPanel({
       ? channelTopicIssueMessage(topicIssue)
       : null;
   const formError = failure && failure.field === null ? failureText(failure) : null;
+
+  // 실패 문장은 스크롤 칸의 맨 아래에 선다. 작은 창(720×480)·큰 글자(200%)에서는 그 자리가 칸 밖이라 누른 뒤 아무 일도
+  // 없는 것처럼 보였다(#5965). 문장이 설 때(같은 실패를 다시 받을 때도 새 `failure`다) 그 자리가 보이게 칸 안쪽만 옮긴다.
+  useEffect(() => {
+    if (formError) formErrorRef.current?.scrollIntoView?.({ block: "nearest" });
+  }, [failure, formError]);
 
   // A rejection about the name is a request to change the name, so the caret
   // goes there. Editing clears the failure, so this fires once per rejection
@@ -412,7 +419,7 @@ function CreateChannelPanel({
         {/* A rejection that belongs to the whole attempt rather than to one box
             (권한, 네트워크). Inline in the form, never a toast. */}
         {formError && (
-          <p className="text-meta text-danger" role="alert" data-testid="create-channel-error">
+          <p ref={formErrorRef} className="text-meta text-danger" role="alert" data-testid="create-channel-error">
             {formError}
           </p>
         )}

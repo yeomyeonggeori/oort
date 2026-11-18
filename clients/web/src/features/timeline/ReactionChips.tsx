@@ -67,7 +67,7 @@ export function ReactionChips({
         // with no reactions the entry point is the action bar (or the long-press
         // sheet); putting a permanent 「+」 under every message would draw a
         // control on every row of the channel to serve the rare one.
-        <Tooltip label="다른 반응 고르기" side="bottom">
+        <Tooltip label="다른 반응 고르기" side="top">
           <button
             type="button"
             disabled={disabled}

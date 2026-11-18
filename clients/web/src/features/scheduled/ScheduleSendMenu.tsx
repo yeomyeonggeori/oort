@@ -117,7 +117,7 @@ export function ScheduleSendMenu({
         }}
         modal={false}
       >
-        <Tooltip label={blocked ? (blockedTitle ?? undefined) : undefined} side="bottom">
+        <Tooltip label={blocked ? (blockedTitle ?? undefined) : undefined} side="top">
           <DropdownMenuTrigger asChild>
             <button
               ref={triggerRef}

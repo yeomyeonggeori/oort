@@ -152,7 +152,6 @@ import { CommandSuggestSlot, ThreadSurfaceRoot } from "./commandSuggestSlot";
 import { MessageRunStatus } from "@/features/agents/MessageRunStatus";
 import { GutterTriggerChip, MessageTriggerChip, ThreadWorkChip } from "@/features/agents/TriggerChip";
 import type { AgentRunProgress } from "@momo/core/lib/api";
-import { Tooltip } from "@/design/ui/tooltip";
 
 // =============================================================================
 // One message row (R-1 §3). Humans and agents share the SAME grid and the same
@@ -976,23 +975,23 @@ export function MessageRow({
       <div className={cn("relative shrink-0", MESSAGE_AVATAR_GUTTER_CLASS)}>
         {startsGroup ? (
           author ? (
-            <Tooltip label={`${author.displayName} @${author.handle} 프로필 열기`} side="bottom">
-              <button
-                type="button"
-                data-testid="row-avatar-profile"
-                data-row-action=""
-                aria-label={`${author.displayName} @${author.handle} 프로필 열기`}
-                onClick={(event) =>
-                  openMemberProfile(author.id, event.currentTarget)
-                }
-                className={cn(
-                  "press focus-visible:focus-ring",
-                  isAgent ? "rounded-sm" : "rounded-full"
-                )}
-              >
-                <Avatar member={author} className={MESSAGE_AVATAR_SIZE_CLASS} />
-              </button>
-            </Tooltip>
+            // 툴팁을 두지 않는다(#5965): 이름과 핸들이 바로 옆 머리 줄에 보이는 자리라 같은 글을 다시 띄울 이유가 없고, 맨 아래 글에서는
+            // 스크롤 칸에 잘리고 읽는 글을 덮는다. 이름은 `aria-label`이 진다(`title`도 되살리지 않는다).
+            <button
+              type="button"
+              data-testid="row-avatar-profile"
+              data-row-action=""
+              aria-label={`${author.displayName} @${author.handle} 프로필 열기`}
+              onClick={(event) =>
+                openMemberProfile(author.id, event.currentTarget)
+              }
+              className={cn(
+                "press focus-visible:focus-ring",
+                isAgent ? "rounded-sm" : "rounded-full"
+              )}
+            >
+              <Avatar member={author} className={MESSAGE_AVATAR_SIZE_CLASS} />
+            </button>
           ) : (
             <Avatar member={author} className={MESSAGE_AVATAR_SIZE_CLASS} />
           )
