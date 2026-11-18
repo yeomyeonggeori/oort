@@ -45,14 +45,16 @@ use axum::response::IntoResponse;
 use axum::{Extension, Json};
 use momo_auth::Principal;
 use momo_messaging::{
-    active_workspace_role, add_channel_member_in_tx, clamp_browse_limit, clamp_channel_list_limit,
-    create_channel_detailed_in_tx, db_now_in_tx, is_channel_name_conflict, judge_browse_person,
-    list_browsable_channels_in_tx, list_workspace_channels_within, normalize_channel_kind,
+    active_workspace_role, add_channel_member_in_tx, channel_summary_in_tx, clamp_browse_limit,
+    clamp_channel_list_limit, create_channel_detailed_in_tx, db_now_in_tx,
+    is_channel_name_conflict, judge_browse_person, list_browsable_channels_in_tx,
+    list_workspace_channels_within, lock_channel_edit_target_in_tx, normalize_channel_kind,
     normalize_channel_name, normalize_channel_topic, normalize_membership_role,
     remove_channel_member_in_tx, rename_channel_in_tx, self_join_channel_in_tx,
-    set_notification_pref_in_tx, validate_channel_mute, BrowsableChannel, BrowseAfter,
-    BrowsePersonRefusal, ChannelMembership, ChannelMute, ChannelRenameOutcome, ChannelRestriction,
-    ChannelSummary, CreatedChannel, MutedUntilInvalid, NewChannel, SelfJoin,
+    set_channel_browse_listed_in_tx, set_notification_pref_in_tx, validate_channel_mute,
+    BrowsableChannel, BrowseAfter, BrowseListedChange, BrowsePersonRefusal, ChannelMembership,
+    ChannelMute, ChannelRenameOutcome, ChannelRestriction, ChannelSummary, CreatedChannel,
+    MutedUntilInvalid, NewChannel, SelfJoin,
 };
 use serde::Deserialize;
 use uuid::Uuid;
@@ -62,7 +64,7 @@ use crate::dto::{
     AddChannelMemberRequest, BrowseChannelDto, BrowseChannelsQuery, BrowseChannelsResponse,
     ChannelDto, ChannelJoinResponse, ChannelMembershipDto, ChannelMembershipResponse,
     CreateChannelRequest, CreateChannelResponse, NotificationPrefResponse, UpdateChannelResponse,
-    UpdateNotificationPrefRequest, UpdatedChannelDto, WorkspaceChannelsResponse,
+    UpdateNotificationPrefRequest, WorkspaceChannelsResponse,
 };
 use crate::error::ApiError;
 use crate::routes::shared::{
@@ -256,14 +258,16 @@ pub async fn create(
 
 /// The fields `PATCH …/channels/{ch}` knows. A body is a partial update: only
 /// the keys present change, an unknown key is a 400 (never silently ignored),
-/// and a body with no known key is a 400. Later pieces add their key to
+/// and a body with no known key is a 400. A later piece adds its key to
 /// [`KNOWN_CHANNEL_PATCH_FIELDS`], to [`ChannelPatch`] and to the transaction in
-/// [`update`] — one piece each.
-const KNOWN_CHANNEL_PATCH_FIELDS: &[&str] = &["name"];
+/// [`update`] — judged before the first write, applied after.
+const KNOWN_CHANNEL_PATCH_FIELDS: &[&str] = &["name", "browseListed"];
 
 struct ChannelPatch {
     /// Already folded and judged by the same function the create route uses.
     name: Option<String>,
+    /// ADR-0224 D2 — shown in channel browse or not.
+    browse_listed: Option<bool>,
 }
 
 fn parse_channel_patch(body: &serde_json::Value) -> Result<ChannelPatch, ApiError> {
@@ -278,7 +282,10 @@ fn parse_channel_patch(body: &serde_json::Value) -> Result<ChannelPatch, ApiErro
             "unknown channel field '{unknown}'"
         )));
     }
-    let mut patch = ChannelPatch { name: None };
+    let mut patch = ChannelPatch {
+        name: None,
+        browse_listed: None,
+    };
     if let Some(raw) = object.get("name") {
         let raw = raw
             .as_str()
@@ -288,21 +295,44 @@ fn parse_channel_patch(body: &serde_json::Value) -> Result<ChannelPatch, ApiErro
                 .map_err(|invalid| ApiError::bad_request(invalid.to_string()))?,
         );
     }
-    if patch.name.is_none() {
+    if let Some(raw) = object.get("browseListed") {
+        patch.browse_listed = Some(
+            raw.as_bool()
+                .ok_or_else(|| ApiError::bad_request("browseListed must be a boolean"))?,
+        );
+    }
+    if patch.name.is_none() && patch.browse_listed.is_none() {
         return Err(ApiError::bad_request("no channel field to update"));
     }
     Ok(patch)
 }
 
+/// The one 404 of the channel PATCH: unknown id, another workspace's, outside the
+/// target condition, and a DM or archived channel for `name` — byte for byte.
+const CHANNEL_EDIT_NOT_FOUND: &str = "channel not found";
+
 /// `PATCH /v1/workspaces/{ws}/channels/{ch}` — rename a public or private
-/// channel (ADR-0225 D10). Human only (`require_human`, and the route is on no
-/// agent / developer-token / narrow-token table), workspace owner or admin
-/// only (ADR-0128). Refusals, in order: 400 (body shape, name rule — before
-/// any DB access, same messages as create), 403 (not admin), 404 (not a live
-/// public/private channel of this workspace, or a private channel the admin is
-/// not in), 409 `general_channel_locked`, 409 `channel name already exists`.
-/// The same name again is a 200 with no audit row. Writes audit
-/// `channel.renamed`; no message, no realtime event.
+/// channel (ADR-0225 D10) and/or switch whether a public channel is shown in
+/// channel browse (ADR-0224 D2, `browseListed`). Human only (`require_human`,
+/// and the route is on no agent / developer-token / narrow-token table),
+/// workspace owner or admin only (ADR-0128).
+///
+/// **One target condition** ([`lock_channel_edit_target_in_tx`]): a channel the
+/// caller is a live member of, or one open to people (public, not archived,
+/// listed in browse). Every other id — a private channel or a browse-off public
+/// channel the caller does not sit in included — is the same 404 as an unknown
+/// id, for every field.
+///
+/// Refusals, in order: 400 (body shape, name rule — before any DB access), 403
+/// (not admin), 404 (outside the target condition; a DM or archived channel for
+/// `name`), 409 `channel_not_listable` (`browseListed` on a private, DM or
+/// archived channel inside the target condition), 409 `general_channel_locked`,
+/// 409 `channel name already exists`. Every piece is judged before the first
+/// write, so a refused request changes nothing; `name` and `browseListed`
+/// together are one transaction. A value the channel already has is a 200 with
+/// no write and no audit row. Audit `channel.renamed` / `channel.browse_listed`;
+/// no message, no realtime event. The answer is the channel in the channel
+/// list's shape.
 pub async fn update(
     State(state): State<AppState>,
     Extension(principal): Extension<Principal>,
@@ -315,7 +345,7 @@ pub async fn update(
     let patch = parse_channel_patch(&body)?;
     let via_token_id = audit_via_token_id(&principal);
 
-    let outcome: DbRejectable<momo_messaging::RenamedChannel> =
+    let outcome: DbRejectable<ChannelSummary> =
         agent_tenant_tx(&state.pool, workspace_id, move |conn| {
             Box::pin(async move {
                 let Some(role) =
@@ -328,53 +358,102 @@ pub async fn update(
                         "workspace owner or admin role required",
                     )));
                 }
-                // The `name` piece. A later field adds its own piece beside it.
-                let Some(new_name) = patch.name.as_deref() else {
-                    return Ok(Err(ApiError::bad_request("no channel field to update")));
-                };
-                match rename_channel_in_tx(
+                let Some(target) = lock_channel_edit_target_in_tx(
                     conn,
                     workspace_id,
                     channel_id,
                     principal.member_id,
-                    new_name,
                 )
                 .await?
-                {
-                    ChannelRenameOutcome::NotFound => {
-                        Ok(Err(ApiError::not_found("channel not found")))
+                else {
+                    return Ok(Err(ApiError::not_found(CHANNEL_EDIT_NOT_FOUND)));
+                };
+                // Judge every piece before the first write: a rejection commits.
+                if patch.name.is_some() && !target.renamable() {
+                    return Ok(Err(ApiError::not_found(CHANNEL_EDIT_NOT_FOUND)));
+                }
+                if patch.browse_listed.is_some() && !target.listable() {
+                    return Ok(Err(channel_not_listable()));
+                }
+                // The `name` piece. Its own refusals come before its only write.
+                if let Some(new_name) = patch.name.as_deref() {
+                    match rename_channel_in_tx(conn, &target, new_name).await? {
+                        ChannelRenameOutcome::NotFound => {
+                            return Ok(Err(ApiError::not_found(CHANNEL_EDIT_NOT_FOUND)))
+                        }
+                        ChannelRenameOutcome::GeneralLocked => {
+                            return Ok(Err(ApiError::coded(
+                                StatusCode::CONFLICT,
+                                "general_channel_locked",
+                                "the general channel cannot be renamed or taken as a name",
+                            )))
+                        }
+                        ChannelRenameOutcome::NameTaken => {
+                            return Ok(Err(ApiError::new(
+                                StatusCode::CONFLICT,
+                                "channel name already exists",
+                            )))
+                        }
+                        ChannelRenameOutcome::Unchanged(_) => {}
+                        ChannelRenameOutcome::Renamed {
+                            previous_name,
+                            channel,
+                        } => {
+                            momo_db::audit::write_audit(
+                                conn,
+                                &momo_db::audit::AuditEntry::new(workspace_id, "channel.renamed")
+                                    .by(principal.member_id)
+                                    .target("channel", channel_id)
+                                    .via_token(via_token_id)
+                                    .with_schema(
+                                        "momo.channel.renamed.v1",
+                                        serde_json::json!({
+                                            "old": previous_name,
+                                            "new": channel.name,
+                                        }),
+                                    ),
+                            )
+                            .await?;
+                        }
                     }
-                    ChannelRenameOutcome::GeneralLocked => Ok(Err(ApiError::coded(
-                        StatusCode::CONFLICT,
-                        "general_channel_locked",
-                        "the general channel cannot be renamed or taken as a name",
-                    ))),
-                    ChannelRenameOutcome::NameTaken => Ok(Err(ApiError::new(
-                        StatusCode::CONFLICT,
-                        "channel name already exists",
-                    ))),
-                    ChannelRenameOutcome::Unchanged(channel) => Ok(Ok(channel)),
-                    ChannelRenameOutcome::Renamed {
-                        previous_name,
-                        channel,
-                    } => {
-                        momo_db::audit::write_audit(
-                            conn,
-                            &momo_db::audit::AuditEntry::new(workspace_id, "channel.renamed")
+                }
+                // The `browseListed` piece (ADR-0224 D2). Memberships stay as they are.
+                if let Some(listed) = patch.browse_listed {
+                    match set_channel_browse_listed_in_tx(conn, &target, listed).await? {
+                        BrowseListedChange::NotListable => return Ok(Err(channel_not_listable())),
+                        BrowseListedChange::Unchanged => {}
+                        BrowseListedChange::Changed { previous } => {
+                            momo_db::audit::write_audit(
+                                conn,
+                                &momo_db::audit::AuditEntry::new(
+                                    workspace_id,
+                                    "channel.browse_listed",
+                                )
                                 .by(principal.member_id)
                                 .target("channel", channel_id)
                                 .via_token(via_token_id)
                                 .with_schema(
-                                    "momo.channel.renamed.v1",
+                                    "momo.channel.browse_listed.v1",
                                     serde_json::json!({
-                                        "old": previous_name,
-                                        "new": channel.name,
+                                        "old": previous,
+                                        "new": listed,
                                     }),
                                 ),
-                        )
-                        .await?;
-                        Ok(Ok(channel))
+                            )
+                            .await?;
+                        }
                     }
+                }
+                // The row the channel list shows, read without the list's membership
+                // join: an admin may edit a channel open to people without sitting in it.
+                match channel_summary_in_tx(conn, workspace_id, principal.member_id, channel_id)
+                    .await?
+                {
+                    Some(summary) => Ok(Ok(summary)),
+                    None => Ok(Err(ApiError::internal(
+                        "channels.update",
+                        "edited channel is missing",
+                    ))),
                 }
             })
         })
@@ -388,16 +467,21 @@ pub async fn update(
         ))),
         other => other,
     };
-    let renamed = settle_db("channels.update", outcome)?;
+    let summary = settle_db("channels.update", outcome)?;
     Ok(Json(UpdateChannelResponse {
-        channel: UpdatedChannelDto {
-            id: renamed.id.to_string(),
-            workspace_id: renamed.workspace_id.to_string(),
-            kind: renamed.kind.as_db_label().to_string(),
-            name: renamed.name,
-            topic: renamed.topic,
-        },
+        channel: channel_dto(&summary),
     }))
+}
+
+/// `browseListed` on a channel inside the target condition that is not a live
+/// public channel (ADR-0224 D2): the caller already sees it, so a 409 tells them
+/// nothing new.
+fn channel_not_listable() -> ApiError {
+    ApiError::coded(
+        StatusCode::CONFLICT,
+        "channel_not_listable",
+        "only a live public channel can be shown in channel browse",
+    )
 }
 
 // ---------------------------------------------------------------------------

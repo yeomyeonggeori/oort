@@ -5912,21 +5912,39 @@ paths:
     patch:
       tags: [channels]
       operationId: updateChannel
-      summary: Rename a public/private channel (workspace admin only, humans only).
+      summary: Rename a channel or switch its browse listing (workspace admin only, humans only).
       description: >
-        ADR-0225 D10. A partial update: only the fields present change. Today
-        the one field is `name`; an unknown field is a 400 (never ignored) and a
-        body with no known field is a 400. The name goes through the same
-        normalisation and rules as `createChannel`, and the response carries the
-        stored name.
+        ADR-0225 D10 and ADR-0224 D2. A partial update: only the fields present
+        change. The fields are `name` and `browseListed`; an unknown field is a
+        400 (never ignored) and a body with no known field is a 400. Both fields
+        in one body are applied in one transaction, and every field is judged
+        before anything is written, so a refused body changes nothing. The
+        name goes through the same normalisation and rules as `createChannel`.
+        The response is the channel as the edit left it, in the same `Channel`
+        shape as the channel list.
 
 
         Human owners and admins only. Agent credentials, developer tokens and
-        the narrow push tokens never reach this route. Targets are live public
-        and private channels of the workspace. A direct message, a group
-        message, an archived channel, a channel of another workspace, an unknown
-        id and a private channel the caller is not a live member of all answer
-        the same 404. A name that already belongs to a live channel
+        the narrow push tokens never reach this route. The route reaches a
+        channel of the workspace that the caller is a live member of, or a
+        public channel that is not archived and is listed in browse. Every other
+        id (a private channel or a public channel with `browseListed` off that
+        the caller does not sit in, a channel of another workspace, an unknown
+        id) answers the same 404, for every field. For `name`, a direct
+        message, a group message and an archived channel are that 404 as well.
+
+
+        `browseListed` (ADR-0224 D2) shows or hides a live public channel in
+        channel browse. A private channel, a direct message or an archived
+        channel the caller sits in is a 409 with `error.code`
+        `channel_not_listable`, whichever value is sent. Switching it off does
+        not change anyone's membership. Each switch writes the audit record
+        `channel.browse_listed` (`old`, `new`); sending the value the channel
+        already has is a 200 and writes nothing. An admin who is not in the
+        channel and switches it off can no longer reach it through this route.
+
+
+        A name that already belongs to a live channel
         (case-insensitive, any non-DM kind) is a 409. `general` is locked in both
         directions: renaming it, or renaming another channel to it, is a 409
         with `error.code` `general_channel_locked`. Sending the name the channel
@@ -5956,8 +5974,8 @@ paths:
         "400":
           description: >
             Invalid channel id, a body that is not an object, an unknown field,
-            no known field, or a name the rules refuse (the same two messages as
-            `createChannel`).
+            no known field, a `browseListed` that is not a boolean, or a name the
+            rules refuse (the same two messages as `createChannel`).
           content:
             application/json:
               schema:
@@ -5973,15 +5991,20 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
         "404":
-          description: Not a live public/private channel the caller may rename.
+          description: >
+            Outside the route's reach (see above), or a direct message, group
+            message or archived channel for `name`. The same body as an unknown
+            id.
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
         "409":
           description: >
-            The name already belongs to a live channel (no `error.code`), or the
-            `general` lock (`error.code` `general_channel_locked`).
+            The name already belongs to a live channel (no `error.code`), the
+            `general` lock (`error.code` `general_channel_locked`), or
+            `browseListed` on a channel that is not a live public channel
+            (`error.code` `channel_not_listable`).
           content:
             application/json:
               schema:
@@ -23640,28 +23663,18 @@ components:
           description: >-
             The new name, normalised and judged exactly like
             `CreateChannelRequest.name` (ADR-0225 D1-D5).
+        browseListed:
+          type: boolean
+          description: >-
+            Show (`true`) or hide (`false`) a live public channel in channel
+            browse (ADR-0224 D2). Memberships are not changed.
 
     UpdateChannelResponse:
       type: object
       required: [channel]
       properties:
         channel:
-          type: object
-          required: [id, workspaceId, kind, name]
-          properties:
-            id:
-              type: string
-              format: uuid
-            workspaceId:
-              type: string
-              format: uuid
-            kind:
-              type: string
-              enum: [public, private]
-            name:
-              type: string
-            topic:
-              type: string
+          $ref: "#/components/schemas/Channel"
 
     MembershipRole:
       type: string
