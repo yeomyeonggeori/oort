@@ -24,11 +24,16 @@ use std::sync::Mutex;
 use momo_auth::{
     approve_hosted_oauth_request_in_tx, channel_is_open_to_member_in_tx,
     confirm_hosted_connection_in_tx, grant_hosted_channels_in_tx, HostedConnectionApproval,
-    HostedMutation, HostedOauthRefusal, HostedOauthRequestClaims, HOSTED_AGENT_PORT_AUDIENCE,
+    HostedMutation, HostedOauthRefusal, HostedOauthRequestClaims, WorkspaceRole,
+    HOSTED_AGENT_PORT_AUDIENCE,
 };
 use momo_db::migrate::{default_migrations_dir, run_migrations, SeedMode};
 use momo_db::{with_tenant_tx, PgPool};
 use momo_messaging::{send_message_in_tx, NewMessage};
+use momo_settings::{
+    change_workspace_role_in_tx, remove_workspace_member_in_tx, set_member_status_in_tx,
+    StatusTransition,
+};
 use momo_workspace_actions::action_resolve::{
     resolve_action_with_origin_in_tx, resolve_visible_channel_in_tx, ArgsOrigin, CardAudience,
     CHANNEL_NAME_LOOKALIKE, OWNER_CANNOT_SEE,
@@ -609,6 +614,14 @@ async fn the_team_ai_names_a_closed_channel_only_in_a_members_own_dm() {
         &[f.outsider, f.helper],
     )
     .await;
+    let pair = channel(
+        &p.su,
+        f.ws,
+        &format!("dm-pair-{tag}"),
+        Kind::Dm,
+        &[f.insider, f.outsider],
+    )
+    .await;
     let names_in = |requester: Uuid, room: Uuid| {
         let worker = p.worker.clone();
         let ws = f.ws;
@@ -642,6 +655,11 @@ async fn the_team_ai_names_a_closed_channel_only_in_a_members_own_dm() {
         0,
         "a member, in a room with a guest"
     );
+    assert_eq!(
+        closed_count(&names_in(f.insider, pair).await),
+        0,
+        "a member, in a two-person DM without the team AI"
+    );
 
     // The member's own DM with the team AI: their view, public channels only.
     let insider_dm = names_in(f.insider, f.helper_dm).await;
@@ -664,6 +682,198 @@ async fn the_team_ai_names_a_closed_channel_only_in_a_members_own_dm() {
         assert!(!names.contains(&f.names.archived));
         assert!(!names.contains(&f.names.elsewhere));
     }
+}
+
+// --- the team AI's 1:1 DM is the conversation only the two were ever in (#5924) ----------
+
+/// #5924: the requester's own 1:1 DM with the team AI (their whole view, and the public channels
+/// they are in among the names) is a conversation that only the two of them were ever in. A third
+/// person who left, was suspended or was removed from the workspace still counts — they could read
+/// the answers again on coming back — so the room keeps the narrow rule when two remain.
+#[tokio::test]
+#[ignore]
+async fn a_conversation_someone_else_was_in_is_not_the_one_to_one_dm() {
+    let p = pools().await;
+    let f = seed(&p).await;
+    let tag = &f.ws.simple().to_string()[..8];
+    let (ws, owner) = (f.ws, f.owner);
+
+    let left = human(&p.su, ws, "오세린", "member").await;
+    let dm_left = channel(
+        &p.su,
+        ws,
+        &format!("dm-left-{tag}"),
+        Kind::Dm,
+        &[f.insider, left, f.helper],
+    )
+    .await;
+    sqlx::query("UPDATE membership SET left_at = now() WHERE channel_id = $1 AND member_id = $2")
+        .bind(dm_left)
+        .bind(left)
+        .execute(&p.su)
+        .await
+        .expect("leave");
+
+    let suspended = human(&p.su, ws, "강민서", "member").await;
+    let dm_suspended = channel(
+        &p.su,
+        ws,
+        &format!("dm-suspended-{tag}"),
+        Kind::Dm,
+        &[f.insider, suspended, f.helper],
+    )
+    .await;
+    with_tenant_tx(&p.app, ws, move |conn| {
+        Box::pin(async move {
+            set_member_status_in_tx(conn, ws, owner, suspended, StatusTransition::Suspend).await
+        })
+    })
+    .await
+    .expect("admin tx")
+    .expect("suspended");
+
+    // Removal deletes the person's channel memberships; the conversation keeps the mark that a
+    // third member was seated in it (an agent admitted into a DM).
+    let removed = human(&p.su, ws, "임태오", "member").await;
+    let dm_removed = channel(
+        &p.su,
+        ws,
+        &format!("dm-removed-{tag}"),
+        Kind::Dm,
+        &[f.insider, removed, f.helper],
+    )
+    .await;
+    sqlx::query("UPDATE channel SET dm_key = 'admitted:' || id::text WHERE id = $1")
+        .bind(dm_removed)
+        .execute(&p.su)
+        .await
+        .expect("admitted mark");
+    with_tenant_tx(&p.app, ws, move |conn| {
+        Box::pin(async move {
+            remove_workspace_member_in_tx(conn, ws, owner, removed, false, None).await
+        })
+    })
+    .await
+    .expect("admin tx")
+    .expect("removed");
+
+    let dm_self = channel(&p.su, ws, &format!("dm-self-{tag}"), Kind::Dm, &[f.insider]).await;
+    let dm_other_agent = channel(
+        &p.su,
+        ws,
+        &format!("dm-agent-{tag}"),
+        Kind::Dm,
+        &[f.insider, f.seated],
+    )
+    .await;
+
+    let rows = [
+        ("1 only the requester and the team AI", f.helper_dm, true),
+        ("2 a third person left", dm_left, false),
+        ("3 a third person was suspended", dm_suspended, false),
+        (
+            "4 a third person was removed from the workspace",
+            dm_removed,
+            false,
+        ),
+        ("5 the requester alone", dm_self, false),
+        ("6 an agent that is not the team AI", dm_other_agent, false),
+    ];
+    let mut wrong = Vec::new();
+    for (label, room, one_to_one) in rows {
+        let mut tx = p.worker.begin().await.expect("begin");
+        let scope = load_scope_in_tx(&mut tx, ws, f.helper, f.insider, room)
+            .await
+            .expect("scope");
+        let roster = team_ai::load_roster_in_tx(&mut tx, ws, f.insider, room)
+            .await
+            .expect("roster");
+        tx.rollback().await.expect("rollback");
+        let whole_view = matches!(scope.audience, Audience::RequesterView);
+        let named = roster
+            .channels
+            .iter()
+            .filter(|n| **n == f.names.closed)
+            .count();
+        let read = carries(
+            &read_channel(&p, &f, f.insider, room, &f.names.closed).await,
+            CLOSED_MARKER,
+        );
+        if whole_view != one_to_one || named != usize::from(one_to_one) || read != one_to_one {
+            wrong.push(format!(
+                "{label}: whole view {whole_view}, closed name {named}, closed text {read}"
+            ));
+        }
+    }
+    assert!(wrong.is_empty(), "{wrong:#?}");
+}
+
+/// #5924 · ADR-0219: a guest is in the channels they were invited to and no others, so a context
+/// a guest gets — their own DM with the team AI, or any room with a guest in it — names no channel
+/// the guest is not in. In their own DM the guest still gets the public channels they are in.
+#[tokio::test]
+#[ignore]
+async fn a_guests_context_names_no_channel_the_guest_is_not_in() {
+    let p = pools().await;
+    let f = seed(&p).await;
+    let tag = &f.ws.simple().to_string()[..8];
+    let (ws, owner) = (f.ws, f.owner);
+
+    // A real guest: a member in `mine` whom an administrator then makes a guest.
+    let guest = human(&p.su, ws, "한지우", "member").await;
+    let mine_name = format!("mine-{tag}");
+    let mine = channel(&p.su, ws, &mine_name, Kind::Listed, &[owner, guest]).await;
+    let room_name = format!("with-guest-{tag}");
+    let room = channel(
+        &p.su,
+        ws,
+        &room_name,
+        Kind::Listed,
+        &[f.insider, guest, f.helper],
+    )
+    .await;
+    let dm_name = format!("dm-guest-{tag}");
+    let dm = channel(&p.su, ws, &dm_name, Kind::Dm, &[guest, f.helper]).await;
+    with_tenant_tx(&p.app, ws, move |conn| {
+        Box::pin(async move {
+            change_workspace_role_in_tx(conn, ws, owner, guest, WorkspaceRole::Guest).await
+        })
+    })
+    .await
+    .expect("admin tx")
+    .expect("made a guest");
+    let _ = mine;
+
+    let names_in = |requester: Uuid, room: Uuid| {
+        let worker = p.worker.clone();
+        async move {
+            let mut tx = worker.begin().await.expect("begin");
+            let roster = team_ai::load_roster_in_tx(&mut tx, ws, requester, room)
+                .await
+                .expect("roster");
+            tx.rollback().await.expect("rollback");
+            roster.channels
+        }
+    };
+    let guest_is_in = [&mine_name, &room_name, &dm_name];
+    let mut wrong = Vec::new();
+    for (label, requester, place) in [
+        ("the guest, in their own DM", guest, dm),
+        ("the guest, in a room", guest, room),
+        ("a member, in a room with the guest", f.insider, room),
+    ] {
+        let names = names_in(requester, place).await;
+        let outside: Vec<&String> = names.iter().filter(|n| !guest_is_in.contains(n)).collect();
+        if !outside.is_empty() {
+            wrong.push(format!("{label}: {outside:?}"));
+        }
+    }
+    assert!(wrong.is_empty(), "{wrong:#?}");
+    let own_dm = names_in(guest, dm).await;
+    assert!(
+        own_dm.contains(&mine_name),
+        "a public channel the guest is in is still named in their DM"
+    );
 }
 
 // --- ③ an agent's name lookup --------------------------------------------------------
