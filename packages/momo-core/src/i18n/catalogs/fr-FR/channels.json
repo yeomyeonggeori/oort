@@ -57,5 +57,10 @@
   "channels.browse.offline": "Vous êtes hors ligne et ne pouvez pas rejoindre pour l'instant. Réessayez une fois connecté.",
   "channels.browse.menuLabel": "Ajouter un canal",
   "channels.browse.menuCreate": "Créer un canal",
-  "channels.browse.paletteGroup": "Canaux publics que vous n'avez pas rejoints"
+  "channels.browse.paletteGroup": "Canaux publics que vous n'avez pas rejoints",
+  "channels.browse.closeAria": "Fermer le navigateur de canaux",
+  "channels.browse.loading": "Chargement des canaux.",
+  "channels.browse.joining": "Adhésion en cours",
+  "channels.browse.emptyAdminDetailPhone": "Pour afficher ici un canal existant, activez « Afficher dans le navigateur de canaux » dans son menu, sur le web ou dans l’application de bureau.",
+  "channels.browse.homeRowHint": "Ouvre le navigateur de canaux avec ce nom."
 }

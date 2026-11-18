@@ -14,6 +14,12 @@ export const catalog: MessageCatalog = {
       "value": "关闭"
     }
   ],
+  "channels.browse.closeAria": [
+    {
+      "type": 0,
+      "value": "关闭频道浏览"
+    }
+  ],
   "channels.browse.default": [
     {
       "type": 0,
@@ -32,6 +38,12 @@ export const catalog: MessageCatalog = {
       "value": "在频道菜单中打开“在浏览中显示”，现有频道就会出现在这里。"
     }
   ],
+  "channels.browse.emptyAdminDetailPhone": [
+    {
+      "type": 0,
+      "value": "在网页版或桌面版的频道菜单中打开“在浏览中显示”，现有频道就会出现在这里。"
+    }
+  ],
   "channels.browse.emptyHeadline": [
     {
       "type": 0,
@@ -48,6 +60,12 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "未加入的频道"
+    }
+  ],
+  "channels.browse.homeRowHint": [
+    {
+      "type": 0,
+      "value": "用这个名称打开频道浏览。"
     }
   ],
   "channels.browse.join": [
@@ -84,6 +102,12 @@ export const catalog: MessageCatalog = {
       "value": "无法加入。请重试。"
     }
   ],
+  "channels.browse.joining": [
+    {
+      "type": 0,
+      "value": "正在加入"
+    }
+  ],
   "channels.browse.joinNetwork": [
     {
       "type": 0,
@@ -110,6 +134,12 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "无法加载频道列表。请稍后再试。"
+    }
+  ],
+  "channels.browse.loading": [
+    {
+      "type": 0,
+      "value": "正在加载频道列表。"
     }
   ],
   "channels.browse.loadMore": [

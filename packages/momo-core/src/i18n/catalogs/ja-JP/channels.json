@@ -57,5 +57,10 @@
   "channels.browse.offline": "オフラインのため今は参加できません。接続したらもう一度お試しください。",
   "channels.browse.menuLabel": "チャンネルを追加",
   "channels.browse.menuCreate": "新しいチャンネルを作成",
-  "channels.browse.paletteGroup": "参加していない公開チャンネル"
+  "channels.browse.paletteGroup": "参加していない公開チャンネル",
+  "channels.browse.closeAria": "チャンネル一覧を閉じる",
+  "channels.browse.loading": "チャンネル一覧を読み込んでいます。",
+  "channels.browse.joining": "参加しています",
+  "channels.browse.emptyAdminDetailPhone": "既存のチャンネルは、Web またはデスクトップのチャンネルメニューで「チャンネル一覧に表示」をオンにするとここに表示されます。",
+  "channels.browse.homeRowHint": "この名前でチャンネル一覧を開きます。"
 }

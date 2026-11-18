@@ -57,5 +57,10 @@
   "channels.browse.offline": "Estás sin conexión y no puedes unirte ahora. Inténtalo de nuevo cuando te conectes.",
   "channels.browse.menuLabel": "Agregar un canal",
   "channels.browse.menuCreate": "Crear un canal",
-  "channels.browse.paletteGroup": "Canales públicos a los que no te has unido"
+  "channels.browse.paletteGroup": "Canales públicos a los que no te has unido",
+  "channels.browse.closeAria": "Cerrar exploración de canales",
+  "channels.browse.loading": "Cargando canales.",
+  "channels.browse.joining": "Uniéndote",
+  "channels.browse.emptyAdminDetailPhone": "Para que un canal existente aparezca aquí, activa «Mostrar al explorar» en el menú del canal en la web o en la app de escritorio.",
+  "channels.browse.homeRowHint": "Abre la exploración de canales con este nombre."
 }

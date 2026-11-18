@@ -1152,6 +1152,12 @@ export const catalog: MessageCatalog = {
       "value": "Close"
     }
   ],
+  "channels.browse.closeAria": [
+    {
+      "type": 0,
+      "value": "Close channel browser"
+    }
+  ],
   "channels.browse.default": [
     {
       "type": 0,
@@ -1170,6 +1176,12 @@ export const catalog: MessageCatalog = {
       "value": "To list an existing channel here, turn on “Show in channel browser” in its channel menu."
     }
   ],
+  "channels.browse.emptyAdminDetailPhone": [
+    {
+      "type": 0,
+      "value": "To list an existing channel here, turn on “Show in channel browser” in its channel menu on the web or desktop app."
+    }
+  ],
   "channels.browse.emptyHeadline": [
     {
       "type": 0,
@@ -1186,6 +1198,12 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "Channels you haven't joined"
+    }
+  ],
+  "channels.browse.homeRowHint": [
+    {
+      "type": 0,
+      "value": "Opens the channel browser with this name."
     }
   ],
   "channels.browse.join": [
@@ -1222,6 +1240,12 @@ export const catalog: MessageCatalog = {
       "value": "Couldn't join. Try again."
     }
   ],
+  "channels.browse.joining": [
+    {
+      "type": 0,
+      "value": "Joining"
+    }
+  ],
   "channels.browse.joinNetwork": [
     {
       "type": 0,
@@ -1248,6 +1272,12 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "Couldn't load the channel list. Try again in a moment."
+    }
+  ],
+  "channels.browse.loading": [
+    {
+      "type": 0,
+      "value": "Loading channels."
     }
   ],
   "channels.browse.loadMore": [

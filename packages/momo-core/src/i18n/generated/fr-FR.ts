@@ -14,6 +14,12 @@ export const catalog: MessageCatalog = {
       "value": "Fermer"
     }
   ],
+  "channels.browse.closeAria": [
+    {
+      "type": 0,
+      "value": "Fermer le navigateur de canaux"
+    }
+  ],
   "channels.browse.default": [
     {
       "type": 0,
@@ -32,6 +38,12 @@ export const catalog: MessageCatalog = {
       "value": "Pour afficher ici un canal existant, activez « Afficher dans le navigateur de canaux » dans son menu."
     }
   ],
+  "channels.browse.emptyAdminDetailPhone": [
+    {
+      "type": 0,
+      "value": "Pour afficher ici un canal existant, activez « Afficher dans le navigateur de canaux » dans son menu, sur le web ou dans l’application de bureau."
+    }
+  ],
   "channels.browse.emptyHeadline": [
     {
       "type": 0,
@@ -48,6 +60,12 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "Canaux que vous n'avez pas rejoints"
+    }
+  ],
+  "channels.browse.homeRowHint": [
+    {
+      "type": 0,
+      "value": "Ouvre le navigateur de canaux avec ce nom."
     }
   ],
   "channels.browse.join": [
@@ -84,6 +102,12 @@ export const catalog: MessageCatalog = {
       "value": "Impossible de rejoindre. Réessayez."
     }
   ],
+  "channels.browse.joining": [
+    {
+      "type": 0,
+      "value": "Adhésion en cours"
+    }
+  ],
   "channels.browse.joinNetwork": [
     {
       "type": 0,
@@ -110,6 +134,12 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "Impossible de charger la liste des canaux. Réessayez dans un instant."
+    }
+  ],
+  "channels.browse.loading": [
+    {
+      "type": 0,
+      "value": "Chargement des canaux."
     }
   ],
   "channels.browse.loadMore": [

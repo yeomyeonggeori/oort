@@ -57,5 +57,10 @@
   "channels.browse.offline": "You're offline, so you can't join right now. Try again once you're connected.",
   "channels.browse.menuLabel": "Add a channel",
   "channels.browse.menuCreate": "Create a channel",
-  "channels.browse.paletteGroup": "Public channels you haven't joined"
+  "channels.browse.paletteGroup": "Public channels you haven't joined",
+  "channels.browse.closeAria": "Close channel browser",
+  "channels.browse.loading": "Loading channels.",
+  "channels.browse.joining": "Joining",
+  "channels.browse.emptyAdminDetailPhone": "To list an existing channel here, turn on “Show in channel browser” in its channel menu on the web or desktop app.",
+  "channels.browse.homeRowHint": "Opens the channel browser with this name."
 }

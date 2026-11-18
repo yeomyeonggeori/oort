@@ -1131,6 +1131,12 @@ export const catalog: MessageCatalog = {
       "value": "닫기"
     }
   ],
+  "channels.browse.closeAria": [
+    {
+      "type": 0,
+      "value": "채널 둘러보기 닫기"
+    }
+  ],
   "channels.browse.default": [
     {
       "type": 0,
@@ -1149,6 +1155,12 @@ export const catalog: MessageCatalog = {
       "value": "이미 있는 채널은 채널 메뉴에서 「둘러보기에 보이기」를 켜면 여기에 보여요."
     }
   ],
+  "channels.browse.emptyAdminDetailPhone": [
+    {
+      "type": 0,
+      "value": "이미 있는 채널은 웹이나 데스크탑의 채널 메뉴에서 「둘러보기에 보이기」를 켜면 여기에 보여요."
+    }
+  ],
   "channels.browse.emptyHeadline": [
     {
       "type": 0,
@@ -1165,6 +1177,12 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "참여하지 않은 채널"
+    }
+  ],
+  "channels.browse.homeRowHint": [
+    {
+      "type": 0,
+      "value": "채널 둘러보기를 이 이름으로 열어요."
     }
   ],
   "channels.browse.join": [
@@ -1201,6 +1219,12 @@ export const catalog: MessageCatalog = {
       "value": "참여하지 못했어요. 다시 시도해 주세요."
     }
   ],
+  "channels.browse.joining": [
+    {
+      "type": 0,
+      "value": "참여하는 중"
+    }
+  ],
   "channels.browse.joinNetwork": [
     {
       "type": 0,
@@ -1227,6 +1251,12 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "채널 목록을 불러오지 못했어요. 잠시 뒤에 다시 시도해 주세요."
+    }
+  ],
+  "channels.browse.loading": [
+    {
+      "type": 0,
+      "value": "채널 목록을 불러오는 중이에요."
     }
   ],
   "channels.browse.loadMore": [

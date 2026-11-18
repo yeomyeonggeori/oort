@@ -57,5 +57,10 @@
   "channels.browse.offline": "目前離線，暫時無法加入。連線後請再試一次。",
   "channels.browse.menuLabel": "新增頻道",
   "channels.browse.menuCreate": "建立新頻道",
-  "channels.browse.paletteGroup": "尚未加入的公開頻道"
+  "channels.browse.paletteGroup": "尚未加入的公開頻道",
+  "channels.browse.closeAria": "關閉頻道瀏覽",
+  "channels.browse.loading": "正在載入頻道列表。",
+  "channels.browse.joining": "正在加入",
+  "channels.browse.emptyAdminDetailPhone": "在網頁版或桌面版的頻道選單中開啟「在瀏覽中顯示」，現有頻道就會出現在這裡。",
+  "channels.browse.homeRowHint": "用這個名稱開啟頻道瀏覽。"
 }

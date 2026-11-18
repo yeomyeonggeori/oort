@@ -173,21 +173,26 @@ export const messageKeys = [
   "blocked.workStateStale.serverUnreachable",
   "channels.browse.clearSearch",
   "channels.browse.close",
+  "channels.browse.closeAria",
   "channels.browse.default",
   "channels.browse.description",
   "channels.browse.emptyAdminDetail",
+  "channels.browse.emptyAdminDetailPhone",
   "channels.browse.emptyHeadline",
   "channels.browse.groupJoined",
   "channels.browse.groupNotJoined",
+  "channels.browse.homeRowHint",
   "channels.browse.join",
   "channels.browse.joinAria",
   "channels.browse.joined",
   "channels.browse.joinForbidden",
   "channels.browse.joinGeneric",
+  "channels.browse.joining",
   "channels.browse.joinNetwork",
   "channels.browse.joinNotFound",
   "channels.browse.loadForbidden",
   "channels.browse.loadGeneric",
+  "channels.browse.loading",
   "channels.browse.loadMore",
   "channels.browse.loadNetwork",
   "channels.browse.loadUnsupported",
@@ -1901,12 +1906,15 @@ export const argumentSpecs = {
   "blocked.workStateStale.serverUnreachable": {},
   "channels.browse.clearSearch": {},
   "channels.browse.close": {},
+  "channels.browse.closeAria": {},
   "channels.browse.default": {},
   "channels.browse.description": {},
   "channels.browse.emptyAdminDetail": {},
+  "channels.browse.emptyAdminDetailPhone": {},
   "channels.browse.emptyHeadline": {},
   "channels.browse.groupJoined": {},
   "channels.browse.groupNotJoined": {},
+  "channels.browse.homeRowHint": {},
   "channels.browse.join": {},
   "channels.browse.joinAria": {
     "name": "string"
@@ -1914,12 +1922,14 @@ export const argumentSpecs = {
   "channels.browse.joined": {},
   "channels.browse.joinForbidden": {},
   "channels.browse.joinGeneric": {},
+  "channels.browse.joining": {},
   "channels.browse.joinNetwork": {
     "reason": "string"
   },
   "channels.browse.joinNotFound": {},
   "channels.browse.loadForbidden": {},
   "channels.browse.loadGeneric": {},
+  "channels.browse.loading": {},
   "channels.browse.loadMore": {},
   "channels.browse.loadNetwork": {
     "reason": "string"
@@ -4128,21 +4138,26 @@ export interface MessageArgs {
   "blocked.workStateStale.serverUnreachable": Record<string, never>;
   "channels.browse.clearSearch": Record<string, never>;
   "channels.browse.close": Record<string, never>;
+  "channels.browse.closeAria": Record<string, never>;
   "channels.browse.default": Record<string, never>;
   "channels.browse.description": Record<string, never>;
   "channels.browse.emptyAdminDetail": Record<string, never>;
+  "channels.browse.emptyAdminDetailPhone": Record<string, never>;
   "channels.browse.emptyHeadline": Record<string, never>;
   "channels.browse.groupJoined": Record<string, never>;
   "channels.browse.groupNotJoined": Record<string, never>;
+  "channels.browse.homeRowHint": Record<string, never>;
   "channels.browse.join": Record<string, never>;
   "channels.browse.joinAria": { name: string };
   "channels.browse.joined": Record<string, never>;
   "channels.browse.joinForbidden": Record<string, never>;
   "channels.browse.joinGeneric": Record<string, never>;
+  "channels.browse.joining": Record<string, never>;
   "channels.browse.joinNetwork": { reason: string };
   "channels.browse.joinNotFound": Record<string, never>;
   "channels.browse.loadForbidden": Record<string, never>;
   "channels.browse.loadGeneric": Record<string, never>;
+  "channels.browse.loading": Record<string, never>;
   "channels.browse.loadMore": Record<string, never>;
   "channels.browse.loadNetwork": { reason: string };
   "channels.browse.loadUnsupported": Record<string, never>;

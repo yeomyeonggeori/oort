@@ -14,6 +14,12 @@ export const catalog: MessageCatalog = {
       "value": "閉じる"
     }
   ],
+  "channels.browse.closeAria": [
+    {
+      "type": 0,
+      "value": "チャンネル一覧を閉じる"
+    }
+  ],
   "channels.browse.default": [
     {
       "type": 0,
@@ -32,6 +38,12 @@ export const catalog: MessageCatalog = {
       "value": "既存のチャンネルは、チャンネルメニューで「チャンネル一覧に表示」をオンにするとここに表示されます。"
     }
   ],
+  "channels.browse.emptyAdminDetailPhone": [
+    {
+      "type": 0,
+      "value": "既存のチャンネルは、Web またはデスクトップのチャンネルメニューで「チャンネル一覧に表示」をオンにするとここに表示されます。"
+    }
+  ],
   "channels.browse.emptyHeadline": [
     {
       "type": 0,
@@ -48,6 +60,12 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "参加していないチャンネル"
+    }
+  ],
+  "channels.browse.homeRowHint": [
+    {
+      "type": 0,
+      "value": "この名前でチャンネル一覧を開きます。"
     }
   ],
   "channels.browse.join": [
@@ -84,6 +102,12 @@ export const catalog: MessageCatalog = {
       "value": "参加できませんでした。もう一度お試しください。"
     }
   ],
+  "channels.browse.joining": [
+    {
+      "type": 0,
+      "value": "参加しています"
+    }
+  ],
   "channels.browse.joinNetwork": [
     {
       "type": 0,
@@ -110,6 +134,12 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "チャンネル一覧を読み込めませんでした。しばらくしてからもう一度お試しください。"
+    }
+  ],
+  "channels.browse.loading": [
+    {
+      "type": 0,
+      "value": "チャンネル一覧を読み込んでいます。"
     }
   ],
   "channels.browse.loadMore": [
