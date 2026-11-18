@@ -352,6 +352,18 @@ export const catalog: MessageCatalog = {
       "value": "No tienes permiso para crear canales. Pídelo a un propietario o administrador del espacio de trabajo."
     }
   ],
+  "channels.createFailure.generic": [
+    {
+      "type": 0,
+      "value": "No se pudo crear el canal. Inténtalo de nuevo en unos momentos."
+    }
+  ],
+  "channels.createFailure.network": [
+    {
+      "type": 0,
+      "value": "No se pudo crear el canal. No se pudo conectar con el servidor. Revisa tu conexión e inténtalo de nuevo."
+    }
+  ],
   "channels.createFailure.rateLimited": [
     {
       "type": 0,
