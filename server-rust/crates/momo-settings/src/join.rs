@@ -617,12 +617,18 @@ pub struct JoinedMember {
     pub handle: String,
 }
 
-/// One public-channel membership the join granted (Swift `JoinMembershipDTO`).
+/// One default-channel membership the join granted or found live (Swift
+/// `JoinMembershipDTO`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct JoinedMembership {
     pub id: Uuid,
     pub channel_id: Uuid,
     pub role: String,
+    /// `true` when this join inserted the row or brought a member back from
+    /// `left_at` — the memberships whose read position starts at the channel's
+    /// end (ADR-0224 D9). `false` for a membership that was already live, whose
+    /// read position this join must not touch. Not part of the response.
+    pub admitted: bool,
 }
 
 /// Everything the response needs, and nothing the response must not have — there
@@ -786,12 +792,12 @@ pub async fn redeem_invite_in_tx(
         }
     }
 
-    // 8) Workspace authority (ADR-0128) then per-channel membership. The
-    //    workspace row is upserted with DO NOTHING: a returning member keeps the
-    //    role they already hold, and (5)/(7) already refused any link that would
-    //    have raised it.
+    // 8) Workspace authority (ADR-0128) then per-channel membership — the
+    //    default channels only (ADR-0224 D7). The workspace row is upserted with
+    //    DO NOTHING: a returning member keeps the role they already hold, and
+    //    (5)/(7) already refused any link that would have raised it.
     ensure_workspace_membership(conn, workspace_id, member.id, &invite_role).await?;
-    let memberships = join_public_channels(conn, workspace_id, member.id, &invite_role).await?;
+    let memberships = join_default_channels(conn, workspace_id, member.id, &invite_role).await?;
     if memberships.is_empty() {
         return Err(JoinRejection::NoPublicChannels.into());
     }
@@ -1258,30 +1264,61 @@ async fn ensure_workspace_membership(
     Ok(())
 }
 
-/// Swift `createPublicChannelMemberships` (:554-601).
+/// The channels an invite join puts a person in: the workspace's **default
+/// channels** (ADR-0224 D6·D7), where Swift `createPublicChannelMemberships`
+/// (:554-601) took every public channel.
+///
+/// Which channels: every live public channel with `is_default`. A workspace with
+/// none (an old self-hosted install, say) falls back to its single oldest live
+/// public channel, and only a workspace with no live public channel at all ends
+/// with no row — the caller's [`JoinRejection::NoPublicChannels`]. Whether a
+/// channel is listed in channel browse (`browse_listed`) plays no part (D7). The
+/// same rule holds for a brand-new person and for an existing member spending
+/// another link, so a second link no longer pulls an existing member into public
+/// channels they never joined.
 ///
 /// `DO UPDATE` rather than `DO NOTHING` so a member who *left* a channel is
 /// brought back in with the invite's role, while a member who never left keeps
 /// the role they already have — `membership.left_at IS NULL` is the test, and
 /// getting it backwards would let a public link rewrite a channel owner's role.
-async fn join_public_channels(
+/// A live membership is still returned (the response lists it), but with
+/// `admitted = false`: only a row this join inserted or restored is a fresh start
+/// whose read position the caller moves to the channel's end (D9).
+async fn join_default_channels(
     conn: &mut PgConnection,
     workspace_id: Uuid,
     member_id: Uuid,
     role: &str,
 ) -> Result<Vec<JoinedMembership>, DbError> {
-    let rows: Vec<(Uuid, Uuid, String)> = sqlx::query_as(
-        "WITH public_channels AS ( \
-           SELECT id \
+    let rows: Vec<(Uuid, Uuid, String, bool)> = sqlx::query_as(
+        "WITH live_public AS ( \
+           SELECT id, is_default, created_at \
              FROM channel \
             WHERE workspace_id = $1 \
               AND kind = 'public' \
               AND archived_at IS NULL \
          ), \
+         targets AS ( \
+           SELECT id FROM live_public WHERE is_default \
+           UNION ALL \
+           SELECT id FROM ( \
+             SELECT id FROM live_public \
+              WHERE NOT EXISTS (SELECT 1 FROM live_public WHERE is_default) \
+              ORDER BY created_at ASC, id ASC \
+              LIMIT 1 \
+           ) oldest \
+         ), \
+         live_before AS ( \
+           SELECT channel_id \
+             FROM membership \
+            WHERE member_id = $2 \
+              AND left_at IS NULL \
+              AND channel_id IN (SELECT id FROM targets) \
+         ), \
          inserted AS ( \
            INSERT INTO membership (workspace_id, channel_id, member_id, role) \
            SELECT $1, id, $2, $3::membership_role \
-             FROM public_channels \
+             FROM targets \
            ON CONFLICT (channel_id, member_id) DO UPDATE \
               SET left_at = NULL, \
                   role = CASE \
@@ -1291,7 +1328,10 @@ async fn join_public_channels(
                          END \
            RETURNING id, channel_id, role::text \
          ) \
-         SELECT id, channel_id, role FROM inserted ORDER BY channel_id",
+         SELECT i.id, i.channel_id, i.role, \
+                NOT EXISTS (SELECT 1 FROM live_before b WHERE b.channel_id = i.channel_id) \
+           FROM inserted i \
+          ORDER BY i.channel_id",
     )
     .bind(workspace_id)
     .bind(member_id)
@@ -1300,10 +1340,11 @@ async fn join_public_channels(
     .await?;
     Ok(rows
         .into_iter()
-        .map(|(id, channel_id, role)| JoinedMembership {
+        .map(|(id, channel_id, role, admitted)| JoinedMembership {
             id,
             channel_id,
             role,
+            admitted,
         })
         .collect())
 }

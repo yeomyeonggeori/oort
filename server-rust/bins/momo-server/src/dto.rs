@@ -2898,6 +2898,12 @@ pub struct ChannelDto {
     /// reason). **Set** on the B4 channel list when `include_archived=true`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub archived_at_ms: Option<i64>,
+    /// `channel.browse_listed` — listed in channel browse (ADR-0224 D2). Always present;
+    /// `false` for every private channel and DM (the table allows `true` only on a public one).
+    pub browse_listed: bool,
+    /// `channel.is_default` — a person joining by invite lands here (ADR-0224 D6·D7). Always
+    /// present; `false` for every private channel and DM.
+    pub is_default: bool,
     pub muted: bool,
     /// End of the caller's timed mute, epoch ms — present **only while a timed mute is in
     /// progress** (ADR-0206 D12, #4343). An open-ended mute and an expired one omit the key.

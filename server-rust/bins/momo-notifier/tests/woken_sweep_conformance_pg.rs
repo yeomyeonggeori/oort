@@ -951,7 +951,8 @@ async fn a_hosted_agent_silent_for_days_is_not_handed_the_welcome_opener() {
     // the welcome speaks in #general: both the person and the agent are in it
     let general = Uuid::new_v4();
     sqlx::query(
-        "INSERT INTO channel(id, workspace_id, kind, name) VALUES($1,$2,'public','general')",
+        "INSERT INTO channel(id, workspace_id, kind, name, is_default) \
+         VALUES($1,$2,'public','general',true)",
     )
     .bind(general)
     .bind(hosted.workspace)

@@ -81,6 +81,7 @@ use axum::http::{HeaderMap, StatusCode, Uri};
 use axum::response::{IntoResponse, Response};
 use axum::Json;
 use momo_db::audit::{write_audit, AuditEntry};
+use momo_messaging::update_read_cursor_in_tx;
 use momo_settings::{
     fallback_handle, normalized_invite_code, normalized_join_display_name, normalized_join_email,
     normalized_join_password, normalized_join_time_zone, normalized_requested_handle,
@@ -219,6 +220,22 @@ pub async fn join(
                     &guess_budget,
                 )
                 .await?;
+                // ADR-0224 D9: a person counts from the moment they join. Each default
+                // channel this join inserted or restored starts read up to its newest
+                // message, so the first day does not open on the channel's whole history
+                // as unread. A membership that was already live is left alone (an existing
+                // member spending another link keeps their unread). Same transaction, after
+                // the membership row exists — the cursor write requires a live one.
+                for membership in outcome.memberships.iter().filter(|m| m.admitted) {
+                    update_read_cursor_in_tx(
+                        conn,
+                        workspace_id,
+                        membership.channel_id,
+                        outcome.member.id,
+                        i64::MAX,
+                    )
+                    .await?;
+                }
                 // Swift writes this row inside the same transaction
                 // (`insertAuditLog` :652-683) and so does this: an audit row that
                 // survived a rolled-back join would be a false record.

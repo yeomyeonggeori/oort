@@ -987,7 +987,8 @@ async fn the_welcome_opener_is_the_owners_alone() {
     // The welcome lands in #general: give the fixture one the agent is approved for.
     let general = Uuid::new_v4();
     sqlx::query(
-        "INSERT INTO channel(id, workspace_id, kind, name) VALUES($1,$2,'public','general')",
+        "INSERT INTO channel(id, workspace_id, kind, name, is_default) \
+         VALUES($1,$2,'public','general',true)",
     )
     .bind(general)
     .bind(f.workspace)
