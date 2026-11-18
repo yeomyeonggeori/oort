@@ -3481,6 +3481,41 @@ paths:
                 $ref: "#/components/schemas/ErrorResponse"
 
   /v1/workspaces/{workspaceId}/channels/{channelId}/members/me:
+    post:
+      tags: [membership]
+      operationId: joinChannel
+      summary: Join a public channel from the browse list (ADR-0224 D4).
+      description: >
+        The pair of the leave below. Only a channel that `GET …/channels/browse`
+        would list can be joined: a private channel, a DM, a public channel with
+        `browseListed` off, an archived channel, an unknown id and another
+        workspace's channel all answer the same 404 (status and body), even for a
+        caller who already sits in that channel. A new or left membership becomes a
+        live channel `member` (a former channel owner comes back as `member`), the
+        read position moves to the channel's end so it starts with nothing unread,
+        and `channel.joined` is audited. A caller who is already a member gets 200
+        with `newlyJoined: false` and nothing is written (role, read position and
+        audit stay). Human members only: a guest, a suspended person and any agent
+        or developer-token credential are refused before the channel is read.
+        Per-member budget `RATE_LIMIT_CHANNEL_JOIN_PER_MEMBER` (default 60 per
+        window).
+      security: [{bearerAuth: []}]
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/ChannelId"
+      responses:
+        "200":
+          description: The caller is a member; `channel` is the row the channel list shows for it.
+          content: {application/json: {schema: {$ref: "#/components/schemas/ChannelJoinResponse"}}}
+        "400": {description: Malformed channel id, content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403":
+          description: >
+            Not a human bearer, workspace scope mismatch, not an active member of
+            the workspace (suspended included), or a guest.
+          content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}
+        "404": {description: Not a channel open to people (one answer for every kind), content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}}
+        "429": {$ref: "#/components/responses/RateLimited"}
     delete:
       tags: [membership]
       operationId: leaveChannel
@@ -5823,6 +5858,55 @@ paths:
                 $ref: "#/components/schemas/ErrorResponse"
         "429":
           $ref: "#/components/responses/RateLimited"
+
+  /v1/workspaces/{workspaceId}/channels/browse:
+    get:
+      tags: [channels]
+      operationId: browseChannels
+      summary: List the public channels a full member may find and join (ADR-0224 D3).
+      description: >
+        Every public channel of the workspace that is not archived and has
+        `browseListed` on, whether or not the caller is in it (`isMember`).
+        Private channels, DMs, public channels with `browseListed` off and
+        archived channels never appear, for any role — owners and admins get the
+        same list as everyone else. Ordered by lower-cased name, then id; a
+        screen groups joined and not-joined rows itself. `q` keeps the rows
+        whose name or topic contains it (case-insensitive, plain text: `%` and
+        `_` are characters). Human members only: a guest, a suspended person and
+        any agent or developer-token credential are refused before a channel is
+        read.
+      security: [{bearerAuth: []}]
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: q
+          in: query
+          required: false
+          description: Text to look for in the name or topic. Trimmed; blank means no filter; at most 100 characters.
+          schema: {type: string, maxLength: 100}
+        - name: cursor
+          in: query
+          required: false
+          description: The `nextCursor` of the previous page. Opaque; a malformed one is 400.
+          schema: {type: string}
+        - name: limit
+          in: query
+          required: false
+          description: Page size, clamped to 1..200; an unusable value falls back to the default.
+          schema: {type: integer, default: 100, minimum: 1, maximum: 200}
+      responses:
+        "200":
+          description: One page of browsable channels.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/BrowseChannelsResponse"}
+        "400": {description: Malformed `q` or `cursor`, content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403":
+          description: >
+            Not a human bearer, workspace scope mismatch, not an active member of
+            the workspace (suspended included), or a guest.
+          content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}
+        "429": {$ref: "#/components/responses/RateLimited"}
 
   /v1/workspaces/{workspaceId}/channels/{channelId}:
     patch:
@@ -16551,7 +16635,9 @@ components:
         default 60; starts of a picture from a
         photo (`POST …/expressions/photo-drafts`, ADR-0218 §8 H11), default 10; marking every
         followed thread read (`POST …/threads/read-all`, ADR-0124 amendment 5,
-        `RATE_LIMIT_THREAD_READ_ALL_PER_MEMBER`), default 60. Cancelling a scheduled
+        `RATE_LIMIT_THREAD_READ_ALL_PER_MEMBER`), default 60; joining a public channel
+        (`POST …/channels/{ch}/members/me`, ADR-0224 D4,
+        `RATE_LIMIT_CHANNEL_JOIN_PER_MEMBER`), default 60. Cancelling a scheduled
         message, editing a message (`PATCH …/messages/{id}`, which streaming answers
         use) and every read except the two below are not budgeted. Retrying with the
         same `clientMsgId` after a 429 is safe. The link-card proxies
@@ -22192,6 +22278,51 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/Channel"
+
+    BrowseChannel:
+      type: object
+      required: [id, name, memberCount, isMember, isDefault]
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        topic:
+          type: string
+          description: Absent when the channel has no topic.
+        memberCount:
+          type: integer
+          format: int64
+          description: Live members who are active and not removed — people and agents together.
+        isMember:
+          type: boolean
+          description: The caller is a member of this channel.
+        isDefault:
+          type: boolean
+          description: A default channel (ADR-0224 D6).
+
+    BrowseChannelsResponse:
+      type: object
+      required: [channels]
+      properties:
+        channels:
+          type: array
+          items:
+            $ref: "#/components/schemas/BrowseChannel"
+        nextCursor:
+          type: string
+          description: Present when another page follows; pass it back as `cursor`.
+
+    ChannelJoinResponse:
+      type: object
+      required: [channel, newlyJoined]
+      properties:
+        channel:
+          $ref: "#/components/schemas/Channel"
+        newlyJoined:
+          type: boolean
+          description: False when the caller was already a member and nothing was written.
 
     UpdateNotificationPrefRequest:
       type: object

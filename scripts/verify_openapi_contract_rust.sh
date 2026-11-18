@@ -3818,6 +3818,19 @@ sample channel-rename patch "/v1/workspaces/{workspaceId}/channels/{channelId}" 
 guard_jq --arg n "rust-gate-renamed-$RUN_EPOCH" '.channel.name == $n' \
   "channel rename answers the stored name"
 
+# ADR-0224 D3·D4 — 둘러보기 목록과 스스로 참여. 갓 만든 공개 채널은 둘러보기에 켜진 채
+# 생기고, 만든 사람은 이미 멤버라 참여는 아무것도 쓰지 않는 200 이다(뒤 표본에 부작용 없음).
+sample channel-browse get "/v1/workspaces/{workspaceId}/channels/browse" \
+  "/v1/workspaces/$WS/channels/browse" 200 "" "$ACCESS"
+guard_jq --arg id "$GATE_CHANNEL_ID" \
+  'any(.channels[]; (.id | ascii_downcase) == $id and .isMember == true)' \
+  "channel browse lists the new public channel as joined"
+sample channel-join post "/v1/workspaces/{workspaceId}/channels/{channelId}/members/me" \
+  "/v1/workspaces/$WS/channels/$GATE_CHANNEL_ID/members/me" 200 "" "$ACCESS"
+guard_jq --arg id "$GATE_CHANNEL_ID" \
+  '(.channel.id | ascii_downcase) == $id and .newlyJoined == false' \
+  "joining a channel one is already in writes nothing"
+
 # 갓 만든 채널에 건다 — #general 의 상태를 게이트가 바꾸면 뒤따르는 read-state
 # 표본이 자기가 만든 부작용을 읽게 된다.
 sample notification-pref put \

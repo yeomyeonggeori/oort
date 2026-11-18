@@ -911,6 +911,10 @@ pub enum MemberWrite {
     /// `POST …/threads/read-all` (ADR-0124 증보 5, #5689): one request moves up to
     /// `THREAD_READ_ALL_MAX_THREADS` of the caller's thread read positions. Human bearers only.
     ThreadReadAll,
+    /// `POST …/channels/{ch}/members/me` (ADR-0224 D4, #5838): a person joins a public channel
+    /// from the browse list. Human bearers only. One accepted request can write a membership,
+    /// a read position (and its read-state broadcast) and an audit row.
+    ChannelJoin,
 }
 
 impl MemberWrite {
@@ -926,6 +930,7 @@ impl MemberWrite {
             MemberWrite::PhotoDraft => "photo_draft",
             MemberWrite::UnfurlPreview => "unfurl_preview",
             MemberWrite::ThreadReadAll => "thread_read_all",
+            MemberWrite::ChannelJoin => "channel_join",
         }
     }
 
@@ -941,6 +946,7 @@ impl MemberWrite {
             MemberWrite::PhotoDraft => "write:photo",
             MemberWrite::UnfurlPreview => "write:unfurl_preview",
             MemberWrite::ThreadReadAll => "write:thread_read_all",
+            MemberWrite::ChannelJoin => "write:channel_join",
         }
     }
 }
@@ -972,6 +978,7 @@ pub fn member_write_limit(
         (MemberWrite::PhotoDraft, _) => config.photo_draft_per_member_limit,
         (MemberWrite::UnfurlPreview, _) => config.unfurl_preview_per_member_limit,
         (MemberWrite::ThreadReadAll, _) => config.thread_read_all_per_member_limit,
+        (MemberWrite::ChannelJoin, _) => config.channel_join_per_member_limit,
     }
 }
 
@@ -1786,6 +1793,7 @@ mod tests {
             unfurl_preview_per_member_limit: 77,
             media_write_per_member_limit: 88,
             thread_read_all_per_member_limit: 99,
+            channel_join_per_member_limit: 111,
             ..RateLimitConfig::default()
         }
     }
@@ -1837,6 +1845,11 @@ mod tests {
                 99,
                 "the thread read-all budget is its own number"
             );
+            assert_eq!(
+                limit(MemberWrite::ChannelJoin, kind),
+                111,
+                "the channel join budget is its own number"
+            );
         }
     }
 
@@ -1854,13 +1867,14 @@ mod tests {
             (MemberWrite::UnfurlPreview, "unfurl_preview"),
             (MemberWrite::MediaWrite, "media_write"),
             (MemberWrite::ThreadReadAll, "thread_read_all"),
+            (MemberWrite::ChannelJoin, "channel_join"),
         ];
         let mut keys = std::collections::HashSet::new();
         for (surface, label) in surfaces {
             assert_eq!(surface.label(), label);
             assert!(keys.insert(member_write_key(surface, member)));
         }
-        assert_eq!(keys.len(), 8);
+        assert_eq!(keys.len(), 9);
         assert_ne!(
             member_write_key(MemberWrite::MessageSend, member),
             member_write_key(MemberWrite::MessageSend, Uuid::from_u128(8)),

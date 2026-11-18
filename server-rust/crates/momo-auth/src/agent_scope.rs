@@ -736,4 +736,18 @@ mod tests {
             assert_eq!(required_agent_scope(method, &path), None, "{method}");
         }
     }
+
+    /// ADR-0224 D8: browsing and joining public channels is a person's act. Neither
+    /// route is on an agent table, with any verb.
+    #[test]
+    fn no_agent_credential_reaches_the_channel_browse_or_join_routes() {
+        for path in [
+            format!("/v1/workspaces/{WS}/channels/browse"),
+            format!("/v1/workspaces/{WS}/channels/{RUN}/members/me"),
+        ] {
+            for method in ["GET", "POST", "PUT", "PATCH", "DELETE"] {
+                assert_eq!(required_agent_scope(method, &path), None, "{method} {path}");
+            }
+        }
+    }
 }

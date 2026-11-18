@@ -45,20 +45,22 @@ use axum::response::IntoResponse;
 use axum::{Extension, Json};
 use momo_auth::Principal;
 use momo_messaging::{
-    active_workspace_role, add_channel_member_in_tx, clamp_channel_list_limit,
-    create_channel_detailed_in_tx, db_now_in_tx, is_channel_name_conflict,
-    list_workspace_channels_within, normalize_channel_kind, normalize_channel_name,
-    normalize_channel_topic, normalize_membership_role, remove_channel_member_in_tx,
-    rename_channel_in_tx, set_notification_pref_in_tx, validate_channel_mute, ChannelMembership,
-    ChannelMute, ChannelRenameOutcome, ChannelRestriction, ChannelSummary, CreatedChannel,
-    MutedUntilInvalid, NewChannel,
+    active_workspace_role, add_channel_member_in_tx, clamp_browse_limit, clamp_channel_list_limit,
+    create_channel_detailed_in_tx, db_now_in_tx, is_channel_name_conflict, judge_browse_person,
+    list_browsable_channels_in_tx, list_workspace_channels_within, normalize_channel_kind,
+    normalize_channel_name, normalize_channel_topic, normalize_membership_role,
+    remove_channel_member_in_tx, rename_channel_in_tx, self_join_channel_in_tx,
+    set_notification_pref_in_tx, validate_channel_mute, BrowsableChannel, BrowseAfter,
+    BrowsePersonRefusal, ChannelMembership, ChannelMute, ChannelRenameOutcome, ChannelRestriction,
+    ChannelSummary, CreatedChannel, MutedUntilInvalid, NewChannel, SelfJoin,
 };
 use serde::Deserialize;
 use uuid::Uuid;
 
 use crate::dev_credential::DevCredential;
 use crate::dto::{
-    AddChannelMemberRequest, ChannelDto, ChannelMembershipDto, ChannelMembershipResponse,
+    AddChannelMemberRequest, BrowseChannelDto, BrowseChannelsQuery, BrowseChannelsResponse,
+    ChannelDto, ChannelJoinResponse, ChannelMembershipDto, ChannelMembershipResponse,
     CreateChannelRequest, CreateChannelResponse, NotificationPrefResponse, UpdateChannelResponse,
     UpdateNotificationPrefRequest, UpdatedChannelDto, WorkspaceChannelsResponse,
 };
@@ -395,6 +397,242 @@ pub async fn update(
             name: renamed.name,
             topic: renamed.topic,
         },
+    }))
+}
+
+// ---------------------------------------------------------------------------
+// ADR-0224 D3·D4 — browse the public channels and join one yourself
+// ---------------------------------------------------------------------------
+
+/// Refusal of a non-human bearer on the two browse routes (same 403 as every
+/// human-only route; the agent and developer-token doors refuse earlier still).
+const BROWSE_HUMAN_ONLY: &str = "only a human member can browse or join channels";
+/// The one 404 of the join: private, DM, browse off, archived, unknown, another
+/// workspace's — all of them, byte for byte.
+const BROWSE_CHANNEL_NOT_FOUND: &str = "channel not found";
+/// Longest `q` the browse list takes, in characters.
+const BROWSE_FILTER_MAX_CHARS: usize = 100;
+/// Longest `cursor` the browse list takes, in bytes (a uuid, a dot and the hex of a
+/// lower-cased channel name).
+const BROWSE_CURSOR_MAX_BYTES: usize = 1024;
+
+fn browse_person_http(refusal: BrowsePersonRefusal) -> ApiError {
+    match refusal {
+        BrowsePersonRefusal::NotActive => ApiError::forbidden("not a workspace member"),
+        BrowsePersonRefusal::Guest => {
+            ApiError::forbidden("guests cannot browse or join public channels")
+        }
+    }
+}
+
+/// `q` → the text to look for, or `None` for "no filter". Trimmed; empty is no filter.
+fn browse_filter(raw: Option<&str>) -> Result<Option<String>, ApiError> {
+    let Some(text) = raw.map(str::trim).filter(|text| !text.is_empty()) else {
+        return Ok(None);
+    };
+    if text.chars().count() > BROWSE_FILTER_MAX_CHARS || text.contains('\0') {
+        return Err(ApiError::bad_request("invalid browse filter"));
+    }
+    Ok(Some(text.to_string()))
+}
+
+/// The cursor is the last row's sort key itself (`{id}.{hex(lower(name))}`), not an id
+/// the server looks up: a lookup would answer differently for a channel that exists
+/// but is hidden, and a channel turned off between two pages would break the walk.
+fn encode_browse_cursor(row: &BrowsableChannel) -> String {
+    let mut cursor = String::with_capacity(37 + row.sort_name.len() * 2);
+    cursor.push_str(&row.id.to_string());
+    cursor.push('.');
+    for byte in row.sort_name.as_bytes() {
+        cursor.push_str(&format!("{byte:02x}"));
+    }
+    cursor
+}
+
+fn decode_browse_cursor(raw: &str) -> Option<BrowseAfter> {
+    if raw.len() > BROWSE_CURSOR_MAX_BYTES {
+        return None;
+    }
+    let (id, hex) = raw.split_once('.')?;
+    let id = Uuid::parse_str(id).ok()?;
+    if hex.len() % 2 != 0 || !hex.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        return None;
+    }
+    let bytes = (0..hex.len())
+        .step_by(2)
+        .map(|at| u8::from_str_radix(&hex[at..at + 2], 16).ok())
+        .collect::<Option<Vec<u8>>>()?;
+    let sort_name = String::from_utf8(bytes).ok()?;
+    if sort_name.contains('\0') {
+        return None;
+    }
+    Some(BrowseAfter { sort_name, id })
+}
+
+fn browse_dto(row: &BrowsableChannel) -> BrowseChannelDto {
+    BrowseChannelDto {
+        id: row.id.to_string(),
+        name: row.name.clone(),
+        topic: row.topic.clone(),
+        member_count: row.member_count,
+        is_member: row.is_member,
+        is_default: row.is_default,
+    }
+}
+
+/// `GET /v1/workspaces/{ws}/channels/browse?q=&cursor=&limit=` — the public channels a
+/// person may find and join (ADR-0224 D3): not archived, `browse_listed` on. Ordered by
+/// `lower(name)` then id; `isMember` says whether the caller is in it already, so a
+/// screen groups the rows itself. Owners and admins get the same list as everyone else.
+///
+/// Refusals, in order, all before a channel is read: 403 non-human bearer, 403
+/// workspace scope, 400 bad `q`/`cursor`, 403 not an active member (suspended
+/// included), 403 guest.
+pub async fn browse(
+    State(state): State<AppState>,
+    Extension(principal): Extension<Principal>,
+    Path(workspace): Path<String>,
+    Query(query): Query<BrowseChannelsQuery>,
+) -> Result<Json<BrowseChannelsResponse>, ApiError> {
+    require_human(&principal, BROWSE_HUMAN_ONLY)?;
+    let workspace_id = workspace_scope(&workspace, &principal)?;
+    let limit = clamp_browse_limit(
+        query
+            .limit
+            .as_deref()
+            .and_then(|raw| raw.trim().parse().ok()),
+    );
+    let filter = browse_filter(query.q.as_deref())?;
+    let after = match query.cursor.as_deref() {
+        None | Some("") => None,
+        Some(raw) => Some(
+            decode_browse_cursor(raw)
+                .ok_or_else(|| ApiError::bad_request("invalid browse cursor"))?,
+        ),
+    };
+    let member_id = principal.member_id;
+
+    let outcome: DbRejectable<(Vec<BrowsableChannel>, bool)> =
+        agent_tenant_tx(&state.pool, workspace_id, move |conn| {
+            Box::pin(async move {
+                let role = active_workspace_role(conn, workspace_id, member_id).await?;
+                if let Err(refusal) = judge_browse_person(role) {
+                    return Ok(Err(browse_person_http(refusal)));
+                }
+                let mut rows = list_browsable_channels_in_tx(
+                    conn,
+                    workspace_id,
+                    member_id,
+                    filter.as_deref(),
+                    after.as_ref(),
+                    limit + 1,
+                )
+                .await?;
+                let more = rows.len() as i64 > limit;
+                rows.truncate(usize::try_from(limit).unwrap_or(0));
+                Ok(Ok((rows, more)))
+            })
+        })
+        .await;
+
+    let (rows, more) = settle_db("channels.browse", outcome)?;
+    let next_cursor = if more {
+        rows.last().map(encode_browse_cursor)
+    } else {
+        None
+    };
+    Ok(Json(BrowseChannelsResponse {
+        channels: rows.iter().map(browse_dto).collect(),
+        next_cursor,
+    }))
+}
+
+/// `POST /v1/workspaces/{ws}/channels/{ch}/members/me` — join a public channel from the
+/// browse list (ADR-0224 D4·D9). The pair of `DELETE …/members/me`.
+///
+/// Refusals, in order: 403 non-human bearer, 403 workspace scope, 400 malformed id, 403
+/// not an active member, 403 guest — all before the channel is read — then one 404 for
+/// every id that is not a channel open to people (private, DM, browse off, archived,
+/// unknown, another workspace's), even for a caller already seated there.
+///
+/// A new or left membership becomes a live `member` (a former channel owner comes back
+/// as `member`), the read position moves to the channel's end so it starts with nothing
+/// unread, and `channel.joined` is audited. A caller who is already a member gets 200
+/// with `newlyJoined: false` and nothing written: role, read position and audit stay.
+pub async fn join_channel(
+    State(state): State<AppState>,
+    Extension(principal): Extension<Principal>,
+    Path((workspace, channel)): Path<(String, String)>,
+) -> Result<Json<ChannelJoinResponse>, ApiError> {
+    require_human(&principal, BROWSE_HUMAN_ONLY)?;
+    let workspace_id = workspace_scope(&workspace, &principal)?;
+    let channel_id = path_uuid(&channel, "invalid channel id")?;
+    let member_id = principal.member_id;
+    let via_token = audit_via_token_id(&principal);
+
+    let outcome: DbRejectable<(ChannelSummary, bool)> =
+        agent_tenant_tx(&state.pool, workspace_id, move |conn| {
+            Box::pin(async move {
+                let role = active_workspace_role(conn, workspace_id, member_id).await?;
+                if let Err(refusal) = judge_browse_person(role) {
+                    return Ok(Err(browse_person_http(refusal)));
+                }
+                let (membership_id, admitted, rejoined) =
+                    match self_join_channel_in_tx(conn, workspace_id, channel_id, member_id).await?
+                    {
+                        SelfJoin::NotFound => {
+                            return Ok(Err(ApiError::not_found(BROWSE_CHANNEL_NOT_FOUND)))
+                        }
+                        SelfJoin::Member {
+                            membership_id,
+                            admitted,
+                            rejoined,
+                        } => (membership_id, admitted, rejoined),
+                    };
+                if admitted {
+                    momo_db::audit::write_audit(
+                        conn,
+                        &momo_db::audit::AuditEntry::new(workspace_id, "channel.joined")
+                            .by(member_id)
+                            .target("channel", channel_id)
+                            .via_token(via_token)
+                            .with_schema(
+                                "momo.membership.channel_joined.v1",
+                                serde_json::json!({
+                                    "kind": "public",
+                                    "membership_id": membership_id.to_string(),
+                                    "rejoined": rejoined.to_string(),
+                                }),
+                            ),
+                    )
+                    .await?;
+                }
+                // The row the channel list would show for it now, so the shapes cannot drift.
+                let ids = [channel_id];
+                let mut rows = list_workspace_channels_within(
+                    conn,
+                    workspace_id,
+                    member_id,
+                    false,
+                    1,
+                    ChannelRestriction::from_channel_ids(Some(&ids)),
+                )
+                .await?;
+                match rows.pop() {
+                    Some(summary) => Ok(Ok((summary, admitted))),
+                    None => Ok(Err(ApiError::internal(
+                        "channels.join",
+                        "joined channel is missing from the channel list",
+                    ))),
+                }
+            })
+        })
+        .await;
+
+    let (summary, newly_joined) = settle_db("channels.join", outcome)?;
+    Ok(Json(ChannelJoinResponse {
+        channel: channel_dto(&summary),
+        newly_joined,
     }))
 }
 
