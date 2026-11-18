@@ -36,7 +36,8 @@ export type TooltipSide = "top" | "bottom";
 export type TooltipAlign = "center" | "end";
 
 interface TooltipProps {
-  label: string;
+  /** 비었거나(`undefined`·`""`) 없으면 툴팁은 뜨지 않고 감싸개만 남는다(이유가 있을 때만 이름이 있는 단추: 막힘 사유 등). */
+  label: string | undefined;
   side?: TooltipSide;
   align?: TooltipAlign;
   /** 처음부터 떠 있게 한다(갤러리·캡처 전용). 평소는 가리키거나 키보드 초점일 때만 뜬다. */
@@ -77,7 +78,8 @@ export function Tooltip({
   className,
   children,
 }: TooltipProps) {
-  const [open, setOpen] = React.useState(defaultOpen);
+  const enabled = label !== undefined && label !== "";
+  const [open, setOpen] = React.useState(defaultOpen && enabled);
   // 초점이 나가며 닫힌 툴팁이 숨긴 채 남아 있는 한 박자(머리말 「보이는 닫힘은 즉시다」). 보이는지는 `open`만 정한다.
   const [leaving, setLeaving] = React.useState(false);
   const timer = React.useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -126,7 +128,7 @@ export function Tooltip({
     <span
       className={cn("relative inline-flex", className)}
       onPointerEnter={(event) => {
-        if (event.pointerType === "touch") return;
+        if (event.pointerType === "touch" || !enabled) return;
         clear();
         const wait = tooltipGroup.delayFor(delayMs);
         if (wait <= 0) {
@@ -141,7 +143,7 @@ export function Tooltip({
       onPointerLeave={close}
       onPointerDown={close}
       onFocus={(event) => {
-        if (!isKeyboardFocus(event.target)) return;
+        if (!enabled || !isKeyboardFocus(event.target)) return;
         clear();
         setOpen(true);
       }}
@@ -151,7 +153,7 @@ export function Tooltip({
       }}
     >
       {children}
-      {(open || leaving) && (
+      {enabled && (open || leaving) && (
         <span
           ref={tipRef}
           hidden={!open}
