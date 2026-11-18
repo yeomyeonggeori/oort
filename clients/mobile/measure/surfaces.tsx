@@ -4938,6 +4938,7 @@ export function Surface({name}: {name: string}): React.JSX.Element {
     case 'shell-home-idle':
     case 'shell-home-browse':
     case 'shell-home-browse-empty':
+    case 'shell-home-browse-search':
     case 'shell-home-approval':
     case 'shell-home-loading':
     case 'shell-home-empty':
@@ -7569,11 +7570,17 @@ function seedShell(surface: string): void {
   }
 
   if (surface === 'shell-home-idle') return;
-  if (surface === 'shell-home-browse' || surface === 'shell-home-browse-empty') {
+  if (surface === 'shell-home-browse' || surface === 'shell-home-browse-empty' || surface === 'shell-home-browse-search') {
     harnessClient.setQueryData(
       ['roster', ADE_WS],
       SHELL_ROSTER.map(member => (member.id === SELF ? {...member, role: 'member'} : member)),
     );
+    // #5961: 이름 검색(「quarter」)에 내 목록은 0줄, 「참여하지 않은 공개 채널」 묶음에만 한 줄이 맞는다 — 서버 읽기를 미리 심어 둔다.
+    if (surface === 'shell-home-browse-search') {
+      harnessClient.setQueryData(['channel-browse', ADE_WS, 'home-search'], {
+        channels: [{id: 'ch-quarterly', name: 'quarterly-planning', memberCount: 12, isMember: false, isDefault: false}],
+      });
+    }
     // 채널이 하나도 없는 정식 멤버(기본 채널까지 나감): 빈 「채널」 섹션과 둘러보기 줄(ADR-0224 D10). DM 은 그대로 둔다.
     if (surface === 'shell-home-browse-empty') {
       harnessClient.setQueryData(

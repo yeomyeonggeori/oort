@@ -760,6 +760,9 @@ export default function SidebarScreen({
     [sections, collapsed, openChannelId],
   );
 
+  // SectionList 가 ListEmptyComponent 를 세우는 조건과 같다(그릴 줄이 0). 묶음이 서는 날의 「메시지에서 찾기」 문이 이것으로 선다(#5961).
+  const listIsEmpty = shownSections.every(section => section.data.length === 0);
+
   // 「취소」의 확인 줄이 열리면(카드가 자라면) 결정 단추까지 목록을 내린다. 가장 큰 글씨(AX5)에서는 읽는 글자인 확인
   // 문장이 카드를 한 화면보다 크게 늘려, 방금 누른 「취소」 아래의 단추가 접힌 아래로 밀려난다(design-review
   // #4285 r1 H1). 사람이 컨트롤을 건드렸을 때만 부른다(`WorkingCardStop.onGrow`).
@@ -1085,24 +1088,29 @@ export default function SidebarScreen({
           }
           ListFooterComponent={
             notJoinedFound.length > 0 && searching ? (
-              <GroupCard
-                label={formatMessage('channels.browse.paletteGroup')}
-                inset="icon"
-                style={styles.notJoinedGroup}
-                testID="home-not-joined-group">
-                {notJoinedFound.map(row => (
-                  <ListRow
-                    key={row.id}
-                    leading={<RowIcon source={HOME_ICONS.hash} />}
-                    title={row.name}
-                    detail={formatMessage('channels.browse.memberCount', {count: row.memberCount})}
-                    accessory="chevron"
-                    accessibilityHint={formatMessage('channels.browse.homeRowHint')}
-                    onPress={() => onOpenChannelBrowse?.(row.name)}
-                    testID={`home-not-joined-${row.id}`}
-                  />
-                ))}
-              </GroupCard>
+              <View>
+                <GroupCard
+                  label={formatMessage('channels.browse.paletteGroup')}
+                  inset="icon"
+                  style={styles.notJoinedGroup}
+                  testID="home-not-joined-group">
+                  {notJoinedFound.map(row => (
+                    <ListRow
+                      key={row.id}
+                      leading={<RowIcon source={HOME_ICONS.hash} />}
+                      title={row.name}
+                      detail={formatMessage('channels.browse.memberCount', {count: row.memberCount})}
+                      accessory="chevron"
+                      accessibilityHint={formatMessage('channels.browse.homeRowHint')}
+                      onPress={() => onOpenChannelBrowse?.(row.name)}
+                      testID={`home-not-joined-${row.id}`}
+                    />
+                  ))}
+                </GroupCard>
+                {/* 내 목록에 맞는 줄이 0이면 문장(「검색 결과가 없습니다」)만 빠지고, 메시지 검색 문은 묶음 아래에 그대로 선다
+                    (#5961 — #5846 전에도 줄이 0일 때 늘 섰다). 내 목록에 맞는 줄이 있을 때는 전부터 문이 없다. */}
+                {listIsEmpty ? <SearchFallthrough query={query} onPress={() => onOpenSearch(query)} /> : null}
+              </View>
             ) : null
           }
           ListEmptyComponent={
