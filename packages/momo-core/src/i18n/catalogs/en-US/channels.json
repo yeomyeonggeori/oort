@@ -79,5 +79,7 @@
   "channels.preview.loadForbidden": "This account cannot preview this channel.",
   "channels.preview.notFound": "This channel could not be found",
   "channels.preview.loadNetwork": "Could not load the channel messages. {reason}",
-  "channels.preview.loadGeneric": "Could not load the channel messages. Try again in a moment."
+  "channels.preview.loadGeneric": "Could not load the channel messages. Try again in a moment.",
+  "channels.preview.joinBand": "Join to write and reply.",
+  "channels.preview.listAria": "Recent messages in {name}"
 }

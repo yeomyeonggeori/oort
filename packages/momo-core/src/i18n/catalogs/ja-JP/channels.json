@@ -79,5 +79,7 @@
   "channels.preview.loadForbidden": "このアカウントではこのチャンネルをプレビューできません。",
   "channels.preview.notFound": "このチャンネルが見つかりません",
   "channels.preview.loadNetwork": "チャンネルの投稿を読み込めませんでした。{reason}",
-  "channels.preview.loadGeneric": "チャンネルの投稿を読み込めませんでした。しばらくしてからもう一度お試しください。"
+  "channels.preview.loadGeneric": "チャンネルの投稿を読み込めませんでした。しばらくしてからもう一度お試しください。",
+  "channels.preview.joinBand": "参加すると投稿や返信ができます。",
+  "channels.preview.listAria": "{name} の最近の投稿"
 }

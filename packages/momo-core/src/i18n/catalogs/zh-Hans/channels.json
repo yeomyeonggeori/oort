@@ -79,5 +79,7 @@
   "channels.preview.loadForbidden": "此账号无法预览该频道。",
   "channels.preview.notFound": "找不到此频道",
   "channels.preview.loadNetwork": "无法加载频道消息。{reason}",
-  "channels.preview.loadGeneric": "无法加载频道消息。请稍后再试。"
+  "channels.preview.loadGeneric": "无法加载频道消息。请稍后再试。",
+  "channels.preview.joinBand": "加入后即可发言和回复。",
+  "channels.preview.listAria": "{name} 的最近消息"
 }
