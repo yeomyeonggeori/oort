@@ -255,12 +255,38 @@ pub async fn self_join_channel_in_tx(
     let membership_id: Option<Uuid> = row.try_get("membership_id").map_err(DbError::from)?;
     let admitted: bool = row.try_get("admitted").map_err(DbError::from)?;
     let was_left: bool = row.try_get("was_left").map_err(DbError::from)?;
-    let Some(membership_id) = membership_id else {
-        // The target exists, so either the INSERT/UPDATE returned a row or a live one was
-        // there before it. Neither is a state this statement can leave behind.
-        return Err(DbError::from(sqlx::Error::Protocol(
-            "self-join found the channel but no membership row".into(),
-        )));
+    let membership_id = match membership_id {
+        Some(id) => id,
+        None => {
+            // The same person's other join won the row while this statement waited on the
+            // unique index: the row is live now, but this statement's snapshot saw none of
+            // it and the guarded upsert (rightly) did not touch it. Read it again; this call
+            // admitted no one, so it writes nothing.
+            let live: Option<Uuid> = sqlx::query_scalar(
+                "SELECT id FROM membership \
+                  WHERE workspace_id = $1 AND channel_id = $2 AND member_id = $3 \
+                    AND left_at IS NULL",
+            )
+            .bind(workspace_id)
+            .bind(channel_id)
+            .bind(member_id)
+            .fetch_optional(&mut *conn)
+            .await?;
+            match live {
+                Some(id) => {
+                    return Ok(SelfJoin::Member {
+                        membership_id: id,
+                        admitted: false,
+                        rejoined: false,
+                    })
+                }
+                None => {
+                    return Err(DbError::from(sqlx::Error::Protocol(
+                        "self-join found the channel but no membership row".into(),
+                    )))
+                }
+            }
+        }
     };
     if admitted {
         update_read_cursor_in_tx(conn, workspace_id, channel_id, member_id, i64::MAX).await?;

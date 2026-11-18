@@ -1372,3 +1372,48 @@ async fn control_a_piece_missing_a_condition_lets_a_hidden_channel_through() {
     cleanup.push(off);
     delete_channels(&r.su, &cleanup).await;
 }
+
+/// A double tap: the same person's two joins race. The one that waits on the other's
+/// row must still answer 200 (`newlyJoined: false`), not fail, and write nothing.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL"]
+async fn a_join_that_loses_a_race_with_the_same_persons_join_answers_200() {
+    let _guard = test_lock().await;
+    let r = rig("br-race").await;
+    let ch = open_channel(&r.su, r.ws.id, "race", r.ws.owner.id).await;
+    // The winner: a membership row inserted but not yet committed.
+    let mut winner = r.su.begin().await.expect("begin");
+    sqlx::query(
+        "INSERT INTO membership (workspace_id, channel_id, member_id, role) \
+         VALUES ($1, $2, $3, 'member'::membership_role)",
+    )
+    .bind(r.ws.id)
+    .bind(ch)
+    .bind(r.ws.member.id)
+    .execute(&mut *winner)
+    .await
+    .expect("winner inserts");
+    let http = r.http.clone();
+    let url = join_url(&r.base, r.ws.id, ch);
+    let token = r.member.clone();
+    let loser = tokio::spawn(async move { call_raw(&http, Method::POST, &url, &token).await });
+    // Let the loser reach the unique index and wait there.
+    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+    assert!(!loser.is_finished(), "the loser waits for the winner's row");
+    winner.commit().await.expect("winner commits");
+    let (status, body) = loser.await.expect("join task");
+    assert_eq!(status, 200, "{body}");
+    let joined: Value = serde_json::from_str(&body).expect("json");
+    assert_eq!(joined["newlyJoined"], false, "{joined}");
+    assert_eq!(joined["channel"]["id"], ch.to_string());
+    assert_eq!(
+        joined_audit_total(&r.su, r.ws.id).await,
+        0,
+        "the loser audits nothing"
+    );
+    assert_eq!(
+        read_seq(&r.su, ch, r.ws.member.id).await,
+        None,
+        "nor moves a cursor"
+    );
+}
