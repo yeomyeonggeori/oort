@@ -598,8 +598,9 @@ pub async fn withhold_link_previews_in_tx(
 pub struct Roster {
     /// `(handle, display name, is_agent)`.
     pub members: Vec<(String, String, bool)>,
-    /// Public channel names plus the channel the request was made in — the reply is
-    /// posted in that channel, so nothing the channel's readers could not see is sent.
+    /// The public channels open to the requester (ADR-0224 D13: listed in channel browse, or the
+    /// requester is in it — [`momo_auth::channel_open_to_member_sql`]) plus the channel the request
+    /// was made in. A private channel's name is never listed here.
     pub channels: Vec<String>,
     /// The channel the request was made in.
     pub this_channel: String,
@@ -639,18 +640,21 @@ pub async fn load_roster_in_tx(
         .fetch_all(&mut *conn)
         .await?
     };
-    let channels = sqlx::query(
+    let channels_sql = format!(
         "SELECT c.name \
            FROM channel c \
           WHERE c.workspace_id = $1 AND c.archived_at IS NULL \
-            AND (c.kind = 'public' OR c.id = $2) \
+            AND ((c.kind = 'public' AND {}) OR c.id = $2) \
           ORDER BY lower(c.name) LIMIT $3",
-    )
-    .bind(workspace_id)
-    .bind(channel_id)
-    .bind(ROSTER_CHANNELS_MAX)
-    .fetch_all(&mut *conn)
-    .await?;
+        momo_auth::channel_open_to_member_sql("c", "$4"),
+    );
+    let channels = sqlx::query(&channels_sql)
+        .bind(workspace_id)
+        .bind(channel_id)
+        .bind(ROSTER_CHANNELS_MAX)
+        .bind(requester_member_id)
+        .fetch_all(&mut *conn)
+        .await?;
     let this_channel: Option<String> =
         sqlx::query_scalar("SELECT name FROM channel WHERE workspace_id = $1 AND id = $2")
             .bind(workspace_id)

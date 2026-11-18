@@ -331,7 +331,8 @@ pub struct ReadScope {
 /// * the helper's 1:1 DM with the requester → the requester's whole view;
 /// * a room with any guest in it (workspace or channel role) → the reply channel
 ///   only;
-/// * otherwise → the reply channel plus every unarchived public channel.
+/// * otherwise → the reply channel plus every channel open to people (ADR-0224 D13:
+///   [`momo_auth::channel_open_to_people_sql`] — a live public channel listed in channel browse).
 pub async fn load_scope_in_tx(
     conn: &mut PgConnection,
     workspace_id: Uuid,
@@ -372,14 +373,15 @@ pub async fn load_scope_in_tx(
     .await?;
     let mut allowed = BTreeSet::from([reply_channel]);
     if !has_guest {
-        let public: Vec<Uuid> = sqlx::query_scalar(
-            "SELECT id FROM channel \
-              WHERE workspace_id = $1 AND kind = 'public' AND archived_at IS NULL",
-        )
-        .bind(workspace_id)
-        .fetch_all(&mut *conn)
-        .await?;
-        allowed.extend(public);
+        let sql = format!(
+            "SELECT c.id FROM channel c WHERE c.workspace_id = $1 AND {}",
+            momo_auth::channel_open_to_people_sql("c"),
+        );
+        let open: Vec<Uuid> = sqlx::query_scalar(&sql)
+            .bind(workspace_id)
+            .fetch_all(&mut *conn)
+            .await?;
+        allowed.extend(open);
     }
     Ok(ReadScope {
         workspace_id,

@@ -80,10 +80,11 @@ pub enum CardAudience {
     /// judged from the **proposer's** point of view (the rules every action had before v5).
     RunChannel,
     /// A card nobody asked for: it stands in `owner`'s one-to-one direct message, so everything
-    /// it names must be something `owner` could already read — a public channel or one `owner`
-    /// is a live member of — and a pinned message may be in **any** such channel, not only the
-    /// run's (the run's channel is the DM itself). A card must never be the first to tell its
-    /// owner that a private room, or what is said in it, exists (ADR-0186 증보 v5 U-b-4 6, U-c).
+    /// it names must be something `owner` could already read — a channel open to people or one
+    /// `owner` is a live member of (ADR-0224 D13) — and a pinned message may be in **any** such
+    /// channel, not only the run's (the run's channel is the DM itself). A card must never be the
+    /// first to tell its owner that a private room, or what is said in it, exists (ADR-0186 증보
+    /// v5 U-b-4 6, U-c).
     Owner(Uuid),
 }
 
@@ -2370,10 +2371,11 @@ pub async fn early_target_agent_in_tx(
 }
 
 /// Find the channel a name points at **from the proposer's point of view**
-/// (증보 V1-b): a live, non-DM channel that is public, or one the proposing agent
-/// is a live member of. Everything else — somebody else's private channel, a DM,
-/// an archived one, a name that does not exist — is `None`, so a refusal cannot
-/// be used to learn that a private channel exists.
+/// (증보 V1-b): a live, non-DM channel that is open to the proposing agent — open to
+/// people, or one it is a live member of (ADR-0224 D13,
+/// [`momo_auth::channel_open_to_member_sql`]). Everything else — somebody else's private
+/// channel, a public one not listed in channel browse, a DM, an archived one, a name that does
+/// not exist — is `None`, so a refusal cannot be used to learn that such a channel exists.
 ///
 /// The channel row is locked `FOR SHARE` so it cannot be archived between this
 /// read and the writes that follow.
@@ -2383,7 +2385,7 @@ pub async fn resolve_visible_channel_in_tx(
     proposer_member_id: Uuid,
     name: &str,
 ) -> Result<Option<ResolvedChannel>, momo_db::DbError> {
-    let row: Option<(Uuid, String, String, i64)> = momo_db::sqlx::query_as(
+    let sql = format!(
         "SELECT c.id, c.name, c.kind::text, \
                 (SELECT count(*) FROM membership x \
                   WHERE x.workspace_id = c.workspace_id AND x.channel_id = c.id \
@@ -2391,17 +2393,16 @@ pub async fn resolve_visible_channel_in_tx(
            FROM channel c \
           WHERE c.workspace_id = $1 AND lower(c.name) = lower($2) \
             AND c.kind IN ('public', 'private') AND c.archived_at IS NULL \
-            AND (c.kind = 'public' OR EXISTS ( \
-                  SELECT 1 FROM membership p \
-                   WHERE p.workspace_id = c.workspace_id AND p.channel_id = c.id \
-                     AND p.member_id = $3 AND p.left_at IS NULL)) \
+            AND {} \
           FOR SHARE OF c",
-    )
-    .bind(workspace_id)
-    .bind(name)
-    .bind(proposer_member_id)
-    .fetch_optional(&mut *conn)
-    .await?;
+        momo_auth::channel_open_to_member_sql("c", "$3"),
+    );
+    let row: Option<(Uuid, String, String, i64)> = momo_db::sqlx::query_as(&sql)
+        .bind(workspace_id)
+        .bind(name)
+        .bind(proposer_member_id)
+        .fetch_optional(&mut *conn)
+        .await?;
     Ok(row.map(|(id, name, kind, member_count)| ResolvedChannel {
         id,
         name,
@@ -2416,8 +2417,8 @@ pub async fn resolve_visible_channel_in_tx(
 ///
 /// Which channels are compared depends on when this runs — here and nowhere else:
 ///
-/// * on the **proposal**, the channels the proposer can see (public, or private
-///   with the agent a live member — the [`resolve_visible_channel_in_tx`] rule). A
+/// * on the **proposal**, the channels the proposer can see (open to people, or the
+///   agent a live member — the [`resolve_visible_channel_in_tx`] rule). A
 ///   refusal caused by a private channel the agent cannot see would tell it that
 ///   channel's name, and a proposal never reveals a private channel (증보 V1-b,
 ///   V11);
@@ -2436,20 +2437,19 @@ async fn lookalike_channel_in_tx(
         ArgsOrigin::Proposal => Some(proposer_member_id),
         ArgsOrigin::Stored => None,
     };
-    let rows: Vec<(Uuid, String)> = momo_db::sqlx::query_as(
+    let sql = format!(
         "SELECT c.id, c.name FROM channel c \
           WHERE c.workspace_id = $1 AND c.kind IN ('public', 'private') \
             AND c.archived_at IS NULL AND c.name IS NOT NULL \
-            AND ($2::uuid IS NULL OR c.kind = 'public' OR EXISTS ( \
-                  SELECT 1 FROM membership p \
-                   WHERE p.workspace_id = c.workspace_id AND p.channel_id = c.id \
-                     AND p.member_id = $2 AND p.left_at IS NULL)) \
+            AND ($2::uuid IS NULL OR {}) \
           ORDER BY c.id",
-    )
-    .bind(workspace_id)
-    .bind(seen_by)
-    .fetch_all(&mut *conn)
-    .await?;
+        momo_auth::channel_open_to_member_sql("c", "$2"),
+    );
+    let rows: Vec<(Uuid, String)> = momo_db::sqlx::query_as(&sql)
+        .bind(workspace_id)
+        .bind(seen_by)
+        .fetch_all(&mut *conn)
+        .await?;
     Ok(rows
         .into_iter()
         .find(|(_, existing)| channel_names_look_alike(existing, name))
@@ -4058,14 +4058,15 @@ pub async fn resolve_action_with_origin_in_tx(
             else {
                 return Ok(Err(ActionRejection::new("channel did not resolve")));
             };
-            // An unasked card stands in the owner's DM and names this channel: a private room
-            // its reader is not in must not be named to them by a card (ADR U-b-4 6). Judged
-            // after the agent's own view, so the two failures stay distinguishable to the
-            // producer (and only to it).
+            // An unasked card stands in the owner's DM and names this channel: a channel not
+            // open to its reader (ADR U-b-4 6; ADR-0224 D13 — a private room or a public one
+            // not listed in channel browse, that the reader is not in) must not be named to
+            // them by a card. Judged after the agent's own view, so the two failures stay
+            // distinguishable to the producer (and only to it).
             if let CardAudience::Owner(reader) = audience {
-                if found.kind != "public"
-                    && !member_is_live_in_channel_in_tx(conn, workspace_id, found.id, reader)
-                        .await?
+                if !momo_auth::channel_is_open_to_member_in_tx(conn, workspace_id, found.id, reader)
+                    .await
+                    .map_err(momo_db::DbError::from)?
                 {
                     return Ok(Err(ActionRejection::new(OWNER_CANNOT_SEE)));
                 }
