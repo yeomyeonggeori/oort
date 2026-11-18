@@ -216,18 +216,15 @@ export const CHANNEL_CREATE_FAILURE_KEYS = {
   rateLimited: "channels.createFailure.rateLimited",
 } as const satisfies Record<string, MessageKey>;
 
-/** Korean sentences for callers that have no message service yet. They are
- *  read from the ko catalog itself, so there is one copy of the words. New
- *  screens format `channelNameIssueKey` with their message service instead. */
+/** The Korean words of `CreateChannelFailure.message`, read from the ko catalog
+ *  itself so there is one copy. Both screens (web, phone) format `messageKey`
+ *  with their message service and read `message` only for the failures that have
+ *  no key (network, unknown). */
 function koSentence(key: MessageKey): string {
   return (koChannels as Record<string, string>)[key].replace(
     "{max, number}",
     String(CHANNEL_NAME_MAX)
   );
-}
-
-export function channelNameIssueMessage(issue: ChannelNameIssue): string {
-  return koSentence(CHANNEL_NAME_ISSUE_KEYS[issue]);
 }
 
 export function channelTopicIssueMessage(issue: ChannelTopicIssue): string {
