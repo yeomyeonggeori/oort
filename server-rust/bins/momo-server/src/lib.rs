@@ -1110,6 +1110,12 @@ pub fn build_app(state: AppState) -> Router {
             "/v1/workspaces/{ws}/channels",
             get(routes::channels::list).post(routes::channels::create),
         )
+        // ADR-0225 D10 — rename (the first channel-editing route; later pieces
+        // add fields to the same PATCH).
+        .route(
+            "/v1/workspaces/{ws}/channels/{ch}",
+            patch(routes::channels::update),
+        )
         .route(
             "/v1/workspaces/{ws}/channels/{ch}/notification-pref",
             put(routes::channels::notification_pref),

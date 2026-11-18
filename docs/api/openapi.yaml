@@ -5824,6 +5824,87 @@ paths:
         "429":
           $ref: "#/components/responses/RateLimited"
 
+  /v1/workspaces/{workspaceId}/channels/{channelId}:
+    patch:
+      tags: [channels]
+      operationId: updateChannel
+      summary: Rename a public/private channel (workspace admin only, humans only).
+      description: >
+        ADR-0225 D10. A partial update: only the fields present change. Today
+        the one field is `name`; an unknown field is a 400 (never ignored) and a
+        body with no known field is a 400. The name goes through the same
+        normalisation and rules as `createChannel`, and the response carries the
+        stored name.
+
+
+        Human owners and admins only. Agent credentials, developer tokens and
+        the narrow push tokens never reach this route. Targets are live public
+        and private channels of the workspace. A direct message, a group
+        message, an archived channel, a channel of another workspace, an unknown
+        id and a private channel the caller is not a live member of all answer
+        the same 404. A name that already belongs to a live channel
+        (case-insensitive, any non-DM kind) is a 409. `general` is locked in both
+        directions: renaming it, or renaming another channel to it, is a 409
+        with `error.code` `general_channel_locked`. Sending the name the channel
+        already has is a 200 and writes nothing. A rename writes the audit
+        record `channel.renamed` (`old`, `new`); it posts no message and
+        publishes no realtime event, so other devices see the new name on their
+        next channel list. A `#old-name` already written in a message stays as
+        written.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/ChannelId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateChannelRequest"
+      responses:
+        "200":
+          description: The channel as it now reads.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UpdateChannelResponse"
+        "400":
+          description: >
+            Invalid channel id, a body that is not an object, an unknown field,
+            no known field, or a name the rules refuse (the same two messages as
+            `createChannel`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: >
+            Caller is not a human workspace owner/admin, or the token is of
+            another workspace.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Not a live public/private channel the caller may rename.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: >
+            The name already belongs to a live channel (no `error.code`), or the
+            `general` lock (`error.code` `general_channel_locked`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
   /v1/workspaces/{workspaceId}/channels/{channelId}/notification-pref:
     put:
       tags: [channels]
@@ -23417,6 +23498,39 @@ components:
           $ref: "#/components/schemas/Channel"
         creatorMembership:
           $ref: "#/components/schemas/ChannelMembership"
+
+    UpdateChannelRequest:
+      type: object
+      additionalProperties: false
+      minProperties: 1
+      properties:
+        name:
+          type: string
+          description: >-
+            The new name, normalised and judged exactly like
+            `CreateChannelRequest.name` (ADR-0225 D1-D5).
+
+    UpdateChannelResponse:
+      type: object
+      required: [channel]
+      properties:
+        channel:
+          type: object
+          required: [id, workspaceId, kind, name]
+          properties:
+            id:
+              type: string
+              format: uuid
+            workspaceId:
+              type: string
+              format: uuid
+            kind:
+              type: string
+              enum: [public, private]
+            name:
+              type: string
+            topic:
+              type: string
 
     MembershipRole:
       type: string

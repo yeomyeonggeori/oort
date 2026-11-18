@@ -3810,6 +3810,14 @@ sample channel-create post "/v1/workspaces/{workspaceId}/channels" \
 GATE_CHANNEL_ID="$(printf '%s' "$RESPONSE_BODY" | jq -er '.channel.id')"
 canonical_uuid "$GATE_CHANNEL_ID" || { echo "[openapi-rust] candidate returned a non-canonical channel id" >&2; exit 1; }
 
+# ADR-0225 D10 — 갓 만든 채널의 이름을 바꾼다(#general 은 잠겨 있어 건드리지 않는다).
+# 뒤따르는 표본은 GATE_CHANNEL_ID 만 쓰므로 이름이 바뀌어도 영향이 없다.
+sample channel-rename patch "/v1/workspaces/{workspaceId}/channels/{channelId}" \
+  "/v1/workspaces/$WS/channels/$GATE_CHANNEL_ID" 200 \
+  "$(jq -cn --arg n "rust-gate-renamed-$RUN_EPOCH" '{name:$n}')" "$ACCESS"
+guard_jq --arg n "rust-gate-renamed-$RUN_EPOCH" '.channel.name == $n' \
+  "channel rename answers the stored name"
+
 # 갓 만든 채널에 건다 — #general 의 상태를 게이트가 바꾸면 뒤따르는 read-state
 # 표본이 자기가 만든 부작용을 읽게 된다.
 sample notification-pref put \

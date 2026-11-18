@@ -2312,4 +2312,14 @@ mod tests {
             assert!(text.contains("<redacted>"));
         }
     }
+
+    /// ADR-0225 D10: a developer token cannot rename a channel — the closed table
+    /// has no `PATCH …/channels/{ch}` row.
+    #[test]
+    fn a_developer_token_cannot_edit_a_channel() {
+        assert_eq!(
+            required_dev_scope("PATCH", "/v1/workspaces/{ws}/channels/{ch}"),
+            None
+        );
+    }
 }
