@@ -1448,10 +1448,52 @@ export const catalog: MessageCatalog = {
       "value": "채널을 만들 권한이 없습니다. 워크스페이스 소유자나 관리자에게 요청하세요."
     }
   ],
+  "channels.createFailure.generic": [
+    {
+      "type": 0,
+      "value": "채널을 만들지 못했습니다. 잠시 뒤에 다시 시도하세요."
+    }
+  ],
+  "channels.createFailure.network": [
+    {
+      "type": 0,
+      "value": "채널을 만들지 못했습니다. 서버에 연결하지 못했어요. 연결을 확인한 뒤 다시 시도하세요."
+    }
+  ],
   "channels.createFailure.rateLimited": [
     {
       "type": 0,
       "value": "요청이 너무 잦습니다. 잠시 뒤에 다시 시도하세요."
+    }
+  ],
+  "channels.default.description": [
+    {
+      "type": 0,
+      "value": "새로 참여하는 사람이 자동으로 들어가요"
+    }
+  ],
+  "channels.default.label": [
+    {
+      "type": 0,
+      "value": "기본 채널로 지정"
+    }
+  ],
+  "channels.default.lastDefault": [
+    {
+      "type": 0,
+      "value": "기본 채널은 하나 이상 있어야 해요. 다른 채널을 먼저 기본 채널로 지정해 주세요."
+    }
+  ],
+  "channels.default.lastHint": [
+    {
+      "type": 0,
+      "value": "기본 채널은 하나 이상 있어야 해요"
+    }
+  ],
+  "channels.default.notDefaultable": [
+    {
+      "type": 0,
+      "value": "공개 채널만 기본 채널로 지정할 수 있어요."
     }
   ],
   "channels.dmLeave.action": [
@@ -1707,6 +1749,108 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "누르면 최근 글을 읽기만 할 수 있게 미리 봐요."
+    }
+  ],
+  "channels.rename.action": [
+    {
+      "type": 0,
+      "value": "이름 바꾸기"
+    }
+  ],
+  "channels.rename.aria": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " 채널의 이름 바꾸기"
+    }
+  ],
+  "channels.rename.busy": [
+    {
+      "type": 0,
+      "value": "바꾸는 중…"
+    }
+  ],
+  "channels.rename.cancel": [
+    {
+      "type": 0,
+      "value": "취소"
+    }
+  ],
+  "channels.rename.description": [
+    {
+      "type": 0,
+      "value": "새 이름은 사이드바와 채널 머리에 바로 보여요."
+    }
+  ],
+  "channels.rename.done": [
+    {
+      "type": 0,
+      "value": "채널 이름을 바꿨어요."
+    }
+  ],
+  "channels.rename.fieldLabel": [
+    {
+      "type": 0,
+      "value": "채널 이름"
+    }
+  ],
+  "channels.rename.forbidden": [
+    {
+      "type": 0,
+      "value": "소유자와 관리자만 채널 이름을 바꿀 수 있어요."
+    }
+  ],
+  "channels.rename.generalLocked": [
+    {
+      "type": 0,
+      "value": "general 채널의 이름은 바꿀 수 없어요."
+    }
+  ],
+  "channels.rename.generic": [
+    {
+      "type": 0,
+      "value": "바꾸지 못했어요. 다시 시도해 주세요."
+    }
+  ],
+  "channels.rename.network": [
+    {
+      "type": 0,
+      "value": "바꾸지 못했어요. "
+    },
+    {
+      "type": 1,
+      "value": "reason"
+    }
+  ],
+  "channels.rename.notFound": [
+    {
+      "type": 0,
+      "value": "이 채널을 찾을 수 없어요."
+    }
+  ],
+  "channels.rename.preview": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " 이름으로 바뀌어요"
+    }
+  ],
+  "channels.rename.submit": [
+    {
+      "type": 0,
+      "value": "바꾸기"
+    }
+  ],
+  "channels.rename.title": [
+    {
+      "type": 0,
+      "value": "채널 이름 바꾸기"
     }
   ],
   "common.feedback.unavailable": [
@@ -3267,6 +3411,40 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "등록 중"
+    }
+  ],
+  "expressions.draft.linkApprove": [
+    {
+      "type": 0,
+      "value": "가져와서 팀 보관함에 등록"
+    }
+  ],
+  "expressions.draft.linkBusy": [
+    {
+      "type": 0,
+      "value": "지금 가져오는 그림이 많아요. 잠시 뒤 다시 눌러 주세요."
+    }
+  ],
+  "expressions.draft.linkFetching": [
+    {
+      "type": 0,
+      "value": "가져오는 중"
+    }
+  ],
+  "expressions.draft.linkFrom": [
+    {
+      "type": 1,
+      "value": "host"
+    },
+    {
+      "type": 0,
+      "value": "에서 가져와요"
+    }
+  ],
+  "expressions.draft.linkHint": [
+    {
+      "type": 0,
+      "value": "승인하면 그림을 한 번 가져와 확인한 뒤 팀 보관함에 등록해요."
     }
   ],
   "expressions.draft.previewLabel": [
@@ -10257,6 +10435,24 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "일하는 에이전트"
+    }
+  ],
+  "timeline.approval.channelAgentIn": [
+    {
+      "type": 0,
+      "value": "이 에이전트가 이미 이 채널에 들어가 있어요."
+    }
+  ],
+  "timeline.approval.channelNeedsMember": [
+    {
+      "type": 0,
+      "value": "먼저 이 채널에 에이전트를 멤버로 추가해 주세요."
+    }
+  ],
+  "timeline.approval.channelsRefused": [
+    {
+      "type": 0,
+      "value": "고른 채널 가운데 지금은 연결할 수 없는 채널이 있어요. 목록을 다시 확인해 주세요."
     }
   ],
   "timeline.approval.reproposeBusy": [

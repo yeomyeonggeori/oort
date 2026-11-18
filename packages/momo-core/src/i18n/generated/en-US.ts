@@ -1490,10 +1490,52 @@ export const catalog: MessageCatalog = {
       "value": "You don't have permission to create channels. Ask a workspace owner or admin."
     }
   ],
+  "channels.createFailure.generic": [
+    {
+      "type": 0,
+      "value": "Couldn't create the channel. Try again in a moment."
+    }
+  ],
+  "channels.createFailure.network": [
+    {
+      "type": 0,
+      "value": "Couldn't create the channel. Could not reach the server. Check your connection and try again."
+    }
+  ],
   "channels.createFailure.rateLimited": [
     {
       "type": 0,
       "value": "Too many requests. Try again in a moment."
+    }
+  ],
+  "channels.default.description": [
+    {
+      "type": 0,
+      "value": "New members join it automatically"
+    }
+  ],
+  "channels.default.label": [
+    {
+      "type": 0,
+      "value": "Make default channel"
+    }
+  ],
+  "channels.default.lastDefault": [
+    {
+      "type": 0,
+      "value": "There must be at least one default channel. Make another channel the default first."
+    }
+  ],
+  "channels.default.lastHint": [
+    {
+      "type": 0,
+      "value": "There must be at least one default channel"
+    }
+  ],
+  "channels.default.notDefaultable": [
+    {
+      "type": 0,
+      "value": "Only public channels can be the default channel."
     }
   ],
   "channels.dmLeave.action": [
@@ -1770,6 +1812,112 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "Opens a read-only preview of recent messages."
+    }
+  ],
+  "channels.rename.action": [
+    {
+      "type": 0,
+      "value": "Rename channel"
+    }
+  ],
+  "channels.rename.aria": [
+    {
+      "type": 0,
+      "value": "Rename the "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " channel"
+    }
+  ],
+  "channels.rename.busy": [
+    {
+      "type": 0,
+      "value": "Renaming…"
+    }
+  ],
+  "channels.rename.cancel": [
+    {
+      "type": 0,
+      "value": "Cancel"
+    }
+  ],
+  "channels.rename.description": [
+    {
+      "type": 0,
+      "value": "The new name shows in the sidebar and channel header right away."
+    }
+  ],
+  "channels.rename.done": [
+    {
+      "type": 0,
+      "value": "Channel renamed."
+    }
+  ],
+  "channels.rename.fieldLabel": [
+    {
+      "type": 0,
+      "value": "Channel name"
+    }
+  ],
+  "channels.rename.forbidden": [
+    {
+      "type": 0,
+      "value": "Only workspace owners and admins can rename channels."
+    }
+  ],
+  "channels.rename.generalLocked": [
+    {
+      "type": 0,
+      "value": "The name of the general channel can't be changed."
+    }
+  ],
+  "channels.rename.generic": [
+    {
+      "type": 0,
+      "value": "Couldn't rename the channel. Try again."
+    }
+  ],
+  "channels.rename.network": [
+    {
+      "type": 0,
+      "value": "Couldn't rename the channel. "
+    },
+    {
+      "type": 1,
+      "value": "reason"
+    }
+  ],
+  "channels.rename.notFound": [
+    {
+      "type": 0,
+      "value": "This channel can't be found."
+    }
+  ],
+  "channels.rename.preview": [
+    {
+      "type": 0,
+      "value": "Will be renamed to "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    }
+  ],
+  "channels.rename.submit": [
+    {
+      "type": 0,
+      "value": "Rename"
+    }
+  ],
+  "channels.rename.title": [
+    {
+      "type": 0,
+      "value": "Rename channel"
     }
   ],
   "common.feedback.unavailable": [
@@ -3517,6 +3665,40 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "Registering"
+    }
+  ],
+  "expressions.draft.linkApprove": [
+    {
+      "type": 0,
+      "value": "Fetch and register in team library"
+    }
+  ],
+  "expressions.draft.linkBusy": [
+    {
+      "type": 0,
+      "value": "Many pictures are being fetched right now. Press again in a moment."
+    }
+  ],
+  "expressions.draft.linkFetching": [
+    {
+      "type": 0,
+      "value": "Fetching"
+    }
+  ],
+  "expressions.draft.linkFrom": [
+    {
+      "type": 0,
+      "value": "Will be fetched from "
+    },
+    {
+      "type": 1,
+      "value": "host"
+    }
+  ],
+  "expressions.draft.linkHint": [
+    {
+      "type": 0,
+      "value": "Approving fetches the picture once, checks it, then registers it in the team library."
     }
   ],
   "expressions.draft.previewLabel": [
@@ -10833,6 +11015,24 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "Working agents"
+    }
+  ],
+  "timeline.approval.channelAgentIn": [
+    {
+      "type": 0,
+      "value": "This agent is already in this channel."
+    }
+  ],
+  "timeline.approval.channelNeedsMember": [
+    {
+      "type": 0,
+      "value": "First add this agent to this channel as a member."
+    }
+  ],
+  "timeline.approval.channelsRefused": [
+    {
+      "type": 0,
+      "value": "Some of the channels you picked can't be connected right now. Please check the list again."
     }
   ],
   "timeline.approval.reproposeBusy": [

@@ -327,10 +327,52 @@ export const catalog: MessageCatalog = {
       "value": "你沒有建立頻道的權限。請聯絡工作區擁有者或管理員。"
     }
   ],
+  "channels.createFailure.generic": [
+    {
+      "type": 0,
+      "value": "無法建立頻道。請稍後再試。"
+    }
+  ],
+  "channels.createFailure.network": [
+    {
+      "type": 0,
+      "value": "無法建立頻道。無法連線到伺服器。請檢查網路連線後再試。"
+    }
+  ],
   "channels.createFailure.rateLimited": [
     {
       "type": 0,
       "value": "請求過於頻繁，請稍後再試。"
+    }
+  ],
+  "channels.default.description": [
+    {
+      "type": 0,
+      "value": "新加入的成員會自動加入"
+    }
+  ],
+  "channels.default.label": [
+    {
+      "type": 0,
+      "value": "設為預設頻道"
+    }
+  ],
+  "channels.default.lastDefault": [
+    {
+      "type": 0,
+      "value": "至少需要一個預設頻道。請先將其他頻道設為預設頻道。"
+    }
+  ],
+  "channels.default.lastHint": [
+    {
+      "type": 0,
+      "value": "至少需要一個預設頻道"
+    }
+  ],
+  "channels.default.notDefaultable": [
+    {
+      "type": 0,
+      "value": "只有公開頻道可以設為預設頻道。"
     }
   ],
   "channels.dmLeave.action": [
@@ -590,6 +632,168 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "點一下即可唯讀預覽最近的訊息。"
+    }
+  ],
+  "channels.rename.action": [
+    {
+      "type": 0,
+      "value": "重新命名頻道"
+    }
+  ],
+  "channels.rename.aria": [
+    {
+      "type": 0,
+      "value": "重新命名 "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " 頻道"
+    }
+  ],
+  "channels.rename.busy": [
+    {
+      "type": 0,
+      "value": "正在重新命名…"
+    }
+  ],
+  "channels.rename.cancel": [
+    {
+      "type": 0,
+      "value": "取消"
+    }
+  ],
+  "channels.rename.description": [
+    {
+      "type": 0,
+      "value": "新名稱會立即顯示在側邊欄和頻道標題中。"
+    }
+  ],
+  "channels.rename.done": [
+    {
+      "type": 0,
+      "value": "已重新命名頻道。"
+    }
+  ],
+  "channels.rename.fieldLabel": [
+    {
+      "type": 0,
+      "value": "頻道名稱"
+    }
+  ],
+  "channels.rename.forbidden": [
+    {
+      "type": 0,
+      "value": "只有擁有者和管理員可以重新命名頻道。"
+    }
+  ],
+  "channels.rename.generalLocked": [
+    {
+      "type": 0,
+      "value": "無法變更 general 頻道的名稱。"
+    }
+  ],
+  "channels.rename.generic": [
+    {
+      "type": 0,
+      "value": "無法重新命名。請再試一次。"
+    }
+  ],
+  "channels.rename.network": [
+    {
+      "type": 0,
+      "value": "無法重新命名。"
+    },
+    {
+      "type": 1,
+      "value": "reason"
+    }
+  ],
+  "channels.rename.notFound": [
+    {
+      "type": 0,
+      "value": "找不到此頻道。"
+    }
+  ],
+  "channels.rename.preview": [
+    {
+      "type": 0,
+      "value": "將重新命名為 "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    }
+  ],
+  "channels.rename.submit": [
+    {
+      "type": 0,
+      "value": "重新命名"
+    }
+  ],
+  "channels.rename.title": [
+    {
+      "type": 0,
+      "value": "重新命名頻道"
+    }
+  ],
+  "expressions.draft.linkApprove": [
+    {
+      "type": 0,
+      "value": "取得並登記到團隊素材庫"
+    }
+  ],
+  "expressions.draft.linkBusy": [
+    {
+      "type": 0,
+      "value": "目前正在取得的圖片較多。請稍後再按一次。"
+    }
+  ],
+  "expressions.draft.linkFetching": [
+    {
+      "type": 0,
+      "value": "正在取得"
+    }
+  ],
+  "expressions.draft.linkFrom": [
+    {
+      "type": 0,
+      "value": "將從 "
+    },
+    {
+      "type": 1,
+      "value": "host"
+    },
+    {
+      "type": 0,
+      "value": " 取得"
+    }
+  ],
+  "expressions.draft.linkHint": [
+    {
+      "type": 0,
+      "value": "核准後會取得一次圖片，檢查後登記到團隊素材庫。"
+    }
+  ],
+  "timeline.approval.channelAgentIn": [
+    {
+      "type": 0,
+      "value": "此代理已在該頻道中。"
+    }
+  ],
+  "timeline.approval.channelNeedsMember": [
+    {
+      "type": 0,
+      "value": "請先將此代理加入為該頻道的成員。"
+    }
+  ],
+  "timeline.approval.channelsRefused": [
+    {
+      "type": 0,
+      "value": "所選頻道中有目前無法連線的頻道。請重新檢查清單。"
     }
   ],
   "timeline.channelLeave.bodyPublicBrowse": [

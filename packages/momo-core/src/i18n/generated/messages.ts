@@ -219,7 +219,14 @@ export const messageKeys = [
   "channels.browse.title",
   "channels.createFailure.duplicate",
   "channels.createFailure.forbidden",
+  "channels.createFailure.generic",
+  "channels.createFailure.network",
   "channels.createFailure.rateLimited",
+  "channels.default.description",
+  "channels.default.label",
+  "channels.default.lastDefault",
+  "channels.default.lastHint",
+  "channels.default.notDefaultable",
   "channels.dmLeave.action",
   "channels.dmLeave.busy",
   "channels.dmLeave.cancel",
@@ -254,6 +261,21 @@ export const messageKeys = [
   "channels.preview.loadNetwork",
   "channels.preview.notFound",
   "channels.preview.openHint",
+  "channels.rename.action",
+  "channels.rename.aria",
+  "channels.rename.busy",
+  "channels.rename.cancel",
+  "channels.rename.description",
+  "channels.rename.done",
+  "channels.rename.fieldLabel",
+  "channels.rename.forbidden",
+  "channels.rename.generalLocked",
+  "channels.rename.generic",
+  "channels.rename.network",
+  "channels.rename.notFound",
+  "channels.rename.preview",
+  "channels.rename.submit",
+  "channels.rename.title",
   "common.feedback.unavailable",
   "common.invitation.received",
   "common.members.count",
@@ -470,6 +492,11 @@ export const messageKeys = [
   "expressions.draft.approve",
   "expressions.draft.approveFailed",
   "expressions.draft.approving",
+  "expressions.draft.linkApprove",
+  "expressions.draft.linkBusy",
+  "expressions.draft.linkFetching",
+  "expressions.draft.linkFrom",
+  "expressions.draft.linkHint",
   "expressions.draft.previewLabel",
   "expressions.draft.replaceFailed",
   "expressions.draft.replacing",
@@ -1481,6 +1508,9 @@ export const messageKeys = [
   "timeline.agentRail.openRecord",
   "timeline.agentRail.sheetClose",
   "timeline.agentRail.sheetTitle",
+  "timeline.approval.channelAgentIn",
+  "timeline.approval.channelNeedsMember",
+  "timeline.approval.channelsRefused",
   "timeline.approval.reproposeBusy",
   "timeline.approval.reproposeSeeded",
   "timeline.approvalExpiry.soon",
@@ -1987,7 +2017,14 @@ export const argumentSpecs = {
   "channels.browse.title": {},
   "channels.createFailure.duplicate": {},
   "channels.createFailure.forbidden": {},
+  "channels.createFailure.generic": {},
+  "channels.createFailure.network": {},
   "channels.createFailure.rateLimited": {},
+  "channels.default.description": {},
+  "channels.default.label": {},
+  "channels.default.lastDefault": {},
+  "channels.default.lastHint": {},
+  "channels.default.notDefaultable": {},
   "channels.dmLeave.action": {},
   "channels.dmLeave.busy": {},
   "channels.dmLeave.cancel": {},
@@ -2038,6 +2075,27 @@ export const argumentSpecs = {
   },
   "channels.preview.notFound": {},
   "channels.preview.openHint": {},
+  "channels.rename.action": {},
+  "channels.rename.aria": {
+    "name": "string"
+  },
+  "channels.rename.busy": {},
+  "channels.rename.cancel": {},
+  "channels.rename.description": {},
+  "channels.rename.done": {},
+  "channels.rename.fieldLabel": {},
+  "channels.rename.forbidden": {},
+  "channels.rename.generalLocked": {},
+  "channels.rename.generic": {},
+  "channels.rename.network": {
+    "reason": "string"
+  },
+  "channels.rename.notFound": {},
+  "channels.rename.preview": {
+    "name": "string"
+  },
+  "channels.rename.submit": {},
+  "channels.rename.title": {},
   "common.feedback.unavailable": {},
   "common.invitation.received": {
     "actorName": "string"
@@ -2329,6 +2387,13 @@ export const argumentSpecs = {
   "expressions.draft.approve": {},
   "expressions.draft.approveFailed": {},
   "expressions.draft.approving": {},
+  "expressions.draft.linkApprove": {},
+  "expressions.draft.linkBusy": {},
+  "expressions.draft.linkFetching": {},
+  "expressions.draft.linkFrom": {
+    "host": "string"
+  },
+  "expressions.draft.linkHint": {},
   "expressions.draft.previewLabel": {
     "name": "string"
   },
@@ -3605,6 +3670,9 @@ export const argumentSpecs = {
   },
   "timeline.agentRail.sheetClose": {},
   "timeline.agentRail.sheetTitle": {},
+  "timeline.approval.channelAgentIn": {},
+  "timeline.approval.channelNeedsMember": {},
+  "timeline.approval.channelsRefused": {},
   "timeline.approval.reproposeBusy": {},
   "timeline.approval.reproposeSeeded": {},
   "timeline.approvalExpiry.soon": {},
@@ -4230,7 +4298,14 @@ export interface MessageArgs {
   "channels.browse.title": Record<string, never>;
   "channels.createFailure.duplicate": Record<string, never>;
   "channels.createFailure.forbidden": Record<string, never>;
+  "channels.createFailure.generic": Record<string, never>;
+  "channels.createFailure.network": Record<string, never>;
   "channels.createFailure.rateLimited": Record<string, never>;
+  "channels.default.description": Record<string, never>;
+  "channels.default.label": Record<string, never>;
+  "channels.default.lastDefault": Record<string, never>;
+  "channels.default.lastHint": Record<string, never>;
+  "channels.default.notDefaultable": Record<string, never>;
   "channels.dmLeave.action": Record<string, never>;
   "channels.dmLeave.busy": Record<string, never>;
   "channels.dmLeave.cancel": Record<string, never>;
@@ -4265,6 +4340,21 @@ export interface MessageArgs {
   "channels.preview.loadNetwork": { reason: string };
   "channels.preview.notFound": Record<string, never>;
   "channels.preview.openHint": Record<string, never>;
+  "channels.rename.action": Record<string, never>;
+  "channels.rename.aria": { name: string };
+  "channels.rename.busy": Record<string, never>;
+  "channels.rename.cancel": Record<string, never>;
+  "channels.rename.description": Record<string, never>;
+  "channels.rename.done": Record<string, never>;
+  "channels.rename.fieldLabel": Record<string, never>;
+  "channels.rename.forbidden": Record<string, never>;
+  "channels.rename.generalLocked": Record<string, never>;
+  "channels.rename.generic": Record<string, never>;
+  "channels.rename.network": { reason: string };
+  "channels.rename.notFound": Record<string, never>;
+  "channels.rename.preview": { name: string };
+  "channels.rename.submit": Record<string, never>;
+  "channels.rename.title": Record<string, never>;
   "common.feedback.unavailable": Record<string, never>;
   "common.invitation.received": { actorName: string };
   "common.members.count": { count: number };
@@ -4481,6 +4571,11 @@ export interface MessageArgs {
   "expressions.draft.approve": Record<string, never>;
   "expressions.draft.approveFailed": Record<string, never>;
   "expressions.draft.approving": Record<string, never>;
+  "expressions.draft.linkApprove": Record<string, never>;
+  "expressions.draft.linkBusy": Record<string, never>;
+  "expressions.draft.linkFetching": Record<string, never>;
+  "expressions.draft.linkFrom": { host: string };
+  "expressions.draft.linkHint": Record<string, never>;
   "expressions.draft.previewLabel": { name: string };
   "expressions.draft.replaceFailed": Record<string, never>;
   "expressions.draft.replacing": Record<string, never>;
@@ -5492,6 +5587,9 @@ export interface MessageArgs {
   "timeline.agentRail.openRecord": { name: string };
   "timeline.agentRail.sheetClose": Record<string, never>;
   "timeline.agentRail.sheetTitle": Record<string, never>;
+  "timeline.approval.channelAgentIn": Record<string, never>;
+  "timeline.approval.channelNeedsMember": Record<string, never>;
+  "timeline.approval.channelsRefused": Record<string, never>;
   "timeline.approval.reproposeBusy": Record<string, never>;
   "timeline.approval.reproposeSeeded": Record<string, never>;
   "timeline.approvalExpiry.soon": Record<string, never>;

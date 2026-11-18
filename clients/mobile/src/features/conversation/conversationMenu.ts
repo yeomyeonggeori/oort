@@ -33,6 +33,7 @@ import {
 
 /** 이 시트가 코어 표에서 가져오는 열쇠. 폰이 실행할 줄 아는 열쇠(`PHONE_CHANNEL_ACTION_KEYS`)의 부분집합이다. */
 export const CONVERSATION_MENU_ACTION_KEYS: ReadonlySet<ChannelActionKey> = new Set<ChannelActionKey>([
+  'rename',
   'mute',
   'close-dm',
   'leave',

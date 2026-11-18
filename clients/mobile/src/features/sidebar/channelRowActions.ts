@@ -5,6 +5,7 @@ import {
   type ChannelActionItem,
   type ChannelActionKey,
 } from '@momo/core/features/channels/actionModel';
+import {canRenameChannel} from '@momo/core/features/channels/rename';
 import {composedUnreadCount} from '@momo/core/features/readState/model';
 import type {MessageService} from '@momo/core/i18n/types';
 
@@ -39,6 +40,7 @@ import type {MessageService} from '@momo/core/i18n/types';
 
 /** 이 시트가 실행할 줄 아는 열쇠. 코어 표에 새 열쇠가 생겨도 여기에 없으면 시험이 빨개진다. */
 export const PHONE_CHANNEL_ACTION_KEYS: ReadonlySet<ChannelActionKey> = new Set<ChannelActionKey>([
+  'rename',
   'copy-name',
   'copy-link',
   'copy-id',
@@ -59,7 +61,7 @@ export interface DmLeaveHeld {
 }
 
 export interface ChannelRowTarget {
-  channel: Pick<Channel, 'id' | 'kind' | 'topic'>;
+  channel: Pick<Channel, 'id' | 'kind' | 'topic'> & Partial<Pick<Channel, 'name' | 'archivedAtMs'>>;
   /** 행에 보이는 이름. 확인 문장·이름 복사가 쓴다. */
   title: string;
   muted: boolean;
@@ -109,6 +111,11 @@ export function channelRowActionItems(
     hasMemorySettings: false,
     hasGithubNotifications: false,
     // DM 이 아닌 채널에는 코어 표가 닫기를 내지 않는다(`isDm &&`).
+    // 「이름 바꾸기」(ADR-0225 D10, #5835): 소유자 · 관리자가 든 공개/비공개 채널, 이름이 general 이 아닐 때(코어 `canRenameChannel`). 이름은 채널이면 보이는 제목과 같다.
+    canRename: canRenameChannel(
+      {kind: target.channel.kind, name: target.channel.name ?? target.title, archivedAtMs: target.channel.archivedAtMs},
+      target.selfRole,
+    ),
     canCloseDm: target.closeOffered === true,
     // 사람끼리의 1:1 에서만(D21). 안 읽음·별표와 무관하다 - 확인 단계가 있어서.
     canLeaveDm: target.leaveOffered === true,

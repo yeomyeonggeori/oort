@@ -6,6 +6,7 @@ import { MemoryRouter } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError } from "@momo/core/lib/api";
+import { NetworkError } from "@momo/core/lib/http";
 import { channelNameIssue, normalizeChannelName } from "@momo/core/features/channels/model";
 import { SessionProvider, type SessionContextValue } from "@/app/session";
 import { LocaleProvider } from "@/i18n/LocaleProvider";
@@ -258,21 +259,30 @@ describe("거절", () => {
   });
 });
 
-describe("채널 만들기가 거절되면 그 문장이 화면 언어로 선다 (#5877, 400·409·403·429)", () => {
-  const cases: [string, number, string, string][] = [
+describe("채널 만들기가 거절되면 그 문장이 화면 언어로 선다 (#5877·#5906, 400·409·403·429·망·그 밖)", () => {
+  const cases: [string, number | Error, string, string][] = [
     ["400", 400, "create-channel-name-error", "The server did not accept this name. Use only letters, numbers, - and _."],
     ["409", 409, "create-channel-name-error", "A channel with this name already exists. Try a different name."],
     ["403", 403, "create-channel-error", "You don't have permission to create channels. Ask a workspace owner or admin."],
     ["429", 429, "create-channel-error", "Too many requests. Try again in a moment."],
+    ["500", 500, "create-channel-error", "Couldn't create the channel. Try again in a moment."],
+    ["망 실패", new NetworkError("timeout", 15_000), "create-channel-error", "Couldn't create the channel. Could not reach the server. Check your connection and try again."],
+    ["알 수 없는 오류", new Error("boom"), "create-channel-error", "Couldn't create the channel. Try again in a moment."],
   ];
   it.each(cases)("영어 화면 %s: 영어 문장이고, 한국어 문장이 아니다", async (_label, status, testId, sentence) => {
     await mount(english);
     await type("ops-room");
-    api.createChannel.mockRejectedValueOnce(new ApiError(status, "x"));
+    api.createChannel.mockRejectedValueOnce(typeof status === "number" ? new ApiError(status, "x") : status);
     await submit();
     const text = q(testId)!.textContent ?? "";
     expect(text).toBe(sentence);
     expect(text).not.toMatch(/[\uAC00-\uD7A3]/);
+  });
+  it("영어 화면의 자리 예약 층(보이지 않는 줄)에도 영어 409 문장이 선다 — 한국어가 아니다", async () => {
+    await mount(english);
+    const reserved = [...status().children[0]!.children].map((p) => p.textContent ?? "");
+    expect(reserved).toContain("A channel with this name already exists. Try a different name.");
+    expect(reserved.join("")).not.toMatch(/[\uAC00-\uD7A3]/);
   });
   it("한국어 화면은 그대로 한국어다", async () => {
     await mount();

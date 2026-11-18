@@ -327,10 +327,52 @@ export const catalog: MessageCatalog = {
       "value": "你没有创建频道的权限。请联系工作区所有者或管理员。"
     }
   ],
+  "channels.createFailure.generic": [
+    {
+      "type": 0,
+      "value": "无法创建频道。请稍后再试。"
+    }
+  ],
+  "channels.createFailure.network": [
+    {
+      "type": 0,
+      "value": "无法创建频道。无法连接到服务器。请检查网络连接后再试。"
+    }
+  ],
   "channels.createFailure.rateLimited": [
     {
       "type": 0,
       "value": "请求过于频繁，请稍后再试。"
+    }
+  ],
+  "channels.default.description": [
+    {
+      "type": 0,
+      "value": "新加入的成员会自动加入"
+    }
+  ],
+  "channels.default.label": [
+    {
+      "type": 0,
+      "value": "设为默认频道"
+    }
+  ],
+  "channels.default.lastDefault": [
+    {
+      "type": 0,
+      "value": "至少需要一个默认频道。请先将其他频道设为默认频道。"
+    }
+  ],
+  "channels.default.lastHint": [
+    {
+      "type": 0,
+      "value": "至少需要一个默认频道"
+    }
+  ],
+  "channels.default.notDefaultable": [
+    {
+      "type": 0,
+      "value": "只有公开频道可以设为默认频道。"
     }
   ],
   "channels.dmLeave.action": [
@@ -590,6 +632,168 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "点按即可只读预览最近的消息。"
+    }
+  ],
+  "channels.rename.action": [
+    {
+      "type": 0,
+      "value": "重命名频道"
+    }
+  ],
+  "channels.rename.aria": [
+    {
+      "type": 0,
+      "value": "重命名 "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " 频道"
+    }
+  ],
+  "channels.rename.busy": [
+    {
+      "type": 0,
+      "value": "正在重命名…"
+    }
+  ],
+  "channels.rename.cancel": [
+    {
+      "type": 0,
+      "value": "取消"
+    }
+  ],
+  "channels.rename.description": [
+    {
+      "type": 0,
+      "value": "新名称会立即显示在侧边栏和频道标题中。"
+    }
+  ],
+  "channels.rename.done": [
+    {
+      "type": 0,
+      "value": "已重命名频道。"
+    }
+  ],
+  "channels.rename.fieldLabel": [
+    {
+      "type": 0,
+      "value": "频道名称"
+    }
+  ],
+  "channels.rename.forbidden": [
+    {
+      "type": 0,
+      "value": "只有所有者和管理员可以重命名频道。"
+    }
+  ],
+  "channels.rename.generalLocked": [
+    {
+      "type": 0,
+      "value": "无法更改 general 频道的名称。"
+    }
+  ],
+  "channels.rename.generic": [
+    {
+      "type": 0,
+      "value": "无法重命名。请重试。"
+    }
+  ],
+  "channels.rename.network": [
+    {
+      "type": 0,
+      "value": "无法重命名。"
+    },
+    {
+      "type": 1,
+      "value": "reason"
+    }
+  ],
+  "channels.rename.notFound": [
+    {
+      "type": 0,
+      "value": "找不到此频道。"
+    }
+  ],
+  "channels.rename.preview": [
+    {
+      "type": 0,
+      "value": "将重命名为 "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    }
+  ],
+  "channels.rename.submit": [
+    {
+      "type": 0,
+      "value": "重命名"
+    }
+  ],
+  "channels.rename.title": [
+    {
+      "type": 0,
+      "value": "重命名频道"
+    }
+  ],
+  "expressions.draft.linkApprove": [
+    {
+      "type": 0,
+      "value": "获取并登记到团队素材库"
+    }
+  ],
+  "expressions.draft.linkBusy": [
+    {
+      "type": 0,
+      "value": "当前正在获取的图片较多。请稍后再按一次。"
+    }
+  ],
+  "expressions.draft.linkFetching": [
+    {
+      "type": 0,
+      "value": "正在获取"
+    }
+  ],
+  "expressions.draft.linkFrom": [
+    {
+      "type": 0,
+      "value": "将从 "
+    },
+    {
+      "type": 1,
+      "value": "host"
+    },
+    {
+      "type": 0,
+      "value": " 获取"
+    }
+  ],
+  "expressions.draft.linkHint": [
+    {
+      "type": 0,
+      "value": "批准后会获取一次图片，检查后登记到团队素材库。"
+    }
+  ],
+  "timeline.approval.channelAgentIn": [
+    {
+      "type": 0,
+      "value": "此智能体已在该频道中。"
+    }
+  ],
+  "timeline.approval.channelNeedsMember": [
+    {
+      "type": 0,
+      "value": "请先将此智能体添加为该频道的成员。"
+    }
+  ],
+  "timeline.approval.channelsRefused": [
+    {
+      "type": 0,
+      "value": "所选频道中有当前无法连接的频道。请重新检查列表。"
     }
   ],
   "timeline.channelLeave.bodyPublicBrowse": [

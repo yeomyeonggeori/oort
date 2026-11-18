@@ -114,6 +114,15 @@ export const EXPRESSION_FAILURE_CODES = [
 ] as const;
 export type ExpressionFailureCode = typeof EXPRESSION_FAILURE_CODES[number];
 
+/**
+ * ADR-0218 §18 (증보 12, #5899): an agent's link candidate that nobody has fetched yet. The server makes no
+ * request to an address an agent chose until a person approves that candidate, so the card carries the host
+ * only and no picture. It closes `Draft.code` after the two lists above, and only a `url` origin carries it
+ * (the server's own rule; the card model reads the host from the origin and offers nothing for any other).
+ */
+export const LINK_AWAITING_APPROVAL_CODE = "source_awaiting_approval" as const;
+export type LinkAwaitingApprovalCode = typeof LINK_AWAITING_APPROVAL_CODE;
+
 interface ExpressionDraftBase extends ExpressionMetadata {
   draftId: string;
   workspaceId: string;
@@ -124,7 +133,7 @@ interface ExpressionDraftBase extends ExpressionMetadata {
 
 export type ExpressionDraft = ExpressionDraftBase & (
   | { state: "ready"; code: null; media: ExpressionMedia }
-  | { state: "manual_upload_required"; code: ManualUploadCode | ExpressionFailureCode; media: null }
+  | { state: "manual_upload_required"; code: ManualUploadCode | ExpressionFailureCode | LinkAwaitingApprovalCode; media: null }
 );
 
 export interface ExpressionImportRequest extends ExpressionMetadata {
@@ -144,6 +153,17 @@ export interface ExpressionChoice {
    * (`recommendExpressionKind`) to the stored large picture when it registers it, which is also
    * what an older client that never sends it gets.
    */
+  kind?: ExpressionKind;
+}
+/**
+ * ADR-0218 §18 (#5899): how a decision approves a link candidate that has no picture yet. There is nothing to
+ * pin by hash until the approval fetches the link, so the choice names the candidate and the revision the
+ * person saw; the server fetches it once and proves the decision again with the hash it computed. Every
+ * candidate that has a picture keeps `ExpressionChoice`, and so does a direct upload's activation.
+ */
+export interface ExpressionLinkChoice {
+  draftId: string;
+  revision: ExpressionVersion;
   kind?: ExpressionKind;
 }
 export type ExpressionCreateRequest = ExpressionChoice;
@@ -181,7 +201,7 @@ export interface ExpressionApproval {
 }
 /** Extension of the existing decision request; not a separate approval route. */
 export interface ExpressionDecision {
-  expressionChoice: ExpressionChoice;
+  expressionChoice: ExpressionChoice | ExpressionLinkChoice;
 }
 /** Extension of existing props.result.expression after the same-tx activation. */
 export interface ExpressionResult {

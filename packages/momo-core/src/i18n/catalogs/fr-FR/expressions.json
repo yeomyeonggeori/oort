@@ -1,1 +1,7 @@
-{}
+{
+  "expressions.draft.linkFrom": "Sera récupérée depuis {host}",
+  "expressions.draft.linkHint": "En approuvant, l’image est récupérée une fois, vérifiée, puis enregistrée dans la bibliothèque de l’équipe.",
+  "expressions.draft.linkApprove": "Récupérer et enregistrer",
+  "expressions.draft.linkFetching": "Récupération",
+  "expressions.draft.linkBusy": "Beaucoup d’images sont en cours de récupération. Appuyez de nouveau dans un instant."
+}

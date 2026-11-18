@@ -352,10 +352,52 @@ export const catalog: MessageCatalog = {
       "value": "No tienes permiso para crear canales. Pídelo a un propietario o administrador del espacio de trabajo."
     }
   ],
+  "channels.createFailure.generic": [
+    {
+      "type": 0,
+      "value": "No se pudo crear el canal. Inténtalo de nuevo en unos momentos."
+    }
+  ],
+  "channels.createFailure.network": [
+    {
+      "type": 0,
+      "value": "No se pudo crear el canal. No se pudo conectar con el servidor. Revisa tu conexión e inténtalo de nuevo."
+    }
+  ],
   "channels.createFailure.rateLimited": [
     {
       "type": 0,
       "value": "Hay demasiadas solicitudes. Inténtalo de nuevo en unos momentos."
+    }
+  ],
+  "channels.default.description": [
+    {
+      "type": 0,
+      "value": "Las personas nuevas se unen automáticamente"
+    }
+  ],
+  "channels.default.label": [
+    {
+      "type": 0,
+      "value": "Establecer como canal predeterminado"
+    }
+  ],
+  "channels.default.lastDefault": [
+    {
+      "type": 0,
+      "value": "Debe haber al menos un canal predeterminado. Primero establece otro canal como predeterminado."
+    }
+  ],
+  "channels.default.lastHint": [
+    {
+      "type": 0,
+      "value": "Debe haber al menos un canal predeterminado"
+    }
+  ],
+  "channels.default.notDefaultable": [
+    {
+      "type": 0,
+      "value": "Solo los canales públicos pueden ser el canal predeterminado."
     }
   ],
   "channels.dmLeave.action": [
@@ -640,6 +682,160 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "Abre una vista previa de solo lectura de los mensajes recientes."
+    }
+  ],
+  "channels.rename.action": [
+    {
+      "type": 0,
+      "value": "Cambiar nombre del canal"
+    }
+  ],
+  "channels.rename.aria": [
+    {
+      "type": 0,
+      "value": "Cambiar el nombre del canal "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    }
+  ],
+  "channels.rename.busy": [
+    {
+      "type": 0,
+      "value": "Cambiando…"
+    }
+  ],
+  "channels.rename.cancel": [
+    {
+      "type": 0,
+      "value": "Cancelar"
+    }
+  ],
+  "channels.rename.description": [
+    {
+      "type": 0,
+      "value": "El nuevo nombre se muestra de inmediato en la barra lateral y en el encabezado del canal."
+    }
+  ],
+  "channels.rename.done": [
+    {
+      "type": 0,
+      "value": "Se cambió el nombre del canal."
+    }
+  ],
+  "channels.rename.fieldLabel": [
+    {
+      "type": 0,
+      "value": "Nombre del canal"
+    }
+  ],
+  "channels.rename.forbidden": [
+    {
+      "type": 0,
+      "value": "Solo los propietarios y administradores pueden cambiar el nombre de un canal."
+    }
+  ],
+  "channels.rename.generalLocked": [
+    {
+      "type": 0,
+      "value": "No se puede cambiar el nombre del canal general."
+    }
+  ],
+  "channels.rename.generic": [
+    {
+      "type": 0,
+      "value": "No se pudo cambiar el nombre. Inténtalo de nuevo."
+    }
+  ],
+  "channels.rename.network": [
+    {
+      "type": 0,
+      "value": "No se pudo cambiar el nombre. "
+    },
+    {
+      "type": 1,
+      "value": "reason"
+    }
+  ],
+  "channels.rename.notFound": [
+    {
+      "type": 0,
+      "value": "No se encuentra este canal."
+    }
+  ],
+  "channels.rename.preview": [
+    {
+      "type": 0,
+      "value": "Se renombrará como "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    }
+  ],
+  "channels.rename.submit": [
+    {
+      "type": 0,
+      "value": "Cambiar"
+    }
+  ],
+  "channels.rename.title": [
+    {
+      "type": 0,
+      "value": "Cambiar nombre del canal"
+    }
+  ],
+  "expressions.draft.linkApprove": [
+    {
+      "type": 0,
+      "value": "Obtener y registrar en la biblioteca"
+    }
+  ],
+  "expressions.draft.linkBusy": [
+    {
+      "type": 0,
+      "value": "Se están obteniendo muchas imágenes. Vuelve a pulsar en un momento."
+    }
+  ],
+  "expressions.draft.linkFetching": [
+    {
+      "type": 0,
+      "value": "Obteniendo"
+    }
+  ],
+  "expressions.draft.linkFrom": [
+    {
+      "type": 0,
+      "value": "Se obtendrá de "
+    },
+    {
+      "type": 1,
+      "value": "host"
+    }
+  ],
+  "expressions.draft.linkHint": [
+    {
+      "type": 0,
+      "value": "Al aprobar, la imagen se obtiene una vez, se revisa y se registra en la biblioteca del equipo."
+    }
+  ],
+  "timeline.approval.channelAgentIn": [
+    {
+      "type": 0,
+      "value": "Este agente ya está en este canal."
+    }
+  ],
+  "timeline.approval.channelNeedsMember": [
+    {
+      "type": 0,
+      "value": "Primero agrega este agente como miembro de este canal."
+    }
+  ],
+  "timeline.approval.channelsRefused": [
+    {
+      "type": 0,
+      "value": "Algunos de los canales que elegiste no se pueden conectar ahora. Revisa la lista de nuevo."
     }
   ],
   "timeline.channelLeave.bodyPublicBrowse": [

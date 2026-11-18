@@ -1,4 +1,7 @@
 {
   "timeline.createChannel.publicDetail": "ワークスペースの正式メンバーなら誰でも、チャンネル一覧から見つけて参加できます。",
-  "timeline.channelLeave.bodyPublicBrowse": "{name} がサイドバーから消えます。チャンネル一覧からいつでも戻れます。"
+  "timeline.channelLeave.bodyPublicBrowse": "{name} がサイドバーから消えます。チャンネル一覧からいつでも戻れます。",
+  "timeline.approval.channelNeedsMember": "先にこのチャンネルにエージェントをメンバーとして追加してください。",
+  "timeline.approval.channelAgentIn": "このエージェントはすでにこのチャンネルに入っています。",
+  "timeline.approval.channelsRefused": "選んだチャンネルの中に、今は接続できないものがあります。一覧をもう一度確認してください。"
 }

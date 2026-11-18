@@ -331,10 +331,52 @@ export const catalog: MessageCatalog = {
       "value": "チャンネルを作成する権限がありません。ワークスペースのオーナーまたは管理者に依頼してください。"
     }
   ],
+  "channels.createFailure.generic": [
+    {
+      "type": 0,
+      "value": "チャンネルを作成できませんでした。しばらくしてからもう一度お試しください。"
+    }
+  ],
+  "channels.createFailure.network": [
+    {
+      "type": 0,
+      "value": "チャンネルを作成できませんでした。サーバーに接続できませんでした。接続を確認してもう一度お試しください。"
+    }
+  ],
   "channels.createFailure.rateLimited": [
     {
       "type": 0,
       "value": "リクエストが多すぎます。しばらくしてからもう一度お試しください。"
+    }
+  ],
+  "channels.default.description": [
+    {
+      "type": 0,
+      "value": "新しく参加する人が自動的に入ります"
+    }
+  ],
+  "channels.default.label": [
+    {
+      "type": 0,
+      "value": "既定のチャンネルに設定"
+    }
+  ],
+  "channels.default.lastDefault": [
+    {
+      "type": 0,
+      "value": "既定のチャンネルは1つ以上必要です。先に別のチャンネルを既定に設定してください。"
+    }
+  ],
+  "channels.default.lastHint": [
+    {
+      "type": 0,
+      "value": "既定のチャンネルは1つ以上必要です"
+    }
+  ],
+  "channels.default.notDefaultable": [
+    {
+      "type": 0,
+      "value": "公開チャンネルのみ既定に設定できます。"
     }
   ],
   "channels.dmLeave.action": [
@@ -590,6 +632,160 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "タップすると最近の投稿を読み取り専用で確認できます。"
+    }
+  ],
+  "channels.rename.action": [
+    {
+      "type": 0,
+      "value": "チャンネル名を変更"
+    }
+  ],
+  "channels.rename.aria": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " チャンネルの名前を変更"
+    }
+  ],
+  "channels.rename.busy": [
+    {
+      "type": 0,
+      "value": "変更中…"
+    }
+  ],
+  "channels.rename.cancel": [
+    {
+      "type": 0,
+      "value": "キャンセル"
+    }
+  ],
+  "channels.rename.description": [
+    {
+      "type": 0,
+      "value": "新しい名前はサイドバーとチャンネルヘッダーにすぐ反映されます。"
+    }
+  ],
+  "channels.rename.done": [
+    {
+      "type": 0,
+      "value": "チャンネル名を変更しました。"
+    }
+  ],
+  "channels.rename.fieldLabel": [
+    {
+      "type": 0,
+      "value": "チャンネル名"
+    }
+  ],
+  "channels.rename.forbidden": [
+    {
+      "type": 0,
+      "value": "チャンネル名を変更できるのはオーナーと管理者だけです。"
+    }
+  ],
+  "channels.rename.generalLocked": [
+    {
+      "type": 0,
+      "value": "general チャンネルの名前は変更できません。"
+    }
+  ],
+  "channels.rename.generic": [
+    {
+      "type": 0,
+      "value": "変更できませんでした。もう一度お試しください。"
+    }
+  ],
+  "channels.rename.network": [
+    {
+      "type": 0,
+      "value": "変更できませんでした。"
+    },
+    {
+      "type": 1,
+      "value": "reason"
+    }
+  ],
+  "channels.rename.notFound": [
+    {
+      "type": 0,
+      "value": "このチャンネルは見つかりません。"
+    }
+  ],
+  "channels.rename.preview": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " に名前が変わります"
+    }
+  ],
+  "channels.rename.submit": [
+    {
+      "type": 0,
+      "value": "変更"
+    }
+  ],
+  "channels.rename.title": [
+    {
+      "type": 0,
+      "value": "チャンネル名を変更"
+    }
+  ],
+  "expressions.draft.linkApprove": [
+    {
+      "type": 0,
+      "value": "取得してチームライブラリに登録"
+    }
+  ],
+  "expressions.draft.linkBusy": [
+    {
+      "type": 0,
+      "value": "いま取得中の画像が多いです。少し待ってからもう一度押してください。"
+    }
+  ],
+  "expressions.draft.linkFetching": [
+    {
+      "type": 0,
+      "value": "取得中"
+    }
+  ],
+  "expressions.draft.linkFrom": [
+    {
+      "type": 1,
+      "value": "host"
+    },
+    {
+      "type": 0,
+      "value": " から取得します"
+    }
+  ],
+  "expressions.draft.linkHint": [
+    {
+      "type": 0,
+      "value": "承認すると画像を一度取得して確認し、チームライブラリに登録します。"
+    }
+  ],
+  "timeline.approval.channelAgentIn": [
+    {
+      "type": 0,
+      "value": "このエージェントはすでにこのチャンネルに入っています。"
+    }
+  ],
+  "timeline.approval.channelNeedsMember": [
+    {
+      "type": 0,
+      "value": "先にこのチャンネルにエージェントをメンバーとして追加してください。"
+    }
+  ],
+  "timeline.approval.channelsRefused": [
+    {
+      "type": 0,
+      "value": "選んだチャンネルの中に、今は接続できないものがあります。一覧をもう一度確認してください。"
     }
   ],
   "timeline.channelLeave.bodyPublicBrowse": [

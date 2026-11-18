@@ -41,7 +41,7 @@ export const catalog: MessageCatalog = {
   "channels.browse.emptyAdminDetailPhone": [
     {
       "type": 0,
-      "value": "Pour afficher ici un canal existant, activez « Afficher dans le navigateur de canaux » dans son menu, sur le web ou dans l’application de bureau."
+      "value": "Pour afficher ici un canal existant, activez « Afficher dans le navigateur de canaux » dans son menu, sur le web ou dans l'application de bureau."
     }
   ],
   "channels.browse.emptyHeadline": [
@@ -352,10 +352,52 @@ export const catalog: MessageCatalog = {
       "value": "Vous n'avez pas la permission de créer des canaux. Demandez à un propriétaire ou à un administrateur de l'espace de travail."
     }
   ],
+  "channels.createFailure.generic": [
+    {
+      "type": 0,
+      "value": "Impossible de créer le canal. Réessayez dans un instant."
+    }
+  ],
+  "channels.createFailure.network": [
+    {
+      "type": 0,
+      "value": "Impossible de créer le canal. Le serveur est injoignable. Vérifiez votre connexion et réessayez."
+    }
+  ],
   "channels.createFailure.rateLimited": [
     {
       "type": 0,
       "value": "Trop de requêtes. Réessayez dans un instant."
+    }
+  ],
+  "channels.default.description": [
+    {
+      "type": 0,
+      "value": "Les nouveaux membres le rejoignent automatiquement"
+    }
+  ],
+  "channels.default.label": [
+    {
+      "type": 0,
+      "value": "Définir comme canal par défaut"
+    }
+  ],
+  "channels.default.lastDefault": [
+    {
+      "type": 0,
+      "value": "Il faut au moins un canal par défaut. Définissez d'abord un autre canal par défaut."
+    }
+  ],
+  "channels.default.lastHint": [
+    {
+      "type": 0,
+      "value": "Il faut au moins un canal par défaut"
+    }
+  ],
+  "channels.default.notDefaultable": [
+    {
+      "type": 0,
+      "value": "Seuls les canaux publics peuvent être le canal par défaut."
     }
   ],
   "channels.dmLeave.action": [
@@ -536,7 +578,7 @@ export const catalog: MessageCatalog = {
   "channels.nameRule.serverRejected": [
     {
       "type": 0,
-      "value": "Le serveur n'a pas accepté ce nom. Seuls les lettres, chiffres, - et _ sont autorisés."
+      "value": "Le serveur n'a pas accepté ce nom. Utilisez uniquement des lettres, des chiffres, - et _."
     }
   ],
   "channels.nameRule.tooLong": [
@@ -632,6 +674,160 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "Ouvre un aperçu en lecture seule des messages récents."
+    }
+  ],
+  "channels.rename.action": [
+    {
+      "type": 0,
+      "value": "Renommer le canal"
+    }
+  ],
+  "channels.rename.aria": [
+    {
+      "type": 0,
+      "value": "Renommer le canal "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    }
+  ],
+  "channels.rename.busy": [
+    {
+      "type": 0,
+      "value": "Renommage…"
+    }
+  ],
+  "channels.rename.cancel": [
+    {
+      "type": 0,
+      "value": "Annuler"
+    }
+  ],
+  "channels.rename.description": [
+    {
+      "type": 0,
+      "value": "Le nouveau nom apparaît tout de suite dans la barre latérale et l'en-tête du canal."
+    }
+  ],
+  "channels.rename.done": [
+    {
+      "type": 0,
+      "value": "Canal renommé."
+    }
+  ],
+  "channels.rename.fieldLabel": [
+    {
+      "type": 0,
+      "value": "Nom du canal"
+    }
+  ],
+  "channels.rename.forbidden": [
+    {
+      "type": 0,
+      "value": "Seuls les propriétaires et les administrateurs peuvent renommer un canal."
+    }
+  ],
+  "channels.rename.generalLocked": [
+    {
+      "type": 0,
+      "value": "Le nom du canal general ne peut pas être modifié."
+    }
+  ],
+  "channels.rename.generic": [
+    {
+      "type": 0,
+      "value": "Impossible de renommer le canal. Réessayez."
+    }
+  ],
+  "channels.rename.network": [
+    {
+      "type": 0,
+      "value": "Impossible de renommer le canal. "
+    },
+    {
+      "type": 1,
+      "value": "reason"
+    }
+  ],
+  "channels.rename.notFound": [
+    {
+      "type": 0,
+      "value": "Ce canal est introuvable."
+    }
+  ],
+  "channels.rename.preview": [
+    {
+      "type": 0,
+      "value": "Sera renommé en "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    }
+  ],
+  "channels.rename.submit": [
+    {
+      "type": 0,
+      "value": "Renommer"
+    }
+  ],
+  "channels.rename.title": [
+    {
+      "type": 0,
+      "value": "Renommer le canal"
+    }
+  ],
+  "expressions.draft.linkApprove": [
+    {
+      "type": 0,
+      "value": "Récupérer et enregistrer"
+    }
+  ],
+  "expressions.draft.linkBusy": [
+    {
+      "type": 0,
+      "value": "Beaucoup d’images sont en cours de récupération. Appuyez de nouveau dans un instant."
+    }
+  ],
+  "expressions.draft.linkFetching": [
+    {
+      "type": 0,
+      "value": "Récupération"
+    }
+  ],
+  "expressions.draft.linkFrom": [
+    {
+      "type": 0,
+      "value": "Sera récupérée depuis "
+    },
+    {
+      "type": 1,
+      "value": "host"
+    }
+  ],
+  "expressions.draft.linkHint": [
+    {
+      "type": 0,
+      "value": "En approuvant, l’image est récupérée une fois, vérifiée, puis enregistrée dans la bibliothèque de l’équipe."
+    }
+  ],
+  "timeline.approval.channelAgentIn": [
+    {
+      "type": 0,
+      "value": "Cet agent est déjà dans ce canal."
+    }
+  ],
+  "timeline.approval.channelNeedsMember": [
+    {
+      "type": 0,
+      "value": "Ajoutez d'abord cet agent comme membre de ce canal."
+    }
+  ],
+  "timeline.approval.channelsRefused": [
+    {
+      "type": 0,
+      "value": "Certains des canaux choisis ne peuvent pas être connectés pour le moment. Vérifiez à nouveau la liste."
     }
   ],
   "timeline.channelLeave.bodyPublicBrowse": [
