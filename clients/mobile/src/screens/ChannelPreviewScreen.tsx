@@ -9,7 +9,7 @@ import {
 import {deletedFoldLabel} from '@momo/core/features/timeline/deletedFold';
 import {GONE_MEMBER_LABEL} from '@momo/core/features/workspace/directory';
 import React, {useCallback, useEffect, useMemo, useRef} from 'react';
-import {FlatList, StyleSheet, Text, View} from 'react-native';
+import {FlatList, StyleSheet, Text, View, type RefreshControlProps} from 'react-native';
 import {useSafeAreaInsets} from 'react-native-safe-area-context';
 
 import {
@@ -20,7 +20,7 @@ import {
   Screen,
   Sentence,
 } from '../design/atoms';
-import {usePullRefresh} from '../design/refresh';
+import {PULL_FILL, usePullRefresh, type PullScrollProps} from '../design/refresh';
 import {PageHeader} from '../design/SheetChrome';
 import {useStyles} from '../design/theme';
 import {font, line, SAFE_GUTTER, space, TOUCH_TARGET, type Palette} from '../design/tokens';
@@ -69,7 +69,7 @@ export default function ChannelPreviewScreen({
     [onOpenChannel],
   );
   const join = useJoinBrowsedChannel(workspaceId, member.id, onJoined);
-  const refresh = usePullRefresh(() => query.refetch(), 'channel-preview-refresh');
+  const {refreshControl, scrollProps, notice} = usePullRefresh(() => query.refetch(), 'channel-preview-refresh');
 
   const messages = useMemo(
     () => (query.data ? previewInReadingOrder(query.data.messages) : []),
@@ -96,15 +96,15 @@ export default function ChannelPreviewScreen({
       joinFailure={join.failures.get(channel.channelId)}
       onJoin={() => void join.join(channel.channelId)}
       onOpen={() => onOpenChannel(channel.channelId, channel.name)}
-      refresh={refresh}
+      refreshControl={refreshControl}
+      scrollProps={scrollProps}
+      notice={notice}
       onClose={onClose}
     />
   );
 }
 
 export type ChannelPreviewViewState = 'loading' | 'error' | 'ready';
-
-type Refresh = Pick<ReturnType<typeof usePullRefresh>, 'refreshControl' | 'scrollProps' | 'notice'>;
 
 /** 순수 표현부. 훅 없이 props 로만 그린다 — 측정 장면과 시험이 서버 없이 네 상태를 세운다. */
 export function ChannelPreviewView({
@@ -120,7 +120,9 @@ export function ChannelPreviewView({
   joinFailure,
   onJoin,
   onOpen,
-  refresh,
+  refreshControl,
+  scrollProps,
+  notice,
   onClose,
 }: {
   state: ChannelPreviewViewState;
@@ -137,7 +139,10 @@ export function ChannelPreviewView({
   joinFailure?: ChannelBrowseFailure;
   onJoin: () => void;
   onOpen: () => void;
-  refresh?: Refresh;
+  /** 당겨서 새로 고침(`usePullRefresh`) — 측정 장면은 주지 않는다. */
+  refreshControl?: React.ReactElement<RefreshControlProps>;
+  scrollProps?: PullScrollProps;
+  notice?: React.ReactNode;
   onClose: () => void;
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
@@ -171,8 +176,8 @@ export function ChannelPreviewView({
     body = (
       <EmptyState
         headline={formatMessage('channels.preview.empty')}
-        refreshControl={refresh?.refreshControl}
-        scrollProps={refresh?.scrollProps}
+        refreshControl={refreshControl}
+        scrollProps={scrollProps}
         testID="channel-preview-empty"
       />
     );
@@ -190,9 +195,9 @@ export function ChannelPreviewView({
           atEnd.current = true;
           listRef.current?.scrollToEnd({animated: false});
         }}
-        refreshControl={refresh?.refreshControl}
-        {...refresh?.scrollProps}
-        contentContainerStyle={styles.list}
+        refreshControl={refreshControl}
+        {...scrollProps}
+        contentContainerStyle={[styles.list, PULL_FILL]}
         testID="channel-preview-list"
       />
     );
@@ -216,7 +221,7 @@ export function ChannelPreviewView({
           {meta}
         </Sentence>
       </View>
-      {refresh?.notice}
+      {notice}
       <View style={styles.body} testID={`channel-preview-body-${state}`}>
         {body}
       </View>
