@@ -984,7 +984,12 @@ export function ChannelActionMenuItems({
         </div>
       )}
       {actions.error && (
-        <div role="group" aria-label={CHANNEL_ACTION_ERROR_GROUP_LABEL}>
+        // `w-0 min-w-full`: 실패 문장이 메뉴 폭을 정하지 않는다. 폭은 줄들이 정하고, 이 상자는 그 폭 안에서 줄바꿈한다(#5958).
+        <div
+          role="group"
+          aria-label={CHANNEL_ACTION_ERROR_GROUP_LABEL}
+          className="w-0 min-w-full"
+        >
           <InlineBanner
             className="px-2"
             message={actions.error}
