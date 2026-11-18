@@ -79,5 +79,7 @@
   "channels.preview.loadForbidden": "이 계정으로는 이 채널을 미리 볼 수 없어요.",
   "channels.preview.notFound": "이 채널을 찾을 수 없어요",
   "channels.preview.loadNetwork": "채널 글을 불러오지 못했어요. {reason}",
-  "channels.preview.loadGeneric": "채널 글을 불러오지 못했어요. 잠시 뒤에 다시 시도해 주세요."
+  "channels.preview.loadGeneric": "채널 글을 불러오지 못했어요. 잠시 뒤에 다시 시도해 주세요.",
+  "channels.preview.joinBand": "참여하면 글을 쓰고 답할 수 있어요.",
+  "channels.preview.listAria": "{name} 채널의 최근 글"
 }

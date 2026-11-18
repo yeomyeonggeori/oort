@@ -79,5 +79,7 @@
   "channels.preview.loadForbidden": "Esta cuenta no puede ver una vista previa de este canal.",
   "channels.preview.notFound": "No se encontró este canal",
   "channels.preview.loadNetwork": "No se pudieron cargar los mensajes del canal. {reason}",
-  "channels.preview.loadGeneric": "No se pudieron cargar los mensajes del canal. Inténtalo de nuevo en un momento."
+  "channels.preview.loadGeneric": "No se pudieron cargar los mensajes del canal. Inténtalo de nuevo en un momento.",
+  "channels.preview.joinBand": "Únete para escribir y responder.",
+  "channels.preview.listAria": "Mensajes recientes de {name}"
 }

@@ -246,6 +246,8 @@ export const messageKeys = [
   "channels.preview.attachmentLocked",
   "channels.preview.closeAria",
   "channels.preview.empty",
+  "channels.preview.joinBand",
+  "channels.preview.listAria",
   "channels.preview.loadForbidden",
   "channels.preview.loadGeneric",
   "channels.preview.loading",
@@ -2024,6 +2026,10 @@ export const argumentSpecs = {
   "channels.preview.attachmentLocked": {},
   "channels.preview.closeAria": {},
   "channels.preview.empty": {},
+  "channels.preview.joinBand": {},
+  "channels.preview.listAria": {
+    "name": "string"
+  },
   "channels.preview.loadForbidden": {},
   "channels.preview.loadGeneric": {},
   "channels.preview.loading": {},
@@ -4251,6 +4257,8 @@ export interface MessageArgs {
   "channels.preview.attachmentLocked": Record<string, never>;
   "channels.preview.closeAria": Record<string, never>;
   "channels.preview.empty": Record<string, never>;
+  "channels.preview.joinBand": Record<string, never>;
+  "channels.preview.listAria": { name: string };
   "channels.preview.loadForbidden": Record<string, never>;
   "channels.preview.loadGeneric": Record<string, never>;
   "channels.preview.loading": Record<string, never>;
