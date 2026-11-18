@@ -1469,7 +1469,7 @@ export const catalog: MessageCatalog = {
   "channels.default.description": [
     {
       "type": 0,
-      "value": "워크스페이스에 새로 들어오는 사람이 자동으로 들어가요"
+      "value": "새 멤버가 자동으로 들어가요"
     }
   ],
   "channels.default.label": [

@@ -84,7 +84,7 @@
   "channels.browse.switchNetwork": "바꾸지 못했어요. {reason}",
   "channels.browse.switchGeneric": "바꾸지 못했어요. 다시 시도해 주세요.",
   "channels.default.label": "기본 채널로 지정",
-  "channels.default.description": "워크스페이스에 새로 들어오는 사람이 자동으로 들어가요",
+  "channels.default.description": "새 멤버가 자동으로 들어가요",
   "channels.default.lastHint": "기본 채널은 하나 이상 있어야 해요",
   "channels.default.lastDefault": "기본 채널은 하나 이상 있어야 해요. 다른 채널을 먼저 기본 채널로 지정해 주세요.",
   "channels.default.notDefaultable": "공개 채널만 기본 채널로 지정할 수 있어요.",
