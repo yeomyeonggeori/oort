@@ -560,10 +560,16 @@ export const catalog: MessageCatalog = {
       "value": "Utilisez uniquement des lettres, des chiffres, des traits d'union (-) et des tirets bas (_)."
     }
   ],
+  "connection.approval.channelAgentIn": [
+    {
+      "type": 0,
+      "value": "Cet agent est déjà dans ce canal."
+    }
+  ],
   "connection.approval.channelNeedsMember": [
     {
       "type": 0,
-      "value": "Un administrateur doit d'abord l'ajouter comme membre de ce canal."
+      "value": "Ajoutez d'abord cet agent comme membre de ce canal."
     }
   ],
   "connection.approval.channelsRefused": [

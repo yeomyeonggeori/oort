@@ -518,10 +518,16 @@ export const catalog: MessageCatalog = {
       "value": "文字、数字、ハイフン（-）、アンダースコア（_）のみ使えます。"
     }
   ],
+  "connection.approval.channelAgentIn": [
+    {
+      "type": 0,
+      "value": "このエージェントはすでにこのチャンネルに入っています。"
+    }
+  ],
   "connection.approval.channelNeedsMember": [
     {
       "type": 0,
-      "value": "管理者が先にこのチャンネルにメンバーとして追加する必要があります。"
+      "value": "先にこのチャンネルにエージェントをメンバーとして追加してください。"
     }
   ],
   "connection.approval.channelsRefused": [

@@ -568,10 +568,16 @@ export const catalog: MessageCatalog = {
       "value": "Solo se pueden usar letras, números, guiones (-) y guiones bajos (_)."
     }
   ],
+  "connection.approval.channelAgentIn": [
+    {
+      "type": 0,
+      "value": "Este agente ya está en este canal."
+    }
+  ],
   "connection.approval.channelNeedsMember": [
     {
       "type": 0,
-      "value": "Un administrador debe agregarlo primero como miembro de este canal."
+      "value": "Primero agrega este agente como miembro de este canal."
     }
   ],
   "connection.approval.channelsRefused": [

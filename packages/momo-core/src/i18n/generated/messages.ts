@@ -252,6 +252,7 @@ export const messageKeys = [
   "connect.rememberEmail.label",
   "connection.action.reconnectNow",
   "connection.action.retry",
+  "connection.approval.channelAgentIn",
   "connection.approval.channelNeedsMember",
   "connection.approval.channelsRefused",
   "connection.approval.offline",
@@ -2027,6 +2028,7 @@ export const argumentSpecs = {
   "connect.rememberEmail.label": {},
   "connection.action.reconnectNow": {},
   "connection.action.retry": {},
+  "connection.approval.channelAgentIn": {},
   "connection.approval.channelNeedsMember": {},
   "connection.approval.channelsRefused": {},
   "connection.approval.offline": {},
@@ -4241,6 +4243,7 @@ export interface MessageArgs {
   "connect.rememberEmail.label": Record<string, never>;
   "connection.action.reconnectNow": Record<string, never>;
   "connection.action.retry": Record<string, never>;
+  "connection.approval.channelAgentIn": Record<string, never>;
   "connection.approval.channelNeedsMember": Record<string, never>;
   "connection.approval.channelsRefused": Record<string, never>;
   "connection.approval.offline": Record<string, never>;

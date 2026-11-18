@@ -1698,10 +1698,16 @@ export const catalog: MessageCatalog = {
       "value": "다시 시도"
     }
   ],
+  "connection.approval.channelAgentIn": [
+    {
+      "type": 0,
+      "value": "이 에이전트가 이미 이 채널에 들어가 있어요."
+    }
+  ],
   "connection.approval.channelNeedsMember": [
     {
       "type": 0,
-      "value": "관리자가 먼저 이 채널에 멤버로 추가해야 해요."
+      "value": "먼저 이 채널에 에이전트를 멤버로 추가해 주세요."
     }
   ],
   "connection.approval.channelsRefused": [

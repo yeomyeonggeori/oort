@@ -518,10 +518,16 @@ export const catalog: MessageCatalog = {
       "value": "只能使用文字、數字、連字號（-）和底線（_）。"
     }
   ],
+  "connection.approval.channelAgentIn": [
+    {
+      "type": 0,
+      "value": "此代理已在該頻道中。"
+    }
+  ],
   "connection.approval.channelNeedsMember": [
     {
       "type": 0,
-      "value": "需要管理員先將其加入為此頻道的成員。"
+      "value": "請先將此代理加入為該頻道的成員。"
     }
   ],
   "connection.approval.channelsRefused": [

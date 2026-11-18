@@ -1782,10 +1782,16 @@ export const catalog: MessageCatalog = {
       "value": "Try again"
     }
   ],
+  "connection.approval.channelAgentIn": [
+    {
+      "type": 0,
+      "value": "This agent is already in this channel."
+    }
+  ],
   "connection.approval.channelNeedsMember": [
     {
       "type": 0,
-      "value": "An admin has to add this agent as a member of this channel first."
+      "value": "First add this agent to this channel as a member."
     }
   ],
   "connection.approval.channelsRefused": [

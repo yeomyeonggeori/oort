@@ -208,7 +208,7 @@ export interface ApprovalChannelInput {
 /** 서버가 승인을 거절하는 까닭을 화면이 사전 키로 말한다. 없으면 일반 줄이다. */
 export type ApprovalChannelDetailKey = Extract<
   MessageKey,
-  `connection.approval.channelNeedsMember`
+  `connection.approval.channelNeedsMember` | `connection.approval.channelAgentIn`
 >;
 
 export interface ApprovalChannelChoice {
@@ -279,6 +279,12 @@ export function approvalChannelsRefusedKey(
 }
 
 const NEEDS_MEMBER_DETAIL = koConnection["connection.approval.channelNeedsMember"];
+const AGENT_IN_DETAIL = koConnection["connection.approval.channelAgentIn"];
+
+/** 고를 수 있는 줄 가운데 에이전트가 이미 든 채널 — 「승인하면 멤버가 돼요」가 맞지 않다. */
+function isAgentIn(channel: ApprovalChannelInput): boolean {
+  return channel.agentIsMember === true && isApprovableChannel(channel);
+}
 
 /** DM · 보관이 아닌데 D13 때문에 잠긴 줄 — 까닭이 「멤버로 먼저 추가」인 줄. */
 function needsMember(channel: ApprovalChannelInput): boolean {
@@ -297,6 +303,7 @@ function channelDetail(channel: ApprovalChannelInput): string {
     return "보관된 채널이에요. 다시 열면 승인할 수 있어요.";
   }
   if (!isApprovableChannel(channel)) return NEEDS_MEMBER_DETAIL;
+  if (isAgentIn(channel)) return AGENT_IN_DETAIL;
   return channel.kind === "private"
     ? "비공개 채널이에요. 승인하면 이 채널의 멤버가 돼요."
     : "공개 채널이에요. 승인하면 이 채널의 멤버가 돼요.";
@@ -321,6 +328,7 @@ export function channelApprovalChoices(
       disabled: !isApprovableChannel(channel),
     };
     if (needsMember(channel)) row.detailKey = "connection.approval.channelNeedsMember";
+    else if (isAgentIn(channel)) row.detailKey = "connection.approval.channelAgentIn";
     (row.disabled ? blocked : eligible).push(row);
   }
   return [...eligible, ...blocked];

@@ -376,8 +376,17 @@ describe("D13 서버 판정과 같은 후보", () => {
     expect(locked).toHaveLength(4);
     for (const row of locked) {
       expect(row.detailKey).toBe("connection.approval.channelNeedsMember");
-      expect(row.detail).toBe("관리자가 먼저 이 채널에 멤버로 추가해야 해요.");
+      expect(row.detail).toBe("먼저 이 채널에 에이전트를 멤버로 추가해 주세요.");
     }
+  });
+
+  it("에이전트가 이미 든 채널은 멤버가 된다고 말하지 않고 이미 들어가 있다고 말한다", () => {
+    const choices = channelApprovalChoices(approvalChannelInputs(rows, label, ["private-in"]));
+    const byId = (id: string) => choices.find((row) => row.id === id);
+    expect(byId("private-in")?.detailKey).toBe("connection.approval.channelAgentIn");
+    expect(byId("private-in")?.detail).toBe("이 에이전트가 이미 이 채널에 들어가 있어요.");
+    expect(byId("listed")?.detail).toContain("승인하면 이 채널의 멤버가 돼요");
+    expect(byId("listed")?.detailKey).toBeUndefined();
   });
 
   it("잠긴 채널은 골라도 본문에 실리지 않는다", () => {

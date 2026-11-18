@@ -518,10 +518,16 @@ export const catalog: MessageCatalog = {
       "value": "只能使用文字、数字、连字符（-）和下划线（_）。"
     }
   ],
+  "connection.approval.channelAgentIn": [
+    {
+      "type": 0,
+      "value": "此智能体已在该频道中。"
+    }
+  ],
   "connection.approval.channelNeedsMember": [
     {
       "type": 0,
-      "value": "需要管理员先将其添加为此频道的成员。"
+      "value": "请先将此智能体添加为该频道的成员。"
     }
   ],
   "connection.approval.channelsRefused": [

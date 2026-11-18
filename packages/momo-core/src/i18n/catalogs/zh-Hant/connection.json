@@ -1,4 +1,5 @@
 {
-  "connection.approval.channelNeedsMember": "需要管理員先將其加入為此頻道的成員。",
+  "connection.approval.channelNeedsMember": "請先將此代理加入為該頻道的成員。",
+  "connection.approval.channelAgentIn": "此代理已在該頻道中。",
   "connection.approval.channelsRefused": "所選頻道中有目前無法連線的頻道。請重新檢查清單。"
 }
