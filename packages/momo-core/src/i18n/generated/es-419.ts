@@ -14,6 +14,12 @@ export const catalog: MessageCatalog = {
       "value": "Cerrar"
     }
   ],
+  "channels.browse.closeAria": [
+    {
+      "type": 0,
+      "value": "Cerrar exploración de canales"
+    }
+  ],
   "channels.browse.default": [
     {
       "type": 0,
@@ -30,6 +36,12 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "Para que un canal existente aparezca aquí, activa «Mostrar al explorar» en el menú del canal."
+    }
+  ],
+  "channels.browse.emptyAdminDetailPhone": [
+    {
+      "type": 0,
+      "value": "Para que un canal existente aparezca aquí, activa «Mostrar al explorar» en el menú del canal en la web o en la app de escritorio."
     }
   ],
   "channels.browse.emptyHeadline": [
@@ -54,6 +66,12 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "Canales públicos ocultos al explorar"
+    }
+  ],
+  "channels.browse.homeRowHint": [
+    {
+      "type": 0,
+      "value": "Abre la exploración de canales con este nombre."
     }
   ],
   "channels.browse.join": [
@@ -90,6 +108,12 @@ export const catalog: MessageCatalog = {
       "value": "No se pudo unir. Inténtalo de nuevo."
     }
   ],
+  "channels.browse.joining": [
+    {
+      "type": 0,
+      "value": "Uniéndote"
+    }
+  ],
   "channels.browse.joinNetwork": [
     {
       "type": 0,
@@ -116,6 +140,12 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "No se pudo cargar la lista de canales. Inténtalo de nuevo en un momento."
+    }
+  ],
+  "channels.browse.loading": [
+    {
+      "type": 0,
+      "value": "Cargando canales."
     }
   ],
   "channels.browse.loadMore": [

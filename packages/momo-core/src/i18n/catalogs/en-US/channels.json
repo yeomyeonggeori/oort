@@ -80,5 +80,10 @@
   "channels.browse.switchNotFound": "This channel isn't available anymore.",
   "channels.browse.switchNotListable": "Only public channels can be shown in the browser.",
   "channels.browse.switchNetwork": "Couldn't save the change. {reason}",
-  "channels.browse.switchGeneric": "Couldn't save the change. Try again."
+  "channels.browse.switchGeneric": "Couldn't save the change. Try again.",
+  "channels.browse.closeAria": "Close channel browser",
+  "channels.browse.loading": "Loading channels.",
+  "channels.browse.joining": "Joining",
+  "channels.browse.emptyAdminDetailPhone": "To list an existing channel here, turn on “Show in channel browser” in its channel menu on the web or desktop app.",
+  "channels.browse.homeRowHint": "Opens the channel browser with this name."
 }

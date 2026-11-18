@@ -1,17 +1,29 @@
 import {createChannel, type Channel, type RosterMember} from '@momo/core/lib/api';
 import {
   channelNameIssue,
+  CHANNEL_CREATE_FAILURE_KEYS,
   CHANNEL_NAME_MAX,
-  channelNameIssueMessage,
+  CHANNEL_NAME_ISSUE_KEYS,
+  CHANNEL_NAME_SERVER_REJECTED_KEY,
   createChannelFailure,
   normalizeChannelName,
+  type ChannelNameIssue,
   type CreateChannelFailure,
 } from '@momo/core/features/channels/model';
 import {withChannelMemberAdded} from '@momo/core/features/channels/memberAdd';
 import {upsertChannel} from '@momo/core/features/directory/model';
 import {useQueryClient} from '@tanstack/react-query';
-import React, {useState} from 'react';
-import {StyleSheet, Text, View} from 'react-native';
+import React, {useRef, useState} from 'react';
+import {
+  StyleSheet,
+  Text,
+  View,
+  type LayoutChangeEvent,
+  type NativeSyntheticEvent,
+  type StyleProp,
+  type TextLayoutEventData,
+  type TextStyle,
+} from 'react-native';
 
 import {FailureBanner} from '../design/atoms';
 import {HOME_ICONS} from '../design/icons';
@@ -43,7 +55,8 @@ import type {ChannelMemberAddTarget} from './ChannelMemberAddSheet';
 // 시트로 넘어온다.
 //
 // 규칙은 모두 core 의 것이다 — 웹 「채널 만들기」 다이얼로그와 한 문장을 쓴다:
-//   이름 규칙·문장  `channelNameIssue` / `channelNameIssueMessage`
+//   이름 규칙       `channelNameIssue` · `normalizeChannelName` (모든 언어의 글자·숫자, ADR-0225)
+//   문장            사전 키 — 안내·자리표시자·미리보기 `channels.nameRule.*`, 거절 `channelNameIssueKey`, 실패 `messageKey`(웹과 같은 키·같은 말, #5834)
 //   거절의 자리     `createChannelFailure`(409·400 은 이름 칸 밑, 403·429·망은 배너)
 //   캐시            `upsertChannel` 로 목록에 바로 넣고 무효화 — 웹 `useCreateChannel`
 //
@@ -135,14 +148,31 @@ function SheetBody({
   const [failure, setFailure] = useState<CreateChannelFailure | null>(null);
 
   const issue = channelNameIssue(name);
-  // 빈 칸은 아직 말하지 않는다 — 열자마자 「입력하세요」가 서면 꾸중부터 듣는다.
-  const issueMessage =
-    issue && (touched || name !== '') ? channelNameIssueMessage(issue) : null;
-  const nameMessage =
-    failure?.field === 'name' ? failure.message : issueMessage;
-  // 규칙은 처음부터 칸 밑에 선다 — 웹 다이얼로그와 같은 자리, 같은 문장 가족이다
-  // (design-review M4). 어기면 같은 자리가 그 이유로 바뀐다.
-  const nameRule = `영문, 숫자, 하이픈, 밑줄로 ${CHANNEL_NAME_MAX}자 이내, 처음과 끝은 영문이나 숫자. 대문자는 소문자로 저장돼요.`;
+  const issueText = (which: ChannelNameIssue): string =>
+    which === 'tooLong'
+      ? formatMessage(CHANNEL_NAME_ISSUE_KEYS.tooLong, {max: CHANNEL_NAME_MAX})
+      : formatMessage(CHANNEL_NAME_ISSUE_KEYS[which]);
+  // 거절 문장은 사전 키로 화면 언어를 따른다(400·409·403·429). 키가 없는 실패(망·알 수 없음)만 코어가 준 문장 그대로다(#5906 몫).
+  const failureText = (f: CreateChannelFailure): string =>
+    f.messageKey !== undefined ? formatMessage(f.messageKey) : f.message;
+  // 빈 칸은 아직 말하지 않는다 — 열자마자 「입력하세요」가 서면 꾸중부터 듣는다. 빈칸뿐인 칸도 같다(웹과 같은 기준).
+  const issueMessage = issue && (touched || name.trim() !== '') ? issueText(issue) : null;
+  const nameMessage = failure?.field === 'name' ? failureText(failure) : issueMessage;
+  // 안내는 처음부터 칸 밑에 선다 — 웹 다이얼로그와 같은 자리, 같은 말이다(design-review M4). 규칙을 어기거나 서버가 거절하면 같은 자리가 그 이유로
+  // 바뀌고, 친 것과 저장될 이름이 다르면 「#디자인-리뷰 이름으로 만들어져요」가 선다(ADR-0225 D13). 칸의 값은 어느 때도 바꾸지 않는다.
+  const nameRule = formatMessage('channels.nameRule.hint', {max: CHANNEL_NAME_MAX});
+  const savedName = issue === null ? normalizeChannelName(name) : null;
+  const namePreview =
+    nameMessage === null && savedName !== null && savedName !== name
+      ? formatMessage('channels.nameRule.preview', {name: `#${savedName}`})
+      : null;
+  // 이 자리에 설 수 있는 모든 문장 — 안 서 있는 문장도 보이지 않게 같은 폭으로 깔려 가장 큰 높이가 자리의 높이를 정한다(미리보기는 안내와 같은 줄 수 안에서 접는다).
+  const nameReserve = [
+    nameRule,
+    ...(Object.keys(CHANNEL_NAME_ISSUE_KEYS) as ChannelNameIssue[]).map(issueText),
+    formatMessage(CHANNEL_NAME_SERVER_REJECTED_KEY),
+    formatMessage(CHANNEL_CREATE_FAILURE_KEYS.duplicate),
+  ].filter((text, at, all) => all.indexOf(text) === at);
 
   const submit = async () => {
     setTouched(true);
@@ -236,37 +266,25 @@ function SheetBody({
             }}
             onBlur={() => setTouched(true)}
             onSubmitEditing={() => void submit()}
-            placeholder="product-planning"
+            placeholder={formatMessage('channels.nameRule.placeholder')}
             autoCapitalize="none"
             autoCorrect={false}
-            // 이름은 영문 소문자·숫자·하이픈·밑줄뿐이다 — 한글 자판으로 열면 첫 글자부터
-            // 규칙 위반 문장을 본다.
-            keyboardType="ascii-capable"
             autoFocus
             returnKeyType="done"
             editable={!pending}
             accessibilityLabel="채널 이름"
-            // VoiceOver 도 같은 줄을 듣는다: 평소엔 규칙, 어기면 그 이유.
-            accessibilityHint={nameMessage ?? nameRule}
+            // VoiceOver 도 같은 줄을 듣는다: 어기면 그 이유 > 저장될 이름 > 평소엔 안내.
+            accessibilityHint={nameMessage ?? namePreview ?? nameRule}
             testID="new-channel-name"
           />
-          {nameMessage ? (
-            <Text
-              accessibilityLiveRegion="polite"
-              style={styles.issue}
-              lineBreakStrategyIOS="hangul-word"
-              testID="new-channel-name-issue">
-              {nameMessage}
-            </Text>
-          ) : (
-            // 「대 / 문자는」처럼 어절 가운데서 갈리지 않게 어절 단위로 접는다(design-review r1a M1·r1c M1).
-            <Text
-              style={styles.rule}
-              lineBreakStrategyIOS="hangul-word"
-              testID="new-channel-name-rule">
-              {nameRule}
-            </Text>
-          )}
+          <NameStatus
+            error={nameMessage}
+            preview={namePreview}
+            hint={nameRule}
+            reserve={nameReserve}
+            ruleStyle={styles.rule}
+            issueStyle={styles.issue}
+          />
         </View>
 
         <GroupCard label="공개 범위" testID="new-channel-kind">
@@ -286,13 +304,81 @@ function SheetBody({
 
         {failure && failure.field === null ? (
           <FailureBanner
-            message={failure.message}
+            message={failureText(failure)}
+            retryLabel={formatMessage('connection.action.retry')}
             onRetry={() => void submit()}
             testID="new-channel-error"
           />
         ) : null}
       </SheetScroll>
     </>
+  );
+}
+
+/**
+ * 칸 아래 한 줄: 거절 문장 · 저장될 이름 · 안내 가운데 **하나만** 선다(위에서부터). 서는 자리는 하나이고, 서지 않은 문장들이 같은 폭으로 보이지 않게
+ * 깔려 가장 큰 높이를 자리의 최소 높이로 삼는다 — 줄이 서고 걷혀도 아래 공개 범위 카드와 머리 단추가 움직이지 않는다(웹 `NameStatus` 와 같은 약속, #5833).
+ * 실제로 화면이 꺾은 높이를 `onLayout` 으로 읽는다(줄 수를 어림하지 않는다). 미리보기는 예약된 줄 수 안에서 접는다 — 80자 이름이 시트를 밀지 않는다.
+ * 「대 / 문자는」처럼 어절 가운데서 갈리지 않게 어절 단위로 접는다(design-review r1a M1·r1c M1).
+ */
+function NameStatus({
+  error,
+  preview,
+  hint,
+  reserve,
+  ruleStyle,
+  issueStyle,
+}: {
+  error: string | null;
+  preview: string | null;
+  hint: string;
+  reserve: readonly string[];
+  ruleStyle: StyleProp<TextStyle>;
+  issueStyle: StyleProp<TextStyle>;
+}): React.JSX.Element {
+  const styles = useStyles(buildStyles);
+  const heights = useRef<Record<number, number>>({});
+  const lineCounts = useRef<Record<number, number>>({});
+  const [reserved, setReserved] = useState(0);
+  const [lines, setLines] = useState<number | undefined>(undefined);
+  const onReserveLayout = (index: number) => (event: LayoutChangeEvent) => {
+    heights.current[index] = event.nativeEvent.layout.height;
+    const tallest = Math.max(0, ...Object.values(heights.current));
+    setReserved(prev => (prev === tallest ? prev : tallest));
+  };
+  // 줄 수는 높이를 줄 높이로 나눠 어림하지 않고 화면이 꺾은 줄 수를 그대로 쓴다 — 가장 큰 접근성 글자에서는 줄 높이가 토큰(18)보다 커서 어림이 틀린다.
+  const onReserveText = (index: number) => (event: NativeSyntheticEvent<TextLayoutEventData>) => {
+    lineCounts.current[index] = event.nativeEvent.lines.length;
+    const most = Math.max(1, ...Object.values(lineCounts.current));
+    setLines(prev => (prev === most ? prev : most));
+  };
+  const shown = error ?? preview ?? hint;
+  const kind = error !== null ? 'issue' : preview !== null ? 'preview' : 'rule';
+  return (
+    <View>
+      <Text
+        accessibilityLiveRegion={kind === 'issue' ? 'polite' : 'none'}
+        style={[kind === 'issue' ? issueStyle : ruleStyle, reserved > 0 && {minHeight: reserved}]}
+        lineBreakStrategyIOS="hangul-word"
+        numberOfLines={kind === 'preview' ? lines : undefined}
+        testID={`new-channel-name-${kind}`}>
+        {shown}
+      </Text>
+      {reserve.map((candidate, index) => (
+        <Text
+          key={index}
+          accessibilityElementsHidden
+          importantForAccessibility="no-hide-descendants"
+          pointerEvents="none"
+          onLayout={onReserveLayout(index)}
+          onTextLayout={onReserveText(index)}
+          style={[ruleStyle, styles.reserveCopy]}
+          lineBreakStrategyIOS="hangul-word"
+          testID={`new-channel-name-reserve-${index}`}>
+          {candidate}
+        </Text>
+      ))}
+    </View>
   );
 }
 
@@ -311,4 +397,6 @@ const buildStyles = (color: Palette) =>
       fontSize: font.label,
       color: color.dangerText,
     },
+    // 높이만 재는 숨은 사본 — 같은 폭의 겹친 층이라 레이아웃 높이를 더하지 않는다.
+    reserveCopy: {position: 'absolute', top: 0, left: 0, right: 0, opacity: 0},
   });

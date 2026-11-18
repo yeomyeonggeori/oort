@@ -80,5 +80,10 @@
   "channels.browse.switchNotFound": "Este canal ya no está disponible.",
   "channels.browse.switchNotListable": "Solo los canales públicos pueden mostrarse al explorar.",
   "channels.browse.switchNetwork": "No se pudo guardar el cambio. {reason}",
-  "channels.browse.switchGeneric": "No se pudo guardar el cambio. Inténtalo de nuevo."
+  "channels.browse.switchGeneric": "No se pudo guardar el cambio. Inténtalo de nuevo.",
+  "channels.browse.closeAria": "Cerrar exploración de canales",
+  "channels.browse.loading": "Cargando canales.",
+  "channels.browse.joining": "Uniéndote",
+  "channels.browse.emptyAdminDetailPhone": "Para que un canal existente aparezca aquí, activa «Mostrar al explorar» en el menú del canal en la web o en la app de escritorio.",
+  "channels.browse.homeRowHint": "Abre la exploración de canales con este nombre."
 }

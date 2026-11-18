@@ -590,12 +590,12 @@ describe('탭 셋과 + (ADR-0189 D1, #2750)', () => {
     expect(screen.getByTestId('new-channel-sheet')).toBeTruthy();
     // 규칙은 처음부터 칸 밑에 선다(웹과 같은 자리).
     expect(screen.getByTestId('new-channel-name-rule')).toHaveTextContent(
-      '영문, 숫자, 하이픈, 밑줄로 80자 이내, 처음과 끝은 영문이나 숫자. 대문자는 소문자로 저장돼요.',
+      '글자, 숫자, 하이픈(-), 밑줄(_)로 80자까지. 빈칸은 -로 바뀌고 영문 대문자는 소문자로 저장돼요.',
     );
     // VoiceOver 는 같은 규칙을 힌트로 듣는다.
     expect(screen.getByTestId('new-channel-name')).toHaveProp(
       'accessibilityHint',
-      '영문, 숫자, 하이픈, 밑줄로 80자 이내, 처음과 끝은 영문이나 숫자. 대문자는 소문자로 저장돼요.',
+      '글자, 숫자, 하이픈(-), 밑줄(_)로 80자까지. 빈칸은 -로 바뀌고 영문 대문자는 소문자로 저장돼요.',
     );
     // 빈 이름으로는 만들 수 없다.
     expect(screen.getByTestId('new-channel-create').props.accessibilityState).toMatchObject(

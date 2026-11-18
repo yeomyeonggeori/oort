@@ -80,5 +80,10 @@
   "channels.browse.switchNotFound": "此频道已不可用。",
   "channels.browse.switchNotListable": "只有公开频道可以在浏览中显示。",
   "channels.browse.switchNetwork": "未能保存更改。{reason}",
-  "channels.browse.switchGeneric": "未能保存更改，请重试。"
+  "channels.browse.switchGeneric": "未能保存更改，请重试。",
+  "channels.browse.closeAria": "关闭频道浏览",
+  "channels.browse.loading": "正在加载频道列表。",
+  "channels.browse.joining": "正在加入",
+  "channels.browse.emptyAdminDetailPhone": "在网页版或桌面版的频道菜单中打开“在浏览中显示”，现有频道就会出现在这里。",
+  "channels.browse.homeRowHint": "用这个名称打开频道浏览。"
 }
