@@ -2,7 +2,7 @@ import type {Member} from '@momo/core/lib/api';
 import {QueryClient, QueryClientProvider} from '@tanstack/react-query';
 import {act, cleanup, fireEvent, render, screen, waitFor, within} from '@testing-library/react-native';
 import React from 'react';
-import {ActionSheetIOS} from 'react-native';
+import {ActionSheetIOS, FlatList} from 'react-native';
 
 import '../src/boot/polyfills';
 import '../src/boot/coreHost';
@@ -296,6 +296,8 @@ describe('홈 이름 검색 — 「참여하지 않은 공개 채널」 묶음',
     expect(within(group).getByTestId('home-not-joined-ch-design-review')).toBeTruthy();
     expect(within(group).queryByTestId('home-not-joined-ch-launch')).toBeNull();
     expect(screen.queryByTestId('channels-no-match')).toBeNull();
+    // 문장만 빠진다 — 이름이 아니라 오간 말을 찾는 사람의 문(메시지에서 찾기)은 묶음 아래에 선다(#5961).
+    expect(screen.getByTestId('search-messages-instead')).toBeTruthy();
     fireEvent.press(within(group).getByTestId('home-not-joined-ch-design-review'));
     await waitFor(() => expect(screen.getByTestId('channel-browse-pane')).toBeTruthy());
     expect(screen.getByTestId('channel-browse-search').props.value).toBe('디자인-리뷰');
@@ -347,6 +349,28 @@ describe('미리 보기 — 글자 칸을 누르면 읽기 전용 층(#5847, ADR
     expect(fetchMock.mock.calls.filter(call => String(call[0]).includes('/preview'))).toHaveLength(1);
     expect(fetchMock.mock.calls.filter(call => call[1]?.method && call[1].method !== 'GET' && !String(call[0]).includes('/v1/auth/'))).toHaveLength(0);
     expect(subscribedTo().some(name => name.includes('ch-design-review'))).toBe(false);
+  });
+
+  it('열리면 높이가 재진 뒤에도 맨 아래로 가고, 사람이 끈 뒤에는 자리를 건드리지 않는다(#5961)', async () => {
+    const scrollTo = jest.spyOn(FlatList.prototype, 'scrollToOffset');
+    try {
+      await openPreview();
+      const list = await screen.findByTestId('channel-preview-list');
+      scrollTo.mockClear();
+      // 줄 높이는 그린 뒤에 재진다: 목록 높이 → 내용 높이 순으로 오고, 내용이 자라도(첨부 · 큰 글자) 끝 자리를 다시 잡는다.
+      fireEvent(list, 'layout', {nativeEvent: {layout: {x: 0, y: 0, width: 390, height: 600}}});
+      fireEvent(list, 'contentSizeChange', 390, 1800);
+      expect(scrollTo).toHaveBeenLastCalledWith({offset: 1200, animated: false});
+      fireEvent(list, 'contentSizeChange', 390, 2000);
+      expect(scrollTo).toHaveBeenLastCalledWith({offset: 1400, animated: false});
+      // 사람이 끌어 올려 읽는 중에 높이가 바뀌어도 건드리지 않는다.
+      scrollTo.mockClear();
+      fireEvent(list, 'scrollBeginDrag');
+      fireEvent(list, 'contentSizeChange', 390, 2200);
+      expect(scrollTo).not.toHaveBeenCalled();
+    } finally {
+      scrollTo.mockRestore();
+    }
   });
 
   it('「참여」를 두 번 눌러도 요청 하나, 성공하면 미리 보기와 둘러보기가 걷히고 그 대화가 열린다', async () => {
