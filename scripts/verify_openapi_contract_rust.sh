@@ -3830,6 +3830,12 @@ sample channel-join post "/v1/workspaces/{workspaceId}/channels/{channelId}/memb
 guard_jq --arg id "$GATE_CHANNEL_ID" \
   '(.channel.id | ascii_downcase) == $id and .newlyJoined == false' \
   "joining a channel one is already in writes nothing"
+# ADR-0224 D5 — 참여 전 미리 보기. 읽기만 하므로 뒤 표본에 부작용이 없다.
+sample channel-preview get "/v1/workspaces/{workspaceId}/channels/{channelId}/preview" \
+  "/v1/workspaces/$WS/channels/$GATE_CHANNEL_ID/preview" 200 "" "$ACCESS"
+guard_jq --arg id "$GATE_CHANNEL_ID" \
+  '(.channel.id | ascii_downcase) == $id and .channel.isMember == true' \
+  "a member's preview names the channel and says they are in it"
 
 # 갓 만든 채널에 건다 — #general 의 상태를 게이트가 바꾸면 뒤따르는 read-state
 # 표본이 자기가 만든 부작용을 읽게 된다.

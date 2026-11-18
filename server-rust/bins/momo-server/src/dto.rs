@@ -2964,6 +2964,52 @@ pub struct ChannelJoinResponse {
     pub newly_joined: bool,
 }
 
+/// ADR-0224 D5 — `GET …/channels/{ch}/preview`. One shape for a member and a non-member
+/// alike; `channel.isMember` is the only difference.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ChannelPreviewResponse {
+    pub channel: PreviewChannelDto,
+    /// Newest first, at most one screen.
+    pub messages: Vec<PreviewMessageDto>,
+}
+
+/// The channel of a preview. `topic` is omitted when the channel has none.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PreviewChannelDto {
+    pub id: String,
+    pub name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub topic: Option<String>,
+    pub member_count: i64,
+    pub is_member: bool,
+}
+
+/// One message of a preview — an allow-list: nothing else of the message travels.
+/// `body` is omitted on a deleted message.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PreviewMessageDto {
+    pub id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub body: Option<String>,
+    pub author: PreviewAuthorDto,
+    pub created_at_ms: i64,
+    pub edited: bool,
+    pub deleted: bool,
+    pub reply_count: i64,
+    pub attachment_names: Vec<String>,
+}
+
+/// Who wrote a preview message: the name to show and whether it is a person or an agent.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PreviewAuthorDto {
+    pub display_name: String,
+    pub kind: String,
+}
+
 // ---------------------------------------------------------------------------
 // channel writes (B4.1 — Swift `ChannelRoutes.create` + `updateNotificationPref`)
 // ---------------------------------------------------------------------------
