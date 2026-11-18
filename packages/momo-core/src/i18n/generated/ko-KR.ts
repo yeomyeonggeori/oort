@@ -1119,6 +1119,24 @@ export const catalog: MessageCatalog = {
       "value": "서버에 닿지 못했어요. 아래는 마지막으로 확인된 작업 상태예요."
     }
   ],
+  "channels.createFailure.duplicate": [
+    {
+      "type": 0,
+      "value": "같은 이름의 채널이 이미 있습니다. 다른 이름으로 다시 시도하세요."
+    }
+  ],
+  "channels.createFailure.forbidden": [
+    {
+      "type": 0,
+      "value": "채널을 만들 권한이 없습니다. 워크스페이스 소유자나 관리자에게 요청하세요."
+    }
+  ],
+  "channels.createFailure.rateLimited": [
+    {
+      "type": 0,
+      "value": "요청이 너무 잦습니다. 잠시 뒤에 다시 시도하세요."
+    }
+  ],
   "channels.dmLeave.action": [
     {
       "type": 0,

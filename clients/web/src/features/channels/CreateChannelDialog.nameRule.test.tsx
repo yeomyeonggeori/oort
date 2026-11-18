@@ -258,6 +258,31 @@ describe("거절", () => {
   });
 });
 
+describe("채널 만들기가 거절되면 그 문장이 화면 언어로 선다 (#5877, 400·409·403·429)", () => {
+  const cases: [string, number, string, string][] = [
+    ["400", 400, "create-channel-name-error", "The server did not accept this name. Use only letters, numbers, - and _."],
+    ["409", 409, "create-channel-name-error", "A channel with this name already exists. Try a different name."],
+    ["403", 403, "create-channel-error", "You don't have permission to create channels. Ask a workspace owner or admin."],
+    ["429", 429, "create-channel-error", "Too many requests. Try again in a moment."],
+  ];
+  it.each(cases)("영어 화면 %s: 영어 문장이고, 한국어 문장이 아니다", async (_label, status, testId, sentence) => {
+    await mount(english);
+    await type("ops-room");
+    api.createChannel.mockRejectedValueOnce(new ApiError(status, "x"));
+    await submit();
+    const text = q(testId)!.textContent ?? "";
+    expect(text).toBe(sentence);
+    expect(text).not.toMatch(/[\uAC00-\uD7A3]/);
+  });
+  it("한국어 화면은 그대로 한국어다", async () => {
+    await mount();
+    await type("ops-room");
+    api.createChannel.mockRejectedValueOnce(new ApiError(403, "x"));
+    await submit();
+    expect(q("create-channel-error")!.textContent).toBe("채널을 만들 권한이 없습니다. 워크스페이스 소유자나 관리자에게 요청하세요.");
+  });
+});
+
 describe("조합 중인 글자가 아직 글자가 아니면 아래 줄은 조합 전의 값에 머문다", () => {
   it("병음 조합 글자(`ni'h`)는 거절하지 않고, 조합이 끝나면 그 이름을 말한다", async () => {
     await mount();

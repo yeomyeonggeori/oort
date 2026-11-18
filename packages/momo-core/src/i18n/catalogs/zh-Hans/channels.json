@@ -20,5 +20,8 @@
   "channels.nameRule.serverRejected": "服务器不接受这个名称。只能使用文字、数字、- 和 _。",
   "channels.nameRule.hint": "可使用文字、数字、连字符（-）和下划线（_），最多 {max, number} 个字符。空格会变成 -，英文大写字母会以小写保存。",
   "channels.nameRule.placeholder": "设计-评审",
-  "channels.nameRule.preview": "将创建为 {name}"
+  "channels.nameRule.preview": "将创建为 {name}",
+  "channels.createFailure.duplicate": "已有同名频道。请换一个名称再试。",
+  "channels.createFailure.forbidden": "你没有创建频道的权限。请联系工作区所有者或管理员。",
+  "channels.createFailure.rateLimited": "请求过于频繁，请稍后再试。"
 }

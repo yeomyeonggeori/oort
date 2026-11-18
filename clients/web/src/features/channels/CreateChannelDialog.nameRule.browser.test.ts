@@ -219,7 +219,7 @@ describe("채널 만들기 창의 이름 아래 줄은 서고 걷혀도 창이 �
             await fillThenWait(page, "Ops Room");
             await page.locator('[data-testid="create-channel-submit"]').click();
             await page.locator('[data-testid="create-channel-name-error"]').waitFor();
-            await waitSaid(page, "같은 이름의 채널이 이미 있습니다.");
+            await waitSaid(page, ko ? "같은 이름의 채널이 이미 있습니다." : "A channel with this name already exists.");
             setMode("400");
             await fillThenWait(page, "Ops Room 2");
             await page.locator('[data-testid="create-channel-submit"]').click();
