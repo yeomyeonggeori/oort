@@ -694,6 +694,24 @@ export const catalog: MessageCatalog = {
       "value": "チャンネル名を変更"
     }
   ],
+  "timeline.approval.channelAgentIn": [
+    {
+      "type": 0,
+      "value": "このエージェントはすでにこのチャンネルに入っています。"
+    }
+  ],
+  "timeline.approval.channelNeedsMember": [
+    {
+      "type": 0,
+      "value": "先にこのチャンネルにエージェントをメンバーとして追加してください。"
+    }
+  ],
+  "timeline.approval.channelsRefused": [
+    {
+      "type": 0,
+      "value": "選んだチャンネルの中に、今は接続できないものがあります。一覧をもう一度確認してください。"
+    }
+  ],
   "timeline.channelLeave.bodyPublicBrowse": [
     {
       "type": 1,

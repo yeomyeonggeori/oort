@@ -744,6 +744,24 @@ export const catalog: MessageCatalog = {
       "value": "Cambiar nombre del canal"
     }
   ],
+  "timeline.approval.channelAgentIn": [
+    {
+      "type": 0,
+      "value": "Este agente ya está en este canal."
+    }
+  ],
+  "timeline.approval.channelNeedsMember": [
+    {
+      "type": 0,
+      "value": "Primero agrega este agente como miembro de este canal."
+    }
+  ],
+  "timeline.approval.channelsRefused": [
+    {
+      "type": 0,
+      "value": "Algunos de los canales que elegiste no se pueden conectar ahora. Revisa la lista de nuevo."
+    }
+  ],
   "timeline.channelLeave.bodyPublicBrowse": [
     {
       "type": 1,

@@ -698,6 +698,24 @@ export const catalog: MessageCatalog = {
       "value": "重命名频道"
     }
   ],
+  "timeline.approval.channelAgentIn": [
+    {
+      "type": 0,
+      "value": "此智能体已在该频道中。"
+    }
+  ],
+  "timeline.approval.channelNeedsMember": [
+    {
+      "type": 0,
+      "value": "请先将此智能体添加为该频道的成员。"
+    }
+  ],
+  "timeline.approval.channelsRefused": [
+    {
+      "type": 0,
+      "value": "所选频道中有当前无法连接的频道。请重新检查列表。"
+    }
+  ],
   "timeline.channelLeave.bodyPublicBrowse": [
     {
       "type": 1,
