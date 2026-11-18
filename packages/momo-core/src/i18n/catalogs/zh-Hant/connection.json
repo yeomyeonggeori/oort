@@ -1,1 +1,4 @@
-{}
+{
+  "connection.approval.channelNeedsMember": "需要管理員先將其加入為此頻道的成員。",
+  "connection.approval.channelsRefused": "所選頻道中有目前無法連線的頻道。請重新檢查清單。"
+}

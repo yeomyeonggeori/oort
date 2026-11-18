@@ -1,1 +1,4 @@
-{}
+{
+  "connection.approval.channelNeedsMember": "Un administrateur doit d'abord l'ajouter comme membre de ce canal.",
+  "connection.approval.channelsRefused": "Certains des canaux choisis ne peuvent pas être connectés pour le moment. Vérifiez à nouveau la liste."
+}

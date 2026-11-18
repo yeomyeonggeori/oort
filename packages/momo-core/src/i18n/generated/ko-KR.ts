@@ -1698,6 +1698,18 @@ export const catalog: MessageCatalog = {
       "value": "다시 시도"
     }
   ],
+  "connection.approval.channelNeedsMember": [
+    {
+      "type": 0,
+      "value": "관리자가 먼저 이 채널에 멤버로 추가해야 해요."
+    }
+  ],
+  "connection.approval.channelsRefused": [
+    {
+      "type": 0,
+      "value": "고른 채널 가운데 지금은 연결할 수 없는 채널이 있어요. 목록을 다시 확인해 주세요."
+    }
+  ],
   "connection.approval.offline": [
     {
       "type": 0,

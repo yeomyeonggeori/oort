@@ -1,1 +1,4 @@
-{}
+{
+  "connection.approval.channelNeedsMember": "需要管理员先将其添加为此频道的成员。",
+  "connection.approval.channelsRefused": "所选频道中有当前无法连接的频道。请重新检查列表。"
+}

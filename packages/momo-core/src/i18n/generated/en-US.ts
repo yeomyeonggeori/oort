@@ -1782,6 +1782,18 @@ export const catalog: MessageCatalog = {
       "value": "Try again"
     }
   ],
+  "connection.approval.channelNeedsMember": [
+    {
+      "type": 0,
+      "value": "An admin has to add this agent as a member of this channel first."
+    }
+  ],
+  "connection.approval.channelsRefused": [
+    {
+      "type": 0,
+      "value": "Some of the channels you picked can't be connected right now. Please check the list again."
+    }
+  ],
   "connection.approval.offline": [
     {
       "type": 0,

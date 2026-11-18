@@ -518,6 +518,18 @@ export const catalog: MessageCatalog = {
       "value": "文字、数字、ハイフン（-）、アンダースコア（_）のみ使えます。"
     }
   ],
+  "connection.approval.channelNeedsMember": [
+    {
+      "type": 0,
+      "value": "管理者が先にこのチャンネルにメンバーとして追加する必要があります。"
+    }
+  ],
+  "connection.approval.channelsRefused": [
+    {
+      "type": 0,
+      "value": "選んだチャンネルの中に、今は接続できないものがあります。一覧をもう一度確認してください。"
+    }
+  ],
   "timeline.channelLeave.bodyPublicBrowse": [
     {
       "type": 1,

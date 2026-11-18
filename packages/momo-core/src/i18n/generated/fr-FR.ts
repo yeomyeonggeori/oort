@@ -560,6 +560,18 @@ export const catalog: MessageCatalog = {
       "value": "Utilisez uniquement des lettres, des chiffres, des traits d'union (-) et des tirets bas (_)."
     }
   ],
+  "connection.approval.channelNeedsMember": [
+    {
+      "type": 0,
+      "value": "Un administrateur doit d'abord l'ajouter comme membre de ce canal."
+    }
+  ],
+  "connection.approval.channelsRefused": [
+    {
+      "type": 0,
+      "value": "Certains des canaux choisis ne peuvent pas être connectés pour le moment. Vérifiez à nouveau la liste."
+    }
+  ],
   "timeline.channelLeave.bodyPublicBrowse": [
     {
       "type": 1,

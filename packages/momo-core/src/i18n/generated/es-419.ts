@@ -568,6 +568,18 @@ export const catalog: MessageCatalog = {
       "value": "Solo se pueden usar letras, números, guiones (-) y guiones bajos (_)."
     }
   ],
+  "connection.approval.channelNeedsMember": [
+    {
+      "type": 0,
+      "value": "Un administrador debe agregarlo primero como miembro de este canal."
+    }
+  ],
+  "connection.approval.channelsRefused": [
+    {
+      "type": 0,
+      "value": "Algunos de los canales que elegiste no se pueden conectar ahora. Revisa la lista de nuevo."
+    }
+  ],
   "timeline.channelLeave.bodyPublicBrowse": [
     {
       "type": 1,

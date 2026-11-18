@@ -1,1 +1,4 @@
-{}
+{
+  "connection.approval.channelNeedsMember": "管理者が先にこのチャンネルにメンバーとして追加する必要があります。",
+  "connection.approval.channelsRefused": "選んだチャンネルの中に、今は接続できないものがあります。一覧をもう一度確認してください。"
+}

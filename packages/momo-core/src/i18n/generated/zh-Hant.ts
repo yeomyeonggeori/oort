@@ -518,6 +518,18 @@ export const catalog: MessageCatalog = {
       "value": "只能使用文字、數字、連字號（-）和底線（_）。"
     }
   ],
+  "connection.approval.channelNeedsMember": [
+    {
+      "type": 0,
+      "value": "需要管理員先將其加入為此頻道的成員。"
+    }
+  ],
+  "connection.approval.channelsRefused": [
+    {
+      "type": 0,
+      "value": "所選頻道中有目前無法連線的頻道。請重新檢查清單。"
+    }
+  ],
   "timeline.channelLeave.bodyPublicBrowse": [
     {
       "type": 1,

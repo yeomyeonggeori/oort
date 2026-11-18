@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Loader2 } from "lucide-react";
 import type { LoginResponse } from "@momo/core/lib/api";
 import { uuidEq } from "@momo/core/lib/api";
@@ -13,7 +13,13 @@ import { EmptyInvite, InlineBanner, Skeleton } from "@/features/common/States";
 // the only offline signal this surface has, and the right one.
 import { useBrowserOffline } from "@/features/common/useOffline";
 import { KeyValueRows } from "@/features/settings/SettingsFields";
-import { useChannels } from "@/features/workspace/useWorkspace";
+import {
+  memberFor,
+  rosterQueryKey,
+  useChannels,
+  useDirectory,
+} from "@/features/workspace/useWorkspace";
+import { useFormatMessage } from "@/i18n/useFormatMessage";
 import type { SessionRestoreStatus } from "@/app/session";
 import {
   approveHostedOauthConsent,
@@ -21,6 +27,9 @@ import {
   previewHostedOauthConsent,
 } from "@momo/core/features/hostedAgents/api";
 import {
+  approvableChannelIds,
+  approvalChannelInputs,
+  approvalChannelsRefusedKey,
   channelApprovalChoices,
   type ApprovalChannelInput,
 } from "@momo/core/features/hostedAgents/approval";
@@ -233,6 +242,9 @@ function ConsentBody({
   const workspaceId = session.member.workspaceId;
   const offline = useBrowserOffline();
   const { groups } = useChannels(workspaceId);
+  const { directory, isPending: rosterPending } = useDirectory(workspaceId);
+  const client = useQueryClient();
+  const formatMessage = useFormatMessage();
   const workspace = useQuery(hostedWorkspaceQuery(workspaceId));
 
   const [connectionId, setConnectionId] = useState<string | null>(null);
@@ -257,6 +269,14 @@ function ConsentBody({
     if (outcome.kind === "terminal") {
       decided.current = true;
       setDecisionTerminal(outcome.terminal);
+      return;
+    }
+    // 채널 승인이 통째로 거절됐다(그 사이 표시나 멤버십이 바뀜): 영어 원문 대신 사전의 문장, 두 목록은 다시 읽는다.
+    const refused = action === "approve" ? approvalChannelsRefusedKey(error) : null;
+    if (refused !== null) {
+      setFailure(formatMessage(refused));
+      void client.invalidateQueries({ queryKey: ["channels", workspaceId] });
+      void client.invalidateQueries({ queryKey: rosterQueryKey(workspaceId) });
       return;
     }
     setFailure(outcome.message);
@@ -308,19 +328,22 @@ function ConsentBody({
     }
   }, [previewError, onSessionExpired]);
 
-  const channelInputs = useMemo<ApprovalChannelInput[]>(() => {
-    const named = groups.channels.map((channel) => ({
-      id: channel.id,
-      label: `#${channel.name ?? "채널"}`,
-      kind: channel.kind,
-    }));
-    const dms = groups.dms.map((channel) => ({
-      id: channel.id,
-      label: channel.name ?? "1:1 대화",
-      kind: channel.kind,
-    }));
-    return [...named, ...dms];
-  }, [groups.channels, groups.dms]);
+  // 서버가 받는 채널(ADR-0224 D13)은 「둘러보기에 보이는 공개 채널」이거나 「고른 에이전트가 이미 든 채널」이다.
+  // 에이전트가 정해지기 전과 명부에 없을 때는 모른다 — 모르면 든 것으로 치지 않는다.
+  const candidateAgentId =
+    data?.candidates.find((candidate) => uuidEq(candidate.connectionId, connectionId ?? ""))
+      ?.agentMemberId ?? null;
+  const agentChannelIds = memberFor(directory, candidateAgentId ?? undefined)?.channelIds ?? null;
+  const channelInputs = useMemo<ApprovalChannelInput[]>(
+    () =>
+      approvalChannelInputs(
+        [...groups.channels, ...groups.dms],
+        (channel) =>
+          channel.kind === "dm" ? (channel.name ?? "1:1 대화") : `#${channel.name ?? "채널"}`,
+        agentChannelIds
+      ),
+    [groups.channels, groups.dms, agentChannelIds]
+  );
 
   function finishDecision(redirectTo: string) {
     if (decided.current) return;
@@ -472,10 +495,12 @@ function ConsentBody({
     (choice) => ({
       id: choice.id,
       label: choice.label,
-      detail: choice.detail,
+      detail: choice.detailKey ? formatMessage(choice.detailKey) : choice.detail,
       ...(choice.disabled ? { disabled: true } : {}),
     })
   );
+  // 에이전트를 바꾸거나 다시 읽은 목록에서 잠긴 줄이 된 채널은 고른 채로 남지 않는다.
+  const selectedChannels = approvableChannelIds(channelInputs, channelSelection);
 
   return (
     <div className="flex min-w-0 flex-col gap-6" data-testid="oauth-consent-form">
@@ -567,14 +592,19 @@ function ConsentBody({
         testId="oauth-scopes"
       />
 
-      {channelItems.length > 0 && (
+      {rosterPending ? (
+        // 명부가 정해지기 전에는 에이전트의 멤버십을 몰라 줄이 풀렸다 잠겼다 한다 — 자리만 잡아 두고 기다린다.
+        <div data-testid="oauth-channels-loading">
+          <Skeleton ready={false} rows={3} className="p-0" />
+        </div>
+      ) : channelItems.length > 0 && (
         <ChoiceList
           name="oauth-channels"
           legend={OAUTH_CONSENT_CHANNELS_LEGEND}
           hint={OAUTH_CONSENT_CHANNELS_HINT}
           multiple
           items={channelItems}
-          selected={channelSelection}
+          selected={selectedChannels}
           onChange={setChannelSelection}
           disabled={busy}
           testId="oauth-channels"

@@ -19,6 +19,8 @@
   "connection.composer.serverUnreachable": "We can't reach the server, so you can't send right now. Your draft is still here, and you can send it once we're connected again.",
   "connection.approval.offline": "You're offline, so you can't decide right now. Once you're connected again, you can approve or deny here.",
   "connection.approval.serverUnreachable": "We can't reach the server, so you can't decide right now. Once we're connected again, you can approve or deny here.",
+  "connection.approval.channelNeedsMember": "An admin has to add this agent as a member of this channel first.",
+  "connection.approval.channelsRefused": "Some of the channels you picked can't be connected right now. Please check the list again.",
   "connection.load.conversationTitle": "Couldn't load the conversation",
   "connection.load.channelListTitle": "Couldn't load the channel list",
   "connection.load.threadTitle": "Couldn't load the thread",
