@@ -21,8 +21,8 @@ use crate::store::{
     media_json, metadata, put_images, resolve_kind, unexpired, Effect,
 };
 use crate::{
-    hash, valid_source_url, version, Actor, Choice, Error, ImageInfo, Metadata, Origin,
-    FAILURE_CODES, QUOTA, SOURCE_CODES,
+    hash, valid_source_url, version, Actor, Choice, Error, ImageInfo, LinkChoice, Metadata, Origin,
+    FAILURE_CODES, LINK_AWAITING_APPROVAL, QUOTA, SOURCE_CODES,
 };
 
 /// ADR-0218 appendix B: `candidates` is 1-4.
@@ -75,6 +75,8 @@ pub fn candidate_origin_ok(origin: &Origin, has_media: bool, code: Option<&str>)
     kind_ok
         && match (has_media, code) {
             (true, None) => true,
+            // An agent's link, not fetched until a person approves it (#5899).
+            (false, Some(LINK_AWAITING_APPROVAL)) => origin.kind == "url",
             (false, Some("video_processing_unavailable")) => origin.kind != "generated",
             // A slot the server could not make (G3.8): the picture is `generated`, the reason is
             // one of the six card codes. A link's reasons stay the link's.
@@ -380,6 +382,177 @@ pub async fn choose_in_tx(
         origin,
         sha256: choice.sha256.clone(),
         subject: meta.subject_member_id,
+    })
+}
+
+/// A link candidate one decision has taken to fetch (#5899).
+#[derive(Debug, Clone)]
+pub struct LinkClaim {
+    pub draft_id: Uuid,
+    /// The candidate's revision when it was taken; the outcome is written only onto this one.
+    pub revision: i64,
+    /// What the approval fetches: the stored `Origin.sourceUrl` (`https://host/path`, ADR-0218
+    /// D5 — the query was never stored).
+    pub source_url: String,
+}
+
+/// Take a link candidate of `approval_id` to be fetched for **this** decision (#5899), inside the
+/// decision's transaction. The proofs are [`choose_in_tx`]'s that need no picture — the add role
+/// and policy now (catalog locked) and, for a face, the person; membership of this card; creator,
+/// face, revision and TTL — plus: the candidate is a link that nobody has fetched. Then the one
+/// write: the candidate's code leaves [`LINK_AWAITING_APPROVAL`], so no later decision, retry or
+/// overlapping tap can take it again. The code it holds until the fetch's outcome is written
+/// (`source_unavailable`) is the true one if that outcome never comes: nothing was received.
+pub async fn claim_link_in_tx(
+    conn: &mut PgConnection,
+    decider: Actor,
+    approval_id: Uuid,
+    proposer: Uuid,
+    drafts: &[Uuid],
+    subject_pin: Option<Uuid>,
+    choice: &LinkChoice,
+) -> Result<LinkClaim, Error> {
+    let revision = version(&choice.revision)?;
+    let ws = decider.workspace;
+    let (_, policy) = catalog(conn, ws).await?;
+    let who = authorize(conn, decider).await?;
+    if !adder_allows(&policy, &who, subject_pin, decider.member) {
+        return Err(Error::Role);
+    }
+    if !drafts.contains(&choice.draft_id) {
+        return Err(Error::Stale);
+    }
+    let rows = sqlx::query("SELECT * FROM expression_draft WHERE workspace_id=$1 AND approval_id=$2 ORDER BY candidate_index FOR UPDATE")
+        .bind(ws).bind(approval_id).fetch_all(&mut *conn).await?;
+    let row = rows
+        .iter()
+        .find(|row| row.try_get::<Uuid, _>("id").ok() == Some(choice.draft_id))
+        .ok_or(Error::Stale)?;
+    if row.try_get::<Uuid, _>("creator")? != proposer
+        || row.try_get::<Option<Uuid>, _>("subject_member_id")? != subject_pin
+        || row.try_get::<String, _>("state")? != "manual_upload_required"
+        || row.try_get::<Option<String>, _>("code")?.as_deref() != Some(LINK_AWAITING_APPROVAL)
+        || row.try_get::<i64, _>("revision")? != revision
+    {
+        return Err(Error::Stale);
+    }
+    unexpired(row)?;
+    let origin: Origin =
+        serde_json::from_value(row.try_get::<Value, _>("origin")?).map_err(|_| Error::Invalid)?;
+    let source_url = match (origin.kind.as_str(), origin.source_url) {
+        ("url", Some(link)) if valid_source_url(&link) => link,
+        _ => return Err(Error::Stale),
+    };
+    let taken = sqlx::query("UPDATE expression_draft SET code='source_unavailable' WHERE workspace_id=$1 AND id=$2 AND code=$3")
+        .bind(ws).bind(choice.draft_id).bind(LINK_AWAITING_APPROVAL)
+        .execute(&mut *conn).await?.rows_affected();
+    if taken != 1 {
+        return Err(Error::Stale);
+    }
+    Ok(LinkClaim {
+        draft_id: choice.draft_id,
+        revision,
+        source_url,
+    })
+}
+
+/// What writing a fetched link's outcome made of its candidate (#5899).
+#[derive(Debug, Clone)]
+pub struct LinkSettled {
+    /// The card's `action.expression` as it now stands.
+    pub card: Value,
+    pub request_message_id: Option<Uuid>,
+    /// The candidate's new revision and its large picture's hash, when the link gave a picture.
+    pub picture: Option<(i64, String)>,
+}
+
+/// Write what the fetch of a claimed link gave (#5899): a picture, as a direct upload would have
+/// (same draft id, origin, name, face and TTL; revision + 1, new immutable pixels, `ready`), or the
+/// closed reason it gave none (the candidate stays `manual_upload_required`, and the approval stays
+/// pending — ADR-0218 appendix C). Only onto the candidate exactly as the claim left it: a
+/// replacement, a reclaim (reject, expiry, another candidate registered) or a second outcome in
+/// between leaves nothing to write, and that is `Stale`. Lock order is the decision's: approval,
+/// then the card's drafts.
+pub async fn settle_link_in_tx(
+    conn: &mut PgConnection,
+    decider: Actor,
+    approval_id: Uuid,
+    claim: &LinkClaim,
+    outcome: Result<&Processed, &'static str>,
+) -> Result<LinkSettled, Error> {
+    let ws = decider.workspace;
+    let approval = sqlx::query("SELECT status::text AS status, request_message_id FROM approval WHERE workspace_id=$1 AND id=$2 FOR UPDATE")
+        .bind(ws).bind(approval_id).fetch_optional(&mut *conn).await?.ok_or(Error::Stale)?;
+    if approval.try_get::<String, _>("status")? != "pending" {
+        return Err(Error::Stale);
+    }
+    let rows = sqlx::query("SELECT * FROM expression_draft WHERE workspace_id=$1 AND approval_id=$2 ORDER BY candidate_index FOR UPDATE")
+        .bind(ws).bind(approval_id).fetch_all(&mut *conn).await?;
+    let row = rows
+        .iter()
+        .find(|row| row.try_get::<Uuid, _>("id").ok() == Some(claim.draft_id))
+        .ok_or(Error::Stale)?;
+    if row.try_get::<String, _>("state")? != "manual_upload_required"
+        || row.try_get::<Option<String>, _>("code")?.as_deref() != Some("source_unavailable")
+        || row.try_get::<i64, _>("revision")? != claim.revision
+    {
+        return Err(Error::Stale);
+    }
+    unexpired(row)?;
+    let origin: Origin =
+        serde_json::from_value(row.try_get::<Value, _>("origin")?).map_err(|_| Error::Invalid)?;
+    let index: i32 = row.try_get("candidate_index")?;
+    let picture = match outcome {
+        Ok(media) => {
+            let updated = sqlx::query("UPDATE expression_draft SET revision=revision+1,state='ready',code=NULL WHERE workspace_id=$1 AND id=$2 RETURNING revision")
+                .bind(ws).bind(claim.draft_id).fetch_one(&mut *conn).await?;
+            let revision: i64 = updated.try_get("revision")?;
+            put_images(conn, ws, claim.draft_id, Some(revision), media).await?;
+            let sha256 = media.large.info.sha256.clone();
+            audit_staged(
+                conn,
+                ws,
+                decider.member,
+                claim.draft_id,
+                &origin,
+                None,
+                Some(&sha256),
+                Some(approval_id),
+                json!({"candidate_index": index, "fetched": "on_approval"}),
+            )
+            .await?;
+            Some((revision, sha256))
+        }
+        Err(code) => {
+            // A link's reasons only (appendix C): never a generation code, never "not fetched".
+            if !(SOURCE_CODES.contains(&code) || code == "video_processing_unavailable") {
+                return Err(Error::Invalid);
+            }
+            sqlx::query("UPDATE expression_draft SET code=$3 WHERE workspace_id=$1 AND id=$2")
+                .bind(ws)
+                .bind(claim.draft_id)
+                .bind(code)
+                .execute(&mut *conn)
+                .await?;
+            audit_staged(
+                conn,
+                ws,
+                decider.member,
+                claim.draft_id,
+                &origin,
+                Some(code),
+                None,
+                Some(approval_id),
+                json!({"candidate_index": index, "fetched": "on_approval"}),
+            )
+            .await?;
+            None
+        }
+    };
+    Ok(LinkSettled {
+        card: card_in_tx(conn, ws, approval_id).await?,
+        request_message_id: approval.try_get("request_message_id")?,
+        picture,
     })
 }
 

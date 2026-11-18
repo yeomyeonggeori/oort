@@ -216,6 +216,15 @@ claims:
     proofs:
       - "server-rust/crates/momo-unfurl/tests/unfurl_conformance_pg.rs#an_agent_authored_message_is_never_fetched_except_an_inbound_integrations_and_a_human_one_is"
       - "server-rust/crates/momo-unfurl/tests/unfurl_conformance_pg.rs#a_job_already_queued_for_an_agent_message_is_skipped_before_any_fetch"
+  - id: NET-5
+    claim: "The server makes no request to a picture link an agent proposes on an expression card until a person approves that candidate: a rejected or expired card's link is never requested, an approved one is requested once however many times or however close together it is approved, and the card shows only the link's host."
+    scope: "Real PostgreSQL with a counting fetch double, the Agent Port expression.create proposal and the approval decision. The approval's fetch goes through the same guard as a person's picture import (the 5 MiB bound is exercised here; the address checks of the real transport are proven by that transport's own tests, not by this claim). A person's own link import and link previews are not covered (NET-4 covers previews)."
+    priority: P1
+    runs: nightly
+    proofs:
+      - "server-rust/bins/momo-server/tests/agent_port_tools_conformance_pg.rs#expression_create_offers_three_sources_and_registers_exactly_the_one_chosen"
+      - "server-rust/bins/momo-server/tests/agent_port_tools_conformance_pg.rs#an_agent_link_on_a_rejected_or_expired_card_is_never_fetched"
+      - "server-rust/bins/momo-server/tests/agent_port_tools_conformance_pg.rs#an_agent_link_that_fails_after_its_approval_says_why_on_the_card"
   - id: NET-3
     claim: "The agent worker's outbound client refuses a hostname that resolves to a private address before connecting."
     scope: "The agent worker egress helper. Other outbound paths have their own claims (NET-1, NET-2)."
