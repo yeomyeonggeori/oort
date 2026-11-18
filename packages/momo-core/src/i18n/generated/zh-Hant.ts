@@ -333,6 +333,36 @@ export const catalog: MessageCatalog = {
       "value": "請求過於頻繁，請稍後再試。"
     }
   ],
+  "channels.default.description": [
+    {
+      "type": 0,
+      "value": "新加入的成員會自動加入"
+    }
+  ],
+  "channels.default.label": [
+    {
+      "type": 0,
+      "value": "設為預設頻道"
+    }
+  ],
+  "channels.default.lastDefault": [
+    {
+      "type": 0,
+      "value": "至少需要一個預設頻道。請先將其他頻道設為預設頻道。"
+    }
+  ],
+  "channels.default.lastHint": [
+    {
+      "type": 0,
+      "value": "至少需要一個預設頻道"
+    }
+  ],
+  "channels.default.notDefaultable": [
+    {
+      "type": 0,
+      "value": "只有公開頻道可以設為預設頻道。"
+    }
+  ],
   "channels.dmLeave.action": [
     {
       "type": 0,
