@@ -488,6 +488,106 @@ export const catalog: MessageCatalog = {
       "value": "只能使用文字、数字、连字符（-）和下划线（_）。"
     }
   ],
+  "channels.rename.action": [
+    {
+      "type": 0,
+      "value": "重命名频道"
+    }
+  ],
+  "channels.rename.aria": [
+    {
+      "type": 0,
+      "value": "重命名 "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " 频道"
+    }
+  ],
+  "channels.rename.busy": [
+    {
+      "type": 0,
+      "value": "正在重命名…"
+    }
+  ],
+  "channels.rename.cancel": [
+    {
+      "type": 0,
+      "value": "取消"
+    }
+  ],
+  "channels.rename.description": [
+    {
+      "type": 0,
+      "value": "新名称会立即显示在侧边栏和频道标题中。"
+    }
+  ],
+  "channels.rename.fieldLabel": [
+    {
+      "type": 0,
+      "value": "频道名称"
+    }
+  ],
+  "channels.rename.forbidden": [
+    {
+      "type": 0,
+      "value": "只有所有者和管理员可以重命名频道。"
+    }
+  ],
+  "channels.rename.generalLocked": [
+    {
+      "type": 0,
+      "value": "无法更改 general 频道的名称。"
+    }
+  ],
+  "channels.rename.generic": [
+    {
+      "type": 0,
+      "value": "无法重命名。请重试。"
+    }
+  ],
+  "channels.rename.network": [
+    {
+      "type": 0,
+      "value": "无法重命名。"
+    },
+    {
+      "type": 1,
+      "value": "reason"
+    }
+  ],
+  "channels.rename.notFound": [
+    {
+      "type": 0,
+      "value": "找不到此频道。"
+    }
+  ],
+  "channels.rename.preview": [
+    {
+      "type": 0,
+      "value": "将重命名为 "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    }
+  ],
+  "channels.rename.submit": [
+    {
+      "type": 0,
+      "value": "重命名"
+    }
+  ],
+  "channels.rename.title": [
+    {
+      "type": 0,
+      "value": "重命名频道"
+    }
+  ],
   "timeline.channelLeave.bodyPublicBrowse": [
     {
       "type": 1,

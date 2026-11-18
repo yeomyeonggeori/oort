@@ -488,6 +488,102 @@ export const catalog: MessageCatalog = {
       "value": "文字、数字、ハイフン（-）、アンダースコア（_）のみ使えます。"
     }
   ],
+  "channels.rename.action": [
+    {
+      "type": 0,
+      "value": "チャンネル名を変更"
+    }
+  ],
+  "channels.rename.aria": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " チャンネルの名前を変更"
+    }
+  ],
+  "channels.rename.busy": [
+    {
+      "type": 0,
+      "value": "変更中…"
+    }
+  ],
+  "channels.rename.cancel": [
+    {
+      "type": 0,
+      "value": "キャンセル"
+    }
+  ],
+  "channels.rename.description": [
+    {
+      "type": 0,
+      "value": "新しい名前はサイドバーとチャンネルヘッダーにすぐ反映されます。"
+    }
+  ],
+  "channels.rename.fieldLabel": [
+    {
+      "type": 0,
+      "value": "チャンネル名"
+    }
+  ],
+  "channels.rename.forbidden": [
+    {
+      "type": 0,
+      "value": "チャンネル名を変更できるのはオーナーと管理者だけです。"
+    }
+  ],
+  "channels.rename.generalLocked": [
+    {
+      "type": 0,
+      "value": "general チャンネルの名前は変更できません。"
+    }
+  ],
+  "channels.rename.generic": [
+    {
+      "type": 0,
+      "value": "変更できませんでした。もう一度お試しください。"
+    }
+  ],
+  "channels.rename.network": [
+    {
+      "type": 0,
+      "value": "変更できませんでした。"
+    },
+    {
+      "type": 1,
+      "value": "reason"
+    }
+  ],
+  "channels.rename.notFound": [
+    {
+      "type": 0,
+      "value": "このチャンネルは見つかりません。"
+    }
+  ],
+  "channels.rename.preview": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " に名前が変わります"
+    }
+  ],
+  "channels.rename.submit": [
+    {
+      "type": 0,
+      "value": "変更"
+    }
+  ],
+  "channels.rename.title": [
+    {
+      "type": 0,
+      "value": "チャンネル名を変更"
+    }
+  ],
   "timeline.channelLeave.bodyPublicBrowse": [
     {
       "type": 1,
