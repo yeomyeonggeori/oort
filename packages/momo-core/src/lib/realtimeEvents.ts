@@ -1138,6 +1138,11 @@ export interface RealtimeHandle {
       onPin?: (event: PinEvent) => void;
       /** ADR-0170 — projection update or author removal on the same rail. */
       onUnfurl?: (event: UnfurlEvent) => void;
+      /**
+       * #5885 — 붙는 순간 이 방의 구독이 이미 살아 있었다(다른 표면이 먼저 붙였다). 그러면 이 손에는 첫 `subscribed` 가 오지 않고, 다음에
+       * 오는 `subscribed` 는 재연결이다. 붙는 자리에서 한 번 부른다.
+       */
+      onAttachedLive?: () => void;
     }
   ) => () => void;
   /**

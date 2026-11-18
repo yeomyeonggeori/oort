@@ -174,6 +174,24 @@ function anchorOf(
   return null;
 }
 
+/** 목록 첨자 `start..end` 에 든 메시지 줄의 seq 범위(#5885). 메시지 줄이 없으면 `null`. */
+function seqRangeOf(
+  items: FoldedItem[],
+  start: number,
+  end: number
+): { firstSeq: number; lastSeq: number } | null {
+  let firstSeq: number | null = null;
+  let lastSeq: number | null = null;
+  for (let i = Math.max(0, start); i <= Math.min(end, items.length - 1); i++) {
+    const item = items[i];
+    if (item.kind !== "message") continue;
+    const seq = item.message.seq;
+    if (firstSeq === null || seq < firstSeq) firstSeq = seq;
+    if (lastSeq === null || seq > lastSeq) lastSeq = seq;
+  }
+  return firstSeq === null || lastSeq === null ? null : { firstSeq, lastSeq };
+}
+
 function indexOfSeq(items: FoldedItem[], seq: number): number {
   return items.findIndex(
     (item) => item.kind === "message" && item.message.seq === seq
@@ -301,9 +319,15 @@ export function Timeline({
   canAddMember = false,
   channelName,
   channelTopic,
+  onVisibleSeqRange,
 }: {
   messages: Message[];
   directory: Directory;
+  /**
+   * 그려진 메시지 줄의 seq 범위(가장 옛 줄 · 가장 새 줄, 가상 목록의 여유분 포함)를 알린다(#5885). 재연결 뒤 다시 읽기가 이 구간을 읽는다.
+   * 메시지 줄이 없으면 `null`.
+   */
+  onVisibleSeqRange?: (range: { firstSeq: number; lastSeq: number } | null) => void;
   status: "loading" | "ready" | "error";
   /** Decides what "empty" means here: a channel gains members, a DM cannot. */
   channelKind?: Channel["kind"];
@@ -1030,6 +1054,7 @@ export function Timeline({
               ? prev
               : { start, end }
           );
+          onVisibleSeqRange?.(seqRangeOf(items, start, end));
         }}
         // 바닥의 여유 (U4-j). 0이면 마지막 행의 자기 여백 몇 픽셀만으로도 「바닥이
         // 아님」이 되어, 아무도 스크롤하지 않았는데 항법 컨트롤이 떴다 사라진다.
