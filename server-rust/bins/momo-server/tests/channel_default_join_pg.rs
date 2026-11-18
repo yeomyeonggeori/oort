@@ -626,6 +626,53 @@ async fn an_invite_join_lands_in_the_default_channels_only() {
     );
 }
 
+/// #5841 / ADR-0224 D6: an admin turning a channel on as a default adds nobody to it; only the
+/// person who joins afterwards lands there.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
+async fn a_channel_turned_on_as_default_receives_only_later_newcomers() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let ws = seed_workspace(&su, "turn-on").await;
+    let general = seed_channel(&su, &ws, "public", "general", 10, false, true, true, 0).await;
+    let notice = seed_channel(&su, &ws, "public", "공지", 9, false, false, true, 0).await;
+    let base = start_server(momo_app_pool().await).await;
+    let http = reqwest::Client::new();
+    let owner_token = login(&http, &base, ws.id, &ws.owner_email, OWNER_PASSWORD).await;
+
+    let early = format!("early-{}@channel-default.test", Uuid::new_v4().simple());
+    let code = issue_invite(&http, &base, &owner_token, ws.id, "member").await;
+    let (status, body) = post_join(&http, &base, &code, &early).await;
+    assert_eq!(status, 201, "{body}");
+    let early_id = member_id_by_email(&su, ws.id, &early).await;
+    assert_eq!(live_channels(&su, ws.id, early_id).await, ids(&[general]));
+
+    let response = http
+        .patch(format!("{base}/v1/workspaces/{}/channels/{notice}", ws.id))
+        .bearer_auth(&owner_token)
+        .json(&json!({"isDefault": true}))
+        .send()
+        .await
+        .expect("turn on");
+    assert_eq!(response.status().as_u16(), 200);
+    assert_eq!(
+        live_channels(&su, ws.id, early_id).await,
+        ids(&[general]),
+        "turning it on adds nobody who is already in"
+    );
+
+    let late = format!("late-{}@channel-default.test", Uuid::new_v4().simple());
+    let code = issue_invite(&http, &base, &owner_token, ws.id, "member").await;
+    let (status, body) = post_join(&http, &base, &code, &late).await;
+    assert_eq!(status, 201, "{body}");
+    let late_id = member_id_by_email(&su, ws.id, &late).await;
+    assert_eq!(
+        live_channels(&su, ws.id, late_id).await,
+        ids(&[general, notice]),
+        "the next newcomer lands in both defaults"
+    );
+}
+
 // ---------------------------------------------------------------------------
 // 3. no default channel → the oldest live public channel
 // ---------------------------------------------------------------------------

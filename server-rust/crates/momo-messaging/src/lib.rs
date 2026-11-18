@@ -155,18 +155,18 @@ pub use attachment_media::{
     MediaWrite, Poster, PosterImage, IMAGE_MIMES, MEDIA_PREFIX_BYTES, VIDEO_PREFIX_BYTES,
 };
 pub use channel::{
-    add_channel_member_in_tx, channel_summary_in_tx, clamp_channel_list_limit, create_channel,
-    create_channel_detailed_in_tx, create_channel_in_tx, fold_channel_name,
-    is_channel_name_conflict, judge_channel_name, list_workspace_channels,
+    add_channel_member_in_tx, channel_summary_in_tx, check_channel_default_change_in_tx,
+    clamp_channel_list_limit, create_channel, create_channel_detailed_in_tx, create_channel_in_tx,
+    fold_channel_name, is_channel_name_conflict, judge_channel_name, list_workspace_channels,
     list_workspace_channels_within, lock_channel_edit_target_in_tx, normalize_channel_kind,
     normalize_channel_name, normalize_channel_topic, normalize_membership_role,
     remove_channel_member_in_tx, rename_channel_in_tx, set_channel_browse_listed_in_tx,
-    set_notification_pref_in_tx, validate_channel_mute, BrowseListedChange, Channel,
-    ChannelEditTarget, ChannelKind, ChannelMembership, ChannelMute, ChannelMuteWrite,
-    ChannelNameRefusal, ChannelRenameOutcome, ChannelSpecInvalid, ChannelSummary, CreatedChannel,
-    MutedUntilInvalid, NewChannel, RenamedChannel, CHANNEL_LIST_LIMIT_DEFAULT,
-    CHANNEL_LIST_LIMIT_MAX, CHANNEL_MUTE_MAX_DAYS, CHANNEL_NAME_MAX_CHARS, CHANNEL_TOPIC_MAX_CHARS,
-    LOCKED_CHANNEL_NAME,
+    set_channel_default_in_tx, set_notification_pref_in_tx, validate_channel_mute,
+    BrowseListedChange, Channel, ChannelEditTarget, ChannelKind, ChannelMembership, ChannelMute,
+    ChannelMuteWrite, ChannelNameRefusal, ChannelRenameOutcome, ChannelSpecInvalid, ChannelSummary,
+    CreatedChannel, DefaultChannelCheck, MutedUntilInvalid, NewChannel, RenamedChannel,
+    CHANNEL_LIST_LIMIT_DEFAULT, CHANNEL_LIST_LIMIT_MAX, CHANNEL_MUTE_MAX_DAYS,
+    CHANNEL_NAME_MAX_CHARS, CHANNEL_TOPIC_MAX_CHARS, LOCKED_CHANNEL_NAME,
 };
 pub use channel_browse::{
     clamp_browse_limit, judge_browse_person, list_browsable_channels_in_tx,

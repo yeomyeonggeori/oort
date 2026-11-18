@@ -129,8 +129,8 @@ claims:
       - "server-rust/bins/momo-server/tests/channel_browse_pg.rs#the_browse_list_holds_only_channels_open_to_people"
       - "server-rust/bins/momo-server/tests/channel_browse_pg.rs#every_channel_that_is_not_open_answers_the_join_like_an_unknown_id"
   - id: TEN-11
-    claim: "Only a human workspace owner or admin can switch a channel's browse listing: a member, a guest and an agent credential are refused with 403 and nothing changes. A private channel, a direct-message channel and an archived channel cannot be listed: an admin who sits in one gets 409 and nothing of the request is applied. The channel edit answers a public channel with browse listing off or a private channel that the admin does not sit in, another workspace's channel and an unknown id with the same 404 body, for the name and for the browse listing alike, and changes nothing."
-    scope: "ADR-0224 D2·D11 (claim 5, browse listing only — the default-channel field is a later piece), PATCH /v1/workspaces/{ws}/channels/{ch}. Real PostgreSQL as the non-bypass API role, two workspaces. The route reaches a channel the caller sits in or one open to people, decided by one locking statement that embeds the same channel piece as the browse list and the join. Switching the listing off keeps every membership. Developer tokens and signed work hosts have no row for this route (unit tests on those tables), not covered here."
+    claim: "Only a human workspace owner or admin can switch a channel's browse listing or its default-channel mark: a member, a guest and an agent credential are refused with 403 and nothing changes. A private channel, a direct-message channel and an archived channel cannot be listed or made a default: an admin who sits in one gets 409 and nothing of the request is applied. The last default channel of a workspace cannot be turned off, including by two requests that each turn off a different one of the last two. The channel edit answers a public channel with browse listing off or a private channel that the admin does not sit in, another workspace's channel and an unknown id with the same 404 body, for the name, the browse listing and the default mark alike, and changes nothing."
+    scope: "ADR-0224 D2·D6·D11 (claim 5), PATCH /v1/workspaces/{ws}/channels/{ch}. Real PostgreSQL as the non-bypass API role, two workspaces. The route reaches a channel the caller sits in or one open to people, decided by one locking statement that embeds the same channel piece as the browse list and the join. Switching the listing or the default mark either way keeps every membership. Developer tokens and signed work hosts have no row for this route (unit tests on those tables), not covered here."
     priority: P1
     runs: pr-ci
     proofs:
@@ -138,6 +138,8 @@ claims:
       - "server-rust/bins/momo-server/tests/channel_rename_pg.rs#browse_listing_is_refused_on_channels_that_cannot_be_listed"
       - "server-rust/bins/momo-server/tests/channel_rename_pg.rs#an_admin_outside_a_hidden_channel_gets_the_unknown_id_404_for_every_field"
       - "server-rust/bins/momo-server/tests/channel_rename_pg.rs#switching_browse_listing_moves_only_the_self_join_door"
+      - "server-rust/bins/momo-server/tests/channel_rename_pg.rs#the_default_switch_keeps_one_default_and_changes_nothing_else"
+      - "server-rust/bins/momo-server/tests/channel_rename_pg.rs#two_requests_turning_off_the_two_defaults_leave_one"
 
   # ---- 인증·세션 -------------------------------------------------------------------
   - id: AUTH-1
