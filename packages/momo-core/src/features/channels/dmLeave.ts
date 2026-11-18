@@ -42,6 +42,7 @@ export type DmLeaveKey = Extract<MessageKey, `channels.dmLeave.${string}`>;
  *   done              성공 뒤 한 줄 알림(되돌리기 단추 없음)
  *   failed            실패 한 줄. 아무것도 바뀌지 않는다
  *   checking          예약 목록을 아직 모를 때 확정 자리의 낱말(확정은 잠긴다)
+ *   scheduledFailed   예약 목록을 못 읽었을 때 그 자리의 한 줄(확정은 잠긴다). 웹·폰이 같은 키를 쓴다(#5903)
  *   unavailable       다시 눌러도 같은 답인 실패(404 는 창을 닫고 걷으므로 409·405)의 한 줄. 확정은 잠긴다
  */
 export const DM_LEAVE_KEYS = {
@@ -57,6 +58,7 @@ export const DM_LEAVE_KEYS = {
   done: "channels.dmLeave.done",
   failed: "channels.dmLeave.failed",
   checking: "channels.dmLeave.checking",
+  scheduledFailed: "channels.dmLeave.scheduledFailed",
   unavailable: "channels.dmLeave.unavailable",
 } as const satisfies Record<string, DmLeaveKey>;
 

@@ -716,6 +716,7 @@ export function ConfirmStep({
   confirmDisabled = false,
   confirmArmMs = 0,
   cancelDisabled = false,
+  detailReserve,
   cancelLabel = '취소',
   onCancel,
   onConfirm,
@@ -750,6 +751,13 @@ export function ConfirmStep({
    * `accessibilityState.disabled` 가 서며 눌려도 `onCancel` 이 불리지 않는다. 진행은 위험 단추의 낱말·`busy` 가 말한다.
    */
   cancelDisabled?: boolean;
+  /**
+   * 설명 글이 **다른 문장으로 바뀔 수 있을 때**(1:1 나가기의 「예약 N개」 자리: 확인 중… · 불러오지 못했어요 · N개 문장) 그 후보 전체(설명 글 전문).
+   * 가장 큰 접근성 글자에서는 후보마다 줄 수가 달라 문장이 바뀔 때 카드와 그 아래 단추가 한두 줄만큼 움직였다(#5903 M1).
+   * 숨은 사본(`opacity: 0` · 낭독 제외)을 같은 폭에 그려 가장 큰 높이를 재고, 진짜 글에 그 높이를 최소 높이로 깐다 —
+   * 줄 수를 어림하지 않고 화면이 실제로 꺾은 높이를 쓴다. 생략하면 지금까지처럼 글 그대로의 높이다.
+   */
+  detailReserve?: readonly string[];
   cancelLabel?: string;
   onCancel: () => void;
   onConfirm: () => void;
@@ -760,6 +768,14 @@ export function ConfirmStep({
   confirmTestID?: string;
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
+  // 후보 글의 실제 높이(후보마다 하나) 가운데 가장 큰 값 — 설명 글의 최소 높이(#5903).
+  const reserveHeights = useRef<Record<number, number>>({});
+  const [reserveHeight, setReserveHeight] = useState(0);
+  const onReserveLayout = (index: number) => (event: LayoutChangeEvent) => {
+    reserveHeights.current[index] = event.nativeEvent.layout.height;
+    const tallest = Math.max(0, ...Object.values(reserveHeights.current));
+    setReserveHeight((prev) => (prev === tallest ? prev : tallest));
+  };
   // 서는 순간 한 번 시계를 건다(다시 그려져도 다시 걸리지 않는다).
   const [armed, setArmed] = useState(confirmArmMs <= 0);
   useEffect(() => {
@@ -780,11 +796,33 @@ export function ConfirmStep({
           <Sentence style={styles.confirmHeadline} testID={testID ? `${testID}-headline` : undefined}>
             {headline}
           </Sentence>
-          <Sentence
-            style={styles.confirmDetail}
-            testID={testID ? `${testID}-detail` : undefined}>
-            {detail}
-          </Sentence>
+          {detailReserve && detailReserve.length > 0 ? (
+            <View>
+              <Sentence
+                style={[styles.confirmDetail, reserveHeight > 0 && {minHeight: reserveHeight}]}
+                testID={testID ? `${testID}-detail` : undefined}>
+                {detail}
+              </Sentence>
+              {detailReserve.map((candidate, index) => (
+                <Sentence
+                  key={index}
+                  accessibilityElementsHidden
+                  importantForAccessibility="no-hide-descendants"
+                  pointerEvents="none"
+                  onLayout={onReserveLayout(index)}
+                  style={[styles.confirmDetail, styles.reserveCopy]}
+                  testID={testID ? `${testID}-detail-reserve-${index}` : undefined}>
+                  {candidate}
+                </Sentence>
+              ))}
+            </View>
+          ) : (
+            <Sentence
+              style={styles.confirmDetail}
+              testID={testID ? `${testID}-detail` : undefined}>
+              {detail}
+            </Sentence>
+          )}
           {error ? (
             <Sentence accessibilityRole="alert" style={styles.confirmError} testID={errorTestID}>
               {error}
@@ -809,7 +847,8 @@ export function ConfirmStep({
         </Pressable>
         <Pressable
           accessibilityRole="button"
-          accessibilityLabel={confirmLabel}
+          // 진행 중에는 보이는 낱말(「나가는 중…」)을 읽는다(#5903 M2) — 눈과 낭독이 같은 말을 한다.
+          accessibilityLabel={pending ? pendingLabel : confirmLabel}
           accessibilityState={{busy: pending, disabled: pending || confirmDisabled}}
           disabled={pending || confirmDisabled}
           onPress={() => {
@@ -1091,6 +1130,8 @@ const buildStyles = (color: Palette) =>
     },
     confirmHeadline: {fontSize: font.body, color: color.text, fontWeight: '700'},
     confirmDetail: {fontSize: font.label, color: color.textMuted, lineHeight: line.label},
+    // 높이만 재는 숨은 사본 — 같은 폭의 겹친 층이라 레이아웃 높이를 더하지 않는다.
+    reserveCopy: {position: 'absolute', top: 0, left: 0, right: 0, opacity: 0},
     confirmError: {fontSize: font.label, color: color.danger, lineHeight: line.label},
     confirmRow: {flexDirection: 'row', gap: space.sm},
     secondary: {

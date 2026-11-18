@@ -113,6 +113,12 @@ export const catalog: MessageCatalog = {
       "value": "退出できませんでした。もう一度お試しください。"
     }
   ],
+  "channels.dmLeave.scheduledFailed": [
+    {
+      "type": 0,
+      "value": "予約リストを読み込めませんでした。"
+    }
+  ],
   "channels.dmLeave.unavailable": [
     {
       "type": 0,

@@ -186,6 +186,7 @@ export const messageKeys = [
   "channels.dmLeave.confirmTitle",
   "channels.dmLeave.done",
   "channels.dmLeave.failed",
+  "channels.dmLeave.scheduledFailed",
   "channels.dmLeave.unavailable",
   "channels.nameRule.edge",
   "channels.nameRule.hidden",
@@ -1885,6 +1886,7 @@ export const argumentSpecs = {
   },
   "channels.dmLeave.done": {},
   "channels.dmLeave.failed": {},
+  "channels.dmLeave.scheduledFailed": {},
   "channels.dmLeave.unavailable": {},
   "channels.nameRule.edge": {},
   "channels.nameRule.hidden": {},
@@ -4057,6 +4059,7 @@ export interface MessageArgs {
   "channels.dmLeave.confirmTitle": { name: string };
   "channels.dmLeave.done": Record<string, never>;
   "channels.dmLeave.failed": Record<string, never>;
+  "channels.dmLeave.scheduledFailed": Record<string, never>;
   "channels.dmLeave.unavailable": Record<string, never>;
   "channels.nameRule.edge": Record<string, never>;
   "channels.nameRule.hidden": Record<string, never>;

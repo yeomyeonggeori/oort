@@ -222,7 +222,13 @@ function InfoBody({
         <PageHeader
           title={pageTitle}
           // 이 페이지는 대화 위에 쌓인 안쪽 장이라 X 가 아니라 ‹ 이다(`phone-sheets.md` §3). 이름은 어디로 가는지 말한다.
-          back={{label: '대화로 돌아가기', onPress: goBack, testID: 'conversation-info-back'}}
+          back={{
+            label: '대화로 돌아가기',
+            onPress: goBack,
+            // 1:1 나가기 요청이 가는 동안은 돌아가지 않는다(요청은 이미 나갔다) — 흐리고 잠김으로 읽힌다(#5903).
+            disabled: dmLeave?.pending === true,
+            testID: 'conversation-info-back',
+          }}
           titleTestID="conversation-info-title"
           testID="conversation-info-header"
         />

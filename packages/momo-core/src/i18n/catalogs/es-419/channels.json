@@ -11,6 +11,7 @@
   "channels.dmLeave.done": "Saliste de la conversación.",
   "channels.dmLeave.failed": "No se pudo salir. Vuelve a intentarlo.",
   "channels.dmLeave.checking": "Verificando…",
+  "channels.dmLeave.scheduledFailed": "No se pudo cargar la lista de mensajes programados.",
   "channels.dmLeave.unavailable": "No puedes salir de esta conversación.",
   "channels.nameRule.required": "Escribe un nombre para el canal.",
   "channels.nameRule.tooLong": "El nombre del canal puede tener hasta {max, number} caracteres.",

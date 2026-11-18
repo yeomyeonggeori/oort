@@ -115,6 +115,7 @@ export function ChannelActionSheet({
         titleTestID="channel-sheet-title"
         closeLabel="대화 액션 닫기"
         closeTestID="channel-sheet-close"
+        closeDisabled={dmLeave?.pending === true}
       />
       <SheetScroll testID="channel-sheet-scroll" scrollToTopWhen={dmLeave !== null}>
         {dmLeave !== null && onConfirmDmLeave && onCancelDmLeave ? (

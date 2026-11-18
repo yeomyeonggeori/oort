@@ -142,6 +142,12 @@ export const catalog: MessageCatalog = {
       "value": "No se pudo salir. Vuelve a intentarlo."
     }
   ],
+  "channels.dmLeave.scheduledFailed": [
+    {
+      "type": 0,
+      "value": "No se pudo cargar la lista de mensajes programados."
+    }
+  ],
   "channels.dmLeave.unavailable": [
     {
       "type": 0,
