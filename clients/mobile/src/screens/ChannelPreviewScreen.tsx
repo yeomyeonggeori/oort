@@ -8,7 +8,7 @@ import {
 } from '@momo/core/features/channels/browse';
 import {deletedFoldLabel} from '@momo/core/features/timeline/deletedFold';
 import {GONE_MEMBER_LABEL} from '@momo/core/features/workspace/directory';
-import React, {useCallback, useEffect, useMemo, useRef} from 'react';
+import React, {useCallback, useMemo, useRef, useState} from 'react';
 import {FlatList, StyleSheet, Text, View, type RefreshControlProps} from 'react-native';
 import {useSafeAreaInsets} from 'react-native-safe-area-context';
 
@@ -45,7 +45,7 @@ import {useSession} from '../session/useSession';
 //
 // ## 열기 · 차례
 // 서버는 최신 먼저 준다(`previewInReadingOrder` 로 뒤집는다): 오래된 글이 위, 최신이 아래, 열리면 맨 아래에 선다. 최대 50개에 쪽 나눔이
-// 없어 모두 그리고 한 번 `scrollToEnd` 하면 정확하다.
+// 없어 모두 그리고, 내용 · 목록 높이가 재질 때마다 끝 자리를 다시 잡는다(사람이 끌기 전까지 — #5961).
 //
 // ## 움직이지 않는 것
 // 머리(`#이름` · 멤버 수 · 주제)는 둘러보기 줄에서 이미 아는 값을 nav 로 받아 글을 읽기 전에 서 있다. 아래 띠는 네 상태 모두에 같은
@@ -149,10 +149,18 @@ export function ChannelPreviewView({
   const formatMessage = useFormatMessage();
   const insets = useSafeAreaInsets();
   const listRef = useRef<FlatList<PreviewMessage>>(null);
-  const atEnd = useRef(false);
-  useEffect(() => {
-    atEnd.current = false;
-  }, [messages]);
+  // 열리면 최신 글(맨 아래)에 서고, 사람이 손으로 스크롤한 뒤에는 자리를 건드리지 않는다(#5961). 줄 높이는 그린 뒤에야 재져서
+  // 처음 한 번의 scrollToEnd 는 이동이 0이었다 — 그래서 네이티브가 알려 주는 내용 높이 · 목록 높이로 끝 자리를 직접 셈하고,
+  // 높이가 바뀔 때마다 사람이 끌기 전까지 그 끝에 다시 선다. 자리를 잡기 전에는 목록을 투명하게 둬서 맨 위가 한 프레임 비치지 않는다.
+  const size = useRef({content: 0, layout: 0});
+  const userMoved = useRef(false);
+  const [placed, setPlaced] = useState(false);
+  const stickToEnd = useCallback(() => {
+    const {content, layout} = size.current;
+    if (userMoved.current || content <= 0 || layout <= 0) return;
+    listRef.current?.scrollToOffset({offset: Math.max(0, content - layout), animated: false});
+    setPlaced(true);
+  }, []);
   const gone = state === 'error' && loadFailure?.kind === 'notFound';
   const meta = [formatMessage('channels.browse.memberCount', {count: memberCount}), topic]
     .filter((part): part is string => part !== undefined && part !== '')
@@ -188,13 +196,20 @@ export function ChannelPreviewView({
         data={messages}
         keyExtractor={message => message.id}
         renderItem={({item}) => <PreviewRow message={item} />}
-        // 최대 50개라 모두 그린다 — 한 번의 scrollToEnd 가 정확하다.
+        // 최대 50개라 모두 그린다 — 내용 높이가 곧 실제 높이다.
         initialNumToRender={50}
-        onContentSizeChange={() => {
-          if (atEnd.current) return;
-          atEnd.current = true;
-          listRef.current?.scrollToEnd({animated: false});
+        onLayout={event => {
+          size.current.layout = event.nativeEvent.layout.height;
+          stickToEnd();
         }}
+        onContentSizeChange={(_width, height) => {
+          size.current.content = height;
+          stickToEnd();
+        }}
+        onScrollBeginDrag={() => {
+          userMoved.current = true;
+        }}
+        style={placed ? undefined : styles.unplaced}
         refreshControl={refreshControl}
         {...scrollProps}
         contentContainerStyle={[styles.list, PULL_FILL]}
@@ -316,6 +331,7 @@ const buildStyles = (color: Palette) =>
     sub: {paddingHorizontal: SAFE_GUTTER, paddingBottom: space.sm},
     subText: {fontSize: font.meta, lineHeight: line.meta, color: color.textMuted, textAlign: 'center'},
     body: {flex: 1},
+    unplaced: {opacity: 0},
     list: {paddingHorizontal: SAFE_GUTTER, paddingVertical: space.md, gap: space.md},
     msg: {gap: space.xs / 2},
     msgHead: {flexDirection: 'row', alignItems: 'baseline', gap: space.sm},

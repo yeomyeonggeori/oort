@@ -44,6 +44,12 @@ const MESSAGES: PreviewMessage[] = [
   msg('p6', NOW - 5 * MIN, '내일 점심 같이 하실 분? 글이 길어지면 아래로 쭉 이어져서 줄이 접혀요. 큰 글자에서는 더 많이 접혀요.'),
 ];
 
+// #5961: 열릴 때 위치를 재는 장면 — 글이 3 · 30 · 50개(`few` · `long` · `long50`). 글 번호가 글에 적혀 있어 마지막 글이 보이는지 눈으로도 읽힌다.
+const numbered = (count: number): PreviewMessage[] =>
+  Array.from({length: count}, (_, index) =>
+    msg(`n${index + 1}`, NOW - (count - index) * 4 * MIN, `글 ${index + 1}번 — ${index % 3 === 0 ? '짧은 글이에요.' : '조금 긴 글이에요. 줄이 접히면 높이가 달라져서 열린 뒤에야 줄 높이가 재져요.'}`),
+  );
+
 const RATE_LIMITED: ChannelBrowseFailure = {kind: 'rateLimited', key: 'channels.browse.rateLimited'};
 
 export function ChannelPreviewSurface({which}: {which: string}): React.JSX.Element {
@@ -61,7 +67,7 @@ export function ChannelPreviewSurface({which}: {which: string}): React.JSX.Eleme
       name="디자인-리뷰"
       memberCount={8}
       topic="주간 시안 리뷰와 피드백"
-      messages={which === 'empty' ? [] : MESSAGES}
+      messages={which === 'empty' ? [] : which === 'few' ? numbered(3) : which === 'long' ? numbered(30) : which === 'long50' ? numbered(50) : MESSAGES}
       loadFailure={loadFailure}
       onRetry={() => {}}
       isMember={false}
