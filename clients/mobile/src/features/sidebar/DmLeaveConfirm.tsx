@@ -1,5 +1,4 @@
 import {DM_LEAVE_KEYS, dmLeaveConfirmCopy} from '@momo/core/features/channels/dmLeave';
-import {SCHEDULED_COPY} from '@momo/core/features/scheduled/copy';
 import React from 'react';
 
 import {ConfirmStep} from '../../design/sheetParts';
@@ -46,17 +45,26 @@ export function DmLeaveConfirm({
     name: step.name,
     scheduledCount: step.scheduled === 'known' ? step.scheduledCount : 0,
   });
+  const checkingText = formatMessage(DM_LEAVE_KEYS.checking);
+  const failedText = formatMessage(DM_LEAVE_KEYS.scheduledFailed);
   const slot =
     step.scheduled === 'checking'
-      ? formatMessage(DM_LEAVE_KEYS.checking)
+      ? checkingText
       : step.scheduled === 'failed'
-        ? SCHEDULED_COPY.load.error
+        ? failedText
         : (copy.scheduled ?? EMPTY_SLOT);
+  // 예약 자리에 올 수 있는 문장들의 설명 글 전문 — 가장 큰 접근성 글자에서 후보마다 줄 수가 달라도 카드·단추가 움직이지 않게
+  // `ConfirmStep` 이 가장 큰 높이를 미리 잡는다(#5903). 두 자릿수 개수가 가장 긴 갈래다.
+  const longestScheduled = dmLeaveConfirmCopy(formatMessage, {name: step.name, scheduledCount: 88}).scheduled;
+  const detailReserve = [checkingText, failedText, longestScheduled ?? EMPTY_SLOT].map((candidate) =>
+    [...copy.body, candidate, copy.warning].join('\n'),
+  );
   return (
     <ConfirmStep
       testID={testID}
       headline={copy.title}
       detail={[...copy.body, slot, copy.warning].join('\n')}
+      detailReserve={detailReserve}
       error={step.error}
       errorTestID={`${testID}-error`}
       confirmLabel={copy.confirm}

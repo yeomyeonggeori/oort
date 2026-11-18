@@ -134,6 +134,12 @@ export const catalog: MessageCatalog = {
       "value": "Impossible de quitter. Veuillez réessayer."
     }
   ],
+  "channels.dmLeave.scheduledFailed": [
+    {
+      "type": 0,
+      "value": "Impossible de charger les messages programmés."
+    }
+  ],
   "channels.dmLeave.unavailable": [
     {
       "type": 0,

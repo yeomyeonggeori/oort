@@ -12,7 +12,6 @@ import {
   runDmLeaveCleanup,
   settleDmLeaveFailure,
 } from "@momo/core/features/channels/dmLeave";
-import { SCHEDULED_COPY } from "@momo/core/features/scheduled/copy";
 import { ConfirmDialog } from "@/design/ui/confirm-dialog";
 import type { DialogFocusTarget } from "@/design/ui/dialog";
 import { INLINE_CONFIRM_MS } from "@/design/ui/inlineConfirm";
@@ -314,7 +313,7 @@ export function DmLeaveHost({
               <ScheduledSlot
                 state={scheduledFailed ? "failed" : scheduledChecking ? "checking" : "known"}
                 checking={messages.formatMessage(DM_LEAVE_KEYS.checking)}
-                failedText={SCHEDULED_COPY.load.error}
+                failedText={messages.formatMessage(DM_LEAVE_KEYS.scheduledFailed)}
               >
                 {copy.scheduled === null ? null : (
                   <p data-testid="dm-leave-confirm-scheduled">{copy.scheduled}</p>
@@ -332,7 +331,7 @@ export function DmLeaveHost({
             failed === "unavailable" ? (
               <span role="alert">{messages.formatMessage(DM_LEAVE_KEYS.unavailable)}</span>
             ) : scheduledFailed ? (
-              <span className="sr-only">{SCHEDULED_COPY.load.error}</span>
+              <span className="sr-only">{messages.formatMessage(DM_LEAVE_KEYS.scheduledFailed)}</span>
             ) : scheduledChecking ? (
               <span className="sr-only">{messages.formatMessage(DM_LEAVE_KEYS.checking)}</span>
             ) : undefined
