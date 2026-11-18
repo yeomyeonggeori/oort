@@ -756,6 +756,10 @@ async fn an_unasked_card_names_only_channels_open_to_its_reader() {
         owner_cannot_see(f.owner, f.names.private.clone()).await,
         "private, as before"
     );
+    assert!(
+        !owner_cannot_see(f.outsider, f.names.lobby.clone()).await,
+        "listed, the reader is not in it"
+    );
 }
 
 // --- ④ the two approval doors ---------------------------------------------------------
