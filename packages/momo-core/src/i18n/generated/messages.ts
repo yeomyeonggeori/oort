@@ -219,6 +219,8 @@ export const messageKeys = [
   "channels.browse.title",
   "channels.createFailure.duplicate",
   "channels.createFailure.forbidden",
+  "channels.createFailure.generic",
+  "channels.createFailure.network",
   "channels.createFailure.rateLimited",
   "channels.default.description",
   "channels.default.label",
@@ -2015,6 +2017,8 @@ export const argumentSpecs = {
   "channels.browse.title": {},
   "channels.createFailure.duplicate": {},
   "channels.createFailure.forbidden": {},
+  "channels.createFailure.generic": {},
+  "channels.createFailure.network": {},
   "channels.createFailure.rateLimited": {},
   "channels.default.description": {},
   "channels.default.label": {},
@@ -4294,6 +4298,8 @@ export interface MessageArgs {
   "channels.browse.title": Record<string, never>;
   "channels.createFailure.duplicate": Record<string, never>;
   "channels.createFailure.forbidden": Record<string, never>;
+  "channels.createFailure.generic": Record<string, never>;
+  "channels.createFailure.network": Record<string, never>;
   "channels.createFailure.rateLimited": Record<string, never>;
   "channels.default.description": Record<string, never>;
   "channels.default.label": Record<string, never>;

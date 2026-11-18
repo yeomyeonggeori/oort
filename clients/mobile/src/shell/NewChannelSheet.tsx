@@ -49,7 +49,7 @@ import type {ChannelMemberAddTarget} from './ChannelMemberAddSheet';
 // 규칙은 모두 core 의 것이다 — 웹 「채널 만들기」 다이얼로그와 한 문장을 쓴다:
 //   이름 규칙       `channelNameIssue` · `normalizeChannelName` (모든 언어의 글자·숫자, ADR-0225)
 //   문장            사전 키 — 안내·자리표시자·미리보기 `channels.nameRule.*`, 거절 `channelNameIssueKey`, 실패 `messageKey`(웹과 같은 키·같은 말, #5834)
-//   거절의 자리     `createChannelFailure`(409·400 은 이름 칸 밑, 403·429·망은 배너)
+//   거절의 자리     `createChannelFailure`(409·400 은 이름 칸 밑, 403·429·망·그 밖은 배너)
 //   캐시            `upsertChannel` 로 목록에 바로 넣고 무효화 — 웹 `useCreateChannel`
 //
 // 누가 볼 수 있는가(소유자·관리자)는 메뉴가 정한다(`canCreateChannelNow`). 서버가 마지막
@@ -144,9 +144,8 @@ function SheetBody({
     which === 'tooLong'
       ? formatMessage(CHANNEL_NAME_ISSUE_KEYS.tooLong, {max: CHANNEL_NAME_MAX})
       : formatMessage(CHANNEL_NAME_ISSUE_KEYS[which]);
-  // 거절 문장은 사전 키로 화면 언어를 따른다(400·409·403·429). 키가 없는 실패(망·알 수 없음)만 코어가 준 문장 그대로다(#5906 몫).
-  const failureText = (f: CreateChannelFailure): string =>
-    f.messageKey !== undefined ? formatMessage(f.messageKey) : f.message;
+  // 실패 문장은 모두 사전 키로 화면 언어를 따른다(400·409·403·429·망·그 밖).
+  const failureText = (f: CreateChannelFailure): string => formatMessage(f.messageKey);
   // 빈 칸은 아직 말하지 않는다 — 열자마자 「입력하세요」가 서면 꾸중부터 듣는다. 빈칸뿐인 칸도 같다(웹과 같은 기준).
   const issueMessage = issue && (touched || name.trim() !== '') ? issueText(issue) : null;
   const nameMessage = failure?.field === 'name' ? failureText(failure) : issueMessage;

@@ -41,7 +41,7 @@ export const catalog: MessageCatalog = {
   "channels.browse.emptyAdminDetailPhone": [
     {
       "type": 0,
-      "value": "Pour afficher ici un canal existant, activez « Afficher dans le navigateur de canaux » dans son menu, sur le web ou dans l’application de bureau."
+      "value": "Pour afficher ici un canal existant, activez « Afficher dans le navigateur de canaux » dans son menu, sur le web ou dans l'application de bureau."
     }
   ],
   "channels.browse.emptyHeadline": [
@@ -352,6 +352,18 @@ export const catalog: MessageCatalog = {
       "value": "Vous n'avez pas la permission de créer des canaux. Demandez à un propriétaire ou à un administrateur de l'espace de travail."
     }
   ],
+  "channels.createFailure.generic": [
+    {
+      "type": 0,
+      "value": "Impossible de créer le canal. Réessayez dans un instant."
+    }
+  ],
+  "channels.createFailure.network": [
+    {
+      "type": 0,
+      "value": "Impossible de créer le canal. Le serveur est injoignable. Vérifiez votre connexion et réessayez."
+    }
+  ],
   "channels.createFailure.rateLimited": [
     {
       "type": 0,
@@ -566,7 +578,7 @@ export const catalog: MessageCatalog = {
   "channels.nameRule.serverRejected": [
     {
       "type": 0,
-      "value": "Le serveur n'a pas accepté ce nom. Seuls les lettres, chiffres, - et _ sont autorisés."
+      "value": "Le serveur n'a pas accepté ce nom. Utilisez uniquement des lettres, des chiffres, - et _."
     }
   ],
   "channels.nameRule.tooLong": [

@@ -405,58 +405,32 @@ describe("canCreateChannelNow", () => {
 
 describe("createChannelFailure", () => {
   it("puts a duplicate name beside the name field", () => {
-    const failure = createChannelFailure(
-      new ApiError(409, "channel name already exists")
-    );
+    const failure = createChannelFailure(new ApiError(409, "channel name already exists"));
     expect(failure.field).toBe("name");
-    expect(failure.message).toContain("이미 있습니다");
+    expect(failure.messageKey).toBe("channels.createFailure.duplicate");
   });
 
-  it("answers a 400 with the dictionary sentence, never the server's English", () => {
+  it("answers a 400 with the dictionary key, never the server's English; it sits beside the name field too", () => {
     const failure = createChannelFailure(new ApiError(400, "channel name must use letters"));
-    expect(failure.messageKey).toBe(CHANNEL_NAME_SERVER_REJECTED_KEY);
-    // Literal on purpose: ADR-0225 D11 fixes these words, so a dictionary edit cannot move the test with it.
-    expect(failure.message).toBe("서버가 이 이름을 받지 않았어요. 글자, 숫자, -, _만 쓸 수 있어요.");
-    expect(failure.message).not.toMatch(/channel name/);
+    expect(failure).toEqual({ field: "name", messageKey: CHANNEL_NAME_SERVER_REJECTED_KEY });
   });
 
-  it("gives every refusal a dictionary key, and the Korean fallback says the same words", () => {
-    const cases: [number, string, string][] = [
-      [409, "channels.createFailure.duplicate", "같은 이름의 채널이 이미 있습니다. 다른 이름으로 다시 시도하세요."],
-      [403, "channels.createFailure.forbidden", "채널을 만들 권한이 없습니다. 워크스페이스 소유자나 관리자에게 요청하세요."],
-      [429, "channels.createFailure.rateLimited", "요청이 너무 잦습니다. 잠시 뒤에 다시 시도하세요."],
+  it("gives every failure a dictionary key; permission, rate limit, network and the rest are form-level", () => {
+    const cases: [string, unknown, string][] = [
+      ["403", new ApiError(403, "forbidden"), "channels.createFailure.forbidden"],
+      ["429", new ApiError(429, "slow down"), "channels.createFailure.rateLimited"],
+      ["500", new ApiError(500, "boom"), "channels.createFailure.generic"],
+      ["network", new NetworkError("timeout", 15_000), "channels.createFailure.network"],
+      ["unknown", new Error("boom"), "channels.createFailure.generic"],
     ];
-    for (const [status, key, sentence] of cases) {
-      const failure = createChannelFailure(new ApiError(status, "x"));
-      expect(failure.messageKey, String(status)).toBe(key);
-      expect(failure.message, String(status)).toBe(sentence);
-      expect((koChannels as Record<string, string>)[key], String(status)).toBe(sentence);
+    for (const [label, error, key] of cases) {
+      expect(createChannelFailure(error), label).toEqual({ field: null, messageKey: key });
     }
-    // No key for what nothing in the dictionary says yet: the transport's own words.
-    expect(createChannelFailure(new NetworkError("timeout", 15_000)).messageKey).toBeUndefined();
-    expect(createChannelFailure(new Error("boom")).messageKey).toBeUndefined();
   });
 
-  it("puts a server-side name rejection beside the name field too", () => {
-    expect(createChannelFailure(new ApiError(400, "bad name")).field).toBe("name");
-  });
-
-  it("treats permission and rate limits as form-level, not field-level", () => {
-    expect(createChannelFailure(new ApiError(403, "forbidden")).field).toBeNull();
-    expect(createChannelFailure(new ApiError(429, "slow down")).field).toBeNull();
-  });
-
-  it("reuses the transport's measured copy when nothing answered", () => {
-    const failure = createChannelFailure(new NetworkError("timeout", 15_000));
-    expect(failure.field).toBeNull();
-    expect(failure.message).toContain("15초");
-  });
-
-  it("never says nothing, and never apologises", () => {
-    const failure = createChannelFailure(new Error("boom"));
-    expect(failure.field).toBeNull();
-    expect(failure.message).toContain("다시 시도");
-    expect(failure.message).not.toMatch(/죄송|알 수 없는/);
+  it("does not read the Korean catalog: no fallback sentence lives in the model", () => {
+    const source = readFileSync(MODEL_PATH).toString("utf8");
+    expect(source).not.toMatch(/i18n\/catalogs\/ko-KR/);
   });
 });
 
