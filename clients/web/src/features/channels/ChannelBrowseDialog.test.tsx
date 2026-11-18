@@ -19,7 +19,7 @@ import { useOpenChannelBrowse } from "./useChannelBrowse";
 //   1. 줄은 서버 목록 그대로다 — 화면이 내 채널 캐시(꺼진 공개 · 비공개 포함)를 섞지 않는다. 참여하지 않은 줄이 위.
 //   2. 참여 → 응답의 채널이 사이드바 캐시에 서고, 명부에 내가 들고, 그 채널로 가며 창이 닫힌다. 두 번 눌러도 요청은 하나.
 //   3. 실패: 404 는 줄을 걷고 그 자리에 문장, 429 · 망은 줄에 문장과 다시 시도.
-//   4. 한글 조합 중에는 서버에 거르기를 보내지 않고, 받은 줄을 화면에서 좁힌다.
+//   4. 조합 중인 글자는 서버에 보내지 않고(확정된 글자만), 받은 줄을 화면에서 좁힌다.
 
 const EN = enChannels as Record<string, string>;
 const WS = "00000000-0000-7000-8000-000000000001";
@@ -260,7 +260,7 @@ describe("채널 둘러보기 창", () => {
     expect(core.joinChannel).toHaveBeenCalledWith(WS, id(12));
   });
 
-  it("한글 조합 중에는 서버에 거르기를 보내지 않고, 받은 줄을 마지막 글자까지 느슨하게 좁힌다", async () => {
+  it("조합 중인 글자는 서버에 보내지 않고, 받은 줄을 마지막 글자까지 느슨하게 좁힌다", async () => {
     core.browseChannels.mockResolvedValue({ channels: [row(11, "디자인-리뷰"), row(12, "디저트-모임"), row(13, "백엔드")] });
     await mountAndOpen();
     expect(core.browseChannels).toHaveBeenCalledTimes(1);
