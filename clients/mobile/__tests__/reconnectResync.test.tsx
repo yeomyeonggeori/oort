@@ -220,6 +220,25 @@ it.each([
   expect(Object.keys(result.current.pins)).toEqual([id(1)]);
 });
 
+it('다른 표면이 이미 붙여 둔 방(첫 `subscribed` 가 오지 않음)에서도 첫 재연결에 다시 읽는다', async () => {
+  seed();
+  transport = createRealtimeTransport({ url: 'wss://api.example.invalid/connection/websocket', now: () => clock });
+  transport.start();
+  const rail = createChannelRail(transport.client);
+  const stopOther = rail.subscribeChannel(WS, CH, { onSubscribed: () => {}, onMessage: () => {} });
+  await advance(50);
+  const { result } = renderHook(() => useTimeline(rail, WS, CH, SELF));
+  await advance(RESYNC_SETTLE_MS + 100);
+  expect(result.current.state.messages.map(m => m.seq)).toEqual([1, 2, 3, 4]);
+  changeWhileAway();
+  recoveredReply = true;
+  await returnToForeground();
+  await advance(RESYNC_SETTLE_MS + 100);
+  expect(reads.reactions).toBe(2);
+  expect(result.current.state.messages.find(m => m.id === id(2))?.body).toBe('끊긴 사이에 고친 글');
+  stopOther();
+});
+
 it('짧게 겹친 재연결은 한 번 읽고, 다시 읽은 결과가 같으면 화면 값이 같은 객체로 남는다', async () => {
   seed();
   const { result } = mount();

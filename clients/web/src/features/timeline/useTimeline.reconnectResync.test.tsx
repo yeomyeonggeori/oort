@@ -53,10 +53,11 @@ vi.mock("@momo/core/lib/api", async (importOriginal) => {
 });
 
 type Handlers = Parameters<RealtimeHandle["subscribeChannel"]>[2];
-const rail: { handlers: Handlers | null } = { handlers: null };
+const rail: { handlers: Handlers | null; live: boolean } = { handlers: null, live: false };
 const realtime = {
   subscribeChannel: (_ws: string, _ch: string, handlers: Handlers) => {
     rail.handlers = handlers;
+    if (rail.live) handlers.onAttachedLive?.();
     return () => {
       rail.handlers = null;
     };
@@ -94,6 +95,7 @@ afterEach(() => {
   host?.remove();
   host = null;
   rail.handlers = null;
+  rail.live = false;
   out.state = null;
   localStorage.clear();
 });
@@ -189,6 +191,17 @@ describe("useTimeline · 재연결 뒤 열린 대화 다시 읽기 (#5885, D17 �
     expect(byId.get(id(4))?.state).toBe("deleted");
     expect(out.reactions).toEqual({ [id(1)]: { "❤️": [OTHER] } });
     expect(Object.keys(out.pins)).toEqual([id(1)]);
+  });
+
+  it("다른 표면이 이미 붙여 둔 방(첫 `subscribed` 가 오지 않음)에서도 첫 재연결에 다시 읽는다", async () => {
+    seed();
+    rail.live = true;
+    await mount();
+    changeWhileAway();
+    await subscribed(true); // 이 손이 받는 첫 `subscribed` 는 재연결이다
+    await settle(AFTER_SETTLE);
+    expect(rereads()).toBe(1);
+    expect(out.state!.messages.find((m) => m.id === id(2))?.body).toBe("끊긴 사이에 고친 글");
   });
 
   it("짧게 겹친 재연결은 한 번 읽고, 다시 읽은 결과가 같으면 화면 값이 같은 객체로 남는다", async () => {

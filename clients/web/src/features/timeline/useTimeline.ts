@@ -1161,6 +1161,9 @@ export function useTimeline(
       }
     });
     resyncRef.current = resync;
+    // 이 구독에서 첫 `subscribed` 를 지났는가(또는 이미 살아 있는 구독에 붙었는가). 그 뒤의 `subscribed` 는 모두 재연결이다. 첫 구독은 위
+    // 머리 · 반응 · 고정 읽기가 이미 읽는다.
+    let resyncArmed = false;
     const unsub = realtime.subscribeChannel(workspaceId, channelId, {
       onSubscribed: (ctx) => {
         if (cancelled) return;
@@ -1168,8 +1171,8 @@ export function useTimeline(
         const recovered = ctx.recovered === true;
         const isFirst = firstSubscribeRef.current;
         firstSubscribeRef.current = false;
-        // 첫 구독은 위 머리 · 반응 · 고정 읽기가 이미 읽는다.
-        if (!isFirst) resync.reconnected();
+        if (resyncArmed) resync.reconnected();
+        resyncArmed = true;
         setResume((r) => ({
           ...r,
           lastRecovered: recovered,
@@ -1260,6 +1263,9 @@ export function useTimeline(
         } else {
           applyPins(removePin(pinsRef.current, event.payload.message_id));
         }
+      },
+      onAttachedLive: () => {
+        resyncArmed = true;
       },
       onUnfurl: (event) => {
         if (cancelled || belowFloor(event.seq)) return;

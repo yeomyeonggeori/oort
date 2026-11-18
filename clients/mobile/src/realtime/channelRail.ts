@@ -304,6 +304,8 @@ export function createChannelRail(
           };
           sub.on('subscribed', onSubscribed);
           sub.on('publication', onPublication);
+          // 이미 살아 있는 구독에 붙었다: 이 손의 다음 `subscribed` 는 재연결이다(#5885).
+          if (sub.state === 'subscribed') handlers.onAttachedLive?.();
           return () => {
             sub.off('subscribed', onSubscribed);
             sub.off('publication', onPublication);

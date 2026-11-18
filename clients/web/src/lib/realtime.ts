@@ -263,6 +263,7 @@ export function createRealtime(
       onReaction?: (event: ReactionEvent) => void;
       onPin?: (event: PinEvent) => void;
       onUnfurl?: (event: UnfurlEvent) => void;
+      onAttachedLive?: () => void;
     }
   ): () => void {
     const roomName = centrifugoChannelName(workspaceId, channelId);
@@ -274,6 +275,8 @@ export function createRealtime(
           handlers.onSubscribed(ctx);
         sub.on("subscribed", onSubscribed);
         sub.on("publication", onRoomPublication);
+        // 이미 살아 있는 구독에 붙었다: 이 손의 다음 `subscribed` 는 재연결이다(#5885).
+        if (sub.state === "subscribed") handlers.onAttachedLive?.();
         return () => {
           sub.off("subscribed", onSubscribed);
           sub.off("publication", onRoomPublication);

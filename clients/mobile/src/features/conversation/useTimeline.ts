@@ -1321,6 +1321,9 @@ export function useTimeline(
       }
     });
     resyncRef.current = resync;
+    // 이 구독에서 첫 `subscribed` 를 지났는가(또는 이미 살아 있는 구독에 붙었는가). 그 뒤의 `subscribed` 는 모두 재연결이다. 첫 구독은 위
+    // 머리 · 반응 · 고정 읽기가 이미 읽는다.
+    let resyncArmed = false;
 
     // 2) The realtime rail, with resume healing.
     const unsub = rail.subscribeChannel(workspaceId, channelId, {
@@ -1329,8 +1332,8 @@ export function useTimeline(
         const recovered = ctx.recovered === true;
         const isFirst = firstSubscribeRef.current;
         firstSubscribeRef.current = false;
-        // 첫 구독은 위 머리 · 반응 · 고정 읽기가 이미 읽는다.
-        if (!isFirst) resync.reconnected();
+        if (resyncArmed) resync.reconnected();
+        resyncArmed = true;
         setResume(r => ({
           ...r,
           lastRecovered: recovered,
@@ -1425,6 +1428,9 @@ export function useTimeline(
         } else {
           applyPins(removePin(pinsRef.current, event.payload.message_id));
         }
+      },
+      onAttachedLive: () => {
+        resyncArmed = true;
       },
       // ADR-0170 D5 — 서버가 만든 카드(또는 작성자의 지우기)가 같은 레일로 온다. 전체 투영이라 통째로 바꾼다.
       onUnfurl: event => {
