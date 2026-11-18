@@ -774,6 +774,40 @@ export const catalog: MessageCatalog = {
       "value": "Cambiar nombre del canal"
     }
   ],
+  "expressions.draft.linkApprove": [
+    {
+      "type": 0,
+      "value": "Obtener y registrar en la biblioteca"
+    }
+  ],
+  "expressions.draft.linkBusy": [
+    {
+      "type": 0,
+      "value": "Se están obteniendo muchas imágenes. Vuelve a pulsar en un momento."
+    }
+  ],
+  "expressions.draft.linkFetching": [
+    {
+      "type": 0,
+      "value": "Obteniendo"
+    }
+  ],
+  "expressions.draft.linkFrom": [
+    {
+      "type": 0,
+      "value": "Se obtendrá de "
+    },
+    {
+      "type": 1,
+      "value": "host"
+    }
+  ],
+  "expressions.draft.linkHint": [
+    {
+      "type": 0,
+      "value": "Al aprobar, la imagen se obtiene una vez, se revisa y se registra en la biblioteca del equipo."
+    }
+  ],
   "timeline.approval.channelAgentIn": [
     {
       "type": 0,

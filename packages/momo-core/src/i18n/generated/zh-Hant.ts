@@ -728,6 +728,44 @@ export const catalog: MessageCatalog = {
       "value": "重新命名頻道"
     }
   ],
+  "expressions.draft.linkApprove": [
+    {
+      "type": 0,
+      "value": "取得並登記到團隊素材庫"
+    }
+  ],
+  "expressions.draft.linkBusy": [
+    {
+      "type": 0,
+      "value": "目前正在取得的圖片較多。請稍後再按一次。"
+    }
+  ],
+  "expressions.draft.linkFetching": [
+    {
+      "type": 0,
+      "value": "正在取得"
+    }
+  ],
+  "expressions.draft.linkFrom": [
+    {
+      "type": 0,
+      "value": "將從 "
+    },
+    {
+      "type": 1,
+      "value": "host"
+    },
+    {
+      "type": 0,
+      "value": " 取得"
+    }
+  ],
+  "expressions.draft.linkHint": [
+    {
+      "type": 0,
+      "value": "核准後會取得一次圖片，檢查後登記到團隊素材庫。"
+    }
+  ],
   "timeline.approval.channelAgentIn": [
     {
       "type": 0,
