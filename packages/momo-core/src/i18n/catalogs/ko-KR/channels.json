@@ -60,7 +60,7 @@
   "channels.browse.paletteGroup": "참여하지 않은 공개 채널",
   "channels.browse.closeAria": "채널 둘러보기 닫기",
   "channels.browse.loading": "채널 목록을 불러오는 중이에요.",
-  "channels.browse.joining": "참여하는 중",
+  "channels.browse.joining": "참여 요청 중",
   "channels.browse.emptyAdminDetailPhone": "이미 있는 채널은 웹이나 데스크탑의 채널 메뉴에서 「둘러보기에 보이기」를 켜면 여기에 보여요.",
   "channels.browse.homeRowHint": "채널 둘러보기를 이 이름으로 열어요."
 }

@@ -1222,7 +1222,7 @@ export const catalog: MessageCatalog = {
   "channels.browse.joining": [
     {
       "type": 0,
-      "value": "참여하는 중"
+      "value": "참여 요청 중"
     }
   ],
   "channels.browse.joinNetwork": [
