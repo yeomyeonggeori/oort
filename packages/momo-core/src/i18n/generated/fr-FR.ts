@@ -370,6 +370,36 @@ export const catalog: MessageCatalog = {
       "value": "Trop de requêtes. Réessayez dans un instant."
     }
   ],
+  "channels.default.description": [
+    {
+      "type": 0,
+      "value": "Les nouveaux membres le rejoignent automatiquement"
+    }
+  ],
+  "channels.default.label": [
+    {
+      "type": 0,
+      "value": "Définir comme canal par défaut"
+    }
+  ],
+  "channels.default.lastDefault": [
+    {
+      "type": 0,
+      "value": "Il faut au moins un canal par défaut. Définissez d'abord un autre canal par défaut."
+    }
+  ],
+  "channels.default.lastHint": [
+    {
+      "type": 0,
+      "value": "Il faut au moins un canal par défaut"
+    }
+  ],
+  "channels.default.notDefaultable": [
+    {
+      "type": 0,
+      "value": "Seuls les canaux publics peuvent être le canal par défaut."
+    }
+  ],
   "channels.dmLeave.action": [
     {
       "type": 0,

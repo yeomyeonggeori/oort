@@ -23,6 +23,7 @@ import {
   Star,
   StarOff,
   Type,
+  UserPlus,
   type LucideIcon,
 } from "lucide-react";
 import {
@@ -50,6 +51,8 @@ import {
 import { canSetBrowseListed } from "@momo/core/features/channels/browse";
 import { canRenameChannel } from "@momo/core/features/channels/rename";
 import { useSetBrowseListed } from "@/features/channels/useSetBrowseListed";
+import { canSetChannelDefault, isOnlyVisibleDefault } from "@momo/core/features/channels/defaultChannel";
+import { useSetChannelDefault } from "@/features/channels/useSetChannelDefault";
 import {
   DropdownMenuCheckboxItem,
   DropdownMenuItem,
@@ -234,6 +237,7 @@ export function useChannelActions({
     setErrorState(next);
   };
   const browseSwitch = useSetBrowseListed(workspaceId);
+  const defaultSwitch = useSetChannelDefault(workspaceId);
   const [confirmLeave, setConfirmLeave] = useState(false);
   const [leaveError, setLeaveError] = useState<string | null>(null);
 
@@ -401,6 +405,8 @@ export function useChannelActions({
         canLeaveDm: Boolean(onLeaveDm),
         // 소유자 · 관리자가 든 공개 채널, 그리고 이 서버가 표시를 싣는 동안만(옛 서버 · 역할 모름은 문을 세우지 않는다).
         canSetBrowseListed: canSetBrowseListed(channel, selfRole),
+        // 소유자 · 관리자가 든 공개 채널, 그리고 이 서버가 기본 채널 표시를 싣는 동안만(#5845).
+        canSetDefault: canSetChannelDefault(channel, selfRole),
         // 소유자 · 관리자가 든 보관 안 된 공개/비공개 채널, 이름이 general 이 아닐 때, 그리고 다이얼로그를 세울 손이 있을 때(역할 모름은 세우지 않는다).
         canRename: Boolean(onRename) && canRenameChannel(channel, selfRole),
       }),
@@ -424,6 +430,9 @@ export function useChannelActions({
     copiedName: nameCopy.copied,
     copiedId: idCopy.copied,
     browseListed: channel.browseListed === true,
+    defaultChannel: channel.isDefault === true,
+    // 내 목록에서 유일한 기본 채널이면 줄이 까닭을 먼저 말한다. 누르는 것은 막지 않는다 - 내가 들지 않은 기본 채널이 있을 수 있어 서버가 정한다.
+    onlyDefault: isOnlyVisibleDefault(channel, client.getQueryData<Channel[]>(["channels", workspaceId])),
     starred,
     sections,
     currentSectionId,
@@ -460,6 +469,7 @@ export function useChannelActions({
     if (key === "mark-read" && markReadMutation.isPending) return;
     if (key === "mark-unread" && markUnreadMutation.isPending) return;
     if (key === "browse-listed" && browseSwitch.pending.has(channel.id)) return;
+    if (key === "default-channel" && defaultSwitch.pending.has(channel.id)) return;
     switch (key) {
       case "mute": {
         const previousMuted = client.getQueryData<Channel[]>(["channels", workspaceId])
@@ -473,6 +483,17 @@ export function useChannelActions({
           ?.find((row) => uuidEq(row.id, channel.id))?.browseListed ?? channel.browseListed;
         setError(null);
         void browseSwitch.run(channel.id, current !== true).then((result) => {
+          if (result === null || result.ok) return;
+          setError(formatMessage(result.failure.key, result.failure.values as never));
+        });
+        return;
+      }
+      case "default-channel": {
+        // 「둘러보기에 보이기」와 같은 왕복(낙관 없음). 끄는 요청은 화면의 셈으로 막지 않고 서버의 409 문장을 그대로 보여 준다.
+        const current = client.getQueryData<Channel[]>(["channels", workspaceId])
+          ?.find((row) => uuidEq(row.id, channel.id))?.isDefault ?? channel.isDefault;
+        setError(null);
+        void defaultSwitch.run(channel.id, current !== true).then((result) => {
           if (result === null || result.ok) return;
           setError(formatMessage(result.failure.key, result.failure.values as never));
         });
@@ -524,6 +545,7 @@ export function useChannelActions({
     if (key === "mark-read") return markReadMutation.isPending;
     if (key === "mark-unread") return markUnreadMutation.isPending;
     if (key === "browse-listed") return browseSwitch.pending.has(channel.id);
+    if (key === "default-channel") return defaultSwitch.pending.has(channel.id);
     return false;
   }
 
@@ -578,6 +600,7 @@ export function useChannelActions({
  *   memory       BookOpen        기억 표지(`MemoryReceiptChip`)와 같다
  *   github       GitPullRequest  앱이 GitHub 를 그리는 글리프(작업 보드 · 실행 보고)
  *   browse       Compass         채널 둘러보기에 보이기(#5843)
+ *   default      UserPlus        기본 채널로 지정(#5845) - 새로 합류하는 사람이 들어온다
  *   rename       Pencil          이름 바꾸기(#5835)
  *   star/unstar  Star / StarOff  별표 붙이기 / 떼기
  *   hide         EyeOff          「목록에서 숨기기」(대화를 지우지 않고 목록에서 안 보이게 한다)
@@ -598,6 +621,7 @@ const ACTION_ICON: Record<ChannelActionIcon, LucideIcon> = {
   memory: BookOpen,
   github: GitPullRequest,
   browse: Compass,
+  default: UserPlus,
   rename: Pencil,
   star: Star,
   unstar: StarOff,
@@ -769,17 +793,36 @@ function ChannelActionMenuRow({
   // 줄 폭이 변하지 않는다. 진행 중에는 그 줄만 `aria-busy` 와 돌림으로 말하고 값은 서버가 답할 때까지 그대로다.
   if (item.checked !== undefined && surface === "header") {
     const { tone: _tone, children: _children, ...rest } = props;
+    const mark = (
+      <span className="flex size-4 shrink-0 items-center justify-center" aria-hidden="true">
+        {busy ? (
+          <Loader2 className="spinner-busy size-4" />
+        ) : item.checked ? (
+          <Check className="size-4 text-ink-muted" />
+        ) : null}
+      </span>
+    );
+    // 한 줄 설명이 붙는 줄(#5845): 둘째 줄이 글자 시작에 맞춰 서고(아이콘 16px + 간격 8px), 낭독은 `aria-describedby` 로 읽는다.
+    if (item.description !== undefined) {
+      const noteId = `${props["data-testid"]}-note`;
+      return (
+        <DropdownMenuCheckboxItem {...rest} layout="stack" aria-describedby={noteId} checked={item.checked}>
+          <span className="flex w-full min-w-0 items-center gap-2">
+            <ActionIcon name={item.icon} />
+            <span className="min-w-0 flex-1 truncate">{item.label}</span>
+            {mark}
+          </span>
+          <span id={noteId} className="pl-6 text-meta text-ink-muted" data-testid={noteId}>
+            {item.description}
+          </span>
+        </DropdownMenuCheckboxItem>
+      );
+    }
     return (
       <DropdownMenuCheckboxItem {...rest} checked={item.checked}>
         <ActionIcon name={item.icon} />
         <span className="min-w-0 flex-1 truncate">{item.label}</span>
-        <span className="flex size-4 shrink-0 items-center justify-center" aria-hidden="true">
-          {busy ? (
-            <Loader2 className="spinner-busy size-4" />
-          ) : item.checked ? (
-            <Check className="size-4 text-ink-muted" />
-          ) : null}
-        </span>
+        {mark}
       </DropdownMenuCheckboxItem>
     );
   }

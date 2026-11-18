@@ -345,6 +345,36 @@ export const catalog: MessageCatalog = {
       "value": "请求过于频繁，请稍后再试。"
     }
   ],
+  "channels.default.description": [
+    {
+      "type": 0,
+      "value": "新加入的成员会自动加入"
+    }
+  ],
+  "channels.default.label": [
+    {
+      "type": 0,
+      "value": "设为默认频道"
+    }
+  ],
+  "channels.default.lastDefault": [
+    {
+      "type": 0,
+      "value": "至少需要一个默认频道。请先将其他频道设为默认频道。"
+    }
+  ],
+  "channels.default.lastHint": [
+    {
+      "type": 0,
+      "value": "至少需要一个默认频道"
+    }
+  ],
+  "channels.default.notDefaultable": [
+    {
+      "type": 0,
+      "value": "只有公开频道可以设为默认频道。"
+    }
+  ],
   "channels.dmLeave.action": [
     {
       "type": 0,

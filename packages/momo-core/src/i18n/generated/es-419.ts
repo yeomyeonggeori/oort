@@ -370,6 +370,36 @@ export const catalog: MessageCatalog = {
       "value": "Hay demasiadas solicitudes. Inténtalo de nuevo en unos momentos."
     }
   ],
+  "channels.default.description": [
+    {
+      "type": 0,
+      "value": "Las personas nuevas se unen automáticamente"
+    }
+  ],
+  "channels.default.label": [
+    {
+      "type": 0,
+      "value": "Establecer como canal predeterminado"
+    }
+  ],
+  "channels.default.lastDefault": [
+    {
+      "type": 0,
+      "value": "Debe haber al menos un canal predeterminado. Primero establece otro canal como predeterminado."
+    }
+  ],
+  "channels.default.lastHint": [
+    {
+      "type": 0,
+      "value": "Debe haber al menos un canal predeterminado"
+    }
+  ],
+  "channels.default.notDefaultable": [
+    {
+      "type": 0,
+      "value": "Solo los canales públicos pueden ser el canal predeterminado."
+    }
+  ],
   "channels.dmLeave.action": [
     {
       "type": 0,

@@ -349,6 +349,36 @@ export const catalog: MessageCatalog = {
       "value": "リクエストが多すぎます。しばらくしてからもう一度お試しください。"
     }
   ],
+  "channels.default.description": [
+    {
+      "type": 0,
+      "value": "新しく参加する人が自動的に入ります"
+    }
+  ],
+  "channels.default.label": [
+    {
+      "type": 0,
+      "value": "既定のチャンネルに設定"
+    }
+  ],
+  "channels.default.lastDefault": [
+    {
+      "type": 0,
+      "value": "既定のチャンネルは1つ以上必要です。先に別のチャンネルを既定に設定してください。"
+    }
+  ],
+  "channels.default.lastHint": [
+    {
+      "type": 0,
+      "value": "既定のチャンネルは1つ以上必要です"
+    }
+  ],
+  "channels.default.notDefaultable": [
+    {
+      "type": 0,
+      "value": "公開チャンネルのみ既定に設定できます。"
+    }
+  ],
   "channels.dmLeave.action": [
     {
       "type": 0,

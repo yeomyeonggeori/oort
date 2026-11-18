@@ -1508,6 +1508,36 @@ export const catalog: MessageCatalog = {
       "value": "Too many requests. Try again in a moment."
     }
   ],
+  "channels.default.description": [
+    {
+      "type": 0,
+      "value": "New members join it automatically"
+    }
+  ],
+  "channels.default.label": [
+    {
+      "type": 0,
+      "value": "Make default channel"
+    }
+  ],
+  "channels.default.lastDefault": [
+    {
+      "type": 0,
+      "value": "There must be at least one default channel. Make another channel the default first."
+    }
+  ],
+  "channels.default.lastHint": [
+    {
+      "type": 0,
+      "value": "There must be at least one default channel"
+    }
+  ],
+  "channels.default.notDefaultable": [
+    {
+      "type": 0,
+      "value": "Only public channels can be the default channel."
+    }
+  ],
   "channels.dmLeave.action": [
     {
       "type": 0,

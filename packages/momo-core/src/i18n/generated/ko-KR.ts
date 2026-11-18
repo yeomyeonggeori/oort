@@ -1466,6 +1466,36 @@ export const catalog: MessageCatalog = {
       "value": "요청이 너무 잦습니다. 잠시 뒤에 다시 시도하세요."
     }
   ],
+  "channels.default.description": [
+    {
+      "type": 0,
+      "value": "새로 참여하는 사람이 자동으로 들어가요"
+    }
+  ],
+  "channels.default.label": [
+    {
+      "type": 0,
+      "value": "기본 채널로 지정"
+    }
+  ],
+  "channels.default.lastDefault": [
+    {
+      "type": 0,
+      "value": "기본 채널은 하나 이상 있어야 해요. 다른 채널을 먼저 기본 채널로 지정해 주세요."
+    }
+  ],
+  "channels.default.lastHint": [
+    {
+      "type": 0,
+      "value": "기본 채널은 하나 이상 있어야 해요"
+    }
+  ],
+  "channels.default.notDefaultable": [
+    {
+      "type": 0,
+      "value": "공개 채널만 기본 채널로 지정할 수 있어요."
+    }
+  ],
   "channels.dmLeave.action": [
     {
       "type": 0,
