@@ -389,13 +389,17 @@ async fn seed(pool: &PgPool) -> Fixture {
     let channel = Uuid::new_v4();
     let private_channel = Uuid::new_v4();
     for (id, name) in [(channel, "approved"), (private_channel, "unapproved")] {
-        sqlx::query("INSERT INTO channel(id, workspace_id, kind, name) VALUES($1,$2,'public',$3)")
-            .bind(id)
-            .bind(workspace)
-            .bind(format!("{name}-{}", id.simple()))
-            .execute(pool)
-            .await
-            .expect("seed channel");
+        // Listed in channel browse, as a new public channel is (ADR-0224 D2): open to people (D13).
+        sqlx::query(
+            "INSERT INTO channel(id, workspace_id, kind, name, browse_listed) \
+             VALUES($1,$2,'public',$3,true)",
+        )
+        .bind(id)
+        .bind(workspace)
+        .bind(format!("{name}-{}", id.simple()))
+        .execute(pool)
+        .await
+        .expect("seed channel");
         sqlx::query("INSERT INTO channel_seq(channel_id, workspace_id, last_seq) VALUES($1,$2,0)")
             .bind(id)
             .bind(workspace)
@@ -8992,8 +8996,8 @@ async fn seed_channel_3707(
     let channel = Uuid::new_v4();
     let name = format!("room-{}", &channel.simple().to_string()[..10]);
     sqlx::query(
-        "INSERT INTO channel(id, workspace_id, kind, name, created_by) \
-         VALUES($1,$2,$3::channel_kind,$4,$5)",
+        "INSERT INTO channel(id, workspace_id, kind, name, created_by, browse_listed) \
+         VALUES($1,$2,$3::channel_kind,$4,$5,$3::channel_kind = 'public')",
     )
     .bind(channel)
     .bind(fixture.workspace)
@@ -9227,7 +9231,8 @@ async fn an_approved_member_add_seats_members_in_a_channel_the_agent_can_see() {
     .await
     .unwrap();
     sqlx::query(
-        "INSERT INTO channel(workspace_id, kind, name, created_by) VALUES($1,'public',$2,$3)",
+        "INSERT INTO channel(workspace_id, kind, name, created_by, browse_listed) \
+         VALUES($1,'public',$2,$3,true)",
     )
     .bind(other_ws)
     .bind(&foreign_name)
@@ -33352,8 +33357,9 @@ async fn named_channel_5830(
     let id = Uuid::new_v4();
     let dm_key = (kind == "dm").then(|| id.to_string());
     sqlx::query(
-        "INSERT INTO channel (id, workspace_id, kind, name, dm_key, archived_at) \
-         VALUES ($1, $2, $3::channel_kind, $4, $5, CASE WHEN $6 THEN now() END)",
+        "INSERT INTO channel (id, workspace_id, kind, name, dm_key, archived_at, browse_listed) \
+         VALUES ($1, $2, $3::channel_kind, $4, $5, CASE WHEN $6 THEN now() END, \
+                 $3::channel_kind = 'public')",
     )
     .bind(id)
     .bind(workspace)

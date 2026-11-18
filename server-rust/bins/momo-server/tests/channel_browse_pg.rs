@@ -1331,8 +1331,19 @@ async fn control_a_piece_missing_a_condition_lets_a_hidden_channel_through() {
     let hidden = hidden_rows_with_the_flag_on(&mut tx, &r.su, r.ws.id, r.ws.owner.id).await;
     let mut hidden_all = hidden.clone();
     hidden_all.push(off);
-    let piece = momo_messaging::CHANNEL_OPEN_TO_PEOPLE_SQL;
-    let conditions: Vec<&str> = piece.split(" AND ").collect();
+    // The one place the three conditions are written (ADR-0224 D11·D13): momo-auth's
+    // judgment, which the browse piece is.
+    let piece = momo_auth::channel_open_to_people_sql("c");
+    assert_eq!(
+        momo_messaging::CHANNEL_OPEN_TO_PEOPLE_SQL.to_string(),
+        piece,
+        "the browse piece is momo-auth's judgment, not a copy"
+    );
+    let inner = piece
+        .strip_prefix('(')
+        .and_then(|rest| rest.strip_suffix(')'))
+        .unwrap_or(&piece);
+    let conditions: Vec<&str> = inner.split(" AND ").collect();
     assert_eq!(conditions.len(), 3, "{piece}");
     let leaks = |listed: &[Uuid]| listed.iter().filter(|id| hidden_all.contains(id)).count();
     let run = |condition: String| {

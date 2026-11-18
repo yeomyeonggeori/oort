@@ -367,6 +367,23 @@ claims:
     proofs:
       - "server-rust/crates/momo-agent/src/tools.rs#no_grant_can_pre_approve_a_login_handoff"
       - "server-rust/crates/momo-agent/src/app_tool_grants.rs#the_host_loads_the_intersection_and_the_server_cannot_widen_it"
+  - id: AGT-5
+    claim: "The team AI's read tools read a channel only when the person who asked is a live member of it; a public channel listed in channel browse that the person is not in is not read, even in their own direct message with the team AI."
+    scope: "ADR-0201 H4 and ADR-0224 D13 (#5870). Real PostgreSQL, the read tools called directly as the worker's role. The rule the tools apply is tested, not the model: what the model would write about a channel it was refused is not."
+    priority: P1
+    runs: nightly
+    proofs:
+      - "server-rust/crates/momo-workspace-actions/tests/agent_channel_open_pg.rs#the_team_ai_reads_only_channels_the_requester_is_in"
+      - "server-rust/bins/momo-agent-worker/tests/team_ai_tools_conformance_pg.rs#a6_a_requester_without_access_gets_nothing"
+  - id: AGT-6
+    claim: "In a room with people, the team AI may answer from the room itself and from live public channels listed in channel browse only: a public channel that is not listed, a private channel and an archived channel are refused there even for a person who is in them. In the person's own direct message with the team AI it may answer from what that person can read, and in a room with a guest from the room alone. The channel names the team AI is given are the room and the channels open to people (live, public, listed in channel browse); only in the person's own direct message with the team AI does it also get the public channels that person is in."
+    scope: "ADR-0224 D13 (#5870). Real PostgreSQL with two workspaces; the scope, the name list and a read_channel call are checked as the worker's role, which bypasses row-level security, so the other-workspace checks prove the statements' own workspace filter. The model is not run: the claim is what the server hands the model, not what the model writes."
+    priority: P1
+    runs: nightly
+    proofs:
+      - "server-rust/crates/momo-workspace-actions/tests/agent_channel_open_pg.rs#a_room_hears_only_itself_and_channels_open_to_people"
+      - "server-rust/crates/momo-workspace-actions/tests/agent_channel_open_pg.rs#the_helper_dm_and_a_guest_room_keep_their_rules"
+      - "server-rust/crates/momo-workspace-actions/tests/agent_channel_open_pg.rs#the_team_ai_names_a_closed_channel_only_in_a_members_own_dm"
 
   # ---- 자격증명 ---------------------------------------------------------------------
   - id: CRED-1
