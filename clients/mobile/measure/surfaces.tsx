@@ -206,6 +206,7 @@ import {JumpSeekSurface} from './jumpSeek';
 import {BubbleSurface} from './bubbleConv';
 import {BubbleClipSurface} from './bubbleClip';
 import {SentenceWrapSurface} from './sentenceWrap';
+import {NewChannelNameSurface} from './newChannelName';
 import {DockGapSurface} from './dockGap';
 import {TapDismissSurface} from './tapDismiss';
 import {EditLiveSurface} from './editLive';
@@ -2284,6 +2285,10 @@ export function Surface({name}: {name: string}): React.JSX.Element {
     return <BubbleClipSurface which={name.slice('bubble-clip'.length).replace(/^-/, '')} />;
   }
   // #5288: 줄바꿈 전략별 잰 줄 수 ↔ 그린 줄 수 — 같은 글을 `hangul-word`·`standard`·지정 없음으로 그려 어긋남을 숫자로 적는다(`sentenceWrap.tsx`).
+  // #5834: 채널 이름 규칙 — 실제 폰 엔진에서 벡터 실행 · 새 채널 시트 한 장(`newChannelName.tsx`).
+  if (name.startsWith('newchannel')) {
+    return <NewChannelNameSurface which={name.slice('newchannel'.length).replace(/^-/, '')} />;
+  }
   if (name.startsWith('sentence-wrap')) {
     return <SentenceWrapSurface which={name.slice('sentence-wrap'.length).replace(/^-/, '')} />;
   }
