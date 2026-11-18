@@ -515,6 +515,45 @@ async fn browse_listed_audit(su: &PgPool, workspace: Uuid) -> i64 {
     audit_count(su, workspace, "channel.browse_listed").await
 }
 
+async fn default_audit(su: &PgPool, workspace: Uuid) -> i64 {
+    audit_count(su, workspace, "channel.default").await
+}
+
+async fn is_default(su: &PgPool, channel: Uuid) -> bool {
+    sqlx::query_scalar("SELECT is_default FROM channel WHERE id = $1")
+        .bind(channel)
+        .fetch_one(su)
+        .await
+        .expect("read is_default")
+}
+
+async fn set_default(su: &PgPool, channel: Uuid, default: bool) {
+    sqlx::query("UPDATE channel SET is_default = $2 WHERE id = $1")
+        .bind(channel)
+        .bind(default)
+        .execute(su)
+        .await
+        .expect("set is_default");
+}
+
+async fn default_count(su: &PgPool, workspace: Uuid) -> i64 {
+    sqlx::query_scalar("SELECT count(*) FROM channel WHERE workspace_id = $1 AND is_default")
+        .bind(workspace)
+        .fetch_one(su)
+        .await
+        .expect("count defaults")
+}
+
+/// A listed public channel both the owner and the admin sit in, default or not.
+async fn seated_public(r: &Rig, name: &str, default: bool) -> Uuid {
+    let ch = insert_channel(&r.su, r.ws.id, "public", Some(name), false, r.ws.owner.id).await;
+    set_browse_listed(&r.su, ch, true).await;
+    set_default(&r.su, ch, default).await;
+    join(&r.su, r.ws.id, ch, r.ws.owner.id).await;
+    join(&r.su, r.ws.id, ch, r.ws.admin.id).await;
+    ch
+}
+
 async fn browse_listed(su: &PgPool, channel: Uuid) -> bool {
     sqlx::query_scalar("SELECT browse_listed FROM channel WHERE id = $1")
         .bind(channel)
@@ -803,7 +842,12 @@ async fn member_guest_and_agent_are_refused() {
     let guest = seed_human(&r.su, r.ws.id, "guest", "정하늘").await;
     let guest_token = login(&r.http, &r.base, r.ws.id, &guest).await;
     let agent_token = bearer_for_agent(&r.su, r.ws.id, r.ws.agent).await;
-    for field in [json!({"name": "taken-over"}), json!({"browseListed": true})] {
+    set_default(&r.su, ch, false).await;
+    for field in [
+        json!({"name": "taken-over"}),
+        json!({"browseListed": true}),
+        json!({"isDefault": true}),
+    ] {
         for (who, token) in [
             ("member", &r.member),
             ("guest", &guest_token),
@@ -815,8 +859,10 @@ async fn member_guest_and_agent_are_refused() {
     }
     assert_eq!(channel_name(&r.su, ch).await, "keep-me");
     assert!(!browse_listed(&r.su, ch).await);
+    assert!(!is_default(&r.su, ch).await);
     assert_eq!(renamed_audit(&r.su, r.ws.id).await, 0);
     assert_eq!(browse_listed_audit(&r.su, r.ws.id).await, 0);
+    assert_eq!(default_audit(&r.su, r.ws.id).await, 0);
 }
 
 /// Other workspace's channel, DM, group DM, archived, unknown id: the same 404.
@@ -952,7 +998,8 @@ async fn bad_names_and_bad_bodies_are_400_like_create() {
     for bad_body in [
         json!({}),
         json!({"topic": "x"}),
-        json!({"name": "ok", "isDefault": true}),
+        json!({"name": "ok", "isArchived": true}),
+        json!({"isDefault": "yes"}),
         json!({"name": 5}),
         json!([1]),
     ] {
@@ -1421,6 +1468,7 @@ async fn an_admin_outside_a_hidden_channel_gets_the_unknown_id_404_for_every_fie
         json!({"name": "taken-over"}),
         json!({"browseListed": true}),
         json!({"browseListed": false}),
+        json!({"isDefault": true}),
     ] {
         let (status, unknown) =
             patch(&r.http, &r.base, r.ws.id, Uuid::new_v4(), &r.admin, &field).await;
@@ -1450,6 +1498,9 @@ async fn an_admin_outside_a_hidden_channel_gets_the_unknown_id_404_for_every_fie
     assert_eq!(renamed_audit(&r.su, r.ws.id).await, 0);
     assert_eq!(browse_listed_audit(&r.su, r.ws.id).await, 0);
     assert_eq!(browse_listed_audit(&r.su, other.id).await, 0);
+    assert_eq!(default_audit(&r.su, r.ws.id).await, 0);
+    assert_eq!(default_audit(&r.su, other.id).await, 0);
+    assert!(!is_default(&r.su, off_public).await);
 
     // a listed channel the admin does not sit in: editable, and the answer is whole
     let listed = insert_channel(
@@ -1531,4 +1582,207 @@ async fn an_admin_outside_a_hidden_channel_gets_the_unknown_id_404_for_every_fie
     )
     .await;
     assert_eq!(status, 200, "{body}");
+}
+
+/// ADR-0224 D6: `isDefault` is judged on the same target and kind rule as the browse
+/// switch, writes one `channel.default` row per real change, touches no
+/// membership and no other field, and never turns off the last default channel.
+/// A body that mixes fields is all or nothing.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL"]
+async fn the_default_switch_keeps_one_default_and_changes_nothing_else() {
+    let _guard = test_lock().await;
+    let r = rig("df-switch").await;
+    let a = seated_public(&r, "alpha-room", true).await;
+    let b = seated_public(&r, "beta-room", true).await;
+    let c = seated_public(&r, "gamma-room", false).await;
+    let seated_c = live_member_ids(&r.su, c).await;
+
+    // on: the flag moves, the seats do not, browse listing stays as it was
+    let (status, body) = patch(
+        &r.http,
+        &r.base,
+        r.ws.id,
+        c,
+        &r.owner,
+        &json!({"isDefault": true}),
+    )
+    .await;
+    assert_eq!(status, 200, "{body}");
+    assert_eq!(body["channel"]["isDefault"], true);
+    assert_eq!(body["channel"]["browseListed"], true);
+    assert_eq!(live_member_ids(&r.su, c).await, seated_c);
+    // the same value again: 200, no second audit row
+    let (status, body) = patch(
+        &r.http,
+        &r.base,
+        r.ws.id,
+        c,
+        &r.admin,
+        &json!({"isDefault": true}),
+    )
+    .await;
+    assert_eq!(status, 200, "{body}");
+    let rows: Vec<(Uuid, Value)> = sqlx::query_as(
+        "SELECT actor_member_id, detail FROM audit_log \
+          WHERE workspace_id = $1 AND action = 'channel.default'",
+    )
+    .bind(r.ws.id)
+    .fetch_all(&r.su)
+    .await
+    .expect("default audit rows");
+    assert_eq!(rows.len(), 1, "{rows:?}");
+    assert_eq!(rows[0].0, r.ws.owner.id);
+    assert_eq!(
+        (&rows[0].1["old"], &rows[0].1["new"]),
+        (&json!(false), &json!(true))
+    );
+
+    // a kind that cannot be a default: 409 for either value, and the rest of the body is not applied
+    let private = insert_channel(
+        &r.su,
+        r.ws.id,
+        "private",
+        Some("hush-room"),
+        false,
+        r.ws.owner.id,
+    )
+    .await;
+    let dm = insert_channel(&r.su, r.ws.id, "dm", None, false, r.ws.owner.id).await;
+    let archived = insert_channel(
+        &r.su,
+        r.ws.id,
+        "public",
+        Some("old-hall"),
+        true,
+        r.ws.owner.id,
+    )
+    .await;
+    for ch in [private, dm, archived] {
+        join(&r.su, r.ws.id, ch, r.ws.owner.id).await;
+        for wanted in [true, false] {
+            let (status, body) = patch(
+                &r.http,
+                &r.base,
+                r.ws.id,
+                ch,
+                &r.owner,
+                &json!({"isDefault": wanted}),
+            )
+            .await;
+            assert_eq!(status, 409, "{wanted} {body}");
+            assert_eq!(body["error"]["code"], "channel_not_defaultable");
+        }
+    }
+    let (status, body) = patch(
+        &r.http,
+        &r.base,
+        r.ws.id,
+        private,
+        &r.owner,
+        &json!({"name": "renamed-hush", "isDefault": true}),
+    )
+    .await;
+    assert_eq!(status, 409, "{body}");
+    assert_eq!(channel_name(&r.su, private).await, "hush-room");
+    assert_eq!(default_audit(&r.su, r.ws.id).await, 1);
+
+    // all or nothing: a name clash refuses the whole body, the default flag included
+    let (status, body) = patch(
+        &r.http,
+        &r.base,
+        r.ws.id,
+        c,
+        &r.owner,
+        &json!({"name": "alpha-room", "browseListed": false, "isDefault": false}),
+    )
+    .await;
+    assert_eq!(status, 409, "{body}");
+    assert!(is_default(&r.su, c).await);
+    assert!(browse_listed(&r.su, c).await);
+    assert_eq!(channel_name(&r.su, c).await, "gamma-room");
+    // all three together apply together
+    let (status, body) = patch(
+        &r.http,
+        &r.base,
+        r.ws.id,
+        c,
+        &r.owner,
+        &json!({"name": "delta-room", "browseListed": false, "isDefault": false}),
+    )
+    .await;
+    assert_eq!(status, 200, "{body}");
+    assert_eq!(body["channel"]["name"], "delta-room");
+    assert_eq!(body["channel"]["browseListed"], false);
+    assert_eq!(body["channel"]["isDefault"], false);
+    assert_eq!(default_audit(&r.su, r.ws.id).await, 2);
+    assert_eq!(live_member_ids(&r.su, c).await, seated_c);
+
+    // the last default cannot go: b may, then a may not
+    let (status, body) = patch(
+        &r.http,
+        &r.base,
+        r.ws.id,
+        b,
+        &r.owner,
+        &json!({"isDefault": false}),
+    )
+    .await;
+    assert_eq!(status, 200, "{body}");
+    let (status, body) = patch(
+        &r.http,
+        &r.base,
+        r.ws.id,
+        a,
+        &r.owner,
+        &json!({"isDefault": false}),
+    )
+    .await;
+    assert_eq!(status, 409, "{body}");
+    assert_eq!(body["error"]["code"], "last_default_channel");
+    assert!(is_default(&r.su, a).await);
+    assert_eq!(default_count(&r.su, r.ws.id).await, 1);
+    assert_eq!(default_audit(&r.su, r.ws.id).await, 3);
+    // listing and default are separate: unlisting the last default keeps it default
+    let (status, body) = patch(
+        &r.http,
+        &r.base,
+        r.ws.id,
+        a,
+        &r.owner,
+        &json!({"browseListed": false}),
+    )
+    .await;
+    assert_eq!(status, 200, "{body}");
+    assert!(is_default(&r.su, a).await);
+}
+
+/// Two admins each turning off a different one of the two remaining defaults at
+/// once: exactly one wins and one default stays, every round.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL"]
+async fn two_requests_turning_off_the_two_defaults_leave_one() {
+    let _guard = test_lock().await;
+    let r = rig("df-race").await;
+    let a = seated_public(&r, "alpha-room", true).await;
+    let b = seated_public(&r, "beta-room", true).await;
+    for round in 0..8 {
+        set_default(&r.su, a, true).await;
+        set_default(&r.su, b, true).await;
+        let off = json!({"isDefault": false});
+        let (first, second) = tokio::join!(
+            patch(&r.http, &r.base, r.ws.id, a, &r.owner, &off),
+            patch(&r.http, &r.base, r.ws.id, b, &r.admin, &off),
+        );
+        let mut statuses = [first.0.as_u16(), second.0.as_u16()];
+        statuses.sort_unstable();
+        assert_eq!(
+            statuses,
+            [200, 409],
+            "round {round}: {} / {}",
+            first.1,
+            second.1
+        );
+        assert_eq!(default_count(&r.su, r.ws.id).await, 1, "round {round}");
+    }
 }

@@ -5914,8 +5914,8 @@ paths:
       operationId: updateChannel
       summary: Rename a channel or switch its browse listing (workspace admin only, humans only).
       description: >
-        ADR-0225 D10 and ADR-0224 D2. A partial update: only the fields present
-        change. The fields are `name` and `browseListed`; an unknown field is a
+        ADR-0225 D10 and ADR-0224 D2·D6. A partial update: only the fields present
+        change. The fields are `name`, `browseListed` and `isDefault`; an unknown field is a
         400 (never ignored) and a body with no known field is a 400. Both fields
         in one body are applied in one transaction, and every field is judged
         before anything is written, so a refused body changes nothing. The
@@ -5942,6 +5942,19 @@ paths:
         `channel.browse_listed` (`old`, `new`); sending the value the channel
         already has is a 200 and writes nothing. An admin who is not in the
         channel and switches it off can no longer reach it through this route.
+
+
+        `isDefault` (ADR-0224 D6) makes a live public channel a default channel,
+        the one a person joining by invite is added to, or takes that away. It
+        is independent of `browseListed`, and it adds or removes nobody who is
+        already in the workspace. A private channel, a direct message or an
+        archived channel the caller sits in is a 409 with `error.code`
+        `channel_not_defaultable`, whichever value is sent. Turning off the
+        workspace's last live default channel is a 409 with `error.code`
+        `last_default_channel`; two requests that would together turn off the
+        last two are decided one after the other, so one default always stays.
+        Each switch writes the audit record `channel.default` (`old`, `new`);
+        sending the value the channel already has is a 200 and writes nothing.
 
 
         A name that already belongs to a live channel
@@ -5974,7 +5987,7 @@ paths:
         "400":
           description: >
             Invalid channel id, a body that is not an object, an unknown field,
-            no known field, a `browseListed` that is not a boolean, or a name the
+            no known field, a `browseListed` or `isDefault` that is not a boolean, or a name the
             rules refuse (the same two messages as `createChannel`).
           content:
             application/json:
@@ -6004,7 +6017,9 @@ paths:
             The name already belongs to a live channel (no `error.code`), the
             `general` lock (`error.code` `general_channel_locked`), or
             `browseListed` on a channel that is not a live public channel
-            (`error.code` `channel_not_listable`).
+            (`error.code` `channel_not_listable`), `isDefault` on one
+            (`error.code` `channel_not_defaultable`), or turning off the last
+            default channel (`error.code` `last_default_channel`).
           content:
             application/json:
               schema:
@@ -23668,6 +23683,13 @@ components:
           description: >-
             Show (`true`) or hide (`false`) a live public channel in channel
             browse (ADR-0224 D2). Memberships are not changed.
+        isDefault:
+          type: boolean
+          description: >-
+            Make a live public channel a default channel (`true`) or not
+            (`false`) (ADR-0224 D6). People already in the workspace are not
+            added; only people who join afterwards land in it. Independent of
+            `browseListed`. The last default channel cannot be turned off.
 
     UpdateChannelResponse:
       type: object

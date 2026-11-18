@@ -486,6 +486,7 @@ pub struct ChannelEditTarget {
     pub topic: Option<String>,
     pub archived: bool,
     pub browse_listed: bool,
+    pub is_default: bool,
 }
 
 impl ChannelEditTarget {
@@ -497,6 +498,12 @@ impl ChannelEditTarget {
     /// The `browseListed` piece's rule (ADR-0224 D2): a live public channel.
     pub fn listable(&self) -> bool {
         self.kind == ChannelKind::Public && !self.archived
+    }
+
+    /// The `isDefault` piece's rule (ADR-0224 D6): a live public channel, the same
+    /// kind rule as the browse switch (the table CHECK allows only public).
+    pub fn defaultable(&self) -> bool {
+        self.listable()
     }
 }
 
@@ -516,7 +523,7 @@ pub async fn lock_channel_edit_target_in_tx(
 ) -> Result<Option<ChannelEditTarget>, DbError> {
     let sql = format!(
         "SELECT c.kind::text AS kind, c.name, c.topic, \
-                c.archived_at IS NOT NULL AS archived, c.browse_listed \
+                c.archived_at IS NOT NULL AS archived, c.browse_listed, c.is_default \
            FROM channel c \
           WHERE c.id = $1 AND c.workspace_id = $2 \
             AND (EXISTS ( \
@@ -551,6 +558,7 @@ pub async fn lock_channel_edit_target_in_tx(
         topic: row.try_get("topic").map_err(DbError::from)?,
         archived: row.try_get("archived").map_err(DbError::from)?,
         browse_listed: row.try_get("browse_listed").map_err(DbError::from)?,
+        is_default: row.try_get("is_default").map_err(DbError::from)?,
     }))
 }
 
@@ -671,6 +679,81 @@ pub async fn set_channel_browse_listed_in_tx(
     Ok(BrowseListedChange::Changed {
         previous: target.browse_listed,
     })
+}
+
+/// What [`check_channel_default_change_in_tx`] decided. Nothing is written.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DefaultChannelCheck {
+    /// Not a live public channel (private, DM or archived).
+    NotDefaultable,
+    /// Turning off the workspace's last live default channel.
+    LastDefault,
+    /// The flag already has that value.
+    Unchanged,
+    /// The flag will be switched; [`set_channel_default_in_tx`] writes it.
+    Change { previous: bool },
+}
+
+/// Judge `isDefault` (ADR-0224 D6) on a target from
+/// [`lock_channel_edit_target_in_tx`], before the request's first write. The kind
+/// rule comes before the "already that value" shortcut, like the browse switch.
+///
+/// Turning a default channel off must leave another live default channel, or a
+/// new person would have no channel to land in. Two requests that each turn off a
+/// different one of two defaults would both count "one left" and leave none, so
+/// the count runs under a per-workspace transaction advisory lock, taken after
+/// the channel row lock by every caller (one order, no cycle) and held to the
+/// commit. The count reads committed rows only, so the second request sees the
+/// first one's result. Turning a default on needs no lock and adds nobody to the
+/// channel: only people who join later land in it.
+pub async fn check_channel_default_change_in_tx(
+    conn: &mut PgConnection,
+    target: &ChannelEditTarget,
+    is_default: bool,
+) -> Result<DefaultChannelCheck, DbError> {
+    if !target.defaultable() {
+        return Ok(DefaultChannelCheck::NotDefaultable);
+    }
+    if target.is_default == is_default {
+        return Ok(DefaultChannelCheck::Unchanged);
+    }
+    if !is_default {
+        sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1, 5841))")
+            .bind(format!("channel_default:{}", target.workspace_id))
+            .execute(&mut *conn)
+            .await?;
+        let others: i64 = sqlx::query_scalar(
+            "SELECT count(*) FROM channel \
+              WHERE workspace_id = $1 AND is_default AND kind = 'public' \
+                AND archived_at IS NULL AND id <> $2",
+        )
+        .bind(target.workspace_id)
+        .bind(target.id)
+        .fetch_one(&mut *conn)
+        .await?;
+        if others == 0 {
+            return Ok(DefaultChannelCheck::LastDefault);
+        }
+    }
+    Ok(DefaultChannelCheck::Change {
+        previous: target.is_default,
+    })
+}
+
+/// Write the `isDefault` switch [`check_channel_default_change_in_tx`] approved.
+/// Memberships are not touched in either direction.
+pub async fn set_channel_default_in_tx(
+    conn: &mut PgConnection,
+    target: &ChannelEditTarget,
+    is_default: bool,
+) -> Result<(), DbError> {
+    sqlx::query("UPDATE channel SET is_default = $3 WHERE id = $1 AND workspace_id = $2")
+        .bind(target.id)
+        .bind(target.workspace_id)
+        .bind(is_default)
+        .execute(&mut *conn)
+        .await?;
+    Ok(())
 }
 
 /// Whether a rename failed on the `channel_name_uniq` index (two requests
