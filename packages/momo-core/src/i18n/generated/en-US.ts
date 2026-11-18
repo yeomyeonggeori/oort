@@ -8649,7 +8649,7 @@ export const catalog: MessageCatalog = {
   "releaseNotes.v0147.agentsLine1": [
     {
       "type": 0,
-      "value": "Claude Code now connects to the personal MCP server right away when you follow the command line card in Settings."
+      "value": "Claude Code now connects to the personal MCP server right away when you follow the command line and AI tools settings."
     }
   ],
   "releaseNotes.v0147.agentsLine2": [
@@ -8703,7 +8703,7 @@ export const catalog: MessageCatalog = {
   "releaseNotes.v0147.channelNamesTitle": [
     {
       "type": 0,
-      "value": "Name and rename channels in your own language"
+      "value": "Name and rename channels in any language"
     }
   ],
   "releaseNotes.v0147.channelNamesTryIt": [

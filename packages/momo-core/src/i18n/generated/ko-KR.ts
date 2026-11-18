@@ -8231,7 +8231,7 @@ export const catalog: MessageCatalog = {
   "releaseNotes.v0147.agentsLine1": [
     {
       "type": 0,
-      "value": "설정의 「명령줄·AI 도구」 카드 안내대로 Claude Code를 사람용 MCP에 연결하면 이제 바로 붙어요."
+      "value": "설정 › 「명령줄·AI 도구」의 안내대로 Claude Code를 사람용 MCP에 연결하면 이제 바로 붙어요."
     }
   ],
   "releaseNotes.v0147.agentsLine2": [
