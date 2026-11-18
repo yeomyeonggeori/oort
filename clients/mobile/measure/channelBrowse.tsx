@@ -70,6 +70,7 @@ export function ChannelBrowseSurface({which}: {which: string}): React.JSX.Elemen
       }
       onJoin={NOOP}
       onOpen={NOOP}
+      onPreview={NOOP}
       hasMore={which === 'more'}
       loadingMore={false}
       moreFailed={false}

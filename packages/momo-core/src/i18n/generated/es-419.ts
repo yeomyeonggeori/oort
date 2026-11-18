@@ -598,6 +598,80 @@ export const catalog: MessageCatalog = {
       "value": "Solo se pueden usar letras, números, guiones (-) y guiones bajos (_)."
     }
   ],
+  "channels.preview.attachmentLocked": [
+    {
+      "type": 0,
+      "value": "Únete para verlo"
+    }
+  ],
+  "channels.preview.closeAria": [
+    {
+      "type": 0,
+      "value": "Cerrar la vista previa del canal"
+    }
+  ],
+  "channels.preview.empty": [
+    {
+      "type": 0,
+      "value": "Aún no hay mensajes"
+    }
+  ],
+  "channels.preview.joinBand": [
+    {
+      "type": 0,
+      "value": "Únete para escribir y responder."
+    }
+  ],
+  "channels.preview.listAria": [
+    {
+      "type": 0,
+      "value": "Mensajes recientes de "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    }
+  ],
+  "channels.preview.loadForbidden": [
+    {
+      "type": 0,
+      "value": "Esta cuenta no puede ver una vista previa de este canal."
+    }
+  ],
+  "channels.preview.loadGeneric": [
+    {
+      "type": 0,
+      "value": "No se pudieron cargar los mensajes del canal. Inténtalo de nuevo en un momento."
+    }
+  ],
+  "channels.preview.loading": [
+    {
+      "type": 0,
+      "value": "Cargando los mensajes más recientes del canal."
+    }
+  ],
+  "channels.preview.loadNetwork": [
+    {
+      "type": 0,
+      "value": "No se pudieron cargar los mensajes del canal. "
+    },
+    {
+      "type": 1,
+      "value": "reason"
+    }
+  ],
+  "channels.preview.notFound": [
+    {
+      "type": 0,
+      "value": "No se encontró este canal"
+    }
+  ],
+  "channels.preview.openHint": [
+    {
+      "type": 0,
+      "value": "Abre una vista previa de solo lectura de los mensajes recientes."
+    }
+  ],
   "channels.rename.action": [
     {
       "type": 0,

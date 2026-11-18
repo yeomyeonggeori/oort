@@ -41,7 +41,26 @@ describe('the three tabs (ADR-0189 D1)', () => {
       apps: null,
       settings: false,
       channelBrowse: null,
+      channelPreview: null,
     });
+  });
+
+  it('채널 미리 보기(#5847): 둘러보기 위의 층 — 뒤로 한 번이면 둘러보기, 참여하면 둘 다 걷고 그 대화, 둘러보기 없이는 안 선다', () => {
+    const preview = {channelId: 'ch-design-review', name: '디자인-리뷰', memberCount: 8};
+    expect(navReducer(INITIAL_NAV, {type: 'openChannelPreview', preview})).toBe(INITIAL_NAV);
+    const browse = navReducer(INITIAL_NAV, {type: 'openChannelBrowse'});
+    const open = navReducer(browse, {type: 'openChannelPreview', preview});
+    expect(open.channelPreview).toEqual(preview);
+    const back = navReducer(open, {type: 'back'});
+    expect(back.channelPreview).toBeNull();
+    expect(back.channelBrowse).toEqual(browse.channelBrowse);
+    const joined = navReducer(open, {
+      type: 'openChannelFromBrowse',
+      conversation: {channelId: 'ch-design-review', title: '디자인-리뷰'},
+    });
+    expect(joined.channelPreview).toBeNull();
+    expect(joined.channelBrowse).toBeNull();
+    expect(navReducer(joined, {type: 'back'})).toEqual(INITIAL_NAV);
   });
 
   it('채널 둘러보기(#5846): 뒤로 한 번에 걷히고, 참여한 채널은 둘러보기를 걷고 그 대화로, 알림 입구는 걷는다', () => {

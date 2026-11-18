@@ -248,6 +248,17 @@ export const messageKeys = [
   "channels.nameRule.serverRejected",
   "channels.nameRule.tooLong",
   "channels.nameRule.unsupported",
+  "channels.preview.attachmentLocked",
+  "channels.preview.closeAria",
+  "channels.preview.empty",
+  "channels.preview.joinBand",
+  "channels.preview.listAria",
+  "channels.preview.loadForbidden",
+  "channels.preview.loadGeneric",
+  "channels.preview.loading",
+  "channels.preview.loadNetwork",
+  "channels.preview.notFound",
+  "channels.preview.openHint",
   "channels.rename.action",
   "channels.rename.aria",
   "channels.rename.busy",
@@ -2037,6 +2048,21 @@ export const argumentSpecs = {
     "max": "number"
   },
   "channels.nameRule.unsupported": {},
+  "channels.preview.attachmentLocked": {},
+  "channels.preview.closeAria": {},
+  "channels.preview.empty": {},
+  "channels.preview.joinBand": {},
+  "channels.preview.listAria": {
+    "name": "string"
+  },
+  "channels.preview.loadForbidden": {},
+  "channels.preview.loadGeneric": {},
+  "channels.preview.loading": {},
+  "channels.preview.loadNetwork": {
+    "reason": "string"
+  },
+  "channels.preview.notFound": {},
+  "channels.preview.openHint": {},
   "channels.rename.action": {},
   "channels.rename.aria": {
     "name": "string"
@@ -4279,6 +4305,17 @@ export interface MessageArgs {
   "channels.nameRule.serverRejected": Record<string, never>;
   "channels.nameRule.tooLong": { max: number };
   "channels.nameRule.unsupported": Record<string, never>;
+  "channels.preview.attachmentLocked": Record<string, never>;
+  "channels.preview.closeAria": Record<string, never>;
+  "channels.preview.empty": Record<string, never>;
+  "channels.preview.joinBand": Record<string, never>;
+  "channels.preview.listAria": { name: string };
+  "channels.preview.loadForbidden": Record<string, never>;
+  "channels.preview.loadGeneric": Record<string, never>;
+  "channels.preview.loading": Record<string, never>;
+  "channels.preview.loadNetwork": { reason: string };
+  "channels.preview.notFound": Record<string, never>;
+  "channels.preview.openHint": Record<string, never>;
   "channels.rename.action": Record<string, never>;
   "channels.rename.aria": { name: string };
   "channels.rename.busy": Record<string, never>;
