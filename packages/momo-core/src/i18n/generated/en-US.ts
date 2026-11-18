@@ -1188,6 +1188,12 @@ export const catalog: MessageCatalog = {
       "value": "Channels you haven't joined"
     }
   ],
+  "channels.browse.hiddenGroup": [
+    {
+      "type": 0,
+      "value": "Public channels hidden from the browser"
+    }
+  ],
   "channels.browse.join": [
     {
       "type": 0,
@@ -1380,6 +1386,60 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "Search by name or topic"
+    }
+  ],
+  "channels.browse.switchForbidden": [
+    {
+      "type": 0,
+      "value": "Only owners and admins can change this."
+    }
+  ],
+  "channels.browse.switchGeneric": [
+    {
+      "type": 0,
+      "value": "Couldn't save the change. Try again."
+    }
+  ],
+  "channels.browse.switchLabel": [
+    {
+      "type": 0,
+      "value": "Show in channel browser"
+    }
+  ],
+  "channels.browse.switchNetwork": [
+    {
+      "type": 0,
+      "value": "Couldn't save the change. "
+    },
+    {
+      "type": 1,
+      "value": "reason"
+    }
+  ],
+  "channels.browse.switchNotFound": [
+    {
+      "type": 0,
+      "value": "This channel isn't available anymore."
+    }
+  ],
+  "channels.browse.switchNotListable": [
+    {
+      "type": 0,
+      "value": "Only public channels can be shown in the browser."
+    }
+  ],
+  "channels.browse.switchShowAria": [
+    {
+      "type": 0,
+      "value": "Show "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " in channel browser"
     }
   ],
   "channels.browse.title": [

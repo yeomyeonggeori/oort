@@ -57,5 +57,13 @@
   "channels.browse.offline": "目前離線，暫時無法加入。連線後請再試一次。",
   "channels.browse.menuLabel": "新增頻道",
   "channels.browse.menuCreate": "建立新頻道",
-  "channels.browse.paletteGroup": "尚未加入的公開頻道"
+  "channels.browse.paletteGroup": "尚未加入的公開頻道",
+  "channels.browse.switchLabel": "在瀏覽中顯示",
+  "channels.browse.switchShowAria": "在瀏覽中顯示 {name}",
+  "channels.browse.hiddenGroup": "未在瀏覽中顯示的公開頻道",
+  "channels.browse.switchForbidden": "只有擁有者和管理員可以變更。",
+  "channels.browse.switchNotFound": "此頻道已無法使用。",
+  "channels.browse.switchNotListable": "只有公開頻道可以在瀏覽中顯示。",
+  "channels.browse.switchNetwork": "無法儲存變更。{reason}",
+  "channels.browse.switchGeneric": "無法儲存變更，請再試一次。"
 }

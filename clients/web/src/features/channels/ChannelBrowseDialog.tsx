@@ -10,9 +10,11 @@ import {
 import { useNavigate } from "react-router-dom";
 import { keepPreviousData, useInfiniteQuery } from "@tanstack/react-query";
 import { Check, Hash, Loader2 } from "lucide-react";
+import type { Channel } from "@momo/core/lib/api";
 import {
   browseChannels,
   channelBrowseLoadFailure,
+  hiddenPublicChannels,
   splitBrowseRows,
   CHANNEL_BROWSE_QUERY_MAX,
   type BrowseChannel,
@@ -26,7 +28,7 @@ import { cn } from "@/design/lib/cn";
 import { CHIP_CLASS } from "@/features/common/chip";
 import { EmptyInvite, InlineBanner, Skeleton } from "@/features/common/States";
 import { useOffline } from "@/features/common/useOffline";
-import { memberFor, useDirectory } from "@/features/workspace/useWorkspace";
+import { memberFor, useChannels, useDirectory } from "@/features/workspace/useWorkspace";
 import { useFormatMessage } from "@/i18n/useFormatMessage";
 import { useSession } from "@/app/session";
 import {
@@ -35,6 +37,7 @@ import {
   useJoinBrowsedChannel,
   type ChannelBrowseTarget,
 } from "./useChannelBrowse";
+import { useSetBrowseListed } from "./useSetBrowseListed";
 
 // =============================================================================
 // 채널 둘러보기 창 (ADR-0224 화면 · D3 · D4 · D10, #5842). Reading this as: a picker dialog in the shell for internal
@@ -51,7 +54,10 @@ import {
 // 조합 중이라 `compositionend` 만 기다리면 다 친 낱말이 늦게 간다). 조합 중에도 목록은 이미 받은 줄을 화면에서 좁힌다:
 // 지금 칸 값으로, 마지막 글자는 `looseTailIncludes` 로 느슨하게(`디장` ↔ 디자인) — 줄이 조합 도중에 깜빡이지 않는다.
 //
-// #5843(둘러보기에 안 보이는 공개 채널 묶음)은 이 목록 아래에 묶음을 하나 더한다. 자리는 `groups` 끝이다.
+// #5843: 소유자 · 관리자에게는 목록 아래에 「둘러보기에 안 보이는 공개 채널」 묶음이 하나 더 선다. 줄은 서버의 둘러보기 목록이 아니라
+// **내가 든** 꺼진 공개 채널(내 채널 목록에서 `kind == 'public' && browseListed === false`)이다 — 관리자가 들지 않은 채널은 서버도
+// 이 길로 닿지 못한다(404). 켜면 응답의 채널이 내 채널 캐시에 서서 그 줄이 묶음에서 빠지고, 위 서버 목록은 다시 읽는다. 묶음이 비면
+// 묶음 자체가 서지 않는다. 목록 자리는 `h-pane` 고정이라 묶음이 서고 걷혀도 창 높이는 그대로다.
 // =============================================================================
 
 /** 서버 거르기를 보내기 전에 쉬는 시간. 확정된 낱말을 이어 칠 때 글자마다 요청이 나가지 않게. */
@@ -181,6 +187,59 @@ function BrowseRow({
   );
 }
 
+/** 묶음의 한 줄: 내가 든 꺼진 공개 채널 + 「둘러보기에 보이기」 단추. 실패는 둘째 층(주제 자리)을 갈아 끼워 줄 높이가 그대로다. */
+function HiddenRow({
+  channel,
+  pending,
+  failure,
+  offline,
+  onShow,
+}: {
+  channel: Channel;
+  pending: boolean;
+  failure: string | undefined;
+  offline: boolean;
+  onShow: (channelId: string) => void;
+}) {
+  const formatMessage = useFormatMessage();
+  const name = channel.name ?? "";
+  return (
+    <li
+      className="flex flex-col border-b border-line last:border-b-0"
+      data-testid="channel-browse-hidden-row"
+      data-channel-id={channel.id}
+    >
+      <div className="flex items-center gap-3 px-4 py-2">
+        <Hash className="size-4 shrink-0 text-ink-muted" aria-hidden="true" />
+        <span className="flex min-w-0 flex-1 flex-col">
+          <span className="min-w-0 truncate text-body font-semibold text-ink">{name}</span>
+          {failure !== undefined ? (
+            <span className="block min-w-0 break-keep text-meta text-danger" role="alert" data-testid="channel-browse-hidden-error">
+              {failure}
+            </span>
+          ) : channel.topic !== undefined && channel.topic !== "" ? (
+            <span className="block min-w-0 truncate text-meta text-ink-muted">{channel.topic}</span>
+          ) : null}
+        </span>
+        <Button
+          size="sm"
+          variant="outline"
+          className="shrink-0"
+          disabled={offline}
+          aria-busy={pending || undefined}
+          aria-label={formatMessage("channels.browse.switchShowAria", { name })}
+          onClick={() => onShow(channel.id)}
+          data-browse-action=""
+          data-testid="channel-browse-hidden-show"
+        >
+          {pending && <Loader2 aria-hidden="true" className="spinner-busy" />}
+          {formatMessage(failure !== undefined ? "channels.browse.retry" : "channels.browse.switchLabel")}
+        </Button>
+      </div>
+    </li>
+  );
+}
+
 function ChannelBrowsePanel({
   target,
   onClose,
@@ -207,6 +266,27 @@ function ChannelBrowsePanel({
   const listRef = useRef<HTMLDivElement>(null);
   const [gone, setGone] = useState<ReadonlySet<string>>(() => new Set());
 
+  // 소유자 · 관리자의 「둘러보기에 안 보이는 공개 채널」 묶음(#5843).
+  const { groups } = useChannels(workspaceId);
+  const browseSwitch = useSetBrowseListed(workspaceId);
+  const [switchFailures, setSwitchFailures] = useState<ReadonlyMap<string, string>>(() => new Map());
+  const showInBrowse = useCallback(
+    (channelId: string) => {
+      setSwitchFailures((current) => {
+        if (!current.has(channelId)) return current;
+        const next = new Map(current);
+        next.delete(channelId);
+        return next;
+      });
+      void browseSwitch.run(channelId, true).then((result) => {
+        if (result === null || result.ok) return;
+        const message = formatMessage(result.failure.key, result.failure.values as never);
+        setSwitchFailures((current) => new Map(current).set(channelId, message));
+      });
+    },
+    [browseSwitch, formatMessage]
+  );
+
   const { pending, failures, join } = useJoinBrowsedChannel(useCallback(() => onClose(), [onClose]));
 
   // 창이 열려 있는 동안에만 산다(`gcTime: 0`): 열 때마다 다시 읽는다 — 관리자가 방금 켠 채널이 다음에 열 때 보인다.
@@ -226,6 +306,15 @@ function ChannelBrowsePanel({
     [query.data, typed]
   );
   const { notJoined, joined } = splitBrowseRows(rows);
+  const hidden = useMemo(
+    () =>
+      isAdmin
+        ? hiddenPublicChannels(groups.channels).filter((channel) =>
+            rowMatches({ id: channel.id, name: channel.name ?? "", topic: channel.topic, memberCount: 0, isMember: true, isDefault: false }, typed)
+          )
+        : [],
+    [isAdmin, groups.channels, typed]
+  );
 
   const handleJoin = useCallback(
     (channelId: string) => {
@@ -344,6 +433,23 @@ function ChannelBrowsePanel({
         )}
         {group(formatMessage("channels.browse.groupNotJoined"), "channel-browse-not-joined", notJoined)}
         {group(formatMessage("channels.browse.groupJoined"), "channel-browse-joined-group", joined)}
+        {hidden.length > 0 && (
+          <section className="flex flex-col" data-testid="channel-browse-hidden-group">
+            <h3 className={GROUP_HEADING_CLASS}>{formatMessage("channels.browse.hiddenGroup")}</h3>
+            <ul className="flex flex-col">
+              {hidden.map((channel) => (
+                <HiddenRow
+                  key={channel.id}
+                  channel={channel}
+                  pending={browseSwitch.pending.has(channel.id)}
+                  failure={switchFailures.get(channel.id)}
+                  offline={offline}
+                  onShow={showInBrowse}
+                />
+              ))}
+            </ul>
+          </section>
+        )}
         {query.hasNextPage && (
           <div className="flex flex-col items-start gap-2 px-4 py-3">
             {query.isFetchNextPageError && (
