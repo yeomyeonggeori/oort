@@ -532,6 +532,10 @@ export function dmLeaveStep(which: string, formatMessage: (key: typeof DM_LEAVE_
   };
   if (which === 'confirm') return base;
   if (which === 'checking') return {...base, scheduled: 'checking', scheduledCount: 0};
+  // 가장 큰 접근성 글자의 예약 줄 높이 측정(#5903): 알았지만 0개(빈 줄) · 12개 · 목록을 못 읽음.
+  if (which === 'known0') return {...base, scheduledCount: 0};
+  if (which === 'known12') return {...base, scheduledCount: 12};
+  if (which === 'sfailed') return {...base, scheduled: 'failed', scheduledCount: 0};
   if (which === 'pending') return {...base, pending: true};
   if (which === 'failed') return {...base, error: formatMessage(DM_LEAVE_KEYS.failed)};
   if (which === 'unavailable') return {...base, unavailable: true, error: formatMessage(DM_LEAVE_KEYS.unavailable)};
@@ -828,6 +832,9 @@ export function SheetKitSurface({which}: {which: string}): React.JSX.Element {
     case 'channel-dm-leave-pending':
     case 'channel-dm-leave-failed':
     case 'channel-dm-leave-checking':
+    case 'channel-dm-leave-known0':
+    case 'channel-dm-leave-known12':
+    case 'channel-dm-leave-sfailed':
     case 'channel-dm-leave-unavailable':
       return (
         <ChannelSheetSurface

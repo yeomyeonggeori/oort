@@ -11,6 +11,7 @@
   "channels.dmLeave.done": "你已退出對話。",
   "channels.dmLeave.failed": "無法退出。請再試一次。",
   "channels.dmLeave.checking": "正在確認…",
+  "channels.dmLeave.scheduledFailed": "無法載入已預約的訊息。",
   "channels.dmLeave.unavailable": "無法退出此對話。",
   "channels.nameRule.required": "請輸入頻道名稱。",
   "channels.nameRule.tooLong": "頻道名稱最多 {max, number} 個字元。",

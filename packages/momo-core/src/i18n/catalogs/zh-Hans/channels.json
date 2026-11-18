@@ -11,6 +11,7 @@
   "channels.dmLeave.done": "你已退出对话。",
   "channels.dmLeave.failed": "无法退出。请重试。",
   "channels.dmLeave.checking": "正在确认…",
+  "channels.dmLeave.scheduledFailed": "无法加载已预约的消息。",
   "channels.dmLeave.unavailable": "无法退出此对话。",
   "channels.nameRule.required": "请输入频道名称。",
   "channels.nameRule.tooLong": "频道名称最多 {max, number} 个字符。",

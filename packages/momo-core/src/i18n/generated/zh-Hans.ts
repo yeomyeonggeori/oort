@@ -117,6 +117,12 @@ export const catalog: MessageCatalog = {
       "value": "无法退出。请重试。"
     }
   ],
+  "channels.dmLeave.scheduledFailed": [
+    {
+      "type": 0,
+      "value": "无法加载已预约的消息。"
+    }
+  ],
   "channels.dmLeave.unavailable": [
     {
       "type": 0,

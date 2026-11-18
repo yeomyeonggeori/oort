@@ -1272,6 +1272,12 @@ export const catalog: MessageCatalog = {
       "value": "Couldn't leave. Please try again."
     }
   ],
+  "channels.dmLeave.scheduledFailed": [
+    {
+      "type": 0,
+      "value": "Couldn't load the scheduled messages."
+    }
+  ],
   "channels.dmLeave.unavailable": [
     {
       "type": 0,

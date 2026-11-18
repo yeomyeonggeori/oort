@@ -1,5 +1,4 @@
 import {DM_LEAVE_KEYS, resetDmLeaveFoldForTest} from '@momo/core/features/channels/dmLeave';
-import {SCHEDULED_COPY} from '@momo/core/features/scheduled/copy';
 import {catalog as koCatalog} from '@momo/core/i18n/generated/ko-KR';
 import {createMessageService} from '@momo/core/i18n/service';
 import type {Member} from '@momo/core/lib/api';
@@ -22,7 +21,9 @@ import {__resetSessionStore, sessionPort} from '../src/storage/secureSession';
 import {NON_SECRET_KEYS} from '../src/storage/kv';
 import {__resetServerBaseCache, setServerBase} from '../src/storage/serverBase';
 import {centrifugoChannelName} from '@momo/core/lib/realtimeEvents';
+import {ACTIVATE_PX} from '../src/nav/edgeSwipe';
 import {openConversationMenu} from './fixtures/conversationMenu';
+import {finger, pane} from './fixtures/finger';
 import {installAppClock, SHELL_WAIT_TEST_TIMEOUT_MS} from './fixtures/fakeClock';
 import {pinReduceMotion} from './fixtures/reduceMotion';
 
@@ -1063,7 +1064,9 @@ describe('예약 목록을 아직 모를 때 — 「확인 중…」 (#5876)', (
   it('목록을 못 읽으면(404 아닌 오류) 모름을 0 으로 읽지 않는다: 까닭을 말하고 확정은 잠근 채, 「취소」는 먹는다', async () => {
     await mountShell({scheduledStatus: 500});
     const head = await openLeaveStep('row');
-    await waitFor(() => expect(detailLines(head)[2]).toBe(SCHEDULED_COPY.load.error));
+    await waitFor(() => expect(detailLines(head)[2]).toBe(ko(DM_LEAVE_KEYS.scheduledFailed)));
+    // 사전 키다(웹과 같은 키 · 마침표 포함) - 옛 고정 문장(마침표 없음)이 아니다.
+    expect(ko(DM_LEAVE_KEYS.scheduledFailed)).toBe('예약 목록을 불러오지 못했어요.');
     expect(confirmState(head)).toMatchObject({disabled: true});
     await arm();
     fireEvent.press(screen.getByTestId(`${head}-button`));
@@ -1077,6 +1080,27 @@ describe('예약 목록을 아직 모를 때 — 「확인 중…」 (#5876)', (
     const head = await openLeaveStep('row');
     await waitFor(() => expect(detailLines(head)[2]).toBe(' '));
     expect(confirmState(head)?.disabled ?? false).toBe(false);
+  });
+});
+
+describe('가장 큰 접근성 글자의 예약 자리 — 후보 가운데 가장 큰 높이를 미리 잡는다 (#5903)', () => {
+  it.each(SITES)('%s: 숨은 후보 사본이 낭독에서 빠지고, 잰 가장 큰 높이가 설명 글의 최소 높이가 된다', async site => {
+    await mountShell({scheduled: true, holdScheduled: true});
+    const head = await openLeaveStep(site);
+    const copies = [0, 1, 2].map(index => screen.getByTestId(`${head}-detail-reserve-${index}`, {includeHiddenElements: true}));
+    for (const copy of copies) {
+      expect(copy.props.accessibilityElementsHidden).toBe(true);
+      expect(copy.props.importantForAccessibility).toBe('no-hide-descendants');
+    }
+    // 첫 그림: 잰 값이 없으면 최소 높이도 없다(글 그대로).
+    expect(StyleSheet.flatten(screen.getByTestId(`${head}-detail`).props.style).minHeight).toBeUndefined();
+    // 화면이 후보를 꺾어 본 높이(기기에서는 가장 큰 글자에서 한 후보가 한 줄 더 길다)를 흉내 낸다.
+    [100, 164, 100].forEach((height, index) => {
+      act(() => {
+        copies[index].props.onLayout({nativeEvent: {layout: {x: 0, y: 0, width: 300, height}}});
+      });
+    });
+    expect(StyleSheet.flatten(screen.getByTestId(`${head}-detail`).props.style).minHeight).toBe(164);
   });
 });
 
@@ -1150,6 +1174,18 @@ describe('진행 중에는 시트가 몸짓으로 닫히지 않는다 (#5876)', 
     await arm();
     fireEvent.press(screen.getByTestId(`${head}-button`));
     await waitFor(() => expect(leaveCalls()).toHaveLength(1));
+    // 닫는 단추(X · ‹)는 흐리고 잠김으로 읽히고(「취소」와 같은 방식), 확정의 낭독 이름은 보이는 진행 낱말이다(#5903).
+    const closer = screen.getByTestId(DISMISS[site][0]);
+    expect(closer.props.accessibilityState).toMatchObject({disabled: true});
+    expect(StyleSheet.flatten(closer.props.style)).toMatchObject({opacity: 0.55});
+    expect(screen.getByTestId(`${head}-button`).props.accessibilityLabel).toBe(ko(DM_LEAVE_KEYS.busy));
+    if (site === 'info') {
+      // 가장자리 밀기 잠금(#5903 M3): 빼면 이 몸짓이 층을 가져간다. 잠금은 enabled 값으로만 지키므로 값이 아니라 몸짓으로 잰다.
+      const touch = finger(pane('conversation-info-pane'));
+      touch.down(6, 400);
+      expect(touch.move(6 + ACTIVATE_PX + 40, 400)).toBe(false);
+      expect(touch.granted).toBe(false);
+    }
     for (const gesture of DISMISS[site]) {
       fireEvent.press(screen.getByTestId(gesture, {includeHiddenElements: true}));
       await act(() => {
@@ -1171,6 +1207,15 @@ describe('진행 중에는 시트가 몸짓으로 닫히지 않는다 (#5876)', 
   it.each(SITES)('%s: 쉬는 동안(요청 전)은 닫는 몸짓이 먹는다 - 잠금은 진행 중에만 걸린다', async site => {
     await mountShell({holdLeave: true});
     const head = await openLeaveStep(site);
+    const closer = screen.getByTestId(DISMISS[site][0]);
+    expect(closer.props.accessibilityState?.disabled ?? false).toBe(false);
+    expect(StyleSheet.flatten(closer.props.style)?.opacity ?? 1).toBe(1);
+    expect(screen.getByTestId(`${head}-button`).props.accessibilityLabel).toBe(ko(DM_LEAVE_KEYS.confirm));
+    if (site === 'info') {
+      const touch = finger(pane('conversation-info-pane'));
+      touch.down(6, 400);
+      expect(touch.move(6 + ACTIVATE_PX + 40, 400)).toBe(true);
+    }
     fireEvent.press(screen.getByTestId(DISMISS[site][0]));
     await waitFor(() => expect(screen.queryByTestId(head)).toBeNull());
     expect(leaveCalls()).toHaveLength(0);

@@ -57,12 +57,15 @@ function HeaderCircle({
   glyphSize,
   label,
   onPress,
+  disabled = false,
   testID,
 }: {
   glyph: ImageSourcePropType;
   glyphSize: number;
   label: string;
   onPress?: () => void;
+  /** 잠금(#5903) — 요청이 가는 동안처럼 눌러도 닫히지 않을 때. 흐려지고 `accessibilityState.disabled` 가 선다(같은 단계의 「취소」·잠긴 행과 같은 방식). */
+  disabled?: boolean;
   testID?: string;
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
@@ -70,9 +73,11 @@ function HeaderCircle({
     <Pressable
       accessibilityRole="button"
       accessibilityLabel={label}
+      accessibilityState={disabled ? {disabled: true} : undefined}
+      disabled={disabled}
       hitSlop={slopTo(SHEET.circle)}
       onPress={onPress}
-      style={({pressed}) => [styles.circle, pressed && styles.pressed]}
+      style={({pressed}) => [styles.circle, pressed && styles.pressed, disabled && styles.locked]}
       testID={testID}>
       <Image
         source={glyph}
@@ -88,12 +93,15 @@ function HeaderCircle({
 export function CloseCircle({
   label,
   onPress,
+  disabled,
   testID,
 }: {
   /** 보조기술 이름 — 「메시지 액션 닫기」처럼 무엇을 닫는지 말한다. */
   label: string;
   /** 생략하면 그릇(`PageSheet`)의 슬라이드 닫기. 시트 밖(페이지)에서는 필수다. */
   onPress?: () => void;
+  /** 잠금 — 진행 중에는 닫히지 않으니 흐리고 잠김으로 읽힌다(#5903). */
+  disabled?: boolean;
   testID?: string;
 }): React.JSX.Element {
   const sheetClose = usePageSheetClose();
@@ -103,6 +111,7 @@ export function CloseCircle({
       glyphSize={SHEET_ICON_SIZE.close}
       label={label}
       onPress={onPress ?? sheetClose ?? undefined}
+      disabled={disabled}
       testID={testID}
     />
   );
@@ -115,11 +124,14 @@ export function CloseCircle({
 export function BackCircle({
   label,
   onPress,
+  disabled,
   testID,
 }: {
   /** 보조기술 이름 — 어디로 돌아가는지 말한다(「설정으로 돌아가기」). 「닫기」가 아니다: 닫는 것이 아니라 돌아간다. */
   label: string;
   onPress: () => void;
+  /** 잠금 — 진행 중에는 돌아가지 않으니 흐리고 잠김으로 읽힌다(#5903). */
+  disabled?: boolean;
   testID?: string;
 }): React.JSX.Element {
   return (
@@ -128,6 +140,7 @@ export function BackCircle({
       glyphSize={CONV_ICON_SIZE.left}
       label={label}
       onPress={onPress}
+      disabled={disabled}
       testID={testID}
     />
   );
@@ -194,6 +207,7 @@ export function SheetHeader({
   closeLabel,
   onClose,
   closeTestID,
+  closeDisabled,
   confirm,
   titleTestID,
   testID,
@@ -202,6 +216,8 @@ export function SheetHeader({
   closeLabel: string;
   onClose?: () => void;
   closeTestID?: string;
+  /** 닫기 X 를 잠근다 — 요청이 가는 동안(1:1 나가기 진행 중, #5903). 스크림·끌기의 잠금은 그릇(`PageSheet` 의 `dirty`)이 맡는다. */
+  closeDisabled?: boolean;
   confirm?: SheetConfirm;
   titleTestID?: string;
   testID?: string;
@@ -224,7 +240,12 @@ export function SheetHeader({
       </View>
       <HeaderTitle title={title} testID={titleTestID} />
       <View style={[styles.side, styles.sideEnd]}>
-        <CloseCircle label={closeLabel} onPress={onClose} testID={closeTestID} />
+        <CloseCircle
+          label={closeLabel}
+          onPress={onClose}
+          disabled={closeDisabled}
+          testID={closeTestID}
+        />
       </View>
     </View>
   );
@@ -240,16 +261,20 @@ type PageHeaderExit =
       closeLabel: string;
       onClose: () => void;
       closeTestID?: string;
+      /** X 를 잠근다(#5903) — 흐리고 잠김으로 읽힌다. */
+      closeDisabled?: boolean;
       back?: undefined;
       trailing?: undefined;
     }
   | {
-      back: {label: string; onPress: () => void; testID?: string};
+      /** `disabled`: ‹ 를 잠근다(#5903) — 요청이 가는 동안 흐리고 잠김으로 읽힌다. */
+      back: {label: string; onPress: () => void; disabled?: boolean; testID?: string};
       /** ‹ 머리의 오른쪽 칸 — 페이지의 동작 하나(글자 「편집」 같은 것). 생략하면 비어 있다. */
       trailing?: React.ReactNode;
       closeLabel?: undefined;
       onClose?: undefined;
       closeTestID?: undefined;
+      closeDisabled?: undefined;
     };
 
 /**
@@ -261,6 +286,7 @@ export function PageHeader({
   closeLabel,
   onClose,
   closeTestID,
+  closeDisabled,
   back,
   trailing,
   titleTestID,
@@ -275,7 +301,12 @@ export function PageHeader({
     <View style={styles.header} testID={testID}>
       <View style={styles.side}>
         {back ? (
-          <BackCircle label={back.label} onPress={back.onPress} testID={back.testID} />
+          <BackCircle
+            label={back.label}
+            onPress={back.onPress}
+            disabled={back.disabled}
+            testID={back.testID}
+          />
         ) : null}
       </View>
       <HeaderTitle title={title} testID={titleTestID} />
@@ -283,7 +314,12 @@ export function PageHeader({
         {back ? (
           (trailing ?? null)
         ) : (
-          <CloseCircle label={closeLabel} onPress={onClose} testID={closeTestID} />
+          <CloseCircle
+            label={closeLabel}
+            onPress={onClose}
+            disabled={closeDisabled}
+            testID={closeTestID}
+          />
         )}
       </View>
     </View>
@@ -356,5 +392,7 @@ const buildStyles = (color: Palette) => {
     // 회색: 글자가 아니라 글리프라 비텍스트 3:1 을 지키는 `textFaint`(= core `line-strong`)다.
     checkGlyphOff: {tintColor: color.textFaint},
     pressed: {opacity: 0.6},
+    // 잠긴 원 — 같은 단계의 잠긴 행·「취소」(`rowDisabled`)와 같은 흐림.
+    locked: {opacity: 0.55},
   });
 };
