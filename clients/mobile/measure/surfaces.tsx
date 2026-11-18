@@ -4927,6 +4927,7 @@ export function Surface({name}: {name: string}): React.JSX.Element {
     case 'shell-home':
     case 'shell-home-idle':
     case 'shell-home-browse':
+    case 'shell-home-browse-empty':
     case 'shell-home-approval':
     case 'shell-home-loading':
     case 'shell-home-empty':
@@ -7558,11 +7559,20 @@ function seedShell(surface: string): void {
   }
 
   if (surface === 'shell-home-idle') return;
-  if (surface === 'shell-home-browse') {
+  if (surface === 'shell-home-browse' || surface === 'shell-home-browse-empty') {
     harnessClient.setQueryData(
       ['roster', ADE_WS],
       SHELL_ROSTER.map(member => (member.id === SELF ? {...member, role: 'member'} : member)),
     );
+    // 채널이 하나도 없는 정식 멤버(기본 채널까지 나감): 빈 「채널」 섹션과 둘러보기 줄(ADR-0224 D10). DM 은 그대로 둔다.
+    if (surface === 'shell-home-browse-empty') {
+      harnessClient.setQueryData(
+        ['channels', ADE_WS],
+        (harnessClient.getQueryData<{kind: string}[]>(['channels', ADE_WS]) ?? []).filter(
+          channel => channel.kind === 'dm',
+        ),
+      );
+    }
     return;
   }
   // 시안의 카드: 김인턴이 #agent-lab 에서 PR 초안을 쓰는 중.

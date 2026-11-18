@@ -65,13 +65,15 @@ interface Routes {
   role?: string;
   browse?: unknown[];
   join?: JoinAnswer;
+  /** 내 채널 목록(생략하면 general 하나). */
+  channels?: Record<string, unknown>[];
 }
 
 /** 참여가 `'hold'` 일 때 풀어 줄 손잡이. */
 let releaseJoin: (() => void) | null = null;
 
 function installFetch(routes: Routes): jest.Mock {
-  const channels: Record<string, unknown>[] = [...MY_CHANNELS];
+  const channels: Record<string, unknown>[] = [...(routes.channels ?? MY_CHANNELS)];
   const mock = jest.fn(async (url: string, init?: {method?: string}) => {
     const method = init?.method ?? 'GET';
     if (url.includes('/channels/browse')) {
@@ -116,7 +118,9 @@ async function mountHome(routes: Routes = {role: 'member'}): Promise<jest.Mock> 
       <AppShell member={SELF} />
     </QueryClientProvider>,
   );
-  await waitFor(() => expect(screen.getByTestId('sidebar-list')).toBeTruthy());
+  await waitFor(() =>
+    expect(screen.queryByTestId('sidebar-list') ?? screen.queryByTestId('channels-empty')).toBeTruthy(),
+  );
   // 명부가 와야 문 판정이 선다(역할을 읽는다).
   await waitFor(() => expect(fetchMock.mock.calls.some(call => String(call[0]).includes('/roster'))).toBe(true));
   return fetchMock;
@@ -177,6 +181,24 @@ describe('문 — 「채널」 섹션 ⋯ 메뉴의 「채널 둘러보기」는
     expect(options.includes('채널 둘러보기')).toBe(offered);
     // 메뉴의 다른 문은 그대로다(+ 메뉴 · 섹션 메뉴의 기존 줄을 건드리지 않음).
     expect(options.slice(0, 2)).toEqual([FILTER_ACTION, '메시지 검색']);
+  });
+});
+
+describe('채널이 하나도 없는 사람(기본 채널까지 나감, ADR-0224 D10)', () => {
+  it('정식 멤버에게는 빈 「채널」 섹션과 「채널 둘러보기」 줄이 서고, 누르면 둘러보기가 열린다', async () => {
+    await mountHome({role: 'member', channels: []});
+    const row = await screen.findByTestId('home-channels-browse-row');
+    expect(screen.getByTestId('home-section-channels')).toBeTruthy();
+    expect(screen.queryByTestId('channels-empty')).toBeNull();
+    fireEvent.press(row);
+    await waitFor(() => expect(screen.getByTestId('channel-browse-pane')).toBeTruthy());
+  });
+
+  it('게스트에게는 섹션도 줄도 없다', async () => {
+    await mountHome({role: 'guest', channels: []});
+    await waitFor(() => expect(screen.getByTestId('channels-empty')).toBeTruthy());
+    expect(screen.queryByTestId('home-section-channels')).toBeNull();
+    expect(screen.queryByTestId('home-channels-browse-row')).toBeNull();
   });
 });
 

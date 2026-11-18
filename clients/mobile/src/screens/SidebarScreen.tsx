@@ -399,6 +399,11 @@ export default function SidebarScreen({
   const readPhase = readProjectionPhase(readStates);
   // 행 이름과 보임 판정이 같은 답을 읽는다(`rows.ts` `rosterReady`).
   const rosterReady = rosterLoaded(directoryQuery);
+  const selfRole = memberFor(directoryQuery.directory, member.id)?.role;
+  // 둘러보기 문(⋯ 메뉴 · 빈 채널 섹션의 줄 · 이름 검색 묶음)은 정식 멤버에게만 선다 — 명부 전 · 역할 모름 · 게스트는 없음(코어 판정, 웹과
+  // 같다, ADR-0224 D8). 채널이 0개여도 이 사람에게는 「채널」 섹션이 선다(`keepEmptyChannels`, D10 — 기본 채널을 나간 사람이 돌아오는 문).
+  const browseOffered =
+    onOpenChannelBrowse !== undefined && canBrowseChannelsNow(rosterReady, selfRole);
   // 서버가 닫기를 싣는가(읽음 투영 행이 말한다). 싣지 않는 서버에서는 닫기를 내밀지 않는다(폰에는 기기 로컬 닫기가 없다).
   const closureMode = dmClosureMode(readStates.data);
   // 투영이 하한을 싣는가(ADR-0177 증보 2026-11-14 D18): GET 행에 `history_from_seq` 키가 있다. 코어 3a 가 나간 대화를 숨긴다. 나가기
@@ -491,6 +496,7 @@ export default function SidebarScreen({
         readPhase,
         rosterReady,
         dmVerdicts: verdicts,
+        keepEmptyChannels: browseOffered,
       }),
     [
       channelsQuery.groups,
@@ -503,6 +509,7 @@ export default function SidebarScreen({
       readPhase,
       rosterReady,
       verdicts,
+      browseOffered,
     ],
   );
 
@@ -615,10 +622,6 @@ export default function SidebarScreen({
       ),
     [channelsQuery.groups],
   );
-  const selfRole = memberFor(directoryQuery.directory, member.id)?.role;
-  // 둘러보기 문(⋯ 메뉴 · 이름 검색 묶음)은 정식 멤버에게만 선다 — 명부 전 · 역할 모름 · 게스트는 없음(코어 판정, 웹과 같다, ADR-0224 D8).
-  const browseOffered =
-    onOpenChannelBrowse !== undefined && canBrowseChannelsNow(rosterReady, selfRole);
   // 이름 검색의 「참여하지 않은 공개 채널」 묶음(웹 ⌘K 와 같은 결정): 거르기 칸이 열려 있는 동안 서버 목록 한 쪽을 한 번 읽고, 친 글자로는
   // 동기로만 거른다(위 「The search field is synchronous」). 내 채널 목록에 있는 id 는 뺀다. 읽기가 실패하면 묶음이 없다.
   const homeBrowse = useHomeBrowseCandidates(workspaceId, browseOffered && filterVisible);
@@ -1125,6 +1128,23 @@ export default function SidebarScreen({
           )}
           renderSectionFooter={({section}) => (
             <View>
+              {/* 채널이 하나도 없는 정식 멤버(기본 채널까지 나간 사람, ADR-0224 D10): 빈 「채널」 섹션 아래 둘러보기로 가는 줄 하나(#5846).
+                  머리만 서고 아래가 비면 빈 화면처럼 읽혀서 문을 줄로도 세운다. 접어도 이 줄은 남는다(문이라서). */}
+              {section.key === 'channels' &&
+              browseOffered &&
+              !searching &&
+              channelsQuery.groups.channels.length === 0 ? (
+                <GroupCard style={styles.emptyChannelsDoor} testID="home-channels-browse-door">
+                  <ListRow
+                    leading={<RowIcon source={HOME_ICONS.hash} />}
+                    title={formatMessage('channels.browse.title')}
+                    detail={formatMessage('channels.browse.description')}
+                    accessory="chevron"
+                    onPress={() => onOpenChannelBrowse?.()}
+                    testID="home-channels-browse-row"
+                  />
+                </GroupCard>
+              ) : null}
               <View style={styles.sectionGap} />
               {section.key !== shownSections[shownSections.length - 1]?.key ? (
                 <View style={styles.divider} testID="home-divider" />
@@ -2019,6 +2039,8 @@ const buildStyles = (color: Palette) => StyleSheet.create({
   sectionGap: {height: HOME.secBelow},
   // 이름 검색의 「참여하지 않은 공개 채널」 묶음(#5846) — 목록 끝, 섹션 사이 숨과 같은 간격.
   notJoinedGroup: {marginTop: HOME.secBelow},
+  // 빈 「채널」 섹션의 둘러보기 줄(#5846) — 섹션 머리 바로 아래.
+  emptyChannelsDoor: {marginTop: space.xs},
   divider: {
     height: 1,
     backgroundColor: alpha(color.text, 0.1),
