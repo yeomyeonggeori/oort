@@ -1055,7 +1055,8 @@ fn expression_create_branch() -> Value {
          to the team's library); a person looks at the stored picture, picks one and approves. \
          Offer at most 4 candidates. Name each candidate's source: image.source 'attachment' \
          (a picture the person who called you attached in THIS conversation), 'url' (one public \
-         HTTPS link to a picture file, port 443) or 'generated' (bytes you made, PNG/JPEG/GIF/WebP, \
+         HTTPS link to a picture file, port 443; it is not fetched until a person approves that \
+         candidate, and the card shows only its host) or 'generated' (bytes you made, PNG/JPEG/GIF/WebP, \
          at most 1 MiB decoded, with the prompt you used; send the prompt so the card can show it) \
          or 'assembled' (one candidate of what oort_expression_assemble kept for you: its assemblyId \
          and the candidate's index; the picture, prompt and original photo are the stored ones). \

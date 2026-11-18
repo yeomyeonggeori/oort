@@ -472,7 +472,7 @@ pub struct LinkSettled {
 /// pending — ADR-0218 appendix C). Only onto the candidate exactly as the claim left it: a
 /// replacement, a reclaim (reject, expiry, another candidate registered) or a second outcome in
 /// between leaves nothing to write, and that is `Stale`. Lock order is the decision's: approval,
-/// then the card's drafts.
+/// catalog, then the card's drafts.
 pub async fn settle_link_in_tx(
     conn: &mut PgConnection,
     decider: Actor,
@@ -486,6 +486,8 @@ pub async fn settle_link_in_tx(
     if approval.try_get::<String, _>("status")? != "pending" {
         return Err(Error::Stale);
     }
+    // The catalog before the drafts, as the decision, a replacement and the sweep take them.
+    catalog(conn, ws).await?;
     let rows = sqlx::query("SELECT * FROM expression_draft WHERE workspace_id=$1 AND approval_id=$2 ORDER BY candidate_index FOR UPDATE")
         .bind(ws).bind(approval_id).fetch_all(&mut *conn).await?;
     let row = rows

@@ -796,17 +796,29 @@ async fn decide(
     if decision.receipt.get("status").and_then(Value::as_str) != Some(EXPRESSION_LINK_CLAIMED) {
         return respond(decision);
     }
-    let fetched = fetch_claimed_link(&state, &claim, link_permit).await;
-    let outcome = run_decision(
-        &state,
-        &parts,
-        DecisionStep::Settle {
-            claim,
-            fetched: std::sync::Arc::new(fetched),
-            kind: link.kind,
-        },
-    )
+    // On its own task: the candidate is already taken, so the fetch and the decision that writes
+    // its outcome finish even when the person's connection goes away mid-way — a dropped request
+    // must not leave the card saying "not fetched" over a candidate nobody can take again.
+    let settled = tokio::spawn({
+        let state = state.clone();
+        let parts = parts.clone();
+        async move {
+            let fetched = fetch_claimed_link(&state, &claim, link_permit).await;
+            run_decision(
+                &state,
+                &parts,
+                DecisionStep::Settle {
+                    claim,
+                    fetched: std::sync::Arc::new(fetched),
+                    kind: link.kind,
+                },
+            )
+            .await
+        }
+    })
     .await;
+    let outcome =
+        settled.unwrap_or_else(|_| Err(protocol_error("the approved link's fetch did not finish")));
     let decision = match outcome {
         Err(ref error) if is_run_not_parked(error) => not_parked(),
         outcome => settle_db("approvals.decide", outcome)?,
