@@ -5,7 +5,7 @@
 //! | test | what it pins | sabotage that turns it red |
 //! |---|---|---|
 //! | `new_public_channels_are_listed_and_the_channel_list_carries_both_marks` | `POST …/channels` makes a public channel `browseListed` and a private one not, neither default; `GET …/channels` carries both marks on every row; a new workspace's `general` is born default and listed | drop `browse_listed` from the create INSERT; drop it from the workspace seed |
-//! | `an_invite_join_lands_in_the_default_channels_only` | a new person gets every default channel (listed or not) and nothing else; an existing member spending another link gains no channel, gets a left default channel back, and keeps the unread of a live one; a joined or restored default channel starts with 0 unread; another workspace is untouched | revert the join to every public channel; drop the read-cursor call; move the cursor for live memberships too |
+//! | `an_invite_join_lands_in_the_default_channels_only` | a new person gets every default channel (listed or not) and nothing else; an existing member spending another link gains no channel and does not get a left default channel back (even when they left every one), and keeps the unread of a live one; a joined or restored default channel starts with 0 unread; another workspace is untouched | revert the join to every public channel; put an existing member back into a default channel they left; drop the read-cursor call; move the cursor for live memberships too |
 //! | `a_workspace_without_a_default_channel_falls_back_to_its_oldest_live_public_channel` | no default → the single oldest live public channel (not an archived one, not a private one) | drop the fallback; let it pick an archived channel |
 //! | `a_guest_never_lands_in_a_default_channel` | a member demoted to guest who spends a member link or a guest link is refused and holds no channel afterwards | — (held by the gates before the channel write, see the test) |
 //! | `the_welcome_speaks_in_the_oldest_default_channel_whatever_its_name` | the welcome target and the speaker's seat are the oldest default channel, never the channel named `general` | look the welcome channel up by name again |
@@ -593,13 +593,13 @@ async fn an_invite_join_lands_in_the_default_channels_only() {
     assert_eq!(status, 200, "an existing member rejoins: {body}");
     assert_eq!(
         joined_channels(&body),
-        ids(&[general, notice]),
-        "the response lists the default channels: {body}"
+        ids(&[general]),
+        "the response lists only the default channels they are still in: {body}"
     );
     assert_eq!(
         live_channels(&su, ws.id, person).await,
-        ids(&[general, notice]),
-        "another link adds no public channel beyond the defaults; the left default comes back"
+        ids(&[general]),
+        "another link changes no channel membership: the default they left stays left"
     );
     let unread = unread_by_channel(&http, &base, ws.id, &token).await;
     assert_eq!(
@@ -609,8 +609,29 @@ async fn an_invite_join_lands_in_the_default_channels_only() {
     );
     assert_eq!(
         unread.get(&notice.to_string()),
-        Some(&0),
-        "a restored default channel starts at its head: {unread:?}"
+        None,
+        "a default channel they left is not back in their list: {unread:?}"
+    );
+
+    // Leaving every default channel does not turn the next link into "no channel to join": the
+    // link is spent, the answer is still 200, and the person is still in none of them.
+    sqlx::query("UPDATE membership SET left_at = now() WHERE channel_id = $1 AND member_id = $2")
+        .bind(general)
+        .bind(person)
+        .execute(&su)
+        .await
+        .expect("leave general");
+    let third = issue_invite(&http, &base, &owner_token, ws.id, "member").await;
+    let (status, body) = post_join(&http, &base, &third, &email).await;
+    assert_eq!(
+        status, 200,
+        "a member in no default channel still spends a link: {body}"
+    );
+    assert_eq!(joined_channels(&body), BTreeSet::new(), "{body}");
+    assert_eq!(
+        live_channels(&su, ws.id, person).await,
+        BTreeSet::new(),
+        "a third link put them back in a channel they left"
     );
 
     // The other tenant: same rows, and its default channel holds only its owner.
@@ -623,6 +644,53 @@ async fn an_invite_join_lands_in_the_default_channels_only() {
         live_channels(&su, other.id, person).await,
         BTreeSet::new(),
         "the joiner reached {other_general}"
+    );
+}
+
+/// #5841 / ADR-0224 D6: an admin turning a channel on as a default adds nobody to it; only the
+/// person who joins afterwards lands there.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
+async fn a_channel_turned_on_as_default_receives_only_later_newcomers() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let ws = seed_workspace(&su, "turn-on").await;
+    let general = seed_channel(&su, &ws, "public", "general", 10, false, true, true, 0).await;
+    let notice = seed_channel(&su, &ws, "public", "공지", 9, false, false, true, 0).await;
+    let base = start_server(momo_app_pool().await).await;
+    let http = reqwest::Client::new();
+    let owner_token = login(&http, &base, ws.id, &ws.owner_email, OWNER_PASSWORD).await;
+
+    let early = format!("early-{}@channel-default.test", Uuid::new_v4().simple());
+    let code = issue_invite(&http, &base, &owner_token, ws.id, "member").await;
+    let (status, body) = post_join(&http, &base, &code, &early).await;
+    assert_eq!(status, 201, "{body}");
+    let early_id = member_id_by_email(&su, ws.id, &early).await;
+    assert_eq!(live_channels(&su, ws.id, early_id).await, ids(&[general]));
+
+    let response = http
+        .patch(format!("{base}/v1/workspaces/{}/channels/{notice}", ws.id))
+        .bearer_auth(&owner_token)
+        .json(&json!({"isDefault": true}))
+        .send()
+        .await
+        .expect("turn on");
+    assert_eq!(response.status().as_u16(), 200);
+    assert_eq!(
+        live_channels(&su, ws.id, early_id).await,
+        ids(&[general]),
+        "turning it on adds nobody who is already in"
+    );
+
+    let late = format!("late-{}@channel-default.test", Uuid::new_v4().simple());
+    let code = issue_invite(&http, &base, &owner_token, ws.id, "member").await;
+    let (status, body) = post_join(&http, &base, &code, &late).await;
+    assert_eq!(status, 201, "{body}");
+    let late_id = member_id_by_email(&su, ws.id, &late).await;
+    assert_eq!(
+        live_channels(&su, ws.id, late_id).await,
+        ids(&[general, notice]),
+        "the next newcomer lands in both defaults"
     );
 }
 

@@ -174,9 +174,10 @@ pub async fn load_message(
 /// stored row, never by a handle or by "has no `agent` row": the service member a
 /// `webhook_installation` names as its `author_member_id`, and the member
 /// `github_workspace_author` names as its workspace's author. A member row that cannot be read
-/// counts as barred.
+/// counts as barred, and so does one that belongs to another workspace than the job's.
 pub async fn author_is_agent(
     conn: &mut PgConnection,
+    workspace_id: Uuid,
     author_member_id: Uuid,
 ) -> Result<bool, DbError> {
     let may_fetch: Option<bool> = sqlx::query_scalar(
@@ -185,9 +186,10 @@ pub async fn author_is_agent(
                          WHERE w.workspace_id = m.workspace_id AND w.author_member_id = m.id) \
              OR EXISTS (SELECT 1 FROM github_workspace_author g \
                          WHERE g.workspace_id = m.workspace_id AND g.author_member_id = m.id) \
-           FROM member m WHERE m.id = $1",
+           FROM member m WHERE m.id = $1 AND m.workspace_id = $2",
     )
     .bind(author_member_id)
+    .bind(workspace_id)
     .fetch_optional(&mut *conn)
     .await?;
     Ok(!may_fetch.unwrap_or(false))

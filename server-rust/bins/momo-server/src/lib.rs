@@ -1120,7 +1120,8 @@ pub fn build_app(state: AppState) -> Router {
         )
         .route(
             "/v1/workspaces/{ws}/channels/{ch}",
-            patch(routes::channels::update),
+            patch(routes::channels::update)
+                .route_layer(member_write(rate_limit::MemberWrite::ChannelEdit)),
         )
         .route(
             "/v1/workspaces/{ws}/channels/{ch}/notification-pref",
@@ -1146,6 +1147,12 @@ pub fn build_app(state: AppState) -> Router {
             post(routes::channels::join_channel)
                 .route_layer(member_write(rate_limit::MemberWrite::ChannelJoin))
                 .delete(routes::member_lifecycle::leave_channel),
+        )
+        // ADR-0224 D5 — read a public channel before joining it. Same gate as the join;
+        // read-only, no budget of its own (a read, like the browse list).
+        .route(
+            "/v1/workspaces/{ws}/channels/{ch}/preview",
+            get(routes::channels::preview),
         )
         .route(
             "/v1/workspaces/{ws}/channels/{ch}/members/{member}/role",

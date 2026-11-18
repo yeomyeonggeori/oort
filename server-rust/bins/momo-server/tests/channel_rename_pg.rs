@@ -11,8 +11,6 @@
 //!   -- --ignored --test-threads=1 --nocapture
 //! ```
 
-#![allow(dead_code)]
-
 use std::collections::BTreeSet;
 use std::net::SocketAddr;
 use std::path::PathBuf;
@@ -23,6 +21,7 @@ use momo_db::migrate::{default_migrations_dir, run_migrations, SeedMode};
 use momo_db::sqlx;
 use momo_db::sqlx::postgres::{PgConnectOptions, PgPoolOptions};
 use momo_db::PgPool;
+use momo_server::config::RateLimitConfig;
 use momo_server::{build_app, AppState};
 use reqwest::{Method, StatusCode};
 use serde_json::{json, Value};
@@ -37,9 +36,6 @@ async fn test_lock() -> tokio::sync::MutexGuard<'static, ()> {
 
 const TEST_JWT_SECRET: &str = "sec07-channel-management-signing-secret";
 const TEST_PASSWORD: &str = "sec07-channel-management-password";
-const FOREIGN_SCOPE: &str = "workspace scope mismatch";
-const NOT_A_WORKSPACE_MEMBER: &str = "not a workspace member";
-const OPERATOR_REQUIRED: &str = "workspace owner or admin role required";
 
 fn database_url() -> String {
     std::env::var("DATABASE_URL").expect("set DATABASE_URL to a pgvector/pg18 superuser DB")
@@ -115,12 +111,15 @@ fn ensure_schema_and_roles() {
     *ready = true;
 }
 
-async fn start_server(pool: PgPool) -> String {
-    let app = build_app(AppState::new(
-        pool,
-        TEST_JWT_SECRET.to_string(),
-        "ws://127.0.0.1:8000/connection/websocket".to_string(),
-    ));
+async fn start_server(pool: PgPool, limits: RateLimitConfig) -> String {
+    let app = build_app(
+        AppState::new(
+            pool,
+            TEST_JWT_SECRET.to_string(),
+            "ws://127.0.0.1:8000/connection/websocket".to_string(),
+        )
+        .with_rate_limit(limits),
+    );
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
         .await
         .expect("bind momo-server");
@@ -143,8 +142,6 @@ struct Human {
 /// 「달무리 스튜디오」 — owner 이도현, admin 박서연, member 최민수, agent 봇.
 struct Workspace {
     id: Uuid,
-    slug: String,
-    name: String,
     owner: Human,
     admin: Human,
     member: Human,
@@ -244,8 +241,6 @@ async fn seed(su: &PgPool, hint: &str) -> Workspace {
     let agent = seed_agent(su, id, owner.id).await;
     Workspace {
         id,
-        slug,
-        name,
         owner,
         admin,
         member,
@@ -294,14 +289,6 @@ fn error_message(body: &Value) -> &str {
     body["error"]["message"].as_str().unwrap_or("<no message>")
 }
 
-fn id_set(ids: &Value) -> BTreeSet<String> {
-    ids.as_array()
-        .expect("an id array")
-        .iter()
-        .map(|id| id.as_str().expect("id string").to_string())
-        .collect()
-}
-
 fn ids_of(ids: &[Uuid]) -> BTreeSet<String> {
     ids.iter().map(Uuid::to_string).collect()
 }
@@ -321,89 +308,6 @@ async fn audit_count(su: &PgPool, workspace: Uuid, action: &str) -> i64 {
     .expect("count audit rows")
 }
 
-async fn stored_name(su: &PgPool, workspace: Uuid) -> String {
-    sqlx::query_scalar("SELECT name FROM workspace WHERE id = $1")
-        .bind(workspace)
-        .fetch_one(su)
-        .await
-        .expect("read stored workspace name")
-}
-
-async fn stored_updated_at_ms(su: &PgPool, workspace: Uuid) -> i64 {
-    sqlx::query_scalar(
-        "SELECT floor(extract(epoch from updated_at) * 1000)::bigint \
-           FROM workspace WHERE id = $1",
-    )
-    .bind(workspace)
-    .fetch_one(su)
-    .await
-    .expect("read stored updated_at")
-}
-
-async fn set_member_state(su: &PgPool, member: Uuid, status: &str, deleted: bool) {
-    sqlx::query(
-        "UPDATE member \
-            SET status = $2::member_status, \
-                deleted_at = CASE WHEN $3 THEN now() ELSE NULL END \
-          WHERE id = $1",
-    )
-    .bind(member)
-    .bind(status)
-    .bind(deleted)
-    .execute(su)
-    .await
-    .expect("set member state");
-}
-
-async fn channel_count_named(su: &PgPool, workspace: Uuid, name: &str) -> i64 {
-    sqlx::query_scalar("SELECT count(*)::bigint FROM channel WHERE workspace_id = $1 AND name = $2")
-        .bind(workspace)
-        .bind(name)
-        .fetch_one(su)
-        .await
-        .expect("count channels by name")
-}
-
-async fn channel_count(su: &PgPool, workspace: Uuid, kind: &str) -> i64 {
-    sqlx::query_scalar(
-        "SELECT count(*)::bigint FROM channel WHERE workspace_id = $1 AND kind = $2::channel_kind",
-    )
-    .bind(workspace)
-    .bind(kind)
-    .fetch_one(su)
-    .await
-    .expect("count channels by kind")
-}
-
-async fn last_seq(su: &PgPool, channel: Uuid) -> i64 {
-    sqlx::query_scalar("SELECT last_seq FROM channel_seq WHERE channel_id = $1")
-        .bind(channel)
-        .fetch_one(su)
-        .await
-        .expect("channel_seq row exists")
-}
-
-async fn message_count(su: &PgPool, channel: Uuid) -> i64 {
-    sqlx::query_scalar("SELECT count(*)::bigint FROM message WHERE channel_id = $1")
-        .bind(channel)
-        .fetch_one(su)
-        .await
-        .expect("count messages")
-}
-
-/// `(role, left_at IS NULL)` of the one membership row, or `None` when absent.
-async fn membership_row(su: &PgPool, channel: Uuid, member: Uuid) -> Option<(String, bool)> {
-    sqlx::query_as(
-        "SELECT role::text, left_at IS NULL FROM membership \
-          WHERE channel_id = $1 AND member_id = $2",
-    )
-    .bind(channel)
-    .bind(member)
-    .fetch_optional(su)
-    .await
-    .expect("read membership row")
-}
-
 async fn live_member_ids(su: &PgPool, channel: Uuid) -> BTreeSet<String> {
     let ids: Vec<Uuid> = sqlx::query_scalar(
         "SELECT member_id FROM membership WHERE channel_id = $1 AND left_at IS NULL",
@@ -415,38 +319,12 @@ async fn live_member_ids(su: &PgPool, channel: Uuid) -> BTreeSet<String> {
     ids_of(&ids)
 }
 
-fn workspace_url(base: &str, workspace: Uuid) -> String {
-    format!("{base}/v1/workspaces/{workspace}")
-}
-
 fn channels_url(base: &str, workspace: Uuid) -> String {
     format!("{base}/v1/workspaces/{workspace}/channels")
 }
 
 fn members_url(base: &str, workspace: Uuid, channel: Uuid) -> String {
     format!("{base}/v1/workspaces/{workspace}/channels/{channel}/members")
-}
-
-fn send_url(base: &str, workspace: Uuid, channel: Uuid) -> String {
-    format!("{base}/v1/workspaces/{workspace}/channels/{channel}/messages")
-}
-
-async fn send_text(
-    http: &reqwest::Client,
-    base: &str,
-    workspace: Uuid,
-    channel: Uuid,
-    token: &str,
-    body: &str,
-) -> (StatusCode, Value) {
-    call(
-        http,
-        Method::POST,
-        &send_url(base, workspace, channel),
-        token,
-        Some(&json!({"clientMsgId": Uuid::new_v4(), "type": "text", "body": body})),
-    )
-    .await
 }
 
 async fn create_channel(
@@ -465,16 +343,6 @@ async fn create_channel(
         Some(&json!({"kind": kind, "name": name})),
     )
     .await
-}
-
-fn uuid_at(value: &Value, pointer: &str) -> Uuid {
-    Uuid::parse_str(
-        value
-            .pointer(pointer)
-            .and_then(Value::as_str)
-            .expect(pointer),
-    )
-    .expect("a uuid string")
 }
 
 fn channel_url(base: &str, workspace: Uuid, channel: Uuid) -> String {
@@ -513,6 +381,45 @@ async fn renamed_audit(su: &PgPool, workspace: Uuid) -> i64 {
 
 async fn browse_listed_audit(su: &PgPool, workspace: Uuid) -> i64 {
     audit_count(su, workspace, "channel.browse_listed").await
+}
+
+async fn default_audit(su: &PgPool, workspace: Uuid) -> i64 {
+    audit_count(su, workspace, "channel.default").await
+}
+
+async fn is_default(su: &PgPool, channel: Uuid) -> bool {
+    sqlx::query_scalar("SELECT is_default FROM channel WHERE id = $1")
+        .bind(channel)
+        .fetch_one(su)
+        .await
+        .expect("read is_default")
+}
+
+async fn set_default(su: &PgPool, channel: Uuid, default: bool) {
+    sqlx::query("UPDATE channel SET is_default = $2 WHERE id = $1")
+        .bind(channel)
+        .bind(default)
+        .execute(su)
+        .await
+        .expect("set is_default");
+}
+
+async fn default_count(su: &PgPool, workspace: Uuid) -> i64 {
+    sqlx::query_scalar("SELECT count(*) FROM channel WHERE workspace_id = $1 AND is_default")
+        .bind(workspace)
+        .fetch_one(su)
+        .await
+        .expect("count defaults")
+}
+
+/// A listed public channel both the owner and the admin sit in, default or not.
+async fn seated_public(r: &Rig, name: &str, default: bool) -> Uuid {
+    let ch = insert_channel(&r.su, r.ws.id, "public", Some(name), false, r.ws.owner.id).await;
+    set_browse_listed(&r.su, ch, true).await;
+    set_default(&r.su, ch, default).await;
+    join(&r.su, r.ws.id, ch, r.ws.owner.id).await;
+    join(&r.su, r.ws.id, ch, r.ws.admin.id).await;
+    ch
 }
 
 async fn browse_listed(su: &PgPool, channel: Uuid) -> bool {
@@ -647,10 +554,14 @@ struct Rig {
 }
 
 async fn rig(hint: &str) -> Rig {
+    rig_with(hint, RateLimitConfig::default()).await
+}
+
+async fn rig_with(hint: &str, limits: RateLimitConfig) -> Rig {
     ensure_schema_and_roles();
     let su = superuser_pool().await;
     let app = momo_app_pool().await;
-    let base = start_server(app).await;
+    let base = start_server(app, limits).await;
     let http = reqwest::Client::new();
     let ws = seed(&su, hint).await;
     let owner = login(&http, &base, ws.id, &ws.owner).await;
@@ -803,7 +714,12 @@ async fn member_guest_and_agent_are_refused() {
     let guest = seed_human(&r.su, r.ws.id, "guest", "정하늘").await;
     let guest_token = login(&r.http, &r.base, r.ws.id, &guest).await;
     let agent_token = bearer_for_agent(&r.su, r.ws.id, r.ws.agent).await;
-    for field in [json!({"name": "taken-over"}), json!({"browseListed": true})] {
+    set_default(&r.su, ch, false).await;
+    for field in [
+        json!({"name": "taken-over"}),
+        json!({"browseListed": true}),
+        json!({"isDefault": true}),
+    ] {
         for (who, token) in [
             ("member", &r.member),
             ("guest", &guest_token),
@@ -815,8 +731,10 @@ async fn member_guest_and_agent_are_refused() {
     }
     assert_eq!(channel_name(&r.su, ch).await, "keep-me");
     assert!(!browse_listed(&r.su, ch).await);
+    assert!(!is_default(&r.su, ch).await);
     assert_eq!(renamed_audit(&r.su, r.ws.id).await, 0);
     assert_eq!(browse_listed_audit(&r.su, r.ws.id).await, 0);
+    assert_eq!(default_audit(&r.su, r.ws.id).await, 0);
 }
 
 /// Other workspace's channel, DM, group DM, archived, unknown id: the same 404.
@@ -952,7 +870,8 @@ async fn bad_names_and_bad_bodies_are_400_like_create() {
     for bad_body in [
         json!({}),
         json!({"topic": "x"}),
-        json!({"name": "ok", "isDefault": true}),
+        json!({"name": "ok", "isArchived": true}),
+        json!({"isDefault": "yes"}),
         json!({"name": 5}),
         json!([1]),
     ] {
@@ -1421,6 +1340,7 @@ async fn an_admin_outside_a_hidden_channel_gets_the_unknown_id_404_for_every_fie
         json!({"name": "taken-over"}),
         json!({"browseListed": true}),
         json!({"browseListed": false}),
+        json!({"isDefault": true}),
     ] {
         let (status, unknown) =
             patch(&r.http, &r.base, r.ws.id, Uuid::new_v4(), &r.admin, &field).await;
@@ -1450,6 +1370,9 @@ async fn an_admin_outside_a_hidden_channel_gets_the_unknown_id_404_for_every_fie
     assert_eq!(renamed_audit(&r.su, r.ws.id).await, 0);
     assert_eq!(browse_listed_audit(&r.su, r.ws.id).await, 0);
     assert_eq!(browse_listed_audit(&r.su, other.id).await, 0);
+    assert_eq!(default_audit(&r.su, r.ws.id).await, 0);
+    assert_eq!(default_audit(&r.su, other.id).await, 0);
+    assert!(!is_default(&r.su, off_public).await);
 
     // a listed channel the admin does not sit in: editable, and the answer is whole
     let listed = insert_channel(
@@ -1531,4 +1454,522 @@ async fn an_admin_outside_a_hidden_channel_gets_the_unknown_id_404_for_every_fie
     )
     .await;
     assert_eq!(status, 200, "{body}");
+}
+
+/// ADR-0224 D6: `isDefault` is judged on the same target and kind rule as the browse
+/// switch, writes one `channel.default` row per real change, touches no
+/// membership and no other field, and never turns off the last default channel.
+/// A body that mixes fields is all or nothing.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL"]
+async fn the_default_switch_keeps_one_default_and_changes_nothing_else() {
+    let _guard = test_lock().await;
+    let r = rig("df-switch").await;
+    let a = seated_public(&r, "alpha-room", true).await;
+    let b = seated_public(&r, "beta-room", true).await;
+    let c = seated_public(&r, "gamma-room", false).await;
+    let seated_c = live_member_ids(&r.su, c).await;
+
+    // on: the flag moves, the seats do not, browse listing stays as it was
+    let (status, body) = patch(
+        &r.http,
+        &r.base,
+        r.ws.id,
+        c,
+        &r.owner,
+        &json!({"isDefault": true}),
+    )
+    .await;
+    assert_eq!(status, 200, "{body}");
+    assert_eq!(body["channel"]["isDefault"], true);
+    assert_eq!(body["channel"]["browseListed"], true);
+    assert_eq!(live_member_ids(&r.su, c).await, seated_c);
+    // the same value again: 200, no second audit row
+    let (status, body) = patch(
+        &r.http,
+        &r.base,
+        r.ws.id,
+        c,
+        &r.admin,
+        &json!({"isDefault": true}),
+    )
+    .await;
+    assert_eq!(status, 200, "{body}");
+    let rows: Vec<(Uuid, Value)> = sqlx::query_as(
+        "SELECT actor_member_id, detail FROM audit_log \
+          WHERE workspace_id = $1 AND action = 'channel.default'",
+    )
+    .bind(r.ws.id)
+    .fetch_all(&r.su)
+    .await
+    .expect("default audit rows");
+    assert_eq!(rows.len(), 1, "{rows:?}");
+    assert_eq!(rows[0].0, r.ws.owner.id);
+    assert_eq!(
+        (&rows[0].1["old"], &rows[0].1["new"]),
+        (&json!(false), &json!(true))
+    );
+
+    // a kind that cannot be a default: 409 for either value, and the rest of the body is not applied
+    let private = insert_channel(
+        &r.su,
+        r.ws.id,
+        "private",
+        Some("hush-room"),
+        false,
+        r.ws.owner.id,
+    )
+    .await;
+    let dm = insert_channel(&r.su, r.ws.id, "dm", None, false, r.ws.owner.id).await;
+    let archived = insert_channel(
+        &r.su,
+        r.ws.id,
+        "public",
+        Some("old-hall"),
+        true,
+        r.ws.owner.id,
+    )
+    .await;
+    for ch in [private, dm, archived] {
+        join(&r.su, r.ws.id, ch, r.ws.owner.id).await;
+        for wanted in [true, false] {
+            let (status, body) = patch(
+                &r.http,
+                &r.base,
+                r.ws.id,
+                ch,
+                &r.owner,
+                &json!({"isDefault": wanted}),
+            )
+            .await;
+            assert_eq!(status, 409, "{wanted} {body}");
+            assert_eq!(body["error"]["code"], "channel_not_defaultable");
+        }
+    }
+    let (status, body) = patch(
+        &r.http,
+        &r.base,
+        r.ws.id,
+        private,
+        &r.owner,
+        &json!({"name": "renamed-hush", "isDefault": true}),
+    )
+    .await;
+    assert_eq!(status, 409, "{body}");
+    assert_eq!(channel_name(&r.su, private).await, "hush-room");
+    assert_eq!(default_audit(&r.su, r.ws.id).await, 1);
+
+    // all or nothing: a name clash refuses the whole body, the default flag included
+    let (status, body) = patch(
+        &r.http,
+        &r.base,
+        r.ws.id,
+        c,
+        &r.owner,
+        &json!({"name": "alpha-room", "browseListed": false, "isDefault": false}),
+    )
+    .await;
+    assert_eq!(status, 409, "{body}");
+    assert!(is_default(&r.su, c).await);
+    assert!(browse_listed(&r.su, c).await);
+    assert_eq!(channel_name(&r.su, c).await, "gamma-room");
+    // all three together apply together
+    let (status, body) = patch(
+        &r.http,
+        &r.base,
+        r.ws.id,
+        c,
+        &r.owner,
+        &json!({"name": "delta-room", "browseListed": false, "isDefault": false}),
+    )
+    .await;
+    assert_eq!(status, 200, "{body}");
+    assert_eq!(body["channel"]["name"], "delta-room");
+    assert_eq!(body["channel"]["browseListed"], false);
+    assert_eq!(body["channel"]["isDefault"], false);
+    assert_eq!(default_audit(&r.su, r.ws.id).await, 2);
+    assert_eq!(live_member_ids(&r.su, c).await, seated_c);
+
+    // the last default cannot go: b may, then a may not
+    let (status, body) = patch(
+        &r.http,
+        &r.base,
+        r.ws.id,
+        b,
+        &r.owner,
+        &json!({"isDefault": false}),
+    )
+    .await;
+    assert_eq!(status, 200, "{body}");
+    let (status, body) = patch(
+        &r.http,
+        &r.base,
+        r.ws.id,
+        a,
+        &r.owner,
+        &json!({"isDefault": false}),
+    )
+    .await;
+    assert_eq!(status, 409, "{body}");
+    assert_eq!(body["error"]["code"], "last_default_channel");
+    assert!(is_default(&r.su, a).await);
+    assert_eq!(default_count(&r.su, r.ws.id).await, 1);
+    assert_eq!(default_audit(&r.su, r.ws.id).await, 3);
+    // listing and default are separate: unlisting the last default keeps it default
+    let (status, body) = patch(
+        &r.http,
+        &r.base,
+        r.ws.id,
+        a,
+        &r.owner,
+        &json!({"browseListed": false}),
+    )
+    .await;
+    assert_eq!(status, 200, "{body}");
+    assert!(is_default(&r.su, a).await);
+}
+
+/// Two admins each turning off a different one of the two remaining defaults at
+/// once: exactly one wins and one default stays, every round.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL"]
+async fn two_requests_turning_off_the_two_defaults_leave_one() {
+    let _guard = test_lock().await;
+    let r = rig("df-race").await;
+    let a = seated_public(&r, "alpha-room", true).await;
+    let b = seated_public(&r, "beta-room", true).await;
+    for round in 0..8 {
+        set_default(&r.su, a, true).await;
+        set_default(&r.su, b, true).await;
+        let off = json!({"isDefault": false});
+        let (first, second) = tokio::join!(
+            patch(&r.http, &r.base, r.ws.id, a, &r.owner, &off),
+            patch(&r.http, &r.base, r.ws.id, b, &r.admin, &off),
+        );
+        let mut statuses = [first.0.as_u16(), second.0.as_u16()];
+        statuses.sort_unstable();
+        assert_eq!(
+            statuses,
+            [200, 409],
+            "round {round}: {} / {}",
+            first.1,
+            second.1
+        );
+        assert_eq!(default_count(&r.su, r.ws.id).await, 1, "round {round}");
+    }
+}
+
+// ---------------------------------------------------------------------------
+// #5905 — what the first review left (ADR-0225 D10)
+// ---------------------------------------------------------------------------
+
+/// A channel the database already holds under a spelling the rule would not store
+/// (capitals, fullwidth, padded) is still `general`: it cannot be renamed. The name it is
+/// renamed to is judged by the create route's fold, as before.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL"]
+async fn a_stored_spelling_of_general_outside_the_rule_is_locked_too() {
+    let _guard = test_lock().await;
+    let r = rig("rn-legacy").await;
+    for (index, stored) in [
+        "General",
+        "\u{FF47}\u{FF45}\u{FF4E}\u{FF45}\u{FF52}\u{FF41}\u{FF4C}",
+        "  general ",
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let legacy =
+            insert_channel(&r.su, r.ws.id, "public", Some(stored), false, r.ws.owner.id).await;
+        join(&r.su, r.ws.id, legacy, r.ws.owner.id).await;
+        let (status, body) = patch(
+            &r.http,
+            &r.base,
+            r.ws.id,
+            legacy,
+            &r.owner,
+            &json!({"name": format!("renamed-{index}")}),
+        )
+        .await;
+        assert_eq!(status, 409, "{stored:?} {body}");
+        assert_eq!(body["error"]["code"], "general_channel_locked");
+        assert_eq!(channel_name(&r.su, legacy).await, stored);
+    }
+    assert_eq!(renamed_audit(&r.su, r.ws.id).await, 0);
+}
+
+/// A key the caller invented is never sent back (no length, no direction mark).
+#[tokio::test]
+#[ignore = "needs DATABASE_URL"]
+async fn an_unknown_field_is_refused_without_echoing_its_name() {
+    let _guard = test_lock().await;
+    let r = rig("rn-echo").await;
+    let ch = insert_channel(
+        &r.su,
+        r.ws.id,
+        "public",
+        Some("keep-me"),
+        false,
+        r.ws.owner.id,
+    )
+    .await;
+    join(&r.su, r.ws.id, ch, r.ws.owner.id).await;
+    let key = format!("\u{202E}{}", "x".repeat(20_000));
+    let response = r
+        .http
+        .patch(channel_url(&r.base, r.ws.id, ch))
+        .bearer_auth(&r.owner)
+        .json(&json!({ key: true }))
+        .send()
+        .await
+        .expect("http call");
+    assert_eq!(response.status(), 400);
+    let text = response.text().await.expect("body");
+    assert!(
+        text.len() < 300,
+        "the answer must not carry the caller's key: {} bytes",
+        text.len()
+    );
+    assert!(
+        !text.contains('\u{202E}') && !text.contains("xxxx"),
+        "{text}"
+    );
+    assert_eq!(channel_name(&r.su, ch).await, "keep-me");
+}
+
+/// The edit has its own per-member budget. The gate sits after sign-in and before the
+/// handler: a request the handler turns away (400) spends a unit, a request without a
+/// valid token spends none, and another person has a budget of their own.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL"]
+async fn editing_a_channel_spends_its_own_per_member_budget() {
+    let _guard = test_lock().await;
+    let r = rig_with(
+        "rn-budget",
+        RateLimitConfig {
+            channel_edit_per_member_limit: 2,
+            ..RateLimitConfig::default()
+        },
+    )
+    .await;
+    let ch = insert_channel(
+        &r.su,
+        r.ws.id,
+        "public",
+        Some("budget-me"),
+        false,
+        r.ws.owner.id,
+    )
+    .await;
+    join(&r.su, r.ws.id, ch, r.ws.owner.id).await;
+    join(&r.su, r.ws.id, ch, r.ws.admin.id).await;
+    for _ in 0..3 {
+        let (status, _) = patch(
+            &r.http,
+            &r.base,
+            r.ws.id,
+            ch,
+            "not-a-token",
+            &json!({"name": "x"}),
+        )
+        .await;
+        assert_eq!(status, 401, "a refused sign-in spends no unit");
+    }
+    let (status, body) = patch(&r.http, &r.base, r.ws.id, ch, &r.admin, &json!({})).await;
+    assert_eq!(status, 400, "{body}");
+    let (status, body) = patch(
+        &r.http,
+        &r.base,
+        r.ws.id,
+        ch,
+        &r.admin,
+        &json!({"name": "budget-two"}),
+    )
+    .await;
+    assert_eq!(status, 200, "{body}");
+    let (status, body) = patch(
+        &r.http,
+        &r.base,
+        r.ws.id,
+        ch,
+        &r.admin,
+        &json!({"name": "budget-three"}),
+    )
+    .await;
+    assert_eq!(status, 429, "{body}");
+    assert_eq!(channel_name(&r.su, ch).await, "budget-two");
+    let (status, body) = patch(
+        &r.http,
+        &r.base,
+        r.ws.id,
+        ch,
+        &r.owner,
+        &json!({"name": "budget-owner"}),
+    )
+    .await;
+    assert_eq!(status, 200, "{body}");
+}
+
+/// Only the `channel_name_uniq` index means "that name is taken". Another unique index
+/// failing (here the primary key) is not a name clash and must reach the caller as itself.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL"]
+async fn only_the_name_index_reads_as_a_name_clash() {
+    let _guard = test_lock().await;
+    let r = rig("rn-23505").await;
+    let first = insert_channel(
+        &r.su,
+        r.ws.id,
+        "public",
+        Some("clash-me"),
+        false,
+        r.ws.owner.id,
+    )
+    .await;
+    let insert = |id: Uuid, name: &'static str| {
+        let su = r.su.clone();
+        let workspace = r.ws.id;
+        let creator = r.ws.owner.id;
+        async move {
+            sqlx::query(
+                "INSERT INTO channel (id, workspace_id, kind, name, created_by) \
+                 VALUES ($1, $2, 'public'::channel_kind, $3, $4)",
+            )
+            .bind(id)
+            .bind(workspace)
+            .bind(name)
+            .bind(creator)
+            .execute(&su)
+            .await
+            .expect_err("a unique index must refuse this row")
+        }
+    };
+    let by_name = momo_db::DbError::from(insert(Uuid::new_v4(), "CLASH-me").await);
+    assert!(
+        momo_messaging::is_channel_name_conflict(&by_name),
+        "{by_name:?}"
+    );
+    let by_key = momo_db::DbError::from(insert(first, "another-name").await);
+    assert!(
+        !momo_messaging::is_channel_name_conflict(&by_key),
+        "{by_key:?}"
+    );
+}
+
+/// A hosted connection's token is for the Agent Port alone: it does not reach the channel
+/// edit route, whatever it is asked to change.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL"]
+async fn a_hosted_connection_token_does_not_reach_the_channel_edit_route() {
+    let _guard = test_lock().await;
+    let r = rig("rn-hosted").await;
+    let ch = insert_channel(
+        &r.su,
+        r.ws.id,
+        "public",
+        Some("keep-me"),
+        false,
+        r.ws.owner.id,
+    )
+    .await;
+    join(&r.su, r.ws.id, ch, r.ws.owner.id).await;
+    // The connection table takes only a dedicated sentinel agent.
+    let sentinel = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO member (id, workspace_id, kind, display_name, handle) \
+         VALUES ($1, $2, 'agent', '연결 도우미', $3)",
+    )
+    .bind(sentinel)
+    .bind(r.ws.id)
+    .bind(format!("hs-{}", &sentinel.simple().to_string()[..8]))
+    .execute(&r.su)
+    .await
+    .expect("sentinel member");
+    sqlx::query(
+        "INSERT INTO agent (member_id, workspace_id, model, base_url, owner_human_id, config) \
+         VALUES ($1, $2, 'hosted-agent', 'https://hosted-agent.invalid/disabled', $3, \
+                 '{\"execution_mode\":\"hosted_dial_in\"}'::jsonb)",
+    )
+    .bind(sentinel)
+    .bind(r.ws.id)
+    .bind(r.ws.owner.id)
+    .execute(&r.su)
+    .await
+    .expect("sentinel agent");
+    sqlx::query(
+        "INSERT INTO workspace_membership (workspace_id, member_id, role) VALUES ($1, $2, 'member')",
+    )
+    .bind(r.ws.id)
+    .bind(sentinel)
+    .execute(&r.su)
+    .await
+    .expect("sentinel membership");
+    let connection = Uuid::new_v4();
+    let scopes: Vec<String> = ["agent:port:connect", "messages:read", "messages:write"]
+        .iter()
+        .map(|s| (*s).to_string())
+        .collect();
+    sqlx::query(
+        "INSERT INTO hosted_agent_connection( \
+           id,workspace_id,agent_member_id,status,pairing_consumed_at,detected_at,detected_by, \
+           confirmed_by,confirmed_at,approved_channel_ids,approved_scopes,created_by) \
+         VALUES($1,$2,$3,'detected',now(),now(),$4,$4,now(),$5,$6,$4)",
+    )
+    .bind(connection)
+    .bind(r.ws.id)
+    .bind(sentinel)
+    .bind(r.ws.owner.id)
+    .bind(vec![ch])
+    .bind(&scopes)
+    .execute(&r.su)
+    .await
+    .expect("connection");
+    let bearer = format!(
+        "momo_agent_v1.{}.{}{}",
+        r.ws.id,
+        Uuid::new_v4().simple(),
+        Uuid::new_v4().simple()
+    );
+    let token: Uuid = sqlx::query_scalar(
+        "INSERT INTO token(workspace_id, kind, actor_member_id, token_hash, scopes, label, \
+                           credential_class, hosted_connection_id, audience, created_by) \
+         VALUES($1,'agent_bearer',$2,digest($3::text,'sha256'),$4,'rename-test', \
+                'hosted_active',$5,'/v1/mcp/agent-port',$6) RETURNING id",
+    )
+    .bind(r.ws.id)
+    .bind(sentinel)
+    .bind(&bearer)
+    .bind(&scopes)
+    .bind(connection)
+    .bind(r.ws.owner.id)
+    .fetch_one(&r.su)
+    .await
+    .expect("token");
+    sqlx::query(
+        "UPDATE hosted_agent_connection SET status='active', active_token_id=$3, \
+           proved_at=now(), proved_by=$4 WHERE workspace_id=$1 AND id=$2",
+    )
+    .bind(r.ws.id)
+    .bind(connection)
+    .bind(token)
+    .bind(sentinel)
+    .execute(&r.su)
+    .await
+    .expect("activate");
+    for field in [
+        json!({"name": "taken-over"}),
+        json!({"browseListed": true}),
+        json!({"isDefault": true}),
+    ] {
+        let (status, body) = patch(&r.http, &r.base, r.ws.id, ch, &bearer, &field).await;
+        assert_eq!(status, 403, "{field} {body}");
+        assert_eq!(
+            error_message(&body),
+            "agent bearer is not allowed for this route"
+        );
+    }
+    assert_eq!(channel_name(&r.su, ch).await, "keep-me");
+    assert_eq!(renamed_audit(&r.su, r.ws.id).await, 0);
+    assert_eq!(browse_listed_audit(&r.su, r.ws.id).await, 0);
+    assert_eq!(default_audit(&r.su, r.ws.id).await, 0);
 }

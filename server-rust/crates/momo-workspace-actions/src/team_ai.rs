@@ -603,7 +603,8 @@ pub struct Roster {
     /// requester is in it — [`momo_auth::channel_open_to_member_sql`]); in any other room, only
     /// the channels open to people ([`momo_auth::channel_open_to_people_sql`]), so a channel the
     /// room's other readers cannot see is never named there. A private channel's name is never
-    /// listed here.
+    /// listed here. With a guest (#5924, ADR-0219): a room with a guest in it gets only its own
+    /// name, and a guest's own DM only the public channels the guest is in.
     pub channels: Vec<String>,
     /// The channel the request was made in.
     pub this_channel: String,
@@ -657,7 +658,20 @@ pub async fn load_roster_in_tx(
         }
         None => false,
     };
-    let open = if in_helper_dm {
+    // A guest is in the channels they were invited to and no others (ADR-0219, #5924): a room
+    // with a guest in it is told only its own name, and a guest's own DM with the team AI only
+    // the public channels the guest is in.
+    let guest_room = !in_helper_dm
+        && (is_guest
+            || crate::team_ai_tools::room_has_guest_in_tx(conn, workspace_id, channel_id).await?);
+    let open = if guest_room {
+        "false".to_string()
+    } else if in_helper_dm && is_guest {
+        "EXISTS (SELECT 1 FROM membership mine \
+            WHERE mine.workspace_id = c.workspace_id AND mine.channel_id = c.id \
+              AND mine.member_id = $4 AND mine.left_at IS NULL)"
+            .to_string()
+    } else if in_helper_dm {
         momo_auth::channel_open_to_member_sql("c", "$4")
     } else {
         momo_auth::channel_open_to_people_sql("c")

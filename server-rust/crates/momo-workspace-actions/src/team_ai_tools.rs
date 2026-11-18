@@ -348,18 +348,7 @@ pub async fn load_scope_in_tx(
             audience: Audience::RequesterView,
         });
     }
-    let has_guest: bool = sqlx::query_scalar(
-        "SELECT EXISTS ( \
-           SELECT 1 FROM membership ms \
-             LEFT JOIN workspace_membership wm \
-               ON wm.workspace_id = ms.workspace_id AND wm.member_id = ms.member_id \
-            WHERE ms.workspace_id = $1 AND ms.channel_id = $2 AND ms.left_at IS NULL \
-              AND (ms.role = 'guest' OR wm.role = 'guest'))",
-    )
-    .bind(workspace_id)
-    .bind(reply_channel)
-    .fetch_one(&mut *conn)
-    .await?;
+    let has_guest = room_has_guest_in_tx(conn, workspace_id, reply_channel).await?;
     let mut allowed = BTreeSet::from([reply_channel]);
     if !has_guest {
         let sql = format!(
@@ -384,6 +373,12 @@ pub async fn load_scope_in_tx(
 /// requester's whole view may be used (H4-3). [`load_scope_in_tx`] and the channel-name list
 /// ([`crate::team_ai::load_roster_in_tx`]) judge the room with this one function, so the two never
 /// see the same room differently (ADR-0224 D13).
+///
+/// It is that DM only if nobody else was **ever** in it (#5924): the two live participants are the
+/// team AI and the requester, the conversation holds no membership row besides theirs (a person
+/// who left or was suspended keeps theirs and could read the answers again), and it does not
+/// carry the mark of a conversation that seated more than two (`group:` · `admitted:` — kept
+/// after a removed person's memberships are gone).
 pub async fn is_helper_dm_with_in_tx(
     conn: &mut PgConnection,
     helper_member_id: Uuid,
@@ -391,7 +386,7 @@ pub async fn is_helper_dm_with_in_tx(
     reply_channel: Uuid,
 ) -> Result<bool, DbError> {
     let audience = momo_agent::load_dm_audience_in_tx(conn, reply_channel).await?;
-    Ok(audience.is_dm
+    let live_pair = audience.is_dm
         && audience.participants.len() == 2
         && audience
             .participants
@@ -400,7 +395,42 @@ pub async fn is_helper_dm_with_in_tx(
         && audience
             .participants
             .iter()
-            .any(|p| p.member_id == requester))
+            .any(|p| p.member_id == requester);
+    if !live_pair {
+        return Ok(false);
+    }
+    let only_two_ever: Option<bool> = sqlx::query_scalar(
+        "SELECT (SELECT count(*) FROM membership ms WHERE ms.channel_id = c.id) = 2 \
+            AND c.dm_key NOT LIKE 'group:%' AND c.dm_key NOT LIKE 'admitted:%' \
+           FROM channel c WHERE c.id = $1",
+    )
+    .bind(reply_channel)
+    .fetch_optional(&mut *conn)
+    .await?
+    .flatten();
+    Ok(only_two_ever == Some(true))
+}
+
+/// Whether a guest — by workspace role or by channel role — is in `channel` now. The room scope
+/// ([`load_scope_in_tx`]) and the channel-name list ([`crate::team_ai::load_roster_in_tx`]) read
+/// this one judgment.
+pub async fn room_has_guest_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    channel: Uuid,
+) -> Result<bool, DbError> {
+    Ok(sqlx::query_scalar(
+        "SELECT EXISTS ( \
+           SELECT 1 FROM membership ms \
+             LEFT JOIN workspace_membership wm \
+               ON wm.workspace_id = ms.workspace_id AND wm.member_id = ms.member_id \
+            WHERE ms.workspace_id = $1 AND ms.channel_id = $2 AND ms.left_at IS NULL \
+              AND (ms.role = 'guest' OR wm.role = 'guest'))",
+    )
+    .bind(workspace_id)
+    .bind(channel)
+    .fetch_one(&mut *conn)
+    .await?)
 }
 
 /// What a read produced. [`ToolOutcome::Data`] and [`ToolOutcome::Document`] carry workspace

@@ -45,16 +45,17 @@ use axum::response::IntoResponse;
 use axum::{Extension, Json};
 use momo_auth::Principal;
 use momo_messaging::{
-    active_workspace_role, add_channel_member_in_tx, channel_summary_in_tx, clamp_browse_limit,
-    clamp_channel_list_limit, create_channel_detailed_in_tx, db_now_in_tx,
-    is_channel_name_conflict, judge_browse_person, list_browsable_channels_in_tx,
-    list_workspace_channels_within, lock_channel_edit_target_in_tx, normalize_channel_kind,
-    normalize_channel_name, normalize_channel_topic, normalize_membership_role,
-    remove_channel_member_in_tx, rename_channel_in_tx, self_join_channel_in_tx,
-    set_channel_browse_listed_in_tx, set_notification_pref_in_tx, validate_channel_mute,
-    BrowsableChannel, BrowseAfter, BrowseListedChange, BrowsePersonRefusal, ChannelMembership,
-    ChannelMute, ChannelRenameOutcome, ChannelRestriction, ChannelSummary, CreatedChannel,
-    MutedUntilInvalid, NewChannel, SelfJoin,
+    active_workspace_role, add_channel_member_in_tx, channel_summary_in_tx,
+    check_channel_default_change_in_tx, clamp_browse_limit, clamp_channel_list_limit,
+    create_channel_detailed_in_tx, db_now_in_tx, is_channel_name_conflict, judge_browse_person,
+    list_browsable_channels_in_tx, list_workspace_channels_within, lock_channel_edit_target_in_tx,
+    normalize_channel_kind, normalize_channel_name, normalize_channel_topic,
+    normalize_membership_role, remove_channel_member_in_tx, rename_channel_in_tx,
+    self_join_channel_in_tx, set_channel_browse_listed_in_tx, set_channel_default_in_tx,
+    set_notification_pref_in_tx, validate_channel_mute, BrowsableChannel, BrowseAfter,
+    BrowseListedChange, BrowsePersonRefusal, ChannelMembership, ChannelMute, ChannelRenameOutcome,
+    ChannelRestriction, ChannelSummary, CreatedChannel, DefaultChannelCheck, MutedUntilInvalid,
+    NewChannel, SelfJoin,
 };
 use serde::Deserialize;
 use uuid::Uuid;
@@ -261,30 +262,33 @@ pub async fn create(
 /// and a body with no known key is a 400. A later piece adds its key to
 /// [`KNOWN_CHANNEL_PATCH_FIELDS`], to [`ChannelPatch`] and to the transaction in
 /// [`update`] — judged before the first write, applied after.
-const KNOWN_CHANNEL_PATCH_FIELDS: &[&str] = &["name", "browseListed"];
+const KNOWN_CHANNEL_PATCH_FIELDS: &[&str] = &["name", "browseListed", "isDefault"];
 
 struct ChannelPatch {
     /// Already folded and judged by the same function the create route uses.
     name: Option<String>,
     /// ADR-0224 D2 — shown in channel browse or not.
     browse_listed: Option<bool>,
+    /// ADR-0224 D6 — a person joining by invite lands in this channel.
+    is_default: Option<bool>,
 }
 
 fn parse_channel_patch(body: &serde_json::Value) -> Result<ChannelPatch, ApiError> {
     let Some(object) = body.as_object() else {
         return Err(ApiError::bad_request("request body must be a JSON object"));
     };
-    if let Some(unknown) = object
+    // The key is the caller's own text: it is not sent back (the repo's other
+    // unknown-field refusals name no key either).
+    if object
         .keys()
-        .find(|key| !KNOWN_CHANNEL_PATCH_FIELDS.contains(&key.as_str()))
+        .any(|key| !KNOWN_CHANNEL_PATCH_FIELDS.contains(&key.as_str()))
     {
-        return Err(ApiError::bad_request(format!(
-            "unknown channel field '{unknown}'"
-        )));
+        return Err(ApiError::bad_request("unknown channel field"));
     }
     let mut patch = ChannelPatch {
         name: None,
         browse_listed: None,
+        is_default: None,
     };
     if let Some(raw) = object.get("name") {
         let raw = raw
@@ -301,7 +305,13 @@ fn parse_channel_patch(body: &serde_json::Value) -> Result<ChannelPatch, ApiErro
                 .ok_or_else(|| ApiError::bad_request("browseListed must be a boolean"))?,
         );
     }
-    if patch.name.is_none() && patch.browse_listed.is_none() {
+    if let Some(raw) = object.get("isDefault") {
+        patch.is_default = Some(
+            raw.as_bool()
+                .ok_or_else(|| ApiError::bad_request("isDefault must be a boolean"))?,
+        );
+    }
+    if patch.name.is_none() && patch.browse_listed.is_none() && patch.is_default.is_none() {
         return Err(ApiError::bad_request("no channel field to update"));
     }
     Ok(patch)
@@ -333,6 +343,10 @@ const CHANNEL_EDIT_NOT_FOUND: &str = "channel not found";
 /// no write and no audit row. Audit `channel.renamed` / `channel.browse_listed`;
 /// no message, no realtime event. The answer is the channel in the channel
 /// list's shape.
+///
+/// `isDefault` (ADR-0224 D6): 409 `channel_not_defaultable` on a private, DM or
+/// archived channel, 409 `last_default_channel` when it would turn off the
+/// workspace's last live default channel; audit `channel.default`.
 pub async fn update(
     State(state): State<AppState>,
     Extension(principal): Extension<Principal>,
@@ -375,6 +389,23 @@ pub async fn update(
                 if patch.browse_listed.is_some() && !target.listable() {
                     return Ok(Err(channel_not_listable()));
                 }
+                // The `isDefault` piece is judged here, before any write; its write
+                // comes last. It takes a per-workspace lock after the row lock above.
+                let default_change = match patch.is_default {
+                    None => None,
+                    Some(wanted) => {
+                        match check_channel_default_change_in_tx(conn, &target, wanted).await? {
+                            DefaultChannelCheck::NotDefaultable => {
+                                return Ok(Err(channel_not_defaultable()))
+                            }
+                            DefaultChannelCheck::LastDefault => {
+                                return Ok(Err(last_default_channel()))
+                            }
+                            DefaultChannelCheck::Unchanged => None,
+                            DefaultChannelCheck::Change { previous } => Some((wanted, previous)),
+                        }
+                    }
+                };
                 // The `name` piece. Its own refusals come before its only write.
                 if let Some(new_name) = patch.name.as_deref() {
                     match rename_channel_in_tx(conn, &target, new_name).await? {
@@ -444,6 +475,26 @@ pub async fn update(
                         }
                     }
                 }
+                // The `isDefault` piece (ADR-0224 D6). Memberships stay as they are:
+                // only people who join later land in a default channel.
+                if let Some((wanted, previous)) = default_change {
+                    set_channel_default_in_tx(conn, &target, wanted).await?;
+                    momo_db::audit::write_audit(
+                        conn,
+                        &momo_db::audit::AuditEntry::new(workspace_id, "channel.default")
+                            .by(principal.member_id)
+                            .target("channel", channel_id)
+                            .via_token(via_token_id)
+                            .with_schema(
+                                "momo.channel.default.v1",
+                                serde_json::json!({
+                                    "old": previous,
+                                    "new": wanted,
+                                }),
+                            ),
+                    )
+                    .await?;
+                }
                 // The row the channel list shows, read without the list's membership
                 // join: an admin may edit a channel open to people without sitting in it.
                 match channel_summary_in_tx(conn, workspace_id, principal.member_id, channel_id)
@@ -481,6 +532,25 @@ fn channel_not_listable() -> ApiError {
         StatusCode::CONFLICT,
         "channel_not_listable",
         "only a live public channel can be shown in channel browse",
+    )
+}
+
+/// `isDefault` on a channel inside the target condition that is not a live
+/// public channel (ADR-0224 D6).
+fn channel_not_defaultable() -> ApiError {
+    ApiError::coded(
+        StatusCode::CONFLICT,
+        "channel_not_defaultable",
+        "only a live public channel can be a default channel",
+    )
+}
+
+/// Turning off the workspace's last live default channel (ADR-0224 D6).
+fn last_default_channel() -> ApiError {
+    ApiError::coded(
+        StatusCode::CONFLICT,
+        "last_default_channel",
+        "the last default channel cannot be turned off",
     )
 }
 
@@ -717,6 +787,85 @@ pub async fn join_channel(
     Ok(Json(ChannelJoinResponse {
         channel: channel_dto(&summary),
         newly_joined,
+    }))
+}
+
+/// `GET /v1/workspaces/{ws}/channels/{ch}/preview` — read a public channel before joining it
+/// (ADR-0224 D5): the channel's name, topic and member count and its newest top-level
+/// messages, each with only body, author name and kind, time, edited/deleted marks, reply
+/// count and attachment names. Read-only: no read position, membership, audit or outbox
+/// row is written, and no realtime subscription is granted.
+///
+/// The gate is the join's, in the join's order: 403 non-human bearer, 403 workspace scope,
+/// 400 malformed id, 403 not an active member, 403 guest — all before the channel is read —
+/// then the join's one 404 for every id that is not a channel open to people (private, DM,
+/// browse off, archived, unknown, another workspace's), even for a caller seated there. A
+/// caller who is already a member gets the same narrow shape, with `isMember: true`.
+pub async fn preview(
+    State(state): State<AppState>,
+    Extension(principal): Extension<Principal>,
+    Path((workspace, channel)): Path<(String, String)>,
+) -> Result<Json<crate::dto::ChannelPreviewResponse>, ApiError> {
+    require_human(&principal, BROWSE_HUMAN_ONLY)?;
+    let workspace_id = workspace_scope(&workspace, &principal)?;
+    let channel_id = path_uuid(&channel, "invalid channel id")?;
+    let member_id = principal.member_id;
+
+    let outcome: DbRejectable<(
+        momo_messaging::PreviewChannel,
+        Vec<momo_messaging::PreviewMessage>,
+    )> = momo_db::with_tenant_tx_prelude(
+        &state.pool,
+        workspace_id,
+        |conn| Box::pin(momo_messaging::begin_preview_snapshot(conn)),
+        |_conn| Box::pin(async move { Ok(()) }),
+        move |conn| {
+            Box::pin(async move {
+                let role = active_workspace_role(conn, workspace_id, member_id).await?;
+                if let Err(refusal) = judge_browse_person(role) {
+                    return Ok(Err(browse_person_http(refusal)));
+                }
+                match momo_messaging::preview_channel_in_tx(
+                    conn,
+                    workspace_id,
+                    channel_id,
+                    member_id,
+                )
+                .await?
+                {
+                    None => Ok(Err(ApiError::not_found(BROWSE_CHANNEL_NOT_FOUND))),
+                    Some(preview) => Ok(Ok(preview)),
+                }
+            })
+        },
+    )
+    .await;
+
+    let (channel, messages) = settle_db("channels.preview", outcome)?;
+    Ok(Json(crate::dto::ChannelPreviewResponse {
+        channel: crate::dto::PreviewChannelDto {
+            id: channel.id.to_string(),
+            name: channel.name,
+            topic: channel.topic,
+            member_count: channel.member_count,
+            is_member: channel.is_member,
+        },
+        messages: messages
+            .into_iter()
+            .map(|message| crate::dto::PreviewMessageDto {
+                id: message.id.to_string(),
+                body: message.body,
+                author: crate::dto::PreviewAuthorDto {
+                    display_name: message.author_display_name,
+                    kind: message.author_kind,
+                },
+                created_at_ms: message.created_at_ms,
+                edited: message.edited,
+                deleted: message.deleted,
+                reply_count: message.reply_count,
+                attachment_names: message.attachment_names,
+            })
+            .collect(),
     }))
 }
 

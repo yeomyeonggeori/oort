@@ -1411,6 +1411,20 @@ async fn edit_body(su: &PgPool, message: Uuid, body: &str) {
     .expect("edit");
 }
 
+/// A preview job for a message whose body gained a link after it was sent.
+async fn queue_job(su: &PgPool, tenant: &Tenant, message: Uuid) {
+    sqlx::query(
+        "INSERT INTO unfurl_job (workspace_id, channel_id, message_id) VALUES ($1, $2, $3) \
+         ON CONFLICT (message_id) DO NOTHING",
+    )
+    .bind(tenant.workspace)
+    .bind(tenant.channel)
+    .bind(message)
+    .execute(su)
+    .await
+    .expect("queue job");
+}
+
 async fn card_rows(su: &PgPool, message: Uuid) -> i64 {
     sqlx::query_scalar("SELECT count(*) FROM message_unfurl WHERE message_id = $1")
         .bind(message)
@@ -1534,6 +1548,8 @@ async fn an_agent_authored_message_is_never_fetched_except_an_inbound_integratio
         "see https://by-rowless-service.example/d",
     )
     .await;
+    // An edit queues nothing by itself, so a preview job is queued for the edited message the
+    // way any writer could, and the worker must be what stops it.
     let edited_by_agent = insert_message(&su, &channel_agent, "no link yet").await;
     edit_body(
         &su,
@@ -1541,6 +1557,15 @@ async fn an_agent_authored_message_is_never_fetched_except_an_inbound_integratio
         "now https://edited-by-agent.example/e",
     )
     .await;
+    queue_job(&su, &channel_agent, edited_by_agent).await;
+    let edited_by_person = insert_message(&su, &person, "no link yet").await;
+    edit_body(
+        &su,
+        edited_by_person,
+        "now https://edited-by-person.example/i",
+    )
+    .await;
+    queue_job(&su, &person, edited_by_person).await;
     let by_webhook = insert_message(&su, &webhook, "see https://by-webhook.example/f").await;
     let by_github = insert_message(&su, &github, "see https://by-github.example/h").await;
     let by_person = insert_message(&su, &person, "see https://by-person.example/g").await;
@@ -1562,7 +1587,8 @@ async fn an_agent_authored_message_is_never_fetched_except_an_inbound_integratio
         vec![
             "https://by-github.example/h".to_string(),
             "https://by-person.example/g".to_string(),
-            "https://by-webhook.example/f".to_string()
+            "https://by-webhook.example/f".to_string(),
+            "https://edited-by-person.example/i".to_string()
         ],
         "the server asked for a person's, a webhook's and GitHub's link, and nothing another agent wrote"
     );
@@ -1578,6 +1604,7 @@ async fn an_agent_authored_message_is_never_fetched_except_an_inbound_integratio
     assert_eq!(card_rows(&su, by_webhook).await, 1);
     assert_eq!(card_rows(&su, by_github).await, 1);
     assert_eq!(card_rows(&su, by_person).await, 1);
+    assert_eq!(card_rows(&su, edited_by_person).await, 1);
 }
 
 /// A job that was already queued for an agent's message (a row written before the rule, or by a
@@ -1621,4 +1648,79 @@ async fn a_job_already_queued_for_an_agent_message_is_skipped_before_any_fetch()
     assert_eq!(status, "skipped");
     assert_eq!(why.as_deref(), Some("agent author"));
     assert_eq!(card_rows(&su, message).await, 0);
+}
+
+/// Another workspace's exception rows and another workspace's member rows never open a fetch:
+/// a webhook installation or a GitHub author row of workspace B that names workspace A's agent
+/// does not let that agent's links through, and a message in A whose author row lives in B is
+/// not fetched either (the check reads the author inside the job's own workspace).
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 DB"]
+async fn another_workspaces_rows_never_open_a_fetch_for_this_workspaces_agent() {
+    let _guard = test_lock().await;
+    ensure_schema();
+    let su = superuser_pool().await;
+    skip_leftover_jobs(&su).await;
+    let a = seed(&su).await;
+    let b = seed(&su).await;
+    let agent_for_webhook = add_member_of_kind(&su, &a, "agent").await;
+    let agent_for_github = add_member_of_kind(&su, &a, "agent").await;
+    let b_webhook = add_webhook_author(&su, &b).await;
+    sqlx::query(
+        "UPDATE webhook_installation SET author_member_id = $1 WHERE author_member_id = $2",
+    )
+    .bind(agent_for_webhook.member)
+    .bind(b_webhook.member)
+    .execute(&su)
+    .await
+    .expect("point B's installation at A's agent");
+    sqlx::query(
+        "INSERT INTO github_workspace_author (workspace_id, author_member_id) VALUES ($1, $2)",
+    )
+    .bind(b.workspace)
+    .bind(agent_for_github.member)
+    .execute(&su)
+    .await
+    .expect("point B's github author at A's agent");
+    // A person of B who somehow authors a message of A.
+    let foreign_author = Tenant {
+        workspace: a.workspace,
+        member: b.member,
+        channel: a.channel,
+    };
+
+    let by_webhook_pointed = insert_message(
+        &su,
+        &agent_for_webhook,
+        "see https://pointed-webhook.example/a",
+    )
+    .await;
+    let by_github_pointed = insert_message(
+        &su,
+        &agent_for_github,
+        "see https://pointed-github.example/b",
+    )
+    .await;
+    let by_foreign = insert_message(&su, &foreign_author, "see https://foreign.example/c").await;
+    let by_own_person = insert_message(&su, &a, "see https://own-person.example/d").await;
+
+    let asked = Arc::new(Mutex::new(Vec::new()));
+    let worker = UnfurlWorker::new(
+        su.clone(),
+        Arc::new(RecordingHttp {
+            asked: asked.clone(),
+        }),
+        UnfurlConfig::for_tests(database_url(), true),
+    );
+    worker.drain_to_empty().await;
+
+    assert_eq!(
+        asked.lock().unwrap().clone(),
+        vec!["https://own-person.example/d".to_string()],
+        "only the workspace's own person was fetched"
+    );
+    for message in [by_webhook_pointed, by_github_pointed, by_foreign] {
+        assert_eq!(card_rows(&su, message).await, 0);
+    }
+    assert_eq!(card_rows(&su, by_own_person).await, 1);
 }

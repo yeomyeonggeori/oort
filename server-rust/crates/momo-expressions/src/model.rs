@@ -35,6 +35,11 @@ pub const FAILURE_CODES: [&str; 6] = [
     "assembly_timeout",
     "assembly_busy",
 ];
+/// A link an agent put on an `expression.create` card, not fetched yet (#5899, ADR-0170 증보
+/// 2026-11-14's invariant): the server makes no request to an address an agent chose until a person
+/// approves that candidate. Until then the candidate is `manual_upload_required` with this code and
+/// no picture. A candidate's code only: a person's own import never carries it.
+pub const LINK_AWAITING_APPROVAL: &str = "source_awaiting_approval";
 pub const INPUT_BYTES: usize = 5 * 1024 * 1024;
 pub const REQUEST_BYTES: usize = 6 * 1024 * 1024;
 
@@ -128,6 +133,19 @@ pub struct Choice {
         deserialize_with = "present",
         skip_serializing_if = "Option::is_none"
     )]
+    pub kind: Option<Kind>,
+}
+
+/// The decision's `expressionChoice` for a link candidate nobody has fetched yet (#5899): the
+/// candidate and the revision the person was shown, and no hash, because there is no picture to pin
+/// until the approval fetches the link. That approval fetches it once and registers what came.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct LinkChoice {
+    pub draft_id: Uuid,
+    pub revision: String,
+    /// As [`Choice::kind`].
+    #[serde(default, deserialize_with = "present")]
     pub kind: Option<Kind>,
 }
 

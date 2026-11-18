@@ -14,6 +14,16 @@
 //! | `the_fill_picks_one_default_per_workspace_and_lists_only_it` | per channel `(is_default, browse_listed)`: one default per workspace that has a live public channel (a live `general`, else the oldest live public), listed; every other channel off; no default where there is no live public channel; `row_security` back on before the commit; a re-run changes nothing and keeps later choices; both CHECKs refuse a private channel and a DM | drop `browse_listed = true` from the fill; drop a CHECK; drop the closing `SET LOCAL row_security = on` |
 //! | `the_row_count_assertion_aborts_a_fill_that_picks_more_than_one_per_workspace` | the `DO` block's `GET DIAGNOSTICS` assertion is live: a choice that no longer picks one row per workspace aborts the migration and rolls it back whole | drop the `IF updated <> expected` assertion |
 //!
+//! #5909 / migration 186 — the same fill as a safety net, on a database where 184 left the columns but
+//! no default channel (what 184 does when it runs outside one transaction under a role that cannot
+//! bypass row security). Seeded with the same hand-written table.
+//!
+//! | test | what it pins | sabotage that turns it red |
+//! |---|---|---|
+//! | `the_186_fill_repairs_a_database_without_defaults_by_either_route` | one transaction and autocommit `psql -f` both leave the hand-written marks; row_security back on; a re-run moves nothing and keeps an admin's later choices | drop the fill's choice or listing |
+//! | `the_186_fill_stops_loudly_for_a_role_that_cannot_bypass_row_security` | a NOBYPASSRLS table owner gets an error, not exit 0, and no mark moves — in autocommit and in one transaction | drop the `set_config('row_security', 'off', …)` line |
+//! | `the_186_row_count_assertion_aborts_a_fill_that_picks_more_than_one_per_workspace` | the assertion is live in 186 | drop the `IF updated <> expected` assertion |
+//!
 //! `#[ignore]` — needs a real Postgres (pgvector/pg18) and a role that may `CREATE DATABASE`:
 //!
 //! ```text
@@ -32,6 +42,7 @@ use momo_db::PgPool;
 use uuid::Uuid;
 
 const MIGRATION_184: &str = "184_channel_browse_listed_and_default.sql";
+const MIGRATION_186: &str = "186_channel_default_fill_safety_net.sql";
 
 fn migrations_dir() -> PathBuf {
     momo_db::migrate::default_migrations_dir()
@@ -159,6 +170,24 @@ fn run_psql(
         String::from_utf8_lossy(&output.stdout).to_string(),
         String::from_utf8_lossy(&output.stderr).to_string(),
     )
+}
+
+/// Copies of migrations `001..=184`: the state 184 leaves when its fill found nothing.
+fn through_184_dir(label: &str) -> PathBuf {
+    let dir = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join(format!(
+        "migrations-5909-{label}-{}",
+        &Uuid::new_v4().simple().to_string()[..8]
+    ));
+    std::fs::create_dir_all(&dir).expect("create scratch migrations dir");
+    let mut copied = 0;
+    for migration in discover_migrations(&migrations_dir()).expect("discover migrations") {
+        if migration.version <= 184 {
+            std::fs::copy(&migration.path, dir.join(&migration.name)).expect("copy migration");
+            copied += 1;
+        }
+    }
+    assert_eq!(copied, 184, "migrations 001..=184 are all present");
+    dir
 }
 
 // ---------------------------------------------------------------------------
@@ -504,6 +533,210 @@ async fn the_row_count_assertion_aborts_a_fill_that_picks_more_than_one_per_work
     let (ok, _, stderr) = run_psql(&db.url(), &migrations_dir().join(MIGRATION_184), true);
     assert!(ok, "the real migration applies to the same data: {stderr}");
     assert_eq!(marks(&pool, &seeded).await, seeded.expected);
+
+    pool.close().await;
+    db.drop_it().await;
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+// ---------------------------------------------------------------------------
+// migration 186 (#5909)
+// ---------------------------------------------------------------------------
+
+/// A database at 184 whose channels all carry the columns' default (false, false): the state a
+/// fill that saw no rows leaves behind. The seed is the same four workspaces.
+async fn prepared_at_184(label: &str) -> (ScratchDb, PgPool, Seeded, PathBuf) {
+    let db = ScratchDb::create(label).await;
+    let dir = through_184_dir(label);
+    run_migrations(&db.url(), &dir, SeedMode::None).expect("apply migrations 001..=184");
+    let pool = db.pool().await;
+    let seeded = seed_pre_184(&pool).await;
+    let none: BTreeMap<&str, (bool, bool)> = seeded
+        .channels
+        .keys()
+        .map(|label| (*label, (false, false)))
+        .collect();
+    assert_eq!(
+        marks(&pool, &seeded).await,
+        none,
+        "the seed starts with no default channel anywhere"
+    );
+    (db, pool, seeded, dir)
+}
+
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB that may CREATE DATABASE"]
+async fn the_186_fill_repairs_a_database_without_defaults_by_either_route() {
+    let migration = migrations_dir().join(MIGRATION_186);
+    for single_transaction in [true, false] {
+        let (db, pool, seeded, dir) = prepared_at_184("fix").await;
+
+        let (ok, _, stderr) = run_psql(&db.url(), &migration, single_transaction);
+        assert!(
+            ok,
+            "186 applies (single transaction: {single_transaction}): {stderr}"
+        );
+        assert_eq!(
+            marks(&pool, &seeded).await,
+            seeded.expected,
+            "per channel (is_default, browse_listed), single transaction: {single_transaction}"
+        );
+
+        // The switch does not outlive the fill inside the transaction it ran in.
+        let probe = dir.join("186_row_security_probe.sql");
+        std::fs::write(
+            &probe,
+            format!(
+                "BEGIN;\n\\i {}\nSHOW row_security;\nROLLBACK;\n",
+                migration.display()
+            ),
+        )
+        .expect("write probe");
+        let (ok, stdout, stderr) = run_psql(&db.url(), &probe, false);
+        assert!(ok, "the probe ran: {stderr}");
+        assert_eq!(
+            stdout.lines().rfind(|line| !line.trim().is_empty()),
+            Some("on"),
+            "row_security after the fill, same transaction: {stdout}"
+        );
+
+        // A re-run moves nothing and keeps a later admin choice: the default of ws1 was unlisted
+        // and a second default was added.
+        let (w1_default, w1_newer) = (
+            seeded.channels["w1-oldest-live-public"],
+            seeded.channels["w1-newer-public"],
+        );
+        sqlx::query("UPDATE channel SET browse_listed = false WHERE id = $1")
+            .bind(w1_default)
+            .execute(&pool)
+            .await
+            .expect("an admin unlists the default");
+        sqlx::query("UPDATE channel SET is_default = true WHERE id = $1")
+            .bind(w1_newer)
+            .execute(&pool)
+            .await
+            .expect("an admin adds a default");
+        let before_rerun = marks(&pool, &seeded).await;
+        let (ok, _, stderr) = run_psql(&db.url(), &migration, single_transaction);
+        assert!(ok, "186 runs again cleanly: {stderr}");
+        assert_eq!(
+            marks(&pool, &seeded).await,
+            before_rerun,
+            "a re-run moved a mark"
+        );
+
+        pool.close().await;
+        db.drop_it().await;
+        let _ = std::fs::remove_dir_all(dir);
+    }
+}
+
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB that may CREATE DATABASE"]
+async fn the_186_fill_stops_loudly_for_a_role_that_cannot_bypass_row_security() {
+    let migration = migrations_dir().join(MIGRATION_186);
+    let (db, pool, seeded, dir) = prepared_at_184("loud").await;
+
+    // The table's owner without BYPASSRLS: FORCE RLS applies to it, and with no `app.workspace_id`
+    // it sees no channel. 184 ran like this reads 0 = 0 and passes.
+    let role = format!("fill5909_{}", &Uuid::new_v4().simple().to_string()[..8]);
+    let admin = db.admin.clone();
+    sqlx::query(&format!(
+        "CREATE ROLE {role} LOGIN PASSWORD 'fill5909-pw' NOSUPERUSER NOBYPASSRLS"
+    ))
+    .execute(&admin)
+    .await
+    .expect("create the role");
+    sqlx::query(&format!("ALTER TABLE channel OWNER TO {role}"))
+        .execute(&pool)
+        .await
+        .expect("make it the owner");
+    let (head, rest) = db
+        .url()
+        .split_once("://")
+        .map(|(a, b)| (a.to_string(), b.to_string()))
+        .unwrap();
+    let (_, host_and_db) = rest
+        .rsplit_once('@')
+        .expect("DATABASE_URL carries credentials");
+    let as_role = format!("{head}://{role}:fill5909-pw@{host_and_db}");
+
+    let none: BTreeMap<&str, (bool, bool)> = seeded
+        .channels
+        .keys()
+        .map(|label| (*label, (false, false)))
+        .collect();
+    for single_transaction in [false, true] {
+        let (ok, _, stderr) = run_psql(&as_role, &migration, single_transaction);
+        assert!(
+            !ok,
+            "a role that cannot bypass row security must fail, not pass with 0 rows \
+             (single transaction: {single_transaction})"
+        );
+        assert!(
+            stderr.contains("row-level security"),
+            "the failure is the row-security error: {stderr}"
+        );
+        assert_eq!(
+            marks(&pool, &seeded).await,
+            none,
+            "a failed run moved a mark (single transaction: {single_transaction})"
+        );
+    }
+
+    // Control: the same file as the superuser fills the same data.
+    let (ok, _, stderr) = run_psql(&db.url(), &migration, false);
+    assert!(ok, "186 applies as the superuser: {stderr}");
+    assert_eq!(marks(&pool, &seeded).await, seeded.expected);
+
+    pool.close().await;
+    db.drop_it().await;
+    sqlx::query(&format!("DROP ROLE IF EXISTS {role}"))
+        .execute(&admin)
+        .await
+        .expect("drop the role");
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB that may CREATE DATABASE"]
+async fn the_186_row_count_assertion_aborts_a_fill_that_picks_more_than_one_per_workspace() {
+    let (db, pool, seeded, dir) = prepared_at_184("drift186").await;
+
+    let original =
+        std::fs::read_to_string(migrations_dir().join(MIGRATION_186)).expect("read migration 186");
+    let needle = "SELECT DISTINCT ON (candidate.workspace_id) candidate.id";
+    assert_eq!(
+        original.matches(needle).count(),
+        1,
+        "the choice is written once"
+    );
+    let sabotaged = dir.join("186_drifted.sql");
+    std::fs::write(
+        &sabotaged,
+        original.replacen(needle, "SELECT candidate.id", 1),
+    )
+    .expect("write the sabotaged copy");
+
+    let (ok, _, stderr) = run_psql(&db.url(), &sabotaged, false);
+    assert!(
+        !ok,
+        "a fill that picks several channels per workspace must abort"
+    );
+    assert!(
+        stderr.contains("186 default-channel fill: updated"),
+        "the failure is the row-count assertion: {stderr}"
+    );
+    let none: BTreeMap<&str, (bool, bool)> = seeded
+        .channels
+        .keys()
+        .map(|label| (*label, (false, false)))
+        .collect();
+    assert_eq!(
+        marks(&pool, &seeded).await,
+        none,
+        "the aborted fill left a mark behind"
+    );
 
     pool.close().await;
     db.drop_it().await;

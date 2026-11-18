@@ -68,6 +68,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         rate_limit_unfurl_preview_per_member = config.rate_limit.unfurl_preview_per_member_limit,
         rate_limit_thread_read_all_per_member = config.rate_limit.thread_read_all_per_member_limit,
         rate_limit_channel_join_per_member = config.rate_limit.channel_join_per_member_limit,
+        rate_limit_channel_edit_per_member = config.rate_limit.channel_edit_per_member_limit,
         agent_port_rate_limit_per_token = config.agent_port.per_token_limit,
         agent_port_rate_limit_per_agent = config.agent_port.per_agent_limit,
         agent_port_rate_limit_per_ip = config.agent_port.per_ip_limit,
@@ -201,6 +202,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             "RATE_LIMIT_CHANNEL_JOIN_PER_MEMBER",
             config.rate_limit.channel_join_per_member_limit,
             "joining a public channel from the browse list",
+        ),
+        (
+            "RATE_LIMIT_CHANNEL_EDIT_PER_MEMBER",
+            config.rate_limit.channel_edit_per_member_limit,
+            "renaming a channel or switching its listing or default flag",
         ),
     ] {
         if limit == 0 {
