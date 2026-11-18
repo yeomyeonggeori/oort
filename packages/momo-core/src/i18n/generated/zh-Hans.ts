@@ -728,6 +728,44 @@ export const catalog: MessageCatalog = {
       "value": "重命名频道"
     }
   ],
+  "expressions.draft.linkApprove": [
+    {
+      "type": 0,
+      "value": "获取并登记到团队素材库"
+    }
+  ],
+  "expressions.draft.linkBusy": [
+    {
+      "type": 0,
+      "value": "当前正在获取的图片较多。请稍后再按一次。"
+    }
+  ],
+  "expressions.draft.linkFetching": [
+    {
+      "type": 0,
+      "value": "正在获取"
+    }
+  ],
+  "expressions.draft.linkFrom": [
+    {
+      "type": 0,
+      "value": "将从 "
+    },
+    {
+      "type": 1,
+      "value": "host"
+    },
+    {
+      "type": 0,
+      "value": " 获取"
+    }
+  ],
+  "expressions.draft.linkHint": [
+    {
+      "type": 0,
+      "value": "批准后会获取一次图片，检查后登记到团队素材库。"
+    }
+  ],
   "timeline.approval.channelAgentIn": [
     {
       "type": 0,

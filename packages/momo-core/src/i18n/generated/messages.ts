@@ -490,6 +490,11 @@ export const messageKeys = [
   "expressions.draft.approve",
   "expressions.draft.approveFailed",
   "expressions.draft.approving",
+  "expressions.draft.linkApprove",
+  "expressions.draft.linkBusy",
+  "expressions.draft.linkFetching",
+  "expressions.draft.linkFrom",
+  "expressions.draft.linkHint",
   "expressions.draft.previewLabel",
   "expressions.draft.replaceFailed",
   "expressions.draft.replacing",
@@ -2378,6 +2383,13 @@ export const argumentSpecs = {
   "expressions.draft.approve": {},
   "expressions.draft.approveFailed": {},
   "expressions.draft.approving": {},
+  "expressions.draft.linkApprove": {},
+  "expressions.draft.linkBusy": {},
+  "expressions.draft.linkFetching": {},
+  "expressions.draft.linkFrom": {
+    "host": "string"
+  },
+  "expressions.draft.linkHint": {},
   "expressions.draft.previewLabel": {
     "name": "string"
   },
@@ -4553,6 +4565,11 @@ export interface MessageArgs {
   "expressions.draft.approve": Record<string, never>;
   "expressions.draft.approveFailed": Record<string, never>;
   "expressions.draft.approving": Record<string, never>;
+  "expressions.draft.linkApprove": Record<string, never>;
+  "expressions.draft.linkBusy": Record<string, never>;
+  "expressions.draft.linkFetching": Record<string, never>;
+  "expressions.draft.linkFrom": { host: string };
+  "expressions.draft.linkHint": Record<string, never>;
   "expressions.draft.previewLabel": { name: string };
   "expressions.draft.replaceFailed": Record<string, never>;
   "expressions.draft.replacing": Record<string, never>;

@@ -1,1 +1,7 @@
-{}
+{
+  "expressions.draft.linkFrom": "将从 {host} 获取",
+  "expressions.draft.linkHint": "批准后会获取一次图片，检查后登记到团队素材库。",
+  "expressions.draft.linkApprove": "获取并登记到团队素材库",
+  "expressions.draft.linkFetching": "正在获取",
+  "expressions.draft.linkBusy": "当前正在获取的图片较多。请稍后再按一次。"
+}

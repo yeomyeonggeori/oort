@@ -766,6 +766,40 @@ export const catalog: MessageCatalog = {
       "value": "Renommer le canal"
     }
   ],
+  "expressions.draft.linkApprove": [
+    {
+      "type": 0,
+      "value": "Récupérer et enregistrer"
+    }
+  ],
+  "expressions.draft.linkBusy": [
+    {
+      "type": 0,
+      "value": "Beaucoup d’images sont en cours de récupération. Appuyez de nouveau dans un instant."
+    }
+  ],
+  "expressions.draft.linkFetching": [
+    {
+      "type": 0,
+      "value": "Récupération"
+    }
+  ],
+  "expressions.draft.linkFrom": [
+    {
+      "type": 0,
+      "value": "Sera récupérée depuis "
+    },
+    {
+      "type": 1,
+      "value": "host"
+    }
+  ],
+  "expressions.draft.linkHint": [
+    {
+      "type": 0,
+      "value": "En approuvant, l’image est récupérée une fois, vérifiée, puis enregistrée dans la bibliothèque de l’équipe."
+    }
+  ],
   "timeline.approval.channelAgentIn": [
     {
       "type": 0,
