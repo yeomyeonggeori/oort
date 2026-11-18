@@ -196,5 +196,8 @@
   "timeline.workRequest.openTools": "Open my tools",
   "timeline.workRequest.openSheet": "Open task request",
   "timeline.workRequest.openSheetLabel": "{label}: open task request",
-  "timeline.workRequest.sheetHint": "Check the text in the sheet, then send it yourself."
+  "timeline.workRequest.sheetHint": "Check the text in the sheet, then send it yourself.",
+  "timeline.approval.channelNeedsMember": "First add this agent to this channel as a member.",
+  "timeline.approval.channelAgentIn": "This agent is already in this channel.",
+  "timeline.approval.channelsRefused": "Some of the channels you picked can't be connected right now. Please check the list again."
 }

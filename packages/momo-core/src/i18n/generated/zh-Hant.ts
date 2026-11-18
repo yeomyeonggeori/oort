@@ -576,19 +576,19 @@ export const catalog: MessageCatalog = {
       "value": "點一下即可唯讀預覽最近的訊息。"
     }
   ],
-  "connection.approval.channelAgentIn": [
+  "timeline.approval.channelAgentIn": [
     {
       "type": 0,
       "value": "此代理已在該頻道中。"
     }
   ],
-  "connection.approval.channelNeedsMember": [
+  "timeline.approval.channelNeedsMember": [
     {
       "type": 0,
       "value": "請先將此代理加入為該頻道的成員。"
     }
   ],
-  "connection.approval.channelsRefused": [
+  "timeline.approval.channelsRefused": [
     {
       "type": 0,
       "value": "所選頻道中有目前無法連線的頻道。請重新檢查清單。"

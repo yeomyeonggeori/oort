@@ -261,9 +261,6 @@ export const messageKeys = [
   "connect.rememberEmail.label",
   "connection.action.reconnectNow",
   "connection.action.retry",
-  "connection.approval.channelAgentIn",
-  "connection.approval.channelNeedsMember",
-  "connection.approval.channelsRefused",
   "connection.approval.offline",
   "connection.approval.serverUnreachable",
   "connection.boot.offlineDetail",
@@ -1482,6 +1479,9 @@ export const messageKeys = [
   "timeline.agentRail.openRecord",
   "timeline.agentRail.sheetClose",
   "timeline.agentRail.sheetTitle",
+  "timeline.approval.channelAgentIn",
+  "timeline.approval.channelNeedsMember",
+  "timeline.approval.channelsRefused",
   "timeline.approval.reproposeBusy",
   "timeline.approval.reproposeSeeded",
   "timeline.approvalExpiry.soon",
@@ -2048,9 +2048,6 @@ export const argumentSpecs = {
   "connect.rememberEmail.label": {},
   "connection.action.reconnectNow": {},
   "connection.action.retry": {},
-  "connection.approval.channelAgentIn": {},
-  "connection.approval.channelNeedsMember": {},
-  "connection.approval.channelsRefused": {},
   "connection.approval.offline": {},
   "connection.approval.serverUnreachable": {},
   "connection.boot.offlineDetail": {},
@@ -3605,6 +3602,9 @@ export const argumentSpecs = {
   },
   "timeline.agentRail.sheetClose": {},
   "timeline.agentRail.sheetTitle": {},
+  "timeline.approval.channelAgentIn": {},
+  "timeline.approval.channelNeedsMember": {},
+  "timeline.approval.channelsRefused": {},
   "timeline.approval.reproposeBusy": {},
   "timeline.approval.reproposeSeeded": {},
   "timeline.approvalExpiry.soon": {},
@@ -4272,9 +4272,6 @@ export interface MessageArgs {
   "connect.rememberEmail.label": Record<string, never>;
   "connection.action.reconnectNow": Record<string, never>;
   "connection.action.retry": Record<string, never>;
-  "connection.approval.channelAgentIn": Record<string, never>;
-  "connection.approval.channelNeedsMember": Record<string, never>;
-  "connection.approval.channelsRefused": Record<string, never>;
   "connection.approval.offline": Record<string, never>;
   "connection.approval.serverUnreachable": Record<string, never>;
   "connection.boot.offlineDetail": Record<string, never>;
@@ -5493,6 +5490,9 @@ export interface MessageArgs {
   "timeline.agentRail.openRecord": { name: string };
   "timeline.agentRail.sheetClose": Record<string, never>;
   "timeline.agentRail.sheetTitle": Record<string, never>;
+  "timeline.approval.channelAgentIn": Record<string, never>;
+  "timeline.approval.channelNeedsMember": Record<string, never>;
+  "timeline.approval.channelsRefused": Record<string, never>;
   "timeline.approval.reproposeBusy": Record<string, never>;
   "timeline.approval.reproposeSeeded": Record<string, never>;
   "timeline.approvalExpiry.soon": Record<string, never>;

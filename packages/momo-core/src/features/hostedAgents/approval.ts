@@ -1,6 +1,6 @@
 import { ApiError, type Channel } from "../../lib/api";
 import { attachParticle } from "../../lib/koreanParticle";
-import koConnection from "../../i18n/catalogs/ko-KR/connection.json";
+import koTimeline from "../../i18n/catalogs/ko-KR/timeline.json";
 import type { MessageKey } from "../../i18n/generated/messages";
 import {
   boundedLabel,
@@ -208,7 +208,7 @@ export interface ApprovalChannelInput {
 /** 서버가 승인을 거절하는 까닭을 화면이 사전 키로 말한다. 없으면 일반 줄이다. */
 export type ApprovalChannelDetailKey = Extract<
   MessageKey,
-  `connection.approval.channelNeedsMember` | `connection.approval.channelAgentIn`
+  `timeline.approval.channelNeedsMember` | `timeline.approval.channelAgentIn`
 >;
 
 export interface ApprovalChannelChoice {
@@ -272,14 +272,14 @@ export function approvalChannelInputs(
  */
 export function approvalChannelsRefusedKey(
   error: unknown
-): Extract<MessageKey, "connection.approval.channelsRefused"> | null {
+): Extract<MessageKey, "timeline.approval.channelsRefused"> | null {
   return error instanceof ApiError && error.status === 400
-    ? "connection.approval.channelsRefused"
+    ? "timeline.approval.channelsRefused"
     : null;
 }
 
-const NEEDS_MEMBER_DETAIL = koConnection["connection.approval.channelNeedsMember"];
-const AGENT_IN_DETAIL = koConnection["connection.approval.channelAgentIn"];
+const NEEDS_MEMBER_DETAIL = koTimeline["timeline.approval.channelNeedsMember"];
+const AGENT_IN_DETAIL = koTimeline["timeline.approval.channelAgentIn"];
 
 /** 고를 수 있는 줄 가운데 에이전트가 이미 든 채널 — 「승인하면 멤버가 돼요」가 맞지 않다. */
 function isAgentIn(channel: ApprovalChannelInput): boolean {
@@ -327,8 +327,8 @@ export function channelApprovalChoices(
       detail: channelDetail(channel),
       disabled: !isApprovableChannel(channel),
     };
-    if (needsMember(channel)) row.detailKey = "connection.approval.channelNeedsMember";
-    else if (isAgentIn(channel)) row.detailKey = "connection.approval.channelAgentIn";
+    if (needsMember(channel)) row.detailKey = "timeline.approval.channelNeedsMember";
+    else if (isAgentIn(channel)) row.detailKey = "timeline.approval.channelAgentIn";
     (row.disabled ? blocked : eligible).push(row);
   }
   return [...eligible, ...blocked];

@@ -618,19 +618,19 @@ export const catalog: MessageCatalog = {
       "value": "Ouvre un aperçu en lecture seule des messages récents."
     }
   ],
-  "connection.approval.channelAgentIn": [
+  "timeline.approval.channelAgentIn": [
     {
       "type": 0,
       "value": "Cet agent est déjà dans ce canal."
     }
   ],
-  "connection.approval.channelNeedsMember": [
+  "timeline.approval.channelNeedsMember": [
     {
       "type": 0,
       "value": "Ajoutez d'abord cet agent comme membre de ce canal."
     }
   ],
-  "connection.approval.channelsRefused": [
+  "timeline.approval.channelsRefused": [
     {
       "type": 0,
       "value": "Certains des canaux choisis ne peuvent pas être connectés pour le moment. Vérifiez à nouveau la liste."

@@ -576,19 +576,19 @@ export const catalog: MessageCatalog = {
       "value": "タップすると最近の投稿を読み取り専用で確認できます。"
     }
   ],
-  "connection.approval.channelAgentIn": [
+  "timeline.approval.channelAgentIn": [
     {
       "type": 0,
       "value": "このエージェントはすでにこのチャンネルに入っています。"
     }
   ],
-  "connection.approval.channelNeedsMember": [
+  "timeline.approval.channelNeedsMember": [
     {
       "type": 0,
       "value": "先にこのチャンネルにエージェントをメンバーとして追加してください。"
     }
   ],
-  "connection.approval.channelsRefused": [
+  "timeline.approval.channelsRefused": [
     {
       "type": 0,
       "value": "選んだチャンネルの中に、今は接続できないものがあります。一覧をもう一度確認してください。"

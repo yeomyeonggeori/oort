@@ -19,7 +19,6 @@
   "connection.composer.serverUnreachable": "서버에 닿지 못해 지금은 보낼 수 없어요. 쓰던 글은 그대로 있고, 다시 연결되면 여기서 보낼 수 있어요.",
   "connection.approval.offline": "오프라인이라 지금은 결정할 수 없어요. 다시 연결되면 여기서 승인하거나 거부할 수 있어요.",
   "connection.approval.serverUnreachable": "서버에 닿지 못해 지금은 결정할 수 없어요. 다시 연결되면 여기서 승인하거나 거부할 수 있어요.",
-  "connection.approval.channelNeedsMember": "먼저 이 채널에 에이전트를 멤버로 추가해 주세요.",
   "connection.load.conversationTitle": "대화를 불러오지 못했어요",
   "connection.load.channelListTitle": "채널 목록을 불러오지 못했어요",
   "connection.load.threadTitle": "스레드를 불러오지 못했어요",
@@ -77,7 +76,5 @@
   "connection.boot.offlineDetail": "네트워크가 연결되면 다시 시도해 주세요.",
   "connection.boot.offlineQrDetail": "네트워크가 연결되면 QR을 찍을 수 있어요.",
   "connection.boot.unreachable": "서버에 닿지 못했어요. 저장된 로그인은 그대로 있고, 연결되면 이어서 시도해요.",
-  "connection.boot.serverSwitchedSignedOut": "다른 서버로 바꿔서 앞 서버({host})의 로그인은 끝났어요. 돌아가려면 다시 로그인해 주세요.",
-  "connection.approval.channelAgentIn": "이 에이전트가 이미 이 채널에 들어가 있어요.",
-  "connection.approval.channelsRefused": "고른 채널 가운데 지금은 연결할 수 없는 채널이 있어요. 목록을 다시 확인해 주세요."
+  "connection.boot.serverSwitchedSignedOut": "다른 서버로 바꿔서 앞 서버({host})의 로그인은 끝났어요. 돌아가려면 다시 로그인해 주세요."
 }

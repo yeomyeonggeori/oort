@@ -1,5 +1,1 @@
-{
-  "connection.approval.channelNeedsMember": "Ajoutez d'abord cet agent comme membre de ce canal.",
-  "connection.approval.channelAgentIn": "Cet agent est déjà dans ce canal.",
-  "connection.approval.channelsRefused": "Certains des canaux choisis ne peuvent pas être connectés pour le moment. Vérifiez à nouveau la liste."
-}
+{}

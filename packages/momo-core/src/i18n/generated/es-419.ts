@@ -626,19 +626,19 @@ export const catalog: MessageCatalog = {
       "value": "Abre una vista previa de solo lectura de los mensajes recientes."
     }
   ],
-  "connection.approval.channelAgentIn": [
+  "timeline.approval.channelAgentIn": [
     {
       "type": 0,
       "value": "Este agente ya está en este canal."
     }
   ],
-  "connection.approval.channelNeedsMember": [
+  "timeline.approval.channelNeedsMember": [
     {
       "type": 0,
       "value": "Primero agrega este agente como miembro de este canal."
     }
   ],
-  "connection.approval.channelsRefused": [
+  "timeline.approval.channelsRefused": [
     {
       "type": 0,
       "value": "Algunos de los canales que elegiste no se pueden conectar ahora. Revisa la lista de nuevo."

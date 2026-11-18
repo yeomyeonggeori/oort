@@ -1756,24 +1756,6 @@ export const catalog: MessageCatalog = {
       "value": "다시 시도"
     }
   ],
-  "connection.approval.channelAgentIn": [
-    {
-      "type": 0,
-      "value": "이 에이전트가 이미 이 채널에 들어가 있어요."
-    }
-  ],
-  "connection.approval.channelNeedsMember": [
-    {
-      "type": 0,
-      "value": "먼저 이 채널에 에이전트를 멤버로 추가해 주세요."
-    }
-  ],
-  "connection.approval.channelsRefused": [
-    {
-      "type": 0,
-      "value": "고른 채널 가운데 지금은 연결할 수 없는 채널이 있어요. 목록을 다시 확인해 주세요."
-    }
-  ],
   "connection.approval.offline": [
     {
       "type": 0,
@@ -10259,6 +10241,24 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "일하는 에이전트"
+    }
+  ],
+  "timeline.approval.channelAgentIn": [
+    {
+      "type": 0,
+      "value": "이 에이전트가 이미 이 채널에 들어가 있어요."
+    }
+  ],
+  "timeline.approval.channelNeedsMember": [
+    {
+      "type": 0,
+      "value": "먼저 이 채널에 에이전트를 멤버로 추가해 주세요."
+    }
+  ],
+  "timeline.approval.channelsRefused": [
+    {
+      "type": 0,
+      "value": "고른 채널 가운데 지금은 연결할 수 없는 채널이 있어요. 목록을 다시 확인해 주세요."
     }
   ],
   "timeline.approval.reproposeBusy": [
