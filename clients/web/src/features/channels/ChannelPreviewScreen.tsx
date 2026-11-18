@@ -60,7 +60,7 @@ export function PreviewRow({ message }: { message: PreviewMessage }) {
 
   return (
     <li
-      className="mx-1 flex flex-col gap-1 rounded-lg px-3 py-row"
+      className="mx-1 flex flex-col gap-1 rounded-lg px-3 py-2"
       aria-label={spoken}
       data-testid="channel-preview-message"
       data-message-id={message.id}
@@ -214,7 +214,7 @@ export function ChannelPreviewScreen({ channelId, loadingOnly = false }: { chann
       <div className="chat-region flex flex-1 flex-col" data-testid="channel-preview" data-state={state}>
         <header
           data-testid="channel-header"
-          className="channel-head flex min-w-0 flex-wrap items-center gap-y-1 py-row-fixed"
+          className="channel-head flex min-w-0 flex-wrap items-center gap-y-1 py-1.5"
         >
           <div className="channel-head-main flex items-center gap-2">
             <SidebarDrawerToggle />
