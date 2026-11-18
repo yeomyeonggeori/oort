@@ -5,7 +5,7 @@
 //! | test | what it pins | sabotage that turns it red |
 //! |---|---|---|
 //! | `new_public_channels_are_listed_and_the_channel_list_carries_both_marks` | `POST …/channels` makes a public channel `browseListed` and a private one not, neither default; `GET …/channels` carries both marks on every row; a new workspace's `general` is born default and listed | drop `browse_listed` from the create INSERT; drop it from the workspace seed |
-//! | `an_invite_join_lands_in_the_default_channels_only` | a new person gets every default channel (listed or not) and nothing else; an existing member spending another link gains no channel, gets a left default channel back, and keeps the unread of a live one; a joined or restored default channel starts with 0 unread; another workspace is untouched | revert the join to every public channel; drop the read-cursor call; move the cursor for live memberships too |
+//! | `an_invite_join_lands_in_the_default_channels_only` | a new person gets every default channel (listed or not) and nothing else; an existing member spending another link gains no channel and does not get a left default channel back (even when they left every one), and keeps the unread of a live one; a joined or restored default channel starts with 0 unread; another workspace is untouched | revert the join to every public channel; put an existing member back into a default channel they left; drop the read-cursor call; move the cursor for live memberships too |
 //! | `a_workspace_without_a_default_channel_falls_back_to_its_oldest_live_public_channel` | no default → the single oldest live public channel (not an archived one, not a private one) | drop the fallback; let it pick an archived channel |
 //! | `a_guest_never_lands_in_a_default_channel` | a member demoted to guest who spends a member link or a guest link is refused and holds no channel afterwards | — (held by the gates before the channel write, see the test) |
 //! | `the_welcome_speaks_in_the_oldest_default_channel_whatever_its_name` | the welcome target and the speaker's seat are the oldest default channel, never the channel named `general` | look the welcome channel up by name again |
@@ -593,13 +593,13 @@ async fn an_invite_join_lands_in_the_default_channels_only() {
     assert_eq!(status, 200, "an existing member rejoins: {body}");
     assert_eq!(
         joined_channels(&body),
-        ids(&[general, notice]),
-        "the response lists the default channels: {body}"
+        ids(&[general]),
+        "the response lists only the default channels they are still in: {body}"
     );
     assert_eq!(
         live_channels(&su, ws.id, person).await,
-        ids(&[general, notice]),
-        "another link adds no public channel beyond the defaults; the left default comes back"
+        ids(&[general]),
+        "another link changes no channel membership: the default they left stays left"
     );
     let unread = unread_by_channel(&http, &base, ws.id, &token).await;
     assert_eq!(
@@ -609,8 +609,29 @@ async fn an_invite_join_lands_in_the_default_channels_only() {
     );
     assert_eq!(
         unread.get(&notice.to_string()),
-        Some(&0),
-        "a restored default channel starts at its head: {unread:?}"
+        None,
+        "a default channel they left is not back in their list: {unread:?}"
+    );
+
+    // Leaving every default channel does not turn the next link into "no channel to join": the
+    // link is spent, the answer is still 200, and the person is still in none of them.
+    sqlx::query("UPDATE membership SET left_at = now() WHERE channel_id = $1 AND member_id = $2")
+        .bind(general)
+        .bind(person)
+        .execute(&su)
+        .await
+        .expect("leave general");
+    let third = issue_invite(&http, &base, &owner_token, ws.id, "member").await;
+    let (status, body) = post_join(&http, &base, &third, &email).await;
+    assert_eq!(
+        status, 200,
+        "a member in no default channel still spends a link: {body}"
+    );
+    assert_eq!(joined_channels(&body), BTreeSet::new(), "{body}");
+    assert_eq!(
+        live_channels(&su, ws.id, person).await,
+        BTreeSet::new(),
+        "a third link put them back in a channel they left"
     );
 
     // The other tenant: same rows, and its default channel holds only its owner.

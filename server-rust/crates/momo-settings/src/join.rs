@@ -624,10 +624,10 @@ pub struct JoinedMembership {
     pub id: Uuid,
     pub channel_id: Uuid,
     pub role: String,
-    /// `true` when this join inserted the row or brought a member back from
-    /// `left_at` — the memberships whose read position starts at the channel's
-    /// end (ADR-0224 D9). `false` for a membership that was already live, whose
-    /// read position this join must not touch. Not part of the response.
+    /// `true` when this join inserted the row — a new person's default channels,
+    /// whose read position starts at the channel's end (ADR-0224 D9). `false` for
+    /// a membership that was already live (an existing member spending another
+    /// link), whose read position this join must not touch. Not part of the response.
     pub admitted: bool,
 }
 
@@ -797,8 +797,11 @@ pub async fn redeem_invite_in_tx(
     //    DO NOTHING: a returning member keeps the role they already hold, and
     //    (5)/(7) already refused any link that would have raised it.
     ensure_workspace_membership(conn, workspace_id, member.id, &invite_role).await?;
-    let memberships = join_default_channels(conn, workspace_id, member.id, &invite_role).await?;
-    if memberships.is_empty() {
+    let memberships =
+        join_default_channels(conn, workspace_id, member.id, &invite_role, created_member).await?;
+    // Only a new person has to land somewhere: an existing member who left every default
+    // channel spends the link and joins none, which is not "the workspace has no channel".
+    if created_member && memberships.is_empty() {
         return Err(JoinRejection::NoPublicChannels.into());
     }
 
@@ -1272,25 +1275,23 @@ async fn ensure_workspace_membership(
 /// none (an old self-hosted install, say) falls back to its single oldest live
 /// public channel, and only a workspace with no live public channel at all ends
 /// with no row — the caller's [`JoinRejection::NoPublicChannels`]. Whether a
-/// channel is listed in channel browse (`browse_listed`) plays no part (D7). The
-/// same rule holds for a brand-new person and for an existing member spending
-/// another link, so a second link no longer pulls an existing member into public
-/// channels they never joined.
+/// channel is listed in channel browse (`browse_listed`) plays no part (D7).
 ///
-/// `DO UPDATE` rather than `DO NOTHING` so a member who *left* a channel is
-/// brought back in with the invite's role, while a member who never left keeps
-/// the role they already have — `membership.left_at IS NULL` is the test, and
-/// getting it backwards would let a public link rewrite a channel owner's role.
-/// A live membership is still returned (the response lists it), but with
-/// `admitted = false`: only a row this join inserted or restored is a fresh start
-/// whose read position the caller moves to the channel's end (D9).
+/// Only a **brand-new person** is put in (`put_in = true`). An existing member
+/// spending another link (`put_in = false`) gains and regains nothing: a default
+/// channel they left stays left, because leaving was their own choice and the way
+/// back is channel browse. Their live default memberships are still returned (the
+/// response lists them), with `admitted = false`, so the caller leaves their read
+/// position alone. A new person has no earlier membership row, so `DO NOTHING`
+/// cannot hide a role or a position that mattered.
 async fn join_default_channels(
     conn: &mut PgConnection,
     workspace_id: Uuid,
     member_id: Uuid,
     role: &str,
+    put_in: bool,
 ) -> Result<Vec<JoinedMembership>, DbError> {
-    let rows: Vec<(Uuid, Uuid, String, bool)> = sqlx::query_as(
+    let rows: Vec<(Uuid, Uuid, String)> = sqlx::query_as(
         "WITH live_public AS ( \
            SELECT id, is_default, created_at \
              FROM channel \
@@ -1308,43 +1309,37 @@ async fn join_default_channels(
               LIMIT 1 \
            ) oldest \
          ), \
-         live_before AS ( \
-           SELECT channel_id \
-             FROM membership \
-            WHERE member_id = $2 \
-              AND left_at IS NULL \
-              AND channel_id IN (SELECT id FROM targets) \
-         ), \
          inserted AS ( \
            INSERT INTO membership (workspace_id, channel_id, member_id, role) \
            SELECT $1, id, $2, $3::membership_role \
              FROM targets \
-           ON CONFLICT (channel_id, member_id) DO UPDATE \
-              SET left_at = NULL, \
-                  role = CASE \
-                           WHEN membership.left_at IS NULL \
-                           THEN membership.role \
-                           ELSE EXCLUDED.role \
-                         END \
+            WHERE $4 \
+           ON CONFLICT (channel_id, member_id) DO NOTHING \
            RETURNING id, channel_id, role::text \
          ) \
-         SELECT i.id, i.channel_id, i.role, \
-                NOT EXISTS (SELECT 1 FROM live_before b WHERE b.channel_id = i.channel_id) \
-           FROM inserted i \
-          ORDER BY i.channel_id",
+         SELECT id, channel_id, role FROM inserted \
+         UNION ALL \
+         SELECT m.id, m.channel_id, m.role::text \
+           FROM membership m \
+          WHERE NOT $4 \
+            AND m.member_id = $2 \
+            AND m.left_at IS NULL \
+            AND m.channel_id IN (SELECT id FROM targets) \
+          ORDER BY channel_id",
     )
     .bind(workspace_id)
     .bind(member_id)
     .bind(role)
+    .bind(put_in)
     .fetch_all(&mut *conn)
     .await?;
     Ok(rows
         .into_iter()
-        .map(|(id, channel_id, role, admitted)| JoinedMembership {
+        .map(|(id, channel_id, role)| JoinedMembership {
             id,
             channel_id,
             role,
-            admitted,
+            admitted: put_in,
         })
         .collect())
 }
