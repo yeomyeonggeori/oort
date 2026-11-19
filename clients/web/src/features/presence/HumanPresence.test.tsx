@@ -90,30 +90,39 @@ const avatar = (row: RosterMember) =>
 const dotIn = (el: HTMLElement) => el.querySelector<HTMLElement>('[data-testid="presence-dot"]');
 
 describe("AvatarWithPresence: the corner dot", () => {
+  // 모양(채운 원 · 초승달 · 가로 줄 · 속 빈 고리)과 색은 `data-tone` 을 읽는 CSS 한 곳(`tokens.css` 의 `avatar-status`)이
+  // 그린다(#5786). 여기서는 화면에 닿는 것 — 어느 톤의 점이 서는지, 아바타가 도려내지는지 — 를 잰다. 실제 그림(틈이 바탕을
+  // 비추는지)은 `avatarStatus.browser.test.ts` 가 WebKit·Chromium 픽셀로 잰다.
   it.each([
-    ["접속 중은 채운 초록", { online: true }, "ok", ["bg-ok"]],
-    ["접속 없음은 속 빈 고리", { online: false }, "muted", ["bg-surface", "border-line-strong"]],
-    ["자리 비움은 접속 여부보다 먼저", { online: true, presenceStatus: "away" as const }, "warn", ["bg-warn"]],
-    ["방해 금지는 접속 중이어도", { online: true, presenceStatus: "dnd" as const }, "danger", ["bg-danger"]],
-  ])("%s", (_name, patch, tone, classes) => {
+    ["접속 중은 ok", { online: true }, "ok"],
+    ["접속 없음은 muted(속 빈 고리)", { online: false }, "muted"],
+    ["자리 비움은 접속 여부보다 먼저", { online: true, presenceStatus: "away" as const }, "warn"],
+    ["방해 금지는 접속 중이어도", { online: true, presenceStatus: "dnd" as const }, "danger"],
+  ])("%s", (_name, patch, tone) => {
     const el = render(avatar(member(patch)));
     const dot = dotIn(el);
     expect(dot).not.toBeNull();
     expect(dot?.getAttribute("data-tone")).toBe(tone);
-    for (const cls of classes) expect(dot?.className).toContain(cls);
-    expect(el.querySelector('[data-testid="face"]')).not.toBeNull(); // the face is still drawn
+    expect(dot?.hasAttribute("data-avatar-status-dot")).toBe(true);
+    const frame = el.querySelector<HTMLElement>('[data-testid="avatar-with-presence"]')!;
+    // 점이 있으면 아바타를 도려낸다. 크기는 목록 줄 32 가 기본이다.
+    expect(frame.hasAttribute("data-status-cut")).toBe(true);
+    expect(frame.getAttribute("data-status-face")).toBe("32");
+    // 점은 아바타의 **형제**다: 도려내는 칸(아바타를 감싼 칸) 안에 들면 점까지 지워진다.
+    const face = frame.querySelector('[data-avatar-status-face]')!;
+    expect(face.contains(dot)).toBe(false);
+    expect(face.querySelector('[data-testid="face"]')).not.toBeNull(); // the face is still drawn
   });
 
-  it("the hollow ring is not the offline of a filled dot: online and offline never share a class", () => {
-    const online = dotIn(render(avatar(member({ online: true }))))!;
-    const onlineClass = online.className;
-    act(() => root?.unmount());
-    root = null;
-    host?.remove();
-    const offline = dotIn(render(avatar(member({ online: false }))))!;
-    expect(offline.className).not.toBe(onlineClass);
-    expect(onlineClass).not.toContain("border-line-strong");
-    expect(offline.className).not.toContain("bg-ok");
+  it("큰 얼굴은 크기를 넘긴다(점의 크기·틈이 그 크기에서 정해진다)", () => {
+    const el = render(
+      createElement(AvatarWithPresence, {
+        member: member({ online: true }),
+        face: 112,
+        children: createElement("span", { "data-testid": "face" }, "이"),
+      })
+    );
+    expect(el.querySelector('[data-testid="avatar-with-presence"]')?.getAttribute("data-status-face")).toBe("112");
   });
 
   it("the word is on the tooltip, and the dot itself is hidden from assistive tech", () => {
@@ -124,10 +133,13 @@ describe("AvatarWithPresence: the corner dot", () => {
     expect(dotIn(el)?.getAttribute("aria-hidden")).toBe("true");
   });
 
-  it("unknown availability draws no dot and no tooltip: absence is not offline", () => {
+  it("unknown availability draws no dot, no tooltip and no cut-out: absence is not offline", () => {
     const el = render(avatar(member({})));
     expect(dotIn(el)).toBeNull();
-    expect(el.querySelector('[data-testid="avatar-with-presence"]')?.hasAttribute("title")).toBe(false);
+    const frame = el.querySelector('[data-testid="avatar-with-presence"]');
+    expect(frame?.hasAttribute("title")).toBe(false);
+    // 점이 없으면 빈 구멍도 없다: 아바타가 온전하다.
+    expect(frame?.hasAttribute("data-status-cut")).toBe(false);
   });
 
   it("an agent never gets a person's dot, even if its row carries `online`", () => {

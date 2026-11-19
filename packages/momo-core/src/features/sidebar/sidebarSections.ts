@@ -93,13 +93,10 @@ export interface SidebarPrefs {
    */
   starredChannelIds: string[];
   /**
-   * 렌더 차례 (BT-5 #1933). 값은 `SIDEBAR_SORT_MODES` 의 낱말이고, 없으면
-   * 「사용자 지정」이다.
-   *
-   * **사이드바 하나에 하나**다. 필드가 문자열 한 칸이기 때문이고(서버
-   * `momo-messaging/src/sidebar_prefs.rs`: `section_sort: Option<String>`,
-   * 32자 상한, `deny_unknown_fields`), 섹션별 지도를 실으려면 payload v1 계약
-   * 자체를 바꿔야 한다 - 그것은 클라 티켓이 할 일이 아니다(ADR-0177 D3).
+   * 예전 「채널 정렬」(가나다) 값 (BT-5 #1933). **화면은 이 값을 읽지 않는다** — 정렬 단추를
+   * 뺐고(#5775) 채널은 늘 사람이 끌어 정한 차례(「사용자 지정」)로 선다. 서버 payload 의 칸
+   * (`momo-messaging/src/sidebar_prefs.rs`: `section_sort: Option<String>`, `deny_unknown_fields`)이
+   * 남아 있어 왕복만 시킨다: 읽은 값을 그대로 다시 쓴다.
    */
   sectionSort?: string;
 }
@@ -250,14 +247,14 @@ export function sidebarEmptySectionHint(pointerCanHover: boolean): string {
 }
 
 /**
- * DM 구획이 비어 보이는데 **닫은 DM이 있을 때** 하는 말 (#3963). 「아직 대화가 없습니다」는
+ * DM 구획이 비어 보이는데 **숨긴 DM이 있을 때** 하는 말 (#3963). 「아직 대화가 없습니다」는
  * 이때 거짓이다: 대화는 있고 이 기기의 사이드바에서 닫혀 있을 뿐이다. 닫은 DM이 돌아오는
  * 조건(새 메시지)을 적어, 사라진 대화를 잃었다고 읽지 않게 한다. 빈 상태의 규칙(한 줄 카피와
  * 액션 하나, README §4)대로 끝은 옛 문장과 같은 행동이다: ⌘⇧K로 시작하세요
  * (design-review R1 M2: 행동이 빠진 첫 판).
  */
 export const SIDEBAR_DMS_ALL_CLOSED_HINT =
-  "닫은 대화는 새 메시지가 오면 다시 나타납니다. ⌘⇧K로 시작하세요.";
+  "숨긴 대화는 새 메시지가 오면 다시 나타납니다. ⌘⇧K로 시작하세요.";
 
 /** 배치를 풀고 기본 섹션으로 되돌리는 항목. */
 export const SECTION_MOVE_TO_BASE_LABEL = "채널 섹션으로";
@@ -326,73 +323,6 @@ export function toggleStarredChannel(
       ? prefs.starredChannelIds.filter((id) => idKey(id) !== key)
       : [...prefs.starredChannelIds, channelId],
   };
-}
-
-// ---------------------------------------------------------------------------
-// 정렬 (BT-5 / #1933)
-// ---------------------------------------------------------------------------
-
-/**
- * 렌더 차례. **두 값이다** — ADR-0177 D5 는 「A-Z/Recent」라 적었고, 이 티켓은
- * Recent 를 싣지 않는다. 그 판정의 근거는 기억이 아니라 실사다:
- *
- *   · buzz 에는 문법이 실물로 있다(`desktop/src/features/sidebar/lib/
- *     channelSortPreference.ts` — `ChannelSortMode = "alpha" | "recent"`).
- *   · 그런데 그 정렬의 **자**는 `channel.lastMessageAt` 이고, oort 의 `Channel`
- *     에는 그런 칸이 없다(`lib/api.ts`). 읽음 투영(`ReadState`)도 시각을 싣지
- *     않고, `seq` 는 채널 안에서만 뜻이 있어 채널끼리 비교할 수 없다.
- *
- * 즉 Recent 를 지금 넣으면 **가나다 목록에 「최근」이라는 이름을 붙이는 일**이
- * 된다. 서버가 채널마다 마지막 활동 시각을 실어 주는 날 값 하나와 비교 함수
- * 하나가 늘어날 뿐이므로(이 파일 한 곳), 그날까지 이름을 미리 만들지 않는다.
- */
-export const SIDEBAR_SORT_MANUAL = "manual";
-export const SIDEBAR_SORT_ALPHA = "alpha";
-export const SIDEBAR_SORT_MODES = [
-  SIDEBAR_SORT_MANUAL,
-  SIDEBAR_SORT_ALPHA,
-] as const;
-export type SidebarSortMode = (typeof SIDEBAR_SORT_MODES)[number];
-
-/**
- * 이 설정의 이름 — 문에도, 그 안의 무리 제목에도 같은 낱말이 선다.
- *
- * 「이 섹션의 정렬」이 아닌 이유: `sectionSort` 는 payload 에 한 칸뿐이라 값도
- * 하나다(`SidebarPrefs.sectionSort` 머리말). 섹션마다 같은 라디오를 세워 두고
- * 섹션의 이름으로 부르면, 하나를 바꿀 때 전부 바뀌는 것이 결함으로 읽힌다.
- *
- * 「사이드바 정렬」도 아닌 이유 (design-review #1933 N-2): 이 차례는 **채널을
- * 이고 있는 섹션들**(별표·기본 「채널」·커스텀)에만 걸리고 DM 에는 걸리지 않는다 —
- * DM 행의 이름은 `channel.name` 이 아니라 명부에서 조립되는 사람 이름이라 코어가
- * 보지 못한다(`deriveSidebarSections` 의 DM 문단). 「사이드바」라고 부르면 낱말이
- * 약속을 실제보다 넓게 한다.
- */
-export const SIDEBAR_SORT_GROUP_LABEL = "채널 정렬";
-
-export function sidebarSortModeLabel(mode: SidebarSortMode): string {
-  return mode === SIDEBAR_SORT_ALPHA ? "가나다" : "사용자 지정";
-}
-
-/** 모르는 낱말은 「사용자 지정」이다 - 남이 쓴 값이 목록을 흔들지 않는다. */
-export function sidebarSortMode(prefs: SidebarPrefs): SidebarSortMode {
-  return prefs.sectionSort === SIDEBAR_SORT_ALPHA
-    ? SIDEBAR_SORT_ALPHA
-    : SIDEBAR_SORT_MANUAL;
-}
-
-/**
- * 정렬을 바꾼 payload. 「사용자 지정」은 **칸을 지운다** - 서버도 빈 값을 부재로
- * 접으므로(`a_blank_section_sort_becomes_absent_rather_than_empty`), 기본값을
- * 굳이 적어 두면 왕복마다 뜻 없는 낱말이 하나 오간다.
- */
-export function withSidebarSortMode(
-  prefs: SidebarPrefs,
-  mode: SidebarSortMode
-): SidebarPrefs {
-  const next = { ...prefs };
-  if (mode === SIDEBAR_SORT_ALPHA) next.sectionSort = SIDEBAR_SORT_ALPHA;
-  else delete next.sectionSort;
-  return next;
 }
 
 // ---------------------------------------------------------------------------
@@ -522,37 +452,6 @@ function idKey(id: string): string {
   return id.trim().toLowerCase();
 }
 
-/** 이름 없는 채널은 자기 id 로 줄을 선다 - 비교가 `undefined` 를 만나지 않는다. */
-function sortName(channel: Channel): string {
-  return (channel.name ?? "").trim() || channel.id;
-}
-
-/**
- * 「가나다」의 자. 같은 이름이 둘이면 id 가 가른다 - 정렬이 렌더마다 흔들리면
- * 그것은 정렬이 아니다.
- *
- * `localeCompare(…, "ko")` 는 이 레포가 사람 이름을 세울 때 이미 쓰는 자다
- * (`features/directory/model.ts`). 코드유닛 비교를 쓰면 「ㄱ」과 「가」가 갈리고
- * 라틴·한글 섞인 목록이 사람이 기대하는 차례와 어긋난다.
- */
-function compareBySortName(a: Channel, b: Channel): number {
-  const byName = sortName(a).localeCompare(sortName(b), "ko");
-  return byName !== 0 ? byName : a.id.localeCompare(b.id);
-}
-
-/**
- * 렌더 차례만 바꾼다. **저장값은 손대지 않는다** - 「가나다」로 보다가 「사용자
- * 지정」으로 돌아오면 사람이 만든 차례가 그대로 있어야 한다(BT-5 red proof).
- */
-function inRenderOrder(
-  channels: Channel[],
-  mode: SidebarSortMode
-): Channel[] {
-  return mode === SIDEBAR_SORT_ALPHA
-    ? [...channels].sort(compareBySortName)
-    : channels;
-}
-
 function orderedSections(prefs: SidebarPrefs): SidebarSectionPrefs[] {
   // `order` 가 정본이고, 같은 수끼리는 payload 순서가 가른다. `sort` 는 안정
   // 정렬이므로 두 규칙이 한 줄에 들어간다.
@@ -588,7 +487,6 @@ export function deriveSidebarSections(input: {
 }): DerivedSidebarSections {
   const byId = new Map<string, Channel>();
   for (const channel of input.channels) byId.set(idKey(channel.id), channel);
-  const mode = sidebarSortMode(input.prefs);
 
   const claimed = new Set<string>();
 
@@ -613,7 +511,7 @@ export function deriveSidebarSections(input: {
     id: BASE_STARRED_SECTION_ID,
     kind: "starred",
     title: BASE_STARRED_SECTION_TITLE,
-    channels: inRenderOrder(starredChannels, mode),
+    channels: starredChannels,
   };
 
   const custom: RenderedSidebarSection[] = [];
@@ -633,7 +531,7 @@ export function deriveSidebarSections(input: {
       id: section.id,
       kind: "custom",
       title: section.name,
-      channels: inRenderOrder(channels, mode),
+      channels,
     });
   }
 
@@ -641,15 +539,9 @@ export function deriveSidebarSections(input: {
     id: BASE_CHANNELS_SECTION_ID,
     kind: "channels",
     title: BASE_CHANNELS_SECTION_TITLE,
-    channels: inRenderOrder(
-      input.channels.filter((channel) => !claimed.has(idKey(channel.id))),
-      mode
-    ),
+    channels: input.channels.filter((channel) => !claimed.has(idKey(channel.id))),
   };
-  // DM 은 서버 차례 그대로다. 「가나다」가 재는 것은 `channel.name` 인데 DM 행의
-  // 이름은 그 칸이 아니라 **명부에서 조립된 사람 이름**이라(웹의
-  // `channelLabelParts`), 여기서 세우면 화면에 적힌 것과 다른 차례가 나온다.
-  // 코어가 못 보는 이름으로 줄을 세우느니 세우지 않는다.
+  // DM 은 서버 차례 그대로다.
   const dms: RenderedSidebarSection = {
     id: BASE_DMS_SECTION_ID,
     kind: "dms",

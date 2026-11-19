@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import type { PendingMessage } from "@momo/core/features/timeline/model";
 import {
   DRAFT_TTL_MS,
+  blockFailedSendsBefore,
   MAX_FAILED_SENDS,
   clearAllDrafts,
   forgetFailedSend,
@@ -118,5 +119,29 @@ describe("보내지 못한 글의 저장소", () => {
     expect(readFailedSends(WS, CH, ME, T0).map((e) => e.row.clientMsgId)).toEqual(["c"]);
     clearAllDrafts();
     expect(keysOf()).toEqual([]);
+  });
+});
+
+// #5825 검수 r1 M3: 나간 대화에서 보내는 중이던 글이 정리 **뒤에** 늦게 실패해도 이 기기의 못 보낸 글로 되살아나지 않는다.
+// 나간 순간 이전에 쓴 글만 막고, 다시 이어진 뒤에 새로 쓴 글은 평소처럼 남는다. 다른 대화·다른 워크스페이스는 그대로다.
+describe("나간 대화의 늦은 실패 (D17 기기 줄)", () => {
+  it("나간 순간까지 쓴 글은 적지 않고, 그 뒤에 쓴 글·다른 대화의 글은 적는다", () => {
+    blockFailedSendsBefore(WS, CH, T0 + 100);
+    rememberFailedSend(WS, row("before", { createdAtMs: T0 + 50 }), "server", T0 + 200);
+    rememberFailedSend(WS, row("edge", { createdAtMs: T0 + 100 }), "server", T0 + 200);
+    expect(readFailedSends(WS, CH, ME, T0 + 300)).toEqual([]);
+    rememberFailedSend(WS, row("after", { createdAtMs: T0 + 101 }), "server", T0 + 200);
+    rememberFailedSend(WS, row("other", { channelId: CH_B, createdAtMs: T0 + 50 }), "server", T0 + 200);
+    expect(readFailedSends(WS, CH, ME, T0 + 300).map((entry) => entry.row.clientMsgId)).toEqual(["after"]);
+    expect(readFailedSends(WS, CH_B, ME, T0 + 300).map((entry) => entry.row.clientMsgId)).toEqual(["other"]);
+  });
+
+  it("대소문자가 달라도 같은 대화로 읽고, 로그아웃(clearAllDrafts)이 막이를 푼다", () => {
+    blockFailedSendsBefore(WS.toUpperCase(), CH.toUpperCase(), T0 + 100);
+    rememberFailedSend(WS, row("before", { createdAtMs: T0 + 50 }), null, T0 + 200);
+    expect(keysOf()).toEqual([]);
+    clearAllDrafts();
+    rememberFailedSend(WS, row("before", { createdAtMs: T0 + 50 }), null, T0 + 200);
+    expect(readFailedSends(WS, CH, ME, T0 + 300)).toHaveLength(1);
   });
 });

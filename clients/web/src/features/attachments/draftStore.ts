@@ -18,6 +18,7 @@ import {
 } from "@momo/core/features/attachments/model";
 import { declareImageSize } from "@momo/core/features/attachments/declareImageSize";
 import { completeAttachmentUpload, createAttachmentUpload } from "@momo/core/lib/api";
+import { isCurrentSession, sessionStamp, type SessionStamp } from "@momo/core/lib/sessionStamp";
 import { canDeclareImageSize } from "@momo/core/lib/attachmentMedia";
 import {
   verdictForRequestFailure,
@@ -163,7 +164,8 @@ interface UploadTarget {
 async function uploadOne(
   key: string,
   target: UploadTarget,
-  draft: AttachmentDraft
+  draft: AttachmentDraft,
+  startedAs: SessionStamp
 ): Promise<void> {
   const file = files.get(draft.localId);
   if (file === undefined) {
@@ -184,6 +186,8 @@ async function uploadOne(
     update(key, (list) => failUpload(list, draft.localId, verdict.issue, verdict.cause));
     return;
   }
+  // 기다리는 사이 트레이가 비워졌다(지운 칩·로그아웃, #5799): 놓은 파일의 바이트를 보내지 않는다.
+  if (!files.has(draft.localId)) return;
 
   const handle = putAttachmentBytes(
     session.uploadUrl,
@@ -194,6 +198,11 @@ async function uploadOne(
   inflight.set(draft.localId, handle);
   const result = await handle.done;
   inflight.delete(draft.localId);
+  // 이어지는 요청(완료 · 크기 선언)은 올리기를 시작한 세션으로만 간다(#5816).
+  if (!isCurrentSession(startedAs)) {
+    update(key, (list) => failUpload(list, draft.localId, "unavailable"));
+    return;
+  }
 
   if (!result.ok) {
     if (result.failure === "aborted") {
@@ -221,6 +230,10 @@ async function uploadOne(
   } catch (error) {
     const verdict = verdictForRequestFailure(error, deviceOnlineNow());
     update(key, (list) => failUpload(list, draft.localId, verdict.issue, verdict.cause));
+    return;
+  }
+  if (!isCurrentSession(startedAs)) {
+    update(key, (list) => failUpload(list, draft.localId, "unavailable"));
     return;
   }
   // 완료 뒤, 「올림」으로 바꾸기 전: 아직 메시지에 안 묶였을 때만 서버가 받는다(위 「사진·GIF 의 가로세로 선언」).
@@ -260,11 +273,23 @@ async function declareSize(
 async function pump(key: string, target: UploadTarget): Promise<void> {
   if (pumping.has(key)) return;
   pumping.add(key);
+  // 다음 건도 이 차례를 시작한 세션으로만 올린다(#5816).
+  const startedAs = sessionStamp();
   try {
     for (;;) {
+      if (!isCurrentSession(startedAs)) {
+        // 이 차례에 남은 건은 시작한 세션의 것이다: 다른 세션으로 올리지 않고 실패로 둔다.
+        update(key, (list) =>
+          list.reduce(
+            (rows, draft) => (draft.status === "ready" ? failUpload(rows, draft.localId, "unavailable") : rows),
+            list
+          )
+        );
+        return;
+      }
       const next = read(key).drafts.find((draft) => draft.status === "ready");
       if (next === undefined) return;
-      await uploadOne(key, target, next);
+      await uploadOne(key, target, next, startedAs);
     }
   } finally {
     pumping.delete(key);
@@ -334,6 +359,17 @@ export function clearSurface(key: string): void {
   write(key, EMPTY);
 }
 
+/**
+ * 한 대화의 트레이를 모두 비운다 - 대화 입력칸과 그 대화의 스레드 입력칸들(ADR-0177 증보 2026-11-14 D17 기기 줄, #5825). 1:1 대화에서
+ * 나간 뒤 그 대화의 올리던 파일이 새 대화로 다시 나가지 않게 한다. 열쇠가 (워크스페이스, 채널, 뿌리)라 다른 대화의 트레이는 남는다.
+ */
+export function clearChannelSurfaces(workspaceId: string, channelId: string): void {
+  const prefix = surfaceKey(workspaceId, channelId, "");
+  for (const key of [...surfaces.keys()]) {
+    if (key.toLowerCase().startsWith(prefix.toLowerCase())) clearSurface(key);
+  }
+}
+
 /** 받지 못한 것들에 대한 고지를 사람이 읽고 나면 지운다. */
 export function acknowledgeNotices(key: string): void {
   const surface = read(key);
@@ -400,6 +436,17 @@ export function dropClaimed(key: string, attachmentIds: readonly string[]): void
     files.delete(draft.localId);
   }
   update(key, (list) => list.filter((draft) => !isClaimed(draft)));
+}
+
+/**
+ * 세션이 끝났다(로그아웃·토큰 만료, #5799). 모든 트레이를 비우고 올리던 것을 멈춘다. 열쇠에 사람이 없어서, 비우지 않으면 같은 페이지에서
+ * 다음 사람이 같은 대화를 열 때 앞 사람이 올리던 파일이 보인다(폰은 세션 provider 가 내려갈 때 같은 일을 한다).
+ */
+export function clearAllAttachmentTrays(): void {
+  for (const handle of inflight.values()) handle.abort();
+  inflight.clear();
+  files.clear();
+  emit(new Map());
 }
 
 /** 테스트 전용 초기화. 모듈 전역이 테스트 사이를 넘어가지 않게 한다. */

@@ -1,5 +1,4 @@
 import { useLayoutEffect, useMemo, useRef } from "react";
-import { Check } from "lucide-react";
 import { effectiveScheme, modesOf } from "@momo/core/design/themeResolve";
 import {
   ACCENT_THEMES,
@@ -11,7 +10,7 @@ import {
 } from "@/design/theme";
 import { defaultSignalFor, presetsFor } from "@/design/themes/derived";
 import { paintElement } from "@/design/themes/paint";
-import { cn } from "@/design/lib/cn";
+import { AccentSwatch } from "./AccentSwatch";
 
 // =============================================================================
 // 강조색 칩 한 벌: 이 테마·모드에서 푼 색과 쓸 수 있는지 (AP-1b #4188, AC 6). **지연 청크**다.
@@ -24,8 +23,11 @@ import { cn } from "@/design/lib/cn";
 //
 // 카탈로그에서는 프리셋이 거절될 수 있다(홍염은 57 테마-모드 가운데 29곳에서 위험색과 겹친다. core `derive.test.ts`의
 // 「프리셋 거절 통계」가 세고, 테마 토큰 표 §8.5의 프로토타입 값 26과는 구현 실측이 다르다). 거절된 칩은 눌 수 없고
-// 이유(core `SIGNAL_REJECTION_COPY` 한 줄)가 칩 아래에 선다. 모드는 지금 화면에 서 있는 모드다: 고정이면 그 모드,
+// 이유(core `SIGNAL_REJECTION_COPY` 한 줄)가 칩 줄 아래에 선다. 모드는 지금 화면에 서 있는 모드다: 고정이면 그 모드,
 // 시스템이면 이 기기의 시스템이 지금 어느 쪽인가.
+//
+// 칩은 이름 없는 동그라미 한 줄이다(#5783 QA 8, `AccentSwatch`). 이름은 낭독·툴팁에 있고, 이유 줄은 이름으로 칩을 가리킨다
+// (「성운·홍염: …」): 흐린 칩을 가리키면 툴팁이 같은 이름을 띄운다.
 // =============================================================================
 
 interface Chip {
@@ -86,28 +88,15 @@ function Swatch({ id, label, checked, chip }: { id: AccentId; label: string; che
   }, [paint]);
   const disabled = chip?.reason != null;
   return (
-    <label
-      ref={node}
-      data-accent-swatch={id}
-      data-testid={`accent-swatch-${id}`}
-      aria-disabled={disabled ? "true" : undefined}
-      className="accent-swatch flex cursor-pointer flex-col items-center justify-center gap-1 text-meta text-ink press"
-    >
-      <input
-        type="radio"
-        name="appearance-accent"
-        value={id}
-        checked={checked}
-        disabled={disabled}
-        aria-describedby={disabled ? REASON_ID : undefined}
-        onChange={() => setAccent(id)}
-        className="sr-only"
-      />
-      <span className="accent-swatch-chip flex items-center justify-center rounded-full" aria-hidden>
-        <Check className={cn("accent-swatch-check size-4")} aria-hidden />
-      </span>
-      {label}
-    </label>
+    <AccentSwatch
+      id={id}
+      label={label}
+      checked={checked}
+      disabled={disabled}
+      describedBy={disabled ? REASON_ID : undefined}
+      onSelect={() => setAccent(id)}
+      labelRef={node}
+    />
   );
 }
 
@@ -122,7 +111,7 @@ export default function AccentGroup({ isDawnsky }: { isDawnsky: boolean }) {
   return (
     <fieldset data-testid="accent-choice" className="m-0 min-w-0 border-0 p-0">
       <legend className="sr-only">강조색</legend>
-      <div className="flex flex-wrap gap-4">
+      <div className="flex flex-wrap" data-testid="accent-chip-row">
         {ACCENT_THEMES.map((theme) => (
           <Swatch
             key={theme.id}

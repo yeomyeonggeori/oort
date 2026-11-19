@@ -76,8 +76,9 @@ const MUST_USE_NAMED_LAYER = [
 const OVERLAY_LAYER_ATTR: Record<string, readonly string[]> = {
   "design/ui/dialog.tsx": ["scrim", "surface"],
   "design/ui/popover.tsx": ["surface"],
-  "design/ui/dropdown-menu.tsx": ["surface"],
-  "design/ui/context-menu.tsx": ["surface"],
+  // 판 + 하위 메뉴 판(#5777). 둘 다 같은 표면 층이다.
+  "design/ui/dropdown-menu.tsx": ["surface", "surface"],
+  "design/ui/context-menu.tsx": ["surface", "surface"],
   "app/QuickSwitcher.tsx": ["surface"],
   "features/ade/AdeDrawer.tsx": ["surface", "scrim"],
   "features/sidebar/Sidebar.tsx": ["surface", "scrim"],

@@ -1,28 +1,22 @@
-import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent } from "react";
-import { ChevronDown, ChevronUp } from "lucide-react";
+import { useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { SchemeChoice } from "@momo/core/design/appearance";
-import {
-  galleryTiles,
-  pickNotice,
-  schemeForThemePick,
-  themeLabel,
-  type GalleryTile,
-} from "@momo/core/design/themeGallery";
-import { effectiveScheme, modesOf } from "@momo/core/design/themeResolve";
+import { galleryTiles, pickNotice, schemeForThemePick, type GalleryTile } from "@momo/core/design/themeGallery";
 import { updateAppearance, useAppearance } from "@/design/theme";
 import { SettingsRow } from "../shell/SettingsRow";
 import { ROW_DESCRIPTION, ROW_LABEL } from "./ThemeStyleRow";
-import { ThemeTile, TileFace, type TileFaceKind } from "./ThemeTile";
+import { ThemeTile } from "./ThemeTile";
 
 // 테마 스타일 행과 갤러리 (AP-1b #4188, 청사진 §5.3-c · Buzz `SettingsPanels.tsx:561-726`을 우리 규칙으로).
 //
-// 접힌 행: 지금 고른 테마의 이름과 썸네일 + chevron(`aria-expanded`·`aria-controls`). 펴면 격자가 같은 카드 안에 서고
-// 고른 타일이 보이는 자리로 스크롤한다(43장 가운데 어디에 있든 찾을 수 있게).
+// **격자는 늘 펴져 있다**(#5783 QA 8, owner 2026-11-14 「늘 펴 둠(버즈식)」). 예전의 접힌 행(고른 테마 이름 + 썸네일 + chevron)은
+// 걷었다: 고르는 자리가 곧 보이는 자리라 한 번 더 누를 까닭이 없다. 행은 라벨·설명 아래로 격자를 세로로 세운다(`stack`).
+// 다크는 43장이라 격자는 높이 상한 안에서 안쪽으로 스크롤하고 위아래 페이드가 더 있음을 알린다(theme-gallery.css).
+// 고른 타일은 처음 설 때와 목록이 바뀔 때(색 모드) 보이는 자리로 **격자 안쪽만** 스크롤한다: `scrollIntoView`는 바깥 설정
+// 페이지까지 움직여서(390 폭·200% 확대) 설정을 연 순간 화면이 갤러리로 뛴다.
 // **탭이 색 모드를 따른다**(별도 탭 위젯이 없다): 시스템은 라이트·다크를 모두 가진 테마만(한 장이 대각 분할),
 // 라이트·다크는 그 모드를 가진 테마 전부다. 안 보이는 테마가 어디 있는지는 탭마다 안내 한 줄이 말한다.
-// 트리거 버튼은 안쪽 여백이 있다(`theme-style-trigger`): 집 규칙의 인셋 초점 링(안쪽 2)이 이름 글자와 썸네일 가장자리를 덮지 않게
-// 한다. 배치는 카드 폭이 정한다: 좁으면 이름이 윗줄, 썸네일과 chevron이 한 덩이로 아랫줄이고(이름 길이와 무관하게 늘 같은 배치라 선택해도
-// 행 높이가 뛰지 않는다), 넓으면 한 줄이다. 고르면 전 화면이 바로 바뀌고(외양 저장소 `commit`) 새로고침 뒤에도 남는다(저장 + 부트 캐시). 단일 모드 테마를 고르면 색 모드를 그 모드로 맞추고 한 줄로 알린다(규칙 1).
+// 고르면 전 화면이 바로 바뀌고(외양 저장소 `commit`) 새로고침 뒤에도 남는다(저장 + 부트 캐시). 단일 모드 테마를 고르면 색 모드를
+// 그 모드로 맞추고 한 줄로 알린다(규칙 1). 타일 안은 글자 없는 미니어처이고 이름은 타일 아래 한 줄이다(`ThemeTile`).
 //
 // 이 파일은 지연 청크다(`ThemeStyleRow.tsx`가 `React.lazy`로 싣는다). 카탈로그 씨앗 표와 파생 엔진이 함께 실린다.
 // 네 상태(SKILL §5): 목록은 로컬 데이터라 로딩·오프라인이 없다(청크를 받는 동안의 자리표시는 `ThemeStyleRow`).
@@ -36,26 +30,37 @@ const TAB_HINT: Readonly<Record<SchemeChoice, string>> = {
   dark: "다크가 있는 테마만 보여요. 라이트 전용 테마는 라이트에서 골라요.",
 };
 
+/**
+ * 고른 타일이 격자 안쪽 스크롤 상자에서 보이게 그 상자의 `scrollTop`만 옮긴다(이미 보이면 그대로). 바깥 페이지는 움직이지 않는다.
+ * 페이드 구간(`scroll-padding-block`)에 걸리지 않게 그 폭만큼 안쪽에 세운다.
+ */
+function revealTileInside(box: HTMLElement, tile: HTMLElement): void {
+  const outer = box.getBoundingClientRect();
+  const inner = tile.getBoundingClientRect();
+  const pad = Number.parseFloat(getComputedStyle(box).scrollPaddingBlockStart) || 0;
+  if (inner.top < outer.top + pad) {
+    box.scrollTop -= outer.top + pad - inner.top;
+  } else if (inner.bottom > outer.bottom - pad) {
+    box.scrollTop += inner.bottom - (outer.bottom - pad);
+  }
+}
+
 export default function ThemeGallery() {
   const { theme, scheme, signal } = useAppearance();
-  const [open, setOpen] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
-  const trigger = useRef<HTMLButtonElement>(null);
-  const region = useRef<HTMLDivElement>(null);
-  const regionId = useId();
+  const scroller = useRef<HTMLDivElement>(null);
   const groupName = `theme-style-${useId()}`;
   const tiles = useMemo(() => galleryTiles(scheme), [scheme]);
 
-  const label = themeLabel(theme);
-  // 단일 모드 테마는 그 모드 한 장, 짝이 있는 테마는 시스템일 때 분할 한 장이다.
-  const pinned = effectiveScheme(scheme, modesOf(theme));
-  const thumbKind: TileFaceKind = pinned ?? "split";
-
-  // 펼치면 고른 타일이 보이게 한다. `nearest`라서 이미 보이면 아무것도 움직이지 않는다.
-  useEffect(() => {
-    if (!open) return;
-    region.current?.querySelector<HTMLElement>(".theme-tile[data-selected]")?.scrollIntoView?.({ block: "nearest" });
-  }, [open]);
+  // 처음 설 때와 색 모드가 바뀌어 목록이 바뀔 때만 격자 안쪽을 잰다(바깥 페이지는 그대로). Tab으로 닿을 때 따라가는 일은 브라우저의
+  // 초점 따라가기가 한다: 라디오가 타일 전체를 덮어서(`radio-cover`, tokens.css) 초점 든 상자가 곧 타일이다. 사람이 고른 순간(누름·
+  // 방향키의 change)에는 `ThemeTile`이 고른 카드를 가장 가까운 자리로 데려온다: WebKit은 방향키로 일부만 보이는 줄에 들어갈 때 따라오지
+  // 않는다(검수 r4 B-1d).
+  useLayoutEffect(() => {
+    const box = scroller.current;
+    const tile = box?.querySelector<HTMLElement>(".theme-tile[data-selected]");
+    if (box && tile) revealTileInside(box, tile);
+  }, [scheme]);
 
   function select(tile: GalleryTile) {
     const next = schemeForThemePick(scheme, tile.ref);
@@ -63,81 +68,38 @@ export default function ThemeGallery() {
     setNotice(next.adjusted ? pickNotice(next.adjusted) : null);
   }
 
-  function onKeyDown(event: KeyboardEvent<HTMLDivElement>) {
-    if (event.key !== "Escape") return;
-    event.stopPropagation();
-    setOpen(false);
-    trigger.current?.focus();
-  }
-
   return (
-    <>
-      <SettingsRow
-        label={ROW_LABEL}
-        description={<span className="block text-balance">{ROW_DESCRIPTION}</span>}
-        testId="theme-style-row"
-      >
-        <button
-          ref={trigger}
-          type="button"
-          aria-expanded={open}
-          aria-controls={open ? regionId : undefined}
-          aria-label={`테마 스타일, 지금은 ${label}`}
-          data-testid="theme-style-trigger"
-          onClick={() => setOpen((value) => !value)}
-          className="theme-style-trigger press rounded-lg bg-transparent text-ink focus-visible:focus-ring"
-        >
-          {/* 이름은 한 줄이다(낱말 한가운데서 끊지 않는다). 배치는 카드 폭이 정하지(`theme-gallery.css`) 이름 길이가 정하지 않는다:
-              좁은 카드에서는 이름이 윗줄이고 썸네일과 chevron이 한 덩이로 아랫줄이다. 그래도 모자라면(지원 폭 밖) 말줄임이다. */}
-          <span data-testid="theme-style-selected-name" className="min-w-0 max-w-full truncate text-meta font-semibold text-ink">
-            {label}
-          </span>
-          <span className="theme-style-trigger-tail">
-            <span data-testid="theme-style-selected-preview" className="flex shrink-0">
-              <TileFace themeRef={theme} kind={thumbKind} signal={signal} className="theme-style-thumb" />
-            </span>
-            {open ? (
-              <ChevronUp aria-hidden className="size-4 shrink-0 text-ink-muted" />
-            ) : (
-              <ChevronDown aria-hidden className="size-4 shrink-0 text-ink-muted" />
-            )}
-          </span>
-        </button>
-      </SettingsRow>
-      {open ? (
-        <div
-          ref={region}
-          id={regionId}
-          className="theme-gallery-region"
-          data-testid="theme-style-options"
-          data-scheme={scheme}
-          onKeyDown={onKeyDown}
-        >
-          <p className="theme-gallery-hint break-keep text-meta text-ink-muted" data-testid="theme-style-hint">
-            {TAB_HINT[scheme]}
-          </p>
-          <div role="status" className="theme-gallery-notice break-keep text-meta text-ink" data-testid="theme-style-notice">
-            {notice}
-          </div>
-          <fieldset className="m-0 min-w-0 border-0 p-0" data-testid="theme-style-group">
-            <legend className="sr-only">테마 스타일</legend>
-            <div className="theme-gallery-scroll">
-              <div className="theme-gallery-grid" data-count={tiles.length}>
-                {tiles.map((tile) => (
-                  <ThemeTile
-                    key={tile.ref}
-                    tile={tile}
-                    selected={tile.ref === theme}
-                    signal={signal}
-                    name={groupName}
-                    onSelect={select}
-                  />
-                ))}
-              </div>
-            </div>
-          </fieldset>
+    <SettingsRow
+      label={ROW_LABEL}
+      description={<span className="block text-balance">{ROW_DESCRIPTION}</span>}
+      testId="theme-style-row"
+      stack
+    >
+      <div className="theme-gallery-region" data-testid="theme-style-options" data-scheme={scheme}>
+        <p className="theme-gallery-hint break-keep text-meta text-ink-muted" data-testid="theme-style-hint">
+          {TAB_HINT[scheme]}
+        </p>
+        <div role="status" className="theme-gallery-notice break-keep text-meta text-ink" data-testid="theme-style-notice">
+          {notice}
         </div>
-      ) : null}
-    </>
+        <fieldset className="m-0 min-w-0 border-0 p-0" data-testid="theme-style-group">
+          <legend className="sr-only">테마 스타일</legend>
+          <div ref={scroller} className="theme-gallery-scroll" data-testid="theme-style-scroll">
+            <div className="theme-gallery-grid" data-count={tiles.length}>
+              {tiles.map((tile) => (
+                <ThemeTile
+                  key={tile.ref}
+                  tile={tile}
+                  selected={tile.ref === theme}
+                  signal={signal}
+                  name={groupName}
+                  onSelect={select}
+                />
+              ))}
+            </div>
+          </div>
+        </fieldset>
+      </div>
+    </SettingsRow>
   );
 }

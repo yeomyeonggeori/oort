@@ -100,6 +100,19 @@ describe("subscribeChannel recovery context forwarding", () => {
     stop();
   });
 
+  it("이미 살아 있는 방 구독에 붙으면 onAttachedLive 를 부른다 — 처음 붙인 손에는 부르지 않는다 (#5885)", async () => {
+    const { createRealtime } = await import("./realtime");
+    const handle = createRealtime("ws://recovery.invalid/connection/websocket", () => {});
+    const first = vi.fn();
+    const second = vi.fn();
+    const stopFirst = handle.subscribeChannel("w-1", "c-1", { onSubscribed: () => {}, onMessage: () => {}, onAttachedLive: first });
+    const stopSecond = handle.subscribeChannel("w-1", "c-1", { onSubscribed: () => {}, onMessage: () => {}, onAttachedLive: second });
+    expect(first).not.toHaveBeenCalled();
+    expect(second).toHaveBeenCalledTimes(1);
+    stopSecond();
+    stopFirst();
+  });
+
   it("필드가 없는 컨텍스트를 recovered:false 로 다시 만들지 않는다", async () => {
     const { seen, stop } = await subscribe();
     for (const fn of mocks.subscribed) fn({});

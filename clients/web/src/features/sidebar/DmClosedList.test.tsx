@@ -5,7 +5,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { DmClosedMenu, type DmClosedListItem } from "./DmClosedList";
 
-// 「⋯ › 닫은 대화」 (ADR-0177 D11, #4228). 메뉴 항목이 목록 다이얼로그를 열고, 「다시 열기」가 그 대화를 호출부에 넘긴다.
+// 「⋯ › 닫은 대화」 (ADR-0177 D11, #4228). 메뉴 항목이 목록 다이얼로그를 열고, 「다시 보이기」가 그 대화를 호출부에 넘긴다.
 
 const reactActEnvironment = globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean };
 let root: Root | null = null;
@@ -75,25 +75,25 @@ describe("DmClosedMenu", () => {
     expect(trigger.hasAttribute("data-section-action")).toBe(true);
   });
 
-  it("메뉴의 「닫은 대화」가 목록을 연다: 닫은 대화는 「다시 열기」, 나간 상대는 「열기」", async () => {
+  it("메뉴의 「숨긴 대화」가 목록을 연다: 닫은 대화는 「다시 보이기」, 나간 상대는 「열기」", async () => {
     mountRoot();
     render(ITEMS);
     await openList();
     const rows = [...document.querySelectorAll<HTMLElement>('[data-testid="dm-closed-list-item"]')];
     expect(rows.map((row) => row.dataset.reason)).toEqual(["closed", "gone"]);
     expect(rows[0]?.textContent).toContain("이도현");
-    expect(rows[0]?.textContent).toContain("내가 닫았어요");
+    expect(rows[0]?.textContent).toContain("내가 숨겼어요");
     expect(rows[1]?.textContent).toContain("나간 멤버");
     expect(rows[1]?.textContent).toContain("상대가 나갔고 안 읽은 메시지가 없어요");
     const buttons = [...document.querySelectorAll<HTMLElement>('[data-testid="dm-closed-list-reopen"]')];
-    expect(buttons.map((button) => button.textContent)).toEqual(["다시 열기", "열기"]);
+    expect(buttons.map((button) => button.textContent)).toEqual(["다시 보이기", "열기"]);
     expect(buttons.map((button) => button.getAttribute("aria-label"))).toEqual([
-      "이도현, 다시 열기",
+      "이도현, 다시 보이기",
       "나간 멤버, 열기",
     ]);
   });
 
-  it("「다시 열기」는 그 대화를 호출부에 넘기고 목록을 닫는다", async () => {
+  it("「다시 보이기」는 그 대화를 호출부에 넘기고 목록을 닫는다", async () => {
     const onReopen = vi.fn();
     const onOpenChange = vi.fn();
     mountRoot();
@@ -114,7 +114,7 @@ describe("DmClosedMenu", () => {
     render(ITEMS);
     await openList();
     render([]);
-    expect(document.querySelector('[data-testid="dm-closed-list-empty"]')?.textContent).toBe("닫은 대화가 없어요.");
+    expect(document.querySelector('[data-testid="dm-closed-list-empty"]')?.textContent).toBe("숨긴 대화가 없어요.");
     expect(document.querySelectorAll('[data-testid="dm-closed-list-item"]')).toHaveLength(0);
   });
 });

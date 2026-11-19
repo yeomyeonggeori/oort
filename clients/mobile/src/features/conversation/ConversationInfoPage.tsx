@@ -2,25 +2,24 @@ import type {
   ChannelActionItem,
   ChannelActionKey,
 } from '@momo/core/features/channels/actionModel';
-import {channelActionClusterTitle} from '@momo/core/features/channels/actionModel';
+import {channelActionClusterTitle, isChannelActionStatusIcon} from '@momo/core/features/channels/actionModel';
 import {
-  CHANNEL_LEAVE_CONFIRM_TITLE,
-  CHANNEL_LEAVE_LABEL,
-  channelLeaveConfirmBody,
+  channelLeaveConfirmBodyKey,
 } from '@momo/core/features/channels/model';
 import {roleLabel, type RoleLabels} from '@momo/core/features/directory/model';
 import type {StatusDot as PeerStatus} from '@momo/core/features/presence/statusDot';
 import {memberFor, type Directory} from '@momo/core/features/workspace/directory';
 import type {Channel, RosterMember} from '@momo/core/lib/api';
-import React, {useState} from 'react';
+import React, {useEffect, useRef, useState} from 'react';
 import {Image, ScrollView, StyleSheet, Text, View} from 'react-native';
 import {useSafeAreaInsets} from 'react-native-safe-area-context';
 import {AVATAR_INITIAL_MAX_SCALE, Screen, Sentence} from '../../design/atoms';
 import {HOME_ICON_SIZE, HOME_ICONS} from '../../design/icons';
 import {PageHeader} from '../../design/SheetChrome';
-import {ConfirmStep, GroupCard, ListRow, RowEmoji} from '../../design/sheetParts';
+import {CONFIRM_ARM_MS, ConfirmStep, GroupCard, ListRow, RowStatusIcon} from '../../design/sheetParts';
 import {useStyles} from '../../design/theme';
 import {font, line, SAFE_GUTTER, space, type Palette} from '../../design/tokens';
+import {useFormatMessage} from '../../i18n/useFormatMessage';
 import {EdgeSwipeBack, useLayerClose} from '../../nav/EdgeSwipeBack';
 import {
   BigFace,
@@ -33,6 +32,8 @@ import {
 } from '../directory/profileHero';
 import {PROFILE_FACE, useFaceRing} from '../profile/ProfileFace';
 import {avatarInitialMetrics} from './Avatar';
+import {DmLeaveConfirm} from '../sidebar/DmLeaveConfirm';
+import type {DmLeaveStepView} from '../sidebar/useChannelRowActions';
 import {CONVERSATION_INFO_LABEL} from './conversationMenu';
 
 // =============================================================================
@@ -43,7 +44,8 @@ import {CONVERSATION_INFO_LABEL} from './conversationMenu';
 // 벗긴다(대화는 밑에 남는다 — 안쪽 `EdgeSwipeBack` 이 바깥을 무장 해제한다). 고정 목록(`PinListPanel`)처럼 대화 화면의 지역 상태로 서고, 층은 JSX 순서다.
 //
 //   DM       큰 얼굴(사진이 있으면 눌러 크게 보기) · 이름 · 「@핸들 · 역할」 · 상태 칩 · 한 줄 상태
-//            [에이전트: 「○○님이 관리」 · 에이전트 정보 ›] → 알림 → 복사(이름·링크·ID) → 대화 닫기
+//            [에이전트: 「○○님이 관리」 · 에이전트 정보 ›] → 알림 → 복사(이름·링크·ID) → 대화 닫기 → 대화 나가기(사람끼리 1:1, 위험색 +
+//            확인 단계 — ADR-0177 증보 2026-11-14 D21)
 //   채널     큰 `#` 얼굴(비공개는 자물쇠 배지) · 이름 · 「6명 · 김인턴 참여 중」 · 주제
 //            알림 → 복사 → 채널 나가기(확인 단계)
 //
@@ -83,6 +85,10 @@ export interface ConversationInfoPageProps {
   onRun: (key: ChannelActionKey) => void;
   onConfirmLeave: () => void;
   onCancelLeave: () => void;
+  /** 1:1 「대화 나가기」 확인 단계(훅의 `dmLeave`). 있으면 행 대신 선다. */
+  dmLeave?: DmLeaveStepView | null;
+  onConfirmDmLeave?: () => void;
+  onCancelDmLeave?: () => void;
   /** 한 겹 벗긴다 — ‹·가장자리 밀기·두 손가락 문지르기가 모두 이 길을 지난다(들어온 길의 반대로 나간 뒤 한 번). */
   onClose: () => void;
   /** DM 상대. 얼굴·핸들·상태 칩이 이 사람의 것이다. 모르면(명부가 아직 안 왔다) 얼굴이 비어 있다. */
@@ -102,6 +108,8 @@ export interface ConversationInfoPageProps {
   onEnlargeAvatar?: (photo: ProfilePhoto) => void;
 }
 
+function noop(): void {}
+
 export function ConversationInfoPage({
   onClose,
   ...rest
@@ -113,6 +121,8 @@ export function ConversationInfoPage({
       accessibilityViewIsModal
       style={styles.overlay}
       onBack={onClose}
+      // 1:1 나가기 요청이 가는 동안은 가장자리 밀기로 물러나지 않는다(요청은 이미 나갔다). 꺼도 겹침 계산에는 남아 바깥 대화의 밀기가 대신 받지 않는다.
+      enabled={rest.dmLeave?.pending !== true}
       // 스택의 push 처럼 오른쪽에서 밀려 들어오고, ‹ 는 오른쪽으로 물러난다(동작 줄이기면 즉시).
       enter="push"
       testID="conversation-info-pane">
@@ -135,6 +145,9 @@ function InfoBody({
   onRun,
   onConfirmLeave,
   onCancelLeave,
+  dmLeave = null,
+  onConfirmDmLeave,
+  onCancelDmLeave,
   onClose,
   peer = null,
   status = null,
@@ -146,10 +159,13 @@ function InfoBody({
   onEnlargeAvatar,
 }: ConversationInfoPageProps): React.JSX.Element {
   const styles = useStyles(buildStyles);
+  const formatMessage = useFormatMessage();
   const insets = useSafeAreaInsets();
   // ‹ · VoiceOver escape 는 같은 길로 한 겹만 벗긴다: 들어온 길의 반대로 물러난 뒤 `onClose`(층 밖에서는 곧바로 `onClose`).
   const closeLayer = useLayerClose();
-  const goBack = closeLayer ?? onClose;
+  const leaveGoing = dmLeave?.pending === true;
+  // 「대화 나가기」 요청이 가는 동안 ‹ · escape 는 아무 일도 하지 않는다(요청은 이미 나갔다, 끝나면 영수증이 선다).
+  const goBack = leaveGoing ? noop : (closeLayer ?? onClose);
   const [dmPending, setDmPending] = useState<string | null>(null);
   const [dmError, setDmError] = useState<string | null>(null);
   const removeAgent = async (id: string) => {
@@ -159,12 +175,20 @@ function InfoBody({
     catch { setDmError('에이전트를 내보내지 못했어요. 연결을 확인하고 다시 시도해 주세요.'); }
     finally { setDmPending(null); }
   };
+  // 「대화 나가기」 확인 단계가 서면 맨 위로(가장 큰 글자에서 단계의 제목이 위로 밀려 안 보이지 않게 - `SheetScroll.scrollToTopWhen` 과 같은 이유).
+  const scrollRef = useRef<ScrollView>(null);
+  const dmLeaveStanding = dmLeave !== null;
+  useEffect(() => {
+    if (dmLeaveStanding) scrollRef.current?.scrollTo?.({y: 0, animated: false});
+  }, [dmLeaveStanding]);
   const isDm = kind === 'dm';
   const pageTitle = isDm ? CONVERSATION_INFO_LABEL.dm : CONVERSATION_INFO_LABEL.channel;
 
   const item = (key: ChannelActionKey) => items.find(candidate => candidate.key === key);
   const mute = item('mute');
   const leaving = item('close-dm') ?? item('leave');
+  // 「대화 나가기」는 숨기기와 따로 선다(D21) — 숨기기가 안 서는 때(안 읽음)에도 선다.
+  const leavingDm = item('leave-dm');
   const copies = (['copy-name', 'copy-link', 'copy-id'] as const)
     .map(item)
     .filter((found): found is ChannelActionItem => found !== undefined);
@@ -176,7 +200,7 @@ function InfoBody({
         key={found.key}
         title={busy && found.busyLabel ? found.busyLabel : found.label}
         // 알림 상태 표지는 오른쪽 값 자리다. 앞 칸·행 차례·위험색은 #4319 계약을 따른다.
-        trailing={found.icon ? <RowEmoji emoji={found.icon} /> : undefined}
+        trailing={isChannelActionStatusIcon(found.icon) ? <RowStatusIcon name={found.icon} /> : undefined}
         tone={found.tone === 'danger' ? 'danger' : 'default'}
         accessory={accessory}
         busy={busy}
@@ -198,11 +222,18 @@ function InfoBody({
         <PageHeader
           title={pageTitle}
           // 이 페이지는 대화 위에 쌓인 안쪽 장이라 X 가 아니라 ‹ 이다(`phone-sheets.md` §3). 이름은 어디로 가는지 말한다.
-          back={{label: '대화로 돌아가기', onPress: goBack, testID: 'conversation-info-back'}}
+          back={{
+            label: '대화로 돌아가기',
+            onPress: goBack,
+            // 1:1 나가기 요청이 가는 동안은 돌아가지 않는다(요청은 이미 나갔다) — 흐리고 잠김으로 읽힌다(#5903).
+            disabled: dmLeave?.pending === true,
+            testID: 'conversation-info-back',
+          }}
           titleTestID="conversation-info-title"
           testID="conversation-info-header"
         />
         <ScrollView
+          ref={scrollRef}
           contentContainerStyle={[
             styles.content,
             {paddingBottom: Math.max(insets.bottom, space.lg) + space.lg},
@@ -274,15 +305,24 @@ function InfoBody({
             />
           )}
 
-          {confirmingLeave ? (
+          {dmLeave !== null && onConfirmDmLeave && onCancelDmLeave ? (
+            <DmLeaveConfirm
+              step={dmLeave}
+              onConfirm={onConfirmDmLeave}
+              onCancel={onCancelDmLeave}
+              testID="conversation-info-dm-leave-confirm"
+            />
+          ) : confirmingLeave ? (
             <ConfirmStep
               testID="conversation-info-leave-confirm"
-              headline={CHANNEL_LEAVE_CONFIRM_TITLE}
-              detail={channelLeaveConfirmBody(title)}
+              confirmArmMs={CONFIRM_ARM_MS}
+              headline={formatMessage('timeline.channelLeave.title')}
+              detail={formatMessage(channelLeaveConfirmBodyKey(kind), {name: title})}
               error={leave.error}
               errorTestID="conversation-info-leave-error"
-              confirmLabel={CHANNEL_LEAVE_LABEL}
-              pendingLabel="나가는 중…"
+              confirmLabel={formatMessage('timeline.channelLeave.confirm')}
+              pendingLabel={formatMessage('timeline.channelLeave.busy')}
+              cancelLabel={formatMessage('timeline.channelLeave.cancel')}
               pending={leave.pending}
               onCancel={onCancelLeave}
               onConfirm={onConfirmLeave}
@@ -327,6 +367,7 @@ function InfoBody({
                 </GroupCard>
               ) : null}
               {leaving !== undefined ? <GroupCard>{row(leaving)}</GroupCard> : null}
+              {leavingDm !== undefined ? <GroupCard>{row(leavingDm)}</GroupCard> : null}
             </>
           )}
         </ScrollView>

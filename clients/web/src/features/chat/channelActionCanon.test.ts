@@ -74,19 +74,20 @@ describe("실행부는 한 벌이다", () => {
     expect(callers("setChannelNotificationPref")).toEqual([CANON]);
   });
 
-  it("멤버십 DELETE 의 임자는 둘이고, 둘은 다른 일이다", () => {
-    // `removeChannelMember` 자체는 「나가기」 전용 동사가 아니다. 에이전트
-    // 허브가 **남(에이전트)의** 채널 멤버십을 관리하며 같은 라우트를 부르는데,
-    // 그것은 이 메뉴의 「내가 나간다」와 다른 행위다. 그래서 목록은 둘이고,
+  it("관리자 길(남의 멤버십 끝내기)과 본인 나가기 길은 다른 함수다 — 나가기는 본인 길 하나다", () => {
+    // `removeChannelMember`(`…/members/{id}`)는 소유자·관리자가 **남의** 채널 멤버십을 끝내는 길이다. 에이전트 허브가
+    // 에이전트를, 채널 멤버 패널이 사람을 내보낼 때 쓴다(#5778). 「내가 나간다」는 그 길이 아니라 본인 길
+    // (`leaveChannel`, `…/members/me`)이다 — 관리자 길로 자기를 지우면 일반 멤버는 403 이었다(#5778 이전).
     // 새 이름이 붙으면 그 자리에서 이유를 적어야 한다.
     expect(callers("removeChannelMember").sort()).toEqual(
-      [CANON, "features/agentHub/AgentChannelsSection.tsx"].sort()
+      ["features/agentHub/AgentChannelsSection.tsx", "features/channels/useRemoveChannelMember.ts"].sort()
     );
+    expect(callers("leaveChannel")).toEqual([CANON]);
     // 「나가기」 흐름 자체 — 실패 문장·확인 문장 — 은 한 벌이다.
-    expect(callers("channelLeaveFailureMessage")).toEqual([CANON]);
-    expect(callers("channelLeaveConfirmBody")).toEqual([CANON]);
+    expect(callers("channelLeaveFailure")).toEqual([CANON]);
+    expect(callers("channelLeaveConfirmBodyKey")).toEqual([CANON]);
     const dialogs = FILES.filter((file) =>
-      /CHANNEL_LEAVE_CONFIRM_TITLE/.test(file.code)
+      /timeline\.channelLeave\.title/.test(file.code)
     ).map((file) => file.path);
     expect(dialogs).toEqual([CANON]);
   });
@@ -121,8 +122,10 @@ describe("한 곳의 수리가 두 표면을 함께 닫는다 (design-review #19
     expect(canon).not.toMatch(/onMutate/);
     expect(canon).not.toMatch(/cancelQueries/);
     // 목록 편집은 서버가 답한 뒤다.
+    // 성공(과 「이미 나간 것」 404)이 같은 정리 `leftChannel` 을 부르고, 목록 편집(`setQueryData`)은 거기 한 곳에만 있다.
     const success = canon.slice(canon.indexOf("leaveMutation"));
-    expect(success).toMatch(/onSuccess[\s\S]{0,600}setQueryData/);
+    expect(success).toMatch(/onSuccess[\s\S]{0,300}leftChannel\(\)/);
+    expect(canon).toMatch(/const leftChannel = \(\) => \{[\s\S]{0,500}setQueryData/);
   });
 
   it("표면 어느 쪽도 자기 나가기 흐름을 갖지 않는다", () => {
@@ -262,24 +265,41 @@ describe("게이트가 실제로 파일을 읽고 있다", () => {
 // N-1 (design-review #1932) — 무리도 표면 분기를 탄다
 // =============================================================================
 
-describe("섹션 이동 무리의 그릇", () => {
+describe("섹션 이동 무리 · 하위 메뉴의 그릇", () => {
+  /** 이 파일의 이름 붙은 함수 하나의 본문(다음 최상위 `function` 앞까지). */
+  function body(name: string): string {
+    const code = fileCode("features/chat/channelActions.tsx");
+    const start = code.indexOf(`function ${name}`);
+    expect(start).toBeGreaterThan(-1);
+    const rest = code.slice(start);
+    return rest.slice(0, rest.indexOf("\nfunction ", 1));
+  }
+
   it("`surface` 로 그릇을 고르고, 컨텍스트 메뉴를 하드코딩하지 않는다", () => {
     // 코어 `channels/actionModel.ts` 는 확장점을 「열쇠 하나·분기 하나·SURFACE_KEYS
     // 항목 하나」라고 광고한다. 그 한 줄을 믿고 헤더에 `move-to-section` 을 넣는
     // 사람이 Radix 루트 없는 컨텍스트 메뉴 조각을 렌더하면, 광고한 확장점이
-    // 실제로는 그것보다 비쌌던 것이다.
-    const code = fileCode("features/chat/channelActions.tsx");
-    const group = code.slice(code.indexOf("function ChannelSectionMoveGroup"));
-    const body = group.slice(0, group.indexOf("\nfunction "));
+    // 실제로는 그것보다 비쌌던 것이다. #5777 부터는 하위 메뉴(복사 · 섹션 이동)의
+    // 여는 줄과 판도 같은 갈래를 탄다.
+    const choices = body("ChannelSectionMoveChoices");
     for (const picked of [
-      "surface === \"header\" ? DropdownMenuLabel : ContextMenuLabel",
       "surface === \"header\" ? DropdownMenuRadioGroup : ContextMenuRadioGroup",
       "surface === \"header\" ? DropdownMenuRadioItem : ContextMenuRadioItem",
     ]) {
-      expect(body).toContain(picked);
+      expect(choices).toContain(picked);
+    }
+    const cluster = body("ChannelActionClusterRows");
+    for (const picked of [
+      "surface === \"header\" ? DropdownMenuSub : ContextMenuSub",
+      "surface === \"header\" ? DropdownMenuSubTrigger : ContextMenuSubTrigger",
+      "surface === \"header\" ? DropdownMenuSubContent : ContextMenuSubContent",
+    ]) {
+      expect(cluster).toContain(picked);
     }
     // 고른 뒤에는 그릇 이름이 본문에 다시 나오지 않는다.
-    expect(body).not.toContain("<ContextMenuRadioItem");
-    expect(body).not.toContain("<ContextMenuLabel");
+    for (const code of [choices, cluster]) {
+      expect(code).not.toMatch(/<ContextMenu[A-Z]/);
+      expect(code).not.toMatch(/<DropdownMenu[A-Z]/);
+    }
   });
 });

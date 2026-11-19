@@ -2,10 +2,9 @@ import type {
   ChannelActionItem,
   ChannelActionKey,
 } from '@momo/core/features/channels/actionModel';
+import {isChannelActionStatusIcon} from '@momo/core/features/channels/actionModel';
 import {
-  CHANNEL_LEAVE_CONFIRM_TITLE,
-  CHANNEL_LEAVE_LABEL,
-  channelLeaveConfirmBody,
+  channelLeaveConfirmBodyKey,
 } from '@momo/core/features/channels/model';
 import type {Channel} from '@momo/core/lib/api';
 import React from 'react';
@@ -13,9 +12,13 @@ import {StyleSheet} from 'react-native';
 import {Sentence} from '../../design/atoms';
 import {PageSheet} from '../../design/PageSheet';
 import {SheetHeader} from '../../design/SheetChrome';
-import {ConfirmStep, GroupCard, ListRow, RowEmoji, SheetScroll} from '../../design/sheetParts';
+import {CONFIRM_ARM_MS, ConfirmStep, GroupCard, ListRow, RowStatusIcon, SheetScroll} from '../../design/sheetParts';
 import {useStyles} from '../../design/theme';
+import {useFormatMessage} from '../../i18n/useFormatMessage';
 import {font, line, type Palette} from '../../design/tokens';
+import {DmLeaveConfirm, ignoreDiscard} from '../sidebar/DmLeaveConfirm';
+import {RenameChannelBody} from '../sidebar/RenameChannelBody';
+import type {ChannelRowActions, DmLeaveStepView} from '../sidebar/useChannelRowActions';
 import {
   CONVERSATION_DELEGATE_LABEL,
   CONVERSATION_INFO_LABEL,
@@ -31,6 +34,8 @@ import {
 //                     정보는 `onOpenInfo` 가 있을 때만, 작업 맡기기는 일대일 에이전트 DM 에서만 선다. 고정은 늘 선다.
 //   카드 2 (알림)     알림 켜짐 / 알림 꺼짐 — 코어 표의 낱말.
 //   카드 3 (떠나기)   DM 은 대화 닫기, 채널은 채널 나가기 — 둘은 한 대화에 함께 서지 않는다. 채널 나가기만 위험색이고 확인 단계를 지난다.
+//   카드 4 (대화 나가기) 사람끼리의 1:1 에만 — 맨 아래 따로 선 카드, 위험색, 확인 단계(ADR-0177 증보 2026-11-14 D21). 「목록에서 숨기기」가
+//                     안 서는 때(안 읽음이 있다)에도 선다.
 //
 // ## 닫는 길이 행마다 다르다 (`phone-sheets.md` §2 「행동은 시트가 내려간 뒤에」)
 //
@@ -44,7 +49,7 @@ import {
 //
 // 알림 · 닫기 · 나가기는 부르는 쪽이 코어 표의 답(`conversationMenuActionItems`)을 그대로 넘기고 여기는 **그리기만** 한다 — 내밀지 말지(`canLeaveChannel`·
 // `dmCloseOffered`)도, 낱말도, 위험색도 코어의 것이다. 「채널 나가기」만 확인 단계를 지난다(되돌릴 길이 없다 — 다시 들어오려면 관리자가 추가해야
-// 한다). 「대화 닫기」는 되돌릴 수 있어(닫은 대화 목록·새 메시지) 확인 단계도 위험색도 없다(코어 표가 그렇게 답한다).
+// 한다). 「목록에서 숨기기」는 되돌릴 수 있어(닫은 대화 목록·새 메시지) 확인 단계도 위험색도 없다(코어 표가 그렇게 답한다).
 // =============================================================================
 
 export function ConversationMenuSheet({
@@ -62,6 +67,12 @@ export function ConversationMenuSheet({
   onRun,
   onConfirmLeave,
   onCancelLeave,
+  dmLeave = null,
+  onConfirmDmLeave,
+  onCancelDmLeave,
+  rename = null,
+  onConfirmRename,
+  onClearRenameFailure,
   onClose,
 }: {
   /** 대화의 이름 — DM 은 상대 이름, 채널은 `#` 없는 이름(머리의 `# ` 는 여기서 붙인다). */
@@ -88,13 +99,25 @@ export function ConversationMenuSheet({
   onRun: (key: ChannelActionKey) => void;
   onConfirmLeave: () => void;
   onCancelLeave: () => void;
+  /** 1:1 「대화 나가기」 확인 단계(훅의 `dmLeave`). 있으면 메뉴 대신 선다. */
+  dmLeave?: DmLeaveStepView | null;
+  onConfirmDmLeave?: () => void;
+  onCancelDmLeave?: () => void;
+  /** 「이름 바꾸기」 단계(훅의 `rename`, ADR-0225 D10 · #5835). 있으면 머리까지 이 단계의 것으로 바뀐다. */
+  rename?: ChannelRowActions['rename'];
+  onConfirmRename?: (name: string) => void;
+  onClearRenameFailure?: () => void;
   onClose: () => void;
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
+  const formatMessage = useFormatMessage();
   const infoLabel = kind === 'dm' ? CONVERSATION_INFO_LABEL.dm : CONVERSATION_INFO_LABEL.channel;
+  const renameItem = items.find(item => item.key === 'rename');
   const mute = items.find(item => item.key === 'mute');
-  // DM 은 「대화 닫기」, 채널은 「채널 나가기」 — 코어 표가 한 대화에 둘을 함께 내지 않는다(`isDm`).
+  // DM 은 「목록에서 숨기기」, 채널은 「채널 나가기」 — 코어 표가 한 대화에 둘을 함께 내지 않는다(`isDm`).
   const leaving = items.find(item => item.key === 'close-dm' || item.key === 'leave');
+  // 「대화 나가기」는 숨기기와 따로 선다(D21) — 숨기기가 안 서는 때(안 읽음)에도 선다.
+  const leavingDm = items.find(item => item.key === 'leave-dm');
 
   const actionRow = (item: ChannelActionItem): React.JSX.Element => {
     const busy = isPending(item.key);
@@ -102,7 +125,7 @@ export function ConversationMenuSheet({
       <ListRow
         title={busy && item.busyLabel ? item.busyLabel : item.label}
         // 알림 상태 표지는 오른쪽 값 자리다. 앞 칸·행 차례·위험색은 #4319 계약을 따른다.
-        trailing={item.icon ? <RowEmoji emoji={item.icon} /> : undefined}
+        trailing={isChannelActionStatusIcon(item.icon) ? <RowStatusIcon name={item.icon} /> : undefined}
         tone={item.tone === 'danger' ? 'danger' : 'default'}
         busy={busy}
         // 닫는 길로 보내지 않는다: 이 시트는 왕복 중의 「…하는 중」과 실패를 스스로 보이는 면이라 행동이 끝날 때까지 떠 있어야 한다.
@@ -119,23 +142,47 @@ export function ConversationMenuSheet({
       accessibilityLabel={conversationMenuAccessibleLabel(title, kind)}
       scrimLabel="대화 메뉴 닫기"
       scrimTestID="conversation-menu-backdrop"
+      // 1:1 나가기 요청이 가는 동안은 몸짓으로 닫히지 않는다(요청은 이미 나갔다).
+      dirty={dmLeave?.pending === true || rename?.pending === true}
+      onDiscardPrompt={ignoreDiscard}
       testID="conversation-menu-sheet">
+      {rename !== null && onConfirmRename ? (
+        <RenameChannelBody
+          current={title}
+          pending={rename.pending}
+          failure={rename.failure}
+          onSubmit={onConfirmRename}
+          onEdit={onClearRenameFailure ?? ignoreDiscard}
+          testIDPrefix="conversation-menu-rename"
+        />
+      ) : (
+      <>
       <SheetHeader
         title={conversationMenuTitle(title, kind)}
         titleTestID="conversation-menu-title"
         closeLabel="대화 메뉴 닫기"
         closeTestID="conversation-menu-close"
+        closeDisabled={dmLeave?.pending === true}
       />
-      <SheetScroll testID="conversation-menu-scroll">
-        {confirmingLeave ? (
+      <SheetScroll testID="conversation-menu-scroll" scrollToTopWhen={dmLeave !== null}>
+        {dmLeave !== null && onConfirmDmLeave && onCancelDmLeave ? (
+          <DmLeaveConfirm
+            step={dmLeave}
+            onConfirm={onConfirmDmLeave}
+            onCancel={onCancelDmLeave}
+            testID="conversation-menu-dm-leave-confirm"
+          />
+        ) : confirmingLeave ? (
           <ConfirmStep
             testID="conversation-menu-leave-confirm"
-            headline={CHANNEL_LEAVE_CONFIRM_TITLE}
-            detail={channelLeaveConfirmBody(title)}
+            confirmArmMs={CONFIRM_ARM_MS}
+            headline={formatMessage('timeline.channelLeave.title')}
+            detail={formatMessage(channelLeaveConfirmBodyKey(kind), {name: title})}
             error={leave.error}
             errorTestID="conversation-menu-leave-error"
-            confirmLabel={CHANNEL_LEAVE_LABEL}
-            pendingLabel="나가는 중…"
+            confirmLabel={formatMessage('timeline.channelLeave.confirm')}
+            pendingLabel={formatMessage('timeline.channelLeave.busy')}
+            cancelLabel={formatMessage('timeline.channelLeave.cancel')}
             pending={leave.pending}
             onCancel={onCancelLeave}
             onConfirm={onConfirmLeave}
@@ -182,11 +229,15 @@ export function ConversationMenuSheet({
                 />
               ) : null}
             </GroupCard>
+            {renameItem !== undefined ? <GroupCard>{actionRow(renameItem)}</GroupCard> : null}
             {mute !== undefined ? <GroupCard>{actionRow(mute)}</GroupCard> : null}
             {leaving !== undefined ? <GroupCard>{actionRow(leaving)}</GroupCard> : null}
+            {leavingDm !== undefined ? <GroupCard>{actionRow(leavingDm)}</GroupCard> : null}
           </>
         )}
       </SheetScroll>
+      </>
+      )}
     </PageSheet>
   );
 }

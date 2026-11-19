@@ -35,6 +35,29 @@ describe("paletteFilter (#4111)", () => {
     expect(paletteFilter("deploy 배포", "zzq")).toBe(0);
   });
 
+  // ADR-0225 D12: 채널·사람 줄(키워드 없음)은 한글 조합 중에도 남는다.
+  it.each(["ㄷ", "디", "딪", "디ㅈ", "디자", "디장", "디자이", "디자인"])(
+    "한글 조합 중 `%s` 에서도 「디자인」 줄이 남고, 「디저트」는 `디자`부터 빠진다",
+    (query) => {
+      expect(paletteFilter("디자인 5f0c9e1a-0000", query)).toBeGreaterThan(0);
+      const dessert = paletteFilter("디저트 5f0c9e1a-0001", query) > 0;
+      expect(dessert).toBe(["ㄷ", "디", "딪", "디ㅈ"].includes(query));
+    }
+  );
+
+  it("글자 그대로 맞은 줄이 느슨하게만 맞은 줄보다 늘 위다: `복` → 복지 > 보고, `갑` → 갑판 > 가방", () => {
+    expect(paletteFilter("복지 id", "복")).toBeGreaterThan(paletteFilter("보고 id", "복"));
+    expect(paletteFilter("보고 id", "복")).toBeGreaterThan(0);
+    // 이름 가운데에서 글자 그대로 맞은 줄(부분 일치)도 느슨한 앞머리보다 위다.
+    expect(paletteFilter("광고 id", "고")).toBeGreaterThan(paletteFilter("공지 id", "고"));
+    expect(paletteFilter("갑판 id", "갑")).toBeGreaterThan(paletteFilter("가방 id", "갑"));
+  });
+
+  it("느슨한 견줌은 마지막 낱말의 마지막 글자만이다", () => {
+    expect(paletteFilter("디자인-리뷰 id", "디자인 리ㅂ")).toBeGreaterThan(0);
+    expect(paletteFilter("디자인-리뷰 id", "디장 리뷰")).toBe(0);
+  });
+
   it("빈 질의는 모두 남긴다", () => {
     expect(paletteFilter("x", "  ", inbox)).toBeGreaterThan(0);
   });

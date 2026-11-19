@@ -39,6 +39,14 @@ import { Popover, PopoverAnchor, PopoverContent, PopoverTrigger } from "@/design
 // - `anchorRef` 는 목록이 달라붙는 상자다. 라벨이 칸 바로 위에 붙은 폼에서 목록이 위로
 //   뒤집혀도 라벨을 가리지 않게, 라벨+칸을 감싼 상자를 넘긴다.
 // - 모달 다이얼로그 안에서도 목록 휠 스크롤이 된다(다이얼로그의 스크롤 잠금이 포털 밖 휠을 막는다).
+//
+// ## 변형 (#5780)
+//
+// - `field`(기본): 입력 그릇. `--line-strong` 테두리, 칸 폭 전체, 화살표는 칸의 오른쪽 끝.
+// - `inline`: **줄 안의 값**(멤버 프로필의 「역할 ⌄」). 이미 이름이 붙은 줄의 끝에 서는 값이라 그릇 테두리가
+//   없고, 단추는 글만큼만 넓고, 화살표가 글 바로 뒤에 붙는다. 어포던스는 화살표와 가리킴 채움이 진다.
+//   목록은 단추보다 넓을 수 있다(단추가 짧아도 항목이 비좁지 않게 `pane-sm` 이 바닥이다) — 단추의 끝에 맞춘다.
+//   이 변형은 이 파일의 다른 쓰는 곳에 번지지 않는다: `variant` 를 넘긴 곳만 바뀐다.
 // =============================================================================
 
 export type ListboxOption<V extends string = string> = {
@@ -73,6 +81,7 @@ export function ListboxSelect<V extends string = string>({
   "aria-labelledby": ariaLabelledBy,
   side = "bottom",
   anchorRef,
+  variant = "field",
   ...rest
 }: Omit<
   React.ButtonHTMLAttributes<HTMLButtonElement>,
@@ -94,7 +103,10 @@ export function ListboxSelect<V extends string = string>({
   side?: "top" | "bottom";
   /** 목록이 달라붙는 상자. 없으면 단추. 라벨이 단추 바로 위에 있으면 라벨+단추 상자를 넘긴다. */
   anchorRef?: React.RefObject<HTMLElement | null>;
+  /** `field` 입력 그릇(기본) · `inline` 줄 안의 값(테두리 없음, 글 바로 뒤 화살표). 머리말 「변형」. */
+  variant?: "field" | "inline";
 }) {
+  const inline = variant === "inline";
   const reactId = React.useId();
   const listId = `${reactId}-list`;
   const optionId = (index: number) => `${reactId}-opt-${index}`;
@@ -223,11 +235,20 @@ export function ListboxSelect<V extends string = string>({
             }
           }}
           className={cn(
-            "tap-target flex h-field w-full min-w-0 items-center gap-2 rounded-lg border border-line-strong bg-transparent pl-3 pr-2.5 text-left text-label press-instant-fill active:bg-surface-pressed focus-visible:focus-ring disabled:cursor-not-allowed disabled:opacity-50 aria-disabled:cursor-not-allowed aria-disabled:opacity-50",
+            inline
+              ? "tap-target inline-flex h-control min-w-0 max-w-full items-center gap-1 rounded-md bg-transparent px-2 text-left text-label font-semibold hover:bg-surface-hover press-instant-fill active:bg-surface-pressed focus-visible:focus-ring disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-transparent aria-disabled:cursor-not-allowed aria-disabled:opacity-50"
+              : "tap-target flex h-field w-full min-w-0 items-center gap-2 rounded-lg border border-line-strong bg-transparent pl-3 pr-2.5 text-left text-label press-instant-fill active:bg-surface-pressed focus-visible:focus-ring disabled:cursor-not-allowed disabled:opacity-50 aria-disabled:cursor-not-allowed aria-disabled:opacity-50",
             className
           )}
+          data-variant={variant}
         >
-          <span className={cn("min-w-0 flex-1 truncate", selected ? "text-ink" : "text-ink-muted")}>
+          <span
+            className={cn(
+              "min-w-0 truncate",
+              !inline && "flex-1",
+              selected ? "text-ink" : "text-ink-muted"
+            )}
+          >
             {selected ? optionDisplay(selected) : placeholder}
           </span>
           <ChevronDown
@@ -241,9 +262,12 @@ export function ListboxSelect<V extends string = string>({
       </PopoverTrigger>
       <PopoverContent
         side={side}
-        align="start"
+        align={inline ? "end" : "start"}
         sideOffset={4}
-        className="max-h-[var(--radix-popover-content-available-height)] w-[var(--radix-popover-trigger-width)] overflow-y-auto rounded-lg p-1"
+        className={cn(
+          "max-h-[var(--radix-popover-content-available-height)] overflow-y-auto rounded-lg p-1",
+          inline ? "w-pane-sm" : "w-[var(--radix-popover-trigger-width)]"
+        )}
         onWheel={stopWheelEscape}
         onTouchMove={stopWheelEscape}
         onOpenAutoFocus={(event) => {

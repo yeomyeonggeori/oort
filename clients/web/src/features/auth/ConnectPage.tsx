@@ -1,6 +1,7 @@
 import {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useRef,
   useState,
   useSyncExternalStore,
@@ -227,7 +228,8 @@ export function ConnectPage({
     [reducedMotion]
   );
 
-  useEffect(() => {
+  // 첫 그림 전에 선다(#5785): 초점이 그림 뒤 프레임에 오면 그 사이 친 글자가 어디에도 들어가지 않는다.
+  useLayoutEffect(() => {
     if (!pendingFocus) return;
     const node = {
       entry: entryRef.current,
@@ -240,11 +242,13 @@ export function ConnectPage({
     // 그 칸을 가진 화면이 마운트될 때까지 기다린다.
     if (!node) return;
     node.focus();
+    // 「바꾸기」·「뒤로」가 앞 서버 주소를 채워 둔 칸: 골라 두면 그대로 붙여 넣기·타자가 그 글을 대신한다(#5785).
+    if (pendingFocus === "entry") entryRef.current?.select();
     setPendingFocus(null);
   }, [pendingFocus, step]);
 
   // 첫 그림의 커서: D0은 입력 칸, D1은 이메일(채워져 있으면 비밀번호), D1′은 이메일.
-  useEffect(() => {
+  useLayoutEffect(() => {
     const first = initialStep.current;
     if (first === "welcome") focusLater("entry");
     else if (first === "sign-in") {
@@ -254,13 +258,19 @@ export function ConnectPage({
 
   /** 서버를 이 기기의 선택으로 굳힌다. "" = 같은 출처(웹). */
   const commitServer = useCallback((base: string) => {
+    // 서버가 바뀌면 앞 서버 로그인 걸음에서 친 비밀번호는 새 서버로 가지 않는다(이메일은 남긴다).
+    const dropPasswordIfMoved = (next: string) => {
+      if ((getServerBase() ?? "") !== next) setPassword("");
+    };
     if (base === "") {
+      dropPasswordIfMoved("");
       setServerBase(null);
       setServerUrl("");
       return;
     }
     const checked = normalizeServerUrl(base);
     if (!checked.ok) return;
+    dropPasswordIfMoved(checked.base);
     setServerBase(checked.base);
     setServerUrl(checked.base);
     rememberRecentServer(checked.base);
@@ -304,8 +314,9 @@ export function ConnectPage({
   );
 
   // 딥링크(데스크탑 `oort://join`, 브라우저 `?code=`)가 이 화면을 연 뒤에도 새
-  // 링크가 오면 다시 적용한다. 링크는 D0을 건너뛴다(ADR-0193 D7).
-  useEffect(() => {
+  // 링크가 오면 다시 적용한다. 링크는 D0을 건너뛴다(ADR-0193 D7). 마운트 때의 링크는 첫 그림 전에 적용한다(#5785):
+  // 로그인 화면은 처음부터 그 서버·걸음·초점으로 서고, 그 뒤로는 사람(또는 새 링크)만 그것을 바꾼다.
+  useLayoutEffect(() => {
     if (!prefill) return;
     if (prefill.inviteCode !== "") {
       const base = prefill.serverUrl || getServerBase() || "";

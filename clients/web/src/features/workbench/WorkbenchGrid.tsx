@@ -46,6 +46,7 @@ import {
 } from "@momo/core/features/workbench/keymap";
 import type { LayoutStorageStatus } from "./useWorkbenchLayout";
 import "./workbench.css";
+import { Tooltip } from "@/design/ui/tooltip";
 
 // Reading this as: 작업 공간 격자(파워 개발자 워크벤치) for internal team users on
 // web+Tauri, density 7/10, motion 1/10.
@@ -723,18 +724,19 @@ function PaneView({ id, ctx }: { id: PaneId; ctx: RenderContext }) {
         >
           {share ? (
             <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <button
-                  type="button"
-                  aria-label={share.menuLabel}
-                  title={share.menuLabel}
-                  data-testid="workbench-pane-share-menu"
-                  // 공유 중인 칸은 좁아도 끄는 길을 접지 않는다(공유가 켜진 칸을 끌 방법이 머리에서 사라지면 안 된다).
-                  className={cn(PANE_BUTTON_CLASS, !share.chip && "hidden @xs:inline-flex")}
-                >
-                  <Share2 />
-                </button>
-              </DropdownMenuTrigger>
+              <Tooltip label={share.menuLabel} side="bottom" className={!share.chip ? "hidden @xs:inline-flex" : undefined}>
+                <DropdownMenuTrigger asChild>
+                  <button
+                    type="button"
+                    aria-label={share.menuLabel}
+                    data-testid="workbench-pane-share-menu"
+                    // 공유 중인 칸은 좁아도 끄는 길을 접지 않는다(공유가 켜진 칸을 끌 방법이 머리에서 사라지면 안 된다).
+                    className={cn(PANE_BUTTON_CLASS, !share.chip && "hidden @xs:inline-flex")}
+                  >
+                    <Share2 />
+                  </button>
+                </DropdownMenuTrigger>
+              </Tooltip>
               <DropdownMenuContent align="end" data-testid="workbench-pane-share-items">
                 {share.menu}
               </DropdownMenuContent>
@@ -839,21 +841,23 @@ function PaneButton({
   return (
     // 꺼진 버튼도 누를 수 있게 둔다(aria-disabled). 누르면 연산이 거부 이유를
     // 상태 줄에 말한다. `disabled`는 포인터를 막아 툴팁도 이유도 보이지 않는다.
-    <button
-      type="button"
-      aria-label={label}
-      aria-keyshortcuts={keycap ? ariaKeys(platform, keycap) : undefined}
-      aria-pressed={pressed}
-      aria-disabled={disabled || undefined}
-      title={
-        (keycap ? `${label} (${modLabel(platform, keycap)})` : label) +
-        (disabledReason ? `: ${disabledReason}` : "")
-      }
-      onClick={onClick}
-      className={cn(PANE_BUTTON_CLASS, narrowHidden && "hidden @xs:inline-flex")}
+    <Tooltip
+      label={(keycap ? `${label} (${modLabel(platform, keycap)})` : label) + (disabledReason ? `: ${disabledReason}` : "")}
+      side="bottom"
+      className={narrowHidden ? "hidden @xs:inline-flex" : undefined}
     >
-      {children}
-    </button>
+      <button
+        type="button"
+        aria-label={label}
+        aria-keyshortcuts={keycap ? ariaKeys(platform, keycap) : undefined}
+        aria-pressed={pressed}
+        aria-disabled={disabled || undefined}
+        onClick={onClick}
+        className={cn(PANE_BUTTON_CLASS, narrowHidden && "hidden @xs:inline-flex")}
+      >
+        {children}
+      </button>
+    </Tooltip>
   );
 }
 

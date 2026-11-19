@@ -19,6 +19,7 @@ import {
   useWorkbenchLayout,
   type LayoutStorage,
 } from "./useWorkbenchLayout";
+import { tooltipTextOf } from "@/design/ui/tooltipTestKit";
 
 // 격자 엔진의 화면 쪽(#2773). 트리 연산 자체는 core 시험이 두껍게 잰다. 여기서는
 // 키(물리 키, 한글 입력), 거부 문구, 최대화 중 칸 유지, 경계 끌기·더블클릭·화살표,
@@ -185,7 +186,7 @@ describe("칸 크롬(#3279): 카드 테두리 없음, 신호색은 「응답 필
     render(<Controlled initial={four()} />);
     const close = screen.getAllByRole("button", { name: "칸 닫기" })[0]!;
     expect(close.getAttribute("aria-keyshortcuts")).toBe("Meta+W");
-    expect(close.getAttribute("title")).toBe("칸 닫기 (⌘W)");
+    expect(tooltipTextOf(close)).toBe("칸 닫기 (⌘W)");
   });
 });
 

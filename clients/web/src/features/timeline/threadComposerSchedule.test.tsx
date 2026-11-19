@@ -44,6 +44,7 @@ import { clearThreadDraft, readThreadDraft } from "@/features/chat/draftStore";
 import { resetAttachmentDraftsForTest } from "@/features/attachments/draftStore";
 import { resetSchedulerDisabledForTest } from "@/features/scheduled/useScheduled";
 import { ThreadComposer } from "./ThreadComposer";
+import { tooltipTextOf } from "@/design/ui/tooltipTestKit";
 
 const NOW = new Date("2026-10-22T14:30:00+09:00").getTime();
 const TOMORROW_9 = new Date("2026-10-23T09:00:00+09:00").getTime();
@@ -235,7 +236,7 @@ describe("입구와 막힌 이유 (UI 명세 0.4: 스레드 입력창)", () => {
     await mount();
     expect(triggerEl().getAttribute("aria-label")).toBe("예약해서 보내기");
     expect(triggerEl().getAttribute("aria-disabled")).toBe("true");
-    expect(triggerEl().getAttribute("title")).toBe("보낼 내용을 쓰면 예약할 수 있어요");
+    expect(tooltipTextOf(triggerEl())).toBe("보낼 내용을 쓰면 예약할 수 있어요");
     const reasonId = triggerEl().getAttribute("aria-describedby") ?? "";
     expect(document.getElementById(reasonId)?.textContent).toBe("보낼 내용을 쓰면 예약할 수 있어요");
     // 보내기와 ▾가 한 알약이다.
@@ -273,9 +274,9 @@ describe("입구와 막힌 이유 (UI 명세 0.4: 스레드 입력창)", () => {
     });
     expect(textOf("thread-composer-offline")).toBe(OFFLINE);
     expect((need("thread-composer-send") as HTMLButtonElement).disabled).toBe(true);
-    expect(need("thread-composer-send").getAttribute("title")).toBe(OFFLINE);
+    expect(tooltipTextOf(need("thread-composer-send"))).toBe(OFFLINE);
     expect(triggerEl().getAttribute("aria-disabled")).toBe("true");
-    expect(triggerEl().getAttribute("title")).toBe(OFFLINE);
+    expect(tooltipTextOf(triggerEl())).toBe(OFFLINE);
     await act(async () => {
       window.dispatchEvent(new Event("online"));
     });

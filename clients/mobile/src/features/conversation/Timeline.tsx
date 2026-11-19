@@ -497,6 +497,22 @@ const KEEP_VISIBLE_POSITION = {minIndexForVisible: 0} as const;
 // 완전한 수리는 네이티브(앵커의 tag·superview 검사를 컬링과 무관하게)이고, 이 앱의 RN
 // 코어는 prebuilt(`React-Core-prebuilt`)다.
 // =============================================================================
+/** 보이는 행 가운데 메시지 줄의 seq 범위(#5885). 메시지 줄이 없으면 `null`. */
+function seqRangeOfTokens(
+  tokens: readonly ViewToken<FoldedTimelineItem>[],
+): {firstSeq: number; lastSeq: number} | null {
+  let firstSeq: number | null = null;
+  let lastSeq: number | null = null;
+  for (const token of tokens) {
+    const item = token.item;
+    if (item === null || item === undefined || item.kind !== 'message') continue;
+    const seq = item.message.seq;
+    if (firstSeq === null || seq < firstSeq) firstSeq = seq;
+    if (lastSeq === null || seq > lastSeq) lastSeq = seq;
+  }
+  return firstSeq === null || lastSeq === null ? null : {firstSeq, lastSeq};
+}
+
 function TimelineCell({
   // `VirtualizedList` 가 식별용으로 넘기는 값들 — 네이티브 뷰의 prop 이 아니다.
   cellKey: _cellKey,
@@ -978,6 +994,7 @@ function TimelineInner({
   onJumpLanded,
   onReaderTookList,
   jumpPills = false,
+  onVisibleSeqRange,
   pillsRef,
   tailRef,
   tailGap,
@@ -1189,6 +1206,11 @@ function TimelineInner({
    * 떼는데, `FlatList` 는 그 콜백이 도중에 바뀌는 것을 허락하지 않는다.
    */
   jumpPills?: boolean;
+  /**
+   * 보이는 메시지 줄의 seq 범위(가장 옛 줄 · 가장 새 줄)를 알린다(#5885). 재연결 뒤 다시 읽기가 이 구간을 읽는다. 보이는 행 보고는 점프 필이
+   * 켜진 표면(`jumpPills`)에서만 오므로 그때만 부른다 — 아니면 다시 읽기는 가장 새 쪽을 읽는다.
+   */
+  onVisibleSeqRange?: (range: {firstSeq: number; lastSeq: number} | null) => void;
   /**
    * Measurement seam (`measure/harness.tsx`), inert in the app (#1892).
    *
@@ -1822,9 +1844,12 @@ function TimelineInner({
    * 그것이 도중에 바뀌는 것을 허락하지 않는다. 그래서 ref 에 한 번 만들고, 읽는
    * 것은 전부 ref 다.
    */
+  const onVisibleSeqRangeRef = useRef(onVisibleSeqRange);
+  onVisibleSeqRangeRef.current = onVisibleSeqRange;
   const onViewableItemsChanged = useRef(
     ({viewableItems}: {viewableItems: ViewToken<FoldedTimelineItem>[]}) => {
       const keys = viewableItems.map(token => token.key);
+      onVisibleSeqRangeRef.current?.(seqRangeOfTokens(viewableItems));
       // 링크 카드의 사이트 아이콘이 「한 번 보인 줄」을 알 수 있게 알린다(#4883). 이 콜백은 필이 있는 표면에만 걸린다 —
       // 필이 없는 표면(스레드 패널·하네스)은 아래 `value` 가 `null` 이라 줄이 늘 보인 것으로 친다.
       rowViewabilityRef.current?.store.update(keys);

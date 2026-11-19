@@ -3,17 +3,19 @@ import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { act, cleanup, render, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, waitFor, within } from "@testing-library/react";
 import { FIXTURE_AI_APPROVAL, FIXTURE_APPROVAL, FIXTURE_MEMBER_ID, FIXTURE_SOURCE_ATTACHMENT_ID, FIXTURE_WORKSPACE_ID, fixtureGeneratedDraft, fixtureManualDraft } from "@momo/core/features/expressions/fixtures";
 import type { ExpressionApproval, ExpressionDraft } from "@momo/core/features/expressions/types";
 import type { AgentApprovalCard } from "@momo/core/features/timeline/agentCardModel";
-import { fetchAttachmentContent } from "@momo/core/lib/api";
+import { authedResponse, fetchAttachmentContent } from "@momo/core/lib/api";
 import { resetAttachmentPreviewsForTest } from "@/features/attachments/content";
 import { resetSettledApprovalsForTest } from "@/features/timeline/settledApprovals";
 import { ExpressionStore } from "./ExpressionStore";
 import { createExpressionFixtureTransport } from "./transport";
 import { ExpressionsContext } from "./context";
 import { ExpressionApprovalCard } from "./ExpressionApprovalCard";
+import { LocaleContext } from "@/i18n/localeContext";
+import { koreanLocaleForTest } from "@/i18n/koreanLocaleForTest";
 
 vi.mock("@momo/core/lib/api", async (actual) => ({ ...await actual<object>(), fetchAttachmentContent: vi.fn(), authedResponse: vi.fn(), fetchRoster: vi.fn().mockResolvedValue([]) }));
 // The candidate pictures are not what these tests are about; their own loading is covered next door.
@@ -200,6 +202,80 @@ describe("a slot the server could not make", () => {
     expect(view.queryByTestId("expression-approval-count")).toBeNull();
     expect(view.getAllByRole("button", { name: "직접 올리기" })).toHaveLength(2);
     expect(view.getAllByRole("status").map((node) => node.textContent)).toEqual(["그림을 만들지 못했어요", "그림을 만들지 못했어요"]);
+  });
+});
+
+describe("an agent's link candidate (ADR-0218 §18, #5934)", () => {
+  // The server sends the host alone; this path is here to show the card reads no further than the host even if one came.
+  const link = { ...fixtureManualDraft(), draftId: "00000000-0000-4000-8000-000000000199", name: "cat_wave", displayName: "손 흔드는 고양이", code: "source_awaiting_approval", origin: { kind: "url", sourceUrl: "https://media.example.com/cats/wave.gif", prompt: null } } as ExpressionDraft;
+  const answer = (status: number, receipt: object) => ({ status, ok: status < 300, text: JSON.stringify(receipt), json: <T,>() => receipt as T, jsonOrNull: () => receipt });
+  // The new lines come from the message catalogs, so these cards are mounted in Korean.
+  let korean: Awaited<ReturnType<typeof koreanLocaleForTest>>;
+  beforeEach(async () => { korean = await koreanLocaleForTest(); });
+  const mountKo = (payload: ExpressionApproval) => {
+    const store = makeStore();
+    return render(<LocaleContext.Provider value={korean}><ExpressionsContext.Provider value={store}><ExpressionApprovalCard card={approvalCard()} payload={live(payload)} result={null} /></ExpressionsContext.Provider></LocaleContext.Provider>);
+  };
+  const linkRow = (view: ReturnType<typeof mountKo>) => view.getAllByTestId("expression-draft").find((row) => row.hasAttribute("data-link-state"))!;
+  const approveLink = (view: ReturnType<typeof mountKo>) => within(linkRow(view)).getByTestId("expression-draft-link-approve") as HTMLButtonElement;
+  const body = (call: number) => JSON.parse(vi.mocked(authedResponse).mock.calls[call][1]!.body as string) as Record<string, unknown>;
+
+  it("shows the host and an approve button beside the other candidates, sends one hash-less choice, locks the card meanwhile and ends registered", async () => {
+    let answerNow!: () => void;
+    vi.mocked(authedResponse).mockImplementation(() => new Promise((resolve) => { answerNow = () => resolve(answer(200, { status: "approved", result: { status: "executed", expression: { id: link.draftId, name: "cat_wave", token: ":cat_wave:" } } }) as never); }));
+    const view = mountKo(approval(fixtureGeneratedDraft(1), link));
+    expect(view.getAllByTestId("expression-draft")).toHaveLength(2);
+    const row = linkRow(view);
+    expect(within(row).getByRole("status").textContent).toBe("media.example.com에서 가져와요");
+    // Host only: no path in the text, and no link out of the row while it waits.
+    expect(view.container.textContent).not.toContain("/cats");
+    expect(row.querySelector("a")).toBeNull();
+    const button = approveLink(view);
+    expect(button.textContent).toBe("가져와서 팀 보관함에 등록");
+    expect(button.getAttribute("aria-describedby")?.split(" ").map((id) => document.getElementById(id)?.textContent)).toEqual(["media.example.com에서 가져와요", "승인하면 그림을 한 번 가져와 확인한 뒤 팀 보관함에 등록해요."]);
+    expect(button.disabled).toBe(true);
+    fireEvent.click(within(row).getByRole("checkbox"));
+    fireEvent.click(button); fireEvent.click(button);
+    await waitFor(() => expect(row.getAttribute("data-link-state")).toBe("fetching"));
+    expect(authedResponse).toHaveBeenCalledTimes(1);
+    expect(body(0)).toMatchObject({ approve: true, expressionChoice: { draftId: link.draftId, revision: link.revision } });
+    expect(body(0).expressionChoice).not.toHaveProperty("sha256");
+    expect(button.textContent).toBe("가져오는 중");
+    // The other candidate and the rejection wait too.
+    expect((view.getByRole("button", { name: "거부하기" }) as HTMLButtonElement).disabled).toBe(true);
+    expect((within(view.getAllByTestId("expression-draft")[0]).getByRole("button", { name: "팀 보관함에 등록" }) as HTMLButtonElement).disabled).toBe(true);
+    await act(async () => { answerNow(); });
+    await waitFor(() => expect(view.getByRole("status").textContent).toBe("팀 보관함에 저장했어요"));
+    expect(authedResponse).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    ["a fetch that failed", 409, { status: "source_unsupported" }, "이 형식은 받지 못했어요. PNG나 GIF로 직접 올려 주세요."],
+    ["a server with no fetch place free", 503, { status: "expression_link_busy" }, "media.example.com에서 가져와요"],
+  ])("keeps the card pending after %s and says so on that row only", async (_name, status, receipt, line) => {
+    vi.mocked(authedResponse).mockResolvedValue(answer(status, receipt) as never);
+    const view = mountKo(approval(fixtureGeneratedDraft(1), link));
+    const [picture, row] = view.getAllByTestId("expression-draft");
+    fireEvent.click(within(row).getByRole("checkbox"));
+    fireEvent.click(approveLink(view));
+    await waitFor(() => expect(authedResponse).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(within(row).getByRole("status").textContent).toBe(line));
+    expect(view.queryByRole("alert")).toBeNull();
+    expect(view.getByTestId("expression-approval").textContent).toContain("후보 중 한 장만 골라 팀 보관함에 등록해요.");
+    expect((view.getByRole("button", { name: "거부하기" }) as HTMLButtonElement).disabled).toBe(false);
+    expect(within(picture).getByRole("status").textContent).toBe("이 그림을 팀 보관함에 등록할까요?");
+    if (status === 409) {
+      // Appendix C's line for the reason, the upload as the way on, and focus already there.
+      expect(row.getAttribute("data-link-state")).toBeNull();
+      expect(within(row).queryByTestId("expression-draft-link-approve")).toBeNull();
+      await waitFor(() => expect(document.activeElement).toBe(within(row).getByRole("button", { name: "직접 올리기" })));
+    } else {
+      expect(within(row).getByTestId("expression-draft-link-note").textContent).toBe("지금 가져오는 그림이 많아요. 잠시 뒤 다시 눌러 주세요.");
+      // Nothing was taken, so pressing again asks again, under a fresh decision id.
+      fireEvent.click(approveLink(view));
+      await waitFor(() => expect(authedResponse).toHaveBeenCalledTimes(2));
+      expect(body(1).client_decision_id).not.toBe(body(0).client_decision_id);
+    }
   });
 });
 

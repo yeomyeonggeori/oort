@@ -1,15 +1,15 @@
 import { useState } from "react";
-import { useMutation } from "@tanstack/react-query";
-import { ApiError, leaveWorkspace } from "@momo/core/lib/api";
-import { errorMessage } from "@momo/core/features/settings/model";
-import { useSession } from "@/app/session";
+import { useFormatMessage } from "@/i18n/useFormatMessage";
 import { SettingsRow } from "./shell/SettingsRow";
 import { ConfirmButton } from "./SettingsFields";
+import { useLeaveWorkspace } from "./useLeaveWorkspace";
 
 // 워크스페이스 나가기 (ADR-0161 D4). 프로필 페이지 맨 아래 위험 행이다(#3578 S2):
 // 「나」에게 걸리는 행동이라 워크스페이스 페이지가 아니라 프로필에 선다. 별도의 「위험
 // 구역」 상자는 만들지 않는다 — 라벨만 위험색이고 파괴 동작은 제자리 확인
 // (`ConfirmButton`)이 지킨다. 마지막 소유자는 서버가 409로 거절한다.
+//
+// 쓰기와 409 판정은 프로필 메뉴의 확인 창(`LeaveWorkspaceDialog`)과 한 벌이다(`useLeaveWorkspace`, #5785).
 
 export function LeaveWorkspaceRow({
   workspaceId,
@@ -18,21 +18,10 @@ export function LeaveWorkspaceRow({
   workspaceId: string;
   offline: boolean;
 }) {
-  const session = useSession();
+  const formatMessage = useFormatMessage();
   // 확인 질문은 한 문장이 길어서 라벨 옆(가로)에 서면 둘 다 접힌다. 묻는 동안만 세로로 선다.
   const [asking, setAsking] = useState(false);
-
-  const leave = useMutation({
-    mutationFn: () => leaveWorkspace(workspaceId),
-    onSuccess: () => {
-      // 나가면 이 세션은 끝이다: 서버가 이미 토큰을 파기했고, 로컬도 정리한다.
-      session.logout();
-    },
-  });
-
-  const lastOwner =
-    leave.isError && leave.error instanceof ApiError && leave.error.status === 409;
-  const otherError = leave.isError && !lastOwner ? errorMessage(leave.error) : null;
+  const { leave, lastOwner, otherError } = useLeaveWorkspace(workspaceId);
 
   return (
     <>
@@ -64,7 +53,7 @@ export function LeaveWorkspaceRow({
           role="alert"
           data-testid="workspace-leave-last-owner"
         >
-          마지막 소유자는 나갈 수 없어요. 먼저 다른 사람에게 소유자를 넘기세요.
+          {formatMessage("workspace.leave.lastOwner")}
         </p>
       )}
       {otherError && (

@@ -22,6 +22,8 @@ import {
 import { CHANNEL_MEMORY_SETTINGS_LABEL } from "../memory/presentation";
 import { CHANNEL_GITHUB_LABEL } from "../github/model";
 import type { Channel, MembershipRole } from "../../lib/api";
+import type { MessageService } from "../../i18n/types";
+import { DM_LEAVE_KEYS } from "./dmLeave";
 
 // =============================================================================
 // 채널 액션 인벤토리 (BT-1 / #1929).
@@ -59,18 +61,18 @@ import type { Channel, MembershipRole } from "../../lib/api";
 // 적용된다(바로 아래 `SURFACE_KEYS.row` 산문). 별표를 헤더에 세우면 「채널을 열지
 // 않고 조작한다」는 이 티켓의 문법이 「열어도 되고 안 열어도 되고」로 흐려진다.
 //
-// ### 왜 서브메뉴가 아닌가
+// ### 하위 메뉴로 접는 무리 (#5777, owner 2026-11-14)
 //
-// #1932 브리프의 스케치는 「섹션으로 이동 ▸」 **서브메뉴**였다. 실사해 보니 이
-// 레포에는 서브메뉴 금지가 이유와 이슈 번호까지 달려 명문화돼 있다
-// (`design/ui/dropdown-menu.tsx` 머리말, 이슈 #1383): *"Adopting submenus
-// therefore means re-arguing that rule, which is ADR work and not a component
-// change."* 그리고 그 문단이 **대체물까지 지정한다** — 「화면에 남는 행들 위의
-// 제목」(`DropdownMenuLabel`).
+// #1932 브리프의 스케치는 「섹션으로 이동 ▸」 **하위 메뉴**였지만, 그때 이 레포는 하위
+// 메뉴를 금지하고 있었다(`design/ui/dropdown-menu.tsx` 머리말, 이슈 #1383: 고를 수 없는
+// 줄은 이유와 함께 화면에 남아야 하는데 하위 메뉴가 그 이유를 한 겹 안으로 숨긴다). 그래서
+// 이 자리는 한동안 「제목 하나 + 화면에 남는 라디오 행들」이었다.
 //
-// 그래서 여기 들어온 것은 제목 하나와 그 아래 라디오 행들이다. 서브메뉴를 들이는
-// 것보다 이쪽이 「문법 동형」에 더 충실하다: 티켓 하나가 컴포넌트 변경으로 ADR급
-// 결정을 뒤집지 않고, 목적지가 열지 않아도 보인다.
+// owner 가 2026-11-14 그 규칙을 **좁혔다**: 하위 메뉴는 **고를 수 없는 줄이 없는 묶음에만**
+// 쓴다(디자인 시스템 README 「메뉴」 절). 금지의 이유는 잠긴 줄이 없는 묶음에는 생기지 않는다.
+// 이 표의 항목은 「있거나 없거나」뿐이라 잠긴 줄이 구조상 없고, 웹은 그중 복사(이름 · 링크 ·
+// ID)와 섹션 이동을 Buzz 처럼 `복사 ›` · `섹션으로 이동 ›` 하위 메뉴로 접는다
+// (`channelActionClusterSubmenu`). 폰 시트는 예전 그대로 제목 + 행이다.
 //
 // 라디오인 이유는 `PresenceControl` 과 같다: 섹션 배치는 **여럿 중 하나**라
 // 지금 속한 섹션이 `aria-checked` 로 들려야 한다. 평범한 항목 N 개는 스크린리더에
@@ -83,27 +85,45 @@ import type { Channel, MembershipRole } from "../../lib/api";
 // 이제 모든 항목이 자기 무리를 들고(`CLUSTER_OF`), 구분선은 **거른 뒤의 이웃이 다른 무리일
 // 때** 선다(`withClusterSeparators`). 정본 차례는 Buzz 의 우클릭 메뉴를 따른다:
 //
-//   복사(이름 · 링크 · ID) │ 섹션 이동 │ 읽음/읽지 않음 · 알림 · 별표 │ 닫기(DM) │ 나가기
+//   복사(이름 · 링크 · ID) │ 섹션 이동 │ 읽음/읽지 않음 · 알림 · 별표 │ 닫기(DM) │ 나가기(채널) · 대화 나가기(DM)
 //
 // 헤더 ⋮ 는 같은 표를 다른 열쇠로 거른다 - `주제 │ 알림 · 기억 │ 나가기` 로 예전 그대로다.
-// 복사 무리는 서브메뉴(Buzz 의 「복사 ▸」)가 아니라 **제목 + 화면에 남는 세 행**이다. 이유는
-// 위 「왜 서브메뉴가 아닌가」와 같다.
+// 웹은 복사 무리와 섹션 이동을 하위 메뉴(Buzz 의 「복사 ›」)로 접고(위 절), 폰 시트는 제목 +
+// 행으로 편다. 무리·구분선은 둘이 같은 이 표에서 읽는다.
+//
+// ## 줄마다 아이콘 (#5777, owner 2026-11-14 「알림 아이콘 정렬 잘 맞춰줘」)
+//
+// 모든 항목이 아이콘 **뜻 낱말**(`ChannelActionIcon`) 하나를 든다. 웹 메뉴는 그것을 줄 앞
+// 16px 글리프로 그려 모든 줄의 아이콘이 한 세로 줄에 서고, 아이콘 없는 줄이 섞여 글자 시작이
+// 들쭉날쭉하지 않는다. 칸이 필수라 새 항목은 아이콘을 고르지 않고는 컴파일되지 않는다.
+//
+// ## 「대화 나가기」 (ADR-0177 증보 2026-11-14 D21, #5824)
+//
+// 사람끼리의 1:1 에만 서는 되돌릴 수 없는 비우기다(`leave-dm`). 「목록에서 숨기기」(`close-dm`)와 나란히 서고, 메뉴 **맨 아래**
+// 위험 무리(`danger`)에 위험색으로 선다 - 무리가 바뀌므로 구분선이 그 위에 선다. 채널의 `leave` 와 같은 무리지만 둘은 한 메뉴에
+// 같이 서지 않는다(채널 / DM). 내밀지 말지는 `dmLeave.ts` 의 `dmLeaveOffered` 가 정하고 호출부가 `canLeaveDm` 으로 넘긴다.
+// 낱말은 사전 키(`DM_LEAVE_KEYS.action`)라서 이 표가 문구를 만들려면 `formatMessage` 가 있어야 한다 - 없으면 항목을 세우지
+// 않는다(빈 이름의 줄을 그리지 않는다).
 // =============================================================================
 
 export type ChannelActionKey =
   | "topic"
+  | "rename"
   | "mark-read"
   | "mark-unread"
   | "mute"
   | "memory"
   | "github"
   | "star"
+  | "browse-listed"
+  | "default-channel"
   | "move-to-section"
   | "copy-link"
   | "copy-name"
   | "copy-id"
   | "close-dm"
-  | "leave";
+  | "leave"
+  | "leave-dm";
 
 /**
  * 구분선의 단위. 정본 차례도 이 이름들의 차례다.
@@ -112,8 +132,8 @@ export type ChannelActionKey =
  *   copy   이름 · 링크 · ID (행 전용, 제목 「복사」)
  *   place  섹션으로 이동 (행 전용, 채널만)
  *   state  읽음 · 읽지 않음 · 알림 · 기억 · 별표
- *   close  대화 닫기 (행 전용, DM 만)
- *   danger 채널 나가기
+ *   close  목록에서 숨기기 (행 전용, DM 만)
+ *   danger 채널 나가기 · 대화 나가기(DM, D21)
  */
 export type ChannelActionCluster =
   | "info"
@@ -126,6 +146,7 @@ export type ChannelActionCluster =
 /** 열쇠 → 무리. 새 항목은 여기 한 줄을 적어야 구분선이 제자리에 선다. */
 const CLUSTER_OF: Record<ChannelActionKey, ChannelActionCluster> = {
   topic: "info",
+  rename: "info",
   "copy-name": "copy",
   "copy-link": "copy",
   "copy-id": "copy",
@@ -135,9 +156,12 @@ const CLUSTER_OF: Record<ChannelActionKey, ChannelActionCluster> = {
   mute: "state",
   memory: "state",
   github: "state",
+  "browse-listed": "state",
+  "default-channel": "state",
   star: "state",
   "close-dm": "close",
   leave: "danger",
+  "leave-dm": "danger",
 };
 
 /** 제목을 이고 서는 무리. 나머지는 제목 없이 행만 선다(`place` 는 항목이 자기 제목을 든다). */
@@ -149,6 +173,70 @@ export function channelActionClusterTitle(
   cluster: ChannelActionCluster
 ): string | undefined {
   return CLUSTER_TITLE[cluster];
+}
+
+/**
+ * 줄 아이콘의 **뜻 낱말** (#5776 → #5777). 그림 이름이 아니라 뜻이다: 웹은 이것을 Lucide 글리프로
+ * 그리고(`channelActions.tsx`), 폰은 자기가 아는 낱말(알림 상태 `bell` · `bell-off`)만 줄 끝 상태
+ * 표지로 그리며 나머지는 그리지 않는다(`isChannelActionStatusIcon`). 이모지를 코어에 두지 않는다.
+ */
+export type ChannelActionIcon =
+  | "topic"
+  | "rename"
+  | "copy"
+  | "copy-name"
+  | "copy-link"
+  | "copy-id"
+  | "section"
+  | "mark-read"
+  | "mark-unread"
+  | "bell"
+  | "bell-off"
+  | "memory"
+  | "github"
+  | "browse"
+  | "default"
+  | "star"
+  | "unstar"
+  | "hide"
+  | "leave";
+
+/** 알림 상태의 두 낱말인가. 폰이 줄 끝 상태 표지(`RowStatusIcon`)로 그리는 것은 이 둘뿐이다. */
+export function isChannelActionStatusIcon(
+  icon: ChannelActionIcon | undefined
+): icon is "bell" | "bell-off" {
+  return icon === "bell" || icon === "bell-off";
+}
+
+/** 하위 메뉴(›)로 접힌 무리의 얼굴: 그 줄의 이름 · 아이콘 · `data-testid` 접미사. */
+export interface ChannelActionSubmenu {
+  testKey: string;
+  label: string;
+  icon: ChannelActionIcon;
+}
+
+/**
+ * 웹 메뉴가 **하위 메뉴(›)로 접는** 무리 (#5777, owner 2026-11-14).
+ *
+ * 규칙(디자인 시스템 README 「메뉴」 절): 하위 메뉴는 **고를 수 없는 줄이 없는 묶음에만** 쓴다.
+ * 고를 수 없는 줄은 이유와 함께 화면에 남아야 하는데 하위 메뉴는 그 이유를 한 겹 안으로 숨기기
+ * 때문이다(`design/ui/dropdown-menu.tsx` 머리말, #1383). 이 표의 항목은 「있거나 없거나」뿐이라
+ * 잠긴 줄이 없다. 그래도 접는 무리를 여기 둘로 닫아 두는 것은, 잠금 칸이 이 표에 들어오는 날
+ * 그 무리를 이 목록에서 빼야 한다는 것을 한 자리에서 보이게 하려는 것이다. 부품 쪽 가드는 하위
+ * 메뉴 판에서 잠긴 줄을 만나면 개발 중 오류를 낸다(`guardSubmenuRows`).
+ *
+ * 낱말은 새로 짓지 않는다: 복사는 무리 제목(「복사」), 섹션 이동은 항목 자신의 이름(「섹션으로
+ * 이동」)이다. `testKey` 도 예전 제목 줄이 쓰던 그대로다(캡처 레인이 그 이름을 읽는다).
+ */
+const CLUSTER_SUBMENU: Partial<Record<ChannelActionCluster, ChannelActionSubmenu>> = {
+  copy: { testKey: "copy-group", label: CHANNEL_COPY_GROUP_LABEL, icon: "copy" },
+  place: { testKey: "move-to-section", label: SECTION_MOVE_GROUP_LABEL, icon: "section" },
+};
+
+export function channelActionClusterSubmenu(
+  cluster: ChannelActionCluster
+): ChannelActionSubmenu | undefined {
+  return CLUSTER_SUBMENU[cluster];
 }
 
 /**
@@ -170,8 +258,12 @@ export interface ChannelActionItem {
   /** `data-testid` 접미사. 표면이 접두사를 붙인다(`channel-` / `channel-row-`). */
   testKey: string;
   label: string;
-  /** 폰에 대응하는 디자인 시스템 아이콘이 없는 경우의 상태 표지. */
-  icon?: "🔔" | "🔕";
+  /**
+   * 이 줄의 아이콘 뜻 낱말(`ChannelActionIcon`). **모든 항목이 든다**(#5777): 웹 메뉴는 줄 앞에 그려
+   * 아이콘이 한 세로 줄에 선다. 낱말이 상태인 항목은 아이콘도 상태를 따른다(알림 `bell`/`bell-off`,
+   * 별표 `star`/`unstar`). 폰은 알림 두 낱말만 줄 끝 표지로 그린다(#5776).
+   */
+  icon: ChannelActionIcon;
   /**
    * 왕복이 도는 동안 이 항목이 하는 말 (design-review #1937 N-1). 없으면
    * 낱말이 바뀌지 않는다 — 왕복이 없는 항목(복사·다이얼로그 인계)이 그렇다.
@@ -180,6 +272,16 @@ export interface ChannelActionItem {
   busyLabel?: string;
   /** 파괴적 액션. 메뉴 행이 --danger 를 입는다. */
   tone?: "danger";
+  /**
+   * 켜고 끄는 줄의 지금 값(#5843 `browse-listed`). 값이 있는 항목만 체크 줄(`menuitemcheckbox`, `aria-checked`)로 그린다.
+   * 없으면 평범한 줄이다 — 기존 항목은 이 칸을 싣지 않는다.
+   */
+  checked?: boolean;
+  /**
+   * 줄 아래에 한 줄로 붙는 설명(#5845 `default-channel`). 있는 항목만 둘째 줄을 그린다. 상태가 말을 바꿀 때도 한 줄이다 —
+   * 켜고 끌 때 줄 높이가 움직이지 않는다.
+   */
+  description?: string;
   /** 이 항목 위에 구분선을 세운다. 거른 뒤의 이웃이 다른 무리일 때만(`withClusterSeparators`). */
   separatorBefore?: boolean;
   /**
@@ -222,6 +324,21 @@ export interface ChannelActionAvailability {
    * 소유자·관리자만 하므로 역할도 본다(서버가 마지막 말을 한다).
    */
   github?: boolean;
+  /**
+   * 「둘러보기에 보이기」(ADR-0224 D2, #5843). 선택 칸이다: 소유자 · 관리자가 든 공개 채널이고 이 서버가 표시를 실을 때만
+   * (`canSetBrowseListed`). 채워 넣지 않은 호출부(폰 포함)는 그대로 없다.
+   */
+  browseListed?: boolean;
+  /**
+   * 「기본 채널로 지정」(ADR-0224 D6, #5845). 선택 칸이다: 소유자 · 관리자가 든 공개 채널이고 이 서버가 기본 채널 표시를 실을 때만
+   * (`canSetChannelDefault`). 채워 넣지 않은 호출부(폰 포함)는 그대로 없다.
+   */
+  defaultChannel?: boolean;
+  /**
+   * 「이름 바꾸기」(ADR-0225 D10, #5835). 선택 칸이다: 소유자 · 관리자가 든 공개 · 비공개 채널이고 이름이 `general` 이 아닐 때만
+   * (`canRenameChannel`). 채워 넣지 않은 호출부(폰의 다른 표면 포함)는 그대로 없다.
+   */
+  rename?: boolean;
   star: boolean;
   moveToSection: boolean;
   copyLink: boolean;
@@ -231,6 +348,11 @@ export interface ChannelActionAvailability {
   /** DM 을 이 기기의 사이드바에서 닫는다 (#3963). DM 이고 닫을 손이 있을 때만. */
   closeDm: boolean;
   leave: boolean;
+  /**
+   * 사람끼리의 1:1 에서 「대화 나가기」(ADR-0177 증보 2026-11-14 D21). DM 이고 호출부가 `dmLeaveOffered` 로 내민다고 했을 때만.
+   * 선택 칸이다: 채워 넣지 않은 호출부는 그대로 없다.
+   */
+  leaveDm?: boolean;
 }
 
 /** 낱말이 상태인 항목들이 읽는 지금. */
@@ -240,6 +362,12 @@ export interface ChannelActionState {
   copiedName: boolean;
   /** ID 가 방금 클립보드에 올라갔는가 (#3963). 없으면 아직이다. */
   copiedId?: boolean;
+  /** 이 채널이 지금 둘러보기에 보이는가(#5843). 없으면 꺼짐. */
+  browseListed?: boolean;
+  /** 이 채널이 지금 기본 채널인가(#5845). 없으면 꺼짐. */
+  defaultChannel?: boolean;
+  /** 이 채널이 내 목록에서 보이는 유일한 기본 채널인가(#5845). 줄이 「하나 이상 있어야 해요」 까닭을 먼저 말한다 - 누르는 것은 막지 않는다. */
+  onlyDefault?: boolean;
   /** 이 채널에 별표가 붙어 있는가 (ADR-0177 / BT-5). 낱말이 이 값으로 뒤집힌다. */
   starred?: boolean;
   /**
@@ -259,7 +387,7 @@ export interface ChannelActionState {
  * 서버의 `remove_member`(`routes/channels.rs`)에는 DM 분기가 없어서 호출하면
  * 그냥 멤버십이 지워지는데, DM 은 그것으로 「대화를 닫는」 것이 아니라 상대가
  * 빈 방에 남는 것이고, 되돌아올 길도 없다(`add_member` 도 관리자 전용). 버즈의
- * 「대화 닫기」에 해당하는 **서버** 라우트는 지금도 없다.
+ * 「목록에서 숨기기」에 해당하는 **서버** 라우트는 지금도 없다.
  *
  * 그 자리를 #3963 이 **기기 로컬 닫기**(`close-dm`)로 채웠고, ADR-0177 증보(#4228)가 **서버가 기억하는 닫기**로 옮겼다:
  * 서버가 닫기를 싣는 동안 닫으면 모든 기기에서 닫히고(옛 서버에서만 이 기기의 원장), 멤버십도 상대 쪽도 건드리지 않으며, 새
@@ -282,6 +410,18 @@ export function channelActionAvailability(input: {
   /** 이 서버가 GitHub 알림을 싣는가(#3955). DM 에는 알림을 보낼 수 없어 여기서도 뺀다. */
   hasGithubNotifications?: boolean;
   /**
+   * 이 채널에 「둘러보기에 보이기」를 내미는가(#5843): `canSetBrowseListed`(소유자 · 관리자 · 공개 · 이 서버가 표시를 실음)가 참이고
+   * 켜고 끌 손(왕복)이 있을 때만 참으로 넘긴다. 옛 서버나 역할을 모를 때는 거짓이다.
+   */
+  canSetBrowseListed?: boolean;
+  /** 이 채널에 「기본 채널로 지정」을 내미는가(#5845): `canSetChannelDefault` 가 참이고 켜고 끌 손(왕복)이 있을 때만 참으로 넘긴다. */
+  canSetDefault?: boolean;
+  /**
+   * 이 채널에 「이름 바꾸기」를 내미는가(#5835): `canRenameChannel`(소유자 · 관리자 · 공개/비공개 · `general` 아님)이 참이고 다이얼로그로
+   * 넘길 손이 있을 때만 참으로 넘긴다. 역할을 모르면 거짓이다.
+   */
+  canRename?: boolean;
+  /**
    * 「읽지 않음으로 표시」를 받을 수 있는 채널인가 (#3963): 서버 투영이 있고 다 읽었고
    * 메시지가 하나라도 있다. 판정은 투영을 든 호출부가 한다(`composedUnreadCount`). 여기서는
    * `unreadCount` 와 겹치지 않는지만 한 번 더 막는다.
@@ -289,6 +429,11 @@ export function channelActionAvailability(input: {
   canMarkUnread?: boolean;
   /** DM 을 닫을 손이 있는가 (#3963). 없으면 눌러도 아무 일이 없는 항목이 된다. */
   canCloseDm?: boolean;
+  /**
+   * 이 DM 에 「대화 나가기」를 내미는가(D21): `dmLeaveOffered(...)` 가 참이고 나갈 손(확인 창)이 있을 때만 참으로 넘긴다.
+   * 옛 서버·에이전트 DM·그룹 DM·나간 상대의 DM 은 `dmLeaveOffered` 가 거짓이다.
+   */
+  canLeaveDm?: boolean;
 }): ChannelActionAvailability {
   const isDm = input.channel.kind === "dm";
   return {
@@ -308,6 +453,9 @@ export function channelActionAvailability(input: {
       !isDm &&
       (input.hasGithubNotifications ?? false) &&
       (input.selfRole === undefined || input.selfRole === "owner" || input.selfRole === "admin"),
+    browseListed: input.canSetBrowseListed ?? false,
+    defaultChannel: input.canSetDefault ?? false,
+    rename: !isDm && (input.canRename ?? false),
     // **DM 은 옮기지 않는다** (ADR-0177 D4). 기본 섹션 두 종은 「채널」과 「DM」
     // 이고 DM 은 그 중 하나에 고정이다 - 커스텀 섹션에 DM 을 넣는 문을 열면
     // 코어의 파생이 그것을 무시하므로(`deriveSidebarSections`), 눌러도 아무 일도
@@ -317,7 +465,9 @@ export function channelActionAvailability(input: {
     copyName: true,
     copyId: true,
     closeDm: isDm && (input.canCloseDm ?? false),
-    leave: !isDm && canLeaveChannel(input.selfRole),
+    // 본인 나가기 길은 역할을 보지 않는다(#5778). DM 만 빠진다(DM 은 아래 `leaveDm`).
+    leave: canLeaveChannel(input.channel.kind),
+    leaveDm: isDm && (input.canLeaveDm ?? false),
   };
 }
 
@@ -342,24 +492,31 @@ function withClusterSeparators(items: ChannelActionItem[]): ChannelActionItem[] 
  *
  * 차례는 무리의 차례다(위 머리말): 주제 │ 복사 │ 섹션 이동 │ 상태(읽음·읽지 않음·알림·
  * 기억·별표) │ 닫기 │ 나가기. 구분선은 `withClusterSeparators` 가 무리가 바뀌는 자리에 세운다.
+ *
+ * `formatMessage` 는 사전 키로 이름을 짓는 항목(`leave-dm`)이 쓴다. 없으면 그 항목은 서지 않는다.
  */
 export function channelActionItems(
   available: ChannelActionAvailability,
-  state: ChannelActionState
+  state: ChannelActionState,
+  formatMessage?: MessageService["formatMessage"]
 ): ChannelActionItem[] {
   const items: ChannelActionItem[] = [];
   const push = (item: Omit<ChannelActionItem, "cluster" | "separatorBefore">) => {
     items.push({ ...item, cluster: CLUSTER_OF[item.key] });
   };
   if (available.topic) {
-    push({ key: "topic", testKey: "topic", label: CHANNEL_TOPIC_VIEW_LABEL });
+    push({ key: "topic", testKey: "topic", label: CHANNEL_TOPIC_VIEW_LABEL, icon: "topic" });
   }
   // 복사 무리: 이름 → 링크 → ID. Buzz 의 「복사 ▸」가 든 것과 같은 세 가지다.
+  if (available.rename === true && formatMessage !== undefined) {
+    push({ key: "rename", testKey: "rename", label: formatMessage("channels.rename.action"), icon: "rename" });
+  }
   if (available.copyName) {
     push({
       key: "copy-name",
       testKey: "copy-name",
       label: channelCopyNameLabel(state.copiedName),
+      icon: "copy-name",
     });
   }
   if (available.copyLink) {
@@ -367,6 +524,7 @@ export function channelActionItems(
       key: "copy-link",
       testKey: "copy-link",
       label: copyLinkActionLabel(state.copiedLink),
+      icon: "copy-link",
     });
   }
   if (available.copyId) {
@@ -374,6 +532,7 @@ export function channelActionItems(
       key: "copy-id",
       testKey: "copy-id",
       label: channelCopyIdLabel(state.copiedId ?? false),
+      icon: "copy-id",
     });
   }
   // 섹션 이동: 무리 하나(제목 + 라디오 행들).
@@ -382,6 +541,7 @@ export function channelActionItems(
       key: "move-to-section",
       testKey: "move-to-section",
       label: SECTION_MOVE_GROUP_LABEL,
+      icon: "section",
       sections: state.sections ?? [],
       currentSectionId: state.currentSectionId ?? null,
     });
@@ -392,6 +552,7 @@ export function channelActionItems(
       key: "mark-read",
       testKey: "mark-read",
       label: CHANNEL_MARK_READ_LABEL,
+      icon: "mark-read",
       busyLabel: CHANNEL_MARK_READ_BUSY_LABEL,
     });
   }
@@ -400,6 +561,7 @@ export function channelActionItems(
       key: "mark-unread",
       testKey: "mark-unread",
       label: CHANNEL_MARK_UNREAD_LABEL,
+      icon: "mark-unread",
       busyLabel: CHANNEL_MARK_UNREAD_BUSY_LABEL,
     });
   }
@@ -408,7 +570,7 @@ export function channelActionItems(
       key: "mute",
       testKey: "mute-toggle",
       label: channelMuteToggleLabel(state.muted),
-      icon: state.muted ? "🔕" : "🔔",
+      icon: state.muted ? "bell-off" : "bell",
     });
   }
   if (available.memory === true) {
@@ -416,26 +578,63 @@ export function channelActionItems(
       key: "memory",
       testKey: "memory-settings",
       label: CHANNEL_MEMORY_SETTINGS_LABEL,
+      icon: "memory",
     });
   }
   if (available.github === true) {
-    push({ key: "github", testKey: "github-notifications", label: CHANNEL_GITHUB_LABEL });
+    push({ key: "github", testKey: "github-notifications", label: CHANNEL_GITHUB_LABEL, icon: "github" });
+  }
+  // 「둘러보기에 보이기」(#5843): 켜짐 · 꺼짐이 체크로 읽히는 줄. 낱말이 사전 키라 `formatMessage` 가 없으면 서지 않는다.
+  if (available.browseListed === true && formatMessage !== undefined) {
+    push({
+      key: "browse-listed",
+      testKey: "browse-listed",
+      label: formatMessage("channels.browse.switchLabel"),
+      icon: "browse",
+      checked: state.browseListed === true,
+    });
+  }
+  // 「기본 채널로 지정」(#5845): 「둘러보기에 보이기」 바로 옆의 같은 모양의 체크 줄. 아래 한 줄은 「새로 합류하는 사람」에게만 적용된다는 뜻이고,
+  // 내 목록에서 유일한 기본 채널이면 같은 자리에서 「하나 이상 있어야 해요」로 바뀐다(둘 다 한 줄).
+  if (available.defaultChannel === true && formatMessage !== undefined) {
+    push({
+      key: "default-channel",
+      testKey: "default-channel",
+      label: formatMessage("channels.default.label"),
+      icon: "default",
+      checked: state.defaultChannel === true,
+      description: formatMessage(
+        state.onlyDefault === true ? "channels.default.lastHint" : "channels.default.description"
+      ),
+    });
   }
   if (available.star) {
     push({
       key: "star",
       testKey: "star",
       label: channelStarToggleLabel(state.starred ?? false),
+      icon: state.starred ? "unstar" : "star",
     });
   }
   if (available.closeDm) {
-    push({ key: "close-dm", testKey: "close-dm", label: DM_CLOSE_LABEL });
+    push({ key: "close-dm", testKey: "close-dm", label: DM_CLOSE_LABEL, icon: "hide" });
   }
   if (available.leave) {
     push({
       key: "leave",
       testKey: "leave",
       label: CHANNEL_LEAVE_LABEL,
+      icon: "leave",
+      tone: "danger",
+    });
+  }
+  // 「대화 나가기」(D21): 맨 아래, 위험색. 확인 창으로 넘기는 항목이다.
+  if (available.leaveDm === true && formatMessage !== undefined) {
+    push({
+      key: "leave-dm",
+      testKey: "leave-dm",
+      label: formatMessage(DM_LEAVE_KEYS.action),
+      icon: "leave",
       tone: "danger",
     });
   }
@@ -449,12 +648,15 @@ export function channelActionItems(
 const SURFACE_KEYS: Record<ChannelActionSurface, ReadonlySet<ChannelActionKey>> = {
   // 헤더 ⋮ 는 BZ-2 가 세운 그대로다. 이 티켓은 헤더의 항목을 늘리지 않는다:
   // 채널을 열어 둔 사람에게 「읽음 처리」와 「이름 복사」는 다른 물음이다.
-  header: new Set<ChannelActionKey>(["topic", "mute", "memory", "github", "leave"]),
+  // 「대화 나가기」(D21)는 대화 머리 메뉴에도 선다(DM 의 머리 메뉴를 세우는 것은 화면 칸의 일이다).
+  header: new Set<ChannelActionKey>(["topic", "rename", "mute", "memory", "github", "browse-listed", "default-channel", "leave", "leave-dm"]),
   // 행 우클릭은 「열지 않고 조작한다」가 전부다. BT-4 의 섹션 배치가 여기 사는
   // 이유도 그것이다 - 채널을 어디에 둘지는 그 채널을 **보지 않고** 정하는 일이고,
   // 헤더 ⋮ 는 정의상 이미 그 안에 들어와 있는 사람의 것이다. 복사 셋과 DM 닫기(#3963)도
   // 같은 갈래다. 「읽지 않음으로 표시」는 읽음 처리의 반대 방향이라 같은 이유로 여기에만 선다.
   row: new Set<ChannelActionKey>([
+    // 「이름 바꾸기」(#5835)는 `canRename` 을 넘긴 표면에만 선다: 폰의 행 시트 · 대화 ⋮ 시트(웹 행 메뉴는 넘기지 않으므로 서지 않는다).
+    "rename",
     "copy-name",
     "copy-link",
     "copy-id",
@@ -465,18 +667,20 @@ const SURFACE_KEYS: Record<ChannelActionSurface, ReadonlySet<ChannelActionKey>> 
     "star",
     "close-dm",
     "leave",
+    "leave-dm",
   ]),
 };
 
 export function channelActionItemsForSurface(
   surface: ChannelActionSurface,
   available: ChannelActionAvailability,
-  state: ChannelActionState
+  state: ChannelActionState,
+  formatMessage?: MessageService["formatMessage"]
 ): ChannelActionItem[] {
   const keys = SURFACE_KEYS[surface];
   // 구분선은 거른 **뒤에** 다시 센다 (`withClusterSeparators`).
   return withClusterSeparators(
-    channelActionItems(available, state).filter((item) => keys.has(item.key))
+    channelActionItems(available, state, formatMessage).filter((item) => keys.has(item.key))
   );
 }
 
@@ -502,9 +706,12 @@ export function channelActionKeepsMenuOpen(key: ChannelActionKey): boolean {
   // `close-dm` (#3963) 도 닫는 쪽이다: 닫는 순간 이 행이 사라지고, 메뉴를 이고 있던 트리거가
   // 함께 언마운트되므로 열린 채로 둘 수 없다(`star` 와 같은 이유). `mark-unread` 는 읽음
   // 처리와 같은 왕복이라 실패 배너를 읽도록 열어 둔다.
+  // `leave-dm` (D21)은 확인 창으로 넘기고, 성공하면 그 행이 사라진다(`close-dm` 과 같은 이유).
   return (
     key !== "leave" &&
+    key !== "leave-dm" &&
     key !== "topic" &&
+    key !== "rename" &&
     key !== "memory" &&
     key !== "github" &&
     key !== "star" &&

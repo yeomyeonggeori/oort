@@ -10,6 +10,7 @@ import { ExpressionStore } from "./ExpressionStore";
 import type { ExpressionTransport } from "./transport";
 import { ExpressionsContext } from "./context";
 import { TeamExpressionsPanel } from "./TeamExpressionsPanel";
+import { tooltipTextOf } from "@/design/ui/tooltipTestKit";
 
 vi.mock("@momo/core/lib/api", async (actual) => ({ ...await actual<object>(), fetchRoster: vi.fn().mockResolvedValue([]), authedResponse: vi.fn() }));
 
@@ -88,7 +89,7 @@ describe("이모티콘 탭 맨 위 「자주·최근」 (#5503)", () => {
     // 이름은 사전의 것이고 세트 띠의 첫 단추(시계)가 그 칸으로 건너뛴다. 칸의 id 는 예전 「최근」과 같지만 머리글과 띠 단추의 낭독 이름은 「자주·최근」(en: Frequent & recent)이다.
     expect(view.container.querySelector("[data-section='recent'] p")?.textContent).toBe("Frequent & recent");
     expect(view.container.querySelector("[data-strip='recent']")?.getAttribute("aria-label")).toBe("Frequent & recent");
-    expect(view.container.querySelector("[data-strip='recent']")?.getAttribute("title")).toBe("Frequent & recent");
+    expect(tooltipTextOf(view.container.querySelector("[data-strip='recent']")!)).toBe("Frequent & recent");
     // 이 칸의 GIF 도 격자의 GIF 와 같은 규칙으로 그린다: 움직이지 않는 썸네일만 받는다(정지 썸네일 규칙을 새로 만들지 않는다).
     await waitFor(() => expect(view.container.querySelectorAll("[data-testid='expression-grid'] img")).toHaveLength(7));
     for (const gif of [wiggle, spin]) {

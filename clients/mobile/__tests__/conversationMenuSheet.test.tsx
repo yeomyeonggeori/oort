@@ -1,18 +1,19 @@
 import {
   CHANNEL_COPY_FAILURE,
-  CHANNEL_LEAVE_CONFIRM_TITLE,
   CHANNEL_LEAVE_LABEL,
   CHANNEL_MUTE_FAILURE,
   DM_CLOSE_FAILURE,
   DM_CLOSE_LABEL,
   channelCopyIdLabel,
   channelCopyNameLabel,
-  channelLeaveConfirmBody,
+  channelLeaveConfirmBodyKey,
   channelMuteToggleLabel,
 } from '@momo/core/features/channels/model';
 import {channelShareUrlFromServerBase} from '@momo/core/features/channels/shareLink';
 import {copyLinkActionLabel} from '@momo/core/features/timeline/copyLabels';
 import type {ChannelActionItem} from '@momo/core/features/channels/actionModel';
+import {catalog as koCatalog} from '@momo/core/i18n/generated/ko-KR';
+import {createMessageService} from '@momo/core/i18n/service';
 import {pinListHeaderLabel} from '@momo/core/features/timeline/pins';
 import type {Member} from '@momo/core/lib/api';
 import {QueryClient, QueryClientProvider} from '@tanstack/react-query';
@@ -25,13 +26,14 @@ import {
   waitFor,
   within,
 } from '@testing-library/react-native';
+import {CONFIRM_ARM_MS} from '../src/design/sheetParts';
 import React from 'react';
-import {AccessibilityInfo, Dimensions, Image, Keyboard, StyleSheet} from 'react-native';
+import {AccessibilityInfo, Dimensions, Image, Keyboard, PixelRatio, StyleSheet} from 'react-native';
 
 import '../src/boot/polyfills';
 import '../src/boot/coreHost';
 
-import {SHEET_ICONS} from '../src/design/icons';
+import {CONV_ICONS, SHEET_ICONS} from '../src/design/icons';
 import {COPY_RECEIPT_MS, copyText} from '../src/features/conversation/copy';
 import {TOUCH_TARGET} from '../src/design/tokens';
 import {ConversationMenuSheet} from '../src/features/conversation/ConversationMenuSheet';
@@ -53,10 +55,29 @@ import AppShell from '../src/shell/AppShell';
 import {__resetSessionStore, sessionPort} from '../src/storage/secureSession';
 import {__resetServerBaseCache, setServerBase} from '../src/storage/serverBase';
 import {openConversationMenu} from './fixtures/conversationMenu';
+import {endGlyphInk} from './fixtures/endGlyphInk';
 import {finger, pane} from './fixtures/finger';
 import {installAppClock, SHELL_WAIT_TEST_TIMEOUT_MS} from './fixtures/fakeClock';
 import {pinReduceMotion} from './fixtures/reduceMotion';
 import {describeCloseContract} from './fixtures/sheetContract';
+
+/**
+ * 확인 단계의 위험 단추는 서고 나서 `CONFIRM_ARM_MS` 동안 눌림을 받지 않는다(#5818 검수 High): 사람이 읽고 누르는 것처럼
+ * 그 시간이 지난 뒤에 누른다. 가짜 시계가 켜져 있으면 시계를 옮기고, 아니면 실제로 기다린다.
+ */
+async function armedPress(testID: string, options?: Parameters<typeof screen.getByTestId>[1]) {
+  const faked = typeof (setTimeout as unknown as {clock?: unknown}).clock !== 'undefined';
+  if (faked) {
+    act(() => {
+      jest.advanceTimersByTime(CONFIRM_ARM_MS + 40);
+    });
+  } else {
+    await act(async () => {
+      await new Promise<void>(resolve => setTimeout(resolve, CONFIRM_ARM_MS + 40));
+    });
+  }
+  fireEvent.press(screen.getByTestId(testID, options));
+}
 
 // =============================================================================
 // 대화 머리 ⋮ 가 여는 공용 행동 시트 (#4319, owner 10-27). 옛 ⋮ 는 시스템 액션 시트(제목 + 「취소」 + 「고정한 메시지」)였다.
@@ -126,11 +147,8 @@ describe('항목은 코어 표의 답에서 거른다 — 새로 짓지 않는�
     expect(keysOf(conversationMenuActionItems(target()))).toEqual(['mute', 'leave']);
   });
 
-  it('채널 나가기는 소유자·관리자에게만 선다(`canLeaveChannel`) — 일반 멤버·손님에게는 서버가 403 으로 답할 막다른 길이다', () => {
-    for (const selfRole of ['member', 'guest'] as const) {
-      expect([selfRole, keysOf(conversationMenuActionItems(target({selfRole})))]).toEqual([selfRole, ['mute']]);
-    }
-    for (const selfRole of ['owner', 'admin'] as const) {
+  it('채널 나가기는 역할과 무관하게 선다(`canLeaveChannel`) — 본인 나가기 길이다 (#5778)', () => {
+    for (const selfRole of ['member', 'guest', 'owner', 'admin'] as const) {
       expect([selfRole, keysOf(conversationMenuActionItems(target({selfRole})))]).toEqual([
         selfRole,
         ['mute', 'leave'],
@@ -140,7 +158,7 @@ describe('항목은 코어 표의 답에서 거른다 — 새로 짓지 않는�
     expect(keysOf(conversationMenuActionItems(target({selfRole: undefined})))).toEqual(['mute', 'leave']);
   });
 
-  it('DM: 닫기를 내밀 때만 「대화 닫기」가 서고, 나가기는 DM 에 없다 — 역할이 관리자여도', () => {
+  it('DM: 닫기를 내밀 때만 「목록에서 숨기기」가 서고, 나가기는 DM 에 없다 — 역할이 관리자여도', () => {
     expect(keysOf(conversationMenuActionItems(dmTarget({closeOffered: true})))).toEqual(['mute', 'close-dm']);
     expect(keysOf(conversationMenuActionItems(dmTarget({closeOffered: false})))).toEqual(['mute']);
     expect(keysOf(conversationMenuActionItems(dmTarget()))).toEqual(['mute']);
@@ -160,14 +178,14 @@ describe('항목은 코어 표의 답에서 거른다 — 새로 짓지 않는�
     expect([on.label, on.busyLabel]).toEqual(['알림 꺼짐', undefined]);
     const leave = conversationMenuActionItems(target()).find(item => item.key === 'leave');
     expect([leave?.label, leave?.tone]).toEqual([CHANNEL_LEAVE_LABEL, 'danger']);
-    // 「대화 닫기」는 되돌릴 수 있는 닫기라 위험색이 아니다(웹·사이드바 시트와 같은 표).
+    // 「목록에서 숨기기」는 되돌릴 수 있는 닫기라 위험색이 아니다(웹·사이드바 시트와 같은 표).
     const close = conversationMenuActionItems(dmTarget({closeOffered: true})).find(item => item.key === 'close-dm');
     expect([close?.label, close?.tone]).toEqual([DM_CLOSE_LABEL, undefined]);
   });
 
   it('이 시트가 거르는 열쇠는 폰이 실행할 줄 아는 열쇠의 부분집합이다 — 실행 못 하는 항목을 내밀지 않는다', () => {
     for (const key of CONVERSATION_MENU_ACTION_KEYS) expect([key, PHONE_CHANNEL_ACTION_KEYS.has(key)]).toEqual([key, true]);
-    expect([...CONVERSATION_MENU_ACTION_KEYS].sort()).toEqual(['close-dm', 'leave', 'mute']);
+    expect([...CONVERSATION_MENU_ACTION_KEYS].sort()).toEqual(['close-dm', 'leave', 'leave-dm', 'mute', 'rename']);
   });
 
   it('머리 제목: DM 은 상대 이름, 채널은 `# 이름`, 종류를 모르는 동안은 이름만 — 모르는 것을 채널이라 부르지 않는다', () => {
@@ -339,6 +357,34 @@ describe('시트 — 카드와 행의 차례 (#4319)', () => {
   });
 });
 
+describe('시트 — 알림 줄의 끝 표지는 종 아이콘이다 (#5776)', () => {
+  motionOff();
+
+  it('켜짐은 bell·꺼짐은 bell-off, 이모지 없이 20pt 로 서고 위 줄들의 셰브론과 잉크가 한 열에 선다 — 2배·3배 (#5791)', () => {
+    const muteOn = conversationMenuActionItems(target({muted: true}))[0];
+    for (const scale of [2, 3] as const) {
+      const ratio = jest.spyOn(PixelRatio, 'get').mockReturnValue(scale);
+      for (const [item, source] of [
+        [MUTE_OFF, CONV_ICONS.bell],
+        [muteOn, CONV_ICONS.bellOff],
+      ] as const) {
+        renderSheet({onOpenInfo: jest.fn(), onDelegateWork: jest.fn(), items: [item]});
+        const row = screen.getByTestId('conversation-menu-mute-toggle');
+        const glyphs = within(row).UNSAFE_queryAllByType(Image);
+        expect(glyphs.map(node => node.props.source)).toEqual([source]);
+        const style = StyleSheet.flatten(glyphs[0].props.style);
+        expect([style.width, style.height]).toEqual([20, 20]);
+        expect(row).not.toHaveTextContent(/🔔|🔕/);
+        // 그린 그림 파일을 디스크에서 읽어 잰 잉크 끝 — 문 셋의 셰브론과 알림 종이 같은 화소에 선다(부르는 쪽은 이웃을 모른다).
+        const keys = ['info', 'pins', 'delegate', 'mute-toggle'];
+        const insets = keys.map(key => endGlyphInk(screen.getByTestId(`conversation-menu-${key}`), scale).insetPx);
+        expect([scale, source, insets]).toEqual([scale, source, keys.map(() => insets[0])]);
+      }
+      ratio.mockRestore();
+    }
+  });
+});
+
 describe('시트 — 닫는 길: 문은 시트를 먼저 내리고, 행동은 시트가 진행을 보인다 (#4319)', () => {
   motionOff();
 
@@ -360,7 +406,7 @@ describe('시트 — 닫는 길: 문은 시트를 먼저 내리고, 행동은 �
     }
   });
 
-  it('알림 · 대화 닫기 · 채널 나가기는 `closesSheet` 가 아니다 — 시트를 닫지 않고 바로 실행을 부탁한다', () => {
+  it('알림 · 목록에서 숨기기 · 채널 나가기는 `closesSheet` 가 아니다 — 시트를 닫지 않고 바로 실행을 부탁한다', () => {
     const dm = renderSheet({items: [MUTE_OFF, CLOSE_DM]});
     fireEvent.press(screen.getByTestId('conversation-menu-mute-toggle'));
     fireEvent.press(screen.getByTestId('conversation-menu-close-dm'));
@@ -383,7 +429,7 @@ describe('시트 — 닫는 길: 문은 시트를 먼저 내리고, 행동은 �
     expect(close.props.accessibilityState).toMatchObject({busy: false});
   });
 
-  it('위험색은 코어 표가 정한 행에만 선다 — 채널 나가기는 위험색, 알림·대화 닫기는 아니다', () => {
+  it('위험색은 코어 표가 정한 행에만 선다 — 채널 나가기는 위험색, 알림·목록에서 숨기기는 아니다', () => {
     renderSheet({kind: 'public', title: 'general', items: [MUTE_OFF, LEAVE]});
     const titleOf = (key: string) =>
       flatten(within(screen.getByTestId(`conversation-menu-${key}`)).getByText(/\S/).props.style);
@@ -411,14 +457,16 @@ describe('시트 — 닫는 길: 문은 시트를 먼저 내리고, 행동은 �
 describe('시트 — 채널 나가기의 확인 단계 (#4319)', () => {
   motionOff();
 
+  // 제공자 없이 세운 시트는 한국어 사전으로 읽는다(`useFormatMessage` 의 대체) — 같은 사전으로 기대값을 짓는다.
+  const ko = createMessageService({messageLocale: 'ko-KR', catalog: koCatalog});
   const channelSheet = (over: Partial<SheetProps> = {}) =>
     renderSheet({kind: 'public', title: 'general', items: [MUTE_OFF, LEAVE], confirmingLeave: true, ...over});
 
   it('확인 단계는 코어 문장 그대로이고, 항목 카드는 사라진다', () => {
     channelSheet();
-    expect(screen.getByTestId('conversation-menu-leave-confirm-headline')).toHaveTextContent(CHANNEL_LEAVE_CONFIRM_TITLE);
+    expect(screen.getByTestId('conversation-menu-leave-confirm-headline')).toHaveTextContent(ko.formatMessage('timeline.channelLeave.title'));
     expect(screen.getByTestId('conversation-menu-leave-confirm-detail')).toHaveTextContent(
-      channelLeaveConfirmBody('general'),
+      ko.formatMessage(channelLeaveConfirmBodyKey('public'), {name: 'general'}),
     );
     expect(screen.getByTestId('conversation-menu-leave-confirm-button')).toHaveTextContent(CHANNEL_LEAVE_LABEL);
     for (const key of ['pins', 'mute-toggle', 'leave']) {
@@ -426,12 +474,15 @@ describe('시트 — 채널 나가기의 확인 단계 (#4319)', () => {
     }
   });
 
-  it('「취소」와 「채널 나가기」가 제 일을 한 번씩 부른다', () => {
+  it('「취소」와 「채널 나가기」가 제 일을 한 번씩 부른다', async () => {
     const props = channelSheet();
     fireEvent.press(screen.getByTestId('conversation-menu-leave-cancel'));
     expect(props.onCancelLeave).toHaveBeenCalledTimes(1);
     expect(props.onConfirmLeave).not.toHaveBeenCalled();
+    // 서자마자의 누름(목록 줄을 누른 자리의 더블탭)은 확정을 누르지 못한다(#5818 검수 High).
     fireEvent.press(screen.getByTestId('conversation-menu-leave-confirm-button'));
+    expect(props.onConfirmLeave).not.toHaveBeenCalled();
+    await armedPress('conversation-menu-leave-confirm-button');
     expect(props.onConfirmLeave).toHaveBeenCalledTimes(1);
   });
 
@@ -656,11 +707,23 @@ function installFetch(routes: Routes = {}) {
         mention_count: 0,
       });
     }
+    // 본인 나가기 길(#5778). 서버처럼 역할을 보지 않는다.
+    const self = /\/channels\/([^/]+)\/members\/me$/.exec(url);
+    if (self && method === 'DELETE') {
+      await gate('leave');
+      if ((routes.leaveStatus ?? 200) !== 200) {
+        return jsonResponse(routes.leaveStatus as number, {error: {message: 'direct message channels cannot be left'}});
+      }
+      left.add(self[1]);
+      return jsonResponse(200, {channelId: self[1], memberId: SELF_ID, archived: false});
+    }
+    // 관리자 전용 길(`…/members/{id}`). 서버처럼 소유자·관리자만 받는다 — 일반 멤버의 나가기가 이 길로 새면 403 이다.
     const member = /\/channels\/([^/]+)\/members\/[^/]+$/.exec(url);
     if (member && method === 'DELETE') {
       await gate('leave');
-      if ((routes.leaveStatus ?? 200) !== 200) {
-        return jsonResponse(routes.leaveStatus as number, {error: {message: 'forbidden'}});
+      const role = routes.selfRole ?? 'admin';
+      if (role !== 'owner' && role !== 'admin') {
+        return jsonResponse(403, {error: {message: 'workspace owner or admin role required'}});
       }
       left.add(member[1]);
       return jsonResponse(200, {
@@ -784,11 +847,11 @@ describe('셸 — ⋮ 시트의 항목은 대화마다 다르다 (#4319)', () =>
     expect(screen.getByTestId('conversation-menu-leave')).toHaveTextContent(CHANNEL_LEAVE_LABEL);
   });
 
-  it('일반 멤버에게는 채널 나가기가 없다', async () => {
+  it('일반 멤버에게도 채널 나가기가 선다 (#5778)', async () => {
     await mountShell({selfRole: 'member'});
     await openConversation(ROW.general);
     await openConversationMenu();
-    expect(menuKeys()).toEqual(['info', 'pins', 'mute-toggle']);
+    expect(menuKeys()).toEqual(['info', 'pins', 'mute-toggle', 'leave']);
   });
 
   it('알림이 꺼진 채널은 「알림 켜기」다', async () => {
@@ -798,7 +861,7 @@ describe('셸 — ⋮ 시트의 항목은 대화마다 다르다 (#4319)', () =>
     expect(screen.getByTestId('conversation-menu-mute-toggle')).toHaveTextContent(/알림 꺼짐/);
   });
 
-  it('사람 DM(서버가 닫기를 싣고 다 읽음): 고정 · 알림 · 대화 닫기 — 머리는 상대 이름이고 나가기는 없다', async () => {
+  it('사람 DM(서버가 닫기를 싣고 다 읽음): 고정 · 알림 · 목록에서 숨기기 — 머리는 상대 이름이고 나가기는 없다', async () => {
     await mountShell({serverClosure: true});
     await openConversation(ROW.human);
     await openConversationMenu();
@@ -856,11 +919,12 @@ describe('셸 — ⋮ 시트의 항목은 대화마다 다르다 (#4319)', () =>
     expect(menuKeys()).toEqual(['info', 'pins', 'mute-toggle']);
   });
 
-  it('채널에는 서버가 닫기를 실어도 닫기가 없다 — 나가기가 없는 일반 멤버라도(나가기가 있으면 한 자리를 먼저 차지해 가린다)', async () => {
+  it('채널에는 서버가 닫기를 실어도 닫기가 없다 — 일반 멤버도(표의 차례가 닫기 → 나가기라, 새면 닫기가 나가기 자리를 먼저 차지한다)', async () => {
     await mountShell({serverClosure: true, selfRole: 'member'});
     await openConversation(ROW.general);
     await openConversationMenu();
-    expect(menuKeys()).toEqual(['info', 'pins', 'mute-toggle']);
+    expect(menuKeys()).toEqual(['info', 'pins', 'mute-toggle', 'leave']);
+    expect(screen.queryByTestId('conversation-menu-close-dm')).toBeNull();
   });
 
   it('고정 행의 낱말은 고정 읽기가 끝나면 개수를 말한다 — 코어 `pinListHeaderLabel`', async () => {
@@ -1043,10 +1107,10 @@ describe('셸 — 채널 나가기는 확인 단계를 지난다 (#4319)', () =>
   it('확인하면 내 멤버십을 지우고, 서버가 답한 뒤에 시트가 걷히고 열려 있던 대화도 걷힌다', async () => {
     const spoken = announce();
     await toConfirm();
-    fireEvent.press(screen.getByTestId('conversation-menu-leave-confirm-button'));
+    await armedPress('conversation-menu-leave-confirm-button');
     await waitFor(() => expect(calls.some(call => call.method === 'DELETE')).toBe(true));
     const del = calls.find(call => call.method === 'DELETE')!;
-    expect(del.url).toContain(`/channels/ch-general/members/${SELF_ID}`);
+    expect(del.url).toMatch(/\/channels\/ch-general\/members\/me$/);
     await waitFor(() => expect(screen.queryByTestId('conversation-pane')).toBeNull());
     expect(screen.queryByTestId('conversation-menu-sheet')).toBeNull();
     expect(spoken).toHaveBeenCalledWith('채널에서 나갔습니다.');
@@ -1056,20 +1120,20 @@ describe('셸 — 채널 나가기는 확인 단계를 지난다 (#4319)', () =>
 
   it('403: 확인 단계가 그대로 서서 이유를 말한다 — 시트도 대화도 사라지지 않는다', async () => {
     await toConfirm({leaveStatus: 403});
-    fireEvent.press(screen.getByTestId('conversation-menu-leave-confirm-button'));
+    await armedPress('conversation-menu-leave-confirm-button');
     await waitFor(() => expect(screen.getByTestId('conversation-menu-leave-error')).toBeTruthy());
-    expect(screen.getByTestId('conversation-menu-leave-error')).toHaveTextContent(/나갈 권한이 없습니다/);
+    expect(screen.getByTestId('conversation-menu-leave-error')).toHaveTextContent(/나갈 수 없어요/);
     expect(screen.getByTestId('conversation-menu-leave-confirm')).toBeTruthy();
     expect(screen.getByTestId('conversation-pane')).toBeTruthy();
   });
 
   it('도는 중에는 위험 단추가 잠겨 두 번 눌러도 DELETE 는 한 번이다', async () => {
     await toConfirm({hold: ['leave']});
-    fireEvent.press(screen.getByTestId('conversation-menu-leave-confirm-button'));
+    await armedPress('conversation-menu-leave-confirm-button');
     await waitFor(() =>
       expect(screen.getByTestId('conversation-menu-leave-confirm-button')).toHaveTextContent('나가는 중…'),
     );
-    fireEvent.press(screen.getByTestId('conversation-menu-leave-confirm-button'));
+    await armedPress('conversation-menu-leave-confirm-button');
     await act(async () => releaseHeld());
     await waitFor(() => expect(screen.queryByTestId('conversation-pane')).toBeNull());
     expect(calls.filter(call => call.method === 'DELETE')).toHaveLength(1);
@@ -1095,12 +1159,12 @@ describe('셸 — 채널 나가기는 확인 단계를 지난다 (#4319)', () =>
   });
 });
 
-describe('셸 — DM 의 「대화 닫기」 (#4319, ADR-0177 증보 D7)', () => {
+describe('셸 — DM 의 「목록에서 숨기기」 (#4319, ADR-0177 증보 D7)', () => {
   liveWorld();
 
   const closeRow = 'conversation-menu-close-dm';
 
-  it('누르면 서버에 PUT …/closure 를 seenSeq(투영의 latestSeq)로 한 번 보내고, 대화가 걷히고, 「대화를 닫았습니다.」를 낭독하고, 행이 목록에서 사라진다', async () => {
+  it('누르면 서버에 PUT …/closure 를 seenSeq(투영의 latestSeq)로 한 번 보내고, 대화가 걷히고, 「대화를 목록에서 숨겼습니다.」를 낭독하고, 행이 목록에서 사라진다', async () => {
     const spoken = announce();
     await mountShell({serverClosure: true});
     await openConversation(ROW.human);
@@ -1114,7 +1178,7 @@ describe('셸 — DM 의 「대화 닫기」 (#4319, ADR-0177 증보 D7)', () =>
     await waitFor(() => expect(screen.queryByTestId('conversation-pane')).toBeNull());
     expect(screen.queryByTestId('conversation-menu-sheet')).toBeNull();
     // 대화가 걷히며 낭독이 삼켜지지 않는다 — 훅이 걷기 전에 알린다.
-    expect(spoken).toHaveBeenCalledWith('대화를 닫았습니다.');
+    expect(spoken).toHaveBeenCalledWith('대화를 목록에서 숨겼습니다.');
     await waitFor(() => expect(screen.queryByTestId(ROW.human)).toBeNull());
   });
 
@@ -1168,7 +1232,7 @@ describe('셸 — DM 의 「대화 닫기」 (#4319, ADR-0177 증보 D7)', () =>
     expect(screen.getByTestId('conversation-pane')).toBeTruthy();
     await act(async () => releaseHeld());
     await waitFor(() => expect(screen.queryByTestId('conversation-pane')).toBeNull());
-    expect(spoken).toHaveBeenCalledWith('대화를 닫았습니다.');
+    expect(spoken).toHaveBeenCalledWith('대화를 목록에서 숨겼습니다.');
     expect(closedDms.get('ch-dm-human')).toBe(2);
   });
 });
@@ -1523,11 +1587,9 @@ describe('셸 — 정보 페이지의 채널 나가기 (#4319)', () => {
   it('확인하면 내 멤버십을 지우고, 서버가 답한 뒤 열려 있던 대화가 페이지째 걷힌다', async () => {
     const spoken = announce();
     await toConfirm();
-    fireEvent.press(screen.getByTestId('conversation-info-leave-confirm-button'));
+    await armedPress('conversation-info-leave-confirm-button');
     await waitFor(() => expect(calls.some(call => call.method === 'DELETE')).toBe(true));
-    expect(calls.find(call => call.method === 'DELETE')!.url).toContain(
-      `/channels/ch-general/members/${SELF_ID}`,
-    );
+    expect(calls.find(call => call.method === 'DELETE')!.url).toMatch(/\/channels\/ch-general\/members\/me$/);
     await waitFor(() => expect(screen.queryByTestId('conversation-pane')).toBeNull());
     expect(screen.queryByTestId('conversation-info-page')).toBeNull();
     expect(spoken).toHaveBeenCalledWith('채널에서 나갔습니다.');
@@ -1536,9 +1598,9 @@ describe('셸 — 정보 페이지의 채널 나가기 (#4319)', () => {
 
   it('403: 확인 단계가 그대로 서서 이유를 말한다 — 페이지도 대화도 사라지지 않는다', async () => {
     await toConfirm({leaveStatus: 403});
-    fireEvent.press(screen.getByTestId('conversation-info-leave-confirm-button'));
+    await armedPress('conversation-info-leave-confirm-button');
     await waitFor(() => expect(screen.getByTestId('conversation-info-leave-error')).toBeTruthy());
-    expect(screen.getByTestId('conversation-info-leave-error')).toHaveTextContent(/나갈 권한이 없습니다/);
+    expect(screen.getByTestId('conversation-info-leave-error')).toHaveTextContent(/나갈 수 없어요/);
     expect(screen.getByTestId('conversation-info-leave-confirm')).toBeTruthy();
     expect(screen.getByTestId('conversation-info-page')).toBeTruthy();
     expect(screen.getByTestId('conversation-pane')).toBeTruthy();
@@ -1546,11 +1608,11 @@ describe('셸 — 정보 페이지의 채널 나가기 (#4319)', () => {
 
   it('도는 중에는 위험 단추가 잠겨 두 번 눌러도 DELETE 는 한 번이다', async () => {
     await toConfirm({hold: ['leave']});
-    fireEvent.press(screen.getByTestId('conversation-info-leave-confirm-button'));
+    await armedPress('conversation-info-leave-confirm-button');
     await waitFor(() =>
       expect(screen.getByTestId('conversation-info-leave-confirm-button')).toHaveTextContent('나가는 중…'),
     );
-    fireEvent.press(screen.getByTestId('conversation-info-leave-confirm-button'));
+    await armedPress('conversation-info-leave-confirm-button');
     await act(async () => releaseHeld());
     await waitFor(() => expect(screen.queryByTestId('conversation-pane')).toBeNull());
     expect(calls.filter(call => call.method === 'DELETE')).toHaveLength(1);
@@ -1566,15 +1628,22 @@ describe('셸 — 정보 페이지의 채널 나가기 (#4319)', () => {
     expect(calls.filter(call => call.method === 'DELETE')).toHaveLength(0);
   });
 
-  it('일반 멤버에게는 나가기가 없다 — 알림 · 복사만 선다', async () => {
+  it('일반 멤버도 나가기가 서고, 확인하면 본인 나가기 길로 나간다 — 관리자 길이면 서버가 403 이다 (#5778)', async () => {
     await mountShell({selfRole: 'member'});
     await openConversation(ROW.general);
     await openInfoPage();
-    expect(infoKeys()).toEqual(['mute-toggle', 'copy-name', 'copy-link', 'copy-id']);
+    expect(infoKeys()).toEqual(['mute-toggle', 'copy-name', 'copy-link', 'copy-id', 'leave']);
+    fireEvent.press(screen.getByTestId('conversation-info-leave'));
+    await armedPress('conversation-info-leave-confirm-button');
+    await waitFor(() => expect(screen.queryByTestId('conversation-pane')).toBeNull());
+    expect(screen.queryByTestId('conversation-info-leave-error')).toBeNull();
+    expect(calls.filter(call => call.method === 'DELETE').map(call => call.url.replace(/^.*\/channels\//, ''))).toEqual([
+      'ch-general/members/me',
+    ]);
   });
 });
 
-describe('셸 — 정보 페이지의 DM 「대화 닫기」 (#4319)', () => {
+describe('셸 — 정보 페이지의 DM 「목록에서 숨기기」 (#4319)', () => {
   liveWorld();
 
   it('닫기를 내미는 DM: 누르면 PUT …/closure 를 한 번 보내고 대화가 페이지째 걷히며 낭독한다', async () => {
@@ -1589,12 +1658,12 @@ describe('셸 — 정보 페이지의 DM 「대화 닫기」 (#4319)', () => {
     expect(callsTo('/closure')[0].body).toEqual({seenSeq: 2});
     await waitFor(() => expect(screen.queryByTestId('conversation-pane')).toBeNull());
     expect(screen.queryByTestId('conversation-info-page')).toBeNull();
-    expect(spoken).toHaveBeenCalledWith('대화를 닫았습니다.');
+    expect(spoken).toHaveBeenCalledWith('대화를 목록에서 숨겼습니다.');
     // 한 겹만 걷혔다: 사이드바가 그대로 서 있다.
     expect(screen.getByTestId('sidebar-list')).toBeTruthy();
   });
 
-  it('닫기를 내밀지 않는 DM(안 읽은 메시지가 있다)에는 「대화 닫기」가 없다', async () => {
+  it('닫기를 내밀지 않는 DM(안 읽은 메시지가 있다)에는 「목록에서 숨기기」가 없다', async () => {
     await mountShell({serverClosure: true, dmUnread: true});
     await openConversation(ROW.human);
     await openInfoPage();

@@ -183,7 +183,7 @@ async function installMocks(context, { settings = "known-off", enable = "ok", se
     })
   );
   await context.route("**/v1/workspaces/*/channels", (route) => json(route, { channels: CHANNELS }));
-  await context.route("**/v1/workspaces/*/roster", (route) => json(route, { members: ROSTER }));
+  await context.route("**/v1/workspaces/*/roster*", (route) => json(route, { members: ROSTER }));
   const readStates = [
     { channel_id: CHANNEL_ID, last_read_seq: 3103, latest_seq: 3103, unread_count: 0, mention_count: 0 },
   ];

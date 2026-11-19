@@ -32,6 +32,7 @@ import {
   navReducer,
   workConsoleAvailable,
   type OpenAgent,
+  type OpenChannelPreview,
   type OpenHostedConnection,
   type Tab,
 } from '../nav/state';
@@ -43,6 +44,8 @@ import {useNotificationTapRouting} from '../push/useNotificationTapRouting';
 import {RealtimeProvider} from '../realtime/RealtimeProvider';
 import AgentDetailScreen from '../screens/AgentDetailScreen';
 import AgentsScreen from '../screens/AgentsScreen';
+import ChannelBrowseScreen from '../screens/ChannelBrowseScreen';
+import ChannelPreviewScreen from '../screens/ChannelPreviewScreen';
 import ConversationScreen from '../screens/ConversationScreen';
 import HostedConnectionDetailScreen from '../screens/HostedConnectionDetailScreen';
 import HostedConnectionsScreen from '../screens/HostedConnectionsScreen';
@@ -65,6 +68,7 @@ import {haptics} from '../lib/haptics';
 import type {HarnessKey} from '../features/work/ask/model';
 import {DelegateWorkSheet, type DelegatePrefill} from './DelegateWorkSheet';
 import {NewChannelSheet} from './NewChannelSheet';
+import {ChannelMemberAddSheet, type ChannelMemberAddTarget} from './ChannelMemberAddSheet';
 import {NewMessageSheet} from './NewMessageSheet';
 import {PlusMenu, type PlusMenuItem} from './PlusMenu';
 import {
@@ -173,6 +177,9 @@ export function Shell({
   // + 가 여는 것: 메뉴, 또는 메뉴에서 고른 무거운 시트 하나. 한 번에 하나만 선다.
   const [create, setCreate] = useState<CreateStep>(initialCreate);
   const closeCreate = useCallback(() => setCreate(null), []);
+  // 채널을 만든 직후 잇는 「멤버 추가」 시트(#5784, 공개·비공개). 새 채널 시트가 iOS 에서 다 내려간 뒤 새 채널로 들어가고 그 위에 선다.
+  const [addMembersTo, setAddMembersTo] = useState<ChannelMemberAddTarget | null>(null);
+  const closeAddMembers = useCallback(() => setAddMembersTo(null), []);
   // 「작업 맡기기」 시트(#3588). `create` 와 따로 둔다: 진입점이 에이전트·채널을 미리
   // 정해 넘기고, `CreateStep` 은 캡처 하네스의 시작값으로도 쓰이는 닫힌 집합이다.
   const [delegate, setDelegate] = useState<DelegatePrefill | null>(null);
@@ -246,6 +253,11 @@ export function Shell({
     (channelId: string) => dispatch({type: 'channelLeft', channelId}),
     [],
   );
+  // 1:1 대화에서 나간 영수증(ADR-0177 증보 2026-11-14 D21 「대화에서 나갔어요.」). 홈 목록 위의 고지(알림 탭 영수증과 같은 `NoticeBlock`)로
+  // 서고, 사람이 닫을 때까지 남는다(타이머로 걷지 않는다 - 걷힐 때 목록이 손가락 밑에서 움직이지 않게). 사이드바 행 시트와 대화 화면의 ⋮ 시트·
+  // 정보 페이지가 같은 자리에 세운다.
+  const [dmLeftReceipt, setDmLeftReceipt] = useState<string | null>(null);
+  const dismissDmLeftReceipt = useCallback(() => setDmLeftReceipt(null), []);
   const onOpenSearch = useCallback(
     (initialQuery?: string) => dispatch({type: 'openSearch', initialQuery}),
     [],
@@ -259,6 +271,20 @@ export function Shell({
   const onCloseSearch = useCallback(() => selectTab(INITIAL_NAV.tab), [selectTab]);
   const onOpenAgentList = useCallback(
     () => dispatch({type: 'openAgentList'}),
+    [],
+  );
+  // 「채널 둘러보기」 페이지(#5846): 홈 「채널」 섹션 ⋯ 메뉴 · 이름 검색 묶음이 연다.
+  const onOpenChannelBrowse = useCallback(
+    (initialQuery?: string) => dispatch({type: 'openChannelBrowse', initialQuery}),
+    [],
+  );
+  const onOpenChannelPreview = useCallback(
+    (preview: OpenChannelPreview) => dispatch({type: 'openChannelPreview', preview}),
+    [],
+  );
+  const onOpenChannelFromBrowse = useCallback(
+    (channelId: string, title: string) =>
+      dispatch({type: 'openChannelFromBrowse', conversation: {channelId, title}}),
     [],
   );
   // 설정을 처음 어느 장으로 여는가(#4937). 보통은 첫 장이고, 「업데이트 소식」 시트의 「자세히 보기」만 소식 장으로 연다.
@@ -394,7 +420,9 @@ export function Shell({
     nav.workSession !== null ||
     nav.hosted !== null ||
     nav.apps !== null ||
-    nav.settings;
+    nav.settings ||
+    nav.channelBrowse !== null ||
+    nav.channelPreview !== null;
   // 설정 위에 다른 층이 얹히면(알림 입구 등) 설정은 더 이상 VoiceOver 의 모달 경계가 아니다.
   const settingsOnTop =
     nav.settings &&
@@ -404,7 +432,9 @@ export function Shell({
     !nav.workList &&
     nav.workSession === null &&
     nav.hosted === null &&
-    nav.apps === null;
+    nav.apps === null &&
+    nav.channelBrowse === null &&
+    nav.channelPreview === null;
   // 대화 밑에 탭 판 말고 다른 층(작업 목록·작업 상세·에이전트 목록·에이전트 상세 등)이 깔려 있는가 (#5546). 그 층들은 탭 판처럼 따로
   // 숨기지 않으므로 이때는 대화 판이 VoiceOver 의 모달 경계다 — 작업 상세 위의 대화(#1292)와 같은 이유. 탭 위에 바로 연 대화는 그대로
   // 모달이 아니다: 그 밑의 탭 판과 크롬은 `covered` 한 쌍이 뺀다.
@@ -415,7 +445,9 @@ export function Shell({
     nav.workSession !== null ||
     nav.hosted !== null ||
     nav.apps !== null ||
-    nav.settings;
+    nav.settings ||
+    nav.channelBrowse !== null ||
+    nav.channelPreview !== null;
   // 메뉴가 열린 채 다른 길(알림 탭 등)로 층이 서면 메뉴를 **접는다**. 숨기기만 하면
   // 층이 닫힐 때 아무도 부르지 않은 메뉴가 다시 뜬다(design-review L1).
   useEffect(() => {
@@ -456,9 +488,13 @@ export function Shell({
               onOpenConversation={onOpenConversation}
               onOpenSearch={onOpenSearch}
               onOpenAgentList={onOpenAgentList}
+              onOpenChannelBrowse={onOpenChannelBrowse}
               onOpenWorkList={onOpenWorkList}
               onOpenSettings={onOpenSettings}
               onChannelLeft={onChannelLeft}
+              onDmLeftReceipt={setDmLeftReceipt}
+              dmLeftReceipt={dmLeftReceipt}
+              onDismissDmLeftReceipt={dismissDmLeftReceipt}
               notificationNotice={tapRouting.notice}
               onDismissNotificationNotice={tapRouting.dismissNotice}
             />
@@ -661,6 +697,39 @@ export function Shell({
         </EdgeSwipeBack>
       ) : null}
 
+      {/* 「채널 둘러보기」(#5846). 닫히면 언마운트한다 — 열 때마다 다시 읽는다. 대화는 이 층을 걷고 열린다(`openChannelFromBrowse`). */}
+      {nav.channelBrowse ? (
+        <EdgeSwipeBack
+          accessibilityViewIsModal={nav.conversation === null && nav.channelPreview === null}
+          style={styles.overlay}
+          onBack={onBack}
+          testID="channel-browse-pane">
+          <ChannelBrowseScreen
+            key={nav.channelBrowse.seq}
+            initialQuery={nav.channelBrowse.initialQuery}
+            onClose={onBack}
+            onOpenChannel={onOpenChannelFromBrowse}
+            onPreview={onOpenChannelPreview}
+          />
+        </EdgeSwipeBack>
+      ) : null}
+
+      {/* 「채널 미리 보기」(#5847): 둘러보기 위의 층. 참여하면 `openChannelFromBrowse` 가 둘 다 걷고 그 대화를 연다. */}
+      {nav.channelPreview ? (
+        <EdgeSwipeBack
+          accessibilityViewIsModal={nav.conversation === null}
+          style={styles.overlay}
+          onBack={onBack}
+          testID="channel-preview-pane">
+          <ChannelPreviewScreen
+            key={nav.channelPreview.channelId}
+            channel={nav.channelPreview}
+            onClose={onBack}
+            onOpenChannel={onOpenChannelFromBrowse}
+          />
+        </EdgeSwipeBack>
+      ) : null}
+
       {/* ## 좌측 엣지에서 밀면 닫힌다 (goal RN-U2)
           성재: "화면 좌측을 슥 넘기면 뒤로가게 해주면 안돼?"
 
@@ -695,6 +764,7 @@ export function Shell({
             onOpenSettings={onOpenSettingsFromConversation}
             // 대화 안 검색의 「모든 대화에서 ›」(#5384): 같은 말로 검색 탭을 연다.
             onOpenSearch={onOpenSearch}
+            onDmLeftReceipt={setDmLeftReceipt}
           />
         </EdgeSwipeBack>
       ) : null}
@@ -708,8 +778,12 @@ export function Shell({
       {create === 'channel' ? (
         <NewChannelSheet
           onOpenConversation={onOpenConversation}
+          onCreated={setAddMembersTo}
           onClose={closeCreate}
         />
+      ) : null}
+      {addMembersTo ? (
+        <ChannelMemberAddSheet target={addMembersTo} onClose={closeAddMembers} />
       ) : null}
       {ai ? (
         <AiSheet

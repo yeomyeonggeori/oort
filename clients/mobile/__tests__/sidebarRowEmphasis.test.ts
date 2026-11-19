@@ -5,7 +5,7 @@ import {
   CHIP_TONE,
   rowEmphasis,
   type RowEmphasisInput,
-} from '../src/features/sidebar/rowEmphasis';
+} from '@momo/core/features/sidebar/rowEmphasis';
 import {
   buildSidebarSections,
   type SidebarInput,

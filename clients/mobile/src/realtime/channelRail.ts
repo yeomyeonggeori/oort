@@ -1,5 +1,6 @@
 import type {Centrifuge, Subscription} from 'centrifuge';
 import {isTerminalProgressFrame} from '@momo/core/features/agents/agentRail';
+import {readStateRailChannelName} from '@momo/core/features/inbox/serverInbox';
 import {
   readExpressionChangedVersion,
   readExpressionChangeDetail,
@@ -22,6 +23,7 @@ import {
   centrifugoAgentChannelName,
   centrifugoChannelName,
   centrifugoOnlineChannelName,
+  relayedRoomChannel,
   centrifugoTypingChannelName,
   createReplayGate,
   type AgentProgressEvent,
@@ -173,7 +175,15 @@ export type ChannelRail = Pick<
  * sockets would mean two sockets, and the second one would not honour any of
  * that policy.
  */
-export function createChannelRail(getClient: () => Centrifuge): ChannelRail {
+export function createChannelRail(
+  getClient: () => Centrifuge,
+  /**
+   * 로그인한 멤버(ADR-0177 증보 2026-11-14 D17, #5876). 있으면 방 구독이 개인 채널(`user:read-state#<나>`)로 옮겨 온 그 방의 프레임
+   * (`room_channel`)도 받는다 - 웹 `createRealtime(…, selfMemberId)` 와 같다. 구독 때마다 부른다(세션이 바뀌어도 낡은 값을 쥐지 않는다).
+   * 없거나 `null` 이면 지금까지처럼 방 채널만 듣는다.
+   */
+  getSelfMemberId: () => string | null = () => null,
+): ChannelRail {
   const shared = new Map<string, {sub: Subscription; refs: number}>();
 
   function attach(
@@ -245,60 +255,87 @@ export function createChannelRail(getClient: () => Centrifuge): ChannelRail {
       );
     },
     subscribeChannel(workspaceId, channelId, handlers: ChannelHandlers) {
-      return attach(
-        centrifugoChannelName(workspaceId, channelId),
+      const roomName = centrifugoChannelName(workspaceId, channelId);
+      // 방 채널로 온 프레임과 개인 채널로 옮겨 온 프레임이 **같은 처리**를 지난다(적용은 seq·id 기준이라 멱등 - 같은 프레임이 둘 다 와도 결과가 같다).
+      const onPublication = (ctx: {data?: unknown}) => {
+        const event = ctx.data as MessageNewEvent | undefined;
+        if (
+          event &&
+          (event.type === 'message.new' || event.type === 'message.edited') &&
+          event.payload
+        ) {
+          handlers.onMessage(event);
+          return;
+        }
+        // The tombstone and reaction frames ride the same channel as the
+        // message they annotate and reuse its `seq`, so they arrive here in
+        // order behind it rather than on a rail of their own.
+        const tombstone: MessageDeletedEvent | null = asMessageDeletedFrame(
+          ctx.data,
+        );
+        if (tombstone) {
+          handlers.onMessageDeleted?.(tombstone);
+          return;
+        }
+        const reaction: ReactionEvent | null = asReactionFrame(ctx.data);
+        if (reaction) {
+          handlers.onReaction?.(reaction);
+          return;
+        }
+        // 이슈 #1112 — pin rides the same channel and reuses the target's
+        // `seq` too, so the pin list and the timeline can never disagree
+        // about which message a frame is about.
+        const pin: PinEvent | null = asPinFrame(ctx.data);
+        if (pin) {
+          handlers.onPin?.(pin);
+          return;
+        }
+        // ADR-0170 D5 — 링크 카드의 전체 투영(`message.unfurl`)과 작성자의 지우기(`message.unfurl.removed`)도
+        // 같은 채널·같은 `seq` 를 쓴다. 모르는 프레임은 여기서 조용히 끝난다(옛 서버·새 종류).
+        const unfurl: UnfurlEvent | null = asUnfurlFrame(ctx.data);
+        if (unfurl) handlers.onUnfurl?.(unfurl);
+      };
+      const detachRoom = attach(
+        roomName,
         {recoverable: true, positioned: true},
         sub => {
           const onSubscribed = (ctx: SubscribedRecoveryContext) => {
             handlers.onSubscribed(ctx);
           };
-          const onPublication = (ctx: {data?: unknown}) => {
-            const event = ctx.data as MessageNewEvent | undefined;
-            if (
-              event &&
-              (event.type === 'message.new' ||
-                event.type === 'message.edited') &&
-              event.payload
-            ) {
-              handlers.onMessage(event);
-              return;
-            }
-            // The tombstone and reaction frames ride the same channel as the
-            // message they annotate and reuse its `seq`, so they arrive here in
-            // order behind it rather than on a rail of their own.
-            const tombstone: MessageDeletedEvent | null = asMessageDeletedFrame(
-              ctx.data,
-            );
-            if (tombstone) {
-              handlers.onMessageDeleted?.(tombstone);
-              return;
-            }
-            const reaction: ReactionEvent | null = asReactionFrame(ctx.data);
-            if (reaction) {
-              handlers.onReaction?.(reaction);
-              return;
-            }
-            // 이슈 #1112 — pin rides the same channel and reuses the target's
-            // `seq` too, so the pin list and the timeline can never disagree
-            // about which message a frame is about.
-            const pin: PinEvent | null = asPinFrame(ctx.data);
-            if (pin) {
-              handlers.onPin?.(pin);
-              return;
-            }
-            // ADR-0170 D5 — 링크 카드의 전체 투영(`message.unfurl`)과 작성자의 지우기(`message.unfurl.removed`)도
-            // 같은 채널·같은 `seq` 를 쓴다. 모르는 프레임은 여기서 조용히 끝난다(옛 서버·새 종류).
-            const unfurl: UnfurlEvent | null = asUnfurlFrame(ctx.data);
-            if (unfurl) handlers.onUnfurl?.(unfurl);
-          };
           sub.on('subscribed', onSubscribed);
           sub.on('publication', onPublication);
+          // 이미 살아 있는 구독에 붙었다: 이 손의 다음 `subscribed` 는 재연결이다(#5885).
+          if (sub.state === 'subscribed') handlers.onAttachedLive?.();
           return () => {
             sub.off('subscribed', onSubscribed);
             sub.off('publication', onPublication);
           };
         },
       );
+      // 개인 채널로 옮겨 온 이 방의 프레임(D17): 1:1 에서 상대가 나간 방의 하한 아래 옛 글에 대한 뒤늦은 수정·반응·고정은 방 채널이 아니라 볼 수
+      // 있는 멤버의 개인 채널로 온다. `room_channel` 이 **이 방**이면(대소문자 무시) 방 프레임과 같이 처리하고, 다른 방 이름·`room_channel` 없는
+      // 신호는 넘기지 않는다. 이 구독의 `subscribed`(복구)는 방의 첫 구독·되살림 판정이 아니라서 `onSubscribed` 에 잇지 않는다. 그런 프레임을
+      // 안 보내는 옛 서버에서는 아무 일도 없다. 하한 아래 프레임을 거르는 것은 처리기(`useTimeline` 의 `isBelowHistoryFloor`)의 몫이다.
+      const self = getSelfMemberId();
+      const detachRelay =
+        self === null
+          ? null
+          : attach(
+              readStateRailChannelName(self),
+              {recoverable: true, positioned: true},
+              sub => {
+                const onRelayed = (ctx: {data?: unknown}) => {
+                  const room = relayedRoomChannel(ctx.data);
+                  if (room !== null && room.toUpperCase() === roomName.toUpperCase()) onPublication(ctx);
+                };
+                sub.on('publication', onRelayed);
+                return () => sub.off('publication', onRelayed);
+              },
+            );
+      return () => {
+        detachRoom();
+        detachRelay?.();
+      };
     },
 
     // N2 (#3594). 작업 상세가 열려 있는 동안 ACP 프레임(`agent.partial` 등)을 듣는다.

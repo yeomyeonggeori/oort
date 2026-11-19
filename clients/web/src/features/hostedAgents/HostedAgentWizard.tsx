@@ -25,9 +25,11 @@ import {
   channelLabel,
   memberFor,
   memberNameParts,
+  rosterQueryKey,
   useChannels,
   useDirectory,
 } from "@/features/workspace/useWorkspace";
+import { useFormatMessage } from "@/i18n/useFormatMessage";
 import { uuidEq } from "@momo/core/lib/api";
 import { normalizedId } from "@momo/core/features/agents/hubModel";
 import {
@@ -100,6 +102,9 @@ import {
   approvalConsequence,
   APPROVAL_CHANGE_NOTE,
   APPROVAL_SECURITY_NOTE,
+  approvableChannelIds,
+  approvalChannelInputs,
+  approvalChannelsRefusedKey,
   buildConfirmApproval,
   channelApprovalChoices,
   DEFAULT_HOSTED_SCOPES,
@@ -251,8 +256,9 @@ function HostedWizardBody({
   const { workspaceId, session } = useSession();
   const client = useQueryClient();
   const offline = useOffline();
-  const { directory } = useDirectory(workspaceId);
+  const { directory, isPending: rosterPending } = useDirectory(workspaceId);
   const { groups } = useChannels(workspaceId);
+  const formatMessage = useFormatMessage();
 
   const autoAdvanceArmedRef = useRef(initialAutoAdvanceArmed(launch, offline));
   const [autoAdvancePending, setAutoAdvancePending] = useState(false);
@@ -489,22 +495,21 @@ function HostedWizardBody({
     regenerate.mutate();
   }, [launch, offline, draft, selectedId, create, regenerate]);
 
-  const channelInputs = useMemo<ApprovalChannelInput[]>(() => {
-    const named = groups.channels.map((channel) => ({
-      id: channel.id,
-      label: `#${channelLabel(channel, directory, session.member.id)}`,
-      kind: channel.kind,
-      ...(channel.archivedAtMs === undefined
-        ? {}
-        : { archivedAtMs: channel.archivedAtMs }),
-    }));
-    const dms = groups.dms.map((channel) => ({
-      id: channel.id,
-      label: channelLabel(channel, directory, session.member.id),
-      kind: channel.kind,
-    }));
-    return [...named, ...dms];
-  }, [groups.channels, groups.dms, directory, session.member.id]);
+  // 서버가 받는 채널(ADR-0224 D13)은 「둘러보기에 보이는 공개 채널」이거나 「이 에이전트가 이미 든 채널」이다.
+  // 에이전트의 멤버십은 명부의 `channelIds` 에서 읽고(관리자가 들지 않은 채널도 실린다), 명부에 없으면 모른다.
+  const agentChannelIds = agent?.channelIds ?? null;
+  const channelInputs = useMemo<ApprovalChannelInput[]>(
+    () =>
+      approvalChannelInputs(
+        [...groups.channels, ...groups.dms],
+        (channel) => {
+          const name = channelLabel(channel, directory, session.member.id);
+          return channel.kind === "dm" ? name : `#${name}`;
+        },
+        agentChannelIds
+      ),
+    [groups.channels, groups.dms, directory, session.member.id, agentChannelIds]
+  );
 
   const confirm = useMutation({
     ...HOSTED_CREDENTIAL_MUTATION_SCOPE,
@@ -538,7 +543,17 @@ function HostedWizardBody({
       );
       void client.invalidateQueries({ queryKey: hostedListQueryKey(workspaceId) });
     },
-    onError: (error) => setFailure(hostedFailureMessage("confirm", error)),
+    onError: (error) => {
+      const refused = approvalChannelsRefusedKey(error);
+      if (refused === null) {
+        setFailure(hostedFailureMessage("confirm", error));
+        return;
+      }
+      // 그 사이 채널의 표시나 에이전트의 멤버십이 바뀌었다: 문장으로 말하고 두 목록을 다시 읽는다.
+      setFailure(formatMessage(refused));
+      void client.invalidateQueries({ queryKey: ["channels", workspaceId] });
+      void client.invalidateQueries({ queryKey: rosterQueryKey(workspaceId) });
+    },
   });
 
   const busy = create.isPending || regenerate.isPending || confirm.isPending;
@@ -692,6 +707,7 @@ function HostedWizardBody({
             agentLabel={agentLabel}
             agentHandle={agentHandle}
             channels={channelInputs}
+            channelsReady={!rosterPending}
             channelSelection={channelSelection}
             setChannelSelection={setChannelSelection}
             scopeSelection={scopeSelection}
@@ -1464,6 +1480,7 @@ function ApprovalStep({
   agentLabel,
   agentHandle,
   channels,
+  channelsReady,
   channelSelection,
   setChannelSelection,
   scopeSelection,
@@ -1474,20 +1491,25 @@ function ApprovalStep({
   agentLabel: string;
   agentHandle: string;
   channels: readonly ApprovalChannelInput[];
+  /** 명부가 한 번 정해졌다 — 그 전에는 에이전트의 멤버십을 몰라 줄이 풀렸다 잠겼다 한다. */
+  channelsReady: boolean;
   channelSelection: string[];
   setChannelSelection: (next: string[]) => void;
   scopeSelection: string[];
   setScopeSelection: (next: string[]) => void;
   disabled: boolean;
 }) {
+  const formatMessage = useFormatMessage();
   const channelItems: ChoiceListItem[] = channelApprovalChoices(channels).map(
     (choice) => ({
       id: choice.id,
       label: choice.label,
-      detail: choice.detail,
+      detail: choice.detailKey ? formatMessage(choice.detailKey) : choice.detail,
       ...(choice.disabled ? { disabled: true } : {}),
     })
   );
+  // 다시 읽은 목록에서 잠긴 줄이 된 채널은 고른 채로 남지 않는다(체크된 채 못 푸는 줄이 되지 않게).
+  const selectedChannels = approvableChannelIds(channels, channelSelection);
   const scopeItems: ChoiceListItem[] = HOSTED_SCOPE_CHOICES.map((choice) => ({
     id: choice.id,
     label: choice.label,
@@ -1515,7 +1537,11 @@ function ApprovalStep({
       <p className="break-keep text-body text-ink" data-testid="hosted-security-note">
         {APPROVAL_SECURITY_NOTE}
       </p>
-      {channelItems.length === 0 ? (
+      {!channelsReady ? (
+        <div data-testid="hosted-channels-loading">
+          <Skeleton ready={false} rows={3} className="p-0" />
+        </div>
+      ) : channelItems.length === 0 ? (
         <EmptyInvite
           className="px-0"
           headline="승인할 채널이 없어요."
@@ -1529,7 +1555,7 @@ function ApprovalStep({
           hint="고른 채널에서만 이 에이전트가 부름을 받아요."
           multiple
           items={channelItems}
-          selected={channelSelection}
+          selected={selectedChannels}
           onChange={setChannelSelection}
           disabled={disabled}
           testId="hosted-channels"

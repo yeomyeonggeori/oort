@@ -246,6 +246,39 @@ describe("`#` 채널 자동완성 (#1930)", () => {
     expect(matchChannels(CHANNELS, "옛채널")).toEqual([]);
   });
 
+  // ADR-0225 D12: 「디자인」을 치는 입력기의 중간 상태에서도 줄이 남는다.
+  it.each(["ㄷ", "디", "딪", "디ㅈ", "디자", "디장", "디자이", "디자인"])(
+    "한글 조합 중 `%s` 에서도 「디자인」 채널이 남고, 무관한 「디저트」는 `디자`부터 빠진다",
+    (query) => {
+      const hangul = ["디자인", "디저트"].map(
+        (name, i) => ({ ...CHANNELS[0], id: `h${i}`, name }) as Channel
+      );
+      const names = matchChannels(hangul, query).map((c) => c.name);
+      expect(names).toContain("디자인");
+      expect(names.includes("디저트")).toBe(["ㄷ", "디", "딪", "디ㅈ"].includes(query));
+    }
+  );
+
+  it("글자 그대로 맞은 줄이 느슨하게만 맞은 줄보다 늘 앞이다: `복` → 「복지」가 「보고」 앞", () => {
+    const rows = ["보고", "복지"].map((name, i) => ({ ...CHANNELS[0], id: `o${i}`, name }) as Channel);
+    expect(matchChannels(rows, "복").map((c) => c.name)).toEqual(["복지", "보고"]);
+  });
+
+  it("6줄 한도에서 느슨한 줄이 글자 그대로 맞은 줄을 밀어내지 않는다", () => {
+    const names = ["공지", "공유", "공부", "공시", "공구", "공방", "회고"];
+    const rows = names.map((name, i) => ({ ...CHANNELS[0], id: `p${i}`, name }) as Channel);
+    // `고`: 「회고」만 글자 그대로, 나머지는 `공…` 느슨. 「회고」가 6줄 안에 앞서 선다.
+    const top = matchChannels(rows, "고").map((c) => c.name);
+    expect(top).toHaveLength(6);
+    expect(top[0]).toBe("회고");
+  });
+
+  it("언어를 주면 같은 등급끼리 화면 언어·숫자 값 차례로 센다", () => {
+    const rows = ["sprint-10", "sprint-2", "sprint-1"].map((name, i) => ({ ...CHANNELS[0], id: `q${i}`, name }) as Channel);
+    expect(matchChannels(rows, "sprint", undefined, "ko-KR").map((c) => c.name)).toEqual(["sprint-1", "sprint-2", "sprint-10"]);
+    expect(matchChannels(rows, "sprint").map((c) => c.name)).toEqual(["sprint-10", "sprint-2", "sprint-1"]);
+  });
+
   it("대소문자를 가리지 않고 부분 일치로 좁힌다", () => {
     expect(matchChannels(CHANNELS, "RELEASE").map((c) => c.name)).toEqual([
       "release-notes",
