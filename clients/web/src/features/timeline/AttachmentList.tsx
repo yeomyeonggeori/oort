@@ -434,7 +434,7 @@ function FileCard({
               channelId={channelId}
               attachment={attachment}
               joinsMessageRow
-              tooltipSide="top"
+              tooltipSide="row"
               onStarted={clearFailures}
               onFailed={() => setFailed(true)}
             />
