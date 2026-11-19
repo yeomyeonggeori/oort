@@ -81,6 +81,11 @@ p256 = { version = "0.14", default-features = false, features = ["ecdsa"] }
 # NFC for human-written text inside signed bytes (ADR-0146 D-5: `input` body and
 # `spawn` first prompt). Already in the lock via sqlx; MIT OR Apache-2.0.
 unicode-normalization = "0.1"
+# Unicode General_Category for the channel name rule (ADR-0225 D1/D4/D11: letters,
+# numbers and marks of every script; control/format/private-use refused). Already
+# in the lock via sqlx-postgres → stringprep; MIT/Apache-2.0. Only the
+# general-category table, not the emoji one.
+unicode-properties = { version = "0.1", default-features = false, features = ["general-category"] }
 
 # auth
 jsonwebtoken = "9"

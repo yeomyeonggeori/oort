@@ -390,11 +390,20 @@ pub async fn subscribe(
                 .await
                 .map_err(DbError::from)?
             {
-                return Ok::<Option<bool>, DbError>(None);
+                return Ok::<Option<Admission>, DbError>(None);
             }
             let allowed = match parsed {
                 ParsedChannel::Channel { channel, .. } => {
-                    is_channel_member(conn, channel, user_member_id).await?
+                    if !is_channel_member(conn, channel, user_member_id).await? {
+                        return Ok(Some(Admission::Refused));
+                    }
+                    // ADR-0177 증보 D17·D22: a subscriber with a history floor in this channel
+                    // gets no recovery, so the publications kept from before the floor are never
+                    // replayed to them. Live delivery is unchanged.
+                    if has_history_floor_in_tx(conn, channel, user_member_id).await? {
+                        return Ok(Some(Admission::WithoutRecovery));
+                    }
+                    true
                 }
                 ParsedChannel::Agent {
                     channel,
@@ -422,7 +431,11 @@ pub async fn subscribe(
                         .is_some()
                 }
             };
-            Ok(Some(allowed))
+            Ok(Some(if allowed {
+                Admission::Allowed
+            } else {
+                Admission::Refused
+            }))
         })
     })
     .await
@@ -430,9 +443,38 @@ pub async fn subscribe(
 
     Ok(Json(match decision {
         None => SubscribeProxyResponse::deny("realtime credential is no longer active"),
-        Some(true) => SubscribeProxyResponse::allow(),
-        Some(false) => SubscribeProxyResponse::deny(parsed.deny_reason()),
+        Some(Admission::Allowed) => SubscribeProxyResponse::allow(),
+        Some(Admission::WithoutRecovery) => SubscribeProxyResponse::allow_without_recovery(),
+        Some(Admission::Refused) => SubscribeProxyResponse::deny(parsed.deny_reason()),
     }))
+}
+
+/// What the subscribe proxy answers for a live credential.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Admission {
+    Allowed,
+    /// Allowed, with the stream's recovery off for this subscription (ADR-0177 증보 D17·D22).
+    WithoutRecovery,
+    Refused,
+}
+
+/// Whether `member` has a history floor (`membership.history_from_seq`) in `channel`. Read in the
+/// proxy's own tenant transaction, which carries no requester: this reads the membership row, not
+/// a message.
+async fn has_history_floor_in_tx(
+    conn: &mut momo_db::sqlx::PgConnection,
+    channel: Uuid,
+    member: Uuid,
+) -> Result<bool, DbError> {
+    let floor: Option<bool> = momo_db::sqlx::query_scalar(
+        "SELECT history_from_seq IS NOT NULL FROM membership \
+          WHERE channel_id = $1 AND member_id = $2 AND left_at IS NULL",
+    )
+    .bind(channel)
+    .bind(member)
+    .fetch_optional(&mut *conn)
+    .await?;
+    Ok(floor.unwrap_or(false))
 }
 
 #[cfg(test)]
@@ -713,6 +755,22 @@ mod tests {
         assert!(deny.get("result").is_none(), "{deny}");
         assert_eq!(deny["error"]["code"], 403);
         assert_eq!(deny["error"]["message"], "nope");
+    }
+
+    /// ADR-0177 증보 D17·D22: the two allows, byte for byte. Everyone without a history floor gets
+    /// exactly `{"result":{}}` as before; a subscriber with one gets the protocol's per-subscription
+    /// `override` with `force_recovery` as a `BoolValue` set to false, and nothing else.
+    #[test]
+    fn the_allow_without_recovery_is_the_protocol_override_and_nothing_else() {
+        assert_eq!(
+            serde_json::to_string(&SubscribeProxyResponse::allow()).expect("allow"),
+            r#"{"result":{}}"#
+        );
+        assert_eq!(
+            serde_json::to_string(&SubscribeProxyResponse::allow_without_recovery())
+                .expect("allow without recovery"),
+            r#"{"result":{"override":{"force_recovery":{"value":false}}}}"#
+        );
     }
 
     #[test]

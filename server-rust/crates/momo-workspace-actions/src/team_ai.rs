@@ -598,8 +598,13 @@ pub async fn withhold_link_previews_in_tx(
 pub struct Roster {
     /// `(handle, display name, is_agent)`.
     pub members: Vec<(String, String, bool)>,
-    /// Public channel names plus the channel the request was made in — the reply is
-    /// posted in that channel, so nothing the channel's readers could not see is sent.
+    /// The channel the request was made in plus (ADR-0224 D13): in the team AI's 1:1 DM with the
+    /// requester, the public channels open to the requester (listed in channel browse, or the
+    /// requester is in it — [`momo_auth::channel_open_to_member_sql`]); in any other room, only
+    /// the channels open to people ([`momo_auth::channel_open_to_people_sql`]), so a channel the
+    /// room's other readers cannot see is never named there. A private channel's name is never
+    /// listed here. With a guest (#5924, ADR-0219): a room with a guest in it gets only its own
+    /// name, and a guest's own DM only the public channels the guest is in.
     pub channels: Vec<String>,
     /// The channel the request was made in.
     pub this_channel: String,
@@ -639,18 +644,53 @@ pub async fn load_roster_in_tx(
         .fetch_all(&mut *conn)
         .await?
     };
-    let channels = sqlx::query(
+    // Which room this is, judged exactly as the room scope judges it (`load_scope_in_tx`).
+    let helper = read_state_in_tx(conn, workspace_id).await?.member_id;
+    let in_helper_dm = match helper {
+        Some(helper) => {
+            crate::team_ai_tools::is_helper_dm_with_in_tx(
+                conn,
+                helper,
+                requester_member_id,
+                channel_id,
+            )
+            .await?
+        }
+        None => false,
+    };
+    // A guest is in the channels they were invited to and no others (ADR-0219, #5924): a room
+    // with a guest in it is told only its own name, and a guest's own DM with the team AI only
+    // the public channels the guest is in.
+    let guest_room = !in_helper_dm
+        && (is_guest
+            || crate::team_ai_tools::room_has_guest_in_tx(conn, workspace_id, channel_id).await?);
+    let open = if guest_room {
+        "false".to_string()
+    } else if in_helper_dm && is_guest {
+        "EXISTS (SELECT 1 FROM membership mine \
+            WHERE mine.workspace_id = c.workspace_id AND mine.channel_id = c.id \
+              AND mine.member_id = $4 AND mine.left_at IS NULL)"
+            .to_string()
+    } else if in_helper_dm {
+        momo_auth::channel_open_to_member_sql("c", "$4")
+    } else {
+        momo_auth::channel_open_to_people_sql("c")
+    };
+    let channels_sql = format!(
         "SELECT c.name \
            FROM channel c \
           WHERE c.workspace_id = $1 AND c.archived_at IS NULL \
-            AND (c.kind = 'public' OR c.id = $2) \
+            AND ((c.kind = 'public' AND {open}) OR c.id = $2) \
           ORDER BY lower(c.name) LIMIT $3",
-    )
-    .bind(workspace_id)
-    .bind(channel_id)
-    .bind(ROSTER_CHANNELS_MAX)
-    .fetch_all(&mut *conn)
-    .await?;
+    );
+    let mut channels_query = sqlx::query(&channels_sql)
+        .bind(workspace_id)
+        .bind(channel_id)
+        .bind(ROSTER_CHANNELS_MAX);
+    if in_helper_dm {
+        channels_query = channels_query.bind(requester_member_id);
+    }
+    let channels = channels_query.fetch_all(&mut *conn).await?;
     let this_channel: Option<String> =
         sqlx::query_scalar("SELECT name FROM channel WHERE workspace_id = $1 AND id = $2")
             .bind(workspace_id)
@@ -661,20 +701,19 @@ pub async fn load_roster_in_tx(
     // B10-7: the helper's own name as it is now — not the default it was created with. This is
     // read from the member row, not found in `members` (a guest's roster is empty and the list is
     // capped), and goes through the same `data_line` as every other name.
-    let helper_display_name: Option<String> =
-        match read_state_in_tx(conn, workspace_id).await?.member_id {
-            Some(helper) => {
-                sqlx::query_scalar(
-                    "SELECT display_name FROM member \
+    let helper_display_name: Option<String> = match helper {
+        Some(helper) => {
+            sqlx::query_scalar(
+                "SELECT display_name FROM member \
                   WHERE workspace_id = $1 AND id = $2 AND deleted_at IS NULL",
-                )
-                .bind(workspace_id)
-                .bind(helper)
-                .fetch_optional(&mut *conn)
-                .await?
-            }
-            None => None,
-        };
+            )
+            .bind(workspace_id)
+            .bind(helper)
+            .fetch_optional(&mut *conn)
+            .await?
+        }
+        None => None,
+    };
     Ok(Roster {
         members: members
             .iter()

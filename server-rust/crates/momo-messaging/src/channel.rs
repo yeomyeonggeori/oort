@@ -129,6 +129,12 @@ fn decode_channel_membership(
 /// RETURNING`s it), and a channel without its creator's membership is one
 /// nobody can read — either half-state would be a channel that exists and does
 /// not work.
+///
+/// A new **public** channel is created listed in channel browse
+/// (`browse_listed`, ADR-0224 D2); a private one never is (the table's CHECK
+/// says so too). It is never a default channel — that is an explicit choice made
+/// elsewhere (D6). Every creator of a public/private channel goes through here:
+/// the REST create route and the agent `channel.create` approval alike.
 pub async fn create_channel_detailed_in_tx(
     conn: &mut PgConnection,
     workspace_id: Uuid,
@@ -136,15 +142,16 @@ pub async fn create_channel_detailed_in_tx(
 ) -> Result<Option<CreatedChannel>, DbError> {
     let row = sqlx::query(
         "WITH inserted_channel AS ( \
-           INSERT INTO channel (workspace_id, kind, name, topic, created_by) \
-           SELECT $1, $2::channel_kind, $3, $4, $5 \
+           INSERT INTO channel (workspace_id, kind, name, topic, created_by, browse_listed) \
+           SELECT $1, $2::channel_kind, $3, $4, $5, ($2::channel_kind = 'public') \
             WHERE NOT EXISTS ( \
                   SELECT 1 FROM channel existing \
                    WHERE existing.workspace_id = $1 \
                      AND existing.kind <> 'dm' \
                      AND existing.archived_at IS NULL \
                      AND lower(existing.name) = lower($3)) \
-           RETURNING id, workspace_id, kind, name, topic, dm_key, created_by, archived_at \
+           RETURNING id, workspace_id, kind, name, topic, dm_key, created_by, archived_at, \
+                     browse_listed, is_default \
          ), \
          inserted_seq AS ( \
            INSERT INTO channel_seq (channel_id, workspace_id, last_seq) \
@@ -166,6 +173,8 @@ pub async fn create_channel_detailed_in_tx(
                 CASE WHEN c.archived_at IS NULL THEN NULL \
                      ELSE floor(extract(epoch from c.archived_at) * 1000)::bigint \
                 END AS archived_at_ms, \
+                c.browse_listed, \
+                c.is_default, \
                 m.id AS membership_id, \
                 m.member_id, \
                 m.role::text AS membership_role, \
@@ -205,6 +214,8 @@ pub async fn create_channel_detailed_in_tx(
         member_ids: Vec::new(),
         created_by: row.try_get("created_by").map_err(DbError::from)?,
         archived_at_ms: row.try_get("archived_at_ms").map_err(DbError::from)?,
+        browse_listed: row.try_get("browse_listed").map_err(DbError::from)?,
+        is_default: row.try_get("is_default").map_err(DbError::from)?,
         // Nobody can have muted a channel that did not exist a statement ago.
         muted: false,
         muted_until_ms: None,
@@ -239,7 +250,8 @@ pub async fn create_channel_in_tx(
 // channel spec validation (B4.1 — Swift `ChannelRoutes.normalized*`, :391-424)
 // ---------------------------------------------------------------------------
 
-/// Swift `normalizedChannelName` bounds, counted in characters.
+/// Channel name bound, counted in Unicode code points after normalization
+/// (ADR-0225 D5) — not bytes: 80 Hangul syllables are 240 bytes.
 pub const CHANNEL_NAME_MAX_CHARS: usize = 80;
 /// Swift `normalizedTopic` bound.
 pub const CHANNEL_TOPIC_MAX_CHARS: usize = 280;
@@ -252,7 +264,9 @@ pub enum ChannelSpecInvalid {
     Kind,
     #[error("channel name must be 1-80 characters")]
     NameLength,
-    #[error("channel name must use lowercase letters, numbers, hyphen, or underscore")]
+    #[error(
+        "channel name must use letters, numbers, hyphen, or underscore, and start with a letter or number"
+    )]
     NameCharset,
     #[error("channel topic must be 280 characters or fewer")]
     TopicLength,
@@ -272,33 +286,488 @@ pub fn normalize_channel_kind(raw: &str) -> Result<ChannelKind, ChannelSpecInval
     }
 }
 
-/// Swift's `^[a-z0-9][a-z0-9_-]*[a-z0-9]$|^[a-z0-9]$` after trim + lowercase,
-/// spelled out rather than pulled through a regex dependency.
+/// Why [`judge_channel_name`] refused a name — the five reasons of the shared
+/// vectors (`docs/api/channel-name.vectors.json`, ADR-0225 D11).
 ///
-/// Length is checked **before** the charset, matching Swift, so an 81-character
-/// valid-looking name is told it is too long rather than told it has bad
-/// characters.
-pub fn normalize_channel_name(raw: &str) -> Result<String, ChannelSpecInvalid> {
-    let value = raw.trim().to_lowercase();
+/// The HTTP and agent paths still answer with two errors (length, characters):
+/// [`ChannelNameRefusal::spec_invalid`] is that mapping. The five exist so the
+/// vectors can pin every check on its own — a hidden character that the charset
+/// check would also refuse must still be refused *as hidden*, or deleting the
+/// hidden check would stay green.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ChannelNameRefusal {
+    /// Nothing left after the blanks are dropped.
+    Required,
+    /// More than [`CHANNEL_NAME_MAX_CHARS`] code points after normalization.
+    TooLong,
+    /// A control, format, private-use or surrogate code point, or a letter/mark
+    /// that renders as nothing (ADR-0225 D4).
+    Hidden,
+    /// Something that is not a letter, number, `-` or `_`, or a combining mark
+    /// with no letter/number before it (D1).
+    Unsupported,
+    /// Starts or ends with `-` or `_` (D1).
+    Edge,
+}
+
+impl ChannelNameRefusal {
+    /// The `verdict` label this refusal carries in the shared vectors.
+    pub fn vector_label(self) -> &'static str {
+        match self {
+            ChannelNameRefusal::Required => "required",
+            ChannelNameRefusal::TooLong => "tooLong",
+            ChannelNameRefusal::Hidden => "hidden",
+            ChannelNameRefusal::Unsupported => "unsupported",
+            ChannelNameRefusal::Edge => "edge",
+        }
+    }
+
+    /// The server's answer: one length error, one character error (ADR-0225
+    /// 「시험 벡터」 — telling the five apart is the screen's job).
+    pub fn spec_invalid(self) -> ChannelSpecInvalid {
+        match self {
+            ChannelNameRefusal::Required | ChannelNameRefusal::TooLong => {
+                ChannelSpecInvalid::NameLength
+            }
+            ChannelNameRefusal::Hidden
+            | ChannelNameRefusal::Unsupported
+            | ChannelNameRefusal::Edge => ChannelSpecInvalid::NameCharset,
+        }
+    }
+}
+
+/// Letters and marks that render as nothing (ADR-0225 D4, second bullet). The
+/// control/format/private-use/surrogate half of D4 is decided by general
+/// category instead, so it cannot miss a `Cf` code point the way a hand list can.
+fn is_invisible_letter_or_mark(c: char) -> bool {
+    matches!(
+        u32::from(c),
+        // Hangul fillers (Lo).
+        0x115F | 0x1160 | 0x3164 | 0xFFA0
+        // Combining grapheme joiner, Khmer inherent vowels, Mongolian free
+        // variation selectors (Mn).
+        | 0x034F | 0x17B4 | 0x17B5 | 0x180B..=0x180D | 0x180F
+        // Variation selectors (Mn).
+        | 0xFE00..=0xFE0F | 0xE0100..=0xE01EF
+    )
+}
+
+/// ADR-0225 D3 steps 1-5: the value a name is stored and looked up as, with
+/// no accept/refuse decision. [`judge_channel_name`] checks this value; a path
+/// that only needs to *find* a channel by a typed name (the CLI, B3) folds with
+/// this and compares.
+///
+/// 1. NFC — decomposed Hangul from a Mac composes.
+/// 2. Fullwidth U+FF01..=U+FF5E → U+0021..=U+007E. Only this block: NFKC would
+///    also turn compatibility jamo into conjoining ones.
+/// 3. Blanks are Unicode `White_Space` (`char::is_whitespace`, the same set the
+///    old `trim()` dropped). Edge runs go; an inner run becomes one `-`, or
+///    nothing when a `-` or `_` already sits next to it.
+/// 4. Lowercase the whole string (default rules, not per char: a final capital
+///    sigma becomes `ς`).
+/// 5. NFC again, for the rare lowercase mapping that leaves a decomposed pair.
+pub fn fold_channel_name(raw: &str) -> String {
+    use unicode_normalization::UnicodeNormalization as _;
+
+    let folded: Vec<char> = raw
+        .nfc()
+        .map(|c| match u32::from(c) {
+            code @ 0xFF01..=0xFF5E => char::from_u32(code - 0xFEE0).unwrap_or(c),
+            _ => c,
+        })
+        .collect();
+    let is_separator = |c: char| c == '-' || c == '_';
+    let mut spaced = String::with_capacity(raw.len());
+    let mut index = 0;
+    while index < folded.len() {
+        let c = folded[index];
+        if !c.is_whitespace() {
+            spaced.push(c);
+            index += 1;
+            continue;
+        }
+        let run_start = index;
+        while index < folded.len() && folded[index].is_whitespace() {
+            index += 1;
+        }
+        let Some(&next) = folded.get(index) else {
+            break; // a trailing run: dropped
+        };
+        if run_start == 0 {
+            continue; // a leading run: dropped
+        }
+        let beside_separator =
+            spaced.chars().next_back().is_some_and(is_separator) || is_separator(next);
+        if !beside_separator {
+            spaced.push('-');
+        }
+    }
+    spaced.to_lowercase().nfc().collect()
+}
+
+/// ADR-0225 D1-D5: fold the name ([`fold_channel_name`]) and decide. Checks run
+/// length → hidden → characters → edges, so an over-long name is told it is too
+/// long and a name with a zero-width space is told that, not "bad character".
+pub fn judge_channel_name(raw: &str) -> Result<String, ChannelNameRefusal> {
+    use unicode_properties::{GeneralCategory, GeneralCategoryGroup, UnicodeGeneralCategory as _};
+
+    let value = fold_channel_name(raw);
     let length = value.chars().count();
-    if length == 0 || length > CHANNEL_NAME_MAX_CHARS {
-        return Err(ChannelSpecInvalid::NameLength);
+    if length == 0 {
+        return Err(ChannelNameRefusal::Required);
     }
-    let is_edge = |c: char| c.is_ascii_lowercase() || c.is_ascii_digit();
-    let is_inner = |c: char| is_edge(c) || c == '_' || c == '-';
-    let mut chars = value.chars();
-    let first = chars.next().expect("non-empty");
-    if !is_edge(first) {
-        return Err(ChannelSpecInvalid::NameCharset);
+    if length > CHANNEL_NAME_MAX_CHARS {
+        return Err(ChannelNameRefusal::TooLong);
     }
-    let last = value.chars().next_back().expect("non-empty");
-    if !is_edge(last) {
-        return Err(ChannelSpecInvalid::NameCharset);
+    let hidden = |c: char| {
+        matches!(
+            c.general_category(),
+            GeneralCategory::Control
+                | GeneralCategory::Format
+                | GeneralCategory::PrivateUse
+                | GeneralCategory::Surrogate
+        ) || is_invisible_letter_or_mark(c)
+    };
+    if value.chars().any(hidden) {
+        return Err(ChannelNameRefusal::Hidden);
     }
-    if !value.chars().all(is_inner) {
-        return Err(ChannelSpecInvalid::NameCharset);
+    // A combining mark must lean on a letter or number (directly, or through
+    // other marks) — never on `-`, `_` or the start of the name.
+    let mut after_base = false;
+    for c in value.chars() {
+        match c.general_category_group() {
+            GeneralCategoryGroup::Letter | GeneralCategoryGroup::Number => after_base = true,
+            GeneralCategoryGroup::Mark if after_base => {}
+            _ if c == '-' || c == '_' => after_base = false,
+            _ => return Err(ChannelNameRefusal::Unsupported),
+        }
+    }
+    let at_edge = |c: Option<char>| c.is_some_and(|c| c == '-' || c == '_');
+    if at_edge(value.chars().next()) || at_edge(value.chars().next_back()) {
+        return Err(ChannelNameRefusal::Edge);
     }
     Ok(value)
+}
+
+/// The channel name rule every path that stores or looks up a public/private
+/// channel by name goes through (ADR-0225): REST create, the agent actions
+/// (`channel.create`, `channel.member.add`, `hosted.channels.grant`). Letters
+/// and numbers of any script, `-` and `_`; blanks become `-`; lowercase; at
+/// most 80 code points. [`judge_channel_name`] is the same decision with the
+/// five reasons the shared vectors name; this answers with the two errors the
+/// API has always had.
+pub fn normalize_channel_name(raw: &str) -> Result<String, ChannelSpecInvalid> {
+    judge_channel_name(raw).map_err(ChannelNameRefusal::spec_invalid)
+}
+
+/// The channel name locked in both directions (ADR-0225 D10): it cannot be renamed and
+/// nothing becomes it. The welcome message no longer looks the channel up by this name
+/// (it follows the default-channel flag, ADR-0224 D6); the lock stays as decided.
+pub const LOCKED_CHANNEL_NAME: &str = "general";
+
+/// A channel as a rename leaves it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RenamedChannel {
+    pub id: Uuid,
+    pub workspace_id: Uuid,
+    pub kind: ChannelKind,
+    pub name: String,
+    pub topic: Option<String>,
+}
+
+/// A channel `PATCH …/channels/{ch}` may touch, read and row-locked by
+/// [`lock_channel_edit_target_in_tx`]. Each field piece (`name`, `browseListed`)
+/// judges its own kind rule on this one row.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ChannelEditTarget {
+    pub id: Uuid,
+    pub workspace_id: Uuid,
+    pub kind: ChannelKind,
+    pub name: String,
+    pub topic: Option<String>,
+    pub archived: bool,
+    pub browse_listed: bool,
+    pub is_default: bool,
+}
+
+impl ChannelEditTarget {
+    /// The `name` piece's rule: a live public or private channel.
+    pub fn renamable(&self) -> bool {
+        matches!(self.kind, ChannelKind::Public | ChannelKind::Private) && !self.archived
+    }
+
+    /// The `browseListed` piece's rule (ADR-0224 D2): a live public channel.
+    pub fn listable(&self) -> bool {
+        self.kind == ChannelKind::Public && !self.archived
+    }
+
+    /// The `isDefault` piece's rule (ADR-0224 D6): a live public channel, the same
+    /// kind rule as the browse switch (the table CHECK allows only public).
+    pub fn defaultable(&self) -> bool {
+        self.listable()
+    }
+}
+
+/// The one target condition of `PATCH …/channels/{ch}` (ADR-0224 D2, ADR-0225
+/// D10): a channel of this workspace that the actor is a live member of, **or**
+/// one open to people ([`crate::CHANNEL_OPEN_TO_PEOPLE_SQL`] — public, not
+/// archived, listed in browse). Anything else — a private channel or a public
+/// channel with browse off that the actor does not sit in, another workspace's
+/// channel, an unknown id — is `None`, so the route answers it exactly like an
+/// unknown id and an admin cannot learn of, or change, a channel they could not
+/// see. The row is locked (`FOR UPDATE`) for the pieces that follow.
+pub async fn lock_channel_edit_target_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    channel_id: Uuid,
+    actor: Uuid,
+) -> Result<Option<ChannelEditTarget>, DbError> {
+    let sql = format!(
+        "SELECT c.kind::text AS kind, c.name, c.topic, \
+                c.archived_at IS NOT NULL AS archived, c.browse_listed, c.is_default \
+           FROM channel c \
+          WHERE c.id = $1 AND c.workspace_id = $2 \
+            AND (EXISTS ( \
+                   SELECT 1 FROM membership m \
+                    WHERE m.channel_id = c.id AND m.workspace_id = c.workspace_id \
+                      AND m.member_id = $3 AND m.left_at IS NULL) \
+                 OR ({open})) \
+          FOR UPDATE OF c",
+        open = crate::channel_browse::CHANNEL_OPEN_TO_PEOPLE_SQL,
+    );
+    let row = sqlx::query(&sql)
+        .bind(channel_id)
+        .bind(workspace_id)
+        .bind(actor)
+        .fetch_optional(&mut *conn)
+        .await?;
+    let Some(row) = row else {
+        return Ok(None);
+    };
+    let kind_label: String = row.try_get("kind").map_err(DbError::from)?;
+    let kind = ChannelKind::from_db_label(&kind_label).ok_or_else(|| {
+        DbError::from(sqlx::Error::Decode(
+            format!("unknown channel_kind '{kind_label}'").into(),
+        ))
+    })?;
+    let name: Option<String> = row.try_get("name").map_err(DbError::from)?;
+    Ok(Some(ChannelEditTarget {
+        id: channel_id,
+        workspace_id,
+        kind,
+        name: name.unwrap_or_default(),
+        topic: row.try_get("topic").map_err(DbError::from)?,
+        archived: row.try_get("archived").map_err(DbError::from)?,
+        browse_listed: row.try_get("browse_listed").map_err(DbError::from)?,
+        is_default: row.try_get("is_default").map_err(DbError::from)?,
+    }))
+}
+
+/// What [`rename_channel_in_tx`] decided.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ChannelRenameOutcome {
+    /// The target is a DM / group DM or archived. The route answers it with the
+    /// same 404 as a channel outside the target condition.
+    NotFound,
+    /// The channel is `general`, or the new name is `general` (ADR-0225 D10).
+    GeneralLocked,
+    /// A live non-DM channel already carries the name.
+    NameTaken,
+    /// The folded name equals the stored one: nothing written.
+    Unchanged(RenamedChannel),
+    Renamed {
+        previous_name: String,
+        channel: RenamedChannel,
+    },
+}
+
+/// Rename a public or private channel (ADR-0225 D10). `target` comes from
+/// [`lock_channel_edit_target_in_tx`] in the same transaction (the row is locked
+/// and inside the target condition); `new_name` must already have passed
+/// [`normalize_channel_name`]. The caller has checked that the actor is a
+/// workspace owner or admin. Every refusal comes before the only write.
+///
+/// Two renames that race to the same name both pass the pre-check; the loser
+/// fails at the `channel_name_uniq` index with SQLSTATE 23505, which
+/// [`is_channel_name_conflict`] recognises so the route can answer 409.
+pub async fn rename_channel_in_tx(
+    conn: &mut PgConnection,
+    target: &ChannelEditTarget,
+    new_name: &str,
+) -> Result<ChannelRenameOutcome, DbError> {
+    if !target.renamable() {
+        return Ok(ChannelRenameOutcome::NotFound);
+    }
+    let channel_id = target.id;
+    let workspace_id = target.workspace_id;
+    let old_name = target.name.clone();
+    let channel = |name: &str| RenamedChannel {
+        id: channel_id,
+        workspace_id,
+        kind: target.kind,
+        name: name.to_string(),
+        topic: target.topic.clone(),
+    };
+
+    if old_name == new_name {
+        return Ok(ChannelRenameOutcome::Unchanged(channel(&old_name)));
+    }
+    // Both names go through the create route's own fold, so a stored legacy
+    // spelling (capitals, fullwidth, padded) is locked like the plain one.
+    if fold_channel_name(&old_name) == LOCKED_CHANNEL_NAME
+        || fold_channel_name(new_name) == LOCKED_CHANNEL_NAME
+    {
+        return Ok(ChannelRenameOutcome::GeneralLocked);
+    }
+    let taken: bool = sqlx::query_scalar(
+        "SELECT EXISTS ( \
+           SELECT 1 FROM channel other \
+            WHERE other.workspace_id = $1 AND other.kind <> 'dm' \
+              AND other.archived_at IS NULL AND other.id <> $2 \
+              AND lower(other.name) = lower($3))",
+    )
+    .bind(workspace_id)
+    .bind(channel_id)
+    .bind(new_name)
+    .fetch_one(&mut *conn)
+    .await?;
+    if taken {
+        return Ok(ChannelRenameOutcome::NameTaken);
+    }
+    sqlx::query("UPDATE channel SET name = $3 WHERE id = $1 AND workspace_id = $2")
+        .bind(channel_id)
+        .bind(workspace_id)
+        .bind(new_name)
+        .execute(&mut *conn)
+        .await?;
+    Ok(ChannelRenameOutcome::Renamed {
+        previous_name: old_name,
+        channel: channel(new_name),
+    })
+}
+
+/// What [`set_channel_browse_listed_in_tx`] decided.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BrowseListedChange {
+    /// Not a live public channel (private, DM or archived): nothing written.
+    NotListable,
+    /// The flag already has that value: nothing written.
+    Unchanged,
+    /// The flag was switched.
+    Changed { previous: bool },
+}
+
+/// Switch `channel.browse_listed` (ADR-0224 D2) on a target from
+/// [`lock_channel_edit_target_in_tx`]. The kind rule is judged before the
+/// "already that value" shortcut, so a private channel is refused whichever
+/// value is asked. Memberships are not touched: people already in a channel
+/// stay in it when it leaves browse.
+pub async fn set_channel_browse_listed_in_tx(
+    conn: &mut PgConnection,
+    target: &ChannelEditTarget,
+    listed: bool,
+) -> Result<BrowseListedChange, DbError> {
+    if !target.listable() {
+        return Ok(BrowseListedChange::NotListable);
+    }
+    if target.browse_listed == listed {
+        return Ok(BrowseListedChange::Unchanged);
+    }
+    sqlx::query("UPDATE channel SET browse_listed = $3 WHERE id = $1 AND workspace_id = $2")
+        .bind(target.id)
+        .bind(target.workspace_id)
+        .bind(listed)
+        .execute(&mut *conn)
+        .await?;
+    Ok(BrowseListedChange::Changed {
+        previous: target.browse_listed,
+    })
+}
+
+/// What [`check_channel_default_change_in_tx`] decided. Nothing is written.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DefaultChannelCheck {
+    /// Not a live public channel (private, DM or archived).
+    NotDefaultable,
+    /// Turning off the workspace's last live default channel.
+    LastDefault,
+    /// The flag already has that value.
+    Unchanged,
+    /// The flag will be switched; [`set_channel_default_in_tx`] writes it.
+    Change { previous: bool },
+}
+
+/// Judge `isDefault` (ADR-0224 D6) on a target from
+/// [`lock_channel_edit_target_in_tx`], before the request's first write. The kind
+/// rule comes before the "already that value" shortcut, like the browse switch.
+///
+/// Turning a default channel off must leave another live default channel, or a
+/// new person would have no channel to land in. Two requests that each turn off a
+/// different one of two defaults would both count "one left" and leave none, so
+/// the count runs under a per-workspace transaction advisory lock, taken after
+/// the channel row lock by every caller (one order, no cycle) and held to the
+/// commit. The count reads committed rows only, so the second request sees the
+/// first one's result. Turning a default on needs no lock and adds nobody to the
+/// channel: only people who join later land in it.
+pub async fn check_channel_default_change_in_tx(
+    conn: &mut PgConnection,
+    target: &ChannelEditTarget,
+    is_default: bool,
+) -> Result<DefaultChannelCheck, DbError> {
+    if !target.defaultable() {
+        return Ok(DefaultChannelCheck::NotDefaultable);
+    }
+    if target.is_default == is_default {
+        return Ok(DefaultChannelCheck::Unchanged);
+    }
+    if !is_default {
+        sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1, 5841))")
+            .bind(format!("channel_default:{}", target.workspace_id))
+            .execute(&mut *conn)
+            .await?;
+        let others: i64 = sqlx::query_scalar(
+            "SELECT count(*) FROM channel \
+              WHERE workspace_id = $1 AND is_default AND kind = 'public' \
+                AND archived_at IS NULL AND id <> $2",
+        )
+        .bind(target.workspace_id)
+        .bind(target.id)
+        .fetch_one(&mut *conn)
+        .await?;
+        if others == 0 {
+            return Ok(DefaultChannelCheck::LastDefault);
+        }
+    }
+    Ok(DefaultChannelCheck::Change {
+        previous: target.is_default,
+    })
+}
+
+/// Write the `isDefault` switch [`check_channel_default_change_in_tx`] approved.
+/// Memberships are not touched in either direction.
+pub async fn set_channel_default_in_tx(
+    conn: &mut PgConnection,
+    target: &ChannelEditTarget,
+    is_default: bool,
+) -> Result<(), DbError> {
+    sqlx::query("UPDATE channel SET is_default = $3 WHERE id = $1 AND workspace_id = $2")
+        .bind(target.id)
+        .bind(target.workspace_id)
+        .bind(is_default)
+        .execute(&mut *conn)
+        .await?;
+    Ok(())
+}
+
+/// Whether a rename failed on the `channel_name_uniq` index (two requests
+/// racing for one name).
+pub fn is_channel_name_conflict(error: &DbError) -> bool {
+    match error {
+        DbError::Sqlx(sqlx::Error::Database(db)) => {
+            db.is_unique_violation() && db.constraint() == Some("channel_name_uniq")
+        }
+        _ => false,
+    }
 }
 
 /// Trim a topic; an empty one is `None`, not `Some("")` — Swift reads a blank
@@ -712,6 +1181,12 @@ pub struct ChannelSummary {
     pub created_by: Option<Uuid>,
     /// Milliseconds since the epoch, or `None` for a live channel.
     pub archived_at_ms: Option<i64>,
+    /// `channel.browse_listed` — listed in channel browse (ADR-0224 D2). Only a
+    /// public channel can carry `true`.
+    pub browse_listed: bool,
+    /// `channel.is_default` — a person joining by invite lands here (ADR-0224
+    /// D6·D7). Only a public channel can carry `true`.
+    pub is_default: bool,
     /// The CALLING member's push-suppression preference for this channel.
     pub muted: bool,
     /// End of the CALLING member's timed mute, epoch ms — set **only while a timed mute is in
@@ -734,9 +1209,75 @@ fn decode_channel_summary(row: &sqlx::postgres::PgRow) -> Result<ChannelSummary,
         member_ids: row.try_get("member_ids")?,
         created_by: row.try_get("created_by")?,
         archived_at_ms: row.try_get("archived_at_ms")?,
+        browse_listed: row.try_get("browse_listed")?,
+        is_default: row.try_get("is_default")?,
         muted: row.try_get("muted")?,
         muted_until_ms: row.try_get("muted_until_ms")?,
     })
+}
+
+/// The columns of one [`ChannelSummary`] row over the channel alias `c`, with the
+/// viewing member bound as `$2` (their own mute). Shared by the channel list and
+/// [`channel_summary_in_tx`] so the two answers cannot drift apart.
+const CHANNEL_SUMMARY_COLUMNS: &str = "c.id, \
+                c.workspace_id, \
+                c.kind::text AS kind, \
+                c.name, \
+                c.topic, \
+                c.dm_key, \
+                c.created_by, \
+                CASE WHEN c.archived_at IS NULL THEN NULL \
+                     ELSE floor(extract(epoch from c.archived_at) * 1000)::bigint \
+                END AS archived_at_ms, \
+                c.browse_listed, \
+                c.is_default, \
+                CASE WHEN c.kind = 'dm' THEN COALESCE(( \
+                       SELECT array_agg(participant.member_id ORDER BY participant.member_id::text) \
+                         FROM membership participant \
+                        WHERE participant.channel_id = c.id \
+                          AND participant.left_at IS NULL \
+                     ), '{}'::uuid[]) \
+                     ELSE '{}'::uuid[] \
+                END AS member_ids, \
+                EXISTS ( \
+                  SELECT 1 FROM notification_pref np \
+                   WHERE np.workspace_id = c.workspace_id \
+                     AND np.channel_id = c.id \
+                     AND np.member_id = $2 \
+                     AND (np.muted_until IS NULL OR np.muted_until > now()) \
+                ) AS muted, \
+                ( SELECT floor(extract(epoch from np.muted_until) * 1000)::bigint \
+                    FROM notification_pref np \
+                   WHERE np.workspace_id = c.workspace_id \
+                     AND np.channel_id = c.id \
+                     AND np.member_id = $2 \
+                     AND np.muted_until > now() \
+                ) AS muted_until_ms";
+
+/// One channel of `workspace_id` in the channel list's row shape, **without** the
+/// list's membership join: the caller has already decided the viewer may see it
+/// (`PATCH …/channels/{ch}` answers an admin who edits a channel open to people
+/// without sitting in it). `muted` is the viewer's own preference.
+pub async fn channel_summary_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    viewer_member_id: Uuid,
+    channel_id: Uuid,
+) -> Result<Option<ChannelSummary>, DbError> {
+    let sql = format!(
+        "SELECT {columns} FROM channel c WHERE c.workspace_id = $1 AND c.id = $3",
+        columns = CHANNEL_SUMMARY_COLUMNS,
+    );
+    let row = sqlx::query(&sql)
+        .bind(workspace_id)
+        .bind(viewer_member_id)
+        .bind(channel_id)
+        .fetch_optional(&mut *conn)
+        .await?;
+    row.as_ref()
+        .map(decode_channel_summary)
+        .transpose()
+        .map_err(DbError::from)
 }
 
 /// Every channel `member_id` currently belongs to in `workspace_id`, ordered the
@@ -793,38 +1334,7 @@ pub async fn list_workspace_channels_within(
         ""
     };
     let sql = format!(
-        "SELECT c.id, \
-                c.workspace_id, \
-                c.kind::text AS kind, \
-                c.name, \
-                c.topic, \
-                c.dm_key, \
-                c.created_by, \
-                CASE WHEN c.archived_at IS NULL THEN NULL \
-                     ELSE floor(extract(epoch from c.archived_at) * 1000)::bigint \
-                END AS archived_at_ms, \
-                CASE WHEN c.kind = 'dm' THEN COALESCE(( \
-                       SELECT array_agg(participant.member_id ORDER BY participant.member_id::text) \
-                         FROM membership participant \
-                        WHERE participant.channel_id = c.id \
-                          AND participant.left_at IS NULL \
-                     ), '{{}}'::uuid[]) \
-                     ELSE '{{}}'::uuid[] \
-                END AS member_ids, \
-                EXISTS ( \
-                  SELECT 1 FROM notification_pref np \
-                   WHERE np.workspace_id = c.workspace_id \
-                     AND np.channel_id = c.id \
-                     AND np.member_id = $2 \
-                     AND (np.muted_until IS NULL OR np.muted_until > now()) \
-                ) AS muted, \
-                ( SELECT floor(extract(epoch from np.muted_until) * 1000)::bigint \
-                    FROM notification_pref np \
-                   WHERE np.workspace_id = c.workspace_id \
-                     AND np.channel_id = c.id \
-                     AND np.member_id = $2 \
-                     AND np.muted_until > now() \
-                ) AS muted_until_ms \
+        "SELECT {columns} \
            FROM channel c \
            JOIN membership actor_membership \
              ON actor_membership.channel_id = c.id \
@@ -839,7 +1349,8 @@ pub async fn list_workspace_channels_within(
                    END, \
                    lower(COALESCE(c.name, '')), \
                    c.id \
-          LIMIT $4"
+          LIMIT $4",
+        columns = CHANNEL_SUMMARY_COLUMNS,
     );
     let mut query = sqlx::query(&sql)
         .bind(workspace_id)
@@ -903,8 +1414,10 @@ mod tests {
         );
     }
 
+    /// The old-rule edges the shared vectors (`tests/channel_name_vectors.rs`)
+    /// do not list, plus the two answers ADR-0225 changed.
     #[test]
-    fn channel_names_follow_the_swift_charset_and_edges() {
+    fn channel_names_keep_the_old_edges_and_take_any_script() {
         assert_eq!(normalize_channel_name("  General  "), Ok("general".into()));
         assert_eq!(normalize_channel_name("a"), Ok("a".into()));
         assert_eq!(normalize_channel_name("9"), Ok("9".into()));
@@ -913,7 +1426,7 @@ mod tests {
             Ok("eng-team_2".into())
         );
 
-        // Edges must be alphanumeric; the middle may carry - and _.
+        // Edges must be a letter or number; the middle may carry - and _.
         for rejected in ["-lead", "lead-", "_x", "x_", "-", "_"] {
             assert_eq!(
                 normalize_channel_name(rejected),
@@ -921,14 +1434,20 @@ mod tests {
                 "{rejected} must be refused"
             );
         }
+        // ADR-0225 D1: letters of any script (the old rule refused this).
+        assert_eq!(normalize_channel_name("도그푸딩"), Ok("도그푸딩".into()));
+        // ADR-0225 D2: an inner blank becomes `-` (the old rule refused this).
+        assert_eq!(normalize_channel_name("a b"), Ok("a-b".into()));
+        // ADR-0225 D3 step 5: a pair only the fullwidth fold and lowercasing
+        // make composable (fullwidth E + combining acute) is composed again.
+        // No row of the shared vectors needs step 5, so it is pinned here.
         assert_eq!(
-            normalize_channel_name("도그푸딩"),
-            Err(ChannelSpecInvalid::NameCharset),
-            "the charset is ASCII; a non-ASCII name is refused by name, not silently mangled"
+            normalize_channel_name("\u{FF25}\u{301}quipe"),
+            Ok("\u{E9}quipe".into())
         );
         assert_eq!(
-            normalize_channel_name("a b"),
-            Err(ChannelSpecInvalid::NameCharset)
+            normalize_channel_name("a!").unwrap_err().to_string(),
+            "channel name must use letters, numbers, hyphen, or underscore, and start with a letter or number"
         );
 
         // Length is answered before the charset, so an over-long name is told
@@ -1069,5 +1588,52 @@ mod tests {
             "the bound is characters, not bytes"
         );
         assert!(normalize_channel_topic(Some(&"긴".repeat(CHANNEL_TOPIC_MAX_CHARS))).is_ok());
+    }
+
+    /// ADR-0225 D4, second bullet: every letter or mark that renders as nothing
+    /// is refused *as hidden*, one code point at a time. The list is a `matches!`
+    /// of ranges, so a test over whole names cannot tell which entry is missing;
+    /// this walks each listed code point and each end of each range. Each one is
+    /// a letter or a mark, so without its entry the charset check would take it
+    /// — dropping any single entry makes its row below accept the name.
+    #[test]
+    fn every_listed_invisible_letter_or_mark_is_refused_as_hidden() {
+        let listed: Vec<u32> = [
+            0x115F_u32, 0x1160, 0x3164, 0xFFA0, 0x034F, 0x17B4, 0x17B5, 0x180F,
+        ]
+        .into_iter()
+        .chain(0x180B..=0x180D)
+        .chain(0xFE00..=0xFE0F)
+        .chain(0xE0100..=0xE01EF)
+        .collect();
+        assert_eq!(listed.len(), 8 + 3 + 16 + 240);
+        for code in listed {
+            let c = char::from_u32(code).expect("a scalar value");
+            let name = format!("가{c}나");
+            assert_eq!(
+                judge_channel_name(&name),
+                Err(ChannelNameRefusal::Hidden),
+                "U+{code:04X} must be refused as hidden"
+            );
+        }
+    }
+
+    /// The neighbours of each listed range are *not* hidden: the list is exact,
+    /// so a range widened by one (U+FE10, U+E01F0, U+1161 …) is caught too.
+    /// U+180E is left out: it is a format character, hidden by category rather than by
+    /// the list.
+    #[test]
+    fn the_code_points_next_to_the_invisible_list_are_ordinary() {
+        for code in [
+            0x115E_u32, 0x1161, 0x3163, 0x3165, 0xFF9F, 0xFFA1, 0x034E, 0x0350, 0x17B3, 0x17B6,
+            0x180A, 0xFE10, 0xE00FF, 0xE01F0,
+        ] {
+            let c = char::from_u32(code).expect("a scalar value");
+            assert_ne!(
+                judge_channel_name(&format!("가{c}나")),
+                Err(ChannelNameRefusal::Hidden),
+                "U+{code:04X} is not on the invisible list"
+            );
+        }
     }
 }

@@ -11,7 +11,7 @@ oort es un mensajero para equipos que funciona en tu propio servidor. Las person
 
 ## Lo que ya funciona
 
-La versión actual es [v0.1.45](https://github.com/yeomyeonggeori/oort/releases/tag/v0.1.45) (la imagen del servidor y la web). Cada versión está en el [registro de cambios](CHANGELOG.md).
+La versión actual es [v0.1.46](https://github.com/yeomyeonggeori/oort/releases/tag/v0.1.46) (la imagen del servidor y la web). Cada versión está en el [registro de cambios](CHANGELOG.md).
 
 - Canales, hilos, mensajes directos, reacciones, emoticonos y búsqueda, en la web, la app de escritorio para macOS y la app para iPhone
 - Agentes como miembros: menciona a uno, sigue su ejecución en el canal, detenla y aprueba o rechaza lo que pida hacer

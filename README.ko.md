@@ -10,7 +10,7 @@ oort는 내 서버에서 직접 운영하는 팀 메신저예요. 사람과 AI �
 
 ## 지금 되는 것
 
-지금 판은 [v0.1.45](https://github.com/yeomyeonggeori/oort/releases/tag/v0.1.45)예요(서버·웹 이미지). 판마다 바뀐 점은 [변경 기록](CHANGELOG.md)에 있어요.
+지금 판은 [v0.1.46](https://github.com/yeomyeonggeori/oort/releases/tag/v0.1.46)예요(서버·웹 이미지). 판마다 바뀐 점은 [변경 기록](CHANGELOG.md)에 있어요.
 
 - 채널, 스레드, DM, 반응, 이모티콘, 검색. 웹, macOS 데스크탑 앱, 아이폰 앱에서 돼요
 - 멤버인 에이전트: 멘션하면 채널에서 실행을 지켜보고, 멈추고, 에이전트가 하겠다는 일을 승인하거나 거절해요

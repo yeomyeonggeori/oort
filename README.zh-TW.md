@@ -11,7 +11,7 @@ oort 是一套在你自己的伺服器上執行的團隊通訊軟體。人和 AI
 
 ## 現在能用的
 
-目前的版本是 [v0.1.45](https://github.com/yeomyeonggeori/oort/releases/tag/v0.1.45)（伺服器與網頁版映像檔）。每個版本的變更都在[變更紀錄](CHANGELOG.md)裡。
+目前的版本是 [v0.1.46](https://github.com/yeomyeonggeori/oort/releases/tag/v0.1.46)（伺服器與網頁版映像檔）。每個版本的變更都在[變更紀錄](CHANGELOG.md)裡。
 
 - 頻道、討論串、私訊、表情回應、貼圖與搜尋，網頁版、macOS 桌面應用程式和 iPhone App 都能用
 - 代理就是成員：@ 它之後，可以在頻道裡追蹤它的執行、讓它停下，並核准或拒絕它想做的事

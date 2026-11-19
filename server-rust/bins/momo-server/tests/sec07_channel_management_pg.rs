@@ -826,6 +826,110 @@ async fn plain_member_cannot_create_a_channel() {
     );
 }
 
+/// ADR-0225 D6 (#5827): the duplicate guard compares the **stored** name, and
+/// the stored name is the folded one, so a spelling that folds to a live
+/// channel's name is a 409 and never a second channel: decomposed against
+/// composed Hangul, fullwidth against ASCII, capitals, and a blank against `-`.
+/// The server runs as the non-bypass `momo_app` role; the same spelling in a
+/// second workspace is a 201 (the guard is per tenant). A hidden character is
+/// still a plain 400 with the character sentence (the error shape is unchanged).
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
+async fn a_name_that_folds_to_a_live_channel_name_is_a_conflict_not_a_second_channel() {
+    let _guard = test_lock().await;
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let base = start_server(momo_app_pool().await).await;
+    let http = reqwest::Client::new();
+    let ws = seed(&su, "fold").await;
+    let other = seed(&su, "fold-other").await;
+    let owner = login(&http, &base, ws.id, &ws.owner).await;
+    let other_owner = login(&http, &base, other.id, &other.owner).await;
+
+    // Decomposed (NFD) Hangul for the composed syllables of "hangul".
+    let nfd_hangul = "\u{1112}\u{1161}\u{11AB}\u{1100}\u{1173}\u{11AF}";
+    let nfc_hangul = "\u{D55C}\u{AE00}";
+    // Fullwidth Q A - r o o m.
+    let fullwidth_qa_room = "\u{FF31}\u{FF21}\u{FF0D}\u{FF52}\u{FF4F}\u{FF4F}\u{FF4D}";
+    // "design review" in Hangul, with an ASCII blank / an ideographic space.
+    let design_review_blank = "\u{B514}\u{C790}\u{C778} \u{B9AC}\u{BDF0}";
+    let design_review_ideographic = "\u{B514}\u{C790}\u{C778}\u{3000}\u{B9AC}\u{BDF0}";
+    let design_review_stored = "\u{B514}\u{C790}\u{C778}-\u{B9AC}\u{BDF0}";
+
+    // (first spelling, the name it is stored as, later spellings of the same name)
+    let cases: [(&str, &str, Vec<&str>); 3] = [
+        (nfd_hangul, nfc_hangul, vec![nfc_hangul, nfd_hangul]),
+        (
+            fullwidth_qa_room,
+            "qa-room",
+            vec!["qa-room", "QA-Room", " Qa\u{3000}Room "],
+        ),
+        (
+            design_review_blank,
+            design_review_stored,
+            vec![design_review_stored, design_review_ideographic],
+        ),
+    ];
+
+    for (first, stored, later) in &cases {
+        let (status, body) = create_channel(&http, &base, ws.id, &owner, "public", first).await;
+        assert_eq!(status, 201, "{} creates: {body}", first.escape_unicode());
+        assert_eq!(
+            body["channel"]["name"],
+            json!(stored),
+            "the answer carries the stored name"
+        );
+        assert_eq!(
+            channel_count_named(&su, ws.id, stored).await,
+            1,
+            "the row holds the folded name byte for byte"
+        );
+        for spelling in later {
+            let (status, body) =
+                create_channel(&http, &base, ws.id, &owner, "public", spelling).await;
+            assert_eq!(
+                status,
+                409,
+                "{} folds to {}: {body}",
+                spelling.escape_unicode(),
+                stored.escape_unicode()
+            );
+            assert_eq!(error_message(&body), "channel name already exists");
+        }
+        assert_eq!(
+            channel_count_named(&su, ws.id, stored).await,
+            1,
+            "a refused spelling adds no second row"
+        );
+
+        let (status, body) =
+            create_channel(&http, &base, other.id, &other_owner, "public", first).await;
+        assert_eq!(status, 201, "another workspace may hold the name: {body}");
+        assert_eq!(body["channel"]["name"], json!(stored));
+    }
+    assert_eq!(
+        channel_count(&su, ws.id, "public").await,
+        3,
+        "three names, three channels"
+    );
+
+    let (status, body) = create_channel(
+        &http,
+        &base,
+        ws.id,
+        &owner,
+        "public",
+        "\u{ACF5}\u{200B}\u{C9C0}",
+    )
+    .await;
+    assert_eq!(status, 400, "a zero-width space is refused: {body}");
+    assert_eq!(
+        error_message(&body),
+        "channel name must use letters, numbers, hyphen, or underscore, and start with a letter or number"
+    );
+    assert_eq!(channel_count(&su, ws.id, "public").await, 3);
+}
+
 /// map-B #35, 39-43: the human add -> remove -> send(403) -> re-add -> send(201)
 /// sequence over HTTP, with the membership rows and `channel_seq` checked after
 /// each step. The refused send must not consume a seq number: the first message

@@ -1,6 +1,7 @@
 # ADR-0216: 명령줄·AI 도구 접근 — 사람 개발자 토큰, 별도 사람 MCP, `oort` CLI (브라우저 승인 먼저, 장치 코드는 SSH용 후속)
 
 - Status: **Accepted** (2026-10-27, owner 결정 「권장대로 해봐」 — #4617 이슈 코멘트 2026-10-27). 아래 「owner 결정 5개」가 그 권장안이에요. 이 ADR이 새로 정한 것(planner 재량)은 끝의 「결재 기록」 표에 모두 적었어요. 문서만 바꾸는 PR이고, 구현은 이 ADR을 정본으로 인용하는 이슈들(#4660·#4661·#4662·#4663)의 몫이에요.
+- 증보: **2026-11-14 (#5787) — 두 문이 `clientInfo`의 모르는 키를 받고 읽지 않아요** (owner 2026-11-14 승인: QA 제안서 7번 「Claude Code가 직접 붙게 서버 검사 풀기」). 파일 끝 「증보 (#5787)」 절.
 - Date: 2026-10-27
 - Deciders: 성재
 - 기안: Sonnet 5.5 엔진 워커 (#4617)
@@ -524,3 +525,9 @@ D6 (나)의 서버 절반을 구현했어요. 「봉인은 구현 이슈에서�
 - 공개 token·revoke 라우트에는 속도 제한이 없어요(안정 id가 DB 조회 뒤에야 알려져요). 코드는 256비트라 추측 대상은 아니지만 DB 조회 증폭 한도는 후속이에요.
 - 정지·제거·탈퇴의 `revoke_member_tokens_in_tx`는 #3109 sweep 잠금 없이 scan 순서로 `token` 행을 잡아서, 같은 멤버의 refresh 회전(sweep 잠금 + id 순)과 겹치면 PostgreSQL이 한쪽을 `40P01`로 중단시킬 수 있어요(재시도하면 되고 상태 불일치는 없어요). 이 ADR이 그 경로를 바꾸지 않는다고 못 박았고 이 구현도 바꾸지 않았어요. 잠금 순서 정리와 교착 시험은 후속이에요.
 - 소각·만료된 원장 행 청소, 「고른 채널만」 프리셋, 새 계보 알림, 동의 문구 다듬기, `docs/security/claims.yaml` 등재, flag 개방과 runtime proof.
+
+## 증보 (#5787) — 두 문이 `clientInfo`의 모르는 키를 받고 읽지 않아요
+
+- Status: **Accepted** (owner 2026-11-14 승인 — QA 제안서 7번 「Claude Code가 직접 붙게 서버 검사 풀기」, 「나머진 다 추천으로 해줘」). 근거는 owner 2026-11-13 「QA 관련해서는 MCP가 있는거 아니야 ? 왜 저렇게 복잡하게 가야하는거야 ?」예요. 공개 API가 받는 범위가 넓어지는 변경이라 이 절이 머지 조건이에요(ADR-0100).
+
+위 「구현 메모 (#4662)」의 실측대로 Claude Code는 `clientInfo`에 사양의 `description`·`websiteUrl`을 함께 보내고, 문(`momo-mcp`의 `valid_implementation_info`)은 `name`·`title`·`version` 밖의 키가 있으면 `-32602`로 거절했어요. 그래서 설정 카드가 안내하는 `.mcp.json`(`type: http`, 값은 환경 변수)으로 Claude Code를 붙이면 손잡기에서 끊겼고, 붙는 길은 `clientInfo`를 세 키로 줄여 보내는 `oort mcp` 브리지뿐이었어요(바이너리는 아직 배포 전). **이제 문은 모르는 키를 받고, 그 값을 읽지 않아요.** 값을 꺼내는 코드가 없으니 응답·로그·감사·DB 어디에도 남지 않아요(거절 진단 로그 `request_shape`는 원래 중첩 키 이름을 싣지 않고, 호출 기록 `call_shape`·`auth.dev_token.used`는 닫힌 어휘이고, 호스티드 pairing은 원래 `name`·`version`도 저장하지 않아요). **그대로인 것**: 세 키의 모양과 길이(`name` 1–128·`version` 1–64 바이트는 필수, `title` 1–128은 선택), `clientInfo`가 객체여야 한다는 것, legacy `initialize`의 `params` 닫힌 키 목록과 modern `_meta`의 버전·capabilities 검사, 파싱 직후 본문 전체에 거는 요청 상한(본문 64 KiB와 문자열·개수·깊이 상한 — 모르는 키 안에도 그대로 걸려요), 인증·문·토큰 범위·도구 목록. **두 문에 같은 규칙**이에요. Agent Port(`/v1/mcp/agent-port`)와 사람 MCP(`/v1/mcp/me`)는 같은 wire core를 쓰고, 두 문 모두 `clientInfo`는 권한의 근거가 아닌 표시용 힌트예요(ADR-0162 D6). 사양을 따르는 다른 클라이언트도 같은 키를 보내니 문마다 다르게 둘 까닭이 없어요. 공개 계약 `AgentPortClientInfo`(두 문이 같이 씀)는 `additionalProperties: true`로 고치고 이 규칙을 적었어요. 시험은 `server-rust/crates/momo-mcp/tests/client_info.rs`(두 문 × 두 시대, 사보타주로 빨강 확인)와 `human_mcp_conformance_pg.rs`의 Claude Code 손잡기 시험(실 PG, 감사 행 전수 검사)이에요. 위 「② 헤더 도우미」를 막던 서버 쪽 이유도 이것으로 풀렸지만, `oort` 바이너리 배포(D11)와 `OORT_CLI_VERIFIED` 켜기는 이 증보 밖이에요.

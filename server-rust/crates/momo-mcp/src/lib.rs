@@ -1257,12 +1257,23 @@ fn modern_meta_version(object: &serde_json::Map<String, Value>) -> Option<&str> 
         .as_str()
 }
 
+/// The MCP `Implementation` a client describes itself with — legacy `initialize`'s
+/// `params.clientInfo` and the modern `_meta` `io.modelcontextprotocol/clientInfo`, on both doors
+/// (Agent Port and the human MCP), which share this wire core.
+///
+/// Only the three keys this server knows are looked at, and each keeps its closed shape: `name`
+/// (required, 1–128 bytes), `version` (required, 1–64 bytes), `title` (optional, 1–128 bytes).
+/// Any other key — the spec's own `description`, `websiteUrl`, `icons`, or a vendor's — is
+/// accepted and **never read**: nothing below looks it up, so its value cannot reach an answer, a
+/// log or an audit row. Its size is held by the request-wide bounds ([`MAX_BODY_BYTES`] and
+/// `validate_bounds`), which have already run over the whole body by the time this is called
+/// (#5787, ADR-0216 증보 2026-11-14 — before it, an unknown key was a `-32602` and Claude Code,
+/// which sends `description` and `websiteUrl`, could not connect directly).
 fn valid_implementation_info(value: &Value) -> bool {
     let Some(info) = value.as_object() else {
         return false;
     };
-    has_only_keys(info, &["name", "title", "version"])
-        && matches!(info.get("name"), Some(Value::String(name)) if !name.is_empty() && name.len() <= 128)
+    matches!(info.get("name"), Some(Value::String(name)) if !name.is_empty() && name.len() <= 128)
         && matches!(info.get("version"), Some(Value::String(version)) if !version.is_empty() && version.len() <= 64)
         && !matches!(info.get("title"), Some(value) if !matches!(value, Value::String(title) if !title.is_empty() && title.len() <= 128))
 }

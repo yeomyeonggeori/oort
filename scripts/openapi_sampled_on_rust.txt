@@ -199,6 +199,10 @@ GET /v1/workspaces/{workspaceId}/roster
 GET /v1/workspaces/{workspaceId}/members
 GET /v1/workspaces/{workspaceId}/channels
 POST /v1/workspaces/{workspaceId}/channels
+PATCH /v1/workspaces/{workspaceId}/channels/{channelId}
+GET /v1/workspaces/{workspaceId}/channels/browse
+POST /v1/workspaces/{workspaceId}/channels/{channelId}/members/me
+GET /v1/workspaces/{workspaceId}/channels/{channelId}/preview
 PUT /v1/workspaces/{workspaceId}/channels/{channelId}/notification-pref
 
 # ── 허들 (ADR-0122 / HD-1) ────────────────────────────────────────────────

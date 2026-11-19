@@ -438,6 +438,46 @@ mod tests {
         assert_eq!(host_id_from_authorization("MomoHost"), None);
     }
 
+    /// ADR-0225 D10: a signed work host is not a person and cannot edit a channel — with any
+    /// verb. (Third door beside the agent and developer-token tables.)
+    #[test]
+    fn a_signed_host_cannot_edit_a_channel() {
+        let ws = Uuid::from_u128(1);
+        let channel = Uuid::from_u128(2);
+        let path = format!("/v1/workspaces/{ws}/channels/{channel}");
+        for method in [
+            Method::PATCH,
+            Method::PUT,
+            Method::POST,
+            Method::DELETE,
+            Method::GET,
+        ] {
+            assert!(!is_allowed_signed_path(&method, &path), "{method}");
+        }
+    }
+
+    /// ADR-0224 D8: a signed work host is not a person and cannot browse or join public
+    /// channels — with any verb.
+    #[test]
+    fn a_signed_host_cannot_browse_or_join_channels() {
+        let ws = Uuid::from_u128(1);
+        let channel = Uuid::from_u128(2);
+        for path in [
+            format!("/v1/workspaces/{ws}/channels/browse"),
+            format!("/v1/workspaces/{ws}/channels/{channel}/members/me"),
+        ] {
+            for method in [
+                Method::GET,
+                Method::POST,
+                Method::PUT,
+                Method::PATCH,
+                Method::DELETE,
+            ] {
+                assert!(!is_allowed_signed_path(&method, &path), "{method} {path}");
+            }
+        }
+    }
+
     #[test]
     fn signed_allow_list_covers_the_ported_workd_loop_and_the_method_is_part_of_the_rule() {
         let ws = Uuid::from_u128(1);

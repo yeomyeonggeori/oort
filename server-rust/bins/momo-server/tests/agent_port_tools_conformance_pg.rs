@@ -389,13 +389,17 @@ async fn seed(pool: &PgPool) -> Fixture {
     let channel = Uuid::new_v4();
     let private_channel = Uuid::new_v4();
     for (id, name) in [(channel, "approved"), (private_channel, "unapproved")] {
-        sqlx::query("INSERT INTO channel(id, workspace_id, kind, name) VALUES($1,$2,'public',$3)")
-            .bind(id)
-            .bind(workspace)
-            .bind(format!("{name}-{}", id.simple()))
-            .execute(pool)
-            .await
-            .expect("seed channel");
+        // Listed in channel browse, as a new public channel is (ADR-0224 D2): open to people (D13).
+        sqlx::query(
+            "INSERT INTO channel(id, workspace_id, kind, name, browse_listed) \
+             VALUES($1,$2,'public',$3,true)",
+        )
+        .bind(id)
+        .bind(workspace)
+        .bind(format!("{name}-{}", id.simple()))
+        .execute(pool)
+        .await
+        .expect("seed channel");
         sqlx::query("INSERT INTO channel_seq(channel_id, workspace_id, last_seq) VALUES($1,$2,0)")
             .bind(id)
             .bind(workspace)
@@ -8839,7 +8843,9 @@ async fn a_stale_or_unsound_channel_proposal_changes_nothing() {
         json!({"name": "ok-name", "memberHandles": ["Not A Handle"]}),
         json!({"name": "ok-name", "memberHandles": [gone_handle]}),
         json!({"name": "ok-name", "memberHandles": [Uuid::new_v4().to_string()]}),
-        json!({"name": "UPPER CASE"}),
+        // ADR-0225: a blank now folds to `-` ("UPPER CASE" is `upper-case`);
+        // a full stop is still a refused name.
+        json!({"name": "UPPER.CASE"}),
     ] {
         let (status, refused) = try_propose_action_3706(
             &client,
@@ -8990,8 +8996,8 @@ async fn seed_channel_3707(
     let channel = Uuid::new_v4();
     let name = format!("room-{}", &channel.simple().to_string()[..10]);
     sqlx::query(
-        "INSERT INTO channel(id, workspace_id, kind, name, created_by) \
-         VALUES($1,$2,$3::channel_kind,$4,$5)",
+        "INSERT INTO channel(id, workspace_id, kind, name, created_by, browse_listed) \
+         VALUES($1,$2,$3::channel_kind,$4,$5,$3::channel_kind = 'public')",
     )
     .bind(channel)
     .bind(fixture.workspace)
@@ -9225,7 +9231,8 @@ async fn an_approved_member_add_seats_members_in_a_channel_the_agent_can_see() {
     .await
     .unwrap();
     sqlx::query(
-        "INSERT INTO channel(workspace_id, kind, name, created_by) VALUES($1,'public',$2,$3)",
+        "INSERT INTO channel(workspace_id, kind, name, created_by, browse_listed) \
+         VALUES($1,'public',$2,$3,true)",
     )
     .bind(other_ws)
     .bind(&foreign_name)
@@ -28386,15 +28393,8 @@ async fn expression_create_offers_three_sources_and_registers_exactly_the_one_ch
     ])).await;
     assert_eq!(status, 200, "{proposed}");
     let approval = proposed_approval_3706(&proposed);
-    assert!(
-        w.mock
-            .calls
-            .lock()
-            .unwrap()
-            .iter()
-            .any(|c| c.contains("Q-SECRET")),
-        "the query is used to fetch"
-    );
+    // #5899: an address the agent chose is not requested while the card waits for a person.
+    assert_eq!(fetches_4829(&w), 0, "a proposal fetches no link");
 
     // ---- what was stored: drafts behind the approval, never bytes/prompt/query in args ----
     let rows: Vec<(String, Option<String>, i32, bool)> = sqlx::query_as(
@@ -28406,8 +28406,8 @@ async fn expression_create_offers_three_sources_and_registers_exactly_the_one_ch
             .collect::<Vec<_>>(),
         [
             ("ready", None),
-            ("ready", None),
-            ("manual_upload_required", Some("source_blocked")),
+            ("manual_upload_required", Some("source_awaiting_approval")),
+            ("manual_upload_required", Some("source_awaiting_approval")),
             ("ready", None)
         ]
     );
@@ -28438,7 +28438,7 @@ async fn expression_create_offers_three_sources_and_registers_exactly_the_one_ch
     let audits: String = sqlx::query_scalar("SELECT COALESCE(string_agg(detail::text, ' '), '') FROM audit_log WHERE workspace_id=$1 AND action IN ('expression.staged')")
         .bind(ws).fetch_one(&w.su).await.unwrap();
     assert!(
-        audits.contains("source_blocked") && audits.contains("cdn.example.test"),
+        audits.contains("source_awaiting_approval") && audits.contains("cdn.example.test"),
         "{audits}"
     );
     for secret in ["PROMPT-SECRET", "Q-SECRET", "dataBase64"] {
@@ -28451,9 +28451,13 @@ async fn expression_create_offers_three_sources_and_registers_exactly_the_one_ch
         .clone();
     assert_eq!(candidates.len(), 4);
     assert_eq!(candidates[2]["state"], "manual_upload_required");
-    assert_eq!(
-        candidates[2]["origin"]["sourceUrl"],
-        "https://cdn.example.test/blocked.gif"
+    // #5899: the card names the link's host and nothing after it.
+    for link in [&candidates[1], &candidates[2]] {
+        assert_eq!(link["origin"]["sourceUrl"], "https://cdn.example.test/");
+    }
+    assert!(
+        !card.to_string().contains(".gif"),
+        "no path of an agent's link on the card: {card}"
     );
     assert_eq!(
         candidates[3]["origin"]["prompt"], prompt,
@@ -28534,12 +28538,26 @@ async fn expression_create_offers_three_sources_and_registers_exactly_the_one_ch
             (403, "role_required"),
         ),
         (
-            "the failed link",
+            "a link with a hash",
             &w.requester_jwt,
             true,
             Some(
                 json!({"draftId": candidates[2]["draftId"], "revision": "1", "sha256": "0".repeat(64)}),
             ),
+            (409, "expression_preview_stale"),
+        ),
+        (
+            "a guest, on the agent's link",
+            &w.guest_jwt,
+            true,
+            Some(json!({"draftId": candidates[1]["draftId"], "revision": "1"})),
+            (403, "role_required"),
+        ),
+        (
+            "a picture without its hash",
+            &w.requester_jwt,
+            true,
+            Some(json!({"draftId": ready["draftId"], "revision": "1"})),
             (409, "expression_preview_stale"),
         ),
         (
@@ -28683,8 +28701,17 @@ async fn expression_create_offers_three_sources_and_registers_exactly_the_one_ch
         200
     );
 
-    // ---- two decisions race (an admin and the requester): exactly one registers -----------
-    let pick = choice_4829(&card2, 1);
+    assert_eq!(fetches_4829(&w), 0, "no refusal above fetched the link");
+
+    // ---- two decisions race (an admin and the requester) on the agent's link: it is fetched once,
+    // after the approval, and exactly one registers (#5899). The link candidate has no picture, so
+    // its choice has no hash.
+    let draft = &card2["action"]["expression"]["candidates"][1];
+    assert_eq!(draft["code"], "source_awaiting_approval");
+    let pick = json!({"draftId": draft["draftId"], "revision": draft["revision"]});
+    w.mock
+        .delay_ms
+        .store(300, std::sync::atomic::Ordering::Relaxed);
     let (a, b) = tokio::join!(
         decide_4829(&w, &admin_jwt, approval, true, Some(pick.clone())),
         decide_4829(&w, &w.requester_jwt, approval, true, Some(pick.clone())),
@@ -28703,6 +28730,11 @@ async fn expression_create_offers_three_sources_and_registers_exactly_the_one_ch
             .await
             .unwrap();
     assert_eq!(registered, 1, "a row lock registers it once");
+    assert_eq!(
+        w.mock.calls.lock().unwrap().clone(),
+        vec!["https://cdn.example.test/ok.gif".to_string()],
+        "one request, after the approval, for the stored address (the query was never kept)"
+    );
     let (name, created_by, proposed_by): (String, Uuid, Uuid) =
         sqlx::query_as("SELECT name, created_by, proposed_by FROM expression WHERE approval_id=$1")
             .bind(approval)
@@ -28826,6 +28858,152 @@ async fn expression_create_offers_three_sources_and_registers_exactly_the_one_ch
         );
     }
     assert_eq!(forged["type"].as_str().unwrap_or("text"), "text");
+}
+
+/// #5899 (ADR-0170 증보 2026-11-14's invariant): a link an agent put on a card that a person rejects,
+/// or that runs out, is never requested — not by the proposal, not by the ending, not by a late
+/// approval of it.
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn an_agent_link_on_a_rejected_or_expired_card_is_never_fetched() {
+    let w = world_4829().await;
+    w.mock
+        .replies
+        .lock()
+        .unwrap()
+        .insert("https://cdn.example.test/ok.gif".into(), Ok(gif_4829()));
+    let link = json!({"source": "url", "url": "https://cdn.example.test/ok.gif"});
+    for ending in ["rejected", "expired"] {
+        let (status, proposed) = propose_4829(
+            &w,
+            json!([candidate_4829(
+                &format!("link_{ending}"),
+                Value::Null,
+                link.clone()
+            )]),
+        )
+        .await;
+        assert_eq!(status, 200, "{proposed}");
+        let approval = proposed_approval_3706(&proposed);
+        let draft = card_4829(&w, approval).await["action"]["expression"]["candidates"][0].clone();
+        let pick = json!({"draftId": draft["draftId"], "revision": draft["revision"]});
+        if ending == "rejected" {
+            let (status, receipt) = decide_4829(&w, &w.requester_jwt, approval, false, None).await;
+            assert_eq!(status, 200, "{receipt}");
+        } else {
+            sqlx::query("UPDATE approval SET expires_at = now() - interval '1 minute' WHERE id=$1")
+                .bind(approval)
+                .execute(&w.su)
+                .await
+                .unwrap();
+        }
+        let (status, receipt) = decide_4829(&w, &w.requester_jwt, approval, true, Some(pick)).await;
+        assert!(
+            (400..500).contains(&status),
+            "{ending}: a late approval of the link: {status} {receipt}"
+        );
+        assert_eq!(approval_status_4385(&w.su, approval).await, ending);
+        assert_eq!(
+            fetches_4829(&w),
+            0,
+            "{ending}: the link was never requested"
+        );
+    }
+}
+
+/// #5899: a link fetched after its approval and found wanting tells the card why, in the link's own
+/// closed reasons (ADR-0218 appendix C), and the request stays open (the person may upload a file
+/// or choose another candidate). The address is requested once: a second tap requests nothing.
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn an_agent_link_that_fails_after_its_approval_says_why_on_the_card() {
+    let w = world_4829().await;
+    type Reply = Result<Vec<u8>, momo_unfurl::FetchError>;
+    let rows: Vec<(&str, Reply, &str)> = vec![
+        (
+            "blocked",
+            Err(momo_unfurl::FetchError::Blocked),
+            "source_blocked",
+        ),
+        // The name resolves to a private address by the time it is fetched.
+        (
+            "inside",
+            Err(momo_unfurl::FetchError::OriginBlocked),
+            "source_blocked",
+        ),
+        (
+            "declared_big",
+            Err(momo_unfurl::FetchError::TooLarge),
+            "source_too_large",
+        ),
+        // A body over 5 MiB that a transport let through is still refused.
+        (
+            "streamed_big",
+            Ok(vec![0x47; momo_unfurl::SOURCE_MAX_BYTES + 1]),
+            "source_too_large",
+        ),
+        (
+            "page",
+            Ok(b"<!doctype html><html><body>x</body></html>".to_vec()),
+            "source_unsupported",
+        ),
+    ];
+    for (name, reply, want) in rows {
+        let url = format!("https://cdn.example.test/{name}.gif");
+        w.mock.replies.lock().unwrap().insert(url.clone(), reply);
+        let before = fetches_4829(&w);
+        let (status, proposed) = propose_4829(
+            &w,
+            json!([candidate_4829(
+                name,
+                Value::Null,
+                json!({"source": "url", "url": url})
+            )]),
+        )
+        .await;
+        assert_eq!(status, 200, "{name}: {proposed}");
+        let approval = proposed_approval_3706(&proposed);
+        let draft = card_4829(&w, approval).await["action"]["expression"]["candidates"][0].clone();
+        let pick = json!({"draftId": draft["draftId"], "revision": draft["revision"]});
+        let (status, receipt) =
+            decide_4829(&w, &w.requester_jwt, approval, true, Some(pick.clone())).await;
+        assert_eq!(
+            (status, receipt["status"].as_str().unwrap_or("")),
+            (409, want),
+            "{name}: {receipt}"
+        );
+        assert_eq!(
+            fetches_4829(&w),
+            before + 1,
+            "{name}: requested once, after the approval"
+        );
+        assert_eq!(
+            approval_status_4385(&w.su, approval).await,
+            "pending",
+            "{name}: the request stays open"
+        );
+        let card = card_4829(&w, approval).await;
+        let shown = &card["action"]["expression"]["candidates"][0];
+        assert_eq!(
+            (shown["state"].as_str(), shown["code"].as_str()),
+            (Some("manual_upload_required"), Some(want)),
+            "{name}: {card}"
+        );
+        assert_eq!(shown["origin"]["sourceUrl"], "https://cdn.example.test/");
+        let (status, receipt) = decide_4829(&w, &w.requester_jwt, approval, true, Some(pick)).await;
+        assert_eq!(
+            (status, receipt["status"].as_str().unwrap_or("")),
+            (409, "expression_preview_stale"),
+            "{name}: {receipt}"
+        );
+        assert_eq!(
+            fetches_4829(&w),
+            before + 1,
+            "{name}: a second tap requests nothing"
+        );
+        let (status, _) = decide_4829(&w, &w.requester_jwt, approval, false, None).await;
+        assert_eq!(status, 200, "{name}: rejected, to free the agent's places");
+    }
 }
 
 async fn set_policy_4829(w: &World4829, policy: &str) {
@@ -29153,10 +29331,6 @@ async fn expression_create_refuses_bad_proposals_and_keeps_its_budget_to_itself(
         "complete",
     )
     .await;
-    w.mock.replies.lock().unwrap().insert(
-        "https://inside.example.test/x.gif".into(),
-        Err(momo_unfurl::FetchError::OriginBlocked),
-    );
     let outsider: Uuid =
         sqlx::query_scalar("SELECT id FROM member WHERE workspace_id=$1 AND handle LIKE 'out-%'")
             .bind(ws)
@@ -29191,10 +29365,6 @@ async fn expression_create_refuses_bad_proposals_and_keeps_its_budget_to_itself(
         (
             "a port other than 443",
             one(json!({"source": "url", "url": "https://cdn.example.test:8443/x.gif"})),
-        ),
-        (
-            "a name that resolves private at the first hop",
-            one(json!({"source": "url", "url": "https://inside.example.test/x.gif"})),
         ),
         (
             "credentials in the link",
@@ -31783,13 +31953,13 @@ async fn expression_create_refuses_the_cheap_things_before_it_fetches_or_decodes
         0
     );
 
-    // (2) The live lease proposes: one fetch, and the run is parked. A parked run refuses
-    // every further proposal on its handle, and it does so before any outside request or
-    // decode: five repeats at once, each carrying a link and a heavy picture, fetch nothing
+    // (2) The live lease proposes (its link waits for a person, unfetched — #5899), and the run is
+    // parked. A parked run refuses every further proposal on its handle, and it does so before
+    // any decode: five repeats at once, each carrying a link and a heavy picture, fetch nothing
     // and leave a person's own upload (sent meanwhile) unhindered.
     let (status, proposed) = propose_with_4829(&w, &fresh, json!([link("first")])).await;
     assert_eq!(status, 200, "{proposed}");
-    assert_eq!(fetches_4829(&w), 1);
+    assert_eq!(fetches_4829(&w), 0);
     let approvals = count_4829(&w, "SELECT count(*) FROM approval WHERE workspace_id=$1").await;
     let drafts = count_4829(
         &w,
@@ -31828,7 +31998,7 @@ async fn expression_create_refuses_the_cheap_things_before_it_fetches_or_decodes
     }
     assert_eq!(
         fetches_4829(&w),
-        1,
+        0,
         "five refused repeats of a parked run made no outside request"
     );
     assert_eq!(
@@ -32035,8 +32205,9 @@ async fn expression_create_refuses_what_the_request_shows_before_it_reads_fetche
         "no draft was stored"
     );
 
-    // The controls: the same two sources, with nothing wrong, ARE read and fetched (so the zeros
-    // above are measurements), and a face that is in this conversation is not refused.
+    // The controls: the same file, with nothing wrong, IS read (so the zeros above are
+    // measurements; a link is never fetched by a proposal at all — #5899), and a face that is in
+    // this conversation is not refused.
     let (fetched, read) = (fetches_4829(&w), reads());
     let (status, proposed) = propose_4829(
         &w,
@@ -32046,8 +32217,8 @@ async fn expression_create_refuses_what_the_request_shows_before_it_reads_fetche
     assert_eq!(status, 200, "{proposed}");
     assert_eq!(
         (fetches_4829(&w), reads()),
-        (fetched + 1, read + 1),
-        "a good proposal reads its file and fetches its link"
+        (fetched, read + 1),
+        "a good proposal reads its file and leaves its link for a person"
     );
     let (fetched, read) = (fetches_4829(&w), reads());
     let (status, proposed) =
@@ -32056,7 +32227,7 @@ async fn expression_create_refuses_what_the_request_shows_before_it_reads_fetche
         status, 200,
         "a person who is in this conversation can be the face: {proposed}"
     );
-    assert_eq!((fetches_4829(&w), reads()), (fetched + 1, read));
+    assert_eq!((fetches_4829(&w), reads()), (fetched, read));
 }
 
 /// #4900: a video attachment is the manual card because of what it IS, decided from its first
@@ -32124,35 +32295,23 @@ async fn expression_create_makes_a_video_attachment_a_card_while_every_decoder_s
     drop(held);
 }
 
-/// **One preparation per agent at a time.** Two runs of one agent propose at once with a slow
-/// link: one is prepared, the other is told to come back (409 / -32004) without a request of its
-/// own; when the first is done the agent prepares again at once.
+/// **One preparation per agent at a time.** Two runs of one agent propose at once with a picture
+/// that is slow to decode (a link is no longer slow: a proposal does not fetch it, #5899): one is
+/// prepared, the other is told to come back (409 / -32004) with nothing stored; when the first is
+/// done the agent prepares again at once.
 #[tokio::test]
 #[ignore = "needs verifier-owned isolated PostgreSQL 18"]
 async fn expression_create_prepares_one_proposal_per_agent_at_a_time() {
     let w = world_4829().await;
-    w.mock
-        .replies
-        .lock()
-        .unwrap()
-        .insert("https://cdn.example.test/ok.gif".into(), Ok(gif_4829()));
-    w.mock
-        .delay_ms
-        .store(700, std::sync::atomic::Ordering::Relaxed);
     mention_4829(&w).await;
     mention_4829(&w).await;
     let handles = claim_handles_4829(&w).await;
     assert_eq!(handles.len(), 2, "two mentions, two jobs");
-    let link = |name: &str| {
-        candidate_4829(
-            name,
-            Value::Null,
-            json!({"source": "url", "url": "https://cdn.example.test/ok.gif"}),
-        )
-    };
+    let heavy = heavy_png_4829();
+    let slow = |name: &str| candidate_4829(name, Value::Null, generated_4829(&heavy, "p"));
     let (a, b) = tokio::join!(
-        propose_with_4829(&w, &handles[0], json!([link("slow_one")])),
-        propose_with_4829(&w, &handles[1], json!([link("slow_two")])),
+        propose_with_4829(&w, &handles[0], json!([slow("slow_one")])),
+        propose_with_4829(&w, &handles[1], json!([slow("slow_two")])),
     );
     let code = |answer: &Value| answer["error"]["code"].as_i64().unwrap_or(0);
     let mut answers = vec![(a.0, code(&a.1)), (b.0, code(&b.1))];
@@ -32161,11 +32320,6 @@ async fn expression_create_prepares_one_proposal_per_agent_at_a_time() {
         answers,
         vec![(200, 0), (409, -32004)],
         "one proposal is prepared, the other is told to come back: {a:?} {b:?}"
-    );
-    assert_eq!(
-        fetches_4829(&w),
-        1,
-        "the one that was told to come back made no outside request"
     );
     assert_eq!(
         count_4829(&w, "SELECT count(*) FROM approval WHERE workspace_id=$1").await,
@@ -32181,9 +32335,6 @@ async fn expression_create_prepares_one_proposal_per_agent_at_a_time() {
     );
 
     // The place went back with the first preparation: the same agent prepares again at once.
-    w.mock
-        .delay_ms
-        .store(0, std::sync::atomic::Ordering::Relaxed);
     let (status, proposed) = propose_4829(
         &w,
         json!([candidate_4829(
@@ -32615,7 +32766,8 @@ async fn expression_create_takes_a_gif_and_a_video_attachment_as_sources() {
 /// **A link's fetch slot goes back as soon as the bytes are here**, before the wait for a decoder
 /// slot. The eight fetch slots are process-wide and a person's `/import` needs one; holding one
 /// through somebody else's decoding queue would let a slow picture starve them. The picture
-/// here is tiny on the wire and slow to decode, and the slot count is read while it decodes.
+/// here is tiny on the wire and slow to decode, and the slot count is read while it decodes. An
+/// agent's link is fetched by the decision that approves it (#5899), so that is where it is read.
 #[tokio::test]
 #[ignore = "needs verifier-owned isolated PostgreSQL 18"]
 async fn expression_create_gives_the_fetch_slot_back_before_it_waits_for_the_decoder() {
@@ -32624,21 +32776,27 @@ async fn expression_create_gives_the_fetch_slot_back_before_it_waits_for_the_dec
         "https://cdn.example.test/heavy.png".into(),
         Ok(heavy_png_4829()),
     );
+    let (status, proposed) = propose_4829(
+        &w,
+        json!([candidate_4829(
+            "heavy_link",
+            Value::Null,
+            json!({"source": "url", "url": "https://cdn.example.test/heavy.png"})
+        )]),
+    )
+    .await;
+    assert_eq!(status, 200, "{proposed}");
+    let approval = proposed_approval_3706(&proposed);
+    let draft = card_4829(&w, approval).await["action"]["expression"]["candidates"][0].clone();
+    let pick = json!({"draftId": draft["draftId"], "revision": draft["revision"]});
     let slots = momo_expressions::intake::import_slots();
     assert_eq!(
         slots.available_permits(),
         momo_expressions::intake::IMPORTS_IN_FLIGHT,
         "no fetch is in flight when the test starts"
     );
-    let ((status, proposed), (during_fetch_done, took_after_fetch)) = tokio::join!(
-        propose_4829(
-            &w,
-            json!([candidate_4829(
-                "heavy_link",
-                Value::Null,
-                json!({"source": "url", "url": "https://cdn.example.test/heavy.png"})
-            )])
-        ),
+    let ((status, receipt), (during_fetch_done, took_after_fetch)) = tokio::join!(
+        decide_4829(&w, &w.requester_jwt, approval, true, Some(pick)),
         async {
             // The fetch is made at once (the mock answers at once); what follows is the decode.
             while fetches_4829(&w) == 0 {
@@ -32649,11 +32807,9 @@ async fn expression_create_gives_the_fetch_slot_back_before_it_waits_for_the_dec
             (slots.available_permits(), fetched_at.elapsed())
         }
     );
-    assert_eq!(status, 200, "{proposed}");
-    let card = card_4829(&w, proposed_approval_3706(&proposed)).await;
     assert_eq!(
-        card["action"]["expression"]["candidates"][0]["state"], "ready",
-        "the picture was really decoded: {card}"
+        status, 200,
+        "the picture was really decoded and registered: {receipt}"
     );
     assert!(
         took_after_fetch >= std::time::Duration::from_millis(250),
@@ -33177,4 +33333,774 @@ async fn approving_an_expression_card_records_the_chosen_kind_or_the_recommended
     assert_eq!(none, 0, "a refused decision registers nothing");
     let (status, _) = decide_4829(&w, &admin_jwt, approval, false, None).await;
     assert_eq!(status, 200, "the card is rejected to free the pending slot");
+}
+
+/// **ADR-0225 D5·D6·D8-4 (#5828) — a Hangul channel flows through all three
+/// channel actions.** The bytes cap used to stop at 80 (27 syllables): a 34-character
+/// name with Hangul, a blank and capitals now proposes, is approved, takes members and
+/// is granted — each time spelled differently from how it was stored — and the
+/// outcome line names the channel without gluing a particle onto it.
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn a_hangul_channel_name_flows_through_create_member_add_and_grant_5828() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let fixture = seed(&su).await;
+    let base = start_server(app, true).await;
+    let client = reqwest::Client::new();
+    let (extra, extra_handle) = seed_extra_member_3706(&su, &fixture, "hangul").await;
+    // 3 + blank + 2 + blank + 27 syllables = 102 bytes: over the old 80-byte bound.
+    let typed = format!("디자인 리뷰 {}", "나".repeat(27));
+    let stored = format!("디자인-리뷰-{}", "나".repeat(27));
+    assert!(typed.len() > 80 && typed.chars().count() <= 80);
+
+    // ---- channel.create ----------------------------------------------------
+    let (status, proposed) = try_propose_action_3706(
+        &client,
+        &base,
+        &su,
+        &fixture,
+        "channel.create",
+        json!({"name": typed}),
+    )
+    .await;
+    assert_eq!(status, 200, "a 102-byte Hangul name proposes: {proposed}");
+    let (status, _h, approved) = decide_as(
+        &client,
+        &base,
+        fixture.workspace,
+        &fixture.human_jwt,
+        proposed_approval_3706(&proposed),
+        true,
+        Uuid::new_v4(),
+    )
+    .await;
+    assert_eq!(status, 200, "{approved}");
+    let (channel_id, _kind, _by) = channel_row_3706(&su, fixture.workspace, &stored)
+        .await
+        .expect("the channel is stored under the folded name");
+
+    // ---- channel.member.add, spelled with a leading # and capitals ----------
+    let (status, proposed) = try_propose_action_3706(
+        &client,
+        &base,
+        &su,
+        &fixture,
+        "channel.member.add",
+        json!({"channel": format!("#{}", typed.to_uppercase()), "memberHandles": [extra_handle]}),
+    )
+    .await;
+    assert_eq!(status, 200, "{proposed}");
+    let (status, _h, approved) = decide_as(
+        &client,
+        &base,
+        fixture.workspace,
+        &fixture.human_jwt,
+        proposed_approval_3706(&proposed),
+        true,
+        Uuid::new_v4(),
+    )
+    .await;
+    assert_eq!(status, 200, "{approved}");
+    assert_eq!(
+        membership_role_3707(&su, channel_id, extra)
+            .await
+            .as_deref(),
+        Some("member")
+    );
+    let outcome_lines: Vec<String> = sqlx::query_scalar(
+        "SELECT body FROM message WHERE workspace_id=$1 AND body LIKE '%명을 넣었어요%'",
+    )
+    .bind(fixture.workspace)
+    .fetch_all(&su)
+    .await
+    .unwrap();
+    assert_eq!(
+        outcome_lines,
+        vec![format!("#{stored} 채널에 멤버 1명을 넣었어요")],
+        "the outcome line puts a word between the name and the particle"
+    );
+
+    // ---- hosted.channels.grant: a public Hangul channel the agent is not in ----
+    let public_name = format!("공개-{}", "라".repeat(30));
+    let (public_id, _) = seed_channel_3707(&su, &fixture, "public", &[]).await;
+    sqlx::query("UPDATE channel SET name=$2 WHERE id=$1")
+        .bind(public_id)
+        .bind(&public_name)
+        .execute(&su)
+        .await
+        .unwrap();
+    let (status, proposed) = try_propose_action_3706(
+        &client,
+        &base,
+        &su,
+        &fixture,
+        "hosted.channels.grant",
+        json!({"channels": [format!("#공개 {}", "라".repeat(30))]}),
+    )
+    .await;
+    assert_eq!(
+        status, 200,
+        "a 99-byte Hangul ref is granted a card: {proposed}"
+    );
+    let (status, _h, approved) = decide_as(
+        &client,
+        &base,
+        fixture.workspace,
+        &fixture.human_jwt,
+        proposed_approval_3706(&proposed),
+        true,
+        Uuid::new_v4(),
+    )
+    .await;
+    assert_eq!(status, 200, "{approved}");
+    assert!(hosted_approved_3706(&su, &fixture)
+        .await
+        .contains(&public_id));
+
+    // ---- the 80-character edge: 240 bytes proposes, 81 characters does not -----
+    let (status, proposed) = try_propose_action_3706(
+        &client,
+        &base,
+        &su,
+        &fixture,
+        "channel.create",
+        json!({"name": "가".repeat(80)}),
+    )
+    .await;
+    assert_eq!(status, 200, "80 Hangul characters propose: {proposed}");
+    let (status, refused) = try_propose_action_3706(
+        &client,
+        &base,
+        &su,
+        &fixture,
+        "channel.create",
+        json!({"name": "가".repeat(81)}),
+    )
+    .await;
+    assert_eq!(status, 400, "81 characters are refused: {refused}");
+}
+
+// ---------------------------------------------------------------------------
+// ADR-0225 D7 (#5830) — an agent's channel name that reads like a live one
+// ---------------------------------------------------------------------------
+
+/// `latin` with its first `e` replaced by the Cyrillic U+0435: the same name to a
+/// reader, a different one to the database.
+fn lookalike_5830(latin: &str) -> String {
+    assert!(latin.contains('e'), "{latin} has no e to swap");
+    latin.replacen('e', "\u{435}", 1)
+}
+
+/// A channel of `kind` named `name`, with `members` seated (a `dm` gets its own
+/// `dm_key`, as a group DM room does).
+async fn named_channel_5830(
+    su: &PgPool,
+    workspace: Uuid,
+    kind: &str,
+    name: &str,
+    members: &[Uuid],
+    archived: bool,
+) -> Uuid {
+    let id = Uuid::new_v4();
+    let dm_key = (kind == "dm").then(|| id.to_string());
+    sqlx::query(
+        "INSERT INTO channel (id, workspace_id, kind, name, dm_key, archived_at, browse_listed) \
+         VALUES ($1, $2, $3::channel_kind, $4, $5, CASE WHEN $6 THEN now() END, \
+                 $3::channel_kind = 'public')",
+    )
+    .bind(id)
+    .bind(workspace)
+    .bind(kind)
+    .bind(name)
+    .bind(dm_key)
+    .bind(archived)
+    .execute(su)
+    .await
+    .expect("named channel");
+    sqlx::query("INSERT INTO channel_seq (channel_id, workspace_id, last_seq) VALUES ($1, $2, 0)")
+        .bind(id)
+        .bind(workspace)
+        .execute(su)
+        .await
+        .expect("channel_seq");
+    for member in members {
+        sqlx::query(
+            "INSERT INTO membership (workspace_id, channel_id, member_id, role) \
+             VALUES ($1, $2, $3, 'member')",
+        )
+        .bind(workspace)
+        .bind(id)
+        .bind(member)
+        .execute(su)
+        .await
+        .expect("seat member");
+    }
+    id
+}
+
+/// The `action.refused` rows of the D7 refusal, oldest first, with the row's actor
+/// and subject.
+async fn lookalike_refusals_5830(
+    su: &PgPool,
+    workspace: Uuid,
+) -> Vec<(Option<Uuid>, Option<Uuid>, Value)> {
+    sqlx::query_as(
+        "SELECT actor_member_id, subject_member_id, detail FROM audit_log \
+          WHERE workspace_id = $1 AND action = 'action.refused' \
+            AND detail->>'reason' = 'channel_name_lookalike' \
+          ORDER BY created_at, id",
+    )
+    .bind(workspace)
+    .fetch_all(su)
+    .await
+    .expect("look-alike refusals")
+}
+
+async fn approval_count_5830(su: &PgPool, workspace: Uuid) -> i64 {
+    sqlx::query_scalar("SELECT count(*) FROM approval WHERE workspace_id = $1")
+        .bind(workspace)
+        .fetch_one(su)
+        .await
+        .expect("approval count")
+}
+
+async fn approval_status_5830(su: &PgPool, approval: Uuid) -> String {
+    sqlx::query_scalar("SELECT status::text FROM approval WHERE id = $1")
+        .bind(approval)
+        .fetch_one(su)
+        .await
+        .expect("approval status")
+}
+
+/// A person (the fixture's admin) makes a channel through REST.
+async fn rest_create_channel_5830(
+    client: &reqwest::Client,
+    base: &str,
+    fixture: &Fixture,
+    name: &str,
+) -> (u16, Value) {
+    let response = client
+        .post(format!(
+            "{base}/v1/workspaces/{}/channels",
+            fixture.workspace
+        ))
+        .bearer_auth(&fixture.human_jwt)
+        .json(&json!({"kind": "public", "name": name}))
+        .send()
+        .await
+        .expect("channel create responds");
+    let status = response.status().as_u16();
+    (status, response.json().await.expect("channel create body"))
+}
+
+/// **ADR-0225 D7 (#5830) — at the proposal.** An agent's `channel.create` whose name
+/// reads like a channel the agent can see — a public one, a private one it sits in —
+/// is refused before any card exists, with the same answer as any refused argument,
+/// and audited by reason and channel id, never by name. A person makes the very same
+/// look-alike through REST: D7 leaves the people's path alone.
+///
+/// | revert that makes it red |
+/// |---|
+/// | drop the D7 check from `resolve_action_with_origin_in_tx` |
+/// | run it only on the stored arguments (the decision) |
+/// | drop the `action.refused` row |
+/// | put the channel's name into the rejection message |
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn an_agents_lookalike_of_a_channel_it_can_see_is_refused_at_the_proposal_5830() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let fixture = seed(&su).await;
+    let base = start_server(app.clone(), true).await;
+    let client = reqwest::Client::new();
+    let s = Uuid::new_v4().simple().to_string()[..8].to_string();
+    let public_name = format!("general-{s}");
+    let private_name = format!("release-{s}");
+    let public =
+        named_channel_5830(&su, fixture.workspace, "public", &public_name, &[], false).await;
+    let private = named_channel_5830(
+        &su,
+        fixture.workspace,
+        "private",
+        &private_name,
+        &[fixture.hosted_agent],
+        false,
+    )
+    .await;
+    let approvals_before = approval_count_5830(&su, fixture.workspace).await;
+
+    // Any refused argument answers the same: the look-alike is not singled out.
+    let (status, malformed) = try_propose_action_3706(
+        &client,
+        &base,
+        &su,
+        &fixture,
+        "channel.create",
+        json!({"name": "not.a.name"}),
+    )
+    .await;
+    assert_eq!(status, 400, "{malformed}");
+    for (lookalike, live) in [
+        (lookalike_5830(&public_name), &public_name),
+        (lookalike_5830(&private_name), &private_name),
+    ] {
+        let (status, refused) = try_propose_action_3706(
+            &client,
+            &base,
+            &su,
+            &fixture,
+            "channel.create",
+            json!({"name": lookalike}),
+        )
+        .await;
+        assert_eq!(status, 400, "{lookalike}: {refused}");
+        assert_eq!(error_code(&refused), error_code(&malformed), "{refused}");
+        assert!(!refused.to_string().contains(live.as_str()), "{refused}");
+    }
+    assert_eq!(
+        approval_count_5830(&su, fixture.workspace).await,
+        approvals_before,
+        "no card was raised"
+    );
+
+    let rows = lookalike_refusals_5830(&su, fixture.workspace).await;
+    assert_eq!(rows.len(), 2, "{rows:?}");
+    for ((actor, subject, detail), similar) in rows.iter().zip([public, private]) {
+        assert_eq!(*actor, Some(fixture.hosted_agent));
+        assert_eq!(*subject, Some(fixture.hosted_agent));
+        assert_eq!(detail["schema"], json!("momo.action.refused.v1"));
+        assert_eq!(detail["action_id"], json!("channel.create"));
+        assert_eq!(detail["stage"], json!("proposal"));
+        assert_eq!(detail["approval_id"], Value::Null);
+        assert_eq!(detail["similar_channel_id"], json!(similar.to_string()));
+        let text = detail.to_string();
+        assert!(!text.contains(&public_name) && !text.contains(&private_name));
+        assert!(!text.contains(&s), "no name, not even in part: {text}");
+    }
+
+    // The rejection itself is the fixed sentence (a REST caller of the resolver
+    // reads `message`): it names no channel.
+    let action =
+        momo_agent::actions::action_by_id("channel.create").expect("channel.create registered");
+    let (workspace, agent) = (fixture.workspace, fixture.hosted_agent);
+    let proposed = json!({"name": lookalike_5830(&private_name)});
+    let outcome = momo_db::with_tenant_tx(&app, workspace, move |conn| {
+        Box::pin(async move {
+            momo_workspace_actions::action_resolve::resolve_action_in_tx(
+                conn, workspace, agent, None, action, &proposed, 0,
+            )
+            .await
+        })
+    })
+    .await
+    .expect("resolver transaction");
+    match outcome {
+        Ok(resolved) => panic!("a look-alike resolved: {resolved:?}"),
+        Err(rejection) => assert_eq!(
+            rejection.message,
+            momo_workspace_actions::action_resolve::CHANNEL_NAME_LOOKALIKE
+        ),
+    }
+
+    // A person may make it: the REST path is not D7's.
+    let (status, created) =
+        rest_create_channel_5830(&client, &base, &fixture, &lookalike_5830(&public_name)).await;
+    assert_eq!(status, 201, "{created}");
+    assert_eq!(
+        created["channel"]["name"],
+        json!(lookalike_5830(&public_name))
+    );
+}
+
+/// **ADR-0225 D7 (#5830) — a private channel the agent cannot see.** Refusing at the
+/// proposal would tell the agent that the channel exists (증보 V11), so the proposal
+/// is answered exactly like a clean name. The decision compares with every live
+/// channel and refuses the tap as stale — the same 409 as a name taken since the
+/// proposal — with the approval pending and no channel made. A member who may not
+/// decide is refused before anything is compared, and leaves no audit row.
+///
+/// | revert that makes it red |
+/// |---|
+/// | compare every channel at the proposal too (the private name leaks) |
+/// | run the check only on the proposal (the tap makes the look-alike) |
+/// | drop the `action.refused` row |
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn a_lookalike_of_a_private_channel_the_agent_cannot_see_is_refused_at_the_decision_5830() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let fixture = seed(&su).await;
+    let base = start_server(app, true).await;
+    let client = reqwest::Client::new();
+    let plain_jwt = seed_plain_member(&su, &fixture).await;
+    let s = Uuid::new_v4().simple().to_string()[..8].to_string();
+    let secret_name = format!("secret-{s}");
+    let secret = named_channel_5830(
+        &su,
+        fixture.workspace,
+        "private",
+        &secret_name,
+        &[fixture.human],
+        false,
+    )
+    .await;
+    let lookalike = lookalike_5830(&secret_name);
+
+    let (status, clean) = try_propose_action_3706(
+        &client,
+        &base,
+        &su,
+        &fixture,
+        "channel.create",
+        json!({"name": format!("plain-{s}")}),
+    )
+    .await;
+    assert_eq!(status, 200, "{clean}");
+    let (status, proposed) = try_propose_action_3706(
+        &client,
+        &base,
+        &su,
+        &fixture,
+        "channel.create",
+        json!({"name": lookalike}),
+    )
+    .await;
+    assert_eq!(status, 200, "the agent learns nothing: {proposed}");
+    let keys = |answer: &Value| {
+        let mut keys: Vec<String> = structured(answer)
+            .as_object()
+            .expect("an object answer")
+            .keys()
+            .cloned()
+            .collect();
+        keys.sort();
+        keys
+    };
+    assert_eq!(
+        keys(&proposed),
+        keys(&clean),
+        "the same shape as a clean name"
+    );
+    assert!(lookalike_refusals_5830(&su, fixture.workspace)
+        .await
+        .is_empty());
+    let approval = proposed_approval_3706(&proposed);
+
+    // A member who may not decide: refused by role, nothing compared, nothing written.
+    let (status, _h, refused) = decide_as(
+        &client,
+        &base,
+        fixture.workspace,
+        &plain_jwt,
+        approval,
+        true,
+        Uuid::new_v4(),
+    )
+    .await;
+    assert_eq!(status, 403, "{refused}");
+    assert_eq!(refused["status"], "role_required");
+    assert!(lookalike_refusals_5830(&su, fixture.workspace)
+        .await
+        .is_empty());
+
+    // The admin's tap: stale, like a name taken since the proposal.
+    let (status, _h, stale) = decide_as(
+        &client,
+        &base,
+        fixture.workspace,
+        &fixture.human_jwt,
+        approval,
+        true,
+        Uuid::new_v4(),
+    )
+    .await;
+    assert_eq!(status, 409, "{stale}");
+    assert_eq!(stale["status"], "action_args_invalid");
+    assert!(!stale.to_string().contains(&secret_name), "{stale}");
+    assert_eq!(approval_status_5830(&su, approval).await, "pending");
+    assert!(channel_row_3706(&su, fixture.workspace, &lookalike)
+        .await
+        .is_none());
+
+    let rows = lookalike_refusals_5830(&su, fixture.workspace).await;
+    assert_eq!(rows.len(), 1, "{rows:?}");
+    let (actor, subject, detail) = &rows[0];
+    assert_eq!(*actor, None, "the server refused a person's tap");
+    assert_eq!(*subject, Some(fixture.hosted_agent));
+    assert_eq!(detail["stage"], json!("decision"));
+    assert_eq!(detail["approval_id"], json!(approval.to_string()));
+    assert_eq!(detail["similar_channel_id"], json!(secret.to_string()));
+    assert!(!detail.to_string().contains(&s), "{detail}");
+}
+
+/// **ADR-0225 D7 (#5830) — the race.** A card whose name was clean when it was
+/// proposed is refused at the tap once a person has made the channel it reads like
+/// in between; the person's own create goes through (201).
+///
+/// | revert that makes it red |
+/// |---|
+/// | run the check only on the proposal |
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn a_lookalike_made_between_the_proposal_and_the_tap_is_refused_at_the_tap_5830() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let fixture = seed(&su).await;
+    let base = start_server(app, true).await;
+    let client = reqwest::Client::new();
+    let s = Uuid::new_v4().simple().to_string()[..8].to_string();
+    let latin = format!("elder-{s}");
+    let lookalike = lookalike_5830(&latin);
+
+    let (status, proposed) = try_propose_action_3706(
+        &client,
+        &base,
+        &su,
+        &fixture,
+        "channel.create",
+        json!({"name": lookalike}),
+    )
+    .await;
+    assert_eq!(status, 200, "nothing reads like it yet: {proposed}");
+    let approval = proposed_approval_3706(&proposed);
+
+    let (status, created) = rest_create_channel_5830(&client, &base, &fixture, &latin).await;
+    assert_eq!(status, 201, "{created}");
+    let latin_id = Uuid::parse_str(created["channel"]["id"].as_str().expect("an id")).unwrap();
+
+    let (status, _h, stale) = decide_as(
+        &client,
+        &base,
+        fixture.workspace,
+        &fixture.human_jwt,
+        approval,
+        true,
+        Uuid::new_v4(),
+    )
+    .await;
+    assert_eq!(status, 409, "{stale}");
+    assert_eq!(stale["status"], "action_args_invalid");
+    assert_eq!(approval_status_5830(&su, approval).await, "pending");
+    assert!(channel_row_3706(&su, fixture.workspace, &lookalike)
+        .await
+        .is_none());
+    let rows = lookalike_refusals_5830(&su, fixture.workspace).await;
+    assert_eq!(rows.len(), 1, "{rows:?}");
+    assert_eq!(rows[0].2["stage"], json!("decision"));
+    assert_eq!(rows[0].2["similar_channel_id"], json!(latin_id.to_string()));
+}
+
+/// **ADR-0225 D7 (#5830) — what is not compared.** An archived channel, a group DM
+/// room (same `name` column, not a channel), another workspace's channel, and a name
+/// that differs only by a digit or a separator: each card is raised and approved.
+///
+/// | revert that makes it red |
+/// |---|
+/// | drop `archived_at IS NULL` |
+/// | drop `kind IN ('public', 'private')` |
+/// | compare with `skeleton` (digits, separators and `1`/`l` folded) |
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn archived_rooms_other_workspaces_and_distinct_names_are_not_lookalikes_5830() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let fixture = seed(&su).await;
+    let other = seed(&su).await;
+    let base = start_server(app, true).await;
+    let client = reqwest::Client::new();
+    let s = Uuid::new_v4().simple().to_string()[..8].to_string();
+    let archived = format!("legacy-{s}");
+    let room = format!("people-{s}");
+    let elsewhere = format!("general-{s}");
+    let digit = format!("team-l-{s}");
+    let separator = format!("dev_ops-{s}");
+    named_channel_5830(&su, fixture.workspace, "public", &archived, &[], true).await;
+    named_channel_5830(
+        &su,
+        fixture.workspace,
+        "dm",
+        &room,
+        &[fixture.human, fixture.hosted_agent],
+        false,
+    )
+    .await;
+    named_channel_5830(&su, other.workspace, "public", &elsewhere, &[], false).await;
+    named_channel_5830(&su, fixture.workspace, "public", &digit, &[], false).await;
+    named_channel_5830(&su, fixture.workspace, "public", &separator, &[], false).await;
+
+    for name in [
+        lookalike_5830(&archived),
+        lookalike_5830(&room),
+        lookalike_5830(&elsewhere),
+        format!("team-1-{s}"),
+        format!("devops-{s}"),
+    ] {
+        let (status, proposed) = try_propose_action_3706(
+            &client,
+            &base,
+            &su,
+            &fixture,
+            "channel.create",
+            json!({"name": name}),
+        )
+        .await;
+        assert_eq!(status, 200, "{name}: {proposed}");
+        let (status, _h, approved) = decide_as(
+            &client,
+            &base,
+            fixture.workspace,
+            &fixture.human_jwt,
+            proposed_approval_3706(&proposed),
+            true,
+            Uuid::new_v4(),
+        )
+        .await;
+        assert_eq!(status, 200, "{name}: {approved}");
+        assert!(
+            channel_row_3706(&su, fixture.workspace, &name)
+                .await
+                .is_some(),
+            "{name} was made"
+        );
+    }
+    assert!(lookalike_refusals_5830(&su, fixture.workspace)
+        .await
+        .is_empty());
+}
+
+/// **ADR-0225 D7 (#5830) — a private channel the agent has left.** Seen from the
+/// proposal, a private channel is the proposer's only while its membership is live:
+/// a look-alike of one it has left is answered like a clean name (the refusal would
+/// tell it the room still stands under that name), and the decision refuses it.
+///
+/// | revert that makes it red |
+/// |---|
+/// | count a membership that has ended as seeing the channel |
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn a_private_channel_the_agent_has_left_is_not_compared_at_the_proposal_5830() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let fixture = seed(&su).await;
+    let base = start_server(app, true).await;
+    let client = reqwest::Client::new();
+    let s = Uuid::new_v4().simple().to_string()[..8].to_string();
+    let left_name = format!("retreat-{s}");
+    let left = named_channel_5830(
+        &su,
+        fixture.workspace,
+        "private",
+        &left_name,
+        &[fixture.human],
+        false,
+    )
+    .await;
+    sqlx::query(
+        "INSERT INTO membership (workspace_id, channel_id, member_id, role, left_at) \
+         VALUES ($1, $2, $3, 'member', now())",
+    )
+    .bind(fixture.workspace)
+    .bind(left)
+    .bind(fixture.hosted_agent)
+    .execute(&su)
+    .await
+    .expect("a membership that has ended");
+
+    let (status, proposed) = try_propose_action_3706(
+        &client,
+        &base,
+        &su,
+        &fixture,
+        "channel.create",
+        json!({"name": lookalike_5830(&left_name)}),
+    )
+    .await;
+    assert_eq!(
+        status, 200,
+        "a room the agent left is not its to see: {proposed}"
+    );
+    assert!(lookalike_refusals_5830(&su, fixture.workspace)
+        .await
+        .is_empty());
+    let (status, _h, stale) = decide_as(
+        &client,
+        &base,
+        fixture.workspace,
+        &fixture.human_jwt,
+        proposed_approval_3706(&proposed),
+        true,
+        Uuid::new_v4(),
+    )
+    .await;
+    assert_eq!(status, 409, "{stale}");
+    let rows = lookalike_refusals_5830(&su, fixture.workspace).await;
+    assert_eq!(rows.len(), 1, "{rows:?}");
+    assert_eq!(rows[0].2["stage"], json!("decision"));
+    assert_eq!(rows[0].2["similar_channel_id"], json!(left.to_string()));
+}
+
+/// **ADR-0225 D5 (#5830 수리) — the agent's byte bound is the text as sent.** An
+/// 80-syllable Hangul name sent decomposed (three jamo per syllable, as a Mac may
+/// send it) is proposed and stored composed; 81 syllables are refused.
+///
+/// | revert that makes it red |
+/// |---|
+/// | bound the name at 4 bytes per character of the composed form (320) |
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn an_eighty_syllable_hangul_name_sent_decomposed_is_proposed_5830() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let fixture = seed(&su).await;
+    let base = start_server(app, true).await;
+    let client = reqwest::Client::new();
+    // "한" decomposed: U+1112 U+1161 U+11AB, nine bytes.
+    let decomposed = "\u{1112}\u{1161}\u{11AB}";
+
+    let (status, proposed) = try_propose_action_3706(
+        &client,
+        &base,
+        &su,
+        &fixture,
+        "channel.create",
+        json!({"name": decomposed.repeat(80)}),
+    )
+    .await;
+    assert_eq!(
+        status, 200,
+        "720 bytes, 80 letters once composed: {proposed}"
+    );
+    let (status, _h, approved) = decide_as(
+        &client,
+        &base,
+        fixture.workspace,
+        &fixture.human_jwt,
+        proposed_approval_3706(&proposed),
+        true,
+        Uuid::new_v4(),
+    )
+    .await;
+    assert_eq!(status, 200, "{approved}");
+    assert!(channel_row_3706(&su, fixture.workspace, &"한".repeat(80))
+        .await
+        .is_some());
+
+    let (status, refused) = try_propose_action_3706(
+        &client,
+        &base,
+        &su,
+        &fixture,
+        "channel.create",
+        json!({"name": decomposed.repeat(81)}),
+    )
+    .await;
+    assert_eq!(status, 400, "81 letters are refused: {refused}");
 }

@@ -993,7 +993,9 @@ paths:
         phone parks in the keychain group its notification extension reads. It
         can call exactly `GET /v1/workspaces/{ws}/channels/{ch}/messages` and
         `GET /v1/workspaces/{ws}/roster` of its own workspace (403 anywhere
-        else, before any query), has no refresh half, cannot mint another, and
+        else, before any query; the roster it reads is the active one even for
+        an owner or admin, `include=suspended` or not), has no refresh half,
+        cannot mint another, and
         lives 6 hours or until the session it was minted under can no longer
         rotate (logout with its refresh half, refresh-reuse sweep, password
         change, suspension, removal) - whichever is first.
@@ -1320,9 +1322,19 @@ paths:
       summary: Join a workspace with an invite code (public, no auth).
       description: >
         Redeems a high-entropy invite code, creating (201) a human member or
-        resuming (200) an existing one, granting membership in every joinable
-        public channel, and issuing a session token pair. Snake-case body
+        resuming (200) an existing one, granting membership in the workspace's
+        default channels, and issuing a session token pair. Snake-case body
         aliases accepted by the server: `display_name`, `time_zone`/`tz`.
+
+        The join puts the person in every live default channel (`isDefault`,
+        ADR-0224 D6·D7) — or, in a workspace that has none, its oldest live
+        public channel — and nowhere else; a workspace with no live public
+        channel refuses the join (409). The same holds for an existing member
+        spending another link: it never adds them to a public channel that is
+        not a default one. A default channel the join adds or restores starts
+        read up to its newest message (D9); one the person was already in keeps
+        its read position. `memberships` lists the default channels, whether
+        added now or already held.
 
         An invite code names a workspace and a role, not a person, so an
         address that already has an account is resumed only with proof (#4625,
@@ -1886,7 +1898,19 @@ paths:
     get:
       tags: [roster]
       operationId: getRoster
-      summary: List active workspace members (humans and agents).
+      summary: List workspace members (humans and agents).
+      description: >
+        Active members for every viewer, restricted to shared-channel members
+        for a guest. A request that adds `include=suspended`, from a person
+        signed in with a full access token whose workspace role is owner or
+        admin, also carries the workspace's suspended humans (`status:
+        suspended`) so a suspension can be found and undone (ADR-0128 D3
+        amendment, #5814). Without that parameter every viewer gets the active
+        roster, so a client that does not send it never meets a suspended row.
+        Anyone else who sends it (a member, a guest, an agent, a work host, a
+        developer credential, the notification extension's `push_fetch`
+        token) gets the active roster, not an error. Suspended agents,
+        `invited` and `deleted` members are never carried.
       security:
         - bearerAuth: []
       parameters:
@@ -1907,9 +1931,22 @@ paths:
             default: 200
             minimum: 1
             maximum: 500
+        - name: include
+          in: query
+          required: false
+          description: >
+            Comma-separated opt-in list (#5814). `suspended` adds the
+            workspace's suspended humans when the viewer is an owner or admin
+            person on a full access token, and is ignored for anyone else.
+            Unknown items are ignored.
+          schema:
+            type: string
       responses:
         "200":
-          description: Active workspace roster, restricted to shared-channel members for guests.
+          description: >
+            Active workspace roster, restricted to shared-channel members for
+            guests; with `include=suspended` an owner or admin person also
+            receives suspended humans.
           content:
             application/json:
               schema:
@@ -1951,6 +1988,12 @@ paths:
             default: 200
             minimum: 1
             maximum: 500
+        - name: include
+          in: query
+          required: false
+          description: Same opt-in as `/roster` (`suspended`, #5814).
+          schema:
+            type: string
       responses:
         "200":
           description: Roster of active members with an active channel membership.
@@ -3438,6 +3481,41 @@ paths:
                 $ref: "#/components/schemas/ErrorResponse"
 
   /v1/workspaces/{workspaceId}/channels/{channelId}/members/me:
+    post:
+      tags: [membership]
+      operationId: joinChannel
+      summary: Join a public channel from the browse list (ADR-0224 D4).
+      description: >
+        The pair of the leave below. Only a channel that `GET …/channels/browse`
+        would list can be joined: a private channel, a DM, a public channel with
+        `browseListed` off, an archived channel, an unknown id and another
+        workspace's channel all answer the same 404 (status and body), even for a
+        caller who already sits in that channel. A new or left membership becomes a
+        live channel `member` (a former channel owner comes back as `member`), the
+        read position moves to the channel's end so it starts with nothing unread,
+        and `channel.joined` is audited. A caller who is already a member gets 200
+        with `newlyJoined: false` and nothing is written (role, read position and
+        audit stay). Human members only: a guest, a suspended person and any agent
+        or developer-token credential are refused before the channel is read.
+        Per-member budget `RATE_LIMIT_CHANNEL_JOIN_PER_MEMBER` (default 60 per
+        window).
+      security: [{bearerAuth: []}]
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/ChannelId"
+      responses:
+        "200":
+          description: The caller is a member; `channel` is the row the channel list shows for it.
+          content: {application/json: {schema: {$ref: "#/components/schemas/ChannelJoinResponse"}}}
+        "400": {description: Malformed channel id, content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403":
+          description: >
+            Not a human bearer, workspace scope mismatch, not an active member of
+            the workspace (suspended included), or a guest.
+          content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}
+        "404": {description: Not a channel open to people (one answer for every kind), content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}}
+        "429": {$ref: "#/components/responses/RateLimited"}
     delete:
       tags: [membership]
       operationId: leaveChannel
@@ -3454,6 +3532,45 @@ paths:
         "401": {$ref: "#/components/responses/Unauthorized"}
         "403": {description: Direct-message leave is forbidden, content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}}
         "404": {description: Active channel membership not found, content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}}
+
+  /v1/workspaces/{workspaceId}/channels/{channelId}/preview:
+    get:
+      tags: [channels]
+      operationId: previewChannel
+      summary: Read a public channel before joining it (ADR-0224 D5).
+      description: >
+        The channel's name, topic and member count and its newest top-level
+        messages (at most 50, newest first; thread replies stay in their
+        thread). Per message only the body, the author's display name and
+        kind, the time, the edited and deleted marks, the reply count and the
+        attachment names travel — no reactions, replies, quotes, link cards,
+        cards or props, read state, attachment address or media. Read-only: no
+        read position, membership, audit or outbox row is written and no
+        realtime subscription is granted; the attachment content route and the
+        realtime subscription still need a membership. Only a channel that
+        `GET …/channels/browse` would list can be previewed: every other id
+        answers the join's 404 (status and body), even for a caller who sits in
+        that channel. A member of the channel gets the same shape, with
+        `isMember: true`. Human members only: a guest, a suspended person and
+        any agent or developer-token credential are refused before the channel
+        is read, with the join's answers.
+      security: [{bearerAuth: []}]
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/ChannelId"
+      responses:
+        "200":
+          description: The preview.
+          content: {application/json: {schema: {$ref: "#/components/schemas/ChannelPreviewResponse"}}}
+        "400": {description: Malformed channel id, content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403":
+          description: >
+            Not a human bearer, workspace scope mismatch, not an active member of
+            the workspace (suspended included), or a guest.
+          content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}
+        "404": {description: Not a channel open to people (one answer for every kind; the join's), content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}}
+        "429": {$ref: "#/components/responses/RateLimited"}
 
   /v1/workspaces/{workspaceId}/channels/{channelId}/members/{memberId}/role:
     patch:
@@ -5774,6 +5891,176 @@ paths:
                 $ref: "#/components/schemas/ErrorResponse"
         "409":
           description: Channel name already exists.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
+  /v1/workspaces/{workspaceId}/channels/browse:
+    get:
+      tags: [channels]
+      operationId: browseChannels
+      summary: List the public channels a full member may find and join (ADR-0224 D3).
+      description: >
+        Every public channel of the workspace that is not archived and has
+        `browseListed` on, whether or not the caller is in it (`isMember`).
+        Private channels, DMs, public channels with `browseListed` off and
+        archived channels never appear, for any role — owners and admins get the
+        same list as everyone else. Ordered by lower-cased name, then id; a
+        screen groups joined and not-joined rows itself. `q` keeps the rows
+        whose name or topic contains it (case-insensitive, plain text: `%` and
+        `_` are characters). Human members only: a guest, a suspended person and
+        any agent or developer-token credential are refused before a channel is
+        read.
+      security: [{bearerAuth: []}]
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: q
+          in: query
+          required: false
+          description: Text to look for in the name or topic. Trimmed; blank means no filter; at most 100 characters.
+          schema: {type: string, maxLength: 100}
+        - name: cursor
+          in: query
+          required: false
+          description: The `nextCursor` of the previous page. Opaque; a malformed one is 400.
+          schema: {type: string}
+        - name: limit
+          in: query
+          required: false
+          description: Page size, clamped to 1..200; an unusable value falls back to the default.
+          schema: {type: integer, default: 100, minimum: 1, maximum: 200}
+      responses:
+        "200":
+          description: One page of browsable channels.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/BrowseChannelsResponse"}
+        "400": {description: Malformed `q` or `cursor`, content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403":
+          description: >
+            Not a human bearer, workspace scope mismatch, not an active member of
+            the workspace (suspended included), or a guest.
+          content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}
+        "429": {$ref: "#/components/responses/RateLimited"}
+
+  /v1/workspaces/{workspaceId}/channels/{channelId}:
+    patch:
+      tags: [channels]
+      operationId: updateChannel
+      summary: Rename a channel or switch its browse listing (workspace admin only, humans only).
+      description: >
+        ADR-0225 D10 and ADR-0224 D2·D6. A partial update: only the fields present
+        change. The fields are `name`, `browseListed` and `isDefault`; an unknown field is a
+        400 (never ignored) and a body with no known field is a 400. Both fields
+        in one body are applied in one transaction, and every field is judged
+        before anything is written, so a refused body changes nothing. The
+        name goes through the same normalisation and rules as `createChannel`.
+        The response is the channel as the edit left it, in the same `Channel`
+        shape as the channel list.
+
+
+        Human owners and admins only. Agent credentials, developer tokens and
+        the narrow push tokens never reach this route. The route reaches a
+        channel of the workspace that the caller is a live member of, or a
+        public channel that is not archived and is listed in browse. Every other
+        id (a private channel or a public channel with `browseListed` off that
+        the caller does not sit in, a channel of another workspace, an unknown
+        id) answers the same 404, for every field. For `name`, a direct
+        message, a group message and an archived channel are that 404 as well.
+
+
+        `browseListed` (ADR-0224 D2) shows or hides a live public channel in
+        channel browse. A private channel, a direct message or an archived
+        channel the caller sits in is a 409 with `error.code`
+        `channel_not_listable`, whichever value is sent. Switching it off does
+        not change anyone's membership. Each switch writes the audit record
+        `channel.browse_listed` (`old`, `new`); sending the value the channel
+        already has is a 200 and writes nothing. An admin who is not in the
+        channel and switches it off can no longer reach it through this route.
+
+
+        `isDefault` (ADR-0224 D6) makes a live public channel a default channel,
+        the one a person joining by invite is added to, or takes that away. It
+        is independent of `browseListed`, and it adds or removes nobody who is
+        already in the workspace. A private channel, a direct message or an
+        archived channel the caller sits in is a 409 with `error.code`
+        `channel_not_defaultable`, whichever value is sent. Turning off the
+        workspace's last live default channel is a 409 with `error.code`
+        `last_default_channel`; two requests that would together turn off the
+        last two are decided one after the other, so one default always stays.
+        Each switch writes the audit record `channel.default` (`old`, `new`);
+        sending the value the channel already has is a 200 and writes nothing.
+
+
+        A name that already belongs to a live channel
+        (case-insensitive, any non-DM kind) is a 409. `general` is locked in both
+        directions: renaming it, or renaming another channel to it, is a 409
+        with `error.code` `general_channel_locked`. Sending the name the channel
+        already has is a 200 and writes nothing. A rename writes the audit
+        record `channel.renamed` (`old`, `new`); it posts no message and
+        publishes no realtime event, so other devices see the new name on their
+        next channel list. A `#old-name` already written in a message stays as
+        written. Per-member budget `RATE_LIMIT_CHANNEL_EDIT_PER_MEMBER` (default 60
+        per window; 0 turns it off); the budget is checked after sign-in and
+        before the body is read, so a refused body spends a unit too.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/ChannelId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateChannelRequest"
+      responses:
+        "200":
+          description: The channel as it now reads.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UpdateChannelResponse"
+        "400":
+          description: >
+            Invalid channel id, a body that is not an object, an unknown field,
+            no known field, a `browseListed` or `isDefault` that is not a boolean, or a name the
+            rules refuse (the same two messages as `createChannel`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: >
+            Caller is not a human workspace owner/admin, or the token is of
+            another workspace.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: >
+            Outside the route's reach (see above), or a direct message, group
+            message or archived channel for `name`. The same body as an unknown
+            id.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: >
+            The name already belongs to a live channel (no `error.code`), the
+            `general` lock (`error.code` `general_channel_locked`), or
+            `browseListed` on a channel that is not a live public channel
+            (`error.code` `channel_not_listable`), `isDefault` on one
+            (`error.code` `channel_not_defaultable`), or turning off the last
+            default channel (`error.code` `last_default_channel`).
           content:
             application/json:
               schema:
@@ -12960,7 +13247,20 @@ paths:
           description: >
             Channel/root not found or not provisioned, or a quote target that is
             not in this channel (a target in another channel or workspace is
-            answered identically to one that does not exist).
+            answered identically to one that does not exist). A root or quote
+            target below the sender's own read floor (ADR-0177 amendment
+            2026-11-14 D17, after leaving a 1:1) is answered the same way.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: >
+            `code: message_before_leave` (ADR-0177 amendment 2026-11-14 D17):
+            a retry whose `clientMsgId` names a message the sender sent before
+            leaving this 1:1, which is below the sender's own read floor.
+            Nothing is stored and no seq is spent; the client drops that
+            pending send. Other conflicts of this route keep their own codes.
           content:
             application/json:
               schema:
@@ -13477,6 +13777,9 @@ paths:
         revives. The `PUT .../read-state` response and the realtime
         `read_state` frame do not carry them (ADR-0177 D10: no closure event);
         other devices pick a closure up on their next read of this list.
+        ADR-0177 amendment 2026-11-14 D18 (#5822) adds `history_from_seq` to
+        every row (always present): the caller's own read floor after leaving
+        a one-to-one conversation, JSON null for full history.
         ADR-0124 amendment 4 (#5667) adds `followed_unread_reply_count` to every
         row (always present, `0` when none): the unread replies in the threads
         the caller follows in that channel. When it may have changed - a new
@@ -13667,6 +13970,92 @@ paths:
         "404":
           description: >
             Not an unarchived DM the caller is a live participant of.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
+  /v1/workspaces/{workspaceId}/channels/{channelId}/dm-leave:
+    put:
+      tags: [dms]
+      operationId: leaveDm
+      summary: Leave a one-to-one conversation between two people, having seen up to `seenSeq`.
+      description: >
+        ADR-0177 amendment 2026-11-14 D14-D18 (#5822). Participation and
+        messages stay; the caller's own read floor
+        (`membership.history_from_seq`) rises to
+        `GREATEST(existing, LEAST(seenSeq, channel head) + 1)`, and from then
+        on the server returns none of this conversation's messages below it to
+        the caller - history, threads, search, pins, reactions, inbox,
+        attachments and push fetches are all closed by one `message` read
+        policy. `seenSeq` is the largest seq the client holds for this DM (the
+        read-state row's `latest_seq` or a newer realtime message), so a
+        message that arrived while the confirmation was on screen stays above
+        the floor. The floor never goes down: a repeat is the same `204`, a
+        late retransmit lowers nothing, and there is no `DELETE`. In the same
+        transaction the caller's own schedules in this channel are cancelled,
+        their reminders, thread follows and inbox items below the floor are
+        removed, a pending agent admission request in the room is cancelled
+        (each person's card becomes `cancelled`), the caller's read position
+        moves to `floor - 1` (unread, mentions and the mark-unread signal
+        settle; one `read_state` frame goes to the caller's own personal
+        channel), the caller's DM closure watermark moves to `floor - 1`, and
+        one `dm.left` audit row is written when the floor moved. No message is
+        written and the other participant sees no line. A new message from
+        either side is above the floor and is delivered as usual. The owner is
+        always the authenticated principal. Human bearers only: the path is
+        absent from every agent bearer's route allow-list, and the handler
+        refuses a non-human principal again.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/ChannelId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PutDmClosureRequest"
+      responses:
+        "204":
+          description: Left (or the floor was already at least this high).
+        "400":
+          description: >
+            `seenSeq` is missing, negative, not an integer or past int64, the
+            body has an unknown key or is not JSON, or an id is invalid.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: >
+            An agent bearer or any other non-human credential (human bearers
+            only), or workspace scope mismatch.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: >
+            Not an unarchived DM the caller is a live participant of (any other
+            channel kind, a DM of other members, an archived DM, an unknown id).
+            Checked before anything else, so the answer never reveals what kind
+            of room another member's DM is.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: >
+            `code: dm_leave_unavailable` - a DM the caller is in, but not a
+            one-to-one conversation between two people (D20): an agent is a
+            participant, a group or agent-admitted room, or no live counterpart.
+            Nothing is written.
           content:
             application/json:
               schema:
@@ -14116,7 +14505,11 @@ paths:
             before the first write), and `run_not_parked` — the run left its
             hold between the execution and the transition, so the whole
             transaction was rolled back and nothing was minted. None of them
-            consumes the approval.
+            consumes the approval. On an `expression.create` card also
+            `expression_preview_stale`, `expression_name_reserved`,
+            `expression_quota`, and — after an approved link not fetched yet gave no
+            picture (#5899) — that link's closed `source_*` reason; the approval stays
+            `pending`.
           headers:
             Cache-Control:
               description: Always `no-store` (ADR-0186 D4).
@@ -14132,6 +14525,24 @@ paths:
                 $ref: "#/components/schemas/ApprovalDecisionReceipt"
         "429":
           $ref: "#/components/responses/RateLimited"
+        "503":
+          description: >
+            Receipt-shaped `expression_link_busy` (#5899): approving a link not fetched
+            yet found no free fetch place. Nothing was taken or decided; the approval
+            stays `pending` and the same request may be sent again.
+          headers:
+            Cache-Control:
+              description: Always `no-store` (ADR-0186 D4).
+              schema:
+                type: string
+            Pragma:
+              description: Always `no-cache` (ADR-0186 D4).
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApprovalDecisionReceipt"
 
   /v1/workspaces/{workspaceId}/approvals/{approvalId}/avatar-preview:
     get:
@@ -16325,7 +16736,11 @@ components:
         default 60; starts of a picture from a
         photo (`POST …/expressions/photo-drafts`, ADR-0218 §8 H11), default 10; marking every
         followed thread read (`POST …/threads/read-all`, ADR-0124 amendment 5,
-        `RATE_LIMIT_THREAD_READ_ALL_PER_MEMBER`), default 60. Cancelling a scheduled
+        `RATE_LIMIT_THREAD_READ_ALL_PER_MEMBER`), default 60; joining a public channel
+        (`POST …/channels/{ch}/members/me`, ADR-0224 D4,
+        `RATE_LIMIT_CHANNEL_JOIN_PER_MEMBER`), default 60; editing a channel
+        (`PATCH …/channels/{ch}`, ADR-0225 D10,
+        `RATE_LIMIT_CHANNEL_EDIT_PER_MEMBER`), default 60. Cancelling a scheduled
         message, editing a message (`PATCH …/messages/{id}`, which streaming answers
         use) and every read except the two below are not budgeted. Retrying with the
         same `clientMsgId` after a 429 is safe. The link-card proxies
@@ -17195,6 +17610,7 @@ components:
             - assembly_output_too_large
             - assembly_timeout
             - assembly_busy
+            - source_awaiting_approval
           media:
             nullable: true
             enum:
@@ -18054,7 +18470,14 @@ components:
                 `invalid_time_zone`, `invalid_schedule`, `unknown_sound`,
                 `level_not_applicable`, `keyword_too_short`,
                 `keyword_too_long`, `too_many_keywords`; 409 `no_device`; 429
-                `rate_limited` (the test push only); ADR-0215 D2 (#4593, the
+                `rate_limited` (the test push only); ADR-0225 D10 and ADR-0224 D2·D6
+                (channel edit, `PATCH …/channels/{channelId}`): 409
+                `general_channel_locked` (the `general` channel cannot be renamed
+                and no channel can take its name), `channel_not_listable`
+                (`browseListed` on a channel that is not a live public channel),
+                `channel_not_defaultable` (`isDefault` on one) and
+                `last_default_channel` (it would turn off the last live default
+                channel); ADR-0215 D2 (#4593, the
                 password a person is choosing: `POST /v1/join`, `POST /v1/claim`,
                 `PATCH …/members/me/password`): 400 `password_too_short` (fewer
                 than 10 characters), `password_too_long` (more than 72 bytes of
@@ -19535,7 +19958,13 @@ components:
           enum: [human, agent]
         status:
           type: string
-          enum: [active, invited, suspended, deleted]
+          enum: [active, suspended]
+          description: >
+            Lifecycle state of the row. `suspended` appears only on a human row
+            of an owner or admin person's roster read with `include=suspended`
+            (ADR-0128 D3 amendment, #5814); every other row, and every row of
+            any other read, is `active`. `invited` and `deleted` members are
+            never on the roster.
         displayName:
           type: string
         handle:
@@ -19657,8 +20086,8 @@ components:
             autocomplete offers it to the owner alone and never to a teammate. A personal
             agent has no `hostOnline` or `brainUnavailableReason` (it runs on the owner's
             member host through a signed spawn, not the Agent Port). A switched-off agent is
-            not on the roster (the roster lists active members); the owner reads it from
-            `GET …/personal-agents`.
+            not on the roster (no viewer's roster carries a suspended agent); the owner reads
+            it from `GET …/personal-agents`.
           required: [label, ownerId, ownerDisplayName, harness, enabled, mentionable]
           properties:
             label: {type: string}
@@ -19705,7 +20134,8 @@ components:
         online:
           type: boolean
           description: >
-            Availability (ADR-0160 ②, #4692), present for humans only: does this
+            Availability (ADR-0160 ②, #4692), present for active humans only (a
+            suspended row in an owner/admin roster never carries it): does this
             person have a live realtime connection to the workspace right now.
             The second input of the dot a client draws, `f(presenceStatus, online)`;
             the wire never carries the effective value. Read from the transport at
@@ -19756,8 +20186,13 @@ components:
             $ref: "#/components/schemas/RosterMember"
         humanCount:
           type: integer
+          description: >
+            Active human rows in `members`. A suspended row in an owner/admin
+            roster read with `include=suspended` is listed but not counted
+            (#5814).
         agentCount:
           type: integer
+          description: Active agent rows in `members`.
 
     SetPresenceRequest:
       type: object
@@ -21880,7 +22315,7 @@ components:
     # ---- Channels ----------------------------------------------------------------
     Channel:
       type: object
-      required: [id, workspaceId, kind, muted]
+      required: [id, workspaceId, kind, browseListed, isDefault, muted]
       properties:
         id:
           type: string
@@ -21912,6 +22347,21 @@ components:
           type: integer
           format: int64
           description: Present only when the channel is archived.
+        browseListed:
+          type: boolean
+          description: >
+            Listed in channel browse — full members may find and join it
+            themselves (ADR-0224 D2). Always present; only a public channel can
+            be `true` (private channels and DMs are always `false`). A public
+            channel created through `POST …/channels` starts `true`; public
+            channels that existed before this field start `false`, except the
+            workspace's default channel.
+        isDefault:
+          type: boolean
+          description: >
+            A default channel — a person joining the workspace by invite is
+            added to it (ADR-0224 D6·D7). Independent of `browseListed`. Always
+            present; only a public channel can be `true`.
         muted:
           type: boolean
           description: Whether push dispatch is suppressed for the authenticated member.
@@ -21939,6 +22389,124 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/Channel"
+
+    BrowseChannel:
+      type: object
+      required: [id, name, memberCount, isMember, isDefault]
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        topic:
+          type: string
+          description: Absent when the channel has no topic.
+        memberCount:
+          type: integer
+          format: int64
+          description: Live members who are active and not removed — people and agents together.
+        isMember:
+          type: boolean
+          description: The caller is a member of this channel.
+        isDefault:
+          type: boolean
+          description: A default channel (ADR-0224 D6).
+
+    BrowseChannelsResponse:
+      type: object
+      required: [channels]
+      properties:
+        channels:
+          type: array
+          items:
+            $ref: "#/components/schemas/BrowseChannel"
+        nextCursor:
+          type: string
+          description: Present when another page follows; pass it back as `cursor`.
+
+    ChannelJoinResponse:
+      type: object
+      required: [channel, newlyJoined]
+      properties:
+        channel:
+          $ref: "#/components/schemas/Channel"
+        newlyJoined:
+          type: boolean
+          description: False when the caller was already a member and nothing was written.
+
+    ChannelPreviewResponse:
+      type: object
+      additionalProperties: false
+      description: >
+        ADR-0224 D5. An allow-list: nothing else of the channel or its
+        messages travels. The shape does not depend on whether the caller is a
+        member of the channel.
+      required: [channel, messages]
+      properties:
+        channel:
+          $ref: "#/components/schemas/PreviewChannel"
+        messages:
+          type: array
+          maxItems: 50
+          description: The newest top-level messages, newest first.
+          items:
+            $ref: "#/components/schemas/PreviewMessage"
+
+    PreviewChannel:
+      type: object
+      additionalProperties: false
+      required: [id, name, memberCount, isMember]
+      properties:
+        id: {type: string, format: uuid}
+        name: {type: string}
+        topic:
+          type: string
+          description: Omitted when the channel has none.
+        memberCount:
+          type: integer
+          format: int64
+          description: The browse list's count — live memberships of active members, people and agents.
+        isMember:
+          type: boolean
+          description: The caller has a live membership in the channel.
+
+    PreviewMessage:
+      type: object
+      additionalProperties: false
+      required: [id, author, createdAtMs, edited, deleted, replyCount, attachmentNames]
+      properties:
+        id: {type: string, format: uuid}
+        body:
+          type: string
+          description: Omitted on a deleted message.
+        author:
+          $ref: "#/components/schemas/PreviewAuthor"
+        createdAtMs: {type: integer, format: int64}
+        edited:
+          type: boolean
+          description: Rewritten by its author (false on a deleted message).
+        deleted: {type: boolean}
+        replyCount:
+          type: integer
+          format: int64
+          description: Replies under it; the replies themselves are not in the preview.
+        attachmentNames:
+          type: array
+          description: Names of its attachments, oldest first; empty on a deleted message. No address, type or size.
+          items: {type: string}
+
+    PreviewAuthor:
+      type: object
+      additionalProperties: false
+      required: [kind]
+      properties:
+        displayName:
+          type: string
+          description: >
+            Omitted when the author is no longer an active member (suspended or
+            removed) — the roster a member reads names active members only.
+        kind: {type: string, enum: [human, agent]}
 
     UpdateNotificationPrefRequest:
       type: object
@@ -23194,8 +23762,19 @@ components:
           enum: [public, private]
         name:
           type: string
-          pattern: "^[a-z0-9][a-z0-9_-]*[a-z0-9]$|^[a-z0-9]$"
-          description: 1..80 chars; lowercased server-side.
+          description: >-
+            Normalized server-side, and the response carries the stored name
+            (ADR-0225 D1-D5): NFC; fullwidth U+FF01-U+FF5E folded to ASCII;
+            edge blanks (Unicode White_Space) dropped and each inner run of
+            blanks turned into one `-` (or dropped next to `-`/`_`); lowercased;
+            NFC again. The result must be 1..80 code points of letters,
+            numbers and combining marks of any script plus `-` and `_`,
+            starting with a letter or number and not ending with `-` or `_`;
+            control, format, private-use and invisible filler characters are
+            refused. A refusal is a 400 with one of two messages (length or
+            characters). No `pattern` is given because OpenAPI 3.0 cannot
+            state a Unicode-aware one; the shared test vectors are
+            docs/api/channel-name.vectors.json.
         topic:
           type: string
           description: At most 280 chars; blank collapses to absent.
@@ -23234,6 +23813,36 @@ components:
           $ref: "#/components/schemas/Channel"
         creatorMembership:
           $ref: "#/components/schemas/ChannelMembership"
+
+    UpdateChannelRequest:
+      type: object
+      additionalProperties: false
+      minProperties: 1
+      properties:
+        name:
+          type: string
+          description: >-
+            The new name, normalised and judged exactly like
+            `CreateChannelRequest.name` (ADR-0225 D1-D5).
+        browseListed:
+          type: boolean
+          description: >-
+            Show (`true`) or hide (`false`) a live public channel in channel
+            browse (ADR-0224 D2). Memberships are not changed.
+        isDefault:
+          type: boolean
+          description: >-
+            Make a live public channel a default channel (`true`) or not
+            (`false`) (ADR-0224 D6). People already in the workspace are not
+            added; only people who join afterwards land in it. Independent of
+            `browseListed`. The last default channel cannot be turned off.
+
+    UpdateChannelResponse:
+      type: object
+      required: [channel]
+      properties:
+        channel:
+          $ref: "#/components/schemas/Channel"
 
     MembershipRole:
       type: string
@@ -27661,6 +28270,7 @@ components:
         - latest_readable_seq
         - closed_at_seq
         - followed_unread_reply_count
+        - history_from_seq
       properties:
         channel_id:
           type: string
@@ -27728,6 +28338,20 @@ components:
             ignores channel mute and the notification pause (ADR-0124 D2,
             D4-A). The `followed_unread.updated` frame on the caller's personal
             channel says when to read it again.
+        history_from_seq:
+          type: integer
+          format: int64
+          minimum: 1
+          nullable: true
+          description: >
+            ADR-0177 amendment 2026-11-14 D18 (#5822). The **requesting
+            member's own** read floor in this channel after leaving a
+            one-to-one conversation (`PUT .../dm-leave`): the server returns
+            only messages with `seq >= history_from_seq` to this member. JSON
+            null = full history. Always present; a client tells a server that
+            supports leaving from an older one by the key being there (D21).
+            Another member's floor is never returned. Not on the `PUT
+            .../read-state` response or the `read_state` frame.
 
     ReadStateListResponse:
       type: object
@@ -28462,7 +29086,14 @@ components:
     # ---- Hosted Agent Port MCP JSON-RPC (ADR-0162 / HAP-E2) ---------------
     AgentPortClientInfo:
       type: object
-      additionalProperties: false
+      description: >
+        The client's MCP `Implementation`, on both doors (`/v1/mcp/agent-port` and
+        `/v1/mcp/me`). Only `name`, `title` and `version` are read, each with the shape
+        below. Any other key (the MCP `description`, `websiteUrl`, `icons`, or a vendor's
+        own) is accepted and ignored: it is never read, echoed, logged or stored, and only
+        the request-wide bounds (the 64 KiB body and the string, collection and nesting
+        limits every request already has) apply to it (#5787, ADR-0216 증보 2026-11-14).
+      additionalProperties: true
       required: [name, version]
       properties:
         name:
@@ -28932,23 +29563,54 @@ components:
             decision is judged on the host the card points at. Not part of the
             idempotency key: a replayed decision answers the original receipt.
         expressionChoice:
-          type: object
-          additionalProperties: false
-          required: [draftId, revision, sha256]
-          properties:
-            draftId: {type: string, format: uuid}
-            revision: {type: string, pattern: '^(0|[1-9][0-9]*)$'}
-            sha256: {type: string, pattern: '^[a-f0-9]{64}$'}
-            kind:
-              type: string
-              enum: [emoji, sticker]
-              description: >
-                ADR-0218 addendum 4 section 10 J3. The kind the person picked; absent means
-                the server applies its recommendation (J4) to the stored large picture.
+          oneOf:
+            - type: object
+              title: picture
+              additionalProperties: false
+              required: [draftId, revision, sha256]
+              properties:
+                draftId: {type: string, format: uuid}
+                revision: {type: string, pattern: '^(0|[1-9][0-9]*)$'}
+                sha256: {type: string, pattern: '^[a-f0-9]{64}$'}
+                kind:
+                  type: string
+                  enum: [emoji, sticker]
+                  description: >
+                    ADR-0218 addendum 4 section 10 J3. The kind the person picked; absent means
+                    the server applies its recommendation (J4) to the stored large picture.
+            - type: object
+              title: link not fetched yet
+              additionalProperties: false
+              required: [draftId, revision]
+              properties:
+                draftId: {type: string, format: uuid}
+                revision: {type: string, pattern: '^(0|[1-9][0-9]*)$'}
+                kind:
+                  type: string
+                  enum: [emoji, sticker]
+                  description: As in the picture shape.
           description: >
-            ADR-0186 addendum v8 X8-2 / ADR-0218 `Decision`. The one picture chosen on
-            an `expression.create` card, exactly as shown (draft id, revision, large
-            sha256). **Required when approving that action and a 400 receipt
+            ADR-0186 addendum v8 X8-2 / ADR-0218 `Decision`. The one candidate chosen on
+            an `expression.create` card, in one of two shapes. **A picture** (a candidate
+            whose `state` is `ready`): exactly as shown (draft id, revision, large
+            sha256). **A link not fetched yet** (#5899, ADR-0170 addendum 2026-11-14,
+            ADR-0218 addendum 12): a candidate whose `state` is `manual_upload_required`
+            and `code` is `source_awaiting_approval` — an address an agent proposed, which
+            the server has not requested and of which the card shows only the host — is
+            approved by draft id and revision alone, with no `sha256` (there is no picture
+            to pin yet). The server then requests that address once (the stored
+            `https://host/path`, never a query), through the same guard as a link import,
+            and registers the picture that came after proving everything below again with
+            the server's own hash of it. A picture shape on such a candidate, or the link
+            shape on any other candidate, is a 409 `expression_preview_stale`. When the
+            fetch gives no picture the receipt is a 409 whose `status` is the link's closed
+            reason (`source_blocked`, `source_unavailable`, `source_too_large`,
+            `source_unsupported`, `source_timeout`, `source_invalid_media`,
+            `video_processing_unavailable`), the candidate shows that same `code`, and the
+            approval stays `pending` (the person may upload a file or choose another
+            candidate); the address is never requested a second time, whoever approves it
+            again or however close together. A 503 `expression_link_busy` means no fetch
+            place was free: nothing was taken, and the same request may be sent again. **Required when approving that action and a 400 receipt
             (`expression_choice_required`) without it; a 400 receipt
             (`expression_choice_not_allowed`) on anything else** (another action, a
             rejection, a non-workspace approval, an `expression.set.create` card, or
@@ -28958,7 +29620,7 @@ components:
             they are the person shown, the candidate's membership of this card, its
             revision, the stored bytes hashed again, the name and the quota; a failure is
             a 409 receipt (`expression_preview_stale`, `expression_name_reserved`,
-            `expression_quota`) that spends nothing. Success registers that one picture,
+            `expression_quota`, or a link's `source_*` reason) that spends nothing. Success registers that one picture,
             reclaims every other candidate's bytes and writes `props.result.expression`
             (`{id,name,token}`) on the card.
         expressionChoices:
@@ -29038,7 +29700,10 @@ components:
         not_found, bad_request, expired,
         action_unavailable, action_args_invalid, public_origin_unavailable,
         run_not_parked, opens_in_app (a `push_action` token on an approval that
-        must be decided in the app), or the approval's current status on a 409).
+        must be decided in the app), on an `expression.create` card
+        expression_preview_stale, expression_name_reserved, expression_quota, a
+        link's `source_*` reason or expression_link_busy (#5899), or the
+        approval's current status on a 409).
 
 
         NOTATION (SRV-B5c): camelCase, matching the deployed Rust server. See

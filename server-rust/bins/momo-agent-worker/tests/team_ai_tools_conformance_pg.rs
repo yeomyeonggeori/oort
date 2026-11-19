@@ -209,9 +209,11 @@ async fn channel(su: &PgPool, t_ws: Uuid, kind: &str, members: &[Uuid]) -> (Uuid
         ids.sort();
         ids.join(":")
     });
+    // A public channel is listed in channel browse, as a new one is (ADR-0224 D2), so it stays one
+    // the room may hear about (D13).
     sqlx::query(
-        "INSERT INTO channel (id, workspace_id, kind, name, dm_key) \
-         VALUES ($1, $2, $3::channel_kind, $4, $5)",
+        "INSERT INTO channel (id, workspace_id, kind, name, dm_key, browse_listed) \
+         VALUES ($1, $2, $3::channel_kind, $4, $5, $3::channel_kind = 'public')",
     )
     .bind(id)
     .bind(t_ws)
@@ -573,9 +575,12 @@ async fn an_admitted_helper_reads_only_its_current_dm_seat_through_every_message
                 ("search_messages", json!({"query":"preseatneedle"})),
                 ("read_channel", json!({"channel":dm_name})),
                 ("read_thread", json!({"channel":dm_name,"messageId":old})),
+                // ADR-0225 D6 (#5828): a DM is not a channel the name resolver finds, so
+                // the current seat's new text is read by an unnamed search.
+                ("search_messages", json!({"query":"afterseatneedle"})),
                 (
                     "search_messages",
-                    json!({"query":"afterseatneedle", "channel":dm_name}),
+                    json!({"query":"please join this conversation"}),
                 ),
             ]),
             text("확인했어요."),
@@ -596,8 +601,8 @@ async fn an_admitted_helper_reads_only_its_current_dm_seat_through_every_message
         let results = fenced(&last_user_turn(&seen, 1));
         assert_eq!(
             results.matches("검색 결과 없음").count(),
-            2,
-            "both searches exclude pre-seat text: {results}"
+            1,
+            "the unnamed search excludes pre-seat text: {results}"
         );
         assert!(
             !results.contains("preseatneedle"),
@@ -611,9 +616,10 @@ async fn an_admitted_helper_reads_only_its_current_dm_seat_through_every_message
             results.contains("please join this conversation"),
             "the one trigger exception remains visible: {results}"
         );
-        assert!(
-            results.contains("not_found"),
-            "the old thread root is not readable: {results}"
+        assert_eq!(
+            results.matches("not_found").count(),
+            3,
+            "the DM is not found by name (D6): the named search, the read and the old thread root: {results}"
         );
     }
 }
@@ -1367,6 +1373,360 @@ async fn a17_a18_no_secret_keys_and_no_bodies_in_audit() {
     );
 }
 
+/// **#5873 (ADR-0201 증보 2026-11-14)** — the audit row names the channels a turn read, and only
+/// those: ids of the channels whose content came back (once each), a count — never an id — for the
+/// reads that were refused, and no text, query, argument or channel name.
+#[tokio::test]
+#[ignore = "requires an isolated PostgreSQL 18 (see module docs)"]
+async fn a5873_the_audit_row_names_the_channels_a_turn_read() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let pool = momo_worker_pool().await;
+    reset_instance(&su).await;
+    let t = seed(&su, &pool).await;
+    seed_chat_link(&su, t.owner_id).await;
+    let (y, y_name) = channel(&su, t.workspace_id, "private", &[t.owner_id]).await;
+    post(
+        &pool,
+        t.workspace_id,
+        y,
+        t.owner_id,
+        &format!("Y {PRIVATE_MARKER}"),
+    )
+    .await;
+    let (lobby, lobby_name) =
+        channel(&su, t.workspace_id, "public", &[t.owner_id, t.member_id]).await;
+    post(
+        &pool,
+        t.workspace_id,
+        lobby,
+        t.owner_id,
+        &format!("로비 {PUBLIC_MARKER}"),
+    )
+    .await;
+
+    let reads_of = |run: Uuid| {
+        let su = su.clone();
+        async move {
+            let rows: Vec<Value> = sqlx::query_scalar(
+                "SELECT detail FROM audit_log WHERE action = 'team_ai.turn' AND run_id = $1",
+            )
+            .bind(run)
+            .fetch_all(&su)
+            .await
+            .unwrap();
+            assert_eq!(rows.len(), 1, "one turn row");
+            rows.into_iter().next().unwrap()
+        }
+    };
+
+    // A turn that reads the lobby twice, searches, and is refused twice (a channel the room may not
+    // hear about, a channel that does not exist).
+    let script = Script::new(vec![
+        tools(&[
+            ("read_channel", json!({"channel": format!("#{lobby_name}")})),
+            ("read_channel", json!({"channel": format!("#{lobby_name}")})),
+            ("search_messages", json!({"query": "LANTERN"})),
+            ("read_channel", json!({"channel": format!("#{y_name}")})),
+            ("read_channel", json!({"channel": "없는방-5873"})),
+        ]),
+        text("읽었어요."),
+    ]);
+    let w = worker_with(script.clone(), |_| {}).await;
+    let run = enqueue_in(
+        &pool,
+        &t,
+        t.channel_id,
+        t.owner_id,
+        "@oort QUERY-5873 읽어 줘",
+    )
+    .await;
+    drain(&w).await;
+    let detail = reads_of(run).await;
+    let reads = &detail["reads"];
+    assert_eq!(reads["channels"], json!([lobby]), "{detail}");
+    assert_eq!(reads["truncated"], json!(false));
+    assert_eq!(
+        reads["denied"],
+        json!({"not_found": 1, "not_visible_here": 1}),
+        "{detail}"
+    );
+    let text_of_row = detail.to_string();
+    for forbidden in [
+        y.to_string(),
+        y_name.clone(),
+        lobby_name.clone(),
+        PRIVATE_MARKER.to_string(),
+        PUBLIC_MARKER.to_string(),
+        "LANTERN".to_string(),
+        "QUERY-5873".to_string(),
+        "없는방-5873".to_string(),
+    ] {
+        assert!(
+            !text_of_row.contains(&forbidden),
+            "the row must not carry {forbidden}: {text_of_row}"
+        );
+    }
+
+    // A turn that read nothing: an empty list and zero counts.
+    let script = Script::new(vec![text("안녕하세요.")]);
+    let w = worker_with(script.clone(), |_| {}).await;
+    let run = enqueue_in(&pool, &t, t.channel_id, t.owner_id, "@oort 안녕").await;
+    drain(&w).await;
+    let detail = reads_of(run).await;
+    assert_eq!(
+        detail["reads"],
+        json!({"channels": [], "truncated": false,
+               "denied": {"not_found": 0, "not_visible_here": 0}}),
+        "{detail}"
+    );
+}
+
+/// Every `team_ai.turn` row of one run.
+async fn turn_rows_of(su: &PgPool, run: Uuid) -> Vec<Value> {
+    sqlx::query_scalar(
+        "SELECT detail FROM audit_log WHERE action = 'team_ai.turn' AND run_id = $1 \
+          ORDER BY created_at, id",
+    )
+    .bind(run)
+    .fetch_all(su)
+    .await
+    .unwrap()
+}
+
+/// **#5873, one table for every channel-reading tool** — a read that succeeds leaves the channel it
+/// read on the turn's audit row, tool by tool (a tool that drops its record turns exactly its own
+/// row red).
+#[tokio::test]
+#[ignore = "requires an isolated PostgreSQL 18 (see module docs)"]
+async fn a5873_every_channel_reading_tool_leaves_its_channel_on_the_row() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let pool = momo_worker_pool().await;
+    reset_instance(&su).await;
+    let t = seed(&su, &pool).await;
+    seed_chat_link(&su, t.owner_id).await;
+    let (lobby, lobby_name) =
+        channel(&su, t.workspace_id, "public", &[t.owner_id, t.member_id]).await;
+    let root = post(
+        &pool,
+        t.workspace_id,
+        lobby,
+        t.owner_id,
+        "SHARED-5873 스레드 첫 글",
+    )
+    .await;
+
+    // an earlier turn in the reply room, whose run `get_agent_run` can then look up
+    let script = Script::new(vec![text("안녕하세요.")]);
+    let w = worker_with(script, |_| {}).await;
+    let earlier = enqueue_in(&pool, &t, t.channel_id, t.owner_id, "@oort 안녕").await;
+    drain(&w).await;
+
+    let cases: Vec<(&str, Value, Uuid)> = vec![
+        (
+            "read_channel",
+            json!({"channel": format!("#{lobby_name}")}),
+            lobby,
+        ),
+        (
+            "read_thread",
+            json!({"channel": format!("#{lobby_name}"), "messageId": root.to_string()}),
+            lobby,
+        ),
+        ("search_messages", json!({"query": "SHARED-5873"}), lobby),
+        (
+            "list_members",
+            json!({"channel": format!("#{lobby_name}")}),
+            lobby,
+        ),
+        ("list_agent_runs", json!({}), t.channel_id),
+        (
+            "get_agent_run",
+            json!({"runId": earlier.to_string()}),
+            t.channel_id,
+        ),
+    ];
+    for (tool, args, expected) in cases {
+        let script = Script::new(vec![tools(&[(tool, args)]), text("읽었어요.")]);
+        let w = worker_with(script.clone(), |_| {}).await;
+        let run = enqueue_in(&pool, &t, t.channel_id, t.owner_id, "@oort 읽어 줘").await;
+        drain(&w).await;
+        let rows = turn_rows_of(&su, run).await;
+        assert_eq!(rows.len(), 1, "{tool}: one turn row");
+        assert_eq!(rows[0]["tools"], json!([tool]), "{tool}: it ran");
+        assert_eq!(rows[0]["tool_results"], json!(["ok"]), "{tool}: it read");
+        assert_eq!(
+            rows[0]["reads"]["channels"],
+            json!([expected]),
+            "{tool}: the channel it read is on the row: {}",
+            rows[0]
+        );
+    }
+}
+
+/// **#5873** — a search names, on the row, only the channels of the hits that may be spoken in this
+/// room. A channel the requester is in but the room may not hear about (a private one) is neither
+/// in the answer nor anywhere in the row — not its id, not its name.
+#[tokio::test]
+#[ignore = "requires an isolated PostgreSQL 18 (see module docs)"]
+async fn a5873_a_search_names_only_the_channels_of_the_hits_it_kept() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let pool = momo_worker_pool().await;
+    reset_instance(&su).await;
+    let t = seed(&su, &pool).await;
+    seed_chat_link(&su, t.owner_id).await;
+    let (y, y_name) = channel(&su, t.workspace_id, "private", &[t.owner_id]).await;
+    let (lobby, _) = channel(&su, t.workspace_id, "public", &[t.owner_id, t.member_id]).await;
+    post(
+        &pool,
+        t.workspace_id,
+        y,
+        t.owner_id,
+        "SHARED-5873 비공개 쪽",
+    )
+    .await;
+    post(
+        &pool,
+        t.workspace_id,
+        lobby,
+        t.owner_id,
+        "SHARED-5873 공개 쪽",
+    )
+    .await;
+    let script = Script::new(vec![
+        tools(&[("search_messages", json!({"query": "SHARED-5873"}))]),
+        text("찾았어요."),
+    ]);
+    let w = worker_with(script.clone(), |_| {}).await;
+    let run = enqueue_in(&pool, &t, t.channel_id, t.owner_id, "@oort 찾아 줘").await;
+    drain(&w).await;
+    let data = fenced(&last_user_turn(&script.seen(), 1));
+    assert!(
+        data.contains("공개 쪽"),
+        "anti-vacuity: the search hit the lobby: {data}"
+    );
+    assert!(!data.contains("비공개 쪽"), "{data}");
+    let rows = turn_rows_of(&su, run).await;
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0]["reads"]["channels"], json!([lobby]), "{}", rows[0]);
+    let all_audit: String = sqlx::query_scalar(
+        "SELECT COALESCE(string_agg(detail::text || ' ' || COALESCE(target_id::text, ''), ' '), '') \
+           FROM audit_log WHERE workspace_id = $1",
+    )
+    .bind(t.workspace_id)
+    .fetch_one(&su)
+    .await
+    .unwrap();
+    assert!(
+        !all_audit.contains(&y.to_string()) && !all_audit.contains(&y_name),
+        "a channel the room may not hear about is nowhere in the audit rows"
+    );
+}
+
+/// **#5873** — a turn that read and then ended badly (the model went off script; the read budget ran
+/// out) still has its `team_ai.turn` row, and the row still names what was read.
+#[tokio::test]
+#[ignore = "requires an isolated PostgreSQL 18 (see module docs)"]
+async fn a5873_a_turn_that_ends_badly_still_names_the_channels_it_read() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let pool = momo_worker_pool().await;
+    reset_instance(&su).await;
+    let t = seed(&su, &pool).await;
+    seed_chat_link(&su, t.owner_id).await;
+    let (lobby, lobby_name) =
+        channel(&su, t.workspace_id, "public", &[t.owner_id, t.member_id]).await;
+    let read = || tools(&[("read_channel", json!({"channel": format!("#{lobby_name}")}))]);
+
+    // off script after a read -> hand-off (`out_of_scope`)
+    let script = Script::new(vec![read(), tools(&[("not_a_tool_5873", json!({}))])]);
+    let w = worker_with(script, |_| {}).await;
+    let run = enqueue_in(&pool, &t, t.channel_id, t.owner_id, "@oort 읽어 줘").await;
+    drain(&w).await;
+    let (status, error) = run_status(&su, run).await;
+    assert_eq!(
+        (status.as_str(), error["code"].as_str()),
+        ("failed", Some("out_of_scope"))
+    );
+    let rows = turn_rows_of(&su, run).await;
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0]["reads"]["channels"], json!([lobby]), "{}", rows[0]);
+
+    // reads until the model-call bound -> `too_long`
+    let script = Script::new((0..10).map(|_| read()).collect());
+    let w = worker_with(script, |_| {}).await;
+    let run = enqueue_in(&pool, &t, t.channel_id, t.owner_id, "@oort 계속 읽어").await;
+    drain(&w).await;
+    let (status, error) = run_status(&su, run).await;
+    assert_eq!(
+        (status.as_str(), error["code"].as_str()),
+        ("failed", Some("too_long"))
+    );
+    let rows = turn_rows_of(&su, run).await;
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0]["reads"]["channels"], json!([lobby]), "{}", rows[0]);
+}
+
+/// **#5873** — a turn that read and then raised an approval card (a card that is not one of the
+/// sensitive ones) is on the record too: a `team_ai.turn` row written in the card's transaction,
+/// naming the channels read. The same ids are **not** in the card's payload, the approval row, the
+/// card message, or the proposal's own audit row (`via_ai` is what the card carries).
+#[tokio::test]
+#[ignore = "requires an isolated PostgreSQL 18 (see module docs)"]
+async fn a5873_a_turn_that_ends_in_a_card_still_names_the_channels_it_read() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let pool = momo_worker_pool().await;
+    reset_instance(&su).await;
+    let t = seed(&su, &pool).await;
+    seed_chat_link(&su, t.owner_id).await;
+    let (lobby, lobby_name) =
+        channel(&su, t.workspace_id, "public", &[t.owner_id, t.member_id]).await;
+    let script = Script::new(vec![
+        tools(&[("read_channel", json!({"channel": format!("#{lobby_name}")}))]),
+        tools(&[(
+            "workspace_action_propose",
+            json!({"actionId": "channel.create", "args": {"name": "new-5873"}, "rationale": "해요"}),
+        )]),
+    ]);
+    let w = worker_with(script, |_| {}).await;
+    let run = enqueue_in(&pool, &t, t.channel_id, t.owner_id, "@oort 채널 만들어 줘").await;
+    drain(&w).await;
+    let (status, _) = run_status(&su, run).await;
+    assert_eq!(
+        status, "awaiting_approval",
+        "anti-vacuity: a card was raised"
+    );
+    let rows = turn_rows_of(&su, run).await;
+    assert_eq!(rows.len(), 1, "one turn row for the card ending");
+    assert_eq!(rows[0]["outcome"], json!("proposed"));
+    assert_eq!(rows[0]["reads"]["channels"], json!([lobby]), "{}", rows[0]);
+    // the card, the approval and the proposal's own row never carry the channels that were read
+    let carried: Vec<String> = sqlx::query_scalar(
+        "SELECT to_jsonb(a)::text FROM approval a WHERE a.workspace_id = $1 \
+         UNION ALL SELECT to_jsonb(m)::text FROM message m WHERE m.workspace_id = $1 AND m.run_id = $2 \
+         UNION ALL SELECT detail::text FROM audit_log \
+           WHERE workspace_id = $1 AND run_id = $2 AND action = 'team_ai.proposed'",
+    )
+    .bind(t.workspace_id)
+    .bind(run)
+    .fetch_all(&su)
+    .await
+    .unwrap();
+    assert!(
+        carried.len() >= 3,
+        "anti-vacuity: approval, card and proposal row exist"
+    );
+    for text in carried {
+        assert!(
+            !text.contains(&lobby.to_string()),
+            "a channel that was read must not ride on the card: {text}"
+        );
+    }
+}
+
 /// **H13-A19** — the ledger's search count is the daily search ceiling: once
 /// it is reached the tool is withheld and the prompt says why.
 #[tokio::test]
@@ -1712,5 +2072,187 @@ async fn a_run_read_says_no_outcome_word_on_an_approval_row() {
             "단계 5: failed · tool_error",
         ],
         "an approval row says no outcome word, decider or not; a row that names none keeps its code: {text}"
+    );
+}
+
+/// A channel with a chosen name (the `channel()` helper above generates one).
+async fn named_channel(
+    su: &PgPool,
+    workspace: Uuid,
+    kind: &str,
+    name: &str,
+    members: &[Uuid],
+    archived: bool,
+) -> Uuid {
+    let id = Uuid::new_v4();
+    let dm_key = (kind == "dm").then(|| id.to_string());
+    sqlx::query(
+        "INSERT INTO channel (id, workspace_id, kind, name, dm_key, archived_at) \
+         VALUES ($1, $2, $3::channel_kind, $4, $5, CASE WHEN $6 THEN now() END)",
+    )
+    .bind(id)
+    .bind(workspace)
+    .bind(kind)
+    .bind(name)
+    .bind(dm_key)
+    .bind(archived)
+    .execute(su)
+    .await
+    .expect("named channel");
+    sqlx::query("INSERT INTO channel_seq (channel_id, workspace_id, last_seq) VALUES ($1, $2, 0)")
+        .bind(id)
+        .bind(workspace)
+        .execute(su)
+        .await
+        .expect("channel_seq");
+    for member in members {
+        join(su, workspace, id, *member).await;
+    }
+    id
+}
+
+/// **ADR-0225 D6 (#5828)** — the team AI finds a Hangul channel by any spelling
+/// the same fold accepts, and a name that is not a visible public/private channel
+/// is `not_found`: a group DM's room name, an archived channel.
+///
+/// | revert that makes it red |
+/// |---|
+/// | compare `lower(name) = lower($raw)` without `fold_channel_name` (blank, fullwidth and decomposed spellings miss) |
+/// | drop `kind IN ('public','private')` (the group DM room is read) |
+/// | drop `archived_at IS NULL` (the archived channel is read) |
+#[tokio::test]
+#[ignore = "requires an isolated PostgreSQL 18 (see module docs)"]
+async fn d6_a_hangul_channel_is_found_by_every_spelling_and_only_as_a_channel_5828() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let pool = momo_worker_pool().await;
+    reset_instance(&su).await;
+    let t = seed(&su, &pool).await;
+    seed_chat_link(&su, t.owner_id).await;
+    let everyone = [t.owner_id, t.member_id, t.agent_id];
+    let design = named_channel(
+        &su,
+        t.workspace_id,
+        "public",
+        "디자인-리뷰-qa",
+        &everyone,
+        false,
+    )
+    .await;
+    post(
+        &pool,
+        t.workspace_id,
+        design,
+        t.owner_id,
+        "ALPHA-디자인-5828",
+    )
+    .await;
+    // Same column, not channels: a group DM's room name and an archived channel.
+    let room = named_channel(&su, t.workspace_id, "dm", "비밀-방-5828", &everyone, false).await;
+    post(&pool, t.workspace_id, room, t.owner_id, "BRAVO-방-5828").await;
+    let old = named_channel(
+        &su,
+        t.workspace_id,
+        "public",
+        "옛-채널-5828",
+        &everyone,
+        true,
+    )
+    .await;
+    post(&pool, t.workspace_id, old, t.owner_id, "CHARLIE-옛-5828").await;
+
+    // "디자인" in decomposed jamo (NFD), then " 리뷰 QA".
+    let nfd = "\u{1103}\u{1175}\u{110C}\u{1161}\u{110B}\u{1175}\u{11AB} 리뷰 QA";
+    let spellings = [
+        "디자인-리뷰-qa".to_string(),
+        "#디자인 리뷰 QA".to_string(),
+        "\u{FF03}디자인-리뷰-\u{FF31}\u{FF21}".to_string(),
+        format!("  #{nfd}  "),
+    ];
+    let mut calls: Vec<(&str, Value)> = spellings
+        .iter()
+        .map(|name| ("read_channel", json!({"channel": name})))
+        .collect();
+    calls.push(("read_channel", json!({"channel": "#비밀-방-5828"})));
+    calls.push(("read_channel", json!({"channel": "#옛-채널-5828"})));
+    let script = Script::new(vec![tools(&calls), text("끝")]);
+    let w = worker_with(script.clone(), |_| {}).await;
+    // Asked in the member's own DM with the helper, so the reply room's audience
+    // is the requester's whole view and only the resolver stands in the way.
+    let (dm, _) = channel(&su, t.workspace_id, "dm", &[t.member_id, t.agent_id]).await;
+    enqueue_in(&pool, &t, dm, t.member_id, "디자인 채널 읽어 줘").await;
+    drain(&w).await;
+
+    let seen = script.seen();
+    assert_eq!(seen.len(), 2, "one read round, then the answer");
+    let data = fenced(&last_user_turn(&seen, 1));
+    assert_eq!(
+        data.matches("ALPHA-디자인-5828").count(),
+        spellings.len(),
+        "every spelling reads the same channel: {data}"
+    );
+    assert!(
+        !data.contains("BRAVO-방-5828"),
+        "a group DM room was read: {data}"
+    );
+    assert!(
+        !data.contains("CHARLIE-옛-5828"),
+        "an archived channel was read: {data}"
+    );
+    assert_eq!(
+        data.matches("not_found").count(),
+        2,
+        "the room and the archived channel are each not_found: {data}"
+    );
+}
+
+/// **ADR-0225 D6 (#5830 수리)** — a channel whose name was stored with capitals
+/// (the database never enforced the rule) is still found by its folded spelling:
+/// the stored side of the comparison is lower-cased too.
+///
+/// | revert that makes it red |
+/// |---|
+/// | compare the stored `name` as it is, without `lower()` |
+#[tokio::test]
+#[ignore = "requires an isolated PostgreSQL 18 (see module docs)"]
+async fn d6_a_channel_stored_with_capitals_is_found_by_its_folded_name_5830() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let pool = momo_worker_pool().await;
+    reset_instance(&su).await;
+    let t = seed(&su, &pool).await;
+    seed_chat_link(&su, t.owner_id).await;
+    let everyone = [t.owner_id, t.member_id, t.agent_id];
+    let legacy = named_channel(
+        &su,
+        t.workspace_id,
+        "public",
+        "Legacy-Room-5830",
+        &everyone,
+        false,
+    )
+    .await;
+    post(
+        &pool,
+        t.workspace_id,
+        legacy,
+        t.owner_id,
+        "DELTA-legacy-5830",
+    )
+    .await;
+
+    let calls = vec![("read_channel", json!({"channel": "#legacy room 5830"}))];
+    let script = Script::new(vec![tools(&calls), text("끝")]);
+    let w = worker_with(script.clone(), |_| {}).await;
+    let (dm, _) = channel(&su, t.workspace_id, "dm", &[t.member_id, t.agent_id]).await;
+    enqueue_in(&pool, &t, dm, t.member_id, "옛 채널 읽어 줘").await;
+    drain(&w).await;
+
+    let seen = script.seen();
+    assert_eq!(seen.len(), 2, "one read round, then the answer");
+    let data = fenced(&last_user_turn(&seen, 1));
+    assert!(
+        data.contains("DELTA-legacy-5830"),
+        "the capitalised channel is read: {data}"
     );
 }
