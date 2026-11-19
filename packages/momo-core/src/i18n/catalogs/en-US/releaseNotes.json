@@ -288,7 +288,7 @@
   "releaseNotes.v0147.channelsLine3": "A new channel shows 1 member right away, then a window opens to add members. The phone does the same.",
   "releaseNotes.v0147.channelsLine4": "Typing a Korean channel name no longer makes it flicker out of # in the composer, ⌘K or phone search.",
   "releaseNotes.v0147.channelsLine5": "In # in the composer, ⌘K and phone search, channel names follow your app language and numbers sort by value.",
-  "releaseNotes.v0147.channelsLine6": "Errors when creating a channel now appear in your app language, with no Korean on English screens.",
+  "releaseNotes.v0147.channelsLine6": "Errors when creating a channel now appear in your app language.",
   "releaseNotes.v0147.lookTopic": "Look and layout",
   "releaseNotes.v0147.lookLine1": "On web and desktop, channel and DM menus show an icon on every item, and copy and section moves open as submenus.",
   "releaseNotes.v0147.lookLine2": "On web and desktop, the Members tab shows each email and can search by it. Guests do not see email addresses.",

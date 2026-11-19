@@ -8327,7 +8327,7 @@ export const catalog: MessageCatalog = {
   "releaseNotes.v0147.channelsLine6": [
     {
       "type": 0,
-      "value": "채널 만들기가 실패할 때의 문장이 화면 언어로 나와요. 영어 화면에 한국어 문장이 섞이지 않아요."
+      "value": "채널 만들기가 실패할 때의 문장이 화면 언어로 나와요."
     }
   ],
   "releaseNotes.v0147.channelsTopic": [
@@ -8351,7 +8351,7 @@ export const catalog: MessageCatalog = {
   "releaseNotes.v0147.dmLeaveTryIt": [
     {
       "type": 0,
-      "value": "사이드바에서 사람과의 1:1 대화 줄을 우클릭해 보세요(폰은 길게 누르기). 「목록에서 숨기기」 아래에 「대화 나가기」가 있고, 누르면 무엇이 사라지는지 먼저 알려 줘요. 「취소」로 돌아올 수 있어요."
+      "value": "사이드바에서 사람과의 1:1 대화 줄을 우클릭해 보세요(폰은 길게 누르기). 메뉴의 「대화 나가기」를 누르면 무엇이 사라지는지 먼저 알려 줘요. 「취소」로 돌아올 수 있어요."
     }
   ],
   "releaseNotes.v0147.lookLine1": [

@@ -8745,7 +8745,7 @@ export const catalog: MessageCatalog = {
   "releaseNotes.v0147.channelsLine6": [
     {
       "type": 0,
-      "value": "Errors when creating a channel now appear in your app language, with no Korean on English screens."
+      "value": "Errors when creating a channel now appear in your app language."
     }
   ],
   "releaseNotes.v0147.channelsTopic": [
