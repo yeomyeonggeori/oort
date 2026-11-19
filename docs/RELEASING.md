@@ -120,6 +120,15 @@ migration이 든 릴리스면 PR 본문의 「되돌릴 때」 줄을 CHANGELOG 
 
 서버 이미지의 `ort-payload` 단계는 ONNX Runtime 라이브러리를 Microsoft 릴리스에서 받지 못하면 `server-rust/Dockerfile` 머리의 `ORT_OWN_IMAGE`(이미 발행한 앱 이미지, 목록 digest 고정)에서 가져온다(#5995). 그 이미지는 빌드마다 당겨지므로 GHCR에서 그 digest를 지우면 둘째 길만이 아니라 이 단계가 늘 실패한다 — 지우기 전에 `ORT_OWN_IMAGE`를 같은 `ORT_VERSION`으로 만든 다른 발행본으로 옮긴다.
 
+dispatch 전에 그 digest가 풀리는지 확인한다(종료 0). `imagetools inspect`는 셸의 ghcr.io 로그인을 쓰므로, 로그인된 맥이면 둘째 줄(익명 토큰으로 manifest 조회, 200)이 익명 확인이다:
+
+```sh
+docker buildx imagetools inspect "$(sed -n 's/^ARG ORT_OWN_IMAGE=//p' server-rust/Dockerfile)"
+ref="$(sed -n 's/^ARG ORT_OWN_IMAGE=//p' server-rust/Dockerfile)"; tok="$(curl -fsS 'https://ghcr.io/token?scope=repository:yeomyeonggeori/oort:pull' | python3 -c 'import json,sys;print(json.load(sys.stdin)["token"])')"; curl -fsSI -o /dev/null -H "Authorization: Bearer $tok" -H 'Accept: application/vnd.oci.image.index.v1+json' "https://ghcr.io/v2/yeomyeonggeori/oort/manifests/${ref##*@}"
+```
+
+발행 런이 끝나면 두 아키텍처 빌드 로그의 `ort-payload: source=` 줄을 보고 어느 길을 탔는지(`upstream` / `own-image@…`) 발행 기록에 적는다 — 런은 어느 쪽이든 초록이라, 바깥 주소가 돌아온 뒤에도 둘째 길에 기대는지는 이 줄로만 보인다.
+
 ---
 
 ## 2. 발행 (dispatch · owner 승인)

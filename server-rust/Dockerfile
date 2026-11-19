@@ -122,13 +122,15 @@ RUN set -eux; \
 # library needs GLIBCXX <= 3.4.21 and GLIBC <= 2.27, which the runtime base has. LICENSE and
 # ThirdPartyNotices.txt travel with it.
 #
-# Two sources, one result (#5995):
+# Two sources, one result (#5995, ADR-0196 D8 증보):
 #   1. upstream — Microsoft's release tgz for the pinned version, checked against its sha256 per CPU
 #      architecture. A tgz that downloads but does not match FAILS the build: a tamper signal is never
 #      answered by switching sources.
-#   2. own image — only when the upstream download itself fails (curl exits non-zero, e.g. the release
-#      URL is gone): the same three files from `ORT_OWN_IMAGE`, an earlier oort app image built from
-#      that same pinned tgz, pinned by digest and resolved to the build's target platform.
+#   2. own image — only when the upstream download itself fails, i.e. curl exits 6, 7, 18, 22, 28 or 56
+#      (name lookup, connect, partial transfer, HTTP error such as 404, timeout, receive failure): the
+#      same three files from `ORT_OWN_IMAGE`, an earlier oort app image built from that same pinned
+#      tgz, pinned by digest and resolved to the build's target platform. Any other curl failure (a TLS
+#      handshake or certificate error among them) fails the build with curl's exit code.
 # Whichever source ran, the library is then checked against its own sha256 per architecture and both
 # licence files against theirs, so the image carries the same bytes either way, and the log says which
 # source ran (`ort-payload: source=upstream` / `source=own-image@sha256:...`).
@@ -167,20 +169,24 @@ RUN --mount=type=bind,from=ort-own-image,source=/opt/momo/lib,target=/own/lib \
     curl --fail --silent --show-error --proto '=https' --proto-redir '=https' --location --retry 3 --retry-delay 2 -o ort.tgz \
       "https://github.com/microsoft/onnxruntime/releases/download/v${ORT_VERSION}/onnxruntime-linux-${arch}-${ORT_VERSION}.tgz" \
       || rc=$?; \
-    if [ "$rc" -eq 0 ]; then \
-      echo "${sha}  ort.tgz" | sha256sum -c; \
-      tar -xzf ort.tgz --strip-components=1; \
-      install -Dm755 "lib/libonnxruntime.so.${ORT_VERSION}" /out/lib/libonnxruntime.so; \
-      install -Dm644 LICENSE /out/licenses/LICENSE; \
-      install -Dm644 ThirdPartyNotices.txt /out/licenses/ThirdPartyNotices.txt; \
-      source=upstream; \
-    else \
-      echo "ort-payload: upstream download failed (curl exit $rc); using the pinned own image" >&2; \
-      install -Dm755 /own/lib/libonnxruntime.so /out/lib/libonnxruntime.so; \
-      install -Dm644 /own/licenses/LICENSE /out/licenses/LICENSE; \
-      install -Dm644 /own/licenses/ThirdPartyNotices.txt /out/licenses/ThirdPartyNotices.txt; \
-      source="own-image@${ORT_OWN_IMAGE##*@}"; \
-    fi; \
+    case "$rc" in \
+      0) \
+        echo "${sha}  ort.tgz" | sha256sum -c; \
+        tar -xzf ort.tgz --strip-components=1; \
+        install -Dm755 "lib/libonnxruntime.so.${ORT_VERSION}" /out/lib/libonnxruntime.so; \
+        install -Dm644 LICENSE /out/licenses/LICENSE; \
+        install -Dm644 ThirdPartyNotices.txt /out/licenses/ThirdPartyNotices.txt; \
+        source=upstream ;; \
+      6|7|18|22|28|56) \
+        echo "ort-payload: upstream download failed (curl exit $rc); using the pinned own image" >&2; \
+        install -Dm755 /own/lib/libonnxruntime.so /out/lib/libonnxruntime.so; \
+        install -Dm644 /own/licenses/LICENSE /out/licenses/LICENSE; \
+        install -Dm644 /own/licenses/ThirdPartyNotices.txt /out/licenses/ThirdPartyNotices.txt; \
+        source="own-image@${ORT_OWN_IMAGE##*@}" ;; \
+      *) \
+        echo "ort-payload: upstream curl exit $rc is not a plain download failure; not switching sources" >&2; \
+        exit "$rc" ;; \
+    esac; \
     echo "${lib_sha}  /out/lib/libonnxruntime.so" | sha256sum -c; \
     echo "${ORT_LICENSE_SHA256}  /out/licenses/LICENSE" | sha256sum -c; \
     echo "${ORT_NOTICES_SHA256}  /out/licenses/ThirdPartyNotices.txt" | sha256sum -c; \
