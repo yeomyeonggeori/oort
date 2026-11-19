@@ -98,8 +98,10 @@ committed to git: the model is downloaded at image build from a pinned Hugging F
 verified by sha256 (`server-rust/model/e5-small-int8.sha256`, `server-rust/Dockerfile` stage
 `model-payload`); the ONNX Runtime shared library is Microsoft's own release
 (`onnxruntime-linux-<arch>-1.28.2.tgz` from github.com/microsoft/onnxruntime, sha256-pinned per
-architecture in the Dockerfile stage `ort-payload`) and is loaded at run time by `momo-agent-worker`
-through `ORT_DYLIB_PATH`.
+architecture in the Dockerfile stage `ort-payload`; when that download fails, the same library and
+licence files are taken from an earlier oort app image pinned by digest, and either way the library
+and both licence files are checked against their own pinned sha256) and is loaded at run time by
+`momo-agent-worker` through `ORT_DYLIB_PATH`.
 
 | Component | Version / revision | License | Where it lives | Attribution |
 |---|---|---|---|---|
