@@ -8,6 +8,7 @@ import {
   type MessageAttachment,
 } from "@momo/core/features/attachments/model";
 import { Tooltip } from "@/design/ui/tooltip";
+import { useRowTipSide } from "@/features/timeline/rowTipSide";
 
 // 타임라인 카드와 라이트박스가 같은 내려받기 상태를 쓴다. 바쁜 동안에도 버튼을
 // 비활성화하지 않는 이유는 AttachmentList의 기존 계약 그대로다: 비활성은
@@ -36,8 +37,11 @@ export function AttachmentDownloadButton({
   busy?: boolean;
   /** 좁은 화면에서도 독립 조작점인 경우 44px 터치 타깃을 보장한다. */
   tapTarget?: boolean;
-  /** 툴팁 방향. 아래에 알약 높이만큼의 자리가 없는 자리(타임라인 맨 아래 글의 파일 카드)는 위로 돌린다(#5965). */
-  tooltipSide?: "top" | "bottom";
+  /**
+   * 툴팁 방향. 아래에 알약 높이만큼의 자리가 없는 자리는 위로 돌린다(#5965). `row`는 대화 줄의 파일 카드: 열릴 때 단추 자리로
+   * 가른다 — 스크롤 칸 맨 위 띠에 걸리면 아래, 그 밖은 위(#5980, `rowTipSide.ts`).
+   */
+  tooltipSide?: "top" | "bottom" | "row";
   /** 이 버튼이 선 표면이 모양을 바꿀 때(라이트박스의 둥근 유리 버튼). 기본 모양 뒤에 합쳐지므로 같은 축은 이쪽이 이긴다. */
   className?: string;
   onBusyChange?: (busy: boolean) => void;
@@ -46,16 +50,20 @@ export function AttachmentDownloadButton({
 }) {
   const [localBusy, setLocalBusy] = useState(false);
   const busy = controlledBusy ?? localBusy;
+  const tip = useRowTipSide();
+  const byRow = tooltipSide === "row";
   const setBusy = (next: boolean) => {
     if (controlledBusy === undefined) setLocalBusy(next);
     onBusyChange?.(next);
   };
 
   return (
-    <Tooltip label={busy ? ATTACH_COPY.downloading : ATTACH_COPY.download} side={tooltipSide}>
+    <Tooltip label={busy ? ATTACH_COPY.downloading : ATTACH_COPY.download} side={byRow ? tip.side : tooltipSide}>
       <button
         type="button"
         aria-busy={busy || undefined}
+        onPointerEnter={byRow ? tip.probe : undefined}
+        onFocus={byRow ? tip.probe : undefined}
         onClick={() => {
           // 두 번 누르면 두 번 받는다. 막는 대신 같은 요청을 다시 보내지 않게만
           // 한다. 비활성화는 포커스를 <body>로 던지고 돌려주지 않는다.

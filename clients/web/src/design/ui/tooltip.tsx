@@ -3,7 +3,7 @@ import { createPortal } from "react-dom";
 import { cn } from "@/design/lib/cn";
 import { tooltipGroup } from "./tooltipGroup";
 import { TOOLTIP_DELAY_MS, TOOLTIP_MOTION } from "@/design/motion";
-import { fitTooltipElement, TOOLTIP_EDGE_PAD } from "./tooltipFit";
+import { clipRange, fitTooltipElement, TOOLTIP_EDGE_PAD } from "./tooltipFit";
 
 // 공용 툴팁 (#4324). Buzz `shared/ui/tooltip.tsx`의 동작을 우리 토큰으로 옮긴 것이다.
 //
@@ -37,6 +37,9 @@ import { fitTooltipElement, TOOLTIP_EDGE_PAD } from "./tooltipFit";
  */
 export type TooltipSide = "top" | "bottom" | "right";
 
+/** 위·아래 알약과 트리거 사이의 틈(px). 감싸개 안에 그릴 때의 `mb-1`/`mt-1`과 같은 4다. `portal`의 자리 계산이 쓴다. */
+const TOOLTIP_GAP = 4;
+
 /** 트리거 기준 가로 정렬. `end`는 오른쪽 끝을 트리거 오른쪽 끝에 맞춘다(가장자리 단추의 툴팁이 잘리지 않게). */
 export type TooltipAlign = "center" | "end";
 
@@ -45,6 +48,13 @@ interface TooltipProps {
   label: string | undefined;
   side?: TooltipSide;
   align?: TooltipAlign;
+  /**
+   * `top`·`bottom`도 `right`처럼 `document.body`에 창 기준으로 그린다(#5980). 트리거가 자르는 조상 안에 있어 위로도 아래로도
+   * 알약이 잘리는 자리(이모티콘 창의 가로 스크롤 묶음 띠)에만 켠다. 기본은 끔이라 다른 자리의 마크업·동작은 그대로다.
+   * 켜면 알약은 떠 있는 표면(`layer-overlay-surface`, 팝오버 위)에 서고, 가로는 창 안으로 민다. 조상이 스크롤하면 다시 재고,
+   * 트리거가 그 조상의 보이는 폭 밖으로 나가면 닫는다.
+   */
+  portal?: boolean;
   /** 처음부터 떠 있게 한다(갤러리·캡처 전용). 평소는 가리키거나 키보드 초점일 때만 뜬다. */
   defaultOpen?: boolean;
   /** 지연 덮어쓰기. 시험이 쓴다. 기본은 `TOOLTIP_DELAY_MS`. */
@@ -79,6 +89,7 @@ export function Tooltip({
   label,
   side = "top",
   align = "center",
+  portal = false,
   defaultOpen = false,
   delayMs = TOOLTIP_DELAY_MS,
   className,
@@ -96,19 +107,50 @@ export function Tooltip({
   React.useLayoutEffect(() => {
     const tip = tipRef.current;
     if (!open || tip === null) return;
-    if (side !== "right") {
+    if (side !== "right" && !portal) {
       fitTooltipElement(tip, align);
       return;
     }
     const anchor = wrapRef.current;
     if (anchor === null) return;
-    const box = anchor.getBoundingClientRect();
     const pad = TOOLTIP_EDGE_PAD;
-    const x = Math.min(box.right + pad, Math.max(pad, window.innerWidth - tip.offsetWidth - pad));
-    const y = Math.min(Math.max(pad, box.top + box.height / 2 - tip.offsetHeight / 2), Math.max(pad, window.innerHeight - tip.offsetHeight - pad));
-    tip.style.setProperty("--tooltip-x", String(Math.round(x)));
-    tip.style.setProperty("--tooltip-y", String(Math.round(y)));
-  }, [open, label, align, side]);
+    // 창 기준 자리. 크기는 `offset*`로 읽는다(나타남 애니메이션의 축소가 상자에 섞이지 않게).
+    const place = () => {
+      const box = anchor.getBoundingClientRect();
+      const width = tip.offsetWidth;
+      const height = tip.offsetHeight;
+      const x =
+        side === "right"
+          ? Math.min(box.right + pad, Math.max(pad, window.innerWidth - width - pad))
+          : Math.min(Math.max(pad, box.left + box.width / 2 - width / 2), Math.max(pad, window.innerWidth - width - pad));
+      const natural =
+        side === "right"
+          ? box.top + box.height / 2 - height / 2
+          : side === "top"
+            ? box.top - height - TOOLTIP_GAP
+            : box.bottom + TOOLTIP_GAP;
+      const y = Math.min(Math.max(pad, natural), Math.max(pad, window.innerHeight - height - pad));
+      tip.style.setProperty("--tooltip-x", String(Math.round(x)));
+      tip.style.setProperty("--tooltip-y", String(Math.round(y)));
+    };
+    place();
+    if (!portal) return;
+    // 트리거를 품은 조상이 스크롤하면(띠를 가로로 밀기, 키보드 초점이 띠를 미는 것 포함) 알약이 따라간다. 트리거의 가운데가 자르는
+    // 조상의 보이는 폭 밖으로 나가면 가리킬 것이 안 보이므로 닫는다.
+    const onScroll = (event: Event) => {
+      if (!(event.target instanceof Node) || !event.target.contains(anchor)) return;
+      const box = anchor.getBoundingClientRect();
+      const middle = box.left + box.width / 2;
+      const range = clipRange(anchor);
+      if (middle < range.left || middle > range.right) {
+        setOpen(false);
+        return;
+      }
+      place();
+    };
+    document.addEventListener("scroll", onScroll, true);
+    return () => document.removeEventListener("scroll", onScroll, true);
+  }, [open, label, align, side, portal]);
 
   const clear = React.useCallback(() => {
     if (timer.current !== null) {
@@ -145,7 +187,7 @@ export function Tooltip({
   React.useEffect(() => tooltipGroup.attach(), []);
 
   const renderTip = () => {
-    const fixed = side === "right";
+    const fixed = side === "right" || portal;
     const tip = (
       <span
         ref={tipRef}
@@ -158,7 +200,7 @@ export function Tooltip({
         data-fixed={fixed ? "" : undefined}
         className={
           fixed
-            ? cn("tooltip-surface layer-content-float text-meta", TOOLTIP_MOTION)
+            ? cn("tooltip-surface text-meta", portal ? "layer-overlay-surface" : "layer-content-float", TOOLTIP_MOTION)
             : cn(TOOLTIP_CLASS, TOOLTIP_SIDE_CLASS[side], TOOLTIP_MOTION, align === "end" && TOOLTIP_END_CLASS)
         }
       >

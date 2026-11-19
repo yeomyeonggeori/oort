@@ -184,6 +184,21 @@ describe("세트 띠", () => {
     expect(bare.view.container.querySelector("[data-strip='recent']")).toBeNull();
   });
 
+  it("띠 단추의 툴팁은 띠의 스크롤 칸 밖(document.body)에 그려진다 - 칸 안에 그리면 위든 아래든 잘린다(#5980)", async () => {
+    const { view } = await mount(storeOf(ITEMS, { starred: ["dam_a"] }));
+    const scroller = stripOf(view).querySelector<HTMLElement>("[data-strip]")!.parentElement!.parentElement!;
+    for (const id of ["favorites", "set:dam"]) {
+      const button = stripOf(view).querySelector<HTMLElement>(`[data-strip='${id}']`)!;
+      button.matches = (selector: string) => selector === ":focus-visible" || Element.prototype.matches.call(button, selector);
+      act(() => { button.dispatchEvent(new FocusEvent("focusin", { bubbles: true })); });
+      const tip = document.querySelector<HTMLElement>('[data-testid="tooltip"]');
+      expect(tip?.textContent).toBe(button.getAttribute("aria-label"));
+      expect(tip?.parentElement).toBe(document.body);
+      expect(scroller.contains(tip)).toBe(false);
+      act(() => { button.dispatchEvent(new FocusEvent("focusout", { bubbles: true })); });
+    }
+  });
+
   it("단추를 누르면 그 구역으로 스크롤하고 지금 구역을 표시한다", async () => {
     const { view } = await mount(storeOf(ITEMS, { used: ["solo"], starred: ["dam_a"] }));
     const grid = view.getByTestId("expression-grid");

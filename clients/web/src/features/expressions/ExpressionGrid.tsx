@@ -191,7 +191,8 @@ export function ExpressionGrid({ sections, empty, cellLabel, disabled, onPick, m
             const Icon = SECTION_ICON[section.kind];
             const first = section.items[0];
             return (
-              <Tooltip key={section.id} label={nameOf(section)} side="top">
+              // 띠는 가로 스크롤 칸이라(세로도 `auto`로 계산된다) 안에 그린 알약은 위든 아래든 잘린다: 칸 밖(`document.body`)에 그린다(#5980).
+              <Tooltip key={section.id} label={nameOf(section)} side="top" portal>
                 <button
                   type="button"
                   aria-label={nameOf(section)}
