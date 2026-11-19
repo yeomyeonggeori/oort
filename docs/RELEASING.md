@@ -118,6 +118,8 @@ migration이 든 릴리스면 PR 본문의 「되돌릴 때」 줄을 CHANGELOG 
 
 새 크레이트·빈이 들어간 릴리스면 `scripts/check_dockerfile_crates.sh` 도 통과시킨다 — `server-rust/Dockerfile` 의존성 캐시 COPY 목록이 워크스페이스 멤버와 어긋나면 이미지 빌드만 깨진다(v0.1.27 publish 실패, #3876). PR CI `alignment` 잡이 `scripts/check_ghcr_notice_bundle.sh` 경유로 같은 검사를 매 PR 돈다.
 
+서버 이미지의 `ort-payload` 단계는 ONNX Runtime 라이브러리를 Microsoft 릴리스에서 받지 못하면 `server-rust/Dockerfile` 머리의 `ORT_OWN_IMAGE`(이미 발행한 앱 이미지, 목록 digest 고정)에서 가져온다(#5995). 그 이미지는 빌드마다 당겨지므로 GHCR에서 그 digest를 지우면 둘째 길만이 아니라 이 단계가 늘 실패한다 — 지우기 전에 `ORT_OWN_IMAGE`를 같은 `ORT_VERSION`으로 만든 다른 발행본으로 옮긴다.
+
 ---
 
 ## 2. 발행 (dispatch · owner 승인)

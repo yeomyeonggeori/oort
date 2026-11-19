@@ -56,6 +56,9 @@
 ARG RUST_IMAGE=rust:1-slim-bookworm
 ARG NODE_IMAGE=node:22-bookworm-slim
 ARG RUNTIME_IMAGE=debian:bookworm-slim
+# Second source of the ONNX Runtime library (stage `ort-payload`): an already-published oort app image,
+# pinned by its multi-arch list digest (never a tag). See `ort-payload` for when it is used.
+ARG ORT_OWN_IMAGE=ghcr.io/yeomyeonggeori/oort@sha256:90de32c299efc5fffa8cdc7c504a1d9f050b8ca06d09542700b7fb40e8aacdc8
 
 # Cheap proof stage: `docker build --target sql-payload` copies the bootstrap
 # SQL without waiting on cargo/npm. The runtime stage still COPYs the same
@@ -91,7 +94,8 @@ ARG MOMO_BUILD_SHA=unknown
 # with `build`, so a code change does not re-download the model and a model bump does not recompile.
 #
 # Build-time external downloads of the whole image (both hash-pinned): this stage (huggingface.co)
-# and `ort-payload` below (github.com/microsoft/onnxruntime releases). cargo itself needs neither.
+# and `ort-payload` below (github.com/microsoft/onnxruntime releases, with our own published image
+# on ghcr.io as its second source). cargo itself needs neither.
 FROM ${RUNTIME_IMAGE} AS model-payload
 ARG E5_SMALL_REVISION=614241f622f53c4eeff9890bdc4f31cfecc418b3
 WORKDIR /models/e5-small-int8
@@ -112,32 +116,75 @@ RUN set -eux; \
 # ---------------------------------------------------------------------------
 # ort-payload — ONNX Runtime shared library for the memory embedder (#3173)
 # ---------------------------------------------------------------------------
-# Microsoft's own release build (MIT), pinned by version and sha256 per CPU architecture, loaded at
-# run time through `ORT_DYLIB_PATH` (`ort-load-dynamic`, see crates/momo-embed/Cargo.toml). Why not
-# `ort`'s prebuilt static library: it is built with a newer GCC than bookworm's, so linking it
-# here fails on libstdc++ symbols (`__cxa_call_terminate`). This library needs GLIBCXX <= 3.4.21 and
-# GLIBC <= 2.27, which the runtime base has. LICENSE and ThirdPartyNotices.txt travel with it.
+# Microsoft's own release build (MIT), loaded at run time through `ORT_DYLIB_PATH` (`ort-load-dynamic`,
+# see crates/momo-embed/Cargo.toml). Why not `ort`'s prebuilt static library: it is built with a newer
+# GCC than bookworm's, so linking it here fails on libstdc++ symbols (`__cxa_call_terminate`). This
+# library needs GLIBCXX <= 3.4.21 and GLIBC <= 2.27, which the runtime base has. LICENSE and
+# ThirdPartyNotices.txt travel with it.
+#
+# Two sources, one result (#5995):
+#   1. upstream — Microsoft's release tgz for the pinned version, checked against its sha256 per CPU
+#      architecture. A tgz that downloads but does not match FAILS the build: a tamper signal is never
+#      answered by switching sources.
+#   2. own image — only when the upstream download itself fails (curl exits non-zero, e.g. the release
+#      URL is gone): the same three files from `ORT_OWN_IMAGE`, an earlier oort app image built from
+#      that same pinned tgz, pinned by digest and resolved to the build's target platform.
+# Whichever source ran, the library is then checked against its own sha256 per architecture and both
+# licence files against theirs, so the image carries the same bytes either way, and the log says which
+# source ran (`ort-payload: source=upstream` / `source=own-image@sha256:...`).
+# The own image is a mount of this RUN, so every uncached build resolves it, even when upstream works:
+# if that digest is deleted from GHCR, this stage fails until ORT_OWN_IMAGE points at another release.
+# Bumping ORT_VERSION means new ORT_LIB_SHA256_* values, and the own-image source cannot pass until
+# ORT_OWN_IMAGE moves to a release built with that version.
+FROM ${ORT_OWN_IMAGE} AS ort-own-image
+
 FROM ${RUNTIME_IMAGE} AS ort-payload
 ARG ORT_VERSION=1.28.2
 ARG ORT_SHA256_X64=d7209b8751b27b862b0c76332c2e20e203396edb5dab700ecf4bb485cf147415
 ARG ORT_SHA256_AARCH64=f020b3d31106cc7db03889b4a5c21e7c38ce4a09ad26119c11d1ad6d3fa0ec04
+# sha256 of lib/libonnxruntime.so.<version> inside those tgz files (= /out/lib/libonnxruntime.so).
+ARG ORT_LIB_SHA256_X64=088f24b1fc56714d3efaaeb3ac2ee486a5d7b50ccfbb3dd26fd1a612534a05fb
+ARG ORT_LIB_SHA256_AARCH64=01fc142511bd585db60446eb7531e07cc4160e90fb4664fe04a988457d62305f
+# The two licence files are byte-identical in both architectures' tgz.
+ARG ORT_LICENSE_SHA256=2f07c72751aed99790b8a4869cf2311df85a860b22ded05fa22803587a48922c
+ARG ORT_NOTICES_SHA256=0e07b95f3a8d6230037707c5c4a2b554d12c4cb67369669ac255635528ffcee2
+ARG ORT_OWN_IMAGE
 WORKDIR /ort
-RUN set -eux; \
+RUN --mount=type=bind,from=ort-own-image,source=/opt/momo/lib,target=/own/lib \
+    --mount=type=bind,from=ort-own-image,source=/usr/share/licenses/momo-rust/onnxruntime,target=/own/licenses \
+    set -eux; \
+    printf '%s\n' "${ORT_OWN_IMAGE}" | grep -Eq '@sha256:[0-9a-f]{64}$' \
+      || { echo "ORT_OWN_IMAGE must be pinned by digest: ${ORT_OWN_IMAGE}" >&2; exit 1; }; \
     apt-get update; \
     apt-get install -y --no-install-recommends ca-certificates curl; \
     rm -rf /var/lib/apt/lists/*; \
     case "$(uname -m)" in \
-      x86_64)  arch=x64;     sha="${ORT_SHA256_X64}" ;; \
-      aarch64) arch=aarch64; sha="${ORT_SHA256_AARCH64}" ;; \
+      x86_64)  arch=x64;     sha="${ORT_SHA256_X64}";     lib_sha="${ORT_LIB_SHA256_X64}" ;; \
+      aarch64) arch=aarch64; sha="${ORT_SHA256_AARCH64}"; lib_sha="${ORT_LIB_SHA256_AARCH64}" ;; \
       *) echo "no pinned ONNX Runtime for $(uname -m)" >&2; exit 1 ;; \
     esac; \
+    rc=0; \
     curl --fail --silent --show-error --proto '=https' --proto-redir '=https' --location --retry 3 --retry-delay 2 -o ort.tgz \
-      "https://github.com/microsoft/onnxruntime/releases/download/v${ORT_VERSION}/onnxruntime-linux-${arch}-${ORT_VERSION}.tgz"; \
-    echo "${sha}  ort.tgz" | sha256sum -c; \
-    tar -xzf ort.tgz --strip-components=1; \
-    install -Dm755 "lib/libonnxruntime.so.${ORT_VERSION}" /out/lib/libonnxruntime.so; \
-    install -Dm644 LICENSE /out/licenses/LICENSE; \
-    install -Dm644 ThirdPartyNotices.txt /out/licenses/ThirdPartyNotices.txt; \
+      "https://github.com/microsoft/onnxruntime/releases/download/v${ORT_VERSION}/onnxruntime-linux-${arch}-${ORT_VERSION}.tgz" \
+      || rc=$?; \
+    if [ "$rc" -eq 0 ]; then \
+      echo "${sha}  ort.tgz" | sha256sum -c; \
+      tar -xzf ort.tgz --strip-components=1; \
+      install -Dm755 "lib/libonnxruntime.so.${ORT_VERSION}" /out/lib/libonnxruntime.so; \
+      install -Dm644 LICENSE /out/licenses/LICENSE; \
+      install -Dm644 ThirdPartyNotices.txt /out/licenses/ThirdPartyNotices.txt; \
+      source=upstream; \
+    else \
+      echo "ort-payload: upstream download failed (curl exit $rc); using the pinned own image" >&2; \
+      install -Dm755 /own/lib/libonnxruntime.so /out/lib/libonnxruntime.so; \
+      install -Dm644 /own/licenses/LICENSE /out/licenses/LICENSE; \
+      install -Dm644 /own/licenses/ThirdPartyNotices.txt /out/licenses/ThirdPartyNotices.txt; \
+      source="own-image@${ORT_OWN_IMAGE##*@}"; \
+    fi; \
+    echo "${lib_sha}  /out/lib/libonnxruntime.so" | sha256sum -c; \
+    echo "${ORT_LICENSE_SHA256}  /out/licenses/LICENSE" | sha256sum -c; \
+    echo "${ORT_NOTICES_SHA256}  /out/licenses/ThirdPartyNotices.txt" | sha256sum -c; \
+    echo "ort-payload: source=${source}"; \
     ls -lR /out
 
 # ---------------------------------------------------------------------------
