@@ -352,13 +352,17 @@ async fn seed(pool: &PgPool) -> Fixture {
     let static_agent = seed_sentinel_agent(pool, workspace, owner, "staticagent").await;
 
     let channel = Uuid::new_v4();
-    sqlx::query("INSERT INTO channel(id, workspace_id, kind, name) VALUES($1,$2,'public',$3)")
-        .bind(channel)
-        .bind(workspace)
-        .bind(format!("general-{}", channel.simple()))
-        .execute(pool)
-        .await
-        .expect("seed channel");
+    // Listed in channel browse, as a new public channel is (ADR-0224 D2): open to people (D13).
+    sqlx::query(
+        "INSERT INTO channel(id, workspace_id, kind, name, browse_listed) \
+         VALUES($1,$2,'public',$3,true)",
+    )
+    .bind(channel)
+    .bind(workspace)
+    .bind(format!("general-{}", channel.simple()))
+    .execute(pool)
+    .await
+    .expect("seed channel");
     sqlx::query("INSERT INTO channel_seq(channel_id, workspace_id, last_seq) VALUES($1,$2,0)")
         .bind(channel)
         .bind(workspace)

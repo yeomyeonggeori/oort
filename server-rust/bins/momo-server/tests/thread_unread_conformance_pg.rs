@@ -970,6 +970,7 @@ async fn the_read_state_line_carries_the_followed_total_and_the_routes_signal_it
             "channel_id",
             "closed_at_seq",
             "followed_unread_reply_count",
+            "history_from_seq",
             "last_read_seq",
             "latest_readable_seq",
             "latest_seq",
@@ -977,7 +978,11 @@ async fn the_read_state_line_carries_the_followed_total_and_the_routes_signal_it
             "mention_count",
             "unread_count",
         ],
-        "exactly one key more than before: {line}"
+        "the line's exact key set (ADR-0177 D18 added history_from_seq): {line}"
+    );
+    assert!(
+        line["history_from_seq"].is_null(),
+        "alice never left a 1:1, so her floor is null (full history): {line}"
     );
     assert_eq!(
         read_state_line(&http, &base, &bob_token, workspace, channel).await

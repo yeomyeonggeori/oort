@@ -21,11 +21,23 @@ use crate::error::DbError;
 tokio::task_local! {
     /// ADR-0217: server-authenticated agent, never a request argument.
     pub static REQUEST_AGENT_MEMBER: Uuid;
+    /// ADR-0177 증보 D17: the server-authenticated **human** requester, never a request argument.
+    /// Scoped by the two human principal doors (`require_principal`'s human branch and
+    /// `require_dev_principal`) around the rest of the request, and read only by
+    /// [`bind_workspace_guc`] into `app.requester_member_id` — the value the `message` read policy
+    /// `dm_leave_history_floor` (migration 180) compares against `membership.history_from_seq`.
+    /// Distinct from the owner-scope `app.member_id`, which a transaction may clear or point at
+    /// another member; nothing but this task-local writes the requester value.
+    pub static REQUEST_HUMAN_MEMBER: Uuid;
 }
 
 /// Set the tenant RLS GUC on an open transaction. `SET LOCAL` semantics via
 /// `set_config(_, _, is_local => true)`, byte-for-byte the Swift statement so
 /// the RLS policies behave identically.
+///
+/// The second statement binds the two request-local actors in one round trip: the agent
+/// (ADR-0217) and the human requester (ADR-0177 증보 D17). Each is `''` outside its scope, which
+/// every policy reading it treats as "no actor" through `NULLIF`.
 async fn bind_workspace_guc(
     tx: &mut Transaction<'_, Postgres>,
     workspace_id: Uuid,
@@ -37,10 +49,17 @@ async fn bind_workspace_guc(
     let agent = REQUEST_AGENT_MEMBER
         .try_with(|id| id.to_string())
         .unwrap_or_default();
-    sqlx::query("SELECT set_config('app.agent_member_id', $1, true)")
-        .bind(agent)
-        .execute(&mut **tx)
-        .await?;
+    let requester = REQUEST_HUMAN_MEMBER
+        .try_with(|id| id.to_string())
+        .unwrap_or_default();
+    sqlx::query(
+        "SELECT set_config('app.agent_member_id', $1, true), \
+                set_config('app.requester_member_id', $2, true)",
+    )
+    .bind(agent)
+    .bind(requester)
+    .execute(&mut **tx)
+    .await?;
     Ok(())
 }
 

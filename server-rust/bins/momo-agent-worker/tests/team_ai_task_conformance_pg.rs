@@ -603,6 +603,18 @@ fn plan_of(items: &[(&str, &str)]) -> Value {
     )
 }
 
+/// How many `team_ai.turn` rows of the run carry the `reads` key (#5873).
+async fn turn_rows_with_reads(su: &PgPool, run: Uuid) -> i64 {
+    sqlx::query_scalar(
+        "SELECT count(*) FROM audit_log \
+          WHERE run_id = $1 AND action = 'team_ai.turn' AND detail->'reads'->'channels' IS NOT NULL",
+    )
+    .bind(run)
+    .fetch_one(su)
+    .await
+    .unwrap()
+}
+
 async fn turn_outcomes(su: &PgPool, run: Uuid) -> Vec<String> {
     sqlx::query_scalar::<_, String>(
         "SELECT detail->>'outcome' FROM audit_log \
@@ -876,6 +888,11 @@ async fn t1_a_first_step_that_continues_starts_a_task() {
         ["조사 중 · 1／3 · 가격 비교하기"]
     );
     assert_eq!(turn_outcomes(&su, run).await, ["task_started"]);
+    assert_eq!(
+        turn_rows_with_reads(&su, run).await,
+        1,
+        "#5873: the row carries the reads"
+    );
     let audit_text: String = sqlx::query_scalar::<_, Value>(
         "SELECT detail FROM audit_log WHERE run_id = $1 AND action = 'team_ai.turn'",
     )
@@ -953,6 +970,11 @@ async fn t2_steps_go_on_and_end_in_one_report() {
     assert_eq!(
         turn_outcomes(&su, run).await,
         ["task_started", "task_step", "answered"]
+    );
+    assert_eq!(
+        turn_rows_with_reads(&su, run).await,
+        3,
+        "#5873: every step's row carries its own reads"
     );
     assert_eq!(
         stage_labels(&su, run).await,

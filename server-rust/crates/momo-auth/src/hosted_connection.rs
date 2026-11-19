@@ -696,7 +696,7 @@ pub async fn confirm_hosted_connection_in_tx(
          ), valid_channels AS ( \
            SELECT count(*)::bigint AS count FROM unnest($7::uuid[]) channel_id \
             WHERE EXISTS (SELECT 1 FROM channel c WHERE c.workspace_id = $1 AND c.id = channel_id \
-                            AND c.archived_at IS NULL AND c.kind <> 'dm') \
+                            AND c.archived_at IS NULL AND c.kind <> 'dm' AND {open}) \
          ), memberships AS ( \
            INSERT INTO membership (workspace_id, channel_id, member_id, role) \
            SELECT $1, channel_id, agent_member_id, 'member' FROM locked \
@@ -724,7 +724,8 @@ pub async fn confirm_hosted_connection_in_tx(
             WHERE id IN (SELECT id FROM locked) AND EXISTS (SELECT 1 FROM inserted) \
            RETURNING * \
          ) \
-         SELECT {PROJECTION}, (SELECT id FROM inserted) AS credential_id FROM updated"
+         SELECT {PROJECTION}, (SELECT id FROM inserted) AS credential_id FROM updated",
+        open = crate::channel_open::channel_open_to_member_sql("c", "$4"),
     );
     let row = sqlx::query(&sql)
         .bind(workspace_id)
@@ -1189,9 +1190,9 @@ pub async fn lock_hosted_connection_in_tx(
 /// connection row `FOR UPDATE` first (and only an `active`, proved connection
 /// bound to `agent_member_id` qualifies), then the array, then the agent's
 /// `membership` rows. Every channel must be a live, non-DM channel of this workspace that is
-/// **public or one the agent is already a live member of** — the caller's
-/// visibility rule, enforced here too so no future caller can seat an agent in a
-/// private room it cannot see.
+/// **open to people or one the agent is already a live member of** (ADR-0224 D13,
+/// [`crate::channel_open`]) — the caller's visibility rule, enforced here too so no
+/// future caller can seat an agent in a room it cannot see.
 /// Returns the new approved set, or `None` when the connection is not live, a
 /// channel does not qualify, or the result would pass
 /// [`MAX_HOSTED_APPROVED_CHANNELS`] — and nothing is written then.
@@ -1222,19 +1223,18 @@ pub async fn grant_hosted_channels_in_tx(
     if locked.is_none() || channel_ids.is_empty() {
         return Ok(None);
     }
-    let qualifying: i64 = sqlx::query_scalar(
+    let qualifying_sql = format!(
         "SELECT count(*) FROM channel c WHERE c.workspace_id=$1 AND c.id = ANY($2) \
             AND c.archived_at IS NULL AND c.kind IN ('public', 'private') \
-            AND (c.kind = 'public' OR EXISTS ( \
-                  SELECT 1 FROM membership m \
-                   WHERE m.workspace_id = c.workspace_id AND m.channel_id = c.id \
-                     AND m.member_id = $3 AND m.left_at IS NULL))",
-    )
-    .bind(workspace_id)
-    .bind(channel_ids)
-    .bind(agent_member_id)
-    .fetch_one(&mut *conn)
-    .await?;
+            AND {}",
+        crate::channel_open::channel_open_to_member_sql("c", "$3"),
+    );
+    let qualifying: i64 = sqlx::query_scalar(&qualifying_sql)
+        .bind(workspace_id)
+        .bind(channel_ids)
+        .bind(agent_member_id)
+        .fetch_one(&mut *conn)
+        .await?;
     let mut distinct = channel_ids.to_vec();
     distinct.sort_unstable();
     distinct.dedup();

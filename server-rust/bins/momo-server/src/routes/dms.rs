@@ -53,6 +53,10 @@ fn channel_dto(channel: &DirectMessage) -> ChannelDto {
         member_ids: Some(channel.member_ids.iter().map(|id| id.to_string()).collect()),
         created_by: channel.created_by.map(|id| id.to_string()),
         archived_at_ms: None,
+        // A DM is never listed in channel browse nor a default channel — the
+        // `channel` CHECKs allow both only on a public channel (ADR-0224 D2·D6).
+        browse_listed: false,
+        is_default: false,
         muted: channel.muted,
         muted_until_ms: channel.muted_until_ms,
     }

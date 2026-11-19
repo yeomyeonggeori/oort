@@ -23,6 +23,7 @@ momo-outbox = { path = "../../crates/momo-outbox" }
 momo-wire = { path = "../../crates/momo-wire" }
 
 reqwest.workspace = true
+uuid.workspace = true
 tokio = { workspace = true, features = ["net", "signal", "time", "sync"] }
 serde.workspace = true
 serde_json.workspace = true
@@ -36,7 +37,6 @@ tracing-subscriber.workspace = true
 momo-messaging = { path = "../../crates/momo-messaging" }
 axum.workspace = true
 chrono.workspace = true
-uuid.workspace = true
 
 [lints]
 workspace = true

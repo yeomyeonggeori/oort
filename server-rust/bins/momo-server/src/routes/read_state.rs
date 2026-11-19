@@ -55,6 +55,7 @@ pub(crate) fn read_state_row_dto(row: &ReadStateProjection) -> ReadStateRowDto {
         latest_readable_seq: row.latest_readable_seq,
         closed_at_seq: row.closed_at_seq,
         followed_unread_reply_count: row.followed_unread_reply_count,
+        history_from_seq: row.history_from_seq,
     }
 }
 
