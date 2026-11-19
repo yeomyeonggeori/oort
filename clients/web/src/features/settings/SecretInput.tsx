@@ -2,6 +2,7 @@ import * as React from "react";
 import { Eye, EyeOff } from "lucide-react";
 import { cn } from "@/design/lib/cn";
 import { Input } from "@/design/ui/input";
+import { Tooltip } from "@/design/ui/tooltip";
 
 // 키·토큰을 붙여 넣는 칸 (#3885). 평소엔 가려진 password 칸이고, 오른쪽 눈 버튼으로
 // 지금 치고 있는(붙여 넣은) 값만 확인한다.
@@ -95,20 +96,21 @@ export const SecretInput = React.forwardRef<HTMLInputElement, SecretInputProps>(
         />
         {/* press가 position을 쓰므로 자리 잡기는 바깥 칸이 한다. */}
         <span className="absolute inset-y-0 right-0 flex w-8">
-          <button
-            type="button"
-            aria-label={label}
-            aria-pressed={shown}
-            title={label}
-            disabled={disabled}
-            // 눌러도 칸의 초점·캐럿을 뺏지 않는다.
-            onMouseDown={(event) => event.preventDefault()}
-            onClick={toggle}
-            className="press inline-flex size-full items-center justify-center rounded-lg text-ink-muted hover:text-ink focus-visible:focus-ring disabled:cursor-not-allowed disabled:opacity-50"
-            data-testid={revealTestId}
-          >
-            <Icon className="size-4" aria-hidden="true" />
-          </button>
+          <Tooltip label={label} side="bottom" className="size-full">
+            <button
+              type="button"
+              aria-label={label}
+              aria-pressed={shown}
+              disabled={disabled}
+              // 눌러도 칸의 초점·캐럿을 뺏지 않는다.
+              onMouseDown={(event) => event.preventDefault()}
+              onClick={toggle}
+              className="press inline-flex size-full items-center justify-center rounded-lg text-ink-muted hover:text-ink focus-visible:focus-ring disabled:cursor-not-allowed disabled:opacity-50"
+              data-testid={revealTestId}
+            >
+              <Icon className="size-4" aria-hidden="true" />
+            </button>
+          </Tooltip>
         </span>
       </div>
     );

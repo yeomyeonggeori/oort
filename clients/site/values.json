@@ -1,7 +1,7 @@
 {
-  "DMG_ARM_URL": "https://github.com/yeomyeonggeori/momo-alpha/releases/download/mac-v0.1.45/oort-macos-aarch64.dmg",
-  "DMG_X64_URL": "https://github.com/yeomyeonggeori/momo-alpha/releases/download/mac-v0.1.45/oort-macos-x86_64.dmg",
-  "VERSION": "0.1.45",
+  "DMG_ARM_URL": "https://github.com/yeomyeonggeori/momo-alpha/releases/download/mac-v0.1.46/oort-macos-aarch64.dmg",
+  "DMG_X64_URL": "https://github.com/yeomyeonggeori/momo-alpha/releases/download/mac-v0.1.46/oort-macos-x86_64.dmg",
+  "VERSION": "0.1.46",
   "MIN_MACOS": "14",
   "WEB_URL": "https://oort-team.up.railway.app",
   "SITE_HOST": "app.oor7.com"

@@ -179,7 +179,7 @@ async function installMocks(context, usage, quota = () => anchoredQuota(QUOTA.he
   await context.route("**/v1/workspaces/*/channels", (route) =>
     json(route, { channels: CHANNELS })
   );
-  await context.route("**/v1/workspaces/*/roster", (route) =>
+  await context.route("**/v1/workspaces/*/roster*", (route) =>
     json(route, { members: ROSTER })
   );
   await context.route("**/v1/workspaces/*/usage/summary*", async (route) => {

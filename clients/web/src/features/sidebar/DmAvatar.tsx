@@ -3,8 +3,8 @@ import { avatarIdentity } from "@momo/core/features/workspace/avatar";
 import { statusDotTooltip } from "@momo/core/features/presence/statusDot";
 import type { RosterMember } from "@momo/core/lib/api";
 import { cn } from "@/design/lib/cn";
-import { STATUS_DOT_BADGE_CLASS } from "@/design/statusDot";
 import { avatarSurfaceClass } from "@/features/common/avatarTone";
+import { AvatarStatus } from "@/features/presence/AvatarStatus";
 import { useDmStatusDot } from "./useDmStatusDot";
 import { useMemberAvatar } from "./useMemberAvatar";
 
@@ -17,6 +17,8 @@ import { useMemberAvatar } from "./useMemberAvatar";
 // 에이전트는 서버의 생존 판정을 점 색으로 말한다
 // (`useDmStatusDot` → 코어 `dmPeerStatusDot`). 글자 라벨(「꺼짐」)은 행에서 뺐다: 낱말은 툴팁(이 상자의
 // `title`)과 행의 숨은 글(`DmStatusText`)이 말한다. **모르면 점이 없다** - 근거 없는 초록 점 금지.
+// 점은 아바타를 도려낸 자리에 앉는다(#5786, 모든 아바타 점이 쓰는 `AvatarStatus` 한 부품): 줄을 가리키거나 골라도,
+// 띠 테마에서도 점 둘레에 색 테가 서지 않는다.
 //
 // 상대를 아바타로 알아볼 수 없는 행(「나간 멤버」: 명부에서 빠진 상대)은 점 하나가 아니라 **기본 아바타**(사람
 // 윤곽)를 그린다. 모를 때 이니셜을 지어내지 않는다는 코어의 규칙(`avatar.ts`)은 그대로이고, 이니셜이
@@ -39,8 +41,11 @@ export function DmAvatar({
   const imageSrc = identity.imageUrl ?? uploaded;
   const dot = useDmStatusDot(member, viewerMayAct, nowMs);
   return (
-    <span
-      className="relative flex size-6 shrink-0"
+    <AvatarStatus
+      face={24}
+      tone={dot?.tone ?? null}
+      kind={identity.kind === "agent" ? "agent" : "human"}
+      dotTestId="dm-peer-dot"
       data-testid="dm-avatar"
       data-avatar-kind={identity.kind}
       data-status-tone={dot?.tone}
@@ -71,17 +76,7 @@ export function DmAvatar({
           />
         )}
       </span>
-      {dot ? (
-        <span
-          data-testid="dm-peer-dot"
-          data-tone={dot.tone}
-          className={cn(
-            "absolute bottom-0 right-0 size-2 rounded-full border",
-            STATUS_DOT_BADGE_CLASS[dot.tone]
-          )}
-        />
-      ) : null}
-    </span>
+    </AvatarStatus>
   );
 }
 

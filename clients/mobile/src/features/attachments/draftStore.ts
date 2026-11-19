@@ -303,6 +303,17 @@ export function clearSurface(key: string): void {
   write(key, EMPTY);
 }
 
+/**
+ * 한 대화의 첨부 트레이를 모두 비운다 — 대화 입력칸과 그 대화의 스레드 입력칸(열쇠 `워크스페이스|채널|뿌리`). 1:1 대화 나가기
+ * (ADR-0177 증보 2026-11-14 D17 기기 줄) 뒤에 부른다. 다른 대화의 트레이는 건드리지 않는다.
+ */
+export function clearChannelSurfaces(workspaceId: string, channelId: string): void {
+  const prefix = `${workspaceId}|${channelId}|`.toLowerCase();
+  for (const key of [...surfaces.keys()]) {
+    if (key.toLowerCase().startsWith(prefix)) clearSurface(key);
+  }
+}
+
 /** 전송 payload와 낙관적 echo가 함께 쓰는 완료 메타데이터를 꺼낸다. */
 export function takeSent(key: string): {attachments: MessageAttachment[]} {
   const drafts = read(key).drafts;

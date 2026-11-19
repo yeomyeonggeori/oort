@@ -2,8 +2,17 @@ import { describe, expect, it } from "vitest";
 import { ApiError, uuidEq, type Channel, type RosterMember } from "../../lib/api";
 import { NetworkError } from "../../lib/http";
 import {
+  assignableWorkspaceRoles,
   canChangeWorkspaceRole,
+  canManageWorkspaceMembership,
+  canRemoveWorkspaceMember,
+  memberLifecycleFailure,
+  suspensionAction,
   canIssuePasswordReset,
+  canSeeMemberManagement,
+  profileEmail,
+  roleChangeKind,
+  workspaceRoleLock,
   changeWorkspaceRoleErrorMessage,
   countLabel,
   dmAvailability,
@@ -153,6 +162,188 @@ describe("canChangeWorkspaceRole", () => {
       false
     );
     expect(canChangeWorkspaceRole("owner", DEMO.id, HERMES)).toBe(false);
+  });
+});
+
+// #5780: 역할 고르개의 선택지는 서버 사다리의 거울이다(`membership_lifecycle.rs` `require_can_manage`,
+// `workspace_authorization.rs` `can_change_role_of`·`can_grant_role`, 시험
+// `membership_lifecycle_conformance_pg.rs` 의 칸별 표). 보는 사람 × 대상 16칸을 서버가 쓰는 대로 적는다.
+describe("assignableWorkspaceRoles", () => {
+  const VIEWER_ID = "00000000-0000-7000-8000-0000000000a1";
+  const TARGET_ID = "00000000-0000-7000-8000-0000000000b2";
+  const target = (role: RosterMember["role"], over: Partial<RosterMember> = {}) =>
+    member({ id: TARGET_ID, role, ...over });
+  type Role = "owner" | "admin" | "member" | "guest";
+  const ALL: Role[] = ["owner", "admin", "member", "guest"];
+  const LADDER: ReadonlyArray<readonly [Role, Role, readonly Role[]]> = [
+    ["owner", "owner", []],
+    ["owner", "admin", ALL],
+    ["owner", "member", ALL],
+    ["owner", "guest", ALL],
+    ["admin", "owner", []],
+    ["admin", "admin", []],
+    ["admin", "member", ["member", "guest"]],
+    ["admin", "guest", ["member", "guest"]],
+    ["member", "owner", []],
+    ["member", "admin", []],
+    ["member", "member", []],
+    ["member", "guest", []],
+    ["guest", "owner", []],
+    ["guest", "admin", []],
+    ["guest", "member", []],
+    ["guest", "guest", []],
+  ];
+
+  it.each(LADDER)("%s 가 %s 를 보면 %j", (viewer, targetRole, expected) => {
+    expect(assignableWorkspaceRoles(viewer, VIEWER_ID, target(targetRole))).toEqual(expected);
+    expect(canChangeWorkspaceRole(viewer, VIEWER_ID, target(targetRole))).toBe(expected.length > 0);
+  });
+
+  it("자기 자신·에이전트·역할 모르는 보는 사람에게는 비어 있다", () => {
+    expect(assignableWorkspaceRoles("owner", TARGET_ID, target("member"))).toEqual([]);
+    // UUID 대소문자가 달라도 자기 자신이다.
+    expect(assignableWorkspaceRoles("owner", TARGET_ID.toUpperCase(), target("member"))).toEqual([]);
+    expect(assignableWorkspaceRoles("owner", VIEWER_ID, target("member", { kind: "agent" }))).toEqual([]);
+    expect(assignableWorkspaceRoles(undefined, VIEWER_ID, target("member"))).toEqual([]);
+  });
+
+  it("역할을 모르는 대상은 소유자에게만 열린다(관리자에게 모름이 열림이 되지 않는다)", () => {
+    expect(assignableWorkspaceRoles("owner", VIEWER_ID, target(undefined))).toEqual(ALL);
+    expect(assignableWorkspaceRoles("admin", VIEWER_ID, target(undefined))).toEqual([]);
+  });
+});
+
+// #5781: 정지·내보내기 줄은 서버 사다리(`workspace_authorization.rs` 의 `can_suspend`·`can_remove` 와
+// `lifecycle_ladders_match_swift_require_can_manage`)의 거울이다. 표는 서버 시험의 칸과 같다.
+describe("canManageWorkspaceMembership · suspensionAction · canRemoveWorkspaceMember", () => {
+  const VIEWER_ID = "00000000-0000-7000-8000-0000000000a1";
+  const TARGET_ID = "00000000-0000-7000-8000-0000000000b2";
+  const target = (role: RosterMember["role"], over: Partial<RosterMember> = {}) =>
+    member({ id: TARGET_ID, role, status: "active", ...over });
+  type Role = "owner" | "admin" | "member" | "guest";
+  const LADDER: ReadonlyArray<readonly [Role, Role, boolean]> = [
+    ["owner", "owner", false],
+    ["owner", "admin", true],
+    ["owner", "member", true],
+    ["owner", "guest", true],
+    ["admin", "owner", false],
+    ["admin", "admin", false],
+    ["admin", "member", true],
+    ["admin", "guest", true],
+    ["member", "owner", false],
+    ["member", "admin", false],
+    ["member", "member", false],
+    ["member", "guest", false],
+    ["guest", "owner", false],
+    ["guest", "admin", false],
+    ["guest", "member", false],
+    ["guest", "guest", false],
+  ];
+
+  it.each(LADDER)("%s 가 활성 %s 를 보면 %s", (viewer, targetRole, allowed) => {
+    expect(canManageWorkspaceMembership(viewer, VIEWER_ID, target(targetRole))).toBe(allowed);
+    expect(suspensionAction(viewer, VIEWER_ID, target(targetRole))).toBe(allowed ? "suspend" : null);
+    expect(canRemoveWorkspaceMember(viewer, VIEWER_ID, target(targetRole))).toBe(allowed);
+  });
+
+  it("정지된 멤버에게는 「정지 풀기」, 초대 대기·삭제된 멤버에게는 줄이 없다", () => {
+    expect(suspensionAction("owner", VIEWER_ID, target("member", { status: "suspended" }))).toBe("reinstate");
+    expect(canRemoveWorkspaceMember("owner", VIEWER_ID, target("member", { status: "suspended" }))).toBe(true);
+    for (const status of ["invited", "deleted"] as const) {
+      expect(suspensionAction("owner", VIEWER_ID, target("member", { status }))).toBeNull();
+      expect(canRemoveWorkspaceMember("owner", VIEWER_ID, target("member", { status }))).toBe(false);
+    }
+    // 정지된 소유자·관리자도 서열이 먼저다: 관리자는 정지된 관리자를 풀지 못한다.
+    expect(suspensionAction("admin", VIEWER_ID, target("admin", { status: "suspended" }))).toBeNull();
+  });
+
+  it("자기 자신·에이전트·역할 모르는 대상·역할 모르는 보는 사람에게는 열리지 않는다", () => {
+    expect(canManageWorkspaceMembership("owner", TARGET_ID, target("member"))).toBe(false);
+    expect(canManageWorkspaceMembership("owner", TARGET_ID.toUpperCase(), target("member"))).toBe(false);
+    expect(canManageWorkspaceMembership("owner", VIEWER_ID, target("member", { kind: "agent" }))).toBe(false);
+    expect(canManageWorkspaceMembership("owner", VIEWER_ID, target(undefined))).toBe(false);
+    expect(canManageWorkspaceMembership(undefined, VIEWER_ID, target("guest"))).toBe(false);
+  });
+});
+
+describe("memberLifecycleFailure", () => {
+  // 문장은 서버 `MembershipLifecycleError::as_swift_message` 그대로다.
+  it.each([
+    [409, "member status must be active", "notActive"],
+    [409, "member status must be suspended", "notSuspended"],
+    [409, "workspace must retain at least one owner", "lastOwner"],
+    [403, "cannot manage an equal or higher role", "rank"],
+    [403, "members cannot manage themselves", "self"],
+    [403, "workspace admin required", "forbidden"],
+    [403, "membership management requires a human member", "forbidden"],
+    [404, "workspace member not found", "notFound"],
+    [429, "slow down", "rateLimited"],
+    [500, "boom", "unknown"],
+  ] as const)("%i %s → %s", (status, wire, kind) => {
+    expect(memberLifecycleFailure(new ApiError(status, wire))).toBe(kind);
+  });
+
+  it("전송이 닿지 않으면 network, 모르는 것은 unknown", () => {
+    expect(memberLifecycleFailure(new NetworkError("unreachable", 15_000))).toBe("network");
+    expect(memberLifecycleFailure(new Error("x"))).toBe("unknown");
+  });
+});
+
+describe("canSeeMemberManagement · workspaceRoleLock", () => {
+  const VIEWER_ID = "00000000-0000-7000-8000-0000000000a1";
+  const TARGET_ID = "00000000-0000-7000-8000-0000000000b2";
+  const target = (role: RosterMember["role"], over: Partial<RosterMember> = {}) =>
+    member({ id: TARGET_ID, role, ...over });
+
+  it("관리 묶음은 운영자가 자기 아닌 사람을 볼 때만 선다", () => {
+    expect(canSeeMemberManagement("owner", VIEWER_ID, target("owner"))).toBe(true);
+    expect(canSeeMemberManagement("admin", VIEWER_ID, target("owner"))).toBe(true);
+    expect(canSeeMemberManagement("member", VIEWER_ID, target("guest"))).toBe(false);
+    expect(canSeeMemberManagement("guest", VIEWER_ID, target("guest"))).toBe(false);
+    expect(canSeeMemberManagement("owner", TARGET_ID, target("owner"))).toBe(false);
+    expect(canSeeMemberManagement("owner", VIEWER_ID, target("member", { kind: "agent" }))).toBe(false);
+  });
+
+  it("글로만 보이는 역할에는 까닭이 있고, 고를 수 있으면 까닭이 없다", () => {
+    expect(workspaceRoleLock("owner", VIEWER_ID, target("owner"))).toBe("ownerPeer");
+    expect(workspaceRoleLock("admin", VIEWER_ID, target("owner"))).toBe("adminCeiling");
+    expect(workspaceRoleLock("admin", VIEWER_ID, target("admin"))).toBe("adminCeiling");
+    expect(workspaceRoleLock("owner", VIEWER_ID, target("admin"))).toBeNull();
+    expect(workspaceRoleLock("admin", VIEWER_ID, target("member"))).toBeNull();
+    expect(workspaceRoleLock("member", VIEWER_ID, target("owner"))).toBeNull();
+    // 역할을 모르면 까닭을 지어내지 않는다.
+    expect(workspaceRoleLock("admin", VIEWER_ID, target(undefined))).toBeNull();
+  });
+});
+
+describe("roleChangeKind", () => {
+  it("소유자 승격·관리자 부여·관리자 회수·그 밖을 가른다", () => {
+    expect(roleChangeKind("admin", "owner")).toBe("promoteOwner");
+    expect(roleChangeKind("member", "owner")).toBe("promoteOwner");
+    expect(roleChangeKind("member", "admin")).toBe("grantAdmin");
+    expect(roleChangeKind("admin", "member")).toBe("revokeAdmin");
+    expect(roleChangeKind("admin", "guest")).toBe("revokeAdmin");
+    expect(roleChangeKind("member", "guest")).toBe("plain");
+    expect(roleChangeKind("guest", "member")).toBe("plain");
+    expect(roleChangeKind(undefined, "member")).toBe("plain");
+  });
+});
+
+describe("profileEmail", () => {
+  const person = member({ id: "00000000-0000-7000-8000-0000000000c3", email: " seoyeon@example.com " });
+
+  it("게스트가 아닌 사람이 보면 사람의 이메일이 보인다", () => {
+    for (const viewer of ["owner", "admin", "member"] as const) {
+      expect(profileEmail(viewer, person)).toBe("seoyeon@example.com");
+    }
+  });
+
+  it("게스트·역할 모르는 보는 사람·에이전트·빈 값에는 없다", () => {
+    expect(profileEmail("guest", person)).toBeNull();
+    expect(profileEmail(undefined, person)).toBeNull();
+    expect(profileEmail("owner", { ...person, kind: "agent" })).toBeNull();
+    expect(profileEmail("owner", { ...person, email: "  " })).toBeNull();
+    expect(profileEmail("owner", { ...person, email: undefined })).toBeNull();
   });
 });
 

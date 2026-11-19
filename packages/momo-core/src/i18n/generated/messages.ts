@@ -171,6 +171,111 @@ export const messageKeys = [
   "blocked.workStateNone.serverUnreachable",
   "blocked.workStateStale.offline",
   "blocked.workStateStale.serverUnreachable",
+  "channels.browse.clearSearch",
+  "channels.browse.close",
+  "channels.browse.closeAria",
+  "channels.browse.default",
+  "channels.browse.description",
+  "channels.browse.emptyAdminDetail",
+  "channels.browse.emptyAdminDetailPhone",
+  "channels.browse.emptyHeadline",
+  "channels.browse.groupJoined",
+  "channels.browse.groupNotJoined",
+  "channels.browse.hiddenGroup",
+  "channels.browse.homeRowHint",
+  "channels.browse.join",
+  "channels.browse.joinAria",
+  "channels.browse.joined",
+  "channels.browse.joinForbidden",
+  "channels.browse.joinGeneric",
+  "channels.browse.joining",
+  "channels.browse.joinNetwork",
+  "channels.browse.joinNotFound",
+  "channels.browse.loadForbidden",
+  "channels.browse.loadGeneric",
+  "channels.browse.loading",
+  "channels.browse.loadMore",
+  "channels.browse.loadNetwork",
+  "channels.browse.loadUnsupported",
+  "channels.browse.memberCount",
+  "channels.browse.menuCreate",
+  "channels.browse.menuLabel",
+  "channels.browse.noMatch",
+  "channels.browse.offline",
+  "channels.browse.open",
+  "channels.browse.openAria",
+  "channels.browse.paletteGroup",
+  "channels.browse.rateLimited",
+  "channels.browse.retry",
+  "channels.browse.searchLabel",
+  "channels.browse.searchPlaceholder",
+  "channels.browse.switchForbidden",
+  "channels.browse.switchGeneric",
+  "channels.browse.switchLabel",
+  "channels.browse.switchNetwork",
+  "channels.browse.switchNotFound",
+  "channels.browse.switchNotListable",
+  "channels.browse.switchShowAria",
+  "channels.browse.title",
+  "channels.createFailure.duplicate",
+  "channels.createFailure.forbidden",
+  "channels.createFailure.generic",
+  "channels.createFailure.network",
+  "channels.createFailure.rateLimited",
+  "channels.default.description",
+  "channels.default.label",
+  "channels.default.lastDefault",
+  "channels.default.lastHint",
+  "channels.default.notDefaultable",
+  "channels.dmLeave.action",
+  "channels.dmLeave.busy",
+  "channels.dmLeave.cancel",
+  "channels.dmLeave.checking",
+  "channels.dmLeave.confirm",
+  "channels.dmLeave.confirmBody",
+  "channels.dmLeave.confirmFinal",
+  "channels.dmLeave.confirmRevive",
+  "channels.dmLeave.confirmScheduled",
+  "channels.dmLeave.confirmTitle",
+  "channels.dmLeave.done",
+  "channels.dmLeave.failed",
+  "channels.dmLeave.scheduledFailed",
+  "channels.dmLeave.unavailable",
+  "channels.nameRule.edge",
+  "channels.nameRule.hidden",
+  "channels.nameRule.hint",
+  "channels.nameRule.placeholder",
+  "channels.nameRule.preview",
+  "channels.nameRule.required",
+  "channels.nameRule.serverRejected",
+  "channels.nameRule.tooLong",
+  "channels.nameRule.unsupported",
+  "channels.preview.attachmentLocked",
+  "channels.preview.closeAria",
+  "channels.preview.empty",
+  "channels.preview.joinBand",
+  "channels.preview.listAria",
+  "channels.preview.loadForbidden",
+  "channels.preview.loadGeneric",
+  "channels.preview.loading",
+  "channels.preview.loadNetwork",
+  "channels.preview.notFound",
+  "channels.preview.openHint",
+  "channels.rename.action",
+  "channels.rename.aria",
+  "channels.rename.busy",
+  "channels.rename.cancel",
+  "channels.rename.description",
+  "channels.rename.done",
+  "channels.rename.fieldLabel",
+  "channels.rename.forbidden",
+  "channels.rename.generalLocked",
+  "channels.rename.generic",
+  "channels.rename.network",
+  "channels.rename.notFound",
+  "channels.rename.preview",
+  "channels.rename.submit",
+  "channels.rename.title",
   "common.feedback.unavailable",
   "common.invitation.received",
   "common.members.count",
@@ -184,6 +289,7 @@ export const messageKeys = [
   "connection.approval.serverUnreachable",
   "connection.boot.offlineDetail",
   "connection.boot.offlineQrDetail",
+  "connection.boot.serverSwitchedSignedOut",
   "connection.boot.unreachable",
   "connection.card.connecting",
   "connection.card.lastSynced",
@@ -300,6 +406,79 @@ export const messageKeys = [
   "desktop.workSession.backToListLabel",
   "desktop.workSession.listTitle",
   "desktop.workSession.pageTitle",
+  "directory.lifecycle.cancel",
+  "directory.lifecycle.errorForbidden",
+  "directory.lifecycle.errorLastOwner",
+  "directory.lifecycle.errorNetwork",
+  "directory.lifecycle.errorNotActive",
+  "directory.lifecycle.errorNotFound",
+  "directory.lifecycle.errorNotSuspended",
+  "directory.lifecycle.errorRank",
+  "directory.lifecycle.errorRateLimited",
+  "directory.lifecycle.errorSelf",
+  "directory.lifecycle.errorUnknown",
+  "directory.lifecycle.reinstate",
+  "directory.lifecycle.reinstateBody",
+  "directory.lifecycle.reinstateBusy",
+  "directory.lifecycle.reinstatedReceipt",
+  "directory.lifecycle.reinstateSchedules",
+  "directory.lifecycle.reinstateTitle",
+  "directory.lifecycle.remove",
+  "directory.lifecycle.removeAction",
+  "directory.lifecycle.removeBusy",
+  "directory.lifecycle.removedClose",
+  "directory.lifecycle.removedTitle",
+  "directory.lifecycle.removeKeeps",
+  "directory.lifecycle.removeLeaves",
+  "directory.lifecycle.removeTitle",
+  "directory.lifecycle.removeWarning",
+  "directory.lifecycle.suspend",
+  "directory.lifecycle.suspendBusy",
+  "directory.lifecycle.suspendedReceipt",
+  "directory.lifecycle.suspendKeeps",
+  "directory.lifecycle.suspendSignOut",
+  "directory.lifecycle.suspendTitle",
+  "directory.lifecycle.suspendUndo",
+  "directory.manage.heading",
+  "directory.manage.hint",
+  "directory.profile.close",
+  "directory.profile.copied",
+  "directory.profile.copyEmail",
+  "directory.profile.copyFailed",
+  "directory.profile.copyMention",
+  "directory.profile.description",
+  "directory.profile.dmInactive",
+  "directory.profile.dmSelf",
+  "directory.profile.emailLabel",
+  "directory.profile.emptyAction",
+  "directory.profile.emptyDetail",
+  "directory.profile.emptyHeadline",
+  "directory.profile.kindAgent",
+  "directory.profile.loading",
+  "directory.profile.message",
+  "directory.profile.messageBusy",
+  "directory.profile.offline",
+  "directory.profile.offlineMissing",
+  "directory.profile.ownerLabel",
+  "directory.profile.ownerLine",
+  "directory.profile.ownerUnknown",
+  "directory.profile.retry",
+  "directory.profile.routing",
+  "directory.profile.title",
+  "directory.profile.titleUnknown",
+  "directory.role.cancel",
+  "directory.role.changed",
+  "directory.role.confirmAction",
+  "directory.role.confirmBusy",
+  "directory.role.confirmGrantAdmin",
+  "directory.role.confirmOwnerWarning",
+  "directory.role.confirmPair",
+  "directory.role.confirmRevokeAdmin",
+  "directory.role.confirmTitle",
+  "directory.role.label",
+  "directory.role.lockedAdminCeiling",
+  "directory.role.lockedOwnerPeer",
+  "directory.role.placeholder",
   "expressions.add.adminsOnly",
   "expressions.add.backLabel",
   "expressions.add.import",
@@ -313,6 +492,11 @@ export const messageKeys = [
   "expressions.draft.approve",
   "expressions.draft.approveFailed",
   "expressions.draft.approving",
+  "expressions.draft.linkApprove",
+  "expressions.draft.linkBusy",
+  "expressions.draft.linkFetching",
+  "expressions.draft.linkFrom",
+  "expressions.draft.linkHint",
   "expressions.draft.previewLabel",
   "expressions.draft.replaceFailed",
   "expressions.draft.replacing",
@@ -587,6 +771,48 @@ export const messageKeys = [
   "inbox.source.task",
   "inbox.source.thread",
   "inbox.source.threadUnknown",
+  "memberList.empty.detail",
+  "memberList.empty.headline",
+  "memberList.empty.invite",
+  "memberList.group.agents",
+  "memberList.group.people",
+  "memberList.group.suspended",
+  "memberList.newDm.close",
+  "memberList.newDm.continueAction",
+  "memberList.newDm.description",
+  "memberList.newDm.emptyDetail",
+  "memberList.newDm.emptyHeadline",
+  "memberList.newDm.hasDm",
+  "memberList.newDm.noMatchDetail",
+  "memberList.newDm.placeholder",
+  "memberList.newDm.startAction",
+  "memberList.newDm.title",
+  "memberList.newDm.toLabel",
+  "memberList.noMatch.clear",
+  "memberList.noMatch.detail",
+  "memberList.noMatch.detailGuest",
+  "memberList.noMatch.headline",
+  "memberList.page.title",
+  "memberList.row.openOwnProfile",
+  "memberList.row.openProfile",
+  "memberList.row.ownedBy",
+  "memberList.row.self",
+  "memberList.search.label",
+  "memberList.search.placeholder",
+  "memberList.search.placeholderGuest",
+  "memberList.state.offline",
+  "mobile.addMember.addHint",
+  "mobile.addMember.adding",
+  "mobile.addMember.close",
+  "mobile.addMember.emptyWorkspace",
+  "mobile.addMember.kindAgent",
+  "mobile.addMember.kindHuman",
+  "mobile.addMember.loading",
+  "mobile.addMember.noMatch",
+  "mobile.addMember.present",
+  "mobile.addMember.searchLabel",
+  "mobile.addMember.searchPlaceholder",
+  "mobile.addMember.title",
   "mobile.attachmentSave.failed",
   "mobile.attachmentSave.photosDenied",
   "mobile.attachmentSave.savedToFiles",
@@ -987,6 +1213,45 @@ export const messageKeys = [
   "releaseNotes.v0146.whoIsDoingChanged",
   "releaseNotes.v0146.whoIsDoingTitle",
   "releaseNotes.v0146.whoIsDoingTryIt",
+  "releaseNotes.v0147.agentLinksChanged",
+  "releaseNotes.v0147.agentLinksTitle",
+  "releaseNotes.v0147.agentLinksTryIt",
+  "releaseNotes.v0147.agentsLine1",
+  "releaseNotes.v0147.agentsLine2",
+  "releaseNotes.v0147.channelBrowseChanged",
+  "releaseNotes.v0147.channelBrowseTitle",
+  "releaseNotes.v0147.channelBrowseTryIt",
+  "releaseNotes.v0147.channelMembersChanged",
+  "releaseNotes.v0147.channelMembersTitle",
+  "releaseNotes.v0147.channelMembersTryIt",
+  "releaseNotes.v0147.channelNamesChanged",
+  "releaseNotes.v0147.channelNamesTitle",
+  "releaseNotes.v0147.channelNamesTryIt",
+  "releaseNotes.v0147.channelsLine1",
+  "releaseNotes.v0147.channelsLine2",
+  "releaseNotes.v0147.channelsLine3",
+  "releaseNotes.v0147.channelsLine4",
+  "releaseNotes.v0147.channelsLine5",
+  "releaseNotes.v0147.channelsLine6",
+  "releaseNotes.v0147.channelsTopic",
+  "releaseNotes.v0147.dmLeaveChanged",
+  "releaseNotes.v0147.dmLeaveTitle",
+  "releaseNotes.v0147.dmLeaveTryIt",
+  "releaseNotes.v0147.lookLine1",
+  "releaseNotes.v0147.lookLine2",
+  "releaseNotes.v0147.lookLine3",
+  "releaseNotes.v0147.lookLine4",
+  "releaseNotes.v0147.lookLine5",
+  "releaseNotes.v0147.lookLine6",
+  "releaseNotes.v0147.lookTopic",
+  "releaseNotes.v0147.reconnectSyncChanged",
+  "releaseNotes.v0147.reconnectSyncTitle",
+  "releaseNotes.v0147.reconnectSyncTryIt",
+  "releaseNotes.v0147.settingsLine1",
+  "releaseNotes.v0147.summary",
+  "releaseNotes.v0147.tooltipsChanged",
+  "releaseNotes.v0147.tooltipsTitle",
+  "releaseNotes.v0147.tooltipsTryIt",
   "releaseNotes.version.current",
   "releaseNotes.version.label",
   "releaseNotes.version.releasedOn",
@@ -1274,14 +1539,33 @@ export const messageKeys = [
   "teamAi.stage.setupLine",
   "teamAi.stage.setupUnverifiedDetail",
   "teamAi.stage.verifyingLine",
+  "timeline.addMember.createdDescription",
+  "timeline.addMember.createdDescriptionPublic",
+  "timeline.addMember.later",
   "timeline.agentRail.open",
   "timeline.agentRail.openActivity",
   "timeline.agentRail.openRecord",
   "timeline.agentRail.sheetClose",
   "timeline.agentRail.sheetTitle",
+  "timeline.approval.channelAgentIn",
+  "timeline.approval.channelNeedsMember",
+  "timeline.approval.channelsRefused",
   "timeline.approval.reproposeBusy",
   "timeline.approval.reproposeSeeded",
   "timeline.approvalExpiry.soon",
+  "timeline.channelLeave.bodyPrivate",
+  "timeline.channelLeave.bodyPublic",
+  "timeline.channelLeave.bodyPublicBrowse",
+  "timeline.channelLeave.busy",
+  "timeline.channelLeave.cancel",
+  "timeline.channelLeave.confirm",
+  "timeline.channelLeave.errorForbidden",
+  "timeline.channelLeave.errorGeneric",
+  "timeline.channelLeave.errorNetwork",
+  "timeline.channelLeave.errorNotFound",
+  "timeline.channelLeave.title",
+  "timeline.createChannel.privateDetail",
+  "timeline.createChannel.publicDetail",
   "timeline.edited.atDate",
   "timeline.edited.atDay",
   "timeline.edited.atTime",
@@ -1301,6 +1585,7 @@ export const messageKeys = [
   "timeline.memberPanel.groupOnline",
   "timeline.memberPanel.groupOtherAgents",
   "timeline.memberPanel.groupPeople",
+  "timeline.memberPanel.groupSuspended",
   "timeline.memberPanel.groupWorking",
   "timeline.memberPanel.listLabel",
   "timeline.memberPanel.moreRuns",
@@ -1309,8 +1594,20 @@ export const messageKeys = [
   "timeline.memberPanel.nowFailedMid",
   "timeline.memberPanel.nowFailedShort",
   "timeline.memberPanel.nowRetry",
+  "timeline.memberPanel.remove",
+  "timeline.memberPanel.removeBody",
+  "timeline.memberPanel.removeBusy",
+  "timeline.memberPanel.removeCancel",
+  "timeline.memberPanel.removeConfirm",
+  "timeline.memberPanel.removed",
+  "timeline.memberPanel.removeErrorForbidden",
+  "timeline.memberPanel.removeErrorGeneric",
+  "timeline.memberPanel.removeErrorNetwork",
+  "timeline.memberPanel.removeErrorNotFound",
+  "timeline.memberPanel.removeTitle",
   "timeline.memberPanel.request",
   "timeline.memberPanel.requestSpoken",
+  "timeline.memberPanel.rowActions",
   "timeline.memberPanel.stageSpoken",
   "timeline.quote.head",
   "timeline.quote.headUnnamed",
@@ -1442,7 +1739,58 @@ export const messageKeys = [
   "timeline.workTool.ping",
   "timeline.workTool.runComplete",
   "timeline.workTool.runEvent",
-  "timeline.workTool.unknown"
+  "timeline.workTool.unknown",
+  "workspace.add.back",
+  "workspace.add.cancel",
+  "workspace.add.createLead",
+  "workspace.add.createLeadNotOperator",
+  "workspace.add.createTitle",
+  "workspace.add.joinChecking",
+  "workspace.add.joinClaim",
+  "workspace.add.joinConfirmAction",
+  "workspace.add.joinConfirmBody",
+  "workspace.add.joinConfirmTitle",
+  "workspace.add.joinEmpty",
+  "workspace.add.joinField",
+  "workspace.add.joinHint",
+  "workspace.add.joinLead",
+  "workspace.add.joinLeadWeb",
+  "workspace.add.joinNext",
+  "workspace.add.joinOpenAction",
+  "workspace.add.joinOpenBody",
+  "workspace.add.joinOpenInvite",
+  "workspace.add.joinOpenServer",
+  "workspace.add.joinOpenTitle",
+  "workspace.add.joinPasteAction",
+  "workspace.add.joinPasteBody",
+  "workspace.add.joinPasteTitle",
+  "workspace.add.joinSameServer",
+  "workspace.add.joinTargetInvite",
+  "workspace.add.joinTargetInviteOnly",
+  "workspace.add.joinTargetServer",
+  "workspace.add.joinTitle",
+  "workspace.add.joinUnreachable",
+  "workspace.add.lead",
+  "workspace.add.operatorContact",
+  "workspace.add.title",
+  "workspace.create.lead",
+  "workspace.create.operatorOnly",
+  "workspace.create.slugHint",
+  "workspace.leave.body",
+  "workspace.leave.busy",
+  "workspace.leave.cancel",
+  "workspace.leave.confirm",
+  "workspace.leave.lastOwner",
+  "workspace.leave.lastOwnerNext",
+  "workspace.leave.title",
+  "workspace.leave.titleUnnamed",
+  "workspace.menu.copiedAddress",
+  "workspace.menu.copyAddress",
+  "workspace.menu.copyAddressNote",
+  "workspace.menu.copyFailed",
+  "workspace.menu.fallbackTitle",
+  "workspace.menu.leave",
+  "workspace.menu.settings"
 ] as const;
 
 export type MessageKey = typeof messageKeys[number];
@@ -1644,6 +1992,149 @@ export const argumentSpecs = {
   "blocked.workStateNone.serverUnreachable": {},
   "blocked.workStateStale.offline": {},
   "blocked.workStateStale.serverUnreachable": {},
+  "channels.browse.clearSearch": {},
+  "channels.browse.close": {},
+  "channels.browse.closeAria": {},
+  "channels.browse.default": {},
+  "channels.browse.description": {},
+  "channels.browse.emptyAdminDetail": {},
+  "channels.browse.emptyAdminDetailPhone": {},
+  "channels.browse.emptyHeadline": {},
+  "channels.browse.groupJoined": {},
+  "channels.browse.groupNotJoined": {},
+  "channels.browse.hiddenGroup": {},
+  "channels.browse.homeRowHint": {},
+  "channels.browse.join": {},
+  "channels.browse.joinAria": {
+    "name": "string"
+  },
+  "channels.browse.joined": {},
+  "channels.browse.joinForbidden": {},
+  "channels.browse.joinGeneric": {},
+  "channels.browse.joining": {},
+  "channels.browse.joinNetwork": {
+    "reason": "string"
+  },
+  "channels.browse.joinNotFound": {},
+  "channels.browse.loadForbidden": {},
+  "channels.browse.loadGeneric": {},
+  "channels.browse.loading": {},
+  "channels.browse.loadMore": {},
+  "channels.browse.loadNetwork": {
+    "reason": "string"
+  },
+  "channels.browse.loadUnsupported": {},
+  "channels.browse.memberCount": {
+    "count": "number"
+  },
+  "channels.browse.menuCreate": {},
+  "channels.browse.menuLabel": {},
+  "channels.browse.noMatch": {
+    "query": "string"
+  },
+  "channels.browse.offline": {},
+  "channels.browse.open": {},
+  "channels.browse.openAria": {
+    "name": "string"
+  },
+  "channels.browse.paletteGroup": {},
+  "channels.browse.rateLimited": {},
+  "channels.browse.retry": {},
+  "channels.browse.searchLabel": {},
+  "channels.browse.searchPlaceholder": {},
+  "channels.browse.switchForbidden": {},
+  "channels.browse.switchGeneric": {},
+  "channels.browse.switchLabel": {},
+  "channels.browse.switchNetwork": {
+    "reason": "string"
+  },
+  "channels.browse.switchNotFound": {},
+  "channels.browse.switchNotListable": {},
+  "channels.browse.switchShowAria": {
+    "name": "string"
+  },
+  "channels.browse.title": {},
+  "channels.createFailure.duplicate": {},
+  "channels.createFailure.forbidden": {},
+  "channels.createFailure.generic": {},
+  "channels.createFailure.network": {},
+  "channels.createFailure.rateLimited": {},
+  "channels.default.description": {},
+  "channels.default.label": {},
+  "channels.default.lastDefault": {},
+  "channels.default.lastHint": {},
+  "channels.default.notDefaultable": {},
+  "channels.dmLeave.action": {},
+  "channels.dmLeave.busy": {},
+  "channels.dmLeave.cancel": {},
+  "channels.dmLeave.checking": {},
+  "channels.dmLeave.confirm": {},
+  "channels.dmLeave.confirmBody": {
+    "name": "string"
+  },
+  "channels.dmLeave.confirmFinal": {},
+  "channels.dmLeave.confirmRevive": {},
+  "channels.dmLeave.confirmScheduled": {
+    "count": "number"
+  },
+  "channels.dmLeave.confirmTitle": {
+    "name": "string"
+  },
+  "channels.dmLeave.done": {},
+  "channels.dmLeave.failed": {},
+  "channels.dmLeave.scheduledFailed": {},
+  "channels.dmLeave.unavailable": {},
+  "channels.nameRule.edge": {},
+  "channels.nameRule.hidden": {},
+  "channels.nameRule.hint": {
+    "max": "number"
+  },
+  "channels.nameRule.placeholder": {},
+  "channels.nameRule.preview": {
+    "name": "string"
+  },
+  "channels.nameRule.required": {},
+  "channels.nameRule.serverRejected": {},
+  "channels.nameRule.tooLong": {
+    "max": "number"
+  },
+  "channels.nameRule.unsupported": {},
+  "channels.preview.attachmentLocked": {},
+  "channels.preview.closeAria": {},
+  "channels.preview.empty": {},
+  "channels.preview.joinBand": {},
+  "channels.preview.listAria": {
+    "name": "string"
+  },
+  "channels.preview.loadForbidden": {},
+  "channels.preview.loadGeneric": {},
+  "channels.preview.loading": {},
+  "channels.preview.loadNetwork": {
+    "reason": "string"
+  },
+  "channels.preview.notFound": {},
+  "channels.preview.openHint": {},
+  "channels.rename.action": {},
+  "channels.rename.aria": {
+    "name": "string"
+  },
+  "channels.rename.busy": {},
+  "channels.rename.cancel": {},
+  "channels.rename.description": {},
+  "channels.rename.done": {},
+  "channels.rename.fieldLabel": {},
+  "channels.rename.forbidden": {},
+  "channels.rename.generalLocked": {},
+  "channels.rename.generic": {},
+  "channels.rename.network": {
+    "reason": "string"
+  },
+  "channels.rename.notFound": {},
+  "channels.rename.preview": {
+    "name": "string"
+  },
+  "channels.rename.submit": {},
+  "channels.rename.title": {},
   "common.feedback.unavailable": {},
   "common.invitation.received": {
     "actorName": "string"
@@ -1661,6 +2152,9 @@ export const argumentSpecs = {
   "connection.approval.serverUnreachable": {},
   "connection.boot.offlineDetail": {},
   "connection.boot.offlineQrDetail": {},
+  "connection.boot.serverSwitchedSignedOut": {
+    "host": "string"
+  },
   "connection.boot.unreachable": {},
   "connection.card.connecting": {},
   "connection.card.lastSynced": {
@@ -1801,6 +2295,124 @@ export const argumentSpecs = {
   "desktop.workSession.backToListLabel": {},
   "desktop.workSession.listTitle": {},
   "desktop.workSession.pageTitle": {},
+  "directory.lifecycle.cancel": {},
+  "directory.lifecycle.errorForbidden": {},
+  "directory.lifecycle.errorLastOwner": {
+    "owner": "string"
+  },
+  "directory.lifecycle.errorNetwork": {},
+  "directory.lifecycle.errorNotActive": {},
+  "directory.lifecycle.errorNotFound": {},
+  "directory.lifecycle.errorNotSuspended": {},
+  "directory.lifecycle.errorRank": {},
+  "directory.lifecycle.errorRateLimited": {},
+  "directory.lifecycle.errorSelf": {},
+  "directory.lifecycle.errorUnknown": {},
+  "directory.lifecycle.reinstate": {},
+  "directory.lifecycle.reinstateBody": {},
+  "directory.lifecycle.reinstateBusy": {},
+  "directory.lifecycle.reinstatedReceipt": {},
+  "directory.lifecycle.reinstateSchedules": {},
+  "directory.lifecycle.reinstateTitle": {
+    "name": "string"
+  },
+  "directory.lifecycle.remove": {},
+  "directory.lifecycle.removeAction": {},
+  "directory.lifecycle.removeBusy": {},
+  "directory.lifecycle.removedClose": {},
+  "directory.lifecycle.removedTitle": {
+    "name": "string"
+  },
+  "directory.lifecycle.removeKeeps": {},
+  "directory.lifecycle.removeLeaves": {},
+  "directory.lifecycle.removeTitle": {
+    "name": "string"
+  },
+  "directory.lifecycle.removeWarning": {},
+  "directory.lifecycle.suspend": {},
+  "directory.lifecycle.suspendBusy": {},
+  "directory.lifecycle.suspendedReceipt": {},
+  "directory.lifecycle.suspendKeeps": {
+    "admin": "string",
+    "owner": "string"
+  },
+  "directory.lifecycle.suspendSignOut": {},
+  "directory.lifecycle.suspendTitle": {
+    "name": "string"
+  },
+  "directory.lifecycle.suspendUndo": {
+    "admin": "string",
+    "owner": "string"
+  },
+  "directory.manage.heading": {},
+  "directory.manage.hint": {
+    "admin": "string",
+    "owner": "string"
+  },
+  "directory.profile.close": {},
+  "directory.profile.copied": {},
+  "directory.profile.copyEmail": {},
+  "directory.profile.copyFailed": {},
+  "directory.profile.copyMention": {},
+  "directory.profile.description": {},
+  "directory.profile.dmInactive": {
+    "status": "string"
+  },
+  "directory.profile.dmSelf": {},
+  "directory.profile.emailLabel": {},
+  "directory.profile.emptyAction": {},
+  "directory.profile.emptyDetail": {},
+  "directory.profile.emptyHeadline": {},
+  "directory.profile.kindAgent": {},
+  "directory.profile.loading": {},
+  "directory.profile.message": {},
+  "directory.profile.messageBusy": {},
+  "directory.profile.offline": {},
+  "directory.profile.offlineMissing": {},
+  "directory.profile.ownerLabel": {},
+  "directory.profile.ownerLine": {
+    "name": "string"
+  },
+  "directory.profile.ownerUnknown": {},
+  "directory.profile.retry": {},
+  "directory.profile.routing": {},
+  "directory.profile.title": {
+    "name": "string"
+  },
+  "directory.profile.titleUnknown": {},
+  "directory.role.cancel": {},
+  "directory.role.changed": {},
+  "directory.role.confirmAction": {},
+  "directory.role.confirmBusy": {},
+  "directory.role.confirmGrantAdmin": {
+    "admin": "string",
+    "guest": "string",
+    "member": "string"
+  },
+  "directory.role.confirmOwnerWarning": {
+    "name": "string",
+    "owner": "string"
+  },
+  "directory.role.confirmPair": {
+    "from": "string",
+    "to": "string"
+  },
+  "directory.role.confirmRevokeAdmin": {
+    "guest": "string",
+    "member": "string"
+  },
+  "directory.role.confirmTitle": {
+    "name": "string"
+  },
+  "directory.role.label": {},
+  "directory.role.lockedAdminCeiling": {
+    "admin": "string",
+    "owner": "string"
+  },
+  "directory.role.lockedOwnerPeer": {
+    "owner": "string"
+  },
+  "directory.role.placeholder": {},
   "expressions.add.adminsOnly": {},
   "expressions.add.backLabel": {},
   "expressions.add.import": {},
@@ -1814,6 +2426,13 @@ export const argumentSpecs = {
   "expressions.draft.approve": {},
   "expressions.draft.approveFailed": {},
   "expressions.draft.approving": {},
+  "expressions.draft.linkApprove": {},
+  "expressions.draft.linkBusy": {},
+  "expressions.draft.linkFetching": {},
+  "expressions.draft.linkFrom": {
+    "host": "string"
+  },
+  "expressions.draft.linkHint": {},
   "expressions.draft.previewLabel": {
     "name": "string"
   },
@@ -2171,6 +2790,58 @@ export const argumentSpecs = {
     "channel": "string"
   },
   "inbox.source.threadUnknown": {},
+  "memberList.empty.detail": {},
+  "memberList.empty.headline": {},
+  "memberList.empty.invite": {},
+  "memberList.group.agents": {},
+  "memberList.group.people": {},
+  "memberList.group.suspended": {},
+  "memberList.newDm.close": {},
+  "memberList.newDm.continueAction": {},
+  "memberList.newDm.description": {},
+  "memberList.newDm.emptyDetail": {},
+  "memberList.newDm.emptyHeadline": {},
+  "memberList.newDm.hasDm": {},
+  "memberList.newDm.noMatchDetail": {
+    "query": "string"
+  },
+  "memberList.newDm.placeholder": {},
+  "memberList.newDm.startAction": {},
+  "memberList.newDm.title": {},
+  "memberList.newDm.toLabel": {},
+  "memberList.noMatch.clear": {},
+  "memberList.noMatch.detail": {
+    "query": "string"
+  },
+  "memberList.noMatch.detailGuest": {
+    "query": "string"
+  },
+  "memberList.noMatch.headline": {},
+  "memberList.page.title": {},
+  "memberList.row.openOwnProfile": {},
+  "memberList.row.openProfile": {},
+  "memberList.row.ownedBy": {
+    "name": "string"
+  },
+  "memberList.row.self": {},
+  "memberList.search.label": {},
+  "memberList.search.placeholder": {},
+  "memberList.search.placeholderGuest": {},
+  "memberList.state.offline": {},
+  "mobile.addMember.addHint": {},
+  "mobile.addMember.adding": {},
+  "mobile.addMember.close": {},
+  "mobile.addMember.emptyWorkspace": {},
+  "mobile.addMember.kindAgent": {},
+  "mobile.addMember.kindHuman": {},
+  "mobile.addMember.loading": {},
+  "mobile.addMember.noMatch": {
+    "query": "string"
+  },
+  "mobile.addMember.present": {},
+  "mobile.addMember.searchLabel": {},
+  "mobile.addMember.searchPlaceholder": {},
+  "mobile.addMember.title": {},
   "mobile.attachmentSave.failed": {},
   "mobile.attachmentSave.photosDenied": {},
   "mobile.attachmentSave.savedToFiles": {},
@@ -2613,6 +3284,45 @@ export const argumentSpecs = {
   "releaseNotes.v0146.whoIsDoingChanged": {},
   "releaseNotes.v0146.whoIsDoingTitle": {},
   "releaseNotes.v0146.whoIsDoingTryIt": {},
+  "releaseNotes.v0147.agentLinksChanged": {},
+  "releaseNotes.v0147.agentLinksTitle": {},
+  "releaseNotes.v0147.agentLinksTryIt": {},
+  "releaseNotes.v0147.agentsLine1": {},
+  "releaseNotes.v0147.agentsLine2": {},
+  "releaseNotes.v0147.channelBrowseChanged": {},
+  "releaseNotes.v0147.channelBrowseTitle": {},
+  "releaseNotes.v0147.channelBrowseTryIt": {},
+  "releaseNotes.v0147.channelMembersChanged": {},
+  "releaseNotes.v0147.channelMembersTitle": {},
+  "releaseNotes.v0147.channelMembersTryIt": {},
+  "releaseNotes.v0147.channelNamesChanged": {},
+  "releaseNotes.v0147.channelNamesTitle": {},
+  "releaseNotes.v0147.channelNamesTryIt": {},
+  "releaseNotes.v0147.channelsLine1": {},
+  "releaseNotes.v0147.channelsLine2": {},
+  "releaseNotes.v0147.channelsLine3": {},
+  "releaseNotes.v0147.channelsLine4": {},
+  "releaseNotes.v0147.channelsLine5": {},
+  "releaseNotes.v0147.channelsLine6": {},
+  "releaseNotes.v0147.channelsTopic": {},
+  "releaseNotes.v0147.dmLeaveChanged": {},
+  "releaseNotes.v0147.dmLeaveTitle": {},
+  "releaseNotes.v0147.dmLeaveTryIt": {},
+  "releaseNotes.v0147.lookLine1": {},
+  "releaseNotes.v0147.lookLine2": {},
+  "releaseNotes.v0147.lookLine3": {},
+  "releaseNotes.v0147.lookLine4": {},
+  "releaseNotes.v0147.lookLine5": {},
+  "releaseNotes.v0147.lookLine6": {},
+  "releaseNotes.v0147.lookTopic": {},
+  "releaseNotes.v0147.reconnectSyncChanged": {},
+  "releaseNotes.v0147.reconnectSyncTitle": {},
+  "releaseNotes.v0147.reconnectSyncTryIt": {},
+  "releaseNotes.v0147.settingsLine1": {},
+  "releaseNotes.v0147.summary": {},
+  "releaseNotes.v0147.tooltipsChanged": {},
+  "releaseNotes.v0147.tooltipsTitle": {},
+  "releaseNotes.v0147.tooltipsTryIt": {},
   "releaseNotes.version.current": {},
   "releaseNotes.version.label": {
     "version": "string"
@@ -3022,6 +3732,13 @@ export const argumentSpecs = {
   "teamAi.stage.setupLine": {},
   "teamAi.stage.setupUnverifiedDetail": {},
   "teamAi.stage.verifyingLine": {},
+  "timeline.addMember.createdDescription": {
+    "name": "string"
+  },
+  "timeline.addMember.createdDescriptionPublic": {
+    "name": "string"
+  },
+  "timeline.addMember.later": {},
   "timeline.agentRail.open": {
     "label": "string"
   },
@@ -3031,9 +3748,33 @@ export const argumentSpecs = {
   },
   "timeline.agentRail.sheetClose": {},
   "timeline.agentRail.sheetTitle": {},
+  "timeline.approval.channelAgentIn": {},
+  "timeline.approval.channelNeedsMember": {},
+  "timeline.approval.channelsRefused": {},
   "timeline.approval.reproposeBusy": {},
   "timeline.approval.reproposeSeeded": {},
   "timeline.approvalExpiry.soon": {},
+  "timeline.channelLeave.bodyPrivate": {
+    "name": "string"
+  },
+  "timeline.channelLeave.bodyPublic": {
+    "name": "string"
+  },
+  "timeline.channelLeave.bodyPublicBrowse": {
+    "name": "string"
+  },
+  "timeline.channelLeave.busy": {},
+  "timeline.channelLeave.cancel": {},
+  "timeline.channelLeave.confirm": {},
+  "timeline.channelLeave.errorForbidden": {},
+  "timeline.channelLeave.errorGeneric": {},
+  "timeline.channelLeave.errorNetwork": {
+    "reason": "string"
+  },
+  "timeline.channelLeave.errorNotFound": {},
+  "timeline.channelLeave.title": {},
+  "timeline.createChannel.privateDetail": {},
+  "timeline.createChannel.publicDetail": {},
   "timeline.edited.atDate": {
     "date": "string",
     "time": "string"
@@ -3077,6 +3818,9 @@ export const argumentSpecs = {
   "timeline.memberPanel.groupPeople": {
     "count": "number"
   },
+  "timeline.memberPanel.groupSuspended": {
+    "count": "number"
+  },
   "timeline.memberPanel.groupWorking": {
     "count": "number"
   },
@@ -3091,11 +3835,34 @@ export const argumentSpecs = {
   "timeline.memberPanel.nowFailedMid": {},
   "timeline.memberPanel.nowFailedShort": {},
   "timeline.memberPanel.nowRetry": {},
+  "timeline.memberPanel.remove": {},
+  "timeline.memberPanel.removeBody": {
+    "channel": "string",
+    "name": "string"
+  },
+  "timeline.memberPanel.removeBusy": {},
+  "timeline.memberPanel.removeCancel": {},
+  "timeline.memberPanel.removeConfirm": {},
+  "timeline.memberPanel.removed": {
+    "name": "string"
+  },
+  "timeline.memberPanel.removeErrorForbidden": {},
+  "timeline.memberPanel.removeErrorGeneric": {},
+  "timeline.memberPanel.removeErrorNetwork": {
+    "reason": "string"
+  },
+  "timeline.memberPanel.removeErrorNotFound": {},
+  "timeline.memberPanel.removeTitle": {
+    "name": "string"
+  },
   "timeline.memberPanel.request": {
     "text": "string"
   },
   "timeline.memberPanel.requestSpoken": {
     "text": "string"
+  },
+  "timeline.memberPanel.rowActions": {
+    "name": "string"
   },
   "timeline.memberPanel.stageSpoken": {
     "stage": "string"
@@ -3323,7 +4090,70 @@ export const argumentSpecs = {
   "timeline.workTool.ping": {},
   "timeline.workTool.runComplete": {},
   "timeline.workTool.runEvent": {},
-  "timeline.workTool.unknown": {}
+  "timeline.workTool.unknown": {},
+  "workspace.add.back": {},
+  "workspace.add.cancel": {},
+  "workspace.add.createLead": {},
+  "workspace.add.createLeadNotOperator": {},
+  "workspace.add.createTitle": {},
+  "workspace.add.joinChecking": {},
+  "workspace.add.joinClaim": {},
+  "workspace.add.joinConfirmAction": {},
+  "workspace.add.joinConfirmBody": {},
+  "workspace.add.joinConfirmTitle": {},
+  "workspace.add.joinEmpty": {},
+  "workspace.add.joinField": {},
+  "workspace.add.joinHint": {},
+  "workspace.add.joinLead": {},
+  "workspace.add.joinLeadWeb": {},
+  "workspace.add.joinNext": {},
+  "workspace.add.joinOpenAction": {},
+  "workspace.add.joinOpenBody": {},
+  "workspace.add.joinOpenInvite": {
+    "server": "string"
+  },
+  "workspace.add.joinOpenServer": {
+    "server": "string"
+  },
+  "workspace.add.joinOpenTitle": {},
+  "workspace.add.joinPasteAction": {},
+  "workspace.add.joinPasteBody": {},
+  "workspace.add.joinPasteTitle": {},
+  "workspace.add.joinSameServer": {},
+  "workspace.add.joinTargetInvite": {
+    "server": "string"
+  },
+  "workspace.add.joinTargetInviteOnly": {},
+  "workspace.add.joinTargetServer": {
+    "server": "string"
+  },
+  "workspace.add.joinTitle": {},
+  "workspace.add.joinUnreachable": {
+    "server": "string"
+  },
+  "workspace.add.lead": {},
+  "workspace.add.operatorContact": {},
+  "workspace.add.title": {},
+  "workspace.create.lead": {},
+  "workspace.create.operatorOnly": {},
+  "workspace.create.slugHint": {},
+  "workspace.leave.body": {},
+  "workspace.leave.busy": {},
+  "workspace.leave.cancel": {},
+  "workspace.leave.confirm": {},
+  "workspace.leave.lastOwner": {},
+  "workspace.leave.lastOwnerNext": {},
+  "workspace.leave.title": {
+    "name": "string"
+  },
+  "workspace.leave.titleUnnamed": {},
+  "workspace.menu.copiedAddress": {},
+  "workspace.menu.copyAddress": {},
+  "workspace.menu.copyAddressNote": {},
+  "workspace.menu.copyFailed": {},
+  "workspace.menu.fallbackTitle": {},
+  "workspace.menu.leave": {},
+  "workspace.menu.settings": {}
 } as const;
 
 export interface MessageArgs {
@@ -3498,6 +4328,111 @@ export interface MessageArgs {
   "blocked.workStateNone.serverUnreachable": Record<string, never>;
   "blocked.workStateStale.offline": Record<string, never>;
   "blocked.workStateStale.serverUnreachable": Record<string, never>;
+  "channels.browse.clearSearch": Record<string, never>;
+  "channels.browse.close": Record<string, never>;
+  "channels.browse.closeAria": Record<string, never>;
+  "channels.browse.default": Record<string, never>;
+  "channels.browse.description": Record<string, never>;
+  "channels.browse.emptyAdminDetail": Record<string, never>;
+  "channels.browse.emptyAdminDetailPhone": Record<string, never>;
+  "channels.browse.emptyHeadline": Record<string, never>;
+  "channels.browse.groupJoined": Record<string, never>;
+  "channels.browse.groupNotJoined": Record<string, never>;
+  "channels.browse.hiddenGroup": Record<string, never>;
+  "channels.browse.homeRowHint": Record<string, never>;
+  "channels.browse.join": Record<string, never>;
+  "channels.browse.joinAria": { name: string };
+  "channels.browse.joined": Record<string, never>;
+  "channels.browse.joinForbidden": Record<string, never>;
+  "channels.browse.joinGeneric": Record<string, never>;
+  "channels.browse.joining": Record<string, never>;
+  "channels.browse.joinNetwork": { reason: string };
+  "channels.browse.joinNotFound": Record<string, never>;
+  "channels.browse.loadForbidden": Record<string, never>;
+  "channels.browse.loadGeneric": Record<string, never>;
+  "channels.browse.loading": Record<string, never>;
+  "channels.browse.loadMore": Record<string, never>;
+  "channels.browse.loadNetwork": { reason: string };
+  "channels.browse.loadUnsupported": Record<string, never>;
+  "channels.browse.memberCount": { count: number };
+  "channels.browse.menuCreate": Record<string, never>;
+  "channels.browse.menuLabel": Record<string, never>;
+  "channels.browse.noMatch": { query: string };
+  "channels.browse.offline": Record<string, never>;
+  "channels.browse.open": Record<string, never>;
+  "channels.browse.openAria": { name: string };
+  "channels.browse.paletteGroup": Record<string, never>;
+  "channels.browse.rateLimited": Record<string, never>;
+  "channels.browse.retry": Record<string, never>;
+  "channels.browse.searchLabel": Record<string, never>;
+  "channels.browse.searchPlaceholder": Record<string, never>;
+  "channels.browse.switchForbidden": Record<string, never>;
+  "channels.browse.switchGeneric": Record<string, never>;
+  "channels.browse.switchLabel": Record<string, never>;
+  "channels.browse.switchNetwork": { reason: string };
+  "channels.browse.switchNotFound": Record<string, never>;
+  "channels.browse.switchNotListable": Record<string, never>;
+  "channels.browse.switchShowAria": { name: string };
+  "channels.browse.title": Record<string, never>;
+  "channels.createFailure.duplicate": Record<string, never>;
+  "channels.createFailure.forbidden": Record<string, never>;
+  "channels.createFailure.generic": Record<string, never>;
+  "channels.createFailure.network": Record<string, never>;
+  "channels.createFailure.rateLimited": Record<string, never>;
+  "channels.default.description": Record<string, never>;
+  "channels.default.label": Record<string, never>;
+  "channels.default.lastDefault": Record<string, never>;
+  "channels.default.lastHint": Record<string, never>;
+  "channels.default.notDefaultable": Record<string, never>;
+  "channels.dmLeave.action": Record<string, never>;
+  "channels.dmLeave.busy": Record<string, never>;
+  "channels.dmLeave.cancel": Record<string, never>;
+  "channels.dmLeave.checking": Record<string, never>;
+  "channels.dmLeave.confirm": Record<string, never>;
+  "channels.dmLeave.confirmBody": { name: string };
+  "channels.dmLeave.confirmFinal": Record<string, never>;
+  "channels.dmLeave.confirmRevive": Record<string, never>;
+  "channels.dmLeave.confirmScheduled": { count: number };
+  "channels.dmLeave.confirmTitle": { name: string };
+  "channels.dmLeave.done": Record<string, never>;
+  "channels.dmLeave.failed": Record<string, never>;
+  "channels.dmLeave.scheduledFailed": Record<string, never>;
+  "channels.dmLeave.unavailable": Record<string, never>;
+  "channels.nameRule.edge": Record<string, never>;
+  "channels.nameRule.hidden": Record<string, never>;
+  "channels.nameRule.hint": { max: number };
+  "channels.nameRule.placeholder": Record<string, never>;
+  "channels.nameRule.preview": { name: string };
+  "channels.nameRule.required": Record<string, never>;
+  "channels.nameRule.serverRejected": Record<string, never>;
+  "channels.nameRule.tooLong": { max: number };
+  "channels.nameRule.unsupported": Record<string, never>;
+  "channels.preview.attachmentLocked": Record<string, never>;
+  "channels.preview.closeAria": Record<string, never>;
+  "channels.preview.empty": Record<string, never>;
+  "channels.preview.joinBand": Record<string, never>;
+  "channels.preview.listAria": { name: string };
+  "channels.preview.loadForbidden": Record<string, never>;
+  "channels.preview.loadGeneric": Record<string, never>;
+  "channels.preview.loading": Record<string, never>;
+  "channels.preview.loadNetwork": { reason: string };
+  "channels.preview.notFound": Record<string, never>;
+  "channels.preview.openHint": Record<string, never>;
+  "channels.rename.action": Record<string, never>;
+  "channels.rename.aria": { name: string };
+  "channels.rename.busy": Record<string, never>;
+  "channels.rename.cancel": Record<string, never>;
+  "channels.rename.description": Record<string, never>;
+  "channels.rename.done": Record<string, never>;
+  "channels.rename.fieldLabel": Record<string, never>;
+  "channels.rename.forbidden": Record<string, never>;
+  "channels.rename.generalLocked": Record<string, never>;
+  "channels.rename.generic": Record<string, never>;
+  "channels.rename.network": { reason: string };
+  "channels.rename.notFound": Record<string, never>;
+  "channels.rename.preview": { name: string };
+  "channels.rename.submit": Record<string, never>;
+  "channels.rename.title": Record<string, never>;
   "common.feedback.unavailable": Record<string, never>;
   "common.invitation.received": { actorName: string };
   "common.members.count": { count: number };
@@ -3511,6 +4446,7 @@ export interface MessageArgs {
   "connection.approval.serverUnreachable": Record<string, never>;
   "connection.boot.offlineDetail": Record<string, never>;
   "connection.boot.offlineQrDetail": Record<string, never>;
+  "connection.boot.serverSwitchedSignedOut": { host: string };
   "connection.boot.unreachable": Record<string, never>;
   "connection.card.connecting": Record<string, never>;
   "connection.card.lastSynced": { relativeTime: string };
@@ -3627,6 +4563,79 @@ export interface MessageArgs {
   "desktop.workSession.backToListLabel": Record<string, never>;
   "desktop.workSession.listTitle": Record<string, never>;
   "desktop.workSession.pageTitle": Record<string, never>;
+  "directory.lifecycle.cancel": Record<string, never>;
+  "directory.lifecycle.errorForbidden": Record<string, never>;
+  "directory.lifecycle.errorLastOwner": { owner: string };
+  "directory.lifecycle.errorNetwork": Record<string, never>;
+  "directory.lifecycle.errorNotActive": Record<string, never>;
+  "directory.lifecycle.errorNotFound": Record<string, never>;
+  "directory.lifecycle.errorNotSuspended": Record<string, never>;
+  "directory.lifecycle.errorRank": Record<string, never>;
+  "directory.lifecycle.errorRateLimited": Record<string, never>;
+  "directory.lifecycle.errorSelf": Record<string, never>;
+  "directory.lifecycle.errorUnknown": Record<string, never>;
+  "directory.lifecycle.reinstate": Record<string, never>;
+  "directory.lifecycle.reinstateBody": Record<string, never>;
+  "directory.lifecycle.reinstateBusy": Record<string, never>;
+  "directory.lifecycle.reinstatedReceipt": Record<string, never>;
+  "directory.lifecycle.reinstateSchedules": Record<string, never>;
+  "directory.lifecycle.reinstateTitle": { name: string };
+  "directory.lifecycle.remove": Record<string, never>;
+  "directory.lifecycle.removeAction": Record<string, never>;
+  "directory.lifecycle.removeBusy": Record<string, never>;
+  "directory.lifecycle.removedClose": Record<string, never>;
+  "directory.lifecycle.removedTitle": { name: string };
+  "directory.lifecycle.removeKeeps": Record<string, never>;
+  "directory.lifecycle.removeLeaves": Record<string, never>;
+  "directory.lifecycle.removeTitle": { name: string };
+  "directory.lifecycle.removeWarning": Record<string, never>;
+  "directory.lifecycle.suspend": Record<string, never>;
+  "directory.lifecycle.suspendBusy": Record<string, never>;
+  "directory.lifecycle.suspendedReceipt": Record<string, never>;
+  "directory.lifecycle.suspendKeeps": { admin: string; owner: string };
+  "directory.lifecycle.suspendSignOut": Record<string, never>;
+  "directory.lifecycle.suspendTitle": { name: string };
+  "directory.lifecycle.suspendUndo": { admin: string; owner: string };
+  "directory.manage.heading": Record<string, never>;
+  "directory.manage.hint": { admin: string; owner: string };
+  "directory.profile.close": Record<string, never>;
+  "directory.profile.copied": Record<string, never>;
+  "directory.profile.copyEmail": Record<string, never>;
+  "directory.profile.copyFailed": Record<string, never>;
+  "directory.profile.copyMention": Record<string, never>;
+  "directory.profile.description": Record<string, never>;
+  "directory.profile.dmInactive": { status: string };
+  "directory.profile.dmSelf": Record<string, never>;
+  "directory.profile.emailLabel": Record<string, never>;
+  "directory.profile.emptyAction": Record<string, never>;
+  "directory.profile.emptyDetail": Record<string, never>;
+  "directory.profile.emptyHeadline": Record<string, never>;
+  "directory.profile.kindAgent": Record<string, never>;
+  "directory.profile.loading": Record<string, never>;
+  "directory.profile.message": Record<string, never>;
+  "directory.profile.messageBusy": Record<string, never>;
+  "directory.profile.offline": Record<string, never>;
+  "directory.profile.offlineMissing": Record<string, never>;
+  "directory.profile.ownerLabel": Record<string, never>;
+  "directory.profile.ownerLine": { name: string };
+  "directory.profile.ownerUnknown": Record<string, never>;
+  "directory.profile.retry": Record<string, never>;
+  "directory.profile.routing": Record<string, never>;
+  "directory.profile.title": { name: string };
+  "directory.profile.titleUnknown": Record<string, never>;
+  "directory.role.cancel": Record<string, never>;
+  "directory.role.changed": Record<string, never>;
+  "directory.role.confirmAction": Record<string, never>;
+  "directory.role.confirmBusy": Record<string, never>;
+  "directory.role.confirmGrantAdmin": { admin: string; guest: string; member: string };
+  "directory.role.confirmOwnerWarning": { name: string; owner: string };
+  "directory.role.confirmPair": { from: string; to: string };
+  "directory.role.confirmRevokeAdmin": { guest: string; member: string };
+  "directory.role.confirmTitle": { name: string };
+  "directory.role.label": Record<string, never>;
+  "directory.role.lockedAdminCeiling": { admin: string; owner: string };
+  "directory.role.lockedOwnerPeer": { owner: string };
+  "directory.role.placeholder": Record<string, never>;
   "expressions.add.adminsOnly": Record<string, never>;
   "expressions.add.backLabel": Record<string, never>;
   "expressions.add.import": Record<string, never>;
@@ -3640,6 +4649,11 @@ export interface MessageArgs {
   "expressions.draft.approve": Record<string, never>;
   "expressions.draft.approveFailed": Record<string, never>;
   "expressions.draft.approving": Record<string, never>;
+  "expressions.draft.linkApprove": Record<string, never>;
+  "expressions.draft.linkBusy": Record<string, never>;
+  "expressions.draft.linkFetching": Record<string, never>;
+  "expressions.draft.linkFrom": { host: string };
+  "expressions.draft.linkHint": Record<string, never>;
   "expressions.draft.previewLabel": { name: string };
   "expressions.draft.replaceFailed": Record<string, never>;
   "expressions.draft.replacing": Record<string, never>;
@@ -3914,6 +4928,48 @@ export interface MessageArgs {
   "inbox.source.task": Record<string, never>;
   "inbox.source.thread": { channel: string };
   "inbox.source.threadUnknown": Record<string, never>;
+  "memberList.empty.detail": Record<string, never>;
+  "memberList.empty.headline": Record<string, never>;
+  "memberList.empty.invite": Record<string, never>;
+  "memberList.group.agents": Record<string, never>;
+  "memberList.group.people": Record<string, never>;
+  "memberList.group.suspended": Record<string, never>;
+  "memberList.newDm.close": Record<string, never>;
+  "memberList.newDm.continueAction": Record<string, never>;
+  "memberList.newDm.description": Record<string, never>;
+  "memberList.newDm.emptyDetail": Record<string, never>;
+  "memberList.newDm.emptyHeadline": Record<string, never>;
+  "memberList.newDm.hasDm": Record<string, never>;
+  "memberList.newDm.noMatchDetail": { query: string };
+  "memberList.newDm.placeholder": Record<string, never>;
+  "memberList.newDm.startAction": Record<string, never>;
+  "memberList.newDm.title": Record<string, never>;
+  "memberList.newDm.toLabel": Record<string, never>;
+  "memberList.noMatch.clear": Record<string, never>;
+  "memberList.noMatch.detail": { query: string };
+  "memberList.noMatch.detailGuest": { query: string };
+  "memberList.noMatch.headline": Record<string, never>;
+  "memberList.page.title": Record<string, never>;
+  "memberList.row.openOwnProfile": Record<string, never>;
+  "memberList.row.openProfile": Record<string, never>;
+  "memberList.row.ownedBy": { name: string };
+  "memberList.row.self": Record<string, never>;
+  "memberList.search.label": Record<string, never>;
+  "memberList.search.placeholder": Record<string, never>;
+  "memberList.search.placeholderGuest": Record<string, never>;
+  "memberList.state.offline": Record<string, never>;
+  "mobile.addMember.addHint": Record<string, never>;
+  "mobile.addMember.adding": Record<string, never>;
+  "mobile.addMember.close": Record<string, never>;
+  "mobile.addMember.emptyWorkspace": Record<string, never>;
+  "mobile.addMember.kindAgent": Record<string, never>;
+  "mobile.addMember.kindHuman": Record<string, never>;
+  "mobile.addMember.loading": Record<string, never>;
+  "mobile.addMember.noMatch": { query: string };
+  "mobile.addMember.present": Record<string, never>;
+  "mobile.addMember.searchLabel": Record<string, never>;
+  "mobile.addMember.searchPlaceholder": Record<string, never>;
+  "mobile.addMember.title": Record<string, never>;
   "mobile.attachmentSave.failed": Record<string, never>;
   "mobile.attachmentSave.photosDenied": Record<string, never>;
   "mobile.attachmentSave.savedToFiles": Record<string, never>;
@@ -4314,6 +5370,45 @@ export interface MessageArgs {
   "releaseNotes.v0146.whoIsDoingChanged": Record<string, never>;
   "releaseNotes.v0146.whoIsDoingTitle": Record<string, never>;
   "releaseNotes.v0146.whoIsDoingTryIt": Record<string, never>;
+  "releaseNotes.v0147.agentLinksChanged": Record<string, never>;
+  "releaseNotes.v0147.agentLinksTitle": Record<string, never>;
+  "releaseNotes.v0147.agentLinksTryIt": Record<string, never>;
+  "releaseNotes.v0147.agentsLine1": Record<string, never>;
+  "releaseNotes.v0147.agentsLine2": Record<string, never>;
+  "releaseNotes.v0147.channelBrowseChanged": Record<string, never>;
+  "releaseNotes.v0147.channelBrowseTitle": Record<string, never>;
+  "releaseNotes.v0147.channelBrowseTryIt": Record<string, never>;
+  "releaseNotes.v0147.channelMembersChanged": Record<string, never>;
+  "releaseNotes.v0147.channelMembersTitle": Record<string, never>;
+  "releaseNotes.v0147.channelMembersTryIt": Record<string, never>;
+  "releaseNotes.v0147.channelNamesChanged": Record<string, never>;
+  "releaseNotes.v0147.channelNamesTitle": Record<string, never>;
+  "releaseNotes.v0147.channelNamesTryIt": Record<string, never>;
+  "releaseNotes.v0147.channelsLine1": Record<string, never>;
+  "releaseNotes.v0147.channelsLine2": Record<string, never>;
+  "releaseNotes.v0147.channelsLine3": Record<string, never>;
+  "releaseNotes.v0147.channelsLine4": Record<string, never>;
+  "releaseNotes.v0147.channelsLine5": Record<string, never>;
+  "releaseNotes.v0147.channelsLine6": Record<string, never>;
+  "releaseNotes.v0147.channelsTopic": Record<string, never>;
+  "releaseNotes.v0147.dmLeaveChanged": Record<string, never>;
+  "releaseNotes.v0147.dmLeaveTitle": Record<string, never>;
+  "releaseNotes.v0147.dmLeaveTryIt": Record<string, never>;
+  "releaseNotes.v0147.lookLine1": Record<string, never>;
+  "releaseNotes.v0147.lookLine2": Record<string, never>;
+  "releaseNotes.v0147.lookLine3": Record<string, never>;
+  "releaseNotes.v0147.lookLine4": Record<string, never>;
+  "releaseNotes.v0147.lookLine5": Record<string, never>;
+  "releaseNotes.v0147.lookLine6": Record<string, never>;
+  "releaseNotes.v0147.lookTopic": Record<string, never>;
+  "releaseNotes.v0147.reconnectSyncChanged": Record<string, never>;
+  "releaseNotes.v0147.reconnectSyncTitle": Record<string, never>;
+  "releaseNotes.v0147.reconnectSyncTryIt": Record<string, never>;
+  "releaseNotes.v0147.settingsLine1": Record<string, never>;
+  "releaseNotes.v0147.summary": Record<string, never>;
+  "releaseNotes.v0147.tooltipsChanged": Record<string, never>;
+  "releaseNotes.v0147.tooltipsTitle": Record<string, never>;
+  "releaseNotes.v0147.tooltipsTryIt": Record<string, never>;
   "releaseNotes.version.current": Record<string, never>;
   "releaseNotes.version.label": { version: string };
   "releaseNotes.version.releasedOn": { date: string };
@@ -4601,14 +5696,33 @@ export interface MessageArgs {
   "teamAi.stage.setupLine": Record<string, never>;
   "teamAi.stage.setupUnverifiedDetail": Record<string, never>;
   "teamAi.stage.verifyingLine": Record<string, never>;
+  "timeline.addMember.createdDescription": { name: string };
+  "timeline.addMember.createdDescriptionPublic": { name: string };
+  "timeline.addMember.later": Record<string, never>;
   "timeline.agentRail.open": { label: string };
   "timeline.agentRail.openActivity": Record<string, never>;
   "timeline.agentRail.openRecord": { name: string };
   "timeline.agentRail.sheetClose": Record<string, never>;
   "timeline.agentRail.sheetTitle": Record<string, never>;
+  "timeline.approval.channelAgentIn": Record<string, never>;
+  "timeline.approval.channelNeedsMember": Record<string, never>;
+  "timeline.approval.channelsRefused": Record<string, never>;
   "timeline.approval.reproposeBusy": Record<string, never>;
   "timeline.approval.reproposeSeeded": Record<string, never>;
   "timeline.approvalExpiry.soon": Record<string, never>;
+  "timeline.channelLeave.bodyPrivate": { name: string };
+  "timeline.channelLeave.bodyPublic": { name: string };
+  "timeline.channelLeave.bodyPublicBrowse": { name: string };
+  "timeline.channelLeave.busy": Record<string, never>;
+  "timeline.channelLeave.cancel": Record<string, never>;
+  "timeline.channelLeave.confirm": Record<string, never>;
+  "timeline.channelLeave.errorForbidden": Record<string, never>;
+  "timeline.channelLeave.errorGeneric": Record<string, never>;
+  "timeline.channelLeave.errorNetwork": { reason: string };
+  "timeline.channelLeave.errorNotFound": Record<string, never>;
+  "timeline.channelLeave.title": Record<string, never>;
+  "timeline.createChannel.privateDetail": Record<string, never>;
+  "timeline.createChannel.publicDetail": Record<string, never>;
   "timeline.edited.atDate": { date: string; time: string };
   "timeline.edited.atDay": { day: string; time: string };
   "timeline.edited.atTime": { time: string };
@@ -4628,6 +5742,7 @@ export interface MessageArgs {
   "timeline.memberPanel.groupOnline": { count: number };
   "timeline.memberPanel.groupOtherAgents": { count: number };
   "timeline.memberPanel.groupPeople": { count: number };
+  "timeline.memberPanel.groupSuspended": { count: number };
   "timeline.memberPanel.groupWorking": { count: number };
   "timeline.memberPanel.listLabel": Record<string, never>;
   "timeline.memberPanel.moreRuns": { count: number };
@@ -4636,8 +5751,20 @@ export interface MessageArgs {
   "timeline.memberPanel.nowFailedMid": Record<string, never>;
   "timeline.memberPanel.nowFailedShort": Record<string, never>;
   "timeline.memberPanel.nowRetry": Record<string, never>;
+  "timeline.memberPanel.remove": Record<string, never>;
+  "timeline.memberPanel.removeBody": { channel: string; name: string };
+  "timeline.memberPanel.removeBusy": Record<string, never>;
+  "timeline.memberPanel.removeCancel": Record<string, never>;
+  "timeline.memberPanel.removeConfirm": Record<string, never>;
+  "timeline.memberPanel.removed": { name: string };
+  "timeline.memberPanel.removeErrorForbidden": Record<string, never>;
+  "timeline.memberPanel.removeErrorGeneric": Record<string, never>;
+  "timeline.memberPanel.removeErrorNetwork": { reason: string };
+  "timeline.memberPanel.removeErrorNotFound": Record<string, never>;
+  "timeline.memberPanel.removeTitle": { name: string };
   "timeline.memberPanel.request": { text: string };
   "timeline.memberPanel.requestSpoken": { text: string };
+  "timeline.memberPanel.rowActions": { name: string };
   "timeline.memberPanel.stageSpoken": { stage: string };
   "timeline.quote.head": { name: string };
   "timeline.quote.headUnnamed": Record<string, never>;
@@ -4770,4 +5897,55 @@ export interface MessageArgs {
   "timeline.workTool.runComplete": Record<string, never>;
   "timeline.workTool.runEvent": Record<string, never>;
   "timeline.workTool.unknown": Record<string, never>;
+  "workspace.add.back": Record<string, never>;
+  "workspace.add.cancel": Record<string, never>;
+  "workspace.add.createLead": Record<string, never>;
+  "workspace.add.createLeadNotOperator": Record<string, never>;
+  "workspace.add.createTitle": Record<string, never>;
+  "workspace.add.joinChecking": Record<string, never>;
+  "workspace.add.joinClaim": Record<string, never>;
+  "workspace.add.joinConfirmAction": Record<string, never>;
+  "workspace.add.joinConfirmBody": Record<string, never>;
+  "workspace.add.joinConfirmTitle": Record<string, never>;
+  "workspace.add.joinEmpty": Record<string, never>;
+  "workspace.add.joinField": Record<string, never>;
+  "workspace.add.joinHint": Record<string, never>;
+  "workspace.add.joinLead": Record<string, never>;
+  "workspace.add.joinLeadWeb": Record<string, never>;
+  "workspace.add.joinNext": Record<string, never>;
+  "workspace.add.joinOpenAction": Record<string, never>;
+  "workspace.add.joinOpenBody": Record<string, never>;
+  "workspace.add.joinOpenInvite": { server: string };
+  "workspace.add.joinOpenServer": { server: string };
+  "workspace.add.joinOpenTitle": Record<string, never>;
+  "workspace.add.joinPasteAction": Record<string, never>;
+  "workspace.add.joinPasteBody": Record<string, never>;
+  "workspace.add.joinPasteTitle": Record<string, never>;
+  "workspace.add.joinSameServer": Record<string, never>;
+  "workspace.add.joinTargetInvite": { server: string };
+  "workspace.add.joinTargetInviteOnly": Record<string, never>;
+  "workspace.add.joinTargetServer": { server: string };
+  "workspace.add.joinTitle": Record<string, never>;
+  "workspace.add.joinUnreachable": { server: string };
+  "workspace.add.lead": Record<string, never>;
+  "workspace.add.operatorContact": Record<string, never>;
+  "workspace.add.title": Record<string, never>;
+  "workspace.create.lead": Record<string, never>;
+  "workspace.create.operatorOnly": Record<string, never>;
+  "workspace.create.slugHint": Record<string, never>;
+  "workspace.leave.body": Record<string, never>;
+  "workspace.leave.busy": Record<string, never>;
+  "workspace.leave.cancel": Record<string, never>;
+  "workspace.leave.confirm": Record<string, never>;
+  "workspace.leave.lastOwner": Record<string, never>;
+  "workspace.leave.lastOwnerNext": Record<string, never>;
+  "workspace.leave.title": { name: string };
+  "workspace.leave.titleUnnamed": Record<string, never>;
+  "workspace.menu.copiedAddress": Record<string, never>;
+  "workspace.menu.copyAddress": Record<string, never>;
+  "workspace.menu.copyAddressNote": Record<string, never>;
+  "workspace.menu.copyFailed": Record<string, never>;
+  "workspace.menu.fallbackTitle": Record<string, never>;
+  "workspace.menu.leave": Record<string, never>;
+  "workspace.menu.settings": Record<string, never>;
 }

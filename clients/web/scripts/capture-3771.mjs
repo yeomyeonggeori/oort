@@ -236,7 +236,7 @@ async function installMocks(context, { messages, decisionStatus }) {
   await context.route("**/v1/workspaces/*/channels", (route) =>
     json(route, { channels: CHANNELS })
   );
-  await context.route("**/v1/workspaces/*/roster", (route) =>
+  await context.route("**/v1/workspaces/*/roster*", (route) =>
     json(route, { members: ROSTER })
   );
   const readStates = [

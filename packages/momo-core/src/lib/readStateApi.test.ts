@@ -337,3 +337,46 @@ describe("touchChannelViewing", () => {
     });
   });
 });
+
+// ADR-0177 증보 2026-11-14 D15·D18·D21: 요청자 본인의 읽기 하한. `closedAtSeq` 와 같은 세 상태다 - 키의 있음(값이 null 이어도)이
+// 「이 서버가 나가기를 싣는다」의 증거라서, 없는 키를 null 로 만들면 옛 서버에 메뉴가 서고, null 을 없애면 새 서버에 메뉴가 안 선다.
+describe("read-state wire: history_from_seq (ADR-0177 D18)", () => {
+  it("양의 정수는 하한, null 은 null(키 있음), 없거나 망가졌으면 키를 만들지 않는다", async () => {
+    installHost();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        jsonResponse({
+          read_states: [
+            { ...WIRE, channel_id: "left", history_from_seq: 11 },
+            { ...WIRE, channel_id: "full", history_from_seq: null },
+            { ...WIRE, channel_id: "old" },
+            { ...WIRE, channel_id: "zero", history_from_seq: 0 },
+            { ...WIRE, channel_id: "neg", history_from_seq: -2 },
+            { ...WIRE, channel_id: "frac", history_from_seq: 1.5 },
+            { ...WIRE, channel_id: "text", history_from_seq: "11" },
+          ],
+        })
+      )
+    );
+    const states = await fetchReadStates("ws");
+    expect(states.map((s) => [s.channelId, s.historyFromSeq])).toEqual([
+      ["left", 11],
+      ["full", null],
+      ["old", undefined],
+      ["zero", undefined],
+      ["neg", undefined],
+      ["frac", undefined],
+      ["text", undefined],
+    ]);
+    expect(states[1]).toHaveProperty("historyFromSeq", null);
+    for (const state of states.slice(2)) expect(state).not.toHaveProperty("historyFromSeq");
+  });
+
+  it("PUT read-state 응답은 하한을 싣지 않는다 - 키가 생기지 않는다", async () => {
+    installHost();
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse(WIRE)));
+    const state = await updateReadState("ws", "c-1", 10);
+    expect(state).not.toHaveProperty("historyFromSeq");
+  });
+});

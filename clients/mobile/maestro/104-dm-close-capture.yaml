@@ -1,7 +1,7 @@
 appId: app.momo.ios
 name: 104-dm-close-capture
 ---
-# 104-dm-close-capture - 사이드바 행을 길게 누르면 「대화 닫기」가 서고, 누르면 그 DM 이 목록에서 사라진다 (#4367).
+# 104-dm-close-capture - 사이드바 행을 길게 누르면 「목록에서 숨기기」가 서고, 누르면 그 DM 이 목록에서 사라진다 (#4367).
 #
 # 표면은 102 와 같다(`-momoMeasure GONE-DM-HOME` / `LIGHT-GONE-DM-HOME`). 박서연 DM 은 다 읽었고 서버가 닫기를 싣는 투영이라 닫기가
 # 서고, 이도현 DM 은 안 읽음이 있어 서지 않는다(둘 다 찍는다). 하네스의 `PUT …/closure` 는 204 로 답한다.

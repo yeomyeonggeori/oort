@@ -42,12 +42,20 @@ import {
 } from "@/features/workspace/useWorkspace";
 import { switcherPeople } from "@momo/core/features/directory/model";
 import { useOpenDm } from "@/features/directory/useOpenDm";
+import { useChannelNameLocale } from "@/i18n/useChannelNameLocale";
+import { compareChannelNames } from "@momo/core/features/channels/nameCollation";
 import { canCreateChannelNow } from "@momo/core/features/channels/model";
 import {
   useCreateChannelOpen,
   useOpenCreateChannel,
 } from "@/features/channels/useCreateChannel";
 import { useAddChannelMemberOpen } from "@/features/channels/useAddChannelMember";
+import {
+  useChannelBrowseOpen,
+  useOpenChannelBrowse,
+} from "@/features/channels/useChannelBrowse";
+import { browseChannels, canBrowseChannelsNow } from "@momo/core/features/channels/browse";
+import { useFormatMessage } from "@/i18n/useFormatMessage";
 import {
   useAgentProfileOpen,
   useOpenAgentProfile,
@@ -456,6 +464,17 @@ export function QuickSwitcher({
   const location = useLocation();
   const { showNav: showDrafts } = useDraftsPanel();
   const { groups } = useChannels(workspaceId);
+  // 빠른 이동의 채널 줄은 클라이언트가 차례를 정한다(같은 점수끼리 이 차례): 화면 언어·숫자는 값으로 (ADR-0225 D12).
+  const channelLocale = useChannelNameLocale();
+  const channelRows = useMemo(
+    () =>
+      channelLocale === undefined
+        ? groups.channels
+        : [...groups.channels].sort((a, b) =>
+            compareChannelNames(channelLocale)(a.name ?? "", b.name ?? "")
+          ),
+    [groups.channels, channelLocale]
+  );
   const directoryQuery = useDirectory(workspaceId);
   const { directory } = directoryQuery;
   const dm = useOpenDm();
@@ -471,6 +490,12 @@ export function QuickSwitcher({
     !directoryQuery.isPending,
     memberFor(directory, session.member.id)?.role
   );
+  // 채널 둘러보기(ADR-0224 화면 ②, #5842): 사이드바 + 와 같은 판정으로 정식 멤버에게만 줄이 선다(게스트 없음, D8).
+  const formatMessage = useFormatMessage();
+  const openChannelBrowse = useOpenChannelBrowse();
+  const canBrowse =
+    openChannelBrowse !== null &&
+    canBrowseChannelsNow(!directoryQuery.isPending, memberFor(directory, session.member.id)?.role);
 
   // 폼 다이얼로그가 떠 있는 동안 전역 단축키는 물러선다 (R2 M4).
   // 세 훅을 각각 부른 뒤 합친다: ||를 그대로 쓰면 단축 평가 때문에 뒤 훅이
@@ -481,8 +506,10 @@ export function QuickSwitcher({
   const addWorkspaceOpen = useAddWorkspaceOpen();
   const newDmOpen = useNewDmOpen();
   const openNewDm = useOpenNewDm();
+  const channelBrowseOpen = useChannelBrowseOpen();
   const formDialogOpen =
     createChannelOpen ||
+    channelBrowseOpen ||
     addMemberOpen ||
     agentProfileOpen ||
     addWorkspaceOpen ||
@@ -610,6 +637,31 @@ export function QuickSwitcher({
   const surfaceProvided = useSurfaceProvidedPredicate();
   // 팔레트에 친 말. 메시지 검색으로 넘길 때 그대로 들고 간다.
   const [typed, setTyped] = useState("");
+
+  // 「참여하지 않은 공개 채널」 묶음의 재료(ADR-0224 화면 ②): 서버 둘러보기 목록 한 쪽(켜진 채널만). 이름을 치기 시작한
+  // 열기에서 한 번 읽고, 걸러내기는 다른 줄과 같이 cmdk 가 한다. 읽는 중 · 실패 · 빈 입력에는 묶음이 없다 — 이 팔레트는
+  // 받아 둔 목록을 동기로 거르는 자리라 기다림과 실패를 보일 곳이 없다(메시지 검색이 자기 표면으로 가는 것과 같은 까닭).
+  // 고르면 참여하지 않고 둘러보기 창을 그 이름으로 연다: 참여는 그 창의 줄이 진행 · 실패를 말하는 쓰기다.
+  const browseQuery = useQuery({
+    queryKey: ["channel-browse-palette", workspaceId],
+    queryFn: () => browseChannels(workspaceId, { limit: 200 }),
+    enabled: open && canBrowse && typed.trim() !== "",
+    staleTime: 0,
+    retry: false,
+  });
+  const notJoinedPublic = useMemo(() => {
+    const mine = new Set(groups.channels.map((channel) => channel.id.toLowerCase()));
+    return (browseQuery.data?.channels ?? []).filter(
+      (row) => !row.isMember && !mine.has(row.id.toLowerCase())
+    );
+  }, [browseQuery.data, groups.channels]);
+
+  /** 팔레트를 닫고 한 프레임 뒤에 둘러보기 창을 연다(폼을 여는 것과 같은 까닭). 닫을 때 캐럿은 팔레트를 연 자리로. */
+  function openBrowseFromPalette(query?: string) {
+    const opener = restoreRef.current;
+    onOpenChange(false);
+    requestAnimationFrame(() => openChannelBrowse?.({ opener, query }));
+  }
 
   /**
    * 설정으로 갈 때의 규율 — 닫는 일은 하지 않는다.
@@ -1016,7 +1068,19 @@ export function QuickSwitcher({
         )}
 
         <Command.Group heading="채널">
-          {groups.channels.map((channel) => (
+          {canBrowse && (
+            <Command.Item role="option"
+              className={itemClass}
+              value={formatMessage("channels.browse.title")}
+              keywords={[formatMessage("channels.browse.title"), "browse channels"]}
+              data-testid="switcher-browse-channels"
+              onSelect={() => openBrowseFromPalette()}
+            >
+              <Search className="size-4 opacity-70" />
+              {formatMessage("channels.browse.title")}
+            </Command.Item>
+          )}
+          {channelRows.map((channel) => (
             <Command.Item role="option"
               key={channel.id}
               value={`${channel.name ?? ""} ${channel.id}`}
@@ -1032,6 +1096,27 @@ export function QuickSwitcher({
             </Command.Item>
           ))}
         </Command.Group>
+
+        {canBrowse && typed.trim() !== "" && notJoinedPublic.length > 0 && (
+          <Command.Group heading={formatMessage("channels.browse.paletteGroup")}>
+            {notJoinedPublic.map((row) => (
+              <Command.Item role="option"
+                key={row.id}
+                value={`${row.name} ${row.topic ?? ""} ${row.id}`}
+                className={itemClass}
+                data-testid="switcher-browse-channel"
+                data-channel-id={row.id}
+                onSelect={() => go(`/c/${row.id}`)}
+              >
+                <Hash className="size-4 opacity-70" />
+                <span className="min-w-0 truncate">{row.name}</span>
+                <span className="ml-auto shrink-0 text-meta text-ink-muted">
+                  {formatMessage("channels.browse.memberCount", { count: row.memberCount })}
+                </span>
+              </Command.Item>
+            ))}
+          </Command.Group>
+        )}
 
         {groups.dms.length > 0 && (
           <Command.Group heading="다이렉트 메시지">

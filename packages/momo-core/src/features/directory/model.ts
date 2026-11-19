@@ -81,14 +81,151 @@ export function roleKeyLabel(
   return trimmedOverride(labels, role) ?? DEFAULT_ROLE_LABELS[role];
 }
 
+const ALL_ROLES: readonly RoleKey[] = ROLE_KEYS;
+const ADMIN_GRANTABLE: readonly RoleKey[] = ["member", "guest"];
+const NO_ROLES: readonly RoleKey[] = [];
+
 /**
- * The only client gates for the workspace-role control: viewer is an operator
- * on the roster projection, the target is a human, and the target is not the
- * viewer. Hierarchy and last-owner stay on the server.
+ * 멤버 프로필의 역할 고르개에 내밀 역할 (#5780). 서버 사다리의 **UX 거울**이고 권위는 서버다:
+ * `membership_lifecycle.rs` 의 `require_can_manage`(자기 자신 금지 → `can_change_role_of` →
+ * `can_grant_role`)와 `workspace_authorization.rs` 의 서열표가 같은 문장을 판정한다. 틀리면 서버가
+ * 403·409로 거절하므로, 이 함수는 「늘 거절될 선택지를 안 내미는 것」만 맡는다.
  *
- * 에이전트 역할은 상수 member(ADR-0004) — 서버 게이트는 #1857.
+ * - 보는 사람은 소유자나 관리자이고, 대상은 **사람**이고, 자기 자신이 아니다(에이전트 역할은 상수 member, ADR-0004).
+ * - 소유자는 소유자가 아닌 사람에게 네 역할 모두(소유자 승격 포함). 소유자끼리는 서로 못 바꾼다.
+ * - 관리자는 멤버·게스트에게 멤버·게스트만. 관리자·소유자는 못 바꾸고, 관리자·소유자로 올리지도 못한다.
+ *
+ * 역할을 모르는 대상(명부 투영이 `role` 을 못 실은 옛 서버)은 소유자에게만 열린다 — `canIssuePasswordReset`
+ * 과 같은 규칙이다. 관리자는 대상이 멤버·게스트라고 **알 때만** 연다. 모름이 열림이 되지 않게 한다.
+ * 마지막 소유자(409)는 서버가 지킨다: 대상이 소유자면 애초에 여기서 비어 있다.
+ */
+export function assignableWorkspaceRoles(
+  viewerRole: MembershipRole | undefined,
+  viewerMemberId: string,
+  target: Pick<RosterMember, "id" | "kind" | "role">
+): readonly RoleKey[] {
+  if (viewerRole !== "owner" && viewerRole !== "admin") return NO_ROLES;
+  if (target.kind !== "human") return NO_ROLES;
+  if (uuidEq(viewerMemberId, target.id)) return NO_ROLES;
+  if (viewerRole === "owner") return target.role === "owner" ? NO_ROLES : ALL_ROLES;
+  return target.role === "member" || target.role === "guest" ? ADMIN_GRANTABLE : NO_ROLES;
+}
+
+/**
+ * 역할 고르개를 그릴지: 줄 수 있는 역할이 하나라도 있으면. `assignableWorkspaceRoles` 의 짧은 말이다.
  */
 export function canChangeWorkspaceRole(
+  viewerRole: MembershipRole | undefined,
+  viewerMemberId: string,
+  target: Pick<RosterMember, "id" | "kind" | "role">
+): boolean {
+  return assignableWorkspaceRoles(viewerRole, viewerMemberId, target).length > 0;
+}
+
+const ROLE_RANK: Readonly<Record<RoleKey, number>> = { owner: 0, admin: 1, member: 2, guest: 3 };
+
+/**
+ * 멤버를 정지하거나 워크스페이스에서 내보낼 수 있는 대상인가 (#5781). `canChangeWorkspaceRole` 과 같은 모양의 서버
+ * 사다리 **UX 거울**이고 권위는 서버다: `membership_lifecycle.rs` 의 `require_can_manage`(자기 자신 금지 →
+ * `can_suspend` && `can_remove`)와 `workspace_authorization.rs` 의 서열표가 같은 문장을 판정한다.
+ *
+ * - 보는 사람은 소유자나 관리자이고, 대상은 **사람**이고, 자기 자신이 아니다.
+ * - 대상의 역할이 보는 사람보다 **엄격히 낮다**: 소유자 → 관리자·멤버·게스트, 관리자 → 멤버·게스트. 소유자끼리·관리자끼리는 안 된다.
+ * - 마지막 소유자 보호(409)는 이 거울에서 저절로 지켜진다: 소유자는 누구의 대상도 되지 않는다.
+ * - 역할을 모르는 대상은 열지 않는다(모름이 열림이 되지 않게). 되돌리기 어려운 일이라 역할 고르개보다 좁다.
+ *
+ * 에이전트는 열지 않는다: 에이전트를 끄고 거두는 일은 에이전트 관리의 길을 따르고, 프로필의 관리 묶음 자체가 사람에게만
+ * 선다(`canSeeMemberManagement`).
+ */
+export function canManageWorkspaceMembership(
+  viewerRole: MembershipRole | undefined,
+  viewerMemberId: string,
+  target: Pick<RosterMember, "id" | "kind" | "role">
+): boolean {
+  if (viewerRole !== "owner" && viewerRole !== "admin") return false;
+  if (target.kind !== "human") return false;
+  if (uuidEq(viewerMemberId, target.id)) return false;
+  if (target.role === undefined) return false;
+  return ROLE_RANK[target.role] > ROLE_RANK[viewerRole];
+}
+
+/** 정지 줄이 무엇을 하는가: 활성이면 정지, 정지된 멤버면 정지 풀기(서버 `StatusTransition` 의 기대 상태와 같다). */
+export type SuspensionAction = "suspend" | "reinstate";
+
+/**
+ * 프로필 관리 묶음의 정지 줄 (#5781). 서열은 `canManageWorkspaceMembership`, 상태는 서버의 기대 상태(정지 = 활성만,
+ * 풀기 = 정지된 멤버만, 그 밖은 409)를 따른다. 초대 대기·삭제된 멤버에게는 줄이 없다.
+ */
+export function suspensionAction(
+  viewerRole: MembershipRole | undefined,
+  viewerMemberId: string,
+  target: Pick<RosterMember, "id" | "kind" | "role" | "status">
+): SuspensionAction | null {
+  if (!canManageWorkspaceMembership(viewerRole, viewerMemberId, target)) return null;
+  if (target.status === "active") return "suspend";
+  if (target.status === "suspended") return "reinstate";
+  return null;
+}
+
+/**
+ * 「워크스페이스에서 내보내기」 줄 (#5781). 활성·정지된 멤버에게만 선다: 확인 문장이 말하는 일(채널·DM 에서 빠지고
+ * 로그아웃)이 그 둘의 일이다.
+ */
+export function canRemoveWorkspaceMember(
+  viewerRole: MembershipRole | undefined,
+  viewerMemberId: string,
+  target: Pick<RosterMember, "id" | "kind" | "role" | "status">
+): boolean {
+  if (!canManageWorkspaceMembership(viewerRole, viewerMemberId, target)) return false;
+  return target.status === "active" || target.status === "suspended";
+}
+
+/** 정지·풀기·내보내기 중 하나. */
+export type MemberLifecycleAction = SuspensionAction | "remove";
+
+/**
+ * 정지·풀기·내보내기가 거절된 까닭의 **종류** (#5781). 문장은 사전이 진다(`directory.lifecycle.error*`) — 여기는
+ * 서버의 상태 코드와 문장(`MembershipLifecycleError::as_swift_message`)을 종류로만 접는다.
+ *
+ * 이 길의 409 는 대개 「그사이 상태가 바뀌었다」다(다른 운영자가 먼저 정지했거나 풀었다). 마지막 소유자 409 는 거울이
+ * 소유자에게 줄을 세우지 않으므로 오래된 명부에서만 닿는다. 그래서 역할 바꾸기처럼 「409 = 마지막 소유자」로 접지 않고
+ * 서버 문장으로 가른다.
+ */
+export type MemberLifecycleFailure =
+  | "notActive"
+  | "notSuspended"
+  | "lastOwner"
+  | "rank"
+  | "self"
+  | "forbidden"
+  | "notFound"
+  | "rateLimited"
+  | "network"
+  | "unknown";
+
+export function memberLifecycleFailure(error: unknown): MemberLifecycleFailure {
+  if (error instanceof ApiError) {
+    const wire = error.message;
+    if (wire.includes("must retain at least one owner")) return "lastOwner";
+    if (wire.includes("status must be suspended")) return "notSuspended";
+    if (wire.includes("status must be active")) return "notActive";
+    if (wire.includes("cannot manage themselves")) return "self";
+    if (wire.includes("equal or higher")) return "rank";
+    if (error.status === 404) return "notFound";
+    if (error.status === 403) return "forbidden";
+    if (error.status === 429) return "rateLimited";
+    return "unknown";
+  }
+  if (error instanceof NetworkError) return "network";
+  return "unknown";
+}
+
+/**
+ * 프로필의 「관리」 묶음을 그릴지 (#5780): 보는 사람이 소유자·관리자이고 대상이 자기 아닌 사람이면. 묶음 안에서
+ * 역할 줄은 고르개(줄 수 있는 역할이 있을 때) 또는 글 + 잠긴 이유(`workspaceRoleLock`)이고, 비밀번호 줄은
+ * `canIssuePasswordReset` 이 따로 정한다. 정지·내보내기 줄(#5781)도 이 묶음에 선다.
+ */
+export function canSeeMemberManagement(
   viewerRole: MembershipRole | undefined,
   viewerMemberId: string,
   target: Pick<RosterMember, "id" | "kind">
@@ -96,6 +233,65 @@ export function canChangeWorkspaceRole(
   if (viewerRole !== "owner" && viewerRole !== "admin") return false;
   if (target.kind !== "human") return false;
   return !uuidEq(viewerMemberId, target.id);
+}
+
+/**
+ * 운영자가 역할을 **글로만** 보게 되는 까닭 (#5780). 「못 고르는 선택지는 이유와 함께 보인다」 규칙의 이 자리 판이다.
+ *
+ * - `ownerPeer`: 소유자가 다른 소유자를 본다(서버 403 「같거나 높은 역할」).
+ * - `adminCeiling`: 관리자가 관리자·소유자를 본다(서버 403).
+ * - `null`: 고를 수 있거나, 운영자가 아니거나, 까닭을 말할 근거가 없다(역할을 모름).
+ */
+export type WorkspaceRoleLock = "ownerPeer" | "adminCeiling";
+
+export function workspaceRoleLock(
+  viewerRole: MembershipRole | undefined,
+  viewerMemberId: string,
+  target: Pick<RosterMember, "id" | "kind" | "role">
+): WorkspaceRoleLock | null {
+  if (!canSeeMemberManagement(viewerRole, viewerMemberId, target)) return null;
+  if (canChangeWorkspaceRole(viewerRole, viewerMemberId, target)) return null;
+  if (viewerRole === "owner") return target.role === "owner" ? "ownerPeer" : null;
+  return target.role === "owner" || target.role === "admin" ? "adminCeiling" : null;
+}
+
+/**
+ * 역할 바꾸기 확인 단계가 무엇을 더 말하는가 (#5780). 낱말은 사전이 진다(`directory.role.*`) — 여기는 종류만.
+ *
+ * - `promoteOwner`: 소유자로 올린다. 소유자끼리는 서로 못 바꾸므로 **되돌릴 수 없다**(위험 단추).
+ * - `grantAdmin`: 관리자로 올린다(채널 만들기·채널 멤버 넣고 빼기가 열린다).
+ * - `revokeAdmin`: 관리자에서 멤버·게스트로 내린다(그 둘이 닫힌다).
+ * - `plain`: 멤버 ↔ 게스트. 덧붙일 말이 없다.
+ *
+ * 채널을 만들고 채널에 멤버를 넣고 빼는 일이 워크스페이스 소유자·관리자 몫이라는 것은 서버
+ * `routes/channels.rs`(만들기·멤버 추가·내보내기의 `is_admin` 판정)가 정한다.
+ */
+export type RoleChangeKind = "promoteOwner" | "grantAdmin" | "revokeAdmin" | "plain";
+
+export function roleChangeKind(from: RoleKey | undefined, to: RoleKey): RoleChangeKind {
+  if (to === "owner") return "promoteOwner";
+  if (to === "admin") return "grantAdmin";
+  if (from === "admin" || from === "owner") return "revokeAdmin";
+  return "plain";
+}
+
+/**
+ * 프로필에 보일 이메일 (#5780). 사람에게만 있고, **게스트 시점에서는 보이지 않는다**(owner 2026-11-14 승인:
+ * 워크스페이스 멤버 모두에게, 게스트 제외). 보는 사람의 역할을 모르면 보이지 않는다 — 모름이 열림이 되지 않게.
+ *
+ * 이것은 화면의 가림이다. 서버 명부는 지금 게스트에게도 `email` 을 싣는다(ADR-0219 D3 의 미구현 조각) —
+ * 게스트에게서 칸을 빼는 일은 서버가 해야 진짜 경계가 된다.
+ */
+export function profileEmail(
+  viewerRole: MembershipRole | undefined,
+  member: Pick<RosterMember, "kind" | "email">
+): string | null {
+  if (viewerRole === undefined || viewerRole === "guest") return null;
+  if (member.kind !== "human") return null;
+  const raw: unknown = member.email;
+  if (typeof raw !== "string") return null;
+  const email = raw.trim();
+  return email === "" ? null : email;
 }
 
 /**

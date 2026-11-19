@@ -8,7 +8,8 @@ import {
 } from "react";
 import { useNavigate } from "react-router-dom";
 import { Check, Loader2 } from "lucide-react";
-import type { RosterMember } from "@momo/core/lib/api";
+import { uuidEq, type RosterMember } from "@momo/core/lib/api";
+import { useFormatMessage } from "@/i18n/useFormatMessage";
 import {
   channelMemberCandidates,
   hasAddableMembers,
@@ -213,6 +214,16 @@ function AddChannelMemberPanel({
     target.id,
     session.member.id
   );
+  const formatMessage = useFormatMessage();
+  // 방금 만든 채널에서 이어 열린 창(#5784)은 아직 나 말고 아무도 없는 동안 닫는 단추가 「나중에」다 — 건너뛰는 일이라서.
+  // 한 명이라도 들어오면 할 일을 한 것이라 평소의 「닫기」로 돌아간다. 판정은 명부의 `channelIds`(추가는 낙관적으로 먼저
+  // 들어간다)라 누르는 순간 바뀐다.
+  const skipping =
+    target.afterCreate !== undefined &&
+    !directory.members.some(
+      (member) =>
+        !uuidEq(member.id, session.member.id) && isChannelMember(member, target.id)
+    );
 
   const handleAdd = useCallback(
     (memberId: string) => {
@@ -356,6 +367,7 @@ function AddChannelMemberPanel({
   return (
     <DialogContent
       data-testid="add-channel-member-dialog"
+      opener={target.opener}
       // 추가가 진행 중일 때는 닫기를 막는다(CreateChannelDialog와 같은 규칙,
       // design-review F-3): 열려 있는 패널이 실패를 인라인으로 되돌려 보여주는데,
       // 그 사이 Esc나 바깥 클릭으로 닫으면 실패가 아무도 안 보는 곳에서 조용히
@@ -369,8 +381,17 @@ function AddChannelMemberPanel({
     >
       <div className="flex flex-col gap-1 border-b border-line p-4">
         <DialogTitle>멤버 추가</DialogTitle>
-        <DialogDescription>
-          {target.name} 채널에 워크스페이스 멤버를 추가합니다.
+        <DialogDescription data-testid="add-member-description">
+          {target.afterCreate ? (
+            formatMessage(
+              target.afterCreate === "public"
+                ? "timeline.addMember.createdDescriptionPublic"
+                : "timeline.addMember.createdDescription",
+              { name: target.name }
+            )
+          ) : (
+            <>{target.name} 채널에 워크스페이스 멤버를 추가합니다.</>
+          )}
         </DialogDescription>
       </div>
 
@@ -416,7 +437,7 @@ function AddChannelMemberPanel({
           onClick={() => onOpenChange(false)}
           data-testid="add-member-close"
         >
-          닫기
+          {skipping ? formatMessage("timeline.addMember.later") : "닫기"}
         </Button>
       </div>
     </DialogContent>

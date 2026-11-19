@@ -321,6 +321,15 @@ describe("읽음 투영 캐시: 두 필드는 말하지 않은 응답이 지우�
     expect(mergeReadStateRow(current, readRow(READ_CH, { followedUnreadReplyCount: 0 })).followedUnreadReplyCount).toBe(0);
   });
 
+  it("읽기 하한(ADR-0177 증보 2026-11-14 D18)도 PUT 응답이 지우지 않는다: null 은 답이라 대신한다", () => {
+    const current = readRow(READ_CH, { historyFromSeq: 11, lastReadSeq: 4 });
+    const merged = mergeReadStateRow(current, readRow(READ_CH, { lastReadSeq: 10 }));
+    expect(merged.historyFromSeq).toBe(11);
+    expect(merged.lastReadSeq).toBe(10);
+    expect(mergeReadStateRow(current, readRow(READ_CH, { historyFromSeq: null })).historyFromSeq).toBeNull();
+    expect("historyFromSeq" in mergeReadStateRow(readRow(READ_CH), readRow(READ_CH))).toBe(false);
+  });
+
   it("캐시에도 응답에도 없으면 키를 만들지 않는다(여전히 「말하지 않음」)", () => {
     const merged = mergeReadStateRow(readRow(READ_CH), readRow(READ_CH));
     expect("closedAtSeq" in merged).toBe(false);

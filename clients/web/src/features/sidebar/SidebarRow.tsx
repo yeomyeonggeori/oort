@@ -23,6 +23,7 @@ import type {
   SidebarDragHandleProps,
   SidebarDropZoneProps,
 } from "./sidebarDnd";
+import { Tooltip } from "@/design/ui/tooltip";
 
 // Flat rows with a hover background, not one rounded "web card" per list item
 // (design-taste-web §8). Everything interactive is a real link/button with a
@@ -58,6 +59,12 @@ export interface SidebarRowProps {
   unreadCount?: number;
   /** Server mention count; promotes the badge to an accent pill. */
   mentionCount?: number;
+  /**
+   * 새 글이 없다고 말하는 줄: 이름·아이콘이 한 단계 연하다(#5775, 폰 #4953 과 같은 규칙). 판정은 코어
+   * `rowEmphasis` 한 함수이고 호출부(채널·DM 줄)만 준다 — 인박스·멤버 같은 목적지 줄과 프로필 줄은 읽음을 말하지
+   * 않으므로 이 프롭이 없고 예전 그대로 또렷하다.
+   */
+  dim?: boolean;
   /** Trailing slot, e.g. the agent turn badge. */
   trailing?: ReactNode;
   testId?: string;
@@ -95,7 +102,7 @@ export interface SidebarRowProps {
    */
   dot?: DotTone | null;
   /**
-   * 호버하면 오른쪽에 서는 X (DM 행의 「대화 닫기」, #3963). 없으면 X 가 서지 않는다.
+   * 호버하면 오른쪽에 서는 X (DM 행의 「목록에서 숨기기」, #3963). 없으면 X 가 서지 않는다.
    *
    * X 는 **링크 안이 아니라 링크의 형제**다: 앵커 안의 `<button>` 은 상호작용 콘텐츠의 중첩이라
    * 클릭이 어느 쪽인지 브라우저마다 다르다. 그래서 `<li>` 가 위치의 기준(`relative`)이 되고 X 는
@@ -135,6 +142,7 @@ export function SidebarRow({
   label,
   handle = null,
   agent = false,
+  dim = false,
   unreadCount = 0,
   mentionCount = 0,
   trailing,
@@ -225,6 +233,7 @@ export function SidebarRow({
     ...dataAttrs,
     ...dragProps,
     "data-unread": hasUnread ? "" : undefined,
+    "data-dim": dim ? "" : undefined,
     // X 가 서 있는 동안 오른쪽 안쪽 여백을 비우고 알약·점을 내린다(`sidebar-row`, tokens.css).
     "data-row-close": showClose ? "" : undefined,
     "aria-label": badgeLabel ? `${label}, ${badgeLabel}` : undefined,
@@ -258,7 +267,9 @@ export function SidebarRow({
         <span
           className={cn(
             "min-w-0 truncate",
-            agent && "text-agent"
+            // 읽은 줄(`dim`)은 에이전트 DM 도 줄의 연한 색을 따른다(#5775, 폰과 같은 규칙): 정체성은 아바타가 지고,
+            // 띠 위에서는 `--agent` 가 `--on-band` 라 읽은 에이전트 줄이 안 읽은 줄과 같은 색이 됐었다.
+            agent && !dim && "text-agent"
           )}
         >
           {label}
@@ -266,6 +277,7 @@ export function SidebarRow({
         {handle && (
           <span
             className="min-w-0 truncate text-meta text-ink-muted"
+            data-row-handle=""
             data-testid="row-handle"
           >
             {handle}
@@ -303,19 +315,20 @@ export function SidebarRow({
     );
 
   const closeButton = showClose ? (
-    <button
-      type="button"
-      tabIndex={-1}
-      onClick={onClose}
-      aria-label={closeLabel ?? DM_CLOSE_LABEL}
-      title={DM_CLOSE_LABEL}
-      data-testid="dm-close"
-      // 자리: 오른쪽 8px(`right-2`) × 24px(`size-6`). `tokens.css` 의 `sidebar-row` 가 같은 숫자에서 이름의
-      // 오른쪽 끝(36px = 24 + 8 + 간격 4)을 도출하므로 둘은 함께 움직인다(소스 시험이 36 을 잰다).
-      className="press absolute right-2 top-1/2 flex size-6 -translate-y-1/2 items-center justify-center rounded-sm text-ink-muted hover:bg-surface-pressed hover:text-ink focus-visible:focus-ring"
-    >
-      <X className="size-4" aria-hidden="true" />
-    </button>
+    <Tooltip label={DM_CLOSE_LABEL} side="bottom" className="absolute right-2 top-1/2 -translate-y-1/2">
+      <button
+        type="button"
+        tabIndex={-1}
+        onClick={onClose}
+        aria-label={closeLabel ?? DM_CLOSE_LABEL}
+        data-testid="dm-close"
+        // 자리: 오른쪽 8px(`right-2`) × 24px(`size-6`). `tokens.css` 의 `sidebar-row` 가 같은 숫자에서 이름의
+        // 오른쪽 끝(36px = 24 + 8 + 간격 4)을 도출하므로 둘은 함께 움직인다(소스 시험이 36 을 잰다).
+        className="press flex size-6 items-center justify-center rounded-sm text-ink-muted hover:bg-surface-pressed hover:text-ink focus-visible:focus-ring"
+      >
+        <X className="size-4" aria-hidden="true" />
+      </button>
+    </Tooltip>
   ) : null;
   // 링크와 X 는 **같은 트리거 상자 안**에 선다: X 위의 우클릭도 행 메뉴를 연다.
   const body = closeButton ? (
@@ -482,18 +495,19 @@ export function SidebarSection({
         onBlurCapture={onHeaderBlur}
       >
         <h2 className="min-w-0 flex-1">
-          <button
-            type="button"
-            onClick={() => onCollapsedChange(!collapsed)}
-            aria-expanded={!collapsed}
-            aria-controls={collapsed ? undefined : listId}
-            title={`${title} 섹션 ${collapsed ? "펼치기" : "접기"}`}
-            data-testid={`section-collapse-${sectionId}`}
-            className="sidebar-section-label w-full min-w-0 rounded-md text-left active:bg-surface-pressed focus-visible:focus-ring"
-          >
-            <Chevron className="size-4 shrink-0" aria-hidden="true" />
-            <span className="min-w-0 truncate">{title}</span>
-          </button>
+          <Tooltip label={`${title} 섹션 ${collapsed ? "펼치기" : "접기"}`} side="bottom" className="flex w-full min-w-0">
+            <button
+              type="button"
+              onClick={() => onCollapsedChange(!collapsed)}
+              aria-expanded={!collapsed}
+              aria-controls={collapsed ? undefined : listId}
+              data-testid={`section-collapse-${sectionId}`}
+              className="sidebar-section-label w-full min-w-0 rounded-md text-left active:bg-surface-pressed focus-visible:focus-ring"
+            >
+              <Chevron className="size-4 shrink-0" aria-hidden="true" />
+              <span className="min-w-0 truncate">{title}</span>
+            </button>
+          </Tooltip>
         </h2>
         {collapsed && sectionPill ? (
           <AttentionPill spec={sectionPill} testId={`section-unread-${sectionId}`} />

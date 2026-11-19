@@ -70,8 +70,14 @@ export function dmClosureMode(input: {
 
 // ---- 첫 페인트 캐시 ------------------------------------------------------------
 
-/** 마지막 투영의 한 행에서 보임 판정에 쓰는 것만: [closedAtSeq|null, latestReadableSeq, lastReadSeq, signal(0|1)]. */
-export type CachedDmFacts = readonly [number | null, number, number, 0 | 1];
+/**
+ * 마지막 투영의 한 행에서 보임 판정에 쓰는 것만: [closedAtSeq|null, latestReadableSeq, lastReadSeq, signal(0|1), historyFromSeq|null].
+ *
+ * 다섯째 칸(읽기 하한, ADR-0177 증보 2026-11-14 D18)은 #5825 가 더했다(#5824 검수 r1 M2): 없으면 첫 페인트에서 별표한 나간 대화가
+ * 4번으로 보이고, 별표 없는 나간 대화는 숨김 행 때문에 7번으로 「숨긴 대화」 목록에 섰다. 네 칸짜리 옛 항목은 하한 없음(`null`)으로
+ * 읽는다 - 나가기가 없던 판이 쓴 사본이라 하한이 있을 수 없다. 같은 열쇠를 쓰는 까닭도 그것이다(새 열쇠는 한 번의 빈 첫 페인트만 낳는다).
+ */
+export type CachedDmFacts = readonly [number | null, number, number, 0 | 1, number | null];
 
 /** channelId(소문자) → 사실. 서버 사실의 **사본**이지 원장이 아니다: 투영이 오면 통째로 바뀐다. */
 export type DmClosureCache = Readonly<Record<string, CachedDmFacts>>;
@@ -95,15 +101,16 @@ export function parseDmClosureCache(raw: string | null, workspaceId: string): Dm
     if (entry === null || typeof entry !== "object" || Array.isArray(entry)) return null;
     const out: Record<string, CachedDmFacts> = {};
     for (const [channel, value] of Object.entries(entry)) {
-      if (channel === "__proto__" || !Array.isArray(value) || value.length !== 4) continue;
-      const [closed, readable, lastRead, signal] = value as unknown[];
+      if (channel === "__proto__" || !Array.isArray(value) || (value.length !== 4 && value.length !== 5)) continue;
+      const [closed, readable, lastRead, signal, floor = null] = value as unknown[];
       if (
         (closed === null || isSeq(closed)) &&
         isSeq(readable) &&
         isSeq(lastRead) &&
-        (signal === 0 || signal === 1)
+        (signal === 0 || signal === 1) &&
+        (floor === null || (isSeq(floor) && floor > 0))
       ) {
-        out[channel.toLowerCase()] = [closed, readable, lastRead, signal];
+        out[channel.toLowerCase()] = [closed, readable, lastRead, signal, floor];
       }
     }
     return out;
@@ -123,6 +130,8 @@ export function dmClosureCacheOf(rows: readonly ReadState[], dmIds: ReadonlySet<
       row.latestReadableSeq ?? row.latestSeq,
       row.lastReadSeq,
       row.markedUnreadBeforeSeq !== null || row.mentionCount > 0 ? 1 : 0,
+      // 하한을 말하지 않은 행(옛 서버)과 하한 없음은 같은 `null` 이다: 사본을 읽는 첫 페인트는 투영 판별(`serverCarriesLeave`) 없이 돈다.
+      isSeq(row.historyFromSeq) && row.historyFromSeq > 0 ? row.historyFromSeq : null,
     ];
   }
   const keys = Object.keys(out);
@@ -141,6 +150,11 @@ export interface DmVerdict {
 
 export interface DmFactsInput {
   mode: DmClosureMode;
+  /**
+   * 읽음 투영이 하한을 싣는가(코어 `readProjectionCarriesLeave`, ADR-0177 증보 2026-11-14 D18). 참이면 server·ready 행의
+   * 하한(`historyFromSeq`)을 그대로 코어 3a 에 넣는다. 아니면(생략 포함) 하한이 없다 - 옛 서버에서 3a 는 아무것도 바꾸지 않는다.
+   */
+  serverCarriesLeave?: boolean;
   phase: ReadProjectionPhase;
   counterpart: DmCounterpart;
   starredOrSectioned: boolean;
@@ -198,6 +212,8 @@ function cachedFacts(input: DmFactsInput, cached: CachedDmFacts): Facts {
   return {
     starredOrSectioned: input.starredOrSectioned,
     closedAtSeq: cached[0],
+    // 사본의 하한(D18): 나간 대화는 첫 페인트에서도 3a 로 숨는다 - 별표·섹션이 있어도, 「숨긴 대화」 목록에도 없이(#5824 검수 r1 M2).
+    historyFromSeq: cached[4] ?? null,
     latestReadableSeq: cached[1],
     lastReadSeq: cached[2],
     // 신호는 「있다/없다」 한 비트만 적어 둔다: 값은 판정이 읽지 않는다(`!== null`).
@@ -238,6 +254,7 @@ function factsFor(input: DmFactsInput): Facts | "pending" {
     return {
       ...base,
       closedAtSeq: closedAt,
+      historyFromSeq: null,
       latestReadableSeq: readable,
       lastReadSeq: lastRead,
       markedUnreadBeforeSeq: read === undefined ? null : read.markedUnreadBeforeSeq,
@@ -250,15 +267,17 @@ function factsFor(input: DmFactsInput): Facts | "pending" {
     if (input.cache === null) return "pending";
     // 사본이 있는 워크스페이스에서 사본에 없는 DM 은 지난 세션 뒤에 생긴 DM 이다 - 안 닫았다.
     return cached === undefined
-      ? { ...base, phase: "ready", closedAtSeq: null, latestReadableSeq: 0, lastReadSeq: 0, markedUnreadBeforeSeq: null, mentionCount: 0 }
+      ? { ...base, phase: "ready", closedAtSeq: null, historyFromSeq: null, latestReadableSeq: 0, lastReadSeq: 0, markedUnreadBeforeSeq: null, mentionCount: 0 }
       : { ...cachedFacts(input, cached), phase: "ready" };
   }
   if (read === undefined) {
-    return { ...base, closedAtSeq: null, latestReadableSeq: 0, lastReadSeq: 0, markedUnreadBeforeSeq: null, mentionCount: 0 };
+    return { ...base, closedAtSeq: null, historyFromSeq: null, latestReadableSeq: 0, lastReadSeq: 0, markedUnreadBeforeSeq: null, mentionCount: 0 };
   }
   return {
     ...base,
     closedAtSeq: read.closedAtSeq,
+    // 하한을 말하지 않은 행(undefined)은 코어 3a 자리에서 직전 판정 유지다(위 `hold` 풀이가 사본으로 푼다).
+    historyFromSeq: input.serverCarriesLeave === true ? read.historyFromSeq : null,
     // 이 행이 읽을 seq 를 말하지 않았다(옛 행): 전체 seq 로 대신한다 - 더 많이 보이는 쪽이다.
     latestReadableSeq: read.latestReadableSeq ?? read.latestSeq,
     lastReadSeq: read.lastReadSeq,

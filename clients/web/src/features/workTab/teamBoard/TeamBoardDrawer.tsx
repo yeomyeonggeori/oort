@@ -20,6 +20,7 @@ import { cn } from "@/design/lib/cn";
 import { isDesktop, openExternalUrl } from "@/lib/tauri";
 import { StateChip, LaneLabel } from "./TeamBoardParts";
 import { ApprovalCardLink, ReportedFacts } from "@/features/workTab/jobs/WorkJobParts";
+import { Tooltip } from "@/design/ui/tooltip";
 
 // =============================================================================
 // 세션 상세 드로어 (#2863, 제안서 §4.3, 시안 ④ `.drawer`).
@@ -66,16 +67,17 @@ export const TeamBoardDrawer = forwardRef<
       <div className="flex flex-col gap-2 border-b border-line px-4 pt-3 pb-3">
         <div className="flex items-center gap-2">
           <LaneLabel item={item} />
-          <button
-            type="button"
-            onClick={onClose}
-            aria-label={TEAM_BOARD_COPY.drawerClose}
-            title={`${TEAM_BOARD_COPY.drawerClose} (Esc)`}
-            data-testid="team-board-drawer-close"
-            className="ms-auto flex size-control-sm shrink-0 items-center justify-center rounded-md text-ink-muted press hover:bg-surface-hover focus-visible:focus-ring"
-          >
-            <X aria-hidden className="size-4" />
-          </button>
+          <Tooltip label={`${TEAM_BOARD_COPY.drawerClose} (Esc)`} side="bottom" className="ms-auto">
+            <button
+              type="button"
+              onClick={onClose}
+              aria-label={TEAM_BOARD_COPY.drawerClose}
+              data-testid="team-board-drawer-close"
+              className="flex size-control-sm shrink-0 items-center justify-center rounded-md text-ink-muted press hover:bg-surface-hover focus-visible:focus-ring"
+            >
+              <X aria-hidden className="size-4" />
+            </button>
+          </Tooltip>
         </div>
         <h2
           id="team-board-drawer-title"

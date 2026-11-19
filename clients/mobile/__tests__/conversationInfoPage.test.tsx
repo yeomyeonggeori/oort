@@ -1,23 +1,25 @@
 import {
   CHANNEL_COPY_GROUP_LABEL,
-  CHANNEL_LEAVE_CONFIRM_TITLE,
   CHANNEL_LEAVE_LABEL,
   DM_CLOSE_LABEL,
   channelCopyIdLabel,
   channelCopyNameLabel,
-  channelLeaveConfirmBody,
+  channelLeaveConfirmBodyKey,
   channelMuteToggleLabel,
 } from '@momo/core/features/channels/model';
 import type {ChannelActionKey} from '@momo/core/features/channels/actionModel';
+import {catalog as koCatalog} from '@momo/core/i18n/generated/ko-KR';
+import {createMessageService} from '@momo/core/i18n/service';
 import {copyLinkActionLabel} from '@momo/core/features/timeline/copyLabels';
 import type {StatusDot as PeerStatus} from '@momo/core/features/presence/statusDot';
 import {makeDirectory} from '@momo/core/features/workspace/directory';
 import type {RosterMember} from '@momo/core/lib/api';
 import {act, cleanup, fireEvent, render, screen, waitFor, within} from '@testing-library/react-native';
+import {CONFIRM_ARM_MS} from '../src/design/sheetParts';
 import React from 'react';
-import {Animated, Dimensions, Image, StyleSheet} from 'react-native';
+import {Animated, Dimensions, Image, PixelRatio, StyleSheet} from 'react-native';
 
-import {SHEET_ICONS} from '../src/design/icons';
+import {CONV_ICONS, SHEET_ICONS} from '../src/design/icons';
 import {EASE_OUT, LAYER_POP_MS, LAYER_PUSH_MS} from '../src/design/motion';
 import {FixedScheme} from '../src/design/theme';
 import {TOUCH_TARGET} from '../src/design/tokens';
@@ -31,9 +33,28 @@ import {
 } from '../src/features/conversation/conversationMenu';
 import {PROFILE_FACE_SQUARE_RING_RADIUS} from '../src/features/profile/ProfileFace';
 import type {ChannelRowTarget} from '../src/features/sidebar/channelRowActions';
+import {endGlyphInk} from './fixtures/endGlyphInk';
 import {finger, pane} from './fixtures/finger';
 import {pinReduceMotion} from './fixtures/reduceMotion';
 import {releaseReduceMotion, setReduceMotion} from './fixtures/sheetContract';
+
+/**
+ * 확인 단계의 위험 단추는 서고 나서 `CONFIRM_ARM_MS` 동안 눌림을 받지 않는다(#5818 검수 High): 사람이 읽고 누르는 것처럼
+ * 그 시간이 지난 뒤에 누른다. 가짜 시계가 켜져 있으면 시계를 옮기고, 아니면 실제로 기다린다.
+ */
+async function armedPress(testID: string, options?: Parameters<typeof screen.getByTestId>[1]) {
+  const faked = typeof (setTimeout as unknown as {clock?: unknown}).clock !== 'undefined';
+  if (faked) {
+    act(() => {
+      jest.advanceTimersByTime(CONFIRM_ARM_MS + 40);
+    });
+  } else {
+    await act(async () => {
+      await new Promise<void>(resolve => setTimeout(resolve, CONFIRM_ARM_MS + 40));
+    });
+  }
+  fireEvent.press(screen.getByTestId(testID, options));
+}
 
 // =============================================================================
 // 대화·채널 정보 페이지 (#4319, owner 10-27 — 머리 가운데 이름·상태 알약이 여는 곳).
@@ -383,7 +404,7 @@ describe('정보 페이지 — 히어로 (#4319)', () => {
 describe('정보 페이지 — 행은 코어 표의 답이다 (#4319)', () => {
   motionOff();
 
-  it('DM(닫기를 내밂): 알림 → 복사 셋 → 대화 닫기, 낱말은 코어 것이다', () => {
+  it('DM(닫기를 내밂): 알림 → 복사 셋 → 목록에서 숨기기, 낱말은 코어 것이다', () => {
     renderPage();
     expect(rowKeys()).toEqual(['mute-toggle', 'copy-name', 'copy-link', 'copy-id', 'close-dm']);
     expect(screen.getByTestId('conversation-info-mute-toggle')).toHaveTextContent(new RegExp(channelMuteToggleLabel(false)));
@@ -395,7 +416,7 @@ describe('정보 페이지 — 행은 코어 표의 답이다 (#4319)', () => {
     expect(within(screen.getByTestId('conversation-info-copy')).getByText(CHANNEL_COPY_GROUP_LABEL)).toBeTruthy();
   });
 
-  it('DM: 닫기를 내밀지 않으면(`closeOffered` 거짓) 「대화 닫기」가 없다 — 나머지는 그대로다', () => {
+  it('DM: 닫기를 내밀지 않으면(`closeOffered` 거짓) 「목록에서 숨기기」가 없다 — 나머지는 그대로다', () => {
     renderPage({items: conversationInfoActionItems(dmTarget({closeOffered: false}))});
     expect(rowKeys()).toEqual(['mute-toggle', 'copy-name', 'copy-link', 'copy-id']);
   });
@@ -405,7 +426,7 @@ describe('정보 페이지 — 행은 코어 표의 답이다 (#4319)', () => {
     expect(screen.getByTestId('conversation-info-mute-toggle')).toHaveTextContent(new RegExp(channelMuteToggleLabel(true)));
   });
 
-  it('채널: 소유자·관리자에게는 「채널 나가기」가 선다 — 위험색이고 DM 의 「대화 닫기」는 없다', () => {
+  it('채널: 소유자·관리자에게는 「채널 나가기」가 선다 — 위험색이고 DM 의 「목록에서 숨기기」는 없다', () => {
     renderPage({kind: 'public', title: 'general', peer: null, items: conversationInfoActionItems(channelTarget())});
     expect(rowKeys()).toEqual(['mute-toggle', 'copy-name', 'copy-link', 'copy-id', 'leave']);
     const leave = screen.getByTestId('conversation-info-leave');
@@ -415,7 +436,7 @@ describe('정보 페이지 — 행은 코어 표의 답이다 (#4319)', () => {
     expect(color('conversation-info-leave')).not.toBe(color('conversation-info-mute-toggle'));
   });
 
-  it('채널: 일반 멤버·손님에게는 「채널 나가기」가 없다(`canLeaveChannel`) — 서버가 403 으로 답할 막다른 길이다', () => {
+  it('채널: 일반 멤버·손님에게도 「채널 나가기」가 선다(`canLeaveChannel`) — 본인 나가기 길은 역할을 보지 않는다 (#5778)', () => {
     for (const selfRole of ['member', 'guest'] as const) {
       renderPage({
         kind: 'public',
@@ -423,7 +444,7 @@ describe('정보 페이지 — 행은 코어 표의 답이다 (#4319)', () => {
         peer: null,
         items: conversationInfoActionItems(channelTarget({selfRole})),
       });
-      expect([selfRole, rowKeys()]).toEqual([selfRole, ['mute-toggle', 'copy-name', 'copy-link', 'copy-id']]);
+      expect([selfRole, rowKeys()]).toEqual([selfRole, ['mute-toggle', 'copy-name', 'copy-link', 'copy-id', 'leave']]);
     }
   });
 
@@ -442,6 +463,7 @@ describe('정보 페이지 — 행은 코어 표의 답이다 (#4319)', () => {
       'copy-link',
       'copy-name',
       'leave',
+      'leave-dm',
       'mute',
     ]);
     // 코어 표에 별표·섹션 이동이 **있어도** 폰이 손이 없다고 입력으로 막은 답이다 — 풀면 열쇠가 늘어난다.
@@ -521,6 +543,39 @@ describe('정보 페이지 — 행은 코어 표의 답이다 (#4319)', () => {
     }
   });
 
+  it('알림 줄의 끝 표지는 종 아이콘이다 — 켜짐은 bell·꺼짐은 bell-off, 이모지가 없고 20pt 그대로 줄 끝에 선다 (#5776)', () => {
+    for (const muted of [false, true]) {
+      renderPage({items: conversationInfoActionItems(dmTarget({muted}))});
+      const row = screen.getByTestId('conversation-info-mute-toggle');
+      const glyphs = within(row).UNSAFE_queryAllByType(Image);
+      expect([muted, glyphs.length]).toEqual([muted, 1]);
+      expect(glyphs[0].props.source).toBe(muted ? CONV_ICONS.bellOff : CONV_ICONS.bell);
+      const style = StyleSheet.flatten(glyphs[0].props.style);
+      expect([style.width, style.height]).toEqual([20, 20]);
+      expect(row).not.toHaveTextContent(/🔔|🔕/);
+    }
+  });
+
+  it('에이전트 DM 의 줄 끝(「에이전트 정보 ›」·알림 종·복사 셋)은 그림에서 잰 잉크가 한 열에 선다 — 2배·3배 (#5791)', () => {
+    const KEYS = ['agent-open', 'mute-toggle', 'copy-name', 'copy-link', 'copy-id'];
+    for (const scale of [2, 3] as const) {
+      const ratio = jest.spyOn(PixelRatio, 'get').mockReturnValue(scale);
+      for (const muted of [false, true]) {
+        renderPage({
+          peer: AGENT_MEMBER,
+          title: '달무리 도우미',
+          onOpenAgent: jest.fn(),
+          items: conversationInfoActionItems(dmTarget({muted})),
+        });
+        // 그린 그림 파일을 디스크에서 읽어 잰 잉크 끝(줄 안쪽 여백 끝에서 몇 화소 안쪽인가). 셰브론은 칸 안에 6pt 들어가 앉는 그림이라
+        // 칸 끝을 맞추면 5pt 안쪽에 섰다(#5776 검수 M4).
+        const insets = KEYS.map(key => endGlyphInk(screen.getByTestId(`conversation-info-${key}`), scale).insetPx);
+        expect([scale, muted, insets]).toEqual([scale, muted, KEYS.map(() => insets[0])]);
+      }
+      ratio.mockRestore();
+    }
+  });
+
   it('행은 엄지에 닿는다(44 이상) — 제목은 어절 단위로 줄바꿈하고 잘리지 않는다', () => {
     renderPage();
     for (const key of rowKeys()) {
@@ -538,6 +593,8 @@ describe('정보 페이지 — 행은 코어 표의 답이다 (#4319)', () => {
 describe('정보 페이지 — 채널 나가기의 확인 단계 (#4319)', () => {
   motionOff();
 
+  // 제공자 없이 세운 화면은 한국어 사전으로 읽는다(`useFormatMessage` 의 대체) — 같은 사전으로 기대값을 짓는다.
+  const ko = createMessageService({messageLocale: 'ko-KR', catalog: koCatalog});
   const confirming = (over: Partial<ConversationInfoPageProps> = {}) =>
     renderPage({
       kind: 'public',
@@ -551,10 +608,10 @@ describe('정보 페이지 — 채널 나가기의 확인 단계 (#4319)', () =>
   it('확인 단계는 코어 문장 그대로이고, 항목 카드는 사라진다 — 머리·히어로는 그대로다', () => {
     confirming();
     expect(screen.getByTestId('conversation-info-leave-confirm-headline')).toHaveTextContent(
-      CHANNEL_LEAVE_CONFIRM_TITLE,
+      ko.formatMessage('timeline.channelLeave.title'),
     );
     expect(screen.getByTestId('conversation-info-leave-confirm-detail')).toHaveTextContent(
-      channelLeaveConfirmBody('general'),
+      ko.formatMessage(channelLeaveConfirmBodyKey('public'), {name: 'general'}),
     );
     expect(screen.getByTestId('conversation-info-leave-confirm-button')).toHaveTextContent(CHANNEL_LEAVE_LABEL);
     expect(rowKeys()).toEqual([]);
@@ -562,12 +619,15 @@ describe('정보 페이지 — 채널 나가기의 확인 단계 (#4319)', () =>
     expect(screen.getByTestId('conversation-info-back')).toBeTruthy();
   });
 
-  it('「취소」와 「채널 나가기」가 제 일을 한 번씩 부르고 페이지는 닫히지 않는다', () => {
+  it('「취소」와 「채널 나가기」가 제 일을 한 번씩 부르고 페이지는 닫히지 않는다', async () => {
     const props = confirming();
     fireEvent.press(screen.getByTestId('conversation-info-leave-cancel'));
     expect(props.onCancelLeave).toHaveBeenCalledTimes(1);
     expect(props.onConfirmLeave).not.toHaveBeenCalled();
+    // 서자마자의 누름(목록 줄을 누른 자리의 더블탭)은 확정을 누르지 못한다(#5818 검수 High).
     fireEvent.press(screen.getByTestId('conversation-info-leave-confirm-button'));
+    expect(props.onConfirmLeave).not.toHaveBeenCalled();
+    await armedPress('conversation-info-leave-confirm-button');
     expect(props.onConfirmLeave).toHaveBeenCalledTimes(1);
     expect(props.onClose).not.toHaveBeenCalled();
   });

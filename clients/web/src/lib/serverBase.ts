@@ -1,5 +1,8 @@
+import { logout } from "@momo/core/lib/api";
 import { normalizeServerUrl } from "@momo/core/lib/serverUrl";
+import { coreSession } from "@momo/core/runtime/host";
 import { API_BASE_DEFAULT, IS_TAURI } from "./env";
+import { markServerSwitchSignedOutNotice } from "./sessionNotice";
 
 export {
   normalizeServerUrl,
@@ -87,6 +90,16 @@ export function getServerBase(): string | null {
 export function setServerBase(base: string | null): void {
   const next = base === null || base === "" ? null : base;
   if (next === chosen) return;
+  // A stored session belongs to the server that issued it (#5816): every request
+  // reads the stored session and the stored server together. Moving the server
+  // under one ends it first, at its own server (`logout` reads the server before
+  // it changes below), so none of its values is ever sent to the next one.
+  if (coreSession().getRefreshToken() !== null) {
+    const previous = absoluteApiBase();
+    void logout();
+    // The login screen says which server's sign-in just ended, never that it is kept.
+    markServerSwitchSignedOutNotice(previous);
+  }
   chosen = next;
   writeStorage(next);
   for (const listener of listeners) listener();

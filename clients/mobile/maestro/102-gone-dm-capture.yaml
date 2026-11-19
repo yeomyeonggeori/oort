@@ -1,10 +1,10 @@
 appId: app.momo.ios
 name: 102-gone-dm-capture
 ---
-# 102-gone-dm-capture - 사이드바 「닫은 대화」 시트 (#4367, 전 #4252 「나간 멤버와의 대화」 줄).
+# 102-gone-dm-capture - 사이드바 「숨긴 대화」 시트 (#4367, 전 #4252 「나간 멤버와의 대화」 줄).
 #
 # 표면 `-momoMeasure GONE-DM-HOME`(다크), `LIGHT-GONE-DM-HOME`(라이트)은 진짜 `SidebarScreen` 을 하네스의 씨앗 위에 세운다.
-# 숨은 DM(내가 닫은 대화 하나·나간 멤버 둘·기계 메시지뿐인 안 읽음 하나)은 목록에 없고, DM 섹션 ⋯ 의 「닫은 대화」가 그 문이다.
+# 숨은 DM(내가 숨긴 대화 하나·나간 멤버 둘·기계 메시지뿐인 안 읽음 하나)은 목록에 없고, DM 섹션 ⋯ 의 「숨긴 대화」가 그 문이다.
 # 이 흐름은 목록을 한 장 찍고, ⋯ 를 눌러 시트를 연 뒤 한 장 더 찍는다(수리 전 번들에는 시트가 없다).
 #
 #   xcrun simctl launch booted app.momo.ios --args \
@@ -18,7 +18,7 @@ name: 102-gone-dm-capture
 - takeScreenshot: ${SHOT}-list
 - tapOn:
     id: "home-section-menu-dms"
-- tapOn: "닫은 대화"
+- tapOn: "숨긴 대화"
 - extendedWaitUntil:
     visible:
       id: "dm-closed-hint"
