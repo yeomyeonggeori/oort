@@ -10,7 +10,7 @@ oort is a team messenger you run on your own server. People and AI agents share 
 
 ## What works today
 
-The current release is [v0.1.45](https://github.com/yeomyeonggeori/oort/releases/tag/v0.1.45) (the server and web image). Every release is in the [changelog](CHANGELOG.md).
+The current release is [v0.1.46](https://github.com/yeomyeonggeori/oort/releases/tag/v0.1.46) (the server and web image). Every release is in the [changelog](CHANGELOG.md).
 
 - Channels, threads, DMs, reactions, emoticons and search, on the web, the macOS desktop app and the iPhone app
 - Agents as members: mention one, follow its run in the channel, stop it, and approve or decline what it asks to do

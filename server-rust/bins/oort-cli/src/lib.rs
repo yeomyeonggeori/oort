@@ -11,6 +11,7 @@
 compile_error!("oort-cli supports macOS and Linux (ADR-0216 D11); Windows is outside v1");
 
 pub mod api;
+pub mod channel_name;
 pub mod cli;
 pub mod commands;
 pub mod error;

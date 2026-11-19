@@ -1116,7 +1116,8 @@ mod tests {
         for refused in [
             json!({}),
             json!({"name": ""}),
-            json!({"name": "Has Space"}),
+            // ADR-0225: a blank now folds to `-`; a full stop is still refused.
+            json!({"name": "has.dot"}),
             json!({"name": "-leading"}),
             json!({"name": "a".repeat(81)}),
             json!({"name": 7}),
@@ -1179,7 +1180,8 @@ mod tests {
             json!({"channel": "plans", "memberHandles": []}),
             json!({"channel": "plans", "memberHandles": null}),
             json!({"channel": "plans", "memberHandles": ["a"]}),
-            json!({"channel": "Has Space", "memberHandles": ["bob"]}),
+            // ADR-0225: a blank now folds to `-`; a full stop is still refused.
+            json!({"channel": "has.dot", "memberHandles": ["bob"]}),
             json!({"channel": "", "memberHandles": ["bob"]}),
             // The role is fixed; ids are never accepted.
             json!({"channel": "plans", "memberHandles": ["bob"], "role": "admin"}),
@@ -1254,7 +1256,8 @@ mod tests {
             json!({"channels": null}),
             json!({"channels": "plans"}),
             json!({"channels": [1]}),
-            json!({"channels": ["Has Space"]}),
+            // ADR-0225: a blank now folds to `-`; a full stop is still refused.
+            json!({"channels": ["has.dot"]}),
             json!({"channels": ["a", "b", "c", "d", "e", "f"]}),
             json!({"channels": ["ok"], "connectionId": Uuid::new_v4()}),
             json!({"channels": ["ok"], "connection": Uuid::new_v4().to_string()}),

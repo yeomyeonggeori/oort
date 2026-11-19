@@ -14,6 +14,7 @@ use crate::api::{
     parse_json, Channel, ChannelsPage, InboxItem, InboxPage, Message, MessagePage, Reply, Route,
     SelfInfo,
 };
+use crate::channel_name::fold_channel_name;
 use crate::cli::{InboxArgs, PostArgs, ReadArgs, TokenArgs};
 use crate::error::{CliError, Kind};
 use crate::output::{note, print_json, rfc3339, sanitize, short_id};
@@ -312,10 +313,30 @@ fn resolve_channel(active: &mut Active, ctx: &Ctx, raw: &str) -> Result<String, 
             error
         }
     })?;
+    pick_channel(&channels, name)
+}
+
+/// The channel a typed `#이름` (the `#` already off) means, from the visible channel list.
+/// Archived channels never match, and neither does a room that is not a channel. Zero matches is "not found"; two or more is "ambiguous" (an
+/// old-rule name that folds onto another) — never a guess.
+pub fn pick_channel(channels: &[Channel], name: &str) -> Result<String, CliError> {
+    // ADR-0225 D9: the typed name and every channel name are folded (D3 steps 1-5) before they
+    // are compared. A name that folds to nothing, or that the server would never have stored,
+    // matches no channel and so takes the ordinary "not found" road: no new error kind.
+    let wanted = fold_channel_name(name);
     let mut matches = channels
         .iter()
         .filter(|channel| channel.archived_at_ms.is_none())
-        .filter(|channel| channel.name.as_deref() == Some(name));
+        // Only channels are named with `#`. A DM or group room that carries a name is never
+        // reached by it (ADR-0225 D6 draws the same line for the team helper).
+        .filter(|channel| matches!(channel.kind.as_str(), "public" | "private"))
+        .filter(|channel| {
+            !wanted.is_empty()
+                && channel
+                    .name
+                    .as_deref()
+                    .is_some_and(|stored| fold_channel_name(stored) == wanted)
+        });
     let first = matches.next();
     match (first, matches.next()) {
         (Some(channel), None) => Ok(channel.id.clone()),

@@ -663,23 +663,33 @@ async fn decide(
     let operator_scope = has_platform_read_scope(&principal);
     let deliver_secret_to_agent = request.deliver_secret_to_agent == Some(true);
     // `expressionChoice` is parsed strictly (closed keys) before anything is read: a malformed
-    // one is a 400 of the request, not a verdict on the card.
-    let expression_choice: Option<momo_expressions::Choice> = match request
-        .expression_choice
-        .clone()
-        .map(serde_json::from_value)
-        .transpose()
-    {
-        Ok(choice) => choice,
-        Err(_) => {
-            return respond(refusal(
-                approval_id,
-                member_id,
-                "expression_choice_invalid",
-                "expressionChoice must be {draftId, revision, sha256, kind?}",
-                StatusCode::BAD_REQUEST,
-                Utc::now(),
-            ))
+    // one is a 400 of the request, not a verdict on the card. A choice without `sha256` names a
+    // link candidate nobody has fetched yet (#5899): there is no picture to pin until this
+    // approval fetches it.
+    let (expression_choice, expression_link) = match request.expression_choice.clone() {
+        None => (None, None),
+        Some(value) => {
+            let parsed = if value.is_object() && value.get("sha256").is_none() {
+                serde_json::from_value::<momo_expressions::LinkChoice>(value)
+                    .map(|link| (None, Some(link)))
+            } else {
+                serde_json::from_value::<momo_expressions::Choice>(value)
+                    .map(|choice| (Some(choice), None))
+            };
+            match parsed {
+                Ok(parsed) => parsed,
+                Err(_) => {
+                    return respond(refusal(
+                        approval_id,
+                        member_id,
+                        "expression_choice_invalid",
+                        "expressionChoice must be {draftId, revision, sha256, kind?}, or \
+                         {draftId, revision, kind?} for a link that is not fetched yet",
+                        StatusCode::BAD_REQUEST,
+                        Utc::now(),
+                    ))
+                }
+            }
         }
     };
     // `expressionChoices` (ADR-0218 §12 L5.4) is parsed the same way, by the contract's own shape
@@ -704,52 +714,282 @@ async fn decide(
     };
     let context_max_messages = state.mentions.context_max_messages;
 
-    // **A decision that PostgreSQL picks as the victim of a deadlock is run once more.**
+    // #5899: approving a link candidate fetches it, once, after the decision that takes it has
+    // committed. The fetch place (eight at a time, process-wide, shared with a person's `/import`)
+    // is taken first, so a busy server answers before anything is taken and a second tap works.
+    let link_permit = match expression_link {
+        Some(_) => match momo_expressions::intake::import_slots()
+            .clone()
+            .try_acquire_owned()
+        {
+            Ok(permit) => Some(permit),
+            Err(_) => {
+                return respond(refusal(
+                    approval_id,
+                    member_id,
+                    EXPRESSION_LINK_BUSY,
+                    "the server is fetching too many pictures right now; try again",
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    Utc::now(),
+                ))
+            }
+        },
+        None => None,
+    };
+    let link_claim: LinkClaimSlot = std::sync::Arc::default();
+    let parts = DecisionParts {
+        workspace_id,
+        approval_id,
+        route_run_id,
+        member_id,
+        via_token_id,
+        credential_via,
+        approve,
+        reason,
+        client_decision_id,
+        selected_host_id,
+        public_origin,
+        claude_subscription_agents_enabled,
+        operator_scope,
+        deliver_secret_to_agent,
+        context_max_messages,
+    };
+    let not_parked = || {
+        // The action was executed and then un-executed: the transaction rolled
+        // back, so nothing was minted, nothing was decided, and the approval is
+        // still pending. Answering the receipt rather than a 500 is what lets a
+        // client say 「이 승인의 실행 대상이 이미 끝났습니다」 and stop offering
+        // the button.
+        refusal(
+            approval_id,
+            member_id,
+            RUN_NOT_PARKED,
+            "this approval's run is no longer waiting for a decision",
+            StatusCode::CONFLICT,
+            Utc::now(),
+        )
+    };
+
+    let outcome = run_decision(
+        &state,
+        &parts,
+        DecisionStep::Decide {
+            expression_choice,
+            expression_choices,
+            expression_link: expression_link.clone(),
+            link_claim: link_claim.clone(),
+        },
+    )
+    .await;
+    let decision = match outcome {
+        Err(ref error) if is_run_not_parked(error) => not_parked(),
+        outcome => settle_db("approvals.decide", outcome)?,
+    };
+
+    // #5899: the decision took a link candidate to fetch, and that is committed. Fetch it now,
+    // outside any transaction, then write what came in a second decision that proves everything
+    // again before it registers anything.
+    let claim = link_claim.lock().ok().and_then(|mut slot| slot.take());
+    let (Some(claim), Some(link)) = (claim, expression_link) else {
+        return respond(decision);
+    };
+    if decision.receipt.get("status").and_then(Value::as_str) != Some(EXPRESSION_LINK_CLAIMED) {
+        return respond(decision);
+    }
+    // On its own task: the candidate is already taken, so the fetch and the decision that writes
+    // its outcome finish even when the person's connection goes away mid-way — a dropped request
+    // must not leave the card saying "not fetched" over a candidate nobody can take again.
     //
-    // A decision is one transaction with no effect outside the database, and its replay is
-    // idempotent by `client_decision_id` — so a rollback by `40P01` committed nothing and the
-    // whole remedy is to run it again. It is needed because the decision's lock order cannot be
-    // made to agree with every writer it meets: it takes the proposer's hosted connection and
-    // inbox counter *before* the channel's `channel_seq` (ADR-0186 증보 v5 U-f, so that two
-    // decisions on one DM do not deadlock with each other), while the message spine takes the
-    // channel first and fans out to the same connection after. A message sent into that room in
-    // the same instant is the other half of an AB/BA pair, and without this the loser of the
-    // pair — here, the person's tap — answered 500. (#4702 security review.) Once, not in a
-    // loop: a second deadlock is a different problem and answers as it always did.
+    // A new task does not inherit the request's task-locals, and the second decision reads and
+    // patches `message`: the person who decides is carried over and bound again, so that
+    // transaction sets `app.requester_member_id` exactly as the first one did (ADR-0177 증보 D17
+    // — a human request's reads are judged as that person's).
+    let requester = momo_db::tenant::REQUEST_HUMAN_MEMBER
+        .try_with(|member| *member)
+        .ok();
+    let settle = {
+        let state = state.clone();
+        let parts = parts.clone();
+        async move {
+            let fetched = fetch_claimed_link(&state, &claim, link_permit).await;
+            run_decision(
+                &state,
+                &parts,
+                DecisionStep::Settle {
+                    claim,
+                    fetched: std::sync::Arc::new(fetched),
+                    kind: link.kind,
+                },
+            )
+            .await
+        }
+    };
+    let settled = match requester {
+        Some(member) => {
+            tokio::spawn(momo_db::tenant::REQUEST_HUMAN_MEMBER.scope(member, settle)).await
+        }
+        None => tokio::spawn(settle).await,
+    };
+    let outcome =
+        settled.unwrap_or_else(|_| Err(protocol_error("the approved link's fetch did not finish")));
+    let decision = match outcome {
+        Err(ref error) if is_run_not_parked(error) => not_parked(),
+        outcome => settle_db("approvals.decide", outcome)?,
+    };
+    respond(decision)
+}
+
+/// #5899: where [`execute_expression_create`] leaves the link candidate its decision took, for
+/// [`decide`] to fetch once that decision has committed.
+type LinkClaimSlot = std::sync::Arc<std::sync::Mutex<Option<momo_expressions::action::LinkClaim>>>;
+
+/// The receipt status of a decision that took a link candidate to fetch (#5899). Never answered:
+/// [`decide`] fetches the link and answers the second decision.
+const EXPRESSION_LINK_CLAIMED: &str = "expression_link_fetching";
+/// #5899: no fetch place is free; nothing was taken, and the person may tap again.
+const EXPRESSION_LINK_BUSY: &str = "expression_link_busy";
+
+/// What [`decide`] read from the request once, owned, for every decision transaction it opens.
+#[derive(Clone)]
+struct DecisionParts {
+    workspace_id: Uuid,
+    approval_id: Uuid,
+    route_run_id: Option<Uuid>,
+    member_id: Uuid,
+    via_token_id: Option<Uuid>,
+    credential_via: Option<&'static str>,
+    approve: bool,
+    reason: Option<String>,
+    client_decision_id: Uuid,
+    selected_host_id: Option<Uuid>,
+    public_origin: Option<String>,
+    claude_subscription_agents_enabled: bool,
+    operator_scope: bool,
+    deliver_secret_to_agent: bool,
+    context_max_messages: i64,
+}
+
+impl DecisionParts {
+    fn input<'a>(
+        &'a self,
+        admission_state: &'a AppState,
+        expression_choice: Option<momo_expressions::Choice>,
+        expression_choices: Option<Vec<momo_expressions::Choice>>,
+        expression_link: Option<momo_expressions::LinkChoice>,
+        link_claim: Option<LinkClaimSlot>,
+    ) -> DecisionInput<'a> {
+        DecisionInput {
+            workspace_id: self.workspace_id,
+            approval_id: self.approval_id,
+            route_run_id: self.route_run_id,
+            member_id: self.member_id,
+            via_token_id: self.via_token_id,
+            credential_via: self.credential_via,
+            approve: self.approve,
+            reason: self.reason.as_deref(),
+            client_decision_id: self.client_decision_id,
+            selected_host_id: self.selected_host_id,
+            public_origin: self.public_origin.as_deref(),
+            claude_subscription_agents_enabled: self.claude_subscription_agents_enabled,
+            operator_scope: self.operator_scope,
+            deliver_secret_to_agent: self.deliver_secret_to_agent,
+            expression_choice,
+            expression_choices,
+            expression_link,
+            link_claim,
+            context_max_messages: self.context_max_messages,
+            admission_state: Some(admission_state),
+        }
+    }
+}
+
+/// One decision transaction [`decide`] opens.
+#[derive(Clone)]
+enum DecisionStep {
+    /// The decision the request asks for.
+    Decide {
+        expression_choice: Option<momo_expressions::Choice>,
+        expression_choices: Option<Vec<momo_expressions::Choice>>,
+        expression_link: Option<momo_expressions::LinkChoice>,
+        link_claim: LinkClaimSlot,
+    },
+    /// #5899: what the fetch of a taken link gave, then the decision on it.
+    Settle {
+        claim: momo_expressions::action::LinkClaim,
+        fetched: std::sync::Arc<Result<momo_expressions::media::Processed, &'static str>>,
+        kind: Option<momo_expressions::Kind>,
+    },
+}
+
+/// Run one decision transaction.
+///
+/// **A decision that PostgreSQL picks as the victim of a deadlock is run once more.**
+///
+/// A decision is one transaction with no effect outside the database, and its replay is
+/// idempotent by `client_decision_id` — so a rollback by `40P01` committed nothing and the
+/// whole remedy is to run it again. It is needed because the decision's lock order cannot be
+/// made to agree with every writer it meets: it takes the proposer's hosted connection and
+/// inbox counter *before* the channel's `channel_seq` (ADR-0186 증보 v5 U-f, so that two
+/// decisions on one DM do not deadlock with each other), while the message spine takes the
+/// channel first and fans out to the same connection after. A message sent into that room in
+/// the same instant is the other half of an AB/BA pair, and without this the loser of the
+/// pair — here, the person's tap — answered 500. (#4702 security review.) Once, not in a
+/// loop: a second deadlock is a different problem and answers as it always did. (A link's fetch
+/// (#5899) happens between two of these transactions, never inside one, so a rerun never fetches.)
+async fn run_decision(
+    state: &AppState,
+    parts: &DecisionParts,
+    step: DecisionStep,
+) -> DbRejectable<Decision> {
     let mut attempt = 1;
-    let outcome: DbRejectable<Decision> = loop {
-        let outcome = agent_tenant_tx(&state.pool, workspace_id, {
-            let reason = reason.clone();
-            let public_origin = public_origin.clone();
+    loop {
+        if let DecisionStep::Decide { link_claim, .. } = &step {
+            // A rolled-back attempt took nothing.
+            if let Ok(mut slot) = link_claim.lock() {
+                *slot = None;
+            }
+        }
+        let outcome = agent_tenant_tx(&state.pool, parts.workspace_id, {
+            let parts = parts.clone();
+            let step = step.clone();
             let admission_state = state.clone();
-            let expression_choice = expression_choice.clone();
-            let expression_choices = expression_choices.clone();
             move |conn| {
                 Box::pin(async move {
-                    decide_in_tx(
-                        conn,
-                        DecisionInput {
-                            workspace_id,
-                            approval_id,
-                            route_run_id,
-                            member_id,
-                            via_token_id,
-                            credential_via,
-                            approve,
-                            reason: reason.as_deref(),
-                            client_decision_id,
-                            selected_host_id,
-                            public_origin: public_origin.as_deref(),
-                            claude_subscription_agents_enabled,
-                            operator_scope,
-                            deliver_secret_to_agent,
-                            expression_choice: expression_choice.clone(),
-                            expression_choices: expression_choices.clone(),
-                            context_max_messages,
-                            admission_state: Some(&admission_state),
-                        },
-                    )
-                    .await
+                    match step {
+                        DecisionStep::Decide {
+                            expression_choice,
+                            expression_choices,
+                            expression_link,
+                            link_claim,
+                        } => {
+                            decide_in_tx(
+                                conn,
+                                parts.input(
+                                    &admission_state,
+                                    expression_choice,
+                                    expression_choices,
+                                    expression_link,
+                                    Some(link_claim),
+                                ),
+                            )
+                            .await
+                        }
+                        DecisionStep::Settle {
+                            claim,
+                            fetched,
+                            kind,
+                        } => {
+                            settle_link_then_decide_in_tx(
+                                conn,
+                                &parts,
+                                &admission_state,
+                                &claim,
+                                fetched.as_ref().as_ref().map_err(|code| *code),
+                                kind,
+                            )
+                            .await
+                        }
+                    }
                 })
             }
         })
@@ -758,31 +998,130 @@ async fn decide(
             Err(error) if attempt < DECISION_ATTEMPTS && is_deadlock_victim(error) => {
                 attempt += 1;
                 tracing::warn!(
-                    approval_id = %approval_id,
+                    approval_id = %parts.approval_id,
                     "an approval decision was the victim of a deadlock; running it once more"
                 );
             }
-            _ => break outcome,
+            _ => return outcome,
+        }
+    }
+}
+
+/// Fetch a link candidate a decision took (#5899), outside any transaction, through the guard every
+/// fetch of an outside picture uses (`momo_unfurl::fetch_source` over the guarded transport: HTTPS,
+/// 443, every DNS answer checked, the address pinned, at most 3 hops, 5 s, 5 MiB), then the
+/// isolated decoder. The fetch place is given back as soon as the bytes are here, before any wait
+/// for a decoder. Every way this ends without a picture is one closed `source_*` reason (ADR-0218
+/// appendix C); an address that resolves private by now is `source_blocked`.
+async fn fetch_claimed_link(
+    state: &AppState,
+    claim: &momo_expressions::action::LinkClaim,
+    permit: Option<tokio::sync::OwnedSemaphorePermit>,
+) -> Result<momo_expressions::media::Processed, &'static str> {
+    use momo_expressions::intake;
+    if !state.unfurl_enabled {
+        // The instance's outgoing-request switch is off: no request is made.
+        return Err("source_unavailable");
+    }
+    let Ok(url) = momo_unfurl::parse_source_url(&claim.source_url) else {
+        return Err("source_blocked");
+    };
+    let started = std::time::Instant::now();
+    let fetched =
+        momo_unfurl::fetch_source(&*state.unfurl_http, &url, momo_unfurl::SOURCE_DEADLINE).await;
+    drop(permit);
+    let bytes = fetched.map_err(|refused| refused.code())?;
+    let remaining = momo_expressions::action::PREPARE_DEADLINE.saturating_sub(started.elapsed());
+    match intake::picture_or_reason(bytes, Some(remaining)).await {
+        Ok(intake::Picture::Ready(processed)) => Ok(*processed),
+        Ok(intake::Picture::Manual(code)) => Err(code),
+        // The bytes came and no decoder did: the link is not at fault, and it was fetched once.
+        Err(intake::DecoderBusy) => Err("source_unavailable"),
+    }
+}
+
+/// The second transaction of approving a link candidate (#5899): write what the fetch gave onto the
+/// candidate the first one took and show it on the card; then, when a picture came, decide exactly
+/// as a person who chose that picture would — [`decide_in_tx`] proves everything again (the person,
+/// the card, the role, the revision and the hash) and registers it. When no picture came, the
+/// candidate says why on the card, the request stays pending (ADR-0218 appendix C), and the answer
+/// is that same reason.
+async fn settle_link_then_decide_in_tx(
+    conn: &mut PgConnection,
+    parts: &DecisionParts,
+    admission_state: &AppState,
+    claim: &momo_expressions::action::LinkClaim,
+    fetched: Result<&momo_expressions::media::Processed, &'static str>,
+    kind: Option<momo_expressions::Kind>,
+) -> DbRejectable<Decision> {
+    let now = Utc::now();
+    let actor = momo_expressions::Actor {
+        workspace: parts.workspace_id,
+        member: parts.member_id,
+    };
+    let settled = match momo_expressions::action::settle_link_in_tx(
+        conn,
+        actor,
+        parts.approval_id,
+        claim,
+        fetched,
+    )
+    .await
+    {
+        Ok(settled) => settled,
+        Err(momo_expressions::Error::Db(error)) => return Err(error),
+        // Replaced by a person's upload, or the card ended, while the link was being fetched.
+        Err(_) => {
+            return Ok(Ok(refusal(
+                parts.approval_id,
+                parts.member_id,
+                "expression_preview_stale",
+                "the link you approved is no longer the one on the card",
+                StatusCode::CONFLICT,
+                now,
+            )))
         }
     };
-
-    let decision = match outcome {
-        // The action was executed and then un-executed: the transaction rolled
-        // back, so nothing was minted, nothing was decided, and the approval is
-        // still pending. Answering the receipt rather than a 500 is what lets a
-        // client say 「이 승인의 실행 대상이 이미 끝났습니다」 and stop offering
-        // the button.
-        Err(ref error) if is_run_not_parked(error) => refusal(
-            approval_id,
-            member_id,
-            RUN_NOT_PARKED,
-            "this approval's run is no longer waiting for a decision",
+    if let Some(message_id) = settled.request_message_id {
+        momo_db::sqlx::query(
+            "UPDATE message SET props = jsonb_set(COALESCE(props, '{}'::jsonb), '{action,expression}', $3, true) \
+              WHERE workspace_id = $1 AND id = $2 AND props #> '{action}' IS NOT NULL",
+        )
+        .bind(parts.workspace_id)
+        .bind(message_id)
+        .bind(&settled.card)
+        .execute(&mut *conn)
+        .await?;
+        momo_messaging::emit_message_edited_in_tx(conn, parts.workspace_id, message_id).await?;
+    }
+    match settled.picture {
+        Some((revision, sha256)) => {
+            decide_in_tx(
+                conn,
+                parts.input(
+                    admission_state,
+                    Some(momo_expressions::Choice {
+                        draft_id: claim.draft_id,
+                        revision: revision.to_string(),
+                        sha256,
+                        kind,
+                    }),
+                    None,
+                    None,
+                    None,
+                ),
+            )
+            .await
+        }
+        None => Ok(Ok(refusal(
+            parts.approval_id,
+            parts.member_id,
+            fetched.err().unwrap_or("source_unavailable"),
+            "the link gave no picture; upload one or choose another candidate",
             StatusCode::CONFLICT,
-            Utc::now(),
-        ),
-        outcome => settle_db("approvals.decide", outcome)?,
-    };
-    respond(decision)
+            now,
+        ))),
+    }
 }
 
 /// Answer a settled decision: the receipt, the one-time value grafted on when
@@ -847,6 +1186,12 @@ struct DecisionInput<'a> {
     expression_choice: Option<momo_expressions::Choice>,
     /// ADR-0218 §12 L5.4: the pictures kept on an `expression.set.create` card, already parsed.
     expression_choices: Option<Vec<momo_expressions::Choice>>,
+    /// #5899: the link candidate of an `expression.create` card the person approved, not fetched
+    /// yet (`expressionChoice` without `sha256`). Never together with `expression_choice`.
+    expression_link: Option<momo_expressions::LinkChoice>,
+    /// #5899: where [`execute_expression_create`] leaves the link it took, for [`decide`] to fetch
+    /// once this transaction has committed. `None` where nothing may be fetched.
+    link_claim: Option<LinkClaimSlot>,
     /// `MentionSettings::context_max_messages` — the recent-conversation window
     /// of the job an approved in-place channel grant releases (ADR-0162 증보 5 G3).
     context_max_messages: i64,
@@ -1093,7 +1438,7 @@ async fn decide_in_tx(conn: &mut PgConnection, input: DecisionInput<'_>) -> DbRe
     // ADR-0218 §12 L5.4). Judged here for the reason `deliverSecretToAgent` is: before the status
     // and expiry arms, so no settlement that writes can outrank it.
     if let Some(code) = expression_choice_refused(
-        input.expression_choice.is_some(),
+        input.expression_choice.is_some() || input.expression_link.is_some(),
         input.expression_choices.is_some(),
         choice_card(&approval),
         input.approve,
@@ -4490,16 +4835,57 @@ async fn execute_expression_create(
     drafts: &[Uuid],
     subject: Option<Uuid>,
 ) -> Result<Execution, momo_db::DbError> {
+    let actor = momo_expressions::Actor {
+        workspace: input.workspace_id,
+        member: input.member_id,
+    };
+    // #5899: the person approved a link candidate nobody has fetched. Every gate a registration
+    // passes has been passed to get here; the candidate is taken (once, for good) and the fetch
+    // happens after this transaction commits, in [`decide`]. Nothing is decided yet: the approval
+    // stays pending until the second decision registers the picture that came.
+    if let Some(link) = input.expression_link.as_ref() {
+        let Some(slot) = input.link_claim.as_ref() else {
+            return Err(protocol_error(
+                "a link was approved where it cannot be fetched",
+            ));
+        };
+        return match momo_expressions::action::claim_link_in_tx(
+            conn,
+            actor,
+            approval.id,
+            approval.requested_by,
+            drafts,
+            subject,
+            link,
+        )
+        .await
+        {
+            Ok(claim) => {
+                let mut slot = slot
+                    .lock()
+                    .map_err(|_| protocol_error("link claim slot poisoned"))?;
+                *slot = Some(claim);
+                Ok(Execution::Refused(Decision {
+                    receipt: decision_receipt(
+                        approval.id,
+                        EXPRESSION_LINK_CLAIMED,
+                        Some(input.member_id),
+                        now,
+                        None,
+                    ),
+                    status: StatusCode::ACCEPTED,
+                    secret_once: None,
+                }))
+            }
+            Err(error) => expression_refusal(conn, approval, input, now, error).await,
+        };
+    }
     let Some(choice) = input.expression_choice.as_ref() else {
         // `expression_choice_refused` turns "approve without a choice" into a 400 before
         // anything else; reaching here would mean a person approved nothing in particular.
         return Err(protocol_error(
             "expression.create approved without a choice",
         ));
-    };
-    let actor = momo_expressions::Actor {
-        workspace: input.workspace_id,
-        member: input.member_id,
     };
     match momo_expressions::action::choose_in_tx(
         conn,
@@ -4529,7 +4915,21 @@ async fn execute_expression_create(
                 "token": format!(":{}:", chosen.name),
             }))),
         })),
-        Err(momo_expressions::Error::Role) => {
+        Err(error) => expression_refusal(conn, approval, input, now, error).await,
+    }
+}
+
+/// Why `expression.create` refused, as the receipt the person gets: nothing spent, every candidate
+/// as it was.
+async fn expression_refusal(
+    conn: &mut PgConnection,
+    approval: &LockedApproval,
+    input: &DecisionInput<'_>,
+    now: chrono::DateTime<Utc>,
+    error: momo_expressions::Error,
+) -> Result<Execution, momo_db::DbError> {
+    match error {
+        momo_expressions::Error::Role => {
             match role_required_refusal(
                 conn,
                 approval,
@@ -4543,7 +4943,7 @@ async fn execute_expression_create(
                 Err(_) => Err(protocol_error("role refusal could not be built")),
             }
         }
-        Err(momo_expressions::Error::NameReserved) => Ok(Execution::Refused(refusal(
+        momo_expressions::Error::NameReserved => Ok(Execution::Refused(refusal(
             approval.id,
             input.member_id,
             "expression_name_reserved",
@@ -4551,7 +4951,7 @@ async fn execute_expression_create(
             StatusCode::CONFLICT,
             now,
         ))),
-        Err(momo_expressions::Error::Quota) => Ok(Execution::Refused(refusal(
+        momo_expressions::Error::Quota => Ok(Execution::Refused(refusal(
             approval.id,
             input.member_id,
             "expression_quota",
@@ -4561,12 +4961,10 @@ async fn execute_expression_create(
         ))),
         // Stale revision/hash, a candidate that is not this card's, an expired or already
         // reclaimed picture: the person's choice no longer names what is stored.
-        Err(
-            momo_expressions::Error::Stale
-            | momo_expressions::Error::Expired
-            | momo_expressions::Error::NotFound
-            | momo_expressions::Error::Invalid,
-        ) => Ok(Execution::Refused(refusal(
+        momo_expressions::Error::Stale
+        | momo_expressions::Error::Expired
+        | momo_expressions::Error::NotFound
+        | momo_expressions::Error::Invalid => Ok(Execution::Refused(refusal(
             approval.id,
             input.member_id,
             "expression_preview_stale",
@@ -4574,7 +4972,7 @@ async fn execute_expression_create(
             StatusCode::CONFLICT,
             now,
         ))),
-        Err(momo_expressions::Error::Db(error)) => Err(error),
+        momo_expressions::Error::Db(error) => Err(error),
     }
 }
 
@@ -5899,6 +6297,8 @@ mod tests {
             deliver_secret_to_agent: false,
             expression_choice: None,
             expression_choices: None,
+            expression_link: None,
+            link_claim: None,
             context_max_messages: 30,
             admission_state: None,
         }

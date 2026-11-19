@@ -536,8 +536,17 @@ fn send_rejection(rejected: SendRejected) -> ApiError {
     match rejected {
         SendRejected::Provenance(provenance) => rejected_signature(provenance),
         SendRejected::Attachment(attachment) => attachment_link_rejection(attachment),
+        // ADR-0177 증보 D17 (#5822): the client drops this pending send quietly.
+        SendRejected::BeforeHistoryFloor => ApiError::coded(
+            StatusCode::CONFLICT,
+            MESSAGE_BEFORE_LEAVE,
+            "this message was sent before the conversation was left",
+        ),
     }
 }
+
+/// ADR-0177 증보 D17: the code of a send retry whose earlier message is below the sender's floor.
+pub(crate) const MESSAGE_BEFORE_LEAVE: &str = "message_before_leave";
 
 /// A refused delivery → its response (ADR-0208 D4). Each variant maps to the exact
 /// status and sentence the inline branch it replaced produced, so extracting the

@@ -804,9 +804,9 @@ const WORKSPACE_ACTION_EXPIRES_IN_DAYS_CEILING: i64 = 30;
 // `momo_agent::actions`' `CHANNEL_*` / `ACTION_MEMBER_HANDLES_MAX` /
 // `MEMBER_HANDLE_MAX_BYTES` by the same drift test).
 const WORKSPACE_CHANNEL_KINDS: [&str; 2] = ["public", "private"];
-const WORKSPACE_CHANNEL_NAME_MAX_BYTES: u64 = 80;
+const WORKSPACE_CHANNEL_NAME_MAX_BYTES: u64 = 720;
 const WORKSPACE_CHANNEL_TOPIC_MAX_BYTES: u64 = 1_120;
-const WORKSPACE_CHANNEL_REF_MAX_BYTES: u64 = 81;
+const WORKSPACE_CHANNEL_REF_MAX_BYTES: u64 = 721;
 const WORKSPACE_AGENT_NAME_MAX_BYTES: u64 = 256;
 const WORKSPACE_AGENT_INVITE_PLATFORMS: [&str; 4] = ["grok_bot", "dots", "muse", "other"];
 const WORKSPACE_GRANT_CHANNELS_MAX: u64 = 5;
@@ -1055,7 +1055,8 @@ fn expression_create_branch() -> Value {
          to the team's library); a person looks at the stored picture, picks one and approves. \
          Offer at most 4 candidates. Name each candidate's source: image.source 'attachment' \
          (a picture the person who called you attached in THIS conversation), 'url' (one public \
-         HTTPS link to a picture file, port 443) or 'generated' (bytes you made, PNG/JPEG/GIF/WebP, \
+         HTTPS link to a picture file, port 443; it is not fetched until a person approves that \
+         candidate, and the card shows only its host) or 'generated' (bytes you made, PNG/JPEG/GIF/WebP, \
          at most 1 MiB decoded, with the prompt you used; send the prompt so the card can show it) \
          or 'assembled' (one candidate of what oort_expression_assemble kept for you: its assemblyId \
          and the candidate's index; the picture, prompt and original photo are the stored ones). \

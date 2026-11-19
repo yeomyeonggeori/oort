@@ -59,19 +59,46 @@
 //!
 //! The read runs **beside** the Postgres read (`join!`), so a slow broker costs the
 //! roster at most `PRESENCE_READ_TIMEOUT` and a healthy one costs it nothing.
+//!
+//! ## #5814 — suspended people, for an owner or admin who asks (ADR-0128 D3 증보)
+//!
+//! A request that says `?include=suspended`, from an owner or admin signed in on a
+//! person's full app session, also gets the workspace's **suspended humans**, each
+//! row saying `status: "suspended"`. Without them a suspension had no way back
+//! from the screen: once the profile window closed, nothing listed the person to
+//! reopen and reinstate.
+//!
+//! Both conditions, or the active roster exactly as before ([`roster_status_scope`]):
+//!   * **The opt-in.** A request without it gets the same response as before #5814,
+//!     whoever sends it, so an app that has not been updated (and does not filter
+//!     rows by status) never meets a suspended row. Unknown `include` values are
+//!     ignored.
+//!   * **The viewer.** Only a person whose workspace role is owner or admin, read
+//!     from the database on this request, on a credential that carries
+//!     [`FullPersonSession`] — an allow list, so every narrow door (developer
+//!     cards, the lock screen, the notification extension, agents, work hosts, and
+//!     any door added later) gets the active roster. Anyone else who asks gets the
+//!     active roster silently, not an error, so a client may always send it.
+//!
+//! Seeing is not undoing: an admin sees a suspended owner too, and the reinstate
+//! route still refuses that by the role ladder. A suspended row carries no
+//! `online`, and `humanCount`/`agentCount` count active rows only, so the numbers
+//! mean the same thing for every viewer. Only this route widens; every other
+//! caller of the roster query keeps the active-only `list_workspace_roster`.
 
 use std::collections::HashSet;
 
 use axum::extract::{Path, Query, State};
 use axum::{Extension, Json};
-use momo_auth::Principal;
+use momo_auth::{Principal, PrincipalKind};
 use momo_ephemeral::OnlineRead;
 use momo_messaging::{
-    active_workspace_role, clamp_roster_limit, list_workspace_roster, parse_roster_kind_filter,
-    MemberKind, RosterMember, WorkspaceRole,
+    active_workspace_role, clamp_roster_limit, list_workspace_roster_with_status,
+    parse_roster_kind_filter, MemberKind, RosterMember, RosterStatusScope, WorkspaceRole,
 };
 use uuid::Uuid;
 
+use crate::auth::FullPersonSession;
 use crate::dto::{RosterMemberDto, RosterQuery, WorkspaceRosterResponse};
 use crate::error::ApiError;
 use crate::routes::shared::{agent_tenant_tx, settle_db, workspace_scope, DbRejectable};
@@ -85,6 +112,14 @@ impl RosterQuery {
 
     fn limit(&self) -> i64 {
         clamp_roster_limit(self.limit.as_deref().and_then(|raw| raw.parse().ok()))
+    }
+
+    /// #5814: did the request opt in to suspended people (`include=suspended`,
+    /// one item of a comma-separated list)? Other items are ignored.
+    fn include_suspended(&self) -> bool {
+        self.include
+            .as_deref()
+            .is_some_and(|raw| raw.split(',').any(|item| item.trim() == "suspended"))
     }
 }
 
@@ -188,9 +223,30 @@ fn apply_availability(
     }
 }
 
+/// #5814 — which lifecycle states this viewer's roster carries.
+///
+/// Suspended humans only when the request **asked** (`include=suspended`) and the
+/// viewer is a **person** on a **full app session** ([`FullPersonSession`], an
+/// allow list) whose workspace role, read on this request, is owner or admin.
+/// Anything else is the active roster: no opt-in (an app that predates it), an
+/// agent or a work host whatever its membership row says, and every narrow door.
+fn roster_status_scope(
+    include_suspended: bool,
+    full_person_session: bool,
+    kind: PrincipalKind,
+    role: WorkspaceRole,
+) -> RosterStatusScope {
+    if include_suspended && full_person_session && kind == PrincipalKind::Human && role.is_admin() {
+        RosterStatusScope::ActiveAndSuspendedHumans
+    } else {
+        RosterStatusScope::Active
+    }
+}
+
 pub async fn roster(
     State(state): State<AppState>,
     Extension(principal): Extension<Principal>,
+    full_person_session: Option<Extension<FullPersonSession>>,
     Path(workspace): Path<String>,
     Query(query): Query<RosterQuery>,
 ) -> Result<Json<WorkspaceRosterResponse>, ApiError> {
@@ -202,6 +258,9 @@ pub async fn roster(
         .map_err(|invalid| ApiError::bad_request(invalid.to_string()))?;
     let limit = query.limit();
     let viewer = principal.member_id;
+    let viewer_kind = principal.kind;
+    let full_person_session = full_person_session.is_some();
+    let include_suspended = query.include_suspended();
 
     let roster_read = agent_tenant_tx(&state.pool, workspace_id, move |conn| {
         Box::pin(async move {
@@ -209,13 +268,14 @@ pub async fn roster(
             else {
                 return Ok(Err(ApiError::forbidden("not a workspace member")));
             };
-            let members = list_workspace_roster(
+            let members = list_workspace_roster_with_status(
                 conn,
                 workspace_id,
                 principal.member_id,
                 role == WorkspaceRole::Guest,
                 kind_filter,
                 limit,
+                roster_status_scope(include_suspended, full_person_session, viewer_kind, role),
             )
             .await?;
             // #3392 AIH-2 — the read contract for the agents this viewer may
@@ -240,13 +300,15 @@ pub async fn roster(
 
     let claude_enabled = state.agent_port.config.claude_subscription_agents_enabled;
     let (members, facts, viewer_is_guest) = settle_db("roster.list", outcome)?;
+    // Active rows only (#5814): a suspended row in an owner/admin view is listed,
+    // not counted, so the counts mean the same thing for every viewer.
     let human_count = members
         .iter()
-        .filter(|member| member.kind == MemberKind::Human)
+        .filter(|member| member.kind == MemberKind::Human && member.status == "active")
         .count();
     let agent_count = members
         .iter()
-        .filter(|member| member.kind == MemberKind::Agent)
+        .filter(|member| member.kind == MemberKind::Agent && member.status == "active")
         .count();
     Ok(Json(WorkspaceRosterResponse {
         members: members
@@ -290,6 +352,7 @@ mod tests {
             kind: kind.map(str::to_string),
             member_kind: member_kind.map(str::to_string),
             limit: limit.map(str::to_string),
+            include: None,
         }
     }
 
@@ -477,6 +540,90 @@ mod tests {
         assert!(
             human.get("paused").is_none(),
             "a person is not a thing that can be paused: {human}"
+        );
+    }
+
+    /// #5814: suspended humans only for a request that opted in, from a person on
+    /// a full app session whose role is owner or admin — every principal kind ×
+    /// role × opt-in × full session or not.
+    #[test]
+    fn only_an_opted_in_owner_or_admin_person_on_a_full_session_gets_suspended_rows() {
+        use WorkspaceRole::{Admin, Guest, Member, Owner};
+        for kind in [
+            PrincipalKind::Human,
+            PrincipalKind::Agent,
+            PrincipalKind::WorkHost,
+        ] {
+            // No `_` arm: a new principal kind fails this build until it is placed.
+            let person = match kind {
+                PrincipalKind::Human => true,
+                PrincipalKind::Agent | PrincipalKind::WorkHost => false,
+            };
+            for role in [Owner, Admin, Member, Guest] {
+                let manages = match role {
+                    Owner | Admin => true,
+                    Member | Guest => false,
+                };
+                for include in [false, true] {
+                    for full in [false, true] {
+                        let expected = if include && full && person && manages {
+                            RosterStatusScope::ActiveAndSuspendedHumans
+                        } else {
+                            RosterStatusScope::Active
+                        };
+                        assert_eq!(
+                            roster_status_scope(include, full, kind, role),
+                            expected,
+                            "{kind:?} {role:?} include={include} full_session={full}"
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    /// #5814: the opt-in is one item of a comma-separated list, matched exactly;
+    /// anything else (absent, empty, unknown, a near miss) is no opt-in.
+    #[test]
+    fn include_suspended_is_an_exact_item_of_the_list() {
+        let with = |raw: Option<&str>| RosterQuery {
+            include: raw.map(str::to_string),
+            ..RosterQuery::default()
+        };
+        for (raw, expected) in [
+            (None, false),
+            (Some(""), false),
+            (Some("suspended"), true),
+            (Some("everything,suspended"), true),
+            (Some("suspended, everything"), true),
+            (Some(" suspended "), true),
+            (Some("everything"), false),
+            (Some("Suspended"), false),
+            (Some("suspended_people"), false),
+            (Some("deleted,invited"), false),
+        ] {
+            assert_eq!(with(raw).include_suspended(), expected, "{raw:?}");
+        }
+    }
+
+    /// #5814: a suspended row in the owner/admin view never carries `online`,
+    /// even when the broker says the account is connected.
+    #[test]
+    fn a_suspended_row_carries_no_availability() {
+        let mut suspended = member(MemberKind::Human);
+        suspended.status = "suspended".into();
+        let connected = HashSet::from([suspended.id]);
+        let mut dto = roster_dto(&suspended);
+        apply_availability(&mut dto, &suspended, Some(&connected));
+        assert_eq!(dto.online, None);
+
+        let active = member(MemberKind::Human);
+        let mut dto = roster_dto(&active);
+        apply_availability(&mut dto, &active, Some(&connected));
+        assert_eq!(
+            dto.online,
+            Some(true),
+            "the same lookup does fill an active row"
         );
     }
 }
