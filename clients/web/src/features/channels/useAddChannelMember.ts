@@ -6,6 +6,7 @@ import {
   withChannelMemberAdded,
 } from "@momo/core/features/channels/memberAdd";
 import { useSession } from "@/app/session";
+import type { DialogFocusTarget } from "@/design/ui/dialog";
 
 // =============================================================================
 // 채널에 멤버 추가 (검수 #2): one dialog for the whole shell adds people to a
@@ -25,6 +26,13 @@ import { useSession } from "@/app/session";
 export interface AddChannelMemberTarget {
   id: string;
   name: string;
+  /**
+   * 방금 만든 채널에서 이어서 열렸다 — 그 채널의 공개 범위(#5784). 설명이 「만들었어요」와 공개 범위의 뜻을 말하고, 아직 아무도
+   * 추가하지 않았으면 닫는 단추가 「나중에」다.
+   */
+  afterCreate?: "public" | "private";
+  /** 닫힐 때 캐럿을 돌려줄 자리. 만들기 창에서 이어 열면 그 창을 열었던 자리다. 없으면 열 때의 activeElement. */
+  opener?: DialogFocusTarget | null;
 }
 
 export interface AddChannelMemberHandle {

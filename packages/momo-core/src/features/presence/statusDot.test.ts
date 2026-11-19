@@ -194,6 +194,16 @@ describe("사람: 선언 상태가 먼저이고, 선언이 없으면 접속 여�
     expect(expired(NOW)).toBeNull();
   });
 
+  it("활성이 아닌 사람은 점이 없다(#5781): 정지된 줄의 선언 상태·접속 여부가 남아 있어도 말하지 않는다", () => {
+    for (const status of ["suspended", "deleted", "invited"] as const) {
+      expect(humanPresenceDot({ status, online: true }, NOW)).toBeNull();
+      expect(humanPresenceDot({ status, presenceStatus: "away", online: false }, NOW)).toBeNull();
+      expect(humanPresenceDot({ status, presenceStatus: "dnd" }, NOW)).toBeNull();
+    }
+    expect(humanPresenceDot({ status: "active", online: true }, NOW)?.tone).toBe("ok");
+    expect(humanPresenceDot({ status: "active", presenceStatus: "away" }, NOW)?.tone).toBe("warn");
+  });
+
   it("접속 여부를 모르면 점이 없다 — 모름은 꺼짐이 아니다(브로커가 느린 것만으로 모두가 꺼져 보이면 안 된다)", () => {
     expect(humanPresenceDot({ presenceStatus: "auto" }, NOW)).toBeNull();
     expect(humanPresenceDot({ presenceStatus: "auto", online: undefined }, NOW)).toBeNull();
@@ -297,6 +307,8 @@ describe("dmPeerStatusDot: DM 상대 한 명", () => {
       label: "오프라인",
     });
     expect(dmPeerStatusDot({ ...input, member: human({}) })).toBeNull();
+    // 정지된 상대(소유자·관리자의 명부에만 실림, #5814)는 DM 줄·머리에도 점이 없다(#5781).
+    expect(dmPeerStatusDot({ ...input, member: human({ status: "suspended", online: true }) })).toBeNull();
   });
 
   it("에이전트는 `online` 을 읽지 않는다 — 에이전트의 생존감은 서버의 생존 판정이다(ADR-0160 D4)", () => {

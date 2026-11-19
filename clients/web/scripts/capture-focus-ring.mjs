@@ -79,7 +79,7 @@ async function installMocks(context) {
   await context.route("**/v1/workspaces/*/channels", (route) =>
     json(route, { channels: CHANNELS })
   );
-  await context.route("**/v1/workspaces/*/roster", (route) => json(route, { members: [] }));
+  await context.route("**/v1/workspaces/*/roster*", (route) => json(route, { members: [] }));
 }
 
 async function waitForServer(url, timeoutMs = 30_000) {

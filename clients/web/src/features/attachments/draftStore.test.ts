@@ -36,6 +36,7 @@ vi.mock("./uploadTransport", () => ({
 
 const {
   addFiles,
+  clearAllAttachmentTrays,
   clearSurface,
   dropClaimed,
   dropDraft,
@@ -471,6 +472,32 @@ describe("upload orchestration", () => {
     await settle();
     clearSurface(KEY);
     expect(upload.abort).toHaveBeenCalled();
+    expect(readSurface(KEY).drafts).toHaveLength(0);
+  });
+});
+
+describe("세션이 끝나면 트레이를 비운다 (#5799)", () => {
+  it("모든 트레이를 비우고, 기다리던 첫 왕복이 늦게 끝나도 놓은 파일의 바이트를 보내지 않는다", async () => {
+    let answer!: (value: unknown) => void;
+    createAttachmentUpload.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          answer = resolve;
+        })
+    );
+    const other = surfaceKey("ws", "other");
+    addFiles(KEY, TARGET, [file("앞 사람의 파일.log", 8)]);
+    addFiles(other, { workspaceId: "ws", channelId: "other" }, [file("다른 대화의 파일.log", 8)]);
+    await settle();
+    expect(readSurface(KEY).drafts).toHaveLength(1); // 대조
+
+    clearAllAttachmentTrays();
+    expect(readSurface(KEY).drafts).toHaveLength(0);
+    expect(readSurface(other).drafts).toHaveLength(0);
+
+    answer({ id: "att-late", status: "pending", uploadUrl: "https://archive.invalid/late" });
+    await settle();
+    expect(putAttachmentBytes.mock.calls.map((call) => call[0])).not.toContain("https://archive.invalid/late");
     expect(readSurface(KEY).drafts).toHaveLength(0);
   });
 });

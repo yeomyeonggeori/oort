@@ -1,1 +1,8 @@
-{}
+{
+  "timeline.createChannel.publicDetail": "工作區的任何正式成員都可以在瀏覽頻道中找到並加入。",
+  "timeline.addMember.createdDescriptionPublic": "已建立 {name} 頻道。工作區的任何正式成員都可以在瀏覽頻道中找到並加入。",
+  "timeline.channelLeave.bodyPublicBrowse": "{name} 將從側邊欄消失。你可以隨時透過瀏覽頻道重新加入。",
+  "timeline.approval.channelNeedsMember": "請先將此代理加入為該頻道的成員。",
+  "timeline.approval.channelAgentIn": "此代理已在該頻道中。",
+  "timeline.approval.channelsRefused": "所選頻道中有目前無法連線的頻道。請重新檢查清單。"
+}

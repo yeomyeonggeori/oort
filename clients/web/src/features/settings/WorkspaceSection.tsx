@@ -60,6 +60,7 @@ import {
   welcomePromptTooLong,
 } from "@/features/welcome/welcomeKickoff";
 import { CopyButton, Field, OperatorNotice, SaveButton } from "./SettingsFields";
+import { useFormatMessage } from "@/i18n/useFormatMessage";
 import {
   NEW_WORKSPACE_ENTRY_GUIDE,
   NEW_WORKSPACE_ID_ONCE_NOTICE,
@@ -1129,6 +1130,7 @@ export function WorkspaceSection({
   workspaceId: string;
   offline: boolean;
 }) {
+  const formatMessage = useFormatMessage();
   const query = useQuery({
     queryKey: workspaceIdentityKey(workspaceId),
     queryFn: () => fetchWorkspace(workspaceId),
@@ -1278,14 +1280,15 @@ export function WorkspaceSection({
 
       <SettingsSection
         title="새 워크스페이스 만들기"
-        description="이 서버에 새 워크스페이스를 하나 더 만들어요. 만든 사람이 소유자가 되고 #general 채널 하나로 시작해요. 서버 운영자만 만들 수 있어요."
+        // 레일 「+」 창의 만들기 걸음과 같은 문장이다(같은 사전 키, #5785).
+        description={formatMessage("workspace.create.lead")}
         testId="workspace-create-card"
       >
         {create.isError && isOperatorDenied(create.error) ? (
           <CardBody>
             <OperatorNotice
               bare
-              who="새 워크스페이스는 이 서버의 운영자만 만들 수 있어요."
+              who={formatMessage("workspace.create.operatorOnly")}
               contact="워크스페이스가 필요하면 이 서버를 운영하는 사람에게 문의하세요."
             />
           </CardBody>
@@ -1319,7 +1322,7 @@ export function WorkspaceSection({
               <Field
                 label="슬러그"
                 htmlFor="workspace-slug"
-                hint="영문 소문자, 숫자, 하이픈만 쓸 수 있어요. 서버 전체에서 하나뿐이어야 해요."
+                hint={formatMessage("workspace.create.slugHint")}
                 error={fieldErrors.slug}
               >
                 <Input

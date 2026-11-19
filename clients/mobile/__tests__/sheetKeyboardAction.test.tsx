@@ -1,6 +1,8 @@
 import {contrast} from '@momo/core/design/color';
 import type {ChannelActionItem} from '@momo/core/features/channels/actionModel';
-import {channelLeaveFailureMessage} from '@momo/core/features/channels/model';
+import {channelLeaveFailure} from '@momo/core/features/channels/model';
+import {catalog as koCatalog} from '@momo/core/i18n/generated/ko-KR';
+import {createMessageService} from '@momo/core/i18n/service';
 import {QUICK_REACTIONS} from '@momo/core/features/timeline/reactions';
 import {ApiError, type Message} from '@momo/core/lib/api';
 import {NetworkError, REQUEST_TIMEOUT_MS} from '@momo/core/lib/http';
@@ -1312,15 +1314,16 @@ const TARGET = {
 };
 
 const ITEMS: ChannelActionItem[] = [
-  {key: 'copy-name', cluster: 'copy', testKey: 'copy-name', label: '이름 복사하기'},
-  {key: 'copy-link', cluster: 'copy', testKey: 'copy-link', label: '링크 복사하기'},
-  {key: 'copy-id', cluster: 'copy', testKey: 'copy-id', label: 'ID 복사하기'},
-  {key: 'mute', cluster: 'state', testKey: 'mute-toggle', label: '알림 끄기', separatorBefore: true},
+  {key: 'copy-name', cluster: 'copy', testKey: 'copy-name', label: '이름 복사하기', icon: 'copy-name'},
+  {key: 'copy-link', cluster: 'copy', testKey: 'copy-link', label: '링크 복사하기', icon: 'copy-link'},
+  {key: 'copy-id', cluster: 'copy', testKey: 'copy-id', label: 'ID 복사하기', icon: 'copy-id'},
+  {key: 'mute', cluster: 'state', testKey: 'mute-toggle', label: '알림 끄기', icon: 'bell', separatorBefore: true},
   {
     key: 'leave',
     cluster: 'danger',
     testKey: 'leave',
     label: '채널 나가기',
+    icon: 'leave',
     tone: 'danger',
     separatorBefore: true,
   },
@@ -1462,6 +1465,13 @@ describe('확인 단계의 문구에는 닫는 괄호 바로 뒤의 조사가 �
     ['연결 불가', new NetworkError('unreachable', REQUEST_TIMEOUT_MS)],
     ['그 밖의 실패', new Error('boom')],
   ];
+
+  // 시트가 제공자 없이 서면 한국어 사전으로 읽으므로(`useFormatMessage` 의 대체) 같은 사전으로 문장을 짓는다.
+  const ko = createMessageService({messageLocale: 'ko-KR', catalog: koCatalog});
+  const channelLeaveFailureMessage = (error: unknown) => {
+    const failure = channelLeaveFailure(error);
+    return ko.formatMessage(failure.key, failure.values as never);
+  };
 
   it('표의 실패 문장은 서로 다르다 - 같은 문장을 다섯 번 훑는 표가 아니다', () => {
     const texts = LEAVE_FAILURES.map(([, error]) => channelLeaveFailureMessage(error));

@@ -59,6 +59,7 @@ import { resetAttachmentDraftsForTest } from "@/features/attachments/draftStore"
 import { resetSchedulerDisabledForTest } from "@/features/scheduled/useScheduled";
 import { clearDraft } from "@/features/chat/draftStore";
 import { Composer } from "./Composer";
+import { tooltipTextOf } from "@/design/ui/tooltipTestKit";
 
 const WS = "00000000-0000-7000-8000-000000000001";
 const ME = "00000000-0000-7000-8000-000000000101";
@@ -179,7 +180,7 @@ describe("입력창 막힘 줄은 막은 원인을 말한다 (#5239)", () => {
     await mount("deviceOffline");
     expect(lineText()).toBe(OFFLINE);
     expect(send().disabled).toBe(true);
-    expect(send().getAttribute("title")).toBe(OFFLINE);
+    expect(tooltipTextOf(send())).toBe(OFFLINE);
   });
 
   it("서버에 닿지 못함: 「서버에 닿지 못해 …」이고 오프라인이라고 말하지 않는다", async () => {
@@ -188,7 +189,7 @@ describe("입력창 막힘 줄은 막은 원인을 말한다 (#5239)", () => {
     expect(lineText()).toBe(SERVER);
     expect(lineText()).not.toContain("오프라인");
     expect(send().disabled).toBe(true);
-    expect(send().getAttribute("title")).toBe(SERVER);
+    expect(tooltipTextOf(send())).toBe(SERVER);
   });
 
   // unknown = 알 수 없음, realtimeDown = 실시간만 끊김

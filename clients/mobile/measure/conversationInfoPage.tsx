@@ -13,7 +13,9 @@ import {
 import {conversationInfoActionItems} from '../src/features/conversation/conversationMenu';
 import {AvatarViewer} from '../src/features/directory/AvatarViewer';
 import type {ChannelRowTarget} from '../src/features/sidebar/channelRowActions';
+import {useFormatMessage} from '../src/i18n/useFormatMessage';
 import {PHOTO} from './profileSheet';
+import {dmLeaveStep} from './sheetKit';
 
 // =============================================================================
 // 대화·채널 정보 페이지의 캡처 표면 (#4319). 배송되는 `ConversationInfoPage` 에 고정 데이터를 건넨다 — 항목은 화면과 같은 길
@@ -21,12 +23,15 @@ import {PHOTO} from './profileSheet';
 //
 //   -momoMeasure INFOPAGE-<이름>   (라이트: LIGHT-INFOPAGE-<이름>)
 //
-//   dm          사람 DM(박서연, 사진 없음) — 이니셜 얼굴(단추 아님) · 자리 비움 칩 · 한 줄 상태 · 알림 · 복사 셋 · 대화 닫기
+//   dm          사람 DM(박서연, 사진 없음) — 이니셜 얼굴(단추 아님) · 자리 비움 칩 · 한 줄 상태 · 알림 · 복사 셋 · 목록에서 숨기기
 //   dm-photo    사진이 있는 사람 — 같은 모양인데 큰 얼굴이 눌려 크게 보기가 된다
 //   dm-agent    에이전트 DM(달무리 도우미) — 둥근 사각 얼굴 · 생존 칩 · 「○○님이 관리」 · 「에이전트 정보 ›」
+//   muted       알림이 꺼진 사람 DM — 알림 줄의 끝 표지가 빗금 종(bell-off)이다(#5776)
 //   channel     공개 채널(# 디자인, 관리자) — 큰 `#` 얼굴 · 「6명 · 달무리 도우미 참여 중」 · 주제 · 알림 · 복사 셋 · 채널 나가기(위험색)
 //   channel-leave 같은 채널의 나가기 확인 단계
 //   viewer      사진 크게 보기(`AvatarViewer`) — 정보 페이지 위에 선 전체 화면
+//   dm-leave    사람 DM 에 「대화 나가기」(맨 아래 따로 선 카드, 위험색 — ADR-0177 증보 2026-11-14 D21)
+//   dm-leave-confirm / -checking / -pending / -failed / -unavailable   그 확인 단계(예약 2개) · 확인 중 · 진행 중 · 실패 · 나갈 수 없음
 //
 // 페이지는 `EdgeSwipeBack` 층(`enter="push"`)이라 들어올 때 오른쪽에서 밀려 들어온다 — 캡처는 멎은 뒤를 찍는다.
 // 사진은 **합성 그라데이션**(`profileSheet.tsx` 의 `PHOTO`)이다. 모든 이름은 가상 인물이다(이도현·박서연·최민수, 에이전트 달무리 도우미,
@@ -145,6 +150,21 @@ function Frame({children}: {children: React.ReactNode}): React.JSX.Element {
 }
 
 export function ConversationInfoPageSurface({which}: {which: string}): React.JSX.Element {
+  const formatMessage = useFormatMessage();
+  if (which === 'dm-leave' || which.startsWith('dm-leave-')) {
+    return (
+      <Frame>
+        <ConversationInfoPage
+          {...props({
+            items: conversationInfoActionItems({...DM_TARGET, leaveOffered: true}, undefined, formatMessage),
+            dmLeave: dmLeaveStep(which.slice('dm-leave-'.length), formatMessage),
+            onConfirmDmLeave: noop,
+            onCancelDmLeave: noop,
+          })}
+        />
+      </Frame>
+    );
+  }
   switch (which) {
     case 'dm-photo':
       return (
@@ -165,6 +185,14 @@ export function ConversationInfoPageSurface({which}: {which: string}): React.JSX
               status: {tone: 'ok', label: '응답함 3분 전'},
               onOpenAgent: noop,
             })}
+          />
+        </Frame>
+      );
+    case 'muted':
+      return (
+        <Frame>
+          <ConversationInfoPage
+            {...props({items: conversationInfoActionItems({...DM_TARGET, muted: true})})}
           />
         </Frame>
       );

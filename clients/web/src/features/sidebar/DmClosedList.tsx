@@ -21,10 +21,11 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/design/ui/dropdown-menu";
+import { Tooltip } from "@/design/ui/tooltip";
 
 // =============================================================================
-// DM 구역 머리 「⋯ › 닫은 대화」 (ADR-0177 증보 D11, #4228). 「나간 멤버와의 대화 N개」 줄을 대신한다: 줄은 지울 수 없는 채로
-// 구역 끝에 서 있었다(owner 2026-10-24). 이 목록은 내가 **닫은** 대화와 상대가 **나간** 대화를 「다시 열기」와 함께 보여 주고,
+// DM 구역 머리 「⋯ › 숨긴 대화」 (ADR-0177 증보 D11, #4228). 「나간 멤버와의 대화 N개」 줄을 대신한다: 줄은 지울 수 없는 채로
+// 구역 끝에 서 있었다(owner 2026-10-24). 이 목록은 내가 **닫은** 대화와 상대가 **나간** 대화를 「다시 보이기」와 함께 보여 주고,
 // 지금 사이드바에 보이는 대화는 넣지 않는다. 호버 클러스터의 규약(`data-section-action`)을 입고, 닫은 대화가 없으면 문이 서지 않는다.
 // =============================================================================
 
@@ -52,20 +53,21 @@ export function DmClosedMenu({
   return (
     <>
       <DropdownMenu onOpenChange={onOpenChange}>
-        <DropdownMenuTrigger asChild>
-          <button
-            ref={trigger}
-            type="button"
-            aria-label="다이렉트 메시지 메뉴"
-            title="다이렉트 메시지 메뉴"
-            data-section-action=""
-            data-testid="dm-section-menu"
-            data-closed-count={items.length}
-            className="tap-target flex size-control-sm items-center justify-center rounded-sm text-ink-muted press hover:bg-surface-hover focus-visible:focus-ring"
-          >
-            <MoreHorizontal className="size-4" aria-hidden="true" />
-          </button>
-        </DropdownMenuTrigger>
+        <Tooltip label="다이렉트 메시지 메뉴" side="bottom">
+          <DropdownMenuTrigger asChild>
+            <button
+              ref={trigger}
+              type="button"
+              aria-label="다이렉트 메시지 메뉴"
+              data-section-action=""
+              data-testid="dm-section-menu"
+              data-closed-count={items.length}
+              className="tap-target flex size-control-sm items-center justify-center rounded-sm text-ink-muted press hover:bg-surface-hover focus-visible:focus-ring"
+            >
+              <MoreHorizontal className="size-4" aria-hidden="true" />
+            </button>
+          </DropdownMenuTrigger>
+        </Tooltip>
         <DropdownMenuContent align="end" data-testid="dm-section-menu-content">
           <DropdownMenuItem
             data-testid="dm-closed-list-open"

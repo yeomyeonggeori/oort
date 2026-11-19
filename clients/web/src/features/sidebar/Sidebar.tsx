@@ -43,13 +43,30 @@ import {
   type Directory,
 } from "@/features/workspace/useWorkspace";
 import {
+  readPhaseMayDim,
+  rowEmphasis,
+} from "@momo/core/features/sidebar/rowEmphasis";
+import {
   canCreateChannelNow,
+  DM_CLOSE_FAILURE,
   dmCloseButtonLabel,
 } from "@momo/core/features/channels/model";
 import {
   useCreateChannelOpen,
   useOpenCreateChannel,
 } from "@/features/channels/useCreateChannel";
+import {
+  useChannelBrowseOpen,
+  useOpenChannelBrowse,
+} from "@/features/channels/useChannelBrowse";
+import { canBrowseChannelsNow } from "@momo/core/features/channels/browse";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/design/ui/dropdown-menu";
+import { useFormatMessage } from "@/i18n/useFormatMessage";
 import { EmptyInvite, InlineBanner, Skeleton } from "@/features/common/States";
 import { LoadFailureLine, LoadFailureNote } from "@/features/common/LoadFailureBox";
 import { loadCauseOf } from "@/features/common/loadFailure";
@@ -89,7 +106,6 @@ import {
   SectionDeleteConfirmDialog,
   SectionNameDialog,
   SidebarSectionMenu,
-  SidebarSortMenu,
 } from "./SidebarSectionDialogs";
 import {
   deriveSidebarSections,
@@ -117,6 +133,10 @@ import {
   useDmVisibility,
 } from "./useDmVisibility";
 import { DmClosedMenu } from "./DmClosedList";
+import { DmLeaveHost, DmLeaveReceiptRow } from "./DmLeaveHost";
+import { requestDmLeave, useDmLeaveStore } from "./dmLeaveStore";
+import { findSidebarChannelRow } from "./sidebarRowFocus";
+import { dmLeaveMode, dmLeaveOffered } from "@momo/core/features/channels/dmLeave";
 import { dmCloseOffered } from "@momo/core/features/sidebar/dmVisibility";
 import { rosterLoaded } from "@momo/core/features/sidebar/goneDm";
 import { useHoverNone } from "@/features/emoji/useHoverNone";
@@ -136,6 +156,7 @@ import { ShortcutHelpDialog } from "@/app/ShortcutHelpDialog";
 import { useOpenNewDm } from "@/features/directory/useNewDm";
 import { mayActOnLiveness } from "@momo/core/features/agents/liveness";
 import { DmAvatar, DmStatusText } from "./DmAvatar";
+import { Tooltip } from "@/design/ui/tooltip";
 
 // =============================================================================
 // Sidebar (R-1 §1): workspace header, the two global surfaces (인박스 / 활동),
@@ -340,6 +361,15 @@ export function Sidebar({
   const newChannelRef = useRef<HTMLButtonElement>(null);
   const rosterSettled = !directoryQuery.isPending;
   const canCreate = canCreateChannelNow(rosterSettled, selfMember?.role);
+  // 채널 둘러보기의 문(ADR-0224 화면 ①, #5842): 정식 멤버 모두에게 같은 + 가 선다. 만들 수 있는 사람에게는 「채널 둘러보기」
+  // 「새 채널 만들기」 두 줄의 메뉴이고, 일반 멤버는 줄이 하나라 바로 둘러보기가 열린다. 게스트에게는 서지 않는다(D8).
+  // 셸 밖(창이 없는 화면)에서는 둘러보기 문이 없고 + 는 예전대로 만들기다.
+  const formatMessage = useFormatMessage();
+  const openChannelBrowse = useOpenChannelBrowse();
+  const channelBrowseOpen = useChannelBrowseOpen();
+  const canBrowse =
+    openChannelBrowse !== null && canBrowseChannelsNow(rosterSettled, selfMember?.role);
+  const [channelAddMenuOpen, setChannelAddMenuOpen] = useState(false);
 
   // 지금 읽고 있는 채널 (goal B8 H10). ChatShell이 커서를 올리는 PUT은 왕복이
   // 걸리고 실패할 수도 있으므로, 그 사이 사이드바는 화면에 떠 있는 그 채널에
@@ -388,6 +418,15 @@ export function Sidebar({
     mode: dmVisibility.mode,
     byChannel: readStates.byChannel,
   });
+  // 1:1 「대화 나가기」(ADR-0177 증보 2026-11-14 D21, #5825). 내밀지 말지는 투영이 하한 칸을 싣는가(옛 서버 판별)와 이 워크스페이스의
+  // 접힘(`dmLeaveMode`)이 정하고, 접힘은 이 저장소의 판이 바뀌어 다시 읽힌다. 끝난 뒤의 영수증도 여기서 온다.
+  const { receipts: allLeaveReceipts } = useDmLeaveStore();
+  const leaveMode = dmLeaveMode({ workspaceId, rows: readStates.data });
+  const leaveReceipts = useMemo(
+    () => allLeaveReceipts.filter((receipt) => uuidEq(receipt.workspaceId, workspaceId)),
+    [allLeaveReceipts, workspaceId]
+  );
+  const receiptFor = (channelId: string) => leaveReceipts.find((receipt) => uuidEq(receipt.channelId, channelId));
   const openId = openChannelId(
     routePath,
     indexFallbackChannelId({
@@ -399,14 +438,17 @@ export function Sidebar({
   // 닫기는 행마다 `dmCloseOffered`(코어) 가 정한다(호버 X 와 메뉴 항목이 같은 함수를 읽는다): **읽음 투영이 준비된 뒤에만**(닫을
   // 때 `seenSeq` 로 서버의 최신 seq 를 적는데, 투영이 오기 전에는 그 기준이 없다), **안 읽은 메시지(멘션 포함)가 없을 때만**(소유자
   // 결정 2026-10-17), **별표·섹션 DM 이 아닐 때만**(ADR-0177 D7). 읽고 나면 다시 보인다.
+  // 나간 대화의 영수증이 서 있는 동안은 그 대화가 자리를 지킨다: 줄 대신 영수증이 같은 자리·같은 높이에 선다(`DmLeaveReceiptRow`).
   const shownDms = useMemo(
     () =>
-      dms.filter((channel) =>
-        dmShownNow(dmVisibility.verdictOf(channel.id), channel.id, openId)
+      dms.filter(
+        (channel) =>
+          dmShownNow(dmVisibility.verdictOf(channel.id), channel.id, openId) ||
+          leaveReceipts.some((receipt) => uuidEq(receipt.channelId, channel.id))
       ),
-    [dms, dmVisibility, openId]
+    [dms, dmVisibility, openId, leaveReceipts]
   );
-  // 「⋯ › 닫은 대화」 목록(D11): 내가 닫았거나 상대가 나간 DM. 지금 열려 있는 DM 은 보이는 대화라 넣지 않는다.
+  // 「⋯ › 숨긴 대화」 목록(D11): 내가 닫았거나 상대가 나간 DM. 지금 열려 있는 DM 은 보이는 대화라 넣지 않는다.
   const closedListItems = useMemo(
     () =>
       dmVisibility.closedList
@@ -450,7 +492,7 @@ export function Sidebar({
       ),
     [readPhase, rosterReady, dms, directoryQuery.directory, session.member.id, selfName]
   );
-  // 닫아 둔 DM 이 **열리는** 순간(주소 · ⌘K · 새 DM · 「닫은 대화」)이 곧 다시 연다는 뜻이다(ADR-0177 D8). 다시 열지 않으면 사람이
+  // 닫아 둔 DM 이 **열리는** 순간(주소 · ⌘K · 새 DM · 「숨긴 대화」)이 곧 다시 연다는 뜻이다(ADR-0177 D8). 다시 열지 않으면 사람이
   // 일부러 연 대화가 다른 곳으로 옮겨 가는 순간 도로 사라진다. 서버가 닫기를 기억하면 `DELETE` 를 보내고(**닫은 적이 있을 때만**:
   // 나간 상대의 DM 은 연다고 아무것도 쓰지 않는다 - 열려 있는 동안만 보인다), 옛 서버에서는 원장 항목을 지운다.
   //
@@ -669,7 +711,7 @@ export function Sidebar({
   }, []);
 
   /**
-   * DM 을 닫는다 (#3963, ADR-0177 D7). 호버 X 와 행 메뉴의 「대화 닫기」가 이 한 길을 지난다. 서버가 닫기를 기억하면 서버에 쓰고(그
+   * DM 을 닫는다 (#3963, ADR-0177 D7). 호버 X 와 행 메뉴의 「목록에서 숨기기」가 이 한 길을 지난다. 서버가 닫기를 기억하면 서버에 쓰고(그
    * 기기에서 닫으면 모든 기기에서 닫힌다), 옛 서버에서는 이 기기의 원장에 쓴다.
    *
    * 순서가 일이다. ①이웃 행은 **지우기 전에** 잡는다(지운 뒤에는 DOM 에서 자리를 못 찾는다) ②닫을 때의 최신 seq(`seenSeq`: 화면이
@@ -692,7 +734,7 @@ export function Sidebar({
     if (neighborId !== null) scheduleSidebarChannelRowFocus(neighborId);
   };
 
-  /** 「닫은 대화」 목록의 「다시 열기」: 서버에 닫힘이 있으면 풀고, 그 대화를 연다. 나간 상대의 DM 은 쓰는 것 없이 연다(D8). */
+  /** 「숨긴 대화」 목록의 「다시 열기」: 서버에 닫힘이 있으면 풀고, 그 대화를 연다. 나간 상대의 DM 은 쓰는 것 없이 연다(D8). */
   const reopenClosedDm = (item: { id: string }) => {
     void dmClosure.reopen(item.id);
     navigate(`/c/${item.id}`);
@@ -713,6 +755,10 @@ export function Sidebar({
     channel: Channel,
     options: { inStarredSection?: boolean } = {}
   ) {
+    const leaveReceipt = receiptFor(channel.id);
+    if (leaveReceipt !== undefined) {
+      return <DmLeaveReceiptRow key={channel.id} receipt={leaveReceipt} paneRef={listPaneRef} />;
+    }
     const counts = unreadCountFor(channel);
     const closeOffered =
       channel.kind === "dm" &&
@@ -740,6 +786,17 @@ export function Sidebar({
         ? dmPeer(channel, directoryQuery.directory, session.member.id)
         : null;
     const dmPeerMember = label.kind === "self" ? (selfMember ?? null) : peer;
+    // 「대화 나가기」: 사람끼리의 1:1 · 새 서버 · 투영 준비(D20·D21). 안 읽음·별표와 무관하다(확인 창이 있어서). 터치에는 줄 메뉴가 없다.
+    const leaveOffered =
+      channel.kind === "dm" &&
+      !touchSurface &&
+      dmLeaveOffered({
+        mode: leaveMode,
+        phase: readPhase,
+        channel,
+        directory: directoryQuery.directory,
+        selfMemberId: session.member.id,
+      });
     const rowTurns = applyApprovalWaits(
       agentTurnsInChannel(turnSignals, channel.id, nowMs),
       channel.id,
@@ -780,6 +837,16 @@ export function Sidebar({
         label={label.text}
         handle={label.handle}
         agent={label.isAgent}
+        dim={
+          rowEmphasis({
+            unreadCount: counts.unreadCount,
+            mentionCount: counts.mentionCount,
+            muted: channel.muted,
+            tracksRead: true,
+            mayDim: readPhaseMayDim(readPhase),
+            selected: openId !== null && uuidEq(channel.id, openId),
+          }).dim
+        }
         iconKind={channel.kind === "dm" ? "avatar" : "glyph"}
         // 호버 X 는 포인터 표면의 문이다: 터치에는 호버가 없고, 그 표면의 길은 (아직) 없다 -
         // 폰 길게 누르기 메뉴는 BT-1 이 서랍 스크롤과의 충돌로 닫아 둔 자리다.
@@ -835,6 +902,20 @@ export function Sidebar({
                 : undefined
             }
             onCloseDm={closeOffered ? () => closeDmRow(channel) : undefined}
+            onLeaveDm={
+              leaveOffered
+                ? () =>
+                    requestDmLeave({
+                      workspaceId,
+                      channelId: channel.id,
+                      name: peer?.displayName ?? label.text,
+                      via: "row",
+                      opener: navRef.current === null ? null : findSidebarChannelRow(navRef.current, channel.id),
+                      observedSeq: null,
+                      rootIds: [],
+                    })
+                : undefined
+            }
           >
             {link}
           </SidebarRowContextMenu>
@@ -900,17 +981,18 @@ export function Sidebar({
             </span>
             {/* 폰에서만 서는 닫기 (goal B6). 넓은 창에서 사이드바는 닫히는 것이
                 아니라 그냥 거기 있으므로, 이 버튼은 그때 아무 일도 하지 않는다. */}
-            <button
-              ref={closeRef}
-              type="button"
-              onClick={closeDrawer}
-              aria-label="채널 목록 닫기"
-              title="채널 목록 닫기"
-              data-testid="close-sidebar-drawer"
-              className="mobile-only tap-target flex size-control shrink-0 items-center justify-center rounded-md text-ink-muted press hover:bg-surface-hover focus-visible:focus-ring"
-            >
-              <X className="size-4" aria-hidden="true" />
-            </button>
+            <Tooltip label="채널 목록 닫기" side="bottom" className="mobile-only">
+              <button
+                ref={closeRef}
+                type="button"
+                onClick={closeDrawer}
+                aria-label="채널 목록 닫기"
+                data-testid="close-sidebar-drawer"
+                className="mobile-only tap-target flex size-control shrink-0 items-center justify-center rounded-md text-ink-muted press hover:bg-surface-hover focus-visible:focus-ring"
+              >
+                <X className="size-4" aria-hidden="true" />
+              </button>
+            </Tooltip>
           </div>
           <div className="flex items-center">
             {/* 데스크톱 접기 토글은 타이틀바에 한 자리만 산다 (#1864). 여기 두면
@@ -1087,6 +1169,8 @@ export function Sidebar({
                 dropProps={drag.dropProps({ kind: "channels", sectionId: null })}
                 overlayOpen={
                   createChannelOpen ||
+                  channelBrowseOpen ||
+                  channelAddMenuOpen ||
                   nameDialog?.mode === "create" ||
                   openSectionMenu === baseChannelSection.id
                 }
@@ -1095,23 +1179,77 @@ export function Sidebar({
                 wrapList={false}
                 action={
                   <>
-                    {canCreate ? (
+                    {canBrowse && canCreate ? (
+                      /* 두 줄 메뉴. 고른 창은 한 프레임 뒤에 연다: 메뉴가 먼저 캐럿을 + 로 돌려놓아야 창이 「무엇이 나를
+                         열었나」로 + 를 잡고, Esc 로 닫을 때 그리로 돌아간다(⌘K 가 폼을 여는 것과 같은 까닭). */
+                      <DropdownMenu onOpenChange={setChannelAddMenuOpen}>
+                        <Tooltip label={formatMessage("channels.browse.menuLabel")} side="bottom">
+                          <DropdownMenuTrigger asChild>
+                            <button
+                              ref={newChannelRef}
+                              type="button"
+                              aria-label={formatMessage("channels.browse.menuLabel")}
+                              data-testid="new-channel"
+                              data-section-action=""
+                              className="tap-target flex size-control-sm items-center justify-center rounded-sm text-ink-muted press hover:bg-surface-hover focus-visible:focus-ring"
+                            >
+                              <Plus className="size-4" aria-hidden="true" />
+                            </button>
+                          </DropdownMenuTrigger>
+                        </Tooltip>
+                        <DropdownMenuContent align="end" data-testid="new-channel-menu">
+                          <DropdownMenuItem
+                            data-testid="new-channel-browse"
+                            onSelect={() =>
+                              requestAnimationFrame(() =>
+                                openChannelBrowse?.({ opener: newChannelRef.current })
+                              )
+                            }
+                          >
+                            {formatMessage("channels.browse.title")}
+                          </DropdownMenuItem>
+                          <DropdownMenuItem
+                            data-testid="new-channel-create"
+                            onSelect={() =>
+                              requestAnimationFrame(() => openCreateChannel(newChannelRef.current))
+                            }
+                          >
+                            {formatMessage("channels.browse.menuCreate")}
+                          </DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    ) : canBrowse ? (
+                      <Tooltip label={formatMessage("channels.browse.title")} side="bottom">
+                        <button
+                          ref={newChannelRef}
+                          type="button"
+                          onClick={() => openChannelBrowse?.({ opener: newChannelRef.current })}
+                          aria-label={formatMessage("channels.browse.title")}
+                          data-testid="new-channel"
+                          data-section-action=""
+                          className="tap-target flex size-control-sm items-center justify-center rounded-sm text-ink-muted press hover:bg-surface-hover focus-visible:focus-ring"
+                        >
+                          <Plus className="size-4" aria-hidden="true" />
+                        </button>
+                      </Tooltip>
+                    ) : canCreate ? (
                     /* size-control-sm(28px): WCAG 2.2 최소 타깃 24px에 딱 걸치던
                        크기를 하우스 컨트롤 높이로 올린다. 사이드바의 아이콘 버튼
                        셋(+ · 새 DM)이 같은 규격이다. 설정은 프로필 카드 행으로
                        이사했다. */
-                    <button
-                      ref={newChannelRef}
-                      type="button"
-                      onClick={() => openCreateChannel(newChannelRef.current)}
-                      aria-label="새 채널 만들기"
-                      title="새 채널 만들기"
-                      data-testid="new-channel"
-                      data-section-action=""
-                      className="tap-target flex size-control-sm items-center justify-center rounded-sm text-ink-muted press hover:bg-surface-hover focus-visible:focus-ring"
-                    >
-                      <Plus className="size-4" aria-hidden="true" />
-                    </button>
+                    <Tooltip label="새 채널 만들기" side="bottom">
+                      <button
+                        ref={newChannelRef}
+                        type="button"
+                        onClick={() => openCreateChannel(newChannelRef.current)}
+                        aria-label="새 채널 만들기"
+                        data-testid="new-channel"
+                        data-section-action=""
+                        className="tap-target flex size-control-sm items-center justify-center rounded-sm text-ink-muted press hover:bg-surface-hover focus-visible:focus-ring"
+                      >
+                        <Plus className="size-4" aria-hidden="true" />
+                      </button>
+                    </Tooltip>
                     ) : rosterSettled ? null : (
                       /* 명부를 기다리는 동안 자리만 지킨다. 호버 클러스터가 열렸을
                          때만 마운트되므로 rest 헤더 높이는 흔들리지 않는다. */
@@ -1128,65 +1266,34 @@ export function Sidebar({
                         비활성으로 남기고 **사유를 이름으로 든다**(M-3). 사라진 문과
                         아직 못 찾은 문을 사람은 구분하지 못한다. */}
                     {canEditSections && (
-                      <button
-                        ref={newSectionRef}
-                        type="button"
-                        disabled={!sidebarPrefs.canCreate}
-                        onClick={() =>
-                          setNameDialog({
-                            mode: "create",
-                            sectionId: null,
-                            name: "",
-                            opener: newSectionRef.current,
-                          })
-                        }
-                        aria-label={
-                          sidebarPrefs.canCreate
-                            ? SECTION_CREATE_TITLE
-                            : sidebarSectionCapMessage()
-                        }
-                        title={
-                          sidebarPrefs.canCreate
-                            ? SECTION_CREATE_TITLE
-                            : sidebarSectionCapMessage()
-                        }
-                        data-testid="new-section"
-                        data-section-action=""
-                        className="tap-target flex size-control-sm items-center justify-center rounded-sm text-ink-muted press hover:bg-surface-hover focus-visible:focus-ring disabled:pointer-events-none disabled:opacity-50"
+                      <Tooltip
+                        label={sidebarPrefs.canCreate ? SECTION_CREATE_TITLE : sidebarSectionCapMessage()}
+                        side="bottom"
                       >
-                        <FolderPlus className="size-4" aria-hidden="true" />
-                      </button>
-                    )}
-                    {/* 정렬의 문은 **여기 하나**다 (BT-5 #1933). 값이 사이드바 전체에
-                        하나뿐이라(payload 의 `sectionSort` 한 칸) 섹션마다 같은
-                        라디오를 세우면 「이 섹션의 정렬」로 읽히고, 하나를 바꿀 때
-                        전부 바뀌는 것이 결함이 된다. 이 헤더인 이유는 그것이 이미
-                        **사이드바의 선반**이기 때문이다 - 「새 섹션」도 채널 섹션의
-                        일이 아니라 사이드바의 일이고 같은 자리에 산다.
-
-                        커스텀 섹션이 하나도 없어도 서야 한다: 정렬은 섹션을 만들어야
-                        열리는 설정이 아니다.
-
-                        **자기 글리프와 자기 이름을 갖는다**(design-review R1 M-2):
-                        섹션 ⋮ 안에 들어 있던 동안에는 스크린리더가 「채널 섹션 메뉴」로
-                        읽었고, 같은 ⋯ 이 섹션마다 다른 메뉴를 열었다. 근거는
-                        `SidebarSortMenu` 머리말에 있다.
-
-                        **터치에는 없다** — BT-4 H-1 의 규율을 그대로 승계한다. 정렬
-                        자체는 손가락으로도 멀쩡히 동작하므로 이것은 「없는 문」이
-                        아니라 **밀도 판정**이다: `hover: none` 에서는 헤더의 액션이
-                        상시 마운트라(`shouldShowSectionActions`) 240px 서랍의 머리글에
-                        아이콘이 하나 더 영구히 서고, 그 값을 두 번째 순위의 설정이
-                        치를 이유가 없다. 폰이 정렬을 갖게 되는 날의 자리는 이 헤더가
-                        아니라 폰의 설정 표면이다. */}
-                    {canEditSections && (
-                      <SidebarSortMenu
-                        mode={sidebarPrefs.sortMode}
-                        onChange={sidebarPrefs.setSortMode}
-                        onOpenChange={(open) =>
-                          setOpenSectionMenu(open ? baseChannelSection.id : null)
-                        }
-                      />
+                        <button
+                          ref={newSectionRef}
+                          type="button"
+                          disabled={!sidebarPrefs.canCreate}
+                          onClick={() =>
+                            setNameDialog({
+                              mode: "create",
+                              sectionId: null,
+                              name: "",
+                              opener: newSectionRef.current,
+                            })
+                          }
+                          aria-label={
+                            sidebarPrefs.canCreate
+                              ? SECTION_CREATE_TITLE
+                              : sidebarSectionCapMessage()
+                          }
+                          data-testid="new-section"
+                          data-section-action=""
+                          className="tap-target flex size-control-sm items-center justify-center rounded-sm text-ink-muted press hover:bg-surface-hover focus-visible:focus-ring disabled:pointer-events-none disabled:opacity-50"
+                        >
+                          <FolderPlus className="size-4" aria-hidden="true" />
+                        </button>
+                      </Tooltip>
                     )}
                   </>
                 }
@@ -1362,23 +1469,24 @@ export function Sidebar({
                 overlayOpen={openDmMenu}
                 action={
                   <>
-                    {/* 「⋯ › 닫은 대화」(ADR-0177 D11): 닫은 대화와 나간 멤버와의 대화를 다시 열 문. 닫은 대화가 없으면 문이 서지 않는다. */}
+                    {/* 「⋯ › 숨긴 대화」(ADR-0177 D11): 숨긴 대화와 나간 멤버와의 대화를 다시 열 문. 닫은 대화가 없으면 문이 서지 않는다. */}
                     <DmClosedMenu
                       items={closedListItems}
                       onOpenChange={setOpenDmMenu}
                       onReopen={reopenClosedDm}
                     />
-                    <button
-                      type="button"
-                      aria-label="새 다이렉트 메시지 시작"
-                      title="새 다이렉트 메시지 (⌘⇧K)"
-                      data-testid="new-dm"
-                      data-section-action=""
-                      onClick={(event) => openNewDm(event.currentTarget)}
-                      className="tap-target flex size-control-sm items-center justify-center rounded-sm text-ink-muted press hover:bg-surface-hover focus-visible:focus-ring"
-                    >
-                      <Plus className="size-4" aria-hidden="true" />
-                    </button>
+                    <Tooltip label="새 다이렉트 메시지 (⌘⇧K)" side="bottom">
+                      <button
+                        type="button"
+                        aria-label="새 다이렉트 메시지 시작"
+                        data-testid="new-dm"
+                        data-section-action=""
+                        onClick={(event) => openNewDm(event.currentTarget)}
+                        className="tap-target flex size-control-sm items-center justify-center rounded-sm text-ink-muted press hover:bg-surface-hover focus-visible:focus-ring"
+                      >
+                        <Plus className="size-4" aria-hidden="true" />
+                      </button>
+                    </Tooltip>
                   </>
                 }
               >
@@ -1419,7 +1527,7 @@ export function Sidebar({
                   <li>
                     <InlineBanner
                       tone="neutral"
-                      message="대화를 닫지 못했어요. 잠시 뒤에 다시 시도해 주세요."
+                      message={DM_CLOSE_FAILURE}
                       actionLabel="확인"
                       onAction={() => setDmCloseFailed(false)}
                       separator={false}
@@ -1536,6 +1644,13 @@ export function Sidebar({
               sidebarPrefs.createSection(name);
             }
           }}
+        />
+        <DmLeaveHost
+          workspaceId={workspaceId}
+          selfMemberId={session.member.id}
+          readRows={readStates.data}
+          openId={openId}
+          navRef={navRef}
         />
         <SectionDeleteConfirmDialog
           open={deleteDialog !== null}

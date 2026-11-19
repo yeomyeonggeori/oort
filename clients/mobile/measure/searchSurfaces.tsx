@@ -201,7 +201,7 @@ export function SearchSurface({which}: {which: SearchSurfaceWhich}): React.JSX.E
           scope={null}
           onPickScope={() => {}}
           onClearScope={() => {}}
-          channels={showsLocal ? matchChannels(CHANNELS, query) : []}
+          channels={showsLocal ? matchChannels(CHANNELS, query, 'ko-KR') : []}
           people={showsLocal ? matchPeople(ROSTER, SELF_ID, query) : []}
           localPending={false}
           recentTiles={RECENT_TILES}

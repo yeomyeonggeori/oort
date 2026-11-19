@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // =============================================================================
-// DM 닫기를 서버 상태로 - 닫기 전후 + 「⋯ › 닫은 대화」 목록 캡처와 실측 (#4228, ADR-0177 증보 D6~D12).
+// DM 닫기를 서버 상태로 - 닫기 전후 + 「⋯ › 숨긴 대화」 목록 캡처와 실측 (#4228, ADR-0177 증보 D6~D12).
 //
 //   npm run build && node scripts/capture-4228.mjs
 //
@@ -9,8 +9,8 @@
 //   ① 닫기 전: DM 구역에 넷이 서고 나간 멤버는 목록에 없다(줄도 없다).
 //   ② 이도현 DM 의 호버 X 를 누른다: 하네스가 PUT …/closure 를 받아 `closed_at_seq` 를 기억하고, 앱이 즉시 그 행을 치운다.
 //   ③ 다른 기기를 모사: 투영을 다시 읽으면(30초 재조회 대신 페이지를 다시 연다) 닫힌 채다.
-//   ④ 「⋯ › 닫은 대화」: 이도현(내가 닫았어요)과 나간 멤버(안 읽은 메시지가 없어요)가 「다시 열기」와 함께 선다.
-//   ⑤ 「다시 열기」: DELETE 를 받고 그 대화가 열리고 목록에 돌아온다.
+//   ④ 「⋯ › 숨긴 대화」: 이도현(내가 숨겼어요)과 나간 멤버(안 읽은 메시지가 없어요)가 「다시 보이기」와 함께 선다.
+//   ⑤ 「다시 보이기」: DELETE 를 받고 그 대화가 열리고 목록에 돌아온다.
 // 라이트·다크 × 1440x900. 웹킷(데스크탑 셸의 엔진)은 라이트만 한 번 더 건다.
 // =============================================================================
 import { mkdirSync, writeFileSync } from "node:fs";
@@ -199,7 +199,7 @@ async function runScheme(browserType, engine, origin, scheme) {
       await shot("dm-before-close");
       await scrollDmsIntoView(page);
       await rowOf(page, DOHYUN).hover();
-      check(engine, scheme, "A2 호버하면 이름을 말하는 X(「이도현, 대화 닫기」)가 선다", (await page.getByTestId("dm-close").getAttribute("aria-label")) === "이도현, 대화 닫기", await page.getByTestId("dm-close").getAttribute("aria-label"));
+      check(engine, scheme, "A2 호버하면 이름을 말하는 X(「이도현, 목록에서 숨기기」)가 선다", (await page.getByTestId("dm-close").getAttribute("aria-label")) === "이도현, 목록에서 숨기기", await page.getByTestId("dm-close").getAttribute("aria-label"));
       await shot("dm-hover-close");
       await page.getByTestId("dm-close").click();
       await settle();
@@ -224,7 +224,7 @@ async function runScheme(browserType, engine, origin, scheme) {
       await page.mouse.move(900, 450);
       await page.getByTestId("sidebar-section-dms-header").hover();
       await page.getByTestId("dm-section-menu").waitFor({ timeout: 5000 });
-      check(engine, scheme, "B0 DM 구역 머리에 「⋯」 가 서고 닫은 대화 둘(내가 닫은 하나 + 나간 멤버)을 센다", (await page.getByTestId("dm-section-menu").getAttribute("data-closed-count")) === "2", await page.getByTestId("dm-section-menu").getAttribute("data-closed-count"));
+      check(engine, scheme, "B0 DM 구역 머리에 「⋯」 가 서고 숨긴 대화 둘(내가 숨긴 하나 + 나간 멤버)을 센다", (await page.getByTestId("dm-section-menu").getAttribute("data-closed-count")) === "2", await page.getByTestId("dm-section-menu").getAttribute("data-closed-count"));
       await page.getByTestId("dm-section-menu").click();
       await page.getByTestId("dm-closed-list-open").waitFor({ timeout: 5000 });
       await shot("dm-menu-open");
@@ -232,12 +232,12 @@ async function runScheme(browserType, engine, origin, scheme) {
       await page.getByTestId("dm-closed-list").waitFor({ timeout: 5000 });
       await page.waitForTimeout(300);
       const items = await page.getByTestId("dm-closed-list-item").allInnerTexts();
-      check(engine, scheme, "B1 목록에 이도현(내가 닫았어요)과 나간 멤버(안 읽은 메시지가 없어요)가 있고 지금 보이는 대화는 없다", items.length === 2 && items.some((t) => t.includes("이도현") && t.includes("내가 닫았어요")) && items.some((t) => t.includes("나간 멤버") && t.includes("안 읽은 메시지가 없어요")), items.join(" | "));
+      check(engine, scheme, "B1 목록에 이도현(내가 숨겼어요)과 나간 멤버(안 읽은 메시지가 없어요)가 있고 지금 보이는 대화는 없다", items.length === 2 && items.some((t) => t.includes("이도현") && t.includes("내가 숨겼어요")) && items.some((t) => t.includes("나간 멤버") && t.includes("안 읽은 메시지가 없어요")), items.join(" | "));
       if (SHOTS) await page.screenshot({ path: resolve(OUT_DIR, `${PREFIX}-${engine}-dm-closed-list-${scheme}.png`) });
       server.calls.length = 0;
       await page.getByTestId("dm-closed-list-reopen").first().click();
       await settle();
-      check(engine, scheme, "B2 「다시 열기」: DELETE 가 나가고 그 대화가 열린다", JSON.stringify(server.calls) === JSON.stringify([{ method: "DELETE", id: DOHYUN }]) && page.url().toLowerCase().endsWith(`/c/${DOHYUN}`), JSON.stringify(server.calls) + " " + page.url());
+      check(engine, scheme, "B2 「다시 보이기」: DELETE 가 나가고 그 대화가 열린다", JSON.stringify(server.calls) === JSON.stringify([{ method: "DELETE", id: DOHYUN }]) && page.url().toLowerCase().endsWith(`/c/${DOHYUN}`), JSON.stringify(server.calls) + " " + page.url());
       check(engine, scheme, "B3 이도현이 목록에 돌아왔다", await shown(DOHYUN), null);
       await shot("dm-after-reopen");
     });

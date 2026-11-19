@@ -187,3 +187,42 @@ describe("ListboxSelect 앵커 (#4131)", () => {
     expect(withoutAnchor - withAnchor).toBe(30);
   });
 });
+
+// #5780: 줄 안 변형. 그릇 테두리가 없고, 단추는 글만큼만 넓고, 화살표가 글 바로 뒤에 붙는다. 목록은 단추보다 넓을 수 있다.
+// 기본(`field`)은 그대로다 — 변형은 넘긴 곳에만 번진다.
+describe("ListboxSelect variant (#5780)", () => {
+  const classTokens = (el: Element | null | undefined) => (el?.getAttribute("class") ?? "").split(/\s+/);
+
+  it("inline: 테두리 없음 · 글이 칸을 채우지 않음 · 화살표가 글 바로 뒤 · 목록은 단추 끝에 맞춘 넓은 판", () => {
+    render(<Harness extra={{ variant: "inline" }} />);
+    const trigger = box();
+    expect(trigger.dataset.variant).toBe("inline");
+    const tokens = classTokens(trigger);
+    expect(tokens).not.toContain("border");
+    expect(tokens).not.toContain("border-line-strong");
+    expect(tokens).not.toContain("w-full");
+    expect(tokens).toContain("inline-flex");
+    const [text, chevron] = [...trigger.children];
+    expect(classTokens(text)).not.toContain("flex-1");
+    expect(chevron?.tagName.toLowerCase()).toBe("svg");
+    expect(trigger.children).toHaveLength(2);
+    fireEvent.click(trigger);
+    const content = document.querySelector('[data-radix-popper-content-wrapper] > *');
+    expect(classTokens(content)).toContain("w-pane-sm");
+    expect(content?.getAttribute("data-align")).toBe("end");
+  });
+
+  it("field(기본): 입력 그릇 테두리 · 칸 폭 전체 · 글이 칸을 채워 화살표는 오른쪽 끝 · 목록은 단추 폭", () => {
+    render(<Harness />);
+    const trigger = box();
+    expect(trigger.dataset.variant).toBe("field");
+    const tokens = classTokens(trigger);
+    expect(tokens).toContain("border-line-strong");
+    expect(tokens).toContain("w-full");
+    expect(classTokens(trigger.children[0])).toContain("flex-1");
+    fireEvent.click(trigger);
+    const content = document.querySelector('[data-radix-popper-content-wrapper] > *');
+    expect(classTokens(content)).toContain("w-[var(--radix-popover-trigger-width)]");
+    expect(content?.getAttribute("data-align")).toBe("start");
+  });
+});

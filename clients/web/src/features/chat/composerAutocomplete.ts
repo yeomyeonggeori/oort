@@ -9,6 +9,8 @@ import type {
   LocalCardArgs,
 } from "@momo/core/features/commands/registry";
 import { mentionAnnotation } from "@momo/core/features/ai/aiMention";
+import { nameMatchTier } from "@momo/core/features/channels/nameSearch";
+import { compareChannelNames } from "@momo/core/features/channels/nameCollation";
 import {
   aliasHint,
   matchedAlias,
@@ -380,7 +382,9 @@ export function matchMembers(
 export function matchChannels(
   channels: Channel[],
   query: string,
-  limit = COMPOSER_CANDIDATE_LIMIT
+  limit = COMPOSER_CANDIDATE_LIMIT,
+  /** 보는 사람의 화면 언어. 있으면 같은 등급끼리 이 언어의 차례(숫자는 값)로 세운다. */
+  locale?: string
 ): Channel[] {
   const needle = query.trim().toLowerCase();
   const open = channels.filter(
@@ -389,10 +393,27 @@ export function matchChannels(
       channel.archivedAtMs === undefined &&
       (channel.name ?? "") !== ""
   );
-  const matched = needle
-    ? open.filter((channel) => (channel.name ?? "").toLowerCase().includes(needle))
-    : open;
-  return matched.slice(0, limit);
+  if (!needle) {
+    return (locale === undefined ? open : [...open].sort((a, b) => compareChannelNames(locale)(a.name ?? "", b.name ?? ""))).slice(0, limit);
+  }
+  const strict: Channel[] = [];
+  const loose: Channel[] = [];
+  for (const channel of open) {
+    const name = (channel.name ?? "").toLowerCase();
+    // 한글을 치는 도중(`디장`·`디ㅈ`)에도 줄이 남게 마지막 글자만 느슨하게 본다 (ADR-0225 D12).
+    // 글자 그대로 맞은 줄이 늘 앞이다 — 느슨하게만 맞은 줄이 앞서거나 6줄 밖으로 밀어내지 않는다.
+    const tier = nameMatchTier(name.includes(needle), needle, name);
+    if (tier === "strict") strict.push(channel);
+    else if (tier === "loose") loose.push(channel);
+  }
+  if (locale !== undefined) {
+    const byName = compareChannelNames(locale);
+    const order = (a: Channel, b: Channel) => byName(a.name ?? "", b.name ?? "");
+    strict.sort(order);
+    loose.sort(order);
+  }
+  return [...strict, ...loose].slice(0, limit);
+
 }
 
 export function memberCandidates(
@@ -452,9 +473,10 @@ export function memberCandidates(
 export function channelCandidates(
   channels: Channel[],
   query: string,
-  limit = COMPOSER_CANDIDATE_LIMIT
+  limit = COMPOSER_CANDIDATE_LIMIT,
+  locale?: string
 ): ComposerCandidate[] {
-  return matchChannels(channels, query, limit).map((channel) => {
+  return matchChannels(channels, query, limit, locale).map((channel) => {
     const name = channel.name ?? "";
     // 비공개 방은 후보로 **남고**, 격을 글리프로 말한다 (design-review #1930
     // M-2). 정보 누출이 아니다 — 이 스토어에는 내가 든 방만 있고, 같은 방이

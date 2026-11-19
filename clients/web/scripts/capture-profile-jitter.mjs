@@ -87,7 +87,7 @@ const PROBE = `
     avatar: "[data-testid='profile-card'] [data-testid='presence-control']",
     name: "[data-testid='self-name']",
     emoji: "[data-testid='custom-status-emoji']",
-    dot: "[data-testid='profile-card'] [data-testid='presence-control'] > span",
+    dot: "[data-testid='profile-card'] [data-testid='presence-badge-dot']",
   };
   const out = {};
   for (const [k, s] of Object.entries(sel)) {

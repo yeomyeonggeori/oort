@@ -37,6 +37,7 @@ export function idleTimelineMock(
     pins: {},
     pinsStatus: "ready" as const,
     reloadPins: () => undefined,
+    noteVisibleRange: () => undefined,
     togglePin: async () => undefined,
     editMessage: async () => undefined,
     deleteMessage: async () => undefined,

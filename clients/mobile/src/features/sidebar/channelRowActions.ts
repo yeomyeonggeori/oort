@@ -5,7 +5,9 @@ import {
   type ChannelActionItem,
   type ChannelActionKey,
 } from '@momo/core/features/channels/actionModel';
+import {canRenameChannel} from '@momo/core/features/channels/rename';
 import {composedUnreadCount} from '@momo/core/features/readState/model';
+import type {MessageService} from '@momo/core/i18n/types';
 
 // =============================================================================
 // 사이드바 행을 길게 누르면 열리는 시트가 **무엇을 내놓는가** (#4229, Buzz식).
@@ -24,18 +26,21 @@ import {composedUnreadCount} from '@momo/core/features/readState/model';
 // 된다(코어 `withClusterSeparators` 머리말).
 //
 //   - 별표·섹션 이동: 폰 UI 가 별도 판단이다(이슈 Out of scope).
-//   - 「대화 닫기」: 서버가 기억하는 닫기(#4227/#4228)를 쓴다. 폰 사이드바가 코어 `dmVisibility` 로 DM 을 거르므로(#4367,
-//     `dmVerdicts.ts`) 닫은 DM 은 목록에서 사라지고 「⋯ › 닫은 대화」 시트에서 돌아온다. 항목을 **내미는가**는 코어
+//   - 「목록에서 숨기기」: 서버가 기억하는 닫기(#4227/#4228)를 쓴다. 폰 사이드바가 코어 `dmVisibility` 로 DM 을 거르므로(#4367,
+//     `dmVerdicts.ts`) 닫은 DM 은 목록에서 사라지고 「⋯ › 숨긴 대화」 시트에서 돌아온다. 항목을 **내미는가**는 코어
 //     `dmCloseOffered`(웹 호버 X·행 메뉴와 같은 한 함수) 한 곳이 정하고, 이 파일은 그 답(`closeOffered`)을 `canCloseDm`
 //     으로 넘길 뿐이다. 서버가 닫기를 싣지 않는 서버에서는 내밀지 않는다. **폰에 기기 로컬 닫기를 새로 만들지 않는다** - 기기마다
 //     어긋나던 문제를 되풀이한다.
 //   - 「주제 보기」·「기억 설정」·「GitHub 알림」: `row` 표면에 없는 항목이다.
 //   - 「채널·상대 정보 보기」: 폰에 그 정보를 보여 줄 화면이 아직 없다(목적지 없음 →
 //     항목 없음). 화면이 생기면 코어 표에 열쇠를 더하고 여기서 손만 넘긴다.
+//   - 「대화 나가기」(ADR-0177 증보 2026-11-14 D21): 내미는가는 코어 `dmLeaveOffered`(옛 서버 판별 `dmLeaveMode` 포함) 한 곳이 정하고
+//     호출부가 그 답을 `leaveOffered` 로 넘긴다. 낱말이 사전 키라 코어 표가 `formatMessage` 를 받아야 항목을 세운다.
 // =============================================================================
 
 /** 이 시트가 실행할 줄 아는 열쇠. 코어 표에 새 열쇠가 생겨도 여기에 없으면 시험이 빨개진다. */
 export const PHONE_CHANNEL_ACTION_KEYS: ReadonlySet<ChannelActionKey> = new Set<ChannelActionKey>([
+  'rename',
   'copy-name',
   'copy-link',
   'copy-id',
@@ -44,10 +49,19 @@ export const PHONE_CHANNEL_ACTION_KEYS: ReadonlySet<ChannelActionKey> = new Set<
   'mute',
   'close-dm',
   'leave',
+  'leave-dm',
 ]);
 
+/** 대화 화면이 그 대화에 대해 들고 있는 것(D16 의 `seenSeq` 관측 쪽 · 성공 뒤 지울 스레드 초안을 찾을 메시지 id). */
+export interface DmLeaveHeld {
+  /** 이력·실시간으로 받은 그 방의 가장 큰 seq. 모르면 `null`. */
+  maxSeq: number | null;
+  /** 이 기기가 든 그 방의 메시지 id(스레드 뿌리 후보). */
+  messageIds: readonly string[];
+}
+
 export interface ChannelRowTarget {
-  channel: Pick<Channel, 'id' | 'kind' | 'topic'>;
+  channel: Pick<Channel, 'id' | 'kind' | 'topic'> & Partial<Pick<Channel, 'name' | 'archivedAtMs'>>;
   /** 행에 보이는 이름. 확인 문장·이름 복사가 쓴다. */
   title: string;
   muted: boolean;
@@ -56,10 +70,17 @@ export interface ChannelRowTarget {
   /** 서버 읽음 투영의 이 채널 항목. 없으면 읽음 처리·안 읽음 표시를 내놓지 않는다. */
   readState: ReadState | null;
   /**
-   * 「대화 닫기」를 내미는가. 호출부가 코어 `dmCloseOffered` 로 정하고(투영이 준비됐고·안 읽은 것이 없고·서버가 닫기를 싣는다),
+   * 「목록에서 숨기기」를 내미는가. 호출부가 코어 `dmCloseOffered` 로 정하고(투영이 준비됐고·안 읽은 것이 없고·서버가 닫기를 싣는다),
    * 생략하면 내밀지 않는다.
    */
   closeOffered?: boolean;
+  /**
+   * 「대화 나가기」를 내미는가(D21). 호출부가 코어 `dmLeaveOffered({mode: dmLeaveMode(...), …})` 로 정한다 - 사람끼리의 1:1 · 나가기를
+   * 싣는 서버 · 투영 준비. 생략하면 내밀지 않는다.
+   */
+  leaveOffered?: boolean;
+  /** 대화 화면만 준다(사이드바 행에는 열린 이력이 없다). 확인 단계가 설 때 한 번 읽는다. */
+  held?: () => DmLeaveHeld;
 }
 
 export interface ChannelRowCopied {
@@ -70,10 +91,14 @@ export interface ChannelRowCopied {
 
 export const NOTHING_COPIED: ChannelRowCopied = {name: false, link: false, id: false};
 
-/** 안 읽음이 이미 있으면 「읽음 처리」, 다 읽었으면 「읽지 않음으로 표시」 — 웹 `useChannelActions` 와 같은 입력이다. */
+/**
+ * 안 읽음이 이미 있으면 「읽음 처리」, 다 읽었으면 「읽지 않음으로 표시」 — 웹 `useChannelActions` 와 같은 입력이다.
+ * `formatMessage` 는 사전 키로 이름을 짓는 「대화 나가기」가 쓴다 - 없으면 코어 표가 그 항목을 세우지 않는다.
+ */
 export function channelRowActionItems(
   target: ChannelRowTarget,
   copied: ChannelRowCopied = NOTHING_COPIED,
+  formatMessage?: MessageService['formatMessage'],
 ): ChannelActionItem[] {
   const unreadCount = target.readState ? composedUnreadCount(target.readState) : 0;
   const available = channelActionAvailability({
@@ -86,19 +111,31 @@ export function channelRowActionItems(
     hasMemorySettings: false,
     hasGithubNotifications: false,
     // DM 이 아닌 채널에는 코어 표가 닫기를 내지 않는다(`isDm &&`).
+    // 「이름 바꾸기」(ADR-0225 D10, #5835): 소유자 · 관리자가 든 공개/비공개 채널, 이름이 general 이 아닐 때(코어 `canRenameChannel`). 이름은 채널이면 보이는 제목과 같다.
+    canRename: canRenameChannel(
+      {kind: target.channel.kind, name: target.channel.name ?? target.title, archivedAtMs: target.channel.archivedAtMs},
+      target.selfRole,
+    ),
     canCloseDm: target.closeOffered === true,
+    // 사람끼리의 1:1 에서만(D21). 안 읽음·별표와 무관하다 - 확인 단계가 있어서.
+    canLeaveDm: target.leaveOffered === true,
     // 투영이 있고, 다 읽었고, 메시지가 하나라도 있을 때만(빈 채널에는 표시할 메시지가 없다).
     canMarkUnread:
       target.readState != null &&
       target.readState.latestSeq > 0 &&
       unreadCount === 0,
   });
-  return channelActionItemsForSurface('row', available, {
-    muted: target.muted,
-    copiedLink: copied.link,
-    copiedName: copied.name,
-    copiedId: copied.id,
-  });
+  return channelActionItemsForSurface(
+    'row',
+    available,
+    {
+      muted: target.muted,
+      copiedLink: copied.link,
+      copiedName: copied.name,
+      copiedId: copied.id,
+    },
+    formatMessage,
+  );
 }
 
 /** 로터(VoiceOver 사용자 동작)의 이름. 항목 열쇠에서 한 줄로 만든다. */

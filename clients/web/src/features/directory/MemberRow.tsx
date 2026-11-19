@@ -1,49 +1,52 @@
-import { ChevronRight } from "lucide-react";
 import { uuidEq, type RosterMember } from "@momo/core/lib/api";
 import { withOwnConnection } from "@momo/core/features/presence/statusDot";
 import { cn } from "@/design/lib/cn";
+import { ListRow } from "@/design/ui/list-row";
 import { useSession } from "@/app/session";
+import { useFormatMessage } from "@/i18n/useFormatMessage";
 import { memberFor, type Directory, useRoleLabels } from "@/features/workspace/useWorkspace";
 import { Avatar } from "@/features/timeline/MessageRow";
 import { CustomStatusMark } from "@/features/sidebar/CustomStatusMark";
 import { AgentLivenessLabel } from "@/features/agents/AgentLivenessLabel";
 import { AvatarWithPresence } from "@/features/presence/HumanPresence";
 import { useCustomStatusView } from "@/features/sidebar/useCustomStatusView";
+import { CHIP_CLASS } from "@/features/common/chip";
 import {
   memberRowLabel,
+  profileEmail,
   roleLabel,
   statusLabel,
 } from "@momo/core/features/directory/model";
 
 // =============================================================================
-// One directory row (parity G-3). Flat row, separator, hover background: a
-// member list is a list, not a stack of cards (design-taste-web §8).
+// One directory row (parity G-3), drawn with the shared list row (#5782,
+// `design/ui/list-row.tsx`): avatar · two layers · trailing marks.
+//
+//   title     name (agent ink for an agent) · 「나」 on my own row · the custom
+//             status emoji · a 초대됨/정지됨/삭제됨 chip when the member is not active
+//   subtitle  people: 「@핸들 · 이메일」 (the email only when this viewer may see
+//             it, `profileEmail`) / agents: 「@핸들 · ○○ 님이 관리」
+//   trailing  people: the role chip / agents: the liveness chip (ADR-0200 D4)
+//
+// Exactly two layers, always: the row's height is the two line boxes, so the
+// skeleton (same component family) predicts it and the list does not move when
+// the roster lands. The custom status TEXT is no longer a third line here; it
+// stays in the accessible name and in the profile.
 //
 // Identity follows the timeline exactly: the shared Avatar carries --agent for
-// an agent and nothing else does, the name sits in the same slot for both
-// kinds, and an agent is attributed to the human accountable for it with the
-// same "{owner} 님이 관리" line the message row and the inbox already use.
+// an agent and nothing else does, and an agent is attributed to the human
+// accountable for it with the same "{owner} 님이 관리" line the message row and
+// the inbox already use.
 //
-// The row IS the action: the whole thing opens the shared identity card. The
-// card owns the DM action and its unavailable reason, so people, agents, self,
-// and inactive members all have one consistent row shape and one keyboard stop.
-//
-// Measure: the row runs the full pane, matching 인박스 and 활동. The 640px
-// content cap this row used to carry (tokens.md §4, "a card is not a banner")
-// left a dead band on the right of every row on a wide window and stranded the
-// hover in the left 640px; 성재 결정(2026-08-10 검수 배치 2)이 전체폭으로
-// 통일했다. The avatar leads, the identity takes the slack, and the trailing
-// chevron closes the row at the pane edge, one measure with the header and search.
+// The row IS the action: the whole thing opens the shared identity card, so
+// people, agents, self, and inactive members all have one row shape and one
+// keyboard stop. The row runs the full pane (성재 결정 2026-08-10 검수 배치 2),
+// inside its group card.
 // =============================================================================
 
-// Exported because the loading state has to predict this exact geometry. A
-// skeleton that guesses at the shape is a skeleton that moves the list when the
-// roster lands, so DirectoryRoute builds its placeholder rows from the SAME two
-// constants rather than from a second description of them.
-export const ROW_CLASS =
-  "flex w-full items-center border-b border-line px-4 py-2 text-left";
-
-export const CONTENT_CLASS = "flex w-full items-center gap-3";
+/** Status chip vessel by membership status: the not-active states are a warning, not a fact. */
+const STATUS_CHIP_CLASS = cn(CHIP_CLASS, "bg-warn-soft text-warn");
+const ROLE_CHIP_CLASS = cn(CHIP_CLASS, "bg-muted-soft text-ink-muted");
 
 export function MemberRow({
   member,
@@ -57,90 +60,98 @@ export function MemberRow({
   onOpenProfile: (member: RosterMember, opener: HTMLElement) => void;
 }) {
   const { workspaceId, connStatus } = useSession();
+  const t = useFormatMessage();
   const labels = useRoleLabels(workspaceId);
   const isAgent = member.kind === "agent";
+  const isSelf = uuidEq(member.id, selfMemberId);
   const owner = isAgent ? memberFor(directory, member.ownerHumanId) : null;
+  const viewerRole = memberFor(directory, selfMemberId)?.role;
+  const email = profileEmail(viewerRole, member);
   const role = roleLabel(member, labels);
   const status = statusLabel(member);
   const { visible: custom, nowMs } = useCustomStatusView(member);
 
-  const identity = (
-    <span className="flex min-w-0 flex-1 flex-col">
-      <span className="flex flex-wrap items-baseline gap-2">
-        <span
-          className={cn(
-            "text-body font-semibold",
-            isAgent ? "text-agent" : "text-ink"
-          )}
-        >
-          {member.displayName}
-        </span>
-        <span className="text-meta text-ink-muted">@{member.handle}</span>
-        {role && <span className="text-meta text-ink-muted">{role}</span>}
-        {status && <span className="text-meta text-warn">{status}</span>}
-      </span>
-      {custom ? (
-        <CustomStatusMark
-          status={custom}
-          className="text-meta text-ink-muted"
-        />
-      ) : null}
-      {owner && (
-        <span className="text-meta text-ink-muted">
-          {owner.displayName} 님이 관리
-        </span>
-      )}
-      {/* 「연결됨」이 아니라 「지금 살아 있는가」(ADR-0200 D4). hosted가 아닌
-          에이전트에는 서버가 답하지 않아 아무것도 서지 않는다. */}
-      {isAgent && <AgentLivenessLabel agentId={member.id} />}
-    </span>
-  );
+  const subtitle = [
+    `@${member.handle}`,
+    email,
+    owner ? t("memberList.row.ownedBy", { name: owner.displayName }) : null,
+  ]
+    .filter((part): part is string => part !== null)
+    .join(" · ");
 
-  const shared = {
-    "data-testid": "directory-row",
-    "data-member-id": member.id,
-    "data-member-kind": member.kind,
-  };
+  // `aria-label` REPLACES the subtree, so everything the eye gets from the row is
+  // in it: the core sentence (name, handle, role, agent attribution, status,
+  // presence, custom status) without its trailing action, then the email this
+  // viewer can see, then this row's action (WCAG 2.5.3: the visible text is
+  // inside the accessible name). The core sentence ends with its action by
+  // contract (`memberRowLabel`: "the action comes last").
+  const coreLabel = memberRowLabel(
+    // 점이 눈에 말하는 것을 이름이 이어 말한다. 자기 행의 접속 여부는 이 클라이언트의 연결이다.
+    withOwnConnection(member, selfMemberId, connStatus === "connected"),
+    owner?.displayName ?? null,
+    labels,
+    nowMs
+  ).replace(/, [^,]*$/, "");
+  const ariaLabel = [
+    coreLabel,
+    email,
+    t(isSelf ? "memberList.row.openOwnProfile" : "memberList.row.openProfile"),
+  ]
+    .filter((part): part is string => part !== null)
+    .join(", ");
 
   return (
-    <li>
-      <button
-        type="button"
-        {...shared}
-        data-directory-row=""
-        aria-label={memberRowLabel(
-          // 점이 눈에 말하는 것을 이름이 이어 말한다. 자기 행의 접속 여부는 이 클라이언트의 연결이다.
-          withOwnConnection(member, selfMemberId, connStatus === "connected"),
-          owner?.displayName ?? null,
-          labels,
-          nowMs
-        ).replace(
-          "다이렉트 메시지 열기",
-          uuidEq(member.id, selfMemberId) ? "나, 프로필 열기" : "프로필 열기"
-        )}
-        onClick={(event) => onOpenProfile(member, event.currentTarget)}
-        className={cn(
-          ROW_CLASS,
-          CONTENT_CLASS,
-          "hover:bg-surface-hover active:bg-surface-pressed focus-visible:focus-ring"
-        )}
-      >
-        {/* 사람에게만 모서리 점이 선다(모르면 점 없음). 점은 아바타 상자 안이라 행 높이가 움직이지 않는다. */}
-        {isAgent ? (
+    <ListRow
+      data-testid="directory-row"
+      data-member-id={member.id}
+      data-member-kind={member.kind}
+      data-directory-row=""
+      aria-label={ariaLabel}
+      onClick={(event) => onOpenProfile(member, event.currentTarget)}
+      leading={
+        // 사람에게만 모서리 점이 선다(모르면 점 없음). 점은 아바타 상자 안이라 행 높이가 움직이지 않는다.
+        isAgent ? (
           <Avatar member={member} />
         ) : (
           <AvatarWithPresence member={member}>
             <Avatar member={member} />
           </AvatarWithPresence>
-        )}
-        {identity}
-        {uuidEq(member.id, selfMemberId) && (
-          <span className="shrink-0 text-meta text-ink-muted">나</span>
-        )}
-        <span className="shrink-0 text-ink-muted" aria-hidden="true">
-          <ChevronRight className="size-4" />
-        </span>
-      </button>
-    </li>
+        )
+      }
+      title={
+        <>
+          <span
+            className={cn(
+              "min-w-0 truncate font-semibold",
+              isAgent ? "text-agent" : "text-ink"
+            )}
+            data-testid="directory-row-name"
+          >
+            {member.displayName}
+          </span>
+          {isSelf ? (
+            <span className="shrink-0 text-meta text-ink-muted" data-testid="directory-row-self">
+              {t("memberList.row.self")}
+            </span>
+          ) : null}
+          {custom ? (
+            <CustomStatusMark status={custom} emojiOnly className="shrink-0 text-meta text-ink-muted" />
+          ) : null}
+          {status ? <span className={STATUS_CHIP_CLASS}>{status}</span> : null}
+        </>
+      }
+      subtitle={<span data-testid="directory-row-subtitle">{subtitle}</span>}
+      trailing={
+        isAgent ? (
+          // 「연결됨」이 아니라 「지금 살아 있는가」(ADR-0200 D4). hosted가 아닌 에이전트에는 서버가 답하지
+          // 않아 아무것도 서지 않는다.
+          <AgentLivenessLabel agentId={member.id} />
+        ) : role ? (
+          <span className={ROLE_CHIP_CLASS} data-testid="directory-row-role">
+            {role}
+          </span>
+        ) : null
+      }
+    />
   );
 }

@@ -21,6 +21,7 @@ import {
   type FormatTrayPosition,
 } from "./composerFormatPosition";
 import { nextComposerTabStop } from "./useComposerFormat";
+import { Tooltip } from "@/design/ui/tooltip";
 
 // Custom rather than a Radix Popover: that primitive moves focus and would
 // collapse the textarea selection this tray is formatting.
@@ -253,24 +254,24 @@ export function ComposerFormatTray({
         const item = composerFormatItemState(value, selection, kind);
         const title = itemTitle(label, shortcut, item.disabledReason);
         return (
-          <button
-            key={kind}
-            type="button"
-            data-toolbar-item=""
-            aria-label={label}
-            aria-pressed={item.pressed}
-            aria-disabled={item.disabled ? true : undefined}
-            title={title}
-            tabIndex={index === activeIndex ? 0 : -1}
-            data-testid={`${testIdPrefix}-${suffix}`}
-            className={formatItemClass(item.pressed, item.disabled)}
-            onClick={() => {
-              if (item.disabled) return;
-              onApply(kind);
-            }}
-          >
-            <Icon className="size-4" aria-hidden="true" />
-          </button>
+          <Tooltip key={kind} label={title} side="top">
+            <button
+              type="button"
+              data-toolbar-item=""
+              aria-label={label}
+              aria-pressed={item.pressed}
+              aria-disabled={item.disabled ? true : undefined}
+              tabIndex={index === activeIndex ? 0 : -1}
+              data-testid={`${testIdPrefix}-${suffix}`}
+              className={formatItemClass(item.pressed, item.disabled)}
+              onClick={() => {
+                if (item.disabled) return;
+                onApply(kind);
+              }}
+            >
+              <Icon className="size-4" aria-hidden="true" />
+            </button>
+          </Tooltip>
         );
       })}
     </div>,

@@ -22,18 +22,25 @@ import { cn } from "@/design/lib/cn";
 import { PRIMARY_ACTION_SHORTCUT } from "@/app/keyboardShortcuts";
 import {
   channelNameIssue,
-  channelNameIssueMessage,
   channelTopicIssue,
   channelTopicIssueMessage,
+  type CreateChannelFailure,
   normalizeChannelName,
   normalizeChannelTopic,
 } from "@momo/core/features/channels/model";
+import type { MessageKey } from "@momo/core/i18n";
+import { useFormatMessage } from "@/i18n/useFormatMessage";
 import {
   CreateChannelOpenContext,
   CreateChannelOpenStateContext,
   useCreateChannel,
 } from "./useCreateChannel";
+import {
+  useOpenAddChannelMember,
+  type AddChannelMemberTarget,
+} from "./useAddChannelMember";
 import { BlockedReason } from "@/features/common/BlockedReason";
+import { ChannelNameField, useChannelNameField } from "./ChannelNameField";
 
 // =============================================================================
 // 채널 만들기 다이얼로그 (AX-1a / MOMO-614). The web sibling of
@@ -52,11 +59,22 @@ import { BlockedReason } from "@/features/common/BlockedReason";
 
 const FORM_ID = "create-channel-form";
 
-const KINDS = [
+const KINDS: {
+  id: "public" | "private";
+  label: string;
+  detailKey: Extract<
+    MessageKey,
+    "timeline.createChannel.publicDetail" | "timeline.createChannel.privateDetail"
+  >;
+  icon: ReactNode;
+}[] = [
   {
     id: "public" as const,
     label: "공개",
-    detail: "워크스페이스의 누구나 찾아서 들어올 수 있어요.",
+    // 공개 채널을 「찾아서 들어오는」 길은 아직 없다(둘러보기·스스로 참여 라우트가 없음, #5784). 그래서 이 줄은 지금
+    // 동작 그대로 말한다: 소유자·관리자가 「멤버 추가」로 넣은 사람이 들어오고, 초대 링크로 새로 합류하는 사람은 그
+    // 순간의 공개 채널에 자동으로 들어간다(서버 `join_public_channels`). 문장은 폰 「새 채널」 시트와 같은 사전 키다.
+    detailKey: "timeline.createChannel.publicDetail",
     icon: <Hash className="size-4" />,
   },
   {
@@ -66,11 +84,8 @@ const KINDS = [
     // 「멤버 추가」 다이얼로그 하나뿐이고, 「초대」는 워크스페이스에 새 사람을
     // 부르는 행위의 낱말로 예약돼 있다(`features/timeline/model.ts` 머리말).
     // 여기서 초대라고 말하면 읽는 사람은 이 제품에 없는 액션을 찾으러 간다.
-    //
-    // 형제 줄과 짝이 되는 자리이기도 하다: 공개는 스스로 **들어오고**, 비공개는
-    // 누군가 **추가해야** 들어온다. 두 줄이 같은 동사 가족을 쓰면 그 대비가
-    // 문장 하나로 읽힌다.
-    detail: "추가된 멤버에게만 보여요.",
+    // 두 줄 모두 「추가」 가족이다: 공개도 지금은 누군가 추가해야 들어오고, 다른 점은 새로 합류하는 사람이다.
+    detailKey: "timeline.createChannel.privateDetail",
     icon: <Lock className="size-4" />,
   },
 ];
@@ -135,22 +150,41 @@ function CreateChannelPanel({
   draft,
   setDraft,
   onOpenChange,
+  onCreated,
   opener,
 }: {
   open: boolean;
   draft: ChannelDraft;
   setDraft: (next: ChannelDraft) => void;
   onOpenChange: (open: boolean) => void;
+  /** 채널이 만들어졌다 — 이 다이얼로그를 닫고 「멤버 추가」로 넘긴다(#5784, 공개·비공개 모두). */
+  onCreated: (target: AddChannelMemberTarget) => void;
   opener?: DialogFocusTarget | null;
 }) {
   const { pending, failure, create, clearFailure } = useCreateChannel();
   const offline = useOffline();
+  const formatMessage = useFormatMessage();
+  // 「멤버 추가」로 넘겼는가. 넘긴 닫힘에서는 이 다이얼로그가 열었던 자리로 캐럿을 돌려주지 않는다 — 캐럿은 이어서 뜬
+  // 「멤버 추가」 안에 있어야 하고, 그 창이 닫힐 때 같은 자리로 돌려준다(여는 자리를 넘겨받는다).
+  const handedOff = useRef(false);
 
   const { kind, name, topic } = draft;
   const [attempted, setAttempted] = useState(false);
+  // 실패 문장은 모두 사전 키로 화면 언어를 따른다(400·409·403·429·망·그 밖).
+  const failureText = (f: CreateChannelFailure) => formatMessage(f.messageKey);
+  const serverNameError = failure?.field === "name" ? failureText(failure) : null;
+  const nameField = useChannelNameField({
+    name,
+    attempted,
+    serverError: serverNameError,
+    previewKey: "channels.nameRule.preview",
+  });
+  const thawName = nameField.thaw;
+  // 이름 칸 아래 줄(안내 · 저장될 이름 · 거절)과 한글 조합 중 얼리기는 이름 바꾸기 창과 같은 칸 부품(`ChannelNameField`)의 일이다.
   const nameRef = useRef<HTMLInputElement>(null);
   const topicRef = useRef<HTMLInputElement>(null);
   const formRef = useRef<HTMLFormElement>(null);
+  const formErrorRef = useRef<HTMLParagraphElement>(null);
   // 이 다이얼로그가 닫힌 적이 있는가 — 마지막 제출 이후로(#5058). 만드는 동안 알림 클릭이 착지하면 다이얼로그는 걷히고(Esc 와 바깥
   // 클릭을 막는 것은 Radix 의 입력이라 방송은 그 규칙을 지나지 않는다) 요청은 계속 간다. 늦은 응답이 알림이 세운 목적지를
   // 덮어쓰지 않게 이 값으로 이동을 가른다. 다시 열렸어도 「닫힌 적 있음」은 남는다 — 새로 연 다이얼로그를 이 요청이 닫지 않는다.
@@ -164,26 +198,26 @@ function CreateChannelPanel({
       closedSinceSubmit.current = true;
       return;
     }
+    handedOff.current = false;
     setAttempted(false);
+    thawName();
     clearFailure();
-  }, [open, clearFailure]);
+  }, [open, clearFailure, thawName]);
 
   const nameIssue = channelNameIssue(name);
   const topicIssue = channelTopicIssue(topic);
 
-  // A rule is only worth stating once the reader has done something it applies
-  // to: an untouched empty field is not a mistake, it is a field.
-  const localNameError =
-    nameIssue !== null && (attempted || name.trim() !== "")
-      ? channelNameIssueMessage(nameIssue)
-      : null;
-  const nameError =
-    localNameError ?? (failure?.field === "name" ? failure.message : null);
   const topicError =
     topicIssue !== null && (attempted || topic.trim() !== "")
       ? channelTopicIssueMessage(topicIssue)
       : null;
-  const formError = failure && failure.field === null ? failure.message : null;
+  const formError = failure && failure.field === null ? failureText(failure) : null;
+
+  // 실패 문장은 스크롤 칸의 맨 아래에 선다. 작은 창(720×480)·큰 글자(200%)에서는 그 자리가 칸 밖이라 누른 뒤 아무 일도
+  // 없는 것처럼 보였다(#5965). 문장이 설 때(같은 실패를 다시 받을 때도 새 `failure`다) 그 자리가 보이게 칸 안쪽만 옮긴다.
+  useEffect(() => {
+    if (formError) formErrorRef.current?.scrollIntoView?.({ block: "nearest" });
+  }, [failure, formError]);
 
   // A rejection about the name is a request to change the name, so the caret
   // goes there. Editing clears the failure, so this fires once per rejection
@@ -194,6 +228,10 @@ function CreateChannelPanel({
 
   async function submit(event: React.FormEvent) {
     event.preventDefault();
+    // 제출은 얼린 줄을 녹인다. 한글이 아닌 조합이 진행 중이었으면 만들지 않는다: 얼린 줄이 말하던 이름과 칸 값으로 만들어질 이름이
+    // 다를 수 있다. 녹은 줄이 칸 값을 말하고 단추가 풀리니, 다시 누르면 줄이 말하는 그 이름으로 만들어진다(⌘↵는 잠긴 단추를 거치지 않는다).
+    nameField.thaw();
+    if (nameField.frozen) return;
     setAttempted(true);
     if (pending || offline) return;
     if (nameIssue !== null || topicIssue !== null) {
@@ -220,8 +258,16 @@ function CreateChannelPanel({
       // 만들어진 채널의 초안은 더 이상 초안이 아니다.
       setDraft(EMPTY_DRAFT);
       // 이미 걷힌 다이얼로그를 다시 닫지 않는다 — 닫기는 열었던 자리로 초점을 돌려주는데(`onOpenChange`), 그 사이 사람은 알림의 대화로
-      // 가 있다.
-      if (!closedSinceSubmit.current) onOpenChange(false);
+      // 가 있다. 같은 까닭으로 「멤버 추가」도 잇지 않는다: 알림이 세운 목적지 위에 창을 띄우지 않는다.
+      if (closedSinceSubmit.current) return;
+      // 채널은 만든 사람 한 명으로 시작하고(공개도 지금은 앞으로 워크스페이스에 들어오는 사람만 자동이다), 다른 사람은 누군가
+      // 추가해야 들어온다. 만든 그 자리에서 「멤버 추가」를 이어서 연다 — 「나중에」로 건너뛸 수 있다(#5784, 공개·비공개 모두).
+      handedOff.current = true;
+      onCreated({
+        id: created.id,
+        name: created.name ?? normalizeChannelName(name),
+        afterCreate: created.kind === "private" ? "private" : "public",
+      });
     }
   }
 
@@ -255,6 +301,10 @@ function CreateChannelPanel({
       onInteractOutside={(event) => {
         if (pending) event.preventDefault();
       }}
+      onCloseAutoFocus={(event) => {
+        // 「멤버 추가」로 넘긴 닫힘이면 열었던 자리로 캐럿을 끌어오지 않는다(위 `handedOff`).
+        if (handedOff.current) event.preventDefault();
+      }}
     >
       <div className="flex flex-col gap-1 border-b border-line p-4">
         <DialogTitle>채널 만들기</DialogTitle>
@@ -285,29 +335,16 @@ function CreateChannelPanel({
             첫 tabbable이라, 보이는 순서와 Tab 순서와 시작 위치가 하나로 맞는다.
             공개 범위가 위에 있던 동안에는 정방향 Tab이 액션 버튼을 지나야 그
             선택지에 닿았다. 순서는 mac 시트(이름, 주제)를 잇는다. */}
-        <DialogField
+        <ChannelNameField
+          id="create-channel-name"
           label="채널 이름"
-          htmlFor="create-channel-name"
-          hint="영문, 숫자, 하이픈, 밑줄로 80자 이내, 처음과 끝은 영문이나 숫자. 대문자는 소문자로 저장돼요."
-          error={nameError}
-        >
-          <Input
-            id="create-channel-name"
-            ref={nameRef}
-            name="name"
-            value={name}
-            onChange={onInput("name")}
-            placeholder="product-planning"
-            autoComplete="off"
-            spellCheck={false}
-            disabled={pending}
-            aria-invalid={nameError ? true : undefined}
-            aria-describedby={
-              nameError ? "create-channel-name-error" : "create-channel-name-hint"
-            }
-            data-testid="create-channel-name"
-          />
-        </DialogField>
+          placeholder={formatMessage("channels.nameRule.placeholder")}
+          value={name}
+          onChange={onInput("name")}
+          field={nameField}
+          inputRef={nameRef}
+          disabled={pending}
+        />
 
         <DialogField
           label="주제"
@@ -369,7 +406,10 @@ function CreateChannelPanel({
                 </span>
                 <span className="flex min-w-0 flex-col gap-px">
                   <span className="text-body text-ink">{choice.label}</span>
-                  <span className="text-meta text-ink-muted">{choice.detail}</span>
+                  {/* 공개 설명이 두 문장으로 길어져 좁은 폭에서 「워크스페/이스」처럼 어절 가운데서 꺾였다 — 어절에서 꺾는다. */}
+                  <span className="break-keep text-meta text-ink-muted">
+                    {formatMessage(choice.detailKey)}
+                  </span>
                 </span>
               </label>
             ))}
@@ -379,7 +419,7 @@ function CreateChannelPanel({
         {/* A rejection that belongs to the whole attempt rather than to one box
             (권한, 네트워크). Inline in the form, never a toast. */}
         {formError && (
-          <p className="text-meta text-danger" role="alert" data-testid="create-channel-error">
+          <p ref={formErrorRef} className="text-meta text-danger" role="alert" data-testid="create-channel-error">
             {formError}
           </p>
         )}
@@ -411,11 +451,13 @@ function CreateChannelPanel({
             `disabled:pointer-events-none` 때문에 hover 자체가 도달하지 않아
             영원히 뜨지 않는 툴팁이었다(R2 M2). 같은 사실을 두 번 약속하느니
             한 번 지킨다. */}
+        {/* 한글이 아닌 조합이 진행 중인 동안(아래 줄이 얼어 있는 동안)도 잠근다: 얼린 줄이 말하는 이름과 칸 값으로 만들어질 이름이
+            다를 수 있다. 잠긴 까닭은 칸에 보이는 조합 글자이고, 줄이 녹는 때(조합 끝·붙여 넣기 같은 input·blur)에 함께 풀린다. */}
         <Button
           type="submit"
           form={FORM_ID}
           size="sm"
-          disabled={offline}
+          disabled={offline || nameField.frozen}
           aria-busy={pending || undefined}
           data-testid="create-channel-submit"
         >
@@ -430,12 +472,14 @@ function CreateChannelPanel({
 export function CreateChannelDialog({
   open,
   onOpenChange,
+  onCreated,
   draft,
   setDraft,
   opener,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  onCreated: (target: AddChannelMemberTarget) => void;
   draft: ChannelDraft;
   setDraft: (next: ChannelDraft) => void;
   opener?: DialogFocusTarget | null;
@@ -452,6 +496,7 @@ export function CreateChannelDialog({
         draft={draft}
         setDraft={setDraft}
         onOpenChange={onOpenChange}
+        onCreated={onCreated}
         opener={opener}
       />
     </Dialog>
@@ -461,11 +506,15 @@ export function CreateChannelDialog({
 /**
  * Holds the one dialog for the whole signed-in shell and hands its entry points
  * the verb that opens it (sidebar header +, empty workspace, ⌘K 팔레트).
+ *
+ * 셸의 「멤버 추가」 provider 안에 있어야 한다(#5784): 채널을 만들면 그 창을 이어서 연다. 밖에 두면 여는 동사가 없어
+ * 렌더에서 바로 던진다 — 조용히 안 뜨는 쪽보다 낫다(`AppShell.tsx` 의 순서, 시험이 소스로 잰다).
  */
 export function CreateChannelProvider({ children }: { children: ReactNode }) {
   const [open, setOpen] = useState(false);
   const [draft, setDraft] = useState<ChannelDraft>(EMPTY_DRAFT);
   const openerRef = useRef<DialogFocusTarget | null>(null);
+  const openAddMember = useOpenAddChannelMember();
   const openCreate = useCallback((opener?: DialogFocusTarget | null) => {
     openerRef.current = opener ?? null;
     setOpen(true);
@@ -478,6 +527,15 @@ export function CreateChannelProvider({ children }: { children: ReactNode }) {
       restoreDialogOpenerFocus(opener);
     });
   }, []);
+  // 만들기 창을 닫고 「멤버 추가」를 연다. 캐럿은 여기서 돌려주지 않고, 이 창을 열었던 자리를 「멤버 추가」에 넘겨 그 창이 닫힐
+  // 때 그리로 돌아가게 한다 — 사람에게는 만들기에서 멤버 추가까지가 한 걸음이다.
+  const onCreated = useCallback(
+    (target: AddChannelMemberTarget) => {
+      setOpen(false);
+      openAddMember({ ...target, opener: openerRef.current });
+    },
+    [openAddMember]
+  );
   return (
     <CreateChannelOpenContext.Provider value={openCreate}>
       {/* 열림 상태는 별도 컨텍스트다. 셸의 전역 단축키가 모달 위에서 발화하지
@@ -489,6 +547,7 @@ export function CreateChannelProvider({ children }: { children: ReactNode }) {
       <CreateChannelDialog
         open={open}
         onOpenChange={onOpenChange}
+        onCreated={onCreated}
         draft={draft}
         setDraft={setDraft}
         opener={openerRef.current}

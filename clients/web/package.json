@@ -21,6 +21,7 @@
     "gate:shell": "node gates/gate-shell-layout.mjs",
     "gate:scroll": "node gates/gate-scroll.mjs",
     "gate:wire": "node gates/gate-wire.mjs",
+    "gate:hangul": "node gates/gate-hangul-compose-filter.mjs",
     "gate:csp": "node gates/gate-csp.mjs",
     "gate:csp-deploy": "npm run build && node gates/gate-csp-deploy.mjs",
     "gate:boot": "node gates/gate-boot-budget.mjs",

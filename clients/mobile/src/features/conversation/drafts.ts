@@ -1,5 +1,6 @@
 import {containsSecretKey} from '@momo/core/features/chat/secretKey';
 import {NON_SECRET_KEYS, nonSecretStore} from '../../storage/kv';
+import {getPersistedSession} from '../../storage/secureSession';
 
 // =============================================================================
 // 아직 보내지 않은 글은 사라지지 않는다 (감사 H-10)
@@ -71,6 +72,27 @@ export interface Draft {
   body: string;
   /** 마지막으로 글자가 바뀐 시각. 청소는 이 값만 본다. */
   savedAtMs: number;
+  /** 쓴 사람(멤버 id, 소문자). 없으면 작성자를 모르는 값이다(아래 「누구의 초안인가」). */
+  author?: string;
+  /**
+   * 이 초안이 속한 대화(채널 id, 소문자). 스레드 초안의 열쇠(`thread:<뿌리 id>`)는 채널을 안 싣는데, 대화 나가기(#5826 · 증보 D17)가 그 대화의
+   * 스레드 초안을 열쇠만으로 다 찾아 지워야 해서 적는다. 없으면(이 칸 전에 저장된 값) 채널을 모르는 초안이다.
+   */
+  channelId?: string;
+}
+
+// 누구의 초안인가 (#5799, 웹 `chat/draftStore.ts`의 같은 규칙). 토큰 만료로 나가면 초안은 남는다 — 같은 사람이 다시 들어와 이어 쓰게.
+// 그래서 쓴 사람을 적고, 읽을 때 지금 사람과 다르면 돌려주지 않으며, 다른 사람이 들어오면 그때 앞 사람 것을 지운다(`keepOnlyDraftsOf`).
+// 작성자를 모르는 값(이 규칙 전에 저장된 것)은 누구의 것으로도 치지 않는다 — 한 번의 초안 손실보다 다른 사람에게 보이는 쪽이 크다.
+//
+// 지금 사람은 세션 저장소가 든 사람이다. 폰은 키를 누를 때만 적고(머리말) 그때는 언제나 세션이 서 있다. 그리고 입력창의 첫 렌더가
+// 초안을 읽는 순간에 이미 그 사람이 들어 있다 — 세션 provider 의 효과는 그보다 늦게 돈다.
+function currentAuthor(): string | null {
+  return getPersistedSession()?.member.id.toLowerCase() ?? null;
+}
+
+function writtenByNow(author: string | undefined): boolean {
+  return (author ?? null) === currentAuthor();
 }
 
 export type DraftMap = Readonly<Record<string, Draft>>;
@@ -122,9 +144,19 @@ export function readDrafts(): DraftMap {
       // 모양을 확인하고 담는다. 옛 판이나 손으로 고쳐진 값이 `body.length` 에서
       // 터지게 두지 않는다.
       if (value === null || typeof value !== 'object') continue;
-      const {body, savedAtMs} = value as {body?: unknown; savedAtMs?: unknown};
+      const {body, savedAtMs, author, channelId} = value as {
+        body?: unknown;
+        savedAtMs?: unknown;
+        author?: unknown;
+        channelId?: unknown;
+      };
       if (typeof body !== 'string' || typeof savedAtMs !== 'number') continue;
-      out[key] = {body, savedAtMs};
+      out[key] = {
+        body,
+        savedAtMs,
+        ...(typeof author === 'string' && author !== '' ? {author} : null),
+        ...(typeof channelId === 'string' && channelId !== '' ? {channelId} : null),
+      };
     }
     return out;
   } catch {
@@ -142,6 +174,7 @@ export function readDraft(key: string, nowMs: number = Date.now()): string {
   const draft = readDrafts()[key];
   if (draft === undefined) return '';
   if (nowMs - draft.savedAtMs >= DRAFT_TTL_MS) return '';
+  if (!writtenByNow(draft.author)) return '';
   return draft.body;
 }
 
@@ -165,6 +198,8 @@ export function saveDraft(
   key: string,
   body: string,
   nowMs: number = Date.now(),
+  /** 이 초안이 속한 대화. 스레드 초안이 채널을 들고 있게 한다(`Draft.channelId`). 생략하면 그 자리에 이미 적힌 값을 이어 간다. */
+  channelId?: string,
 ): void {
   // API 키 모양이 든 글은 저장소에 남기지 않는다 (#2945 GC-4, 웹 `draftStore.ts`
   // #2942와 같은 문). 이 저장소는 `NON_SECRET_KEYS` — 이름 그대로 비밀이 아닌 것만
@@ -175,8 +210,19 @@ export function saveDraft(
     return;
   }
   try {
+    const author = currentAuthor();
+    const all = readDrafts();
+    const channel = (channelId ?? all[key]?.channelId)?.toLowerCase();
     const next = pruneDrafts(
-      {...readDrafts(), [key]: {body, savedAtMs: nowMs}},
+      {
+        ...all,
+        [key]: {
+          body,
+          savedAtMs: nowMs,
+          ...(author === null ? null : {author}),
+          ...(channel === undefined ? null : {channelId: channel}),
+        },
+      },
       nowMs,
     );
     writeDrafts(next);
@@ -230,6 +276,7 @@ export function seedDraft(
   key: string,
   text: string,
   nowMs: number = Date.now(),
+  channelId?: string,
 ): boolean {
   if (text.trim() === '') return false;
   const mounted = [...(seedListeners.get(key) ?? [])];
@@ -237,7 +284,7 @@ export function seedDraft(
     mounted.length > 0
       ? mounted.map(listener => listener(text)).some(Boolean)
       : readDraft(key, nowMs).trim() === '';
-  if (accepted) saveDraft(key, text, nowMs);
+  if (accepted) saveDraft(key, text, nowMs, channelId);
   return accepted;
 }
 
@@ -250,6 +297,41 @@ export function clearDraft(key: string, nowMs: number = Date.now()): void {
     writeDrafts(pruneDrafts(map, nowMs));
   } catch {
     // 위와 같다.
+  }
+}
+
+/**
+ * 이 대화에 속한 초안을 **열쇠로 다** 지운다(대화 나가기, #5826). 채널 초안(`channel:<id>`)과 채널을 적어 둔 스레드 초안(`Draft.channelId`)이 대상이고,
+ * 다른 대화의 것은 그대로다. 지운 열쇠를 돌려준다.
+ */
+export function clearDraftsOfChannel(channelId: string, nowMs: number = Date.now()): string[] {
+  try {
+    const wanted = channelId.toLowerCase();
+    const map = {...readDrafts()};
+    const gone = Object.keys(map).filter(
+      key => key === channelDraftKey(channelId) || map[key].channelId === wanted,
+    );
+    if (gone.length === 0) return [];
+    for (const key of gone) delete map[key];
+    writeDrafts(pruneDrafts(map, nowMs));
+    return gone;
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * 세션이 섰다(#5799). 이 사람이 쓴 초안만 남기고 다른 사람의 것(작성자를 모르는 값 포함)은 지운다. 같은 사람이 만료 뒤 다시 들어오면 그대로
+ * 이어 쓴다.
+ */
+export function keepOnlyDraftsOf(memberId: string): void {
+  try {
+    const me = memberId.toLowerCase();
+    const map = readDrafts();
+    const mine = Object.fromEntries(Object.entries(map).filter(([, draft]) => draft.author === me));
+    if (Object.keys(mine).length !== Object.keys(map).length) writeDrafts(mine);
+  } catch {
+    // 위와 같다. 읽을 때도 거르므로(`readDraft`) 다른 사람에게 보이지는 않는다.
   }
 }
 

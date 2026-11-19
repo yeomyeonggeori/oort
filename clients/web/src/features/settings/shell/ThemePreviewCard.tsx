@@ -2,7 +2,8 @@ import type { ThemeRef } from "@momo/core/design/themeResolve";
 import { cn } from "@/design/lib/cn";
 
 // 테마 미리보기 (#3578 S3a, AP-1b #4188): 미니 앱 화면 한 장. 바닥 + 목록 열 + 본문 판 + 신호 알약 + 에이전트 점으로
-// 「이 테마·이 모드의 앱」을 그린다. 글자는 몇 줄뿐이고 나머지는 막대다(색을 보는 자리이지 글을 읽는 자리가 아니다).
+// 「이 테마·이 모드의 앱」을 그린다. 큰 미리보기 카드는 글자가 몇 줄뿐이고 나머지는 막대다(색을 보는 자리이지 글을 읽는
+// 자리가 아니다). 갤러리 타일은 그 몇 줄도 막대로 바꾼다(아래 `bare`).
 //
 // 값은 한 줄도 적지 않고, 층은 **변수를 물려받는다**. `ThemePreviewCard`는 루트의 변수를 그대로 받는다(지금 고른
 // 테마·신호·모드의 앱이므로 루트가 답을 이미 들고 있다). 갤러리 타일(`ThemeTile`, 지연 청크)은 층을 감싼 요소에 자기
@@ -15,6 +16,10 @@ import { cn } from "@/design/lib/cn";
 // 변수를 그대로 읽는다.
 //
 // 장식이다. 고르는 컨트롤은 옆의 세그먼트·갤러리이고 이 카드는 그 결과를 보여 줄 뿐이라 보조기술에는 숨긴다.
+//
+// 글자 없는 미니어처(`bare`, #5783 QA 8): 갤러리 타일은 글자를 하나도 그리지 않는다(Buzz `ThemePreviewFrame`처럼 선과 점만).
+// 같은 자리에 같은 색 역할을 막대로 둔다: 제목은 잉크 막대, 「새 글」 알약은 글자 없는 신호 알약, 답장 줄은 에이전트 점 + 흐린
+// 잉크 막대. 글자·알약의 대비를 읽는 자리는 맨 아래 큰 미리보기(`ThemePreviewCard`) 한 곳이고 거기에는 글자가 남는다.
 
 export type PreviewMode = "light" | "dark" | "system";
 
@@ -22,17 +27,21 @@ export function PreviewLayer({
   mode,
   split,
   testIds,
+  bare = false,
 }: {
   mode: "light" | "dark";
   split?: boolean;
   /** 시험·캡처가 읽는 `data-testid`를 단다(한 화면에 하나만). */
   testIds?: boolean;
+  /** 글자 없는 미니어처(갤러리 타일). 큰 미리보기 카드는 글자가 있는 층을 쓴다. */
+  bare?: boolean;
 }) {
   return (
     <div
       className="theme-preview-layer canvas-gradient"
       data-preview-mode={mode}
       data-split={split ? "" : undefined}
+      data-bare={bare ? "" : undefined}
       data-testid={testIds ? `theme-preview-layer-${mode}` : undefined}
     >
       <div className="flex min-w-0 flex-col gap-1">
@@ -44,29 +53,44 @@ export function PreviewLayer({
         <span className="h-1 w-3/5 rounded-full bg-icon" />
       </div>
       <div className="theme-preview-pane flex min-w-0 flex-col gap-1 rounded-md bg-pane p-2">
-        <div className="flex items-center gap-1">
-          <span
-            className="theme-preview-title truncate text-timestamp font-semibold text-ink"
-            data-testid={testIds ? "theme-preview-title" : undefined}
-          >
-            오늘 배포
-          </span>
-          <span
-            className="shrink-0 rounded-full bg-signal px-1 text-timestamp font-semibold text-on-signal"
-            data-testid={testIds ? "theme-preview-pill" : undefined}
-          >
-            새 글 3
-          </span>
-        </div>
-        <div className="flex items-center gap-1">
-          <span className="size-2 shrink-0 rounded-full bg-agent" />
-          <span
-            className="theme-preview-reply truncate text-timestamp text-ink-muted"
-            data-testid={testIds ? "theme-preview-muted" : undefined}
-          >
-            김인턴 답장
-          </span>
-        </div>
+        {bare ? (
+          <>
+            <div className="flex items-center gap-1">
+              <span className="h-2 w-1/2 rounded-full bg-ink" />
+              <span className="h-2 w-1/4 shrink-0 rounded-full bg-signal" />
+            </div>
+            <div className="flex items-center gap-1">
+              <span className="size-2 shrink-0 rounded-full bg-agent" />
+              <span className="h-1 w-1/2 rounded-full bg-ink-muted" />
+            </div>
+          </>
+        ) : (
+          <>
+            <div className="flex items-center gap-1">
+              <span
+                className="truncate text-timestamp font-semibold text-ink"
+                data-testid={testIds ? "theme-preview-title" : undefined}
+              >
+                오늘 배포
+              </span>
+              <span
+                className="shrink-0 rounded-full bg-signal px-1 text-timestamp font-semibold text-on-signal"
+                data-testid={testIds ? "theme-preview-pill" : undefined}
+              >
+                새 글 3
+              </span>
+            </div>
+            <div className="flex items-center gap-1">
+              <span className="size-2 shrink-0 rounded-full bg-agent" />
+              <span
+                className="truncate text-timestamp text-ink-muted"
+                data-testid={testIds ? "theme-preview-muted" : undefined}
+              >
+                김인턴 답장
+              </span>
+            </div>
+          </>
+        )}
         <span className="h-1 w-full rounded-full bg-line-strong" />
         <span className="h-1 w-3/4 rounded-full bg-line-strong" />
       </div>

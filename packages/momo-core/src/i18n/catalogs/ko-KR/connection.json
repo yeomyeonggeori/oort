@@ -75,5 +75,6 @@
   "connection.session.expired": "로그인이 만료됐어요. 다시 로그인해 주세요.",
   "connection.boot.offlineDetail": "네트워크가 연결되면 다시 시도해 주세요.",
   "connection.boot.offlineQrDetail": "네트워크가 연결되면 QR을 찍을 수 있어요.",
-  "connection.boot.unreachable": "서버에 닿지 못했어요. 저장된 로그인은 그대로 있고, 연결되면 이어서 시도해요."
+  "connection.boot.unreachable": "서버에 닿지 못했어요. 저장된 로그인은 그대로 있고, 연결되면 이어서 시도해요.",
+  "connection.boot.serverSwitchedSignedOut": "다른 서버로 바꿔서 앞 서버({host})의 로그인은 끝났어요. 돌아가려면 다시 로그인해 주세요."
 }

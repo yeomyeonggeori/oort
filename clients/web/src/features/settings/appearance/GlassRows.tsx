@@ -7,6 +7,7 @@ import { Switch } from "@/design/ui/switch";
 import { SettingsRow } from "../shell/SettingsRow";
 import { setGlassOn, setGlassOpacity, useGlassSnapshot } from "./desktopEffects";
 import { GLASS_COPY } from "./glassCopy";
+import { Tooltip } from "@/design/ui/tooltip";
 
 // 유리 배경 스위치와 유리 불투명도 슬라이더 (AP-3 #4190, ADR-0189 증보 1 D4 · 증보 3 D6).
 // 자리: 카드 「색상」, 강조색 아래. 행 구조는 Buzz `AppearanceSettingsControls.tsx:396-494`를 우리 토큰과
@@ -116,21 +117,22 @@ export function GlassRows() {
           >
             {opacity}%
           </span>
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon"
-            aria-label={GLASS_COPY.reset}
-            title={GLASS_COPY.reset}
-            disabled={opacity === range.defaultPercent}
-            onClick={() => {
-              setGlassOpacity(undefined);
-              sliderRef.current?.focus();
-            }}
-            data-testid="glass-opacity-reset"
-          >
-            <RotateCcw aria-hidden="true" />
-          </Button>
+          <Tooltip label={GLASS_COPY.reset} side="bottom">
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              aria-label={GLASS_COPY.reset}
+              disabled={opacity === range.defaultPercent}
+              onClick={() => {
+                setGlassOpacity(undefined);
+                sliderRef.current?.focus();
+              }}
+              data-testid="glass-opacity-reset"
+            >
+              <RotateCcw aria-hidden="true" />
+            </Button>
+          </Tooltip>
         </SettingsRow>
       ) : null}
     </>

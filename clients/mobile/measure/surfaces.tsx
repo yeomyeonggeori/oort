@@ -206,6 +206,7 @@ import {JumpSeekSurface} from './jumpSeek';
 import {BubbleSurface} from './bubbleConv';
 import {BubbleClipSurface} from './bubbleClip';
 import {SentenceWrapSurface} from './sentenceWrap';
+import {NewChannelNameSurface} from './newChannelName';
 import {DockGapSurface} from './dockGap';
 import {TapDismissSurface} from './tapDismiss';
 import {EditLiveSurface} from './editLive';
@@ -216,6 +217,8 @@ import {SteadySurface, seedSteady} from './steady';
 import {UncollectedSurface, isUncollectedSurface, seedUncollected} from './uncollected';
 import {WorkTimelineSurface, isWorkTimelineSurface, seedWorkTimeline} from './workTimeline';
 import {AppsSurface} from './apps';
+import {ChannelBrowseSurface} from './channelBrowse';
+import {ChannelPreviewSurface} from './channelPreview';
 import {AppsTailSurface} from './appsTail';
 import {OortLoaderSurface} from './oortLoader';
 import {ConnectionStripSurface} from './connectionStrip';
@@ -2270,6 +2273,14 @@ export function Surface({name}: {name: string}): React.JSX.Element {
   if (name === 'sheetdrag' || name.startsWith('sheetdrag-')) {
     return <SheetDragSurface which={name.slice('sheetdrag'.length).replace(/^-/, '')} />;
   }
+  // #5846: 폰 「채널 둘러보기」 페이지(`measure/channelBrowse.tsx`, 배송되는 표현부 + 고정 데이터, 가상 채널 이름).
+  // #5847: 폰 「채널 미리 보기」(`measure/channelPreview.tsx`, 배송되는 표현부 + 고정 데이터, 가상 채널 · 사람 이름).
+  if (name === 'channelpreview' || name.startsWith('channelpreview-')) {
+    return <ChannelPreviewSurface which={name.slice('channelpreview'.length).replace(/^-/, '') || 'list'} />;
+  }
+  if (name === 'channelbrowse' || name.startsWith('channelbrowse-')) {
+    return <ChannelBrowseSurface which={name.slice('channelbrowse'.length).replace(/^-/, '') || 'list'} />;
+  }
   // #3951: 폰 「앱」 읽기 화면(목록·상세·네 상태).
   if (name.startsWith('apps-') && !name.startsWith('apps-tail')) {
     return <AppsSurface which={name.slice('apps-'.length)} />;
@@ -2284,6 +2295,10 @@ export function Surface({name}: {name: string}): React.JSX.Element {
     return <BubbleClipSurface which={name.slice('bubble-clip'.length).replace(/^-/, '')} />;
   }
   // #5288: 줄바꿈 전략별 잰 줄 수 ↔ 그린 줄 수 — 같은 글을 `hangul-word`·`standard`·지정 없음으로 그려 어긋남을 숫자로 적는다(`sentenceWrap.tsx`).
+  // #5834: 채널 이름 규칙 — 실제 폰 엔진에서 벡터 실행 · 새 채널 시트 한 장(`newChannelName.tsx`).
+  if (name.startsWith('newchannel')) {
+    return <NewChannelNameSurface which={name.slice('newchannel'.length).replace(/^-/, '')} />;
+  }
   if (name.startsWith('sentence-wrap')) {
     return <SentenceWrapSurface which={name.slice('sentence-wrap'.length).replace(/^-/, '')} />;
   }
@@ -4918,8 +4933,12 @@ export function Surface({name}: {name: string}): React.JSX.Element {
     // 셸을 **그대로** 세운다(`Shell`). 탭·시트가 열린 판은 시작값으로 고른다 —
     // 시뮬레이터는 누를 수 없으므로(하네스 머리 주석). 캡션을 달지 않는다: 시안과
     // 나란히 놓는 사진이라 화면 위에 글자가 한 줄이라도 더 서면 대조가 흐려진다.
+    // #5846 `shell-home-browse`: 정식 멤버(역할 member)의 홈 — 「채널」 섹션 ⋯ 메뉴에 「채널 둘러보기」가 선다(기본 명부에는 역할 칸이 없어 문이 없다).
     case 'shell-home':
     case 'shell-home-idle':
+    case 'shell-home-browse':
+    case 'shell-home-browse-empty':
+    case 'shell-home-browse-search':
     case 'shell-home-approval':
     case 'shell-home-loading':
     case 'shell-home-empty':
@@ -5424,10 +5443,10 @@ export function Surface({name}: {name: string}): React.JSX.Element {
     case 'dm-status-dots-member':
     case 'dm-status-dots-states':
     case 'dm-status-dots-states-member':
-    // #4252·#4367: 「닫은 대화」와 「나간 멤버와의 대화」. 사이드바를 **그대로** 세운다. 서버가 닫기를 싣는 투영 위에서, 내가 닫은 DM
+    // #4252·#4367: 「숨긴 대화」와 「나간 멤버와의 대화」. 사이드바를 **그대로** 세운다. 서버가 닫기를 싣는 투영 위에서, 내가 닫은 DM
     // 하나·나간 멤버 DM 넷(안 읽음 없음 둘 · 안 읽은 사람 메시지 하나 · 기계 메시지뿐인 안 읽음 하나)과 명부에 있는 DM(꺼진 에이전트
-    // 꺼진 개인 에이전트 포함)이 한 목록에 선다. 숨은 DM 은 `maestro/102-gone-dm-capture.yaml` 이 DM 섹션 ⋯ 의 「닫은 대화」로 열고,
-    // `maestro/104-dm-close-capture.yaml` 이 행을 길게 눌러 「대화 닫기」를 찍는다. 수리 전 코드로 띄우면 닫은 DM 이 목록에 그대로 선다.
+    // 꺼진 개인 에이전트 포함)이 한 목록에 선다. 숨은 DM 은 `maestro/102-gone-dm-capture.yaml` 이 DM 섹션 ⋯ 의 「숨긴 대화」로 열고,
+    // `maestro/104-dm-close-capture.yaml` 이 행을 길게 눌러 「목록에서 숨기기」를 찍는다. 수리 전 코드로 띄우면 닫은 DM 이 목록에 그대로 선다.
     case 'gone-dm-home':
       return (
         <View style={styles.fill}>
@@ -6591,13 +6610,13 @@ function seedDmStatusDots(surface: string): void {
 }
 
 /**
- * #4252·#4367 사이드바 「닫은 대화」·「나간 멤버와의 대화」 장의 씨앗. 서버가 없는 하네스라 화면이 읽는 질의 키(`roster`·`channels`·
+ * #4252·#4367 사이드바 「숨긴 대화」·「나간 멤버와의 대화」 장의 씨앗. 서버가 없는 하네스라 화면이 읽는 질의 키(`roster`·`channels`·
  * `read-state`·`agent-liveness`)에 답을 **미리 꽂는다** - 화면은 배송되는 `SidebarScreen` 그대로다. 읽음 투영은 서버가 닫기를 싣는
  * 형상(`latestReadableSeq`·`closedAtSeq` 가 모든 행에 있다)이라 보임 판정이 코어 `dmVisibility` 한 함수로 돈다.
  *
  *   이도현   안 읽음 2                    박서연   다 읽음(닫기를 내민다)
  *   꺼진 개인 에이전트(명부에 **있다** - 숨지 않는 쪽)       grok   응답함
- *   최민수   내가 닫은 DM(closedAtSeq = 읽을 seq) - 목록에 없고 「닫은 대화」 시트에 「내가 닫았어요」로 선다
+ *   최민수   내가 닫은 DM(closedAtSeq = 읽을 seq) - 목록에 없고 「숨긴 대화」 시트에 「내가 숨겼어요」로 선다
  *   나간 멤버 ×4  명부에 없는 상대. 둘은 다 읽음(숨는다), 하나는 안 읽은 사람 메시지 1(보인다), 하나는 안 읽음 4 가 전부 기계
  *                 메시지(작업 상태·시스템 줄)라 서버가 읽을 seq 를 읽은 자리에 둔다(숨는다, 이슈 AC 「안 읽은 사람 메시지」)
  *
@@ -7551,6 +7570,28 @@ function seedShell(surface: string): void {
   }
 
   if (surface === 'shell-home-idle') return;
+  if (surface === 'shell-home-browse' || surface === 'shell-home-browse-empty' || surface === 'shell-home-browse-search') {
+    harnessClient.setQueryData(
+      ['roster', ADE_WS],
+      SHELL_ROSTER.map(member => (member.id === SELF ? {...member, role: 'member'} : member)),
+    );
+    // #5961: 이름 검색(「quarter」)에 내 목록은 0줄, 「참여하지 않은 공개 채널」 묶음에만 한 줄이 맞는다 — 서버 읽기를 미리 심어 둔다.
+    if (surface === 'shell-home-browse-search') {
+      harnessClient.setQueryData(['channel-browse', ADE_WS, 'home-search'], {
+        channels: [{id: 'ch-quarterly', name: 'quarterly-planning', memberCount: 12, isMember: false, isDefault: false}],
+      });
+    }
+    // 채널이 하나도 없는 정식 멤버(기본 채널까지 나감): 빈 「채널」 섹션과 둘러보기 줄(ADR-0224 D10). DM 은 그대로 둔다.
+    if (surface === 'shell-home-browse-empty') {
+      harnessClient.setQueryData(
+        ['channels', ADE_WS],
+        (harnessClient.getQueryData<{kind: string}[]>(['channels', ADE_WS]) ?? []).filter(
+          channel => channel.kind === 'dm',
+        ),
+      );
+    }
+    return;
+  }
   // 시안의 카드: 김인턴이 #agent-lab 에서 PR 초안을 쓰는 중.
   const nowMs = Date.now();
   markAgentWorking({

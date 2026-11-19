@@ -67,6 +67,11 @@ export interface DmVerdictsInput {
   /** 명부를 받았나(코어 `rosterLoaded`). */
   rosterReady?: boolean;
   mode: DmClosureMode;
+  /**
+   * 읽음 투영이 하한을 싣는가(코어 `readProjectionCarriesLeave`, ADR-0177 증보 2026-11-14 D18). 참이면 행의 하한이 코어 3a 로 간다.
+   * 생략하면 하한이 없다(옛 서버와 같다).
+   */
+  serverCarriesLeave?: boolean;
   /** legacy 에서 나간 상대 DM 의 안 읽음 판정(`useGoneUnreadVerdicts`). */
   goneVerdicts?: ReadonlyMap<string, GoneUnreadVerdict>;
   /** 마지막 투영에서 닫혀 있던 DM id(소문자 키). 투영이 오기 전 첫 페인트에서만 읽는다. */
@@ -97,7 +102,7 @@ export function dmVerdicts(input: DmVerdictsInput): Map<string, DmVerdict> {
     const read = input.byChannel.get(id);
     const isOpen = input.openChannelId !== null && uuidEq(dm.id, input.openChannelId);
     // 행을 통째로 코어에 넘긴다(폰은 마크 필드를 이름으로 부르지 않는다, D3). 옛 서버는 닫힘 없이 전체 seq 로 읽는다.
-    const facts = dmReadFacts(read, input.mode === 'server');
+    const facts = dmReadFacts(read, input.mode === 'server', input.serverCarriesLeave === true);
     let latestReadableSeq = facts.latestReadableSeq;
     if (read !== undefined && input.mode !== 'server') {
       // 나간 상대 DM 의 안 읽음이 기계 메시지뿐이면(`useGoneUnreadVerdicts` 가 읽어 가른다, 읽는 중이어도) 읽은 자리가 곧 읽을 자리다.
@@ -137,7 +142,7 @@ export interface DmClosedEntry {
   reason: 'closed' | 'gone';
 }
 
-/** 「⋯ › 닫은 대화」 목록(D11): 숨겨진 DM 중 명시적 닫기(7)와 나간 상대(6)만. 열린 DM 은 verdict 가 이미 보임이다. */
+/** 「⋯ › 숨긴 대화」 목록(D11): 숨겨진 DM 중 명시적 닫기(7)와 나간 상대(6)만. 열린 DM 은 verdict 가 이미 보임이다. */
 export function dmClosedEntries(
   dms: readonly Channel[],
   verdicts: ReadonlyMap<string, DmVerdict>,

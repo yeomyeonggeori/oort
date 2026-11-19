@@ -1119,6 +1119,740 @@ export const catalog: MessageCatalog = {
       "value": "서버에 닿지 못했어요. 아래는 마지막으로 확인된 작업 상태예요."
     }
   ],
+  "channels.browse.clearSearch": [
+    {
+      "type": 0,
+      "value": "찾기 지우기"
+    }
+  ],
+  "channels.browse.close": [
+    {
+      "type": 0,
+      "value": "닫기"
+    }
+  ],
+  "channels.browse.closeAria": [
+    {
+      "type": 0,
+      "value": "채널 둘러보기 닫기"
+    }
+  ],
+  "channels.browse.default": [
+    {
+      "type": 0,
+      "value": "기본"
+    }
+  ],
+  "channels.browse.description": [
+    {
+      "type": 0,
+      "value": "공개 채널을 찾아 참여할 수 있어요."
+    }
+  ],
+  "channels.browse.emptyAdminDetail": [
+    {
+      "type": 0,
+      "value": "이미 있는 채널은 채널 메뉴에서 「둘러보기에 보이기」를 켜면 여기에 보여요."
+    }
+  ],
+  "channels.browse.emptyAdminDetailPhone": [
+    {
+      "type": 0,
+      "value": "이미 있는 채널은 웹이나 데스크탑의 채널 메뉴에서 「둘러보기에 보이기」를 켜면 여기에 보여요."
+    }
+  ],
+  "channels.browse.emptyHeadline": [
+    {
+      "type": 0,
+      "value": "아직 참여하지 않은 공개 채널이 없어요."
+    }
+  ],
+  "channels.browse.groupJoined": [
+    {
+      "type": 0,
+      "value": "참여 중인 채널"
+    }
+  ],
+  "channels.browse.groupNotJoined": [
+    {
+      "type": 0,
+      "value": "참여하지 않은 채널"
+    }
+  ],
+  "channels.browse.hiddenGroup": [
+    {
+      "type": 0,
+      "value": "둘러보기에 안 보이는 공개 채널"
+    }
+  ],
+  "channels.browse.homeRowHint": [
+    {
+      "type": 0,
+      "value": "채널 둘러보기를 이 이름으로 열어요."
+    }
+  ],
+  "channels.browse.join": [
+    {
+      "type": 0,
+      "value": "참여"
+    }
+  ],
+  "channels.browse.joinAria": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " 채널에 참여"
+    }
+  ],
+  "channels.browse.joined": [
+    {
+      "type": 0,
+      "value": "참여 중"
+    }
+  ],
+  "channels.browse.joinForbidden": [
+    {
+      "type": 0,
+      "value": "이 계정으로는 이 채널에 참여할 수 없어요."
+    }
+  ],
+  "channels.browse.joinGeneric": [
+    {
+      "type": 0,
+      "value": "참여하지 못했어요. 다시 시도해 주세요."
+    }
+  ],
+  "channels.browse.joining": [
+    {
+      "type": 0,
+      "value": "참여 요청 중"
+    }
+  ],
+  "channels.browse.joinNetwork": [
+    {
+      "type": 0,
+      "value": "참여하지 못했어요. "
+    },
+    {
+      "type": 1,
+      "value": "reason"
+    }
+  ],
+  "channels.browse.joinNotFound": [
+    {
+      "type": 0,
+      "value": "이 채널은 이제 둘러보기에 없어요."
+    }
+  ],
+  "channels.browse.loadForbidden": [
+    {
+      "type": 0,
+      "value": "이 계정으로는 채널을 둘러볼 수 없어요."
+    }
+  ],
+  "channels.browse.loadGeneric": [
+    {
+      "type": 0,
+      "value": "채널 목록을 불러오지 못했어요. 잠시 뒤에 다시 시도해 주세요."
+    }
+  ],
+  "channels.browse.loading": [
+    {
+      "type": 0,
+      "value": "채널 목록을 불러오는 중이에요."
+    }
+  ],
+  "channels.browse.loadMore": [
+    {
+      "type": 0,
+      "value": "더 불러오기"
+    }
+  ],
+  "channels.browse.loadNetwork": [
+    {
+      "type": 0,
+      "value": "채널 목록을 불러오지 못했어요. "
+    },
+    {
+      "type": 1,
+      "value": "reason"
+    }
+  ],
+  "channels.browse.loadUnsupported": [
+    {
+      "type": 0,
+      "value": "이 서버는 아직 채널 둘러보기를 지원하지 않아요."
+    }
+  ],
+  "channels.browse.memberCount": [
+    {
+      "type": 0,
+      "value": "멤버 "
+    },
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "명"
+    }
+  ],
+  "channels.browse.menuCreate": [
+    {
+      "type": 0,
+      "value": "새 채널 만들기"
+    }
+  ],
+  "channels.browse.menuLabel": [
+    {
+      "type": 0,
+      "value": "채널 추가"
+    }
+  ],
+  "channels.browse.noMatch": [
+    {
+      "type": 0,
+      "value": "「"
+    },
+    {
+      "type": 1,
+      "value": "query"
+    },
+    {
+      "type": 0,
+      "value": "」와 맞는 공개 채널이 없어요."
+    }
+  ],
+  "channels.browse.offline": [
+    {
+      "type": 0,
+      "value": "오프라인이라 지금은 참여할 수 없어요. 연결되면 다시 시도해 주세요."
+    }
+  ],
+  "channels.browse.open": [
+    {
+      "type": 0,
+      "value": "열기"
+    }
+  ],
+  "channels.browse.openAria": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " 채널 열기"
+    }
+  ],
+  "channels.browse.paletteGroup": [
+    {
+      "type": 0,
+      "value": "참여하지 않은 공개 채널"
+    }
+  ],
+  "channels.browse.rateLimited": [
+    {
+      "type": 0,
+      "value": "요청이 너무 잦아요. 잠시 뒤에 다시 시도해 주세요."
+    }
+  ],
+  "channels.browse.retry": [
+    {
+      "type": 0,
+      "value": "다시 시도"
+    }
+  ],
+  "channels.browse.searchLabel": [
+    {
+      "type": 0,
+      "value": "채널 찾기"
+    }
+  ],
+  "channels.browse.searchPlaceholder": [
+    {
+      "type": 0,
+      "value": "이름이나 주제로 찾기"
+    }
+  ],
+  "channels.browse.switchForbidden": [
+    {
+      "type": 0,
+      "value": "소유자와 관리자만 바꿀 수 있어요."
+    }
+  ],
+  "channels.browse.switchGeneric": [
+    {
+      "type": 0,
+      "value": "바꾸지 못했어요. 다시 시도해 주세요."
+    }
+  ],
+  "channels.browse.switchLabel": [
+    {
+      "type": 0,
+      "value": "둘러보기에 보이기"
+    }
+  ],
+  "channels.browse.switchNetwork": [
+    {
+      "type": 0,
+      "value": "바꾸지 못했어요. "
+    },
+    {
+      "type": 1,
+      "value": "reason"
+    }
+  ],
+  "channels.browse.switchNotFound": [
+    {
+      "type": 0,
+      "value": "이 채널은 이제 찾을 수 없어요."
+    }
+  ],
+  "channels.browse.switchNotListable": [
+    {
+      "type": 0,
+      "value": "공개 채널만 둘러보기에 보일 수 있어요."
+    }
+  ],
+  "channels.browse.switchShowAria": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " 채널을 둘러보기에 보이기"
+    }
+  ],
+  "channels.browse.title": [
+    {
+      "type": 0,
+      "value": "채널 둘러보기"
+    }
+  ],
+  "channels.createFailure.duplicate": [
+    {
+      "type": 0,
+      "value": "같은 이름의 채널이 이미 있습니다. 다른 이름으로 다시 시도하세요."
+    }
+  ],
+  "channels.createFailure.forbidden": [
+    {
+      "type": 0,
+      "value": "채널을 만들 권한이 없습니다. 워크스페이스 소유자나 관리자에게 요청하세요."
+    }
+  ],
+  "channels.createFailure.generic": [
+    {
+      "type": 0,
+      "value": "채널을 만들지 못했습니다. 잠시 뒤에 다시 시도하세요."
+    }
+  ],
+  "channels.createFailure.network": [
+    {
+      "type": 0,
+      "value": "채널을 만들지 못했습니다. 서버에 연결하지 못했어요. 연결을 확인한 뒤 다시 시도하세요."
+    }
+  ],
+  "channels.createFailure.rateLimited": [
+    {
+      "type": 0,
+      "value": "요청이 너무 잦습니다. 잠시 뒤에 다시 시도하세요."
+    }
+  ],
+  "channels.default.description": [
+    {
+      "type": 0,
+      "value": "새 멤버가 자동으로 들어가요"
+    }
+  ],
+  "channels.default.label": [
+    {
+      "type": 0,
+      "value": "기본 채널로 지정"
+    }
+  ],
+  "channels.default.lastDefault": [
+    {
+      "type": 0,
+      "value": "기본 채널은 하나 이상 있어야 해요. 다른 채널을 먼저 기본 채널로 지정해 주세요."
+    }
+  ],
+  "channels.default.lastHint": [
+    {
+      "type": 0,
+      "value": "기본 채널은 하나 이상 있어야 해요"
+    }
+  ],
+  "channels.default.notDefaultable": [
+    {
+      "type": 0,
+      "value": "공개 채널만 기본 채널로 지정할 수 있어요."
+    }
+  ],
+  "channels.dmLeave.action": [
+    {
+      "type": 0,
+      "value": "대화 나가기"
+    }
+  ],
+  "channels.dmLeave.busy": [
+    {
+      "type": 0,
+      "value": "나가는 중…"
+    }
+  ],
+  "channels.dmLeave.cancel": [
+    {
+      "type": 0,
+      "value": "취소"
+    }
+  ],
+  "channels.dmLeave.checking": [
+    {
+      "type": 0,
+      "value": "확인 중…"
+    }
+  ],
+  "channels.dmLeave.confirm": [
+    {
+      "type": 0,
+      "value": "나가기"
+    }
+  ],
+  "channels.dmLeave.confirmBody": [
+    {
+      "type": 0,
+      "value": "내 화면에서 지금까지의 대화가 사라져요. "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " 님의 화면에는 그대로 남아요."
+    }
+  ],
+  "channels.dmLeave.confirmFinal": [
+    {
+      "type": 0,
+      "value": "나간 뒤에는 되돌릴 수 없어요."
+    }
+  ],
+  "channels.dmLeave.confirmRevive": [
+    {
+      "type": 0,
+      "value": "다시 글이 오면 그 글부터 새 대화로 보여요."
+    }
+  ],
+  "channels.dmLeave.confirmScheduled": [
+    {
+      "type": 0,
+      "value": "예약해 둔 메시지 "
+    },
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "개도 취소돼요."
+    }
+  ],
+  "channels.dmLeave.confirmTitle": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " 님과의 대화에서 나갈까요?"
+    }
+  ],
+  "channels.dmLeave.done": [
+    {
+      "type": 0,
+      "value": "대화에서 나갔어요."
+    }
+  ],
+  "channels.dmLeave.failed": [
+    {
+      "type": 0,
+      "value": "나가지 못했어요. 다시 시도해 주세요."
+    }
+  ],
+  "channels.dmLeave.scheduledFailed": [
+    {
+      "type": 0,
+      "value": "예약 목록을 불러오지 못했어요."
+    }
+  ],
+  "channels.dmLeave.unavailable": [
+    {
+      "type": 0,
+      "value": "이 대화에서는 나갈 수 없어요."
+    }
+  ],
+  "channels.nameRule.edge": [
+    {
+      "type": 0,
+      "value": "처음과 끝은 글자나 숫자여야 해요. 하이픈과 밑줄은 가운데에만 쓸 수 있어요."
+    }
+  ],
+  "channels.nameRule.hidden": [
+    {
+      "type": 0,
+      "value": "보이지 않는 글자가 들어 있어요. 이름을 지우고 다시 적어 주세요."
+    }
+  ],
+  "channels.nameRule.hint": [
+    {
+      "type": 0,
+      "value": "글자, 숫자, 하이픈(-), 밑줄(_)로 "
+    },
+    {
+      "type": 2,
+      "value": "max",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "자까지. 빈칸은 -로 바뀌고 영문 대문자는 소문자로 저장돼요."
+    }
+  ],
+  "channels.nameRule.placeholder": [
+    {
+      "type": 0,
+      "value": "디자인-리뷰"
+    }
+  ],
+  "channels.nameRule.preview": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " 이름으로 만들어져요"
+    }
+  ],
+  "channels.nameRule.required": [
+    {
+      "type": 0,
+      "value": "채널 이름을 입력해 주세요."
+    }
+  ],
+  "channels.nameRule.serverRejected": [
+    {
+      "type": 0,
+      "value": "서버가 이 이름을 받지 않았어요. 글자, 숫자, -, _만 쓸 수 있어요."
+    }
+  ],
+  "channels.nameRule.tooLong": [
+    {
+      "type": 0,
+      "value": "채널 이름은 "
+    },
+    {
+      "type": 2,
+      "value": "max",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "자까지 쓸 수 있어요."
+    }
+  ],
+  "channels.nameRule.unsupported": [
+    {
+      "type": 0,
+      "value": "글자, 숫자, 하이픈(-), 밑줄(_)만 쓸 수 있어요."
+    }
+  ],
+  "channels.preview.attachmentLocked": [
+    {
+      "type": 0,
+      "value": "참여하면 볼 수 있어요"
+    }
+  ],
+  "channels.preview.closeAria": [
+    {
+      "type": 0,
+      "value": "채널 미리 보기 닫기"
+    }
+  ],
+  "channels.preview.empty": [
+    {
+      "type": 0,
+      "value": "아직 글이 없어요"
+    }
+  ],
+  "channels.preview.joinBand": [
+    {
+      "type": 0,
+      "value": "참여하면 글을 쓰고 답할 수 있어요."
+    }
+  ],
+  "channels.preview.listAria": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " 채널의 최근 글"
+    }
+  ],
+  "channels.preview.loadForbidden": [
+    {
+      "type": 0,
+      "value": "이 계정으로는 이 채널을 미리 볼 수 없어요."
+    }
+  ],
+  "channels.preview.loadGeneric": [
+    {
+      "type": 0,
+      "value": "채널 글을 불러오지 못했어요. 잠시 뒤에 다시 시도해 주세요."
+    }
+  ],
+  "channels.preview.loading": [
+    {
+      "type": 0,
+      "value": "채널의 최근 글을 불러오는 중이에요."
+    }
+  ],
+  "channels.preview.loadNetwork": [
+    {
+      "type": 0,
+      "value": "채널 글을 불러오지 못했어요. "
+    },
+    {
+      "type": 1,
+      "value": "reason"
+    }
+  ],
+  "channels.preview.notFound": [
+    {
+      "type": 0,
+      "value": "이 채널을 찾을 수 없어요"
+    }
+  ],
+  "channels.preview.openHint": [
+    {
+      "type": 0,
+      "value": "누르면 최근 글을 읽기만 할 수 있게 미리 봐요."
+    }
+  ],
+  "channels.rename.action": [
+    {
+      "type": 0,
+      "value": "이름 바꾸기"
+    }
+  ],
+  "channels.rename.aria": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " 채널의 이름 바꾸기"
+    }
+  ],
+  "channels.rename.busy": [
+    {
+      "type": 0,
+      "value": "바꾸는 중…"
+    }
+  ],
+  "channels.rename.cancel": [
+    {
+      "type": 0,
+      "value": "취소"
+    }
+  ],
+  "channels.rename.description": [
+    {
+      "type": 0,
+      "value": "새 이름은 사이드바와 채널 머리에 바로 보여요."
+    }
+  ],
+  "channels.rename.done": [
+    {
+      "type": 0,
+      "value": "채널 이름을 바꿨어요."
+    }
+  ],
+  "channels.rename.fieldLabel": [
+    {
+      "type": 0,
+      "value": "채널 이름"
+    }
+  ],
+  "channels.rename.forbidden": [
+    {
+      "type": 0,
+      "value": "소유자와 관리자만 채널 이름을 바꿀 수 있어요."
+    }
+  ],
+  "channels.rename.generalLocked": [
+    {
+      "type": 0,
+      "value": "general 채널의 이름은 바꿀 수 없어요."
+    }
+  ],
+  "channels.rename.generic": [
+    {
+      "type": 0,
+      "value": "바꾸지 못했어요. 다시 시도해 주세요."
+    }
+  ],
+  "channels.rename.network": [
+    {
+      "type": 0,
+      "value": "바꾸지 못했어요. "
+    },
+    {
+      "type": 1,
+      "value": "reason"
+    }
+  ],
+  "channels.rename.notFound": [
+    {
+      "type": 0,
+      "value": "이 채널을 찾을 수 없어요."
+    }
+  ],
+  "channels.rename.preview": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " 이름으로 바뀌어요"
+    }
+  ],
+  "channels.rename.submit": [
+    {
+      "type": 0,
+      "value": "바꾸기"
+    }
+  ],
+  "channels.rename.title": [
+    {
+      "type": 0,
+      "value": "채널 이름 바꾸기"
+    }
+  ],
   "common.feedback.unavailable": [
     {
       "type": 0,
@@ -1204,6 +1938,20 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "네트워크가 연결되면 QR을 찍을 수 있어요."
+    }
+  ],
+  "connection.boot.serverSwitchedSignedOut": [
+    {
+      "type": 0,
+      "value": "다른 서버로 바꿔서 앞 서버("
+    },
+    {
+      "type": 1,
+      "value": "host"
+    },
+    {
+      "type": 0,
+      "value": ")의 로그인은 끝났어요. 돌아가려면 다시 로그인해 주세요."
     }
   ],
   "connection.boot.unreachable": [
@@ -1985,6 +2733,608 @@ export const catalog: MessageCatalog = {
       "value": "세션"
     }
   ],
+  "directory.lifecycle.cancel": [
+    {
+      "type": 0,
+      "value": "취소"
+    }
+  ],
+  "directory.lifecycle.errorForbidden": [
+    {
+      "type": 0,
+      "value": "이 워크스페이스에서 멤버를 정지하거나 내보낼 권한이 없어요."
+    }
+  ],
+  "directory.lifecycle.errorLastOwner": [
+    {
+      "type": 0,
+      "value": "워크스페이스에는 "
+    },
+    {
+      "type": 1,
+      "value": "owner"
+    },
+    {
+      "type": 0,
+      "value": " 역할인 사람이 한 명은 있어야 해서 정지하거나 내보낼 수 없어요."
+    }
+  ],
+  "directory.lifecycle.errorNetwork": [
+    {
+      "type": 0,
+      "value": "서버에 닿지 못했어요. 연결을 확인한 뒤 다시 시도하세요."
+    }
+  ],
+  "directory.lifecycle.errorNotActive": [
+    {
+      "type": 0,
+      "value": "이 멤버는 지금 활성 상태가 아니에요. 그사이 다른 사람이 정지했을 수 있어요."
+    }
+  ],
+  "directory.lifecycle.errorNotFound": [
+    {
+      "type": 0,
+      "value": "이 멤버를 찾지 못했어요. 이미 워크스페이스에서 나갔을 수 있어요."
+    }
+  ],
+  "directory.lifecycle.errorNotSuspended": [
+    {
+      "type": 0,
+      "value": "이 멤버는 지금 정지된 상태가 아니에요. 그사이 다른 사람이 정지를 풀었을 수 있어요."
+    }
+  ],
+  "directory.lifecycle.errorRank": [
+    {
+      "type": 0,
+      "value": "같거나 높은 역할의 멤버는 정지하거나 내보낼 수 없어요. 그사이 역할이 바뀌었을 수 있어요."
+    }
+  ],
+  "directory.lifecycle.errorRateLimited": [
+    {
+      "type": 0,
+      "value": "요청이 너무 잦아요. 잠시 뒤에 다시 시도하세요."
+    }
+  ],
+  "directory.lifecycle.errorSelf": [
+    {
+      "type": 0,
+      "value": "자기 자신은 정지하거나 내보낼 수 없어요."
+    }
+  ],
+  "directory.lifecycle.errorUnknown": [
+    {
+      "type": 0,
+      "value": "처리하지 못했어요. 다시 시도하세요."
+    }
+  ],
+  "directory.lifecycle.reinstate": [
+    {
+      "type": 0,
+      "value": "정지 풀기"
+    }
+  ],
+  "directory.lifecycle.reinstateBody": [
+    {
+      "type": 0,
+      "value": "다시 로그인할 수 있게 돼요. 정지 전의 로그인은 되살아나지 않아서 새로 로그인해야 해요. 들어가 있던 채널은 그대로예요."
+    }
+  ],
+  "directory.lifecycle.reinstateBusy": [
+    {
+      "type": 0,
+      "value": "푸는 중"
+    }
+  ],
+  "directory.lifecycle.reinstatedReceipt": [
+    {
+      "type": 0,
+      "value": "풀림"
+    }
+  ],
+  "directory.lifecycle.reinstateSchedules": [
+    {
+      "type": 0,
+      "value": "정지할 때 보류된 예약 메시지는 풀어도 저절로 나가지 않아요. 본인이 다시 예약하거나 바로 보내야 해요."
+    }
+  ],
+  "directory.lifecycle.reinstateTitle": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " 님의 정지를 풀까요?"
+    }
+  ],
+  "directory.lifecycle.remove": [
+    {
+      "type": 0,
+      "value": "워크스페이스에서 내보내기"
+    }
+  ],
+  "directory.lifecycle.removeAction": [
+    {
+      "type": 0,
+      "value": "내보내기"
+    }
+  ],
+  "directory.lifecycle.removeBusy": [
+    {
+      "type": 0,
+      "value": "내보내는 중"
+    }
+  ],
+  "directory.lifecycle.removedClose": [
+    {
+      "type": 0,
+      "value": "닫기"
+    }
+  ],
+  "directory.lifecycle.removedTitle": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " 님을 워크스페이스에서 내보냈어요."
+    }
+  ],
+  "directory.lifecycle.removeKeeps": [
+    {
+      "type": 0,
+      "value": "쓴 글과 DM 기록은 남고, 글쓴이 이름은 「나간 멤버」 표시로 바뀌어요."
+    }
+  ],
+  "directory.lifecycle.removeLeaves": [
+    {
+      "type": 0,
+      "value": "모든 채널과 DM에서 빠지고, 모든 기기에서 바로 로그아웃돼요. 예약해 둔 메시지는 취소돼요."
+    }
+  ],
+  "directory.lifecycle.removeTitle": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " 님을 워크스페이스에서 내보낼까요?"
+    }
+  ],
+  "directory.lifecycle.removeWarning": [
+    {
+      "type": 0,
+      "value": "되돌릴 수 없어요. 다시 초대해도 같은 이메일로는 이 워크스페이스에 들어올 수 없어요."
+    }
+  ],
+  "directory.lifecycle.suspend": [
+    {
+      "type": 0,
+      "value": "정지"
+    }
+  ],
+  "directory.lifecycle.suspendBusy": [
+    {
+      "type": 0,
+      "value": "정지 중"
+    }
+  ],
+  "directory.lifecycle.suspendedReceipt": [
+    {
+      "type": 0,
+      "value": "정지함"
+    }
+  ],
+  "directory.lifecycle.suspendKeeps": [
+    {
+      "type": 0,
+      "value": "쓴 글과 들어가 있던 채널은 그대로 남아요. 정지된 동안 그 글의 글쓴이는 "
+    },
+    {
+      "type": 1,
+      "value": "owner"
+    },
+    {
+      "type": 0,
+      "value": "·"
+    },
+    {
+      "type": 1,
+      "value": "admin"
+    },
+    {
+      "type": 0,
+      "value": "에게는 이름 그대로, 다른 사람에게는 「나간 멤버」로 보여요."
+    }
+  ],
+  "directory.lifecycle.suspendSignOut": [
+    {
+      "type": 0,
+      "value": "모든 기기에서 바로 로그아웃되고, 정지가 풀릴 때까지 다시 로그인할 수 없어요. 폰 알림도 더는 가지 않아요."
+    }
+  ],
+  "directory.lifecycle.suspendTitle": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " 님을 정지할까요?"
+    }
+  ],
+  "directory.lifecycle.suspendUndo": [
+    {
+      "type": 0,
+      "value": "정지된 멤버는 멤버 탭의 「정지됨」에서 다시 찾아 언제든 풀 수 있어요. 「정지됨」은 "
+    },
+    {
+      "type": 1,
+      "value": "owner"
+    },
+    {
+      "type": 0,
+      "value": "·"
+    },
+    {
+      "type": 1,
+      "value": "admin"
+    },
+    {
+      "type": 0,
+      "value": "에게만 보여요."
+    }
+  ],
+  "directory.manage.heading": [
+    {
+      "type": 0,
+      "value": "관리"
+    }
+  ],
+  "directory.manage.hint": [
+    {
+      "type": 1,
+      "value": "owner"
+    },
+    {
+      "type": 0,
+      "value": "·"
+    },
+    {
+      "type": 1,
+      "value": "admin"
+    },
+    {
+      "type": 0,
+      "value": "에게만 보여요"
+    }
+  ],
+  "directory.profile.close": [
+    {
+      "type": 0,
+      "value": "프로필 닫기"
+    }
+  ],
+  "directory.profile.copied": [
+    {
+      "type": 0,
+      "value": "복사됨"
+    }
+  ],
+  "directory.profile.copyEmail": [
+    {
+      "type": 0,
+      "value": "이메일 복사"
+    }
+  ],
+  "directory.profile.copyFailed": [
+    {
+      "type": 0,
+      "value": "복사하지 못했어요. 다시 눌러 보세요."
+    }
+  ],
+  "directory.profile.copyMention": [
+    {
+      "type": 0,
+      "value": "멘션 복사"
+    }
+  ],
+  "directory.profile.description": [
+    {
+      "type": 0,
+      "value": "멤버 정보와 연락 방법, 역할을 확인해요."
+    }
+  ],
+  "directory.profile.dmInactive": [
+    {
+      "type": 1,
+      "value": "status"
+    },
+    {
+      "type": 0,
+      "value": " 상태에서는 다이렉트 메시지를 열 수 없습니다."
+    }
+  ],
+  "directory.profile.dmSelf": [
+    {
+      "type": 0,
+      "value": "내 프로필에서는 다이렉트 메시지를 열 수 없습니다."
+    }
+  ],
+  "directory.profile.emailLabel": [
+    {
+      "type": 0,
+      "value": "이메일"
+    }
+  ],
+  "directory.profile.emptyAction": [
+    {
+      "type": 0,
+      "value": "명부 다시 불러오기"
+    }
+  ],
+  "directory.profile.emptyDetail": [
+    {
+      "type": 0,
+      "value": "명부를 다시 불러온 뒤 프로필을 확인하세요."
+    }
+  ],
+  "directory.profile.emptyHeadline": [
+    {
+      "type": 0,
+      "value": "이 멤버를 명부에서 찾을 수 없습니다."
+    }
+  ],
+  "directory.profile.kindAgent": [
+    {
+      "type": 0,
+      "value": "에이전트"
+    }
+  ],
+  "directory.profile.loading": [
+    {
+      "type": 0,
+      "value": "멤버 프로필을 불러오는 중입니다."
+    }
+  ],
+  "directory.profile.message": [
+    {
+      "type": 0,
+      "value": "메시지 보내기"
+    }
+  ],
+  "directory.profile.messageBusy": [
+    {
+      "type": 0,
+      "value": "대화 여는 중"
+    }
+  ],
+  "directory.profile.offline": [
+    {
+      "type": 0,
+      "value": "연결 끊김, 마지막으로 받은 프로필입니다. 연결이 돌아오면 새 대화를 열 수 있습니다."
+    }
+  ],
+  "directory.profile.offlineMissing": [
+    {
+      "type": 0,
+      "value": "연결 끊김, 이 멤버의 마지막 프로필을 찾지 못했습니다."
+    }
+  ],
+  "directory.profile.ownerLabel": [
+    {
+      "type": 0,
+      "value": "책임자"
+    }
+  ],
+  "directory.profile.ownerLine": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " 님이 관리"
+    }
+  ],
+  "directory.profile.ownerUnknown": [
+    {
+      "type": 0,
+      "value": "관리자 정보 없음"
+    }
+  ],
+  "directory.profile.retry": [
+    {
+      "type": 0,
+      "value": "다시 시도"
+    }
+  ],
+  "directory.profile.routing": [
+    {
+      "type": 0,
+      "value": "라우팅 설정"
+    }
+  ],
+  "directory.profile.title": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " 프로필"
+    }
+  ],
+  "directory.profile.titleUnknown": [
+    {
+      "type": 0,
+      "value": "멤버 프로필"
+    }
+  ],
+  "directory.role.cancel": [
+    {
+      "type": 0,
+      "value": "취소"
+    }
+  ],
+  "directory.role.changed": [
+    {
+      "type": 0,
+      "value": "바뀜"
+    }
+  ],
+  "directory.role.confirmAction": [
+    {
+      "type": 0,
+      "value": "역할 바꾸기"
+    }
+  ],
+  "directory.role.confirmBusy": [
+    {
+      "type": 0,
+      "value": "바꾸는 중"
+    }
+  ],
+  "directory.role.confirmGrantAdmin": [
+    {
+      "type": 1,
+      "value": "admin"
+    },
+    {
+      "type": 0,
+      "value": " 역할은 "
+    },
+    {
+      "type": 1,
+      "value": "member"
+    },
+    {
+      "type": 0,
+      "value": "·"
+    },
+    {
+      "type": 1,
+      "value": "guest"
+    },
+    {
+      "type": 0,
+      "value": "의 역할을 바꾸고, 정지하거나 내보내고, 비밀번호 재설정 링크를 만들 수 있어요. 채널을 만들고 채널에 사람을 넣고 뺄 수도 있어요."
+    }
+  ],
+  "directory.role.confirmOwnerWarning": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " 님도 나와 같은 권한을 갖게 돼요. "
+    },
+    {
+      "type": 1,
+      "value": "owner"
+    },
+    {
+      "type": 0,
+      "value": "끼리는 서로의 역할을 바꾸거나 서로를 정지하고 내보낼 수 없지만, 서로의 비밀번호 재설정 링크는 만들 수 있어요. 한 번 올리면 되돌릴 수 없어요."
+    }
+  ],
+  "directory.role.confirmPair": [
+    {
+      "type": 0,
+      "value": "지금 역할 "
+    },
+    {
+      "type": 1,
+      "value": "from"
+    },
+    {
+      "type": 0,
+      "value": ", 바꿀 역할 "
+    },
+    {
+      "type": 1,
+      "value": "to"
+    }
+  ],
+  "directory.role.confirmRevokeAdmin": [
+    {
+      "type": 1,
+      "value": "member"
+    },
+    {
+      "type": 0,
+      "value": "·"
+    },
+    {
+      "type": 1,
+      "value": "guest"
+    },
+    {
+      "type": 0,
+      "value": "의 역할 바꾸기·정지·내보내기, 비밀번호 재설정 링크 만들기, 채널 만들기와 채널에 사람 넣고 빼기를 더는 할 수 없게 돼요."
+    }
+  ],
+  "directory.role.confirmTitle": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " 님의 역할을 바꿀까요?"
+    }
+  ],
+  "directory.role.label": [
+    {
+      "type": 0,
+      "value": "역할"
+    }
+  ],
+  "directory.role.lockedAdminCeiling": [
+    {
+      "type": 1,
+      "value": "admin"
+    },
+    {
+      "type": 0,
+      "value": " 역할은 "
+    },
+    {
+      "type": 1,
+      "value": "admin"
+    },
+    {
+      "type": 0,
+      "value": "·"
+    },
+    {
+      "type": 1,
+      "value": "owner"
+    },
+    {
+      "type": 0,
+      "value": "의 역할을 바꿀 수 없어요."
+    }
+  ],
+  "directory.role.lockedOwnerPeer": [
+    {
+      "type": 1,
+      "value": "owner"
+    },
+    {
+      "type": 0,
+      "value": "끼리는 서로의 역할을 바꿀 수 없어요."
+    }
+  ],
+  "directory.role.placeholder": [
+    {
+      "type": 0,
+      "value": "역할 고르기"
+    }
+  ],
   "expressions.add.adminsOnly": [
     {
       "type": 0,
@@ -2061,6 +3411,40 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "등록 중"
+    }
+  ],
+  "expressions.draft.linkApprove": [
+    {
+      "type": 0,
+      "value": "가져와서 팀 보관함에 등록"
+    }
+  ],
+  "expressions.draft.linkBusy": [
+    {
+      "type": 0,
+      "value": "지금 가져오는 그림이 많아요. 잠시 뒤 다시 눌러 주세요."
+    }
+  ],
+  "expressions.draft.linkFetching": [
+    {
+      "type": 0,
+      "value": "가져오는 중"
+    }
+  ],
+  "expressions.draft.linkFrom": [
+    {
+      "type": 1,
+      "value": "host"
+    },
+    {
+      "type": 0,
+      "value": "에서 가져와요"
+    }
+  ],
+  "expressions.draft.linkHint": [
+    {
+      "type": 0,
+      "value": "승인하면 그림을 한 번 가져와 확인한 뒤 팀 보관함에 등록해요."
     }
   ],
   "expressions.draft.previewLabel": [
@@ -3968,6 +5352,294 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "스레드"
+    }
+  ],
+  "memberList.empty.detail": [
+    {
+      "type": 0,
+      "value": "초대 링크를 만들어 팀을 부르면 여기에 명부가 쌓이고, 각 행에서 프로필과 대화를 열 수 있습니다."
+    }
+  ],
+  "memberList.empty.headline": [
+    {
+      "type": 0,
+      "value": "이 워크스페이스에 아직 다른 멤버가 없습니다."
+    }
+  ],
+  "memberList.empty.invite": [
+    {
+      "type": 0,
+      "value": "멤버 초대하기"
+    }
+  ],
+  "memberList.group.agents": [
+    {
+      "type": 0,
+      "value": "에이전트"
+    }
+  ],
+  "memberList.group.people": [
+    {
+      "type": 0,
+      "value": "사람"
+    }
+  ],
+  "memberList.group.suspended": [
+    {
+      "type": 0,
+      "value": "정지됨"
+    }
+  ],
+  "memberList.newDm.close": [
+    {
+      "type": 0,
+      "value": "닫기"
+    }
+  ],
+  "memberList.newDm.continueAction": [
+    {
+      "type": 0,
+      "value": "대화 이어가기"
+    }
+  ],
+  "memberList.newDm.description": [
+    {
+      "type": 0,
+      "value": "대화할 멤버나 에이전트를 고르세요. 이미 대화 중이면 그 대화로 이동합니다."
+    }
+  ],
+  "memberList.newDm.emptyDetail": [
+    {
+      "type": 0,
+      "value": "워크스페이스에 멤버를 초대하면 여기서 바로 대화를 시작할 수 있습니다."
+    }
+  ],
+  "memberList.newDm.emptyHeadline": [
+    {
+      "type": 0,
+      "value": "대화할 다른 멤버가 없습니다."
+    }
+  ],
+  "memberList.newDm.hasDm": [
+    {
+      "type": 0,
+      "value": "대화 중"
+    }
+  ],
+  "memberList.newDm.noMatchDetail": [
+    {
+      "type": 0,
+      "value": "검색어 \""
+    },
+    {
+      "type": 1,
+      "value": "query"
+    },
+    {
+      "type": 0,
+      "value": "\"에 해당하는 이름이나 핸들이 없습니다."
+    }
+  ],
+  "memberList.newDm.placeholder": [
+    {
+      "type": 0,
+      "value": "이름이나 핸들로 검색"
+    }
+  ],
+  "memberList.newDm.startAction": [
+    {
+      "type": 0,
+      "value": "새 대화 시작"
+    }
+  ],
+  "memberList.newDm.title": [
+    {
+      "type": 0,
+      "value": "새 다이렉트 메시지"
+    }
+  ],
+  "memberList.newDm.toLabel": [
+    {
+      "type": 0,
+      "value": "받는 사람"
+    }
+  ],
+  "memberList.noMatch.clear": [
+    {
+      "type": 0,
+      "value": "검색 지우기"
+    }
+  ],
+  "memberList.noMatch.detail": [
+    {
+      "type": 0,
+      "value": "검색어 \""
+    },
+    {
+      "type": 1,
+      "value": "query"
+    },
+    {
+      "type": 0,
+      "value": "\"에 해당하는 이름, 핸들, 이메일이 없습니다. 다른 말로 찾아 보세요."
+    }
+  ],
+  "memberList.noMatch.detailGuest": [
+    {
+      "type": 0,
+      "value": "검색어 \""
+    },
+    {
+      "type": 1,
+      "value": "query"
+    },
+    {
+      "type": 0,
+      "value": "\"에 해당하는 이름이나 핸들이 없습니다. 다른 이름으로 검색하세요."
+    }
+  ],
+  "memberList.noMatch.headline": [
+    {
+      "type": 0,
+      "value": "일치하는 멤버가 없습니다."
+    }
+  ],
+  "memberList.page.title": [
+    {
+      "type": 0,
+      "value": "멤버"
+    }
+  ],
+  "memberList.row.openOwnProfile": [
+    {
+      "type": 0,
+      "value": "나, 프로필 열기"
+    }
+  ],
+  "memberList.row.openProfile": [
+    {
+      "type": 0,
+      "value": "프로필 열기"
+    }
+  ],
+  "memberList.row.ownedBy": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " 님이 관리"
+    }
+  ],
+  "memberList.row.self": [
+    {
+      "type": 0,
+      "value": "나"
+    }
+  ],
+  "memberList.search.label": [
+    {
+      "type": 0,
+      "value": "멤버 검색"
+    }
+  ],
+  "memberList.search.placeholder": [
+    {
+      "type": 0,
+      "value": "이름, 핸들, 이메일로 찾기"
+    }
+  ],
+  "memberList.search.placeholderGuest": [
+    {
+      "type": 0,
+      "value": "이름이나 핸들로 찾기"
+    }
+  ],
+  "memberList.state.offline": [
+    {
+      "type": 0,
+      "value": "연결 끊김, 재연결 중입니다. 명부는 마지막으로 받은 상태이고, 새 대화는 연결이 돌아온 뒤 열립니다."
+    }
+  ],
+  "mobile.addMember.addHint": [
+    {
+      "type": 0,
+      "value": "채널에 추가해요."
+    }
+  ],
+  "mobile.addMember.adding": [
+    {
+      "type": 0,
+      "value": "추가 중"
+    }
+  ],
+  "mobile.addMember.close": [
+    {
+      "type": 0,
+      "value": "멤버 추가 닫기"
+    }
+  ],
+  "mobile.addMember.emptyWorkspace": [
+    {
+      "type": 0,
+      "value": "이 워크스페이스에 다른 멤버가 아직 없어요."
+    }
+  ],
+  "mobile.addMember.kindAgent": [
+    {
+      "type": 0,
+      "value": "에이전트"
+    }
+  ],
+  "mobile.addMember.kindHuman": [
+    {
+      "type": 0,
+      "value": "사람"
+    }
+  ],
+  "mobile.addMember.loading": [
+    {
+      "type": 0,
+      "value": "멤버 목록을 불러오는 중이에요."
+    }
+  ],
+  "mobile.addMember.noMatch": [
+    {
+      "type": 0,
+      "value": "「"
+    },
+    {
+      "type": 1,
+      "value": "query"
+    },
+    {
+      "type": 0,
+      "value": "」 검색 결과가 없어요."
+    }
+  ],
+  "mobile.addMember.present": [
+    {
+      "type": 0,
+      "value": "멤버"
+    }
+  ],
+  "mobile.addMember.searchLabel": [
+    {
+      "type": 0,
+      "value": "추가할 멤버 찾기"
+    }
+  ],
+  "mobile.addMember.searchPlaceholder": [
+    {
+      "type": 0,
+      "value": "이름이나 @핸들"
+    }
+  ],
+  "mobile.addMember.title": [
+    {
+      "type": 0,
+      "value": "멤버 추가"
     }
   ],
   "mobile.attachmentSave.failed": [
@@ -6538,6 +8210,240 @@ export const catalog: MessageCatalog = {
       "value": "웹이나 데스크탑에서 에이전트가 일하는 채널을 열고, 채널 머리의 멤버 단추를 눌러 보세요. 일하는 에이전트가 맨 위에서 지금 하는 일을 한 줄로 보여 줘요."
     }
   ],
+  "releaseNotes.v0147.agentLinksChanged": [
+    {
+      "type": 0,
+      "value": "이제부터 에이전트가 쓰거나 고친 글의 링크에는 서버가 미리보기 카드를 자동으로 만들지 않아요. 이미 붙어 있던 카드와 링크를 눌러 여는 것은 그대로예요. 웹훅과 GitHub 연동이 올린 글은 지금처럼 미리보기가 붙어요. 에이전트가 이모티콘을 제안하면서 그림 링크를 넣으면, 웹과 데스크탑의 승인 카드에는 그림 대신 그 그림을 어느 사이트에서 가져오는지가 한 줄로 보여요. 주소 전체가 아니라 사이트 이름만 보여요. 「가져와서 팀 보관함에 등록」을 누른 뒤에야 서버가 그 그림을 한 번 가져와 확인하고, 가져오지 못하면 그 줄에 까닭이 서요."
+    }
+  ],
+  "releaseNotes.v0147.agentLinksTitle": [
+    {
+      "type": 0,
+      "value": "에이전트가 쓴 링크를 서버가 먼저 열지 않아요"
+    }
+  ],
+  "releaseNotes.v0147.agentLinksTryIt": [
+    {
+      "type": 0,
+      "value": "에이전트에게 링크가 든 글을 하나 써 달라고 해 보세요. 그 글에는 링크 미리보기 카드가 자동으로 붙지 않아요. 같은 링크를 내가 쓰면 지금처럼 미리보기가 붙어요."
+    }
+  ],
+  "releaseNotes.v0147.agentsLine1": [
+    {
+      "type": 0,
+      "value": "설정 › 「명령줄·AI 도구」의 안내대로 Claude Code를 사람용 MCP에 연결하면 이제 바로 붙어요."
+    }
+  ],
+  "releaseNotes.v0147.agentsLine2": [
+    {
+      "type": 0,
+      "value": "에이전트 연결 확인과 OAuth 동의 화면에서는 에이전트가 들어갈 수 있는 채널만 고를 수 있고, 고를 수 없는 채널에는 까닭이 함께 보여요."
+    }
+  ],
+  "releaseNotes.v0147.channelBrowseChanged": [
+    {
+      "type": 0,
+      "value": "공개 채널을 찾아 스스로 참여하는 「채널 둘러보기」가 생겼어요. 웹과 데스크탑은 사이드바 「채널」 머리의 +에서, 폰은 홈 「채널」 섹션 머리의 ⋯ 메뉴에서 열어요. 줄마다 채널 이름, 「기본」 표시, 멤버 수, 주제가 보이고, 「참여」를 누르면 바로 그 채널로 가요. 참여하기 전에 줄의 이름을 누르면 최근 글을 읽기만 할 수 있게 미리 봐요. 웹과 데스크탑의 ⌘K와 폰의 이름 검색에도 「참여하지 않은 공개 채널」이 함께 나와요. 참여한 채널의 읽지 않은 글은 참여한 뒤에 온 글부터 세요. 새로 만드는 공개 채널은 처음부터 둘러보기에 보여요. 이미 있던 공개 채널은 기본 채널만 보이고, 나머지는 소유자나 관리자가 웹이나 데스크탑의 채널 메뉴에서 「둘러보기에 보이기」를 켜야 보여요. 같은 메뉴의 「기본 채널로 지정」으로 기본 채널을 더 정할 수 있어요. 새로 들어오는 사람은 이제 공개 채널 전부가 아니라 기본 채널에만 자동으로 들어가요. 이미 있던 멤버는 어느 채널에서도 빠지거나 더해지지 않아요."
+    }
+  ],
+  "releaseNotes.v0147.channelBrowseTitle": [
+    {
+      "type": 0,
+      "value": "공개 채널을 둘러보고 스스로 참여해요"
+    }
+  ],
+  "releaseNotes.v0147.channelBrowseTryIt": [
+    {
+      "type": 0,
+      "value": "소유자나 관리자라면 웹이나 데스크탑에서 팀이 함께 쓰는 공개 채널을 열고, 채널 머리 ⋮ 메뉴의 「둘러보기에 보이기」를 켜 보세요. 다른 멤버가 「채널 둘러보기」를 열면 그 채널이 보이고 「참여」로 들어올 수 있어요."
+    }
+  ],
+  "releaseNotes.v0147.channelMembersChanged": [
+    {
+      "type": 0,
+      "value": "이제 일반 멤버도 공개 채널과 비공개 채널에서 나갈 수 있어요. 웹과 데스크탑은 채널 줄의 메뉴와 채널 머리 ⋮ 메뉴에, 폰은 채널 줄 시트, 대화의 ⋮ 시트, 대화 정보에 「채널 나가기」가 있어요. 둘러보기에 보이는 공개 채널은 나간 뒤에도 「채널 둘러보기」에서 언제든 다시 들어올 수 있고, 그 밖의 채널은 소유자나 관리자가 다시 넣어 줘야 해요. 웹과 데스크탑의 멤버 프로필 창은 큰 얼굴 아래에 「메시지 보내기」, 「멘션 복사」, 이메일이 서도록 새로 그렸어요. 소유자와 관리자는 그 창의 「관리」에서 역할을 바꾸고 「정지」, 「정지 풀기」, 「워크스페이스에서 내보내기」를 해요. 어느 것이든 확인 단계에서 무엇이 바뀌는지 먼저 읽고 정해요. 정지한 멤버는 멤버 탭의 「정지됨」 묶음에서 다시 찾아 풀 수 있어요. 채널 멤버 패널에서는 사람 줄의 ⋯로 「채널에서 내보내기」를 해요."
+    }
+  ],
+  "releaseNotes.v0147.channelMembersTitle": [
+    {
+      "type": 0,
+      "value": "누구나 채널을 나가고, 관리자는 멤버를 정리해요"
+    }
+  ],
+  "releaseNotes.v0147.channelMembersTryIt": [
+    {
+      "type": 0,
+      "value": "웹이나 데스크탑에서 멤버 탭의 사람을 눌러 프로필 창을 열어 보세요. 소유자나 관리자라면 「관리」에서 역할을 골라도 바로 바뀌지 않고, 확인 단계가 먼저 서요."
+    }
+  ],
+  "releaseNotes.v0147.channelNamesChanged": [
+    {
+      "type": 0,
+      "value": "채널 이름에 한글을 비롯해 모든 언어의 글자와 숫자를 쓸 수 있어요. 예전에는 영문 소문자, 숫자, 하이픈(-), 밑줄(_)만 받았어요. 빈칸은 -로 바뀌고 영문 대문자는 소문자로 저장돼서, 만들기 창은 친 것과 저장될 이름이 다를 때 「#디자인-리뷰 이름으로 만들어져요」처럼 미리 알려 줘요. 폰의 새 채널 시트도 같은 안내를 쓰고, 이제 한글 자판으로도 칠 수 있어요. 소유자와 관리자는 이미 있는 채널의 이름을 「이름 바꾸기」로 바꿀 수 있어요. 웹과 데스크탑은 채널 머리의 ⋮ 메뉴에, 폰은 채널 줄을 길게 누른 시트와 대화의 ⋮ 시트에 있어요. general 채널의 이름은 바꿀 수 없어요. 바꾼 이름은 내 사이드바와 채널 머리에 바로 보여요."
+    }
+  ],
+  "releaseNotes.v0147.channelNamesTitle": [
+    {
+      "type": 0,
+      "value": "채널 이름을 한글로 짓고 바꿀 수 있어요"
+    }
+  ],
+  "releaseNotes.v0147.channelNamesTryIt": [
+    {
+      "type": 0,
+      "value": "소유자나 관리자라면 새 채널 만들기에서 「디자인 리뷰」라고 쳐 보세요. 칸 아래에 「#디자인-리뷰 이름으로 만들어져요」가 서요."
+    }
+  ],
+  "releaseNotes.v0147.channelsLine1": [
+    {
+      "type": 0,
+      "value": "웹과 데스크탑 사이드바의 「채널」 머리에서 정렬 단추를 뺐어요. 가나다 정렬을 골라 두었던 계정도 이제 직접 정한 차례로 보여요."
+    }
+  ],
+  "releaseNotes.v0147.channelsLine2": [
+    {
+      "type": 0,
+      "value": "웹과 데스크탑 사이드바에서 새 글이 없는 채널과 DM은 이름이 한 단계 연하게 보여요."
+    }
+  ],
+  "releaseNotes.v0147.channelsLine3": [
+    {
+      "type": 0,
+      "value": "채널을 만들면 머리의 멤버 수가 바로 1로 서고, 이어서 「멤버 추가」가 떠서 사람을 넣을 수 있어요. 폰도 같아요."
+    }
+  ],
+  "releaseNotes.v0147.channelsLine4": [
+    {
+      "type": 0,
+      "value": "한글로 채널 이름을 치는 도중 입력기가 「디자인」을 잠깐 「디장」으로 만들어도, 작성창의 #, ⌘K, 폰 검색에서 그 채널이 사라지지 않아요."
+    }
+  ],
+  "releaseNotes.v0147.channelsLine5": [
+    {
+      "type": 0,
+      "value": "작성창의 #, ⌘K, 폰 검색에서 채널 이름은 화면 언어의 차례로, 숫자는 값대로 세워요. sprint-2가 sprint-10보다 앞이에요."
+    }
+  ],
+  "releaseNotes.v0147.channelsLine6": [
+    {
+      "type": 0,
+      "value": "채널 만들기가 실패할 때의 문장이 화면 언어로 나와요."
+    }
+  ],
+  "releaseNotes.v0147.channelsTopic": [
+    {
+      "type": 0,
+      "value": "채널"
+    }
+  ],
+  "releaseNotes.v0147.dmLeaveChanged": [
+    {
+      "type": 0,
+      "value": "사람끼리의 1:1 대화에 「대화 나가기」가 생겼어요. 웹과 데스크탑은 사이드바 대화 줄의 우클릭 메뉴와 대화 머리의 ⋮ 메뉴에, 폰은 대화 줄을 길게 누른 시트, 대화의 ⋮ 시트, 대화 정보에 있어요. 나가면 내 화면에서 지금까지의 대화가 사라지고, 상대의 화면에는 그대로 남아요. 상대가 다시 글을 보내면 그 글부터 새 대화로 보여요. 그 대화에 예약해 둔 메시지도 함께 취소되고 나간 뒤에는 되돌릴 수 없어서, 나가기 전에 한 번 더 확인해요. 에이전트와의 DM과 여러 사람이 있는 대화에는 이 메뉴가 없어요. 대화를 목록에서만 치우던 「대화 닫기」는 이름이 「목록에서 숨기기」로 바뀌었고, 치운 대화는 「숨긴 대화」에서 「다시 보이기」로 되살려요."
+    }
+  ],
+  "releaseNotes.v0147.dmLeaveTitle": [
+    {
+      "type": 0,
+      "value": "1:1 대화에서 나갈 수 있어요"
+    }
+  ],
+  "releaseNotes.v0147.dmLeaveTryIt": [
+    {
+      "type": 0,
+      "value": "사이드바에서 사람과의 1:1 대화 줄을 우클릭해 보세요(폰은 길게 누르기). 메뉴의 「대화 나가기」를 누르면 무엇이 사라지는지 먼저 알려 줘요. 「취소」로 돌아올 수 있어요."
+    }
+  ],
+  "releaseNotes.v0147.lookLine1": [
+    {
+      "type": 0,
+      "value": "웹과 데스크탑의 채널·DM 줄 메뉴와 채널 머리 ⋮ 메뉴는 줄마다 아이콘이 붙고, 「복사」와 「섹션으로 이동」은 옆으로 펼치는 하위 메뉴가 됐어요."
+    }
+  ],
+  "releaseNotes.v0147.lookLine2": [
+    {
+      "type": 0,
+      "value": "웹과 데스크탑의 멤버 탭이 줄마다 이메일을 보여 주고, 이름이나 이메일로도 찾을 수 있어요. 게스트 화면에는 이메일이 나오지 않아요."
+    }
+  ],
+  "releaseNotes.v0147.lookLine3": [
+    {
+      "type": 0,
+      "value": "아바타의 접속 점이 모양으로도 갈려요. 온라인은 채운 원, 자리 비움은 초승달, 방해 금지는 가로 줄, 오프라인은 속 빈 고리예요. 폰도 같아요."
+    }
+  ],
+  "releaseNotes.v0147.lookLine4": [
+    {
+      "type": 0,
+      "value": "웹과 데스크탑의 「워크스페이스 추가」 창이 「새 워크스페이스 만들기」와 「이미 있는 곳에 참여」 두 카드로 바뀌었어요."
+    }
+  ],
+  "releaseNotes.v0147.lookLine5": [
+    {
+      "type": 0,
+      "value": "웹과 데스크탑의 프로필 메뉴에 「서버 주소 복사」, 「워크스페이스 설정」, 「워크스페이스 나가기」, 「워크스페이스 추가」가 생겼어요."
+    }
+  ],
+  "releaseNotes.v0147.lookLine6": [
+    {
+      "type": 0,
+      "value": "폰의 시트와 대화 정보에서 줄 끝 아이콘이 한 세로 줄에 맞춰 서고, 알림 줄의 이모지는 종 아이콘으로 바뀌었어요."
+    }
+  ],
+  "releaseNotes.v0147.lookTopic": [
+    {
+      "type": 0,
+      "value": "화면"
+    }
+  ],
+  "releaseNotes.v0147.reconnectSyncChanged": [
+    {
+      "type": 0,
+      "value": "연결이 끊겼다가 다시 붙으면, 열어 둔 대화에서 화면에 보이는 글을 한 번 다시 읽어 그 사이에 고쳐지거나 지워진 글, 달리거나 떼어진 반응, 고정과 고정 풀기를 맞춰요. 폰은 앱을 다시 앞으로 가져와 연결이 다시 붙을 때도 같아요. 화면에 이미 있던 글만 고치고, 열어 두지 않은 대화는 이때 다시 읽지 않아요. 웹, 데스크탑, 폰 모두 같아요."
+    }
+  ],
+  "releaseNotes.v0147.reconnectSyncTitle": [
+    {
+      "type": 0,
+      "value": "다시 연결되면 그 사이의 수정과 반응이 맞춰져요"
+    }
+  ],
+  "releaseNotes.v0147.reconnectSyncTryIt": [
+    {
+      "type": 0,
+      "value": "폰에서 대화를 열어 둔 채 비행기 모드를 잠깐 켜고, 그 사이 다른 기기에서 그 대화의 글에 반응을 달아 보세요. 비행기 모드를 끄면 반응이 맞춰져요."
+    }
+  ],
+  "releaseNotes.v0147.settingsLine1": [
+    {
+      "type": 0,
+      "value": "웹과 데스크탑의 설정 › 모양에서 테마 고르기가 늘 펼친 격자로 서고, 테마 그림은 글자 없이, 강조색은 이름 없는 동그라미로 보여요."
+    }
+  ],
+  "releaseNotes.v0147.summary": [
+    {
+      "type": 0,
+      "value": "공개 채널을 둘러보고 스스로 참여하고, 사람끼리의 1:1 대화에서 나가고, 채널 이름을 한글로 짓고 바꿀 수 있어요."
+    }
+  ],
+  "releaseNotes.v0147.tooltipsChanged": [
+    {
+      "type": 0,
+      "value": "웹과 데스크탑에서 아이콘만 있는 단추에 마우스를 올리면, 브라우저의 기본 툴팁 대신 앱의 툴팁이 금방 떠요. 사이드바, 왼쪽 레일, 입력창, 첨부 보기, 이모티콘 고르기, 작업 도크 같은 곳의 단추가 모두 같은 툴팁을 써요. 키보드로 초점을 옮겨도 바로 뜨고, 터치로 누를 때는 뜨지 않아요."
+    }
+  ],
+  "releaseNotes.v0147.tooltipsTitle": [
+    {
+      "type": 0,
+      "value": "아이콘 단추에 이름이 바로 떠요"
+    }
+  ],
+  "releaseNotes.v0147.tooltipsTryIt": [
+    {
+      "type": 0,
+      "value": "웹이나 데스크탑에서 사이드바 「채널」 머리의 + 단추에 마우스를 올리거나, Tab으로 초점을 옮겨 보세요. 단추 이름이 바로 떠요."
+    }
+  ],
   "releaseNotes.version.current": [
     {
       "type": 0,
@@ -8701,6 +10607,32 @@ export const catalog: MessageCatalog = {
       "value": "키를 확인하는 중이에요."
     }
   ],
+  "timeline.addMember.createdDescription": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " 채널을 만들었어요. 비공개 채널은 추가한 멤버에게만 보여요."
+    }
+  ],
+  "timeline.addMember.createdDescriptionPublic": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " 채널을 만들었어요. 워크스페이스의 정식 멤버 누구나 채널 둘러보기에서 찾아 참여할 수 있어요."
+    }
+  ],
+  "timeline.addMember.later": [
+    {
+      "type": 0,
+      "value": "나중에"
+    }
+  ],
   "timeline.agentRail.open": [
     {
       "type": 1,
@@ -8739,6 +10671,24 @@ export const catalog: MessageCatalog = {
       "value": "일하는 에이전트"
     }
   ],
+  "timeline.approval.channelAgentIn": [
+    {
+      "type": 0,
+      "value": "이 에이전트가 이미 이 채널에 들어가 있어요."
+    }
+  ],
+  "timeline.approval.channelNeedsMember": [
+    {
+      "type": 0,
+      "value": "먼저 이 채널에 에이전트를 멤버로 추가해 주세요."
+    }
+  ],
+  "timeline.approval.channelsRefused": [
+    {
+      "type": 0,
+      "value": "고른 채널 가운데 지금은 연결할 수 없는 채널이 있어요. 목록을 다시 확인해 주세요."
+    }
+  ],
   "timeline.approval.reproposeBusy": [
     {
       "type": 0,
@@ -8755,6 +10705,100 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "결정하지 않으면 에이전트가 다시 제안해야 해요."
+    }
+  ],
+  "timeline.channelLeave.bodyPrivate": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " 채널이 사이드바에서 사라져요. 비공개 채널이라 다시 들어오려면 소유자나 관리자의 초대가 필요해요. 마지막 멤버가 나가면 채널이 보관되고 아무도 다시 들어올 수 없어요."
+    }
+  ],
+  "timeline.channelLeave.bodyPublic": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " 채널이 사이드바에서 사라져요. 다시 들어오려면 소유자나 관리자가 다시 추가해야 해요."
+    }
+  ],
+  "timeline.channelLeave.bodyPublicBrowse": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " 채널이 사이드바에서 사라져요. 채널 둘러보기에서 언제든 다시 들어올 수 있어요."
+    }
+  ],
+  "timeline.channelLeave.busy": [
+    {
+      "type": 0,
+      "value": "나가는 중…"
+    }
+  ],
+  "timeline.channelLeave.cancel": [
+    {
+      "type": 0,
+      "value": "취소"
+    }
+  ],
+  "timeline.channelLeave.confirm": [
+    {
+      "type": 0,
+      "value": "채널 나가기"
+    }
+  ],
+  "timeline.channelLeave.errorForbidden": [
+    {
+      "type": 0,
+      "value": "이 채널에서는 나갈 수 없어요."
+    }
+  ],
+  "timeline.channelLeave.errorGeneric": [
+    {
+      "type": 0,
+      "value": "채널에서 나가지 못했어요. 잠시 뒤에 다시 시도해 주세요."
+    }
+  ],
+  "timeline.channelLeave.errorNetwork": [
+    {
+      "type": 0,
+      "value": "채널에서 나가지 못했어요. "
+    },
+    {
+      "type": 1,
+      "value": "reason"
+    }
+  ],
+  "timeline.channelLeave.errorNotFound": [
+    {
+      "type": 0,
+      "value": "이미 이 채널의 멤버가 아니에요. 채널이 보관됐을 수도 있어요."
+    }
+  ],
+  "timeline.channelLeave.title": [
+    {
+      "type": 0,
+      "value": "이 채널에서 나갈까요?"
+    }
+  ],
+  "timeline.createChannel.privateDetail": [
+    {
+      "type": 0,
+      "value": "추가된 멤버에게만 보여요."
+    }
+  ],
+  "timeline.createChannel.publicDetail": [
+    {
+      "type": 0,
+      "value": "워크스페이스의 정식 멤버 누구나 채널 둘러보기에서 찾아 참여할 수 있어요."
     }
   ],
   "timeline.edited.atDate": [
@@ -8939,6 +10983,17 @@ export const catalog: MessageCatalog = {
       "style": null
     }
   ],
+  "timeline.memberPanel.groupSuspended": [
+    {
+      "type": 0,
+      "value": "정지됨 "
+    },
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    }
+  ],
   "timeline.memberPanel.groupWorking": [
     {
       "type": 0,
@@ -9006,6 +11061,96 @@ export const catalog: MessageCatalog = {
       "value": "다시 불러오기"
     }
   ],
+  "timeline.memberPanel.remove": [
+    {
+      "type": 0,
+      "value": "채널에서 내보내기"
+    }
+  ],
+  "timeline.memberPanel.removeBody": [
+    {
+      "type": 1,
+      "value": "channel"
+    },
+    {
+      "type": 0,
+      "value": " 채널이 "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " 님의 사이드바에서 사라져요. 다시 들어오려면 소유자나 관리자가 다시 추가해야 해요."
+    }
+  ],
+  "timeline.memberPanel.removeBusy": [
+    {
+      "type": 0,
+      "value": "내보내는 중"
+    }
+  ],
+  "timeline.memberPanel.removeCancel": [
+    {
+      "type": 0,
+      "value": "취소"
+    }
+  ],
+  "timeline.memberPanel.removeConfirm": [
+    {
+      "type": 0,
+      "value": "내보내기"
+    }
+  ],
+  "timeline.memberPanel.removed": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " 님을 채널에서 내보냈어요."
+    }
+  ],
+  "timeline.memberPanel.removeErrorForbidden": [
+    {
+      "type": 0,
+      "value": "이 멤버를 채널에서 내보낼 권한이 없어요."
+    }
+  ],
+  "timeline.memberPanel.removeErrorGeneric": [
+    {
+      "type": 0,
+      "value": "내보내지 못했어요. 잠시 뒤에 다시 시도해 주세요."
+    }
+  ],
+  "timeline.memberPanel.removeErrorNetwork": [
+    {
+      "type": 0,
+      "value": "내보내지 못했어요. "
+    },
+    {
+      "type": 1,
+      "value": "reason"
+    }
+  ],
+  "timeline.memberPanel.removeErrorNotFound": [
+    {
+      "type": 0,
+      "value": "이미 이 채널의 멤버가 아니에요."
+    }
+  ],
+  "timeline.memberPanel.removeTitle": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " 님을 이 채널에서 내보낼까요?"
+    }
+  ],
   "timeline.memberPanel.request": [
     {
       "type": 0,
@@ -9028,6 +11173,16 @@ export const catalog: MessageCatalog = {
     {
       "type": 1,
       "value": "text"
+    }
+  ],
+  "timeline.memberPanel.rowActions": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " 님 관리"
     }
   ],
   "timeline.memberPanel.stageSpoken": [
@@ -10147,6 +12302,336 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "oort 도구"
+    }
+  ],
+  "workspace.add.back": [
+    {
+      "type": 0,
+      "value": "뒤로"
+    }
+  ],
+  "workspace.add.cancel": [
+    {
+      "type": 0,
+      "value": "취소"
+    }
+  ],
+  "workspace.add.createLead": [
+    {
+      "type": 0,
+      "value": "이 서버에 새 워크스페이스를 열어요. 서버 운영자만 만들 수 있어요."
+    }
+  ],
+  "workspace.add.createLeadNotOperator": [
+    {
+      "type": 0,
+      "value": "이 서버의 운영자만 만들 수 있어요. 이 계정으로는 만들 수 없어요."
+    }
+  ],
+  "workspace.add.createTitle": [
+    {
+      "type": 0,
+      "value": "새 워크스페이스 만들기"
+    }
+  ],
+  "workspace.add.joinChecking": [
+    {
+      "type": 0,
+      "value": "확인 중"
+    }
+  ],
+  "workspace.add.joinClaim": [
+    {
+      "type": 0,
+      "value": "첫 소유자 링크와 재설정 링크는 여기서 받지 않아요. 로그아웃한 뒤 로그인 화면에 붙여 넣으세요."
+    }
+  ],
+  "workspace.add.joinConfirmAction": [
+    {
+      "type": 0,
+      "value": "로그아웃하고 넘어가기"
+    }
+  ],
+  "workspace.add.joinConfirmBody": [
+    {
+      "type": 0,
+      "value": "이 앱은 한 번에 워크스페이스 하나에만 로그인해요. 지금 워크스페이스에서 로그아웃돼요. 로그인 화면에는 넣은 주소를 채워 둘게요."
+    }
+  ],
+  "workspace.add.joinConfirmTitle": [
+    {
+      "type": 0,
+      "value": "로그아웃하고 넘어갈까요?"
+    }
+  ],
+  "workspace.add.joinEmpty": [
+    {
+      "type": 0,
+      "value": "주소나 초대 링크를 넣으세요."
+    }
+  ],
+  "workspace.add.joinField": [
+    {
+      "type": 0,
+      "value": "주소나 초대 링크"
+    }
+  ],
+  "workspace.add.joinHint": [
+    {
+      "type": 0,
+      "value": "받은 그대로 붙여 넣어요. 예: https://team.example.com"
+    }
+  ],
+  "workspace.add.joinLead": [
+    {
+      "type": 0,
+      "value": "주소나 초대 링크로 들어가요. 다른 서버는 로그아웃한 뒤 로그인 화면에서 그 링크를 넣고, 이 서버의 초대는 로그아웃한 뒤 로그인 화면에서 이어 가요."
+    }
+  ],
+  "workspace.add.joinLeadWeb": [
+    {
+      "type": 0,
+      "value": "주소나 초대 링크로 들어가요. 다른 서버는 새 탭에서 열고, 이 서버의 초대는 로그아웃한 뒤 로그인 화면에서 이어 가요."
+    }
+  ],
+  "workspace.add.joinNext": [
+    {
+      "type": 0,
+      "value": "계속"
+    }
+  ],
+  "workspace.add.joinOpenAction": [
+    {
+      "type": 0,
+      "value": "새 탭에서 열기"
+    }
+  ],
+  "workspace.add.joinOpenBody": [
+    {
+      "type": 0,
+      "value": "웹에서는 이 창에서 다른 서버로 넘어갈 수 없어요. 그 서버를 새 탭에서 열고, 지금 워크스페이스는 그대로 있어요."
+    }
+  ],
+  "workspace.add.joinOpenInvite": [
+    {
+      "type": 1,
+      "value": "server"
+    },
+    {
+      "type": 0,
+      "value": "의 초대를 새 탭에서 열어요."
+    }
+  ],
+  "workspace.add.joinOpenServer": [
+    {
+      "type": 1,
+      "value": "server"
+    },
+    {
+      "type": 0,
+      "value": "의 로그인 화면을 새 탭에서 열어요."
+    }
+  ],
+  "workspace.add.joinOpenTitle": [
+    {
+      "type": 0,
+      "value": "새 탭에서 열까요?"
+    }
+  ],
+  "workspace.add.joinPasteAction": [
+    {
+      "type": 0,
+      "value": "로그아웃"
+    }
+  ],
+  "workspace.add.joinPasteBody": [
+    {
+      "type": 0,
+      "value": "다른 서버에 참여하려면 로그아웃한 뒤 로그인 화면에서 「바꾸기」를 누르고, 나오는 칸에 이 링크를 붙여 넣어요. 로그아웃하기 전에 복사해 두세요."
+    }
+  ],
+  "workspace.add.joinPasteTitle": [
+    {
+      "type": 0,
+      "value": "로그아웃할까요?"
+    }
+  ],
+  "workspace.add.joinSameServer": [
+    {
+      "type": 0,
+      "value": "이미 이 서버에 있어요. 같은 서버의 다른 워크스페이스는 로그아웃한 뒤 로그인 화면의 「다른 워크스페이스로 로그인」에서 워크스페이스 ID로 들어가요."
+    }
+  ],
+  "workspace.add.joinTargetInvite": [
+    {
+      "type": 1,
+      "value": "server"
+    },
+    {
+      "type": 0,
+      "value": "의 초대로 넘어가요."
+    }
+  ],
+  "workspace.add.joinTargetInviteOnly": [
+    {
+      "type": 0,
+      "value": "받은 초대 링크로 넘어가요."
+    }
+  ],
+  "workspace.add.joinTargetServer": [
+    {
+      "type": 1,
+      "value": "server"
+    },
+    {
+      "type": 0,
+      "value": "의 로그인 화면으로 넘어가요."
+    }
+  ],
+  "workspace.add.joinTitle": [
+    {
+      "type": 0,
+      "value": "이미 있는 곳에 참여"
+    }
+  ],
+  "workspace.add.joinUnreachable": [
+    {
+      "type": 1,
+      "value": "server"
+    },
+    {
+      "type": 0,
+      "value": "에 닿지 않아서 로그아웃하지 않았어요. 주소를 다시 확인하세요."
+    }
+  ],
+  "workspace.add.lead": [
+    {
+      "type": 0,
+      "value": "새 워크스페이스를 만들거나, 이미 있는 워크스페이스에 들어가요."
+    }
+  ],
+  "workspace.add.operatorContact": [
+    {
+      "type": 0,
+      "value": "초대를 받았다면 「이미 있는 곳에 참여」로 들어갈 수 있어요. 없다면 이 서버를 운영하는 사람에게 문의하세요."
+    }
+  ],
+  "workspace.add.title": [
+    {
+      "type": 0,
+      "value": "워크스페이스 추가"
+    }
+  ],
+  "workspace.create.lead": [
+    {
+      "type": 0,
+      "value": "이 서버에 새 워크스페이스를 하나 더 만들어요. 만든 사람이 소유자가 되고 #general 채널 하나로 시작해요. 서버 운영자만 만들 수 있어요."
+    }
+  ],
+  "workspace.create.operatorOnly": [
+    {
+      "type": 0,
+      "value": "새 워크스페이스는 이 서버의 운영자만 만들 수 있어요."
+    }
+  ],
+  "workspace.create.slugHint": [
+    {
+      "type": 0,
+      "value": "영문 소문자, 숫자, 하이픈만 쓸 수 있어요. 서버 전체에서 하나뿐이어야 해요."
+    }
+  ],
+  "workspace.leave.body": [
+    {
+      "type": 0,
+      "value": "나가면 멤버십이 끝나고, 확인하면 바로 로그아웃돼요. 보낸 메시지는 남아요. 다시 들어오려면 초대가 필요해요."
+    }
+  ],
+  "workspace.leave.busy": [
+    {
+      "type": 0,
+      "value": "나가는 중"
+    }
+  ],
+  "workspace.leave.cancel": [
+    {
+      "type": 0,
+      "value": "취소"
+    }
+  ],
+  "workspace.leave.confirm": [
+    {
+      "type": 0,
+      "value": "나가기"
+    }
+  ],
+  "workspace.leave.lastOwner": [
+    {
+      "type": 0,
+      "value": "마지막 소유자는 나갈 수 없어요. 먼저 다른 사람에게 소유자를 넘기세요."
+    }
+  ],
+  "workspace.leave.lastOwnerNext": [
+    {
+      "type": 0,
+      "value": "멤버 탭에서 그 사람의 프로필을 열어 역할을 소유자로 바꾼 뒤 다시 나가세요."
+    }
+  ],
+  "workspace.leave.title": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "에서 나갈까요?"
+    }
+  ],
+  "workspace.leave.titleUnnamed": [
+    {
+      "type": 0,
+      "value": "이 워크스페이스에서 나갈까요?"
+    }
+  ],
+  "workspace.menu.copiedAddress": [
+    {
+      "type": 0,
+      "value": "서버 주소 복사됨"
+    }
+  ],
+  "workspace.menu.copyAddress": [
+    {
+      "type": 0,
+      "value": "서버 주소 복사"
+    }
+  ],
+  "workspace.menu.copyAddressNote": [
+    {
+      "type": 0,
+      "value": "기본이 아닌 워크스페이스는 ID도 필요해요."
+    }
+  ],
+  "workspace.menu.copyFailed": [
+    {
+      "type": 0,
+      "value": "복사하지 못했어요"
+    }
+  ],
+  "workspace.menu.fallbackTitle": [
+    {
+      "type": 0,
+      "value": "워크스페이스"
+    }
+  ],
+  "workspace.menu.leave": [
+    {
+      "type": 0,
+      "value": "워크스페이스 나가기"
+    }
+  ],
+  "workspace.menu.settings": [
+    {
+      "type": 0,
+      "value": "워크스페이스 설정"
     }
   ]
 };

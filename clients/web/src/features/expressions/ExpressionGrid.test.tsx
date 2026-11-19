@@ -11,6 +11,7 @@ import { ExpressionStore } from "./ExpressionStore";
 import type { ExpressionTransport } from "./transport";
 import { ExpressionsContext } from "./context";
 import { TeamExpressionsPanel } from "./TeamExpressionsPanel";
+import { tooltipTextOf } from "@/design/ui/tooltipTestKit";
 
 vi.mock("@momo/core/lib/api", async (actual) => ({ ...await actual<object>(), fetchRoster: vi.fn().mockResolvedValue([]), authedResponse: vi.fn() }));
 
@@ -91,7 +92,7 @@ describe("그림 격자: 구역과 칸", () => {
     // 옛 안내 글(owner: 텍스트는 같이 노출 안 하고 카카오톡처럼)은 창 어디에도 없다.
     expect(view.container.textContent).not.toContain("한 보관함의 그림을 반응이나 메시지에 쓸 수 있어요");
     const first = grid.querySelector("button")!;
-    expect(first.getAttribute("title")).toBe("chi_a");
+    expect(tooltipTextOf(first)).toBe("chi_a");
     expect(first.getAttribute("aria-label")).toBe("chi_a 메시지에 넣기");
     // 열 수는 방향키 모델(코어 EXPRESSION_GRID_COLS)과 같은 숫자여야 한다 - 다르면 위아래 키가 화면의 줄과 어긋난다.
     for (const list of grid.querySelectorAll("[data-section] > div")) expect(list.className).toContain(`grid-cols-${EXPRESSION_GRID_COLS}`);
@@ -181,6 +182,21 @@ describe("세트 띠", () => {
     expect(stripLabels(bare.view)).toEqual(["chi", "농담곰", "Other"]);
     expect(bare.view.container.querySelector("[data-strip='favorites']")).toBeNull();
     expect(bare.view.container.querySelector("[data-strip='recent']")).toBeNull();
+  });
+
+  it("띠 단추의 툴팁은 띠의 스크롤 칸 밖(document.body)에 그려진다 - 칸 안에 그리면 위든 아래든 잘린다(#5980)", async () => {
+    const { view } = await mount(storeOf(ITEMS, { starred: ["dam_a"] }));
+    const scroller = stripOf(view).querySelector<HTMLElement>("[data-strip]")!.parentElement!.parentElement!;
+    for (const id of ["favorites", "set:dam"]) {
+      const button = stripOf(view).querySelector<HTMLElement>(`[data-strip='${id}']`)!;
+      button.matches = (selector: string) => selector === ":focus-visible" || Element.prototype.matches.call(button, selector);
+      act(() => { button.dispatchEvent(new FocusEvent("focusin", { bubbles: true })); });
+      const tip = document.querySelector<HTMLElement>('[data-testid="tooltip"]');
+      expect(tip?.textContent).toBe(button.getAttribute("aria-label"));
+      expect(tip?.parentElement).toBe(document.body);
+      expect(scroller.contains(tip)).toBe(false);
+      act(() => { button.dispatchEvent(new FocusEvent("focusout", { bubbles: true })); });
+    }
   });
 
   it("단추를 누르면 그 구역으로 스크롤하고 지금 구역을 표시한다", async () => {

@@ -31,6 +31,7 @@ import { RestoringScreen } from "@/app/RestoringScreen";
 import { Skeleton } from "@/features/common/States";
 import { RenderErrorBoundary } from "@/features/common/RenderErrorBoundary";
 import { ChatShell } from "@/features/chat/ChatShell";
+import { ChannelRoute } from "@/features/channels/ChannelRoute";
 import { InboxRoute } from "@/features/inbox/InboxRoute";
 import { DraftsRoute } from "@/features/drafts/DraftsRoute";
 import { ScheduledRoute } from "@/features/scheduled/ScheduledRoute";
@@ -139,14 +140,16 @@ function FirstRunSession({
   useEffect(() => {
     const handle = createRealtime(
       resolveSpikeRealtimeUrl(session.realtimeWebSocketUrl),
-      setConnStatus
+      setConnStatus,
+      // 방 구독이 개인 채널로 옮겨 온 그 방의 프레임도 받는다(ADR-0177 증보 2026-11-14 D17).
+      session.member.id
     );
     setRealtime(handle);
     return () => {
       handle.dispose();
       setRealtime(null);
     };
-  }, [session.realtimeWebSocketUrl]);
+  }, [session.realtimeWebSocketUrl, session.member.id]);
 
   return (
     <SessionProvider
@@ -178,7 +181,7 @@ export function App() {
   const retryRestore = useCallback(async () => {
     const restored = await restoreSession();
     if (restored) signIn(restored);
-    else if (!hasPersistedSession()) clearSessionNotices();
+    else if (!hasPersistedSession()) clearSessionNotices({ keepServerSwitch: true });
   }, [signIn]);
   const [firstRunTick, setFirstRunTick] = useState(0);
   // GitHub 에서 돌아온 주소의 단어(`?githubApp=`·`?githubInstall=`)는 첫 렌더에 한 번만 읽어 붙든다.
@@ -381,7 +384,7 @@ export function App() {
           }
         >
           <Route index element={<ChatShell />} />
-          <Route path="c/:channelId" element={<ChatShell />} />
+          <Route path="c/:channelId" element={<ChannelRoute />} />
           <Route path="inbox" element={<InboxRoute />} />
           <Route path="drafts" element={<DraftsRoute />} />
           <Route path="scheduled" element={<ScheduledRoute />} />

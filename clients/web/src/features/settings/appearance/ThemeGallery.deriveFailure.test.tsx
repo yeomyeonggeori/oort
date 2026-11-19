@@ -75,7 +75,7 @@ async function mountSection(): Promise<HTMLElement> {
   try {
     await vi.waitFor(
       () => {
-        expect(q(host, "theme-style-trigger")).not.toBeNull();
+        expect(q(host, "theme-style-group")).not.toBeNull();
         expect(host.querySelector<HTMLElement>('[data-testid="accent-swatch-dawn"]')?.style.getPropertyValue("--signal")).toBeTruthy();
       },
       { timeout: 15_000, interval: 10 }
@@ -114,10 +114,7 @@ describe("화면: 한 테마의 파생이 던져도 설정 화면은 서고 그 
     mocks.failIds.add("nord");
     updateAppearance({ theme: "catalog:github", scheme: "dark" });
     const host = await mountSection();
-    act(() => {
-      q(host, "theme-style-trigger")!.click();
-    });
-    expect(q(host, "theme-style-options")).not.toBeNull();
+    expect(q(host, "theme-style-options")).not.toBeNull(); // 격자는 늘 펴져 있다(#5783)
     const nord = q(host, tileTestId("catalog:nord"));
     expect(nord).not.toBeNull(); // 타일은 그대로 있고
     expect(paintedVars(nord)).toEqual([0]); // 색만 비어 있다
@@ -127,7 +124,7 @@ describe("화면: 한 테마의 파생이 던져도 설정 화면은 서고 그 
     expect(host.querySelectorAll('[data-testid^="accent-swatch-"]')).toHaveLength(5);
   });
 
-  it("고른 테마 자신이 던져도 접힌 행·칩이 무너지지 않는다 (칩은 기본 신호가 없어 그리지 않는다)", async () => {
+  it("고른 테마 자신이 던져도 격자·칩이 무너지지 않는다 (칩은 기본 신호가 없어 그리지 않는다)", async () => {
     // 저장소가 막 읽은 값이 던지는 테마여도 화면 전체가 무너지면 안 된다: 칩은 null 결과를 그린 채 남는다.
     updateAppearance({ theme: "catalog:github", scheme: "dark" });
     mocks.failIds.add("github");
@@ -140,11 +137,15 @@ describe("화면: 한 테마의 파생이 던져도 설정 화면은 서고 그 
     });
     reactActEnvironment.IS_REACT_ACT_ENVIRONMENT = false;
     try {
-      await vi.waitFor(() => expect(q(host, "theme-style-trigger")).not.toBeNull(), { timeout: 15_000, interval: 10 });
+      await vi.waitFor(() => expect(q(host, "theme-style-group")).not.toBeNull(), { timeout: 15_000, interval: 10 });
     } finally {
       reactActEnvironment.IS_REACT_ACT_ENVIRONMENT = true;
     }
-    expect(q(host, "theme-style-trigger")!.getAttribute("aria-label")).toContain("GitHub");
-    expect(q(host, "theme-style-selected-preview")).not.toBeNull();
+    // 고른 타일은 이름과 함께 서 있고(색만 비어 층이 루트를 물려받는다), 칩 다섯도 선다.
+    const github = q(host, tileTestId("catalog:github"))!;
+    expect(github.hasAttribute("data-selected")).toBe(true);
+    expect(github.querySelector(".theme-tile-name")?.textContent).toBe("GitHub");
+    expect(paintedVars(github)).toEqual([0]);
+    expect(host.querySelectorAll('[data-testid^="accent-swatch-"]')).toHaveLength(5);
   });
 });

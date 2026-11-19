@@ -1,12 +1,36 @@
 import { isSurfaceProvided } from "@momo/core/features/capabilities/serverSurfaces";
-import { Fragment, useId, useMemo, useState } from "react";
+import { Fragment, useMemo, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { Bell, BellOff, Check, Loader2 } from "lucide-react";
 import {
-  removeChannelMember,
+  Bell,
+  BellOff,
+  BookOpen,
+  Check,
+  Copy,
+  EyeOff,
+  Fingerprint,
+  FolderInput,
+  GitPullRequest,
+  Info,
+  Link,
+  Loader2,
+  Compass,
+  DoorOpen,
+  Mail,
+  MailOpen,
+  Pencil,
+  Star,
+  StarOff,
+  Type,
+  UserPlus,
+  type LucideIcon,
+} from "lucide-react";
+import {
+  leaveChannel,
   setChannelNotificationPref,
   uuidEq,
+  ApiError,
   type Channel,
   type MembershipRole,
   type ReadState,
@@ -15,57 +39,60 @@ import { composedUnreadCount } from "@momo/core/features/readState/model";
 import { useChannelNotificationMutation } from "./useChannelNotificationMutation";
 import { advertiseReadState } from "@/features/chat/advertiseReadState";
 import {
-  channelLeaveConfirmBody,
-  channelLeaveFailureMessage,
+  channelLeaveConfirmBodyKey,
+  channelLeaveFailure,
   CHANNEL_ACTION_ERROR_GROUP_LABEL,
   CHANNEL_COPY_FAILURE,
   CHANNEL_COPY_UNAVAILABLE,
-  CHANNEL_LEAVE_CONFIRM_TITLE,
-  CHANNEL_LEAVE_LABEL,
   CHANNEL_MARK_READ_FAILURE,
   CHANNEL_MARK_UNREAD_FAILURE,
   CHANNEL_MUTE_FAILURE,
 } from "@momo/core/features/channels/model";
+import { canSetBrowseListed } from "@momo/core/features/channels/browse";
+import { canRenameChannel } from "@momo/core/features/channels/rename";
+import { useSetBrowseListed } from "@/features/channels/useSetBrowseListed";
+import { canSetChannelDefault, isOnlyVisibleDefault } from "@momo/core/features/channels/defaultChannel";
+import { useSetChannelDefault } from "@/features/channels/useSetChannelDefault";
 import {
-  DropdownMenuGroup,
+  DropdownMenuCheckboxItem,
   DropdownMenuItem,
-  DropdownMenuLabel,
   DropdownMenuRadioGroup,
   DropdownMenuRadioItem,
   DropdownMenuSeparator,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
 } from "@/design/ui/dropdown-menu";
 import {
-  ContextMenuGroup,
   ContextMenuItem,
-  ContextMenuLabel,
   ContextMenuRadioGroup,
   ContextMenuRadioItem,
   ContextMenuSeparator,
+  ContextMenuSub,
+  ContextMenuSubContent,
+  ContextMenuSubTrigger,
 } from "@/design/ui/context-menu";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogTitle,
-  type DialogFocusTarget,
-} from "@/design/ui/dialog";
-import { Button } from "@/design/ui/button";
+import { type DialogFocusTarget } from "@/design/ui/dialog";
 import { InlineBanner } from "@/features/common/States";
+import { ConfirmDialog } from "@/design/ui/confirm-dialog";
+import { ROUTE_REGION_DOM_ID } from "@/app/shellNav";
 import { useClipboardCopy } from "@/design/hooks/useClipboardCopy";
 import { channelShareUrl } from "@/features/inbox/anchor";
 import { openChannelId } from "@/features/sidebar/openChannel";
 import { SECTION_MOVE_TO_BASE_LABEL } from "@momo/core/features/sidebar/sidebarSections";
 import { absoluteApiBase } from "@/lib/serverBase";
+import { useFormatMessage } from "@/i18n/useFormatMessage";
 import {
   applyReadStateToCache,
   useInvalidateReadStates,
 } from "@/features/workspace/useWorkspace";
 import {
   channelActionAvailability,
-  channelActionClusterTitle,
+  channelActionClusterSubmenu,
   channelActionItemsForSurface,
   channelActionKeepsMenuOpen,
   type ChannelActionAvailability,
+  type ChannelActionIcon,
   type ChannelActionItem,
   type ChannelActionKey,
   type ChannelActionState,
@@ -93,6 +120,7 @@ export interface ChannelActionTarget {
   channel: Channel;
   /** 화면에 보이는 채널 이름(labelParts.text ?? label). 확인 문장·이름 복사가 쓴다. */
   title: string;
+  /** 로그인 멤버. 나가기가 본인 길(`…/members/me`)이 된 뒤로(#5778) 이 훅은 읽지 않는다 — 부르는 쪽의 모양만 남았다. */
   selfMemberId: string;
   /** 로그인 멤버의 워크스페이스 역할. undefined 면 내놓고 서버가 답하게 둔다. */
   selfRole: MembershipRole | undefined;
@@ -121,11 +149,22 @@ export interface ChannelActionTarget {
   starred?: boolean;
   onToggleStar?: () => void;
   /**
-   * DM 을 이 기기의 사이드바에서 닫는다 (#3963). 손이 없으면 「대화 닫기」가 서지
+   * DM 을 이 기기의 사이드바에서 닫는다 (#3963). 손이 없으면 「목록에서 숨기기」가 서지
    * 않는다 - 별표·배치와 같은 규율이다. 닫는 일의 실행(원장 기록 · 열려 있으면 착지 · 이웃
    * 행으로 캐럿)은 사이드바가 지고, 여기서는 항목을 내고 부르기만 한다.
    */
   onCloseDm?: () => void;
+  /**
+   * 사람끼리의 1:1 에서 「대화 나가기」 (ADR-0177 증보 2026-11-14 D21, #5825). 손이 없으면 항목이 서지 않는다 - 숨기기와 같은 규율이다.
+   * 내밀지 말지(새 서버 · 사람끼리 1:1 · 투영 준비)는 부르는 쪽이 코어 `dmLeaveOffered` 로 정하고, 확인 창은 사이드바의 `DmLeaveHost`
+   * 가 진다(줄·머리 안에 두면 성공하는 순간 같이 사라진다). 여기서는 항목을 내고 표면이 메뉴를 닫은 뒤 부른다.
+   */
+  onLeaveDm?: () => void;
+  /**
+   * 「이름 바꾸기」 (ADR-0225 D10, #5835). 이름 칸이 있는 다이얼로그는 표면이 세운다(헤더 ⋮ 의 `RenameChannelDialog`) - 손이 없으면 항목이 서지
+   * 않는다. 여기서는 항목을 내고 표면이 메뉴를 닫은 뒤 다이얼로그를 연다(주제 · 기억 설정과 같은 넘김).
+   */
+  onRename?: () => void;
 }
 
 export interface ChannelActions {
@@ -142,11 +181,21 @@ export interface ChannelActions {
   isPending: (key: ChannelActionKey) => boolean;
   /** 항목 자리에서 하는 말(§5, 토스트가 아니다). 메뉴가 열려 있어야 읽힌다. */
   error: string | null;
+  /**
+   * 복사 실패는 배너가 아니라 **누른 그 줄**이 말한다(#5777 검수 M1). 배너가 판 맨 위에 서면 위 판이
+   * 192 → 331px 로 넓어져 방금 누른 자리를 다른 줄이 차지했고, 「다시 눌러 보세요」대로 누르면 읽음·알림이
+   * 실행됐다. 줄은 높이도 위치도 그대로이고 글자만 바뀐다(「복사됨」 영수증과 같은 자리).
+   */
+  copyFailure: { key: ChannelActionKey; message: string } | null;
   clearError: () => void;
   run: (key: ChannelActionKey) => void;
   /** 「섹션으로 이동」의 라디오 행이 고른 목적지. 표면이 없으면 아무 일도 없다. */
   moveToSection: (sectionId: string | null) => void;
   leave: {
+    /** 확인 문장이 공개·비공개로 갈린다(`channelLeaveConfirmBodyKey`). */
+    kind: Channel["kind"];
+    /** 켜진 공개 채널은 「둘러보기에서 다시 들어올 수 있어요」로 말한다(ADR-0224, #5842). 옛 서버는 싣지 않는다 — 꺼짐. */
+    browseListed: boolean;
     confirmOpen: boolean;
     open: () => void;
     close: () => void;
@@ -160,7 +209,6 @@ export function useChannelActions({
   workspaceId,
   channel,
   title,
-  selfMemberId,
   selfRole,
   readState = null,
   onActionSucceeded,
@@ -170,12 +218,26 @@ export function useChannelActions({
   starred = false,
   onToggleStar,
   onCloseDm,
+  onLeaveDm,
+  onRename,
 }: ChannelActionTarget): ChannelActions {
   const client = useQueryClient();
   const navigate = useNavigate();
   const location = useLocation();
+  const formatMessage = useFormatMessage();
   const invalidateReadStates = useInvalidateReadStates(workspaceId);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setErrorState] = useState<string | null>(null);
+  const [copyFailure, setCopyFailure] = useState<{
+    key: ChannelActionKey;
+    message: string;
+  } | null>(null);
+  // 배너 쪽 오류를 비우거나 새로 세울 때 복사 실패 줄도 같이 쉰다 - 두 말이 한 메뉴에 겹치지 않는다.
+  const setError = (next: string | null) => {
+    setCopyFailure(null);
+    setErrorState(next);
+  };
+  const browseSwitch = useSetBrowseListed(workspaceId);
+  const defaultSwitch = useSetChannelDefault(workspaceId);
   const [confirmLeave, setConfirmLeave] = useState(false);
   const [leaveError, setLeaveError] = useState<string | null>(null);
 
@@ -280,30 +342,45 @@ export function useChannelActions({
   // 사라지는 것 자체는 남고, ③은 「지워졌다」와 「지우는 중」이라는 두 개의 참을
   // 한 행에 겹쳐 그린다. 스냅샷·롤백이 함께 사라지는 것은 덤이다 — 되돌릴 것을
   // 만들지 않으면 되돌리기가 필요 없다.
+  // 이 채널이 내 것이 아니게 된 뒤의 정리 - 나가기 성공과 「이미 나간 것」(404)이 같은 길이다.
+  const leftChannel = () => {
+    // 서버가 답한 **뒤에** 목록에서 지운다. 무효화만 걸면 재조회가 도착할
+    // 때까지 방금 나온 채널이 남아 있으므로, 캐시를 지금 한 번 편집하고
+    // 서버가 마지막 말을 하게 둔다.
+    client.setQueryData<Channel[]>(["channels", workspaceId], (current) =>
+      current?.filter((c) => !uuidEq(c.id, channel.id))
+    );
+    void client.invalidateQueries({ queryKey: ["channels", workspaceId] });
+    // 명부의 channelIds 도 이 편집으로 바뀌었다.
+    void client.invalidateQueries({ queryKey: ["roster", workspaceId] });
+    // 방금 나온 채널에 머무를 수 없다 — 열려 있었다면. 사이드바에서 **읽고
+    // 있지 않은** 채널을 나갈 때까지 인덱스로 튕기면, 사람은 자기가 보고 있던
+    // 대화를 잃는다. 헤더 메뉴는 정의상 열린 채널이라 예전 그대로 착지한다.
+    const open = openChannelId(location.pathname, null);
+    if (open !== null && uuidEq(open, channel.id)) navigate("/");
+  };
   const leaveMutation = useMutation({
-    mutationFn: () => removeChannelMember(workspaceId, channel.id, selfMemberId),
+    // 본인 나가기 길(#5778). 관리자 전용 `removeChannelMember` 로 자기를 지우면 일반 멤버는 403 이다.
+    mutationFn: () => leaveChannel(workspaceId, channel.id),
     onSuccess: () => {
       setLeaveError(null);
       setConfirmLeave(false);
-      // 서버가 답한 **뒤에** 목록에서 지운다. 무효화만 걸면 재조회가 도착할
-      // 때까지 방금 나온 채널이 남아 있으므로, 캐시를 지금 한 번 편집하고
-      // 서버가 마지막 말을 하게 둔다.
-      client.setQueryData<Channel[]>(["channels", workspaceId], (current) =>
-        current?.filter((c) => !uuidEq(c.id, channel.id))
-      );
-      void client.invalidateQueries({ queryKey: ["channels", workspaceId] });
-      // 명부의 channelIds 도 이 편집으로 바뀌었다.
-      void client.invalidateQueries({ queryKey: ["roster", workspaceId] });
-      // 방금 나온 채널에 머무를 수 없다 — 열려 있었다면. 사이드바에서 **읽고
-      // 있지 않은** 채널을 나갈 때까지 인덱스로 튕기면, 사람은 자기가 보고 있던
-      // 대화를 잃는다. 헤더 메뉴는 정의상 열린 채널이라 예전 그대로 착지한다.
-      const open = openChannelId(location.pathname, null);
-      if (open !== null && uuidEq(open, channel.id)) navigate("/");
+      leftChannel();
     },
     onError: (mutationError) => {
+      // 404 = 서버가 「이미 이 채널의 멤버가 아니다」(다른 탭·기기에서 먼저 나갔거나 채널이 보관됨)라고 답한 것이다. 낡은 화면이
+      // 한 사실을 아직 모르는 것이므로 나간 것과 같게 거둔다: 줄을 걷고, 열려 있으면 옮기고, 초점을 돌려준다(#5818 검수 M2).
+      // 확인 창은 닫는다 - 줄이 사라지면 그 서브트리의 창도 함께 죽는데(위 시간축), 사라지는 창 안에 문장을 세워 둘 이유가 없다.
+      if (mutationError instanceof ApiError && mutationError.status === 404) {
+        setLeaveError(null);
+        setConfirmLeave(false);
+        leftChannel();
+        return;
+      }
       // 목록을 건드리지 않았으므로 되돌릴 것이 없다. 다이얼로그는 그대로 서
       // 있고, 그 안에서 이유를 말한다.
-      setLeaveError(channelLeaveFailureMessage(mutationError));
+      const failure = channelLeaveFailure(mutationError);
+      setLeaveError(formatMessage(failure.key, failure.values as never));
     },
   });
 
@@ -325,6 +402,13 @@ export function useChannelActions({
           readState.latestSeq > 0 &&
           composedUnreadCount(readState) === 0,
         canCloseDm: Boolean(onCloseDm),
+        canLeaveDm: Boolean(onLeaveDm),
+        // 소유자 · 관리자가 든 공개 채널, 그리고 이 서버가 표시를 싣는 동안만(옛 서버 · 역할 모름은 문을 세우지 않는다).
+        canSetBrowseListed: canSetBrowseListed(channel, selfRole),
+        // 소유자 · 관리자가 든 공개 채널, 그리고 이 서버가 기본 채널 표시를 싣는 동안만(#5845).
+        canSetDefault: canSetChannelDefault(channel, selfRole),
+        // 소유자 · 관리자가 든 보관 안 된 공개/비공개 채널, 이름이 general 이 아닐 때, 그리고 다이얼로그를 세울 손이 있을 때(역할 모름은 세우지 않는다).
+        canRename: Boolean(onRename) && canRenameChannel(channel, selfRole),
       }),
     [
       channel,
@@ -334,6 +418,8 @@ export function useChannelActions({
       onMoveToSection,
       onToggleStar,
       onCloseDm,
+      onLeaveDm,
+      onRename,
     ]
   );
 
@@ -343,21 +429,25 @@ export function useChannelActions({
     copiedLink: linkCopy.copied,
     copiedName: nameCopy.copied,
     copiedId: idCopy.copied,
+    browseListed: channel.browseListed === true,
+    defaultChannel: channel.isDefault === true,
+    // 내 목록에서 유일한 기본 채널이면 줄이 까닭을 먼저 말한다. 누르는 것은 막지 않는다 - 내가 들지 않은 기본 채널이 있을 수 있어 서버가 정한다.
+    onlyDefault: isOnlyVisibleDefault(channel, client.getQueryData<Channel[]>(["channels", workspaceId])),
     starred,
     sections,
     currentSectionId,
   };
 
-  function runCopy(copy: () => Promise<boolean>) {
+  function runCopy(key: ChannelActionKey, copy: () => Promise<boolean>) {
     // 클립보드 API 자체가 없으면 다시 눌러도 같다. 「다시 시도」라고 말하지
     // 않는 이유이고, `MessageRow.onCopyLink` 가 이미 하는 판정이다.
     if (typeof navigator.clipboard?.writeText !== "function") {
-      setError(CHANNEL_COPY_UNAVAILABLE);
+      setCopyFailure({ key, message: CHANNEL_COPY_UNAVAILABLE });
       return;
     }
     setError(null);
     void copy().then((ok) => {
-      if (!ok) setError(CHANNEL_COPY_FAILURE);
+      if (!ok) setCopyFailure({ key, message: CHANNEL_COPY_FAILURE });
     });
   }
 
@@ -378,11 +468,35 @@ export function useChannelActions({
     if (key === "mute" && muteMutation.isPending) return;
     if (key === "mark-read" && markReadMutation.isPending) return;
     if (key === "mark-unread" && markUnreadMutation.isPending) return;
+    if (key === "browse-listed" && browseSwitch.pending.has(channel.id)) return;
+    if (key === "default-channel" && defaultSwitch.pending.has(channel.id)) return;
     switch (key) {
       case "mute": {
         const previousMuted = client.getQueryData<Channel[]>(["channels", workspaceId])
           ?.find((row) => uuidEq(row.id, channel.id))?.muted ?? channel.muted;
         muteMutation.mutate({ workspaceId, channelId: channel.id, previousMuted, muted: !previousMuted });
+        return;
+      }
+      case "browse-listed": {
+        // 낙관 갱신 없이 서버의 답으로 캐시를 고친다(`useSetBrowseListed`). 켜진 값은 캐시의 가장 최근 줄에서 읽는다.
+        const current = client.getQueryData<Channel[]>(["channels", workspaceId])
+          ?.find((row) => uuidEq(row.id, channel.id))?.browseListed ?? channel.browseListed;
+        setError(null);
+        void browseSwitch.run(channel.id, current !== true).then((result) => {
+          if (result === null || result.ok) return;
+          setError(formatMessage(result.failure.key, result.failure.values as never));
+        });
+        return;
+      }
+      case "default-channel": {
+        // 「둘러보기에 보이기」와 같은 왕복(낙관 없음). 끄는 요청은 화면의 셈으로 막지 않고 서버의 409 문장을 그대로 보여 준다.
+        const current = client.getQueryData<Channel[]>(["channels", workspaceId])
+          ?.find((row) => uuidEq(row.id, channel.id))?.isDefault ?? channel.isDefault;
+        setError(null);
+        void defaultSwitch.run(channel.id, current !== true).then((result) => {
+          if (result === null || result.ok) return;
+          setError(formatMessage(result.failure.key, result.failure.values as never));
+        });
         return;
       }
       case "mark-read":
@@ -392,13 +506,13 @@ export function useChannelActions({
         markUnreadMutation.mutate();
         return;
       case "copy-link":
-        runCopy(linkCopy.copy);
+        runCopy(key, linkCopy.copy);
         return;
       case "copy-name":
-        runCopy(nameCopy.copy);
+        runCopy(key, nameCopy.copy);
         return;
       case "copy-id":
-        runCopy(idCopy.copy);
+        runCopy(key, idCopy.copy);
         return;
       case "close-dm":
         // 왕복이 없다. 닫기는 이 기기의 원장 한 칸이고(`sidebarDmClosure.ts`), 서버도 상대 쪽
@@ -413,9 +527,11 @@ export function useChannelActions({
         onToggleStar?.();
         return;
       case "topic":
+      case "rename":
       case "memory":
       case "github":
       case "leave":
+      case "leave-dm":
       case "move-to-section":
         // 다이얼로그로 넘어가는 항목과 무리 항목은 표면이 자기 복귀를 챙긴다.
         // 「섹션으로 이동」은 **행 하나가 아니라 무리**라 고를 것이 여기 없다 -
@@ -428,15 +544,18 @@ export function useChannelActions({
     if (key === "mute") return muteMutation.isPending;
     if (key === "mark-read") return markReadMutation.isPending;
     if (key === "mark-unread") return markUnreadMutation.isPending;
+    if (key === "browse-listed") return browseSwitch.pending.has(channel.id);
+    if (key === "default-channel") return defaultSwitch.pending.has(channel.id);
     return false;
   }
 
   return {
     available,
     state,
-    items: (surface) => channelActionItemsForSurface(surface, available, state),
+    items: (surface) => channelActionItemsForSurface(surface, available, state, formatMessage),
     isPending,
     error,
+    copyFailure,
     clearError: () => setError(null),
     run,
     moveToSection: (sectionId) => {
@@ -444,6 +563,8 @@ export function useChannelActions({
       onMoveToSection?.(sectionId);
     },
     leave: {
+      kind: channel.kind,
+      browseListed: channel.browseListed === true,
       confirmOpen: confirmLeave,
       open: () => {
         setLeaveError(null);
@@ -461,27 +582,75 @@ export function useChannelActions({
 }
 
 /**
- * 「섹션으로 이동」 — 제목 하나와 그 아래 라디오 행들 (ADR-0177 D4 / BT-4 #1932).
+ * 아이콘 뜻 낱말 → Lucide 글리프 (#5777, owner 2026-11-14 「알림 아이콘 정렬 잘 맞춰줘」).
  *
- * 서브메뉴가 아닌 이유는 코어 `channels/actionModel.ts` 머리말에 있다(요약: 이 레포는
- * 서브메뉴를 이슈 번호까지 달아 금지하고, 그 문단이 대체물로 「화면에 남는 행들
- * 위의 제목」을 지정한다). 라디오인 이유는 배치가 **여럿 중 하나**라서다 -
- * 지금 속한 섹션이 `aria-checked` 로 들려야 하고, 그것은 체크 표시가 눈에
- * 말하는 것과 같은 사실이다.
- *
- * 제목은 `useId` 로 자기 id 를 갖고 그룹이 `aria-labelledby` 로 되짚는다.
- * Radix 의 Label 은 aria 를 하나도 걸어 주지 않으므로(`DropdownMenuLabel`
- * 독스트링), 이 두 줄이 없으면 무리가 스크린리더에 이름 없이 선다.
- *
- * 그릇은 **표면이 고른다** (design-review #1932 N-1). 오늘 이 무리는 행 메뉴에만
- * 서고(`SURFACE_KEYS.header` 가 이 열쇠를 주지 않는다) 그래서 컨텍스트 메뉴를
- * 하드코딩해도 안전했다. 그런데 이 파일의 형제 컴포넌트는 전부 `surface` 로 갈라
- * 그릇을 고르고, 코어 `channels/actionModel.ts` 는 확장점을 「열쇠 하나·분기 하나·
- * SURFACE_KEYS 항목 하나」라고 광고한다. 그 한 줄을 믿고 헤더에 이 열쇠를 넣는
- * 사람은 Radix 루트 없는 컨텍스트 메뉴 조각을 렌더하게 된다 - 광고한 확장점이
- * 실제로 그만큼만 드는 것이 이 분기의 값이다.
+ * 모든 줄이 줄 앞에 16px(`size-4`, README §2.8) 글리프 하나를 든다. 줄의 안쪽 여백(`px-2`)과 간격(`gap-2`)이
+ * 같으므로 아이콘은 한 세로 줄에, 글자는 그 오른쪽 한 세로 줄에 선다 - 아이콘 없는 줄이 섞이면 그 줄의 글자만
+ * 왼쪽으로 24px 당겨져 들쭉날쭉해진다(예전 알림 줄만 아이콘이 있던 메뉴). 표가 낱말마다 하나를 요구하므로
+ * (`Record<ChannelActionIcon, …>`) 새 낱말은 글리프를 고르지 않고는 컴파일되지 않는다. 고른 이유:
+ *   topic        Info            채널에 대한 설명을 본다(헤더 전용)
+ *   copy         Copy            복사 하위 메뉴(메시지 메뉴의 「메시지 복사」와 같은 글리프)
+ *   copy-name    Type            글자(이름)를 가져간다
+ *   copy-link    Link            메시지 메뉴의 「링크 복사하기」와 같다
+ *   copy-id      Fingerprint     하나뿐인 식별값
+ *   section      FolderInput     폴더(섹션)로 넣는다. 사이드바의 「새 섹션」이 `FolderPlus` 다
+ *   mark-read    MailOpen        열린 봉투 = 읽음. 메시지 메뉴의 「여기부터 안 읽음」(닫힌 봉투 `Mail`)과 짝
+ *   mark-unread  Mail            닫힌 봉투 = 안 읽음(BT-6 의 읽음 상태 문법, README §6 Buzz 대응표)
+ *   bell(-off)   Bell / BellOff  알림 상태 그대로(낱말 「알림 켜짐 / 꺼짐」과 같은 상태를 그린다)
+ *   memory       BookOpen        기억 표지(`MemoryReceiptChip`)와 같다
+ *   github       GitPullRequest  앱이 GitHub 를 그리는 글리프(작업 보드 · 실행 보고)
+ *   browse       Compass         채널 둘러보기에 보이기(#5843)
+ *   default      UserPlus        기본 채널로 지정(#5845) - 새로 합류하는 사람이 들어온다
+ *   rename       Pencil          이름 바꾸기(#5835)
+ *   star/unstar  Star / StarOff  별표 붙이기 / 떼기
+ *   hide         EyeOff          「목록에서 숨기기」(대화를 지우지 않고 목록에서 안 보이게 한다)
+ *   leave        DoorOpen        나가기. 위험 줄이라 글자와 함께 `--danger` 를 입는다(`currentColor`)
+ * 색은 따로 주지 않는다: 메시지 메뉴(`MessageActions.tsx` `actionIcon`)처럼 줄 글자색을 물려받는다.
  */
-function ChannelSectionMoveGroup({
+const ACTION_ICON: Record<ChannelActionIcon, LucideIcon> = {
+  topic: Info,
+  copy: Copy,
+  "copy-name": Type,
+  "copy-link": Link,
+  "copy-id": Fingerprint,
+  section: FolderInput,
+  "mark-read": MailOpen,
+  "mark-unread": Mail,
+  bell: Bell,
+  "bell-off": BellOff,
+  memory: BookOpen,
+  github: GitPullRequest,
+  browse: Compass,
+  default: UserPlus,
+  rename: Pencil,
+  star: Star,
+  unstar: StarOff,
+  hide: EyeOff,
+  leave: DoorOpen,
+};
+
+function ActionIcon({ name }: { name: ChannelActionIcon }) {
+  const Glyph = ACTION_ICON[name];
+  return (
+    <Glyph className="size-4 shrink-0" aria-hidden="true" data-menu-icon={name} />
+  );
+}
+
+/**
+ * 「섹션으로 이동 ›」 하위 판의 목적지들 — 라디오 행 (ADR-0177 D4 / BT-4 #1932 → #5777).
+ *
+ * 이 무리는 웹에서 하위 메뉴로 접힌다(코어 `channelActionClusterSubmenu`, 규칙은 「고를 수 없는 줄이 없는
+ * 묶음에만」). 목적지는 언제나 고를 수 있는 줄이라 그 규칙 안에 든다. 예전의 제목 줄(「섹션으로 이동」)은
+ * 하위 메뉴를 여는 줄이 되었고, 하위 판은 Radix 가 그 줄을 이름으로 단다(`aria-labelledby`). 라디오인
+ * 이유는 배치가 **여럿 중 하나**라서다 - 지금 속한 섹션이 `aria-checked` 로 들려야 하고, 그것은 체크
+ * 표시가 눈에 말하는 것과 같은 사실이다.
+ *
+ * 그릇은 **표면이 고른다** (design-review #1932 N-1). 오늘 이 무리는 행 메뉴에만 서고(`SURFACE_KEYS.header`
+ * 가 이 열쇠를 주지 않는다), 그런데도 갈라 두는 것은 코어가 확장점을 「열쇠 하나·분기 하나·SURFACE_KEYS 항목
+ * 하나」라고 광고하기 때문이다. 그 한 줄을 믿고 헤더에 이 열쇠를 넣는 사람이 Radix 루트 없는 컨텍스트 메뉴
+ * 조각을 렌더하지 않게 한다.
+ */
+function ChannelSectionMoveChoices({
   surface,
   prefix,
   item,
@@ -494,72 +663,74 @@ function ChannelSectionMoveGroup({
   actions: ChannelActions;
   onHandOff: (key: ChannelActionKey) => void;
 }) {
-  const labelId = useId();
   const choices = item.sections ?? [];
   // 값은 문자열이어야 한다(Radix RadioGroup). 기본 섹션의 `null` 은 채널 id 가
   // 될 수 없는 낱말 하나로 적는다 - 커스텀 섹션 id 는 `sec-<수>` 꼴이라 절대
   // 겹치지 않는다.
   const BASE = "\u0000base";
   const current = item.currentSectionId ?? BASE;
-  const Label = surface === "header" ? DropdownMenuLabel : ContextMenuLabel;
   const RadioGroup =
     surface === "header" ? DropdownMenuRadioGroup : ContextMenuRadioGroup;
   const RadioItem =
     surface === "header" ? DropdownMenuRadioItem : ContextMenuRadioItem;
   return (
-    <>
-      <Label id={labelId} data-testid={`${prefix}-${item.testKey}`}>
-        {item.label}
-      </Label>
-      <RadioGroup
-        aria-labelledby={labelId}
-        value={current}
-        onValueChange={(next) => {
-          onHandOff(item.key);
-          actions.moveToSection(next === BASE ? null : next);
-        }}
-      >
-        {[{ id: null, label: SECTION_MOVE_TO_BASE_LABEL }, ...choices].map(
-          (choice) => {
-            const value = choice.id ?? BASE;
-            return (
-              <RadioItem
-                key={value}
-                value={value}
-                data-testid={`${prefix}-section-${choice.id ?? "base"}`}
+    <RadioGroup
+      value={current}
+      onValueChange={(next) => {
+        onHandOff(item.key);
+        actions.moveToSection(next === BASE ? null : next);
+      }}
+    >
+      {[{ id: null, label: SECTION_MOVE_TO_BASE_LABEL }, ...choices].map(
+        (choice) => {
+          const value = choice.id ?? BASE;
+          return (
+            <RadioItem
+              key={value}
+              value={value}
+              data-testid={`${prefix}-section-${choice.id ?? "base"}`}
+            >
+              {/* 긴 한글 섹션 이름(최대 80자)이 판을 창 밖으로 밀지 않는다.
+                  `max-w-pane`(320) 은 이 레포가 이미 목록 하나의 폭으로 들고
+                  있는 수이고, 자른 자리의 전체 이름은 title 이 든다 - 사이드바
+                  행이 같은 축에서 같은 것을 한다. */}
+              <span
+                className="min-w-0 max-w-pane flex-1 truncate"
+                title={choice.label}
               >
-                {/* 긴 한글 섹션 이름(최대 80자)이 메뉴를 창 밖으로 밀지 않는다.
-                    `max-w-pane`(320) 은 이 레포가 이미 목록 하나의 폭으로 들고
-                    있는 수이고, 자른 자리의 전체 이름은 title 이 든다 - 사이드바
-                    행이 같은 축에서 같은 것을 한다. */}
-                <span
-                  className="min-w-0 max-w-pane flex-1 truncate"
-                  title={choice.label}
-                >
-                  {choice.label}
-                </span>
-                {/* 체크는 **캘러가 그린다** (`DropdownMenuRadioItem` 독스트링:
-                    "It does NOT reserve an indicator gutter"). `aria-checked` 가
-                    귀에 말하는 것과 같은 사실을 눈에 말하는 자리이고, 없으면
-                    스크린리더만 지금 자리를 안다. `PresenceControl` 이 같은 것을
-                    같은 아이콘·같은 잉크로 그린다. */}
-                {value === current && (
-                  <Check
-                    className="size-4 shrink-0 text-ink-muted"
-                    aria-hidden="true"
-                  />
-                )}
-              </RadioItem>
-            );
-          }
-        )}
-      </RadioGroup>
-    </>
+                {choice.label}
+              </span>
+              {/* 체크는 **캘러가 그린다** (`DropdownMenuRadioItem` 독스트링:
+                  "It does NOT reserve an indicator gutter"). `aria-checked` 가
+                  귀에 말하는 것과 같은 사실을 눈에 말하는 자리이고, 없으면
+                  스크린리더만 지금 자리를 안다. `PresenceControl` 이 같은 것을
+                  같은 아이콘·같은 잉크로 그린다. 하위 판 안의 줄은 모두 아이콘이
+                  없어 글자 시작이 한 세로 줄이다. */}
+              {value === current && (
+                <Check
+                  className="size-4 shrink-0 text-ink-muted"
+                  aria-hidden="true"
+                />
+              )}
+            </RadioItem>
+          );
+        }
+      )}
+    </RadioGroup>
   );
 }
 
 /**
- * 한 메뉴의 항목 전량. 그릇만 다르고(드롭다운 / 컨텍스트) 나머지는 같다 —
+ * 복사 실패 문장의 첫 문장(「복사하지 못했습니다」). 줄은 한 줄·32px 로 고정이라 전체 문장은 `title` 과
+ * 스크린리더용 알림이 맡는다. 새 문구를 코드에 적지 않고 코어가 가진 문장에서 가져온다.
+ */
+function copyFailureRowLabel(message: string): string {
+  const first = message.split(". ")[0];
+  return first.endsWith(".") ? first.slice(0, -1) : first;
+}
+
+/**
+ * 한 줄. 아이콘(`ActionIcon`) + 낱말. 그릇만 다르고(드롭다운 / 컨텍스트) 나머지는 같다 —
  * `MessageActionMenuItems` 와 같은 갈래이고, 같은 이유다.
  */
 function ChannelActionMenuRow({
@@ -576,11 +747,16 @@ function ChannelActionMenuRow({
   onHandOff: (key: ChannelActionKey) => void;
 }) {
   const busy = actions.isPending(item.key);
+  const failure =
+    actions.copyFailure?.key === item.key ? actions.copyFailure : null;
   const props = {
     "data-testid": `${prefix}-${item.testKey}`,
     "data-muted":
       item.key === "mute" && actions.state.muted ? "" : undefined,
-    tone: item.tone,
+    tone: failure ? ("danger" as const) : item.tone,
+    // 눌린 줄이 실패를 말할 때 전체 문장(다시 눌러 보세요 / 클립보드를 쓸 수 없습니다)은 title 에 둔다.
+    title: failure?.message,
+    "data-copy-failed": failure ? "" : undefined,
     // 왕복 중에도 잠그지도 흐리지도 않는다 (design-review #1937 N-1).
     // `States.tsx` 가 같은 축에 「`aria-busy` 와 바뀐 낱말, never `disabled`
     // and never dimmed」라 적어 두었다 — 회색이 된 컨트롤은 「지금 일어나는
@@ -602,15 +778,54 @@ function ChannelActionMenuRow({
       if (!channelActionKeepsMenuOpen(item.key)) onHandOff(item.key);
       actions.run(item.key);
     },
-    children: item.key === "mute" ? (
+    children: (
       <>
-        {actions.state.muted
-          ? <BellOff className="size-4 shrink-0" aria-hidden="true" />
-          : <Bell className="size-4 shrink-0" aria-hidden="true" />}
-        {item.label}
+        <ActionIcon name={item.icon} />
+        {failure
+          ? copyFailureRowLabel(failure.message)
+          : busy
+            ? item.busyLabel ?? item.label
+            : item.label}
       </>
-    ) : busy ? item.busyLabel ?? item.label : item.label,
+    ),
   };
+  // 켜고 끄는 줄(#5843): 켜짐이 체크와 `aria-checked` 로 함께 읽힌다. 끝자리 16px 은 늘 잡혀 있어(진행 중 돌림 · 체크 · 빈칸이 같은 자리)
+  // 줄 폭이 변하지 않는다. 진행 중에는 그 줄만 `aria-busy` 와 돌림으로 말하고 값은 서버가 답할 때까지 그대로다.
+  if (item.checked !== undefined && surface === "header") {
+    const { tone: _tone, children: _children, ...rest } = props;
+    const mark = (
+      <span className="flex size-4 shrink-0 items-center justify-center" aria-hidden="true">
+        {busy ? (
+          <Loader2 className="spinner-busy size-4" />
+        ) : item.checked ? (
+          <Check className="size-4 text-ink-muted" />
+        ) : null}
+      </span>
+    );
+    // 한 줄 설명이 붙는 줄(#5845): 둘째 줄이 글자 시작에 맞춰 서고(아이콘 16px + 간격 8px), 낭독은 `aria-describedby` 로 읽는다.
+    if (item.description !== undefined) {
+      const noteId = `${props["data-testid"]}-note`;
+      return (
+        <DropdownMenuCheckboxItem {...rest} layout="stack" aria-describedby={noteId} checked={item.checked}>
+          <span className="flex w-full min-w-0 items-center gap-2">
+            <ActionIcon name={item.icon} />
+            <span className="min-w-0 flex-1 truncate">{item.label}</span>
+            {mark}
+          </span>
+          <span id={noteId} className="pl-6 text-meta text-ink-muted" data-testid={noteId}>
+            {item.description}
+          </span>
+        </DropdownMenuCheckboxItem>
+      );
+    }
+    return (
+      <DropdownMenuCheckboxItem {...rest} checked={item.checked}>
+        <ActionIcon name={item.icon} />
+        <span className="min-w-0 flex-1 truncate">{item.label}</span>
+        {mark}
+      </DropdownMenuCheckboxItem>
+    );
+  }
   return surface === "header" ? (
     <DropdownMenuItem {...props} />
   ) : (
@@ -633,13 +848,15 @@ function clusterRuns(items: ChannelActionItem[]): ChannelActionItem[][] {
 }
 
 /**
- * 한 무리의 행들. 제목이 있는 무리(「복사」)는 제목 + 그룹으로, 없는 무리는 행만 선다.
+ * 한 무리의 줄들. 하위 메뉴로 접는 무리(복사 · 섹션 이동, 코어 `channelActionClusterSubmenu`)는 **여는 줄
+ * 하나 + 하위 판**으로, 나머지는 줄만 선다 (#5777, owner 2026-11-14 「버즈에선 우클릭했을 때 라벨 섹션없이」).
  *
- * 제목은 서브메뉴가 아니라 **화면에 남는 행들 위의 제목**이다(위 `ChannelSectionMoveGroup` 과
- * 같은 문법, 이유는 코어 `channels/actionModel.ts` 머리말). 제목은 `useId` 로 자기 id 를 갖고 그룹이
- * `aria-labelledby` 로 되짚는다 - Radix 의 Label 은 aria 를 하나도 걸어 주지 않는다.
- * 그릇은 `ChannelSectionMoveGroup` 처럼 **표면이 고른다**: 오늘 이 무리는 행 메뉴에만 서지만
- * 열쇠 하나를 헤더에 더하는 사람이 Radix 루트 없는 조각을 렌더하지 않게.
+ * 예전에는 복사가 「제목 + 화면에 남는 세 줄」이었다(하위 메뉴 금지, #1383). 그 규칙은 「고를 수 없는 줄이
+ * 없는 묶음에만 하위 메뉴」로 좁혀졌고(`dropdown-menu.tsx` 머리말), 이 두 무리는 잠긴 줄이 없다. 여는 줄은
+ * 다른 줄처럼 아이콘을 앞에 들어 아이콘 세로 줄이 끊기지 않고, 끝에 › 가 선다(`submenuChevron`).
+ *
+ * 하위 판의 접근 이름은 여는 줄의 글자다(Radix 가 판에 `aria-labelledby` 로 단다). 복사 줄은 「복사됨」
+ * 영수증 동안 두 판이 다 열려 있고(`channelActionKeepsMenuOpen`), 목적지를 고르면 표면이 메뉴를 통째로 닫는다.
  */
 function ChannelActionClusterRows({
   surface,
@@ -654,11 +871,9 @@ function ChannelActionClusterRows({
   actions: ChannelActions;
   onHandOff: (key: ChannelActionKey) => void;
 }) {
-  const labelId = useId();
-  const title = channelActionClusterTitle(run[0].cluster);
   const rows = run.map((item) =>
     item.sections ? (
-      <ChannelSectionMoveGroup
+      <ChannelSectionMoveChoices
         key={item.key}
         surface={surface}
         prefix={prefix}
@@ -677,16 +892,41 @@ function ChannelActionClusterRows({
       />
     )
   );
-  if (title === undefined) return <>{rows}</>;
-  const Group = surface === "header" ? DropdownMenuGroup : ContextMenuGroup;
-  const Label = surface === "header" ? DropdownMenuLabel : ContextMenuLabel;
+  const submenu = channelActionClusterSubmenu(run[0].cluster);
+  if (submenu === undefined) return <>{rows}</>;
+  const Sub = surface === "header" ? DropdownMenuSub : ContextMenuSub;
+  const SubTrigger =
+    surface === "header" ? DropdownMenuSubTrigger : ContextMenuSubTrigger;
+  const SubContent =
+    surface === "header" ? DropdownMenuSubContent : ContextMenuSubContent;
   return (
-    <>
-      <Label id={labelId} data-testid={`${prefix}-${run[0].cluster}-group`}>
-        {title}
-      </Label>
-      <Group aria-labelledby={labelId}>{rows}</Group>
-    </>
+    <Sub>
+      <SubTrigger data-testid={`${prefix}-${submenu.testKey}`}>
+        <ActionIcon name={submenu.icon} />
+        {submenu.label}
+      </SubTrigger>
+      <SubContent data-testid={`${prefix}-${submenu.testKey}-menu`}>
+        {rows}
+      </SubContent>
+    </Sub>
+  );
+}
+
+/**
+ * 이 무리 위에 구분선을 세우는가. 코어가 무리가 바뀌는 자리에 단 `separatorBefore` 를 따르되, **하위 메뉴를
+ * 여는 줄끼리는 한 띠로 붙인다**(#5777): Buzz 의 행 메뉴처럼 `복사 ›` 바로 아래 `섹션으로 이동 ›` 이 선다.
+ * 여는 줄 하나짜리 무리마다 선이 서면 줄 하나를 선 둘이 감싸 메뉴가 토막 난다. 폰 시트는 무리마다 카드라
+ * 이 규칙을 쓰지 않는다(코어의 구분선 값은 그대로다).
+ */
+function separatesFrom(
+  previous: ChannelActionItem[] | undefined,
+  run: ChannelActionItem[]
+): boolean {
+  if (!run[0].separatorBefore) return false;
+  return !(
+    previous !== undefined &&
+    channelActionClusterSubmenu(previous[0].cluster) !== undefined &&
+    channelActionClusterSubmenu(run[0].cluster) !== undefined
   );
 }
 
@@ -712,10 +952,14 @@ export function ChannelActionMenuItems({
 }) {
   const Separator =
     surface === "header" ? DropdownMenuSeparator : ContextMenuSeparator;
+  const runs = clusterRuns(actions.items(surface));
   return (
     <>
       {/* 실패는 항목 위에 그 자리에서 선다(§5, 토스트가 아니다). 메뉴가 열려
-          있어야 읽히므로, 아래 항목들은 왕복 중에 메뉴를 닫지 않는다.
+          있어야 읽히므로, 아래 항목들은 왕복 중에 메뉴를 닫지 않는다. 하위 판의
+          복사 줄이 실패해도 이 배너는 위 판 맨 위에 선다 - 복사 영수증 동안 두
+          판이 다 열려 있으므로 보이고, `role="alert"` 라 초점이 하위 판에 있어도
+          읽힌다(#5777).
 
           `role="group"` 으로 한 겹 감싼다 (design-review #1937 N-5): `menu` 의
           직계 자식은 menuitem/group/separator 여야 하는데 `InlineBanner` 는
@@ -726,8 +970,26 @@ export function ChannelActionMenuItems({
 
           `px-2`: 배너의 기본 `px-4` 는 메뉴 행(`px-2`)과 다른 축이라 첫 글자가
           8px 오른쪽으로 밀려 섰다(실측 21px 대 13px, N-3). 같은 왼쪽 자를 쓴다. */}
-      {actions.error && (
+      {actions.copyFailure && (
+        // 눈에는 누른 줄이 말하고(위 `ChannelActionMenuRow`), 귀에는 여기가 문장 전체를 읽는다. `sr-only`
+        // 는 자리를 차지하지 않으므로 판의 폭도 줄 위치도 움직이지 않는다.
         <div role="group" aria-label={CHANNEL_ACTION_ERROR_GROUP_LABEL}>
+          <p
+            role="alert"
+            className="sr-only"
+            data-testid={`${prefix}-action-error`}
+          >
+            {actions.copyFailure.message}
+          </p>
+        </div>
+      )}
+      {actions.error && (
+        // `w-0 min-w-full`: 실패 문장이 메뉴 폭을 정하지 않는다. 폭은 줄들이 정하고, 이 상자는 그 폭 안에서 줄바꿈한다(#5958).
+        <div
+          role="group"
+          aria-label={CHANNEL_ACTION_ERROR_GROUP_LABEL}
+          className="w-0 min-w-full"
+        >
           <InlineBanner
             className="px-2"
             message={actions.error}
@@ -735,9 +997,9 @@ export function ChannelActionMenuItems({
           />
         </div>
       )}
-      {clusterRuns(actions.items(surface)).map((run) => (
+      {runs.map((run, index) => (
         <Fragment key={run[0].cluster}>
-          {run[0].separatorBefore && <Separator />}
+          {separatesFrom(runs[index - 1], run) && <Separator />}
           <ChannelActionClusterRows
             surface={surface}
             prefix={prefix}
@@ -763,67 +1025,55 @@ export function ChannelLeaveConfirmDialog({
 }: {
   actions: ChannelActions;
   title: string;
-  /** 표면별 접두사를 붙인 id. 게이트가 표면을 구별해 누른다. */
+  /** 표면별 접두사를 붙인 id. 게이트가 표면을 구별해 누른다(`<id>`·`<id>-confirm`·`<id>-cancel`·`<id>-error`). */
   testId: string;
   opener?: DialogFocusTarget | null;
 }) {
   const { leave } = actions;
+  const formatMessage = useFormatMessage();
+  // 닫힐 때 초점을 돌려줄 곳: 연 단추·줄이 아직 있으면 그곳, 나가서 사라졌으면 옮겨 간 화면의 본문 자리(`ROUTE_REGION_DOM_ID`,
+  // `tabIndex=-1`) - 문서 몸통으로 떨어지지 않게(#5818 검수 M3). 닫히는 순간(퇴장 모션 뒤)에 읽으므로 그때의 사실로 정한다.
+  const focusLanding: DialogFocusTarget = {
+    get isConnected() {
+      return (opener?.isConnected ?? false) || document.getElementById(ROUTE_REGION_DOM_ID) !== null;
+    },
+    focus: () => {
+      if (opener?.isConnected) {
+        opener.focus();
+        return;
+      }
+      // 폰 폭에서는 줄 메뉴가 서랍 안에 있고, 서랍이 열려 있는 동안 본문 자리는 `inert` 라 `focus()` 가 조용히 거절된다
+      // (그 뒤 서랍이 닫히며 초점은 몸통으로 떨어진다, #5818 검수 r2 N2). 받을 때까지 몇 프레임 다시 시도한다.
+      let tries = 30;
+      const land = () => {
+        const region = document.getElementById(ROUTE_REGION_DOM_ID);
+        if (region === null) return;
+        region.focus({ preventScroll: true });
+        if (document.activeElement !== region && (tries -= 1) > 0) requestAnimationFrame(land);
+      };
+      land();
+    },
+  };
+  // 공용 확인 창(`ConfirmDialog`)의 몸을 쓴다: 확정은 서고 나서 500ms 동안 눌림을 받지 않는다(메뉴 줄을 누른 자리에 위험 확정이
+  // 서도 둘째 누름이 확정을 누르지 못한다, #5818 검수 High), 진행 중에는 Esc·바깥 누름·취소가 잠긴다. 자기 단추를 따로 그리지 않는다.
   return (
-    <Dialog
+    <ConfirmDialog
       open={leave.confirmOpen}
       onOpenChange={(next) => {
         if (!next) leave.close();
       }}
-    >
-      <DialogContent
-        opener={opener}
-        className="gap-4 p-4"
-        data-testid={testId}
-          onEscapeKeyDown={(event) => {
-            if (leave.pending) event.preventDefault();
-          }}
-          onInteractOutside={(event) => {
-            if (leave.pending) event.preventDefault();
-          }}
-        >
-          <div className="flex flex-col gap-1">
-            <DialogTitle>{CHANNEL_LEAVE_CONFIRM_TITLE}</DialogTitle>
-            <DialogDescription>{channelLeaveConfirmBody(title)}</DialogDescription>
-          </div>
-          {leave.error && (
-            <InlineBanner
-              separator={false}
-              message={leave.error}
-              testId={`${testId}-error`}
-            />
-          )}
-          {/* 표준 테두리 버튼, 후행 정렬, 기본(파괴) 액션이 마지막(§8). */}
-          <div className="flex items-center justify-end gap-2">
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              disabled={leave.pending}
-              onClick={() => leave.close()}
-              data-testid={`${testId}-cancel`}
-            >
-              취소
-            </Button>
-            <Button
-              type="button"
-              variant="destructive"
-              size="sm"
-              aria-busy={leave.pending || undefined}
-              onClick={() => leave.confirm()}
-              data-testid={`${testId}-action`}
-            >
-              {leave.pending && (
-                <Loader2 aria-hidden="true" className="spinner-busy" />
-              )}
-              {leave.pending ? "나가는 중" : CHANNEL_LEAVE_LABEL}
-            </Button>
-          </div>
-      </DialogContent>
-    </Dialog>
+      // `ConfirmDialog` 는 `HTMLElement` 로 받지만 `DialogContent` 가 쓰는 것은 `isConnected`·`focus` 둘뿐이다(`DialogFocusTarget`).
+      opener={focusLanding as unknown as HTMLElement}
+      testId={testId}
+      tone="destructive"
+      title={formatMessage("timeline.channelLeave.title")}
+      description={formatMessage(channelLeaveConfirmBodyKey(leave.kind, leave.browseListed), { name: title })}
+      cancelLabel={formatMessage("timeline.channelLeave.cancel")}
+      confirmLabel={formatMessage("timeline.channelLeave.confirm")}
+      busyLabel={formatMessage("timeline.channelLeave.busy")}
+      busy={leave.pending}
+      error={leave.error}
+      onConfirm={() => leave.confirm()}
+    />
   );
 }

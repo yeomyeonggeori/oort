@@ -5,7 +5,9 @@ import React from 'react';
 import {ConversationMenuSheet} from '../src/features/conversation/ConversationMenuSheet';
 import {conversationMenuActionItems} from '../src/features/conversation/conversationMenu';
 import type {ChannelRowTarget} from '../src/features/sidebar/channelRowActions';
-import {Backdrop} from './sheetKit';
+import type {ChannelRowActions, DmLeaveStepView} from '../src/features/sidebar/useChannelRowActions';
+import {useFormatMessage} from '../src/i18n/useFormatMessage';
+import {Backdrop, dmLeaveStep} from './sheetKit';
 
 // =============================================================================
 // 대화 머리 ⋮ 시트의 캡처 표면 (#4319). 배송되는 `ConversationMenuSheet` 에 고정 데이터를 건넨다 — 항목은 화면과 같은 길(`conversationMenuActionItems`,
@@ -13,11 +15,14 @@ import {Backdrop} from './sheetKit';
 //
 //   -momoMeasure CONVMENU-<이름>   (라이트: LIGHT-CONVMENU-<이름>)
 //
-//   dm             사람 DM(박서연) — 고정한 메시지 › · 알림 끄기 · 대화 닫기. 정보 행은 없다(그 화면을 가진 호출자만 문을 단다)
+//   dm             사람 DM(박서연) — 고정한 메시지 › · 알림 끄기 · 목록에서 숨기기. 정보 행은 없다(그 화면을 가진 호출자만 문을 단다)
 //   agent          에이전트 DM(달무리 도우미) — 위에 작업 맡기기 › 가 더해진다
+//   muted          알림이 꺼진 사람 DM — 알림 줄의 끝 표지가 빗금 종(bell-off)이다(#5776)
 //   channel        채널(#디자인, 관리자) — 고정한 메시지 › · 알림 끄기 · 채널 나가기(위험색)
 //   channel-leave  같은 채널의 나가기 확인 단계(「이 채널에서 나갈까요?」 + 취소 · 채널 나가기)
 //   mute-failure   알림 끄기가 거절된 뒤 — 시트가 열린 채 그 자리에서 이유를 말한다
+//   dm-leave       사람끼리 1:1 — 맨 아래 따로 선 카드에 「대화 나가기」(위험색, ADR-0177 증보 2026-11-14 D21)
+//   dm-leave-confirm / -checking / -pending / -failed / -unavailable   그 확인 단계(예약 2개) · 확인 중 · 진행 중 · 실패 · 나갈 수 없음
 //
 // 시트는 `Modal` 이라 한 프레임에 하나만 선다 — 표면 하나가 시트 하나다. 모든 이름은 가상 인물이다(이도현·박서연, 에이전트 달무리 도우미,
 // 회사 달무리 스튜디오).
@@ -63,12 +68,20 @@ function Sheet({
   delegate = false,
   confirmingLeave = false,
   error = null,
+  dmLeave = null,
+  rename = null,
+  hideRename = false,
 }: {
   target: ChannelRowTarget;
   delegate?: boolean;
   confirmingLeave?: boolean;
   error?: string | null;
+  dmLeave?: DmLeaveStepView | null;
+  rename?: ChannelRowActions['rename'];
+  /** 이름 바꾸기 줄이 서기 전의 모양(#5835 캡처의 「전」). */
+  hideRename?: boolean;
 }): React.JSX.Element {
+  const formatMessage = useFormatMessage();
   return (
     <Backdrop>
       <ConversationMenuSheet
@@ -79,7 +92,7 @@ function Sheet({
         onOpenInfo={noop}
         onOpenPins={noop}
         onDelegateWork={delegate ? noop : undefined}
-        items={conversationMenuActionItems(target)}
+        items={conversationMenuActionItems(target, formatMessage).filter(item => !(hideRename && item.key === 'rename'))}
         confirmingLeave={confirmingLeave}
         isPending={() => false}
         error={error}
@@ -87,6 +100,12 @@ function Sheet({
         onRun={noop}
         onConfirmLeave={noop}
         onCancelLeave={noop}
+        dmLeave={dmLeave}
+        onConfirmDmLeave={noop}
+        onCancelDmLeave={noop}
+        rename={rename}
+        onConfirmRename={noop}
+        onClearRenameFailure={noop}
         onClose={noop}
       />
     </Backdrop>
@@ -94,11 +113,43 @@ function Sheet({
 }
 
 export function ConversationMenuSurface({which}: {which: string}): React.JSX.Element {
+  const formatDmLeave = useFormatMessage();
+  if (which === 'dm-leave' || which.startsWith('dm-leave-')) {
+    return (
+      <Sheet
+        target={{...DM_TARGET, leaveOffered: true}}
+        dmLeave={dmLeaveStep(which.slice('dm-leave-'.length), formatDmLeave)}
+      />
+    );
+  }
   switch (which) {
     case 'agent':
       return <Sheet target={AGENT_TARGET} delegate />;
+    case 'muted':
+      return <Sheet target={{...DM_TARGET, muted: true}} />;
     case 'channel':
       return <Sheet target={CHANNEL_TARGET} />;
+    // 「이름 바꾸기」(#5835): 줄이 서기 전 · 선 뒤 · 단계 · 서버의 거절(general 잠금) · 보내는 중.
+    case 'channel-before':
+      return <Sheet target={CHANNEL_TARGET} hideRename />;
+    case 'channel-rename':
+      return <Sheet target={CHANNEL_TARGET} rename={{pending: false, failure: null}} />;
+    case 'channel-rename-409':
+      return (
+        <Sheet
+          target={CHANNEL_TARGET}
+          rename={{pending: false, failure: {kind: 'generalLocked', key: 'channels.rename.generalLocked'}}}
+        />
+      );
+    case 'channel-rename-dup':
+      return (
+        <Sheet
+          target={CHANNEL_TARGET}
+          rename={{pending: false, failure: {kind: 'duplicate', key: 'channels.createFailure.duplicate'}}}
+        />
+      );
+    case 'channel-rename-busy':
+      return <Sheet target={CHANNEL_TARGET} rename={{pending: true, failure: null}} />;
     case 'channel-leave':
       return <Sheet target={CHANNEL_TARGET} confirmingLeave />;
     case 'mute-failure':

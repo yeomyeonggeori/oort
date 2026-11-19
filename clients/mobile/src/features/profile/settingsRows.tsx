@@ -1,7 +1,6 @@
 import React from 'react';
 import {
   ActivityIndicator,
-  Image,
   Pressable,
   StyleSheet,
   Switch,
@@ -10,7 +9,8 @@ import {
 } from 'react-native';
 
 import {Sentence} from '../../design/atoms';
-import {HOME_ICON_SIZE, HOME_ICONS, SHEET_ICON_SIZE, SHEET_ICONS} from '../../design/icons';
+import {HOME_ICON_SIZE, SHEET_ICON_SIZE} from '../../design/icons';
+import {RowEndImage} from '../../design/sheetParts';
 import {usePalette, useStyles} from '../../design/theme';
 import {font, line, SHEET, space, type Palette} from '../../design/tokens';
 
@@ -198,14 +198,15 @@ export function ActionRow({
           importantForAccessibility="no-hide-descendants"
         />
       ) : expanded !== undefined ? (
-        <Image
-          source={HOME_ICONS.down}
-          style={[styles.expand, expanded && styles.expandFlipped]}
-          accessibilityElementsHidden
+        // `ListRow` 의 줄 끝과 같은 길로 그린다 — 같은 설정 화면의 셰브론·⌄ 가 한 열에 선다(#5791).
+        <RowEndImage
+          glyph="expand"
+          style={styles.expand}
+          flipped={expanded}
           testID={testID ? `${testID}-expand` : undefined}
         />
       ) : chevron ? (
-        <Image source={SHEET_ICONS.chevron} style={styles.chevron} accessibilityElementsHidden />
+        <RowEndImage glyph="chevron" style={styles.chevron} />
       ) : null}
     </Pressable>
   );
@@ -276,7 +277,6 @@ const buildStyles = (color: Palette) =>
       height: HOME_ICON_SIZE.down,
       tintColor: color.icon,
     },
-    expandFlipped: {transform: [{rotate: '180deg'}]},
     rowDetail: {
       marginTop: space.xs,
       fontSize: font.label,
