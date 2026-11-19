@@ -3,6 +3,12 @@
 > 세션 종료 시 공용 계약에 따라 짧은 항목을 맨 위에 추가한다.
 > **로테이션(2026-09-01 재편):** 이 파일은 최근 20항목만 담는다. 갱신할 때 초과분을 해당 월의 `docs/planning/archive/JOURNAL-YYYY-MM.md`로 원문 그대로 이동한다.
 
+## 2026-11-19 · Opus 5.5 배포 워커 · ★v0.1.47 발행·서버 배포(migration 180~186)
+
+- 첫 발행 런 44482508158(옛 빌드 `1a90e515c`)이 `ort-payload`의 바깥 내려받기 404(GitHub의 `microsoft/onnxruntime` 저장소가 사라짐)로 두 아키 모두 실패, 운영 쓰기 0으로 멈춤. 수리 #5996(승격 #5999) 뒤 새 빌드 `761f8091e`로 런 44543816087 시도 1 success — `ort-payload: source=` 두 아키 모두 `own-image@sha256:90de32c2…`. SLSA v1 6/6, 태그·Release, 발행 기록 PR #6002.
+- oort-team 서버 7건 SUCCESS, pre-deploy `+ APPLY` 180~186 7줄·`applied=7 skipped=179 total=186`(directory→applied 9.7초)·IDEMPOTENCY_OK, 원장 186·정책 261·열 1722, 기본 채널 쿼리 `0|t|1|1|0|0`, 새 경로 4개 GET 404 → 401, 새 env 0, Hermes·Centrifugo·postgres 불변, 12분 관찰 로그 NEG 0. 기록 #3550.
+- 교훈: 이미지 빌드가 바깥 주소 하나에 기대면 발행 전체가 멈춘다 — 이번엔 둘째 길(digest 고정 앞선 이미지)을 붙였고, 발행 로그의 `ort-payload: source=` 줄로 어느 길을 탔는지 본다. 맥이 잠들면 기준선을 다시 잰다.
+
 ## 2026-11-13 · Opus 5.5 배포 워커 · ★v0.1.46 발행·서버 배포(migration 0)
 
 - v0.1.46 발행: 런 43415177040 시도 1 success, SLSA v1 6/6, 태그·Release, 발행 기록 PR #5771. oort-team 서버 7건 SUCCESS, pre-deploy `applied=0 skipped=179 total=179`(원장 179 그대로)·`runtime roles provisioned` 2회, notifier `work_permission_request` 열 SELECT 0 → 3(예정), 새 env 0(공유 `MOMO_RUST_IMAGE` 값만), Hermes·Centrifugo·postgres 불변. 기록 #3550.
@@ -228,12 +234,3 @@
 - **패킷**: SH-11g(`--platform` 프로파일·§0 경계·§1 티어표) · SH-11f(gate:csp-deploy 렌더 기반·템플릿 시험·env 표) · SH-11a~e 브리프 초안 · **SH-12 브리프**(`brief-sh12.md`: 결재 **D-A 노선**[buzz 2스텝 캐논 vs 성재 5스텝 → 권고 절충(3): 필수 이름+프로필 1화면·선택 초대 skip 탈출구·팀 규모는 추론] · **D-B 제로베이스 정의**[권고 v0.1.5=(b) 시드 유지+온보딩 덮어쓰기, (a) 시드 제거는 후속 ADR] · D-C 셀프호스트 킥오프 no-op → 첫 에이전트 유도) → **ADR-0185 Proposed** 초안 · **SH-12a #2301**(claim 뒤 first-run 퍼널 전체 스킵 결함 — ClaimPage가 마커 1/4만 기록) 결재 불요 즉시 수리.
 - **교훈**: ①봇에게 「지시 1회 → 매니페스트 1회」 형식을 주면 HAP-E6 정리가 한 번에 닫힌다 — acknowledge는 disposition+evidence가 짝(문서 §3.3.18 반영 확인) ②그록봇 스케줄 루틴은 동작하되 ≈2배 지연 — 카피는 「지연 가능」, 도어벨이 1차 ③Workflow/Fable 워커 병렬은 격리 워크트리 + PR-only 계약이면 planner 검토 병목만 남는다 ④E2E는 「누구로 착륙하는가」까지 봐야 제로베이스다(데모 시드 착륙 = 성재 지적).
 - **잔여 후보**: SH-12b~e(ADR-0185 결재 뒤) · SH-11a~e 이슈화 · A1/A3/A4·A6·A7 문서 티켓 · VM Update/Reset 복구 실측 · #2262 M-1·M-2·N3 · 캡처 레인 게이트 · D4 플러그인 검증기 Rust화 · `arbitrary_tw` 사각 · 선재 #2157·#2181·#2193 · Railway E2E(최종) · APNs(데스크톱 뒤) · **v0.1.5 발행**(성재 dispatch, CHANGELOG·manifest).
-
-## 2026-09-09 (낮) · Fable · ★E2E-B 실측 완주(케이스 B 폐곡선 PASS) + 실결함 2·판정 1·문서 묶음 수리 전량 main 정본화 + UX-R2c 잔여 폐곡선 — 스냅샷 95
-
-- **성재 결재**: 「Fable 위주 속도·완성도, 19:00 초기화까지 타이트」 재개 go · D9(셀프호스트 생성 env `MOMO_HOSTED_DELIVERY_ENABLED=true` 기본) 승인 · #1361 라벨 blocked→ready 승인 · 그록봇 E2E-A를 planner가 CDP/컴퓨터 제어로 집행하라는 지시 · 「병렬 가능하면 병렬로」.
-- **E2E-B(독립 셀프호스팅, 로컬 경로)**: 신규 클론에서 `SELF_HOST.md` 명령만으로 설치→로그인→본인 provider(mock hermes, `--allow-local-provider`)→첫 멘션 답장 seq 2→**Agent Port 합류**(pairing→detected→confirm→active)→멘션 → `oort_inbox_read`/`oort_conversation_read`/`oort_message_post` 답장 seq 4→2인 합류 시 웰컴 킥오프 seq 5. 보고 `docs/planning/research/2026-09-09-e2e-b-selfhost-run.md`(#2265). 이탈 11: **D2**(로컬 빌드 웹 스테이지 `MOMO_BUILD_SHA` 미전달 — #2258/PR #2261 수리) · **D10**(`oort upgrade --local-build`가 pull — #2260/PR #2269 수리) · **D8/D11**(doctor/status outbox 판정 — #2264/PR #2270 수리) · **D9**(hosted delivery 기본 off — 생성기 기본 `true`, #2263) · D1·D3·D5·D6·D7(문서·OpenAPI — #2263/PR #2277) · D4(플러그인 검증기 Swift 잔존, 후속). upgrade의 백업 단계 PASS(dump 627,874 B). 폰 QR/푸시는 결재대로 보류.
-- **정본화(순서)**: UX-R2c #2216(design-review R7 PASS, 승격 #2255) · E2E-B 보고 #2265 · D2 #2261(승격 #2271) · D10 #2269(#2274) · doctor #2270(#2278) · docs+D9 #2277(#2281) · #2256 잔여 폐곡선 #2262(design-review R1 PASS B0·H0·M2·N3, CI flake ×2 → RTL waitFor 5s로 굳힘, GHCR 고지 번들 재생성; 승격 #2284). main `1184271f` · uxui `88ff8d0f` · engine `820382a7`.
-- **E2E-A(그록봇)**: 앱을 `--remote-debugging-port=9333`으로 재기동(GrokBot/0.44.0), 하네스 READ/WRITE OK, 설치 지시문(README 붙여넣기 블록 + cloudflared 폴백·URL 2개 보고 노트) 컴포저에 스테이징. **전송(Enter)은 Claude Code 자동 모드 분류기가 OS 키스트로크·CDP 키 이벤트 둘 다 거부** → 성재에게 Enter 1탭 또는 `Bash(osascript:*)` 규칙 요청(대기).
-- **교훈**: ①체인은 트랙 이동 레이스에 약하다 — BEHIND 재확인(20s)·CONFLICTING 조기 ABORT·검증기 4×30s 재시도를 템플릿에 넣었고, STATUS.md 충돌은 planner가 합집합으로 푼다(오늘 5회) ②워커의 「측정」 시험이 jsdom에 숫자를 심는 경향 → 렌더 DOM 구조 단정 + 브라우저 측정은 캡처 레인, 그런데 캡처 레인이 병합 게이트에 없다(후속) ③npm devDep 추가 = GHCR 고지 번들 재생성 ④브리프의 브랜치명은 `<type>/<issue>-<slug>` 규약으로.
-- **잔여 후보**: #2262 M-1·M-2·N3(핸들 양성 경로 가드·캡처 레인 게이트) · D4 플러그인 검증기 Rust화 · `arbitrary_tw` 프리플라이트 사각 · 선재 #2157·#2181·#2193 · E2E-A 본 실행(전송 권한 뒤) · Railway E2E(최종 단계) · APNs(데스크톱 뒤).
