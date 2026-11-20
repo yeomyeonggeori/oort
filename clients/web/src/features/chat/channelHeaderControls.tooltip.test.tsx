@@ -185,17 +185,18 @@ const CASES: Case[] = [
         selfRole: "owner" as const,
       }),
   },
+  // 허들 단추의 낱말은 사전에 있다(#6020). 공급자 없이 띄운 컨트롤은 번들된 영어로 선다(`useFormatMessage`).
   {
     name: "허들 시작",
     testId: "huddle-start",
-    label: "허들 시작",
+    label: "Start huddle",
     render: () =>
       createElement(HuddleHeaderControl, { huddle: huddleController(), offline: false }),
   },
   {
     name: "허들 다시 불러오기",
     testId: "huddle-error-retry",
-    label: "다시 불러오기",
+    label: "Reload",
     render: () =>
       createElement(HuddleHeaderControl, {
         huddle: huddleController({ status: "error" }),
@@ -205,7 +206,7 @@ const CASES: Case[] = [
   {
     name: "허들 마이크",
     testId: "huddle-microphone",
-    label: "마이크 끄기",
+    label: "Turn microphone off",
     render: () =>
       createElement(HuddleHeaderControl, {
         huddle: huddleController({ joined: true }),
@@ -215,7 +216,7 @@ const CASES: Case[] = [
   {
     name: "허들 마이크 선택",
     testId: "huddle-mic-devices",
-    label: "마이크 선택",
+    label: "Choose microphone",
     render: () =>
       createElement(HuddleHeaderControl, {
         huddle: huddleController({ joined: true }),
@@ -225,7 +226,7 @@ const CASES: Case[] = [
   {
     name: "허들 나가기",
     testId: "huddle-leave",
-    label: "허들 나가기",
+    label: "Leave huddle",
     render: () =>
       createElement(HuddleHeaderControl, {
         huddle: huddleController({ joined: true }),

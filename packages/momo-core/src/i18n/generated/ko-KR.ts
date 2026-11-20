@@ -1853,6 +1853,42 @@ export const catalog: MessageCatalog = {
       "value": "채널 이름 바꾸기"
     }
   ],
+  "common.action.cancel": [
+    {
+      "type": 0,
+      "value": "취소"
+    }
+  ],
+  "common.action.checkAgain": [
+    {
+      "type": 0,
+      "value": "다시 확인"
+    }
+  ],
+  "common.action.close": [
+    {
+      "type": 0,
+      "value": "닫기"
+    }
+  ],
+  "common.action.reload": [
+    {
+      "type": 0,
+      "value": "다시 불러오기"
+    }
+  ],
+  "common.action.retry": [
+    {
+      "type": 0,
+      "value": "다시 시도"
+    }
+  ],
+  "common.action.save": [
+    {
+      "type": 0,
+      "value": "저장"
+    }
+  ],
   "common.feedback.unavailable": [
     {
       "type": 0,
@@ -1878,6 +1914,48 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "명"
+    }
+  ],
+  "common.state.checking": [
+    {
+      "type": 0,
+      "value": "확인 중"
+    }
+  ],
+  "common.state.connected": [
+    {
+      "type": 0,
+      "value": "연결됨"
+    }
+  ],
+  "common.state.creating": [
+    {
+      "type": 0,
+      "value": "만드는 중"
+    }
+  ],
+  "common.state.loading": [
+    {
+      "type": 0,
+      "value": "불러오는 중"
+    }
+  ],
+  "common.state.notConnected": [
+    {
+      "type": 0,
+      "value": "연결 안 됨"
+    }
+  ],
+  "common.state.saving": [
+    {
+      "type": 0,
+      "value": "저장 중"
+    }
+  ],
+  "common.state.sending": [
+    {
+      "type": 0,
+      "value": "보내는 중"
     }
   ],
   "connect.language.close": [
@@ -5281,6 +5359,232 @@ export const catalog: MessageCatalog = {
       "value": "이모티콘 추천"
     }
   ],
+  "huddles.control.busy": [
+    {
+      "type": 0,
+      "value": "허들 요청 처리 중"
+    }
+  ],
+  "huddles.control.checking": [
+    {
+      "type": 0,
+      "value": "허들 확인 중"
+    }
+  ],
+  "huddles.control.join": [
+    {
+      "type": 0,
+      "value": "허들 참가"
+    }
+  ],
+  "huddles.control.leave": [
+    {
+      "type": 0,
+      "value": "허들 나가기"
+    }
+  ],
+  "huddles.control.live": [
+    {
+      "type": 0,
+      "value": "Live"
+    }
+  ],
+  "huddles.control.loadFailed": [
+    {
+      "type": 0,
+      "value": "허들 상태를 불러오지 못했습니다."
+    }
+  ],
+  "huddles.control.microphoneOff": [
+    {
+      "type": 0,
+      "value": "마이크 끄기"
+    }
+  ],
+  "huddles.control.microphoneOn": [
+    {
+      "type": 0,
+      "value": "마이크 켜기"
+    }
+  ],
+  "huddles.control.start": [
+    {
+      "type": 0,
+      "value": "허들 시작"
+    }
+  ],
+  "huddles.error.connection": [
+    {
+      "type": 0,
+      "value": "허들 오디오 연결이 끊겼습니다. 네트워크를 확인한 뒤 다시 참가하세요."
+    }
+  ],
+  "huddles.error.cspBlocked": [
+    {
+      "type": 0,
+      "value": "이 배포의 보안 정책이 LiveKit 주소를 허용하지 않습니다. 운영자 확인이 필요합니다."
+    }
+  ],
+  "huddles.error.expired": [
+    {
+      "type": 0,
+      "value": "참가 준비 시간이 지나 연결하지 못했습니다. 허들에 다시 참가하세요."
+    }
+  ],
+  "huddles.error.membership": [
+    {
+      "type": 0,
+      "value": "이 채널에서 허들을 사용할 권한이 없습니다. 채널 멤버십을 확인하세요."
+    }
+  ],
+  "huddles.error.microphoneDenied": [
+    {
+      "type": 0,
+      "value": "마이크 권한이 거부되어 참가하지 못했습니다. 브라우저 설정에서 마이크를 허용한 뒤 다시 참가하세요."
+    }
+  ],
+  "huddles.error.microphoneMissing": [
+    {
+      "type": 0,
+      "value": "사용할 수 있는 마이크를 찾지 못했습니다. 오디오 입력 장치를 연결한 뒤 다시 참가하세요."
+    }
+  ],
+  "huddles.error.unconfigured": [
+    {
+      "type": 0,
+      "value": "이 서버는 허들을 사용하지 않습니다. 운영자가 LiveKit을 구성하면 사용할 수 있습니다."
+    }
+  ],
+  "huddles.error.unknown": [
+    {
+      "type": 0,
+      "value": "허들에 연결하지 못했습니다. 잠시 뒤에 다시 시도하세요."
+    }
+  ],
+  "huddles.mic.empty": [
+    {
+      "type": 0,
+      "value": "연결된 마이크가 없습니다."
+    }
+  ],
+  "huddles.mic.gain": [
+    {
+      "type": 0,
+      "value": "입력 음량"
+    }
+  ],
+  "huddles.mic.menu": [
+    {
+      "type": 0,
+      "value": "마이크"
+    }
+  ],
+  "huddles.mic.permissionDenied": [
+    {
+      "type": 0,
+      "value": "마이크 권한이 없어 장치를 고를 수 없습니다. 브라우저 설정에서 허용하세요."
+    }
+  ],
+  "huddles.mic.permissionPrompt": [
+    {
+      "type": 0,
+      "value": "마이크 사용을 허용하면 장치를 고를 수 있습니다."
+    }
+  ],
+  "huddles.mic.picker": [
+    {
+      "type": 0,
+      "value": "마이크 선택"
+    }
+  ],
+  "huddles.mic.systemDefault": [
+    {
+      "type": 0,
+      "value": "시스템 기본"
+    }
+  ],
+  "huddles.mic.unnamed": [
+    {
+      "type": 0,
+      "value": "마이크 "
+    },
+    {
+      "type": 2,
+      "value": "number",
+      "style": null
+    }
+  ],
+  "huddles.notice.endedAudioClosed": [
+    {
+      "type": 0,
+      "value": "허들이 종료되어 오디오 연결을 닫았습니다."
+    }
+  ],
+  "huddles.notice.endedJoinCancelled": [
+    {
+      "type": 0,
+      "value": "허들이 종료되어 참가를 취소했습니다."
+    }
+  ],
+  "huddles.notice.leaveUnconfirmed": [
+    {
+      "type": 0,
+      "value": "오디오는 종료됐지만 서버에 나가기를 확인하지 못했습니다. 활성 상태를 다시 확인하세요."
+    }
+  ],
+  "huddles.participants.many": [
+    {
+      "type": 1,
+      "value": "first"
+    },
+    {
+      "type": 0,
+      "value": ", "
+    },
+    {
+      "type": 1,
+      "value": "second"
+    },
+    {
+      "type": 0,
+      "value": " 외 "
+    },
+    {
+      "type": 2,
+      "value": "others",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "명"
+    }
+  ],
+  "huddles.participants.one": [
+    {
+      "type": 1,
+      "value": "first"
+    }
+  ],
+  "huddles.participants.two": [
+    {
+      "type": 1,
+      "value": "first"
+    },
+    {
+      "type": 0,
+      "value": ", "
+    },
+    {
+      "type": 1,
+      "value": "second"
+    }
+  ],
+  "huddles.participants.waiting": [
+    {
+      "type": 0,
+      "value": "참가자 기다리는 중"
+    }
+  ],
   "inbox.approval.open": [
     {
       "type": 0,
@@ -6238,6 +6542,36 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "초대 링크를 올렸어요"
+    }
+  ],
+  "readState.markUnread.action": [
+    {
+      "type": 0,
+      "value": "여기부터 안 읽음"
+    }
+  ],
+  "readState.markUnread.done": [
+    {
+      "type": 0,
+      "value": "여기부터 안 읽음으로 표시했습니다"
+    }
+  ],
+  "readState.markUnread.failed": [
+    {
+      "type": 0,
+      "value": "안 읽음으로 표시하지 못했습니다. 잠시 뒤에 다시 시도하세요."
+    }
+  ],
+  "readState.markUnread.messageGone": [
+    {
+      "type": 0,
+      "value": "이 메시지는 이 채널에 더 이상 없습니다. 채널을 새로 고치거나 다시 열어 보세요."
+    }
+  ],
+  "readState.markUnread.notMember": [
+    {
+      "type": 0,
+      "value": "이 채널의 멤버만 안 읽음으로 표시할 수 있습니다."
     }
   ],
   "recovery.claim.hostBody": [

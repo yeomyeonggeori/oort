@@ -1,5 +1,18 @@
 {
   "common.feedback.unavailable": "Content is unavailable. Please try again.",
   "common.members.count": "{count, plural, one {# member} other {# members}}",
-  "common.invitation.received": "{actorName} invited you."
+  "common.invitation.received": "{actorName} invited you.",
+  "common.action.retry": "Try again",
+  "common.action.cancel": "Cancel",
+  "common.action.close": "Close",
+  "common.action.reload": "Reload",
+  "common.action.checkAgain": "Check again",
+  "common.action.save": "Save",
+  "common.state.saving": "Saving",
+  "common.state.checking": "Checking",
+  "common.state.loading": "Loading",
+  "common.state.creating": "Creating",
+  "common.state.sending": "Sending",
+  "common.state.connected": "Connected",
+  "common.state.notConnected": "Not connected"
 }

@@ -83,14 +83,14 @@ describe("classifyAudioInputDevices", () => {
     ]);
   });
 
-  it("names unlabeled devices after a granted hint", () => {
+  it("keeps an unlabeled device after a granted hint (the menu names it by its place, #6020)", () => {
     const classified = classifyAudioInputDevices(
       [row("audioinput", "mic-1", "")],
       "granted"
     );
     expect(classified).toEqual({
       permission: "granted",
-      devices: [{ deviceId: "mic-1", label: "마이크 1" }],
+      devices: [{ deviceId: "mic-1", label: "" }],
     });
   });
 

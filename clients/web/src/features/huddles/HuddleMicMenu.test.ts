@@ -3,15 +3,14 @@
 import { act, createElement, useState, type ReactElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import {
-  HUDDLE_MIC_DEFAULT_LABEL,
-  HUDDLE_MIC_EMPTY,
-  HUDDLE_MIC_GAIN_LABEL,
-  HUDDLE_MIC_PERMISSION_DENIED,
-  HUDDLE_MIC_PERMISSION_PROMPT,
-  HuddleMicMenu,
-} from "./HuddleMicMenu";
+import { catalog as enCatalog } from "@momo/core/i18n/generated/en-US";
+import { createMessageCopy } from "@momo/core/testkit";
+import { HuddleMicMenu } from "./HuddleMicMenu";
+import { HUDDLE_MIC_KEYS } from "./micKeys";
 import type { AudioInputDevicesState } from "./useAudioInputDevices";
+
+// 공급자 없이 띄운 메뉴는 번들된 영어로 선다(`useFormatMessage`). 시험은 같은 생성물로 키를 풀어 그 문장을 찾는다.
+const en = createMessageCopy({ messageLocale: "en-US", catalog: enCatalog });
 
 const devicesState: AudioInputDevicesState = {
   permission: "granted",
@@ -164,7 +163,7 @@ describe("HuddleMicMenu copy and states", () => {
     devicesState.devices = [];
     mountMenu();
     const menu = await openMenu();
-    expect(menu.textContent).toContain(HUDDLE_MIC_PERMISSION_PROMPT);
+    expect(menu.textContent).toContain(en(HUDDLE_MIC_KEYS.permissionPrompt));
     expect(menu.querySelector('[data-testid="huddle-mic-list"]')).toBeNull();
   });
 
@@ -173,8 +172,17 @@ describe("HuddleMicMenu copy and states", () => {
     devicesState.devices = [];
     mountMenu();
     const menu = await openMenu();
-    expect(menu.textContent).toContain(HUDDLE_MIC_PERMISSION_DENIED);
+    expect(menu.textContent).toContain(en(HUDDLE_MIC_KEYS.permissionDenied));
     expect(menu.querySelector('[data-testid="huddle-mic-list"]')).toBeNull();
+  });
+
+  it("names a device the browser left unnamed by its place in the list", async () => {
+    devicesState.devices = [{ deviceId: "mic-x", label: "" }];
+    mountMenu();
+    const menu = await openMenu();
+    const option = menu.querySelector('[data-testid="huddle-mic-option-mic-x"] .truncate');
+    expect(option?.textContent).toBe(en("huddles.mic.unnamed", { number: 1 }));
+    expect(option?.textContent).toBe("Microphone 1");
   });
 
   it("names an empty device list as a sentence", async () => {
@@ -182,7 +190,7 @@ describe("HuddleMicMenu copy and states", () => {
     devicesState.devices = [];
     mountMenu();
     const menu = await openMenu();
-    expect(menu.textContent).toContain(HUDDLE_MIC_EMPTY);
+    expect(menu.textContent).toContain(en(HUDDLE_MIC_KEYS.empty));
     expect(menu.querySelector('[data-testid="huddle-mic-list"]')).toBeNull();
   });
 
@@ -190,8 +198,8 @@ describe("HuddleMicMenu copy and states", () => {
     mountMenu({ gainStart: 100 });
     const menu = await openMenu();
     expect(menu.querySelector('[data-testid="huddle-mic-list"]')).not.toBeNull();
-    expect(menu.textContent).toContain(HUDDLE_MIC_DEFAULT_LABEL);
-    expect(menu.textContent).toContain(HUDDLE_MIC_GAIN_LABEL);
+    expect(menu.textContent).toContain(en(HUDDLE_MIC_KEYS.systemDefault));
+    expect(menu.textContent).toContain(en(HUDDLE_MIC_KEYS.gain));
     expect(menu.className).toContain("max-w-menu-available");
     const value = menu.querySelector('[data-testid="huddle-mic-gain-value"]');
     expect(value?.textContent).toBe("100%");

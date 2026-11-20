@@ -74,7 +74,8 @@ function huddleController(over: Partial<HuddleController> = {}): HuddleControlle
 }
 
 const NAMES = ["Nadia Rahman — 제품 디자인 운영", "곽성재 — 웹 클라이언트 담당", "이도현", "팀원 1", "팀원 2"];
-const SUMMARY = "Nadia Rahman — 제품 디자인 운영, 곽성재 — 웹 클라이언트 담당 외 3명";
+// 공급자 없이 띄운 머리는 번들된 영어로 선다(`useFormatMessage`, #6020): 요약은 영어 틀(`huddles.participants.many`)의 문장이다.
+const SUMMARY = "Nadia Rahman — 제품 디자인 운영, 곽성재 — 웹 클라이언트 담당 and 3 others";
 
 function activeHuddle(): Huddle {
   return {

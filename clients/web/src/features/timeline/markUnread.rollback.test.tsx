@@ -7,14 +7,17 @@ import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { ApiError, type Message, type ReadState, type RosterMember } from "@momo/core/lib/api";
 import { markAt3Cursor10 } from "@momo/core/features/readState/proof";
 import {
-  MARK_UNREAD_ACTION_LABEL,
-  markUnreadFailureMessage,
+  MARK_UNREAD_ACTION_KEY,
+  markUnreadFailureKey,
 } from "@momo/core/features/readState/copy";
+import { catalog as koCatalog } from "@momo/core/i18n/generated/ko-KR";
+import { createMessageCopy } from "@momo/core/testkit";
 import { makeDirectory } from "@momo/core/features/workspace/directory";
 import { SessionProvider, type SessionContextValue } from "@/app/session";
 import { useMarkUnread } from "./useMarkUnread";
 import { MessageRow } from "./MessageRow";
 
+const ko = createMessageCopy({ messageLocale: "ko-KR", catalog: koCatalog });
 const WS = "00000000-0000-7000-8000-000000000001";
 const ME = "00000000-0000-7000-8000-000000000101";
 const CH = markAt3Cursor10().channelId;
@@ -123,11 +126,12 @@ function Inner({
           })
           .then(() => onDone(null))
           .catch((error: unknown) => {
-            onDone(error instanceof Error ? error.message : String(error));
+            // 화면(MessageRow)이 하는 그대로: 넘어온 실패를 키로 바꿔 지금 언어로 푼다.
+            onDone(ko(markUnreadFailureKey(error)));
           });
       },
     },
-    MARK_UNREAD_ACTION_LABEL
+    ko(MARK_UNREAD_ACTION_KEY)
   );
 }
 
@@ -238,7 +242,7 @@ describe("마크 낙관과 400 롤백", () => {
 
     const cached = client.getQueryData<ReadState[]>(["read-state", WS]);
     expect(cached?.[0]?.markedUnreadBeforeSeq).toBeNull();
-    expect(banner).toBe(markUnreadFailureMessage(new ApiError(400, "x")));
+    expect(banner).toBe(ko("readState.markUnread.messageGone"));
     expect(banner).not.toContain("mark_unread_before_seq");
     expect(advertiseReadState).toHaveBeenCalledWith(WS, CH, 10, "mark_unread", {
       markUnreadBeforeSeq: 3,
@@ -317,7 +321,8 @@ describe("마크 낙관과 400 롤백", () => {
     const alert = document.querySelector('[data-testid="message-action-error"]');
     expect(alert).not.toBeNull();
     expect(alert?.getAttribute("role")).toBe("alert");
-    expect(alert?.textContent).toContain("더 이상 없습니다");
+    // 공급자 없이 띄운 행은 번들된 영어로 선다(#6020). 「닫기」 단추는 아직 옮기지 않은 문구라 한국어 그대로다.
+    expect(alert?.textContent).toContain("This message is no longer in this channel.");
     expect(alert?.querySelector("button")?.textContent).toContain("닫기");
   });
 

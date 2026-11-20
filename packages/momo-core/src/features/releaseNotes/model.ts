@@ -1,4 +1,4 @@
-import type { MessageArgs, MessageKey } from "../../i18n/generated/messages";
+import type { PlainMessageKey } from "../../i18n/keys";
 
 // =============================================================================
 // 앱 안 「업데이트 소식」 모델 (#4937, owner 10-31 · 글을 사전으로 옮김 #5054, owner 11-03).
@@ -57,9 +57,7 @@ export const RELEASE_NOTES_SETTINGS_PAGE = "releaseNotes" as const;
  * 소식 글의 사전 키. 값 없이 그대로 읽는 문구(`{count}` 같은 인자가 없는 것)만이고, 사전에 없는 키는 컴파일이 막는다:
  * 키 오타가 조용히 안전 문구(「Content is unavailable」)로 나가지 않는다.
  */
-export type ReleaseNoteKey = {
-  [K in MessageKey]: MessageArgs[K] extends Record<string, never> ? K : never;
-}[MessageKey];
+export type ReleaseNoteKey = PlainMessageKey;
 
 export interface ReleaseNoteItem {
   /** 소식 안에서 유일한 이름. 영문 낱말로 시작하는 영숫자(`channelNotifications`). 화면의 key·testID가 쓰고, 키 이름의 한 토막이다. */

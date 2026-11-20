@@ -92,10 +92,12 @@ import { useEscapeLayer } from "@/design/ui/escapeLayer";
 // =============================================================================
 
 import type { MessageActionAvailability } from "@momo/core/features/timeline/model";
+import { useFormatMessage } from "@/i18n/useFormatMessage";
 import {
   actionKeepsMenuOpen,
   messageActionGroups,
   messageActionItemsForSurface,
+  messageActionLabel,
   messageToolbarItems,
   type MessageActionCopyState,
   type MessageActionItem,
@@ -233,6 +235,7 @@ function ActionMenuItem({
   callbacks: MessageActionCallbacks;
   onOpenPicker: (opener?: HTMLElement | null) => void;
 }) {
+  const formatMessage = useFormatMessage();
   const props = {
     "data-testid": `${prefix}-${item.testKey}`,
     "aria-label": item.accessibleLabel,
@@ -246,7 +249,7 @@ function ActionMenuItem({
     children: (
       <>
         {actionIcon(item, pinned)}
-        {item.label}
+        {messageActionLabel(item, formatMessage)}
       </>
     ),
   };
@@ -660,6 +663,7 @@ export function MessageActionSheet({
   onOpenPicker: (opener?: HTMLElement | null) => void;
 }) {
   const close = () => onOpenChange(false);
+  const formatMessage = useFormatMessage();
   const items = messageActionItemsForSurface("sheet", available, copyState);
   const quick = items.filter((item) => item.key.startsWith("react:"));
   const more = items.find((item) => item.key === "react-more");
@@ -714,7 +718,7 @@ export function MessageActionSheet({
         {regular.map((item) => (
           <SheetAction
             key={item.key}
-            label={item.label}
+            label={messageActionLabel(item, formatMessage)}
             testId={`sheet-${item.testKey}`}
             tone={item.tone}
             onSelect={() => {

@@ -7,7 +7,8 @@ import {
   copyMessageActionLabel,
 } from "@momo/core/features/timeline/copyLabels";
 import { REMINDER_MENU_LABEL } from "@momo/core/features/reminders/model";
-import { MARK_UNREAD_ACTION_LABEL } from "@momo/core/features/readState/copy";
+import { MARK_UNREAD_ACTION_KEY } from "@momo/core/features/readState/copy";
+import type { PlainMessageKey } from "@momo/core/i18n";
 
 export type MessageActionItemKey =
   | `react:${string}`
@@ -82,7 +83,13 @@ export const MESSAGE_ACTION_GROUP_PLACEMENT: Readonly<
 export interface MessageActionItem {
   key: MessageActionItemKey;
   testKey: string;
+  /** 아직 사전으로 옮기지 않은 항목의 낱말. `labelKey`가 있는 항목은 빈 문자열이다. */
   label: string;
+  /**
+   * 사전으로 옮긴 항목의 키(#6020). 화면은 `messageActionLabel`로 지금 언어의 낱말을 받는다. 이 모델의 나머지 낱말이 옮겨지면
+   * (L-A3) `label`을 지우고 이것 하나로 모은다.
+   */
+  labelKey?: PlainMessageKey;
   accessibleLabel?: string;
   tone?: "danger";
   group: MessageActionGroup;
@@ -93,6 +100,14 @@ export interface MessageActionItem {
    * 항목의 값인 이유는 문구 장부(`direct-copy`)가 코드 안의 영어 낱말 문자열을 사용자 문구 후보로 세기 때문이다.
    */
   toolbarCopy?: true;
+}
+
+/** 항목이 화면에 내는 낱말: 사전으로 옮긴 항목은 지금 언어로 푼 키, 나머지는 아직 모델이 든 낱말이다. */
+export function messageActionLabel(
+  item: Pick<MessageActionItem, "label" | "labelKey">,
+  formatMessage: (key: PlainMessageKey) => string
+): string {
+  return item.labelKey === undefined ? item.label : formatMessage(item.labelKey);
 }
 
 export const MESSAGE_ACTION_SURFACES = ["menu", "context", "sheet"] as const;
@@ -191,7 +206,8 @@ export function messageActionItems(
     items.push({
       key: "mark-unread",
       testKey: "mark-unread",
-      label: MARK_UNREAD_ACTION_LABEL,
+      label: "",
+      labelKey: MARK_UNREAD_ACTION_KEY,
       group: MESSAGE_ACTION_GROUP.message,
     });
   }

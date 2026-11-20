@@ -7,6 +7,7 @@
 // =============================================================================
 
 import type { MessageArgs, MessageKey } from "../../i18n/generated/messages";
+import type { PlainMessageKey } from "../../i18n/keys";
 import type { TeamAiBundle, TeamAiNoticeKind, TeamAiRolesErrorKind } from "./teamAiRoles";
 import type { TeamAiDelegationUnavailableReason } from "./teamAiLimits";
 import type { TeamAiDelegationKind } from "../timeline/teamAiDelegation";
@@ -18,11 +19,9 @@ import { teamAiSaveErrorCopy } from "./teamAiSwitch";
 
 /**
  * 값을 받지 않는 문구의 키만. 키를 변수로 들고 다니는 표(`TEAM_AI_ROLE_COPY`…)와 모델(`teamAiStageGuide`)은 이
- * 타입으로 좁혀야 `formatMessage(key)`가 인자 없이 불린다(값이 필요한 키가 섞이면 컴파일이 멈춘다).
+ * 타입으로 좁혀야 `formatMessage(key)`가 인자 없이 불린다(값이 필요한 키가 섞이면 컴파일이 멈춘다). 정의는 사전 쪽 한 곳이다(#6020).
  */
-export type PlainMessageKey = {
-  [K in MessageKey]: MessageArgs[K] extends Record<string, never> ? K : never;
-}[MessageKey];
+export type { PlainMessageKey };
 
 /** 묶음 하나의 이름과 한 줄 설명. */
 export const TEAM_AI_ROLE_COPY = {

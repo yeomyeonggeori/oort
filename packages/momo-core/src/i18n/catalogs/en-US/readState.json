@@ -1,0 +1,7 @@
+{
+  "readState.markUnread.action": "Mark unread from here",
+  "readState.markUnread.done": "Marked unread from here",
+  "readState.markUnread.messageGone": "This message is no longer in this channel. Refresh or reopen the channel.",
+  "readState.markUnread.notMember": "Only members of this channel can mark messages as unread.",
+  "readState.markUnread.failed": "Couldn't mark as unread. Try again in a moment."
+}

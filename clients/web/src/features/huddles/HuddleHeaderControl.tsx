@@ -17,9 +17,19 @@ import {
   huddleParticipantSummary,
 } from "@momo/core/features/huddles/huddleModel";
 import type { Huddle } from "@momo/core/lib/api";
+import { useFormatMessage } from "@/i18n/useFormatMessage";
 import { HuddleMicMenu } from "./HuddleMicMenu";
 import { useHuddle, type HuddleController } from "./useHuddle";
 import { BlockedReason } from "@/features/common/BlockedReason";
+
+/** 참가자 요약 한 줄(코어가 고른 틀과 값)을 지금 언어로 푼다. 칩의 낭독 · 참가 중 낭독 · 이름 글이 같은 한 줄을 읽는다. */
+function useParticipantSummary(): (huddle: Huddle) => string {
+  const formatMessage = useFormatMessage();
+  return (huddle) => {
+    const summary = huddleParticipantSummary(huddle);
+    return formatMessage(summary.key, summary.values as never);
+  };
+}
 
 /** 참가자 전원의 이름(쉼표로 이은 전문): 칩의 `title`과 이름 글의 `title`이 같은 글을 읽는다. */
 function participantNames(huddle: Huddle): string {
@@ -43,6 +53,8 @@ function HuddleLiveChip({
   announce?: boolean;
 }) {
   const names = huddle ? participantNames(huddle) : undefined;
+  const formatMessage = useFormatMessage();
+  const summaryOf = useParticipantSummary();
   return (
     <div
       className="flex h-control min-w-0 items-center gap-1 overflow-hidden rounded-sm bg-ok-soft px-2 text-meta"
@@ -51,12 +63,12 @@ function HuddleLiveChip({
     >
       <span className="flex shrink-0 items-center gap-1 font-medium text-ok">
         <span className="size-2 rounded-full bg-ok" aria-hidden="true" />
-        Live
+        {formatMessage("huddles.control.live")}
       </span>
       {huddle && (
         <>
           {announce && (
-            <span className="sr-only">{huddleParticipantSummary(huddle)}</span>
+            <span className="sr-only">{summaryOf(huddle)}</span>
           )}
           <span
             className="shrink-0 text-ink-muted mobile-only"
@@ -83,6 +95,7 @@ export function HuddleHeaderNames({
   offline: boolean;
 }) {
   const target = huddleNamesTarget(huddle, offline);
+  const summaryOf = useParticipantSummary();
   if (target === null) return null;
   return (
     <span
@@ -94,7 +107,7 @@ export function HuddleHeaderNames({
       // 말줄임된 이름 글 위에서도 전문이 뜬다(예전에는 이름이 칩 안에 있어 칩의 `title`이 떴다).
       title={participantNames(target)}
     >
-      {huddleParticipantSummary(target)}
+      {summaryOf(target)}
     </span>
   );
 }
@@ -155,6 +168,8 @@ export function HuddleHeaderControl({
   offline: boolean;
 }) {
   const busy = huddle.busy !== null;
+  const formatMessage = useFormatMessage();
+  const summaryOf = useParticipantSummary();
 
   // 「아무것도 그리지 않는다」의 판단은 모델 한 곳이다(`huddleControlShown`): ChatShell이 ⋮를 이 컨트롤과 묶을지 같은 판단으로 정한다.
   // 오프라인과 허들 없는 서버(unconfigured)는 여기서 걸러진다(아래 가지들은 그 둘을 다시 묻지 않는다).
@@ -164,7 +179,9 @@ export function HuddleHeaderControl({
   // its exit and microphone controls win over every projection state, including
   // a transient 500 or a later 503.
   if (huddle.joined) {
-    const microphoneLabel = huddle.muted ? "마이크 켜기" : "마이크 끄기";
+    const microphoneLabel = formatMessage(
+      huddle.muted ? "huddles.control.microphoneOn" : "huddles.control.microphoneOff"
+    );
     return (
       <div
         className="flex min-w-0 items-center justify-end gap-1"
@@ -178,7 +195,7 @@ export function HuddleHeaderControl({
         {/* 칩이 양보하거나(머리 안쪽 26rem 밑) 폰 폭에서 안 서도 참가자 전문은 낭독에 남는다: 칩 래퍼 밖의 sr-only 한 곳이 읽는다. */}
         {huddle.active && (
           <span className="sr-only">
-            {huddleParticipantSummary(huddle.active)}
+            {summaryOf(huddle.active)}
           </span>
         )}
         {/* 마이크 묶음은 `overflow-hidden`이 아니다(#4591): 그 상자는 안의 툴팁을 잘라 버린다. 대신 양 끝 단추가 자기
@@ -219,7 +236,7 @@ export function HuddleHeaderControl({
         </div>
         <HuddleIconButton
           testId="huddle-leave"
-          label="허들 나가기"
+          label={formatMessage("huddles.control.leave")}
           busy={huddle.busy === "leave"}
           onClick={() => void huddle.leave()}
         >
@@ -230,7 +247,7 @@ export function HuddleHeaderControl({
           )}
         </HuddleIconButton>
         <span className="sr-only" aria-live="polite">
-          {busy ? "허들 요청 처리 중" : ""}
+          {busy ? formatMessage("huddles.control.busy") : ""}
         </span>
       </div>
     );
@@ -244,7 +261,7 @@ export function HuddleHeaderControl({
         data-testid="huddle-loading"
       >
         <Loader2 aria-hidden="true" className="spinner-busy size-4" />
-        <span className="sr-only">허들 확인 중</span>
+        <span className="sr-only">{formatMessage("huddles.control.checking")}</span>
       </p>
     );
   }
@@ -256,7 +273,7 @@ export function HuddleHeaderControl({
     return (
       <HuddleIconButton
         testId="huddle-error-retry"
-        label="다시 불러오기"
+        label={formatMessage("common.action.reload")}
         onClick={huddle.retry}
       >
         <RotateCw aria-hidden="true" className="size-4" />
@@ -264,7 +281,9 @@ export function HuddleHeaderControl({
     );
   }
 
-  const startOrJoinLabel = huddle.active ? "허들 참가" : "허들 시작";
+  const startOrJoinLabel = formatMessage(
+    huddle.active ? "huddles.control.join" : "huddles.control.start"
+  );
   return (
     <div
       className="flex min-w-0 items-center justify-end gap-1"
@@ -284,7 +303,7 @@ export function HuddleHeaderControl({
         )}
       </HuddleIconButton>
       <span className="sr-only" aria-live="polite">
-        {busy ? "허들 요청 처리 중" : ""}
+        {busy ? formatMessage("huddles.control.busy") : ""}
       </span>
     </div>
   );
@@ -297,10 +316,11 @@ export function HuddleHeaderBanner({
   huddle: HuddleController;
   offline: boolean;
 }) {
+  const formatMessage = useFormatMessage();
   if (huddle.notice) {
     return (
       <InlineBanner
-        message={huddle.notice}
+        message={formatMessage(huddle.notice)}
         testId="huddle-notice"
       />
     );
@@ -334,13 +354,13 @@ export function HuddleHeaderBanner({
   // 지원하지 않는 표면은 접는다. 사람이 여기서 할 수 있는 일이 없고, 할 수 있는
   // 일이 생기는 조건(운영자가 LiveKit을 구성)은 이 채널 헤더가 아니라 운영
   // 문서에 있다. 시작/참가를 눌렀는데 서버가 503을 답하는 경우는 여전히 문장을
-  // 받는다(huddleErrorCopy("unconfigured")): 그때는 사람이 방금 무언가를 했고,
+  // 받는다(HUDDLE_ERROR_KEYS.unconfigured): 그때는 사람이 방금 무언가를 했고,
   // 답이 없으면 눌린 것인지조차 알 수 없다.
   if (huddle.status === "unconfigured") return null;
   if (huddle.status === "error") {
     return (
       <InlineBanner
-        message="허들 상태를 불러오지 못했습니다."
+        message={formatMessage("huddles.control.loadFailed")}
         testId="huddle-error"
       />
     );
