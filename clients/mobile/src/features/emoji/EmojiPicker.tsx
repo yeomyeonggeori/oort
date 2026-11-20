@@ -41,6 +41,7 @@ import {SheetHeader} from '../../design/SheetChrome';
 import {useKeyboardAppearance, useStyles} from '../../design/theme';
 import {
   font,
+  PRESSED_OPACITY,
   radius,
   SAFE_GUTTER,
   space,
@@ -429,7 +430,7 @@ const buildStyles = (color: Palette) =>
     toneChip: {borderRadius: radius.pill, borderWidth: 2, borderColor: 'transparent'},
     toneChipSelected: {borderColor: color.accent},
     selected: {backgroundColor: color.accentSurface},
-    pressed: {opacity: 0.6},
+    pressed: {opacity: PRESSED_OPACITY},
     glyph: {fontSize: font.title, color: color.text},
     cell: {
       width: TOUCH_TARGET,

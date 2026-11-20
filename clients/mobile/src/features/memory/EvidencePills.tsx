@@ -1,7 +1,7 @@
 import type {MemoryEvidenceLink} from '@momo/core/features/memory/model';
 import React from 'react';
 import {Pressable, StyleSheet, Text, View} from 'react-native';
-import {font, radius, slopTo, space, type Palette} from '../../design/tokens';
+import {font, PRESSED_OPACITY, radius, slopTo, space, type Palette} from '../../design/tokens';
 import {useStyles} from '../../design/theme';
 import {evidenceA11y, evidenceLabel, evidenceMore} from './copy';
 
@@ -65,7 +65,7 @@ const buildStyles = (color: Palette) =>
       borderColor: color.border,
       backgroundColor: color.bg,
     },
-    pressed: {opacity: 0.6},
+    pressed: {opacity: PRESSED_OPACITY},
     pillLabel: {fontSize: font.meta, color: color.accentText, fontWeight: '600'},
     rest: {fontSize: font.meta, color: color.textMuted},
   });

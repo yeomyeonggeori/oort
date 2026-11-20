@@ -69,6 +69,7 @@ import {
   ds2Radius,
   font,
   line as lineHeight,
+  PRESSED_OPACITY,
   radius,
   slopTo,
   space,
@@ -914,7 +915,7 @@ function buildStyles(color: Palette) {
       justifyContent: 'center',
       borderRadius: ds2Radius.pill,
     },
-    pressed: {opacity: 0.6},
+    pressed: {opacity: PRESSED_OPACITY},
     section: {paddingTop: space.xs, paddingBottom: space.xs, paddingHorizontal: space.md},
     sectionHead: {
       fontSize: font.meta,

@@ -28,7 +28,7 @@ import type {OnboardingDots as OnboardingDotsModel} from '@momo/core/features/on
 
 import {HOME_ICON_SIZE, HOME_ICONS} from '../../design/icons';
 import {usePalette, useStyles} from '../../design/theme';
-import {font, space, TOUCH_TARGET, type Palette} from '../../design/tokens';
+import {font, PRESSED_OPACITY, space, TOUCH_TARGET, type Palette} from '../../design/tokens';
 import {useReduceMotion} from '../../lib/useReduceMotion';
 import {OnboardingCanvas, OnboardingDots} from './KomettoGuide';
 
@@ -568,7 +568,7 @@ const buildStyles = (color: Palette) =>
       fontSize: font.body,
       fontWeight: '500',
     },
-    pressedText: {opacity: 0.6},
+    pressedText: {opacity: PRESSED_OPACITY},
     linkRow: {
       flexDirection: 'row',
       flexWrap: 'wrap',
