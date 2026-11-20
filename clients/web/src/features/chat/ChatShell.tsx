@@ -1407,15 +1407,8 @@ export function ChatShell() {
             모자라면(폰 320, 판이 좁은 600대에서 단추가 다 선 대화) 묶음 안에서 줄이 바뀐다(`flex-wrap`).
             어느 쪽이든 단추는 뷰포트 안에 남는다. */}
         <div className="channel-head-tools flex items-center justify-end gap-2">
-          {timeline.resume.resubscribeCount > 0 && (
-            <span
-              className="text-timestamp text-ink-muted"
-              data-numeric
-              data-testid="resume-info"
-            >
-              재연결 {timeline.resume.resubscribeCount}회
-            </span>
-          )}
+          {/* 재연결 횟수는 머리에 두지 않는다(#6025): 쓰는 사람이 뜻을 알 수 없는 글이었다. 같은 사실(연결이 바뀐 횟수)은
+              설정 › 업데이트 › 연결 기록에 있다. */}
           <div
             className="flex min-w-0 flex-wrap items-center justify-end gap-1"
             role="group"
