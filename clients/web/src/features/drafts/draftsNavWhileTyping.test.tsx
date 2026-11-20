@@ -1,8 +1,8 @@
 // @vitest-environment jsdom
 
-import { act, createElement, useState } from "react";
+import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { MemoryRouter } from "react-router-dom";
+import { MemoryRouter, Route, Routes, useNavigate, useParams } from "react-router-dom";
 import { QueryClient, QueryClientProvider, onlineManager } from "@tanstack/react-query";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Channel } from "@momo/core/lib/api";
@@ -94,10 +94,11 @@ function session(): SessionContextValue {
   } as unknown as SessionContextValue;
 }
 
-/** 사이드바 줄과 입력창 하나. 대화를 옮기면 ChatShell처럼 같은 입력창이 다른 채널을 받는다. */
+/** 사이드바 줄과 입력창 하나. 대화를 옮기면 ChatShell처럼 주소가 바뀌고 같은 입력창이 다른 채널을 받는다. */
 function Shell() {
-  const [channelId, setChannelId] = useState(CH_A);
-  openChannel = setChannelId;
+  const channelId = useParams().channelId ?? CH_A;
+  const navigate = useNavigate();
+  openChannel = (id) => navigate(`/c/${id}`);
   return createElement(
     "div",
     null,
@@ -125,7 +126,7 @@ async function settle() {
   }
 }
 
-async function mount(): Promise<HTMLElement> {
+async function mount(path = `/c/${CH_A}`): Promise<HTMLElement> {
   host = document.createElement("div");
   document.body.append(host);
   mountedRoot = createRoot(host);
@@ -137,11 +138,21 @@ async function mount(): Promise<HTMLElement> {
         { client },
         createElement(
           MemoryRouter,
-          { initialEntries: [`/c/${CH_A}`] },
+          { initialEntries: [path] },
           createElement(
             OpenAgentProfileContext.Provider,
             { value: () => undefined },
-            createElement(SessionProvider, { value: session() }, createElement(Shell))
+            createElement(
+              SessionProvider,
+              { value: session() },
+              createElement(
+                Routes,
+                null,
+                // 첫 화면(`/`)은 주소에 채널이 없지만 첫 채널의 입력창을 연다(ChatShell의 색인 폴백).
+                createElement(Route, { path: "/", element: createElement(Shell) }),
+                createElement(Route, { path: "/c/:channelId", element: createElement(Shell) })
+              )
+            )
           )
         )
       )
@@ -163,6 +174,29 @@ async function type(root: HTMLElement, value: string) {
 async function moveTo(channelId: string) {
   await act(async () => openChannel(channelId));
   await settle();
+}
+
+/** 사이드바 줄만(입력창 없이) 이 주소에 올린다 — 새로고침 직후 입력창이 서기 전의 모양이다. */
+async function mountNavAt(path: string): Promise<HTMLElement> {
+  host = document.createElement("div");
+  document.body.append(host);
+  mountedRoot = createRoot(host);
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: Infinity } } });
+  await act(async () => {
+    mountedRoot?.render(
+      createElement(
+        QueryClientProvider,
+        { client },
+        createElement(
+          MemoryRouter,
+          { initialEntries: [path] },
+          createElement(SessionProvider, { value: session() }, createElement("ul", null, createElement(DraftsNavItem)))
+        )
+      )
+    );
+  });
+  await settle();
+  return host;
 }
 
 const navRow = (root: HTMLElement) => root.querySelector('[data-testid="nav-drafts"]');
@@ -187,11 +221,30 @@ describe("쓰는 동안 「초안」 줄이 서지 않는다 (#6030)", () => {
     expect(navRow(root)).toBeNull();
   });
 
+  it("첫 화면(`/`)에서도 치는 동안 줄이 없고, 다른 대화로 옮기면 선다", async () => {
+    const root = await mount("/");
+    await type(root, "첫 화면에서 쓰는 글");
+    expect(navRow(root)).toBeNull();
+    await moveTo(CH_B);
+    expect(navRow(root)).not.toBeNull();
+  });
+
   it("다른 대화에 초안이 이미 있으면 치기 전후 모두 줄이 서 있다", async () => {
     writeDraft(WS, CH_B, "엔진 채널에 남긴 글");
     const root = await mount();
     expect(navRow(root)).not.toBeNull();
     await type(root, "일반 채널에 쓰는 글");
     expect(navRow(root)).not.toBeNull();
+  });
+
+  it("그 대화의 주소에서는 입력창이 서기 전에도 그 대화의 초안으로 줄을 세우지 않는다 — 새로고침에 줄이 섰다 걷히지 않게", async () => {
+    writeDraft(WS, CH_A, "새로고침 전에 쓰던 글");
+    const inA = await mountNavAt(`/c/${CH_A}`);
+    expect(navRow(inA)).toBeNull();
+    act(() => mountedRoot?.unmount());
+    mountedRoot = null;
+    host?.remove();
+    const elsewhere = await mountNavAt("/inbox");
+    expect(navRow(elsewhere)).not.toBeNull();
   });
 });

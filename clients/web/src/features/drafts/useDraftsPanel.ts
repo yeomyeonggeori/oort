@@ -1,4 +1,5 @@
 import { useMemo } from "react";
+import { useMatch } from "react-router-dom";
 import { useSession } from "@/app/session";
 import {
   listWorkspaceDrafts,
@@ -81,6 +82,10 @@ export function useDraftsPanel(): DraftsPanelState {
     () => listWorkspaceDrafts(workspaceId),
     [workspaceId, epoch]
   );
+  // 지금 열어 둔 대화(#6030): 주소가 대화를 가리키면 그것, 아니면(첫 화면 `/`) 입력창이 건 대화. 주소를 먼저 보는 까닭은
+  // 그 대화에서 새로고침하면 입력창이 서기 전에 사이드바가 먼저 그려져, 그사이 줄이 섰다 걷히기 때문이다.
+  const routeChannelId = useMatch("/c/:channelId")?.params.channelId ?? null;
+  const openChannelId = routeChannelId ?? openDraftChannelId(workspaceId);
 
   const visible = visibleDrafts(drafts, liveIds, channelsReady);
   const items = channelsReady
@@ -89,8 +94,7 @@ export function useDraftsPanel(): DraftsPanelState {
 
   return {
     items,
-    // 열어 둔 대화는 `holdOpenDraftChannel`이 바꾸고 그때 `epoch`가 오른다 — 이 렌더가 그 값을 다시 읽는다.
-    showNav: shouldShowDraftsNav(drafts, liveIds, channelsReady, openDraftChannelId(workspaceId)),
+    showNav: shouldShowDraftsNav(drafts, liveIds, channelsReady, openChannelId),
     isPending: channelsQuery.isPending && channelsQuery.data === undefined,
     isError: channelsQuery.isError && channelsQuery.data === undefined,
     error: channelsQuery.error,
