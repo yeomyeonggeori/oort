@@ -301,8 +301,7 @@ describe('눌림 · 잠김 흐림 토큰 (#6022)', () => {
     const source = codeOnly(fs.readFileSync(path.join(SRC_DIR, 'design', 'sheetParts.tsx'), 'utf8'));
     const found = source.match(/\browDisabled:\s*\{opacity:\s*([\w.]+)\}/);
     expect(found?.[1]).toBeDefined();
-    const value = found?.[1] === 'DISABLED_OPACITY' ? tokens.DISABLED_OPACITY : Number(found?.[1]);
-    expect(value).toBe(tokens.DISABLED_OPACITY);
+    expect(['DISABLED_OPACITY', String(tokens.DISABLED_OPACITY)]).toContain(found?.[1]);
   });
 });
 
