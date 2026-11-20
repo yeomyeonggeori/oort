@@ -67,7 +67,7 @@ PODS:
   - ExpoMediaLibrary (57.0.5):
     - ExpoModulesCore
     - React-Core
-  - ExpoModulesCore (57.0.8):
+  - ExpoModulesCore (57.0.26):
     - ExpoModulesJSI
     - hermes-engine
     - RCTRequired
@@ -91,10 +91,10 @@ PODS:
     - ReactCommon/turbomodule/core
     - ReactNativeDependencies
     - Yoga
-  - ExpoModulesJSI (57.0.4):
+  - ExpoModulesJSI (57.1.3):
     - React-Core
     - ReactCommon
-  - ExpoModulesWorklets (57.0.8):
+  - ExpoModulesWorklets (57.0.26):
     - ExpoModulesCore
     - ExpoModulesJSI
   - ExpoNotifications (57.0.8):
@@ -2511,9 +2511,9 @@ SPEC CHECKSUMS:
   ExpoKeepAwake: c26f14275017370cc8a4b7b43a0e23361f2053a5
   ExpoLogBox: 6bb73c341aca22e699bd4da6cc61afc844e1a648
   ExpoMediaLibrary: 341321256621e7bf220b6272c42fedcb095607d0
-  ExpoModulesCore: c74426df582d7c3f7bfbaf20306c9c526c14e75d
-  ExpoModulesJSI: b20fefa4cdd9097e7e6b715466d1900b8c5d4711
-  ExpoModulesWorklets: 6b240031daa3de4df791588fc78236637ff602f6
+  ExpoModulesCore: eddcff7b0f292f3ffccbb237fc17877fefe4885d
+  ExpoModulesJSI: ded9f4c72f35fc9400ad85506a94acdd87b2b23b
+  ExpoModulesWorklets: a3021e8f3b01c5f9b989ce625782cd296eaaf68f
   ExpoNotifications: 0f253ad90f108c1c4045b541294164865c6aadc8
   ExpoVideo: 31d5dc617d913808aeba05c3ab900712637b0e47
   FBLazyVector: 3c3be9a019176b5699455f7f66c5444b78a411c6
