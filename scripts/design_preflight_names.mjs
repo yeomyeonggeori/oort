@@ -32,8 +32,8 @@
 // 표면을 인용한 것이지 만든 것이 아니라서). 이름은 반대다: 실명이 새는 자리가 바로
 // 테스트 고정값이다. 그래서 별도 단계이고, **주석·식별자·문자열 전부**를 같은 규칙으로 본다.
 //
-// 훑는 범위는 아래 `SCOPE` 한 곳이다. #4632 가 정리한 트리만 넣었다: 정리하지 않은 트리를
-// 넣으면 첫날부터 붉다. 후속 정리(웹·폰 시험 고정값)가 끝난 트리를 거기에 더한다.
+// 훑는 범위는 아래 `SCOPE` 한 곳이다. #4632 가 코어와 폰 측정 하네스를 정리했고, #6038 이
+// 웹·폰의 시험·픽스처·하네스·게이트·캡처 스크립트를 정리해 세 트리 전체로 넓혔다.
 //
 // ## 「안 돈 것」과 「초록」을 구분한다
 //
@@ -61,15 +61,23 @@ const DIGEST_FILE = resolve(HERE, "design_preflight_names.digests");
 
 // ---- 범위 -------------------------------------------------------------------
 //
-// 넓힐 때: 후속 정리가 끝난 트리를 여기에 더한다(예: clients/mobile/__tests__,
-// clients/web/src, clients/web/scripts). 정리 전 트리를 넣으면 붉다.
-export const SCOPE = ["packages/momo-core/src", "clients/mobile/measure"];
+// 코어 `src`(#4632) + 웹·폰 트리 전체(#6038: 시험·픽스처·하네스·게이트·캡처 스크립트·소스 주석).
+// 추적 중이거나 무시되지 않은 파일만 훑는다(`git ls-files`), 그래서 node_modules·빌드 산출물은 빠진다.
+export const SCOPE = ["packages/momo-core/src", "clients/web", "clients/mobile"];
 
 // 값을 바꿀 수 없는 파일. 경로가 정확히 같을 때만 면제한다.
 export const EXEMPT = new Map([
   [
     "packages/momo-core/src/features/auth/__fixtures__/human-control-signing-v4.vectors.json",
     "서명 벡터: 같은 바이트를 docs/api·모바일 사본·Rust 시험이 함께 서명/검증한다. 값을 바꾸면 서명이 깨진다(재서명 후속 이슈).",
+  ],
+  [
+    "clients/mobile/__tests__/fixtures/human-control-signing-v4.vectors.json",
+    "서명 벡터의 폰 사본: 위 코어 파일과 바이트가 같아야 한다(같은 이유, #6038).",
+  ],
+  [
+    "clients/web/src/features/work/__fixtures__/desktop-sign-requests.json",
+    "서명 벡터: 데스크탑 Rust 시험(device_key/payload/tests.rs)이 include_str 로 읽어 같은 payload 를 다시 만든다. 값을 바꾸면 서명이 깨진다(재서명 후속 이슈, #6038).",
   ],
 ]);
 
