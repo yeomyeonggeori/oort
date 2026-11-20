@@ -42,6 +42,7 @@ OmD가 읽는 루트 `DESIGN.md`와 `.omd/system/*`는 이 정본을 Core v2로 
 | 간격·반경·글자 크기를 고른다 | §2.3~§2.5 — 스케일 밖 값은 **이름**으로 들어오거나 아예 안 들어온다. |
 | 아이콘을 고른다 | §2.8 — lucide 한 벌, 16px 단일 기본. 예외는 컴포넌트가 사유를 진다. |
 | 버튼 두 개를 나란히 세운다 | §3 위계 — 파괴 > 주 > 보조. 값이 아니라 **관계**다. |
+| 어느 일에 어느 공용 부품을 쓰는지, 그 규격이 어디 있는지(또는 없는지) 찾는다 | [components.md](components.md) — 일 → 웹 · 폰 부품 → 규격 절 → 상태 견본 → 시험을 한 장에. 맨 위에 「규격 없음」의 수. |
 | 새 표면을 만든다 | §4 상태 — 빈·로딩·오류·오프라인 넷이 다 있어야 출하다. 폰이면 시트·페이지·드로어 고르기와 공용 부품은 [phone-sheets.md](phone-sheets.md). |
 | 대화 안에서 에이전트가 일하는 모습(레일·칩·예외 줄)을 건드린다 | [agent-work-display.md](agent-work-display.md) — 어느 자리가 무엇을 말하는지, 유예·낱말을 한 곳이 정하는 규칙, Buzz 대비. |
 | 에이전트에게 부탁한 일의 제안·결정·결과(묶음 카드·상태 칩·생각 줄·푸시 문장·인박스 「승인」 칸)를 건드린다 | [agent-request-loop.md](agent-request-loop.md) — 한 요청 한 묶음의 카드 문법과 상태표, 요청 스레드 자리 규칙, 푸시 문장과 바로 승인 기준, 승인 고리의 말 사전. |
@@ -211,7 +212,7 @@ OmD가 읽는 루트 `DESIGN.md`와 `.omd/system/*`는 이 정본을 Core v2로 
 
 **온보딩 2.0 예외 (ADR-0193 D11, #2807).** 온보딩 틀(`clients/web/src/features/onboarding/guide/`, `tokens.css` 「온보딩 2.0 공통 틀」 블록)은 owner가 고른 시안을 따라 입력 그릇과 행동 버튼을 높이 44, 반경 10(`--radius-md`)으로 그리고, 보조 행동은 채움 알약이 아니라 `--line-strong` 1px 테두리(`.onboarding-action[data-variant="secondary"]`)다. 주 행동은 여전히 잉크 채움이고 입력 그릇만 `--surface`다. 이 예외는 온보딩 틀 안에서만 유효하다. 제품 셸의 버튼은 §2.2의 채움 알약(`rounded-full`) 규칙을 그대로 따르고, 이 클래스를 온보딩 밖에서 빌려 쓰지 않는다. 같은 틀의 진행 점은 시안의 `--muted-soft` 대신 남은 칸에 `--line-strong`을 써서 바닥 세 정지점 위 비텍스트 3:1을 지킨다(core `ONBOARDING_DOT_ROLES`, `guide.test.ts`).
 
-폰은 `10·14·20·27·30·pill`이다([테마 토큰 표](themes-2.0.md) §5; 컴포저 단은 #4179가 26 → 27로 옮겼다). `designSystem.test.ts`가 웹 사다리의 값·순서와 프리미티브가 자기 자리에 서는지를 잰다. 옛 `sm/md/lg` 세 값은 같은 값이라 기존 소비처의 기하는 움직이지 않았다.
+폰은 표가 **둘**이고 둘 다 지금 쓰인다. DS2 사다리 `ds2Radius`(`clients/mobile/src/design/tokens.ts`)는 `10·14·20·27·30·pill`이다([테마 토큰 표](themes-2.0.md) §5; 컴포저 단은 #4179가 26 → 27로 옮겼다). 옛 표 `radius`는 `sm 6 · md 8 · pill`이고 소비처를 옮기지 않아 그대로 남아 있다(`src/` 안 쓰임: 옛 표 172곳 · DS2 사다리 100곳, 2026-11-20 센 값). 두 표는 `pill`을 빼면 값이 겹치지 않는 별개 사다리다. `designSystem.test.ts`는 웹 값을 읽어 대조하지 않고 각 표 안의 순서(옛 표 `sm < md < pill`, DS2 사다리 `badge < row < card < composer < sheet < pill`)를 재며, `src/` 스윕은 숫자 리터럴 `borderRadius: N`이 **옛 표**의 값 밖이면 잔량 표(지금 1곳) 안에서만 허용한다 — DS2 값은 리터럴이 아니라 `ds2Radius.<이름>`으로 읽어야 한다.
 
 ### 2.5 타이포
 
@@ -296,7 +297,7 @@ reduced-motion(D9): 사다리 네 duration과 모달 200/150은 `0ms`가 된다.
 
 오르트 로더(#3961, 시안 A 「공전」, owner 2026-10-17)는 연결 끊김·다시 연결 중·첫 로딩에서 도는 브랜드 표시다. 링은 가만히 있고 위성이 홈에서 나와 한 바퀴 돌고 다시 꽂힌다(한 주기 1.8s). 움직이는 속성은 `transform`·`opacity`뿐이다. 감소된 동작에서는 회전 대신 정지 마크 + 투명도 1↔0.5이고, 진행 중이 아닌 자리(오프라인·재시도 실패)는 정지 마크다(움직임이 곧 「지금 시도 중」이라는 주장이라서). 마크 사용 규칙은 `docs/brand/mark/README.md` 「로더」.
 
-폰 사다리는 웹과 이름·값이 같다(**사다리 칸 중에서는** 폰 전용 `send-arrive` 300ms 하나만 웹에 짝이 없다 — §6 「폰에 값을 더할 때」대로 값이 아니라 관계 `standard < send-arrive < arrival` 을 `sendArrival.test.tsx` 가 단정한다. 사다리 밖의 폰 값(탭 페이드 150ms 등)은 이 문장의 대상이 아니다). 2026-07-28 권고 `instant 0 / fast 120 / standard 180 / slow 240`은 이 결정이 대체한다 — `instant 0`은 값이 아니라 reduced-motion 상태다. 폰 `tokens.ts` 파생은 M1a.
+**폰에는 이 사다리가 없다.** `clients/mobile/src/design/motion.ts`는 사다리 이름 없이 기능마다 상수를 둔다(탭 페이드 150 · 메뉴 180 · 층 200/150/240/180 · 보내기 300 등). 웹 사다리의 이름은 그 주석이 근거를 말할 때만 나온다(예: `LANDED_TINT_FADE_MS`는 `standard` 240과 같은 값). 폰 전용 `send-arrive` 300ms는 값이 아니라 관계 `standard < send-arrive < arrival` 을 `sendArrival.test.tsx` 가 단정한다(§6 「폰에 값을 더할 때」). 2026-07-28 권고 `instant 0 / fast 120 / standard 180 / slow 240`은 이 결정이 대체한다 — `instant 0`은 값이 아니라 reduced-motion 상태다. 폰 `tokens.ts` 파생은 M1a(아직 안 했다 — 위 문장대로 폰 코드에 사다리가 없다).
 
 아직 이 축이 안 재는 것(owed, 이 PR이 닫지 않음):
 
@@ -628,7 +629,7 @@ owner 물음 「우리 저 부분 디자인 시스템에서 컴포넌트로 구�
 
 **재지 않는 것.** 다른 사람 목록이 이 부품을 쓰는지 — 멤버 탭과 새 DM 창은 옮겼고, 채널 멤버 패널(`ChannelContextControls`) · 채널 멤버 추가 창(`AddChannelMemberDialog`)은 아직 손으로 쓴 줄과 선 띠 머리글이다(후속). 그것을 세는 기계는 없다. 묶음 그릇을 바탕에 맞게 골랐는지(본문 판 위 카드 / 표면 안 시트 채움)는 사람과 design-review 가 본다(§5.3).
 
-### 2.10 좁은 웹 창에서 사이드바 열은 본문 칸에 바닥을 내준다 (#5093, #5048 D4)
+### 2.15 좁은 웹 창에서 사이드바 열은 본문 칸에 바닥을 내준다 (#5093, #5048 D4)
 
 사이드바가 240에서 324(레일 56 + 목록 열 268)가 된 뒤, 펼친 셸의 컴포저 입력 상자는 `창 폭 − 390`이다. 바닥(240)을 지키지 못한 폭은 **600~629px뿐**이었다(600px에서 210). 630~719px는 수리 전에도 바닥 위였다(650 → 260 · 719 → 329). 규칙은 이 문서가 이미 쓰는 문법이다: **주 표면이 바닥을 갖고 모자란 폭은 부차 표면이 낸다**(`route-region` · `chat-region` · `thread-pane`). 그 부차 표면에 사이드바 열이 빠져 있었을 뿐이고, 문턱은 더하지 않았다.
 
@@ -665,13 +666,13 @@ owner 물음 「우리 저 부분 디자인 시스템에서 컴포넌트로 구�
 
 ### 3.3 지금 기계가 재는 것 / 안 재는 것
 
-> **이 절과 §5.3·§5.4의 "#1210" 표시는 유통기한이 있다.** #1210(컨트롤 경계 3:1 · 폰 파괴 채움 토큰 · 포커스 링 페이드 · 웹 lint 게이트 배선)이 랜딩하면 아래 ❌ 넷과 §5.4의 lint 항목이 함께 닫힌다. **그 PR이 이 표를 갱신하는 것이 마지막 한 걸음이다** — 닫힌 자리를 열려 있다고 말하는 표는 이 문서가 막으려는 바로 그 결함이다.
+> **#1210(컨트롤 경계 3:1 · 폰 파괴 채움 토큰 · 포커스 링 페이드 · 웹 lint 게이트 배선)은 2026-08-09에 닫혔다.** 폰 파괴 채움 토큰(`dangerFill`)은 있고 채움 순서는 `paletteContrast.test.ts`가 잰다. 아래 ❌는 지금도 열린 자리다. 닫힌 자리를 열려 있다고 말하는 표는 이 문서가 막으려는 바로 그 결함이다.
 
 | 규칙 | 웹 | 폰 |
 |---|---|---|
 | 채도 순서 (danger>warn>muted) | `tokens.contrast.test.ts` ✅ | `paletteContrast.test.ts` ✅ |
-| 채움 순서 (primary>danger-fill, DS2-1부터 명도) | `tokens.contrast.test.ts` ✅ | ❌ — **폰에 파괴 채움 토큰이 없다**(#1210) |
-| 윤곽 순서 (danger>line-strong) | `tokens.contrast.test.ts` ✅ (#1211) | ❌ — #1210이 토큰을 놓은 뒤 같은 자리에 |
+| 채움 순서 (primary>danger-fill, DS2-1부터 명도) | `tokens.contrast.test.ts` ✅ | `paletteContrast.test.ts` ✅ (파괴 채움 `dangerFill`이 표면 위 3:1을 넘고 주 행동 `primary`보다 덜 보인다) |
+| 윤곽 순서 (danger>line-strong) | `tokens.contrast.test.ts` ✅ (#1211) | ❌ — 폰에는 `line-strong` 역할이 없고(컨트롤 테두리는 `textFaint`) `danger`와의 순서를 재는 단정이 아직 없다 |
 | `--line`이 3:1을 못 넘는다(규칙의 전제) | `tokens.contrast.test.ts` ✅ (#1211) | `paletteContrast.test.ts` ✅ |
 | **어느 컴포넌트가 어느 쪽을 쓰는가** | `designSystem.test.ts` ✅ (#1211, 프리미티브 층) | ❌ 체계적으로는 없다 — 표면 하나에 대한 단정은 있다(`adeControlSurface.test.tsx:939`) |
 | 렌더된 화면에서의 위계 | ❌ 사람 + design-review 에이전트 | ❌ 동 |
@@ -745,10 +746,10 @@ owner 물음 「우리 저 부분 디자인 시스템에서 컴포넌트로 구�
 | **그림자** | `designSystem.test.ts` — `--elevation-rest/float` 이름 + 클래스 두 단 | `designSystem.test.ts` — `shadowColor`는 팔레트에서만 | **대조 불가 축**(§2.6) |
 | **겹침 층** | `overlayLayers.test.ts` — `--layer-*` 순서·바닥(`z-50` 위)·`data-overlay-layer` 여섯 파일 + 잔량 허용목록. `appPaneIsolation.browser.test.ts`(#4587) — 판(`app-pane`)이 `isolate`일 때의 순서를 WebKit·Chromium의 **그려진 픽셀**로 잰다(포털 스크림 > 판 안의 덮는 판, 서랍 > 덮는 판, 덮는 판 > 머리, 띠의 알약 > 머리, 그리고 판 격리로 **바뀐** 두 관계: 띠의 알약 > 덮는 판, 사이드바 스크림 > 덮는 판). 히트 테스트와 **루트 스윕**(이름 밖 수치 z = 0)은 `scripts/capture-overlay-layers.mjs` | ❌ | — |
 | **창 띠·머리 컨트롤** (§2.9) | `desktopShell.band.browser.test.ts`(WebKit·Chromium 계산 기하: 띠 40 · 토글 중심 20 · 판 위쪽 셸 40/웹 8 · 머리 선 0 · `--head-edge` · 단추 선 `--line` · 툴팁 알약 · 전체 화면 인셋 · 판 바깥 = 사이드바 색 픽셀(팔레트 3 × 스킴 2 × 장면 4) · 노을띠 「내 작업」 윗줄 픽셀) + `AppTitlebar.shell.test.tsx`(셸 끌기 판정, 다운로드 단추를 채운 오른쪽 자리) + `features/downloads/*.test.*`(진행·기록·단추 상태·웹에서 숨김·셸과 번들의 약속) + `ChatShell.header.test.ts`·`channelHeaderControls.tooltip.test.tsx`(머리 단추는 전부 툴팁, `title` 없음) | 비해당(폰은 창 띠가 없다) | — |
-| **좁은 웹 창의 본문 바닥** (§2.10) | `shellNarrowFloor.browser.test.ts`(WebKit·Chromium 계산 기하: 사이드바 = min(324, 창 − 306) · 접힘 56 · 컴포저 입력 바닥 240 · 접힘 `transitionend`, 폭 7 × 상태 2) + `desktopShell.ds2.test.ts`(양보 선언이 셸의 넓은 창 계층에 있다) + `gate:work-panel`의 `narrow-shell-*`(렌더된 앱: 폭 7 × 사이드바 펼침·접힘 × 스레드 닫힘·열림, red proof `WORK_PANEL_GATE_PROVE_RED_SIDEBAR`; **게이트 미배선** §5.4 — 사람이 `npm run gate:work-panel`을 돌린다) | ❌ (폰은 서랍이라 열이 서지 않는다) | — |
+| **좁은 웹 창의 본문 바닥** (§2.15) | `shellNarrowFloor.browser.test.ts`(WebKit·Chromium 계산 기하: 사이드바 = min(324, 창 − 306) · 접힘 56 · 컴포저 입력 바닥 240 · 접힘 `transitionend`, 폭 7 × 상태 2) + `desktopShell.ds2.test.ts`(양보 선언이 셸의 넓은 창 계층에 있다) + `gate:work-panel`의 `narrow-shell-*`(렌더된 앱: 폭 7 × 사이드바 펼침·접힘 × 스레드 닫힘·열림, red proof `WORK_PANEL_GATE_PROVE_RED_SIDEBAR`; **게이트 미배선** §5.4 — 사람이 `npm run gate:work-panel`을 돌린다) | ❌ (폰은 서랍이라 열이 서지 않는다) | — |
 | **대화 안 에이전트 작업 표시** ([agent-work-display.md](agent-work-display.md)) | 코어 `runExceptionChipParity.test`(카드·줄·칩·레일이 **같은 시각에 같은 판정·같은 낱말**, 시간 초과·신호 소실은 칩도 줄과 같은 낱말·경고 톤, 박자 3종 × phase 9 × 종료 코드 9 × 시각 11) + `ActivityRail.browser.test`(레일 칸의 바닥 행 y 이동 0, 끊긴 레일의 한정 문장이 안 잘리고 에이전트 글은 접힘·이름만·전문 중 하나라 낱말 중간에서 끊기지 않음(14폭), `popover-fit`의 폭 계산, 줄의 누르는 면 = 칸 24, WebKit·Chromium × 두 스킴) + `composerRailReservation.browser.test`(**진짜 `Composer` 마크업**: 에이전트 대화 간격 24 불변 · 사람만 있는 대화 8(폰 13) 불변) + `TriggerChip.browser.test`(칩 폭·높이 고정, 낱말·아이콘 두 모양, 좁은 줄 383/384 경계, 요청 묶음을 여는 칩의 누르는 면 +4px) + `MessageRow.triggerChip.browser.test`(**진짜 `MessageRow` 마크업**: 이름 2~40자 × 열 폭 6종 줄바꿈 0 · 이름 열 글자 이상 · 칩 자리가 비어도(성공) 머리 줄 높이·줄바꿈 0 불변 · 거터 칩의 행 높이 불변·hover 양보·터치) + `runStatus.test`(칩 대상) + `MessageRunStatus.test`(행동은 요청자·owner/admin에게만, 취소 영수증) + `iconSystem.test`(칩 글리프는 전부 lucide) | 폰은 같은 코어 모델을 #4620이 읽는다([§10](agent-work-display.md): jest만 — 실측·캡처는 검증 줄) | 낱말·판정은 코어 한 곳(`runWaiting`·`runException`·`triggerChip`) |
 | **모션** | `motion.test.ts`(사다리·상수·눌림·reduced-motion) + 프리플라이트 `raw_motion`·`motion_lib_scope`. 데스크톱 사이드바 접기(셸 상태 변화) = `--motion-standard` 240 · 390 오버레이 드로어·스크림(`--elevation-float` 표면) = `--motion-fast` 180 대칭 | ❌ (M1a) | 값 파생은 M1a |
-| **터치 44** | `capture-screens.mjs`의 `assertTapTargets`(**손으로 유지되는 12개 목록**) | `conversationHygiene.test.tsx:148` (렌더 트리 실측) + `conversationA11y.test.tsx:330` + `designSystem.test.ts`(손으로 적은 슬롭 잔량 5, 늘면 빨강) | `designSystem.test.ts` — `TOUCH_TARGET` ↔ `--tap-target` ✅ (#1211) |
+| **터치 44** | `capture-screens.mjs`의 `assertTapTargets`(**손으로 유지되는 12개 목록**) | `conversationHygiene.test.tsx:148` (렌더 트리 실측) + `conversationA11y.test.tsx:330` + `designSystem.test.ts`(손으로 적은 슬롭 잔량 3, 늘면 빨강) | `designSystem.test.ts` — `TOUCH_TARGET` ↔ `--tap-target` ✅ (#1211) |
 | **컨트롤 경계 3:1** | `tokens.contrast.test.ts`(토큰) + `designSystem.test.ts`(프리미티브 층) | `paletteContrast.test.ts`(토큰) | — |
 | **위계** | §3.3 표 | 동 | — |
 | **카피** | 프리플라이트 `hype` + AST `emdash`·`progress_word`·`latin_particle`(#1511) | `conversationHygiene.test.tsx` — `src/` 전수 em-dash 스윕 + 같은 AST 로 `progress_word`·`latin_particle`(`design_preflight_phone_strings.mjs` 를 자식 프로세스로, #1511) | `design_preflight_ast.mjs` 가 세 소비자의 규칙 한 벌. 코어에도 거는 이유는 실측이다 — 진행 낱말이 코어 상수로 폰까지 출하됐다(`CANCEL_BUSY_LABEL`) |
@@ -778,7 +779,7 @@ owner 물음 「우리 저 부분 디자인 시스템에서 컴포넌트로 구�
 | — | **비텍스트 대비(WCAG 1.4.11)를 살 수 있는 곳** | **없다.** Deque 자사 데이터로 axe DevTools 커버리지 **0.00%**(자동·인간보조 모두 0, 100% 수동). 우리 손수 만든 시험을 지우면 대체물이 없다 |
 | — | **아이콘 규칙의 나머지 전부**(§2.8) | `iconSystem.test.ts`는 예외 목록과 import 형태 **둘만** 잰다. 16px 단일 기본·`strokeWidth` 재지정 금지·`currentColor` 상속·`aria-hidden`(잔량 57곳/인접 레이블 없는 36곳)·CSS 도형/아이콘 폰트/기능 이모지 회피·`src/**` 아래 SVG 자산 유입·**`.ts` 파일 안 손제작 SVG·`createElement("svg")`**(둘 다 초록 통과 실증) — 전부 무검사다. §2.8이 잔량을 세어 둔 이유다 |
 
-> **폰에는 taste 스킬 방언이 없다.** `.claude/skills/momo-design-taste`(SwiftUI)와 `-web`(React) 둘뿐이고, `tokens.ts` 머리 주석이 그것을 자백한다. `.claude/agents/design-review.md`의 계약도 macOS/Core를 가리키는데 최근 리뷰 대부분은 웹·폰이다 — ADR-0159 D4가 Swift 삭제 배치와 함께 재조준하기로 한 자리다.
+> **폰에는 taste 스킬 방언이 없다.** `.claude/skills/`에는 라우터 `momo-design-taste`(어느 문서가 그 표면을 다스리는지만 가른다)와 웹 방언 `momo-design-taste-web`이 있고, 폰은 라우터 §2가 `tokens.ts`와 시험 둘을 가리키는 것으로 대신한다. `.claude/agents/design-review.md`는 웹 · 데스크탑 · 폰을 모두 가리키며 폰에 방언 스킬도 기계 프리플라이트도 없다고 보고에 쓰게 한다. 남은 일은 폰 방언 스킬 하나다(§7 미결 6).
 
 ### 5.4 게이트 실행 경로 — 강제 층의 실행 보장은 **사람**이다
 
