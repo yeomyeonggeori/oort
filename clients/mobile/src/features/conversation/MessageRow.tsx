@@ -123,7 +123,7 @@ import {
   type TextStyle,
 } from 'react-native';
 import {GlassSurface} from '../../design/glass';
-import {font, line, radius, SAFE_GUTTER, slopTo, space, TOUCH_TARGET, type Palette} from '../../design/tokens';
+import {font, line, PRESSED_OPACITY, radius, SAFE_GUTTER, slopTo, space, TOUCH_TARGET, type Palette} from '../../design/tokens';
 import {landedFace, pressFace, ROW_FACE} from './rowFace';
 import {usePalette, useStyles} from '../../design/theme';
 import {CONV_ICONS, CONV_ICON_SIZE} from '../../design/icons';
@@ -4898,7 +4898,7 @@ const buildStyles = (color: Palette) => StyleSheet.create({
     borderColor: color.dangerBorder,
   },
   resendLabel: {fontSize: font.label, color: color.danger, fontWeight: '600'},
-  pressed: {opacity: 0.6},
+  pressed: {opacity: PRESSED_OPACITY},
 
   // 라벨이 **앞**에 선다(`DIVIDER_LABEL_SIDE`). 여백·두께도 코어 값이다.
   divider: {

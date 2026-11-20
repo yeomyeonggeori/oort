@@ -3,7 +3,7 @@ import {Image, Pressable, StyleSheet} from 'react-native';
 import {SHELL_ICONS} from '../../design/icons';
 import {CARD_ICONS} from '../../design/icons/cardIcons';
 import {useStyles} from '../../design/theme';
-import {TOUCH_TARGET, type Palette} from '../../design/tokens';
+import {PRESSED_OPACITY, TOUCH_TARGET, type Palette} from '../../design/tokens';
 import {useFormatMessage} from '../../i18n/useFormatMessage';
 
 // =============================================================================
@@ -71,5 +71,5 @@ const buildStyles = (color: Palette) =>
     action: {padding: (TOUCH_TARGET - GLYPH) / 2},
     resendGlyph: {width: GLYPH, height: GLYPH, tintColor: color.textMuted},
     discardGlyph: {width: GLYPH, height: GLYPH, tintColor: color.danger},
-    pressed: {opacity: 0.6},
+    pressed: {opacity: PRESSED_OPACITY},
   });

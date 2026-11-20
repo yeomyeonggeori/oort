@@ -12,7 +12,7 @@ import {Sentence} from '../../design/atoms';
 import {HOME_ICON_SIZE, SHEET_ICON_SIZE} from '../../design/icons';
 import {RowEndImage} from '../../design/sheetParts';
 import {usePalette, useStyles} from '../../design/theme';
-import {font, line, SHEET, space, type Palette} from '../../design/tokens';
+import {DISABLED_OPACITY, font, line, SHEET, space, type Palette} from '../../design/tokens';
 
 // =============================================================================
 // 설정 페이지의 얇은 행 부품 (#4457).
@@ -261,7 +261,7 @@ const buildStyles = (color: Palette) =>
       paddingVertical: space.md,
     },
     rowPressed: {backgroundColor: color.surfacePressed},
-    rowDisabled: {opacity: 0.55},
+    rowDisabled: {opacity: DISABLED_OPACITY},
     rowText: {flex: 1},
     rowTitle: {fontSize: font.body, lineHeight: line.body, color: color.text},
     rowTitleAccent: {color: color.accentText, fontWeight: '600'},

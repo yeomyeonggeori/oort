@@ -16,7 +16,7 @@ import {
   type TeamAiDelegate,
   type TeamAiDelegateCandidate,
 } from '@momo/core/features/timeline/teamAi';
-import {font, line, radius, space, TOUCH_TARGET, type Palette} from '../../design/tokens';
+import {font, line, PRESSED_OPACITY, radius, space, TOUCH_TARGET, type Palette} from '../../design/tokens';
 import {Sentence} from '../../design/atoms';
 import {usePalette, useStyles} from '../../design/theme';
 
@@ -233,6 +233,6 @@ function build(color: Palette) {
     },
     pillLabel: {fontSize: font.label, fontWeight: '600', color: color.text},
     dim: {opacity: 0.5},
-    pressed: {opacity: 0.6},
+    pressed: {opacity: PRESSED_OPACITY},
   });
 }

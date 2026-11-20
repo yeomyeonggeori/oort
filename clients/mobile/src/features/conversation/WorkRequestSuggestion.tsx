@@ -11,6 +11,7 @@ import {
 import {
   font,
   line,
+  PRESSED_OPACITY,
   slopTo,
   space,
   TOUCH_TARGET,
@@ -175,7 +176,7 @@ function build(color: Palette) {
       backgroundColor: color.sheet,
     },
     actionText: {fontSize: font.meta, fontWeight: '600', color: color.agent},
-    pressed: {opacity: 0.6},
+    pressed: {opacity: PRESSED_OPACITY},
     oneline: {
       flexDirection: 'row',
       alignItems: 'center',

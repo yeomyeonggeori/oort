@@ -47,6 +47,15 @@ import {
 /** iOS HIG minimum tappable edge, in points. Not negotiable per-screen. */
 export const TOUCH_TARGET = 44;
 
+/**
+ * 눌림 · 잠김 흐림. 화면마다 `opacity` 숫자를 적지 않고 이름으로 쓴다 (#6022).
+ * 눌림 0.6 은 누르는 동안 몸통을 옅게 하는 값, 잠김 0.55 는 `sheetParts` 의
+ * `rowDisabled` 와 같은 값(시험이 묶는다). 다른 흐림 값(0.85 · 0.8 · 0.5 …)은 아직
+ * 화면마다 따로이고 `designSystemResidue.test.ts` 의 잔량 표에 남아 있다.
+ */
+export const PRESSED_OPACITY = 0.6;
+export const DISABLED_OPACITY = 0.55;
+
 /** Shared horizontal inset. One number, so no two surfaces disagree. */
 export const SAFE_GUTTER = 16;
 

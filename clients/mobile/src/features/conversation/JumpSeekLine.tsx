@@ -3,7 +3,7 @@ import {ActivityIndicator, Image, Pressable, StyleSheet, View} from 'react-nativ
 import {Sentence} from '../../design/atoms';
 import {SHEET_ICON_SIZE, SHEET_ICONS} from '../../design/icons';
 import {usePalette, useStyles} from '../../design/theme';
-import {font, SAFE_GUTTER, space, TOUCH_TARGET, type Palette} from '../../design/tokens';
+import {font, PRESSED_OPACITY, SAFE_GUTTER, space, TOUCH_TARGET, type Palette} from '../../design/tokens';
 import {useFormatMessage} from '../../i18n/useFormatMessage';
 
 // =============================================================================
@@ -130,5 +130,5 @@ const buildStyles = (color: Palette) =>
       height: SHEET_ICON_SIZE.close,
       tintColor: color.icon,
     },
-    pressed: {opacity: 0.6},
+    pressed: {opacity: PRESSED_OPACITY},
   });

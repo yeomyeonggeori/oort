@@ -7,6 +7,7 @@ import {useStyles} from '../../design/theme';
 import {
   ds2Radius,
   font,
+  PRESSED_OPACITY,
   space,
   TOUCH_TARGET,
   type Palette,
@@ -69,7 +70,7 @@ const buildStyles = (color: Palette) =>
       borderRadius: ds2Radius.pill,
       backgroundColor: color.accentSurface,
     },
-    pressed: {opacity: 0.6},
+    pressed: {opacity: PRESSED_OPACITY},
     glyph: {width: GLYPH, height: GLYPH, tintColor: color.accentText},
     label: {fontSize: font.label, color: color.accentText, fontWeight: '600'},
   });

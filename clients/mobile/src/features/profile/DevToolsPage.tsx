@@ -21,8 +21,10 @@ import {Sentence} from '../../design/atoms';
 import {ConfirmStep, GroupCard, ListRow} from '../../design/sheetParts';
 import {usePalette, useStyles} from '../../design/theme';
 import {
+  DISABLED_OPACITY,
   font,
   line,
+  PRESSED_OPACITY,
   SAFE_GUTTER,
   SHEET,
   space,
@@ -404,7 +406,7 @@ const buildStyles = (color: Palette) =>
       paddingHorizontal: space.md,
       marginRight: -space.md,
     },
-    revokePressed: {opacity: 0.6},
-    revokeDisabled: {opacity: 0.55},
+    revokePressed: {opacity: PRESSED_OPACITY},
+    revokeDisabled: {opacity: DISABLED_OPACITY},
     revokeLabel: {fontSize: font.body, fontWeight: '600', color: color.danger},
   });

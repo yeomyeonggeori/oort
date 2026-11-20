@@ -12,7 +12,7 @@ import {
   commandSuggestViewer,
   type CommandSuggestCard,
 } from '@momo/core/features/timeline/commandSuggest';
-import {font, line, slopTo, space, TOUCH_TARGET, type Palette} from '../../design/tokens';
+import {font, line, PRESSED_OPACITY, slopTo, space, TOUCH_TARGET, type Palette} from '../../design/tokens';
 import {Sentence} from '../../design/atoms';
 import {usePalette, useStyles} from '../../design/theme';
 import {
@@ -273,7 +273,7 @@ function build(color: Palette) {
     noteIcon: {marginTop: AI_SUGGEST.noteIconNudge},
     noteText: {flexShrink: 1, fontSize: font.meta, lineHeight: line.meta, color: color.textMuted},
     icon: {width: AI_CONNECT_ICON_SIZE, height: AI_CONNECT_ICON_SIZE},
-    pressed: {opacity: 0.6},
+    pressed: {opacity: PRESSED_OPACITY},
     /** 시안 `.cft`: 카드 발, 자물쇠 + 한 줄. */
     foot: {
       flexDirection: 'row',

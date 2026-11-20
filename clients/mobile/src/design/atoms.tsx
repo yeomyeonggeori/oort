@@ -12,7 +12,7 @@ import {
   type ViewStyle,
 } from 'react-native';
 import {useSafeAreaInsets} from 'react-native-safe-area-context';
-import {font, radius, SAFE_GUTTER, space, TOUCH_TARGET, type Palette} from './tokens';
+import {DISABLED_OPACITY, font, radius, SAFE_GUTTER, space, TOUCH_TARGET, type Palette} from './tokens';
 import {circleLook} from './sheetModel';
 import {SHEET_ICON_SIZE, SHEET_ICONS} from './icons';
 import {usePalette, useStyles} from './theme';
@@ -943,5 +943,5 @@ const buildStyles = (color: Palette) => StyleSheet.create({
   groupRowDetail: {fontSize: font.label, color: color.textMuted, lineHeight: 18},
   groupRowValue: {fontSize: font.body, color: color.textMuted, flexShrink: 1},
   groupRowChevron: {fontSize: font.heading, color: color.textFaint},
-  groupRowDisabled: {opacity: 0.55},
+  groupRowDisabled: {opacity: DISABLED_OPACITY},
 });
