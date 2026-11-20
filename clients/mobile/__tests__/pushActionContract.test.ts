@@ -180,11 +180,13 @@ describe('처리기가 지키는 규율', () => {
   it('AppDelegate 가 React Native 를 시작하기 전에 처리기를 붙인다', () => {
     const appDelegate = read(join(APP_ROOT, 'ios/MomoMobile/AppDelegate.swift'));
     const install = appDelegate.indexOf('MomoPushActionInstaller.install()');
-    const start = appDelegate.indexOf('factory.startReactNative(');
     const factory = appDelegate.indexOf('ExpoReactNativeFactory(delegate:');
     expect(install).toBeGreaterThan(-1);
     expect(install).toBeLessThan(factory);
-    expect(install).toBeLessThan(start);
+    // scene 수명 주기(#6015): React Native 는 scene 대리자가 scene 이 붙을 때 시작한다 — didFinishLaunching 이
+    // 돌아간 뒤라 처리기가 늘 먼저다. AppDelegate 가 스스로 시작하는 줄(주석 아닌 문장)이 다시 생기면 그 순서를
+    // 여기서 다시 재야 한다.
+    expect(appDelegate).not.toMatch(/^[^/\n]*startReactNative\(/m);
     // ExpoModulesProvider 가 이 모듈을 internal 로 import 하므로 같은 수준이어야 빌드된다.
     expect(appDelegate).toMatch(/^internal import MomoPushActionNative$/m);
   });
