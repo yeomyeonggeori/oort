@@ -14,7 +14,8 @@ import {usePalette, useStyles} from '../../design/theme';
 // (`@momo/core/features/presence/statusDot`)가 정하고, 이 파일은 그 톤을 폰의 팔레트 토큰에 매긴다 -
 // `presence/model.ts` 머리말의 분업이다(웹은 Tailwind 클래스, 폰은 토큰 객체).
 //
-//   ok → `ok` · warn → `warn` · danger → `danger` · muted → **속이 빈 고리**(`textFaint` 선 + 면 채움)
+//   ok → `ok` · warn → `warn` · danger → `danger` · muted → **속이 빈 고리**(`textFaint` 선 + 면 채움) — 단 사람의 오프라인은
+//   회색으로 채운 원(`textMuted`, #6023 — 웹 글자 곁 점·아바타 점과 같은 채운 회색, 모양은 코어 `statusBadgeShape`)
 //
 // Buzz식(소유자 결정 2026-10-17 「Buzz식: 초록=살아 있음, 회색 고리=꺼짐」): 낱말이 곁에 없는 자리라 모양이 말한다 -
 // 채운 초록 = 살아 있음(응답함·살아 있음·대기), 속 빈 회색 고리 = 꺼짐(조용함·꺼짐). 살아 있음과 꺼짐이 한 점이면 점이
@@ -32,17 +33,21 @@ export const STATUS_DOT_RING = 1.5;
 
 export function StatusDot({
   tone,
+  kind,
   testID = 'status-dot',
 }: {
   tone: StatusDotTone;
+  /** 누구의 상태인가. 사람이면 오프라인이 회색으로 채운 원이다(#6023). 주지 않으면(맥 점 등) 이 칸 전 그대로 고리다. */
+  kind?: StatusBadgeSubject;
   testID?: string;
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
+  const filledGrey = tone === 'muted' && kind !== undefined && statusBadgeShape(tone, kind) === 'fill';
   return (
     <View
       accessibilityElementsHidden
       importantForAccessibility="no-hide-descendants"
-      style={[styles.dot, styles[tone]]}
+      style={[styles.dot, styles[tone], filledGrey && styles.mutedFill]}
       testID={testID}
     />
   );
@@ -61,7 +66,7 @@ export function StatusDot({
  * 위·아래 끝은 1.06:1 이하로 다르다(새벽하늘 어둡게 아래 끝이 가장 크다, 나머지 테마는 평평하다). 사용자 배경화면(사진) 위에서는 고리 색이 사진과 맞을 수 없다(인계에 적은 한계).
  *
  * 모양은 웹과 같은 코어 판정(`statusBadgeShape`, 뜻으로 고른다)이다: 사람은 채운 원 = 온라인 · 초승달 = 자리 비움 · 가로 줄 =
- * 방해 금지 · 속 빈 고리 = 오프라인, 에이전트는 채운 원 = 살아 있음·경고(채운 주황) · 속 빈 고리 = 꺼짐. 초승달·가로 줄·고리
+ * 방해 금지 · 회색으로 채운 원 = 오프라인(#6023, `textMuted`), 에이전트는 채운 원 = 살아 있음·경고(채운 주황) · 속 빈 고리 = 꺼짐. 초승달·가로 줄·고리
  * 속의 빈 곳도 바탕색이다(웹은 바탕이 비친다). 꺼짐 고리의 선은 웹과 같은 `textMuted`(= `--ink-muted`)다: 글자 곁 점의
  * `textFaint`(= `--line-strong`)는 눌린 줄(`surfacePressed`) 위에서 2.7~3.0:1 이었다(#5786 r1 M3 수리, `statusBadge.test.ts`).
  * 부모는 얼굴 크기의 상자다.
@@ -99,6 +104,7 @@ export function FaceStatusDot({
         style={[
           styles.faceMark,
           styles[tone],
+          tone === 'muted' && shape === 'fill' && styles.mutedFill,
           shape === 'ring' && {backgroundColor: fill, borderColor: palette.textMuted},
           {width: dot, height: dot, borderWidth: shape === 'ring' ? gap : 0},
         ]}
@@ -137,6 +143,8 @@ const buildStyles = (color: Palette) =>
     warn: {backgroundColor: color.warn},
     danger: {backgroundColor: color.danger},
     muted: {backgroundColor: color.surface, borderColor: color.textFaint},
+    // 사람의 오프라인(#6023): 회색으로 채운 원. 둘레는 다른 채운 점과 같은 면색 고리다.
+    mutedFill: {backgroundColor: color.textMuted, borderColor: color.surface},
     faceGap: {
       position: 'absolute',
       alignItems: 'center',

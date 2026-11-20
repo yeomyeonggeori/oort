@@ -17,9 +17,10 @@ import type { StatusDotTone } from "@momo/core/features/presence/statusDot";
 
 // =============================================================================
 // 아바타 상태 점의 대비 (#5786 · #4725 M2·M3). 점은 이제 도려낸 틈 안에 앉으므로 **점과 맞닿는 것은 아바타가 아니라 그
-// 자리의 바탕**이다(틈이 비어 있다). 그래서 잰다: 네 상태의 표식 색(채운 점의 채움, 꺼짐 고리의 선) × 점이 실제로 서는
-// 바탕 전부 ≥ 3:1(WCAG 1.4.11 비글자 대비). 상태끼리의 구별은 색이 아니라 모양이 맡는다(채운 원 · 초승달 · 가로 줄 ·
-// 속 빈 고리 — `tokens.css` 의 `avatar-status`). 밝기가 거의 같은 초록·주황(1.02~1.26, #4725 M3)과 띠 위에서 둘 다
+// 자리의 바탕**이다(틈이 비어 있다). 그래서 잰다: 네 상태의 표식 색(채운 점의 채움, 오프라인의 회색 채움 = 에이전트 꺼짐 고리의
+// 선) × 점이 실제로 서는 바탕 전부 ≥ 3:1(WCAG 1.4.11 비글자 대비). 상태끼리의 구별은 모양이 맡는다(채운 원 · 초승달 · 가로 줄,
+// 에이전트 꺼짐은 속 빈 고리 — `tokens.css` 의 `avatar-status`). 사람의 온라인과 오프라인(#6023)만 같은 채운 원이라 색으로
+// 갈리고, 둘의 대비는 표의 마지막 열이 적는다. 밝기가 거의 같은 초록·주황(1.02~1.26, #4725 M3)과 띠 위에서 둘 다
 // 흰빛이 되는 주황·빨강은 색으로 가를 수 없기 때문이다. 아래 「모양」 묶음이 그 규칙이 CSS 에 실제로 있는지 잰다.
 //
 // 바탕(점이 서는 자리):
@@ -239,9 +240,9 @@ function failures(cases: readonly Case[]): string[] {
 function printTable(cases: readonly Case[]) {
   if (!process.env.AVATAR_STATUS_TABLE) return;
   const lines = cases.map(
-    (c) => `| ${c.label} | ${TONES.map((tone) => contrast(c.marks[tone], c.bg).toFixed(2)).join(" | ")} |`
+    (c) => `| ${c.label} | ${TONES.map((tone) => contrast(c.marks[tone], c.bg).toFixed(2)).join(" | ")} | ${contrast(c.marks.ok, c.marks.muted).toFixed(2)} |`
   );
-  console.log(["| 바탕 | 온라인 | 자리 비움 | 방해 금지 | 꺼짐 고리 |", "|---|---|---|---|---|", ...lines].join("\n"));
+  console.log(["| 바탕 | 온라인 | 자리 비움 | 방해 금지 | 오프라인 · 꺼짐 | 온라인 대 오프라인 |", "|---|---|---|---|---|---|", ...lines].join("\n"));
 }
 
 describe("상태 점 대비 — 점이 서는 바탕 전부에서 3:1 (#5786, #4725 M2)", () => {
@@ -289,12 +290,15 @@ describe("상태 점 모양 — 색이 아니라 모양으로 갈린다", () => 
     return avatarStatus.slice(at, avatarStatus.indexOf("}", at));
   };
 
-  it("톤 규칙은 색만 칠한다(모양은 뜻이 고르는 `status-shape-*`), 꺼짐 톤에는 채움이 없다", () => {
+  it("톤 규칙은 색만 칠한다(모양은 뜻이 고르는 `status-shape-*`), 회색 채움은 채운 원(사람 오프라인)에만 — 에이전트 고리는 채움이 없다", () => {
     for (const tone of ["ok", "warn", "danger"] as const) {
       expect(toneRule(tone)).toContain("background-color");
       expect(toneRule(tone)).not.toContain("mask");
     }
-    expect(avatarStatus).not.toContain('[data-tone="muted"]');
+    // 사람의 오프라인(#6023) = 고리 선과 같은 역할로 채운 원. 위 대비 표의 「오프라인 · 꺼짐」 열이 이 한 역할을 잰다.
+    expect(avatarStatus).toContain(`[data-avatar-status-dot][data-tone="muted"][data-shape="fill"] {
+    background-color: var(--${ringRole});`);
+    expect(avatarStatus).not.toMatch(/\[data-tone="muted"\](?!\[data-shape="fill"\])/);
     expect(shapeRule("status-shape-ring")).not.toContain("background");
     expect(shapeRule("status-shape-ring")).toContain("border:");
   });

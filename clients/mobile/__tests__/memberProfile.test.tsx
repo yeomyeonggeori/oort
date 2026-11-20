@@ -18,7 +18,7 @@ import {
   copyText,
 } from '../src/features/conversation/copy';
 import { SHEET_ICONS } from '../src/design/icons';
-import { slopTo, SHEET, TOUCH_TARGET } from '../src/design/tokens';
+import { darkPalette, lightPalette, slopTo, SHEET, TOUCH_TARGET } from '../src/design/tokens';
 import {
   MessageRow,
   type MessageRowActions,
@@ -285,6 +285,18 @@ describe('다른 사람 프로필 시트 — 상태 칩과 한 줄 상태 (#4319
     expect(chip.props.accessibilityLabel).toBe('상태: 방해 금지');
     const dot = within(chip).getByTestId('profile-status-dot', { includeHiddenElements: true });
     expect(flatten(dot.props.style).backgroundColor).toBeDefined();
+  });
+
+  it('사람의 오프라인은 회색으로 채운 점, 에이전트 꺼짐은 그대로 속 빈 고리다 (#6023)', () => {
+    const MUTED_GREY = [lightPalette.textMuted, darkPalette.textMuted];
+    renderProfile(HUMAN, { status: { tone: 'muted', label: '오프라인' } });
+    const human = flatten(screen.getByTestId('profile-status-dot', { includeHiddenElements: true }).props.style);
+    expect(MUTED_GREY).toContain(human.backgroundColor);
+    screen.unmount();
+    renderProfile(AGENT_MEMBER, { status: { tone: 'muted', label: '꺼짐' } });
+    const agent = flatten(screen.getByTestId('profile-status-dot', { includeHiddenElements: true }).props.style);
+    expect(MUTED_GREY).not.toContain(agent.backgroundColor);
+    expect([lightPalette.textFaint, darkPalette.textFaint]).toContain(agent.borderColor);
   });
 
   it('에이전트의 생존 판정도 같은 칩이다', () => {
