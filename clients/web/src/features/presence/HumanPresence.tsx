@@ -10,7 +10,7 @@ import { useHumanPresenceDot } from "./useHumanPresenceDot";
 // 사람의 상태 점을 그리는 두 모양 (#4692, ADR-0160 ②③). 판정은 둘 다 한 훅이다(`useHumanPresenceDot` →
 // 코어 `humanPresenceDot`). 모양은 글자가 곁에 있는가로 갈린다(`design/statusDot.ts` 와 같은 구분):
 //
-//   AvatarWithPresence 아바타 모서리의 점 - 글자가 없으니 **모양이 말한다**: 채운 원 = 접속 중, 속 빈 고리 = 접속 없음,
+//   AvatarWithPresence 아바타 모서리의 점 - 글자가 없으니 **모양이 말한다**: 채운 초록 = 접속 중, 채운 회색 = 접속 없음(#6023),
 //                      초승달 = 자리 비움, 가로 줄 = 방해 금지. 아바타를 점 둘레만큼 도려낸 자리에 앉는다(#5786,
 //                      `AvatarStatus` 한 부품). 행의 높이를 바꾸지 않는다.
 //   HumanPresenceLabel 점 + 낱말 한 줄(대화 머리) - 낱말이 곁에 있으니 모든 톤이 채워진다.

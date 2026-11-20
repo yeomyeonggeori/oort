@@ -90,12 +90,12 @@ const avatar = (row: RosterMember) =>
 const dotIn = (el: HTMLElement) => el.querySelector<HTMLElement>('[data-testid="presence-dot"]');
 
 describe("AvatarWithPresence: the corner dot", () => {
-  // 모양(채운 원 · 초승달 · 가로 줄 · 속 빈 고리)과 색은 `data-tone` 을 읽는 CSS 한 곳(`tokens.css` 의 `avatar-status`)이
+  // 모양(채운 원 · 초승달 · 가로 줄, 사람 오프라인은 회색으로 채운 원 #6023)과 색은 `data-tone` 을 읽는 CSS 한 곳(`tokens.css` 의 `avatar-status`)이
   // 그린다(#5786). 여기서는 화면에 닿는 것 — 어느 톤의 점이 서는지, 아바타가 도려내지는지 — 를 잰다. 실제 그림(틈이 바탕을
   // 비추는지)은 `avatarStatus.browser.test.ts` 가 WebKit·Chromium 픽셀로 잰다.
   it.each([
     ["접속 중은 ok", { online: true }, "ok"],
-    ["접속 없음은 muted(속 빈 고리)", { online: false }, "muted"],
+    ["접속 없음은 muted(회색으로 채운 원)", { online: false }, "muted"],
     ["자리 비움은 접속 여부보다 먼저", { online: true, presenceStatus: "away" as const }, "warn"],
     ["방해 금지는 접속 중이어도", { online: true, presenceStatus: "dnd" as const }, "danger"],
   ])("%s", (_name, patch, tone) => {
@@ -188,7 +188,7 @@ describe("HumanPresenceLabel: dot and word on one line", () => {
     host?.remove();
     const offline = chip(render(label(member({ online: false }))))!;
     expect(offline.textContent).toBe("오프라인");
-    // Beside a word the offline dot is a filled grey, not the avatar corner's hollow ring.
+    // Beside a word the offline dot is a filled grey, like the avatar corner's offline dot (#6023).
     expect(offline.querySelector("span")?.className).toContain("bg-ink-muted");
   });
 
