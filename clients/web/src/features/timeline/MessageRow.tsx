@@ -115,6 +115,7 @@ import { messageShareUrl } from "@/features/inbox/anchor";
 import { absoluteApiBase } from "@/lib/serverBase";
 import { useOpenMemberProfile } from "@/features/directory/memberProfileContext";
 import { useHoverToolbarFocusHandoff, useRowRovingFocus } from "./rowFocus";
+import { useRowClockPlacement } from "./rowClockPlacement";
 import { MessageEditor } from "./MessageEditor";
 import { EditedMark } from "./EditedMark";
 import { EditRequestContext } from "./editRequest";
@@ -819,6 +820,15 @@ export function MessageRow({
     neighborBannerOpen,
   });
   useHoverToolbarFocusHandoff(rowRef, showHoverToolbar, rowFocused);
+  // 이어지는 행의 시각은 올림 · 키보드 초점에서 줄 오른쪽 빈자리로 옮겨 선다(#6026, `rowClockPlacement.ts`). hover가 없는 기기는
+  // 시각을 세우지 않으므로(#5624 M2) 재지 않는다.
+  const clockRef = useRef<HTMLTimeElement | null>(null);
+  useRowClockPlacement(
+    rowRef,
+    clockRef,
+    !startsGroup && !touchSurface && !editing && !selectionWithinRow && (rowHovered || rowFocused),
+    editing || selectionWithinRow
+  );
 
   // 호버는 **DOM 이 아는 사실**로 센다(#5328, SidebarRow #3963 과 같은 문제). React 의 `onMouseEnter`/`onMouseLeave` 는 포털 자손을 행 안으로
   // 친다: 포인터가 행에서 ⋮ 메뉴(포털, DOM 으로는 행 밖)로 건너가도 leave 가 오지 않고, 행동을 고르면 메뉴 항목이 포인터 밑에서 사라져(사라진
@@ -998,6 +1008,7 @@ export function MessageRow({
         ) : (
           <>
           <time
+            ref={clockRef}
             dateTime={new Date(message.createdAtMs).toISOString()}
             data-numeric
             data-testid="row-time"
@@ -1011,8 +1022,12 @@ export function MessageRow({
             //
             // 키보드에도 길을 준다: 행 안 어디에 포커스가 있어도 보이게 `focus-within`을
             // 함께 건다 — hover만 걸면 마우스 없는 사람에게는 없는 기능이 된다.
+            //
+            // 자리 (#6026): 올림 · 키보드 초점에서 줄 오른쪽 빈자리로 옮겨 선다(`useRowClockPlacement`가 잰 자리를 CSS 변수로
+            // 건네고 `tokens.css`가 놓는다 — 기준은 이 거터 칸이다). 빈자리가 없는 드문 행은 이 거터 자리 그대로다. `pointer-events-none`: 쉬는 동안(투명) 본문
+            // 위에 남은 상자가 글 클릭 · 고르기를 먹지 않는다.
             className={cn(
-              "absolute right-0 top-0 whitespace-nowrap text-timestamp text-ink-muted",
+              "pointer-events-none absolute right-0 top-0 whitespace-nowrap text-timestamp text-ink-muted",
               "opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100",
               // 움직임을 줄여 달라고 한 사람에게는 페이드도 움직임이다.
               "motion-reduce:transition-none"
