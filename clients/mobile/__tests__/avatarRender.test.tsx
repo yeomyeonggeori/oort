@@ -167,7 +167,7 @@ describe('아바타가 선다 — 그리고 코어가 말한 그대로 선다', 
 
   it('이니셜은 이름의 첫 글자다', () => {
     const view = render(<Avatar directory={DIRECTORY} memberId={SELF} />);
-    expect(view.getByTestId('avatar-initial', HIDDEN).props.children).toBe('곽');
+    expect(view.getByTestId('avatar-initial', HIDDEN).props.children).toBe('한');
   });
 
   it('모르는 작성자에게는 글자를 그리지 않는다 — uuid 는 이름이 아니다 (H-11 3)', () => {

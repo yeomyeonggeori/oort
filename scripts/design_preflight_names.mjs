@@ -137,7 +137,10 @@ export function scanLine(rawLine, index) {
     }
   }
   for (const word of line.match(/[A-Za-z]+/g) ?? []) {
-    for (const piece of word.split(SPLIT_CAMEL)) {
+    const pieces = word.split(SPLIT_CAMEL);
+    // 카멜로 쪼개면 두 토막이 되는 같은 낱말(대소문자만 섞은 철자)도 한 덩이로 본다 (#6038).
+    if (pieces.length > 1) pieces.push(word);
+    for (const piece of pieces) {
       if (piece.length < 4 || !index.latinLens.has(piece.length)) continue;
       const id = index.latin.get(digestOf(piece));
       if (id) hits.push(`l${piece.length}·${id}`);
@@ -229,6 +232,7 @@ function selftest() {
     { want: 1, why: "카멜 덩이(앞 토막)", src: "const GildongHong = 1;" },
     { want: 1, why: "하이픈으로 이은 핸들", src: '"gildong-claude 빌드 봐 줘"' },
     { want: 1, why: "이메일 로컬 파트", src: 'login("gildong@example.com")' },
+    { want: 1, why: "대소문자만 섞어 카멜로 쪼개지는 같은 낱말(#6038)", src: 'login("\\t  GilDong@Example.COM")' },
     { want: 0, why: "더 긴 소문자 한 덩이는 다른 토막이다(공개 로그인이 이래서 통과한다)", src: "/Users/xxgildong/projects" },
     { want: 0, why: "2음절 부분은 목록에 없으면 통과(이름만 금지한 게 아니다)", src: '"길동 맥북"' },
     { want: 0, why: "가상 인물은 통과", src: 'displayName: "이도현", handle: "dohyun" // 박서연 최민수 정하윤' },

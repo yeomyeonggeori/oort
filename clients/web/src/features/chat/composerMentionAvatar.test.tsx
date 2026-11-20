@@ -50,7 +50,7 @@ describe("멘션 목록 아바타", () => {
     expect(avatars.every((a) => a !== null)).toBe(true);
     expect(avatars.map((a) => a?.getAttribute("data-avatar-kind")).sort()).toEqual(["agent", "human"]);
     expect(avatars.every((a) => a?.getAttribute("data-avatar-size") === "sm")).toBe(true);
-    expect(avatars.map((a) => a?.textContent).sort()).toEqual(["곽", "그"]);
+    expect(avatars.map((a) => a?.textContent).sort()).toEqual(["그", "한"]);
   });
 
   it("후보가 명부 행을 그대로 들고 있어야 아바타를 그릴 수 있다", () => {

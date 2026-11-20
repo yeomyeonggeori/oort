@@ -143,7 +143,7 @@ describe('login, end to end through the core', () => {
   it('sends the address in the form the server stores it', async () => {
     fetchMock.mockResolvedValueOnce(jsonResponse(200, LOGIN_BODY));
 
-    await login('\t  SeongJae@Example.COM  ', 'pw');
+    await login('\t  JiHu@Example.COM  ', 'pw');
 
     const [, init] = fetchMock.mock.calls[0];
     expect(JSON.parse(String(init?.body))).toEqual({

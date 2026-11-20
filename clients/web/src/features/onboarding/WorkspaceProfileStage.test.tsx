@@ -652,11 +652,11 @@ describe("onboarding S1 우리 팀 이름 (#2332, 겉 #2811)", () => {
     mountStage();
     fill("onboarding-s1-workspace-name", "여명거리");
     fill("onboarding-s1-display-name", "성재");
-    fill("onboarding-s1-handle", "SeongJae");
+    fill("onboarding-s1-handle", "JiHu");
     expect(readS1Draft()).toEqual({
       workspaceName: "여명거리",
       displayName: "성재",
-      handle: "SeongJae",
+      handle: "JiHu",
     });
     act(() => mountedRoot?.unmount());
     mountedRoot = null;
@@ -674,7 +674,7 @@ describe("onboarding S1 우리 팀 이름 (#2332, 겉 #2811)", () => {
     expect(
       (remounted.querySelector('[data-testid="onboarding-s1-handle"]') as HTMLInputElement)
         .value
-    ).toBe("SeongJae");
+    ).toBe("JiHu");
     expect(remounted.querySelector('[data-testid="onboarding-s1-handle-preview"]')?.textContent).toBe(
       "저장되는 핸들 @jihu"
     );
