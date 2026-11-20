@@ -174,7 +174,8 @@ export function useRowClockPlacement(
         if (records.every((record) => record.target === clock)) return;
         place();
       });
-      mutations.observe(row, { subtree: true, childList: true, attributes: true, attributeFilter: ["data-straddle", "style"] });
+      // `characterData`: 서 있는 동안 같은 줄 안에서 글이 바뀌면(고친 글이 들어오거나 이어 쓰는 글) 줄 높이가 그대로라 크기 관찰이 못 본다.
+      mutations.observe(row, { subtree: true, childList: true, characterData: true, attributes: true, attributeFilter: ["data-straddle", "style"] });
       cleanups.push(() => mutations.disconnect());
     }
     return () => {
