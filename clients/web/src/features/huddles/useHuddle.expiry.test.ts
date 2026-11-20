@@ -17,7 +17,7 @@ import {
   it,
   vi,
 } from "vitest";
-import { huddleErrorCopy } from "@momo/core/features/huddles/huddleModel";
+import { HUDDLE_ERROR_KEYS } from "@momo/core/features/huddles/huddleModel";
 
 const fetchActiveHuddle = vi.fn();
 const startHuddle = vi.fn();
@@ -213,7 +213,7 @@ describe("useHuddle token expiry (#2757)", () => {
     expect(leaveHuddle).toHaveBeenCalledTimes(1);
     expect(disconnectAudio).toHaveBeenCalledTimes(1);
     expect(text(host, "joined")).toBe("no");
-    expect(text(host, "notice")).toBe(huddleErrorCopy("connection"));
+    expect(text(host, "notice")).toBe(HUDDLE_ERROR_KEYS.connection);
   });
 
   it("ends with the expired copy when the token expired before connecting", async () => {
@@ -229,6 +229,6 @@ describe("useHuddle token expiry (#2757)", () => {
     expect(connectHuddleAudio).not.toHaveBeenCalled();
     expect(leaveHuddle).toHaveBeenCalledTimes(1);
     expect(text(host, "joined")).toBe("no");
-    expect(text(host, "notice")).toBe(huddleErrorCopy("expired"));
+    expect(text(host, "notice")).toBe(HUDDLE_ERROR_KEYS.expired);
   });
 });

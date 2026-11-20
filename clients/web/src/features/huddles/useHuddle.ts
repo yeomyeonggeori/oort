@@ -26,7 +26,7 @@ import {
   writeHuddleMicDeviceId,
 } from "./micDeviceStore";
 import {
-  huddleErrorCopy,
+  HUDDLE_ERROR_KEYS,
   huddleErrorKind,
   initialHuddleProjection,
   isHuddleUnsupportedStatus,
@@ -34,6 +34,7 @@ import {
   type HuddleErrorKind,
 } from "@momo/core/features/huddles/huddleModel";
 import { clampGainPercent, gainPercentTo01 } from "./micGain";
+import type { PlainMessageKey } from "@momo/core/i18n";
 
 export type HuddleBusyAction =
   | "start-or-join"
@@ -48,7 +49,8 @@ export interface HuddleController {
   joined: boolean;
   muted: boolean;
   busy: HuddleBusyAction;
-  notice: string | null;
+  /** 머리 아래 배너의 사전 키. 문장은 배너가 그릴 때 지금 언어로 푼다(#6020): 배너가 서 있는 동안 언어를 바꿔도 따라간다. */
+  notice: PlainMessageKey | null;
   microphoneDeviceId: string;
   microphoneGainPercent: number;
   retry: () => void;
@@ -93,7 +95,7 @@ export function useHuddle(
   const [joinedVersion, setJoinedVersion] = useState(0);
   const [muted, setMuted] = useState(false);
   const [busy, setBusy] = useState<HuddleBusyAction>(null);
-  const [notice, setNotice] = useState<string | null>(null);
+  const [notice, setNotice] = useState<PlainMessageKey | null>(null);
   const [microphoneDeviceId, setMicrophoneDeviceId] = useState(
     () => readHuddleMicDeviceId() ?? ""
   );
@@ -161,9 +163,7 @@ export function useHuddle(
           mountedRef.current &&
           activationRef.current === activation
         ) {
-          setNotice(
-            "오디오는 종료됐지만 서버에 나가기를 확인하지 못했습니다. 활성 상태를 다시 확인하세요."
-          );
+          setNotice("huddles.notice.leaveUnconfirmed");
           refresh();
         }
       }
@@ -174,7 +174,7 @@ export function useHuddle(
   const leaveForReason = useCallback(
     async (kind: HuddleErrorKind) => {
       await leaveCurrent(false);
-      if (mountedRef.current) setNotice(huddleErrorCopy(kind));
+      if (mountedRef.current) setNotice(HUDDLE_ERROR_KEYS[kind]);
     },
     [leaveCurrent]
   );
@@ -207,9 +207,9 @@ export function useHuddle(
           setMuted(false);
           setMicrophoneGainPercent(100);
           void disconnectAudio();
-          setNotice("허들이 종료되어 오디오 연결을 닫았습니다.");
+          setNotice("huddles.notice.endedAudioClosed");
         } else if (endedJoinAttempt) {
-          setNotice("허들이 종료되어 참가를 취소했습니다.");
+          setNotice("huddles.notice.endedJoinCancelled");
         }
         return;
       }
@@ -377,7 +377,7 @@ export function useHuddle(
         mountedRef.current &&
         activationRef.current === activation
       ) {
-        setNotice(huddleErrorCopy(kind));
+        setNotice(HUDDLE_ERROR_KEYS[kind]);
       }
     } finally {
       if (
@@ -416,7 +416,7 @@ export function useHuddle(
       if (mountedRef.current) setMuted(target);
     } catch (error) {
       if (mountedRef.current) {
-        setNotice(huddleErrorCopy(huddleErrorKind(error, "microphone")));
+        setNotice(HUDDLE_ERROR_KEYS[huddleErrorKind(error, "microphone")]);
       }
     } finally {
       if (mountedRef.current) setBusy(null);
@@ -445,7 +445,7 @@ export function useHuddle(
     } catch (error) {
       if (mountedRef.current) {
         setMicrophoneDeviceId(previousId);
-        setNotice(huddleErrorCopy(huddleErrorKind(error, "microphone")));
+        setNotice(HUDDLE_ERROR_KEYS[huddleErrorKind(error, "microphone")]);
       }
     } finally {
       if (mountedRef.current) setBusy(null);

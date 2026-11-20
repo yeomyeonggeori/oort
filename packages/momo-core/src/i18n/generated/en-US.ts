@@ -1920,6 +1920,42 @@ export const catalog: MessageCatalog = {
       "value": "Rename channel"
     }
   ],
+  "common.action.cancel": [
+    {
+      "type": 0,
+      "value": "Cancel"
+    }
+  ],
+  "common.action.checkAgain": [
+    {
+      "type": 0,
+      "value": "Check again"
+    }
+  ],
+  "common.action.close": [
+    {
+      "type": 0,
+      "value": "Close"
+    }
+  ],
+  "common.action.reload": [
+    {
+      "type": 0,
+      "value": "Reload"
+    }
+  ],
+  "common.action.retry": [
+    {
+      "type": 0,
+      "value": "Try again"
+    }
+  ],
+  "common.action.save": [
+    {
+      "type": 0,
+      "value": "Save"
+    }
+  ],
   "common.feedback.unavailable": [
     {
       "type": 0,
@@ -1966,6 +2002,48 @@ export const catalog: MessageCatalog = {
       },
       "offset": 0,
       "pluralType": "cardinal"
+    }
+  ],
+  "common.state.checking": [
+    {
+      "type": 0,
+      "value": "Checking"
+    }
+  ],
+  "common.state.connected": [
+    {
+      "type": 0,
+      "value": "Connected"
+    }
+  ],
+  "common.state.creating": [
+    {
+      "type": 0,
+      "value": "Creating"
+    }
+  ],
+  "common.state.loading": [
+    {
+      "type": 0,
+      "value": "Loading"
+    }
+  ],
+  "common.state.notConnected": [
+    {
+      "type": 0,
+      "value": "Not connected"
+    }
+  ],
+  "common.state.saving": [
+    {
+      "type": 0,
+      "value": "Saving"
+    }
+  ],
+  "common.state.sending": [
+    {
+      "type": 0,
+      "value": "Sending"
     }
   ],
   "connect.language.close": [
@@ -5670,6 +5748,253 @@ export const catalog: MessageCatalog = {
       "value": "Emoticon suggestions"
     }
   ],
+  "huddles.control.busy": [
+    {
+      "type": 0,
+      "value": "Processing huddle request"
+    }
+  ],
+  "huddles.control.checking": [
+    {
+      "type": 0,
+      "value": "Checking huddle"
+    }
+  ],
+  "huddles.control.join": [
+    {
+      "type": 0,
+      "value": "Join huddle"
+    }
+  ],
+  "huddles.control.leave": [
+    {
+      "type": 0,
+      "value": "Leave huddle"
+    }
+  ],
+  "huddles.control.live": [
+    {
+      "type": 0,
+      "value": "Live"
+    }
+  ],
+  "huddles.control.loadFailed": [
+    {
+      "type": 0,
+      "value": "Couldn't load the huddle status."
+    }
+  ],
+  "huddles.control.microphoneOff": [
+    {
+      "type": 0,
+      "value": "Mute"
+    }
+  ],
+  "huddles.control.microphoneOn": [
+    {
+      "type": 0,
+      "value": "Unmute"
+    }
+  ],
+  "huddles.control.start": [
+    {
+      "type": 0,
+      "value": "Start huddle"
+    }
+  ],
+  "huddles.error.connection": [
+    {
+      "type": 0,
+      "value": "The huddle audio connection dropped. Check your network, then join again."
+    }
+  ],
+  "huddles.error.cspBlocked": [
+    {
+      "type": 0,
+      "value": "This deployment's security policy doesn't allow the LiveKit address. An operator needs to check it."
+    }
+  ],
+  "huddles.error.expired": [
+    {
+      "type": 0,
+      "value": "Couldn't connect because the time to join ran out. Join the huddle again."
+    }
+  ],
+  "huddles.error.membership": [
+    {
+      "type": 0,
+      "value": "You don't have permission to use huddles in this channel. Check your channel membership."
+    }
+  ],
+  "huddles.error.microphoneDenied": [
+    {
+      "type": 0,
+      "value": "Couldn't join because microphone access was denied. Allow the microphone in your browser settings, then join again."
+    }
+  ],
+  "huddles.error.microphoneMissing": [
+    {
+      "type": 0,
+      "value": "Couldn't find a microphone to use. Connect an audio input device, then join again."
+    }
+  ],
+  "huddles.error.unconfigured": [
+    {
+      "type": 0,
+      "value": "This server doesn't use huddles. They become available once an operator configures LiveKit."
+    }
+  ],
+  "huddles.error.unknown": [
+    {
+      "type": 0,
+      "value": "Couldn't connect to the huddle. Try again in a moment."
+    }
+  ],
+  "huddles.mic.empty": [
+    {
+      "type": 0,
+      "value": "No microphone is connected."
+    }
+  ],
+  "huddles.mic.gain": [
+    {
+      "type": 0,
+      "value": "Input volume"
+    }
+  ],
+  "huddles.mic.menu": [
+    {
+      "type": 0,
+      "value": "Microphone"
+    }
+  ],
+  "huddles.mic.permissionDenied": [
+    {
+      "type": 0,
+      "value": "Microphone access is blocked, so you can't choose a device. Allow it in your browser settings."
+    }
+  ],
+  "huddles.mic.permissionPrompt": [
+    {
+      "type": 0,
+      "value": "Allow microphone access to choose a device."
+    }
+  ],
+  "huddles.mic.picker": [
+    {
+      "type": 0,
+      "value": "Choose microphone"
+    }
+  ],
+  "huddles.mic.systemDefault": [
+    {
+      "type": 0,
+      "value": "System default"
+    }
+  ],
+  "huddles.mic.unnamed": [
+    {
+      "type": 0,
+      "value": "Microphone "
+    },
+    {
+      "type": 2,
+      "value": "number",
+      "style": null
+    }
+  ],
+  "huddles.notice.endedAudioClosed": [
+    {
+      "type": 0,
+      "value": "The huddle ended, so the audio connection was closed."
+    }
+  ],
+  "huddles.notice.endedJoinCancelled": [
+    {
+      "type": 0,
+      "value": "The huddle ended, so joining was cancelled."
+    }
+  ],
+  "huddles.notice.leaveUnconfirmed": [
+    {
+      "type": 0,
+      "value": "Audio ended, but the server didn't confirm that you left. Check the huddle status again."
+    }
+  ],
+  "huddles.participants.many": [
+    {
+      "type": 1,
+      "value": "first"
+    },
+    {
+      "type": 0,
+      "value": ", "
+    },
+    {
+      "type": 1,
+      "value": "second"
+    },
+    {
+      "type": 0,
+      "value": " and "
+    },
+    {
+      "type": 6,
+      "value": "others",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " other"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " others"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "huddles.participants.one": [
+    {
+      "type": 1,
+      "value": "first"
+    }
+  ],
+  "huddles.participants.two": [
+    {
+      "type": 1,
+      "value": "first"
+    },
+    {
+      "type": 0,
+      "value": ", "
+    },
+    {
+      "type": 1,
+      "value": "second"
+    }
+  ],
+  "huddles.participants.waiting": [
+    {
+      "type": 0,
+      "value": "Waiting for participants"
+    }
+  ],
   "inbox.approval.open": [
     {
       "type": 0,
@@ -6644,6 +6969,36 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "Posted an invite link"
+    }
+  ],
+  "readState.markUnread.action": [
+    {
+      "type": 0,
+      "value": "Mark unread from here"
+    }
+  ],
+  "readState.markUnread.done": [
+    {
+      "type": 0,
+      "value": "Marked unread from here"
+    }
+  ],
+  "readState.markUnread.failed": [
+    {
+      "type": 0,
+      "value": "Couldn't mark as unread. Try again in a moment."
+    }
+  ],
+  "readState.markUnread.messageGone": [
+    {
+      "type": 0,
+      "value": "This message is no longer in this channel. Refresh or reopen the channel."
+    }
+  ],
+  "readState.markUnread.notMember": [
+    {
+      "type": 0,
+      "value": "Only members of this channel can mark messages as unread."
     }
   ],
   "recovery.claim.hostBody": [

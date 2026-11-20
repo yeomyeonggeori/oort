@@ -11,6 +11,7 @@ import { useEffect, useState } from "react";
 
 export type AudioInputDevice = {
   deviceId: string;
+  /** 브라우저가 준 장치 이름. 권한이 있어도 비어 있을 수 있다 — 그때 메뉴가 차례 번호로 부른다(#6020: 문장은 화면이 짓는다). */
   label: string;
 };
 
@@ -35,9 +36,9 @@ export function classifyAudioInputDevices(
   const labeled = withId.filter((device) => device.label !== "");
   if (labeled.length > 0 || permissionHint === "granted") {
     return {
-      devices: withId.map((device, index) => ({
+      devices: withId.map((device) => ({
         deviceId: device.deviceId,
-        label: device.label || `마이크 ${index + 1}`,
+        label: device.label,
       })),
       permission: "granted",
     };

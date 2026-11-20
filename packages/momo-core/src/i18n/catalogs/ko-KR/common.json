@@ -1,5 +1,18 @@
 {
   "common.feedback.unavailable": "내용을 표시하지 못했어요. 다시 시도해 주세요.",
   "common.members.count": "{count, number}명",
-  "common.invitation.received": "{actorName} 님이 초대했어요."
+  "common.invitation.received": "{actorName} 님이 초대했어요.",
+  "common.action.retry": "다시 시도",
+  "common.action.cancel": "취소",
+  "common.action.close": "닫기",
+  "common.action.reload": "다시 불러오기",
+  "common.action.checkAgain": "다시 확인",
+  "common.action.save": "저장",
+  "common.state.saving": "저장 중",
+  "common.state.checking": "확인 중",
+  "common.state.loading": "불러오는 중",
+  "common.state.creating": "만드는 중",
+  "common.state.sending": "보내는 중",
+  "common.state.connected": "연결됨",
+  "common.state.notConnected": "연결 안 됨"
 }

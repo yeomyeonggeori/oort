@@ -257,6 +257,213 @@ ICU plural (CLDR categories per language, e.g. French/Spanish `many`), number an
 compile for drafts the same way; `generation.test.ts` proves it on a fixture root, not the product
 catalogs (translations are P2).
 
+## P1 migration — the one pattern every copy cell follows (#6020)
+
+This section is the whole contract for a cell that moves screen copy into the dictionary. Read it instead of the
+rest of this file. The finished specimen is `features/readState/copy.ts` and `features/huddles/huddleModel.ts` in the
+core, `clients/web/src/features/huddles/*`, and their callers in `clients/web/src/features/timeline/`. A web key table lives in its own `.ts` file (`huddles/micKeys.ts`):
+exporting it from a component file trips `react-refresh/only-export-components`.
+
+### Steps of one cell
+
+1. Pick the catalog file for your copy from the table in **Catalog files**. Add each sentence to `catalogs/ko-KR` and
+   `catalogs/en-US` next to its related keys. A new file also needs `{}` in the five draft directories.
+2. `npm --prefix packages/momo-core run i18n:generate`. Commit the regenerated `generated/*.ts` with the catalogs.
+3. Replace the literals using the shapes in **One shape**. Move the Korean **verbatim**: the Korean screen must not
+   change by one character (wording fixes are separate issues). English is short, direct and sentence case.
+4. `node packages/momo-core/src/i18n/tooling/direct-copy.mjs shrink`, then `… check`. Delete the raises your change
+   made unnecessary. Your files' rows must reach `{"ko": 0, "en": 0}` (and `cat` 0 where it was counted).
+5. Fix the tests as described in **Tests**.
+6. Find every other place that reads the moved text: grep each moved Korean sentence (and each removed constant
+   name) across `clients/web/src`, `clients/web/gates`, `clients/web/scripts`, `clients/web/e2e`,
+   `clients/mobile/__tests__` and `clients/mobile/.maestro`, and fix every hit that renders or reads the screen.
+   At #6020, "the tests in the folder I touched" missed a tooltip test in `features/chat/` and a browser gate.
+   Also search every reader of each field, state, return value or constant that changed from text to a key: the type
+   system does not stop a key from reaching a text slot (`PlainMessageKey` is a string, so `message={state.notice}`
+   compiles and shows `huddles.notice.…`). Report "N readers, all through `formatMessage`".
+7. Run the core vitest suite in full once (it holds the key/table equality tests), the web/phone tests from steps 5–6,
+   the three typechecks, `i18n:check`, and `bash scripts/design_preflight_web.sh` (core copy rules) right after
+   adding keys. If a gate rejects a verbatim Korean sentence, stop and report it; do not rewrite copy to pass.
+
+### Shared words (`common.*`)
+
+Counted, not picked: every Korean literal the ledger counts on the three surfaces (10,862 at `7a41b2a90`), grouped
+by exact text. A word became a shared key only if it appears at least 9 times on at least two surfaces **and** has
+one English rendering everywhere (the existing catalog was the test: the same Korean already translated two ways is
+two meanings). `연결 안 됨` (7) joins as the pair of `연결됨`, a house word. `저장` stands alone 6 times (the raw count of 10 includes
+four `${date} 저장` tails meaning *Saved*, which belong to their own sentences); it stays as the plain button word
+*Save*. Four of the keys had no catalog entry yet, so their
+call sites were read instead: 연결됨 / 연결 안 됨 always name whether an account, device, relay or runtime is
+linked (AI link pill, login relay, hosted assistants, the work model, presence dots) — not network state, which is
+`connection.*`; 만드는 중 is always a create button in progress (agents, tokens, invites, webhooks, workspaces);
+보내는 중 is always a send in progress (approval decisions, delegation sheets, event tests, scheduled messages).
+
+| Key | 한국어 | English | Uses (core / web / phone) |
+|---|---|---|---:|
+| `common.action.retry` | 다시 시도 | Try again | 79 (14 / 59 / 6) |
+| `common.action.cancel` | 취소 | Cancel | 60 (15 / 40 / 5) |
+| `common.action.close` | 닫기 | Close | 63 (12 / 42 / 9) |
+| `common.action.reload` | 다시 불러오기 | Reload | 29 (6 / 11 / 12) |
+| `common.action.checkAgain` | 다시 확인 | Check again | 14 (2 / 11 / 1) |
+| `common.action.save` | 저장 | Save | 6 (1 / 2 / 3) |
+| `common.state.saving` | 저장 중 | Saving | 19 (2 / 14 / 3) |
+| `common.state.checking` | 확인 중 | Checking | 17 (3 / 12 / 2) |
+| `common.state.loading` | 불러오는 중 | Loading | 9 (1 / 8 / 0) |
+| `common.state.creating` | 만드는 중 | Creating | 9 (1 / 8 / 0) |
+| `common.state.sending` | 보내는 중 | Sending | 9 (1 / 4 / 4) |
+| `common.state.connected` | 연결됨 | Connected | 12 (7 / 4 / 1) |
+| `common.state.notConnected` | 연결 안 됨 | Not connected | 7 (5 / 1 / 1) |
+
+Use the shared key whenever the screen's word **and** its English are the ones above; do not add a feature key for
+them. Left out on purpose:
+
+- One Korean word, two English words today: 닫기 for a notice (`Dismiss`; the catalog already has it twice,
+  `mobile.jumpSeek.dismiss` and `timeline.thread.followDismiss`) is **not** `common.action.close` — only the dialog,
+  sheet or panel sense `Close` is shared,
+  더 보기 (`Load more` / `Show more` / `See more`), 지우기 (`Remove` / `Delete`), 다시 보내기 (`Resend` /
+  `Try again`), 확인 (`OK` / `Got it`), 완료 (button `Done` / state `Completed`), 에이전트 (`Agent` / `Agents`),
+  실패 · 거부 · 승인 · 대기 (an action and a state).
+- Counters and joining pieces — 개 · 일 · 월 · 외 · 명 · 건 · 분 · 시간 · 초 · 까지. They are debris of assembled
+  sentences; each becomes an ICU argument inside its own sentence (`{count, number}명`), never a key.
+- Domain nouns (채널, 워크스페이스, 라이트, 다크, 상태, 기본, 전체): they belong to their feature's file and wording.
+
+The catalog already holds feature keys with these exact words (다시 시도 ×13, 취소 ×13, 닫기 ×7, 복사됨 ×4).
+They stay; folding them into `common.*` touches about 40 call sites across bundles and is a follow-up, not part of
+any cell.
+
+### One shape: the core returns keys, the screen formats
+
+The core never returns a sentence. It returns a key (`PlainMessageKey`) or a key with values (`MessageRef`), both
+from `i18n/keys.ts`; the screen formats with `formatMessage` when it draws, in the language it is showing. This is
+what the newest core models already do (`channels/rename.ts`, `browse.ts`, `connection/copyKeys.ts`); at #6020,
+20 core files carried keys and 19 took a formatter, so the key shape is the one kept.
+
+| What the old code is | New shape | Specimen |
+|---|---|---|
+| Constant: `export const X_LABEL = "…"` | `export const X_KEY = "feature.surface.intent" satisfies PlainMessageKey;` → caller `formatMessage(X_KEY)` | `MARK_UNREAD_ACTION_KEY` |
+| Closed enum → sentence (`switch`) | Table `as const satisfies Record<Kind, PlainMessageKey>` (compile stops on a missing kind) | `HUDDLE_ERROR_KEYS` |
+| Logic → sentence (status codes, branches) | Same function, returns `PlainMessageKey` | `markUnreadFailureKey` |
+| Sentence with a name or a count | Returns `MessageRef<K>`, one key per sentence form; never join pieces with `,` or `외` → caller `formatMessage(ref.key, ref.values as never)` | `huddleParticipantSummary` |
+| Sentence kept in React state | State holds the key; format where it renders (switching language updates a standing banner) | `useHuddle` `notice` |
+| Same, but the state is shared with copy another cell still owns | Format when setting, with a comment; the cell that moves the last sentence turns the state into a key | `MessageRow` `setRowError` |
+| Sentence carried in `throw new Error(…)` | Rethrow the original error; the display site maps it to a key | `useMarkUnread` → `MessageRow` |
+| Web/phone model that builds a list of labels | Move the whole model and delete `label` (items carry `labelKey`). If only part moves, make the item type a union of `{ label }` and `{ labelKey }` with no shared field, so every unnarrowed `item.label` read stops compiling, and read the word only through a resolver | `messageActionModel.ts` (`messageActionLabel`) |
+
+The single exception: when building a **value** needs the locale service (`formatTime`, `formatDate`,
+`formatNumber`, `formatRelativeTime`, or another message), the function takes the formatter or `LocaleService` as its
+first parameter and returns the string (`timeline/editedLabel.ts`). Ask one question per function: "does any value
+need the locale?" No → key shape. Yes → this exception. Nothing else.
+
+Do not wrap `formatMessage` in a helper with another name: the ledger recognises only that callee (unknown keys,
+`cat` joins). Strings that are message keys are not counted as English copy, so key tables need no exemption.
+The `as never` on `values` is the existing idiom; the values were type-checked against the key where the ref was built.
+Phone screens already consume refs the same way (`clients/mobile/src/features/sidebar/RenameChannelBody.tsx`,
+`screens/ChannelBrowseScreen.tsx`).
+
+### Catalog files
+
+The generator requires the first key segment to equal the file name, so a prefix **is** a file. Merging measured at
+#6020 on throwaway branches, two rounds:
+
+- Two **different** files whose keys sort apart (`readState` + `huddles`, `readState` + `notifications`): clean, and
+  the merged `generated/` is already fresh.
+- Two different **new** files whose prefixes sort next to each other (`chat` + `commands`, nothing between them):
+  the JSON merges, but all three `generated/` files conflict (both insert at the same spot of the sorted output).
+- The **same** file (new or existing): the JSON and all three `generated/` files conflict.
+
+The landing train resolves `generated/` conflicts by regenerating after the merge, so the first two are fine there; a
+cell landed on its own must merge the track into its branch and regenerate. A JSON conflict is not resolved, and the
+train drops that cell. So:
+
+- **One open cell per catalog file.** Cells of one bundle run one after another; bundles may run side by side because
+  their files below do not overlap.
+- Phone-only copy goes into the bundle's feature file, not `mobile.json` (shared by every phone cell; its existing
+  keys stay).
+- Keys are `feature.surface.intent`: the surface is the component or area (`huddles.mic`), the intent a camelCase
+  meaning (`permissionDenied`), never the Korean text or a line number.
+
+| Bundle | Cells | Catalog files (= key prefixes) |
+|---|---|---|
+| A 대화 | L-A1 → A2 → A3 → A4 | `timeline` (core timeline, web timeline, phone conversation and its screen), `reply`, `scheduled`, `attachments`, `reminders`, `chat`, `emoji`, `drafts`, `huddles`, `readState` |
+| B 길찾기 | L-B1 → B2 → B3 | `inbox`, `presence`, `sidebar`, `channels`, `directory`, `memberList`, `search`, `workspace`, `notifications`, `connection` (network state, incl. core `lib/http.ts`), `updates`, `downloads`, `activity`, `pwa`, `home`, `push`, `shell` |
+| C 가입 · 연결 | L-C1 → C2 | `auth`, `onboarding`, `cliLogin`, `welcome`, `deviceKey`, `aiConnect`, `connect`, `recovery` |
+| X 표현 | L-X1 | `expressions` |
+| F 작업 | L-F1 → F2 → F3 → F4 | `workbench`, `work`, `workstreams`, `workTab`, `workConsole`, `ade` |
+| D 설정 · 앱 | L-D1 → D2 → D4 → D5 → D6 and L-D3 → D7 side by side; L-D8 after both (it writes `settings` and `appearance`) | `settings` (core and web settings, phone profile), `appearance` (core `design/` themes and wallpapers, phone `design/`), `github`, `capabilities`, `plugins`, `commands`, `webhooks`, `app`, `desktop`, `appUpdate` |
+| E 에이전트 · AI · 기억 | L-E1 → E2 → E3 → E5 → E6; L-E4 | `ai`, `hostedAgents`, `agents`, `routing`, `approvals`, `agentHub`, `decisionStage`, `aiHub`, `teamAi`, `memory` |
+| (shared) | L-0 only | `common` — later cells only read it |
+| (shared) | none | `blocked` (blocked-reason sentences several bundles render) — later cells only read it; a new sentence there is its own small issue |
+| (release) | release notes only | `releaseNotes` — written by each release's notes PR, never by a copy cell |
+| (frozen) | none | `mobile` — existing phone-only keys stay; no new keys (see above) |
+
+`connection.*` is network state (#5219); do not put other failures there. Core `lib/` is split by meaning, not by
+folder: `http.ts` → B (`connection`), `serverUrl.ts` → C (`auth`), the tool-permission sentences in `api.ts` → E
+(`agents`). A cell that needs a sentence owned by another bundle's file uses a shared key or adds one to its own file.
+
+### Not copy
+
+- **Design gallery** (`clients/web/src/design/Gallery.tsx`, 119 ko / 27 en including raise #5782): exempt. It is
+  loaded only when `import.meta.env.MODE === "design"` or `VITE_DESIGN_GALLERY=1` (`clients/web/src/app/App.tsx`,
+  `DESIGN_GALLERY_ENABLED`); production builds never contain it, and its literals quote product copy as specimens. Its
+  counts already sit in the anchor, so it needs nothing now; "P1 done" means every ledger row is 0 **except this one
+  file**. New specimen copy there uses the existing `raise` with a reason, as #5782 did. There is no exemption list in
+  the tool. `design/themes/index.ts` (5) names themes a person picks, so it is copy (cell L-D8).
+- **Text no person sees** (developer `Error`s that only reach logs, dev-only switches): write it in English
+  diagnostics. That removes the `ko` count honestly; English in an `Error` is not counted. First prove that no path
+  renders it: grep every `catch` that could receive that error for `.message` reaching a banner, toast or state. If one
+  does, it is copy: use the `Error` row of **One shape**.
+- **Language data**: `lib/koreanParticle.ts` (23) holds particles and Sino-Korean digits, the Korean-only formatter
+  ADR-0213 §4 confines to the translation layer. It is not a sentence and cannot reach 0 by moving copy; whether it
+  is excluded like `autonyms.ts` is a ledger policy change for the planner. Until then its row stays as it is.
+- **User data** (names, channel names, device labels from the OS) is a value, never a key. A name list is a sentence
+  with arguments (`huddles.participants.*`), not a `join(", ")` plus a counter.
+
+### Tests
+
+- **Core**: bind the dictionary with `createMessageCopy({messageLocale: "ko-KR", catalog})` (`@momo/core/testkit`) and
+  keep asserting the same Korean sentence, so the wording guard stays (`readState/copy.test.ts`). It throws on an
+  unknown key or bad values.
+- **Web**: a screen mounted without a locale provider renders the **bundled English** (`useFormatMessage`). A test
+  that asserted Korean before the move keeps asserting the same Korean: wrap the mounted tree with
+  `LocaleProvider` + `koreanLocale()` (`src/testing/koLocale.ts`) — `channelHeaderControls.tooltip.test.tsx`,
+  `HuddleHeaderNames.test.tsx`, `HuddleMicMenu.test.ts`, `markUnread.rollback.test.tsx`. Hand-written English is
+  only for a **new** test about structure or the English template itself. Never turn an existing Korean assertion
+  into English: after ~50 cells nothing would guard what Korean users see.
+- **Phone**: `useFormatMessage` falls back to **Korean**, so most phone tests should keep passing unchanged. This is
+  read from `clients/mobile/src/i18n/useFormatMessage.ts`, not yet proven by a phone move (#6020 had no phone call
+  site); the first phone cell confirms it and corrects this line.
+- **Source-reading tests** that pin a Korean literal in code (`ChatShell.header.test.ts`) now pin the key.
+- A test that compared a hook's thrown `error.message` with a sentence now checks the key the display site uses.
+
+### Particles, numbers, dates
+
+- No `koreanParticle` / `attachParticle` in a moved sentence (ADR-0213 §4). Use a Korean template whose particle does
+  not depend on the name: `{name} 님이`, `{name}에게`, `{name}의`. If no such wording keeps the meaning, stop and
+  report; do not move the particle call into the dictionary path.
+- Counts are ICU arguments: Korean `{count, number}명`, English `{count, plural, one {# member} other {# members}}`.
+  Never branch on `count === 1` in code.
+- Times and dates are formatted with the locale service and passed as a string argument (an ICU time argument ignores
+  the hour cycle — see P0-2's known follow-up). Hard-coded `"ko-KR"` in `toLocale*String` inside a cell's files is
+  part of that cell (ADR-0213 §9 P1-5 · P1-8).
+
+### Generated files and landing
+
+`generated/*.ts` is always regenerated and committed with the catalogs; never edit it by hand. When branches meet,
+the landing train resolves conflicts in `generated/` and the ledger by regenerating after the merge; a conflict in a
+catalog JSON is not resolved automatically, which is why a file has one open cell. Copy cells should land by train:
+a PR landed on its own conflicts in `generated/` whenever another landed cell's keys sort right next to its own
+(measured above), and then the cell has to merge the track, run `i18n:generate` and commit before it can land. PR
+CI's `i18n:check` proves the merged `generated/` is fresh either way.
+
+### Measured at #6020
+
+- 13 shared keys added; `PlainMessageKey` (three private copies before) and `MessageRef` now live in `i18n/keys.ts`.
+- Specimen: core `readState/copy.ts` 5 → 0, `huddles/huddleModel.ts` 11 → 0; web `features/huddles` 21 ko + 1 en → 0.
+  Surfaces: core 5,331 → 5,315, web 4,095 → 4,074 (en 125 → 124), phone 1,436 (no phone call site in this folder).
+- Time: 38 literals (37 ko, 1 en) took about 11 minutes from the first edit to green tests in the touched folders, and
+  about 15 with the tooltip test and browser gate found by step 6 (Opus, design work excluded). Ten test files and one
+  gate changed against nine source files: test churn, not catalog writing, is the larger share.
+
 ## Direct-copy ratchet (#4834, redesigned by #5589)
 
 `tooling/direct-copy-baseline.json` (version 2) is the ledger of hardcoded copy outside the

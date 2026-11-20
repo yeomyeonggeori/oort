@@ -15,6 +15,9 @@ import { ChannelMemberPanel } from "@/features/channels/ChannelContextControls";
 import { HuddleHeaderControl } from "@/features/huddles/HuddleHeaderControl";
 import type { HuddleController } from "@/features/huddles/useHuddle";
 import { ChannelHeaderMenu } from "./ChannelHeaderMenu";
+import { LocaleProvider } from "@/i18n/LocaleProvider";
+import type { AppLocale } from "@/i18n/localeStore";
+import { koreanLocale } from "@/testing/koLocale";
 
 // =============================================================================
 // 대화 머리 단추는 전부 디자인 시스템 툴팁이고, 네이티브 `title`은 없다 (#4591).
@@ -37,9 +40,12 @@ const reactActEnvironment = globalThis as typeof globalThis & {
 };
 let mountedRoot: Root | null = null;
 let mountedHost: HTMLElement | null = null;
+// 사전으로 옮긴 낱말(허들 단추, #6020)도 예전처럼 한국어로 잡는다: 제품과 같은 한국어 사전으로 감싼다.
+let ko: AppLocale;
 
-beforeAll(() => {
+beforeAll(async () => {
   reactActEnvironment.IS_REACT_ACT_ENVIRONMENT = true;
+  ko = await koreanLocale();
 });
 
 afterEach(() => {
@@ -72,7 +78,11 @@ function mount(element: ReactElement): HTMLElement {
       createElement(
         MemoryRouter,
         { initialEntries: [`/c/${CHANNEL_ID}`] },
-        createElement(QueryClientProvider, { client }, element)
+        createElement(
+          QueryClientProvider,
+          { client },
+          createElement(LocaleProvider, { locale: ko, children: element })
+        )
       )
     );
   });

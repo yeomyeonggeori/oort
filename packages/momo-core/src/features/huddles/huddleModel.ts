@@ -1,4 +1,6 @@
 import { ApiError, type Huddle, uuidEq } from "../../lib/api";
+import type { MessageKey } from "../../i18n/generated/messages";
+import type { MessageRef, PlainMessageKey } from "../../i18n/keys";
 
 export type HuddleLoadStatus =
   | "loading"
@@ -173,35 +175,37 @@ export function huddleErrorKind(
   return "unknown";
 }
 
-export function huddleErrorCopy(kind: HuddleErrorKind): string {
-  switch (kind) {
-    case "unconfigured":
-      return "이 서버는 허들을 사용하지 않습니다. 운영자가 LiveKit을 구성하면 사용할 수 있습니다.";
-    case "membership":
-      return "이 채널에서 허들을 사용할 권한이 없습니다. 채널 멤버십을 확인하세요.";
-    case "csp-blocked":
-      return "이 배포의 보안 정책이 LiveKit 주소를 허용하지 않습니다. 운영자 확인이 필요합니다.";
-    case "microphone-denied":
-      return "마이크 권한이 거부되어 참가하지 못했습니다. 브라우저 설정에서 마이크를 허용한 뒤 다시 참가하세요.";
-    case "microphone-missing":
-      return "사용할 수 있는 마이크를 찾지 못했습니다. 오디오 입력 장치를 연결한 뒤 다시 참가하세요.";
-    case "expired":
-      return "참가 준비 시간이 지나 연결하지 못했습니다. 허들에 다시 참가하세요.";
-    case "connection":
-      return "허들 오디오 연결이 끊겼습니다. 네트워크를 확인한 뒤 다시 참가하세요.";
-    case "unknown":
-      return "허들에 연결하지 못했습니다. 잠시 뒤에 다시 시도하세요.";
-  }
-}
+/**
+ * 오류 종류마다 배너가 하는 말의 사전 키(`catalogs/<언어>/huddles.json`). 문장은 화면이 그릴 때 지금 언어로 푼다.
+ * `satisfies`가 종류를 더하고 키를 빠뜨리는 일을 컴파일에서 막는다.
+ */
+export const HUDDLE_ERROR_KEYS = {
+  unconfigured: "huddles.error.unconfigured",
+  membership: "huddles.error.membership",
+  "csp-blocked": "huddles.error.cspBlocked",
+  "microphone-denied": "huddles.error.microphoneDenied",
+  "microphone-missing": "huddles.error.microphoneMissing",
+  expired: "huddles.error.expired",
+  connection: "huddles.error.connection",
+  unknown: "huddles.error.unknown",
+} as const satisfies Record<HuddleErrorKind, PlainMessageKey>;
 
-export function huddleParticipantSummary(huddle: Huddle): string {
+/**
+ * 참가자 요약 한 줄(「Nadia, 김도현 외 3명」)의 키와 값. 앞의 두 이름만 세우고 나머지는 수로 말한다 — 이름을 쉼표로 잇고
+ * 「외 N명」을 붙이는 조립은 언어마다 달라서 문장 틀 하나(`huddles.participants.*`)가 통째로 맡는다.
+ */
+export function huddleParticipantSummary(huddle: Huddle): MessageRef<HuddleParticipantSummaryKey> {
   const names = huddle.participants
     .map((participant) => participant.displayName.trim())
     .filter(Boolean);
-  if (names.length === 0) return "참가자 기다리는 중";
-  if (names.length <= 2) return names.join(", ");
-  return `${names.slice(0, 2).join(", ")} 외 ${names.length - 2}명`;
+  const [first, second] = names;
+  if (first === undefined) return { key: "huddles.participants.waiting" };
+  if (second === undefined) return { key: "huddles.participants.one", values: { first } };
+  if (names.length === 2) return { key: "huddles.participants.two", values: { first, second } };
+  return { key: "huddles.participants.many", values: { first, second, others: names.length - 2 } };
 }
+
+type HuddleParticipantSummaryKey = Extract<MessageKey, `huddles.participants.${string}`>;
 
 /**
  * 채널 머리의 허들 표면이 읽는 사실 셋 (#5206 · #5184). 웹 `useHuddle`의 컨트롤러가 이 모양을 그대로 만족한다.
