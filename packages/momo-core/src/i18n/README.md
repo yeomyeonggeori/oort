@@ -274,7 +274,11 @@ exporting it from a component file trips `react-refresh/only-export-components`.
 4. `node packages/momo-core/src/i18n/tooling/direct-copy.mjs shrink`, then `… check`. Delete the raises your change
    made unnecessary. Your files' rows must reach `{"ko": 0, "en": 0}` (and `cat` 0 where it was counted).
 5. Fix the tests as described in **Tests**.
-6. Run the core vitest suite in full once (it holds the key/table equality tests), the web/phone tests you touched,
+6. Find every other place that reads the moved text: grep each moved Korean sentence (and each removed constant
+   name) across `clients/web/src`, `clients/web/gates`, `clients/web/scripts`, `clients/web/e2e`,
+   `clients/mobile/__tests__` and `clients/mobile/.maestro`, and fix every hit that renders or reads the screen.
+   At #6020, "the tests in the folder I touched" missed a tooltip test in `features/chat/` and a browser gate.
+7. Run the core vitest suite in full once (it holds the key/table equality tests), the web/phone tests from steps 5–6,
    the three typechecks, `i18n:check`, and `bash scripts/design_preflight_web.sh` (core copy rules) right after
    adding keys. If a gate rejects a verbatim Korean sentence, stop and report it; do not rewrite copy to pass.
 
@@ -283,7 +287,11 @@ exporting it from a component file trips `react-refresh/only-export-components`.
 Counted, not picked: every Korean literal the ledger counts on the three surfaces (10,862 at `7a41b2a90`), grouped
 by exact text. A word became a shared key only if it appears at least 9 times on at least two surfaces **and** has
 one English rendering everywhere (the existing catalog was the test: the same Korean already translated two ways is
-two meanings). `연결 안 됨` (7) joins as the pair of `연결됨`, a house word.
+two meanings). `연결 안 됨` (7) joins as the pair of `연결됨`, a house word. Four of the keys had no catalog entry yet, so their
+call sites were read instead: 연결됨 / 연결 안 됨 always name whether an account, device, relay or runtime is
+linked (AI link pill, login relay, hosted assistants, the work model, presence dots) — not network state, which is
+`connection.*`; 만드는 중 is always a create button in progress (agents, tokens, invites, webhooks, workspaces);
+보내는 중 is always a send in progress (approval decisions, delegation sheets, event tests, scheduled messages).
 
 | Key | 한국어 | English | Uses (core / web / phone) |
 |---|---|---|---:|
@@ -348,9 +356,17 @@ Phone screens already consume refs the same way (`clients/mobile/src/features/si
 ### Catalog files
 
 The generator requires the first key segment to equal the file name, so a prefix **is** a file. Merging measured at
-#6020 on four throwaway branches: keys added to two different files merge cleanly and the merged `generated/` is
-already fresh; two branches adding to the **same** file (new or existing) conflict in the JSON and in all three
-generated files, and the landing train drops a cell whose conflict is outside `generated/` and the ledger. So:
+#6020 on throwaway branches, two rounds:
+
+- Two **different** files whose keys sort apart (`readState` + `huddles`, `readState` + `notifications`): clean, and
+  the merged `generated/` is already fresh.
+- Two different **new** files whose prefixes sort next to each other (`chat` + `commands`, nothing between them):
+  the JSON merges, but all three `generated/` files conflict (both insert at the same spot of the sorted output).
+- The **same** file (new or existing): the JSON and all three `generated/` files conflict.
+
+The landing train resolves `generated/` conflicts by regenerating after the merge, so the first two are fine there; a
+cell landed on its own must merge the track into its branch and regenerate. A JSON conflict is not resolved, and the
+train drops that cell. So:
 
 - **One open cell per catalog file.** Cells of one bundle run one after another; bundles may run side by side because
   their files below do not overlap.
@@ -366,7 +382,7 @@ generated files, and the landing train drops a cell whose conflict is outside `g
 | C 가입 · 연결 | L-C1 → C2 | `auth`, `onboarding`, `cliLogin`, `welcome`, `deviceKey`, `aiConnect`, `connect`, `recovery` |
 | X 표현 | L-X1 | `expressions` |
 | F 작업 | L-F1 → F2 → F3 → F4 | `workbench`, `work`, `workstreams`, `workTab`, `workConsole`, `ade` |
-| D 설정 · 앱 | L-D1 → D2 → D4 → D5 → D6 → D8; L-D3 → D7 | `settings` (core and web settings, phone profile), `appearance` (themes, phone `design/`), `github`, `capabilities`, `plugins`, `commands`, `webhooks`, `app`, `desktop`, `appUpdate` |
+| D 설정 · 앱 | L-D1 → D2 → D4 → D5 → D6 and L-D3 → D7 side by side; L-D8 after both (it writes `settings` and `appearance`) | `settings` (core and web settings, phone profile), `appearance` (core `design/` themes and wallpapers, phone `design/`), `github`, `capabilities`, `plugins`, `commands`, `webhooks`, `app`, `desktop`, `appUpdate` |
 | E 에이전트 · AI · 기억 | L-E1 → E2 → E3 → E5 → E6; L-E4 | `ai`, `hostedAgents`, `agents`, `routing`, `approvals`, `agentHub`, `decisionStage`, `aiHub`, `teamAi`, `memory` |
 | (shared) | L-0 only | `common` — later cells only read it |
 
@@ -383,7 +399,9 @@ folder: `http.ts` → B (`connection`), `serverUrl.ts` → C (`auth`), the tool-
   file**. New specimen copy there uses the existing `raise` with a reason, as #5782 did. There is no exemption list in
   the tool. `design/themes/index.ts` (5) names themes a person picks, so it is copy (cell L-D8).
 - **Text no person sees** (developer `Error`s that only reach logs, dev-only switches): write it in English
-  diagnostics. That removes the `ko` count honestly; English in an `Error` is not counted.
+  diagnostics. That removes the `ko` count honestly; English in an `Error` is not counted. First prove that no path
+  renders it: grep every `catch` that could receive that error for `.message` reaching a banner, toast or state. If one
+  does, it is copy: use the `Error` row of **One shape**.
 - **Language data**: `lib/koreanParticle.ts` (23) holds particles and Sino-Korean digits, the Korean-only formatter
   ADR-0213 §4 confines to the translation layer. It is not a sentence and cannot reach 0 by moving copy; whether it
   is excluded like `autonyms.ts` is a ledger policy change for the planner. Until then its row stays as it is.
@@ -398,7 +416,9 @@ folder: `http.ts` → B (`connection`), `serverUrl.ts` → C (`auth`), the tool-
 - **Web**: a screen mounted without a locale provider renders the **bundled English** (`useFormatMessage`). A test
   that guards Korean wording wraps the screen with `koreanLocale()` (`src/testing/koLocale.ts`); a test about
   structure asserts the English, written out by hand (`HuddleHeaderNames.test.tsx`).
-- **Phone**: `useFormatMessage` falls back to **Korean**, so most phone tests keep passing unchanged.
+- **Phone**: `useFormatMessage` falls back to **Korean**, so most phone tests should keep passing unchanged. This is
+  read from `clients/mobile/src/i18n/useFormatMessage.ts`, not yet proven by a phone move (#6020 had no phone call
+  site); the first phone cell confirms it and corrects this line.
 - **Source-reading tests** that pin a Korean literal in code (`ChatShell.header.test.ts`) now pin the key.
 - A test that compared a hook's thrown `error.message` with a sentence now checks the key the display site uses.
 
@@ -417,17 +437,19 @@ folder: `http.ts` → B (`connection`), `serverUrl.ts` → C (`auth`), the tool-
 
 `generated/*.ts` is always regenerated and committed with the catalogs; never edit it by hand. When branches meet,
 the landing train resolves conflicts in `generated/` and the ledger by regenerating after the merge; a conflict in a
-catalog JSON is not resolved automatically, which is why a file has one open cell. A single PR updated from its
-track (`update-branch`) gets a clean merge when its files are its own, and PR CI's `i18n:check` proves the merged
-`generated/` is fresh.
+catalog JSON is not resolved automatically, which is why a file has one open cell. Copy cells should land by train:
+a PR landed on its own conflicts in `generated/` whenever another landed cell's keys sort right next to its own
+(measured above), and then the cell has to merge the track, run `i18n:generate` and commit before it can land. PR
+CI's `i18n:check` proves the merged `generated/` is fresh either way.
 
 ### Measured at #6020
 
 - 13 shared keys added; `PlainMessageKey` (three private copies before) and `MessageRef` now live in `i18n/keys.ts`.
 - Specimen: core `readState/copy.ts` 5 → 0, `huddles/huddleModel.ts` 11 → 0; web `features/huddles` 21 ko + 1 en → 0.
   Surfaces: core 5,331 → 5,315, web 4,095 → 4,074 (en 125 → 124), phone 1,436 (no phone call site in this folder).
-- Time: 37 literals took about 11 minutes from the first edit to green touched tests (about 8 editing, 3 fixing six
-  test files), on top of the design work. Test churn, not catalog writing, is the larger share.
+- Time: 38 literals (37 ko, 1 en) took about 11 minutes from the first edit to green tests in the touched folders, and
+  about 15 with the tooltip test and browser gate found by step 6 (Opus, design work excluded). Ten test files and one
+  gate changed against nine source files: test churn, not catalog writing, is the larger share.
 
 ## Direct-copy ratchet (#4834, redesigned by #5589)
 
