@@ -508,15 +508,15 @@ describe('탭 셋과 + (ADR-0189 D1, #2750)', () => {
       );
     });
 
-    it('접속 없음은 속이 빈 회색 고리다 — 채운 점과 한 점이 되지 않는다', async () => {
+    it('접속 없음은 회색으로 채운 원이다 (#6023) — 채운 초록과 색으로 갈린다', async () => {
       personOnline = false;
       installFetch();
       await openSheet();
       await waitFor(() => expect(dotOf()).toBeTruthy());
       const style = StyleSheet.flatten(dotOf()!.props.style);
-      expect([lightPalette.surface, darkPalette.surface]).toContain(style.backgroundColor);
-      // 얼굴 점의 꺼짐 고리 선은 웹과 같은 textMuted(#5786 r1 수리: textFaint 는 눌린 줄 위 3:1 미만).
-      expect([lightPalette.textMuted, darkPalette.textMuted]).toContain(style.borderColor);
+      // 채움은 웹 --ink-muted 와 같은 역할(textMuted), 고리는 없다.
+      expect([lightPalette.textMuted, darkPalette.textMuted]).toContain(style.backgroundColor);
+      expect(style.borderWidth).toBe(0);
       expect(screen.getByTestId('new-dm-person-seeun')).toHaveProp(
         'accessibilityLabel',
         '박세은, @seeun, 사람, 오프라인',

@@ -99,7 +99,7 @@ async function buildCss(): Promise<string> {
 /** 바탕 다섯: 쉬는 면 · 가리킨 줄 · 짙은 색 바탕(색 테가 가장 잘 드러나는 곳) · 띠(노을, 사이드바) · 사진 아바타(쉬는 면 위). */
 const BACKDROPS = ["surface", "hover", "tinted", "band", "photo"] as const;
 type Backdrop = (typeof BACKDROPS)[number];
-/** 열: 사람의 네 상태 · 점 없음 · 에이전트 경고(채운 원이어야 한다). */
+/** 열: 사람의 네 상태 · 점 없음 · 에이전트 경고(채운 원이어야 한다) · 에이전트 꺼짐(속 빈 고리, #6023). */
 const TONES: readonly { tone: StatusDotTone | null; subject: StatusBadgeSubject }[] = [
   { tone: "ok", subject: "human" },
   { tone: "warn", subject: "human" },
@@ -107,6 +107,8 @@ const TONES: readonly { tone: StatusDotTone | null; subject: StatusBadgeSubject 
   { tone: "muted", subject: "human" },
   { tone: null, subject: "human" },
   { tone: "warn", subject: "agent" },
+  // #6023: 사람 오프라인이 채운 원이 된 뒤에도 에이전트 꺼짐은 속 빈 고리다 — 고리를 픽셀로 재는 유일한 칸.
+  { tone: "muted", subject: "agent" },
 ];
 
 const CELL = 176;
@@ -292,7 +294,11 @@ function measureCell(img: Image, cell: Cell, label: string): string[] {
     if (!near(got, backdrop)) problems.push(`${label} 빈 곳(${where}) ${show(got)} ≠ 바탕 ${show(backdrop)}`);
   };
   const r = dot / 2;
-  if (cell.subject === "agent") {
+  if (cell.subject === "agent" && cell.tone === "muted") {
+    // 에이전트 꺼짐 = 속 빈 고리: 가운데가 바탕, 고리 자리가 표식.
+    hole("가운데", 0, 0);
+    mark("고리", -(r - gap / 2), 0);
+  } else if (cell.subject === "agent") {
     // 에이전트 경고 = 채운 원: 가운데도, 사람의 초승달이 비는 왼쪽 위도 표식이다.
     mark("가운데", 0, 0);
     mark("왼쪽 위(초승달이면 빈 곳)", -r * 0.5, -r * 0.5);
