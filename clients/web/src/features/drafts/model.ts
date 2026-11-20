@@ -77,12 +77,21 @@ export function orphanDrafts(
 /**
  * 사이드바 「초안」 줄. 0개면 숨긴다. 채널 목록이 오기 전에는 이 워크스페이스에
  * 초안이 있기만 하면 보여, 로딩 한 프레임에 줄이 사라졌다 나타나지 않게 한다.
+ *
+ * 지금 열어 둔 대화(`openChannelId`)의 초안은 세지 않는다(#6030): 쓰는 동안 줄이 서면 아래 목록이
+ * 한 줄만큼 내려간다. 그 대화를 떠나면 세어 줄이 선다. 초안 화면의 목록은 이 판정과 무관하게 전부 보인다.
  */
 export function shouldShowDraftsNav(
-  drafts: readonly DraftRecord[],
+  allDrafts: readonly DraftRecord[],
   liveChannelIds: ReadonlySet<string>,
-  channelsReady: boolean
+  channelsReady: boolean,
+  openChannelId: string | null = null
 ): boolean {
+  const open = openChannelId?.toLowerCase() ?? null;
+  const drafts =
+    open === null
+      ? allDrafts
+      : allDrafts.filter((draft) => draft.channelId.toLowerCase() !== open);
   if (drafts.length === 0) return false;
   if (!channelsReady) return true;
   return drafts.some((draft) =>
