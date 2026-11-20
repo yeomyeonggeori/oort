@@ -7,7 +7,7 @@ import {Pressable, StyleSheet, Text, View} from 'react-native';
 
 import {HEAD_MAX_SCALE} from '../../design/atoms';
 import {PRESS_VISUAL_DELAY_MS} from '../../design/motion';
-import {font, line, slopTo, TOUCH_TARGET, type Palette} from '../../design/tokens';
+import {font, line, PRESSED_OPACITY, slopTo, TOUCH_TARGET, type Palette} from '../../design/tokens';
 import {useStyles} from '../../design/theme';
 import {useFormatMessage} from '../../i18n/useFormatMessage';
 import {useExpressionItems} from '../expressions/ExpressionProvider';
@@ -114,5 +114,5 @@ const buildStyles = (color: Palette) =>
     // 못 넘는다(#5294, 화면 검수 5a H1).
     excerpt: {fontSize: font.meta, lineHeight: line.meta, color: color.textMuted},
     link: {alignSelf: 'flex-start', maxWidth: '100%'},
-    pressed: {opacity: 0.6},
+    pressed: {opacity: PRESSED_OPACITY},
   });

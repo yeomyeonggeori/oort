@@ -44,6 +44,7 @@ import {CloseCircle} from '../../design/SheetChrome';
 import {useStyles} from '../../design/theme';
 
 import {
+  DISABLED_OPACITY,
   ds2Radius,
   font,
   line,
@@ -846,7 +847,7 @@ const buildStyles = (color: Palette) =>
       padding: space.sm,
     },
     // 눌리지 않는 이전/다음/썸네일. 저장소의 비활성 모양(`rowDisabled` 등)과 같은 값이다.
-    controlDisabled: {opacity: 0.55},
+    controlDisabled: {opacity: DISABLED_OPACITY},
     actions: {padding: space.md},
     navigation: {gap: space.xs, paddingBottom: space.sm},
     thumbnails: {flexGrow: 0, flexShrink: 1},
