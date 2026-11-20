@@ -290,6 +290,49 @@ describe('the iOS project survives (ADR-0137 D7 정오 7항)', () => {
   });
 });
 
+describe('the app adopts the UIScene life cycle (#6015)', () => {
+  // UIKit stops an app built with the iOS 27 SDK at launch, the moment its first
+  // scene is created, unless the app adopts scenes. Adoption is this manifest in the
+  // app's Info.plist. If the delegate it names is not a class in the app, UIKit
+  // cannot load it and the app launches to an empty window.
+  const plist = readFileSync(
+    join(APP_ROOT, 'ios/MomoMobile/Info.plist'),
+    'utf8',
+  ).replace(/<!--[\s\S]*?-->/g, '');
+  const start = plist.indexOf('<key>UIApplicationSceneManifest</key>');
+  // Top-level keys sit one tab in; the manifest runs to the next one.
+  const manifest =
+    start === -1 ? '' : plist.slice(start, plist.indexOf('\n\t<key>', start));
+
+  it('declares the manifest with multiple windows off', () => {
+    expect(start).toBeGreaterThan(-1);
+    expect(manifest).toMatch(
+      /<key>UIApplicationSupportsMultipleScenes<\/key>\s*<false\/>/,
+    );
+  });
+
+  it('names a scene delegate that is a compiled Swift class of the app', () => {
+    const named = manifest.match(
+      /<key>UIWindowSceneSessionRoleApplication<\/key>\s*<array>\s*<dict>[\s\S]*?<key>UISceneDelegateClassName<\/key>\s*<string>\$\(PRODUCT_MODULE_NAME\)\.(\w+)<\/string>/,
+    )?.[1];
+    expect(named).toBeDefined();
+    const iosApp = join(APP_ROOT, 'ios/MomoMobile');
+    const declaring = readdirSync(iosApp)
+      .filter(entry => entry.endsWith('.swift'))
+      .filter(entry =>
+        new RegExp(
+          `^@objc\\(${named}\\)\\s*\\n\\s*class ${named}: ExpoAppSceneDelegate\\b`,
+          'm',
+        ).test(readFileSync(join(iosApp, entry), 'utf8')),
+      );
+    expect(declaring).toHaveLength(1);
+    // A file the target does not compile declares nothing at run time.
+    expect(readFileSync(PBXPROJ, 'utf8')).toContain(
+      `/* ${declaring[0]} in Sources */,`,
+    );
+  });
+});
+
 describe('the Xcode Cloud lane stays reachable (#1115, docs/cicd/10 §8)', () => {
   // Every assertion here is a way this lane breaks WITHOUT breaking any build:
   // Xcode Cloud simply stops running, or runs and skips the bootstrap, and the
