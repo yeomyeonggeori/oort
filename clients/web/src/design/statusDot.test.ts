@@ -44,9 +44,13 @@ describe("상태 점 색 역할 (#3964, #5786)", () => {
     expect(STATUS_DOT_FILL_CLASS.danger).toBe("bg-danger");
   });
 
-  it("Buzz식(소유자 결정 2026-10-17): 칩의 꺼짐 점은 낱말이 곁에 있어 채운 회색, 아바타의 꺼짐은 채움 없는 고리", () => {
+  it("칩의 꺼짐 점은 채운 회색, 아바타의 사람 오프라인도 채운 회색(#6023), 에이전트 꺼짐은 채움 없는 고리(Buzz식 2026-10-17)", () => {
     expect(STATUS_DOT_FILL_CLASS.muted).toBe("bg-ink-muted");
-    expect(avatarStatus).not.toContain('[data-tone="muted"]');
+    // 회색 채움은 모양이 채운 원일 때만 — 같은 톤의 에이전트 고리는 채우지 않는다.
+    expect(avatarStatus).toContain('[data-avatar-status-dot][data-tone="muted"][data-shape="fill"] {');
+    expect(avatarStatus).not.toMatch(/\[data-tone="muted"\](?!\[data-shape="fill"\])/);
+    const offline = avatarStatus.slice(avatarStatus.indexOf('[data-tone="muted"][data-shape="fill"] {'));
+    expect(offline.slice(0, offline.indexOf("}"))).toContain("background-color: var(--ink-muted);");
     expect(shapeRule("status-shape-ring")).not.toContain("background");
     expect(shapeRule("status-shape-ring")).toContain("border: var(--status-gap) solid var(--ink-muted);");
   });

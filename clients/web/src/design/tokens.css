@@ -3565,15 +3565,20 @@
   & > [data-avatar-status-dot][data-tone="danger"] {
     background-color: var(--danger);
   }
+  /* 사람의 오프라인 = 회색으로 채운 원(이슈 6023 — 이 규칙 안에는 # 숫자를 적지 않는다: 색 시험이 16진수 색으로 읽는다). 에이전트 꺼짐(같은 톤)은 채움 없는 고리라 모양이 채운 원일 때만 칠한다. 색은
+   * 고리 선과 같은 역할(`--ink-muted`, 띠 위에서는 on-band-muted)이라 대비 표가 그대로 잰다. */
+  & > [data-avatar-status-dot][data-tone="muted"][data-shape="fill"] {
+    background-color: var(--ink-muted);
+  }
 }
 
 /* 상태 표식의 모양 (#5786) — 아바타 모서리 점(`avatar-status`)과 「내 상태」 메뉴의 표지(`status-mark`)가 같은 규칙을 읽는다.
  * 크기는 둘러싼 규칙의 `--status-dot`·`--status-gap` 이다. 모양은 코어 `statusBadgeShape` 가 뜻으로 고른다:
  *
- *   (클래스 없음)        채운 원      온라인 · 에이전트 살아 있음 · 에이전트 경고(owner/admin, 채운 주황)
+ *   (클래스 없음)        채운 원      온라인 · 오프라인(회색, #6023) · 에이전트 살아 있음 · 에이전트 경고(owner/admin, 채운 주황)
  *   status-shape-moon    초승달       자리 비움(사람만) — 왼쪽 위를 둥글게 덜어 낸다
  *   status-shape-bar     가로 줄      방해 금지 — 가운데 줄(폭 = 점 - 틈×2, 높이 = 틈)이 빠진 원
- *   status-shape-ring    속 빈 고리   오프라인 · 에이전트 꺼짐 — 굵기 = 틈
+ *   status-shape-ring    속 빈 고리   에이전트 꺼짐 — 굵기 = 틈
  *
  * 초승달·가로 줄·고리 속의 빈 곳도 도려낸 틈처럼 바탕이 비친다(면색 채움이 없다). 고리의 선은 `--ink-muted` 다: 예전
  * `--line-strong` 은 아바타 색 위에서 3:1 미만이었고(#4725 M2), 틈 안에서도 가리킨·눌린 줄 위에서 2.6~2.9:1 이었다. 띠
