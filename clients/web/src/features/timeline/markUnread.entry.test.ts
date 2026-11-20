@@ -43,7 +43,7 @@ describe("⋯ 메뉴 「여기부터 안 읽음」", () => {
         testKey: "mark-unread",
         labelKey: MARK_UNREAD_ACTION_KEY,
       });
-      return item?.labelKey;
+      return item !== undefined && "labelKey" in item ? item.labelKey : undefined;
     });
     expect(new Set(labels).size).toBe(1);
     const ko = createMessageCopy({ messageLocale: "ko-KR", catalog: koCatalog });

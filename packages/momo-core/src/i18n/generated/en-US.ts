@@ -5787,13 +5787,13 @@ export const catalog: MessageCatalog = {
   "huddles.control.microphoneOff": [
     {
       "type": 0,
-      "value": "Turn microphone off"
+      "value": "Mute"
     }
   ],
   "huddles.control.microphoneOn": [
     {
       "type": 0,
-      "value": "Turn microphone on"
+      "value": "Unmute"
     }
   ],
   "huddles.control.start": [
@@ -5817,7 +5817,7 @@ export const catalog: MessageCatalog = {
   "huddles.error.expired": [
     {
       "type": 0,
-      "value": "Couldn't connect because the join window ran out. Join the huddle again."
+      "value": "Couldn't connect because the time to join ran out. Join the huddle again."
     }
   ],
   "huddles.error.membership": [

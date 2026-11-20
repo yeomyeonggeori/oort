@@ -14,6 +14,9 @@ import { catalog as koCatalog } from "@momo/core/i18n/generated/ko-KR";
 import { createMessageCopy } from "@momo/core/testkit";
 import { makeDirectory } from "@momo/core/features/workspace/directory";
 import { SessionProvider, type SessionContextValue } from "@/app/session";
+import { LocaleProvider } from "@/i18n/LocaleProvider";
+import type { AppLocale } from "@/i18n/localeStore";
+import { koreanLocale } from "@/testing/koLocale";
 import { useMarkUnread } from "./useMarkUnread";
 import { MessageRow } from "./MessageRow";
 
@@ -60,7 +63,11 @@ const reactActEnvironment = globalThis as typeof globalThis & {
 let mountedRoot: Root | null = null;
 let host: HTMLElement | null = null;
 
-beforeAll(() => {
+// 행이 그리는 배너 글은 예전처럼 한국어로 잡는다(#6020): 제품과 같은 한국어 사전으로 감싼다.
+let koLocale: AppLocale;
+
+beforeAll(async () => {
+  koLocale = await koreanLocale();
   reactActEnvironment.IS_REACT_ACT_ENVIRONMENT = true;
   Object.defineProperty(HTMLElement.prototype, "offsetParent", {
     configurable: true,
@@ -290,7 +297,9 @@ describe("마크 낙관과 400 롤백", () => {
     }
 
     act(() => {
-      mountedRoot?.render(createElement(RowHarness));
+      mountedRoot?.render(
+        createElement(LocaleProvider, { locale: koLocale, children: createElement(RowHarness) })
+      );
     });
 
     const row = host.querySelector<HTMLElement>('[data-testid="timeline-message"]');
@@ -321,8 +330,7 @@ describe("마크 낙관과 400 롤백", () => {
     const alert = document.querySelector('[data-testid="message-action-error"]');
     expect(alert).not.toBeNull();
     expect(alert?.getAttribute("role")).toBe("alert");
-    // 공급자 없이 띄운 행은 번들된 영어로 선다(#6020). 「닫기」 단추는 아직 옮기지 않은 문구라 한국어 그대로다.
-    expect(alert?.textContent).toContain("This message is no longer in this channel.");
+    expect(alert?.textContent).toContain("더 이상 없습니다");
     expect(alert?.querySelector("button")?.textContent).toContain("닫기");
   });
 

@@ -278,6 +278,9 @@ exporting it from a component file trips `react-refresh/only-export-components`.
    name) across `clients/web/src`, `clients/web/gates`, `clients/web/scripts`, `clients/web/e2e`,
    `clients/mobile/__tests__` and `clients/mobile/.maestro`, and fix every hit that renders or reads the screen.
    At #6020, "the tests in the folder I touched" missed a tooltip test in `features/chat/` and a browser gate.
+   Also search every reader of each field, state, return value or constant that changed from text to a key: the type
+   system does not stop a key from reaching a text slot (`PlainMessageKey` is a string, so `message={state.notice}`
+   compiles and shows `huddles.notice.…`). Report "N readers, all through `formatMessage`".
 7. Run the core vitest suite in full once (it holds the key/table equality tests), the web/phone tests from steps 5–6,
    the three typechecks, `i18n:check`, and `bash scripts/design_preflight_web.sh` (core copy rules) right after
    adding keys. If a gate rejects a verbatim Korean sentence, stop and report it; do not rewrite copy to pass.
@@ -287,7 +290,9 @@ exporting it from a component file trips `react-refresh/only-export-components`.
 Counted, not picked: every Korean literal the ledger counts on the three surfaces (10,862 at `7a41b2a90`), grouped
 by exact text. A word became a shared key only if it appears at least 9 times on at least two surfaces **and** has
 one English rendering everywhere (the existing catalog was the test: the same Korean already translated two ways is
-two meanings). `연결 안 됨` (7) joins as the pair of `연결됨`, a house word. Four of the keys had no catalog entry yet, so their
+two meanings). `연결 안 됨` (7) joins as the pair of `연결됨`, a house word. `저장` stands alone 6 times (the raw count of 10 includes
+four `${date} 저장` tails meaning *Saved*, which belong to their own sentences); it stays as the plain button word
+*Save*. Four of the keys had no catalog entry yet, so their
 call sites were read instead: 연결됨 / 연결 안 됨 always name whether an account, device, relay or runtime is
 linked (AI link pill, login relay, hosted assistants, the work model, presence dots) — not network state, which is
 `connection.*`; 만드는 중 is always a create button in progress (agents, tokens, invites, webhooks, workspaces);
@@ -300,7 +305,7 @@ linked (AI link pill, login relay, hosted assistants, the work model, presence d
 | `common.action.close` | 닫기 | Close | 63 (12 / 42 / 9) |
 | `common.action.reload` | 다시 불러오기 | Reload | 29 (6 / 11 / 12) |
 | `common.action.checkAgain` | 다시 확인 | Check again | 14 (2 / 11 / 1) |
-| `common.action.save` | 저장 | Save | 10 (1 / 5 / 4) |
+| `common.action.save` | 저장 | Save | 6 (1 / 2 / 3) |
 | `common.state.saving` | 저장 중 | Saving | 19 (2 / 14 / 3) |
 | `common.state.checking` | 확인 중 | Checking | 17 (3 / 12 / 2) |
 | `common.state.loading` | 불러오는 중 | Loading | 9 (1 / 8 / 0) |
@@ -312,7 +317,9 @@ linked (AI link pill, login relay, hosted assistants, the work model, presence d
 Use the shared key whenever the screen's word **and** its English are the ones above; do not add a feature key for
 them. Left out on purpose:
 
-- One Korean word, two English words today: 닫기 for a notice (`Dismiss` — the dialog/panel sense `Close` is shared),
+- One Korean word, two English words today: 닫기 for a notice (`Dismiss`; the catalog already has it twice,
+  `mobile.jumpSeek.dismiss` and `timeline.thread.followDismiss`) is **not** `common.action.close` — only the dialog,
+  sheet or panel sense `Close` is shared,
   더 보기 (`Load more` / `Show more` / `See more`), 지우기 (`Remove` / `Delete`), 다시 보내기 (`Resend` /
   `Try again`), 확인 (`OK` / `Got it`), 완료 (button `Done` / state `Completed`), 에이전트 (`Agent` / `Agents`),
   실패 · 거부 · 승인 · 대기 (an action and a state).
@@ -340,7 +347,7 @@ what the newest core models already do (`channels/rename.ts`, `browse.ts`, `conn
 | Sentence kept in React state | State holds the key; format where it renders (switching language updates a standing banner) | `useHuddle` `notice` |
 | Same, but the state is shared with copy another cell still owns | Format when setting, with a comment; the cell that moves the last sentence turns the state into a key | `MessageRow` `setRowError` |
 | Sentence carried in `throw new Error(…)` | Rethrow the original error; the display site maps it to a key | `useMarkUnread` → `MessageRow` |
-| Web/phone model that builds a list of labels | Item gets `labelKey` and a resolver (`messageActionLabel`); the cell that moves the rest of that model drops `label` | `messageActionModel.ts` |
+| Web/phone model that builds a list of labels | Move the whole model and delete `label` (items carry `labelKey`). If only part moves, make the item type a union of `{ label }` and `{ labelKey }` with no shared field, so every unnarrowed `item.label` read stops compiling, and read the word only through a resolver | `messageActionModel.ts` (`messageActionLabel`) |
 
 The single exception: when building a **value** needs the locale service (`formatTime`, `formatDate`,
 `formatNumber`, `formatRelativeTime`, or another message), the function takes the formatter or `LocaleService` as its
@@ -385,6 +392,9 @@ train drops that cell. So:
 | D 설정 · 앱 | L-D1 → D2 → D4 → D5 → D6 and L-D3 → D7 side by side; L-D8 after both (it writes `settings` and `appearance`) | `settings` (core and web settings, phone profile), `appearance` (core `design/` themes and wallpapers, phone `design/`), `github`, `capabilities`, `plugins`, `commands`, `webhooks`, `app`, `desktop`, `appUpdate` |
 | E 에이전트 · AI · 기억 | L-E1 → E2 → E3 → E5 → E6; L-E4 | `ai`, `hostedAgents`, `agents`, `routing`, `approvals`, `agentHub`, `decisionStage`, `aiHub`, `teamAi`, `memory` |
 | (shared) | L-0 only | `common` — later cells only read it |
+| (shared) | none | `blocked` (blocked-reason sentences several bundles render) — later cells only read it; a new sentence there is its own small issue |
+| (release) | release notes only | `releaseNotes` — written by each release's notes PR, never by a copy cell |
+| (frozen) | none | `mobile` — existing phone-only keys stay; no new keys (see above) |
 
 `connection.*` is network state (#5219); do not put other failures there. Core `lib/` is split by meaning, not by
 folder: `http.ts` → B (`connection`), `serverUrl.ts` → C (`auth`), the tool-permission sentences in `api.ts` → E
@@ -414,8 +424,11 @@ folder: `http.ts` → B (`connection`), `serverUrl.ts` → C (`auth`), the tool-
   keep asserting the same Korean sentence, so the wording guard stays (`readState/copy.test.ts`). It throws on an
   unknown key or bad values.
 - **Web**: a screen mounted without a locale provider renders the **bundled English** (`useFormatMessage`). A test
-  that guards Korean wording wraps the screen with `koreanLocale()` (`src/testing/koLocale.ts`); a test about
-  structure asserts the English, written out by hand (`HuddleHeaderNames.test.tsx`).
+  that asserted Korean before the move keeps asserting the same Korean: wrap the mounted tree with
+  `LocaleProvider` + `koreanLocale()` (`src/testing/koLocale.ts`) — `channelHeaderControls.tooltip.test.tsx`,
+  `HuddleHeaderNames.test.tsx`, `HuddleMicMenu.test.ts`, `markUnread.rollback.test.tsx`. Hand-written English is
+  only for a **new** test about structure or the English template itself. Never turn an existing Korean assertion
+  into English: after ~50 cells nothing would guard what Korean users see.
 - **Phone**: `useFormatMessage` falls back to **Korean**, so most phone tests should keep passing unchanged. This is
   read from `clients/mobile/src/i18n/useFormatMessage.ts`, not yet proven by a phone move (#6020 had no phone call
   site); the first phone cell confirms it and corrects this line.

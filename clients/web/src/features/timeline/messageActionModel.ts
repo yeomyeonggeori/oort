@@ -80,16 +80,19 @@ export const MESSAGE_ACTION_GROUP_PLACEMENT: Readonly<
   [MESSAGE_ACTION_GROUP.destructive]: [MESSAGE_ACTION_PLACE.menu],
 };
 
-export interface MessageActionItem {
+/**
+ * 항목의 낱말은 둘 중 하나다(#6020, 검수 M1): 아직 사전으로 옮기지 않은 `label`(글) 또는 옮긴 `labelKey`(키). 둘을 한 타입에
+ * 함께 두지 않아서, 좁히지 않고 `item.label`을 읽는 자리는 컴파일이 막는다 — 낱말은 `messageActionLabel`로만 받는다.
+ * 이 모델의 나머지 낱말이 옮겨지면(L-A3) `MessageActionLabelText`를 지우고 키 하나로 모은다.
+ */
+export type MessageActionLabelText = { label: string };
+export type MessageActionLabelKey = { labelKey: PlainMessageKey };
+
+export type MessageActionItem = (MessageActionLabelText | MessageActionLabelKey) & MessageActionItemBase;
+
+interface MessageActionItemBase {
   key: MessageActionItemKey;
   testKey: string;
-  /** 아직 사전으로 옮기지 않은 항목의 낱말. `labelKey`가 있는 항목은 빈 문자열이다. */
-  label: string;
-  /**
-   * 사전으로 옮긴 항목의 키(#6020). 화면은 `messageActionLabel`로 지금 언어의 낱말을 받는다. 이 모델의 나머지 낱말이 옮겨지면
-   * (L-A3) `label`을 지우고 이것 하나로 모은다.
-   */
-  labelKey?: PlainMessageKey;
   accessibleLabel?: string;
   tone?: "danger";
   group: MessageActionGroup;
@@ -104,10 +107,10 @@ export interface MessageActionItem {
 
 /** 항목이 화면에 내는 낱말: 사전으로 옮긴 항목은 지금 언어로 푼 키, 나머지는 아직 모델이 든 낱말이다. */
 export function messageActionLabel(
-  item: Pick<MessageActionItem, "label" | "labelKey">,
+  item: MessageActionLabelText | MessageActionLabelKey,
   formatMessage: (key: PlainMessageKey) => string
 ): string {
-  return item.labelKey === undefined ? item.label : formatMessage(item.labelKey);
+  return "labelKey" in item ? formatMessage(item.labelKey) : item.label;
 }
 
 export const MESSAGE_ACTION_SURFACES = ["menu", "context", "sheet"] as const;
@@ -206,7 +209,6 @@ export function messageActionItems(
     items.push({
       key: "mark-unread",
       testKey: "mark-unread",
-      label: "",
       labelKey: MARK_UNREAD_ACTION_KEY,
       group: MESSAGE_ACTION_GROUP.message,
     });

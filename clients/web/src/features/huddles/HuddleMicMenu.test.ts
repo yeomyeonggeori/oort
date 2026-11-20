@@ -3,14 +3,18 @@
 import { act, createElement, useState, type ReactElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { catalog as enCatalog } from "@momo/core/i18n/generated/en-US";
+import { catalog as koCatalog } from "@momo/core/i18n/generated/ko-KR";
 import { createMessageCopy } from "@momo/core/testkit";
 import { HuddleMicMenu } from "./HuddleMicMenu";
 import { HUDDLE_MIC_KEYS } from "./micKeys";
+import { LocaleProvider } from "@/i18n/LocaleProvider";
+import type { AppLocale } from "@/i18n/localeStore";
+import { koreanLocale } from "@/testing/koLocale";
 import type { AudioInputDevicesState } from "./useAudioInputDevices";
 
-// 공급자 없이 띄운 메뉴는 번들된 영어로 선다(`useFormatMessage`). 시험은 같은 생성물로 키를 풀어 그 문장을 찾는다.
-const en = createMessageCopy({ messageLocale: "en-US", catalog: enCatalog });
+// 예전처럼 한국어 화면의 글을 잡는다(#6020): 메뉴를 제품과 같은 한국어 사전으로 감싸고, 같은 사전으로 키를 풀어 견준다.
+const ko = createMessageCopy({ messageLocale: "ko-KR", catalog: koCatalog });
+let koLocale: AppLocale;
 
 const devicesState: AudioInputDevicesState = {
   permission: "granted",
@@ -33,7 +37,8 @@ const reactActEnvironment = globalThis as typeof globalThis & {
 let mountedRoot: Root | null = null;
 let mountedHost: HTMLElement | null = null;
 
-beforeAll(() => {
+beforeAll(async () => {
+  koLocale = await koreanLocale();
   reactActEnvironment.IS_REACT_ACT_ENVIRONMENT = true;
   HTMLElement.prototype.scrollIntoView = () => undefined;
   HTMLElement.prototype.hasPointerCapture = () => false;
@@ -122,7 +127,11 @@ function mountMenu(props: Parameters<typeof Harness>[0] = {}): HTMLElement {
   document.body.append(host);
   mountedHost = host;
   mountedRoot = createRoot(host);
-  act(() => mountedRoot?.render(createElement(Harness, props)));
+  act(() =>
+    mountedRoot?.render(
+      createElement(LocaleProvider, { locale: koLocale, children: createElement(Harness, props) })
+    )
+  );
   return host;
 }
 
@@ -163,7 +172,7 @@ describe("HuddleMicMenu copy and states", () => {
     devicesState.devices = [];
     mountMenu();
     const menu = await openMenu();
-    expect(menu.textContent).toContain(en(HUDDLE_MIC_KEYS.permissionPrompt));
+    expect(menu.textContent).toContain(ko(HUDDLE_MIC_KEYS.permissionPrompt));
     expect(menu.querySelector('[data-testid="huddle-mic-list"]')).toBeNull();
   });
 
@@ -172,7 +181,7 @@ describe("HuddleMicMenu copy and states", () => {
     devicesState.devices = [];
     mountMenu();
     const menu = await openMenu();
-    expect(menu.textContent).toContain(en(HUDDLE_MIC_KEYS.permissionDenied));
+    expect(menu.textContent).toContain(ko(HUDDLE_MIC_KEYS.permissionDenied));
     expect(menu.querySelector('[data-testid="huddle-mic-list"]')).toBeNull();
   });
 
@@ -181,8 +190,7 @@ describe("HuddleMicMenu copy and states", () => {
     mountMenu();
     const menu = await openMenu();
     const option = menu.querySelector('[data-testid="huddle-mic-option-mic-x"] .truncate');
-    expect(option?.textContent).toBe(en("huddles.mic.unnamed", { number: 1 }));
-    expect(option?.textContent).toBe("Microphone 1");
+    expect(option?.textContent).toBe("마이크 1");
   });
 
   it("names an empty device list as a sentence", async () => {
@@ -190,7 +198,7 @@ describe("HuddleMicMenu copy and states", () => {
     devicesState.devices = [];
     mountMenu();
     const menu = await openMenu();
-    expect(menu.textContent).toContain(en(HUDDLE_MIC_KEYS.empty));
+    expect(menu.textContent).toContain(ko(HUDDLE_MIC_KEYS.empty));
     expect(menu.querySelector('[data-testid="huddle-mic-list"]')).toBeNull();
   });
 
@@ -198,8 +206,8 @@ describe("HuddleMicMenu copy and states", () => {
     mountMenu({ gainStart: 100 });
     const menu = await openMenu();
     expect(menu.querySelector('[data-testid="huddle-mic-list"]')).not.toBeNull();
-    expect(menu.textContent).toContain(en(HUDDLE_MIC_KEYS.systemDefault));
-    expect(menu.textContent).toContain(en(HUDDLE_MIC_KEYS.gain));
+    expect(menu.textContent).toContain(ko(HUDDLE_MIC_KEYS.systemDefault));
+    expect(menu.textContent).toContain(ko(HUDDLE_MIC_KEYS.gain));
     expect(menu.className).toContain("max-w-menu-available");
     const value = menu.querySelector('[data-testid="huddle-mic-gain-value"]');
     expect(value?.textContent).toBe("100%");

@@ -7,6 +7,9 @@ import type { Huddle } from "@momo/core/lib/api";
 import { HuddleHeaderControl, HuddleHeaderNames } from "./HuddleHeaderControl";
 import { huddleControlShown, huddleNamesTarget } from "@momo/core/features/huddles/huddleModel";
 import type { HuddleController } from "./useHuddle";
+import { LocaleProvider } from "@/i18n/LocaleProvider";
+import type { AppLocale } from "@/i18n/localeStore";
+import { koreanLocale } from "@/testing/koLocale";
 
 // =============================================================================
 // 허들 참가자 이름 글은 Live 칩 밖, 제목 칸의 꼬리로 옮겨 갔다 (#5184).
@@ -28,9 +31,12 @@ const reactActEnvironment = globalThis as typeof globalThis & {
 };
 let mountedRoot: Root | null = null;
 let mountedHost: HTMLElement | null = null;
+// 이 시험은 예전부터 한국어 화면의 글을 잡았다: 제품과 같은 한국어 사전으로 감싸 그대로 잡는다(#6020).
+let ko: AppLocale;
 
-beforeAll(() => {
+beforeAll(async () => {
   reactActEnvironment.IS_REACT_ACT_ENVIRONMENT = true;
+  ko = await koreanLocale();
 });
 
 afterEach(() => {
@@ -48,7 +54,7 @@ function mount(element: ReactElement): HTMLElement {
   mountedHost = host;
   mountedRoot = createRoot(host);
   act(() => {
-    mountedRoot?.render(element);
+    mountedRoot?.render(createElement(LocaleProvider, { locale: ko, children: element }));
   });
   return host;
 }
@@ -73,9 +79,8 @@ function huddleController(over: Partial<HuddleController> = {}): HuddleControlle
   };
 }
 
-const NAMES = ["Nadia Rahman — 제품 디자인 운영", "곽성재 — 웹 클라이언트 담당", "이도현", "팀원 1", "팀원 2"];
-// 공급자 없이 띄운 머리는 번들된 영어로 선다(`useFormatMessage`, #6020): 요약은 영어 틀(`huddles.participants.many`)의 문장이다.
-const SUMMARY = "Nadia Rahman — 제품 디자인 운영, 곽성재 — 웹 클라이언트 담당 and 3 others";
+const NAMES = ["Nadia Rahman — 제품 디자인 운영", "김도현 — 웹 클라이언트 담당", "이도현", "팀원 1", "팀원 2"];
+const SUMMARY = "Nadia Rahman — 제품 디자인 운영, 김도현 — 웹 클라이언트 담당 외 3명";
 
 function activeHuddle(): Huddle {
   return {

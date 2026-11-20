@@ -15,6 +15,9 @@ import { ChannelMemberPanel } from "@/features/channels/ChannelContextControls";
 import { HuddleHeaderControl } from "@/features/huddles/HuddleHeaderControl";
 import type { HuddleController } from "@/features/huddles/useHuddle";
 import { ChannelHeaderMenu } from "./ChannelHeaderMenu";
+import { LocaleProvider } from "@/i18n/LocaleProvider";
+import type { AppLocale } from "@/i18n/localeStore";
+import { koreanLocale } from "@/testing/koLocale";
 
 // =============================================================================
 // 대화 머리 단추는 전부 디자인 시스템 툴팁이고, 네이티브 `title`은 없다 (#4591).
@@ -37,9 +40,12 @@ const reactActEnvironment = globalThis as typeof globalThis & {
 };
 let mountedRoot: Root | null = null;
 let mountedHost: HTMLElement | null = null;
+// 사전으로 옮긴 낱말(허들 단추, #6020)도 예전처럼 한국어로 잡는다: 제품과 같은 한국어 사전으로 감싼다.
+let ko: AppLocale;
 
-beforeAll(() => {
+beforeAll(async () => {
   reactActEnvironment.IS_REACT_ACT_ENVIRONMENT = true;
+  ko = await koreanLocale();
 });
 
 afterEach(() => {
@@ -72,7 +78,11 @@ function mount(element: ReactElement): HTMLElement {
       createElement(
         MemoryRouter,
         { initialEntries: [`/c/${CHANNEL_ID}`] },
-        createElement(QueryClientProvider, { client }, element)
+        createElement(
+          QueryClientProvider,
+          { client },
+          createElement(LocaleProvider, { locale: ko, children: element })
+        )
       )
     );
   });
@@ -185,18 +195,17 @@ const CASES: Case[] = [
         selfRole: "owner" as const,
       }),
   },
-  // 허들 단추의 낱말은 사전에 있다(#6020). 공급자 없이 띄운 컨트롤은 번들된 영어로 선다(`useFormatMessage`).
   {
     name: "허들 시작",
     testId: "huddle-start",
-    label: "Start huddle",
+    label: "허들 시작",
     render: () =>
       createElement(HuddleHeaderControl, { huddle: huddleController(), offline: false }),
   },
   {
     name: "허들 다시 불러오기",
     testId: "huddle-error-retry",
-    label: "Reload",
+    label: "다시 불러오기",
     render: () =>
       createElement(HuddleHeaderControl, {
         huddle: huddleController({ status: "error" }),
@@ -206,7 +215,7 @@ const CASES: Case[] = [
   {
     name: "허들 마이크",
     testId: "huddle-microphone",
-    label: "Turn microphone off",
+    label: "마이크 끄기",
     render: () =>
       createElement(HuddleHeaderControl, {
         huddle: huddleController({ joined: true }),
@@ -216,7 +225,7 @@ const CASES: Case[] = [
   {
     name: "허들 마이크 선택",
     testId: "huddle-mic-devices",
-    label: "Choose microphone",
+    label: "마이크 선택",
     render: () =>
       createElement(HuddleHeaderControl, {
         huddle: huddleController({ joined: true }),
@@ -226,7 +235,7 @@ const CASES: Case[] = [
   {
     name: "허들 나가기",
     testId: "huddle-leave",
-    label: "Leave huddle",
+    label: "허들 나가기",
     render: () =>
       createElement(HuddleHeaderControl, {
         huddle: huddleController({ joined: true }),
