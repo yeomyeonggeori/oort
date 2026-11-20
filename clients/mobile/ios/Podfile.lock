@@ -1,9 +1,9 @@
 PODS:
   - EXApplication (57.0.2):
     - ExpoModulesCore
-  - EXConstants (57.0.8):
+  - EXConstants (57.0.24):
     - ExpoModulesCore
-  - Expo (57.0.9):
+  - Expo (57.0.23):
     - ExpoModulesCore
     - ExpoModulesJSI
     - hermes-engine
@@ -29,7 +29,7 @@ PODS:
     - ReactCommon/turbomodule/core
     - ReactNativeDependencies
     - Yoga
-  - ExpoAsset (57.0.8):
+  - ExpoAsset (57.0.21):
     - ExpoModulesCore
   - ExpoBlur (57.0.3):
     - ExpoModulesCore
@@ -49,7 +49,7 @@ PODS:
     - ExpoModulesCore
   - ExpoFileSystem (57.0.1):
     - ExpoModulesCore
-  - ExpoFont (57.0.1):
+  - ExpoFont (57.0.4):
     - ExpoModulesCore
   - ExpoGlassEffect (57.0.4):
     - ExpoModulesCore
@@ -60,9 +60,9 @@ PODS:
     - SDWebImageWebPCoder
   - ExpoImagePicker (57.0.12):
     - ExpoModulesCore
-  - ExpoKeepAwake (57.0.1):
+  - ExpoKeepAwake (57.0.2):
     - ExpoModulesCore
-  - ExpoLogBox (57.0.2):
+  - ExpoLogBox (57.0.5):
     - React-Core
   - ExpoMediaLibrary (57.0.5):
     - ExpoModulesCore
@@ -2492,9 +2492,9 @@ EXTERNAL SOURCES:
 
 SPEC CHECKSUMS:
   EXApplication: bbd517d50878ca1d121fb3843392beb210181e28
-  EXConstants: 5efe6122eecac2d970aa50a2a502ecc6ce4b7564
-  Expo: cba780b47e8661e90c9fe8e1a92a81cef5773290
-  ExpoAsset: a76534cf7b762978861dd31708308496c676166f
+  EXConstants: 3c072d540176acea8cf9b3c41730cc0d22a8b258
+  Expo: d06878ab7512dbcb2deec84c4d56f07af8a8b765
+  ExpoAsset: a936cb6daa7a1c1f03c9ecc90e2e8feec2c745eb
   ExpoBlur: 975b78b65b3c8f475c44bd8f8b53948146b1ff9b
   ExpoCamera: 00a098da25adbc6013f051b5db47279cb10a716c
   ExpoCameraBarcodeScanning: 14c72e1f522eb69f7a672d757eb294c096756faa
@@ -2503,13 +2503,13 @@ SPEC CHECKSUMS:
   ExpoDocumentPicker: 6fb67a6f39ba9beb53a4b4a3f2949e0b5e9bc3bf
   ExpoDomWebView: beaec034e51bd028428b98bb1f2633ab79c6d095
   ExpoFileSystem: e441dae0ae671fc451640517550973d9e024fdf0
-  ExpoFont: 59e1faf66ba9bcd232ae1e2ce58d202a48b6f65e
+  ExpoFont: f8198a952ba2ff53c9b393b5269ea435f232cfc3
   ExpoGlassEffect: 310dc75c8d862de1c4b3ff15a90439ba51a39798
   ExpoHaptics: 32efd02d88953d30a5c2ff796c0fce692e7bcd2e
   ExpoImageManipulator: 9dc637d77a29941bbbff5ec9cfc6ef3d6772d875
   ExpoImagePicker: 09fafe2ab0257a41a0e6625ebbe56d73cb6611fa
-  ExpoKeepAwake: c26f14275017370cc8a4b7b43a0e23361f2053a5
-  ExpoLogBox: 6bb73c341aca22e699bd4da6cc61afc844e1a648
+  ExpoKeepAwake: 72af0b3be3615e59bc819d26061ff4e06b155ee0
+  ExpoLogBox: 1e498d9b63edb2895cacad690bd1848c0546cf01
   ExpoMediaLibrary: 341321256621e7bf220b6272c42fedcb095607d0
   ExpoModulesCore: eddcff7b0f292f3ffccbb237fc17877fefe4885d
   ExpoModulesJSI: ded9f4c72f35fc9400ad85506a94acdd87b2b23b
