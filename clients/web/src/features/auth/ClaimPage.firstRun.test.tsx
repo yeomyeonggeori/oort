@@ -129,7 +129,7 @@ beforeEach(() => {
   });
   changeMyProfile.mockResolvedValue({
     ...session.member,
-    handle: "seongjae",
+    handle: "jihu",
     displayName: "성재",
   });
   window.history.replaceState(null, "", `/claim/${TOKEN}`);
@@ -245,7 +245,7 @@ describe("claim → first-run 사다리 (#2301)", () => {
 
     fill("onboarding-s1-workspace-name", "새벽");
     fill("onboarding-s1-display-name", "성재");
-    fill("onboarding-s1-handle", "seongjae");
+    fill("onboarding-s1-handle", "jihu");
     await act(async () => {
       click("onboarding-s1-submit");
     });
@@ -275,7 +275,7 @@ describe("claim → first-run 사다리 (#2301)", () => {
     });
     expect(onLoggedIn).toHaveBeenCalledWith({
       ...session,
-      member: { ...session.member, handle: "seongjae", displayName: "성재" },
+      member: { ...session.member, handle: "jihu", displayName: "성재" },
     });
     expect(window.location.pathname).toBe("/");
     expect(sessionStorage.getItem("oort.onboarding.v1")).toBeNull();

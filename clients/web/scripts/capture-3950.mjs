@@ -40,7 +40,7 @@ const channels = [
 const auth = {
   accessToken: "capture-only-not-a-credential",
   refreshToken: "capture-only-not-a-credential",
-  member: { id: me, workspaceId, kind: "human", displayName: "곽성재", handle: "seongjae" },
+  member: { id: me, workspaceId, kind: "human", displayName: "한지후", handle: "jihu" },
   realtimeWebSocketUrl: "ws://capture-3950.invalid/connection/websocket",
 };
 const person = (id, displayName, handle, role, channelIds) => ({
@@ -48,7 +48,7 @@ const person = (id, displayName, handle, role, channelIds) => ({
   channelIds, capabilities: [], createdAtMs: 0, updatedAtMs: 0,
 });
 const roster = () => [
-  person(me, "곽성재", "seongjae", "owner", [marketing, blocked, dm]),
+  person(me, "한지후", "jihu", "owner", [marketing, blocked, dm]),
   person(haneul, "김하늘", "haneul", "member", [marketing]),
   person(minjun, "박민준", "minjun", "member", [marketing]),
   person(soyeon, "이소연", "soyeon", "member", [marketing]),
@@ -243,7 +243,7 @@ async function tailScenes(browser, origin, scheme, viewport) {
     await page.getByTestId("apps-details-toggle").first().click();
     await page.waitForTimeout(200);
     const details = await page.getByTestId("apps-details").first().textContent();
-    check(`${tag} 자세히: 명의·연결·자기 보고·개인 앱 안내`, ["Hermes에서 실행했어요.", "곽성재 명의로 썼어요.", "연결: gmailmcp.googleapis.com", "oort는 확인하지 못해요", "요약만 올리는 게 원칙이에요"].every((t) => details.includes(t)), details);
+    check(`${tag} 자세히: 명의·연결·자기 보고·개인 앱 안내`, ["Hermes에서 실행했어요.", "한지후 명의로 썼어요.", "연결: gmailmcp.googleapis.com", "oort는 확인하지 못해요", "요약만 올리는 게 원칙이에요"].every((t) => details.includes(t)), details);
     await page.screenshot({ path: resolve(OUT_DIR, `c3950-1c-tail-channel-details-${tag}.png`) });
     await page.getByTestId("apps-details-toggle").first().click();
     await page.getByTestId("apps-used-tail").first().evaluate((el) => el.scrollIntoView({ block: "center" }));

@@ -36,8 +36,8 @@ const member = (over: Partial<RosterMember> & {handle: string}): RosterMember =>
   }) as unknown as RosterMember;
 
 const MEMBERS = [
-  member({handle: 'seongjae', displayName: '곽성재'}),
-  member({handle: 'dayeon', displayName: '박다연'}),
+  member({handle: 'jihu', displayName: '한지후'}),
+  member({handle: 'seoyeon', displayName: '박서연'}),
   member({handle: 'yeomyeong', displayName: '김여명'}),
   member({handle: 'seeun', displayName: '박세은'}),
 ];

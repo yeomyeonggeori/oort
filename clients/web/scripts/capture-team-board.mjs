@@ -42,13 +42,13 @@ const ch = Object.fromEntries(channels.map((c) => [c.name, c]));
 const auth = {
   accessToken: "capture-only-not-a-credential",
   refreshToken: "capture-only-not-a-credential",
-  member: { id: memberId, workspaceId, kind: "human", displayName: "곽성재", handle: "seongjae" },
+  member: { id: memberId, workspaceId, kind: "human", displayName: "한지후", handle: "jihu" },
   realtimeWebSocketUrl: "ws://team-board-capture.invalid/connection/websocket",
 };
 const roster = [
   {
-    id: memberId, workspaceId, kind: "human", status: "active", role: "owner", displayName: "곽성재",
-    handle: "seongjae", channelCount: 4, channelIds: channels.map((c) => c.id), capabilities: [],
+    id: memberId, workspaceId, kind: "human", status: "active", role: "owner", displayName: "한지후",
+    handle: "jihu", channelCount: 4, channelIds: channels.map((c) => c.id), capabilities: [],
     createdAtMs: 0, updatedAtMs: 0,
   },
 ];
@@ -65,28 +65,28 @@ function boardRows(now) {
   return [
     {
       ...base, sessionId: "00000000-0000-7000-8000-0000000000a1", origin: "local_pty", label: "한글 입력 이중 전송 수리",
-      folderLabel: "momo", status: "running", owner: owner(memberId, "곽성재"),
+      folderLabel: "momo", status: "running", owner: owner(memberId, "한지후"),
       homeChannel: { id: ch.workbench.id, name: "workbench" }, repo: "momo", branch: "feat/2774-xterm",
       harness: "claude", state: "waiting", stages: ["세션 시작", "작업 중", "실행 허락 기다림"],
       diff: diff(128, 40, 9, 2), lastActivityAt: sec - 3 * MIN,
     },
     {
       ...base, sessionId: "00000000-0000-7000-8000-0000000000a2", origin: "local_pty", label: "relay 중복 발행 수리",
-      folderLabel: "momo", status: "running", owner: owner(memberId, "곽성재"),
+      folderLabel: "momo", status: "running", owner: owner(memberId, "한지후"),
       homeChannel: { id: ch.workbench.id, name: "workbench" }, repo: "momo", branch: "fix/push-dup",
       harness: "codex", state: "waiting", stages: ["세션 시작", "작업 중", "답 기다림"],
       diff: diff(42, 18, 4, 1), lastActivityAt: sec - 2 * MIN,
     },
     {
       ...base, sessionId: "00000000-0000-7000-8000-0000000000a3", origin: "local_pty", label: "PR #2851 푸시 중복 수리",
-      folderLabel: "momo", status: "ended", endedAtMs: now - 11 * 60_000, owner: owner(memberId, "곽성재"),
+      folderLabel: "momo", status: "ended", endedAtMs: now - 11 * 60_000, owner: owner(memberId, "한지후"),
       homeChannel: { id: ch.workbench.id, name: "workbench" }, repo: "momo", branch: "fix/push-dup",
       harness: "claude", state: "done", stages: ["세션 시작", "작업 중", "턴 끝남"],
       diff: diff(42, 18, 4, 3), prUrl: "https://github.com/yeomyeonggeori/oort/pull/2851", lastActivityAt: sec - 11 * MIN,
     },
     {
       ...base, sessionId: "00000000-0000-7000-8000-0000000000b1", origin: "host", label: "온보딩 문구 다듬기",
-      status: "running", owner: owner(memberId, "곽성재"),
+      status: "running", owner: owner(memberId, "한지후"),
       homeChannel: { id: ch["agent-lab"].id, name: "agent-lab" }, repo: null, branch: null, harness: "claude",
       state: "running", stages: [], diff: none, lastActivityAt: sec - 1 * MIN, sharedAtMs: null,
     },

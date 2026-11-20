@@ -40,7 +40,7 @@ const channels = [
 const auth = {
   accessToken: "capture-only-not-a-credential",
   refreshToken: "capture-only-not-a-credential",
-  member: { id: memberId, workspaceId, kind: "human", displayName: "곽성재", handle: "seongjae" },
+  member: { id: memberId, workspaceId, kind: "human", displayName: "한지후", handle: "jihu" },
   realtimeWebSocketUrl: "ws://inbox-capture.invalid/connection/websocket",
 };
 const NOW = Date.now();
@@ -50,7 +50,7 @@ const person = (id, kind, displayName, handle, extra = {}) => ({
   channelIds: channels.map((c) => c.id), capabilities: [], createdAtMs: 0, updatedAtMs: 0, ...extra,
 });
 const roster = [
-  person(memberId, "human", "곽성재", "seongjae", { role: "owner" }),
+  person(memberId, "human", "한지후", "jihu", { role: "owner" }),
   person(otherId, "human", "서연", "seoyeon", { role: "member" }),
   person(agentId, "agent", "김인턴", "kim-intern", { ownerHumanId: memberId }),
   person(dawnId, "agent", "새벽봇", "dawn-bot", { ownerHumanId: otherId }),
@@ -74,7 +74,7 @@ const dmDawn = [
 const rootMine = msg(WB, 3, memberId, "배포 일정 언제쯤 확정될까요?", 200, {
   thread: { reply_count: 2, last_reply_seq: 9, last_reply_at: NOW - 6 * MIN },
 });
-const mentionWb = msg(WB, 8, otherId, `@seongjae 배포 전에 한번 봐 주세요. 체크리스트 링크 남겼어요.`, 25, {
+const mentionWb = msg(WB, 8, otherId, `@jihu 배포 전에 한번 봐 주세요. 체크리스트 링크 남겼어요.`, 25, {
   props: { mention_member_ids: [memberId] },
 });
 const wbPage = [rootMine, msg(WB, 6, agentId, "빌드 통과했습니다.", 60), mentionWb];
@@ -82,7 +82,7 @@ const replies = [
   msg(WB, 7, otherId, "다음 주 화요일 예정이에요", 30, { rootId: rootMine.id }),
   msg(WB, 9, agentId, "QA 확인 끝나면 바로 공유드릴게요.", 6, { rootId: rootMine.id }),
 ];
-const mentionDesign = msg(DESIGN, 4, dawnId, "@seongjae 시안 3번 컬러 토큰 확인 부탁드려요", 45, {
+const mentionDesign = msg(DESIGN, 4, dawnId, "@jihu 시안 3번 컬러 토큰 확인 부탁드려요", 45, {
   props: { mention_member_ids: [memberId] },
 });
 const pendingApproval = {

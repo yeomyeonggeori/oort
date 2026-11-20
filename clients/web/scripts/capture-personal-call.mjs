@@ -38,7 +38,7 @@ const channels = [{ id: channelId, workspaceId, kind: "public", name: "workbench
 const auth = {
   accessToken: "capture-only-not-a-credential",
   refreshToken: "capture-only-not-a-credential",
-  member: { id: memberId, workspaceId, kind: "human", displayName: "곽성재", handle: "seongjae" },
+  member: { id: memberId, workspaceId, kind: "human", displayName: "한지후", handle: "jihu" },
   realtimeWebSocketUrl: "ws://personal-call-capture.invalid/connection/websocket",
 };
 const agentRow = (id, handle, ownerId, ownerName) => ({
@@ -48,10 +48,10 @@ const agentRow = (id, handle, ownerId, ownerName) => ({
 });
 const roster = [
   {
-    id: memberId, workspaceId, kind: "human", status: "active", role: "owner", displayName: "곽성재",
-    handle: "seongjae", channelCount: 1, channelIds: [channelId], capabilities: [], createdAtMs: 0, updatedAtMs: 0,
+    id: memberId, workspaceId, kind: "human", status: "active", role: "owner", displayName: "한지후",
+    handle: "jihu", channelCount: 1, channelIds: [channelId], capabilities: [], createdAtMs: 0, updatedAtMs: 0,
   },
-  agentRow("00000000-0000-7000-8000-000000000401", "kwak-claude", memberId, "곽성재"),
+  agentRow("00000000-0000-7000-8000-000000000401", "han-claude", memberId, "한지후"),
   agentRow("00000000-0000-7000-8000-000000000402", "min-claude", otherId, "민수"),
 ];
 
@@ -194,11 +194,11 @@ async function signIn(page, origin) {
 const overflowX = (page) => page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
 
 const SCENES = [
-  { name: "typing", desktop: true, flag: true, text: "@kwak-claude 빌드가 왜 깨지는지 봐 줘", send: false, expectPreview: "내 맥 · 성재 MacBook Pro · Claude Code" },
-  { name: "sent", desktop: true, flag: true, text: "@kwak-claude 빌드가 왜 깨지는지 봐 줘", send: true, expectNotice: "called", expect: { messages: 1, spawns: 1, signs: 1 } },
-  { name: "flag-off", desktop: true, flag: false, text: "@kwak-claude 빌드가 왜 깨지는지 봐 줘", send: true, expectNotice: "not_delivered", expectText: "이 서버는 아직 내 맥으로 보내는 호출을 받지 않아요.", expect: { messages: 1, spawns: 0, signs: 0 } },
-  { name: "mac-off", desktop: true, flag: true, spawnStatus: 409, text: "@kwak-claude 빌드가 왜 깨지는지 봐 줘", send: true, expectNotice: "not_delivered", expectText: "내 맥이 꺼져 있어요. 맥을 켠 뒤 다시 불러 주세요.", expect: { messages: 1, spawns: 1, signs: 1 }, retry: true },
-  { name: "web", desktop: false, flag: true, text: "@kwak-claude 빌드가 왜 깨지는지 봐 줘", send: true, expectPreview: null, expectNotice: "message_only", expectText: "데스크탑·폰에서 불러 주세요", expect: { messages: 1, spawns: 0, signs: 0 } },
+  { name: "typing", desktop: true, flag: true, text: "@han-claude 빌드가 왜 깨지는지 봐 줘", send: false, expectPreview: "내 맥 · 성재 MacBook Pro · Claude Code" },
+  { name: "sent", desktop: true, flag: true, text: "@han-claude 빌드가 왜 깨지는지 봐 줘", send: true, expectNotice: "called", expect: { messages: 1, spawns: 1, signs: 1 } },
+  { name: "flag-off", desktop: true, flag: false, text: "@han-claude 빌드가 왜 깨지는지 봐 줘", send: true, expectNotice: "not_delivered", expectText: "이 서버는 아직 내 맥으로 보내는 호출을 받지 않아요.", expect: { messages: 1, spawns: 0, signs: 0 } },
+  { name: "mac-off", desktop: true, flag: true, spawnStatus: 409, text: "@han-claude 빌드가 왜 깨지는지 봐 줘", send: true, expectNotice: "not_delivered", expectText: "내 맥이 꺼져 있어요. 맥을 켠 뒤 다시 불러 주세요.", expect: { messages: 1, spawns: 1, signs: 1 }, retry: true },
+  { name: "web", desktop: false, flag: true, text: "@han-claude 빌드가 왜 깨지는지 봐 줘", send: true, expectPreview: null, expectNotice: "message_only", expectText: "데스크탑·폰에서 불러 주세요", expect: { messages: 1, spawns: 0, signs: 0 } },
   { name: "teammate", desktop: true, flag: true, text: "@min-claude 빌드가 왜 깨지는지 봐 줘", send: true, expectNoLine: true, expect: { messages: 1, spawns: 0, signs: 0 } },
 ];
 

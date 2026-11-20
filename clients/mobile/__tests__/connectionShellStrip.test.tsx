@@ -35,7 +35,7 @@ import {pinReduceMotion} from './fixtures/reduceMotion';
 const WS = '22222222-2222-4222-8222-222222222222';
 const SELF_ID = '11111111-1111-4111-8111-111111111111';
 const BASE = 'https://api.example.com';
-const SELF: Member = {id: SELF_ID, workspaceId: WS, kind: 'human', displayName: '곽성재', handle: 'seongjae'};
+const SELF: Member = {id: SELF_ID, workspaceId: WS, kind: 'human', displayName: '한지후', handle: 'jihu'};
 const LOGIN_BODY = {
   accessToken: 'access-token-1',
   refreshToken: 'refresh-token-1',

@@ -132,7 +132,7 @@ function session(): SessionContextValue {
     session: {
       accessToken: "a",
       refreshToken: "r",
-      member: { id: ME, workspaceId: WS, kind: "human", displayName: "곽성재", handle: "s" },
+      member: { id: ME, workspaceId: WS, kind: "human", displayName: "한지후", handle: "s" },
       realtimeWebSocketUrl: "wss://x/connection/websocket",
     },
     workspaceId: WS,

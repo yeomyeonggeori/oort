@@ -6,17 +6,17 @@ describe("resolveS1Seeds (H-R3-1)", () => {
     const seeds = resolveS1Seeds({
       draft: {
         workspaceName: "여명거리",
-        displayName: "곽성재",
-        handle: "seongjae",
+        displayName: "한지후",
+        handle: "jihu",
       },
       workspaceName: "여명거리",
-      memberHandle: "kwak",
-      memberDisplayName: "곽성재",
+      memberHandle: "han",
+      memberDisplayName: "한지후",
       profileSaved: true,
       workspaceSaved: false,
     });
-    expect(seeds.handle).toBe("kwak");
-    expect(seeds.displayName).toBe("곽성재");
+    expect(seeds.handle).toBe("han");
+    expect(seeds.displayName).toBe("한지후");
     expect(seeds.workspaceName).toBe("여명거리");
   });
 
@@ -25,18 +25,18 @@ describe("resolveS1Seeds (H-R3-1)", () => {
       draft: {
         workspaceName: "새벽 팀",
         displayName: "성재",
-        handle: "seongjae",
+        handle: "jihu",
       },
       workspaceName: "여명거리",
-      memberHandle: "kwak",
-      memberDisplayName: "곽성재",
+      memberHandle: "han",
+      memberDisplayName: "한지후",
       profileSaved: false,
       workspaceSaved: false,
     });
     expect(seeds).toEqual({
       workspaceName: "새벽 팀",
       displayName: "성재",
-      handle: "seongjae",
+      handle: "jihu",
     });
   });
 
@@ -45,15 +45,15 @@ describe("resolveS1Seeds (H-R3-1)", () => {
       draft: {
         workspaceName: "여명거리",
         displayName: "성재",
-        handle: "seongjae",
+        handle: "jihu",
       },
       workspaceName: "새벽 팀",
-      memberHandle: "seongjae",
-      memberDisplayName: "곽성재",
+      memberHandle: "jihu",
+      memberDisplayName: "한지후",
       profileSaved: false,
       workspaceSaved: true,
     });
     expect(seeds.workspaceName).toBe("새벽 팀");
-    expect(seeds.handle).toBe("seongjae");
+    expect(seeds.handle).toBe("jihu");
   });
 });

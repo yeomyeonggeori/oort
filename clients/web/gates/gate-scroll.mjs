@@ -50,8 +50,8 @@ const SESSION = {
     id: ME,
     workspaceId: WORKSPACE_ID,
     kind: "human",
-    displayName: "곽성재",
-    handle: "seongjae",
+    displayName: "한지후",
+    handle: "jihu",
   },
   // ?stress= 경로는 실시간 소켓을 아예 열지 않는다(AppShell.tsx:144). 그래도
   // 모양은 채워 둔다 — 세션 파서가 읽는 필드다.
@@ -124,7 +124,7 @@ const page = await context.newPage();
 const navStart = Date.now();
 await page.goto(`${BASE}/?stress=1000`, { waitUntil: "domcontentloaded" });
 await advanceToAccount(page);
-await page.fill('[data-testid="login-email"]', LIVE ? email : "seongjae@dawn.example");
+await page.fill('[data-testid="login-email"]', LIVE ? email : "jihu@dawn.example");
 await page.fill(
   '[data-testid="login-password"]',
   LIVE ? password : "gate-only-not-a-credential"

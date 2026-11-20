@@ -173,8 +173,8 @@ const LOGIN_BODY = {
     id: ME,
     workspaceId: WS,
     kind: 'human' as const,
-    displayName: 'Seongjae Kwak',
-    handle: 'seongjae',
+    displayName: 'Jihu Han',
+    handle: 'jihu',
   },
 };
 function Probe(): React.JSX.Element {

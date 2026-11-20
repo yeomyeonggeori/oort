@@ -50,7 +50,7 @@ const person = (id, kind, displayName, handle, extra = {}) => ({
   id, workspaceId, kind, status: "active", displayName, handle, channelCount: 2,
   channelIds: [CH, GENERAL], capabilities: [], createdAtMs: 0, updatedAtMs: 0, ...extra,
 });
-const roster = [person(memberId, "human", "곽성재", "seongjae", { role: "owner" })];
+const roster = [person(memberId, "human", "한지후", "jihu", { role: "owner" })];
 const channels = [
   { id: CH, workspaceId, kind: "public", name: "계획", muted: false },
   { id: GENERAL, workspaceId, kind: "public", name: "general", muted: false },
@@ -58,7 +58,7 @@ const channels = [
 const auth = {
   accessToken: "capture-only-not-a-credential",
   refreshToken: "capture-only-not-a-credential",
-  member: { id: memberId, workspaceId, kind: "human", displayName: "곽성재", handle: "seongjae" },
+  member: { id: memberId, workspaceId, kind: "human", displayName: "한지후", handle: "jihu" },
   realtimeWebSocketUrl: "ws://ap3-4190-capture.invalid/connection/websocket",
 };
 const json = (route, body, status = 200) =>

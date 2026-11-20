@@ -63,8 +63,8 @@ export const ME: Member = {
   id: SELF,
   workspaceId: WS,
   kind: 'human',
-  displayName: '곽성재',
-  handle: 'seongjae',
+  displayName: '한지후',
+  handle: 'jihu',
 };
 export const roster = (id: string): RosterMember =>
   ({
@@ -72,8 +72,8 @@ export const roster = (id: string): RosterMember =>
     workspaceId: WS,
     kind: id === HERMES ? 'agent' : 'human',
     status: 'active',
-    displayName: id === HERMES ? 'hermes' : '곽성재',
-    handle: id === HERMES ? 'hermes' : 'seongjae',
+    displayName: id === HERMES ? 'hermes' : '한지후',
+    handle: id === HERMES ? 'hermes' : 'jihu',
     channelCount: 1,
     channelIds: [FIXTURE_CHANNEL_ID],
     capabilities: [],

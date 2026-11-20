@@ -584,8 +584,8 @@ const SESSION = {
     id: ME,
     workspaceId: WORKSPACE_ID,
     kind: "human",
-    displayName: "곽성재",
-    handle: "seongjae",
+    displayName: "한지후",
+    handle: "jihu",
   },
   // Deliberately unreachable: the capture shows the disconnected/connecting
   // rail state rather than pretending the realtime rail is up.
@@ -676,8 +676,8 @@ const ROSTER = [
     kind: "human",
     status: "active",
     role: "owner",
-    displayName: "곽성재",
-    handle: "seongjae",
+    displayName: "한지후",
+    handle: "jihu",
     channelCount: CHANNEL_IDS.length,
     channelIds: CHANNEL_IDS,
     capabilities: [],
@@ -2450,7 +2450,7 @@ async function signIn(page) {
   );
   await page.reload({ waitUntil: "networkidle" });
   await signInThroughOnboarding(page, {
-    email: "seongjae@dawn.example",
+    email: "jihu@dawn.example",
     password: "capture-only-not-a-credential",
   });
   await page.getByTestId("channel-list").waitFor({ state: "visible" });
@@ -6609,7 +6609,7 @@ async function captureMobile(browser, scheme) {
 
   // 2. 채널. 사이드바는 열이 아니라 닫힌 서랍이므로 타임라인이 390px 전부를
   //    받고, 컴포저는 안전 영역 위에 도크된다.
-  await page.getByTestId("login-email").fill("seongjae@dawn.example");
+  await page.getByTestId("login-email").fill("jihu@dawn.example");
   await page.getByTestId("login-password").fill("capture-only-not-a-credential");
   await sceneClick(page, page.getByTestId("login-submit"));
   await page.getByTestId("composer-input").waitFor({ state: "visible" });
@@ -9097,7 +9097,7 @@ async function captureTerminalDockScenes(browser, scheme) {
     if (boot === "pending") {
       await page.goto(ORIGIN, { waitUntil: "domcontentloaded" });
       await signInThroughOnboarding(page, {
-        email: "seongjae@dawn.example",
+        email: "jihu@dawn.example",
         password: "capture-only-not-a-credential",
       });
       await page.getByTestId("open-terminal-dock").waitFor({ state: "visible" });
@@ -9447,8 +9447,8 @@ function welcomeRoster({ paused }) {
     me,
     {
       ...agent,
-      displayName: "곽성재의 Claude",
-      handle: "seongjae-claude",
+      displayName: "한지후의 Claude",
+      handle: "jihu-claude",
       ownerHumanId: ME,
       paused,
     },
@@ -9557,7 +9557,7 @@ async function captureWelcomeKickoffScenes(browser, scheme) {
               hlcCount: 0,
               authorMemberId: agentId,
               type: "text",
-              body: "안녕하세요 @곽성재님, 저는 이 맥의 Claude Code로 돌아가는 성재님의 에이전트예요. 여기서 부르면 바로 일을 받아요. 오늘 무엇부터 같이 할까요?",
+              body: "안녕하세요 @한지후님, 저는 이 맥의 Claude Code로 돌아가는 성재님의 에이전트예요. 여기서 부르면 바로 일을 받아요. 오늘 무엇부터 같이 할까요?",
               state: "sent",
               createdAtMs: 1_704_067_200_000,
             },
@@ -12651,7 +12651,7 @@ async function captureAiAccountsScenes(browser, scheme) {
     endpointLabel: "ChatGPT",
     credentialKind: "oauth-openai",
     credentialMeta: {
-      accountLabel: "곽성재 개인",
+      accountLabel: "한지후 개인",
       accessTokenPresent: true,
       accessTokenExpiresAtMs: FIXTURE_NOW + 3_600_000,
       notice: "개인 ChatGPT 구독으로 동작하는 내부용 연결입니다.",
@@ -12910,7 +12910,7 @@ async function captureSkeletonRevealAt(browser, scheme, viewport, nameSuffix) {
     );
     await page.reload({ waitUntil: "domcontentloaded" });
     await signInThroughOnboarding(page, {
-      email: "seongjae@dawn.example",
+      email: "jihu@dawn.example",
       password: "capture-only-not-a-credential",
     });
     if (phone) {

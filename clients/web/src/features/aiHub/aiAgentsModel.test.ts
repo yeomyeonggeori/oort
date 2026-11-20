@@ -69,7 +69,7 @@ describe("에이전트 표 행: 서버 값 → core 라벨", () => {
   });
 
   it("사람 멤버는 표에 없다", () => {
-    const human: RosterMember = { ...agent("h", "곽성재"), kind: "human" };
+    const human: RosterMember = { ...agent("h", "한지후"), kind: "human" };
     expect(agentTableRows([human, ...MEMBERS], [], ME)).toHaveLength(MEMBERS.length);
   });
 

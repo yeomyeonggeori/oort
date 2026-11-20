@@ -57,7 +57,7 @@ const channels = [{ id: "00000000-0000-7000-8000-000000000201", workspaceId, kin
 const auth = {
   accessToken: "capture-only-not-a-credential",
   refreshToken: "capture-only-not-a-credential",
-  member: { id: memberId, workspaceId, kind: "human", displayName: "곽성재", handle: "seongjae" },
+  member: { id: memberId, workspaceId, kind: "human", displayName: "한지후", handle: "jihu" },
   realtimeWebSocketUrl: "ws://ai-agents-capture.invalid/connection/websocket",
 };
 const base = { workspaceId, status: "active", channelCount: 1, channelIds: channels.map((c) => c.id), capabilities: [], createdAtMs: 0, updatedAtMs: 0 };
@@ -68,14 +68,14 @@ const ownedBy = (id, name) => ({ ownerHumanId: id, owner: { id, displayName: nam
 const roster = [
   bot(1, "김인턴", "kim-intern", { brain: "team_key", callableBy: "everyone", ...ownedBy(otherHuman, "성재") }),
   bot(2, "하늘의 Codex", "haneul-codex", { brain: "subscription", callableBy: "owner_only", hostOnline: true, ...ownedBy(memberId, "하늘") }),
-  bot(3, "성재의 Codex", "seongjae-codex", { brain: "subscription", callableBy: "owner_only", hostOnline: false, ...ownedBy(otherHuman, "성재") }),
-  bot(4, "성재의 API 키", "seongjae-key", { brain: "personal_key", callableBy: "owner_only", ...ownedBy(otherHuman, "성재") }),
-  bot(5, "성재의 Claude Code", "seongjae-claude", {
+  bot(3, "성재의 Codex", "jihu-codex", { brain: "subscription", callableBy: "owner_only", hostOnline: false, ...ownedBy(otherHuman, "성재") }),
+  bot(4, "성재의 API 키", "jihu-key", { brain: "personal_key", callableBy: "owner_only", ...ownedBy(otherHuman, "성재") }),
+  bot(5, "성재의 Claude Code", "jihu-claude", {
     brain: "subscription", callableBy: "owner_only", hostOnline: true, brainUnavailableReason: "claude_subscription_agent_paused", ...ownedBy(otherHuman, "성재"),
   }),
   bot(6, "hermes", "hermes", { brain: "external", callableBy: "everyone" }),
   human(memberId, "하늘", "haneul", "member"),
-  human(otherHuman, "성재", "seongjae", "owner"),
+  human(otherHuman, "성재", "jihu", "owner"),
   bot(7, "하늘의 Claude Code", "haneul-claude", {
     brain: "subscription", callableBy: "owner_only", hostOnline: true, brainUnavailableReason: "claude_subscription_agent_paused", ...ownedBy(memberId, "하늘"),
   }),
@@ -214,18 +214,18 @@ async function scenes(browser, origin, scheme, viewport) {
     const text = (handle, sel) => lineOf(page, handle).locator(`[data-testid='${sel}']`).textContent();
     check(`${tag} 팀 키: 팀 키 · 누구나`, (await text("kim-intern", "mention-agent-line")) === "팀 키 · 누구나");
     check(`${tag} 내 구독: 내 구독 · 나만 부를 수 있어요`, (await text("haneul-codex", "mention-agent-line")) === "내 구독 · 나만 부를 수 있어요");
-    check(`${tag} 남의 구독: 성재 님 개인 구독 · 성재 님만 부를 수 있어요 · 맥 꺼짐`, (await text("seongjae-codex", "mention-agent-line")) === "성재 님 개인 구독 · 성재 님만 부를 수 있어요 · 맥 꺼짐");
-    check(`${tag} 개인 키: 개인 키 · 성재 님만`, (await text("seongjae-key", "mention-agent-line")) === "개인 키 · 성재 님만");
-    check(`${tag} 문의 중 꼬리`, (await text("seongjae-claude", "mention-agent-line")).endsWith("· 문의 중"));
+    check(`${tag} 남의 구독: 성재 님 개인 구독 · 성재 님만 부를 수 있어요 · 맥 꺼짐`, (await text("jihu-codex", "mention-agent-line")) === "성재 님 개인 구독 · 성재 님만 부를 수 있어요 · 맥 꺼짐");
+    check(`${tag} 개인 키: 개인 키 · 성재 님만`, (await text("jihu-key", "mention-agent-line")) === "개인 키 · 성재 님만");
+    check(`${tag} 문의 중 꼬리`, (await text("jihu-claude", "mention-agent-line")).endsWith("· 문의 중"));
     check(`${tag} 외부: 외부 · 누구나`, (await text("hermes", "mention-agent-line")) === "외부 · 누구나");
-    for (const h of ["seongjae-codex", "seongjae-key", "seongjae-claude"]) {
+    for (const h of ["jihu-codex", "jihu-key", "jihu-claude"]) {
       check(`${tag} ${h} 잠금`, (await lineOf(page, h).getAttribute("data-locked")) !== null);
     }
     for (const h of ["kim-intern", "haneul-codex", "hermes"]) {
       check(`${tag} ${h} 잠금 아님`, (await lineOf(page, h).getAttribute("data-locked")) === null);
     }
     // 긴 표시 이름(「성재의 Claude Code」)이 감겨도 칩은 이름 줄(첫 줄)에 붙어 있다.
-    for (const h of ["seongjae-claude", "seongjae-codex", "kim-intern"]) {
+    for (const h of ["jihu-claude", "jihu-codex", "kim-intern"]) {
       const opt = lineOf(page, h);
       const first = await opt.locator("span").first().boundingBox();
       const chip = await opt.getByTestId("mention-badge").boundingBox();
@@ -236,7 +236,7 @@ async function scenes(browser, origin, scheme, viewport) {
     check(`${tag} 목록이 화면 안`, box.x >= 0 && box.x + box.width <= viewport.width, JSON.stringify(box));
 
     // 남의 구독을 골라 보내기 전
-    await lineOf(page, "seongjae-codex").click();
+    await lineOf(page, "jihu-codex").click();
     await page.keyboard.type("배포 요약 부탁해요");
     const notice = page.getByTestId("composer-agent-notice");
     await notice.waitFor();
@@ -261,10 +261,10 @@ async function scenes(browser, origin, scheme, viewport) {
     check(`${tag} 부를 수 있으면 라우팅 줄이 선다`, (await page.getByText("이번만 바꾸기").count()) > 0);
     check(`${tag} 라우팅 줄에 오류 문구 없음`, (await page.getByText("실행 위치 확인 필요").count()) === 0 && (await page.getByText("확인하지 못했습니다").count()) === 0 && (await page.getByText("불러오지 못해").count()) === 0);
     // 왼쪽 안쪽 여백: 한 줄과 라우팅 줄이 같은 x 에서 시작한다
-    await input.fill("@seongjae-codex 요약 부탁해요");
+    await input.fill("@jihu-codex 요약 부탁해요");
     await notice.waitFor();
     const noticePad = await notice.evaluate((el) => { const r = el.getBoundingClientRect(); return r.x + parseFloat(getComputedStyle(el).paddingLeft); });
-    await input.fill("@kim-intern @seongjae-codex 요약 부탁해요");
+    await input.fill("@kim-intern @jihu-codex 요약 부탁해요");
     await page.waitForTimeout(500);
     await page.screenshot({ path: resolve(OUT_DIR, `composer-mixed-${tag}.png`) });
     const routingX = await page.getByText("이번만 바꾸기").first().evaluate((el) => { const d = el.closest("div.px-4") ?? el.closest("div"); const r = d.getBoundingClientRect(); return r.x + parseFloat(getComputedStyle(d).paddingLeft); });
@@ -273,7 +273,7 @@ async function scenes(browser, origin, scheme, viewport) {
     // 일부만 답하는 글(#3444): 라우팅 줄은 답할 에이전트만 센다. 답하지 않는 에이전트는 아래 한 줄이 말한다.
     const routingRow = page.getByTestId("composer-routing");
     const routingLabel = async () => (await routingRow.textContent()) ?? "";
-    check(`${tag} 일부만 답함: 라우팅 줄에 답하지 않는 @seongjae-codex 없음`, !(await routingLabel()).includes("seongjae-codex"), await routingLabel());
+    check(`${tag} 일부만 답함: 라우팅 줄에 답하지 않는 @jihu-codex 없음`, !(await routingLabel()).includes("jihu-codex"), await routingLabel());
     check(`${tag} 일부만 답함: 라우팅 줄은 답하는 @kim-intern 하나`, (await routingLabel()).includes("@kim-intern") && (await routingRow.getAttribute("data-called")) === null);
     check(`${tag} 일부만 답함: 한 줄이 답하지 않는 에이전트를 말함`, ((await notice.textContent()) ?? "").includes("성재의 Codex"));
     await assertRowClean(page, `${tag} 일부만 답함`);
@@ -290,10 +290,10 @@ async function scenes(browser, origin, scheme, viewport) {
     await page.screenshot({ path: resolve(OUT_DIR, `composer-three-answering-${tag}.png`) });
     await assertRowClean(page, `${tag} 셋 다 답함`);
     // 둘 답하고 하나 안 답함: 답할 둘만 센다
-    await input.fill("@kim-intern @hermes @seongjae-codex 요약 부탁해요");
+    await input.fill("@kim-intern @hermes @jihu-codex 요약 부탁해요");
     await page.waitForTimeout(600);
     await page.screenshot({ path: resolve(OUT_DIR, `composer-two-of-three-${tag}.png`) });
-    check(`${tag} 셋 중 둘 답함: 라우팅 줄은 둘`, (await routingRow.getAttribute("data-called")) === "2" && !(await routingLabel()).includes("seongjae-codex"));
+    check(`${tag} 셋 중 둘 답함: 라우팅 줄은 둘`, (await routingRow.getAttribute("data-called")) === "2" && !(await routingLabel()).includes("jihu-codex"));
     await assertRowClean(page, `${tag} 셋 중 둘 답함`);
 
     // 오버라이드가 걸린 줄(칩 + 되돌리기 + 접기)도 좁은 폭에서 겹치지 않는다
@@ -327,7 +327,7 @@ async function scenes(browser, origin, scheme, viewport) {
     const tinput = page.getByTestId("thread-panel").getByTestId("thread-composer-input");
     await tinput.waitFor({ timeout: 8000 });
     await tinput.click();
-    await page.keyboard.type("@seongjae-codex 부탁해요");
+    await page.keyboard.type("@jihu-codex 부탁해요");
     const tnotice = page.getByTestId("thread-composer-agent-notice");
     await tnotice.waitFor();
     await page.waitForTimeout(500);

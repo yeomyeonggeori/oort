@@ -57,14 +57,14 @@ const personal = (harness: string, ownerId = HUMAN) => ({
 });
 
 const withBoth = makeDirectory([
-  member(HUMAN, "human", "곽성재", "sj"),
+  member(HUMAN, "human", "한지후", "sj"),
   member(OTHER, "human", "김하늘", "sky"),
   member(AGENT, "agent", "hermes", "hermes"),
   member("a-claude", "agent", "내 Claude Code", "my-claude", personal("claude_code")),
   member("a-codex", "agent", "내 Codex", "my-codex", personal("codex")),
 ]);
 const withNone = makeDirectory([
-  member(HUMAN, "human", "곽성재", "sj"),
+  member(HUMAN, "human", "한지후", "sj"),
   member(OTHER, "human", "김하늘", "sky"),
   member(AGENT, "agent", "hermes", "hermes"),
   member("a-theirs", "agent", "남의 Codex", "their-codex", personal("codex", OTHER)),
@@ -99,7 +99,7 @@ const SESSION: SessionContextValue = {
   session: {
     accessToken: "access",
     refreshToken: "refresh",
-    member: { id: HUMAN, workspaceId: "w", kind: "human", displayName: "곽성재", handle: "sj" },
+    member: { id: HUMAN, workspaceId: "w", kind: "human", displayName: "한지후", handle: "sj" },
     realtimeWebSocketUrl: "wss://example.test/connection/websocket",
   },
   workspaceId: "w",
@@ -184,7 +184,7 @@ describe("WorkRequestOpenSuggestion (웹)", () => {
     cleanup();
     window.localStorage.clear();
     const onlyClaude = makeDirectory([
-      member(HUMAN, "human", "곽성재", "sj"),
+      member(HUMAN, "human", "한지후", "sj"),
       member(AGENT, "agent", "hermes", "hermes"),
       member("a-claude", "agent", "내 Claude Code", "my-claude", personal("claude")),
     ]);
@@ -288,7 +288,7 @@ describe("WorkRequestOpenSuggestion (웹)", () => {
   it("남에게는 라벨만 말하는 한 줄이고 단추도 글도 없다", () => {
     mount(cardFor(withBoth, { harness: "claude", prompt: PROMPT }), OTHER);
     const line = screen.getByTestId("work-request-suggest-line");
-    expect(line.textContent).toBe("곽성재에게 「내 맥의 Claude Code에 맡기기」 카드를 제안했어요");
+    expect(line.textContent).toBe("한지후에게 「내 맥의 Claude Code에 맡기기」 카드를 제안했어요");
     expect(screen.queryByRole("button")).toBeNull();
     expect(screen.getByTestId("work-request-suggest").textContent).not.toContain("비밀번호 보기");
   });

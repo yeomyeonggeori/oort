@@ -31,7 +31,7 @@ const channels = [{ id: "00000000-0000-7000-8000-000000000201", workspaceId, kin
 const auth = {
   accessToken: "capture-only-not-a-credential",
   refreshToken: "capture-only-not-a-credential",
-  member: { id: memberId, workspaceId, kind: "human", displayName: "곽성재", handle: "seongjae" },
+  member: { id: memberId, workspaceId, kind: "human", displayName: "한지후", handle: "jihu" },
   realtimeWebSocketUrl: "ws://settings-s5b-capture.invalid/connection/websocket",
 };
 function roster(role) {
@@ -39,7 +39,7 @@ function roster(role) {
     id, workspaceId, kind, status: "active", role: "member", displayName, handle, channelCount: 1,
     channelIds: channels.map((c) => c.id), capabilities: [], createdAtMs: 0, updatedAtMs: 0, ...extra,
   });
-  return [base(memberId, "human", "곽성재", "seongjae", { role }), base(agentId, "agent", "김인턴", "kim-intern")];
+  return [base(memberId, "human", "한지후", "jihu", { role }), base(agentId, "agent", "김인턴", "kim-intern")];
 }
 const WORKSPACE = {
   id: workspaceId, slug: "yeomyeong", name: "여명거리", updatedAtMs: 1_760_000_000_000,

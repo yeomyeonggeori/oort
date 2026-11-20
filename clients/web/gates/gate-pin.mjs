@@ -211,8 +211,8 @@ const session = {
     id: memberId,
     workspaceId,
     kind: "human",
-    displayName: "곽성재",
-    handle: "seongjae",
+    displayName: "한지후",
+    handle: "jihu",
   },
   realtimeWebSocketUrl: "ws://pin-gate.invalid/connection/websocket",
 };
@@ -236,8 +236,8 @@ const roster = [
     id: memberId,
     kind: "human",
     role: "owner",
-    displayName: "곽성재",
-    handle: "seongjae",
+    displayName: "한지후",
+    handle: "jihu",
   }),
   member({ id: peerId, kind: "human", displayName: "이도현", handle: "dohyun" }),
 ];
@@ -753,7 +753,7 @@ async function exercise(browser) {
       `the list entry must carry the message the server projected, read "${coldText}"`
     );
   }
-  if (!coldText.includes("곽성재")) {
+  if (!coldText.includes("한지후")) {
     throw new Error(`the list entry must name its author, read "${coldText}"`);
   }
 

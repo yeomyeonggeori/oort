@@ -90,7 +90,7 @@ function member(over: Partial<RosterMember> & Pick<RosterMember, "id" | "kind" |
   return {
     workspaceId: WS,
     status: "active",
-    handle: over.kind === "agent" ? "grokbot" : "seongjae",
+    handle: over.kind === "agent" ? "grokbot" : "jihu",
     role: over.kind === "agent" ? "member" : "owner",
     channelCount: 0,
     channelIds: [],
@@ -106,7 +106,7 @@ function session(): SessionContextValue {
     session: {
       accessToken: "a",
       refreshToken: "r",
-      member: { id: MEMBER_ID, workspaceId: WS, kind: "human", displayName: "곽성재", handle: "seongjae" },
+      member: { id: MEMBER_ID, workspaceId: WS, kind: "human", displayName: "한지후", handle: "jihu" },
       realtimeWebSocketUrl: "wss://example.test/connection/websocket",
     },
     workspaceId: WS,
@@ -150,7 +150,7 @@ describe("그록봇 승인과 교체 프롬프트 (#3773)", () => {
     vi.mocked(listHostedConnections).mockResolvedValue({ connections: [wire()] });
     vi.mocked(getHostedConnection).mockResolvedValue({ connection: wire(), cleanupArtifacts: [] });
     vi.mocked(fetchRoster).mockResolvedValue([
-      member({ id: MEMBER_ID, kind: "human", displayName: "곽성재" }),
+      member({ id: MEMBER_ID, kind: "human", displayName: "한지후" }),
       member({ id: AGENT_ID, kind: "agent", displayName: "그록봇" }),
     ]);
     vi.mocked(listChannels).mockResolvedValue([

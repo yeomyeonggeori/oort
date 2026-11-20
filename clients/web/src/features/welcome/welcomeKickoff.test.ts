@@ -395,19 +395,19 @@ describe("welcomeBandSpeaker (who the band waits for)", () => {
     expect(
       welcomeBandSpeaker(
         [
-          agent({ displayName: "곽성재의 Claude", paused: true, ownerHumanId: MEMBER.toUpperCase() }),
+          agent({ displayName: "한지후의 Claude", paused: true, ownerHumanId: MEMBER.toUpperCase() }),
           agent({ id: "y", displayName: "팀봇", paused: true, ownerHumanId: OTHER_MEMBER }),
         ],
         MEMBER
       )
-    ).toEqual({ name: "곽성재의 Claude", sleepy: true });
+    ).toEqual({ name: "한지후의 Claude", sleepy: true });
   });
 
   it("an awake agent beats my paused one (someone can already speak)", () => {
     expect(
       welcomeBandSpeaker(
         [
-          agent({ displayName: "곽성재의 Claude", paused: true, ownerHumanId: MEMBER }),
+          agent({ displayName: "한지후의 Claude", paused: true, ownerHumanId: MEMBER }),
           agent({ id: "z", displayName: "김인턴", paused: false }),
         ],
         MEMBER

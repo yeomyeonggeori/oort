@@ -67,8 +67,8 @@ vi.mock("@/features/workspace/useWorkspace", async (importOriginal) => {
           workspaceId: IDS.ws,
           kind: "human",
           status: "active",
-          displayName: "곽성재",
-          handle: "seongjae",
+          displayName: "한지후",
+          handle: "jihu",
           channelCount: 1,
           channelIds: [IDS.channel],
           capabilities: [],
@@ -287,7 +287,7 @@ describe("DesktopNotifications in a browser tab (#3340)", () => {
     expect(subscribed).toBeGreaterThan(0);
     await deliver(mention());
     expect(FakeNotification.instances).toHaveLength(1);
-    expect(FakeNotification.instances[0]?.title).toBe("곽성재");
+    expect(FakeNotification.instances[0]?.title).toBe("한지후");
   });
 
   it("a granted tab holds its banner while the server pause is on, and shows it once it is off (#4197)", async () => {

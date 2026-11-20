@@ -38,7 +38,7 @@ const channels = [
 const auth = {
   accessToken: "capture-only-not-a-credential",
   refreshToken: "capture-only-not-a-credential",
-  member: { id: me, workspaceId, kind: "human", displayName: "곽성재", handle: "seongjae" },
+  member: { id: me, workspaceId, kind: "human", displayName: "한지후", handle: "jihu" },
   realtimeWebSocketUrl: "ws://capture-3893.invalid/connection/websocket",
 };
 const person = (id, displayName, handle, role) => ({
@@ -66,7 +66,7 @@ let bag = { team_ai_fast_path: false };
 function roster() {
   const helperRow = bot(helper, "oort 도우미", "oort-helper", scenario.v2 ? { aliases: ["oort", "오르트"] } : {});
   return [
-    person(me, "곽성재", "seongjae", "owner"),
+    person(me, "한지후", "jihu", "owner"),
     person(haneul, "김하늘", "haneul", "member"),
     helperRow,
     bot(grok, "그록봇", "grokbot"),

@@ -141,12 +141,12 @@ const NAMES = {
 const LONG_TOPIC =
   "release-2026-08 운영 토픽: 온콜 교대, 배포 판단, 고객 영향, 롤백 조건을 이 채널에서 함께 기록합니다. " +
   "긴 문장도 헤더의 다른 컨트롤을 밀어내지 않으며, 전체 내용은 키보드로 열어 읽을 수 있어야 합니다.";
-const LONG_PEER = "곽성재님의 아주아주 긴 이름을 가진 에이전트 어시스턴트 (운영팀 온콜 담당)";
+const LONG_PEER = "한지후님의 아주아주 긴 이름을 가진 에이전트 어시스턴트 (운영팀 온콜 담당)";
 const SHORT_PEER = "이도현";
 /** 허들 참가자 5명: 요약은 앞의 둘과 「외 3명」(`huddleParticipantSummary`)이라 긴 이름 둘이면 한 줄이 300px 가까이 된다. */
 const HUDDLE_PARTICIPANTS = [
   "Nadia Rahman — 제품 디자인 운영",
-  "곽성재 — 웹 클라이언트 담당",
+  "한지후 — 웹 클라이언트 담당",
   "이도현",
   "팀원 1",
   "팀원 2",
@@ -213,8 +213,8 @@ function roster(scene) {
       id: ownerId,
       kind: "human",
       role: "owner",
-      displayName: "곽성재",
-      handle: "seongjae",
+      displayName: "한지후",
+      handle: "jihu",
       channelIds: [channelId, dmChannelId],
     }),
   ];
@@ -329,7 +329,7 @@ async function installRoutes(context, scene, withPlan) {
       return json(route, {
         accessToken: "gate-only-not-a-credential",
         refreshToken: "gate-only-not-a-credential",
-        member: { id: ownerId, workspaceId, kind: "human", displayName: "곽성재", handle: "seongjae" },
+        member: { id: ownerId, workspaceId, kind: "human", displayName: "한지후", handle: "jihu" },
         realtimeWebSocketUrl: "ws://header-fit-gate.invalid/connection/websocket",
       });
     }

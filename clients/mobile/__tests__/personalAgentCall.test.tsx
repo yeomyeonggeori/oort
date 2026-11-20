@@ -102,7 +102,7 @@ function personal(id: string, handle: string, ownerId: string): RosterMember {
 }
 
 const MEMBERS: RosterMember[] = [
-  member({id: ME, handle: 'seongjae'}),
+  member({id: ME, handle: 'jihu'}),
   member({id: TEAMMATE, handle: 'mate'}),
   personal(MY_AGENT, 'my-claude', ME),
   personal(THEIR_AGENT, 'mate-claude', TEAMMATE),
@@ -299,7 +299,7 @@ beforeEach(() => {
     accessToken: 'access-token-1',
     refreshToken: 'refresh-token-1',
     realtimeWebSocketUrl: 'wss://api.example.com/connection/websocket',
-    member: {id: ME, workspaceId: WS, kind: 'human', displayName: '곽성재', handle: 'seongjae'},
+    member: {id: ME, workspaceId: WS, kind: 'human', displayName: '한지후', handle: 'jihu'},
   });
   installFetch();
 });

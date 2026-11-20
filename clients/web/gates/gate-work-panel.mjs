@@ -157,7 +157,7 @@ const DELTA_SENTENCE = DELTAS.join("");
 const REOPEN_DELTA = "다시 열고 나서 온 줄입니다.";
 const MISSED_DELTA = "닫혀 있는 동안 흘러간 줄입니다.";
 const TOOL_NAME = "work.session.end";
-const TOOL_ARG_MARKER = "/Users/seongjae/projects/momo/secret-plan.md";
+const TOOL_ARG_MARKER = "/Users/jihu/projects/momo/secret-plan.md";
 const TOOL_ARG_VALUE = "되돌리기-절차-초안";
 const ROOT_MESSAGE = "0199aaaa-0000-7000-8000-0000000000M1";
 const REPLY_MESSAGE = "0199aaaa-0000-7000-8000-0000000000M2";
@@ -211,8 +211,8 @@ const session = {
     id: memberId,
     workspaceId,
     kind: "human",
-    displayName: "곽성재",
-    handle: "seongjae",
+    displayName: "한지후",
+    handle: "jihu",
   },
   realtimeWebSocketUrl: "ws://work-panel-gate.invalid/connection/websocket",
 };
@@ -224,8 +224,8 @@ const roster = [
     kind: "human",
     status: "active",
     role: "owner",
-    displayName: "곽성재",
-    handle: "seongjae",
+    displayName: "한지후",
+    handle: "jihu",
     channelCount: 1,
     channelIds: [channelId],
     capabilities: [],

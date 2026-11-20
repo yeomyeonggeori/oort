@@ -49,7 +49,7 @@ function member(id: string, patch: Partial<RosterMember>): RosterMember {
   };
 }
 const roster = [
-  member(ME, { displayName: "곽성재", handle: "seongjae" }),
+  member(ME, { displayName: "한지후", handle: "jihu" }),
   member(DOHYUN, { displayName: "이도현", handle: "dohyun" }),
   member(SEOYEON, { displayName: "박서연", handle: "seoyeon" }),
   member(INTERN, { displayName: "김인턴", handle: "intern", kind: "agent" }),
@@ -89,7 +89,7 @@ const session: SessionContextValue = {
   session: {
     accessToken: "a",
     refreshToken: "r",
-    member: { id: ME, workspaceId: WS, kind: "human", displayName: "곽성재", handle: "seongjae" },
+    member: { id: ME, workspaceId: WS, kind: "human", displayName: "한지후", handle: "jihu" },
     realtimeWebSocketUrl: "wss://example.test/connection/websocket",
   },
   workspaceId: WS,

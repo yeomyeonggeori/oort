@@ -27,9 +27,9 @@ const channels = ["general", "workbench", "agent-lab", "design-2-0", "release"].
 const json = (route, body) => route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(body) });
 
 const SCENES = {
-  status: { displayName: "곽성재", handle: "seongjae", presenceStatus: "auto", statusEmoji: "🏝️", statusText: "휴가 중, 금요일에 돌아와요" },
-  plain: { displayName: "곽성재", handle: "seongjae", presenceStatus: "auto" },
-  dnd: { displayName: "곽성재", handle: "seongjae", presenceStatus: "dnd", statusEmoji: "🎧", statusText: "집중 작업" },
+  status: { displayName: "한지후", handle: "jihu", presenceStatus: "auto", statusEmoji: "🏝️", statusText: "휴가 중, 금요일에 돌아와요" },
+  plain: { displayName: "한지후", handle: "jihu", presenceStatus: "auto" },
+  dnd: { displayName: "한지후", handle: "jihu", presenceStatus: "dnd", statusEmoji: "🎧", statusText: "집중 작업" },
   long: { displayName: "Alexandria Montgomery-Wellington", handle: "alexandria", presenceStatus: "away", statusEmoji: "📅", statusText: "분기 회고 준비로 오후 내내 자리를 비웁니다" },
 };
 

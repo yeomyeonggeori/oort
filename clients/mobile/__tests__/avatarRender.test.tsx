@@ -50,7 +50,7 @@ function member(over: Partial<RosterMember> & {id: string}): RosterMember {
 }
 
 const DIRECTORY = makeDirectory([
-  member({id: SELF, displayName: '곽성재', handle: 'seongjae'}),
+  member({id: SELF, displayName: '한지후', handle: 'jihu'}),
   member({
     id: AGENT,
     kind: 'agent',
@@ -167,7 +167,7 @@ describe('아바타가 선다 — 그리고 코어가 말한 그대로 선다', 
 
   it('이니셜은 이름의 첫 글자다', () => {
     const view = render(<Avatar directory={DIRECTORY} memberId={SELF} />);
-    expect(view.getByTestId('avatar-initial', HIDDEN).props.children).toBe('곽');
+    expect(view.getByTestId('avatar-initial', HIDDEN).props.children).toBe('한');
   });
 
   it('모르는 작성자에게는 글자를 그리지 않는다 — uuid 는 이름이 아니다 (H-11 3)', () => {
@@ -207,7 +207,7 @@ describe('아바타가 선다 — 그리고 코어가 말한 그대로 선다', 
 // -----------------------------------------------------------------------------
 describe('avatarUrl 경로가 개통됐다 — 다만 폰이 실을 수 있는 것만', () => {
   const withAvatar = (avatarUrl: string) =>
-    makeDirectory([member({id: SELF, displayName: '곽성재', avatarUrl})]);
+    makeDirectory([member({id: SELF, displayName: '한지후', avatarUrl})]);
 
   it('상대 주소는 이 기기가 고른 서버 앞에 붙는다', () => {
     // 웹에서는 `/media/…` 로 끝이지만 RN 의 `Image` 에는 문서 오리진이 없다.

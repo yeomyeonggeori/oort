@@ -36,7 +36,7 @@ const SELF = '11111111-1111-4111-8111-111111111111';
 const AGENT = 'aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa';
 const ROOT_ID = 'cccccccc-1111-4111-8111-cccccccccccc';
 const BASE_MS = 1_700_000_000_000;
-const ME = {id: SELF, workspaceId: WS, displayName: '곽성재'} as Member;
+const ME = {id: SELF, workspaceId: WS, displayName: '한지후'} as Member;
 
 const OFFLINE_COMPOSER = '오프라인이라 지금은 보낼 수 없어요. 쓰던 글은 그대로 있고, 다시 연결되면 여기서 보낼 수 있어요.';
 const SERVER_COMPOSER = '서버에 닿지 못해 지금은 보낼 수 없어요. 쓰던 글은 그대로 있고, 다시 연결되면 여기서 보낼 수 있어요.';
@@ -49,8 +49,8 @@ function member(id: string): RosterMember {
     workspaceId: WS,
     kind: id === AGENT ? 'agent' : 'human',
     status: 'active',
-    displayName: id === AGENT ? '김인턴' : '곽성재',
-    handle: id === AGENT ? 'intern-kim' : 'seongjae',
+    displayName: id === AGENT ? '김인턴' : '한지후',
+    handle: id === AGENT ? 'intern-kim' : 'jihu',
     channelCount: 0,
     channelIds: [],
     capabilities: [],

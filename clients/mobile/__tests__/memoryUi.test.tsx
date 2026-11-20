@@ -497,7 +497,7 @@ function rosterMember(over: Partial<RosterMember> & {id: string}): RosterMember 
   } as RosterMember;
 }
 const DIRECTORY = makeDirectory([
-  rosterMember({id: SELF, displayName: '곽성재', handle: 'seongjae'}),
+  rosterMember({id: SELF, displayName: '한지후', handle: 'jihu'}),
   rosterMember({id: AGENT, kind: 'agent', displayName: '김인턴', handle: 'intern'}),
 ]);
 function turnRecord(over: Partial<Message> = {}): Message {

@@ -105,7 +105,7 @@ function member(id: string, displayName: string, handle: string): RosterMember {
     updatedAtMs: 1,
   };
 }
-const self = { ...member(ME, "곽성재", "seongjae"), role: "owner" } as RosterMember;
+const self = { ...member(ME, "한지후", "jihu"), role: "owner" } as RosterMember;
 const roster = [self, member(PEER_ONE, "이도현", "dohyun"), member(PEER_TWO, "박서연", "seoyeon")];
 
 const dm = (id: string, peer: string): Channel =>
@@ -246,7 +246,7 @@ function sessionValue(): SessionContextValue {
     session: {
       accessToken: "access",
       refreshToken: "refresh",
-      member: { id: ME, workspaceId: WS, kind: "human", displayName: "곽성재", handle: "seongjae" },
+      member: { id: ME, workspaceId: WS, kind: "human", displayName: "한지후", handle: "jihu" },
       realtimeWebSocketUrl: "wss://example.test/connection/websocket",
     },
     workspaceId: WS,

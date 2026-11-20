@@ -75,15 +75,15 @@ function rosterMember(
   } as RosterMember;
 }
 const DIRECTORY = makeDirectory([
-  rosterMember(SELF_ID, 'human', '곽성재', 'seongjae'),
+  rosterMember(SELF_ID, 'human', '한지후', 'jihu'),
   rosterMember(HERMES, 'agent', 'Hermes', 'hermes'),
 ]);
 const ME: Member = {
   id: SELF_ID,
   workspaceId: WS,
   kind: 'human',
-  displayName: '곽성재',
-  handle: 'seongjae',
+  displayName: '한지후',
+  handle: 'jihu',
 };
 
 const catalog = (installed: boolean): PluginCatalog =>
@@ -183,7 +183,7 @@ describe('쓴 앱 꼬리 (폰)', () => {
     fireEvent.press(screen.getByTestId('apps-details-toggle'));
     const details = screen.getAllByTestId('apps-detail-line').map(n => n.props.children).join('|');
     expect(details).toContain('Hermes에서 실행했어요.');
-    expect(details).toContain('곽성재 명의로 썼어요.');
+    expect(details).toContain('한지후 명의로 썼어요.');
     expect(details).toContain('연결: gmailmcp.googleapis.com');
     expect(details).toContain('oort는 확인하지 못해요');
     expect(details).toContain('요약만 올리는 게 원칙이에요');

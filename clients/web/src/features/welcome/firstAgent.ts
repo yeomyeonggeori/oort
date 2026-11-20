@@ -388,7 +388,7 @@ export function firstAgentCaptureSubscription(): {
   }
   return {
     agentDisplayName: "성재의 Claude",
-    agentHandle: "seongjae-claude",
+    agentHandle: "jihu-claude",
     endpoint: "https://oort-team.example.com/v1/mcp/agent-port",
     credential: "momo_pair_v1.capture.once-only-fixture-do-not-repeat",
   };

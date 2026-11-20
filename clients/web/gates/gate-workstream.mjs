@@ -160,8 +160,8 @@ const session = {
     id: viewerId,
     workspaceId,
     kind: "human",
-    displayName: "곽성재",
-    handle: "seongjae",
+    displayName: "한지후",
+    handle: "jihu",
   },
   realtimeWebSocketUrl: "ws://workstream-gate.invalid/connection/websocket",
 };
@@ -173,8 +173,8 @@ const roster = [
     kind: "human",
     status: "active",
     role: "owner",
-    displayName: "곽성재",
-    handle: "seongjae",
+    displayName: "한지후",
+    handle: "jihu",
     channelCount: 1,
     channelIds: [channelId],
     capabilities: [],
@@ -1521,7 +1521,7 @@ async function assertListAndHistory(browser) {
   // "A -> 에이전트 -> C" 원장에서 가운데 칸의 책임 주체. 토큰 색만으로는 그
   // 에이전트를 누구에게 물어야 하는지가 화면에 없다(skill §9).
   const agentOwner = await text(agentRow.getByTestId("workstream-run-owner"));
-  if (agentOwner !== "곽성재 님이 관리") {
+  if (agentOwner !== "한지후 님이 관리") {
     throw new Error(
       `에이전트 소유자 병기: 에이전트 실행이 책임 주체를 말하지 않는다 (${agentOwner || "없음"})`
     );
@@ -1636,7 +1636,7 @@ async function assertListAndHistory(browser) {
   const afterActors = await page
     .getByTestId("workstream-run-actor")
     .evaluateAll((nodes) => nodes.map((node) => node.textContent?.trim()));
-  if (!afterActors.includes("곽성재")) {
+  if (!afterActors.includes("한지후")) {
     throw new Error(
       `인수 왕복: the reader's own Run never joined the history (${JSON.stringify(afterActors)})`
     );

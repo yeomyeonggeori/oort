@@ -78,8 +78,8 @@ function rosterMember(
   role: RosterMember["role"],
   id = ME,
   kind: RosterMember["kind"] = "human",
-  displayName = "곽성재",
-  handle = "seongjae"
+  displayName = "한지후",
+  handle = "jihu"
 ): RosterMember {
   return {
     id,
@@ -106,8 +106,8 @@ function sessionValue(): SessionContextValue {
         id: ME,
         workspaceId: WS,
         kind: "human",
-        displayName: "곽성재",
-        handle: "seongjae",
+        displayName: "한지후",
+        handle: "jihu",
       },
       realtimeWebSocketUrl: "wss://example.test/connection/websocket",
     },

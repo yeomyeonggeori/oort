@@ -199,8 +199,8 @@ const session = {
     id: memberId,
     workspaceId,
     kind: "human",
-    displayName: "곽성재",
-    handle: "seongjae",
+    displayName: "한지후",
+    handle: "jihu",
   },
   realtimeWebSocketUrl: "ws://composer-gate.invalid/connection/websocket",
 };
@@ -224,8 +224,8 @@ const roster = [
     id: memberId,
     kind: "human",
     role: "owner",
-    displayName: "곽성재",
-    handle: "seongjae",
+    displayName: "한지후",
+    handle: "jihu",
   }),
   member({
     id: peerId,

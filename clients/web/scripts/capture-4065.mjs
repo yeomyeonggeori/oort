@@ -31,11 +31,11 @@ const channels = [
 const auth = {
   accessToken: "capture-only-not-a-credential",
   refreshToken: "capture-only-not-a-credential",
-  member: { id: me, workspaceId, kind: "human", displayName: "곽성재", handle: "seongjae" },
+  member: { id: me, workspaceId, kind: "human", displayName: "한지후", handle: "jihu" },
   realtimeWebSocketUrl: "ws://capture-4065.invalid/connection/websocket",
 };
 const roster = () => [
-  { id: me, workspaceId, kind: "human", status: "active", role: "owner", displayName: "곽성재", handle: "seongjae", channelCount: 2, channelIds: [ch, dm], capabilities: [], createdAtMs: 0, updatedAtMs: 0 },
+  { id: me, workspaceId, kind: "human", status: "active", role: "owner", displayName: "한지후", handle: "jihu", channelCount: 2, channelIds: [ch, dm], capabilities: [], createdAtMs: 0, updatedAtMs: 0 },
   { id: grok, workspaceId, kind: "agent", status: "active", displayName: "grok", handle: "grok", channelCount: 2, channelIds: [ch, dm], capabilities: [], ownerHumanId: me, createdAtMs: 0, updatedAtMs: 0 },
 ];
 function json(route, body, status = 200) {

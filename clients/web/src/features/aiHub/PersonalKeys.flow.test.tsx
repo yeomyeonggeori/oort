@@ -103,7 +103,7 @@ function sessionFor(id: string): SessionContextValue {
   return {
     session: {
       accessToken: "a", refreshToken: "r",
-      member: { id, workspaceId: WS, kind: "human", displayName: id === ME ? "곽성재" : "서연", handle: id === ME ? "seongjae" : "seoyeon" },
+      member: { id, workspaceId: WS, kind: "human", displayName: id === ME ? "한지후" : "서연", handle: id === ME ? "jihu" : "seoyeon" },
       realtimeWebSocketUrl: "wss://example.test/connection/websocket",
     },
     workspaceId: WS, realtime: null, connStatus: "connected", logout: () => undefined, replaceSessionMember: () => undefined,
@@ -161,7 +161,7 @@ beforeAll(() => {
 
 beforeEach(() => {
   vi.mocked(fetchRoster).mockReset().mockResolvedValue([
-    person(ME, "곽성재", "owner", "seongjae"), person(SEOYEON, "서연", "member", "seoyeon"), person(MINA, "미나", "member", "mina"),
+    person(ME, "한지후", "owner", "jihu"), person(SEOYEON, "서연", "member", "seoyeon"), person(MINA, "미나", "member", "mina"),
   ]);
   vi.mocked(listChannels).mockReset().mockResolvedValue([]);
   vi.mocked(listHostedConnections).mockReset().mockResolvedValue({ connections: [] });
@@ -205,7 +205,7 @@ describe("운영자: 발급", () => {
     expect(byId("ai-personal-issue-holder")!.getAttribute("role")).toBe("combobox");
     openHolder();
     const options = holderOptions().map((o) => o.textContent);
-    expect(options).toEqual(["사람 고르기", "곽성재", "서연", "미나"]);
+    expect(options).toEqual(["사람 고르기", "한지후", "서연", "미나"]);
     expect(byId("ai-personal-issue-preset-openai")).not.toBeNull();
     expect(byId("ai-personal-issue-preset-anthropic")).not.toBeNull();
   });
@@ -287,7 +287,7 @@ describe("운영자: 발급", () => {
     expect(byId("ai-personal-issue-holder")!.getAttribute("role")).toBe("combobox");
     openHolder();
     const options = holderOptions().map((o) => o.textContent);
-    expect(options).toEqual(["사람 고르기", "곽성재", "미나"]);
+    expect(options).toEqual(["사람 고르기", "한지후", "미나"]);
   });
 
   it("창을 닫으면 칸 값과 함께 사라진다", async () => {

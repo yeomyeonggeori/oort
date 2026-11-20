@@ -90,8 +90,8 @@ const SELF: Member = {
   id: SELF_ID,
   workspaceId: WS,
   kind: 'human',
-  displayName: '곽성재',
-  handle: 'seongjae',
+  displayName: '한지후',
+  handle: 'jihu',
 };
 
 function rosterMember(fields: Record<string, unknown>) {
@@ -111,7 +111,7 @@ function rosterMember(fields: Record<string, unknown>) {
 }
 
 const ROSTER = [
-  rosterMember({id: SELF_ID, displayName: '곽성재', handle: 'seongjae'}),
+  rosterMember({id: SELF_ID, displayName: '한지후', handle: 'jihu'}),
   rosterMember({id: AGENT_ID, kind: 'agent', displayName: '김인턴', handle: 'kim-intern'}),
   rosterMember({id: PERSON_ID, displayName: '박세은', handle: 'seeun'}),
 ];
@@ -569,7 +569,7 @@ describe('탭 셋과 + (ADR-0189 D1, #2750)', () => {
     // 옛 시트의 두 문은 메뉴로 옮겼다 — 시트에는 사람만 있다.
     expect(screen.queryByTestId('new-message-agents')).toBeNull();
     // 나 자신은 목록에 없다.
-    expect(screen.queryByTestId('new-dm-person-seongjae')).toBeNull();
+    expect(screen.queryByTestId('new-dm-person-jihu')).toBeNull();
     fireEvent.changeText(screen.getByTestId('new-dm-search'), '세은');
     expect(screen.queryByTestId('new-dm-person-kim-intern')).toBeNull();
     fireEvent.press(screen.getByTestId('new-dm-person-seeun'));
@@ -648,7 +648,7 @@ describe('탭 셋과 + (ADR-0189 D1, #2750)', () => {
     expect(rosterNow?.find(row => row.id === SELF_ID)?.channelIds).toContain('ch-new');
     // 나는 고를 사람에 없고, 사람·에이전트가 선다.
     await waitFor(() => expect(screen.getByTestId('channel-member-add-person-seeun')).toBeTruthy());
-    expect(screen.queryByTestId('channel-member-add-person-seongjae')).toBeNull();
+    expect(screen.queryByTestId('channel-member-add-person-jihu')).toBeNull();
     expect(screen.getByTestId('channel-member-add-person-kim-intern')).toBeTruthy();
     // 누르면 그 사람이 채널에 추가되고, 줄은 그 자리에서 「멤버」가 된다(시트는 닫히지 않는다).
     fireEvent.press(screen.getByTestId('channel-member-add-person-seeun'));

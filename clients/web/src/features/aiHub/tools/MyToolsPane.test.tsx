@@ -54,7 +54,7 @@ const session: SessionContextValue = {
   session: {
     accessToken: "access",
     refreshToken: "refresh",
-    member: { id: ME, workspaceId: WS, kind: "human", displayName: "곽성재", handle: "seongjae" },
+    member: { id: ME, workspaceId: WS, kind: "human", displayName: "한지후", handle: "jihu" },
     realtimeWebSocketUrl: "wss://example.test/connection/websocket",
   },
   workspaceId: WS,
@@ -132,7 +132,7 @@ function fakePort(initial: PersonalAgentSummary[] = [], listState: "ok" | "unava
       displayName: alias,
       harness,
       enabled: true,
-      label: "곽성재의 개인 에이전트",
+      label: "한지후의 개인 에이전트",
     };
     agents = [...agents.filter((a) => a.harness !== harness), agent];
     return agent;
@@ -276,7 +276,7 @@ describe("로그인 × 호스트 상태", () => {
 
   it("「문의 중」은 어디에도 없다(Claude 개인 에이전트가 켜져 있어도)", async () => {
     const { store, server } = setup([
-      { id: "a1", handle: "my-claude", displayName: "my-claude", harness: "claude_code", enabled: true, label: "곽성재의 개인 에이전트" },
+      { id: "a1", handle: "my-claude", displayName: "my-claude", harness: "claude_code", enabled: true, label: "한지후의 개인 에이전트" },
     ]);
     mount({ store, port: server.port });
     await until(() => card("claude")?.getAttribute("data-personal") === "on");
@@ -421,7 +421,7 @@ describe("연결을 끊어도 개인 에이전트는 켜져 있다 (#4252)", () 
     displayName: "my-claude",
     harness: "claude_code" as const,
     enabled: true,
-    label: "곽성재의 개인 에이전트",
+    label: "한지후의 개인 에이전트",
   };
 
   it("개인 에이전트가 켜져 있으면 끊기 확인이 그 사실과 정리하는 길(스위치)을 말한다", async () => {
@@ -534,7 +534,7 @@ describe("개인 에이전트로 쓰기", () => {
 
   it("끄기: 스위치를 끄면 그 멤버를 비활성으로 보낸다", async () => {
     const { store, server } = setup([
-      { id: "a1", handle: "my-claude", displayName: "my-claude", harness: "claude_code", enabled: true, label: "곽성재의 개인 에이전트" },
+      { id: "a1", handle: "my-claude", displayName: "my-claude", harness: "claude_code", enabled: true, label: "한지후의 개인 에이전트" },
     ]);
     mount({ store, port: server.port });
     await until(() => card("claude")?.getAttribute("data-personal") === "on");
@@ -546,7 +546,7 @@ describe("개인 에이전트로 쓰기", () => {
 
   it("끄면 명부도 다시 읽는다: 꺼진 멤버는 서버 명부(활성만)에서 빠지므로 사이드바 DM 이 이름 그대로 남지 않는다 (#4252)", async () => {
     const { store, server } = setup([
-      { id: "a1", handle: "my-claude", displayName: "my-claude", harness: "claude_code", enabled: true, label: "곽성재의 개인 에이전트" },
+      { id: "a1", handle: "my-claude", displayName: "my-claude", harness: "claude_code", enabled: true, label: "한지후의 개인 에이전트" },
     ]);
     mount({ store, port: server.port });
     await until(() => card("claude")?.getAttribute("data-personal") === "on");

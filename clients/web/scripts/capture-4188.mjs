@@ -68,7 +68,7 @@ const person = (id, kind, displayName, handle, extra = {}) => ({
   channelIds: [CH, GENERAL], capabilities: [], createdAtMs: 0, updatedAtMs: 0, ...extra,
 });
 const roster = [
-  person(memberId, "human", "곽성재", "seongjae", { role: "owner" }),
+  person(memberId, "human", "한지후", "jihu", { role: "owner" }),
   person(P("11"), "human", "이도현", "dohyun"),
   person(P("12"), "human", "박서연", "seoyeon"),
   person(P("13"), "human", "최민수", "minsu"),
@@ -84,7 +84,7 @@ const channelsFor = (unread) => (unread ? [...channels, { id: DESIGN, workspaceI
 const auth = {
   accessToken: "capture-only-not-a-credential",
   refreshToken: "capture-only-not-a-credential",
-  member: { id: memberId, workspaceId, kind: "human", displayName: "곽성재", handle: "seongjae" },
+  member: { id: memberId, workspaceId, kind: "human", displayName: "한지후", handle: "jihu" },
   realtimeWebSocketUrl: "ws://ap1a-4188-capture.invalid/connection/websocket",
 };
 const json = (route, body, status = 200) =>
@@ -104,7 +104,7 @@ function messageRows(unread = false) {
     m(5, agentId, "요약해 둘게요. 필요한 일이 있으면 말씀해 주세요.", 12 * MIN),
     m(6, memberId, "이번 주 일정 정리해 줘", 4 * MIN),
     // 신호색이 앱에서 보이는 자리(`unread` 장면만): 나를 부른 멘션은 신호 채움, 다른 멤버 멘션은 신호 옅은 채움이다.
-    ...(unread ? [m(7, P("11"), "@seongjae 배포 전에 @grok 한테 점검 요청해 주세요", 1 * MIN)] : []),
+    ...(unread ? [m(7, P("11"), "@jihu 배포 전에 @grok 한테 점검 요청해 주세요", 1 * MIN)] : []),
   ];
 }
 

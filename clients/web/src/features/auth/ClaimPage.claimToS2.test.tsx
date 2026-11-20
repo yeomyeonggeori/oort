@@ -117,8 +117,8 @@ const session: LoginResponse = {
     id: "00000000-0000-7000-8000-000000000101",
     workspaceId: "00000000-0000-7000-8000-000000000001",
     kind: "human",
-    displayName: "곽성재",
-    handle: "seongjae",
+    displayName: "한지후",
+    handle: "jihu",
   },
   realtimeWebSocketUrl: "wss://example.test/connection/websocket",
 };
@@ -197,7 +197,7 @@ beforeEach(() => {
   changeMyProfile.mockResolvedValue({
     ...session.member,
     displayName: "성재",
-    handle: "seongjae",
+    handle: "jihu",
   });
   window.history.replaceState(null, "", `/claim/${TOKEN}`);
   vi.stubGlobal("matchMedia", (query: string) => ({
@@ -300,7 +300,7 @@ async function submitS1() {
   });
   fill("onboarding-s1-workspace-name", "새벽");
   fill("onboarding-s1-display-name", "성재");
-  fill("onboarding-s1-handle", "seongjae");
+  fill("onboarding-s1-handle", "jihu");
   await act(async () => {
     click("onboarding-s1-submit");
   });
@@ -411,7 +411,7 @@ describe("claim → S1 submit → S2", () => {
     );
     expect(changeMyProfile).toHaveBeenCalledTimes(1);
     expect(changeMyProfile).toHaveBeenCalledWith(session.member.workspaceId, {
-      handle: "seongjae",
+      handle: "jihu",
       displayName: "성재",
     });
     expect(
@@ -488,7 +488,7 @@ describe("reload during S1 re-enters S1", () => {
       "성재"
     );
     expect(getPersistedSession()?.member.displayName).toBe("성재");
-    expect(getPersistedSession()?.member.handle).toBe("seongjae");
+    expect(getPersistedSession()?.member.handle).toBe("jihu");
   });
 });
 
@@ -549,7 +549,7 @@ describe("S1 identity survives into the shell (H-2)", () => {
     });
     await submitS1();
     expect(getPersistedSession()?.member.displayName).toBe("성재");
-    expect(getPersistedSession()?.member.handle).toBe("seongjae");
+    expect(getPersistedSession()?.member.handle).toBe("jihu");
     click("onboarding-s2-skip");
     await skipTeamAiStage();
     await waitForUi(() => {
@@ -557,7 +557,7 @@ describe("S1 identity survives into the shell (H-2)", () => {
         "성재"
       );
     });
-    expect(getPersistedSession()?.member.handle).toBe("seongjae");
+    expect(getPersistedSession()?.member.handle).toBe("jihu");
 
     unmountApp();
     const reloaded = await mountApp();
@@ -567,7 +567,7 @@ describe("S1 identity survives into the shell (H-2)", () => {
     expect(reloaded.querySelector('[data-testid="self-name"]')?.textContent).toBe(
       "성재"
     );
-    expect(getPersistedSession()?.member.handle).toBe("seongjae");
+    expect(getPersistedSession()?.member.handle).toBe("jihu");
     expect(reloaded.querySelector('[data-testid="onboarding-s1"]')).toBeNull();
   });
 });
@@ -586,7 +586,7 @@ describe("S1 pending survives S2 skip (H-R2-1)", () => {
     });
     fill("onboarding-s1-workspace-name", "새벽");
     fill("onboarding-s1-display-name", "성재");
-    fill("onboarding-s1-handle", "seongjae");
+    fill("onboarding-s1-handle", "jihu");
     await act(async () => {
       click("onboarding-s1-submit");
     });

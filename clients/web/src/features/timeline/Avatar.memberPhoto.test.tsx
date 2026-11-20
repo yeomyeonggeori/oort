@@ -39,7 +39,7 @@ function member(avatarUrl?: string): RosterMember {
     workspaceId: "w",
     kind: "human",
     status: "active",
-    displayName: "곽성재",
+    displayName: "한지후",
     handle: "k",
     ...(avatarUrl ? { avatarUrl } : {}),
     channelCount: 0,
@@ -84,13 +84,13 @@ describe("Avatar — 업로드된 멤버 사진", () => {
     fetchMemberAvatar.mockRejectedValue(new Error("404"));
     const h = await mount(member(PATH));
     expect(h.querySelector("img")).toBeNull();
-    expect(h.textContent).toBe("곽");
+    expect(h.textContent).toBe("한");
   });
 
   it("사진이 없으면 받지 않고 이니셜", async () => {
     const h = await mount(member());
     expect(fetchMemberAvatar).not.toHaveBeenCalled();
-    expect(h.textContent).toBe("곽");
+    expect(h.textContent).toBe("한");
   });
 
   it("옛 avatarUrl(같은 오리진 data:)은 referrerpolicy=no-referrer 로 직접 그린다", async () => {
@@ -112,7 +112,7 @@ describe("Avatar — 업로드된 멤버 사진", () => {
     document.body.append(host);
     root = createRoot(host);
     await act(async () => {
-      root?.render(createElement(PresenceBadge, { selfName: "곽성재", effective: "online", avatarUrl: PATH }));
+      root?.render(createElement(PresenceBadge, { selfName: "한지후", effective: "online", avatarUrl: PATH }));
     });
     await act(async () => {
       await new Promise((r) => setTimeout(r, 30));

@@ -100,8 +100,8 @@ const auth = {
     id: memberId,
     workspaceId,
     kind: "human",
-    displayName: "곽성재",
-    handle: "seongjae",
+    displayName: "한지후",
+    handle: "jihu",
   },
   realtimeWebSocketUrl: "ws://display-control-gate.invalid/connection/websocket",
 };
@@ -125,7 +125,7 @@ function member(id, kind, displayName, handle, over = {}) {
 }
 
 const roster = [
-  member(memberId, "human", "곽성재", "seongjae"),
+  member(memberId, "human", "한지후", "jihu"),
   member(agentId, "agent", "김인턴", "kim-intern", {
     capabilities: ["work.observe"],
     ownerHumanId: memberId,

@@ -118,8 +118,8 @@ const session = {
     id: memberId,
     workspaceId,
     kind: "human",
-    displayName: "곽성재",
-    handle: "seongjae",
+    displayName: "한지후",
+    handle: "jihu",
   },
   realtimeWebSocketUrl: "ws://quote-gate.invalid/connection/websocket",
 };
@@ -143,8 +143,8 @@ const roster = [
     id: memberId,
     kind: "human",
     role: "owner",
-    displayName: "곽성재",
-    handle: "seongjae",
+    displayName: "한지후",
+    handle: "jihu",
   }),
   member({
     id: peerId,
@@ -527,7 +527,7 @@ async function exercise(browser) {
       `the quote block did not carry the original's text, read "${blockText}"`
     );
   }
-  if (!blockText.includes("곽성재")) {
+  if (!blockText.includes("한지후")) {
     throw new Error(
       `the quote block did not name the quoted author, read "${blockText}"`
     );

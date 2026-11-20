@@ -39,7 +39,7 @@ const DM_BOT = 'aaaaaaaa-0000-4000-8000-000000000003';
 const BASE = 'https://api.example.com';
 const NOW = 1_700_000_000_000;
 
-const SELF: Member = {id: ME, workspaceId: WS, kind: 'human', displayName: '곽성재', handle: 'seongjae'};
+const SELF: Member = {id: ME, workspaceId: WS, kind: 'human', displayName: '한지후', handle: 'jihu'};
 const LOGIN_BODY = {
   accessToken: 'access-token-1',
   refreshToken: 'refresh-token-1',
@@ -51,7 +51,7 @@ const person = (id: string, kind: string, displayName: string, handle: string, e
   channelIds: [GENERAL, DM_SEO, DM_BOT], capabilities: [], createdAtMs: 0, updatedAtMs: 0, ...extra,
 });
 const ROSTER = [
-  person(ME, 'human', '곽성재', 'seongjae'),
+  person(ME, 'human', '한지후', 'jihu'),
   person(SEO, 'human', '서연', 'seoyeon'),
   person(BOT, 'agent', '김인턴', 'kim-intern', {ownerHumanId: ME}),
 ];
@@ -99,12 +99,12 @@ function fullWorld(): World {
       payload: {tool_call: {name: 'work.session.end'}},
     }],
     messages: {
-      [GENERAL]: [root, msg(GENERAL, 8, SEO, '@seongjae 배포 전에 확인 부탁해요', {props: {mention_member_ids: [ME]}})],
+      [GENERAL]: [root, msg(GENERAL, 8, SEO, '@jihu 배포 전에 확인 부탁해요', {props: {mention_member_ids: [ME]}})],
       [DM_SEO]: [msg(DM_SEO, 7, SEO, '잠깐 얘기 가능해요?'), msg(DM_SEO, 8, SEO, '오늘 4시 리뷰 같이 봐요')],
       [DM_BOT]: [msg(DM_BOT, 3, ME, '요약 부탁'), msg(DM_BOT, 4, BOT, '정리해서 올렸어요')],
     },
     afterMessages: {
-      [GENERAL]: [msg(GENERAL, 8, SEO, '@seongjae 배포 전에 확인 부탁해요', {props: {mention_member_ids: [ME]}})],
+      [GENERAL]: [msg(GENERAL, 8, SEO, '@jihu 배포 전에 확인 부탁해요', {props: {mention_member_ids: [ME]}})],
     },
   };
 }

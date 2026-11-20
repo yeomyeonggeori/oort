@@ -65,7 +65,7 @@ function member(over: Partial<RosterMember> & {id: string}): RosterMember {
 }
 
 const DIRECTORY = makeDirectory([
-  member({id: SELF, displayName: '곽성재', handle: 'seongjae'}),
+  member({id: SELF, displayName: '한지후', handle: 'jihu'}),
   member({id: OTHER, displayName: '김인턴', handle: 'intern-kim'}),
   member({
     id: 'cccccccc-1111-4111-8111-cccccccccccc',
@@ -198,7 +198,7 @@ describe.each(SCHEMES)('%s — 본문 멘션 렌더', (scheme, palette) => {
     render(
       <FixedScheme scheme={scheme}>
         <MessageBody
-          body="@Seongjae @intern-kim"
+          body="@Jihu @intern-kim"
           directory={DIRECTORY}
           selfMemberId={SELF}
         />
@@ -207,7 +207,7 @@ describe.each(SCHEMES)('%s — 본문 멘션 렌더', (scheme, palette) => {
 
     const self = screen.getByTestId('message-self-mention');
     const style = StyleSheet.flatten(self.props.style);
-    expect(self.props.children).toBe('@Seongjae');
+    expect(self.props.children).toBe('@Jihu');
     expect(style.color).toBe(palette.onAccent);
     expect(style.backgroundColor).toBe(palette.accent);
     expect(style.backgroundColor).not.toBe(palette.accentSurface);

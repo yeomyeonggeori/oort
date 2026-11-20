@@ -115,7 +115,7 @@ function member(id: string, name: string, kind: 'human' | 'agent' = 'human'): Ro
 }
 
 const DIRECTORY = makeDirectory([
-  member(SELF, 'seongjae'),
+  member(SELF, 'jihu'),
   member(MINSU, 'minsu'),
   member(HANEUL, 'haneul'),
   member(HERMES, 'hermes', 'agent'),

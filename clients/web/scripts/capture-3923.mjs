@@ -54,7 +54,7 @@ const channels = [
 const auth = {
   accessToken: "capture-only-not-a-credential",
   refreshToken: "capture-only-not-a-credential",
-  member: { id: memberId, workspaceId, kind: "human", displayName: "곽성재", handle: "seongjae" },
+  member: { id: memberId, workspaceId, kind: "human", displayName: "한지후", handle: "jihu" },
   realtimeWebSocketUrl: "ws://pause-banner-capture.invalid/connection/websocket",
 };
 
@@ -87,8 +87,8 @@ function wireRules(server) {
 
 function rosterRows(server) {
   const self = {
-    id: memberId, workspaceId, kind: "human", status: "active", role: "owner", displayName: "곽성재",
-    handle: "seongjae", channelCount: 2, channelIds: channels.map((c) => c.id), capabilities: [],
+    id: memberId, workspaceId, kind: "human", status: "active", role: "owner", displayName: "한지후",
+    handle: "jihu", channelCount: 2, channelIds: channels.map((c) => c.id), capabilities: [],
     createdAtMs: 0, updatedAtMs: 0, presenceStatus: server.presenceStatus,
   };
   if (server.presenceStatus === "dnd" && server.dndUntilMs !== undefined) self.dndUntilMs = server.dndUntilMs;

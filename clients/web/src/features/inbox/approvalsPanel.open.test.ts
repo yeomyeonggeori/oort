@@ -27,7 +27,7 @@ const AGENT: ActorNames = {
   name: "오르트 도우미",
   handle: "oort",
   isAgent: true,
-  ownerName: "곽성재",
+  ownerName: "한지후",
 };
 
 function approvalRow(

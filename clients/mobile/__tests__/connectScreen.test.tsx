@@ -40,8 +40,8 @@ const LOGIN_BODY = {
     id: '11111111-1111-4111-8111-111111111111',
     workspaceId: '22222222-2222-4222-8222-222222222222',
     kind: 'human',
-    displayName: 'Seongjae Kwak',
-    handle: 'seongjae',
+    displayName: 'Jihu Han',
+    handle: 'jihu',
   },
 };
 
@@ -167,7 +167,7 @@ describe('the login round trip, mocked', () => {
       screen.getByTestId('server-url-input'),
       'https://api.example.com',
     );
-    fireEvent.changeText(screen.getByTestId('email-input'), 'seongjae@example.com');
+    fireEvent.changeText(screen.getByTestId('email-input'), 'jihu@example.com');
     fireEvent.changeText(screen.getByTestId('password-input'), 'pw');
   }
 
@@ -247,7 +247,7 @@ describe('the login round trip, mocked', () => {
 
   it('will not submit without a usable address', () => {
     renderSignInForm();
-    fireEvent.changeText(screen.getByTestId('email-input'), 'seongjae@example.com');
+    fireEvent.changeText(screen.getByTestId('email-input'), 'jihu@example.com');
     fireEvent.changeText(screen.getByTestId('password-input'), 'pw');
     fireEvent.press(screen.getByTestId('submit-button'));
     expect(fetchMock).not.toHaveBeenCalled();

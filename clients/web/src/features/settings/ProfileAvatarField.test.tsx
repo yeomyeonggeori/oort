@@ -45,7 +45,7 @@ function me(avatarUrl?: string): RosterMember {
     workspaceId: "w",
     kind: "human",
     status: "active",
-    displayName: "곽성재",
+    displayName: "한지후",
     handle: "k",
     ...(avatarUrl ? { avatarUrl } : {}),
     channelCount: 0,

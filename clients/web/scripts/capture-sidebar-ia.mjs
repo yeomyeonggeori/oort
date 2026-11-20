@@ -38,7 +38,7 @@ const channels = [
 const auth = {
   accessToken: "capture-only-not-a-credential",
   refreshToken: "capture-only-not-a-credential",
-  member: { id: memberId, workspaceId, kind: "human", displayName: "곽성재", handle: "seongjae" },
+  member: { id: memberId, workspaceId, kind: "human", displayName: "한지후", handle: "jihu" },
   realtimeWebSocketUrl: "ws://work-tab-capture.invalid/connection/websocket",
 };
 const agentId = "00000000-0000-7000-8000-000000000301";
@@ -61,8 +61,8 @@ const roster = [
     channelCount: 4, channelIds: channels.map((c) => c.id), capabilities: [], createdAtMs: 0, updatedAtMs: 0,
   },
   {
-    id: memberId, workspaceId, kind: "human", status: "active", role: "owner", displayName: "곽성재",
-    handle: "seongjae", channelCount: 4, channelIds: channels.map((c) => c.id), capabilities: [],
+    id: memberId, workspaceId, kind: "human", status: "active", role: "owner", displayName: "한지후",
+    handle: "jihu", channelCount: 4, channelIds: channels.map((c) => c.id), capabilities: [],
     createdAtMs: 0, updatedAtMs: 0,
   },
 ];
@@ -115,14 +115,14 @@ function sharedRows(now) {
     owner: { memberId: whoId, displayName: who }, homeChannel: { id: channels[0].id, name: "workbench" },
     repo, branch, harness: "claude", state, stages: ["세션 시작", "작업 중"], diff: d, lastActivityAt: sec - minAgo * MIN,
   });
-  const extra = Array.from({ length: EXTRA_TEAM }, (_, i) => row(`b${String(i).padStart(2, "0")}`, `추가 세션 ${i + 1}`, "곽성재", memberId, i % 3 === 0 ? "waiting" : i % 3 === 1 ? "idle" : "done", "momo", `chore/extra-${i + 1}`, 30 + i));
+  const extra = Array.from({ length: EXTRA_TEAM }, (_, i) => row(`b${String(i).padStart(2, "0")}`, `추가 세션 ${i + 1}`, "한지후", memberId, i % 3 === 0 ? "waiting" : i % 3 === 1 ? "idle" : "done", "momo", `chore/extra-${i + 1}`, 30 + i));
   return [
     ...extra,
     row("a1", "주간 리포트", "김인턴", agentId, "running", null, null, 1),
     row("a2", "결제 모듈 리팩터", "서연", seId, "waiting", "momo", "refactor/pay", 3, diff(88, 21, 5, 2)),
-    row("a3", "한글 입력 이중 전송 수리", "곽성재", memberId, "waiting", "momo", "feat/2774-xterm", 4, diff(128, 40, 9, 2)),
+    row("a3", "한글 입력 이중 전송 수리", "한지후", memberId, "waiting", "momo", "feat/2774-xterm", 4, diff(128, 40, 9, 2)),
     row("a4", "온보딩 카피", "서연", seId, "review", "momo", "docs/onboarding", 24, diff(12, 3, 1, 1)),
-    row("a5", "relay 중복 발행 수리", "곽성재", memberId, "running", "momo", "fix/push-dup", 6, diff(42, 18, 4, 1)),
+    row("a5", "relay 중복 발행 수리", "한지후", memberId, "running", "momo", "fix/push-dup", 6, diff(42, 18, 4, 1)),
   ];
 }
 
@@ -167,7 +167,7 @@ async function installRoutes(context) {
         id, channelId: channels[0].id, seq, hlcTs: NOW - 60_000 * seq, hlcCount: 0, authorMemberId: otherId, type: "text",
         body: text, text, createdAtMs: NOW - 60_000 * (10 - seq), props: { mention_member_ids: [memberId] },
       });
-      return json(route, { messages: [mention("m-1", 8, "@seongjae 배포 전에 한번 봐 주세요"), mention("m-2", 9, "@seongjae 리뷰 코멘트 반영했어요")] });
+      return json(route, { messages: [mention("m-1", 8, "@jihu 배포 전에 한번 봐 주세요"), mention("m-2", 9, "@jihu 리뷰 코멘트 반영했어요")] });
     }
     return json(route, {});
   });

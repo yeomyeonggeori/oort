@@ -73,8 +73,8 @@ const MEMBER = {
   id: '11111111-1111-4111-8111-111111111111',
   workspaceId: '22222222-2222-4222-8222-222222222222',
   kind: 'human',
-  displayName: 'Seongjae Kwak',
-  handle: 'seongjae',
+  displayName: 'Jihu Han',
+  handle: 'jihu',
 };
 
 function jsonResponse(status: number, body: unknown): Response {
@@ -115,7 +115,7 @@ async function signedInWithSlowRotation() {
       member: MEMBER,
     }),
   );
-  await login('seongjae@example.com', 'pw');
+  await login('jihu@example.com', 'pw');
   await keychainSettled();
   mockLog.length = 0;
 

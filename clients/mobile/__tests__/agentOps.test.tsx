@@ -56,8 +56,8 @@ const SELF: Member = {
   id: SELF_ID,
   workspaceId: WS,
   kind: 'human',
-  displayName: '곽성재',
-  handle: 'seongjae',
+  displayName: '한지후',
+  handle: 'jihu',
 };
 
 const LOGIN_BODY = {
@@ -89,7 +89,7 @@ function rosterMember(over: Record<string, unknown>): Record<string, unknown> {
  * 인코딩한다. 사람 행에 이 키를 넣지 않는 것이 이 픽스처의 요점 중 하나다.
  */
 const ROSTER = [
-  rosterMember({id: SELF_ID, displayName: '곽성재', handle: 'seongjae'}),
+  rosterMember({id: SELF_ID, displayName: '한지후', handle: 'jihu'}),
   rosterMember({
     id: 'bbbbbbbb-1111-4111-8111-bbbbbbbbbbbb',
     displayName: '김인턴',
@@ -429,7 +429,7 @@ describe('the 에이전트 tab exists at all', () => {
     // workspace holds two of them, because the human one is not an agent.
     expect(screen.getByTestId(`agent-row-${KIM_AGENT}`)).toBeTruthy();
     expect(screen.getByTestId(`agent-row-${HERMES}`)).toBeTruthy();
-    expect(screen.queryByText('곽성재')).toBeNull();
+    expect(screen.queryByText('한지후')).toBeNull();
     expect(screen.getAllByText('김인턴')).toHaveLength(1);
   });
 

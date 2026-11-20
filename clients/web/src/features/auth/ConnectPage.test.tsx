@@ -97,8 +97,8 @@ const session: LoginResponse = {
     id: "00000000-0000-7000-8000-000000000101",
     workspaceId: "00000000-0000-7000-8000-000000000001",
     kind: "human",
-    displayName: "곽성재",
-    handle: "seongjae",
+    displayName: "한지후",
+    handle: "jihu",
   },
   realtimeWebSocketUrl: "wss://example.test/connection/websocket",
 };
@@ -538,7 +538,7 @@ describe("D1 로그인 한 화면 (#2809 OB2-3)", () => {
     const watch = watchInputScreens();
     const onLoggedIn = vi.fn();
     mount(onLoggedIn);
-    fill("login-email", "seongjae@dawn.example");
+    fill("login-email", "jihu@dawn.example");
     fill("login-password", "correct-horse");
     await submitForm();
     await vi.waitFor(() => expect(onLoggedIn).toHaveBeenCalledWith(session));
@@ -555,11 +555,11 @@ describe("D1 로그인 한 화면 (#2809 OB2-3)", () => {
     expect(guideLine()).toBe("다시 왔군요. 이메일로 들어가요.");
     expect(guideExpression()).toBe("idle");
     expect(q("login-submit")?.textContent).toBe("들어가기");
-    fill("login-email", "seongjae@dawn.example");
+    fill("login-email", "jihu@dawn.example");
     fill("login-password", "correct-horse");
     await submitForm();
     await vi.waitFor(() => {
-      expect(login).toHaveBeenCalledWith("seongjae@dawn.example", "correct-horse", "");
+      expect(login).toHaveBeenCalledWith("jihu@dawn.example", "correct-horse", "");
     });
     expect(onLoggedIn).toHaveBeenCalledWith(session);
     expect(joinWithInvite).not.toHaveBeenCalled();
@@ -571,7 +571,7 @@ describe("D1 로그인 한 화면 (#2809 OB2-3)", () => {
     let resolve: (value: LoginResponse) => void = () => undefined;
     login.mockImplementation(() => new Promise<LoginResponse>((r) => (resolve = r)));
     mount();
-    fill("login-email", "seongjae@dawn.example");
+    fill("login-email", "jihu@dawn.example");
     fill("login-password", "correct-horse");
     await submitForm();
     expect(guideExpression()).toBe("thinking");
@@ -604,7 +604,7 @@ describe("D1 로그인 한 화면 (#2809 OB2-3)", () => {
     function readyForm() {
       setServerBase("https://team.example.com");
       mount();
-      fill("login-email", "seongjae@dawn.example");
+      fill("login-email", "jihu@dawn.example");
       fill("login-password", "correct-horse");
     }
 
@@ -640,7 +640,7 @@ describe("D1 로그인 한 화면 (#2809 OB2-3)", () => {
       const pending = pendingLogin();
       readyForm();
       submitEvent();
-      expect((q("login-email") as HTMLInputElement).value).toBe("seongjae@dawn.example");
+      expect((q("login-email") as HTMLInputElement).value).toBe("jihu@dawn.example");
       expect((q("login-email") as HTMLInputElement).disabled).toBe(false);
       expect((q("login-password") as HTMLInputElement).disabled).toBe(false);
       expect((q("onboarding-back") as HTMLButtonElement).disabled).toBe(true);
@@ -687,7 +687,7 @@ describe("D1 로그인 한 화면 (#2809 OB2-3)", () => {
       const onLoggedIn = vi.fn();
       setServerBase("https://team.example.com");
       mount(onLoggedIn);
-      fill("login-email", "seongjae@dawn.example");
+      fill("login-email", "jihu@dawn.example");
       fill("login-password", "correct-horse");
       submitEvent();
       const errors: unknown[][] = [];
@@ -708,7 +708,7 @@ describe("D1 로그인 한 화면 (#2809 OB2-3)", () => {
     login.mockRejectedValue(new ApiError(401, "invalid credentials"));
     const onLoggedIn = vi.fn();
     mount(onLoggedIn);
-    fill("login-email", "seongjae@dawn.example");
+    fill("login-email", "jihu@dawn.example");
     fill("login-password", "wrong-horse");
     await submitForm();
     await vi.waitFor(() => expect(q("login-password-error")).not.toBeNull());
@@ -735,7 +735,7 @@ describe("D1 로그인 한 화면 (#2809 OB2-3)", () => {
     await submitForm();
     expect(q("login-email-error")?.textContent).toBe("이메일을 넣으세요.");
     expect(login).not.toHaveBeenCalled();
-    fill("login-email", "seongjae@dawn.example");
+    fill("login-email", "jihu@dawn.example");
     await submitForm();
     expect(q("login-password-error")?.textContent).toBe("비밀번호를 넣으세요.");
     expect(login).not.toHaveBeenCalled();
@@ -745,7 +745,7 @@ describe("D1 로그인 한 화면 (#2809 OB2-3)", () => {
     setServerBase("https://team.example.com");
     login.mockRejectedValue(new NetworkError("unreachable", 15_000));
     mount();
-    fill("login-email", "seongjae@dawn.example");
+    fill("login-email", "jihu@dawn.example");
     fill("login-password", "correct-horse");
     await submitForm();
     await vi.waitFor(() => expect(q("login-error")).not.toBeNull());
@@ -806,7 +806,7 @@ async function joinFromLink(options: { name?: string } = {}) {
   window.history.replaceState(null, "", `/?code=${CODE}`);
   const onLoggedIn = vi.fn();
   mount(onLoggedIn);
-  fill("login-email", "seongjae@dawn.example");
+  fill("login-email", "jihu@dawn.example");
   fill("login-password", "new-pass");
   if (options.name !== undefined) fill("onboarding-profile-name", options.name);
   await submitForm();
@@ -843,7 +843,7 @@ describe("D1′ 초대 수락 한 화면 (#2810 OB2-4)", () => {
     changeMyDisplayName.mockResolvedValue({ ...session.member, displayName: "성재" });
     const onLoggedIn = await joinFromLink({ name: "성재" });
     await vi.waitFor(() => expect(onLoggedIn).toHaveBeenCalledTimes(1));
-    expect(joinWithInvite).toHaveBeenCalledWith(CODE, "seongjae@dawn.example", "new-pass");
+    expect(joinWithInvite).toHaveBeenCalledWith(CODE, "jihu@dawn.example", "new-pass");
     expect(changeMyDisplayName).toHaveBeenCalledWith(session.member.workspaceId, "성재");
     expect(onLoggedIn.mock.calls[0]?.[0].member.displayName).toBe("성재");
   });
@@ -944,13 +944,13 @@ describe("D1′ 초대 수락 한 화면 (#2810 OB2-4)", () => {
     changeMyDisplayName.mockRejectedValueOnce(new ApiError(500, "engine boom"));
     const onLoggedIn = await joinFromLink({ name: "성재" });
     await vi.waitFor(() => expect(q("onboarding-profile-banner")).not.toBeNull());
-    changeMyDisplayName.mockResolvedValue({ ...session.member, displayName: "곽성재2" });
-    fill("onboarding-profile-name", "곽성재2");
+    changeMyDisplayName.mockResolvedValue({ ...session.member, displayName: "한지후2" });
+    fill("onboarding-profile-name", "한지후2");
     expect(q("onboarding-profile-banner")).toBeNull();
     expect(q("login-submit")?.textContent).toBe("팀에 들어가기");
     await submitForm();
     await vi.waitFor(() => expect(onLoggedIn).toHaveBeenCalledTimes(1));
-    expect(changeMyDisplayName).toHaveBeenLastCalledWith(session.member.workspaceId, "곽성재2");
+    expect(changeMyDisplayName).toHaveBeenLastCalledWith(session.member.workspaceId, "한지후2");
     expect(joinWithInvite).toHaveBeenCalledTimes(1);
   });
 
@@ -1126,7 +1126,7 @@ describe("join session hold (BZ-6b, kept through the merge)", () => {
     changeMyDisplayName.mockRejectedValue(new ApiError(500, "engine boom"));
     window.history.replaceState(null, "", `/?code=${CODE}`);
     mountGate();
-    fill("login-email", "seongjae@dawn.example");
+    fill("login-email", "jihu@dawn.example");
     fill("login-password", "new-pass");
     fill("onboarding-profile-name", "성재");
     await submitForm();

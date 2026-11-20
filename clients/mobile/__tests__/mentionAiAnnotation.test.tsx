@@ -49,7 +49,7 @@ function member(over: Partial<RosterMember> & {handle: string}): RosterMember {
   } as unknown as RosterMember;
 }
 
-const human = member({handle: 'seongjae', kind: 'human', displayName: '곽성재'});
+const human = member({handle: 'jihu', kind: 'human', displayName: '한지후'});
 const teamKey = member({
   handle: 'intern',
   displayName: '김인턴',
@@ -329,7 +329,7 @@ describe('입력창 위 한 줄 — 답하지 않을 에이전트를 부르는 �
 
   it('부를 수 있는 에이전트·사람만 부르면 없다 (실패할 수 있는 가드)', () => {
     composer([teamKey, mineSub, human, otherSub]);
-    fireEvent.changeText(screen.getByTestId('composer-input'), '@intern @mine @seongjae 안녕 ');
+    fireEvent.changeText(screen.getByTestId('composer-input'), '@intern @mine @jihu 안녕 ');
     expect(screen.queryByTestId('composer-agent-notice')).toBeNull();
   });
 

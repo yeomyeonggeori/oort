@@ -96,8 +96,8 @@ const SELF: Member = {
   id: SELF_ID,
   workspaceId: WS,
   kind: 'human',
-  displayName: '곽성재',
-  handle: 'seongjae',
+  displayName: '한지후',
+  handle: 'jihu',
 };
 
 const LOGIN_BODY = {
@@ -124,7 +124,7 @@ function rosterMember(over: Record<string, unknown>) {
 }
 
 const ROSTER = [
-  rosterMember({id: SELF_ID, displayName: '곽성재', handle: 'seongjae'}),
+  rosterMember({id: SELF_ID, displayName: '한지후', handle: 'jihu'}),
   rosterMember({
     id: KIM_AGENT,
     kind: 'agent',

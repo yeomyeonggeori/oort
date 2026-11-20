@@ -40,7 +40,7 @@ function member(overrides: Partial<RosterMember> & {id: string}): RosterMember {
   };
 }
 
-const SELF = member({id: SELF_ID, displayName: '곽성재', handle: 'seongjae'});
+const SELF = member({id: SELF_ID, displayName: '한지후', handle: 'jihu'});
 const HUMAN_KIM = member({
   id: 'bbbbbbbb-1111-4111-8111-bbbbbbbbbbbb',
   displayName: '김인턴',

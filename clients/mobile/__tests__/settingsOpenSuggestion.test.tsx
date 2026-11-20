@@ -37,7 +37,7 @@ function person(id: string, kind: 'human' | 'agent', displayName: string, handle
 }
 
 const directory = makeDirectory([
-  person(HUMAN, 'human', '곽성재', 'sj'),
+  person(HUMAN, 'human', '한지후', 'sj'),
   person(OTHER, 'human', '김하늘', 'sky'),
   person(AGENT, 'agent', 'hermes', 'hermes'),
 ]);
@@ -96,7 +96,7 @@ describe('SettingsOpenSuggestion (phone)', () => {
   it('남에게는 한 줄이다', () => {
     render(<SettingsOpenSuggestion card={cardFor({section: 'notifications'})} viewerMemberId={OTHER} />);
     expect(screen.getByTestId('settings-suggest-line')).toBeTruthy();
-    expect(screen.getByText('곽성재에게 「알림 설정 열기」 카드를 제안했어요')).toBeTruthy();
+    expect(screen.getByText('한지후에게 「알림 설정 열기」 카드를 제안했어요')).toBeTruthy();
     expect(screen.queryByTestId('settings-suggest-target')).toBeNull();
   });
 

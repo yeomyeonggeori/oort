@@ -30,7 +30,7 @@ const BRIGHT = svg("#fdfcfa", "#f6f2ec");
 const DARKPHOTO = svg("#15181d", "#20242b");
 const person = (id, kind, displayName, handle, extra = {}) => ({ id, workspaceId, kind, status: "active", displayName, handle, channelCount: 2, channelIds: [CH, GENERAL], capabilities: [], createdAtMs: 0, updatedAtMs: 0, ...extra });
 const roster = [
-  person(memberId, "human", "곽성재", "seongjae", { role: "owner" }),
+  person(memberId, "human", "한지후", "jihu", { role: "owner" }),
   person(P("11"), "human", "이도현", "dohyun"),
   person(P("12"), "human", "박서연", "seoyeon", { avatarUrl: BRIGHT }),
   person(P("13"), "human", "최민수", "minsu"),
@@ -44,7 +44,7 @@ const channels = [
 ];
 const auth = {
   accessToken: "capture-only-not-a-credential", refreshToken: "capture-only-not-a-credential",
-  member: { id: memberId, workspaceId, kind: "human", displayName: "곽성재", handle: "seongjae" },
+  member: { id: memberId, workspaceId, kind: "human", displayName: "한지후", handle: "jihu" },
   realtimeWebSocketUrl: "ws://avatar-4162-capture.invalid/connection/websocket",
 };
 const json = (route, body, status = 200) => route.fulfill({ status, contentType: "application/json", body: JSON.stringify(body) });

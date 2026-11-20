@@ -30,7 +30,7 @@ const row = (id: string, name: string, kind: "human" | "agent"): RosterMember =>
 const session: SessionContextValue = {
   session: {
     accessToken: "a", refreshToken: "r",
-    member: { id: ME, workspaceId: WS, kind: "human", displayName: "곽성재", handle: "seongjae" },
+    member: { id: ME, workspaceId: WS, kind: "human", displayName: "한지후", handle: "jihu" },
     realtimeWebSocketUrl: "wss://example.test/connection/websocket",
   },
   workspaceId: WS, realtime: null, connStatus: "connected", logout: () => undefined, replaceSessionMember: () => undefined,
@@ -52,7 +52,7 @@ afterEach(() => {
 
 describe("에이전트 허브 아바타", () => {
   it("목록 행은 에이전트 아바타를 갖고, 프로필 탭 맨 위는 프로필 카드이며 admin에게는 이름 바꾸기가 열린다", async () => {
-    vi.mocked(fetchRoster).mockResolvedValue([row(ME, "곽성재", "human"), row(A1, "가나다", "agent")]);
+    vi.mocked(fetchRoster).mockResolvedValue([row(ME, "한지후", "human"), row(A1, "가나다", "agent")]);
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     host = document.createElement("div");
     document.body.append(host);

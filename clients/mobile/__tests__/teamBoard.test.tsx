@@ -54,8 +54,8 @@ const SELF: Member = {
   id: SELF_ID,
   workspaceId: WS,
   kind: 'human',
-  displayName: '곽성재',
-  handle: 'seongjae',
+  displayName: '한지후',
+  handle: 'jihu',
 };
 
 const LOGIN_BODY = {
@@ -85,7 +85,7 @@ function row(
     label: '작업',
     folderLabel: 'oort',
     status: 'running',
-    owner: {memberId: SELF_ID, displayName: '곽성재'},
+    owner: {memberId: SELF_ID, displayName: '한지후'},
     homeChannel: {id: CH_A, name: 'workbench'},
     startedAtMs: now - 3_600_000,
     endedAtMs: null,
@@ -315,7 +315,7 @@ describe('상태 순서와 구간', () => {
       expect(screen.getByTestId('team-board-row-S-RUN-AGENT')).toBeTruthy(),
     );
     expect(screen.getByTestId('team-board-row-S-RUN-AGENT')).toHaveTextContent(
-      /에이전트 · 곽성재가 시킴/,
+      /에이전트 · 한지후가 시킴/,
     );
     expect(screen.getByTestId('team-board-row-S-WAIT')).toHaveTextContent(
       /로컬 · 공유됨/,
@@ -426,7 +426,7 @@ describe('읽기 전용 상세 시트', () => {
       '응답이 필요한 세션',
     );
     expect(screen.getByTestId('team-detail-sentence')).toHaveTextContent(
-      /곽성재의 응답이 필요해요 · \d+분째/,
+      /한지후의 응답이 필요해요 · \d+분째/,
     );
     expect(screen.getByTestId('team-detail-stages')).toHaveTextContent(
       /세션 시작.*작업 중.*실행 허락 기다림/,
@@ -731,7 +731,7 @@ describe('에이전트 작업 줄 (#3518)', () => {
   const RUN_WIRE = {
     source: 'run',
     runId: 'R-1',
-    requestedBy: {memberId: SELF_ID, displayName: '곽성재'},
+    requestedBy: {memberId: SELF_ID, displayName: '한지후'},
     stepCount: 2,
     commits: 2,
     origin: 'agent_run',
@@ -768,7 +768,7 @@ describe('에이전트 작업 줄 (#3518)', () => {
       mock.mock.calls.some(([url]) => /\/work-sessions\/R-1\/shared/.test(String(url))),
     ).toBe(false);
     expect(screen.getByTestId('team-detail-lane')).toHaveTextContent(
-      /에이전트 · 곽성재가 시킴/,
+      /에이전트 · 한지후가 시킴/,
     );
     expect(screen.getByTestId('team-detail-pr')).toHaveTextContent(/PR #12/);
     expect(screen.getByTestId('team-detail-terminal-note')).toHaveTextContent(

@@ -32,7 +32,7 @@ const ME = "00000000-0000-7000-8000-000000000101";
 const CH = "00000000-0000-7000-8000-000000000201";
 const CARD = "0199AA11-2222-7000-8000-0000000000D1";
 const NOW = 1_800_000_000_000;
-const AGENT: ActorNames = { name: "오르트 도우미", handle: "oort", isAgent: true, ownerName: "곽성재" };
+const AGENT: ActorNames = { name: "오르트 도우미", handle: "oort", isAgent: true, ownerName: "한지후" };
 
 vi.mock("@/features/workspace/useWorkspace", () => ({
   memberFor: () => null,

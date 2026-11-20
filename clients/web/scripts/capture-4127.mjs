@@ -29,7 +29,7 @@ const channels = [
 const auth = {
   accessToken: "capture-only-not-a-credential",
   refreshToken: "capture-only-not-a-credential",
-  member: { id: memberId, workspaceId, kind: "human", displayName: "곽성재", handle: "seongjae" },
+  member: { id: memberId, workspaceId, kind: "human", displayName: "한지후", handle: "jihu" },
   realtimeWebSocketUrl: "ws://pause-capture.invalid/connection/websocket",
 };
 
@@ -45,7 +45,7 @@ const items = [
 
 function roster() {
   return [
-    { id: memberId, workspaceId, kind: "human", status: "active", role: "owner", displayName: "곽성재", handle: "seongjae", channelCount: 2, channelIds: channels.map((c) => c.id), capabilities: [], createdAtMs: 0, updatedAtMs: 0 },
+    { id: memberId, workspaceId, kind: "human", status: "active", role: "owner", displayName: "한지후", handle: "jihu", channelCount: 2, channelIds: channels.map((c) => c.id), capabilities: [], createdAtMs: 0, updatedAtMs: 0 },
     { id: peerId, workspaceId, kind: "human", status: "active", role: "member", displayName: "서연", handle: "seoyeon", channelCount: 1, channelIds: [channels[0].id], capabilities: [], createdAtMs: 0, updatedAtMs: 0 },
   ];
 }

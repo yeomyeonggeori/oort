@@ -30,7 +30,7 @@ const WS = "00000000-0000-7000-8000-000000000001";
 const ME = "00000000-0000-7000-8000-000000000101";
 
 function member(over: Partial<Member> = {}): Member {
-  return { id: ME, workspaceId: WS, kind: "human", displayName: "곽성재", handle: "demo", ...over };
+  return { id: ME, workspaceId: WS, kind: "human", displayName: "한지후", handle: "demo", ...over };
 }
 
 function Probe({ who }: { who: Member }) {
@@ -74,7 +74,7 @@ describe("시드 이름 재판정 (#3696)", () => {
     const base = { workspaceName: "momo Demo Workspace", memberHandle: "demo", role: "owner" };
     expect(isSeedWorkspaceUntouched(base)).toBe(true);
     expect(isSeedWorkspaceUntouched({ ...base, workspaceName: "새벽팀" })).toBe(false);
-    expect(isSeedWorkspaceUntouched({ ...base, memberHandle: "seongjae" })).toBe(false);
+    expect(isSeedWorkspaceUntouched({ ...base, memberHandle: "jihu" })).toBe(false);
     expect(isSeedWorkspaceUntouched({ ...base, role: "member" })).toBe(false);
     expect(isSeedWorkspaceUntouched({ ...base, role: undefined })).toBe(false);
   });
@@ -102,7 +102,7 @@ describe("시드 이름 재판정 (#3696)", () => {
   });
 
   it("핸들이 @demo가 아니면 서버에 묻지도 않는다", async () => {
-    await mount(member({ handle: "seongjae" }));
+    await mount(member({ handle: "jihu" }));
     expect(fetchWorkspace).not.toHaveBeenCalled();
     expect(fetchRoster).not.toHaveBeenCalled();
   });
@@ -119,7 +119,7 @@ describe("시드 이름 재판정 (#3696)", () => {
     resetOwnerOnboardingLoadState(); // 앱을 껐다 켠 것과 같다.
     expect(readOwnerOnboardingStage()).toBe("workspace-profile");
     fetchWorkspace.mockResolvedValue({ name: "새벽팀" });
-    await mount(member({ handle: "seongjae" }));
+    await mount(member({ handle: "jihu" }));
     expect(fetchWorkspace).toHaveBeenCalled();
     expect(fetchRoster).not.toHaveBeenCalled();
     expect(readOwnerOnboardingStage()).toBeNull();
@@ -128,7 +128,7 @@ describe("시드 이름 재판정 (#3696)", () => {
   it("이번 실행의 claim이 막 찍은 표지는 서버 이름이 시드가 아니어도 걷지 않는다", async () => {
     markOwnerOnboardingPending();
     fetchWorkspace.mockResolvedValue({ name: "새벽팀" });
-    await mount(member({ handle: "seongjae" }));
+    await mount(member({ handle: "jihu" }));
     expect(readOwnerOnboardingStage()).toBe("workspace-profile");
   });
 
@@ -137,7 +137,7 @@ describe("시드 이름 재판정 (#3696)", () => {
     resetOwnerOnboardingLoadState();
     fetchWorkspace.mockResolvedValue({ name: "momo Demo Workspace" });
     fetchRoster.mockResolvedValue([{ id: ME, role: "owner" }]);
-    await mount(member({ handle: "seongjae" }));
+    await mount(member({ handle: "jihu" }));
     expect(readOwnerOnboardingStage()).toBe("workspace-profile");
   });
 

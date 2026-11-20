@@ -43,7 +43,7 @@ const TOKEN = "capture-only-not-a-credential";
 const SESSION = {
   accessToken: TOKEN,
   refreshToken: TOKEN,
-  member: { id: ME, workspaceId: WORKSPACE_ID, kind: "human", displayName: "곽성재", handle: "seongjae" },
+  member: { id: ME, workspaceId: WORKSPACE_ID, kind: "human", displayName: "한지후", handle: "jihu" },
   realtimeWebSocketUrl: `ws://127.0.0.1:${PORT + 900}/connection/websocket`,
 };
 
@@ -58,8 +58,8 @@ const ROSTER = [
     workspaceId: WORKSPACE_ID,
     kind: "human",
     status: "active",
-    displayName: "곽성재",
-    handle: "seongjae",
+    displayName: "한지후",
+    handle: "jihu",
     role: "owner",
     channelCount: 2,
     channelIds: [GENERAL_ID],
@@ -148,7 +148,7 @@ async function captureOne(browser, { scheme, language, version }) {
     await page.goto(ORIGIN, { waitUntil: "networkidle" });
     // 데스크탑 셸의 첫 화면은 같은 출처 서버를 가정하지 않아서 서버 주소를 받는다(`connect-entry`): 이 미리보기 서버의 주소를 준다.
     await advanceToAccount(page, { path: "invite", inviteLink: ORIGIN });
-    await page.getByTestId("login-email").fill("seongjae@dawn.example");
+    await page.getByTestId("login-email").fill("jihu@dawn.example");
     await page.getByTestId("login-password").fill(TOKEN);
     await page.getByTestId("login-submit").click();
     await page.getByTestId("channel-list").waitFor({ state: "visible" });

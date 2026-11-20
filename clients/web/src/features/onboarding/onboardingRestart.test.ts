@@ -30,7 +30,7 @@ function login(memberId: string, workspaceId = WS): void {
   const response: LoginResponse = {
     accessToken: "test-only-not-a-credential",
     refreshToken: "test-only-not-a-credential",
-    member: { id: memberId, workspaceId, kind: "human", displayName: "곽성재", handle: "demo" },
+    member: { id: memberId, workspaceId, kind: "human", displayName: "한지후", handle: "demo" },
     realtimeWebSocketUrl: "ws://test.invalid/connection/websocket",
   };
   applyLogin(response);
@@ -62,13 +62,13 @@ describe("온보딩 진행 상태는 앱 재시작을 넘어 이어진다 (#3696
   it("S1 대기 표지와 S1 초안이 재시작 뒤에도 남는다", () => {
     login(ME);
     markOwnerOnboardingPending();
-    writeS1Draft({ workspaceName: "새벽팀", displayName: "성재", handle: "seongjae" });
+    writeS1Draft({ workspaceName: "새벽팀", displayName: "성재", handle: "jihu" });
     restartApp();
     expect(readOwnerOnboardingStage()).toBe("workspace-profile");
     expect(readS1Draft()).toEqual({
       workspaceName: "새벽팀",
       displayName: "성재",
-      handle: "seongjae",
+      handle: "jihu",
     });
   });
 
@@ -84,7 +84,7 @@ describe("온보딩 진행 상태는 앱 재시작을 넘어 이어진다 (#3696
   it("다른 계정은 이 계정의 진행 상태를 보지 못한다", () => {
     login(ME);
     markOwnerOnboardingPending();
-    writeS1Draft({ workspaceName: "새벽팀", displayName: "성재", handle: "seongjae" });
+    writeS1Draft({ workspaceName: "새벽팀", displayName: "성재", handle: "jihu" });
     clearSession();
     login(OTHER);
     expect(readOwnerOnboardingStage()).toBeNull();

@@ -61,7 +61,7 @@ const bot = (id: string, name: string, extra: Partial<RosterMember>): RosterMemb
 const owned = (id: string, name: string) => ({ ownerHumanId: id, owner: { id, displayName: name } });
 
 const ROSTER = (role: RosterMember["role"]): RosterMember[] => [
-  person(ME, "곽성재", role),
+  person(ME, "한지후", role),
   person(OTHER, "서연", "member"),
   bot("a1", "김인턴", { brain: "team_key", callableBy: "everyone" }),
   bot("a2", "성재-codex", { brain: "subscription", callableBy: "owner_only", hostOnline: true, ...owned(ME, "성재") }),
@@ -76,7 +76,7 @@ const ROSTER = (role: RosterMember["role"]): RosterMember[] => [
 const session: SessionContextValue = {
   session: {
     accessToken: "access", refreshToken: "refresh",
-    member: { id: ME, workspaceId: WS, kind: "human", displayName: "곽성재", handle: "seongjae" },
+    member: { id: ME, workspaceId: WS, kind: "human", displayName: "한지후", handle: "jihu" },
     realtimeWebSocketUrl: "wss://example.test/connection/websocket",
   },
   workspaceId: WS, realtime: null, connStatus: "connected", logout: () => undefined, replaceSessionMember: () => undefined,

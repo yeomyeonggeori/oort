@@ -6,7 +6,7 @@
 //
 // 실제 design 번들의 타임라인에 hermes의 답 + `momo.command_suggest(ai.connect)` props가
 // 실린 메시지를 놓고, 로그인한 사람을 바꿔 보는 사람별 렌더를 찍는다:
-//   target(곽성재, 운영자) · target-done(로그인 뒤) · other(김하늘, 403) ·
+//   target(한지후, 운영자) · target-done(로그인 뒤) · other(김하늘, 403) ·
 //   operator(김하늘, 200 → 「팀 연결 보기」 펼침).
 // 구독 줄의 자세는 GC-3와 같은 design 전용 `?aiEntry=rows&aiProbe=…`(제품 빌드는 무시).
 // 라이트·다크 × 1280·390 → captures/2948/*.png
@@ -30,7 +30,7 @@ const agentId = "00000000-0000-7000-8000-000000000103";
 const channelA = "00000000-0000-7000-8000-000000000201";
 
 
-let viewer = { id: memberId, displayName: "곽성재", handle: "seongjae" };
+let viewer = { id: memberId, displayName: "한지후", handle: "jihu" };
 const sessionFor = () => ({
   accessToken: "gate-only-not-a-credential",
   refreshToken: "gate-only-not-a-credential",
@@ -53,7 +53,7 @@ function member(over) {
 }
 
 const roster = [
-  member({ id: memberId, kind: "human", role: "owner", displayName: "곽성재", handle: "seongjae" }),
+  member({ id: memberId, kind: "human", role: "owner", displayName: "한지후", handle: "jihu" }),
   member({ id: peerId, kind: "human", role: "admin", displayName: "김하늘", handle: "haneul" }),
   member({
     id: agentId,
@@ -329,7 +329,7 @@ async function scene(browser, { width, scheme, name, query, team, as, act, args,
   return { name, width, scheme, path, text, viewerAttr, controls, active };
 }
 
-const SUNG = { id: memberId, displayName: "곽성재", handle: "seongjae" };
+const SUNG = { id: memberId, displayName: "한지후", handle: "jihu" };
 const SKY = { id: peerId, displayName: "김하늘", handle: "haneul" };
 
 function scenes() {

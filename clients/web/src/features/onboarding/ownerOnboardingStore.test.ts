@@ -106,8 +106,8 @@ describe("owner onboarding pending flags", () => {
     markOwnerOnboardingPending();
     writeS1Draft({
       workspaceName: "여명거리",
-      displayName: "곽성재",
-      handle: "seongjae",
+      displayName: "한지후",
+      handle: "jihu",
     });
     recordOwnerOnboardingSettingsSave("profile");
     expect(readS1Draft()).toEqual({

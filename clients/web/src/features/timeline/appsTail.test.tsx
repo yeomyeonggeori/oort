@@ -51,7 +51,7 @@ function roster(id: string, kind: "human" | "agent", displayName: string, handle
   };
 }
 const DIRECTORY = makeDirectory([
-  roster(ME, "human", "곽성재", "seongjae"),
+  roster(ME, "human", "한지후", "jihu"),
   roster(OTHER, "human", "김하늘", "haneul"),
   roster(HERMES, "agent", "Hermes", "hermes"),
 ]);
@@ -61,7 +61,7 @@ function sessionValue(): SessionContextValue {
     session: {
       accessToken: "access",
       refreshToken: "refresh",
-      member: { id: ME, workspaceId: WS, kind: "human", displayName: "곽성재", handle: "seongjae" },
+      member: { id: ME, workspaceId: WS, kind: "human", displayName: "한지후", handle: "jihu" },
       realtimeWebSocketUrl: "wss://example.test/connection/websocket",
     },
     workspaceId: WS,
@@ -208,7 +208,7 @@ describe("쓴 앱 꼬리 (E8·E10)", () => {
     act(() => toggle?.click());
     const details = view.querySelector('[data-testid="apps-details"]')?.textContent ?? "";
     expect(details).toContain("Hermes에서 실행했어요.");
-    expect(details).toContain("곽성재 명의로 썼어요.");
+    expect(details).toContain("한지후 명의로 썼어요.");
     expect(details).toContain("연결: gmailmcp.googleapis.com");
     // 자기 보고 안내가 화면에 있다(수용기준 9).
     expect(details).toContain("에이전트가 알려 준 대로예요. oort는 확인하지 못해요.");

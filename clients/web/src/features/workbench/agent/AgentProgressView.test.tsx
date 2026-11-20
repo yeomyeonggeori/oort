@@ -104,7 +104,7 @@ afterEach(() => {
 function render(
   m: AgentPaneModel,
   actions: AgentPaneActions,
-  ownerName: string | null = "곽성재",
+  ownerName: string | null = "한지후",
   offline = false,
   instructFrom: InstructFrom = "here"
 ) {
@@ -242,7 +242,7 @@ describe("permission card", () => {
     render(model([tool("bash", "npm install"), ask([ONCE, REJECT])], OTHER), { decide: vi.fn(), reply: vi.fn() });
     expect(q('[data-testid="agent-permission-allow"]')).toBeNull();
     expect(q('[data-testid="agent-permission-preview"]')).toBeNull();
-    expect(q('[data-testid="agent-permission-waiting"]')!.textContent).toBe("곽성재의 확인을 기다려요");
+    expect(q('[data-testid="agent-permission-waiting"]')!.textContent).toBe("한지후의 확인을 기다려요");
     expect(q('[data-testid="agent-pane-reply"]')).toBeNull();
   });
 });
@@ -347,7 +347,7 @@ describe("decision outcomes (#3013)", () => {
     render(m, { decide, reply: null });
     click(q('[data-testid="agent-permission-allow"]'));
     expect(q('[data-testid="agent-permission-confirm"]')).not.toBeNull();
-    render(m, { decide, reply: null }, "곽성재", true);
+    render(m, { decide, reply: null }, "한지후", true);
     expect(q('[data-testid="agent-permission-confirm"]')).toBeNull();
     expect((q('[data-testid="agent-permission-allow"]') as HTMLButtonElement).disabled).toBe(true);
     expect((q('[data-testid="agent-permission-reject"]') as HTMLButtonElement).disabled).toBe(true);
@@ -464,7 +464,7 @@ describe("browser instructs from the app (#3029)", () => {
   it.each(["here", "app"] as const)("the allow button and the reply box read the same value (%s)", async (from) => {
     const decide = vi.fn(async () => undefined);
     const reply = vi.fn(async () => undefined);
-    render(model(events()), { decide, reply }, "곽성재", false, from);
+    render(model(events()), { decide, reply }, "한지후", false, from);
     const app = from === "app";
     const allow = q('[data-testid="agent-permission-allow"]') as HTMLButtonElement;
     const inApp = q('[data-testid="agent-permission-in-app"]');
@@ -495,7 +495,7 @@ describe("browser instructs from the app (#3029)", () => {
 
   it("reject still goes from the browser", async () => {
     const decide = vi.fn(async () => undefined);
-    render(model(events()), { decide, reply: null }, "곽성재", false, "app");
+    render(model(events()), { decide, reply: null }, "한지후", false, "app");
     click(q('[data-testid="agent-permission-reject"]'));
     act(() => vi.advanceTimersByTime(CONFIRM_GUARD_MS));
     await act(async () => {
@@ -506,7 +506,7 @@ describe("browser instructs from the app (#3029)", () => {
   });
 
   it("offline or cramped reasons win over the app line (one reason at a time)", () => {
-    render(model(events()), { decide: async () => undefined, reply: null }, "곽성재", true, "app");
+    render(model(events()), { decide: async () => undefined, reply: null }, "한지후", true, "app");
     expect(q('[data-testid="agent-permission-in-app"]')).toBeNull();
     expect(q('[data-testid="agent-permission-unavailable"]')!.textContent).toBe("You're offline, so you can't decide right now. You can press it once you're connected again.");
   });
@@ -541,7 +541,7 @@ describe("browser instructs from the app (#3029)", () => {
     await commitAllow();
     expect(q('[data-testid="agent-permission-error"]')).not.toBeNull();
     // 소스가 플래그를 다시 읽고 `app`으로 바꾼다.
-    render(m, { decide, reply: null }, "곽성재", false, "app");
+    render(m, { decide, reply: null }, "한지후", false, "app");
     expect(q('[data-testid="agent-permission-confirm"]')).toBeNull();
     expect(q('[data-testid="agent-permission-error"]')).toBeNull();
     expect(q('[data-testid="agent-permission-in-app"]')!.textContent).toBe(ALLOW_IN_APP_LINE);
@@ -746,7 +746,7 @@ describe("signed preview gate (#3128)", () => {
     }
     act(() => {
       root!.render(
-        createElement(AgentProgressView, { model: model(events()), ownerName: "곽성재", actions, previewGate: gate })
+        createElement(AgentProgressView, { model: model(events()), ownerName: "한지후", actions, previewGate: gate })
       );
     });
   }

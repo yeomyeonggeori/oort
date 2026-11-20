@@ -36,7 +36,7 @@ function member(id: string, kind: "human" | "agent", displayName: string, handle
 }
 
 const directory = makeDirectory([
-  member(HUMAN, "human", "곽성재", "sj"),
+  member(HUMAN, "human", "한지후", "sj"),
   member(OTHER, "human", "김하늘", "sky"),
   member(AGENT, "agent", "hermes", "hermes"),
 ]);
@@ -70,7 +70,7 @@ const SESSION: SessionContextValue = {
   session: {
     accessToken: "access",
     refreshToken: "refresh",
-    member: { id: HUMAN, workspaceId: "w", kind: "human", displayName: "곽성재", handle: "sj" },
+    member: { id: HUMAN, workspaceId: "w", kind: "human", displayName: "한지후", handle: "sj" },
     realtimeWebSocketUrl: "wss://example.test/connection/websocket",
   },
   workspaceId: "w",
@@ -135,7 +135,7 @@ describe("SettingsOpenSuggestion", () => {
 
   it("남에게는 한 줄이고 버튼이 없다", () => {
     mount(cardFor({ section: "notifications" }), OTHER);
-    expect(screen.getByTestId("settings-suggest-line").textContent).toContain("곽성재에게 「알림 설정 열기」 카드를 제안했어요");
+    expect(screen.getByTestId("settings-suggest-line").textContent).toContain("한지후에게 「알림 설정 열기」 카드를 제안했어요");
     expect(screen.queryByRole("button")).toBeNull();
   });
 

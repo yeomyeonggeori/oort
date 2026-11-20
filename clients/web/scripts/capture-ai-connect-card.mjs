@@ -34,7 +34,7 @@ const channelA = "00000000-0000-7000-8000-000000000201";
 const session = {
   accessToken: "gate-only-not-a-credential",
   refreshToken: "gate-only-not-a-credential",
-  member: { id: memberId, workspaceId, kind: "human", displayName: "곽성재", handle: "seongjae" },
+  member: { id: memberId, workspaceId, kind: "human", displayName: "한지후", handle: "jihu" },
   realtimeWebSocketUrl: "ws://slash-gate.invalid/connection/websocket",
 };
 
@@ -53,7 +53,7 @@ function member(over) {
 }
 
 const roster = [
-  member({ id: memberId, kind: "human", role: "owner", displayName: "곽성재", handle: "seongjae" }),
+  member({ id: memberId, kind: "human", role: "owner", displayName: "한지후", handle: "jihu" }),
   member({ id: peerId, kind: "human", displayName: "김하늘", handle: "haneul" }),
   member({
     id: agentId,

@@ -36,7 +36,7 @@ function member(over: Partial<RosterMember> & {id: string}): RosterMember {
 }
 
 const DIRECTORY = makeDirectory([
-  member({id: SELF, displayName: '곽성재', handle: 'seongjae'}),
+  member({id: SELF, displayName: '한지후', handle: 'jihu'}),
   member({id: OTHER, displayName: '김인턴', handle: 'intern-kim'}),
   member({id: AGENT, kind: 'agent', displayName: '코메토', handle: 'kometto'}),
 ]);
@@ -159,7 +159,7 @@ describe('폰 스레드 화면: root 를 가리키는 인용', () => {
     renderThread([ANSWER_TO_ROOT, HUMAN_BETWEEN, LIVE_TO_ROOT, ANSWER_TO_REPLY]);
     const heads = screen.getAllByTestId('quote-block');
     expect(heads).toHaveLength(1);
-    expect(within(heads[0]).getByTestId('quote-head-label').props.children).toBe('곽성재에게 답장');
+    expect(within(heads[0]).getByTestId('quote-head-label').props.children).toBe('한지후에게 답장');
     expect(within(heads[0]).getByTestId('quote-body').props.children).toEqual(['고마워요.', '']);
   });
 });

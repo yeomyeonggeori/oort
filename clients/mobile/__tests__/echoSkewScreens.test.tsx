@@ -42,7 +42,7 @@ function member(id: string, displayName: string, handle: string): RosterMember {
   } as RosterMember;
 }
 
-const DIRECTORY = makeDirectory([member(SELF, '곽성재', 'seongjae'), member(OTHER, '김인턴', 'intern-kim')]);
+const DIRECTORY = makeDirectory([member(SELF, '한지후', 'jihu'), member(OTHER, '김인턴', 'intern-kim')]);
 
 function message(seq: number, over: Partial<Message>): Message {
   return {

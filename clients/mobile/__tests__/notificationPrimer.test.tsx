@@ -68,8 +68,8 @@ const MEMBER: Member = {
   id: '11111111-1111-4111-8111-111111111111',
   workspaceId: WS,
   kind: 'human',
-  displayName: 'Seongjae Kwak',
-  handle: 'seongjae',
+  displayName: 'Jihu Han',
+  handle: 'jihu',
 };
 
 const getPermissions = Notifications.getPermissionsAsync as jest.Mock;
@@ -394,7 +394,7 @@ describe('M3 어떤 알림을 받을까요? (#3925, ADR-0204 D4)', () => {
       ),
     ).toBe(true);
     expect(JSON.stringify(NOTIFY_SAMPLES)).not.toMatch(
-      new RegExp(`${MEMBER.displayName}|${MEMBER.handle}|곽성재`),
+      new RegExp(`${MEMBER.displayName}|${MEMBER.handle}|한지후`),
     );
   });
 

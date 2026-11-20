@@ -32,8 +32,8 @@
 // 표면을 인용한 것이지 만든 것이 아니라서). 이름은 반대다: 실명이 새는 자리가 바로
 // 테스트 고정값이다. 그래서 별도 단계이고, **주석·식별자·문자열 전부**를 같은 규칙으로 본다.
 //
-// 훑는 범위는 아래 `SCOPE` 한 곳이다. #4632 가 정리한 트리만 넣었다: 정리하지 않은 트리를
-// 넣으면 첫날부터 붉다. 후속 정리(웹·폰 시험 고정값)가 끝난 트리를 거기에 더한다.
+// 훑는 범위는 아래 `SCOPE` 한 곳이다. #4632 가 코어와 폰 측정 하네스를 정리했고, #6038 이
+// 웹·폰의 시험·픽스처·하네스·게이트·캡처 스크립트를 정리해 세 트리 전체로 넓혔다.
 //
 // ## 「안 돈 것」과 「초록」을 구분한다
 //
@@ -61,15 +61,23 @@ const DIGEST_FILE = resolve(HERE, "design_preflight_names.digests");
 
 // ---- 범위 -------------------------------------------------------------------
 //
-// 넓힐 때: 후속 정리가 끝난 트리를 여기에 더한다(예: clients/mobile/__tests__,
-// clients/web/src, clients/web/scripts). 정리 전 트리를 넣으면 붉다.
-export const SCOPE = ["packages/momo-core/src", "clients/mobile/measure"];
+// 코어 `src`(#4632) + 웹·폰 트리 전체(#6038: 시험·픽스처·하네스·게이트·캡처 스크립트·소스 주석).
+// 추적 중이거나 무시되지 않은 파일만 훑는다(`git ls-files`), 그래서 node_modules·빌드 산출물은 빠진다.
+export const SCOPE = ["packages/momo-core/src", "clients/web", "clients/mobile"];
 
 // 값을 바꿀 수 없는 파일. 경로가 정확히 같을 때만 면제한다.
 export const EXEMPT = new Map([
   [
     "packages/momo-core/src/features/auth/__fixtures__/human-control-signing-v4.vectors.json",
     "서명 벡터: 같은 바이트를 docs/api·모바일 사본·Rust 시험이 함께 서명/검증한다. 값을 바꾸면 서명이 깨진다(재서명 후속 이슈).",
+  ],
+  [
+    "clients/mobile/__tests__/fixtures/human-control-signing-v4.vectors.json",
+    "서명 벡터의 폰 사본: 위 코어 파일과 바이트가 같아야 한다(같은 이유, #6038).",
+  ],
+  [
+    "clients/web/src/features/work/__fixtures__/desktop-sign-requests.json",
+    "서명 벡터: 데스크탑 Rust 시험(device_key/payload/tests.rs)이 include_str 로 읽어 같은 payload 를 다시 만든다. 값을 바꾸면 서명이 깨진다(재서명 후속 이슈, #6038).",
   ],
 ]);
 
@@ -129,7 +137,10 @@ export function scanLine(rawLine, index) {
     }
   }
   for (const word of line.match(/[A-Za-z]+/g) ?? []) {
-    for (const piece of word.split(SPLIT_CAMEL)) {
+    const pieces = word.split(SPLIT_CAMEL);
+    // 카멜로 쪼개면 두 토막이 되는 같은 낱말(대소문자만 섞은 철자)도 한 덩이로 본다 (#6038).
+    if (pieces.length > 1) pieces.push(word);
+    for (const piece of pieces) {
       if (piece.length < 4 || !index.latinLens.has(piece.length)) continue;
       const id = index.latin.get(digestOf(piece));
       if (id) hits.push(`l${piece.length}·${id}`);
@@ -221,6 +232,7 @@ function selftest() {
     { want: 1, why: "카멜 덩이(앞 토막)", src: "const GildongHong = 1;" },
     { want: 1, why: "하이픈으로 이은 핸들", src: '"gildong-claude 빌드 봐 줘"' },
     { want: 1, why: "이메일 로컬 파트", src: 'login("gildong@example.com")' },
+    { want: 1, why: "대소문자만 섞어 카멜로 쪼개지는 같은 낱말(#6038)", src: 'login("\\t  GilDong@Example.COM")' },
     { want: 0, why: "더 긴 소문자 한 덩이는 다른 토막이다(공개 로그인이 이래서 통과한다)", src: "/Users/xxgildong/projects" },
     { want: 0, why: "2음절 부분은 목록에 없으면 통과(이름만 금지한 게 아니다)", src: '"길동 맥북"' },
     { want: 0, why: "가상 인물은 통과", src: 'displayName: "이도현", handle: "dohyun" // 박서연 최민수 정하윤' },

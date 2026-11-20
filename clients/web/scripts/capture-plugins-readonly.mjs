@@ -77,11 +77,11 @@ const channels = [
 const auth = {
   accessToken: "capture-only-not-a-credential",
   refreshToken: "capture-only-not-a-credential",
-  member: { id: memberId, workspaceId, kind: "human", displayName: "곽성재", handle: "seongjae" },
+  member: { id: memberId, workspaceId, kind: "human", displayName: "한지후", handle: "jihu" },
   realtimeWebSocketUrl: "ws://plugins-readonly-capture.invalid/connection/websocket",
 };
 const base = { workspaceId, status: "active", channelCount: 1, channelIds: channels.map((c) => c.id), capabilities: [], createdAtMs: 0, updatedAtMs: 0 };
-const roster = [{ ...base, id: memberId, kind: "human", displayName: "곽성재", handle: "seongjae", role: "owner" }];
+const roster = [{ ...base, id: memberId, kind: "human", displayName: "한지후", handle: "jihu", role: "owner" }];
 
 /** 앱 목록 경로가 어떤 서버처럼 답하는가: ok · empty · error(503) · absent(404) · slow(2.5초 늦게). */
 const scenario = { catalog: "ok" };

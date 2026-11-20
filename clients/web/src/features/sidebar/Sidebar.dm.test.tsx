@@ -96,7 +96,7 @@ function member(id: string, patch: Partial<RosterMember>): RosterMember {
     ...patch,
   };
 }
-const self = member(MEMBER_ID, { displayName: "곽성재", handle: "seongjae", role: "owner" });
+const self = member(MEMBER_ID, { displayName: "한지후", handle: "jihu", role: "owner" });
 const roster = [
   self,
   member(PEER_PLAIN, { displayName: "이도현", handle: "dohyun" }),
@@ -343,8 +343,8 @@ function sessionValue(): SessionContextValue {
         id: MEMBER_ID,
         workspaceId: WS,
         kind: "human",
-        displayName: "곽성재",
-        handle: "seongjae",
+        displayName: "한지후",
+        handle: "jihu",
       },
       realtimeWebSocketUrl: "wss://example.test/connection/websocket",
     },
@@ -613,8 +613,8 @@ describe("사이드바 DM 구획 (#3662)", () => {
     );
     expect(labels.filter((t) => t === "다이렉트 메시지")).toEqual([]);
     const selfRow = dmRow(host, DM_ID(5));
-    expect(selfRow.textContent).toContain("곽성재 (나)");
-    expect(selfRow.querySelector('[data-testid="dm-avatar"]')?.textContent).toBe("곽");
+    expect(selfRow.textContent).toContain("한지후 (나)");
+    expect(selfRow.querySelector('[data-testid="dm-avatar"]')?.textContent).toBe("한");
     // 명부에 없는 상대의 DM 은 안 읽음이 없으면 목록에 없다(#4252): 「닫은 대화」에 있다. 이름은 멘션이 행을 세운 판에서 잰다.
     expect(dmRow(host, DM_ID(6))).toBeNull();
     expect(closedCount(host)).toBe(1);

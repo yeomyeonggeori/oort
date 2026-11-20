@@ -55,8 +55,8 @@ const persisted = {
     id: "019f94e3-7a10-79cd-9dee-208f47edd9a8",
     workspaceId,
     kind: "human",
-    displayName: "곽성재",
-    handle: "seongjae",
+    displayName: "한지후",
+    handle: "jihu",
   },
 };
 
