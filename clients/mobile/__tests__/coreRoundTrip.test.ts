@@ -43,8 +43,8 @@ const MEMBER = {
   id: '11111111-1111-4111-8111-111111111111',
   workspaceId: '22222222-2222-4222-8222-222222222222',
   kind: 'human',
-  displayName: 'Seongjae Kwak',
-  handle: 'seongjae',
+  displayName: 'Jihu Han',
+  handle: 'jihu',
 };
 
 const LOGIN_BODY = {
@@ -119,19 +119,19 @@ describe('login, end to end through the core', () => {
   it('builds the request from the stored base and adopts the response', async () => {
     fetchMock.mockResolvedValueOnce(jsonResponse(200, LOGIN_BODY));
 
-    const response = await login('seongjae@example.com', 'pw');
+    const response = await login('jihu@example.com', 'pw');
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const [url, init] = fetchMock.mock.calls[0];
     expect(url).toBe('https://api.example.com/v1/auth/login');
     expect(init?.method).toBe('POST');
     expect(JSON.parse(String(init?.body))).toEqual({
-      email: 'seongjae@example.com',
+      email: 'jihu@example.com',
       password: 'pw',
     });
 
     // Decoded by the core's wire decoder, not by this client.
-    expect(response.member.displayName).toBe('Seongjae Kwak');
+    expect(response.member.displayName).toBe('Jihu Han');
     expect(coreSession().getAccessToken()).toBe('access-token-1');
   });
 
@@ -147,14 +147,14 @@ describe('login, end to end through the core', () => {
 
     const [, init] = fetchMock.mock.calls[0];
     expect(JSON.parse(String(init?.body))).toEqual({
-      email: 'seongjae@example.com',
+      email: 'jihu@example.com',
       password: 'pw',
     });
   });
 
   it('puts the refresh token in the keychain and NOT in MMKV', async () => {
     fetchMock.mockResolvedValueOnce(jsonResponse(200, LOGIN_BODY));
-    await login('seongjae@example.com', 'pw');
+    await login('jihu@example.com', 'pw');
     await keychainSettled();
 
     const stored = keychainItems.get('app.momo.ios.rn.session');
@@ -174,7 +174,7 @@ describe('login, end to end through the core', () => {
 
   it('keeps the non-secret metadata where a relaunch can find it', async () => {
     fetchMock.mockResolvedValueOnce(jsonResponse(200, LOGIN_BODY));
-    await login('seongjae@example.com', 'pw');
+    await login('jihu@example.com', 'pw');
 
     const metadata = JSON.parse(
       String(mmkvStore.get('momo.mobile.session.meta.v1')),
@@ -193,7 +193,7 @@ describe('login, end to end through the core', () => {
       jsonResponse(401, {error: {message: '이메일 또는 비밀번호가 올바르지 않습니다.'}}),
     );
 
-    await expect(login('seongjae@example.com', 'wrong')).rejects.toThrow(
+    await expect(login('jihu@example.com', 'wrong')).rejects.toThrow(
       ApiError,
     );
     expect(getRefreshToken()).toBeNull();
@@ -203,7 +203,7 @@ describe('login, end to end through the core', () => {
   it('surfaces an unreachable server as NetworkError, not as a rejection', async () => {
     fetchMock.mockRejectedValueOnce(new TypeError('Network request failed'));
 
-    const error = await login('seongjae@example.com', 'pw').catch(e => e);
+    const error = await login('jihu@example.com', 'pw').catch(e => e);
     expect(error).toBeInstanceOf(NetworkError);
     expect(error.failure).toBe('unreachable');
     // A wrong password and a dead server must never read as the same thing.
@@ -222,7 +222,7 @@ describe('login, end to end through the core', () => {
           }),
       );
 
-      const pending = login('seongjae@example.com', 'pw').catch(e => e);
+      const pending = login('jihu@example.com', 'pw').catch(e => e);
       jest.advanceTimersByTime(REQUEST_TIMEOUT_MS + 1);
       const error = await pending;
 
@@ -243,7 +243,7 @@ describe('resume and sign out', () => {
 
   it('resumes a stored session with exactly one rotation', async () => {
     fetchMock.mockResolvedValueOnce(jsonResponse(200, LOGIN_BODY));
-    await login('seongjae@example.com', 'pw');
+    await login('jihu@example.com', 'pw');
     await keychainSettled();
 
     // A relaunch: memory is gone, the keychain and MMKV are not.
@@ -279,7 +279,7 @@ describe('resume and sign out', () => {
 
   it('erases the device copy before the network revocation is attempted', async () => {
     fetchMock.mockResolvedValueOnce(jsonResponse(200, LOGIN_BODY));
-    await login('seongjae@example.com', 'pw');
+    await login('jihu@example.com', 'pw');
     await keychainSettled();
 
     fetchMock.mockRejectedValueOnce(new TypeError('Network request failed'));

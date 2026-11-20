@@ -89,8 +89,8 @@ function member(id: string, over: Partial<RosterMember> = {}): RosterMember {
     workspaceId: WS,
     kind: id === AGENT ? 'agent' : 'human',
     status: 'active',
-    displayName: id === AGENT ? '김인턴' : '곽성재',
-    handle: id === AGENT ? 'intern-kim' : 'seongjae',
+    displayName: id === AGENT ? '김인턴' : '한지후',
+    handle: id === AGENT ? 'intern-kim' : 'jihu',
     channelCount: 0,
     channelIds: [],
     capabilities: [],
@@ -101,7 +101,7 @@ function member(id: string, over: Partial<RosterMember> = {}): RosterMember {
 }
 
 const DIRECTORY = makeDirectory([member(SELF), member(AGENT)]);
-const ME = {id: SELF, workspaceId: WS, displayName: '곽성재'} as Member;
+const ME = {id: SELF, workspaceId: WS, displayName: '한지후'} as Member;
 
 const GATE: ApprovalGate = {
   approvalId: 'ap-1',
@@ -912,7 +912,7 @@ describe('DM admission names the person whose consent this card requires', () =>
     const view = renderCard({message, gates: new Map([['ap-1', GATE]]), viewerMemberId: AGENT});
     // #4920: 카드는 고정된 결정자의 이름으로 말한다. 요청자·결정자·다른 참여자 시점과 묶음 카드 갈래는
     // dmAdmissionCard.test.tsx가 잰다.
-    expect(view.getByText('곽성재 님의 허락을 기다려요')).toBeTruthy();
+    expect(view.getByText('한지후 님의 허락을 기다려요')).toBeTruthy();
     expect(view.queryByText(/표시된 참여자/u)).toBeNull();
     expect(view.queryByTestId('card-approval-ap-1-approve')).toBeNull();
   });

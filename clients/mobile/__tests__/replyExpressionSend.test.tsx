@@ -66,7 +66,7 @@ const BASE_MS = 1_700_000_000_000;
 function member(id: string, name: string): RosterMember {
   return {id, workspaceId: WS, kind: 'human', status: 'active', displayName: name, handle: name, channelCount: 0, channelIds: [], capabilities: [], createdAtMs: 0, updatedAtMs: 0} as RosterMember;
 }
-const DIRECTORY = makeDirectory([member(SELF, '곽성재'), member(OTHER, '김인턴')]);
+const DIRECTORY = makeDirectory([member(SELF, '한지후'), member(OTHER, '김인턴')]);
 /** 남이 쓴 본류의 글 - 밀어서 답장을 걸 대상이면서 스레드의 루트다. */
 const PEER: Message = {id: ROOT_ID, channelId: CH, seq: 10, hlcTs: 10, hlcCount: 0, authorMemberId: OTHER, type: 'text', body: '배포는 금요일에 합니다.', state: 'sent', createdAtMs: BASE_MS};
 

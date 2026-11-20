@@ -40,7 +40,7 @@ function member(over: Partial<RosterMember> & {id: string}): RosterMember {
 }
 
 const DIRECTORY = makeDirectory([
-  member({id: SELF, displayName: '곽성재', handle: 'seongjae'}),
+  member({id: SELF, displayName: '한지후', handle: 'jihu'}),
   member({id: AGENT, displayName: '헤르메스', handle: 'hermes', kind: 'agent', ownerHumanId: SELF}),
 ]);
 
@@ -122,7 +122,7 @@ describe('중단 시스템 줄이 서는 모양', () => {
     expect(screen.getByTestId('system-line')).toBeTruthy();
     expect(screen.queryByTestId('message-row')).toBeNull();
     expect(screen.queryByTestId('message-avatar-slot')).toBeNull();
-    expect(screen.queryByText('곽성재')).toBeNull();
+    expect(screen.queryByText('한지후')).toBeNull();
   });
 
   it('멈춘 사람의 다음 글은 이름 머리를 다시 단다 — 위에 가운데 줄이 있어 이어진 행이 되면 누구 글인지 읽을 근거가 없다', () => {

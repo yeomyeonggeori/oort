@@ -45,11 +45,11 @@ const member = (id: string, kind: 'human' | 'agent', displayName: string, handle
     updatedAtMs: 0,
   }) as RosterMember;
 const DIRECTORY = makeDirectory([
-  member(SELF_ID, 'human', '곽성재', 'seongjae'),
+  member(SELF_ID, 'human', '한지후', 'jihu'),
   member(GITHUB_ID, 'agent', 'GitHub', 'github'),
   member(HERMES_ID, 'agent', 'Hermes', 'hermes'),
 ]);
-const ME: Member = {id: SELF_ID, workspaceId: WS, kind: 'human', displayName: '곽성재', handle: 'seongjae'};
+const ME: Member = {id: SELF_ID, workspaceId: WS, kind: 'human', displayName: '한지후', handle: 'jihu'};
 
 const PROPS = {
   source: 'github',

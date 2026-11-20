@@ -66,7 +66,7 @@ function rosterMember(
 }
 
 const DIRECTORY = makeDirectory([
-  rosterMember(SELF_ID, 'human', '곽성재', 'seongjae'),
+  rosterMember(SELF_ID, 'human', '한지후', 'jihu'),
   rosterMember(OTHER_ID, 'human', '김하늘', 'haneul'),
   rosterMember(HELPER, 'agent', 'oort 도우미', 'oort-helper'),
   rosterMember(GROK, 'agent', '그록봇', 'grokbot'),
@@ -75,8 +75,8 @@ const ME: Member = {
   id: SELF_ID,
   workspaceId: WS,
   kind: 'human',
-  displayName: '곽성재',
-  handle: 'seongjae',
+  displayName: '한지후',
+  handle: 'jihu',
 };
 
 function message(over: Partial<Message>): Message {

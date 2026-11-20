@@ -44,7 +44,7 @@ function member(over: Partial<RosterMember> & {id: string}): RosterMember {
 }
 
 const DIRECTORY = makeDirectory([
-  member({id: SELF_ID, displayName: '곽성재', handle: 'seongjae'}),
+  member({id: SELF_ID, displayName: '한지후', handle: 'jihu'}),
   member({id: OTHER, displayName: '김인턴', handle: 'intern-kim'}),
   member({
     id: 'cccccccc-1111-4111-8111-cccccccccccc',
@@ -492,7 +492,7 @@ describe('행이 말하는 것', () => {
     expect(screen.queryByText('에이전트')).toBeNull();
     expect(screen.getByLabelText(/^헤르메스, 에이전트, /)).toBeTruthy();
     // ADR-0131: an agent has a human who is accountable for it.
-    expect(screen.getByText('곽성재님이 관리')).toBeTruthy();
+    expect(screen.getByText('한지후님이 관리')).toBeTruthy();
   });
 
   it('「작업 중」 행도 배지 없이 낭독에만 「에이전트」를 말한다 (#4065)', () => {

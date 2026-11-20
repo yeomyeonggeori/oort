@@ -81,8 +81,8 @@ const SELF: Member = {
   id: SELF_ID,
   workspaceId: WS,
   kind: 'human',
-  displayName: '곽성재',
-  handle: 'seongjae',
+  displayName: '한지후',
+  handle: 'jihu',
 };
 
 function rosterMember(over: Record<string, unknown>) {
@@ -102,7 +102,7 @@ function rosterMember(over: Record<string, unknown>) {
 }
 
 const ROSTER = [
-  rosterMember({id: SELF_ID, displayName: '곽성재', handle: 'seongjae'}),
+  rosterMember({id: SELF_ID, displayName: '한지후', handle: 'jihu'}),
   rosterMember({id: HUMAN_ID, displayName: '박세은', handle: 'seeun'}),
   rosterMember({id: AGENT_ID, kind: 'agent', displayName: '김인턴', handle: 'kim-intern'}),
   rosterMember({id: HERMES_ID, kind: 'agent', displayName: '헤르메스', handle: 'hermes'}),
@@ -472,7 +472,7 @@ describe('홈 — 머리', () => {
     ).toMatchObject({width: HOME.logo, height: HOME.logo, borderRadius: HOME.logo / 2});
     // 계정 문은 그대로 머리 오른쪽에 있다(#2702).
     expect(screen.getByTestId('profile-avatar').props.accessibilityLabel).toBe(
-      '내 프로필, 곽성재',
+      '내 프로필, 한지후',
     );
   });
 
@@ -481,7 +481,7 @@ describe('홈 — 머리', () => {
     await waitFor(() =>
       expect(screen.getByTestId('home-title')).toHaveTextContent('워크스페이스'),
     );
-    expect(screen.getByTestId('home-title')).not.toHaveTextContent(/곽성재/);
+    expect(screen.getByTestId('home-title')).not.toHaveTextContent(/한지후/);
   });
 
   it('이름을 기다리는 동안에도 사람 이름으로 채우지 않는다 — 빈 제목, 빈 로고 원', async () => {

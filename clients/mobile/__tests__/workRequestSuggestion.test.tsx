@@ -37,7 +37,7 @@ function person(id: string, kind: 'human' | 'agent', displayName: string, handle
 }
 
 const directory = makeDirectory([
-  person(HUMAN, 'human', '곽성재', 'sj'),
+  person(HUMAN, 'human', '한지후', 'sj'),
   person(OTHER, 'human', '김하늘', 'sky'),
   person(AGENT, 'agent', 'hermes', 'hermes'),
 ]);
@@ -149,7 +149,7 @@ describe('WorkRequestSuggestion (phone)', () => {
     );
     expect(screen.getByTestId('work-request-suggest-line')).toBeTruthy();
     expect(
-      screen.getByText('곽성재에게 「내 맥의 Claude Code에 맡기기」 카드를 제안했어요'),
+      screen.getByText('한지후에게 「내 맥의 Claude Code에 맡기기」 카드를 제안했어요'),
     ).toBeTruthy();
     expect(screen.queryByTestId('work-request-suggest-open')).toBeNull();
     expect(screen.queryByText(/비밀번호 보기/)).toBeNull();

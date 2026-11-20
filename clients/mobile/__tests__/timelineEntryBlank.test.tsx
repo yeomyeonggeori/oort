@@ -90,12 +90,12 @@ function member(id: string, displayName: string, handle: string, over: Partial<R
 }
 
 const DIRECTORY = makeDirectory([
-  member(SELF, '곽성재', 'seongjae'),
+  member(SELF, '한지후', 'jihu'),
   member(MINSU, '김민수', 'minsu'),
   member(HANEUL, '이하늘', 'haneul'),
   member(HERMES, '헤르메스', 'hermes', {kind: 'agent'}),
 ]);
-const ME = {id: SELF, workspaceId: WS, displayName: '곽성재'} as Member;
+const ME = {id: SELF, workspaceId: WS, displayName: '한지후'} as Member;
 
 const BASE_MS = 1_700_000_000_000;
 const at = (minute: number) => BASE_MS + minute * 60_000;
@@ -130,7 +130,7 @@ const FIXTURE: Message[] = [
     thread: {reply_count: 2, last_reply_seq: 6, last_reply_at: at(21)},
   } as Partial<Message>),
   row(5, HANEUL, 'DB 백업 끝났습니다. 스냅샷 이름은 pre-0.1.6 입니다.', 15, {rootId: ROOT}),
-  row(6, HERMES, '@곽성재 헬스체크 세 개가 모두 통과했습니다. 프로덕션으로 넘어가도 됩니다.', 21, {
+  row(6, HERMES, '@한지후 헬스체크 세 개가 모두 통과했습니다. 프로덕션으로 넘어가도 됩니다.', 21, {
     rootId: ROOT,
     props: {mention_member_ids: [SELF]},
   }),
@@ -144,7 +144,7 @@ const FIXTURE: Message[] = [
       is_reversible: false,
     },
   } as Partial<Message>),
-  row(8, MINSU, '@곽성재 배포 로그 링크를 스레드에 올려 뒀어요. 승인 전에 한 번만 봐 주세요.', 27, {
+  row(8, MINSU, '@한지후 배포 로그 링크를 스레드에 올려 뒀어요. 승인 전에 한 번만 봐 주세요.', 27, {
     props: {mention_member_ids: [SELF]},
   }),
   row(9, HANEUL, '저도 로그 확인했습니다. 마이그레이션 시간은 40초 정도 걸렸어요.', 30),

@@ -226,8 +226,8 @@ function rosterMember(id: string, over: Partial<RosterMember> = {}): RosterMembe
     workspaceId: WS,
     kind: id === HERMES ? 'agent' : 'human',
     status: 'active',
-    displayName: id === HERMES ? 'hermes' : '곽성재',
-    handle: id === HERMES ? 'hermes' : 'seongjae',
+    displayName: id === HERMES ? 'hermes' : '한지후',
+    handle: id === HERMES ? 'hermes' : 'jihu',
     channelCount: 1,
     channelIds: [GENERAL],
     capabilities: [],
@@ -243,8 +243,8 @@ const ME: Member = {
   id: SELF_ID,
   workspaceId: WS,
   kind: 'human',
-  displayName: '곽성재',
-  handle: 'seongjae',
+  displayName: '한지후',
+  handle: 'jihu',
 };
 
 const GATE: ApprovalGate = {
@@ -1142,7 +1142,7 @@ describe('#2513 — 영속 결과 카드 (부록 B)', () => {
     expect(within(rows[0]).getByText('역할')).toBeTruthy();
     expect(within(rows[0]).getByText('member')).toBeTruthy();
     expect(
-      within(screen.getByTestId('action-result-decided-by')).getByText('곽성재'),
+      within(screen.getByTestId('action-result-decided-by')).getByText('한지후'),
     ).toBeTruthy();
     expect(screen.getByTestId('action-result-note').props.children).toBe(
       '실행을 마쳤어요.',

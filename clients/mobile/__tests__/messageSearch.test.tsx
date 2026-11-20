@@ -271,7 +271,7 @@ describe('넘겨받은 질의', () => {
 
 describe('검색 탭 — 종류 칩·묶음 결과·최근 목록·대화 고르기 (#5365)', () => {
   const t = createMessageService({messageLocale: 'ko-KR', catalog: koCatalog}).formatMessage;
-  const ME = selfMember({displayName: '곽성재', handle: 'seongjae'});
+  const ME = selfMember({displayName: '한지후', handle: 'jihu'});
   const LUNA = member({id: OTHER_ID, workspaceId: WS_ID, displayName: '루나', handle: 'luna'});
   const HELPER = member({
     id: 'bbbbbbbb-2222-4222-8222-bbbbbbbbbbbb',
@@ -280,7 +280,7 @@ describe('검색 탭 — 종류 칩·묶음 결과·최근 목록·대화 고르
     displayName: '루나 도우미',
     handle: 'luna-helper',
   });
-  const ROSTER = [member({id: SELF_ID, workspaceId: WS_ID, displayName: '곽성재', handle: 'seongjae'}), LUNA, HELPER];
+  const ROSTER = [member({id: SELF_ID, workspaceId: WS_ID, displayName: '한지후', handle: 'jihu'}), LUNA, HELPER];
   const channel = (id: string, name: string, kind: Channel['kind'] = 'public'): Channel => ({
     id,
     workspaceId: WS_ID,

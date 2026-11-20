@@ -86,8 +86,8 @@ const SELF: Member = {
   id: SELF_ID,
   workspaceId: WS,
   kind: 'human',
-  displayName: '곽성재',
-  handle: 'seongjae',
+  displayName: '한지후',
+  handle: 'jihu',
 };
 
 function rosterMember(over: Record<string, unknown> = {}) {
@@ -643,7 +643,7 @@ describe('후보 판정(순수)', () => {
   it('소유자 전용 에이전트는 소유자가 아닌 사람에게 나오지 않는다', () => {
     const mine = rosterMember({
       callableBy: 'owner_only',
-      owner: {id: SELF_ID, displayName: '곽성재'},
+      owner: {id: SELF_ID, displayName: '한지후'},
     });
     const theirs = rosterMember({
       id: '99999999-9999-4999-8999-999999999999',

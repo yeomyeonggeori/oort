@@ -60,8 +60,8 @@ const LOGIN_BODY = {
     id: '11111111-1111-4111-8111-111111111111',
     workspaceId: WS,
     kind: 'human' as const,
-    displayName: 'Seongjae Kwak',
-    handle: 'seongjae',
+    displayName: 'Jihu Han',
+    handle: 'jihu',
   },
 };
 

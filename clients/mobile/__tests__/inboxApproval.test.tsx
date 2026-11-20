@@ -85,8 +85,8 @@ const SELF: Member = {
   id: SELF_ID,
   workspaceId: WS,
   kind: 'human',
-  displayName: '곽성재',
-  handle: 'seongjae',
+  displayName: '한지후',
+  handle: 'jihu',
 };
 
 const LOGIN_BODY = {
@@ -102,8 +102,8 @@ const ROSTER = [
     workspaceId: WS,
     kind: 'human',
     status: 'active',
-    displayName: '곽성재',
-    handle: 'seongjae',
+    displayName: '한지후',
+    handle: 'jihu',
     channelCount: 1,
     channelIds: [CHANNEL],
     capabilities: [],

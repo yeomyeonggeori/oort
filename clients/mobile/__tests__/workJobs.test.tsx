@@ -42,8 +42,8 @@ const SELF: Member = {
   id: SELF_ID,
   workspaceId: WS,
   kind: 'human',
-  displayName: '곽성재',
-  handle: 'seongjae',
+  displayName: '한지후',
+  handle: 'jihu',
 };
 
 const LOGIN_BODY = {
@@ -60,7 +60,7 @@ function wireRun(over: Record<string, unknown>) {
   return {
     source: 'run',
     runId: 'RUN-1',
-    requestedBy: {memberId: SELF_ID, displayName: '곽성재'},
+    requestedBy: {memberId: SELF_ID, displayName: '한지후'},
     stepCount: 2,
     origin: 'agent_run',
     label: '온보딩 문구 다듬기',
@@ -242,7 +242,7 @@ describe('결과 중심 줄 (ADR-0202 D1)', () => {
     installFetch();
     renderJobs();
     await waitFor(() => expect(screen.getByTestId('work-job-row-RUN-1')).toBeTruthy());
-    expect(screen.getByTestId('work-job-who-RUN-1')).toHaveTextContent('곽성재 → 그록봇');
+    expect(screen.getByTestId('work-job-who-RUN-1')).toHaveTextContent('한지후 → 그록봇');
     expect(screen.getByTestId('work-job-state-RUN-1')).toHaveTextContent(/끝남 · PR/);
     expect(screen.getByTestId('work-job-reported-tag-RUN-1')).toHaveTextContent(/에이전트 보고/);
     expect(screen.getByTestId('work-job-result-RUN-1')).toHaveTextContent(

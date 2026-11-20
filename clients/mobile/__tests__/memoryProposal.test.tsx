@@ -67,7 +67,7 @@ function rosterMember(over: Partial<RosterMember> & {id: string}): RosterMember 
 }
 function directoryOf(selfRole: RosterMember['role']) {
   return makeDirectory([
-    rosterMember({id: SELF, displayName: '곽성재', handle: 'seongjae', role: selfRole}),
+    rosterMember({id: SELF, displayName: '한지후', handle: 'jihu', role: selfRole}),
     rosterMember({id: BOB, displayName: '밥', handle: 'bob'}),
     rosterMember({id: AGENT, kind: 'agent', displayName: '김인턴', handle: 'intern'}),
   ]);

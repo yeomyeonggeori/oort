@@ -74,7 +74,7 @@ function person(
 }
 
 const DIRECTORY = makeDirectory([
-  person(REQUESTER, 'human', '곽성재', 'seongjae'),
+  person(REQUESTER, 'human', '한지후', 'jihu'),
   person(SKY, 'human', '김하늘', 'sky'),
   person(HERMES, 'agent', 'hermes', 'hermes'),
 ]);
@@ -230,7 +230,7 @@ describe('대상 본인 — 폰 읽기 카드', () => {
   it('props에 상태를 실어도 믿지 않는다: 한 줄 폴백, 누를 것 0', async () => {
     renderRow(message({...G3, state: 'ready'}), REQUESTER);
     const line = await screen.findByTestId('ai-suggest-other', {}, {timeout: 5000});
-    expect(within(line).getByText('곽성재에게 AI 계정 연결을 제안했어요')).toBeTruthy();
+    expect(within(line).getByText('한지후에게 AI 계정 연결을 제안했어요')).toBeTruthy();
     expect(pressables(line)).toBe(0);
     expect(screen.queryByTestId('ai-suggest-target')).toBeNull();
   });
@@ -242,7 +242,7 @@ describe('대상이 아닌 사람', () => {
     renderRow(message(G3), SKY);
     await waitFor(() => expect(fetchProviderLink).toHaveBeenCalled());
     const line = await screen.findByTestId('ai-suggest-other', {}, {timeout: 5000});
-    expect(within(line).getByText('곽성재에게 AI 계정 연결을 제안했어요')).toBeTruthy();
+    expect(within(line).getByText('한지후에게 AI 계정 연결을 제안했어요')).toBeTruthy();
     expect(pressables(line)).toBe(0);
     expect(screen.queryByText(/내 계정/)).toBeNull();
   });

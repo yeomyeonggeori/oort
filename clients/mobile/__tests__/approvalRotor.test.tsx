@@ -66,8 +66,8 @@ function member(id: string): RosterMember {
     workspaceId: WS,
     kind: id === AGENT ? 'agent' : 'human',
     status: 'active',
-    displayName: id === AGENT ? '김인턴' : '곽성재',
-    handle: id === AGENT ? 'intern-kim' : 'seongjae',
+    displayName: id === AGENT ? '김인턴' : '한지후',
+    handle: id === AGENT ? 'intern-kim' : 'jihu',
     channelCount: 0,
     channelIds: [],
     capabilities: [],
@@ -77,7 +77,7 @@ function member(id: string): RosterMember {
 }
 
 const DIRECTORY = makeDirectory([member(SELF), member(AGENT)]);
-const ME = {id: SELF, workspaceId: WS, displayName: '곽성재'} as Member;
+const ME = {id: SELF, workspaceId: WS, displayName: '한지후'} as Member;
 const GATE: ApprovalGate = {approvalId: 'ap-1', reversible: false, expiresAtMs: null};
 const GATES = new Map([['ap-1', GATE]]);
 

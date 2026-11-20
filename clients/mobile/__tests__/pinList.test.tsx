@@ -48,7 +48,7 @@ function member(over: Partial<RosterMember> & {id: string}): RosterMember {
 }
 
 const DIRECTORY = makeDirectory([
-  member({id: SELF, displayName: '곽성재', handle: 'seongjae'}),
+  member({id: SELF, displayName: '한지후', handle: 'jihu'}),
   member({id: OTHER, displayName: '김인턴', handle: 'intern-kim'}),
 ]);
 
@@ -166,13 +166,13 @@ describe('고정 목록은 가는 곳이다', () => {
 
   /**
    * 화면에는 두 줄이지만 VoiceOver 에게는 한 문장이어야 한다 — 그리고 그 문장은
-   * **무엇이 열리는지**로 끝나야 한다. 「곽성재」만 읽어 주면 누를 이유를 모른다.
+   * **무엇이 열리는지**로 끝나야 한다. 「한지후」만 읽어 주면 누를 이유를 모른다.
    */
   it('항목 하나가 한 문장으로 읽히고, 무엇이 열리는지로 끝난다', () => {
     renderPanel(pinsOf(wire()));
     const label = screen.getByTestId('pin-list-item').props
       .accessibilityLabel as string;
-    expect(label).toContain('곽성재');
+    expect(label).toContain('한지후');
     expect(label).toContain('배포 순서는');
     expect(label.endsWith('원본으로 이동')).toBe(true);
   });

@@ -44,7 +44,7 @@ const SEO = '33333333-3333-4333-8333-333333333333';
 const DM_SEO = 'aaaaaaaa-0000-4000-8000-000000000002';
 const BASE = 'https://api.example.com';
 
-const SELF: Member = {id: ME, workspaceId: WS, kind: 'human', displayName: '곽성재', handle: 'seongjae'};
+const SELF: Member = {id: ME, workspaceId: WS, kind: 'human', displayName: '한지후', handle: 'jihu'};
 const LOGIN_BODY = {
   accessToken: 'access-token-1',
   refreshToken: 'refresh-token-1',
@@ -55,7 +55,7 @@ const person = (id: string, kind: string, displayName: string, handle: string) =
   id, workspaceId: WS, kind, status: 'active', displayName, handle, channelCount: 1,
   channelIds: [DM_SEO], capabilities: [], createdAtMs: 0, updatedAtMs: 0,
 });
-const ROSTER = [person(ME, 'human', '곽성재', 'seongjae'), person(SEO, 'human', '서연', 'seoyeon')];
+const ROSTER = [person(ME, 'human', '한지후', 'jihu'), person(SEO, 'human', '서연', 'seoyeon')];
 const CHANNELS = [{id: DM_SEO, workspaceId: WS, kind: 'dm', dmKey: 'a', memberIds: [ME, SEO], muted: false}];
 
 interface Item {
