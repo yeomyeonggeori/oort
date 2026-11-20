@@ -51,12 +51,18 @@ describe('얼굴 점의 기하 (r1 M4 P2·P3)', () => {
     }
   });
 
-  it('꺼짐: 속 빈 고리의 두께 = 틈(0 이면 점이 바탕색으로 사라진다), 선은 textMuted(눌린 줄 위 3:1)', () => {
+  it('에이전트 꺼짐: 속 빈 고리의 두께 = 틈(0 이면 점이 바탕색으로 사라진다), 선은 textMuted(눌린 줄 위 3:1)', () => {
     const {gap} = statusBadgeGeometry(28);
-    const {mark} = dot({tone: 'muted'});
+    const {mark} = dot({tone: 'muted', subject: 'agent'});
     expect(gap).toBeGreaterThan(0);
     expect(mark.borderWidth).toBe(gap);
     expect(mark.borderColor).toBe(darkPalette.textMuted);
+  });
+
+  it('사람 오프라인: 회색(textMuted)으로 채운 원 — 고리가 아니다 (#6023)', () => {
+    const {mark} = dot({tone: 'muted', subject: 'human'});
+    expect(mark.backgroundColor).toBe(darkPalette.textMuted);
+    expect(mark.borderWidth).toBe(0);
   });
 
   it('채운 점은 고리가 없다(두께 0)', () => {
@@ -71,7 +77,7 @@ describe('고리·빈 곳 = 얼굴이 서는 바탕 (r1 M3)', () => {
     expect(dot({tone: 'ok', ground: GROUND}).gap.backgroundColor).toBe(GROUND);
     expect(dot({tone: 'warn', ground: GROUND}).moon!.backgroundColor).toBe(GROUND);
     expect(dot({tone: 'danger', ground: GROUND}).bar!.backgroundColor).toBe(GROUND);
-    expect(dot({tone: 'muted', ground: GROUND}).mark.backgroundColor).toBe(GROUND);
+    expect(dot({tone: 'muted', subject: 'agent', ground: GROUND}).mark.backgroundColor).toBe(GROUND);
   });
 
   it('바탕을 넘기지 않으면 면(surface) — 대화 머리 알약·새 메시지 카드', () => {

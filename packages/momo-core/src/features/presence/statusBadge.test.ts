@@ -88,8 +88,8 @@ describe("상태 점 크기 — 아바타 한 변 하나에서", () => {
 describe("상태 점 모양 — 톤이 아니라 뜻 (r1 H2)", () => {
   const TONES: readonly StatusDotTone[] = ["ok", "warn", "danger", "muted"];
 
-  it("사람: 온라인 채운 원 · 자리 비움 초승달 · 방해 금지 가로 줄 · 오프라인 속 빈 고리", () => {
-    expect(TONES.map((tone) => statusBadgeShape(tone, "human"))).toEqual(["fill", "moon", "bar", "ring"]);
+  it("사람: 온라인 채운 원 · 자리 비움 초승달 · 방해 금지 가로 줄 · 오프라인 회색으로 채운 원(#6023)", () => {
+    expect(TONES.map((tone) => statusBadgeShape(tone, "human"))).toEqual(["fill", "moon", "bar", "fill"]);
   });
 
   it("에이전트: 경고는 채운 원(이 칸 전 그대로) · 꺼짐은 속 빈 고리 — 사람의 자리 비움과 같은 그림이 아니다", () => {
@@ -99,8 +99,8 @@ describe("상태 점 모양 — 톤이 아니라 뜻 (r1 H2)", () => {
     expect(statusBadgeShape("warn", "agent")).not.toBe(statusBadgeShape("warn", "human"));
   });
 
-  it("사람의 네 상태는 모양이 모두 다르다", () => {
-    expect(new Set(TONES.map((tone) => statusBadgeShape(tone, "human"))).size).toBe(4);
+  it("사람: 온라인과 오프라인만 같은 채운 원(색으로 갈린다, #6023) — 자리 비움 · 방해 금지는 모양이 따로다", () => {
+    expect(new Set(TONES.map((tone) => statusBadgeShape(tone, "human"))).size).toBe(3);
   });
 });
 

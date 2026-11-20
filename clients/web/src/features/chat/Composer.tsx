@@ -61,6 +61,7 @@ import { useTypists } from "@/features/chat/typingStore";
 import {
   COMPOSER_SEED_EVENT,
   clearDraft,
+  holdOpenDraftChannel,
   readDraft,
   writeDraft,
 } from "@/features/chat/draftStore";
@@ -596,6 +597,8 @@ export function Composer({
       save();
     };
   }, [workspaceId, channelId, setAutocompleteCaret, closeAutocomplete]);
+  // 열어 둔 동안 이 대화의 초안으로는 사이드바 「초안」 줄을 세우지 않는다(#6030 — 첫 글자에 목록이 밀렸다). 떠나면 푼다.
+  useEffect(() => holdOpenDraftChannel(workspaceId, channelId), [workspaceId, channelId]);
 
   /**
    * 지금 이 전송이 나갈 수 있는가.

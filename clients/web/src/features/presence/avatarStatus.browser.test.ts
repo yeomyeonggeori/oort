@@ -27,7 +27,7 @@ import { AvatarStatus } from "./AvatarStatus";
  *   틈    점 중심에서 「점 반지름 + 틈/2」 거리의 세 점(왼쪽·왼쪽 위·위 — 아바타 위)이 **바탕 색 그대로**다. 예전의 면색 테는
  *         가리킴·선택·띠·사진 위에서 바탕과 다른 색이었다 — 그 색 테가 없다는 것이 이 줄이다.
  *   점    모양(뜻): 사람 ok 는 가운데가 표식, 사람 warn 은 왼쪽 위(덜어 낸 원)가 바탕이고 오른쪽 아래가 표식, danger 는
- *         가운데(가로 줄)가 바탕이고 위아래가 표식, muted 는 가운데가 바탕이고 고리 자리가 표식. **에이전트 warn 은 채운
+ *         가운데(가로 줄)가 바탕이고 위아래가 표식, 사람 muted(오프라인)는 회색으로 채운 원이라 가운데도 표식(#6023). **에이전트 warn 은 채운
  *         원**이다 — 사람의 초승달이 비는 왼쪽 위까지 표식이다(r1 H2: 경고가 「자리 비움」 그림이 되지 않는다). 표식은 바탕과
  *         3:1 이상.
  *   가장자리 도려낸 원의 반지름을 세 방향에서 재어 1 기기 px 안에서 같다(찌그러지거나 계단지지 않는다). 바탕과 아바타
@@ -99,7 +99,7 @@ async function buildCss(): Promise<string> {
 /** 바탕 다섯: 쉬는 면 · 가리킨 줄 · 짙은 색 바탕(색 테가 가장 잘 드러나는 곳) · 띠(노을, 사이드바) · 사진 아바타(쉬는 면 위). */
 const BACKDROPS = ["surface", "hover", "tinted", "band", "photo"] as const;
 type Backdrop = (typeof BACKDROPS)[number];
-/** 열: 사람의 네 상태 · 점 없음 · 에이전트 경고(채운 원이어야 한다). */
+/** 열: 사람의 네 상태 · 점 없음 · 에이전트 경고(채운 원이어야 한다) · 에이전트 꺼짐(속 빈 고리, #6023). */
 const TONES: readonly { tone: StatusDotTone | null; subject: StatusBadgeSubject }[] = [
   { tone: "ok", subject: "human" },
   { tone: "warn", subject: "human" },
@@ -107,6 +107,8 @@ const TONES: readonly { tone: StatusDotTone | null; subject: StatusBadgeSubject 
   { tone: "muted", subject: "human" },
   { tone: null, subject: "human" },
   { tone: "warn", subject: "agent" },
+  // #6023: 사람 오프라인이 채운 원이 된 뒤에도 에이전트 꺼짐은 속 빈 고리다 — 고리를 픽셀로 재는 유일한 칸.
+  { tone: "muted", subject: "agent" },
 ];
 
 const CELL = 176;
@@ -292,7 +294,11 @@ function measureCell(img: Image, cell: Cell, label: string): string[] {
     if (!near(got, backdrop)) problems.push(`${label} 빈 곳(${where}) ${show(got)} ≠ 바탕 ${show(backdrop)}`);
   };
   const r = dot / 2;
-  if (cell.subject === "agent") {
+  if (cell.subject === "agent" && cell.tone === "muted") {
+    // 에이전트 꺼짐 = 속 빈 고리: 가운데가 바탕, 고리 자리가 표식.
+    hole("가운데", 0, 0);
+    mark("고리", -(r - gap / 2), 0);
+  } else if (cell.subject === "agent") {
     // 에이전트 경고 = 채운 원: 가운데도, 사람의 초승달이 비는 왼쪽 위도 표식이다.
     mark("가운데", 0, 0);
     mark("왼쪽 위(초승달이면 빈 곳)", -r * 0.5, -r * 0.5);
@@ -310,8 +316,9 @@ function measureCell(img: Image, cell: Cell, label: string): string[] {
       mark("줄 아래", 0, gap / 2 + (r - gap / 2) / 2);
       break;
     case "muted":
-      hole("가운데", 0, 0);
-      mark("고리", -(r - gap / 2), 0);
+      // 사람의 오프라인 = 회색으로 채운 원(#6023): 가운데도, 고리였을 때의 선 자리도 표식이다.
+      mark("가운데", 0, 0);
+      mark("가장자리 안쪽", -(r - gap / 2), 0);
       break;
   }
   // 가장자리: 구멍 반지름을 세 방향에서(점 중심에서 바깥으로 걸어 처음 「바탕이 아닌」 픽셀) — 같아야 한다.
