@@ -50,7 +50,7 @@ const channels = [
 const auth = {
   accessToken: "capture-only-not-a-credential",
   refreshToken: "capture-only-not-a-credential",
-  member: { id: memberId, workspaceId, kind: "human", displayName: "곽성재", handle: "seongjae" },
+  member: { id: memberId, workspaceId, kind: "human", displayName: "한지후", handle: "jihu" },
   realtimeWebSocketUrl: "ws://pause-banner-capture.invalid/connection/websocket",
 };
 
@@ -81,7 +81,7 @@ function rosterRows(server) {
     id, workspaceId, kind, status: "active", role: kind === "agent" ? "member" : "owner", displayName, handle,
     channelCount: 2, channelIds: [chWork, chGeneral], capabilities: [], createdAtMs: 0, updatedAtMs: 0, ...extra,
   });
-  const self = row(memberId, "human", "곽성재", "seongjae", { presenceStatus: server.presenceStatus });
+  const self = row(memberId, "human", "한지후", "jihu", { presenceStatus: server.presenceStatus });
   if (server.presenceStatus === "dnd" && server.rules.dndUntilMs !== undefined) self.dndUntilMs = server.rules.dndUntilMs;
   return [self, row(otherId, "human", "곽민지", "minji"), row(agentId, "agent", "헤르메스", "hermes")];
 }

@@ -37,7 +37,7 @@ const memberId = "019f94e3-7a10-79cd-9dee-208f47edd9a8";
 const session = {
   accessToken: "gate-only-not-a-credential",
   refreshToken: "gate-only-not-a-credential",
-  member: { id: memberId, workspaceId, kind: "human", displayName: "곽성재", handle: "seongjae" },
+  member: { id: memberId, workspaceId, kind: "human", displayName: "한지후", handle: "jihu" },
   realtimeWebSocketUrl: "ws://ailink-gate.invalid/connection/websocket",
 };
 
@@ -149,8 +149,8 @@ async function installRoutes(context, state) {
       return json(route, {
         members: [
           {
-            id: memberId, workspaceId, kind: "human", role: "owner", status: "active", displayName: "곽성재",
-            handle: "seongjae", channelCount: 0, channelIds: [], capabilities: [], createdAtMs: 0, updatedAtMs: 0,
+            id: memberId, workspaceId, kind: "human", role: "owner", status: "active", displayName: "한지후",
+            handle: "jihu", channelCount: 0, channelIds: [], capabilities: [], createdAtMs: 0, updatedAtMs: 0,
           },
         ],
       });

@@ -154,8 +154,8 @@ function roster(selfRole) {
       id: ownerId,
       kind: "human",
       role: selfRole,
-      displayName: "곽성재",
-      handle: "seongjae",
+      displayName: "한지후",
+      handle: "jihu",
     }),
     member({ id: peerId, kind: "human", displayName: "이도현", handle: "dohyun" }),
     member({
@@ -286,7 +286,7 @@ async function installRoutes(context, traffic, options = {}) {
     const method = request.method();
 
     if (path === "/v1/auth/login") {
-      return json(route, session(ownerId, "곽성재", "seongjae"));
+      return json(route, session(ownerId, "한지후", "jihu"));
     }
     if (path === "/v1/auth/realtime-token") {
       return json(route, {

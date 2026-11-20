@@ -75,7 +75,7 @@ const ROWS = [
 const WARN_ROWS = ROWS.filter((r) => r.tone === "warn" && r.peer.kind === "agent");
 const GHOST_N = ROWS.length + 1;
 const GHOST = P("99");
-const roster = [person("01", "곽성재", "seongjae", { role: "owner", presenceStatus: "auto" }), ...ROWS.map((r) => r.peer)];
+const roster = [person("01", "한지후", "jihu", { role: "owner", presenceStatus: "auto" }), ...ROWS.map((r) => r.peer)];
 const dm = (n, other) => ({ id: dmId(n), workspaceId, kind: "dm", muted: false, memberIds: [P("01"), other] });
 const dms = [...ROWS.map((r) => dm(r.n, r.peer.id)), dm(GHOST_N, GHOST)];
 const READ = Object.fromEntries([...channels.map((c) => [c.id, [3, 3]]), ...dms.map((d) => [d.id, [2, 2]])]);
@@ -100,7 +100,7 @@ function newState(cfg = {}) {
 async function installMocks(context, state) {
   const auth = {
     accessToken: "capture-only-not-a-credential", refreshToken: "capture-only-not-a-credential",
-    member: { id: memberId, workspaceId, kind: "human", displayName: "곽성재", handle: "seongjae" },
+    member: { id: memberId, workspaceId, kind: "human", displayName: "한지후", handle: "jihu" },
     realtimeWebSocketUrl: "ws://dm-status-3964-capture.invalid/connection/websocket",
   };
   const liveness = new Map(ROWS.filter((r) => r.peer.kind === "agent").map((r) => [r.peer.id.toLowerCase(), r.live]));

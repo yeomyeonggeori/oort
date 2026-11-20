@@ -65,8 +65,8 @@ const session = {
     id: memberId,
     workspaceId,
     kind: "human",
-    displayName: "곽성재",
-    handle: "seongjae",
+    displayName: "한지후",
+    handle: "jihu",
   },
   // The shell gets this address from the login response (ADR-0110), never from
   // the page origin. It has no listener in the gate, which is fine: the CSP
@@ -164,8 +164,8 @@ async function installMocks(context) {
           kind: "human",
           status: "active",
           role: "owner",
-          displayName: "곽성재",
-          handle: "seongjae",
+          displayName: "한지후",
+          handle: "jihu",
           channelCount: 1,
           channelIds: [channelId],
           capabilities: [],

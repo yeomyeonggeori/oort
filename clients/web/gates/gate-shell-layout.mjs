@@ -182,8 +182,8 @@ const SESSION = {
     id: ME,
     workspaceId: WORKSPACE_ID,
     kind: "human",
-    displayName: "곽성재",
-    handle: "seongjae",
+    displayName: "한지후",
+    handle: "jihu",
   },
   realtimeWebSocketUrl: `ws://127.0.0.1:${PORT + 900}/connection/websocket`,
 };
@@ -216,7 +216,7 @@ const TEAM = [
 ];
 
 const ROSTER = [
-  { id: ME, workspaceId: WORKSPACE_ID, kind: "human", status: "active", role: "owner", displayName: "곽성재", handle: "seongjae", channelCount: CHANNEL_IDS.length, channelIds: CHANNEL_IDS, capabilities: [], createdAtMs: 0, updatedAtMs: 0 },
+  { id: ME, workspaceId: WORKSPACE_ID, kind: "human", status: "active", role: "owner", displayName: "한지후", handle: "jihu", channelCount: CHANNEL_IDS.length, channelIds: CHANNEL_IDS, capabilities: [], createdAtMs: 0, updatedAtMs: 0 },
   { id: HERMES, workspaceId: WORKSPACE_ID, kind: "agent", status: "active", role: "member", displayName: "hermes", handle: "hermes", channelCount: CHANNEL_IDS.length, channelIds: CHANNEL_IDS, capabilities: ["code"], ownerHumanId: ME, agentModel: "hermes-agent", createdAtMs: 0, updatedAtMs: 0 },
   ...TEAM.map(([displayName, handle, role], i) => ({
     id: `019f9a01-0000-7000-8000-0000000004${String(i).padStart(2, "0")}`,
@@ -490,7 +490,7 @@ async function installMocks(context) {
       availability: "ok",
       keyConfigured: true,
       updatedAtMs: Date.now(),
-      updatedBy: "곽성재",
+      updatedBy: "한지후",
       diagnostics: [LONG_KO, LONG_KO],
     })
   );
@@ -666,7 +666,7 @@ async function assertShellHeld(page, label, shotName) {
 
 async function signIn(page) {
   await advanceToAccount(page);
-  await page.getByTestId("login-email").fill("seongjae@dawn.example");
+  await page.getByTestId("login-email").fill("jihu@dawn.example");
   await page.getByTestId("login-password").fill("gate-only-not-a-credential");
   await page.getByTestId("login-submit").click();
   await page.getByTestId("channel-list").waitFor({ state: "visible" });

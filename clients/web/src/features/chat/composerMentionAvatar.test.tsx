@@ -26,7 +26,7 @@ const base = {
   capabilities: [], createdAtMs: 0, updatedAtMs: 0,
 };
 const MEMBERS: RosterMember[] = [
-  { ...base, id: "h1", kind: "human", displayName: "곽성재", handle: "seongjae" },
+  { ...base, id: "h1", kind: "human", displayName: "한지후", handle: "jihu" },
   { ...base, id: "a1", kind: "agent", displayName: "그록", handle: "grok" },
 ];
 

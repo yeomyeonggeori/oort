@@ -55,7 +55,7 @@ function roster(id: string, kind: "human" | "agent", displayName: string, handle
 }
 
 const DIRECTORY = makeDirectory([
-  roster(ME, "human", "곽성재", "seongjae"),
+  roster(ME, "human", "한지후", "jihu"),
   roster(OTHER, "human", "김하늘", "haneul"),
   roster(HELPER, "agent", "oort 도우미", "oort-helper"),
   roster(GROK, "agent", "그록봇", "grokbot"),
@@ -66,7 +66,7 @@ function sessionValue(): SessionContextValue {
     session: {
       accessToken: "access",
       refreshToken: "refresh",
-      member: { id: ME, workspaceId: WS, kind: "human", displayName: "곽성재", handle: "seongjae" },
+      member: { id: ME, workspaceId: WS, kind: "human", displayName: "한지후", handle: "jihu" },
       realtimeWebSocketUrl: "wss://example.test/connection/websocket",
     },
     workspaceId: WS,

@@ -31,14 +31,14 @@ const ME = "019f94e3-7a10-79cd-9dee-208f47edd9a8";
 const SESSION = {
   accessToken: "capture-only-not-a-credential",
   refreshToken: "capture-only-not-a-credential",
-  member: { id: ME, workspaceId: WS, kind: "human", displayName: "곽성재", handle: "seongjae" },
+  member: { id: ME, workspaceId: WS, kind: "human", displayName: "한지후", handle: "jihu" },
   realtimeWebSocketUrl: `ws://127.0.0.1:${PORT + 900}/connection/websocket`,
 };
 
 const ROSTER = [
   {
     id: ME, workspaceId: WS, kind: "human", status: "active", role: "owner",
-    displayName: "곽성재", handle: "seongjae", channelCount: 1, channelIds: [GENERAL],
+    displayName: "한지후", handle: "jihu", channelCount: 1, channelIds: [GENERAL],
     capabilities: [], createdAtMs: 0, updatedAtMs: 0,
   },
 ];
@@ -86,7 +86,7 @@ async function overflow(page) {
 async function signIn(page, origin) {
   await page.goto(origin, { waitUntil: "networkidle" });
   await page.getByTestId("connect-entry-submit").click();
-  await page.getByTestId("login-email").fill("seongjae@dawn.example");
+  await page.getByTestId("login-email").fill("jihu@dawn.example");
   await page.getByTestId("login-password").fill("capture-only-not-a-credential");
   await page.getByTestId("login-submit").click();
   await page.waitForFunction(() => !document.querySelector('[data-testid="onboarding-sign-in"]'));

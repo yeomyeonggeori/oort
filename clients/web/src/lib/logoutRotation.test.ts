@@ -49,8 +49,8 @@ const login: LoginResponse = {
     id: "0199aaaa-0000-7000-8000-000000000001",
     workspaceId: "00000000-0000-7000-8000-000000000001",
     kind: "human",
-    displayName: "곽성재",
-    handle: "seongjae",
+    displayName: "한지후",
+    handle: "jihu",
   },
 };
 

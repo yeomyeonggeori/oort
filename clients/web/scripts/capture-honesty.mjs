@@ -45,8 +45,8 @@ const session = {
     id: meId,
     workspaceId,
     kind: "human",
-    displayName: "곽성재",
-    handle: "seongjae",
+    displayName: "한지후",
+    handle: "jihu",
   },
   realtimeWebSocketUrl: "ws://honesty-capture.invalid/connection/websocket",
 };
@@ -80,7 +80,7 @@ function member(overrides) {
 }
 
 const roster = [
-  member({ id: meId, displayName: "곽성재", handle: "seongjae", role: "owner" }),
+  member({ id: meId, displayName: "한지후", handle: "jihu", role: "owner" }),
   member({ id: teammateId, displayName: "김도현", handle: "dohyun" }),
   member({
     id: agentId,
@@ -153,7 +153,7 @@ const APPROVAL_MESSAGE = {
     tool_name: "shell",
     title: "빌드 캐시 정리",
     summary: "빌드 산출물 디렉터리를 지웁니다.",
-    arguments: { command: "rm -rf build/", cwd: "/Users/seongjae/projects/momo" },
+    arguments: { command: "rm -rf build/", cwd: "/Users/jihu/projects/momo" },
     tool_grant: { grant_id: "g-31", scopes: ["shell:write"] },
     status: "pending",
     source: "hermes_gateway",

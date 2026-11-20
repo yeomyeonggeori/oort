@@ -39,7 +39,7 @@ function member(avatarUrl?: string): RosterMember {
     workspaceId: "w",
     kind: "human",
     status: "active",
-    displayName: "곽성재",
+    displayName: "한지후",
     handle: "k",
     ...(avatarUrl ? { avatarUrl } : {}),
     channelCount: 0,
@@ -112,7 +112,7 @@ describe("Avatar — 업로드된 멤버 사진", () => {
     document.body.append(host);
     root = createRoot(host);
     await act(async () => {
-      root?.render(createElement(PresenceBadge, { selfName: "곽성재", effective: "online", avatarUrl: PATH }));
+      root?.render(createElement(PresenceBadge, { selfName: "한지후", effective: "online", avatarUrl: PATH }));
     });
     await act(async () => {
       await new Promise((r) => setTimeout(r, 30));

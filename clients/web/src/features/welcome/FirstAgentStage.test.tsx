@@ -140,8 +140,8 @@ const human: RosterMember = {
   workspaceId: WS,
   kind: "human",
   status: "active",
-  displayName: "곽성재",
-  handle: "seongjae",
+  displayName: "한지후",
+  handle: "jihu",
   role: "owner",
   channelCount: 1,
   channelIds: [GENERAL_ID],
@@ -276,8 +276,8 @@ function sessionValue(): SessionContextValue {
         id: MEMBER_ID,
         workspaceId: WS,
         kind: "human",
-        displayName: "곽성재",
-        handle: "seongjae",
+        displayName: "한지후",
+        handle: "jihu",
       },
       realtimeWebSocketUrl: "wss://example.test/connection/websocket",
     },
@@ -732,8 +732,8 @@ describe("로그인 모달 → PTY 없음 → Phase 1 폴백 → 2초 재확인 
 
 const agentSummary = (over: Partial<PersonalAgentSummary> = {}): PersonalAgentSummary => ({
   id: "019f9a01-0000-7000-8000-000000000777",
-  handle: "seongjae-claude",
-  displayName: "seongjae-claude",
+  handle: "jihu-claude",
+  displayName: "jihu-claude",
   harness: "claude_code",
   enabled: true,
   label: "개인",
@@ -756,10 +756,10 @@ describe("내 도구 → 개인 에이전트 켜기 (ADR-0198 D7, #3713)", () =>
     await pickClaude(host);
     await waitFor(() => q(host, "first-agent-mention") !== null, "mention");
     expect(personalPort.enable).toHaveBeenCalledTimes(1);
-    expect(personalPort.enable).toHaveBeenCalledWith("claude_code", "seongjae-claude");
+    expect(personalPort.enable).toHaveBeenCalledWith("claude_code", "jihu-claude");
     expect(vi.mocked(createHostedConnection)).not.toHaveBeenCalled();
     expect(q(host, "first-agent-connect")).toBeNull();
-    expect(q(host, "first-agent-heading")?.textContent).toBe("seongjae-claude가 들어왔어요.");
+    expect(q(host, "first-agent-heading")?.textContent).toBe("jihu-claude가 들어왔어요.");
     expect(host.textContent).toContain("나만 부를 수 있는 개인 에이전트예요. 내 맥이 켜져 있을 때만 답해요.");
     // 채널 승인 대기 문장은 개인 에이전트에 해당하지 않는다.
     expect(q(host, "first-agent-channel-pending")).toBeNull();
@@ -773,7 +773,7 @@ describe("내 도구 → 개인 에이전트 켜기 (ADR-0198 D7, #3713)", () =>
     await pickClaude(host);
     await waitFor(() => q(host, "first-agent-mention-action") !== null, "mention");
     click(q(host, "first-agent-mention-action"));
-    expect(readDraft(WS, GENERAL_ID)).toBe(firstMentionDraft("seongjae-claude"));
+    expect(readDraft(WS, GENERAL_ID)).toBe(firstMentionDraft("jihu-claude"));
     expect(readFirstAgentMarker(WS)).toBe("done");
   });
 
@@ -784,7 +784,7 @@ describe("내 도구 → 개인 에이전트 켜기 (ADR-0198 D7, #3713)", () =>
       { id: "codex", installed: true, auth: "logged_in" },
     ]);
     personalPort.enable.mockResolvedValue(
-      agentSummary({ harness: "codex", handle: "seongjae-codex", displayName: "seongjae-codex" })
+      agentSummary({ harness: "codex", handle: "jihu-codex", displayName: "jihu-codex" })
     );
     const host = mountStage();
     await waitFor(
@@ -793,20 +793,20 @@ describe("내 도구 → 개인 에이전트 켜기 (ADR-0198 D7, #3713)", () =>
     );
     click(q(host, "first-agent-continue"));
     await waitFor(() => personalPort.enable.mock.calls.length === 1, "enable");
-    expect(personalPort.enable).toHaveBeenCalledWith("codex", "seongjae-codex");
+    expect(personalPort.enable).toHaveBeenCalledWith("codex", "jihu-codex");
   });
 
   it("별칭이 겹치면 다음 핸들로 한 번 다시 요청한다", async () => {
     subscriptionOn();
     personalPort.enable
       .mockRejectedValueOnce(new PersonalAgentError(409, "personal_agent_alias_taken"))
-      .mockResolvedValueOnce(agentSummary({ handle: "seongjae-claude-2" }));
+      .mockResolvedValueOnce(agentSummary({ handle: "jihu-claude-2" }));
     const host = mountStage();
     await pickClaude(host);
     await waitFor(() => q(host, "first-agent-mention") !== null, "mention");
     expect(personalPort.enable.mock.calls.map((call) => call[1])).toEqual([
-      "seongjae-claude",
-      "seongjae-claude-2",
+      "jihu-claude",
+      "jihu-claude-2",
     ]);
   });
 
@@ -815,12 +815,12 @@ describe("내 도구 → 개인 에이전트 켜기 (ADR-0198 D7, #3713)", () =>
     personalPort.enable.mockRejectedValue(new PersonalAgentError(409, "personal_agent_exists"));
     personalPort.list.mockResolvedValue({
       state: "ok",
-      agents: [agentSummary({ handle: "kwak-claude", displayName: "kwak-claude" })],
+      agents: [agentSummary({ handle: "han-claude", displayName: "han-claude" })],
     });
     const host = mountStage();
     await pickClaude(host);
     await waitFor(() => q(host, "first-agent-mention") !== null, "mention");
-    expect(q(host, "first-agent-mention-handle")?.textContent).toBe("@kwak-claude");
+    expect(q(host, "first-agent-mention-handle")?.textContent).toBe("@han-claude");
   });
 
   it("서버에 라우트가 없으면(404) 두 줄을 「이 서버에서는 아직 켤 수 없어요」로 닫고 다시 보내지 않는다", async () => {
@@ -1220,7 +1220,7 @@ describe("재진입 (#2870, RCA 1-b): 설정·에이전트 화면에서 다시 �
     await waitFor(() => rowIds(host).includes("claude"), "rows");
     pick(host, "claude");
     await waitFor(() => personalPort.enable.mock.calls.length === 1, "enable");
-    expect(personalPort.enable).toHaveBeenCalledWith("claude_code", "seongjae-claude");
+    expect(personalPort.enable).toHaveBeenCalledWith("claude_code", "jihu-claude");
     expect(vi.mocked(createHostedConnection)).not.toHaveBeenCalled();
   });
 });

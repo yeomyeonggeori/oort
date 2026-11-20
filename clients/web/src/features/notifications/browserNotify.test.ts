@@ -85,7 +85,7 @@ describe("showBrowserNotification", () => {
     setBrowserOpenHandler(open);
     const focus = vi.spyOn(window, "focus").mockImplementation(() => undefined);
     await expect(
-      showBrowserNotification("곽성재", "본문", { kind: "mention", route: "/c/abc" })
+      showBrowserNotification("한지후", "본문", { kind: "mention", route: "/c/abc" })
     ).resolves.toBe(true);
     const banner = FakeNotification.instances[0]!;
     expect(banner.options).toMatchObject({ body: "본문", tag: "oort-mention" });

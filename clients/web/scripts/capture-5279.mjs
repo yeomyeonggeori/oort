@@ -244,7 +244,7 @@ async function releaseNotesMore(browser, scheme) {
     const page = await context.newPage();
     await page.goto(ORIGIN, { waitUntil: "networkidle" });
     await advanceToAccount(page, { path: "invite", inviteLink: ORIGIN });
-    await page.getByTestId("login-email").fill("seongjae@dawn.example");
+    await page.getByTestId("login-email").fill("jihu@dawn.example");
     await page.getByTestId("login-password").fill("capture-only-not-a-credential");
     await page.getByTestId("login-submit").click();
     await page.getByTestId("release-notes-dialog").waitFor({ state: "visible", timeout: 20_000 });

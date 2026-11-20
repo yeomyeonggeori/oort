@@ -92,8 +92,8 @@ function peer(over: Partial<RosterMember> = {}): RosterMember {
     workspaceId: "ws",
     kind: "human",
     status: "active",
-    displayName: "곽성재",
-    handle: "seongjae",
+    displayName: "한지후",
+    handle: "jihu",
     channelCount: 1,
     channelIds: [CHANNEL],
     capabilities: [],
@@ -242,14 +242,14 @@ describe("Timeline channel intro leading row", () => {
   it("swaps icon, name, and copy on a DM and never offers add-member", () => {
     const root = mount({
       channelKind: "dm",
-      channelName: "곽성재 @seongjae",
+      channelName: "한지후 @jihu",
       peer: peer(),
       canAddMember: true,
     });
     const intro = root.querySelector("[data-testid='timeline-empty']");
     expect(intro?.getAttribute("data-empty-kind")).toBe("dm");
-    expect(intro?.querySelector("h2")?.textContent).toBe("곽성재 @seongjae");
-    expect(intro?.textContent).toContain("곽성재님과의 대화를 시작하세요.");
+    expect(intro?.querySelector("h2")?.textContent).toBe("한지후 @jihu");
+    expect(intro?.textContent).toContain("한지후님과의 대화를 시작하세요.");
     expect(intro?.textContent).toContain(
       "여기 쓴 메시지는 둘만 봅니다. 참여자는 이 둘로 고정됩니다."
     );

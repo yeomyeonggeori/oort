@@ -87,14 +87,14 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-function rosterMember(displayName = "곽성재"): RosterMember {
+function rosterMember(displayName = "한지후"): RosterMember {
   return {
     id: MEMBER_ID,
     workspaceId: WS,
     kind: "human",
     status: "active",
     displayName,
-    handle: "seongjae",
+    handle: "jihu",
     role: "owner",
     channelCount: 0,
     channelIds: [],
@@ -104,13 +104,13 @@ function rosterMember(displayName = "곽성재"): RosterMember {
   };
 }
 
-function sessionMember(displayName = "곽성재"): Member {
+function sessionMember(displayName = "한지후"): Member {
   return {
     id: MEMBER_ID,
     workspaceId: WS,
     kind: "human",
     displayName,
-    handle: "seongjae",
+    handle: "jihu",
   };
 }
 
@@ -214,7 +214,7 @@ describe("ProfileSection", () => {
     expect(
       (host.querySelector('[data-testid="profile-handle"]') as HTMLInputElement)
         .value
-    ).toBe("seongjae");
+    ).toBe("jihu");
     expect(host.querySelectorAll('[data-testid="profile-save"]').length).toBe(1);
   });
 
@@ -240,7 +240,7 @@ describe("ProfileSection", () => {
     expect(replaceSessionMember).not.toHaveBeenCalled();
     expect(
       (client.getQueryData(["roster", WS]) as RosterMember[])[0].displayName
-    ).toBe("곽성재");
+    ).toBe("한지후");
 
     await act(async () => {
       resolvePatch?.(sessionMember("성재"));
@@ -319,12 +319,12 @@ describe("ProfileSection", () => {
 
   it("핸들 저장은 E2 PATCH 1회이고 성공 시에만 세션을 갱신한다", async () => {
     const member = sessionMember();
-    changeMyProfile.mockResolvedValue({ ...member, handle: "kwak" });
+    changeMyProfile.mockResolvedValue({ ...member, handle: "han" });
     const { host, replaceSessionMember } = mountSection();
     const input = host.querySelector(
       '[data-testid="profile-handle"]'
     ) as HTMLInputElement;
-    act(() => setInputValue(input, "kwak"));
+    act(() => setInputValue(input, "han"));
     await act(async () => {
       (
         host.querySelector('[data-testid="profile-save"]') as HTMLButtonElement
@@ -333,10 +333,10 @@ describe("ProfileSection", () => {
     await vi.waitFor(() => {
       expect(changeMyProfile).toHaveBeenCalledTimes(1);
     });
-    expect(changeMyProfile).toHaveBeenCalledWith(WS, { handle: "kwak" });
+    expect(changeMyProfile).toHaveBeenCalledWith(WS, { handle: "han" });
     expect(replaceSessionMember).toHaveBeenCalledWith({
       ...member,
-      handle: "kwak",
+      handle: "han",
     });
   });
 
@@ -410,8 +410,8 @@ describe("ProfileSection", () => {
 
   it("표시 이름과 핸들을 같이 바꾸면 PATCH 1회 (M-R3-5)", async () => {
     changeMyProfile.mockResolvedValue({
-      ...sessionMember("곽성재2"),
-      handle: "kwak",
+      ...sessionMember("한지후2"),
+      handle: "han",
     });
     const { host } = mountSection();
     const display = host.querySelector(
@@ -420,8 +420,8 @@ describe("ProfileSection", () => {
     const handle = host.querySelector(
       '[data-testid="profile-handle"]'
     ) as HTMLInputElement;
-    act(() => setInputValue(display, "곽성재2"));
-    act(() => setInputValue(handle, "kwak"));
+    act(() => setInputValue(display, "한지후2"));
+    act(() => setInputValue(handle, "han"));
     await act(async () => {
       (host.querySelector('[data-testid="profile-save"]') as HTMLButtonElement).click();
     });
@@ -429,8 +429,8 @@ describe("ProfileSection", () => {
       expect(changeMyProfile).toHaveBeenCalledTimes(1);
     });
     expect(changeMyProfile).toHaveBeenCalledWith(WS, {
-      displayName: "곽성재2",
-      handle: "kwak",
+      displayName: "한지후2",
+      handle: "han",
     });
   });
 
@@ -443,8 +443,8 @@ describe("ProfileSection", () => {
     const handle = host.querySelector(
       '[data-testid="profile-handle"]'
     ) as HTMLInputElement;
-    act(() => setInputValue(display, "곽성재2"));
-    act(() => setInputValue(handle, "kwak"));
+    act(() => setInputValue(display, "한지후2"));
+    act(() => setInputValue(handle, "han"));
     await act(async () => {
       (host.querySelector('[data-testid="profile-save"]') as HTMLButtonElement).click();
     });
@@ -494,15 +494,15 @@ describe("ProfileSection", () => {
     markOwnerOnboardingPending();
     writeS1Draft({
       workspaceName: "여명거리",
-      displayName: "곽성재",
-      handle: "seongjae",
+      displayName: "한지후",
+      handle: "jihu",
     });
-    changeMyProfile.mockResolvedValue({ ...sessionMember(), handle: "kwak" });
+    changeMyProfile.mockResolvedValue({ ...sessionMember(), handle: "han" });
     const { host } = mountSection();
     const input = host.querySelector(
       '[data-testid="profile-handle"]'
     ) as HTMLInputElement;
-    act(() => setInputValue(input, "kwak"));
+    act(() => setInputValue(input, "han"));
     await act(async () => {
       (host.querySelector('[data-testid="profile-save"]') as HTMLButtonElement).click();
     });
@@ -539,16 +539,16 @@ async function pickPng(host: HTMLElement) {
 describe("ProfileSection 한 페이지", () => {
   it("히어로가 이름·핸들·역할을 큰 글씨로 말하고 계정 정보 카드는 두 ID만 든다", () => {
     const { host } = mountSection();
-    expect(tid(host, "profile-hero-name")?.textContent).toBe("곽성재");
-    expect(tid(host, "profile-hero-handle")?.textContent).toContain("@seongjae");
+    expect(tid(host, "profile-hero-name")?.textContent).toBe("한지후");
+    expect(tid(host, "profile-hero-handle")?.textContent).toContain("@jihu");
     expect(tid(host, "profile-hero-role")?.textContent).toBe("소유자");
     expect(tid(host, "profile-avatar")?.getAttribute("data-avatar-size")).toBe("hero");
     const account = tid(host, "profile-account-card")!;
     expect(account.textContent).toContain(WS);
     expect(account.textContent).toContain(MEMBER_ID);
     // 이름·핸들은 프로필 카드와 히어로가 이미 말한다: 계정 카드에서 되풀이하지 않는다.
-    expect(account.textContent).not.toContain("곽성재");
-    expect(account.textContent).not.toContain("@seongjae");
+    expect(account.textContent).not.toContain("한지후");
+    expect(account.textContent).not.toContain("@jihu");
   });
 
   it("로그아웃은 로그인 카드의 한 행이고 누르면 세션 logout을 한 번 부른다", () => {

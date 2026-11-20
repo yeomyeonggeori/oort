@@ -337,8 +337,8 @@ function galleryMember(): RosterMember {
     workspaceId: WS,
     kind: "human",
     status: "active",
-    displayName: "곽성재",
-    handle: "seongjae",
+    displayName: "한지후",
+    handle: "jihu",
     channelCount: 1,
     channelIds: [CHANNEL_ID],
     capabilities: [],
@@ -1117,7 +1117,7 @@ function GalleryBody() {
           <span className="rounded-full bg-signal px-1 text-timestamp font-bold text-on-signal">5</span>
           <span className="rounded-full bg-primary px-1 text-timestamp font-bold text-on-primary">@2</span>
           <span className="rounded-sm bg-signal-soft px-1 font-semibold text-signal-text">@김인턴</span>
-          <span className="rounded-sm bg-signal px-1 font-semibold text-on-signal">@곽성재</span>
+          <span className="rounded-sm bg-signal px-1 font-semibold text-on-signal">@한지후</span>
         </div>
       </section>
 

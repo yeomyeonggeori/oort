@@ -38,7 +38,7 @@ const FAKE_KEY = ["s", "k-", "proj-", "Q7mZ2xL9vB4nR8tK1wE6yU3iO5pA0sD", "_", "h
 const session = {
   accessToken: "gate-only-not-a-credential",
   refreshToken: "gate-only-not-a-credential",
-  member: { id: memberId, workspaceId, kind: "human", displayName: "곽성재", handle: "seongjae" },
+  member: { id: memberId, workspaceId, kind: "human", displayName: "한지후", handle: "jihu" },
   realtimeWebSocketUrl: "ws://slash-gate.invalid/connection/websocket",
 };
 
@@ -57,7 +57,7 @@ function member(over) {
 }
 
 const roster = [
-  member({ id: memberId, kind: "human", role: "owner", displayName: "곽성재", handle: "seongjae" }),
+  member({ id: memberId, kind: "human", role: "owner", displayName: "한지후", handle: "jihu" }),
   member({ id: peerId, kind: "human", displayName: "김하늘", handle: "haneul" }),
   member({
     id: agentId,

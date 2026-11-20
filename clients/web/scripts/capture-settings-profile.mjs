@@ -27,13 +27,13 @@ const channels = [{ id: "00000000-0000-7000-8000-000000000201", workspaceId, kin
 const auth = {
   accessToken: "capture-only-not-a-credential",
   refreshToken: "capture-only-not-a-credential",
-  member: { id: memberId, workspaceId, kind: "human", displayName: "곽성재", handle: "seongjae" },
+  member: { id: memberId, workspaceId, kind: "human", displayName: "한지후", handle: "jihu" },
   realtimeWebSocketUrl: "ws://settings-profile-capture.invalid/connection/websocket",
 };
 const LONG_NAME = "가나다라마바사아자차카타파하".repeat(7).slice(0, 100);
 const rosterMember = (withPhoto, longName) => ({
-  id: memberId, workspaceId, kind: "human", status: "active", role: "owner", displayName: longName ? LONG_NAME : "곽성재",
-  handle: "seongjae", channelCount: 1, channelIds: channels.map((c) => c.id), capabilities: [],
+  id: memberId, workspaceId, kind: "human", status: "active", role: "owner", displayName: longName ? LONG_NAME : "한지후",
+  handle: "jihu", channelCount: 1, channelIds: channels.map((c) => c.id), capabilities: [],
   ...(withPhoto ? { avatarUrl: `/v1/workspaces/${workspaceId}/members/${memberId}/avatar/content?v=cap` } : {}),
   createdAtMs: 0, updatedAtMs: 0,
 });

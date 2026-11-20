@@ -42,7 +42,7 @@ const channels = [
 const auth = {
   accessToken: "capture-only-not-a-credential",
   refreshToken: "capture-only-not-a-credential",
-  member: { id: memberId, workspaceId, kind: "human", displayName: "곽성재", handle: "seongjae" },
+  member: { id: memberId, workspaceId, kind: "human", displayName: "한지후", handle: "jihu" },
   realtimeWebSocketUrl: "ws://inbox-capture.invalid/connection/websocket",
 };
 const MIN = 60_000;
@@ -51,7 +51,7 @@ const person = (id, kind, displayName, handle, extra = {}) => ({
   channelIds: channels.map((c) => c.id), capabilities: [], createdAtMs: 0, updatedAtMs: 0, ...extra,
 });
 const roster = [
-  person(memberId, "human", "곽성재", "seongjae", { role: "owner" }),
+  person(memberId, "human", "한지후", "jihu", { role: "owner" }),
   person(otherId, "human", "서연", "seoyeon", { role: "member" }),
   person(agentId, "agent", "김인턴", "kim-intern", { ownerHumanId: memberId }),
   person(dawnId, "agent", "grok", "grokbot", { ownerHumanId: otherId }),
@@ -107,11 +107,11 @@ const seed = () => [
   }),
   wireItem("00000000-0000-7000-8000-0000000009a2", "thread_reply", by(WB), 9, agentId, "QA 확인 끝나면 바로 공유드릴게요.", 6, null, { rootId: rootMine.id }),
   wireItem("00000000-0000-7000-8000-0000000009a3", "dm", by(DM_SEO), 8, otherId, "오늘 4시에 디자인 리뷰 있는데, 같이 보면 좋겠어요", 12, null),
-  wireItem("00000000-0000-7000-8000-0000000009a4", "mention", by(LAB), 5, dawnId, "@seongjae 시안 3번 컬러 토큰 확인 부탁드려요", 25, null),
+  wireItem("00000000-0000-7000-8000-0000000009a4", "mention", by(LAB), 5, dawnId, "@jihu 시안 3번 컬러 토큰 확인 부탁드려요", 25, null),
   wireItem("00000000-0000-7000-8000-0000000009a5", "reply_to_me", by(LAB), 22, dawnId, "말씀하신 로그는 19:07에 올려 뒀어요. 인용해서 답해요.", 2, null, {
     quotedMessage: { id: mid(LAB, 21), authorMemberId: memberId, preview: "어제 배포 로그 어디 있어?", deleted: false },
   }),
-  wireItem("00000000-0000-7000-8000-0000000009a6", "mention", by(WB), 6, otherId, "@seongjae 릴리스 노트 초안 봐 주세요", 60 * 20, 60 * 18),
+  wireItem("00000000-0000-7000-8000-0000000009a6", "mention", by(WB), 6, otherId, "@jihu 릴리스 노트 초안 봐 주세요", 60 * 20, 60 * 18),
   wireItem("00000000-0000-7000-8000-0000000009a7", "dm", by(DM_DAWN), 4, dawnId, "정리해서 #workbench에 올려 뒀어요.", 60 * 72, 60 * 70),
 ];
 

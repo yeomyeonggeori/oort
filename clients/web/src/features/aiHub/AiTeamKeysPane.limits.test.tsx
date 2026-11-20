@@ -108,7 +108,7 @@ function session(): SessionContextValue {
   return {
     session: {
       accessToken: "a", refreshToken: "r",
-      member: { id: ME, workspaceId: WS, kind: "human", displayName: "곽성재", handle: "seongjae" },
+      member: { id: ME, workspaceId: WS, kind: "human", displayName: "한지후", handle: "jihu" },
       realtimeWebSocketUrl: "wss://example.test/connection/websocket",
     },
     workspaceId: WS,
@@ -196,7 +196,7 @@ beforeEach(() => {
   vi.mocked(fetchProviderLimits).mockReset();
   vi.mocked(fetchProviderLimits).mockResolvedValue(LIMITS);
   vi.mocked(fetchRoster).mockReset();
-  vi.mocked(fetchRoster).mockResolvedValue([human(ME, "곽성재", "member"), human(BOSS, "박운영", "owner"), AGENT_MEMBER]);
+  vi.mocked(fetchRoster).mockResolvedValue([human(ME, "한지후", "member"), human(BOSS, "박운영", "owner"), AGENT_MEMBER]);
   vi.mocked(listChannels).mockReset();
   vi.mocked(listChannels).mockResolvedValue([]);
   vi.mocked(listHostedConnections).mockReset();

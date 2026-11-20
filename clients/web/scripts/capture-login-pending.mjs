@@ -40,7 +40,7 @@ async function shoot(browser, scheme, viewport, tag) {
   });
   await page.goto(origin);
   await page.getByTestId("connect-entry-submit").click(); // 웹: 빈 칸 = 이 페이지의 서버
-  await page.getByTestId("login-email").fill("seongjae@dawn.example");
+  await page.getByTestId("login-email").fill("jihu@dawn.example");
   await page.getByTestId("login-password").fill("correct-horse-battery");
   await page.getByTestId("login-submit").click();
   await page.getByTestId("login-submit").click({ force: true });

@@ -76,8 +76,8 @@ function session(port) {
       id: ME,
       workspaceId: WORKSPACE_ID,
       kind: "human",
-      displayName: "곽성재",
-      handle: "seongjae",
+      displayName: "한지후",
+      handle: "jihu",
     },
     realtimeWebSocketUrl: `ws://127.0.0.1:${port + 900}/connection/websocket`,
   };
@@ -103,8 +103,8 @@ const ROSTER = [
     kind: "human",
     status: "active",
     role: "owner",
-    displayName: "곽성재",
-    handle: "seongjae",
+    displayName: "한지후",
+    handle: "jihu",
     channelCount: 1,
     channelIds: [GENERAL_ID],
     capabilities: [],
@@ -157,7 +157,7 @@ async function installMocks(context) {
     json(route, { workspace: WORKSPACE })
   );
   await context.route(`**/v1/workspaces/${WORKSPACE_ID}/members/me`, (route) =>
-    json(route, { member: { ...sess.member, displayName: "곽성재", handle: "seongjae" } })
+    json(route, { member: { ...sess.member, displayName: "한지후", handle: "jihu" } })
   );
   await context.route(`**/v1/workspaces/${WORKSPACE_ID}/invites`, (route) => {
     if (route.request().method() !== "POST") return json(route, { invites: [] });
@@ -471,7 +471,7 @@ async function login(page, origin) {
   await page.goto(origin, { waitUntil: "networkidle" });
   // D0(#2808): 빈 칸 [계속]은 이 페이지의 서버다.
   await page.getByTestId("connect-entry-submit").click();
-  await page.getByTestId("login-email").fill("seongjae@dawn.example");
+  await page.getByTestId("login-email").fill("jihu@dawn.example");
   await page.getByTestId("login-password").fill("capture-only-not-a-credential");
   await page.getByTestId("login-submit").click();
   await page.waitForFunction(() => !document.querySelector('[data-testid="onboarding-sign-in"]'));
@@ -495,7 +495,7 @@ async function flowLogin(browser, origin, scheme) {
     keyboard: {
       focus: "login-password",
       primary: "login-submit",
-      fill: { "login-email": "seongjae@dawn.example", "login-password": "capture-only-not-a-credential" },
+      fill: { "login-email": "jihu@dawn.example", "login-password": "capture-only-not-a-credential" },
     },
   });
   await context.close();
@@ -543,10 +543,10 @@ async function flowClaim(browser, origin, scheme) {
     keyboard: {
       focus: "onboarding-s1-handle",
       primary: "onboarding-s1-submit",
-      fill: { "onboarding-s1-display-name": "곽성재" },
+      fill: { "onboarding-s1-display-name": "한지후" },
     },
   });
-  await page.getByTestId("onboarding-s1-display-name").fill("곽성재");
+  await page.getByTestId("onboarding-s1-display-name").fill("한지후");
   transition = await watchTransition(page, () => page.getByTestId("onboarding-s1-submit").click());
   await measureScene(page, scheme, { name: "claim-s2", ready: "onboarding-s2", transition });
   transition = await watchTransition(page, () => page.getByTestId("onboarding-s2-issue").click());

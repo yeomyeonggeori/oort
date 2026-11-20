@@ -284,7 +284,7 @@ function SignatureScene({ model, actions }: { model: AgentPaneModel; actions: Ag
   return (
     <AgentProgressView
       model={model}
-      ownerName="곽성재"
+      ownerName="한지후"
       instructFrom={from}
       actions={{
         ...actions,
@@ -360,7 +360,7 @@ export function fixtureAgentSource(scene: AgentFixtureScene): AgentPaneSource {
       return m ? (
         <AgentProgressView
           model={m}
-          ownerName="곽성재"
+          ownerName="한지후"
           actions={actions}
           offline={scene === "offline"}
           instructFrom={scene === "browser" ? "app" : "here"}

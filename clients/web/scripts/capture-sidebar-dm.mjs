@@ -35,7 +35,7 @@ const person = (n, displayName, handle, extra = {}) => ({
   id: P(n), workspaceId, kind: "human", status: "active", displayName, handle, channelCount: 1, channelIds: [], capabilities: [], createdAtMs: 0, updatedAtMs: 0, ...extra,
 });
 const roster = [
-  person("01", "곽성재", "seongjae", { role: "owner", presenceStatus: "auto" }),
+  person("01", "한지후", "jihu", { role: "owner", presenceStatus: "auto" }),
   person("11", "이도현", "dohyun"),
   person("12", "박서연", "seoyeon", { avatarUrl: photo }),
   person("13", "최민수", "minsu", { presenceStatus: "away" }),
@@ -51,7 +51,7 @@ async function open(browser, origin, scheme, viewport, scene = {}) {
   const sceneDms = scene.dms ?? dms;
   const auth = {
     accessToken: "capture-only-not-a-credential", refreshToken: "capture-only-not-a-credential",
-    member: { id: memberId, workspaceId, kind: "human", displayName: "곽성재", handle: "seongjae" },
+    member: { id: memberId, workspaceId, kind: "human", displayName: "한지후", handle: "jihu" },
     realtimeWebSocketUrl: "ws://sidebar-dm-capture.invalid/connection/websocket",
   };
   const context = await browser.newContext({ viewport, colorScheme: scheme, serviceWorkers: "block" });

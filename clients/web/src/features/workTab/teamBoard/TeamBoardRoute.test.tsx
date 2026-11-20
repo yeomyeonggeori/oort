@@ -65,7 +65,7 @@ function sessionValue(): SessionContextValue {
     session: {
       accessToken: "access",
       refreshToken: "refresh",
-      member: { id: ME, workspaceId: WS, kind: "human", displayName: "곽성재", handle: "seongjae" },
+      member: { id: ME, workspaceId: WS, kind: "human", displayName: "한지후", handle: "jihu" },
       realtimeWebSocketUrl: "wss://example.test/connection/websocket",
     },
     workspaceId: WS,
@@ -148,7 +148,7 @@ describe("팀 보드: 보는 사람 채널 멤버십 (#2863 Acceptance)", () => 
     await screen.findAllByTestId("team-board-row");
     const lanes = screen.getAllByTestId("team-board-lane").map((el) => [el.dataset.lane, el.textContent]);
     expect(lanes).toContainEqual(["local", "로컬 · 공유됨"]);
-    expect(lanes).toContainEqual(["agent", "에이전트 · 곽성재가 시킴"]);
+    expect(lanes).toContainEqual(["agent", "에이전트 · 한지후가 시킴"]);
     // 에이전트 줄은 저장소·브랜치·diff를 지어내지 않는다.
     const agent = document.querySelector('[data-origin="host"]')!;
     expect(agent.querySelector('[data-testid="team-board-diff"]')).toBeNull();
@@ -162,7 +162,7 @@ describe("팀 보드: 보는 사람 채널 멤버십 (#2863 Acceptance)", () => 
     for (const part of ["한글 입력 이중 전송 수리", "momo", "feat/2774-xterm", "claude", "응답 필요", "+128", "−40", "3분 전", "#workbench"]) {
       expect(text).toContain(part);
     }
-    expect(screen.getByRole("heading", { name: /곽성재/ })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: /한지후/ })).toBeTruthy();
   });
 
   it("열어 둔 줄이 공유 해제로 보이지 않게 되면(단건 404) 드로어가 닫히고 안내가 선다", async () => {
@@ -316,7 +316,7 @@ describe("팀 보드: 키보드", () => {
 
   it("j/k와 화살표가 줄을 옮기고 Home/End가 처음·끝으로 간다", async () => {
     const list = await rows();
-    // 묶음은 소유자 기준이다: 곽성재(a1, a2) 다음 에이전트 줄이 아니라 같은 소유자라 한 묶음이다.
+    // 묶음은 소유자 기준이다: 한지후(a1, a2) 다음 에이전트 줄이 아니라 같은 소유자라 한 묶음이다.
     const order = screen.getAllByTestId("team-board-row");
     order[0]!.focus();
     fireEvent.keyDown(order[0]!, { key: "j" });

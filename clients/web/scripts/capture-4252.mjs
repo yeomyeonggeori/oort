@@ -7,7 +7,7 @@
 //   npm run build && node scripts/capture-4252.mjs                               # 수리 후
 //   DIST_DIR=~/.cache/momo-scratch/4252-before-dist MODE=before node scripts/capture-4252.mjs   # 수리 전
 //
-// 장면: 사이드바 DM 구역. 이도현(안 읽음 2) · 박서연 · kwak의 Claude(꺼진 에이전트, 명부에 **있다**) · grok ·
+// 장면: 사이드바 DM 구역. 이도현(안 읽음 2) · 박서연 · han의 Claude(꺼진 에이전트, 명부에 **있다**) · grok ·
 // 나간 멤버 둘(안 읽음 없음) · 나간 멤버 하나(안 읽은 사람 메시지 1) · 나간 멤버 하나(안 읽음 4, 전부 작업 상태 같은 기계 메시지).
 //
 //   수리 후(MODE=after): 안 읽음 없는 나간 멤버 둘과 안 읽음이 기계 메시지뿐인 하나는 접히고 「나간 멤버와의 대화 3개」가
@@ -57,11 +57,11 @@ const person = (n, displayName, handle, extra = {}) => ({
   id: P(n), workspaceId, kind: "human", status: "active", displayName, handle, channelCount: 1, channelIds: [], capabilities: [], createdAtMs: 0, updatedAtMs: 0, ...extra,
 });
 const roster = [
-  person("01", "곽성재", "seongjae", { role: "owner", presenceStatus: "auto" }),
+  person("01", "한지후", "jihu", { role: "owner", presenceStatus: "auto" }),
   person("11", "이도현", "dohyun"),
   person("12", "박서연", "seoyeon"),
   // 꺼 두지 않은 개인 에이전트: 명부에 **있다**. 이 규칙이 접지 않는 쪽(연결이 꺼져 있을 뿐인 에이전트)이다.
-  person("14", "kwak의 Claude", "kwak-claude", { kind: "agent", hostOnline: false, ownerHumanId: P("01") }),
+  person("14", "han의 Claude", "han-claude", { kind: "agent", hostOnline: false, ownerHumanId: P("01") }),
   person("15", "grok", "grok", { kind: "agent", hostOnline: true }),
 ];
 const dm = (n, other) => ({ id: dmId(n), workspaceId, kind: "dm", muted: false, memberIds: [P("01"), other] });
@@ -120,7 +120,7 @@ const wireRead = (id) => ({
 async function installMocks(context) {
   const auth = {
     accessToken: "capture-only-not-a-credential", refreshToken: "capture-only-not-a-credential",
-    member: { id: memberId, workspaceId, kind: "human", displayName: "곽성재", handle: "seongjae" },
+    member: { id: memberId, workspaceId, kind: "human", displayName: "한지후", handle: "jihu" },
     realtimeWebSocketUrl: "ws://gone-dm-4252-capture.invalid/connection/websocket",
   };
   await context.route("**/v1/**", async (route) => {

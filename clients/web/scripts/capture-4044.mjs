@@ -30,7 +30,7 @@ const person = (id, kind, displayName, handle, extra = {}) => ({
   channelIds: [GENERAL, DM], capabilities: [], createdAtMs: 0, updatedAtMs: 0, ...extra,
 });
 const roster = [
-  person(memberId, "human", "곽성재", "seongjae", { role: "owner" }),
+  person(memberId, "human", "한지후", "jihu", { role: "owner" }),
   person(agentId, "agent", "그록", "grok", { ownerHumanId: memberId }),
 ];
 const channels = [
@@ -40,7 +40,7 @@ const channels = [
 const auth = {
   accessToken: "capture-only-not-a-credential",
   refreshToken: "capture-only-not-a-credential",
-  member: { id: memberId, workspaceId, kind: "human", displayName: "곽성재", handle: "seongjae" },
+  member: { id: memberId, workspaceId, kind: "human", displayName: "한지후", handle: "jihu" },
   realtimeWebSocketUrl: "ws://4044-capture.invalid/connection/websocket",
 };
 

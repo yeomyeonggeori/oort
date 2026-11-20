@@ -42,7 +42,7 @@ const ACTIVE = "momo_active_v1.capture-only-not-a-credential";
 const auth = {
   accessToken: "capture-only-not-a-credential",
   refreshToken: "capture-only-not-a-credential",
-  member: { id: ME, workspaceId: WS, kind: "human", displayName: "곽성재", handle: "seongjae" },
+  member: { id: ME, workspaceId: WS, kind: "human", displayName: "한지후", handle: "jihu" },
   realtimeWebSocketUrl: "ws://assistants-capture.invalid/connection/websocket",
 };
 const channels = [
@@ -50,8 +50,8 @@ const channels = [
   { id: LAB, workspaceId: WS, kind: "public", name: "agent-lab", muted: false },
 ];
 const human = {
-  id: ME, workspaceId: WS, kind: "human", status: "active", role: "owner", displayName: "곽성재",
-  handle: "seongjae", channelCount: 2, channelIds: channels.map((c) => c.id), capabilities: [],
+  id: ME, workspaceId: WS, kind: "human", status: "active", role: "owner", displayName: "한지후",
+  handle: "jihu", channelCount: 2, channelIds: channels.map((c) => c.id), capabilities: [],
   createdAtMs: 0, updatedAtMs: 0,
 };
 const grok = {

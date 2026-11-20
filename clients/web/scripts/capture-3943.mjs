@@ -57,7 +57,7 @@ const channels = [
 const auth = {
   accessToken: "capture-only-not-a-credential",
   refreshToken: "capture-only-not-a-credential",
-  member: { id: memberId, workspaceId, kind: "human", displayName: "곽성재", handle: "seongjae" },
+  member: { id: memberId, workspaceId, kind: "human", displayName: "한지후", handle: "jihu" },
   realtimeWebSocketUrl: "ws://plugins-readonly-capture.invalid/connection/websocket",
 };
 const base = { workspaceId, status: "active", channelCount: 1, channelIds: channels.map((c) => c.id), capabilities: [], createdAtMs: 0, updatedAtMs: 0 };
@@ -87,7 +87,7 @@ async function installRealtime(page) {
 
 
 const adminRow = { ...base, id: "00000000-0000-7000-8000-000000000102", kind: "human", displayName: "김관리", handle: "kim", role: "admin" };
-const meRow = (role) => ({ ...base, id: memberId, kind: "human", displayName: "곽성재", handle: "seongjae", role });
+const meRow = (role) => ({ ...base, id: memberId, kind: "human", displayName: "한지후", handle: "jihu", role });
 
 const WORLDS = {
   admin: { roster: [meRow("owner")], notionInstalled: false },

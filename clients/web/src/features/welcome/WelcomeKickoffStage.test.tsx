@@ -117,7 +117,7 @@ describe("WelcomeKickoffStage (첫 대화 코메토 띠, #2817)", () => {
     const root = mount({
       phase: "stage",
       reducedMotion: false,
-      speaker: { name: "곽성재의 Claude", sleepy: true },
+      speaker: { name: "한지후의 Claude", sleepy: true },
     });
     expect(face(root)).toBe("sleepy");
     expect(root.textContent).toContain(WELCOME_BAND_SLEEPY_COPY);
@@ -125,7 +125,7 @@ describe("WelcomeKickoffStage (첫 대화 코메토 띠, #2817)", () => {
       render({
         phase: "backstop",
         reducedMotion: false,
-        speaker: { name: "곽성재의 Claude", sleepy: true },
+        speaker: { name: "한지후의 Claude", sleepy: true },
       })
     );
     expect(band(root)?.getAttribute("data-state")).toBe("sleepy");

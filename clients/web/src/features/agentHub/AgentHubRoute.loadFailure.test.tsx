@@ -51,12 +51,12 @@ const row = (id: string, name: string, kind: "human" | "agent"): RosterMember =>
   id, workspaceId: WS, kind, status: "active", displayName: name, handle: name, role: kind === "human" ? "owner" : undefined,
   channelCount: 0, channelIds: [], capabilities: [], createdAtMs: 0, updatedAtMs: 0, paused: false,
 });
-const ROSTER = [row(ME, "곽성재", "human"), row(A1, "가나다", "agent")];
+const ROSTER = [row(ME, "한지후", "human"), row(A1, "가나다", "agent")];
 
 const session: SessionContextValue = {
   session: {
     accessToken: "a", refreshToken: "r",
-    member: { id: ME, workspaceId: WS, kind: "human", displayName: "곽성재", handle: "seongjae" },
+    member: { id: ME, workspaceId: WS, kind: "human", displayName: "한지후", handle: "jihu" },
     realtimeWebSocketUrl: "wss://example.test/connection/websocket",
   },
   workspaceId: WS, realtime: null, connStatus: "connected", logout: () => undefined, replaceSessionMember: () => undefined,

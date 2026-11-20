@@ -51,12 +51,12 @@ const channels = [{ id: marketing, workspaceId, kind: "public", name: "마케팅
 const auth = {
   accessToken: "capture-only-not-a-credential",
   refreshToken: "capture-only-not-a-credential",
-  member: { id: me, workspaceId, kind: "human", displayName: "곽성재", handle: "seongjae" },
+  member: { id: me, workspaceId, kind: "human", displayName: "한지후", handle: "jihu" },
   realtimeWebSocketUrl: "ws://capture-4220.invalid/connection/websocket",
 };
 const roster = [
   {
-    id: me, workspaceId, kind: "human", status: "active", role: "owner", displayName: "곽성재", handle: "seongjae",
+    id: me, workspaceId, kind: "human", status: "active", role: "owner", displayName: "한지후", handle: "jihu",
     channelCount: 1, channelIds: [marketing], capabilities: [], createdAtMs: 0, updatedAtMs: 0,
   },
 ];

@@ -99,7 +99,7 @@ describe("RespondingAvatar", () => {
 describe("PresenceBadge(사이드바 하단 내 아바타)", () => {
   it("사진이 없으면 내 id 색조 채움 + 테두리이고 옛 흰 면(bg-surface)이 아니다", () => {
     const el = q(
-      mount(createElement(PresenceBadge, { selfName: "곽성재", effective: "online", memberId: ID })),
+      mount(createElement(PresenceBadge, { selfName: "한지후", effective: "online", memberId: ID })),
       "presence-control"
     );
     expect(el.className).toContain("border border-line");
@@ -109,7 +109,7 @@ describe("PresenceBadge(사이드바 하단 내 아바타)", () => {
   });
   it("사진이 있으면 --avatar-edge 테두리다", () => {
     const el = q(
-      mount(createElement(PresenceBadge, { selfName: "곽성재", effective: "online", memberId: ID, avatarUrl: "data:image/png;base64,AAAA" })),
+      mount(createElement(PresenceBadge, { selfName: "한지후", effective: "online", memberId: ID, avatarUrl: "data:image/png;base64,AAAA" })),
       "presence-control"
     );
     expect(el.className).toContain("border-avatar-edge");

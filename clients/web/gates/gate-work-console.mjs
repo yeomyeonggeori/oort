@@ -98,8 +98,8 @@ const auth = {
     id: memberId,
     workspaceId,
     kind: "human",
-    displayName: "곽성재",
-    handle: "seongjae",
+    displayName: "한지후",
+    handle: "jihu",
   },
   realtimeWebSocketUrl: "ws://work-console-gate.invalid/connection/websocket",
 };
@@ -119,8 +119,8 @@ const roster = [
     kind: "human",
     status: "active",
     role: "owner",
-    displayName: "곽성재",
-    handle: "seongjae",
+    displayName: "한지후",
+    handle: "jihu",
     channelCount: 1,
     channelIds: [channelId],
     capabilities: [],
@@ -750,7 +750,7 @@ async function assertConsole(context, state) {
   });
   if (sameElement) throw new Error("session state and execution location collapsed into one chip");
   const firstMeta = (await rows.first().getByTestId("work-console-meta").textContent())?.trim();
-  if (firstMeta !== "#agent-runtime · 곽성재 · codex") {
+  if (firstMeta !== "#agent-runtime · 한지후 · codex") {
     throw new Error(`session who/what meta drifted: ${firstMeta}`);
   }
   for (const meta of await page.getByTestId("work-console-meta").all()) {
@@ -1672,7 +1672,7 @@ async function main() {
       await assertMetadataFallback(
         browser,
         { mode: "normal", failChannels: true },
-        "채널 조회 실패 · 곽성재 · codex",
+        "채널 조회 실패 · 한지후 · codex",
         "채널 정보를 새로 확인하지 못했어요."
       );
       await assertMetadataFallback(

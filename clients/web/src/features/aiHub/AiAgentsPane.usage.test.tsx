@@ -25,7 +25,7 @@ vi.mock("@/features/common/useOffline", () => ({ useOffline: () => false }));
 const WS = "00000000-0000-7000-8000-000000000001";
 const ME = "00000000-0000-7000-8000-000000000101";
 const AGENTS = ["a1", "a2", "a3"];
-const person = (id: string): RosterMember => ({ id, workspaceId: WS, kind: "human", status: "active", displayName: "곽성재", handle: "seongjae", role: "owner", channelCount: 0, channelIds: [], capabilities: [], createdAtMs: 0, updatedAtMs: 0 });
+const person = (id: string): RosterMember => ({ id, workspaceId: WS, kind: "human", status: "active", displayName: "한지후", handle: "jihu", role: "owner", channelCount: 0, channelIds: [], capabilities: [], createdAtMs: 0, updatedAtMs: 0 });
 const bot = (id: string, name: string): RosterMember => ({ ...person(id), kind: "agent", displayName: name, handle: name, role: undefined, paused: false, brain: "team_key", callableBy: "everyone" });
 const metrics = { runs: 3, reportedRuns: 3, promptTokens: 1000, completionTokens: 20, cachedTokens: 0, costMicroUsd: 1_500_000, unpricedRuns: 0, unpricedModels: [] as string[], estimatedRuns: 0, source: "measured" as const };
 const USAGE: AgentUsageResponse = {
@@ -34,7 +34,7 @@ const USAGE: AgentUsageResponse = {
   totals: { mine: metrics, shared: metrics, workspace: metrics }, hiddenPersonalAgents: 0,
 };
 const session: SessionContextValue = {
-  session: { accessToken: "access", refreshToken: "refresh", member: { id: ME, workspaceId: WS, kind: "human", displayName: "곽성재", handle: "seongjae" }, realtimeWebSocketUrl: "wss://example.test/connection/websocket" },
+  session: { accessToken: "access", refreshToken: "refresh", member: { id: ME, workspaceId: WS, kind: "human", displayName: "한지후", handle: "jihu" }, realtimeWebSocketUrl: "wss://example.test/connection/websocket" },
   workspaceId: WS, realtime: null, connStatus: "connected", logout: () => undefined, replaceSessionMember: () => undefined,
 };
 

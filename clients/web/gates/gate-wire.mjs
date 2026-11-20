@@ -24,7 +24,7 @@ const workspaceId = "00000000-0000-7000-8000-000000000001";
 const memberId = "019f94e3-7a10-79cd-9dee-208f47edd9a8";
 const session = {
   accessToken: "gate-only-not-a-credential", refreshToken: "gate-only-not-a-credential",
-  member: { id: memberId, workspaceId, kind: "human", displayName: "곽성재", handle: "seongjae" },
+  member: { id: memberId, workspaceId, kind: "human", displayName: "한지후", handle: "jihu" },
   realtimeWebSocketUrl: `ws://127.0.0.1:${port + 900}/connection/websocket`,
 };
 

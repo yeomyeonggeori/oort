@@ -119,7 +119,7 @@ function member(over) {
 }
 
 const roster = [
-  member({ id: memberId, kind: "human", role: "owner", displayName: "곽성재", handle: "seongjae" }),
+  member({ id: memberId, kind: "human", role: "owner", displayName: "한지후", handle: "jihu" }),
   member({ id: peerId, kind: "human", displayName: "이도현", handle: "dohyun" }),
 ];
 const channels = [
@@ -135,8 +135,8 @@ function sessionFor(who) {
       id,
       workspaceId,
       kind: "human",
-      displayName: who === "receiver" ? "이도현" : "곽성재",
-      handle: who === "receiver" ? "dohyun" : "seongjae",
+      displayName: who === "receiver" ? "이도현" : "한지후",
+      handle: who === "receiver" ? "dohyun" : "jihu",
     },
     realtimeWebSocketUrl: "ws://image-card-gate.invalid/connection/websocket",
   };

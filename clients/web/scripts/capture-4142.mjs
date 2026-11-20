@@ -7,7 +7,7 @@
 //   npm run build && node scripts/capture-4142.mjs
 //   DIST_DIR=… 로 수리 전 번들에도 돌려 적색/녹색 두 줄을 남긴다.
 //
-// 장면: kwak의 Claude(에이전트 DM)와 나간 멤버(로스터에 없는 상대) DM 을 X 로 닫는다 ->
+// 장면: han의 Claude(에이전트 DM)와 나간 멤버(로스터에 없는 상대) DM 을 X 로 닫는다 ->
 //   (1) 에이전트가 기계 메시지(system·work_session)만 쌓는다 -> 새로고침(= 재시작) 뒤에도 둘 다 닫힌 채여야 한다.
 //   (2) 에이전트가 사람이 읽을 글을 쓴다 -> 그 DM 만 돌아오고 나간 멤버 DM 은 닫힌 채다.
 // =============================================================================
@@ -42,13 +42,13 @@ const person = (n, displayName, handle, extra = {}) => ({
   id: P(n), workspaceId, kind: "human", status: "active", displayName, handle, channelCount: 1, channelIds: [], capabilities: [], createdAtMs: 0, updatedAtMs: 0, ...extra,
 });
 const roster = [
-  person("01", "곽성재", "seongjae", { role: "owner", presenceStatus: "auto" }),
+  person("01", "한지후", "jihu", { role: "owner", presenceStatus: "auto" }),
   person("11", "이도현", "dohyun"),
   person("12", "박서연", "seoyeon"),
   // 긴 이름(한글+부가 설명): 쉴 때도 잘리고, X가 서면 X 왼쪽에서 다시 잘려야 한다.
   person("13", "민수 (마케팅팀 · 글로벌 파트너십 총괄 디렉터)", "minsu", { presenceStatus: "away" }),
   person("15", "정하윤", "hayun", { presenceStatus: "dnd" }),
-  person("14", "kwak의 Claude", "kwak-claude", { kind: "agent", hostOnline: true, ownerHumanId: P("01") }),
+  person("14", "han의 Claude", "han-claude", { kind: "agent", hostOnline: true, ownerHumanId: P("01") }),
 ];
 const dm = (n, other) => ({ id: dmId(n), workspaceId, kind: "dm", muted: false, memberIds: [P("01"), other] });
 const dms = [dm(1, P("11")), dm(2, P("12")), dm(3, P("13")), dm(4, P("14")), dm(5, P("99"))];
@@ -85,7 +85,7 @@ const wireRead = (state, id) => ({
 async function installMocks(context, state) {
   const auth = {
     accessToken: "capture-only-not-a-credential", refreshToken: "capture-only-not-a-credential",
-    member: { id: memberId, workspaceId, kind: "human", displayName: "곽성재", handle: "seongjae" },
+    member: { id: memberId, workspaceId, kind: "human", displayName: "한지후", handle: "jihu" },
     realtimeWebSocketUrl: "ws://dm-revival-4142-capture.invalid/connection/websocket",
   };
   await context.route("**/v1/**", async (route) => {
@@ -186,7 +186,7 @@ async function runEngine(browserType, engine, origin) {
     try {
       await attempt(engine, scheme, "R.revival", async () => {
         await page.mouse.move(900, 450);
-        check(engine, scheme, "R0 닫기 전: kwak의 Claude·나간 멤버 DM 이 사이드바에 있다", (await shown(dmId(4))) && (await shown(dmId(5))), null);
+        check(engine, scheme, "R0 닫기 전: han의 Claude·나간 멤버 DM 이 사이드바에 있다", (await shown(dmId(4))) && (await shown(dmId(5))), null);
         await shot("1-before-close");
         for (const id of [dmId(4), dmId(5)]) {
           await rowOf(page, id).hover();
@@ -212,7 +212,7 @@ async function runEngine(browserType, engine, origin) {
         await page.reload({ waitUntil: "domcontentloaded" });
         await page.getByTestId("channel-item").first().waitFor({ timeout: 20_000 });
         await settle();
-        check(engine, scheme, "R5 사람이 읽을 글이 오면 kwak의 Claude DM 이 돌아온다", await shown(dmId(4)), state.messageReads);
+        check(engine, scheme, "R5 사람이 읽을 글이 오면 han의 Claude DM 이 돌아온다", await shown(dmId(4)), state.messageReads);
         check(engine, scheme, "R6 나간 멤버 DM 은 새 메시지가 없으니 닫힌 채다", !(await shown(dmId(5))), null);
         await shot("4-restart-human-message");
       });

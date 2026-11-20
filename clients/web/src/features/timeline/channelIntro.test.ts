@@ -176,8 +176,8 @@ describe("buildChannelIntro", () => {
   it("drops first-message copy on a non-empty DM and keeps the contract", () => {
     const intro = buildChannelIntro({
       kind: "dm",
-      name: "곽성재",
-      peer: { displayName: "곽성재", kind: "human" },
+      name: "한지후",
+      peer: { displayName: "한지후", kind: "human" },
       canAddMember: false,
       empty: false,
     });
@@ -212,9 +212,9 @@ describe("buildChannelIntro", () => {
   });
 
   it("keeps the pair sentence when the group facts say two people or nothing (#4912)", () => {
-    const peer = { displayName: "곽성재", kind: "human" as const };
+    const peer = { displayName: "한지후", kind: "human" as const };
     for (const dmGroup of [undefined, null, { count: 2, agentCount: 0 }]) {
-      const intro = buildChannelIntro({ kind: "dm", name: "곽성재", peer, canAddMember: false, dmGroup, empty: false });
+      const intro = buildChannelIntro({ kind: "dm", name: "한지후", peer, canAddMember: false, dmGroup, empty: false });
       expect(intro.body).toContain(DM_DETAIL);
     }
   });

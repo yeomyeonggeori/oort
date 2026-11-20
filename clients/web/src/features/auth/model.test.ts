@@ -262,7 +262,7 @@ describe("realtime address resolution (ADR-0110 boundary)", () => {
 describe("prefill focus", () => {
   const filled = {
     serverUrl: "https://api.example.com",
-    email: "seongjae@example.com",
+    email: "jihu@example.com",
     password: "pw",
     requiresServer: true,
   };

@@ -29,12 +29,12 @@ const PHOTO_PATH = `/v1/workspaces/${WS}/members/${HERMES}/avatar/content?v=m1`;
 const SESSION = {
   accessToken: "capture-only-not-a-credential",
   refreshToken: "capture-only-not-a-credential",
-  member: { id: ME, workspaceId: WS, kind: "human", displayName: "곽성재", handle: "seongjae" },
+  member: { id: ME, workspaceId: WS, kind: "human", displayName: "한지후", handle: "jihu" },
   realtimeWebSocketUrl: "ws://identity-capture.invalid/connection/websocket",
 };
 const base = { workspaceId: WS, status: "active", channelCount: 1, channelIds: [CH], capabilities: [], createdAtMs: 0, updatedAtMs: 0 };
 const ROSTER = [
-  { ...base, id: ME, kind: "human", role: "owner", displayName: "곽성재", handle: "seongjae" },
+  { ...base, id: ME, kind: "human", role: "owner", displayName: "한지후", handle: "jihu" },
   { ...base, id: HERMES, kind: "agent", role: "member", displayName: "hermes", handle: "hermes", ownerHumanId: ME, paused: false,
     ...(PHOTO ? { avatarUrl: PHOTO_PATH } : {}), tagline: "코드 리뷰와 배포 점검을 도와요" },
   { ...base, id: GROK, kind: "agent", role: "member", displayName: "그록", handle: "grok", ownerHumanId: ME, paused: false,
@@ -80,7 +80,7 @@ async function login(context) {
   const page = await context.newPage();
   await page.goto(ORIGIN, { waitUntil: "networkidle" });
   await advanceToAccount(page);
-  await page.getByTestId("login-email").fill("seongjae@dawn.example");
+  await page.getByTestId("login-email").fill("jihu@dawn.example");
   await page.getByTestId("login-password").fill("capture-only-not-a-credential");
   await page.getByTestId("login-submit").click();
   await page.getByTestId("channel-list").waitFor({ state: "visible" });

@@ -31,13 +31,13 @@ const channels = [
 const auth = {
   accessToken: "capture-only-not-a-credential",
   refreshToken: "capture-only-not-a-credential",
-  member: { id: memberId, workspaceId, kind: "human", displayName: "kwak", handle: "kwak" },
+  member: { id: memberId, workspaceId, kind: "human", displayName: "han", handle: "han" },
   realtimeWebSocketUrl: "ws://profile-jitter-capture.invalid/connection/websocket",
 };
 const roster = [
   {
-    id: memberId, workspaceId, kind: "human", status: "active", role: "owner", displayName: "kwak",
-    handle: "kwak", channelCount: 1, channelIds: channels.map((c) => c.id), capabilities: [],
+    id: memberId, workspaceId, kind: "human", status: "active", role: "owner", displayName: "han",
+    handle: "han", channelCount: 1, channelIds: channels.map((c) => c.id), capabilities: [],
     presenceStatus: "dnd", statusEmoji: "🏝️", statusText: "휴가 중",
     createdAtMs: 0, updatedAtMs: 0,
   },

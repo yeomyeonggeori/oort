@@ -86,7 +86,7 @@ const member: Member = {
   workspaceId: WS,
   kind: "human",
   displayName: "데모 사용자",
-  handle: "seongjae",
+  handle: "jihu",
 };
 
 const session: LoginResponse = {
@@ -127,7 +127,7 @@ beforeEach(() => {
   });
   changeMyProfile.mockResolvedValue({
     ...member,
-    handle: "seongjae",
+    handle: "jihu",
     displayName: "성재",
   });
   vi.stubGlobal("matchMedia", (query: string) => ({
@@ -208,7 +208,7 @@ function click(testId: string) {
 async function submitFilled(host: HTMLElement) {
   fill("onboarding-s1-workspace-name", "새벽");
   fill("onboarding-s1-display-name", "성재");
-  fill("onboarding-s1-handle", "seongjae");
+  fill("onboarding-s1-handle", "jihu");
   await act(async () => {
     click("onboarding-s1-submit");
   });
@@ -224,7 +224,7 @@ function mountStage(props?: {
   return mount(
     createElement(WorkspaceProfileStage, {
       workspaceId: WS,
-      memberHandle: props?.memberHandle ?? "seongjae",
+      memberHandle: props?.memberHandle ?? "jihu",
       memberDisplayName: props?.memberDisplayName,
       workspaceName: "새벽",
       workspaceUpdatedAtMs: UPDATED_AT,
@@ -294,7 +294,7 @@ describe("onboarding S1 우리 팀 이름 (#2332, 겉 #2811)", () => {
     expect(renameWorkspace).toHaveBeenCalledWith(WS, "새벽", UPDATED_AT);
     expect(changeMyProfile).toHaveBeenCalledTimes(1);
     expect(changeMyProfile).toHaveBeenCalledWith(WS, {
-      handle: "seongjae",
+      handle: "jihu",
       displayName: "성재",
     });
     expect(changeMyHandle).not.toHaveBeenCalled();
@@ -302,7 +302,7 @@ describe("onboarding S1 우리 팀 이름 (#2332, 겉 #2811)", () => {
     expect(replaceSessionMember).toHaveBeenCalledTimes(1);
     expect(replaceSessionMember).toHaveBeenCalledWith({
       ...member,
-      handle: "seongjae",
+      handle: "jihu",
       displayName: "성재",
     });
     expect(
@@ -353,7 +353,7 @@ describe("onboarding S1 우리 팀 이름 (#2332, 겉 #2811)", () => {
       .mockRejectedValueOnce(new ApiError(409, HANDLE_TAKEN_SENTENCE))
       .mockResolvedValueOnce({
         ...member,
-        handle: "seongjae2",
+        handle: "jihu2",
         displayName: "성재",
       });
     const host = mountStage({ onComplete: vi.fn() });
@@ -362,7 +362,7 @@ describe("onboarding S1 우리 팀 이름 (#2332, 겉 #2811)", () => {
       expect(host.querySelector('[data-testid="onboarding-s1-handle-error"]')).not.toBeNull();
     });
     expect(renameWorkspace).toHaveBeenCalledTimes(1);
-    fill("onboarding-s1-handle", "seongjae2");
+    fill("onboarding-s1-handle", "jihu2");
     await act(async () => {
       click("onboarding-s1-submit");
     });
@@ -510,7 +510,7 @@ describe("onboarding S1 우리 팀 이름 (#2332, 겉 #2811)", () => {
     const host = mount(
       createElement(WorkspaceProfileStage, {
         workspaceId: WS,
-        memberHandle: "seongjae",
+        memberHandle: "jihu",
         workspaceName: "새벽",
         workspaceUpdatedAtMs: UPDATED_AT,
         replaceSessionMember,
@@ -565,7 +565,7 @@ describe("onboarding S1 우리 팀 이름 (#2332, 겉 #2811)", () => {
     const host = mountStage();
     fill("onboarding-s1-workspace-name", "새벽");
     fill("onboarding-s1-display-name", "성재");
-    fill("onboarding-s1-handle", "seongjae");
+    fill("onboarding-s1-handle", "jihu");
     act(() => {
       click("onboarding-s1-submit");
     });
@@ -676,7 +676,7 @@ describe("onboarding S1 우리 팀 이름 (#2332, 겉 #2811)", () => {
         .value
     ).toBe("SeongJae");
     expect(remounted.querySelector('[data-testid="onboarding-s1-handle-preview"]')?.textContent).toBe(
-      "저장되는 핸들 @seongjae"
+      "저장되는 핸들 @jihu"
     );
   });
 
@@ -700,24 +700,24 @@ describe("onboarding S1 우리 팀 이름 (#2332, 겉 #2811)", () => {
     recordOwnerOnboardingSettingsSave("profile");
     writeS1Draft({
       workspaceName: "여명거리",
-      displayName: "곽성재",
-      handle: "seongjae",
+      displayName: "한지후",
+      handle: "jihu",
     });
     const onComplete = vi.fn();
     const host = mountStage({
-      memberHandle: "kwak",
-      memberDisplayName: "곽성재",
+      memberHandle: "han",
+      memberDisplayName: "한지후",
       onComplete,
     });
     expect(
       (host.querySelector('[data-testid="onboarding-s1-handle"]') as HTMLInputElement)
         .value
-    ).toBe("kwak");
+    ).toBe("han");
     expect(
       (host.querySelector(
         '[data-testid="onboarding-s1-display-name"]'
       ) as HTMLInputElement).value
-    ).toBe("곽성재");
+    ).toBe("한지후");
     fill("onboarding-s1-workspace-name", "여명거리");
     await act(async () => {
       click("onboarding-s1-submit");
@@ -802,7 +802,7 @@ describe("S1 handle copy (H-1)", () => {
       "핸들은 영문 소문자·숫자·하이픈 2~32자예요."
     );
     expect(handleFieldError("!")).not.toMatch(/handle must|a-z/);
-    expect(handleFieldError("seongjae")).toBeNull();
+    expect(handleFieldError("jihu")).toBeNull();
     expect(handleSaveMessage(new ApiError(409, HANDLE_TAKEN_SENTENCE))).toBe(
       "이미 쓰는 핸들이에요. 다른 핸들을 골라주세요."
     );

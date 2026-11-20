@@ -24,7 +24,7 @@ function member(id: string, kind: "human" | "agent", displayName: string, handle
 }
 
 const directory = makeDirectory([
-  member(HUMAN, "human", "곽성재", "sj"),
+  member(HUMAN, "human", "한지후", "sj"),
   member(AGENT, "agent", "hermes", "hermes"),
 ]);
 

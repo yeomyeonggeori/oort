@@ -414,8 +414,8 @@ describe("설치 요청 안내와 관리자 없음 상태 (#3943)", () => {
   ) => ({ displayName, handle, role, status: "active", kind: "human" as const, ...over });
 
   it("관리자가 있으면 「○○님(관리자)에게 설치를 요청하세요」", () => {
-    expect(nonAdminInstallGuidance(["곽성재"])).toBe("곽성재님(관리자)에게 설치를 요청하세요.");
-    expect(nonAdminInstallGuidance(["곽성재", "김인턴"])).toBe("곽성재님, 김인턴님(관리자)에게 설치를 요청하세요.");
+    expect(nonAdminInstallGuidance(["한지후"])).toBe("한지후님(관리자)에게 설치를 요청하세요.");
+    expect(nonAdminInstallGuidance(["한지후", "김인턴"])).toBe("한지후님, 김인턴님(관리자)에게 설치를 요청하세요.");
     expect(nonAdminInstallGuidance(["가", "나", "다", "라"])).toBe("가님, 나님 외 2명(관리자)에게 설치를 요청하세요.");
   });
 

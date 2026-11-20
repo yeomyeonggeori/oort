@@ -61,7 +61,7 @@ function agent(handle: string, personal: Record<string, unknown> | null, over: P
 const mine = (over: Record<string, unknown> = {}) => ({
   label: "내 Claude Code",
   ownerId: ME,
-  ownerDisplayName: "곽성재",
+  ownerDisplayName: "한지후",
   harness: "claude",
   enabled: true,
   mentionable: true,

@@ -23,7 +23,7 @@ export type RegisterPose = (typeof REGISTER_POSES)[number];
 
 const base: RegisterState = {
   step: { step: "confirm" },
-  handle: "seongjae-claude",
+  handle: "jihu-claude",
   plan: null,
   agent: null,
   reason: null,
@@ -54,10 +54,10 @@ export function registerPoseFixture(pose: RegisterPose): {
     case "register-done":
       return {
         harness: "claude",
-        state: { ...base, step: { step: "done", handle: "seongjae-claude", displayName: "곽성재-claude" } },
+        state: { ...base, step: { step: "done", handle: "jihu-claude", displayName: "한지후-claude" } },
       };
     case "register-existing":
-      return { harness: "claude", state: { ...base, step: { step: "existing", handle: "seongjae-claude" } } };
+      return { harness: "claude", state: { ...base, step: { step: "existing", handle: "jihu-claude" } } };
     case "register-paused":
       return { harness: "claude", state: { ...base, step: { step: "calm", refusal: "paused" } } };
     case "register-disabled":
@@ -69,8 +69,8 @@ export function registerPoseFixture(pose: RegisterPose): {
         harness: "codex",
         state: {
           ...base,
-          handle: "seongjae-codex",
-          step: { step: "manual", handle: "seongjae-codex", why: "codex" },
+          handle: "jihu-codex",
+          step: { step: "manual", handle: "jihu-codex", why: "codex" },
           plan: { kind: "fields", endpoint: ENDPOINT, credential: FAKE },
         },
       };
@@ -79,7 +79,7 @@ export function registerPoseFixture(pose: RegisterPose): {
         harness: "claude",
         state: {
           ...base,
-          step: { step: "manual", handle: "seongjae-claude", why: "cli-failed" },
+          step: { step: "manual", handle: "jihu-claude", why: "cli-failed" },
           plan: {
             kind: "command",
             command: `claude mcp add --scope user --transport http oort ${ENDPOINT} --header "Authorization: Bearer ${FAKE}"`,

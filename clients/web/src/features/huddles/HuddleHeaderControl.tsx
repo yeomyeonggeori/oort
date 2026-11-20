@@ -72,7 +72,7 @@ function HuddleLiveChip({
 }
 
 /**
- * 참가자 이름 글(「Nadia, 곽성재 외 3명」): 제목 칸 꼬리(`channel-head-tail`)에 서는 장식 글이다. 칩이 같은 전문을 낭독하므로
+ * 참가자 이름 글(「Nadia, 한지후 외 3명」): 제목 칸 꼬리(`channel-head-tail`)에 서는 장식 글이다. 칩이 같은 전문을 낭독하므로
  * 여기는 `aria-hidden`이고, 칸이 8rem보다 좁으면 조각이 아니라 통째로 숨는다(tokens.css `channel-head-names`).
  */
 export function HuddleHeaderNames({

@@ -138,8 +138,8 @@ function rosterMember(over: Partial<RosterMember> = {}): RosterMember {
     workspaceId: WS,
     kind: "human",
     status: "active",
-    displayName: "곽성재",
-    handle: "seongjae",
+    displayName: "한지후",
+    handle: "jihu",
     role: "owner",
     channelCount: 0,
     channelIds: [],
@@ -160,8 +160,8 @@ function sessionValue(logout: () => void): SessionContextValue {
         id: MEMBER_ID,
         workspaceId: WS,
         kind: "human",
-        displayName: "곽성재",
-        handle: "seongjae",
+        displayName: "한지후",
+        handle: "jihu",
       },
       realtimeWebSocketUrl: "wss://example.test/connection/websocket",
     },
@@ -209,7 +209,7 @@ function mountCard(
               workspaceId: WS,
               selfMemberId: MEMBER_ID,
               selfMember,
-              selfName: extra.selfName ?? "곽성재",
+              selfName: extra.selfName ?? "한지후",
               connected: true,
               workspaceName: extra.workspaceName,
               compact: extra.compact,
@@ -404,7 +404,7 @@ describe("ProfileCard 목록 끝 한 줄 (#3574)", () => {
     mountCard(() => undefined, rosterMember(), { workspaceName: "여명거리" });
     const trigger = document.querySelector('[data-testid="profile-card"]');
     const name = trigger?.querySelector('[data-testid="self-name"]');
-    expect(name?.textContent).toBe("곽성재");
+    expect(name?.textContent).toBe("한지후");
     expect(name?.className).toContain("font-semibold");
     expect(trigger?.querySelector('[data-testid="presence-control"]')).not.toBeNull();
     expect(
@@ -464,7 +464,7 @@ describe("ProfileCard 목록 끝 한 줄 (#3574)", () => {
     expect(trigger?.querySelector('[data-testid="presence-control"]')).not.toBeNull();
     const textWrap = trigger?.querySelector('[data-testid="self-name"]')?.parentElement;
     expect(textWrap?.className).toContain("hidden");
-    expect(trigger?.getAttribute("aria-label")).toContain("곽성재");
+    expect(trigger?.getAttribute("aria-label")).toContain("한지후");
     expect(trigger?.getAttribute("aria-label")).toContain("휴가 중");
   });
 

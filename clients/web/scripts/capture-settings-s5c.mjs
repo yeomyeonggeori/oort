@@ -36,7 +36,7 @@ const channels = [
 const auth = {
   accessToken: "capture-only-not-a-credential",
   refreshToken: "capture-only-not-a-credential",
-  member: { id: memberId, workspaceId, kind: "human", displayName: "곽성재", handle: "seongjae" },
+  member: { id: memberId, workspaceId, kind: "human", displayName: "한지후", handle: "jihu" },
   realtimeWebSocketUrl: "ws://settings-s5c-capture.invalid/connection/websocket",
 };
 /** 에이전트별 줄의 이름은 명부가 정한다. 같은 표시 이름 둘(사람 @intern-kim, 에이전트 @kim-intern)이 핸들을 붙이는 이유다. */
@@ -46,7 +46,7 @@ function roster() {
     channelIds: channels.map((c) => c.id), capabilities: [], createdAtMs: 0, updatedAtMs: 0, ...extra,
   });
   return [
-    base(memberId, "human", "곽성재", "seongjae", { role: "owner" }),
+    base(memberId, "human", "한지후", "jihu", { role: "owner" }),
     base("019F94E3-7B0F-7A22-9C13-4D5E6F708192", "human", "김인턴", "intern-kim"),
     base("019F94E3-8B21-7AE0-B3C4-5F1A2D6E7C90", "agent", "김인턴", "kim-intern", { ownerHumanId: memberId, agentModel: "claude-opus-5" }),
     base("019F94E3-9C32-7BF1-A4D5-6E2B3C7D8E01", "agent", "hermes", "hermes", { ownerHumanId: memberId, agentModel: "gpt-5.6-sol" }),

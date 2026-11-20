@@ -70,8 +70,8 @@ const session: LoginResponse = {
     id: "00000000-0000-7000-8000-000000000101",
     workspaceId: WS,
     kind: "human",
-    displayName: "곽성재",
-    handle: "seongjae",
+    displayName: "한지후",
+    handle: "jihu",
   },
   realtimeWebSocketUrl: "wss://example.test/connection/websocket",
 };

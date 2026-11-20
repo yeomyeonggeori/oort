@@ -43,7 +43,7 @@ function mount(offline = false): HTMLElement {
     id: "u",
     workspaceId: "w",
     kind: "human",
-    displayName: "곽성재",
+    displayName: "한지후",
     handle: "k",
   };
   const session: SessionContextValue = {

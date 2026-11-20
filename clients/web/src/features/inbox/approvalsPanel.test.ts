@@ -52,9 +52,9 @@ const AGENT: ActorNames = {
   name: "김인턴",
   handle: "kim-intern",
   isAgent: true,
-  ownerName: "곽성재",
+  ownerName: "한지후",
 };
-const HUMAN: ActorNames = { name: "곽성재", isAgent: false };
+const HUMAN: ActorNames = { name: "한지후", isAgent: false };
 
 function approval(status: ApprovalStatus, id = `approval-${status}`): Approval {
   return {
@@ -166,7 +166,7 @@ describe("approvalRowControl", () => {
       hlcCount: 0,
       authorMemberId: "00000000-0000-7000-8000-000000000102",
       type: "text",
-      body: "@곽성재 배포 확인 부탁드립니다",
+      body: "@한지후 배포 확인 부탁드립니다",
       createdAtMs: NOW_MS - 30_000,
     };
     // 승인 대기 중인 **작업 실행** 행이다. 결정 컨트롤이 승인 행이 아니라

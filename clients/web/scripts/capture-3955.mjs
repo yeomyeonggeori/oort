@@ -55,14 +55,14 @@ const channels = [
 const auth = {
   accessToken: "capture-only-not-a-credential",
   refreshToken: "capture-only-not-a-credential",
-  member: { id: me, workspaceId, kind: "human", displayName: "곽성재", handle: "seongjae" },
+  member: { id: me, workspaceId, kind: "human", displayName: "한지후", handle: "jihu" },
   realtimeWebSocketUrl: "ws://capture-3955.invalid/connection/websocket",
 };
 const person = (id, displayName, handle, role, kind = "human") => ({
   id, workspaceId, kind, status: "active", role, displayName, handle, channelCount: 2,
   channelIds: [marketing, billing], capabilities: [], createdAtMs: 0, updatedAtMs: 0,
 });
-const roster = [person(me, "곽성재", "seongjae", "owner"), person(haneul, "김하늘", "haneul", "member"), person(githubAgent, "GitHub", "github", "member", "agent")];
+const roster = [person(me, "한지후", "jihu", "owner"), person(haneul, "김하늘", "haneul", "member"), person(githubAgent, "GitHub", "github", "member", "agent")];
 
 // ---- GitHub 쪽 세계 (PR #4070 소스에서 옮긴 모양) -------------------------------------------
 const PERMISSIONS = { metadata: "read", issues: "read", pull_requests: "read", checks: "read", contents: "read" };
@@ -109,7 +109,7 @@ const pr = (n, title, who) => `yeomyeonggeori/oort · @${who}님이 PR을 열었
 const NOTIFICATIONS = [
   { id: "g1", author: githubAgent, body: pr(412, "알림 설정에서 방해 금지 기한 고르기", "haneul"), props: { source: "github", github_event: "pull_request", github_action: "opened", github_repository: "yeomyeonggeori/oort", github_url: "https://github.com/yeomyeonggeori/oort/pull/412" } },
   { id: "g2", author: githubAgent, body: "yeomyeonggeori/oort · @minjun님이 이슈를 닫았어요\n[#398 푸시 알림이 두 번 와요](https://github.com/yeomyeonggeori/oort/issues/398)", props: { source: "github", github_event: "issues", github_action: "closed", github_repository: "yeomyeonggeori/oort", github_url: "https://github.com/yeomyeonggeori/oort/issues/398" } },
-  { id: "g3", author: githubAgent, body: "yeomyeonggeori/oort · @seongjae님이 릴리스를 게시했어요\n[v0.4.2 폰 알림 걷기 수리](https://github.com/yeomyeonggeori/oort/releases/tag/v0.4.2)", props: { source: "github", github_event: "release", github_action: "published", github_repository: "yeomyeonggeori/oort", github_url: "https://github.com/yeomyeonggeori/oort/releases/tag/v0.4.2" } },
+  { id: "g3", author: githubAgent, body: "yeomyeonggeori/oort · @jihu님이 릴리스를 게시했어요\n[v0.4.2 폰 알림 걷기 수리](https://github.com/yeomyeonggeori/oort/releases/tag/v0.4.2)", props: { source: "github", github_event: "release", github_action: "published", github_repository: "yeomyeonggeori/oort", github_url: "https://github.com/yeomyeonggeori/oort/releases/tag/v0.4.2" } },
   { id: "g4", author: haneul, body: "412번 PR, 오늘 안에 리뷰 부탁해요.", props: undefined },
 ];
 function messagesFor(channelId) {
