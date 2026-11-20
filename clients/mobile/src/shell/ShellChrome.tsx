@@ -16,7 +16,7 @@ import {useReduceMotionRef} from '../lib/useReduceMotion';
 import {SHELL_ICONS, SHELL_ICON_SIZE, type ShellIconName} from '../design/icons';
 import {BAR_CONTROL_MAX_SCALE} from '../design/atoms';
 import {usePalette, useStyles} from '../design/theme';
-import {TOUCH_TARGET, type Palette, font} from '../design/tokens';
+import {PRESSED_OPACITY, TOUCH_TARGET, type Palette, font} from '../design/tokens';
 import {tabLabel, visibleTabs, type Tab} from '../nav/state';
 
 // =============================================================================
@@ -530,7 +530,7 @@ const buildStyles = (color: Palette) =>
       alignItems: 'center',
       justifyContent: 'center',
     },
-    pressed: {opacity: 0.6},
+    pressed: {opacity: PRESSED_OPACITY},
     dot: {
       position: 'absolute',
       top: 8,

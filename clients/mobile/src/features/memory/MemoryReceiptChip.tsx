@@ -1,7 +1,7 @@
 import type {MemoryEvidenceLink} from '@momo/core/features/memory/model';
 import React, {useState} from 'react';
 import {Pressable, StyleSheet, Text} from 'react-native';
-import {font, radius, slopTo, space, type Palette} from '../../design/tokens';
+import {font, PRESSED_OPACITY, radius, slopTo, space, type Palette} from '../../design/tokens';
 import {useStyles} from '../../design/theme';
 import {
   receiptChipA11y,
@@ -92,6 +92,6 @@ const buildStyles = (color: Palette) =>
       borderColor: color.border,
       backgroundColor: color.agentSurface,
     },
-    pressed: {opacity: 0.6},
+    pressed: {opacity: PRESSED_OPACITY},
     label: {fontSize: font.meta, color: color.text, fontWeight: '600'},
   });

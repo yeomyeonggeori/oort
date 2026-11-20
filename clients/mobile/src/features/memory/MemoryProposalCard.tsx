@@ -9,7 +9,7 @@ import type {Directory} from '@momo/core/features/workspace/directory';
 import React, {useState} from 'react';
 import {ActivityIndicator, Pressable, StyleSheet, Text, View} from 'react-native';
 import {Sentence} from '../../design/atoms';
-import {font, line, radius, space, TOUCH_TARGET, type Palette} from '../../design/tokens';
+import {font, line, PRESSED_OPACITY, radius, space, TOUCH_TARGET, type Palette} from '../../design/tokens';
 import {useStyles} from '../../design/theme';
 import {
   PROPOSAL_ACCEPT,
@@ -437,7 +437,7 @@ const buildStyles = (color: Palette) =>
       backgroundColor: color.bg,
     },
     rejectLabel: {fontSize: font.body, color: color.text, fontWeight: '600'},
-    pressed: {opacity: 0.6},
+    pressed: {opacity: PRESSED_OPACITY},
     result: {gap: space.xs},
     resultText: {fontSize: font.label, lineHeight: line.label, color: color.text, fontWeight: '600'},
   });

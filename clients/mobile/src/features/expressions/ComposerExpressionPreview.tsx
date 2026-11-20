@@ -5,7 +5,7 @@ import {Image, Pressable, StyleSheet, Text, View} from 'react-native';
 import {CONV_ICON_SIZE, CONV_ICONS} from '../../design/icons';
 import {useStyles} from '../../design/theme';
 import {WORD} from '../../lib/techWords';
-import {font, line, space, TOUCH_TARGET, type Palette} from '../../design/tokens';
+import {font, line, PRESSED_OPACITY, space, TOUCH_TARGET, type Palette} from '../../design/tokens';
 import {ExpressionImage} from './ExpressionImage';
 import {EXPRESSION_POINTS} from './expressionBox';
 import {useExpressionMessages} from './useExpressionMessages';
@@ -93,7 +93,7 @@ const buildStyles = (color: Palette) =>
       // 큰 글자에서도 눌림 면이 44 아래로 내려가지 않게 바깥쪽 여백으로 채운다.
       marginTop: Math.max(0, (TOUCH_TARGET - CLEAR_SIZE) / 2 - space.xs),
     },
-    pressed: {opacity: 0.6},
+    pressed: {opacity: PRESSED_OPACITY},
     glyph: {
       width: CONV_ICON_SIZE.cross,
       height: CONV_ICON_SIZE.cross,

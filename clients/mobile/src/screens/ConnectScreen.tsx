@@ -50,7 +50,7 @@ import {
   type NativeSyntheticEvent,
 } from 'react-native';
 import {FailureBanner, NoticeBlock, SAS_MAX_SCALE, Sentence} from '../design/atoms';
-import {font, space, TOUCH_TARGET, type Palette} from '../design/tokens';
+import {font, PRESSED_OPACITY, space, TOUCH_TARGET, type Palette} from '../design/tokens';
 import {useKeyboardAppearance, usePalette, useStyles, useTheme} from '../design/theme';
 import {
   arrivalFromDeviceLinkUrl,
@@ -1374,7 +1374,7 @@ const buildStyles = (color: Palette) => StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
-  reentryPressed: {opacity: 0.6},
+  reentryPressed: {opacity: PRESSED_OPACITY},
   // `.reentry{font-size:12.5px;color:ink2;text-align:center}` · `.link{signal-text 600 underline}`
   reentryText: {fontSize: font.meta, color: color.textMuted, textAlign: 'center'},
   reentryLink: {

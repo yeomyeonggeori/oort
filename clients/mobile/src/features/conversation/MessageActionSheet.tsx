@@ -24,6 +24,7 @@ import {
 import {
   font,
   line,
+  PRESSED_OPACITY,
   radius,
   SHEET,
   space,
@@ -458,5 +459,5 @@ const buildStyles = (color: Palette) =>
     },
     // 이모지 한 글자의 도형 크기 — 역할 표의 「화면·시트 제목」(22)과 같다.
     reactionGlyph: {fontSize: font.title},
-    pressed: {opacity: 0.6},
+    pressed: {opacity: PRESSED_OPACITY},
   });

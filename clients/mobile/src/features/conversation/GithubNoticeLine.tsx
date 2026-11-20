@@ -5,7 +5,7 @@ import {
   githubNoticeLabel,
   type GithubNotice,
 } from '@momo/core/features/github/model';
-import {font, line, radius, space, TOUCH_TARGET, type Palette} from '../../design/tokens';
+import {font, line, PRESSED_OPACITY, radius, space, TOUCH_TARGET, type Palette} from '../../design/tokens';
 import {useStyles} from '../../design/theme';
 import {openLink} from './MessageBody';
 
@@ -83,6 +83,6 @@ function build(color: Palette) {
       color: color.accentText,
       textDecorationLine: 'underline',
     },
-    pressed: {opacity: 0.6},
+    pressed: {opacity: PRESSED_OPACITY},
   });
 }

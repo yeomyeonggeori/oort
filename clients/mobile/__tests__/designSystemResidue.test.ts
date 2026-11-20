@@ -208,23 +208,20 @@ const RADIUS_CONSTANT_CEILING: Readonly<Counts> = {
 };
 
 const OPACITY_CEILING: Readonly<Counts> = {
-  'design': 9,
+  'design': 8,
   'features/agents': 1,
-  'features/aiConnect': 2,
+  'features/aiConnect': 1,
   'features/appUpdate': 1,
   'features/attachments': 4,
-  'features/conversation': 20,
-  'features/decisionStage': 1,
+  'features/conversation': 5,
   'features/directory': 1,
-  'features/emoji': 1,
-  'features/expressions': 8,
+  'features/expressions': 7,
   'features/inbox': 3,
-  'features/memory': 4,
-  'features/onboarding': 2,
-  'features/profile': 6,
+  'features/onboarding': 1,
+  'features/profile': 3,
   'features/work': 7,
-  'screens': 4,
-  'shell': 3,
+  'screens': 3,
+  'shell': 2,
 };
 
 const OLD_RADIUS_CEILING: Readonly<Counts> = {
@@ -290,6 +287,21 @@ describe('공용 부품 밖 잔량 — 폰', () => {
       measure(code => code.match(/\bradius\.(?:sm|md)\b/g) ?? []),
       OLD_RADIUS_CEILING,
     );
+  });
+});
+
+describe('눌림 · 잠김 흐림 토큰 (#6022)', () => {
+  it('이름의 값은 화면이 전에 적던 숫자와 같다', () => {
+    expect(tokens.PRESSED_OPACITY).toBe(0.6);
+    expect(tokens.DISABLED_OPACITY).toBe(0.55);
+  });
+
+  it('잠김 이름은 sheetParts 의 rowDisabled 와 같은 값이다', () => {
+    // sheetParts 가 숫자를 적든 이름을 쓰든 같은 값이어야 한다(그 파일은 다른 칸이 고친다).
+    const source = codeOnly(fs.readFileSync(path.join(SRC_DIR, 'design', 'sheetParts.tsx'), 'utf8'));
+    const found = source.match(/\browDisabled:\s*\{opacity:\s*([\w.]+)\}/);
+    expect(found?.[1]).toBeDefined();
+    expect(['DISABLED_OPACITY', String(tokens.DISABLED_OPACITY)]).toContain(found?.[1]);
   });
 });
 
