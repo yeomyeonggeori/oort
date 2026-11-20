@@ -2,6 +2,7 @@ import { useMemo } from "react";
 import { useSession } from "@/app/session";
 import {
   listWorkspaceDrafts,
+  openDraftChannelId,
   useDraftsEpoch,
   type DraftRecord,
 } from "@/features/chat/draftStore";
@@ -88,7 +89,8 @@ export function useDraftsPanel(): DraftsPanelState {
 
   return {
     items,
-    showNav: shouldShowDraftsNav(drafts, liveIds, channelsReady),
+    // 열어 둔 대화는 `holdOpenDraftChannel`이 바꾸고 그때 `epoch`가 오른다 — 이 렌더가 그 값을 다시 읽는다.
+    showNav: shouldShowDraftsNav(drafts, liveIds, channelsReady, openDraftChannelId(workspaceId)),
     isPending: channelsQuery.isPending && channelsQuery.data === undefined,
     isError: channelsQuery.isError && channelsQuery.data === undefined,
     error: channelsQuery.error,

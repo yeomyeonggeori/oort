@@ -75,6 +75,13 @@ describe("shouldShowDraftsNav", () => {
       shouldShowDraftsNav([draft(GONE, "글", 1)], new Set([CH_A]), true)
     ).toBe(false);
   });
+
+  it("지금 열어 둔 대화의 초안은 세지 않는다 — 목록이 오기 전에도 (#6030)", () => {
+    const only = [draft(CH_A, "쓰는 중", 1)];
+    expect(shouldShowDraftsNav(only, new Set(), false, CH_A.toUpperCase())).toBe(false);
+    expect(shouldShowDraftsNav(only, new Set([CH_A]), true, CH_A)).toBe(false);
+    expect(shouldShowDraftsNav([...only, draft(CH_B, "남긴 글", 2)], new Set([CH_A, CH_B]), true, CH_A)).toBe(true);
+  });
 });
 
 describe("channelPathForDraft", () => {
