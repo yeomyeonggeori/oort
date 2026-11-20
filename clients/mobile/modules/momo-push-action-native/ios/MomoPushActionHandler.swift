@@ -30,7 +30,8 @@ import os
 //
 // ## What it returns
 //
-// `true` for 승인/거절 on an approval notification, `false` for everything else.
+// `true` for 승인/거절 on an approval notification and for a 답장 (#6036, kept on the
+// list in MomoPushReplyQueue.swift before this returns), `false` for everything else.
 // NotificationCenterManager keeps a response in `pendingResponses` only while no
 // delegate has handled it, and replays that list to the EmitterModule when JS
 // comes up: it is how a cold-launch BODY tap reaches `getLastNotificationResponse`
@@ -194,6 +195,20 @@ public final class MomoPushActionHandler: NSObject, NotificationDelegate {
     _ response: UNNotificationResponse,
     completionHandler: @escaping () -> Void
   ) -> Bool {
+    // 답장 (#6036): kept here, synchronously, before this returns — a live EmitterModule
+    // hears the same response right after, and JS then finds it on the list. See
+    // MomoPushReplyQueue.swift.
+    let content = response.notification.request.content
+    if MomoPushReplyCapture.isReply(
+      actionIdentifier: response.actionIdentifier, categoryIdentifier: content.categoryIdentifier)
+    {
+      guard let input = response as? UNTextInputNotificationResponse else { return false }
+      let text = input.userText.trimmingCharacters(in: .whitespacesAndNewlines)
+      // Nothing typed is nothing to send (JS treated it the same way).
+      if text.isEmpty { return true }
+      MomoPushReplyKeeper.keep(text: text, request: response.notification.request)
+      return true
+    }
     guard let intent = MomoPushActionIntent(response: response) else { return false }
     let credentials: MomoPushActionCredentials =
       MomoPushActionKeychain.live() ?? MomoPushActionNoCredentials()
@@ -207,6 +222,88 @@ public final class MomoPushActionHandler: NSObject, NotificationDelegate {
       tasks: MomoPushActionUIKitTasks()
     ).start()
     return true
+  }
+}
+
+/// Keeps one 답장 and answers it on the lock screen with one line.
+enum MomoPushReplyKeeper {
+  static func keep(text: String, request: UNNotificationRequest) {
+    let content = request.content
+    let outcome: MomoPushReplyOutcome
+    if let keychain = MomoPushActionKeychain.live() {
+      outcome = MomoPushReplyCapture.keep(
+        text: text,
+        requestIdentifier: request.identifier,
+        userInfo: content.userInfo,
+        owner: keychain.readReplyOwner(),
+        store: keychain.replyStore,
+        nowMs: Int64(Date().timeIntervalSince1970 * 1000)
+      )
+    } else {
+      outcome = .storeFailed
+    }
+    MomoPushActionLog.logger.notice("[push] \(outcome.logName, privacy: .public)")
+
+    let korean = MomoPushReplyCopy.isKorean(Bundle.main.preferredLocalizations)
+    let line = UNMutableNotificationContent()
+    if outcome.kept {
+      line.title = MomoPushReplyCopy.queued(korean: korean)
+      // What the person just did, confirmed: to the list, without lighting the screen.
+      line.interruptionLevel = .passive
+    } else {
+      line.title = MomoPushReplyCopy.notKeptTitle(korean: korean)
+      line.body = MomoPushReplyCopy.notKeptBody(korean: korean)
+      line.sound = .default
+      line.interruptionLevel = .active
+    }
+    line.threadIdentifier = content.threadIdentifier
+    // The id-only payload under `origin`, as the 승인/거절 line carries it: a tap on the
+    // line lands on the conversation (`pushPayloadOfRequest`). No category, no buttons.
+    let userInfo = content.userInfo
+    if JSONSerialization.isValidJSONObject(userInfo),
+      let data = try? JSONSerialization.data(withJSONObject: userInfo)
+    {
+      line.userInfo = MomoPushActionPlanner.userInfo(origin: data)
+    }
+    // The same identifier replaces the notification that was answered.
+    let replacement = UNNotificationRequest(identifier: request.identifier, content: line, trigger: nil)
+
+    let tasks = MomoPushActionUIKitTasks()
+    let finish = MomoPushReplyTaskEnd(tasks: tasks)
+    finish.token = tasks.begin(name: "oort.push-action.reply") { finish.end() }
+    UNUserNotificationCenter.current().add(replacement) { error in
+      if error != nil { MomoPushActionLog.logger.error("[push] reply line not posted") }
+      finish.end()
+    }
+  }
+}
+
+/// Ends a background task once, whichever of "posted" and "expired" comes first.
+final class MomoPushReplyTaskEnd: @unchecked Sendable {
+  private let tasks: MomoPushActionBackgroundTasks
+  private let lock = NSLock()
+  private var ended = false
+  var token: Int? {
+    get { lock.withLock { storedToken } }
+    set {
+      let handBack: Int? = lock.withLock {
+        storedToken = newValue
+        return ended ? newValue : nil
+      }
+      if let handBack { tasks.end(handBack) }
+    }
+  }
+  private var storedToken: Int?
+
+  init(tasks: MomoPushActionBackgroundTasks) { self.tasks = tasks }
+
+  func end() {
+    let handBack: Int? = lock.withLock {
+      guard !ended else { return nil }
+      ended = true
+      return storedToken
+    }
+    if let handBack { tasks.end(handBack) }
   }
 }
 

@@ -149,6 +149,37 @@ describe('처리기가 붙어 있으면 JS 는 승인·거절에서 물러난다
   });
 });
 
+describe('답장을 처리기가 남기는 빌드에서는 JS 가 답장을 보내지 않는다 (#6036)', () => {
+  const reply = () =>
+    remote(
+      PUSH_ACTION.quickReply,
+      payload({aps: {category: 'momo.message'}, momo: {reason: 'dm', approval_id: undefined}}),
+      '알겠어요',
+    );
+
+  it('처리기가 답장을 맡으면 물러난다 — 보내기는 보관 목록 한 길이다', async () => {
+    nativeModules({handlesApprovalActions: true, handlesReplyActions: true});
+
+    const result = await handlePushResponse(reply(), {signedInWorkspaceId: WS});
+
+    expect(result).toEqual({kind: 'ignored', reason: 'replies are kept natively and sent from the list'});
+    expect(mockSendMessage).not.toHaveBeenCalled();
+    expect(mockSendThreadReply).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['옛 모듈이라 상수가 없다', {handlesApprovalActions: true}],
+    ['상수가 불리언이 아니다', {handlesApprovalActions: true, handlesReplyActions: 'yes'}],
+  ])('%s: 예전처럼 JS 가 보낸다 (대조군)', async (_name, module) => {
+    nativeModules(module);
+
+    const result = await handlePushResponse(reply(), {signedInWorkspaceId: WS});
+
+    expect(result).toEqual({kind: 'replied'});
+    expect(mockSendMessage).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe('처리기가 붙어 있지 않으면 JS 가 예전처럼 한다 (대조군 — 위의 「보내지 않는다」가 헛돌지 않게)', () => {
   it.each([
     ['모듈이 없다', null],

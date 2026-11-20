@@ -111,3 +111,50 @@ export function nativeApprovalHandlerAttached(): boolean {
       ?.handlesApprovalActions === true
   );
 }
+
+interface MomoPushActionReplies {
+  /** 처리기가 붙어 있고 이 빌드가 앱 전용 키체인 그룹을 말할 때만 참 (#6036). */
+  readonly handlesReplyActions?: boolean;
+  queuedReplies?(): string[] | null;
+  removeQueuedReply?(clientMsgId: string): void;
+  clearQueuedReplies?(): void;
+}
+
+/** 잠금 화면 답장의 보관 목록 (#6036, `queuedReplies.ts`). */
+export interface QueuedReplyStore {
+  /** 남은 항목(JSON 문자열). 키체인이 답하지 않으면 null — 「없음」이 아니라 「모름」이다. */
+  list(): string[] | null;
+  remove(clientMsgId: string): void;
+  clear(): void;
+}
+
+/**
+ * 잠금 화면의 답장을 네이티브 처리기가 **받아 남기고 있는가** (#6036). 참일 때만 `handlePushResponse` 가
+ * 답장 갈래에서 물러난다 — 승인 · 거절과 같은 까닭으로 「iOS 이면」이 아니라 「처리기가 붙어 있으면」이다.
+ * 옛 바이너리 위의 새 JS 에서는 거짓이라 예전처럼 JS 가 보낸다.
+ */
+export function nativeReplyHandlerAttached(): boolean {
+  return (
+    requireOptionalNativeModule<MomoPushActionReplies>(PUSH_ACTION_NATIVE_MODULE)
+      ?.handlesReplyActions === true
+  );
+}
+
+/** 보관 목록. 이 모듈이 없는 빌드(시험, 옛 바이너리)에서는 null. */
+export function nativeQueuedReplyStore(): QueuedReplyStore | null {
+  const module = requireOptionalNativeModule<MomoPushActionReplies>(PUSH_ACTION_NATIVE_MODULE);
+  if (
+    !module ||
+    typeof module.queuedReplies !== 'function' ||
+    typeof module.removeQueuedReply !== 'function' ||
+    typeof module.clearQueuedReplies !== 'function'
+  ) {
+    return null;
+  }
+  const {queuedReplies, removeQueuedReply, clearQueuedReplies} = module;
+  return {
+    list: () => queuedReplies.call(module) ?? null,
+    remove: id => removeQueuedReply.call(module, id),
+    clear: () => clearQueuedReplies.call(module),
+  };
+}

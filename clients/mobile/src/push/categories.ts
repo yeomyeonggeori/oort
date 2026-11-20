@@ -93,9 +93,24 @@ export const PUSH_CATEGORY_ACTIONS: ReadonlyArray<
  * there is no retroactive fix for one already in the shade.
  */
 export async function registerPushCategories(): Promise<void> {
-  await Promise.all(
-    PUSH_CATEGORY_ACTIONS.map(([identifier, actions]) =>
-      Notifications.setNotificationCategoryAsync(identifier, [...actions]),
-    ),
-  );
+  // One at a time, never in parallel (#6036). expo's `CategoryManager` is an actor whose
+  // `setCategory` reads the current set, suspends, then writes "that set + mine": calls in
+  // flight together all read the same (empty) set and each writes only its own, so the
+  // LAST one wins. Measured on the simulator: after `Promise.all` over these rows the
+  // system held `momo.system` alone — no 답장 and no 승인/거절 button on any notification.
+  //
+  // One that fails does not stop the rest (a missing category costs only its own
+  // buttons), and the failure is not swallowed: the promise rejects naming every category
+  // that did not register, so the caller can say so and try again.
+  const failed: string[] = [];
+  for (const [identifier, actions] of PUSH_CATEGORY_ACTIONS) {
+    try {
+      await Notifications.setNotificationCategoryAsync(identifier, [...actions]);
+    } catch {
+      failed.push(identifier);
+    }
+  }
+  if (failed.length > 0) {
+    throw new Error(`notification categories not registered: ${failed.join(', ')}`);
+  }
 }
