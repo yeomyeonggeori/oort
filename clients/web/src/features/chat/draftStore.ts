@@ -113,6 +113,30 @@ export function useDraftsEpoch(): number {
   );
 }
 
+// 지금 열어 둔 대화 (#6030). 입력창은 글자마다 초안을 저장하지만(글을 잃지 않게), 사이드바 「초안」 줄은 그 대화를 떠날 때
+// 세운다: 첫 글자에 줄이 서면 그 아래 목록 전체가 한 줄만큼 내려간다. 열린 입력창이 여기 자기 대화를 걸고, 내려가거나 다른
+// 대화로 옮길 때 푼다. 사이드바는 주소(`/c/:id`)를 먼저 보고, 이 값은 주소에 채널이 없는 첫 화면(`/`)을 위한 것이다 —
+// 첫 화면도 첫 채널의 입력창을 연다(`useDraftsPanel`).
+let openDraftChannel: { workspaceId: string; channelId: string } | null = null;
+
+/** 이 입력창이 이 대화를 열어 두었다. 돌려준 함수로 푼다(그사이 다른 입력창이 걸었으면 건드리지 않는다). */
+export function holdOpenDraftChannel(workspaceId: string, channelId: string): () => void {
+  const held = { workspaceId: workspaceId.toLowerCase(), channelId: channelId.toLowerCase() };
+  openDraftChannel = held;
+  emitDraftsChanged();
+  return () => {
+    if (openDraftChannel !== held) return;
+    openDraftChannel = null;
+    emitDraftsChanged();
+  };
+}
+
+/** 이 워크스페이스에서 지금 입력창이 열어 둔 대화(소문자). 없으면 `null`. */
+export function openDraftChannelId(workspaceId: string): string | null {
+  if (openDraftChannel === null || openDraftChannel.workspaceId !== workspaceId.toLowerCase()) return null;
+  return openDraftChannel.channelId;
+}
+
 /**
  * 초안 하나의 열쇠. 워크스페이스까지 넣는 이유는 채널 id 가 워크스페이스마다
  * 새로 발급되기 때문이 아니라, **같은 기기에서 두 워크스페이스를 오가는 사람**의

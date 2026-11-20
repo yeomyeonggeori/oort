@@ -691,7 +691,7 @@ describe('홈 — DM 줄의 상태 점 (#3964)', () => {
     expect([lightPalette.danger, darkPalette.danger]).toContain(bg(dnd));
   });
 
-  it('사람: 접속 중은 채운 초록 점, 접속 없음은 속이 빈 회색 고리 — 에이전트의 두 끝과 같은 모양 (#4692)', async () => {
+  it('사람: 접속 중은 채운 초록 점, 접속 없음은 회색으로 채운 원 (#4692, #6023)', async () => {
     const HUMAN2 = 'dddddddd-1111-4111-8111-dddddddddddd';
     await mountHome({
       roster: [
@@ -714,9 +714,9 @@ describe('홈 — DM 줄의 상태 점 (#3964)', () => {
       expect(node).toBeTruthy();
       return node!;
     });
-    // 속이 빈 고리: 바탕(줄의 바닥) 채움 + 선 색(textMuted, 웹 --ink-muted 와 같은 역할) 둘레. 채운 초록과 한 점이 되지 않는다.
-    expect([lightPalette.bg, darkPalette.bg]).toContain(bg(off));
-    expect([lightPalette.textMuted, darkPalette.textMuted]).toContain(border(off));
+    // 회색으로 채운 원(#6023): 채움 = textMuted(웹 --ink-muted 와 같은 역할), 고리 없음. 채운 초록과 색으로 갈린다.
+    expect([lightPalette.textMuted, darkPalette.textMuted]).toContain(bg(off));
+    expect(flat(off.props.style).borderWidth).toBe(0);
     expect(bg(on)).not.toBe(bg(off));
     // 낱말은 낭독 라벨이 잇는다(점은 보조기술에서 숨는다).
     expect(screen.getByTestId('sidebar-row-dm:ch-dm-human').props.accessibilityLabel).toMatch(

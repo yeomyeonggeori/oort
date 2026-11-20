@@ -11,14 +11,13 @@
 // `connection.card.realtimeDownTitle`로 폈다. 문장의 뜻은 그대로다.
 // =============================================================================
 
-import type { MessageArgs, MessageKey } from "../../i18n/generated/messages";
+import type { MessageKey } from "../../i18n/generated/messages";
+import type { PlainMessageKey } from "../../i18n/keys";
 
 export type ConnectionKey = Extract<MessageKey, `connection.${string}`>;
 
 /** 값을 받지 않는 문구의 키만. 모델이 내놓는 키는 모두 이 타입이라 `formatMessage(key)`가 인자 없이 불린다. */
-export type ConnectionPlainKey = {
-  [K in ConnectionKey]: MessageArgs[K] extends Record<string, never> ? K : never;
-}[ConnectionKey];
+export type ConnectionPlainKey = Extract<PlainMessageKey, ConnectionKey>;
 
 export const CONNECTION_KEYS = {
   // 지속 표시(웹 연결 카드·폰 띠)

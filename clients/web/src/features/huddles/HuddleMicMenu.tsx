@@ -14,22 +14,16 @@ import {
 import { Tooltip } from "@/design/ui/tooltip";
 import { clampGainPercent } from "./micGain";
 import { useAudioInputDevices } from "./useAudioInputDevices";
+import { HUDDLE_MIC_KEYS } from "./micKeys";
+import { useFormatMessage } from "@/i18n/useFormatMessage";
+import type { PlainMessageKey } from "@momo/core/i18n";
 
-export const HUDDLE_MIC_PICKER_LABEL = "마이크 선택";
-export const HUDDLE_MIC_MENU_LABEL = "마이크";
-export const HUDDLE_MIC_DEFAULT_LABEL = "시스템 기본";
-export const HUDDLE_MIC_GAIN_LABEL = "입력 음량";
-export const HUDDLE_MIC_PERMISSION_PROMPT =
-  "마이크 사용을 허용하면 장치를 고를 수 있습니다.";
-export const HUDDLE_MIC_PERMISSION_DENIED =
-  "마이크 권한이 없어 장치를 고를 수 없습니다. 브라우저 설정에서 허용하세요.";
-export const HUDDLE_MIC_EMPTY = "연결된 마이크가 없습니다.";
 
 const DEFAULT_DEVICE_VALUE = "__momo_default__";
 
-function permissionCopy(permission: "prompt" | "granted" | "denied"): string {
-  if (permission === "denied") return HUDDLE_MIC_PERMISSION_DENIED;
-  return HUDDLE_MIC_PERMISSION_PROMPT;
+function permissionKey(permission: "prompt" | "granted" | "denied"): PlainMessageKey {
+  if (permission === "denied") return HUDDLE_MIC_KEYS.permissionDenied;
+  return HUDDLE_MIC_KEYS.permissionPrompt;
 }
 
 export function HuddleMicMenu({
@@ -50,6 +44,8 @@ export function HuddleMicMenu({
   onGainChange: (gainPercent: number) => void;
 }) {
   const { devices, permission } = useAudioInputDevices();
+  const formatMessage = useFormatMessage();
+  const pickerLabel = formatMessage(HUDDLE_MIC_KEYS.picker);
   const menuLabelId = useId();
   const gainId = useId();
   const selectedInList = devices.some(
@@ -70,7 +66,7 @@ export function HuddleMicMenu({
   const trigger = split ? (
     <button
       type="button"
-      aria-label={HUDDLE_MIC_PICKER_LABEL}
+      aria-label={pickerLabel}
       aria-busy={busy || undefined}
       disabled={locked}
       data-testid="huddle-mic-devices"
@@ -87,7 +83,7 @@ export function HuddleMicMenu({
       type="button"
       variant="outline"
       size="icon"
-      aria-label={HUDDLE_MIC_PICKER_LABEL}
+      aria-label={pickerLabel}
       aria-busy={busy || undefined}
       disabled={locked}
       data-testid="huddle-mic-devices"
@@ -103,7 +99,7 @@ export function HuddleMicMenu({
 
   // 툴팁은 트리거 바깥, 방향은 아래다(#4591). 네이티브 `title`은 두지 않는다: 같은 말이 두 번 뜬다.
   const tipped = (
-    <Tooltip label={HUDDLE_MIC_PICKER_LABEL} side="bottom">
+    <Tooltip label={pickerLabel} side="bottom">
       <DropdownMenuTrigger asChild>{trigger}</DropdownMenuTrigger>
     </Tooltip>
   );
@@ -117,14 +113,14 @@ export function HuddleMicMenu({
         className="max-w-menu-available"
       >
         <DropdownMenuLabel id={menuLabelId}>
-          {HUDDLE_MIC_MENU_LABEL}
+          {formatMessage(HUDDLE_MIC_KEYS.menu)}
         </DropdownMenuLabel>
         {!showList && (
           <p
             className="px-2 py-2 text-meta text-ink-muted"
             data-testid="huddle-mic-permission"
           >
-            {permissionCopy(permission)}
+            {formatMessage(permissionKey(permission))}
           </p>
         )}
         {listEmpty && (
@@ -132,7 +128,7 @@ export function HuddleMicMenu({
             className="px-2 py-2 text-meta text-ink-muted"
             data-testid="huddle-mic-empty"
           >
-            {HUDDLE_MIC_EMPTY}
+            {formatMessage(HUDDLE_MIC_KEYS.empty)}
           </p>
         )}
         {showList && !listEmpty && (
@@ -152,7 +148,7 @@ export function HuddleMicMenu({
               }}
             >
               <span className="min-w-0 flex-1 truncate">
-                {HUDDLE_MIC_DEFAULT_LABEL}
+                {formatMessage(HUDDLE_MIC_KEYS.systemDefault)}
               </span>
               {current === "" && (
                 <Check
@@ -161,8 +157,11 @@ export function HuddleMicMenu({
                 />
               )}
             </DropdownMenuRadioItem>
-            {devices.map((device) => {
+            {devices.map((device, index) => {
               const isCurrent = device.deviceId === current;
+              // 이름을 주지 않는 장치는 목록 차례로 부른다(브라우저가 이름을 비운 채 넘기는 장치).
+              const deviceName =
+                device.label || formatMessage("huddles.mic.unnamed", { number: index + 1 });
               return (
                 <DropdownMenuRadioItem
                   key={device.deviceId}
@@ -175,7 +174,7 @@ export function HuddleMicMenu({
                     onSelectDevice(device.deviceId);
                   }}
                 >
-                  <span className="min-w-0 flex-1 truncate">{device.label}</span>
+                  <span className="min-w-0 flex-1 truncate">{deviceName}</span>
                   {isCurrent && (
                     <Check
                       className="size-4 shrink-0 text-ink-muted"
@@ -205,7 +204,7 @@ export function HuddleMicMenu({
               }}
             >
               <label htmlFor={gainId} className="text-meta text-ink-muted">
-                {HUDDLE_MIC_GAIN_LABEL}
+                {formatMessage(HUDDLE_MIC_KEYS.gain)}
               </label>
               <span className="flex w-full min-w-0 items-center gap-2">
                 <input

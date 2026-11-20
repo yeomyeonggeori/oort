@@ -1,6 +1,5 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { uuidEq, type ReadState } from "@momo/core/lib/api";
-import { markUnreadFailureMessage } from "@momo/core/features/readState/copy";
 import { advertiseReadState } from "@/features/chat/advertiseReadState";
 import { noteVisitMarkRolledBack } from "@/features/chat/openedReadState";
 import { applyReadStateToCache } from "@/features/workspace/useWorkspace";
@@ -14,7 +13,8 @@ export interface MarkUnreadInput {
 /**
  * 「여기부터 안 읽음」. Optimistic local mark, then PUT with
  * `mark_unread_before_seq` and no `read_intent` (background). A 400/403
- * rolls the cache back; the caller puts the Korean sentence on the row
+ * rolls the cache back and rethrows the failure unchanged; the caller puts
+ * `markUnreadFailureKey(error)` (formatted in the current language) on the row
  * banner.
  */
 export function useMarkUnread(workspaceId: string): {
@@ -57,7 +57,8 @@ export function useMarkUnread(workspaceId: string): {
             );
           });
         }
-        throw new Error(markUnreadFailureMessage(error));
+        // 실패를 그대로 넘긴다: 문장은 화면이 그릴 때 `markUnreadFailureKey(error)`로 지금 언어로 푼다(#6020).
+        throw error;
       }
     },
   };

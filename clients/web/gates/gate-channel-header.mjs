@@ -102,6 +102,19 @@ const AGENT_HEADING_PREFIXES = Object.fromEntries(
   })
 );
 
+/** 허들 시작 단추의 낭독 이름(#6020부터 사전 `huddles.control.start`). 화면 언어의 사전 값과 견준다. */
+const HUDDLE_START_LABELS = Object.fromEntries(
+  ["ko-KR", "en-US"].map((locale) => [
+    locale,
+    JSON.parse(
+      readFileSync(
+        resolve(webRoot, `../../packages/momo-core/src/i18n/catalogs/${locale}/huddles.json`),
+        "utf8"
+      )
+    )["huddles.control.start"],
+  ])
+);
+
 const proveRedCount = process.env.HEADER_GATE_PROVE_RED_COUNT === "1";
 const proveRedRename = process.env.HEADER_GATE_PROVE_RED_RENAME === "1";
 const proveRedMute = process.env.HEADER_GATE_PROVE_RED_MUTE === "1";
@@ -430,8 +443,10 @@ async function exercise(browser) {
     );
   }
   const huddleStart = page.getByTestId("huddle-start");
-  if ((await huddleStart.getAttribute("aria-label")) !== "허들 시작") {
-    throw new Error("the idle huddle control must keep an aria-label for 허들 시작");
+  const pageLang = await page.evaluate(() => document.documentElement.lang);
+  const startLabel = HUDDLE_START_LABELS[pageLang.startsWith("ko") ? "ko-KR" : "en-US"];
+  if ((await huddleStart.getAttribute("aria-label")) !== startLabel) {
+    throw new Error(`the idle huddle control must keep an aria-label for ${startLabel}`);
   }
 
   await openMenu(page);

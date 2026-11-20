@@ -276,9 +276,22 @@ export const messageKeys = [
   "channels.rename.preview",
   "channels.rename.submit",
   "channels.rename.title",
+  "common.action.cancel",
+  "common.action.checkAgain",
+  "common.action.close",
+  "common.action.reload",
+  "common.action.retry",
+  "common.action.save",
   "common.feedback.unavailable",
   "common.invitation.received",
   "common.members.count",
+  "common.state.checking",
+  "common.state.connected",
+  "common.state.creating",
+  "common.state.loading",
+  "common.state.notConnected",
+  "common.state.saving",
+  "common.state.sending",
   "connect.language.close",
   "connect.language.hint",
   "connect.rememberEmail.hint",
@@ -763,6 +776,38 @@ export const messageKeys = [
   "expressions.suggest.replaced",
   "expressions.suggest.settingHint",
   "expressions.suggest.settingLabel",
+  "huddles.control.busy",
+  "huddles.control.checking",
+  "huddles.control.join",
+  "huddles.control.leave",
+  "huddles.control.live",
+  "huddles.control.loadFailed",
+  "huddles.control.microphoneOff",
+  "huddles.control.microphoneOn",
+  "huddles.control.start",
+  "huddles.error.connection",
+  "huddles.error.cspBlocked",
+  "huddles.error.expired",
+  "huddles.error.membership",
+  "huddles.error.microphoneDenied",
+  "huddles.error.microphoneMissing",
+  "huddles.error.unconfigured",
+  "huddles.error.unknown",
+  "huddles.mic.empty",
+  "huddles.mic.gain",
+  "huddles.mic.menu",
+  "huddles.mic.permissionDenied",
+  "huddles.mic.permissionPrompt",
+  "huddles.mic.picker",
+  "huddles.mic.systemDefault",
+  "huddles.mic.unnamed",
+  "huddles.notice.endedAudioClosed",
+  "huddles.notice.endedJoinCancelled",
+  "huddles.notice.leaveUnconfirmed",
+  "huddles.participants.many",
+  "huddles.participants.one",
+  "huddles.participants.two",
+  "huddles.participants.waiting",
   "inbox.approval.open",
   "inbox.source.channelUnknown",
   "inbox.source.dm",
@@ -894,6 +939,11 @@ export const messageKeys = [
   "mobile.workPermission.rechecking",
   "mobile.workPermission.recheckMissed",
   "notifications.inviteLink.fallback",
+  "readState.markUnread.action",
+  "readState.markUnread.done",
+  "readState.markUnread.failed",
+  "readState.markUnread.messageGone",
+  "readState.markUnread.notMember",
   "recovery.claim.hostBody",
   "recovery.claim.hostConfirm",
   "recovery.claim.hostReject",
@@ -2135,6 +2185,12 @@ export const argumentSpecs = {
   },
   "channels.rename.submit": {},
   "channels.rename.title": {},
+  "common.action.cancel": {},
+  "common.action.checkAgain": {},
+  "common.action.close": {},
+  "common.action.reload": {},
+  "common.action.retry": {},
+  "common.action.save": {},
   "common.feedback.unavailable": {},
   "common.invitation.received": {
     "actorName": "string"
@@ -2142,6 +2198,13 @@ export const argumentSpecs = {
   "common.members.count": {
     "count": "number"
   },
+  "common.state.checking": {},
+  "common.state.connected": {},
+  "common.state.creating": {},
+  "common.state.loading": {},
+  "common.state.notConnected": {},
+  "common.state.saving": {},
+  "common.state.sending": {},
   "connect.language.close": {},
   "connect.language.hint": {},
   "connect.rememberEmail.hint": {},
@@ -2775,6 +2838,49 @@ export const argumentSpecs = {
   },
   "expressions.suggest.settingHint": {},
   "expressions.suggest.settingLabel": {},
+  "huddles.control.busy": {},
+  "huddles.control.checking": {},
+  "huddles.control.join": {},
+  "huddles.control.leave": {},
+  "huddles.control.live": {},
+  "huddles.control.loadFailed": {},
+  "huddles.control.microphoneOff": {},
+  "huddles.control.microphoneOn": {},
+  "huddles.control.start": {},
+  "huddles.error.connection": {},
+  "huddles.error.cspBlocked": {},
+  "huddles.error.expired": {},
+  "huddles.error.membership": {},
+  "huddles.error.microphoneDenied": {},
+  "huddles.error.microphoneMissing": {},
+  "huddles.error.unconfigured": {},
+  "huddles.error.unknown": {},
+  "huddles.mic.empty": {},
+  "huddles.mic.gain": {},
+  "huddles.mic.menu": {},
+  "huddles.mic.permissionDenied": {},
+  "huddles.mic.permissionPrompt": {},
+  "huddles.mic.picker": {},
+  "huddles.mic.systemDefault": {},
+  "huddles.mic.unnamed": {
+    "number": "number"
+  },
+  "huddles.notice.endedAudioClosed": {},
+  "huddles.notice.endedJoinCancelled": {},
+  "huddles.notice.leaveUnconfirmed": {},
+  "huddles.participants.many": {
+    "first": "string",
+    "others": "number",
+    "second": "string"
+  },
+  "huddles.participants.one": {
+    "first": "string"
+  },
+  "huddles.participants.two": {
+    "first": "string",
+    "second": "string"
+  },
+  "huddles.participants.waiting": {},
   "inbox.approval.open": {},
   "inbox.source.channelUnknown": {},
   "inbox.source.dm": {
@@ -2950,6 +3056,11 @@ export const argumentSpecs = {
   "mobile.workPermission.rechecking": {},
   "mobile.workPermission.recheckMissed": {},
   "notifications.inviteLink.fallback": {},
+  "readState.markUnread.action": {},
+  "readState.markUnread.done": {},
+  "readState.markUnread.failed": {},
+  "readState.markUnread.messageGone": {},
+  "readState.markUnread.notMember": {},
   "recovery.claim.hostBody": {},
   "recovery.claim.hostConfirm": {},
   "recovery.claim.hostReject": {},
@@ -4433,9 +4544,22 @@ export interface MessageArgs {
   "channels.rename.preview": { name: string };
   "channels.rename.submit": Record<string, never>;
   "channels.rename.title": Record<string, never>;
+  "common.action.cancel": Record<string, never>;
+  "common.action.checkAgain": Record<string, never>;
+  "common.action.close": Record<string, never>;
+  "common.action.reload": Record<string, never>;
+  "common.action.retry": Record<string, never>;
+  "common.action.save": Record<string, never>;
   "common.feedback.unavailable": Record<string, never>;
   "common.invitation.received": { actorName: string };
   "common.members.count": { count: number };
+  "common.state.checking": Record<string, never>;
+  "common.state.connected": Record<string, never>;
+  "common.state.creating": Record<string, never>;
+  "common.state.loading": Record<string, never>;
+  "common.state.notConnected": Record<string, never>;
+  "common.state.saving": Record<string, never>;
+  "common.state.sending": Record<string, never>;
   "connect.language.close": Record<string, never>;
   "connect.language.hint": Record<string, never>;
   "connect.rememberEmail.hint": Record<string, never>;
@@ -4920,6 +5044,38 @@ export interface MessageArgs {
   "expressions.suggest.replaced": { name: string };
   "expressions.suggest.settingHint": Record<string, never>;
   "expressions.suggest.settingLabel": Record<string, never>;
+  "huddles.control.busy": Record<string, never>;
+  "huddles.control.checking": Record<string, never>;
+  "huddles.control.join": Record<string, never>;
+  "huddles.control.leave": Record<string, never>;
+  "huddles.control.live": Record<string, never>;
+  "huddles.control.loadFailed": Record<string, never>;
+  "huddles.control.microphoneOff": Record<string, never>;
+  "huddles.control.microphoneOn": Record<string, never>;
+  "huddles.control.start": Record<string, never>;
+  "huddles.error.connection": Record<string, never>;
+  "huddles.error.cspBlocked": Record<string, never>;
+  "huddles.error.expired": Record<string, never>;
+  "huddles.error.membership": Record<string, never>;
+  "huddles.error.microphoneDenied": Record<string, never>;
+  "huddles.error.microphoneMissing": Record<string, never>;
+  "huddles.error.unconfigured": Record<string, never>;
+  "huddles.error.unknown": Record<string, never>;
+  "huddles.mic.empty": Record<string, never>;
+  "huddles.mic.gain": Record<string, never>;
+  "huddles.mic.menu": Record<string, never>;
+  "huddles.mic.permissionDenied": Record<string, never>;
+  "huddles.mic.permissionPrompt": Record<string, never>;
+  "huddles.mic.picker": Record<string, never>;
+  "huddles.mic.systemDefault": Record<string, never>;
+  "huddles.mic.unnamed": { number: number };
+  "huddles.notice.endedAudioClosed": Record<string, never>;
+  "huddles.notice.endedJoinCancelled": Record<string, never>;
+  "huddles.notice.leaveUnconfirmed": Record<string, never>;
+  "huddles.participants.many": { first: string; others: number; second: string };
+  "huddles.participants.one": { first: string };
+  "huddles.participants.two": { first: string; second: string };
+  "huddles.participants.waiting": Record<string, never>;
   "inbox.approval.open": Record<string, never>;
   "inbox.source.channelUnknown": Record<string, never>;
   "inbox.source.dm": { name: string };
@@ -5051,6 +5207,11 @@ export interface MessageArgs {
   "mobile.workPermission.rechecking": Record<string, never>;
   "mobile.workPermission.recheckMissed": Record<string, never>;
   "notifications.inviteLink.fallback": Record<string, never>;
+  "readState.markUnread.action": Record<string, never>;
+  "readState.markUnread.done": Record<string, never>;
+  "readState.markUnread.failed": Record<string, never>;
+  "readState.markUnread.messageGone": Record<string, never>;
+  "readState.markUnread.notMember": Record<string, never>;
   "recovery.claim.hostBody": Record<string, never>;
   "recovery.claim.hostConfirm": Record<string, never>;
   "recovery.claim.hostReject": Record<string, never>;

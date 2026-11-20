@@ -7,14 +7,20 @@ import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { ApiError, type Message, type ReadState, type RosterMember } from "@momo/core/lib/api";
 import { markAt3Cursor10 } from "@momo/core/features/readState/proof";
 import {
-  MARK_UNREAD_ACTION_LABEL,
-  markUnreadFailureMessage,
+  MARK_UNREAD_ACTION_KEY,
+  markUnreadFailureKey,
 } from "@momo/core/features/readState/copy";
+import { catalog as koCatalog } from "@momo/core/i18n/generated/ko-KR";
+import { createMessageCopy } from "@momo/core/testkit";
 import { makeDirectory } from "@momo/core/features/workspace/directory";
 import { SessionProvider, type SessionContextValue } from "@/app/session";
+import { LocaleProvider } from "@/i18n/LocaleProvider";
+import type { AppLocale } from "@/i18n/localeStore";
+import { koreanLocale } from "@/testing/koLocale";
 import { useMarkUnread } from "./useMarkUnread";
 import { MessageRow } from "./MessageRow";
 
+const ko = createMessageCopy({ messageLocale: "ko-KR", catalog: koCatalog });
 const WS = "00000000-0000-7000-8000-000000000001";
 const ME = "00000000-0000-7000-8000-000000000101";
 const CH = markAt3Cursor10().channelId;
@@ -57,7 +63,11 @@ const reactActEnvironment = globalThis as typeof globalThis & {
 let mountedRoot: Root | null = null;
 let host: HTMLElement | null = null;
 
-beforeAll(() => {
+// 행이 그리는 배너 글은 예전처럼 한국어로 잡는다(#6020): 제품과 같은 한국어 사전으로 감싼다.
+let koLocale: AppLocale;
+
+beforeAll(async () => {
+  koLocale = await koreanLocale();
   reactActEnvironment.IS_REACT_ACT_ENVIRONMENT = true;
   Object.defineProperty(HTMLElement.prototype, "offsetParent", {
     configurable: true,
@@ -123,11 +133,12 @@ function Inner({
           })
           .then(() => onDone(null))
           .catch((error: unknown) => {
-            onDone(error instanceof Error ? error.message : String(error));
+            // 화면(MessageRow)이 하는 그대로: 넘어온 실패를 키로 바꿔 지금 언어로 푼다.
+            onDone(ko(markUnreadFailureKey(error)));
           });
       },
     },
-    MARK_UNREAD_ACTION_LABEL
+    ko(MARK_UNREAD_ACTION_KEY)
   );
 }
 
@@ -238,7 +249,7 @@ describe("마크 낙관과 400 롤백", () => {
 
     const cached = client.getQueryData<ReadState[]>(["read-state", WS]);
     expect(cached?.[0]?.markedUnreadBeforeSeq).toBeNull();
-    expect(banner).toBe(markUnreadFailureMessage(new ApiError(400, "x")));
+    expect(banner).toBe(ko("readState.markUnread.messageGone"));
     expect(banner).not.toContain("mark_unread_before_seq");
     expect(advertiseReadState).toHaveBeenCalledWith(WS, CH, 10, "mark_unread", {
       markUnreadBeforeSeq: 3,
@@ -286,7 +297,9 @@ describe("마크 낙관과 400 롤백", () => {
     }
 
     act(() => {
-      mountedRoot?.render(createElement(RowHarness));
+      mountedRoot?.render(
+        createElement(LocaleProvider, { locale: koLocale, children: createElement(RowHarness) })
+      );
     });
 
     const row = host.querySelector<HTMLElement>('[data-testid="timeline-message"]');

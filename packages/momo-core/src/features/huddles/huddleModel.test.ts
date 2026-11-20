@@ -7,9 +7,12 @@ import {
 } from "../../lib/api";
 import { WireShapeError } from "../../lib/wire";
 import { asHuddleLifecycleFrame } from "../../lib/realtimeEvents";
+import { catalog as koCatalog } from "../../i18n/generated/ko-KR";
+import { catalog as enCatalog } from "../../i18n/generated/en-US";
+import { createMessageCopy } from "../../testkit";
 import {
+  HUDDLE_ERROR_KEYS,
   huddleControlShown,
-  huddleErrorCopy,
   huddleErrorKind,
   huddleNamesTarget,
   huddleParticipantSummary,
@@ -18,7 +21,17 @@ import {
   reduceHuddleProjection,
   type HuddleHeaderFacts,
   type HuddleLoadStatus,
+  type HuddleErrorKind,
 } from "./huddleModel";
+
+// 문장은 사전에 있다(#6020): 시험은 제품과 같은 생성물로 키를 풀어 그 문장을 단정한다.
+const ko = createMessageCopy({ messageLocale: "ko-KR", catalog: koCatalog });
+const en = createMessageCopy({ messageLocale: "en-US", catalog: enCatalog });
+const huddleErrorCopy = (kind: HuddleErrorKind) => ko(HUDDLE_ERROR_KEYS[kind]);
+const summaryIn = (copy: typeof ko, huddle: Huddle) => {
+  const ref = huddleParticipantSummary(huddle);
+  return copy(ref.key, ref.values as never);
+};
 
 const ACTIVE: Huddle = {
   id: "00000000-0000-7000-8000-000000000643",
@@ -220,9 +233,9 @@ describe("huddle user states", () => {
   });
 
   it("keeps a dense participant summary while preserving mixed team names", () => {
-    expect(huddleParticipantSummary(ACTIVE)).toBe("구민수, Nadia Rahman");
+    expect(summaryIn(ko, ACTIVE)).toBe("구민수, Nadia Rahman");
     expect(
-      huddleParticipantSummary({
+      summaryIn(ko, {
         ...ACTIVE,
         participants: [
           ...ACTIVE.participants,
@@ -234,6 +247,16 @@ describe("huddle user states", () => {
         ],
       })
     ).toBe("구민수, Nadia Rahman 외 1명");
+    // 영어는 같은 틀의 다른 문장이다: 「외 N명」을 이어 붙이던 조립이었다면 영어 화면에 한글이 섰다.
+    const four = {
+      ...ACTIVE,
+      participants: ["third", "fourth"].reduce(
+        (all, id) => [...all, { memberId: id, displayName: id, joinedAtMs: 1_722_000_003_000 }],
+        [...ACTIVE.participants]
+      ),
+    };
+    expect(summaryIn(en, four)).toBe("구민수, Nadia Rahman and 2 others");
+    expect(summaryIn(en, { ...ACTIVE, participants: [] })).toBe("Waiting for participants");
   });
 });
 

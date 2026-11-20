@@ -139,9 +139,10 @@ import { UnfurlCards } from "./UnfurlCards";
 import { useSession } from "@/app/session";
 import { reminderFailureMessage } from "@momo/core/features/reminders/model";
 import {
-  MARK_UNREAD_SUCCESS_ANNOUNCEMENT,
-  markUnreadFailureMessage,
+  MARK_UNREAD_SUCCESS_KEY,
+  markUnreadFailureKey,
 } from "@momo/core/features/readState/copy";
+import { useFormatMessage } from "@/i18n/useFormatMessage";
 import { RemindDialog } from "@/features/reminders/RemindDialog";
 import { useReminderMutations } from "@/features/reminders/useReminders";
 import { useMarkUnread } from "./useMarkUnread";
@@ -463,6 +464,7 @@ export function MessageRow({
   const { workspaceId, session } = useSession();
   const reminderMutations = useReminderMutations(workspaceId);
   const markUnread = useMarkUnread(workspaceId);
+  const formatMessage = useFormatMessage();
   const [actionMenuOpen, setActionMenuOpen] = useState(false);
   const [contextMenuOpen, setContextMenuOpen] = useState(false);
   const [rowHovered, setRowHovered] = useState(false);
@@ -717,15 +719,13 @@ export function MessageRow({
           seq: message.seq,
         })
         .then(() => {
-          setRowAnnouncement(MARK_UNREAD_SUCCESS_ANNOUNCEMENT);
-          timelineLive.announce(MARK_UNREAD_SUCCESS_ANNOUNCEMENT);
+          const done = formatMessage(MARK_UNREAD_SUCCESS_KEY);
+          setRowAnnouncement(done);
+          timelineLive.announce(done);
         })
         .catch((error: unknown) =>
-          setRowError(
-            error instanceof Error
-              ? error.message
-              : markUnreadFailureMessage(error)
-          )
+          // 행 오류 칸은 다른 실패(고정 · 알림)의 문장과 함께 쓰므로 지금은 푼 문장을 담는다(#6020 README 「상태」).
+          setRowError(formatMessage(markUnreadFailureKey(error)))
         );
     },
     onEdit: () => {
