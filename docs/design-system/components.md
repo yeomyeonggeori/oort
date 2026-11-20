@@ -101,6 +101,14 @@
 
 `design/` 밖에 임시로 둔 공용(`shell/sheetForm.tsx`의 `Field` · `TextArea` · `FieldLabel` · `SheetNotice`)은 phone-sheets §7 표가 정식 자리를 적는다. 폰 `Avatar`는 `features/conversation/Avatar.tsx`에 있고 `design/`이 아니다.
 
+## 폰 상태 값
+
+눌림 · 잠김의 흐림은 화면마다 숫자로 적지 않고 `clients/mobile/src/design/tokens.ts`의 이름으로 쓴다. 이름을 둔 것은 값이 같던 자리를 옮긴 것이고, 다른 흐림 값(눌림 0.85 · 0.8 · 0.86 · 0.7 · 0.5, 잠김 0.6 · 0.5 · 0.4 · 0.7)은 아직 화면마다 따로다 — 한 값으로 맞추면 화면이 바뀌므로 부품 칸에서 한다.
+
+| 상태 | 이름 | 값 | 남은 숫자 | 지키는 시험 |
+|---|---|---|---|---|
+| 눌림 흐림 · 잠김 흐림 | `PRESSED_OPACITY` · `DISABLED_OPACITY` | 0.6 · 0.55 (`sheetParts`의 `rowDisabled`와 같은 값) | 폴더별 천장 — `designSystemResidue.test.ts`의 `OPACITY_CEILING` | 폰 `designSystemResidue.test.ts`(이름의 값 · `rowDisabled` 묶음 · 흐림 숫자 천장) |
+
 ## 다시 세는 법
 
 수는 바뀐다. 아래로 다시 센다(주석을 벗기지 않은 값이라 조사 보고의 값과 몇 퍼센트 다를 수 있다).
