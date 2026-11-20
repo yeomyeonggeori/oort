@@ -225,6 +225,20 @@ public final class MomoPushActionHandler: NSObject, NotificationDelegate {
   }
 }
 
+extension MomoPushReplyCapture {
+  /// Whether a 답장 arriving now would be KEPT: the handler is attached, this build names
+  /// the app-only group, and the push_action session item says whose it is. JS steps aside
+  /// from sending a reply only on this (`src/push/native.ts`): when the token was never
+  /// minted (an older server, the per-session cap, the moments after sign-in) nothing is
+  /// kept, and a live JS must send the reply itself as it always did. A boolean, nothing more.
+  static func keepsNow() -> Bool {
+    guard MomoPushActionInstaller.isInstalled, let keychain = MomoPushActionKeychain.live() else {
+      return false
+    }
+    return keychain.readReplyOwner() != nil
+  }
+}
+
 /// Keeps one 답장 and answers it on the lock screen with one line.
 enum MomoPushReplyKeeper {
   static func keep(text: String, request: UNNotificationRequest) {

@@ -304,9 +304,12 @@ describe('처리기가 지키는 규율', () => {
     expect(src.match(/Constant\(/g)).toHaveLength(2);
     expect([...src.matchAll(/Function\("(\w+)"\)/g)].map(match => match[1]).sort()).toEqual([
       'clearQueuedReplies',
+      'keepsRepliesNow',
       'queuedReplies',
       'removeQueuedReply',
     ]);
+    // 「지금 남기는가」는 불리언 하나다.
+    expect(src).toMatch(/Function\("keepsRepliesNow"\) \{ \(\) -> Bool in\s*MomoPushReplyCapture\.keepsNow\(\)\s*\}/);
     expect(src).not.toMatch(/readSession|actionToken|readDeviceSecret|readReplyOwner/);
   });
 });
@@ -505,7 +508,7 @@ describe('잠금 화면 답장의 보관 목록 (#6036) — Swift 가 남기고 
       expect(MODULE_SWIFT).toContain(`Constant("${name}")`);
       expect(native).toContain(name);
     }
-    for (const name of ['queuedReplies', 'removeQueuedReply', 'clearQueuedReplies']) {
+    for (const name of ['keepsRepliesNow', 'queuedReplies', 'removeQueuedReply', 'clearQueuedReplies']) {
       expect(MODULE_SWIFT).toContain(`Function("${name}")`);
       expect(native).toContain(`${name}?(`);
     }

@@ -31,6 +31,12 @@ public class MomoPushActionNativeModule: Module {
       MomoPushActionInstaller.isInstalled && MomoPushActionKeychain.live() != nil
     }
 
+    // Asked per response, not read once: whether a reply arriving now is kept (handler,
+    // app-only group AND a session item that says whose it is). See `keepsNow`.
+    Function("keepsRepliesNow") { () -> Bool in
+      MomoPushReplyCapture.keepsNow()
+    }
+
     // The kept replies, each the JSON `MomoPushQueuedReply`. Nil when the keychain will
     // not answer (locked before the first unlock): "unknown", not "empty".
     Function("queuedReplies") { () -> [String]? in

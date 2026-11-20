@@ -158,7 +158,7 @@ describe('답장을 처리기가 남기는 빌드에서는 JS 가 답장을 보�
     );
 
   it('처리기가 답장을 맡으면 물러난다 — 보내기는 보관 목록 한 길이다', async () => {
-    nativeModules({handlesApprovalActions: true, handlesReplyActions: true});
+    nativeModules({handlesApprovalActions: true, handlesReplyActions: true, keepsRepliesNow: () => true});
 
     const result = await handlePushResponse(reply(), {signedInWorkspaceId: WS});
 
@@ -169,7 +169,10 @@ describe('답장을 처리기가 남기는 빌드에서는 JS 가 답장을 보�
 
   it.each([
     ['옛 모듈이라 상수가 없다', {handlesApprovalActions: true}],
-    ['상수가 불리언이 아니다', {handlesApprovalActions: true, handlesReplyActions: 'yes'}],
+    ['상수가 불리언이 아니다', {handlesApprovalActions: true, handlesReplyActions: 'yes', keepsRepliesNow: () => true}],
+    // 처리기는 붙었지만 자격이 아직 없다(옛 서버 · 세션당 상한 · 로그인 직후): 처리기가 남기지 않으므로 JS 가 보낸다.
+    ['처리기는 있으나 지금은 남기지 않는다(세션 항목 없음)', {handlesApprovalActions: true, handlesReplyActions: true, keepsRepliesNow: () => false}],
+    ['묻는 함수가 없다', {handlesApprovalActions: true, handlesReplyActions: true}],
   ])('%s: 예전처럼 JS 가 보낸다 (대조군)', async (_name, module) => {
     nativeModules(module);
 

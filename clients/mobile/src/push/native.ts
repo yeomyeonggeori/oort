@@ -115,6 +115,8 @@ export function nativeApprovalHandlerAttached(): boolean {
 interface MomoPushActionReplies {
   /** 처리기가 붙어 있고 이 빌드가 앱 전용 키체인 그룹을 말할 때만 참 (#6036). */
   readonly handlesReplyActions?: boolean;
+  /** 지금 온 답장을 처리기가 **남기는가** — 위 조건 + 누구의 것인지 말해 줄 세션 항목이 있다. */
+  keepsRepliesNow?(): boolean;
   queuedReplies?(): string[] | null;
   removeQueuedReply?(clientMsgId: string): void;
   clearQueuedReplies?(): void;
@@ -129,15 +131,22 @@ export interface QueuedReplyStore {
 }
 
 /**
- * 잠금 화면의 답장을 네이티브 처리기가 **받아 남기고 있는가** (#6036). 참일 때만 `handlePushResponse` 가
+ * 잠금 화면의 답장을 네이티브 처리기가 **지금 받아 남기는가** (#6036). 응답마다 묻는다. 참일 때만 `handlePushResponse` 가
  * 답장 갈래에서 물러난다 — 승인 · 거절과 같은 까닭으로 「iOS 이면」이 아니라 「처리기가 붙어 있으면」이다.
  * 옛 바이너리 위의 새 JS 에서는 거짓이라 예전처럼 JS 가 보낸다.
  */
 export function nativeReplyHandlerAttached(): boolean {
-  return (
-    requireOptionalNativeModule<MomoPushActionReplies>(PUSH_ACTION_NATIVE_MODULE)
-      ?.handlesReplyActions === true
-  );
+  const module = requireOptionalNativeModule<MomoPushActionReplies>(PUSH_ACTION_NATIVE_MODULE);
+  if (module?.handlesReplyActions !== true || typeof module.keepsRepliesNow !== 'function') {
+    return false;
+  }
+  // 상수만으로는 모자란다: 자격(push_action 토큰)이 아직 놓이지 않았으면(옛 서버, 세션당 상한, 로그인
+  // 직후) 처리기는 답장을 남기지 않는다. 그때 JS 까지 물러나면 답장이 아무 데로도 가지 않는다.
+  try {
+    return module.keepsRepliesNow.call(module) === true;
+  } catch {
+    return false;
+  }
 }
 
 /** 보관 목록. 이 모듈이 없는 빌드(시험, 옛 바이너리)에서는 null. */
