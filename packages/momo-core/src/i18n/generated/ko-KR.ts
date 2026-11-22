@@ -6693,6 +6693,30 @@ export const catalog: MessageCatalog = {
       "value": "언어를 적용하는 중이에요."
     }
   ],
+  "mobile.pushReply.drafted": [
+    {
+      "type": 0,
+      "value": "답장을 보내지 못해 초안으로 남겼어요"
+    }
+  ],
+  "mobile.pushReply.notSentBody": [
+    {
+      "type": 0,
+      "value": "앱을 열어 다시 보내 주세요"
+    }
+  ],
+  "mobile.pushReply.notSentTitle": [
+    {
+      "type": 0,
+      "value": "답장을 보내지 못했어요"
+    }
+  ],
+  "mobile.pushReply.queued": [
+    {
+      "type": 0,
+      "value": "답장은 앱을 열면 보내요"
+    }
+  ],
   "mobile.workPermission.elsewhereOnHost": [
     {
       "type": 0,

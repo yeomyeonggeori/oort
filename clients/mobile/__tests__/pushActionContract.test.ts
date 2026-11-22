@@ -204,7 +204,12 @@ describe('처리기가 지키는 규율', () => {
     expect(code(body)).not.toMatch(/\b(?:Task|DispatchQueue|async|await|Thread|OperationQueue)\b/);
     // 승인·거절만 `true`, 나머지는 `false` — 본문 탭이 콜드 런치에서 EmitterModule 로 가는 길을 먹지 않는다.
     expect(body).toMatch(/guard let intent = MomoPushActionIntent\(response: response\) else \{ return false \}/);
-    expect(body.match(/return true/g)).toHaveLength(1);
+    const approval = body.slice(body.indexOf('guard let intent'), body.indexOf('/// Keeps one 답장'));
+    expect(approval.match(/return true/g)).toHaveLength(1);
+    // 답장(#6036)은 그 앞에서 갈라진다. 남기는 일은 반환 **전에**, 같은 호출 안에서 한다 — 살아 있는 EmitterModule 이
+    // 바로 뒤에 같은 응답을 듣고 JS 가 목록을 읽으므로, 그때 항목이 이미 있어야 한다.
+    const reply = body.slice(0, body.indexOf('guard let intent'));
+    expect(reply).toMatch(/MomoPushReplyKeeper\.keep\([^)]*\)\s*\n\s*return true/);
     // 완료는 NotificationCenterManager 가 부른다 — 두 번 부르지 않는다.
     expect(code(HANDLER)).not.toMatch(/completionHandler\s*\(\s*\)/);
     expect(code(JOB)).not.toMatch(/completionHandler/);
@@ -292,9 +297,20 @@ describe('처리기가 지키는 규율', () => {
   });
 
   it('토큰을 JS 로 돌려주는 길이 모듈에 없다', () => {
-    // JS 가 보는 것은 불리언 하나뿐이다.
-    expect(code(MODULE_SWIFT)).not.toMatch(/AsyncFunction|Function\(/);
-    expect(code(MODULE_SWIFT).match(/Constant\(/g)).toHaveLength(1);
+    // JS 가 보는 것은 불리언 둘과(승인 · 거절, 답장) 잠금 화면 답장의 보관 목록뿐이다(#6036). 목록의 함수는 세션
+    // 항목 · 토큰 · 기기 비밀을 읽지 않는다.
+    const src = code(MODULE_SWIFT);
+    expect(src).not.toMatch(/AsyncFunction/);
+    expect(src.match(/Constant\(/g)).toHaveLength(2);
+    expect([...src.matchAll(/Function\("(\w+)"\)/g)].map(match => match[1]).sort()).toEqual([
+      'clearQueuedReplies',
+      'keepsRepliesNow',
+      'queuedReplies',
+      'removeQueuedReply',
+    ]);
+    // 「지금 남기는가」는 불리언 하나다.
+    expect(src).toMatch(/Function\("keepsRepliesNow"\) \{ \(\) -> Bool in\s*MomoPushReplyCapture\.keepsNow\(\)\s*\}/);
+    expect(src).not.toMatch(/readSession|actionToken|readDeviceSecret|readReplyOwner/);
   });
 });
 
@@ -427,5 +443,74 @@ describe('NSE: 본문을 못 채운 승인은 「열어서 결정」으로 낮�
     expect(body.slice(again)).toMatch(
       /MomoPushCategoryDemotion\.categoryIdentifier\(\s*current: updated\.categoryIdentifier, resolved: false\)/,
     );
+  });
+});
+
+describe('잠금 화면 답장의 보관 목록 (#6036) — Swift 가 남기고 JS 가 비운다', () => {
+  const QUEUE = swift('MomoPushReplyQueue.swift');
+  const catalog = (locale: string) =>
+    JSON.parse(
+      read(join(APP_ROOT, `../../packages/momo-core/src/i18n/catalogs/${locale}/mobile.json`)),
+    ) as Record<string, string>;
+
+  /** `korean ? "…" : "…"` 한 줄에서 두 문장을 꺼낸다. */
+  function bilingual(name: string): {ko: string; en: string} {
+    const body = QUEUE.slice(QUEUE.indexOf(`static func ${name}(`));
+    const match = body.match(/korean \? "([^"]+)" : "([^"]+)"/);
+    if (!match) throw new Error(`no bilingual line in ${name}`);
+    return {ko: match[1], en: match[2]};
+  }
+
+  it('잠금 화면 줄은 사전의 문장과 같다(ko · en)', () => {
+    const ko = catalog('ko-KR');
+    const en = catalog('en-US');
+    expect(bilingual('queued')).toEqual({ko: ko['mobile.pushReply.queued'], en: en['mobile.pushReply.queued']});
+    expect(bilingual('notKeptTitle')).toEqual({
+      ko: ko['mobile.pushReply.notSentTitle'],
+      en: en['mobile.pushReply.notSentTitle'],
+    });
+    expect(bilingual('notKeptBody')).toEqual({
+      ko: ko['mobile.pushReply.notSentBody'],
+      en: en['mobile.pushReply.notSentBody'],
+    });
+  });
+
+  it('남긴 항목의 키 이름이 JS 가 읽는 이름과 같다', () => {
+    const struct = QUEUE.slice(
+      QUEUE.indexOf('struct MomoPushQueuedReply'),
+      QUEUE.indexOf('struct MomoPushReplyOwner'),
+    );
+    const swiftKeys = [...code(struct).matchAll(/\blet (\w+):/g)].map(match => match[1]).sort();
+    const ts = read(join(APP_ROOT, 'src/push/queuedReplies.ts'));
+    const iface = ts.slice(ts.indexOf('export interface QueuedReply {'), ts.indexOf('/** 이 판이 읽는 모양'));
+    const tsKeys = [...iface.matchAll(/^\s+(\w+): /gm)].map(match => match[1]).sort();
+    expect(swiftKeys).toEqual(tsKeys);
+  });
+
+  it('답장 버튼 · 범주가 JS 와 같고, 목록은 세션 항목과 다른 서비스에 있다', () => {
+    expect(constant(QUEUE, 'replyAction')).toBe(PUSH_ACTION.quickReply);
+    expect(QUEUE).toContain(`["${PUSH_CATEGORY.message}", "${PUSH_CATEGORY.mention}"]`);
+    const service = constant(QUEUE, 'keychainService');
+    expect(service).not.toBe(PUSH_ACTION_KEYCHAIN_SERVICE);
+    expect(service).not.toBe(constant(CORE, 'deviceSecretService'));
+  });
+
+  it('목록은 앱 전용 그룹 · 첫 잠금 해제 뒤 · 이 기기만 · 동기화 안 함으로 둔다', () => {
+    const store = code(QUEUE.slice(QUEUE.indexOf('struct MomoPushReplySecItemStore')));
+    expect(store).toContain('kSecAttrAccessGroup as String: accessGroup');
+    expect(store).toContain('kSecAttrSynchronizable as String: false');
+    expect(store).toContain('kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly');
+  });
+
+  it('JS 가 물러나는 상수와 목록 함수의 이름이 Swift 와 같다', () => {
+    const native = read(join(APP_ROOT, 'src/push/native.ts'));
+    for (const name of ['handlesReplyActions']) {
+      expect(MODULE_SWIFT).toContain(`Constant("${name}")`);
+      expect(native).toContain(name);
+    }
+    for (const name of ['keepsRepliesNow', 'queuedReplies', 'removeQueuedReply', 'clearQueuedReplies']) {
+      expect(MODULE_SWIFT).toContain(`Function("${name}")`);
+      expect(native).toContain(`${name}?(`);
+    }
   });
 });

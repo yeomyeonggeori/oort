@@ -331,6 +331,36 @@ describe('the app adopts the UIScene life cycle (#6015)', () => {
       `/* ${declaring[0]} in Sources */,`,
     );
   });
+
+  // The scene delegate takes the React Native factory from the app delegate with a
+  // run-time `as?` cast and stops the app with `fatalError` when the cast fails
+  // (expo's ExpoAppSceneDelegate). Dropping the protocol from the class still builds.
+  const appDelegate = readFileSync(
+    join(APP_ROOT, 'ios/MomoMobile/AppDelegate.swift'),
+    'utf8',
+  ).replace(/^\s*\/\/.*$/gm, '');
+
+  it('has the app delegate adopt ExpoReactNativeFactoryProvider', () => {
+    const adopted = appDelegate
+      .match(/^class AppDelegate:([^{]+)\{/m)?.[1]
+      ?.split(',')
+      .map(name => name.trim());
+    expect(adopted).toContain('ExpoReactNativeFactoryProvider');
+  });
+
+  // Without this property the provider's default, "main", starts a surface nothing
+  // registers: index.js registers the app under app.json's name. The app opens on
+  // an empty screen and nothing fails.
+  it('starts React Native under the name index.js registers (app.json name)', () => {
+    const started = appDelegate.match(
+      /var reactNativeFactoryModuleName: String\s*\{\s*(?:return\s+)?"([^"]*)"\s*\}/,
+    )?.[1];
+    const registered = JSON.parse(
+      readFileSync(join(APP_ROOT, 'app.json'), 'utf8'),
+    ).name;
+    expect(registered).toEqual(expect.any(String));
+    expect(started).toBe(registered);
+  });
 });
 
 describe('the Xcode Cloud lane stays reachable (#1115, docs/cicd/10 §8)', () => {

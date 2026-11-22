@@ -16,10 +16,18 @@ import {
 } from 'expo-notifications';
 
 import {useSession} from '../session/useSession';
-import {getAccessToken, subscribeSession} from '../storage/secureSession';
+import {getAccessToken, getPersistedSession, subscribeSession} from '../storage/secureSession';
 import {absoluteApiBase} from '../storage/serverBase';
 import {registerPushCategories} from './categories';
-import {apnsEnvironment, keychainAccessGroup, nativeApprovalHandlerAttached} from './native';
+import {useFormatMessage} from '../i18n/useFormatMessage';
+import {
+  apnsEnvironment,
+  keychainAccessGroup,
+  nativeApprovalHandlerAttached,
+  nativeReplyHandlerAttached,
+} from './native';
+import {PUSH_ACTION} from './contract';
+import {drainQueuedReplies} from './queuedReplies';
 import {
   askPushPermission,
   fetchApnsToken,
@@ -135,6 +143,7 @@ export default function PushProvider({
 
   useEffect(() => {
     let cancelled = false;
+    let categoriesOwed = false;
 
     (async () => {
       // Categories FIRST. iOS matches a payload's `aps.category` against what is
@@ -144,7 +153,10 @@ export default function PushProvider({
       try {
         await registerPushCategories();
       } catch (cause) {
-        console.warn(`${LOG} category registration failed`, cause);
+        // Loud, and owed: a category that did not register is a notification with no
+        // 답장 / 승인 / 거절 button (#6036). The next foreground tries again.
+        categoriesOwed = true;
+        console.error(`${LOG} category registration failed`, cause);
       }
       if (cancelled) return;
       const standing = await readPushGate();
@@ -161,6 +173,13 @@ export default function PushProvider({
     // be registered without signing out and in again.
     const subscription = AppState.addEventListener('change', next => {
       if (next !== 'active') return;
+      if (categoriesOwed) {
+        categoriesOwed = false;
+        registerPushCategories().catch(cause => {
+          categoriesOwed = true;
+          console.error(`${LOG} category registration failed again`, cause);
+        });
+      }
       readPushGate()
         .then(standing => {
           if (cancelled) return;
@@ -412,6 +431,37 @@ export default function PushProvider({
     return () => subscription.remove();
   }, [workspaceId, memberId]);
 
+  // ---- 3b. 잠금 화면 답장의 보관 목록 (#6036) ------------------------------
+  //
+  // iOS 에서 잠금 화면의 [답장]은 네이티브 처리기가 받아 앱 전용 키체인에 남긴다(`queuedReplies.ts` 머리말).
+  // 보내기는 사람의 세션을 가진 여기서 한다: 로그인한 트리가 서자마자, 앱이 앞으로 돌아올 때마다, 그리고 뒤에서
+  // 살아 있는 JS 가 답장 응답을 들었을 때(아래 리스너). 비우기는 한 번에 하나만 돈다.
+  const formatMessage = useFormatMessage();
+  const formatMessageRef = useRef(formatMessage);
+  formatMessageRef.current = formatMessage;
+  const drainReplies = useCallback(() => {
+    const format = formatMessageRef.current;
+    void drainQueuedReplies({
+      workspaceId,
+      memberId,
+      isCurrent: () =>
+        getPersistedSession()?.member.id.toLowerCase() === memberId.toLowerCase(),
+      copy: {
+        drafted: format('mobile.pushReply.drafted'),
+        notSentTitle: format('mobile.pushReply.notSentTitle'),
+        notSentBody: format('mobile.pushReply.notSentBody'),
+      },
+    });
+  }, [workspaceId, memberId]);
+
+  useEffect(() => {
+    drainReplies();
+    const subscription = AppState.addEventListener('change', next => {
+      if (next === 'active') drainReplies();
+    });
+    return () => subscription.remove();
+  }, [drainReplies]);
+
   // ---- 4. Notification actions, and where a body tap goes -----------------
   //
   // ## 본문 탭은 세 길로 온다 (#2569)
@@ -462,6 +512,13 @@ export default function PushProvider({
   useEffect(() => {
     const subscription = addNotificationResponseReceivedListener(response => {
       deliverTap(response);
+      // 처리기가 이 답장을 이미 목록에 남겼다(같은 응답을 먼저 받는다). 보내기는 목록에서 한 번만.
+      if (
+        response.actionIdentifier === PUSH_ACTION.quickReply &&
+        nativeReplyHandlerAttached()
+      ) {
+        drainReplies();
+      }
       void handlePushResponse(response, {signedInWorkspaceId: workspaceId})
         .then(result => {
           // 원장이 이미 다른 답을 들고 있었으면 그 사실까지 남긴다 (2R H5).
@@ -486,7 +543,7 @@ export default function PushProvider({
     if (launchedBy) deliverTap(launchedBy);
 
     return () => subscription.remove();
-  }, [workspaceId, deliverTap]);
+  }, [workspaceId, deliverTap, drainReplies]);
 
   // 다른 곳에서 결정된 승인의 알림을 걷는다(#3926). 앱 안 결정과 알림 버튼은 결정을
   // 보낸 자리에서 직접 걷고, 이 훅은 남이 한 결정을 대기 승인 목록에서 알아챈다.

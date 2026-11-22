@@ -90,5 +90,9 @@
   "mobile.linkCard.removeConfirm": "Remove",
   "mobile.linkCard.removePending": "Removing…",
   "mobile.linkCard.removeFailed": "Couldn’t remove the link preview. Check your connection and try again.",
-  "mobile.linkCard.cancel": "Cancel"
+  "mobile.linkCard.cancel": "Cancel",
+  "mobile.pushReply.queued": "Your reply will be sent when you open oort",
+  "mobile.pushReply.notSentTitle": "Your reply wasn't sent",
+  "mobile.pushReply.notSentBody": "Open oort to send it again",
+  "mobile.pushReply.drafted": "Your reply couldn't be sent, so it's saved as a draft"
 }
