@@ -54,7 +54,7 @@ function request(patch: Partial<DecisionStageRequest> = {}): DecisionStageReques
   };
 }
 function open(patch: Partial<DecisionStageRequest> = {}) {
-  render(<DecisionStageHost />);
+  render(<LocaleProvider locale={ko}><DecisionStageHost /></LocaleProvider>);
   let controller!: ReturnType<typeof openDecisionStage>;
   act(() => { controller = openDecisionStage(request(patch)); });
   return controller;

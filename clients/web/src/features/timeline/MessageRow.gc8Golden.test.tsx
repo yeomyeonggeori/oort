@@ -11,6 +11,9 @@
 import golden from "../../../../../docs/api/command-suggest-ai-connect.golden.json";
 import { act, createElement, type ReactElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
+import { LocaleProvider } from "@/i18n/LocaleProvider";
+import type { AppLocale } from "@/i18n/localeStore";
+import { koreanLocale } from "@/testing/koLocale";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { waitFor } from "@testing-library/react";
 import {
@@ -232,7 +235,11 @@ const actEnv = globalThis as typeof globalThis & {
 let roots: Root[] = [];
 let hosts: HTMLElement[] = [];
 
-beforeAll(() => {
+// 이 파일은 한국어 문구를 단정한다(#6044): 공급자 밖의 화면은 번들된 영어로 그리므로 한국어 언어 객체로 감싼다.
+let ko: AppLocale;
+
+beforeAll(async () => {
+  ko = await koreanLocale();
   actEnv.IS_REACT_ACT_ENVIRONMENT = true;
   Object.defineProperty(HTMLElement.prototype, "offsetParent", {
     configurable: true,
@@ -304,7 +311,7 @@ function mount(node: ReactElement, me: string): HTMLElement {
     defaultOptions: { queries: { retry: false } },
   });
   act(() => {
-    root.render(
+    root.render(createElement(LocaleProvider, { locale: ko }, 
       createElement(
         MemoryRouter,
         null,
@@ -318,7 +325,7 @@ function mount(node: ReactElement, me: string): HTMLElement {
           ),
         ),
       ),
-    );
+    ));
   });
   return host;
 }

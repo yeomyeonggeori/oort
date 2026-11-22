@@ -728,6 +728,8 @@ async function exercise(browser) {
   const context = await browser.newContext({
     viewport: { width: 1280, height: 900 },
     reducedMotion: "reduce",
+    // 한국어 문구를 단정한다(#6044): 브라우저 기본(en-US)이면 영어 사전이 서므로 한국어로 고정한다.
+    locale: "ko-KR",
   });
   const page = await context.newPage();
   await installRealtimeSocket(page);
@@ -1142,6 +1144,8 @@ async function exerciseHonesty(browser) {
   const context = await browser.newContext({
     viewport: { width: 1280, height: 900 },
     reducedMotion: "reduce",
+    // 한국어 문구를 단정한다(#6044): 브라우저 기본(en-US)이면 영어 사전이 서므로 한국어로 고정한다.
+    locale: "ko-KR",
   });
   const page = await context.newPage();
   await installRealtimeSocket(page);
@@ -1260,6 +1264,8 @@ async function exerciseKeepsWhatItHas(browser) {
   const context = await browser.newContext({
     viewport: { width: 1280, height: 900 },
     reducedMotion: "reduce",
+    // 한국어 문구를 단정한다(#6044): 브라우저 기본(en-US)이면 영어 사전이 서므로 한국어로 고정한다.
+    locale: "ko-KR",
   });
   const page = await context.newPage();
   await installRealtimeSocket(page);
@@ -1407,6 +1413,8 @@ async function captureShots(browser) {
     const context = await browser.newContext({
       viewport: { width: 1280, height: 900 },
       reducedMotion: "reduce",
+      // 한국어 문구를 단정한다(#6044): 브라우저 기본(en-US)이면 영어 사전이 서므로 한국어로 고정한다.
+      locale: "ko-KR",
       colorScheme: scheme,
     });
     const page = await context.newPage();
@@ -1457,6 +1465,8 @@ async function captureShots(browser) {
     const failedContext = await browser.newContext({
       viewport: { width: 1280, height: 900 },
       reducedMotion: "reduce",
+      // 한국어 문구를 단정한다(#6044): 브라우저 기본(en-US)이면 영어 사전이 서므로 한국어로 고정한다.
+      locale: "ko-KR",
       colorScheme: scheme,
     });
     const failedPage = await failedContext.newPage();
