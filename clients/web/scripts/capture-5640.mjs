@@ -36,6 +36,8 @@ const WEB_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const OUT_DIR = process.env.OUT_DIR ? resolve(process.env.OUT_DIR) : resolve(homedir(), ".cache/momo-scratch/5640/captures");
 const PORT = Number(process.env.CAPTURE_PORT || 5264);
 const ONLY = process.env.CAPTURE_ONLY ?? "";
+/** `CAPTURE_ENGINES=chromium` 또는 `webkit`: 두 엔진을 도는 묶음에서 한 엔진만(오래 쉰 WebKit의 첫 열기가 부하에서 시간 초과 나는 것을 나눠 돌리려고). */
+const ENGINES = process.env.CAPTURE_ENGINES ?? "";
 
 const workspaceId = "00000000-0000-7000-8000-000000000001";
 const memberId = "00000000-0000-7000-8000-000000000101";
@@ -1605,8 +1607,12 @@ async function moveZeroScene(browser, origin, engine) {
       const s3 = await slotBoxes(page);
       // 수리 4회차: 새 요청은 머리의 「새 요청 n · 보기」(칸 수 그대로) → 누르면 맨 아래 칸(앞 칸 0px).
       const held = Object.keys(s3).length === Object.keys(s2).length && (await revealShown(page)) !== null;
+      // 「보기」 뒤 새 칸이 화면 밖이면 목록이 그 칸을 보이게 굴린다(검수 r5 L3, 사람이 누른 결과): 굴린 양만큼 되돌려 내용 안 자리로 잰다.
+      const st = () => page.evaluate(() => document.querySelector("[data-team-board-list]").scrollTop);
+      const st3 = await st();
       await revealNew(page);
-      const s4 = await slotBoxes(page);
+      const dScroll = (await st()) - st3;
+      const s4 = Object.fromEntries(Object.entries(await slotBoxes(page)).map(([k, v]) => [k, { ...v, top: v.top + dScroll }]));
       const m = [maxMove(s0, s1), maxMove(s1, s2), maxMove(s2, s3), maxMove(s3, s4)];
       const appended = held && Object.keys(s4).length === Object.keys(s3).length + 1;
       const tag = `${viewport.width}${big ? `-${big.replace("%", "")}` : ""}`;
@@ -2266,7 +2272,7 @@ async function r5Scene(browser, origin, engine) {
     const s1 = await slotBoxes(page);
     const m = await page.evaluate((sel) => {
       const list = document.querySelector(sel).getBoundingClientRect();
-      const head = document.querySelector('[data-testid="work-jobs-head"]').getBoundingClientRect();
+      const head = document.querySelector('[data-testid="work-jobs-head"]')?.getBoundingClientRect() ?? { top: NaN };
       const b = document.querySelector('[data-testid="work-jobs-reveal-new"]').getBoundingClientRect();
       const cx = b.left + b.width / 2;
       const cy = b.top + b.height / 2;
@@ -2510,7 +2516,7 @@ async function main() {
       const parts = ONLY.startsWith("fix5738:") ? ONLY.slice(8).split(",") : ["n1", "rows", "slow", "still", "move0", "shots"];
       const wk = await webkit.launch();
       try {
-        for (const [engine, b] of [["chromium", browser], ["webkit", wk]]) {
+        for (const [engine, b] of [["chromium", browser], ["webkit", wk]].filter(([e]) => ENGINES === "" || ENGINES.split(",").includes(e))) {
           if (parts.includes("n1")) await n1Scene(b, preview.origin, engine);
           if (parts.includes("rows")) await delayRowsScene(b, preview.origin, engine);
           if (parts.includes("slow")) await slowFailScene(b, preview.origin, engine);
@@ -2526,7 +2532,7 @@ async function main() {
       const parts = ONLY.startsWith("fix5738r2:") ? ONLY.slice(10).split(",") : ["below", "band", "conn", "scroll", "hold", "wheelmix", "clamp", "nearend", "r5", "touchrev", "four", "shots", "look"];
       const wk = await webkit.launch();
       try {
-        for (const [engine, b] of [["chromium", browser], ["webkit", wk]]) {
+        for (const [engine, b] of [["chromium", browser], ["webkit", wk]].filter(([e]) => ENGINES === "" || ENGINES.split(",").includes(e))) {
           if (parts.includes("below")) await belowScene(b, preview.origin, engine);
           if (parts.includes("band")) await bandScene(b, preview.origin, engine);
           if (parts.includes("conn")) await connScene(b, preview.origin, engine);
@@ -2548,7 +2554,7 @@ async function main() {
     if (ONLY === "" || ONLY === "fix5712") {
       const wk = await webkit.launch();
       try {
-        for (const [engine, b] of [["chromium", browser], ["webkit", wk]]) {
+        for (const [engine, b] of [["chromium", browser], ["webkit", wk]].filter(([e]) => ENGINES === "" || ENGINES.split(",").includes(e))) {
           await mixedScene(b, preview.origin, engine);
           await threeRowsEvenScene(b, preview.origin, engine);
           await repressSecondScene(b, preview.origin, engine);
