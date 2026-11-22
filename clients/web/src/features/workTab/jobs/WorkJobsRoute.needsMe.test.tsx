@@ -1046,6 +1046,25 @@ describe("「응답 필요」의 칸은 화면에 떠 있는 동안 자리를 �
   const guardedLook = (n: number) => needsMeSlot(n).hasAttribute("data-arrival-guard");
   const GUARD_PASSED_MS = 1100;
 
+  it("돌아온 방문의 첫 그림은 캐시의 낡은 목록이 아니라 그 방문의 첫 새 목록이다 — 떠난 사이 온 권한 요청은 「새 요청」으로 밀리지 않고 바로 칸으로 선다", async () => {
+    board(new Set());
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: 30_000 } } });
+    const first = render(mount("/work", client));
+    await screen.findAllByTestId("work-job-row");
+    expect(sectionKeys()).toEqual(["now"]);
+    first.unmount();
+    // 떠난 사이 내 맥 세션이 권한을 물었다. 돌아오면 캐시의 목록(그 세션은 아직 `running`)이 먼저 있고, 새 목록은 조금 뒤에 온다.
+    const waitingView = new Set([macSession.sessionId]);
+    api.fetchWorkJobs.mockImplementation(async (_ws: string, opts: { who: "mine" | "team" }) => {
+      await sleepMs(120);
+      const mine = [macSession, macQuiet].map((item) => (waitingView.has(item.sessionId) ? { ...item, state: "waiting" as const } : item));
+      return { sessions: opts.who === "mine" ? mine : mine, nextCursor: null, mode: "jobs" };
+    });
+    render(mount("/work", client));
+    await waitFor(() => expect(rowsIn("needsMe")).toEqual([macSession.sessionId]));
+    expect(screen.queryByTestId("work-jobs-reveal-new")).toBeNull();
+  });
+
   it("첫 그림은 승인 원장을 기다린다 — 원장이 목록보다 늦게 와도 칸이 목록 사이로 나중에 끼어들지 않고 한 번에 선다", async () => {
     let releaseLedger: () => void = () => undefined;
     const ledgerGate = new Promise<void>((resolve) => {

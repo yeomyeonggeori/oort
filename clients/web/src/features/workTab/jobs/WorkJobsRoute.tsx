@@ -224,8 +224,10 @@ export function WorkJobsRoute() {
   // 새 요청은 줄을 세우지 않는다(#5738 수리 4회차): 구간이 처음 선 뒤(목록과 승인 원장이 한 번씩 답한 뒤) 새로 묻는 일은 칸이 되지 않고
   // 머리의 「새 요청 n · 보기」로만 센다. 「보기」를 누르면 그때까지 온 것이 맨 아래 칸으로 선다. 그동안 그 줄은 제 구간(「지금」)에 단추
   // 없이 남는다. 첫 그림 · 「내 작업/팀 전체」를 갈아탄 첫 그림은 지금 묻는 일을 모두 칸으로 세운다.
+  // 첫 그림 = 이 방문의 첫 새 목록(캐시의 낡은 목록이 아니라 — 돌아온 사이 온 요청이 「새 요청」으로 밀리지 않게, 끊겼으면 캐시 그대로)
+  // + 「내 작업」이면 승인 원장의 첫 답.
   const hasData = list.data !== undefined;
-  const seeding = !hasData || (filter === "mine" && !decisions.ledgerSettled);
+  const seeding = !hasData || (!list.isFetchedAfterMount && !offline) || (filter === "mine" && !decisions.ledgerSettled);
   const [revealTick, setRevealTick] = useState(0);
   const slotsRef = useRef<{ scope: string; slots: Slot[]; seeded: boolean; reveal: number }>({
     scope,
@@ -868,12 +870,29 @@ function visibleRowAnchors(list: HTMLElement | null): RowAnchor[] {
   return out;
 }
 
-function sameBox(a: DOMRect, b: DOMRect): boolean {
+/** 목록 상자의 화면 자리 · 크기와 안쪽 폭 · 높이(공간을 차지하는 스크롤 막대가 서면 상자는 그대로여도 안쪽 폭이 줄어 줄이 다시 감긴다). */
+interface ListBox {
+  top: number;
+  left: number;
+  width: number;
+  height: number;
+  innerWidth: number;
+  innerHeight: number;
+}
+
+function listBoxOf(list: HTMLElement): ListBox {
+  const rect = list.getBoundingClientRect();
+  return { top: rect.top, left: rect.left, width: rect.width, height: rect.height, innerWidth: list.clientWidth, innerHeight: list.clientHeight };
+}
+
+function sameBox(a: ListBox, b: ListBox): boolean {
   return (
     Math.abs(a.top - b.top) <= BOX_MOVE_PX &&
     Math.abs(a.left - b.left) <= BOX_MOVE_PX &&
     Math.abs(a.width - b.width) <= BOX_MOVE_PX &&
-    Math.abs(a.height - b.height) <= BOX_MOVE_PX
+    Math.abs(a.height - b.height) <= BOX_MOVE_PX &&
+    Math.abs(a.innerWidth - b.innerWidth) <= BOX_MOVE_PX &&
+    Math.abs(a.innerHeight - b.innerHeight) <= BOX_MOVE_PX
   );
 }
 
@@ -889,7 +908,7 @@ function sameBox(a: DOMRect, b: DOMRect): boolean {
  * - 키보드(Enter·Space, `detail === 0`)는 초점이 고른 단추라 막지 않는다.
  */
 function useLayoutGuard(listRef: RefObject<HTMLDivElement | null>, scope: string) {
-  const boxRef = useRef<DOMRect | null>(null);
+  const boxRef = useRef<ListBox | null>(null);
   const changedAtRef = useRef(-Infinity);
   const scopeRef = useRef(scope);
   const [guarded, setGuarded] = useState(false);
@@ -900,7 +919,7 @@ function useLayoutGuard(listRef: RefObject<HTMLDivElement | null>, scope: string
   const check = useCallback(() => {
     const list = listRef.current;
     if (list === null) return;
-    const box = list.getBoundingClientRect();
+    const box = listBoxOf(list);
     const was = boxRef.current;
     boxRef.current = box;
     if (was === null || sameBox(was, box)) return;
