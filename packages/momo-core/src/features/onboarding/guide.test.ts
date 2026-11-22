@@ -11,7 +11,18 @@ import {
   isKomettoExpression,
   onboardingDotScreens,
   onboardingDots,
+  type OnboardingDots,
 } from "./guide";
+
+import { catalog as koCatalog } from "../../i18n/generated/ko-KR";
+import { createMessageCopy } from "../../testkit";
+
+// 문장은 사전(`onboarding.json`)에 있다(#6064). 시험은 제품과 같은 한국어 생성물로 키를 풀어 예전 한국어를 그대로 단정한다.
+const ko = createMessageCopy({ messageLocale: "ko-KR", catalog: koCatalog });
+const stepLabel = (dots: OnboardingDots | null): string => {
+  if (dots === null) throw new Error("no dots");
+  return ko(dots.labelRef.key, dots.labelRef.values);
+};
 
 describe("상태 → 표정 표 (ADR-0193 D11)", () => {
   it("has the six rows of the decision table, in order", () => {
@@ -101,17 +112,18 @@ describe("진행 점 흐름 모델 (ADR-0193 D10)", () => {
       total: 5,
       current: 2,
       dots: ["done", "current", "todo", "todo", "todo"],
-      label: "5단계 중 2단계",
+      labelRef: { key: "onboarding.guide.stepLabel", values: { total: "5", current: "2" } },
     });
-    expect(onboardingDots("claim", "team-ai")?.label).toBe("5단계 중 4단계");
+    expect(stepLabel(onboardingDots("claim", "workspace-profile"))).toBe("5단계 중 2단계");
+    expect(stepLabel(onboardingDots("claim", "team-ai"))).toBe("5단계 중 4단계");
     expect(onboardingDots("invite", "team-ai")).toBeNull();
     expect(onboardingDots("invite", "join")).toEqual({
       total: 2,
       current: 1,
       dots: ["current", "todo"],
-      label: "2단계 중 1단계",
+      labelRef: { key: "onboarding.guide.stepLabel", values: { total: "2", current: "1" } },
     });
-    expect(onboardingDots("login", "sign-in", { aiConnect: true })?.label).toBe(
+    expect(stepLabel(onboardingDots("login", "sign-in", { aiConnect: true }))).toBe(
       "2단계 중 1단계"
     );
     expect(onboardingDots("claim", "ai-connect")?.dots).toEqual([

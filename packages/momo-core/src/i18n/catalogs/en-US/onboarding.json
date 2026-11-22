@@ -1,0 +1,15 @@
+{
+  "onboarding.guide.expressionIdle": "Idle",
+  "onboarding.guide.expressionThinking": "Thinking",
+  "onboarding.guide.expressionHappy": "Happy",
+  "onboarding.guide.expressionFlustered": "Flustered",
+  "onboarding.guide.expressionWorking": "Working",
+  "onboarding.guide.expressionSleepy": "Sleepy",
+  "onboarding.guide.stateAwaiting": "Waiting for an answer",
+  "onboarding.guide.stateChecking": "Detecting, checking, or connecting",
+  "onboarding.guide.stateSuccess": "Done or detected",
+  "onboarding.guide.stateTrouble": "Error or offline",
+  "onboarding.guide.statePreparing": "Getting the agent ready",
+  "onboarding.guide.stateSkipped": "Skipped for later",
+  "onboarding.guide.stepLabel": "Step {current} of {total}"
+}

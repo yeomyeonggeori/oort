@@ -1,0 +1,15 @@
+{
+  "onboarding.guide.expressionIdle": "대기",
+  "onboarding.guide.expressionThinking": "생각",
+  "onboarding.guide.expressionHappy": "기쁨",
+  "onboarding.guide.expressionFlustered": "당황",
+  "onboarding.guide.expressionWorking": "작업 중",
+  "onboarding.guide.expressionSleepy": "졸림",
+  "onboarding.guide.stateAwaiting": "질문을 기다림",
+  "onboarding.guide.stateChecking": "감지·확인·연결 중",
+  "onboarding.guide.stateSuccess": "완료·감지 성공",
+  "onboarding.guide.stateTrouble": "오류·오프라인",
+  "onboarding.guide.statePreparing": "에이전트 준비 중",
+  "onboarding.guide.stateSkipped": "건너뛰고 나중에 할 때",
+  "onboarding.guide.stepLabel": "{total}단계 중 {current}단계"
+}

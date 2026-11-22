@@ -7432,6 +7432,96 @@ export const catalog: MessageCatalog = {
       "value": "초대 링크를 올렸어요"
     }
   ],
+  "onboarding.guide.expressionFlustered": [
+    {
+      "type": 0,
+      "value": "당황"
+    }
+  ],
+  "onboarding.guide.expressionHappy": [
+    {
+      "type": 0,
+      "value": "기쁨"
+    }
+  ],
+  "onboarding.guide.expressionIdle": [
+    {
+      "type": 0,
+      "value": "대기"
+    }
+  ],
+  "onboarding.guide.expressionSleepy": [
+    {
+      "type": 0,
+      "value": "졸림"
+    }
+  ],
+  "onboarding.guide.expressionThinking": [
+    {
+      "type": 0,
+      "value": "생각"
+    }
+  ],
+  "onboarding.guide.expressionWorking": [
+    {
+      "type": 0,
+      "value": "작업 중"
+    }
+  ],
+  "onboarding.guide.stateAwaiting": [
+    {
+      "type": 0,
+      "value": "질문을 기다림"
+    }
+  ],
+  "onboarding.guide.stateChecking": [
+    {
+      "type": 0,
+      "value": "감지·확인·연결 중"
+    }
+  ],
+  "onboarding.guide.statePreparing": [
+    {
+      "type": 0,
+      "value": "에이전트 준비 중"
+    }
+  ],
+  "onboarding.guide.stateSkipped": [
+    {
+      "type": 0,
+      "value": "건너뛰고 나중에 할 때"
+    }
+  ],
+  "onboarding.guide.stateSuccess": [
+    {
+      "type": 0,
+      "value": "완료·감지 성공"
+    }
+  ],
+  "onboarding.guide.stateTrouble": [
+    {
+      "type": 0,
+      "value": "오류·오프라인"
+    }
+  ],
+  "onboarding.guide.stepLabel": [
+    {
+      "type": 1,
+      "value": "total"
+    },
+    {
+      "type": 0,
+      "value": "단계 중 "
+    },
+    {
+      "type": 1,
+      "value": "current"
+    },
+    {
+      "type": 0,
+      "value": "단계"
+    }
+  ],
   "readState.markUnread.action": [
     {
       "type": 0,

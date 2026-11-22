@@ -1071,6 +1071,19 @@ export const messageKeys = [
   "mobile.workPermission.rechecking",
   "mobile.workPermission.recheckMissed",
   "notifications.inviteLink.fallback",
+  "onboarding.guide.expressionFlustered",
+  "onboarding.guide.expressionHappy",
+  "onboarding.guide.expressionIdle",
+  "onboarding.guide.expressionSleepy",
+  "onboarding.guide.expressionThinking",
+  "onboarding.guide.expressionWorking",
+  "onboarding.guide.stateAwaiting",
+  "onboarding.guide.stateChecking",
+  "onboarding.guide.statePreparing",
+  "onboarding.guide.stateSkipped",
+  "onboarding.guide.stateSuccess",
+  "onboarding.guide.stateTrouble",
+  "onboarding.guide.stepLabel",
   "readState.markUnread.action",
   "readState.markUnread.done",
   "readState.markUnread.failed",
@@ -3346,6 +3359,22 @@ export const argumentSpecs = {
   "mobile.workPermission.rechecking": {},
   "mobile.workPermission.recheckMissed": {},
   "notifications.inviteLink.fallback": {},
+  "onboarding.guide.expressionFlustered": {},
+  "onboarding.guide.expressionHappy": {},
+  "onboarding.guide.expressionIdle": {},
+  "onboarding.guide.expressionSleepy": {},
+  "onboarding.guide.expressionThinking": {},
+  "onboarding.guide.expressionWorking": {},
+  "onboarding.guide.stateAwaiting": {},
+  "onboarding.guide.stateChecking": {},
+  "onboarding.guide.statePreparing": {},
+  "onboarding.guide.stateSkipped": {},
+  "onboarding.guide.stateSuccess": {},
+  "onboarding.guide.stateTrouble": {},
+  "onboarding.guide.stepLabel": {
+    "current": "string",
+    "total": "string"
+  },
   "readState.markUnread.action": {},
   "readState.markUnread.done": {},
   "readState.markUnread.failed": {},
@@ -5629,6 +5658,19 @@ export interface MessageArgs {
   "mobile.workPermission.rechecking": Record<string, never>;
   "mobile.workPermission.recheckMissed": Record<string, never>;
   "notifications.inviteLink.fallback": Record<string, never>;
+  "onboarding.guide.expressionFlustered": Record<string, never>;
+  "onboarding.guide.expressionHappy": Record<string, never>;
+  "onboarding.guide.expressionIdle": Record<string, never>;
+  "onboarding.guide.expressionSleepy": Record<string, never>;
+  "onboarding.guide.expressionThinking": Record<string, never>;
+  "onboarding.guide.expressionWorking": Record<string, never>;
+  "onboarding.guide.stateAwaiting": Record<string, never>;
+  "onboarding.guide.stateChecking": Record<string, never>;
+  "onboarding.guide.statePreparing": Record<string, never>;
+  "onboarding.guide.stateSkipped": Record<string, never>;
+  "onboarding.guide.stateSuccess": Record<string, never>;
+  "onboarding.guide.stateTrouble": Record<string, never>;
+  "onboarding.guide.stepLabel": { current: string; total: string };
   "readState.markUnread.action": Record<string, never>;
   "readState.markUnread.done": Record<string, never>;
   "readState.markUnread.failed": Record<string, never>;

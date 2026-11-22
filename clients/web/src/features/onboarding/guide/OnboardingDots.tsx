@@ -1,3 +1,4 @@
+import { useFormatMessage } from "@/i18n/useFormatMessage";
 import type { OnboardingDots as OnboardingDotsModel } from "@momo/core/features/onboarding/guide";
 
 /**
@@ -9,6 +10,7 @@ import type { OnboardingDots as OnboardingDotsModel } from "@momo/core/features/
  * (Buzz는 점을 aria-hidden으로만 두었다. oort는 문장을 둔다).
  */
 export function OnboardingDots({ dots }: { dots: OnboardingDotsModel | null }) {
+  const formatMessage = useFormatMessage();
   if (dots === null) return null;
   return (
     <div
@@ -18,7 +20,7 @@ export function OnboardingDots({ dots }: { dots: OnboardingDotsModel | null }) {
       data-current={dots.current}
     >
       <span className="sr-only" data-testid="onboarding-dots-label">
-        {dots.label}
+        {formatMessage(dots.labelRef.key, dots.labelRef.values)}
       </span>
       {dots.dots.map((state, index) => (
         <span

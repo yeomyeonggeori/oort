@@ -7937,6 +7937,96 @@ export const catalog: MessageCatalog = {
       "value": "Posted an invite link"
     }
   ],
+  "onboarding.guide.expressionFlustered": [
+    {
+      "type": 0,
+      "value": "Flustered"
+    }
+  ],
+  "onboarding.guide.expressionHappy": [
+    {
+      "type": 0,
+      "value": "Happy"
+    }
+  ],
+  "onboarding.guide.expressionIdle": [
+    {
+      "type": 0,
+      "value": "Idle"
+    }
+  ],
+  "onboarding.guide.expressionSleepy": [
+    {
+      "type": 0,
+      "value": "Sleepy"
+    }
+  ],
+  "onboarding.guide.expressionThinking": [
+    {
+      "type": 0,
+      "value": "Thinking"
+    }
+  ],
+  "onboarding.guide.expressionWorking": [
+    {
+      "type": 0,
+      "value": "Working"
+    }
+  ],
+  "onboarding.guide.stateAwaiting": [
+    {
+      "type": 0,
+      "value": "Waiting for an answer"
+    }
+  ],
+  "onboarding.guide.stateChecking": [
+    {
+      "type": 0,
+      "value": "Detecting, checking, or connecting"
+    }
+  ],
+  "onboarding.guide.statePreparing": [
+    {
+      "type": 0,
+      "value": "Getting the agent ready"
+    }
+  ],
+  "onboarding.guide.stateSkipped": [
+    {
+      "type": 0,
+      "value": "Skipped for later"
+    }
+  ],
+  "onboarding.guide.stateSuccess": [
+    {
+      "type": 0,
+      "value": "Done or detected"
+    }
+  ],
+  "onboarding.guide.stateTrouble": [
+    {
+      "type": 0,
+      "value": "Error or offline"
+    }
+  ],
+  "onboarding.guide.stepLabel": [
+    {
+      "type": 0,
+      "value": "Step "
+    },
+    {
+      "type": 1,
+      "value": "current"
+    },
+    {
+      "type": 0,
+      "value": " of "
+    },
+    {
+      "type": 1,
+      "value": "total"
+    }
+  ],
   "readState.markUnread.action": [
     {
       "type": 0,
