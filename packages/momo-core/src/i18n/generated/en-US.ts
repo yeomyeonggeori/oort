@@ -12366,6 +12366,132 @@ export const catalog: MessageCatalog = {
       "value": "Deleted message"
     }
   ],
+  "timeline.divider.dateFull": [
+    {
+      "type": 1,
+      "value": "month"
+    },
+    {
+      "type": 0,
+      "value": "/"
+    },
+    {
+      "type": 1,
+      "value": "day"
+    },
+    {
+      "type": 0,
+      "value": "/"
+    },
+    {
+      "type": 1,
+      "value": "year"
+    }
+  ],
+  "timeline.divider.dateMonthDay": [
+    {
+      "type": 1,
+      "value": "month"
+    },
+    {
+      "type": 0,
+      "value": "/"
+    },
+    {
+      "type": 1,
+      "value": "day"
+    }
+  ],
+  "timeline.divider.labelToday": [
+    {
+      "type": 1,
+      "value": "date"
+    },
+    {
+      "type": 0,
+      "value": ", today"
+    }
+  ],
+  "timeline.divider.labelYesterday": [
+    {
+      "type": 1,
+      "value": "date"
+    },
+    {
+      "type": 0,
+      "value": ", yesterday"
+    }
+  ],
+  "timeline.divider.recovery": [
+    {
+      "type": 0,
+      "value": "Reconnected, recovered up to here"
+    }
+  ],
+  "timeline.divider.recoveryLabel": [
+    {
+      "type": 0,
+      "value": "The connection is back. Everything above this line was recovered."
+    }
+  ],
+  "timeline.divider.recoveryLabelReread": [
+    {
+      "type": 0,
+      "value": "The connection is back. Everything above this line was recovered. Messages you have already seen may arrive again."
+    }
+  ],
+  "timeline.divider.recoveryReread": [
+    {
+      "type": 0,
+      "value": " (read again)"
+    }
+  ],
+  "timeline.divider.today": [
+    {
+      "type": 0,
+      "value": "Today"
+    }
+  ],
+  "timeline.divider.unread": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "figure"
+            },
+            {
+              "type": 0,
+              "value": " new message, read up to here"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "figure"
+            },
+            {
+              "type": 0,
+              "value": " new messages, read up to here"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "timeline.divider.yesterday": [
+    {
+      "type": 0,
+      "value": "Yesterday"
+    }
+  ],
   "timeline.edited.atDate": [
     {
       "type": 0,
@@ -12762,6 +12888,102 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": " (agent report)"
+    }
+  ],
+  "timeline.pins.emptyBody": [
+    {
+      "type": 0,
+      "value": "Message with no content"
+    }
+  ],
+  "timeline.pins.listCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " pinned message"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " pinned messages"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "timeline.pins.listEmptyDetail": [
+    {
+      "type": 0,
+      "value": "Messages you pin from message actions collect here."
+    }
+  ],
+  "timeline.pins.listEmptyHeadline": [
+    {
+      "type": 0,
+      "value": "No pinned messages."
+    }
+  ],
+  "timeline.pins.listEmptySentence": [
+    {
+      "type": 0,
+      "value": "No pinned messages. Messages you pin from message actions collect here."
+    }
+  ],
+  "timeline.pins.listFailedDetail": [
+    {
+      "type": 0,
+      "value": "Check your connection and try again."
+    }
+  ],
+  "timeline.pins.listFailedHeadline": [
+    {
+      "type": 0,
+      "value": "Couldn't load pinned messages."
+    }
+  ],
+  "timeline.pins.listFailedSentence": [
+    {
+      "type": 0,
+      "value": "Couldn't load pinned messages. Check your connection and try again."
+    }
+  ],
+  "timeline.pins.listNone": [
+    {
+      "type": 0,
+      "value": "Pinned messages"
+    }
+  ],
+  "timeline.pins.rowMark": [
+    {
+      "type": 0,
+      "value": "Pinned"
+    }
+  ],
+  "timeline.pins.stamp": [
+    {
+      "type": 0,
+      "value": "Pinned "
+    },
+    {
+      "type": 1,
+      "value": "date"
     }
   ],
   "timeline.quote.head": [

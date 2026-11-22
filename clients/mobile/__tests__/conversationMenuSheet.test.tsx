@@ -14,7 +14,7 @@ import {copyLinkActionLabel} from '@momo/core/features/timeline/copyLabels';
 import type {ChannelActionItem} from '@momo/core/features/channels/actionModel';
 import {catalog as koCatalog} from '@momo/core/i18n/generated/ko-KR';
 import {createMessageService} from '@momo/core/i18n/service';
-import {pinListHeaderLabel} from '@momo/core/features/timeline/pins';
+import {pinListHeaderLabel as pinListHeaderRef} from '@momo/core/features/timeline/pins';
 import type {Member} from '@momo/core/lib/api';
 import {QueryClient, QueryClientProvider} from '@tanstack/react-query';
 import {
@@ -78,6 +78,12 @@ async function armedPress(testID: string, options?: Parameters<typeof screen.get
   }
   fireEvent.press(screen.getByTestId(testID, options));
 }
+
+// 문장은 사전에 있다(#6044): 한국어 생성물로 키를 풀어 한국어 그대로 단정한다.
+const pinListHeaderLabel = (count: number, status: Parameters<typeof pinListHeaderRef>[1]) => {
+  const ref = pinListHeaderRef(count, status);
+  return createMessageService({messageLocale: 'ko-KR', catalog: koCatalog}).formatMessage(ref.key, ref.values as never);
+};
 
 // =============================================================================
 // 대화 머리 ⋮ 가 여는 공용 행동 시트 (#4319, owner 10-27). 옛 ⋮ 는 시스템 액션 시트(제목 + 「취소」 + 「고정한 메시지」)였다.

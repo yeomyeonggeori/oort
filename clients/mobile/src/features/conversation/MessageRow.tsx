@@ -85,7 +85,7 @@ import {
   type PendingMessage,
 } from '@momo/core/features/timeline/model';
 import {
-  PIN_ROW_MARK,
+  PIN_ROW_MARK_KEY,
   pinActionLabel,
 } from '@momo/core/features/timeline/pins';
 import {streamStopMarkKey} from '@momo/core/features/timeline/streamStop';
@@ -524,11 +524,12 @@ export function DayDivider({
   atMs: number;
   nowMs: number;
 }): React.JSX.Element {
+  const formatMessage = useFormatMessage();
   const styles = useStyles(buildStyles);
   return (
     <View
       accessibilityRole="text"
-      accessibilityLabel={dayDividerLabel(atMs, nowMs)}
+      accessibilityLabel={dayDividerLabel(formatMessage, atMs, nowMs)}
       style={[styles.dayRow, styles.dividerDay]}
       testID="day-divider">
       {/* 시안 A `.a-day` — 가운데 유리 알약(DS2-4 #2716). 위 「앞 라벨 + rule 하나」
@@ -538,7 +539,7 @@ export function DayDivider({
           표지는 여전히 앞 라벨 + rule 이다(웹과 같은 문법). */}
       <View style={styles.dayPill}>
         <DividerLabel
-          segments={dayDividerSegments(atMs, nowMs)}
+          segments={dayDividerSegments(formatMessage, atMs, nowMs)}
           tone={DIVIDER_TONE.day}
           strong
         />
@@ -562,6 +563,7 @@ export function FloatingDayPill({
   atMs: number;
   nowMs: number;
 }): React.JSX.Element {
+  const formatMessage = useFormatMessage();
   const styles = useStyles(buildStyles);
   return (
     <View
@@ -572,7 +574,7 @@ export function FloatingDayPill({
       testID="floating-day">
       <GlassSurface radius={radius.pill} style={styles.dayPillFloat} testID="floating-day-glass">
         <Text style={styles.dayFloatLabel} maxFontSizeMultiplier={BAR_CONTROL_MAX_SCALE}>
-          {dayDividerSegments(atMs, nowMs).map(segment => segment.text).join('')}
+          {dayDividerSegments(formatMessage, atMs, nowMs).map(segment => segment.text).join('')}
         </Text>
       </GlassSurface>
     </View>
@@ -605,11 +607,12 @@ export function FloatingDayPill({
  * 한 경계는 한 색이다.
  */
 export function UnreadDivider({count}: {count: number}): React.JSX.Element {
+  const formatMessage = useFormatMessage();
   const styles = useStyles(buildStyles);
   return (
     <View style={styles.divider} testID="unread-divider">
       <DividerLabel
-        segments={unreadDividerSegments(count)}
+        segments={unreadDividerSegments(formatMessage, count)}
         tone={DIVIDER_TONE.unread}
       />
       <View style={[styles.dividerLine, styles.dividerLineBoundary]} />
@@ -657,15 +660,16 @@ export function RecoveryDivider({
   /** Which rail healed the gap. Stated, because they are not equally strong. */
   source: RecoverySource;
 }): React.JSX.Element {
+  const formatMessage = useFormatMessage();
   const styles = useStyles(buildStyles);
   return (
     <View
       accessibilityRole="text"
-      accessibilityLabel={recoveryDividerLabel(source)}
+      accessibilityLabel={recoveryDividerLabel(formatMessage, source)}
       style={styles.divider}
       testID="recovery-divider">
       <DividerLabel
-        segments={recoveryDividerSegments(seq, source)}
+        segments={recoveryDividerSegments(formatMessage, seq, source)}
         tone={DIVIDER_TONE.recovery}
       />
       <View style={styles.dividerLine} />
@@ -3277,7 +3281,7 @@ function MessageRowInner({
     // 「수정됨」 다음, 「답글 N개」 앞 — 본문에 대한 서술 다음이고 바깥 스레드로
     // 나가는 문 앞이다. 안쪽에서 바깥쪽으로. 이 배열은 낭독 라벨의 재료이기도
     // 하므로(`rowAccessibilityLabel`), 여기 끼우는 것만으로 귀에도 닿는다.
-    showsPinMark ? PIN_ROW_MARK : null,
+    showsPinMark ? formatMessage(PIN_ROW_MARK_KEY) : null,
     threadView ? threadView.copy.spoken : null,
   ].filter((part): part is string => part !== null);
 
@@ -3668,7 +3672,7 @@ function MessageRowInner({
             )}
             {showsPinMark ? (
               <Text style={styles.tailMark} testID="pin-mark">
-                {PIN_ROW_MARK}
+                {formatMessage(PIN_ROW_MARK_KEY)}
               </Text>
             ) : null}
             {rollup && threadView ? (

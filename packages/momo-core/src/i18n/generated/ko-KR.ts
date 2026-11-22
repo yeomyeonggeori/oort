@@ -11740,6 +11740,132 @@ export const catalog: MessageCatalog = {
       "value": "삭제된 메시지"
     }
   ],
+  "timeline.divider.dateFull": [
+    {
+      "type": 1,
+      "value": "year"
+    },
+    {
+      "type": 0,
+      "value": "년 "
+    },
+    {
+      "type": 1,
+      "value": "month"
+    },
+    {
+      "type": 0,
+      "value": "월 "
+    },
+    {
+      "type": 1,
+      "value": "day"
+    },
+    {
+      "type": 0,
+      "value": "일"
+    }
+  ],
+  "timeline.divider.dateMonthDay": [
+    {
+      "type": 1,
+      "value": "month"
+    },
+    {
+      "type": 0,
+      "value": "월 "
+    },
+    {
+      "type": 1,
+      "value": "day"
+    },
+    {
+      "type": 0,
+      "value": "일"
+    }
+  ],
+  "timeline.divider.labelToday": [
+    {
+      "type": 1,
+      "value": "date"
+    },
+    {
+      "type": 0,
+      "value": ", 오늘"
+    }
+  ],
+  "timeline.divider.labelYesterday": [
+    {
+      "type": 1,
+      "value": "date"
+    },
+    {
+      "type": 0,
+      "value": ", 어제"
+    }
+  ],
+  "timeline.divider.recovery": [
+    {
+      "type": 0,
+      "value": "재연결됨, 여기까지 복구"
+    }
+  ],
+  "timeline.divider.recoveryLabel": [
+    {
+      "type": 0,
+      "value": "연결이 다시 이어졌습니다. 이 줄 위까지 복구했습니다."
+    }
+  ],
+  "timeline.divider.recoveryLabelReread": [
+    {
+      "type": 0,
+      "value": "연결이 다시 이어졌습니다. 이 줄 위까지 복구했습니다. 이미 본 메시지가 다시 올 수 있습니다."
+    }
+  ],
+  "timeline.divider.recoveryReread": [
+    {
+      "type": 0,
+      "value": " (다시 읽음)"
+    }
+  ],
+  "timeline.divider.today": [
+    {
+      "type": 0,
+      "value": "오늘"
+    }
+  ],
+  "timeline.divider.unread": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "새 메시지 "
+            },
+            {
+              "type": 1,
+              "value": "figure"
+            },
+            {
+              "type": 0,
+              "value": "개, 여기까지 읽음"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "timeline.divider.yesterday": [
+    {
+      "type": 0,
+      "value": "어제"
+    }
+  ],
   "timeline.edited.atDate": [
     {
       "type": 1,
@@ -12132,6 +12258,85 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": " (에이전트 보고)"
+    }
+  ],
+  "timeline.pins.emptyBody": [
+    {
+      "type": 0,
+      "value": "내용 없는 메시지"
+    }
+  ],
+  "timeline.pins.listCount": [
+    {
+      "type": 0,
+      "value": "고정 "
+    },
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "개"
+    }
+  ],
+  "timeline.pins.listEmptyDetail": [
+    {
+      "type": 0,
+      "value": "메시지 액션에서 고정하면 여기 모입니다."
+    }
+  ],
+  "timeline.pins.listEmptyHeadline": [
+    {
+      "type": 0,
+      "value": "고정한 메시지가 없습니다."
+    }
+  ],
+  "timeline.pins.listEmptySentence": [
+    {
+      "type": 0,
+      "value": "고정한 메시지가 없습니다. 메시지 액션에서 고정하면 여기 모입니다."
+    }
+  ],
+  "timeline.pins.listFailedDetail": [
+    {
+      "type": 0,
+      "value": "연결을 확인한 뒤 다시 시도하세요."
+    }
+  ],
+  "timeline.pins.listFailedHeadline": [
+    {
+      "type": 0,
+      "value": "고정 목록을 불러오지 못했습니다."
+    }
+  ],
+  "timeline.pins.listFailedSentence": [
+    {
+      "type": 0,
+      "value": "고정 목록을 불러오지 못했습니다. 연결을 확인한 뒤 다시 시도하세요."
+    }
+  ],
+  "timeline.pins.listNone": [
+    {
+      "type": 0,
+      "value": "고정한 메시지"
+    }
+  ],
+  "timeline.pins.rowMark": [
+    {
+      "type": 0,
+      "value": "고정됨"
+    }
+  ],
+  "timeline.pins.stamp": [
+    {
+      "type": 1,
+      "value": "date"
+    },
+    {
+      "type": 0,
+      "value": "에 고정"
     }
   ],
   "timeline.quote.head": [

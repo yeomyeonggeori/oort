@@ -87,7 +87,7 @@ function Sheet({
       <ConversationMenuSheet
         title={target.title}
         kind={target.channel.kind}
-        pinLabel={pinListHeaderLabel(2, 'ready')}
+        pinLabel={formatMessage(pinListHeaderLabel(2, 'ready').key, pinListHeaderLabel(2, 'ready').values as never)}
         // 출하 모양: 화면은 정보 페이지 문(`onOpenInfo`)을 항상 준다 — 첫 카드의 「대화/채널 정보 ›」 행이 서야 한다.
         onOpenInfo={noop}
         onOpenPins={noop}

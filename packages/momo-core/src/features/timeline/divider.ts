@@ -38,6 +38,8 @@
 // 넷이 M-2가 말한 「다른 얼굴」의 전부다.
 // =============================================================================
 
+import type { LocaleService } from "../../i18n/context";
+
 /**
  * 라벨 한 조각. `figure`에만 자릿폭 고정을 건다.
  *
@@ -249,25 +251,24 @@ export function calendarDaysBetween(fromMs: number, toMs: number): number {
  * 메시지 본문이 답할 일이다.
  */
 export function dayDividerSegments(
+  formatMessage: LocaleService["formatMessage"],
   atMs: number,
   nowMs: number
 ): DividerSegment[] {
   const days = calendarDaysBetween(atMs, nowMs);
-  if (days === 0) return [{ kind: "prose", text: "오늘" }];
-  if (days === 1) return [{ kind: "prose", text: "어제" }];
+  if (days === 0) return [{ kind: "prose", text: formatMessage("timeline.divider.today") }];
+  if (days === 1) return [{ kind: "prose", text: formatMessage("timeline.divider.yesterday") }];
 
   const at = new Date(atMs);
   const now = new Date(nowMs);
-  const segments: DividerSegment[] = [];
-  if (at.getFullYear() !== now.getFullYear()) {
-    segments.push({ kind: "figure", text: `${at.getFullYear()}` });
-    segments.push({ kind: "prose", text: "년 " });
-  }
-  segments.push({ kind: "figure", text: `${at.getMonth() + 1}` });
-  segments.push({ kind: "prose", text: "월 " });
-  segments.push({ kind: "figure", text: `${at.getDate()}` });
-  segments.push({ kind: "prose", text: "일" });
-  return segments;
+  // 어순과 단위 글자는 사전이 정하고, 숫자 자리만 figure 조각이 된다(`markFigure`).
+  const month = markFigure(at.getMonth() + 1);
+  const day = markFigure(at.getDate());
+  return segmentsFromMarked(
+    at.getFullYear() !== now.getFullYear()
+      ? formatMessage("timeline.divider.dateFull", { year: markFigure(at.getFullYear()), month, day })
+      : formatMessage("timeline.divider.dateMonthDay", { month, day })
+  );
 }
 
 /**
@@ -279,9 +280,16 @@ export function dayDividerSegments(
  * `pinStampLabel`)이 같은 문장을 짓는다. 두 파일이 각자 `getFullYear()`를 열면
  * 「2026년 8월 5일」과 「2026. 8. 5.」가 한 앱에서 함께 산다.
  */
-export function absoluteDayLabel(atMs: number): string {
+export function absoluteDayLabel(
+  formatMessage: LocaleService["formatMessage"],
+  atMs: number
+): string {
   const at = new Date(atMs);
-  return `${at.getFullYear()}년 ${at.getMonth() + 1}월 ${at.getDate()}일`;
+  return formatMessage("timeline.divider.dateFull", {
+    year: String(at.getFullYear()),
+    month: String(at.getMonth() + 1),
+    day: String(at.getDate()),
+  });
 }
 
 /**
@@ -292,28 +300,34 @@ export function absoluteDayLabel(atMs: number): string {
  * 빼는 것이다. 보이는 글자와 읽히는 글자가 일부러 다른 자리이고, `chat/typing.ts`의
  * `typingLabel`이 같은 판단을 한다.
  */
-export function dayDividerLabel(atMs: number, nowMs: number): string {
-  const absolute = absoluteDayLabel(atMs);
+export function dayDividerLabel(
+  formatMessage: LocaleService["formatMessage"],
+  atMs: number,
+  nowMs: number
+): string {
+  const date = absoluteDayLabel(formatMessage, atMs);
   const days = calendarDaysBetween(atMs, nowMs);
-  if (days === 0) return `${absolute}, 오늘`;
-  if (days === 1) return `${absolute}, 어제`;
-  return absolute;
+  if (days === 0) return formatMessage("timeline.divider.labelToday", { date });
+  if (days === 1) return formatMessage("timeline.divider.labelYesterday", { date });
+  return date;
 }
 
 /** 안읽음 경계. 수는 서버의 진실이고(P7) 여기서 세지 않는다. */
-export function unreadDividerSegments(count: number): DividerSegment[] {
-  return [
-    { kind: "prose", text: "새 메시지 " },
-    { kind: "figure", text: `${count}` },
-    { kind: "prose", text: "개, 여기까지 읽음" },
-  ];
+export function unreadDividerSegments(
+  formatMessage: LocaleService["formatMessage"],
+  count: number
+): DividerSegment[] {
+  return segmentsFromMarked(
+    formatMessage("timeline.divider.unread", { count, figure: markFigure(count) })
+  );
 }
 
 /** Screen-reader label for the unread boundary. Same words as the visible segments. */
-export function unreadDividerLabel(count: number): string {
-  return unreadDividerSegments(count)
-    .map((segment) => segment.text)
-    .join("");
+export function unreadDividerLabel(
+  formatMessage: LocaleService["formatMessage"],
+  count: number
+): string {
+  return dividerText(unreadDividerSegments(formatMessage, count));
 }
 
 /**
@@ -376,16 +390,15 @@ export type RecoverySource = "replay" | "backfill";
  *   소비한 뒤의 일이다.
  */
 export function recoveryDividerSegments(
+  formatMessage: LocaleService["formatMessage"],
   _seq: number,
   source: RecoverySource
 ): DividerSegment[] {
   const segments: DividerSegment[] = [
-    { kind: "prose", text: "재연결됨, 여기까지 복구" },
+    { kind: "prose", text: formatMessage("timeline.divider.recovery") },
   ];
-  // 되읽은 구간은 「이미 본 것이 다시 온다」는 사실을 말해야 한다. 레일이 그대로
-  // 흘려 준 구간(`replay`)에는 할 말이 없으므로 아무것도 붙이지 않는다.
   if (source === "backfill") {
-    segments.push({ kind: "prose", text: " (다시 읽음)" });
+    segments.push({ kind: "prose", text: formatMessage("timeline.divider.recoveryReread") });
   }
   return segments;
 }
@@ -422,11 +435,15 @@ export function pruneRecoveryMarkers<M extends { seq: number }>(
  * `seq`는 여기서도 나가지 않는다. 눈으로 못 쓰는 숫자가 귀로 쓸 수 있게 되지는
  * 않는다.
  */
-export function recoveryDividerLabel(source: RecoverySource): string {
-  const base = "연결이 다시 이어졌습니다. 이 줄 위까지 복구했습니다.";
-  return source === "backfill"
-    ? `${base} 이미 본 메시지가 다시 올 수 있습니다.`
-    : base;
+export function recoveryDividerLabel(
+  formatMessage: LocaleService["formatMessage"],
+  source: RecoverySource
+): string {
+  return formatMessage(
+    source === "backfill"
+      ? "timeline.divider.recoveryLabelReread"
+      : "timeline.divider.recoveryLabel"
+  );
 }
 
 /** 조각을 이어 붙인 글자. 라벨 문자열이 필요한 자리(테스트·낭독)를 위한 것. */

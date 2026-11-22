@@ -1,3 +1,5 @@
+import type { LocaleService } from "../../i18n/context";
+import type { MessageRef, PlainMessageKey } from "../../i18n/keys";
 import type { PinnedMessageWire } from "../../lib/api";
 import {
   absoluteDayLabel,
@@ -178,8 +180,12 @@ export function pinActionLabel(pinned: boolean): string {
 }
 
 /** The header entry point's label, with the count folded in. */
-export function pinListLabel(count: number): string {
-  return count > 0 ? `고정 ${count}개` : "고정한 메시지";
+export function pinListLabel(
+  count: number
+): MessageRef<"timeline.pins.listCount" | "timeline.pins.listNone"> {
+  return count > 0
+    ? { key: "timeline.pins.listCount", values: { count } }
+    : { key: "timeline.pins.listNone" };
 }
 
 /**
@@ -196,7 +202,7 @@ export function pinListLabel(count: number): string {
 export function pinListHeaderLabel(
   count: number,
   status: PinListStatus
-): string {
+): MessageRef<"timeline.pins.listCount" | "timeline.pins.listNone"> {
   return status === "ready" ? pinListLabel(count) : pinListLabel(0);
 }
 
@@ -214,11 +220,13 @@ export function pinListHeaderLabel(
  * and phone with a long press, so a sentence naming either would be wrong on
  * the other surface.
  */
-export const PIN_LIST_EMPTY_HEADLINE = "고정한 메시지가 없습니다.";
-export const PIN_LIST_EMPTY_DETAIL = "메시지 액션에서 고정하면 여기 모입니다.";
+export const PIN_LIST_EMPTY_HEADLINE_KEY = "timeline.pins.listEmptyHeadline" satisfies PlainMessageKey;
+export const PIN_LIST_EMPTY_DETAIL_KEY = "timeline.pins.listEmptyDetail" satisfies PlainMessageKey;
+/** 웹 메뉴는 두 줄을 한 문장으로 그린다. 이어 붙이지 않고 한 키로 둔다. */
+export const PIN_LIST_EMPTY_SENTENCE_KEY = "timeline.pins.listEmptySentence" satisfies PlainMessageKey;
 
 /** The body a pinned entry draws when the message has no text. */
-export const PIN_EMPTY_BODY_TEXT = "내용 없는 메시지";
+export const PIN_EMPTY_BODY_KEY = "timeline.pins.emptyBody" satisfies PlainMessageKey;
 
 /**
  * What the list says when the cold read **failed** (이슈 #1146 M2).
@@ -236,8 +244,10 @@ export const PIN_EMPTY_BODY_TEXT = "내용 없는 메시지";
  * (「답글을 불러오지 못했습니다.」) with its noun swapped — a failed read is a
  * failed read, and this app already knows how to say it.
  */
-export const PIN_LIST_FAILED_HEADLINE = "고정 목록을 불러오지 못했습니다.";
-export const PIN_LIST_FAILED_DETAIL = "연결을 확인한 뒤 다시 시도하세요.";
+export const PIN_LIST_FAILED_HEADLINE_KEY = "timeline.pins.listFailedHeadline" satisfies PlainMessageKey;
+export const PIN_LIST_FAILED_DETAIL_KEY = "timeline.pins.listFailedDetail" satisfies PlainMessageKey;
+/** 웹 메뉴는 두 줄을 한 문장으로 그린다. 이어 붙이지 않고 한 키로 둔다. */
+export const PIN_LIST_FAILED_SENTENCE_KEY = "timeline.pins.listFailedSentence" satisfies PlainMessageKey;
 
 /**
  * Where the cold read of the channel's pins stands (이슈 #1146 M2).
@@ -282,7 +292,7 @@ export type PinListStatus = "loading" | "ready" | "failed";
  * 순서도 그 규칙을 따른다 — 「수정됨」(본문에 대한 서술) 다음, 「답글 N개」(바깥
  * 스레드로 나가는 문) 앞. 안쪽에서 바깥쪽으로.
  */
-export const PIN_ROW_MARK = "고정됨";
+export const PIN_ROW_MARK_KEY = "timeline.pins.rowMark" satisfies PlainMessageKey;
 
 /**
  * 고정 목록 항목의 시각 도장 — **정렬 근거 그대로** (이슈 #1146 N1).
@@ -304,10 +314,11 @@ export const PIN_ROW_MARK = "고정됨";
  * 1차의 웹 판이 정확히 그 결함이었다(`<span data-numeric>8월 5일</span>`).
  */
 export function pinStampSegments(
+  formatMessage: LocaleService["formatMessage"],
   pinnedAtMs: number,
   nowMs: number
 ): DividerSegment[] {
-  return dayDividerSegments(pinnedAtMs, nowMs);
+  return dayDividerSegments(formatMessage, pinnedAtMs, nowMs);
 }
 
 /**
@@ -321,8 +332,11 @@ export function pinStampSegments(
  * 카드에는 쓰인 때도 고정된 때도 있을 수 있고, 낭독은 열이 없어서 어느 쪽인지
  * 위치로 알 수 없다.
  */
-export function pinStampLabel(pinnedAtMs: number): string {
-  return `${absoluteDayLabel(pinnedAtMs)}에 고정`;
+export function pinStampLabel(
+  formatMessage: LocaleService["formatMessage"],
+  pinnedAtMs: number
+): string {
+  return formatMessage("timeline.pins.stamp", { date: absoluteDayLabel(formatMessage, pinnedAtMs) });
 }
 
 /**
@@ -372,9 +386,13 @@ export interface PinExcerpt {
  * 눈에 보이는 유일한 파손(허공에 뜬 ZWJ, 뒤따를 것이 없는 U+FE0F)이고, 나머지는
  * 「가족이 두 사람으로 잘렸다」 — 읽기에는 멀쩡한 글자다.
  */
-export function pinExcerpt(body: string | null, limit: number): PinExcerpt {
+export function pinExcerpt(
+  formatMessage: LocaleService["formatMessage"],
+  body: string | null,
+  limit: number
+): PinExcerpt {
   const text = body?.trim();
-  if (!text) return { text: PIN_EMPTY_BODY_TEXT, empty: true };
+  if (!text) return { text: formatMessage(PIN_EMPTY_BODY_KEY), empty: true };
   // 줄바꿈은 한 줄짜리 발췌에서 공백이다 — 안 접으면 목록이 본문의 모양을 흉내
   // 내려다 아무 모양도 못 갖는다.
   const flattened = text.replace(/\s+/g, " ");

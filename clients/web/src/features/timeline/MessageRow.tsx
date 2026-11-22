@@ -87,8 +87,8 @@ import {
   hasAnyAction,
 } from "@momo/core/features/timeline/model";
 import {
-  PIN_EMPTY_BODY_TEXT,
-  PIN_ROW_MARK,
+  PIN_EMPTY_BODY_KEY,
+  PIN_ROW_MARK_KEY,
 } from "@momo/core/features/timeline/pins";
 import {
   canQuoteMessage,
@@ -521,7 +521,7 @@ export function MessageRow({
   // 「내용 없는 메시지」는 사진이 달린 메시지에게 하는 말이 아니다. 리마인더는 이 줄을 저장해 두고
   // 목록에서 다시 보이므로 한 번 잘못 말하면 그 말이 남는다.
   const previewText =
-    message.body?.trim() || attachmentPreviewLine(attachments) || PIN_EMPTY_BODY_TEXT;
+    message.body?.trim() || attachmentPreviewLine(attachments) || formatMessage(PIN_EMPTY_BODY_KEY);
   const rollup = showRollup ? (listRollup === undefined ? threadRollup(message) : listRollup) : null;
   const showsEditedMark = message.state === "edited" && !editing;
   // 이슈 #1146 M3 — 이 행이 고정돼 있다는 흔적. 왜 그리는지·왜 이 줄인지·왜
@@ -1312,7 +1312,7 @@ export function MessageRow({
             {/* 「수정됨」 다음, 「답글 N개」 앞 — 본문에 대한 서술 다음이고 바깥
                 스레드로 나가는 문 앞이다. 안쪽에서 바깥쪽으로. */}
             {showsPinMark && (
-              <span data-testid="pin-mark">{PIN_ROW_MARK}</span>
+              <span data-testid="pin-mark">{formatMessage(PIN_ROW_MARK_KEY)}</span>
             )}
             {/* 접힌 반복의 개수 (goal P3 1-2). 알림 문장은 서버가 쓴 그대로 본문에
                 남고, 이 조각은 그 문장이 몇 번 반복될 뻔했는지만 덧붙인다 —
@@ -1582,16 +1582,17 @@ function DividerRow({
  * 있었다(`relativeLabel`, 스레드 롤업이 쓰던 것 — 요약 줄에서 시간 문구가 빠지며 #4878이 지웠다).
  */
 export function DayDivider({ atMs, nowMs }: { atMs: number; nowMs: number }) {
+  const formatMessage = useFormatMessage();
   return (
     <DividerRow
       testId="day-divider"
-      segments={dayDividerSegments(atMs, nowMs)}
+      segments={dayDividerSegments(formatMessage, atMs, nowMs)}
       tone={DIVIDER_TONE.day}
       padClass={DAY_DIVIDER_PAD_CLASS}
       extra={{
         // 눈은 「오늘」을 읽고 보조기술은 절대 날짜를 읽는다. 화면을 되돌아볼 수 없는
         // 사람에게 상대 표현만 남기는 것은 정보를 빼는 것이다 (typing 줄과 같은 판단).
-        "aria-label": dayDividerLabel(atMs, nowMs),
+        "aria-label": dayDividerLabel(formatMessage, atMs, nowMs),
         role: "separator",
       }}
     />
@@ -1606,14 +1607,15 @@ export function DayDivider({ atMs, nowMs }: { atMs: number; nowMs: number }) {
  * 그 선택은 팔레트를 손대는 사람에게 보이지 않았다.
  */
 export function UnreadDivider({ count }: { count: number }) {
+  const formatMessage = useFormatMessage();
   return (
     <DividerRow
       testId="unread-divider"
-      segments={unreadDividerSegments(count)}
+      segments={unreadDividerSegments(formatMessage, count)}
       tone={DIVIDER_TONE.unread}
       padClass={MARKER_DIVIDER_PAD_CLASS}
       extra={{
-        "aria-label": unreadDividerLabel(count),
+        "aria-label": unreadDividerLabel(formatMessage, count),
         role: "separator",
       }}
     />
@@ -1641,16 +1643,17 @@ export function RecoveryDivider({
   seq: number;
   source: "replay" | "backfill";
 }) {
+  const formatMessage = useFormatMessage();
   return (
     <DividerRow
       testId="recovery-divider"
-      segments={recoveryDividerSegments(seq, source)}
+      segments={recoveryDividerSegments(formatMessage, seq, source)}
       tone={DIVIDER_TONE.recovery}
       padClass={MARKER_DIVIDER_PAD_CLASS}
       extra={{
         "data-seq": seq,
         "data-source": source,
-        "aria-label": recoveryDividerLabel(source),
+        "aria-label": recoveryDividerLabel(formatMessage, source),
         role: "separator",
       }}
     />

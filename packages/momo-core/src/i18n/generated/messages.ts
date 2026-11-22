@@ -1700,6 +1700,17 @@ export const messageKeys = [
   "timeline.decisionStage.positionNone",
   "timeline.deletedFold.repeat",
   "timeline.deletedFold.tombstone",
+  "timeline.divider.dateFull",
+  "timeline.divider.dateMonthDay",
+  "timeline.divider.labelToday",
+  "timeline.divider.labelYesterday",
+  "timeline.divider.recovery",
+  "timeline.divider.recoveryLabel",
+  "timeline.divider.recoveryLabelReread",
+  "timeline.divider.recoveryReread",
+  "timeline.divider.today",
+  "timeline.divider.unread",
+  "timeline.divider.yesterday",
   "timeline.edited.atDate",
   "timeline.edited.atDay",
   "timeline.edited.atTime",
@@ -1743,6 +1754,17 @@ export const messageKeys = [
   "timeline.memberPanel.requestSpoken",
   "timeline.memberPanel.rowActions",
   "timeline.memberPanel.stageSpoken",
+  "timeline.pins.emptyBody",
+  "timeline.pins.listCount",
+  "timeline.pins.listEmptyDetail",
+  "timeline.pins.listEmptyHeadline",
+  "timeline.pins.listEmptySentence",
+  "timeline.pins.listFailedDetail",
+  "timeline.pins.listFailedHeadline",
+  "timeline.pins.listFailedSentence",
+  "timeline.pins.listNone",
+  "timeline.pins.rowMark",
+  "timeline.pins.stamp",
   "timeline.quote.head",
   "timeline.quote.headUnnamed",
   "timeline.reaction.chipMine",
@@ -4107,6 +4129,31 @@ export const argumentSpecs = {
     "count": "string"
   },
   "timeline.deletedFold.tombstone": {},
+  "timeline.divider.dateFull": {
+    "day": "string",
+    "month": "string",
+    "year": "string"
+  },
+  "timeline.divider.dateMonthDay": {
+    "day": "string",
+    "month": "string"
+  },
+  "timeline.divider.labelToday": {
+    "date": "string"
+  },
+  "timeline.divider.labelYesterday": {
+    "date": "string"
+  },
+  "timeline.divider.recovery": {},
+  "timeline.divider.recoveryLabel": {},
+  "timeline.divider.recoveryLabelReread": {},
+  "timeline.divider.recoveryReread": {},
+  "timeline.divider.today": {},
+  "timeline.divider.unread": {
+    "count": "number",
+    "figure": "string"
+  },
+  "timeline.divider.yesterday": {},
   "timeline.edited.atDate": {
     "date": "string",
     "time": "string"
@@ -4198,6 +4245,21 @@ export const argumentSpecs = {
   },
   "timeline.memberPanel.stageSpoken": {
     "stage": "string"
+  },
+  "timeline.pins.emptyBody": {},
+  "timeline.pins.listCount": {
+    "count": "number"
+  },
+  "timeline.pins.listEmptyDetail": {},
+  "timeline.pins.listEmptyHeadline": {},
+  "timeline.pins.listEmptySentence": {},
+  "timeline.pins.listFailedDetail": {},
+  "timeline.pins.listFailedHeadline": {},
+  "timeline.pins.listFailedSentence": {},
+  "timeline.pins.listNone": {},
+  "timeline.pins.rowMark": {},
+  "timeline.pins.stamp": {
+    "date": "string"
   },
   "timeline.quote.head": {
     "name": "string"
@@ -6253,6 +6315,17 @@ export interface MessageArgs {
   "timeline.decisionStage.positionNone": Record<string, never>;
   "timeline.deletedFold.repeat": { count: string };
   "timeline.deletedFold.tombstone": Record<string, never>;
+  "timeline.divider.dateFull": { day: string; month: string; year: string };
+  "timeline.divider.dateMonthDay": { day: string; month: string };
+  "timeline.divider.labelToday": { date: string };
+  "timeline.divider.labelYesterday": { date: string };
+  "timeline.divider.recovery": Record<string, never>;
+  "timeline.divider.recoveryLabel": Record<string, never>;
+  "timeline.divider.recoveryLabelReread": Record<string, never>;
+  "timeline.divider.recoveryReread": Record<string, never>;
+  "timeline.divider.today": Record<string, never>;
+  "timeline.divider.unread": { count: number; figure: string };
+  "timeline.divider.yesterday": Record<string, never>;
   "timeline.edited.atDate": { date: string; time: string };
   "timeline.edited.atDay": { day: string; time: string };
   "timeline.edited.atTime": { time: string };
@@ -6296,6 +6369,17 @@ export interface MessageArgs {
   "timeline.memberPanel.requestSpoken": { text: string };
   "timeline.memberPanel.rowActions": { name: string };
   "timeline.memberPanel.stageSpoken": { stage: string };
+  "timeline.pins.emptyBody": Record<string, never>;
+  "timeline.pins.listCount": { count: number };
+  "timeline.pins.listEmptyDetail": Record<string, never>;
+  "timeline.pins.listEmptyHeadline": Record<string, never>;
+  "timeline.pins.listEmptySentence": Record<string, never>;
+  "timeline.pins.listFailedDetail": Record<string, never>;
+  "timeline.pins.listFailedHeadline": Record<string, never>;
+  "timeline.pins.listFailedSentence": Record<string, never>;
+  "timeline.pins.listNone": Record<string, never>;
+  "timeline.pins.rowMark": Record<string, never>;
+  "timeline.pins.stamp": { date: string };
   "timeline.quote.head": { name: string };
   "timeline.quote.headUnnamed": Record<string, never>;
   "timeline.reaction.chipMine": { count: number; emoji: string; names: string };

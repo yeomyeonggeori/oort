@@ -115,10 +115,11 @@ function canonicalPinCopy(root) {
   // #1149 M2·M4 — 행의 표지, 빈 본문의 서술, 그리고 그 서술 앞에 서는 주(註)
   // 기호. 셋 다 코어에서 읽는 이유는 위와 같다: 게이트가 문자열을 다시 적으면
   // 정본이 바뀐 날 게이트만 혼자 초록으로 남는다.
-  const rowMark = /export const PIN_ROW_MARK = "([^"]+)";/.exec(pins);
-  const emptyBody = /export const PIN_EMPTY_BODY_TEXT = "([^"]+)";/.exec(pins);
-  if (!rowMark || !emptyBody) {
-    throw new Error("PIN_ROW_MARK / PIN_EMPTY_BODY_TEXT 를 코어에서 찾지 못했다");
+  // 두 낱말도 한국어 사전이 정본이다(#6044): 코어는 키(`timeline.pins.rowMark` · `timeline.pins.emptyBody`)만 안다.
+  const rowMark = [null, catalog["timeline.pins.rowMark"]];
+  const emptyBody = [null, catalog["timeline.pins.emptyBody"]];
+  if (!rowMark[1] || !emptyBody[1]) {
+    throw new Error("timeline.pins.rowMark / timeline.pins.emptyBody 를 한국어 사전에서 찾지 못했다");
   }
   const voice = readFileSync(
     resolve(root, "../../packages/momo-core/src/features/timeline/appVoice.ts"),
