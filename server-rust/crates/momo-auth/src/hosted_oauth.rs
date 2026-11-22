@@ -390,17 +390,21 @@ pub async fn approve_hosted_oauth_request_in_tx(
         return Ok(Err(HostedOauthRefusal::Expired));
     }
 
-    // Every approved channel must be a live, non-DM channel of this workspace.
+    // Every approved channel must be a live, non-DM channel of this workspace that is
+    // open to people or one the agent already sits in (ADR-0224 D13, `crate::channel_open`).
     // Counting first keeps the membership insert all-or-nothing.
-    let valid_channels: i64 = sqlx::query_scalar(
+    let valid_sql = format!(
         "SELECT count(*)::bigint FROM unnest($2::uuid[]) channel_id \
           WHERE EXISTS (SELECT 1 FROM channel c WHERE c.workspace_id = $1 AND c.id = channel_id \
-                          AND c.archived_at IS NULL AND c.kind <> 'dm')",
-    )
-    .bind(workspace_id)
-    .bind(approved_channel_ids)
-    .fetch_one(&mut *conn)
-    .await?;
+                          AND c.archived_at IS NULL AND c.kind <> 'dm' AND {})",
+        crate::channel_open::channel_open_to_member_sql("c", "$3"),
+    );
+    let valid_channels: i64 = sqlx::query_scalar(&valid_sql)
+        .bind(workspace_id)
+        .bind(approved_channel_ids)
+        .bind(agent_member_id)
+        .fetch_one(&mut *conn)
+        .await?;
     if valid_channels != approved_channel_ids.len() as i64 {
         return Ok(Err(HostedOauthRefusal::InvalidApproval));
     }

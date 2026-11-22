@@ -1499,7 +1499,8 @@ async fn roster_online_is_read_from_the_transport_only_for_rows_the_viewer_may_s
             // lower-case on purpose: the id is the same person however it is spelled
             team.alice.id.to_string().to_lowercase(),
             broker_user(team.guest.id),
-            // people the roster never lists to anyone:
+            // an agent (no availability), a suspended person (listed only to an
+            // owner/admin who asks, since #5814, never with availability), a stranger:
             broker_user(team.agent),
             broker_user(team.suspended.id),
             broker_user(stranger.id),
@@ -1566,6 +1567,32 @@ async fn roster_online_is_read_from_the_transport_only_for_rows_the_viewer_may_s
         assert!(
             !owner_text.contains(&forbidden),
             "{forbidden} reached a response: {owner_text}"
+        );
+    }
+
+    // #5814: the owner's members tab asks for suspended people. The row is listed
+    // (so the suspension can be undone from the screen) but never with
+    // availability, whatever the broker says.
+    let asked = get(
+        &http,
+        &base,
+        &owner_token,
+        &format!("{roster_path}?include=suspended"),
+    )
+    .await;
+    assert_eq!(asked.status, 200, "{}", asked.body);
+    let body = &asked.body;
+    let suspended_row = row_by_id(body, team.suspended.id);
+    assert_eq!(suspended_row["status"], json!("suspended"), "{body}");
+    assert!(
+        suspended_row.get("online").is_none(),
+        "a suspended member carries no availability, whatever the broker says: {body}"
+    );
+    let asked_text = body.to_string();
+    for forbidden in [stranger.id.to_string(), BROKER_CLIENT_SENTINEL.to_string()] {
+        assert!(
+            !asked_text.contains(&forbidden),
+            "{forbidden} reached a response: {asked_text}"
         );
     }
 

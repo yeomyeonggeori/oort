@@ -58,14 +58,14 @@ const person = (id, kind, displayName, handle, extra = {}) => ({
   channelIds: [CH], capabilities: [], createdAtMs: 0, updatedAtMs: 0, ...extra,
 });
 const roster = [
-  person(memberId, "human", "곽성재", "seongjae", { role: "owner" }),
+  person(memberId, "human", "한지후", "jihu", { role: "owner" }),
   person(peerId, "human", "이도현", "dohyun"),
 ];
 const channels = [{ id: CH, workspaceId, kind: "public", name: "간판-시안", muted: false }];
 const auth = {
   accessToken: "capture-only-not-a-credential",
   refreshToken: "capture-only-not-a-credential",
-  member: { id: memberId, workspaceId, kind: "human", displayName: "곽성재", handle: "seongjae" },
+  member: { id: memberId, workspaceId, kind: "human", displayName: "한지후", handle: "jihu" },
   realtimeWebSocketUrl: "ws://lightbox-5190-capture.invalid/connection/websocket",
 };
 

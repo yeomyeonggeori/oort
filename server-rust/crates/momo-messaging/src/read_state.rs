@@ -94,6 +94,17 @@ pub struct ReadStateProjection {
     /// closed the channel (and for every non-DM channel). The join that fills it carries
     /// `member_id = <requester>`; another member's closure is never visible here.
     pub closed_at_seq: Option<i64>,
+    /// ADR-0124 증보 4 (#5667): the unread replies in the threads the requester **follows** in this
+    /// channel — the sum of the thread summary's `unread_reply_count` over those threads
+    /// ([`crate::thread_follow::followed_unread_by_channel_in_tx`]). `0` when they follow nothing here
+    /// or have read it all. Like the two fields above, only the list projection says it.
+    pub followed_unread_reply_count: i64,
+    /// ADR-0177 증보 D18 (#5822): the **requester's own** `membership.history_from_seq` — "I read this
+    /// channel from this seq on" after leaving a 1:1 — or `None` (full history). Read off the
+    /// requester's own membership row, which is the row this projection is built from, so another
+    /// member's floor can never ride it. Like the closure watermark, only the list projection says
+    /// it (no frame, no PUT response).
+    pub history_from_seq: Option<i64>,
 }
 
 /// Why a read-state advertisement was sent (ADR-0178 D4).
@@ -293,6 +304,11 @@ pub async fn list_read_state(
 /// only separates workspaces, so that member predicate is the whole of the member boundary: without
 /// it one member's closure would ride another member's rows (and a second closer would duplicate the
 /// row). `dm_closure`'s primary key `(member_id, channel_id)` makes the join at most one row.
+///
+/// ADR-0124 증보 4 (#5667) adds `followed_unread_reply_count` from a **second statement** that owns
+/// the `thread_follow` side ([`crate::thread_follow::followed_unread_by_channel_in_tx`]), so the
+/// statement above — and every value it returns — stays exactly as it was. Only channels that have a
+/// line here get a number: a channel the member left, or that is archived, counts nowhere.
 pub async fn list_read_state_projection(
     conn: &mut PgConnection,
     workspace_id: Uuid,
@@ -307,7 +323,8 @@ pub async fn list_read_state_projection(
                 COALESCE(rs.mention_count, 0)::int AS mention_count, \
                 rs.marked_unread_before_seq, \
                 COALESCE(cs.last_readable_seq, 0)::bigint AS latest_readable_seq, \
-                dc.closed_at_seq \
+                dc.closed_at_seq, \
+                ms.history_from_seq \
            FROM membership ms \
            JOIN channel c \
              ON c.id = ms.channel_id \
@@ -332,12 +349,20 @@ pub async fn list_read_state_projection(
     .bind(member_id)
     .fetch_all(&mut *conn)
     .await?;
+    let followed_unread =
+        crate::thread_follow::followed_unread_by_channel_in_tx(&mut *conn, workspace_id, member_id)
+            .await?;
     rows.iter()
         .map(|row| {
+            let state = decode_read_state(row)?;
+            let followed_unread_reply_count =
+                followed_unread.get(&state.channel_id).copied().unwrap_or(0);
             Ok(ReadStateProjection {
-                state: decode_read_state(row)?,
+                state,
                 latest_readable_seq: row.try_get("latest_readable_seq")?,
                 closed_at_seq: row.try_get("closed_at_seq")?,
+                followed_unread_reply_count,
+                history_from_seq: row.try_get("history_from_seq")?,
             })
         })
         .collect::<Result<_, sqlx::Error>>()

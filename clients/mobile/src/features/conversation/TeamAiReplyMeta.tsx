@@ -6,7 +6,7 @@ import {
   TEAM_AI_SOURCES_LABEL,
   type TeamAiReplyMeta as Meta,
 } from '@momo/core/features/timeline/teamAiReply';
-import {font, line, radius, slopTo, space, TOUCH_TARGET, type Palette} from '../../design/tokens';
+import {font, line, PRESSED_OPACITY, radius, slopTo, space, TOUCH_TARGET, type Palette} from '../../design/tokens';
 import {Sentence} from '../../design/atoms';
 import {useStyles} from '../../design/theme';
 import {openLink} from './MessageBody';
@@ -227,6 +227,6 @@ function build(color: Palette) {
       lineHeight: line.meta,
       color: color.textMuted,
     },
-    pressed: {opacity: 0.6},
+    pressed: {opacity: PRESSED_OPACITY},
   });
 }

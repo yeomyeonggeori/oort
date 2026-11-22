@@ -512,6 +512,46 @@ pub struct SocketShared {
     pub share: Option<Arc<dyn crate::client::ShareRelay>>,
 }
 
+/// This run's control-socket secret (#5619): every request must carry it.
+///
+/// The desktop app makes a new one for each `run` it starts — 32 random
+/// bytes, written as 64 lower-case hex digits — and hands it over on the
+/// child's stdin, so it never appears in an argument, the environment, a file
+/// or a log line. A same-user process that is not the app has no way to read
+/// it. It has no `Debug` and no `Display` on purpose.
+pub struct ControlSecret(String);
+
+impl ControlSecret {
+    /// The digits in one secret.
+    pub const HEX_DIGITS: usize = 64;
+
+    /// The line exactly as the app writes it (one trailing newline allowed);
+    /// anything else is no secret.
+    pub fn parse(line: &str) -> Option<Self> {
+        let digits = line.strip_suffix('\n').unwrap_or(line);
+        let well_formed = digits.len() == Self::HEX_DIGITS
+            && digits
+                .bytes()
+                .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b));
+        well_formed.then(|| Self(digits.to_string()))
+    }
+
+    /// Whether `presented` is this secret. Every byte is compared, so the time
+    /// taken does not say how many leading digits were right.
+    pub fn admits(&self, presented: Option<&str>) -> bool {
+        let Some(presented) = presented else {
+            return false;
+        };
+        let (own, presented) = (self.0.as_bytes(), presented.as_bytes());
+        own.len() == presented.len()
+            && own
+                .iter()
+                .zip(presented)
+                .fold(0u8, |differ, (a, b)| differ | (a ^ b))
+                == 0
+    }
+}
+
 /// The heartbeat's last outcome, which the desktop app reads through the
 /// control socket's `status` (#2778).
 #[derive(Debug, Default)]

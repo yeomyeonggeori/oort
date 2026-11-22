@@ -257,6 +257,32 @@ afterEach(() => {
   resetAgentWorking();
 });
 
+describe("채널 멤버 패널의 정지된 사람 (#5781)", () => {
+  // 소유자·관리자의 명부는 정지된 사람도 `status: "suspended"` 로 싣는다(#5814, `online` 없음, 선언 상태는 남음).
+  const SUSPENDED = "00000000-0000-7000-8000-000000000105";
+  const withSuspended = [
+    ...MEMBERS,
+    member(SUSPENDED, "human", "한지민", "jimin", { status: "suspended", presenceStatus: "away" }),
+  ];
+
+  it("머리 수는 활성만, 정지된 사람은 맨 아래 「정지됨」 묶음에 접속 점·낱말 없이 선다", async () => {
+    await mount(withSuspended);
+    const count = document.querySelector<HTMLElement>('[data-testid="channel-member-count"]')!;
+    expect(count.textContent).toBe(String(MEMBERS.length));
+    expect(count.getAttribute("aria-label")).toBe(`채널 멤버 ${MEMBERS.length}명`);
+    await openKnown();
+    const all = sections();
+    expect(all.at(-1)).toEqual({ group: "suspended", heading: "정지됨 1", ids: [SUSPENDED] });
+    // 활성 묶음들의 합이 머리 수다.
+    expect(all.filter((s) => s.group !== "suspended").reduce((n, s) => n + s.ids.length, 0)).toBe(MEMBERS.length);
+    const row = rowOf(SUSPENDED)!;
+    expect(row.querySelector('[data-testid="avatar-with-presence"]')?.getAttribute("data-presence-tone")).toBeNull();
+    expect(row.querySelector('[data-testid="channel-member-now"]')?.getAttribute("data-now")).toBe("none");
+    expect(row.querySelector(".sr-only")?.textContent).toBe("한지민, @jimin");
+    expect(panel()?.textContent).toContain(`design-lab 채널의 멤버 ${MEMBERS.length}명입니다.`);
+  });
+});
+
 describe("채널 멤버 패널의 「지금」 (#5686)", () => {
   it("닫혀 있으면 읽지 않고, 열면 「지금 실행 중」 한 번 + 생존은 에이전트 수만큼", async () => {
     await mount();

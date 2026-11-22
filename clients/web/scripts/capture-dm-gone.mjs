@@ -37,7 +37,7 @@ const person = (id, displayName, handle, extra = {}) => ({
   id, workspaceId, kind: "human", status: "active", displayName, handle, channelCount: 1, channelIds: [],
   capabilities: [], createdAtMs: 0, updatedAtMs: 0, ...extra,
 });
-const roster = [person(memberId, "곽성재", "kwak", { role: "owner" }), person(seoId, "서연", "seoyeon")];
+const roster = [person(memberId, "한지후", "han", { role: "owner" }), person(seoId, "서연", "seoyeon")];
 const NOW = Date.now();
 const DAY = 86_400_000;
 const msg = (channelId, seq, authorMemberId, body, daysAgo, extra = {}) => ({
@@ -57,7 +57,7 @@ const json = (route, body) => route.fulfill({ status: 200, contentType: "applica
 async function open(browser, origin, scheme, hash) {
   const auth = {
     accessToken: "capture-only-not-a-credential", refreshToken: "capture-only-not-a-credential",
-    member: { id: memberId, workspaceId, kind: "human", displayName: "곽성재", handle: "kwak" },
+    member: { id: memberId, workspaceId, kind: "human", displayName: "한지후", handle: "han" },
     realtimeWebSocketUrl: "ws://dm-gone-capture.invalid/connection/websocket",
   };
   const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, colorScheme: scheme, serviceWorkers: "block" });

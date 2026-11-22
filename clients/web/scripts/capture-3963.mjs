@@ -68,7 +68,7 @@ const person = (n, displayName, handle, extra = {}) => ({
   id: P(n), workspaceId, kind: "human", status: "active", displayName, handle, channelCount: 1, channelIds: [], capabilities: [], createdAtMs: 0, updatedAtMs: 0, ...extra,
 });
 const roster = [
-  person("01", "곽성재", "seongjae", { role: "owner", presenceStatus: "auto" }),
+  person("01", "한지후", "jihu", { role: "owner", presenceStatus: "auto" }),
   person("11", "이도현", "dohyun"),
   person("12", "박서연", "seoyeon"),
   // 긴 이름(한글+부가 설명): 쉴 때도 잘리고, X가 서면 X 왼쪽에서 다시 잘려야 한다.
@@ -111,7 +111,7 @@ const wireRead = (state, id) => ({
 async function installMocks(context, state) {
   const auth = {
     accessToken: "capture-only-not-a-credential", refreshToken: "capture-only-not-a-credential",
-    member: { id: memberId, workspaceId, kind: "human", displayName: "곽성재", handle: "seongjae" },
+    member: { id: memberId, workspaceId, kind: "human", displayName: "한지후", handle: "jihu" },
     realtimeWebSocketUrl: "ws://sidebar-row-3963-capture.invalid/connection/websocket",
   };
   await context.route("**/v1/**", async (route) => {

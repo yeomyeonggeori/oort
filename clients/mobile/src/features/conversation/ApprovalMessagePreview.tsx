@@ -6,7 +6,7 @@ import type {AgentApprovalCard} from '@momo/core/features/timeline/agentCardMode
 import React from 'react';
 import {Pressable, StyleSheet, Text} from 'react-native';
 import {useStyles} from '../../design/theme';
-import {font, line, space, TOUCH_TARGET, type Palette} from '../../design/tokens';
+import {font, line, PRESSED_OPACITY, space, TOUCH_TARGET, type Palette} from '../../design/tokens';
 
 // =============================================================================
 // 고정·고정 풀기 승인 카드의 「전문 보기」 (ADR-0186 증보 v5 U-e, #4705)
@@ -75,5 +75,5 @@ const buildStyles = (color: Palette) =>
       color: color.accentText,
       textDecorationLine: 'underline',
     },
-    pressed: {opacity: 0.6},
+    pressed: {opacity: PRESSED_OPACITY},
   });

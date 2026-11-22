@@ -43,13 +43,13 @@ const chByName = Object.fromEntries(channels.map((c) => [c.name, c]));
 const auth = {
   accessToken: "capture-only-not-a-credential",
   refreshToken: "capture-only-not-a-credential",
-  member: { id: memberId, workspaceId, kind: "human", displayName: "곽성재", handle: "seongjae" },
+  member: { id: memberId, workspaceId, kind: "human", displayName: "한지후", handle: "jihu" },
   realtimeWebSocketUrl: "ws://share-capture.invalid/connection/websocket",
 };
 const roster = [
   {
-    id: memberId, workspaceId, kind: "human", status: "active", role: "owner", displayName: "곽성재",
-    handle: "seongjae", channelCount: 4, channelIds: channels.map((c) => c.id), capabilities: [],
+    id: memberId, workspaceId, kind: "human", status: "active", role: "owner", displayName: "한지후",
+    handle: "jihu", channelCount: 4, channelIds: channels.map((c) => c.id), capabilities: [],
     createdAtMs: 0, updatedAtMs: 0,
   },
 ];
@@ -89,7 +89,7 @@ function boardRow(world, id, now) {
   const sec = Math.floor(now / 1000);
   return {
     sessionId: id, origin: "local_pty", label: s.label, folderLabel: s.folderLabel, status: "running",
-    owner: { memberId, displayName: "곽성재" }, homeChannel: { id: ch.id, name: ch.name },
+    owner: { memberId, displayName: "한지후" }, homeChannel: { id: ch.id, name: ch.name },
     repo: sum.repo, branch: sum.branch, harness: sum.harness, state: sum.state, stages: sum.stages,
     diff: sum.diff, prUrl: sum.prUrl, lastActivityAt: sum.lastActivityAt ?? sec,
     endedAtMs: null, startedAtMs: now - 600_000, sharedAtMs: now - 60_000,

@@ -129,7 +129,7 @@ describe('로그아웃 — 이 기기의 못 보낸 글도 지운다', () => {
       }
       render(
         <QueryClientProvider client={new QueryClient({defaultOptions: {queries: {retry: false, gcTime: 0}}})}>
-          <SessionProvider member={{id: SELF, workspaceId: 'ws-1', displayName: '곽성재'} as never}>
+          <SessionProvider member={{id: SELF, workspaceId: 'ws-1', displayName: '한지후'} as never}>
             <Probe />
           </SessionProvider>
         </QueryClientProvider>,

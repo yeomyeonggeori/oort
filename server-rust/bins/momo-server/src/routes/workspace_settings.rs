@@ -21,8 +21,10 @@ use momo_settings::{
     TEAM_AI_LIMIT_MONTHLY_USD, TEAM_AI_ROLES_SETTING,
 };
 use momo_workspace_actions::team_ai::TeamAiWorkspace;
+use momo_workspace_actions::team_ai_hermes::operator_env_pin_resolves;
 use momo_workspace_actions::team_ai_limits::{
-    limits_status_in_tx, monthly_usd_availability_in_tx, OperatorCaps, UsdAvailability,
+    limits_status_in_tx, monthly_usd_availability_in_tx, DelegationProcessFacts, OperatorCaps,
+    UsdAvailability,
 };
 use momo_workspace_actions::team_ai_roles::{
     changed_keys, memory_prerequisite_in_tx, record_notice_in_tx, roles_changed_audit,
@@ -82,13 +84,23 @@ async fn with_limits_status(
     conn: &mut momo_db::PgConnection,
     workspace_id: Uuid,
     caps: &OperatorCaps,
+    process: &DelegationProcessFacts,
     mut bag: Value,
 ) -> Result<Value, momo_db::DbError> {
-    let status = limits_status_in_tx(conn, workspace_id, caps).await?;
+    let status = limits_status_in_tx(conn, workspace_id, caps, process).await?;
     if let Value::Object(map) = &mut bag {
         map.insert(INCLUDE_LIMITS_STATUS.to_string(), status);
     }
     Ok(bag)
+}
+
+/// ADR-0201 증보 v4 P8 (#5374): this process's half of the delegation door's facts for the status read —
+/// G4's declarations as the api reads them and whether an `operator_env` pin resolves here (G5).
+fn delegation_process_facts(state: &AppState) -> DelegationProcessFacts {
+    DelegationProcessFacts {
+        declarations: state.team_ai_hermes.clone(),
+        env_pin_resolves: operator_env_pin_resolves(&state.settings.env_provider),
+    }
 }
 
 /// ADR-0201 증보 v3 B9-2: a monthly dollar limit is a promise the server can only keep if it can
@@ -126,13 +138,21 @@ pub async fn get(
     require_workspace_operator(&state, &principal, workspace_id).await?;
     let include_status = wants_limits_status(&query)?;
     let caps = state.team_ai_caps;
+    let process = delegation_process_facts(&state);
     let outcome: DbRejectable<Value> = agent_tenant_tx(&state.pool, workspace_id, move |conn| {
         Box::pin(async move {
             match read_workspace_settings(conn, workspace_id).await? {
                 Some(settings) => {
                     let bag = as_object(Some(settings));
                     if include_status {
-                        Ok(Ok(with_limits_status(conn, workspace_id, &caps, bag).await?))
+                        Ok(Ok(with_limits_status(
+                            conn,
+                            workspace_id,
+                            &caps,
+                            &process,
+                            bag,
+                        )
+                        .await?))
                     } else {
                         Ok(Ok(bag))
                     }
@@ -166,6 +186,7 @@ pub async fn patch(
     let notice = take_screen_notice(&mut request)
         .map_err(|error| ApiError::bad_request(error.to_string()))?;
     let caps = state.team_ai_caps;
+    let process = delegation_process_facts(&state);
     let member_id = principal.member_id;
     let via = audit_via_token_id(&principal);
     let patch_keys: Vec<String> = request
@@ -307,7 +328,14 @@ pub async fn patch(
             }
             let bag = as_object(Some(stored));
             if include_status {
-                Ok(Ok(with_limits_status(conn, workspace_id, &caps, bag).await?))
+                Ok(Ok(with_limits_status(
+                    conn,
+                    workspace_id,
+                    &caps,
+                    &process,
+                    bag,
+                )
+                .await?))
             } else {
                 Ok(Ok(bag))
             }

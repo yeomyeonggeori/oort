@@ -43,8 +43,8 @@ const SESSION = {
     id: ME,
     workspaceId: WORKSPACE_ID,
     kind: "human",
-    displayName: "곽성재",
-    handle: "seongjae",
+    displayName: "한지후",
+    handle: "jihu",
   },
   realtimeWebSocketUrl: `ws://127.0.0.1:${PORT + 900}/connection/websocket`,
 };
@@ -66,8 +66,8 @@ const ROSTER = [
     kind: "human",
     status: "active",
     role: "owner",
-    displayName: "곽성재",
-    handle: "seongjae",
+    displayName: "한지후",
+    handle: "jihu",
     channelCount: 1,
     channelIds: [GENERAL_ID],
     capabilities: [],
@@ -102,7 +102,7 @@ const OPENER = {
   authorMemberId: AGENT,
   type: "text",
   body:
-    "안녕하세요 @곽성재님, 저는 이 맥의 Claude Code로 돌아가는 성재님의 에이전트예요. 여기서 부르면 바로 일을 받아요. 오늘 무엇부터 같이 할까요?",
+    "안녕하세요 @한지후님, 저는 이 맥의 Claude Code로 돌아가는 성재님의 에이전트예요. 여기서 부르면 바로 일을 받아요. 오늘 무엇부터 같이 할까요?",
   state: "sent",
   createdAtMs: NOW - 60_000,
 };
@@ -139,7 +139,7 @@ async function installMocks(context, { linked }) {
   await context.route("**/v1/workspaces/*/channels", (route) =>
     json(route, { channels: CHANNELS })
   );
-  await context.route("**/v1/workspaces/*/roster", (route) =>
+  await context.route("**/v1/workspaces/*/roster*", (route) =>
     json(route, { members: ROSTER })
   );
   await context.route("**/v1/workspaces/*/channels/*/messages*", (route) => {
@@ -208,7 +208,7 @@ async function openGeneral(context, cardState) {
   const page = await context.newPage();
   await page.goto(ORIGIN, { waitUntil: "networkidle" });
   await advanceToAccount(page);
-  await page.getByTestId("login-email").fill("seongjae@dawn.example");
+  await page.getByTestId("login-email").fill("jihu@dawn.example");
   await page.getByTestId("login-password").fill("capture-only-not-a-credential");
   await page.getByTestId("login-submit").click();
   await page.getByTestId("channel-list").waitFor({ state: "visible" });

@@ -1,7 +1,11 @@
 import { describe, expect, it } from "vitest";
 import type { Message } from "../../lib/api";
 import { TURN_STATUS_LABEL, type AgentTurnStatus } from "./agentCardModel";
-import { artifactNote, isProvisional, rowPresentation } from "./rowModel";
+import { artifactNote, isProvisional, rowPresentation as presentationAs } from "./rowModel";
+
+// #5577 — 이 파일의 픽스처는 모두 에이전트(게이트웨이·워커·도우미)가 쓴 서버 결과다. 사람·모르는 작성자는
+// `serverResultAuthor.test.ts` 가 잰다.
+const rowPresentation = (message: Message) => presentationAs(message, "agent");
 
 // =============================================================================
 // The precedence chain one timeline row runs (MOMO-620 R1).

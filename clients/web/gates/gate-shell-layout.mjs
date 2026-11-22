@@ -182,8 +182,8 @@ const SESSION = {
     id: ME,
     workspaceId: WORKSPACE_ID,
     kind: "human",
-    displayName: "곽성재",
-    handle: "seongjae",
+    displayName: "한지후",
+    handle: "jihu",
   },
   realtimeWebSocketUrl: `ws://127.0.0.1:${PORT + 900}/connection/websocket`,
 };
@@ -216,7 +216,7 @@ const TEAM = [
 ];
 
 const ROSTER = [
-  { id: ME, workspaceId: WORKSPACE_ID, kind: "human", status: "active", role: "owner", displayName: "곽성재", handle: "seongjae", channelCount: CHANNEL_IDS.length, channelIds: CHANNEL_IDS, capabilities: [], createdAtMs: 0, updatedAtMs: 0 },
+  { id: ME, workspaceId: WORKSPACE_ID, kind: "human", status: "active", role: "owner", displayName: "한지후", handle: "jihu", channelCount: CHANNEL_IDS.length, channelIds: CHANNEL_IDS, capabilities: [], createdAtMs: 0, updatedAtMs: 0 },
   { id: HERMES, workspaceId: WORKSPACE_ID, kind: "agent", status: "active", role: "member", displayName: "hermes", handle: "hermes", channelCount: CHANNEL_IDS.length, channelIds: CHANNEL_IDS, capabilities: ["code"], ownerHumanId: ME, agentModel: "hermes-agent", createdAtMs: 0, updatedAtMs: 0 },
   ...TEAM.map(([displayName, handle, role], i) => ({
     id: `019f9a01-0000-7000-8000-0000000004${String(i).padStart(2, "0")}`,
@@ -441,7 +441,8 @@ async function installMocks(context) {
   await context.route("**/v1/workspaces/*/channels", (route) =>
     json(route, { channels: CHANNELS })
   );
-  await context.route("**/v1/workspaces/*/roster", (route) =>
+  // 웹 명부 읽기는 `?include=suspended` 를 단다(#5781): 쿼리까지 받게 끝에 `*`.
+  await context.route("**/v1/workspaces/*/roster*", (route) =>
     json(route, { members: ROSTER })
   );
   await context.route("**/v1/workspaces/*/read-state", (route) =>
@@ -489,7 +490,7 @@ async function installMocks(context) {
       availability: "ok",
       keyConfigured: true,
       updatedAtMs: Date.now(),
-      updatedBy: "곽성재",
+      updatedBy: "한지후",
       diagnostics: [LONG_KO, LONG_KO],
     })
   );
@@ -665,7 +666,7 @@ async function assertShellHeld(page, label, shotName) {
 
 async function signIn(page) {
   await advanceToAccount(page);
-  await page.getByTestId("login-email").fill("seongjae@dawn.example");
+  await page.getByTestId("login-email").fill("jihu@dawn.example");
   await page.getByTestId("login-password").fill("gate-only-not-a-credential");
   await page.getByTestId("login-submit").click();
   await page.getByTestId("channel-list").waitFor({ state: "visible" });
@@ -726,7 +727,8 @@ async function assertDesktopSidebarFocusMode(page, size) {
       before.sidebarWidth === SIDEBAR_WIDTH &&
       before.titlebarHoldsToggle === true &&
       before.buttonName === "탐색 패널 접기" &&
-      before.buttonTitle === "탐색 패널 접기 (⌘B)" &&
+      before.buttonTitle === null && // 네이티브 title 없음(#5779): 눈으로 보는 이름은 공용 Tooltip이고 글은 AppTitlebar.test.tsx가 잰다
+      
       before.buttonHasIcon === true &&
       before.buttonControls === "sidebar-channel-pane" &&
       before.buttonExpanded === "true",
@@ -854,7 +856,8 @@ async function assertDesktopSidebarFocusMode(page, size) {
       collapsed.sidebarInert === false &&
       collapsed.focus === "sidebar-toggle" &&
       collapsed.buttonName === "탐색 패널 열기" &&
-      collapsed.buttonTitle === "탐색 패널 열기 (⌘B)" &&
+      collapsed.buttonTitle === null && // 위와 같다(#5779)
+      
       collapsed.buttonHasIcon === true &&
       collapsed.buttonControls === "sidebar-channel-pane" &&
       collapsed.buttonExpanded === "false",

@@ -299,14 +299,37 @@ pub(crate) fn origin_json(row: &PgRow) -> Result<Value, Error> {
     }
     Ok(origin)
 }
+/// #5899: on an approval card a link is its host alone (`https://host/`). Every candidate of a card
+/// is an agent's proposal, so the path, and anything the agent put in it, stays off the card, its
+/// previews and its replays; a person's own draft (no `approval_id`) and a registered expression
+/// keep the stored `https://host/path`.
+fn card_link_host_only(origin: &mut Value) {
+    if origin.get("kind").and_then(Value::as_str) != Some("url") {
+        return;
+    }
+    let host = origin
+        .get("sourceUrl")
+        .and_then(Value::as_str)
+        .and_then(|link| link.strip_prefix("https://"))
+        .and_then(|rest| rest.split('/').next())
+        .filter(|authority| !authority.is_empty())
+        .map(|authority| format!("https://{authority}/"));
+    if let (Some(host), Some(object)) = (host, origin.as_object_mut()) {
+        object.insert("sourceUrl".into(), json!(host));
+    }
+}
 pub(crate) async fn draft_json(conn: &mut PgConnection, row: &PgRow) -> Result<Value, Error> {
     let ws: Uuid = row.try_get("workspace_id")?;
     let id: Uuid = row.try_get("id")?;
     let state: String = row.try_get("state")?;
+    let mut origin = origin_json(row)?;
+    if row.try_get::<Option<Uuid>, _>("approval_id")?.is_some() {
+        card_link_host_only(&mut origin);
+    }
     let mut v = serde_json::to_value(metadata(row)?).map_err(|_| Error::Invalid)?;
     let expires: chrono::DateTime<chrono::Utc> = row.try_get("expires_at")?;
     v.as_object_mut().ok_or(Error::Invalid)?.extend(json!({"draftId":id,"workspaceId":ws,"revision":row.try_get::<i64,_>("revision")?.to_string(),
-        "origin":origin_json(row)?,"expiresAtMs":expires.timestamp_millis(),"state":state,"code":row.try_get::<Option<String>,_>("code")?,
+        "origin":origin,"expiresAtMs":expires.timestamp_millis(),"state":state,"code":row.try_get::<Option<String>,_>("code")?,
         "media":if state=="ready" {media_json(conn,ws,id,true).await?} else {Value::Null}}).as_object().ok_or(Error::Invalid)?.clone());
     Ok(v)
 }

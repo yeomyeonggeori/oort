@@ -38,8 +38,8 @@ const SELF: Member = {
   id: SELF_ID,
   workspaceId: WS,
   kind: 'human',
-  displayName: '곽성재',
-  handle: 'seongjae',
+  displayName: '한지후',
+  handle: 'jihu',
 };
 
 const LOGIN_BODY = {
@@ -55,8 +55,8 @@ const ROSTER = [
     workspaceId: WS,
     kind: 'human',
     status: 'active',
-    displayName: '곽성재',
-    handle: 'seongjae',
+    displayName: '한지후',
+    handle: 'jihu',
     channelCount: 1,
     channelIds: [GENERAL],
     capabilities: [],
@@ -83,7 +83,7 @@ const MY_AGENT = {
   personalAgent: {
     label: '내 Claude Code',
     ownerId: SELF_ID,
-    ownerDisplayName: '곽성재',
+    ownerDisplayName: '한지후',
     harness: 'claude',
     enabled: true,
     mentionable: true,

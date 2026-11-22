@@ -79,7 +79,7 @@ vi.mock("@/features/workspace/useWorkspace", () => ({
     refetch: () => undefined,
     directory: {
       members: [
-        { id: ME, kind: "human", status: "active", role: h.role, displayName: "곽성재", handle: "seongjae" },
+        { id: ME, kind: "human", status: "active", role: h.role, displayName: "한지후", handle: "jihu" },
         ...h.others,
       ],
     },

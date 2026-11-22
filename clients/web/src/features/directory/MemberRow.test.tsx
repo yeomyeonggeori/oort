@@ -8,6 +8,9 @@ import type { RosterMember } from "@momo/core/lib/api";
 import { makeDirectory } from "@momo/core/features/workspace/directory";
 import { SessionProvider, type SessionContextValue } from "@/app/session";
 import { workspaceIdentityKey } from "@/features/workspace/useWorkspace";
+import { LocaleProvider } from "@/i18n/LocaleProvider";
+import type { AppLocale } from "@/i18n/localeStore";
+import { koreanLocale } from "@/testing/koLocale";
 import { MemberRow } from "./MemberRow";
 
 // The directory row (#4692): who is connected, said by the avatar-corner dot and
@@ -31,9 +34,11 @@ const reactActEnvironment = globalThis as typeof globalThis & {
 };
 let root: Root | null = null;
 let host: HTMLElement | null = null;
+let ko: AppLocale;
 
-beforeAll(() => {
+beforeAll(async () => {
   reactActEnvironment.IS_REACT_ACT_ENVIRONMENT = true;
+  ko = await koreanLocale();
 });
 
 afterEach(() => {
@@ -78,7 +83,8 @@ function sessionValue(connStatus: SessionContextValue["connStatus"]): SessionCon
 
 function render(
   row: RosterMember,
-  connStatus: SessionContextValue["connStatus"] = "connected"
+  connStatus: SessionContextValue["connStatus"] = "connected",
+  roster: RosterMember[] = [row]
 ): HTMLElement {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } });
   client.setQueryData(workspaceIdentityKey(WS), {
@@ -96,24 +102,27 @@ function render(
   root = createRoot(host);
   act(() =>
     root?.render(
-      createElement(
-        QueryClientProvider,
-        { client },
-        createElement(
-          SessionProvider,
-          { value: sessionValue(connStatus) },
+      createElement(LocaleProvider, {
+        locale: ko,
+        children: createElement(
+          QueryClientProvider,
+          { client },
           createElement(
-            "ul",
-            null,
-            createElement(MemberRow, {
-              member: row,
-              directory: makeDirectory([row]),
-              selfMemberId: ME,
-              onOpenProfile: () => undefined,
-            })
+            SessionProvider,
+            { value: sessionValue(connStatus) },
+            createElement(
+              "ul",
+              null,
+              createElement(MemberRow, {
+                member: row,
+                directory: makeDirectory(roster),
+                selfMemberId: ME,
+                onOpenProfile: () => undefined,
+              })
+            )
           )
-        )
-      )
+        ),
+      })
     )
   );
   return host;
@@ -168,5 +177,73 @@ describe("MemberRow: a person's availability (#4692)", () => {
     const cut = render({ ...own, online: true }, "disconnected");
     expect(dot(cut)?.getAttribute("data-tone")).toBe("muted");
     expect(name(cut)).toContain("오프라인");
+  });
+});
+
+// #5782: the row is the shared list row, two layers exactly, and the email is a
+// member's to see but not a guest's (owner 2026-11-14, 제안서 12번 추천).
+describe("MemberRow: two layers and the email (#5782)", () => {
+  const subtitle = (el: HTMLElement) =>
+    el.querySelector('[data-testid="directory-row-subtitle"]')?.textContent ?? "";
+  const peer = () =>
+    member({ id: PEER, displayName: "이서연", handle: "seoyeon", role: "admin", email: " seoyeon@example.com " });
+  const viewer = (role: RosterMember["role"]) =>
+    member({ id: ME, displayName: "김도현", handle: "dohyeon", role });
+
+  it("a member viewer reads 「@핸들 · 이메일」, and the email is in the accessible name", () => {
+    const el = render(peer(), "connected", [viewer("member"), peer()]);
+    expect(subtitle(el)).toBe("@seoyeon · seoyeon@example.com");
+    expect(name(el)).toBe("이서연 @seoyeon, 관리자, seoyeon@example.com, 프로필 열기");
+  });
+
+  it("a guest viewer does not see the email, on screen or in the accessible name", () => {
+    const el = render(peer(), "connected", [viewer("guest"), peer()]);
+    expect(subtitle(el)).toBe("@seoyeon");
+    expect(el.textContent).not.toContain("example.com");
+    expect(name(el)).not.toContain("example.com");
+  });
+
+  it("a viewer whose role is not known yet does not see it either (unknown is not open)", () => {
+    const el = render(peer(), "connected", [peer()]);
+    expect(subtitle(el)).toBe("@seoyeon");
+  });
+
+  it("an agent reads 「@핸들 · ○○ 님이 관리」 with no email, and no role chip", () => {
+    const agent = member({
+      id: AGENT,
+      kind: "agent",
+      displayName: "hermes",
+      handle: "hermes",
+      ownerHumanId: ME,
+      email: "agent@example.com",
+    });
+    const el = render(agent, "connected", [viewer("owner"), agent]);
+    expect(subtitle(el)).toBe("@hermes · 김도현 님이 관리");
+    expect(el.querySelector('[data-testid="directory-row-role"]')).toBeNull();
+  });
+
+  it("the role is a chip at the end, and my own row says 「나」 beside the name", () => {
+    const me = viewer("owner");
+    const el = render(me, "connected", [me]);
+    expect(el.querySelector('[data-testid="directory-row-role"]')?.textContent).toBe("소유자");
+    expect(el.querySelector('[data-testid="directory-row-self"]')?.textContent).toBe("나");
+    expect(name(el)).toMatch(/, 나, 프로필 열기$/);
+  });
+
+  it("exactly two text layers: a custom status adds no third line, a stale member adds a chip in the title", () => {
+    const busy = member({
+      id: PEER,
+      displayName: "이서연",
+      handle: "seoyeon",
+      status: "suspended",
+      statusEmoji: "🌴",
+      statusText: "휴가",
+    });
+    const el = render(busy, "connected", [viewer("member"), busy]);
+    const button = el.querySelector('[data-testid="directory-row"]');
+    const stack = button?.children[1];
+    expect(stack?.children.length).toBe(2);
+    expect(stack?.children[0]?.textContent).toContain("정지됨");
+    expect(el.querySelector('[data-testid="custom-status-text"]')).toBeNull();
   });
 });

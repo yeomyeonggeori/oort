@@ -9,6 +9,9 @@
 //! | `cs_5_a_live_socket_is_not_stolen_and_a_stale_one_is_replaced` | the connect probe in `ControlSocket::bind` |
 //! | `cs_6_the_binary_opens_no_tcp_socket_with_the_control_socket_on` | ADR-0188 D2 (no TCP, including loopback) |
 //! | `cs_7_forget_deletes_the_key_and_the_state` | `cli::forget` (the local half of 등록 해제) |
+//! | `cs_8_a_request_without_this_runs_secret_is_not_answered_and_changes_nothing` | the secret check in `control_socket::answer` (#5619) |
+//! | `cs_9_a_request_written_after_the_connection_was_accepted_still_needs_the_secret` | the same check: the request is judged, not the connection (#5619) |
+//! | `cs_10_without_a_secret_on_stdin_the_binary_does_not_start` | `cli::read_control_secret` (#5619) |
 #![cfg(target_os = "macos")]
 
 use std::os::unix::fs::PermissionsExt as _;
@@ -18,9 +21,11 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use momo_workd::control_socket::{
-    ControlSocket, ControlSocketError, HostHealth, HostIdentity, PeerPolicy, SocketShared,
+    ControlSecret, ControlSocket, ControlSocketError, HostHealth, HostIdentity, PeerPolicy,
+    SocketShared,
 };
 use momo_workd::human_trust::{HumanTrust, TrustIdentity};
+use serde_json::json;
 use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
 use tokio::net::UnixStream;
 use tokio::sync::Notify;
@@ -60,8 +65,22 @@ fn identity() -> HostIdentity {
     }
 }
 
-fn serve(path: &Path, policy: PeerPolicy) -> (tokio::task::JoinHandle<()>, Arc<Notify>) {
+/// A secret made the way the desktop app makes one, at run time (#5619).
+fn fresh_secret() -> String {
+    format!("{}{}", Uuid::new_v4().simple(), Uuid::new_v4().simple())
+}
+
+/// `request` with this run's secret in `"auth"`, as the app sends it.
+fn authed(request: serde_json::Value, secret: &str) -> String {
+    let mut request = request;
+    request["auth"] = serde_json::Value::String(secret.to_string());
+    request.to_string()
+}
+
+/// The socket served with a fresh secret; the secret comes back with it.
+fn serve(path: &Path, policy: PeerPolicy) -> (tokio::task::JoinHandle<()>, Arc<Notify>, String) {
     let socket = ControlSocket::bind(path, policy).expect("bind");
+    let secret = fresh_secret();
     let stop = Arc::new(Notify::new());
     let identity = identity();
     let trust = HumanTrust::open(
@@ -84,8 +103,9 @@ fn serve(path: &Path, policy: PeerPolicy) -> (tokio::task::JoinHandle<()>, Arc<N
         grants: momo_workd::session_grant::GrantEpoch::default(),
         share: None,
     };
-    let task = tokio::spawn(socket.serve(identity, shared));
-    (task, stop)
+    let control_secret = ControlSecret::parse(&secret).expect("a well-formed secret");
+    let task = tokio::spawn(socket.serve(control_secret, identity, shared));
+    (task, stop, secret)
 }
 
 /// Send one line; return whatever came back before the peer closed.
@@ -114,8 +134,10 @@ fn cs_0_this_test_binary_is_not_team_signed() {
 #[tokio::test]
 async fn cs_1_an_unsigned_workd_answers_nobody_without_the_dev_flag() {
     let folder = Folder::new();
-    let (task, _) = serve(&folder.sock(), PeerPolicy::RefuseAll);
-    assert_eq!(ask(&folder.sock(), r#"{"op":"status"}"#).await, "");
+    let (task, _, secret) = serve(&folder.sock(), PeerPolicy::RefuseAll);
+    // Even with the run's secret: the fences come first.
+    let status = authed(json!({"op": "status"}), &secret);
+    assert_eq!(ask(&folder.sock(), &status).await, "");
     task.abort();
 }
 
@@ -125,28 +147,31 @@ async fn cs_2_a_peer_that_is_not_the_team_signed_app_is_refused() {
     // A real team rule, checked by Security.framework against this (unsigned)
     // test process's audit token.
     let policy = PeerPolicy::decide(Some("ABCDE12345"), false).unwrap();
-    let (task, _) = serve(&folder.sock(), policy);
-    assert_eq!(ask(&folder.sock(), r#"{"op":"status"}"#).await, "");
-    assert_eq!(ask(&folder.sock(), r#"{"op":"shutdown"}"#).await, "");
+    let (task, _, secret) = serve(&folder.sock(), policy);
+    for op in ["status", "shutdown"] {
+        let request = authed(json!({ "op": op }), &secret);
+        assert_eq!(ask(&folder.sock(), &request).await, "", "{op}");
+    }
     task.abort();
 }
 
 #[tokio::test]
 async fn cs_3_the_dev_flag_answers_status_over_a_user_only_socket() {
     let folder = Folder::new();
-    let (task, stop) = serve(&folder.sock(), PeerPolicy::DevUnsigned);
+    let (task, stop, secret) = serve(&folder.sock(), PeerPolicy::DevUnsigned);
     let mode = std::fs::metadata(folder.sock())
         .unwrap()
         .permissions()
         .mode()
         & 0o777;
     assert_eq!(mode, 0o600, "the socket file is the user's alone");
+    let status = authed(json!({"op": "status"}), &secret);
     let status: serde_json::Value =
-        serde_json::from_str(ask(&folder.sock(), r#"{"op":"status"}"#).await.trim()).unwrap();
+        serde_json::from_str(ask(&folder.sock(), &status).await.trim()).unwrap();
     assert_eq!(status["ok"], true);
     assert_eq!(status["hostId"], Uuid::from_u128(11).to_string());
     let stopped = stop.notified();
-    let answer = ask(&folder.sock(), r#"{"op":"shutdown"}"#).await;
+    let answer = ask(&folder.sock(), &authed(json!({"op": "shutdown"}), &secret)).await;
     assert_eq!(answer.trim(), r#"{"ok":true}"#);
     tokio::time::timeout(Duration::from_secs(2), stopped)
         .await
@@ -180,7 +205,7 @@ async fn cs_4_a_folder_other_users_can_enter_is_refused() {
 #[tokio::test]
 async fn cs_5_a_live_socket_is_not_stolen_and_a_stale_one_is_replaced() {
     let folder = Folder::new();
-    let (task, _) = serve(&folder.sock(), PeerPolicy::DevUnsigned);
+    let (task, _, _) = serve(&folder.sock(), PeerPolicy::DevUnsigned);
     assert!(matches!(
         ControlSocket::bind(&folder.sock(), PeerPolicy::DevUnsigned),
         Err(ControlSocketError::AlreadyRunning(_))
@@ -191,10 +216,12 @@ async fn cs_5_a_live_socket_is_not_stolen_and_a_stale_one_is_replaced() {
     let stale = std::os::unix::net::UnixListener::bind(folder.sock()).unwrap();
     drop(stale);
     assert!(folder.sock().exists());
-    let (task, _) = serve(&folder.sock(), PeerPolicy::DevUnsigned);
-    assert!(ask(&folder.sock(), r#"{"op":"status"}"#)
-        .await
-        .contains("\"ok\":true"));
+    let (task, _, secret) = serve(&folder.sock(), PeerPolicy::DevUnsigned);
+    assert!(
+        ask(&folder.sock(), &authed(json!({"op": "status"}), &secret))
+            .await
+            .contains("\"ok\":true")
+    );
     task.abort();
     // Not a socket: never removed.
     let _ = task.await;
@@ -254,18 +281,8 @@ fn installation(folder: &Folder) -> PathBuf {
 fn cs_6_the_binary_opens_no_tcp_socket_with_the_control_socket_on() {
     let folder = Folder::new();
     let config = installation(&folder);
-    let mut child = Command::new(WORKD)
-        .args(["run", "--config"])
-        .arg(&config)
-        .arg("--dev-key-file")
-        .arg(folder.0.join("host.key"))
-        .arg("--control-socket")
-        .arg(folder.sock())
-        .arg("--dev-unsigned-peer")
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .spawn()
-        .unwrap();
+    let secret = fresh_secret();
+    let mut child = run_with_socket(&folder, &config, Some(&secret));
     let deadline = std::time::Instant::now() + Duration::from_secs(10);
     while !folder.sock().exists() && std::time::Instant::now() < deadline {
         std::thread::sleep(Duration::from_millis(50));
@@ -286,20 +303,12 @@ fn cs_6_the_binary_opens_no_tcp_socket_with_the_control_socket_on() {
     let udp = lsof(&["-iUDP"]);
 
     // The status answer over the socket, from the running binary.
-    let status = std::os::unix::net::UnixStream::connect(folder.sock()).map(|mut stream| {
-        use std::io::{Read as _, Write as _};
-        stream.write_all(b"{\"op\":\"status\"}\n").unwrap();
-        let mut out = String::new();
-        stream.read_to_string(&mut out).unwrap();
-        out
-    });
-    let shutdown = std::os::unix::net::UnixStream::connect(folder.sock()).map(|mut stream| {
-        use std::io::{Read as _, Write as _};
-        stream.write_all(b"{\"op\":\"shutdown\"}\n").unwrap();
-        let mut out = String::new();
-        stream.read_to_string(&mut out).unwrap();
-        out
-    });
+    let status = ask_blocking(&folder.sock(), &authed(json!({"op": "status"}), &secret));
+    // #5619: without this run's secret the running binary answers nothing
+    // and does not stop.
+    let unauthorised = ask_blocking(&folder.sock(), r#"{"op":"shutdown"}"#);
+    let still_running = child.try_wait().unwrap().is_none();
+    let shutdown = ask_blocking(&folder.sock(), &authed(json!({"op": "shutdown"}), &secret));
     let exited = (0..100).find_map(|_| {
         std::thread::sleep(Duration::from_millis(100));
         child.try_wait().unwrap()
@@ -323,6 +332,8 @@ fn cs_6_the_binary_opens_no_tcp_socket_with_the_control_socket_on() {
         status.contains("\"failing\":true"),
         "no server → failing heartbeat: {status}"
     );
+    assert_eq!(unauthorised.expect("connect"), "", "no secret, no answer");
+    assert!(still_running, "no secret, no shutdown");
     assert!(shutdown.expect("shutdown connect").contains("\"ok\":true"));
     assert_eq!(
         exited.and_then(|s| s.code()),
@@ -333,6 +344,147 @@ fn cs_6_the_binary_opens_no_tcp_socket_with_the_control_socket_on() {
         !folder.sock().exists(),
         "the socket file is removed on exit"
     );
+}
+
+/// `momo-workd run --control-socket` as the app starts it: `secret` is the
+/// one stdin line (#5619); `None` is an app that sends none.
+fn run_with_socket(folder: &Folder, config: &Path, secret: Option<&str>) -> std::process::Child {
+    use std::io::Write as _;
+    let mut child = Command::new(WORKD)
+        .args(["run", "--config"])
+        .arg(config)
+        .arg("--dev-key-file")
+        .arg(folder.0.join("host.key"))
+        .arg("--control-socket")
+        .arg(folder.sock())
+        .arg("--dev-unsigned-peer")
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .unwrap();
+    let mut stdin = child.stdin.take().expect("piped stdin");
+    if let Some(secret) = secret {
+        stdin.write_all(format!("{secret}\n").as_bytes()).unwrap();
+    }
+    drop(stdin);
+    child
+}
+
+/// One line on a blocking stream; whatever came back before the close.
+fn ask_blocking(path: &Path, line: &str) -> std::io::Result<String> {
+    use std::io::{Read as _, Write as _};
+    let mut stream = std::os::unix::net::UnixStream::connect(path)?;
+    stream.set_read_timeout(Some(Duration::from_secs(5)))?;
+    stream.write_all(format!("{line}\n").as_bytes())?;
+    let mut out = String::new();
+    stream.read_to_string(&mut out)?;
+    Ok(out)
+}
+
+/// Whether `stop` was signalled. `notify_one` keeps a permit for a later
+/// waiter, so an op that already ran is seen here too.
+async fn stopped(stop: &Notify) -> bool {
+    tokio::time::timeout(Duration::from_millis(300), stop.notified())
+        .await
+        .is_ok()
+}
+
+/// #5619: a peer the fences let through (here every same-user peer:
+/// `--dev-unsigned-peer`) still gets no answer and changes nothing without
+/// this run's secret.
+#[tokio::test]
+async fn cs_8_a_request_without_this_runs_secret_is_not_answered_and_changes_nothing() {
+    let folder = Folder::new();
+    let (task, stop, secret) = serve(&folder.sock(), PeerPolicy::DevUnsigned);
+    let mut one_off = secret.clone().into_bytes();
+    one_off[0] = if one_off[0] == b'0' { b'1' } else { b'0' };
+    let one_off = String::from_utf8(one_off).unwrap();
+    for request in [
+        r#"{"op":"shutdown"}"#.to_string(),
+        json!({"op": "shutdown", "auth": null}).to_string(),
+        authed(json!({"op": "shutdown"}), &one_off),
+        authed(json!({"op": "shutdown"}), &fresh_secret()),
+        authed(json!({"op": "shutdown"}), &secret[..63]),
+        authed(json!({"op": "shutdown"}), &secret.to_ascii_uppercase()),
+    ] {
+        assert_eq!(ask(&folder.sock(), &request).await, "", "{request}");
+    }
+    assert!(
+        !stopped(&stop).await,
+        "no refused request reached the run loop"
+    );
+    let answer = ask(&folder.sock(), &authed(json!({"op": "shutdown"}), &secret)).await;
+    assert_eq!(answer.trim(), r#"{"ok":true}"#);
+    assert!(stopped(&stop).await, "the run's own secret does");
+    task.abort();
+}
+
+/// #5619: what decides is the request, not the connection it arrives on.
+/// The test process connects (and passes the fences); a different process
+/// then writes the request on that connection. Multi-threaded: the test
+/// blocks on the child and the stream while the socket task answers.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn cs_9_a_request_written_after_the_connection_was_accepted_still_needs_the_secret() {
+    let folder = Folder::new();
+    let (task, stop, secret) = serve(&folder.sock(), PeerPolicy::DevUnsigned);
+    let written_by_another_process = |line: String| {
+        let path = folder.sock();
+        async move {
+            let stream = std::os::unix::net::UnixStream::connect(&path).unwrap();
+            stream
+                .set_read_timeout(Some(Duration::from_secs(5)))
+                .unwrap();
+            // Long enough for the accept and the fences to have run.
+            tokio::time::sleep(Duration::from_millis(200)).await;
+            let status = Command::new("/bin/sh")
+                .args(["-c", "printf '%s\\n' \"$1\"", "sh", &line])
+                .stdout(std::process::Stdio::from(std::os::fd::OwnedFd::from(
+                    stream.try_clone().unwrap(),
+                )))
+                .status()
+                .unwrap();
+            assert!(status.success());
+            let mut out = String::new();
+            let _ = std::io::Read::read_to_string(&mut &stream, &mut out);
+            out
+        }
+    };
+    assert_eq!(
+        written_by_another_process(r#"{"op":"shutdown"}"#.to_string()).await,
+        ""
+    );
+    assert_eq!(
+        written_by_another_process(authed(json!({"op": "shutdown"}), &fresh_secret())).await,
+        ""
+    );
+    assert!(!stopped(&stop).await, "nothing reached the run loop");
+    // The same path with this run's secret is answered: the refusals above
+    // are the secret's, not the hand-over's.
+    let status = written_by_another_process(authed(json!({"op": "status"}), &secret)).await;
+    assert!(status.contains("\"ok\":true"), "{status}");
+    task.abort();
+}
+
+/// #5619: an app that sends no secret (an older app starting this binary)
+/// gets no control socket at all — fail closed, exit 2, nothing bound.
+#[test]
+fn cs_10_without_a_secret_on_stdin_the_binary_does_not_start() {
+    let folder = Folder::new();
+    let config = installation(&folder);
+    for secret in [None, Some("not a secret")] {
+        let mut child = run_with_socket(&folder, &config, secret);
+        let exited = (0..100).find_map(|_| {
+            std::thread::sleep(Duration::from_millis(100));
+            child.try_wait().unwrap()
+        });
+        if exited.is_none() {
+            let _ = child.kill();
+            let _ = child.wait();
+        }
+        assert_eq!(exited.and_then(|s| s.code()), Some(2), "{secret:?}");
+        assert!(!folder.sock().exists(), "{secret:?}: nothing was bound");
+    }
 }
 
 #[test]

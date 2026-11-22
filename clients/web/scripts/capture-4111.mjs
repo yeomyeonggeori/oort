@@ -30,13 +30,13 @@ const channels = [
 const auth = {
   accessToken: "capture-only-not-a-credential",
   refreshToken: "capture-only-not-a-credential",
-  member: { id: memberId, workspaceId, kind: "human", displayName: "곽성재", handle: "seongjae" },
+  member: { id: memberId, workspaceId, kind: "human", displayName: "한지후", handle: "jihu" },
   realtimeWebSocketUrl: "ws://work-tab-capture.invalid/connection/websocket",
 };
 const roster = [
   {
-    id: memberId, workspaceId, kind: "human", status: "active", role: "owner", displayName: "곽성재",
-    handle: "seongjae", channelCount: 4, channelIds: channels.map((c) => c.id), capabilities: [],
+    id: memberId, workspaceId, kind: "human", status: "active", role: "owner", displayName: "한지후",
+    handle: "jihu", channelCount: 4, channelIds: channels.map((c) => c.id), capabilities: [],
     createdAtMs: 0, updatedAtMs: 0,
   },
 ];

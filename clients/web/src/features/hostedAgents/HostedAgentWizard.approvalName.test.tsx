@@ -107,7 +107,7 @@ function rosterMember(
   return {
     workspaceId: WS,
     status: "active",
-    handle: overrides.kind === "agent" ? "grokbot" : "seongjae",
+    handle: overrides.kind === "agent" ? "grokbot" : "jihu",
     role: overrides.kind === "agent" ? "member" : "owner",
     channelCount: 0,
     channelIds: [],
@@ -134,8 +134,8 @@ function sessionValue(): SessionContextValue {
         id: MEMBER_ID,
         workspaceId: WS,
         kind: "human",
-        displayName: "곽성재",
-        handle: "seongjae",
+        displayName: "한지후",
+        handle: "jihu",
       },
       realtimeWebSocketUrl: "wss://example.test/connection/websocket",
     },
@@ -198,7 +198,7 @@ function mountWizard(
     rosterMember({
       id: MEMBER_ID,
       kind: "human",
-      displayName: "곽성재",
+      displayName: "한지후",
     }),
     rosterMember({
       id: AGENT_ID,

@@ -1140,6 +1140,822 @@ export const catalog: MessageCatalog = {
       "value": "We can't reach the server. Below is the work state as last confirmed."
     }
   ],
+  "channels.browse.clearSearch": [
+    {
+      "type": 0,
+      "value": "Clear search"
+    }
+  ],
+  "channels.browse.close": [
+    {
+      "type": 0,
+      "value": "Close"
+    }
+  ],
+  "channels.browse.closeAria": [
+    {
+      "type": 0,
+      "value": "Close channel browser"
+    }
+  ],
+  "channels.browse.default": [
+    {
+      "type": 0,
+      "value": "Default"
+    }
+  ],
+  "channels.browse.description": [
+    {
+      "type": 0,
+      "value": "Find public channels and join them."
+    }
+  ],
+  "channels.browse.emptyAdminDetail": [
+    {
+      "type": 0,
+      "value": "To list an existing channel here, turn on “Show in channel browser” in its channel menu."
+    }
+  ],
+  "channels.browse.emptyAdminDetailPhone": [
+    {
+      "type": 0,
+      "value": "To list an existing channel here, turn on “Show in channel browser” in its channel menu on the web or desktop app."
+    }
+  ],
+  "channels.browse.emptyHeadline": [
+    {
+      "type": 0,
+      "value": "There are no public channels you haven't joined yet."
+    }
+  ],
+  "channels.browse.groupJoined": [
+    {
+      "type": 0,
+      "value": "Channels you're in"
+    }
+  ],
+  "channels.browse.groupNotJoined": [
+    {
+      "type": 0,
+      "value": "Channels you haven't joined"
+    }
+  ],
+  "channels.browse.hiddenGroup": [
+    {
+      "type": 0,
+      "value": "Public channels hidden from the browser"
+    }
+  ],
+  "channels.browse.homeRowHint": [
+    {
+      "type": 0,
+      "value": "Opens the channel browser with this name."
+    }
+  ],
+  "channels.browse.join": [
+    {
+      "type": 0,
+      "value": "Join"
+    }
+  ],
+  "channels.browse.joinAria": [
+    {
+      "type": 0,
+      "value": "Join "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    }
+  ],
+  "channels.browse.joined": [
+    {
+      "type": 0,
+      "value": "Joined"
+    }
+  ],
+  "channels.browse.joinForbidden": [
+    {
+      "type": 0,
+      "value": "This account can't join this channel."
+    }
+  ],
+  "channels.browse.joinGeneric": [
+    {
+      "type": 0,
+      "value": "Couldn't join. Try again."
+    }
+  ],
+  "channels.browse.joining": [
+    {
+      "type": 0,
+      "value": "Joining"
+    }
+  ],
+  "channels.browse.joinNetwork": [
+    {
+      "type": 0,
+      "value": "Couldn't join. "
+    },
+    {
+      "type": 1,
+      "value": "reason"
+    }
+  ],
+  "channels.browse.joinNotFound": [
+    {
+      "type": 0,
+      "value": "This channel is no longer in the channel browser."
+    }
+  ],
+  "channels.browse.loadForbidden": [
+    {
+      "type": 0,
+      "value": "This account can't browse channels."
+    }
+  ],
+  "channels.browse.loadGeneric": [
+    {
+      "type": 0,
+      "value": "Couldn't load the channel list. Try again in a moment."
+    }
+  ],
+  "channels.browse.loading": [
+    {
+      "type": 0,
+      "value": "Loading channels."
+    }
+  ],
+  "channels.browse.loadMore": [
+    {
+      "type": 0,
+      "value": "Load more"
+    }
+  ],
+  "channels.browse.loadNetwork": [
+    {
+      "type": 0,
+      "value": "Couldn't load the channel list. "
+    },
+    {
+      "type": 1,
+      "value": "reason"
+    }
+  ],
+  "channels.browse.loadUnsupported": [
+    {
+      "type": 0,
+      "value": "This server doesn't support browsing channels yet."
+    }
+  ],
+  "channels.browse.memberCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " member"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " members"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "channels.browse.menuCreate": [
+    {
+      "type": 0,
+      "value": "Create a channel"
+    }
+  ],
+  "channels.browse.menuLabel": [
+    {
+      "type": 0,
+      "value": "Add a channel"
+    }
+  ],
+  "channels.browse.noMatch": [
+    {
+      "type": 0,
+      "value": "No public channel matches “"
+    },
+    {
+      "type": 1,
+      "value": "query"
+    },
+    {
+      "type": 0,
+      "value": "”."
+    }
+  ],
+  "channels.browse.offline": [
+    {
+      "type": 0,
+      "value": "You're offline, so you can't join right now. Try again once you're connected."
+    }
+  ],
+  "channels.browse.open": [
+    {
+      "type": 0,
+      "value": "Open"
+    }
+  ],
+  "channels.browse.openAria": [
+    {
+      "type": 0,
+      "value": "Open "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    }
+  ],
+  "channels.browse.paletteGroup": [
+    {
+      "type": 0,
+      "value": "Public channels you haven't joined"
+    }
+  ],
+  "channels.browse.rateLimited": [
+    {
+      "type": 0,
+      "value": "Too many requests. Try again in a moment."
+    }
+  ],
+  "channels.browse.retry": [
+    {
+      "type": 0,
+      "value": "Try again"
+    }
+  ],
+  "channels.browse.searchLabel": [
+    {
+      "type": 0,
+      "value": "Find a channel"
+    }
+  ],
+  "channels.browse.searchPlaceholder": [
+    {
+      "type": 0,
+      "value": "Search by name or topic"
+    }
+  ],
+  "channels.browse.switchForbidden": [
+    {
+      "type": 0,
+      "value": "Only owners and admins can change this."
+    }
+  ],
+  "channels.browse.switchGeneric": [
+    {
+      "type": 0,
+      "value": "Couldn't save the change. Try again."
+    }
+  ],
+  "channels.browse.switchLabel": [
+    {
+      "type": 0,
+      "value": "Show in channel browser"
+    }
+  ],
+  "channels.browse.switchNetwork": [
+    {
+      "type": 0,
+      "value": "Couldn't save the change. "
+    },
+    {
+      "type": 1,
+      "value": "reason"
+    }
+  ],
+  "channels.browse.switchNotFound": [
+    {
+      "type": 0,
+      "value": "This channel isn't available anymore."
+    }
+  ],
+  "channels.browse.switchNotListable": [
+    {
+      "type": 0,
+      "value": "Only public channels can be shown in the browser."
+    }
+  ],
+  "channels.browse.switchShowAria": [
+    {
+      "type": 0,
+      "value": "Show "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " in channel browser"
+    }
+  ],
+  "channels.browse.title": [
+    {
+      "type": 0,
+      "value": "Browse channels"
+    }
+  ],
+  "channels.createFailure.duplicate": [
+    {
+      "type": 0,
+      "value": "A channel with this name already exists. Try a different name."
+    }
+  ],
+  "channels.createFailure.forbidden": [
+    {
+      "type": 0,
+      "value": "You don't have permission to create channels. Ask a workspace owner or admin."
+    }
+  ],
+  "channels.createFailure.generic": [
+    {
+      "type": 0,
+      "value": "Couldn't create the channel. Try again in a moment."
+    }
+  ],
+  "channels.createFailure.network": [
+    {
+      "type": 0,
+      "value": "Couldn't create the channel. Could not reach the server. Check your connection and try again."
+    }
+  ],
+  "channels.createFailure.rateLimited": [
+    {
+      "type": 0,
+      "value": "Too many requests. Try again in a moment."
+    }
+  ],
+  "channels.default.description": [
+    {
+      "type": 0,
+      "value": "New members join it automatically"
+    }
+  ],
+  "channels.default.label": [
+    {
+      "type": 0,
+      "value": "Make default channel"
+    }
+  ],
+  "channels.default.lastDefault": [
+    {
+      "type": 0,
+      "value": "There must be at least one default channel. Make another channel the default first."
+    }
+  ],
+  "channels.default.lastHint": [
+    {
+      "type": 0,
+      "value": "There must be at least one default channel"
+    }
+  ],
+  "channels.default.notDefaultable": [
+    {
+      "type": 0,
+      "value": "Only public channels can be the default channel."
+    }
+  ],
+  "channels.dmLeave.action": [
+    {
+      "type": 0,
+      "value": "Leave conversation"
+    }
+  ],
+  "channels.dmLeave.busy": [
+    {
+      "type": 0,
+      "value": "Leaving…"
+    }
+  ],
+  "channels.dmLeave.cancel": [
+    {
+      "type": 0,
+      "value": "Cancel"
+    }
+  ],
+  "channels.dmLeave.checking": [
+    {
+      "type": 0,
+      "value": "Checking…"
+    }
+  ],
+  "channels.dmLeave.confirm": [
+    {
+      "type": 0,
+      "value": "Leave"
+    }
+  ],
+  "channels.dmLeave.confirmBody": [
+    {
+      "type": 0,
+      "value": "The conversation so far disappears from your screen. It stays as it is on "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "'s screen."
+    }
+  ],
+  "channels.dmLeave.confirmFinal": [
+    {
+      "type": 0,
+      "value": "You can't undo this after you leave."
+    }
+  ],
+  "channels.dmLeave.confirmRevive": [
+    {
+      "type": 0,
+      "value": "If a new message arrives, it starts a new conversation from that message."
+    }
+  ],
+  "channels.dmLeave.confirmScheduled": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " scheduled message will also be canceled."
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " scheduled messages will also be canceled."
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "channels.dmLeave.confirmTitle": [
+    {
+      "type": 0,
+      "value": "Leave your conversation with "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "?"
+    }
+  ],
+  "channels.dmLeave.done": [
+    {
+      "type": 0,
+      "value": "You left the conversation."
+    }
+  ],
+  "channels.dmLeave.failed": [
+    {
+      "type": 0,
+      "value": "Couldn't leave. Please try again."
+    }
+  ],
+  "channels.dmLeave.scheduledFailed": [
+    {
+      "type": 0,
+      "value": "Couldn't load the scheduled messages."
+    }
+  ],
+  "channels.dmLeave.unavailable": [
+    {
+      "type": 0,
+      "value": "You can't leave this conversation."
+    }
+  ],
+  "channels.nameRule.edge": [
+    {
+      "type": 0,
+      "value": "The name must start and end with a letter or number. Hyphens and underscores can only go in the middle."
+    }
+  ],
+  "channels.nameRule.hidden": [
+    {
+      "type": 0,
+      "value": "The name contains invisible characters. Clear it and type the name again."
+    }
+  ],
+  "channels.nameRule.hint": [
+    {
+      "type": 0,
+      "value": "Letters, numbers, hyphens (-) and underscores (_), up to "
+    },
+    {
+      "type": 2,
+      "value": "max",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": " characters. Spaces become -, and uppercase letters are saved as lowercase."
+    }
+  ],
+  "channels.nameRule.placeholder": [
+    {
+      "type": 0,
+      "value": "design-review"
+    }
+  ],
+  "channels.nameRule.preview": [
+    {
+      "type": 0,
+      "value": "Will be created as "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    }
+  ],
+  "channels.nameRule.required": [
+    {
+      "type": 0,
+      "value": "Enter a channel name."
+    }
+  ],
+  "channels.nameRule.serverRejected": [
+    {
+      "type": 0,
+      "value": "The server did not accept this name. Use only letters, numbers, - and _."
+    }
+  ],
+  "channels.nameRule.tooLong": [
+    {
+      "type": 0,
+      "value": "Channel names can be up to "
+    },
+    {
+      "type": 2,
+      "value": "max",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": " characters."
+    }
+  ],
+  "channels.nameRule.unsupported": [
+    {
+      "type": 0,
+      "value": "Use only letters, numbers, hyphens (-) and underscores (_)."
+    }
+  ],
+  "channels.preview.attachmentLocked": [
+    {
+      "type": 0,
+      "value": "Join to see this"
+    }
+  ],
+  "channels.preview.closeAria": [
+    {
+      "type": 0,
+      "value": "Close channel preview"
+    }
+  ],
+  "channels.preview.empty": [
+    {
+      "type": 0,
+      "value": "No messages yet"
+    }
+  ],
+  "channels.preview.joinBand": [
+    {
+      "type": 0,
+      "value": "Join to write and reply."
+    }
+  ],
+  "channels.preview.listAria": [
+    {
+      "type": 0,
+      "value": "Recent messages in "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    }
+  ],
+  "channels.preview.loadForbidden": [
+    {
+      "type": 0,
+      "value": "This account cannot preview this channel."
+    }
+  ],
+  "channels.preview.loadGeneric": [
+    {
+      "type": 0,
+      "value": "Could not load the channel messages. Try again in a moment."
+    }
+  ],
+  "channels.preview.loading": [
+    {
+      "type": 0,
+      "value": "Loading the latest messages in this channel."
+    }
+  ],
+  "channels.preview.loadNetwork": [
+    {
+      "type": 0,
+      "value": "Could not load the channel messages. "
+    },
+    {
+      "type": 1,
+      "value": "reason"
+    }
+  ],
+  "channels.preview.notFound": [
+    {
+      "type": 0,
+      "value": "This channel could not be found"
+    }
+  ],
+  "channels.preview.openHint": [
+    {
+      "type": 0,
+      "value": "Opens a read-only preview of recent messages."
+    }
+  ],
+  "channels.rename.action": [
+    {
+      "type": 0,
+      "value": "Rename channel"
+    }
+  ],
+  "channels.rename.aria": [
+    {
+      "type": 0,
+      "value": "Rename the "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " channel"
+    }
+  ],
+  "channels.rename.busy": [
+    {
+      "type": 0,
+      "value": "Renaming…"
+    }
+  ],
+  "channels.rename.cancel": [
+    {
+      "type": 0,
+      "value": "Cancel"
+    }
+  ],
+  "channels.rename.description": [
+    {
+      "type": 0,
+      "value": "The new name shows in the sidebar and channel header right away."
+    }
+  ],
+  "channels.rename.done": [
+    {
+      "type": 0,
+      "value": "Channel renamed."
+    }
+  ],
+  "channels.rename.fieldLabel": [
+    {
+      "type": 0,
+      "value": "Channel name"
+    }
+  ],
+  "channels.rename.forbidden": [
+    {
+      "type": 0,
+      "value": "Only workspace owners and admins can rename channels."
+    }
+  ],
+  "channels.rename.generalLocked": [
+    {
+      "type": 0,
+      "value": "The name of the general channel can't be changed."
+    }
+  ],
+  "channels.rename.generic": [
+    {
+      "type": 0,
+      "value": "Couldn't rename the channel. Try again."
+    }
+  ],
+  "channels.rename.network": [
+    {
+      "type": 0,
+      "value": "Couldn't rename the channel. "
+    },
+    {
+      "type": 1,
+      "value": "reason"
+    }
+  ],
+  "channels.rename.notFound": [
+    {
+      "type": 0,
+      "value": "This channel can't be found."
+    }
+  ],
+  "channels.rename.preview": [
+    {
+      "type": 0,
+      "value": "Will be renamed to "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    }
+  ],
+  "channels.rename.submit": [
+    {
+      "type": 0,
+      "value": "Rename"
+    }
+  ],
+  "channels.rename.title": [
+    {
+      "type": 0,
+      "value": "Rename channel"
+    }
+  ],
+  "common.action.cancel": [
+    {
+      "type": 0,
+      "value": "Cancel"
+    }
+  ],
+  "common.action.checkAgain": [
+    {
+      "type": 0,
+      "value": "Check again"
+    }
+  ],
+  "common.action.close": [
+    {
+      "type": 0,
+      "value": "Close"
+    }
+  ],
+  "common.action.reload": [
+    {
+      "type": 0,
+      "value": "Reload"
+    }
+  ],
+  "common.action.retry": [
+    {
+      "type": 0,
+      "value": "Try again"
+    }
+  ],
+  "common.action.save": [
+    {
+      "type": 0,
+      "value": "Save"
+    }
+  ],
   "common.feedback.unavailable": [
     {
       "type": 0,
@@ -1186,6 +2002,48 @@ export const catalog: MessageCatalog = {
       },
       "offset": 0,
       "pluralType": "cardinal"
+    }
+  ],
+  "common.state.checking": [
+    {
+      "type": 0,
+      "value": "Checking"
+    }
+  ],
+  "common.state.connected": [
+    {
+      "type": 0,
+      "value": "Connected"
+    }
+  ],
+  "common.state.creating": [
+    {
+      "type": 0,
+      "value": "Creating"
+    }
+  ],
+  "common.state.loading": [
+    {
+      "type": 0,
+      "value": "Loading"
+    }
+  ],
+  "common.state.notConnected": [
+    {
+      "type": 0,
+      "value": "Not connected"
+    }
+  ],
+  "common.state.saving": [
+    {
+      "type": 0,
+      "value": "Saving"
+    }
+  ],
+  "common.state.sending": [
+    {
+      "type": 0,
+      "value": "Sending"
     }
   ],
   "connect.language.close": [
@@ -1246,6 +2104,20 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "Once you're connected to a network, you can scan the QR code."
+    }
+  ],
+  "connection.boot.serverSwitchedSignedOut": [
+    {
+      "type": 0,
+      "value": "You switched servers, so you're signed out of the previous one ("
+    },
+    {
+      "type": 1,
+      "value": "host"
+    },
+    {
+      "type": 0,
+      "value": "). Sign in again to go back."
     }
   ],
   "connection.boot.unreachable": [
@@ -2159,6 +3031,648 @@ export const catalog: MessageCatalog = {
       "value": "Session"
     }
   ],
+  "directory.lifecycle.cancel": [
+    {
+      "type": 0,
+      "value": "Cancel"
+    }
+  ],
+  "directory.lifecycle.errorForbidden": [
+    {
+      "type": 0,
+      "value": "You do not have permission to suspend or remove members in this workspace."
+    }
+  ],
+  "directory.lifecycle.errorLastOwner": [
+    {
+      "type": 0,
+      "value": "The workspace needs at least one person with the "
+    },
+    {
+      "type": 1,
+      "value": "owner"
+    },
+    {
+      "type": 0,
+      "value": " role, so this person cannot be suspended or removed."
+    }
+  ],
+  "directory.lifecycle.errorNetwork": [
+    {
+      "type": 0,
+      "value": "Could not reach the server. Check your connection and try again."
+    }
+  ],
+  "directory.lifecycle.errorNotActive": [
+    {
+      "type": 0,
+      "value": "This member is no longer active. Someone else may have suspended them in the meantime."
+    }
+  ],
+  "directory.lifecycle.errorNotFound": [
+    {
+      "type": 0,
+      "value": "We could not find this member. They may have already left the workspace."
+    }
+  ],
+  "directory.lifecycle.errorNotSuspended": [
+    {
+      "type": 0,
+      "value": "This member is not suspended any more. Someone else may have lifted the suspension in the meantime."
+    }
+  ],
+  "directory.lifecycle.errorRank": [
+    {
+      "type": 0,
+      "value": "You cannot suspend or remove a member whose role is the same as or higher than yours. Their role may have changed in the meantime."
+    }
+  ],
+  "directory.lifecycle.errorRateLimited": [
+    {
+      "type": 0,
+      "value": "Too many requests. Try again in a moment."
+    }
+  ],
+  "directory.lifecycle.errorSelf": [
+    {
+      "type": 0,
+      "value": "You cannot suspend or remove yourself."
+    }
+  ],
+  "directory.lifecycle.errorUnknown": [
+    {
+      "type": 0,
+      "value": "That did not go through. Try again."
+    }
+  ],
+  "directory.lifecycle.reinstate": [
+    {
+      "type": 0,
+      "value": "Lift suspension"
+    }
+  ],
+  "directory.lifecycle.reinstateBody": [
+    {
+      "type": 0,
+      "value": "They will be able to sign in again. Their earlier sign-ins are not restored, so they need to sign in again. Their channels are unchanged."
+    }
+  ],
+  "directory.lifecycle.reinstateBusy": [
+    {
+      "type": 0,
+      "value": "Lifting"
+    }
+  ],
+  "directory.lifecycle.reinstatedReceipt": [
+    {
+      "type": 0,
+      "value": "Lifted"
+    }
+  ],
+  "directory.lifecycle.reinstateSchedules": [
+    {
+      "type": 0,
+      "value": "Scheduled messages held when they were suspended do not go out on their own after the suspension is lifted. They need to reschedule them or send them now."
+    }
+  ],
+  "directory.lifecycle.reinstateTitle": [
+    {
+      "type": 0,
+      "value": "Lift "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "'s suspension?"
+    }
+  ],
+  "directory.lifecycle.remove": [
+    {
+      "type": 0,
+      "value": "Remove from workspace"
+    }
+  ],
+  "directory.lifecycle.removeAction": [
+    {
+      "type": 0,
+      "value": "Remove"
+    }
+  ],
+  "directory.lifecycle.removeBusy": [
+    {
+      "type": 0,
+      "value": "Removing"
+    }
+  ],
+  "directory.lifecycle.removedClose": [
+    {
+      "type": 0,
+      "value": "Close"
+    }
+  ],
+  "directory.lifecycle.removedTitle": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " was removed from the workspace."
+    }
+  ],
+  "directory.lifecycle.removeKeeps": [
+    {
+      "type": 0,
+      "value": "Their messages and direct message history stay, with a former-member label in place of their name."
+    }
+  ],
+  "directory.lifecycle.removeLeaves": [
+    {
+      "type": 0,
+      "value": "They leave every channel and direct message and are signed out on every device right away. Their scheduled messages are cancelled."
+    }
+  ],
+  "directory.lifecycle.removeTitle": [
+    {
+      "type": 0,
+      "value": "Remove "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " from the workspace?"
+    }
+  ],
+  "directory.lifecycle.removeWarning": [
+    {
+      "type": 0,
+      "value": "This cannot be undone. Even with a new invite, the same email address cannot join this workspace again."
+    }
+  ],
+  "directory.lifecycle.suspend": [
+    {
+      "type": 0,
+      "value": "Suspend"
+    }
+  ],
+  "directory.lifecycle.suspendBusy": [
+    {
+      "type": 0,
+      "value": "Suspending"
+    }
+  ],
+  "directory.lifecycle.suspendedReceipt": [
+    {
+      "type": 0,
+      "value": "Suspended"
+    }
+  ],
+  "directory.lifecycle.suspendKeeps": [
+    {
+      "type": 0,
+      "value": "Their messages and channels stay as they are. While they are suspended, the "
+    },
+    {
+      "type": 1,
+      "value": "owner"
+    },
+    {
+      "type": 0,
+      "value": " and "
+    },
+    {
+      "type": 1,
+      "value": "admin"
+    },
+    {
+      "type": 0,
+      "value": " roles still see their name on their messages; everyone else sees a former-member label."
+    }
+  ],
+  "directory.lifecycle.suspendSignOut": [
+    {
+      "type": 0,
+      "value": "They are signed out on every device right away and cannot sign in again until the suspension is lifted. Phone notifications stop as well."
+    }
+  ],
+  "directory.lifecycle.suspendTitle": [
+    {
+      "type": 0,
+      "value": "Suspend "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "?"
+    }
+  ],
+  "directory.lifecycle.suspendUndo": [
+    {
+      "type": 0,
+      "value": "Suspended members stay under Suspended on the Members tab, where you can lift the suspension at any time. Only the "
+    },
+    {
+      "type": 1,
+      "value": "owner"
+    },
+    {
+      "type": 0,
+      "value": " and "
+    },
+    {
+      "type": 1,
+      "value": "admin"
+    },
+    {
+      "type": 0,
+      "value": " roles see that group."
+    }
+  ],
+  "directory.manage.heading": [
+    {
+      "type": 0,
+      "value": "Manage"
+    }
+  ],
+  "directory.manage.hint": [
+    {
+      "type": 0,
+      "value": "Only people with the "
+    },
+    {
+      "type": 1,
+      "value": "owner"
+    },
+    {
+      "type": 0,
+      "value": " or "
+    },
+    {
+      "type": 1,
+      "value": "admin"
+    },
+    {
+      "type": 0,
+      "value": " role see this"
+    }
+  ],
+  "directory.profile.close": [
+    {
+      "type": 0,
+      "value": "Close profile"
+    }
+  ],
+  "directory.profile.copied": [
+    {
+      "type": 0,
+      "value": "Copied"
+    }
+  ],
+  "directory.profile.copyEmail": [
+    {
+      "type": 0,
+      "value": "Copy email"
+    }
+  ],
+  "directory.profile.copyFailed": [
+    {
+      "type": 0,
+      "value": "Could not copy. Try again."
+    }
+  ],
+  "directory.profile.copyMention": [
+    {
+      "type": 0,
+      "value": "Copy mention"
+    }
+  ],
+  "directory.profile.description": [
+    {
+      "type": 0,
+      "value": "See this member's details, how to reach them, and their role."
+    }
+  ],
+  "directory.profile.dmInactive": [
+    {
+      "type": 0,
+      "value": "You cannot open a direct message while this member is "
+    },
+    {
+      "type": 1,
+      "value": "status"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "directory.profile.dmSelf": [
+    {
+      "type": 0,
+      "value": "You cannot open a direct message from your own profile."
+    }
+  ],
+  "directory.profile.emailLabel": [
+    {
+      "type": 0,
+      "value": "Email"
+    }
+  ],
+  "directory.profile.emptyAction": [
+    {
+      "type": 0,
+      "value": "Reload roster"
+    }
+  ],
+  "directory.profile.emptyDetail": [
+    {
+      "type": 0,
+      "value": "Reload the roster, then check the profile again."
+    }
+  ],
+  "directory.profile.emptyHeadline": [
+    {
+      "type": 0,
+      "value": "This member is not on the roster."
+    }
+  ],
+  "directory.profile.kindAgent": [
+    {
+      "type": 0,
+      "value": "Agent"
+    }
+  ],
+  "directory.profile.loading": [
+    {
+      "type": 0,
+      "value": "Loading the member profile."
+    }
+  ],
+  "directory.profile.message": [
+    {
+      "type": 0,
+      "value": "Send message"
+    }
+  ],
+  "directory.profile.messageBusy": [
+    {
+      "type": 0,
+      "value": "Opening conversation"
+    }
+  ],
+  "directory.profile.offline": [
+    {
+      "type": 0,
+      "value": "Disconnected. This is the last profile we received. You can start a new conversation once the connection is back."
+    }
+  ],
+  "directory.profile.offlineMissing": [
+    {
+      "type": 0,
+      "value": "Disconnected. We could not find this member's last profile."
+    }
+  ],
+  "directory.profile.ownerLabel": [
+    {
+      "type": 0,
+      "value": "Owner"
+    }
+  ],
+  "directory.profile.ownerLine": [
+    {
+      "type": 0,
+      "value": "Managed by "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    }
+  ],
+  "directory.profile.ownerUnknown": [
+    {
+      "type": 0,
+      "value": "No owner on record"
+    }
+  ],
+  "directory.profile.retry": [
+    {
+      "type": 0,
+      "value": "Try again"
+    }
+  ],
+  "directory.profile.routing": [
+    {
+      "type": 0,
+      "value": "Routing settings"
+    }
+  ],
+  "directory.profile.title": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "'s profile"
+    }
+  ],
+  "directory.profile.titleUnknown": [
+    {
+      "type": 0,
+      "value": "Member profile"
+    }
+  ],
+  "directory.role.cancel": [
+    {
+      "type": 0,
+      "value": "Cancel"
+    }
+  ],
+  "directory.role.changed": [
+    {
+      "type": 0,
+      "value": "Changed"
+    }
+  ],
+  "directory.role.confirmAction": [
+    {
+      "type": 0,
+      "value": "Change role"
+    }
+  ],
+  "directory.role.confirmBusy": [
+    {
+      "type": 0,
+      "value": "Changing"
+    }
+  ],
+  "directory.role.confirmGrantAdmin": [
+    {
+      "type": 0,
+      "value": "The "
+    },
+    {
+      "type": 1,
+      "value": "admin"
+    },
+    {
+      "type": 0,
+      "value": " role can change the role of "
+    },
+    {
+      "type": 1,
+      "value": "member"
+    },
+    {
+      "type": 0,
+      "value": " and "
+    },
+    {
+      "type": 1,
+      "value": "guest"
+    },
+    {
+      "type": 0,
+      "value": " people, suspend or remove them, and create password reset links for them. It can also create channels and add or remove people in channels."
+    }
+  ],
+  "directory.role.confirmOwnerWarning": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " will have the same permissions as you. People with the "
+    },
+    {
+      "type": 1,
+      "value": "owner"
+    },
+    {
+      "type": 0,
+      "value": " role cannot change each other's roles, suspend each other, or remove each other, but they can create password reset links for each other. This cannot be undone."
+    }
+  ],
+  "directory.role.confirmPair": [
+    {
+      "type": 0,
+      "value": "Current role "
+    },
+    {
+      "type": 1,
+      "value": "from"
+    },
+    {
+      "type": 0,
+      "value": ", new role "
+    },
+    {
+      "type": 1,
+      "value": "to"
+    }
+  ],
+  "directory.role.confirmRevokeAdmin": [
+    {
+      "type": 0,
+      "value": "They will no longer be able to change the role of "
+    },
+    {
+      "type": 1,
+      "value": "member"
+    },
+    {
+      "type": 0,
+      "value": " and "
+    },
+    {
+      "type": 1,
+      "value": "guest"
+    },
+    {
+      "type": 0,
+      "value": " people, suspend or remove them, create password reset links, create channels, or add and remove people in channels."
+    }
+  ],
+  "directory.role.confirmTitle": [
+    {
+      "type": 0,
+      "value": "Change "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "'s role?"
+    }
+  ],
+  "directory.role.label": [
+    {
+      "type": 0,
+      "value": "Role"
+    }
+  ],
+  "directory.role.lockedAdminCeiling": [
+    {
+      "type": 0,
+      "value": "The "
+    },
+    {
+      "type": 1,
+      "value": "admin"
+    },
+    {
+      "type": 0,
+      "value": " role cannot change the role of someone who is "
+    },
+    {
+      "type": 1,
+      "value": "admin"
+    },
+    {
+      "type": 0,
+      "value": " or "
+    },
+    {
+      "type": 1,
+      "value": "owner"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "directory.role.lockedOwnerPeer": [
+    {
+      "type": 0,
+      "value": "People with the "
+    },
+    {
+      "type": 1,
+      "value": "owner"
+    },
+    {
+      "type": 0,
+      "value": " role cannot change each other's roles."
+    }
+  ],
+  "directory.role.placeholder": [
+    {
+      "type": 0,
+      "value": "Choose a role"
+    }
+  ],
   "expressions.add.adminsOnly": [
     {
       "type": 0,
@@ -2235,6 +3749,40 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "Registering"
+    }
+  ],
+  "expressions.draft.linkApprove": [
+    {
+      "type": 0,
+      "value": "Fetch and register in team library"
+    }
+  ],
+  "expressions.draft.linkBusy": [
+    {
+      "type": 0,
+      "value": "Many pictures are being fetched right now. Press again in a moment."
+    }
+  ],
+  "expressions.draft.linkFetching": [
+    {
+      "type": 0,
+      "value": "Fetching"
+    }
+  ],
+  "expressions.draft.linkFrom": [
+    {
+      "type": 0,
+      "value": "Will be fetched from "
+    },
+    {
+      "type": 1,
+      "value": "host"
+    }
+  ],
+  "expressions.draft.linkHint": [
+    {
+      "type": 0,
+      "value": "Approving fetches the picture once, checks it, then registers it in the team library."
     }
   ],
   "expressions.draft.previewLabel": [
@@ -4206,6 +5754,253 @@ export const catalog: MessageCatalog = {
       "value": "Emoticon suggestions"
     }
   ],
+  "huddles.control.busy": [
+    {
+      "type": 0,
+      "value": "Processing huddle request"
+    }
+  ],
+  "huddles.control.checking": [
+    {
+      "type": 0,
+      "value": "Checking huddle"
+    }
+  ],
+  "huddles.control.join": [
+    {
+      "type": 0,
+      "value": "Join huddle"
+    }
+  ],
+  "huddles.control.leave": [
+    {
+      "type": 0,
+      "value": "Leave huddle"
+    }
+  ],
+  "huddles.control.live": [
+    {
+      "type": 0,
+      "value": "Live"
+    }
+  ],
+  "huddles.control.loadFailed": [
+    {
+      "type": 0,
+      "value": "Couldn't load the huddle status."
+    }
+  ],
+  "huddles.control.microphoneOff": [
+    {
+      "type": 0,
+      "value": "Mute"
+    }
+  ],
+  "huddles.control.microphoneOn": [
+    {
+      "type": 0,
+      "value": "Unmute"
+    }
+  ],
+  "huddles.control.start": [
+    {
+      "type": 0,
+      "value": "Start huddle"
+    }
+  ],
+  "huddles.error.connection": [
+    {
+      "type": 0,
+      "value": "The huddle audio connection dropped. Check your network, then join again."
+    }
+  ],
+  "huddles.error.cspBlocked": [
+    {
+      "type": 0,
+      "value": "This deployment's security policy doesn't allow the LiveKit address. An operator needs to check it."
+    }
+  ],
+  "huddles.error.expired": [
+    {
+      "type": 0,
+      "value": "Couldn't connect because the time to join ran out. Join the huddle again."
+    }
+  ],
+  "huddles.error.membership": [
+    {
+      "type": 0,
+      "value": "You don't have permission to use huddles in this channel. Check your channel membership."
+    }
+  ],
+  "huddles.error.microphoneDenied": [
+    {
+      "type": 0,
+      "value": "Couldn't join because microphone access was denied. Allow the microphone in your browser settings, then join again."
+    }
+  ],
+  "huddles.error.microphoneMissing": [
+    {
+      "type": 0,
+      "value": "Couldn't find a microphone to use. Connect an audio input device, then join again."
+    }
+  ],
+  "huddles.error.unconfigured": [
+    {
+      "type": 0,
+      "value": "This server doesn't use huddles. They become available once an operator configures LiveKit."
+    }
+  ],
+  "huddles.error.unknown": [
+    {
+      "type": 0,
+      "value": "Couldn't connect to the huddle. Try again in a moment."
+    }
+  ],
+  "huddles.mic.empty": [
+    {
+      "type": 0,
+      "value": "No microphone is connected."
+    }
+  ],
+  "huddles.mic.gain": [
+    {
+      "type": 0,
+      "value": "Input volume"
+    }
+  ],
+  "huddles.mic.menu": [
+    {
+      "type": 0,
+      "value": "Microphone"
+    }
+  ],
+  "huddles.mic.permissionDenied": [
+    {
+      "type": 0,
+      "value": "Microphone access is blocked, so you can't choose a device. Allow it in your browser settings."
+    }
+  ],
+  "huddles.mic.permissionPrompt": [
+    {
+      "type": 0,
+      "value": "Allow microphone access to choose a device."
+    }
+  ],
+  "huddles.mic.picker": [
+    {
+      "type": 0,
+      "value": "Choose microphone"
+    }
+  ],
+  "huddles.mic.systemDefault": [
+    {
+      "type": 0,
+      "value": "System default"
+    }
+  ],
+  "huddles.mic.unnamed": [
+    {
+      "type": 0,
+      "value": "Microphone "
+    },
+    {
+      "type": 2,
+      "value": "number",
+      "style": null
+    }
+  ],
+  "huddles.notice.endedAudioClosed": [
+    {
+      "type": 0,
+      "value": "The huddle ended, so the audio connection was closed."
+    }
+  ],
+  "huddles.notice.endedJoinCancelled": [
+    {
+      "type": 0,
+      "value": "The huddle ended, so joining was cancelled."
+    }
+  ],
+  "huddles.notice.leaveUnconfirmed": [
+    {
+      "type": 0,
+      "value": "Audio ended, but the server didn't confirm that you left. Check the huddle status again."
+    }
+  ],
+  "huddles.participants.many": [
+    {
+      "type": 1,
+      "value": "first"
+    },
+    {
+      "type": 0,
+      "value": ", "
+    },
+    {
+      "type": 1,
+      "value": "second"
+    },
+    {
+      "type": 0,
+      "value": " and "
+    },
+    {
+      "type": 6,
+      "value": "others",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " other"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " others"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "huddles.participants.one": [
+    {
+      "type": 1,
+      "value": "first"
+    }
+  ],
+  "huddles.participants.two": [
+    {
+      "type": 1,
+      "value": "first"
+    },
+    {
+      "type": 0,
+      "value": ", "
+    },
+    {
+      "type": 1,
+      "value": "second"
+    }
+  ],
+  "huddles.participants.waiting": [
+    {
+      "type": 0,
+      "value": "Waiting for participants"
+    }
+  ],
   "inbox.approval.open": [
     {
       "type": 0,
@@ -4298,6 +6093,294 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "Thread"
+    }
+  ],
+  "memberList.empty.detail": [
+    {
+      "type": 0,
+      "value": "Create an invite link to bring your team in. The roster fills up here, and each row opens a profile and a conversation."
+    }
+  ],
+  "memberList.empty.headline": [
+    {
+      "type": 0,
+      "value": "No one else is in this workspace yet."
+    }
+  ],
+  "memberList.empty.invite": [
+    {
+      "type": 0,
+      "value": "Invite members"
+    }
+  ],
+  "memberList.group.agents": [
+    {
+      "type": 0,
+      "value": "Agents"
+    }
+  ],
+  "memberList.group.people": [
+    {
+      "type": 0,
+      "value": "People"
+    }
+  ],
+  "memberList.group.suspended": [
+    {
+      "type": 0,
+      "value": "Suspended"
+    }
+  ],
+  "memberList.newDm.close": [
+    {
+      "type": 0,
+      "value": "Close"
+    }
+  ],
+  "memberList.newDm.continueAction": [
+    {
+      "type": 0,
+      "value": "continue the conversation"
+    }
+  ],
+  "memberList.newDm.description": [
+    {
+      "type": 0,
+      "value": "Pick a member or an agent to talk to. If you already have a conversation, it opens that one."
+    }
+  ],
+  "memberList.newDm.emptyDetail": [
+    {
+      "type": 0,
+      "value": "Invite members to the workspace and you can start a conversation right here."
+    }
+  ],
+  "memberList.newDm.emptyHeadline": [
+    {
+      "type": 0,
+      "value": "There is no one else to talk to yet."
+    }
+  ],
+  "memberList.newDm.hasDm": [
+    {
+      "type": 0,
+      "value": "In conversation"
+    }
+  ],
+  "memberList.newDm.noMatchDetail": [
+    {
+      "type": 0,
+      "value": "No name or handle matches \""
+    },
+    {
+      "type": 1,
+      "value": "query"
+    },
+    {
+      "type": 0,
+      "value": "\"."
+    }
+  ],
+  "memberList.newDm.placeholder": [
+    {
+      "type": 0,
+      "value": "Search by name or handle"
+    }
+  ],
+  "memberList.newDm.startAction": [
+    {
+      "type": 0,
+      "value": "start a new conversation"
+    }
+  ],
+  "memberList.newDm.title": [
+    {
+      "type": 0,
+      "value": "New direct message"
+    }
+  ],
+  "memberList.newDm.toLabel": [
+    {
+      "type": 0,
+      "value": "To"
+    }
+  ],
+  "memberList.noMatch.clear": [
+    {
+      "type": 0,
+      "value": "Clear search"
+    }
+  ],
+  "memberList.noMatch.detail": [
+    {
+      "type": 0,
+      "value": "No name, handle, or email matches \""
+    },
+    {
+      "type": 1,
+      "value": "query"
+    },
+    {
+      "type": 0,
+      "value": "\". Try a different search."
+    }
+  ],
+  "memberList.noMatch.detailGuest": [
+    {
+      "type": 0,
+      "value": "No name or handle matches \""
+    },
+    {
+      "type": 1,
+      "value": "query"
+    },
+    {
+      "type": 0,
+      "value": "\". Try a different name."
+    }
+  ],
+  "memberList.noMatch.headline": [
+    {
+      "type": 0,
+      "value": "No matching members."
+    }
+  ],
+  "memberList.page.title": [
+    {
+      "type": 0,
+      "value": "Members"
+    }
+  ],
+  "memberList.row.openOwnProfile": [
+    {
+      "type": 0,
+      "value": "You, open profile"
+    }
+  ],
+  "memberList.row.openProfile": [
+    {
+      "type": 0,
+      "value": "Open profile"
+    }
+  ],
+  "memberList.row.ownedBy": [
+    {
+      "type": 0,
+      "value": "Managed by "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    }
+  ],
+  "memberList.row.self": [
+    {
+      "type": 0,
+      "value": "You"
+    }
+  ],
+  "memberList.search.label": [
+    {
+      "type": 0,
+      "value": "Search members"
+    }
+  ],
+  "memberList.search.placeholder": [
+    {
+      "type": 0,
+      "value": "Find by name, handle, or email"
+    }
+  ],
+  "memberList.search.placeholderGuest": [
+    {
+      "type": 0,
+      "value": "Find by name or handle"
+    }
+  ],
+  "memberList.state.offline": [
+    {
+      "type": 0,
+      "value": "Disconnected, reconnecting. The roster is as last received, and new conversations open once the connection is back."
+    }
+  ],
+  "mobile.addMember.addHint": [
+    {
+      "type": 0,
+      "value": "Adds them to the channel."
+    }
+  ],
+  "mobile.addMember.adding": [
+    {
+      "type": 0,
+      "value": "Adding"
+    }
+  ],
+  "mobile.addMember.close": [
+    {
+      "type": 0,
+      "value": "Close Add members"
+    }
+  ],
+  "mobile.addMember.emptyWorkspace": [
+    {
+      "type": 0,
+      "value": "No one else is in this workspace yet."
+    }
+  ],
+  "mobile.addMember.kindAgent": [
+    {
+      "type": 0,
+      "value": "Agent"
+    }
+  ],
+  "mobile.addMember.kindHuman": [
+    {
+      "type": 0,
+      "value": "Person"
+    }
+  ],
+  "mobile.addMember.loading": [
+    {
+      "type": 0,
+      "value": "Loading members."
+    }
+  ],
+  "mobile.addMember.noMatch": [
+    {
+      "type": 0,
+      "value": "No results for “"
+    },
+    {
+      "type": 1,
+      "value": "query"
+    },
+    {
+      "type": 0,
+      "value": "”."
+    }
+  ],
+  "mobile.addMember.present": [
+    {
+      "type": 0,
+      "value": "Member"
+    }
+  ],
+  "mobile.addMember.searchLabel": [
+    {
+      "type": 0,
+      "value": "Find members to add"
+    }
+  ],
+  "mobile.addMember.searchPlaceholder": [
+    {
+      "type": 0,
+      "value": "Name or @handle"
+    }
+  ],
+  "mobile.addMember.title": [
+    {
+      "type": 0,
+      "value": "Add members"
     }
   ],
   "mobile.attachmentSave.failed": [
@@ -4892,6 +6975,36 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "Posted an invite link"
+    }
+  ],
+  "readState.markUnread.action": [
+    {
+      "type": 0,
+      "value": "Mark unread from here"
+    }
+  ],
+  "readState.markUnread.done": [
+    {
+      "type": 0,
+      "value": "Marked unread from here"
+    }
+  ],
+  "readState.markUnread.failed": [
+    {
+      "type": 0,
+      "value": "Couldn't mark as unread. Try again in a moment."
+    }
+  ],
+  "readState.markUnread.messageGone": [
+    {
+      "type": 0,
+      "value": "This message is no longer in this channel. Refresh or reopen the channel."
+    }
+  ],
+  "readState.markUnread.notMember": [
+    {
+      "type": 0,
+      "value": "Only members of this channel can mark messages as unread."
     }
   ],
   "recovery.claim.hostBody": [
@@ -6702,6 +8815,414 @@ export const catalog: MessageCatalog = {
       "value": "Emoticons you have already seen are not downloaded again after a restart, the pictures you use most gather at the top of the Emoticons tab, and on the phone you can now react with emoticons and GIFs too."
     }
   ],
+  "releaseNotes.v0146.agentsLine1": [
+    {
+      "type": 0,
+      "value": "Team AI replies now show the chip naming the model that answered, including replies you got before."
+    }
+  ],
+  "releaseNotes.v0146.agentsLine2": [
+    {
+      "type": 0,
+      "value": "On web and desktop, the work console is now the session view inside Work, and “← Work” returns to the row you opened."
+    }
+  ],
+  "releaseNotes.v0146.backgroundDesktopChanged": [
+    {
+      "type": 0,
+      "value": "After a few minutes with its window closed or behind other apps, the desktop app used to pause, and new messages only caught up when you brought it back. Now the menu bar mark and the Dock badge light up as soon as a new message arrives, even in the background. Unread DMs and new replies from others in threads you follow now count toward the menu bar mark and the Dock badge too. The setting that counts new DMs in the Dock badge, under Settings › Notifications, is on by default, and it is turned on once even on devices where it was off. A message that arrives in a chat you have open is marked read when you bring the window forward and see it. Waking your Mac no longer shows “Can't reach the server” while the connection is fine, and “Mark all as read” in the menu bar now also covers new replies in threads you follow."
+    }
+  ],
+  "releaseNotes.v0146.backgroundDesktopTitle": [
+    {
+      "type": 0,
+      "value": "The desktop app keeps up in the background"
+    }
+  ],
+  "releaseNotes.v0146.backgroundDesktopTryIt": [
+    {
+      "type": 0,
+      "value": "Close the desktop app's window, wait a few minutes and ask a teammate to send you a DM. The menu bar mark and the Dock badge light up right away without bringing the app forward."
+    }
+  ],
+  "releaseNotes.v0146.conversationsLine1": [
+    {
+      "type": 0,
+      "value": "On web and desktop, opening a chat shows the newest message at the bottom right from the start."
+    }
+  ],
+  "releaseNotes.v0146.conversationsLine2": [
+    {
+      "type": 0,
+      "value": "On desktop, adding or removing a reaction on the last message no longer nudges the chat."
+    }
+  ],
+  "releaseNotes.v0146.conversationsLine3": [
+    {
+      "type": 0,
+      "value": "In web and desktop threads, the reply you read stays put as replies above change; new ones stay in view at the bottom."
+    }
+  ],
+  "releaseNotes.v0146.conversationsLine4": [
+    {
+      "type": 0,
+      "value": "On the phone, the “is typing…” line no longer pushes the chat when it appears or goes, even with large text."
+    }
+  ],
+  "releaseNotes.v0146.desktopLine1": [
+    {
+      "type": 0,
+      "value": "After updating, once no work runs on this Mac, quit the desktop app with ⌘Q and reopen it so every part of it updates."
+    }
+  ],
+  "releaseNotes.v0146.desktopLine2": [
+    {
+      "type": 0,
+      "value": "Settings › Updates now has a Connection log of today's connection changes, with a button to copy it for a report."
+    }
+  ],
+  "releaseNotes.v0146.desktopTopic": [
+    {
+      "type": 0,
+      "value": "Desktop"
+    }
+  ],
+  "releaseNotes.v0146.needsReplyChanged": [
+    {
+      "type": 0,
+      "value": "On web and desktop, the top of My work in Work now has a section for work waiting on you. When an agent job you started needs your approval, you approve or reject it right in that row, or press Open when the approval has to be decided on its card. When a session on your Mac asks for permission, its row says so, and in the desktop app “Open to answer” takes you straight to that session's approval card. That permission request also shows up as a desktop notification. The phone's work list puts the same rows first, and tapping your session row or a permission notification opens that session's screen directly. When Codex running in a desktop terminal pane waits for an answer, that pane now shows it needs you. Stopping one of your Mac sessions on web or desktop now ends the work on the Mac, as it already did on the phone. If work on your Mac stops because the connection dropped or it failed, or a permission request closes after 10 minutes, a line is added to that session and its owner is notified."
+    }
+  ],
+  "releaseNotes.v0146.needsReplyTitle": [
+    {
+      "type": 0,
+      "value": "Work waiting on you comes first"
+    }
+  ],
+  "releaseNotes.v0146.needsReplyTryIt": [
+    {
+      "type": 0,
+      "value": "Open Work in the desktop app and choose My work. If a row waiting for your approval sits at the top, approve or reject it right in that row without opening the card."
+    }
+  ],
+  "releaseNotes.v0146.notificationsLine1": [
+    {
+      "type": 0,
+      "value": "Phone notifications for thread replies no longer start with “Thread ·”, and tapping one still opens that thread."
+    }
+  ],
+  "releaseNotes.v0146.steadyChatChanged": [
+    {
+      "type": 0,
+      "value": "On web and desktop, a chat no longer jumps while you are only looking at it because emoticons briefly turned into :name: text. While the connection is unsteady, a blank space of the same size holds each picture's place, and the picture is drawn back into it. The chat no longer shakes while you write several lines, and the other person's “is typing…” line now sits on its own row right under the composer, so nothing moves when it appears or goes. When two people type, both names stay visible even if they are long, and the phone does the same. On every screen, the name and time line above a message you just sent no longer appears and then disappears. One person's messages are now grouped only when they were sent in the same minute. On web and desktop, sending while you are scrolled up takes you to the bottom, and if earlier messages fail to load at the top, a “Try again” button appears."
+    }
+  ],
+  "releaseNotes.v0146.steadyChatTitle": [
+    {
+      "type": 0,
+      "value": "Chats stay still while you read, type and send"
+    }
+  ],
+  "releaseNotes.v0146.steadyChatTryIt": [
+    {
+      "type": 0,
+      "value": "On web or desktop, scroll a chat up a little and send a message. The chat moves to the bottom, and the message you sent settles in place without its name line flashing on and off."
+    }
+  ],
+  "releaseNotes.v0146.suggestPickChanged": [
+    {
+      "type": 0,
+      "value": "When you tap a picture in the suggestion row and the composer holds only that word, the word is replaced with the emoticon; if the word is part of a longer phrase, your text stays and the emoticon is added. When a phrase like “ㅋㅋ 개웃기네 진심” has several matching words, pictures for each word appear together in one row. The row now appears only when the word you just typed is an emoticon keyword, so it no longer pops up every time you pause in a phrase. Closing it with Esc (on the phone, swipe the row down) keeps it closed until the next keyword. On the phone, emoticons no longer turn into :name: text when the connection drops; they keep a space of the same size, and an emoticon in a message whose picture has not arrived for more than 3 seconds shows its name there, so you can tell what was sent."
+    }
+  ],
+  "releaseNotes.v0146.suggestPickTitle": [
+    {
+      "type": 0,
+      "value": "Emoticon suggestions fit what you wrote"
+    }
+  ],
+  "releaseNotes.v0146.suggestPickTryIt": [
+    {
+      "type": 0,
+      "value": "Type just one emoticon keyword, such as “ㅋㅋ”, and tap a picture in the suggestion row. The word turns into the picture, and pressing send posts only the emoticon."
+    }
+  ],
+  "releaseNotes.v0146.summary": [
+    {
+      "type": 0,
+      "value": "Chats stay still while you read, type and send, work waiting on your answer gathers at the top, and the desktop app keeps up with new messages and new versions even in the background."
+    }
+  ],
+  "releaseNotes.v0146.updateNoticeChanged": [
+    {
+      "type": 0,
+      "value": "From this version, the desktop app checks for a new version every 6 hours while it runs, and again right after your Mac wakes. When a new version is downloaded, the app restarts on its own after 3 seconds if no terminal pane or work session is running on this Mac, and you can put it off with “Not now” during those 3 seconds. If something is running, it says “Restarts when work on this Mac ends” and waits. The card shows what a restart would cut off right now, and “Restart now” restarts at once. A restart also moves the part that runs work on your Mac to the new version, and your drafts stay as they were. Settings › Updates now shows when it last checked, and a build that does not check for itself says “Not checking”. You can move between the update card's buttons with Tab."
+    }
+  ],
+  "releaseNotes.v0146.updateNoticeTitle": [
+    {
+      "type": 0,
+      "value": "A running desktop app notices new versions"
+    }
+  ],
+  "releaseNotes.v0146.updateNoticeTryIt": [
+    {
+      "type": 0,
+      "value": "In the desktop app, open Settings › Updates and see when it last checked. When a new version is out, the Update pill next to your profile at the bottom of the sidebar tells you, even with the sidebar collapsed."
+    }
+  ],
+  "releaseNotes.v0146.whoIsDoingChanged": [
+    {
+      "type": 0,
+      "value": "On web and desktop, the Channel members window, opened with the members button in the channel header, now has a second line for each member about what is happening now. People show their presence dot and the status they wrote, and away and do not disturb are also written out. Agents show what they are doing in this channel: the step they reported and how many minutes it has taken. The list is grouped as working agents, other agents, online and offline. In the Inbox, each row now has a line under the name saying where it came from, such as “Thread · #channel”, “DM · name” or “#channel”. The phone's Inbox shows the same line."
+    }
+  ],
+  "releaseNotes.v0146.whoIsDoingTitle": [
+    {
+      "type": 0,
+      "value": "See who is doing what"
+    }
+  ],
+  "releaseNotes.v0146.whoIsDoingTryIt": [
+    {
+      "type": 0,
+      "value": "On web or desktop, open a channel where an agent is working and press the members button in the channel header. Working agents are listed first, each with a line about what it is doing now."
+    }
+  ],
+  "releaseNotes.v0147.agentLinksChanged": [
+    {
+      "type": 0,
+      "value": "From now on, the server no longer builds link preview cards on its own for links in messages agents write or edit. Cards already attached and opening a link by clicking it stay the same. Messages posted by webhooks and the GitHub integration still get previews as before. When an agent suggests an emoticon with a link to a picture, the approval card on web and desktop shows, instead of the picture, one line naming the site the picture would come from. Only the site name is shown, not the whole address. The server fetches the picture once to check it only after someone presses “Fetch and register in team library”, and if that fails, the reason appears on that row."
+    }
+  ],
+  "releaseNotes.v0147.agentLinksTitle": [
+    {
+      "type": 0,
+      "value": "The server no longer opens links from agents on its own"
+    }
+  ],
+  "releaseNotes.v0147.agentLinksTryIt": [
+    {
+      "type": 0,
+      "value": "Ask an agent to write a message with a link in it. No link preview card is added to it automatically, while the same link in a message you write still gets one."
+    }
+  ],
+  "releaseNotes.v0147.agentsLine1": [
+    {
+      "type": 0,
+      "value": "Claude Code now connects to the personal MCP server right away when you follow the command line and AI tools settings."
+    }
+  ],
+  "releaseNotes.v0147.agentsLine2": [
+    {
+      "type": 0,
+      "value": "Agent connection and OAuth consent screens offer only channels the agent can enter, and say why for the rest."
+    }
+  ],
+  "releaseNotes.v0147.channelBrowseChanged": [
+    {
+      "type": 0,
+      "value": "A new Browse channels view lets you find public channels and join them yourself. On web and desktop, open it from the + in the sidebar's Channels header; on the phone, from the ⋯ menu in the Channels section header on Home. Each row shows the channel name, a Default tag, the member count and the topic, and Join takes you straight into the channel. Before joining, tap the name in a row to preview recent messages without being able to post. ⌘K on web and desktop and the name search on the phone also list public channels you haven't joined. In a channel you join, only messages after you joined count as unread. New public channels show up in Browse channels from the start. Of the public channels that already existed, only the default channel shows up; the rest appear once an owner or admin turns on “Show in channel browser” in the channel menu on web or desktop. “Make default channel” in the same menu adds more default channels. People who join the workspace now go only into the default channels instead of every public channel. Existing members are not added to or removed from any channel."
+    }
+  ],
+  "releaseNotes.v0147.channelBrowseTitle": [
+    {
+      "type": 0,
+      "value": "Browse public channels and join on your own"
+    }
+  ],
+  "releaseNotes.v0147.channelBrowseTryIt": [
+    {
+      "type": 0,
+      "value": "If you are an owner or admin, open a public channel your team shares on web or desktop and turn on “Show in channel browser” in the channel header's ⋮ menu. Other members then see it in Browse channels and can come in with Join."
+    }
+  ],
+  "releaseNotes.v0147.channelMembersChanged": [
+    {
+      "type": 0,
+      "value": "Members can now leave public and private channels themselves. On web and desktop, Leave channel is in the channel row's menu and the channel header's ⋮ menu; on the phone, in the channel row sheet, the chat's ⋮ sheet and the chat info page. A public channel shown in Browse channels can be rejoined from there at any time; other channels need an owner or admin to add you back. On web and desktop, the member profile window was redrawn with a large face, Send message, Copy mention and the email address. In that window's management section, owners and admins change roles and use Suspend, Lift suspension and Remove from workspace. Each one first shows a confirmation step that says what will change. Suspended members are listed under Suspended in the Members tab, where they can be found again and their suspension lifted. In the channel members panel, the ⋯ on a person's row offers Remove from channel."
+    }
+  ],
+  "releaseNotes.v0147.channelMembersTitle": [
+    {
+      "type": 0,
+      "value": "Anyone can leave a channel, and admins can manage members"
+    }
+  ],
+  "releaseNotes.v0147.channelMembersTryIt": [
+    {
+      "type": 0,
+      "value": "On web or desktop, click a person in the Members tab to open their profile window. If you are an owner or admin, picking a new role there does not change it right away; a confirmation step comes first."
+    }
+  ],
+  "releaseNotes.v0147.channelNamesChanged": [
+    {
+      "type": 0,
+      "value": "Channel names can now use letters and numbers from any language, including Korean. Before, only lowercase English letters, numbers, hyphens (-) and underscores (_) were accepted. Spaces become hyphens and capital English letters are saved in lowercase, so when what you typed differs from the name that will be saved, the create window shows the saved name first. The phone's new channel sheet uses the same guidance and no longer limits you to an English keyboard. Owners and admins can rename an existing channel with Rename channel. On web and desktop, it is in the channel header's ⋮ menu; on the phone, in the sheet you get by pressing and holding the channel row and in the chat's ⋮ sheet. The general channel cannot be renamed. The new name shows right away in your sidebar and the channel header."
+    }
+  ],
+  "releaseNotes.v0147.channelNamesTitle": [
+    {
+      "type": 0,
+      "value": "Name and rename channels in any language"
+    }
+  ],
+  "releaseNotes.v0147.channelNamesTryIt": [
+    {
+      "type": 0,
+      "value": "If you are an owner or admin, type “Design Review” in the new channel window. A line under the field shows the name that will be saved, #design-review."
+    }
+  ],
+  "releaseNotes.v0147.channelsLine1": [
+    {
+      "type": 0,
+      "value": "The web and desktop sidebar drops the channel sort button; accounts set to A to Z now show the order you arranged."
+    }
+  ],
+  "releaseNotes.v0147.channelsLine2": [
+    {
+      "type": 0,
+      "value": "In the web and desktop sidebar, channels and DMs with nothing new now show their names one step lighter."
+    }
+  ],
+  "releaseNotes.v0147.channelsLine3": [
+    {
+      "type": 0,
+      "value": "A new channel shows 1 member right away, then a window opens to add members. The phone does the same."
+    }
+  ],
+  "releaseNotes.v0147.channelsLine4": [
+    {
+      "type": 0,
+      "value": "Typing a Korean channel name no longer makes it flicker out of # in the composer, ⌘K or phone search."
+    }
+  ],
+  "releaseNotes.v0147.channelsLine5": [
+    {
+      "type": 0,
+      "value": "In # in the composer, ⌘K and phone search, channel names follow your app language and numbers sort by value."
+    }
+  ],
+  "releaseNotes.v0147.channelsLine6": [
+    {
+      "type": 0,
+      "value": "Errors when creating a channel now appear in your app language."
+    }
+  ],
+  "releaseNotes.v0147.channelsTopic": [
+    {
+      "type": 0,
+      "value": "Channels"
+    }
+  ],
+  "releaseNotes.v0147.dmLeaveChanged": [
+    {
+      "type": 0,
+      "value": "One-to-one chats between people now have Leave conversation. On web and desktop, it is in the right-click menu of the chat row in the sidebar and in the ⋮ menu of the chat header; on the phone, in the sheet you get by pressing and holding the chat row, the chat's ⋮ sheet and the chat info page. Leaving removes the conversation so far from your screen, while it stays on the other person's screen. If they write again, the chat starts fresh from that message. Messages you scheduled in that chat are cancelled too, and leaving cannot be undone, so you are asked to confirm first. Chats with agents and chats with more than two people do not have this item. The item that only takes a chat off the list is still there under a new name, and chats hidden that way can be brought back from the list of hidden conversations."
+    }
+  ],
+  "releaseNotes.v0147.dmLeaveTitle": [
+    {
+      "type": 0,
+      "value": "Leave a one-to-one chat"
+    }
+  ],
+  "releaseNotes.v0147.dmLeaveTryIt": [
+    {
+      "type": 0,
+      "value": "Right-click a one-to-one chat with a person in the sidebar (on the phone, press and hold it). Leave conversation is at the bottom, and it first tells you what will go away. Cancel takes you back."
+    }
+  ],
+  "releaseNotes.v0147.lookLine1": [
+    {
+      "type": 0,
+      "value": "On web and desktop, channel and DM menus show an icon on every item, and copy and section moves open as submenus."
+    }
+  ],
+  "releaseNotes.v0147.lookLine2": [
+    {
+      "type": 0,
+      "value": "On web and desktop, the Members tab shows each email and can search by it. Guests do not see email addresses."
+    }
+  ],
+  "releaseNotes.v0147.lookLine3": [
+    {
+      "type": 0,
+      "value": "Presence dots differ by shape: filled for online, a crescent for away, a bar for do not disturb, a ring for offline."
+    }
+  ],
+  "releaseNotes.v0147.lookLine4": [
+    {
+      "type": 0,
+      "value": "On web and desktop, Add a workspace now offers two cards: create a new workspace, or join one that already exists."
+    }
+  ],
+  "releaseNotes.v0147.lookLine5": [
+    {
+      "type": 0,
+      "value": "On web and desktop, the profile menu can copy the server address, open workspace settings, leave or add a workspace."
+    }
+  ],
+  "releaseNotes.v0147.lookLine6": [
+    {
+      "type": 0,
+      "value": "On the phone, icons at the end of rows in sheets and chat info line up, and notification rows use a bell icon."
+    }
+  ],
+  "releaseNotes.v0147.lookTopic": [
+    {
+      "type": 0,
+      "value": "Look and layout"
+    }
+  ],
+  "releaseNotes.v0147.reconnectSyncChanged": [
+    {
+      "type": 0,
+      "value": "When the connection drops and comes back, the chat you have open reads the messages on screen once more and catches up on edits, deletions, added or removed reactions, and pins and unpins made in between. On the phone, the same happens when the app comes back to the front and reconnects. Only messages already on screen are updated, and chats that are not open are not read again at that moment. This works the same on web, desktop and phone."
+    }
+  ],
+  "releaseNotes.v0147.reconnectSyncTitle": [
+    {
+      "type": 0,
+      "value": "Edits and reactions catch up after reconnecting"
+    }
+  ],
+  "releaseNotes.v0147.reconnectSyncTryIt": [
+    {
+      "type": 0,
+      "value": "Open a chat on the phone, turn on airplane mode for a moment, and add a reaction to a message in that chat from another device. When you turn airplane mode off, the reaction catches up."
+    }
+  ],
+  "releaseNotes.v0147.settingsLine1": [
+    {
+      "type": 0,
+      "value": "On web and desktop, the theme picker is always an open grid, with text-free previews and unlabeled accent dots."
+    }
+  ],
+  "releaseNotes.v0147.summary": [
+    {
+      "type": 0,
+      "value": "Browse public channels and join them yourself, leave a one-to-one chat with a person, and name or rename channels in Korean and other languages."
+    }
+  ],
+  "releaseNotes.v0147.tooltipsChanged": [
+    {
+      "type": 0,
+      "value": "On web and desktop, hovering over a button that shows only an icon now brings up the app's own tooltip almost at once instead of the browser's default one. Buttons in the sidebar, the left rail, the composer, the attachment viewer, the emoticon picker and the work dock all use the same tooltip. It also appears right away when you move focus with the keyboard, and it does not appear when you tap."
+    }
+  ],
+  "releaseNotes.v0147.tooltipsTitle": [
+    {
+      "type": 0,
+      "value": "Icon buttons show their names right away"
+    }
+  ],
+  "releaseNotes.v0147.tooltipsTryIt": [
+    {
+      "type": 0,
+      "value": "On web or desktop, hover over the + button in the sidebar's Channels header, or move focus to it with Tab. Its name appears right away."
+    }
+  ],
   "releaseNotes.version.current": [
     {
       "type": 0,
@@ -7278,6 +9799,21 @@ export const catalog: MessageCatalog = {
       "value": "Messages are searched from 2 characters."
     }
   ],
+  "settings.aiLimits.ceilingDelegations": [
+    {
+      "type": 0,
+      "value": "The server operator limited this to "
+    },
+    {
+      "type": 2,
+      "value": "limit",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": " a day."
+    }
+  ],
   "settings.aiLimits.ceilingSearches": [
     {
       "type": 0,
@@ -7314,6 +9850,44 @@ export const catalog: MessageCatalog = {
       "value": "Limit turned off."
     }
   ],
+  "settings.aiLimits.delegationsHint": [
+    {
+      "type": 0,
+      "value": "How many times a day the helper may hand work to the team's Hermes. If you set nothing, it is 30."
+    }
+  ],
+  "settings.aiLimits.delegationsLabel": [
+    {
+      "type": 0,
+      "value": "Daily Hermes requests"
+    }
+  ],
+  "settings.aiLimits.delegationsToday": [
+    {
+      "type": 0,
+      "value": "Handed to Hermes today: "
+    },
+    {
+      "type": 2,
+      "value": "used",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "/"
+    },
+    {
+      "type": 2,
+      "value": "limit",
+      "style": null
+    }
+  ],
+  "settings.aiLimits.delegationsValueLabel": [
+    {
+      "type": 0,
+      "value": "Requests per day"
+    }
+  ],
   "settings.aiLimits.description": [
     {
       "type": 0,
@@ -7330,6 +9904,12 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "Enter a whole number of 1 or more."
+    }
+  ],
+  "settings.aiLimits.errorInvalidDelegations": [
+    {
+      "type": 0,
+      "value": "Enter a whole number from 1 to 200."
     }
   ],
   "settings.aiLimits.errorInvalidUsd": [
@@ -8240,6 +10820,298 @@ export const catalog: MessageCatalog = {
       "value": "Installed. Restart to open the new version."
     }
   ],
+  "teamAi.delegation.chipImage": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " help · picture"
+    }
+  ],
+  "teamAi.delegation.chipSearch": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " help · search"
+    }
+  ],
+  "teamAi.delegation.hermesFallbackName": [
+    {
+      "type": 0,
+      "value": "Hermes"
+    }
+  ],
+  "teamAi.delegation.reasonAmbiguous": [
+    {
+      "type": 0,
+      "value": "More than one Hermes is connected, so the helper cannot tell which one to use."
+    }
+  ],
+  "teamAi.delegation.reasonCeilingUnset": [
+    {
+      "type": 0,
+      "value": "The server operator has turned off Hermes help."
+    }
+  ],
+  "teamAi.delegation.reasonConnectionMode": [
+    {
+      "type": 0,
+      "value": "This Hermes has personal apps connected, so nothing can be handed to it."
+    }
+  ],
+  "teamAi.delegation.reasonDailyCap": [
+    {
+      "type": 0,
+      "value": "Today's Hermes requests are used up."
+    }
+  ],
+  "teamAi.delegation.reasonNotConnected": [
+    {
+      "type": 0,
+      "value": "Hermes is not connected."
+    }
+  ],
+  "teamAi.delegation.reasonPinUnresolved": [
+    {
+      "type": 0,
+      "value": "The server has no connection details for Hermes."
+    }
+  ],
+  "teamAi.delegation.reasonToolsNotLocked": [
+    {
+      "type": 0,
+      "value": "The server operator has not declared Hermes's tool lock."
+    }
+  ],
+  "teamAi.delegation.reasonUnknown": [
+    {
+      "type": 0,
+      "value": "The current status is unknown."
+    }
+  ],
+  "teamAi.delegation.spentCredits": [
+    {
+      "type": 0,
+      "value": "Credit tokens "
+    },
+    {
+      "type": 1,
+      "value": "tokens"
+    }
+  ],
+  "teamAi.delegation.spentCreditsEstimated": [
+    {
+      "type": 0,
+      "value": "Credit tokens about "
+    },
+    {
+      "type": 1,
+      "value": "tokens"
+    },
+    {
+      "type": 0,
+      "value": " (estimate)"
+    }
+  ],
+  "teamAi.delegation.spentHermes": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " time"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " times"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    },
+    {
+      "type": 0,
+      "value": " (a subscription, so oort cannot measure the cost)"
+    }
+  ],
+  "teamAi.delegation.spentLabel": [
+    {
+      "type": 0,
+      "value": "What this answer used"
+    }
+  ],
+  "teamAi.delegation.spentLine": [
+    {
+      "type": 1,
+      "value": "label"
+    },
+    {
+      "type": 0,
+      "value": ": "
+    },
+    {
+      "type": 1,
+      "value": "credits"
+    }
+  ],
+  "teamAi.delegation.spentLineWithHermes": [
+    {
+      "type": 1,
+      "value": "label"
+    },
+    {
+      "type": 0,
+      "value": ": "
+    },
+    {
+      "type": 1,
+      "value": "credits"
+    },
+    {
+      "type": 0,
+      "value": " · "
+    },
+    {
+      "type": 1,
+      "value": "hermes"
+    }
+  ],
+  "teamAi.delegation.unavailable": [
+    {
+      "type": 0,
+      "value": "Not available right now."
+    }
+  ],
+  "teamAi.delegation.waitImage": [
+    {
+      "type": 0,
+      "value": "Pictures can take up to "
+    },
+    {
+      "type": 6,
+      "value": "minutes",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " minute"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " minutes"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "teamAi.delegation.waitImageShort": [
+    {
+      "type": 0,
+      "value": "Picture: up to "
+    },
+    {
+      "type": 2,
+      "value": "minutes",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": " min"
+    }
+  ],
+  "teamAi.delegation.waitSearch": [
+    {
+      "type": 0,
+      "value": "Searches can take up to "
+    },
+    {
+      "type": 6,
+      "value": "minutes",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " minute"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " minutes"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "teamAi.delegation.waitSearchShort": [
+    {
+      "type": 0,
+      "value": "Search: up to "
+    },
+    {
+      "type": 2,
+      "value": "minutes",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": " min"
+    }
+  ],
   "teamAi.helper.aliasesLine": [
     {
       "type": 0,
@@ -8424,6 +11296,18 @@ export const catalog: MessageCatalog = {
       "value": "Files"
     }
   ],
+  "teamAi.roles.hermesHint": [
+    {
+      "type": 0,
+      "value": "Hands work the team key cannot do (a picture, or a web search on a day it cannot search) to the team's Hermes once, then writes the answer."
+    }
+  ],
+  "teamAi.roles.hermesName": [
+    {
+      "type": 0,
+      "value": "Hermes help"
+    }
+  ],
   "teamAi.roles.inviteAccessHint": [
     {
       "type": 0,
@@ -8470,6 +11354,12 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "Turning on Files sends the content of attachments the helper reads to your team AI provider (the AI company that issued the team key)."
+    }
+  ],
+  "teamAi.roles.noticeHermes": [
+    {
+      "type": 0,
+      "value": "Turning on Hermes help sends the request sentence the helper hands over to the AI company Hermes uses (OpenAI or others). Hermes keeps the request sentence and its result in its own record (state.db). The server operator, not oort, decides how long they are kept and when they are deleted."
     }
   ],
   "teamAi.roles.noticeMemory": [
@@ -8646,6 +11536,40 @@ export const catalog: MessageCatalog = {
       "value": "Checking the key."
     }
   ],
+  "timeline.addMember.createdDescription": [
+    {
+      "type": 0,
+      "value": "Created "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": ". A private channel is visible only to the members you add."
+    }
+  ],
+  "timeline.addMember.createdDescriptionPublic": [
+    {
+      "type": 0,
+      "value": "Created "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": ". Any full member of the workspace can find it in the channel browser and join."
+    }
+  ],
+  "timeline.addMember.later": [
+    {
+      "type": 0,
+      "value": "Later"
+    }
+  ],
   "timeline.agentRail.open": [
     {
       "type": 1,
@@ -8688,6 +11612,24 @@ export const catalog: MessageCatalog = {
       "value": "Working agents"
     }
   ],
+  "timeline.approval.channelAgentIn": [
+    {
+      "type": 0,
+      "value": "This agent is already in this channel."
+    }
+  ],
+  "timeline.approval.channelNeedsMember": [
+    {
+      "type": 0,
+      "value": "First add this agent to this channel as a member."
+    }
+  ],
+  "timeline.approval.channelsRefused": [
+    {
+      "type": 0,
+      "value": "Some of the channels you picked can't be connected right now. Please check the list again."
+    }
+  ],
   "timeline.approval.reproposeBusy": [
     {
       "type": 0,
@@ -8704,6 +11646,100 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "If you do not decide, the agent has to propose it again."
+    }
+  ],
+  "timeline.channelLeave.bodyPrivate": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " will disappear from your sidebar. It's a private channel, so you'll need an invitation from an owner or admin to come back. If the last member leaves, the channel is archived and no one can join it again."
+    }
+  ],
+  "timeline.channelLeave.bodyPublic": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " will disappear from your sidebar. To come back, an owner or admin has to add you again."
+    }
+  ],
+  "timeline.channelLeave.bodyPublicBrowse": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " will disappear from your sidebar. You can come back any time from the channel browser."
+    }
+  ],
+  "timeline.channelLeave.busy": [
+    {
+      "type": 0,
+      "value": "Leaving…"
+    }
+  ],
+  "timeline.channelLeave.cancel": [
+    {
+      "type": 0,
+      "value": "Cancel"
+    }
+  ],
+  "timeline.channelLeave.confirm": [
+    {
+      "type": 0,
+      "value": "Leave channel"
+    }
+  ],
+  "timeline.channelLeave.errorForbidden": [
+    {
+      "type": 0,
+      "value": "You can't leave this channel."
+    }
+  ],
+  "timeline.channelLeave.errorGeneric": [
+    {
+      "type": 0,
+      "value": "Couldn't leave the channel. Try again in a moment."
+    }
+  ],
+  "timeline.channelLeave.errorNetwork": [
+    {
+      "type": 0,
+      "value": "Couldn't leave the channel. "
+    },
+    {
+      "type": 1,
+      "value": "reason"
+    }
+  ],
+  "timeline.channelLeave.errorNotFound": [
+    {
+      "type": 0,
+      "value": "You're no longer a member of this channel. It may have been archived."
+    }
+  ],
+  "timeline.channelLeave.title": [
+    {
+      "type": 0,
+      "value": "Leave this channel?"
+    }
+  ],
+  "timeline.createChannel.privateDetail": [
+    {
+      "type": 0,
+      "value": "Only members who are added can see it."
+    }
+  ],
+  "timeline.createChannel.publicDetail": [
+    {
+      "type": 0,
+      "value": "Any full member of the workspace can find it in the channel browser and join."
     }
   ],
   "timeline.edited.atDate": [
@@ -8888,6 +11924,17 @@ export const catalog: MessageCatalog = {
       "style": null
     }
   ],
+  "timeline.memberPanel.groupSuspended": [
+    {
+      "type": 0,
+      "value": "Suspended "
+    },
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    }
+  ],
   "timeline.memberPanel.groupWorking": [
     {
       "type": 0,
@@ -8951,6 +11998,104 @@ export const catalog: MessageCatalog = {
       "value": "Reload"
     }
   ],
+  "timeline.memberPanel.remove": [
+    {
+      "type": 0,
+      "value": "Remove from channel"
+    }
+  ],
+  "timeline.memberPanel.removeBody": [
+    {
+      "type": 1,
+      "value": "channel"
+    },
+    {
+      "type": 0,
+      "value": " will disappear from "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "'s sidebar. To come back, an owner or admin has to add them again."
+    }
+  ],
+  "timeline.memberPanel.removeBusy": [
+    {
+      "type": 0,
+      "value": "Removing"
+    }
+  ],
+  "timeline.memberPanel.removeCancel": [
+    {
+      "type": 0,
+      "value": "Cancel"
+    }
+  ],
+  "timeline.memberPanel.removeConfirm": [
+    {
+      "type": 0,
+      "value": "Remove"
+    }
+  ],
+  "timeline.memberPanel.removed": [
+    {
+      "type": 0,
+      "value": "Removed "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " from the channel."
+    }
+  ],
+  "timeline.memberPanel.removeErrorForbidden": [
+    {
+      "type": 0,
+      "value": "You don't have permission to remove this member from the channel."
+    }
+  ],
+  "timeline.memberPanel.removeErrorGeneric": [
+    {
+      "type": 0,
+      "value": "Couldn't remove them. Try again in a moment."
+    }
+  ],
+  "timeline.memberPanel.removeErrorNetwork": [
+    {
+      "type": 0,
+      "value": "Couldn't remove them. "
+    },
+    {
+      "type": 1,
+      "value": "reason"
+    }
+  ],
+  "timeline.memberPanel.removeErrorNotFound": [
+    {
+      "type": 0,
+      "value": "This person is no longer a member of this channel."
+    }
+  ],
+  "timeline.memberPanel.removeTitle": [
+    {
+      "type": 0,
+      "value": "Remove "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " from this channel?"
+    }
+  ],
   "timeline.memberPanel.request": [
     {
       "type": 0,
@@ -8973,6 +12118,16 @@ export const catalog: MessageCatalog = {
     {
       "type": 1,
       "value": "text"
+    }
+  ],
+  "timeline.memberPanel.rowActions": [
+    {
+      "type": 0,
+      "value": "Manage "
+    },
+    {
+      "type": 1,
+      "value": "name"
     }
   ],
   "timeline.memberPanel.stageSpoken": [
@@ -10289,6 +13444,360 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "oort tool"
+    }
+  ],
+  "workspace.add.back": [
+    {
+      "type": 0,
+      "value": "Back"
+    }
+  ],
+  "workspace.add.cancel": [
+    {
+      "type": 0,
+      "value": "Cancel"
+    }
+  ],
+  "workspace.add.createLead": [
+    {
+      "type": 0,
+      "value": "Opens a new workspace on this server. Only the server operator can create one."
+    }
+  ],
+  "workspace.add.createLeadNotOperator": [
+    {
+      "type": 0,
+      "value": "Only this server's operator can create one. This account can't."
+    }
+  ],
+  "workspace.add.createTitle": [
+    {
+      "type": 0,
+      "value": "Create a new workspace"
+    }
+  ],
+  "workspace.add.joinChecking": [
+    {
+      "type": 0,
+      "value": "Checking"
+    }
+  ],
+  "workspace.add.joinClaim": [
+    {
+      "type": 0,
+      "value": "First-owner and reset links can't be used here. Sign out and paste it on the sign-in screen."
+    }
+  ],
+  "workspace.add.joinConfirmAction": [
+    {
+      "type": 0,
+      "value": "Sign out and continue"
+    }
+  ],
+  "workspace.add.joinConfirmBody": [
+    {
+      "type": 0,
+      "value": "This app signs in to one workspace at a time. You'll be signed out of this workspace. The sign-in screen will be filled in with what you entered."
+    }
+  ],
+  "workspace.add.joinConfirmTitle": [
+    {
+      "type": 0,
+      "value": "Sign out and continue?"
+    }
+  ],
+  "workspace.add.joinEmpty": [
+    {
+      "type": 0,
+      "value": "Enter an address or an invite link."
+    }
+  ],
+  "workspace.add.joinField": [
+    {
+      "type": 0,
+      "value": "Address or invite link"
+    }
+  ],
+  "workspace.add.joinHint": [
+    {
+      "type": 0,
+      "value": "Paste it as you received it. For example: https://team.example.com"
+    }
+  ],
+  "workspace.add.joinLead": [
+    {
+      "type": 0,
+      "value": "Use an address or an invite link. For another server, sign out and enter it on the sign-in screen; an invite to this server signs you out and continues on the sign-in screen."
+    }
+  ],
+  "workspace.add.joinLeadWeb": [
+    {
+      "type": 0,
+      "value": "Use an address or an invite link. Another server opens in a new tab; an invite to this server signs you out and continues on the sign-in screen."
+    }
+  ],
+  "workspace.add.joinNext": [
+    {
+      "type": 0,
+      "value": "Continue"
+    }
+  ],
+  "workspace.add.joinOpenAction": [
+    {
+      "type": 0,
+      "value": "Open in a new tab"
+    }
+  ],
+  "workspace.add.joinOpenBody": [
+    {
+      "type": 0,
+      "value": "On the web you can't switch to another server from this window. That server opens in a new tab, and this workspace stays as it is."
+    }
+  ],
+  "workspace.add.joinOpenInvite": [
+    {
+      "type": 0,
+      "value": "Opens the invite to "
+    },
+    {
+      "type": 1,
+      "value": "server"
+    },
+    {
+      "type": 0,
+      "value": " in a new tab."
+    }
+  ],
+  "workspace.add.joinOpenServer": [
+    {
+      "type": 0,
+      "value": "Opens the sign-in screen of "
+    },
+    {
+      "type": 1,
+      "value": "server"
+    },
+    {
+      "type": 0,
+      "value": " in a new tab."
+    }
+  ],
+  "workspace.add.joinOpenTitle": [
+    {
+      "type": 0,
+      "value": "Open in a new tab?"
+    }
+  ],
+  "workspace.add.joinPasteAction": [
+    {
+      "type": 0,
+      "value": "Sign out"
+    }
+  ],
+  "workspace.add.joinPasteBody": [
+    {
+      "type": 0,
+      "value": "To join another server, sign out, then choose “Change” on the sign-in screen and paste this link into the box that opens. Copy it before you sign out."
+    }
+  ],
+  "workspace.add.joinPasteTitle": [
+    {
+      "type": 0,
+      "value": "Sign out?"
+    }
+  ],
+  "workspace.add.joinSameServer": [
+    {
+      "type": 0,
+      "value": "You're already on this server. For another workspace on it, sign out and use “Sign in to another workspace” on the sign-in screen with its workspace ID."
+    }
+  ],
+  "workspace.add.joinTargetInvite": [
+    {
+      "type": 0,
+      "value": "Continues with an invite to "
+    },
+    {
+      "type": 1,
+      "value": "server"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "workspace.add.joinTargetInviteOnly": [
+    {
+      "type": 0,
+      "value": "Continues with the invite link you received."
+    }
+  ],
+  "workspace.add.joinTargetServer": [
+    {
+      "type": 0,
+      "value": "Continues on the sign-in screen of "
+    },
+    {
+      "type": 1,
+      "value": "server"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "workspace.add.joinTitle": [
+    {
+      "type": 0,
+      "value": "Join one that already exists"
+    }
+  ],
+  "workspace.add.joinUnreachable": [
+    {
+      "type": 0,
+      "value": "Couldn't reach "
+    },
+    {
+      "type": 1,
+      "value": "server"
+    },
+    {
+      "type": 0,
+      "value": ", so you weren't signed out. Check the address."
+    }
+  ],
+  "workspace.add.lead": [
+    {
+      "type": 0,
+      "value": "Create a new workspace, or get into one that already exists."
+    }
+  ],
+  "workspace.add.operatorContact": [
+    {
+      "type": 0,
+      "value": "If you have an invite, use “Join one that already exists”. Otherwise, ask the person who runs this server."
+    }
+  ],
+  "workspace.add.title": [
+    {
+      "type": 0,
+      "value": "Add a workspace"
+    }
+  ],
+  "workspace.create.lead": [
+    {
+      "type": 0,
+      "value": "Adds another workspace on this server. Whoever creates it becomes the owner, and it starts with a single #general channel. Only the server operator can create one."
+    }
+  ],
+  "workspace.create.operatorOnly": [
+    {
+      "type": 0,
+      "value": "Only this server's operator can create a new workspace."
+    }
+  ],
+  "workspace.create.slugHint": [
+    {
+      "type": 0,
+      "value": "Lowercase letters, numbers and hyphens only. It must be unique on the whole server."
+    }
+  ],
+  "workspace.leave.body": [
+    {
+      "type": 0,
+      "value": "Your membership ends and you're signed out right away. Messages you sent stay. You'll need an invite to come back."
+    }
+  ],
+  "workspace.leave.busy": [
+    {
+      "type": 0,
+      "value": "Leaving"
+    }
+  ],
+  "workspace.leave.cancel": [
+    {
+      "type": 0,
+      "value": "Cancel"
+    }
+  ],
+  "workspace.leave.confirm": [
+    {
+      "type": 0,
+      "value": "Leave"
+    }
+  ],
+  "workspace.leave.lastOwner": [
+    {
+      "type": 0,
+      "value": "The last owner can't leave. Make someone else an owner first."
+    }
+  ],
+  "workspace.leave.lastOwnerNext": [
+    {
+      "type": 0,
+      "value": "In the Members tab, open that person's profile and change their role to owner, then leave again."
+    }
+  ],
+  "workspace.leave.title": [
+    {
+      "type": 0,
+      "value": "Leave "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "?"
+    }
+  ],
+  "workspace.leave.titleUnnamed": [
+    {
+      "type": 0,
+      "value": "Leave this workspace?"
+    }
+  ],
+  "workspace.menu.copiedAddress": [
+    {
+      "type": 0,
+      "value": "Server address copied"
+    }
+  ],
+  "workspace.menu.copyAddress": [
+    {
+      "type": 0,
+      "value": "Copy server address"
+    }
+  ],
+  "workspace.menu.copyAddressNote": [
+    {
+      "type": 0,
+      "value": "A non-default workspace needs its ID too."
+    }
+  ],
+  "workspace.menu.copyFailed": [
+    {
+      "type": 0,
+      "value": "Couldn't copy"
+    }
+  ],
+  "workspace.menu.fallbackTitle": [
+    {
+      "type": 0,
+      "value": "Workspace"
+    }
+  ],
+  "workspace.menu.leave": [
+    {
+      "type": 0,
+      "value": "Leave workspace"
+    }
+  ],
+  "workspace.menu.settings": [
+    {
+      "type": 0,
+      "value": "Workspace settings"
     }
   ]
 };

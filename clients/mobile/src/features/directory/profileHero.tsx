@@ -3,6 +3,7 @@ import {
   customStatusAccessibleText,
   visibleCustomStatus,
 } from '@momo/core/features/presence/customStatus';
+import type {StatusBadgeSubject} from '@momo/core/features/presence/statusBadge';
 import type {
   StatusDot as PeerStatus,
   StatusDotTone,
@@ -48,15 +49,18 @@ export const photoName = (name: string) => `${name} 프로필 사진`;
 export interface ProfileChip {
   label: string;
   tone: StatusDotTone | null;
+  /** 누구의 상태인가 — 사람의 오프라인은 회색으로 채운 점이다(#6023). */
+  kind: StatusBadgeSubject;
 }
 
 export function memberChip(
   member: RosterMember,
   status: PeerStatus | null,
 ): ProfileChip | null {
+  const kind: StatusBadgeSubject = member.kind === 'agent' ? 'agent' : 'human';
   const membershipWord = statusLabel(member);
-  if (membershipWord !== null) return {label: membershipWord, tone: null};
-  return status !== null ? {label: status.label, tone: status.tone} : null;
+  if (membershipWord !== null) return {label: membershipWord, tone: null, kind};
+  return status !== null ? {label: status.label, tone: status.tone, kind} : null;
 }
 
 /** 한 줄 상태(이모지 + 글) — 만료됐으면 `null`. `accessible` 은 만료까지 읽는 낭독 문장이다. */
@@ -150,7 +154,7 @@ export function StatusChips({
           accessibilityLabel={`상태: ${chip.label}`}
           style={styles.chip}
           testID={ids.chip}>
-          {chip.tone !== null ? <StatusDot tone={chip.tone} testID={ids.dot} /> : null}
+          {chip.tone !== null ? <StatusDot tone={chip.tone} kind={chip.kind} testID={ids.dot} /> : null}
           {/* 낱말을 자르지 않는다 — 「조용함 · 마지막 응답 5분 전」 같은 긴 판정이 큰 글씨·좁은 폭에서 한 줄이 못 되면 알약 안에서 접힌다. */}
           <Sentence style={styles.chipLabel}>{chip.label}</Sentence>
         </View>

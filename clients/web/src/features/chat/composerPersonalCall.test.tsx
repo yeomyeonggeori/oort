@@ -90,7 +90,7 @@ function session(): SessionContextValue {
     session: {
       accessToken: "a",
       refreshToken: "r",
-      member: { id: ME, workspaceId: "w", kind: "human", displayName: "곽성재", handle: "kwak" },
+      member: { id: ME, workspaceId: "w", kind: "human", displayName: "한지후", handle: "han" },
     },
     workspaceId: "w",
     realtime: null,

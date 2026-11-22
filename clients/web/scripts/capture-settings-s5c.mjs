@@ -36,7 +36,7 @@ const channels = [
 const auth = {
   accessToken: "capture-only-not-a-credential",
   refreshToken: "capture-only-not-a-credential",
-  member: { id: memberId, workspaceId, kind: "human", displayName: "곽성재", handle: "seongjae" },
+  member: { id: memberId, workspaceId, kind: "human", displayName: "한지후", handle: "jihu" },
   realtimeWebSocketUrl: "ws://settings-s5c-capture.invalid/connection/websocket",
 };
 /** 에이전트별 줄의 이름은 명부가 정한다. 같은 표시 이름 둘(사람 @intern-kim, 에이전트 @kim-intern)이 핸들을 붙이는 이유다. */
@@ -46,7 +46,7 @@ function roster() {
     channelIds: channels.map((c) => c.id), capabilities: [], createdAtMs: 0, updatedAtMs: 0, ...extra,
   });
   return [
-    base(memberId, "human", "곽성재", "seongjae", { role: "owner" }),
+    base(memberId, "human", "한지후", "jihu", { role: "owner" }),
     base("019F94E3-7B0F-7A22-9C13-4D5E6F708192", "human", "김인턴", "intern-kim"),
     base("019F94E3-8B21-7AE0-B3C4-5F1A2D6E7C90", "agent", "김인턴", "kim-intern", { ownerHumanId: memberId, agentModel: "claude-opus-5" }),
     base("019F94E3-9C32-7BF1-A4D5-6E2B3C7D8E01", "agent", "hermes", "hermes", { ownerHumanId: memberId, agentModel: "gpt-5.6-sol" }),
@@ -339,12 +339,13 @@ const DIALOGS = [
     scope: "[data-testid=add-workspace-dialog]",
     verify: async (page, tag) => {
       const t = await page.getByTestId("add-workspace-dialog").innerText();
-      check(`${tag} 안내가 해요체`, t.includes("초대 링크로 참여해요") && t.includes("사람이 읽는 이름이에요") && t.includes("하나뿐이어야 해요"), t);
+      // #5785: 첫 화면은 두 카드다(만들기 / 이미 있는 곳에 참여). 폼 문장은 만들기 걸음에 있다.
+      check(`${tag} 안내가 해요체`, t.includes("이미 있는 곳에 참여") && t.includes("서버 운영자만 만들 수 있어요") && !/습니다/.test(t), t);
     },
   },
   {
     name: "dialog-add-workspace-offline",
-    open: async (page, context) => { await opener(page, "add-workspace"); await page.getByTestId("add-workspace-dialog").waitFor({ timeout: 10_000 }); await goOffline(page, context); await page.getByTestId("add-workspace-offline").waitFor({ timeout: 10_000 }); },
+    open: async (page, context) => { await opener(page, "add-workspace"); await page.getByTestId("add-workspace-dialog").waitFor({ timeout: 10_000 }); await page.getByTestId("add-workspace-choose-create").click(); await goOffline(page, context); await page.getByTestId("add-workspace-offline").waitFor({ timeout: 10_000 }); },
     scope: "[data-testid=add-workspace-dialog]",
     verify: async (page, tag) => check(`${tag} 오프라인 문장`, (await page.getByTestId("add-workspace-offline").innerText()).includes("연결이 끊겼어요. 워크스페이스 만들기는 다시 연결된 뒤에 할 수 있어요.")),
   },
@@ -353,19 +354,21 @@ const DIALOGS = [
     open: async (page) => {
       await opener(page, "add-workspace");
       await page.getByTestId("add-workspace-dialog").waitFor({ timeout: 10_000 });
+      await page.getByTestId("add-workspace-choose-create").click();
       await page.getByTestId("add-workspace-name").fill("새 팀");
       await page.getByTestId("add-workspace-slug").fill("new-team");
       await page.getByTestId("add-workspace-submit").click();
       await waitText(page, "add-workspace-dialog", "운영자만 만들 수 있어요");
     },
     scope: "[data-testid=add-workspace-dialog]",
-    verify: async (page, tag) => check(`${tag} 운영자 안내 두 문장`, (await page.getByTestId("operator-notice").innerText()).includes("받은 초대 링크로 참여할 수 있어요")),
+    verify: async (page, tag) => check(`${tag} 운영자 안내 두 문장`, (await page.getByTestId("operator-notice").innerText()).includes("「이미 있는 곳에 참여」로 들어갈 수 있어요")),
   },
   {
     name: "dialog-add-workspace-created",
     open: async (page) => {
       await opener(page, "add-workspace");
       await page.getByTestId("add-workspace-dialog").waitFor({ timeout: 10_000 });
+      await page.getByTestId("add-workspace-choose-create").click();
       await page.getByTestId("add-workspace-name").fill("새 팀");
       await page.getByTestId("add-workspace-slug").fill("new-team");
       await page.getByTestId("add-workspace-submit").click();
@@ -380,7 +383,7 @@ const DIALOGS = [
     scope: "[data-testid=create-channel-dialog]",
     verify: async (page, tag) => {
       const t = await page.getByTestId("create-channel-dialog").innerText();
-      check(`${tag} 안내가 해요체`, t.includes("찾아서 들어올 수 있어요") && t.includes("추가된 멤버에게만 보여요") && t.includes("저장돼요") && t.includes("280자까지 쓸 수 있어요"), t);
+      check(`${tag} 안내가 해요체`, t.includes("워크스페이스에 들어오는 사람은 자동으로 들어와요") && t.includes("추가된 멤버에게만 보여요") && t.includes("저장돼요") && t.includes("280자까지 쓸 수 있어요"), t);
     },
   },
   {

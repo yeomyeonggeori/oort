@@ -207,3 +207,12 @@ reason = """minimatch 3.1.5 / 10.2.5-10.2.6 (DoS via globparts amplification; ne
 id = "GHSA-3g3m-2fjr-6pw4"
 ignoreUntil = 2026-12-31
 reason = """glob 13.0.6 (an aborted async walk keeps reading directories; only matters to callers that pass a signal). Fixed only in 14.0.2 (major). clients/mobile only, through @expo/cli, @expo/config, @expo/config-plugins and @expo/fingerprint (Expo build tooling, not in the Metro release bundle); the only caller that passes a signal is the TypeScript doctor check of @expo/cli (`expo start`: fixed pattern `**/*.@(ts|tsx)` in the developer's own project root with AbortSignal.timeout(5000)), where the leftover walk costs I/O and CPU on the developer machine only (no attacker-controlled pattern or path). The latest @expo/* 58.x still requires glob ^13. Follow-up: re-check Expo at renewal."""
+
+# ---- npm build tooling, no patched version yet (11-18, #5890) ------------------
+
+[[IgnoredVulns]]
+id = "GHSA-fc5q-39xc-vjpf"
+ignoreUntil = 2027-02-15
+reason = """picomatch <= 4.0.7 (high, CVE-2026-112366: ReDoS — a crafted extglob pattern backtracks exponentially and blocks the event loop; needs an attacker-supplied glob PATTERN). No patched version exists yet. \
+Build machine only: root workspace and clients/web reach it as a dev dependency (vite, tinyglobby, fdir); clients/mobile through @expo/cli, @expo/metro-config, jest-util, micromatch, anymatch, tinyglobby, which npm files under `dependencies` but which never enter the app bundle. \
+No product code imports picomatch, and every pattern these tools match comes from this repository's own config. Follow-up: lockfile repair as soon as a fixed release exists (#5890)."""

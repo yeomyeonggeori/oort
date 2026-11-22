@@ -44,7 +44,7 @@ function member(over: Partial<RosterMember> & {id: string}): RosterMember {
 }
 
 const DIRECTORY = makeDirectory([
-  member({id: SELF_ID, displayName: '곽성재', handle: 'seongjae'}),
+  member({id: SELF_ID, displayName: '한지후', handle: 'jihu'}),
   member({id: OTHER, displayName: '김인턴', handle: 'intern-kim'}),
   member({
     id: 'cccccccc-1111-4111-8111-cccccccccccc',
@@ -270,6 +270,26 @@ describe('리스트 구성 — 정방향과 프리펜드 보정', () => {
   });
 });
 
+describe('머리 칸 높이 (#5757)', () => {
+  // 읽는 동안만 돌림표가 서서 목록 길이가 늘었다 줄면 맨 아래 따라가기가 계속 끊긴다. 읽는 중·아닐 때·시작에 닿았을 때 높이가 같아야 한다.
+  const headerHeight = () =>
+    StyleSheet.flatten(screen.getByTestId('timeline-header').props.style).minHeight;
+  it('돌림표가 서도 서지 않아도 같은 자리를 잡는다', () => {
+    const first = renderTimeline({loadingOlder: false});
+    const idle = headerHeight();
+    first.unmount();
+    const second = renderTimeline({loadingOlder: true});
+    const loading = headerHeight();
+    second.unmount();
+    const third = renderTimeline({reachedStart: true});
+    const atStart = headerHeight();
+    third.unmount();
+    expect(idle).toBeGreaterThanOrEqual(20 + 16);
+    expect(loading).toBe(idle);
+    expect(atStart).toBe(idle);
+  });
+});
+
 describe('네 가지 상태', () => {
   it('불러오는 중', () => {
     renderTimeline({messages: [], status: 'loading'});
@@ -472,7 +492,7 @@ describe('행이 말하는 것', () => {
     expect(screen.queryByText('에이전트')).toBeNull();
     expect(screen.getByLabelText(/^헤르메스, 에이전트, /)).toBeTruthy();
     // ADR-0131: an agent has a human who is accountable for it.
-    expect(screen.getByText('곽성재님이 관리')).toBeTruthy();
+    expect(screen.getByText('한지후님이 관리')).toBeTruthy();
   });
 
   it('「작업 중」 행도 배지 없이 낭독에만 「에이전트」를 말한다 (#4065)', () => {

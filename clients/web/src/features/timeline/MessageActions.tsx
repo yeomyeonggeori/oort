@@ -92,10 +92,12 @@ import { useEscapeLayer } from "@/design/ui/escapeLayer";
 // =============================================================================
 
 import type { MessageActionAvailability } from "@momo/core/features/timeline/model";
+import { useFormatMessage } from "@/i18n/useFormatMessage";
 import {
   actionKeepsMenuOpen,
   messageActionGroups,
   messageActionItemsForSurface,
+  messageActionLabel,
   messageToolbarItems,
   type MessageActionCopyState,
   type MessageActionItem,
@@ -233,6 +235,7 @@ function ActionMenuItem({
   callbacks: MessageActionCallbacks;
   onOpenPicker: (opener?: HTMLElement | null) => void;
 }) {
+  const formatMessage = useFormatMessage();
   const props = {
     "data-testid": `${prefix}-${item.testKey}`,
     "aria-label": item.accessibleLabel,
@@ -246,7 +249,7 @@ function ActionMenuItem({
     children: (
       <>
         {actionIcon(item, pinned)}
-        {item.label}
+        {messageActionLabel(item, formatMessage)}
       </>
     ),
   };
@@ -394,6 +397,7 @@ export function MessageHoverToolbar({
   // the next unmount+mount picks up the new order (#1743 H-2). aria-pressed
   // still follows live `mineEmojis`.
   const [slots] = useState(liveSlots);
+  const formatMessage = useFormatMessage();
   // 도구 막대의 단추는 모델의 표가 정한다(`MESSAGE_ACTION_GROUP_PLACEMENT`): 표와 화면이 따로 놀지 않는다.
   const toolbarItems = messageToolbarItems(available, copyState);
   const hasReact = toolbarItems.some((item) => item.key.startsWith("react:"));
@@ -402,6 +406,7 @@ export function MessageHoverToolbar({
   // 도구 막대에도 복사본이 서는 메뉴 항목(`toolbarCopy`): 연필(고치기, #5326) 하나다. 내 메시지에만 선다(`available.edit`가 작성자 문이다).
   // 이름은 메뉴의 같은 항목에서 읽는다: 메뉴의 첫 줄과 같은 낱말이고 이 파일이 낱말을 두 번 적지 않는다.
   const editCopy = toolbarItems.find((item) => item.toolbarCopy === true);
+  const editLabel = editCopy ? messageActionLabel(editCopy, formatMessage) : "";
   const hasMenu =
     messageActionItemsForSurface("menu", available, copyState).length > 0;
   if (toolbarItems.length === 0 && !hasMenu) return null;
@@ -488,13 +493,13 @@ export function MessageHoverToolbar({
         </Tooltip>
       )}
       {editCopy && (
-        <Tooltip label={editCopy.label} side={tipSide}>
+        <Tooltip label={editLabel} side={tipSide}>
           <button
             type="button"
             data-toolbar-item=""
             data-row-action=""
             data-testid="toolbar-edit"
-            aria-label={editCopy.label}
+            aria-label={editLabel}
             onClick={() => callbacks.onEdit()}
             className={toolbarItemClass}
           >
@@ -660,6 +665,7 @@ export function MessageActionSheet({
   onOpenPicker: (opener?: HTMLElement | null) => void;
 }) {
   const close = () => onOpenChange(false);
+  const formatMessage = useFormatMessage();
   const items = messageActionItemsForSurface("sheet", available, copyState);
   const quick = items.filter((item) => item.key.startsWith("react:"));
   const more = items.find((item) => item.key === "react-more");
@@ -692,14 +698,14 @@ export function MessageActionSheet({
                 }}
                 className="tap-target flex items-center justify-center rounded-sm text-title press hover:bg-surface-hover focus-visible:focus-ring"
               >
-                <span aria-hidden="true">{item.label}</span>
+                <span aria-hidden="true">{messageActionLabel(item, formatMessage)}</span>
               </button>
             ))}
             {more && (
               <button
                 type="button"
                 data-testid={`sheet-${more.testKey}`}
-                aria-label={more.label}
+                aria-label={messageActionLabel(more, formatMessage)}
                 onClick={() => {
                   close();
                   invokeAction(more.key, callbacks, onOpenPicker);
@@ -714,7 +720,7 @@ export function MessageActionSheet({
         {regular.map((item) => (
           <SheetAction
             key={item.key}
-            label={item.label}
+            label={messageActionLabel(item, formatMessage)}
             testId={`sheet-${item.testKey}`}
             tone={item.tone}
             onSelect={() => {

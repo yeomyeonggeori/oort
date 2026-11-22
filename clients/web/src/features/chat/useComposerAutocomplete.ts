@@ -1,3 +1,4 @@
+import { useChannelNameLocale } from "@/i18n/useChannelNameLocale";
 import { useExpressions } from "@/features/expressions/context";
 import { searchExpressions } from "@momo/core/features/expressions/search";
 import { expressionToken } from "@momo/core/features/expressions/message";
@@ -147,10 +148,11 @@ export function useComposerAutocomplete({
   const catalog = useEmojiCatalog(kind === "emoji");
   const entries = catalog.entries;
   const { cache: expressionCache, usage: expressionUsage } = useExpressions();
+  const channelLocale = useChannelNameLocale();
   const candidates = useMemo(() => {
     if (kind === null || queryText === null) return NO_CANDIDATES;
     if (kind === "mention") return memberCandidates(members, queryText, undefined, viewerHumanId);
-    if (kind === "channel") return channelCandidates(channels, queryText);
+    if (kind === "channel") return channelCandidates(channels, queryText, undefined, channelLocale);
     if (kind === "command") {
       return commandsEnabled
         ? commandCandidates(queryText, undefined, commandCardAvailable)
@@ -166,6 +168,7 @@ export function useComposerAutocomplete({
     members,
     viewerHumanId,
     channels,
+    channelLocale,
     entries,
     expressionCache.items,
     expressionUsage,

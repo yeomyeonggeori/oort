@@ -54,7 +54,7 @@ function sessionValue(): SessionContextValue {
     session: {
       accessToken: "a",
       refreshToken: "r",
-      member: { id: ME, workspaceId: WS, kind: "human", displayName: "곽성재", handle: "s" },
+      member: { id: ME, workspaceId: WS, kind: "human", displayName: "한지후", handle: "s" },
       realtimeWebSocketUrl: "wss://x.test/connection/websocket",
     },
     workspaceId: WS,
@@ -120,12 +120,12 @@ describe("팀 보드: 에이전트 작업 줄 (#3518)", () => {
     expect(api.fetchSharedWorkSessions).toHaveBeenCalledWith(WS, expect.objectContaining({ include: "runs" }));
     const row = screen.getByTestId("team-board-row");
     expect(row.dataset.source).toBe("run");
-    expect(screen.getByTestId("team-board-lane").textContent).toBe("에이전트 · 곽성재가 시킴");
+    expect(screen.getByTestId("team-board-lane").textContent).toBe("에이전트 · 한지후가 시킴");
     expect(screen.getByTestId("team-board-state").textContent).toContain("끝남 · PR");
     expect(screen.getByTestId("team-board-stage").textContent).toBe("문구 고치는 중");
     const link = screen.getByTestId("team-board-row-pr") as HTMLAnchorElement;
     expect(link.href).toBe("https://github.com/acme/oort/pull/12");
-    expect(screen.getByTestId("team-board-group").textContent).toContain("곽성재");
+    expect(screen.getByTestId("team-board-group").textContent).toContain("한지후");
   });
 
   it("실행 줄을 열어도 단건(세션 전용) 읽기를 하지 않고, 상세에 단계·결과가 선다", async () => {

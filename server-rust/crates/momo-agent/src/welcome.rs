@@ -7,9 +7,13 @@
 //! way mentions are (ADR-0185 R2): otherwise the row is undeliverable and the
 //! opener key is stuck forever.
 //!
-//! The one extra write here is `#general` membership for the opener speaker so
-//! `resolve_welcome_target_in_tx` can return `Some` in the same transaction
-//! (D3: the opener speaks in `#general`).
+//! The one extra write here is default-channel membership for the opener speaker
+//! so `resolve_welcome_target_in_tx` can return `Some` in the same transaction
+//! (D3: the opener speaks in `#general`). "`#general`" is found by its
+//! `channel.is_default` mark, never by name (ADR-0224 D6): a renamed or
+//! Hangul-named default channel is still the one the welcome speaks in, and with
+//! several default channels the oldest one is chosen (the order the name lookup
+//! used).
 
 use momo_db::DbError;
 use serde_json::{json, Map, Value};
@@ -157,42 +161,66 @@ pub async fn welcome_opener_already_queued_in_tx(
     Ok(found.is_some())
 }
 
-/// Put the opener speaker in `#general` (D3). Returns whether this write
-/// created or restored a membership (for the native-create audit count).
+/// The channel the welcome opener speaks in: the workspace's oldest live
+/// default channel (`channel.is_default`, ADR-0224 D6), or no row when it has
+/// none. One statement, spliced into each lookup below, so the speaker's seat
+/// and the target cannot disagree on which channel it is.
+macro_rules! welcome_channel_sql {
+    () => {
+        "SELECT id FROM channel \
+          WHERE workspace_id = $1 \
+            AND kind = 'public' \
+            AND is_default \
+            AND archived_at IS NULL \
+          ORDER BY created_at ASC, id ASC \
+          LIMIT 1"
+    };
+}
+
+async fn welcome_channel_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+) -> Result<Option<Uuid>, DbError> {
+    Ok(sqlx::query_scalar(welcome_channel_sql!())
+        .bind(workspace_id)
+        .fetch_optional(&mut *conn)
+        .await?)
+}
+
+/// Put the opener speaker in the welcome channel — the oldest default channel
+/// (D3, ADR-0224 D6). Returns whether this write created or restored a
+/// membership (for the native-create audit count). The check and the write name
+/// the same channel, so with several default channels the answer is about the
+/// one the opener will speak in.
 pub async fn ensure_agent_in_general_in_tx(
     conn: &mut PgConnection,
     workspace_id: Uuid,
     agent_member_id: Uuid,
 ) -> Result<bool, DbError> {
-    let already: bool = sqlx::query_scalar(
+    let already: bool = sqlx::query_scalar(concat!(
         "SELECT EXISTS ( \
             SELECT 1 FROM membership ms \
-             JOIN channel c ON c.id = ms.channel_id AND c.workspace_id = ms.workspace_id \
             WHERE ms.workspace_id = $1 \
               AND ms.member_id = $2 \
-              AND c.kind = 'public' \
-              AND c.name = 'general' \
-              AND c.archived_at IS NULL \
               AND ms.left_at IS NULL \
-         )",
-    )
+              AND ms.channel_id = (",
+        welcome_channel_sql!(),
+        ") \
+         )"
+    ))
     .bind(workspace_id)
     .bind(agent_member_id)
     .fetch_one(&mut *conn)
     .await?;
-    sqlx::query(
+    sqlx::query(concat!(
         "INSERT INTO membership (workspace_id, channel_id, member_id, role) \
-         SELECT $1, id, $2, 'member' \
-           FROM channel \
-          WHERE workspace_id = $1 \
-            AND kind = 'public' \
-            AND name = 'general' \
-            AND archived_at IS NULL \
-          ORDER BY created_at ASC, id ASC \
-          LIMIT 1 \
+         SELECT $1, welcome.id, $2, 'member' \
+           FROM (",
+        welcome_channel_sql!(),
+        ") welcome \
          ON CONFLICT (channel_id, member_id) DO UPDATE SET left_at = NULL \
-           WHERE membership.workspace_id = EXCLUDED.workspace_id",
-    )
+           WHERE membership.workspace_id = EXCLUDED.workspace_id"
+    ))
     .bind(workspace_id)
     .bind(agent_member_id)
     .execute(&mut *conn)
@@ -200,8 +228,9 @@ pub async fn ensure_agent_in_general_in_tx(
     Ok(!already)
 }
 
-/// Default channel `#general`, plus the welcome agent (settings override, else
-/// `prefer_agent_member_id`, else first deliverable agent in that channel).
+/// The welcome channel (the oldest default channel), plus the welcome agent
+/// (settings override, else `prefer_agent_member_id`, else first deliverable
+/// agent in that channel).
 /// Hosted agents that cannot be delivered (gate closed, not active, or
 /// `#general` unapproved) are skipped so they never consume the opener marker.
 ///
@@ -224,19 +253,7 @@ pub async fn resolve_welcome_target_in_tx(
         .fetch_optional(&mut *conn)
         .await?
         .unwrap_or_else(|| json!({}));
-    let channel_id: Option<Uuid> = sqlx::query_scalar(
-        "SELECT id FROM channel \
-          WHERE workspace_id = $1 \
-            AND kind = 'public' \
-            AND name = 'general' \
-            AND archived_at IS NULL \
-          ORDER BY created_at ASC, id ASC \
-          LIMIT 1",
-    )
-    .bind(workspace_id)
-    .fetch_optional(&mut *conn)
-    .await?;
-    let Some(channel_id) = channel_id else {
+    let Some(channel_id) = welcome_channel_in_tx(conn, workspace_id).await? else {
         return Ok(None);
     };
     let specified = stored_welcome_agent(&settings).or(prefer_agent_member_id);

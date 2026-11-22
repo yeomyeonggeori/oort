@@ -61,7 +61,7 @@ function context(): Omit<NotifyContext, "kindEnabled" | "paused"> {
     selfMemberId: SELF,
     isMuted: () => false,
     isAnnounced: () => false,
-    actorFor: () => "곽성재",
+    actorFor: () => "한지후",
     inviteLinkSentence: () => "사전의 고정 문장",
     nowMs: NOW,
   };

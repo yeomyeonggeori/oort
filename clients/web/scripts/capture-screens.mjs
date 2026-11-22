@@ -584,8 +584,8 @@ const SESSION = {
     id: ME,
     workspaceId: WORKSPACE_ID,
     kind: "human",
-    displayName: "곽성재",
-    handle: "seongjae",
+    displayName: "한지후",
+    handle: "jihu",
   },
   // Deliberately unreachable: the capture shows the disconnected/connecting
   // rail state rather than pretending the realtime rail is up.
@@ -676,8 +676,8 @@ const ROSTER = [
     kind: "human",
     status: "active",
     role: "owner",
-    displayName: "곽성재",
-    handle: "seongjae",
+    displayName: "한지후",
+    handle: "jihu",
     channelCount: CHANNEL_IDS.length,
     channelIds: CHANNEL_IDS,
     capabilities: [],
@@ -2031,7 +2031,7 @@ async function installMocks(context, { resetHarness = true } = {}) {
     }
     return json(route, own);
   });
-  await context.route("**/v1/workspaces/*/roster", (route) =>
+  await context.route("**/v1/workspaces/*/roster*", (route) =>
     json(route, {
       members: ROSTER.map((member) =>
         member.id === ME
@@ -2450,7 +2450,7 @@ async function signIn(page) {
   );
   await page.reload({ waitUntil: "networkidle" });
   await signInThroughOnboarding(page, {
-    email: "seongjae@dawn.example",
+    email: "jihu@dawn.example",
     password: "capture-only-not-a-credential",
   });
   await page.getByTestId("channel-list").waitFor({ state: "visible" });
@@ -2742,13 +2742,10 @@ async function captureSidebarRowMenu(page, scheme, shots) {
   // BT-5(#1933)가 「별표」를 사이드바 정리 무리의 첫 항목으로 들여놨다. 배치
   // (「섹션으로 이동」)는 커스텀 섹션이 하나도 없는 이 시점에는 서지 않는다 —
   // 목적지가 없는 라디오 무리는 선택지가 아니기 때문이다(BT-4).
-  // 복사 무리(이름·링크·ID)가 맨 앞에 서고 접히지 않는다(SidebarRowContextMenu 시험이 같은 차례를 못박는다).
-  // `channel-row-copy-group`은 그 무리의 상자라 접두사 선택자에 함께 잡힌다(#5048).
+  // 「복사 ›」(이름·링크·ID 의 하위 메뉴, #5777)가 맨 앞에 선다(SidebarRowContextMenu 시험이 같은 차례를
+  // 못박는다). 이름·링크·ID 는 하위 판 안이라 위 판에는 여는 줄 하나뿐이다.
   const expected = [
     "channel-row-copy-group",
-    "channel-row-copy-name",
-    "channel-row-copy-link",
-    "channel-row-copy-id",
     "channel-row-mark-read",
     "channel-row-mute-toggle",
     "channel-row-star",
@@ -2783,12 +2780,10 @@ async function captureSidebarRowMenu(page, scheme, shots) {
   await row.focus();
   await page.keyboard.press("Shift+F10");
   await menu.waitFor({ state: "visible" });
-  // 복사 무리(이름·링크·ID)가 메뉴 맨 앞이라 첫 정거장은 「이름 복사」다(SidebarRowContextMenu 시험이 같은 차례를
+  // 「복사 ›」가 메뉴 맨 앞이라 첫 정거장은 그 여는 줄이다(#5777, SidebarRowContextMenu 시험이 같은 차례를
   // 못박는다). 알림 항목까지 ↓로 걸어가는 동안 메뉴는 살아 있어야 한다 — 한 걸음마다 정거장을 단정한다(#5048).
   const kbdWalk = [
-    "channel-row-copy-name",
-    "channel-row-copy-link",
-    "channel-row-copy-id",
+    "channel-row-copy-group",
     "channel-row-mark-read",
     "channel-row-mute-toggle",
   ];
@@ -3342,7 +3337,8 @@ async function captureCustomSection(page, scheme, shots) {
     throw new Error(`새 섹션이 비어 있지 않다 ${scheme}: ${emptyRows}`);
   }
 
-  // 행 우클릭 → 「섹션으로 이동」. 서브메뉴가 아니라 제목 + 라디오 무리다.
+  // 행 우클릭 → 「섹션으로 이동 ›」. 잠긴 줄이 없는 묶음이라 하위 메뉴로 접힌다(#5777): 여는 줄을 눌러 하위
+  // 판을 열고, 목적지 라디오는 그 판에 선다.
   const row = page
     .getByTestId("sidebar-section-channels")
     .locator('[data-testid="channel-item"]')
@@ -3352,8 +3348,12 @@ async function captureCustomSection(page, scheme, shots) {
   await page
     .getByTestId("channel-row-move-to-section")
     .waitFor({ state: "visible" });
+  await sceneClick(page, page.getByTestId("channel-row-move-to-section"));
+  await page
+    .getByTestId("channel-row-move-to-section-menu")
+    .waitFor({ state: "visible" });
   const radios = await page
-    .getByTestId("channel-row-menu")
+    .getByTestId("channel-row-move-to-section-menu")
     .locator('[role="menuitemradio"]')
     .count();
   if (radios !== 2) {
@@ -3369,9 +3369,9 @@ async function captureCustomSection(page, scheme, shots) {
       `배치 전 기본 섹션이 체크가 아니다 ${scheme}: ${baseChecked}`
     );
   }
-  // 80자 이름이 메뉴를 창 밖으로 밀지 않는다.
+  // 80자 이름이 하위 판을 창 밖으로 밀지 않는다.
   const menuBox = await page.evaluate(`(() => {
-    const el = document.querySelector('[data-testid="channel-row-menu"]');
+    const el = document.querySelector('[data-testid="channel-row-move-to-section-menu"]');
     const r = el.getBoundingClientRect();
     return { right: Math.round(r.right), width: Math.round(r.width), view: window.innerWidth };
   })()`);
@@ -3396,6 +3396,10 @@ async function captureCustomSection(page, scheme, shots) {
     button: "right",
   });
   await page.getByTestId("channel-row-menu").waitFor({ state: "visible" });
+  await sceneClick(page, page.getByTestId("channel-row-move-to-section"));
+  await page
+    .getByTestId("channel-row-move-to-section-menu")
+    .waitFor({ state: "visible" });
   const nowChecked = await page
     .getByTestId("channel-row-section-sec-1")
     .getAttribute("aria-checked");
@@ -3470,49 +3474,24 @@ async function captureCustomSection(page, scheme, shots) {
 }
 
 /**
- * 정렬의 문 (BT-5 / #1933, design-review R1 M-2).
- *
- * 이 문은 한동안 기본 「채널」 섹션의 ⋮ 안에 있었고, 그때 스크린리더는 그것을
- * 「채널 섹션 메뉴」라 읽었다 — 사이드바 전체에 걸리는 설정인데. 눈으로도 같은 ⋯
- * 글리프가 섹션마다 다른 메뉴를 열었다. 그래서 문을 갈랐고, 이 장면이 그 판정을
- * 레인 안으로 들여 잠근다: **자기 글리프·자기 이름**이고, 섹션 ⋮ 는 그 자리에
- * 없다.
+ * 정렬 단추가 없다 (#5775). 기본 「채널」 머리에는 「새 채널」·「새 섹션」만 서고 정렬 문(⇅)도
+ * 섹션 ⋮ 도 없다. 사라진 것을 장면으로 잠근다.
  */
 async function captureSortDoor(page, scheme, shots) {
   beginScene("sidebar-sort-menu");
   await page.getByTestId("sidebar-section-channels-header").hover();
-  const door = page.getByTestId("sidebar-sort-menu");
-  await door.waitFor({ state: "visible" });
-  await assertSectionControlSize(page, scheme, "sidebar-sort-menu");
-  const name = await door.getAttribute("aria-label");
-  if (name !== "채널 정렬") {
-    throw new Error(`정렬 문의 이름 ${scheme}: ${name}`);
+  const sortDoor = await page.getByTestId("sidebar-sort-menu").count();
+  if (sortDoor !== 0) {
+    throw new Error(`정렬 문이 남았다 ${scheme}: ${sortDoor}`);
   }
-  // 기본 섹션에는 ⋮ 가 없다 — 그 메뉴는 커스텀 섹션의 것이다(BT-4 그대로).
   const sectionMenu = await page.getByTestId("section-menu-channels").count();
   if (sectionMenu !== 0) {
     throw new Error(`기본 섹션에 ⋮ 가 섰다 ${scheme}: ${sectionMenu}`);
   }
-
-  await sceneClick(page, door);
-  const content = page.getByTestId("sidebar-sort-menu-content");
-  await content.waitFor({ state: "visible" });
-  const label = (await page.getByTestId("sidebar-sort-label").innerText()).trim();
-  if (label !== "채널 정렬") {
-    throw new Error(`정렬 무리의 제목 ${scheme}: ${label}`);
-  }
-  const checked = await page
-    .getByTestId("sidebar-sort-manual")
-    .getAttribute("aria-checked");
-  if (checked !== "true") {
-    throw new Error(`기본 정렬이 체크가 아니다 ${scheme}: ${checked}`);
-  }
-  await assertNoHorizontalOverflow(page, `sort door ${scheme}`);
+  await assertNoHorizontalOverflow(page, `channels header ${scheme}`);
   const shot = beginSceneFromShotPath(`${OUT_DIR}/sidebar-sort-menu-${scheme}.png`);
   await page.screenshot({ path: shot });
   shots.push(shot);
-  await page.keyboard.press("Escape");
-  await content.waitFor({ state: "detached" });
 }
 
 /**
@@ -6630,7 +6609,7 @@ async function captureMobile(browser, scheme) {
 
   // 2. 채널. 사이드바는 열이 아니라 닫힌 서랍이므로 타임라인이 390px 전부를
   //    받고, 컴포저는 안전 영역 위에 도크된다.
-  await page.getByTestId("login-email").fill("seongjae@dawn.example");
+  await page.getByTestId("login-email").fill("jihu@dawn.example");
   await page.getByTestId("login-password").fill("capture-only-not-a-credential");
   await sceneClick(page, page.getByTestId("login-submit"));
   await page.getByTestId("composer-input").waitFor({ state: "visible" });
@@ -7946,6 +7925,11 @@ async function captureScheme(browser, scheme) {
   shots.push(createPendingShot);
   await login.getByTestId("create-channel-dialog").waitFor({ state: "detached" });
   await login.unroute("**/v1/workspaces/*/channels");
+  // #5784: 채널을 만들면 「멤버 추가」가 이어서 뜬다(공개·비공개 모두). 「나중에」로 건너뛰고 다음 장면(오프라인)으로 간다 — 떠 있는 창이
+  //        사이드바의 + 를 가린다.
+  await login.getByTestId("add-channel-member-dialog").waitFor({ state: "visible" });
+  await sceneClick(login, login.getByTestId("add-member-close"));
+  await login.getByTestId("add-channel-member-dialog").waitFor({ state: "detached" });
 
   // 3a-4. 오프라인 (MOMO-614 R1 / R-1 5장): 배너 한 줄 + 만들기 버튼 disabled.
   //       레일의 disconnected는 종단 절단에서만 오므로 브라우저가 아는 오프라인도
@@ -7988,7 +7972,7 @@ async function captureScheme(browser, scheme) {
       ? route.fallback()
       : json(route, { channels: [] })
   );
-  await nonAdmin.route("**/v1/workspaces/*/roster", (route) =>
+  await nonAdmin.route("**/v1/workspaces/*/roster*", (route) =>
     json(route, {
       members: ROSTER.map((m) =>
         m.id === ME ? { ...m, role: "member" } : m
@@ -8009,7 +7993,7 @@ async function captureScheme(browser, scheme) {
   //       답하고, 성공 경로를 꺾어 403을 만드는 것은 억지 모킹이다. 그 문장은
   //       WorkspaceSection.test.tsx가 계약으로 붙잡는다.
   const memberSettings = await newScenePage();
-  await memberSettings.route("**/v1/workspaces/*/roster", (route) =>
+  await memberSettings.route("**/v1/workspaces/*/roster*", (route) =>
     json(route, {
       members: ROSTER.map((m) =>
         m.id === ME ? { ...m, role: "member" } : m
@@ -8414,7 +8398,7 @@ async function captureScheme(browser, scheme) {
   await notificationsPage.close();
 
   // BF-A5 (#1901): 크로스채널 초안 패널. signIn이 localStorage를 비우므로
-  // 로그인한 뒤에 심고, 같은 탭 구독이 다시 읽도록 사건을 낸다.
+  // 로그인한 뒤에 심고, 같은 탭 구독이 다시 읽도록 사건을 낸다. 초안은 쓴 사람을 든다(#5799: 다른 사람·모르는 사람의 초안은 읽지 않는다).
   const draftsPage = await newScenePage();
   await draftsPage.goto(ORIGIN, { waitUntil: "networkidle" });
   await signIn(draftsPage);
@@ -8424,14 +8408,17 @@ async function captureScheme(browser, scheme) {
     localStorage.setItem(prefix + "${GENERAL_ID}", JSON.stringify({
       text: "배포 롤백 근거를 정리하면",
       atMs: now,
+      author: "${ME}",
     }));
     localStorage.setItem(prefix + "00000000-0000-7000-8000-000000000202", JSON.stringify({
       text: "PR 본문에 게이트 증거를 붙이고\\n두 번째 줄은 미리보기에서 한 줄로 접힌다",
       atMs: now - 60_000,
+      author: "${ME}",
     }));
     localStorage.setItem(prefix + "${DM_ID}", JSON.stringify({
       text: "hermes 온보딩 문구를 이어서",
       atMs: now - 3_600_000,
+      author: "${ME}",
     }));
     window.dispatchEvent(new Event("${DRAFTS_CHANGED_EVENT}"));
     window.dispatchEvent(new CustomEvent("momo:composer-seed", {
@@ -9110,7 +9097,7 @@ async function captureTerminalDockScenes(browser, scheme) {
     if (boot === "pending") {
       await page.goto(ORIGIN, { waitUntil: "domcontentloaded" });
       await signInThroughOnboarding(page, {
-        email: "seongjae@dawn.example",
+        email: "jihu@dawn.example",
         password: "capture-only-not-a-credential",
       });
       await page.getByTestId("open-terminal-dock").waitFor({ state: "visible" });
@@ -9460,8 +9447,8 @@ function welcomeRoster({ paused }) {
     me,
     {
       ...agent,
-      displayName: "곽성재의 Claude",
-      handle: "seongjae-claude",
+      displayName: "한지후의 Claude",
+      handle: "jihu-claude",
       ownerHumanId: ME,
       paused,
     },
@@ -9481,7 +9468,7 @@ async function captureWelcomeKickoffScenes(browser, scheme) {
       reducedMotion,
     });
     await installMocks(context);
-    await context.route("**/v1/workspaces/*/roster", (route) =>
+    await context.route("**/v1/workspaces/*/roster*", (route) =>
       json(route, { members: welcomeRoster({ paused: Boolean(options.paused) }) })
     );
     await context.route("**/v1/workspaces/*/channels/*/messages*", (route) => {
@@ -9570,7 +9557,7 @@ async function captureWelcomeKickoffScenes(browser, scheme) {
               hlcCount: 0,
               authorMemberId: agentId,
               type: "text",
-              body: "안녕하세요 @곽성재님, 저는 이 맥의 Claude Code로 돌아가는 성재님의 에이전트예요. 여기서 부르면 바로 일을 받아요. 오늘 무엇부터 같이 할까요?",
+              body: "안녕하세요 @한지후님, 저는 이 맥의 Claude Code로 돌아가는 성재님의 에이전트예요. 여기서 부르면 바로 일을 받아요. 오늘 무엇부터 같이 할까요?",
               state: "sent",
               createdAtMs: 1_704_067_200_000,
             },
@@ -10126,7 +10113,7 @@ async function captureAddMemberScenes(browser, scheme) {
         : route.fallback();
     });
     if (overrideRoster) {
-      await context.route("**/v1/workspaces/*/roster", overrideRoster);
+      await context.route("**/v1/workspaces/*/roster*", overrideRoster);
     }
 
     const page = await context.newPage();
@@ -11260,7 +11247,7 @@ async function captureAgentCredentialsScenes(browser, scheme) {
 
   const longNameRoster = async (context) => {
     await listWith(activeKim)(context);
-    await context.route("**/v1/workspaces/*/roster", (route) =>
+    await context.route("**/v1/workspaces/*/roster*", (route) =>
       json(route, {
         members: ROSTER.map((member) =>
           member.id === "019f9a01-0000-7000-8000-000000000404"
@@ -12664,7 +12651,7 @@ async function captureAiAccountsScenes(browser, scheme) {
     endpointLabel: "ChatGPT",
     credentialKind: "oauth-openai",
     credentialMeta: {
-      accountLabel: "곽성재 개인",
+      accountLabel: "한지후 개인",
       accessTokenPresent: true,
       accessTokenExpiresAtMs: FIXTURE_NOW + 3_600_000,
       notice: "개인 ChatGPT 구독으로 동작하는 내부용 연결입니다.",
@@ -12923,7 +12910,7 @@ async function captureSkeletonRevealAt(browser, scheme, viewport, nameSuffix) {
     );
     await page.reload({ waitUntil: "domcontentloaded" });
     await signInThroughOnboarding(page, {
-      email: "seongjae@dawn.example",
+      email: "jihu@dawn.example",
       password: "capture-only-not-a-credential",
     });
     if (phone) {

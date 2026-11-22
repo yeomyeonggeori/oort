@@ -51,7 +51,7 @@ function person(
 }
 
 const DIRECTORY = makeDirectory([
-  person(REQUESTER, 'human', '곽성재', 'seongjae'),
+  person(REQUESTER, 'human', '한지후', 'jihu'),
   person(SKY, 'human', '김하늘', 'sky'),
   person(HERMES, 'agent', 'hermes', 'hermes'),
 ]);

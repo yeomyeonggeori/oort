@@ -67,7 +67,7 @@ function member(id: string, name: string): RosterMember {
   } as RosterMember;
 }
 
-const DIRECTORY = makeDirectory([member(SELF, 'seongjae'), member(OTHER, 'minsu')]);
+const DIRECTORY = makeDirectory([member(SELF, 'jihu'), member(OTHER, 'minsu')]);
 
 // ---- 잰 기하(기기 로그의 모양을 줄였다) ---------------------------------------------
 /** 원인 문장이 서 있는 동안의 목록 창 — 기기: 669.3. */

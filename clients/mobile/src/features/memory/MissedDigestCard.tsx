@@ -9,6 +9,7 @@ import {SHEET_ICON_SIZE, SHEET_ICONS} from '../../design/icons';
 import {
   font,
   line,
+  PRESSED_OPACITY,
   radius,
   SAFE_GUTTER,
   slopTo,
@@ -390,7 +391,7 @@ const buildStyles = (color: Palette) =>
       alignItems: 'flex-end',
       justifyContent: 'center',
     },
-    pressed: {opacity: 0.6},
+    pressed: {opacity: PRESSED_OPACITY},
     dismissGlyph: {
       width: SHEET_ICON_SIZE.close,
       height: SHEET_ICON_SIZE.close,

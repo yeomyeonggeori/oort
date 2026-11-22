@@ -31,13 +31,13 @@ const channels = [
 const auth = {
   accessToken: "capture-only-not-a-credential",
   refreshToken: "capture-only-not-a-credential",
-  member: { id: memberId, workspaceId, kind: "human", displayName: "곽성재", handle: "seongjae" },
+  member: { id: memberId, workspaceId, kind: "human", displayName: "한지후", handle: "jihu" },
   realtimeWebSocketUrl: "ws://ai-external-capture.invalid/connection/websocket",
 };
 const base = { workspaceId, status: "active", channelCount: 2, channelIds: channels.map((c) => c.id), capabilities: [], createdAtMs: 0, updatedAtMs: 0 };
 const agentId = "00000000-0000-7000-8000-000000000303";
 const roster = [
-  { ...base, id: memberId, kind: "human", displayName: "곽성재", handle: "seongjae", role: "owner" },
+  { ...base, id: memberId, kind: "human", displayName: "한지후", handle: "jihu", role: "owner" },
   { ...base, id: otherHuman, kind: "human", displayName: "서연", handle: "seoyeon", role: "member" },
   { ...base, id: agentId, kind: "agent", displayName: "hermes", handle: "hermes", paused: false, ownerHumanId: memberId },
 ];

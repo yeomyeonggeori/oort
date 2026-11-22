@@ -13,6 +13,7 @@ import { ComposerFormatTray } from "./ComposerFormatTray";
 import { resetEscapeLayers } from "@/design/ui/escapeLayer";
 import { useComposerFormat } from "./useComposerFormat";
 import * as position from "./composerFormatPosition";
+import { tooltipTextOf } from "@/design/ui/tooltipTestKit";
 
 const reactActEnvironment = globalThis as typeof globalThis & {
   IS_REACT_ACT_ENVIRONMENT?: boolean;
@@ -147,13 +148,13 @@ describe("컴포저 선택 서식 트레이 (#1902)", () => {
       "[data-testid='composer-format-bold']"
     );
     expect(bold?.getAttribute("aria-label")).toBe("굵게");
-    expect(bold?.getAttribute("title")).toBe("굵게 (⌘B)");
+    expect(tooltipTextOf(bold!)).toBe("굵게 (⌘B)");
     expect(bold?.getAttribute("aria-pressed")).toBe("false");
     const italic = document.querySelector("[data-testid='composer-format-italic']");
     const code = document.querySelector("[data-testid='composer-format-code']");
     const link = document.querySelector("[data-testid='composer-format-link']");
     expect(italic && code && link).toBeTruthy();
-    expect(italic?.getAttribute("title")).toContain("영문이나 숫자");
+    expect(tooltipTextOf(italic!)).toContain("영문이나 숫자");
 
     act(() => {
       bold?.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true }));
@@ -192,11 +193,7 @@ describe("컴포저 선택 서식 트레이 (#1902)", () => {
     expect(input.value).toBe("*soon* 롤백");
     expect(input.selectionStart).toBe(1);
     expect(input.selectionEnd).toBe(5);
-    expect(
-      document
-        .querySelector("[data-testid='composer-format-italic']")
-        ?.getAttribute("title")
-    ).toBe("기울임 (⌘I)");
+    expect(tooltipTextOf(document.querySelector("[data-testid='composer-format-italic']")!)).toBe("기울임 (⌘I)");
 
     selectRange(input, 7, 9);
     act(() => {
@@ -335,7 +332,7 @@ describe("컴포저 선택 서식 트레이 (#1902)", () => {
       "[data-testid='composer-format-italic']"
     );
     expect(italic?.getAttribute("aria-disabled")).toBe("true");
-    expect(italic?.getAttribute("title")).toContain("영문이나 숫자");
+    expect(tooltipTextOf(italic!)).toContain("영문이나 숫자");
     act(() => {
       italic?.click();
     });

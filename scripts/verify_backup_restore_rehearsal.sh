@@ -32,7 +32,8 @@ MD_FILE="$OUT_DIR/momo-backup-restore-$RUN_ID.md"
 STARTED_AT="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
 
 cleanup() {
-  docker rm -f "$SRC_CONTAINER" "$DST_CONTAINER" >/dev/null 2>&1 || true
+  # #5606: `-v` so each PG container's anonymous VOLUME goes with it.
+  docker rm -f -v "$SRC_CONTAINER" "$DST_CONTAINER" >/dev/null 2>&1 || true
 }
 trap cleanup EXIT
 

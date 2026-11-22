@@ -17,11 +17,6 @@ import {
   type QuoteDraft,
 } from '@momo/core/features/timeline/quote';
 import {
-  typingLabel,
-  typingVisualSegments,
-  TYPING_AGGREGATE_THRESHOLD_FALLBACK,
-} from '@momo/core/features/chat/typing';
-import {
   channelLabel,
   channelLabelParts,
   labelRecipientKind,
@@ -32,7 +27,13 @@ import {UNKNOWN_AGENT_NAME} from '@momo/core/features/agents/turnCopy';
 import {isSurfaceProvided} from '@momo/core/features/capabilities/serverSurfaces';
 import type {ChannelActionKey} from '@momo/core/features/channels/actionModel';
 import {normalizeChannelTopic} from '@momo/core/features/channels/model';
+import {profileEmail} from '@momo/core/features/directory/model';
 import {dmCloseOffered} from '@momo/core/features/sidebar/dmVisibility';
+import {
+  dmLeaveMode,
+  dmLeaveOffered,
+  higherHistoryFloor,
+} from '@momo/core/features/channels/dmLeave';
 import {readProjectionPhase} from '@momo/core/features/sidebar/goneDm';
 import {composedUnreadCount} from '@momo/core/features/readState/model';
 import {
@@ -119,12 +120,11 @@ import {
 import {channelDraftKey, seedDraft} from '../features/conversation/drafts';
 import {conversationFloor} from '../features/conversation/bubble';
 import {CONV} from '../features/conversation/convDesign';
-import {TYPING_OVERHANG, TypingBar} from '../features/conversation/TypingBar';
+import {TYPING_OVERHANG} from '../features/conversation/TypingBar';
+import {TypingLiveBar} from '../features/conversation/TypingLiveBar';
 import {
   markTyping,
   resetTyping,
-  sweepTyping,
-  useTypists,
 } from '../features/conversation/typingSignals';
 import {useTypingSender} from '../features/conversation/useTypingSender';
 import {ConversationLayout} from '../features/conversation/ConversationLayout';
@@ -162,7 +162,7 @@ import {usePersonalAgentCall} from '../features/conversation/usePersonalAgentCal
 import {useTimeline} from '../features/conversation/useTimeline';
 import {useMarkRead} from '../features/inbox/useInbox';
 import {dmClosureMode} from '../features/sidebar/dmVerdicts';
-import type {ChannelRowTarget} from '../features/sidebar/channelRowActions';
+import type {ChannelRowTarget, DmLeaveHeld} from '../features/sidebar/channelRowActions';
 import {useChannelRowActions} from '../features/sidebar/useChannelRowActions';
 import {visitFlushReason} from '../features/readState/advertise';
 import {useAppForeground, useViewingBeat} from '../features/readState/useViewingBeat';
@@ -344,7 +344,7 @@ interface Visit {
 
 export default function ConversationScreen({
   channelId,
-  title,
+  title: openedTitle,
   anchor,
   notification,
   onBack,
@@ -356,6 +356,7 @@ export default function ConversationScreen({
   onOpenWorkList,
   onOpenSettings,
   onOpenSearch,
+  onDmLeftReceipt,
 }: {
   channelId: string;
   title: string;
@@ -419,6 +420,8 @@ export default function ConversationScreen({
    * (뒤로가기는 검색 탭에서 홈 탭으로 돌아가는 X 와 같은 길). 없으면(셸이 아닌 곳에서 쓰는 호출자) 문이 서지 않는다.
    */
   onOpenSearch?: (initialQuery: string) => void;
+  /** 1:1 대화에서 나간 뒤(204) 그 한 줄 알림을 셸의 영수증 자리에 세운다(ADR-0177 증보 2026-11-14 D21). */
+  onDmLeftReceipt?: (message: string) => void;
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
   const {member, workspaceId} = useSession();
@@ -443,7 +446,13 @@ export default function ConversationScreen({
   const roleLabels = useRoleLabels(workspaceId);
   const markRead = useMarkRead();
 
-  const timeline = useTimeline(rail, workspaceId, channelId, member.id);
+  // 하한 아래 실시간 발행물(다시 보내기로 온 나가기 전 글과 그 반응·고정·카드·지움)을 그리지 않는다 - ADR-0177 증보 2026-11-14 D22 한계 3 의
+  // 클라이언트 몫. 하한은 읽음 투영 행에서만 온다(코어 `higherHistoryFloor`).
+  const historyFloor = higherHistoryFloor(
+    unreadFor(readStates.byChannel, channelId)?.historyFromSeq,
+    null,
+  );
+  const timeline = useTimeline(rail, workspaceId, channelId, member.id, historyFloor);
   /**
    * 타임라인이 **이 방의** 첫 페이지를 들고 있다 (#2569).
    *
@@ -507,6 +516,9 @@ export default function ConversationScreen({
       ) ?? null,
     [groups, channelId],
   );
+
+  // 채널 이름은 목록 캐시가 말한다 — 이름을 바꾸면(#5835) 열려 있는 대화의 머리가 바로 새 이름이다. DM 의 제목은 상대 이름이라 연 때의 것이다.
+  const title = channel !== null && channel.kind !== 'dm' && channel.name ? channel.name : openedTitle;
 
   const peer = useMemo(
     () => (channel ? dmPeer(channel, directory, member.id) : null),
@@ -899,36 +911,8 @@ export default function ConversationScreen({
     };
   }, [rail, railLive, workspaceId, channelId]);
 
-  // 만료는 1Hz 시계가 훑는다. 두 번째 인터벌을 세우지 않는 이유는
-  // `typingSignals.ts` 머리말에 있다 — 같은 박자를 두 번 사는 일이다.
-  useEffect(() => sweepTyping(nowMs), [nowMs]);
-
-  // 에이전트를 화면에서 떨구는 자리. 서버가 403 으로 막지만(`require_human`)
-  // 그것은 서버의 방어이고 이것은 화면의 방어다: 어떤 경로로든 에이전트 id 를
-  // 실은 신호가 그려지는 순간 「사람은 작성 중, 에이전트는 작업 중」이 깨진다.
-  // 명부에 없는 id 도 떨군다 — 이름 없는 「누군가 작성 중」은 나르는 정보가 0이다.
-  const isTypistEligible = useCallback(
-    (memberId: string) => memberFor(directory, memberId)?.kind === 'human',
-    [directory],
-  );
-  const typists = useTypists({
-    channelId,
-    nowMs,
-    myMemberId: member.id,
-    isEligible: isTypistEligible,
-  });
-  const typistNames = useMemo(
-    () => typists.map(id => memberNameParts(directory, id, '').name),
-    [typists, directory],
-  );
-  const typingParts = useMemo(
-    () => typingVisualSegments(typistNames),
-    [typistNames],
-  );
-  const typingA11y = useMemo(
-    () => typingLabel(typistNames, TYPING_AGGREGATE_THRESHOLD_FALLBACK),
-    [typistNames],
-  );
+  // 「작성 중」 줄의 만료는 `TypingLiveBar` 가 제 1초 시계로 훑는다(#5756). 이 화면의 `nowMs` 는
+  // 분 눈금이라 줄 만료를 맡기면 다음 분 눈금까지 줄이 서 있고, 1초로 돌리면 대화 전체가 다시 그려진다.
 
   // 송신: 타이머 없이 키스트로크에 매단다. 자세한 이유는 `useTypingSender` 머리말.
   const onTyping = useTypingSender(workspaceId, channelId, railLive);
@@ -1057,7 +1041,12 @@ export default function ConversationScreen({
     },
     [onBack],
   );
-  const rowActions = useChannelRowActions(workspaceId, member.id, onMenuChannelLeft);
+  const rowActions = useChannelRowActions(
+    workspaceId,
+    member.id,
+    onMenuChannelLeft,
+    onDmLeftReceipt,
+  );
   const {
     open: openRowActions,
     close: closeMenu,
@@ -1074,7 +1063,12 @@ export default function ConversationScreen({
   // 페이지의 알림·복사·닫기·나가기는 같은 훅의 **둘째 인스턴스**가 실행한다 — 첫째(`rowActions`)의 `active` 가 ⋮ 시트의 열림이라, 정보 페이지의 복사
   // 영수증·알림 실패·나가기 확인이 같은 인스턴스를 쓰면 ⋮ 시트가 페이지 위에 뜬다(`flashCopied`·`failed`·`run(leave)` 가 모두 `active` 를 세운다). 둘째는
   // `active` 를 그리는 데 쓰지 않으므로 그럴 일이 없고, 훅이 영수증 뒤 `close()` 를 불러도 페이지는 안 사라진다(페이지의 열림은 `infoOpen` 이다).
-  const infoActions = useChannelRowActions(workspaceId, member.id, onMenuChannelLeft);
+  const infoActions = useChannelRowActions(
+    workspaceId,
+    member.id,
+    onMenuChannelLeft,
+    onDmLeftReceipt,
+  );
   const {
     close: closeInfoActions,
     run: runInfoAction,
@@ -1099,6 +1093,22 @@ export default function ConversationScreen({
   const selfRole = memberFor(directory, member.id)?.role;
   // 이 채널의 **지금** 읽음 투영 행이다. 방문 때 얼려 둔 구분선 기준(`boundary`)이 아니다 — 닫기 판정은 서버가 지금 말하는 안 읽음을 본다.
   const liveReadState = unreadFor(readStates.byChannel, channelId);
+  // 「대화 나가기」를 내미는가(D21): 투영 키 + 경로 접기(모듈 상태라 렌더마다 다시 읽는다 - 실패 답이 서는 렌더에서 항목이 같이 빠진다).
+  const leaveMode = dmLeaveMode({workspaceId, rows: readStates.data});
+  const formatMenuMessage = useFormatMessage();
+  // 확인 단계가 설 때 한 번 읽는다(D16 `seenSeq` 의 관측 쪽 · 스레드 초안을 찾을 메시지 id). 이 방의 첫 쪽을 아직 안 들었으면 비어 있다.
+  const timelineRef = useRef(timeline);
+  timelineRef.current = timeline;
+  const heldInConversation = useCallback((): DmLeaveHeld => {
+    const current = timelineRef.current;
+    if (!uuidEq(current.loadedChannelId ?? undefined, channelIdRef.current)) {
+      return {maxSeq: null, messageIds: []};
+    }
+    return {
+      maxSeq: current.state.newestSeq,
+      messageIds: current.state.messages.map(message => message.id),
+    };
+  }, []);
   const menuTarget = useMemo<ChannelRowTarget>(
     () => ({
       // 채널 목록이 오기 전에도 ⋮ 는 열린다(고정 목록은 채널 없이 열린다). 훅은 id 만 읽고, 알림·닫기·나가기 행은 채널을 알 때만 선다(`menuItems`).
@@ -1107,7 +1117,7 @@ export default function ConversationScreen({
       muted: channel?.muted ?? false,
       selfRole,
       readState: liveReadState,
-      // 「대화 닫기」: 코어 `dmCloseOffered` 한 함수(웹 호버 X · 사이드바 행 시트와 같다) + 서버가 닫기를 싣는 동안만 + 닫을 때 적을 투영 행이
+      // 「목록에서 숨기기」: 코어 `dmCloseOffered` 한 함수(웹 호버 X · 사이드바 행 시트와 같다) + 서버가 닫기를 싣는 동안만 + 닫을 때 적을 투영 행이
       // 있을 때만(메시지가 한 번도 없는 DM 에는 행이 없어 훅이 아무 일도 하지 않는다 — 눌러도 반응 없는 행을 내밀지 않는다).
       closeOffered:
         channel?.kind === 'dm' &&
@@ -1119,16 +1129,42 @@ export default function ConversationScreen({
           mentionCount: liveReadState.mentionCount,
           starredOrSectioned: false,
         }),
+      // 「대화 나가기」: 코어 `dmLeaveOffered` 한 함수(사이드바 행 시트·웹 머리 메뉴와 같다). 채널 목록을 모르면 서지 않는다.
+      leaveOffered:
+        channel !== null &&
+        dmLeaveOffered({
+          mode: leaveMode,
+          phase: readPhase,
+          channel,
+          directory,
+          selfMemberId: member.id,
+        }),
+      held: heldInConversation,
     }),
-    [channel, channelId, title, selfRole, liveReadState, closureMode, readPhase],
+    [
+      channel,
+      channelId,
+      title,
+      selfRole,
+      liveReadState,
+      closureMode,
+      readPhase,
+      leaveMode,
+      directory,
+      member.id,
+      heldInConversation,
+    ],
   );
   const menuItems = useMemo(
-    () => (channel === null ? [] : conversationMenuActionItems(menuTarget)),
-    [channel, menuTarget],
+    () => (channel === null ? [] : conversationMenuActionItems(menuTarget, formatMenuMessage)),
+    [channel, menuTarget, formatMenuMessage],
   );
   const infoItems = useMemo(
-    () => (channel === null ? [] : conversationInfoActionItems(menuTarget, infoActions.copied)),
-    [channel, menuTarget, infoActions.copied],
+    () =>
+      channel === null
+        ? []
+        : conversationInfoActionItems(menuTarget, infoActions.copied, formatMenuMessage),
+    [channel, menuTarget, infoActions.copied, formatMenuMessage],
   );
   const runInfo = useCallback(
     (key: ChannelActionKey) => {
@@ -1145,7 +1181,7 @@ export default function ConversationScreen({
   );
   const runMenuAction = useCallback(
     (key: ChannelActionKey) => {
-      // 같은 행동이 도는 중이면 다시 보내지 않는다 — 두 번 누른 「대화 닫기」가 요청과 뒤로가기를 두 번 내지 않게.
+      // 같은 행동이 도는 중이면 다시 보내지 않는다 — 두 번 누른 「목록에서 숨기기」가 요청과 뒤로가기를 두 번 내지 않게.
       if (isRowActionPending(key)) return;
       runRowAction(menuTarget, key);
     },
@@ -2382,6 +2418,7 @@ export default function ConversationScreen({
               working={working}
               reactions={timeline.reactions}
               pins={timeline.pins}
+              onVisibleSeqRange={timeline.noteVisibleRange}
               // 링크 카드(#4883) — 목록이 줄마다 자기 메시지의 카드를 유도한다.
               unfurls={timeline.unfurls}
               myMemberId={member.id}
@@ -2514,7 +2551,7 @@ export default function ConversationScreen({
                 예약하면서 그 이유가 사라졌다** — 이제 이 줄은 나타나고 사라지며
                 아무것도 밀어내지 않는다. 수리 하나가 다른 수리를 가능하게 한 자리다.
                 =================================================== */}
-            <TypingBar segments={typingParts} label={typingA11y} />
+            <TypingLiveBar channelId={channelId} myMemberId={member.id} directory={directory} />
             {/* 결과는 컨트롤 밖에서, 줄보다 넓은 자리에 말한다. 「이미 끝났습니다」는
                 실패가 아니라 답이므로 배너가 아니라 영수증과 같은 자리에 선다 —
                 빨간 글씨와 재시도는 이미 이긴 경주를 다시 뛰라는 뜻이 된다. */}
@@ -2673,6 +2710,9 @@ export default function ConversationScreen({
           onRun={runInfo}
           onConfirmLeave={infoActions.confirmLeave}
           onCancelLeave={infoActions.cancelLeave}
+          dmLeave={infoActions.dmLeave}
+          onConfirmDmLeave={infoActions.confirmDmLeave}
+          onCancelDmLeave={infoActions.cancelDmLeave}
           onClose={closeInfo}
           peer={peer}
           status={peerStatus}
@@ -2719,6 +2759,12 @@ export default function ConversationScreen({
           onRun={runMenuAction}
           onConfirmLeave={rowActions.confirmLeave}
           onCancelLeave={rowActions.cancelLeave}
+          dmLeave={rowActions.dmLeave}
+          onConfirmDmLeave={rowActions.confirmDmLeave}
+          onCancelDmLeave={rowActions.cancelDmLeave}
+          rename={rowActions.rename}
+          onConfirmRename={rowActions.confirmRename}
+          onClearRenameFailure={rowActions.clearRenameFailure}
           onClose={closeMenu}
         />
       ) : null}
@@ -2733,6 +2779,8 @@ export default function ConversationScreen({
           dmError={profileDmError}
           status={profileStatus}
           nowMs={nowMs}
+          // 명부가 싣는 이메일(#5780). 게스트 시점에서는 가린다 — 웹 프로필 창과 같은 코어 판정이다.
+          email={profileEmail(memberFor(directory, member.id)?.role, profileMember) ?? undefined}
           onClose={closeMemberProfile}
           onOpenDm={() => openProfileDm(profileMember.id)}
           // 「에이전트 정보」·「설정 열기」 타일은 `closesSheet` 라 시트가 내려가며 `onClose`(= `closeMemberProfile`)를 먼저 부른다 — 여기서

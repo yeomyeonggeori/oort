@@ -20,6 +20,8 @@ import { REVIVAL_RETRY_DELAY_MS } from "./dmRevival";
 import { GONE_UNREAD_RETRY_DELAY_MS } from "./goneUnreadVerdicts";
 import { DM_CLOSURE_CACHE_KEY, DM_CLOSURE_MIGRATED_KEY, resetDmClosureFoldForTest } from "./dmClosureModel";
 import { resetDmMigrationForTest } from "./useDmVisibility";
+import { isDmLeaveListHeld, resetDmLeaveStoreForTest, setOpenTimeline } from "./dmLeaveStore";
+import { resetDmLeaveFoldForTest } from "@momo/core/features/channels/dmLeave";
 import {
   closeDmOnDevice,
   closedAtSeqOf,
@@ -94,7 +96,7 @@ function member(id: string, patch: Partial<RosterMember>): RosterMember {
     ...patch,
   };
 }
-const self = member(MEMBER_ID, { displayName: "곽성재", handle: "seongjae", role: "owner" });
+const self = member(MEMBER_ID, { displayName: "한지후", handle: "jihu", role: "owner" });
 const roster = [
   self,
   member(PEER_PLAIN, { displayName: "이도현", handle: "dohyun" }),
@@ -198,6 +200,28 @@ const revival = vi.hoisted(() => ({
    */
   holds: new Map<string, Promise<void>>(),
 }));
+/** 「대화 나가기」 경로의 대역(ADR-0177 증보 2026-11-14 D16, #5825). `fail` 이 상태 코드면 그 코드로 거절한다. */
+const leave = vi.hoisted(() => ({
+  calls: [] as Array<{ channelId: string; seenSeq: number }>,
+  fail: null as number | null,
+  /** 거절의 `error.code`(409 `dm_leave_unavailable` 등). */
+  code: undefined as string | undefined,
+  /** 왕복을 붙든다(진행 중 낱말을 잰다). 시험이 연다. */
+  gate: null as Promise<void> | null,
+}));
+/** 내 예약 목록의 대역(확인 창의 「예약해 둔 메시지 N개」). */
+const scheduledRows = vi.hoisted(() => ({
+  rows: [] as Array<{ id: string; channelId: string; status: string; rev: number }>,
+  /** 목록을 붙든다(「아직 모름」을 잰다). 시험이 연다. */
+  gate: null as Promise<void> | null,
+}));
+vi.mock("@momo/core/features/scheduled/api", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@momo/core/features/scheduled/api")>()),
+  listAllScheduledMessages: async () => {
+    if (scheduledRows.gate !== null) await scheduledRows.gate;
+    return scheduledRows.rows;
+  },
+}));
 /** DM 닫기 경로의 대역(ADR-0177 D7, #4228). `fail` 이 상태 코드면 그 코드로 거절하고, 네트워크 실패면 `"network"`. */
 const closure = vi.hoisted(() => ({
   calls: [] as Array<{ kind: "PUT" | "DELETE"; channelId: string; seenSeq?: number }>,
@@ -218,6 +242,11 @@ vi.mock("@momo/core/lib/api", async (importOriginal) => {
     reopenDm: async (_ws: string, channelId: string) => {
       closure.calls.push({ kind: "DELETE", channelId: channelId.toLowerCase() });
       answer();
+    },
+    leaveDm: async (_ws: string, channelId: string, seenSeq: number) => {
+      leave.calls.push({ channelId: channelId.toLowerCase(), seenSeq });
+      if (leave.gate !== null) await leave.gate;
+      if (leave.fail !== null) throw new actual.ApiError(leave.fail, "x", leave.code);
     },
     fetchMessages: async (_ws: string, channelId: string, query: { after?: number; limit?: number } = {}) => {
       revival.calls.push({ channelId: channelId.toLowerCase(), after: query.after, limit: query.limit });
@@ -314,8 +343,8 @@ function sessionValue(): SessionContextValue {
         id: MEMBER_ID,
         workspaceId: WS,
         kind: "human",
-        displayName: "곽성재",
-        handle: "seongjae",
+        displayName: "한지후",
+        handle: "jihu",
       },
       realtimeWebSocketUrl: "wss://example.test/connection/websocket",
     },
@@ -408,6 +437,14 @@ beforeEach(() => {
   revival.holds.clear();
   closure.calls.length = 0;
   closure.fail = null;
+  leave.calls.length = 0;
+  leave.fail = null;
+  leave.code = undefined;
+  leave.gate = null;
+  scheduledRows.rows = [];
+  scheduledRows.gate = null;
+  resetDmLeaveFoldForTest();
+  resetDmLeaveStoreForTest();
   resetDmClosureFoldForTest();
   resetDmMigrationForTest();
   touch.hoverNone = false;
@@ -576,8 +613,8 @@ describe("사이드바 DM 구획 (#3662)", () => {
     );
     expect(labels.filter((t) => t === "다이렉트 메시지")).toEqual([]);
     const selfRow = dmRow(host, DM_ID(5));
-    expect(selfRow.textContent).toContain("곽성재 (나)");
-    expect(selfRow.querySelector('[data-testid="dm-avatar"]')?.textContent).toBe("곽");
+    expect(selfRow.textContent).toContain("한지후 (나)");
+    expect(selfRow.querySelector('[data-testid="dm-avatar"]')?.textContent).toBe("한");
     // 명부에 없는 상대의 DM 은 안 읽음이 없으면 목록에 없다(#4252): 「닫은 대화」에 있다. 이름은 멘션이 행을 세운 판에서 잰다.
     expect(dmRow(host, DM_ID(6))).toBeNull();
     expect(closedCount(host)).toBe(1);
@@ -640,7 +677,7 @@ describe("DM 호버 X (#3963)", () => {
     const host = await mount();
     enterRow(host, DM_ID(1));
     const x = closeButton(host)!;
-    expect(x.getAttribute("aria-label")).toBe("이도현, 대화 닫기");
+    expect(x.getAttribute("aria-label")).toBe("이도현, 목록에서 숨기기");
     expect(x.tabIndex).toBe(-1);
     // 링크 안의 버튼이 아니다: 앵커 안의 상호작용 콘텐츠는 클릭이 어느 쪽인지 브라우저마다 다르다.
     expect(dmRow(host, DM_ID(1)).contains(x)).toBe(false);
@@ -767,7 +804,7 @@ describe("DM 닫기는 안 읽음이 없을 때만 (#3963, 소유자 결정 2026
     expect(closeButton(host)).toBeNull();
   });
 
-  it("우클릭 메뉴의 「대화 닫기」도 같은 규칙이다 — 안 읽음이 있으면 항목이 없고 읽은 DM 에는 있다", async () => {
+  it("우클릭 메뉴의 「목록에서 숨기기」도 같은 규칙이다 — 안 읽음이 있으면 항목이 없고 읽은 DM 에는 있다", async () => {
     setReadStates([readState(DM_ID(1), 12, 10), readState(DM_ID(2), 9)]);
     const host = await mount();
     rightClickRow(host, DM_ID(1));
@@ -778,7 +815,7 @@ describe("DM 닫기는 안 읽음이 없을 때만 (#3963, 소유자 결정 2026
     rightClickRow(host, DM_ID(2));
     await flush();
     expect(menuOpen()).toBe(true);
-    expect(menuCloseItem()?.textContent).toContain("대화 닫기");
+    expect(menuCloseItem()?.textContent).toContain("목록에서 숨기기");
   });
 
   it("지금 열려 있는 DM 은 읽고 있는 것이라 안 읽음이 있던 DM 이어도 닫을 수 있다", async () => {
@@ -919,7 +956,7 @@ describe("DM 닫기: 사라지고, 돌아온다 (#3963)", () => {
     const empty = host.querySelector('[data-testid="dm-section-empty"]');
     if (empty === null) console.log("DBG", host.querySelector('[data-testid="sidebar-section-dms"]')?.outerHTML.slice(0, 1500));
     expect(empty).not.toBeNull();
-    expect(empty!.textContent).toContain("닫은 대화는 새 메시지가 오면 다시 나타납니다");
+    expect(empty!.textContent).toContain("숨긴 대화는 새 메시지가 오면 다시 나타납니다");
     expect(empty!.textContent).not.toContain("아직 대화가 없습니다");
     // 빈 상태는 한 줄 카피와 액션 하나다: 옛 문장의 행동(⌘⇧K로 시작하세요)이 남아 있다.
     expect(empty!.textContent).toContain("⌘⇧K로 시작하세요");
@@ -1011,7 +1048,7 @@ describe("채널이 없는 멤버의 첫 DM (design-review R1 H1)", () => {
     act(() => closeButton(host)!.click());
     expect(rowIds(host)).toEqual([]);
     expect(host.querySelector('[data-testid="dm-section-empty"]')?.textContent).toContain(
-      "닫은 대화는 새 메시지가 오면 다시 나타납니다"
+      "숨긴 대화는 새 메시지가 오면 다시 나타납니다"
     );
   });
 });
@@ -1175,20 +1212,23 @@ describe("DM 행의 상태 점 (#3964)", () => {
   it("에이전트: 생존 판정이 점이 된다 — 응답함·살아 있음은 채운 초록, 꺼짐은 속이 빈 회색 고리 (Buzz식, 소유자 결정 2026-10-17)", async () => {
     // 모양이 말한다(낱말이 없는 자리): 채운 초록 = 살아 있음, 속 빈 고리 = 꺼짐. 「살아 있지만 일이 없는」 에이전트와
     // 「꺼진」 에이전트가 한 점이면 점이 질문에 답하지 못한다 (#3964 H1). 응답함과 살아 있음·대기는 낱말이 가른다.
-    const cases: Array<[string, string, string[], string[]]> = [
-      ["responsive", "ok", ["bg-ok", "border-surface"], ["bg-surface", "bg-ink-muted"]],
-      ["alive_idle", "ok", ["bg-ok", "border-surface"], ["bg-surface", "bg-ink-muted"]],
-      ["inactive", "muted", ["bg-surface", "border-line-strong"], ["bg-ok", "bg-ink-muted"]],
-      ["quiet", "muted", ["bg-surface", "border-line-strong"], ["bg-ok", "bg-ink-muted"]],
+    // 모양·색은 `data-tone` 을 읽는 CSS 한 곳(`avatar-status`, #5786)이 그린다: ok = 채운 원, muted = 속 빈 고리.
+    const cases: Array<[string, string]> = [
+      ["responsive", "ok"],
+      ["alive_idle", "ok"],
+      ["inactive", "muted"],
+      ["quiet", "muted"],
     ];
-    for (const [state, tone, has, lacks] of cases) {
+    for (const [state, tone] of cases) {
       liveness.byAgent.set(PEER_AGENT, state);
       const host = await mount();
       await settle();
       const dot = dotOf(host, AGENT_DM)!;
       expect(dot.getAttribute("data-tone"), state).toBe(tone);
-      for (const cls of has) expect(dot.className, `${state}: ${cls}`).toContain(cls);
-      for (const cls of lacks) expect(dot.className, `${state}: !${cls}`).not.toContain(cls);
+      // 점이 있으면 아바타가 도려내진다(24 칸).
+      const avatar = dmRow(host, AGENT_DM).querySelector('[data-testid="dm-avatar"]')!;
+      expect(avatar.hasAttribute("data-status-cut"), state).toBe(true);
+      expect(avatar.getAttribute("data-status-face"), state).toBe("24");
       act(() => mountedRoot?.unmount());
       mountedHost?.remove();
     }
@@ -1207,12 +1247,11 @@ describe("DM 행의 상태 점 (#3964)", () => {
     expect(dmRow(host, AGENT_DM).textContent).toMatch(/김인턴, 연결이 꺼져 있어요/);
   });
 
-  it("사람: 자리 비움은 주황 채움 점이고, 낱말은 숨은 글에 있다", async () => {
+  it("사람: 자리 비움은 주황 초승달 점이고, 낱말은 숨은 글에 있다", async () => {
     const host = await mount();
     await settle();
     const dot = dotOf(host, DM_ID(3))!;
     expect(dot.getAttribute("data-tone")).toBe("warn");
-    expect(dot.className).toContain("bg-warn");
     expect(dmRow(host, DM_ID(3)).querySelector(".sr-only")?.textContent).toBe(", 자리 비움");
   });
 
@@ -1223,18 +1262,14 @@ describe("DM 행의 상태 점 (#3964)", () => {
 
     const on = dotOf(host, DM_ID(1))!;
     expect(on.getAttribute("data-tone")).toBe("ok");
-    expect(on.className).toContain("bg-ok");
     expect(dmRow(host, DM_ID(1)).querySelector(".sr-only")?.textContent).toBe(", 온라인");
     expect(
       dmRow(host, DM_ID(1)).querySelector('[data-testid="dm-avatar"]')?.getAttribute("title")
     ).toBe("온라인");
 
     const off = dotOf(host, DM_ID(2))!;
+    // 속이 빈 고리(muted): 채운 점과 한 점이 되지 않는다(살아 있음과 꺼짐은 모양이 다르다 — CSS 가 톤으로 그린다).
     expect(off.getAttribute("data-tone")).toBe("muted");
-    // 속이 빈 고리: 채운 점과 한 점이 되지 않는다(살아 있음과 꺼짐은 모양이 다르다).
-    expect(off.className).toContain("bg-surface");
-    expect(off.className).toContain("border-line-strong");
-    expect(off.className).not.toContain("bg-ok");
     expect(dmRow(host, DM_ID(2)).querySelector(".sr-only")?.textContent).toBe(", 오프라인");
   });
 
@@ -1440,7 +1475,7 @@ describe("나간 멤버와의 대화 (#4252)", () => {
     channelsQuery.data = [dms[5]];
     const host = await mount("/c/none");
     expect(host.querySelector('[data-testid="dm-section-empty"]')?.textContent).toContain(
-      "닫은 대화는 새 메시지가 오면 다시 나타납니다"
+      "숨긴 대화는 새 메시지가 오면 다시 나타납니다"
     );
     expect(host.textContent).not.toContain("아직 대화가 없습니다");
     expect(closedCount(host)).toBe(1);
@@ -1463,7 +1498,7 @@ describe("나간 멤버와의 대화 (#4252)", () => {
     setReadStates([readState(DM_ID(1), 3)]);
     const host = await mount("/c/none");
     expect(host.querySelector('[data-testid="dm-section-empty"]')?.textContent).toContain(
-      "닫은 대화는 새 메시지가 오면 다시 나타납니다"
+      "숨긴 대화는 새 메시지가 오면 다시 나타납니다"
     );
     expect(closedCount(host)).toBe(2);
   });
@@ -1893,7 +1928,7 @@ describe("DM 닫기 · 서버 갈래 (#4228)", () => {
       await Promise.resolve();
     });
     await settle();
-    expect(host.querySelector('[data-testid="dm-close-error"]')?.textContent).toContain("대화를 닫지 못했어요");
+    expect(host.querySelector('[data-testid="dm-close-error"]')?.textContent).toContain("목록에서 숨기지 못했어요");
     expect(closedDmsFor(WS)).toEqual({});
   });
 
@@ -2074,5 +2109,517 @@ describe("안 읽은 채널로 가는 전역 단축키 (⌥↑·⌥↓)", () => 
     await pressAltArrow("ArrowDown");
     // 갔다: 지금 열려 있는 DM 은 읽고 있는 것이라 안 읽음 수가 없다.
     expect(unreadBadge(host)).toBeNull();
+  });
+});
+
+describe("읽은 채널·DM 줄은 한 단계 연하다 (#5775, 폰 #4953 과 같은 규칙)", () => {
+  // 주소가 `/` 이면 셸이 첫 채널(일반)을 열려 있는 줄로 친다. 이 시험들은 열려 있지 않은 줄을 재므로 다른 DM 을 연다.
+  const OPEN = `/c/${DM_ID(3)}`;
+  const dimmed = (host: HTMLElement, channelId: string) =>
+    dmRow(host, channelId).hasAttribute("data-dim");
+
+  it("새 글이 없는 줄만 연하다: 읽은 채널·읽은 DM 은 연하고, 안 읽은 DM 은 또렷하다", async () => {
+    setReadStates([readState(CH_GENERAL, 5), readState(DM_ID(1), 12, 10), readState(DM_ID(2), 3)]);
+    const host = await mount(OPEN);
+    expect(dimmed(host, CH_GENERAL)).toBe(true);
+    expect(dimmed(host, DM_ID(1))).toBe(false);
+    expect(dimmed(host, DM_ID(2))).toBe(true);
+  });
+
+  it("목적지 줄(인박스·멤버 등)과 프로필 줄은 읽음을 말하지 않아 표지가 없다 — 표지는 채널·DM 줄에만 선다", async () => {
+    setReadStates([readState(CH_GENERAL, 5), readState(DM_ID(2), 3)]);
+    const host = await mount(OPEN);
+    const marked = [...host.querySelectorAll("[data-dim]")];
+    expect(marked.length).toBeGreaterThan(0);
+    expect(marked.every((el) => el.getAttribute("data-testid") === "channel-item")).toBe(true);
+  });
+
+  it("알림을 끈 줄은 새 글이 있어도 연하다", async () => {
+    const muted = { ...general, muted: true };
+    channelsQuery.groups = { channels: [muted], dms };
+    channelsQuery.data = [muted, ...dms];
+    setReadStates([readState(CH_GENERAL, 9, 5)]);
+    const host = await mount(OPEN);
+    expect(dimmed(host, CH_GENERAL)).toBe(true);
+  });
+
+  it("지금 열려 있는 줄은 읽었어도 연하지 않다", async () => {
+    setReadStates([readState(CH_GENERAL, 5)]);
+    const host = await mount(`/c/${CH_GENERAL}`);
+    expect(dimmed(host, CH_GENERAL)).toBe(false);
+  });
+
+  it("읽음 정보를 못 받았으면 연하게 칠하지 않는다 — 다 읽었다는 거짓을 만들지 않는다", async () => {
+    readStatesQuery.isError = true;
+    readStatesQuery.data = undefined;
+    const host = await mount(OPEN);
+    expect(dimmed(host, CH_GENERAL)).toBe(false);
+  });
+});
+
+// =============================================================================
+// 1:1 「대화 나가기」 (ADR-0177 증보 2026-11-14 D18·D21, #5825)
+// =============================================================================
+
+describe("대화 나가기 · 보임 판정이 실제 사이드바에 닿는다 (#5824 검수 r1 M1)", () => {
+  /** 나간 직후 서버 값: 하한 11 · 숨김 10 · 읽을 seq 10. 나머지 행은 하한 칸이 `null`(새 서버, 나가지 않음). */
+  const leftRows = () =>
+    serverRows({ 2: { closedAt: 10, readable: 10, latestSeq: 10 } }).map((row) => ({
+      ...row,
+      historyFromSeq: row.channelId === DM_ID(2) ? 11 : null,
+    }));
+
+  it("GET 행이 하한을 실으면 나간 대화는 목록에도 「숨긴 대화」에도 없다 - 서버가 같이 올린 숨김 행(7)으로 새지 않는다", async () => {
+    setReadStates(leftRows());
+    const host = await mount();
+    await settle();
+    expect(rowIds(host)).not.toContain(DM_ID(2));
+    // 「숨긴 대화」는 나간 상대의 DM 6 하나뿐이다. 하한을 판정에 잇는 줄(`serverCarriesLeave`)이 빠지면 7번으로 2 가 된다.
+    expect(closedCount(host)).toBe(1);
+  });
+
+  it("하한 위에 새 글이 오면 원래 자리에 다시 선다", async () => {
+    setReadStates(leftRows().map((row) => (row.channelId === DM_ID(2) ? { ...row, latestSeq: 11, latestReadableSeq: 11 } : row)));
+    const host = await mount();
+    await settle();
+    expect(rowIds(host)).toContain(DM_ID(2));
+  });
+});
+
+/**
+ * 확인 창의 확정을 누른다. 공용 확인 단계의 「선 뒤 500ms 눌림 무시」 가드(#5813)가 있는 판이면 `data-armed="true"` 를 기다리고, 그 속성이
+ * 없는 판(가드 전)이면 바로 누른다 - 두 판에서 같은 시험이 돈다.
+ */
+async function pressLeaveConfirm(): Promise<void> {
+  const button = () => document.querySelector<HTMLElement>('[data-testid="dm-leave-confirm-confirm"]')!;
+  for (let waited = 0; button().getAttribute("data-armed") === "false" && waited < 2_000; waited += 50) {
+    await act(async () => {
+      await new Promise<void>((resolve) => setTimeout(resolve, 50));
+    });
+  }
+  await act(async () => {
+    button().click();
+    await Promise.resolve();
+  });
+}
+
+describe("대화 나가기 · 줄 메뉴 (D21)", () => {
+  beforeAll(() => {
+    HTMLElement.prototype.scrollIntoView = () => undefined;
+    HTMLElement.prototype.hasPointerCapture = () => false;
+    HTMLElement.prototype.setPointerCapture = () => undefined;
+    HTMLElement.prototype.releasePointerCapture = () => undefined;
+    if (typeof globalThis.ResizeObserver === "undefined") {
+      globalThis.ResizeObserver = class ResizeObserver {
+        observe() { return undefined; }
+        unobserve() { return undefined; }
+        disconnect() { return undefined; }
+      };
+    }
+  });
+  const rightClick = (host: HTMLElement, channelId: string) =>
+    act(() => {
+      dmRow(host, channelId).dispatchEvent(
+        new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 12, clientY: 40 })
+      );
+    });
+  const items = () =>
+    [...document.querySelectorAll<HTMLElement>('[data-testid="channel-row-menu"] [role="menuitem"]')].map(
+      (el) => el.dataset.testid
+    );
+  const newServer = () => serverRows().map((row) => ({ ...row, historyFromSeq: null }));
+
+  it("새 서버의 사람끼리 1:1 에는 맨 아래 위험 줄로 선다 - 「목록에서 숨기기」 아래, 구분선 아래", async () => {
+    koreanLocaleForTest = await koreanLocale();
+    setReadStates(newServer());
+    const host = await mount();
+    await settle();
+    rightClick(host, DM_ID(1));
+    await settle();
+    const rows = items();
+    expect(rows.at(-1)).toBe("channel-row-leave-dm");
+    expect(rows.at(-2)).toBe("channel-row-close-dm");
+    const leaveItem = document.querySelector<HTMLElement>('[data-testid="channel-row-leave-dm"]')!;
+    expect(leaveItem.textContent).toContain("대화 나가기");
+    expect(leaveItem.querySelector("svg[data-menu-icon]")?.getAttribute("data-menu-icon")).toBe("leave");
+    expect(leaveItem.previousElementSibling?.getAttribute("role")).toBe("separator");
+    koreanLocaleForTest = null;
+  });
+
+  it("에이전트 DM · 옛 서버(하한 칸 없음)에는 서지 않는다", async () => {
+    setReadStates(newServer());
+    const host = await mount();
+    await settle();
+    rightClick(host, DM_ID(4));
+    await settle();
+    expect(items()).not.toContain("channel-row-leave-dm");
+    expect(items()).toContain("channel-row-close-dm");
+
+    unmountForRemount();
+    setReadStates(serverRows());
+    const again = await mount();
+    await settle();
+    rightClick(again, DM_ID(1));
+    await settle();
+    expect(items()).not.toContain("channel-row-leave-dm");
+  });
+
+  it("고르면 확인 창이 서고 초점은 「취소」, 확정하면 연 순간의 seq 로 PUT 하고 그 자리에 영수증이 선다", async () => {
+    koreanLocaleForTest = await koreanLocale();
+    try {
+      scheduledRows.rows = [
+        { id: "s1", channelId: DM_ID(1), status: "pending", rev: 1 },
+        { id: "s2", channelId: DM_ID(1), status: "failed", rev: 1 },
+        { id: "s3", channelId: DM_ID(2), status: "pending", rev: 1 },
+      ];
+      setReadStates(newServer().map((row) => (row.channelId === DM_ID(1) ? { ...row, latestSeq: 17, lastReadSeq: 17 } : row)));
+      const host = await mount();
+      await settle();
+      await settle();
+      rightClick(host, DM_ID(1));
+      await settle();
+      act(() => document.querySelector<HTMLElement>('[data-testid="channel-row-leave-dm"]')!.click());
+      await settle();
+      await settle();
+      const dialog = document.querySelector<HTMLElement>('[data-testid="dm-leave-confirm"]')!;
+      expect(dialog.getAttribute("role")).toBe("alertdialog");
+      expect(dialog.textContent).toContain("이도현 님과의 대화에서 나갈까요?");
+      expect(dialog.textContent).toContain("나간 뒤에는 되돌릴 수 없어요.");
+      expect(dialog.textContent).toContain("예약해 둔 메시지 2개도 취소돼요.");
+      expect(document.activeElement?.getAttribute("data-testid")).toBe("dm-leave-confirm-cancel");
+      // 확인 창을 보는 사이에 투영이 새 글(18)을 실어 와도 연 순간의 seq 로 보낸다(D16).
+      setReadStates(newServer().map((row) => (row.channelId === DM_ID(1) ? { ...row, latestSeq: 18, lastReadSeq: 17 } : row)));
+      await rerender();
+      await pressLeaveConfirm();
+      await settle();
+      expect(leave.calls).toEqual([{ channelId: DM_ID(1), seenSeq: 17 }]);
+      expect(document.querySelector('[data-testid="dm-leave-confirm"]')).toBeNull();
+      const receipt = host.querySelector<HTMLElement>('[data-testid="dm-leave-receipt"]')!;
+      expect(receipt.textContent).toContain("대화에서 나갔어요.");
+      expect(receipt.dataset.channelId).toBe(DM_ID(1));
+      expect(rowIds(host)).not.toContain(DM_ID(1));
+      // 캐럿은 <body> 로 떨어지지 않고 이웃 줄(다음 DM)로 간다.
+      await nextFrame();
+      await nextFrame();
+      expect(document.activeElement).toBe(dmRow(host, DM_ID(2)));
+    } finally {
+      koreanLocaleForTest = null;
+    }
+  });
+
+  /** 줄 메뉴로 확인 창을 연다(예약 목록이 오기를 기다리지 않는다). */
+  const openLeave = async (host: HTMLElement, channelId: string) => {
+    // 앞 시험이 남긴 되돌림(캐럿·닫힘)이 끝나기 전에 우클릭이 떨어지면 메뉴가 안 설 수 있어, 서 있는 항목을 기다린다(없으면 한 번 더 눌러 본다).
+    for (let attempt = 0; attempt < 4; attempt += 1) {
+      rightClick(host, channelId);
+      await settle();
+      if (document.querySelector('[data-testid="channel-row-leave-dm"]') !== null) break;
+      await nextFrame();
+    }
+    act(() => document.querySelector<HTMLElement>('[data-testid="channel-row-leave-dm"]')!.click());
+    await settle();
+    await settle();
+  };
+  const dialogText = () => document.querySelector<HTMLElement>('[data-testid="dm-leave-confirm"]')?.textContent ?? "";
+  const confirmButton = () => document.querySelector<HTMLElement>('[data-testid="dm-leave-confirm-confirm"]')!;
+  const tryLeave = async (host: HTMLElement, channelId: string) => {
+    await openLeave(host, channelId);
+    await pressLeaveConfirm();
+    await settle();
+  };
+
+  it("다시 눌러 달라질 수 있는 실패(500)는 창 안 한 줄 + 살아 있는 확정이다 - 줄은 그대로, 다시 누르면 PUT 이 한 번 더 나간다", async () => {
+    koreanLocaleForTest = await koreanLocale();
+    try {
+      setReadStates(newServer());
+      const host = await mount();
+      await settle();
+      await settle();
+      leave.fail = 500;
+      await tryLeave(host, DM_ID(1));
+      const error = document.querySelector('[data-testid="dm-leave-confirm-error"]')!;
+      expect(error.getAttribute("role")).toBe("alert");
+      expect(error.textContent).toBe("나가지 못했어요. 다시 시도해 주세요.");
+      expect(confirmButton().getAttribute("aria-disabled")).toBeNull();
+      expect(rowIds(host)).toContain(DM_ID(1));
+      expect(host.querySelector('[data-testid="dm-leave-receipt"]')).toBeNull();
+      await pressLeaveConfirm();
+      await settle();
+      expect(leave.calls).toHaveLength(2);
+    } finally {
+      koreanLocaleForTest = null;
+    }
+  });
+
+  it("404(이미 나갔거나 없는 대화)는 문장 없이 창을 닫고 줄을 걷는다 - 영수증도 다시 시도 줄도 없고, 다른 DM 메뉴는 그대로다 (M5)", async () => {
+    setReadStates(newServer());
+    const host = await mount();
+    await settle();
+    await settle();
+    leave.fail = 404;
+    const client = queryClient!;
+    const invalidate = vi.spyOn(client, "invalidateQueries");
+    await tryLeave(host, DM_ID(1));
+    expect(document.querySelector('[data-testid="dm-leave-confirm"]')).toBeNull();
+    expect(document.querySelector('[data-testid="dm-leave-confirm-error"]')).toBeNull();
+    expect(host.querySelector('[data-testid="dm-leave-receipt"]')).toBeNull();
+    expect(leave.calls).toHaveLength(1);
+    // 채널 목록을 다시 받아 그 대화가 서버의 생각과 맞춰진다.
+    expect(invalidate.mock.calls.map(([filters]) => JSON.stringify((filters as { queryKey: unknown }).queryKey))).toContain(
+      JSON.stringify(["channels", WS])
+    );
+    // 그 대화 하나의 일이다: 다른 DM 의 메뉴는 그대로.
+    await nextFrame();
+    await nextFrame();
+    await settle();
+    rightClick(host, DM_ID(2));
+    await settle();
+    expect(items()).toContain("channel-row-leave-dm");
+  });
+
+  it("409 dm_leave_unavailable 은 「이 대화에서는 나갈 수 없어요.」 + 확정 잠금이다 - 다시 시도 줄이 없고 잠긴 확정은 PUT 을 더 보내지 않는다 (M5)", async () => {
+    koreanLocaleForTest = await koreanLocale();
+    try {
+      setReadStates(newServer());
+      const host = await mount();
+      await settle();
+      await settle();
+      leave.fail = 409;
+      leave.code = "dm_leave_unavailable";
+      await tryLeave(host, DM_ID(1));
+      expect(dialogText()).toContain("이 대화에서는 나갈 수 없어요.");
+      expect(dialogText()).not.toContain("다시 시도");
+      expect(document.querySelector('[data-testid="dm-leave-confirm-error"]')).toBeNull();
+      expect(confirmButton().getAttribute("aria-disabled")).toBe("true");
+      expect(document.querySelector('[role="alert"]')?.textContent).toBe("이 대화에서는 나갈 수 없어요.");
+      expect(rowIds(host)).toContain(DM_ID(1));
+      await pressLeaveConfirm();
+      await settle();
+      expect(leave.calls).toHaveLength(1);
+      // 「취소」는 그대로 살아 있다: 닫을 수 있다.
+      act(() => document.querySelector<HTMLElement>('[data-testid="dm-leave-confirm-cancel"]')!.click());
+      await settle();
+      expect(document.querySelector('[data-testid="dm-leave-confirm"]')).toBeNull();
+    } finally {
+      koreanLocaleForTest = null;
+    }
+  });
+
+  it("405 는 같은 한 줄 + 확정 잠금이고 이 워크스페이스의 메뉴를 접는다 (M5)", async () => {
+    koreanLocaleForTest = await koreanLocale();
+    try {
+      setReadStates(newServer());
+      const host = await mount();
+      await settle();
+      await settle();
+      leave.fail = 405;
+      await tryLeave(host, DM_ID(2));
+      expect(dialogText()).toContain("이 대화에서는 나갈 수 없어요.");
+      expect(confirmButton().getAttribute("aria-disabled")).toBe("true");
+      expect(document.querySelector('[data-testid="dm-leave-confirm-error"]')).toBeNull();
+      act(() => document.querySelector<HTMLElement>('[data-testid="dm-leave-confirm-cancel"]')!.click());
+      await settle();
+      rightClick(host, DM_ID(3));
+      await settle();
+      expect(items()).not.toContain("channel-row-leave-dm");
+    } finally {
+      koreanLocaleForTest = null;
+    }
+  });
+
+  it("확인 창의 접근 가능한 이름 = 제목이다 - 창이 가리키는 이름표 요소가 실제로 있다 (H1)", async () => {
+    koreanLocaleForTest = await koreanLocale();
+    try {
+      setReadStates(newServer());
+      const host = await mount();
+      await settle();
+      await settle();
+      await openLeave(host, DM_ID(1));
+      const dialog = document.querySelector<HTMLElement>('[data-testid="dm-leave-confirm"]')!;
+      const labelledBy = dialog.getAttribute("aria-labelledby");
+      expect(labelledBy).not.toBeNull();
+      const label = document.getElementById(labelledBy!);
+      expect(label?.textContent).toBe("이도현 님과의 대화에서 나갈까요?");
+      // 설명도 같은 방식으로 실제 요소를 가리킨다.
+      expect(document.getElementById(dialog.getAttribute("aria-describedby")!)?.textContent).toContain("그 글부터 새 대화로");
+    } finally {
+      koreanLocaleForTest = null;
+    }
+  });
+
+  it("진행 중에는 확정이 「나가는 중…」을 말하고 aria-busy 이며 취소는 눌러도 창이 그대로다 (M1)", async () => {
+    koreanLocaleForTest = await koreanLocale();
+    try {
+      setReadStates(newServer());
+      const host = await mount();
+      await settle();
+      await settle();
+      let open!: () => void;
+      leave.gate = new Promise<void>((resolve) => { open = resolve; });
+      await openLeave(host, DM_ID(1));
+      expect(confirmButton().textContent).toBe("나가기");
+      await pressLeaveConfirm();
+      expect(confirmButton().textContent).toBe("나가는 중…");
+      expect(confirmButton().getAttribute("aria-busy")).toBe("true");
+      act(() => document.querySelector<HTMLElement>('[data-testid="dm-leave-confirm-cancel"]')!.click());
+      await settle();
+      expect(document.querySelector('[data-testid="dm-leave-confirm"]')).not.toBeNull();
+      await act(async () => {
+        open();
+        await Promise.resolve();
+      });
+      await settle();
+      expect(document.querySelector('[data-testid="dm-leave-confirm"]')).toBeNull();
+    } finally {
+      koreanLocaleForTest = null;
+    }
+  });
+
+  it("예약 목록을 아직 모르면 창은 바로 서고 확정만 잠긴 채 「확인 중…」을 말한다 - 알게 되면 그 자리의 문장만 바뀌고 확정이 살아난다 (M2)", async () => {
+    koreanLocaleForTest = await koreanLocale();
+    try {
+      scheduledRows.rows = [{ id: "s1", channelId: DM_ID(1), status: "pending", rev: 1 }];
+      setReadStates(newServer());
+      let open!: () => void;
+      scheduledRows.gate = new Promise<void>((resolve) => { open = resolve; });
+      const host = await mount();
+      await settle();
+      await settle();
+      await openLeave(host, DM_ID(1));
+      // 예약 목록이 아직 안 왔다: 창은 서 있다.
+      expect(document.querySelector('[data-testid="dm-leave-confirm"]')).not.toBeNull();
+      expect(dialogText()).toContain("확인 중…");
+      expect(dialogText()).not.toContain("예약해 둔");
+      expect(confirmButton().getAttribute("aria-disabled")).toBe("true");
+      // 낭독: 잠긴 확정이 가리키는 설명 글이 「확인 중…」이다(눈에 보이는 줄은 aria-hidden 이라 이 글이 낭독을 맡는다).
+      const lockId = confirmButton().getAttribute("aria-describedby");
+      expect(lockId).not.toBeNull();
+      expect(document.getElementById(lockId!)?.textContent).toBe("확인 중…");
+      expect(document.querySelector('[data-testid="dm-leave-confirm-slot"]')?.getAttribute("data-state")).toBe("checking");
+      // 잠긴 확정을 눌러도 아무것도 나가지 않는다.
+      await pressLeaveConfirm();
+      await settle();
+      expect(leave.calls).toEqual([]);
+      // 목록이 온다: 같은 칸에서 문장이 바뀌고 확정이 산다.
+      await act(async () => {
+        open();
+        await Promise.resolve();
+      });
+      await settle();
+      await settle();
+      expect(document.querySelector('[data-testid="dm-leave-confirm-slot"]')?.getAttribute("data-state")).toBe("known");
+      expect(dialogText()).toContain("예약해 둔 메시지 1개도 취소돼요.");
+      expect(dialogText()).not.toContain("확인 중…");
+      expect(confirmButton().getAttribute("aria-disabled")).toBeNull();
+      await pressLeaveConfirm();
+      await settle();
+      expect(leave.calls).toHaveLength(1);
+    } finally {
+      koreanLocaleForTest = null;
+    }
+  });
+
+  it("확인 중에 취소하면 목록이 뒤늦게 와도 창이 다시 뜨지 않는다 (M2)", async () => {
+    scheduledRows.rows = [];
+    setReadStates(newServer());
+    let open!: () => void;
+    scheduledRows.gate = new Promise<void>((resolve) => { open = resolve; });
+    const host = await mount();
+    await settle();
+    await settle();
+    await openLeave(host, DM_ID(1));
+    expect(document.querySelector('[data-testid="dm-leave-confirm"]')).not.toBeNull();
+    act(() => document.querySelector<HTMLElement>('[data-testid="dm-leave-confirm-cancel"]')!.click());
+    await settle();
+    expect(document.querySelector('[data-testid="dm-leave-confirm"]')).toBeNull();
+    await act(async () => {
+      open();
+      await Promise.resolve();
+    });
+    await settle();
+    await settle();
+    expect(document.querySelector('[data-testid="dm-leave-confirm"]')).toBeNull();
+    expect(leave.calls).toEqual([]);
+  });
+
+  it("영수증은 그 대화 줄의 자리에 서고 다른 줄의 순서는 그대로다 - 나가면 아래 줄이 올라오지 않는다 (V9)", async () => {
+    setReadStates(newServer());
+    const host = await mount();
+    await settle();
+    await settle();
+    const order = () =>
+      [...host.querySelectorAll<HTMLElement>('[data-testid="channel-item"], [data-testid="dm-leave-receipt"]')].map(
+        (el) => (el.dataset.testid === "dm-leave-receipt" ? `receipt:${el.dataset.channelId}` : `row:${el.dataset.channelId}`)
+      );
+    const before = order();
+    const at = before.indexOf(`row:${DM_ID(1)}`);
+    expect(at).toBeGreaterThanOrEqual(0);
+    await tryLeave(host, DM_ID(1));
+    // 서버의 투영이 하한을 실어 오면(다시 읽기) 그 대화는 보임 판정에서 내려간다 - 영수증이 서 있는 동안은 그래도 자리를 지킨다.
+    setReadStates(
+      serverRows({ 1: { closedAt: 10, readable: 10, latestSeq: 10 } }).map((row) => ({
+        ...row,
+        historyFromSeq: row.channelId === DM_ID(1) ? 11 : null,
+      }))
+    );
+    await rerender();
+    await settle();
+    const after = order();
+    expect(after).toHaveLength(before.length);
+    expect(after[at]).toBe(`receipt:${DM_ID(1)}`);
+    expect(after.filter((_, i) => i !== at)).toEqual(before.filter((_, i) => i !== at));
+  });
+
+  it("성공하면 정리 뒤 읽음 투영을 다시 읽는다 - 나가는 중이던 옛 읽기가 하한 없는 행으로 덮지 못하게 (V10)", async () => {
+    setReadStates(newServer());
+    const host = await mount();
+    await settle();
+    await settle();
+    const invalidate = vi.spyOn(queryClient!, "invalidateQueries");
+    await openLeave(host, DM_ID(1));
+    expect(invalidate).not.toHaveBeenCalled();
+    await pressLeaveConfirm();
+    await settle();
+    const keys = invalidate.mock.calls.map(([filters]) => JSON.stringify((filters as { queryKey: unknown }).queryKey));
+    expect(keys).toContain(JSON.stringify(["read-state", WS]));
+  });
+
+  it("목록의 줄 메뉴가 열려 있는 동안 영수증 걷기가 붙들리고, 메뉴가 닫히면 풀린다 (M4)", async () => {
+    setReadStates(newServer());
+    const host = await mount();
+    await settle();
+    await settle();
+    expect(isDmLeaveListHeld()).toBe(false);
+    rightClick(host, DM_ID(2));
+    // 메뉴가 뜨는 박자(부하에 따라 달라진다)를 세지 않고 뜰 때까지 조건으로 기다린다.
+    await vi.waitFor(() => expect(document.querySelector('[data-testid="channel-row-menu"]')).not.toBeNull(), { timeout: 5000 });
+    expect(isDmLeaveListHeld()).toBe(true);
+    act(() => {
+      document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    });
+    await vi.waitFor(() => expect(document.querySelector('[data-testid="channel-row-menu"]')).toBeNull(), { timeout: 5000 });
+    await vi.waitFor(() => expect(isDmLeaveListHeld()).toBe(false), { timeout: 5000 });
+  });
+
+  it("seenSeq 는 투영의 최신 seq 와 열려 있는 이력이 아는 가장 큰 seq 중 큰 쪽이다 (D16, V11)", async () => {
+    setReadStates(newServer().map((row) => (row.channelId === DM_ID(1) ? { ...row, latestSeq: 17, lastReadSeq: 17 } : row)));
+    const host = await mount();
+    await settle();
+    await settle();
+    // 이 대화가 열려 있고 이력이 실시간으로 25 까지 봤다(투영은 아직 17).
+    setOpenTimeline({ workspaceId: WS, channelId: DM_ID(1), newestSeq: 25, messageIds: [] });
+    await tryLeave(host, DM_ID(1));
+    expect(leave.calls).toEqual([{ channelId: DM_ID(1), seenSeq: 25 }]);
+    // 짝: 열려 있는 이력이 더 작으면 투영의 값이다.
+    unmountForRemount();
+    leave.calls.length = 0;
+    resetDmLeaveStoreForTest();
+    setReadStates(newServer().map((row) => (row.channelId === DM_ID(2) ? { ...row, latestSeq: 9, lastReadSeq: 9 } : row)));
+    const again = await mount();
+    await settle();
+    await settle();
+    setOpenTimeline({ workspaceId: WS, channelId: DM_ID(2), newestSeq: 4, messageIds: [] });
+    await tryLeave(again, DM_ID(2));
+    expect(leave.calls).toEqual([{ channelId: DM_ID(2), seenSeq: 9 }]);
   });
 });

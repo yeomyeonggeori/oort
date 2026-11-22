@@ -33,7 +33,7 @@ function member(over: Partial<RosterMember> & {id: string}): RosterMember {
 const MEMBERS = [
   member({id: '1', displayName: '김인턴', handle: 'kim-intern', kind: 'agent'}),
   member({id: '2', displayName: '헤르메스', handle: 'hermes', kind: 'agent'}),
-  member({id: '3', displayName: '곽성재', handle: 'seongjae'}),
+  member({id: '3', displayName: '한지후', handle: 'jihu'}),
   member({id: '4', displayName: '떠난사람', handle: 'gone', status: 'deleted'}),
 ];
 

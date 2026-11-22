@@ -181,7 +181,8 @@ fn webhook_props(
         }
         // #4965 (r1 Low-1) — nor can it write a marker only the server writes under an ordinary
         // key (`kind: "team_ai_invite_link"`, the helper's invite-link message): the value half of
-        // the same rule, held in one place for the REST send and this route.
+        // the same rule, held in one place for the REST send and this route. #5566 made that
+        // place the whole list (`messages::SERVER_ONLY_PROPS_KINDS`): no card or system-line kind.
         if crate::routes::messages::is_server_owned_props_entry(key, value) {
             continue;
         }
@@ -767,5 +768,29 @@ mod tests {
         ordinary.insert("kind".to_string(), "deploy_notice".to_string());
         let props = webhook_props(Uuid::nil(), WebhookMode::Native, "label", &ordinary);
         assert_eq!(props["kind"], json!("deploy_notice"));
+    }
+
+    /// #5566 — a webhook writes `text` lines under its own member, so a `kind` it could carry
+    /// would draw the worker's completion report (or a system line's marker) as the external
+    /// sender's line. It is held to the same list as a REST send — `dm_agent_membership`, once a
+    /// REST-only strip, included — and the rest of its props still ride.
+    #[test]
+    fn a_webhook_cannot_write_a_server_only_kind() {
+        for kind in ["completion_report", "dm_agent_membership"]
+            .into_iter()
+            .chain(crate::routes::messages::SERVER_ONLY_PROPS_KINDS)
+        {
+            let mut client = BTreeMap::new();
+            client.insert("kind".to_string(), kind.to_string());
+            client.insert("summary".to_string(), "배포 끝".to_string());
+            let props = webhook_props(Uuid::nil(), WebhookMode::Native, "label", &client);
+            assert!(props.get("kind").is_none(), "{kind}: {props}");
+            assert_eq!(props["summary"], json!("배포 끝"), "{kind}: {props}");
+            assert_eq!(
+                props["source"],
+                json!("external_webhook"),
+                "{kind}: {props}"
+            );
+        }
     }
 }

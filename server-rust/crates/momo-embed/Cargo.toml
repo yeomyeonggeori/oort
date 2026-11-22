@@ -23,7 +23,8 @@ rust-version.workspace = true
 # bookworm's, so linking it in the bookworm build image fails on libstdc++ symbols
 # (`__cxa_call_terminate`, `basic_string::_M_replace_cold`), and it adds a build-time download from
 # cdn.pyke.io. Microsoft's own release library (MIT, `onnxruntime-linux-<arch>-<ver>.tgz`) needs only
-# GLIBCXX <= 3.4.21 / GLIBC <= 2.27, is pinned by sha256 in the Dockerfile stage `ort-payload`, and
+# GLIBCXX <= 3.4.21 / GLIBC <= 2.27, is pinned by sha256 in the Dockerfile stage `ort-payload` (which
+# falls back to an earlier oort image, pinned by digest, when the release download fails), and
 # needs nothing at cargo build time — so `cargo build/test/clippy` stay offline-capable and CI needs
 # no extra download. Anything that actually creates a session (the image's `--embed-check`, the
 # ignored real-model tests) needs `ORT_DYLIB_PATH` pointing at libonnxruntime.

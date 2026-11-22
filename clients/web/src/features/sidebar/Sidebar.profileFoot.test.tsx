@@ -12,6 +12,7 @@ import { SessionProvider, type SessionContextValue } from "@/app/session";
 import { ShellNavProvider } from "@/app/shellNav";
 import { resetUpdateStoreForTest, seedUpdateStateForTest } from "@/features/updates/store";
 import { Sidebar } from "./Sidebar";
+import { tooltipTextOf } from "@/design/ui/tooltipTestKit";
 
 const WS = "00000000-0000-7000-8000-000000000001";
 const MEMBER_ID = "00000000-0000-7000-8000-000000000101";
@@ -76,8 +77,8 @@ const self: RosterMember = {
   workspaceId: WS,
   kind: "human",
   status: "active",
-  displayName: "곽성재",
-  handle: "seongjae",
+  displayName: "한지후",
+  handle: "jihu",
   role: "owner",
   channelCount: 2,
   channelIds: [CH_ENGINE, CH_GENERAL],
@@ -173,8 +174,8 @@ function sessionValue(): SessionContextValue {
         id: MEMBER_ID,
         workspaceId: WS,
         kind: "human",
-        displayName: "곽성재",
-        handle: "seongjae",
+        displayName: "한지후",
+        handle: "jihu",
       },
       realtimeWebSocketUrl: "wss://example.test/connection/websocket",
     },
@@ -348,7 +349,7 @@ describe("사이드바 하단 프로필 (#3574)", () => {
     expect(railPill?.getAttribute("data-placement")).toBe("rail");
     expect(railPill?.getAttribute("aria-label")).toBe("업데이트. 0.1.28로 업데이트할 수 있어요. 누르면 받고 다시 시작해요.");
     // 레일은 가로로 넘친 것을 잘라 직접 그린 툴팁이 서지 못한다: 설명은 레일 타일과 같은 `title`이다.
-    expect(railPill?.getAttribute("title")).toBe("0.1.28로 업데이트할 수 있어요. 누르면 받고 다시 시작해요.");
+    expect(tooltipTextOf(railPill!)).toBe("0.1.28로 업데이트할 수 있어요. 누르면 받고 다시 시작해요.");
     const railOrder = Array.from(rail.querySelectorAll("[data-testid]")).map((n) => n.getAttribute("data-testid"));
     expect(railOrder.indexOf("update-pill")).toBeLessThan(railOrder.indexOf("profile-card"));
     resetUpdateStoreForTest();

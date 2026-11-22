@@ -30,7 +30,7 @@ const ME = "019f94e3-7a10-79cd-9dee-208f47edd9a8";
 const SESSION = {
   accessToken: "capture-only-not-a-credential",
   refreshToken: "capture-only-not-a-credential",
-  member: { id: ME, workspaceId: WORKSPACE_ID, kind: "human", displayName: "곽성재", handle: "seongjae" },
+  member: { id: ME, workspaceId: WORKSPACE_ID, kind: "human", displayName: "한지후", handle: "jihu" },
   realtimeWebSocketUrl: `ws://127.0.0.1:${PORT + 900}/connection/websocket`,
 };
 const CHANNELS = [
@@ -60,7 +60,7 @@ async function installMocks(context) {
     json(route, { accessToken: SESSION.accessToken, refreshToken: SESSION.refreshToken })
   );
   await context.route("**/v1/workspaces/*/channels", (route) => json(route, { channels: CHANNELS }));
-  await context.route("**/v1/workspaces/*/roster", (route) => json(route, { members: [] }));
+  await context.route("**/v1/workspaces/*/roster*", (route) => json(route, { members: [] }));
   // 운영자가 아닌 사람의 팀 연결(403 → 운영자 안내). 내 계정 절만 본다.
   await context.route("**/v1/provider/link**", (route) =>
     json(route, { error: { code: "forbidden", message: "operator required" } }, 403)
@@ -133,7 +133,7 @@ async function signedIn(browser, { viewport, scheme }) {
   const page = await context.newPage();
   await page.goto(ORIGIN, { waitUntil: "networkidle" });
   await advanceToAccount(page);
-  await page.getByTestId("login-email").fill("seongjae@dawn.example");
+  await page.getByTestId("login-email").fill("jihu@dawn.example");
   await page.getByTestId("login-password").fill("capture-only-not-a-credential");
   await page.getByTestId("login-submit").click();
   await page.getByTestId("channel-list").waitFor({ state: "visible" });

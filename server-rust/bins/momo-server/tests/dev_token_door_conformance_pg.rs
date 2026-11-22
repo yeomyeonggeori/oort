@@ -2502,11 +2502,9 @@ const CONTRACT_WITHOUT_MOUNT: Drift = &[
         ],
     ),
     (
-        "work, huddle, agent-card, presence and drive operations in openapi.yaml that build_app mounts no such method for (e.g. `work-tool-profiles` is mounted GET-only: 'Swift CRUD stays unported')",
+        "work, huddle, presence and drive operations in openapi.yaml that build_app mounts no such method for (e.g. `work-tool-profiles` is mounted GET-only: 'Swift CRUD stays unported')",
         &[
             ("POST", "/v1/mcp/drive"),
-            ("POST", "/v1/workspaces/{}/agents/from-card"),
-            ("POST", "/v1/workspaces/{}/agents/from-card/{}/confirm"),
             ("GET", "/v1/workspaces/{}/audit"),
             ("GET", "/v1/workspaces/{}/context-packets/{}"),
             ("POST", "/v1/workspaces/{}/huddles/{}/recording-consent"),

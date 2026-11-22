@@ -1,23 +1,26 @@
 import {
   channelActionClusterTitle,
   channelActionMenuLabel,
+  isChannelActionStatusIcon,
   type ChannelActionItem,
   type ChannelActionKey,
 } from '@momo/core/features/channels/actionModel';
 import {
-  CHANNEL_LEAVE_CONFIRM_TITLE,
-  CHANNEL_LEAVE_LABEL,
-  channelLeaveConfirmBody,
+  channelLeaveConfirmBodyKey,
 } from '@momo/core/features/channels/model';
 import React from 'react';
 import {StyleSheet} from 'react-native';
 import {Sentence} from '../../design/atoms';
 import {PageSheet} from '../../design/PageSheet';
 import {SheetHeader} from '../../design/SheetChrome';
-import {ConfirmStep, GroupCard, ListRow, RowEmoji, SheetScroll} from '../../design/sheetParts';
+import {CONFIRM_ARM_MS, ConfirmStep, GroupCard, ListRow, RowStatusIcon, SheetScroll} from '../../design/sheetParts';
 import {font, line, type Palette} from '../../design/tokens';
 import {useStyles} from '../../design/theme';
+import {useFormatMessage} from '../../i18n/useFormatMessage';
 import type {ChannelRowTarget} from './channelRowActions';
+import {DmLeaveConfirm, ignoreDiscard} from './DmLeaveConfirm';
+import {RenameChannelBody} from './RenameChannelBody';
+import type {ChannelRowActions, DmLeaveStepView} from './useChannelRowActions';
 
 // =============================================================================
 // 행을 길게 누르면 열리는 시트 (#4229, Buzz식). 그릇·머리·행은 #4318 의 공용 부품이다.
@@ -36,6 +39,7 @@ import type {ChannelRowTarget} from './channelRowActions';
 //
 // 되돌릴 길이 없는 일(다시 들어오려면 관리자가 추가해야 한다)이라 한 단계를 더 둔다 — 메시지 시트의
 // 지우기 확인과 같은 모양이다. 실패는 확인 단계 **안에서** 말한다(시트를 닫지 않는다).
+// 1:1 「대화 나가기」(ADR-0177 증보 2026-11-14 D21)도 같은 자리의 확인 단계다(`DmLeaveConfirm`, 문장은 코어 사전).
 // =============================================================================
 
 interface Group {
@@ -72,6 +76,12 @@ export function ChannelActionSheet({
   onRun,
   onConfirmLeave,
   onCancelLeave,
+  dmLeave = null,
+  onConfirmDmLeave,
+  onCancelDmLeave,
+  rename = null,
+  onConfirmRename,
+  onClearRenameFailure,
   onClose,
 }: {
   target: ChannelRowTarget;
@@ -83,9 +93,18 @@ export function ChannelActionSheet({
   onRun: (key: ChannelActionKey) => void;
   onConfirmLeave: () => void;
   onCancelLeave: () => void;
+  /** 1:1 「대화 나가기」 확인 단계(훅의 `dmLeave`). 있으면 메뉴 대신 선다. */
+  dmLeave?: DmLeaveStepView | null;
+  onConfirmDmLeave?: () => void;
+  onCancelDmLeave?: () => void;
+  /** 「이름 바꾸기」 단계(훅의 `rename`, ADR-0225 D10 · #5835). 있으면 머리까지 이 단계의 것으로 바뀐다. */
+  rename?: ChannelRowActions['rename'];
+  onConfirmRename?: (name: string) => void;
+  onClearRenameFailure?: () => void;
   onClose: () => void;
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
+  const formatMessage = useFormatMessage();
   const isDm = target.channel.kind === 'dm';
 
   return (
@@ -95,23 +114,47 @@ export function ChannelActionSheet({
       accessibilityLabel={channelActionMenuLabel(target.title, target.channel)}
       scrimLabel="대화 액션 닫기"
       scrimTestID="channel-sheet-backdrop"
+      // 1:1 나가기 요청이 가는 동안은 몸짓으로 닫히지 않는다(요청은 이미 나갔다).
+      dirty={dmLeave?.pending === true || rename?.pending === true}
+      onDiscardPrompt={ignoreDiscard}
       testID="channel-action-sheet">
+      {rename !== null && onConfirmRename ? (
+        <RenameChannelBody
+          current={target.channel.name ?? target.title}
+          pending={rename.pending}
+          failure={rename.failure}
+          onSubmit={onConfirmRename}
+          onEdit={onClearRenameFailure ?? ignoreDiscard}
+          testIDPrefix="channel-sheet-rename"
+        />
+      ) : (
+      <>
       <SheetHeader
         title={isDm ? target.title : `# ${target.title}`}
         titleTestID="channel-sheet-title"
         closeLabel="대화 액션 닫기"
         closeTestID="channel-sheet-close"
+        closeDisabled={dmLeave?.pending === true}
       />
-      <SheetScroll testID="channel-sheet-scroll">
-        {confirmingLeave ? (
+      <SheetScroll testID="channel-sheet-scroll" scrollToTopWhen={dmLeave !== null}>
+        {dmLeave !== null && onConfirmDmLeave && onCancelDmLeave ? (
+          <DmLeaveConfirm
+            step={dmLeave}
+            onConfirm={onConfirmDmLeave}
+            onCancel={onCancelDmLeave}
+            testID="channel-dm-leave-confirm"
+          />
+        ) : confirmingLeave ? (
           <ConfirmStep
             testID="channel-leave-confirm"
-            headline={CHANNEL_LEAVE_CONFIRM_TITLE}
-            detail={channelLeaveConfirmBody(target.title)}
+            confirmArmMs={CONFIRM_ARM_MS}
+            headline={formatMessage('timeline.channelLeave.title')}
+            detail={formatMessage(channelLeaveConfirmBodyKey(target.channel.kind), {name: target.title})}
             error={leave.error}
             errorTestID="channel-leave-error"
-            confirmLabel={CHANNEL_LEAVE_LABEL}
-            pendingLabel="나가는 중…"
+            confirmLabel={formatMessage('timeline.channelLeave.confirm')}
+            pendingLabel={formatMessage('timeline.channelLeave.busy')}
+            cancelLabel={formatMessage('timeline.channelLeave.cancel')}
             pending={leave.pending}
             onCancel={onCancelLeave}
             onConfirm={onConfirmLeave}
@@ -134,7 +177,7 @@ export function ChannelActionSheet({
                       key={item.key}
                       title={busy && item.busyLabel ? item.busyLabel : item.label}
                       // 알림 상태 표지는 오른쪽 값 자리다. 앞 칸·행 차례·위험색은 #4319 계약을 따른다.
-                      trailing={item.icon ? <RowEmoji emoji={item.icon} /> : undefined}
+                      trailing={isChannelActionStatusIcon(item.icon) ? <RowStatusIcon name={item.icon} /> : undefined}
                       tone={item.tone === 'danger' ? 'danger' : 'default'}
                       busy={busy}
                       // 닫는 길로 보내지 않는다: 이 시트는 왕복 중의 「…하는 중」·「복사됨」·실패를 스스로
@@ -150,6 +193,8 @@ export function ChannelActionSheet({
           </>
         )}
       </SheetScroll>
+      </>
+      )}
     </PageSheet>
   );
 }

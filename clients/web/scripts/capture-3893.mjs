@@ -38,7 +38,7 @@ const channels = [
 const auth = {
   accessToken: "capture-only-not-a-credential",
   refreshToken: "capture-only-not-a-credential",
-  member: { id: me, workspaceId, kind: "human", displayName: "곽성재", handle: "seongjae" },
+  member: { id: me, workspaceId, kind: "human", displayName: "한지후", handle: "jihu" },
   realtimeWebSocketUrl: "ws://capture-3893.invalid/connection/websocket",
 };
 const person = (id, displayName, handle, role) => ({
@@ -66,7 +66,7 @@ let bag = { team_ai_fast_path: false };
 function roster() {
   const helperRow = bot(helper, "oort 도우미", "oort-helper", scenario.v2 ? { aliases: ["oort", "오르트"] } : {});
   return [
-    person(me, "곽성재", "seongjae", "owner"),
+    person(me, "한지후", "jihu", "owner"),
     person(haneul, "김하늘", "haneul", "member"),
     helperRow,
     bot(grok, "그록봇", "grokbot"),
@@ -77,7 +77,7 @@ function roster() {
 const REPLY_V2 = {
   source: "team_ai",
   run_id: "0199aa11-2222-7000-8000-0000000038a1",
-  model_label: "Claude Sonnet 4.5",
+  team_ai_model: { model: "claude-sonnet-4-5-20250929", wire: "anthropic_messages" },
   tools_used: [{ name: "search_messages" }, { name: "read_channel", channel: "마케팅" }, { name: "web_search" }],
   web_citations: [
     { url: "https://www.example.com/blog/launch-checklist-2026", title: "2026 출시 체크리스트, 무엇을 먼저 할까" },

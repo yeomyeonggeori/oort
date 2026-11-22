@@ -33,20 +33,20 @@ const lab = channels[1];
 const auth = {
   accessToken: "capture-only-not-a-credential",
   refreshToken: "capture-only-not-a-credential",
-  member: { id: memberId, workspaceId, kind: "human", displayName: "곽성재", handle: "seongjae" },
+  member: { id: memberId, workspaceId, kind: "human", displayName: "한지후", handle: "jihu" },
   realtimeWebSocketUrl: "ws://work-3842-capture.invalid/connection/websocket",
 };
 const ids = (n) => `00000000-0000-7000-8000-0000000000d${n}`;
 const other = { memberId: "00000000-0000-7000-8000-000000000102", displayName: "김민지" };
 const roster = [
   { id: agentId, workspaceId, kind: "agent", status: "active", displayName: "그록봇", handle: "grok-bot", channelCount: 2, channelIds: channels.map((c) => c.id), capabilities: [], ownerHumanId: memberId, createdAtMs: 0, updatedAtMs: 0 },
-  { id: memberId, workspaceId, kind: "human", status: "active", role: "owner", displayName: "곽성재", handle: "seongjae", channelCount: 2, channelIds: channels.map((c) => c.id), capabilities: [], createdAtMs: 0, updatedAtMs: 0 },
+  { id: memberId, workspaceId, kind: "human", status: "active", role: "owner", displayName: "한지후", handle: "jihu", channelCount: 2, channelIds: channels.map((c) => c.id), capabilities: [], createdAtMs: 0, updatedAtMs: 0 },
 ];
 
 const NOW = Date.now();
 const sec = Math.floor(NOW / 1000);
 const none = { added: null, deleted: null, files: null, ahead: null, behind: null, uncommitted: null };
-const me = { memberId, displayName: "곽성재" };
+const me = { memberId, displayName: "한지후" };
 const grok = { memberId: agentId, displayName: "그록봇" };
 const runBase = { source: "run", requestedBy: me, origin: "agent_run", folderLabel: null, owner: grok, homeChannel: { id: lab.id, name: "agent-lab" }, sharedAtMs: null, repo: null, harness: "hosted", diff: none, stages: [] };
 const mineRows = [

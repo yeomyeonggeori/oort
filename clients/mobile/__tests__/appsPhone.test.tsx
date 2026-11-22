@@ -62,8 +62,8 @@ const SELF: Member = {
   id: SELF_ID,
   workspaceId: WS,
   kind: 'human',
-  displayName: '곽성재',
-  handle: 'seongjae',
+  displayName: '한지후',
+  handle: 'jihu',
 };
 
 function reply(status: number, body: unknown): Response {
@@ -414,8 +414,8 @@ describe('plugin.install 승인 카드 · 결과 카드 (폰 렌더, #3893 대�
   const BASE_MS = 1_760_000_000_000;
   const DIRECTORY = makeDirectory([
     {
-      id: SELF_ID, workspaceId: WS, kind: 'human', status: 'active', displayName: '곽성재',
-      handle: 'seongjae', channelCount: 1, channelIds: [], capabilities: [], createdAtMs: 0, updatedAtMs: 0,
+      id: SELF_ID, workspaceId: WS, kind: 'human', status: 'active', displayName: '한지후',
+      handle: 'jihu', channelCount: 1, channelIds: [], capabilities: [], createdAtMs: 0, updatedAtMs: 0,
     },
     {
       id: HELPER, workspaceId: WS, kind: 'agent', status: 'active', displayName: 'oort 도우미',

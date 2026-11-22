@@ -2898,6 +2898,12 @@ pub struct ChannelDto {
     /// reason). **Set** on the B4 channel list when `include_archived=true`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub archived_at_ms: Option<i64>,
+    /// `channel.browse_listed` — listed in channel browse (ADR-0224 D2). Always present;
+    /// `false` for every private channel and DM (the table allows `true` only on a public one).
+    pub browse_listed: bool,
+    /// `channel.is_default` — a person joining by invite lands here (ADR-0224 D6·D7). Always
+    /// present; `false` for every private channel and DM.
+    pub is_default: bool,
     pub muted: bool,
     /// End of the caller's timed mute, epoch ms — present **only while a timed mute is in
     /// progress** (ADR-0206 D12, #4343). An open-ended mute and an expired one omit the key.
@@ -2911,6 +2917,101 @@ pub struct ChannelDto {
 #[serde(rename_all = "camelCase")]
 pub struct WorkspaceChannelsResponse {
     pub channels: Vec<ChannelDto>,
+}
+
+/// ADR-0224 D3 — `GET …/channels/browse?q=&cursor=&limit=`. Lenient like the channel
+/// list: a garbage `limit` falls back to the default; `cursor` is strict (400) because a
+/// bad cursor cannot be read as "the first page".
+#[derive(Debug, Deserialize)]
+pub struct BrowseChannelsQuery {
+    #[serde(default)]
+    pub q: Option<String>,
+    #[serde(default)]
+    pub cursor: Option<String>,
+    #[serde(default)]
+    pub limit: Option<String>,
+}
+
+/// One row of the browse list (ADR-0224 D3). `topic` is omitted when the channel has none.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BrowseChannelDto {
+    pub id: String,
+    pub name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub topic: Option<String>,
+    pub member_count: i64,
+    pub is_member: bool,
+    pub is_default: bool,
+}
+
+/// ADR-0224 D3 — the browse page. `nextCursor` is omitted on the last page.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BrowseChannelsResponse {
+    pub channels: Vec<BrowseChannelDto>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub next_cursor: Option<String>,
+}
+
+/// ADR-0224 D4 — `POST …/channels/{ch}/members/me`. `channel` is the same `Channel` row
+/// the channel list carries, so a client can put it in the sidebar as it is.
+/// `newlyJoined` is false when the caller was already a member (nothing was written).
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ChannelJoinResponse {
+    pub channel: ChannelDto,
+    pub newly_joined: bool,
+}
+
+/// ADR-0224 D5 — `GET …/channels/{ch}/preview`. One shape for a member and a non-member
+/// alike; `channel.isMember` is the only difference.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ChannelPreviewResponse {
+    pub channel: PreviewChannelDto,
+    /// Newest first, at most one screen.
+    pub messages: Vec<PreviewMessageDto>,
+}
+
+/// The channel of a preview. `topic` is omitted when the channel has none.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PreviewChannelDto {
+    pub id: String,
+    pub name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub topic: Option<String>,
+    pub member_count: i64,
+    pub is_member: bool,
+}
+
+/// One message of a preview — an allow-list: nothing else of the message travels.
+/// `body` is omitted on a deleted message.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PreviewMessageDto {
+    pub id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub body: Option<String>,
+    pub author: PreviewAuthorDto,
+    pub created_at_ms: i64,
+    pub edited: bool,
+    pub deleted: bool,
+    pub reply_count: i64,
+    pub attachment_names: Vec<String>,
+}
+
+/// Who wrote a preview message: the name to show (an active member's only) and whether it
+/// is a person or an agent.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PreviewAuthorDto {
+    /// Omitted when the author is no longer an active member (the roster names active
+    /// members only).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub display_name: Option<String>,
+    pub kind: String,
 }
 
 // ---------------------------------------------------------------------------
@@ -2957,6 +3058,16 @@ pub struct ChannelMembershipDto {
 pub struct CreateChannelResponse {
     pub channel: ChannelDto,
     pub creator_membership: ChannelMembershipDto,
+}
+
+/// `PATCH /v1/workspaces/{ws}/channels/{ch}` response (ADR-0225 D10, ADR-0224
+/// D2): the channel as the edit left it, in the same `Channel` shape as the
+/// channel list, create and join answers (`browseListed`, `isDefault` and the
+/// caller's own `muted` included).
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateChannelResponse {
+    pub channel: ChannelDto,
 }
 
 /// `PUT …/channels/{ch}/notification-pref` request (Swift
@@ -3568,6 +3679,11 @@ pub struct RosterQuery {
     pub member_kind: Option<String>,
     #[serde(default)]
     pub limit: Option<String>,
+    /// #5814: a comma-separated opt-in list. `suspended` asks for the workspace's
+    /// suspended humans, honoured only for an owner or admin person on a full app
+    /// session; every other value is ignored.
+    #[serde(default)]
+    pub include: Option<String>,
 }
 
 // ---------------------------------------------------------------------------
@@ -3847,7 +3963,23 @@ pub struct SubscribeProxyResponse {
 }
 
 #[derive(Debug, Serialize)]
-pub struct SubscribeProxyResult {}
+pub struct SubscribeProxyResult {
+    /// Per-subscription channel options (the Centrifugo v6 proxy protocol's `override`). Absent
+    /// for every subscription but one whose subscriber has a history floor in that channel.
+    #[serde(rename = "override", skip_serializing_if = "Option::is_none")]
+    pub override_options: Option<SubscribeProxyOverride>,
+}
+
+/// The one option this server overrides: `force_recovery`, as a protocol `BoolValue`.
+#[derive(Debug, Serialize)]
+pub struct SubscribeProxyOverride {
+    pub force_recovery: SubscribeProxyBool,
+}
+
+#[derive(Debug, Serialize)]
+pub struct SubscribeProxyBool {
+    pub value: bool,
+}
 
 #[derive(Debug, Serialize)]
 pub struct SubscribeProxyError {
@@ -3858,7 +3990,23 @@ pub struct SubscribeProxyError {
 impl SubscribeProxyResponse {
     pub fn allow() -> Self {
         SubscribeProxyResponse {
-            result: Some(SubscribeProxyResult {}),
+            result: Some(SubscribeProxyResult {
+                override_options: None,
+            }),
+            error: None,
+        }
+    }
+
+    /// Allow, with the stream's recovery switched off for this one subscription (ADR-0177 증보
+    /// D17·D22): the publications the channel keeps are not replayed to it, whatever position the
+    /// client asks to recover from.
+    pub fn allow_without_recovery() -> Self {
+        SubscribeProxyResponse {
+            result: Some(SubscribeProxyResult {
+                override_options: Some(SubscribeProxyOverride {
+                    force_recovery: SubscribeProxyBool { value: false },
+                }),
+            }),
             error: None,
         }
     }
@@ -4121,12 +4269,42 @@ pub struct ReadStateRowDto {
     pub latest_readable_seq: i64,
     /// The **caller's own** closure watermark, never another member's.
     pub closed_at_seq: Option<i64>,
+    /// ADR-0124 증보 4 (#5667): unread replies in the threads the caller follows in this channel (the
+    /// sum of the thread summaries' `unread_reply_count`). Always present, `0` when there are none.
+    pub followed_unread_reply_count: i64,
+    /// ADR-0177 증보 D18 (#5822): the **caller's own** read floor after leaving a 1:1 (`membership.
+    /// history_from_seq`), `null` = full history. Always present like `closed_at_seq`: a client tells
+    /// a server that carries 「대화 나가기」 from an older one by the key being there (D21).
+    pub history_from_seq: Option<i64>,
 }
 
 /// Swift `ReadStateListResponseDTO` (:317-322).
 #[derive(Debug, Serialize)]
 pub struct ReadStateListResponseDto {
     pub read_states: Vec<ReadStateRowDto>,
+}
+
+/// `POST …/threads/read-all` request (ADR-0124 증보 5, #5689). snake_case like the read-state family.
+/// `channel_ids` absent or `null` = every channel the caller is a member of; `[]` = none (a no-op). No
+/// member id: the positions moved are always the bearer's. **Closed** (security review r1 M2): an
+/// unknown key is refused, so a misspelt `channelIds` is never read as "every channel". The route
+/// also refuses a body that is not an object before it gets here (serde would read a bare `[]` as
+/// this struct with no ids).
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ThreadReadAllRequestDto {
+    #[serde(default)]
+    pub channel_ids: Option<Vec<Uuid>>,
+}
+
+/// `POST …/threads/read-all` response: the `GET read-state` lines of the channels whose followed-thread
+/// positions moved (the same [`ReadStateRowDto`], read after the write), how many threads moved, and
+/// whether more were left than one request moves. Nothing moved → `read_states: []`.
+#[derive(Debug, Serialize)]
+pub struct ThreadReadAllResponseDto {
+    pub read_states: Vec<ReadStateRowDto>,
+    pub marked_thread_count: i64,
+    pub has_more: bool,
 }
 
 /// `PUT …/channels/{ch}/closure` request (ADR-0177 증보 D7, #4227).
@@ -7505,6 +7683,8 @@ mod tests {
                 },
                 latest_readable_seq: 2,
                 closed_at_seq: None,
+                followed_unread_reply_count: 3,
+                history_from_seq: None,
             }],
         })
         .expect("serialize");
@@ -7533,6 +7713,24 @@ mod tests {
         );
         // `flatten` keeps the row flat: the cursor fields are siblings, not nested under `state`.
         assert!(json["read_states"][0].get("state").is_none(), "{json}");
+        // ADR-0124 증보 4 (#5667): exactly one key more, snake_case like its siblings; every other key
+        // and value of the row is what it was.
+        assert_eq!(
+            json["read_states"][0],
+            serde_json::json!({
+                "channel_id": "c",
+                "last_read_seq": 1,
+                "latest_seq": 2,
+                "unread_count": 1,
+                "mention_count": 0,
+                "marked_unread_before_seq": null,
+                "latest_readable_seq": 2,
+                "closed_at_seq": null,
+                "followed_unread_reply_count": 3,
+                // ADR-0177 증보 D18 (#5822): an explicit null, never an omitted key (D21).
+                "history_from_seq": null,
+            }),
+        );
     }
 
     /// ADR-0177 증보 D7 (#4227): the closure body is exactly `{ "seenSeq": <integer> }`.

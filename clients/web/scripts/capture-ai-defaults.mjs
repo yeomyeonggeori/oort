@@ -47,7 +47,7 @@ const ME = "019f94e3-7a10-79cd-9dee-208f47edd9a8";
 const SESSION = {
   accessToken: "capture-only-not-a-credential",
   refreshToken: "capture-only-not-a-credential",
-  member: { id: ME, workspaceId: WORKSPACE_ID, kind: "human", displayName: "곽성재", handle: "seongjae" },
+  member: { id: ME, workspaceId: WORKSPACE_ID, kind: "human", displayName: "한지후", handle: "jihu" },
   realtimeWebSocketUrl: `ws://127.0.0.1:${PORT + 900}/connection/websocket`,
 };
 const CHANNELS = [
@@ -174,7 +174,7 @@ async function installMocks(context, team) {
     json(route, { accessToken: SESSION.accessToken, refreshToken: SESSION.refreshToken })
   );
   await context.route("**/v1/workspaces/*/channels", (route) => json(route, { channels: CHANNELS }));
-  await context.route("**/v1/workspaces/*/roster", (route) => json(route, { members: [] }));
+  await context.route("**/v1/workspaces/*/roster*", (route) => json(route, { members: [] }));
   await context.route("**/v1/provider/default-ai", (route) => {
     if (team === "member") return json(route, { error: { code: "forbidden", message: "operator required" } }, 403);
     // 저장 중 장면: PUT 은 답하지 않는다(「저장하고 있어요」가 선 상태를 찍는다).
@@ -262,7 +262,7 @@ async function signedIn(browser, { viewport, scheme }, team) {
   const page = await context.newPage();
   await page.goto(ORIGIN, { waitUntil: "networkidle" });
   await advanceToAccount(page);
-  await page.getByTestId("login-email").fill("seongjae@dawn.example");
+  await page.getByTestId("login-email").fill("jihu@dawn.example");
   await page.getByTestId("login-password").fill("capture-only-not-a-credential");
   await page.getByTestId("login-submit").click();
   await page.getByTestId("channel-list").waitFor({ state: "visible" });

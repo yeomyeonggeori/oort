@@ -137,8 +137,8 @@ function rosterMember(role: RosterMember["role"]): RosterMember {
     workspaceId: WS,
     kind: "human",
     status: "active",
-    displayName: "곽성재",
-    handle: "seongjae",
+    displayName: "한지후",
+    handle: "jihu",
     role,
     channelCount: 0,
     channelIds: [],
@@ -157,8 +157,8 @@ function sessionValue(): SessionContextValue {
         id: MEMBER_ID,
         workspaceId: WS,
         kind: "human",
-        displayName: "곽성재",
-        handle: "seongjae",
+        displayName: "한지후",
+        handle: "jihu",
       },
       realtimeWebSocketUrl: "wss://example.test/connection/websocket",
     },
@@ -792,7 +792,8 @@ describe("워크스페이스 페이지 상태 (S5b)", () => {
 
   it("새 워크스페이스 만들기가 403이면 서버 운영자 안내로 바뀐다", async () => {
     createWorkspaceMock.mockRejectedValue(new ApiError(403, "instance operator required"));
-    const host = mountSection({ role: "owner" });
+    // 안내의 첫 문장은 레일 「+」 창과 같은 사전 키다(#5785): 한국어 사전으로 그려 단정한다.
+    const host = mountSection({ role: "owner", korean: true });
     act(() => setInputValue(host.querySelector("#workspace-name") as HTMLInputElement, "새 팀"));
     act(() => setInputValue(host.querySelector("#workspace-slug") as HTMLInputElement, "new-team"));
     await act(async () => {

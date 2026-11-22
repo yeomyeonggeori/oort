@@ -99,6 +99,16 @@ function restStationOnRow(root: HTMLElement, items: HTMLElement[]): void {
 }
 
 /**
+ * 스크립트 착지(`focusRowStation`)가 막 초점을 놓은 행. 그 초점에 이어지는 ⋯ 넘겨주기 한 번은 스크롤을 막는다(#5747).
+ *
+ * 「최신 메시지로 이동」·「안 읽은 곳으로」는 가상 목록이 부드럽게 스크롤하는 **도중에** 착지 줄에 초점을 놓는다. 그 넘겨주기가 스크롤을
+ * 막지 않으면 WebKit 이 반쯤 보이던 ⋯ 를 드러내며 진행 중인 스크롤을 끊어, 바닥 64px 위에서 멈췄다 한 번에 붙었다(#5670 검수 4회차 M1).
+ * 사람이 Tab 으로 줄에 들어온 넘겨주기는 그대로 스크롤한다: 화면 밖이거나 반쯤 걸친 ⋯ 를 보이게 하는 길이라 키보드로 줄을 오가는
+ * 동작을 바꾸지 않는다. 표시는 넘겨주기가 쓰거나, 초점이 행을 떠나면 지운다.
+ */
+const quietHandoffRows = new WeakSet<HTMLElement>();
+
+/**
  * 행 요소에 붙인다. 돌려주는 것은 그 행에 걸 `onKeyDown` 하나뿐이다.
  */
 export function useRowRovingFocus(
@@ -131,6 +141,8 @@ export function useRowRovingFocus(
     const onFocusOut = (event: FocusEvent) => {
       const next = event.relatedTarget;
       if (next instanceof Node && root.contains(next)) return;
+      // 착지 초점을 넘겨주지 못한 채 떠났다: 다음에 Tab 으로 들어오면 넘겨주기는 평소처럼 스크롤한다(#5747).
+      quietHandoffRows.delete(root);
       normalizeRow(root, { resetToPreferred: true });
     };
     root.addEventListener("focusout", onFocusOut);
@@ -241,7 +253,11 @@ export function focusRowStation(root: HTMLElement): void {
     root.tabIndex === 0
       ? root
       : (rowActionItems(root).find((el) => el.tabIndex === 0) ?? root);
+  // 이 초점에 이어지는 ⋯ 넘겨주기도 스크롤하지 않는다(#5747). 넘겨주기가 초점 이벤트 안에서 곧바로 돌 수도 있어 초점보다 먼저 적고,
+  // 넘겨주기가 오지 않을 초점(키보드 초점이 아님)이면 바로 지운다.
+  quietHandoffRows.add(root);
   station.focus({ preventScroll: true });
+  if (!isKeyboardRowFocus(root)) quietHandoffRows.delete(root);
 }
 
 /** 타임라인 행의 공개 신원(`data-seq`). 착지 정거장을 seq로 고른다. */
@@ -304,13 +320,14 @@ export function isKeyboardRowFocus(root: HTMLElement): boolean {
  */
 export function handoffRowFocusToPreferred(root: HTMLElement): void {
   if (!isKeyboardRowFocus(root)) return;
+  const quiet = quietHandoffRows.delete(root);
   const items = rowActionItems(root);
   const primary = items.find(
     (el) => el.getAttribute("data-row-action") === "primary"
   );
   const target = primary ?? items[0];
   if (!target) return;
-  target.focus();
+  target.focus(quiet ? { preventScroll: true } : undefined);
   normalizeRow(root);
 }
 

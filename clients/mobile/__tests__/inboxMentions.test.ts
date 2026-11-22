@@ -82,9 +82,9 @@ it('matches ids case-insensitively, because they cross the wire in mixed case', 
 
 it('never re-parses the body for an @handle', async () => {
   // Handles and display names change; the decision the server recorded at insert
-  // time does not. A message that says "@seongjae" but carries no
+  // time does not. A message that says "@jihu" but carries no
   // `mention_member_ids` is not a mention.
-  const shouty = {...message(11), body: '@seongjae 이것 좀 봐주세요'};
+  const shouty = {...message(11), body: '@jihu 이것 좀 봐주세요'};
   mockFetchMessages.mockReturnValueOnce(page([shouty]));
   expect(await fetchMentionsAfter(WS, CHANNEL, 10, SELF, 1)).toEqual([]);
 });

@@ -88,6 +88,41 @@ SCAN_SCOPE = [
         "why": "lib.rs:68 renewable_lease_candidates (SELECT only; writes nothing)",
     },
     {
+        # #5594 / #5614 M2: the work-permission expiry sweep's ONE statement on the notifier
+        # pool is the cross-tenant read of which workspaces have a lapsed request (three columns,
+        # hence a column grant, #5614 M1). Its lock, close and line run on the RLS-bound momo_app
+        # write pool and must stay out of scope. The tier sweep does not touch the table.
+        "path": "server-rust/crates/momo-t3/src/work_permission.rs",
+        "mode": "symbols",
+        "symbols": ["workspaces_with_lapsed_permission_requests"],
+        "column_reads": {"work_permission_request": ["workspace_id", "status", "expires_at"]},
+        "why": "work_permission_sweep.rs sweep_lapsed_work_permissions (read_pool only)",
+    },
+    {
+        # #5594: the stop notice's session site (work_session SELECT) and its guarded write
+        # through send_message_in_tx (scanned below), from the tier sweep on the notifier pool.
+        # (The expiry sweep calls the same functions on the momo_app write pool.)
+        "path": "server-rust/crates/momo-t3/src/work_notice.rs",
+        "mode": "symbols",
+        "symbols": [
+            "session_notice_site_in_tx",
+            "post_work_notice_in_tx",
+            "post_session_notice_in_tx",
+            "post_work_notice_guarded_in_tx",
+            "post_session_notice_guarded_in_tx",
+        ],
+        "why": "sweep.rs converge_in_tx HostLost (notifier pool)",
+    },
+    {
+        # #5614 H1: the DM seat check a stop notice (and the stall sweep's line) makes before a
+        # persona speaks: channel_seq FOR UPDATE + the dm_agent_can_speak() function (its reads
+        # are channel / dm_agent_admission / member / membership, already granted).
+        "path": "server-rust/crates/momo-messaging/src/dm.rs",
+        "mode": "symbols",
+        "symbols": ["dm_agent_can_speak_in_tx"],
+        "why": "work_notice.rs post_work_notice_in_tx; run_stall_sweep.rs settle_stalled_run_in_tx",
+    },
+    {
         "path": "server-rust/crates/momo-t3/src/lifecycle.rs",
         "mode": "symbols",
         "symbols": [

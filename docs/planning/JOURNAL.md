@@ -3,6 +3,18 @@
 > 세션 종료 시 공용 계약에 따라 짧은 항목을 맨 위에 추가한다.
 > **로테이션(2026-09-01 재편):** 이 파일은 최근 20항목만 담는다. 갱신할 때 초과분을 해당 월의 `docs/planning/archive/JOURNAL-YYYY-MM.md`로 원문 그대로 이동한다.
 
+## 2026-11-13 · Opus 5.5 배포 워커 · ★v0.1.46 발행·서버 배포(migration 0)
+
+- v0.1.46 발행: 런 43415177040 시도 1 success, SLSA v1 6/6, 태그·Release, 발행 기록 PR #5771. oort-team 서버 7건 SUCCESS, pre-deploy `applied=0 skipped=179 total=179`(원장 179 그대로)·`runtime roles provisioned` 2회, notifier `work_permission_request` 열 SELECT 0 → 3(예정), 새 env 0(공유 `MOMO_RUST_IMAGE` 값만), Hermes·Centrifugo·postgres 불변. 기록 #3550.
+- 새 경로 `POST …/threads/read-all`은 무인증 GET 404 → 401로 생긴 것을 봤다. Hermes 맡기기는 결정 D(그대로 배포)대로 닫힌 채다(워커에 `TOOLS_LOCKED`·종류 선언 없음). 만료 훑기는 닫을 요청이 0이라 미검증.
+- 교훈: 이번엔 열 권한이 마이그레이션이 아니라 역할 파일에서만 오므로, notifier 띄우기 도구의 물러섬(「api SUCCESS면 띄움」)을 `runtime roles provisioned`가 보일 때만으로 좁혔다. 작업 폴더가 지워져 승인·caddy 도구를 기록을 보고 다시 썼고, caddy는 링크 없는 스크래치 폴더에서 `--path-as-root`로 올렸다.
+
+## 2026-11-08 · Opus 5.5 배포 워커 · ★v0.1.45 발행·서버 배포(migration 175~179)
+
+- v0.1.45 발행: 런 42458331997 시도 1 success, SLSA v1 6/6, 태그·Release, 발행 기록 PR #5558. oort-team 서버 7건 SUCCESS, pre-deploy `applied=5 skipped=174 total=179`(원장 179), 역할 잠금 블록 넷 RAISE 0, 새 env 0(공유 `MOMO_RUST_IMAGE` 값만), Hermes·Centrifugo·postgres 불변. 기록 #3550.
+- 닫힌 문(Hermes 위임·세트 제안·에이전트 그림 쓰기)은 배포 뒤에도 0행이다. 사진 크기 선언(178)은 누가 새 웹·새 앱으로 사진을 보낸 뒤에 잰다(미검증).
+- 교훈: 예전 락 실측 스크립트가 지워져 있어 운영 pre-deploy 순서(역할 1차 → 175~179 → 역할 2차)를 격리 PG 18.6에 그대로 재현해 새로 썼다. 그래서 `team_ai_task` 권한 변화가 마이그레이션 전 역할 1차에서 이미 생긴다는 것(옛 api는 열 단위 SELECT로 버틴다)을 배포 전에 확인했다.
+
 ## 2026-11-07 · Opus 5.5 planner(+Sonnet 5.5 워커·독립 보안 검수·검증) · ★v0.1.44 승격·배포, S12 출발
 
 - 이모티콘 흐름 묶음을 v0.1.44로 승격했다(PR #5505, main `7fb34e996`). 서버 배포 7건 SUCCESS, migration 0, 스모크 61/61, Release v0.1.44. 새 인코더는 등록이 없어 미검증이다.
@@ -225,18 +237,3 @@
 - **E2E-A(그록봇)**: 앱을 `--remote-debugging-port=9333`으로 재기동(GrokBot/0.44.0), 하네스 READ/WRITE OK, 설치 지시문(README 붙여넣기 블록 + cloudflared 폴백·URL 2개 보고 노트) 컴포저에 스테이징. **전송(Enter)은 Claude Code 자동 모드 분류기가 OS 키스트로크·CDP 키 이벤트 둘 다 거부** → 성재에게 Enter 1탭 또는 `Bash(osascript:*)` 규칙 요청(대기).
 - **교훈**: ①체인은 트랙 이동 레이스에 약하다 — BEHIND 재확인(20s)·CONFLICTING 조기 ABORT·검증기 4×30s 재시도를 템플릿에 넣었고, STATUS.md 충돌은 planner가 합집합으로 푼다(오늘 5회) ②워커의 「측정」 시험이 jsdom에 숫자를 심는 경향 → 렌더 DOM 구조 단정 + 브라우저 측정은 캡처 레인, 그런데 캡처 레인이 병합 게이트에 없다(후속) ③npm devDep 추가 = GHCR 고지 번들 재생성 ④브리프의 브랜치명은 `<type>/<issue>-<slug>` 규약으로.
 - **잔여 후보**: #2262 M-1·M-2·N3(핸들 양성 경로 가드·캡처 레인 게이트) · D4 플러그인 검증기 Rust화 · `arbitrary_tw` 프리플라이트 사각 · 선재 #2157·#2181·#2193 · E2E-A 본 실행(전송 권한 뒤) · Railway E2E(최종 단계) · APNs(데스크톱 뒤).
-
-## 2026-09-08 (저녁·밤) → 09-09 새벽 · Fable · ★결재 4건 집행 + G1'-2·G1'-3 전량 main 정본화(SH-6a-w R7 PASS·SH-6a-e·#1265·SH-8·SH-9) — 스냅샷 94
-
-- **성재 결재(09-08 저녁)**: ①ADR-0004 증보 Accept(로컬 provider opt-in 경계 — planner가 워커의 「Accepted(성재 승인)」 표기를 Proposed로 정정해 결재를 받은 뒤 Accepted) ②SH-8·SH-9 발급 go ③Railway 실배포 E2E는 최종 셀프호스팅 검증 단계 ④실기기 APNs는 데스크톱 셀프호스팅 완료 뒤. 기록: `2026-09-08-remaining-work-map.md` 결재 절 · `first-goal-two-cases.md` §9.
-- **정본화(순서대로)**: #1265 웹훅 인바운드(PR #2226, R2: 세 Caddyfile `/hooks/*` 프록시 + 「403 아님」만 보던 계약 시험을 블록 실재·업스트림·순서 단정으로 교체; 승격 #2227) · G1'-3 패킷 docs(#2232→#2233) · **SH-6a-e**(PR #2225, 승격 #2237, ADR-0004 증보 Accepted, mock hermes E2E) · **SH-8 #2230**(PR #2236: §3.3.16 라우트 대조표 5/5·pairing bearer `tools/call` 401 문서 정정·로컬 CDP 하네스 READ/WRITE·SEND=사람 Enter 1탭; 승격 #2240) · **SH-9 #2231**(PR #2243: 4문서 Rust 현행화·SELF_HOST §5 로컬 provider 실측 seq=3·문서 인용 게이트; 승격 #2244) · **SH-6a-w #2204**(PR #2214, design-review **R5 FAIL B2 → R6 FAIL B1 → R7 PASS B0·H0·M0·N4**, R8 주석 정정; 승격 #2247). main `9dd350e1` · uxui `857f3277` · engine `3d1923e2`. UX-R2c #2216 워커 발사(00:2x).
-- **탐색 정정(SH-8/SH-9 브리프)**: §3.3.16 합류 절은 09-06에 이미 존재(검수·보강으로 축소) · CDP 하네스는 레포에 커밋된 적 없음(신규 작성, 사양 research/2026-08-22) · #1361 Deps 전부 CLOSED(blocked 라벨 낡음 — 재실측 코멘트 게시, 라벨 교체는 성재 승인 대기) · external-agent-provider 스테일은 국소적(Swift 이름 11·죽은 검증기 5·포트 2), 진짜 공백은 SELF_HOST §5.
-- **교훈**: ①planner의 레이아웃 규칙도 부작용을 낳는다(R5 규칙 3 → 컨트롤이 `--accent-soft` 위, R5 `minmax` 바닥은 산술상 dead) — 규칙은 「측정 열」과 함께 적고 사보타주가 실제로 붉어지는지까지 리뷰어가 잰다 ②감사 랜딩 템플릿: CONFLICTING이면 감사 전에 ABORT, 검증기는 4×30s 재시도(라벨 재부착 뒤 평가기 provenance 지연), 병합은 planner가 STATUS 합집합으로 ③발사기 셸 함정: `pipefail`+`grep -q`(SIGPIPE), 워커 0일 때 `pgrep` exit 1 + `set -e` ④체인 템플릿의 낡은 echo(「#2142 closed」)는 오독을 부른다 — 자리표시자로.
-- **잔여 후보(미발급)**: R7-N4 core `parseDisconnectStart` 상태 재기록 가드 · 프리플라이트 `arbitrary_tw` 사각(`[minmax`·다중행 `cn()`) · #1361 라벨 blocked→ready(승인 대기) · Railway E2E(최종 단계) · APNs 실기기(데스크톱 뒤).
-
-## 2026-09-08 (오전·재개) · Fable · ★안전 중단 플러시 + 재개 — SH-6a-w R3 FAIL → R4 가동, Railway 실배포는 G1'-4 시점으로
-
-- 09-08 새벽 진행분(중단 시 미플러시): **SH-5a 템플릿 main `03e90c4c`**(#2210·승격 #2211; 실배포 E2E 미실행 — `RAILWAY_TOKEN` 부재, #2205 open) · **G1'-2 패킷 main `bbb00168`**(#2217·승격 #2218: SH-6a-e #2215·UX-R2c #2216·#1265 브리프, 지도 갱신) · **SH-6a-w #2214**: design-review R1 FAIL(H4·M5·N5, 브리프 결함 H-3 포함) → R2 수리 → R2 FAIL(B1·H3·M3·N5, 수리 회귀: 해제 대상 불일치) → R3 수리 → **R3 FAIL(B1·H1·M2·N5)**: R2 12건 CLOSED, R1 H-4 재발(한 줄 레이아웃 flex — 390px 이름 폭 0~3px), 터미널 행 도어벨 착지 결함. 성재 지시로 안전 중단(PR·머지 없이).
-- 재개: 정렬 초록 · **R4 워커 가동**(`--continue`, 390 flex 우선순위·터미널 행 도어벨·가드 범위·jsdom 단정) → R4 검수(회귀 우선) → 랜딩 → UX-R2c 발사. G1'-2 엔진 쌍(SH-6a-e ∥ #1265)은 go 대기.
-- 성재 질문 「Railway 실배포는 왜 필요한가」 → 답: Dawn 운영 서버 아님, **케이스 B 클라우드 설치 경로의 1회 실증**(G2 「Railway 1」 전제). 필요 시점 = G1'-4(E2E-B). 그 전까지 VPS/로컬 경로로 대체 가능 → 다음 작업으로 미룸. 새벽 회수가 커밋 없는 워크트리 2개(`wsh6ae`·`w1265`) 삭제(손실 0) — 런처 자가 복구.
-- 교훈: ①수리가 수리를 부르는 사슬 3회전 — R4 미션에 「1280/900 무변화·390은 min-w-0 + 축약」을 수치로 ②브리프의 좌표(플래그명·티켓 id)는 화면 글자가 아님 ③design-review의 「회귀 우선」이 B-1·H-4 재발을 잡았다 — 상설 유지.

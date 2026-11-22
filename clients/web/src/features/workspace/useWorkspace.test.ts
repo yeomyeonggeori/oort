@@ -63,10 +63,10 @@ const DEMO = member({
   displayName: "데모 사용자",
   handle: "demo",
 });
-const SEONGJAE = member({
+const JIHU = member({
   id: "00000000-0000-7000-8000-0000000005d1",
-  displayName: "곽성재",
-  handle: "seongjae",
+  displayName: "한지후",
+  handle: "jihu",
 });
 const INTERN_HUMAN = member({
   id: "00000000-0000-7000-8000-0000000005d2",
@@ -81,7 +81,7 @@ const INTERN_AGENT = member({
   ownerHumanId: DEMO.id,
 });
 
-const DIRECTORY = makeDirectory([DEMO, SEONGJAE, INTERN_HUMAN, INTERN_AGENT]);
+const DIRECTORY = makeDirectory([DEMO, JIHU, INTERN_HUMAN, INTERN_AGENT]);
 
 function dm(peerId: string, id = "019f98d1-9d84-7625-9034-17f83367ca8a"): Channel {
   return {
@@ -98,7 +98,7 @@ describe("makeDirectory / isAmbiguousName", () => {
   it("marks a display name carried by more than one member", () => {
     expect(isAmbiguousName(DIRECTORY, INTERN_HUMAN)).toBe(true);
     expect(isAmbiguousName(DIRECTORY, INTERN_AGENT)).toBe(true);
-    expect(isAmbiguousName(DIRECTORY, SEONGJAE)).toBe(false);
+    expect(isAmbiguousName(DIRECTORY, JIHU)).toBe(false);
   });
 
   it("folds case and edge whitespace when comparing names", () => {
@@ -118,8 +118,8 @@ describe("makeDirectory / isAmbiguousName", () => {
 
 describe("dmPeer", () => {
   it("resolves the other participant whatever case the ids arrive in", () => {
-    const channel = dm(SEONGJAE.id.toUpperCase());
-    expect(dmPeer(channel, DIRECTORY, DEMO.id)?.handle).toBe("seongjae");
+    const channel = dm(JIHU.id.toUpperCase());
+    expect(dmPeer(channel, DIRECTORY, DEMO.id)?.handle).toBe("jihu");
   });
 
   it("is null for a channel, which has no single other participant", () => {
@@ -147,14 +147,14 @@ describe("dmAutoReplyAgent", () => {
   });
 
   it("is null when the counterpart is a human, who does not run", () => {
-    expect(dmAutoReplyAgent(dm(SEONGJAE.id), DIRECTORY, DEMO.id)).toBeNull();
+    expect(dmAutoReplyAgent(dm(JIHU.id), DIRECTORY, DEMO.id)).toBeNull();
   });
 
   it("is null for a group DM, which is back to \"who did you mean\"", () => {
     const group: Channel = {
       ...dm(INTERN_AGENT.id),
       dmKey: "admitted:group",
-      memberIds: [DEMO.id, INTERN_AGENT.id, SEONGJAE.id],
+      memberIds: [DEMO.id, INTERN_AGENT.id, JIHU.id],
     };
     expect(dmAutoReplyAgent(group, DIRECTORY, DEMO.id)).toBeNull();
     expect(dmPeer(group, DIRECTORY, DEMO.id)).toBeNull();
@@ -162,7 +162,7 @@ describe("dmAutoReplyAgent", () => {
 
   it("requires the human sender to be one of exactly two participants", () => {
     expect(dmAutoReplyAgent({ ...dm(INTERN_AGENT.id), memberIds: [INTERN_AGENT.id] }, DIRECTORY, DEMO.id)).toBeNull();
-    expect(dmAutoReplyAgent(dm(INTERN_AGENT.id), DIRECTORY, SEONGJAE.id)).toBeNull();
+    expect(dmAutoReplyAgent(dm(INTERN_AGENT.id), DIRECTORY, JIHU.id)).toBeNull();
     expect(dmAutoReplyAgent(dm(INTERN_AGENT.id), DIRECTORY, INTERN_AGENT.id)).toBeNull();
   });
 
@@ -204,8 +204,8 @@ describe("channelLabelParts", () => {
   });
 
   it("leaves the handle off when the name is already unique", () => {
-    expect(channelLabelParts(dm(SEONGJAE.id), DIRECTORY, DEMO.id)).toEqual({
-      text: "곽성재",
+    expect(channelLabelParts(dm(JIHU.id), DIRECTORY, DEMO.id)).toEqual({
+      text: "한지후",
       handle: null,
       isAgent: false,
       kind: "peer",
@@ -214,7 +214,7 @@ describe("channelLabelParts", () => {
 
   it("falls back without inventing a name when the roster has not loaded", () => {
     const empty = makeDirectory([]);
-    expect(channelLabelParts(dm(SEONGJAE.id), empty, DEMO.id)).toEqual({
+    expect(channelLabelParts(dm(JIHU.id), empty, DEMO.id)).toEqual({
       text: "불러오는 중",
       handle: null,
       isAgent: false,
@@ -244,7 +244,7 @@ describe("channelLabel", () => {
     expect(channelLabel(dm(INTERN_AGENT.id), DIRECTORY, DEMO.id)).toBe(
       "김인턴 @kim-intern"
     );
-    expect(channelLabel(dm(SEONGJAE.id), DIRECTORY, DEMO.id)).toBe("곽성재");
+    expect(channelLabel(dm(JIHU.id), DIRECTORY, DEMO.id)).toBe("한지후");
   });
 });
 
@@ -256,8 +256,8 @@ describe("memberNameParts", () => {
       name: "김인턴",
       handle: "@kim-intern",
     });
-    expect(memberNameParts(DIRECTORY, SEONGJAE.id, "에이전트")).toEqual({
-      name: "곽성재",
+    expect(memberNameParts(DIRECTORY, JIHU.id, "에이전트")).toEqual({
+      name: "한지후",
     });
   });
 
@@ -319,6 +319,15 @@ describe("읽음 투영 캐시: 두 필드는 말하지 않은 응답이 지우�
     expect(merged.lastReadSeq).toBe(10);
     // GET 이 말하면 그 값이다(0 도 답이다).
     expect(mergeReadStateRow(current, readRow(READ_CH, { followedUnreadReplyCount: 0 })).followedUnreadReplyCount).toBe(0);
+  });
+
+  it("읽기 하한(ADR-0177 증보 2026-11-14 D18)도 PUT 응답이 지우지 않는다: null 은 답이라 대신한다", () => {
+    const current = readRow(READ_CH, { historyFromSeq: 11, lastReadSeq: 4 });
+    const merged = mergeReadStateRow(current, readRow(READ_CH, { lastReadSeq: 10 }));
+    expect(merged.historyFromSeq).toBe(11);
+    expect(merged.lastReadSeq).toBe(10);
+    expect(mergeReadStateRow(current, readRow(READ_CH, { historyFromSeq: null })).historyFromSeq).toBeNull();
+    expect("historyFromSeq" in mergeReadStateRow(readRow(READ_CH), readRow(READ_CH))).toBe(false);
   });
 
   it("캐시에도 응답에도 없으면 키를 만들지 않는다(여전히 「말하지 않음」)", () => {

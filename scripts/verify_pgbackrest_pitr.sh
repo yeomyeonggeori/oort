@@ -269,7 +269,9 @@ cleanup_resources() {
   drop_probe_best_effort
   while IFS= read -r container; do
     [[ "$container" =~ ^[0-9a-f]{12,64}$ ]] || continue
-    docker rm -f "$container" >/dev/null 2>&1
+    # #5606: `-v` removes only the container's anonymous volumes (a PG18 image
+    # VOLUME at /var/lib/postgresql); named volumes are never touched by it.
+    docker rm -f -v "$container" >/dev/null 2>&1
   done < <(docker ps -aq --filter "label=com.momo.pitr.invocation-id=$invocation_id" 2>/dev/null)
   # Volume names are not ownership capabilities.  A same-name foreign
   # replacement between list and rm must survive cleanup, so ask the daemon to
@@ -639,7 +641,7 @@ candidate_container_id="$(docker create --name "$candidate_container" \
   || fail "candidate_container_id_invalid"
 mkdir -p "$scratch_dir/migrations"
 docker cp "$candidate_container_id:/opt/momo/migrations/." "$scratch_dir/migrations"
-docker rm "$candidate_container_id" >/dev/null
+docker rm -v "$candidate_container_id" >/dev/null
 candidate_container=""
 candidate_container_id=""
 migrations_sha256="$(python3 - "$scratch_dir/migrations" <<'PY'

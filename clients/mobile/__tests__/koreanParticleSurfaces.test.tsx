@@ -54,7 +54,7 @@ function mountComposer(agent: RosterMember) {
   return render(
     <Composer recipient="place"
       directory={makeDirectory([
-        member({id: SELF, displayName: '곽성재', handle: 'seongjae'}),
+        member({id: SELF, displayName: '한지후', handle: 'jihu'}),
         agent,
       ])}
       channelLabel={agent.displayName}
@@ -139,7 +139,7 @@ describe('#2891 DM 힌트는 서버의 전달 상태를 따른다', () => {
     handle: 'claude-code',
   });
   const directory = makeDirectory([
-    member({id: SELF, displayName: '곽성재', handle: 'seongjae'}),
+    member({id: SELF, displayName: '한지후', handle: 'jihu'}),
     agent,
   ]);
 
@@ -150,12 +150,12 @@ describe('#2891 DM 힌트는 서버의 전달 상태를 따른다', () => {
         directory={directory}
         channelLabel={agent.displayName}
         dmAgent={agent}
-        dmHint="곽성재님이 이 대화를 열어야 Claude Code가 답합니다."
+        dmHint="한지후님이 이 대화를 열어야 Claude Code가 답합니다."
         onSend={() => {}}
       />,
     );
     expect(
-      screen.getByText('곽성재님이 이 대화를 열어야 Claude Code가 답합니다.'),
+      screen.getByText('한지후님이 이 대화를 열어야 Claude Code가 답합니다.'),
     ).toBeTruthy();
     expect(screen.queryByText(/바로 말하면/)).toBeNull();
   });

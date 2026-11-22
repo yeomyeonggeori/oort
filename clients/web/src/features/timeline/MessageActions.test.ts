@@ -16,10 +16,18 @@ import {
   messageActionGroups,
   messageActionItems,
   messageActionItemsForSurface,
+  messageActionLabel,
   messageToolbarItems,
   type MessageActionCopyState,
+  type MessageActionItem,
   type MessageActionItemKey,
 } from "./messageActionModel";
+import { catalog as koCatalog } from "@momo/core/i18n/generated/ko-KR";
+import { createMessageCopy } from "@momo/core/testkit";
+
+// 항목 낱말은 글이거나 키다(#6020): 화면과 같은 해석기로, 한국어 사전으로 받는다.
+const ko = createMessageCopy({ messageLocale: "ko-KR", catalog: koCatalog });
+const labelOf = (item: MessageActionItem | undefined) => (item ? messageActionLabel(item, ko) : undefined);
 import { selectionIsWithinRow } from "./messageContextMenuModel";
 
 const available: MessageActionAvailability = {
@@ -180,8 +188,7 @@ describe("메시지 액션 세 표면", () => {
     expect(keys.indexOf("copy-link")).toBe(keys.indexOf("copy") + 1);
     expect(keys.indexOf("remind")).toBe(keys.indexOf("pin") + 1);
     expect(
-      messageActionItems(available, copyReady).find((item) => item.key === "remind")
-        ?.label
+      labelOf(messageActionItems(available, copyReady).find((item) => item.key === "remind"))
     ).toBe("나중에 알림");
   });
 
@@ -255,7 +262,7 @@ describe("메시지 액션 세 표면", () => {
         label: COPY_LINK_ACTION_LABEL,
         accessibleLabel: COPY_LINK_ACTION_LABEL,
       });
-      return item?.label;
+      return labelOf(item);
     });
     expect(new Set(labels).size).toBe(1);
 
@@ -272,7 +279,7 @@ describe("메시지 액션 세 표면", () => {
       ...copyReady,
       copiedLink: true,
     }).find((entry) => entry.key === "copy-link");
-    expect(item?.label).toBe(COPY_LINK_DONE_LABEL);
+    expect(labelOf(item)).toBe(COPY_LINK_DONE_LABEL);
     expect(item?.accessibleLabel).toBe(COPY_LINK_DONE_LABEL);
   });
 

@@ -6,7 +6,7 @@ import { particleFor, directionParticle } from "../../lib/koreanParticle";
 import { describe, expect, it } from "vitest";
 import type { Message } from "../../lib/api";
 import {
-  agentCardModel,
+  agentCardModel as cardAs,
   agentCost,
   cardKeepsBody,
   failureGuidance,
@@ -21,6 +21,10 @@ import {
 } from "./agentCardModel";
 import { NetworkError } from "../../lib/http";
 import { interpretReceipt, sendFailureCopy } from "./approvalDecision";
+
+// #5577 — 이 파일의 픽스처는 모두 에이전트(게이트웨이·워커·도우미)가 쓴 서버 결과다. 사람·모르는 작성자는
+// `serverResultAuthor.test.ts` 가 잰다.
+const agentCardModel = (message: Message) => cardAs(message, "agent");
 
 function msg(overrides: Partial<Message> = {}): Message {
   return {

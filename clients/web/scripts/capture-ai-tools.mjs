@@ -32,13 +32,13 @@ const channels = [{ id: "00000000-0000-7000-8000-000000000201", workspaceId, kin
 const auth = {
   accessToken: "capture-only-not-a-credential",
   refreshToken: "capture-only-not-a-credential",
-  member: { id: memberId, workspaceId, kind: "human", displayName: "곽성재", handle: "seongjae" },
+  member: { id: memberId, workspaceId, kind: "human", displayName: "한지후", handle: "jihu" },
   realtimeWebSocketUrl: "ws://ai-tools-capture.invalid/connection/websocket",
 };
 const roster = [
   {
-    id: memberId, workspaceId, kind: "human", status: "active", role: "owner", displayName: "곽성재",
-    handle: "seongjae", channelCount: 1, channelIds: channels.map((c) => c.id), capabilities: [],
+    id: memberId, workspaceId, kind: "human", status: "active", role: "owner", displayName: "한지후",
+    handle: "jihu", channelCount: 1, channelIds: channels.map((c) => c.id), capabilities: [],
     createdAtMs: 0, updatedAtMs: 0,
   },
   {
@@ -68,8 +68,8 @@ function hostRow(over = {}) {
 }
 
 const personalClaude = {
-  id: "00000000-0000-7000-8000-000000000401", handle: "kwak-claude", displayName: "kwak-claude",
-  harness: "claude_code", enabled: true, label: "곽성재의 개인 에이전트",
+  id: "00000000-0000-7000-8000-000000000401", handle: "han-claude", displayName: "han-claude",
+  harness: "claude_code", enabled: true, label: "한지후의 개인 에이전트",
 };
 
 async function installRoutes(context, scene) {
@@ -243,7 +243,7 @@ async function toolsScene(browser, origin, scene, { scheme, viewport }) {
     }
     if (scene.flow === "personal-form") {
       await page.getByTestId("tool-card-claude-personal-switch").click();
-      await page.getByTestId("tool-card-claude-alias-input").fill("kwak-claude");
+      await page.getByTestId("tool-card-claude-alias-input").fill("han-claude");
     }
     if (scene.flow === "unavailable") {
       await page.locator("[data-testid='tool-card-claude-personal'][data-read='unavailable']").waitFor({ timeout: 5_000 });

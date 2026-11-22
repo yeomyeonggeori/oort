@@ -40,7 +40,7 @@ const ROWS = [
   { n: 8, peer: agent("14", "김인턴", "intern", { hostOnline: true }) },
 ];
 const GHOST_N = ROWS.length + 1;
-const roster = [person("01", "곽성재", "seongjae", { role: "owner", presenceStatus: "auto" }), ...ROWS.map((r) => r.peer)];
+const roster = [person("01", "한지후", "jihu", { role: "owner", presenceStatus: "auto" }), ...ROWS.map((r) => r.peer)];
 const dm = (n, other) => ({ id: dmId(n), workspaceId, kind: "dm", muted: false, memberIds: [P("01"), other] });
 const dms = [...ROWS.map((r) => dm(r.n, r.peer.id)), dm(GHOST_N, P("99"))];
 const READ = Object.fromEntries([...channels.map((c) => [c.id, [3, 3]]), ...dms.map((d) => [d.id, [2, 2]])]);
@@ -50,7 +50,7 @@ function check(scheme, name, ok, detail) { results.push({ scheme, name, ok: Bool
 async function installMocks(context) {
   const auth = {
     accessToken: "capture-only-not-a-credential", refreshToken: "capture-only-not-a-credential",
-    member: { id: memberId, workspaceId, kind: "human", displayName: "곽성재", handle: "seongjae" },
+    member: { id: memberId, workspaceId, kind: "human", displayName: "한지후", handle: "jihu" },
     realtimeWebSocketUrl: "ws://dm-avatar-4148-capture.invalid/connection/websocket",
   };
   const liveness = new Map();

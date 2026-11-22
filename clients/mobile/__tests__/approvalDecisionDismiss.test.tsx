@@ -34,7 +34,7 @@ const MESSAGE = '44444444-4444-4444-8444-444444444444';
 // 16진 문자가 든 id여야 대문자 시험이 의미가 있다(숫자뿐이면 `toUpperCase()`가 그대로다).
 const APPROVAL = '5555abcd-5555-4555-8555-55555555ef01';
 const OTHER_APPROVAL = '6666abcd-6666-4666-8666-66666666ef02';
-const ME = {id: '77777777-7777-4777-8777-777777777777', workspaceId: WS, displayName: '곽성재'} as Member;
+const ME = {id: '77777777-7777-4777-8777-777777777777', workspaceId: WS, displayName: '한지후'} as Member;
 
 function envelope(approvalId: string) {
   return {

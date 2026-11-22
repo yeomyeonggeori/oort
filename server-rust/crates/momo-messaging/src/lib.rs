@@ -59,12 +59,16 @@ pub mod attachment_media;
 pub mod attachment_reclaim;
 pub mod avatar_reclaim;
 pub mod channel;
+pub mod channel_browse;
+pub mod channel_preview;
 /// ADR-0216 D4 (#4660) — a developer token's channel restriction, as a domain argument.
 pub mod channel_restriction;
 pub mod channel_viewing;
 pub mod dm;
 /// ADR-0177 증보 D6·D7 / #4227 — a member's own DM closure watermark (no outbox fan-out, D10).
 pub mod dm_closure;
+/// ADR-0177 증보 2026-11-14 D15~D17 / #5822 — 1:1 「대화 나가기」: the requester's own read floor.
+pub mod dm_leave;
 pub mod error;
 pub mod hosted_inbox;
 pub mod huddle;
@@ -152,14 +156,28 @@ pub use attachment_media::{
     MediaWrite, Poster, PosterImage, IMAGE_MIMES, MEDIA_PREFIX_BYTES, VIDEO_PREFIX_BYTES,
 };
 pub use channel::{
-    add_channel_member_in_tx, clamp_channel_list_limit, create_channel,
-    create_channel_detailed_in_tx, create_channel_in_tx, list_workspace_channels,
-    list_workspace_channels_within, normalize_channel_kind, normalize_channel_name,
-    normalize_channel_topic, normalize_membership_role, remove_channel_member_in_tx,
-    set_notification_pref_in_tx, validate_channel_mute, Channel, ChannelKind, ChannelMembership,
-    ChannelMute, ChannelMuteWrite, ChannelSpecInvalid, ChannelSummary, CreatedChannel,
-    MutedUntilInvalid, NewChannel, CHANNEL_LIST_LIMIT_DEFAULT, CHANNEL_LIST_LIMIT_MAX,
-    CHANNEL_MUTE_MAX_DAYS, CHANNEL_NAME_MAX_CHARS, CHANNEL_TOPIC_MAX_CHARS,
+    add_channel_member_in_tx, channel_summary_in_tx, check_channel_default_change_in_tx,
+    clamp_channel_list_limit, create_channel, create_channel_detailed_in_tx, create_channel_in_tx,
+    fold_channel_name, is_channel_name_conflict, judge_channel_name, list_workspace_channels,
+    list_workspace_channels_within, lock_channel_edit_target_in_tx, normalize_channel_kind,
+    normalize_channel_name, normalize_channel_topic, normalize_membership_role,
+    remove_channel_member_in_tx, rename_channel_in_tx, set_channel_browse_listed_in_tx,
+    set_channel_default_in_tx, set_notification_pref_in_tx, validate_channel_mute,
+    BrowseListedChange, Channel, ChannelEditTarget, ChannelKind, ChannelMembership, ChannelMute,
+    ChannelMuteWrite, ChannelNameRefusal, ChannelRenameOutcome, ChannelSpecInvalid, ChannelSummary,
+    CreatedChannel, DefaultChannelCheck, MutedUntilInvalid, NewChannel, RenamedChannel,
+    CHANNEL_LIST_LIMIT_DEFAULT, CHANNEL_LIST_LIMIT_MAX, CHANNEL_MUTE_MAX_DAYS,
+    CHANNEL_NAME_MAX_CHARS, CHANNEL_TOPIC_MAX_CHARS, LOCKED_CHANNEL_NAME,
+};
+pub use channel_browse::{
+    clamp_browse_limit, judge_browse_person, list_browsable_channels_in_tx,
+    self_join_channel_in_tx, BrowsableChannel, BrowseAfter, BrowsePersonRefusal,
+    ChannelOpenToPeople, SelfJoin, BROWSE_LIMIT_DEFAULT, BROWSE_LIMIT_MAX,
+    CHANNEL_OPEN_TO_PEOPLE_SQL,
+};
+pub use channel_preview::{
+    begin_preview_snapshot, preview_channel_in_tx, PreviewChannel, PreviewMessage,
+    PREVIEW_MESSAGE_LIMIT,
 };
 pub use channel_restriction::ChannelRestriction;
 pub use channel_viewing::{touch_channel_viewing_in_tx, ViewingOutcome, VIEWING_MIN_REFRESH_SECS};
@@ -170,6 +188,11 @@ pub use dm::{
     DM_LIST_LIMIT,
 };
 pub use dm_closure::{close_dm_in_tx, reopen_dm_in_tx, DmClosureOutcome};
+pub use dm_leave::{
+    clear_own_items_below_in_tx, dm_leave_participant_in_tx, lock_and_classify_in_tx,
+    lock_own_open_schedules_in_tx, next_history_floor, raise_history_floor_in_tx, DmLeaveClass,
+    DmLeaveCleanup,
+};
 pub use error::{MessagingError, ProvenanceRejected};
 pub use hosted_inbox::{
     append_job_reference_in_tx, append_message_reference_in_tx, append_run_reference_in_tx,
@@ -185,10 +208,10 @@ pub use huddle::{
 pub use identity::{
     active_workspace_role, can_observe_agent, clamp_roster_limit, get_member, get_workspace,
     is_active_agent, is_active_human_member, is_channel_member, list_workspace_roster,
-    parse_roster_kind_filter, read_workspace_for_active_member, resolve_member_signing_key,
-    verify_password_login, Member, MemberKind, PasswordLogin, RosterKindFilterInvalid,
-    RosterMember, Workspace, WorkspaceIdentity, WorkspaceRead, WorkspaceRole, ROSTER_LIMIT_DEFAULT,
-    ROSTER_LIMIT_MAX,
+    list_workspace_roster_with_status, parse_roster_kind_filter, read_workspace_for_active_member,
+    resolve_member_signing_key, verify_password_login, Member, MemberKind, PasswordLogin,
+    RosterKindFilterInvalid, RosterMember, RosterStatusScope, Workspace, WorkspaceIdentity,
+    WorkspaceRead, WorkspaceRole, ROSTER_LIMIT_DEFAULT, ROSTER_LIMIT_MAX,
 };
 pub use inbox::{
     clamp_inbox_limit, delete_read_inbox_items_in_tx, inbox_event_payload,
@@ -250,8 +273,8 @@ pub use message::{
     cent_channel, clamp_history_limit, clamp_replies_limit, context_message_body,
     counts_as_thread_reply, fetch_thread_rollup_in_tx, find_client_message_in_tx,
     find_message_in_tx, list_channel_page, list_messages, list_thread_replies,
-    parse_replies_cursor, patch_and_prune_message_props_in_tx, patch_message_props_in_tx,
-    send_message, send_message_in_tx, send_message_with_mentions_in_tx,
+    newest_channel_page_sql, parse_replies_cursor, patch_and_prune_message_props_in_tx,
+    patch_message_props_in_tx, send_message, send_message_in_tx, send_message_with_mentions_in_tx,
     send_message_with_mentions_via_in_tx, send_run_line_in_tx, send_signed_message_in_tx,
     send_thread_notice_in_tx, send_thread_notice_with_run_pictures_in_tx, thread_root_state_in_tx,
     validate_quote_target_in_tx, validate_replies_root_in_tx, validate_thread_root_in_tx,
@@ -339,9 +362,11 @@ pub use sidebar_prefs::{
     SECTION_MAX, SECTION_NAME_MAX_CHARS, SECTION_SORT_MAX_CHARS, SIDEBAR_PREFS_VERSION,
 };
 pub use thread_follow::{
-    attach_unread_reply_counts, is_following_thread_in_tx, mark_thread_read_in_tx,
-    set_thread_follow_in_tx, thread_follow_views_in_tx, FollowRefused, FollowView, ThreadReadState,
-    STATE_AUTO, STATE_FOLLOWED, STATE_UNFOLLOWED,
+    attach_unread_reply_counts, build_followed_unread_payload, followed_unread_by_channel_in_tx,
+    is_following_thread_in_tx, mark_followed_threads_read_in_tx, mark_thread_read_in_tx,
+    set_thread_follow_in_tx, thread_follow_views_in_tx, FollowRefused, FollowView,
+    FollowedThreadsReadAll, ThreadReadState, FOLLOWED_UNREAD_FRAME_TYPE, STATE_AUTO,
+    STATE_FOLLOWED, STATE_UNFOLLOWED, THREAD_READ_ALL_MAX_CHANNEL_IDS, THREAD_READ_ALL_MAX_THREADS,
 };
 pub use workspace_avatar::{
     create_pending_avatar_upload_in_tx, load_avatar_media_in_tx, read_current_avatar_media_in_tx,

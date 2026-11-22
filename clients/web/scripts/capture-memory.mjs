@@ -45,7 +45,7 @@ const NOW = Date.parse("2026-09-29T09:30:00+09:00");
 const SESSION = {
   accessToken: "capture-only-not-a-credential",
   refreshToken: "capture-only-not-a-credential",
-  member: { id: ME, workspaceId: WORKSPACE_ID, kind: "human", displayName: "곽성재", handle: "seongjae" },
+  member: { id: ME, workspaceId: WORKSPACE_ID, kind: "human", displayName: "한지후", handle: "jihu" },
   realtimeWebSocketUrl: `ws://127.0.0.1:${PORT + 900}/connection/websocket`,
 };
 
@@ -61,7 +61,7 @@ function roster(role) {
     createdAtMs: 0, updatedAtMs: 0, ...extra,
   });
   return [
-    base(ME, "human", "곽성재", "seongjae", { role }),
+    base(ME, "human", "한지후", "jihu", { role }),
     base(JIHOON, "human", "박지훈", "jihoon"),
     base(AGENT, "agent", "김인턴", "kim-intern", { ownerHumanId: ME, agentModel: "claude-opus-5" }),
   ];
@@ -129,7 +129,7 @@ async function installMocks(context, v) {
   await context.route("**/v1/auth/realtime-token", (route) =>
     json(route, { token: "capture-only-not-a-credential", tokenType: "jwt", expiresAtMs: Date.now() + 60_000, ttlSeconds: 60, workspaceId: WORKSPACE_ID, memberId: ME }));
   await context.route("**/v1/workspaces/*/channels", (route) => json(route, { channels: CHANNELS }));
-  await context.route("**/v1/workspaces/*/roster", (route) => json(route, { members: roster(v.role ?? "owner") }));
+  await context.route("**/v1/workspaces/*/roster*", (route) => json(route, { members: roster(v.role ?? "owner") }));
   await context.route("**/v1/workspaces/*/read-state", (route) =>
     json(route, { read_states: [
       { channel_id: GENERAL_ID, last_read_seq: 1409, latest_seq: 1416, unread_count: 7, mention_count: 1 },
@@ -171,7 +171,7 @@ async function open(context, hash) {
   const page = await context.newPage();
   await page.goto(ORIGIN, { waitUntil: "networkidle" });
   await advanceToAccount(page);
-  await page.getByTestId("login-email").fill("seongjae@dawn.example");
+  await page.getByTestId("login-email").fill("jihu@dawn.example");
   await page.getByTestId("login-password").fill("capture-only-not-a-credential");
   await page.getByTestId("login-submit").click();
   await page.getByTestId("channel-list").waitFor({ state: "visible" });

@@ -28,7 +28,7 @@ describe("fallbackHandle (server fallback_handle 동형)", () => {
   });
 
   it("treats a bare handle as a local part", () => {
-    expect(fallbackHandle("seongjae")).toBe("seongjae");
+    expect(fallbackHandle("jihu")).toBe("jihu");
     expect(fallbackHandle("demo")).toBe("demo");
   });
 });
@@ -50,6 +50,6 @@ describe("S1 field defaults", () => {
     expect(suggestedHandle("demo")).toBe("");
     expect(suggestedHandle("demo@momo.local")).toBe("");
     expect(suggestedHandle("ada@example.com")).toBe("ada");
-    expect(suggestedHandle("seongjae")).toBe("seongjae");
+    expect(suggestedHandle("jihu")).toBe("jihu");
   });
 });

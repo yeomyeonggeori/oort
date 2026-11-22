@@ -35,12 +35,12 @@ const JIHOON = "019f94e3-7b0f-7a22-9c13-4d5e6f708192";
 const SESSION = {
   accessToken: "capture-only-not-a-credential",
   refreshToken: "capture-only-not-a-credential",
-  member: { id: ME, workspaceId: WORKSPACE_ID, kind: "human", displayName: "곽성재", handle: "seongjae" },
+  member: { id: ME, workspaceId: WORKSPACE_ID, kind: "human", displayName: "한지후", handle: "jihu" },
   realtimeWebSocketUrl: `ws://127.0.0.1:${PORT + 900}/connection/websocket`,
 };
 
 const roster = (role) => [
-  { id: ME, workspaceId: WORKSPACE_ID, kind: "human", status: "active", role, displayName: "곽성재", handle: "seongjae",
+  { id: ME, workspaceId: WORKSPACE_ID, kind: "human", status: "active", role, displayName: "한지후", handle: "jihu",
     channelCount: 1, channelIds: [GENERAL_ID], capabilities: [], createdAtMs: 0, updatedAtMs: 0 },
   { id: JIHOON, workspaceId: WORKSPACE_ID, kind: "human", status: "active", role: "member", displayName: "박지훈", handle: "jihoon",
     channelCount: 1, channelIds: [GENERAL_ID], capabilities: [], createdAtMs: 0, updatedAtMs: 0 },
@@ -72,7 +72,7 @@ async function installMocks(context, v) {
     json(route, { token: "capture-only-not-a-credential", tokenType: "jwt", expiresAtMs: Date.now() + 60_000, ttlSeconds: 60, workspaceId: WORKSPACE_ID, memberId: ME }));
   await context.route("**/v1/workspaces/*/channels", (route) =>
     json(route, { channels: [{ id: GENERAL_ID, workspaceId: WORKSPACE_ID, kind: "public", name: "결제-개발", muted: false }] }));
-  await context.route("**/v1/workspaces/*/roster", (route) => json(route, { members: roster(v.role ?? "owner") }));
+  await context.route("**/v1/workspaces/*/roster*", (route) => json(route, { members: roster(v.role ?? "owner") }));
   await context.route("**/v1/workspaces/*/read-state", (route) => json(route, { read_states: [] }));
   await context.route("**/v1/workspaces/*/memory/settings", (route) => {
     if (route.request().method() === "GET") return json(route, v.settings ?? settings());
@@ -101,7 +101,7 @@ async function open(context) {
   const page = await context.newPage();
   await page.goto(ORIGIN, { waitUntil: "networkidle" });
   await advanceToAccount(page);
-  await page.getByTestId("login-email").fill("seongjae@dawn.example");
+  await page.getByTestId("login-email").fill("jihu@dawn.example");
   await page.getByTestId("login-password").fill("capture-only-not-a-credential");
   await page.getByTestId("login-submit").click();
   await page.getByTestId("channel-list").waitFor({ state: "visible" });

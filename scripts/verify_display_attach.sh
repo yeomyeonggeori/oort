@@ -111,7 +111,7 @@ docker_require_absent() {
 docker_remove_and_verify() {
   local kind="$1" ref="$2"
   case "$kind" in
-    container) "$DOCKER_BIN" rm -f "$ref" >/dev/null 2>&1 || return 1 ;;
+    container) "$DOCKER_BIN" rm -f -v "$ref" >/dev/null 2>&1 || return 1 ;;  # #5606: -v takes the image VOLUME
     network) "$DOCKER_BIN" network rm "$ref" >/dev/null 2>&1 || return 1 ;;
     *) return 1 ;;
   esac
@@ -164,6 +164,8 @@ if [ "${1:-}" = "--verify-cleanup-contract" ]; then
   # middle one: a listed object whose inspect failed is AMBIGUOUS, and treating
   # it as absent is how a verifier reports a clean teardown it did not perform.
   SELF_TEST_DIR="$(mktemp -d "${TMPDIR:-/tmp}/momo-display-attach-selftest.XXXXXX")"
+  # #5606: a failing self-test case must not strand this directory (the success path removes it itself).
+  trap 'case "$SELF_TEST_DIR" in "${TMPDIR:-/tmp}"/momo-display-attach-selftest.*) [ ! -d "$SELF_TEST_DIR" ] || rm -rf -- "$SELF_TEST_DIR" ;; esac' EXIT
   FAKE_DOCKER="$SELF_TEST_DIR/docker"
   printf '%s\n' \
     '#!/usr/bin/env bash' \

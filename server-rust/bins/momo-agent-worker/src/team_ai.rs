@@ -209,6 +209,8 @@ struct TurnTrace {
     wire: &'static str,
     tools: Vec<String>,
     tool_codes: Vec<&'static str>,
+    /// #5873: the channels this request read (ids) and how many reads were refused, by kind.
+    reads: team_ai_tools::ReadAudit,
     model_calls: i32,
     web_searches: i32,
     latency_ms: i64,
@@ -238,6 +240,7 @@ impl TurnTrace {
             "wire": self.wire,
             "tools": self.tools,
             "tool_results": self.tool_codes,
+            "reads": self.reads.to_json(),
             "model_calls": self.model_calls,
             "web_searches": self.web_searches,
             "latency_ms": self.latency_ms,
@@ -279,6 +282,8 @@ const OUTCOME_REFUSED_AFTER_READ: &str = "refused_after_read";
 const OUTCOME_REFUSED_INVITE_ROLE: &str = "refused_invite_role";
 /// `team_ai.turn`'s `outcome` for a turn that ended with a `card_suggest` card (B8 C1, #4972).
 const OUTCOME_SUGGESTED_CARD: &str = "suggested_card";
+/// `team_ai.turn`'s `outcome` for a turn that ended with an approval card (#5873).
+const OUTCOME_PROPOSED: &str = "proposed";
 
 /// How a settled team-AI turn ends the run.
 enum Ending {
@@ -983,7 +988,7 @@ impl AgentWorker {
                         // The `files` bundle's tool (#4970). A request that was not offered it does not
                         // get it by naming it (B13-I5); the lookup re-reads the switch as well.
                         if !roles.tool_allowed(team_ai_tools::TOOL_READ_ATTACHMENT) {
-                            Ok(team_ai_files::FILES_OFF)
+                            Ok((team_ai_files::FILES_OFF, Vec::new()))
                         } else {
                             match self
                                 .team_ai_read_attachment(
@@ -1004,7 +1009,7 @@ impl AgentWorker {
                                     if let Some(image) = read.image {
                                         attached.push(image);
                                     }
-                                    Ok(read.outcome)
+                                    Ok((read.outcome, Vec::new()))
                                 }
                                 Err(error) => Err(error),
                             }
@@ -1021,7 +1026,10 @@ impl AgentWorker {
                         .await
                     };
                 let outcome = match read {
-                    Ok(outcome) => outcome,
+                    Ok((outcome, channels)) => {
+                        trace.reads.record(&outcome, &channels);
+                        outcome
+                    }
                     Err(error) => {
                         return Some(
                             self.settle_retryable(
@@ -1245,6 +1253,11 @@ impl AgentWorker {
         let ledger = ledger_report(usage, &model, payload);
         let fallback_model = model.clone();
         let searches = trace.web_searches;
+        // #5873: a turn that ends in a card writes no `team_ai.turn` row of its own (the card's
+        // `team_ai.proposed` row carries `via_ai`, which is also the approval card's payload and
+        // must never name the channels that were read). The turn row is written here, in the same
+        // transaction as the card, so the channels read are on the record for this ending too.
+        let turn_detail = trace.audit_detail(usage, OUTCOME_PROPOSED);
         let proposed = with_tenant_tx(&self.pool, workspace_id, move |conn| {
             let via = via.clone();
             let action_id = action_id.clone();
@@ -1252,6 +1265,7 @@ impl AgentWorker {
             let rationale = rationale.clone();
             let ledger = ledger.clone();
             let fallback_model = fallback_model.clone();
+            let turn_detail = turn_detail.clone();
             Box::pin(async move {
                 let context = ProposalContext {
                     workspace_id,
@@ -1276,6 +1290,14 @@ impl AgentWorker {
                 // before the card and either returns `ProposalOk` or errors, so `Ok` is exactly
                 // "parked"): the rail is told in this same transaction, after the card.
                 if let Ok(ok) = &outcome {
+                    audit::write_audit(
+                        conn,
+                        &AuditEntry::new(workspace_id, "team_ai.turn")
+                            .by(agent)
+                            .run(run_id)
+                            .with_schema("momo.team_ai_turn.v1", turn_detail),
+                    )
+                    .await?;
                     emit_awaiting_approval_agent_status(
                         conn,
                         momo_agent::AgentRunAddress {
@@ -1378,7 +1400,7 @@ impl AgentWorker {
         reply_channel: Uuid,
         tool: &str,
         args: &Value,
-    ) -> Result<ToolOutcome, DbError> {
+    ) -> Result<(ToolOutcome, Vec<Uuid>), DbError> {
         let tool = tool.to_string();
         let args = args.clone();
         momo_db::tenant::REQUEST_AGENT_MEMBER
@@ -1395,7 +1417,8 @@ impl AgentWorker {
                             reply_channel,
                         )
                         .await?;
-                        team_ai_tools::execute_read_tool_in_tx(conn, &scope, &tool, &args).await
+                        team_ai_tools::execute_read_tool_traced_in_tx(conn, &scope, &tool, &args)
+                            .await
                     })
                 }),
             )
@@ -1752,8 +1775,7 @@ impl AgentWorker {
         // which wire actually spoke (a plain id — no key, no URL).
         let label = trace
             .as_ref()
-            .filter(|trace| !trace.model.is_empty())
-            .map(|trace| json!({"model": trace.model, "wire": trace.wire}));
+            .and_then(|trace| answer_model_label(&trace.model, trace.wire));
         let audit_detail = trace
             .as_ref()
             .map(|trace| trace.audit_detail(usage, outcome));
@@ -1884,14 +1906,7 @@ impl AgentWorker {
                 // went without it, with the fixed sentence): the delegation's audit row says so.
                 let mut picture_posted = true;
                 if let Some(text) = body {
-                    let mut props = if props.is_object() { props } else { json!({}) };
-                    if let Some(object) = props.as_object_mut() {
-                        object.insert("run_id".into(), json!(run_id));
-                        object.entry("source").or_insert_with(|| json!("team_ai"));
-                        if let Some(label) = label {
-                            object.insert("team_ai_model".into(), label);
-                        }
-                    }
+                    let props = answer_props(props, run_id, label);
                     // #4622 (ADR-0148 증보 2026-10-27): the same place and the same spine
                     // as every other final answer — inside the thread the request was
                     // made in (the rollup moves with it), the main flow otherwise.
@@ -2310,6 +2325,28 @@ fn millis(since: Instant) -> i64 {
     i64::try_from(since.elapsed().as_millis()).unwrap_or(i64::MAX)
 }
 
+/// H2-8 / H9-I9: the label an answer carries — which model on which wire actually spoke, a plain id (no
+/// key, no URL). `None` when the turn named no model, and the answer then carries no label.
+fn answer_model_label(model: &str, wire: &str) -> Option<Value> {
+    (!model.is_empty()).then(|| json!({"model": model, "wire": wire}))
+}
+
+/// #5600: the props of the helper's answer — what the ending put there, the run, the source (an ending's
+/// own is kept) and the label under `team_ai_model`. The core's `parseTeamAiReplyMeta` draws its
+/// 「팀 AI · 모델」 chip from exactly this shape; both sides are pinned to one file,
+/// `packages/momo-core/src/features/timeline/__fixtures__/team-ai-reply-props.json`.
+fn answer_props(props: Value, run_id: Uuid, label: Option<Value>) -> Value {
+    let mut props = if props.is_object() { props } else { json!({}) };
+    if let Some(object) = props.as_object_mut() {
+        object.insert("run_id".into(), json!(run_id));
+        object.entry("source").or_insert_with(|| json!("team_ai"));
+        if let Some(label) = label {
+            object.insert("team_ai_model".into(), label);
+        }
+    }
+    props
+}
+
 #[cfg(test)]
 mod profile_tests_4791 {
     use super::*;
@@ -2415,5 +2452,130 @@ mod profile_tests_4791 {
             web_search_requests: 0,
         }));
         assert!(!image_was_refused(&answered));
+    }
+}
+
+/// #5600: the helper's answer props and the core's chip parser read one file.
+#[cfg(test)]
+mod answer_props_tests_5600 {
+    use super::*;
+
+    /// The server half of the shared fixture; the core half is
+    /// `packages/momo-core/src/features/timeline/teamAiReply.test.ts`, which draws the chip from the
+    /// same `props`.
+    const SHARED: &str = include_str!(
+        "../../../../packages/momo-core/src/features/timeline/__fixtures__/team-ai-reply-props.json"
+    );
+
+    #[test]
+    fn the_answer_props_are_the_shared_fixture() {
+        let fixture: Value = serde_json::from_str(SHARED).expect("the shared fixture is JSON");
+        let model = fixture["trace"]["model"].as_str().expect("trace.model");
+        let run_id: Uuid = fixture["run_id"]
+            .as_str()
+            .and_then(|id| id.parse().ok())
+            .expect("run_id");
+        // The fixture's wire is one the worker really speaks, read off the enum, not typed again.
+        let wire = ProviderWire::AnthropicMessages.as_str();
+        assert_eq!(fixture["trace"]["wire"], json!(wire));
+        let props = answer_props(json!({}), run_id, answer_model_label(model, wire));
+        assert_eq!(
+            props, fixture["props"],
+            "the server's answer props drifted from the core's fixture"
+        );
+    }
+
+    #[test]
+    fn no_model_no_label_and_an_endings_own_keys_stay() {
+        assert_eq!(answer_model_label("", "chat_completions"), None);
+        let run_id = Uuid::from_u128(0x56a0);
+        // A delegation's chip key and an ending's own source are kept; nothing is labelled without a model.
+        assert_eq!(
+            answer_props(
+                json!({"source": "kept", "team_ai_delegated": []}),
+                run_id,
+                None
+            ),
+            json!({"source": "kept", "team_ai_delegated": [], "run_id": run_id})
+        );
+        // Not an object (a refusal's `{}` is one; anything else is replaced).
+        assert_eq!(
+            answer_props(
+                json!(null),
+                run_id,
+                answer_model_label("gpt-4o", "responses")
+            ),
+            json!({
+                "run_id": run_id,
+                "source": "team_ai",
+                "team_ai_model": {"model": "gpt-4o", "wire": "responses"},
+            })
+        );
+    }
+}
+
+/// #5873: the largest `team_ai.turn` row a turn can write is bounded — the whole row, not only the
+/// `reads` value. The reads are capped (six calls, 32 channel ids), tool names come from a closed
+/// list and the model label is a short name.
+#[cfg(test)]
+mod audit_row_size_tests_5873 {
+    use super::*;
+    use momo_workspace_actions::team_ai_tools::{ReadAudit, AUDIT_READ_CHANNELS_MAX};
+
+    /// The most the whole row may weigh. The test below measures the biggest row there can be and
+    /// must stay under it; a new key that grows the row past it is a decision, not an accident.
+    const AUDIT_ROW_BYTES_MAX: usize = 2_600;
+
+    #[test]
+    fn the_biggest_turn_row_stays_under_its_bound() {
+        let mut reads = ReadAudit::default();
+        let ids: Vec<Uuid> = (0..(AUDIT_READ_CHANNELS_MAX as u128 + 8))
+            .map(|n| Uuid::from_u128(u128::MAX - n))
+            .collect();
+        reads.record(&ToolOutcome::Data("x".into()), &ids);
+        for _ in 0..3 {
+            reads.record(&ToolOutcome::NotFound, &[]);
+            reads.record(&ToolOutcome::NotVisibleHere, &[]);
+        }
+        let trace = TurnTrace {
+            model: "m".repeat(120),
+            wire: "anthropic_messages",
+            tools: (0..team_ai::MAX_TOOL_CALLS)
+                .map(|_| team_ai_tools::TOOL_READ_ATTACHMENT.to_string())
+                .collect(),
+            tool_codes: vec!["invalid_arguments"; team_ai::MAX_TOOL_CALLS],
+            reads,
+            model_calls: i32::MAX,
+            web_searches: i32::MAX,
+            latency_ms: i64::MAX,
+            refused_action: Some("workspace.settings.update.longest-known-id"),
+            task_step: Some(i32::MAX),
+            suggested_command: Some("work.request.open"),
+            hermes: Some(HermesTrace {
+                offered: vec!["image", "web_search"],
+                results: vec!["invalid_arguments"; 8],
+                settle: None,
+            }),
+        };
+        let spend = Spend {
+            usage: ChatUsage {
+                prompt_tokens: i32::MAX,
+                completion_tokens: i32::MAX,
+                ..ChatUsage::default()
+            },
+            estimated: true,
+        };
+        let row = trace
+            .audit_detail(Some(spend), "refused_after_read")
+            .to_string();
+        assert!(
+            row.len() <= AUDIT_ROW_BYTES_MAX,
+            "the biggest team_ai.turn row is {} bytes",
+            row.len()
+        );
+        assert!(
+            row.contains("\"truncated\":true"),
+            "anti-vacuity: the cap was reached"
+        );
     }
 }

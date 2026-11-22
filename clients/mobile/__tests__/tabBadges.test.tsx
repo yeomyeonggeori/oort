@@ -42,8 +42,8 @@ const SELF: Member = {
   id: SELF_ID,
   workspaceId: WS,
   kind: 'human',
-  displayName: '곽성재',
-  handle: 'seongjae',
+  displayName: '한지후',
+  handle: 'jihu',
 };
 
 const APPROVAL_A = 'aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa';
@@ -186,8 +186,8 @@ interface Fixture {
 function installFetch(fixture: Fixture): jest.Mock {
   const roster = [
     {
-      id: SELF_ID, workspaceId: WS, kind: 'human', status: 'active', displayName: '곽성재',
-      handle: 'seongjae', channelCount: 0, channelIds: [], capabilities: [], createdAtMs: 0, updatedAtMs: 0,
+      id: SELF_ID, workspaceId: WS, kind: 'human', status: 'active', displayName: '한지후',
+      handle: 'jihu', channelCount: 0, channelIds: [], capabilities: [], createdAtMs: 0, updatedAtMs: 0,
     },
     {
       id: AGENT_ID, workspaceId: WS, kind: 'agent', status: 'active', displayName: '김인턴',

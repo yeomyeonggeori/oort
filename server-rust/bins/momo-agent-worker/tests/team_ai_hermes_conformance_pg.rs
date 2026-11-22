@@ -24,7 +24,7 @@
 //! |---|---|
 //! | `h1_every_gate_open_offers_the_declared_kinds_and_the_bundle_alone_takes_it_away` | drop the `ask_hermes_definition` push, or the `hermes` row from `BUNDLES`, or the `image_path_ready` check in `DoorFacts::judge` |
 //! | `h2_each_database_gate_broken_alone_takes_the_tool_away_and_its_undo_gives_it_back` | delete any gate's branch in `DoorFacts::judge`, or a filter of `PinnedAgent::is_target_for` |
-//! | `h3_the_declarations_and_the_ceiling_are_the_operators_to_give_not_the_workspaces` | read the connection-mode declarations by what the api parses, drop the `delegation_ceiling()` open-ness, or the `hermes_delegation_opened` skip |
+//! | `h3_the_declarations_and_the_ceiling_are_the_operators_to_give_not_the_workspaces` | read the connection-mode declarations by what the api parses, read an unset ceiling as closed (or drop the `delegation_off()` check), or the `hermes_delegation_opened` skip |
 //! | `h4_the_search_kind_never_reaches_a_switch_that_turned_search_off` | evaluate the wire before the operator's `0` in `WebSearch::judge` |
 //! | `h5_after_a_read_the_tool_is_gone_and_the_prompt_says_why` | compute `tainted` as `false` for the door, or drop `HermesPrompt::WithheldByRead` |
 //! | `h6_a_call_that_was_never_offered_is_not_offered_and_runs_nothing_else` | route an un-offered `ask_hermes` to the off-script fallback, or run the reads of that answer |
@@ -53,6 +53,7 @@ use momo_messaging::{send_message_in_tx, NewMessage};
 use momo_outbox::{emit_outbox, OutboxKind};
 use momo_settings::{seal_bearer, upsert_link, EgressPolicy};
 use momo_workspace_actions::team_ai_hermes::{self, HermesDeclarations};
+use momo_workspace_actions::team_ai_limits::HermesCeiling;
 use serde_json::{json, Value};
 use sqlx::postgres::{PgConnectOptions, PgPoolOptions};
 use uuid::Uuid;
@@ -627,7 +628,7 @@ fn declared() -> HermesDeclarations {
 #[derive(Clone)]
 struct Setup {
     hermes: HermesDeclarations,
-    ceiling: Option<i64>,
+    ceiling: HermesCeiling,
     /// A real bearer on the operator's link (G5). `false` leaves the dev placeholder, which is no key.
     key: bool,
     /// The "Hermes" address the worker is configured with.
@@ -642,7 +643,7 @@ impl Setup {
     fn open() -> Setup {
         Setup {
             hermes: declared(),
-            ceiling: Some(30),
+            ceiling: HermesCeiling::Ceiling(30),
             key: true,
             base_url: None,
             search_cap: None,
@@ -962,13 +963,13 @@ async fn h2_each_database_gate_broken_alone_takes_the_tool_away_and_its_undo_giv
 /// P15-A1 G4/G6 and A11 ②: the operator's declarations and ceiling are the operator's to give. The
 /// door is shut — and **no database row is read for it** — without the tool lock, with either
 /// connection-mode declaration holding a value (the worker's environment, whatever the workspace or the
-/// api's parse of it says), with the ceiling unset or `0`. Each undo reopens it.
+/// api's parse of it says), with the ceiling `0`. Each undo reopens it, and an unset ceiling is open (#5685).
 #[tokio::test]
 #[ignore = "requires an isolated PostgreSQL 18 (see module docs)"]
 async fn h3_the_declarations_and_the_ceiling_are_the_operators_to_give_not_the_workspaces() {
     let (su, pool, t, hermes) = fixture().await;
     let setup = Setup::open();
-    // a workspace that asks for the most the settings allow does not open a closed ceiling
+    // a workspace that asks for the most the settings allow does not open a ceiling of `0`
     set_setting(&su, &t, "team_ai_limits", json!({"dailyDelegations": 200})).await;
     let open = |kinds: Option<Vec<String>>| assert_eq!(kinds, Some(vec!["web_search".to_string()]));
     open(first_call_kinds(&su, &pool, &t, t.owner_id, HELLO, &setup).await);
@@ -1039,18 +1040,19 @@ async fn h3_the_declarations_and_the_ceiling_are_the_operators_to_give_not_the_w
     );
     open(first_call_kinds(&su, &pool, &t, t.owner_id, HELLO, &setup).await);
 
-    // G6: the operator's ceiling — unset and `0` are CLOSED (the inverse of the other two ceilings)
-    for ceiling in [None, Some(0)] {
-        let mut closed = setup.clone();
-        closed.ceiling = ceiling;
-        assert_eq!(
-            first_call_kinds(&su, &pool, &t, t.owner_id, HELLO, &closed).await,
-            None,
-            "G6 ceiling {ceiling:?}"
-        );
-    }
+    // G6: the operator's ceiling (#5685) — only `0` is CLOSED; unset is no ceiling (the workspace's 200 binds)
+    let mut closed = setup.clone();
+    closed.ceiling = HermesCeiling::Off;
+    assert_eq!(
+        first_call_kinds(&su, &pool, &t, t.owner_id, HELLO, &closed).await,
+        None,
+        "G6 ceiling 0"
+    );
+    let mut unset = setup.clone();
+    unset.ceiling = HermesCeiling::NoCeiling;
+    open(first_call_kinds(&su, &pool, &t, t.owner_id, HELLO, &unset).await);
     let mut one = setup.clone();
-    one.ceiling = Some(1);
+    one.ceiling = HermesCeiling::Ceiling(1);
     open(first_call_kinds(&su, &pool, &t, t.owner_id, HELLO, &one).await);
     // nothing declared at all: no tool, and no sentence
     let mut nothing = setup.clone();

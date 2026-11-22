@@ -123,7 +123,7 @@ import {
   type TextStyle,
 } from 'react-native';
 import {GlassSurface} from '../../design/glass';
-import {font, line, radius, SAFE_GUTTER, slopTo, space, TOUCH_TARGET, type Palette} from '../../design/tokens';
+import {font, line, PRESSED_OPACITY, radius, SAFE_GUTTER, slopTo, space, TOUCH_TARGET, type Palette} from '../../design/tokens';
 import {landedFace, pressFace, ROW_FACE} from './rowFace';
 import {usePalette, useStyles} from '../../design/theme';
 import {CONV_ICONS, CONV_ICON_SIZE} from '../../design/icons';
@@ -2574,7 +2574,9 @@ function MessageRowInner({
   );
   // 이 행이 **그리고 말하는** 인용. 걸러지기 전의 `quote` 는 위임 줄의 원문 읽기(`delegateSourceBody`)만 쓴다 — 이유는 `quoteRedundant` 의 prop 주석.
   const drawnQuote = quoteRedundant ? null : quote;
-  const presentation = useMemo(() => rowPresentation(message), [message]);
+  // #5577 — 서버 결과 카드·칩(턴 기록·도우미 꼬리)은 작성자가 에이전트일 때만 선다: 종류는 멤버 목록에서 온다.
+  const authorKind = memberFor(directory, message.authorMemberId)?.kind;
+  const presentation = useMemo(() => rowPresentation(message, authorKind), [message, authorKind]);
   // 이모티콘 세트의 두 카드가 읽는 메시지의 몫(ADR-0218 §12, #5463). 코어가 행동 id 로 먼저 거르므로 다른 행은 셋 다 `null` 이고 값이 싸다.
   const expressionCards = useMemo<ExpressionSetCards>(
     () => ({
@@ -2603,8 +2605,8 @@ function MessageRowInner({
   // 같은 꼬리에 「쓴 앱」 줄(E8·E10, #3950)이 붙는다: 보고가 있는 에이전트 답에만.
   const appsTail = useAppsTailContext(message, directory, actions?.workspaceId);
   const teamAiReply = useMemo(
-    () => teamAiReplyMetaFor(message, appsTail),
-    [message, appsTail],
+    () => teamAiReplyMetaFor(message, appsTail, authorKind),
+    [message, appsTail, authorKind],
   );
   // 앱을 쓰다 막혔을 때의 한 문장(+ 행동 하나). 칸이 없으면 null.
   const appNotice = useAppNotice(message, actions?.workspaceId, nowMs);
@@ -3252,7 +3254,7 @@ function MessageRowInner({
   // 「고정됨」을 다는 창은 프레임이 도착하기까지의 몇 밀리초뿐이고, 그 몇 밀리초에
   // 하는 말은 이미 참이 아니다.
   const showsPinMark = pinned === true && !deleted;
-  const memoryRunId = turnRecordRunId(message);
+  const memoryRunId = turnRecordRunId(message, authorKind);
   // ADR-0155 — 멈춘 답. 왜 이 낱말인지·왜 accent 가 아닌지는 코어의
   // `streamStop.ts` 헤더에 있다. 묘비에는 그리지 않는다: 저자가 지운 메시지에
   // 대고 「중단됨」이라고 말하는 것은 이미 없는 본문을 서술하는 것이다.
@@ -4896,7 +4898,7 @@ const buildStyles = (color: Palette) => StyleSheet.create({
     borderColor: color.dangerBorder,
   },
   resendLabel: {fontSize: font.label, color: color.danger, fontWeight: '600'},
-  pressed: {opacity: 0.6},
+  pressed: {opacity: PRESSED_OPACITY},
 
   // 라벨이 **앞**에 선다(`DIVIDER_LABEL_SIDE`). 여백·두께도 코어 값이다.
   divider: {

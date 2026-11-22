@@ -71,7 +71,7 @@ function member(over: Partial<RosterMember> & {id: string}): RosterMember {
 }
 
 const DIRECTORY = makeDirectory([
-  member({id: SELF, displayName: '곽성재', handle: 'seongjae'}),
+  member({id: SELF, displayName: '한지후', handle: 'jihu'}),
   member({id: HUMAN, displayName: '김민수', handle: 'minsu'}),
   member({id: HUMAN2, displayName: '이하늘', handle: 'haneul'}),
   member({id: HUMAN3, displayName: '박도윤', handle: 'doyun'}),

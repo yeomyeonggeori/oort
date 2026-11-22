@@ -61,8 +61,8 @@ const SELF: Member = {
   id: SELF_ID,
   workspaceId: WS,
   kind: 'human',
-  displayName: '곽성재',
-  handle: 'seongjae',
+  displayName: '한지후',
+  handle: 'jihu',
 };
 
 function rosterMember(fields: Record<string, unknown>) {
@@ -94,7 +94,7 @@ function personalAgent(
     personalAgent: {
       label: over.label ?? '내 Claude Code',
       ownerId: over.ownerId ?? SELF_ID,
-      ownerDisplayName: '곽성재',
+      ownerDisplayName: '한지후',
       harness: over.harness ?? 'claude',
       enabled: over.enabled ?? true,
       mentionable: true,
@@ -107,7 +107,7 @@ const THEIRS = 'bbbbbbbb-1111-4111-8111-bbbbbbbbbbbb';
 const RETIRED = 'cccccccc-1111-4111-8111-cccccccccccc';
 const OFF = 'dddddddd-1111-4111-8111-dddddddddddd';
 
-const HUMANS = [rosterMember({id: SELF_ID, displayName: '곽성재', handle: 'seongjae'})];
+const HUMANS = [rosterMember({id: SELF_ID, displayName: '한지후', handle: 'jihu'})];
 
 function host(online: boolean, over: Record<string, unknown> = {}) {
   return {

@@ -77,6 +77,8 @@ pub mod work_board;
 /// ADR-0114 D4/D5 + ADR-0125 D6-A — the host-control ledger and the spawn
 /// approval card's host candidates.
 pub mod work_control;
+/// #5594: the lines that tell a session's owner the work stopped.
+pub mod work_notice;
 /// ADR-0188 D5 (#3000) — the permission bridge's ledger: an ACP permission
 /// request relayed by a member host, decided once by the session owner.
 pub mod work_permission;

@@ -88,7 +88,8 @@ function ConfirmForm({
     <form
       onSubmit={(event) => void onSubmit(event)}
       noValidate
-      className="flex min-h-0 flex-col"
+      // 프로필 창의 본문 높이를 덮어 선다(#5780 검수 r1 M2): 남는 높이는 본문이 갖고 바닥 줄은 창 바닥에 붙는다.
+      className="flex min-h-0 flex-1 flex-col"
       data-testid="member-profile-reset-stage"
     >
       <div
@@ -96,7 +97,7 @@ function ConfirmForm({
         role="group"
         tabIndex={-1}
         aria-labelledby={titleId}
-        className="flex min-h-0 flex-col gap-4 overflow-y-auto p-4 focus-visible:focus-ring"
+        className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto p-4 focus-visible:focus-ring"
       >
         <div className="flex flex-col gap-1">
           <h3 id={titleId} className="text-title font-semibold text-ink">
@@ -208,14 +209,14 @@ function IssuedLink({
   const when = resetExpiryWhen(locale, issued.expiresAtMs);
 
   return (
-    <div className="flex min-h-0 flex-col">
+    <div className="flex min-h-0 flex-1 flex-col">
       <div
         ref={cardRef}
         role="group"
         tabIndex={-1}
         aria-labelledby={titleId}
         aria-describedby={leadId}
-        className="flex min-h-0 flex-col gap-4 overflow-y-auto p-4 focus-visible:focus-ring"
+        className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto p-4 focus-visible:focus-ring"
         data-testid="member-profile-reset-issued"
       >
         <h3 id={titleId} className="text-title font-semibold text-ink">

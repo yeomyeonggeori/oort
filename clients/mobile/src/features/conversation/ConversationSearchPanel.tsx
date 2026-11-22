@@ -18,7 +18,7 @@ import {FlatList, Image, Pressable, StyleSheet, Text, View} from 'react-native';
 import {EmptyState, ErrorState, LoadingState, Sentence} from '../../design/atoms';
 import {CONV_ICONS, CONV_ICON_SIZE, SHEET_ICONS, SHEET_ICON_SIZE} from '../../design/icons';
 import {usePalette, useStyles} from '../../design/theme';
-import {ds2Radius, font, line, SAFE_GUTTER, slopTo, space, TOUCH_TARGET, type Palette} from '../../design/tokens';
+import {ds2Radius, font, line, PRESSED_OPACITY, SAFE_GUTTER, slopTo, space, TOUCH_TARGET, type Palette} from '../../design/tokens';
 import {useFormatMessage} from '../../i18n/useFormatMessage';
 import {useLocaleService} from '../../i18n/useLocaleService';
 import {useKeyboardHeight} from '../../lib/useKeyboardHeight';
@@ -425,7 +425,7 @@ const buildStyles = (color: Palette) =>
     },
     listHead: {flexShrink: 1, fontSize: font.label, lineHeight: line.label, color: color.textMuted},
     searchAll: {...ROW, flexShrink: 0, gap: space.xs},
-    searchAllPressed: {opacity: 0.6},
+    searchAllPressed: {opacity: PRESSED_OPACITY},
     searchAllLabel: {fontSize: font.label, lineHeight: line.label, color: color.accentText, fontWeight: '600'},
     searchAllGlyph: {
       width: SHEET_ICON_SIZE.chevron - space.xs,

@@ -23,6 +23,7 @@ import {
   type LinkPreviewPreference,
 } from "./linkPreviewPreference";
 import { useUnfurlImage, useVisibleOnce } from "./useUnfurlImage";
+import { Tooltip } from "@/design/ui/tooltip";
 
 // =============================================================================
 // 링크 카드 (ADR-0170 D5, #4882). 무엇을 보여 줄지는 코어 표시 모델이 한 곳에서 정한다
@@ -423,21 +424,22 @@ export function UnfurlCards({
       // 숨기고 터치는 늘 보인다(손가락에는 호버가 없다). 키보드는 그대로 닿고(방향키·Tab) 닿는 순간 드러난다(`focus-visible`·카드 안
       // `:focus-visible`). 테두리 없는 원이고, 면은 불투명 토큰(bg-surface-raised) + 옅은 그림자다: 반투명 스크림은 OG 배경이 임의 색이라
       // 대비 상한이 없다. ✕는 글 쪽 끝 여백(`pr-control-lg`)에 서서 그림 위에 서지 않는다.
-      <button
-        type="button"
-        data-row-action=""
-        aria-label="링크 미리보기 제거"
-        title="링크 미리보기 제거"
-        className="tap-target absolute right-1 top-1 layer-content-float flex size-control-sm items-center justify-center rounded-full bg-surface-raised text-ink-muted shadow-sm press hover:bg-surface-hover hover:text-ink focus-visible:focus-ring pointer-hover:opacity-0 pointer-hover:group-hover/unfurl:opacity-100 pointer-hover:group-has-[:focus-visible]/unfurl:opacity-100 pointer-hover:focus-visible:opacity-100"
-        onClick={(event) => {
-          setOpener(event.currentTarget);
-          setError(false);
-          setConfirmOpen(true);
-        }}
-        data-testid="unfurl-remove"
-      >
-        <X className="size-4" aria-hidden="true" />
-      </button>
+      <Tooltip label="링크 미리보기 제거" side="bottom" className="absolute right-1 top-1">
+        <button
+          type="button"
+          data-row-action=""
+          aria-label="링크 미리보기 제거"
+          className="tap-target layer-content-float flex size-control-sm items-center justify-center rounded-full bg-surface-raised text-ink-muted shadow-sm press hover:bg-surface-hover hover:text-ink focus-visible:focus-ring pointer-hover:opacity-0 pointer-hover:group-hover/unfurl:opacity-100 pointer-hover:group-has-[:focus-visible]/unfurl:opacity-100 pointer-hover:focus-visible:opacity-100"
+          onClick={(event) => {
+            setOpener(event.currentTarget);
+            setError(false);
+            setConfirmOpen(true);
+          }}
+          data-testid="unfurl-remove"
+        >
+          <X className="size-4" aria-hidden="true" />
+        </button>
+      </Tooltip>
     ) : null;
 
   return (

@@ -185,7 +185,7 @@ describe('나간 상대 (6번): 닫기보다 먼저, 안 읽은 것이 없을 �
     ).toBe(true);
   });
 
-  it('나간 상대의 DM 도 내가 닫았으면 「닫은 대화」 이유는 gone 이다(6번이 7번보다 먼저)', () => {
+  it('나간 상대의 DM 도 내가 닫았으면 「숨긴 대화」 이유는 gone 이다(6번이 7번보다 먼저)', () => {
     const rows = [row(DM_GONE.id, {closedAtSeq: 5, latestReadableSeq: 5})];
     expect(verdicts(rows).get(DM_GONE.id)?.rule).toBe(6);
   });
@@ -268,7 +268,7 @@ describe('첫 페인트 캐시: 마지막 투영에서 닫혀 있던 DM 은 오�
   });
 });
 
-describe('dmClosedEntries: 「닫은 대화」 목록은 숨은 DM 중 닫음(7)과 나감(6)만', () => {
+describe('dmClosedEntries: 「숨긴 대화」 목록은 숨은 DM 중 닫음(7)과 나감(6)만', () => {
   it('보이는 대화는 넣지 않고, 이유를 붙인다', () => {
     const rows = [
       row(DM_PEER.id, {closedAtSeq: 5, latestReadableSeq: 5}),
@@ -292,5 +292,30 @@ describe('dmClosedEntries: 「닫은 대화」 목록은 숨은 DM 중 닫음(7)
     expect(dmClosedEntries([DM_PEER], open)).toEqual([]);
     const plain = verdicts([row(DM_PEER.id, {closedAtSeq: null, latestReadableSeq: 5})]);
     expect(dmClosedEntries([DM_PEER], plain)).toEqual([]);
+  });
+});
+
+// ADR-0177 증보 2026-11-14 D18·D21: 나간 대화(3a). 폰은 행의 하한을 「나가기를 싣는 서버」에서만 코어에 넣는다.
+describe('나간 대화 (3a): 나가기를 싣는 서버에서만 하한이 판정에 간다', () => {
+  // 하한 6, 그 뒤 읽을 글 없음. 숨김 기록은 일부러 비웠다 - 이 DM 을 숨기는 것은 3a 하나뿐이다.
+  const left = row(DM_PEER.id, {historyFromSeq: 6, closedAtSeq: null, latestReadableSeq: 5});
+
+  it('나가기를 싣는 서버: 숨김 (3a)', () => {
+    expect(verdicts([left], {serverCarriesLeave: true}).get(DM_PEER.id)).toEqual({shown: false, rule: '3a'});
+  });
+
+  it('나가기를 모르는 서버(생략·거짓): 하한을 읽지 않는다 -> 보임 (9번)', () => {
+    expect(verdicts([left]).get(DM_PEER.id)).toEqual({shown: true, rule: 9});
+    expect(verdicts([left], {serverCarriesLeave: false}).get(DM_PEER.id)).toEqual({shown: true, rule: 9});
+  });
+
+  it('하한 위에 글이 오면 3a 를 지나 보통 판정이다 (9번)', () => {
+    const revived = {...left, latestReadableSeq: 6, latestSeq: 6};
+    expect(verdicts([revived], {serverCarriesLeave: true}).get(DM_PEER.id)).toEqual({shown: true, rule: 9});
+  });
+
+  it('나간 대화는 「숨긴 대화」 목록에 없다', () => {
+    const v = verdicts([left], {serverCarriesLeave: true});
+    expect(dmClosedEntries([DM_PEER, DM_GONE], v).map(entry => entry.channel.id)).not.toContain(DM_PEER.id);
   });
 });

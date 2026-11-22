@@ -8,8 +8,8 @@
 // ## 무엇이 점이 되는가
 //
 //   사람     스스로 정한 **자리 비움**(warn)·**방해 금지**(danger)이 먼저이고, 그렇지 않으면(auto) **접속 여부**가 정한다
-//            (#4692, ADR-0160 D3 `f(선언, 가용성)`): 접속 중 = 채운 초록(ok), 접속 없음 = 속 빈 고리(muted) - 에이전트
-//            점과 같은 문법이다(초록 = 살아 있다, 고리 = 꺼져 있다). 가용성은 서버가 전송(Centrifugo presence)에서
+//            (#4692, ADR-0160 D3 `f(선언, 가용성)`): 접속 중 = 채운 초록(ok), 접속 없음 = 회색(muted) - 아바타 모서리에서는
+//            회색으로 채운 원이다(#6023, 모양은 `statusBadge.ts`). 가용성은 서버가 전송(Centrifugo presence)에서
 //            읽어 명부 행에 `online` 으로 싣는다. **모르면(필드 없음) 점이 없다** - 명부가 접속 여부를 모를 때 초록이나
 //            고리를 그리면 근거 없는 점이다(design-review #1889 H-3). 방해 금지는 접속 중이어도 방해 금지로 보인다.
 //   에이전트 서버가 파생한 **생존 판정**(`livenessView`)을 점으로 옮긴다(Buzz식, 소유자 결정 2026-10-17
@@ -31,10 +31,16 @@
 //            이어 도착하는 판정이 다른 색일 때 거짓을 한 번 그렸다 지우게 된다.
 //
 // 색만으로 말하지 않는다: 낱말은 `label`/`meaning` 이 들고, 행에서는 글자를 빼는 대신 접근 가능한 이름과
-// 툴팁이 말한다(웹 `DmAvatar`, 폰 `Row`). muted 는 웹에서 속이 빈 고리로 그려 모양으로도 갈린다.
+// 툴팁이 말한다(웹 `DmAvatar`, 폰 `Row`). 아바타 모서리의 모양은 뜻이 고른다(`statusBadgeShape`: 에이전트 꺼짐은 속 빈 고리,
+// 사람 오프라인은 회색으로 채운 원).
 // =============================================================================
 
-import { uuidEq, type AgentLiveness, type RosterMember } from "../../lib/api";
+import {
+  uuidEq,
+  type AgentLiveness,
+  type EffectivePresence,
+  type RosterMember,
+} from "../../lib/api";
 import {
   livenessToneFor,
   livenessView,
@@ -113,15 +119,20 @@ export function agentHostDot(hostOnline: boolean | undefined): StatusDot | null 
  *   방해 금지  접속 중이어도 방해 금지(danger). 만료 시각이 지나면 자동(auto)으로 본다 - 서버는 만료 때 이벤트를
  *             보내지 않는다. 만료된 방해 금지는 「점 없음」이 아니라 접속 여부로 내려간다.
  *   자리 비움  warn
- *   auto      `online === true` 채운 초록(ok) · `online === false` 속 빈 고리(muted) · 모르면(`undefined`) **점 없음**
+ *   auto      `online === true` 채운 초록(ok) · `online === false` 회색(muted) · 모르면(`undefined`) **점 없음**
  *
  * `online` 이 `undefined` 인 것은 「꺼짐」이 아니라 「모름」이다(서버가 가용성을 못 읽은 응답, 구서버, 에이전트).
- * 모름을 고리로 그리면 브로커가 잠깐 느린 것만으로 모든 동료가 꺼진 것처럼 보인다.
+ * 모름을 회색으로 그리면 브로커가 잠깐 느린 것만으로 모든 동료가 꺼진 것처럼 보인다.
+ *
+ * **활성이 아닌 사람에게는 점이 없다**(#5781). 소유자·관리자의 명부는 정지된 사람도 싣고(#5814, 그 줄에는 `online` 이
+ * 없지만 선언 상태는 남는다), 정지·내보내기로 모든 세션이 끝난 사람의 「자리 비움」·「온라인」은 거짓이다. 상태를
+ * 모르는 입력(`status` 없음)은 지금처럼 판정한다.
  */
 export function humanPresenceDot(
-  member: Pick<RosterMember, "presenceStatus" | "dndUntilMs" | "online">,
+  member: Pick<RosterMember, "presenceStatus" | "dndUntilMs" | "online"> & { status?: RosterMember["status"] },
   nowMs: number
 ): StatusDot | null {
+  if (member.status !== undefined && member.status !== "active") return null;
   if (member.presenceStatus === "away") {
     return { tone: "warn", label: declaredStatusLabel("away") };
   }
@@ -138,6 +149,24 @@ export function humanPresenceDot(
     return { tone: "muted", label: effectivePresenceLabel("offline") };
   }
   return null;
+}
+
+/**
+ * 이미 판정된 실효 상태(내 프로필 줄의 배지: `effectivePresence(선언, 연결됨)`) → 점의 톤. 위 `humanPresenceDot` 과 같은
+ * 대응이다(온라인 = ok · 자리 비움 = warn · 방해 금지 = danger · 오프라인 = muted). 웹이 이 대응을 따로 적던 자리
+ * (`PresenceControl` 의 클래스 함수)를 여기로 모았다(#5786).
+ */
+export function effectivePresenceTone(effective: EffectivePresence): StatusDotTone {
+  switch (effective) {
+    case "online":
+      return "ok";
+    case "away":
+      return "warn";
+    case "dnd":
+      return "danger";
+    case "offline":
+      return "muted";
+  }
 }
 
 /**
@@ -163,10 +192,10 @@ export function withOwnConnection<T extends Pick<RosterMember, "id" | "online">>
  * `liveness`: 값 있음 / `null`(라벨 없음: 호스티드가 아님) / `undefined`(아직 모름). 사람에게는 쓰지 않는다.
  */
 export function dmPeerStatusDot(input: {
-  member: Pick<
+  member: (Pick<
     RosterMember,
     "kind" | "hostOnline" | "presenceStatus" | "dndUntilMs" | "online"
-  > | null;
+  > & { status?: RosterMember["status"] }) | null;
   liveness: Pick<AgentLiveness, "state" | "lastSignalAtMs"> | null | undefined;
   mayAct: boolean;
   nowMs: number;

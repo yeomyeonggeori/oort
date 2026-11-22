@@ -90,8 +90,8 @@ vi.mock("@/features/workspace/useWorkspace", async (importOriginal) => {
           workspaceId: IDS.ws,
           kind: "human",
           status: "active",
-          displayName: "곽성재",
-          handle: "seongjae",
+          displayName: "한지후",
+          handle: "jihu",
           channelCount: 1,
           channelIds: [IDS.channel],
           capabilities: [],
@@ -219,6 +219,9 @@ function sessionValue(): SessionContextValue {
   };
 }
 
+/** 마지막으로 세운 판의 쿼리 캐시(읽음 투영을 심는 시험이 쓴다). */
+let railClient: QueryClient | null = null;
+
 function mountRail(path = "/"): HTMLElement {
   const host = document.createElement("div");
   document.body.append(host);
@@ -229,7 +232,7 @@ function mountRail(path = "/"): HTMLElement {
     { initialEntries: [path] },
     createElement(
       QueryClientProvider,
-      { client: new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } }) },
+      { client: (railClient = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } })) },
       createElement(
         SessionProvider,
         { value: sessionValue() },
@@ -310,7 +313,7 @@ describe("DesktopNotifications", () => {
       await Promise.resolve();
     });
     expect(showNotification).toHaveBeenCalledTimes(1);
-    expect(showNotification.mock.calls[0]?.[0]).toBe("곽성재");
+    expect(showNotification.mock.calls[0]?.[0]).toBe("한지후");
   });
 
   it("honours this-device kind toggles on the live rail", async () => {
@@ -325,6 +328,30 @@ describe("DesktopNotifications", () => {
 
     await act(async () => {
       onMessage?.(approvalEvent());
+      osNotifier().flush();
+      await Promise.resolve();
+    });
+    expect(showNotification).toHaveBeenCalledTimes(1);
+  });
+
+  it("읽기 하한 아래 seq 는 알리지 않고, 하한 이상은 알린다 (ADR-0177 증보 2026-11-14 D18·D22, #5825)", async () => {
+    mountRail();
+    act(() => {
+      railClient?.setQueryData(["read-state", IDS.ws], [
+        { channelId: IDS.channel, lastReadSeq: 49, latestSeq: 49, unreadCount: 0, mentionCount: 0, markedUnreadBeforeSeq: null, historyFromSeq: 50 },
+      ]);
+    });
+    await act(async () => {
+      onMessage?.(mentionEvent("019F96A4-E717-7F82-9750-58B2D7D28301"));
+      osNotifier().flush();
+      await Promise.resolve();
+    });
+    expect(showNotification).not.toHaveBeenCalled();
+    const above = mentionEvent("019F96A4-E717-7F82-9750-58B2D7D28302");
+    above.seq = 50;
+    above.payload.seq = 50;
+    await act(async () => {
+      onMessage?.(above);
       osNotifier().flush();
       await Promise.resolve();
     });
@@ -693,7 +720,7 @@ describe("도우미 초대 링크 DM의 배너에는 링크가 없다 (#5025)", 
   it("서버 preview가 배너 본문이고, 링크는 제목에도 본문에도 없다", async () => {
     await deliver(linkEvent({ kind: "team_ai_invite_link", preview: "초대 링크를 올렸어요" }));
     expect(showNotification).toHaveBeenCalledTimes(1);
-    expect(showNotification.mock.calls[0]).toEqual(["곽성재", "초대 링크를 올렸어요"]);
+    expect(showNotification.mock.calls[0]).toEqual(["한지후", "초대 링크를 올렸어요"]);
     expect(JSON.stringify(showNotification.mock.calls)).not.toContain("join?code");
   });
 
@@ -705,7 +732,7 @@ describe("도우미 초대 링크 DM의 배너에는 링크가 없다 (#5025)", 
     expect(dictionary.trim()).not.toBe("");
     await deliver(linkEvent({ kind: "team_ai_invite_link" }));
     expect(showNotification).toHaveBeenCalledTimes(1);
-    expect(showNotification.mock.calls[0]).toEqual(["곽성재", dictionary]);
+    expect(showNotification.mock.calls[0]).toEqual(["한지후", dictionary]);
     expect(JSON.stringify(showNotification.mock.calls)).not.toContain("join?code");
   });
 });

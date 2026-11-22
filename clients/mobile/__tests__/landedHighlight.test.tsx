@@ -67,7 +67,7 @@ const BASE_MS = 1_700_000_000_000;
 const CH = 'ch';
 
 const DIRECTORY = makeDirectory([
-  member({id: SELF, displayName: '곽성재', handle: 'seongjae'}),
+  member({id: SELF, displayName: '한지후', handle: 'jihu'}),
   member({id: AGENT, kind: 'agent', displayName: '김인턴', handle: 'intern-kim'}),
 ]);
 
@@ -125,7 +125,7 @@ interface MountProps {
 }
 
 /** 승인 카드의 컨트롤(`ApprovalDecision`)이 세션과 질의 클라이언트를 요구한다. */
-const ME = {id: SELF, workspaceId: 'ws', displayName: '곽성재'} as Member;
+const ME = {id: SELF, workspaceId: 'ws', displayName: '한지후'} as Member;
 const CLIENT = new QueryClient({
   defaultOptions: {queries: {retry: false, gcTime: 0}},
 });

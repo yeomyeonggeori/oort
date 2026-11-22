@@ -62,7 +62,7 @@ const person = (id, kind, displayName, handle, extra = {}) => ({
   channelIds: [CH, GENERAL], capabilities: [], createdAtMs: 0, updatedAtMs: 0, ...extra,
 });
 const roster = [
-  person(memberId, "human", "곽성재", "seongjae", { role: "owner" }),
+  person(memberId, "human", "한지후", "jihu", { role: "owner" }),
   person(agentId, "agent", "그록봇", "grokbot", { ownerHumanId: memberId }),
   person(otherAgentId, "agent", "김인턴", "kim-intern", { ownerHumanId: memberId }),
 ];
@@ -73,7 +73,7 @@ const channels = [
 const auth = {
   accessToken: "capture-only-not-a-credential",
   refreshToken: "capture-only-not-a-credential",
-  member: { id: memberId, workspaceId, kind: "human", displayName: "곽성재", handle: "seongjae" },
+  member: { id: memberId, workspaceId, kind: "human", displayName: "한지후", handle: "jihu" },
   realtimeWebSocketUrl: "ws://run-honesty-capture.invalid/connection/websocket",
 };
 
@@ -645,7 +645,7 @@ async function u3(browser, origin, scheme) {
   const build = (role) => {
     const scene = newScene();
     scene.role = role;
-    scene.roster = [person(memberId, "human", "곽성재", "seongjae", { role }), ...agents];
+    scene.roster = [person(memberId, "human", "한지후", "jihu", { role }), ...agents];
     scene.liveness = {
       [A.kim]: { state: "responsive", lastSignalAtMs: now - 3 * MIN },
       [A.dots]: { state: "alive_idle", lastSignalAtMs: now - 2 * MIN },

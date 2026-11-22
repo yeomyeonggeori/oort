@@ -615,8 +615,8 @@ describe("mention autocomplete", () => {
       workspaceId: "w",
       kind: "human",
       status: "active",
-      displayName: "곽성재",
-      handle: "seongjae",
+      displayName: "한지후",
+      handle: "jihu",
       channelCount: 1,
       channelIds: ["c"],
       capabilities: [],
@@ -658,7 +658,7 @@ describe("mention autocomplete", () => {
   });
 
   it("ignores an @ in the middle of a word", () => {
-    const value = "seongjae@example.com";
+    const value = "jihu@example.com";
     expect(mentionQueryAt(value, value.length)).toBeNull();
   });
 
@@ -671,7 +671,7 @@ describe("mention autocomplete", () => {
     expect(matchMembers(members, "her").map((m) => m.handle)).toEqual(["hermes"]);
     expect(matchMembers(members, "인턴").map((m) => m.handle)).toEqual(["hermes"]);
     expect(matchMembers(members, "").map((m) => m.handle)).toEqual([
-      "seongjae",
+      "jihu",
       "hermes",
     ]);
   });
@@ -725,11 +725,11 @@ describe("empty surface copy", () => {
 
   it("names the person and offers no invite in a DM", () => {
     const copy = emptyChannelCopy("dm", {
-      displayName: "곽성재",
+      displayName: "한지후",
       kind: "human",
     });
     expect(copy.surface).toBe("dm");
-    expect(copy.headline).toBe("곽성재님과의 대화를 시작하세요.");
+    expect(copy.headline).toBe("한지후님과의 대화를 시작하세요.");
     expect(copy.primary.kind).toBe("write");
     expect(copy.secondary).toBeNull();
     expect(copy.detail).not.toContain("추가");
@@ -776,7 +776,7 @@ describe("empty surface copy", () => {
 
   it("keeps the two-person copy exactly as it was: a pair, an unloaded roster, no group facts at all", () => {
     for (const group of [undefined, null, { count: 2, agentCount: 0 }, { count: 2, agentCount: 1 }, { count: 1, agentCount: 0 }]) {
-      expect(emptyChannelCopy("dm", { displayName: "곽성재", kind: "human" }, group).detail).toBe(PAIR_DETAIL);
+      expect(emptyChannelCopy("dm", { displayName: "한지후", kind: "human" }, group).detail).toBe(PAIR_DETAIL);
       expect(emptyChannelCopy("dm", { displayName: "김인턴", kind: "agent" }, group).detail).toBe(PAIR_DETAIL);
       expect(emptyChannelCopy("dm", null, group).detail).toBe(PAIR_DETAIL);
     }
@@ -803,7 +803,7 @@ describe("empty surface copy", () => {
     // 범위다. 금지어를 이 파일에 다시 적으면 그 스캐너가 **이 줄을** 위반으로
     // 집는다(실측 — hype 1건).
     const copies = [
-      emptyChannelCopy("dm", { displayName: "곽성재", kind: "human" }),
+      emptyChannelCopy("dm", { displayName: "한지후", kind: "human" }),
       emptyChannelCopy("dm", { displayName: "김인턴", kind: "agent" }),
       emptyChannelCopy("dm", null),
       emptyChannelCopy("dm", null, { count: 3, agentCount: 1 }),

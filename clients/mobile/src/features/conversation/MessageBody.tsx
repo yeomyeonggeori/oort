@@ -31,7 +31,7 @@ import {
   type TextLayoutEventData,
 } from 'react-native';
 import {headroomLineHeight} from '../../design/lineHeadroom';
-import {font, line, radius, space, type Palette} from '../../design/tokens';
+import {font, line, PRESSED_OPACITY, radius, space, type Palette} from '../../design/tokens';
 import {useBubbleChoice, usePalette, useStyles} from '../../design/theme';
 import type {QuoteBlock as QuoteBlockModel} from '@momo/core/features/timeline/quote';
 import {MatchScope, type SearchMatchSpec} from '../search/MatchedText';
@@ -1025,7 +1025,7 @@ const buildStyles = (color: Palette) => StyleSheet.create({
   // 그만큼 두꺼워지고, 답 하나에 상자가 셋이면 화면 한 뼘이 사라진다.
   codeCopy: {minHeight: 24, justifyContent: 'center', paddingHorizontal: space.sm},
   codeCopyLabel: {fontSize: font.meta, color: color.textMuted, fontWeight: '600'},
-  pressed: {opacity: 0.6},
+  pressed: {opacity: PRESSED_OPACITY},
   codeScroll: {},
   codeContent: {padding: space.sm},
   // ===========================================================================

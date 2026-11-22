@@ -1,4 +1,4 @@
-import { useId, useState } from "react";
+import { useId, useState, type ReactNode } from "react";
 import { ExternalLink } from "lucide-react";
 import { Link } from "react-router-dom";
 import {
@@ -33,7 +33,14 @@ import { isDesktop, openExternalUrl } from "@/lib/tauri";
 // 상태가 아니라 이름이라 색을 쓰지 않는다: 회색 바탕 + 흐린 글자.
 // =============================================================================
 
-export function TeamAiReplyMeta({ meta }: { meta: Meta }) {
+export function TeamAiReplyMeta({
+  meta,
+  chips,
+}: {
+  meta: Meta;
+  /** 모델 칩 옆에 서는 칩들(Hermes 도움, #5375). 같은 줄·같은 모양이다. */
+  chips?: ReactNode;
+}) {
   const sourcesId = useId();
   const [detailsOpen, setDetailsOpen] = useState(false);
   return (
@@ -69,7 +76,7 @@ export function TeamAiReplyMeta({ meta }: { meta: Meta }) {
           )}
         </div>
       )}
-      {(meta.toolsLine !== null || meta.modelChip !== null) && (
+      {(meta.toolsLine !== null || meta.modelChip !== null || chips !== undefined) && (
         <div className="flex min-w-0 flex-wrap items-center gap-2">
           {meta.toolsLine !== null && (
             <p
@@ -90,6 +97,7 @@ export function TeamAiReplyMeta({ meta }: { meta: Meta }) {
               {meta.modelChip}
             </span>
           )}
+          {chips}
         </div>
       )}
       {meta.citations.length > 0 && (

@@ -74,8 +74,8 @@ const SESSION = {
     id: ME,
     workspaceId: WORKSPACE_ID,
     kind: "human",
-    displayName: "곽성재",
-    handle: "seongjae",
+    displayName: "한지후",
+    handle: "jihu",
   },
   realtimeWebSocketUrl: `ws://127.0.0.1:${PORT + 1}/connection/websocket`,
 };
@@ -107,7 +107,7 @@ function member(overrides) {
 }
 
 const ROSTER = [
-  member({ id: ME, displayName: "곽성재", handle: "seongjae", role: "owner" }),
+  member({ id: ME, displayName: "한지후", handle: "jihu", role: "owner" }),
   member({ id: TEAMMATE, displayName: "김도현", handle: "dohyun" }),
 ];
 
@@ -377,7 +377,7 @@ const PAGE_HELPERS = () => {
 async function login(page) {
   await page.goto(page.__origin ?? ORIGIN, { waitUntil: "domcontentloaded" });
   await advanceToAccount(page);
-  await page.getByTestId("login-email").fill("seongjae@dawn.example");
+  await page.getByTestId("login-email").fill("jihu@dawn.example");
   await page.getByTestId("login-password").fill("capture-only-not-a-credential");
   await page.getByTestId("login-submit").click();
   await page.getByTestId("timeline-message").first().waitFor({ timeout: 20_000 });

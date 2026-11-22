@@ -1108,9 +1108,13 @@ pub const CHANNEL_CREATE_KINDS: [&str; 2] = ["public", "private"];
 /// What `kind` means when a proposal names none: **private**. An agent that wants
 /// a public channel has to say so, and the card shows it.
 pub const CHANNEL_CREATE_DEFAULT_KIND: &str = "private";
-/// `name` bound in UTF-8 bytes (the domain's 80 is characters, but the accepted
-/// alphabet is ASCII, so the two coincide for every legal name).
-pub const CHANNEL_NAME_MAX_BYTES: u64 = 80;
+/// `name` bound in UTF-8 bytes, measured on the text **as sent** — before the
+/// domain normaliser composes it (ADR-0225 D5): 80 characters at 9 bytes, the
+/// size of one Hangul syllable sent decomposed (three 3-byte jamo, as a Mac may
+/// send it). It only cuts an absurd input early; the exact judgement — at most 80
+/// characters after normalisation, so at most 320 stored bytes — is the
+/// normaliser's.
+pub const CHANNEL_NAME_MAX_BYTES: u64 = 9 * 80;
 /// `topic` bound in UTF-8 bytes: the domain's 280 characters at the 4-byte
 /// worst case. The domain normaliser still enforces the 280 characters.
 pub const CHANNEL_TOPIC_MAX_BYTES: u64 = 1_120;
@@ -1318,7 +1322,7 @@ fn expression_create_args_schema() -> Value {
                 "type": "array",
                 "minItems": 1,
                 "maxItems": EXPRESSION_CANDIDATES_MAX,
-                "description": "1-4 candidates for ONE expression; every candidate names the same subjectMemberId. A person picks one after seeing the stored picture.",
+                "description": "1-4 candidates for ONE expression; every candidate names the same subjectMemberId. A person picks one after seeing the stored picture (a 'url' candidate: its host; the link is fetched only once a person approves it).",
                 "items": {
                     "type": "object",
                     "additionalProperties": false,
@@ -1550,8 +1554,8 @@ fn hosted_channels_grant_args_schema() -> Value {
     })
 }
 
-/// A channel reference: `#` + the 80-character name.
-pub const CHANNEL_REF_MAX_BYTES: u64 = 81;
+/// A channel reference: `#` + the name, as sent (see [`CHANNEL_NAME_MAX_BYTES`]).
+pub const CHANNEL_REF_MAX_BYTES: u64 = CHANNEL_NAME_MAX_BYTES + 1;
 
 /// `team_ai.roles.set` arguments (ADR-0201 증보 v3 B3-T, #4964): one bundle and the switch.
 /// The enum is the six **switchable** bundles — `chat_read` is not on it, and the
@@ -2584,9 +2588,9 @@ pub fn channel_member_add_result_body(
     already_in: usize,
 ) -> String {
     if already_in > 0 {
-        format!("#{channel_name}에 멤버 {added}명을 넣었어요(이미 있던 {already_in}명)")
+        format!("#{channel_name} 채널에 멤버 {added}명을 넣었어요(이미 있던 {already_in}명)")
     } else {
-        format!("#{channel_name}에 멤버 {added}명을 넣었어요")
+        format!("#{channel_name} 채널에 멤버 {added}명을 넣었어요")
     }
 }
 
@@ -3286,6 +3290,41 @@ pub fn last_attempt_patch(last_attempt: &str) -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// ADR-0225 D5: the bytes bounds are measured on the text as sent, so an
+    /// 80-syllable Hangul name fits under both whether it is sent composed
+    /// (240 bytes) or decomposed (720 bytes), with `#` for the reference. The MCP
+    /// tool's copy of the numbers is measured against these by the catalog drift
+    /// test in `momo-server`.
+    #[test]
+    fn the_channel_name_bounds_fit_eighty_hangul_characters() {
+        assert_eq!(CHANNEL_REF_MAX_BYTES, CHANNEL_NAME_MAX_BYTES + 1);
+        // "한" decomposed: three conjoining jamo of three bytes each.
+        let decomposed = "\u{1112}\u{1161}\u{11AB}";
+        for name in ["가".repeat(80), "한".repeat(80), decomposed.repeat(80)] {
+            assert!(
+                name.len() as u64 <= CHANNEL_NAME_MAX_BYTES,
+                "{}",
+                name.len()
+            );
+            assert!(format!("#{name}").len() as u64 <= CHANNEL_REF_MAX_BYTES);
+        }
+        assert!(decomposed.repeat(81).len() as u64 > CHANNEL_NAME_MAX_BYTES);
+    }
+
+    /// ADR-0225 D8-4: the member-add outcome puts the word `채널` between the name
+    /// and the particle, so an agent re-reading it cannot take `이름에` for a name.
+    #[test]
+    fn the_member_add_outcome_does_not_glue_a_particle_to_the_name() {
+        assert_eq!(
+            channel_member_add_result_body("디자인-리뷰", 2, 0),
+            "#디자인-리뷰 채널에 멤버 2명을 넣었어요"
+        );
+        assert_eq!(
+            channel_member_add_result_body("디자인-리뷰", 1, 3),
+            "#디자인-리뷰 채널에 멤버 1명을 넣었어요(이미 있던 3명)"
+        );
+    }
 
     #[test]
     fn the_executable_and_declared_lists_are_what_the_batch_opened() {

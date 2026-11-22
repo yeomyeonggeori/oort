@@ -1309,8 +1309,9 @@ fn summary_dto(row: &AgentRunSummaryRow) -> AgentRunSummaryDto {
 const CANCEL_SYSTEM_LINE: &str = "사람이 실행을 중단했어요.";
 
 /// `message.props.kind` (Swift :532) — what a client switches on to render the
-/// line as a stop rather than as generic system chatter.
-const CANCEL_PROPS_KIND: &str = "agent_run_cancelled";
+/// line as a stop rather than as generic system chatter. On the server-only list
+/// (`messages::SERVER_ONLY_PROPS_KINDS`, #5566), so a member's own send cannot carry it.
+pub(crate) const CANCEL_PROPS_KIND: &str = "agent_run_cancelled";
 
 const CANCEL_AUDIT_ACTION: &str = "agent.run.cancelled";
 const CANCEL_AUDIT_SCHEMA: &str = "momo.agent_run.cancelled.v1";

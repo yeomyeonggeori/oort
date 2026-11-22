@@ -40,8 +40,8 @@ const SELF: Member = {
   id: SELF_ID,
   workspaceId: WS,
   kind: 'human',
-  displayName: '곽성재',
-  handle: 'seongjae',
+  displayName: '한지후',
+  handle: 'jihu',
 };
 
 function rosterMember(fields: Record<string, unknown>) {
@@ -78,7 +78,7 @@ function personal(id: string, handle: string, ownerId: string) {
 }
 
 const ROSTER = [
-  rosterMember({id: SELF_ID, displayName: '곽성재', handle: 'seongjae'}),
+  rosterMember({id: SELF_ID, displayName: '한지후', handle: 'jihu'}),
   rosterMember({id: MATE, displayName: '동료', handle: 'mate'}),
   personal(MY_AGENT, 'my-claude', SELF_ID),
   personal(THEIR_AGENT, 'mate-claude', MATE),

@@ -11,14 +11,13 @@
 // `connection.card.realtimeDownTitle`로 폈다. 문장의 뜻은 그대로다.
 // =============================================================================
 
-import type { MessageArgs, MessageKey } from "../../i18n/generated/messages";
+import type { MessageKey } from "../../i18n/generated/messages";
+import type { PlainMessageKey } from "../../i18n/keys";
 
 export type ConnectionKey = Extract<MessageKey, `connection.${string}`>;
 
 /** 값을 받지 않는 문구의 키만. 모델이 내놓는 키는 모두 이 타입이라 `formatMessage(key)`가 인자 없이 불린다. */
-export type ConnectionPlainKey = {
-  [K in ConnectionKey]: MessageArgs[K] extends Record<string, never> ? K : never;
-}[ConnectionKey];
+export type ConnectionPlainKey = Extract<PlainMessageKey, ConnectionKey>;
 
 export const CONNECTION_KEYS = {
   // 지속 표시(웹 연결 카드·폰 띠)
@@ -129,4 +128,6 @@ export const CONNECTION_KEYS = {
   /** 환영 화면에서 오프라인일 때 QR을 찍을 수 없는 까닭 한 줄(#5262). */
   bootOfflineQrDetail: "connection.boot.offlineQrDetail",
   bootUnreachable: "connection.boot.unreachable",
+  /** 저장된 로그인이 있는 채 다른 서버로 바꿔 앞 서버의 로그인을 끝냈다(#5816). `{host}` = 앞 서버. */
+  bootServerSwitchedSignedOut: "connection.boot.serverSwitchedSignedOut",
 } as const satisfies Record<string, ConnectionKey>;

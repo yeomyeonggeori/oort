@@ -45,7 +45,7 @@ const WS = '22222222-2222-4222-8222-222222222222';
 const SELF_ID = '11111111-1111-4111-8111-111111111111';
 const AGENT_ID = 'cccccccc-1111-4111-8111-cccccccccccc';
 const BASE = 'https://api.example.com';
-const SELF: Member = {id: SELF_ID, workspaceId: WS, kind: 'human', displayName: '곽성재', handle: 'seongjae'};
+const SELF: Member = {id: SELF_ID, workspaceId: WS, kind: 'human', displayName: '한지후', handle: 'jihu'};
 const LOGIN_BODY = {
   accessToken: 'access-token-1',
   refreshToken: 'refresh-token-1',
@@ -73,7 +73,7 @@ function rosterMember(over: Record<string, unknown>) {
 }
 
 const ROSTER = [
-  rosterMember({id: SELF_ID, displayName: '곽성재', handle: 'seongjae'}),
+  rosterMember({id: SELF_ID, displayName: '한지후', handle: 'jihu'}),
   rosterMember({id: AGENT_ID, kind: 'agent', displayName: '김인턴', handle: 'kim-intern', callableBy: 'everyone'}),
 ];
 const CHANNELS = [

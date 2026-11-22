@@ -281,8 +281,8 @@ function sessionValue(): SessionContextValue {
         id: ME,
         workspaceId: WS,
         kind: "human",
-        displayName: "곽성재",
-        handle: "seongjae",
+        displayName: "한지후",
+        handle: "jihu",
       },
       realtimeWebSocketUrl: "wss://example.test/connection/websocket",
     },
@@ -834,7 +834,7 @@ describe("welcome kickoff product path", () => {
     vi.useFakeTimers();
     const mine: RosterMember = {
       ...agentMember(),
-      displayName: "곽성재의 Claude",
+      displayName: "한지후의 Claude",
       paused: true,
       ownerHumanId: ME,
     };
@@ -856,7 +856,7 @@ describe("welcome kickoff product path", () => {
     expect(root.querySelector("[data-testid='welcome-kickoff-backstop']")).toBeNull();
     expect(root.querySelector(BAND)?.getAttribute("data-state")).toBe("sleepy");
     await act(async () => {
-      rail.handlers?.onMessage(frame(OPENER_ID, AGENT, 1, "안녕하세요 @곽성재님"));
+      rail.handlers?.onMessage(frame(OPENER_ID, AGENT, 1, "안녕하세요 @한지후님"));
     });
     await settle();
     await finishBandExit(root);

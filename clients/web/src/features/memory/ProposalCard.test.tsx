@@ -128,7 +128,7 @@ describe("제안 카드: 대기", () => {
     expect(rows).toHaveLength(2);
     expect(rows[0]?.textContent).toContain("박지훈");
     expect(rows[0]?.textContent).toContain(TEXT_A);
-    expect(rows[1]?.textContent).toContain("곽성재");
+    expect(rows[1]?.textContent).toContain("한지후");
     expect(rows[1]?.textContent).toContain(TEXT_B);
     // 근거 본문은 API가 아니라 일반 메시지 읽기 경로에서 온다(seq 구간 한 번).
     expect(fetchMessages).toHaveBeenCalledTimes(1);

@@ -55,7 +55,8 @@ cleanup() {
   local rc=$?
   trap - EXIT INT TERM
   stop_server
-  docker rm -f "$POSTGRES_CONTAINER" >/dev/null 2>&1 || true
+  # #5606: `--rm` does not cover a forced removal; `-v` takes the PG VOLUME along.
+  docker rm -f -v "$POSTGRES_CONTAINER" >/dev/null 2>&1 || true
   case "$TMP_DIR" in
     "${TMPDIR:-/tmp}"/momo-t3-migration-repair.*) rm -r -- "$TMP_DIR" ;;
     *) log "refusing unexpected cleanup path: $TMP_DIR" ;;

@@ -11,11 +11,16 @@ OORT="$REPO_ROOT/scripts/oort"
 TEMPLATE="$SCRIPT_DIR/fixtures/oort-doctor/valid.env.template"
 SANDBOX="$(mktemp -d "${TMPDIR:-/tmp}/oort-day2-test.XXXXXX")"
 PG_CID=""
+# #5606: removed by name, so a `docker run` that created the container and then
+# failed to start it (no id printed) cannot leave a Created container behind.
+PG_NAME="oort-day2-pg-$$"
 HTTP_PID=""
 cleanup() {
   [ -n "$HTTP_PID" ] && kill "$HTTP_PID" >/dev/null 2>&1 || true
-  [ -n "$PG_CID" ] && docker rm -f "$PG_CID" >/dev/null 2>&1 || true
-  rm -rf "$SANDBOX"
+  # #5606: `--rm` does not help a forced removal — without `-v` the postgres
+  # image's VOLUME outlives the container.
+  docker rm -f -v "$PG_NAME" >/dev/null 2>&1 || true
+  case "$SANDBOX" in "${TMPDIR:-/tmp}"/oort-day2-test.*) rm -rf -- "$SANDBOX" ;; esac
 }
 trap cleanup EXIT INT TERM
 cd "$REPO_ROOT"
@@ -57,6 +62,10 @@ port_busy() {
   return 1
 }
 
+# Only for ports this test never binds (the fixture env's web/api/centrifugo
+# ports, which the doctor merely needs to find free). The postgres host port is
+# assigned by Docker at `docker run`, never picked ahead: a docs gate running
+# beside this one could pick the same free port and bind it first (#5623).
 pick_port() {
   local port="$1" limit=$(($1 + 40))
   [ "$limit" -le 65536 ] || limit=65536
@@ -65,6 +74,21 @@ pick_port() {
     port=$((port + 1))
   done
   fail "no free port near $1"
+}
+
+# #5623: after teardown nothing may still listen on a port this run bound.
+assert_ports_released() {
+  local left="$*" still p i=0
+  while [ -n "$left" ] && [ "$i" -lt 20 ]; do
+    [ "$i" -eq 0 ] || sleep 0.1
+    still=""
+    for p in $left; do
+      if port_busy "$p"; then still="$still $p"; fi
+    done
+    left="${still# }"
+    i=$((i + 1))
+  done
+  [ -z "$left" ] || fail "a listener is still on port(s) ${left} after teardown"
 }
 
 TOKEN_PG="$(openssl rand -hex 12)"
@@ -449,13 +473,20 @@ docker info >/dev/null 2>&1 || fail "docker daemon is required for T2 URL proofs
 PG_RESTORE_BIN="$(momo_pg_client_bin pg_restore)" || fail "pg_restore 없음 (postgresql-client 필요)"
 PSQL_BIN="$(momo_pg_client_bin psql)" || fail "psql 없음 (postgresql-client 필요)"
 
-PG_PORT="$(pick_port 25432)"
-PG_CID="$(docker run -d --rm \
+# #5623: Docker assigns the host port at `docker run`. It used to be picked
+# here by probing first, so a docs gate running beside this one could pick the
+# same free 25432 and bind it first.
+PG_CID="$(docker run -d --rm --name "$PG_NAME" \
+  --label "com.momo.gate-run=${LOCAL_GATE_RUN_ID:-manual-$$}" \
   -e POSTGRES_USER=momo \
   -e POSTGRES_PASSWORD="$TOKEN_PG" \
   -e POSTGRES_DB=momo \
-  -p "127.0.0.1:${PG_PORT}:5432" \
+  -p "127.0.0.1::5432" \
   postgres:18)"
+PG_PORT="$(docker port "$PG_CID" 5432/tcp)"
+PG_PORT="${PG_PORT%%$'\n'*}"
+PG_PORT="${PG_PORT##*:}"
+[[ "$PG_PORT" =~ ^[0-9]+$ ]] || fail "throwaway postgres:18 host port unreadable: ${PG_PORT}"
 i=0
 while [ "$i" -lt 40 ]; do
   if docker exec "$PG_CID" pg_isready -U momo >/dev/null 2>&1; then
@@ -676,5 +707,12 @@ grep -Fq 'momo_t2_done_condition_line' "$REPO_ROOT/scripts/lib/oort_day2.sh" || 
 grep -Fq 'momo_t2_done_condition_line' "$REPO_ROOT/scripts/self_host_pg_restore.sh" || \
   fail "self_host_pg_restore.sh does not call momo_t2_done_condition_line"
 pass "T2 restore and upgrade share the same done-condition line"
+
+# #5623: remove the postgres now (the EXIT trap then has nothing left) and prove
+# no process still listens on its host port.
+docker rm -f -v "$PG_CID" >/dev/null
+PG_CID=""
+assert_ports_released "$PG_PORT"
+pass "teardown: no listener left on postgres port ${PG_PORT}"
 
 echo "[oort-day2-test] PASS: $CASES case(s)"

@@ -7,11 +7,13 @@ import {
   type PinListStatus,
   type PinMap,
 } from '@momo/core/features/timeline/pins';
-import {cleanup, fireEvent, render, screen} from '@testing-library/react-native';
+import {cleanup, fireEvent, render, screen, within} from '@testing-library/react-native';
 import React from 'react';
+import {Image, StyleSheet} from 'react-native';
 
 import {PinListPanel} from '../src/features/conversation/PinListPanel';
 import {APP_NOTE_MARK} from '../src/features/conversation/appVoice';
+import {CONV_ICONS} from '../src/design/icons';
 import {TOUCH_TARGET} from '../src/design/tokens';
 
 // =============================================================================
@@ -46,7 +48,7 @@ function member(over: Partial<RosterMember> & {id: string}): RosterMember {
 }
 
 const DIRECTORY = makeDirectory([
-  member({id: SELF, displayName: '곽성재', handle: 'seongjae'}),
+  member({id: SELF, displayName: '한지후', handle: 'jihu'}),
   member({id: OTHER, displayName: '김인턴', handle: 'intern-kim'}),
 ]);
 
@@ -164,13 +166,13 @@ describe('고정 목록은 가는 곳이다', () => {
 
   /**
    * 화면에는 두 줄이지만 VoiceOver 에게는 한 문장이어야 한다 — 그리고 그 문장은
-   * **무엇이 열리는지**로 끝나야 한다. 「곽성재」만 읽어 주면 누를 이유를 모른다.
+   * **무엇이 열리는지**로 끝나야 한다. 「한지후」만 읽어 주면 누를 이유를 모른다.
    */
   it('항목 하나가 한 문장으로 읽히고, 무엇이 열리는지로 끝난다', () => {
     renderPanel(pinsOf(wire()));
     const label = screen.getByTestId('pin-list-item').props
       .accessibilityLabel as string;
-    expect(label).toContain('곽성재');
+    expect(label).toContain('한지후');
     expect(label).toContain('배포 순서는');
     expect(label.endsWith('원본으로 이동')).toBe(true);
   });
@@ -252,11 +254,22 @@ describe('빈 목록도 말을 한다', () => {
     );
   });
 
-  /** 덮는 표면은 자기가 무엇을 닫는지 말한다 (`ScreenHeader.backLabel`). */
+  /** 머리는 「대화 정보」와 같은 부품이다 — 둥근 뒤로 단추와 가운데 제목 (#5776). 옛 머리의 글자 ‹ 는 없다. */
+  it('머리가 새 부품이다 — 둥근 뒤로 단추 + 가운데 제목, 글자 ‹ 는 없다', () => {
+    renderPanel(emptyPins());
+    const title = screen.getByTestId('pin-list-title');
+    expect(title.props.accessibilityRole).toBe('header');
+    expect(StyleSheet.flatten(title.props.style).textAlign).toBe('center');
+    const glyphs = within(screen.getByTestId('header-back')).UNSAFE_queryAllByType(Image);
+    expect(glyphs.map(g => g.props.source)).toEqual([CONV_ICONS.left]);
+    expect(screen.queryByText('‹')).toBeNull();
+  });
+
+  /** 덮는 표면은 자기가 무엇을 닫는지 말한다 (`PageHeader` 의 `back.label`). */
   it('뒤로가기가 「뒤로」가 아니라 무엇을 닫는지 말한다', () => {
     const {onClose} = renderPanel(emptyPins());
     const back = screen.getByTestId('header-back');
-    expect(back.props.accessibilityLabel).toBe('고정 목록 닫기');
+    expect(back.props.accessibilityLabel).toBe('대화로 돌아가기');
     fireEvent.press(back);
     expect(onClose).toHaveBeenCalledTimes(1);
   });

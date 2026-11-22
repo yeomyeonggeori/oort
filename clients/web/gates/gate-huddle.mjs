@@ -54,8 +54,8 @@ const session = {
     id: memberId,
     workspaceId,
     kind: "human",
-    displayName: "곽성재",
-    handle: "seongjae",
+    displayName: "한지후",
+    handle: "jihu",
   },
   realtimeWebSocketUrl: "ws://huddle-gate.invalid/connection/websocket",
 };
@@ -73,8 +73,8 @@ const roster = [
     kind: "human",
     status: "active",
     role: "member",
-    displayName: "곽성재",
-    handle: "seongjae",
+    displayName: "한지후",
+    handle: "jihu",
     channelCount: 1,
     channelIds: [channelId],
     capabilities: [],
@@ -111,7 +111,7 @@ const activeHuddle = {
     },
     {
       memberId,
-      displayName: "곽성재 — 웹 클라이언트",
+      displayName: "한지후 — 웹 클라이언트",
       joinedAtMs: 1_722_000_002_000,
     },
   ],
@@ -520,7 +520,7 @@ async function main() {
       const page = await openSignedIn(context);
       await page.getByTestId("huddle-live").waitFor();
       const names = await page.getByTestId("huddle-participants").textContent();
-      if (!names?.includes("Nadia Rahman") || !names.includes("곽성재")) {
+      if (!names?.includes("Nadia Rahman") || !names.includes("한지후")) {
         throw new Error(`active participants missing: ${JSON.stringify(names)}`);
       }
       await page.screenshot({

@@ -1,5 +1,6 @@
 //! The single outbox-insert chokepoint. No other file in the workspace may
 //! contain an outbox `INSERT` — enforced by review + the grep in the B0 PR body.
+//! It holds two: [`emit_outbox`] (one row) and its batch form [`emit_outbox_batch`].
 
 use serde_json::Value;
 use sqlx::PgExecutor;
@@ -98,7 +99,8 @@ pub async fn emit_outbox<'e, E>(
 where
     E: PgExecutor<'e>,
 {
-    // The one and only outbox insert in the codebase.
+    // One of the two outbox inserts in the codebase — both in this file (the other is the batch form,
+    // [`emit_outbox_batch`]).
     let id: i64 = sqlx::query_scalar(
         "INSERT INTO outbox \
            (workspace_id, kind, status, method, payload, partition_key) \
@@ -113,6 +115,47 @@ where
     .fetch_one(executor)
     .await?;
     Ok(id)
+}
+
+/// The batch form of [`emit_outbox`]: several pending rows of one `kind` and `method` that differ only
+/// in `payload` and `partition_key`, in **one statement** — one round trip however many rows. Same
+/// columns, same fixed `'pending'` status, same rule (call it inside the transaction of the domain
+/// write). Rows are inserted in slice order. An empty slice writes nothing and sends no statement.
+/// Returns the number of rows written.
+///
+/// For a fan-out whose size the caller does not choose: #5667 sends one `followed_unread.updated`
+/// frame per follower of a thread inside the reply's send transaction, which per-row
+/// [`emit_outbox`] calls would lengthen by one round trip per follower.
+pub async fn emit_outbox_batch<'e, E>(
+    executor: E,
+    workspace_id: Uuid,
+    kind: OutboxKind,
+    method: &str,
+    rows: &[(Value, Option<Uuid>)],
+) -> Result<u64, sqlx::Error>
+where
+    E: PgExecutor<'e>,
+{
+    if rows.is_empty() {
+        return Ok(0);
+    }
+    let (payloads, partition_keys): (Vec<Value>, Vec<Option<Uuid>>) = rows.iter().cloned().unzip();
+    let written = sqlx::query(
+        "INSERT INTO outbox \
+           (workspace_id, kind, status, method, payload, partition_key) \
+         SELECT $1, $2::outbox_kind, 'pending', $3, r.payload, r.partition_key \
+           FROM unnest($4::jsonb[], $5::uuid[]) WITH ORDINALITY AS r (payload, partition_key, ord) \
+          ORDER BY r.ord",
+    )
+    .bind(workspace_id)
+    .bind(kind.as_db_label())
+    .bind(method)
+    .bind(payloads)
+    .bind(partition_keys)
+    .execute(executor)
+    .await?
+    .rows_affected();
+    Ok(written)
 }
 
 #[cfg(test)]

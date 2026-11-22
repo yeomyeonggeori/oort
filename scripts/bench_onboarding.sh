@@ -441,7 +441,7 @@ teardown() {
   if [ -n "$CURRENT_PROJECT" ]; then
     # compose가 남긴 것이 없어야 정상이다. 남았다면 프로젝트 라벨로 회수한다.
     docker ps -aq --filter "label=com.docker.compose.project=$CURRENT_PROJECT" 2>/dev/null \
-      | while IFS= read -r cid; do [ -n "$cid" ] && docker rm -f "$cid" >/dev/null 2>&1 || true; done
+      | while IFS= read -r cid; do [ -n "$cid" ] && docker rm -f -v "$cid" >/dev/null 2>&1 || true; done  # #5606: -v
     docker volume ls -q --filter "label=com.docker.compose.project=$CURRENT_PROJECT" 2>/dev/null \
       | while IFS= read -r vol; do [ -n "$vol" ] && docker volume rm -f "$vol" >/dev/null 2>&1 || true; done
     docker network ls -q --filter "label=com.docker.compose.project=$CURRENT_PROJECT" 2>/dev/null \

@@ -31,6 +31,7 @@ import {
 import { EMOJI_CATALOG_COPY } from "./copy";
 import { filterEmojis, isEmojiSearchQuery } from "./search";
 import { useEmojiSkinTone } from "./skinToneStore";
+import { Tooltip } from "@/design/ui/tooltip";
 
 
 
@@ -367,31 +368,31 @@ export function EmojiPickerPanel({
           {EMOJI_CATEGORY_TABS.map((tab, index) => {
             const selected = category === tab.id;
             return (
-              <button
-                key={tab.id}
-                type="button"
-                role="tab"
-                id={`${tablistId}-${tab.id}`}
-                aria-selected={selected}
-                aria-controls={`${id}-panel`}
-                tabIndex={tabFocus === index ? 0 : -1}
-                title={tab.label}
-                aria-label={tab.label}
-                data-testid={`emoji-cat-${tab.id}`}
-                onClick={() => {
-                  onSkinOpenChange(false);
-                  setCategory(tab.id);
-                  setTabFocus(index);
-                }}
-                className={cn(
-                  "tap-target flex size-control shrink-0 items-center justify-center rounded-sm press focus-visible:focus-ring",
-                  selected
-                    ? "bg-accent-soft text-ink active:bg-surface-pressed"
-                    : "text-ink-muted hover:bg-surface-hover hover:text-ink"
-                )}
-              >
-                <tab.Icon className="size-4" aria-hidden="true" />
-              </button>
+              <Tooltip key={tab.id} label={tab.label} side="bottom">
+                <button
+                  type="button"
+                  role="tab"
+                  id={`${tablistId}-${tab.id}`}
+                  aria-selected={selected}
+                  aria-controls={`${id}-panel`}
+                  tabIndex={tabFocus === index ? 0 : -1}
+                  aria-label={tab.label}
+                  data-testid={`emoji-cat-${tab.id}`}
+                  onClick={() => {
+                    onSkinOpenChange(false);
+                    setCategory(tab.id);
+                    setTabFocus(index);
+                  }}
+                  className={cn(
+                    "tap-target flex size-control shrink-0 items-center justify-center rounded-sm press focus-visible:focus-ring",
+                    selected
+                      ? "bg-accent-soft text-ink active:bg-surface-pressed"
+                      : "text-ink-muted hover:bg-surface-hover hover:text-ink"
+                  )}
+                >
+                  <tab.Icon className="size-4" aria-hidden="true" />
+                </button>
+              </Tooltip>
             );
           })}
         </div>

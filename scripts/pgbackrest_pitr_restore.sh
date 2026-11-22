@@ -262,7 +262,9 @@ cleanup() {
   while IFS= read -r owned_id; do
     [ -z "$owned_id" ] && continue
     [[ "$owned_id" =~ ^[0-9a-f]{12,64}$ ]] || continue
-    docker rm -f "$owned_id" >/dev/null 2>&1 || true
+    # #5606: `-v` drops only anonymous volumes (the preflight's image VOLUME);
+    # the named restore/repo volumes are never removed by it.
+    docker rm -f -v "$owned_id" >/dev/null 2>&1 || true
   done < <(docker ps -aq \
     --filter "label=com.momo.pitr.invocation-id=$invocation_id" 2>/dev/null || true)
 }

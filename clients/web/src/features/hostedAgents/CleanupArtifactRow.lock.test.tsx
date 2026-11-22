@@ -36,7 +36,7 @@ function mount(): HTMLElement {
           artifact,
           open: true,
           onOpenChange: () => undefined,
-          actorName: "곽성재",
+          actorName: "한지후",
           failure: null,
           onDismissFailure: () => undefined,
           disabled: true,

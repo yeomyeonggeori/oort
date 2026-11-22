@@ -9,6 +9,9 @@ rust-version.workspace = true
 # shared infrastructure — consumed through its public API, never re-implemented.
 momo-db = { path = "../momo-db" }             # the sole RLS GUC seam
 momo-provider = { path = "../momo-provider" } # the sole provider-specific seam
+# #5594: the stop notices (`work_notice`) are written through the one send
+# spine (`channel_seq` + message + outbox), in the transaction of the fact.
+momo-messaging = { path = "../momo-messaging" }
 momo-wire = { path = "../momo-wire" }         # B2.2: the bootstrap-token digest
                                               # format is a server<->workd
                                               # contract, so it is minted with

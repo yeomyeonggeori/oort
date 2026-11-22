@@ -118,8 +118,8 @@ const session = {
     id: memberId,
     workspaceId,
     kind: "human",
-    displayName: "곽성재",
-    handle: "seongjae",
+    displayName: "한지후",
+    handle: "jihu",
   },
   realtimeWebSocketUrl: "ws://quote-gate.invalid/connection/websocket",
 };
@@ -143,8 +143,8 @@ const roster = [
     id: memberId,
     kind: "human",
     role: "owner",
-    displayName: "곽성재",
-    handle: "seongjae",
+    displayName: "한지후",
+    handle: "jihu",
   }),
   member({
     id: peerId,
@@ -527,7 +527,7 @@ async function exercise(browser) {
       `the quote block did not carry the original's text, read "${blockText}"`
     );
   }
-  if (!blockText.includes("곽성재")) {
+  if (!blockText.includes("한지후")) {
     throw new Error(
       `the quote block did not name the quoted author, read "${blockText}"`
     );
@@ -1157,7 +1157,8 @@ async function exercise(browser) {
   const profile = page.getByTestId("member-profile-dialog");
   await profile.waitFor();
   const profileText = (await profile.textContent()) ?? "";
-  for (const expected of ["이도현", "@dohyun", "사람", "활성", "멤버"]) {
+  // #5780: 「종류」·「상태」 줄은 없다 — 이름과 「@핸들 · 역할」이 그 사람을 말한다.
+  for (const expected of ["이도현", "@dohyun · 멤버"]) {
     if (!profileText.includes(expected)) {
       throw new Error(`the shared profile omitted ${expected}: ${profileText}`);
     }

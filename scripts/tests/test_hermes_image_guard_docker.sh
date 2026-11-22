@@ -6,7 +6,8 @@
 #
 # Needs Docker and the pinned image (compose `hermes`; a pull happens only if it is not local). Nothing is published and
 # nothing is mounted writable: infra/hermes is bind-mounted read-only at /oort, /opt/data is the container's own volume
-# (removed with `--rm`). What it proves, scenario by scenario (python helper: fixtures/hermes_image_guard_inimage.py):
+# (removed with `--rm`, and the detached gateway-boot container with `rm -f -v`, #5606). Without [output-dir] the evidence
+# goes to a temp dir that is removed on exit, pass or fail; pass a directory to keep it. What it proves, scenario by scenario (python helper: fixtures/hermes_image_guard_inimage.py):
 #   healthy ................ the shipped files pass: files verified, the plugin is loaded and enabled by Hermes itself,
 #                            every refused canary example is blocked before the tool runs, every accepted one reaches it
 #   no-plugin / edited ..... a missing or edited guard is refused before Hermes listens
@@ -80,7 +81,25 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 COMPOSE="$ROOT/infra/rust/docker-compose.rust.yml"
 IMG="$(grep -o 'nousresearch/hermes-agent@sha256:[0-9a-f]*' "$COMPOSE" | head -1)"
-OUT="${1:-$(mktemp -d "${TMPDIR:-/tmp}/hermes-image-guard.XXXXXX")}"
+OUT_OWNED=0
+if [ -n "${1:-}" ]; then
+  OUT="$1"
+else
+  OUT="$(mktemp -d "${TMPDIR:-/tmp}/hermes-image-guard.XXXXXX")"
+  OUT_OWNED=1
+fi
+NAME=""
+# #5606: the detached gateway-boot container goes with its /opt/data volume (`-v`; a bare `rm -f` left SOUL.md/auth.lock
+# volumes behind), and a temp evidence dir this run made is removed even when a scenario fails. A caller's dir is kept.
+cleanup() {
+  [ -n "$NAME" ] && docker rm -f -v "$NAME" >/dev/null 2>&1 || true
+  if [ "$OUT_OWNED" = 1 ]; then
+    case "$OUT" in "${TMPDIR:-/tmp}"/hermes-image-guard.*) rm -rf -- "$OUT" ;; esac
+  fi
+}
+trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 KEY="$(python3 -c 'print("fixture-api-key-" * 3)')"
 # python-dotenv in the pinned Hermes image: the uv.lock of Hermes v0.22.2 (the image's source) pins 1.2.2, and the input table of
 # infra/hermes/test_lockgate_env.py was measured on it. Moving the image to another version means measuring that table again.
@@ -245,7 +264,6 @@ default_model_start railway-start-previous-team-default "$PREVIOUS_MODEL_B64"
 # --- the real gateway: compose command in full (gate, report, s6 init, gateway) with no network ---------------------------
 say "scenario gateway-boot (real gateway + real lockgate report, no network)"
 NAME="oort-guardproof-$$"
-trap 'docker rm -f "$NAME" >/dev/null 2>&1 || true' EXIT
 docker run -d --name "$NAME" --network none --memory 2g -e "API_SERVER_KEY=$KEY" -e API_SERVER_ENABLED=true \
   -e OORT_SELF_MEDIA_ORIGIN=https://oort.example.com -e "HERMES_MEDIA_DELIVERY_STRICT=$STRICT_COMPOSE" \
   -e API_SERVER_HOST=0.0.0.0 -e API_SERVER_PORT=8642 -v "$ROOT/infra/hermes:/oort:ro" -v "$ROOT/scripts/tests/fixtures:/fx:ro" \
@@ -268,7 +286,7 @@ docker exec "$NAME" ls -ln /opt/data/plugins/oort-image-guard >"$OUT/gateway-boo
 docker exec "$NAME" /bin/sh -c 'if [ -f /opt/data/.env ]; then echo ENV_PRESENT; sed -n "s/^[[:space:]]*\(export[[:space:]][[:space:]]*\)\{0,1\}\([A-Za-z_][A-Za-z0-9_]*\)[[:space:]]*=.*/\2/p" /opt/data/.env | sort -u; else echo ENV_ABSENT; fi; if [ -e /opt/data/.op.env ]; then echo OP_ENV_PRESENT; fi; if [ -d /opt/data/profiles ]; then if [ -z "$(ls -A /opt/data/profiles)" ]; then echo PROFILES_EMPTY; else echo PROFILES_NOT_EMPTY; fi; else echo PROFILES_ABSENT; fi' >"$OUT/gateway-boot.envnames" 2>&1 || true
 docker exec -u hermes "$NAME" /opt/hermes/.venv/bin/python /fx/hermes_image_guard_live_probe.py >"$OUT/gateway-boot.probe" 2>"$OUT/gateway-boot.probe.err" || true
 docker inspect -f '{{.State.Running}}' "$NAME" >"$OUT/gateway-boot.running" 2>&1 || true
-docker rm -f "$NAME" >/dev/null 2>&1 || true
+docker rm -f -v "$NAME" >/dev/null 2>&1 || true
 
 # --- judge ---------------------------------------------------------------------------------------------------------------
 python3 - "$OUT" "$EXPECTED_DOTENV" "$ROOT" <<'PY'
@@ -666,4 +684,4 @@ print("OK: %d in-image scenarios (gate) + 15 start-command runs + the live gatew
      "connector-config-nostrict", "connector-config-apps-missing", "hermes-home-other", "cross-run-tools-off", "cross-run-tools-on", "env-parser-parity",
      "env-loader-oracle"]))
 PY
-say "PASS (evidence in $OUT)"
+if [ "$OUT_OWNED" = 1 ]; then say "PASS (temp evidence dir is removed on exit; pass an output dir to keep it)"; else say "PASS (evidence in $OUT)"; fi

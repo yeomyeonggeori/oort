@@ -30,13 +30,13 @@ const channels = [{ id: "00000000-0000-7000-8000-000000000201", workspaceId, kin
 const auth = {
   accessToken: "capture-only-not-a-credential",
   refreshToken: "capture-only-not-a-credential",
-  member: { id: memberId, workspaceId, kind: "human", displayName: "곽성재", handle: "seongjae" },
+  member: { id: memberId, workspaceId, kind: "human", displayName: "한지후", handle: "jihu" },
   realtimeWebSocketUrl: "ws://ai-personal-keys-capture.invalid/connection/websocket",
 };
 const base = { workspaceId, status: "active", channelCount: 1, channelIds: channels.map((c) => c.id), capabilities: [], createdAtMs: 0, updatedAtMs: 0 };
 const human = (id, displayName, handle, role) => ({ ...base, id, kind: "human", displayName, handle, role });
 const roster = () => [
-  human(memberId, "곽성재", "seongjae", scenario.role),
+  human(memberId, "한지후", "jihu", scenario.role),
   human(seoyeon, "서연", "seoyeon", "member"),
   human(mina, "미나", "mina", "member"),
   human(jun, "준호 Lee-Kim-Park", "junho", "member"),
@@ -220,7 +220,7 @@ async function member(browser, origin, scheme, viewport) {
         await page.getByTestId("ai-my-personal-key-create-agent").click();
         await page.getByTestId("ai-my-personal-agent-form").waitFor();
         await shot(page, `create-agent-dialog-${tag}`);
-        check(`${tag} 이름 기본값 곽성재-Anthropic`, (await page.getByTestId("ai-my-personal-agent-name").inputValue()) === "곽성재-Anthropic");
+        check(`${tag} 이름 기본값 한지후-Anthropic`, (await page.getByTestId("ai-my-personal-agent-name").inputValue()) === "한지후-Anthropic");
         check(`${tag} 에이전트 창 가로 넘침 0`, (await overflowX(page)) === 0);
         await page.getByTestId("ai-my-personal-agent-cancel").click();
         await page.getByTestId("ai-my-personal-agent-dialog").waitFor({ state: "detached" });

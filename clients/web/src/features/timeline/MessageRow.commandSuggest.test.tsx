@@ -121,7 +121,7 @@ function person(id: string, kind: "human" | "agent", displayName: string, handle
 }
 
 const directory = makeDirectory([
-  person(REQUESTER, "human", "곽성재", "seongjae"),
+  person(REQUESTER, "human", "한지후", "jihu"),
   { ...person(SKY, "human", "김하늘", "sky"), role: "owner" },
   person(AGENT, "agent", "hermes", "hermes"),
 ]);
@@ -229,7 +229,7 @@ beforeEach(() => {
   });
   vi.mocked(fetchRoster)
     .mockReset()
-    .mockResolvedValue([{ ...person(REQUESTER, "human", "곽성재", "seongjae"), role: "owner" }]);
+    .mockResolvedValue([{ ...person(REQUESTER, "human", "한지후", "jihu"), role: "owner" }]);
   vi.mocked(fetchProviderLink).mockReset().mockResolvedValue(KEY_LINK);
   vi.mocked(fetchProviderChain).mockReset().mockRejectedValue(new ApiError(404, "not found"));
   vi.mocked(detectLocalHarnesses).mockReset().mockResolvedValue(LOGIN);
@@ -351,7 +351,7 @@ describe("대상 본인 — 조작 카드(시안 ③ 요청자)", () => {
     const host = mountRow(suggestion({ ...G3, state: "ready", status: "connected" }), REQUESTER);
     const line = await until(host, "ai-suggest");
     expect(line.dataset.viewer).toBe("other");
-    expect(line.textContent).toContain("곽성재에게 AI 계정 연결을 제안했어요");
+    expect(line.textContent).toContain("한지후에게 AI 계정 연결을 제안했어요");
     expect(controls(line)).toBe(0);
     expect(host.textContent).not.toMatch(/준비됨|connected/);
   });
@@ -365,7 +365,7 @@ describe("대상이 아닌 사람 — 한 줄(시안 ③ 김하늘)", () => {
     await waitFor(() => expect(fetchProviderLink).toHaveBeenCalled());
     await act(async () => undefined);
     expect(line.dataset.viewer).toBe("other");
-    expect(q(line, "ai-suggest-line")?.textContent).toBe("곽성재에게 AI 계정 연결을 제안했어요");
+    expect(q(line, "ai-suggest-line")?.textContent).toBe("한지후에게 AI 계정 연결을 제안했어요");
     expect(controls(line)).toBe(0);
     expect(line.textContent).not.toContain("내 계정");
     expect(host.textContent).toContain(BODY);

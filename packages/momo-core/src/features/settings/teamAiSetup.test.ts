@@ -186,6 +186,18 @@ describe("온보딩 고지 기록: 켜는 요청에 실린다", () => {
     ]);
   });
 
+  // ADR-0201 증보 v4 P10 (#5374): 온보딩은 hermes의 두 줄 고지를 보이지 않는다. 기본(켬)이든 고른 값이든 그 묶음을
+  // 「보였다」고 적으면 거짓 기록이다 — 기록은 보인 줄(파일·기억)만이고, hermes 칸은 PATCH도 하지 않는다.
+  it("hermes는 기본으로 켜져 있어도 온보딩 기록에 들어가지 않고, 바꾸지 않았으면 역할 PATCH도 없다", async () => {
+    const base = defaultTeamAiRoles();
+    expect(base.hermes).toBe(true);
+    const defaults = await run(base);
+    expect(defaults.enable.mock.calls).toEqual([[WS, notice(["files", "memory"])]]);
+    expect(defaults.patchRoles).not.toHaveBeenCalled();
+    const onlyHermes = await run({ ...base, files: false, memory: false });
+    expect(onlyHermes.enable.mock.calls).toEqual([[WS, null]]);
+  });
+
   it("켜기가 실패하면 기록도 남지 않았으니 다시 시도에 다시 싣고, 켜진 뒤에는 다시 보내지 않는다", async () => {
     const { spies } = deps();
     spies.enable.mockRejectedValueOnce(new ApiError(503, "down"));

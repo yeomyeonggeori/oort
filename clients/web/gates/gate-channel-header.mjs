@@ -18,9 +18,9 @@
 //   5. 나가기는 파괴다    「채널 나가기」는 확인 다이얼로그를 거쳐 DELETE를 보내고,
 //                        성공하면 그 채널을 떠난다. 낙관적으로 지운 목록은 실패
 //                        하면 되돌아온다.
-//   6. 권한 없는 문은 안 연다  서버 `remove_member`는 오너/관리자만 멤버십을 지울
-//                        수 있으므로, 일반 멤버의 메뉴에는 「나가기」가 아예 서지
-//                        않는다(확인 뒤 403으로 끝나는 막다른 길을 만들지 않는다).
+//   6. 나가기는 누구의 길  「채널 나가기」는 본인 길(`DELETE …/members/me`)이라 일반
+//                        멤버에게도 선다(#5778). 서는 순간 확정은 누르지 못하고(공용
+//                        확인 창의 `data-armed`), 풀린 뒤 본인 길로 한 번만 나간다.
 //   7. 컨트롤 그룹       우측은 [👥 N] [허들] [⋮] 순(기존 터미널·고정은 같은
 //                        문법으로 앞에 흡수). 각 버튼은 키보드로 닿고 aria-label
 //                        이 있다.
@@ -102,6 +102,19 @@ const AGENT_HEADING_PREFIXES = Object.fromEntries(
   })
 );
 
+/** 허들 시작 단추의 낭독 이름(#6020부터 사전 `huddles.control.start`). 화면 언어의 사전 값과 견준다. */
+const HUDDLE_START_LABELS = Object.fromEntries(
+  ["ko-KR", "en-US"].map((locale) => [
+    locale,
+    JSON.parse(
+      readFileSync(
+        resolve(webRoot, `../../packages/momo-core/src/i18n/catalogs/${locale}/huddles.json`),
+        "utf8"
+      )
+    )["huddles.control.start"],
+  ])
+);
+
 const proveRedCount = process.env.HEADER_GATE_PROVE_RED_COUNT === "1";
 const proveRedRename = process.env.HEADER_GATE_PROVE_RED_RENAME === "1";
 const proveRedMute = process.env.HEADER_GATE_PROVE_RED_MUTE === "1";
@@ -154,8 +167,8 @@ function roster(selfRole) {
       id: ownerId,
       kind: "human",
       role: selfRole,
-      displayName: "곽성재",
-      handle: "seongjae",
+      displayName: "한지후",
+      handle: "jihu",
     }),
     member({ id: peerId, kind: "human", displayName: "이도현", handle: "dohyun" }),
     member({
@@ -286,7 +299,7 @@ async function installRoutes(context, traffic, options = {}) {
     const method = request.method();
 
     if (path === "/v1/auth/login") {
-      return json(route, session(ownerId, "곽성재", "seongjae"));
+      return json(route, session(ownerId, "한지후", "jihu"));
     }
     if (path === "/v1/auth/realtime-token") {
       return json(route, {
@@ -318,23 +331,17 @@ async function installRoutes(context, traffic, options = {}) {
     // 채널 나가기. 자기 자신의 멤버십을 지운다.
     if (path.includes("/members/") && method === "DELETE") {
       traffic.memberDeletes.push(path);
+      // 본인 나가기 길만 있다(관리자 전용 `/members/<id>` 길로 나가면 일반 멤버는 403).
+      if (!path.endsWith("/members/me")) {
+        return json(route, { error: { code: "forbidden", message: "admin only" } }, 403);
+      }
       // red seam: 오너/관리자만 지울 수 있다는 서버를 흉내 내 403을 돌려준다.
       // 그러면 나가기는 발효되지 않고, 성공에 매인 단언들이 깨진다.
       if (proveRedLeave) {
         return json(route, { error: { code: "forbidden", message: "admin only" } }, 403);
       }
       left = true;
-      return json(route, {
-        membership: {
-          id: "00000000-0000-7000-8000-000000000301",
-          workspaceId,
-          channelId,
-          memberId: ownerId,
-          role: selfRole,
-          joinedAtMs: 1,
-          leftAtMs: AT,
-        },
-      });
+      return json(route, { channelId, memberId: ownerId, archived: false });
     }
 
     if (path.endsWith("/roster") || (path.endsWith("/members") && method === "GET")) {
@@ -436,8 +443,10 @@ async function exercise(browser) {
     );
   }
   const huddleStart = page.getByTestId("huddle-start");
-  if ((await huddleStart.getAttribute("aria-label")) !== "허들 시작") {
-    throw new Error("the idle huddle control must keep an aria-label for 허들 시작");
+  const pageLang = await page.evaluate(() => document.documentElement.lang);
+  const startLabel = HUDDLE_START_LABELS[pageLang.startsWith("ko") ? "ko-KR" : "en-US"];
+  if ((await huddleStart.getAttribute("aria-label")) !== startLabel) {
+    throw new Error(`the idle huddle control must keep an aria-label for ${startLabel}`);
   }
 
   await openMenu(page);
@@ -651,7 +660,9 @@ async function exercise(browser) {
   if (traffic.memberDeletes.length !== 0) {
     throw new Error("leaving fired before the confirmation was answered");
   }
-  await page.getByTestId("channel-leave-confirm-action").click();
+  // 확정은 서고 나서 500ms 동안 눌림을 받지 않는다(공용 확인 창): 읽고 누르는 사람처럼 풀린 뒤에 누른다.
+  await page.locator('[data-testid="channel-leave-confirm-confirm"][data-armed="true"]').waitFor();
+  await page.getByTestId("channel-leave-confirm-confirm").click();
   await page.waitForFunction(
     () => document.querySelectorAll('[data-testid="channel-item"]').length === 0,
     undefined,
@@ -666,9 +677,9 @@ async function exercise(browser) {
       `leaving must DELETE the membership exactly once, saw ${traffic.memberDeletes.length}`
     );
   }
-  if (!traffic.memberDeletes[0].endsWith(`/members/${ownerId}`)) {
+  if (!traffic.memberDeletes[0].endsWith("/members/me")) {
     throw new Error(
-      `leaving must remove the caller's own membership, deleted "${traffic.memberDeletes[0]}"`
+      `leaving must use the self-leave path (…/members/me), deleted "${traffic.memberDeletes[0]}"`
     );
   }
   // 방금 나온 채널의 헤더에 머무를 수 없다.
@@ -766,10 +777,10 @@ async function exerciseRosterStates(browser) {
 }
 
 /**
- * 일반 멤버에게는 「나가기」가 서지 않는다. 서버 `remove_member`가 오너/관리자만
- * 허용하므로, 확인 뒤 403으로 끝나는 막다른 길을 애초에 내놓지 않는다.
+ * 일반 멤버에게도 「나가기」가 선다(#5778): 본인 길이라 서버가 역할을 안 본다. 서자마자 눌린 확정(둘째 누름)은 받지
+ * 않고, 풀린 뒤에 본인 길(`/members/me`)로 정확히 한 번 나간다.
  */
-async function exerciseMemberHidesLeave(browser) {
+async function exerciseMemberSeesLeave(browser) {
   const traffic = makeTraffic();
   const context = await browser.newContext({
     viewport: { width: 1280, height: 900 },
@@ -785,11 +796,30 @@ async function exerciseMemberHidesLeave(browser) {
   if ((await page.getByTestId("channel-mute-toggle").count()) !== 1) {
     throw new Error("every member can mute a channel — the item must be present");
   }
-  // 나가기는 서지 않는다.
-  if ((await page.getByTestId("channel-leave").count()) !== 0) {
-    throw new Error(
-      "a plain member was offered 채널 나가기 — the server rejects self-removal for non-admins, so the item must not appear"
-    );
+  // 나가기도 누구에게나 선다.
+  if ((await page.getByTestId("channel-leave").count()) !== 1) {
+    throw new Error("a plain member must be offered 채널 나가기 (self-leave path)");
+  }
+  await page.getByTestId("channel-leave").click();
+  const confirm = page.getByTestId("channel-leave-confirm-confirm");
+  await confirm.waitFor();
+  // 서자마자의 누름은 아무 일도 하지 않는다.
+  await confirm.click({ force: true });
+  await page.waitForTimeout(150);
+  if (traffic.memberDeletes.length !== 0) {
+    throw new Error("a press right after the confirmation stood must not leave (data-armed guard)");
+  }
+  await page.locator('[data-testid="channel-leave-confirm-confirm"][data-armed="true"]').waitFor();
+  await confirm.click();
+  await page.waitForFunction(
+    () => document.querySelectorAll('[data-testid="channel-item"]').length === 0,
+    undefined,
+    { timeout: 6_000 }
+  ).catch(() => {
+    throw new Error("a plain member's leaving did not take effect");
+  });
+  if (traffic.memberDeletes.length !== 1 || !traffic.memberDeletes[0].endsWith("/members/me")) {
+    throw new Error(`a plain member must leave once via /members/me, saw ${JSON.stringify(traffic.memberDeletes)}`);
   }
 
   await context.close();
@@ -809,7 +839,7 @@ async function main() {
     try {
       await exercise(browser);
       await exerciseRosterStates(browser);
-      await exerciseMemberHidesLeave(browser);
+      await exerciseMemberSeesLeave(browser);
     } finally {
       await browser.close();
     }

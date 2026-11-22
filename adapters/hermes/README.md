@@ -10,10 +10,10 @@ oort has two Hermes integration modes:
 
 | Mode | Role | Default? |
 |---|---|---:|
-| **AgentWorker -> OpenAI-compatible SSE** | oort builds the Context Packet projection, reserves budget, calls Hermes/Kim Intern through `/v1/chat/completions` SSE, then records message/run/cost/audit in Postgres. | **Yes** |
+| **agent-worker -> OpenAI-compatible `/v1/chat/completions`** | oort builds the Context Packet projection, reserves budget, calls Hermes/Kim Intern through `/v1/chat/completions` with `"stream": false` (one JSON answer, not SSE), then records message/run/cost/audit in Postgres. | **Yes** |
 | **Hermes platform adapter** | Hermes gateway loads this plugin so a Hermes agent can treat oort as a messaging platform through `connect`, `send`, and `handle_message`. | Optional ingress/interop |
 
-The product default is the AgentWorker SSE path because oort must own Context
+The product default is the agent-worker path because oort must own Context
 Packet, approval pause/resume, cost reserve/reconcile, and audit ledger decisions.
 This platform adapter remains useful for dogfood and gateway interop, but it does
 not replace the oort-owned execution path. The normative decision and fixtures are

@@ -1,6 +1,7 @@
 import { Bold } from "lucide-react";
 import { cn } from "@/design/lib/cn";
 import { Button } from "@/design/ui/button";
+import { Tooltip } from "@/design/ui/tooltip";
 
 // 도구 줄의 「서식」 (#4317). 서식 트레이는 글을 고르면 뜨는 것이 원래 길이고, 이 단추는 같은 트레이를
 // 손으로 여는 두 번째 길이다. 선택이 없으면 캐럿의 낱말을 골라 연다(`useComposerFormat.openForSelection`).
@@ -27,23 +28,24 @@ export function ComposerFormatButton({
 }) {
   if (!available) return null;
   return (
-    <Button
-      type="button"
-      variant="ghost"
-      size="icon"
-      className={cn("tap-target shrink-0 aria-disabled:opacity-50", className)}
-      aria-label={COMPOSER_FORMAT_BUTTON_LABEL}
-      aria-pressed={open}
-      aria-disabled={hasText ? undefined : true}
-      title={TITLE}
-      data-testid={testId}
-      // 누르는 순간 초점이 글 칸을 떠나면 선택이 접힌다. 마우스 누름만 막고, 키보드는 그대로 닿는다.
-      onMouseDown={(event) => event.preventDefault()}
-      onClick={() => {
-        if (hasText) onPress();
-      }}
-    >
-      <Bold aria-hidden="true" />
-    </Button>
+    <Tooltip label={TITLE} side="top">
+      <Button
+        type="button"
+        variant="ghost"
+        size="icon"
+        className={cn("tap-target shrink-0 aria-disabled:opacity-50", className)}
+        aria-label={COMPOSER_FORMAT_BUTTON_LABEL}
+        aria-pressed={open}
+        aria-disabled={hasText ? undefined : true}
+        data-testid={testId}
+        // 누르는 순간 초점이 글 칸을 떠나면 선택이 접힌다. 마우스 누름만 막고, 키보드는 그대로 닿는다.
+        onMouseDown={(event) => event.preventDefault()}
+        onClick={() => {
+          if (hasText) onPress();
+        }}
+      >
+        <Bold aria-hidden="true" />
+      </Button>
+    </Tooltip>
   );
 }

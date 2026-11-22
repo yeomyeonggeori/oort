@@ -415,10 +415,10 @@ services:
       # give both services the same ones.
       TEAM_AI_DAILY_TOKEN_CAP: ${TEAM_AI_DAILY_TOKEN_CAP:-}
       TEAM_AI_DAILY_SEARCH_CAP: ${TEAM_AI_DAILY_SEARCH_CAP:-}
-      # ADR-0201 증보 v4 P7 (#5369): the operator's per-workspace ceiling on the team AI's delegations to Hermes per
-      # UTC day. UNLIKE the two above, EMPTY = CLOSED (a subscription is not the team's own money): the delegation is off
-      # until an operator sets a positive number here. `0` is closed too. The template ships it EMPTY — a value in the
-      # template would make the first release that carries the delegation active by itself. Same value on api and agent-worker.
+      # ADR-0201 증보 v4 P7 (#5369), 증보 2026-11-12 (#5685): the operator's per-workspace ceiling on the team AI's
+      # delegations to Hermes per UTC day. LIKE the two above, EMPTY = NO CEILING: the workspace's own day cap (settings,
+      # default 30) is the cap. A positive number is a ceiling no workspace value gets past; `0` turns the delegation off.
+      # The template ships it EMPTY. Same value on api and agent-worker.
       TEAM_AI_HERMES_DAILY_CAP: ${TEAM_AI_HERMES_DAILY_CAP:-}
       HERMES_APP_LOGIN_GOOGLE_PUBLISHING: ${HERMES_APP_LOGIN_GOOGLE_PUBLISHING:-}
       # MOMO-605 / DESK-1. Empty (the default) means the CORS layer is not
@@ -644,8 +644,8 @@ services:
       # (TOKEN_CAP=0 the helper, SEARCH_CAP=0 web search). The api gets the same two values (above).
       TEAM_AI_DAILY_TOKEN_CAP: ${TEAM_AI_DAILY_TOKEN_CAP:-}
       TEAM_AI_DAILY_SEARCH_CAP: ${TEAM_AI_DAILY_SEARCH_CAP:-}
-      # ADR-0201 증보 v4 P7 (#5369): the per-workspace ceiling on delegations to Hermes — EMPTY = CLOSED (see api above).
-      # This is the process that enforces it; the template ships it EMPTY on purpose.
+      # ADR-0201 증보 v4 P7 (#5369), 증보 2026-11-12 (#5685): the per-workspace ceiling on delegations to Hermes —
+      # EMPTY = NO CEILING, `0` = off (see api above). This is the process that enforces it; the template ships it EMPTY.
       TEAM_AI_HERMES_DAILY_CAP: ${TEAM_AI_HERMES_DAILY_CAP:-}
       LOG_LEVEL: ${LOG_LEVEL:-info}
     depends_on:

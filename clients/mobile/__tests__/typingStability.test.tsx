@@ -439,7 +439,7 @@ describe('M-5 — 같은 질문에 답하는 두 줄이 붙어 있다', () => {
     // 대조(작성 중 ↔ 작업 중)가 끊긴다.
     const code = codeOnly(SCREEN);
     const activity = code.indexOf('<ConversationActivityRail');
-    const typing = code.indexOf('<TypingBar');
+    const typing = code.indexOf('<TypingLiveBar');
     const receipt = code.indexOf('stopOutcome ? (');
     const hint = code.indexOf('<LongPressHint');
     expect(activity).toBeGreaterThan(-1);

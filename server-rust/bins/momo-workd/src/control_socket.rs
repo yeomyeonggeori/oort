@@ -42,11 +42,24 @@
 //! a warning. A **signed** workd refuses that flag at start, so the flag can
 //! never loosen a shipped binary.
 //!
+//! ## What each request must carry (#5619)
+//!
+//! Fences 2 and 3 are checked once, when the connection is accepted. They say
+//! who connected, not who wrote the request that follows, so they are not
+//! what lets a request act. Every request also carries **this run's secret**
+//! ([`ControlSecret`]) in `"auth"`: the app makes it for each `run` and hands
+//! it over on the child's stdin (`run --control-socket` reads that one line
+//! before anything else and refuses to start without it). A request without
+//! it, or with another value, is not answered and changes nothing: the
+//! connection closes, and the log says `secret` and nothing else. This holds
+//! with `--dev-unsigned-peer` too.
+//!
 //! ## Wire
 //!
 //! One JSON line in, one JSON line out, then the connection closes. A request
 //! is at most [`MAX_REQUEST_BYTES`] and must arrive within
-//! [`REQUEST_TIMEOUT`].
+//! [`REQUEST_TIMEOUT`]. Every request object also has `"auth":"<this run's
+//! secret>"`; it is left out of the lines below.
 //!
 //! ```text
 //! → {"op":"status"}
@@ -103,7 +116,7 @@ use tokio::io::{AsyncBufReadExt as _, AsyncWriteExt as _, BufReader};
 use tokio::net::{UnixListener, UnixStream};
 use uuid::Uuid;
 
-pub use crate::controls::{HostHealth, SocketShared};
+pub use crate::controls::{ControlSecret, HostHealth, SocketShared};
 
 /// The desktop app's code-signing identifier (its bundle id). The only program
 /// whose connections workd answers.
@@ -148,6 +161,19 @@ pub enum PeerRefusal {
     UnsignedSelf,
     #[error("peer credentials unavailable: {0}")]
     Credentials(String),
+}
+
+impl PeerRefusal {
+    /// The word the log gets: never the peer's uid, the requirement or the
+    /// framework's detail (#5619).
+    pub fn label(&self) -> &'static str {
+        match self {
+            Self::OtherUser { .. } => "other_user",
+            Self::Signature { .. } => "signature",
+            Self::UnsignedSelf => "unsigned_self",
+            Self::Credentials(_) => "credentials",
+        }
+    }
 }
 
 /// How peers are judged, fixed at start.
@@ -316,9 +342,11 @@ impl ControlSocket {
     }
 
     /// Answer connections until the task is dropped. `shutdown` is signalled
-    /// through `stop`.
-    pub async fn serve(self, identity: HostIdentity, shared: SocketShared) {
+    /// through `stop`. A request is acted on only when it carries `secret`
+    /// (#5619, see the module header).
+    pub async fn serve(self, secret: ControlSecret, identity: HostIdentity, shared: SocketShared) {
         let this = Arc::new(self);
+        let secret = Arc::new(secret);
         loop {
             let stream = match this.listener.accept().await {
                 Ok((stream, _)) => stream,
@@ -328,16 +356,32 @@ impl ControlSocket {
                     continue;
                 }
             };
-            let (this, identity, shared) = (this.clone(), identity.clone(), shared.clone());
+            let (this, secret, identity, shared) = (
+                this.clone(),
+                secret.clone(),
+                identity.clone(),
+                shared.clone(),
+            );
             tokio::spawn(async move {
                 if let Err(refusal) = check_peer(stream.as_raw_fd(), &this.policy) {
-                    tracing::warn!(refusal = %refusal, "control socket peer refused");
+                    tracing::warn!(refusal = refusal.label(), "control socket peer refused");
                     return;
                 }
-                answer(stream, &identity, &shared).await;
+                answer(stream, &secret, &identity, &shared).await;
             });
         }
     }
+}
+
+/// Whether one request line carries this run's secret in `"auth"`.
+fn carries_secret(line: &str, secret: &ControlSecret) -> bool {
+    let request = serde_json::from_str::<Value>(line).ok();
+    secret.admits(
+        request
+            .as_ref()
+            .and_then(|request| request.get("auth"))
+            .and_then(Value::as_str),
+    )
 }
 
 /// Fences 2 and 3 for one connection.
@@ -373,13 +417,26 @@ pub fn check_peer(fd: RawFd, policy: &PeerPolicy) -> Result<(), PeerRefusal> {
     }
 }
 
-async fn answer(stream: UnixStream, identity: &HostIdentity, shared: &SocketShared) {
+async fn answer(
+    stream: UnixStream,
+    secret: &ControlSecret,
+    identity: &HostIdentity,
+    shared: &SocketShared,
+) {
     let (read, mut write) = stream.into_split();
     let mut reader = BufReader::new(read.take_limited());
     let mut line = String::new();
     let read = tokio::time::timeout(REQUEST_TIMEOUT, reader.read_line(&mut line)).await;
     let response = match read {
-        Ok(Ok(_)) if line.ends_with('\n') => respond_async(line.trim_end(), identity, shared).await,
+        Ok(Ok(_)) if line.ends_with('\n') => {
+            // #5619: judged per request, on what the request carries. No
+            // answer at all, so the refusal tells the writer nothing.
+            if !carries_secret(line.trim_end(), secret) {
+                tracing::warn!(refusal = "secret", "control socket request refused");
+                return;
+            }
+            respond_async(line.trim_end(), identity, shared).await
+        }
         Ok(Ok(_)) => json!({"ok": false, "error": "request_too_long_or_unterminated"}),
         Ok(Err(_)) => return,
         Err(_) => json!({"ok": false, "error": "timeout"}),
@@ -754,6 +811,72 @@ mod tests {
             requirement,
             "anchor apple generic and identifier \"app.momo.desktop\" and \
              certificate leaf[subject.OU] = \"ABCDE12345\""
+        );
+    }
+
+    /// A secret made the way the app makes it, at run time.
+    fn fresh_secret_digits() -> String {
+        format!("{}{}", Uuid::new_v4().simple(), Uuid::new_v4().simple())
+    }
+
+    #[test]
+    fn the_secret_is_exactly_the_apps_line_and_nothing_else() {
+        let digits = fresh_secret_digits();
+        assert!(ControlSecret::parse(&digits).is_some());
+        assert!(ControlSecret::parse(&format!("{digits}\n")).is_some());
+        for bad in [
+            String::new(),
+            "\n".to_string(),
+            digits[..63].to_string(),
+            format!("{digits}0"),
+            digits.to_ascii_uppercase(),
+            format!(" {}", &digits[1..]),
+            format!("{}g", &digits[..63]),
+            format!("{digits}\n\n"),
+        ] {
+            assert!(ControlSecret::parse(&bad).is_none(), "{bad:?}");
+        }
+    }
+
+    #[test]
+    fn a_request_acts_only_with_this_runs_secret() {
+        let digits = fresh_secret_digits();
+        let secret = ControlSecret::parse(&digits).unwrap();
+        let with = |auth: Value| json!({"op": "shutdown", "auth": auth}).to_string();
+        assert!(carries_secret(&with(json!(digits)), &secret));
+        let mut flipped = digits.clone().into_bytes();
+        flipped[63] = if flipped[63] == b'0' { b'1' } else { b'0' };
+        let other = fresh_secret_digits();
+        for refused in [
+            r#"{"op":"shutdown"}"#.to_string(),
+            with(Value::Null),
+            with(json!(String::from_utf8(flipped).unwrap())),
+            with(json!(other)),
+            with(json!(&digits[..63])),
+            with(json!(format!("{digits}0"))),
+            with(json!([digits.clone()])),
+            "not json".to_string(),
+        ] {
+            assert!(!carries_secret(&refused, &secret), "{refused}");
+        }
+        assert!(!secret.admits(None));
+    }
+
+    #[test]
+    fn a_refusal_is_logged_as_a_closed_word() {
+        let refusals = [
+            PeerRefusal::OtherUser { peer: 7, own: 8 },
+            PeerRefusal::Signature {
+                requirement: "anchor apple generic".into(),
+                detail: "/private/tmp/x".into(),
+            },
+            PeerRefusal::UnsignedSelf,
+            PeerRefusal::Credentials("LOCAL_PEERTOKEN: x".into()),
+        ];
+        let labels: Vec<_> = refusals.iter().map(PeerRefusal::label).collect();
+        assert_eq!(
+            labels,
+            ["other_user", "signature", "unsigned_self", "credentials"]
         );
     }
 

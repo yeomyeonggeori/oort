@@ -835,7 +835,7 @@ export function slashListMaxHeight(fontScale: number, windowHeight: number): num
 /**
  * 보조 줄(`쓰는 AI · 부를 수 있는 사람 · 맥 꺼짐`)이 접힐 수 있는 줄 수 (AIH-9b, #3440).
  *
- * 가장 긴 줄(「곽성재 개인 구독 · 곽성재만 부를 수 있어요 · 맥 꺼짐」, 스무 자 남짓)은
+ * 가장 긴 줄(「한지후 개인 구독 · 한지후만 부를 수 있어요 · 맥 꺼짐」, 스무 자 남짓)은
  * 오른쪽 칩이 서는 기본 크기에서 왼쪽 칸(~250pt)에 두 줄이 든다. 글자가 커지면
  * 줄 수를 늘리는 대신 **한 줄로 줄이고 말줄임**한다 — 슬래시 목록(`slashHintLines`)과
  * 반대 방향인 이유는 시트가 열린 도크가 열 안에 들어야 해서다(`mentionSheetMaxHeight`):
@@ -1403,6 +1403,9 @@ export function Composer({
 
   const attachmentWorkspaceId = attachmentTarget?.workspaceId;
   const attachmentChannelId = attachmentTarget?.channelId;
+  // 초안에 대화를 적는다(스레드 초안은 열쇠에 채널이 없다 - `Draft.channelId`). 키스트로크 콜백이 낡은 값을 안 읽게 거울로 든다.
+  const draftChannelRef = useRef(attachmentChannelId);
+  draftChannelRef.current = attachmentChannelId;
   const attachmentRootId = attachmentTarget?.rootId;
   const stableAttachmentTarget = useMemo(
     () =>
@@ -1668,7 +1671,7 @@ export function Composer({
     // 저장을 다는 대신 매 글자를 적어 두면 잃는 경로 자체가 없어진다
     // (`drafts.ts` 머리말).
     if (draftKeyRef.current !== undefined) {
-      saveDraft(draftKeyRef.current, next);
+      saveDraft(draftKeyRef.current, next, undefined, draftChannelRef.current);
     }
     onTypingRef.current?.();
   }, [setKeyBlocked]);
@@ -1761,7 +1764,7 @@ export function Composer({
       // 멘션 수락도 글자를 바꾼 것이다. 여기서 안 적으면 「@김인턴 」까지 쓰고
       // 나간 사람은 그 낱말만 잃는다.
       if (draftKeyRef.current !== undefined) {
-        saveDraft(draftKeyRef.current, next.text);
+        saveDraft(draftKeyRef.current, next.text, undefined, draftChannelRef.current);
       }
     },
     [query, text, caret],
@@ -3393,7 +3396,7 @@ const buildStyles = (color: Palette) => StyleSheet.create({
     color: color.textFaint,
   },
   // 못 부르는 행은 이름·핸들·자물쇠·칩만 흐리게 한다 — 보조 줄은 **흐리지 않다**. 그 줄이 못
-  // 부르는 까닭(「박다연 님만 부를 수 있어요」)의 유일한 눈에 보이는 문장이라, 행 전체에 0.6 을
+  // 부르는 까닭(「박서연 님만 부를 수 있어요」)의 유일한 눈에 보이는 문장이라, 행 전체에 0.6 을
   // 주면 가장 안 읽히는 글자가 가장 중요한 말을 든다(design-review H1). 눌린 동안은 흐리지 않다.
   mentionLockedDim: {opacity: 0.6},
   // 「아래에 더 있다」 표지가 서는 오른쪽 띠. 행이 이 띠를 비워 두므로 줄이 표지 밑으로 안 간다.

@@ -62,10 +62,40 @@
 //!   unfollowing or a later reply — only by a signal.
 //! * **Absent is not zero.** A thread the reader does not follow has no value at all; `Some(0)` means
 //!   "follows, nothing new".
+//!
+//! ## The channel total and its signal (#5667, ADR-0124 증보 4)
+//!
+//! The read-state projection (`GET …/read-state`) carries, per channel line,
+//! `followed_unread_reply_count`: the **sum of the per-thread count above over the threads the reader
+//! follows in that channel** ([`followed_unread_by_channel_in_tx`]). It is the same rule row for row —
+//! other people's undeleted `text` replies past the position, following = `auto`/`followed` — and a
+//! conformance test keeps it equal to the sum of the per-thread numbers. A channel the reader has left or that is archived has no
+//! projection line, so its threads count nowhere.
+//!
+//! When that total can change, the reader's personal channel (`user:read-state#<MEMBER>`, the read-state
+//! broadcast's channel) gets a `followed_unread.updated` frame through the outbox, in the same
+//! transaction. The frame carries ids only (workspace, member, channel, root) and means "read the
+//! projection again" — like the inbox signals, it is never a number a client must fold in order:
+//!
+//! * **a new reply** — every follower of that thread except its author, who is still a live member of
+//!   the (non-archived) channel ([`signal_followers_of_reply_in_tx`], after the automatic follow so the
+//!   people it just pulled in are included, and after the reply's own channel broadcast, in one batch);
+//! * **the reader read the thread** — the signal moved the position of a row they follow;
+//! * **follow / stop following** — the write changed the row's state;
+//! * **read all** (#5689, ADR-0124 증보 5) — [`mark_followed_threads_read_in_tx`] moved at least one
+//!   followed thread's position in that channel: one frame per changed channel.
+//!
+//! The inbox's `inbox_item.created` is not a substitute: its `thread_reply` recipients are the root's
+//! author and the thread's writers (migration 126), so a direct follower or a person only mentioned
+//! earlier gets no item for the next reply, and reading a thread does not read its inbox items.
 
 use std::collections::HashMap;
 
+use chrono::Utc;
 use momo_db::DbError;
+use momo_outbox::{emit_outbox, emit_outbox_batch, OutboxKind};
+use momo_wire::payload::BroadcastPayload;
+use serde_json::{json, Value};
 use sqlx::{PgConnection, Row};
 use uuid::Uuid;
 
@@ -223,6 +253,11 @@ async fn guard_thread_in_tx(
 /// for a thread with no replies): following is "from now on", so the replies already there are not
 /// "new replies". An existing row keeps its position — only a signal moves it
 /// ([`mark_thread_read_in_tx`]).
+///
+/// A write that changed the row (a new row, or a state that differs) puts a `followed_unread.updated`
+/// frame on the caller's personal channel (#5667): stopping removes the thread's unread replies from
+/// the channel total, and following again brings back what is still unread. A no-op write sends
+/// nothing.
 pub async fn set_thread_follow_in_tx(
     conn: &mut PgConnection,
     workspace_id: Uuid,
@@ -245,7 +280,10 @@ pub async fn set_thread_follow_in_tx(
     } else {
         STATE_UNFOLLOWED
     };
-    sqlx::query(
+    // RETURNING yields a row only when the statement inserted or really updated one (the `DO UPDATE …
+    // WHERE` skips a same-state write). `updated_at` (this transaction's `now()`) tells one change from
+    // the next in the frame's idempotency key.
+    let changed: Option<i64> = sqlx::query_scalar(
         "INSERT INTO thread_follow \
            (workspace_id, channel_id, root_id, member_id, state, last_read_reply_seq) \
          VALUES ($1, $2, $3, $4, $5, \
@@ -253,15 +291,27 @@ pub async fn set_thread_follow_in_tx(
                             WHERE t.workspace_id = $1 AND t.root_id = $3), 0)) \
          ON CONFLICT (root_id, member_id) DO UPDATE \
             SET state = EXCLUDED.state, updated_at = now() \
-          WHERE thread_follow.state IS DISTINCT FROM EXCLUDED.state",
+          WHERE thread_follow.state IS DISTINCT FROM EXCLUDED.state \
+         RETURNING (extract(epoch FROM updated_at) * 1000000)::bigint",
     )
     .bind(workspace_id)
     .bind(channel_id)
     .bind(root_id)
     .bind(member_id)
     .bind(state)
-    .execute(&mut *conn)
+    .fetch_optional(&mut *conn)
     .await?;
+    if let Some(changed_at_us) = changed {
+        emit_followed_unread_in_tx(
+            &mut *conn,
+            workspace_id,
+            member_id,
+            channel_id,
+            root_id,
+            &format!("f:{}:{state}:{changed_at_us}", upper(root_id)),
+        )
+        .await?;
+    }
     Ok(Ok(follow))
 }
 
@@ -404,6 +454,10 @@ pub struct ThreadReadState {
 ///
 /// Guard order is the thread read's (live channel member → the root), with no DM refusal: a DM has no
 /// follow rows, so the signal is simply a no-op there.
+///
+/// When the position of a row the caller **follows** moved, the caller's personal channel gets a
+/// `followed_unread.updated` frame (#5667) so their other devices re-read the channel total. A request
+/// that moved nothing, and a stopped follow (which counts nowhere), send nothing.
 pub async fn mark_thread_read_in_tx(
     conn: &mut PgConnection,
     workspace_id: Uuid,
@@ -417,23 +471,21 @@ pub async fn mark_thread_read_in_tx(
     {
         return Ok(Err(refused));
     }
-    sqlx::query(
-        "UPDATE thread_follow tf \
-            SET last_read_reply_seq = target.seq \
-           FROM (SELECT LEAST($4::bigint, \
-                              COALESCE((SELECT t.last_reply_seq FROM thread t \
-                                         WHERE t.workspace_id = $1 AND t.root_id = $2), 0)) AS seq) target \
-          WHERE tf.workspace_id = $1 \
-            AND tf.root_id = $2 \
-            AND tf.member_id = $3 \
-            AND target.seq > tf.last_read_reply_seq",
-    )
-    .bind(workspace_id)
-    .bind(root_id)
-    .bind(member_id)
-    .bind(requested.max(0))
-    .execute(&mut *conn)
-    .await?;
+    let moved =
+        advance_read_positions_in_tx(&mut *conn, workspace_id, member_id, &[(root_id, requested)])
+            .await?;
+    if let Some(moved) = moved.first().filter(|moved| moved.following) {
+        // The position only moves forward, so (root, position) names this change once.
+        emit_followed_unread_in_tx(
+            &mut *conn,
+            workspace_id,
+            member_id,
+            channel_id,
+            root_id,
+            &format!("r:{}:{}", upper(root_id), moved.position),
+        )
+        .await?;
+    }
 
     let views = thread_follow_views_in_tx(&mut *conn, workspace_id, member_id, &[root_id]).await?;
     Ok(Ok(
@@ -450,4 +502,453 @@ pub async fn mark_thread_read_in_tx(
             },
         },
     ))
+}
+
+/// One row the position statement really moved.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct MovedPosition {
+    root_id: Uuid,
+    channel_id: Uuid,
+    /// `auto` or `followed` — a stopped follow's position moves too, but counts nowhere.
+    following: bool,
+    position: i64,
+}
+
+/// **The** statement that moves read positions, for [`mark_thread_read_in_tx`] (one thread) and
+/// [`mark_followed_threads_read_in_tx`] (many): one rule, written once.
+///
+/// For each `(root, requested)` the new position is `LEAST(requested, thread head)` (a negative request
+/// reads as `0`) and it is written only when it is greater than the stored one — never backward, never
+/// past the last reply that exists. It updates rows that are there and creates none. Returns the rows
+/// it moved; a row that stayed where it was is not in the list.
+///
+/// `workspace_id` is named on every table (the agent worker's BYPASSRLS role also reaches this
+/// module), and `member_id` binds the owner: no request shape can move another member's position.
+async fn advance_read_positions_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    member_id: Uuid,
+    targets: &[(Uuid, i64)],
+) -> Result<Vec<MovedPosition>, DbError> {
+    if targets.is_empty() {
+        return Ok(Vec::new());
+    }
+    let (roots, requested): (Vec<Uuid>, Vec<i64>) = targets
+        .iter()
+        .map(|(root, seq)| (*root, (*seq).max(0)))
+        .unzip();
+    let rows = sqlx::query(
+        "UPDATE thread_follow tf \
+            SET last_read_reply_seq = target.seq \
+           FROM (SELECT u.root_id, \
+                        LEAST(u.requested, \
+                              COALESCE((SELECT t.last_reply_seq FROM thread t \
+                                         WHERE t.workspace_id = $1 AND t.root_id = u.root_id), 0)) \
+                          AS seq \
+                   FROM unnest($3::uuid[], $4::bigint[]) AS u (root_id, requested)) target \
+          WHERE tf.workspace_id = $1 \
+            AND tf.root_id = target.root_id \
+            AND tf.member_id = $2 \
+            AND target.seq > tf.last_read_reply_seq \
+         RETURNING tf.root_id, tf.channel_id, tf.state, tf.last_read_reply_seq",
+    )
+    .bind(workspace_id)
+    .bind(member_id)
+    .bind(&roots)
+    .bind(&requested)
+    .fetch_all(&mut *conn)
+    .await?;
+    let mut moved = Vec::with_capacity(rows.len());
+    for row in rows {
+        let state: String = row.try_get("state")?;
+        moved.push(MovedPosition {
+            root_id: row.try_get("root_id")?,
+            channel_id: row.try_get("channel_id")?,
+            following: matches!(state.as_str(), STATE_AUTO | STATE_FOLLOWED),
+            position: row.try_get("last_read_reply_seq")?,
+        });
+    }
+    Ok(moved)
+}
+
+// ---------------------------------------------------------------------------
+// read all followed threads at once (#5689, ADR-0124 증보 5)
+// ---------------------------------------------------------------------------
+
+/// The most threads one `POST …/threads/read-all` moves. Past it the answer says `has_more` and the
+/// client calls again. [추정] the inbox page's ceiling (`INBOX_MAX_LIMIT`, 100): the inbox's own
+/// read-all has no cap to copy.
+pub const THREAD_READ_ALL_MAX_THREADS: i64 = 100;
+
+/// The most `channel_ids` one read-all may name. [추정] the channel list's page ceiling
+/// (`CHANNEL_LIST_LIMIT_MAX`, 500), so a client can pass one page of its channel list as it is.
+pub const THREAD_READ_ALL_MAX_CHANNEL_IDS: usize = 500;
+
+/// What a read-all did.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct FollowedThreadsReadAll {
+    /// The channels in which at least one followed thread's position moved, in id order. Each got
+    /// exactly one `followed_unread.updated` frame.
+    pub changed_channels: Vec<Uuid>,
+    /// How many threads' positions moved.
+    pub marked: i64,
+    /// More followed threads with unread replies were left than `max_threads` allowed.
+    pub has_more: bool,
+}
+
+/// 「모두 읽음」 for the threads `member_id` **follows**: move the read position of each followed thread
+/// that has an unread reply to that thread's last reply, in the caller's transaction (#5689).
+///
+/// Which threads: a row in `auto` / `followed`, in a channel the member is a **live member** of
+/// (`left_at IS NULL`) and that is **not archived** — the channels that have a read-state projection
+/// line, so exactly the threads `followed_unread_reply_count` counts — narrowed to `channels` when the
+/// caller named some (an id that is not such a channel matches nothing, whatever the reason). "Has an
+/// unread reply" is the per-thread count's predicate word for word ([`thread_follow_views_in_tx`]), and
+/// a thread whose position is already at its head is not a candidate, so every candidate really moves
+/// and `has_more` can never stay true without progress.
+///
+/// At most `max_threads` threads, in `(channel, root)` order; the rows are locked in that order
+/// (`FOR UPDATE OF tf`), so two devices pressing at once wait for each other instead of deadlocking.
+/// The positions move through [`advance_read_positions_in_tx`] — the single read's statement — with the
+/// head seen here as the request: a reply that lands after this read stays unread, and a position
+/// another device already moved further is left alone.
+///
+/// Signal: one ids-only `followed_unread.updated` frame per changed channel on the member's personal
+/// channel, in one batch insert. Its `root_id` is one of the threads that moved there (the smallest
+/// id), not a list. Nothing moved, nothing sent. The channel cursor (`read_state`) and the inbox are
+/// not touched — the same as reading one thread.
+pub async fn mark_followed_threads_read_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    member_id: Uuid,
+    channels: Option<&[Uuid]>,
+    max_threads: i64,
+) -> Result<FollowedThreadsReadAll, DbError> {
+    let max_threads = max_threads.max(1);
+    let candidates = sqlx::query(
+        "SELECT tf.root_id, t.last_reply_seq AS head \
+           FROM thread_follow tf \
+           JOIN membership ms \
+             ON ms.workspace_id = $1 \
+            AND ms.channel_id = tf.channel_id \
+            AND ms.member_id = tf.member_id \
+            AND ms.left_at IS NULL \
+           JOIN channel c \
+             ON c.id = tf.channel_id \
+            AND c.workspace_id = $1 \
+            AND c.archived_at IS NULL \
+           JOIN thread t \
+             ON t.workspace_id = $1 \
+            AND t.root_id = tf.root_id \
+          WHERE tf.workspace_id = $1 \
+            AND tf.member_id = $2 \
+            AND tf.state IN ('auto', 'followed') \
+            AND ($3::uuid[] IS NULL OR tf.channel_id = ANY($3::uuid[])) \
+            AND tf.last_read_reply_seq < t.last_reply_seq \
+            AND EXISTS (SELECT 1 FROM message r \
+                         WHERE r.workspace_id = $1 \
+                           AND r.root_id = tf.root_id \
+                           AND r.seq > tf.last_read_reply_seq \
+                           AND r.author_member_id <> $2 \
+                           AND r.type = 'text' \
+                           AND r.deleted_at IS NULL) \
+          ORDER BY tf.channel_id, tf.root_id \
+          LIMIT $4 \
+            FOR UPDATE OF tf",
+    )
+    .bind(workspace_id)
+    .bind(member_id)
+    .bind(channels)
+    .bind(max_threads + 1)
+    .fetch_all(&mut *conn)
+    .await?;
+    let has_more = candidates.len() as i64 > max_threads;
+    let mut targets = Vec::with_capacity(candidates.len());
+    for row in candidates.iter().take(max_threads as usize) {
+        targets.push((row.try_get("root_id")?, row.try_get("head")?));
+    }
+
+    let moved = advance_read_positions_in_tx(&mut *conn, workspace_id, member_id, &targets).await?;
+
+    // One frame per changed channel; the smallest moved root names the change. The positions only move
+    // forward, so (that root, its new position) is a key no other change produces.
+    let mut by_channel: std::collections::BTreeMap<Uuid, (Uuid, i64)> =
+        std::collections::BTreeMap::new();
+    for row in moved.iter().filter(|row| row.following) {
+        by_channel
+            .entry(row.channel_id)
+            .and_modify(|first| {
+                if row.root_id < first.0 {
+                    *first = (row.root_id, row.position);
+                }
+            })
+            .or_insert((row.root_id, row.position));
+    }
+    let timestamp_ms = Utc::now().timestamp_millis();
+    let frames: Vec<(Value, Option<Uuid>)> = by_channel
+        .iter()
+        .map(|(channel_id, (root_id, position))| {
+            let payload = build_followed_unread_payload(
+                workspace_id,
+                member_id,
+                *channel_id,
+                *root_id,
+                &format!("ra:{}:{position}", upper(*root_id)),
+                timestamp_ms,
+            );
+            (payload, Some(member_id))
+        })
+        .collect();
+    emit_outbox_batch(
+        &mut *conn,
+        workspace_id,
+        OutboxKind::Broadcast,
+        "publish",
+        &frames,
+    )
+    .await?;
+
+    Ok(FollowedThreadsReadAll {
+        changed_channels: by_channel.into_keys().collect(),
+        marked: moved.len() as i64,
+        has_more,
+    })
+}
+
+// ---------------------------------------------------------------------------
+// the channel total and its signal (#5667, ADR-0124 증보 4)
+// ---------------------------------------------------------------------------
+
+/// The `type` of the personal-channel frame that says "this channel's followed-thread total may have
+/// changed — read `GET …/read-state` again". Ids only, never a number.
+pub const FOLLOWED_UNREAD_FRAME_TYPE: &str = "followed_unread.updated";
+
+/// `followed_unread_reply_count` for every channel in which `member_id` follows a thread with something
+/// unread: channel → the sum, over the threads they follow there (`auto` / `followed`), of other
+/// people's undeleted `text` replies past their position. The per-thread term is
+/// [`thread_follow_views_in_tx`]'s `unread`, word for word.
+///
+/// A channel with no entry is `0`. Channels the member has left are still in the map; the caller (the
+/// projection) only has lines for live, unarchived memberships, so they count nowhere.
+///
+/// One statement: the member's rows through `thread_follow_member_idx (member_id)`, then per row the
+/// same correlated range scan on `message_thread_idx (root_id, seq)` the thread summary uses, starting
+/// after the position — the cost is the member's follow rows plus their unread replies, not the
+/// threads' lengths. `workspace_id` is named explicitly (the projection's role is RLS-bound, but a
+/// BYPASSRLS caller must not read another tenant's rows either).
+pub async fn followed_unread_by_channel_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    member_id: Uuid,
+) -> Result<HashMap<Uuid, i64>, DbError> {
+    let rows = sqlx::query(
+        "SELECT tf.channel_id, \
+                COALESCE(sum((SELECT count(*) FROM message r \
+                               WHERE r.workspace_id = $1 \
+                                 AND r.root_id = tf.root_id \
+                                 AND r.seq > tf.last_read_reply_seq \
+                                 AND r.author_member_id <> $2 \
+                                 AND r.type = 'text' \
+                                 AND r.deleted_at IS NULL)), 0)::bigint AS followed_unread \
+           FROM thread_follow tf \
+          WHERE tf.workspace_id = $1 \
+            AND tf.member_id = $2 \
+            AND tf.state IN ('auto', 'followed') \
+          GROUP BY tf.channel_id",
+    )
+    .bind(workspace_id)
+    .bind(member_id)
+    .fetch_all(&mut *conn)
+    .await?;
+    let mut totals = HashMap::with_capacity(rows.len());
+    for row in rows {
+        totals.insert(row.try_get("channel_id")?, row.try_get("followed_unread")?);
+    }
+    Ok(totals)
+}
+
+/// The new-reply half of the signal: after a counted `text` reply (the automatic follow's own guard —
+/// `thread_counted` is `ThreadPolicy::Maintain` at the call site), every follower of the thread except
+/// the reply's author gets a `followed_unread.updated` frame. Called after [`auto_follow_in_tx`], so
+/// the root's author and the mentioned people that reply just pulled in are among them, and after the
+/// reply's own `message.new` / `thread.updated` rows, so the relay (which drains by outbox id) never
+/// delivers these personal frames ahead of the reply itself.
+///
+/// Only a **live member of the channel**, and only while the channel is not archived: a person who
+/// left (or was removed from) a private channel keeps their follow rows but must not learn that it is
+/// active, and neither has a projection line to re-read. One frame per follower per reply, with the
+/// reply's id in the idempotency key (a retried send never gets here — it returns before the call).
+/// Every predicate names `workspace_id`: the agent worker's BYPASSRLS role also reaches this.
+pub(crate) async fn signal_followers_of_reply_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    message: &StoredMessage,
+    thread_counted: bool,
+) -> Result<(), DbError> {
+    if !thread_counted || message.message_type != MessageType::Text {
+        return Ok(());
+    }
+    let Some(root_id) = message.root_id else {
+        return Ok(());
+    };
+    let followers: Vec<Uuid> = sqlx::query_scalar(
+        "SELECT tf.member_id \
+           FROM thread_follow tf \
+           JOIN membership ms \
+             ON ms.workspace_id = $1 \
+            AND ms.channel_id = tf.channel_id \
+            AND ms.member_id = tf.member_id \
+            AND ms.left_at IS NULL \
+           JOIN channel c \
+             ON c.id = tf.channel_id \
+            AND c.workspace_id = $1 \
+            AND c.archived_at IS NULL \
+          WHERE tf.workspace_id = $1 \
+            AND tf.root_id = $2 \
+            AND tf.channel_id = $3 \
+            AND tf.state IN ('auto', 'followed') \
+            AND tf.member_id <> $4 \
+          ORDER BY tf.member_id",
+    )
+    .bind(workspace_id)
+    .bind(root_id)
+    .bind(message.channel_id)
+    .bind(message.author_member_id)
+    .fetch_all(&mut *conn)
+    .await?;
+    // One frame per follower, all in one batch insert: the send transaction (which holds the channel's
+    // sequence row lock) pays two round trips here however many people follow the thread.
+    let cause = format!("m:{}", upper(message.id));
+    let timestamp_ms = Utc::now().timestamp_millis();
+    let frames: Vec<(Value, Option<Uuid>)> = followers
+        .into_iter()
+        .map(|follower| {
+            let payload = build_followed_unread_payload(
+                workspace_id,
+                follower,
+                message.channel_id,
+                root_id,
+                &cause,
+                timestamp_ms,
+            );
+            (payload, Some(follower))
+        })
+        .collect();
+    emit_outbox_batch(
+        &mut *conn,
+        workspace_id,
+        OutboxKind::Broadcast,
+        "publish",
+        &frames,
+    )
+    .await?;
+    Ok(())
+}
+
+/// Build the `outbox.payload` of a `followed_unread.updated` frame for `member_id`'s personal channel
+/// (the read-state broadcast's channel, [`crate::read_state::read_state_channel`]). Ids uppercase like
+/// the `read_state` frame. No `version` (not an ordered channel event).
+///
+/// `cause` makes the idempotency key unique per change — `m:<reply>`, `r:<root>:<position>` or
+/// `f:<root>:<state>:<µs>` — so a second change is never deduplicated as a replay of the first.
+pub fn build_followed_unread_payload(
+    workspace_id: Uuid,
+    member_id: Uuid,
+    channel_id: Uuid,
+    root_id: Uuid,
+    cause: &str,
+    timestamp_ms: i64,
+) -> Value {
+    let channel = crate::read_state::read_state_channel(member_id);
+    let channel_token = upper(channel_id);
+    let envelope = BroadcastPayload {
+        channel: channel.clone(),
+        data: json!({
+            "type": FOLLOWED_UNREAD_FRAME_TYPE,
+            "v": 1,
+            "ts": timestamp_ms,
+            "payload": {
+                "workspace_id": upper(workspace_id),
+                "member_id": upper(member_id),
+                "channel_id": channel_token,
+                "root_id": upper(root_id),
+            },
+        }),
+        version: None,
+        idempotency_key: Some(format!("{channel}:followed-unread:{channel_token}:{cause}")),
+    };
+    serde_json::to_value(envelope).expect("followed-unread payload serializes")
+}
+
+async fn emit_followed_unread_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    member_id: Uuid,
+    channel_id: Uuid,
+    root_id: Uuid,
+    cause: &str,
+) -> Result<(), DbError> {
+    let payload = build_followed_unread_payload(
+        workspace_id,
+        member_id,
+        channel_id,
+        root_id,
+        cause,
+        Utc::now().timestamp_millis(),
+    );
+    emit_outbox(
+        &mut *conn,
+        workspace_id,
+        OutboxKind::Broadcast,
+        "publish",
+        &payload,
+        Some(member_id),
+    )
+    .await?;
+    Ok(())
+}
+
+fn upper(id: Uuid) -> String {
+    id.to_string().to_uppercase()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The frame rides the read-state broadcast's personal channel, carries ids only (no count — a
+    /// client re-reads the projection), and its key changes with the cause.
+    #[test]
+    fn the_followed_unread_frame_is_ids_only_on_the_personal_channel() {
+        let (ws, member, channel, root) = (
+            Uuid::from_u128(0xa),
+            Uuid::from_u128(0xb),
+            Uuid::from_u128(0xc),
+            Uuid::from_u128(0xd),
+        );
+        let payload = build_followed_unread_payload(ws, member, channel, root, "r:X:7", 42);
+        assert_eq!(
+            payload["channel"],
+            json!(crate::read_state::read_state_channel(member))
+        );
+        assert_eq!(payload["data"]["type"], json!("followed_unread.updated"));
+        assert_eq!(payload["data"]["ts"], json!(42));
+        let body = payload["data"]["payload"]
+            .as_object()
+            .expect("payload object");
+        let mut keys: Vec<&str> = body.keys().map(String::as_str).collect();
+        keys.sort_unstable();
+        assert_eq!(
+            keys,
+            ["channel_id", "member_id", "root_id", "workspace_id"],
+            "ids only — no number a client would have to order"
+        );
+        assert_eq!(body["channel_id"], json!(upper(channel)));
+        assert!(payload.get("version").is_none() || payload["version"].is_null());
+        let other = build_followed_unread_payload(ws, member, channel, root, "r:X:8", 42);
+        assert_ne!(
+            payload["idempotency_key"], other["idempotency_key"],
+            "a second change must not be deduplicated as a replay of the first"
+        );
+    }
 }

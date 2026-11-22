@@ -398,7 +398,7 @@ describe("mentionRoutingTarget", () => {
   const members = [
     agent("hermes", "019f94e3-8b21-7ae0-b3c4-5f1a2d6e7c90"),
     agent("kim-intern", "019f9a01-0000-7000-8000-000000000404"),
-    human("seongjae", "019f94e3-7a10-79cd-9dee-208f47edd9a8"),
+    human("jihu", "019f94e3-7a10-79cd-9dee-208f47edd9a8"),
   ];
 
   it("텍스트에 남아 있는 핸들만 읽는다", () => {
@@ -414,7 +414,7 @@ describe("mentionRoutingTarget", () => {
   });
 
   it("사람 멘션과 없는 핸들은 대상이 아니다", () => {
-    expect(mentionRoutingTarget("@seongjae 확인 부탁", members).kind).toBe("none");
+    expect(mentionRoutingTarget("@jihu 확인 부탁", members).kind).toBe("none");
     expect(mentionRoutingTarget("@hermez 오타", members).kind).toBe("none");
   });
 

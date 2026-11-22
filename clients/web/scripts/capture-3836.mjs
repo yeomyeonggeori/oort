@@ -42,8 +42,8 @@ const SESSION = {
     id: ME,
     workspaceId: WORKSPACE_ID,
     kind: "human",
-    displayName: "곽성재",
-    handle: "seongjae",
+    displayName: "한지후",
+    handle: "jihu",
   },
   realtimeWebSocketUrl: "ws://capture-3836.invalid/connection/websocket",
 };
@@ -71,7 +71,7 @@ function member(id, kind, displayName, handle, extra = {}) {
 }
 
 const ROSTER = [
-  member(ME, "human", "곽성재", "seongjae"),
+  member(ME, "human", "한지후", "jihu"),
   member(HANEUL, "human", "김하늘", "haneul", { role: "member" }),
   member(HELPER, "agent", "oort 도우미", "oort-helper", { ownerHumanId: ME }),
   member(GROK, "agent", "그록봇", "grokbot", { ownerHumanId: ME }),
@@ -183,7 +183,7 @@ async function installMocks(context, { settings = "known-off", enable = "ok", se
     })
   );
   await context.route("**/v1/workspaces/*/channels", (route) => json(route, { channels: CHANNELS }));
-  await context.route("**/v1/workspaces/*/roster", (route) => json(route, { members: ROSTER }));
+  await context.route("**/v1/workspaces/*/roster*", (route) => json(route, { members: ROSTER }));
   const readStates = [
     { channel_id: CHANNEL_ID, last_read_seq: 3103, latest_seq: 3103, unread_count: 0, mention_count: 0 },
   ];
@@ -273,7 +273,7 @@ async function login(context) {
   const page = await context.newPage();
   await page.goto(ORIGIN, { waitUntil: "networkidle" });
   await advanceToAccount(page);
-  await page.getByTestId("login-email").fill("seongjae@dawn.example");
+  await page.getByTestId("login-email").fill("jihu@dawn.example");
   await page.getByTestId("login-password").fill("capture-only-not-a-credential");
   await page.getByTestId("login-submit").click();
   await page.getByTestId("channel-list").waitFor({ state: "visible" });

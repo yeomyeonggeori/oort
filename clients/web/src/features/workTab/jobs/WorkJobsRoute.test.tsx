@@ -53,7 +53,7 @@ function sessionValue(): SessionContextValue {
     session: {
       accessToken: "access",
       refreshToken: "refresh",
-      member: { id: ME, workspaceId: WS, kind: "human", displayName: "곽성재", handle: "seongjae" },
+      member: { id: ME, workspaceId: WS, kind: "human", displayName: "한지후", handle: "jihu" },
       realtimeWebSocketUrl: "wss://example.test/connection/websocket",
     },
     workspaceId: WS,
@@ -216,7 +216,7 @@ describe("「작업」 한 화면: 결과 중심 줄 (ADR-0202 D1)", () => {
     render(mount());
     const row = await screen.findByTestId("work-job-row");
     const text = row.textContent ?? "";
-    for (const part of ["온보딩 문구 다듬기", "곽성재 → 그록봇", "끝남 · PR", "24분 동안 작업", "#agent-lab"]) {
+    for (const part of ["온보딩 문구 다듬기", "한지후 → 그록봇", "끝남 · PR", "24분 동안 작업", "#agent-lab"]) {
       expect(text).toContain(part);
     }
     const result = within(row).getAllByTestId("work-job-result")[0]!;

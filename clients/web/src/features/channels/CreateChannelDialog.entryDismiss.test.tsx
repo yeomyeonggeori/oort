@@ -8,6 +8,7 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vite
 import type { Channel } from "@momo/core/lib/api";
 import { dismissTemporarySurfaces } from "@momo/core/features/notifications/entryDismiss";
 import { SessionProvider, type SessionContextValue } from "@/app/session";
+import { AddChannelMemberProvider } from "./AddChannelMemberDialog";
 import { CreateChannelProvider } from "./CreateChannelDialog";
 import { useOpenCreateChannel } from "./useCreateChannel";
 
@@ -41,7 +42,7 @@ const session: SessionContextValue = {
   session: {
     accessToken: "a",
     refreshToken: "r",
-    member: { id: ME, workspaceId: WS, kind: "human", displayName: "곽성재", handle: "seongjae" },
+    member: { id: ME, workspaceId: WS, kind: "human", displayName: "한지후", handle: "jihu" },
     realtimeWebSocketUrl: "wss://example.test/connection/websocket",
   },
   workspaceId: WS,
@@ -92,7 +93,12 @@ async function mount(): Promise<void> {
       createElement(
         MemoryRouter,
         { initialEntries: ["/"] },
-        createElement(CreateChannelProvider, null, createElement(Opener), createElement(Where), createElement(Lander))
+        // 셸과 같은 순서(#5784): 만들기 창이 비공개 채널 뒤에 「멤버 추가」를 이어서 열므로 그 provider 안에 선다.
+        createElement(
+          AddChannelMemberProvider,
+          null,
+          createElement(CreateChannelProvider, null, createElement(Opener), createElement(Where), createElement(Lander))
+        )
       )
     )
   );

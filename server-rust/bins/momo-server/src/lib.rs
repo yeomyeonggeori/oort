@@ -392,6 +392,11 @@ pub struct AppState {
     /// (`team_ai_limits_status.operatorCeiling`). Default: no ceiling. Set the same values on both
     /// processes — a ceiling the api does not know is still enforced, just not shown.
     pub team_ai_caps: momo_workspace_actions::team_ai_limits::OperatorCaps,
+    /// ADR-0201 증보 v4 P8 (#5374) — the delegation door's G4 declarations (`OORT_COHOSTED_AGENT_TOOLS_LOCKED`
+    /// and the two connection-mode variables) **as the api reads them**, so the settings screen can say why
+    /// the helper cannot hand work to Hermes now. The agent-worker enforces with its own copy; the templates
+    /// keep the two equal. Default: nothing declared — the screen reads `tools_not_locked` (closed).
+    pub team_ai_hermes: momo_workspace_actions::team_ai_hermes::HermesDeclarations,
 }
 
 impl AppState {
@@ -466,7 +471,18 @@ impl AppState {
                 )),
             )),
             team_ai_caps: momo_workspace_actions::team_ai_limits::OperatorCaps::default(),
+            team_ai_hermes: momo_workspace_actions::team_ai_hermes::HermesDeclarations::default(),
         }
+    }
+
+    /// ADR-0201 증보 v4 P8 (#5374) — attach the operator's delegation declarations (`main.rs` from the env,
+    /// a test with explicit values). Never read from the process environment here: a test must not set one.
+    pub fn with_team_ai_hermes(
+        mut self,
+        declarations: momo_workspace_actions::team_ai_hermes::HermesDeclarations,
+    ) -> Self {
+        self.team_ai_hermes = declarations;
+        self
     }
 
     /// ADR-0201 증보 v3 B9 (#4944) — attach the operator's team-AI ceilings (`main.rs` from the
@@ -931,6 +947,14 @@ pub fn build_app(state: AppState) -> Router {
             "/v1/workspaces/{ws}/channels/{ch}/messages/{root}/read",
             put(routes::thread_follow::mark_read),
         )
+        // ADR-0124 증보 5 (#5689) — 「모두 읽음」 for the threads the caller follows: the same
+        // position statement as the route above, for every followed thread with an unread reply.
+        // One request moves up to 100 positions, so it carries a per-member budget.
+        .route(
+            "/v1/workspaces/{ws}/threads/read-all",
+            post(routes::thread_follow::read_all)
+                .route_layer(member_write(rate_limit::MemberWrite::ThreadReadAll)),
+        )
         // B11 — the things you can do to a message that is already sent.
         // Message-scoped, not channel-scoped: Swift mounts these under
         // `/workspaces/{ws}/messages/{id}` (`MessageRoutes.swift:28-31`) because
@@ -1086,6 +1110,19 @@ pub fn build_app(state: AppState) -> Router {
             "/v1/workspaces/{ws}/channels",
             get(routes::channels::list).post(routes::channels::create),
         )
+        // ADR-0225 D10 — rename (the first channel-editing route; later pieces
+        // add fields to the same PATCH).
+        // ADR-0224 D3 — the public channels a person may find. A literal segment beats
+        // `{ch}`, so this GET never reaches the channel routes below.
+        .route(
+            "/v1/workspaces/{ws}/channels/browse",
+            get(routes::channels::browse),
+        )
+        .route(
+            "/v1/workspaces/{ws}/channels/{ch}",
+            patch(routes::channels::update)
+                .route_layer(member_write(rate_limit::MemberWrite::ChannelEdit)),
+        )
         .route(
             "/v1/workspaces/{ws}/channels/{ch}/notification-pref",
             put(routes::channels::notification_pref),
@@ -1103,9 +1140,19 @@ pub fn build_app(state: AppState) -> Router {
             "/v1/workspaces/{ws}/channels/{ch}/members/{member}",
             delete(routes::channels::remove_member),
         )
+        // ADR-0224 D4 — joining from the browse list spends a per-member budget; leaving
+        // does not (it is the safety action).
         .route(
             "/v1/workspaces/{ws}/channels/{ch}/members/me",
-            delete(routes::member_lifecycle::leave_channel),
+            post(routes::channels::join_channel)
+                .route_layer(member_write(rate_limit::MemberWrite::ChannelJoin))
+                .delete(routes::member_lifecycle::leave_channel),
+        )
+        // ADR-0224 D5 — read a public channel before joining it. Same gate as the join;
+        // read-only, no budget of its own (a read, like the browse list).
+        .route(
+            "/v1/workspaces/{ws}/channels/{ch}/preview",
+            get(routes::channels::preview),
         )
         .route(
             "/v1/workspaces/{ws}/channels/{ch}/members/{member}/role",
@@ -1607,6 +1654,13 @@ pub fn build_app(state: AppState) -> Router {
         .route(
             "/v1/workspaces/{ws}/channels/{ch}/closure",
             put(routes::dm_closure::put).delete(routes::dm_closure::delete),
+        )
+        // 1:1 「대화 나가기」 (ADR-0177 증보 2026-11-14 D16, #5822): the caller's own read floor.
+        // Human-only twice over, exactly like the closure route (absent from `required_agent_scope`,
+        // `require_human` first). No DELETE: the floor is never lowered through the API.
+        .route(
+            "/v1/workspaces/{ws}/channels/{ch}/dm-leave",
+            put(routes::dm_leave::put),
         )
         // inbox (ADR-0199, #3681): the member's own "to me" list. Humans only;
         // the member is the bearer, never a request field.

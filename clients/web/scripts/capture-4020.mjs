@@ -45,7 +45,7 @@ const person = (id, kind, displayName, handle, extra = {}) => ({
   channelIds: [CH, GENERAL], capabilities: [], createdAtMs: 0, updatedAtMs: 0, ...extra,
 });
 const roster = [
-  person(memberId, "human", "곽성재", "seongjae", { role: "owner" }),
+  person(memberId, "human", "한지후", "jihu", { role: "owner" }),
   person(agentId, "agent", "그록", "grok", { ownerHumanId: memberId }),
   person(otherAgentId, "agent", "김인턴", "kim-intern", { ownerHumanId: memberId }),
 ];
@@ -56,7 +56,7 @@ const channels = [
 const auth = {
   accessToken: "capture-only-not-a-credential",
   refreshToken: "capture-only-not-a-credential",
-  member: { id: memberId, workspaceId, kind: "human", displayName: "곽성재", handle: "seongjae" },
+  member: { id: memberId, workspaceId, kind: "human", displayName: "한지후", handle: "jihu" },
   realtimeWebSocketUrl: "ws://4020-capture.invalid/connection/websocket",
 };
 
@@ -258,7 +258,7 @@ function messages(now) {
   return [
     mine("00000000-0000-7000-8000-0000000a0001", 10, "그록, 어제 올린 보고서 요약 부탁해요", 9 * MIN),
     mine("00000000-0000-7000-8000-0000000a0002", 11, "ㅎㅇ", 6 * MIN),
-    { id: "00000000-0000-7000-8000-0000000a0003", channelId: CH, seq: 12, hlcTs: now - 5 * MIN, hlcCount: 0, authorMemberId: agentId, type: "text", body: "안녕하세요, 곽성재님! 필요한 일 있으면 편하게 말씀해 주세요.", state: "sent", createdAtMs: now - 5 * MIN },
+    { id: "00000000-0000-7000-8000-0000000a0003", channelId: CH, seq: 12, hlcTs: now - 5 * MIN, hlcCount: 0, authorMemberId: agentId, type: "text", body: "안녕하세요, 한지후님! 필요한 일 있으면 편하게 말씀해 주세요.", state: "sent", createdAtMs: now - 5 * MIN },
     mine("00000000-0000-7000-8000-0000000a0004", 13, "이번 주 일정 정리해 줘", 20_000),
   ];
 }

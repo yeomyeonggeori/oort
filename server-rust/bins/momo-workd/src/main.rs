@@ -71,7 +71,27 @@ async fn main() {
             dev_key_file,
             control_socket,
             dev_unsigned_peer,
-        } => cli::run(config, dev_key_file, control_socket, dev_unsigned_peer).await,
+        } => {
+            // #5619: the control secret is the first thing read, before any
+            // child exists that could inherit stdin.
+            match control_socket
+                .as_ref()
+                .map(|_| cli::read_control_secret(std::io::stdin().lock()))
+                .transpose()
+            {
+                Ok(secret) => {
+                    cli::run(
+                        config,
+                        dev_key_file,
+                        control_socket,
+                        secret,
+                        dev_unsigned_peer,
+                    )
+                    .await
+                }
+                Err(error) => Err(error),
+            }
+        }
     };
     if let Err(error) = result {
         eprintln!("momo-workd: {error}");

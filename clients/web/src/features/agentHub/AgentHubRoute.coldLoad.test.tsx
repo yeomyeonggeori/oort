@@ -26,12 +26,12 @@ const row = (id: string, name: string, kind: "human" | "agent", extra: Partial<R
 });
 const A1 = "00000000-0000-7000-8000-000000000301";
 const A2 = "00000000-0000-7000-8000-000000000302";
-const ROSTER = [row(ME, "곽성재", "human"), row(A1, "가나다", "agent"), row(A2, "하하하", "agent")];
+const ROSTER = [row(ME, "한지후", "human"), row(A1, "가나다", "agent"), row(A2, "하하하", "agent")];
 
 const session: SessionContextValue = {
   session: {
     accessToken: "a", refreshToken: "r",
-    member: { id: ME, workspaceId: WS, kind: "human", displayName: "곽성재", handle: "seongjae" },
+    member: { id: ME, workspaceId: WS, kind: "human", displayName: "한지후", handle: "jihu" },
     realtimeWebSocketUrl: "wss://example.test/connection/websocket",
   },
   workspaceId: WS, realtime: null, connStatus: "connected", logout: () => undefined, replaceSessionMember: () => undefined,

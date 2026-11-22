@@ -50,8 +50,8 @@ const SELF: Member = {
   id: SELF_ID,
   workspaceId: WS,
   kind: 'human',
-  displayName: '곽성재',
-  handle: 'seongjae',
+  displayName: '한지후',
+  handle: 'jihu',
 };
 
 function message(seq: number, over: Partial<Message> = {}): Message {
@@ -245,6 +245,47 @@ describe('읽기 — seq 가 유일한 순서 권위다', () => {
     expect(result.current.state.messages.map(m => m.seq)).toEqual([8, 9, 10, 11]);
     // The server said there is nothing older, so the list stops asking.
     expect(result.current.reachedStart).toBe(true);
+  });
+
+  // #5757: 서버는 대화의 맨 처음에 `nextBefore: null` 을 준다. 그것이 「끝」으로 읽히지 않으면 짧은 대화에서 더 읽기가 끝없이 되풀이된다.
+  it('머리 읽기가 nextBefore: null 이면 끝이고, 더 읽지 않는다', async () => {
+    const log = installFetch({
+      messages: () => jsonResponse(200, {messages: [message(1), message(2)], nextBefore: null}),
+    });
+    const {rail} = makeRail();
+    const {result} = renderTimeline(rail);
+    await waitFor(() => expect(result.current.status).toBe('ready'));
+    expect(result.current.reachedStart).toBe(true);
+
+    await act(async () => {
+      await result.current.loadOlder();
+    });
+    expect(log.urls.filter(u => u.includes('before='))).toHaveLength(0);
+  });
+
+  it('위로 읽은 쪽이 nextBefore: null 이면 끝이 서고 세 번째 읽기는 없다', async () => {
+    let call = 0;
+    const log = installFetch({
+      messages: () => {
+        call += 1;
+        return call === 1
+          ? jsonResponse(200, {messages: [message(10), message(11)], nextBefore: 10})
+          : jsonResponse(200, {messages: [message(8), message(9)], nextBefore: null});
+      },
+    });
+    const {rail} = makeRail();
+    const {result} = renderTimeline(rail);
+    await waitFor(() => expect(result.current.status).toBe('ready'));
+    expect(result.current.reachedStart).toBe(false);
+
+    await act(async () => {
+      await result.current.loadOlder();
+    });
+    expect(result.current.reachedStart).toBe(true);
+    await act(async () => {
+      await result.current.loadOlder();
+    });
+    expect(log.urls.filter(u => u.includes('before='))).toHaveLength(1);
   });
 });
 

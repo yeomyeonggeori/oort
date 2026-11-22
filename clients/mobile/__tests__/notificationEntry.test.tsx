@@ -75,8 +75,8 @@ const SELF: Member = {
   id: SELF_ID,
   workspaceId: WS,
   kind: 'human',
-  displayName: '곽성재',
-  handle: 'seongjae',
+  displayName: '한지후',
+  handle: 'jihu',
 };
 
 const LOGIN_BODY = {
@@ -104,7 +104,7 @@ function rosterMember(over: Record<string, unknown>) {
 
 // 「새 채널」 행은 소유자·관리자에게만 선다(ADR-0128).
 const ROSTER = [
-  rosterMember({id: SELF_ID, displayName: '곽성재', handle: 'seongjae', role: 'owner'}),
+  rosterMember({id: SELF_ID, displayName: '한지후', handle: 'jihu', role: 'owner'}),
   rosterMember({id: MINSU, displayName: '김민수', handle: 'minsu'}),
 ];
 

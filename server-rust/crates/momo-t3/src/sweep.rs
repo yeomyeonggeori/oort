@@ -45,14 +45,33 @@
 //! Ports Swift `NotifierWorker/TierFallbackSweep.swift` (candidate query :49-96,
 //! `transitionStaleSession` :433-631).
 //!
-//! **Not ported here (scope):** the follow-on user-visible surface of the same
-//! function — the resume offer (`ask`, :633-702), auto-resume (`auto`, :704-836),
-//! the session-card `props` re-render, the `broadcast` outbox rows and the
-//! `audit_log` provenance. Each needs an egress this batch does not own
-//! (`momo_outbox::emit_outbox` is the single broadcast seam, and `momo-db`'s
-//! audit writer is still a B0 stub), and the ADR-0139 idle-timeout sweep
-//! (:169-431) is a separate ticket. What lands here is the part that decides
-//! money and session state.
+//! **The owner hears it (#5594).** The transition writes, in its own
+//! transaction, one System line in the session's thread — 「맥 연결이 끊겨 작업이
+//! 멈췄어요」 (`work_notice::WorkNotice::HostLost`) — through the one send spine.
+//! The push is the judgment's: the session's owner only, and only when a turn
+//! was running. One line per transition: it is written only when the guarded
+//! UPDATE moved the row, and its `client_msg_id` is the session's.
+//!
+//! **The line never decides the transition.** It is written inside its own
+//! SAVEPOINT (`work_notice::post_session_notice_guarded_in_tx`): a line that cannot
+//! be written — a persona the owner switched off in an admitted DM, which the DM
+//! write boundary refuses for every role (#5614 H1) — is rolled back and logged
+//! alone, and the settlement and transition commit. The line speaks as the owner
+//! when the persona may no longer speak there.
+//!
+//! **This transaction touches no table beyond the ones the stall sweep already
+//! writes** (message, `channel_seq`, outbox), all on the notifier pool. A permission request the lost
+//! session was waiting on stays `pending`: the decision route already refuses a
+//! session that is not running, and the work-permission expiry sweep closes the
+//! row at its deadline without a second line (the session is not running). So a
+//! notifier deployed before its `work_permission_request` grant cannot stop a
+//! session from being orphaned — the settlement path stays independent of it.
+//!
+//! **Not ported here (scope):** the rest of the follow-on surface of the same
+//! function — the resume offer's 이어받기 button (`ask`, :633-702), auto-resume
+//! (`auto`, :704-836), the session-card `props` re-render and the `audit_log`
+//! provenance — and the ADR-0139 idle-timeout sweep (:169-431), a separate
+//! ticket.
 
 use chrono::{DateTime, Utc};
 use momo_db::{PgConnection, PgPool};
@@ -62,6 +81,7 @@ use uuid::Uuid;
 use crate::error::T3Error;
 use crate::lifecycle::{terminate_in_tx, with_t3_lifecycle_tx, T3LockLadder, TerminationReason};
 use crate::reconcile::declare_destroy_intent_in_tx;
+use crate::work_notice::{post_session_notice_guarded_in_tx, WorkNotice};
 
 /// The `work_tier_policy.mode` that makes host loss terminal rather than
 /// resumable (025:16). Read from the DB per session; never assumed.
@@ -118,6 +138,9 @@ pub struct StaleConvergence {
     /// a substrate that reports a crashed VM as `running` forever, the second is
     /// the one that decides whether the host stops costing money.
     pub destroy_intended: bool,
+    /// #5594: the session's thread got its 「맥 연결이 끊겨 작업이 멈췄어요」 line
+    /// in this transaction (false when nothing moved, or on a retried write).
+    pub noticed: bool,
 }
 
 /// Sessions whose host is gone, across every tenant.
@@ -283,14 +306,47 @@ async fn converge_in_tx(
         // T1/T2: there is no paid instance to reclaim.
         None => false,
     };
+    // #5594: whether a turn was in progress, read under the row lock the transition
+    // below takes anyway (a finished session that loses its Mac gets the line, not a push).
+    let was_running: bool = sqlx::query_scalar(
+        "SELECT status = 'running' FROM work_session \
+          WHERE workspace_id = $1 AND id = $2 \
+          FOR UPDATE",
+    )
+    .bind(candidate.workspace_id)
+    .bind(candidate.session_id)
+    .fetch_optional(&mut *conn)
+    .await?
+    .unwrap_or(false);
     let transitioned = transition_stale_session_in_tx(conn, &candidate, grace_seconds).await?;
     if !transitioned && settled {
         return Err(T3Error::StaleAfterSettlement(candidate.session_id));
+    }
+    // #5594 — only a session this transaction actually moved gets the line, so a
+    // sweep that loses the race (or runs again) writes nothing.
+    let mut noticed = false;
+    if transitioned {
+        // Guarded (#5614 H1): a line the DM write boundary — or anything else — refuses
+        // is rolled back alone; the settlement and the transition above still commit, so
+        // a refused line can never keep a session (or its paid host) from being orphaned.
+        noticed = post_session_notice_guarded_in_tx(
+            conn,
+            candidate.workspace_id,
+            candidate.session_id,
+            &WorkNotice::HostLost {
+                session_id: candidate.session_id,
+                owner_member_id: candidate.member_id,
+                resumable: !candidate.is_terminal(),
+                was_running,
+            },
+        )
+        .await?;
     }
     Ok(StaleConvergence {
         settled,
         transitioned,
         destroy_intended,
+        noticed,
     })
 }
 
@@ -461,11 +517,13 @@ mod tests {
             settled: true,
             transitioned: true,
             destroy_intended: true,
+            noticed: true,
         };
         let nothing_to_bill = StaleConvergence {
             settled: false,
             transitioned: true,
             destroy_intended: true,
+            noticed: true,
         };
         for outcome in [settled, nothing_to_bill] {
             assert!(

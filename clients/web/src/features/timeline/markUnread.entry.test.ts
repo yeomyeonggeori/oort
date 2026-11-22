@@ -7,7 +7,9 @@ import {
   messageActionItemsForSurface,
   type MessageActionCopyState,
 } from "./messageActionModel";
-import { MARK_UNREAD_ACTION_LABEL } from "@momo/core/features/readState/copy";
+import { MARK_UNREAD_ACTION_KEY } from "@momo/core/features/readState/copy";
+import { catalog as koCatalog } from "@momo/core/i18n/generated/ko-KR";
+import { createMessageCopy } from "@momo/core/testkit";
 
 const available: MessageActionAvailability = {
   reply: true,
@@ -39,12 +41,13 @@ describe("⋯ 메뉴 「여기부터 안 읽음」", () => {
       expect(item).toMatchObject({
         key: "mark-unread",
         testKey: "mark-unread",
-        label: MARK_UNREAD_ACTION_LABEL,
+        labelKey: MARK_UNREAD_ACTION_KEY,
       });
-      return item?.label;
+      return item !== undefined && "labelKey" in item ? item.labelKey : undefined;
     });
     expect(new Set(labels).size).toBe(1);
-    expect(labels[0]).toBe("여기부터 안 읽음");
+    const ko = createMessageCopy({ messageLocale: "ko-KR", catalog: koCatalog });
+    expect(ko(labels[0]!)).toBe("여기부터 안 읽음");
   });
 
   it("인벤토리에 항목이 있고 「이 메시지를 두고 하는 일」 묶음의 끝(나중에 알림 뒤, 복사 묶음 앞)에 선다", () => {

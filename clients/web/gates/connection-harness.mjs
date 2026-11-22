@@ -47,7 +47,7 @@ function member(id, kind, displayName, handle, extra = {}) {
 }
 
 const ROSTER = [
-  member(ME, "human", "곽성재", "seongjae", { role: "owner" }),
+  member(ME, "human", "한지후", "jihu", { role: "owner" }),
   member(PEER, "human", "김인턴", "intern-kim", { role: "member" }),
   member(AGENT, "agent", "코메토", "kometto", { ownerHumanId: ME, agentModel: "claude-opus-5" }),
 ];
@@ -155,7 +155,7 @@ export async function installBackend(context, port, options = {}) {
   const session = {
     accessToken: "gate-only-not-a-credential",
     refreshToken: "gate-only-not-a-credential",
-    member: { id: ME, workspaceId: WORKSPACE_ID, kind: "human", displayName: "곽성재", handle: "seongjae" },
+    member: { id: ME, workspaceId: WORKSPACE_ID, kind: "human", displayName: "한지후", handle: "jihu" },
     realtimeWebSocketUrl: `ws://127.0.0.1:${port + 900}/connection/websocket`,
   };
   const state = {
@@ -348,7 +348,7 @@ export async function installBackend(context, port, options = {}) {
 export async function signIn(page, origin, ready = { testId: "channel-list", state: "visible" }) {
   await page.goto(origin, { waitUntil: "networkidle" });
   await advanceToAccount(page);
-  await page.getByTestId("login-email").fill("seongjae@dawn.example");
+  await page.getByTestId("login-email").fill("jihu@dawn.example");
   await page.getByTestId("login-password").fill("gate-only-not-a-credential");
   await page.getByTestId("login-submit").click();
   await page.getByTestId(ready.testId).waitFor({ state: ready.state });

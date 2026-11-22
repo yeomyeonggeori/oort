@@ -82,7 +82,7 @@ function person(
 }
 
 const DIRECTORY = makeDirectory([
-  person(REQUESTER, 'human', '곽성재', 'seongjae'),
+  person(REQUESTER, 'human', '한지후', 'jihu'),
   person(SKY, 'human', '김하늘', 'sky'),
   person(HERMES, 'agent', 'hermes', 'hermes'),
 ]);
@@ -240,7 +240,7 @@ describe('GC-8: 서버가 게시한 골든 props → 폰 보는 사람별 렌더
     );
     await act(async () => undefined);
     expect(
-      within(line).getByText('곽성재에게 AI 계정 연결을 제안했어요'),
+      within(line).getByText('한지후에게 AI 계정 연결을 제안했어요'),
     ).toBeTruthy();
     expect(pressables(line)).toBe(0);
     expect(screen.queryByTestId('ai-suggest-target')).toBeNull();

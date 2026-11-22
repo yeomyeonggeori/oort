@@ -38,12 +38,25 @@ import UIKit
 // (#3931, ADR-0204 D6).
 // =============================================================================
 
+// Scene life cycle (#6015). An app built with the iOS 27 SDK that does not adopt
+// UIScene is stopped by UIKit the moment its first scene is created. Info.plist's
+// UIApplicationSceneManifest names `SceneDelegate` (SceneDelegate.swift), Expo's
+// `ExpoAppSceneDelegate`, which creates the window and starts React Native into
+// it from `scene(_:willConnectTo:options:)`. So this class only builds the factory
+// and hands it over through `ExpoReactNativeFactoryProvider`; it no longer makes a
+// window. The scene delegate also writes its window back into `window` below.
 @main
-class AppDelegate: ExpoAppDelegate {
+class AppDelegate: ExpoAppDelegate, ExpoReactNativeFactoryProvider {
   var window: UIWindow?
 
   var reactNativeDelegate: ReactNativeDelegate?
-  var reactNativeFactory: ExpoReactNativeFactory?
+  // `RCTReactNativeFactory?`, the exact type ExpoReactNativeFactoryProvider asks
+  // for; the value is still the ExpoReactNativeFactory built below.
+  var reactNativeFactory: RCTReactNativeFactory?
+
+  // The module name index.js registers. The provider's default is "main", which
+  // would start a surface nothing is registered under.
+  var reactNativeFactoryModuleName: String { "MomoMobile" }
 
   override func application(
     _ application: UIApplication,
@@ -70,13 +83,9 @@ class AppDelegate: ExpoAppDelegate {
     reactNativeDelegate = delegate
     reactNativeFactory = factory
 
-    window = UIWindow(frame: UIScreen.main.bounds)
-
-    factory.startReactNative(
-      withModuleName: "MomoMobile",
-      in: window,
-      launchOptions: launchOptions
-    )
+    // No window and no startReactNative here: the scene delegate does both once
+    // UIKit connects the scene, after this method has returned. The lock-screen
+    // 승인/거절 does not wait for that: its handler, installed above, is native.
 
     // Load-bearing: this is what hands the launch event to every registered Expo
     // subscriber. Returning `true` instead would leave expo-notifications
@@ -86,8 +95,12 @@ class AppDelegate: ExpoAppDelegate {
 
   // Warm `oort://` / `momo://` (OS camera, Safari, another app) must reach JS
   // `Linking` 'url'. ExpoAppDelegate only forwards this to Expo subscribers;
-  // RCTLinkingManager is not one. Cold launch still uses launchOptions via
-  // getInitialURL and is unchanged.
+  // RCTLinkingManager is not one. Under the scene life cycle UIKit calls the scene
+  // delegate, not this method; Expo's SceneEventForwarder calls this method from
+  // there and skips its own RCTLinkingManager call when this one already made it,
+  // so the 'url' event fires once. A cold launch's URL arrives in the scene's
+  // connection options, and ExpoAppSceneDelegate rebuilds the launch options
+  // `Linking.getInitialURL()` reads from it.
   override func application(
     _ app: UIApplication,
     open url: URL,

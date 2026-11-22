@@ -34,6 +34,7 @@ import { attachmentMediaFromWire } from "./attachmentMedia";
 import { parseExecutionPlan, type SpawnExecutionPlan } from "./executionPlan";
 import { restoredLoginResponse } from "./sessionModel";
 import { tokenExpiresAtMs } from "./tokenLifetime";
+import { anotherSessionStored, nextSessionEpoch, sessionStamp, type SessionStamp } from "./sessionStamp";
 import {
   isUnfurlProxyPath,
   messageUnfurlFromWire,
@@ -136,6 +137,12 @@ export interface RosterMember {
   avatarUrl?: string;
   /** Workspace role, as the roster projection reports it. */
   role?: MembershipRole;
+  /**
+   * Humans only (openapi `RosterMember.email`): the sign-in address. The server sends it to every
+   * reader of the roster today; who may SEE it is the client gate `profileEmail` (guests do not, #5780).
+   * Absent for agents and on servers that predate the column; a non-string drops the column.
+   */
+  email?: string;
   channelCount: number;
   channelIds: string[];
   capabilities: string[];
@@ -281,8 +288,8 @@ function sanitizeRosterMember(value: unknown): unknown {
     const { statusText: _bad, ...rest } = row;
     row = rest;
   }
-  // v3 agent profile text: a non-string drops the column, never the member.
-  for (const key of ["tagline", "roleLabel", "avatarPreset"] as const) {
+  // v3 agent profile text, and the human's email (#5780): a non-string drops the column, never the member.
+  for (const key of ["tagline", "roleLabel", "avatarPreset", "email"] as const) {
     if (key in row && typeof row[key] !== "string") {
       const { [key]: _bad, ...rest } = row;
       row = rest;
@@ -343,6 +350,13 @@ export interface Channel {
   memberIds?: string[];
   muted: boolean;
   archivedAtMs?: number;
+  /**
+   * ADR-0224 D2 (#5837, additive). 정식 멤버가 「채널 둘러보기」에서 찾아 스스로 들어올 수 있는 공개 채널인가.
+   * 옛 서버는 싣지 않는다 — 없으면 꺼짐으로 읽는다(지금 동작 그대로).
+   */
+  browseListed?: boolean;
+  /** ADR-0224 D6 (#5837, additive). 새로 합류하는 사람이 자동으로 들어가는 기본 채널인가. 없으면 아니다. */
+  isDefault?: boolean;
 }
 
 /**
@@ -399,6 +413,20 @@ export interface ReadState {
    * the cached value; a reader treats a value it never had as `0`.
    */
   followedUnreadReplyCount?: number;
+  /**
+   * ADR-0177 amendment 2026-11-14 D15/D18. The **requesting member's own** read floor: after
+   * 「대화 나가기」 only messages with `seq >= historyFromSeq` reach the caller. Wire name
+   * `history_from_seq`. Three states, like `closedAtSeq`:
+   *
+   * - `number` (≥ 1): the caller left this 1:1 and the floor is here;
+   * - `null`: a `GET read-state` row said there is no floor (full history);
+   * - `undefined`: this response did not say (a server without the leave route, the `PUT
+   *   read-state` response, the realtime frame). Keep what you had — `null` would show a left DM.
+   *
+   * D21: the key's **presence** on a `GET` row (even with `null`) is how a client knows the server
+   * carries 「대화 나가기」 (`dmLeaveMode`).
+   */
+  historyFromSeq?: number | null;
 }
 
 /** ADR-0178 D6. Only `"explicit_open"` is sent; absence means background. */
@@ -899,15 +927,21 @@ interface RefreshResponse {
 // cannot reach the server fails as a `NetworkError` within seconds instead of
 // pending forever, which is what made a `.local` address look like a hung app
 // rather than a wrong address (MOMO-609 / G-1).
+//
+// `base` is the server the credential in `token` (or in the body) belongs to. A
+// caller that read the credential and then awaits anything before sending passes
+// the base it read in the same tick: the stored server can change in between
+// (#5816), and the request must still go where the credential came from.
 function rawRequest(
   path: string,
   init: RequestInit,
-  token: string | null
+  token: string | null,
+  base: string = apiBase()
 ): Promise<HttpResponse> {
   const headers = new Headers(init.headers);
   headers.set("Content-Type", "application/json");
   if (token) headers.set("Authorization", `Bearer ${token}`);
-  return fetchWithDeadline(`${apiBase()}${path}`, { ...init, headers });
+  return fetchWithDeadline(`${base}${path}`, { ...init, headers });
 }
 
 function parseError(res: HttpResponse): ApiError {
@@ -966,6 +1000,8 @@ interface Rotation {
    * through the host.
    */
   handle?: boolean;
+  /** The server that minted `pair` (#5816): a pair is revoked there and nowhere else. */
+  base?: string;
 }
 
 // ---- refresh proof (#3106, ADR-0146 D-7 증보 #3079) ----------------------------
@@ -1065,11 +1101,17 @@ async function refreshAttempt(
   refreshToken: string,
   identity: { workspaceId: string; memberId: string } | null,
   skewMs: number,
-  bind = false
+  bind: boolean,
+  base: string
 ): Promise<RefreshAttempt> {
   const session = coreSession();
   if (identity && session.refreshThroughHost) {
-    const answer = await session.refreshThroughHost({ ...identity, skewMs, ...(bind ? { bind } : {}) });
+    const answer = await session.refreshThroughHost({
+      ...identity,
+      skewMs,
+      apiBase: base,
+      ...(bind ? { bind } : {}),
+    });
     if (answer) {
       const pair =
         answer.status === 200 && answer.accessToken && answer.refreshToken
@@ -1107,7 +1149,8 @@ async function refreshAttempt(
       method: "POST",
       body: JSON.stringify(deviceProof ? { refreshToken, deviceProof } : { refreshToken }),
     },
-    null
+    null,
+    base
   );
   if (res.ok) {
     return {
@@ -1137,12 +1180,13 @@ async function refreshAttempt(
 async function refreshWithRetries(
   refreshToken: string,
   identity: { workspaceId: string; memberId: string } | null,
-  bind = false
+  bind: boolean,
+  base: string
 ): Promise<{ pair: RefreshResponse; handle: boolean } | null> {
   let skewMs = 0;
   let plainRetried = false;
   for (let attempt = 1; attempt <= MAX_REFRESH_ATTEMPTS; attempt++) {
-    const answer = await refreshAttempt(refreshToken, identity, skewMs, bind);
+    const answer = await refreshAttempt(refreshToken, identity, skewMs, bind, base);
     if (answer.pair) return { pair: answer.pair, handle: answer.handle };
     const retry = refreshRetry(answer.status, answer.code, answer.proved, plainRetried);
     if (retry === "sign-out") return null;
@@ -1206,13 +1250,16 @@ function rotateSession(): Promise<Rotation> {
  */
 async function rotateOnce(): Promise<Rotation> {
   const refreshToken = coreSession().getRefreshToken();
+  // The server that token belongs to, read in the same tick: every attempt of
+  // this rotation (and the revocation of a pair nobody holds) goes there.
+  const base = apiBase();
   // Having no token to present is not a network problem: there is nothing
   // to rotate and nothing to keep waiting for.
   if (!refreshToken) return { outcome: "rejected", pair: null };
   rotationPosted = true;
   const bind = nextRotationBinds;
   nextRotationBinds = false;
-  const rotated = await refreshWithRetries(refreshToken, identityOf(), bind);
+  const rotated = await refreshWithRetries(refreshToken, identityOf(), bind, base);
   if (!rotated) {
     coreSession().markAuthExpired();
     return { outcome: "rejected", pair: null };
@@ -1228,12 +1275,19 @@ async function rotateOnce(): Promise<Rotation> {
     // Nobody will hold this pair. A logout that joined this rotation revokes it
     // itself; otherwise end it here so it does not live on the server for 30
     // days (#3072 review M1).
-    if (!rotationJoinedByLogout) void revokePair(pair, handle);
+    if (!rotationJoinedByLogout) void revokePair(pair, handle, base);
     // Nothing is proven about the session now in the store — it is not ours.
-    return { outcome: "unreachable", pair, handle };
+    return { outcome: "unreachable", pair, handle, base };
+  }
+  if (apiBase() !== base) {
+    // The stored session always belongs to the stored server (#5816): a pair
+    // minted by another one is ended there and not kept.
+    void revokePair(pair, handle, base);
+    coreSession().clearSession();
+    return { outcome: "rejected", pair, handle, base };
   }
   coreSession().applyRotation(pair.accessToken, pair.refreshToken);
-  return { outcome: "rotated", pair, handle };
+  return { outcome: "rotated", pair, handle, base };
 }
 
 /**
@@ -1241,7 +1295,7 @@ async function rotateOnce(): Promise<Rotation> {
  * token: the server would refuse the whole logout over it (it validates the
  * refresh half first), so only the access half goes.
  */
-async function revokePair(pair: RefreshResponse, handle = false): Promise<void> {
+async function revokePair(pair: RefreshResponse, handle: boolean, base: string): Promise<void> {
   try {
     await rawRequest(
       "/v1/auth/logout",
@@ -1249,7 +1303,8 @@ async function revokePair(pair: RefreshResponse, handle = false): Promise<void> 
         method: "POST",
         body: JSON.stringify(handle ? {} : { refreshToken: pair.refreshToken }),
       },
-      pair.accessToken
+      pair.accessToken,
+      base
     );
   } catch {
     // The pair expires on its own; there is no one to tell.
@@ -1279,10 +1334,27 @@ export const BIND_RETRIES = 3;
  * `require`'s protection — until the next sign-in. A bind that nothing
  * answered is retried a few times while the first token is still the stored
  * one. A browser (no key) is unchanged: no extra refresh.
+ *
+ * `base` is the server the sign-in's credential went to (#5816): its answer is
+ * a session of that server and is adopted only while this device still points
+ * there (see `refuseIfServerMoved`).
  */
-function adoptSignIn(response: LoginResponse): void {
+function adoptSignIn(response: LoginResponse, base: string): void {
+  refuseIfServerMoved(response, base);
+  nextSessionEpoch();
   coreSession().applyLogin(response);
   bindRefreshKey(0);
+}
+
+/**
+ * A session is adopted only under the server that issued it (#5816): the
+ * stored session always belongs to the stored server. Otherwise the pair is
+ * ended where it was minted and the sign-in fails the way an unanswered one does.
+ */
+function refuseIfServerMoved(response: LoginResponse, base: string): void {
+  if (apiBase() === base) return;
+  void revokePair(response, false, base);
+  throw new NetworkError("unreachable", REQUEST_TIMEOUT_MS);
 }
 
 function hostProvesRefresh(): boolean {
@@ -1341,9 +1413,14 @@ function bindRefreshKey(retry: number): void {
  *                  reach the server, check the connection and try again"); the
  *                  next request, or the reconnect, rotates again.
  */
-export async function rotateAfterUnauthorized(): Promise<boolean> {
+export async function rotateAfterUnauthorized(sentAs: SessionStamp): Promise<boolean> {
+  // A request is retried only as the session that sent it (`sentAs`, read with
+  // the token it carried, #5816). Another stored session's credentials are never
+  // spent on it: the request fails like an unanswered one, and that session is
+  // not declared over.
+  if (anotherSessionStored(sentAs)) throw new NetworkError("unreachable", REQUEST_TIMEOUT_MS);
   const outcome = await refreshSessionOutcome();
-  if (outcome === "unreachable") {
+  if (outcome === "unreachable" || anotherSessionStored(sentAs)) {
     throw new NetworkError("unreachable", REQUEST_TIMEOUT_MS);
   }
   return outcome === "rotated";
@@ -1375,9 +1452,12 @@ export async function authedResponse(
   path: string,
   init: RequestInit = {}
 ): Promise<HttpResponse> {
+  // The session this request goes out as (#5816): it is sent again only as that
+  // session.
+  const sentAs = sessionStamp();
   let res = await rawRequest(path, init, coreSession().getAccessToken());
   if (res.status === 401 && coreSession().getRefreshToken()) {
-    if (await rotateAfterUnauthorized()) {
+    if (await rotateAfterUnauthorized(sentAs)) {
       res = await rawRequest(path, init, coreSession().getAccessToken());
     }
   }
@@ -1482,14 +1562,16 @@ export async function login(
 ): Promise<LoginResponse> {
   const body: Record<string, string> = { email: normalizeEmail(email), password };
   if (workspace && workspace.trim()) body.workspace = workspace.trim();
+  const base = apiBase();
   const res = await rawRequest(
     "/v1/auth/login",
     { method: "POST", body: JSON.stringify(body) },
-    null
+    null,
+    base
   );
   if (!res.ok) throw parseError(res);
   const loginResponse = loginResponseFromWire(res.json<unknown>());
-  adoptSignIn(loginResponse);
+  adoptSignIn(loginResponse, base);
   return loginResponse;
 }
 
@@ -1548,6 +1630,7 @@ export async function joinWithInvite(
   // display name from any other spelling would name the account after a string
   // it does not contain (`ADA@…` had been shouting "ADA" back at people).
   const normalizedEmail = normalizeEmail(email);
+  const base = apiBase();
   const res = await rawRequest(
     "/v1/join",
     {
@@ -1564,11 +1647,12 @@ export async function joinWithInvite(
         timeZone: browserTimeZone(),
       }),
     },
-    null
+    null,
+    base
   );
   if (!res.ok) throw parseError(res);
   const joinResponse = joinResponseFromWire(res.json<unknown>());
-  adoptSignIn(joinResponse);
+  adoptSignIn(joinResponse, base);
   return joinResponse;
 }
 
@@ -1621,18 +1705,20 @@ export async function claimOwnerPassword(
   token: string,
   password: string
 ): Promise<ClaimedSession> {
+  const base = apiBase();
   const res = await rawRequest(
     "/v1/claim",
     {
       method: "POST",
       body: JSON.stringify({ token: token.trim(), password }),
     },
-    null
+    null,
+    base
   );
   if (!res.ok) throw claimErrorFromResponse(res);
   const body = res.json<unknown>();
   const claimResponse = loginResponseFromWire(body);
-  adoptSignIn(claimResponse);
+  adoptSignIn(claimResponse, base);
   const claimKind = parseClaimKind(str(responseRecord(body), "claimKind"));
   return claimKind === undefined ? claimResponse : { ...claimResponse, claimKind };
 }
@@ -1648,6 +1734,11 @@ export interface DeviceLinkRedeemResult {
   pendingSas: boolean;
   /** Four-digit SAS when the server sent one. Null when omitted (OpenAPI). */
   sas: string | null;
+  /**
+   * The server that redeemed the voucher and issued `session` (#5816). A held
+   * session is probed and activated against this server only.
+   */
+  server: string;
 }
 
 export type DeviceLinkProbe = "active" | "pending" | "unreachable";
@@ -1656,7 +1747,7 @@ function fourDigitSas(value: string | undefined): string | null {
   return value !== undefined && /^\d{4}$/.test(value) ? value : null;
 }
 
-function deviceLinkRedeemFromWire(value: unknown): DeviceLinkRedeemResult {
+function deviceLinkRedeemFromWire(value: unknown, server: string): DeviceLinkRedeemResult {
   const source = responseRecord(value);
   const pendingSas = bool(source, "pendingSas");
   if (pendingSas === undefined) throw new WireShapeError();
@@ -1664,6 +1755,7 @@ function deviceLinkRedeemFromWire(value: unknown): DeviceLinkRedeemResult {
     session: loginResponseFromWire(source),
     pendingSas,
     sas: fourDigitSas(str(source, "sas")),
+    server,
   };
 }
 
@@ -1671,6 +1763,7 @@ export async function redeemDeviceLink(
   token: string,
   device: { name: string; platform: string }
 ): Promise<DeviceLinkRedeemResult> {
+  const base = apiBase();
   const res = await rawRequest(
     "/v1/auth/device-link/redeem",
     {
@@ -1683,35 +1776,47 @@ export async function redeemDeviceLink(
         },
       }),
     },
-    null
+    null,
+    base
   );
   if (!res.ok) throw parseError(res);
-  const result = deviceLinkRedeemFromWire(res.json<unknown>());
-  if (!result.pendingSas) {
-    adoptSignIn(result.session);
+  const result = deviceLinkRedeemFromWire(res.json<unknown>(), base);
+  if (result.pendingSas) {
+    // A held session is not adopted yet, but it is the redeeming server's all
+    // the same: when the device already points elsewhere it is never activated.
+    refuseIfServerMoved(result.session, base);
+  } else {
+    adoptSignIn(result.session, base);
   }
   return result;
 }
 
-/** Land the redeemed session after SAS confirm (or immediately if no hold). */
-export function activateDeviceLinkSession(session: LoginResponse): void {
-  adoptSignIn(session);
+/**
+ * Land the redeemed session after SAS confirm (or immediately if no hold).
+ * `server` is `DeviceLinkRedeemResult.server`: the session is adopted only
+ * while this device still points there (#5816).
+ */
+export function activateDeviceLinkSession(session: LoginResponse, server: string): void {
+  adoptSignIn(session, server);
 }
 
 /**
  * Ask whether a redeemed access token is usable yet. Does not touch the
  * session store and does not treat 401 as "signed out" — pending SAS is 401
- * until the issuer confirms.
+ * until the issuer confirms. Sent to `server` (`DeviceLinkRedeemResult.server`),
+ * the one that issued the token, whatever this device points at by now (#5816).
  */
 export async function probeDeviceLinkAccess(
   accessToken: string,
-  workspaceId: string
+  workspaceId: string,
+  server: string
 ): Promise<DeviceLinkProbe> {
   try {
     const res = await rawRequest(
       `/v1/workspaces/${encodeURIComponent(workspaceId)}/channels`,
       { method: "GET" },
-      accessToken
+      accessToken,
+      server
     );
     if (res.ok) return "active";
     if (res.status === 401) return "pending";
@@ -1756,8 +1861,11 @@ export interface LogoutOptions {
    * revocation waits until it settles, so its request is answered before the
    * token dies; bound its own deadline accordingly. A rejection is swallowed —
    * it never stops the revocation.
+   *
+   * `apiBase` is the server that issued that token (#5816). Send there, never
+   * to the stored server read later: it may already name another one.
    */
-  beforeRevoke?: (accessToken: string) => Promise<unknown>;
+  beforeRevoke?: (accessToken: string, apiBase: string) => Promise<unknown>;
 }
 
 /**
@@ -1774,8 +1882,19 @@ export interface LogoutOptions {
  * captured access half, so `beforeRevoke` would be refused too. So the network
  * half joins the rotation and uses what it minted (#2677 review M1). When the
  * rotation fails, the captured pair is all there is, as before.
+ *
+ * Every request this makes — `beforeRevoke`'s, the revocation, the host's
+ * revocation, the rotation an expired access token needs — goes to the server
+ * that issued the leaving pair, read in the same tick as the tokens (#5816).
+ * Changing the stored server afterwards never redirects them.
  */
 export async function logout(options: LogoutOptions = {}): Promise<void> {
+  // Whatever this session still has in the air is no longer sent again (#5816).
+  nextSessionEpoch();
+  // The server this session belongs to. Read first, with the tokens below, in
+  // the same tick: nothing after an `await` re-reads it. A pair a joined
+  // rotation minted is revoked where that rotation sent its refresh.
+  let base = apiBase();
   // Join only a rotation that has actually presented its token. One still
   // waiting for another tab's lock has spent nothing: once the store is wiped
   // below it finds no token and never posts (#3072 review M1).
@@ -1788,16 +1907,17 @@ export async function logout(options: LogoutOptions = {}): Promise<void> {
   coreSession().clearSession();
   if (rotation) {
     // Never rejects: the rotation turns its own failures into an outcome.
-    const { pair } = await rotation;
+    const { pair, base: mintedAt } = await rotation;
     if (pair) {
       access = pair.accessToken;
       refresh = pair.refreshToken;
+      if (mintedAt !== undefined) base = mintedAt;
     }
   }
   if (!access) return; // nothing the server will accept a revocation for
   if (options.beforeRevoke) {
     try {
-      await options.beforeRevoke(access);
+      await options.beforeRevoke(access, base);
     } catch {
       // Best effort by contract: the session still has to end.
     }
@@ -1807,7 +1927,14 @@ export async function logout(options: LogoutOptions = {}): Promise<void> {
   const session = coreSession();
   if (session.revokeThroughHost && identity) {
     try {
-      if (await session.revokeThroughHost({ accessToken: access, refreshToken: refresh, ...identity }))
+      if (
+        await session.revokeThroughHost({
+          accessToken: access,
+          refreshToken: refresh,
+          ...identity,
+          apiBase: base,
+        })
+      )
         return;
     } catch {
       // Best effort, like every revocation here.
@@ -1821,7 +1948,8 @@ export async function logout(options: LogoutOptions = {}): Promise<void> {
         method: "POST",
         body: JSON.stringify(refreshToken ? { refreshToken } : {}),
       },
-      accessToken
+      accessToken,
+      base
     );
   try {
     const res = await revoke(access, refresh);
@@ -1832,7 +1960,7 @@ export async function logout(options: LogoutOptions = {}): Promise<void> {
       // is already wiped, so this rotation is carried by locals only — with
       // the refresh key's proof like every refresh (#3106): under `require`
       // an unproven one would be refused and the lineage would live on.
-      const rotated = await refreshWithRetries(refresh, identity);
+      const rotated = await refreshWithRetries(refresh, identity, false, base);
       if (rotated && !rotated.handle) {
         await revoke(rotated.pair.accessToken, rotated.pair.refreshToken);
       }
@@ -1859,7 +1987,7 @@ export async function fetchRealtimeToken(): Promise<string> {
 export async function fetchFreshRealtimeToken(nowMs = Date.now()): Promise<string> {
   const expiresAt = tokenExpiresAtMs(coreSession().getAccessToken());
   if (expiresAt === null || expiresAt - nowMs <= 120_000) {
-    if (!(await rotateAfterUnauthorized())) throw new ApiError(401, "Session expired");
+    if (!(await rotateAfterUnauthorized(sessionStamp()))) throw new ApiError(401, "Session expired");
   }
   return fetchRealtimeToken();
 }
@@ -1942,10 +2070,22 @@ export function openDirectMessage(
   );
 }
 
-/** Active workspace members, humans and agents alike (agents are members). */
-export async function fetchRoster(workspaceId: string): Promise<RosterMember[]> {
+/**
+ * Active workspace members, humans and agents alike (agents are members).
+ *
+ * `includeSuspended` asks for the suspended humans as well (`?include=suspended`, #5814): the server honours it only for
+ * an owner or admin person on a full session and ignores it for everyone else, and a server older than #5814 ignores the
+ * unknown query key (`RosterQuery` has no `deny_unknown_fields`) and keeps returning the active roster. Only the web
+ * roster query that feeds the member tab and the profile's 「정지 풀기」 asks (#5781); every other caller — the phone,
+ * one-off reads — keeps the active roster, so a suspended person cannot leak into a picker that never expected one.
+ */
+export async function fetchRoster(
+  workspaceId: string,
+  options: { includeSuspended?: boolean } = {}
+): Promise<RosterMember[]> {
+  const query = options.includeSuspended === true ? "?include=suspended" : "";
   const res = await request<{ members: RosterMember[] }>(
-    `/v1/workspaces/${encodeURIComponent(workspaceId)}/roster`
+    `/v1/workspaces/${encodeURIComponent(workspaceId)}/roster${query}`
   );
   return (arrayField(res, "members") ?? [])
     .map(sanitizeRosterMember)
@@ -2171,6 +2311,40 @@ export async function removeChannelMember(
       { method: "DELETE" }
     )
   );
+}
+
+/** What `DELETE …/channels/{ch}/members/me` answers: whose membership ended, and whether it archived the channel. */
+export interface ChannelLeaveResult {
+  channelId: string;
+  memberId: string;
+  /** A private channel is archived in the same transaction when its last active member leaves. */
+  archived: boolean;
+}
+
+/**
+ * Leave a channel yourself (#5778). Any human member may: this is the self route, not the
+ * owner/admin `removeChannelMember`. A DM answers 403 (DMs cannot be left), no live membership
+ * — or an archived channel — answers 404.
+ */
+export async function leaveChannel(
+  workspaceId: string,
+  channelId: string
+): Promise<ChannelLeaveResult> {
+  const source = responseRecord(
+    await request<unknown>(
+      `/v1/workspaces/${encodeURIComponent(
+        workspaceId
+      )}/channels/${encodeURIComponent(channelId)}/members/me`,
+      { method: "DELETE" }
+    )
+  );
+  const leftChannelId = str(source, "channelId");
+  const memberId = str(source, "memberId");
+  const archived = bool(source, "archived");
+  if (leftChannelId === undefined || memberId === undefined || archived === undefined) {
+    throw new WireShapeError();
+  }
+  return { channelId: leftChannelId, memberId, archived };
 }
 
 /**
@@ -2702,6 +2876,8 @@ interface WireReadState {
   closed_at_seq?: number | null;
   /** ADR-0124 amendment 4 (#5667). Absent on an older server and on a `PUT read-state` response. */
   followed_unread_reply_count?: number;
+  /** ADR-0177 D15/D18 (2026-11-14). `null` = no floor (GET), absent = the response did not say. */
+  history_from_seq?: number | null;
 }
 
 function markedUnreadBeforeSeqFromWire(
@@ -2733,6 +2909,18 @@ function closedAtSeqFromWire(wire: WireReadState): number | null | undefined {
   return seqFromWire(value);
 }
 
+/**
+ * ADR-0177 D15/D18 (2026-11-14): `null` stays `null` ("no floor"), a positive integer is the floor
+ * (the column is `CHECK (history_from_seq > 0)`), anything else — absent, zero, negative, fractional,
+ * not a number — is "did not say". A malformed value is neither a floor nor a claim that there is none.
+ */
+function historyFromSeqFromWire(wire: WireReadState): number | null | undefined {
+  const value = wire.history_from_seq;
+  if (value === null) return null;
+  const seq = seqFromWire(value);
+  return seq !== undefined && seq > 0 ? seq : undefined;
+}
+
 function toReadState(wire: WireReadState): ReadState {
   const state: ReadState = {
     channelId: wire.channel_id,
@@ -2751,6 +2939,8 @@ function toReadState(wire: WireReadState): ReadState {
   // A count, not a seq, but the same shape: a non-negative integer, anything else is "did not say".
   const followedUnreadReplyCount = seqFromWire(wire.followed_unread_reply_count);
   if (followedUnreadReplyCount !== undefined) state.followedUnreadReplyCount = followedUnreadReplyCount;
+  const historyFromSeq = historyFromSeqFromWire(wire);
+  if (historyFromSeq !== undefined) state.historyFromSeq = historyFromSeq;
   return state;
 }
 
@@ -2788,6 +2978,22 @@ export async function closeDm(
 ): Promise<void> {
   await authedRequest(
     `/v1/workspaces/${encodeURIComponent(workspaceId)}/channels/${encodeURIComponent(channelId)}/closure`,
+    { method: "PUT", body: JSON.stringify({ seenSeq }) }
+  );
+}
+
+/**
+ * 사람끼리의 1:1 에서 나간다 (ADR-0177 증보 2026-11-14 D16). `seenSeq` 는 이 대화에서 클라이언트가 **들고 있는 가장 큰 seq**
+ * (`dmLeaveSeenSeq`)다. 서버는 하한을 `GREATEST(기존, LEAST(seenSeq, 마지막 seq) + 1)` 로 올리고 내리지 않는다. 204 - 본문이 없고
+ * 하한 값도 싣지 않는다(다음 `GET read-state` 가 싣는다). 되돌리는 경로는 없다. 응답 갈래는 `dmLeaveOutcome` 이 가른다.
+ */
+export async function leaveDm(
+  workspaceId: string,
+  channelId: string,
+  seenSeq: number
+): Promise<void> {
+  await authedRequest(
+    `/v1/workspaces/${encodeURIComponent(workspaceId)}/channels/${encodeURIComponent(channelId)}/dm-leave`,
     { method: "PUT", body: JSON.stringify({ seenSeq }) }
   );
 }
@@ -2911,7 +3117,16 @@ export async function fetchMessages(
     )}/channels/${encodeURIComponent(channelId)}/messages${suffix}`
   );
   const messages = arrayField<Message>(page, "messages");
-  return { ...page, messages: (messages ?? []).filter(isMessage) };
+  // 서버는 글이 든 쪽에는 언제나 숫자를 주고(대화의 맨 처음이 든 쪽도), 더 옛 글이 없어 빈 쪽을 줄
+  // 때만 `nextBefore: null` 을 준다(키는 늘 실린다). 클라이언트는 「없음」을 `undefined` 로만
+  // 읽으므로(`nextBefore === undefined` = 더 옛 글 없음) 여기서 한 번 키를 지운다 — `null` 이 새면
+  // 「끝」이 영영 서지 않아 맨 위에 닿을 때마다 빈 쪽을 되풀이해 읽는다(#5757).
+  const { nextBefore, ...rest } = page;
+  return {
+    ...rest,
+    ...(typeof nextBefore === "number" ? { nextBefore } : {}),
+    messages: (messages ?? []).filter(isMessage),
+  };
 }
 
 // ---- 링크 언퍼얼 (ADR-0170 D5) ---------------------------------------------
@@ -3043,9 +3258,10 @@ export async function fetchUnfurlImage(
       ...(signal ? { signal } : {}),
     });
   };
+  const sentAs = sessionStamp();
   let res = await send(coreSession().getAccessToken());
   if (res.status === 401 && coreSession().getRefreshToken()) {
-    if (await rotateAfterUnauthorized()) res = await send(coreSession().getAccessToken());
+    if (await rotateAfterUnauthorized(sentAs)) res = await send(coreSession().getAccessToken());
   }
   if (res.status === 401) coreSession().markAuthExpired();
   // A 429 from the proxy says when to come back (#4956); keep it so a screen can wait that long
@@ -3675,9 +3891,10 @@ export async function fetchAttachmentContent(
       ...(signal ? { signal } : {}),
     });
   };
+  const sentAs = sessionStamp();
   let res = await send(coreSession().getAccessToken());
   if (res.status === 401 && coreSession().getRefreshToken()) {
-    if (await rotateAfterUnauthorized()) res = await send(coreSession().getAccessToken());
+    if (await rotateAfterUnauthorized(sentAs)) res = await send(coreSession().getAccessToken());
   }
   if (res.status === 401) coreSession().markAuthExpired();
   if (!res.ok) throw new ApiError(res.status, `HTTP ${res.status}`);
@@ -3828,9 +4045,10 @@ async function fetchAvatarBlob(
     if (token) headers.set("Authorization", `Bearer ${token}`);
     return fetch(`${apiBase()}${avatarUrl}`, { headers });
   };
+  const sentAs = sessionStamp();
   let res = await send(coreSession().getAccessToken());
   if (res.status === 401 && coreSession().getRefreshToken()) {
-    if (await rotateAfterUnauthorized()) res = await send(coreSession().getAccessToken());
+    if (await rotateAfterUnauthorized(sentAs)) res = await send(coreSession().getAccessToken());
   }
   if (res.status === 401) coreSession().markAuthExpired();
   if (!res.ok) throw new ApiError(res.status, `HTTP ${res.status}`);
@@ -4081,6 +4299,71 @@ export async function changeWorkspaceMemberRole(
       )}/members/${encodeURIComponent(memberId)}/role`,
       { method: "PATCH", body: JSON.stringify({ role }) }
     )
+  );
+}
+
+// ---- 워크스페이스 멤버 정지·정지 풀기·내보내기 (#5781 / ADR-0128 D2·D3) --------
+// POST   /v1/workspaces/{ws}/members/{member}/suspend
+// POST   /v1/workspaces/{ws}/members/{member}/reinstate
+// DELETE /v1/workspaces/{ws}/members/{member}   { ban, reason }
+//
+// 서열(자기보다 낮은 역할만 · 자기 자신 불가 · 마지막 소유자 보호)과 상태(정지는 활성만, 풀기는 정지된 멤버만)는
+// 서버가 판정한다. 이 클라이언트는 요청을 보내고 서버가 말한 새 상태를 돌려줄 뿐이다. 차단(`ban`)은 이 화면의 범위가
+// 아니라 늘 `false` 로 보낸다(차단 목록 화면은 따로).
+
+/** `MembershipLifecycleResponse`(`memberId`, `status`). `status` 는 서버가 적은 새 멤버 상태다. */
+export interface WorkspaceMemberLifecycle {
+  memberId: string;
+  status: RosterMember["status"];
+}
+
+export function workspaceMemberLifecycleFromWire(value: unknown): WorkspaceMemberLifecycle {
+  const source = responseRecord(value);
+  const memberId = str(source, "memberId");
+  const status = str(source, "status");
+  if (
+    memberId === undefined ||
+    (status !== "active" && status !== "invited" && status !== "suspended" && status !== "deleted")
+  ) {
+    throw new WireShapeError();
+  }
+  return { memberId: memberId.toLowerCase(), status };
+}
+
+function memberLifecyclePath(workspaceId: string, memberId: string): string {
+  return `/v1/workspaces/${encodeURIComponent(workspaceId)}/members/${encodeURIComponent(memberId)}`;
+}
+
+/** 멤버를 정지한다. 서버가 그 멤버의 모든 세션·푸시 등록을 끝낸다. 활성이 아니면 409. */
+export async function suspendWorkspaceMember(
+  workspaceId: string,
+  memberId: string
+): Promise<WorkspaceMemberLifecycle> {
+  return workspaceMemberLifecycleFromWire(
+    await request<unknown>(`${memberLifecyclePath(workspaceId, memberId)}/suspend`, { method: "POST" })
+  );
+}
+
+/** 정지를 푼다. 끝난 세션은 되살아나지 않는다(다시 로그인). 정지된 멤버가 아니면 409. */
+export async function reinstateWorkspaceMember(
+  workspaceId: string,
+  memberId: string
+): Promise<WorkspaceMemberLifecycle> {
+  return workspaceMemberLifecycleFromWire(
+    await request<unknown>(`${memberLifecyclePath(workspaceId, memberId)}/reinstate`, { method: "POST" })
+  );
+}
+
+/** 워크스페이스에서 내보낸다(모든 채널·DM 에서 빠지고 세션이 끝난다). 차단은 하지 않는다. */
+export async function removeWorkspaceMember(
+  workspaceId: string,
+  memberId: string
+): Promise<WorkspaceMemberLifecycle> {
+  return workspaceMemberLifecycleFromWire(
+    await request<unknown>(memberLifecyclePath(workspaceId, memberId), {
+      method: "DELETE",
+      body: JSON.stringify({ ban: false }),
+    })
   );
 }
 
@@ -6154,10 +6437,64 @@ export interface AgentRun {
    * 검증하지 않은 자기 보고다. 보고가 없으면(옛 서버·벤더 경로) 키 자체가 없다.
    */
   appsUsed?: AppsUsedEntry[];
+  /** 이 run이 쓴 양(`AgentRunSpent`). 팀 AI 작업 run의 상세에만 있고, 다른 run·옛 서버는 키가 없다. */
+  spent?: AgentRunSpent;
   startedAtMs?: number;
   finishedAtMs?: number;
   createdAtMs: number;
   updatedAtMs: number;
+}
+
+/**
+ * 한 run이 쓴 양(openapi `AgentRunSpent` — ADR-0201 증보 v3 B12 #4968, `delegations`는 증보 v4 P7 #5370). 팀 AI 작업
+ * run에만 서버가 싣는다. **한 run이지 한 사람이 아니다**: 요청자·멤버 칸이 없다(ADR-0147 증보 2026-10-30 D6).
+ * 금액도 없다 — 단가가 있으면 화면이 토큰으로 「약 … 이상」을 계산한다.
+ */
+export interface AgentRunSpent {
+  promptTokens: number;
+  completionTokens: number;
+  /** 공급자 쪽 웹 검색 횟수(원장의 `web_search_requests`). */
+  webSearches: number;
+  /** 토큰 일부가 oort의 어림이다(공급자가 알려 주지 않았다). 그 숫자는 어림이라고 말한다(ADR-0147 D3). */
+  estimated: boolean;
+  /**
+   * 이 run에서 도우미가 팀 Hermes에 맡긴 횟수(지금은 0 또는 1 — 한 요청은 한 번 맡긴다). 위의 토큰·검색은 **도우미
+   * 자신의 행(팀 크레딧)만**이고, Hermes 쪽은 구독이라 oort가 금액을 재지 못해 여기 섞이지 않는다(P7·P8 「Hermes
+   * 1회(구독 — oort가 금액을 못 재요)」). 이 칸을 모르는 옛 서버(#5370 전)는 맡긴 적이 없으므로 0으로 읽는다.
+   */
+  delegations: number;
+}
+
+function spentCount(source: Record<string, unknown>, key: string): number | undefined {
+  const value = source[key];
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? value : undefined;
+}
+
+/**
+ * run의 `spent` 하나를 읽는다. **절대 던지지 않는다**: 진행 쪽은 `runs.map(parse)`라 더해진 칸 하나가 채널 전체의
+ * 진행을 비우면 안 된다. 칸이 모자라거나 모양이 다르면(음수·소수·문자열) `undefined` — 쓴 양을 말하지 않는다
+ * (모르는 숫자를 지어내지 않는다). `delegations`만은 **없으면 0**이다(그 칸 전의 서버); 있는데 모양이 다르면
+ * 나머지처럼 `undefined`다.
+ */
+export function agentRunSpentFromWire(value: unknown): AgentRunSpent | undefined {
+  const source = record(value);
+  if (source === null) return undefined;
+  const promptTokens = spentCount(source, "promptTokens");
+  const completionTokens = spentCount(source, "completionTokens");
+  const webSearches = spentCount(source, "webSearches");
+  const estimated = source["estimated"];
+  const delegations =
+    source["delegations"] === undefined ? 0 : spentCount(source, "delegations");
+  if (
+    promptTokens === undefined ||
+    completionTokens === undefined ||
+    webSearches === undefined ||
+    typeof estimated !== "boolean" ||
+    delegations === undefined
+  ) {
+    return undefined;
+  }
+  return { promptTokens, completionTokens, webSearches, estimated, delegations };
 }
 
 /** 「쓴 앱」 한 줄. 와이어 키는 이 셋뿐이다(본문·인자·결과·URL·토큰이 실릴 키가 없다). */
@@ -6412,6 +6749,8 @@ export interface AgentRunProgress {
   approvalExpiresAtMs?: number;
   /** 서버가 이 run의 승인 하나를 보는 사람 기준으로 읽어 준 것. 옛 서버·승인 없는 run은 없다. */
   bundle?: AgentRunBundle;
+  /** 이 run이 쓴 양(`AgentRunSpent`, 팀 AI 작업 run만). 다른 run·옛 서버·모양이 다른 값은 없다. */
+  spent?: AgentRunSpent;
   /** 서버가 쓴 닫힌 코드(`approval_expired` …). 모르는 코드도 그대로 온다. */
   endReason?: string;
   /** 1 = 다음에 가져갈 순서. 아직 아무도 가져가지 않은 run에만 있다. */
@@ -6555,6 +6894,7 @@ export function agentRunProgressFromWire(value: unknown): AgentRunProgress {
   const approvalId = optionalString(source, "approvalId");
   const approvalExpiresAtMs = optionalFiniteNumber(source, "approvalExpiresAtMs");
   const bundle = agentRunBundleFromWire(source.bundle);
+  const spent = agentRunSpentFromWire(source.spent);
   const endReason = optionalString(source, "endReason");
   const queuePosition = optionalPositiveInt(source, "queuePosition");
   const aheadTotal = optionalPositiveInt(source, "aheadTotal");
@@ -6590,6 +6930,7 @@ export function agentRunProgressFromWire(value: unknown): AgentRunProgress {
     ...(approvalId === undefined ? {} : { approvalId: approvalId.toLowerCase() }),
     ...(approvalExpiresAtMs === undefined ? {} : { approvalExpiresAtMs }),
     ...(bundle === undefined ? {} : { bundle }),
+    ...(spent === undefined ? {} : { spent }),
     ...(endReason === undefined ? {} : { endReason }),
     ...(queuePosition === undefined ? {} : { queuePosition }),
     ...(aheadTotal === undefined ? {} : { aheadTotal }),
@@ -7293,6 +7634,7 @@ function agentRunDetailFromWire(value: unknown): AgentRun {
   const appsUsed = appsUsedFromWire(
     source.appsUsed ?? record(output)?.["appsUsed"]
   );
+  const spent = agentRunSpentFromWire(source.spent);
   return {
     ...summary,
     workspaceId: workspaceId.toLowerCase(),
@@ -7302,6 +7644,7 @@ function agentRunDetailFromWire(value: unknown): AgentRun {
     ...(input === null ? {} : { input }),
     ...(output === undefined || output === null ? {} : { output }),
     ...(appsUsed === null ? {} : { appsUsed }),
+    ...(spent === undefined ? {} : { spent }),
   };
 }
 

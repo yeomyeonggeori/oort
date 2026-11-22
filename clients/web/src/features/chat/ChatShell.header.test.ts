@@ -135,8 +135,9 @@ describe("BZ-2 right control group rearranges existing actions", () => {
 
   it("keeps idle huddle as an icon control with the live surface's labels", () => {
     expect(HUDDLE_CODE).toMatch(/label=\{startOrJoinLabel\}/);
-    expect(HUDDLE_CODE).toMatch(/"허들 시작"/);
-    expect(HUDDLE_CODE).toMatch(/"허들 참가"/);
+    // 낱말은 사전에 있다(#6020): 단추가 읽는 키를 잡는다.
+    expect(HUDDLE_CODE).toMatch(/"huddles\.control\.start"/);
+    expect(HUDDLE_CODE).toMatch(/"huddles\.control\.join"/);
     expect(HUDDLE_CODE).toMatch(
       /testId=\{huddle\.active \? "huddle-join" : "huddle-start"\}/
     );
@@ -379,15 +380,15 @@ describe("#5184 허들 참가자 이름 글은 제목 칸의 꼬리에서 제목
     expect(chip).not.toContain('data-testid="huddle-participants"');
     expect(chip).not.toMatch(/truncate/);
     // 전문은 칩의 낭독과 title에 남는다.
-    expect(chip).toMatch(/className="sr-only">\{huddleParticipantSummary\(huddle\)\}/);
+    expect(chip).toMatch(/className="sr-only">\{summaryOf\(huddle\)\}/);
     expect(chip).toMatch(/title=\{names\}/);
   });
 
   it("참가 중에는 전문이 칩 래퍼 밖의 sr-only 한 곳에 있다(칩이 양보해 display: none이 돼도 낭독에서 안 빠지고, 칩은 announce={false}라 둘로 안 읽힌다)", () => {
     expect(HUDDLE_CODE).toMatch(/<HuddleLiveChip huddle=\{huddle\.active\} announce=\{false\} \/>/);
-    expect(HUDDLE_CODE).toMatch(/<span className="sr-only">\s*\{huddleParticipantSummary\(huddle\.active\)\}\s*<\/span>/);
+    expect(HUDDLE_CODE).toMatch(/<span className="sr-only">\s*\{summaryOf\(huddle\.active\)\}\s*<\/span>/);
     // 칩 자신의 낭독은 announce일 때만 선다.
-    expect(HUDDLE_CODE).toMatch(/\{announce && \(\s*<span className="sr-only">\{huddleParticipantSummary\(huddle\)\}<\/span>\s*\)\}/);
+    expect(HUDDLE_CODE).toMatch(/\{announce && \(\s*<span className="sr-only">\{summaryOf\(huddle\)\}<\/span>\s*\)\}/);
   });
 
   it("이름 글은 aria-hidden(칩이 같은 전문을 낭독한다)이고, 참가 중에는 칩과 함께 양보한다", () => {

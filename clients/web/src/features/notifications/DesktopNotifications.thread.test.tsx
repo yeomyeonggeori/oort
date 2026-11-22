@@ -80,8 +80,8 @@ vi.mock("@/features/workspace/useWorkspace", async (importOriginal) => {
           workspaceId: IDS.ws,
           kind: "human",
           status: "active",
-          displayName: "곽성재",
-          handle: "seongjae",
+          displayName: "한지후",
+          handle: "jihu",
           channelCount: 1,
           channelIds: [IDS.channel],
           capabilities: [],
@@ -264,7 +264,7 @@ describe("따라가는 스레드의 새 답글 배너 (#4890)", () => {
     expect(fetchThreadReplies).toHaveBeenCalledTimes(1);
     expect(fetchThreadReplies).toHaveBeenCalledWith(IDS.ws, IDS.channel, IDS.root, undefined, 1);
     expect(showNotification).toHaveBeenCalledTimes(1);
-    expect(showNotification.mock.calls[0]?.[0]).toBe("곽성재");
+    expect(showNotification.mock.calls[0]?.[0]).toBe("한지후");
     expect(showNotification.mock.calls[0]?.[1]).toBe("배포 끝났어요");
   });
 

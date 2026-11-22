@@ -378,3 +378,79 @@ describe("focusRowStation", () => {
     expect(document.activeElement).toBe(row);
   });
 });
+
+// #5747: 「최신 메시지로 이동」·「안 읽은 곳으로」는 부드러운 스크롤 도중에 착지 줄에 초점을 놓는다. 그 초점에 이어지는 ⋯ 넘겨주기가
+// 스크롤을 막지 않으면 WebKit 이 진행 중인 스크롤을 끊는다(게이트 thread-hold L8 이 진짜 엔진에서 잰다). 여기서는 범위만 잠근다:
+// 착지에 이어진 넘겨주기만 막고, 사람이 줄에 들어온 넘겨주기는 예전처럼 스크롤한다.
+describe("착지 초점에 이어진 ⋯ 넘겨주기 (#5747)", () => {
+  function landingRow(): { row: HTMLElement; primary: HTMLButtonElement } {
+    const row = document.createElement("div");
+    row.dataset.actionable = "true";
+    const primary = action("primary");
+    row.append(primary);
+    document.body.append(row);
+    return { row, primary };
+  }
+
+  it("착지(focusRowStation) 뒤 넘겨주기는 스크롤을 막는다", () => {
+    const { row, primary } = landingRow();
+    stubFocusVisible(row, true);
+    const focus = vi.spyOn(primary, "focus");
+
+    focusRowStation(row);
+    handoffRowFocusToPreferred(row);
+
+    expect(document.activeElement).toBe(primary);
+    expect(focus).toHaveBeenCalledTimes(1);
+    expect(focus).toHaveBeenCalledWith({ preventScroll: true });
+  });
+
+  it("사람이 줄에 들어온 넘겨주기는 예전처럼 스크롤한다", () => {
+    const { row, primary } = landingRow();
+    row.tabIndex = 0;
+    stubFocusVisible(row, true);
+    const focus = vi.spyOn(primary, "focus");
+
+    row.focus();
+    handoffRowFocusToPreferred(row);
+
+    expect(document.activeElement).toBe(primary);
+    expect(focus).toHaveBeenCalledTimes(1);
+    expect(focus.mock.calls[0]?.[0]).toBeUndefined();
+  });
+
+  it("넘겨주기가 오지 않을 착지(키보드 초점 아님) 뒤에 사람이 들어오면 스크롤한다", () => {
+    const { row, primary } = landingRow();
+    const matches = stubFocusVisible(row, false);
+    focusRowStation(row);
+    row.blur();
+    matches.mockRestore();
+    stubFocusVisible(row, true);
+    const focus = vi.spyOn(primary, "focus");
+
+    row.focus();
+    handoffRowFocusToPreferred(row);
+
+    expect(focus).toHaveBeenCalledTimes(1);
+    expect(focus.mock.calls[0]?.[0]).toBeUndefined();
+  });
+
+  it("넘겨주기 전에 초점이 행을 떠나면 표시를 지운다: 다시 들어온 넘겨주기는 스크롤한다", () => {
+    const row = mountRovingRow();
+    row.dataset.actionable = "true";
+    const primary = row.querySelector<HTMLButtonElement>('[data-testid="primary"]')!;
+    const outside = document.createElement("button");
+    document.body.append(outside);
+    stubFocusVisible(row, true);
+    focusRowStation(row);
+    expect(document.activeElement).toBe(row);
+
+    outside.focus();
+    row.focus();
+    const focus = vi.spyOn(primary, "focus");
+    handoffRowFocusToPreferred(row);
+
+    expect(focus).toHaveBeenCalledTimes(1);
+    expect(focus.mock.calls[0]?.[0]).toBeUndefined();
+  });
+});

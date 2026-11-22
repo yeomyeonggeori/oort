@@ -45,8 +45,8 @@ const SELF: Member = {
   id: '11111111-1111-4111-8111-111111111111',
   workspaceId: WS,
   kind: 'human',
-  displayName: '곽성재',
-  handle: 'seongjae',
+  displayName: '한지후',
+  handle: 'jihu',
 } as Member;
 
 const SCHEMES: ReadonlyArray<readonly [ColorScheme, Palette]> = [

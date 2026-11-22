@@ -1,11 +1,18 @@
 import {ApiError, openDirectMessage, uuidEq} from '@momo/core/lib/api';
 import {NetworkError} from '@momo/core/lib/http';
+import {blend} from '@momo/core/design/scrim';
 import {attachParticle} from '@momo/core/lib/koreanParticle';
 import {serverSurface} from '@momo/core/features/capabilities/serverSurfaces';
 import {shellSpeaksFor} from '@momo/core/features/connection/shellStrip';
 import {channelLabel, channelLabelParts, idKey, memberFor} from '@momo/core/features/workspace/directory';
 import {readProjectionPhase, rosterLoaded} from '@momo/core/features/sidebar/goneDm';
 import {DM_CLOSED_LIST_LABEL, dmCloseOffered} from '@momo/core/features/sidebar/dmVisibility';
+import {canBrowseChannelsNow} from '@momo/core/features/channels/browse';
+import {
+  dmLeaveMode,
+  dmLeaveOffered,
+  readProjectionCarriesLeave,
+} from '@momo/core/features/channels/dmLeave';
 import {mayActOnLiveness} from '@momo/core/features/agents/liveness';
 import {isUntakenHumanRun} from '@momo/core/features/agents/runWaiting';
 import {
@@ -68,8 +75,13 @@ import {
   withApprovalWaits,
 } from '../features/agents/workingSignal';
 import {useWorkspaceApprovalWaits} from '../features/conversation/usePendingApprovals';
-import {StatusDot} from '../features/presence/StatusDot';
+import {FaceStatusDot} from '../features/presence/StatusDot';
 import {useCollapsedSections, visibleRows} from '../features/home/collapsedSections';
+import {
+  notJoinedMatches,
+  useHomeBrowseCandidates,
+} from '../features/channelBrowse/useChannelBrowse';
+import {GroupCard, ListRow, RowIcon} from '../design/sheetParts';
 import {
   buildWorkingCard,
   cardCancelRunId,
@@ -84,7 +96,7 @@ import {
   type SidebarRow,
   type SidebarSection,
 } from '../features/sidebar/rows';
-import {CHIP_TONE, type ChipTone, type RowChip} from '../features/sidebar/rowEmphasis';
+import {CHIP_TONE, type ChipTone, type RowChip} from '@momo/core/features/sidebar/rowEmphasis';
 import {useGoneUnreadVerdicts} from '../features/sidebar/useGoneUnreadVerdicts';
 import {dmClosedEntries, dmClosureMode, dmVerdicts} from '../features/sidebar/dmVerdicts';
 import {DmClosedSheet} from '../features/sidebar/DmClosedSheet';
@@ -106,8 +118,11 @@ import {
   channelRowAccessibilityActions,
   channelRowActionItems,
   channelRowActionKeyOf,
+  NOTHING_COPIED,
   type ChannelRowTarget,
 } from '../features/sidebar/channelRowActions';
+import {useFormatMessage} from '../i18n/useFormatMessage';
+import {useNoticeDismissGuard} from '../features/sidebar/noticeDismissGuard';
 import {useChannelRowActions} from '../features/sidebar/useChannelRowActions';
 import {
   AppUpdateBanner,
@@ -297,9 +312,13 @@ export default function SidebarScreen({
   onOpenConversation,
   onOpenSearch,
   onOpenAgentList,
+  onOpenChannelBrowse,
   onOpenWorkList,
   onOpenSettings,
   onChannelLeft,
+  onDmLeftReceipt,
+  dmLeftReceipt = null,
+  onDismissDmLeftReceipt,
   notificationNotice = null,
   onDismissNotificationNotice,
   active = true,
@@ -307,6 +326,11 @@ export default function SidebarScreen({
   openChannelId: string | null;
   /** 채널을 나간 뒤·DM 을 닫은 뒤. 열려 있던 그 대화를 걷는다(웹은 `/` 로 착지한다). */
   onChannelLeft?: (channelId: string) => void;
+  /** 1:1 대화에서 나간 뒤(204) 그 한 줄 알림을 셸의 영수증 자리에 세운다(ADR-0177 증보 2026-11-14 D21). */
+  onDmLeftReceipt?: (message: string) => void;
+  /** 「대화에서 나갔어요.」 영수증 - 사람이 닫을 때까지 목록 위에 선다(되돌리기 단추 없음, D21). */
+  dmLeftReceipt?: string | null;
+  onDismissDmLeftReceipt?: () => void;
   onOpenConversation: (channelId: string, title: string) => void;
   /**
    * Open 메시지 검색, optionally carrying what was already typed here.
@@ -325,6 +349,11 @@ export default function SidebarScreen({
    * 에서는 없을 수 있고, 그때 그 문들은 서지 않는다.
    */
   onOpenAgentList?: () => void;
+  /**
+   * 「채널 둘러보기」 페이지를 연다(ADR-0224 화면 폰 줄, #5846) — 「채널」 섹션 ⋯ 메뉴와 이름 검색의 「참여하지 않은 공개 채널」 줄.
+   * 이름 검색에서 고르면 그 이름을 넘긴다. 셸 밖(하네스)에서는 없고, 그때 두 문은 서지 않는다.
+   */
+  onOpenChannelBrowse?: (initialQuery?: string) => void;
   /**
    * 「작업」 층을 연다(ADR-0202 D6, U1 #3842): 「작업 중」 카드 머리의 「모두 보기」. + 메뉴의
    * 「작업」과 같은 화면·같은 줄이다. 작업 표면이 없는 서버·셸 밖(하네스)에서는 없고, 그때 이
@@ -370,8 +399,22 @@ export default function SidebarScreen({
   const readPhase = readProjectionPhase(readStates);
   // 행 이름과 보임 판정이 같은 답을 읽는다(`rows.ts` `rosterReady`).
   const rosterReady = rosterLoaded(directoryQuery);
+  const selfRole = memberFor(directoryQuery.directory, member.id)?.role;
+  // 둘러보기 문(⋯ 메뉴 · 빈 채널 섹션의 줄 · 이름 검색 묶음)은 정식 멤버에게만 선다 — 명부 전 · 역할 모름 · 게스트는 없음(코어 판정, 웹과
+  // 같다, ADR-0224 D8). 채널이 0개여도 이 사람에게는 「채널」 섹션이 선다(`keepEmptyChannels`, D10 — 기본 채널을 나간 사람이 돌아오는 문).
+  const browseOffered =
+    onOpenChannelBrowse !== undefined && canBrowseChannelsNow(rosterReady, selfRole);
   // 서버가 닫기를 싣는가(읽음 투영 행이 말한다). 싣지 않는 서버에서는 닫기를 내밀지 않는다(폰에는 기기 로컬 닫기가 없다).
   const closureMode = dmClosureMode(readStates.data);
+  // 투영이 하한을 싣는가(ADR-0177 증보 2026-11-14 D18): GET 행에 `history_from_seq` 키가 있다. 코어 3a 가 나간 대화를 숨긴다. 나가기
+  // 경로의 접기는 메뉴만 닫으므로 여기서 보지 않는다(`dmLeaveMode` 가 아니라 이것).
+  const serverCarriesLeave = readProjectionCarriesLeave(readStates.data);
+  // 영수증을 닫으면 그 아래 단추가 X 자리로 올라온다 - 닫은 직후 잠깐 그 자리의 눌림을 받지 않는다(M5).
+  const dismissGuard = useNoticeDismissGuard();
+  // 「대화 나가기」를 **내미는가**(D21): 투영 키 + 이 워크스페이스에서 경로가 접히지 않았나. 접기는 모듈 상태라 렌더마다 다시 읽는다 - 실패
+  // 답(404·405·501)이 확인 단계에 서는 렌더에서 메뉴 항목이 같이 빠진다.
+  const leaveMode = dmLeaveMode({workspaceId, rows: readStates.data});
+  const formatMessage = useFormatMessage();
 
   // Synchronous. See the note above.
   const [query, setQuery] = useState('');
@@ -404,7 +447,7 @@ export default function SidebarScreen({
   // 마지막 투영의 닫힘 id: 첫 프레임에만 쓰는 캐시(원장 아님, `dmClosedCache.ts`).
   const cachedClosed = useDmClosedCacheInitial(workspaceId);
 
-  // DM 이 목록에 서는가: 코어 `dmVisibility` 한 함수(웹과 같다). 숨은 DM 은 「⋯ › 닫은 대화」가 연다.
+  // DM 이 목록에 서는가: 코어 `dmVisibility` 한 함수(웹과 같다). 숨은 DM 은 「⋯ › 숨긴 대화」가 연다.
   const verdicts = useMemo(
     () =>
       dmVerdicts({
@@ -416,6 +459,7 @@ export default function SidebarScreen({
         phase: readPhase,
         rosterReady,
         mode: closureMode,
+        serverCarriesLeave,
         goneVerdicts: goneUnreadVerdicts,
         cachedClosed,
       }),
@@ -428,6 +472,7 @@ export default function SidebarScreen({
       readPhase,
       rosterReady,
       closureMode,
+      serverCarriesLeave,
       goneUnreadVerdicts,
       cachedClosed,
     ],
@@ -451,6 +496,7 @@ export default function SidebarScreen({
         readPhase,
         rosterReady,
         dmVerdicts: verdicts,
+        keepEmptyChannels: browseOffered,
       }),
     [
       channelsQuery.groups,
@@ -463,6 +509,7 @@ export default function SidebarScreen({
       readPhase,
       rosterReady,
       verdicts,
+      browseOffered,
     ],
   );
 
@@ -564,7 +611,7 @@ export default function SidebarScreen({
   );
 
   // 행을 길게 누르면 열리는 시트(#4229). 항목은 코어 표가 정하고(`channelRowActionItems`), 시트는 화면에 하나다.
-  const rowActions = useChannelRowActions(workspaceId, member.id, onChannelLeft);
+  const rowActions = useChannelRowActions(workspaceId, member.id, onChannelLeft, onDmLeftReceipt);
   const channelById = useMemo(
     () =>
       new Map(
@@ -575,7 +622,20 @@ export default function SidebarScreen({
       ),
     [channelsQuery.groups],
   );
-  const selfRole = memberFor(directoryQuery.directory, member.id)?.role;
+  // 이름 검색의 「참여하지 않은 공개 채널」 묶음(웹 ⌘K 와 같은 결정): 거르기 칸이 열려 있는 동안 서버 목록 한 쪽을 한 번 읽고, 친 글자로는
+  // 동기로만 거른다(위 「The search field is synchronous」). 내 채널 목록에 있는 id 는 뺀다. 읽기가 실패하면 묶음이 없다.
+  const homeBrowse = useHomeBrowseCandidates(workspaceId, browseOffered && filterVisible);
+  const myChannelIds = useMemo(
+    () => new Set((channelsQuery.data ?? []).map(channel => idKey(channel.id))),
+    [channelsQuery.data],
+  );
+  const notJoinedFound = useMemo(
+    () =>
+      browseOffered && homeBrowse.data !== undefined
+        ? notJoinedMatches(homeBrowse.data.channels, myChannelIds, query)
+        : [],
+    [browseOffered, homeBrowse.data, myChannelIds, query],
+  );
   const actionTargetFor = useCallback(
     (row: SidebarRow): ChannelRowTarget | null => {
       // 아직 DM 이 없는 에이전트 줄은 채널이 아니다(누르면 DM 을 연다) — 열 시트가 없다.
@@ -588,7 +648,7 @@ export default function SidebarScreen({
         muted: row.muted,
         selfRole,
         readState: readStates.byChannel.get(idKey(row.targetId)) ?? null,
-        // 「대화 닫기」: 코어 `dmCloseOffered` 한 함수(웹 호버 X·행 메뉴와 같다) + 서버가 닫기를 싣는 동안만(기기 로컬 닫기는 없다).
+        // 「목록에서 숨기기」: 코어 `dmCloseOffered` 한 함수(웹 호버 X·행 메뉴와 같다) + 서버가 닫기를 싣는 동안만(기기 로컬 닫기는 없다).
         closeOffered:
           row.kind === 'dm' &&
           closureMode === 'server' &&
@@ -598,12 +658,31 @@ export default function SidebarScreen({
             mentionCount: row.mentionCount,
             starredOrSectioned: false,
           }),
+        // 「대화 나가기」: 코어 `dmLeaveOffered` 한 함수(웹 줄 메뉴와 같다) - 사람끼리 1:1 · 나가기를 싣는 서버 · 투영 준비. 안 읽음과 무관하다.
+        leaveOffered:
+          row.kind === 'dm' &&
+          dmLeaveOffered({
+            mode: leaveMode,
+            phase: readPhase,
+            channel,
+            directory: directoryQuery.directory,
+            selfMemberId: member.id,
+          }),
       };
     },
-    [channelById, selfRole, readStates.byChannel, closureMode, readPhase],
+    [
+      channelById,
+      selfRole,
+      readStates.byChannel,
+      closureMode,
+      readPhase,
+      leaveMode,
+      directoryQuery.directory,
+      member.id,
+    ],
   );
 
-  // 「⋯ › 닫은 대화」 시트(ADR-0177 증보 D11, #4367). 내가 닫은 대화와 상대가 나간 대화를 다시 연다.
+  // 「⋯ › 숨긴 대화」 시트(ADR-0177 증보 D11, #4367). 내가 닫은 대화와 상대가 나간 대화를 다시 연다.
   const [closedListOpen, setClosedListOpen] = useState(false);
   const closedItems = useMemo(
     () =>
@@ -642,6 +721,13 @@ export default function SidebarScreen({
       ];
       if (section.key === 'channels') {
         items.push({label: SEARCH_SURFACE_NAME, run: () => onOpenSearch()});
+        // 「채널 둘러보기」(#5846): 정식 멤버에게만. DM 섹션이 에이전트 목록 · 숨긴 대화로 가는 것과 같은 문이다.
+        if (browseOffered && onOpenChannelBrowse) {
+          items.push({
+            label: formatMessage('channels.browse.title'),
+            run: () => onOpenChannelBrowse(),
+          });
+        }
       } else {
         if (onOpenAgentList) {
           items.push({label: AGENT_LIST_ACTION, run: onOpenAgentList});
@@ -660,7 +746,7 @@ export default function SidebarScreen({
         index => items[index]?.run(),
       );
     },
-    [closedEntries.length, onOpenAgentList, onOpenSearch],
+    [closedEntries.length, onOpenAgentList, onOpenSearch, browseOffered, onOpenChannelBrowse, formatMessage],
   );
 
   const shownSections = useMemo(
@@ -673,6 +759,9 @@ export default function SidebarScreen({
       })),
     [sections, collapsed, openChannelId],
   );
+
+  // SectionList 가 ListEmptyComponent 를 세우는 조건과 같다(그릴 줄이 0). 묶음이 서는 날의 「메시지에서 찾기」 문이 이것으로 선다(#5961).
+  const listIsEmpty = shownSections.every(section => section.data.length === 0);
 
   // 「취소」의 확인 줄이 열리면(카드가 자라면) 결정 단추까지 목록을 내린다. 가장 큰 글씨(AX5)에서는 읽는 글자인 확인
   // 문장이 카드를 한 화면보다 크게 늘려, 방금 누른 「취소」 아래의 단추가 접힌 아래로 밀려난다(design-review
@@ -809,13 +898,28 @@ export default function SidebarScreen({
     <>
       {/* 알림 탭의 영수증 (#2569). 방금 한 행동에 대한 답이라 닫을 수 있고,
           다른 고지보다 위에 선다 — 사람이 이 화면에 온 이유가 이것이다. */}
-      {notificationNotice ? (
-        <NoticeBlock
-          headline={notificationNotice}
-          onDismiss={onDismissNotificationNotice}
-          testID="notification-tap-notice"
-        />
-      ) : null}
+      {notificationNotice
+        ? dismissGuard.measured(
+            'notification-tap-notice',
+            <NoticeBlock
+              headline={notificationNotice}
+              onDismiss={dismissGuard.dismissing('notification-tap-notice', onDismissNotificationNotice)}
+              testID="notification-tap-notice"
+            />,
+          )
+        : null}
+
+      {/* 1:1 대화에서 나간 영수증(ADR-0177 증보 2026-11-14 D21). 방금 한 행동에 대한 답이라 같은 문법(닫을 수 있음)이고 되돌리기 단추가 없다. */}
+      {dmLeftReceipt
+        ? dismissGuard.measured(
+            'dm-left-receipt',
+            <NoticeBlock
+              headline={dmLeftReceipt}
+              onDismiss={dismissGuard.dismissing('dm-left-receipt', onDismissDmLeftReceipt)}
+              testID="dm-left-receipt"
+            />,
+          )
+        : null}
 
       {/* 셸 띠(#5222): 기기 오프라인·서버에 닿지 못함이면 홈에서도 말한다. 아래의 읽기 실패 고지는 대개 이 띠가 말하는 원인의 결과라
           그 위에 선다. 실시간만 끊긴 것은 홈이 말하지 않는다(대화 화면 띠가 말한다). */}
@@ -898,7 +1002,11 @@ export default function SidebarScreen({
 
       {/* 고지는 목록 상태와 무관하게 선다 — 알림 탭이 막힌 이유는 목록이 실패했을 때
           가장 필요하다(#2584 M-1, 목록 자리의 오류 상자 제목 `connection.load.channelListTitle` 이 두 곳에서 말한다). */}
-      <View style={styles.noticeWrap}>{notices}</View>
+      <View style={styles.noticeWrap} {...dismissGuard.wrapProps}>
+        {notices}
+      </View>
+      {/* 영수증을 닫은 직후 그 자리로 올라온 단추를 손가락이 두 번째로 누르지 않게 잠깐 덮는다(`noticeDismissGuard.tsx`). */}
+      {dismissGuard.guard}
 
       {loading ? (
         <LoadingState label="채널 목록을 불러오는 중입니다." testID="channels-loading" />
@@ -978,7 +1086,35 @@ export default function SidebarScreen({
               {filterField}
             </>
           }
+          ListFooterComponent={
+            notJoinedFound.length > 0 && searching ? (
+              <View>
+                <GroupCard
+                  label={formatMessage('channels.browse.paletteGroup')}
+                  inset="icon"
+                  style={styles.notJoinedGroup}
+                  testID="home-not-joined-group">
+                  {notJoinedFound.map(row => (
+                    <ListRow
+                      key={row.id}
+                      leading={<RowIcon source={HOME_ICONS.hash} />}
+                      title={row.name}
+                      detail={formatMessage('channels.browse.memberCount', {count: row.memberCount})}
+                      accessory="chevron"
+                      accessibilityHint={formatMessage('channels.browse.homeRowHint')}
+                      onPress={() => onOpenChannelBrowse?.(row.name)}
+                      testID={`home-not-joined-${row.id}`}
+                    />
+                  ))}
+                </GroupCard>
+                {/* 내 목록에 맞는 줄이 0이면 문장(「검색 결과가 없습니다」)만 빠지고, 메시지 검색 문은 묶음 아래에 그대로 선다
+                    (#5961 — #5846 전에도 줄이 0일 때 늘 섰다). 내 목록에 맞는 줄이 있을 때는 전부터 문이 없다. */}
+                {listIsEmpty ? <SearchFallthrough query={query} onPress={() => onOpenSearch(query)} /> : null}
+              </View>
+            ) : null
+          }
           ListEmptyComponent={
+            notJoinedFound.length > 0 ? null : (
             <View>
               <EmptyState
                 headline={`'${query.trim()}' 검색 결과가 없습니다.`}
@@ -988,6 +1124,7 @@ export default function SidebarScreen({
               {/* 같은 문이므로 같은 이름을 쓴다 (이슈 #1146 N4). */}
               <SearchFallthrough query={query} onPress={() => onOpenSearch(query)} />
             </View>
+            )
           }
           renderSectionHeader={({section}) => (
             <SectionHead
@@ -999,6 +1136,23 @@ export default function SidebarScreen({
           )}
           renderSectionFooter={({section}) => (
             <View>
+              {/* 채널이 하나도 없는 정식 멤버(기본 채널까지 나간 사람, ADR-0224 D10): 빈 「채널」 섹션 아래 둘러보기로 가는 줄 하나(#5846).
+                  머리만 서고 아래가 비면 빈 화면처럼 읽혀서 문을 줄로도 세운다. 접어도 이 줄은 남는다(문이라서). */}
+              {section.key === 'channels' &&
+              browseOffered &&
+              !searching &&
+              channelsQuery.groups.channels.length === 0 ? (
+                <GroupCard style={styles.emptyChannelsDoor} testID="home-channels-browse-door">
+                  <ListRow
+                    leading={<RowIcon source={HOME_ICONS.hash} />}
+                    title={formatMessage('channels.browse.title')}
+                    detail={formatMessage('channels.browse.description')}
+                    accessory="chevron"
+                    onPress={() => onOpenChannelBrowse?.()}
+                    testID="home-channels-browse-row"
+                  />
+                </GroupCard>
+              ) : null}
               <View style={styles.sectionGap} />
               {section.key !== shownSections[shownSections.length - 1]?.key ? (
                 <View style={styles.divider} testID="home-divider" />
@@ -1044,7 +1198,15 @@ export default function SidebarScreen({
       {rowActions.active !== null ? (
         <ChannelActionSheet
           target={rowActions.active}
-          items={channelRowActionItems(rowActions.active, rowActions.copied)}
+          // 시트가 든 대상은 연 순간의 것이다. 「대화 나가기」만 지금 판정으로 다시 거른다 — 경로가 접히면(404·405·501) 열린 시트에서도 빠진다.
+          items={channelRowActionItems(
+            {
+              ...rowActions.active,
+              leaveOffered: rowActions.active.leaveOffered === true && leaveMode === 'server',
+            },
+            rowActions.copied,
+            formatMessage,
+          )}
           confirmingLeave={rowActions.confirmingLeave}
           isPending={rowActions.isPending}
           error={rowActions.error}
@@ -1052,6 +1214,12 @@ export default function SidebarScreen({
           onRun={key => rowActions.run(rowActions.active as ChannelRowTarget, key)}
           onConfirmLeave={rowActions.confirmLeave}
           onCancelLeave={rowActions.cancelLeave}
+          dmLeave={rowActions.dmLeave}
+          onConfirmDmLeave={rowActions.confirmDmLeave}
+          onCancelDmLeave={rowActions.cancelDmLeave}
+          rename={rowActions.rename}
+          onConfirmRename={rowActions.confirmRename}
+          onClearRenameFailure={rowActions.clearRenameFailure}
           onClose={rowActions.close}
         />
       ) : null}
@@ -1277,9 +1445,11 @@ function Row({
   const palette = usePalette();
   const status = useRowStatusDot(row, directory);
   // 길게 누르기와 VoiceOver 로터가 **같은 항목 배열**을 쓴다(코어 표의 답). 손가락에만 있는 동작은 없다.
+  const formatMessage = useFormatMessage();
   const actionItems = useMemo(
-    () => (actionTarget === null ? [] : channelRowActionItems(actionTarget)),
-    [actionTarget],
+    () =>
+      actionTarget === null ? [] : channelRowActionItems(actionTarget, NOTHING_COPIED, formatMessage),
+    [actionTarget, formatMessage],
   );
   const accessibilityActions = useMemo(
     () => channelRowAccessibilityActions(actionItems),
@@ -1319,16 +1489,21 @@ function Row({
     lead = <View style={styles.faceBlank} />;
   }
   // 상태 점은 얼굴 모서리에 앉는다. 점이 있는 줄만 얼굴 크기의 상자로 감싸므로(점 없는 줄의 구조는 그대로다)
-  // 얼굴의 자리는 움직이지 않는다.
-  const face =
+  // 얼굴의 자리는 움직이지 않는다. 점의 고리(틈)는 줄이 서는 바탕 색이다(`homeRowGround`, #5786 r1 M3): 면색이면 바닥 위에서
+  // 흰 테로 보였다. 모양은 뜻으로 고른다(에이전트 경고 = 채운 원, r1 H2).
+  const face = (pressed: boolean) =>
     status === null ? (
       lead
     ) : (
       <View style={styles.face} testID="home-row-face">
         {lead}
-        <View style={styles.statusAnchor}>
-          <StatusDot tone={status.tone} testID="home-row-status-dot" />
-        </View>
+        <FaceStatusDot
+          face={HOME.rowFace}
+          tone={status.tone}
+          kind={row.isAgent ? 'agent' : 'human'}
+          ground={homeRowGround(palette, selected, pressed)}
+          testID="home-row-status-dot"
+        />
       </View>
     );
   return (
@@ -1356,31 +1531,49 @@ function Row({
         pressed && styles.rowPressed,
       ]}
       testID={`sidebar-row-${row.key}`}>
-      {face}
-      <View style={styles.rowName}>
-        <Text
-          style={[
-            styles.rowTitle,
-            emphasis.bold && styles.rowTitleUnread,
-            emphasis.dim && styles.rowTitleMuted,
-          ]}
-          numberOfLines={1}
-          ellipsizeMode="tail">
-          {row.title}
-        </Text>
-        {row.handle ? (
-          <Text style={styles.rowHandle} numberOfLines={1}>
-            {row.handle}
-          </Text>
-        ) : null}
-      </View>
-      {busy ? (
-        <ActivityIndicator color={palette.textMuted} testID="home-row-busy" />
-      ) : emphasis.chip !== null ? (
-        <RowChipView chip={emphasis.chip} />
-      ) : null}
+      {({pressed}) => (
+        <>
+          {face(pressed)}
+          <View style={styles.rowName}>
+            <Text
+              style={[
+                styles.rowTitle,
+                emphasis.bold && styles.rowTitleUnread,
+                emphasis.dim && styles.rowTitleMuted,
+              ]}
+              numberOfLines={1}
+              ellipsizeMode="tail">
+              {row.title}
+            </Text>
+            {row.handle ? (
+              <Text style={styles.rowHandle} numberOfLines={1}>
+                {row.handle}
+              </Text>
+            ) : null}
+          </View>
+          {busy ? (
+            <ActivityIndicator color={palette.textMuted} testID="home-row-busy" />
+          ) : emphasis.chip !== null ? (
+            <RowChipView chip={emphasis.chip} />
+          ) : null}
+        </>
+      )}
     </Pressable>
   );
+}
+
+/**
+ * 홈 줄의 점 고리 색 = 줄이 서는 바탕 (#5786 r1 M3). 쉬는 줄은 바닥(`bg`, 그라데이션의 가운데 정지점 — 위·아래 끝과는 1.06:1
+ * 이하), 눌린 줄은 눌림 면(`rowPressed`), 고른 줄은 바닥 위 유리(`rowSelected`, 반투명이라 바닥에 얹은 색). 고리는 얼굴을
+ * 가리는 틈이라 반투명이면 얼굴이 비친다 — 그래서 합성한 불투명 색이다.
+ */
+export function homeRowGround(color: Palette, selected: boolean, pressed: boolean): string {
+  if (pressed) return color.surfacePressed;
+  if (selected) {
+    const glassAlpha = color.glass.length === 9 ? parseInt(color.glass.slice(7, 9), 16) / 255 : 1;
+    return blend(color.glass.slice(0, 7), color.bg, glassAlpha);
+  }
+  return color.bg;
 }
 
 /** 칩마다의 testID. 키가 이름 붙은 숫자(`CHIP_TONE`)라 이 표에는 문자열 비교가 없다. */
@@ -1855,6 +2048,10 @@ const buildStyles = (color: Palette) => StyleSheet.create({
   pressedGlyph: {opacity: 0.5},
   chevronCollapsed: {transform: [{rotate: '-90deg'}]},
   sectionGap: {height: HOME.secBelow},
+  // 이름 검색의 「참여하지 않은 공개 채널」 묶음(#5846) — 목록 끝, 섹션 사이 숨과 같은 간격.
+  notJoinedGroup: {marginTop: HOME.secBelow},
+  // 빈 「채널」 섹션의 둘러보기 줄(#5846) — 섹션 머리 바로 아래.
+  emptyChannelsDoor: {marginTop: space.xs},
   divider: {
     height: 1,
     backgroundColor: alpha(color.text, 0.1),
@@ -1908,7 +2105,6 @@ const buildStyles = (color: Palette) => StyleSheet.create({
   },
   // 상태 점이 있는 줄의 얼굴 상자(점의 절대 위치 기준). 크기는 얼굴과 같다.
   face: {width: HOME.rowFace, height: HOME.rowFace},
-  statusAnchor: {position: 'absolute', right: -2, bottom: -2},
   agentSquare: {
     backgroundColor: color.agentSurface,
     alignItems: 'center',

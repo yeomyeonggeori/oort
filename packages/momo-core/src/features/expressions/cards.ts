@@ -1,6 +1,8 @@
 import { expressionFailureLine } from "../approvals/approvalOutcome";
 import { expressionCopy } from "./cardCopy";
-import type { ExpressionChoice, ExpressionDraft, ExpressionKind, ManualUploadCode } from "./types";
+import { matchesExpressionContract } from "./contracts";
+import { LINK_AWAITING_APPROVAL_CODE, MANUAL_UPLOAD_CODES } from "./types";
+import type { ExpressionApproval, ExpressionChoice, ExpressionDraft, ExpressionKind, ExpressionLinkChoice, ManualUploadCode } from "./types";
 
 const MANUAL_COPY: Record<ManualUploadCode, string> = {
   source_blocked: "이 출처에서 그림을 받지 못했어요. 직접 올려 주세요.",
@@ -25,16 +27,34 @@ function manualUploadLine(code: string): string {
     ?? expressionCopy("expressions.card.manualFallback");
 }
 
+/**
+ * The host of an agent's link candidate that is waiting for a person (ADR-0218 §18), or null. Only a `url`
+ * origin carries the code, and only the host is read: the card shows where the picture will come from, never
+ * a path or a query (the server sends `https://host/` alone, and this reads no further even if it did not).
+ */
+function awaitingLinkHost(draft: ExpressionDraft): string | null {
+  if (draft.state !== "manual_upload_required" || draft.code !== LINK_AWAITING_APPROVAL_CODE) return null;
+  if (draft.origin.kind !== "url" || typeof draft.origin.sourceUrl !== "string") return null;
+  try {
+    const url = new URL(draft.origin.sourceUrl);
+    return url.protocol === "https:" && url.hostname !== "" ? url.hostname : null;
+  } catch { return null; }
+}
+
 /** Approval status is independent: a failed fetch leaves the request pending. */
 export function expressionDraftCard(draft: ExpressionDraft, nowMs: number, pending = true) {
   const expired = nowMs >= draft.expiresAtMs;
   const open = pending && !expired;
+  const linkHost = awaitingLinkHost(draft);
   return {
     state: !pending ? "settled" as const : expired ? "expired" as const : draft.state,
     sourceLink: draft.origin.sourceUrl,
     preview: open && draft.state === "ready" ? draft.media : null,
     canApprove: open && draft.state === "ready",
     canUpload: open && draft.state === "manual_upload_required",
+    /** An agent's link nobody has fetched: approving it fetches it once (ADR-0218 §18). The host is all the card shows. */
+    linkHost,
+    canFetch: open && linkHost !== null,
     uploadLabel: "직접 올리기",
     code: draft.code,
     line: !pending ? "처리가 끝난 요청이에요" : expired ? "승인을 기다리다 만료됐어요" :
@@ -103,6 +123,50 @@ function readSourcePointer(value: unknown): string | null | undefined {
 export function expressionChoice(draft: ExpressionDraft, nowMs: number, kind?: ExpressionKind): ExpressionChoice | null {
   if (!expressionDraftCard(draft, nowMs).canApprove || draft.state !== "ready") return null;
   return { draftId: draft.draftId, revision: draft.revision, sha256: draft.media.large.sha256, ...(kind ? { kind } : {}) };
+}
+
+/** What approving an agent's link candidate sends (ADR-0218 §18): no hash, since there is no picture until the approval fetches it. */
+export function expressionLinkChoice(draft: ExpressionDraft, nowMs: number): ExpressionLinkChoice | null {
+  return expressionDraftCard(draft, nowMs).canFetch ? { draftId: draft.draftId, revision: draft.revision } : null;
+}
+
+/**
+ * What the decision's answer means for a link approval (ADR-0218 §18 and appendix C). A 409 naming one of the
+ * fetch reasons is the candidate's new code, and the card stays pending; a 503 `expression_link_busy` took
+ * nothing and the person presses again later. Anything else is not about the link, so it is `null` and the
+ * card reads the receipt the way it always has.
+ */
+export function expressionLinkDecision(httpStatus: number, receiptStatus: unknown): { kind: "failed"; code: ManualUploadCode } | { kind: "busy" } | null {
+  if (httpStatus === 503 && receiptStatus === "expression_link_busy") return { kind: "busy" };
+  if (httpStatus === 409 && typeof receiptStatus === "string" && (MANUAL_UPLOAD_CODES as readonly string[]).includes(receiptStatus)) {
+    return { kind: "failed", code: receiptStatus as ManualUploadCode };
+  }
+  return null;
+}
+
+/** A code this build has not seen, in the shape the server writes codes (lower snake case). */
+const FUTURE_CODE = /^[a-z][a-z0-9_]{0,63}$/u;
+
+/**
+ * Reads the server-authored candidates of an `expression.create` card. The whole card is held to the contract,
+ * with one allowance: a candidate without a picture may carry a code this build does not know yet. That
+ * candidate is judged as if its code were a known one and keeps its own code, so the card stands and that one
+ * line falls back to the neutral sentence (`manualUploadLine`) instead of every candidate going missing
+ * (#5934: the link code did exactly that to cards from a newer server). Returns the value it was given, the
+ * same reference, so a caller that reads it on every render does not see a new card each time.
+ */
+export function readExpressionApproval(value: unknown): ExpressionApproval | null {
+  if (matchesExpressionContract("Approval", value)) return value as ExpressionApproval;
+  if (value === null || typeof value !== "object" || Array.isArray(value)) return null;
+  const candidates = (value as { candidates?: unknown }).candidates;
+  if (!Array.isArray(candidates)) return null;
+  const known = candidates.map((candidate: unknown) => {
+    if (candidate === null || typeof candidate !== "object" || Array.isArray(candidate)) return candidate;
+    const { state, code } = candidate as { state?: unknown; code?: unknown };
+    return state === "manual_upload_required" && typeof code === "string" && FUTURE_CODE.test(code)
+      ? { ...candidate, code: "source_unavailable" } : candidate;
+  });
+  return matchesExpressionContract("Approval", { ...value, candidates: known }) ? value as ExpressionApproval : null;
 }
 
 /** A replacement upload invalidates every previously viewed choice. */

@@ -52,7 +52,7 @@ function member(id: string, name: string): RosterMember {
     updatedAtMs: 0,
   } as RosterMember;
 }
-const DIRECTORY = makeDirectory([member(SELF, '곽성재'), member(OTHER, '김인턴')]);
+const DIRECTORY = makeDirectory([member(SELF, '한지후'), member(OTHER, '김인턴')]);
 
 const ROOT: Message = {
   id: ROOT_ID,

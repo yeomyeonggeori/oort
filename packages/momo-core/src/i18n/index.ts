@@ -12,6 +12,7 @@ export type { LocaleService, LocaleServiceContext, DateFormatOptions, NumberForm
 /** P0-6 reads this nonempty key list and argument schema for the existing copy testkit. */
 export { messageKeys, argumentSpecs } from './generated/messages';
 export type { MessageKey, MessageArgs } from './generated/messages';
+export type { PlainMessageKey, MessageRef } from './keys';
 export type {
   CatalogLocale, MessageCatalog, MessageValues, MessageArguments,
   MessageService, MessageServiceOptions, MessageDiagnostic,

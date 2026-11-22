@@ -587,14 +587,13 @@ async function sceneThemeSwitch(browser, origin) {
   const fresh = new Map();
   for (const theme of ["dawnsky", "graphite", "noeul"]) {
     const boot = await open(browser, origin, { scheme: "light", width: 1100, hash: "/settings?section=appearance", theme });
-    await boot.page.getByTestId("theme-style-trigger").waitFor({ timeout: 20_000 });
+    await boot.page.getByTestId("theme-style-options").waitFor({ timeout: 20_000 });
     await settle(boot.page);
     fresh.set(theme, await edge(boot.page));
     await boot.context.close();
   }
   const { context, page } = await open(browser, origin, { scheme: "light", width: 1100, hash: "/settings?section=appearance", theme: "dawnsky" });
-  await page.getByTestId("theme-style-trigger").waitFor({ timeout: 20_000 });
-  await page.getByTestId("theme-style-trigger").click();
+  await page.getByTestId("theme-style-options").waitFor({ timeout: 20_000 }); // 격자는 늘 펴져 있다(#5783)
   await page.getByTestId("theme-tile-noeul").waitFor({ timeout: 20_000 });
   await settle(page);
   for (const next of ["noeul", "graphite", "dawnsky", "noeul", "dawnsky"]) {

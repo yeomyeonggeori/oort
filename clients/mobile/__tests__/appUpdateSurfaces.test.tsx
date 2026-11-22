@@ -28,7 +28,7 @@ const offerHook = useAppUpdateOffer as jest.Mock;
 
 const WS = '22222222-2222-4222-8222-222222222222';
 const SELF_ID = '11111111-1111-4111-8111-111111111111';
-const SELF: Member = {id: SELF_ID, workspaceId: WS, kind: 'human', displayName: '곽성재', handle: 'seongjae'};
+const SELF: Member = {id: SELF_ID, workspaceId: WS, kind: 'human', displayName: '한지후', handle: 'jihu'};
 const OFFER = {version: '0.1.29', latestBuild: 3036, currentBuild: 3035, testflight: true};
 
 function jsonResponse(status: number, body: unknown): Response {
@@ -85,7 +85,7 @@ beforeEach(() => {
     if (url.includes('/roster')) {
       return jsonResponse(200, {
         members: [
-          {id: SELF_ID, workspaceId: WS, kind: 'human', status: 'active', displayName: '곽성재', handle: 'seongjae', channelCount: 0, channelIds: [], capabilities: [], createdAtMs: 0, updatedAtMs: 0},
+          {id: SELF_ID, workspaceId: WS, kind: 'human', status: 'active', displayName: '한지후', handle: 'jihu', channelCount: 0, channelIds: [], capabilities: [], createdAtMs: 0, updatedAtMs: 0},
         ],
       });
     }

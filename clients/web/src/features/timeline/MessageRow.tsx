@@ -14,6 +14,8 @@ import { TeamAiDelegateStrip } from "./TeamAiDelegateStrip";
 import { teamAiDelegateFor } from "@momo/core/features/timeline/teamAi";
 import { teamAiReplyMetaFor } from "@momo/core/features/timeline/teamAiReply";
 import { AppNoticeLine, TeamAiReplyMeta } from "./TeamAiReplyMeta";
+import { TeamAiDelegationTail } from "./TeamAiDelegationTail";
+import { teamAiDelegatedAnswerOf } from "@momo/core/features/timeline/teamAiDelegationView";
 import { githubNoticeFor } from "@momo/core/features/github/model";
 import { GithubNoticeStrip } from "@/features/github/GithubNoticeStrip";
 import { useAppNotice, useAppsTailContext } from "./appsTail";
@@ -113,6 +115,7 @@ import { messageShareUrl } from "@/features/inbox/anchor";
 import { absoluteApiBase } from "@/lib/serverBase";
 import { useOpenMemberProfile } from "@/features/directory/memberProfileContext";
 import { useHoverToolbarFocusHandoff, useRowRovingFocus } from "./rowFocus";
+import { useRowClockPlacement } from "./rowClockPlacement";
 import { MessageEditor } from "./MessageEditor";
 import { EditedMark } from "./EditedMark";
 import { EditRequestContext } from "./editRequest";
@@ -137,9 +140,10 @@ import { UnfurlCards } from "./UnfurlCards";
 import { useSession } from "@/app/session";
 import { reminderFailureMessage } from "@momo/core/features/reminders/model";
 import {
-  MARK_UNREAD_SUCCESS_ANNOUNCEMENT,
-  markUnreadFailureMessage,
+  MARK_UNREAD_SUCCESS_KEY,
+  markUnreadFailureKey,
 } from "@momo/core/features/readState/copy";
+import { useFormatMessage } from "@/i18n/useFormatMessage";
 import { RemindDialog } from "@/features/reminders/RemindDialog";
 import { useReminderMutations } from "@/features/reminders/useReminders";
 import { useMarkUnread } from "./useMarkUnread";
@@ -461,6 +465,7 @@ export function MessageRow({
   const { workspaceId, session } = useSession();
   const reminderMutations = useReminderMutations(workspaceId);
   const markUnread = useMarkUnread(workspaceId);
+  const formatMessage = useFormatMessage();
   const [actionMenuOpen, setActionMenuOpen] = useState(false);
   const [contextMenuOpen, setContextMenuOpen] = useState(false);
   const [rowHovered, setRowHovered] = useState(false);
@@ -547,9 +552,11 @@ export function MessageRow({
   // parsing a 700 line patch on every scroll-driven re-render is work the
   // virtualiser would pay for over and over. The message object is replaced
   // only when the server row changes, so it is the right key.
+  // #5577 — 서버 결과 카드(턴 기록)는 작성자가 에이전트일 때만 선다: 종류는 멤버 목록에서 온다.
+  const authorKind = author?.kind;
   const { card, artifact, artifactState, keepsBody } = useMemo(
-    () => rowPresentation(message),
-    [message]
+    () => rowPresentation(message, authorKind),
+    [message, authorKind]
   );
   const idleNotice = useMemo(() => workSessionIdleNotice(message), [message]);
   // 도우미가 넘기는 줄(ADR-0201 D5). 이 키를 보내지 않는 서버에서는 늘 null 이다.
@@ -558,9 +565,11 @@ export function MessageRow({
   // 같은 꼬리에 「쓴 앱」 줄(E8·E10, #3950)이 붙는다: 보고가 있는 에이전트 답에만.
   const appsTail = useAppsTailContext(message, directory);
   const teamAiReply = useMemo(
-    () => teamAiReplyMetaFor(message, appsTail),
-    [message, appsTail]
+    () => teamAiReplyMetaFor(message, appsTail, authorKind),
+    [message, appsTail, authorKind]
   );
+  // Hermes에 맡겨 끝낸 답(서버 소유 칩 칸, ADR-0201 v4 P8 · #5375): 칩·쓴 양 줄·그림 자리. 칸이 없으면 null.
+  const delegatedAnswer = useMemo(() => teamAiDelegatedAnswerOf(message, authorKind), [message, authorKind]);
   // 앱을 쓰다 막혔을 때의 한 문장(+ 행동 하나). 칸이 없으면 null.
   const appNotice = useAppNotice(message);
   // 서버가 GitHub 앱으로 보낸 알림이면 아랫줄이 「GitHub 알림」이라고 말한다(ADR-0205, #3955).
@@ -711,15 +720,13 @@ export function MessageRow({
           seq: message.seq,
         })
         .then(() => {
-          setRowAnnouncement(MARK_UNREAD_SUCCESS_ANNOUNCEMENT);
-          timelineLive.announce(MARK_UNREAD_SUCCESS_ANNOUNCEMENT);
+          const done = formatMessage(MARK_UNREAD_SUCCESS_KEY);
+          setRowAnnouncement(done);
+          timelineLive.announce(done);
         })
         .catch((error: unknown) =>
-          setRowError(
-            error instanceof Error
-              ? error.message
-              : markUnreadFailureMessage(error)
-          )
+          // 행 오류 칸은 다른 실패(고정 · 알림)의 문장과 함께 쓰므로 지금은 푼 문장을 담는다(#6020 README 「상태」).
+          setRowError(formatMessage(markUnreadFailureKey(error)))
         );
     },
     onEdit: () => {
@@ -813,6 +820,15 @@ export function MessageRow({
     neighborBannerOpen,
   });
   useHoverToolbarFocusHandoff(rowRef, showHoverToolbar, rowFocused);
+  // 이어지는 행의 시각은 올림 · 키보드 초점에서 줄 오른쪽 빈자리로 옮겨 선다(#6026, `rowClockPlacement.ts`). hover가 없는 기기는
+  // 시각을 세우지 않으므로(#5624 M2) 재지 않는다.
+  const clockRef = useRef<HTMLTimeElement | null>(null);
+  useRowClockPlacement(
+    rowRef,
+    clockRef,
+    !startsGroup && !touchSurface && !editing && !selectionWithinRow && (rowHovered || rowFocused),
+    editing || selectionWithinRow
+  );
 
   // 호버는 **DOM 이 아는 사실**로 센다(#5328, SidebarRow #3963 과 같은 문제). React 의 `onMouseEnter`/`onMouseLeave` 는 포털 자손을 행 안으로
   // 친다: 포인터가 행에서 ⋮ 메뉴(포털, DOM 으로는 행 밖)로 건너가도 leave 가 오지 않고, 행동을 고르면 메뉴 항목이 포인터 밑에서 사라져(사라진
@@ -969,12 +985,13 @@ export function MessageRow({
       <div className={cn("relative shrink-0", MESSAGE_AVATAR_GUTTER_CLASS)}>
         {startsGroup ? (
           author ? (
+            // 툴팁을 두지 않는다(#5965): 이름과 핸들이 바로 옆 머리 줄에 보이는 자리라 같은 글을 다시 띄울 이유가 없고, 맨 아래 글에서는
+            // 스크롤 칸에 잘리고 읽는 글을 덮는다. 이름은 `aria-label`이 진다(`title`도 되살리지 않는다).
             <button
               type="button"
               data-testid="row-avatar-profile"
               data-row-action=""
               aria-label={`${author.displayName} @${author.handle} 프로필 열기`}
-              title={`${author.displayName} @${author.handle} 프로필 열기`}
               onClick={(event) =>
                 openMemberProfile(author.id, event.currentTarget)
               }
@@ -991,6 +1008,7 @@ export function MessageRow({
         ) : (
           <>
           <time
+            ref={clockRef}
             dateTime={new Date(message.createdAtMs).toISOString()}
             data-numeric
             data-testid="row-time"
@@ -1004,8 +1022,12 @@ export function MessageRow({
             //
             // 키보드에도 길을 준다: 행 안 어디에 포커스가 있어도 보이게 `focus-within`을
             // 함께 건다 — hover만 걸면 마우스 없는 사람에게는 없는 기능이 된다.
+            //
+            // 자리 (#6026): 올림 · 키보드 초점에서 줄 오른쪽 빈자리로 옮겨 선다(`useRowClockPlacement`가 잰 자리를 CSS 변수로
+            // 건네고 `tokens.css`가 놓는다 — 기준은 이 거터 칸이다). 빈자리가 없는 드문 행은 이 거터 자리 그대로다. `pointer-events-none`: 쉬는 동안(투명) 본문
+            // 위에 남은 상자가 글 클릭 · 고르기를 먹지 않는다.
             className={cn(
-              "absolute right-0 top-0 whitespace-nowrap text-timestamp text-ink-muted",
+              "pointer-events-none absolute right-0 top-0 whitespace-nowrap text-timestamp text-ink-muted",
               "opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100",
               // 움직임을 줄여 달라고 한 사람에게는 페이드도 움직임이다.
               "motion-reduce:transition-none"
@@ -1163,7 +1185,8 @@ export function MessageRow({
         {!deleted && <NoticeActionLink message={message} />}
         {appNotice && <AppNoticeLine notice={appNotice} />}
         {!deleted && githubNotice && <GithubNoticeStrip notice={githubNotice} />}
-        {teamAiReply && <TeamAiReplyMeta meta={teamAiReply} />}
+        {teamAiReply && delegatedAnswer === null && <TeamAiReplyMeta meta={teamAiReply} />}
+        {delegatedAnswer && <TeamAiDelegationTail meta={teamAiReply} answer={delegatedAnswer} directory={directory} />}
         {teamAiDelegate && (
           <TeamAiDelegateStrip
             delegate={teamAiDelegate}
@@ -1186,6 +1209,7 @@ export function MessageRow({
             attachments={attachments}
             senderName={name}
             sentAtMs={message.createdAtMs}
+            pictureFrame={delegatedAnswer?.picture === true}
           />
         )}
         {!deleted && unfurls.length > 0 && (
@@ -1240,7 +1264,7 @@ export function MessageRow({
         {/* Provider cascade (ADR-0135 D1). Outside the card/artifact branch on
             purpose: whichever of the two took the slot, a turn served by the
             second provider says so. Renders nothing for every other row. */}
-        <CascadeNotice runId={turnRecordRunId(message)} />
+        <CascadeNotice runId={turnRecordRunId(message, authorKind)} />
         {/* 「기억 n개 참고」(ADR-0196 D12 V2, #3165). 정착한 턴 기록 한 줄에만 단다:
             한 run이 쓴 행은 여럿이라 `run_id`만 보면 같은 칩이 세 번 나온다(위
             CascadeNotice와 같은 좁힘). 영수증이 없으면 칩도 없다. */}

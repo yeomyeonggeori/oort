@@ -135,8 +135,8 @@ const DIRECTORY = makeDirectory([
     kind: "human",
     status: "active",
     role: "owner",
-    displayName: "곽성재",
-    handle: "seongjae",
+    displayName: "한지후",
+    handle: "jihu",
     channelCount: 1,
     channelIds: [],
     capabilities: [],
@@ -154,8 +154,8 @@ function sessionValue(): SessionContextValue {
         id: ME,
         workspaceId: WORKSPACE_ID,
         kind: "human",
-        displayName: "곽성재",
-        handle: "seongjae",
+        displayName: "한지후",
+        handle: "jihu",
       },
       realtimeWebSocketUrl: "wss://example.test/connection/websocket",
     },
@@ -915,7 +915,7 @@ describe("서버가 이미 결정한 옛 카드는 버튼이 없다 (#3818)", ()
       decided_at_ms: 1_753_400_000_000,
     });
     openDetails(host);
-    expect(byTestId(host, "approval-ledger")[0]?.textContent).toContain("곽성재");
+    expect(byTestId(host, "approval-ledger")[0]?.textContent).toContain("한지후");
     expect(byTestId(host, "approval-ledger")[0]?.textContent).toContain("원장 #");
   });
 

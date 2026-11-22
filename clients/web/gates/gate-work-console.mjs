@@ -28,6 +28,16 @@ const channelId = "00000000-0000-7000-8000-000000000201";
 // 사전에서 오는 문장은 한국어로 읽는다(#5304). Playwright 컨텍스트가 언어를 주지 않으면 Chromium 기본(en-US)이라 앱이 사전의
 // 영어 문장을 그린다 — 그래서 이 게이트의 모든 컨텍스트가 `locale: GATE_LOCALE`을 넘긴다.
 const GATE_LOCALE = "ko-KR";
+
+/** 단추를 가리켜 뜬 공용 Tooltip의 글(#5779: 아이콘 단추는 네이티브 title이 아니다). 읽은 뒤 포인터를 치운다. */
+async function tooltipTextOf(page, locator) {
+  await locator.hover();
+  const tip = page.locator('[data-testid="tooltip"]').first();
+  await tip.waitFor({ state: "visible", timeout: 3000 });
+  const text = await tip.textContent();
+  await page.mouse.move(0, 0);
+  return text;
+}
 // 작업 콘솔 오프라인 띠의 두 문장(#5260이 원인별 틀 `blocked.workStateStale.*`·`blocked.workStateNone.*`로 옮겼다)은 한국어 사전
 // (blocked.json)이 정본이다. 손으로 적으면 이 게이트가 화면을 지키는 것이 아니라 문장이 고쳐지는 것을 막는 쪽이 된다
 // (gate-connection·capture-5260과 같은 규칙).
@@ -88,8 +98,8 @@ const auth = {
     id: memberId,
     workspaceId,
     kind: "human",
-    displayName: "곽성재",
-    handle: "seongjae",
+    displayName: "한지후",
+    handle: "jihu",
   },
   realtimeWebSocketUrl: "ws://work-console-gate.invalid/connection/websocket",
 };
@@ -109,8 +119,8 @@ const roster = [
     kind: "human",
     status: "active",
     role: "owner",
-    displayName: "곽성재",
-    handle: "seongjae",
+    displayName: "한지후",
+    handle: "jihu",
     channelCount: 1,
     channelIds: [channelId],
     capabilities: [],
@@ -740,7 +750,7 @@ async function assertConsole(context, state) {
   });
   if (sameElement) throw new Error("session state and execution location collapsed into one chip");
   const firstMeta = (await rows.first().getByTestId("work-console-meta").textContent())?.trim();
-  if (firstMeta !== "#agent-runtime · 곽성재 · codex") {
+  if (firstMeta !== "#agent-runtime · 한지후 · codex") {
     throw new Error(`session who/what meta drifted: ${firstMeta}`);
   }
   for (const meta of await page.getByTestId("work-console-meta").all()) {
@@ -869,7 +879,8 @@ async function assertConsole(context, state) {
   const wideToggle = page.getByTestId("work-console-detail-wide");
   if (
     (await wideToggle.getAttribute("aria-label")) !== "세션 상세 넓게 보기" ||
-    (await wideToggle.getAttribute("title")) !== "상세 넓게 보기" ||
+    (await wideToggle.getAttribute("title")) !== null ||
+    (await tooltipTextOf(page, wideToggle)) !== "상세 넓게 보기" ||
     (await wideToggle.getAttribute("aria-controls")) !==
       "work-console-session-list"
   ) {
@@ -899,7 +910,8 @@ async function assertConsole(context, state) {
     (await consoleLayout.getAttribute("data-detail-wide")) === null ||
     (await wideToggle.getAttribute("aria-pressed")) !== "true" ||
     (await wideToggle.getAttribute("aria-label")) !== "세션 상세 넓게 보기" ||
-    (await wideToggle.getAttribute("title")) !== "세션 목록 보이기"
+    (await wideToggle.getAttribute("title")) !== null ||
+    (await tooltipTextOf(page, wideToggle)) !== "세션 목록 보이기"
   ) {
     throw new Error("detail focus state is not exposed to assistive technology");
   }
@@ -1660,7 +1672,7 @@ async function main() {
       await assertMetadataFallback(
         browser,
         { mode: "normal", failChannels: true },
-        "채널 조회 실패 · 곽성재 · codex",
+        "채널 조회 실패 · 한지후 · codex",
         "채널 정보를 새로 확인하지 못했어요."
       );
       await assertMetadataFallback(

@@ -37,6 +37,8 @@
 //     expected failure: "tabular-nums leaked onto Korean prose"
 //   BORDERS_GATE_PROVE_RED_TOUCH=1 npm run gate:borders
 //     expected failure: "a touch reader sees the header's time repeated"
+//   BORDERS_GATE_PROVE_RED_CLOCK_SIDE=1 npm run gate:borders
+//     expected failure: "a continuation row's time is not on the right"
 //
 // red seam은 **CSS만** 바꾼다(드라이버 행동). 제품 소스를 지우거나 단언을 빼라고
 // 요구하지 않으므로 증명은 반복 가능하다. TAIL은 본문 열을 flex로 만들어 꼬리를 칩
@@ -95,6 +97,7 @@ const proveRedHover = process.env.BORDERS_GATE_PROVE_RED_HOVER === "1";
 const proveRedGap = process.env.BORDERS_GATE_PROVE_RED_GAP === "1";
 const proveRedNumeric = process.env.BORDERS_GATE_PROVE_RED_NUMERIC === "1";
 const proveRedTouch = process.env.BORDERS_GATE_PROVE_RED_TOUCH === "1";
+const proveRedClockSide = process.env.BORDERS_GATE_PROVE_RED_CLOCK_SIDE === "1";
 
 // 행 id는 소문자다 — 행이 `data-message-id`를 소문자로 내놓는다.
 const OLD_MSG = "0199bbbb-0000-7000-8000-0000000000c1";
@@ -111,8 +114,8 @@ const session = {
     id: memberId,
     workspaceId,
     kind: "human",
-    displayName: "곽성재",
-    handle: "seongjae",
+    displayName: "한지후",
+    handle: "jihu",
   },
   realtimeWebSocketUrl: "ws://quote-gate.invalid/connection/websocket",
 };
@@ -136,8 +139,8 @@ const roster = [
     id: memberId,
     kind: "human",
     role: "owner",
-    displayName: "곽성재",
-    handle: "seongjae",
+    displayName: "한지후",
+    handle: "jihu",
   }),
   member({
     id: peerId,
@@ -453,6 +456,42 @@ async function login(page) {
   await rowLocator(page, TAIL_MSG).waitFor();
 }
 
+/**
+ * 이어진 줄의 시각 자리를 잰다(#6026): 시각 글자 상자, 본문 상자, 호버 막대 상자, 그 줄 글자와의 겹침 수, 그리고 행 기준 글자 자리(움직임 비교용).
+ */
+function clockGeometry(row) {
+  return row.evaluate((node) => {
+    const box = (r) => ({ left: r.left, right: r.right, top: r.top, bottom: r.bottom });
+    const hit = (a, b) => a.left < b.right && a.right > b.left && a.top < b.bottom && a.bottom > b.top;
+    const clockNode = node.querySelector("[data-row-clock]");
+    const range = document.createRange();
+    range.selectNodeContents(clockNode);
+    const clock = box(range.getBoundingClientRect());
+    const bodyNode = node.querySelector("[data-row-body]");
+    const body = box(bodyNode.getBoundingClientRect());
+    const barNode = node.querySelector('[data-testid="message-hover-toolbar"]');
+    const bar = barNode ? box(barNode.getBoundingClientRect()) : null;
+    const rowBox = node.getBoundingClientRect();
+    const glyphs = [];
+    let glyphHits = 0;
+    const walker = document.createTreeWalker(bodyNode, NodeFilter.SHOW_TEXT);
+    while (walker.nextNode()) {
+      const text = walker.currentNode.textContent ?? "";
+      for (let i = 0; i < text.length; i++) {
+        if (text[i] === " " || text[i] === "\n") continue;
+        const glyph = document.createRange();
+        glyph.setStart(walker.currentNode, i);
+        glyph.setEnd(walker.currentNode, i + 1);
+        const r = glyph.getBoundingClientRect();
+        if (r.width === 0 && r.height === 0) continue;
+        glyphs.push([r.left - rowBox.left, r.top - rowBox.top]);
+        if (hit(clock, r)) glyphHits += 1;
+      }
+    }
+    return { clock, body, bar, glyphs, glyphHits, barHit: bar !== null && hit(clock, bar) };
+  });
+}
+
 function rowLocator(page, messageId) {
   return page.locator(
     `[data-testid="timeline-message"][data-message-id="${messageId}"]`
@@ -619,6 +658,11 @@ async function exercise(browser) {
   const opacityOf = () =>
     contTime.evaluate((node) => Number(getComputedStyle(node).opacity));
   const restingOpacity = await opacityOf();
+  if (proveRedClockSide) {
+    // red seam: 시각을 옛 거터 자리(`right-0 top-0`)에 묶는다 = owner QA(2026-11-20)가 본 「왼쪽 여백에 뜨는 시각」.
+    await page.addStyleTag({ content: "[data-row-clock]{left:auto!important;right:0!important;top:0!important}" });
+  }
+  const restClock = await clockGeometry(contRow);
   await contRow.hover();
   await wait(250);
   const hoveredOpacity = await opacityOf();
@@ -628,6 +672,28 @@ async function exercise(browser) {
       `a continuation row never showed its time: hover 뒤에도 불투명도가 ${hoveredOpacity}다. ` +
         "묶음 안에서 개별 발화의 시각을 얻는 길이 없다 (진단 H-3)"
     );
+  }
+  // 자리 (#6026): 올린 시각은 줄 **오른쪽**에 서고, 그 줄의 글자 · 호버 막대와 겹치지 않으며, 올려도 글이 움직이지 않는다.
+  const hoveredClock = await clockGeometry(contRow);
+  console.log(`[rowtime] 자리 ${JSON.stringify(hoveredClock.clock)} 본문 ${JSON.stringify(hoveredClock.body)} 막대 ${JSON.stringify(hoveredClock.bar)}`);
+  if (hoveredClock.clock.left < hoveredClock.body.left + (hoveredClock.body.right - hoveredClock.body.left) / 2 ||
+      hoveredClock.clock.right > hoveredClock.body.right + 1) {
+    throw new Error(
+      "a continuation row's time is not on the right: 이어진 줄에 올린 시각이 줄 오른쪽(본문 오른쪽 절반 안)에 서지 않았다 " +
+        `(시각 ${hoveredClock.clock.left}~${hoveredClock.clock.right}, 본문 ${hoveredClock.body.left}~${hoveredClock.body.right}) — #6026`
+    );
+  }
+  if (hoveredClock.glyphHits > 0) {
+    throw new Error(`이어진 줄의 시각이 그 줄의 글자 ${hoveredClock.glyphHits}자를 덮는다 (#6026)`);
+  }
+  if (hoveredClock.barHit) {
+    throw new Error("이어진 줄의 시각이 호버 막대와 겹친다 (#6026)");
+  }
+  const shifted = hoveredClock.glyphs.length !== restClock.glyphs.length
+    ? Infinity
+    : Math.max(0, ...hoveredClock.glyphs.map((g, i) => Math.max(Math.abs(g[0] - restClock.glyphs[i][0]), Math.abs(g[1] - restClock.glyphs[i][1]))));
+  if (shifted > 0) {
+    throw new Error(`이어진 줄에 올리자 글이 ${shifted}px 움직였다: 시각은 글을 밀지 않는다 (#6026)`);
   }
   // 보조기술은 hover 없이도 얻는다. 폰이 이미 모든 행의 시각을 라벨에 넣고 있었고
   // (진단 H-3의 아이러니), 웹에서 그것을 hover에만 두면 같은 비대칭을 되풀이한다.

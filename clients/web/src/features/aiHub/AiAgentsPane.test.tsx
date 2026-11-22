@@ -55,7 +55,7 @@ const bot = (id: string, name: string, extra: Partial<RosterMember>): RosterMemb
 const owned = (id: string, name: string) => ({ ownerHumanId: id, owner: { id, displayName: name } });
 
 const ROSTER = (role: RosterMember["role"]): RosterMember[] => [
-  person(ME, "곽성재", role),
+  person(ME, "한지후", role),
   person(OTHER, "서연", "member"),
   bot("a1", "김인턴", { brain: "team_key", callableBy: "everyone" }),
   bot("a2", "성재-codex", { brain: "subscription", callableBy: "owner_only", hostOnline: true, ...owned(ME, "성재") }),
@@ -70,7 +70,7 @@ const ROSTER = (role: RosterMember["role"]): RosterMember[] => [
 const session: SessionContextValue = {
   session: {
     accessToken: "access", refreshToken: "refresh",
-    member: { id: ME, workspaceId: WS, kind: "human", displayName: "곽성재", handle: "seongjae" },
+    member: { id: ME, workspaceId: WS, kind: "human", displayName: "한지후", handle: "jihu" },
     realtimeWebSocketUrl: "wss://example.test/connection/websocket",
   },
   workspaceId: WS, realtime: null, connStatus: "connected", logout: () => undefined, replaceSessionMember: () => undefined,
@@ -237,13 +237,13 @@ describe("네 가지 상태", () => {
   });
 
   it("비어 있음: 만들 수 있는 사람에게는 만들기를, 없는 사람에게는 누가 만드는지를", async () => {
-    vi.mocked(fetchRoster).mockResolvedValue([person(ME, "곽성재", "owner")]);
+    vi.mocked(fetchRoster).mockResolvedValue([person(ME, "한지후", "owner")]);
     mount();
     expect((await until("ai-agents-empty")).textContent).toContain("만들면 채널에서 @로 부를 수 있어요");
   });
 
   it("비어 있음, 일반 멤버", async () => {
-    vi.mocked(fetchRoster).mockResolvedValue([person(ME, "곽성재", "member")]);
+    vi.mocked(fetchRoster).mockResolvedValue([person(ME, "한지후", "member")]);
     mount();
     const empty = await until("ai-agents-empty");
     expect(empty.textContent).toContain("소유자나 관리자가 만들 수 있어요");

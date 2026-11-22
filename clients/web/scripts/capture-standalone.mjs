@@ -54,8 +54,8 @@ const SESSION = {
     id: ME,
     workspaceId: WORKSPACE_ID,
     kind: "human",
-    displayName: "곽성재",
-    handle: "seongjae",
+    displayName: "한지후",
+    handle: "jihu",
   },
   realtimeWebSocketUrl: `ws://127.0.0.1:${PORT + 1}/connection/websocket`,
 };
@@ -433,7 +433,7 @@ async function captureSignedInShell(browser, { standalone, scheme = "light" }) {
   await context.route("**/v1/workspaces/*/channels", (route) =>
     json(route, { channels: CHANNELS })
   );
-  await context.route("**/v1/workspaces/*/roster", (route) =>
+  await context.route("**/v1/workspaces/*/roster*", (route) =>
     json(route, { members: [SESSION.member] })
   );
   // 포괄 목의 `{}`를 허들 파서가 "불러오지 못했습니다"로 읽는다. 없는 허들은
@@ -453,7 +453,7 @@ async function captureSignedInShell(browser, { standalone, scheme = "light" }) {
     await page.addStyleTag({ content: `#root { ${SAFE_AREA_TOP_DECLARATION}; }` });
   }
   await advanceToAccount(page);
-  await page.getByTestId("login-email").fill("seongjae@dawn.example");
+  await page.getByTestId("login-email").fill("jihu@dawn.example");
   await page.getByTestId("login-password").fill("capture-only-not-a-credential");
   await page.getByTestId("login-submit").click();
   await page.getByTestId("channel-list").waitFor({ state: "visible" });

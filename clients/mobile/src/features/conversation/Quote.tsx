@@ -16,7 +16,7 @@ import React, {useMemo} from 'react';
 import {Image, Pressable, StyleSheet, Text, View} from 'react-native';
 import {CONV_ICON_SIZE, CONV_ICONS} from '../../design/icons';
 import {usePalette, useStyles} from '../../design/theme';
-import {font, line, space, TOUCH_TARGET, type Palette} from '../../design/tokens';
+import {font, line, PRESSED_OPACITY, space, TOUCH_TARGET, type Palette} from '../../design/tokens';
 import {useFormatMessage} from '../../i18n/useFormatMessage';
 import {appNote} from './appVoice';
 import {otherBubbleFill, quoteHeadFor, type QuoteHeadColors} from './bubble';
@@ -398,5 +398,5 @@ const buildStyles = (color: Palette) => StyleSheet.create({
     justifyContent: 'center',
   },
   cross: {width: CONV_ICON_SIZE.cross, height: CONV_ICON_SIZE.cross},
-  pressed: {opacity: 0.6},
+  pressed: {opacity: PRESSED_OPACITY},
 });

@@ -42,11 +42,13 @@ OmD가 읽는 루트 `DESIGN.md`와 `.omd/system/*`는 이 정본을 Core v2로 
 | 간격·반경·글자 크기를 고른다 | §2.3~§2.5 — 스케일 밖 값은 **이름**으로 들어오거나 아예 안 들어온다. |
 | 아이콘을 고른다 | §2.8 — lucide 한 벌, 16px 단일 기본. 예외는 컴포넌트가 사유를 진다. |
 | 버튼 두 개를 나란히 세운다 | §3 위계 — 파괴 > 주 > 보조. 값이 아니라 **관계**다. |
+| 어느 일에 어느 공용 부품을 쓰는지, 그 규격이 어디 있는지(또는 없는지) 찾는다 | [components.md](components.md) — 일 → 웹 · 폰 부품 → 규격 절 → 상태 견본 → 시험을 한 장에. 맨 위에 「규격 없음」의 수. |
 | 새 표면을 만든다 | §4 상태 — 빈·로딩·오류·오프라인 넷이 다 있어야 출하다. 폰이면 시트·페이지·드로어 고르기와 공용 부품은 [phone-sheets.md](phone-sheets.md). |
 | 대화 안에서 에이전트가 일하는 모습(레일·칩·예외 줄)을 건드린다 | [agent-work-display.md](agent-work-display.md) — 어느 자리가 무엇을 말하는지, 유예·낱말을 한 곳이 정하는 규칙, Buzz 대비. |
 | 에이전트에게 부탁한 일의 제안·결정·결과(묶음 카드·상태 칩·생각 줄·푸시 문장·인박스 「승인」 칸)를 건드린다 | [agent-request-loop.md](agent-request-loop.md) — 한 요청 한 묶음의 카드 문법과 상태표, 요청 스레드 자리 규칙, 푸시 문장과 바로 승인 기준, 승인 고리의 말 사전. |
 | 에이전트가 대화에 띄우는 카드의 바닥 규칙(등록된 종류 · 누가 확인한 값인지 · 버튼 · 그림)을 건드린다 | §2.13 — 등록된 종류만 카드가 되고 모르는 것은 본문 글이다. 에이전트가 알린 값에는 「에이전트 보고」를 달고, 서버를 바꾸는 일은 승인 카드에서 결정한다. 열린 질문은 §7 미결 11~17. |
 | 링크 카드(링크 미리보기)의 크기·빠진 항목 대체 규칙을 건드린다 | [link-cards.md](link-cards.md) — 작게·크게·끄기, 그림 칸 셋, 빠진 것마다 한 모양(코어 표시 모델 한 곳), 아이콘 지연 로딩과 조용한 실패, 접근성 이름. |
+| 사람을 늘어놓는 목록·프로필·확인 창을 웹에 그린다 | §2.14 — 목록 줄(아바타 · 두 층 · 끝 칸)과 묶음 머리글은 공용 부품이고, 프로필·아바타 + 접속 점·확인 창의 구성과 치수가 한 곳에 있다. 폰 짝은 [phone-sheets.md](phone-sheets.md) §4. |
 | "이거 기계가 잡나?"를 묻는다 | §5 강제 기제 지도. **§5.3이 안 잡는 것 목록**이다. |
 | 스케일에 값을 하나 더하고 싶다 | §6. 대개 답은 "더하지 말고 이름을 지어라"다. |
 
@@ -214,7 +216,7 @@ OmD가 읽는 루트 `DESIGN.md`와 `.omd/system/*`는 이 정본을 Core v2로 
 
 **온보딩 2.0 예외 (ADR-0193 D11, #2807).** 온보딩 틀(`clients/web/src/features/onboarding/guide/`, `tokens.css` 「온보딩 2.0 공통 틀」 블록)은 owner가 고른 시안을 따라 입력 그릇과 행동 버튼을 높이 44, 반경 10(`--radius-md`)으로 그리고, 보조 행동은 채움 알약이 아니라 `--line-strong` 1px 테두리(`.onboarding-action[data-variant="secondary"]`)다. 주 행동은 여전히 잉크 채움이고 입력 그릇만 `--surface`다. 이 예외는 온보딩 틀 안에서만 유효하다. 제품 셸의 버튼은 §2.2의 채움 알약(`rounded-full`) 규칙을 그대로 따르고, 이 클래스를 온보딩 밖에서 빌려 쓰지 않는다. 같은 틀의 진행 점은 시안의 `--muted-soft` 대신 남은 칸에 `--line-strong`을 써서 바닥 세 정지점 위 비텍스트 3:1을 지킨다(core `ONBOARDING_DOT_ROLES`, `guide.test.ts`).
 
-폰은 `10·14·20·27·30·pill`이다([테마 토큰 표](themes-2.0.md) §5; 컴포저 단은 #4179가 26 → 27로 옮겼다). `designSystem.test.ts`가 웹 사다리의 값·순서와 프리미티브가 자기 자리에 서는지를 잰다. 옛 `sm/md/lg` 세 값은 같은 값이라 기존 소비처의 기하는 움직이지 않았다.
+폰은 표가 **둘**이고 둘 다 지금 쓰인다. DS2 사다리 `ds2Radius`(`clients/mobile/src/design/tokens.ts`)는 `10·14·20·27·30·pill`이다([테마 토큰 표](themes-2.0.md) §5; 컴포저 단은 #4179가 26 → 27로 옮겼다). 옛 표 `radius`는 `sm 6 · md 8 · pill`이고 소비처를 옮기지 않아 그대로 남아 있다(`src/` 안 쓰임: 옛 표 172곳 · DS2 사다리 100곳, 2026-11-20 센 값). 두 표는 `pill`을 빼면 값이 겹치지 않는 별개 사다리다. `designSystem.test.ts`는 웹 값을 읽어 대조하지 않고 각 표 안의 순서(옛 표 `sm < md < pill`, DS2 사다리 `badge < row < card < composer < sheet < pill`)를 재며, `src/` 스윕은 숫자 리터럴 `borderRadius: N`이 **옛 표**의 값 밖이면 잔량 표(지금 1곳) 안에서만 허용한다 — DS2 값은 리터럴이 아니라 `ds2Radius.<이름>`으로 읽어야 한다.
 
 ### 2.5 타이포
 
@@ -299,7 +301,7 @@ reduced-motion(D9): 사다리 네 duration과 모달 200/150은 `0ms`가 된다.
 
 오르트 로더(#3961, 시안 A 「공전」, owner 2026-10-17)는 연결 끊김·다시 연결 중·첫 로딩에서 도는 브랜드 표시다. 링은 가만히 있고 위성이 홈에서 나와 한 바퀴 돌고 다시 꽂힌다(한 주기 1.8s). 움직이는 속성은 `transform`·`opacity`뿐이다. 감소된 동작에서는 회전 대신 정지 마크 + 투명도 1↔0.5이고, 진행 중이 아닌 자리(오프라인·재시도 실패)는 정지 마크다(움직임이 곧 「지금 시도 중」이라는 주장이라서). 마크 사용 규칙은 `docs/brand/mark/README.md` 「로더」.
 
-폰 사다리는 웹과 이름·값이 같다(**사다리 칸 중에서는** 폰 전용 `send-arrive` 300ms 하나만 웹에 짝이 없다 — §6 「폰에 값을 더할 때」대로 값이 아니라 관계 `standard < send-arrive < arrival` 을 `sendArrival.test.tsx` 가 단정한다. 사다리 밖의 폰 값(탭 페이드 150ms 등)은 이 문장의 대상이 아니다). 2026-07-28 권고 `instant 0 / fast 120 / standard 180 / slow 240`은 이 결정이 대체한다 — `instant 0`은 값이 아니라 reduced-motion 상태다. 폰 `tokens.ts` 파생은 M1a.
+**폰에는 이 사다리가 없다.** `clients/mobile/src/design/motion.ts`는 사다리 이름 없이 기능마다 상수를 둔다(탭 페이드 150 · 메뉴 180 · 층 200/150/240/180 · 보내기 300 등). 웹 사다리의 이름은 그 주석이 근거를 말할 때만 나온다(예: `LANDED_TINT_FADE_MS`는 `standard` 240과 같은 값). 폰 전용 `send-arrive` 300ms는 값이 아니라 관계 `standard < send-arrive < arrival` 을 `sendArrival.test.tsx` 가 단정한다(§6 「폰에 값을 더할 때」). 2026-07-28 권고 `instant 0 / fast 120 / standard 180 / slow 240`은 이 결정이 대체한다 — `instant 0`은 값이 아니라 reduced-motion 상태다. 폰 `tokens.ts` 파생은 M1a(아직 안 했다 — 위 문장대로 폰 코드에 사다리가 없다).
 
 아직 이 축이 안 재는 것(owed, 이 PR이 닫지 않음):
 
@@ -561,7 +563,77 @@ Accepted). 의미가 같은 Lucide 글리프가 있으면 로컬 `<svg>`·CSS �
 
 **기계.** 코어 `actionResultCard.test.ts`(모르는 형식 버전 · 모르는 상태는 도구 카드로, 어긋난 행과 상한을 넘은 행은 개수로), `commandSuggest.test.ts`(본문 폴백과 한 줄 폴백, 에이전트가 쓴 `label`은 화면 문구가 되지 않음, 남에게 보이는 줄에 에이전트가 쓴 글이 없음), `agentCardModel.test.ts`(평범한 에이전트 글은 카드가 아님, 모르는 미리보기 종류는 그 칸만 빠짐), `completionReportCard.test.ts`(`kind`가 맞을 때만 카드). 「에이전트 보고」 칸은 웹 `AgentWorkPanel.agentReport.test.tsx`와 폰 `workTimelineSheet.test.tsx`가 run 상세에서 잰다. 서버 걸러내기는 `props_kind_forgery_conformance_pg.rs`(실 PG, `track/engine`)가 잰다. **재지 않는 것:** 화면이 카드를 쓴 쪽을 확인하는지(#5576 전에는 확인하지 않는다), 카드마다 어느 칸이 에이전트가 쓴 글인지 전수로 재는 시험, 렌더된 카드의 위계와 네 상태(사람과 design-review, §5.3). **알려진 빈틈(근거는 정해져 있고 화면이 아직 못 따른다, 후속 일감):** (가) 작업 완료 리포트 카드: 제목 · 요약 · 게이트 표가 모델이 쓴 글인데 웹 `AgentCard` · 폰 `MessageRow`에 「에이전트 보고」 꼬리표가 없다(③ · ADR-0220 §3-2 7행). (나) 한 줄 단계: §3-2 5행은 단계를 에이전트의 말로 세는데, run 상세는 단계 줄을 「에이전트 보고」가 아니라 「기록」 칸에 두고(웹 `AgentWorkPanel.agentReport.test.tsx` · 폰 `workTimelineSheet.test.tsx`), 요청 스레드의 생각 줄([agent-request-loop.md](agent-request-loop.md) §3)도 단계를 꼬리표 없이 그린다.
 
-### 2.10 좁은 웹 창에서 사이드바 열은 본문 칸에 바닥을 내준다 (#5093, #5048 D4)
+### 2.14 사람 목록 · 프로필 · 확인 창 — 웹 부품 규격 ([#5782](https://github.com/yeomyeonggeori/oort/issues/5782) · [#5780](https://github.com/yeomyeonggeori/oort/issues/5780), owner 2026-11-13 QA 12·13)
+
+owner 물음 「우리 저 부분 디자인 시스템에서 컴포넌트로 구성할 때 따로 신경도 안쓴거야?」의 답은 「아니었다」였다. 대화 상자 그릇과 단추·입력 칸만 공용 부품이었고, 멤버 줄·묶음 머리글·프로필 머리·키-값 줄은 두 화면이 손으로 짠 마크업이었으며, 이 문서에 그 부품들의 웹 규격 자체가 없었다. 폰은 2026-10 말에 같은 화면을 부품 가족(`ProfileFace`·`ActionTile`·`GroupCard`·`ListRow`·`GroupLabel`, [phone-sheets.md](phone-sheets.md) §4 · #4319)으로 다시 지었다. 이 절은 그 가족의 **웹 번역**이고, 다섯 규격을 한 곳에 둔다. 값은 모두 위 축(§2.3 간격 · §2.4 반경 · §2.5 타이포 · §2.8 아이콘)의 이름이고 새 값은 없다.
+
+**① 목록 줄 — `ListRow`** (`clients/web/src/design/ui/list-row.tsx`, #5782)
+
+| 칸 | 규격 |
+|---|---|
+| 앞 칸 | 아바타 하나, 32(`Avatar` 기본 `size-8` = 코어 `AVATAR_SIZE`). 접속 점은 아바타를 도려낸 자리, 아바타 상자 **안**에 앉아 줄 높이를 바꾸지 않는다(④) |
+| 첫 층 | `text-body`(15/22). 이름 `font-semibold`(에이전트는 `text-agent`, 사람은 `text-ink`)이 먼저 줄어들고(`truncate`), 그 곁에 짧은 표식만: 「나」(`text-meta text-ink-muted`) · 사용자 상태 이모지 · 활성이 아닐 때 상태 칩(`CHIP_CLASS` + `bg-warn-soft text-warn`) |
+| 둘째 층 | `text-meta text-ink-muted`(12/18) **한 줄**, 넘치면 말줄임. 사람은 「@핸들 · 이메일」(이메일은 보는 사람이 볼 수 있을 때만, 아래), 에이전트는 「@핸들 · ○○ 님이 관리」 |
+| 끝 칸 | 값이 아닌 표식. 사람은 역할 칩(`CHIP_CLASS` + `bg-muted-soft text-ink-muted`, §2.2 칩 그릇), 에이전트는 생존 칩(ADR-0200 D4). 셰브론 `›` 는 두지 않는다: 줄 전체가 프로필을 여는 단추 하나이고, 「더 들어간다」는 자리가 말한다 |
+| 기하 | `px-4 py-2 gap-3`. 높이는 **두 줄 상자 + 위아래 8** 이다: 기본 글자 56, 「크게」 58.7(§2.5 배율을 따른다). 셋째 줄은 두지 않는다 — 사용자 상태 글은 접근 이름과 프로필이 말한다 |
+| 상호작용 | 줄 전체가 `<button>` 하나, `hover:bg-surface-hover active:bg-surface-pressed focus-visible:focus-ring`. 전폭 줄이라 스케일 눌림은 없다(§2.6 「전폭은 폭이다」). ↑/↓ 가 줄을 걷는 것은 화면(멤버 탭)의 몫이다 |
+| 접근 이름 | `aria-label` 은 하위 트리를 **대신하므로** 눈에 보이는 모든 것을 잇는다: 이름 @핸들 · 역할 · (에이전트) 관리 · 상태 · 접속 낱말 · 사용자 상태 · 이메일 · 행동(「프로필 열기」). 이 파일은 글자를 갖지 않는다 — 낱말은 부르는 쪽이 사전 키로 넘긴다 |
+| 로딩 | `ListRowSkeleton`: 같은 32 원 + **같은 글자 역할의 줄 상자 안에 앉은** `inline-block` 막대. 높이를 막대가 아니라 줄 상자가 정하므로 글자 크기 설정을 실제 줄과 함께 따라간다(옛 멤버 탭은 32 아바타 줄 위에 24 네모를 그렸다) |
+
+목록 위 찾기 칸은 공용 `Input` 그대로이고(입력 그릇의 `--line-strong`, §2.2) 앞에 `Search`(`size-4 text-ink-muted`)가 칸 안쪽 여백 32(`pl-8`) 안에 앉는다. 폭은 `max-w-pane-md`(512)에서 멈춘다 — 판 끝까지 늘어난 칸이 QA 13 의 「큰 검색 칸」이었다.
+
+**이메일을 누가 보는가**(owner 2026-11-14, 제안서 12번 추천): 워크스페이스 멤버 모두에게 보이고 **게스트 시점에서는 보이지 않는다**. 보는 사람의 역할을 모르면(명부에 내 줄이 아직 없으면) 보이지 않는다. 가림은 화면·접근 이름·**검색** 셋 모두다 — 게스트가 남의 주소를 쳐서 줄이 걸리면 가린 주소가 찾기 칸으로 샌다. 이것은 화면의 가림이고 경계가 아니다: 서버 명부는 지금 게스트에게도 `email` 을 싣는다(ADR-0219 D3 의 미구현 조각). 판정은 코어 `profileEmail` 하나다(#5780) — 멤버 탭 · 멤버 프로필 창 · 폰 프로필 시트가 같은 함수를 쓴다.
+
+**② 묶음 머리글 — `ListGroup`** (같은 파일)
+
+- 머리글: `h2`, `text-meta font-semibold text-ink-muted`, 줄의 글자 열과 같은 `px-4`. 곁의 수는 `font-normal` + `data-numeric`. 문장형 평문이다 — 대문자 라벨·번호 머리 금지(스킬 §8). 옛 멤버 탭의 **선으로 가른 머리글 띠**(`border-b … py-1`)는 쓰지 않는다.
+- 그릇은 **서는 바탕이 정한다**. 본문 판 위(멤버 탭·설정)는 `Card`(반경 20 · rest 그림자 · 고대비 `card-edge`) 하나에 줄 사이 `--line` 한 줄(`divide-y divide-line`) — 설정의 `SettingsSection` 과 같은 문법이다(「Card only when elevation means grouping」). 떠 있는 표면(대화 상자) 안에서는 카드 그림자를 겹치지 않고 `bg-sheet` 채움 + `rounded-lg` 묶음이 같은 일을 한다 — `ListGroup surface="sheet"`(새 DM 창), 프로필 ③의 묶음도 같은 모양이다. 대화 상자 안 목록은 그릇 바깥에 `px-4` 를 두고 묶음 사이 16(`gap-4`)이다.
+- 묶음 사이 24(`gap-6`), 머리글과 그릇 사이 8(`gap-2`).
+- `list-row.tsx` 는 §3.3 분류의 **컨테이너 프리미티브**다: 줄 사이 선은 나누는 선이고, 줄 단추는 경계가 아니라 가리킴 채움으로 자기를 말한다(`designSystem.test.ts` · `controlBorders.test.ts` 의 닫힌 표).
+
+**③ 프로필 — 멤버 프로필 창** (`features/directory/MemberProfileDialog.tsx`, #5780 가지 기준. 착륙 때 이 문단을 그 판과 다시 맞춘다)
+
+- 그릇은 지금 `Dialog` 그대로(반경 20, `max-w-pane-md`)이고 본문은 `px-6 pt-8 pb-6`, 묶음 사이 24. 닫기는 오른쪽 위 원형 X(`size-icon-button`, 공용 `Tooltip`)이고 글자 「닫기」 단추는 없다(폰 시트의 X 와 같은 자리, phone-sheets §2).
+- 차례는 폰 프로필 시트와 같다: **큰 얼굴**(가운데, `avatar-hero` 112) · 이름(`text-display font-semibold`, 활성이 아닐 때만 곁에 상태 칩) · 「@핸들 · 역할」(`text-body text-ink-muted`) · 접속 낱말 · 한 줄 상태(`text-meta`) → **행동 줄**(가운데 정렬 채움 알약: 메시지 보내기(주) · 멘션 복사(보조) · 에이전트면 라우팅 설정) → **정보 묶음**(이메일 + 복사 · 에이전트면 책임자) → **관리 묶음**(소유자·관리자에게만: 역할 · 비밀번호 재설정 링크. 정지·내보내기 줄은 #5781 이 이 묶음에 더한다).
+- 옛 창의 「종류」·「상태」 키-값 줄과 선 넷(머리 아래 · 목록 위아래 · 바닥 위)은 없다. 묶음은 선이 아니라 바탕으로 갈리고 줄 사이에만 선이 선다(§3.3 「경계는 나누는 선이다」).
+- 역할 고르개는 줄 안 변형(테두리 없음, 글 바로 뒤 화살표)이고, 고르면 확인 단계(⑤ `ConfirmStage`)가 본문 자리에 선다. 결과는 토스트가 아니라 고르개 곁 「바뀜」 1.6초(`useInlineConfirm`, §4 오류 규칙).
+- 허들 행동은 아직 없다(프로필에서 DM 을 열며 허들을 거는 길이 없다, #5780 인계).
+
+**④ 아바타 + 접속 점 — 도려낸 자리에 앉는 점** (`features/presence/AvatarStatus.tsx` 한 부품, [#5786](https://github.com/yeomyeonggeori/oort/issues/5786), owner 2026-11-13 QA 15)
+
+- 아바타: 사람은 원(`rounded-full`), 에이전트는 둥근 네모(`rounded-sm`) + `--agent-soft` 바탕 · `--agent` 글자(스킬 §9, `features/common/avatarTone.ts`). 사진이 없으면 이니셜. 기본 32, 큰 얼굴 112(`avatar-hero`).
+- **점은 아바타를 점 둘레만큼 도려낸 자리에 앉는다**(CSS 마스크, 새 `<svg>` 없음 — ADR-0172). 틈은 비어 있어 그 자리의 바탕(가리킨 줄 · 선택 줄 · 띠 · 카드 · 창)이 그대로 보인다. 예전의 면색 테(`border-surface` 1px)는 바탕이 바뀌면 색 테로 드러났다(QA 15). 점이 없으면(모름) 도려내지 않는다.
+- 크기는 코어 `statusBadgeGeometry`(아바타 한 변 → 점 지름 · 틈 · 이니셜 옮김) **한 함수**가 정하고, 웹 `tokens.css` 의 `avatar-status` 규칙이 그 표를 `data-status-face` 로 옮긴다(인라인 스타일 금지 §1). 점 상자는 아바타 상자의 오른쪽 아래에 붙고, 도려낸 원은 점과 중심이 같다. 비율: 작은 얼굴(≤ 24)은 1/3, 보통 얼굴은 ≈ 38%(짝수 반올림), 점은 28 을 넘지 않는다(큰 얼굴 25%) · 틈 = 점의 1/7, 최소 2.
+
+  | 아바타 | 쓰는 자리 | 점 지름 | 틈(= 꺼짐 고리 굵기) | 비율 |
+  |---|---|---|---|---|
+  | 24 | 사이드바 DM 줄 · 접힌 레일의 내 프로필 | 8 | 2 | 33% |
+  | 28 · 32 (폰) | 홈 DM 줄 · 대화 머리 · 새 메시지 시트 | 10 · 12 | 2 | 36 · 38% |
+  | 32 | 목록 끝 내 프로필 줄 · 멤버 목록 · 채널 멤버 패널 | 12 | 2 | 38% |
+  | 40 · 56 (지금 쓰는 자리 없음) | — | 16 · 22 | 2 · 3 | 40 · 39% |
+  | 112 | 멤버 프로필 창의 큰 얼굴 | 28 | 4 | 25% |
+
+- **24 의 글자 아바타는 점이 있을 때 이니셜을 구멍 반대쪽(왼쪽 위)으로 1px 옮긴다**(`--status-glyph-shift`, 사진 · 기본 아바타는 옮기지 않는다). 점 10 · 틈 2 일 때 구멍이 아바타 폭의 58% 라 받침을 12~21% 먹어 「김」이 「기」로 읽혔다(design-review r1 B1). 지금은 받침 있는 이니셜(김 · 박 · 한 · 정 · 홍) · 라틴(K · D) · 에이전트 이니셜 모두 잉크 손실 0.5% 이하(두 엔진, `capture-5786.mjs` 의 I 줄).
+
+- **모양이 말한다**(글자가 곁에 없는 자리). 모양은 톤이 아니라 **뜻**이 고른다(코어 `statusBadgeShape`): 사람은 채운 원 = 온라인 · **초승달** = 자리 비움 · **가로 줄이 빠진 원** = 방해 금지 · **회색(`--ink-muted`)으로 채운 원** = 오프라인(#6023, owner 2026-11-20 QA — 속 빈 고리는 24 얼굴에서 가운데 4px 구멍만 남아 점으로 읽히지 않았다). 에이전트는 채운 원 = 살아 있음 · **채운 주황 원** = 경고(owner/admin 에게만: 일이 안 가져가짐 · 응답 없음 · 거절됨 — 「손이 필요하다」라 「쉬는 중」인 초승달을 빌리지 않는다, r1 H2) · **속 빈 고리**(굵기 = 틈, 선 `--ink-muted`) = 꺼짐(Buzz식 결정 그대로). 초승달 · 가로 줄 · 고리 속도 틈처럼 바탕이 비친다. 「내 상태」 메뉴의 표지도 같은 모양 규칙(`status-mark` · `status-shape-*`)을 읽는다 — 메뉴가 새 모양을 가르쳐 주는 자리다. 밝기가 거의 같은 초록 · 주황(#4725 M3)과, 띠 위에서 둘 다 흰빛이 되는 주황 · 빨강이 모양으로 갈린다. 서버가 접속 여부를 말하지 않으면 **점이 없다**(모름은 오프라인이 아니다, ADR-0160 D3).
+- 색: `--ok` · `--warn` · `--danger`, 오프라인 채움 · 꺼짐 고리 `--ink-muted`(한 역할). 띠 위(사이드바 묶음)에서 주황 · 빨강 · 회색은 on-band 단계로 묶이고, 초록만 점 전용 `--status-ok`(루트 초록에 on-band 를 45% 섞은 값)를 읽는다 — 섞지 않은 `--ok` 는 노을 띠(밝게)에서 2.8:1 이었다. 띠가 없으면 `--status-ok` 는 **그 자리의 `--ok`** 로 떨어져 배경화면 · 유리가 사이드바에 거는 보정을 받는다(r1 H1: 루트 값으로 떨어지면 어두운 배경화면 + 밝게에서 2.35~2.57:1 이었다). 선택 줄(`band-surface`)에서는 원래 색으로 돌아간다. 점이 서는 바탕 전부에서 3:1 이상이다(`avatarStatus.contrast.test.ts`): 면 · 띠 최저 온라인 3.80 · 자리 비움 4.53 · 방해 금지 4.41 · 오프라인 · 꺼짐 4.92, **배경화면을 켠 사이드바**(scrim 최악 합성 두 끝 = 가장 어두운 · 가장 밝은 배경화면) 최저 4.81, **유리를 켠 사이드바**(불투명도 하한 · 최대, 노을띠는 반투명 띠 위) 최저 온라인 3.21(노을 밝게 79%) · 나머지 4.8 이상. 예전 고리 선 `--line-strong` 은 아바타 색 위 2.78~3.34(#4725 M2), 가리킨 · 눌린 줄 위 2.6~2.9 였다. **온라인과 오프라인은 이제 같은 채운 원이라 색으로만 갈린다** — 두 색의 명도 대비(같은 표의 마지막 열, `AVATAR_STATUS_TABLE=1`)는 면 위 1.09~1.21 · 노을 띠 위 1.36~1.50(유리를 켠 띠 포함) · 띠 없는 테마의 배경화면 · 유리 사이드바 1.00~1.19(그 자리는 네 표식을 한 밝기로 묶는다)다. 색을 못 가르는 눈에는 밝기 차이가 거의 없어서 뜻은 줄의 접근 가능한 이름과 툴팁의 낱말이 잇는다.
+- 큰 얼굴은 바깥 그림자(`avatar-hero` 의 rest 고도)가 마스크에 잘리지 않게 도려내는 칸을 그림자 폭(`--spacing-8`)만큼 넓히고 음수 여백으로 되돌린다(배치는 그대로).
+- 폰은 도려내기가 기본 기능이 아니라(마스크는 새 의존) **고리**를 쓴다: 같은 함수의 점 지름, 고리 두께 = 틈, 색 점의 바깥 끝이 얼굴 모서리에 닿는다(`FaceStatusDot`). 고리의 색은 **얼굴이 서는 바탕**(`ground`)이다: 대화 머리 알약 · 새 메시지 카드는 면(`surface`), 홈 줄은 바닥(`bg`) · 눌린 줄은 눌림 면 · 고른 줄은 바닥 위 유리를 합성한 색(`homeRowGround`). 홈 줄의 바닥은 세로 그라데이션이라 가운데 정지점과 위 · 아래 끝이 1.06:1 이하로 다르고(새벽하늘만, 나머지 테마는 평평하다), 사용자 배경화면(사진) 위에서는 고리 색이 사진과 맞을 수 없다. 모양은 웹과 같은 판정이고 초승달 · 가로 줄 · 고리 속의 빈 곳도 바탕색이다. 사람 오프라인은 `textMuted` 로 채운 원이고(프로필 · 대화 정보의 상태 칩 점도 사람이면 같은 채운 회색, 맥 점 · 에이전트 칩은 고리 그대로), 에이전트 꺼짐 고리의 선은 웹과 같은 `textMuted`(= `--ink-muted`)다 — 글자 곁 점의 `textFaint` 는 밝게 눌린 줄 위에서 2.7~3.0:1 이었다. 네 표식 × 바탕 여섯(면 · 바닥 세 정지점 · 눌림 면 · 유리 합성) 3:1 이상(코어 `statusBadge.test.ts`).
+- 점은 낭독에서 숨고(`aria-hidden`), 같은 사실을 줄·카드의 접근 이름이 낱말로 잇는다(#4692).
+- 출처: `features/presence/AvatarStatus.tsx`(모양) · `tokens.css` `avatar-status`(크기 · 모양 · 색) · 코어 `presence/statusBadge`(크기) · `design/statusDot.ts`(글자 곁 점의 톤 → 클래스) · 코어 `presence/statusDot`(판정). **기계:** `avatarStatus.geometry.test.ts`(CSS 표 = 코어 함수, 이니셜 옮김, 메뉴 표지) · `avatarStatus.contrast.test.ts`(테마 × 밝게/어둡게 × 바탕 · 배경화면 · 유리 3:1, 모양 규칙) · `avatarStatus.browser.test.ts`(WebKit · Chromium 픽셀: 틈 = 바탕, 모양, 에이전트 경고 = 채운 원, 가장자리, 큰 얼굴 그림자) · `avatarStatus.callers.test.tsx`(부르는 자리의 face = 실제 아바타 크기, 메뉴 표지 모양) · 폰 `faceStatusDot5786.test.tsx`(고리 = 바탕, 기하, 대화 머리 얼굴 크기).
+
+**⑤ 확인 창 — `ConfirmDialog` · `ConfirmStage`** (`clients/web/src/design/ui/confirm-dialog.tsx`, #5780 이 세운다)
+
+- 몸 하나, 그릇 둘: 화면 위에 처음 뜨는 확인은 `ConfirmDialog`(`Dialog` + `role="alertdialog"`), **이미 떠 있는 표면 안**의 확인은 `ConfirmStage`(그 표면의 본문 자리에 서는 단계 — 표면 위 표면은 스크림이 깔린다, §3.4).
+- 차례: 제목(무엇을 할지 묻는 한 문장) · 설명 · [경고 한 줄, `text-danger` 굵게 — 되돌릴 수 없을 때] · [오류, `text-meta text-danger`, `role="alert"`] · [잠긴 까닭] · 오른쪽 끝 「취소」 | 확정.
+- 초점은 열리면 **취소**로 들어간다. `tone="destructive"` 면 확정이 위험 채움이다(§3.1 파괴 > 주 > 보조). 왕복 중에는 확정이 `aria-busy` + 진행 낱말이고 다시 눌러도 한 번이다. 결과는 토스트가 아니라 그 자리에서 말한다.
+- 아직 손으로 조립한 확인 네 곳(`TeamUnlinkDialog` · `HarnessUnlinkDialog` · `GithubSubscribeForm` · `PersonalKeyRevokeDialog`)은 후속에서 이 부품으로 옮긴다.
+
+**기계가 재는 것.** `designSystem.test.ts`·`controlBorders.test.ts`(`list-row.tsx` 가 컨테이너 분류에 든다) · `gallery.test.tsx`(`ListGroup`·`ListRow`·`ListRowSkeleton` 견본이 면적 있게 렌더된다, 갤러리 「ListGroup · ListRow · ListRowSkeleton」) · `MemberRow.test.tsx`(두 층 — 사용자 상태 글이 셋째 줄로 서지 않음 · 「@핸들 · 이메일」 · 게스트·역할 모름에서 가림 · 에이전트 관리 줄 · 역할 칩 · 「나」) · `memberListModel.test.ts`(이메일 보임과 찾기 — 게스트가 주소를 쳐도 0 줄) · 렌더 실측 `clients/web/scripts/capture-5782.mjs`(스켈레톤 줄 = 실제 줄 56 · 「크게」 58.7, 목록 도착 전후 첫 줄 위 끝 같음, 모든 줄 같은 높이, 390 폭·200% 가로 넘침 0, 게스트 시점 DOM 에 이메일 0, 새 DM 창의 줄도 56 이고 그릇이 시트 채움). 프로필·확인 창의 시험은 #5780 의 `MemberProfileDialog.test.tsx` · `ConfirmDialog.test.tsx` 다.
+
+**재지 않는 것.** 다른 사람 목록이 이 부품을 쓰는지 — 멤버 탭과 새 DM 창은 옮겼고, 채널 멤버 패널(`ChannelContextControls`) · 채널 멤버 추가 창(`AddChannelMemberDialog`)은 아직 손으로 쓴 줄과 선 띠 머리글이다(후속). 그것을 세는 기계는 없다. 묶음 그릇을 바탕에 맞게 골랐는지(본문 판 위 카드 / 표면 안 시트 채움)는 사람과 design-review 가 본다(§5.3).
+
+### 2.15 좁은 웹 창에서 사이드바 열은 본문 칸에 바닥을 내준다 (#5093, #5048 D4)
 
 사이드바가 240에서 324(레일 56 + 목록 열 268)가 된 뒤, 펼친 셸의 컴포저 입력 상자는 `창 폭 − 390`이다. 바닥(240)을 지키지 못한 폭은 **600~629px뿐**이었다(600px에서 210). 630~719px는 수리 전에도 바닥 위였다(650 → 260 · 719 → 329). 규칙은 이 문서가 이미 쓰는 문법이다: **주 표면이 바닥을 갖고 모자란 폭은 부차 표면이 낸다**(`route-region` · `chat-region` · `thread-pane`). 그 부차 표면에 사이드바 열이 빠져 있었을 뿐이고, 문턱은 더하지 않았다.
 
@@ -598,13 +670,13 @@ Accepted). 의미가 같은 Lucide 글리프가 있으면 로컬 `<svg>`·CSS �
 
 ### 3.3 지금 기계가 재는 것 / 안 재는 것
 
-> **이 절과 §5.3·§5.4의 "#1210" 표시는 유통기한이 있다.** #1210(컨트롤 경계 3:1 · 폰 파괴 채움 토큰 · 포커스 링 페이드 · 웹 lint 게이트 배선)이 랜딩하면 아래 ❌ 넷과 §5.4의 lint 항목이 함께 닫힌다. **그 PR이 이 표를 갱신하는 것이 마지막 한 걸음이다** — 닫힌 자리를 열려 있다고 말하는 표는 이 문서가 막으려는 바로 그 결함이다.
+> **#1210(컨트롤 경계 3:1 · 폰 파괴 채움 토큰 · 포커스 링 페이드 · 웹 lint 게이트 배선)은 2026-08-09에 닫혔다.** 폰 파괴 채움 토큰(`dangerFill`)은 있고 채움 순서는 `paletteContrast.test.ts`가 잰다. 아래 ❌는 지금도 열린 자리다. 닫힌 자리를 열려 있다고 말하는 표는 이 문서가 막으려는 바로 그 결함이다.
 
 | 규칙 | 웹 | 폰 |
 |---|---|---|
 | 채도 순서 (danger>warn>muted) | `tokens.contrast.test.ts` ✅ | `paletteContrast.test.ts` ✅ |
-| 채움 순서 (primary>danger-fill, DS2-1부터 명도) | `tokens.contrast.test.ts` ✅ | ❌ — **폰에 파괴 채움 토큰이 없다**(#1210) |
-| 윤곽 순서 (danger>line-strong) | `tokens.contrast.test.ts` ✅ (#1211) | ❌ — #1210이 토큰을 놓은 뒤 같은 자리에 |
+| 채움 순서 (primary>danger-fill, DS2-1부터 명도) | `tokens.contrast.test.ts` ✅ | `paletteContrast.test.ts` ✅ (파괴 채움 `dangerFill`이 표면 위 3:1을 넘고 주 행동 `primary`보다 덜 보인다) |
+| 윤곽 순서 (danger>line-strong) | `tokens.contrast.test.ts` ✅ (#1211) | ❌ — 폰에는 `line-strong` 역할이 없고(컨트롤 테두리는 `textFaint`) `danger`와의 순서를 재는 단정이 아직 없다 |
 | `--line`이 3:1을 못 넘는다(규칙의 전제) | `tokens.contrast.test.ts` ✅ (#1211) | `paletteContrast.test.ts` ✅ |
 | **어느 컴포넌트가 어느 쪽을 쓰는가** | `designSystem.test.ts` ✅ (#1211, 프리미티브 층) | ❌ 체계적으로는 없다 — 표면 하나에 대한 단정은 있다(`adeControlSurface.test.tsx:939`) |
 | 렌더된 화면에서의 위계 | ❌ 사람 + design-review 에이전트 | ❌ 동 |
@@ -615,7 +687,7 @@ Accepted). 의미가 같은 Lucide 글리프가 있으면 로컬 `<svg>`·CSS �
 
 - **컨트롤 프리미티브** (경계가 어포던스를 진다): `input.tsx` · `select.tsx`
 - **채움 프리미티브** (채움이 어포던스를 진다, ADR-0189 D6): `button.tsx`
-- **컨테이너 프리미티브** (경계는 나누는 선이다): `card.tsx` · `dialog.tsx` · `dropdown-menu.tsx` · `context-menu.tsx` · `popover.tsx`
+- **컨테이너 프리미티브** (경계는 나누는 선이다): `card.tsx` · `dialog.tsx` · `confirm-dialog.tsx` · `dropdown-menu.tsx` · `context-menu.tsx` · `popover.tsx`
 
 `designSystem.test.ts`가 ①이 분류표가 `src/design/ui`의 모든 파일을 덮는지(새 프리미티브는 반드시 한쪽에 든다) ②컨트롤 프리미티브가 나누는 선을 경계로 쓰지 않는지를 잰다.
 
@@ -625,7 +697,7 @@ Accepted). 의미가 같은 Lucide 글리프가 있으면 로컬 `<svg>`·CSS �
 
 색 위계(§3.1)가 나란한 컨트롤의 채도라면, 겹침 층은 **앞에 선 표면이 뒤를 만지지 못하게** 하는 위계다. 값과 클래스 이름은 §2.6 D6 표. 떠 있는 표면 위에 허용되는 층은 없다.
 
-**겹쳐 뜬 표면이 필요한 확인은 표면 안의 단계로 선다** (#4986, 디자인 검수 M11). 고르개(표면 층 300) 안에서 삭제·신고 확인 대화상자를 따로 띄우면 그 스크림(층 200)이 고르개 아래에 깔려서, 앱은 흐려졌는데 고르개만 밝게 남고 확인 창과 고르개가 서로를 가렸다. 새 층 이름을 더하지 않고(위 시험이 「표면 위에 층 없음」을 지킨다) 그 확인을 고르개 안의 단계로 두었다: 목록이 내려가고 같은 자리에 제목·설명·「취소」·보내는 단추가 서며, 초점은 안전한 쪽(「취소」)으로 들어가 닫히면 그 항목의 「관리」로 돌아간다. Esc는 단계만 취소한다(`TeamExpressionsPanel` 의 `escapeClaim`).
+**겹쳐 뜬 표면이 필요한 확인은 표면 안의 단계로 선다** (#4986, 디자인 검수 M11). 고르개(표면 층 300) 안에서 삭제·신고 확인 대화상자를 따로 띄우면 그 스크림(층 200)이 고르개 아래에 깔려서, 앱은 흐려졌는데 고르개만 밝게 남고 확인 창과 고르개가 서로를 가렸다. 새 층 이름을 더하지 않고(위 시험이 「표면 위에 층 없음」을 지킨다) 그 확인을 고르개 안의 단계로 두었다: 목록이 내려가고 같은 자리에 제목·설명·「취소」·보내는 단추가 서며, 초점은 안전한 쪽(「취소」)으로 들어가 닫히면 그 항목의 「관리」로 돌아간다. Esc는 단계만 취소한다(`TeamExpressionsPanel` 의 `escapeClaim`). 이 문법은 공용 부품이다(#5780): `design/ui/confirm-dialog.tsx` 의 `ConfirmStage` 가 떠 있는 표면 안의 단계이고, 처음 뜨는 확인 창은 같은 몸의 `ConfirmDialog`(`role="alertdialog"`)다 — 둘 다 초점이 취소로 들어가고, 파괴 확정은 `tone="destructive"` 다. 멤버 프로필의 역할 바꾸기가 먼저 쓴다.
 
 이름을 쓰지 않은 `z-*` 잔량은 **자기 상자가 스태킹 컨텍스트를 만들어** 루트에서 경쟁하지 않아야 한다(`isolate`). 잔량이 루트에서 경쟁하면 그것은 「로컬」이 아니라 앱 전역 층이고, 이름표 축이 닫히지 않는다. 같은 규칙이 **한 층 안에서 겨루는 두 떠 있는 것**에도 적용된다: 언펄 카드는 `isolate` 라 그 카드의 X 는 카드 안에서만 뜨고, 자기 행 위로 내려앉은 호버 툴바(`hover-toolbar-straddle-below`)가 카드를 이긴다 — 한 층 안의 순서를 DOM 에 맡기지 않는다(#2485 R1 M-3).
 
@@ -678,10 +750,10 @@ Accepted). 의미가 같은 Lucide 글리프가 있으면 로컬 `<svg>`·CSS �
 | **그림자** | `designSystem.test.ts` — `--elevation-rest/float` 이름 + 클래스 두 단 | `designSystem.test.ts` — `shadowColor`는 팔레트에서만 | **대조 불가 축**(§2.6) |
 | **겹침 층** | `overlayLayers.test.ts` — `--layer-*` 순서·바닥(`z-50` 위)·`data-overlay-layer` 여섯 파일 + 잔량 허용목록. `appPaneIsolation.browser.test.ts`(#4587) — 판(`app-pane`)이 `isolate`일 때의 순서를 WebKit·Chromium의 **그려진 픽셀**로 잰다(포털 스크림 > 판 안의 덮는 판, 서랍 > 덮는 판, 덮는 판 > 머리, 띠의 알약 > 머리, 그리고 판 격리로 **바뀐** 두 관계: 띠의 알약 > 덮는 판, 사이드바 스크림 > 덮는 판). 히트 테스트와 **루트 스윕**(이름 밖 수치 z = 0)은 `scripts/capture-overlay-layers.mjs` | ❌ | — |
 | **창 띠·머리 컨트롤** (§2.9) | `desktopShell.band.browser.test.ts`(WebKit·Chromium 계산 기하: 띠 40 · 토글 중심 20 · 판 위쪽 셸 40/웹 8 · 머리 선 0 · `--head-edge` · 단추 선 `--line` · 툴팁 알약 · 전체 화면 인셋 · 판 바깥 = 사이드바 색 픽셀(팔레트 3 × 스킴 2 × 장면 4) · 노을띠 「내 작업」 윗줄 픽셀) + `AppTitlebar.shell.test.tsx`(셸 끌기 판정, 다운로드 단추를 채운 오른쪽 자리) + `features/downloads/*.test.*`(진행·기록·단추 상태·웹에서 숨김·셸과 번들의 약속) + `ChatShell.header.test.ts`·`channelHeaderControls.tooltip.test.tsx`(머리 단추는 전부 툴팁, `title` 없음) | 비해당(폰은 창 띠가 없다) | — |
-| **좁은 웹 창의 본문 바닥** (§2.10) | `shellNarrowFloor.browser.test.ts`(WebKit·Chromium 계산 기하: 사이드바 = min(324, 창 − 306) · 접힘 56 · 컴포저 입력 바닥 240 · 접힘 `transitionend`, 폭 7 × 상태 2) + `desktopShell.ds2.test.ts`(양보 선언이 셸의 넓은 창 계층에 있다) + `gate:work-panel`의 `narrow-shell-*`(렌더된 앱: 폭 7 × 사이드바 펼침·접힘 × 스레드 닫힘·열림, red proof `WORK_PANEL_GATE_PROVE_RED_SIDEBAR`; **게이트 미배선** §5.4 — 사람이 `npm run gate:work-panel`을 돌린다) | ❌ (폰은 서랍이라 열이 서지 않는다) | — |
+| **좁은 웹 창의 본문 바닥** (§2.15) | `shellNarrowFloor.browser.test.ts`(WebKit·Chromium 계산 기하: 사이드바 = min(324, 창 − 306) · 접힘 56 · 컴포저 입력 바닥 240 · 접힘 `transitionend`, 폭 7 × 상태 2) + `desktopShell.ds2.test.ts`(양보 선언이 셸의 넓은 창 계층에 있다) + `gate:work-panel`의 `narrow-shell-*`(렌더된 앱: 폭 7 × 사이드바 펼침·접힘 × 스레드 닫힘·열림, red proof `WORK_PANEL_GATE_PROVE_RED_SIDEBAR`; **게이트 미배선** §5.4 — 사람이 `npm run gate:work-panel`을 돌린다) | ❌ (폰은 서랍이라 열이 서지 않는다) | — |
 | **대화 안 에이전트 작업 표시** ([agent-work-display.md](agent-work-display.md)) | 코어 `runExceptionChipParity.test`(카드·줄·칩·레일이 **같은 시각에 같은 판정·같은 낱말**, 시간 초과·신호 소실은 칩도 줄과 같은 낱말·경고 톤, 박자 3종 × phase 9 × 종료 코드 9 × 시각 11) + `ActivityRail.browser.test`(레일 칸의 바닥 행 y 이동 0, 끊긴 레일의 한정 문장이 안 잘리고 에이전트 글은 접힘·이름만·전문 중 하나라 낱말 중간에서 끊기지 않음(14폭), `popover-fit`의 폭 계산, 줄의 누르는 면 = 칸 24, WebKit·Chromium × 두 스킴) + `composerRailReservation.browser.test`(**진짜 `Composer` 마크업**: 에이전트 대화 간격 24 불변 · 사람만 있는 대화 8(폰 13) 불변) + `TriggerChip.browser.test`(칩 폭·높이 고정, 낱말·아이콘 두 모양, 좁은 줄 383/384 경계, 요청 묶음을 여는 칩의 누르는 면 +4px) + `MessageRow.triggerChip.browser.test`(**진짜 `MessageRow` 마크업**: 이름 2~40자 × 열 폭 6종 줄바꿈 0 · 이름 열 글자 이상 · 칩 자리가 비어도(성공) 머리 줄 높이·줄바꿈 0 불변 · 거터 칩의 행 높이 불변·hover 양보·터치) + `runStatus.test`(칩 대상) + `MessageRunStatus.test`(행동은 요청자·owner/admin에게만, 취소 영수증) + `iconSystem.test`(칩 글리프는 전부 lucide) | 폰은 같은 코어 모델을 #4620이 읽는다([§10](agent-work-display.md): jest만 — 실측·캡처는 검증 줄) | 낱말·판정은 코어 한 곳(`runWaiting`·`runException`·`triggerChip`) |
 | **모션** | `motion.test.ts`(사다리·상수·눌림·reduced-motion) + 프리플라이트 `raw_motion`·`motion_lib_scope`. 데스크톱 사이드바 접기(셸 상태 변화) = `--motion-standard` 240 · 390 오버레이 드로어·스크림(`--elevation-float` 표면) = `--motion-fast` 180 대칭 | ❌ (M1a) | 값 파생은 M1a |
-| **터치 44** | `capture-screens.mjs`의 `assertTapTargets`(**손으로 유지되는 12개 목록**) | `conversationHygiene.test.tsx:148` (렌더 트리 실측) + `conversationA11y.test.tsx:330` + `designSystem.test.ts`(손으로 적은 슬롭 잔량 5, 늘면 빨강) | `designSystem.test.ts` — `TOUCH_TARGET` ↔ `--tap-target` ✅ (#1211) |
+| **터치 44** | `capture-screens.mjs`의 `assertTapTargets`(**손으로 유지되는 12개 목록**) | `conversationHygiene.test.tsx:148` (렌더 트리 실측) + `conversationA11y.test.tsx:330` + `designSystem.test.ts`(손으로 적은 슬롭 잔량 3, 늘면 빨강) | `designSystem.test.ts` — `TOUCH_TARGET` ↔ `--tap-target` ✅ (#1211) |
 | **컨트롤 경계 3:1** | `tokens.contrast.test.ts`(토큰) + `designSystem.test.ts`(프리미티브 층) | `paletteContrast.test.ts`(토큰) | — |
 | **위계** | §3.3 표 | 동 | — |
 | **카피** | 프리플라이트 `hype` + AST `emdash`·`progress_word`·`latin_particle`(#1511) | `conversationHygiene.test.tsx` — `src/` 전수 em-dash 스윕 + 같은 AST 로 `progress_word`·`latin_particle`(`design_preflight_phone_strings.mjs` 를 자식 프로세스로, #1511) | `design_preflight_ast.mjs` 가 세 소비자의 규칙 한 벌. 코어에도 거는 이유는 실측이다 — 진행 낱말이 코어 상수로 폰까지 출하됐다(`CANCEL_BUSY_LABEL`) |
@@ -711,7 +783,7 @@ Accepted). 의미가 같은 Lucide 글리프가 있으면 로컬 `<svg>`·CSS �
 | — | **비텍스트 대비(WCAG 1.4.11)를 살 수 있는 곳** | **없다.** Deque 자사 데이터로 axe DevTools 커버리지 **0.00%**(자동·인간보조 모두 0, 100% 수동). 우리 손수 만든 시험을 지우면 대체물이 없다 |
 | — | **아이콘 규칙의 나머지 전부**(§2.8) | `iconSystem.test.ts`는 예외 목록과 import 형태 **둘만** 잰다. 16px 단일 기본·`strokeWidth` 재지정 금지·`currentColor` 상속·`aria-hidden`(잔량 57곳/인접 레이블 없는 36곳)·CSS 도형/아이콘 폰트/기능 이모지 회피·`src/**` 아래 SVG 자산 유입·**`.ts` 파일 안 손제작 SVG·`createElement("svg")`**(둘 다 초록 통과 실증) — 전부 무검사다. §2.8이 잔량을 세어 둔 이유다 |
 
-> **폰에는 taste 스킬 방언이 없다.** `.claude/skills/momo-design-taste`(SwiftUI)와 `-web`(React) 둘뿐이고, `tokens.ts` 머리 주석이 그것을 자백한다. `.claude/agents/design-review.md`의 계약도 macOS/Core를 가리키는데 최근 리뷰 대부분은 웹·폰이다 — ADR-0159 D4가 Swift 삭제 배치와 함께 재조준하기로 한 자리다.
+> **폰에는 taste 스킬 방언이 없다.** `.claude/skills/`에는 라우터 `momo-design-taste`(어느 문서가 그 표면을 다스리는지만 가른다)와 웹 방언 `momo-design-taste-web`이 있고, 폰은 라우터 §2가 `tokens.ts`와 시험 둘을 가리키는 것으로 대신한다. `.claude/agents/design-review.md`는 웹 · 데스크탑 · 폰을 모두 가리키며 폰에 방언 스킬도 기계 프리플라이트도 없다고 보고에 쓰게 한다. 남은 일은 폰 방언 스킬 하나다(§7 미결 6).
 
 ### 5.4 게이트 실행 경로 — 강제 층의 실행 보장은 **사람**이다
 
@@ -774,6 +846,20 @@ Accepted). 의미가 같은 Lucide 글리프가 있으면 로컬 `<svg>`·CSS �
 **#5192가 더한 기계**: ⋮ 메뉴의 구조(묶음 순서·묶음 사이에만 선 구분선·지우기 맨 아래·위험색)와 「도구 막대 ∪ 메뉴 = 시트 = 전체 인벤토리, 두 곳에 겹치지 않음」은 `MessageActions.test.ts`·`MessageHoverToolbar.test.tsx`가, 아이콘의 글리프 이름(행마다 하나·서로 다름)은 같은 파일이, 툴팁 시간(처음 · 옮겨 다님 · 쉰 뒤 · 키보드 · 터치 · 닫는 길)은 `tooltipDelay.test.ts`가 가짜 시계로 경계에서 잰다. 실제 엔진(Chromium·WebKit)에서 내 메시지·남의 메시지·에이전트 메시지 × 900·1440 × 밝음·어두움으로 호버·키보드·우클릭 메뉴가 열리고 판 안에 머무는지, 툴팁이 목표 시간 안에 뜨는지(처음 ≤ 200ms · 옮겨 감 ≤ 80ms · 빠른 통과 0개)는 레인 `capture-5192.mjs`가 잰다. 900폭에서 도구 막대가 앞 행 끝줄을 덮는 것은 #4231 1번의 기존 결함이고 덮는 글자 수가 실행마다 0↔16으로 흔들려서, 레인은 그 원인인 도구 막대 **너비**(223px)가 커지지 않았는지만 결정적으로 가둔다(고치기 연필처럼 단추를 하나 올리면 내 행만 257로 붉어진다).
 
 기계 자가 **아직 안 재는** 축: 순회 중 탭스톱 +1(유닛이 행당 1 불변; 캡처 `countTabStopsToComposer`가 전체 비용만 잰다), 다크 그릇 분리(토큰 §2.2 산술 + 사람 리뷰), 슬롯 클릭 직후 재배열(유닛이 마운트가 유지되는 동안 고정 — 포커스가 마운트를 유지할 수 있다).
+
+### 메뉴 — 줄마다 아이콘, 하위 메뉴는 잠긴 줄이 없는 묶음에만 (#5777, owner 2026-11-14)
+
+owner(2026-11-14, Buzz 우클릭 메뉴 대조): 「버즈에선 우클릭했을 때 라벨 섹션없이 저렇게 구성 돼 있거든. 저 컴포넌트를 우리도 적극 활용해보자.」 「알림 아이콘 정렬 잘 맞춰줘.」
+
+1. **줄마다 아이콘 하나, 한 세로 줄.** 채널 · DM 줄 우클릭 메뉴와 채널 머리 ⋮(그리고 앞서 메시지 메뉴, 위 Buzz 대응표)는 모든 줄이 맨 앞에 16px Lucide 글리프(§2.8)를 하나 든다. 줄의 안쪽 여백(`px-2`)과 간격(`gap-2`)이 모든 줄에 같으므로 아이콘은 한 세로 줄에, 글자는 그 오른쪽 한 세로 줄에 선다. 이 메뉴들에서는 **아이콘 있는 줄과 없는 줄을 한 판에 섞지 않는다** — 섞으면 아이콘 없는 줄의 글자만 24px(아이콘 16 + 간격 8) 왼쪽으로 당겨진다(#5777 전의 채널 메뉴가 알림 줄만 아이콘을 들어 그랬다). 코어 표의 `icon` 칸이 필수라 새 줄은 아이콘 없이 들어오지 못한다. 글리프 색은 줄 글자색을 물려받는다(위험 줄은 아이콘도 `--danger`). 글리프 표와 고른 이유는 `channelActions.tsx`의 `ACTION_ICON`이다. 다른 메뉴(예약 메시지 · 세션 줄 등, 지금 아이콘 없음)로 이 규칙을 넓힐지는 정하지 않았다.
+2. **머리글(무리 제목) 줄 대신 하위 메뉴 — 단, 고를 수 없는 줄이 없는 묶음에만.** 이 앱의 원래 규칙은 「고를 수 없는 줄은 이유와 함께 화면에 남는다」이고(#1383, `dropdown-menu.tsx` 머리말), 하위 메뉴가 금지됐던 이유는 그 이유를 한 겹 안으로 숨기기 때문이었다. 그 이유는 잠긴 줄이 **없는** 묶음에는 생기지 않으므로 owner가 규칙을 이렇게 좁혔다:
+   - 하위 메뉴(`DropdownMenuSub*` · `ContextMenuSub*`)는 **모든 줄을 언제나 고를 수 있는 묶음**에만 쓴다. 채널 · DM 줄 메뉴의 「복사 ›」(이름 · 링크 · ID)와 「섹션으로 이동 ›」(목적지 라디오)가 그렇다(코어 `channelActionClusterSubmenu`).
+   - 잠긴 줄(`disabled`, 이유 둘째 줄)을 품을 수 있는 묶음은 지금처럼 **제목 + 화면에 남는 줄**이다(`DropdownMenuLabel`, 실행 호스트 고르기 등).
+   - 하위 메뉴를 여는 줄은 다른 줄과 같은 자(`menuRowClass`, 32px)를 입고 앞에 아이콘, 끝에 `ChevronRight`(연한 잉크)가 선다. 여는 줄끼리는 구분선 없이 붙는다(Buzz의 `Copy ›` · `Move to section ›`).
+   - 하위 판은 부모 판과 같은 그릇이고(층 · 테두리 · 그림자 · 안쪽 4px, 창보다 길면 판 안에서 스크롤), 첫 줄이 여는 줄과 같은 높이에 서고 부모 판과 4px 떨어진다. 창 가장자리에서는 반대쪽으로 뒤집히고 위아래로 밀려 들어온다(충돌 여백 8px). 폭은 그 쪽의 가용 폭을 넘지 않는다(`max-w-menu-available`): 양쪽 다 자리가 모자라면 긴 이름(80자 섹션 이름)은 판 안에서 잘리고 전체 이름은 줄의 `title`이 든다.
+   - 키보드: Enter · Space · → 가 열고 첫 줄에 캐럿을 둔다. ← 가 닫고 여는 줄로 돌아온다. Esc 는 메뉴 전체를 닫고 메뉴를 연 자리로 캐럿을 돌린다. 하위 판의 이름은 여는 줄의 글자다(`aria-labelledby`). 포인터는 여는 줄 위에서 100ms 뒤에 연다(Radix).
+
+**기계가 재는 것**: 하위 판 안에 잠긴 줄(`data-disabled`)이 서면 개발 중 콘솔 오류(`guardSubmenuRows`, 시험 `design/submenu.test.tsx`가 드롭다운 · 우클릭 둘 다에서 울림과 조용함을 잰다). 채널 표의 모든 항목이 아이콘 뜻 낱말을 하나씩 들고 서로 다르다는 것, 접는 무리가 복사 · 섹션 이동 둘뿐이라는 것은 코어 `actionModel.test.ts`, 모든 줄의 첫 자식이 아이콘이고 하위 메뉴 키보드(→ · ← · Esc · 포털 키가 사이드바 순회로 새지 않음)는 `SidebarRowContextMenu.test.tsx`, 실제 엔진에서 아이콘 · 글자 왼쪽 끝의 흩어짐(px)과 하위 판이 창 안에 머무는지(720×480 · 200%)는 레인 `capture-5777.mjs`가 잰다. **안 재는 것**: 1번의 「섞지 않는다」를 채널 메뉴 밖의 판에서 재는 기계는 없다(사람 리뷰).
 
 ### 스케일에 값을 하나 더하고 싶을 때
 

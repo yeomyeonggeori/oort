@@ -27,6 +27,7 @@
 //! | `the_transport_is_bounded_stateless_and_private` | the wire discipline: no query, one `Content-Type`, 64 KiB, an object (no batch), JSON `Accept`; `Cache-Control: private, no-store`; no `Mcp-Session-Id` echoed; a token outside `Authorization` is no credential | the route drifts from the Agent Port's transport rules |
 //! | `an_admitted_call_leaves_one_used_row_for_the_template_and_no_tool_content` | R15 via MCP: one `auth.dev_token.used` row per admitted POST, `detail` the closed vocabulary with the template `/v1/mcp/me`; no row of the workspace's audit holds the message text, a channel id or the token | a tool writes its arguments or results into an audit row |
 //! | `the_door_judges_revocation_and_the_role_policy_on_every_mcp_call` | D3 · D7 through the MCP route: a revoked card is the unknown-token 401, a demoted holder gets 403 `dev_access_denied` on the next call | the route caches an admission |
+//! | `claude_codes_own_handshake_is_admitted_directly_and_its_extra_client_info_is_kept_nowhere` | #5787 · ADR-0216 증보 2026-11-14: Claude Code's direct handshake (modern `server/discover`, legacy `initialize` with no version header, `notifications/initialized`, `tools/list`, `tools/call` in both eras) with `description`·`websiteUrl`·`icons`·a vendor key in `clientInfo` is admitted with the bytes the three-key `clientInfo` gets; a bad known key beside them is still -32602; no answer and no audit row of the workspace holds an unknown key's value | the door refuses an unknown `clientInfo` key again, or an unknown key's value reaches an answer or an audit row |
 
 #[path = "common/apps_pg.rs"]
 mod apps_pg;
@@ -1850,5 +1851,199 @@ async fn the_door_judges_revocation_and_the_role_policy_on_every_mcp_call() {
         s.w.ledger(s.a).await.messages,
         0,
         "a demoted holder's tool sends nothing"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// #5787 — Claude Code straight at the door, with the `clientInfo` it really sends
+// ---------------------------------------------------------------------------
+
+/// #5787 · ADR-0216 증보 2026-11-14 through the route. Claude Code connects to `/v1/mcp/me` over
+/// HTTP (the settings card's `.mcp.json`) with a `clientInfo` that carries `description` and
+/// `websiteUrl` beside the three keys the door reads; before #5787 its `initialize` was a 400. The
+/// whole handshake it sends is admitted, every answer is the one the three-key `clientInfo` gets,
+/// a bad known key beside the extras is still refused, and the extras' values are in no answer
+/// and no audit row of the workspace.
+#[tokio::test]
+#[ignore = "needs an isolated PostgreSQL 18 (#5787)"]
+async fn claude_codes_own_handshake_is_admitted_directly_and_its_extra_client_info_is_kept_nowhere()
+{
+    const CANARY: &str = "canary5787";
+    let _guard = test_lock().await;
+    let s = studio().await;
+    let (id, token) = s.w.card_row(s.holder.id, &DEV_READ_ONLY_SCOPES, None).await;
+    let url = format!("{}/v1/mcp/me", s.w.base);
+
+    let plain = json!({"name": "claude-code", "title": "Claude Code", "version": "2.1.312"});
+    let extras = json!({
+        "name": "claude-code", "title": "Claude Code", "version": "2.1.312",
+        "description": format!("{CANARY} agentic coding tool"),
+        "websiteUrl": format!("https://{CANARY}.example/claude-code"),
+        "icons": [{"src": format!("https://{CANARY}.example/icon.png"), "mimeType": "image/png"}],
+        "x-vendor": {format!("{CANARY}-name"): format!("{CANARY}-value")}
+    });
+    let meta = |info: &Value| {
+        json!({
+            "io.modelcontextprotocol/protocolVersion": MODERN,
+            "io.modelcontextprotocol/clientCapabilities": {"roots": {}},
+            "io.modelcontextprotocol/clientInfo": info
+        })
+    };
+    /// (era header, Mcp-Method, Mcp-Name, body) of one POST.
+    type Step = (
+        Option<&'static str>,
+        Option<&'static str>,
+        Option<&'static str>,
+        Value,
+    );
+    // The order Claude Code sends them in.
+    let handshake = |info: &Value| -> Vec<Step> {
+        vec![
+            (
+                Some(MODERN),
+                Some("server/discover"),
+                None,
+                json!({
+                    "jsonrpc": "2.0", "id": 0, "method": "server/discover",
+                    "params": {"_meta": meta(info)}
+                }),
+            ),
+            (
+                None,
+                None,
+                None,
+                json!({
+                    "jsonrpc": "2.0", "id": 0, "method": "initialize", "params": {
+                        "protocolVersion": LEGACY,
+                        "capabilities": {"roots": {}, "elicitation": {}},
+                        "clientInfo": info
+                    }
+                }),
+            ),
+            (
+                Some(LEGACY),
+                None,
+                None,
+                json!({"jsonrpc": "2.0", "method": "notifications/initialized"}),
+            ),
+            (
+                Some(LEGACY),
+                None,
+                None,
+                json!({"jsonrpc": "2.0", "id": 1, "method": "tools/list"}),
+            ),
+            (
+                Some(LEGACY),
+                None,
+                None,
+                json!({
+                    "jsonrpc": "2.0", "id": 2, "method": "tools/call",
+                    "params": {"name": "oort_me_whoami", "arguments": {}}
+                }),
+            ),
+            (
+                Some(MODERN),
+                Some("tools/call"),
+                Some("oort_me_whoami"),
+                json!({
+                    "jsonrpc": "2.0", "id": 3, "method": "tools/call",
+                    "params": {"_meta": meta(info), "name": "oort_me_whoami", "arguments": {}}
+                }),
+            ),
+        ]
+    };
+    let post = |version: Option<&str>, method: Option<&str>, name: Option<&str>, body: &Value| {
+        let mut request =
+            s.w.http
+                .post(&url)
+                .bearer_auth(&token)
+                .header("content-type", "application/json")
+                .header("accept", "application/json, text/event-stream")
+                .body(body.to_string());
+        if let Some(version) = version {
+            request = request.header("mcp-protocol-version", version);
+        }
+        if let Some(method) = method {
+            request = request.header("mcp-method", method);
+        }
+        if let Some(name) = name {
+            request = request.header("mcp-name", name);
+        }
+        request
+    };
+
+    let mut admitted = 0;
+    for ((version, method, name, control), (_, _, _, real)) in
+        handshake(&plain).into_iter().zip(handshake(&extras))
+    {
+        let expected =
+            s.w.send_request(post(version, method, name, &control))
+                .await;
+        let answered = s.w.send_request(post(version, method, name, &real)).await;
+        admitted += 2;
+        assert!(
+            matches!(answered.status, 200 | 202),
+            "{} was refused: {answered:?}",
+            real["method"]
+        );
+        assert!(!answered.text().contains(CANARY), "{answered:?}");
+        match real["method"].as_str() {
+            Some("tools/call") => {
+                // whoami names the use before this one (`lastUsedAtMs`), which the control call
+                // itself just moved; everything else is the control's answer.
+                let mut got = outcome(&answered);
+                let mut want = outcome(&expected);
+                assert!(!got.is_error, "{answered:?}");
+                for structured in [&mut got.structured, &mut want.structured] {
+                    let object = structured.as_object_mut().expect("whoami is an object");
+                    assert!(object.remove("lastUsedAtMs").is_some(), "{answered:?}");
+                }
+                assert_eq!(got.structured, want.structured);
+                assert_eq!(answered.status, expected.status);
+                assert_eq!(answered.headers, expected.headers);
+            }
+            other => {
+                // The same bytes the three-key `clientInfo` gets (the clock header is already
+                // left out of `Reply`).
+                assert_eq!(answered, expected, "{other:?}");
+                if matches!(other, Some("server/discover" | "initialize")) {
+                    assert_eq!(answered.json()["result"]["serverInfo"]["name"], "oort-me");
+                }
+            }
+        }
+    }
+
+    // A known key keeps its shape beside the extras: an empty `name` is still -32602 in both eras,
+    // and the refusal carries nothing of the extras either.
+    let mut bad = extras.clone();
+    bad["name"] = json!("");
+    for (version, method, name, body) in handshake(&bad).into_iter().take(2) {
+        let refused = s.w.send_request(post(version, method, name, &body)).await;
+        admitted += 1;
+        refused.expect(400);
+        assert_eq!(refused.json()["error"]["code"], -32602, "{refused:?}");
+        assert!(!refused.text().contains(CANARY), "{refused:?}");
+    }
+
+    // The door wrote its one closed row per admitted POST, and nothing of the extras is in any
+    // audit row of the workspace.
+    let rows = s.w.used_rows(id).await;
+    assert_eq!(rows.len(), admitted, "one row per admitted POST: {rows:?}");
+    let everything: String = sqlx::query_scalar(
+        "SELECT coalesce(string_agg(action || ' ' || coalesce(detail::text, '') || ' ' || \
+                                    coalesce(target_type, ''), E'\\n'), '') \
+           FROM audit_log WHERE workspace_id = $1",
+    )
+    .bind(s.w.ws)
+    .fetch_one(&s.w.su)
+    .await
+    .expect("the audit text");
+    assert!(
+        everything.contains("auth.dev_token.used") && everything.contains("/v1/mcp/me"),
+        "the audit scan read nothing: {everything:?}"
+    );
+    assert!(
+        !everything.contains(CANARY),
+        "the audit holds the extras: {everything}"
     );
 }

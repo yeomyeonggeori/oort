@@ -2018,15 +2018,16 @@ else:
                 bad.append("%s %s is %r, not the team default mode's %r" % (role, var, e[var], default))
         if api.get(var) != worker.get(var):
             bad.append("api and agent-worker disagree on %s (api %r, agent-worker %r)" % (var, api.get(var), worker.get(var)))
-    # The Hermes delegation stays closed as shipped: no kind declared, and the per-workspace operator ceiling EMPTY (which
-    # means CLOSED, unlike the two older ceilings): a template that carried a value would make the first release with the
-    # delegation active by itself.
+    # The Hermes delegation stays closed as shipped because no kind is declared (the two kind declarations are present and
+    # EMPTY): that is the latch (ADR-0201 증보 v4.5, #5685). The per-workspace operator ceiling ships present and EMPTY too,
+    # which now means NO operator ceiling (like the two older ceilings), not closed; it is the operator's choice, not the
+    # switch. A template that carried a kind declaration would make the first release with the delegation active by itself.
     for var in ("OORT_COHOSTED_AGENT_IMAGE_TOOL", "OORT_COHOSTED_AGENT_SEARCH_TOOL"):
         if worker.get(var) != "":
             bad.append("agent-worker %s is %r (the template declares no Hermes kind: present and empty)" % (var, worker.get(var)))
     for role, e in (("api", api), ("agent-worker", worker)):
         if e.get("TEAM_AI_HERMES_DAILY_CAP") != "":
-            bad.append("%s TEAM_AI_HERMES_DAILY_CAP is %r (the template ships it present and EMPTY = delegation closed)" % (role, e.get("TEAM_AI_HERMES_DAILY_CAP")))
+            bad.append("%s TEAM_AI_HERMES_DAILY_CAP is %r (the template ships it present and EMPTY = no operator ceiling; what keeps the delegation closed is the empty kind declarations checked just above)" % (role, e.get("TEAM_AI_HERMES_DAILY_CAP")))
     for secret in ("DATABASE_URL", "WORKER_DATABASE_URL", "PROVIDER_LINK_MASTER_KEY", "JWT_HMAC"):
         if secret in env:
             bad.append("hermes holds oort secret %s" % secret)
@@ -2124,7 +2125,7 @@ elif edit == "worker-connector-apps-dropped":  # a missing key is not an empty o
     del cfg["services"]["agent-worker"]["environment"]["OORT_COHOSTED_AGENT_CONNECTOR_APPS"]
 elif edit == "api-connector-apps-dropped":
     del api["OORT_COHOSTED_AGENT_CONNECTOR_APPS"]
-elif edit == "hermes-cap-shipped-set":  # the template must not open the delegation by itself
+elif edit == "hermes-cap-shipped-set":  # the ceiling ships EMPTY (an operator's choice, not the switch); a value is a drift from that shape, not an opening
     cfg["services"]["agent-worker"]["environment"]["TEAM_AI_HERMES_DAILY_CAP"] = "30"
 elif edit == "hermes-kind-shipped-declared":
     cfg["services"]["agent-worker"]["environment"]["OORT_COHOSTED_AGENT_SEARCH_TOOL"] = "1"

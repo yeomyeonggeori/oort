@@ -27,7 +27,7 @@ const channels = [{ id: "00000000-0000-7000-8000-000000000201", workspaceId, kin
 const auth = {
   accessToken: "capture-only-not-a-credential",
   refreshToken: "capture-only-not-a-credential",
-  member: { id: memberId, workspaceId, kind: "human", displayName: "곽성재", handle: "seongjae" },
+  member: { id: memberId, workspaceId, kind: "human", displayName: "한지후", handle: "jihu" },
   realtimeWebSocketUrl: "ws://ai-agents-capture.invalid/connection/websocket",
 };
 const base = { workspaceId, status: "active", channelCount: 1, channelIds: channels.map((c) => c.id), capabilities: [], createdAtMs: 0, updatedAtMs: 0 };
@@ -35,13 +35,13 @@ const human = (id, displayName, handle, role) => ({ ...base, id, kind: "human", 
 const bot = (n, displayName, handle, extra) => ({ ...base, id: `00000000-0000-7000-8000-00000000030${n}`, kind: "agent", displayName, handle, paused: false, ...extra });
 const ownedBy = (id, name) => ({ ownerHumanId: id, owner: { id, displayName: name } });
 const roster = [
-  human(memberId, "곽성재", "seongjae", "owner"),
+  human(memberId, "한지후", "jihu", "owner"),
   human(otherHuman, "서연", "seoyeon", "member"),
-  bot(1, "김인턴", "kim-intern", { brain: "team_key", callableBy: "everyone", ...ownedBy(memberId, "곽성재") }),
-  bot(2, "성재의 Codex", "seongjae-codex", { brain: "subscription", callableBy: "owner_only", hostOnline: true, ...ownedBy(memberId, "성재") }),
+  bot(1, "김인턴", "kim-intern", { brain: "team_key", callableBy: "everyone", ...ownedBy(memberId, "한지후") }),
+  bot(2, "성재의 Codex", "jihu-codex", { brain: "subscription", callableBy: "owner_only", hostOnline: true, ...ownedBy(memberId, "성재") }),
   bot(3, "서연의 Codex", "seoyeon-codex", { brain: "subscription", callableBy: "owner_only", hostOnline: false, ...ownedBy(otherHuman, "서연") }),
-  bot(4, "성재의 API 키", "seongjae-key", { brain: "personal_key", callableBy: "owner_only", ...ownedBy(memberId, "성재") }),
-  bot(5, "성재의 Claude Code", "seongjae-claude", {
+  bot(4, "성재의 API 키", "jihu-key", { brain: "personal_key", callableBy: "owner_only", ...ownedBy(memberId, "성재") }),
+  bot(5, "성재의 Claude Code", "jihu-claude", {
     brain: "subscription", callableBy: "owner_only", hostOnline: true, brainUnavailableReason: "claude_subscription_agent_paused", ...ownedBy(memberId, "성재"),
   }),
   bot(6, "hermes", "hermes", { brain: "external", callableBy: "everyone" }),
@@ -193,11 +193,11 @@ async function scenes(browser, origin, scheme, viewport) {
     check(`${tag} 머리: 쓰는 AI · 부를 수 있는 사람 · 비용 · 상태`, JSON.stringify(await page.locator("thead th").allTextContents()) === JSON.stringify(["에이전트", "쓰는 AI", "부를 수 있는 사람", "비용", "상태"]));
     check(`${tag} 여섯 줄`, (await page.locator("tbody tr").count()) === 6);
     check(`${tag} 팀 키: 팀 AI 키 · 누구나 · 팀`, (await cell(page, "brain", "kim-intern")) === "팀 AI 키" && (await cell(page, "callable", "kim-intern")) === "누구나" && (await cell(page, "cost", "kim-intern")) === "팀");
-    check(`${tag} 내 구독 (Codex) · 나만 · 내 맥 켜짐`, (await cell(page, "brain", "seongjae-codex")) === "내 구독 (Codex)" && (await cell(page, "callable", "seongjae-codex")) === "나만" && (await cell(page, "status", "seongjae-codex")) === "내 맥 켜짐");
+    check(`${tag} 내 구독 (Codex) · 나만 · 내 맥 켜짐`, (await cell(page, "brain", "jihu-codex")) === "내 구독 (Codex)" && (await cell(page, "callable", "jihu-codex")) === "나만" && (await cell(page, "status", "jihu-codex")) === "내 맥 켜짐");
     const other = await cell(page, "callable", "seoyeon-codex");
     check(`${tag} 남의 구독: 서연 님만 + 잠금 + 맥 꺼짐`, other.startsWith("서연 님만") && (await page.getByTestId("ai-agent-row-seoyeon-codex").getAttribute("data-locked")) === "true" && (await cell(page, "status", "seoyeon-codex")).includes("팀 키로 대신하지 않아요"));
-    check(`${tag} 개인 키: 개인 키 · 나만 · 개인 키`, (await cell(page, "brain", "seongjae-key")) === "개인 키" && (await cell(page, "callable", "seongjae-key")) === "나만" && (await cell(page, "cost", "seongjae-key")) === "개인 키");
-    const paused = await cell(page, "status", "seongjae-claude");
+    check(`${tag} 개인 키: 개인 키 · 나만 · 개인 키`, (await cell(page, "brain", "jihu-key")) === "개인 키" && (await cell(page, "callable", "jihu-key")) === "나만" && (await cell(page, "cost", "jihu-key")) === "개인 키");
+    const paused = await cell(page, "status", "jihu-claude");
     check(`${tag} Claude: 문의 중 + 설명, 맥 켜짐 없음`, paused.includes("문의 중") && paused.includes("Anthropic 약관 확인 전까지") && !paused.includes("맥 켜짐"), paused);
     check(`${tag} 외부: 외부 (직접 운영) · 누구나 · 외부 운영자`, (await cell(page, "brain", "hermes")) === "외부 (직접 운영)" && (await cell(page, "cost", "hermes")) === "외부 운영자");
     check(`${tag} 문서 가로 넘침 0`, (await overflowX(page)) === 0);
@@ -250,33 +250,33 @@ async function widthScenes(browser, origin, scheme, viewport) {
     await page.waitForTimeout(800);
     await page.screenshot({ path: resolve(OUT_DIR, `v2-table-harness-${tag}.png`) });
     check(`${tag} 하니스: 내 구독 (Codex) / 내 구독 (Claude Code) + C·X 마크`,
-      (await cell(page, "brain", "seongjae-codex")) === "내 구독 (Codex)" && (await cell(page, "brain", "seongjae-claude")) === "내 구독 (Claude Code)" &&
-      (await page.getByTestId("ai-agent-row-seongjae-codex").locator("th").textContent()).includes("X") &&
-      (await page.getByTestId("ai-agent-row-seongjae-claude").locator("th").textContent()).includes("C"));
-    const nameBox = await page.getByTestId("ai-agent-link-seongjae-claude").boundingBox();
+      (await cell(page, "brain", "jihu-codex")) === "내 구독 (Codex)" && (await cell(page, "brain", "jihu-claude")) === "내 구독 (Claude Code)" &&
+      (await page.getByTestId("ai-agent-row-jihu-codex").locator("th").textContent()).includes("X") &&
+      (await page.getByTestId("ai-agent-row-jihu-claude").locator("th").textContent()).includes("C"));
+    const nameBox = await page.getByTestId("ai-agent-link-jihu-claude").boundingBox();
     check(`${tag} 이름 한 줄(높이 ${Math.round(nameBox.height)})`, viewport.width < 1400 || nameBox.height < 24, String(nameBox.height));
     const tone = (h) => page.getByTestId(`ai-agent-callable-${h}`).locator("[data-tone]").getAttribute("data-tone");
-    check(`${tag} 「나만」 회색, 「서연 님만」 호박색`, (await tone("seongjae-codex")) === "mute" && (await tone("seoyeon-codex")) === "warn");
+    check(`${tag} 「나만」 회색, 「서연 님만」 호박색`, (await tone("jihu-codex")) === "mute" && (await tone("seoyeon-codex")) === "warn");
     check(`${tag} 문서 가로 넘침 0`, (await overflowX(page)) === 0);
-    const statusW = await page.getByTestId("ai-agent-status-seongjae-claude").evaluate((el) => el.getBoundingClientRect().width);
+    const statusW = await page.getByTestId("ai-agent-status-jihu-claude").evaluate((el) => el.getBoundingClientRect().width);
     const wide = await page.locator("[role='region']").getAttribute("data-wide");
     check(`${tag} 표 모양이면 상태 열이 충분히 넓고(${Math.round(statusW)}px), 아니면 카드`, wide === null || statusW >= 380, `wide=${wide} status=${statusW}`);
     const region = await page.locator("[role='region']").evaluate((el) => ({ over: el.scrollWidth > el.clientWidth + 1, tab: el.getAttribute("tabindex") }));
     check(`${tag} 스크롤 영역 정차점은 넘칠 때만`, region.over === (region.tab === "0"), JSON.stringify(region));
-    await page.getByTestId("ai-agent-link-seongjae-codex").click();
+    await page.getByTestId("ai-agent-link-jihu-codex").click();
     await page.getByTestId("agent-hub-route").waitFor();
     await page.waitForTimeout(600);
-    check(`${tag} 이름 링크 → /agents 에서 그 에이전트가 열린다`, page.url().includes("agent=") && (await page.getByTestId("agent-hub-agent-row").evaluateAll((els) => els.some((e) => e.getAttribute("aria-current") === "page" && e.textContent.includes("seongjae-codex")))));
+    check(`${tag} 이름 링크 → /agents 에서 그 에이전트가 열린다`, page.url().includes("agent=") && (await page.getByTestId("agent-hub-agent-row").evaluateAll((els) => els.some((e) => e.getAttribute("aria-current") === "page" && e.textContent.includes("jihu-codex")))));
     // 새로고침(처음 열기): 명부가 오기 전에 선택을 지우지 않아서 ?agent= 의 에이전트가 그대로 선택된다.
     await page.reload({ waitUntil: "domcontentloaded" });
     await page.getByTestId("agent-hub-route").waitFor({ timeout: 20000 });
     await page.waitForFunction(() => document.querySelectorAll("[data-testid='agent-hub-agent-row']").length > 1, null, { timeout: 8000 });
     await page.waitForTimeout(600);
-    check(`${tag} 처음 열기(새로고침) /agents?agent= : 첫 줄이 아니라 그 에이전트`, await page.getByTestId("agent-hub-agent-row").evaluateAll((els) => els.filter((e) => e.getAttribute("aria-current") === "page").map((e) => e.textContent).join("|").includes("seongjae-codex")));
+    check(`${tag} 처음 열기(새로고침) /agents?agent= : 첫 줄이 아니라 그 에이전트`, await page.getByTestId("agent-hub-agent-row").evaluateAll((els) => els.filter((e) => e.getAttribute("aria-current") === "page").map((e) => e.textContent).join("|").includes("jihu-codex")));
     if (viewport.width > 700) {
       await page.screenshot({ path: resolve(OUT_DIR, `v2-agents-list-chips-${tag}.png`) });
       const chips = await page.getByTestId("agent-hub-agent-row").evaluateAll((els) => els.map((e) => e.textContent));
-      const claude = chips.find((t) => t.includes("seongjae-claude")) ?? "";
+      const claude = chips.find((t) => t.includes("jihu-claude")) ?? "";
       const seoyeon = chips.find((t) => t.includes("seoyeon-codex")) ?? "";
       check(`${tag} /agents 칩이 표와 같다: 문의 중 / 맥 꺼짐`, claude.includes("문의 중") && seoyeon.includes("맥 꺼짐"), JSON.stringify([claude, seoyeon]));
     }

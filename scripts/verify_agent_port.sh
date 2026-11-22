@@ -121,7 +121,7 @@ docker_require_absent() {
 docker_remove_and_verify() {
   local kind="$1" ref="$2"
   case "$kind" in
-    container) "$DOCKER_BIN" rm -f "$ref" >/dev/null 2>&1 || return 1 ;;
+    container) "$DOCKER_BIN" rm -f -v "$ref" >/dev/null 2>&1 || return 1 ;;  # #5606: -v takes the image VOLUME
     network) "$DOCKER_BIN" network rm "$ref" >/dev/null 2>&1 || return 1 ;;
     volume) "$DOCKER_BIN" volume rm "$ref" >/dev/null 2>&1 || return 1 ;;
     image) "$DOCKER_BIN" image rm "$ref" >/dev/null 2>&1 || return 1 ;;
@@ -202,6 +202,8 @@ if [ "${1:-}" = "--verify-cleanup-contract" ]; then
     fail "immutable image execution binding accepted a retagged image id"
   fi
   SELF_TEST_DIR="$(mktemp -d "${TMPDIR:-/tmp}/momo-agent-port-selftest.XXXXXX")"
+  # #5606: a failing self-test case must not strand this directory (the success path removes it itself).
+  trap 'case "$SELF_TEST_DIR" in "${TMPDIR:-/tmp}"/momo-agent-port-selftest.*) [ ! -d "$SELF_TEST_DIR" ] || rm -rf -- "$SELF_TEST_DIR" ;; esac' EXIT
   SELF_TEST_SECRET="$SELF_TEST_DIR/secret.env"
   LARGE_REFS="$VALID_OBJECT_ID"$'\n'"$(awk 'BEGIN { line=""; for (j=0; j<64; j++) line=line "b"; for (i=1; i<200000; i++) print line }')"
   exact_ref_membership "$LARGE_REFS" "$VALID_OBJECT_ID" ||

@@ -52,8 +52,8 @@ const member = {
   id: memberId,
   workspaceId,
   kind: "human",
-  displayName: "곽성재",
-  handle: "seongjae",
+  displayName: "한지후",
+  handle: "jihu",
 };
 
 /** Single-use refresh server, no grace window. */

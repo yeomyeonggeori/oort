@@ -963,6 +963,7 @@ def hermes_errors(services: dict, compose: str, repo_root: Path) -> list[str]:
         if var in (services["agent-worker"].get("variables") or {}):
             errors.append("agent-worker must not carry %s (the login relay is api only, #4079)" % var)
     errors.extend(cohosted_declaration_errors(services, compose))
+    errors.extend(hermes_kind_errors(services))
     return errors
 
 
@@ -1002,6 +1003,26 @@ def cohosted_declaration_errors(services: dict, compose: str) -> list[str]:
                 "compose api and agent-worker must declare the same expression for %s: api %r, agent-worker %r "
                 "(ADR-0201 증보 v4 G4, K-S2 flipped)" % (var, api_expr, worker_expr)
             )
+    return errors
+
+
+# ADR-0201 증보 v4.5 (#5685, #5702): with the operator ceiling unset meaning "no ceiling", the only operator-side latch that keeps
+# the shipped template from opening the Hermes delegation by itself is that it declares no Hermes kind. A kind declaration with
+# a value (on either role) would make the first release with the delegation active by itself; absent or empty both pass.
+HERMES_KIND_DECLARATIONS = ("OORT_COHOSTED_AGENT_SEARCH_TOOL", "OORT_COHOSTED_AGENT_IMAGE_TOOL")
+
+
+def hermes_kind_errors(services: dict) -> list[str]:
+    errors: list[str] = []
+    for role in ("api", "agent-worker"):
+        got = services[role].get("variables") or {}
+        for var in HERMES_KIND_DECLARATIONS:
+            if got.get(var, "") != "":
+                errors.append(
+                    "%s %s is %r: the template declares no Hermes kind (an empty kind declaration is what keeps the "
+                    "delegation closed now that an unset operator ceiling means no ceiling; ADR-0201 증보 v4.5, #5685)"
+                    % (role, var, got.get(var))
+                )
     return errors
 
 
@@ -1684,6 +1705,13 @@ def mutate_catalog(kind: str, data: dict) -> None:
     # directions, and the template itself leaving team default mode.
     elif kind == "worker-hermes-attest-dropped":  # the worker lost the declaration api has
         del services["agent-worker"]["variables"]["OORT_COHOSTED_AGENT_TOOLS_LOCKED"]
+    # ADR-0201 증보 v4.5 (#5685, #5702): the template must not declare a Hermes kind (the empty kind declaration is the latch).
+    elif kind == "worker-hermes-search-kind-shipped":
+        services["agent-worker"]["variables"]["OORT_COHOSTED_AGENT_SEARCH_TOOL"] = "1"
+    elif kind == "worker-hermes-image-kind-shipped":
+        services["agent-worker"]["variables"]["OORT_COHOSTED_AGENT_IMAGE_TOOL"] = "1"
+    elif kind == "api-hermes-search-kind-shipped":
+        api["variables"]["OORT_COHOSTED_AGENT_SEARCH_TOOL"] = "1"
     elif kind == "api-connector-apps-only":  # connection mode on api alone: the worker would read team default
         api["variables"]["OORT_COHOSTED_AGENT_CONNECTOR_APPS"] = "com.momo.plugins.gmail"
     elif kind == "worker-connector-apps-only":  # and the other direction: only the worker has it
@@ -1834,6 +1862,9 @@ CATALOG_MUTATIONS: tuple[tuple[str, str], ...] = (
     ("api-hermes-wildcard-host", "api AGENT_PROVIDER_LOCAL_HOSTS"),
     ("api-hermes-attest-dropped", "api OORT_COHOSTED_AGENT_TOOLS_LOCKED"),
     ("worker-hermes-attest-dropped", "agent-worker OORT_COHOSTED_AGENT_TOOLS_LOCKED is missing"),
+    ("worker-hermes-search-kind-shipped", "agent-worker OORT_COHOSTED_AGENT_SEARCH_TOOL is '1': the template declares no Hermes kind"),
+    ("worker-hermes-image-kind-shipped", "agent-worker OORT_COHOSTED_AGENT_IMAGE_TOOL is '1': the template declares no Hermes kind"),
+    ("api-hermes-search-kind-shipped", "api OORT_COHOSTED_AGENT_SEARCH_TOOL is '1': the template declares no Hermes kind"),
     ("api-connector-apps-only", "api and agent-worker must carry the same OORT_COHOSTED_AGENT_CONNECTOR_APPS"),
     ("worker-connector-apps-only", "api and agent-worker must carry the same OORT_COHOSTED_AGENT_CONNECTOR_APPS"),
     ("api-connectors-locked-only", "api and agent-worker must carry the same OORT_COHOSTED_AGENT_CONNECTORS_LOCKED"),
