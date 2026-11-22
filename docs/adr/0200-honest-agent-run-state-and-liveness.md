@@ -1217,7 +1217,7 @@ oort_run_event {
 | E2 | 반응은 새 `seq`를 쓰지 않고 `message` 행을 건드리지 않는다. 같은 tx의 outbox `Broadcast` 한 줄(`reaction.added/removed`)뿐이다. 푸시 후보·받은함 투영은 글 INSERT·props UPDATE·읽음 상태에만 걸려 있다 | 같은 파일 머리말 1~3, `momo-outbox/src/emit.rs`, `server/Migrations/126_inbox_item.sql` |
 | E3 | `agent_run.trigger_message_id`를 채우는 트리거는 둘뿐이다: 멘션과 스레드 답글 깨우기. 작업 요청·환영·에이전트가 먼저 낸 제안은 NULL이다 | `momo-agent/src/run.rs`(`RunTrigger::trigger_message_id`) |
 | E4 | run을 종결 상태로 쓰는 문장은 한 곳이 아니다: 완료 콜백(성공·실패), 승인 대기의 거절·만료, 시간 초과, 사람의 멈춤, 게이트웨이 쪽 취소, DM 착석 흐름 등 **적어도 다섯 파일**에 흩어져 있고 쓰는 역할도 api·워커·notifier 셋이다 | `momo-agent/src/run.rs`(`finish_run_in_tx`·`end_parked_run_in_tx`·`cancel_run_in_tx` 외), `momo-agent/src/in_place_grant.rs`, `momo-outbox/src/gateway.rs`, `routes/dm_agents.rs`, `routes/agent_gateway.rs` |
-| E5 | 「가져감」의 서버 사실: 호스팅 에이전트는 claim tx가 쓰는 원장 `claimed` 행(D1·D2), 관리형 워커·팀 AI는 `queued → running` 전이(`mark_run_started_in_tx`)다 | `routes/agent_port_tools.rs`(`AppendedRunEvent::Claimed` 두 곳), `momo-agent/src/run.rs` |
+| E5 | 「가져감」의 서버 사실: 호스팅 에이전트는 claim tx가 쓰는 원장 `claimed` 행(D1·D2), 관리형 워커·팀 AI는 `queued → running` 전이(`mark_run_started_in_tx`)다. 반대로 **놓는** 길도 있다: 게이트웨이가 lease 주인을 비우는 문장이 네 곳 있고(`momo-outbox/src/gateway.rs`, `oort_job_release` 등), run이 아직 `queued`면 D1의 표대로 `phase`가 `queued`로 돌아간다. lease가 **만료만** 된 것은 주인이 남아 있어 `claimed` 그대로다 | `routes/agent_port_tools.rs`(`AppendedRunEvent::Claimed` 두 곳), `momo-agent/src/run.rs` |
 | E6 | 부른 글 머리의 칩은 받음 → 가져감 → 작업 중 → 승인 대기·일시 정지와 예외(아직 받지 않았어요·시간 초과·실패)를 모든 사람에게 보이고, **성공·취소로 끝나면 사라진다** | `packages/momo-core/src/features/agents/triggerChip.ts` |
 | E7 | REST 반응 길의 감사 줄은 라우트가 쓰고 도메인 함수는 쓰지 않는다. 도메인 함수는 달기·떼기 모두 채널 멤버십을 먼저 본다 | `routes/messages.rs`(`mutate_reaction`), `interaction.rs`(`lock_and_authorize`) |
 | E8 | 에이전트 자격은 REST 반응 길에 닿지 못한다(시험이 scope 없음으로 고정) | `momo-auth/src/agent_scope.rs`(`the_slice_door_opens_for_patch_alone`) |
@@ -1227,6 +1227,7 @@ oort_run_event {
 - **L1 · 서버가 파생한다.** 눈(`👀`)과 체크(`✅`)는 서버가 run 상태에서 파생해 **그 run의 에이전트 멤버 이름으로** 단다. 에이전트가 도구로 「받았어요·끝났어요」를 다는 방식이 아니다. D1(「상태 어휘는 서버가 파생해서 내려준다」)과 같은 원칙이다: 에이전트가 협조하지 않아도, 어느 런타임이어도(외부·호스팅·관리형·팀 AI) 같은 사실이 같은 그림으로 보인다.
 - **L2 · 대상은 run을 낳은 글 하나다**(`agent_run.trigger_message_id`). 그 값은 run 행에서 읽고 요청의 어떤 값도 대상을 정하지 못한다. 부른 글이 없는 run(E3: 작업 요청·환영·먼저 낸 제안)은 대상이 아니다. 부른 글이 지워졌으면 조용히 건너뛴다.
 - **L3 · 눈을 다는 때 = 「그 에이전트가 그 일을 가져갔다」는 서버 사실이 처음 기록되는 tx**(E5). 호스팅 에이전트는 원장 `claimed` 행을 쓰는 tx(`phase`가 `claimed`가 되는 순간), 그 밖의 런타임은 `queued → running` 전이 tx다. **`phase = queued`인 동안에는 달지 않는다** — 아무도 가져가지 않았는데 「봤어요」라고 하지 않는다(이 ADR의 이름이 「사실대로」다). 승인 대기·일시 정지는 가져간 일이 멈춘 것이므로 눈을 그대로 둔다.
+  - **놓으면 뗀다.** 눈의 뜻은 「지금 그 에이전트가 이 일을 쥐고 있다」다. 정확히는 그 run의 `phase`가 `claimed`·`running`·`awaiting_approval`·`paused` 가운데 하나일 때만 눈이 있다. 그래서 가져간 일을 시작하기 전에 놓아서(E5: lease 주인을 비우는 tx) `phase`가 `queued`로 돌아가면 **같은 tx에서 눈을 뗀다.** 다시 가져가면 다시 단다. lease가 만료만 된 run은 D1대로 `claimed`이므로 눈을 둔다(「돌아올 수 있음」 — 끝내 돌아오지 않으면 스위프의 종결이 뗀다, L4).
   - owner의 낱말은 「받으면 눈」이다. 이 증보는 「받음」을 「에이전트가 가져감」으로 읽었다(**owner가 승인 때 정할 값 ①**). 「서버가 요청을 받은 때(run이 생긴 tx)」로 고르면 이 절의 한 줄이 바뀌고, 아무도 가져가지 않아 끝난 run에도 눈이 달렸다 떼지며, 칩의 「아직 받지 않았어요」와 눈이 같은 글에서 어긋난다.
 - **L4 · 끝나는 모든 길에서 눈은 남지 않는다. 규칙은 함수 목록이 아니라 상태 전이에 건다.** run이 종결 상태(`succeeded`·`failed`·`timed_out`·`cancelled`)가 되는 tx는 **같은 tx에서** 그 run이 단 눈을 뗀다. 성공이면 같은 tx에서 체크를 단다. 「정리」도 종결 전이다: lease를 버린 run(`lease_abandoned`), 깨웠는데 가져가지 않은 run(`woken_not_collected`), 승인 만료, 연결 해제 뒤의 고아 run, 채널 줄 없이 조용히 끝내는 유령 run 모두 같은 규칙을 지난다.
   - 종결을 쓰는 문장이 여러 파일·세 역할에 흩어져 있어서(E4) 「부르는 것을 잊은 길」이 가장 큰 위험이다. 구현은 둘 가운데 하나를 고르고 PR에 적는다: **(a)** 종결 전이를 쓰는 모든 문장이 한 함수를 지나게 하고, 종결 상태를 쓰는 문장의 목록을 정적 시험이 닫는다(새 문장이 생기면 시험이 빨개진다) **(b)** `agent_run`의 종결 전이에 거는 DB 트리거. 어느 쪽이든 LA1이 길마다 실제 행을 잰다.
@@ -1283,7 +1284,7 @@ oort_run_event {
 | LT6 | 설정을 껐는데 눈이 남는다 | 「끔」은 달기만 막는다(L10) | LA5 |
 | LT7 | 다른 채널·워크스페이스의 글에 달린다 | 대상은 run 행의 `trigger_message_id`뿐이고 테넌트 tx 안이다(L2) | LA6 |
 | LT8 | 글당 200개 한도를 에이전트가 채운다 | 에이전트 하나가 글 하나에 다는 서버 반응은 많아야 둘(눈·체크) | LA2 |
-| LT9 | 실시간 프레임이 몰린다 | run 하나에 프레임 셋 이하(눈 달기·눈 떼기·체크) | LA4 |
+| LT9 | 실시간 프레임이 몰린다 | 가져간 뒤 놓지 않은 run은 프레임 셋 이하(눈 달기·눈 떼기·체크). 가져갔다 놓기를 되풀이하면 그때마다 한 쌍이 더 나가지만 그 횟수는 claim의 기존 속도 제한과 lease 규칙이 쥔다 [확인 필요: claim–release 되풀이의 상한] | LA4 |
 | LT10 | 나간 채널에 새 반응이 달린다 | 달기는 멤버십을 본다(L7 1) | LA9 |
 | LT11 | 반응이 에이전트를 깨워 되먹임이 생긴다 | 반응은 run을 만들지 않는다(L14) | LA3 |
 
@@ -1292,7 +1293,7 @@ oort_run_event {
 - **LA1 · 끝나는 길마다 남는 눈 0.** 눈이 달린 run을 다음 길마다 끝내고 그 (글, 에이전트, 눈) 행이 0임을 격리 PG로 잰다: ① 성공 완료 ② 실패 완료 ③ 사람의 멈춤(취소) ④ 승인 거절 ⑤ 승인 만료 스위프 ⑥ lease를 버린 run의 스위프 ⑦ 깨웠는데 가져가지 않은 run의 종결(눈이 애초에 0) ⑧ 연결 해제 뒤 고아 run의 종결 ⑨ 조용히 끝내는 유령 run ⑩ E4가 든 그 밖의 종결 문장 각각. 종결 상태를 쓰는 문장을 새로 더하면 빨개지는 가드(정적 목록 또는 트리거 시험)가 있다.
 - **LA2 · 성공 때 체크 정확히 1.** 완료 콜백을 두 번 보내도 1. 실패·시간 초과·취소로 끝난 run은 0.
 - **LA3 · 알림·받은함·seq 변화 0.** 눈 달기·떼기·체크 달기 전후로 `push_candidate`·`inbox_item` 행 수, 채널 `seq`, 읽음 상태가 그대로다. 닫은 DM이 다시 열리지 않는다. 반응으로 생긴 run 0.
-- **LA4 · 눈의 때.** `phase = queued`인 동안 눈 0. 가져감이 기록된 tx 뒤 정확히 1(호스팅 claim, 관리형·팀 AI의 시작 전이 각각). 승인 대기 동안 1 유지. run 하나의 반응 프레임은 셋 이하.
+- **LA4 · 눈의 때.** `phase = queued`인 동안 눈 0 — **가져가기 전에도, 가져갔다 놓은 뒤에도**(lease 주인을 비우는 문장 각각에 대해: 놓은 tx 뒤 눈 0, 다시 가져가면 1). 가져감이 기록된 tx 뒤 정확히 1(호스팅 claim, 관리형·팀 AI의 시작 전이 각각). 승인 대기·lease 만료(주인 남음) 동안 1 유지. 가져간 뒤 놓지 않은 run의 반응 프레임은 셋 이하.
 - **LA5 · 설정.** 「끔」이면 새 반응 0. run 도중 「끔」으로 바꾸면 종결 뒤 눈 0·체크 0. 「상태 표시만」이면 눈·체크가 달리고 에이전트 반응 도구는 목록에 없다. 에이전트 값이 워크스페이스 값보다 넓을 때 유효 값은 워크스페이스 값이다. 관리자·프로필 편집자가 아닌 사람의 저장은 거절이다.
 - **LA6 · 대상.** 부른 글이 없는 run(작업 요청·환영·먼저 낸 제안)은 반응 0. 부른 글이 지워진 run은 반응 0이고 종결은 정상이다.
 - **LA7 · 종결을 막지 않는다.** 글당 200개가 찬 글·지워진 글·에이전트가 나간 채널에서 run의 종결 상태와 최종 답 메시지가 반응이 없을 때와 같다.
