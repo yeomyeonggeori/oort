@@ -5,7 +5,8 @@
 //   npm run build && OUT_DIR=<dir> CAPTURE_PORT=<port> node scripts/capture-5640.mjs
 //   (`CAPTURE_ONLY=fix5712`: 마우스 뒤 손가락 · 줄 높이가 같은 세 줄 차례로 · 둘째 줄 누른 자리 다시 — 두 엔진. `CAPTURE_DIST=<폴더>`: 그 빌드를 띄움)
 //   (`CAPTURE_ONLY=fix5738` 또는 `fix5738:n1,rows,slow,still,move0,shots`: 칸이 자리를 지킴 — #5732 검수 N1·N2b·N2c·N7, 남이 일으킨 변화, 이동 0, 캡처)
-//   (`CAPTURE_ONLY=fix5738r2` 또는 `fix5738r2:below,band,conn,scroll,hold,wheelmix,clamp,touchrev,four,shots,look`: 둘째 겹 — 밖에서 온 변화로 선·옮겨진 단추는 잠깐 막힘, #5744 검수 H1·H2·M1)
+//   (`CAPTURE_ONLY=fix5738r2` 또는 `fix5738r2:below,band,conn,scroll,hold,wheelmix,clamp,nearend,touchrev,four,shots,look`: 밖에서 온 변화 — 새 요청은 머리의 수,
+//    표는 줄지 않음, 목록 상자가 바뀌면 잠깐 막힘, 결정은 누름이 시작된 단추에서만, #5744 검수 H1·H2·M1 · r4 H1·M1)
 //
 // 백엔드가 없다. `/v1/**`는 이 파일의 고정 응답이고, 보드는 #5639 계약을 흉내 낸다: `include=jobs`로 읽는 사람이 세션 주인일
 // 때만, 대기 요청이 있는 실행 중 맥 세션의 상태가 `waiting`이다. 승인 원장은 인박스 배지가 읽는 그 경로다. 사람·컴퓨터 이름은
@@ -715,6 +716,15 @@ const underPoint = (page, x, y) =>
 const approveCenter = async (page, rowId) => {
   const box = await page.locator('[data-testid="work-job"]', { has: page.locator(`[data-job-id="${rowId}"]`) }).getByTestId("work-job-approval-approve").boundingBox();
   return { x: box.x + box.width / 2, y: box.y + box.height / 2 };
+};
+/** 수리 4회차: 구간이 선 뒤의 새 요청은 머리의 「새 요청 n · 보기」로만 선다. 그 단추가 섰는지 · 누르기. */
+const revealShown = (page) => page.evaluate(() => document.querySelector('[data-testid="work-jobs-reveal-new"]')?.textContent ?? null);
+const revealNew = async (page) => {
+  const before = await page.evaluate(() => document.querySelectorAll('[data-section="needsMe"] [data-testid="work-job"]').length);
+  const box = await page.getByTestId("work-jobs-reveal-new").boundingBox();
+  await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+  await page.waitForFunction((n) => document.querySelectorAll('[data-section="needsMe"] [data-testid="work-job"]').length > n, before, { timeout: 5000, polling: "raf" });
+  await sleep(150);
 };
 const twoDecidersReady = (page) =>
   page.waitForFunction(() => document.querySelectorAll('[data-section="needsMe"] [data-testid="work-job-approval-approve"]').length === 2, null, { timeout: 15_000 });
@@ -1549,15 +1559,16 @@ async function stillScene(browser, origin, engine) {
     state.waiting.add(macQuiet.sessionId);
     await reread(page, state);
     const na = await stepCheck("나");
+    // 수리 4회차: 새 요청은 칸을 세우지 않고 머리의 수로만 선다(그 줄은 「응답 필요」에 없다).
     const appendedLast = await page.evaluate((sid) => {
-      const rows = [...document.querySelectorAll('[data-section="needsMe"] [data-testid="work-job-row"]')];
-      return rows.at(-1)?.dataset.jobId === sid;
+      const inSlots = [...document.querySelectorAll('[data-section="needsMe"] [data-testid="work-job-row"]')].some((r) => r.dataset.jobId === sid);
+      return !inSlots && document.querySelector('[data-testid="work-jobs-reveal-new"]') !== null;
     }, macQuiet.sessionId);
     // (다) 서버가 순서를 뒤집는다.
     state.reverse = true;
     await reread(page, state);
     const da = await stepCheck("다");
-    check(`still-${engine}-${name} 포인터가 B의 「승인」 위 — 남의 결정·새 요청·순서 바꿈에도 그 밑은 B, 움직임 0, 결정 0, 새 요청은 맨 아래`, ga && na && da && appendedLast && state.decisions === 0, { steps, appendedLast, decisions: state.decisions });
+    check(`still-${engine}-${name} 포인터가 B의 「승인」 위 — 남의 결정·새 요청·순서 바꿈에도 그 밑은 B, 움직임 0, 결정 0, 새 요청은 머리의 「새 요청 n · 보기」`, ga && na && da && appendedLast && state.decisions === 0, { steps, appendedLast, decisions: state.decisions });
     summary.push(`${name}=${steps.join(" ")}`);
     await context.close();
   }
@@ -1592,10 +1603,14 @@ async function moveZeroScene(browser, origin, engine) {
       state.waiting.add(macQuiet.sessionId);
       await reread(page, state);
       const s3 = await slotBoxes(page);
-      const m = [maxMove(s0, s1), maxMove(s1, s2), maxMove(s2, s3)];
-      const appended = Object.keys(s3).length === Object.keys(s2).length + 1;
+      // 수리 4회차: 새 요청은 머리의 「새 요청 n · 보기」(칸 수 그대로) → 누르면 맨 아래 칸(앞 칸 0px).
+      const held = Object.keys(s3).length === Object.keys(s2).length && (await revealShown(page)) !== null;
+      await revealNew(page);
+      const s4 = await slotBoxes(page);
+      const m = [maxMove(s0, s1), maxMove(s1, s2), maxMove(s2, s3), maxMove(s3, s4)];
+      const appended = held && Object.keys(s4).length === Object.keys(s3).length + 1;
       const tag = `${viewport.width}${big ? `-${big.replace("%", "")}` : ""}`;
-      check(`move0-${engine}-${tag} 결과 줄 · 실패 · 새 요청 맨 아래 → 앞 칸 움직임 0px`, m.every((v) => v === 0) && appended && errorShown, { moves: m, appended, errorShown });
+      check(`move0-${engine}-${tag} 결과 줄 · 실패 · 새 요청(머리의 수) · 「보기」로 맨 아래 칸 → 앞 칸 움직임 0px`, m.every((v) => v === 0) && appended && errorShown, { moves: m, held, appended, errorShown });
       summary.push(`${tag}=${m.map((v) => v.toFixed(1)).join("/")}`);
       await context.close();
     }
@@ -1629,7 +1644,10 @@ async function slotShots(browser, origin) {
       await shot(page, `5738-3-failed-${tag}`);
       state.waiting.add(macQuiet.sessionId);
       await reread(page, state);
-      await shot(page, `5738-4-new-request-bottom-${tag}`);
+      await shot(page, `5738-4-new-request-header-${tag}`);
+      await revealNew(page);
+      await page.mouse.move(5, 5);
+      await shot(page, `5738-5-new-request-revealed-${tag}`);
       check(`shots-${tag} 가로 넘침 0`, (await overflowX(page)) === 0, await overflowX(page));
       await context.close();
     }
@@ -1677,8 +1695,9 @@ async function sampleGrid(page) {
 const gridMap = (pts) => new Map(pts.map(([x, y, job, d]) => [`${x},${y}`, [job, d]]));
 
 /**
- * H1(`rv-below`): 포인터가 「응답 필요」 아래(「지금」 줄)에 있을 때 새 요청이 오면(「지금」의 run이 승인을 물음 → 맨 아래 새 칸) 새 칸의 결정
- * 단추가 손 밑에 선다. 1280·390 × 구간 있음·빈 구간. 점은 앞 창에서 격자로 찾고, 새 창에서 그 점에 마우스를 두고 잰다.
+ * H1(`rv-below`) — 수리 4회차 기대값: 포인터가 「응답 필요」 아래(「지금」 줄)에 있을 때 새 요청이 와도(「지금」의 run이 승인을 물음) 칸이
+ * 서지 않고 머리의 「새 요청 n · 보기」로만 선다. 그래서 손 밑에 결정 단추가 오는 점이 0이고(격자), +100ms 누름은 결정 0건이며, 사람이
+ * 「보기」를 눌러 선 맨 아래 칸의 「승인」은 1건이다. 1280·390 × 구간 있음·빈 구간.
  */
 async function belowScene(browser, origin, engine) {
   const summary = [];
@@ -1686,67 +1705,52 @@ async function belowScene(browser, origin, engine) {
     for (const empty of [false, true]) {
       const tag = `r2-below-${engine}-${vp}${empty ? "-empty" : ""}`;
       const server = { twoDeciders: !empty, decisionDelayMs: 60, roundTripMs: 60, ...(empty ? { dropApprovals: new Set([approvals[0].id]) } : {}) };
-      const open = async () => {
-        const ctx = await openContext(browser, origin, { scheme: "light", viewport: R2_VP[vp], waiting: [], server });
-        if (!empty) await twoDecidersReady(ctx.page);
-        await sleep(1500);
-        await settle(ctx.page, runNonDecider.runId);
-        return ctx;
-      };
-      const ask = async (page, state) => {
-        state.patch = new Map([[runWorking.runId, { phase: "awaiting_approval" }]]);
-        state.extraApprovals = [approvalW];
-        await page.evaluate(() => {
-          window.__capture5640Advance(31_000);
-          window.dispatchEvent(new Event("visibilitychange"));
-        });
-        await page.waitForFunction(
-          (rid) => !!document.querySelector(`[data-section="needsMe"] [data-job-id="${rid}"]`)?.closest('[data-testid="work-job"]')?.querySelector('[data-decision="approve"]'),
-          runWorking.runId,
-          { timeout: 8000, polling: "raf" }
-        );
-      };
-      let pick = null;
-      {
-        const { context, page, state } = await open();
-        const g0 = await sampleGrid(page);
-        await ask(page, state);
-        await sleep(200);
-        const g1 = gridMap(await sampleGrid(page));
-        pick = g0.find(([x, y, , d]) => { const a = g1.get(`${x},${y}`); return d === null && a && a[1] !== null && a[0] === runWorking.runId; }) ?? null;
-        await context.close();
-      }
-      if (pick === null) {
-        check(`${tag} 장면 성립: 새 칸의 결정 단추가 손 밑에 오는 점`, false, {});
-        continue;
-      }
-      const { context, page, state } = await open();
-      await page.mouse.move(pick[0], pick[1]);
-      const u0 = await underPoint(page, pick[0], pick[1]);
-      await ask(page, state);
+      const { context, page, state } = await openContext(browser, origin, { scheme: "light", viewport: R2_VP[vp], waiting: [], server });
+      if (!empty) await twoDecidersReady(page);
+      await sleep(1500);
+      await settle(page, runNonDecider.runId);
+      const g0 = await sampleGrid(page);
+      const p = await page.evaluate((rid) => {
+        const r = document.querySelector(`[data-job-id="${rid}"]`).getBoundingClientRect();
+        return { x: Math.round(r.left + 40), y: Math.round(r.top + r.height / 2) };
+      }, runWorking.runId);
+      await page.mouse.move(p.x, p.y);
+      const u0 = await underPoint(page, p.x, p.y);
+      state.patch = new Map([[runWorking.runId, { phase: "awaiting_approval" }]]);
+      state.extraApprovals = [approvalW];
+      await page.evaluate(() => {
+        window.__capture5640Advance(31_000);
+        window.dispatchEvent(new Event("visibilitychange"));
+      });
+      const shown = await page
+        .waitForFunction(() => document.querySelector('[data-testid="work-jobs-reveal-new"]') !== null, null, { timeout: 8000, polling: "raf" })
+        .then(() => true, () => false);
       await sleep(100);
-      const u1 = await underPoint(page, pick[0], pick[1]);
-      const look = await guardLookOf(page, runWorking.runId);
+      const g1 = gridMap(await sampleGrid(page));
+      const arrived = g0.filter(([x, y, , d]) => {
+        const a = g1.get(`${x},${y}`);
+        return d === null && a && a[1] !== null;
+      }).length;
+      const u1 = await underPoint(page, p.x, p.y);
       await pressHere(page);
       await sleep(300);
       const during = state.decisions;
-      // 풀린 뒤: 자리가 가라앉으면(1.2초 동안 그대로) 같은 자리를 누른다. 폰 폭에서는 시계를 당긴 탓에 셸의 연결 띠가 뒤따라 서며(검수 r1 (마))
-      // 칸 묶음이 한 번 더 옮겨 갈 수 있다 — 그러면 그 점은 더는 새 칸의 단추가 아니므로 새 칸의 단추(지금 자리)를 누른다.
-      await settle(page, runWorking.runId);
-      const band = await page.evaluate(() => document.querySelector('[data-testid="connection-banner"]') !== null);
-      let u2 = await underPoint(page, pick[0], pick[1]);
-      if (during > 0) {
-        // 막지 못했다(이미 새 요청이 결정됨): 풀린 뒤 누름은 재지 않는다.
-      } else if (u2.job === runWorking.runId && u2.decision !== null) await pressHere(page);
-      else {
-        const c = await decisionCenter(page, runWorking.runId, u1.decision);
-        await mousePress(page, c.x, c.y);
-        u2 = { ...(await underPoint(page, c.x, c.y)), moved: true };
+      const inSlots = await page.evaluate((rid) => !!document.querySelector(`[data-section="needsMe"] [data-job-id="${rid}"]`), runWorking.runId);
+      // 줄을 눌러 열린 서랍을 닫고(목록 폭이 바뀌어 잠깐 막힘) 가라앉은 뒤, 사람이 「보기」를 눌러 맨 아래 칸으로 세우고 그 「승인」을 누른다.
+      await page.keyboard.press("Escape");
+      await sleep(GUARD_OVER_MS);
+      let after = 0;
+      if (shown) {
+        await revealNew(page);
+        await sleep(GUARD_OVER_MS);
+        const c2 = await decisionCenter(page, runWorking.runId, "approve");
+        await mousePress(page, c2.x, c2.y);
+        await sleep(600);
+        after = state.decisions;
       }
-      await sleep(600);
-      const ok = u1.job === runWorking.runId && u1.decision !== null && look === true && during === 0 && state.decisions === 1 && state.decidedOrder[0] === approvalW.id;
-      check(`${tag} 「지금」 위 포인터 + 새 요청 → 새 칸의 단추가 손 밑: +100ms 누름 0건(막힌 모양) · 풀린 뒤 누름 = 새 요청 1건`, ok, { u0: short(u0), u1: short(u1), u2: short(u2), look, during, band, order: state.decidedOrder.map((x) => x.slice(-2)) });
-      summary.push(`${vp}${empty ? "/빈" : ""}: ${short(u0)}→${short(u1)} 막힌모양=${look} +100ms=${during} 풀린뒤=${state.decisions}(${u2.moved ? "연결 띠로 자리 옮김 → 새 칸 단추 " : "같은 자리 "}${short(u2)})`);
+      const ok = shown && arrived === 0 && u1.decision === null && during === 0 && !inSlots && after === 1 && state.decidedOrder[0] === approvalW.id;
+      check(`${tag} 「지금」 위 포인터 + 새 요청 → 칸이 서지 않고 머리의 「새 요청 n · 보기」: 손 밑에 온 결정 단추 점 0 · +100ms 누름 0건 · 「보기」 뒤 새 칸 「승인」 1건`, ok, { shown, arrived, u0: short(u0), u1: short(u1), during, inSlots, after, order: state.decidedOrder.map((x) => x.slice(-2)) });
+      summary.push(`${vp}${empty ? "/빈" : ""}: 머리=${shown} 손 밑 결정 단추 점=${arrived} ${short(u0)}→${short(u1)} +100ms=${during} 보기 뒤=${after}`);
       await context.close();
     }
   }
@@ -2110,8 +2114,10 @@ async function clampScene(browser, origin, engine) {
     await toBottom(page, t00.box);
     const t2 = await tops(page);
     const cand = t2.btn.find((b) => b.y + shift > t00.box.t + 12 && b.y + shift < t00.box.b - 12);
+    // 수리 4회차: 표는 화면에 떠 있는 동안 줄지 않는다 → 아래 줄이 빠져도 scrollTop이 그대로이고 단추가 내려오지 않는다(0px).
+    check(`r4-clamp-${engine}-#${rep} 끝까지 내린 목록에서 아래 줄이 빠져도 단추 0px · scrollTop 그대로`, shift === 0 && t1.st === t0.st, { shift, st: [t0.st, t1.st], max: [t0.max, t1.max] });
+    summary.push(`#${rep}: 줄 빠짐 → 옮김 ${shift}px scrollTop ${t0.st}→${t1.st}`);
     if (!cand || shift === 0) {
-      check(`r3-clamp-${engine}-#${rep} 장면 성립(끝까지 내림 + 줄 빠짐으로 단추가 내려옴)`, false, { shift, t0: [t0.st, t0.max], t1: [t1.st, t1.max], cand: cand ?? null });
       await context.close();
       continue;
     }
@@ -2181,6 +2187,56 @@ async function clampScene(browser, origin, engine) {
  * 수리 3회차 High 2(검수 r3 `v1` label, Chromium 터치 흉내): 손가락을 단추가 아닌 곳(다른 줄의 제목)에 대고 있는 동안 띠가 서서 손 밑으로 다른 줄의
  * 「거부」가 오고 1.3초 뒤 떼면 그 단추가 결정되던 것 — 터치의 click은 뗀 자리에 떨어진다. 누르는 동안 손 밑으로 온 단추는 누른 것이 아니다.
  */
+/**
+ * 수리 4회차(검수 r4 M1, WebKit): 목록 끝 가까이에서 결정하면 목록이 스스로 36px 굴러 다음 결정이 나가지 않던 것. 끝까지 내린 목록에서
+ * 보이는 첫 칸을 승인 → 결과 줄 → 둘째 칸의 「승인」이 그 자리 그대로(scrollTop · 단추 y 0px)이고, 곧바로 누르면 나간다(2건).
+ */
+async function nearEndScene(browser, origin, engine) {
+  const summary = [];
+  for (const h of [1450, 1500, 1550, 1600]) {
+    const { context, page, state } = await openContext(browser, origin, { scheme: "light", viewport: { width: 1280, height: h }, waiting: [], server: { twoDeciders: true, threeDeciders: true, decisionDelayMs: 60, roundTripMs: 60 } });
+    await threeReady(page);
+    await settle(page);
+    await sleep(1200);
+    const box = await page.evaluate(() => {
+      const r = document.querySelector("[data-team-board-list]").getBoundingClientRect();
+      return { l: r.left, t: r.top, b: r.bottom };
+    });
+    await page.mouse.move(Math.round(box.l + 30), Math.round(box.t + 60));
+    await page.mouse.wheel(0, 3000);
+    await sleep(1500);
+    const visible = await page.evaluate((b) =>
+      [...document.querySelectorAll('[data-section="needsMe"] [data-testid="work-job-approval-approve"]')]
+        .filter((el) => {
+          const r = el.getBoundingClientRect();
+          return r.top > b.t + 4 && r.bottom < b.b - 4;
+        })
+        .map((el) => el.closest('[data-testid="work-job"]').querySelector('[data-testid="work-job-row"]').dataset.jobId),
+    box);
+    const st = () => page.evaluate(() => document.querySelector("[data-team-board-list]").scrollTop);
+    const st0 = await st();
+    if (visible.length < 2 || st0 === 0) {
+      summary.push(`${h}: 장면 안 섬(보이는 칸 ${visible.length}, scrollTop ${st0})`);
+      await context.close();
+      continue;
+    }
+    const b0 = await decisionCenter(page, visible[1], "approve");
+    const a = await decisionCenter(page, visible[0], "approve");
+    await mousePress(page, a.x, a.y);
+    await settledIn(page, visible[0]);
+    await sleep(500);
+    const st1 = await st();
+    const b1 = await decisionCenter(page, visible[1], "approve");
+    await mousePress(page, b1.x, b1.y);
+    await sleep(700);
+    const ok = st1 === st0 && Math.abs(b1.y - b0.y) < 1 && state.decisions === 2;
+    check(`r4-nearend-${engine}-${h} 끝까지 내린 목록에서 결정 → 목록 스스로 안 구름 · 다음 칸 단추 0px · 곧바로 누름 = 2건`, ok, { st: [st0, st1], by: [b0.y, b1.y], decisions: state.decisions });
+    summary.push(`${h}: scrollTop ${st0}→${st1} 다음 단추 y ${b0.y}→${b1.y} 결정 ${state.decisions}`);
+    await context.close();
+  }
+  console.log(`MEASURE r4-nearend-${engine}: ${summary.join(" | ")}`);
+}
+
 async function touchRevScene(browser, origin, engine) {
   if (engine !== "chromium") return;
   const { context, page, state } = await openContext(browser, origin, { scheme: "light", viewport: R2_VP["390"], waiting: [], touch: true, server: { twoDeciders: true, threeDeciders: true, decisionDelayMs: 60, roundTripMs: 60 } });
@@ -2256,8 +2312,8 @@ async function r2Shots(browser, origin) {
         window.__capture5640Advance(31_000);
         window.dispatchEvent(new Event("visibilitychange"));
       });
-      await page.waitForFunction((rid) => document.querySelector(`[data-section="needsMe"] [data-job-id="${rid}"]`)?.closest('[data-testid="work-job"]')?.hasAttribute("data-arrival-guard"), runWorking.runId, { timeout: 8000, polling: "raf" });
-      await shot(page, `5738r2-2-guarded-new-request-${tag}`);
+      await page.waitForFunction(() => document.querySelector('[data-testid="work-jobs-reveal-new"]') !== null, null, { timeout: 8000, polling: "raf" });
+      await shot(page, `5738r2-2-new-request-header-${tag}`);
       check(`r2-shots-${tag} 가로 넘침 0`, (await overflowX(page)) === 0, await overflowX(page));
       await context.close();
     }
@@ -2389,7 +2445,7 @@ async function main() {
       }
     }
     if (ONLY === "" || ONLY === "fix5738r2" || ONLY.startsWith("fix5738r2:")) {
-      const parts = ONLY.startsWith("fix5738r2:") ? ONLY.slice(10).split(",") : ["below", "band", "conn", "scroll", "hold", "wheelmix", "clamp", "touchrev", "four", "shots", "look"];
+      const parts = ONLY.startsWith("fix5738r2:") ? ONLY.slice(10).split(",") : ["below", "band", "conn", "scroll", "hold", "wheelmix", "clamp", "nearend", "touchrev", "four", "shots", "look"];
       const wk = await webkit.launch();
       try {
         for (const [engine, b] of [["chromium", browser], ["webkit", wk]]) {
@@ -2400,6 +2456,7 @@ async function main() {
           if (parts.includes("hold")) await holdScene(b, preview.origin, engine);
           if (parts.includes("wheelmix")) await wheelMixScene(b, preview.origin, engine);
           if (parts.includes("clamp")) await clampScene(b, preview.origin, engine);
+          if (parts.includes("nearend")) await nearEndScene(b, preview.origin, engine);
           if (parts.includes("touchrev")) await touchRevScene(b, preview.origin, engine);
           if (parts.includes("four")) await fourRowsScene(b, preview.origin, engine);
         }

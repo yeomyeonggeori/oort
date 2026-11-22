@@ -673,7 +673,7 @@ export function WorkJobsRoute() {
                         type="button"
                         size="sm"
                         variant="ghost"
-                        className="absolute end-1 bottom-0"
+                        className="absolute end-1 bottom-0 tap-target"
                         onClick={reveal}
                         data-testid="work-jobs-reveal-new"
                       >
