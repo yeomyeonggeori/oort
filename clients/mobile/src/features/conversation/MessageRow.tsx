@@ -86,7 +86,7 @@ import {
 } from '@momo/core/features/timeline/model';
 import {
   PIN_ROW_MARK_KEY,
-  pinActionLabel,
+  pinActionLabelKey,
 } from '@momo/core/features/timeline/pins';
 import {streamStopMarkKey} from '@momo/core/features/timeline/streamStop';
 import {
@@ -188,8 +188,8 @@ import {
   delegateButtonLabel,
   teamAiDelegateFor,
   type TeamAiDelegate,
-  TEAM_AI_PROPOSAL_AUTHORITY,
-  TEAM_AI_PROPOSAL_LABEL,
+  TEAM_AI_PROPOSAL_AUTHORITY_KEY,
+  TEAM_AI_PROPOSAL_LABEL_KEY,
   teamAiCallNames,
   teamAiProposalLine,
 } from '@momo/core/features/timeline/teamAi';
@@ -1554,6 +1554,7 @@ function ApprovalActionRows({
   origin: Pick<AgentApprovalCard, 'proposedVia' | 'agentInitiated'>;
   styles: ReturnType<typeof buildStyles>;
 }): React.JSX.Element {
+  const formatMessage = useFormatMessage();
   const tag = rationaleTag(origin);
   return (
     <View style={styles.factRows} testID="approval-action-rows">
@@ -1586,9 +1587,9 @@ function ApprovalActionRows({
       ) : null}
       {action.rationale !== null ? (
         <FactRow
-          label={tag.label}
+          label={formatMessage(tag.labelKey)}
           value={action.rationale}
-          {...(tag.note !== null ? {note: tag.note} : {})}
+          {...(tag.noteKey !== null ? {note: formatMessage(tag.noteKey)} : {})}
           styles={styles}
           testID="approval-action-rationale"
         />
@@ -1743,6 +1744,7 @@ function AgentCard({
    */
   onOpenMessage?: (channelId: string, messageId: string) => void;
 }): React.JSX.Element {
+  const formatMessage = useFormatMessage();
   const styles = useStyles(buildStyles);
   const approvalNoteStyle = useStyles(buildApprovalNoteStyle);
   const completionToneStyle = useStyles(buildCompletionToneStyle);
@@ -1816,7 +1818,7 @@ function AgentCard({
           {/* 먼저 제안 카드(#4705)는 제목 끝에 「 · 먼저 제안」 꼬리표 하나가 붙는다. 새 행도 배지도
               없다 — 제안자는 메시지 줄이 이미 말한다. */}
           <Text style={styles.cardTitle} numberOfLines={2} testID="approval-card-title">
-            {approvalHeadTitle(card)}
+            {approvalHeadTitle(formatMessage, card)}
           </Text>
           {/* 원장이 방금 답해 준 상태가 있으면 그것이 이긴다. 없으면 스냅샷.
               둘을 섞지 않는 이유는 사진이 잡아냈다 — 영수증이 「승인을
@@ -1839,12 +1841,13 @@ function AgentCard({
         {card.proposedVia !== undefined ? (
           <View style={styles.factRows}>
             <FactRow
-              label={TEAM_AI_PROPOSAL_LABEL}
+              label={formatMessage(TEAM_AI_PROPOSAL_LABEL_KEY)}
               value={teamAiProposalLine(
+                formatMessage,
                 memberFor(directory, card.proposedVia.requesterId ?? undefined)
                   ?.displayName ?? card.proposedVia.requesterName,
               )}
-              note={TEAM_AI_PROPOSAL_AUTHORITY}
+              note={formatMessage(TEAM_AI_PROPOSAL_AUTHORITY_KEY)}
               styles={styles}
               testID="approval-team-ai"
             />
@@ -3150,7 +3153,7 @@ function MessageRowInner({
     teamAiSend.pressable.forEach((candidate, index) => {
       list.push({
         name: `${TEAM_AI_DELEGATE_ACTION_PREFIX}${index}`,
-        label: delegateButtonLabel(candidate),
+        label: delegateButtonLabel(formatMessage, candidate),
       });
     });
     // 도우미 답의 웹 출처(ADR-0201 v2 H5). 꼬리의 링크와 같은 `openLink` 로 연다.
@@ -3171,7 +3174,7 @@ function MessageRowInner({
     // 이슈 #1112 — 시트를 열지 않고도 로터에서 바로 고정할 수 있다. 낱말은
     // 시트의 항목과 같은 코어 상수에서 오므로 둘이 갈라질 수 없다.
     if (available.pin) {
-      list.push({name: 'momoPin', label: pinActionLabel(pinned === true)});
+      list.push({name: 'momoPin', label: formatMessage(pinActionLabelKey(pinned === true))});
     }
     // 아래 넷이 H-1 이 더한 것이다. 묘비에는 하나도 붙지 않는다 — 지워진
     // 메시지에는 열 링크도 복사할 코드도 없다.
@@ -3346,6 +3349,7 @@ function MessageRowInner({
         }),
         // 도우미가 넘긴 줄의 띠(넘긴 이유·맡겼어요). 행이 원소 하나라 따로 읽히지 않는다.
         ...teamAiDelegateSpoken(
+          formatMessage,
           teamAiDelegate,
           teamAiSend,
           approvalOffline === true,

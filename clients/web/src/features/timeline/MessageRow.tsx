@@ -755,7 +755,7 @@ export function MessageRow({
   // like any form.
   const rowRef = useRef<HTMLElement | null>(null);
   const openRunStage = (opener: HTMLElement | null, runIds?: readonly string[]) => {
-    openRunDecisionStage({ runs: (runStatus ?? []).filter((run) => !runIds || runIds.includes(run.id)),
+    openRunDecisionStage({ formatMessage, runs: (runStatus ?? []).filter((run) => !runIds || runIds.includes(run.id)),
       member: session.member, directory, workspaceId, channelId: message.channelId,
       triggerSeq: message.seq, opener, fallback: () => onOpenThread?.(message) });
   };

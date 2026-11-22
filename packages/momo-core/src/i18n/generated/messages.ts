@@ -1615,6 +1615,9 @@ export const messageKeys = [
   "timeline.addMember.createdDescription",
   "timeline.addMember.createdDescriptionPublic",
   "timeline.addMember.later",
+  "timeline.agentInitiative.headTitle",
+  "timeline.agentInitiative.rationaleDefault",
+  "timeline.agentInitiative.rationaleLabel",
   "timeline.agentRail.open",
   "timeline.agentRail.openActivity",
   "timeline.agentRail.openRecord",
@@ -1754,6 +1757,8 @@ export const messageKeys = [
   "timeline.memberPanel.requestSpoken",
   "timeline.memberPanel.rowActions",
   "timeline.memberPanel.stageSpoken",
+  "timeline.pins.actionPin",
+  "timeline.pins.actionUnpin",
   "timeline.pins.emptyBody",
   "timeline.pins.listCount",
   "timeline.pins.listEmptyDetail",
@@ -1797,6 +1802,25 @@ export const messageKeys = [
   "timeline.spawnHost.unavailable",
   "timeline.streamStop.cancelled",
   "timeline.streamStop.cutOff",
+  "timeline.teamAi.delegateButton",
+  "timeline.teamAi.delegateQuoted",
+  "timeline.teamAi.delegateReason",
+  "timeline.teamAi.delegateSent",
+  "timeline.teamAi.limitOperatorDay",
+  "timeline.teamAi.limitOperatorOff",
+  "timeline.teamAi.limitTeamMonth",
+  "timeline.teamAi.limitUnknown",
+  "timeline.teamAi.proposalAuthority",
+  "timeline.teamAi.proposalLabel",
+  "timeline.teamAi.proposalLine",
+  "timeline.teamAi.proposalLineUnknown",
+  "timeline.teamAi.rationaleLabel",
+  "timeline.teamAi.rationaleNote",
+  "timeline.teamAi.reasonCouldNotPropose",
+  "timeline.teamAi.reasonOutOfScope",
+  "timeline.teamAi.reasonOverBudget",
+  "timeline.teamAi.reasonRateLimited",
+  "timeline.teamAi.reasonSlow",
   "timeline.thread.followDismiss",
   "timeline.thread.followFailed",
   "timeline.thread.followHint",
@@ -4003,6 +4027,11 @@ export const argumentSpecs = {
     "name": "string"
   },
   "timeline.addMember.later": {},
+  "timeline.agentInitiative.headTitle": {
+    "title": "string"
+  },
+  "timeline.agentInitiative.rationaleDefault": {},
+  "timeline.agentInitiative.rationaleLabel": {},
   "timeline.agentRail.open": {
     "label": "string"
   },
@@ -4246,6 +4275,8 @@ export const argumentSpecs = {
   "timeline.memberPanel.stageSpoken": {
     "stage": "string"
   },
+  "timeline.pins.actionPin": {},
+  "timeline.pins.actionUnpin": {},
   "timeline.pins.emptyBody": {},
   "timeline.pins.listCount": {
     "count": "number"
@@ -4337,6 +4368,35 @@ export const argumentSpecs = {
   "timeline.spawnHost.unavailable": {},
   "timeline.streamStop.cancelled": {},
   "timeline.streamStop.cutOff": {},
+  "timeline.teamAi.delegateButton": {
+    "name": "string"
+  },
+  "timeline.teamAi.delegateQuoted": {
+    "mention": "string"
+  },
+  "timeline.teamAi.delegateReason": {
+    "reason": "string"
+  },
+  "timeline.teamAi.delegateSent": {
+    "name": "string"
+  },
+  "timeline.teamAi.limitOperatorDay": {},
+  "timeline.teamAi.limitOperatorOff": {},
+  "timeline.teamAi.limitTeamMonth": {},
+  "timeline.teamAi.limitUnknown": {},
+  "timeline.teamAi.proposalAuthority": {},
+  "timeline.teamAi.proposalLabel": {},
+  "timeline.teamAi.proposalLine": {
+    "name": "string"
+  },
+  "timeline.teamAi.proposalLineUnknown": {},
+  "timeline.teamAi.rationaleLabel": {},
+  "timeline.teamAi.rationaleNote": {},
+  "timeline.teamAi.reasonCouldNotPropose": {},
+  "timeline.teamAi.reasonOutOfScope": {},
+  "timeline.teamAi.reasonOverBudget": {},
+  "timeline.teamAi.reasonRateLimited": {},
+  "timeline.teamAi.reasonSlow": {},
   "timeline.thread.followDismiss": {},
   "timeline.thread.followFailed": {},
   "timeline.thread.followHint": {},
@@ -6230,6 +6290,9 @@ export interface MessageArgs {
   "timeline.addMember.createdDescription": { name: string };
   "timeline.addMember.createdDescriptionPublic": { name: string };
   "timeline.addMember.later": Record<string, never>;
+  "timeline.agentInitiative.headTitle": { title: string };
+  "timeline.agentInitiative.rationaleDefault": Record<string, never>;
+  "timeline.agentInitiative.rationaleLabel": Record<string, never>;
   "timeline.agentRail.open": { label: string };
   "timeline.agentRail.openActivity": Record<string, never>;
   "timeline.agentRail.openRecord": { name: string };
@@ -6369,6 +6432,8 @@ export interface MessageArgs {
   "timeline.memberPanel.requestSpoken": { text: string };
   "timeline.memberPanel.rowActions": { name: string };
   "timeline.memberPanel.stageSpoken": { stage: string };
+  "timeline.pins.actionPin": Record<string, never>;
+  "timeline.pins.actionUnpin": Record<string, never>;
   "timeline.pins.emptyBody": Record<string, never>;
   "timeline.pins.listCount": { count: number };
   "timeline.pins.listEmptyDetail": Record<string, never>;
@@ -6412,6 +6477,25 @@ export interface MessageArgs {
   "timeline.spawnHost.unavailable": Record<string, never>;
   "timeline.streamStop.cancelled": Record<string, never>;
   "timeline.streamStop.cutOff": Record<string, never>;
+  "timeline.teamAi.delegateButton": { name: string };
+  "timeline.teamAi.delegateQuoted": { mention: string };
+  "timeline.teamAi.delegateReason": { reason: string };
+  "timeline.teamAi.delegateSent": { name: string };
+  "timeline.teamAi.limitOperatorDay": Record<string, never>;
+  "timeline.teamAi.limitOperatorOff": Record<string, never>;
+  "timeline.teamAi.limitTeamMonth": Record<string, never>;
+  "timeline.teamAi.limitUnknown": Record<string, never>;
+  "timeline.teamAi.proposalAuthority": Record<string, never>;
+  "timeline.teamAi.proposalLabel": Record<string, never>;
+  "timeline.teamAi.proposalLine": { name: string };
+  "timeline.teamAi.proposalLineUnknown": Record<string, never>;
+  "timeline.teamAi.rationaleLabel": Record<string, never>;
+  "timeline.teamAi.rationaleNote": Record<string, never>;
+  "timeline.teamAi.reasonCouldNotPropose": Record<string, never>;
+  "timeline.teamAi.reasonOutOfScope": Record<string, never>;
+  "timeline.teamAi.reasonOverBudget": Record<string, never>;
+  "timeline.teamAi.reasonRateLimited": Record<string, never>;
+  "timeline.teamAi.reasonSlow": Record<string, never>;
   "timeline.thread.followDismiss": Record<string, never>;
   "timeline.thread.followFailed": Record<string, never>;
   "timeline.thread.followHint": Record<string, never>;

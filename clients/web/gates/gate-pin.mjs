@@ -85,22 +85,12 @@ const webRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const LANDING_CLASS = landingClass(webRoot);
 
 /**
- * 고정 액션의 두 낱말. 코어 소스에서 읽는다 (gate-quote가 `QUOTE_ACTION_LABEL`에
+ * 고정 액션의 두 낱말. 한국어 사전에서 읽는다(#6044 — 그전에는 코어 소스에서 읽었다. gate-quote가 `QUOTE_ACTION_LABEL`에
  * 대해 하는 것과 같은 규율이고 같은 이유다). `import`가 아니라 정규식인 이유도
  * 같다: 이 게이트는 node가 직접 도는 `.mjs`이고, 코어의 `.ts` 한 줄을 읽자고 TS
  * 로더를 끌어오는 것은 값에 비해 비싸다.
  */
 function canonicalPinCopy(root) {
-  const pins = readFileSync(
-    resolve(root, "../../packages/momo-core/src/features/timeline/pins.ts"),
-    "utf8"
-  );
-  const labels = /return pinned \? "([^"]+)" : "([^"]+)";/.exec(pins);
-  if (!labels) {
-    throw new Error(
-      "pinActionLabel의 낱말을 코어에서 찾지 못했다: 게이트가 검사할 문자열의 정본이 사라졌다"
-    );
-  }
   // 409 문장은 한국어 사전이 정본이다(#6044): 코어는 키(`timeline.actionFailure.pinLimit`)만 안다.
   const catalog = JSON.parse(
     readFileSync(
@@ -108,6 +98,11 @@ function canonicalPinCopy(root) {
       "utf8"
     )
   );
+  // 고정 단추의 두 낱말도 사전이 정본이다(#6044): 코어는 키(`timeline.pins.actionUnpin` · `timeline.pins.actionPin`)만 안다.
+  const labels = [null, catalog["timeline.pins.actionUnpin"], catalog["timeline.pins.actionPin"]];
+  if (!labels[1] || !labels[2]) {
+    throw new Error("timeline.pins.actionUnpin / actionPin 낱말을 한국어 사전에서 찾지 못했다: 게이트가 검사할 문자열의 정본이 사라졌다");
+  }
   const conflict = [null, catalog["timeline.actionFailure.pinLimit"]];
   if (!conflict[1]) {
     throw new Error("timeline.actionFailure.pinLimit 문장을 한국어 사전에서 찾지 못했다");

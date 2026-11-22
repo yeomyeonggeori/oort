@@ -11702,6 +11702,28 @@ export const catalog: MessageCatalog = {
       "value": "Later"
     }
   ],
+  "timeline.agentInitiative.headTitle": [
+    {
+      "type": 1,
+      "value": "title"
+    },
+    {
+      "type": 0,
+      "value": " · Suggested first"
+    }
+  ],
+  "timeline.agentInitiative.rationaleDefault": [
+    {
+      "type": 0,
+      "value": "Reason"
+    }
+  ],
+  "timeline.agentInitiative.rationaleLabel": [
+    {
+      "type": 0,
+      "value": "Written by the agent"
+    }
+  ],
   "timeline.agentRail.open": [
     {
       "type": 1,
@@ -12890,6 +12912,18 @@ export const catalog: MessageCatalog = {
       "value": " (agent report)"
     }
   ],
+  "timeline.pins.actionPin": [
+    {
+      "type": 0,
+      "value": "Pin"
+    }
+  ],
+  "timeline.pins.actionUnpin": [
+    {
+      "type": 0,
+      "value": "Unpin"
+    }
+  ],
   "timeline.pins.emptyBody": [
     {
       "type": 0,
@@ -13536,6 +13570,144 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "Response cut off"
+    }
+  ],
+  "timeline.teamAi.delegateButton": [
+    {
+      "type": 0,
+      "value": "Hand off to "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    }
+  ],
+  "timeline.teamAi.delegateQuoted": [
+    {
+      "type": 1,
+      "value": "mention"
+    },
+    {
+      "type": 0,
+      "value": " Please take the quoted request."
+    }
+  ],
+  "timeline.teamAi.delegateReason": [
+    {
+      "type": 0,
+      "value": "Passed on because: "
+    },
+    {
+      "type": 1,
+      "value": "reason"
+    }
+  ],
+  "timeline.teamAi.delegateSent": [
+    {
+      "type": 0,
+      "value": "Handed off to "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": ". The reply will arrive in this channel."
+    }
+  ],
+  "timeline.teamAi.limitOperatorDay": [
+    {
+      "type": 0,
+      "value": "Used up today’s usage set by the server operator"
+    }
+  ],
+  "timeline.teamAi.limitOperatorOff": [
+    {
+      "type": 0,
+      "value": "The server operator has paused the helper"
+    }
+  ],
+  "timeline.teamAi.limitTeamMonth": [
+    {
+      "type": 0,
+      "value": "Used up the helper’s usage for this month"
+    }
+  ],
+  "timeline.teamAi.limitUnknown": [
+    {
+      "type": 0,
+      "value": "Reached the helper’s usage limit"
+    }
+  ],
+  "timeline.teamAi.proposalAuthority": [
+    {
+      "type": 0,
+      "value": "If approved, it runs with the approver’s permissions."
+    }
+  ],
+  "timeline.teamAi.proposalLabel": [
+    {
+      "type": 0,
+      "value": "Proposal"
+    }
+  ],
+  "timeline.teamAi.proposalLine": [
+    {
+      "type": 0,
+      "value": "Helper proposal · requested by "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    }
+  ],
+  "timeline.teamAi.proposalLineUnknown": [
+    {
+      "type": 0,
+      "value": "Helper proposal · couldn't confirm who asked"
+    }
+  ],
+  "timeline.teamAi.rationaleLabel": [
+    {
+      "type": 0,
+      "value": "Reason written by the helper"
+    }
+  ],
+  "timeline.teamAi.rationaleNote": [
+    {
+      "type": 0,
+      "value": "Written by AI. See the fields above for what will actually change."
+    }
+  ],
+  "timeline.teamAi.reasonCouldNotPropose": [
+    {
+      "type": 0,
+      "value": "Couldn't turn it into an approval card"
+    }
+  ],
+  "timeline.teamAi.reasonOutOfScope": [
+    {
+      "type": 0,
+      "value": "Too big for the helper to do directly"
+    }
+  ],
+  "timeline.teamAi.reasonOverBudget": [
+    {
+      "type": 0,
+      "value": "Used up the helper’s usage for today"
+    }
+  ],
+  "timeline.teamAi.reasonRateLimited": [
+    {
+      "type": 0,
+      "value": "Too many requests"
+    }
+  ],
+  "timeline.teamAi.reasonSlow": [
+    {
+      "type": 0,
+      "value": "The helper didn't answer in time"
     }
   ],
   "timeline.thread.followDismiss": [

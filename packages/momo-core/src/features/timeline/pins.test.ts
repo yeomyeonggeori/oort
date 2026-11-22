@@ -14,7 +14,7 @@ import {
   emptyPins,
   isPinned,
   normalizePinList,
-  pinActionLabel,
+  pinActionLabelKey,
   pinExcerpt,
   pinList,
   pinListHeaderLabel as pinListHeaderRef,
@@ -209,10 +209,10 @@ describe("낱말", () => {
    * it must be a verb phrase, which the phone's a11y test enforces mechanically.
    */
   it("고정 라벨은 상태에 따라 뒤집히고 둘 다 동사형이다", () => {
-    expect(pinActionLabel(false)).toBe("고정하기");
-    expect(pinActionLabel(true)).toBe("고정 해제하기");
-    expect(pinActionLabel(false)).not.toBe(pinActionLabel(true));
-    for (const label of [pinActionLabel(false), pinActionLabel(true)]) {
+    expect(ko(pinActionLabelKey(false))).toBe("고정하기");
+    expect(ko(pinActionLabelKey(true))).toBe("고정 해제하기");
+    expect(ko(pinActionLabelKey(false))).not.toBe(ko(pinActionLabelKey(true)));
+    for (const label of [ko(pinActionLabelKey(false)), ko(pinActionLabelKey(true))]) {
       expect(label.endsWith("하기")).toBe(true);
     }
   });
@@ -400,8 +400,8 @@ describe("행의 흔적 (#1146 M3)", () => {
    */
   it("행의 표지는 서술형이고, 액션 낱말과 다르다", () => {
     expect(PIN_ROW_MARK).toBe("고정됨");
-    expect(PIN_ROW_MARK).not.toBe(pinActionLabel(true));
-    expect(PIN_ROW_MARK).not.toBe(pinActionLabel(false));
+    expect(PIN_ROW_MARK).not.toBe(ko(pinActionLabelKey(true)));
+    expect(PIN_ROW_MARK).not.toBe(ko(pinActionLabelKey(false)));
     expect(PIN_ROW_MARK.endsWith("하기")).toBe(false);
   });
 });

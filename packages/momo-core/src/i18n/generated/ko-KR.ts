@@ -11105,6 +11105,28 @@ export const catalog: MessageCatalog = {
       "value": "나중에"
     }
   ],
+  "timeline.agentInitiative.headTitle": [
+    {
+      "type": 1,
+      "value": "title"
+    },
+    {
+      "type": 0,
+      "value": " · 먼저 제안"
+    }
+  ],
+  "timeline.agentInitiative.rationaleDefault": [
+    {
+      "type": 0,
+      "value": "사유"
+    }
+  ],
+  "timeline.agentInitiative.rationaleLabel": [
+    {
+      "type": 0,
+      "value": "에이전트가 쓴 글"
+    }
+  ],
   "timeline.agentRail.open": [
     {
       "type": 1,
@@ -12260,6 +12282,18 @@ export const catalog: MessageCatalog = {
       "value": " (에이전트 보고)"
     }
   ],
+  "timeline.pins.actionPin": [
+    {
+      "type": 0,
+      "value": "고정하기"
+    }
+  ],
+  "timeline.pins.actionUnpin": [
+    {
+      "type": 0,
+      "value": "고정 해제하기"
+    }
+  ],
   "timeline.pins.emptyBody": [
     {
       "type": 0,
@@ -12709,6 +12743,140 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "응답이 끊김"
+    }
+  ],
+  "timeline.teamAi.delegateButton": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "에게 맡기기"
+    }
+  ],
+  "timeline.teamAi.delegateQuoted": [
+    {
+      "type": 1,
+      "value": "mention"
+    },
+    {
+      "type": 0,
+      "value": " 인용한 요청을 맡아 주세요."
+    }
+  ],
+  "timeline.teamAi.delegateReason": [
+    {
+      "type": 0,
+      "value": "넘긴 이유: "
+    },
+    {
+      "type": 1,
+      "value": "reason"
+    }
+  ],
+  "timeline.teamAi.delegateSent": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "에게 맡겼어요. 답은 이 채널에 와요."
+    }
+  ],
+  "timeline.teamAi.limitOperatorDay": [
+    {
+      "type": 0,
+      "value": "서버 운영자가 정한 오늘 사용량을 다 씀"
+    }
+  ],
+  "timeline.teamAi.limitOperatorOff": [
+    {
+      "type": 0,
+      "value": "서버 운영자가 도우미를 멈춰 둠"
+    }
+  ],
+  "timeline.teamAi.limitTeamMonth": [
+    {
+      "type": 0,
+      "value": "이번 달 도우미 사용량을 다 씀"
+    }
+  ],
+  "timeline.teamAi.limitUnknown": [
+    {
+      "type": 0,
+      "value": "도우미 사용량 한도에 닿음"
+    }
+  ],
+  "timeline.teamAi.proposalAuthority": [
+    {
+      "type": 0,
+      "value": "승인하면 승인한 사람의 권한으로 실행돼요."
+    }
+  ],
+  "timeline.teamAi.proposalLabel": [
+    {
+      "type": 0,
+      "value": "제안"
+    }
+  ],
+  "timeline.teamAi.proposalLine": [
+    {
+      "type": 0,
+      "value": "도우미 제안 · 요청: "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    }
+  ],
+  "timeline.teamAi.proposalLineUnknown": [
+    {
+      "type": 0,
+      "value": "도우미 제안 · 요청한 사람을 확인하지 못했어요"
+    }
+  ],
+  "timeline.teamAi.rationaleLabel": [
+    {
+      "type": 0,
+      "value": "도우미가 쓴 사유"
+    }
+  ],
+  "timeline.teamAi.rationaleNote": [
+    {
+      "type": 0,
+      "value": "AI가 쓴 글이에요. 실제로 바뀌는 내용은 위 칸을 보세요."
+    }
+  ],
+  "timeline.teamAi.reasonCouldNotPropose": [
+    {
+      "type": 0,
+      "value": "승인 카드로 만들지 못함"
+    }
+  ],
+  "timeline.teamAi.reasonOutOfScope": [
+    {
+      "type": 0,
+      "value": "도우미가 바로 하기엔 큰 일"
+    }
+  ],
+  "timeline.teamAi.reasonOverBudget": [
+    {
+      "type": 0,
+      "value": "오늘 도우미 사용량을 다 씀"
+    }
+  ],
+  "timeline.teamAi.reasonRateLimited": [
+    {
+      "type": 0,
+      "value": "요청이 너무 잦음"
+    }
+  ],
+  "timeline.teamAi.reasonSlow": [
+    {
+      "type": 0,
+      "value": "도우미가 제때 답하지 못함"
     }
   ],
   "timeline.thread.followDismiss": [

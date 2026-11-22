@@ -175,8 +175,8 @@ export const CHANNEL_PIN_LIMIT = 100;
  * the phone sheet) — a label duplicated three times is a label that drifts.
  * Verb phrases, which the phone's a11y test enforces mechanically.
  */
-export function pinActionLabel(pinned: boolean): string {
-  return pinned ? "고정 해제하기" : "고정하기";
+export function pinActionLabelKey(pinned: boolean): PlainMessageKey {
+  return pinned ? "timeline.pins.actionUnpin" : "timeline.pins.actionPin";
 }
 
 /** The header entry point's label, with the count folded in. */
