@@ -124,7 +124,7 @@
   "channels.menu.dmClose": "Hide from list",
   "channels.menu.dmCloseFailed": "Couldn't hide the conversation. Try again in a moment.",
   "channels.menu.dmReopenFailed": "Couldn't show the conversation again. Try again in a moment.",
-  "channels.menu.dmCloseAria": "{name}, Hide from list",
+  "channels.menu.dmCloseAria": "{name}, hide from list",
   "channels.menu.errorGroup": "Notices for this menu",
   "channels.menu.ariaChannel": "{name} channel menu",
   "channels.menu.ariaDm": "{name} direct message menu",

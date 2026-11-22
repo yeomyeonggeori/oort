@@ -1773,7 +1773,7 @@ export const catalog: MessageCatalog = {
     },
     {
       "type": 0,
-      "value": ", Hide from list"
+      "value": ", hide from list"
     }
   ],
   "channels.menu.dmCloseFailed": [
@@ -7213,13 +7213,13 @@ export const catalog: MessageCatalog = {
   "notifications.banner.code": [
     {
       "type": 0,
-      "value": "Code"
+      "value": "code"
     }
   ],
   "notifications.banner.secret": [
     {
       "type": 0,
-      "value": "Private value"
+      "value": "private value"
     }
   ],
   "notifications.inviteLink.fallback": [
@@ -11176,7 +11176,7 @@ export const catalog: MessageCatalog = {
     },
     {
       "type": 0,
-      "value": ", Show again"
+      "value": ", show again"
     }
   ],
   "sidebar.dms.reopenAriaOpen": [
@@ -11186,7 +11186,7 @@ export const catalog: MessageCatalog = {
     },
     {
       "type": 0,
-      "value": ", Open"
+      "value": ", open"
     }
   ],
   "sidebar.prefs.loadFailed": [
@@ -11308,7 +11308,7 @@ export const catalog: MessageCatalog = {
   "sidebar.section.moveToBase": [
     {
       "type": 0,
-      "value": "To Channels section"
+      "value": "Channels section"
     }
   ],
   "sidebar.section.moveUp": [

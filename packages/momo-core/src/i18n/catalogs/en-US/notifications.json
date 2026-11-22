@@ -1,6 +1,6 @@
 {
   "notifications.inviteLink.fallback": "Posted an invite link",
-  "notifications.banner.code": "Code",
-  "notifications.banner.secret": "Private value",
+  "notifications.banner.code": "code",
+  "notifications.banner.secret": "private value",
   "notifications.banner.approvalTitle": "Approval needed · {actor}"
 }

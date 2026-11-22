@@ -12,7 +12,7 @@
   "sidebar.section.deleteConfirmTitle": "Delete this section?",
   "sidebar.section.deleteConfirmBody": "The {name} section disappears from the sidebar. Its channels move back to the Channels section; you won't leave any of them.",
   "sidebar.section.moveGroup": "Move to section",
-  "sidebar.section.moveToBase": "To Channels section",
+  "sidebar.section.moveToBase": "Channels section",
   "sidebar.section.moveUp": "Move up",
   "sidebar.section.moveDown": "Move down",
   "sidebar.section.emptyHintHover": "Drag a channel row here or right-click it to move it.",
@@ -36,6 +36,6 @@
   "sidebar.dms.open": "Open",
   "sidebar.dms.closedListEmpty": "No hidden conversations.",
   "sidebar.dms.goneDisclosure": "{count, plural, one {# conversation with a member who left} other {# conversations with members who left}}",
-  "sidebar.dms.reopenAriaClosed": "{name}, Show again",
-  "sidebar.dms.reopenAriaOpen": "{name}, Open"
+  "sidebar.dms.reopenAriaClosed": "{name}, show again",
+  "sidebar.dms.reopenAriaOpen": "{name}, open"
 }

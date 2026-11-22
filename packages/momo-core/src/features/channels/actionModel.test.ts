@@ -809,7 +809,7 @@ describe("대화 나가기 항목 leave-dm (D21)", () => {
   const format = ((key: string) => `«${key}»`) as Parameters<typeof channelActionItems>[2];
   const DM = channel({ kind: "dm", name: undefined });
 
-  function rowItems(over: Partial<Parameters<typeof channelActionAvailability>[0]> = {}, withFormat = true) {
+  function rowItems(over: Partial<Parameters<typeof channelActionAvailability>[0]> = {}) {
     const available = channelActionAvailability({
       channel: DM,
       selfRole: "member",
@@ -818,7 +818,7 @@ describe("대화 나가기 항목 leave-dm (D21)", () => {
       canLeaveDm: true,
       ...over,
     });
-    return channelActionItemsForSurface("row", available, REST, withFormat ? format : undefined);
+    return channelActionItemsForSurface("row", available, REST, format);
   }
 
   it("사람끼리 1:1 이라고 넘기면 맨 아래에 위험색으로 서고, 숨기기와 구분선으로 갈린다", () => {

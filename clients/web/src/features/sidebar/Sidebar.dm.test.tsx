@@ -2630,4 +2630,3 @@ describe("대화 나가기 · 줄 메뉴 (D21)", () => {
     expect(leave.calls).toEqual([{ channelId: DM_ID(2), seenSeq: 9 }]);
   });
 });
-   
