@@ -669,16 +669,19 @@ export function WorkJobsRoute() {
                     </span>
                     {/* 새 요청(#5738 수리 4회차): 머리 줄 안에 겹쳐 서서(줄 높이를 바꾸지 않는다) 칸을 세우지 않고 수만 말한다. */}
                     {section.slots && pending > 0 && (
-                      <Button
-                        type="button"
-                        size="sm"
-                        variant="ghost"
-                        className="absolute end-1 bottom-0 tap-target"
-                        onClick={reveal}
-                        data-testid="work-jobs-reveal-new"
-                      >
-                        {formatMessage("desktop.workJobs.revealNewAsks", { count: String(pending) })}
-                      </Button>
+                      // 글줄 높이의 그릇이 글줄(위 여백 다음)에 서고, 단추(포인터 28 · 폰 폭 44)는 그 가운데에 넘쳐 선다.
+                      <span className="absolute end-1 top-3 flex h-[var(--text-meta--line-height)] items-center">
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="ghost"
+                          className="tap-target"
+                          onClick={reveal}
+                          data-testid="work-jobs-reveal-new"
+                        >
+                          {formatMessage("desktop.workJobs.revealNewAsks", { count: String(pending) })}
+                        </Button>
+                      </span>
                     )}
                   </h2>
                   <ul className="flex flex-col">
