@@ -6909,6 +6909,30 @@ export const catalog: MessageCatalog = {
       "value": "Applying language…"
     }
   ],
+  "mobile.pushReply.drafted": [
+    {
+      "type": 0,
+      "value": "Your reply couldn't be sent, so it's saved as a draft"
+    }
+  ],
+  "mobile.pushReply.notSentBody": [
+    {
+      "type": 0,
+      "value": "Open oort to send it again"
+    }
+  ],
+  "mobile.pushReply.notSentTitle": [
+    {
+      "type": 0,
+      "value": "Your reply wasn't sent"
+    }
+  ],
+  "mobile.pushReply.queued": [
+    {
+      "type": 0,
+      "value": "Your reply will be sent when you open oort"
+    }
+  ],
   "mobile.workPermission.elsewhereOnHost": [
     {
       "type": 0,

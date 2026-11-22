@@ -930,6 +930,10 @@ export const messageKeys = [
   "mobile.linkPreview.title",
   "mobile.locale.backToSettings",
   "mobile.locale.saving",
+  "mobile.pushReply.drafted",
+  "mobile.pushReply.notSentBody",
+  "mobile.pushReply.notSentTitle",
+  "mobile.pushReply.queued",
   "mobile.workPermission.elsewhereOnHost",
   "mobile.workPermission.elsewhereOnMac",
   "mobile.workPermission.elsewhereTitle",
@@ -3149,6 +3153,10 @@ export const argumentSpecs = {
   "mobile.linkPreview.title": {},
   "mobile.locale.backToSettings": {},
   "mobile.locale.saving": {},
+  "mobile.pushReply.drafted": {},
+  "mobile.pushReply.notSentBody": {},
+  "mobile.pushReply.notSentTitle": {},
+  "mobile.pushReply.queued": {},
   "mobile.workPermission.elsewhereOnHost": {
     "host": "string"
   },
@@ -5475,6 +5483,10 @@ export interface MessageArgs {
   "mobile.linkPreview.title": Record<string, never>;
   "mobile.locale.backToSettings": Record<string, never>;
   "mobile.locale.saving": Record<string, never>;
+  "mobile.pushReply.drafted": Record<string, never>;
+  "mobile.pushReply.notSentBody": Record<string, never>;
+  "mobile.pushReply.notSentTitle": Record<string, never>;
+  "mobile.pushReply.queued": Record<string, never>;
   "mobile.workPermission.elsewhereOnHost": { host: string };
   "mobile.workPermission.elsewhereOnMac": Record<string, never>;
   "mobile.workPermission.elsewhereTitle": Record<string, never>;
