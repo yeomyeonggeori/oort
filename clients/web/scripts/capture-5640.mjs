@@ -2281,9 +2281,10 @@ async function r5Scene(browser, origin, engine) {
       return { stuck: Math.abs(head.top - list.top) < 1, inList: b.top >= list.top - 8 && b.bottom <= list.bottom, under, status, scrollTop: document.querySelector(sel).scrollTop, h: b.height };
     }, LIST);
     const move = maxMove(s0, s1);
-    await revealNew(page);
+    // 「보기」가 화면 밖이면(붙지 않은 머리) 누를 수 없다 — 그 사실을 단언에 싣고 넘어간다.
+    const pressed = m.inList ? await revealNew(page).then(() => true, () => false) : false;
     await sleep(300);
-    const seen = await page.evaluate(([sel, rid]) => {
+    const seen = pressed && await page.evaluate(([sel, rid]) => {
       const list = document.querySelector(sel).getBoundingClientRect();
       const r = document.querySelector(`[data-section="needsMe"] [data-job-id="${rid}"]`).closest('[data-testid="work-job"]').getBoundingClientRect();
       return r.top >= list.top && r.bottom <= list.bottom + 1;
