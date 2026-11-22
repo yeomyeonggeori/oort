@@ -2389,6 +2389,88 @@ async function growScene(browser, origin, engine) {
   console.log(`MEASURE r6-grow-${engine}: ${summary.join(" | ")}`);
 }
 
+/**
+ * 검수 r7: 붙은 열 머리가 키보드 초점을 가리지 않는다. (가) 맨 아래 줄에서 k로 한 줄씩 올라갈 때 초점 줄이 머리 밑에 들어가는 px · 제목이
+ * 가려진 걸음(두 엔진). (나) 첫 칸의 결정 단추를 머리 바로 밑에 굴려 두고 Shift+Tab → 그 단추가 가려진 px, 그 상태의 Enter가 가려진 채
+ * 나갔는가(Chromium — WebKit은 Tab이 단추에 서지 않는다). 머리 높이와 목록의 scroll-padding-top이 같은가도 잰다.
+ */
+async function focusScene(browser, origin, engine) {
+  const summary = [];
+  for (const vp of ["1280", "390"]) {
+    const viewport = vp === "1280" ? { width: 1280, height: 700 } : { width: 390, height: 900 };
+    {
+      const { context, page } = await openContext(browser, origin, { scheme: "light", viewport, waiting: [], server: { twoDeciders: true, threeDeciders: true, decisionDelayMs: 60, roundTripMs: 60 } });
+      await threeReady(page);
+      await settle(page);
+      const pad = await page.evaluate(() => ({ pad: parseFloat(getComputedStyle(document.querySelector("[data-team-board-list]")).scrollPaddingTop), head: document.querySelector('[data-testid="work-jobs-head"]').getBoundingClientRect().height }));
+      await page.getByTestId("work-job-row").first().focus();
+      await page.keyboard.press("End");
+      await sleep(300);
+      const n = await page.getByTestId("work-job-row").count();
+      const read = () =>
+        page.evaluate(() => {
+          const list = document.querySelector("[data-team-board-list]");
+          const head = document.querySelector('[data-testid="work-jobs-head"]').getBoundingClientRect();
+          const a = document.activeElement;
+          const li = a?.closest('[data-testid="work-job"]');
+          if (!li) return null;
+          const r = li.getBoundingClientRect();
+          const lr = list.getBoundingClientRect();
+          const title = a.querySelector('[data-col="task"] span')?.getBoundingClientRect();
+          return { st: list.scrollTop, rowH: r.height, covered: Math.max(0, Math.min(r.bottom, head.bottom) - r.top), titleHidden: title ? title.top < head.bottom - 0.5 : false, lt: lr.top };
+        });
+      const samples = [];
+      for (let i = 0; i < n - 1; i++) {
+        await page.keyboard.press("k");
+        await sleep(120);
+        const s = await read();
+        if (s && s.st > 0) samples.push(s);
+      }
+      const worst = Math.round(Math.max(0, ...samples.map((s) => s.covered)));
+      const titleHidden = samples.filter((s) => s.titleHidden).length;
+      check(`r7-focus-${engine}-${vp} k로 올라갈 때 초점 줄이 붙은 머리 밑에 가려진 px ≤ 1 · 제목 가려진 걸음 0 · 굴림 위 여백 = 머리 높이`, worst <= 1 && titleHidden === 0 && Math.abs(pad.pad - pad.head) <= 0.5, { worst, titleHidden, pad, steps: samples.length });
+      summary.push(`${vp} k: 가려짐 최대 ${worst}px · 제목 가려진 걸음 ${titleHidden}/${samples.length} · 여백 ${pad.pad} / 머리 ${pad.head}`);
+      await context.close();
+    }
+    if (engine === "chromium") {
+      const { context, page, state } = await openContext(browser, origin, { scheme: "light", viewport, waiting: [], server: { twoDeciders: true, threeDeciders: true, decisionDelayMs: 60, roundTripMs: 60 } });
+      await threeReady(page);
+      await settle(page);
+      await page.evaluate(() => {
+        const list = document.querySelector("[data-team-board-list]");
+        const slots = [...document.querySelectorAll('[data-section="needsMe"] [data-testid="work-job"]')];
+        const btn = slots[0].querySelector('[data-decision="approve"]');
+        list.scrollTop += btn.getBoundingClientRect().top - list.getBoundingClientRect().top - 2;
+      });
+      await sleep(200);
+      await page.evaluate(() => {
+        const slots = [...document.querySelectorAll('[data-section="needsMe"] [data-testid="work-job"]')];
+        slots[1].querySelector('[data-testid="work-job-row"]').focus({ preventScroll: true });
+      });
+      let last = null;
+      for (let i = 0; i < 2; i++) {
+        await page.keyboard.press("Shift+Tab");
+        await sleep(200);
+        last = await page.evaluate(() => {
+          const head = document.querySelector('[data-testid="work-jobs-head"]').getBoundingClientRect();
+          const a = document.activeElement;
+          const r = a.getBoundingClientRect();
+          return { decision: a.dataset.decision ?? null, h: Math.round(r.height), covered: Math.max(0, Math.round(Math.min(r.bottom, head.bottom) - r.top)) };
+        });
+      }
+      const before = state.decisions;
+      await page.keyboard.press("Enter");
+      await sleep(500);
+      const sent = state.decisions - before;
+      const hiddenSent = last.covered >= last.h ? sent : 0;
+      check(`r7-tab-${engine}-${vp} 머리 밑에 굴려 둔 결정 단추로 Shift+Tab → 가려짐 0px · 가려진 채 나간 결정 0`, last.decision !== null && last.covered === 0 && hiddenSent === 0, { last, sent });
+      summary.push(`${vp} Tab: 「${last.decision}」 가려짐 ${last.covered}/${last.h}px · Enter ${sent}건(가려진 채 ${hiddenSent})`);
+      await context.close();
+    }
+  }
+  console.log(`MEASURE r7-focus-${engine}: ${summary.join(" | ")}`);
+}
+
 async function touchRevScene(browser, origin, engine) {
   if (engine !== "chromium") return;
   const { context, page, state } = await openContext(browser, origin, { scheme: "light", viewport: R2_VP["390"], waiting: [], touch: true, server: { twoDeciders: true, threeDeciders: true, decisionDelayMs: 60, roundTripMs: 60 } });
@@ -2597,7 +2679,7 @@ async function main() {
       }
     }
     if (ONLY === "" || ONLY === "fix5738r2" || ONLY.startsWith("fix5738r2:")) {
-      const parts = ONLY.startsWith("fix5738r2:") ? ONLY.slice(10).split(",") : ["below", "band", "conn", "scroll", "hold", "wheelmix", "clamp", "nearend", "r5", "grow", "touchrev", "four", "shots", "look"];
+      const parts = ONLY.startsWith("fix5738r2:") ? ONLY.slice(10).split(",") : ["below", "band", "conn", "scroll", "hold", "wheelmix", "clamp", "nearend", "r5", "grow", "focus", "touchrev", "four", "shots", "look"];
       const wk = await webkit.launch();
       try {
         for (const [engine, b] of [["chromium", browser], ["webkit", wk]].filter(([e]) => ENGINES === "" || ENGINES.split(",").includes(e))) {
@@ -2611,6 +2693,7 @@ async function main() {
           if (parts.includes("nearend")) await nearEndScene(b, preview.origin, engine);
           if (parts.includes("r5")) await r5Scene(b, preview.origin, engine);
           if (parts.includes("grow")) await growScene(b, preview.origin, engine);
+          if (parts.includes("focus")) await focusScene(b, preview.origin, engine);
           if (parts.includes("touchrev")) await touchRevScene(b, preview.origin, engine);
           if (parts.includes("four")) await fourRowsScene(b, preview.origin, engine);
         }
