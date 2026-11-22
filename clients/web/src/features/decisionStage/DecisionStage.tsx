@@ -26,6 +26,7 @@ import {
 import { useDecisionStageDrag } from "./useDecisionStageDrag";
 import "./DecisionStage.css";
 import { BlockedReason } from "@/features/common/BlockedReason";
+import { useFormatMessage } from "@/i18n/useFormatMessage";
 
 /** 셸 한 곳에 둬요. 카드·칩은 openDecisionStage만 부르면 돼요. */
 export function DecisionStageHost() {
@@ -46,6 +47,7 @@ export function DecisionStage({ request, open, onClose }: {
   onClose: () => void;
 }) {
   const { workspaceId } = useSession();
+  const formatMessage = useFormatMessage();
   const offline = useOffline();
   const [nowMs, setNowMs] = useState(Date.now);
   const [selection, setSelection] = useState(() => createDecisionStage(
@@ -286,7 +288,7 @@ export function DecisionStage({ request, open, onClose }: {
               </div>
               <Button type="button" variant="ghost" size="icon" className="decision-stage-step glass shrink-0" aria-label="다음 결정" aria-disabled={model.index >= model.cards.length - 1 || undefined} onClick={() => move("next")}><ChevronRight className="size-4" aria-hidden="true" /></Button>
             </div>
-            <p role="status" data-numeric="" className="glass rounded-full px-3 py-1 font-mono text-meta">{model.positionLabel}</p>
+            <p role="status" data-numeric="" className="glass rounded-full px-3 py-1 font-mono text-meta">{formatMessage(model.position.key, model.position.values as never)}</p>
           </nav> : null}
         </div>
       </DialogContent>

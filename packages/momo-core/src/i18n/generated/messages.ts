@@ -1622,6 +1622,25 @@ export const messageKeys = [
   "timeline.approval.reproposeBusy",
   "timeline.approval.reproposeSeeded",
   "timeline.approvalExpiry.soon",
+  "timeline.artifactNote.awaitingApproval",
+  "timeline.artifactNote.cancelled",
+  "timeline.artifactNote.done",
+  "timeline.artifactNote.error",
+  "timeline.artifactNote.inFlight",
+  "timeline.artifactNote.leadNote",
+  "timeline.artifactNote.leadSignal",
+  "timeline.artifactNote.queued",
+  "timeline.artifactNote.stalled",
+  "timeline.artifactNote.withNote",
+  "timeline.cascade.noticeMulti",
+  "timeline.cascade.noticeSingle",
+  "timeline.cascade.reasonRateLimited",
+  "timeline.cascade.reasonStatus",
+  "timeline.cascade.reasonUnknown",
+  "timeline.cascade.reasonUnreachable",
+  "timeline.cascade.route",
+  "timeline.cascade.servedFallback",
+  "timeline.cascade.servedLabeled",
   "timeline.channelLeave.bodyPrivate",
   "timeline.channelLeave.bodyPublic",
   "timeline.channelLeave.bodyPublicBrowse",
@@ -1635,6 +1654,8 @@ export const messageKeys = [
   "timeline.channelLeave.title",
   "timeline.createChannel.privateDetail",
   "timeline.createChannel.publicDetail",
+  "timeline.decisionStage.position",
+  "timeline.decisionStage.positionNone",
   "timeline.deletedFold.repeat",
   "timeline.deletedFold.tombstone",
   "timeline.edited.atDate",
@@ -3929,6 +3950,44 @@ export const argumentSpecs = {
   "timeline.approval.reproposeBusy": {},
   "timeline.approval.reproposeSeeded": {},
   "timeline.approvalExpiry.soon": {},
+  "timeline.artifactNote.awaitingApproval": {},
+  "timeline.artifactNote.cancelled": {},
+  "timeline.artifactNote.done": {},
+  "timeline.artifactNote.error": {},
+  "timeline.artifactNote.inFlight": {},
+  "timeline.artifactNote.leadNote": {},
+  "timeline.artifactNote.leadSignal": {},
+  "timeline.artifactNote.queued": {},
+  "timeline.artifactNote.stalled": {},
+  "timeline.artifactNote.withNote": {
+    "lead": "string",
+    "note": "string",
+    "sentence": "string"
+  },
+  "timeline.cascade.noticeMulti": {
+    "count": "number",
+    "reason": "string",
+    "served": "string"
+  },
+  "timeline.cascade.noticeSingle": {
+    "reason": "string",
+    "served": "string"
+  },
+  "timeline.cascade.reasonRateLimited": {},
+  "timeline.cascade.reasonStatus": {
+    "status": "string"
+  },
+  "timeline.cascade.reasonUnknown": {
+    "reason": "string"
+  },
+  "timeline.cascade.reasonUnreachable": {},
+  "timeline.cascade.route": {
+    "label": "string"
+  },
+  "timeline.cascade.servedFallback": {},
+  "timeline.cascade.servedLabeled": {
+    "label": "string"
+  },
   "timeline.channelLeave.bodyPrivate": {
     "name": "string"
   },
@@ -3950,6 +4009,11 @@ export const argumentSpecs = {
   "timeline.channelLeave.title": {},
   "timeline.createChannel.privateDetail": {},
   "timeline.createChannel.publicDetail": {},
+  "timeline.decisionStage.position": {
+    "current": "string",
+    "total": "string"
+  },
+  "timeline.decisionStage.positionNone": {},
   "timeline.deletedFold.repeat": {
     "count": "string"
   },
@@ -6022,6 +6086,25 @@ export interface MessageArgs {
   "timeline.approval.reproposeBusy": Record<string, never>;
   "timeline.approval.reproposeSeeded": Record<string, never>;
   "timeline.approvalExpiry.soon": Record<string, never>;
+  "timeline.artifactNote.awaitingApproval": Record<string, never>;
+  "timeline.artifactNote.cancelled": Record<string, never>;
+  "timeline.artifactNote.done": Record<string, never>;
+  "timeline.artifactNote.error": Record<string, never>;
+  "timeline.artifactNote.inFlight": Record<string, never>;
+  "timeline.artifactNote.leadNote": Record<string, never>;
+  "timeline.artifactNote.leadSignal": Record<string, never>;
+  "timeline.artifactNote.queued": Record<string, never>;
+  "timeline.artifactNote.stalled": Record<string, never>;
+  "timeline.artifactNote.withNote": { lead: string; note: string; sentence: string };
+  "timeline.cascade.noticeMulti": { count: number; reason: string; served: string };
+  "timeline.cascade.noticeSingle": { reason: string; served: string };
+  "timeline.cascade.reasonRateLimited": Record<string, never>;
+  "timeline.cascade.reasonStatus": { status: string };
+  "timeline.cascade.reasonUnknown": { reason: string };
+  "timeline.cascade.reasonUnreachable": Record<string, never>;
+  "timeline.cascade.route": { label: string };
+  "timeline.cascade.servedFallback": Record<string, never>;
+  "timeline.cascade.servedLabeled": { label: string };
   "timeline.channelLeave.bodyPrivate": { name: string };
   "timeline.channelLeave.bodyPublic": { name: string };
   "timeline.channelLeave.bodyPublicBrowse": { name: string };
@@ -6035,6 +6118,8 @@ export interface MessageArgs {
   "timeline.channelLeave.title": Record<string, never>;
   "timeline.createChannel.privateDetail": Record<string, never>;
   "timeline.createChannel.publicDetail": Record<string, never>;
+  "timeline.decisionStage.position": { current: string; total: string };
+  "timeline.decisionStage.positionNone": Record<string, never>;
   "timeline.deletedFold.repeat": { count: string };
   "timeline.deletedFold.tombstone": Record<string, never>;
   "timeline.edited.atDate": { date: string; time: string };

@@ -11756,6 +11756,218 @@ export const catalog: MessageCatalog = {
       "value": "If you do not decide, the agent has to propose it again."
     }
   ],
+  "timeline.artifactNote.awaitingApproval": [
+    {
+      "type": 0,
+      "value": "Waiting for approval, so the content below is not final yet."
+    }
+  ],
+  "timeline.artifactNote.cancelled": [
+    {
+      "type": 0,
+      "value": "The run was stopped, so only this much arrived."
+    }
+  ],
+  "timeline.artifactNote.done": [
+    {
+      "type": 0,
+      "value": "The run has finished. The content below is everything."
+    }
+  ],
+  "timeline.artifactNote.error": [
+    {
+      "type": 0,
+      "value": "This change didn't finish. The content below goes up to the point it failed."
+    }
+  ],
+  "timeline.artifactNote.inFlight": [
+    {
+      "type": 0,
+      "value": "Still receiving. The content and numbers below are what has arrived so far."
+    }
+  ],
+  "timeline.artifactNote.leadNote": [
+    {
+      "type": 0,
+      "value": "Attached note"
+    }
+  ],
+  "timeline.artifactNote.leadSignal": [
+    {
+      "type": 0,
+      "value": "Last signal"
+    }
+  ],
+  "timeline.artifactNote.queued": [
+    {
+      "type": 0,
+      "value": "Not started yet. The content and numbers below are not final."
+    }
+  ],
+  "timeline.artifactNote.stalled": [
+    {
+      "type": 0,
+      "value": "No response yet. It hasn't been confirmed as failed."
+    }
+  ],
+  "timeline.artifactNote.withNote": [
+    {
+      "type": 1,
+      "value": "sentence"
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 1,
+      "value": "lead"
+    },
+    {
+      "type": 0,
+      "value": ": "
+    },
+    {
+      "type": 1,
+      "value": "note"
+    }
+  ],
+  "timeline.cascade.noticeMulti": [
+    {
+      "type": 0,
+      "value": "Handled by "
+    },
+    {
+      "type": 1,
+      "value": "served"
+    },
+    {
+      "type": 0,
+      "value": " (after "
+    },
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " switch"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " switches"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    },
+    {
+      "type": 0,
+      "value": ", last reason: "
+    },
+    {
+      "type": 1,
+      "value": "reason"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "timeline.cascade.noticeSingle": [
+    {
+      "type": 0,
+      "value": "Handled by "
+    },
+    {
+      "type": 1,
+      "value": "served"
+    },
+    {
+      "type": 0,
+      "value": " ("
+    },
+    {
+      "type": 1,
+      "value": "reason"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "timeline.cascade.reasonRateLimited": [
+    {
+      "type": 0,
+      "value": "Rate limit exceeded"
+    }
+  ],
+  "timeline.cascade.reasonStatus": [
+    {
+      "type": 0,
+      "value": "Server error "
+    },
+    {
+      "type": 1,
+      "value": "status"
+    }
+  ],
+  "timeline.cascade.reasonUnknown": [
+    {
+      "type": 0,
+      "value": "Reason reported by the server: "
+    },
+    {
+      "type": 1,
+      "value": "reason"
+    }
+  ],
+  "timeline.cascade.reasonUnreachable": [
+    {
+      "type": 0,
+      "value": "No response"
+    }
+  ],
+  "timeline.cascade.route": [
+    {
+      "type": 0,
+      "value": "Switched from "
+    },
+    {
+      "type": 1,
+      "value": "label"
+    }
+  ],
+  "timeline.cascade.servedFallback": [
+    {
+      "type": 0,
+      "value": "Backup provider"
+    }
+  ],
+  "timeline.cascade.servedLabeled": [
+    {
+      "type": 1,
+      "value": "label"
+    },
+    {
+      "type": 0,
+      "value": " provider"
+    }
+  ],
   "timeline.channelLeave.bodyPrivate": [
     {
       "type": 1,
@@ -11848,6 +12060,26 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "Any full member of the workspace can find it in the channel browser and join."
+    }
+  ],
+  "timeline.decisionStage.position": [
+    {
+      "type": 1,
+      "value": "current"
+    },
+    {
+      "type": 0,
+      "value": " of "
+    },
+    {
+      "type": 1,
+      "value": "total"
+    }
+  ],
+  "timeline.decisionStage.positionNone": [
+    {
+      "type": 0,
+      "value": "0 items"
     }
   ],
   "timeline.deletedFold.repeat": [

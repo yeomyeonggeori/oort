@@ -12,6 +12,7 @@ import { cn } from "@/design/lib/cn";
 import { isDesktop, openExternalUrl } from "@/lib/tauri";
 import { formatCount } from "@momo/core/features/timeline/agentCardModel";
 import { StreamCaret, TurnChip } from "./StatusChip";
+import { useFormatMessage } from "@/i18n/useFormatMessage";
 import { artifactNote, isProvisional, type ArtifactState } from "@momo/core/features/timeline/rowModel";
 import {
   isTruncated,
@@ -382,7 +383,8 @@ function OmittedFileRow({ file }: { file: DiffFile }) {
  * left in the component is the rendering: one tone, one caret.
  */
 function StatusNote({ state }: { state: ArtifactState }) {
-  const note = artifactNote(state);
+  const formatMessage = useFormatMessage();
+  const note = artifactNote(formatMessage, state);
   return (
     <p
       data-testid="artifact-status-note"

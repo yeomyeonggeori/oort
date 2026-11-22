@@ -1,7 +1,12 @@
 import { describe, expect, it } from "vitest";
+import { catalog as koCatalog } from "../../i18n/generated/ko-KR";
+import { createMessageCopy } from "../../testkit";
 import type { Message } from "../../lib/api";
 import { TURN_STATUS_LABEL, type AgentTurnStatus } from "./agentCardModel";
-import { artifactNote, isProvisional, rowPresentation as presentationAs } from "./rowModel";
+import { artifactNote as artifactNoteWith, isProvisional, rowPresentation as presentationAs } from "./rowModel";
+// 문장은 사전(`timeline.json`)에 있다(#6044). 시험은 제품과 같은 한국어 생성물로 키를 풀어 한국어 그대로 단정한다.
+const ko = createMessageCopy({ messageLocale: "ko-KR", catalog: koCatalog });
+const artifactNote = (state: Parameters<typeof artifactNoteWith>[1]) => artifactNoteWith(ko, state);
 
 // #5577 — 이 파일의 픽스처는 모두 에이전트(게이트웨이·워커·도우미)가 쓴 서버 결과다. 사람·모르는 작성자는
 // `serverResultAuthor.test.ts` 가 잰다.

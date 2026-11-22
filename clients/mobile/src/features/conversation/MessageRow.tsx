@@ -2087,7 +2087,8 @@ function ArtifactCard({
   state: ArtifactState | null;
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
-  const note = state ? artifactNote(state) : null;
+  const formatMessage = useFormatMessage();
+  const note = state ? artifactNote(formatMessage, state) : null;
   const provisional = isProvisional(state);
   return (
     <View style={styles.card} testID="artifact-card">

@@ -11155,6 +11155,185 @@ export const catalog: MessageCatalog = {
       "value": "결정하지 않으면 에이전트가 다시 제안해야 해요."
     }
   ],
+  "timeline.artifactNote.awaitingApproval": [
+    {
+      "type": 0,
+      "value": "승인을 기다리는 중이라 아래 내용은 아직 확정이 아닙니다."
+    }
+  ],
+  "timeline.artifactNote.cancelled": [
+    {
+      "type": 0,
+      "value": "실행이 중단되어 여기까지만 도착했습니다."
+    }
+  ],
+  "timeline.artifactNote.done": [
+    {
+      "type": 0,
+      "value": "실행이 끝났습니다. 아래 내용이 전부입니다."
+    }
+  ],
+  "timeline.artifactNote.error": [
+    {
+      "type": 0,
+      "value": "이 변경을 끝내지 못했습니다. 아래 내용은 실패한 시점까지입니다."
+    }
+  ],
+  "timeline.artifactNote.inFlight": [
+    {
+      "type": 0,
+      "value": "아직 받는 중입니다. 아래 내용과 숫자는 지금까지 도착한 부분입니다."
+    }
+  ],
+  "timeline.artifactNote.leadNote": [
+    {
+      "type": 0,
+      "value": "함께 온 메모"
+    }
+  ],
+  "timeline.artifactNote.leadSignal": [
+    {
+      "type": 0,
+      "value": "마지막 신호"
+    }
+  ],
+  "timeline.artifactNote.queued": [
+    {
+      "type": 0,
+      "value": "아직 시작하지 않았습니다. 아래 내용과 숫자는 확정이 아닙니다."
+    }
+  ],
+  "timeline.artifactNote.stalled": [
+    {
+      "type": 0,
+      "value": "아직 응답이 없습니다. 실패로 확정되지 않았습니다."
+    }
+  ],
+  "timeline.artifactNote.withNote": [
+    {
+      "type": 1,
+      "value": "sentence"
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 1,
+      "value": "lead"
+    },
+    {
+      "type": 0,
+      "value": ": "
+    },
+    {
+      "type": 1,
+      "value": "note"
+    }
+  ],
+  "timeline.cascade.noticeMulti": [
+    {
+      "type": 1,
+      "value": "served"
+    },
+    {
+      "type": 0,
+      "value": "로 처리됨 (전환 "
+    },
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "번, 마지막 사유: "
+    },
+    {
+      "type": 1,
+      "value": "reason"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "timeline.cascade.noticeSingle": [
+    {
+      "type": 1,
+      "value": "served"
+    },
+    {
+      "type": 0,
+      "value": "로 처리됨 ("
+    },
+    {
+      "type": 1,
+      "value": "reason"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "timeline.cascade.reasonRateLimited": [
+    {
+      "type": 0,
+      "value": "요청 한도 초과"
+    }
+  ],
+  "timeline.cascade.reasonStatus": [
+    {
+      "type": 0,
+      "value": "서버 오류 "
+    },
+    {
+      "type": 1,
+      "value": "status"
+    }
+  ],
+  "timeline.cascade.reasonUnknown": [
+    {
+      "type": 0,
+      "value": "서버가 보고한 사유: "
+    },
+    {
+      "type": 1,
+      "value": "reason"
+    }
+  ],
+  "timeline.cascade.reasonUnreachable": [
+    {
+      "type": 0,
+      "value": "응답 없음"
+    }
+  ],
+  "timeline.cascade.route": [
+    {
+      "type": 1,
+      "value": "label"
+    },
+    {
+      "type": 0,
+      "value": "에서 넘어왔습니다"
+    }
+  ],
+  "timeline.cascade.servedFallback": [
+    {
+      "type": 0,
+      "value": "예비 프로바이더"
+    }
+  ],
+  "timeline.cascade.servedLabeled": [
+    {
+      "type": 1,
+      "value": "label"
+    },
+    {
+      "type": 0,
+      "value": " 프로바이더"
+    }
+  ],
   "timeline.channelLeave.bodyPrivate": [
     {
       "type": 1,
@@ -11247,6 +11426,30 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "워크스페이스의 정식 멤버 누구나 채널 둘러보기에서 찾아 참여할 수 있어요."
+    }
+  ],
+  "timeline.decisionStage.position": [
+    {
+      "type": 1,
+      "value": "total"
+    },
+    {
+      "type": 0,
+      "value": "건 중 "
+    },
+    {
+      "type": 1,
+      "value": "current"
+    },
+    {
+      "type": 0,
+      "value": "번"
+    }
+  ],
+  "timeline.decisionStage.positionNone": [
+    {
+      "type": 0,
+      "value": "0건"
     }
   ],
   "timeline.deletedFold.repeat": [
