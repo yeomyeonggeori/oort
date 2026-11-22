@@ -670,10 +670,11 @@ export function WorkJobsRoute() {
                 <span aria-hidden data-col="channel">{WORK_JOBS_COPY.colChannel}</span>
                 {pending > 0 && (
                   <span className="absolute inset-y-0 end-1 flex items-center">
+                    {/* 채움 알약: 아래 열 이름(요청 채널)과 글자가 겹쳐 보이지 않게 그 자리를 덮는다. */}
                     <Button
                       type="button"
                       size="sm"
-                      variant="ghost"
+                      variant="secondary"
                       className="tap-target"
                       onClick={reveal}
                       data-testid="work-jobs-reveal-new"
