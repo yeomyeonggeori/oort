@@ -254,6 +254,186 @@ export const catalog: MessageCatalog = {
       "value": "This link has already been used. Sign in instead."
     }
   ],
+  "auth.deviceKey.authFailed": [
+    {
+      "type": 0,
+      "value": "Couldn't verify it's you. Try again."
+    }
+  ],
+  "auth.deviceKey.cancelled": [
+    {
+      "type": 0,
+      "value": "Touch ID or passcode confirmation was canceled."
+    }
+  ],
+  "auth.deviceKey.changed": [
+    {
+      "type": 0,
+      "value": "This Mac's signing key has changed. Register this Mac as a signing device again."
+    }
+  ],
+  "auth.deviceKey.declined": [
+    {
+      "type": 0,
+      "value": "Signing was canceled."
+    }
+  ],
+  "auth.deviceKey.endorseConflict": [
+    {
+      "type": 0,
+      "value": "This Mac already approved a different key under this name, or the same key under another name. Reload the list to check."
+    }
+  ],
+  "auth.deviceKey.entitlementMissing": [
+    {
+      "type": 0,
+      "value": "This build doesn't have permission to keep a signing key. Use the team release app."
+    }
+  ],
+  "auth.deviceKey.failed": [
+    {
+      "type": 0,
+      "value": "Couldn't sign. Try again."
+    }
+  ],
+  "auth.deviceKey.hostPinnedOther": [
+    {
+      "type": 0,
+      "value": "This Mac's work host already has a different key registered as the signing device. Register the work host again."
+    }
+  ],
+  "auth.deviceKey.kindNotEnabled": [
+    {
+      "type": 0,
+      "value": "This app can't make this kind of signature yet."
+    }
+  ],
+  "auth.deviceKey.noLetter": [
+    {
+      "type": 0,
+      "value": "There's no revocation signed on this Mac, so it can't be sent again."
+    }
+  ],
+  "auth.deviceKey.noSession": [
+    {
+      "type": 0,
+      "value": "This sign-in can't move keys. Sign out and sign in again."
+    }
+  ],
+  "auth.deviceKey.notEndorsedHere": [
+    {
+      "type": 0,
+      "value": "This Mac has no record of approving this key, so it can't sign the revocation. Disconnecting that device revokes the key on the server, but this Mac's work host won't be told."
+    }
+  ],
+  "auth.deviceKey.notRootHere": [
+    {
+      "type": 0,
+      "value": "This Mac isn't registered as a signing device for this workspace."
+    }
+  ],
+  "auth.deviceKey.payloadRejected": [
+    {
+      "type": 0,
+      "value": "It wasn't signed because the content has invisible characters or an invalid value."
+    }
+  ],
+  "auth.deviceKey.pinRefused": [
+    {
+      "type": 0,
+      "value": "This Mac's work host didn't accept this key as the signing device. Check the work host status."
+    }
+  ],
+  "auth.deviceKey.rebindNotCurrent": [
+    {
+      "type": 0,
+      "value": "The server didn't move this key to this sign-in. Reload the list and try again."
+    }
+  ],
+  "auth.deviceKey.serverAlreadyRegistered": [
+    {
+      "type": 0,
+      "value": "This key is already registered. Reload the list."
+    }
+  ],
+  "auth.deviceKey.serverLineageEnded": [
+    {
+      "type": 0,
+      "value": "This sign-in can't register keys anymore. Sign in again."
+    }
+  ],
+  "auth.deviceKey.serverLinkedSession": [
+    {
+      "type": 0,
+      "value": "A device connected with a QR code can't be a signing device. Sign in with a password on this Mac, then register it."
+    }
+  ],
+  "auth.deviceKey.serverLinkNotFromMac": [
+    {
+      "type": 0,
+      "value": "This phone was connected with a QR code shown somewhere other than a Mac. Connect again with a QR code from a Mac."
+    }
+  ],
+  "auth.deviceKey.serverNotFound": [
+    {
+      "type": 0,
+      "value": "The server no longer has this key. Reload the list and register it again."
+    }
+  ],
+  "auth.deviceKey.serverPasswordRequired": [
+    {
+      "type": 0,
+      "value": "That password isn't correct. Enter this account's current password."
+    }
+  ],
+  "auth.deviceKey.serverRebindRequired": [
+    {
+      "type": 0,
+      "value": "This key is tied to a sign-in that has ended. Connect again."
+    }
+  ],
+  "auth.deviceKey.serverRequiresLinkedSession": [
+    {
+      "type": 0,
+      "value": "This phone wasn't connected with a QR code, so it can't send commands. Connect it once with a QR code from a Mac."
+    }
+  ],
+  "auth.deviceKey.serverSignatureInvalid": [
+    {
+      "type": 0,
+      "value": "The server didn't accept this device's signature. Check that the device clock is right and try again."
+    }
+  ],
+  "auth.deviceKey.unsignedBuild": [
+    {
+      "type": 0,
+      "value": "This build isn't signed, so it can't use a Secure Enclave key. Use the team release app."
+    }
+  ],
+  "auth.deviceKey.unsupported": [
+    {
+      "type": 0,
+      "value": "This device can't create a command-signing key."
+    }
+  ],
+  "auth.deviceKey.workdRefused": [
+    {
+      "type": 0,
+      "value": "This Mac's work host didn't accept the request. Try again."
+    }
+  ],
+  "auth.deviceKey.workHostNotRunning": [
+    {
+      "type": 0,
+      "value": "This Mac's work host isn't running. Turn it on and try again."
+    }
+  ],
+  "auth.deviceKey.workHostOtherWorkspace": [
+    {
+      "type": 0,
+      "value": "This Mac's work host belongs to another workspace, so it can't be changed here."
+    }
+  ],
   "auth.deviceLink.addressFallbackLabel": [
     {
       "type": 0,
@@ -408,6 +588,12 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "This invite can no longer be used. Ask a workspace admin for a new invite link."
+    }
+  ],
+  "auth.linkedDevice.platformWeb": [
+    {
+      "type": 0,
+      "value": "Web"
     }
   ],
   "auth.passwordRule.tooLong": [

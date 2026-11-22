@@ -11,6 +11,14 @@ import {
   parseLinkedDeviceList,
   revokeLinkedDevice,
 } from "./linkedDevices";
+import { catalog as koCatalog } from "../../i18n/generated/ko-KR";
+import { createLocaleService, resolveLocaleContext } from "../../i18n";
+
+// 「웹」은 사전(`auth.json`)에 있다(#6064). 시험은 한국어 언어 서비스로 푼다.
+const { formatMessage } = createLocaleService({
+  ...resolveLocaleContext("ko-KR", { languages: ["ko-KR"] }),
+  catalog: koCatalog,
+});
 
 const CURRENT_ID = "019f9b10-0000-7000-8000-000000000d01";
 const OTHER_ID = "019f9b10-0000-7000-8000-000000000d02";
@@ -104,14 +112,15 @@ describe("linkedDevices wire", () => {
 
 describe("linkedDevices platform labels", () => {
   it("maps known wire tokens and treats ipados as a phone", () => {
-    expect(linkedDevicePlatformLabel("ios")).toBe("iOS");
-    expect(linkedDevicePlatformLabel("ipados")).toBe("iPadOS");
-    expect(linkedDevicePlatformLabel("macos")).toBe("macOS");
-    expect(linkedDevicePlatformLabel("android")).toBe("Android");
-    expect(linkedDevicePlatformLabel("windows")).toBe("Windows");
+    expect(linkedDevicePlatformLabel(formatMessage, "ios")).toBe("iOS");
+    expect(linkedDevicePlatformLabel(formatMessage, "ipados")).toBe("iPadOS");
+    expect(linkedDevicePlatformLabel(formatMessage, "macos")).toBe("macOS");
+    expect(linkedDevicePlatformLabel(formatMessage, "android")).toBe("Android");
+    expect(linkedDevicePlatformLabel(formatMessage, "windows")).toBe("Windows");
+    expect(linkedDevicePlatformLabel(formatMessage, "web")).toBe("웹");
     expect(isPhonePlatform("ipados")).toBe(true);
     expect(isPhonePlatform("macos")).toBe(false);
-    expect(linkedDevicePlatformLabel("custom-rig")).toBe("custom-rig");
+    expect(linkedDevicePlatformLabel(formatMessage, "custom-rig")).toBe("custom-rig");
   });
 });
 

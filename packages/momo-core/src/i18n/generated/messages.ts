@@ -26,6 +26,36 @@ export const messageKeys = [
   "auth.claim.passwordRecheck",
   "auth.claim.unmapped",
   "auth.claim.used",
+  "auth.deviceKey.authFailed",
+  "auth.deviceKey.cancelled",
+  "auth.deviceKey.changed",
+  "auth.deviceKey.declined",
+  "auth.deviceKey.endorseConflict",
+  "auth.deviceKey.entitlementMissing",
+  "auth.deviceKey.failed",
+  "auth.deviceKey.hostPinnedOther",
+  "auth.deviceKey.kindNotEnabled",
+  "auth.deviceKey.noLetter",
+  "auth.deviceKey.noSession",
+  "auth.deviceKey.notEndorsedHere",
+  "auth.deviceKey.notRootHere",
+  "auth.deviceKey.payloadRejected",
+  "auth.deviceKey.pinRefused",
+  "auth.deviceKey.rebindNotCurrent",
+  "auth.deviceKey.serverAlreadyRegistered",
+  "auth.deviceKey.serverLineageEnded",
+  "auth.deviceKey.serverLinkedSession",
+  "auth.deviceKey.serverLinkNotFromMac",
+  "auth.deviceKey.serverNotFound",
+  "auth.deviceKey.serverPasswordRequired",
+  "auth.deviceKey.serverRebindRequired",
+  "auth.deviceKey.serverRequiresLinkedSession",
+  "auth.deviceKey.serverSignatureInvalid",
+  "auth.deviceKey.unsignedBuild",
+  "auth.deviceKey.unsupported",
+  "auth.deviceKey.workdRefused",
+  "auth.deviceKey.workHostNotRunning",
+  "auth.deviceKey.workHostOtherWorkspace",
   "auth.deviceLink.addressFallbackLabel",
   "auth.deviceLink.cameraError",
   "auth.deviceLink.cameraOpening",
@@ -52,6 +82,7 @@ export const messageKeys = [
   "auth.join.revoked",
   "auth.join.unmapped",
   "auth.join.unusable",
+  "auth.linkedDevice.platformWeb",
   "auth.passwordRule.tooLong",
   "auth.passwordRule.tooShort",
   "auth.signIn.invalidCredentials",
@@ -1994,6 +2025,36 @@ export const argumentSpecs = {
   "auth.claim.passwordRecheck": {},
   "auth.claim.unmapped": {},
   "auth.claim.used": {},
+  "auth.deviceKey.authFailed": {},
+  "auth.deviceKey.cancelled": {},
+  "auth.deviceKey.changed": {},
+  "auth.deviceKey.declined": {},
+  "auth.deviceKey.endorseConflict": {},
+  "auth.deviceKey.entitlementMissing": {},
+  "auth.deviceKey.failed": {},
+  "auth.deviceKey.hostPinnedOther": {},
+  "auth.deviceKey.kindNotEnabled": {},
+  "auth.deviceKey.noLetter": {},
+  "auth.deviceKey.noSession": {},
+  "auth.deviceKey.notEndorsedHere": {},
+  "auth.deviceKey.notRootHere": {},
+  "auth.deviceKey.payloadRejected": {},
+  "auth.deviceKey.pinRefused": {},
+  "auth.deviceKey.rebindNotCurrent": {},
+  "auth.deviceKey.serverAlreadyRegistered": {},
+  "auth.deviceKey.serverLineageEnded": {},
+  "auth.deviceKey.serverLinkedSession": {},
+  "auth.deviceKey.serverLinkNotFromMac": {},
+  "auth.deviceKey.serverNotFound": {},
+  "auth.deviceKey.serverPasswordRequired": {},
+  "auth.deviceKey.serverRebindRequired": {},
+  "auth.deviceKey.serverRequiresLinkedSession": {},
+  "auth.deviceKey.serverSignatureInvalid": {},
+  "auth.deviceKey.unsignedBuild": {},
+  "auth.deviceKey.unsupported": {},
+  "auth.deviceKey.workdRefused": {},
+  "auth.deviceKey.workHostNotRunning": {},
+  "auth.deviceKey.workHostOtherWorkspace": {},
   "auth.deviceLink.addressFallbackLabel": {},
   "auth.deviceLink.cameraError": {},
   "auth.deviceLink.cameraOpening": {},
@@ -2020,6 +2081,7 @@ export const argumentSpecs = {
   "auth.join.revoked": {},
   "auth.join.unmapped": {},
   "auth.join.unusable": {},
+  "auth.linkedDevice.platformWeb": {},
   "auth.passwordRule.tooLong": {
     "hangulBytes": "string",
     "maxBytes": "string",
@@ -4522,6 +4584,36 @@ export interface MessageArgs {
   "auth.claim.passwordRecheck": Record<string, never>;
   "auth.claim.unmapped": Record<string, never>;
   "auth.claim.used": Record<string, never>;
+  "auth.deviceKey.authFailed": Record<string, never>;
+  "auth.deviceKey.cancelled": Record<string, never>;
+  "auth.deviceKey.changed": Record<string, never>;
+  "auth.deviceKey.declined": Record<string, never>;
+  "auth.deviceKey.endorseConflict": Record<string, never>;
+  "auth.deviceKey.entitlementMissing": Record<string, never>;
+  "auth.deviceKey.failed": Record<string, never>;
+  "auth.deviceKey.hostPinnedOther": Record<string, never>;
+  "auth.deviceKey.kindNotEnabled": Record<string, never>;
+  "auth.deviceKey.noLetter": Record<string, never>;
+  "auth.deviceKey.noSession": Record<string, never>;
+  "auth.deviceKey.notEndorsedHere": Record<string, never>;
+  "auth.deviceKey.notRootHere": Record<string, never>;
+  "auth.deviceKey.payloadRejected": Record<string, never>;
+  "auth.deviceKey.pinRefused": Record<string, never>;
+  "auth.deviceKey.rebindNotCurrent": Record<string, never>;
+  "auth.deviceKey.serverAlreadyRegistered": Record<string, never>;
+  "auth.deviceKey.serverLineageEnded": Record<string, never>;
+  "auth.deviceKey.serverLinkedSession": Record<string, never>;
+  "auth.deviceKey.serverLinkNotFromMac": Record<string, never>;
+  "auth.deviceKey.serverNotFound": Record<string, never>;
+  "auth.deviceKey.serverPasswordRequired": Record<string, never>;
+  "auth.deviceKey.serverRebindRequired": Record<string, never>;
+  "auth.deviceKey.serverRequiresLinkedSession": Record<string, never>;
+  "auth.deviceKey.serverSignatureInvalid": Record<string, never>;
+  "auth.deviceKey.unsignedBuild": Record<string, never>;
+  "auth.deviceKey.unsupported": Record<string, never>;
+  "auth.deviceKey.workdRefused": Record<string, never>;
+  "auth.deviceKey.workHostNotRunning": Record<string, never>;
+  "auth.deviceKey.workHostOtherWorkspace": Record<string, never>;
   "auth.deviceLink.addressFallbackLabel": Record<string, never>;
   "auth.deviceLink.cameraError": Record<string, never>;
   "auth.deviceLink.cameraOpening": Record<string, never>;
@@ -4548,6 +4640,7 @@ export interface MessageArgs {
   "auth.join.revoked": Record<string, never>;
   "auth.join.unmapped": Record<string, never>;
   "auth.join.unusable": Record<string, never>;
+  "auth.linkedDevice.platformWeb": Record<string, never>;
   "auth.passwordRule.tooLong": { hangulBytes: string; maxBytes: string; maxHangul: string };
   "auth.passwordRule.tooShort": { minChars: number };
   "auth.signIn.invalidCredentials": Record<string, never>;

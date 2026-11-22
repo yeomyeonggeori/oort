@@ -184,8 +184,11 @@ afterEach(() => {
   resetEscapeLayers();
 });
 
-/** `korean`은 사전 문장을 단정하는 시험만 켠다(공급자가 없으면 번들된 영어로 물러난다). */
-function mount(korean = false): HTMLElement {
+/**
+ * 화면은 한국어 언어 객체 아래에서 그린다. 이 시험은 사전에서 오는 기기 키 실패 문장(#6064 이전에는 코어가 돌려주던 글)을
+ * 한국어 그대로 단정한다. 공급자가 없으면 번들된 영어로 물러나므로 `korean = false`는 영어 대체를 보는 시험 전용이다.
+ */
+function mount(korean = true): HTMLElement {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false, staleTime: 0 }, mutations: { retry: false } },
   });
