@@ -2444,9 +2444,9 @@ export const argumentSpecs = {
   "cliLogin.consent.hostLabel": {},
   "cliLogin.consent.lead": {},
   "cliLogin.consent.lifetime": {
-    "accessMinutes": "string",
-    "idleDays": "string",
-    "maxDays": "string"
+    "accessMinutes": "number",
+    "idleDays": "number",
+    "maxDays": "number"
   },
   "cliLogin.consent.loadingSr": {},
   "cliLogin.consent.memberLabel": {},
@@ -5004,7 +5004,7 @@ export interface MessageArgs {
   "cliLogin.consent.dismiss": Record<string, never>;
   "cliLogin.consent.hostLabel": Record<string, never>;
   "cliLogin.consent.lead": Record<string, never>;
-  "cliLogin.consent.lifetime": { accessMinutes: string; idleDays: string; maxDays: string };
+  "cliLogin.consent.lifetime": { accessMinutes: number; idleDays: number; maxDays: number };
   "cliLogin.consent.loadingSr": Record<string, never>;
   "cliLogin.consent.memberLabel": Record<string, never>;
   "cliLogin.consent.offlineNote": Record<string, never>;

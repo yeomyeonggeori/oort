@@ -263,7 +263,7 @@ export const catalog: MessageCatalog = {
   "auth.deviceKey.cancelled": [
     {
       "type": 0,
-      "value": "Touch ID or passcode confirmation was canceled."
+      "value": "Touch ID or password confirmation was canceled."
     }
   ],
   "auth.deviceKey.changed": [
@@ -669,7 +669,7 @@ export const catalog: MessageCatalog = {
   "auth.signIn.invalidCredentials": [
     {
       "type": 0,
-      "value": "The email or password doesn't match."
+      "value": "Incorrect email or password."
     }
   ],
   "auth.signIn.suspended": [
@@ -2470,28 +2470,106 @@ export const catalog: MessageCatalog = {
       "value": "The connection lasts up to "
     },
     {
-      "type": 1,
-      "value": "maxDays"
+      "type": 6,
+      "value": "maxDays",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " day"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " days"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     },
     {
       "type": 0,
-      "value": " days and ends after "
+      "value": " and ends after "
     },
     {
-      "type": 1,
-      "value": "idleDays"
+      "type": 6,
+      "value": "idleDays",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " day"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " days"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     },
     {
       "type": 0,
-      "value": " days without use. Sign-in refreshes automatically every "
+      "value": " without use. Sign-in refreshes automatically every "
     },
     {
-      "type": 1,
-      "value": "accessMinutes"
+      "type": 6,
+      "value": "accessMinutes",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " minute"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " minutes"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     },
     {
       "type": 0,
-      "value": " minutes. Changing your password ends this connection right away."
+      "value": ". Changing your password ends this connection right away."
     }
   ],
   "cliLogin.consent.loadingSr": [
@@ -2769,13 +2847,13 @@ export const catalog: MessageCatalog = {
   "cliLogin.scope.identity": [
     {
       "type": 0,
-      "value": "Confirm who I am"
+      "value": "Confirm your account"
     }
   ],
   "cliLogin.scope.inboxRead": [
     {
       "type": 0,
-      "value": "Read my inbox"
+      "value": "Read your inbox"
     }
   ],
   "cliLogin.scope.messagesRead": [
@@ -2787,7 +2865,7 @@ export const catalog: MessageCatalog = {
   "cliLogin.scope.messagesWrite": [
     {
       "type": 0,
-      "value": "Send messages as me"
+      "value": "Send messages as you"
     }
   ],
   "cliLogin.terminal.accessDeniedDetail": [
@@ -8184,7 +8262,7 @@ export const catalog: MessageCatalog = {
   "onboarding.harnessLogin.waitingBrowser": [
     {
       "type": 0,
-      "value": "Signing in in your browser."
+      "value": "Finishing sign-in in your browser."
     }
   ],
   "onboarding.harnessLogin.waitingDetail": [
@@ -8198,7 +8276,7 @@ export const catalog: MessageCatalog = {
     },
     {
       "type": 0,
-      "value": " opened. oort never sees your login details."
+      "value": " opened. oort doesn't see your login details."
     }
   ],
   "onboarding.harnessLogin.waitingDevice": [

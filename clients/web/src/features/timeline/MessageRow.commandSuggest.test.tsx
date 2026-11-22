@@ -31,6 +31,11 @@ import { CommandSuggestSlot, ThreadSurfaceRoot } from "./commandSuggestSlot";
 import { readDraft, writeDraft } from "@/features/chat/draftStore";
 import { MessageRow, type MessageRowActions } from "./MessageRow";
 import { ThreadComposer } from "./ThreadComposer";
+import { LocaleProvider } from "@/i18n/LocaleProvider";
+import { koreanLocale } from "@/testing/koLocale";
+
+// 로그인 단추 낱말은 사전에 있다(#6064). 화면은 한국어 언어 객체 아래에서 그린다.
+const koLocale = await koreanLocale();
 
 const envSlot = vi.hoisted(() => ({ tauri: true, flag: true }));
 
@@ -251,7 +256,7 @@ function mount(node: ReactElement, me: string): HTMLElement {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   act(() => {
     root.render(
-      createElement(
+      createElement(LocaleProvider, { locale: koLocale, children: createElement(
         MemoryRouter,
         null,
         createElement(
@@ -263,7 +268,7 @@ function mount(node: ReactElement, me: string): HTMLElement {
             createElement(QueryClientProvider, { client }, node)
           )
         )
-      )
+      ) })
     );
   });
   return host;

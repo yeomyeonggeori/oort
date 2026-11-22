@@ -643,9 +643,9 @@ export function cliConsentLifetime(preview: {
   return {
     key: "cliLogin.consent.lifetime",
     values: {
-      maxDays: String(preview.maxDays),
-      idleDays: String(preview.idleDays),
-      accessMinutes: String(preview.accessMinutes),
+      maxDays: preview.maxDays,
+      idleDays: preview.idleDays,
+      accessMinutes: preview.accessMinutes,
     },
   };
 }
