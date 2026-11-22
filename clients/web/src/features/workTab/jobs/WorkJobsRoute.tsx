@@ -653,14 +653,14 @@ export function WorkJobsRoute() {
               }
             />
           ) : (
-            <div ref={tableRef} className="flex flex-col px-2 pb-4" data-testid="work-jobs-table">
+            <div ref={tableRef} className="flex shrink-0 flex-col px-2 pb-4" data-testid="work-jobs-table">
               <p className="sr-only" role="status" data-testid="work-jobs-decision-note">
                 {decisionText}
               </p>
               {/* 열 머리는 목록 위에 붙는다(r5 M2): 굴려 내려가 있어도 「새 요청 n · 보기」가 보인다. 단추는 머리 줄 안에 겹쳐 서서 줄
                   높이를 바꾸지 않고, 수는 조용히 낭독한다(`role="status"`). */}
               <div
-                className="work-jobs-row sticky top-0 layer-content-float border-b border-line bg-pane px-3 py-2 text-timestamp font-semibold text-ink-muted"
+                className="work-jobs-row tap-target sticky top-0 layer-content-float border-b border-line bg-pane px-3 py-2 text-timestamp font-semibold text-ink-muted"
                 data-testid="work-jobs-head"
               >
                 <span aria-hidden>{WORK_JOBS_COPY.colTask}</span>
@@ -1011,6 +1011,8 @@ function useLayoutGuard(listRef: RefObject<HTMLDivElement | null>, scope: string
  * 내용이 줄지 않게 한다. 그래서 목록을 끝까지 내린 채 줄이 빠져도 브라우저가 끝에 맞춰 scrollTop을 스스로 줄이지 않고(위 칸이 내려오지
  * 않는다), 빈 자리는 표 맨 아래에 남는다. 「내 작업/팀 전체」를 갈아타거나 표가 새로 서면 놓는다.
  */
+// 표는 세로 flex 그릇(목록)의 아이라 `shrink-0`이어야 한다(검수 r6 H2): 줄어들 수 있으면 px 바닥을 박은 뒤 표 상자가 그 높이에 머물고
+// 내용만 넘쳐, 바닥이 첫 그림 높이에서 더 올라가지 않는다.
 function useNoShrinkTable(scope: string) {
   const floorRef = useRef<{ scope: string; height: number; width: number }>({ scope, height: 0, width: 0 });
   const tableRef = useRef<HTMLDivElement | null>(null);
