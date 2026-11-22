@@ -311,7 +311,7 @@ function mount(node: ReactElement, me: string): HTMLElement {
     defaultOptions: { queries: { retry: false } },
   });
   act(() => {
-    root.render(createElement(LocaleProvider, { locale: ko }, 
+    root.render(createElement(LocaleProvider, { locale: ko, children: 
       createElement(
         MemoryRouter,
         null,
@@ -325,7 +325,7 @@ function mount(node: ReactElement, me: string): HTMLElement {
           ),
         ),
       ),
-    ));
+     }));
   });
   return host;
 }

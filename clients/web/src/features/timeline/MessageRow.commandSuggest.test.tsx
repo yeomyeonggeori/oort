@@ -257,7 +257,7 @@ function mount(node: ReactElement, me: string): HTMLElement {
   roots.push(root);
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   act(() => {
-    root.render(createElement(LocaleProvider, { locale: ko }, 
+    root.render(createElement(LocaleProvider, { locale: ko, children: 
       createElement(
         MemoryRouter,
         null,
@@ -271,7 +271,7 @@ function mount(node: ReactElement, me: string): HTMLElement {
           )
         )
       )
-    ));
+     }));
   });
   return host;
 }
