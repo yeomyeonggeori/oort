@@ -32,7 +32,7 @@ import { MemoryReceiptChip } from "@/features/memory/MemoryReceiptChip";
 import { receiptRunIdFor } from "@/features/memory/receiptGate";
 import { RunProposalCards } from "@/features/memory/ProposalCard";
 import { rowPresentation } from "@momo/core/features/timeline/rowModel";
-import { streamStopMark } from "@momo/core/features/timeline/streamStop";
+import { streamStopMarkKey } from "@momo/core/features/timeline/streamStop";
 // 구분선의 판정은 코어가 갖는다 — 폰이 같은 값을 소비한다 (U1 M-2).
 import {
   dayDividerLabel,
@@ -123,10 +123,10 @@ import { onNextPointerMove } from "@/features/sidebar/pointerTrail";
 import { ReactionChips } from "./ReactionChips";
 import type { ReactionChip } from "@momo/core/features/timeline/reactions";
 import {
-  deleteFailureMessage,
-  editFailureMessage,
-  pinFailureMessage,
-  reactionFailureMessage,
+  deleteFailureKey,
+  editFailureKey,
+  pinFailureKey,
+  reactionFailureKey,
 } from "@momo/core/features/timeline/actionCopy";
 import { useLongPress } from "./useLongPress";
 import { rememberLongPressLearned } from "./LongPressHint";
@@ -534,7 +534,8 @@ export function MessageRow({
   // ADR-0155 — 멈춘 답. 왜 이 낱말인지·왜 accent 가 아닌지는 코어의
   // `streamStop.ts` 헤더에 있다. 묘비에는 그리지 않는다: 저자가 지운 메시지에
   // 대고 「중단됨」이라고 말하는 것은 이미 없는 본문을 서술하는 것이다.
-  const stopMark = deleted ? null : streamStopMark(message, runEnded);
+  const stopMarkKey = deleted ? null : streamStopMarkKey(message, runEnded);
+  const stopMark = stopMarkKey === null ? null : formatMessage(stopMarkKey);
   // 하나로 접힌 반복 (goal P3 1-2). 한 번뿐이면 셀 것이 없으므로 아무 말도 하지
   // 않는다 — "1개"는 개수가 아니라 잡음이다.
   const repeatLabel =
@@ -695,14 +696,14 @@ export function MessageRow({
       if (!actions) return;
       setRowError(null);
       void Promise.resolve(actions.onToggleReaction(message, emoji)).catch(
-        (error: unknown) => setRowError(reactionFailureMessage(error))
+        (error: unknown) => setRowError(formatMessage(reactionFailureKey(error)))
       );
     },
     onPin: () => {
       if (!actions) return;
       setRowError(null);
       void Promise.resolve(actions.onTogglePin(message)).catch(
-        (error: unknown) => setRowError(pinFailureMessage(error))
+        (error: unknown) => setRowError(formatMessage(pinFailureKey(error)))
       );
     },
     onRemind: () => {
@@ -1144,7 +1145,7 @@ export function MessageRow({
               data-testid="tombstone"
               data-deleted-repeat={deletedRepeat}
             >
-              <DividerLabel segments={deletedFoldSegments(deletedRepeat)} />
+              <DividerLabel segments={deletedFoldSegments(formatMessage, deletedRepeat)} />
             </p>
           ) : editing && actions ? (
             <MessageEditor
@@ -1159,7 +1160,7 @@ export function MessageRow({
                   .onEditMessage(message, body)
                   .then(finishEdit)
                   .catch((error: unknown) =>
-                    setEditError(editFailureMessage(error))
+                    setEditError(formatMessage(editFailureKey(error)))
                   )
                   .finally(() => setEditPending(false));
               }}
@@ -1443,7 +1444,7 @@ export function MessageRow({
                 .onDeleteMessage(message)
                 .then(() => setConfirmOpen(false))
                 .catch((error: unknown) => {
-                  setRowError(deleteFailureMessage(error));
+                  setRowError(formatMessage(deleteFailureKey(error)));
                   setConfirmOpen(false);
                 })
                 .finally(() => setDeletePending(false));

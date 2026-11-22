@@ -2,9 +2,9 @@ import type {Member, Message} from '@momo/core/lib/api';
 import {isStrictlyOrdered} from '@momo/core/features/timeline/model';
 import {
   isStreamRunEnded,
-  STREAM_CUT_OFF_MARK,
+  STREAM_CUT_OFF_MARK_KEY,
   STREAM_PROPS_KEY,
-  streamStopMark,
+  streamStopMarkKey,
 } from '@momo/core/features/timeline/streamStop';
 import {centrifugoChannelName} from '@momo/core/lib/realtimeEvents';
 import {act, cleanup, renderHook, waitFor} from '@testing-library/react-native';
@@ -1112,8 +1112,8 @@ describe('#1166 — 페이지 읽기가 run 의 종결을 들고 온다', () => 
     await waitFor(() => expect(result.current.status).toBe('ready'));
     const row = result.current.state.messages[0];
     expect(endedRunIds().has(RUN.toLowerCase())).toBe(true);
-    expect(streamStopMark(row, isStreamRunEnded(row, endedRunIds()))).toBe(
-      STREAM_CUT_OFF_MARK,
+    expect(streamStopMarkKey(row, isStreamRunEnded(row, endedRunIds()))).toBe(
+      STREAM_CUT_OFF_MARK_KEY,
     );
   });
 
@@ -1128,7 +1128,7 @@ describe('#1166 — 페이지 읽기가 run 의 종결을 들고 온다', () => 
     const row = result.current.state.messages[0];
     expect(endedRunIds().size).toBe(0);
     expect(
-      streamStopMark(row, isStreamRunEnded(row, endedRunIds())),
+      streamStopMarkKey(row, isStreamRunEnded(row, endedRunIds())),
     ).toBeNull();
   });
 });

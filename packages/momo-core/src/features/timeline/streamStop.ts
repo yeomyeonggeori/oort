@@ -43,6 +43,7 @@
 // 프로바이더가 죽은 것조차 이 행에서는 **서술**이다. 「수정됨」과 같은 흐린 글자.
 // =============================================================================
 
+import type { PlainMessageKey } from "../../i18n/keys";
 import type { Message } from "../../lib/api";
 
 /**
@@ -164,7 +165,7 @@ export function isStreamRunEnded(
 }
 
 /** 사람이 정지를 눌러 얼어붙은 답. 메시지 자신이 그렇다고 적혀 있을 때만. */
-export const STREAM_CANCELLED_MARK = "중단됨";
+export const STREAM_CANCELLED_MARK_KEY = "timeline.streamStop.cancelled" satisfies PlainMessageKey;
 
 /**
  * 답이 더 오지 않는데 왜인지는 모를 때.
@@ -173,7 +174,7 @@ export const STREAM_CANCELLED_MARK = "중단됨";
  * 메시지가 같은 낱말을 쓴다. 둘 다 사람에게는 같은 사실이다 — 문장이 끊겼고 뒤는
  * 오지 않는다.
  */
-export const STREAM_CUT_OFF_MARK = "응답이 끊김";
+export const STREAM_CUT_OFF_MARK_KEY = "timeline.streamStop.cutOff" satisfies PlainMessageKey;
 
 /**
  * 이 메시지 꼬리에 설 낱말, 없으면 `null` — **판정 하나** (ADR-0155 결정 3).
@@ -186,17 +187,17 @@ export const STREAM_CUT_OFF_MARK = "응답이 끊김";
  * 침묵이 기본값이다. 잘 도착한 답, 아직 도착 중인 답, 사람이 친 글은 전부 `null`
  * 을 받는다 — 꼬리 한 줄은 할 말이 있을 때만 선다.
  */
-export function streamStopMark(
+export function streamStopMarkKey(
   message: Message,
   runIsOver: boolean,
-): string | null {
+): PlainMessageKey | null {
   const marker = streamMarker(message);
   if (!marker) return null;
-  if (marker.outcome === "cancelled") return STREAM_CANCELLED_MARK;
-  if (marker.outcome === "failed") return STREAM_CUT_OFF_MARK;
+  if (marker.outcome === "cancelled") return STREAM_CANCELLED_MARK_KEY;
+  if (marker.outcome === "failed") return STREAM_CUT_OFF_MARK_KEY;
   // 방어 렌더링. 도장이 없는데 열려 있고 run 은 끝났다 — 닫는 PATCH 가 못 닿은
   // 메시지다. 아직 열려 있고 run 도 살아 있으면 그냥 도착 중이므로 아무 말도 하지
   // 않는다.
-  if (marker.streaming && runIsOver) return STREAM_CUT_OFF_MARK;
+  if (marker.streaming && runIsOver) return STREAM_CUT_OFF_MARK_KEY;
   return null;
 }

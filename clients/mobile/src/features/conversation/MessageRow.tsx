@@ -70,7 +70,7 @@ import {hasRenderableBody} from '@momo/core/features/timeline/bodySlot';
 import {isTruncated, omittedFileCount} from '@momo/core/features/timeline/artifacts';
 import type {ArtifactPresentation} from '@momo/core/features/timeline/artifacts';
 import {attachmentMetaLine} from '@momo/core/features/attachments/model';
-import {deletedFoldLabel} from '@momo/core/features/timeline/deletedFold';
+import {deletedFoldRef} from '@momo/core/features/timeline/deletedFold';
 import {canQuoteMessage} from '@momo/core/features/timeline/quote';
 import type {QuoteBlock as QuoteBlockModel} from '@momo/core/features/timeline/quote';
 import {
@@ -88,12 +88,12 @@ import {
   PIN_ROW_MARK,
   pinActionLabel,
 } from '@momo/core/features/timeline/pins';
-import {streamStopMark} from '@momo/core/features/timeline/streamStop';
+import {streamStopMarkKey} from '@momo/core/features/timeline/streamStop';
 import {
-  deleteFailureMessage,
-  editFailureMessage,
-  pinFailureMessage,
-  reactionFailureMessage,
+  deleteFailureKey,
+  editFailureKey,
+  pinFailureKey,
+  reactionFailureKey,
 } from '@momo/core/features/timeline/actionCopy';
 import type {ReactionChip} from '@momo/core/features/timeline/reactions';
 import type {MemoryEvidenceLink} from '@momo/core/features/memory/model';
@@ -2987,7 +2987,7 @@ function MessageRowInner({
       const epoch = reactionEpochRef.current;
       const feedback = hapticScope(() => reactionEpochRef.current === epoch);
       void actions.onToggleReaction(message, emoji).catch((error: unknown) => {
-        setRowError(reactionFailureMessage(error));
+        setRowError(formatMessage(reactionFailureKey(error)));
         feedback('actionFailed');
       });
     },
@@ -2998,7 +2998,7 @@ function MessageRowInner({
     if (!actions?.onTogglePin) return;
     setRowError(null);
     void actions.onTogglePin(message).catch((error: unknown) => {
-      setRowError(pinFailureMessage(error));
+      setRowError(formatMessage(pinFailureKey(error)));
     });
   }, [actions, message]);
 
@@ -3245,7 +3245,8 @@ function MessageRowInner({
   // **문장을 여기서 짓지 않는다** (U4-6 코어 승격). 폰이 자기 파일에서 조사를
   // 붙이고 웹이 자기 파일에서 다른 조사를 붙이는 순간 같은 접기가 두 얼굴을
   // 갖는다 — U1 M-2 가 구분선에서 이미 겪은 실패 양식이다.
-  const tombstoneText = deletedFoldLabel(deletedRepeat);
+  const tombstoneRef = deletedFoldRef(deletedRepeat);
+  const tombstoneText = formatMessage(tombstoneRef.key, tombstoneRef.values as never);
 
   // 이슈 #1146 M3 — 이 행이 고정돼 있다는 흔적. 왜 그리는지·왜 이 줄인지·왜
   // accent 가 아닌지는 코어의 `PIN_ROW_MARK` 독스트링에 있다.
@@ -3258,7 +3259,8 @@ function MessageRowInner({
   // ADR-0155 — 멈춘 답. 왜 이 낱말인지·왜 accent 가 아닌지는 코어의
   // `streamStop.ts` 헤더에 있다. 묘비에는 그리지 않는다: 저자가 지운 메시지에
   // 대고 「중단됨」이라고 말하는 것은 이미 없는 본문을 서술하는 것이다.
-  const stopMark = deleted ? null : streamStopMark(message, runEnded === true);
+  const stopMarkKey = deleted ? null : streamStopMarkKey(message, runEnded === true);
+  const stopMark = stopMarkKey === null ? null : formatMessage(stopMarkKey);
 
   // 「수정됨」과 고친 시각 (#5326). 낱말은 사전, 시각 문장은 웹과 같은 코어 함수다. 지워진 행에는 없다.
   const editedTail = deleted ? null : editedMark(locale, message, nowMs);
@@ -3887,7 +3889,7 @@ function MessageRowInner({
               .onDelete(message)
               .then(() => setSheetOpen(false))
               .catch((error: unknown) => {
-                setRowError(deleteFailureMessage(error));
+                setRowError(formatMessage(deleteFailureKey(error)));
                 setSheetOpen(false);
               })
               .finally(() => setDeletePending(false));
@@ -3908,7 +3910,7 @@ function MessageRowInner({
             void actions
               .onEdit(message, next)
               .then(() => setEditing(false))
-              .catch((error: unknown) => setEditError(editFailureMessage(error)))
+              .catch((error: unknown) => setEditError(formatMessage(editFailureKey(error))))
               .finally(() => setEditPending(false));
           }}
         />

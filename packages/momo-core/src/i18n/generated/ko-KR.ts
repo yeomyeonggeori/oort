@@ -10941,6 +10941,120 @@ export const catalog: MessageCatalog = {
       "value": "키를 확인하는 중이에요."
     }
   ],
+  "timeline.actionFailure.deleteFailed": [
+    {
+      "type": 0,
+      "value": "메시지를 지우지 못했습니다. 잠시 뒤에 다시 시도하세요."
+    }
+  ],
+  "timeline.actionFailure.deleteNotAuthor": [
+    {
+      "type": 0,
+      "value": "내가 보낸 메시지만 지울 수 있습니다."
+    }
+  ],
+  "timeline.actionFailure.editDeleted": [
+    {
+      "type": 0,
+      "value": "이미 삭제된 메시지는 고칠 수 없습니다."
+    }
+  ],
+  "timeline.actionFailure.editFailed": [
+    {
+      "type": 0,
+      "value": "메시지를 고치지 못했습니다. 잠시 뒤에 다시 시도하세요."
+    }
+  ],
+  "timeline.actionFailure.editNotAuthor": [
+    {
+      "type": 0,
+      "value": "내가 보낸 메시지만 고칠 수 있습니다."
+    }
+  ],
+  "timeline.actionFailure.generic": [
+    {
+      "type": 0,
+      "value": "요청을 끝내지 못했습니다. 잠시 뒤에 다시 시도하세요."
+    }
+  ],
+  "timeline.actionFailure.messageNotFound": [
+    {
+      "type": 0,
+      "value": "메시지를 찾지 못했습니다. 이미 지워졌을 수 있습니다."
+    }
+  ],
+  "timeline.actionFailure.pinDeleted": [
+    {
+      "type": 0,
+      "value": "삭제된 메시지는 고정할 수 없습니다."
+    }
+  ],
+  "timeline.actionFailure.pinFailed": [
+    {
+      "type": 0,
+      "value": "메시지를 고정하지 못했습니다. 잠시 뒤에 다시 시도하세요."
+    }
+  ],
+  "timeline.actionFailure.pinLimit": [
+    {
+      "type": 0,
+      "value": "이 채널에 고정된 메시지가 100개를 넘었습니다. 고정 목록에서 하나를 해제한 뒤 다시 눌러 보세요."
+    }
+  ],
+  "timeline.actionFailure.pinNotMember": [
+    {
+      "type": 0,
+      "value": "이 채널의 멤버만 메시지를 고정할 수 있습니다."
+    }
+  ],
+  "timeline.actionFailure.reactDeleted": [
+    {
+      "type": 0,
+      "value": "삭제된 메시지에는 반응을 남길 수 없습니다."
+    }
+  ],
+  "timeline.actionFailure.reactFailed": [
+    {
+      "type": 0,
+      "value": "반응을 남기지 못했습니다. 잠시 뒤에 다시 시도하세요."
+    }
+  ],
+  "timeline.actionFailure.reactLimit": [
+    {
+      "type": 0,
+      "value": "이 메시지에 달린 반응이 200개를 넘었습니다. 기존 반응을 하나 지운 뒤 다시 눌러 보세요."
+    }
+  ],
+  "timeline.actionFailure.reactNotMember": [
+    {
+      "type": 0,
+      "value": "이 채널의 멤버만 반응할 수 있습니다."
+    }
+  ],
+  "timeline.actionFailure.replyFailed": [
+    {
+      "type": 0,
+      "value": "답글을 보내지 못했습니다. 잠시 뒤에 다시 시도하세요."
+    }
+  ],
+  "timeline.actionFailure.replyNotAllowed": [
+    {
+      "type": 0,
+      "value": "이 메시지에는 답글을 달 수 없습니다. 원본이 삭제됐거나 이미 답글입니다."
+    }
+  ],
+  "timeline.actionFailure.replyNotMember": [
+    {
+      "type": 0,
+      "value": "이 채널의 멤버만 답글을 달 수 있습니다."
+    }
+  ],
+  "timeline.actionFailure.replyOriginalNotFound": [
+    {
+      "type": 0,
+      "value": "원본 메시지를 찾지 못했습니다. 이미 지워졌을 수 있습니다."
+    }
+  ],
   "timeline.addMember.createdDescription": [
     {
       "type": 1,
@@ -11133,6 +11247,26 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "워크스페이스의 정식 멤버 누구나 채널 둘러보기에서 찾아 참여할 수 있어요."
+    }
+  ],
+  "timeline.deletedFold.repeat": [
+    {
+      "type": 0,
+      "value": "삭제된 메시지 "
+    },
+    {
+      "type": 1,
+      "value": "count"
+    },
+    {
+      "type": 0,
+      "value": "개"
+    }
+  ],
+  "timeline.deletedFold.tombstone": [
+    {
+      "type": 0,
+      "value": "삭제된 메시지"
     }
   ],
   "timeline.edited.atDate": [
@@ -11583,6 +11717,18 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "전송 중"
+    }
+  ],
+  "timeline.streamStop.cancelled": [
+    {
+      "type": 0,
+      "value": "중단됨"
+    }
+  ],
+  "timeline.streamStop.cutOff": [
+    {
+      "type": 0,
+      "value": "응답이 끊김"
     }
   ],
   "timeline.thread.followDismiss": [

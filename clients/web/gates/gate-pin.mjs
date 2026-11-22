@@ -101,16 +101,16 @@ function canonicalPinCopy(root) {
       "pinActionLabel의 낱말을 코어에서 찾지 못했다: 게이트가 검사할 문자열의 정본이 사라졌다"
     );
   }
-  const copy = readFileSync(
-    resolve(root, "../../packages/momo-core/src/features/timeline/actionCopy.ts"),
-    "utf8"
+  // 409 문장은 한국어 사전이 정본이다(#6044): 코어는 키(`timeline.actionFailure.pinLimit`)만 안다.
+  const catalog = JSON.parse(
+    readFileSync(
+      resolve(root, "../../packages/momo-core/src/i18n/catalogs/ko-KR/timeline.json"),
+      "utf8"
+    )
   );
-  const conflict =
-    /export function pinFailureMessage[\s\S]*?case 409:\s*\n\s*return "([^"]+)";/.exec(
-      copy
-    );
-  if (!conflict) {
-    throw new Error("pinFailureMessage의 409 문장을 코어에서 찾지 못했다");
+  const conflict = [null, catalog["timeline.actionFailure.pinLimit"]];
+  if (!conflict[1]) {
+    throw new Error("timeline.actionFailure.pinLimit 문장을 한국어 사전에서 찾지 못했다");
   }
   // #1149 M2·M4 — 행의 표지, 빈 본문의 서술, 그리고 그 서술 앞에 서는 주(註)
   // 기호. 셋 다 코어에서 읽는 이유는 위와 같다: 게이트가 문자열을 다시 적으면

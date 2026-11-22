@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
 
 import type { Message } from "../../lib/api";
+import { catalog as koCatalog } from "../../i18n/generated/ko-KR";
+import { createMessageCopy } from "../../testkit";
 import { dividerText } from "./divider";
 import {
-  deletedFoldLabel,
+  deletedFoldRef,
   deletedFoldSegments,
   foldDeletedRuns,
   foldedStandInIndex,
@@ -202,28 +204,33 @@ describe("foldedStandInIndex", () => {
 // 문구 — 두 클라가 같은 문장을 말한다
 // ---------------------------------------------------------------------------
 
-describe("deletedFoldLabel", () => {
+const ko = createMessageCopy({ messageLocale: "ko-KR", catalog: koCatalog });
+const label = (repeat: number | undefined) => {
+  const ref = deletedFoldRef(repeat);
+  return ko(ref.key, ref.values as never);
+};
+
+describe("deletedFoldRef", () => {
   it("하나면 세지 않는다 — 「1개」는 개수가 아니라 잡음이다", () => {
-    expect(deletedFoldLabel(undefined)).toBe("삭제된 메시지");
-    expect(deletedFoldLabel(1)).toBe("삭제된 메시지");
+    expect(label(undefined)).toBe("삭제된 메시지");
+    expect(label(1)).toBe("삭제된 메시지");
   });
 
   it("둘 이상이면 개수를 말한다", () => {
-    expect(deletedFoldLabel(3)).toBe("삭제된 메시지 3개");
+    expect(label(3)).toBe("삭제된 메시지 3개");
   });
 
   it("조각을 이어 붙이면 같은 문장이다 — 두 판이 갈라지지 않는다", () => {
     for (const repeat of [undefined, 1, 2, 12]) {
-      expect(dividerText(deletedFoldSegments(repeat))).toBe(
-        deletedFoldLabel(repeat)
-      );
+      expect(dividerText(deletedFoldSegments(ko, repeat))).toBe(label(repeat));
     }
   });
 
   it("숫자만 figure 다 — 「개」에 자릿폭을 걸면 음절이 벌어진다", () => {
-    const segments = deletedFoldSegments(4);
+    const segments = deletedFoldSegments(ko, 4);
     expect(segments.filter((s) => s.kind === "figure").map((s) => s.text)).toEqual(
       ["4"]
     );
+    expect(segments.at(-1)).toEqual({ kind: "prose", text: "개" });
   });
 });

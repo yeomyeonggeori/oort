@@ -30,12 +30,16 @@ import {
   PendingRow,
 } from '../src/features/conversation/MessageRow';
 import {
-  deletedFoldLabel,
-  DELETED_TOMBSTONE_COPY,
+  deletedFoldRef,
+  DELETED_TOMBSTONE_KEY,
   foldDeletedRuns,
   foldedStandInIndex,
 } from '@momo/core/features/timeline/deletedFold';
 import {Timeline} from '../src/features/conversation/Timeline';
+import {catalog as koCatalog} from '@momo/core/i18n/generated/ko-KR';
+import {createMessageService} from '@momo/core/i18n/service';
+
+const FORMAT = createMessageService({messageLocale: 'ko-KR', catalog: koCatalog}).formatMessage;
 
 // =============================================================================
 // U4-5M — 폰 위생 (감사 U4-i: M-1 · M-12 · M-13 · M-14) + 착지 틴트 (#1076)
@@ -498,12 +502,13 @@ describe('M-1 — 연달아 지워진 메시지가 한 줄로 접힌다', () => 
           nowMs={BASE_MS}
         />,
       );
+      const ref = deletedFoldRef(count);
       expect(view.getByTestId('tombstone').props.children).toContain(
-        deletedFoldLabel(count),
+        FORMAT(ref.key, ref.values as never),
       );
       view.unmount();
     }
-    expect(deletedFoldLabel(undefined)).toBe(DELETED_TOMBSTONE_COPY);
+    expect(FORMAT(DELETED_TOMBSTONE_KEY)).toBe('삭제된 메시지');
   });
 
   it('대리 착지 계약이 그대로다 — 진짜 없는 것은 여전히 없다 (#1105 인계)', () => {

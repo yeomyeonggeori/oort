@@ -11530,6 +11530,120 @@ export const catalog: MessageCatalog = {
       "value": "Checking the key."
     }
   ],
+  "timeline.actionFailure.deleteFailed": [
+    {
+      "type": 0,
+      "value": "Couldn't delete the message. Try again in a moment."
+    }
+  ],
+  "timeline.actionFailure.deleteNotAuthor": [
+    {
+      "type": 0,
+      "value": "You can only delete messages you sent."
+    }
+  ],
+  "timeline.actionFailure.editDeleted": [
+    {
+      "type": 0,
+      "value": "You can't edit a deleted message."
+    }
+  ],
+  "timeline.actionFailure.editFailed": [
+    {
+      "type": 0,
+      "value": "Couldn't edit the message. Try again in a moment."
+    }
+  ],
+  "timeline.actionFailure.editNotAuthor": [
+    {
+      "type": 0,
+      "value": "You can only edit messages you sent."
+    }
+  ],
+  "timeline.actionFailure.generic": [
+    {
+      "type": 0,
+      "value": "Couldn't finish the request. Try again in a moment."
+    }
+  ],
+  "timeline.actionFailure.messageNotFound": [
+    {
+      "type": 0,
+      "value": "Couldn't find the message. It may already be deleted."
+    }
+  ],
+  "timeline.actionFailure.pinDeleted": [
+    {
+      "type": 0,
+      "value": "You can't pin a deleted message."
+    }
+  ],
+  "timeline.actionFailure.pinFailed": [
+    {
+      "type": 0,
+      "value": "Couldn't pin the message. Try again in a moment."
+    }
+  ],
+  "timeline.actionFailure.pinLimit": [
+    {
+      "type": 0,
+      "value": "This channel has more than 100 pinned messages. Unpin one from the pinned list, then try again."
+    }
+  ],
+  "timeline.actionFailure.pinNotMember": [
+    {
+      "type": 0,
+      "value": "Only members of this channel can pin messages."
+    }
+  ],
+  "timeline.actionFailure.reactDeleted": [
+    {
+      "type": 0,
+      "value": "You can't react to a deleted message."
+    }
+  ],
+  "timeline.actionFailure.reactFailed": [
+    {
+      "type": 0,
+      "value": "Couldn't add the reaction. Try again in a moment."
+    }
+  ],
+  "timeline.actionFailure.reactLimit": [
+    {
+      "type": 0,
+      "value": "This message has more than 200 reactions. Remove one, then try again."
+    }
+  ],
+  "timeline.actionFailure.reactNotMember": [
+    {
+      "type": 0,
+      "value": "Only members of this channel can react."
+    }
+  ],
+  "timeline.actionFailure.replyFailed": [
+    {
+      "type": 0,
+      "value": "Couldn't send the reply. Try again in a moment."
+    }
+  ],
+  "timeline.actionFailure.replyNotAllowed": [
+    {
+      "type": 0,
+      "value": "You can't reply to this message. The original was deleted or is already a reply."
+    }
+  ],
+  "timeline.actionFailure.replyNotMember": [
+    {
+      "type": 0,
+      "value": "Only members of this channel can reply."
+    }
+  ],
+  "timeline.actionFailure.replyOriginalNotFound": [
+    {
+      "type": 0,
+      "value": "Couldn't find the original message. It may already be deleted."
+    }
+  ],
   "timeline.addMember.createdDescription": [
     {
       "type": 0,
@@ -11734,6 +11848,22 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "Any full member of the workspace can find it in the channel browser and join."
+    }
+  ],
+  "timeline.deletedFold.repeat": [
+    {
+      "type": 1,
+      "value": "count"
+    },
+    {
+      "type": 0,
+      "value": " deleted messages"
+    }
+  ],
+  "timeline.deletedFold.tombstone": [
+    {
+      "type": 0,
+      "value": "Deleted message"
     }
   ],
   "timeline.edited.atDate": [
@@ -12188,6 +12318,18 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "Sending"
+    }
+  ],
+  "timeline.streamStop.cancelled": [
+    {
+      "type": 0,
+      "value": "Stopped"
+    }
+  ],
+  "timeline.streamStop.cutOff": [
+    {
+      "type": 0,
+      "value": "Response cut off"
     }
   ],
   "timeline.thread.followDismiss": [

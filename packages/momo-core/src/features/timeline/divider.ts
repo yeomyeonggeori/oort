@@ -48,6 +48,36 @@ export type DividerSegment =
   | { kind: "figure"; text: string }
   | { kind: "prose"; text: string };
 
+const FIGURE_OPEN = "\uE000";
+const FIGURE_CLOSE = "\uE001";
+
+/**
+ * 사전 문장 안에서 **숫자 자리**를 표시하는 인자값. 문장은 사전이 한 덩이로 짓고(어순이 언어마다 다르다),
+ * 화면은 `markFigure`로 감싼 값만 figure 조각으로 가른다 — `segmentsFromMarked`가 짓는 순서 그대로 쪼갠다.
+ * 감싸개는 사설 영역 문자라 어느 언어의 문장에도 없다. 값이 조각에 그대로 남는 것은 `String(value)`뿐이다.
+ */
+export function markFigure(value: number | string): string {
+  return `${FIGURE_OPEN}${value}${FIGURE_CLOSE}`;
+}
+
+/** `markFigure`로 감싼 자리만 figure, 나머지는 prose인 조각으로. 감싼 자리가 없으면 prose 하나다. */
+export function segmentsFromMarked(sentence: string): DividerSegment[] {
+  const segments: DividerSegment[] = [];
+  let rest = sentence;
+  while (rest.length > 0) {
+    const open = rest.indexOf(FIGURE_OPEN);
+    const close = open < 0 ? -1 : rest.indexOf(FIGURE_CLOSE, open);
+    if (open < 0 || close < 0) {
+      segments.push({ kind: "prose", text: rest.split(FIGURE_OPEN).join("").split(FIGURE_CLOSE).join("") });
+      break;
+    }
+    if (open > 0) segments.push({ kind: "prose", text: rest.slice(0, open) });
+    segments.push({ kind: "figure", text: rest.slice(open + 1, close) });
+    rest = rest.slice(close + 1);
+  }
+  return segments;
+}
+
 /**
  * 라벨이 서는 쪽. **두 클라의 통일값이고, 값은 `leading`이다** (M-2).
  *
