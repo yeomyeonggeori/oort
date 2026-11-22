@@ -52,6 +52,42 @@ describe('모든 카테고리가 등록된다', () => {
   });
 });
 
+describe('하나씩 등록한다 — 동시에 부르면 마지막 하나만 남는다 (#6036)', () => {
+  it('expo 의 등록(현재 집합을 읽고 · 기다렸다가 · 「읽은 것 + 내 것」을 쓴다)을 거쳐도 여섯 개가 다 남는다', async () => {
+    // expo-notifications 57 `CategoryManager.setCategory` 의 순서를 그대로 옮긴 가짜다. 시뮬레이터에서
+    // `Promise.all` 로 부르던 판은 `momo.system` 하나만 남겼다(답장 · 승인 · 거절 버튼이 모두 사라짐).
+    let system = new Set<string>();
+    const register = jest.mocked(Notifications.setNotificationCategoryAsync);
+    register.mockClear();
+    register.mockImplementation(async identifier => {
+      const current = new Set(system);
+      await new Promise(resolve => setTimeout(resolve, 0));
+      system = new Set([...current].filter(id => id !== identifier)).add(identifier);
+      return {identifier, actions: [], options: {}} as never;
+    });
+
+    await registerPushCategories();
+
+    expect([...system].sort()).toEqual(Object.values(PUSH_CATEGORY).sort());
+    register.mockReset();
+  });
+});
+
+describe('하나가 실패해도 나머지는 등록하고, 실패는 숨기지 않는다 (#6036)', () => {
+  it('실패한 범주의 이름으로 거절하고, 나머지 다섯은 등록한다', async () => {
+    const register = jest.mocked(Notifications.setNotificationCategoryAsync);
+    register.mockReset();
+    register.mockImplementation(async identifier => {
+      if (identifier === PUSH_CATEGORY.message) throw new Error('refused');
+      return {identifier, actions: [], options: {}} as never;
+    });
+
+    await expect(registerPushCategories()).rejects.toThrow(PUSH_CATEGORY.message);
+    expect(register.mock.calls.map(([id]) => id).sort()).toEqual(Object.values(PUSH_CATEGORY).sort());
+    register.mockReset();
+  });
+});
+
 describe('인라인 승인 — 잠금 화면에서 승인·거절', () => {
   it('승인과 거절 두 버튼이고, 둘 다 인증을 요구하며 앱을 열지 않는다', () => {
     const actions = actionsOf(PUSH_CATEGORY.approval);
