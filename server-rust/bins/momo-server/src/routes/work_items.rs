@@ -31,7 +31,10 @@
 //!   owner/admin (ADR-0222 미결 7 의 지금 값), anyone else who can see the item gets 403. An
 //!   admin who is not in the home channel cannot see the item and gets the 404.
 //! * **The new assignee is a person who can see the item.** An active human member of the home
-//!   channel; an agent, an unknown id and another workspace's id are one 400. The database
+//!   channel who is not a workspace guest; an agent, a guest, an unknown id and another
+//!   workspace's id are one 400. A guest cannot create a work item either (403, nothing written) —
+//!   a guest neither creates nor owns work (planner decision on #6066's security review r1 M3);
+//!   reading what their channels hold is unchanged. The database
 //!   trigger (`work_item_people_guard`) refuses an agent assignee even without this check.
 //! * **No realtime frame yet.** The progress log and its thin frame are 원장-2 (ADR-0222 D3); no
 //!   outbox row is written here.
@@ -62,6 +65,7 @@ const NOT_FOUND: &str = "work item not found";
 const CHANNEL_NOT_FOUND: &str = "channel not found";
 const NOT_ALLOWED: &str = "only the assignee or a workspace admin can do this";
 const BAD_ASSIGNEE: &str = "assignee must be a person in the work item's channel";
+const GUEST_NOT_ALLOWED: &str = "workspace guests cannot create work items";
 
 /// Title limit (ADR-0222 데이터 계약 「제목(1~200자, 제어·서식 문자 금지)」).
 pub const TITLE_MAX_CHARS: usize = 200;
@@ -244,6 +248,13 @@ async fn create_in_tx(
     title: String,
 ) -> DbRejectable<ItemRow> {
     // ---- refusals first: nothing (not even the counter) is written above this line ----
+    // A workspace guest neither creates nor owns work items (planner decision on #6066 r1 M3). The
+    // caller's own role, judged before any channel is read, so the answer says nothing about it.
+    if momo_auth::active_workspace_role(conn, workspace_id, caller).await?
+        == Some(momo_auth::WorkspaceRole::Guest)
+    {
+        return Ok(Err(ApiError::forbidden(GUEST_NOT_ALLOWED)));
+    }
     let channel_visible: bool = sqlx::query_scalar(
         "SELECT EXISTS ( \
            SELECT 1 FROM channel c \
@@ -493,6 +504,9 @@ pub async fn set_assignee(
                          JOIN membership ms \
                            ON ms.workspace_id = m.workspace_id AND ms.member_id = m.id \
                           AND ms.channel_id = $3 AND ms.left_at IS NULL \
+                         JOIN workspace_membership wm \
+                           ON wm.workspace_id = m.workspace_id AND wm.member_id = m.id \
+                          AND wm.role <> 'guest' \
                         WHERE m.workspace_id = $1 AND m.id = $2 AND m.kind = 'human' \
                           AND m.status = 'active' AND m.deleted_at IS NULL)",
                 )

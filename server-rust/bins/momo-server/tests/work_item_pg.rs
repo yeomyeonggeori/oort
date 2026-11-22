@@ -9,6 +9,9 @@
 //! | `the_server_names_the_requester_and_a_body_cannot` | a body naming a person column is 400 with nothing written; the stored person columns are the caller | `deny_unknown_fields` on `CreateWorkItemRequest`; binding a body value |
 //! | `an_item_the_caller_cannot_see_answers_like_an_unknown_number` | hidden / unknown / other-workspace numbers: same status and bytes for read, close, reassign; list leaves it out | the membership join in `VISIBLE_ITEM` |
 //! | `close_and_reassign_belong_to_the_assignee_and_admins` | assignee and admin 200, anyone else 403 with the row unmoved; one 400 for an ineligible assignee | `may_steer_in_tx`; the eligibility query |
+//! | `a_member_who_left_and_an_archived_channel_hide_the_item` | the `left_at` and `archived_at` legs of `VISIBLE_ITEM`: same 404 as unknown for read/close/reassign, out of the list | either leg of `VISIBLE_ITEM` |
+//! | `the_list_pages_by_number` | `limit` + `cursor` + `nextCursor`, and an unknown query key is 400 | the `w.number < $3` bound; the `limit + 1` probe |
+//! | `a_guest_neither_creates_nor_takes_a_work_item` | guest create 403 with nothing written; guest as new assignee = the agent's 400; reading unchanged | the guest check in `create_in_tx`; the `wm.role` join |
 //! | `twenty_concurrent_creates_are_numbered_one_to_twenty` | 20 parallel creates → exactly 1..=20; another workspace starts at 1 | `work_item_assign_number` |
 //!
 //! `#[ignore]` — needs a real Postgres (superuser `DATABASE_URL`; the harness applies every
@@ -717,6 +720,15 @@ async fn the_database_keeps_assignee_and_on_behalf_of_human() {
         .await,
         "cannot change",
     );
+    assert_check_violation(
+        exec_probe(
+            &mut tx,
+            "UPDATE work_item SET on_behalf_of_member_id = $2 WHERE id = $1",
+            &[id, agent],
+        )
+        .await,
+        "on-behalf-of must be a human",
+    );
     exec_probe(
         &mut tx,
         "UPDATE work_item SET assignee_member_id = $2 WHERE id = $1",
@@ -811,6 +823,23 @@ async fn a_child_run_carries_its_parents_work_item() {
         .await,
         "on-behalf-of must be a human",
     );
+    assert_check_violation(
+        exec_probe(
+            &mut tx,
+            "UPDATE agent_run SET requested_by_member_id = $2, on_behalf_of_member_id = $3 \
+              WHERE id = $1",
+            &[parent, s.a.owner.id, s.a.member.id],
+        )
+        .await,
+        "must equal a human requester",
+    );
+    exec_probe(
+        &mut tx,
+        "UPDATE agent_run SET requested_by_member_id = $2, on_behalf_of_member_id = $2 WHERE id = $1",
+        &[parent, s.a.owner.id],
+    )
+    .await
+    .expect("a human requester on their own behalf is accepted");
     tx.rollback().await.expect("rollback");
 }
 
@@ -1069,15 +1098,17 @@ async fn an_item_the_caller_cannot_see_answers_like_an_unknown_number() {
     )
     .await;
     assert_eq!(status, 403, "another workspace's path is refused by scope");
-    let hidden_state: String =
-        sqlx::query_scalar("SELECT state FROM work_item WHERE workspace_id = $1 AND number = 2")
-            .bind(s.a.id)
-            .fetch_one(&s.su)
-            .await
-            .unwrap();
+    let hidden_row: (String, Uuid) = sqlx::query_as(
+        "SELECT state, assignee_member_id FROM work_item WHERE workspace_id = $1 AND number = 2",
+    )
+    .bind(s.a.id)
+    .fetch_one(&s.su)
+    .await
+    .unwrap();
     assert_eq!(
-        hidden_state, "open",
-        "no refused close touched the hidden item"
+        hidden_row,
+        ("open".to_string(), s.a.owner.id),
+        "no refused close or reassign touched the hidden item"
     );
 }
 
@@ -1228,6 +1259,35 @@ async fn close_and_reassign_belong_to_the_assignee_and_admins() {
     .await;
     assert_eq!(status, 200, "{answer}");
     assert_eq!(snapshot(2).await, ("cancelled".to_string(), s.a.owner.id));
+
+    // Every write left its audit row, and no audit row carries the title.
+    let first_id: Uuid = first["id"].as_str().unwrap().parse().unwrap();
+    let audits: Vec<(String, String)> = sqlx::query_as(
+        "SELECT action, detail::text FROM audit_log \
+          WHERE workspace_id = $1 AND target_type = 'work_item' AND target_id = $2 \
+          ORDER BY created_at, id",
+    )
+    .bind(s.a.id)
+    .bind(first_id)
+    .fetch_all(&s.su)
+    .await
+    .expect("audit rows");
+    let actions: Vec<&str> = audits.iter().map(|(action, _)| action.as_str()).collect();
+    assert_eq!(
+        actions,
+        vec![
+            "work_item.created",
+            "work_item.assignee_changed",
+            "work_item.closed"
+        ],
+        "one audit row per accepted write, none for the refused ones"
+    );
+    for (action, detail) in &audits {
+        assert!(
+            !detail.contains("온보딩 문서"),
+            "{action} must not carry the title: {detail}"
+        );
+    }
 }
 
 /// Acceptance 5 (numbers) — twenty creates at once in one workspace are numbered 1..=20 exactly,
@@ -1278,4 +1338,273 @@ async fn twenty_concurrent_creates_are_numbered_one_to_twenty() {
     let b_jwt = login(&s.http, &s.base, b.id, &b.owner).await;
     let first = create_item(&s.http, &s.base, b.id, &b_jwt, b_room, "b-1").await;
     assert_eq!(first["number"], 1, "each workspace counts on its own");
+}
+
+/// The other legs of the visibility predicate: a member who left the home channel, and a home
+/// channel that was archived, both make the item answer like an unknown number, for reading,
+/// closing and reassigning, and drop it from the list. Nothing moves.
+#[tokio::test]
+#[ignore = "needs a real Postgres"]
+async fn a_member_who_left_and_an_archived_channel_hide_the_item() {
+    let _guard = test_lock().await;
+    let s = stage("legs").await;
+    let item = create_item(&s.http, &s.base, s.a.id, &s.owner_jwt, s.room, "떠난 뒤").await;
+    let number = item["number"].as_i64().unwrap();
+    let (status, _) = call(
+        &s.http,
+        Method::GET,
+        &item_url(&s.base, s.a.id, number),
+        &s.member_jwt,
+        None,
+    )
+    .await;
+    assert_eq!(status, 200, "seated, the member sees it");
+
+    // Leg 1: the member leaves the home channel.
+    sqlx::query("UPDATE membership SET left_at = now() WHERE workspace_id = $1 AND channel_id = $2 AND member_id = $3")
+        .bind(s.a.id)
+        .bind(s.room)
+        .bind(s.a.member.id)
+        .execute(&s.su)
+        .await
+        .expect("leave");
+    assert_hidden_like_unknown(&s, &s.member_jwt, number, "left member").await;
+
+    // Leg 2: the owner stays seated, but the home channel is archived.
+    let archived = insert_channel(
+        &s.su,
+        s.a.id,
+        "public",
+        Some("보관-legs"),
+        false,
+        s.a.owner.id,
+    )
+    .await;
+    join(&s.su, s.a.id, archived, s.a.owner.id).await;
+    let kept = create_item(
+        &s.http,
+        &s.base,
+        s.a.id,
+        &s.owner_jwt,
+        archived,
+        "보관될 작업",
+    )
+    .await;
+    let kept_number = kept["number"].as_i64().unwrap();
+    sqlx::query("UPDATE channel SET archived_at = now() WHERE workspace_id = $1 AND id = $2")
+        .bind(s.a.id)
+        .bind(archived)
+        .execute(&s.su)
+        .await
+        .expect("archive");
+    assert_hidden_like_unknown(&s, &s.owner_jwt, kept_number, "archived channel").await;
+
+    let rows: Vec<(String, Uuid)> = sqlx::query_as(
+        "SELECT state, assignee_member_id FROM work_item WHERE workspace_id = $1 ORDER BY number",
+    )
+    .bind(s.a.id)
+    .fetch_all(&s.su)
+    .await
+    .unwrap();
+    assert_eq!(
+        rows,
+        vec![
+            ("open".to_string(), s.a.owner.id),
+            ("open".to_string(), s.a.owner.id)
+        ],
+        "no refused close or reassign moved a row"
+    );
+}
+
+async fn assert_hidden_like_unknown(s: &Stage, jwt: &str, number: i64, case: &str) {
+    for (verb, method, suffix, body) in [
+        ("GET", Method::GET, "", None),
+        (
+            "close",
+            Method::POST,
+            "/close",
+            Some(json!({"state": "done"})),
+        ),
+        (
+            "assignee",
+            Method::PUT,
+            "/assignee",
+            Some(json!({"memberId": s.other.id})),
+        ),
+    ] {
+        let hidden = call_bytes(
+            &s.http,
+            method.clone(),
+            &format!("{}{suffix}", item_url(&s.base, s.a.id, number)),
+            jwt,
+            body.as_ref(),
+        )
+        .await;
+        let unknown = call_bytes(
+            &s.http,
+            method,
+            &format!("{}{suffix}", item_url(&s.base, s.a.id, 999)),
+            jwt,
+            body.as_ref(),
+        )
+        .await;
+        assert_eq!(hidden.0, 404, "{case} {verb}: {}", hidden.1);
+        assert_eq!(
+            hidden, unknown,
+            "{case} {verb}: hidden must answer like unknown"
+        );
+    }
+    let (status, page) = call(&s.http, Method::GET, &items_url(&s.base, s.a.id), jwt, None).await;
+    assert_eq!(status, 200);
+    assert!(
+        page["workItems"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|item| item["number"].as_i64() != Some(number)),
+        "{case}: the list leaves #{number} out: {page}"
+    );
+}
+
+/// The list pages by number: three items, two per page, then the rest; the cursor is the last
+/// number of the page, and the last page has no cursor. An unknown query key is a 400.
+#[tokio::test]
+#[ignore = "needs a real Postgres"]
+async fn the_list_pages_by_number() {
+    let _guard = test_lock().await;
+    let s = stage("pages").await;
+    for title in ["첫째", "둘째", "셋째"] {
+        create_item(&s.http, &s.base, s.a.id, &s.member_jwt, s.room, title).await;
+    }
+    let numbers = |page: &Value| -> Vec<i64> {
+        page["workItems"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|item| item["number"].as_i64().unwrap())
+            .collect()
+    };
+    let base = items_url(&s.base, s.a.id);
+    let (status, first) = call(
+        &s.http,
+        Method::GET,
+        &format!("{base}?limit=2"),
+        &s.member_jwt,
+        None,
+    )
+    .await;
+    assert_eq!(status, 200, "{first}");
+    assert_eq!(numbers(&first), vec![3, 2]);
+    assert_eq!(first["nextCursor"], "2");
+    let (status, second) = call(
+        &s.http,
+        Method::GET,
+        &format!("{base}?limit=2&cursor=2"),
+        &s.member_jwt,
+        None,
+    )
+    .await;
+    assert_eq!(status, 200, "{second}");
+    assert_eq!(numbers(&second), vec![1]);
+    assert!(
+        second.get("nextCursor").is_none(),
+        "the last page has no cursor: {second}"
+    );
+    let (status, _) = call(
+        &s.http,
+        Method::GET,
+        &format!("{base}?sort=asc"),
+        &s.member_jwt,
+        None,
+    )
+    .await;
+    assert_eq!(status, 400, "an unknown query key is refused");
+}
+
+/// Planner decision on #6066 r1 M3 — a workspace guest neither creates a work item (403, nothing
+/// written, no counter) nor can be handed one (the same 400 as an agent); reading is unchanged.
+#[tokio::test]
+#[ignore = "needs a real Postgres"]
+async fn a_guest_neither_creates_nor_takes_a_work_item() {
+    let _guard = test_lock().await;
+    let s = stage("guest").await;
+    let guest = seed_human(&s.su, s.a.id, "member", "한지우").await;
+    join(&s.su, s.a.id, s.room, guest.id).await;
+    let guest_jwt = login(&s.http, &s.base, s.a.id, &guest).await;
+    sqlx::query(
+        "UPDATE workspace_membership SET role = 'guest' WHERE workspace_id = $1 AND member_id = $2",
+    )
+    .bind(s.a.id)
+    .bind(guest.id)
+    .execute(&s.su)
+    .await
+    .expect("demote to guest");
+
+    let (status, answer) = call(
+        &s.http,
+        Method::POST,
+        &items_url(&s.base, s.a.id),
+        &guest_jwt,
+        Some(&json!({"title": "게스트 작업", "homeChannelId": s.room})),
+    )
+    .await;
+    assert_eq!(status, 403, "{answer}");
+    assert_eq!(
+        error_message(&answer),
+        "workspace guests cannot create work items"
+    );
+    assert_eq!(count_items(&s.su, s.a.id).await, 0);
+    assert_eq!(counter(&s.su, s.a.id).await, None);
+
+    let item = create_item(
+        &s.http,
+        &s.base,
+        s.a.id,
+        &s.member_jwt,
+        s.room,
+        "넘기지 못할 작업",
+    )
+    .await;
+    let url = format!(
+        "{}/assignee",
+        item_url(&s.base, s.a.id, item["number"].as_i64().unwrap())
+    );
+    let to_guest = call_bytes(
+        &s.http,
+        Method::PUT,
+        &url,
+        &s.member_jwt,
+        Some(&json!({"memberId": guest.id})),
+    )
+    .await;
+    let to_agent = call_bytes(
+        &s.http,
+        Method::PUT,
+        &url,
+        &s.member_jwt,
+        Some(&json!({"memberId": s.a.agent})),
+    )
+    .await;
+    assert_eq!(to_guest.0, 400, "{}", to_guest.1);
+    assert_eq!(
+        to_guest, to_agent,
+        "a guest is refused like any ineligible assignee"
+    );
+    let assignee: Uuid =
+        sqlx::query_scalar("SELECT assignee_member_id FROM work_item WHERE workspace_id = $1")
+            .bind(s.a.id)
+            .fetch_one(&s.su)
+            .await
+            .unwrap();
+    assert_eq!(assignee, s.a.member.id);
+
+    let (status, read) = call(
+        &s.http,
+        Method::GET,
+        &item_url(&s.base, s.a.id, item["number"].as_i64().unwrap()),
+        &guest_jwt,
+        None,
+    )
+    .await;
+    assert_eq!(status, 200, "a seated guest still reads it: {read}");
 }

@@ -27,9 +27,20 @@
 --   * 제목: 다듬은 뒤 1~200자, 제어·보이지 않는·방향을 바꾸는 문자 금지. Rust 쪽 규칙
 --     (momo_wire::report_text::checked_text)이 이 CHECK 를 포함하므로 CHECK 가 먼저 터지지 않는다.
 --
+-- 작업은 지우지 않는다(#6066 보안 검수 r1 M1). ADR-0222 D2 는 작업을 「열림 · 완료 · 취소」로 닫을 뿐
+-- 지우는 길을 두지 않고(데이터 계약 「닫힘 상태」), 진행 기록도 「행은 고치지 않는다」. 그래서 작업을 가리키는
+-- FK(집 채널 · agent_run · work_session)는 ON DELETE 동작 없이(NO ACTION — 문장 끝에서 검사) 둔다.
+--   * 처음 판은 run · 세션 쪽을 ON DELETE SET NULL 로 두었는데, 그 SET NULL 이 일으키는 UPDATE 를
+--     agent_run_work_item_guard 가 「자식 있는 run 의 작업 바꾸기」로 거절했고, 가드를 풀면 자식이 부모
+--     값을 다시 물려 써서 지워진 작업을 가리키는 행이 남았다. 지우지 않기로 하면 두 규칙이 부딪히지 않는다.
+--   * 작업이나 집 채널을 지우는 문장은 그 작업을 가리키는 행이 남아 있으면 거절된다(조용히 지우지 않는다).
+--     워크스페이스 삭제는 workspace FK 의 CASCADE 가 같은 문장 안에서 모두 지우므로 문장 끝 검사를 통과한다.
+--     RESTRICT(즉시 검사)가 아니라 NO ACTION 인 까닭이 이것이다. 채널 · 작업을 지우는 운영 경로는 지금 없다.
+--
 -- LOCK NOTE (운영): agent_run·work_session 의 ALTER TABLE 은 커밋까지 ACCESS EXCLUSIVE 를 쥔다.
 -- 기본값 없는 NULL 허용 칸 추가는 메타데이터만 바꾸고, FK 는 NOT VALID 로 더해 옛 행을 훑지 않는다
--- (새 칸이라 옛 행은 모두 NULL 이다 — 168 과 같은 까닭으로 VALIDATE 하지 않는다).
+-- (새 칸이라 옛 행은 모두 NULL 이다 — 168 과 같은 까닭으로 VALIDATE 하지 않는다). 새 부분 색인 둘도 같은
+-- 잠금 안에서 만들어진다(지금 규모에서는 짧다).
 --
 -- schema_v0.sql 은 건드리지 않는다.
 -- =============================================================================
@@ -78,9 +89,10 @@ CREATE TABLE work_item (
   CONSTRAINT work_item_title_ck CHECK (
     title = btrim(title)
     AND char_length(title) BETWEEN 1 AND 200
-    AND title !~ '[[:cntrl:]­؜​-‏\u2028-‮⁠-⁯﻿]'),
+    AND title !~ '[[:cntrl:]\u00AD\u061C\u200B-\u200F\u2028-\u202E\u2060-\u206F\uFEFF]'),
+  -- 작업은 지우지 않는다(아래 「작업은 지우지 않는다」): 집 채널 삭제가 작업을 함께 지우지 않는다.
   CONSTRAINT work_item_home_channel_fk FOREIGN KEY (workspace_id, home_channel_id)
-    REFERENCES channel (workspace_id, id) ON DELETE CASCADE,
+    REFERENCES channel (workspace_id, id),
   CONSTRAINT work_item_assignee_fk FOREIGN KEY (workspace_id, assignee_member_id)
     REFERENCES member (workspace_id, id),
   CONSTRAINT work_item_doer_fk FOREIGN KEY (workspace_id, doer_member_id)
@@ -183,7 +195,7 @@ ALTER TABLE agent_run
 
 ALTER TABLE agent_run
   ADD CONSTRAINT agent_run_work_item_fk FOREIGN KEY (workspace_id, work_item_id)
-    REFERENCES work_item (workspace_id, id) ON DELETE SET NULL (work_item_id) NOT VALID,
+    REFERENCES work_item (workspace_id, id) NOT VALID,
   ADD CONSTRAINT agent_run_requested_by_fk FOREIGN KEY (workspace_id, requested_by_member_id)
     REFERENCES member (workspace_id, id) NOT VALID,
   ADD CONSTRAINT agent_run_on_behalf_of_fk FOREIGN KEY (workspace_id, on_behalf_of_member_id)
@@ -246,7 +258,7 @@ ALTER TABLE work_session
 
 ALTER TABLE work_session
   ADD CONSTRAINT work_session_work_item_fk FOREIGN KEY (workspace_id, work_item_id)
-    REFERENCES work_item (workspace_id, id) ON DELETE SET NULL (work_item_id) NOT VALID;
+    REFERENCES work_item (workspace_id, id) NOT VALID;
 
 CREATE INDEX work_session_work_item_idx ON work_session (workspace_id, work_item_id)
   WHERE work_item_id IS NOT NULL;
