@@ -6965,6 +6965,28 @@ export const catalog: MessageCatalog = {
       "value": "Checked again, but the signing setting still couldn’t be read."
     }
   ],
+  "notifications.banner.approvalTitle": [
+    {
+      "type": 0,
+      "value": "Approval needed · "
+    },
+    {
+      "type": 1,
+      "value": "actor"
+    }
+  ],
+  "notifications.banner.code": [
+    {
+      "type": 0,
+      "value": "Code"
+    }
+  ],
+  "notifications.banner.secret": [
+    {
+      "type": 0,
+      "value": "Private value"
+    }
+  ],
   "notifications.inviteLink.fallback": [
     {
       "type": 0,

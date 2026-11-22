@@ -6538,6 +6538,28 @@ export const catalog: MessageCatalog = {
       "value": "다시 확인했지만 서명 설정을 아직 읽지 못했어요."
     }
   ],
+  "notifications.banner.approvalTitle": [
+    {
+      "type": 0,
+      "value": "승인 필요 · "
+    },
+    {
+      "type": 1,
+      "value": "actor"
+    }
+  ],
+  "notifications.banner.code": [
+    {
+      "type": 0,
+      "value": "코드"
+    }
+  ],
+  "notifications.banner.secret": [
+    {
+      "type": 0,
+      "value": "비공개 값"
+    }
+  ],
   "notifications.inviteLink.fallback": [
     {
       "type": 0,

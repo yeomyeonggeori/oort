@@ -1,4 +1,4 @@
-import { notificationBody } from "@momo/core/features/notifications/model";
+import { notificationBody, type NotifyFormat } from "@momo/core/features/notifications/model";
 import {
   reminderBacklogNotificationBody,
   reminderPreviewText,
@@ -37,13 +37,17 @@ export function reminderNotifyDecision(args: {
   return { show: true };
 }
 
-export function reminderNotificationBody(reminder: MessageReminder): string | undefined {
-  return notificationBody(reminderPreviewText(reminder));
+export function reminderNotificationBody(
+  reminder: MessageReminder,
+  formatMessage: NotifyFormat
+): string | undefined {
+  return notificationBody(reminderPreviewText(reminder), formatMessage);
 }
 
 export async function fireReminderNotification(
   reminder: MessageReminder,
-  announcedIds: Set<string>
+  announcedIds: Set<string>,
+  formatMessage: NotifyFormat
 ): Promise<boolean> {
   const decision = reminderNotifyDecision({
     isDesktop: isDesktop(),
@@ -54,7 +58,7 @@ export async function fireReminderNotification(
   if (!decision.show) return false;
   return showNotification(
     REMINDER_NOTIFY_TITLE,
-    reminderNotificationBody(reminder)
+    reminderNotificationBody(reminder, formatMessage)
   );
 }
 

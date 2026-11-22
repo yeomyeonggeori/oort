@@ -938,6 +938,9 @@ export const messageKeys = [
   "mobile.workPermission.recheck",
   "mobile.workPermission.rechecking",
   "mobile.workPermission.recheckMissed",
+  "notifications.banner.approvalTitle",
+  "notifications.banner.code",
+  "notifications.banner.secret",
   "notifications.inviteLink.fallback",
   "readState.markUnread.action",
   "readState.markUnread.done",
@@ -3055,6 +3058,11 @@ export const argumentSpecs = {
   "mobile.workPermission.recheck": {},
   "mobile.workPermission.rechecking": {},
   "mobile.workPermission.recheckMissed": {},
+  "notifications.banner.approvalTitle": {
+    "actor": "string"
+  },
+  "notifications.banner.code": {},
+  "notifications.banner.secret": {},
   "notifications.inviteLink.fallback": {},
   "readState.markUnread.action": {},
   "readState.markUnread.done": {},
@@ -5206,6 +5214,9 @@ export interface MessageArgs {
   "mobile.workPermission.recheck": Record<string, never>;
   "mobile.workPermission.rechecking": Record<string, never>;
   "mobile.workPermission.recheckMissed": Record<string, never>;
+  "notifications.banner.approvalTitle": { actor: string };
+  "notifications.banner.code": Record<string, never>;
+  "notifications.banner.secret": Record<string, never>;
   "notifications.inviteLink.fallback": Record<string, never>;
   "readState.markUnread.action": Record<string, never>;
   "readState.markUnread.done": Record<string, never>;
