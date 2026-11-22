@@ -2278,7 +2278,9 @@ async function r5Scene(browser, origin, engine) {
       const cy = b.top + b.height / 2;
       const under = document.elementFromPoint(cx, cy)?.closest('[data-testid="work-jobs-reveal-new"]') !== null;
       const status = document.querySelector('[data-testid="work-jobs-new-asks-status"]')?.textContent ?? "";
-      return { stuck: Math.abs(head.top - list.top) < 1, inList: b.top >= list.top - 8 && b.bottom <= list.bottom, under, status, scrollTop: document.querySelector(sel).scrollTop, h: b.height };
+      const headBox = document.querySelector('[data-testid="work-jobs-head"]')?.getBoundingClientRect();
+      const fits = headBox !== undefined && b.top >= headBox.top - 0.5 && b.bottom <= headBox.bottom + 0.5;
+      return { fits, stuck: Math.abs(head.top - list.top) < 1, inList: b.top >= list.top - 8 && b.bottom <= list.bottom, under, status, scrollTop: document.querySelector(sel).scrollTop, h: b.height };
     }, LIST);
     const move = maxMove(s0, s1);
     // 「보기」가 화면 밖이면(붙지 않은 머리) 누를 수 없다 — 그 사실을 단언에 싣고 넘어간다.
@@ -2289,9 +2291,9 @@ async function r5Scene(browser, origin, engine) {
       const r = document.querySelector(`[data-section="needsMe"] [data-job-id="${rid}"]`).closest('[data-testid="work-job"]').getBoundingClientRect();
       return r.top >= list.top && r.bottom <= list.bottom + 1;
     }, [LIST, runWorking.runId]);
-    const ok = m.stuck && m.inList && m.under && m.status !== "" && move === 0 && seen && state.decisions === 0;
+    const ok = m.fits && m.stuck && m.inList && m.under && m.status !== "" && move === 0 && seen && state.decisions === 0;
     check(`r5-head-${engine}-${vp} 굴려 내려가 있어도 붙은 열 머리에 「새 요청 n · 보기」(낭독 「${m.status}」) · 줄과 겹침 0 · 칸 0px · 「보기」 뒤 새 칸이 보임`, ok, { ...m, move, seen });
-    summary.push(`${vp}: 붙음=${m.stuck} 단추 ${m.h}px 밑=${m.under} 낭독=「${m.status}」 scrollTop=${m.scrollTop} 칸 ${move.toFixed(1)}px 보기 뒤 보임=${seen}`);
+    summary.push(`${vp}: 붙음=${m.stuck} 머리 안=${m.fits} 단추 ${m.h}px 밑=${m.under} 낭독=「${m.status}」 scrollTop=${m.scrollTop} 칸 ${move.toFixed(1)}px 보기 뒤 보임=${seen}`);
     await context.close();
   }
   {
@@ -2320,6 +2322,71 @@ async function r5Scene(browser, origin, engine) {
     await context.close();
   }
   console.log(`MEASURE r5-${engine}: ${summary.join(" | ")}`);
+}
+
+/**
+ * 검수 r6 H2: 같은 폭에서 목록이 한 번 늘어난 뒤(줄 18 → 19) 끝까지 내린 채 그 줄이 다시 빠지면, 표 바닥이 첫 그림 높이에 머물러
+ * 브라우저가 굴림을 줄이고 결정 단추가 내려오던 것(39px, 손 밑이 윗줄 「거부」 → 1건). 고친 뒤: 바닥이 늘어난 높이를 따라가 단추 0px ·
+ * scrollTop 그대로 · 손 밑 그대로(잘못 나간 결정 0). 1280 × 1400·1500.
+ */
+async function growScene(browser, origin, engine) {
+  const LIST = "[data-team-board-list]";
+  const summary = [];
+  const tops = (page) =>
+    page.evaluate((sel) => {
+      const el = document.querySelector(sel);
+      const r = el.getBoundingClientRect();
+      const t = document.querySelector('[data-testid="work-jobs-table"]');
+      return {
+        st: el.scrollTop,
+        tableH: Math.round(t.getBoundingClientRect().height),
+        rows: el.querySelectorAll('[data-testid="work-job-row"]').length,
+        box: { l: r.left, t: r.top, b: r.bottom },
+        btn: [...el.querySelectorAll('[data-decision="reject"]')].map((b) => {
+          const q = b.getBoundingClientRect();
+          return { x: Math.round(q.left + q.width / 2), y: Math.round(q.top + q.height / 2) };
+        }),
+      };
+    }, LIST);
+  const toEnd = async (page, box) => {
+    await page.mouse.move(Math.round(box.l + 30), Math.round(box.t + 60));
+    await page.mouse.wheel(0, 3000);
+    await sleep(1500);
+  };
+  for (const h of [1400, 1500]) {
+    const { context, page, state } = await openContext(browser, origin, { scheme: "light", viewport: { width: 1280, height: h }, waiting: [], server: { twoDeciders: true, threeDeciders: true, decisionDelayMs: 60, roundTripMs: 60, hidden: new Set([runWorking.runId]) } });
+    await threeReady(page);
+    await settle(page);
+    await sleep(1200);
+    const a = await tops(page);
+    // 같은 폭에서 줄이 하나 는다(새 작업이 목록에 섬) → 끝까지 내린다.
+    state.hidden = new Set();
+    await rereadBoard(page, state);
+    await sleep(300);
+    const b = await tops(page);
+    await toEnd(page, b.box);
+    const c0 = await tops(page);
+    // 손을 둘째 「거부」 아래(앞 빌드에서 단추가 내려오던 만큼)에 둔다 — 고친 빌드에서는 그 「거부」 자리.
+    const target = c0.btn[1] ?? c0.btn[0];
+    const P = { x: target.x, y: target.y + 39 };
+    await page.mouse.move(P.x, P.y);
+    const u0 = await underPoint(page, P.x, P.y);
+    // 그 줄이 다시 빠진다.
+    state.hidden = new Set([runWorking.runId]);
+    await rereadBoard(page, state);
+    await sleep(100);
+    const d = await tops(page);
+    const u1 = await underPoint(page, P.x, P.y);
+    await mousePress(page, P.x, P.y);
+    await sleep(600);
+    const shift = (d.btn[0]?.y ?? 0) - (c0.btn[0]?.y ?? 0);
+    const sameUnder = u0.job === u1.job && u0.decision === u1.decision;
+    const wrong = sameUnder ? 0 : state.decisions;
+    check(`r6-grow-${engine}-${h} 줄이 늘었다가(${a.rows}→${b.rows}) 끝까지 내린 채 빠짐 → 단추 0px · scrollTop 그대로 · 손 밑 그대로 · 잘못 나간 결정 0`, shift === 0 && d.st === c0.st && sameUnder && wrong === 0, { tableH: [a.tableH, b.tableH, d.tableH], st: [c0.st, d.st], shift, u0: short(u0), u1: short(u1), decisions: state.decisions });
+    summary.push(`${h}: 줄 ${a.rows}→${b.rows}→${d.rows} 표 ${a.tableH}→${b.tableH}→${d.tableH} scrollTop ${c0.st}→${d.st} 단추 ${shift}px 손 밑 ${short(u0)}→${short(u1)} 잘못 나간 결정 ${wrong}`);
+    await context.close();
+  }
+  console.log(`MEASURE r6-grow-${engine}: ${summary.join(" | ")}`);
 }
 
 async function touchRevScene(browser, origin, engine) {
@@ -2530,7 +2597,7 @@ async function main() {
       }
     }
     if (ONLY === "" || ONLY === "fix5738r2" || ONLY.startsWith("fix5738r2:")) {
-      const parts = ONLY.startsWith("fix5738r2:") ? ONLY.slice(10).split(",") : ["below", "band", "conn", "scroll", "hold", "wheelmix", "clamp", "nearend", "r5", "touchrev", "four", "shots", "look"];
+      const parts = ONLY.startsWith("fix5738r2:") ? ONLY.slice(10).split(",") : ["below", "band", "conn", "scroll", "hold", "wheelmix", "clamp", "nearend", "r5", "grow", "touchrev", "four", "shots", "look"];
       const wk = await webkit.launch();
       try {
         for (const [engine, b] of [["chromium", browser], ["webkit", wk]].filter(([e]) => ENGINES === "" || ENGINES.split(",").includes(e))) {
@@ -2543,6 +2610,7 @@ async function main() {
           if (parts.includes("clamp")) await clampScene(b, preview.origin, engine);
           if (parts.includes("nearend")) await nearEndScene(b, preview.origin, engine);
           if (parts.includes("r5")) await r5Scene(b, preview.origin, engine);
+          if (parts.includes("grow")) await growScene(b, preview.origin, engine);
           if (parts.includes("touchrev")) await touchRevScene(b, preview.origin, engine);
           if (parts.includes("four")) await fourRowsScene(b, preview.origin, engine);
         }
