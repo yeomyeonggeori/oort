@@ -8027,6 +8027,186 @@ export const catalog: MessageCatalog = {
       "value": "total"
     }
   ],
+  "onboarding.harnessLogin.actionClaude": [
+    {
+      "type": 0,
+      "value": "Sign in with Claude Code"
+    }
+  ],
+  "onboarding.harnessLogin.actionCodex": [
+    {
+      "type": 0,
+      "value": "Sign in with Codex"
+    }
+  ],
+  "onboarding.harnessLogin.checking": [
+    {
+      "type": 0,
+      "value": "Checking your sign-in."
+    }
+  ],
+  "onboarding.harnessLogin.codeHint": [
+    {
+      "type": 0,
+      "value": "The pasted code goes only to Claude Code and is not stored."
+    }
+  ],
+  "onboarding.harnessLogin.codeLabel": [
+    {
+      "type": 0,
+      "value": "Sign-in code"
+    }
+  ],
+  "onboarding.harnessLogin.codeSent": [
+    {
+      "type": 0,
+      "value": "Code sent."
+    }
+  ],
+  "onboarding.harnessLogin.codeSubmit": [
+    {
+      "type": 0,
+      "value": "Send"
+    }
+  ],
+  "onboarding.harnessLogin.codeToggle": [
+    {
+      "type": 0,
+      "value": "Did the browser show a code?"
+    }
+  ],
+  "onboarding.harnessLogin.connected": [
+    {
+      "type": 0,
+      "value": "Connected."
+    }
+  ],
+  "onboarding.harnessLogin.connectedDetail": [
+    {
+      "type": 0,
+      "value": "You can now choose "
+    },
+    {
+      "type": 1,
+      "value": "cli"
+    },
+    {
+      "type": 0,
+      "value": " as your agent."
+    }
+  ],
+  "onboarding.harnessLogin.detach": [
+    {
+      "type": 0,
+      "value": "Close and keep going"
+    }
+  ],
+  "onboarding.harnessLogin.deviceCode": [
+    {
+      "type": 0,
+      "value": "Sign in with a device code"
+    }
+  ],
+  "onboarding.harnessLogin.done": [
+    {
+      "type": 0,
+      "value": "Done"
+    }
+  ],
+  "onboarding.harnessLogin.failedDefault": [
+    {
+      "type": 0,
+      "value": "Couldn't finish signing in."
+    }
+  ],
+  "onboarding.harnessLogin.failedSpawn": [
+    {
+      "type": 0,
+      "value": "This app couldn't start the sign-in."
+    }
+  ],
+  "onboarding.harnessLogin.failedTimeout": [
+    {
+      "type": 0,
+      "value": "Sign-in didn't finish."
+    }
+  ],
+  "onboarding.harnessLogin.notLoggedInDetail": [
+    {
+      "type": 1,
+      "value": "cli"
+    },
+    {
+      "type": 0,
+      "value": " reported that you are not signed in yet."
+    }
+  ],
+  "onboarding.harnessLogin.rowHint": [
+    {
+      "type": 0,
+      "value": "Sign in to choose it."
+    }
+  ],
+  "onboarding.harnessLogin.spawnDetail": [
+    {
+      "type": 0,
+      "value": "Copy the command and sign in yourself in a terminal."
+    }
+  ],
+  "onboarding.harnessLogin.terminalAria": [
+    {
+      "type": 1,
+      "value": "title"
+    },
+    {
+      "type": 0,
+      "value": " terminal"
+    }
+  ],
+  "onboarding.harnessLogin.terminalHide": [
+    {
+      "type": 0,
+      "value": "Hide terminal"
+    }
+  ],
+  "onboarding.harnessLogin.terminalShow": [
+    {
+      "type": 0,
+      "value": "Show in terminal"
+    }
+  ],
+  "onboarding.harnessLogin.timeoutDetail": [
+    {
+      "type": 0,
+      "value": "It stopped because nothing came back from the browser for 5 minutes."
+    }
+  ],
+  "onboarding.harnessLogin.waitingBrowser": [
+    {
+      "type": 0,
+      "value": "Signing in in your browser."
+    }
+  ],
+  "onboarding.harnessLogin.waitingDetail": [
+    {
+      "type": 0,
+      "value": "Sign-in finishes in the browser window "
+    },
+    {
+      "type": 1,
+      "value": "cli"
+    },
+    {
+      "type": 0,
+      "value": " opened. oort never sees your login details."
+    }
+  ],
+  "onboarding.harnessLogin.waitingDevice": [
+    {
+      "type": 0,
+      "value": "Enter the code shown in the terminal into your browser."
+    }
+  ],
   "readState.markUnread.action": [
     {
       "type": 0,

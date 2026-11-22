@@ -1084,6 +1084,32 @@ export const messageKeys = [
   "onboarding.guide.stateSuccess",
   "onboarding.guide.stateTrouble",
   "onboarding.guide.stepLabel",
+  "onboarding.harnessLogin.actionClaude",
+  "onboarding.harnessLogin.actionCodex",
+  "onboarding.harnessLogin.checking",
+  "onboarding.harnessLogin.codeHint",
+  "onboarding.harnessLogin.codeLabel",
+  "onboarding.harnessLogin.codeSent",
+  "onboarding.harnessLogin.codeSubmit",
+  "onboarding.harnessLogin.codeToggle",
+  "onboarding.harnessLogin.connected",
+  "onboarding.harnessLogin.connectedDetail",
+  "onboarding.harnessLogin.detach",
+  "onboarding.harnessLogin.deviceCode",
+  "onboarding.harnessLogin.done",
+  "onboarding.harnessLogin.failedDefault",
+  "onboarding.harnessLogin.failedSpawn",
+  "onboarding.harnessLogin.failedTimeout",
+  "onboarding.harnessLogin.notLoggedInDetail",
+  "onboarding.harnessLogin.rowHint",
+  "onboarding.harnessLogin.spawnDetail",
+  "onboarding.harnessLogin.terminalAria",
+  "onboarding.harnessLogin.terminalHide",
+  "onboarding.harnessLogin.terminalShow",
+  "onboarding.harnessLogin.timeoutDetail",
+  "onboarding.harnessLogin.waitingBrowser",
+  "onboarding.harnessLogin.waitingDetail",
+  "onboarding.harnessLogin.waitingDevice",
   "readState.markUnread.action",
   "readState.markUnread.done",
   "readState.markUnread.failed",
@@ -3375,6 +3401,40 @@ export const argumentSpecs = {
     "current": "string",
     "total": "string"
   },
+  "onboarding.harnessLogin.actionClaude": {},
+  "onboarding.harnessLogin.actionCodex": {},
+  "onboarding.harnessLogin.checking": {},
+  "onboarding.harnessLogin.codeHint": {},
+  "onboarding.harnessLogin.codeLabel": {},
+  "onboarding.harnessLogin.codeSent": {},
+  "onboarding.harnessLogin.codeSubmit": {},
+  "onboarding.harnessLogin.codeToggle": {},
+  "onboarding.harnessLogin.connected": {},
+  "onboarding.harnessLogin.connectedDetail": {
+    "cli": "string"
+  },
+  "onboarding.harnessLogin.detach": {},
+  "onboarding.harnessLogin.deviceCode": {},
+  "onboarding.harnessLogin.done": {},
+  "onboarding.harnessLogin.failedDefault": {},
+  "onboarding.harnessLogin.failedSpawn": {},
+  "onboarding.harnessLogin.failedTimeout": {},
+  "onboarding.harnessLogin.notLoggedInDetail": {
+    "cli": "string"
+  },
+  "onboarding.harnessLogin.rowHint": {},
+  "onboarding.harnessLogin.spawnDetail": {},
+  "onboarding.harnessLogin.terminalAria": {
+    "title": "string"
+  },
+  "onboarding.harnessLogin.terminalHide": {},
+  "onboarding.harnessLogin.terminalShow": {},
+  "onboarding.harnessLogin.timeoutDetail": {},
+  "onboarding.harnessLogin.waitingBrowser": {},
+  "onboarding.harnessLogin.waitingDetail": {
+    "cli": "string"
+  },
+  "onboarding.harnessLogin.waitingDevice": {},
   "readState.markUnread.action": {},
   "readState.markUnread.done": {},
   "readState.markUnread.failed": {},
@@ -5671,6 +5731,32 @@ export interface MessageArgs {
   "onboarding.guide.stateSuccess": Record<string, never>;
   "onboarding.guide.stateTrouble": Record<string, never>;
   "onboarding.guide.stepLabel": { current: string; total: string };
+  "onboarding.harnessLogin.actionClaude": Record<string, never>;
+  "onboarding.harnessLogin.actionCodex": Record<string, never>;
+  "onboarding.harnessLogin.checking": Record<string, never>;
+  "onboarding.harnessLogin.codeHint": Record<string, never>;
+  "onboarding.harnessLogin.codeLabel": Record<string, never>;
+  "onboarding.harnessLogin.codeSent": Record<string, never>;
+  "onboarding.harnessLogin.codeSubmit": Record<string, never>;
+  "onboarding.harnessLogin.codeToggle": Record<string, never>;
+  "onboarding.harnessLogin.connected": Record<string, never>;
+  "onboarding.harnessLogin.connectedDetail": { cli: string };
+  "onboarding.harnessLogin.detach": Record<string, never>;
+  "onboarding.harnessLogin.deviceCode": Record<string, never>;
+  "onboarding.harnessLogin.done": Record<string, never>;
+  "onboarding.harnessLogin.failedDefault": Record<string, never>;
+  "onboarding.harnessLogin.failedSpawn": Record<string, never>;
+  "onboarding.harnessLogin.failedTimeout": Record<string, never>;
+  "onboarding.harnessLogin.notLoggedInDetail": { cli: string };
+  "onboarding.harnessLogin.rowHint": Record<string, never>;
+  "onboarding.harnessLogin.spawnDetail": Record<string, never>;
+  "onboarding.harnessLogin.terminalAria": { title: string };
+  "onboarding.harnessLogin.terminalHide": Record<string, never>;
+  "onboarding.harnessLogin.terminalShow": Record<string, never>;
+  "onboarding.harnessLogin.timeoutDetail": Record<string, never>;
+  "onboarding.harnessLogin.waitingBrowser": Record<string, never>;
+  "onboarding.harnessLogin.waitingDetail": { cli: string };
+  "onboarding.harnessLogin.waitingDevice": Record<string, never>;
   "readState.markUnread.action": Record<string, never>;
   "readState.markUnread.done": Record<string, never>;
   "readState.markUnread.failed": Record<string, never>;

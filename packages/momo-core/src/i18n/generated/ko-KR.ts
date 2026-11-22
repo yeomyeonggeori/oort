@@ -7522,6 +7522,186 @@ export const catalog: MessageCatalog = {
       "value": "단계"
     }
   ],
+  "onboarding.harnessLogin.actionClaude": [
+    {
+      "type": 0,
+      "value": "Claude Code로 로그인"
+    }
+  ],
+  "onboarding.harnessLogin.actionCodex": [
+    {
+      "type": 0,
+      "value": "Codex로 로그인"
+    }
+  ],
+  "onboarding.harnessLogin.checking": [
+    {
+      "type": 0,
+      "value": "로그인을 확인하고 있어요."
+    }
+  ],
+  "onboarding.harnessLogin.codeHint": [
+    {
+      "type": 0,
+      "value": "붙여 넣은 코드는 Claude Code에만 전달하고 저장하지 않습니다."
+    }
+  ],
+  "onboarding.harnessLogin.codeLabel": [
+    {
+      "type": 0,
+      "value": "로그인 코드"
+    }
+  ],
+  "onboarding.harnessLogin.codeSent": [
+    {
+      "type": 0,
+      "value": "코드를 보냈습니다."
+    }
+  ],
+  "onboarding.harnessLogin.codeSubmit": [
+    {
+      "type": 0,
+      "value": "보내기"
+    }
+  ],
+  "onboarding.harnessLogin.codeToggle": [
+    {
+      "type": 0,
+      "value": "브라우저에 코드가 나왔나요?"
+    }
+  ],
+  "onboarding.harnessLogin.connected": [
+    {
+      "type": 0,
+      "value": "연결됐어요."
+    }
+  ],
+  "onboarding.harnessLogin.connectedDetail": [
+    {
+      "type": 0,
+      "value": "이제 "
+    },
+    {
+      "type": 1,
+      "value": "cli"
+    },
+    {
+      "type": 0,
+      "value": "를 내 에이전트로 고를 수 있어요."
+    }
+  ],
+  "onboarding.harnessLogin.detach": [
+    {
+      "type": 0,
+      "value": "닫고 계속하기"
+    }
+  ],
+  "onboarding.harnessLogin.deviceCode": [
+    {
+      "type": 0,
+      "value": "기기 코드로 로그인"
+    }
+  ],
+  "onboarding.harnessLogin.done": [
+    {
+      "type": 0,
+      "value": "완료"
+    }
+  ],
+  "onboarding.harnessLogin.failedDefault": [
+    {
+      "type": 0,
+      "value": "로그인을 마치지 못했어요."
+    }
+  ],
+  "onboarding.harnessLogin.failedSpawn": [
+    {
+      "type": 0,
+      "value": "이 앱에서 로그인을 열지 못했어요."
+    }
+  ],
+  "onboarding.harnessLogin.failedTimeout": [
+    {
+      "type": 0,
+      "value": "로그인이 끝나지 않았어요."
+    }
+  ],
+  "onboarding.harnessLogin.notLoggedInDetail": [
+    {
+      "type": 1,
+      "value": "cli"
+    },
+    {
+      "type": 0,
+      "value": "가 아직 로그인되지 않았다고 알려 왔어요."
+    }
+  ],
+  "onboarding.harnessLogin.rowHint": [
+    {
+      "type": 0,
+      "value": "로그인하면 고를 수 있어요."
+    }
+  ],
+  "onboarding.harnessLogin.spawnDetail": [
+    {
+      "type": 0,
+      "value": "명령을 복사해 터미널에서 직접 로그인해 주세요."
+    }
+  ],
+  "onboarding.harnessLogin.terminalAria": [
+    {
+      "type": 1,
+      "value": "title"
+    },
+    {
+      "type": 0,
+      "value": " 터미널"
+    }
+  ],
+  "onboarding.harnessLogin.terminalHide": [
+    {
+      "type": 0,
+      "value": "터미널 접기"
+    }
+  ],
+  "onboarding.harnessLogin.terminalShow": [
+    {
+      "type": 0,
+      "value": "터미널로 보기"
+    }
+  ],
+  "onboarding.harnessLogin.timeoutDetail": [
+    {
+      "type": 0,
+      "value": "5분 동안 브라우저에서 돌아오지 않아 멈췄어요."
+    }
+  ],
+  "onboarding.harnessLogin.waitingBrowser": [
+    {
+      "type": 0,
+      "value": "브라우저에서 로그인하고 있어요."
+    }
+  ],
+  "onboarding.harnessLogin.waitingDetail": [
+    {
+      "type": 0,
+      "value": "로그인은 "
+    },
+    {
+      "type": 1,
+      "value": "cli"
+    },
+    {
+      "type": 0,
+      "value": "가 연 브라우저 창에서 끝나요. oort는 로그인 정보를 보지 않아요."
+    }
+  ],
+  "onboarding.harnessLogin.waitingDevice": [
+    {
+      "type": 0,
+      "value": "터미널에 나온 코드를 브라우저에 넣어 주세요."
+    }
+  ],
   "readState.markUnread.action": [
     {
       "type": 0,

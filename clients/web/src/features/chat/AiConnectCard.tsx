@@ -13,7 +13,7 @@ import {
   HARNESS_LABEL,
   type HarnessPill,
 } from "@momo/core/features/onboarding/aiConnect";
-import { loginActionLabel } from "@momo/core/features/onboarding/harnessLogin";
+import { loginActionKey } from "@momo/core/features/onboarding/harnessLogin";
 import {
   fetchProviderLink,
   testProviderLink,
@@ -75,6 +75,7 @@ import {
 } from "@/features/welcome/harnessLogin/registerFixtures";
 import { START_CREATE_LABEL } from "@momo/core/features/onboarding/subscriptionRegister";
 import { BlockedReason, type BlockedFrame } from "@/features/common/BlockedReason";
+import { useFormatMessage } from "@/i18n/useFormatMessage";
 
 // Reading this as: agent card family (local tool card at the timeline tail) for
 // internal team users on web+Tauri, density 6/10, motion 2/10.
@@ -680,6 +681,7 @@ function harnessResultLine(result: HarnessResult | undefined, pill: HarnessPill)
 }
 
 function HarnessRows({ only }: { only: LocalHarnessId | null }) {
+  const formatMessage = useFormatMessage();
   const pose = readCardPose();
   const fixture = readProbeFixture();
   const harness = useLocalHarnessWatch({
@@ -776,7 +778,7 @@ function HarnessRows({ only }: { only: LocalHarnessId | null }) {
                 onClick={() => openLogin(id)}
                 data-testid={`ai-connect-card-${id}-login`}
               >
-                {loginActionLabel(id)}
+                {formatMessage(loginActionKey(id))}
               </Button>
             );
           } else {
