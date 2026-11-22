@@ -4194,6 +4194,13 @@
  * 한 글자로 잘린다(design-review B-1). */
 @utility work-jobs-list {
   container-type: inline-size;
+  /* 굴림 맞추기의 위 여백 = 붙은 열 머리(`work-jobs-head`) 높이 — py-2 + 글줄 + 아래 선 1px, 폰 폭은 머리가 tap-target(44)이라
+   * 그 값. 키보드 초점 · 「보기」 뒤 맞추기가 머리 밑에 숨지 않게(#5738 검수 r7). */
+  scroll-padding-top: calc(var(--spacing-2) * 2 + var(--text-timestamp--line-height) + 1px);
+
+  @media (width < 600px) {
+    scroll-padding-top: max(var(--tap-target), calc(var(--spacing-2) * 2 + var(--text-timestamp--line-height) + 1px));
+  }
 }
 
 /* 「작업」 한 화면의 줄. 작업 | 결과 | 상태 120 | 작업 시간 104 | 요청 채널 96. 목록 상자가 900보다
