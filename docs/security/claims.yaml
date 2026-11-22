@@ -165,6 +165,20 @@ claims:
     runs: pr-ci
     proofs:
       - "server-rust/bins/momo-server/tests/channel_preview_pg.rs#guests_suspended_people_and_agents_are_refused_the_preview_like_the_join"
+  - id: TEN-15
+    claim: "A work item number the caller cannot see (they are not an active member of its home channel), a number that does not exist and a number that exists only in another workspace give the same status and the same body bytes for reading, closing and reassigning, and the work item list leaves hidden items out, titles included."
+    scope: "ADR-0222 원장-1 (#6066), GET /v1/workspaces/{ws}/work-items, GET …/work-items/{number}, POST …/{number}/close, PUT …/{number}/assignee. Real PostgreSQL as the non-bypass API role, two workspaces. One visibility predicate (home channel not archived, caller seated and active) is the start of every read and write; a workspace admin who is not in the home channel gets the same 404. Not covered: the progress log, links and team counts (later pieces of ADR-0222)."
+    priority: P1
+    runs: pr-ci
+    proofs:
+      - "server-rust/bins/momo-server/tests/work_item_pg.rs#an_item_the_caller_cannot_see_answers_like_an_unknown_number"
+  - id: TEN-16
+    claim: "Closing a work item or handing it to another person succeeds only for its assignee or a workspace owner/admin; any other person who can see it gets 403 and the row does not change, and the new assignee must be an active person in the item's home channel (an agent, an unknown id and a person outside the channel get one identical 400)."
+    scope: "ADR-0222 원장-1 (#6066) and its 미결 7 current value. Real PostgreSQL as the non-bypass API role. Who may close or reassign later (the doer, the requester, an agent) is not decided and not claimed."
+    priority: P1
+    runs: pr-ci
+    proofs:
+      - "server-rust/bins/momo-server/tests/work_item_pg.rs#close_and_reassign_belong_to_the_assignee_and_admins"
 
   # ---- 인증·세션 -------------------------------------------------------------------
   - id: AUTH-1
@@ -423,6 +437,26 @@ claims:
       - "server-rust/crates/momo-workspace-actions/tests/agent_channel_open_pg.rs#the_team_ai_names_a_closed_channel_only_in_a_members_own_dm"
       - "server-rust/crates/momo-workspace-actions/tests/agent_channel_open_pg.rs#a_conversation_someone_else_was_in_is_not_the_one_to_one_dm"
       - "server-rust/crates/momo-workspace-actions/tests/agent_channel_open_pg.rs#a_guests_context_names_no_channel_the_guest_is_not_in"
+  - id: AGT-7
+    claim: "The database refuses an agent as a work item's assignee or on-behalf-of, on INSERT and on UPDATE, refuses an on-behalf-of that differs from a human requester, never lets the requester change, and keeps an agent run's on-behalf-of a person."
+    scope: "ADR-0222 D2 and its data contract (#6066). Triggers on work_item and agent_run, exercised as the non-bypass API role inside its tenant transaction, so the refusal holds with every application check removed. Filling an agent run's requester and on-behalf-of when the run is created is a later piece and not claimed."
+    priority: P1
+    runs: pr-ci
+    proofs:
+      - "server-rust/bins/momo-server/tests/work_item_pg.rs#the_database_keeps_assignee_and_on_behalf_of_human"
+      - "server-rust/bins/momo-server/tests/work_item_pg.rs#a_child_run_carries_its_parents_work_item"
+  - id: AGT-8
+    claim: "Only a signed-in person reaches the five work item routes: an agent bearer is refused by the agent route table (403) and nothing is written, the handlers refuse an agent or a signed work host principal before reading the body, developer tokens and signed work hosts have no row for any of them, and a create body that names a requester, an on-behalf-of, an assignee or an actor is a 400 — the stored requester, on-behalf-of, assignee and creator are the caller."
+    scope: "ADR-0222 원장-1 (#6066): agents creating work items is a later piece (ADR-0222 증보 E4). Real PostgreSQL for the HTTP proofs; the handler layer and the closed body are also proved with no database and no middleware, with a control that a valid request reaches the pool."
+    priority: P1
+    runs: pr-ci
+    proofs:
+      - "server-rust/bins/momo-server/tests/work_item_pg.rs#an_agent_bearer_cannot_create_and_nothing_is_written"
+      - "server-rust/bins/momo-server/tests/work_item_pg.rs#the_server_names_the_requester_and_a_body_cannot"
+      - "server-rust/bins/momo-server/tests/work_item_gates.rs#layer_two_every_handler_refuses_a_non_human_principal_first"
+      - "server-rust/bins/momo-server/tests/work_item_gates.rs#a_create_body_that_names_a_person_is_a_400_before_any_connection"
+      - "server-rust/crates/momo-auth/src/dev_token.rs#a_developer_token_cannot_reach_work_items"
+      - "server-rust/bins/momo-server/src/work_host_auth.rs#a_signed_host_cannot_reach_work_items"
 
   # ---- 자격증명 ---------------------------------------------------------------------
   - id: CRED-1
