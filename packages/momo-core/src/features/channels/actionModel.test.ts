@@ -1,35 +1,52 @@
 import { describe, expect, it } from "vitest";
 import {
-  CHANNEL_COPY_GROUP_LABEL,
-  CHANNEL_COPY_ID_DONE_LABEL,
-  CHANNEL_COPY_ID_LABEL,
-  CHANNEL_LEAVE_LABEL,
-  CHANNEL_MARK_READ_LABEL,
-  CHANNEL_MARK_UNREAD_LABEL,
-  CHANNEL_MUTE_LABEL,
-  CHANNEL_TOPIC_VIEW_LABEL,
-  CHANNEL_UNMUTE_LABEL,
+  CHANNEL_COPY_GROUP_KEY,
+  CHANNEL_COPY_ID_DONE_KEY,
+  CHANNEL_COPY_ID_KEY,
+  CHANNEL_LEAVE_KEY,
+  CHANNEL_MARK_READ_KEY,
+  CHANNEL_MARK_UNREAD_KEY,
+  CHANNEL_MUTE_KEY,
+  CHANNEL_TOPIC_VIEW_KEY,
+  CHANNEL_UNMUTE_KEY,
 } from "./model";
 import {
   COPY_LINK_ACTION_LABEL,
   COPY_LINK_DONE_LABEL,
 } from "../timeline/copyLabels";
 import type { Channel } from "../../lib/api";
+import { catalog as koCatalog } from "../../i18n/generated/ko-KR";
+import { createMessageCopy } from "../../testkit";
 import {
   channelActionAvailability,
   channelActionClusterSubmenu,
-  channelActionClusterTitle,
-  channelActionItems,
-  channelActionItemsForSurface,
+  channelActionClusterTitleKey,
+  channelActionItems as buildItems,
+  channelActionItemsForSurface as buildItemsForSurface,
   channelActionKeepsMenuOpen,
-  channelActionMenuLabel,
+  channelActionMenuRef,
   isChannelActionStatusIcon,
   type ChannelActionAvailability,
   type ChannelActionCluster,
   type ChannelActionKey,
   type ChannelActionState,
 } from "./actionModel";
-import { SECTION_MOVE_GROUP_LABEL } from "../sidebar/sidebarSections";
+import { SECTION_MOVE_GROUP_KEY } from "../sidebar/sidebarSections";
+const refText = (ref: { key: string; values?: object }) => ko(ref.key as never, ref.values as never);
+
+// 메뉴 낱말은 사전에 있다(#6045). 시험은 한국어 생성물로 풀어 같은 문장을 단정한다.
+const ko = createMessageCopy({ messageLocale: "ko-KR", catalog: koCatalog });
+const channelActionItems = (
+  available: ChannelActionAvailability,
+  state: ChannelActionState,
+  formatMessage: typeof ko = ko
+) => buildItems(available, state, formatMessage);
+const channelActionItemsForSurface = (
+  surface: Parameters<typeof buildItemsForSurface>[0],
+  available: ChannelActionAvailability,
+  state: ChannelActionState,
+  formatMessage: typeof ko = ko
+) => buildItemsForSurface(surface, available, state, formatMessage);
 
 const WS = "00000000-0000-7000-8000-000000000001";
 
@@ -197,11 +214,11 @@ describe("channelActionItems", () => {
 
   it("낱말이 상태다: 알림도 복사도 지금을 읽는다", () => {
     const idle = channelActionItems(ALL, REST);
-    expect(idle.find((i) => i.key === "mute")?.label).toBe(CHANNEL_MUTE_LABEL);
+    expect(idle.find((i) => i.key === "mute")?.label).toBe(ko(CHANNEL_MUTE_KEY));
     expect(idle.find((i) => i.key === "copy-link")?.label).toBe(
       COPY_LINK_ACTION_LABEL
     );
-    expect(idle.find((i) => i.key === "copy-id")?.label).toBe(CHANNEL_COPY_ID_LABEL);
+    expect(idle.find((i) => i.key === "copy-id")?.label).toBe(ko(CHANNEL_COPY_ID_KEY));
 
     const after = channelActionItems(ALL, {
       muted: true,
@@ -209,13 +226,13 @@ describe("channelActionItems", () => {
       copiedName: true,
       copiedId: true,
     });
-    expect(after.find((i) => i.key === "mute")?.label).toBe(CHANNEL_UNMUTE_LABEL);
+    expect(after.find((i) => i.key === "mute")?.label).toBe(ko(CHANNEL_UNMUTE_KEY));
     expect(after.find((i) => i.key === "copy-link")?.label).toBe(
       COPY_LINK_DONE_LABEL
     );
     expect(after.find((i) => i.key === "copy-name")?.label).toContain("복사됨");
     expect(after.find((i) => i.key === "copy-id")?.label).toBe(
-      CHANNEL_COPY_ID_DONE_LABEL
+      ko(CHANNEL_COPY_ID_DONE_KEY)
     );
   });
 
@@ -224,7 +241,7 @@ describe("channelActionItems", () => {
     expect(items.filter((i) => i.tone === "danger").map((i) => i.key)).toEqual([
       "leave",
     ]);
-    expect(items.find((i) => i.key === "leave")?.label).toBe(CHANNEL_LEAVE_LABEL);
+    expect(items.find((i) => i.key === "leave")?.label).toBe(ko(CHANNEL_LEAVE_KEY));
   });
 
   it("구분선은 무리가 바뀌는 자리에만 선다", () => {
@@ -246,10 +263,10 @@ describe("channelActionItems", () => {
       ["mute", "state"],
       ["leave", "danger"],
     ]);
-    expect(channelActionClusterTitle("copy")).toBe(CHANNEL_COPY_GROUP_LABEL);
+    expect(channelActionClusterTitleKey("copy")).toBe(CHANNEL_COPY_GROUP_KEY);
     // 제목이 없는 무리는 행만 선다. 섹션 이동은 항목이 자기 제목을 든다.
-    expect(channelActionClusterTitle("state")).toBeUndefined();
-    expect(channelActionClusterTitle("place")).toBeUndefined();
+    expect(channelActionClusterTitleKey("state")).toBeUndefined();
+    expect(channelActionClusterTitleKey("place")).toBeUndefined();
   });
 });
 
@@ -270,7 +287,7 @@ describe("channelActionItemsForSurface", () => {
       channelActionItemsForSurface("header", ALL, REST).find(
         (i) => i.key === "topic"
       )?.label
-    ).toBe(CHANNEL_TOPIC_VIEW_LABEL);
+    ).toBe(ko(CHANNEL_TOPIC_VIEW_KEY));
   });
 
   it("헤더 ⋮ 의 구분선은 예전 그대로다: 주제 │ 알림 · 기억 │ 나가기", () => {
@@ -321,7 +338,7 @@ describe("channelActionItemsForSurface", () => {
       channelActionItemsForSurface("row", ALL, REST).find(
         (i) => i.key === "mark-read"
       )?.label
-    ).toBe(CHANNEL_MARK_READ_LABEL);
+    ).toBe(ko(CHANNEL_MARK_READ_KEY));
   });
 
   it("행 메뉴는 Buzz 의 차례다: 복사 │ 섹션 │ 읽음·알림·별표 │ 나가기", () => {
@@ -468,7 +485,7 @@ describe("진행 낱말과 메뉴 이름 (design-review #1937)", () => {
       }),
       REST
     ).find((i) => i.key === "mark-unread");
-    expect(unread?.label).toBe(CHANNEL_MARK_UNREAD_LABEL);
+    expect(unread?.label).toBe(ko(CHANNEL_MARK_UNREAD_KEY));
     expect(unread?.busyLabel).toBe("읽지 않음으로 표시 중");
   });
 
@@ -482,13 +499,13 @@ describe("진행 낱말과 메뉴 이름 (design-review #1937)", () => {
   });
 
   it("메뉴 이름이 DM 을 「채널」이라 부르지 않는다", () => {
-    expect(channelActionMenuLabel("이도현", { kind: "dm" })).toBe(
+    expect(refText(channelActionMenuRef("이도현", { kind: "dm" }))).toBe(
       "이도현 다이렉트 메시지 메뉴"
     );
-    expect(channelActionMenuLabel("general", { kind: "public" })).toBe(
+    expect(refText(channelActionMenuRef("general", { kind: "public" }))).toBe(
       "general 채널 메뉴"
     );
-    expect(channelActionMenuLabel("비밀", { kind: "private" })).toContain("채널");
+    expect(refText(channelActionMenuRef("비밀", { kind: "private" }))).toContain("채널");
   });
 });
 
@@ -756,20 +773,20 @@ describe("줄 아이콘과 하위 메뉴 (#5777)", () => {
     // 새 낱말을 짓지 않는다: 복사는 무리 제목, 섹션 이동은 항목 이름 그대로다(직접 문구 장부가 늘지 않는다).
     expect(channelActionClusterSubmenu("copy")).toEqual({
       testKey: "copy-group",
-      label: CHANNEL_COPY_GROUP_LABEL,
+      labelKey: CHANNEL_COPY_GROUP_KEY,
       icon: "copy",
     });
     expect(channelActionClusterSubmenu("place")).toEqual({
       testKey: "move-to-section",
-      label: SECTION_MOVE_GROUP_LABEL,
+      labelKey: SECTION_MOVE_GROUP_KEY,
       icon: "section",
     });
     const move = channelActionItems(EVERY, WITH_SECTIONS).find(
       (i) => i.key === "move-to-section"
     );
-    expect(move?.label).toBe(channelActionClusterSubmenu("place")?.label);
+    expect(move?.label).toBe(ko(channelActionClusterSubmenu("place")!.labelKey));
     // 폰 시트의 무리 제목은 그대로다(폰 시트 모양은 이 이슈 밖).
-    expect(channelActionClusterTitle("copy")).toBe(CHANNEL_COPY_GROUP_LABEL);
+    expect(channelActionClusterTitleKey("copy")).toBe(CHANNEL_COPY_GROUP_KEY);
   });
 
   it("폰이 줄 끝 상태 표지로 그리는 낱말은 알림 둘뿐이다", () => {
@@ -834,10 +851,6 @@ describe("대화 나가기 항목 leave-dm (D21)", () => {
     const items = rowItems({ channel: channel(), selfRole: "owner" });
     expect(keysOf(items)).not.toContain("leave-dm");
     expect(keysOf(items)).toContain("leave");
-  });
-
-  it("낱말 함수가 없으면 빈 이름의 줄을 그리지 않고 항목을 세우지 않는다", () => {
-    expect(keysOf(rowItems({}, false))).not.toContain("leave-dm");
   });
 
   it("대화 머리 메뉴(header)에도 선다", () => {

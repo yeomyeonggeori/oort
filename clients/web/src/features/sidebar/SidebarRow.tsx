@@ -8,7 +8,7 @@ import {
 } from "react";
 import { ChevronDown, ChevronRight, X } from "lucide-react";
 import { Link, NavLink } from "react-router-dom";
-import { DM_CLOSE_LABEL } from "@momo/core/features/channels/model";
+import { DM_CLOSE_KEY } from "@momo/core/features/channels/model";
 import { cn } from "@/design/lib/cn";
 import { useHoverNone } from "@/features/emoji/useHoverNone";
 import { AttentionDot, AttentionPill } from "./AttentionBadge";
@@ -24,6 +24,7 @@ import type {
   SidebarDropZoneProps,
 } from "./sidebarDnd";
 import { Tooltip } from "@/design/ui/tooltip";
+import { useFormatMessage } from "@/i18n/useFormatMessage";
 
 // Flat rows with a hover background, not one rounded "web card" per list item
 // (design-taste-web §8). Everything interactive is a real link/button with a
@@ -157,6 +158,7 @@ export function SidebarRow({
   closeLabel,
   iconKind = "glyph",
 }: SidebarRowProps) {
+  const formatMessage = useFormatMessage();
   // 알약은 한 줄에 하나다(필요 > 일반). 규칙은 `badgeFor`가 진다.
   const pill = badgeFor({ needsMe: mentionCount, unread: unreadCount });
   const hasUnread = unreadCount > 0;
@@ -315,12 +317,12 @@ export function SidebarRow({
     );
 
   const closeButton = showClose ? (
-    <Tooltip label={DM_CLOSE_LABEL} side="bottom" className="absolute right-2 top-1/2 -translate-y-1/2">
+    <Tooltip label={formatMessage(DM_CLOSE_KEY)} side="bottom" className="absolute right-2 top-1/2 -translate-y-1/2">
       <button
         type="button"
         tabIndex={-1}
         onClick={onClose}
-        aria-label={closeLabel ?? DM_CLOSE_LABEL}
+        aria-label={closeLabel ?? formatMessage(DM_CLOSE_KEY)}
         data-testid="dm-close"
         // 자리: 오른쪽 8px(`right-2`) × 24px(`size-6`). `tokens.css` 의 `sidebar-row` 가 같은 숫자에서 이름의
         // 오른쪽 끝(36px = 24 + 8 + 간격 4)을 도출하므로 둘은 함께 움직인다(소스 시험이 36 을 잰다).

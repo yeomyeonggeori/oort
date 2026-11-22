@@ -1,23 +1,24 @@
 import type {Channel, MembershipRole, ReadState} from '@momo/core/lib/api';
 import {
-  CHANNEL_COPY_GROUP_LABEL,
-  CHANNEL_LEAVE_LABEL,
-  CHANNEL_MARK_UNREAD_LABEL,
-  CHANNEL_MUTE_LABEL,
-  CHANNEL_UNMUTE_LABEL,
-  DM_CLOSE_LABEL,
+  CHANNEL_COPY_GROUP_KEY,
+  CHANNEL_LEAVE_KEY,
+  CHANNEL_MARK_UNREAD_KEY,
+  CHANNEL_MUTE_KEY,
+  CHANNEL_UNMUTE_KEY,
+  DM_CLOSE_KEY,
 } from '@momo/core/features/channels/model';
 
 import {
   PHONE_CHANNEL_ACTION_KEYS,
   channelRowAccessibilityActions,
-  channelRowActionItems,
+  channelRowActionItems as base_channelRowActionItems,
   channelRowActionKeyOf,
   type ChannelRowTarget,
 } from '../src/features/sidebar/channelRowActions';
 import {readIntentWire} from '../src/features/readState/advertise';
 import {catalog as koCatalog} from '@momo/core/i18n/generated/ko-KR';
 import {createMessageService} from '@momo/core/i18n/service';
+const channelRowActionItems = (target: Parameters<typeof base_channelRowActionItems>[0], copied?: Parameters<typeof base_channelRowActionItems>[1], f: typeof koFormat = koFormat) => base_channelRowActionItems(target, copied, f);
 
 const koFormat = createMessageService({messageLocale: 'ko-KR', catalog: koCatalog}).formatMessage;
 
@@ -54,6 +55,7 @@ const keys = (t: ChannelRowTarget, copied?: Parameters<typeof channelRowActionIt
 describe('채널 행', () => {
   it('안 읽음이 있으면 복사 셋 → 읽음 처리 → 알림 → 나가기, 이 차례 그대로', () => {
     expect(keys(target())).toEqual([
+      'rename',
       'copy-name',
       'copy-link',
       'copy-id',
@@ -69,7 +71,7 @@ describe('채널 행', () => {
     );
     expect(items.map(item => item.key)).toContain('mark-unread');
     expect(items.map(item => item.key)).not.toContain('mark-read');
-    expect(items.find(item => item.key === 'mark-unread')?.label).toBe(CHANNEL_MARK_UNREAD_LABEL);
+    expect(items.find(item => item.key === 'mark-unread')?.label).toBe(koFormat(CHANNEL_MARK_UNREAD_KEY));
   });
 
   it('읽음 투영이 없으면 읽음 쪽 항목이 없다 — 광고할 자리를 모르면서 내놓지 않는다', () => {
@@ -87,8 +89,8 @@ describe('채널 행', () => {
   it('알림의 낱말은 상태다', () => {
     const label = (muted: boolean) =>
       channelRowActionItems(target({muted})).find(item => item.key === 'mute')?.label;
-    expect(label(false)).toBe(CHANNEL_MUTE_LABEL);
-    expect(label(true)).toBe(CHANNEL_UNMUTE_LABEL);
+    expect(label(false)).toBe(koFormat(CHANNEL_MUTE_KEY));
+    expect(label(true)).toBe(koFormat(CHANNEL_UNMUTE_KEY));
   });
 
   it('「채널 나가기」는 역할과 무관하게 선다 — 본인 나가기 길이다 (#5778)', () => {
@@ -99,22 +101,23 @@ describe('채널 행', () => {
 
   it('나가기는 위험 톤이고 마지막이다', () => {
     const items = channelRowActionItems(target());
-    expect(items[items.length - 1]).toMatchObject({key: 'leave', tone: 'danger', label: CHANNEL_LEAVE_LABEL});
+    expect(items[items.length - 1]).toMatchObject({key: 'leave', tone: 'danger', label: koFormat(CHANNEL_LEAVE_KEY)});
   });
 
   it('복사 무리만 제목(「복사」)을 달고, 무리가 바뀌는 자리에만 구분선이 선다', () => {
     const items = channelRowActionItems(target());
     expect(items.map(item => item.separatorBefore)).toEqual([
-      false, // copy-name (첫 항목은 선을 이지 않는다)
+      false, // rename (첫 항목은 선을 이지 않는다)
+      true, // copy-name: 정보 → 복사
       false,
       false,
       true, // mark-read: 복사 → 상태
       false, // mute
       true, // leave: 상태 → 나가기
     ]);
-    expect(items[0].cluster).toBe('copy');
+    expect(items[1].cluster).toBe('copy');
     // 제목 낱말은 코어 상수다.
-    expect(CHANNEL_COPY_GROUP_LABEL).toBe('복사');
+    expect(koFormat(CHANNEL_COPY_GROUP_KEY)).toBe('복사');
   });
 });
 
@@ -145,7 +148,7 @@ describe('DM 행의 「목록에서 숨기기」 (#4367)', () => {
     const item = channelRowActionItems(target({kind: 'dm', closeOffered: true})).find(
       candidate => candidate.key === 'close-dm',
     );
-    expect(item?.label).toBe(DM_CLOSE_LABEL);
+    expect(item?.label).toBe(koFormat(DM_CLOSE_KEY));
     // 상태 무리에 붙는다: 나가기처럼 위험 색이나 구분선이 서지 않는다(지우는 것이 아니다).
     expect(item?.tone).toBeUndefined();
   });

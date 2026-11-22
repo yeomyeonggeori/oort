@@ -59,6 +59,7 @@
 
 import { record, num, str, stringArrayField } from "../../lib/wire";
 import type { Channel } from "../../lib/api";
+import type { MessageRef, PlainMessageKey } from "../../i18n/keys";
 
 // ---------------------------------------------------------------------------
 // 계약 (서버 084 / routes/sidebar_prefs.rs 와 같은 수)
@@ -188,16 +189,16 @@ export function sidebarChannelRefCount(prefs: SidebarPrefs): number {
 /** 기본 섹션 두 종. 삭제도 이름변경도 되지 않는다(ADR-0177 D4). */
 export const BASE_CHANNELS_SECTION_ID = "channels";
 export const BASE_DMS_SECTION_ID = "dms";
-export const BASE_CHANNELS_SECTION_TITLE = "채널";
-export const BASE_DMS_SECTION_TITLE = "다이렉트 메시지";
+export const BASE_CHANNELS_SECTION_TITLE_KEY = "sidebar.section.channels" satisfies PlainMessageKey;
+export const BASE_DMS_SECTION_TITLE_KEY = "sidebar.section.dms" satisfies PlainMessageKey;
 
-export const SECTION_CREATE_TITLE = "새 섹션 만들기";
-export const SECTION_RENAME_LABEL = "이름 바꾸기";
-export const SECTION_RENAME_TITLE = "섹션 이름 바꾸기";
-export const SECTION_DELETE_LABEL = "섹션 삭제";
-export const SECTION_NAME_FIELD_LABEL = "섹션 이름";
-export const SECTION_NAME_PLACEHOLDER = "예: 출시 준비";
-export const SECTION_DELETE_CONFIRM_LABEL = "삭제";
+export const SECTION_CREATE_TITLE_KEY = "sidebar.section.create" satisfies PlainMessageKey;
+export const SECTION_RENAME_LABEL_KEY = "sidebar.section.renameLabel" satisfies PlainMessageKey;
+export const SECTION_RENAME_TITLE_KEY = "sidebar.section.renameTitle" satisfies PlainMessageKey;
+export const SECTION_DELETE_LABEL_KEY = "sidebar.section.deleteLabel" satisfies PlainMessageKey;
+export const SECTION_NAME_FIELD_LABEL_KEY = "sidebar.section.nameField" satisfies PlainMessageKey;
+export const SECTION_NAME_PLACEHOLDER_KEY = "sidebar.section.namePlaceholder" satisfies PlainMessageKey;
+export const SECTION_DELETE_CONFIRM_LABEL_KEY = "sidebar.section.deleteConfirm" satisfies PlainMessageKey;
 
 /**
  * 삭제 확인의 **제목은 고정 문장**이고 이름은 본문이 진다.
@@ -208,15 +209,15 @@ export const SECTION_DELETE_CONFIRM_LABEL = "삭제";
  * 반대로 한다 — 제목은 `CHANNEL_LEAVE_CONFIRM_TITLE` 고정, 가변 이름은
  * `channelLeaveConfirmBody` 가 진다. 같은 자리에 같은 규칙을 쓴다.
  */
-export const SECTION_DELETE_CONFIRM_TITLE = "이 섹션을 삭제할까요?";
+export const SECTION_DELETE_CONFIRM_TITLE_KEY = "sidebar.section.deleteConfirmTitle" satisfies PlainMessageKey;
 
 /** 삭제는 채널을 지우지 않는다. 그 사실을 확인 자리에서 말해야 한다. */
-export function sectionDeleteConfirmBody(name: string): string {
-  return `${name} 섹션이 사이드바에서 사라집니다. 이 섹션의 채널은 채널 섹션으로 돌아가고, 채널에서 나가지는 않습니다.`;
+export function sectionDeleteConfirmBodyRef(name: string): MessageRef<"sidebar.section.deleteConfirmBody"> {
+  return { key: "sidebar.section.deleteConfirmBody", values: { name } };
 }
 
 /** 행 메뉴의 배치 무리 이름. */
-export const SECTION_MOVE_GROUP_LABEL = "섹션으로 이동";
+export const SECTION_MOVE_GROUP_KEY = "sidebar.section.moveGroup" satisfies PlainMessageKey;
 
 /**
  * 빈 섹션이 하는 말 — **표면마다 다르다** (design-review #1932 H-1).
@@ -228,7 +229,7 @@ export const SECTION_MOVE_GROUP_LABEL = "섹션으로 이동";
  * 두 문장인 이유는 두 표면이 실제로 다른 것을 가졌기 때문이다. 낱말을 흐려서
  * 하나로 만드는 길도 있었지만, 그러면 포인터 쪽이 **어떻게** 옮기는지를 잃는다.
  */
-export function sidebarEmptySectionHint(pointerCanHover: boolean): string {
+export function sidebarEmptySectionHintKey(pointerCanHover: boolean): PlainMessageKey {
   // 포인터 문장이 문 **둘**을 든다 (BT-5 #1933): 끌어다 놓기가 생겼고, 그것이
   // 대개 먼저 시도되는 손짓이다. 우클릭을 지우지 않는 이유는 그것이 키보드로도
   // 닿는 유일한 경로이기 때문이다(메뉴 키 / Shift+F10 → 「섹션으로 이동」).
@@ -241,9 +242,7 @@ export function sidebarEmptySectionHint(pointerCanHover: boolean): string {
   // 「이 섹션으로」를 뺀다. 이 줄은 바로 그 섹션 **안에** 서 있어서 어디로
   // 옮기는지는 자리가 이미 말하고 있었다. BT-4 의 문장보다 짧으면서 문은 여전히
   // 둘이다.
-  return pointerCanHover
-    ? "채널 행을 끌어다 놓거나 우클릭해서 옮겨요."
-    : "비어 있어요. 채널은 넓은 화면에서 옮길 수 있어요.";
+  return pointerCanHover ? "sidebar.section.emptyHintHover" : "sidebar.section.emptyHintTouch";
 }
 
 /**
@@ -253,11 +252,11 @@ export function sidebarEmptySectionHint(pointerCanHover: boolean): string {
  * 액션 하나, README §4)대로 끝은 옛 문장과 같은 행동이다: ⌘⇧K로 시작하세요
  * (design-review R1 M2: 행동이 빠진 첫 판).
  */
-export const SIDEBAR_DMS_ALL_CLOSED_HINT =
-  "숨긴 대화는 새 메시지가 오면 다시 나타납니다. ⌘⇧K로 시작하세요.";
+export const SIDEBAR_DMS_ALL_CLOSED_HINT_KEY =
+  "sidebar.dms.allClosedHint" satisfies PlainMessageKey;
 
 /** 배치를 풀고 기본 섹션으로 되돌리는 항목. */
-export const SECTION_MOVE_TO_BASE_LABEL = "채널 섹션으로";
+export const SECTION_MOVE_TO_BASE_KEY = "sidebar.section.moveToBase" satisfies PlainMessageKey;
 
 /**
  * 터치 표면의 「별표」 섹션이 하는 말 (design-review #1933 M-1).
@@ -272,7 +271,7 @@ export const SECTION_MOVE_TO_BASE_LABEL = "채널 섹션으로";
  * 규율 밖에 섰다. 그래서 빈 커스텀 섹션이 터치에서 하는 말과 **같은 문법**으로
  * 사정을 적는다: 없는 동작을 지시하지 않고, 그 문이 어디 있는지만 말한다.
  */
-export const SIDEBAR_STARRED_TOUCH_HINT = "별표는 넓은 화면에서 뗄 수 있습니다.";
+export const SIDEBAR_STARRED_TOUCH_HINT_KEY = "sidebar.starred.touchHint" satisfies PlainMessageKey;
 
 // ---------------------------------------------------------------------------
 // 별표 (BT-5 / #1933)
@@ -280,14 +279,14 @@ export const SIDEBAR_STARRED_TOUCH_HINT = "별표는 넓은 화면에서 뗄 수
 
 /** 별표 채널이 서는 파생 섹션. 맨 위, 삭제도 이름변경도 되지 않는다. */
 export const BASE_STARRED_SECTION_ID = "starred";
-export const BASE_STARRED_SECTION_TITLE = "별표";
+export const BASE_STARRED_SECTION_TITLE_KEY = "sidebar.section.starred" satisfies PlainMessageKey;
 
-/** 낱말은 상태다 - 알림 토글(`channelMuteToggleLabel`)과 같은 문법. */
-export const CHANNEL_STAR_LABEL = "별표 붙이기";
-export const CHANNEL_UNSTAR_LABEL = "별표 떼기";
+/** 낱말은 상태다 - 알림 토글(`channelMuteToggleKey`)과 같은 문법. */
+export const CHANNEL_STAR_KEY = "sidebar.channel.star" satisfies PlainMessageKey;
+export const CHANNEL_UNSTAR_KEY = "sidebar.channel.unstar" satisfies PlainMessageKey;
 
-export function channelStarToggleLabel(starred: boolean): string {
-  return starred ? CHANNEL_UNSTAR_LABEL : CHANNEL_STAR_LABEL;
+export function channelStarToggleKey(starred: boolean): PlainMessageKey {
+  return starred ? CHANNEL_UNSTAR_KEY : CHANNEL_STAR_KEY;
 }
 
 export function isChannelStarred(
@@ -336,11 +335,11 @@ export function toggleStarredChannel(
  * 바꾸기」·「섹션 삭제」가 서고, 이 레포의 메뉴 항목은 대체로 동사구다(섹션으로
  * 이동 · 별표 붙이기 · 읽음 처리하기). 방향만 적으면 그 둘과 어긋난 꼴이 된다.
  */
-export const SECTION_MOVE_UP_LABEL = "위로 옮기기";
-export const SECTION_MOVE_DOWN_LABEL = "아래로 옮기기";
+export const SECTION_MOVE_UP_KEY = "sidebar.section.moveUp" satisfies PlainMessageKey;
+export const SECTION_MOVE_DOWN_KEY = "sidebar.section.moveDown" satisfies PlainMessageKey;
 
-export const SIDEBAR_PREFS_SAVE_FAILURE =
-  "섹션 변경을 저장하지 못했습니다. 잠시 후 다시 시도해 주세요.";
+export const SIDEBAR_PREFS_SAVE_FAILURE_KEY =
+  "sidebar.prefs.saveFailed" satisfies PlainMessageKey;
 
 /**
  * 부트스트랩 GET 이 실패했을 때 (design-review #1932 B-1).
@@ -357,8 +356,8 @@ export const SIDEBAR_PREFS_SAVE_FAILURE =
 // 낱말이 「섹션」인 것도 그 자리 때문이다: 바로 아래 형제 배너가 「채널을…」이라
 // 말하므로 둘이 나란히 서도 무엇이 실패했는지 갈린다. 이 기능의 다른 모든 문장이
 // 쓰는 낱말이기도 하다(새 섹션 · 섹션 이름 · 섹션 삭제 · 섹션으로 이동).
-export const SIDEBAR_PREFS_LOAD_FAILURE = "섹션을 불러오지 못했습니다.";
-export const SIDEBAR_PREFS_LOAD_RETRY_LABEL = "다시 시도";
+export const SIDEBAR_PREFS_LOAD_FAILURE_KEY = "sidebar.prefs.loadFailed" satisfies PlainMessageKey;
+export const SIDEBAR_PREFS_LOAD_RETRY_KEY = "common.action.retry" satisfies PlainMessageKey;
 
 /**
  * 섹션 상한에 닿았을 때 (design-review #1932 M-3).
@@ -366,8 +365,8 @@ export const SIDEBAR_PREFS_LOAD_RETRY_LABEL = "다시 시도";
  * 문을 지우지 않고 **비활성으로 남기고 사유를 든다**: 사라진 문과 아직 못 찾은
  * 문을 사람은 구분하지 못한다. 이 문장이 그 컨트롤의 접근가능 이름이 된다.
  */
-export function sidebarSectionCapMessage(): string {
-  return `섹션은 ${SIDEBAR_SECTION_MAX}개까지 만들 수 있습니다.`;
+export function sidebarSectionCapRef(): MessageRef<"sidebar.section.capSections"> {
+  return { key: "sidebar.section.capSections", values: { max: SIDEBAR_SECTION_MAX } };
 }
 
 /**
@@ -378,8 +377,8 @@ export function sidebarSectionCapMessage(): string {
  * 이것을 걸고, 넘긴 편집은 **적용되지 않는다** — 적용한 뒤 저장이 실패하고
  * 롤백되면 사람은 무엇이 한계였는지 끝내 듣지 못한다.
  */
-export function sidebarChannelRefCapMessage(): string {
-  return `한 사이드바에 담을 수 있는 채널은 ${SIDEBAR_CHANNEL_REF_MAX}개까지입니다.`;
+export function sidebarChannelRefCapRef(): MessageRef<"sidebar.section.capChannels"> {
+  return { key: "sidebar.section.capChannels", values: { max: SIDEBAR_CHANNEL_REF_MAX } };
 }
 
 export type SidebarSectionNameIssue = "empty" | "too-long";
@@ -394,12 +393,12 @@ export function sidebarSectionNameIssue(
   return null;
 }
 
-export function sidebarSectionNameIssueMessage(
+export function sidebarSectionNameIssueRef(
   issue: SidebarSectionNameIssue
-): string {
+): MessageRef<"sidebar.section.nameEmpty" | "sidebar.section.nameTooLong"> {
   return issue === "empty"
-    ? "섹션 이름을 입력해 주세요."
-    : `섹션 이름은 ${SIDEBAR_SECTION_NAME_MAX}자까지입니다.`;
+    ? { key: "sidebar.section.nameEmpty" }
+    : { key: "sidebar.section.nameTooLong", values: { max: SIDEBAR_SECTION_NAME_MAX } };
 }
 
 /** 상한에 닿았으면 「새 섹션」을 내놓지 않는다. 눌러서 400 을 받는 문은 문이 아니다. */
@@ -413,12 +412,20 @@ export function canCreateSidebarSection(prefs: SidebarPrefs): boolean {
 
 export type SidebarSectionKind = "starred" | "channels" | "dms" | "custom";
 
-export interface RenderedSidebarSection {
+/** A person's own section is named by them (`title`); the three built-in sections are named by a dictionary key the screen formats (`titleKey`). */
+export interface CustomSidebarSection {
   id: string;
-  kind: SidebarSectionKind;
+  kind: "custom";
   title: string;
   channels: Channel[];
 }
+export interface BuiltInSidebarSection {
+  id: string;
+  kind: "starred" | "channels" | "dms";
+  titleKey: PlainMessageKey;
+  channels: Channel[];
+}
+export type RenderedSidebarSection = CustomSidebarSection | BuiltInSidebarSection;
 
 /**
  * 파생의 결과. 배열 하나가 아니라 **이름 붙은 셋 + 렌더 차례**다.
@@ -439,13 +446,13 @@ export interface DerivedSidebarSections {
    */
   sections: RenderedSidebarSection[];
   /** 「별표」. 파생이다 - payload 에 이 섹션은 없다(`starredChannelIds` 뿐). */
-  starred: RenderedSidebarSection;
+  starred: BuiltInSidebarSection;
   /** 기본 「채널」. 삭제도 이름변경도 되지 않는다(D4). */
-  base: RenderedSidebarSection;
+  base: BuiltInSidebarSection;
   /** 커스텀 섹션들, `order` 차례. */
-  custom: RenderedSidebarSection[];
+  custom: CustomSidebarSection[];
   /** 기본 「다이렉트 메시지」. */
-  dms: RenderedSidebarSection;
+  dms: BuiltInSidebarSection;
 }
 
 function idKey(id: string): string {
@@ -507,14 +514,14 @@ export function deriveSidebarSections(input: {
     claimed.add(key);
     starredChannels.push(channel);
   }
-  const starred: RenderedSidebarSection = {
+  const starred: BuiltInSidebarSection = {
     id: BASE_STARRED_SECTION_ID,
     kind: "starred",
-    title: BASE_STARRED_SECTION_TITLE,
+    titleKey: BASE_STARRED_SECTION_TITLE_KEY,
     channels: starredChannels,
   };
 
-  const custom: RenderedSidebarSection[] = [];
+  const custom: CustomSidebarSection[] = [];
   for (const section of orderedSections(input.prefs)) {
     const channels: Channel[] = [];
     for (const rawId of section.channelIds) {
@@ -535,17 +542,17 @@ export function deriveSidebarSections(input: {
     });
   }
 
-  const base: RenderedSidebarSection = {
+  const base: BuiltInSidebarSection = {
     id: BASE_CHANNELS_SECTION_ID,
     kind: "channels",
-    title: BASE_CHANNELS_SECTION_TITLE,
+    titleKey: BASE_CHANNELS_SECTION_TITLE_KEY,
     channels: input.channels.filter((channel) => !claimed.has(idKey(channel.id))),
   };
   // DM 은 서버 차례 그대로다.
-  const dms: RenderedSidebarSection = {
+  const dms: BuiltInSidebarSection = {
     id: BASE_DMS_SECTION_ID,
     kind: "dms",
-    title: BASE_DMS_SECTION_TITLE,
+    titleKey: BASE_DMS_SECTION_TITLE_KEY,
     channels: [...input.dms],
   };
   return {

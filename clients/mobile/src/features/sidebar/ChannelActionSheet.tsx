@@ -1,6 +1,6 @@
 import {
-  channelActionClusterTitle,
-  channelActionMenuLabel,
+  channelActionClusterTitleKey,
+  channelActionMenuRef,
   isChannelActionStatusIcon,
   type ChannelActionItem,
   type ChannelActionKey,
@@ -21,6 +21,7 @@ import type {ChannelRowTarget} from './channelRowActions';
 import {DmLeaveConfirm, ignoreDiscard} from './DmLeaveConfirm';
 import {RenameChannelBody} from './RenameChannelBody';
 import type {ChannelRowActions, DmLeaveStepView} from './useChannelRowActions';
+import type {MessageService} from '@momo/core/i18n/types';
 
 // =============================================================================
 // 행을 길게 누르면 열리는 시트 (#4229, Buzz식). 그릇·머리·행은 #4318 의 공용 부품이다.
@@ -42,6 +43,14 @@ import type {ChannelRowActions, DmLeaveStepView} from './useChannelRowActions';
 // 1:1 「대화 나가기」(ADR-0177 증보 2026-11-14 D21)도 같은 자리의 확인 단계다(`DmLeaveConfirm`, 문장은 코어 사전).
 // =============================================================================
 
+function clusterTitle(
+  cluster: ChannelActionItem['cluster'],
+  formatMessage: MessageService['formatMessage'],
+): string | undefined {
+  const key = channelActionClusterTitleKey(cluster);
+  return key === undefined ? undefined : formatMessage(key);
+}
+
 interface Group {
   key: string;
   title: string | undefined;
@@ -49,14 +58,17 @@ interface Group {
 }
 
 /** 코어가 준 차례를 카드 묶음으로 자른다 — 제목이 바뀌거나 `separatorBefore` 면 새 카드다. */
-function groupItems(items: ChannelActionItem[]): Group[] {
+function groupItems(
+  items: ChannelActionItem[],
+  formatMessage: MessageService['formatMessage'],
+): Group[] {
   const groups: Group[] = [];
   items.forEach((item, index) => {
     const startsCluster = index === 0 || items[index - 1].cluster !== item.cluster;
     if (startsCluster || item.separatorBefore) {
       groups.push({
         key: item.key,
-        title: startsCluster ? channelActionClusterTitle(item.cluster) : undefined,
+        title: startsCluster ? clusterTitle(item.cluster, formatMessage) : undefined,
         items: [item],
       });
     } else {
@@ -105,13 +117,14 @@ export function ChannelActionSheet({
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
   const formatMessage = useFormatMessage();
+  const menuRef = channelActionMenuRef(target.title, target.channel);
   const isDm = target.channel.kind === 'dm';
 
   return (
     <PageSheet
       height="fit"
       onClose={onClose}
-      accessibilityLabel={channelActionMenuLabel(target.title, target.channel)}
+      accessibilityLabel={formatMessage(menuRef.key, menuRef.values as never)}
       scrimLabel="대화 액션 닫기"
       scrimTestID="channel-sheet-backdrop"
       // 1:1 나가기 요청이 가는 동안은 몸짓으로 닫히지 않는다(요청은 이미 나갔다).
@@ -168,7 +181,7 @@ export function ChannelActionSheet({
                 {error}
               </Sentence>
             ) : null}
-            {groupItems(items).map(group => (
+            {groupItems(items, formatMessage).map(group => (
               <GroupCard key={group.key} label={group.title}>
                 {group.items.map(item => {
                   const busy = isPending(item.key);

@@ -33,7 +33,7 @@ import { useCallback, useEffect, useMemo, useState, type DragEvent } from "react
 // 터치(`hover: none`)에는 이 문이 없다. HTML5 드래그는 손가락에 발화하지 않고,
 // 서랍의 세로 스크롤이 행을 누른 채 시작하기 때문이다(BT-1 이 행 컨텍스트
 // 메뉴를 같은 이유로 닫아 둔 자리). 그 사실은 이미 표면이 말하고 있다 —
-// `sidebarEmptySectionHint(false)`: 「채널은 넓은 화면에서 옮길 수 있습니다.」
+// `sidebarEmptySectionHintKey(false)`: 「채널은 넓은 화면에서 옮길 수 있습니다.」
 // =============================================================================
 
 /** 지금 끌고 있는 것. */

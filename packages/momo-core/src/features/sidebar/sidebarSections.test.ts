@@ -6,13 +6,13 @@ import {
   BASE_STARRED_SECTION_ID,
   canCreateSidebarSection,
   canMoveSidebarSection,
-  channelStarToggleLabel,
+  channelStarToggleKey,
   isChannelStarred,
   moveSidebarSection,
   reorderSidebarSection,
-  SECTION_MOVE_DOWN_LABEL,
-  SECTION_MOVE_UP_LABEL,
-  SIDEBAR_STARRED_TOUCH_HINT,
+  SECTION_MOVE_DOWN_KEY,
+  SECTION_MOVE_UP_KEY,
+  SIDEBAR_STARRED_TOUCH_HINT_KEY,
   toggleStarredChannel,
   createSidebarSection,
   deleteSidebarSection,
@@ -25,17 +25,23 @@ import {
   sidebarChannelRefCount,
   sidebarPrefsFromWire,
   sidebarPrefsToWire,
-  sectionDeleteConfirmBody,
-  SECTION_DELETE_CONFIRM_TITLE,
-  sidebarChannelRefCapMessage,
-  sidebarEmptySectionHint,
-  sidebarSectionCapMessage,
+  sectionDeleteConfirmBodyRef,
+  SECTION_DELETE_CONFIRM_TITLE_KEY,
+  sidebarChannelRefCapRef,
+  sidebarEmptySectionHintKey,
+  sidebarSectionCapRef,
   sidebarSectionNameIssue,
   SIDEBAR_CHANNEL_REF_MAX,
   SIDEBAR_SECTION_MAX,
   SIDEBAR_SECTION_NAME_MAX,
   type SidebarPrefs,
 } from "./sidebarSections";
+import { catalog as koCatalog } from "../../i18n/generated/ko-KR";
+import { createMessageCopy } from "../../testkit";
+
+// 낱말은 사전에 있다(#6045). 시험은 한국어 생성물로 풀어 같은 문장을 그대로 단정한다.
+const ko = createMessageCopy({ messageLocale: "ko-KR", catalog: koCatalog });
+const refText = (ref: { key: string; values?: object }) => ko(ref.key as never, ref.values as never);
 
 function channel(id: string, name: string): Channel {
   return {
@@ -402,7 +408,9 @@ describe("실전 크기 payload", () => {
     for (let s = 0; s < 8; s += 1) {
       expect(rendered[s + 1].id).toBe(`sec-${s + 1}`);
       expect(rendered[s + 1].channels).toHaveLength(2);
-      expect([...rendered[s + 1].title].length).toBe(77);
+      const custom = rendered[s + 1];
+      expect(custom.kind).toBe("custom");
+      expect([...("title" in custom ? custom.title : "")].length).toBe(77);
     }
     // 죽은 id 는 세 번째 섹션의 개수를 늘리지 않았다.
     expect(rendered[3].channels.map((c) => c.id)).not.toContain(DEAD);
@@ -424,10 +432,10 @@ describe("낱말", () => {
   // 끝에 도착한다 — `ChannelLeaveConfirmDialog` 가 정확히 그 이유로 이렇게 한다.
   it("삭제 확인의 제목은 이름을 담지 않는다", () => {
     const long = "긴급대응".repeat(20);
-    expect(SECTION_DELETE_CONFIRM_TITLE).not.toContain(long);
-    expect([...SECTION_DELETE_CONFIRM_TITLE].length).toBeLessThan(20);
+    expect(ko(SECTION_DELETE_CONFIRM_TITLE_KEY)).not.toContain(long);
+    expect([...ko(SECTION_DELETE_CONFIRM_TITLE_KEY)].length).toBeLessThan(20);
     // 그리고 본문이 이름과 **무엇이 사라지지 않는지**를 함께 진다.
-    const body = sectionDeleteConfirmBody(long);
+    const body = refText(sectionDeleteConfirmBodyRef(long));
     expect(body).toContain(long);
     expect(body).toContain("채널 섹션으로 돌아가고");
     expect(body).toContain("나가지는 않습니다");
@@ -435,18 +443,18 @@ describe("낱말", () => {
 
   // M-3: 상한 셋 중 둘이 말이 없었다. 이제 셋 다 자기 수를 든다.
   it("상한 문장이 자기 수를 든다", () => {
-    expect(sidebarSectionCapMessage()).toContain(String(SIDEBAR_SECTION_MAX));
-    expect(sidebarChannelRefCapMessage()).toContain(
+    expect(refText(sidebarSectionCapRef())).toContain(String(SIDEBAR_SECTION_MAX));
+    expect(refText(sidebarChannelRefCapRef())).toContain(
       String(SIDEBAR_CHANNEL_REF_MAX)
     );
   });
 
   // H-1: 터치에는 우클릭이 없다(BT-1 이 hover:none 에서 행 메뉴를 닫아 두었다).
   it("빈 섹션 문장이 표면마다 다르고, 없는 동작을 지시하지 않는다", () => {
-    expect(sidebarEmptySectionHint(true)).toContain("우클릭");
-    expect(sidebarEmptySectionHint(false)).not.toContain("우클릭");
-    expect(sidebarEmptySectionHint(false)).not.toBe(
-      sidebarEmptySectionHint(true)
+    expect(ko(sidebarEmptySectionHintKey(true))).toContain("우클릭");
+    expect(ko(sidebarEmptySectionHintKey(false))).not.toContain("우클릭");
+    expect(ko(sidebarEmptySectionHintKey(false))).not.toBe(
+      ko(sidebarEmptySectionHintKey(true))
     );
   });
 });
@@ -551,8 +559,8 @@ describe("BT-5 별표", () => {
   });
 
   it("낱말이 상태다", () => {
-    expect(channelStarToggleLabel(false)).not.toBe(channelStarToggleLabel(true));
-    expect(channelStarToggleLabel(true)).toContain("별표");
+    expect(ko(channelStarToggleKey(false))).not.toBe(ko(channelStarToggleKey(true)));
+    expect(ko(channelStarToggleKey(true))).toContain("별표");
   });
 });
 
@@ -678,16 +686,16 @@ describe("BT-5 섹션 차례", () => {
 describe("BT-5 R1 — design-review 수리의 낱말", () => {
   // M-1: 별표는 로밍하는데 터치에는 떼는 문이 없다. 표면이 그 사실을 말한다.
   it("터치의 별표 섹션이 없는 동작을 지시하지 않고 사정만 말한다", () => {
-    expect(SIDEBAR_STARRED_TOUCH_HINT).toContain("별표");
-    expect(SIDEBAR_STARRED_TOUCH_HINT).toContain("넓은 화면");
+    expect(ko(SIDEBAR_STARRED_TOUCH_HINT_KEY)).toContain("별표");
+    expect(ko(SIDEBAR_STARRED_TOUCH_HINT_KEY)).toContain("넓은 화면");
     // 우클릭도 끌기도 그 표면에 없다 - 지시하면 없는 문을 가리킨 것이 된다.
-    expect(SIDEBAR_STARRED_TOUCH_HINT).not.toContain("우클릭");
-    expect(SIDEBAR_STARRED_TOUCH_HINT).not.toContain("끌어");
+    expect(ko(SIDEBAR_STARRED_TOUCH_HINT_KEY)).not.toContain("우클릭");
+    expect(ko(SIDEBAR_STARRED_TOUCH_HINT_KEY)).not.toContain("끌어");
   });
 
   // M-3: 문이 둘이 되며 길어진 문장이 섹션마다 되풀이됐다. 길이만 되돌린다.
   it("빈 섹션 문장이 BT-4 의 것보다 짧으면서 문은 여전히 둘이다", () => {
-    const hint = sidebarEmptySectionHint(true);
+    const hint = ko(sidebarEmptySectionHintKey(true));
     expect(hint).toContain("끌어다");
     expect(hint).toContain("우클릭");
     expect([...hint].length).toBeLessThan(
@@ -699,7 +707,7 @@ describe("BT-5 R1 — design-review 수리의 낱말", () => {
 
   // N-1: 같은 메뉴의 형제들이 동사구다(이름 바꾸기 · 섹션 삭제).
   it("차례 항목이 동사구다", () => {
-    expect(SECTION_MOVE_UP_LABEL).toContain("옮기기");
-    expect(SECTION_MOVE_DOWN_LABEL).toContain("옮기기");
+    expect(ko(SECTION_MOVE_UP_KEY)).toContain("옮기기");
+    expect(ko(SECTION_MOVE_DOWN_KEY)).toContain("옮기기");
   });
 });

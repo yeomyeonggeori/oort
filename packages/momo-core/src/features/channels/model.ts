@@ -1,6 +1,7 @@
 import { ApiError, type Channel, type MembershipRole } from "../../lib/api";
 import { NetworkError } from "../../lib/http";
 import type { MessageKey } from "../../i18n/generated/messages";
+import type { MessageRef, PlainMessageKey } from "../../i18n/keys";
 
 // =============================================================================
 // 채널 만들기 model (AX-1a / MOMO-614). Everything the dialog decides without
@@ -217,10 +218,10 @@ export const CHANNEL_CREATE_FAILURE_KEYS = {
   generic: "channels.createFailure.generic",
 } as const satisfies Record<string, MessageKey>;
 
-export function channelTopicIssueMessage(issue: ChannelTopicIssue): string {
+export function channelTopicIssueMessage(issue: ChannelTopicIssue): MessageRef<"channels.topic.tooLong"> {
   switch (issue) {
     case "tooLong":
-      return `주제는 ${CHANNEL_TOPIC_MAX}자 이내여야 합니다.`;
+      return { key: "channels.topic.tooLong", values: { max: CHANNEL_TOPIC_MAX } };
   }
 }
 
@@ -237,14 +238,14 @@ export function channelTopicIssueMessage(issue: ChannelTopicIssue): string {
 // 「주제 보기」이지 「편집」이 아니다. 빈 토픽에는 항목 자체를 그리지 않는다.
 // =============================================================================
 
-export const CHANNEL_MUTE_LABEL = "알림 켜짐";
-export const CHANNEL_UNMUTE_LABEL = "알림 꺼짐";
-export const CHANNEL_LEAVE_LABEL = "채널 나가기";
-export const CHANNEL_TOPIC_VIEW_LABEL = "주제 보기";
+export const CHANNEL_MUTE_KEY = "channels.menu.muteOn" satisfies PlainMessageKey;
+export const CHANNEL_UNMUTE_KEY = "channels.menu.muteOff" satisfies PlainMessageKey;
+export const CHANNEL_LEAVE_KEY = "channels.menu.leave" satisfies PlainMessageKey;
+export const CHANNEL_TOPIC_VIEW_KEY = "channels.menu.topicView" satisfies PlainMessageKey;
 
 /** 항목의 낱말은 상태다: 지금 켜짐·꺼짐을 말한다. */
-export function channelMuteToggleLabel(muted: boolean): string {
-  return muted ? CHANNEL_UNMUTE_LABEL : CHANNEL_MUTE_LABEL;
+export function channelMuteToggleKey(muted: boolean): PlainMessageKey {
+  return muted ? CHANNEL_UNMUTE_KEY : CHANNEL_MUTE_KEY;
 }
 
 /**
@@ -260,8 +261,8 @@ export function canLeaveChannel(kind: Channel["kind"]): boolean {
 }
 
 /** 알림 설정을 바꾸지 못했을 때, 그 항목 자리에서 하는 말(토스트가 아니다). */
-export const CHANNEL_MUTE_FAILURE =
-  "알림 설정을 바꾸지 못했어요. 잠시 뒤에 다시 시도해 주세요.";
+export const CHANNEL_MUTE_FAILURE_KEY =
+  "channels.menu.muteFailed" satisfies PlainMessageKey;
 
 /**
  * 확인 단계의 본문 사전 키(`{name}` = 채널 이름). 문장은 사전이 진다(`timeline.channelLeave.*` — 제목·단추·진행 낱말도
@@ -317,21 +318,21 @@ export function channelLeaveFailure(error: unknown): {
 // 것을 그대로 든다 — 같은 뜻에 두 번째 이름을 만들지 않는다.
 
 /** 이 채널의 안 읽음을 서버에 광고한다. 채널을 열지 않고. */
-export const CHANNEL_MARK_READ_LABEL = "읽음 처리하기";
+export const CHANNEL_MARK_READ_KEY = "channels.menu.markRead" satisfies PlainMessageKey;
 
 /** 읽음 광고가 실패했을 때, 그 항목 자리에서 하는 말(토스트가 아니다). */
-export const CHANNEL_MARK_READ_FAILURE =
-  "읽음 처리를 하지 못했습니다. 잠시 뒤에 다시 시도하세요.";
+export const CHANNEL_MARK_READ_FAILURE_KEY =
+  "channels.menu.markReadFailed" satisfies PlainMessageKey;
 
 /** 채널 이름(또는 DM 상대의 이름)을 클립보드에 올린다. */
-export const CHANNEL_COPY_NAME_LABEL = "이름 복사하기";
+export const CHANNEL_COPY_NAME_KEY = "channels.menu.copyName" satisfies PlainMessageKey;
 
 /** 이름이 클립보드에 올라간 뒤의 영수증. */
-export const CHANNEL_COPY_NAME_DONE_LABEL = "이름 복사됨";
+export const CHANNEL_COPY_NAME_DONE_KEY = "channels.menu.copyNameDone" satisfies PlainMessageKey;
 
 /** 복사 항목의 낱말도 상태다 — `copyLinkActionLabel`과 같은 결. */
-export function channelCopyNameLabel(copied: boolean): string {
-  return copied ? CHANNEL_COPY_NAME_DONE_LABEL : CHANNEL_COPY_NAME_LABEL;
+export function channelCopyNameKey(copied: boolean): PlainMessageKey {
+  return copied ? CHANNEL_COPY_NAME_DONE_KEY : CHANNEL_COPY_NAME_KEY;
 }
 
 // ---- 복사 · 읽지 않음으로 표시 · DM 닫기 (#3963) ----------------------------
@@ -341,17 +342,17 @@ export function channelCopyNameLabel(copied: boolean): string {
 // 위의 제목**으로 옮겼다: 이름·링크·ID 세 행이 접히지 않고 서 있다.
 
 /** 복사 무리의 제목. 항목이 아니라 그 아래 세 행의 이름이다. */
-export const CHANNEL_COPY_GROUP_LABEL = "복사";
+export const CHANNEL_COPY_GROUP_KEY = "channels.menu.copyGroup" satisfies PlainMessageKey;
 
 /** 채널(또는 DM)의 ID를 클립보드에 올린다. */
-export const CHANNEL_COPY_ID_LABEL = "ID 복사하기";
+export const CHANNEL_COPY_ID_KEY = "channels.menu.copyId" satisfies PlainMessageKey;
 
 /** ID가 클립보드에 올라간 뒤의 영수증. */
-export const CHANNEL_COPY_ID_DONE_LABEL = "ID 복사됨";
+export const CHANNEL_COPY_ID_DONE_KEY = "channels.menu.copyIdDone" satisfies PlainMessageKey;
 
-/** 복사 항목의 낱말도 상태다 - `channelCopyNameLabel` 과 같은 결. */
-export function channelCopyIdLabel(copied: boolean): string {
-  return copied ? CHANNEL_COPY_ID_DONE_LABEL : CHANNEL_COPY_ID_LABEL;
+/** 복사 항목의 낱말도 상태다 - `channelCopyNameKey` 과 같은 결. */
+export function channelCopyIdKey(copied: boolean): PlainMessageKey {
+  return copied ? CHANNEL_COPY_ID_DONE_KEY : CHANNEL_COPY_ID_KEY;
 }
 
 /**
@@ -359,14 +360,14 @@ export function channelCopyIdLabel(copied: boolean): string {
  * (ADR-0178 D5). 안 읽음이 이미 있는 채널에는 「읽음 처리하기」가 서므로 둘은 한 자리의
  * 두 방향이고, 한 메뉴에 함께 서지 않는다.
  */
-export const CHANNEL_MARK_UNREAD_LABEL = "읽지 않음으로 표시하기";
+export const CHANNEL_MARK_UNREAD_KEY = "channels.menu.markUnread" satisfies PlainMessageKey;
 
 /** 왕복이 도는 동안. 「명사 + 중」 꼴이다(진행 낱말 게이트). */
-export const CHANNEL_MARK_UNREAD_BUSY_LABEL = "읽지 않음으로 표시 중";
+export const CHANNEL_MARK_UNREAD_BUSY_KEY = "channels.menu.markUnreadBusy" satisfies PlainMessageKey;
 
 /** 표시가 거절됐을 때, 그 항목 자리에서 하는 말(토스트가 아니다). */
-export const CHANNEL_MARK_UNREAD_FAILURE =
-  "읽지 않음으로 표시하지 못했습니다. 잠시 뒤에 다시 시도하세요.";
+export const CHANNEL_MARK_UNREAD_FAILURE_KEY =
+  "channels.menu.markUnreadFailed" satisfies PlainMessageKey;
 
 /**
  * DM 행의 「목록에서 숨기기」 (2026-11-14 QA 11: 옛 낱말 「목록에서 숨기기」). 호버 X 와 우클릭 항목이 같은 낱말을 쓴다.
@@ -374,16 +375,16 @@ export const CHANNEL_MARK_UNREAD_FAILURE =
  * 오면 다시 나타난다. 그래서 확인 단계가 없다. 이 낱말이 「나가기」와 헷갈리지 않게 「닫기」를 쓰지 않는다.
  * 동작 이름(`close-dm`·`closure` 라우트)은 그대로이고 사람이 읽는 낱말만 바뀌었다.
  */
-export const DM_CLOSE_LABEL = "목록에서 숨기기";
+export const DM_CLOSE_KEY = "channels.menu.dmClose" satisfies PlainMessageKey;
 
 /** 숨기기·다시 보이기가 서버에서 거절됐을 때 하는 말. 되돌려진 대화가 다시 서 있는 이유다. */
-export const DM_CLOSE_FAILURE = "대화를 목록에서 숨기지 못했어요. 잠시 뒤에 다시 시도해 주세요.";
+export const DM_CLOSE_FAILURE_KEY = "channels.menu.dmCloseFailed" satisfies PlainMessageKey;
 
-export const DM_REOPEN_FAILURE = "대화를 다시 보이게 하지 못했어요. 잠시 뒤에 다시 시도해 주세요.";
+export const DM_REOPEN_FAILURE_KEY = "channels.menu.dmReopenFailed" satisfies PlainMessageKey;
 
 /** 호버 X 의 접근 가능한 이름. 행의 링크 이름 꼴(`이름, 뜻`)을 따른다. */
-export function dmCloseButtonLabel(name: string): string {
-  return `${name}, ${DM_CLOSE_LABEL}`;
+export function dmCloseButtonRef(name: string): MessageRef<"channels.menu.dmCloseAria"> {
+  return { key: "channels.menu.dmCloseAria", values: { name } };
 }
 
 /**
@@ -393,10 +394,10 @@ export function dmCloseButtonLabel(name: string): string {
  * `role="alert"` 이다. `group` 한 겹으로 구조를 맞추면 그 group 은 이름을 가져야
  * 하고, 그 이름이 이 문장이다.
  */
-export const CHANNEL_ACTION_ERROR_GROUP_LABEL = "이 메뉴의 알림";
+export const CHANNEL_ACTION_ERROR_GROUP_KEY = "channels.menu.errorGroup" satisfies PlainMessageKey;
 
 /** 읽음 광고가 도는 동안. */
-export const CHANNEL_MARK_READ_BUSY_LABEL = "읽음 처리 중";
+export const CHANNEL_MARK_READ_BUSY_KEY = "channels.menu.markReadBusy" satisfies PlainMessageKey;
 
 /**
  * 이 행의 메뉴가 스크린리더에게 자기를 부르는 이름 (design-review #1937 M-1).
@@ -405,20 +406,23 @@ export const CHANNEL_MARK_READ_BUSY_LABEL = "읽음 처리 중";
  * 이 낱말이 DM 에 붙는 자리는 사이드바 행이 처음이고, 이 제품이 그 표면을
  * 부르는 이름은 사이드바 섹션 제목과 같은 「다이렉트 메시지」다.
  */
-export function channelMenuAccessibleLabel(name: string, isDm: boolean): string {
-  return `${name} ${isDm ? "다이렉트 메시지" : "채널"} 메뉴`;
+export function channelMenuAccessibleRef(
+  name: string,
+  isDm: boolean
+): MessageRef<"channels.menu.ariaChannel" | "channels.menu.ariaDm"> {
+  return { key: isDm ? "channels.menu.ariaDm" : "channels.menu.ariaChannel", values: { name } };
 }
 
 /**
  * 클립보드 자체가 없는 런타임에서 하는 말. 다시 눌러도 같으므로 「다시
  * 시도」라고 말하지 않는다 — `MessageRow`의 형제 문장과 같은 판정이다.
  */
-export const CHANNEL_COPY_UNAVAILABLE =
-  "복사하지 못했습니다. 이 브라우저에서는 클립보드를 쓸 수 없습니다.";
+export const CHANNEL_COPY_UNAVAILABLE_KEY =
+  "channels.menu.copyUnavailable" satisfies PlainMessageKey;
 
 /** 클립보드는 있는데 쓰기가 실패했을 때. 다시 누르면 될 수 있다. */
-export const CHANNEL_COPY_FAILURE =
-  "복사하지 못했습니다. 같은 항목을 다시 눌러 보세요.";
+export const CHANNEL_COPY_FAILURE_KEY =
+  "channels.menu.copyFailed" satisfies PlainMessageKey;
 
 /**
  * May this member create a channel at all?

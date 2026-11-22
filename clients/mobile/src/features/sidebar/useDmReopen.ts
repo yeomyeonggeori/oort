@@ -1,10 +1,11 @@
 import {ApiError, reopenDm, type ReadState} from '@momo/core/lib/api';
-import {DM_REOPEN_FAILURE} from '@momo/core/features/channels/model';
+import {DM_REOPEN_FAILURE_KEY} from '@momo/core/features/channels/model';
 import {useQueryClient} from '@tanstack/react-query';
 import {useCallback, useEffect, useRef, useState} from 'react';
 import {haptics} from '../../lib/haptics';
 import {applyClosureToReadStates, workspaceKeys} from '../workspace/queries';
 import type {DmClosedEntry} from './dmVerdicts';
+import {useFormatMessage} from '../../i18n/useFormatMessage';
 
 // =============================================================================
 // 「숨긴 대화」 시트의 「다시 보이기」 (ADR-0177 증보 D7·D8·D11, #4367). 웹 `reopenClosedDm` 의 폰판이다.
@@ -32,6 +33,7 @@ export function useDmReopen(
   onOpened: (entry: DmClosedEntry) => void,
 ): DmReopen {
   const client = useQueryClient();
+  const formatMessage = useFormatMessage();
   const [pendingId, setPendingId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const mounted = useRef(true);
@@ -73,7 +75,7 @@ export function useDmReopen(
           setPendingId(null);
           if (!ok) {
             haptics.error();
-            setError(DM_REOPEN_FAILURE);
+            setError(formatMessage(DM_REOPEN_FAILURE_KEY));
             return;
           }
           applyClosureToReadStates(client, workspaceId, id, null);
@@ -82,7 +84,7 @@ export function useDmReopen(
           onOpened(entry);
         });
     },
-    [client, onOpened, workspaceId],
+    [client, formatMessage, onOpened, workspaceId],
   );
 
   const clearError = useCallback(() => setError(null), []);

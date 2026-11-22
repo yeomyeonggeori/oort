@@ -13,11 +13,12 @@ import {
   useChannelActions,
 } from "@/features/chat/channelActions";
 import {
-  channelActionMenuLabel,
+  channelActionMenuRef,
   type ChannelSectionChoice,
 } from "@momo/core/features/channels/actionModel";
 import { holdDmLeaveReceipts } from "./dmLeaveStore";
 import { scheduleSidebarChannelRowFocus } from "./sidebarRowFocus";
+import { useFormatMessage } from "@/i18n/useFormatMessage";
 
 // =============================================================================
 // 사이드바 행의 우클릭 메뉴 (BT-1 / #1929).
@@ -152,6 +153,8 @@ export function SidebarRowContextMenu({
    */
   onLeaveDm?: () => void;
 }) {
+  const formatMessage = useFormatMessage();
+  const menuRef = channelActionMenuRef(title, channel);
   const [open, setOpen] = useState(false);
   // 이 메뉴를 **누가** 열었는가 (#3963, design-review R1 N1). 열림 윤곽(`tokens.css` 「포인터로 연
   // 행 메뉴」)은 키보드로 연 메뉴만의 표식이고, 그 갈림은 전역 모달리티 스탬프가 아니라 **열린 순간의
@@ -299,7 +302,7 @@ export function SidebarRowContextMenu({
         </ContextMenuTrigger>
         <ContextMenuContent
           data-testid="channel-row-menu"
-          aria-label={channelActionMenuLabel(title, channel)}
+          aria-label={formatMessage(menuRef.key, menuRef.values as never)}
         >
           <ChannelActionMenuItems
             surface="row"

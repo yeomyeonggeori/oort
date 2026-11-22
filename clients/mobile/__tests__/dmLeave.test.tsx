@@ -6,7 +6,7 @@ import {QueryClient, QueryClientProvider} from '@tanstack/react-query';
 import {act, cleanup, fireEvent, render, screen, waitFor, within} from '@testing-library/react-native';
 import React from 'react';
 import {AccessibilityInfo, ActionSheetIOS, ScrollView, StyleSheet} from 'react-native';
-import {DM_CLOSED_LIST_LABEL} from '@momo/core/features/sidebar/dmVisibility';
+import {DM_CLOSED_LIST_KEY} from '@momo/core/features/sidebar/dmVisibility';
 
 import '../src/boot/polyfills';
 import '../src/boot/coreHost';
@@ -525,7 +525,7 @@ describe('행 시트 — 성공 뒤 (D21 · D17 기기 줄)', () => {
     expect(screen.getByTestId('dm-left-receipt')).toHaveTextContent(ko(DM_LEAVE_KEYS.done));
     expect(say).toHaveBeenCalledWith(ko(DM_LEAVE_KEYS.done));
     // 「숨긴 대화」에도 없다(3a) — 문이 서지 않는다.
-    expect(dmSectionMenuOptions()).not.toContain(DM_CLOSED_LIST_LABEL);
+    expect(dmSectionMenuOptions()).not.toContain(ko(DM_CLOSED_LIST_KEY));
 
     const drafts = readDrafts();
     expect(drafts[channelDraftKey('ch-dm-human')]).toBeUndefined();
@@ -663,7 +663,7 @@ describe('이음매 — 홈 화면이 투영의 하한을 보임 판정에 넘�
     // DM 섹션 ⋯ 메뉴에 「숨긴 대화」 문이 없다 — 숨김 행만 보면(7번) 이 대화가 그 목록에 섰다.
     const offered = dmSectionMenuOptions();
     expect(offered.length).toBeGreaterThan(0);
-    expect(offered).not.toContain(DM_CLOSED_LIST_LABEL);
+    expect(offered).not.toContain(ko(DM_CLOSED_LIST_KEY));
   });
 });
 

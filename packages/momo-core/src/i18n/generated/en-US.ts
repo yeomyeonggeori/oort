@@ -1664,6 +1664,202 @@ export const catalog: MessageCatalog = {
       "value": "You can't leave this conversation."
     }
   ],
+  "channels.memberAdd.forbidden": [
+    {
+      "type": 0,
+      "value": "You don't have permission to add members. Ask a workspace owner or admin."
+    }
+  ],
+  "channels.memberAdd.generic": [
+    {
+      "type": 0,
+      "value": "Couldn't add the member. Try again in a moment."
+    }
+  ],
+  "channels.memberAdd.network": [
+    {
+      "type": 0,
+      "value": "Couldn't add the member. "
+    },
+    {
+      "type": 1,
+      "value": "reason"
+    }
+  ],
+  "channels.memberAdd.notFound": [
+    {
+      "type": 0,
+      "value": "Members can't be added to this channel. It may have been archived or removed."
+    }
+  ],
+  "channels.memberAdd.rateLimited": [
+    {
+      "type": 0,
+      "value": "Too many requests. Try again in a moment."
+    }
+  ],
+  "channels.menu.ariaChannel": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " channel menu"
+    }
+  ],
+  "channels.menu.ariaDm": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " direct message menu"
+    }
+  ],
+  "channels.menu.copyFailed": [
+    {
+      "type": 0,
+      "value": "Couldn't copy. Try pressing the same item again."
+    }
+  ],
+  "channels.menu.copyGroup": [
+    {
+      "type": 0,
+      "value": "Copy"
+    }
+  ],
+  "channels.menu.copyId": [
+    {
+      "type": 0,
+      "value": "Copy ID"
+    }
+  ],
+  "channels.menu.copyIdDone": [
+    {
+      "type": 0,
+      "value": "ID copied"
+    }
+  ],
+  "channels.menu.copyName": [
+    {
+      "type": 0,
+      "value": "Copy name"
+    }
+  ],
+  "channels.menu.copyNameDone": [
+    {
+      "type": 0,
+      "value": "Name copied"
+    }
+  ],
+  "channels.menu.copyUnavailable": [
+    {
+      "type": 0,
+      "value": "Couldn't copy. This browser doesn't allow clipboard access."
+    }
+  ],
+  "channels.menu.dmClose": [
+    {
+      "type": 0,
+      "value": "Hide from list"
+    }
+  ],
+  "channels.menu.dmCloseAria": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": ", Hide from list"
+    }
+  ],
+  "channels.menu.dmCloseFailed": [
+    {
+      "type": 0,
+      "value": "Couldn't hide the conversation. Try again in a moment."
+    }
+  ],
+  "channels.menu.dmReopenFailed": [
+    {
+      "type": 0,
+      "value": "Couldn't show the conversation again. Try again in a moment."
+    }
+  ],
+  "channels.menu.errorGroup": [
+    {
+      "type": 0,
+      "value": "Notices for this menu"
+    }
+  ],
+  "channels.menu.leave": [
+    {
+      "type": 0,
+      "value": "Leave channel"
+    }
+  ],
+  "channels.menu.markRead": [
+    {
+      "type": 0,
+      "value": "Mark as read"
+    }
+  ],
+  "channels.menu.markReadBusy": [
+    {
+      "type": 0,
+      "value": "Marking as read"
+    }
+  ],
+  "channels.menu.markReadFailed": [
+    {
+      "type": 0,
+      "value": "Couldn't mark as read. Try again in a moment."
+    }
+  ],
+  "channels.menu.markUnread": [
+    {
+      "type": 0,
+      "value": "Mark as unread"
+    }
+  ],
+  "channels.menu.markUnreadBusy": [
+    {
+      "type": 0,
+      "value": "Marking as unread"
+    }
+  ],
+  "channels.menu.markUnreadFailed": [
+    {
+      "type": 0,
+      "value": "Couldn't mark as unread. Try again in a moment."
+    }
+  ],
+  "channels.menu.muteFailed": [
+    {
+      "type": 0,
+      "value": "Couldn't change the notification setting. Try again in a moment."
+    }
+  ],
+  "channels.menu.muteOff": [
+    {
+      "type": 0,
+      "value": "Notifications off"
+    }
+  ],
+  "channels.menu.muteOn": [
+    {
+      "type": 0,
+      "value": "Notifications on"
+    }
+  ],
+  "channels.menu.topicView": [
+    {
+      "type": 0,
+      "value": "View topic"
+    }
+  ],
   "channels.nameRule.edge": [
     {
       "type": 0,
@@ -1918,6 +2114,21 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "Rename channel"
+    }
+  ],
+  "channels.topic.tooLong": [
+    {
+      "type": 0,
+      "value": "The topic must be "
+    },
+    {
+      "type": 2,
+      "value": "max",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": " characters or fewer."
     }
   ],
   "common.action.cancel": [
@@ -10834,6 +11045,309 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "Installed. Restart to open the new version."
+    }
+  ],
+  "sidebar.channel.star": [
+    {
+      "type": 0,
+      "value": "Star"
+    }
+  ],
+  "sidebar.channel.unstar": [
+    {
+      "type": 0,
+      "value": "Unstar"
+    }
+  ],
+  "sidebar.dms.allClosedHint": [
+    {
+      "type": 0,
+      "value": "Hidden conversations reappear when a new message arrives. Press ⌘⇧K to start one."
+    }
+  ],
+  "sidebar.dms.closedListEmpty": [
+    {
+      "type": 0,
+      "value": "No hidden conversations."
+    }
+  ],
+  "sidebar.dms.closedListHint": [
+    {
+      "type": 0,
+      "value": "Hidden conversations return to the sidebar when a new message arrives."
+    }
+  ],
+  "sidebar.dms.closedListLabel": [
+    {
+      "type": 0,
+      "value": "Hidden conversations"
+    }
+  ],
+  "sidebar.dms.closeStarFirst": [
+    {
+      "type": 0,
+      "value": "Unstar it first"
+    }
+  ],
+  "sidebar.dms.goneDisclosure": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " conversation with a member who left"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " conversations with members who left"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "sidebar.dms.open": [
+    {
+      "type": 0,
+      "value": "Open"
+    }
+  ],
+  "sidebar.dms.reasonClosed": [
+    {
+      "type": 0,
+      "value": "You hid this"
+    }
+  ],
+  "sidebar.dms.reasonGone": [
+    {
+      "type": 0,
+      "value": "They left and there's nothing unread"
+    }
+  ],
+  "sidebar.dms.reopen": [
+    {
+      "type": 0,
+      "value": "Show again"
+    }
+  ],
+  "sidebar.dms.reopenAriaClosed": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": ", Show again"
+    }
+  ],
+  "sidebar.dms.reopenAriaOpen": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": ", Open"
+    }
+  ],
+  "sidebar.prefs.loadFailed": [
+    {
+      "type": 0,
+      "value": "Couldn't load sections."
+    }
+  ],
+  "sidebar.prefs.saveFailed": [
+    {
+      "type": 0,
+      "value": "Couldn't save the section changes. Try again in a moment."
+    }
+  ],
+  "sidebar.section.capChannels": [
+    {
+      "type": 0,
+      "value": "A sidebar can hold up to "
+    },
+    {
+      "type": 2,
+      "value": "max",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": " channels."
+    }
+  ],
+  "sidebar.section.capSections": [
+    {
+      "type": 0,
+      "value": "You can create up to "
+    },
+    {
+      "type": 2,
+      "value": "max",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": " sections."
+    }
+  ],
+  "sidebar.section.channels": [
+    {
+      "type": 0,
+      "value": "Channels"
+    }
+  ],
+  "sidebar.section.create": [
+    {
+      "type": 0,
+      "value": "New section"
+    }
+  ],
+  "sidebar.section.deleteConfirm": [
+    {
+      "type": 0,
+      "value": "Delete"
+    }
+  ],
+  "sidebar.section.deleteConfirmBody": [
+    {
+      "type": 0,
+      "value": "The "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " section disappears from the sidebar. Its channels move back to the Channels section; you won't leave any of them."
+    }
+  ],
+  "sidebar.section.deleteConfirmTitle": [
+    {
+      "type": 0,
+      "value": "Delete this section?"
+    }
+  ],
+  "sidebar.section.deleteLabel": [
+    {
+      "type": 0,
+      "value": "Delete section"
+    }
+  ],
+  "sidebar.section.dms": [
+    {
+      "type": 0,
+      "value": "Direct messages"
+    }
+  ],
+  "sidebar.section.emptyHintHover": [
+    {
+      "type": 0,
+      "value": "Drag a channel row here or right-click it to move it."
+    }
+  ],
+  "sidebar.section.emptyHintTouch": [
+    {
+      "type": 0,
+      "value": "Empty. You can move channels on a wider screen."
+    }
+  ],
+  "sidebar.section.moveDown": [
+    {
+      "type": 0,
+      "value": "Move down"
+    }
+  ],
+  "sidebar.section.moveGroup": [
+    {
+      "type": 0,
+      "value": "Move to section"
+    }
+  ],
+  "sidebar.section.moveToBase": [
+    {
+      "type": 0,
+      "value": "To Channels section"
+    }
+  ],
+  "sidebar.section.moveUp": [
+    {
+      "type": 0,
+      "value": "Move up"
+    }
+  ],
+  "sidebar.section.nameEmpty": [
+    {
+      "type": 0,
+      "value": "Enter a section name."
+    }
+  ],
+  "sidebar.section.nameField": [
+    {
+      "type": 0,
+      "value": "Section name"
+    }
+  ],
+  "sidebar.section.namePlaceholder": [
+    {
+      "type": 0,
+      "value": "e.g. Launch prep"
+    }
+  ],
+  "sidebar.section.nameTooLong": [
+    {
+      "type": 0,
+      "value": "Section names can be up to "
+    },
+    {
+      "type": 2,
+      "value": "max",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": " characters."
+    }
+  ],
+  "sidebar.section.renameLabel": [
+    {
+      "type": 0,
+      "value": "Rename"
+    }
+  ],
+  "sidebar.section.renameTitle": [
+    {
+      "type": 0,
+      "value": "Rename section"
+    }
+  ],
+  "sidebar.section.starred": [
+    {
+      "type": 0,
+      "value": "Starred"
+    }
+  ],
+  "sidebar.starred.touchHint": [
+    {
+      "type": 0,
+      "value": "You can remove stars on a wider screen."
     }
   ],
   "teamAi.delegation.chipImage": [
