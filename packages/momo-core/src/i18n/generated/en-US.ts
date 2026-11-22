@@ -12050,6 +12050,250 @@ export const catalog: MessageCatalog = {
       "value": "Leave this channel?"
     }
   ],
+  "timeline.commandSuggest.askBusy": [
+    {
+      "type": 0,
+      "value": "You have a draft in progress, so I didn't fill it in. Mention the operator yourself."
+    }
+  ],
+  "timeline.commandSuggest.askNone": [
+    {
+      "type": 0,
+      "value": "Couldn't find an operator in this workspace."
+    }
+  ],
+  "timeline.commandSuggest.askOperator": [
+    {
+      "type": 0,
+      "value": "Ask the operator"
+    }
+  ],
+  "timeline.commandSuggest.askThread": [
+    {
+      "type": 0,
+      "value": "Open the thread and mention the operator."
+    }
+  ],
+  "timeline.commandSuggest.oneLineAiConnect": [
+    {
+      "type": 0,
+      "value": "Suggested connecting an AI account to "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    }
+  ],
+  "timeline.commandSuggest.oneLineCard": [
+    {
+      "type": 0,
+      "value": "Suggested a “"
+    },
+    {
+      "type": 1,
+      "value": "what"
+    },
+    {
+      "type": 0,
+      "value": "” card to "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    }
+  ],
+  "timeline.commandSuggest.onlyMe": [
+    {
+      "type": 0,
+      "value": "Only you can use this"
+    }
+  ],
+  "timeline.commandSuggest.openAppearance": [
+    {
+      "type": 0,
+      "value": "Open appearance settings"
+    }
+  ],
+  "timeline.commandSuggest.openCode": [
+    {
+      "type": 0,
+      "value": "Open run host settings"
+    }
+  ],
+  "timeline.commandSuggest.openDevices": [
+    {
+      "type": 0,
+      "value": "Open device settings"
+    }
+  ],
+  "timeline.commandSuggest.openMembers": [
+    {
+      "type": 0,
+      "value": "Open members and invites"
+    }
+  ],
+  "timeline.commandSuggest.openMemory": [
+    {
+      "type": 0,
+      "value": "Open memory settings"
+    }
+  ],
+  "timeline.commandSuggest.openNotifications": [
+    {
+      "type": 0,
+      "value": "Open notification settings"
+    }
+  ],
+  "timeline.commandSuggest.openPlugins": [
+    {
+      "type": 0,
+      "value": "Open app settings"
+    }
+  ],
+  "timeline.commandSuggest.openProfile": [
+    {
+      "type": 0,
+      "value": "Open profile settings"
+    }
+  ],
+  "timeline.commandSuggest.openShortcuts": [
+    {
+      "type": 0,
+      "value": "Open shortcut settings"
+    }
+  ],
+  "timeline.commandSuggest.openUpdates": [
+    {
+      "type": 0,
+      "value": "Open update settings"
+    }
+  ],
+  "timeline.commandSuggest.openUsage": [
+    {
+      "type": 0,
+      "value": "Open usage"
+    }
+  ],
+  "timeline.commandSuggest.openWorkspace": [
+    {
+      "type": 0,
+      "value": "Open workspace settings"
+    }
+  ],
+  "timeline.commandSuggest.phoneFoot": [
+    {
+      "type": 0,
+      "value": "Enter keys on your Mac or the web"
+    }
+  ],
+  "timeline.commandSuggest.phoneMine": [
+    {
+      "type": 0,
+      "value": "Subscription sign-in happens on your Mac. Open this card on your Mac to sign in right away."
+    }
+  ],
+  "timeline.commandSuggest.settingsOpen": [
+    {
+      "type": 0,
+      "value": "Open"
+    }
+  ],
+  "timeline.commandSuggest.settingsOpenGeneric": [
+    {
+      "type": 0,
+      "value": "Open settings"
+    }
+  ],
+  "timeline.commandSuggest.settingsPhone": [
+    {
+      "type": 0,
+      "value": "Open this setting on your Mac or the web."
+    }
+  ],
+  "timeline.commandSuggest.targetAppearance": [
+    {
+      "type": 0,
+      "value": "Appearance settings"
+    }
+  ],
+  "timeline.commandSuggest.targetCode": [
+    {
+      "type": 0,
+      "value": "Run host settings"
+    }
+  ],
+  "timeline.commandSuggest.targetDevices": [
+    {
+      "type": 0,
+      "value": "Device settings"
+    }
+  ],
+  "timeline.commandSuggest.targetMembers": [
+    {
+      "type": 0,
+      "value": "Members and invites"
+    }
+  ],
+  "timeline.commandSuggest.targetMemory": [
+    {
+      "type": 0,
+      "value": "Memory settings"
+    }
+  ],
+  "timeline.commandSuggest.targetNotifications": [
+    {
+      "type": 0,
+      "value": "Notification settings"
+    }
+  ],
+  "timeline.commandSuggest.targetPlugins": [
+    {
+      "type": 0,
+      "value": "App settings"
+    }
+  ],
+  "timeline.commandSuggest.targetProfile": [
+    {
+      "type": 0,
+      "value": "Profile settings"
+    }
+  ],
+  "timeline.commandSuggest.targetShortcuts": [
+    {
+      "type": 0,
+      "value": "Shortcut settings"
+    }
+  ],
+  "timeline.commandSuggest.targetUpdates": [
+    {
+      "type": 0,
+      "value": "Update settings"
+    }
+  ],
+  "timeline.commandSuggest.targetUsage": [
+    {
+      "type": 0,
+      "value": "Usage"
+    }
+  ],
+  "timeline.commandSuggest.targetWorkspace": [
+    {
+      "type": 0,
+      "value": "Workspace settings"
+    }
+  ],
+  "timeline.commandSuggest.teamClose": [
+    {
+      "type": 0,
+      "value": "Hide team AI key"
+    }
+  ],
+  "timeline.commandSuggest.teamOpen": [
+    {
+      "type": 0,
+      "value": "Show team AI key"
+    }
+  ],
   "timeline.createChannel.privateDetail": [
     {
       "type": 0,

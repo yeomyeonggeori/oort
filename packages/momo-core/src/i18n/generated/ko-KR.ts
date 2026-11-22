@@ -11416,6 +11416,250 @@ export const catalog: MessageCatalog = {
       "value": "이 채널에서 나갈까요?"
     }
   ],
+  "timeline.commandSuggest.askBusy": [
+    {
+      "type": 0,
+      "value": "쓰던 글이 있어 채우지 않았어요. 운영자를 직접 멘션해 주세요."
+    }
+  ],
+  "timeline.commandSuggest.askNone": [
+    {
+      "type": 0,
+      "value": "이 워크스페이스에서 운영자를 찾지 못했어요."
+    }
+  ],
+  "timeline.commandSuggest.askOperator": [
+    {
+      "type": 0,
+      "value": "운영자에게 부탁하기"
+    }
+  ],
+  "timeline.commandSuggest.askThread": [
+    {
+      "type": 0,
+      "value": "스레드를 열고 운영자를 멘션해 주세요."
+    }
+  ],
+  "timeline.commandSuggest.oneLineAiConnect": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "에게 AI 계정 연결을 제안했어요"
+    }
+  ],
+  "timeline.commandSuggest.oneLineCard": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "에게 「"
+    },
+    {
+      "type": 1,
+      "value": "what"
+    },
+    {
+      "type": 0,
+      "value": "」 카드를 제안했어요"
+    }
+  ],
+  "timeline.commandSuggest.onlyMe": [
+    {
+      "type": 0,
+      "value": "나에게만 조작돼요"
+    }
+  ],
+  "timeline.commandSuggest.openAppearance": [
+    {
+      "type": 0,
+      "value": "모양 설정 열기"
+    }
+  ],
+  "timeline.commandSuggest.openCode": [
+    {
+      "type": 0,
+      "value": "실행 호스트 설정 열기"
+    }
+  ],
+  "timeline.commandSuggest.openDevices": [
+    {
+      "type": 0,
+      "value": "기기 설정 열기"
+    }
+  ],
+  "timeline.commandSuggest.openMembers": [
+    {
+      "type": 0,
+      "value": "멤버와 초대 열기"
+    }
+  ],
+  "timeline.commandSuggest.openMemory": [
+    {
+      "type": 0,
+      "value": "기억 설정 열기"
+    }
+  ],
+  "timeline.commandSuggest.openNotifications": [
+    {
+      "type": 0,
+      "value": "알림 설정 열기"
+    }
+  ],
+  "timeline.commandSuggest.openPlugins": [
+    {
+      "type": 0,
+      "value": "앱 설정 열기"
+    }
+  ],
+  "timeline.commandSuggest.openProfile": [
+    {
+      "type": 0,
+      "value": "프로필 설정 열기"
+    }
+  ],
+  "timeline.commandSuggest.openShortcuts": [
+    {
+      "type": 0,
+      "value": "단축키 설정 열기"
+    }
+  ],
+  "timeline.commandSuggest.openUpdates": [
+    {
+      "type": 0,
+      "value": "업데이트 설정 열기"
+    }
+  ],
+  "timeline.commandSuggest.openUsage": [
+    {
+      "type": 0,
+      "value": "사용량 열기"
+    }
+  ],
+  "timeline.commandSuggest.openWorkspace": [
+    {
+      "type": 0,
+      "value": "워크스페이스 설정 열기"
+    }
+  ],
+  "timeline.commandSuggest.phoneFoot": [
+    {
+      "type": 0,
+      "value": "키 입력은 맥·웹에서 해요"
+    }
+  ],
+  "timeline.commandSuggest.phoneMine": [
+    {
+      "type": 0,
+      "value": "구독 로그인은 맥에서 해요. 맥에서 이 카드를 열면 바로 로그인할 수 있어요."
+    }
+  ],
+  "timeline.commandSuggest.settingsOpen": [
+    {
+      "type": 0,
+      "value": "열기"
+    }
+  ],
+  "timeline.commandSuggest.settingsOpenGeneric": [
+    {
+      "type": 0,
+      "value": "설정 열기"
+    }
+  ],
+  "timeline.commandSuggest.settingsPhone": [
+    {
+      "type": 0,
+      "value": "이 설정은 맥·웹에서 열어요."
+    }
+  ],
+  "timeline.commandSuggest.targetAppearance": [
+    {
+      "type": 0,
+      "value": "모양 설정"
+    }
+  ],
+  "timeline.commandSuggest.targetCode": [
+    {
+      "type": 0,
+      "value": "실행 호스트 설정"
+    }
+  ],
+  "timeline.commandSuggest.targetDevices": [
+    {
+      "type": 0,
+      "value": "기기 설정"
+    }
+  ],
+  "timeline.commandSuggest.targetMembers": [
+    {
+      "type": 0,
+      "value": "멤버와 초대"
+    }
+  ],
+  "timeline.commandSuggest.targetMemory": [
+    {
+      "type": 0,
+      "value": "기억 설정"
+    }
+  ],
+  "timeline.commandSuggest.targetNotifications": [
+    {
+      "type": 0,
+      "value": "알림 설정"
+    }
+  ],
+  "timeline.commandSuggest.targetPlugins": [
+    {
+      "type": 0,
+      "value": "앱 설정"
+    }
+  ],
+  "timeline.commandSuggest.targetProfile": [
+    {
+      "type": 0,
+      "value": "프로필 설정"
+    }
+  ],
+  "timeline.commandSuggest.targetShortcuts": [
+    {
+      "type": 0,
+      "value": "단축키 설정"
+    }
+  ],
+  "timeline.commandSuggest.targetUpdates": [
+    {
+      "type": 0,
+      "value": "업데이트 설정"
+    }
+  ],
+  "timeline.commandSuggest.targetUsage": [
+    {
+      "type": 0,
+      "value": "사용량"
+    }
+  ],
+  "timeline.commandSuggest.targetWorkspace": [
+    {
+      "type": 0,
+      "value": "워크스페이스 설정"
+    }
+  ],
+  "timeline.commandSuggest.teamClose": [
+    {
+      "type": 0,
+      "value": "팀 AI 키 접기"
+    }
+  ],
+  "timeline.commandSuggest.teamOpen": [
+    {
+      "type": 0,
+      "value": "팀 AI 키 보기"
+    }
+  ],
   "timeline.createChannel.privateDetail": [
     {
       "type": 0,

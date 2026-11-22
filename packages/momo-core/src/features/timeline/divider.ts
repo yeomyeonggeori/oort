@@ -160,7 +160,7 @@ export interface DividerToneSpec {
 
 export const DIVIDER_TONE_SPEC = {
   quiet: {
-    meaning: "훑는 눈이 배경으로 처리하는 표지",
+    meaning: "A marker the scanning eye treats as background",
     paintsRule: false,
     mustDifferFrom: [],
   },
@@ -169,7 +169,7 @@ export const DIVIDER_TONE_SPEC = {
     // 설명하는 줄이다(위 `DividerToneSpec.meaning` 독스트링). 화면에 나가는 것은
     // 구분선의 라벨이지 이 문장이 아니고, 이 칸을 읽는 것은 두 클라의 팔레트 대조
     // 테스트뿐이다(dividerTone.test.ts · conversationVisual.test.tsx).
-    meaning: "여기서부터 아직 읽지 않았다 — 경계를 그리는 색",
+    meaning: "Unread starts here; the colour that draws the boundary",
     paintsRule: true,
     mustDifferFrom: ["quiet", "agent", "danger"],
   },

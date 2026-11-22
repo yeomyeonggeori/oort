@@ -3,14 +3,15 @@ import { useNavigate } from "react-router-dom";
 import { ArrowRight, Settings } from "lucide-react";
 import { isSurfaceProvided } from "@momo/core/features/capabilities/serverSurfaces";
 import {
-  COMMAND_SUGGEST_SETTINGS_OPEN,
+  COMMAND_SUGGEST_SETTINGS_OPEN_KEY,
   commandSuggestHead,
   commandSuggestOneLine,
   commandSuggestViewer,
-  settingsOpenLabel,
-  settingsOpenTarget,
+  settingsOpenLabelKey,
+  settingsOpenTargetKey,
 } from "@momo/core/features/timeline/commandSuggest";
 import { Button } from "@/design/ui/button";
+import { useFormatMessage } from "@/i18n/useFormatMessage";
 import { useSurfaceProvidedPredicate } from "@/features/capabilities/useSurfaceProvided";
 import { reachableSettingsSections, resolveSettingsSection } from "@/features/settings/settingsNav";
 import type { CommandSuggestSlotProps } from "@/features/timeline/commandSuggestSlot";
@@ -66,6 +67,7 @@ function useSectionReachable(section: string | null): boolean {
 export function SettingsOpenSuggestion({ card, viewerMemberId }: CommandSuggestSlotProps) {
   const navigate = useNavigate();
   const headingId = useId();
+  const formatMessage = useFormatMessage();
   const section = card.section;
   const reachable = useSectionReachable(section);
   if (!isSurfaceProvided("settingsOpenCard")) return null;
@@ -84,14 +86,14 @@ export function SettingsOpenSuggestion({ card, viewerMemberId }: CommandSuggestS
           data-testid="settings-suggest-line"
         >
           <Settings className="size-4 shrink-0 text-icon" aria-hidden="true" />
-          <span className="min-w-0 flex-1 break-keep">{commandSuggestOneLine(card)}</span>
+          <span className="min-w-0 flex-1 break-keep">{commandSuggestOneLine(formatMessage, card)}</span>
         </p>
       </div>
     );
   }
   if (!reachable) return null;
   const initial = [...card.agentName.trim()][0]?.toUpperCase() ?? "";
-  const label = settingsOpenLabel(section);
+  const label = formatMessage(settingsOpenLabelKey(section));
   return (
     <section
       aria-labelledby={headingId}
@@ -114,7 +116,7 @@ export function SettingsOpenSuggestion({ card, viewerMemberId }: CommandSuggestS
       <div className="flex min-w-0 items-center gap-3 px-3 py-3">
         <Settings className="size-4 shrink-0 text-icon" aria-hidden="true" />
         <span className="min-w-0 flex-1 break-keep text-body text-ink" data-testid="settings-suggest-label">
-          {settingsOpenTarget(section)}
+          {formatMessage(settingsOpenTargetKey(section))}
         </span>
         <Button
           type="button"
@@ -126,7 +128,7 @@ export function SettingsOpenSuggestion({ card, viewerMemberId }: CommandSuggestS
           data-testid="settings-suggest-open"
         >
           <ArrowRight aria-hidden="true" />
-          {COMMAND_SUGGEST_SETTINGS_OPEN}
+          {formatMessage(COMMAND_SUGGEST_SETTINGS_OPEN_KEY)}
         </Button>
       </div>
     </section>

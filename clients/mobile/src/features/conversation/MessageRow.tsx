@@ -2992,7 +2992,7 @@ function MessageRowInner({
         feedback('actionFailed');
       });
     },
-    [actions, message],
+    [actions, message, formatMessage],
   );
 
   const togglePin = useCallback(() => {
@@ -3001,7 +3001,7 @@ function MessageRowInner({
     void actions.onTogglePin(message).catch((error: unknown) => {
       setRowError(formatMessage(pinFailureKey(error)));
     });
-  }, [actions, message]);
+  }, [actions, message, formatMessage]);
 
   const onChipPress = useCallback(
     (emoji: string) => {

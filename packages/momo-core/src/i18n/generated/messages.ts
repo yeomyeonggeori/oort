@@ -1652,6 +1652,44 @@ export const messageKeys = [
   "timeline.channelLeave.errorNetwork",
   "timeline.channelLeave.errorNotFound",
   "timeline.channelLeave.title",
+  "timeline.commandSuggest.askBusy",
+  "timeline.commandSuggest.askNone",
+  "timeline.commandSuggest.askOperator",
+  "timeline.commandSuggest.askThread",
+  "timeline.commandSuggest.oneLineAiConnect",
+  "timeline.commandSuggest.oneLineCard",
+  "timeline.commandSuggest.onlyMe",
+  "timeline.commandSuggest.openAppearance",
+  "timeline.commandSuggest.openCode",
+  "timeline.commandSuggest.openDevices",
+  "timeline.commandSuggest.openMembers",
+  "timeline.commandSuggest.openMemory",
+  "timeline.commandSuggest.openNotifications",
+  "timeline.commandSuggest.openPlugins",
+  "timeline.commandSuggest.openProfile",
+  "timeline.commandSuggest.openShortcuts",
+  "timeline.commandSuggest.openUpdates",
+  "timeline.commandSuggest.openUsage",
+  "timeline.commandSuggest.openWorkspace",
+  "timeline.commandSuggest.phoneFoot",
+  "timeline.commandSuggest.phoneMine",
+  "timeline.commandSuggest.settingsOpen",
+  "timeline.commandSuggest.settingsOpenGeneric",
+  "timeline.commandSuggest.settingsPhone",
+  "timeline.commandSuggest.targetAppearance",
+  "timeline.commandSuggest.targetCode",
+  "timeline.commandSuggest.targetDevices",
+  "timeline.commandSuggest.targetMembers",
+  "timeline.commandSuggest.targetMemory",
+  "timeline.commandSuggest.targetNotifications",
+  "timeline.commandSuggest.targetPlugins",
+  "timeline.commandSuggest.targetProfile",
+  "timeline.commandSuggest.targetShortcuts",
+  "timeline.commandSuggest.targetUpdates",
+  "timeline.commandSuggest.targetUsage",
+  "timeline.commandSuggest.targetWorkspace",
+  "timeline.commandSuggest.teamClose",
+  "timeline.commandSuggest.teamOpen",
   "timeline.createChannel.privateDetail",
   "timeline.createChannel.publicDetail",
   "timeline.decisionStage.position",
@@ -4007,6 +4045,49 @@ export const argumentSpecs = {
   },
   "timeline.channelLeave.errorNotFound": {},
   "timeline.channelLeave.title": {},
+  "timeline.commandSuggest.askBusy": {},
+  "timeline.commandSuggest.askNone": {},
+  "timeline.commandSuggest.askOperator": {},
+  "timeline.commandSuggest.askThread": {},
+  "timeline.commandSuggest.oneLineAiConnect": {
+    "name": "string"
+  },
+  "timeline.commandSuggest.oneLineCard": {
+    "name": "string",
+    "what": "string"
+  },
+  "timeline.commandSuggest.onlyMe": {},
+  "timeline.commandSuggest.openAppearance": {},
+  "timeline.commandSuggest.openCode": {},
+  "timeline.commandSuggest.openDevices": {},
+  "timeline.commandSuggest.openMembers": {},
+  "timeline.commandSuggest.openMemory": {},
+  "timeline.commandSuggest.openNotifications": {},
+  "timeline.commandSuggest.openPlugins": {},
+  "timeline.commandSuggest.openProfile": {},
+  "timeline.commandSuggest.openShortcuts": {},
+  "timeline.commandSuggest.openUpdates": {},
+  "timeline.commandSuggest.openUsage": {},
+  "timeline.commandSuggest.openWorkspace": {},
+  "timeline.commandSuggest.phoneFoot": {},
+  "timeline.commandSuggest.phoneMine": {},
+  "timeline.commandSuggest.settingsOpen": {},
+  "timeline.commandSuggest.settingsOpenGeneric": {},
+  "timeline.commandSuggest.settingsPhone": {},
+  "timeline.commandSuggest.targetAppearance": {},
+  "timeline.commandSuggest.targetCode": {},
+  "timeline.commandSuggest.targetDevices": {},
+  "timeline.commandSuggest.targetMembers": {},
+  "timeline.commandSuggest.targetMemory": {},
+  "timeline.commandSuggest.targetNotifications": {},
+  "timeline.commandSuggest.targetPlugins": {},
+  "timeline.commandSuggest.targetProfile": {},
+  "timeline.commandSuggest.targetShortcuts": {},
+  "timeline.commandSuggest.targetUpdates": {},
+  "timeline.commandSuggest.targetUsage": {},
+  "timeline.commandSuggest.targetWorkspace": {},
+  "timeline.commandSuggest.teamClose": {},
+  "timeline.commandSuggest.teamOpen": {},
   "timeline.createChannel.privateDetail": {},
   "timeline.createChannel.publicDetail": {},
   "timeline.decisionStage.position": {
@@ -6116,6 +6197,44 @@ export interface MessageArgs {
   "timeline.channelLeave.errorNetwork": { reason: string };
   "timeline.channelLeave.errorNotFound": Record<string, never>;
   "timeline.channelLeave.title": Record<string, never>;
+  "timeline.commandSuggest.askBusy": Record<string, never>;
+  "timeline.commandSuggest.askNone": Record<string, never>;
+  "timeline.commandSuggest.askOperator": Record<string, never>;
+  "timeline.commandSuggest.askThread": Record<string, never>;
+  "timeline.commandSuggest.oneLineAiConnect": { name: string };
+  "timeline.commandSuggest.oneLineCard": { name: string; what: string };
+  "timeline.commandSuggest.onlyMe": Record<string, never>;
+  "timeline.commandSuggest.openAppearance": Record<string, never>;
+  "timeline.commandSuggest.openCode": Record<string, never>;
+  "timeline.commandSuggest.openDevices": Record<string, never>;
+  "timeline.commandSuggest.openMembers": Record<string, never>;
+  "timeline.commandSuggest.openMemory": Record<string, never>;
+  "timeline.commandSuggest.openNotifications": Record<string, never>;
+  "timeline.commandSuggest.openPlugins": Record<string, never>;
+  "timeline.commandSuggest.openProfile": Record<string, never>;
+  "timeline.commandSuggest.openShortcuts": Record<string, never>;
+  "timeline.commandSuggest.openUpdates": Record<string, never>;
+  "timeline.commandSuggest.openUsage": Record<string, never>;
+  "timeline.commandSuggest.openWorkspace": Record<string, never>;
+  "timeline.commandSuggest.phoneFoot": Record<string, never>;
+  "timeline.commandSuggest.phoneMine": Record<string, never>;
+  "timeline.commandSuggest.settingsOpen": Record<string, never>;
+  "timeline.commandSuggest.settingsOpenGeneric": Record<string, never>;
+  "timeline.commandSuggest.settingsPhone": Record<string, never>;
+  "timeline.commandSuggest.targetAppearance": Record<string, never>;
+  "timeline.commandSuggest.targetCode": Record<string, never>;
+  "timeline.commandSuggest.targetDevices": Record<string, never>;
+  "timeline.commandSuggest.targetMembers": Record<string, never>;
+  "timeline.commandSuggest.targetMemory": Record<string, never>;
+  "timeline.commandSuggest.targetNotifications": Record<string, never>;
+  "timeline.commandSuggest.targetPlugins": Record<string, never>;
+  "timeline.commandSuggest.targetProfile": Record<string, never>;
+  "timeline.commandSuggest.targetShortcuts": Record<string, never>;
+  "timeline.commandSuggest.targetUpdates": Record<string, never>;
+  "timeline.commandSuggest.targetUsage": Record<string, never>;
+  "timeline.commandSuggest.targetWorkspace": Record<string, never>;
+  "timeline.commandSuggest.teamClose": Record<string, never>;
+  "timeline.commandSuggest.teamOpen": Record<string, never>;
   "timeline.createChannel.privateDetail": Record<string, never>;
   "timeline.createChannel.publicDetail": Record<string, never>;
   "timeline.decisionStage.position": { current: string; total: string };

@@ -3,10 +3,10 @@ import {Image, Pressable, StyleSheet, Text, View} from 'react-native';
 import {useQuery} from '@tanstack/react-query';
 import {fetchProviderLink} from '@momo/core/features/settings/api';
 import {
-  COMMAND_SUGGEST_PHONE_FOOT,
-  COMMAND_SUGGEST_PHONE_MINE,
-  COMMAND_SUGGEST_TEAM_CLOSE,
-  COMMAND_SUGGEST_TEAM_OPEN,
+  COMMAND_SUGGEST_PHONE_FOOT_KEY,
+  COMMAND_SUGGEST_PHONE_MINE_KEY,
+  COMMAND_SUGGEST_TEAM_CLOSE_KEY,
+  COMMAND_SUGGEST_TEAM_OPEN_KEY,
   commandSuggestHead,
   commandSuggestOneLine,
   commandSuggestViewer,
@@ -15,6 +15,7 @@ import {
 import {font, line, PRESSED_OPACITY, slopTo, space, TOUCH_TARGET, type Palette} from '../../design/tokens';
 import {Sentence} from '../../design/atoms';
 import {usePalette, useStyles} from '../../design/theme';
+import {useFormatMessage} from '../../i18n/useFormatMessage';
 import {
   AI_CONNECT_ICON_SIZE,
   AI_CONNECT_ICONS,
@@ -92,6 +93,7 @@ function SuggestionLine({
 }): React.JSX.Element {
   const styles = useStyles(build);
   const palette = usePalette();
+  const formatMessage = useFormatMessage();
   const [open, setOpen] = useState(false);
   return (
     <View
@@ -104,7 +106,7 @@ function SuggestionLine({
           accessibilityIgnoresInvertColors
         />
         <Text style={styles.onelineText} lineBreakStrategyIOS="hangul-word">
-          {commandSuggestOneLine(card)}
+          {commandSuggestOneLine(formatMessage, card)}
         </Text>
         {operator ? (
           <Pressable
@@ -115,7 +117,7 @@ function SuggestionLine({
             testID="ai-suggest-team-open"
             style={({pressed}) => [pressed && styles.pressed]}>
             <Text style={styles.onelineLink}>
-              {open ? COMMAND_SUGGEST_TEAM_CLOSE : COMMAND_SUGGEST_TEAM_OPEN}
+              {formatMessage(open ? COMMAND_SUGGEST_TEAM_CLOSE_KEY : COMMAND_SUGGEST_TEAM_OPEN_KEY)}
             </Text>
           </Pressable>
         ) : null}
@@ -143,6 +145,7 @@ function SuggestedCard({
 }): React.JSX.Element {
   const styles = useStyles(build);
   const palette = usePalette();
+  const formatMessage = useFormatMessage();
   const focus = card.focus;
   const showMine =
     focus === null || focus === 'mine' || focus === 'claude' || focus === 'codex';
@@ -174,7 +177,7 @@ function SuggestedCard({
               style={[styles.icon, styles.noteIcon, {tintColor: palette.icon}]}
               accessibilityIgnoresInvertColors
             />
-            <Sentence style={styles.noteText}>{COMMAND_SUGGEST_PHONE_MINE}</Sentence>
+            <Sentence style={styles.noteText}>{formatMessage(COMMAND_SUGGEST_PHONE_MINE_KEY)}</Sentence>
           </View>
         </View>
       ) : null}
@@ -194,7 +197,7 @@ function SuggestedCard({
             accessibilityIgnoresInvertColors
           />
           <Text style={styles.footText} lineBreakStrategyIOS="hangul-word">
-            {COMMAND_SUGGEST_PHONE_FOOT}
+            {formatMessage(COMMAND_SUGGEST_PHONE_FOOT_KEY)}
           </Text>
         </View>
       ) : null}
