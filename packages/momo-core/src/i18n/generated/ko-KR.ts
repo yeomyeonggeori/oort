@@ -1853,6 +1853,430 @@ export const catalog: MessageCatalog = {
       "value": "채널 이름 바꾸기"
     }
   ],
+  "cliLogin.consent.approve": [
+    {
+      "type": 0,
+      "value": "허용"
+    }
+  ],
+  "cliLogin.consent.approveBusy": [
+    {
+      "type": 0,
+      "value": "허용 중"
+    }
+  ],
+  "cliLogin.consent.checkNote": [
+    {
+      "type": 0,
+      "value": "터미널에 표시된 서버 주소와 기기 이름이 아래와 같을 때만 허용해 주세요. 다르거나 내가 시작한 로그인이 아니면 허용하지 말고 거절해 주세요."
+    }
+  ],
+  "cliLogin.consent.clientLabel": [
+    {
+      "type": 0,
+      "value": "클라이언트"
+    }
+  ],
+  "cliLogin.consent.credentialLimit": [
+    {
+      "type": 0,
+      "value": "이 계정으로 로그인한 기기가 너무 많아요. 쓰지 않는 기존 연결을 정리한 뒤 다시 시도해 주세요."
+    }
+  ],
+  "cliLogin.consent.deny": [
+    {
+      "type": 0,
+      "value": "거절"
+    }
+  ],
+  "cliLogin.consent.denyBusy": [
+    {
+      "type": 0,
+      "value": "거절 중"
+    }
+  ],
+  "cliLogin.consent.deviceLabel": [
+    {
+      "type": 0,
+      "value": "기기 이름"
+    }
+  ],
+  "cliLogin.consent.deviceMissing": [
+    {
+      "type": 0,
+      "value": "기기 이름을 보내지 않았어요"
+    }
+  ],
+  "cliLogin.consent.deviceNote": [
+    {
+      "type": 0,
+      "value": "기기 이름은 연결하는 쪽이 정한 값이에요."
+    }
+  ],
+  "cliLogin.consent.dismiss": [
+    {
+      "type": 0,
+      "value": "닫기"
+    }
+  ],
+  "cliLogin.consent.hostLabel": [
+    {
+      "type": 0,
+      "value": "서버 호스트"
+    }
+  ],
+  "cliLogin.consent.lead": [
+    {
+      "type": 0,
+      "value": "터미널의 oort CLI가 내 계정으로 이 워크스페이스에 연결하려고 해요."
+    }
+  ],
+  "cliLogin.consent.lifetime": [
+    {
+      "type": 0,
+      "value": "연결은 최대 "
+    },
+    {
+      "type": 1,
+      "value": "maxDays"
+    },
+    {
+      "type": 0,
+      "value": "일 유지되고, "
+    },
+    {
+      "type": 1,
+      "value": "idleDays"
+    },
+    {
+      "type": 0,
+      "value": "일 동안 쓰지 않으면 끊겨요. 로그인 상태는 "
+    },
+    {
+      "type": 1,
+      "value": "accessMinutes"
+    },
+    {
+      "type": 0,
+      "value": "분마다 자동으로 갱신돼요. 비밀번호를 바꾸면 이 연결도 바로 끊겨요."
+    }
+  ],
+  "cliLogin.consent.loadingSr": [
+    {
+      "type": 0,
+      "value": "로그인 요청을 불러오는 중이에요."
+    }
+  ],
+  "cliLogin.consent.memberLabel": [
+    {
+      "type": 0,
+      "value": "승인하는 사람"
+    }
+  ],
+  "cliLogin.consent.offlineNote": [
+    {
+      "type": 0,
+      "value": "연결이 끊겼어요. 허용과 거절은 다시 연결된 뒤에 할 수 있어요."
+    }
+  ],
+  "cliLogin.consent.passwordHint": [
+    {
+      "type": 0,
+      "value": "허용하기 전에 내 비밀번호를 한 번 더 확인해요."
+    }
+  ],
+  "cliLogin.consent.passwordLabel": [
+    {
+      "type": 0,
+      "value": "현재 비밀번호"
+    }
+  ],
+  "cliLogin.consent.passwordWrong": [
+    {
+      "type": 0,
+      "value": "비밀번호가 맞지 않아요. 다시 입력해 주세요."
+    }
+  ],
+  "cliLogin.consent.presetHint": [
+    {
+      "type": 0,
+      "value": "허용한 뒤에는 범위를 바꿀 수 없어서, 바꾸려면 새로 연결해야 해요."
+    }
+  ],
+  "cliLogin.consent.presetLegend": [
+    {
+      "type": 0,
+      "value": "허용할 범위"
+    }
+  ],
+  "cliLogin.consent.rerun": [
+    {
+      "type": 0,
+      "value": "터미널에서 oort login을 다시 실행해 주세요."
+    }
+  ],
+  "cliLogin.consent.retryLater": [
+    {
+      "type": 0,
+      "value": "잠시 뒤에 다시 시도해 주세요."
+    }
+  ],
+  "cliLogin.consent.returning": [
+    {
+      "type": 0,
+      "value": "결정을 저장했어요. 터미널로 돌아가는 중이에요."
+    }
+  ],
+  "cliLogin.consent.signinDetail": [
+    {
+      "type": 0,
+      "value": "이 로그인 요청을 확인하려면 먼저 이 워크스페이스에 로그인해야 해요. 로그인하면 이 요청으로 돌아와요."
+    }
+  ],
+  "cliLogin.consent.title": [
+    {
+      "type": 0,
+      "value": "터미널 로그인 승인"
+    }
+  ],
+  "cliLogin.consent.workspaceLabel": [
+    {
+      "type": 0,
+      "value": "워크스페이스"
+    }
+  ],
+  "cliLogin.failure.approveLead": [
+    {
+      "type": 0,
+      "value": "허용을 저장하지 못했어요."
+    }
+  ],
+  "cliLogin.failure.busy": [
+    {
+      "type": 0,
+      "value": "서버가 잠깐 바빠요. "
+    },
+    {
+      "type": 1,
+      "value": "wait"
+    }
+  ],
+  "cliLogin.failure.denyLead": [
+    {
+      "type": 0,
+      "value": "거절을 저장하지 못했어요."
+    }
+  ],
+  "cliLogin.failure.frame": [
+    {
+      "type": 1,
+      "value": "lead"
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 1,
+      "value": "detail"
+    }
+  ],
+  "cliLogin.failure.previewLead": [
+    {
+      "type": 0,
+      "value": "로그인 요청을 불러오지 못했어요."
+    }
+  ],
+  "cliLogin.failure.retryAt": [
+    {
+      "type": 1,
+      "value": "when"
+    },
+    {
+      "type": 0,
+      "value": "에 다시 시도해 주세요."
+    }
+  ],
+  "cliLogin.failure.tooMany": [
+    {
+      "type": 0,
+      "value": "요청이 너무 잦아요. "
+    },
+    {
+      "type": 1,
+      "value": "wait"
+    }
+  ],
+  "cliLogin.preset.detail": [
+    {
+      "type": 1,
+      "value": "scopes"
+    },
+    {
+      "type": 0,
+      "value": ". "
+    },
+    {
+      "type": 1,
+      "value": "note"
+    }
+  ],
+  "cliLogin.preset.readClosed": [
+    {
+      "type": 0,
+      "value": "보내기, 고치기, 지우기와 설정 변경은 할 수 없어요."
+    }
+  ],
+  "cliLogin.preset.readLabel": [
+    {
+      "type": 0,
+      "value": "읽기만"
+    }
+  ],
+  "cliLogin.preset.sendCaution": [
+    {
+      "type": 0,
+      "value": "보낸 메시지는 바로 전송되고 고치거나 지울 수 없어요. 멘션은 에이전트를 깨울 수 있어요."
+    }
+  ],
+  "cliLogin.preset.sendLabel": [
+    {
+      "type": 0,
+      "value": "읽기와 보내기"
+    }
+  ],
+  "cliLogin.preset.sendUnavailable": [
+    {
+      "type": 0,
+      "value": "이 로그인 요청에는 메시지 보내기가 들어 있지 않아서 고를 수 없어요."
+    }
+  ],
+  "cliLogin.retry.inMinutes": [
+    {
+      "type": 0,
+      "value": "약 "
+    },
+    {
+      "type": 1,
+      "value": "minutes"
+    },
+    {
+      "type": 0,
+      "value": "분 뒤"
+    }
+  ],
+  "cliLogin.retry.inSeconds": [
+    {
+      "type": 1,
+      "value": "seconds"
+    },
+    {
+      "type": 0,
+      "value": "초 뒤"
+    }
+  ],
+  "cliLogin.scope.channelsRead": [
+    {
+      "type": 0,
+      "value": "채널 목록 읽기"
+    }
+  ],
+  "cliLogin.scope.identity": [
+    {
+      "type": 0,
+      "value": "내가 누구인지 확인"
+    }
+  ],
+  "cliLogin.scope.inboxRead": [
+    {
+      "type": 0,
+      "value": "받은 편지함 읽기"
+    }
+  ],
+  "cliLogin.scope.messagesRead": [
+    {
+      "type": 0,
+      "value": "채널의 메시지와 스레드 읽기"
+    }
+  ],
+  "cliLogin.scope.messagesWrite": [
+    {
+      "type": 0,
+      "value": "내 이름으로 메시지 보내기"
+    }
+  ],
+  "cliLogin.terminal.accessDeniedDetail": [
+    {
+      "type": 0,
+      "value": "관리자가 허용해야 쓸 수 있어요. 필요하면 워크스페이스 관리자에게 문의해 주세요. 이 화면에서는 아무것도 허용되지 않았어요."
+    }
+  ],
+  "cliLogin.terminal.accessDeniedHeadline": [
+    {
+      "type": 0,
+      "value": "이 워크스페이스에서는 명령줄 접근을 만들 수 없어요."
+    }
+  ],
+  "cliLogin.terminal.alreadyDecidedDetail": [
+    {
+      "type": 0,
+      "value": "결정은 한 번만 기록돼요. 필요하면 터미널에서 oort login을 다시 실행해 주세요."
+    }
+  ],
+  "cliLogin.terminal.alreadyDecidedHeadline": [
+    {
+      "type": 0,
+      "value": "이미 처리된 요청이에요."
+    }
+  ],
+  "cliLogin.terminal.expiredDetail": [
+    {
+      "type": 0,
+      "value": "만료된 요청은 허용할 수 없어요. 터미널에서 oort login을 다시 실행해 주세요."
+    }
+  ],
+  "cliLogin.terminal.expiredHeadline": [
+    {
+      "type": 0,
+      "value": "이 로그인 요청이 만료됐어요."
+    }
+  ],
+  "cliLogin.terminal.notFoundDetail": [
+    {
+      "type": 0,
+      "value": "이 화면에서는 아무것도 허용되지 않았어요. 터미널에서 oort login을 다시 실행해 주세요."
+    }
+  ],
+  "cliLogin.terminal.notFoundHeadline": [
+    {
+      "type": 0,
+      "value": "요청이 만료됐거나 올바르지 않아요."
+    }
+  ],
+  "cliLogin.terminal.passwordUnavailableDetail": [
+    {
+      "type": 0,
+      "value": "이 계정에는 비밀번호가 없어서 허용 전에 확인할 수 없어요. 지금은 이 방법으로 명령줄에 연결할 수 없고, 이 화면에서는 아무것도 허용되지 않았어요."
+    }
+  ],
+  "cliLogin.terminal.passwordUnavailableHeadline": [
+    {
+      "type": 0,
+      "value": "이 계정은 비밀번호를 확인할 수 없어요."
+    }
+  ],
+  "cliLogin.terminal.redirectRefusedDetail": [
+    {
+      "type": 0,
+      "value": "서버 응답에서 이 기기의 터미널(127.0.0.1)로 돌아가는 주소를 확인하지 못해서 따라가지 않았어요. 터미널에서 oort login을 다시 실행해 주세요."
+    }
+  ],
+  "cliLogin.terminal.redirectRefusedHeadline": [
+    {
+      "type": 0,
+      "value": "터미널로 돌아갈 주소를 확인하지 못했어요."
+    }
+  ],
   "common.action.cancel": [
     {
       "type": 0,

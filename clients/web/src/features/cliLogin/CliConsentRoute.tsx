@@ -40,37 +40,39 @@ import {
   isCliSessionExpired,
   parseCliConsentPreview,
   parseCliDecision,
-  CLI_CONSENT_APPROVE_BUSY,
-  CLI_CONSENT_APPROVE_LABEL,
-  CLI_CONSENT_CHECK_NOTE,
+  CLI_CONSENT_APPROVE_BUSY_KEY,
+  CLI_CONSENT_APPROVE_LABEL_KEY,
+  CLI_CONSENT_CHECK_NOTE_KEY,
   CLI_CONSENT_CLIENT_KEY,
-  CLI_CONSENT_DENY_BUSY,
-  CLI_CONSENT_DENY_LABEL,
+  CLI_CONSENT_DENY_BUSY_KEY,
+  CLI_CONSENT_DENY_LABEL_KEY,
   CLI_CONSENT_DEVICE_KEY,
-  CLI_CONSENT_DEVICE_MISSING,
-  CLI_CONSENT_DEVICE_NOTE,
-  CLI_CONSENT_DISMISS_ACTION,
+  CLI_CONSENT_DEVICE_MISSING_KEY,
+  CLI_CONSENT_DEVICE_NOTE_KEY,
+  CLI_CONSENT_DISMISS_ACTION_KEY,
   CLI_CONSENT_HOST_KEY,
-  CLI_CONSENT_LEAD,
-  CLI_CONSENT_LOADING_SR,
+  CLI_CONSENT_LEAD_KEY,
+  CLI_CONSENT_LOADING_SR_KEY,
   CLI_CONSENT_MEMBER_KEY,
-  CLI_CONSENT_OFFLINE_NOTE,
-  CLI_CONSENT_PASSWORD_HINT,
-  CLI_CONSENT_PASSWORD_LABEL,
-  CLI_CONSENT_PASSWORD_WRONG,
-  CLI_CONSENT_RETRY_ACTION,
-  CLI_CONSENT_RETURNING,
-  CLI_CONSENT_SIGNIN_DETAIL,
-  CLI_CONSENT_TITLE,
+  CLI_CONSENT_OFFLINE_NOTE_KEY,
+  CLI_CONSENT_PASSWORD_HINT_KEY,
+  CLI_CONSENT_PASSWORD_LABEL_KEY,
+  CLI_CONSENT_PASSWORD_WRONG_KEY,
+  CLI_CONSENT_RETRY_ACTION_KEY,
+  CLI_CONSENT_RETURNING_KEY,
+  CLI_CONSENT_SIGNIN_DETAIL_KEY,
+  CLI_CONSENT_TITLE_KEY,
   CLI_CONSENT_WORKSPACE_KEY,
   CLI_DEFAULT_PRESET,
-  CLI_PRESET_HINT,
-  CLI_PRESET_LEGEND,
-  CLI_TERMINAL_COPY,
+  CLI_PRESET_HINT_KEY,
+  CLI_PRESET_LEGEND_KEY,
+  CLI_TERMINAL_KEYS,
+  cliConsentFailureMessage,
   type CliScopePreset,
   type CliTerminalKind,
 } from "@momo/core/features/cliLogin/consent";
 import { oauthRequestExpiry } from "@momo/core/features/hostedAgents/oauthConsent";
+import { useFormatMessage } from "@/i18n/useFormatMessage";
 import { readCliRequestId } from "./cliConsentPath";
 
 // =============================================================================
@@ -121,6 +123,7 @@ export function CliConsentRoute({
   const [sessionLost, setSessionLost] = useState(false);
   const onSessionExpired = useCallback(() => setSessionLost(true), []);
   const titleRef = useRef<HTMLHeadingElement>(null);
+  const formatMessage = useFormatMessage();
 
   if (
     requestId !== null &&
@@ -134,7 +137,7 @@ export function CliConsentRoute({
       <div className="flex min-h-full w-full flex-col">
         <InlineBanner
           tone="neutral"
-          message={CLI_CONSENT_SIGNIN_DETAIL}
+          message={formatMessage(CLI_CONSENT_SIGNIN_DETAIL_KEY)}
           testId="cli-consent-signin"
         />
         <ConnectPage
@@ -174,6 +177,7 @@ function ConsentFrame({
   titleRef: RefObject<HTMLHeadingElement>;
   children: ReactNode;
 }) {
+  const formatMessage = useFormatMessage();
   return (
     <div className="mx-auto flex min-h-full w-full max-w-lg flex-col gap-6 p-4">
       <header className="flex min-w-0 flex-col gap-1">
@@ -183,9 +187,9 @@ function ConsentFrame({
           className="break-keep text-title font-semibold text-ink"
           data-testid="cli-consent-title"
         >
-          {CLI_CONSENT_TITLE}
+          {formatMessage(CLI_CONSENT_TITLE_KEY)}
         </h1>
-        <p className="break-keep text-body text-ink-muted">{CLI_CONSENT_LEAD}</p>
+        <p className="break-keep text-body text-ink-muted">{formatMessage(CLI_CONSENT_LEAD_KEY)}</p>
       </header>
       {children}
     </div>
@@ -193,9 +197,10 @@ function ConsentFrame({
 }
 
 function ConsentLoading() {
+  const formatMessage = useFormatMessage();
   return (
     <div role="status" data-testid="cli-consent-loading">
-      <span className="sr-only">{CLI_CONSENT_LOADING_SR}</span>
+      <span className="sr-only">{formatMessage(CLI_CONSENT_LOADING_SR_KEY)}</span>
       <Skeleton ready={false} rows={5} className="p-0" />
     </div>
   );
@@ -207,10 +212,12 @@ function ConsentLoading() {
  * 달아 스크린리더가 바뀐 결과를 읽게 한다.
  */
 function ConsentTerminal({ terminal }: { terminal: CliTerminalKind }) {
-  const copy = CLI_TERMINAL_COPY[terminal];
+  const formatMessage = useFormatMessage();
+  const copy = CLI_TERMINAL_KEYS[terminal];
   return (
     <div role="alert" data-testid="cli-consent-terminal" data-terminal={terminal}>
-      <EmptyInvite className="px-0" headline={copy.headline} detail={copy.detail} />
+      <EmptyInvite className="px-0" headline={formatMessage(copy.headline)}
+        detail={formatMessage(copy.detail)} />
     </div>
   );
 }
@@ -232,12 +239,17 @@ function ConsentBody({
   // 워크스페이스는 승인하는 세션의 것이다(호스티드 동의와 같다).
   const workspaceId = session.member.workspaceId;
   const offline = useBrowserOffline();
+  const formatMessage = useFormatMessage();
   const passwordRef = useRef<HTMLInputElement>(null);
 
   const [preset, setPreset] = useState<CliScopePreset>(CLI_DEFAULT_PRESET);
   const [password, setPassword] = useState("");
-  const [passwordError, setPasswordError] = useState<string | null>(null);
-  const [failure, setFailure] = useState<string | null>(null);
+  // 틀린 비밀번호와 실패 배너는 문장이 아니라 사실을 들고 있다가 그릴 때 지금 언어로 푼다.
+  const [passwordWrong, setPasswordWrong] = useState(false);
+  const [failure, setFailure] = useState<{
+    action: "approve" | "deny";
+    error: unknown;
+  } | null>(null);
   const [returning, setReturning] = useState(false);
   // 결정 시점에 서버가 낸 종료(409 이미 처리됨·404·403·안전하지 않은 돌아갈 곳).
   // 배너가 아니라 종료 화면이라, 버튼이 함께 서 자기모순을 그리지 않는다.
@@ -307,12 +319,12 @@ function ConsentBody({
       case "wrong-password":
         phase.current = "idle";
         setPassword("");
-        setPasswordError(CLI_CONSENT_PASSWORD_WRONG);
+        setPasswordWrong(true);
         setRefocusTick((tick) => tick + 1);
         return;
       case "failure":
         phase.current = "idle";
-        setFailure(outcome.message);
+        setFailure({ action: outcome.action, error: outcome.error });
         return;
     }
   }
@@ -376,7 +388,7 @@ function ConsentBody({
           className="break-keep text-body text-ink"
           data-testid="cli-consent-returning"
         >
-          {CLI_CONSENT_RETURNING}
+          {formatMessage(CLI_CONSENT_RETURNING_KEY)}
         </p>
       );
     case "terminal":
@@ -385,8 +397,8 @@ function ConsentBody({
       return (
         <InlineBanner
           separator={false}
-          message={screen.message}
-          actionLabel={CLI_CONSENT_RETRY_ACTION}
+          message={cliConsentFailureMessage(formatMessage, "preview", screen.error)}
+          actionLabel={formatMessage(CLI_CONSENT_RETRY_ACTION_KEY)}
           onAction={() => void preview.refetch()}
           testId="cli-consent-preview-error"
         />
@@ -411,7 +423,7 @@ function ConsentBody({
     if (!canApprove || phase.current !== "idle") return;
     phase.current = "inflight";
     setFailure(null);
-    setPasswordError(null);
+    setPasswordWrong(false);
     approve.mutate();
   }
 
@@ -419,13 +431,14 @@ function ConsentBody({
     if (!canDeny || phase.current !== "idle") return;
     phase.current = "inflight";
     setFailure(null);
-    setPasswordError(null);
+    setPasswordWrong(false);
     deny.mutate();
   }
 
   const expiry = oauthRequestExpiry(data.expiresAtMs, nowMs);
+  const lifetime = cliConsentLifetime(data);
   const effective = effectiveCliPreset(preset, data);
-  const presetItems: ChoiceListItem[] = cliScopePresetChoices(data).map((choice) => ({
+  const presetItems: ChoiceListItem[] = cliScopePresetChoices(formatMessage, data).map((choice) => ({
     id: choice.id,
     label: choice.label,
     detail: choice.detail,
@@ -445,14 +458,14 @@ function ConsentBody({
       {offline && (
         <InlineBanner
           tone="neutral"
-          message={CLI_CONSENT_OFFLINE_NOTE}
+          message={formatMessage(CLI_CONSENT_OFFLINE_NOTE_KEY)}
           testId="cli-consent-offline"
         />
       )}
       {failure && (
         <InlineBanner
-          message={failure}
-          actionLabel={CLI_CONSENT_DISMISS_ACTION}
+          message={cliConsentFailureMessage(formatMessage, failure.action, failure.error)}
+          actionLabel={formatMessage(CLI_CONSENT_DISMISS_ACTION_KEY)}
           onAction={() => setFailure(null)}
           testId="cli-consent-failure"
         />
@@ -468,19 +481,19 @@ function ConsentBody({
           {expiry.label}
         </p>
         <p className="break-keep text-body text-ink" data-testid="cli-consent-check-note">
-          {CLI_CONSENT_CHECK_NOTE}
+          {formatMessage(CLI_CONSENT_CHECK_NOTE_KEY)}
         </p>
         <KeyValueRows
           rows={[
-            { key: CLI_CONSENT_CLIENT_KEY, value: data.clientName, prose: true },
-            { key: CLI_CONSENT_HOST_KEY, value: data.serverHost, numeric: true },
+            { key: formatMessage(CLI_CONSENT_CLIENT_KEY), value: data.clientName, prose: true },
+            { key: formatMessage(CLI_CONSENT_HOST_KEY), value: data.serverHost, numeric: true },
             {
-              key: CLI_CONSENT_DEVICE_KEY,
-              value: data.deviceName ?? CLI_CONSENT_DEVICE_MISSING,
+              key: formatMessage(CLI_CONSENT_DEVICE_KEY),
+              value: data.deviceName ?? formatMessage(CLI_CONSENT_DEVICE_MISSING_KEY),
             },
-            { key: CLI_CONSENT_WORKSPACE_KEY, value: data.workspaceName, prose: true },
+            { key: formatMessage(CLI_CONSENT_WORKSPACE_KEY), value: data.workspaceName, prose: true },
             {
-              key: CLI_CONSENT_MEMBER_KEY,
+              key: formatMessage(CLI_CONSENT_MEMBER_KEY),
               value:
                 data.roleLabel === null
                   ? data.memberDisplayName
@@ -493,14 +506,14 @@ function ConsentBody({
           className="break-keep text-meta text-ink-muted"
           data-testid="cli-consent-device-note"
         >
-          {CLI_CONSENT_DEVICE_NOTE}
+          {formatMessage(CLI_CONSENT_DEVICE_NOTE_KEY)}
         </p>
       </div>
 
       <ChoiceList
         name="cli-preset"
-        legend={CLI_PRESET_LEGEND}
-        hint={CLI_PRESET_HINT}
+        legend={formatMessage(CLI_PRESET_LEGEND_KEY)}
+        hint={formatMessage(CLI_PRESET_HINT_KEY)}
         multiple={false}
         items={presetItems}
         selected={[effective]}
@@ -516,14 +529,14 @@ function ConsentBody({
         className="break-keep text-meta text-ink-muted"
         data-testid="cli-consent-lifetime"
       >
-        {cliConsentLifetime(data)}
+        {formatMessage(lifetime.key, lifetime.values)}
       </p>
 
       <Field
-        label={CLI_CONSENT_PASSWORD_LABEL}
+        label={formatMessage(CLI_CONSENT_PASSWORD_LABEL_KEY)}
         htmlFor="cli-consent-password"
-        hint={CLI_CONSENT_PASSWORD_HINT}
-        error={passwordError}
+        hint={formatMessage(CLI_CONSENT_PASSWORD_HINT_KEY)}
+        error={passwordWrong ? formatMessage(CLI_CONSENT_PASSWORD_WRONG_KEY) : null}
       >
         <Input
           ref={passwordRef}
@@ -534,7 +547,7 @@ function ConsentBody({
           readOnly={busy}
           onChange={(event) => {
             setPassword(event.target.value);
-            if (passwordError !== null) setPasswordError(null);
+            if (passwordWrong) setPasswordWrong(false);
           }}
           data-testid="cli-consent-password"
         />
@@ -558,7 +571,9 @@ function ConsentBody({
           data-testid="cli-consent-deny"
         >
           {deny.isPending && <Loader2 aria-hidden="true" className="spinner-busy" />}
-          {deny.isPending ? CLI_CONSENT_DENY_BUSY : CLI_CONSENT_DENY_LABEL}
+          {formatMessage(
+            deny.isPending ? CLI_CONSENT_DENY_BUSY_KEY : CLI_CONSENT_DENY_LABEL_KEY
+          )}
         </Button>
         <Button
           type="submit"
@@ -568,7 +583,9 @@ function ConsentBody({
           data-testid="cli-consent-approve"
         >
           {approve.isPending && <Loader2 aria-hidden="true" className="spinner-busy" />}
-          {approve.isPending ? CLI_CONSENT_APPROVE_BUSY : CLI_CONSENT_APPROVE_LABEL}
+          {formatMessage(
+            approve.isPending ? CLI_CONSENT_APPROVE_BUSY_KEY : CLI_CONSENT_APPROVE_LABEL_KEY
+          )}
         </Button>
       </div>
     </form>

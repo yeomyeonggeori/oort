@@ -276,6 +276,66 @@ export const messageKeys = [
   "channels.rename.preview",
   "channels.rename.submit",
   "channels.rename.title",
+  "cliLogin.consent.approve",
+  "cliLogin.consent.approveBusy",
+  "cliLogin.consent.checkNote",
+  "cliLogin.consent.clientLabel",
+  "cliLogin.consent.credentialLimit",
+  "cliLogin.consent.deny",
+  "cliLogin.consent.denyBusy",
+  "cliLogin.consent.deviceLabel",
+  "cliLogin.consent.deviceMissing",
+  "cliLogin.consent.deviceNote",
+  "cliLogin.consent.dismiss",
+  "cliLogin.consent.hostLabel",
+  "cliLogin.consent.lead",
+  "cliLogin.consent.lifetime",
+  "cliLogin.consent.loadingSr",
+  "cliLogin.consent.memberLabel",
+  "cliLogin.consent.offlineNote",
+  "cliLogin.consent.passwordHint",
+  "cliLogin.consent.passwordLabel",
+  "cliLogin.consent.passwordWrong",
+  "cliLogin.consent.presetHint",
+  "cliLogin.consent.presetLegend",
+  "cliLogin.consent.rerun",
+  "cliLogin.consent.retryLater",
+  "cliLogin.consent.returning",
+  "cliLogin.consent.signinDetail",
+  "cliLogin.consent.title",
+  "cliLogin.consent.workspaceLabel",
+  "cliLogin.failure.approveLead",
+  "cliLogin.failure.busy",
+  "cliLogin.failure.denyLead",
+  "cliLogin.failure.frame",
+  "cliLogin.failure.previewLead",
+  "cliLogin.failure.retryAt",
+  "cliLogin.failure.tooMany",
+  "cliLogin.preset.detail",
+  "cliLogin.preset.readClosed",
+  "cliLogin.preset.readLabel",
+  "cliLogin.preset.sendCaution",
+  "cliLogin.preset.sendLabel",
+  "cliLogin.preset.sendUnavailable",
+  "cliLogin.retry.inMinutes",
+  "cliLogin.retry.inSeconds",
+  "cliLogin.scope.channelsRead",
+  "cliLogin.scope.identity",
+  "cliLogin.scope.inboxRead",
+  "cliLogin.scope.messagesRead",
+  "cliLogin.scope.messagesWrite",
+  "cliLogin.terminal.accessDeniedDetail",
+  "cliLogin.terminal.accessDeniedHeadline",
+  "cliLogin.terminal.alreadyDecidedDetail",
+  "cliLogin.terminal.alreadyDecidedHeadline",
+  "cliLogin.terminal.expiredDetail",
+  "cliLogin.terminal.expiredHeadline",
+  "cliLogin.terminal.notFoundDetail",
+  "cliLogin.terminal.notFoundHeadline",
+  "cliLogin.terminal.passwordUnavailableDetail",
+  "cliLogin.terminal.passwordUnavailableHeadline",
+  "cliLogin.terminal.redirectRefusedDetail",
+  "cliLogin.terminal.redirectRefusedHeadline",
   "common.action.cancel",
   "common.action.checkAgain",
   "common.action.close",
@@ -2189,6 +2249,86 @@ export const argumentSpecs = {
   },
   "channels.rename.submit": {},
   "channels.rename.title": {},
+  "cliLogin.consent.approve": {},
+  "cliLogin.consent.approveBusy": {},
+  "cliLogin.consent.checkNote": {},
+  "cliLogin.consent.clientLabel": {},
+  "cliLogin.consent.credentialLimit": {},
+  "cliLogin.consent.deny": {},
+  "cliLogin.consent.denyBusy": {},
+  "cliLogin.consent.deviceLabel": {},
+  "cliLogin.consent.deviceMissing": {},
+  "cliLogin.consent.deviceNote": {},
+  "cliLogin.consent.dismiss": {},
+  "cliLogin.consent.hostLabel": {},
+  "cliLogin.consent.lead": {},
+  "cliLogin.consent.lifetime": {
+    "accessMinutes": "string",
+    "idleDays": "string",
+    "maxDays": "string"
+  },
+  "cliLogin.consent.loadingSr": {},
+  "cliLogin.consent.memberLabel": {},
+  "cliLogin.consent.offlineNote": {},
+  "cliLogin.consent.passwordHint": {},
+  "cliLogin.consent.passwordLabel": {},
+  "cliLogin.consent.passwordWrong": {},
+  "cliLogin.consent.presetHint": {},
+  "cliLogin.consent.presetLegend": {},
+  "cliLogin.consent.rerun": {},
+  "cliLogin.consent.retryLater": {},
+  "cliLogin.consent.returning": {},
+  "cliLogin.consent.signinDetail": {},
+  "cliLogin.consent.title": {},
+  "cliLogin.consent.workspaceLabel": {},
+  "cliLogin.failure.approveLead": {},
+  "cliLogin.failure.busy": {
+    "wait": "string"
+  },
+  "cliLogin.failure.denyLead": {},
+  "cliLogin.failure.frame": {
+    "detail": "string",
+    "lead": "string"
+  },
+  "cliLogin.failure.previewLead": {},
+  "cliLogin.failure.retryAt": {
+    "when": "string"
+  },
+  "cliLogin.failure.tooMany": {
+    "wait": "string"
+  },
+  "cliLogin.preset.detail": {
+    "note": "string",
+    "scopes": "string"
+  },
+  "cliLogin.preset.readClosed": {},
+  "cliLogin.preset.readLabel": {},
+  "cliLogin.preset.sendCaution": {},
+  "cliLogin.preset.sendLabel": {},
+  "cliLogin.preset.sendUnavailable": {},
+  "cliLogin.retry.inMinutes": {
+    "minutes": "number"
+  },
+  "cliLogin.retry.inSeconds": {
+    "seconds": "number"
+  },
+  "cliLogin.scope.channelsRead": {},
+  "cliLogin.scope.identity": {},
+  "cliLogin.scope.inboxRead": {},
+  "cliLogin.scope.messagesRead": {},
+  "cliLogin.scope.messagesWrite": {},
+  "cliLogin.terminal.accessDeniedDetail": {},
+  "cliLogin.terminal.accessDeniedHeadline": {},
+  "cliLogin.terminal.alreadyDecidedDetail": {},
+  "cliLogin.terminal.alreadyDecidedHeadline": {},
+  "cliLogin.terminal.expiredDetail": {},
+  "cliLogin.terminal.expiredHeadline": {},
+  "cliLogin.terminal.notFoundDetail": {},
+  "cliLogin.terminal.notFoundHeadline": {},
+  "cliLogin.terminal.passwordUnavailableDetail": {},
+  "cliLogin.terminal.passwordUnavailableHeadline": {},
+  "cliLogin.terminal.redirectRefusedDetail": {},
+  "cliLogin.terminal.redirectRefusedHeadline": {},
   "common.action.cancel": {},
   "common.action.checkAgain": {},
   "common.action.close": {},
@@ -4552,6 +4692,66 @@ export interface MessageArgs {
   "channels.rename.preview": { name: string };
   "channels.rename.submit": Record<string, never>;
   "channels.rename.title": Record<string, never>;
+  "cliLogin.consent.approve": Record<string, never>;
+  "cliLogin.consent.approveBusy": Record<string, never>;
+  "cliLogin.consent.checkNote": Record<string, never>;
+  "cliLogin.consent.clientLabel": Record<string, never>;
+  "cliLogin.consent.credentialLimit": Record<string, never>;
+  "cliLogin.consent.deny": Record<string, never>;
+  "cliLogin.consent.denyBusy": Record<string, never>;
+  "cliLogin.consent.deviceLabel": Record<string, never>;
+  "cliLogin.consent.deviceMissing": Record<string, never>;
+  "cliLogin.consent.deviceNote": Record<string, never>;
+  "cliLogin.consent.dismiss": Record<string, never>;
+  "cliLogin.consent.hostLabel": Record<string, never>;
+  "cliLogin.consent.lead": Record<string, never>;
+  "cliLogin.consent.lifetime": { accessMinutes: string; idleDays: string; maxDays: string };
+  "cliLogin.consent.loadingSr": Record<string, never>;
+  "cliLogin.consent.memberLabel": Record<string, never>;
+  "cliLogin.consent.offlineNote": Record<string, never>;
+  "cliLogin.consent.passwordHint": Record<string, never>;
+  "cliLogin.consent.passwordLabel": Record<string, never>;
+  "cliLogin.consent.passwordWrong": Record<string, never>;
+  "cliLogin.consent.presetHint": Record<string, never>;
+  "cliLogin.consent.presetLegend": Record<string, never>;
+  "cliLogin.consent.rerun": Record<string, never>;
+  "cliLogin.consent.retryLater": Record<string, never>;
+  "cliLogin.consent.returning": Record<string, never>;
+  "cliLogin.consent.signinDetail": Record<string, never>;
+  "cliLogin.consent.title": Record<string, never>;
+  "cliLogin.consent.workspaceLabel": Record<string, never>;
+  "cliLogin.failure.approveLead": Record<string, never>;
+  "cliLogin.failure.busy": { wait: string };
+  "cliLogin.failure.denyLead": Record<string, never>;
+  "cliLogin.failure.frame": { detail: string; lead: string };
+  "cliLogin.failure.previewLead": Record<string, never>;
+  "cliLogin.failure.retryAt": { when: string };
+  "cliLogin.failure.tooMany": { wait: string };
+  "cliLogin.preset.detail": { note: string; scopes: string };
+  "cliLogin.preset.readClosed": Record<string, never>;
+  "cliLogin.preset.readLabel": Record<string, never>;
+  "cliLogin.preset.sendCaution": Record<string, never>;
+  "cliLogin.preset.sendLabel": Record<string, never>;
+  "cliLogin.preset.sendUnavailable": Record<string, never>;
+  "cliLogin.retry.inMinutes": { minutes: number };
+  "cliLogin.retry.inSeconds": { seconds: number };
+  "cliLogin.scope.channelsRead": Record<string, never>;
+  "cliLogin.scope.identity": Record<string, never>;
+  "cliLogin.scope.inboxRead": Record<string, never>;
+  "cliLogin.scope.messagesRead": Record<string, never>;
+  "cliLogin.scope.messagesWrite": Record<string, never>;
+  "cliLogin.terminal.accessDeniedDetail": Record<string, never>;
+  "cliLogin.terminal.accessDeniedHeadline": Record<string, never>;
+  "cliLogin.terminal.alreadyDecidedDetail": Record<string, never>;
+  "cliLogin.terminal.alreadyDecidedHeadline": Record<string, never>;
+  "cliLogin.terminal.expiredDetail": Record<string, never>;
+  "cliLogin.terminal.expiredHeadline": Record<string, never>;
+  "cliLogin.terminal.notFoundDetail": Record<string, never>;
+  "cliLogin.terminal.notFoundHeadline": Record<string, never>;
+  "cliLogin.terminal.passwordUnavailableDetail": Record<string, never>;
+  "cliLogin.terminal.passwordUnavailableHeadline": Record<string, never>;
+  "cliLogin.terminal.redirectRefusedDetail": Record<string, never>;
+  "cliLogin.terminal.redirectRefusedHeadline": Record<string, never>;
   "common.action.cancel": Record<string, never>;
   "common.action.checkAgain": Record<string, never>;
   "common.action.close": Record<string, never>;

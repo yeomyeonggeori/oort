@@ -1920,6 +1920,482 @@ export const catalog: MessageCatalog = {
       "value": "Rename channel"
     }
   ],
+  "cliLogin.consent.approve": [
+    {
+      "type": 0,
+      "value": "Allow"
+    }
+  ],
+  "cliLogin.consent.approveBusy": [
+    {
+      "type": 0,
+      "value": "Allowing"
+    }
+  ],
+  "cliLogin.consent.checkNote": [
+    {
+      "type": 0,
+      "value": "Only allow this if the server address and device name shown in your terminal match the ones below. If they differ, or you did not start this sign-in, deny it."
+    }
+  ],
+  "cliLogin.consent.clientLabel": [
+    {
+      "type": 0,
+      "value": "Client"
+    }
+  ],
+  "cliLogin.consent.credentialLimit": [
+    {
+      "type": 0,
+      "value": "Too many devices are signed in with this account. Remove connections you no longer use, then try again."
+    }
+  ],
+  "cliLogin.consent.deny": [
+    {
+      "type": 0,
+      "value": "Deny"
+    }
+  ],
+  "cliLogin.consent.denyBusy": [
+    {
+      "type": 0,
+      "value": "Denying"
+    }
+  ],
+  "cliLogin.consent.deviceLabel": [
+    {
+      "type": 0,
+      "value": "Device name"
+    }
+  ],
+  "cliLogin.consent.deviceMissing": [
+    {
+      "type": 0,
+      "value": "No device name was sent"
+    }
+  ],
+  "cliLogin.consent.deviceNote": [
+    {
+      "type": 0,
+      "value": "The device name is chosen by whatever is connecting."
+    }
+  ],
+  "cliLogin.consent.dismiss": [
+    {
+      "type": 0,
+      "value": "Dismiss"
+    }
+  ],
+  "cliLogin.consent.hostLabel": [
+    {
+      "type": 0,
+      "value": "Server host"
+    }
+  ],
+  "cliLogin.consent.lead": [
+    {
+      "type": 0,
+      "value": "The oort CLI in your terminal wants to connect to this workspace with your account."
+    }
+  ],
+  "cliLogin.consent.lifetime": [
+    {
+      "type": 0,
+      "value": "The connection lasts up to "
+    },
+    {
+      "type": 1,
+      "value": "maxDays"
+    },
+    {
+      "type": 0,
+      "value": " days and ends after "
+    },
+    {
+      "type": 1,
+      "value": "idleDays"
+    },
+    {
+      "type": 0,
+      "value": " days without use. Sign-in refreshes automatically every "
+    },
+    {
+      "type": 1,
+      "value": "accessMinutes"
+    },
+    {
+      "type": 0,
+      "value": " minutes. Changing your password ends this connection right away."
+    }
+  ],
+  "cliLogin.consent.loadingSr": [
+    {
+      "type": 0,
+      "value": "Loading the sign-in request."
+    }
+  ],
+  "cliLogin.consent.memberLabel": [
+    {
+      "type": 0,
+      "value": "Approving as"
+    }
+  ],
+  "cliLogin.consent.offlineNote": [
+    {
+      "type": 0,
+      "value": "You are offline. You can allow or deny once you are back online."
+    }
+  ],
+  "cliLogin.consent.passwordHint": [
+    {
+      "type": 0,
+      "value": "We ask for your password once more before you allow this."
+    }
+  ],
+  "cliLogin.consent.passwordLabel": [
+    {
+      "type": 0,
+      "value": "Current password"
+    }
+  ],
+  "cliLogin.consent.passwordWrong": [
+    {
+      "type": 0,
+      "value": "That password is not correct. Enter it again."
+    }
+  ],
+  "cliLogin.consent.presetHint": [
+    {
+      "type": 0,
+      "value": "Access cannot be changed after you allow it. To change it, connect again."
+    }
+  ],
+  "cliLogin.consent.presetLegend": [
+    {
+      "type": 0,
+      "value": "Access to allow"
+    }
+  ],
+  "cliLogin.consent.rerun": [
+    {
+      "type": 0,
+      "value": "Run oort login again in your terminal."
+    }
+  ],
+  "cliLogin.consent.retryLater": [
+    {
+      "type": 0,
+      "value": "Try again in a moment."
+    }
+  ],
+  "cliLogin.consent.returning": [
+    {
+      "type": 0,
+      "value": "Your decision is saved. Returning to your terminal."
+    }
+  ],
+  "cliLogin.consent.signinDetail": [
+    {
+      "type": 0,
+      "value": "To review this sign-in request, sign in to this workspace first. You will come back to this request afterward."
+    }
+  ],
+  "cliLogin.consent.title": [
+    {
+      "type": 0,
+      "value": "Approve terminal sign-in"
+    }
+  ],
+  "cliLogin.consent.workspaceLabel": [
+    {
+      "type": 0,
+      "value": "Workspace"
+    }
+  ],
+  "cliLogin.failure.approveLead": [
+    {
+      "type": 0,
+      "value": "Couldn't save your approval."
+    }
+  ],
+  "cliLogin.failure.busy": [
+    {
+      "type": 0,
+      "value": "The server is busy for a moment. "
+    },
+    {
+      "type": 1,
+      "value": "wait"
+    }
+  ],
+  "cliLogin.failure.denyLead": [
+    {
+      "type": 0,
+      "value": "Couldn't save your denial."
+    }
+  ],
+  "cliLogin.failure.frame": [
+    {
+      "type": 1,
+      "value": "lead"
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 1,
+      "value": "detail"
+    }
+  ],
+  "cliLogin.failure.previewLead": [
+    {
+      "type": 0,
+      "value": "Couldn't load the sign-in request."
+    }
+  ],
+  "cliLogin.failure.retryAt": [
+    {
+      "type": 0,
+      "value": "Try again "
+    },
+    {
+      "type": 1,
+      "value": "when"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "cliLogin.failure.tooMany": [
+    {
+      "type": 0,
+      "value": "Too many requests. "
+    },
+    {
+      "type": 1,
+      "value": "wait"
+    }
+  ],
+  "cliLogin.preset.detail": [
+    {
+      "type": 1,
+      "value": "scopes"
+    },
+    {
+      "type": 0,
+      "value": ". "
+    },
+    {
+      "type": 1,
+      "value": "note"
+    }
+  ],
+  "cliLogin.preset.readClosed": [
+    {
+      "type": 0,
+      "value": "It cannot send, edit, delete, or change settings."
+    }
+  ],
+  "cliLogin.preset.readLabel": [
+    {
+      "type": 0,
+      "value": "Read only"
+    }
+  ],
+  "cliLogin.preset.sendCaution": [
+    {
+      "type": 0,
+      "value": "Messages are sent right away and cannot be edited or deleted. Mentions can wake agents."
+    }
+  ],
+  "cliLogin.preset.sendLabel": [
+    {
+      "type": 0,
+      "value": "Read and send"
+    }
+  ],
+  "cliLogin.preset.sendUnavailable": [
+    {
+      "type": 0,
+      "value": "This sign-in request does not include sending messages, so you cannot choose this."
+    }
+  ],
+  "cliLogin.retry.inMinutes": [
+    {
+      "type": 0,
+      "value": "in about "
+    },
+    {
+      "type": 6,
+      "value": "minutes",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " minute"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " minutes"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "cliLogin.retry.inSeconds": [
+    {
+      "type": 0,
+      "value": "in "
+    },
+    {
+      "type": 6,
+      "value": "seconds",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " second"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " seconds"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "cliLogin.scope.channelsRead": [
+    {
+      "type": 0,
+      "value": "Read the channel list"
+    }
+  ],
+  "cliLogin.scope.identity": [
+    {
+      "type": 0,
+      "value": "Confirm who I am"
+    }
+  ],
+  "cliLogin.scope.inboxRead": [
+    {
+      "type": 0,
+      "value": "Read my inbox"
+    }
+  ],
+  "cliLogin.scope.messagesRead": [
+    {
+      "type": 0,
+      "value": "Read messages and threads in channels"
+    }
+  ],
+  "cliLogin.scope.messagesWrite": [
+    {
+      "type": 0,
+      "value": "Send messages as me"
+    }
+  ],
+  "cliLogin.terminal.accessDeniedDetail": [
+    {
+      "type": 0,
+      "value": "An admin has to allow it first. Ask a workspace admin if you need it. Nothing was allowed from this page."
+    }
+  ],
+  "cliLogin.terminal.accessDeniedHeadline": [
+    {
+      "type": 0,
+      "value": "Command-line access cannot be created in this workspace."
+    }
+  ],
+  "cliLogin.terminal.alreadyDecidedDetail": [
+    {
+      "type": 0,
+      "value": "A decision is recorded only once. If you need to, run oort login again in your terminal."
+    }
+  ],
+  "cliLogin.terminal.alreadyDecidedHeadline": [
+    {
+      "type": 0,
+      "value": "This request was already handled."
+    }
+  ],
+  "cliLogin.terminal.expiredDetail": [
+    {
+      "type": 0,
+      "value": "An expired request cannot be allowed. Run oort login again in your terminal."
+    }
+  ],
+  "cliLogin.terminal.expiredHeadline": [
+    {
+      "type": 0,
+      "value": "This sign-in request has expired."
+    }
+  ],
+  "cliLogin.terminal.notFoundDetail": [
+    {
+      "type": 0,
+      "value": "Nothing was allowed from this page. Run oort login again in your terminal."
+    }
+  ],
+  "cliLogin.terminal.notFoundHeadline": [
+    {
+      "type": 0,
+      "value": "This request has expired or is not valid."
+    }
+  ],
+  "cliLogin.terminal.passwordUnavailableDetail": [
+    {
+      "type": 0,
+      "value": "This account has no password, so it cannot be checked before allowing. You cannot connect the command line this way for now, and nothing was allowed from this page."
+    }
+  ],
+  "cliLogin.terminal.passwordUnavailableHeadline": [
+    {
+      "type": 0,
+      "value": "This account's password can't be checked."
+    }
+  ],
+  "cliLogin.terminal.redirectRefusedDetail": [
+    {
+      "type": 0,
+      "value": "The server's response did not contain a verified address back to this device's terminal (127.0.0.1), so it was not followed. Run oort login again in your terminal."
+    }
+  ],
+  "cliLogin.terminal.redirectRefusedHeadline": [
+    {
+      "type": 0,
+      "value": "Couldn't verify the address back to your terminal."
+    }
+  ],
   "common.action.cancel": [
     {
       "type": 0,
