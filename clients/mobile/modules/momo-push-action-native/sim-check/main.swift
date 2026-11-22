@@ -1387,5 +1387,91 @@ do {
     "any address is link-shaped; the sentences themselves are not")
 }
 
+// ---- the lock screen's 답장, kept (#6036) --------------------------------------
+
+final class FakeReplyStore: MomoPushReplyStore, @unchecked Sendable {
+  var items: [String: Data] = [:]
+  var refuseAdd = false
+  var unreadable = false
+  func all() -> [Data]? { unreadable ? nil : Array(items.values) }
+  func add(account: String, data: Data) -> Bool {
+    if refuseAdd || items[account] != nil { return false }
+    items[account] = data
+    return true
+  }
+  func remove(account: String) { items[account] = nil }
+  func removeAll() { items = [:] }
+}
+
+do {
+  let memberID = "55555555-5555-4555-8555-555555555555"
+  let owner = MomoPushReplyOwner(workspaceID: workspaceID, memberID: memberID)
+  let replyPayload: [AnyHashable: Any] = [
+    "aps": ["category": "momo.message", "thread-id": channelID, "badge": 1],
+    "momo": [
+      "schema": MomoPushActionContract.envelopeSchema, "server_id": "s", "collapse_id": "c",
+      "workspace_id": workspaceID.uppercased(), "channel_id": channelID, "message_id": messageID,
+      "reason": "dm",
+    ],
+  ]
+  var counter = 0
+  let nextID: () -> String = {
+    counter += 1
+    return "00000000-0000-4000-8000-00000000000\(counter)"
+  }
+  func keep(_ text: String, owner: MomoPushReplyOwner?, _ store: FakeReplyStore,
+    payload: [AnyHashable: Any]? = nil, request: String = "req-1") -> MomoPushReplyOutcome {
+    MomoPushReplyCapture.keep(
+      text: text, requestIdentifier: request, userInfo: payload ?? replyPayload, owner: owner,
+      store: store, newID: nextID, nowMs: 1_000)
+  }
+
+  check(MomoPushReplyCapture.isReply(actionIdentifier: "momo.action.quick-reply", categoryIdentifier: "momo.message")
+    && MomoPushReplyCapture.isReply(actionIdentifier: "momo.action.quick-reply", categoryIdentifier: "momo.mention"),
+    "a 답장 on a message or a mention is taken")
+  check(!MomoPushReplyCapture.isReply(actionIdentifier: approve, categoryIdentifier: "momo.message")
+    && !MomoPushReplyCapture.isReply(actionIdentifier: "momo.action.quick-reply", categoryIdentifier: "momo.approval")
+    && !MomoPushReplyCapture.isReply(actionIdentifier: "com.apple.UNNotificationDefaultActionIdentifier", categoryIdentifier: "momo.message"),
+    "승인 · another category · a body tap are not")
+
+  let store = FakeReplyStore()
+  check(keep("안녕하세요", owner: owner, store) == .queued, "a reply with its owner's session is kept")
+  let kept = store.items.values.first.flatMap { try? JSONDecoder().decode(MomoPushQueuedReply.self, from: $0) }
+  check(kept?.clientMsgId == "00000000-0000-4000-8000-000000000001" && store.items[kept?.clientMsgId ?? ""] != nil,
+    "under the id chosen here, which is also the item's account")
+  check(kept?.workspaceID == workspaceID && kept?.memberID == memberID && kept?.text == "안녕하세요"
+    && kept?.requestIdentifier == "req-1" && kept?.v == 1 && kept?.createdAtMs == 1_000,
+    "with whose it is, the text, and the notification it answers")
+  let origin = kept.flatMap { try? JSONSerialization.jsonObject(with: Data($0.origin.utf8)) as? [String: Any] }
+  check((origin?["momo"] as? [String: Any])?["channel_id"] as? String == channelID,
+    "and the id-only payload, for JS's envelope reader")
+
+  check(keep("안녕하세요", owner: owner, store) == .alreadyQueued && store.items.count == 1,
+    "the same response twice is one reply")
+  check(keep("한 줄 더", owner: owner, store) == .queued && store.items.count == 2,
+    "another text on the same notification is another reply")
+
+  let none = FakeReplyStore()
+  check(keep("x", owner: nil, none) == .noOwner && none.items.isEmpty, "no session: nothing kept")
+  let otherOwner = MomoPushReplyOwner(workspaceID: approvalID, memberID: memberID)
+  check(keep("x", owner: otherOwner, none) == .otherWorkspace && none.items.isEmpty,
+    "a session of another workspace: nothing kept")
+  check(keep("x", owner: owner, none, payload: ["aps": [:]]) == .unreadableNotification && none.items.isEmpty,
+    "a payload with no workspace: nothing kept")
+  let refusing = FakeReplyStore()
+  refusing.refuseAdd = true
+  check(keep("x", owner: owner, refusing) == .storeFailed, "a keychain that will not keep it says so")
+  check(!MomoPushReplyOutcome.storeFailed.kept && !MomoPushReplyOutcome.noOwner.kept
+    && MomoPushReplyOutcome.alreadyQueued.kept, "only kept outcomes promise a send")
+
+  let session = #"{"baseURL":"https://x.test","workspaceID":"\#(workspaceID.uppercased())","memberID":"\#(memberID)","actionToken":"t","expiresAtMs":1,"ttlSeconds":1}"#
+  check(MomoPushReplyOwner.decode(Data(session.utf8)) == owner, "the owner is read from the session item, lower-cased")
+  check(MomoPushReplyOwner.decode(Data(#"{"workspaceID":"\#(workspaceID)"}"#.utf8)) == nil,
+    "a session item with no member is no owner")
+
+  check(MomoPushReplyCopy.isKorean(["ko"]) && MomoPushReplyCopy.isKorean(["ko-KR"]) && !MomoPushReplyCopy.isKorean(["en"]),
+    "the line's language follows the app bundle's resolved localization")
+}
+
 print(failures == 0 ? "PASS" : "FAILED (\(failures))")
 exit(failures == 0 ? 0 : 1)

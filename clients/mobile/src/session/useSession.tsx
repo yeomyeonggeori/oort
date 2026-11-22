@@ -39,6 +39,7 @@ import {forgetMeasuredSizes} from '../storage/measureMemory';
 import {revokeDevice} from '../push/devices';
 import {dismissDeliveredNotifications} from '../push/dismissDelivered';
 import {clearPushActionSession} from '../push/pushActionSession';
+import {clearQueuedReplies} from '../push/queuedReplies';
 import {clearPresentationState} from '../push/presentation';
 import {clearPushOptOut} from '../push/pushOptOut';
 import {registeredPushDeviceId} from '../push/registration';
@@ -346,6 +347,9 @@ export function SessionProvider({
     // 결정할 수 있다. `PushProvider` 가 내려갈 때도 같은 것을 지우나(토큰 만료 같은 다른 길),
     // 그것은 트리가 내려간 **뒤**다 — 사람이 나가는 순간에는 기다리지 않는다.
     void clearPushActionSession();
+    // 잠금 화면 답장의 보관 목록도 지운다 (#6036). 앞 사람이 쓴 글이고, 다음 사람의 이름으로 가면 안 된다.
+    // 여기서만 지운다 — `PushProvider` 가 내려가는 길(토큰 만료)에서 지우면 같은 사람의 답장을 잃는다.
+    clearQueuedReplies();
     // 이미 와 있는 알림도 비운다 (#3931). 승인 요청은 버튼을 단 채 앞 사람의 이름으로 잠금 화면에
     // 남아 있다 — 자격이 없어 눌러도 결정은 되지 않지만, 로그아웃한 폰에 앞 사람의 요청과 메시지
     // 미리보기가 남아 있을 이유가 없다.

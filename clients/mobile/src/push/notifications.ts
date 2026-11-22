@@ -21,7 +21,7 @@ import {
   threadRootId,
   type PushEnvelope,
 } from './envelope';
-import {nativeApprovalHandlerAttached} from './native';
+import {nativeApprovalHandlerAttached, nativeReplyHandlerAttached} from './native';
 
 // =============================================================================
 // expo-notifications wiring (goal RN-N1, ADR-0137 D7 정오 5항).
@@ -35,8 +35,10 @@ import {nativeApprovalHandlerAttached} from './native';
 // `EmitterModule.definition()`'s OnCreate. That is what forwards responses to
 // this file. Verified in 57.0.8 sources; see the PR for the full note.
 //
-// Because the emitter already delivers `actionIdentifier` to JS, 답장 and the
-// body tap need NO native delegate of their own. 승인·거절 are the exception
+// Because the emitter already delivers `actionIdentifier` to JS, the body tap
+// needs NO native delegate of its own. 답장 is kept natively too since #6036 (the
+// emitter is not there for a process woken in the background without JS; see
+// `queuedReplies.ts`), and 승인·거절 are the original exception
 // (#3931, ADR-0204 D6). `NotificationCenterManager.userNotificationCenter(_:didReceive:)`
 // calls the system completion handler UNCONDITIONALLY after polling its delegates
 // (NotificationCenterManager.swift:116-124), so a process woken for a lock-screen
@@ -231,12 +233,18 @@ export async function handlePushResponse(
   // 승인·거절은 iOS 에서 네이티브 처리기가 혼자 맡는다 (#3931, ADR-0204 D6). 같은 버튼을
   // JS 도 보내면 결정이 두 번 간다(멱등 키가 서로 달라 하나는 409 로 끝나지만, 두 요청이
   // 서로를 앞지르는 경주가 된다). 처리기가 **붙어 있을 때만** 물러난다 — 이유는
-  // `native.ts` 에 있다. 답장은 그대로 JS 의 몫이다.
+  // `native.ts` 에 있다.
   if (
     (action === PUSH_ACTION.approve || action === PUSH_ACTION.reject) &&
     nativeApprovalHandlerAttached()
   ) {
     return {kind: 'ignored', reason: 'approval buttons are answered natively'};
+  }
+  // 답장도 iOS 에서 처리기가 붙어 있으면 여기서 보내지 않는다 (#6036). 처리기가 응답을 받은 그 자리에서
+  // 앱 전용 보관 목록에 남기고, 보내기는 그 목록을 비우는 `queuedReplies.ts` 한 길이 한다 — 같은 열쇠로,
+  // 한 번만. 여기서도 보내면 열쇠가 다른 같은 글이 하나 더 간다.
+  if (action === PUSH_ACTION.quickReply && nativeReplyHandlerAttached()) {
+    return {kind: 'ignored', reason: 'replies are kept natively and sent from the list'};
   }
 
   if (!envelope) {

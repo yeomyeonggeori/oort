@@ -90,5 +90,9 @@
   "mobile.linkCard.removeConfirm": "지우기",
   "mobile.linkCard.removePending": "지우는 중…",
   "mobile.linkCard.removeFailed": "링크 미리보기를 지우지 못했어요. 연결을 확인하고 다시 해 보세요.",
-  "mobile.linkCard.cancel": "취소"
+  "mobile.linkCard.cancel": "취소",
+  "mobile.pushReply.queued": "답장은 앱을 열면 보내요",
+  "mobile.pushReply.notSentTitle": "답장을 보내지 못했어요",
+  "mobile.pushReply.notSentBody": "앱을 열어 다시 보내 주세요",
+  "mobile.pushReply.drafted": "답장을 보내지 못해 초안으로 남겼어요"
 }

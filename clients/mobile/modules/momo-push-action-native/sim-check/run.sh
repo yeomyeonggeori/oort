@@ -24,6 +24,7 @@ SOURCES=(
   "$HERE/../ios/MomoPushActionDecisionKey.swift"
   "$HERE/../ios/MomoPushActionKeychain.swift"
   "$HERE/../ios/MomoPushActionJob.swift"
+  "$HERE/../ios/MomoPushReplyQueue.swift"
   "$HERE/../../../ios/MomoPushKit/PushNotification.swift"
   "$HERE/main.swift"
 )
