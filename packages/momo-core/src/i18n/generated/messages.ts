@@ -1682,12 +1682,34 @@ export const messageKeys = [
   "timeline.memberPanel.stageSpoken",
   "timeline.quote.head",
   "timeline.quote.headUnnamed",
+  "timeline.reaction.chipMine",
+  "timeline.reaction.chipMineNoNames",
+  "timeline.reaction.chipOther",
+  "timeline.reaction.chipOtherNoNames",
+  "timeline.reaction.names1",
+  "timeline.reaction.names2",
+  "timeline.reaction.names3",
+  "timeline.reaction.namesExtra0",
+  "timeline.reaction.namesExtra1",
+  "timeline.reaction.namesExtra2",
+  "timeline.reaction.namesExtra3",
+  "timeline.reaction.selfToken",
   "timeline.runException.open",
   "timeline.runException.settings",
   "timeline.send.discard",
   "timeline.send.failed",
   "timeline.send.resend",
   "timeline.send.sending",
+  "timeline.spawnHost.candidateWithReason",
+  "timeline.spawnHost.choiceLabel",
+  "timeline.spawnHost.noEligibleHost",
+  "timeline.spawnHost.notReady",
+  "timeline.spawnHost.offline",
+  "timeline.spawnHost.revoked",
+  "timeline.spawnHost.tierCloud",
+  "timeline.spawnHost.tierLocal",
+  "timeline.spawnHost.tierRemote",
+  "timeline.spawnHost.unavailable",
   "timeline.streamStop.cancelled",
   "timeline.streamStop.cutOff",
   "timeline.thread.followDismiss",
@@ -4028,6 +4050,55 @@ export const argumentSpecs = {
     "name": "string"
   },
   "timeline.quote.headUnnamed": {},
+  "timeline.reaction.chipMine": {
+    "count": "number",
+    "emoji": "string",
+    "names": "string"
+  },
+  "timeline.reaction.chipMineNoNames": {
+    "count": "number",
+    "emoji": "string"
+  },
+  "timeline.reaction.chipOther": {
+    "count": "number",
+    "emoji": "string",
+    "names": "string"
+  },
+  "timeline.reaction.chipOtherNoNames": {
+    "count": "number",
+    "emoji": "string"
+  },
+  "timeline.reaction.names1": {
+    "a": "string"
+  },
+  "timeline.reaction.names2": {
+    "a": "string",
+    "b": "string"
+  },
+  "timeline.reaction.names3": {
+    "a": "string",
+    "b": "string",
+    "c": "string"
+  },
+  "timeline.reaction.namesExtra0": {
+    "extra": "number"
+  },
+  "timeline.reaction.namesExtra1": {
+    "a": "string",
+    "extra": "number"
+  },
+  "timeline.reaction.namesExtra2": {
+    "a": "string",
+    "b": "string",
+    "extra": "number"
+  },
+  "timeline.reaction.namesExtra3": {
+    "a": "string",
+    "b": "string",
+    "c": "string",
+    "extra": "number"
+  },
+  "timeline.reaction.selfToken": {},
   "timeline.runException.open": {
     "text": "string"
   },
@@ -4036,6 +4107,19 @@ export const argumentSpecs = {
   "timeline.send.failed": {},
   "timeline.send.resend": {},
   "timeline.send.sending": {},
+  "timeline.spawnHost.candidateWithReason": {
+    "name": "string",
+    "reason": "string"
+  },
+  "timeline.spawnHost.choiceLabel": {},
+  "timeline.spawnHost.noEligibleHost": {},
+  "timeline.spawnHost.notReady": {},
+  "timeline.spawnHost.offline": {},
+  "timeline.spawnHost.revoked": {},
+  "timeline.spawnHost.tierCloud": {},
+  "timeline.spawnHost.tierLocal": {},
+  "timeline.spawnHost.tierRemote": {},
+  "timeline.spawnHost.unavailable": {},
   "timeline.streamStop.cancelled": {},
   "timeline.streamStop.cutOff": {},
   "timeline.thread.followDismiss": {},
@@ -5998,12 +6082,34 @@ export interface MessageArgs {
   "timeline.memberPanel.stageSpoken": { stage: string };
   "timeline.quote.head": { name: string };
   "timeline.quote.headUnnamed": Record<string, never>;
+  "timeline.reaction.chipMine": { count: number; emoji: string; names: string };
+  "timeline.reaction.chipMineNoNames": { count: number; emoji: string };
+  "timeline.reaction.chipOther": { count: number; emoji: string; names: string };
+  "timeline.reaction.chipOtherNoNames": { count: number; emoji: string };
+  "timeline.reaction.names1": { a: string };
+  "timeline.reaction.names2": { a: string; b: string };
+  "timeline.reaction.names3": { a: string; b: string; c: string };
+  "timeline.reaction.namesExtra0": { extra: number };
+  "timeline.reaction.namesExtra1": { a: string; extra: number };
+  "timeline.reaction.namesExtra2": { a: string; b: string; extra: number };
+  "timeline.reaction.namesExtra3": { a: string; b: string; c: string; extra: number };
+  "timeline.reaction.selfToken": Record<string, never>;
   "timeline.runException.open": { text: string };
   "timeline.runException.settings": Record<string, never>;
   "timeline.send.discard": Record<string, never>;
   "timeline.send.failed": Record<string, never>;
   "timeline.send.resend": Record<string, never>;
   "timeline.send.sending": Record<string, never>;
+  "timeline.spawnHost.candidateWithReason": { name: string; reason: string };
+  "timeline.spawnHost.choiceLabel": Record<string, never>;
+  "timeline.spawnHost.noEligibleHost": Record<string, never>;
+  "timeline.spawnHost.notReady": Record<string, never>;
+  "timeline.spawnHost.offline": Record<string, never>;
+  "timeline.spawnHost.revoked": Record<string, never>;
+  "timeline.spawnHost.tierCloud": Record<string, never>;
+  "timeline.spawnHost.tierLocal": Record<string, never>;
+  "timeline.spawnHost.tierRemote": Record<string, never>;
+  "timeline.spawnHost.unavailable": Record<string, never>;
   "timeline.streamStop.cancelled": Record<string, never>;
   "timeline.streamStop.cutOff": Record<string, never>;
   "timeline.thread.followDismiss": Record<string, never>;

@@ -694,6 +694,8 @@
     "packages/momo-core/src/features/sidebar/sidebarSections.ts": {"ko": 32, "en": 0},
     "packages/momo-core/src/features/timeline/actionCopy.ts": {"ko": 0, "en": 0},
     "packages/momo-core/src/features/timeline/deletedFold.ts": {"ko": 0, "en": 0},
+    "packages/momo-core/src/features/timeline/reactionNames.ts": {"ko": 0, "en": 0},
+    "packages/momo-core/src/features/timeline/spawnHostChoice.ts": {"ko": 0, "en": 0},
     "packages/momo-core/src/features/timeline/streamStop.ts": {"ko": 0, "en": 0},
     "packages/momo-core/src/features/work/workSessionModel.ts": {"ko": 59, "en": 0}
   },

@@ -12280,6 +12280,418 @@ export const catalog: MessageCatalog = {
       "value": "Replying to a message"
     }
   ],
+  "timeline.reaction.chipMine": [
+    {
+      "type": 1,
+      "value": "emoji"
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " reaction"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " reactions"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    },
+    {
+      "type": 0,
+      "value": ", "
+    },
+    {
+      "type": 1,
+      "value": "names"
+    }
+  ],
+  "timeline.reaction.chipMineNoNames": [
+    {
+      "type": 1,
+      "value": "emoji"
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " reaction"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " reactions"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    },
+    {
+      "type": 0,
+      "value": ", remove my reaction"
+    }
+  ],
+  "timeline.reaction.chipOther": [
+    {
+      "type": 1,
+      "value": "emoji"
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " reaction"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " reactions"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    },
+    {
+      "type": 0,
+      "value": ", "
+    },
+    {
+      "type": 1,
+      "value": "names"
+    },
+    {
+      "type": 0,
+      "value": ", react too"
+    }
+  ],
+  "timeline.reaction.chipOtherNoNames": [
+    {
+      "type": 1,
+      "value": "emoji"
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " reaction"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " reactions"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    },
+    {
+      "type": 0,
+      "value": ", react too"
+    }
+  ],
+  "timeline.reaction.names1": [
+    {
+      "type": 1,
+      "value": "a"
+    }
+  ],
+  "timeline.reaction.names2": [
+    {
+      "type": 1,
+      "value": "a"
+    },
+    {
+      "type": 0,
+      "value": " and "
+    },
+    {
+      "type": 1,
+      "value": "b"
+    }
+  ],
+  "timeline.reaction.names3": [
+    {
+      "type": 1,
+      "value": "a"
+    },
+    {
+      "type": 0,
+      "value": ", "
+    },
+    {
+      "type": 1,
+      "value": "b"
+    },
+    {
+      "type": 0,
+      "value": " and "
+    },
+    {
+      "type": 1,
+      "value": "c"
+    }
+  ],
+  "timeline.reaction.namesExtra0": [
+    {
+      "type": 6,
+      "value": "extra",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " other"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " others"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "timeline.reaction.namesExtra1": [
+    {
+      "type": 1,
+      "value": "a"
+    },
+    {
+      "type": 0,
+      "value": " and "
+    },
+    {
+      "type": 6,
+      "value": "extra",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " other"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " others"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "timeline.reaction.namesExtra2": [
+    {
+      "type": 1,
+      "value": "a"
+    },
+    {
+      "type": 0,
+      "value": ", "
+    },
+    {
+      "type": 1,
+      "value": "b"
+    },
+    {
+      "type": 0,
+      "value": " and "
+    },
+    {
+      "type": 6,
+      "value": "extra",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " other"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " others"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "timeline.reaction.namesExtra3": [
+    {
+      "type": 1,
+      "value": "a"
+    },
+    {
+      "type": 0,
+      "value": ", "
+    },
+    {
+      "type": 1,
+      "value": "b"
+    },
+    {
+      "type": 0,
+      "value": ", "
+    },
+    {
+      "type": 1,
+      "value": "c"
+    },
+    {
+      "type": 0,
+      "value": " and "
+    },
+    {
+      "type": 6,
+      "value": "extra",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " other"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " others"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "timeline.reaction.selfToken": [
+    {
+      "type": 0,
+      "value": "You (remove my reaction)"
+    }
+  ],
   "timeline.runException.open": [
     {
       "type": 1,
@@ -12318,6 +12730,78 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "Sending"
+    }
+  ],
+  "timeline.spawnHost.candidateWithReason": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " ("
+    },
+    {
+      "type": 1,
+      "value": "reason"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "timeline.spawnHost.choiceLabel": [
+    {
+      "type": 0,
+      "value": "Host to run on"
+    }
+  ],
+  "timeline.spawnHost.noEligibleHost": [
+    {
+      "type": 0,
+      "value": "No host can run this right now. Check that the host app is running, then try again."
+    }
+  ],
+  "timeline.spawnHost.notReady": [
+    {
+      "type": 0,
+      "value": "Not ready yet"
+    }
+  ],
+  "timeline.spawnHost.offline": [
+    {
+      "type": 0,
+      "value": "Offline"
+    }
+  ],
+  "timeline.spawnHost.revoked": [
+    {
+      "type": 0,
+      "value": "Revoked"
+    }
+  ],
+  "timeline.spawnHost.tierCloud": [
+    {
+      "type": 0,
+      "value": "Cloud"
+    }
+  ],
+  "timeline.spawnHost.tierLocal": [
+    {
+      "type": 0,
+      "value": "Local"
+    }
+  ],
+  "timeline.spawnHost.tierRemote": [
+    {
+      "type": 0,
+      "value": "Remote"
+    }
+  ],
+  "timeline.spawnHost.unavailable": [
+    {
+      "type": 0,
+      "value": "Can't be chosen right now"
     }
   ],
   "timeline.streamStop.cancelled": [

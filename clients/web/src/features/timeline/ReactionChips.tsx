@@ -9,6 +9,7 @@ import {
   reactionChipAccessibleName,
 } from "@momo/core/features/timeline/reactionNames";
 import { Tooltip } from "@/design/ui/tooltip";
+import { useFormatMessage } from "@/i18n/useFormatMessage";
 import { useRowTipSide } from "./rowTipSide";
 
 // =============================================================================
@@ -104,16 +105,17 @@ function ReactionChipButton({
   disabled?: boolean;
   onToggle: (emoji: string) => void;
 }) {
+  const formatMessage = useFormatMessage();
   // chipsFor reuses the map's memberIds array, so this identity is stable
   // across parent renders that did not change who reacted.
   const names = useMemo(
-    () => formatReactionNames(chip.memberIds ?? [], directory, myMemberId),
-    [chip.memberIds, directory, myMemberId]
+    () => formatReactionNames(formatMessage, chip.memberIds ?? [], directory, myMemberId),
+    [formatMessage, chip.memberIds, directory, myMemberId]
   );
   const accessibleName = useMemo(
     () =>
-      reactionChipAccessibleName(chip.emoji, chip.count, names, chip.mine),
-    [chip.emoji, chip.count, names, chip.mine]
+      reactionChipAccessibleName(formatMessage, chip.emoji, chip.count, names, chip.mine),
+    [formatMessage, chip.emoji, chip.count, names, chip.mine]
   );
 
   return (

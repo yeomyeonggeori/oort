@@ -11679,6 +11679,238 @@ export const catalog: MessageCatalog = {
       "value": "메시지에 답장"
     }
   ],
+  "timeline.reaction.chipMine": [
+    {
+      "type": 1,
+      "value": "emoji"
+    },
+    {
+      "type": 0,
+      "value": " 반응 "
+    },
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "개, "
+    },
+    {
+      "type": 1,
+      "value": "names"
+    }
+  ],
+  "timeline.reaction.chipMineNoNames": [
+    {
+      "type": 1,
+      "value": "emoji"
+    },
+    {
+      "type": 0,
+      "value": " 반응 "
+    },
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "개, 내 반응 취소"
+    }
+  ],
+  "timeline.reaction.chipOther": [
+    {
+      "type": 1,
+      "value": "emoji"
+    },
+    {
+      "type": 0,
+      "value": " 반응 "
+    },
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "개, "
+    },
+    {
+      "type": 1,
+      "value": "names"
+    },
+    {
+      "type": 0,
+      "value": ", 나도 반응하기"
+    }
+  ],
+  "timeline.reaction.chipOtherNoNames": [
+    {
+      "type": 1,
+      "value": "emoji"
+    },
+    {
+      "type": 0,
+      "value": " 반응 "
+    },
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "개, 나도 반응하기"
+    }
+  ],
+  "timeline.reaction.names1": [
+    {
+      "type": 1,
+      "value": "a"
+    }
+  ],
+  "timeline.reaction.names2": [
+    {
+      "type": 1,
+      "value": "a"
+    },
+    {
+      "type": 0,
+      "value": ", "
+    },
+    {
+      "type": 1,
+      "value": "b"
+    }
+  ],
+  "timeline.reaction.names3": [
+    {
+      "type": 1,
+      "value": "a"
+    },
+    {
+      "type": 0,
+      "value": ", "
+    },
+    {
+      "type": 1,
+      "value": "b"
+    },
+    {
+      "type": 0,
+      "value": ", "
+    },
+    {
+      "type": 1,
+      "value": "c"
+    }
+  ],
+  "timeline.reaction.namesExtra0": [
+    {
+      "type": 0,
+      "value": "외 "
+    },
+    {
+      "type": 2,
+      "value": "extra",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "명"
+    }
+  ],
+  "timeline.reaction.namesExtra1": [
+    {
+      "type": 1,
+      "value": "a"
+    },
+    {
+      "type": 0,
+      "value": " 외 "
+    },
+    {
+      "type": 2,
+      "value": "extra",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "명"
+    }
+  ],
+  "timeline.reaction.namesExtra2": [
+    {
+      "type": 1,
+      "value": "a"
+    },
+    {
+      "type": 0,
+      "value": ", "
+    },
+    {
+      "type": 1,
+      "value": "b"
+    },
+    {
+      "type": 0,
+      "value": " 외 "
+    },
+    {
+      "type": 2,
+      "value": "extra",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "명"
+    }
+  ],
+  "timeline.reaction.namesExtra3": [
+    {
+      "type": 1,
+      "value": "a"
+    },
+    {
+      "type": 0,
+      "value": ", "
+    },
+    {
+      "type": 1,
+      "value": "b"
+    },
+    {
+      "type": 0,
+      "value": ", "
+    },
+    {
+      "type": 1,
+      "value": "c"
+    },
+    {
+      "type": 0,
+      "value": " 외 "
+    },
+    {
+      "type": 2,
+      "value": "extra",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "명"
+    }
+  ],
+  "timeline.reaction.selfToken": [
+    {
+      "type": 0,
+      "value": "나(내 반응 취소)"
+    }
+  ],
   "timeline.runException.open": [
     {
       "type": 1,
@@ -11717,6 +11949,78 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "전송 중"
+    }
+  ],
+  "timeline.spawnHost.candidateWithReason": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " ("
+    },
+    {
+      "type": 1,
+      "value": "reason"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "timeline.spawnHost.choiceLabel": [
+    {
+      "type": 0,
+      "value": "실행할 호스트"
+    }
+  ],
+  "timeline.spawnHost.noEligibleHost": [
+    {
+      "type": 0,
+      "value": "지금 이 작업을 실행할 수 있는 호스트가 없습니다. 호스트 앱이 켜져 있는지 확인한 뒤 다시 시도하세요."
+    }
+  ],
+  "timeline.spawnHost.notReady": [
+    {
+      "type": 0,
+      "value": "준비 중"
+    }
+  ],
+  "timeline.spawnHost.offline": [
+    {
+      "type": 0,
+      "value": "오프라인"
+    }
+  ],
+  "timeline.spawnHost.revoked": [
+    {
+      "type": 0,
+      "value": "해지됨"
+    }
+  ],
+  "timeline.spawnHost.tierCloud": [
+    {
+      "type": 0,
+      "value": "클라우드"
+    }
+  ],
+  "timeline.spawnHost.tierLocal": [
+    {
+      "type": 0,
+      "value": "로컬"
+    }
+  ],
+  "timeline.spawnHost.tierRemote": [
+    {
+      "type": 0,
+      "value": "원격"
+    }
+  ],
+  "timeline.spawnHost.unavailable": [
+    {
+      "type": 0,
+      "value": "지금 선택할 수 없음"
     }
   ],
   "timeline.streamStop.cancelled": [
