@@ -2237,6 +2237,84 @@ async function nearEndScene(browser, origin, engine) {
   console.log(`MEASURE r4-nearend-${engine}: ${summary.join(" | ")}`);
 }
 
+/**
+ * 검수 r5 M2 · M3. (가) 굴려 내려가 있을 때 새 요청이 와도 목록 위에 붙은 열 머리의 「새 요청 n · 보기」가 보이고(붙은 머리 = 목록 상자 위,
+ * 단추 가운데 점 밑은 그 단추 — 줄과 겹침 0), 그 단추가 서도 칸 자리 0px, 「보기」 뒤 새 칸이 목록 상자 안에 보인다. (나) 1440 창에서 서랍을
+ * 열었다 닫으면 표 바닥이 다시 재여 빈 꼬리 0px.
+ */
+async function r5Scene(browser, origin, engine) {
+  const summary = [];
+  for (const vp of ["1280", "390"]) {
+    const viewport = vp === "1280" ? { width: 1280, height: 700 } : { width: 390, height: 900 };
+    const { context, page, state } = await openContext(browser, origin, { scheme: "light", viewport, waiting: [], server: { twoDeciders: true, threeDeciders: true, decisionDelayMs: 60, roundTripMs: 60 } });
+    await threeReady(page);
+    await settle(page);
+    const LIST = "[data-team-board-list]";
+    await page.evaluate((sel) => {
+      document.querySelector(sel).scrollTop = 400;
+    }, LIST);
+    await sleep(300);
+    const s0 = await slotBoxes(page);
+    state.patch = new Map([[runWorking.runId, { phase: "awaiting_approval" }]]);
+    state.extraApprovals = [approvalW];
+    await page.evaluate(() => {
+      window.__capture5640Advance(31_000);
+      window.dispatchEvent(new Event("visibilitychange"));
+    });
+    await page.waitForFunction(() => document.querySelector('[data-testid="work-jobs-reveal-new"]') !== null, null, { timeout: 8000, polling: "raf" });
+    await sleep(200);
+    const s1 = await slotBoxes(page);
+    const m = await page.evaluate((sel) => {
+      const list = document.querySelector(sel).getBoundingClientRect();
+      const head = document.querySelector('[data-testid="work-jobs-head"]').getBoundingClientRect();
+      const b = document.querySelector('[data-testid="work-jobs-reveal-new"]').getBoundingClientRect();
+      const cx = b.left + b.width / 2;
+      const cy = b.top + b.height / 2;
+      const under = document.elementFromPoint(cx, cy)?.closest('[data-testid="work-jobs-reveal-new"]') !== null;
+      const status = document.querySelector('[data-testid="work-jobs-new-asks-status"]')?.textContent ?? "";
+      return { stuck: Math.abs(head.top - list.top) < 1, inList: b.top >= list.top - 8 && b.bottom <= list.bottom, under, status, scrollTop: document.querySelector(sel).scrollTop, h: b.height };
+    }, LIST);
+    const move = maxMove(s0, s1);
+    await revealNew(page);
+    await sleep(300);
+    const seen = await page.evaluate(([sel, rid]) => {
+      const list = document.querySelector(sel).getBoundingClientRect();
+      const r = document.querySelector(`[data-section="needsMe"] [data-job-id="${rid}"]`).closest('[data-testid="work-job"]').getBoundingClientRect();
+      return r.top >= list.top && r.bottom <= list.bottom + 1;
+    }, [LIST, runWorking.runId]);
+    const ok = m.stuck && m.inList && m.under && m.status !== "" && move === 0 && seen && state.decisions === 0;
+    check(`r5-head-${engine}-${vp} 굴려 내려가 있어도 붙은 열 머리에 「새 요청 n · 보기」(낭독 「${m.status}」) · 줄과 겹침 0 · 칸 0px · 「보기」 뒤 새 칸이 보임`, ok, { ...m, move, seen });
+    summary.push(`${vp}: 붙음=${m.stuck} 단추 ${m.h}px 밑=${m.under} 낭독=「${m.status}」 scrollTop=${m.scrollTop} 칸 ${move.toFixed(1)}px 보기 뒤 보임=${seen}`);
+    await context.close();
+  }
+  {
+    const { context, page } = await openContext(browser, origin, { scheme: "light", viewport: { width: 1440, height: 900 }, waiting: [], server: { twoDeciders: true, threeDeciders: true, decisionDelayMs: 60, roundTripMs: 60 } });
+    await threeReady(page);
+    await settle(page);
+    const tableOf = () => page.evaluate(() => {
+      const t = document.querySelector('[data-testid="work-jobs-table"]');
+      const rows = [...t.querySelectorAll('[data-testid="work-job"]')];
+      const last = rows.at(-1).getBoundingClientRect().bottom;
+      return { h: t.getBoundingClientRect().height, content: last - t.getBoundingClientRect().top, min: t.style.minHeight };
+    });
+    const t0 = await tableOf();
+    const row = await page.getByTestId("work-job-row").nth(4).boundingBox();
+    await page.mouse.click(row.x + 30, row.y + row.height / 2);
+    await page.waitForFunction(() => document.querySelector("[data-team-board-drawer]") !== null, null, { timeout: 5000 });
+    await sleep(500);
+    const tOpen = await tableOf();
+    await page.keyboard.press("Escape");
+    await page.waitForFunction(() => document.querySelector("[data-team-board-drawer]") === null, null, { timeout: 5000 });
+    await sleep(500);
+    const t1 = await tableOf();
+    const tail = Math.round(t1.h - t0.h);
+    check(`r5-tail-${engine}-1440 서랍을 열었다 닫으면 표 바닥이 다시 재여 빈 꼬리 0px`, Math.abs(tail) <= 1, { t0, tOpen, t1 });
+    summary.push(`1440 서랍: 표 ${Math.round(t0.h)} → 열림 ${Math.round(tOpen.h)} → 닫힘 ${Math.round(t1.h)} (꼬리 ${tail}px)`);
+    await context.close();
+  }
+  console.log(`MEASURE r5-${engine}: ${summary.join(" | ")}`);
+}
+
 async function touchRevScene(browser, origin, engine) {
   if (engine !== "chromium") return;
   const { context, page, state } = await openContext(browser, origin, { scheme: "light", viewport: R2_VP["390"], waiting: [], touch: true, server: { twoDeciders: true, threeDeciders: true, decisionDelayMs: 60, roundTripMs: 60 } });
@@ -2445,7 +2523,7 @@ async function main() {
       }
     }
     if (ONLY === "" || ONLY === "fix5738r2" || ONLY.startsWith("fix5738r2:")) {
-      const parts = ONLY.startsWith("fix5738r2:") ? ONLY.slice(10).split(",") : ["below", "band", "conn", "scroll", "hold", "wheelmix", "clamp", "nearend", "touchrev", "four", "shots", "look"];
+      const parts = ONLY.startsWith("fix5738r2:") ? ONLY.slice(10).split(",") : ["below", "band", "conn", "scroll", "hold", "wheelmix", "clamp", "nearend", "r5", "touchrev", "four", "shots", "look"];
       const wk = await webkit.launch();
       try {
         for (const [engine, b] of [["chromium", browser], ["webkit", wk]]) {
@@ -2457,6 +2535,7 @@ async function main() {
           if (parts.includes("wheelmix")) await wheelMixScene(b, preview.origin, engine);
           if (parts.includes("clamp")) await clampScene(b, preview.origin, engine);
           if (parts.includes("nearend")) await nearEndScene(b, preview.origin, engine);
+          if (parts.includes("r5")) await r5Scene(b, preview.origin, engine);
           if (parts.includes("touchrev")) await touchRevScene(b, preview.origin, engine);
           if (parts.includes("four")) await fourRowsScene(b, preview.origin, engine);
         }
