@@ -8,6 +8,7 @@
 - 증보: **증보 4 — 호스팅 에이전트 왕복 줄이기: `oort_job_start` 합성 도구 (2026-10-14, #3831) · Accepted (성재 결재 「둘 다 (추천)」 2026-10-14, 선택지: 그록봇 도구를 합쳐 왕복을 줄여요(40~70초 단축, 기존 결정 문서 보강)).** `oort_job_start` 하나로 claim·시작 보고·최근 대화를 받고, `oort_jobs_claim`에 같은 게이트의 최근 대화를 싣는다. 새 scope·테이블·마이그레이션 없음. 파일 끝 「증보 4」 절.
 - 증보: **증보 5 — 코드 결과 계약·스레드 답글 깨우기·그 자리 채널 승인 카드 (2026-10-15, #3838) · Accepted (성재 결재 「정해진 칸으로 보고 (추천)」·「깨우기 (추천)」·「그 자리 승인 카드 (추천)」·「oort 호출 + VM 개수 보고 (추천)」 2026-10-15).** `oort_run_complete.artifacts`에 닫힌 결과 칸(C1)과 VM 안 개수 자기 보고(C2), 거절 오류·재시도 규칙(C3), 에이전트가 연 스레드의 사람 답글이 그 에이전트를 깨우는 규칙(W1~W4), 승인 안 된 채널에서 부르면 그 자리에 「이 채널에서 쓰기」 승인 카드가 뜨고 승인 시 대기 요청이 정확히 한 번 처리되는 규칙(G1~G6, HAP-E3 정확 채널 허가 경계). 파일 끝 「증보 5」 절.
 - 증보: **증보 6 — 끝난 run의 죽은 job 재배달 차단·`oort_job_start` 닫힘 답·낡은 handle의 상태 배지 (2026-10-16, #3903) · Accepted (근거: 성재 제보 「그록 기준으로 지금 호출이 거절됨이라고 뜨는데 이유 분석해주고」, 위임 「남은 작업 알아서 진행해줘. 어차피 테스트니까 니가 알아서 해봐.」 2026-10-16).** 새 도구·scope·오류 코드·마이그레이션 없음. 파일 끝 「증보 6」 절.
+- 증보: **증보 7 — 그림 올리기 도구 `oort_picture_upload_begin`과 `oort_message_post.attachmentIds` (2026-11-22, #6051) · Proposed (owner 승인과 등급 2 독립 보안 검수 전).** D3 도구 표에 한 줄. 새 scope 없음(기존 `messages:write`), 운영자 스위치가 켜졌을 때만 광고. 경계·상한·위협·수용 기준은 [ADR-0151](0151-attachments-v0-drive-contract-port.md) 증보 10이 정본이다. 파일 끝 「증보 7」 절.
 - 역방향: 2026-10-16 **D16** — 앱(커넥터)을 붙인 호스팅 에이전트는 `agent.connector_owner_human_id` 배달 규칙을 따른다. 소유자 본인만 부를 수 있어서 D16의 「채널 승인 뒤 다른 멤버의 요청」 노출은 그 에이전트에는 열리지 않는다([ADR-0113](0113-connector-credential-plugin-boundary.md) 증보 2 E3, 구현 C-S2 #3938). D16 본문은 고치지 않았다.
 - 역방향: 2026-10-28 [ADR-0216](0216-oort-cli-terminal-access.md)(#4660)이 개인 개발자 도구에 한해 이 문장을 좁힌다. 가리키는 곳은 D4의 「shared auth는 일반 REST route-scope dispatch보다 먼저 credential class·connection·audience를 검사하고 … generic non-hosted bearer의 기존 REST 권한은 유지한다」(에이전트 자격·generic 에이전트 문)와 증보 1 A3의 「세 credential은 서로 승격되지 않는다」다. 사람이 자기 이름으로 쓰는 CLI·AI 도구는 에이전트 자격이 아니라 사람의 개발자 토큰(`momo_dev_v1`, `token_kind='dev'`)이라는 별도 문으로 붙는다. credential class에 이 개발자 토큰이 더해지고, Agent Port는 이를 모르는 문자열(`invalid_token`)로 거절하며 에이전트 자격·pairing·hosted OAuth도 그 문에 들어가지 못한다(A3와 같은 원리, 서로 승격되지 않는다). Agent Port와 generic 에이전트 자격의 본문 결정은 바꾸지 않았다. OAuth 서버를 「사람 주체」로 넓히는 일은 ADR-0216의 체크리스트(증보 대기)다. → 2026-10-28 #4700이 ADR-0216 D6 (나)로 구현했다: 내장 공개 클라이언트 `oort-cli`·고정 루프백 후보·별도 원장(migration 153)·별도 봉투 키와 코드 접두(`momo_devc_v1`)·`MOMO_DEV_LOGIN_OAUTH_ENABLED`(호스티드 flag와 독립, 기본 닫힘). 호스티드 arm의 경로·응답·접근자는 바뀌지 않았고, 이 증보 1의 별도 증보 전문은 쓰지 않았다(ADR-0216 D6이 이 면을 Accepted로 정했다). 임의 포트·`localhost`·CIMD는 여전히 증보 대기다.
 - 증보 포인터: 2026-11-12 [ADR-0222](0222-work-ledger-and-orchestrator-view.md) 증보(#5687) E3이 채널 승인의 쓰임 한 가지를 더한다. 에이전트가 방금 만든 새 채널(글 0건, 서버가 판정)에 이미 워크스페이스 멤버인 다른 에이전트를 넣을 때, 그 에이전트 connection의 승인 채널에 그 채널 하나를 올린다. 「채널 승인 권한 주체는 관리자」는 그대로다(관리자가 직접 부른 run 안이거나 관리자가 카드로 승인할 때만 실행된다. 앞의 경우 관리자는 그 넣기를 따로 확인하지 않는다). confirm·DM 승인·승인 scope는 건드리지 않고, 「새 채널」 판정에 맞지 않는 채널로 넓히는 길은 열지 않는다. owner 확인을 기다리는 줄이고(그 절의 「결재 기록」), owner가 확인하기 전에는 구현하지 않는다. 본문은 바꾸지 않았다.
@@ -86,6 +87,7 @@ Agent Port v0의 capability는 세 묶음이다. 최종 tool 이름과 JSON sche
 | `oort_message_post` | `messages:write` (기존) | 기존 write authority 재사용 |
 | `oort_jobs_claim`, `oort_job_renew`, `oort_job_release` | `agent:jobs:read` (기존) | 기존 claim/lease authority 재사용 |
 | `oort_run_event`, `oort_run_complete` | `agent:runs:callback` (기존) | 기존 callback authority 재사용 |
+| `oort_picture_upload_begin` **[제안 이름]** — **Proposed**, 증보 7(#6051) | `messages:write` (기존) | 새 scope 없음. 운영자 스위치가 켜졌을 때만 list·call. 같은 증보가 `oort_message_post`에 선택 인자 `attachmentIds`를 더한다. 경계는 ADR-0151 증보 10 |
 
 `agent:port:connect`, `agent:inbox:read`, `messages:read`는 모두 credential 기본 scope가 아니다. hosted activation이 사람이 승인한 exact scope만 발급하고, `tools/list`는 active connection·current membership·위 scope 교집합만 광고한다. 누락 scope의 tool은 list와 call에서 모두 fail-closed하며 provider metadata가 scope를 늘리지 못한다.
 
@@ -696,3 +698,23 @@ D12의 `artifacts`에 키를 더한다. `additionalProperties:false`는 유지�
 ## 증보 6 (2026-10-30): 동의받은 그룹 DM 멤버
 
 [ADR-0217](0217-consented-agent-group-dm.md)(Accepted, #4792)의 owner 결정으로 증보 2 B1의 ‘그룹 DM은 전달하지 않는다’를 한정한다. 기존 사람↔에이전트 1:1 소유자 승인 규칙은 그대로다. 사람이 있던 DM에 에이전트를 들일 때는 다른 사람 **모두**의 허락, 동의한 연결 고정, 착석 뒤 메시지+호출 메시지 하나의 읽기 하한이 필요하다. 현재 착석한 에이전트는 그 범위의 그룹 DM 전달을 받으며 사람 누구나 내보낼 수 있다. 이 권한은 관리자 confirm 목록이나 기존 타인 1:1 DM 승인 목록에서 만들 수 없다. 명시적 멘션·스레드 깨움은 기존 gate를 통과하고 그룹 대화에는 1:1 무멘션 자동 답장을 적용하지 않는다.
+
+
+## 증보 7 (2026-11-22, #6051) — 그림 올리기 도구 `oort_picture_upload_begin`과 `oort_message_post.attachmentIds` (Proposed)
+
+- Status: **Proposed** (2026-11-22, Fable 5.2 기안). owner 승인과 등급 2 독립 보안 검수 1회 전이다. 공개 도구 표면이 바뀌므로 ADR-0100에 따라 Accepted가 #6013 구현의 머지 조건이다. **정본은 [ADR-0151](0151-attachments-v0-drive-contract-port.md) 증보 10**이고(무엇이 넓어지나·불변식·상한·위협·수용 기준·되돌리는 법), 이 절은 Agent Port 쪽에서 바뀌는 것만 적는다. 번호: 이 파일에는 「증보 6」이 둘 있다(#3903, 2026-10-30 그룹 DM). 고치지 않고 다음 번호 7을 쓴다.
+
+| # | 결정 | 근거 |
+|---|---|---|
+| I1 | **도구 하나를 더한다: `oort_picture_upload_begin { channelId }` [제안 이름].** 1회용 올리기 주소를 돌려준다. D3의 tool → scope 표에 한 줄(위). 판정은 `oort_message_post`와 같은 함수다(연결 활성·`messages:write`·승인된 채널·그 채널의 활성 멤버). | 글을 쓸 자격이 있는 채널에 그림을 붙이는 것은 같은 쓰기다. 판정이 둘이면 어긋난다 |
+| I2 | **새 scope를 만들지 않는다.** `HOSTED_AGENT_PORT_GRANTABLE_SCOPES`는 그대로다. 끄고 켜는 손잡이는 운영자 스위치 하나다(ADR-0151 증보 10 P8). | 발급 상한은 닫힌 집합이다(D3). `oort_card_suggest`·`oort_ping`·`oort_expression_assemble`도 기존 scope에 얹었다 |
+| I3 | **광고 규칙에 스위치를 더한다.** D3의 「`tools/list`는 active connection·current membership·scope 교집합만 광고한다」에 「운영자 스위치가 켜졌을 때」가 이 도구에 한해 더해진다. 꺼져 있으면 list와 call 모두 없는 도구와 같다(fail-closed). | 누락 scope의 도구와 같은 모양이라 새 거절 갈래가 없다 |
+| I4 | **`oort_message_post`에 선택 인자 `attachmentIds`(0~4개 [제안]).** 같은 보내기 tx에서 묶는다. 묶을 수 있는 것은 호출자가 **이 길로 올린** 첨부뿐이고 거절은 한 모양이다(증보 10 P6). 인자가 없으면 동작은 지금과 글자 하나 다르지 않다. | D3 「메시지 게시가 기존 `momo-messaging` 트랜잭션과 outbox를 우회하지 않는다」 그대로 — REST 보내기가 이미 쓰는 묶기 함수를 같은 tx에서 부른다 |
+| I5 | **올리기 주소는 Agent Port가 아니다.** `PUT /v1/agent-uploads/{ws}/{token}` [제안]은 MCP 문이 아닌 별도 라우트이고, 그 토큰은 credential class가 아니다: 그 토큰으로 되는 일은 그림 한 장을 한 번 올리는 것뿐이고 MCP·REST 어느 문도 열지 못한다. 증보 1 A3의 「세 credential은 서로 승격되지 않는다」는 그대로다. | 토큰이 모델 문맥에 남는 대가를(증보 10 PT1) 그 토큰이 할 수 있는 일을 한 가지로 줄여 받는다 |
+| I6 | **요청 본문 상한은 바뀌지 않는다.** 그림 바이트는 MCP 요청에 실리지 않으므로 64 KiB와 「큰 본문」 예외 둘은 그대로다. | 도구 호출 안에 base64로 싣는 모양은 기각했다(증보 10 P1) |
+
+**열지 않는 것.** 새 scope·새 credential·바깥 주소 인자·에이전트가 첨부를 읽는 도구·`oort_card_suggest`/`oort_run_complete`의 첨부·사람용 문(ADR-0216)의 첨부.
+
+**수용 기준.** ADR-0151 증보 10의 `PA1`~`PA16`. Agent Port 쪽에서 특히: `PA9`(묶기 거절 일곱 경우가 한 모양), `PA12`(스위치를 끄면 `tools/list` 길이가 정확히 1 줄고 `attachmentIds`가 스키마에서 빠진다), `PA14`(주소가 호출 기록에 없다). 도구 설명·외부 연결 지시문(`SELF_HOST_AGENT.md`, `HOSTED_ROUTINE_TEMPLATE`)에는 「그림은 설명하는 글과 함께, 필요한 만큼만」 한 줄을 더하고 [ADR-0200](0200-honest-agent-run-state-and-liveness.md) 증보 5의 규칙 8(대화에는 결과·막힘·사람이 할 일만)을 그림에도 적용한다.
+
+**되돌리는 법.** 운영자 스위치를 끄면 I1·I4가 닫힌다(배포 없음). 결정을 뒤집으면 D3 표의 줄과 이 절의 Status를 고친다.
