@@ -1,6 +1,7 @@
 import { ApiError, ClaimApiError, type ClaimKind } from "../../lib/api";
 import { NetworkError } from "../../lib/http";
 import type { MessageKey } from "../../i18n/generated/messages";
+import type { FailureMessage } from "./failureMessage";
 import { passwordRuleCopy } from "./passwordRuleCopy";
 
 /** `error.code` of a new password that holds a NUL character (ADR-0215 D2). */
@@ -16,7 +17,8 @@ export type ClaimMessageKey = Extract<
 >;
 
 export interface ClaimFailure {
-  message: string;
+  /** 사전의 문장(`auth.*`) 또는 전송 오류가 들고 온 글. 화면이 `failureMessageText`로 푼다. */
+  message: FailureMessage;
   /**
    * The dictionary sentence for this refusal, when there is one (ADR-0215 D6 kind-specific copy, #4601).
    * A screen that reads the dictionary shows this and not `message`; `message` stays the sentence for
@@ -39,7 +41,7 @@ export interface ClaimFailure {
 function transportFailure(cause: unknown): ClaimFailure | null {
   if (cause instanceof NetworkError) {
     return {
-      message: cause.message,
+      message: { raw: cause.message },
       suggestSignIn: false,
       retryable: true,
       keepForm: true,
@@ -47,7 +49,7 @@ function transportFailure(cause: unknown): ClaimFailure | null {
   }
   if (cause instanceof ApiError) return null;
   return {
-    message: "서버 응답을 읽지 못했습니다. 주소를 확인하고 다시 시도하세요.",
+    message: { key: "auth.failure.unreadableResponse" },
     suggestSignIn: false,
     retryable: true,
     keepForm: true,
@@ -85,15 +87,14 @@ export function claimFailureCopy(cause: unknown): ClaimFailure {
   switch (failure.status) {
     case 404:
       return {
-        message: "이 링크는 유효하지 않습니다. 받은 주소를 그대로 여세요.",
+        message: { key: "auth.claim.invalidLink" },
         suggestSignIn: false,
         retryable: false,
         keepForm: false,
       };
     case 410:
       return {
-        message:
-          "이 링크는 만료되었습니다. 설치를 실행한 쪽에 새 링크를 요청하세요.",
+        message: { key: "auth.claim.expired" },
         ...(refusedKind(failure) === "password_reset"
           ? { messageKey: "recovery.claim.resetExpired" as const }
           : {}),
@@ -103,7 +104,7 @@ export function claimFailureCopy(cause: unknown): ClaimFailure {
       };
     case 409:
       return {
-        message: "이 링크는 이미 사용되었습니다. 로그인하세요.",
+        message: { key: "auth.claim.used" },
         ...(refusedKind(failure) === "password_reset"
           ? { messageKey: "recovery.claim.resetUsed" as const }
           : {}),
@@ -117,9 +118,7 @@ export function claimFailureCopy(cause: unknown): ClaimFailure {
       // A 400 that names no rule, or one this screen does not know, keeps the
       // generic line.
       return {
-        message:
-          passwordRuleCopy(failure.code) ??
-          "비밀번호를 다시 확인하세요. 비어 있거나 너무 깁니다.",
+        message: passwordRuleCopy(failure.code) ?? { key: "auth.claim.passwordRecheck" },
         // A NUL character cannot be typed, so this is rare; it still gets its own sentence (#4601 hand-down
         // from E-1). A code this screen does not know keeps only the generic line above.
         ...(failure.code === PASSWORD_INVALID_CHAR_CODE
@@ -132,7 +131,7 @@ export function claimFailureCopy(cause: unknown): ClaimFailure {
       };
     case 429:
       return {
-        message: "요청이 너무 잦습니다. 잠시 뒤에 다시 시도하세요.",
+        message: { key: "auth.failure.tooManyRequests" },
         suggestSignIn: false,
         retryable: false,
         keepForm: true,
@@ -141,8 +140,8 @@ export function claimFailureCopy(cause: unknown): ClaimFailure {
       return {
         message:
           failure.status >= 500
-            ? "서버에서 오류가 났습니다. 잠시 뒤에 다시 시도하세요."
-            : "요청을 처리하지 못했습니다. 받은 주소를 확인하고 다시 시도하세요.",
+            ? { key: "auth.failure.serverError" }
+            : { key: "auth.claim.unmapped" },
         suggestSignIn: false,
         retryable: failure.status >= 500,
         keepForm: true,

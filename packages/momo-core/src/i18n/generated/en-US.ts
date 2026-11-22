@@ -224,6 +224,286 @@ export const catalog: MessageCatalog = {
       "style": null
     }
   ],
+  "auth.claim.expired": [
+    {
+      "type": 0,
+      "value": "This link has expired. Ask whoever ran the install for a new link."
+    }
+  ],
+  "auth.claim.invalidLink": [
+    {
+      "type": 0,
+      "value": "This link isn't valid. Open the address exactly as you received it."
+    }
+  ],
+  "auth.claim.passwordRecheck": [
+    {
+      "type": 0,
+      "value": "Check the password again. It is empty or too long."
+    }
+  ],
+  "auth.claim.unmapped": [
+    {
+      "type": 0,
+      "value": "The request couldn't be processed. Check the address you received and try again."
+    }
+  ],
+  "auth.claim.used": [
+    {
+      "type": 0,
+      "value": "This link has already been used. Sign in instead."
+    }
+  ],
+  "auth.deviceLink.addressFallbackLabel": [
+    {
+      "type": 0,
+      "value": "Connect with an address"
+    }
+  ],
+  "auth.deviceLink.cameraError": [
+    {
+      "type": 0,
+      "value": "Couldn't open the camera. Connect with the address instead."
+    }
+  ],
+  "auth.deviceLink.cameraOpening": [
+    {
+      "type": 0,
+      "value": "Opening camera"
+    }
+  ],
+  "auth.deviceLink.expired": [
+    {
+      "type": 0,
+      "value": "This connection code has expired or isn't recognized."
+    }
+  ],
+  "auth.deviceLink.malformed": [
+    {
+      "type": 0,
+      "value": "That isn't a connection code. Scan the QR code again."
+    }
+  ],
+  "auth.deviceLink.permission": [
+    {
+      "type": 0,
+      "value": "Camera access is off, so the QR code can't be scanned. Connect with the address instead."
+    }
+  ],
+  "auth.deviceLink.qrInstruction": [
+    {
+      "type": 0,
+      "value": "Point the camera at the QR code on the desktop screen."
+    }
+  ],
+  "auth.deviceLink.qrLabel": [
+    {
+      "type": 0,
+      "value": "Connect with QR"
+    }
+  ],
+  "auth.deviceLink.retryLabel": [
+    {
+      "type": 0,
+      "value": "Scan again"
+    }
+  ],
+  "auth.deviceLink.sasWait": [
+    {
+      "type": 0,
+      "value": "This continues once you confirm on the desktop."
+    }
+  ],
+  "auth.deviceLink.settingsLabel": [
+    {
+      "type": 0,
+      "value": "Allow in Settings"
+    }
+  ],
+  "auth.deviceLink.unreachable": [
+    {
+      "type": 0,
+      "value": "Couldn't reach the server. Trying to connect again."
+    }
+  ],
+  "auth.deviceLink.used": [
+    {
+      "type": 0,
+      "value": "This connection code has already been used."
+    }
+  ],
+  "auth.failure.serverError": [
+    {
+      "type": 0,
+      "value": "The server ran into an error. Try again in a moment."
+    }
+  ],
+  "auth.failure.tooManyRequests": [
+    {
+      "type": 0,
+      "value": "Too many requests. Try again in a moment."
+    }
+  ],
+  "auth.failure.unreadableResponse": [
+    {
+      "type": 0,
+      "value": "The server's response couldn't be read. Check the address and try again."
+    }
+  ],
+  "auth.join.alreadyRedeemed": [
+    {
+      "type": 0,
+      "value": "This account has already joined with this invite. Sign in instead."
+    }
+  ],
+  "auth.join.cannotJoin": [
+    {
+      "type": 0,
+      "value": "You can't join with this invite. Ask a workspace admin for a new invite link."
+    }
+  ],
+  "auth.join.exhausted": [
+    {
+      "type": 0,
+      "value": "This invite has been used up. Ask a workspace admin for a new invite link."
+    }
+  ],
+  "auth.join.expired": [
+    {
+      "type": 0,
+      "value": "This invite has expired. Ask a workspace admin for a new invite link."
+    }
+  ],
+  "auth.join.guestPaused": [
+    {
+      "type": 0,
+      "value": "Guest invites are paused until per-channel invites are ready. Contact a workspace admin."
+    }
+  ],
+  "auth.join.invalidCode": [
+    {
+      "type": 0,
+      "value": "This invite code isn't valid. Ask the person who invited you to check the link again."
+    }
+  ],
+  "auth.join.notPermitted": [
+    {
+      "type": 0,
+      "value": "This invite doesn't give you permission to join. Ask a workspace admin for a new invite link."
+    }
+  ],
+  "auth.join.revoked": [
+    {
+      "type": 0,
+      "value": "This invite was revoked. Ask a workspace admin for a new invite link."
+    }
+  ],
+  "auth.join.unmapped": [
+    {
+      "type": 0,
+      "value": "The request couldn't be processed. Ask a workspace admin for a new invite link."
+    }
+  ],
+  "auth.join.unusable": [
+    {
+      "type": 0,
+      "value": "This invite can no longer be used. Ask a workspace admin for a new invite link."
+    }
+  ],
+  "auth.passwordRule.tooLong": [
+    {
+      "type": 0,
+      "value": "The password is too long. Use "
+    },
+    {
+      "type": 1,
+      "value": "maxBytes"
+    },
+    {
+      "type": 0,
+      "value": " bytes or fewer. A Hangul character takes "
+    },
+    {
+      "type": 1,
+      "value": "hangulBytes"
+    },
+    {
+      "type": 0,
+      "value": " bytes (up to "
+    },
+    {
+      "type": 1,
+      "value": "maxHangul"
+    },
+    {
+      "type": 0,
+      "value": " characters if only Hangul)."
+    }
+  ],
+  "auth.passwordRule.tooShort": [
+    {
+      "type": 0,
+      "value": "The password is too short. Use at least "
+    },
+    {
+      "type": 6,
+      "value": "minChars",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " character"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " characters"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "auth.signIn.invalidCredentials": [
+    {
+      "type": 0,
+      "value": "The email or password doesn't match."
+    }
+  ],
+  "auth.signIn.suspended": [
+    {
+      "type": 0,
+      "value": "This account can't sign in right now. Contact a workspace admin."
+    }
+  ],
+  "auth.signIn.unmapped": [
+    {
+      "type": 0,
+      "value": "The request couldn't be processed. Contact a workspace admin."
+    }
+  ],
+  "auth.signIn.workspaceIdFormat": [
+    {
+      "type": 0,
+      "value": "That isn't a workspace ID. Leave it empty to connect to the default workspace."
+    }
+  ],
   "blocked.addMemberLater.offline": [
     {
       "type": 0,

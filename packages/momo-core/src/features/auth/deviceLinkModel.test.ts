@@ -7,15 +7,30 @@ import {
   type DeviceLinkPrefill,
 } from "./deepLink";
 import {
-  DEVICE_LINK_EXPIRED_COPY,
-  DEVICE_LINK_MALFORMED_COPY,
+  DEVICE_LINK_EXPIRED_KEY,
+  DEVICE_LINK_MALFORMED_KEY,
   DEVICE_LINK_TOKEN_LEN,
-  DEVICE_LINK_USED_COPY,
+  DEVICE_LINK_USED_KEY,
   DeviceLinkFormatError,
   deviceLinkFailureCopy,
   deviceLinkSasDigits,
   isDeviceLinkToken,
 } from "./deviceLinkModel";
+import { catalog as koCatalog } from "../../i18n/generated/ko-KR";
+import { createLocaleService, resolveLocaleContext } from "../../i18n";
+import { failureMessageText, type FailureMessage } from "./failureMessage";
+
+// 문장은 사전(`auth.json`)에 있다(#6064). 시험은 제품과 같은 한국어 생성물로 문장을 풀어 예전 한국어를 그대로 단정한다.
+const { formatMessage } = createLocaleService({
+  ...resolveLocaleContext("ko-KR", { languages: ["ko-KR"] }),
+  catalog: koCatalog,
+});
+const msg = (failure: { message: FailureMessage }): string =>
+  failureMessageText(formatMessage, failure.message);
+const DEVICE_LINK_EXPIRED_COPY = formatMessage(DEVICE_LINK_EXPIRED_KEY);
+const DEVICE_LINK_USED_COPY = formatMessage(DEVICE_LINK_USED_KEY);
+const DEVICE_LINK_MALFORMED_COPY = formatMessage(DEVICE_LINK_MALFORMED_KEY);
+
 
 const TOKEN = "A".repeat(DEVICE_LINK_TOKEN_LEN);
 const SERVER = "https://api.example.com";
@@ -74,10 +89,10 @@ describe("device-link redeem copy", () => {
       new ApiError(409, "device link token has already been used")
     );
     const malformed = deviceLinkFailureCopy(new DeviceLinkFormatError());
-    expect(expired.message).toBe(DEVICE_LINK_EXPIRED_COPY);
-    expect(used.message).toBe(DEVICE_LINK_USED_COPY);
-    expect(malformed.message).toBe(DEVICE_LINK_MALFORMED_COPY);
-    expect(new Set([expired.message, used.message, malformed.message]).size).toBe(
+    expect(msg(expired)).toBe(DEVICE_LINK_EXPIRED_COPY);
+    expect(msg(used)).toBe(DEVICE_LINK_USED_COPY);
+    expect(msg(malformed)).toBe(DEVICE_LINK_MALFORMED_COPY);
+    expect(new Set([msg(expired), msg(used), msg(malformed)]).size).toBe(
       3
     );
     expect(expired.retryable).toBe(false);
@@ -88,14 +103,14 @@ describe("device-link redeem copy", () => {
     const expired = deviceLinkFailureCopy(
       new ApiError(401, "device link token is invalid")
     );
-    expect(expired.message).not.toMatch(/invalid|expired|token/i);
+    expect(msg(expired)).not.toMatch(/invalid|expired|token/i);
   });
 
   it("passes a transport failure through as retryable", () => {
     const copy = deviceLinkFailureCopy(new NetworkError("unreachable", 15_000));
     expect(copy.retryable).toBe(true);
-    expect(copy.message.length).toBeGreaterThan(0);
-    expect(copy.message).not.toBe(DEVICE_LINK_EXPIRED_COPY);
+    expect(msg(copy).length).toBeGreaterThan(0);
+    expect(msg(copy)).not.toBe(DEVICE_LINK_EXPIRED_COPY);
   });
 });
 

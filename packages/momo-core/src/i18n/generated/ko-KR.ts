@@ -203,6 +203,260 @@ export const catalog: MessageCatalog = {
       "value": "번째"
     }
   ],
+  "auth.claim.expired": [
+    {
+      "type": 0,
+      "value": "이 링크는 만료되었습니다. 설치를 실행한 쪽에 새 링크를 요청하세요."
+    }
+  ],
+  "auth.claim.invalidLink": [
+    {
+      "type": 0,
+      "value": "이 링크는 유효하지 않습니다. 받은 주소를 그대로 여세요."
+    }
+  ],
+  "auth.claim.passwordRecheck": [
+    {
+      "type": 0,
+      "value": "비밀번호를 다시 확인하세요. 비어 있거나 너무 깁니다."
+    }
+  ],
+  "auth.claim.unmapped": [
+    {
+      "type": 0,
+      "value": "요청을 처리하지 못했습니다. 받은 주소를 확인하고 다시 시도하세요."
+    }
+  ],
+  "auth.claim.used": [
+    {
+      "type": 0,
+      "value": "이 링크는 이미 사용되었습니다. 로그인하세요."
+    }
+  ],
+  "auth.deviceLink.addressFallbackLabel": [
+    {
+      "type": 0,
+      "value": "주소로 연결"
+    }
+  ],
+  "auth.deviceLink.cameraError": [
+    {
+      "type": 0,
+      "value": "카메라를 열 수 없습니다. 주소로 연결하세요."
+    }
+  ],
+  "auth.deviceLink.cameraOpening": [
+    {
+      "type": 0,
+      "value": "카메라 여는 중"
+    }
+  ],
+  "auth.deviceLink.expired": [
+    {
+      "type": 0,
+      "value": "이 연결 코드는 만료되었거나 알 수 없습니다."
+    }
+  ],
+  "auth.deviceLink.malformed": [
+    {
+      "type": 0,
+      "value": "연결 코드 형식이 아닙니다. QR을 다시 찍으세요."
+    }
+  ],
+  "auth.deviceLink.permission": [
+    {
+      "type": 0,
+      "value": "카메라 권한이 없어 QR을 찍을 수 없습니다. 주소로 연결하세요."
+    }
+  ],
+  "auth.deviceLink.qrInstruction": [
+    {
+      "type": 0,
+      "value": "데스크탑 화면의 QR을 카메라에 맞추세요."
+    }
+  ],
+  "auth.deviceLink.qrLabel": [
+    {
+      "type": 0,
+      "value": "QR로 연결"
+    }
+  ],
+  "auth.deviceLink.retryLabel": [
+    {
+      "type": 0,
+      "value": "QR 다시 찍기"
+    }
+  ],
+  "auth.deviceLink.sasWait": [
+    {
+      "type": 0,
+      "value": "데스크탑에서 확인을 누르면 진행됩니다."
+    }
+  ],
+  "auth.deviceLink.settingsLabel": [
+    {
+      "type": 0,
+      "value": "설정에서 허용"
+    }
+  ],
+  "auth.deviceLink.unreachable": [
+    {
+      "type": 0,
+      "value": "서버에 닿지 못했습니다. 다시 연결을 시도합니다."
+    }
+  ],
+  "auth.deviceLink.used": [
+    {
+      "type": 0,
+      "value": "이 연결 코드는 이미 사용되었습니다."
+    }
+  ],
+  "auth.failure.serverError": [
+    {
+      "type": 0,
+      "value": "서버에서 오류가 났습니다. 잠시 뒤에 다시 시도하세요."
+    }
+  ],
+  "auth.failure.tooManyRequests": [
+    {
+      "type": 0,
+      "value": "요청이 너무 잦습니다. 잠시 뒤에 다시 시도하세요."
+    }
+  ],
+  "auth.failure.unreadableResponse": [
+    {
+      "type": 0,
+      "value": "서버 응답을 읽지 못했습니다. 주소를 확인하고 다시 시도하세요."
+    }
+  ],
+  "auth.join.alreadyRedeemed": [
+    {
+      "type": 0,
+      "value": "이미 이 초대로 가입한 계정입니다. 로그인하세요."
+    }
+  ],
+  "auth.join.cannotJoin": [
+    {
+      "type": 0,
+      "value": "이 초대로는 가입할 수 없습니다. 워크스페이스 관리자에게 새 초대 링크를 요청하세요."
+    }
+  ],
+  "auth.join.exhausted": [
+    {
+      "type": 0,
+      "value": "사용 횟수가 모두 찬 초대입니다. 워크스페이스 관리자에게 새 초대 링크를 요청하세요."
+    }
+  ],
+  "auth.join.expired": [
+    {
+      "type": 0,
+      "value": "만료된 초대입니다. 워크스페이스 관리자에게 새 초대 링크를 요청하세요."
+    }
+  ],
+  "auth.join.guestPaused": [
+    {
+      "type": 0,
+      "value": "게스트 초대는 채널별 초대가 준비될 때까지 잠시 멈춰 있습니다. 워크스페이스 관리자에게 문의하세요."
+    }
+  ],
+  "auth.join.invalidCode": [
+    {
+      "type": 0,
+      "value": "유효하지 않은 초대 코드입니다. 초대한 사람에게 링크를 다시 확인하세요."
+    }
+  ],
+  "auth.join.notPermitted": [
+    {
+      "type": 0,
+      "value": "이 초대로는 가입 권한이 없습니다. 워크스페이스 관리자에게 새 초대 링크를 요청하세요."
+    }
+  ],
+  "auth.join.revoked": [
+    {
+      "type": 0,
+      "value": "회수된 초대입니다. 워크스페이스 관리자에게 새 초대 링크를 요청하세요."
+    }
+  ],
+  "auth.join.unmapped": [
+    {
+      "type": 0,
+      "value": "요청을 처리하지 못했습니다. 워크스페이스 관리자에게 새 초대 링크를 요청하세요."
+    }
+  ],
+  "auth.join.unusable": [
+    {
+      "type": 0,
+      "value": "더 이상 쓸 수 없는 초대입니다. 워크스페이스 관리자에게 새 초대 링크를 요청하세요."
+    }
+  ],
+  "auth.passwordRule.tooLong": [
+    {
+      "type": 0,
+      "value": "비밀번호가 너무 깁니다. "
+    },
+    {
+      "type": 1,
+      "value": "maxBytes"
+    },
+    {
+      "type": 0,
+      "value": "바이트 이하로 입력하세요. 한글은 한 자에 "
+    },
+    {
+      "type": 1,
+      "value": "hangulBytes"
+    },
+    {
+      "type": 0,
+      "value": "바이트입니다(한글만이면 "
+    },
+    {
+      "type": 1,
+      "value": "maxHangul"
+    },
+    {
+      "type": 0,
+      "value": "자)."
+    }
+  ],
+  "auth.passwordRule.tooShort": [
+    {
+      "type": 0,
+      "value": "비밀번호가 너무 짧습니다. "
+    },
+    {
+      "type": 1,
+      "value": "minChars"
+    },
+    {
+      "type": 0,
+      "value": "자 이상으로 입력하세요."
+    }
+  ],
+  "auth.signIn.invalidCredentials": [
+    {
+      "type": 0,
+      "value": "이메일 또는 비밀번호가 맞지 않습니다."
+    }
+  ],
+  "auth.signIn.suspended": [
+    {
+      "type": 0,
+      "value": "이 계정은 지금 로그인할 수 없습니다. 워크스페이스 관리자에게 문의하세요."
+    }
+  ],
+  "auth.signIn.unmapped": [
+    {
+      "type": 0,
+      "value": "요청을 처리하지 못했습니다. 워크스페이스 관리자에게 문의하세요."
+    }
+  ],
+  "auth.signIn.workspaceIdFormat": [
+    {
+      "type": 0,
+      "value": "워크스페이스 ID 형식이 아닙니다. 비워 두면 기본 워크스페이스로 연결합니다."
+    }
+  ],
   "blocked.addMemberLater.offline": [
     {
       "type": 0,

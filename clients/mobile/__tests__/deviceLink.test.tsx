@@ -5,16 +5,18 @@ import {Linking} from 'react-native';
 import '../src/boot/polyfills';
 import '../src/boot/coreHost';
 
+import {catalog as koCatalog} from '@momo/core/i18n/generated/ko-KR';
+import {createMessageCopy} from '@momo/core/testkit';
 import {
-  DEVICE_LINK_CAMERA_ERROR_COPY,
-  DEVICE_LINK_CAMERA_OPENING_COPY,
-  DEVICE_LINK_EXPIRED_COPY,
-  DEVICE_LINK_MALFORMED_COPY,
-  DEVICE_LINK_QR_INSTRUCTION,
-  DEVICE_LINK_SAS_WAIT_COPY,
+  DEVICE_LINK_CAMERA_ERROR_KEY,
+  DEVICE_LINK_CAMERA_OPENING_KEY,
+  DEVICE_LINK_EXPIRED_KEY,
+  DEVICE_LINK_MALFORMED_KEY,
+  DEVICE_LINK_QR_INSTRUCTION_KEY,
+  DEVICE_LINK_SAS_WAIT_KEY,
   DEVICE_LINK_TOKEN_LEN,
-  DEVICE_LINK_UNREACHABLE_COPY,
-  DEVICE_LINK_USED_COPY,
+  DEVICE_LINK_UNREACHABLE_KEY,
+  DEVICE_LINK_USED_KEY,
 } from '@momo/core/features/auth/deviceLinkModel';
 import {parseDeviceLinkDeepLink} from '@momo/core/features/auth/deepLink';
 
@@ -23,6 +25,18 @@ import {deviceLinkDevice} from '../src/features/deviceLink/deviceIdentity';
 import {focusTextInput} from '../src/features/deviceLink/focusTextInput';
 import {__resetSessionStore, keychainSettled} from '../src/storage/secureSession';
 import {__resetServerBaseCache} from '../src/storage/serverBase';
+
+// 문장은 사전(`auth.json`)에 있다(#6064). 폰 화면은 제공자가 없으면 한국어로 읽으므로, 시험은 같은 한국어 생성물로 키를 풀어
+// 예전 한국어 문장을 그대로 단정한다.
+const ko = createMessageCopy({messageLocale: 'ko-KR', catalog: koCatalog});
+const DEVICE_LINK_CAMERA_ERROR_COPY = ko(DEVICE_LINK_CAMERA_ERROR_KEY);
+const DEVICE_LINK_CAMERA_OPENING_COPY = ko(DEVICE_LINK_CAMERA_OPENING_KEY);
+const DEVICE_LINK_EXPIRED_COPY = ko(DEVICE_LINK_EXPIRED_KEY);
+const DEVICE_LINK_MALFORMED_COPY = ko(DEVICE_LINK_MALFORMED_KEY);
+const DEVICE_LINK_QR_INSTRUCTION = ko(DEVICE_LINK_QR_INSTRUCTION_KEY);
+const DEVICE_LINK_SAS_WAIT_COPY = ko(DEVICE_LINK_SAS_WAIT_KEY);
+const DEVICE_LINK_UNREACHABLE_COPY = ko(DEVICE_LINK_UNREACHABLE_KEY);
+const DEVICE_LINK_USED_COPY = ko(DEVICE_LINK_USED_KEY);
 
 jest.mock('../src/features/deviceLink/focusTextInput', () => ({
   focusTextInput: jest.fn(),

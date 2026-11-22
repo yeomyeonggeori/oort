@@ -21,6 +21,43 @@ export const messageKeys = [
   "attachments.video.unmute",
   "attachments.viewer.mixedCaption",
   "attachments.viewer.mixedCaptionLabel",
+  "auth.claim.expired",
+  "auth.claim.invalidLink",
+  "auth.claim.passwordRecheck",
+  "auth.claim.unmapped",
+  "auth.claim.used",
+  "auth.deviceLink.addressFallbackLabel",
+  "auth.deviceLink.cameraError",
+  "auth.deviceLink.cameraOpening",
+  "auth.deviceLink.expired",
+  "auth.deviceLink.malformed",
+  "auth.deviceLink.permission",
+  "auth.deviceLink.qrInstruction",
+  "auth.deviceLink.qrLabel",
+  "auth.deviceLink.retryLabel",
+  "auth.deviceLink.sasWait",
+  "auth.deviceLink.settingsLabel",
+  "auth.deviceLink.unreachable",
+  "auth.deviceLink.used",
+  "auth.failure.serverError",
+  "auth.failure.tooManyRequests",
+  "auth.failure.unreadableResponse",
+  "auth.join.alreadyRedeemed",
+  "auth.join.cannotJoin",
+  "auth.join.exhausted",
+  "auth.join.expired",
+  "auth.join.guestPaused",
+  "auth.join.invalidCode",
+  "auth.join.notPermitted",
+  "auth.join.revoked",
+  "auth.join.unmapped",
+  "auth.join.unusable",
+  "auth.passwordRule.tooLong",
+  "auth.passwordRule.tooShort",
+  "auth.signIn.invalidCredentials",
+  "auth.signIn.suspended",
+  "auth.signIn.unmapped",
+  "auth.signIn.workspaceIdFormat",
   "blocked.addMemberLater.offline",
   "blocked.addMemberLater.serverUnreachable",
   "blocked.aiKeysLead.offline",
@@ -1952,6 +1989,49 @@ export const argumentSpecs = {
     "position": "number",
     "total": "number"
   },
+  "auth.claim.expired": {},
+  "auth.claim.invalidLink": {},
+  "auth.claim.passwordRecheck": {},
+  "auth.claim.unmapped": {},
+  "auth.claim.used": {},
+  "auth.deviceLink.addressFallbackLabel": {},
+  "auth.deviceLink.cameraError": {},
+  "auth.deviceLink.cameraOpening": {},
+  "auth.deviceLink.expired": {},
+  "auth.deviceLink.malformed": {},
+  "auth.deviceLink.permission": {},
+  "auth.deviceLink.qrInstruction": {},
+  "auth.deviceLink.qrLabel": {},
+  "auth.deviceLink.retryLabel": {},
+  "auth.deviceLink.sasWait": {},
+  "auth.deviceLink.settingsLabel": {},
+  "auth.deviceLink.unreachable": {},
+  "auth.deviceLink.used": {},
+  "auth.failure.serverError": {},
+  "auth.failure.tooManyRequests": {},
+  "auth.failure.unreadableResponse": {},
+  "auth.join.alreadyRedeemed": {},
+  "auth.join.cannotJoin": {},
+  "auth.join.exhausted": {},
+  "auth.join.expired": {},
+  "auth.join.guestPaused": {},
+  "auth.join.invalidCode": {},
+  "auth.join.notPermitted": {},
+  "auth.join.revoked": {},
+  "auth.join.unmapped": {},
+  "auth.join.unusable": {},
+  "auth.passwordRule.tooLong": {
+    "hangulBytes": "string",
+    "maxBytes": "string",
+    "maxHangul": "string"
+  },
+  "auth.passwordRule.tooShort": {
+    "minChars": "number"
+  },
+  "auth.signIn.invalidCredentials": {},
+  "auth.signIn.suspended": {},
+  "auth.signIn.unmapped": {},
+  "auth.signIn.workspaceIdFormat": {},
   "blocked.addMemberLater.offline": {},
   "blocked.addMemberLater.serverUnreachable": {},
   "blocked.aiKeysLead.offline": {},
@@ -4437,6 +4517,43 @@ export interface MessageArgs {
   "attachments.video.unmute": Record<string, never>;
   "attachments.viewer.mixedCaption": { position: number; total: number };
   "attachments.viewer.mixedCaptionLabel": { position: number; total: number };
+  "auth.claim.expired": Record<string, never>;
+  "auth.claim.invalidLink": Record<string, never>;
+  "auth.claim.passwordRecheck": Record<string, never>;
+  "auth.claim.unmapped": Record<string, never>;
+  "auth.claim.used": Record<string, never>;
+  "auth.deviceLink.addressFallbackLabel": Record<string, never>;
+  "auth.deviceLink.cameraError": Record<string, never>;
+  "auth.deviceLink.cameraOpening": Record<string, never>;
+  "auth.deviceLink.expired": Record<string, never>;
+  "auth.deviceLink.malformed": Record<string, never>;
+  "auth.deviceLink.permission": Record<string, never>;
+  "auth.deviceLink.qrInstruction": Record<string, never>;
+  "auth.deviceLink.qrLabel": Record<string, never>;
+  "auth.deviceLink.retryLabel": Record<string, never>;
+  "auth.deviceLink.sasWait": Record<string, never>;
+  "auth.deviceLink.settingsLabel": Record<string, never>;
+  "auth.deviceLink.unreachable": Record<string, never>;
+  "auth.deviceLink.used": Record<string, never>;
+  "auth.failure.serverError": Record<string, never>;
+  "auth.failure.tooManyRequests": Record<string, never>;
+  "auth.failure.unreadableResponse": Record<string, never>;
+  "auth.join.alreadyRedeemed": Record<string, never>;
+  "auth.join.cannotJoin": Record<string, never>;
+  "auth.join.exhausted": Record<string, never>;
+  "auth.join.expired": Record<string, never>;
+  "auth.join.guestPaused": Record<string, never>;
+  "auth.join.invalidCode": Record<string, never>;
+  "auth.join.notPermitted": Record<string, never>;
+  "auth.join.revoked": Record<string, never>;
+  "auth.join.unmapped": Record<string, never>;
+  "auth.join.unusable": Record<string, never>;
+  "auth.passwordRule.tooLong": { hangulBytes: string; maxBytes: string; maxHangul: string };
+  "auth.passwordRule.tooShort": { minChars: number };
+  "auth.signIn.invalidCredentials": Record<string, never>;
+  "auth.signIn.suspended": Record<string, never>;
+  "auth.signIn.unmapped": Record<string, never>;
+  "auth.signIn.workspaceIdFormat": Record<string, never>;
   "blocked.addMemberLater.offline": Record<string, never>;
   "blocked.addMemberLater.serverUnreachable": Record<string, never>;
   "blocked.aiKeysLead.offline": Record<string, never>;

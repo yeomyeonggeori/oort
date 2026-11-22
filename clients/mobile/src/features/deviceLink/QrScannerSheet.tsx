@@ -4,13 +4,14 @@ import {Modal, StyleSheet, View} from 'react-native';
 import {useSafeAreaInsets} from 'react-native-safe-area-context';
 
 import {
-  DEVICE_LINK_ADDRESS_FALLBACK_LABEL,
-  DEVICE_LINK_CAMERA_ERROR_COPY,
-  DEVICE_LINK_CAMERA_OPENING_COPY,
-  DEVICE_LINK_QR_INSTRUCTION,
-  DEVICE_LINK_QR_LABEL,
+  DEVICE_LINK_ADDRESS_FALLBACK_KEY,
+  DEVICE_LINK_CAMERA_ERROR_KEY,
+  DEVICE_LINK_CAMERA_OPENING_KEY,
+  DEVICE_LINK_QR_INSTRUCTION_KEY,
+  DEVICE_LINK_QR_KEY,
 } from '@momo/core/features/auth/deviceLinkModel';
 
+import {useFormatMessage} from '../../i18n/useFormatMessage';
 import {OutlineButton, ScreenHeader, Sentence} from '../../design/atoms';
 import {font, line, SAFE_GUTTER, space, type Palette} from '../../design/tokens';
 import {useStyles} from '../../design/theme';
@@ -23,6 +24,7 @@ export function QrScannerSheet({
   onScan: (data: string) => void;
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
+  const formatMessage = useFormatMessage();
   const insets = useSafeAreaInsets();
   const scanned = useRef(false);
   const [ready, setReady] = useState(false);
@@ -40,18 +42,18 @@ export function QrScannerSheet({
           {paddingTop: insets.top, paddingBottom: insets.bottom},
         ]}>
         <ScreenHeader
-          title={DEVICE_LINK_QR_LABEL}
+          title={formatMessage(DEVICE_LINK_QR_KEY)}
           onBack={onClose}
           backLabel="스캐너 닫기"
         />
-        <Sentence style={styles.instruction}>{DEVICE_LINK_QR_INSTRUCTION}</Sentence>
+        <Sentence style={styles.instruction}>{formatMessage(DEVICE_LINK_QR_INSTRUCTION_KEY)}</Sentence>
         {mountError ? (
           <View style={styles.errorBlock}>
             <Sentence style={styles.errorCopy} testID="qr-camera-error">
-              {DEVICE_LINK_CAMERA_ERROR_COPY}
+              {formatMessage(DEVICE_LINK_CAMERA_ERROR_KEY)}
             </Sentence>
             <OutlineButton
-              label={DEVICE_LINK_ADDRESS_FALLBACK_LABEL}
+              label={formatMessage(DEVICE_LINK_ADDRESS_FALLBACK_KEY)}
               onPress={onClose}
               testID="qr-camera-address-fallback"
             />
@@ -60,7 +62,7 @@ export function QrScannerSheet({
           <View style={styles.cameraWrap}>
             {!ready ? (
               <Sentence style={styles.opening} testID="qr-camera-opening">
-                {DEVICE_LINK_CAMERA_OPENING_COPY}
+                {formatMessage(DEVICE_LINK_CAMERA_OPENING_KEY)}
               </Sentence>
             ) : null}
             <CameraView
