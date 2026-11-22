@@ -478,6 +478,29 @@ mod tests {
         }
     }
 
+    /// ADR-0222 원장-1 (#6066): a signed work host is not a person and reaches no work-item
+    /// route, with any verb.
+    #[test]
+    fn a_signed_host_cannot_reach_work_items() {
+        let ws = Uuid::from_u128(1);
+        for path in [
+            format!("/v1/workspaces/{ws}/work-items"),
+            format!("/v1/workspaces/{ws}/work-items/1"),
+            format!("/v1/workspaces/{ws}/work-items/1/close"),
+            format!("/v1/workspaces/{ws}/work-items/1/assignee"),
+        ] {
+            for method in [
+                Method::GET,
+                Method::POST,
+                Method::PUT,
+                Method::PATCH,
+                Method::DELETE,
+            ] {
+                assert!(!is_allowed_signed_path(&method, &path), "{method} {path}");
+            }
+        }
+    }
+
     #[test]
     fn signed_allow_list_covers_the_ported_workd_loop_and_the_method_is_part_of_the_rule() {
         let ws = Uuid::from_u128(1);
