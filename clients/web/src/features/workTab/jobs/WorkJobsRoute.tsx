@@ -660,7 +660,7 @@ export function WorkJobsRoute() {
               {/* 열 머리는 목록 위에 붙는다(r5 M2): 굴려 내려가 있어도 「새 요청 n · 보기」가 보인다. 단추는 머리 줄 안에 겹쳐 서서 줄
                   높이를 바꾸지 않고, 수는 조용히 낭독한다(`role="status"`). */}
               <div
-                className="work-jobs-row sticky top-0 z-10 border-b border-line bg-pane px-3 py-2 text-timestamp font-semibold text-ink-muted"
+                className="work-jobs-row sticky top-0 layer-content-float border-b border-line bg-pane px-3 py-2 text-timestamp font-semibold text-ink-muted"
                 data-testid="work-jobs-head"
               >
                 <span aria-hidden>{WORK_JOBS_COPY.colTask}</span>
