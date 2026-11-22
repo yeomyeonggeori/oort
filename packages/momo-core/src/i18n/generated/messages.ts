@@ -408,9 +408,11 @@ export const messageKeys = [
   "desktop.tray.stateBlocked",
   "desktop.tray.stateWorking",
   "desktop.workJobs.approvalHintInList",
+  "desktop.workJobs.newAsksCount",
   "desktop.workJobs.openToAnswer",
   "desktop.workJobs.reportedTitle",
   "desktop.workJobs.revealNewAsks",
+  "desktop.workJobs.sectionWithNewAsks",
   "desktop.workJobs.settledElsewhere",
   "desktop.workJobs.stateAwaitingApproval",
   "desktop.workJobs.tagApproval",
@@ -2351,12 +2353,20 @@ export const argumentSpecs = {
   "desktop.tray.stateBlocked": {},
   "desktop.tray.stateWorking": {},
   "desktop.workJobs.approvalHintInList": {},
+  "desktop.workJobs.newAsksCount": {
+    "count": "string"
+  },
   "desktop.workJobs.openToAnswer": {},
   "desktop.workJobs.reportedTitle": {
     "summary": "string"
   },
   "desktop.workJobs.revealNewAsks": {
     "count": "string"
+  },
+  "desktop.workJobs.sectionWithNewAsks": {
+    "count": "string",
+    "pending": "string",
+    "section": "string"
   },
   "desktop.workJobs.settledElsewhere": {},
   "desktop.workJobs.stateAwaitingApproval": {},
@@ -4690,9 +4700,11 @@ export interface MessageArgs {
   "desktop.tray.stateBlocked": Record<string, never>;
   "desktop.tray.stateWorking": Record<string, never>;
   "desktop.workJobs.approvalHintInList": Record<string, never>;
+  "desktop.workJobs.newAsksCount": { count: string };
   "desktop.workJobs.openToAnswer": Record<string, never>;
   "desktop.workJobs.reportedTitle": { summary: string };
   "desktop.workJobs.revealNewAsks": { count: string };
+  "desktop.workJobs.sectionWithNewAsks": { count: string; pending: string; section: string };
   "desktop.workJobs.settledElsewhere": Record<string, never>;
   "desktop.workJobs.stateAwaitingApproval": Record<string, never>;
   "desktop.workJobs.tagApproval": Record<string, never>;

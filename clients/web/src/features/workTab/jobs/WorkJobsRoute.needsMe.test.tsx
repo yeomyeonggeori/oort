@@ -2,7 +2,7 @@
 
 import { act, type ReactNode } from "react";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { QueryClient, QueryClientProvider, onlineManager } from "@tanstack/react-query";
 import { Link, MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError, type Approval, type SharedWorkSession } from "@momo/core/lib/api";
@@ -1248,5 +1248,163 @@ describe("다른 승인의 문장은 이 단추 위에 서지 않는다 (#5640 �
     } finally {
       stop();
     }
+  });
+});
+
+describe("첫 그림 기다림은 한 번뿐 · 필터를 갈아탈 땐 캐시로 · 표 바닥은 폭이 바뀌면 다시 (#5738 검수 r5)", () => {
+  const Rn = (n: number) => `00000000-0000-7000-8000-0000000000c${n}`;
+  const An = (n: number) => `00000000-0000-7000-8000-0000000000f${n}`;
+  const runOf = (n: number) =>
+    runRow({ sessionId: Rn(n), runId: Rn(n), requestedBy: DOHYUN, owner: AGENT, label: `에이전트 작업 ${n}`, phase: "awaiting_approval", trigger: "mention" });
+  const rowCount = () => screen.queryAllByTestId("work-job-row").length;
+  const revealShown = () => screen.queryByTestId("work-jobs-reveal-new") !== null;
+  const newClient = () => new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: 30_000 } } });
+
+  it("원장 첫 읽기가 실패한 뒤 다시 읽어도(계속 실패) 표가 뼈대로 돌아가지 않고, 그 사이 온 새 권한 요청은 머리의 수로 남는다 (r5 H1 P1)", async () => {
+    board(new Set());
+    let slow = 0;
+    api.fetchApprovals.mockImplementation(async () => {
+      if (slow > 0) await sleepMs(slow);
+      throw new ApiError(500, "ledger down");
+    });
+    const client = newClient();
+    render(mount("/work", client));
+    await waitFor(() => expect(rowCount()).toBe(2), { timeout: 5000 });
+    board(new Set([macSession.sessionId]));
+    await act(async () => {
+      await client.refetchQueries({ predicate: (q) => JSON.stringify(q.queryKey).includes("jobs"), type: "active" });
+    });
+    await waitFor(() => expect(revealShown()).toBe(true), { timeout: 3000 });
+    slow = 200;
+    void client.refetchQueries({ queryKey: ["approvals"], type: "active" });
+    await sleepMs(60);
+    const during = rowCount();
+    await sleepMs(400);
+    expect({ during, reveal: revealShown(), needsMe: rowsIn("needsMe") }).toEqual({ during: 2, reveal: true, needsMe: [] });
+  });
+
+  it("끊긴 채 돌아와 캐시로 그린 뒤 이어져도 표가 뼈대로 돌아가지 않고, 떠난 사이 온 요청은 머리의 수다 (r5 H1 P2)", async () => {
+    board(new Set());
+    const client = newClient();
+    const first = render(mount("/work", client));
+    await screen.findAllByTestId("work-job-row");
+    first.unmount();
+    onlineManager.setOnline(false);
+    net.offline = true;
+    try {
+      const second = render(mount("/work", client));
+      await waitFor(() => expect(rowCount()).toBe(2), { timeout: 3000 });
+      api.fetchWorkJobs.mockImplementation(async () => {
+        await sleepMs(200);
+        return { sessions: [{ ...macSession, state: "waiting" as const }, macQuiet], nextCursor: null, mode: "jobs" };
+      });
+      net.offline = false;
+      await act(async () => {
+        onlineManager.setOnline(true);
+      });
+      second.rerender(mount("/work", client));
+      await sleepMs(60);
+      const during = rowCount();
+      await waitFor(() => expect(revealShown()).toBe(true), { timeout: 3000 });
+      expect({ during, needsMe: rowsIn("needsMe") }).toEqual({ during: 2, needsMe: [] });
+    } finally {
+      onlineManager.setOnline(true);
+    }
+  });
+
+  it("「내 작업 ↔ 팀 전체」를 갈아탈 때는(둘 다 캐시에 있음) 새 목록을 기다리지 않고 캐시로 바로 그린다 (r5 M1 P3)", async () => {
+    board(new Set());
+    render(mount("/work", newClient()));
+    await screen.findAllByTestId("work-job-row");
+    fireEvent.click(screen.getByTestId("work-jobs-filter-team"));
+    await waitFor(() => expect(rowCount()).toBe(3), { timeout: 3000 });
+    const impl = api.fetchWorkJobs.getMockImplementation()!;
+    api.fetchWorkJobs.mockImplementation(async (...args: unknown[]) => {
+      await sleepMs(200);
+      return (impl as (...a: unknown[]) => unknown)(...args);
+    });
+    fireEvent.click(screen.getByTestId("work-jobs-filter-mine"));
+    await sleepMs(60);
+    const mineDuring = rowCount();
+    await waitFor(() => expect(rowCount()).toBe(2), { timeout: 3000 });
+    fireEvent.click(screen.getByTestId("work-jobs-filter-team"));
+    await sleepMs(60);
+    const teamDuring = rowCount();
+    expect({ mineDuring, teamDuring }).toEqual({ mineDuring: 2, teamDuring: 3 });
+  });
+
+  it("원장 첫 읽기가 실패했다 되살아나도 표가 뼈대로 돌아가지 않고, 승인·거부 단추가 「보기」 없이 서지 않으며 선 직후 누름도 나가지 않는다 (r5 H1 P4)", async () => {
+    const runs = [runOf(5), runOf(6)];
+    board(new Set(), { mine: runs });
+    let ledgerOk = false;
+    let slow = 0;
+    api.fetchApprovals.mockImplementation(async () => {
+      if (slow > 0) await sleepMs(slow);
+      if (!ledgerOk) throw new ApiError(500, "ledger down");
+      return [approval({ id: An(5), runId: Rn(5) }), approval({ id: An(6), runId: Rn(6) })];
+    });
+    api.authedResponse.mockImplementation(async () => httpResponse(200, { status: "approved", decided_by: ME, decided_at_ms: Date.now() }));
+    const client = newClient();
+    render(mount("/work", client));
+    await waitFor(() => expect(rowCount()).toBe(4), { timeout: 5000 });
+    ledgerOk = true;
+    slow = 200;
+    void client.refetchQueries({ queryKey: ["approvals"], type: "active" });
+    await sleepMs(60);
+    const during = rowCount();
+    await waitFor(() => expect(revealShown()).toBe(true), { timeout: 5000 });
+    const buttons = document.querySelectorAll('[data-section="needsMe"] [data-decision]').length;
+    const approve = document.querySelector<HTMLElement>('[data-testid="work-job-approval-approve"]');
+    if (approve) {
+      fireEvent.pointerDown(approve);
+      fireEvent.click(approve, { detail: 1 });
+    }
+    await sleepMs(150);
+    expect({ during, buttons, sent: decisionCalls().length }).toEqual({ during: 4, buttons: 0, sent: 0 });
+  });
+
+  it("목록 안쪽 폭이 바뀌면(스크롤 막대 · 서랍) 결정 단추를 1초 막고, 표 바닥은 그 폭에서 다시 잰다 (r5 M3 · L7)", async () => {
+    const box = { innerWidth: 1000, tableWidth: 980, tableHeight: 500 };
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
+      const rect = (left: number, top: number, width: number, height: number) =>
+        ({ left, top, right: left + width, bottom: top + height, x: left, y: top, width, height, toJSON: () => ({}) }) as DOMRect;
+      if (this.hasAttribute("data-team-board-list")) return rect(0, 100, 1000, 700);
+      if (this.dataset.testid === "work-jobs-table") return rect(0, 100, box.tableWidth, box.tableHeight);
+      return rect(0, 0, 0, 0);
+    });
+    const runs = [runOf(3), runOf(4)];
+    board(new Set(), { mine: runs });
+    api.fetchApprovals.mockResolvedValue([approval({ id: An(3), runId: Rn(3) }), approval({ id: An(4), runId: Rn(4) })]);
+    api.authedResponse.mockImplementation(async () => httpResponse(200, { status: "approved", decided_by: ME, decided_at_ms: Date.now() }));
+    const client = newClient();
+    render(mount("/work", client));
+    await waitFor(() => expect(rowsIn("needsMe")).toEqual([Rn(3), Rn(4)]), { timeout: 3000 });
+    const list = screen.getByRole("region", { name: WORK_JOBS_COPY.listLabel });
+    Object.defineProperty(list, "clientWidth", { configurable: true, get: () => box.innerWidth });
+    const table = screen.getByTestId("work-jobs-table");
+    await act(async () => {
+      await client.invalidateQueries();
+    });
+    expect(table.style.minHeight).toBe("500px");
+    // 아래 줄이 빠져 내용이 줄어도 바닥은 그대로(아래 누름이 다시 그리게 한다).
+    box.tableHeight = 400;
+    // 공간을 차지하는 스크롤 막대가 서서 안쪽 폭이 줄었다(상자는 그대로): 결정 단추를 막는다.
+    box.innerWidth = 985;
+    const firstSlot = () =>
+      within(screen.getAllByTestId("work-jobs-section").find((s) => s.dataset.section === "needsMe")!).getAllByTestId("work-job")[0]!;
+    const reject = within(firstSlot()).getByTestId("work-job-approval-reject");
+    fireEvent.pointerDown(reject);
+    fireEvent.click(reject, { detail: 1 });
+    await sleepMs(50);
+    expect(decisionCalls()).toHaveLength(0);
+    expect(firstSlot().hasAttribute("data-arrival-guard")).toBe(true);
+    expect(table.style.minHeight).toBe("500px");
+    // 서랍을 닫아 표가 넓어지고 줄이 낮아졌다: 바닥을 놓고 새 폭에서 다시 잰다(빈 꼬리 0).
+    box.tableWidth = 1200;
+    box.tableHeight = 420;
+    // 막기가 풀리며 다시 그린다(jsdom에는 ResizeObserver가 없어 그림마다 잰다).
+    await sleepMs(1100);
+    expect(firstSlot().hasAttribute("data-arrival-guard")).toBe(false);
+    expect(table.style.minHeight).toBe("420px");
   });
 });

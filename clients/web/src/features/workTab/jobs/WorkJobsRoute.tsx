@@ -224,10 +224,17 @@ export function WorkJobsRoute() {
   // 새 요청은 줄을 세우지 않는다(#5738 수리 4회차): 구간이 처음 선 뒤(목록과 승인 원장이 한 번씩 답한 뒤) 새로 묻는 일은 칸이 되지 않고
   // 머리의 「새 요청 n · 보기」로만 센다. 「보기」를 누르면 그때까지 온 것이 맨 아래 칸으로 선다. 그동안 그 줄은 제 구간(「지금」)에 단추
   // 없이 남는다. 첫 그림 · 「내 작업/팀 전체」를 갈아탄 첫 그림은 지금 묻는 일을 모두 칸으로 세운다.
-  // 첫 그림 = 이 방문의 첫 새 목록(캐시의 낡은 목록이 아니라 — 돌아온 사이 온 요청이 「새 요청」으로 밀리지 않게, 끊겼으면 캐시 그대로)
-  // + 「내 작업」이면 승인 원장의 첫 답.
+  // 첫 그림 = 목록 + 「내 작업」이면 승인 원장의 첫 답. 「작업」에 들어온 그 필터(「내 작업」)는 이 방문의 첫 새 목록까지 기다린다(캐시의
+  // 낡은 목록이 아니라 — 돌아온 사이 온 요청이 「새 요청」으로 밀리지 않게, 끊겼으면 캐시 그대로). 필터를 갈아탈 때 · 「팀 전체」는 캐시로 바로.
+  // 기다림은 이 방문 · 이 필터에서 **한 번뿐**이다(r5 H1): 한 번 그린 뒤에는 원장이 실패했다 되살아나도 · 끊겼다 이어져도 표를 뼈대로
+  // 돌리지 않고, 그 뒤에 온 목록 · 원장 답은 보통 갱신이라 새 요청은 머리의 수로 센다.
   const hasData = list.data !== undefined;
-  const seeding = !hasData || (!list.isFetchedAfterMount && !offline) || (filter === "mine" && !decisions.ledgerSettled);
+  const entryScopeRef = useRef(scope);
+  const drawnScopesRef = useRef<Set<string>>(new Set());
+  const waitFresh = filter === "mine" && scope === entryScopeRef.current && !list.isFetchedAfterMount && !offline;
+  const seeding =
+    !drawnScopesRef.current.has(scope) && (!hasData || waitFresh || (filter === "mine" && !decisions.ledgerSettled));
+  if (!seeding) drawnScopesRef.current.add(scope);
   const [revealTick, setRevealTick] = useState(0);
   const slotsRef = useRef<{ scope: string; slots: Slot[]; seeded: boolean; reveal: number }>({
     scope,
@@ -458,7 +465,10 @@ export function WorkJobsRoute() {
     const first = slots.find((slot) => !before.has(slot.key));
     if (first === undefined) return;
     setActiveKey(first.key);
-    rowRefs.current.get(first.key)?.focus({ preventScroll: true });
+    const el = rowRefs.current.get(first.key);
+    el?.focus({ preventScroll: true });
+    // 칸이 많으면 새 칸이 화면 밖에 선다: 보이게만 맞춘다(사람이 누른 「보기」의 결과다).
+    el?.scrollIntoView?.({ block: "nearest" });
   }, [slots]);
   const rovingKey =
     activeKey !== null && orderedKeys.includes(activeKey) ? activeKey : (orderedKeys[0] ?? null);
@@ -647,44 +657,55 @@ export function WorkJobsRoute() {
               <p className="sr-only" role="status" data-testid="work-jobs-decision-note">
                 {decisionText}
               </p>
+              {/* 열 머리는 목록 위에 붙는다(r5 M2): 굴려 내려가 있어도 「새 요청 n · 보기」가 보인다. 단추는 머리 줄 안에 겹쳐 서서 줄
+                  높이를 바꾸지 않고, 수는 조용히 낭독한다(`role="status"`). */}
               <div
-                aria-hidden
-                className="work-jobs-row border-b border-line px-3 py-2 text-timestamp font-semibold text-ink-muted"
+                className="work-jobs-row sticky top-0 z-10 border-b border-line bg-pane px-3 py-2 text-timestamp font-semibold text-ink-muted"
+                data-testid="work-jobs-head"
               >
-                <span>{WORK_JOBS_COPY.colTask}</span>
-                <span data-col="result">{WORK_JOBS_COPY.colResult}</span>
-                <span>{WORK_JOBS_COPY.colState}</span>
-                <span data-col="duration">{WORK_JOBS_COPY.colDuration}</span>
-                <span data-col="channel">{WORK_JOBS_COPY.colChannel}</span>
+                <span aria-hidden>{WORK_JOBS_COPY.colTask}</span>
+                <span aria-hidden data-col="result">{WORK_JOBS_COPY.colResult}</span>
+                <span aria-hidden>{WORK_JOBS_COPY.colState}</span>
+                <span aria-hidden data-col="duration">{WORK_JOBS_COPY.colDuration}</span>
+                <span aria-hidden data-col="channel">{WORK_JOBS_COPY.colChannel}</span>
+                {pending > 0 && (
+                  <span className="absolute inset-y-0 end-1 flex items-center">
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="ghost"
+                      className="tap-target"
+                      onClick={reveal}
+                      data-testid="work-jobs-reveal-new"
+                    >
+                      {formatMessage("desktop.workJobs.revealNewAsks", { count: String(pending) })}
+                    </Button>
+                  </span>
+                )}
               </div>
+              <p className="sr-only" role="status" data-testid="work-jobs-new-asks-status">
+                {pending > 0 ? formatMessage("desktop.workJobs.newAsksCount", { count: String(pending) }) : ""}
+              </p>
               {sections.map((section) => (
                 <section
                   key={section.key}
-                  aria-label={`${section.label} ${sectionCount(section)}개`}
+                  aria-label={
+                    section.slots && pending > 0
+                      ? formatMessage("desktop.workJobs.sectionWithNewAsks", {
+                          section: section.label,
+                          count: String(sectionCount(section)),
+                          pending: String(pending),
+                        })
+                      : `${section.label} ${sectionCount(section)}개`
+                  }
                   data-testid="work-jobs-section"
                   data-section={section.key}
                 >
-                  <h2 className="relative px-3 pt-3 pb-1 text-meta font-semibold text-ink-muted">
+                  <h2 className="px-3 pt-3 pb-1 text-meta font-semibold text-ink-muted">
                     {section.label}{" "}
                     <span data-numeric className="font-mono font-normal" data-testid="work-jobs-section-count">
                       {sectionCount(section)}
                     </span>
-                    {/* 새 요청(#5738 수리 4회차): 머리 줄 안에 겹쳐 서서(줄 높이를 바꾸지 않는다) 칸을 세우지 않고 수만 말한다. */}
-                    {section.slots && pending > 0 && (
-                      // 글줄 높이의 그릇이 글줄(위 여백 다음)에 서고, 단추(포인터 28 · 폰 폭 44)는 그 가운데에 넘쳐 선다.
-                      <span className="absolute end-1 top-3 flex h-[var(--text-meta--line-height)] items-center">
-                        <Button
-                          type="button"
-                          size="sm"
-                          variant="ghost"
-                          className="tap-target"
-                          onClick={reveal}
-                          data-testid="work-jobs-reveal-new"
-                        >
-                          {formatMessage("desktop.workJobs.revealNewAsks", { count: String(pending) })}
-                        </Button>
-                      </span>
-                    )}
                   </h2>
                   <ul className="flex flex-col">
                     {section.slots
@@ -990,13 +1011,21 @@ function useLayoutGuard(listRef: RefObject<HTMLDivElement | null>, scope: string
  * 않는다), 빈 자리는 표 맨 아래에 남는다. 「내 작업/팀 전체」를 갈아타거나 표가 새로 서면 놓는다.
  */
 function useNoShrinkTable(scope: string) {
-  const floorRef = useRef<{ scope: string; height: number }>({ scope, height: 0 });
+  const floorRef = useRef<{ scope: string; height: number; width: number }>({ scope, height: 0, width: 0 });
   const tableRef = useRef<HTMLDivElement | null>(null);
   const sizesRef = useRef<ResizeObserver | null>(null);
   const fit = useCallback(() => {
     const table = tableRef.current;
     if (table === null) return;
-    const height = table.getBoundingClientRect().height;
+    let { height, width } = table.getBoundingClientRect();
+    // 폭이 바뀌면(서랍 · 창 · 스크롤 막대) 줄이 다시 감겨 높이가 달라진다: 바닥을 놓고 그 폭에서 다시 잰다(r5 M3). 그때는 목록 상자
+    // 막기가 이미 걸려 있다.
+    if (Math.abs(width - floorRef.current.width) > 1) {
+      floorRef.current.width = width;
+      floorRef.current.height = 0;
+      table.style.minHeight = "";
+      ({ height, width } = table.getBoundingClientRect());
+    }
     if (height > floorRef.current.height) {
       floorRef.current.height = height;
       table.style.minHeight = `${height}px`;
@@ -1009,6 +1038,7 @@ function useNoShrinkTable(scope: string) {
       sizesRef.current = null;
       tableRef.current = el;
       floorRef.current.height = 0;
+      floorRef.current.width = 0;
       if (el !== null && typeof ResizeObserver !== "undefined") {
         sizesRef.current = new ResizeObserver(fit);
         sizesRef.current.observe(el);
@@ -1018,7 +1048,7 @@ function useNoShrinkTable(scope: string) {
   );
   useLayoutEffect(() => {
     if (floorRef.current.scope !== scope) {
-      floorRef.current = { scope, height: 0 };
+      floorRef.current = { scope, height: 0, width: 0 };
       if (tableRef.current !== null) tableRef.current.style.minHeight = "";
     }
     fit();
