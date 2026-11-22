@@ -198,7 +198,7 @@ function approval(over: Partial<Approval>): Approval {
 const sectionKeys = () => screen.getAllByTestId("work-jobs-section").map((s) => s.dataset.section);
 const rowsIn = (key: string) => {
   const section = screen.getAllByTestId("work-jobs-section").find((s) => s.dataset.section === key);
-  return section ? within(section).getAllByTestId("work-job-row").map((r) => r.dataset.jobId) : [];
+  return section ? within(section).queryAllByTestId("work-job-row").map((r) => r.dataset.jobId) : [];
 };
 
 beforeEach(async () => {
@@ -400,7 +400,7 @@ describe("갱신: 권한 요청·결정이 실시간으로 오면 다시 읽는�
     },
   });
 
-  it("목록에 있는 세션의 `approval.requested`가 오면 다시 읽고 줄이 「응답 필요」로 옮긴다. 글 조각(`agent.partial`)과 목록 밖 세션은 읽지 않는다", async () => {
+  it("목록에 있는 세션의 `approval.requested`가 오면 다시 읽는다 — 구간이 선 뒤의 새 요청은 머리의 「새 요청 1 · 보기」로만 서고, 누르면 「응답 필요」 칸이 된다. 글 조각(`agent.partial`)과 목록 밖 세션은 읽지 않는다", async () => {
     board(new Set());
     render(mount());
     await screen.findAllByTestId("work-job-row");
@@ -417,7 +417,14 @@ describe("갱신: 권한 요청·결정이 실시간으로 오면 다시 읽는�
     act(() => {
       for (const h of subscribed) h.onAcpEvent(frame("approval.requested", macSession.sessionId.toUpperCase()));
     });
+    // 새 요청은 줄을 세우지 않는다(#5738 수리 4회차): 그 줄은 「지금」에 남고 머리에 수만 선다.
+    const revealNew = await screen.findByTestId("work-jobs-reveal-new");
+    expect(revealNew.textContent).toBe("새 요청 1 · 보기");
+    expect(rowsIn("needsMe")).toEqual([]);
+    expect(rowsIn("now")).toContain(macSession.sessionId);
+    fireEvent.click(revealNew);
     await waitFor(() => expect(rowsIn("needsMe")).toEqual([macSession.sessionId]));
+    expect(screen.queryByTestId("work-jobs-reveal-new")).toBeNull();
     // 결정이 오면 다시 읽는다. 화면에 떠 있는 동안 그 칸은 자리를 지키고 결과 줄이 된다(#5738) — 「응답 필요」 수는 0.
     board(new Set());
     act(() => {
@@ -431,7 +438,7 @@ describe("갱신: 권한 요청·결정이 실시간으로 오면 다시 읽는�
     expect(screen.getAllByTestId("work-jobs-section-count")[0]!.textContent).toBe("0");
   });
 
-  it("줄이 「지금」에서 「응답 필요」로 옮겨도 그 줄의 캐럿을 잃지 않는다", async () => {
+  it("새 요청이 와도 그 줄은 「지금」에 남아 캐럿이 그대로이고, 「보기」를 누르면 캐럿은 「응답 필요」의 새 칸으로 간다", async () => {
     board(new Set());
     render(mount());
     await screen.findAllByTestId("work-job-row");
@@ -443,9 +450,12 @@ describe("갱신: 권한 요청·결정이 실시간으로 오면 다시 읽는�
     act(() => {
       for (const h of subscribed) h.onAcpEvent(frame("approval.requested", macSession.sessionId));
     });
+    const revealNew = await screen.findByTestId("work-jobs-reveal-new");
+    expect(document.activeElement).toBe(before);
+    fireEvent.click(revealNew);
     await waitFor(() => expect(rowsIn("needsMe")).toEqual([macSession.sessionId]));
-    const after = screen.getAllByTestId("work-job-row").find((r) => r.dataset.jobId === macSession.sessionId)!;
-    expect(after).not.toBe(before);
+    const after = within(screen.getAllByTestId("work-jobs-section").find((s) => s.dataset.section === "needsMe")!)
+      .getAllByTestId("work-job-row")[0]!;
     expect(document.activeElement).toBe(after);
   });
 });
@@ -776,6 +786,8 @@ describe("「응답 필요」의 칸은 화면에 떠 있는 동안 자리를 �
       li.querySelector<HTMLElement>(`[data-testid="work-job-approval-${which}"]`) ??
       li.querySelector<HTMLElement>('[data-testid="work-job-control-box"]') ??
       li;
+    // 포인터의 결정은 누름이 시작된 그 단추에서만이다(수리 4회차): 누름의 시작과 끝을 같은 단추에서.
+    fireEvent.pointerDown(target);
     fireEvent.click(target, { detail: 1 });
   };
   const resultIn = (n: number) => within(needsMeSlot(n)).queryAllByTestId("work-job-approval-settled")[0]?.textContent ?? null;
@@ -892,7 +904,7 @@ describe("「응답 필요」의 칸은 화면에 떠 있는 동안 자리를 �
     15_000
   );
 
-  it("내가 일으키지 않은 변화: 위 칸이 다른 곳에서 결정돼도 그 칸은 「이제 응답하지 않아도 돼요」 결과 줄로 남고, 새 요청은 맨 아래에 붙고, 서버가 순서를 바꿔도 칸은 그대로다", async () => {
+  it("내가 일으키지 않은 변화: 위 칸이 다른 곳에서 결정돼도 그 칸은 「이제 응답하지 않아도 돼요」 결과 줄로 남고, 새 요청은 칸을 세우지 않고 머리의 수로만 서며(「지금」의 그 줄에 결정 단추 없음, 「보기」를 누르면 맨 아래 칸), 서버가 순서를 바꿔도 칸은 그대로다", async () => {
     const three = [runOf(1), runOf(2), runOf(3)];
     let asks = [1, 2].map((n) => approval({ id: A(n), runId: R(n) }));
     let order = [runOf(1), runOf(2), runOf(3)];
@@ -918,7 +930,13 @@ describe("「응답 필요」의 칸은 화면에 떠 있는 동안 자리를 �
     asks = [approval({ id: A(3), runId: R(3) }), ...asks];
     order = [runOf(3), runOf(1), runOf(2)];
     await reread();
-    expect(rowsIn("needsMe")).toEqual([R(1), R(2), R(3)]);
+    expect(rowsIn("needsMe")).toEqual([R(1), R(2)]);
+    expect(screen.getByTestId("work-jobs-reveal-new").textContent).toBe("새 요청 1 · 보기");
+    const nowSection = screen.getAllByTestId("work-jobs-section").find((s) => s.dataset.section === "now")!;
+    const pendingRow = within(nowSection).getAllByTestId("work-job").find((li) => li.querySelector(`[data-job-id="${R(3)}"]`))!;
+    expect(pendingRow.querySelector("[data-decision]")).toBeNull();
+    fireEvent.click(screen.getByTestId("work-jobs-reveal-new"));
+    await waitFor(() => expect(rowsIn("needsMe")).toEqual([R(1), R(2), R(3)]));
     // (다) 서버가 순서를 바꿨다.
     order = [runOf(2), runOf(3), runOf(1)];
     asks = [...asks].reverse();
@@ -948,13 +966,16 @@ describe("「응답 필요」의 칸은 화면에 떠 있는 동안 자리를 �
     expect(needsMeCount()).toBe(2);
   });
 
-  it("같은 run의 다음 승인은 새 요청이라 맨 아래 새 칸에 서고, 방금 결정한 칸은 그 자리의 결과 줄이다", async () => {
+  it("같은 run의 다음 승인은 새 요청이라 머리의 수로 서고(「보기」를 누르면 맨 아래 새 칸), 방금 결정한 칸은 그 자리의 결과 줄이다", async () => {
     board(new Set(), { mine: twoRuns });
     const second = approval({ id: A(9), runId: R(1) });
     serveDecisions(40, { approvals: [...twoApprovals, second] });
     render(mount());
     await waitFor(() => expect(rowsIn("needsMe")).toEqual([R(1), R(8)]), { timeout: 3000 });
     pressSlot(0);
+    const revealNew = await screen.findByTestId("work-jobs-reveal-new", {}, { timeout: 3000 });
+    expect(rowsIn("needsMe")).toEqual([R(1), R(8)]);
+    fireEvent.click(revealNew);
     await waitFor(() => expect(rowsIn("needsMe")).toEqual([R(1), R(8), R(1)]), { timeout: 3000 });
     expect(resultIn(0)).toBe(RECEIPT.approve);
     expect(resultIn(2)).toBeNull();
@@ -1012,222 +1033,102 @@ describe("「응답 필요」의 칸은 화면에 떠 있는 동안 자리를 �
     expect(needsMeSlot(0).querySelector("[data-decision]")).toBeNull();
   });
 
-  // ---- 둘째 겹(수리 1회차, 검수 H1·H2·M1): 밖에서 온 변화로 새로 서거나 옮겨진 결정 단추는 잠깐 포인터 누름을 받지 않는다 ----------------
+  // ---- 밖에서 온 변화(수리 4회차): 첫 그림은 원장을 기다림 · 목록 상자가 바뀌면 잠깐 막음 · 누름이 시작된 단추에서만 ----------------
 
-  /**
-   * 결정 단추에 화면 자리를 준다(jsdom에는 배치가 없다 — 그려지지 않은 0×0 단추는 막기가 세지 않는다): n번째 칸의 「거부」는 x 160,
-   * 「승인」은 x 260, y = 100 + 200n + `at.y`(목록 위에 띠가 서거나 사람이 굴리면 `at.y`가 바뀐다).
-   */
-  function placeControls(at: { y: number }) {
+  /** 목록 상자에 화면 자리를 준다(jsdom에는 배치가 없다): 목록 위에 띠가 서면 `box.top`이 내려가고 높이가 준다. */
+  function placeList(box: { top: number; height: number }) {
     vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
       const rect = (left: number, top: number, width: number, height: number) =>
         ({ left, top, right: left + width, bottom: top + height, x: left, y: top, width, height, toJSON: () => ({}) }) as DOMRect;
-      const which = this.getAttribute("data-decision");
-      const li = this.closest('[data-section="needsMe"] li');
-      if (which === null || li === null) return rect(0, 0, 0, 0);
-      const slot = [...li.parentElement!.children].indexOf(li);
-      return rect(which === "approve" ? 260 : 160, 100 + slot * 200 + at.y, 80, 44);
+      return this.hasAttribute("data-team-board-list") ? rect(0, box.top, 1000, box.height) : rect(0, 0, 0, 0);
     });
   }
   const guardedLook = (n: number) => needsMeSlot(n).hasAttribute("data-arrival-guard");
   const GUARD_PASSED_MS = 1100;
 
-  it("밖에서 새로 선 결정 단추(원장이 늦게 와 선 칸 · 맨 아래 새 요청)는 1초 동안 포인터 누름을 받지 않고 막힌 모양이며, 키보드는 받고, 풀린 뒤에는 받는다 — 그대로 선 단추는 막지 않는다", async () => {
-    placeControls({ y: 0 });
-    let asks = [approval({ id: A(1), runId: R(1) })];
-    api.fetchWorkJobs.mockImplementation(async () => ({ sessions: twoRuns, nextCursor: null, mode: "jobs" }));
-    api.fetchApprovals.mockImplementation(async () => asks);
-    api.authedResponse.mockImplementation(async (path: string) =>
-      String(path).endsWith("/decision") ? httpResponse(200, { status: "approved", decided_by: ME, decided_at_ms: Date.now() }) : httpResponse(404, {})
-    );
-    const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: 30_000 } } });
-    render(mount("/work", client));
-    // 원장이 목록보다 늦게 와 칸이 섰다(들어온 뒤 첫 그림이 아니다): 막 선 단추는 포인터 누름을 삼킨다.
-    await waitFor(() => expect(rowsIn("needsMe")).toEqual([R(1)]));
-    expect(guardedLook(0)).toBe(true);
-    pressSlot(0);
-    await sleepMs(50);
-    expect(decidedIds()).toEqual([]);
-    await sleepMs(GUARD_PASSED_MS);
-    expect(guardedLook(0)).toBe(false);
-    // 새 요청이 맨 아래에 섰다: 새 칸의 단추는 막히고, 그대로 선 위 칸의 단추는 막히지 않는다.
-    asks = [...asks, approval({ id: A(8), runId: R(8) })];
-    await act(async () => {
-      await client.invalidateQueries();
+  it("첫 그림은 승인 원장을 기다린다 — 원장이 목록보다 늦게 와도 칸이 목록 사이로 나중에 끼어들지 않고 한 번에 선다", async () => {
+    let releaseLedger: () => void = () => undefined;
+    const ledgerGate = new Promise<void>((resolve) => {
+      releaseLedger = resolve;
     });
+    api.fetchWorkJobs.mockImplementation(async () => ({ sessions: twoRuns, nextCursor: null, mode: "jobs" }));
+    api.fetchApprovals.mockImplementation(async () => {
+      await ledgerGate;
+      return twoApprovals;
+    });
+    render(mount());
+    await waitFor(() => expect(api.fetchWorkJobs).toHaveBeenCalled());
+    await sleepMs(150);
+    expect(screen.queryAllByTestId("work-job-row")).toEqual([]);
+    releaseLedger();
     await waitFor(() => expect(rowsIn("needsMe")).toEqual([R(1), R(8)]));
-    expect(guardedLook(1)).toBe(true);
+    expect(screen.queryByTestId("work-jobs-reveal-new")).toBeNull();
+  });
+
+  it("목록 상자가 옮겨지거나 크기가 바뀌면(목록 위 띠 · 셸의 띠 · 창) 「응답 필요」의 결정 단추는 1초 동안 포인터 결정을 받지 않고 흐리게 선다 — 키보드는 받고, 풀린 뒤에는 받는다", async () => {
+    const box = { top: 100, height: 700 };
+    placeList(box);
+    board(new Set(), { mine: twoRuns });
+    serveDecisions(20);
+    render(mount());
+    await waitFor(() => expect(rowsIn("needsMe")).toEqual([R(1), R(8)]), { timeout: 3000 });
     expect(guardedLook(0)).toBe(false);
-    pressSlot(1, "reject");
+    // 셸이 목록 위에 띠를 세웠다(이 화면은 다시 그리지 않는다): 누르는 순간 상자를 재어 막는다.
+    box.top = 145;
+    box.height = 655;
+    pressSlot(0, "reject");
     await sleepMs(50);
     expect(decidedIds()).toEqual([]);
-    pressSlot(0);
-    await waitFor(() => expect(decidedIds()).toEqual([A(1)]));
+    expect(guardedLook(0)).toBe(true);
+    expect(guardedLook(1)).toBe(true);
     // 키보드(Enter·Space)는 초점이 고른 단추라 막지 않는다.
     fireEvent.click(within(needsMeSlot(1)).getByTestId("work-job-approval-approve"), { detail: 0 });
-    await waitFor(() => expect(decidedIds()).toEqual([A(1), A(8)]));
+    await waitFor(() => expect(decidedIds()).toEqual([A(8)]), { timeout: 3000 });
+    await sleepMs(GUARD_PASSED_MS);
+    expect(guardedLook(0)).toBe(false);
+    pressSlot(0, "reject");
+    await waitFor(() => expect(decidedIds()).toEqual([A(8), A(1)]), { timeout: 3000 });
   });
 
-  it("목록 위에 띠가 서서(이 화면이 다시 그리지 않는 셸의 띠도) 단추가 옮겨지면 막고 풀린 뒤에는 받는다 — 사람이 굴려 옮긴 단추는 굴림 사건이 오기 전에 눌러도 막지 않는다", async () => {
-    const at = { y: 0 };
-    placeControls(at);
-    board(new Set(), { mine: twoRuns });
-    serveDecisions(20);
+  it("포인터의 결정은 누름이 시작된 그 단추에서만이다 — 다른 단추 · 줄 · 목록 밖 띠에서 시작해 단추 위에서 뗀 누름, 시작 기록 없는 click, 막힌 동안 시작해 풀린 뒤 뗀 누름은 결정하지 않는다", async () => {
+    const box = { top: 100, height: 700 };
+    placeList(box);
+    // 앞 시험이 결정한 run(모듈 장부)에 기대지 않게 다른 run 둘로.
+    const runs = [runOf(3), runOf(4)];
+    board(new Set(), { mine: runs });
+    serveDecisions(20, { runs, approvals: [approval({ id: A(3), runId: R(3) }), approval({ id: A(4), runId: R(4) })] });
     render(mount());
-    await waitFor(() => expect(rowsIn("needsMe")).toEqual([R(1), R(8)]), { timeout: 3000 });
-    await sleepMs(GUARD_PASSED_MS);
-    // 셸이 목록 위에 띠를 세웠다: 이 화면은 다시 그리지 않고 문서의 DOM만 바뀐다 → 다음 프레임에 잰다.
-    const band = document.createElement("div");
-    at.y = 45;
-    act(() => {
-      document.body.prepend(band);
-    });
-    await sleepMs(60);
-    expect(guardedLook(0)).toBe(true);
-    pressSlot(0, "reject");
-    await sleepMs(50);
-    expect(decidedIds()).toEqual([]);
-    // 띠가 걷혔다(위로 올라옴): 다시 막는다.
-    at.y = 0;
-    act(() => {
-      band.remove();
-    });
-    await sleepMs(60);
-    pressSlot(0, "reject");
-    await sleepMs(50);
-    expect(decidedIds()).toEqual([]);
-    await sleepMs(GUARD_PASSED_MS);
-    pressSlot(0, "reject");
-    await waitFor(() => expect(decidedIds()).toEqual([A(1)]), { timeout: 3000 });
-    // 사람이 목록을 굴렸다(굴림 사건까지 옴): 옮겨진 단추를 막지 않는다.
-    const list = screen.getByRole("region", { name: WORK_JOBS_COPY.listLabel });
-    list.scrollTop = 100;
-    at.y = -100;
-    fireEvent.scroll(list);
-    expect(guardedLook(1)).toBe(false);
-    // 굴림 사건이 오기 전에(같은 프레임) 누른 것도 막지 않는다.
-    list.scrollTop = 150;
-    at.y = -150;
-    pressSlot(1);
-    await waitFor(() => expect(decidedIds()).toEqual([A(1), A(8)]), { timeout: 3000 });
-  });
-
-  it("누름의 시작과 끝 둘 다에서 본다 — 막힌 동안 시작한 누름은 풀린 뒤 떼도, 누르는 동안 줄이 옮겨져 다른 단추 위에서 뗀 누름도 삼킨다 (수리 2회차 H1)", async () => {
-    const at = { y: 0 };
-    placeControls(at);
-    board(new Set(), { mine: twoRuns });
-    serveDecisions(20);
-    render(mount());
-    await waitFor(() => expect(rowsIn("needsMe")).toEqual([R(1), R(8)]), { timeout: 3000 });
-    await sleepMs(GUARD_PASSED_MS);
+    await waitFor(() => expect(rowsIn("needsMe")).toEqual([R(3), R(4)]), { timeout: 3000 });
     const approve = (n: number) => within(needsMeSlot(n)).getByTestId("work-job-approval-approve");
     const reject = (n: number) => within(needsMeSlot(n)).getByTestId("work-job-approval-reject");
-    // 누르는 동안 줄이 옮겨져 다른 단추 위에서 뗌: 시작한 단추와 뗀 단추가 다르면 삼킨다(막힘 여부와 무관).
+    // 같은 줄의 다른 단추에서 시작 → 누르는 동안 옮겨진 「거부」 위에서 뗌.
     fireEvent.pointerDown(approve(0));
+    fireEvent.click(reject(0), { detail: 1 });
+    // 줄(단추가 아닌 곳)에서 시작.
+    fireEvent.pointerDown(needsMeSlot(0));
+    fireEvent.click(reject(0), { detail: 1 });
+    // 목록 밖(목록 위 띠)에 손가락을 댄 채 띠가 걷히고, 손 밑으로 온 단추 위에서 뗌.
+    const band = document.createElement("div");
+    document.body.prepend(band);
+    fireEvent.pointerDown(band);
+    band.remove();
+    fireEvent.click(reject(0), { detail: 1 });
+    // 시작 기록이 없는 포인터 click.
     fireEvent.click(reject(0), { detail: 1 });
     await sleepMs(80);
     expect(decidedIds()).toEqual([]);
-    // 띠가 서서 막힌 동안 누르기 시작 → 1초 넘게 붙들어 막힘이 풀린 뒤 뗌: 삼킨다(풀린 뒤 시작한 누름이 아니다).
-    at.y = 45;
-    const band = document.createElement("div");
-    act(() => {
-      document.body.prepend(band);
-    });
-    await sleepMs(60);
-    expect(guardedLook(0)).toBe(true);
+    // 상자가 바뀌어 막힌 동안 누르기 시작 → 1초 넘게 붙들어 풀린 뒤 뗌.
+    box.top = 145;
+    box.height = 655;
     fireEvent.pointerDown(reject(0));
     await sleepMs(GUARD_PASSED_MS);
     expect(guardedLook(0)).toBe(false);
     fireEvent.click(reject(0), { detail: 1 });
     await sleepMs(80);
     expect(decidedIds()).toEqual([]);
-    // 같은 자리를 이번에는 풀린 상태에서 시작해 뗌: 받는다.
-    fireEvent.pointerDown(reject(0));
-    fireEvent.click(reject(0), { detail: 1 });
-    await waitFor(() => expect(decidedIds()).toEqual([A(1)]), { timeout: 3000 });
-    band.remove();
-  });
-
-  it("굴리는 도중에 밖의 변화가 겹쳐도, 굴림 양을 뺀 남는 옮김이 1px를 넘으면 막는다 (수리 2회차 M1)", async () => {
-    const at = { y: 0 };
-    placeControls(at);
-    board(new Set(), { mine: twoRuns });
-    serveDecisions(20);
-    render(mount());
-    await waitFor(() => expect(rowsIn("needsMe")).toEqual([R(1), R(8)]), { timeout: 3000 });
-    await sleepMs(GUARD_PASSED_MS);
-    const list = screen.getByRole("region", { name: WORK_JOBS_COPY.listLabel });
-    // 사람이 50px 굴렸다(단추는 -50) — 같은 사이에 밖의 변화가 100px 밀었다(합쳐 +50): 굴림 사건 하나로 오지만 막는다.
-    list.scrollTop = 50;
-    at.y = 50;
-    fireEvent.scroll(list);
-    // 앞 시험에서 결정한 run이 남아 있을 수 있어(모듈 장부) 결정 단추가 서 있는 첫 칸을 본다.
-    const open = [0, 1].find((n) => needsMeSlot(n).querySelector("[data-decision]") !== null)!;
-    expect(guardedLook(open)).toBe(true);
-    pressSlot(open, "reject");
-    await sleepMs(50);
-    expect(decidedIds()).toEqual([]);
-  });
-
-  it("단추가 아닌 곳에서 시작한 누름도 시작 시각을 적는다 — 누르는 동안 손 밑으로 온 단추는 1초가 지난 뒤 떼도 삼킨다 (수리 3회차 H2)", async () => {
-    const at = { y: 0 };
-    placeControls(at);
-    board(new Set(), { mine: twoRuns });
-    serveDecisions(20);
-    render(mount());
-    await waitFor(() => expect(rowsIn("needsMe")).toEqual([R(1), R(8)]), { timeout: 3000 });
-    await sleepMs(GUARD_PASSED_MS);
-    const open = [0, 1].find((n) => needsMeSlot(n).querySelector("[data-decision]") !== null)!;
-    // 손가락을 단추가 아닌 곳(줄)에 대고 있는 동안 띠가 서서 단추가 손 밑으로 옮겨 온다. 1초 넘게 붙들었다 떼면 click이 그 단추에 떨어진다.
-    fireEvent.pointerDown(needsMeSlot(open));
-    at.y = 45;
-    const band = document.createElement("div");
-    act(() => {
-      document.body.prepend(band);
-    });
-    await sleepMs(GUARD_PASSED_MS);
-    expect(guardedLook(open)).toBe(false);
-    fireEvent.click(within(needsMeSlot(open)).getByTestId("work-job-approval-reject"), { detail: 1 });
-    await sleepMs(80);
-    expect(decidedIds()).toEqual([]);
-    // 새로 시작한 누름은 받는다.
-    pressSlot(open, "reject");
-    await waitFor(() => expect(decidedIds().length).toBe(1), { timeout: 3000 });
-    band.remove();
-  });
-
-  it("목록을 끝까지 내린 채 내용이 줄어 브라우저가 scrollTop을 스스로 줄인 만큼은 사람의 굴림이 아니다 — 내려온 단추는 막는다 (수리 3회차 H1)", async () => {
-    const at = { y: 0 };
-    placeControls(at);
-    board(new Set(), { mine: twoRuns });
-    serveDecisions(20);
-    render(mount());
-    await waitFor(() => expect(rowsIn("needsMe")).toEqual([R(1), R(8)]), { timeout: 3000 });
-    await sleepMs(GUARD_PASSED_MS);
-    const list = screen.getByRole("region", { name: WORK_JOBS_COPY.listLabel });
-    let scrollHeight = 1541;
-    Object.defineProperty(list, "scrollHeight", { configurable: true, get: () => scrollHeight });
-    Object.defineProperty(list, "clientHeight", { configurable: true, get: () => 1395 });
-    // 끝까지 내렸다(사람의 굴림 146px — 단추는 -146): 막지 않고 자리만 새로 적는다.
-    list.scrollTop = 146;
-    at.y = -146;
-    fireEvent.scroll(list);
-    const open = [0, 1].find((n) => needsMeSlot(n).querySelector("[data-decision]") !== null)!;
-    expect(guardedLook(open)).toBe(false);
-    // 아래쪽 줄이 빠져 내용이 55px 줄었다: 브라우저가 scrollTop을 끝(91)에 맞춰 스스로 줄이니 단추는 화면에서 +55px 내려온다. 사람이 굴린 것이 아니다.
-    scrollHeight = 1486;
-    list.scrollTop = 91;
-    at.y = -91;
-    const band = document.createElement("div");
-    act(() => {
-      document.body.prepend(band);
-    });
-    await sleepMs(60);
-    expect(guardedLook(open)).toBe(true);
-    pressSlot(open, "reject");
-    await sleepMs(50);
-    expect(decidedIds()).toEqual([]);
-    band.remove();
+    // 같은 단추에서 시작하고 끝난 누름은 받는다.
+    pressSlot(0, "reject");
+    await waitFor(() => expect(decidedIds()).toEqual([A(3)]), { timeout: 3000 });
   });
 });
 

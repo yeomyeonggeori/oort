@@ -2757,6 +2757,20 @@ export const catalog: MessageCatalog = {
       "value": "summary"
     }
   ],
+  "desktop.workJobs.revealNewAsks": [
+    {
+      "type": 0,
+      "value": "새 요청 "
+    },
+    {
+      "type": 1,
+      "value": "count"
+    },
+    {
+      "type": 0,
+      "value": " · 보기"
+    }
+  ],
   "desktop.workJobs.settledElsewhere": [
     {
       "type": 0,

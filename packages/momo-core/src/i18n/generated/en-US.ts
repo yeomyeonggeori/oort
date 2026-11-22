@@ -2971,6 +2971,16 @@ export const catalog: MessageCatalog = {
       "value": "summary"
     }
   ],
+  "desktop.workJobs.revealNewAsks": [
+    {
+      "type": 1,
+      "value": "count"
+    },
+    {
+      "type": 0,
+      "value": " new · Show"
+    }
+  ],
   "desktop.workJobs.settledElsewhere": [
     {
       "type": 0,
