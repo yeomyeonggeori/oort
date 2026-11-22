@@ -11878,6 +11878,58 @@ export const catalog: MessageCatalog = {
       "value": "note"
     }
   ],
+  "timeline.artifacts.commitTitle": [
+    {
+      "type": 0,
+      "value": "Commit"
+    }
+  ],
+  "timeline.artifacts.diffTitle": [
+    {
+      "type": 0,
+      "value": "Code change"
+    }
+  ],
+  "timeline.artifacts.pullRequestTitle": [
+    {
+      "type": 0,
+      "value": "Pull request"
+    }
+  ],
+  "timeline.artifacts.toolTitle": [
+    {
+      "type": 0,
+      "value": "Ran "
+    },
+    {
+      "type": 1,
+      "value": "tool"
+    }
+  ],
+  "timeline.artifacts.toolTitleWithObject": [
+    {
+      "type": 0,
+      "value": "Ran "
+    },
+    {
+      "type": 1,
+      "value": "tool"
+    },
+    {
+      "type": 0,
+      "value": ", "
+    },
+    {
+      "type": 1,
+      "value": "object"
+    }
+  ],
+  "timeline.artifacts.unnamedFile": [
+    {
+      "type": 0,
+      "value": "Unnamed file"
+    }
+  ],
   "timeline.cascade.noticeMulti": [
     {
       "type": 0,

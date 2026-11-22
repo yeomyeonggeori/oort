@@ -349,5 +349,11 @@
   "timeline.teamAi.delegateQuoted": "{mention} Please take the quoted request.",
   "timeline.agentInitiative.headTitle": "{title} · Suggested first",
   "timeline.agentInitiative.rationaleLabel": "Written by the agent",
-  "timeline.agentInitiative.rationaleDefault": "Reason"
+  "timeline.agentInitiative.rationaleDefault": "Reason",
+  "timeline.artifacts.diffTitle": "Code change",
+  "timeline.artifacts.commitTitle": "Commit",
+  "timeline.artifacts.pullRequestTitle": "Pull request",
+  "timeline.artifacts.toolTitle": "Ran {tool}",
+  "timeline.artifacts.toolTitleWithObject": "Ran {tool}, {object}",
+  "timeline.artifacts.unnamedFile": "Unnamed file"
 }

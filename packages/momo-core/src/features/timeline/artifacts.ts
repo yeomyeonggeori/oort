@@ -1,3 +1,5 @@
+import type { LocaleService } from "../../i18n/context";
+import type { MessageRef } from "../../i18n/keys";
 import type { Message } from "../../lib/api";
 import { hasRenderableBody } from "./bodySlot";
 
@@ -37,6 +39,35 @@ export type DiffLineKind =
   | "addition"
   | "deletion";
 
+/**
+ * 카드 제목. 보낸 쪽이 이름을 붙였으면 그 글이고(`text`), 아니면 이 빌드가 짓는 제목의 키와 값이다.
+ * 키는 화면이 지금 언어로 푼다(`artifactTitleText`).
+ */
+export type ArtifactTitle =
+  | { text: string }
+  | MessageRef<
+      | "timeline.artifacts.diffTitle"
+      | "timeline.artifacts.commitTitle"
+      | "timeline.artifacts.pullRequestTitle"
+      | "timeline.artifacts.toolTitle"
+      | "timeline.artifacts.toolTitleWithObject"
+    >;
+
+export function artifactTitleText(
+  formatMessage: LocaleService["formatMessage"],
+  title: ArtifactTitle
+): string {
+  return "text" in title ? title.text : formatMessage(title.key, title.values as never);
+}
+
+/** 이름을 알 수 없는 파일의 자리 낱말, 아니면 경로. */
+export function diffFilePathText(
+  formatMessage: LocaleService["formatMessage"],
+  file: Pick<DiffFile, "path" | "unnamed">
+): string {
+  return file.unnamed === true ? formatMessage("timeline.artifacts.unnamedFile") : file.path;
+}
+
 export interface DiffLine {
   id: number;
   kind: DiffLineKind;
@@ -46,6 +77,8 @@ export interface DiffLine {
 export interface DiffFile {
   id: number;
   path: string;
+  /** 파일 이름을 알 수 없었다. `path` 는 비어 있고 화면은 `diffFilePathText` 로 자리 낱말을 그린다. */
+  unnamed?: true;
   /** Full-file counts. Truncating the body never changes them. */
   additions: number;
   deletions: number;
@@ -60,7 +93,7 @@ export interface DiffFile {
 
 export interface DiffArtifact {
   kind: "diff";
-  title: string;
+  title: ArtifactTitle;
   /** Source-wide counts, honest even when `files` holds a truncated slice. */
   additions: number;
   deletions: number;
@@ -92,7 +125,7 @@ export interface DiffArtifact {
  */
 export interface OversizedArtifact {
   kind: "oversized";
-  title: string;
+  title: ArtifactTitle;
   /** Lines in the source patch. */
   totalLineCount: number;
   /** Bytes in the source patch, as the ceiling measured them. */
@@ -103,7 +136,7 @@ export interface OversizedArtifact {
 
 export interface LinkArtifact {
   kind: "commit" | "pr";
-  title: string;
+  title: ArtifactTitle;
   branch?: string;
   status?: string;
   repository?: string;
@@ -300,7 +333,7 @@ function normalizedPath(raw: string | undefined): string | undefined {
   }
   if (path.startsWith("a/") || path.startsWith("b/")) path = path.slice(2);
   if (path.startsWith("/") && path !== "/dev/null") {
-    path = path.split("/").at(-1) ?? "이름 없는 파일";
+    path = path.split("/").at(-1) ?? "";
   }
   return path === "/dev/null" ? undefined : path;
 }
@@ -341,14 +374,30 @@ interface PendingFile {
  * The budgets add up to less than the 200 character title ceiling, so a
  * composed title is never dropped by the clamp below.
  */
-function toolActionTitle(props: Record<string, unknown> | undefined) {
+const DIFF_TITLE = { key: "timeline.artifacts.diffTitle" } as const satisfies ArtifactTitle;
+
+function titleText(text: string | undefined): ArtifactTitle | undefined {
+  return text === undefined ? undefined : { text };
+}
+
+/** 보낸 쪽이 이름을 붙인 제목만 길이를 자른다. 이 빌드가 짓는 제목은 이미 상한 안이다. */
+function clampedTitle(title: ArtifactTitle | undefined): ArtifactTitle | undefined {
+  if (title === undefined) return undefined;
+  return "text" in title ? titleText(clamped(title.text, 200)) : title;
+}
+
+function toolActionTitle(
+  props: Record<string, unknown> | undefined
+): ArtifactTitle | undefined {
   const tool = clamped(
     propString(props, "tool_name") ?? propString(props, "tool"),
     80
   );
   if (tool === undefined) return undefined;
   const object = clamped(propString(props, "label"), 100);
-  return object === undefined ? `${tool} 실행` : `${tool} 실행, ${object}`;
+  return object === undefined
+    ? { key: "timeline.artifacts.toolTitle", values: { tool } }
+    : { key: "timeline.artifacts.toolTitleWithObject", values: { tool, object } };
 }
 
 /**
@@ -357,14 +406,14 @@ function toolActionTitle(props: Record<string, unknown> | undefined) {
  */
 function diffArtifact(
   raw: string,
-  rawTitle: string | undefined
+  rawTitle: ArtifactTitle | undefined
 ): DiffArtifact | OversizedArtifact | null {
   const source = stripSingleDiffFence(raw);
   const byteCount = byteLength(source);
   if (byteCount > MAX_SOURCE_BYTES) {
     return {
       kind: "oversized",
-      title: clamped(rawTitle, 200) ?? "코드 변경",
+      title: clampedTitle(rawTitle) ?? DIFF_TITLE,
       totalLineCount: source.split("\n").length,
       byteCount,
       rawPatch: source,
@@ -373,7 +422,7 @@ function diffArtifact(
   return parseDiff(source, rawTitle);
 }
 
-function parseDiff(source: string, rawTitle: string | undefined): DiffArtifact | null {
+function parseDiff(source: string, rawTitle: ArtifactTitle | undefined): DiffArtifact | null {
   const lines = source.split("\n");
 
   const files: DiffFile[] = [];
@@ -383,14 +432,14 @@ function parseDiff(source: string, rawTitle: string | undefined): DiffArtifact |
 
   const append = () => {
     if (current === undefined || current.lines.length === 0) return;
+    const namedPath =
+      normalizedPath(
+        current.newPath === "/dev/null" ? current.oldPath : current.newPath
+      ) ?? normalizedPath(current.oldPath);
     files.push({
       id: files.length,
-      path:
-        normalizedPath(
-          current.newPath === "/dev/null" ? current.oldPath : current.newPath
-        ) ??
-        normalizedPath(current.oldPath) ??
-        "이름 없는 파일",
+      path: namedPath ?? "",
+      ...(namedPath === undefined ? { unnamed: true as const } : {}),
       additions: current.additions,
       deletions: current.deletions,
       lineCount: current.lines.length,
@@ -450,7 +499,7 @@ function parseDiff(source: string, rawTitle: string | undefined): DiffArtifact |
 
   return {
     kind: "diff",
-    title: clamped(rawTitle, 200) ?? "코드 변경",
+    title: clampedTitle(rawTitle) ?? DIFF_TITLE,
     files: renderedFiles,
     additions: files.reduce((sum, file) => sum + file.additions, 0),
     deletions: files.reduce((sum, file) => sum + file.deletions, 0),
@@ -535,9 +584,9 @@ function linkArtifact(kind: "commit" | "pr", message: Message): LinkArtifact {
       : undefined;
   return {
     kind,
-    title:
-      clamped(propString(message.props, "title"), 200) ??
-      (kind === "commit" ? "커밋" : "풀 리퀘스트"),
+    title: titleText(clamped(propString(message.props, "title"), 200)) ?? {
+      key: kind === "commit" ? "timeline.artifacts.commitTitle" : "timeline.artifacts.pullRequestTitle",
+    },
     ...(branch ? { branch } : {}),
     ...(status ? { status } : {}),
     ...(repository ? { repository } : {}),
@@ -585,8 +634,9 @@ export function resolveArtifact(message: Message): ArtifactPresentation | null {
     return linkArtifact(explicit, message);
   }
   const body = hasRenderableBody(message.body) ? message.body : undefined;
-  const title =
-    propString(message.props, "title") ?? toolActionTitle(message.props);
+  const serverTitle = propString(message.props, "title");
+  const title: ArtifactTitle | undefined =
+    serverTitle !== undefined ? { text: serverTitle } : toolActionTitle(message.props);
   if (explicit === "diff") {
     const source = propString(message.props, "patch") ?? body;
     return source === undefined ? null : diffArtifact(source, title);

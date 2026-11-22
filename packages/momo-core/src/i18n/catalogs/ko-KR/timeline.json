@@ -349,5 +349,11 @@
   "timeline.teamAi.delegateQuoted": "{mention} 인용한 요청을 맡아 주세요.",
   "timeline.agentInitiative.headTitle": "{title} · 먼저 제안",
   "timeline.agentInitiative.rationaleLabel": "에이전트가 쓴 글",
-  "timeline.agentInitiative.rationaleDefault": "사유"
+  "timeline.agentInitiative.rationaleDefault": "사유",
+  "timeline.artifacts.diffTitle": "코드 변경",
+  "timeline.artifacts.commitTitle": "커밋",
+  "timeline.artifacts.pullRequestTitle": "풀 리퀘스트",
+  "timeline.artifacts.toolTitle": "{tool} 실행",
+  "timeline.artifacts.toolTitleWithObject": "{tool} 실행, {object}",
+  "timeline.artifacts.unnamedFile": "이름 없는 파일"
 }

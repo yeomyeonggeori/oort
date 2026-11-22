@@ -1639,6 +1639,12 @@ export const messageKeys = [
   "timeline.artifactNote.queued",
   "timeline.artifactNote.stalled",
   "timeline.artifactNote.withNote",
+  "timeline.artifacts.commitTitle",
+  "timeline.artifacts.diffTitle",
+  "timeline.artifacts.pullRequestTitle",
+  "timeline.artifacts.toolTitle",
+  "timeline.artifacts.toolTitleWithObject",
+  "timeline.artifacts.unnamedFile",
   "timeline.cascade.noticeMulti",
   "timeline.cascade.noticeSingle",
   "timeline.cascade.reasonRateLimited",
@@ -4061,6 +4067,17 @@ export const argumentSpecs = {
     "note": "string",
     "sentence": "string"
   },
+  "timeline.artifacts.commitTitle": {},
+  "timeline.artifacts.diffTitle": {},
+  "timeline.artifacts.pullRequestTitle": {},
+  "timeline.artifacts.toolTitle": {
+    "tool": "string"
+  },
+  "timeline.artifacts.toolTitleWithObject": {
+    "object": "string",
+    "tool": "string"
+  },
+  "timeline.artifacts.unnamedFile": {},
   "timeline.cascade.noticeMulti": {
     "count": "number",
     "reason": "string",
@@ -6314,6 +6331,12 @@ export interface MessageArgs {
   "timeline.artifactNote.queued": Record<string, never>;
   "timeline.artifactNote.stalled": Record<string, never>;
   "timeline.artifactNote.withNote": { lead: string; note: string; sentence: string };
+  "timeline.artifacts.commitTitle": Record<string, never>;
+  "timeline.artifacts.diffTitle": Record<string, never>;
+  "timeline.artifacts.pullRequestTitle": Record<string, never>;
+  "timeline.artifacts.toolTitle": { tool: string };
+  "timeline.artifacts.toolTitleWithObject": { object: string; tool: string };
+  "timeline.artifacts.unnamedFile": Record<string, never>;
   "timeline.cascade.noticeMulti": { count: number; reason: string; served: string };
   "timeline.cascade.noticeSingle": { reason: string; served: string };
   "timeline.cascade.reasonRateLimited": Record<string, never>;

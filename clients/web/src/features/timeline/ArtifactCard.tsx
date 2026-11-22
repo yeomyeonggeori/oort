@@ -15,6 +15,8 @@ import { StreamCaret, TurnChip } from "./StatusChip";
 import { useFormatMessage } from "@/i18n/useFormatMessage";
 import { artifactNote, isProvisional, type ArtifactState } from "@momo/core/features/timeline/rowModel";
 import {
+  artifactTitleText,
+  diffFilePathText,
   isTruncated,
   omittedFileCount,
   type DiffArtifact,
@@ -259,6 +261,7 @@ function DiffFileSection({
   storageKey: string;
   defaultOpen: boolean;
 }) {
+  const formatMessage = useFormatMessage();
   const [open, setOpen] = useState(() => OPEN_FILES.get(storageKey) ?? defaultOpen);
   const lines = useScrollable<HTMLPreElement>();
   const hidden = file.lineCount - file.lines.length;
@@ -298,7 +301,7 @@ function DiffFileSection({
           <ChevronRight className="size-4 shrink-0 text-ink-muted" aria-hidden="true" />
         )}
         <span className="min-w-0 flex-1 truncate font-mono text-meta text-ink">
-          {file.path}
+          {diffFilePathText(formatMessage, file)}
         </span>
         <ChangeSummary additions={file.additions} deletions={file.deletions} />
       </summary>
@@ -317,7 +320,7 @@ function DiffFileSection({
         // ended there, with no hint that the rest existed.
         <pre
           ref={lines.ref}
-          {...scrollStop(lines.scrollable, `${file.path} 변경 내용`)}
+          {...scrollStop(lines.scrollable, `${diffFilePathText(formatMessage, file)} 변경 내용`)}
           className={cn(
             "scrollbar-visible overflow-x-auto pb-1 font-mono text-meta",
             "focus-visible:focus-ring"
@@ -357,6 +360,7 @@ function DiffFileSection({
  * worse than a line of text that says where the content actually is.
  */
 function OmittedFileRow({ file }: { file: DiffFile }) {
+  const formatMessage = useFormatMessage();
   return (
     <div
       data-testid="artifact-diff-file"
@@ -366,7 +370,7 @@ function OmittedFileRow({ file }: { file: DiffFile }) {
     >
       <FileX2 className="size-4 shrink-0 text-ink-muted" aria-hidden="true" />
       <span className="min-w-0 flex-1 truncate font-mono text-meta text-ink-muted">
-        {file.path}
+        {diffFilePathText(formatMessage, file)}
       </span>
       <span className="shrink-0 text-timestamp text-ink-muted">원본 diff에만</span>
       <ChangeSummary additions={file.additions} deletions={file.deletions} />
@@ -451,6 +455,7 @@ function DiffCard({
   state: ArtifactState | null;
   storageKey: string;
 }) {
+  const formatMessage = useFormatMessage();
   const truncated = isTruncated(diff);
   const omitted = omittedFileCount(diff);
   const provisional = isProvisional(state);
@@ -463,7 +468,7 @@ function DiffCard({
       data-total-lines={diff.totalLineCount}
       data-displayed-lines={diff.displayedLineCount}
       data-status={state?.status}
-      aria-label={`${diff.title}, 파일 ${formatCount(
+      aria-label={`${artifactTitleText(formatMessage, diff.title)}, 파일 ${formatCount(
         diff.files.length
       )}개, 추가 ${formatCount(diff.additions)}줄, 삭제 ${formatCount(
         diff.deletions
@@ -473,7 +478,7 @@ function DiffCard({
       <div className="flex items-center gap-2 border-b border-line px-3 py-2">
         <FileDiff className="size-4 shrink-0 text-ink-muted" aria-hidden="true" />
         <span className="min-w-0 flex-1 truncate text-body font-medium text-ink">
-          {diff.title}
+          {artifactTitleText(formatMessage, diff.title)}
         </span>
         <ArtifactChip state={state} />
         <ChangeSummary
@@ -557,19 +562,20 @@ function OversizedCard({
   oversized: OversizedArtifact;
   state: ArtifactState | null;
 }) {
+  const formatMessage = useFormatMessage();
   const kb = Math.round(oversized.byteCount / 1_024);
   return (
     <section
       data-testid="artifact-card"
       data-artifact-kind="oversized"
       data-status={state?.status}
-      aria-label={`${oversized.title}, 표시하기에 너무 큰 변경`}
+      aria-label={`${artifactTitleText(formatMessage, oversized.title)}, 표시하기에 너무 큰 변경`}
       className="mt-2 max-w-pane-lg rounded-md border border-line bg-surface-raised"
     >
       <div className="flex items-center gap-2 border-b border-line px-3 py-2">
         <FileDiff className="size-4 shrink-0 text-ink-muted" aria-hidden="true" />
         <span className="min-w-0 flex-1 truncate text-body font-medium text-ink">
-          {oversized.title}
+          {artifactTitleText(formatMessage, oversized.title)}
         </span>
         <ArtifactChip state={state} />
       </div>
@@ -701,6 +707,7 @@ function LinkCard({
   state: ArtifactState | null;
   storageKey: string;
 }) {
+  const formatMessage = useFormatMessage();
   const isCommit = link.kind === "commit";
   const Icon = isCommit ? GitCommitHorizontal : GitPullRequest;
   return (
@@ -710,7 +717,7 @@ function LinkCard({
       data-status={state?.status}
       aria-label={[
         isCommit ? "커밋" : "풀 리퀘스트",
-        link.title,
+        artifactTitleText(formatMessage, link.title),
         link.repository,
         link.branch,
         link.status,
@@ -722,7 +729,7 @@ function LinkCard({
       <div className="flex items-center gap-2 border-b border-line px-3 py-2">
         <Icon className="size-4 shrink-0 text-ink-muted" aria-hidden="true" />
         <span className="min-w-0 flex-1 truncate text-body font-medium text-ink">
-          {link.title}
+          {artifactTitleText(formatMessage, link.title)}
         </span>
         <ArtifactChip state={state} />
         <span className="shrink-0 rounded-sm bg-surface-hover px-2 py-px text-timestamp font-medium text-ink-muted">

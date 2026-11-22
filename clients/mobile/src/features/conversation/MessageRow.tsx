@@ -67,7 +67,7 @@ import {
 // 이 행이 쓰던 `body !== ''` 는 그보다 한 칸 좁았다 — 공백만 있는 본문이 칸을 얻어
 // 빈 줄을 그렸다. 왜 `trim()` 인지는 그 파일 머리말에.
 import {hasRenderableBody} from '@momo/core/features/timeline/bodySlot';
-import {isTruncated, omittedFileCount} from '@momo/core/features/timeline/artifacts';
+import {artifactTitleText, diffFilePathText, isTruncated, omittedFileCount} from '@momo/core/features/timeline/artifacts';
 import type {ArtifactPresentation} from '@momo/core/features/timeline/artifacts';
 import {attachmentMetaLine} from '@momo/core/features/attachments/model';
 import {deletedFoldRef} from '@momo/core/features/timeline/deletedFold';
@@ -2101,7 +2101,7 @@ function ArtifactCard({
     <View style={styles.card} testID="artifact-card">
       <View style={styles.cardHead}>
         <Text style={styles.cardTitle} numberOfLines={2}>
-          {artifact.title}
+          {artifactTitleText(formatMessage, artifact.title)}
         </Text>
         {state ? (
           <StatusChip label={TURN_STATUS_LABEL[state.status]} tone={toneForTurn(state.status)} />
@@ -2127,7 +2127,7 @@ function ArtifactCard({
           {artifact.files.slice(0, 6).map(file => (
             <View key={file.id} style={styles.fileRow}>
               <Text style={styles.filePath} numberOfLines={1} ellipsizeMode="head">
-                {file.path}
+                {diffFilePathText(formatMessage, file)}
               </Text>
               <Text style={styles.fileCounts}>
                 {`+${file.additions} −${file.deletions}`}

@@ -11277,6 +11277,54 @@ export const catalog: MessageCatalog = {
       "value": "note"
     }
   ],
+  "timeline.artifacts.commitTitle": [
+    {
+      "type": 0,
+      "value": "커밋"
+    }
+  ],
+  "timeline.artifacts.diffTitle": [
+    {
+      "type": 0,
+      "value": "코드 변경"
+    }
+  ],
+  "timeline.artifacts.pullRequestTitle": [
+    {
+      "type": 0,
+      "value": "풀 리퀘스트"
+    }
+  ],
+  "timeline.artifacts.toolTitle": [
+    {
+      "type": 1,
+      "value": "tool"
+    },
+    {
+      "type": 0,
+      "value": " 실행"
+    }
+  ],
+  "timeline.artifacts.toolTitleWithObject": [
+    {
+      "type": 1,
+      "value": "tool"
+    },
+    {
+      "type": 0,
+      "value": " 실행, "
+    },
+    {
+      "type": 1,
+      "value": "object"
+    }
+  ],
+  "timeline.artifacts.unnamedFile": [
+    {
+      "type": 0,
+      "value": "이름 없는 파일"
+    }
+  ],
   "timeline.cascade.noticeMulti": [
     {
       "type": 1,
