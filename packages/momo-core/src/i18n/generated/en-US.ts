@@ -4186,6 +4186,16 @@ export const catalog: MessageCatalog = {
       "value": "You can also approve it from the list"
     }
   ],
+  "desktop.workJobs.newAsksCount": [
+    {
+      "type": 1,
+      "value": "count"
+    },
+    {
+      "type": 0,
+      "value": " new requests"
+    }
+  ],
   "desktop.workJobs.openToAnswer": [
     {
       "type": 0,
@@ -4200,6 +4210,48 @@ export const catalog: MessageCatalog = {
     {
       "type": 1,
       "value": "summary"
+    }
+  ],
+  "desktop.workJobs.revealNewAsks": [
+    {
+      "type": 1,
+      "value": "count"
+    },
+    {
+      "type": 0,
+      "value": " new · Show"
+    }
+  ],
+  "desktop.workJobs.sectionWithNewAsks": [
+    {
+      "type": 1,
+      "value": "section"
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 1,
+      "value": "count"
+    },
+    {
+      "type": 0,
+      "value": " · "
+    },
+    {
+      "type": 1,
+      "value": "pending"
+    },
+    {
+      "type": 0,
+      "value": " new requests"
+    }
+  ],
+  "desktop.workJobs.settledElsewhere": [
+    {
+      "type": 0,
+      "value": "No response needed anymore"
     }
   ],
   "desktop.workJobs.stateAwaitingApproval": [

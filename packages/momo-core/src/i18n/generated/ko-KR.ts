@@ -3816,6 +3816,16 @@ export const catalog: MessageCatalog = {
       "value": "승인은 목록에서도 할 수 있어요"
     }
   ],
+  "desktop.workJobs.newAsksCount": [
+    {
+      "type": 0,
+      "value": "새 요청 "
+    },
+    {
+      "type": 1,
+      "value": "count"
+    }
+  ],
   "desktop.workJobs.openToAnswer": [
     {
       "type": 0,
@@ -3830,6 +3840,48 @@ export const catalog: MessageCatalog = {
     {
       "type": 1,
       "value": "summary"
+    }
+  ],
+  "desktop.workJobs.revealNewAsks": [
+    {
+      "type": 0,
+      "value": "새 요청 "
+    },
+    {
+      "type": 1,
+      "value": "count"
+    },
+    {
+      "type": 0,
+      "value": " · 보기"
+    }
+  ],
+  "desktop.workJobs.sectionWithNewAsks": [
+    {
+      "type": 1,
+      "value": "section"
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 1,
+      "value": "count"
+    },
+    {
+      "type": 0,
+      "value": "개 · 새 요청 "
+    },
+    {
+      "type": 1,
+      "value": "pending"
+    }
+  ],
+  "desktop.workJobs.settledElsewhere": [
+    {
+      "type": 0,
+      "value": "이제 응답하지 않아도 돼요"
     }
   ],
   "desktop.workJobs.stateAwaitingApproval": [

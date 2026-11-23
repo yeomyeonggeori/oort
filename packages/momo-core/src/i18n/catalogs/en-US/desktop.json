@@ -43,5 +43,9 @@
   "desktop.workJobs.stateAwaitingApproval": "Awaiting approval",
   "desktop.workJobs.approvalHintInList": "You can also approve it from the list",
   "desktop.workJobs.openToAnswer": "Open to answer",
+  "desktop.workJobs.settledElsewhere": "No response needed anymore",
+  "desktop.workJobs.revealNewAsks": "{count} new · Show",
+  "desktop.workJobs.newAsksCount": "{count} new requests",
+  "desktop.workJobs.sectionWithNewAsks": "{section} {count} · {pending} new requests",
   "desktop.workJobs.reportedTitle": "Agent report: {summary}"
 }

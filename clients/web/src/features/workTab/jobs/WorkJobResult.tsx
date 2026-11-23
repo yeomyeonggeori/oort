@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { Check, ShieldCheck } from "lucide-react";
 import { Link } from "react-router-dom";
 import type { FeedItem } from "@momo/core/features/inbox/model";
@@ -50,35 +51,46 @@ export interface JobApprovalFacts {
   /** 결정자가 아닐 때의 대기 줄(카드와 같은 문장). 원장이 아직 답하지 않았으면 null — 「원장에 없다」를 지어내지 않는다. */
   waiting: string | null;
   /**
-   * 방금 이 줄에서 결정해 그 자리에 붙든 동안의 영수증(받은함과 같은 「승인을 기록했어요.」·「거부를 기록했어요.」, 수리 4회차). 있으면
-   * 결과 칸은 이 한 줄이 먼저다. `decision`이 없으면 이 한 줄뿐이다(결정 전의 꼬리표·되돌릴 수 없음·만료를 말하지 않는다).
+   * 「응답 필요」의 결과 칸(#5738)이 단추 자리에 세우는 결과 한 줄: 이 화면에서 결정했으면 받은함과 같은 영수증(「승인을 기록했어요.」
+   * 등), 다른 곳에서 끝났으면 「이제 응답하지 않아도 돼요」. 있으면 결정 전의 꼬리표·되돌릴 수 없음·만료는 자리만 남는다.
    */
   receipt: string | null;
   /**
-   * 붙든 줄에 같은 run의 새 요청이 섰을 때 그 요청의 원장 행과 카드 문장(수리 5회차 M3). 새 요청은 영수증 **아래 새 줄**에 서고(`decision`이
-   * 그 요청), 누른 자리에는 영수증이 남는다.
+   * 결과 칸의 흐린 요약 한 줄(#5738 수리 1회차): 누가·언제(이 화면에서 결정했으면 「나 · 시각」, 다른 곳에서 끝났으면 알아챈 시각). 결정 전의
+   * 되돌릴 수 없음·만료가 서 있던 자리를 채운다(빈 띠가 남지 않게). 없으면 그 자리는 비어 있다.
    */
-  nextAsk?: { item: FeedItem | null; intent: string | null } | null;
+  receiptMeta?: string | null;
 }
 
 /**
- * 영수증 한 줄. `asControl`이면 결정 단추가 서 있던 층에 **단추와 같은 높이**로 선다(`InboxApprovalActions`의 `py-1` + 단추 `h-control-sm`,
- * 좁은 폭은 손가락 44px `tap-target`) — 누른 자리에 결과가 서고 줄 높이가 바뀌지 않는다.
+ * 결정 층의 상자(#5738): 단추 한 줄 높이(`h-control-sm`, 폰 폭은 손가락 44px `tap-target` — 결정 단추가 그 폭에서 서는 높이와 같다) +
+ * 위아래 `py-1`. 결정 전 단추·보내는 중·실패(단추 옆 한 줄)·끊김·「열기」·결과 한 줄이 모두 이 상자 하나에 선다 — 무엇이 서도 줄 높이가
+ * 같아 아래 줄이 움직이지 않는다(브라우저 하네스 `fix5738:move0`가 1280·900·390 × 글자 100·150·200%로 잰다). 글은 한 줄에서 자른다.
+ *
+ * 상자의 바닥 높이는 단추 높이와 한 줄의 줄높이 가운데 큰 쪽이다(#5738 수리 1회차 M2): 단추는 `--spacing-control-sm` 28px로 고정이고
+ * 결과·실패 한 줄의 줄높이는 글자 크기를 따라 커져(200%에서 36px) 둘 중 하나만 바닥으로 두면 큰 글자에서 결정 전·후가 8px 어긋난다.
+ * 그래서 바깥 겹이 둘 중 큰 쪽을, 안쪽 겹이 단추 높이와 폰 폭 44px(`tap-target`)을 진다 — 같은 속성을 한 상자에 두 번 적지 않는다.
  */
-function ReceiptLine({ text, asControl = false }: { text: string; asControl?: boolean }) {
-  const line = (
-    <span
-      className={cn(
-        "min-w-0 break-keep text-meta text-ink",
-        asControl && "flex min-h-control-sm tap-target items-center"
-      )}
-      data-testid="work-job-approval-settled"
-    >
-      <Check className="me-1 inline size-4 shrink-0 align-text-bottom" aria-hidden="true" />
-      {text}
+function ControlBox({ children }: { children: ReactNode }) {
+  return (
+    <span className="flex w-full min-w-0 py-1" data-testid="work-job-control-box">
+      <span className="flex min-h-[max(var(--spacing-control-sm),var(--text-meta--line-height))] min-w-0 flex-1">
+        <span className="flex min-h-control-sm tap-target min-w-0 flex-1 items-center">{children}</span>
+      </span>
     </span>
   );
-  return asControl ? <span className="flex py-1">{line}</span> : line;
+}
+
+/** 결과 한 줄(영수증·「이제 응답하지 않아도 돼요」): 단추가 서 있던 상자에 한 줄로. 넘치면 자르고 전체는 `title`. */
+function ReceiptLine({ text }: { text: string }) {
+  return (
+    <ControlBox>
+      <span className="min-w-0 truncate text-meta text-ink" title={text} data-testid="work-job-approval-settled">
+        <Check className="me-1 inline size-4 shrink-0 align-text-bottom" aria-hidden="true" />
+        {text}
+      </span>
+    </ControlBox>
+  );
 }
 
 type RowControl = ReturnType<typeof approvalRowControl>;
@@ -150,6 +162,7 @@ export function JobResultCell({
   reported,
   approval,
   inApp,
+  settledLine = null,
 }: {
   row: WorkJobRow;
   kind: WorkJobResultKind;
@@ -157,29 +170,42 @@ export function JobResultCell({
   approval: JobApprovalFacts | null;
   /** 권한 요청 줄, 브라우저에서만: 허락을 보낼 곳(폰·데스크탑 앱). */
   inApp: string | null;
+  /** 권한 요청의 결과 칸(#5738): 더는 묻지 않을 때의 한 줄. */
+  settledLine?: string | null;
 }) {
   const formatMessage = useFormatMessage();
   if (kind === "approval" && approval?.receipt) {
-    // 붙든 줄(방금 결정함)은 결정된 모습만 말한다(수리 4회차, 검수 2회차 M2): 꼬리표·되돌릴 수 없음·만료는 걷고 무엇을 결정했는지(요약)만
-    // 남긴다. 걷은 줄의 자리는 비워 둔다 — 줄 높이가 그대로라 누른 점 밑으로 다른 줄이 올라오지 않는다. 영수증은 단추가 있던 층에 선다.
-    // 같은 run의 새 요청이 와도 이 칸은 그대로다(새 요청은 영수증 아래 새 줄, `JobResultActions`).
+    // 결과 칸(#5738)은 결정된 모습만 말한다: 되돌릴 수 없음·만료는 걷고 무엇을 결정했는지(요약)를 남긴다. 결과 한 줄은 단추가 있던 상자에
+    // 선다. 걷은 줄의 자리는 빈 띠로 두지 않고 **같은 높이의 흐린 결과 요약**으로 채운다(수리 1회차, owner가 볼 모양): 꼬리표 자리에는 같은
+    // 꼬리표를 흐리게(방패 대신 체크), 되돌릴 수 없음·만료 자리에는 누가·언제 한 줄. 높이는 칸이 처음 선 때의 글이 정한다 — 그 글은 보이지
+    // 않게 그 자리에 남고 흐린 한 줄이 같은 칸에 겹쳐 서며(한 줄에서 자름), 꼬리표는 같은 칩이라 높이가 같다.
     const item = approval.item;
     const summary = approval.intent ?? item?.predicate ?? null;
+    const meta = approval.receiptMeta ?? null;
     return (
       <span className="flex min-w-0 flex-col gap-1" data-testid="work-job-result" data-kind={kind} data-held="">
-        <span aria-hidden className={cn(CHIP_CLASS, "invisible inline-flex shrink-0 items-center gap-1 self-start")}>
-          <ShieldCheck className="size-3 shrink-0" />
+        <span
+          className={cn(CHIP_CLASS, "inline-flex shrink-0 items-center gap-1 self-start bg-muted-soft text-ink-muted")}
+          data-testid="work-job-settled-tag"
+        >
+          <Check aria-hidden className="size-3 shrink-0" />
           {formatMessage("desktop.workJobs.tagApproval")}
         </span>
         {summary !== null && <span className="min-w-0 break-keep text-meta text-ink">{summary}</span>}
-        {item?.note && (
-          <span aria-hidden className="invisible min-w-0 break-keep text-meta">
-            {item.note}
-          </span>
-        )}
-        {item?.timeLabel && (
-          <span aria-hidden className="invisible min-w-0 break-keep text-timestamp">
-            {item.timeLabel}
+        {(item?.note || item?.timeLabel) && (
+          <span className="grid min-w-0">
+            <span aria-hidden className="invisible col-start-1 row-start-1 flex min-w-0 flex-col gap-1">
+              {item?.note && <span className="min-w-0 break-keep text-meta">{item.note}</span>}
+              {item?.timeLabel && <span className="min-w-0 break-keep text-timestamp">{item.timeLabel}</span>}
+            </span>
+            {meta !== null && (
+              <span
+                className="col-start-1 row-start-1 min-w-0 self-center truncate text-timestamp text-ink-muted"
+                data-testid="work-job-settled-meta"
+              >
+                {meta}
+              </span>
+            )}
           </span>
         )}
       </span>
@@ -193,12 +219,33 @@ export function JobResultCell({
     );
   }
   if (kind === "permission") {
+    // 결과 칸(#5738): 꼬리표와 브라우저 안내는 자리만 남기고, 브라우저(컨트롤 층이 없음)는 안내가 있던 자리에 결과 한 줄을 겹쳐 세운다 —
+    // 한 칸 격자에 둘이 겹쳐 높이는 둘 중 큰 쪽이고, 결과 한 줄은 한 줄에서 자른다.
+    const settled = settledLine !== null;
     return (
-      <span className="flex min-w-0 flex-col gap-1" data-testid="work-job-result" data-kind={kind}>
-        <KindTag label={formatMessage("desktop.workJobs.tagPermission")} testId="work-job-permission-tag" />
+      <span className="flex min-w-0 flex-col gap-1" data-testid="work-job-result" data-kind={kind} data-held={settled ? "" : undefined}>
+        {settled ? (
+          <span aria-hidden className={cn(CHIP_CLASS, "invisible inline-flex shrink-0 items-center gap-1 self-start")}>
+            <ShieldCheck className="size-3 shrink-0" />
+            {formatMessage("desktop.workJobs.tagPermission")}
+          </span>
+        ) : (
+          <KindTag label={formatMessage("desktop.workJobs.tagPermission")} testId="work-job-permission-tag" />
+        )}
         {inApp !== null && (
-          <span className="min-w-0 break-keep text-timestamp text-ink-muted" data-testid="work-job-permission-in-app">
-            {inApp}
+          <span className="grid min-w-0">
+            <span
+              aria-hidden={settled || undefined}
+              className={cn("col-start-1 row-start-1 min-w-0 break-keep text-timestamp text-ink-muted", settled && "invisible")}
+              data-testid={settled ? undefined : "work-job-permission-in-app"}
+            >
+              {inApp}
+            </span>
+            {settled && (
+              <span className="col-start-1 row-start-1 min-w-0 truncate text-timestamp text-ink" data-testid="work-job-approval-settled">
+                {settledLine}
+              </span>
+            )}
           </span>
         )}
       </span>
@@ -245,17 +292,23 @@ export function JobResultActions({
   row,
   kind,
   approval,
+  settledLine = null,
   desktop,
   onOpenPermission,
   onDecided,
+  onSending,
   focusRow,
 }: {
   row: WorkJobRow;
   kind: WorkJobResultKind;
   approval: JobApprovalFacts | null;
+  /** 권한 요청의 결과 칸(#5738): 「열어서 답하기」가 서 있던 상자에 선다. */
+  settledLine?: string | null;
   desktop: boolean;
   onOpenPermission: () => void;
-  onDecided: (outcome: DecisionOutcome, approvalId: string) => void;
+  onDecided: (outcome: DecisionOutcome) => void;
+  /** 결정이 서버에 나가 있는 동안 true(#5738 — 그 칸이 답을 받을 때까지 「다른 곳에서」로 바뀌지 않게). */
+  onSending?: (busy: boolean) => void;
   /** 결정이 닿아 눌린 단추가 사라질 때 캐럿을 받을 줄 단추. */
   focusRow: () => void;
 }) {
@@ -264,41 +317,35 @@ export function JobResultActions({
     <span className="flex min-w-0 flex-col items-start gap-1" data-testid="work-job-actions">
       {kind === "approval" &&
         (approval?.receipt ? (
-          <>
-            <ReceiptLine text={approval.receipt} asControl />
-            {approval.decision && (
-              // 같은 run의 새 요청(수리 5회차 M3): 방금 누른 자리에는 영수증이 남고, 새 요청과 그 단추는 영수증 **아래 새 줄**에 선다.
-              <span className="flex min-w-0 flex-col items-start gap-1 pt-1" data-testid="work-job-next-ask">
-                <ApprovalAskLines
-                  item={approval.nextAsk?.item ?? approval.decision.item}
-                  intent={approval.nextAsk?.intent ?? null}
-                  waiting={null}
-                />
-                <JobDecision title={row.title} decision={approval.decision} onDecided={onDecided} focusRow={focusRow} />
-              </span>
-            )}
-          </>
+          <ReceiptLine text={approval.receipt} />
         ) : approval?.decision ? (
           <JobDecision
             title={row.title}
             decision={approval.decision}
             onDecided={onDecided}
+            onSending={onSending}
             focusRow={focusRow}
           />
         ) : (
           <ApprovalCardLink channelId={row.channelId} channel={row.channel} />
         ))}
-      {kind === "permission" && desktop && (
-        <Button
-          type="button"
-          size="sm"
-          variant="secondary"
-          onClick={onOpenPermission}
-          data-testid="work-job-permission-open"
-        >
-          {formatMessage("desktop.workJobs.openToAnswer")}
-        </Button>
-      )}
+      {kind === "permission" &&
+        desktop &&
+        (settledLine !== null ? (
+          <ReceiptLine text={settledLine} />
+        ) : (
+          <ControlBox>
+            <Button
+              type="button"
+              size="sm"
+              variant="secondary"
+              onClick={onOpenPermission}
+              data-testid="work-job-permission-open"
+            >
+              {formatMessage("desktop.workJobs.openToAnswer")}
+            </Button>
+          </ControlBox>
+        ))}
       {row.pr !== null && <JobPrLink pr={row.pr} />}
     </span>
   );
@@ -308,11 +355,13 @@ function JobDecision({
   title,
   decision,
   onDecided,
+  onSending,
   focusRow,
 }: {
   title: string;
   decision: DecidableApproval;
-  onDecided: (outcome: DecisionOutcome, approvalId: string) => void;
+  onDecided: (outcome: DecisionOutcome) => void;
+  onSending?: ((busy: boolean) => void) | undefined;
   focusRow: () => void;
 }) {
   const formatMessage = useFormatMessage();
@@ -327,48 +376,47 @@ function JobDecision({
   const awaited = awaitedApprovalId(control);
   // 열기를 `kind === "open"`으로 묻지 않는 것은 받은함과 같은 이유다(직접 문구 장부가 영어 낱말 리터럴도 센다): id를 싣는데 `decide`가 아니면 열기다.
   const opensOnCard = !decideHere && awaited !== null;
+  // 어느 모습이든 같은 상자(`ControlBox`)에 선다(#5738): 끊김·되찾음·실패·영수증으로 바뀌어도 줄 높이가 같다.
   if (decideHere && awaited !== null) {
     return (
-      <InboxApprovalActions
-        approvalId={awaited}
-        execution={decision.item.execution}
-        lead=""
-        className="px-0 py-1"
-        testIdPrefix="work-job-approval"
-        decisionLabel={title}
-        onSettled={(outcome) => {
-          // 눌린 단추는 이 렌더에서 영수증 줄로 바뀌며 사라진다. 캐럿이 body로 떨어지지 않게 그 줄이 받는다.
-          focusRow();
-          onDecided(outcome, awaited);
-        }}
-      />
+      <ControlBox>
+        <InboxApprovalActions
+          approvalId={awaited}
+          execution={decision.item.execution}
+          lead=""
+          className="min-w-0 flex-1 p-0"
+          testIdPrefix="work-job-approval"
+          decisionLabel={title}
+          errorBeside
+          {...(onSending !== undefined ? { onBusyChange: onSending } : {})}
+          onSettled={(outcome) => {
+            // 눌린 단추는 이 렌더에서 결과 한 줄로 바뀌며 사라진다. 캐럿이 body로 떨어지지 않게 그 줄이 받는다.
+            focusRow();
+            onDecided(outcome);
+          }}
+        />
+      </ControlBox>
     );
   }
   if (opensOnCard) {
     return (
-      <Button asChild size="sm" variant="secondary">
-        <Link
-          to={inboxTargetPath(decision.item)}
-          data-testid="work-job-approval-open"
-        >
-          {formatMessage("inbox.approval.open")}
-        </Link>
-      </Button>
+      <ControlBox>
+        <Button asChild size="sm" variant="secondary">
+          <Link to={inboxTargetPath(decision.item)} data-testid="work-job-approval-open">
+            {formatMessage("inbox.approval.open")}
+          </Link>
+        </Button>
+      </ControlBox>
     );
   }
-  if (settledLine !== null) {
-    return (
-      <p className="text-meta text-ink" data-testid="work-job-approval-settled">
-        <Check className="me-1 inline size-4 align-text-bottom" aria-hidden="true" />
-        {settledLine}
-      </p>
-    );
-  }
+  if (settledLine !== null) return <ReceiptLine text={settledLine} />;
   if (control.kind === "offline") {
     return (
-      <p className="break-keep text-meta text-ink-muted" data-testid="work-job-approval-offline">
-        {blockedLine}
-      </p>
+      <ControlBox>
+        <span className="min-w-0 truncate text-meta text-ink-muted" title={blockedLine} data-testid="work-job-approval-offline">
+          {blockedLine}
+        </span>
+      </ControlBox>
     );
   }
   return null;

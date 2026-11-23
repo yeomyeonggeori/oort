@@ -508,6 +508,9 @@ describe("컴포넌트는 스타일을 짓지 않는다 — 런타임 몫", () =
     // #4775: thumbnail/photo computed border radius is measured at runtime; the crop's WAAPI
     // frames likewise interpolate getBoundingClientRect geometry. Fixed visibility/transform live in CSS.
     "features/attachments/useStageHero.ts",
+    // #5738: 「작업」 표의 바닥(min-height)은 그 표가 지금까지 선 가장 큰 높이를 잰 값이다 — 아래 줄이 빠져도 내용이 줄지 않아
+    // 브라우저가 끝에 맞춰 굴림을 줄이지 않게(위 결정 단추가 손 밑으로 내려오지 않게). 지어낸 값이 없다.
+    "features/workTab/jobs/WorkJobsRoute.tsx",
   ];
 
   it("런타임 스타일 작성자가 잔량 목록보다 늘지 않는다", () => {
