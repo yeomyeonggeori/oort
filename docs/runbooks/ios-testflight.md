@@ -15,9 +15,9 @@
 
 1. §1 준비물을 확인한다.
 2. main 커밋에서 `bash clients/mobile/scripts/archive-release.sh`로 아카이브·검사·로컬 IPA를 만든다(§3–§4).
-3. §5-1 업로드 전 관문을 순서대로 통과한다: 자동 배포 꺼짐 확인과 날짜, `owner-evidence` 그룹 생성, 승인 인용, IPA 해시 대조, ASC 사전 검증.
+3. §5-1 업로드 전 관문을 순서대로 통과한다: 자동 배포 꺼짐 확인과 날짜, `momo-owner-evidence` 그룹 확인(없으면 생성), 승인 인용, IPA 해시 대조, ASC 사전 검증.
 4. §5-2 기본 경로로 **검사한 IPA를 그대로** 올린다. 쓸 수 없을 때만 owner가 §5-3 폴백을 쓴다.
-5. ASC에서 처리가 끝나면 빌드를 `owner-evidence` 그룹에 수동으로 넣고 설치한다(§6).
+5. ASC에서 처리가 끝나면 빌드를 `momo-owner-evidence` 그룹에 수동으로 넣고 설치한다(§6).
 6. APNs production 경로를 확인한다(§7).
 
 ## 1. 준비물
@@ -114,7 +114,7 @@ bash "<작업 디렉터리>/clients/mobile/scripts/archive-release.sh"
 
 ## 5. 업로드 — owner 승인 뒤, 건마다
 
-**실제 기록(2026-11-20, 빌드 3080.1).** 이 절의 명령 경로로 올렸다. 순서는 §5-1 5의 사전 검증 통과(15:00) → 업로드 15:01~15:13 KST, 결과 `UPLOAD SUCCEEDED`, 종료 코드 0, `INTERNAL_ONLY`, `usesNonExemptEncryption=false`, 처리 `VALID`(수출 규정 질문 없음)다. 업로드 전 ASC에는 `momo-internal-test`(internal, 자동 배포 꺼짐, 테스터 2)만 있었고, `owner-evidence` 그룹은 업로드 뒤(15:14)에 만들어 빌드 한 개를 넣었다. 이 순서는 §5-1 2와 다르다. 다음부터는 §5-1 순서대로 한다. 올릴 파일은 `build-info.txt`의 `ipa:` 줄이 가리키는 IPA다. 2026-09-23 실측 이름은 `export/oort.ipa`다.
+**실제 기록(2026-11-20, 빌드 3080.1).** 이 절의 명령 경로로 올렸다. 순서는 §5-1 5의 사전 검증 통과(15:00) → 업로드 15:01~15:13 KST, 결과 `UPLOAD SUCCEEDED`, 종료 코드 0, `INTERNAL_ONLY`, `usesNonExemptEncryption=false`, 처리 `VALID`(수출 규정 질문 없음)다. 업로드 전 ASC에는 `momo-internal-test`(internal, 자동 배포 꺼짐, 테스터 2)만 있었고, `momo-owner-evidence` 그룹은 업로드 뒤(15:14)에 만들어 빌드 한 개를 넣었다. 이 순서는 §5-1 2와 달랐다. 그룹이 이제 있으니 다음부터는 다시 만들지 않는다(§5-1 2는 그룹이 없을 때만). 올릴 파일은 `build-info.txt`의 `ipa:` 줄이 가리키는 IPA다. 2026-09-23 실측 이름은 `export/oort.ipa`다.
 
 ### 5-1. 업로드 전 관문 — 순서대로, 하나라도 빠지면 올리지 않는다
 
@@ -122,7 +122,7 @@ bash "<작업 디렉터리>/clients/mobile/scripts/archive-release.sh"
    - 대상은 둘이다: ASC 내부 테스터 그룹의 자동 배포, Xcode Cloud 워크플로의 TestFlight 액션.
    - PR이나 이슈에 한 줄로 적는다. 예: `2026-MM-DD owner 확인: ASC 내부 그룹 자동 배포 꺼짐, Xcode Cloud TestFlight 액션 꺼짐`.
    - 켜져 있으면 업로드만으로 팀 배포가 된다.
-2. **`owner-evidence` 그룹을 첫 업로드 전에 만든다.**
+2. **`momo-owner-evidence` 그룹이 없으면 첫 업로드 전에 만든다.** 2026-11-20에 만들어 두었으니, 있으면 다시 만들지 않고 설정만 확인한다.
    - ASC › 앱 › TestFlight › 내부 테스팅에서 만든다. 자동 배포는 끈 채로 만들고, 테스터는 owner 한 명만 넣는다.
    - 업로드하는 순간 자동 배포가 켜진 내부 그룹이 하나도 없어야 한다.
 3. **승인 인용과 빌드 사실.**
@@ -216,9 +216,9 @@ GUI로 할 때는 `open "<출력 디렉터리>/MomoMobile-<build>.xcarchive"`로
 
 ## 6. owner 1인 그룹에 넣고 설치
 
-그룹은 §5-1의 2에서 첫 업로드 전에 만들어 두었다(자동 배포 꺼짐, 테스터 owner 1명).
+그룹(`momo-owner-evidence`)은 §5-1의 2대로 이미 있다(자동 배포 꺼짐, 테스터 owner 1명).
 
-1. 처리가 끝난 빌드를 `owner-evidence` 그룹에 **수동으로** 넣는다.
+1. 처리가 끝난 빌드를 `momo-owner-evidence` 그룹에 **수동으로** 넣는다.
 2. owner 기기의 TestFlight 앱에서 설치한다. 설치된 버전과 빌드가 `build-info.txt`와 같은지 본다.
 3. 되돌리기(M7-I I-6).
    - 문제가 있는 빌드는 그룹에서 뺀다.
@@ -301,7 +301,6 @@ TestFlight 빌드는 **production** APNs 토큰을 만든다. 네 곳이 모두 
 
 `--validate-app`이나 `--upload-package`가 응답 없이 시간만 가면 연결에서 멈춘 것이다.
 1. 그 명령의 PID를 `ps`로 찾아 `kill <PID>`로 그 하나만 끝낸다. `pkill`·`killall`은 쓰지 않는다.
-2. 같은 명령을 한 번만 다시 돌린다.
-3. 두 번째도 멈추면 멈춘 시각 · 명령 종류 · 빌드 번호를 이슈로 남기고 멈춘다.
-
-업로드 명령이 멈춘 것이라면 다시 돌리기 전에 ASC › TestFlight에서 그 빌드 번호가 이미 들어왔는지 본다. 들어왔으면 같은 번호로 다시 올리지 않는다(§5-4).
+2. 업로드 명령이 멈춘 것이라면 먼저 ASC › TestFlight에서 그 빌드 번호가 이미 들어왔는지 본다. 들어왔으면 같은 번호로 다시 올리지 않는다(§5-4).
+3. 그렇지 않으면 같은 명령을 한 번만 다시 돌린다.
+4. 두 번째도 멈추면 멈춘 시각 · 명령 종류 · 빌드 번호를 이슈로 남기고 멈춘다.
