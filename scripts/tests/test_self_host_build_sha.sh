@@ -46,10 +46,36 @@ if overlay_declares_arg "$sabotaged"; then
 fi
 pass "sabotage drop overlay args → RED"
 
-dockerfile_line203="$(sed -n '203p' "$DOCKERFILE")"
-[ "$dockerfile_line203" = "ARG MOMO_BUILD_SHA=unknown" ] ||
-  fail "Dockerfile line 203 must be ARG MOMO_BUILD_SHA=unknown, got: $dockerfile_line203"
-pass "Dockerfile line 203 defaults MOMO_BUILD_SHA=unknown"
+# Found by content, not by line number: the Dockerfile grows and shrinks above.
+# Invariant: in the stage that exports MOMO_BUILD_SHA (ENV, which the SPA stamp
+# reads), the ARG that feeds it is declared earlier in the same stage with the
+# honest default `unknown`.
+dockerfile_stamps_unknown() {
+  awk '
+    /^FROM[[:space:]]/ { have_arg = 0 }
+    /^ARG MOMO_BUILD_SHA=unknown[[:space:]]*$/ { have_arg = 1 }
+    /^ENV MOMO_BUILD_SHA=/ { seen_env = 1; if (have_arg) ok = 1 }
+    END { exit !(seen_env && ok) }
+  ' "$1"
+}
+dockerfile_stamps_unknown "$DOCKERFILE" ||
+  fail "Dockerfile must declare ARG MOMO_BUILD_SHA=unknown before ENV MOMO_BUILD_SHA= in the same stage"
+pass "Dockerfile defaults MOMO_BUILD_SHA=unknown before it is exported (any line)"
+
+# Sabotage: default dropped, or ARG moved after the ENV → must be RED.
+grep -v '^ARG MOMO_BUILD_SHA=unknown' "$DOCKERFILE" >"$TMP/Dockerfile.nodefault"
+if dockerfile_stamps_unknown "$TMP/Dockerfile.nodefault"; then
+  fail "sabotage (drop ARG default) still passed — check is not load-bearing"
+fi
+awk '/^ENV MOMO_BUILD_SHA=/ { print; print "ARG MOMO_BUILD_SHA=unknown"; next }
+     /^ARG MOMO_BUILD_SHA=unknown/ { next } { print }' "$DOCKERFILE" >"$TMP/Dockerfile.argafter"
+if dockerfile_stamps_unknown "$TMP/Dockerfile.argafter"; then
+  fail "sabotage (ARG after ENV) still passed — check is not load-bearing"
+fi
+{ printf '# pad\n# pad\n# pad\n'; cat "$DOCKERFILE"; } >"$TMP/Dockerfile.padded"
+dockerfile_stamps_unknown "$TMP/Dockerfile.padded" ||
+  fail "lines added above the stamp must not break the check"
+pass "sabotage drop default / ARG after ENV → RED; padded copy → GREEN"
 
 make_fixture() {
   local name="$1"

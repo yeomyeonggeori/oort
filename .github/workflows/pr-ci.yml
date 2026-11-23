@@ -360,6 +360,15 @@ jobs:
       - name: GHCR 고지 묶음 신선도 + Dockerfile COPY 목록(상시)
         run: scripts/check_ghcr_notice_bundle.sh --stale-only
 
+      # 상시 검사(#6050): 시험 고정값·하네스에 실명이 들어오면 빨갛다. 로컬 게이트(웹 프로파일)·
+      # 병합 트리 게이트·코어 `gate:copy` 에서만 돌던 것을, 닿은 경로와 무관하게 PR에서도 돌린다
+      # (레포 전체 훑기가 아니라 SCOPE 의 몇 폴더라 실측 1초 안쪽). 금지 목록은 SHA-256 뿐이고
+      # 출력은 파일:줄과 해시 앞 8자리 표지뿐이라 적중한 글자는 로그에 나오지 않는다.
+      # 종료 코드 0이 아니면(1 위반 · 2 못 돌림) 이 잡이 빨갛고, `gate` 가 ALIGNMENT_RESULT 를
+      # success 로 요구하므로 `PR CI gate` 도 빨갛다.
+      - name: 실명 재유입 게이트(상시)
+        run: node scripts/design_preflight_names.mjs
+
   # ── ①-b 정책 회귀 레인 (#4696, 검수·시험 v2 T1) ──────────────────────────
   # 게이트 스크립트·워크플로 자체의 회귀 시험 6개. 전에는 `alignment` 잡의 한 step 으로
   # **모든 PR에서** 114초(실측 중앙값, 18/18)를 썼고, 로컬 실측(부하 낮은 때 아님)으로
