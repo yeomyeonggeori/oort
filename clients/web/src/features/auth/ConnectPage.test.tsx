@@ -15,6 +15,8 @@ import { getServerBase, setServerBase } from "@/lib/serverBase";
 import { applyLogin, clearSession } from "@/lib/session";
 import { useRestoredSession } from "@/app/session";
 import { clearRecentServers } from "./recentServers";
+import { LocaleProvider } from "@/i18n/LocaleProvider";
+import { koreanLocale } from "@/testing/koLocale";
 import { ConnectPage } from "./ConnectPage";
 import { NEW_WORKSPACE_ENTRY_GUIDE } from "./loginWorkspaceEntry";
 import {
@@ -160,13 +162,18 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+// 실패 문장은 사전에서 오므로(#6064) 화면을 한국어 언어 객체 아래에 세운다. 아직 옮기지 않은 가입 화면 글은 그대로다.
+const koLocale = await koreanLocale();
+const inKorean = (child: ReturnType<typeof createElement>) =>
+  createElement(LocaleProvider, { locale: koLocale, children: child });
+
 function mount(onLoggedIn: (next: LoginResponse) => void = () => undefined): HTMLElement {
   const host = document.createElement("div");
   document.body.append(host);
   mountedHost = host;
   mountedRoot = createRoot(host);
   act(() => {
-    mountedRoot?.render(createElement(ConnectPage, { onLoggedIn }));
+    mountedRoot?.render(inKorean(createElement(ConnectPage, { onLoggedIn })));
   });
   return host;
 }
@@ -186,7 +193,7 @@ function mountGate(): HTMLElement {
   mountedHost = host;
   mountedRoot = createRoot(host);
   act(() => {
-    mountedRoot?.render(createElement(SessionGate));
+    mountedRoot?.render(inKorean(createElement(SessionGate)));
   });
   return host;
 }

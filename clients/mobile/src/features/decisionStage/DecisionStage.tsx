@@ -23,6 +23,7 @@ import type {AgentApprovalCard} from '@momo/core/features/timeline/agentCardMode
 import {formatMicroUsd} from '@momo/core/features/timeline/agentCardModel';
 import type {DecisionOutcome} from '@momo/core/features/timeline/approvalDecision';
 import {
+  type DecisionStageModel,
   createDecisionStage,
   decisionStageModel,
   decisionStageDragAction,
@@ -66,6 +67,7 @@ import {
 import {LinkOnce} from '../conversation/LinkOnce';
 import {ApprovalDecision, decisionReceiptCopy} from '../inbox/ApprovalDecision';
 import type {DecisionStageSource} from './openDecisionStage';
+import {useFormatMessage} from '../../i18n/useFormatMessage';
 import {useDecisionStageHero} from './useDecisionStageHero';
 
 export interface DecisionStageEntry {
@@ -107,6 +109,8 @@ export function DecisionStage({
   onClose: () => void;
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
+  const formatMessage = useFormatMessage();
+  const positionLabel = (model: DecisionStageModel) => formatMessage(model.position.key, model.position.values as never);
   // 막은 원인의 문장(#5262): 연결 모델이 없는 곳(하네스·시험)은 undefined 라 기존 문장으로 물러난다.
   const blockedLine = useApprovalBlockedLine();
   // 알림이 새 입구로 들어오면 걷는다(#4667). 영웅 모션으로 돌아가는 `hero.close()` 가 아니라 부모의 `onClose` 다 — 그 모션은
@@ -506,7 +510,7 @@ export function DecisionStage({
                       testID="decision-stage-drag"
                       accessible
                       accessibilityRole="adjustable"
-                      accessibilityLabel={`${current.bundle.headline}. ${model.positionLabel}`}
+                      accessibilityLabel={`${current.bundle.headline}. ${positionLabel(model)}`}
                       accessibilityHint={
                         flowing
                           ? undefined
@@ -692,7 +696,7 @@ export function DecisionStage({
                   accessibilityLiveRegion="polite"
                   testID="decision-stage-position"
                 >
-                  {model.positionLabel}
+                  {positionLabel(model)}
                 </Sentence>
                 <Pressable
                   accessibilityRole="button"

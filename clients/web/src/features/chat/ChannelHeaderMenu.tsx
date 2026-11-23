@@ -20,9 +20,10 @@ import {
   useChannelActions,
 } from "./channelActions";
 import {
-  channelActionMenuLabel,
+  channelActionMenuRef,
   type ChannelActionKey,
 } from "@momo/core/features/channels/actionModel";
+import { useFormatMessage } from "@/i18n/useFormatMessage";
 
 // =============================================================================
 // 채널 헤더 ⋮ 메뉴 (검수 피드백 #3 · #1865). 트리거는 헤더 우측 라운드 버튼
@@ -110,7 +111,9 @@ export function ChannelHeaderMenu({
   const [githubOpen, setGithubOpen] = useState(false);
   const [renameOpen, setRenameOpen] = useState(false);
   const topic = normalizeChannelTopic(channel.topic ?? "");
-  const menuLabel = channelActionMenuLabel(title, channel);
+  const formatMessage = useFormatMessage();
+  const menuRef = channelActionMenuRef(title, channel);
+  const menuLabel = formatMessage(menuRef.key, menuRef.values as never);
 
   const actions = useChannelActions({
     workspaceId,

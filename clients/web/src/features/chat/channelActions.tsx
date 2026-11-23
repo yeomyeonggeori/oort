@@ -41,12 +41,12 @@ import { advertiseReadState } from "@/features/chat/advertiseReadState";
 import {
   channelLeaveConfirmBodyKey,
   channelLeaveFailure,
-  CHANNEL_ACTION_ERROR_GROUP_LABEL,
-  CHANNEL_COPY_FAILURE,
-  CHANNEL_COPY_UNAVAILABLE,
-  CHANNEL_MARK_READ_FAILURE,
-  CHANNEL_MARK_UNREAD_FAILURE,
-  CHANNEL_MUTE_FAILURE,
+  CHANNEL_ACTION_ERROR_GROUP_KEY,
+  CHANNEL_COPY_FAILURE_KEY,
+  CHANNEL_COPY_UNAVAILABLE_KEY,
+  CHANNEL_MARK_READ_FAILURE_KEY,
+  CHANNEL_MARK_UNREAD_FAILURE_KEY,
+  CHANNEL_MUTE_FAILURE_KEY,
 } from "@momo/core/features/channels/model";
 import { canSetBrowseListed } from "@momo/core/features/channels/browse";
 import { canRenameChannel } from "@momo/core/features/channels/rename";
@@ -79,7 +79,7 @@ import { ROUTE_REGION_DOM_ID } from "@/app/shellNav";
 import { useClipboardCopy } from "@/design/hooks/useClipboardCopy";
 import { channelShareUrl } from "@/features/inbox/anchor";
 import { openChannelId } from "@/features/sidebar/openChannel";
-import { SECTION_MOVE_TO_BASE_LABEL } from "@momo/core/features/sidebar/sidebarSections";
+import { SECTION_MOVE_TO_BASE_KEY } from "@momo/core/features/sidebar/sidebarSections";
 import { absoluteApiBase } from "@/lib/serverBase";
 import { useFormatMessage } from "@/i18n/useFormatMessage";
 import {
@@ -260,7 +260,7 @@ export function useChannelActions({
       setError(null);
       onActionSucceeded();
     },
-    onError: () => setError(CHANNEL_MUTE_FAILURE),
+    onError: () => setError(formatMessage(CHANNEL_MUTE_FAILURE_KEY)),
   });
 
   // 「읽음 처리」는 새 서버 표면이 아니다: ChatShell 이 채널을 열었을 때 미는 것과
@@ -286,7 +286,7 @@ export function useChannelActions({
       applyReadStateToCache(client, workspaceId, state);
       invalidateReadStates();
     },
-    onError: () => setError(CHANNEL_MARK_READ_FAILURE),
+    onError: () => setError(formatMessage(CHANNEL_MARK_READ_FAILURE_KEY)),
   });
 
   // 「읽지 않음으로 표시」 (#3963). 다 읽은 채널의 **가장 최근 메시지**를 첫 안 읽음으로
@@ -312,7 +312,7 @@ export function useChannelActions({
       applyReadStateToCache(client, workspaceId, state);
       invalidateReadStates();
     },
-    onError: () => setError(CHANNEL_MARK_UNREAD_FAILURE),
+    onError: () => setError(formatMessage(CHANNEL_MARK_UNREAD_FAILURE_KEY)),
   });
 
   // ## 목록에서 지우는 시점 — 낙관이 다이얼로그를 죽였다 (design-review #1937 H-1)
@@ -442,12 +442,12 @@ export function useChannelActions({
     // 클립보드 API 자체가 없으면 다시 눌러도 같다. 「다시 시도」라고 말하지
     // 않는 이유이고, `MessageRow.onCopyLink` 가 이미 하는 판정이다.
     if (typeof navigator.clipboard?.writeText !== "function") {
-      setCopyFailure({ key, message: CHANNEL_COPY_UNAVAILABLE });
+      setCopyFailure({ key, message: formatMessage(CHANNEL_COPY_UNAVAILABLE_KEY) });
       return;
     }
     setError(null);
     void copy().then((ok) => {
-      if (!ok) setCopyFailure({ key, message: CHANNEL_COPY_FAILURE });
+      if (!ok) setCopyFailure({ key, message: formatMessage(CHANNEL_COPY_FAILURE_KEY) });
     });
   }
 
@@ -663,6 +663,7 @@ function ChannelSectionMoveChoices({
   actions: ChannelActions;
   onHandOff: (key: ChannelActionKey) => void;
 }) {
+  const formatMessage = useFormatMessage();
   const choices = item.sections ?? [];
   // 값은 문자열이어야 한다(Radix RadioGroup). 기본 섹션의 `null` 은 채널 id 가
   // 될 수 없는 낱말 하나로 적는다 - 커스텀 섹션 id 는 `sec-<수>` 꼴이라 절대
@@ -681,7 +682,7 @@ function ChannelSectionMoveChoices({
         actions.moveToSection(next === BASE ? null : next);
       }}
     >
-      {[{ id: null, label: SECTION_MOVE_TO_BASE_LABEL }, ...choices].map(
+      {[{ id: null, label: formatMessage(SECTION_MOVE_TO_BASE_KEY) }, ...choices].map(
         (choice) => {
           const value = choice.id ?? BASE;
           return (
@@ -871,6 +872,7 @@ function ChannelActionClusterRows({
   actions: ChannelActions;
   onHandOff: (key: ChannelActionKey) => void;
 }) {
+  const formatMessage = useFormatMessage();
   const rows = run.map((item) =>
     item.sections ? (
       <ChannelSectionMoveChoices
@@ -903,7 +905,7 @@ function ChannelActionClusterRows({
     <Sub>
       <SubTrigger data-testid={`${prefix}-${submenu.testKey}`}>
         <ActionIcon name={submenu.icon} />
-        {submenu.label}
+        {formatMessage(submenu.labelKey)}
       </SubTrigger>
       <SubContent data-testid={`${prefix}-${submenu.testKey}-menu`}>
         {rows}
@@ -950,6 +952,7 @@ export function ChannelActionMenuItems({
    */
   onHandOff: (key: ChannelActionKey) => void;
 }) {
+  const formatMessage = useFormatMessage();
   const Separator =
     surface === "header" ? DropdownMenuSeparator : ContextMenuSeparator;
   const runs = clusterRuns(actions.items(surface));
@@ -973,7 +976,7 @@ export function ChannelActionMenuItems({
       {actions.copyFailure && (
         // 눈에는 누른 줄이 말하고(위 `ChannelActionMenuRow`), 귀에는 여기가 문장 전체를 읽는다. `sr-only`
         // 는 자리를 차지하지 않으므로 판의 폭도 줄 위치도 움직이지 않는다.
-        <div role="group" aria-label={CHANNEL_ACTION_ERROR_GROUP_LABEL}>
+        <div role="group" aria-label={formatMessage(CHANNEL_ACTION_ERROR_GROUP_KEY)}>
           <p
             role="alert"
             className="sr-only"
@@ -987,7 +990,7 @@ export function ChannelActionMenuItems({
         // `w-0 min-w-full`: 실패 문장이 메뉴 폭을 정하지 않는다. 폭은 줄들이 정하고, 이 상자는 그 폭 안에서 줄바꿈한다(#5958).
         <div
           role="group"
-          aria-label={CHANNEL_ACTION_ERROR_GROUP_LABEL}
+          aria-label={formatMessage(CHANNEL_ACTION_ERROR_GROUP_KEY)}
           className="w-0 min-w-full"
         >
           <InlineBanner

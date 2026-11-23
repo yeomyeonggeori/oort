@@ -128,8 +128,11 @@ export function viewerCaptionLabel(position: number, total: number): string {
  * 「2026년 10월 29일 14:55」. 날짜는 앱 전체가 쓰는 한 가지 철자다(`absoluteDayLabel` — 「2026. 10. 29.」를 따로 지으면 한 앱에
  * 두 철자가 산다, `divider.ts`). 시각은 행 시각과 같은 24시간 HH:MM 이다.
  */
-export function viewerStamp(sentAtMs: number): string {
-  return `${absoluteDayLabel(sentAtMs)} ${clockLabel(sentAtMs)}`;
+export function viewerStamp(
+  formatMessage: Parameters<typeof absoluteDayLabel>[0],
+  sentAtMs: number
+): string {
+  return `${absoluteDayLabel(formatMessage, sentAtMs)} ${clockLabel(sentAtMs)}`;
 }
 
 /**

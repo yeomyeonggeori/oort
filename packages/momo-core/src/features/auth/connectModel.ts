@@ -1,6 +1,7 @@
 import { ApiError } from "../../lib/api";
 import { NetworkError } from "../../lib/http";
 import { GUEST_INVITES_PAUSED_CODE } from "../settings/model";
+import type { FailureMessage } from "./failureMessage";
 import { passwordRuleCopy } from "./passwordRuleCopy";
 
 // =============================================================================
@@ -73,7 +74,8 @@ export function prefillFocus(form: {
 
 /** A failure the connect screen can state plainly, with what to do next. */
 export interface ConnectFailure {
-  message: string;
+  /** 사전의 문장(`auth.*`) 또는 전송 오류가 들고 온 글. 화면이 `failureMessageText`로 푼다. */
+  message: FailureMessage;
   /**
    * Invite-code verdicts (404/409/410/403) render on S1 next to the code
    * field. Password and transport failures stay on S2.
@@ -90,8 +92,6 @@ export interface ConnectFailure {
   retryable: boolean;
 }
 
-const ASK_ADMIN = "워크스페이스 관리자에게 새 초대 링크를 요청하세요.";
-
 /**
  * The transport never got an answer (MOMO-609). `NetworkError` already carries
  * user-facing copy that names which of the two happened — the deadline blew, or
@@ -100,13 +100,13 @@ const ASK_ADMIN = "워크스페이스 관리자에게 새 초대 링크를 요�
  */
 function transportFailure(cause: unknown): ConnectFailure | null {
   if (cause instanceof NetworkError) {
-    return { message: cause.message, suggestSignIn: false, retryable: true };
+    return { message: { raw: cause.message }, suggestSignIn: false, retryable: true };
   }
   if (cause instanceof ApiError) return null;
   // Anything else reaching here is a client-side fault (a malformed response
   // body, say). It still ends the busy state with something actionable.
   return {
-    message: "서버 응답을 읽지 못했습니다. 주소를 확인하고 다시 시도하세요.",
+    message: { key: "auth.failure.unreadableResponse" },
     suggestSignIn: false,
     retryable: true,
   };
@@ -144,7 +144,7 @@ function joinFailureCopyBody(cause: unknown): ConnectFailure {
     // A guest code: there is no new link to ask for, so the sentence does not say so.
     if (isGuestInvitePaused(failure)) {
       return {
-        message: `게스트 초대는 채널별 초대가 준비될 때까지 잠시 멈춰 있습니다. ${ASK_ADMIN_SIGN_IN}`,
+        message: { key: "auth.join.guestPaused" },
         suggestSignIn: false,
         retryable: false,
       };
@@ -154,60 +154,59 @@ function joinFailureCopyBody(cause: unknown): ConnectFailure {
   switch (failure.status) {
     case 404:
       return {
-        message:
-          "유효하지 않은 초대 코드입니다. 초대한 사람에게 링크를 다시 확인하세요.",
+        message: { key: "auth.join.invalidCode" },
         suggestSignIn: false,
         retryable: false,
       };
     case 410:
       if (detail.includes("expired")) {
         return {
-          message: `만료된 초대입니다. ${ASK_ADMIN}`,
+          message: { key: "auth.join.expired" },
           suggestSignIn: false,
           retryable: false,
         };
       }
       if (detail.includes("revoked")) {
         return {
-          message: `회수된 초대입니다. ${ASK_ADMIN}`,
+          message: { key: "auth.join.revoked" },
           suggestSignIn: false,
           retryable: false,
         };
       }
       return {
-        message: `더 이상 쓸 수 없는 초대입니다. ${ASK_ADMIN}`,
+        message: { key: "auth.join.unusable" },
         suggestSignIn: false,
         retryable: false,
       };
     case 409:
       if (detail.includes("already redeemed")) {
         return {
-          message: "이미 이 초대로 가입한 계정입니다. 로그인하세요.",
+          message: { key: "auth.join.alreadyRedeemed" },
           suggestSignIn: true,
           retryable: false,
         };
       }
       if (detail.includes("exhausted")) {
         return {
-          message: `사용 횟수가 모두 찬 초대입니다. ${ASK_ADMIN}`,
+          message: { key: "auth.join.exhausted" },
           suggestSignIn: false,
           retryable: false,
         };
       }
       return {
-        message: `이 초대로는 가입할 수 없습니다. ${ASK_ADMIN}`,
+        message: { key: "auth.join.cannotJoin" },
         suggestSignIn: false,
         retryable: false,
       };
     case 403:
       return {
-        message: `이 초대로는 가입 권한이 없습니다. ${ASK_ADMIN}`,
+        message: { key: "auth.join.notPermitted" },
         suggestSignIn: false,
         retryable: false,
       };
     case 429:
       return {
-        message: "요청이 너무 잦습니다. 잠시 뒤에 다시 시도하세요.",
+        message: { key: "auth.failure.tooManyRequests" },
         suggestSignIn: false,
         retryable: false,
       };
@@ -219,15 +218,12 @@ function joinFailureCopyBody(cause: unknown): ConnectFailure {
       // language of the form, and the raw string stays where it is useful — the
       // network tab.
       return {
-        message: unmappedMessage(failure.status, ASK_ADMIN),
+        message: unmappedMessage(failure.status, "auth.join.unmapped"),
         suggestSignIn: false,
         retryable: failure.status >= 500,
       };
   }
 }
-
-/** The admin to ask when a sign-in, rather than an invite, is the thing stuck. */
-const ASK_ADMIN_SIGN_IN = "워크스페이스 관리자에게 문의하세요.";
 
 /**
  * Copy for a status nothing above claimed.
@@ -236,10 +232,11 @@ const ASK_ADMIN_SIGN_IN = "워크스페이스 관리자에게 문의하세요.";
  * distinction worth keeping from the raw string is the one a person can act on:
  * a 5xx is worth retrying and a 4xx is not.
  */
-function unmappedMessage(status: number, askAdmin: string): string {
-  return status >= 500
-    ? "서버에서 오류가 났습니다. 잠시 뒤에 다시 시도하세요."
-    : `요청을 처리하지 못했습니다. ${askAdmin}`;
+function unmappedMessage(
+  status: number,
+  clientError: "auth.join.unmapped" | "auth.signIn.unmapped"
+): FailureMessage {
+  return status >= 500 ? { key: "auth.failure.serverError" } : { key: clientError };
 }
 
 /** Sign-in failures. 401 and 403 carry the two answers a person can act on. */
@@ -249,7 +246,7 @@ export function signInFailureCopy(cause: unknown): ConnectFailure {
   const failure = cause as ApiError;
   if (failure.status === 401) {
     return {
-      message: "이메일 또는 비밀번호가 맞지 않습니다.",
+      message: { key: "auth.signIn.invalidCredentials" },
       suggestSignIn: false,
       retryable: false,
     };
@@ -265,8 +262,7 @@ export function signInFailureCopy(cause: unknown): ConnectFailure {
     failure.message.toLowerCase().includes("workspace")
   ) {
     return {
-      message:
-        "워크스페이스 ID 형식이 아닙니다. 비워 두면 기본 워크스페이스로 연결합니다.",
+      message: { key: "auth.signIn.workspaceIdFormat" },
       suggestSignIn: false,
       retryable: false,
     };
@@ -276,13 +272,13 @@ export function signInFailureCopy(cause: unknown): ConnectFailure {
     // not usable, which is a different sentence and a different next step from
     // "the password is wrong".
     return {
-      message: `이 계정은 지금 로그인할 수 없습니다. ${ASK_ADMIN_SIGN_IN}`,
+      message: { key: "auth.signIn.suspended" },
       suggestSignIn: false,
       retryable: false,
     };
   }
   return {
-    message: unmappedMessage(failure.status, ASK_ADMIN_SIGN_IN),
+    message: unmappedMessage(failure.status, "auth.signIn.unmapped"),
     suggestSignIn: false,
     retryable: failure.status >= 500,
   };

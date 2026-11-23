@@ -17,14 +17,15 @@ import {
   renameSidebarSection,
   reorderSidebarSection,
   sectionIdForChannel,
-  sidebarChannelRefCapMessage,
+  sidebarChannelRefCapRef,
   sidebarChannelRefCount,
   toggleStarredChannel,
   SIDEBAR_CHANNEL_REF_MAX,
-  SIDEBAR_PREFS_LOAD_FAILURE,
-  SIDEBAR_PREFS_SAVE_FAILURE,
+  SIDEBAR_PREFS_LOAD_FAILURE_KEY,
+  SIDEBAR_PREFS_SAVE_FAILURE_KEY,
   type SidebarPrefs,
 } from "@momo/core/features/sidebar/sidebarSections";
+import type { MessageRef } from "@momo/core/i18n/keys";
 
 // =============================================================================
 // 사이드바 배치의 저장 (ADR-0177 D2 / BT-4 #1932).
@@ -76,6 +77,11 @@ import {
 /** buzz `channelSectionsSync` 와 같은 수. 정리하는 손이 멈춘 뒤에야 한 번 나간다. */
 export const SIDEBAR_PREFS_SAVE_DEBOUNCE_MS = 2000;
 
+/** What the banner says, as a key the screen formats when it draws (a standing banner follows a language switch). */
+export type SidebarPrefsMessage = MessageRef<
+  "sidebar.prefs.saveFailed" | "sidebar.prefs.loadFailed" | "sidebar.section.capChannels"
+>;
+
 export type SidebarPrefsStatus = "loading" | "error" | "ready";
 
 export interface SidebarPrefsController {
@@ -93,9 +99,9 @@ export interface SidebarPrefsController {
   /** 상한에 닿지 않았는가(50). `canEdit` 이 거짓이면 이 값은 뜻이 없다. */
   canCreate: boolean;
   /** 저장 실패·상한 초과 문장. 배너가 읽는다. */
-  error: string | null;
+  error: SidebarPrefsMessage | null;
   /** 부트스트랩을 한 번도 못 읽었을 때의 문장. `error` 와 다른 자리다. */
-  loadError: string | null;
+  loadError: SidebarPrefsMessage | null;
   retryLoad: () => void;
   dismissError: () => void;
   createSection: (name: string) => void;
@@ -128,7 +134,7 @@ export function useSidebarPrefs(workspaceId: string): SidebarPrefsController {
   // 로컬 편집. `null` 이면 서버가 준 것이 곧 화면이다. 편집이 저장되면 다시
   // `null` 로 돌아가 서버가 유일한 정본이 된다 - 두 벌을 오래 들고 있지 않는다.
   const [draft, setDraft] = useState<SidebarPrefs | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<SidebarPrefsMessage | null>(null);
 
   // **여기가 B-1 의 자리다.** `query.data` 가 없다는 것은 「섹션이 없다」가 아니라
   // 「모른다」이고, 그 둘을 같은 값으로 접으면 아래 쓰기 경로가 남의 payload 를
@@ -165,7 +171,7 @@ export function useSidebarPrefs(workspaceId: string): SidebarPrefsController {
         .catch(() => {
           // 되돌린다. 서버가 준 마지막 payload 가 다시 화면이 된다.
           setDraft((current) => (current === next ? null : current));
-          setError(SIDEBAR_PREFS_SAVE_FAILURE);
+          setError({ key: SIDEBAR_PREFS_SAVE_FAILURE_KEY });
         });
     },
     [client]
@@ -177,14 +183,14 @@ export function useSidebarPrefs(workspaceId: string): SidebarPrefsController {
       // 들지 않은 동안에는 이 훅이 쓰기 자체를 거절한다. 조용히 거절하지 않고
       // 문장을 남긴다 - 눌렀는데 아무 일도 없는 컨트롤은 아무 말도 하지 않는다.
       if (!knowsServerTruth) {
-        setError(SIDEBAR_PREFS_LOAD_FAILURE);
+        setError({ key: SIDEBAR_PREFS_LOAD_FAILURE_KEY });
         return;
       }
       // M-3: 「저장 전에 여기서 먼저 세어 400 을 왕복 없이 막는다」는 약속을
       // 지키는 자리. 적용한 뒤 서버가 거절해 롤백되면, 사람은 무엇이 한계였는지
       // 끝내 듣지 못한다.
       if (sidebarChannelRefCount(next) > SIDEBAR_CHANNEL_REF_MAX) {
-        setError(sidebarChannelRefCapMessage());
+        setError(sidebarChannelRefCapRef());
         return;
       }
       setDraft(next);
@@ -310,7 +316,7 @@ export function useSidebarPrefs(workspaceId: string): SidebarPrefsController {
       canEdit: status === "ready",
       canCreate: canCreateSidebarSection(prefs),
       error,
-      loadError: status === "error" ? SIDEBAR_PREFS_LOAD_FAILURE : null,
+      loadError: status === "error" ? { key: SIDEBAR_PREFS_LOAD_FAILURE_KEY } : null,
       retryLoad,
       dismissError: () => setError(null),
       createSection,

@@ -1,3 +1,5 @@
+import type { LocaleService } from "../../i18n/context";
+import type { PlainMessageKey } from "../../i18n/keys";
 import type { Message } from "../../lib/api";
 import {
   agentCardModel,
@@ -93,18 +95,17 @@ export interface ArtifactNote {
 }
 
 interface NoteCopy {
-  sentence: string;
+  sentence: PlainMessageKey;
   /**
    * How the server's note is introduced, or null when the note REPLACES the
    * sentence: on a failure the server's own reason is better copy than ours.
    */
-  lead: string | null;
+  lead: PlainMessageKey | null;
   tone?: "danger";
   live?: true;
 }
 
-const IN_FLIGHT =
-  "아직 받는 중입니다. 아래 내용과 숫자는 지금까지 도착한 부분입니다.";
+const IN_FLIGHT = "timeline.artifactNote.inFlight" satisfies PlainMessageKey;
 
 /**
  * Copy per status, as a TOTAL map rather than an if/else chain.
@@ -128,41 +129,50 @@ const IN_FLIGHT =
  */
 const NOTE_COPY: Readonly<Record<AgentTurnStatus, NoteCopy>> = {
   queued: {
-    sentence: "아직 시작하지 않았습니다. 아래 내용과 숫자는 확정이 아닙니다.",
-    lead: "함께 온 메모",
+    sentence: "timeline.artifactNote.queued",
+    lead: "timeline.artifactNote.leadNote",
   },
-  thinking: { sentence: IN_FLIGHT, lead: "마지막 신호", live: true },
-  streaming: { sentence: IN_FLIGHT, lead: "마지막 신호", live: true },
+  thinking: { sentence: IN_FLIGHT, lead: "timeline.artifactNote.leadSignal", live: true },
+  streaming: { sentence: IN_FLIGHT, lead: "timeline.artifactNote.leadSignal", live: true },
   "awaiting-approval": {
-    sentence: "승인을 기다리는 중이라 아래 내용은 아직 확정이 아닙니다.",
-    lead: "마지막 신호",
+    sentence: "timeline.artifactNote.awaitingApproval",
+    lead: "timeline.artifactNote.leadSignal",
   },
   done: {
-    sentence: "실행이 끝났습니다. 아래 내용이 전부입니다.",
-    lead: "함께 온 메모",
+    sentence: "timeline.artifactNote.done",
+    lead: "timeline.artifactNote.leadNote",
   },
   error: {
-    sentence: "이 변경을 끝내지 못했습니다. 아래 내용은 실패한 시점까지입니다.",
+    sentence: "timeline.artifactNote.error",
     lead: null,
     tone: "danger",
   },
   stalled: {
-    sentence: "아직 응답이 없습니다. 실패로 확정되지 않았습니다.",
-    lead: "마지막 신호",
+    sentence: "timeline.artifactNote.stalled",
+    lead: "timeline.artifactNote.leadSignal",
   },
   cancelled: {
-    sentence: "실행이 중단되어 여기까지만 도착했습니다.",
-    lead: "마지막 신호",
+    sentence: "timeline.artifactNote.cancelled",
+    lead: "timeline.artifactNote.leadSignal",
   },
 };
 
 /** What the artifact card says under the chip, for one turn state. */
-export function artifactNote(state: ArtifactState): ArtifactNote {
+export function artifactNote(
+  formatMessage: LocaleService["formatMessage"],
+  state: ArtifactState
+): ArtifactNote {
   const copy = NOTE_COPY[state.status];
-  let text = copy.sentence;
+  let text = formatMessage(copy.sentence);
   if (state.note !== undefined) {
     text =
-      copy.lead === null ? state.note : `${text} ${copy.lead}: ${state.note}`;
+      copy.lead === null
+        ? state.note
+        : formatMessage("timeline.artifactNote.withNote", {
+            sentence: text,
+            lead: formatMessage(copy.lead),
+            note: state.note,
+          });
   }
   return { text, tone: copy.tone ?? "muted", live: copy.live === true };
 }

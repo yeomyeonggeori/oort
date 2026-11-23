@@ -1,19 +1,24 @@
 import { describe, expect, it } from "vitest";
 import {
-  DM_CLOSE_STAR_FIRST_HINT,
+  DM_CLOSE_STAR_FIRST_KEY,
   dmCloseBlockedByStar,
   dmCloseOffered,
   dmClosedListReason,
   dmReadFacts,
-  dmClosedReasonLabel,
-  dmReopenLabelFor,
-  DM_CLOSED_LIST_HINT,
-  DM_CLOSED_LIST_LABEL,
-  DM_REOPEN_LABEL,
+  dmClosedReasonKey,
+  dmReopenKeyFor,
+  DM_CLOSED_LIST_HINT_KEY,
+  DM_CLOSED_LIST_KEY,
+  DM_REOPEN_KEY,
   dmVisibility,
   type DmVisibilityInput,
   type DmVisibilityRule,
 } from "./dmVisibility";
+import { catalog as koCatalog } from "../../i18n/generated/ko-KR";
+import { createMessageCopy } from "../../testkit";
+
+// 낱말은 사전에 있다(#6045). 시험은 한국어 생성물로 풀어 같은 문장을 그대로 단정한다.
+const ko = createMessageCopy({ messageLocale: "ko-KR", catalog: koCatalog });
 
 // ADR-0177 증보 D8 의 표 9줄과 `unknown` 을 한 행렬로 잰다. 기본 입력은 「9번: 그 밖」이고, 각 행은 **그 줄만** 맞도록 한 칸씩
 // 바꾼다. 그래서 줄을 지우거나 순서를 바꾸면 이름을 부르며 빨개진다.
@@ -157,7 +162,7 @@ describe("닫기를 내미는가 (D7)", () => {
     expect(dmCloseBlockedByStar({ ...OK, starredOrSectioned: true, unreadCount: 3 })).toBe(false);
     expect(dmCloseBlockedByStar({ ...OK, starredOrSectioned: true, phase: "loading" })).toBe(false);
     expect(dmCloseBlockedByStar(OK)).toBe(false);
-    expect(DM_CLOSE_STAR_FIRST_HINT).toBe("별표를 먼저 빼요");
+    expect(ko(DM_CLOSE_STAR_FIRST_KEY)).toBe("별표를 먼저 빼요");
   });
 });
 
@@ -179,20 +184,20 @@ describe("「숨긴 대화」 목록에 드는 줄 (D11)", () => {
 
 describe("「숨긴 대화」 문구 (D11)", () => {
   it("이유 줄: 숨김은 「내가 숨겼어요」, 나간 상대는 원인(상대가 나갔다)과 조건(안 읽은 메시지가 없다)을 함께 말한다", () => {
-    expect(dmClosedReasonLabel("closed")).toBe("내가 숨겼어요");
-    expect(dmClosedReasonLabel("gone")).toBe("상대가 나갔고 안 읽은 메시지가 없어요");
+    expect(ko(dmClosedReasonKey("closed"))).toBe("내가 숨겼어요");
+    expect(ko(dmClosedReasonKey("gone"))).toBe("상대가 나갔고 안 읽은 메시지가 없어요");
   });
 
   it("동작 낱말: 숨긴 대화는 「다시 보이기」, 나간 상대는 풀 숨김이 없어 「열기」", () => {
-    expect(DM_REOPEN_LABEL).toBe("다시 보이기");
-    expect(dmReopenLabelFor("closed")).toBe("다시 보이기");
-    expect(dmReopenLabelFor("gone")).toBe("열기");
+    expect(ko(DM_REOPEN_KEY)).toBe("다시 보이기");
+    expect(ko(dmReopenKeyFor("closed"))).toBe("다시 보이기");
+    expect(ko(dmReopenKeyFor("gone"))).toBe("열기");
   });
 
   it("제목과 힌트는 한 번씩만 말한다", () => {
-    expect(DM_CLOSED_LIST_LABEL).toBe("숨긴 대화");
-    expect(DM_CLOSED_LIST_HINT).toContain("새 메시지가 오면");
-    expect(DM_CLOSED_LIST_HINT).not.toContain("—");
+    expect(ko(DM_CLOSED_LIST_KEY)).toBe("숨긴 대화");
+    expect(ko(DM_CLOSED_LIST_HINT_KEY)).toContain("새 메시지가 오면");
+    expect(ko(DM_CLOSED_LIST_HINT_KEY)).not.toContain("—");
   });
 });
 

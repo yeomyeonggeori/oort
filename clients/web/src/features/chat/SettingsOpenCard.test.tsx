@@ -5,7 +5,10 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { MemoryRouter, useLocation } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { SessionProvider, type SessionContextValue } from "@/app/session";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { LocaleProvider } from "@/i18n/LocaleProvider";
+import type { AppLocale } from "@/i18n/localeStore";
+import { koreanLocale } from "@/testing/koLocale";
 import type { Message, RosterMember } from "@momo/core/lib/api";
 import { makeDirectory } from "@momo/core/features/workspace/directory";
 import * as surfaces from "@momo/core/features/capabilities/serverSurfaces";
@@ -81,12 +84,20 @@ const SESSION: SessionContextValue = {
 };
 
 /** 표면 판정 훅(`useSurfaceProvidedPredicate`)이 세션·쿼리 문맥을 요구한다. 호스트 목록은 못 받아 「없음」이다. */
+// 이 파일은 한국어 문구를 단정한다(#6044): 공급자 밖의 화면은 번들된 영어로 그리므로 한국어 언어 객체로 감싼다.
+let ko: AppLocale;
+beforeAll(async () => {
+  ko = await koreanLocale();
+});
+
 function Providers({ children }: { children: React.ReactNode }) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return (
     <QueryClientProvider client={client}>
       <SessionProvider value={SESSION}>
-        <MemoryRouter initialEntries={["/c/general"]}>{children}</MemoryRouter>
+        <LocaleProvider locale={ko}>
+          <MemoryRouter initialEntries={["/c/general"]}>{children}</MemoryRouter>
+        </LocaleProvider>
       </SessionProvider>
     </QueryClientProvider>
   );

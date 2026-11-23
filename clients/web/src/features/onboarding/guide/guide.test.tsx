@@ -14,6 +14,11 @@ import {
 import { KOMETTO_EXPRESSION_ASSETS } from "./komettoExpressions";
 import { KomettoGuide } from "./KomettoGuide";
 import { OnboardingDots } from "./OnboardingDots";
+import { LocaleProvider } from "@/i18n/LocaleProvider";
+import { koreanLocale } from "@/testing/koLocale";
+
+// 진행 점의 숨김 문장 등은 사전에서 오므로(#6064) 화면을 한국어 언어 객체 아래에서 그린다.
+const koLocale = await koreanLocale();
 
 let reducedMotion = false;
 let host: HTMLDivElement;
@@ -43,7 +48,7 @@ afterEach(() => {
 });
 
 function render(element: ReactElement) {
-  act(() => root.render(element));
+  act(() => root.render(createElement(LocaleProvider, { locale: koLocale, children: element })));
 }
 
 function guide(expression: KomettoExpression, line = "어디로 갈까요?") {

@@ -5,8 +5,8 @@ import { installCoreHost, resetCoreHost } from "../../runtime/host";
 import {
   DEVICE_KEY_REFUSAL,
   DeviceKeyRebindError,
-  deviceKeyErrorMessage,
-  deviceKeyServerMessage,
+  deviceKeyErrorKey,
+  deviceKeyServerKey,
   fetchSigningContext,
   keyNeedsRebind,
   listDeviceKeys,
@@ -23,6 +23,16 @@ import {
   unapprovablePhoneKeys,
   type DeviceKey,
 } from "./deviceKeys";
+import { catalog as koCatalog } from "../../i18n/generated/ko-KR";
+import { createMessageCopy } from "../../testkit";
+
+// 문장은 사전(`auth.json`)에 있다(#6064). 시험은 제품과 같은 한국어 생성물로 키를 풀어 예전 한국어를 그대로 단정한다.
+const ko = createMessageCopy({ messageLocale: "ko-KR", catalog: koCatalog });
+const errorText = (code: unknown): string => ko(deviceKeyErrorKey(code));
+const serverText = (code: string | undefined, fallback: string): string => {
+  const key = deviceKeyServerKey(code);
+  return key === null ? fallback : ko(key);
+};
 
 const WS = "00000000-0000-7000-8000-000000000001";
 const PHONE_KEY = "A2sX0fLhLEJH+Lzm5WOkQPJ3A32BLeszoPShOUXYmMKW";
@@ -256,7 +266,7 @@ describe("rebind (#3103, ADR-0146 D-7 증보 #3097)", () => {
     answer({ deviceKey: row({ current: false, lineageLive: true }) });
     const error = await rebindDeviceKey(WS, input).catch((e: unknown) => e);
     expect(error).toBeInstanceOf(DeviceKeyRebindError);
-    expect(deviceKeyErrorMessage(error)).toContain("옮기지 않았어요");
+    expect(errorText(error)).toContain("옮기지 않았어요");
     answer({ deviceKey: row({ current: true, lineageLive: false }) });
     expect(await rebindDeviceKey(WS, input).catch((e: unknown) => e)).toBeInstanceOf(
       DeviceKeyRebindError
@@ -268,10 +278,10 @@ describe("rebind (#3103, ADR-0146 D-7 증보 #3097)", () => {
     answer({ error: { message: "x", code: "device_signature_invalid" } }, 403);
     const error = (await rebindDeviceKey(WS, input).catch((e: unknown) => e)) as ApiError;
     expect(error.code).toBe("device_signature_invalid");
-    expect(deviceKeyServerMessage(error.code, "fallback")).toContain("시계");
-    expect(deviceKeyServerMessage("device_key_rebind_required", "f")).toContain("다시 연결");
-    expect(deviceKeyServerMessage("device_key_not_found", "f")).toContain("새로 등록");
-    expect(deviceKeyErrorMessage("device_key_no_session")).toContain("다시 로그인");
+    expect(serverText(error.code, "fallback")).toContain("시계");
+    expect(serverText("device_key_rebind_required", "f")).toContain("다시 연결");
+    expect(serverText("device_key_not_found", "f")).toContain("새로 등록");
+    expect(errorText("device_key_no_session")).toContain("다시 로그인");
   });
 });
 
@@ -311,8 +321,8 @@ describe("deviceKeys views", () => {
     expect(phoneKeys(rows).map((k) => k.id)).toEqual(["qr", "approved-before", "older-server"]);
     expect(rows[3]!.linkedSession).toBe(false);
     expect(rows[4]!.linkedSession).toBeUndefined();
-    expect(deviceKeyServerMessage(DEVICE_KEY_REFUSAL.requiresLinkedSession, "x")).toContain("QR");
-    expect(deviceKeyServerMessage(DEVICE_KEY_REFUSAL.linkNotFromMac, "x")).toContain("QR");
+    expect(serverText(DEVICE_KEY_REFUSAL.requiresLinkedSession, "x")).toContain("QR");
+    expect(serverText(DEVICE_KEY_REFUSAL.linkNotFromMac, "x")).toContain("QR");
   });
 
   it("counts the waiting phones no root may approve, and only those (#3129)", () => {
@@ -333,8 +343,8 @@ describe("deviceKeys views", () => {
       .filter((k) => k.state === "unendorsed")
       .map((k) => k.id);
     expect(shown.sort()).toEqual(waiting.sort());
-    expect(deviceKeyErrorMessage("work_host_not_running")).toContain("작업 호스트");
-    expect(deviceKeyErrorMessage("workd_refused: requirement_unavailable")).toContain(
+    expect(errorText("work_host_not_running")).toContain("작업 호스트");
+    expect(errorText("workd_refused: requirement_unavailable")).toContain(
       "작업 호스트"
     );
   });

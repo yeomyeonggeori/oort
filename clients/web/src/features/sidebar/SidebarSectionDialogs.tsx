@@ -18,22 +18,23 @@ import {
 import { Button } from "@/design/ui/button";
 import { Input } from "@/design/ui/input";
 import {
-  SECTION_CREATE_TITLE,
-  SECTION_DELETE_CONFIRM_LABEL,
-  SECTION_DELETE_CONFIRM_TITLE,
-  SECTION_DELETE_LABEL,
-  SECTION_MOVE_DOWN_LABEL,
-  SECTION_MOVE_UP_LABEL,
-  SECTION_NAME_FIELD_LABEL,
-  SECTION_NAME_PLACEHOLDER,
-  SECTION_RENAME_LABEL,
-  SECTION_RENAME_TITLE,
-  sectionDeleteConfirmBody,
+  SECTION_CREATE_TITLE_KEY,
+  SECTION_DELETE_CONFIRM_LABEL_KEY,
+  SECTION_DELETE_CONFIRM_TITLE_KEY,
+  SECTION_DELETE_LABEL_KEY,
+  SECTION_MOVE_DOWN_KEY,
+  SECTION_MOVE_UP_KEY,
+  SECTION_NAME_FIELD_LABEL_KEY,
+  SECTION_NAME_PLACEHOLDER_KEY,
+  SECTION_RENAME_LABEL_KEY,
+  SECTION_RENAME_TITLE_KEY,
+  sectionDeleteConfirmBodyRef,
   sidebarSectionNameIssue,
-  sidebarSectionNameIssueMessage,
+  sidebarSectionNameIssueRef,
   SIDEBAR_SECTION_NAME_MAX,
 } from "@momo/core/features/sidebar/sidebarSections";
 import { Tooltip } from "@/design/ui/tooltip";
+import { useFormatMessage } from "@/i18n/useFormatMessage";
 
 // =============================================================================
 // 섹션 CRUD 의 그릇 (ADR-0177 D4 / BT-4 #1932).
@@ -72,6 +73,7 @@ export function SectionNameDialog({
   onOpenChange: (open: boolean) => void;
   onSubmit: (name: string) => void;
 }) {
+  const formatMessage = useFormatMessage();
   const fieldId = useId();
   const [name, setName] = useState(initialName);
   const [touched, setTouched] = useState(false);
@@ -88,7 +90,7 @@ export function SectionNameDialog({
   const issue = sidebarSectionNameIssue(name);
   // 아직 아무것도 안 친 빈 칸에 붉은 문장을 세우지 않는다. 제출을 눌렀을 때
   // (혹은 한 번 고쳤다가 지웠을 때) 비로소 말한다.
-  const error = touched && issue ? sidebarSectionNameIssueMessage(issue) : null;
+  const error = touched && issue ? sidebarSectionNameIssueRef(issue) : null;
 
   return (
     <Dialog
@@ -104,7 +106,7 @@ export function SectionNameDialog({
       >
           <div className="flex flex-col gap-1">
             <DialogTitle>
-              {mode === "create" ? SECTION_CREATE_TITLE : SECTION_RENAME_TITLE}
+              {formatMessage(mode === "create" ? SECTION_CREATE_TITLE_KEY : SECTION_RENAME_TITLE_KEY)}
             </DialogTitle>
             <DialogDescription>
               사이드바에서 이 이름으로 채널을 묶어요.
@@ -122,14 +124,14 @@ export function SectionNameDialog({
             }}
           >
             <label htmlFor={fieldId} className="text-meta text-ink-muted">
-              {SECTION_NAME_FIELD_LABEL}
+              {formatMessage(SECTION_NAME_FIELD_LABEL_KEY)}
             </label>
             <Input
               id={fieldId}
               autoFocus
               value={name}
               maxLength={SIDEBAR_SECTION_NAME_MAX}
-              placeholder={SECTION_NAME_PLACEHOLDER}
+              placeholder={formatMessage(SECTION_NAME_PLACEHOLDER_KEY)}
               aria-invalid={error ? true : undefined}
               aria-describedby={error ? `${fieldId}-error` : undefined}
               onChange={(event) => {
@@ -145,7 +147,7 @@ export function SectionNameDialog({
                 id={`${fieldId}-error`}
                 data-testid="sidebar-section-name-error"
               >
-                {error}
+                {formatMessage(error.key, error.values as never)}
               </p>
             ) : (
               <p className="text-meta text-ink-muted">
@@ -199,6 +201,7 @@ export function SectionDeleteConfirmDialog({
   onOpenChange: (open: boolean) => void;
   onConfirm: () => void;
 }) {
+  const formatMessage = useFormatMessage();
   return (
     <Dialog
       open={open}
@@ -216,8 +219,11 @@ export function SectionDeleteConfirmDialog({
               문법을 빌려 온 `ChannelLeaveConfirmDialog` 가 정확히 그 이유로
               반대로 한다. */}
           <div className="flex flex-col gap-1">
-            <DialogTitle>{SECTION_DELETE_CONFIRM_TITLE}</DialogTitle>
-            <DialogDescription>{sectionDeleteConfirmBody(name)}</DialogDescription>
+            <DialogTitle>{formatMessage(SECTION_DELETE_CONFIRM_TITLE_KEY)}</DialogTitle>
+            <DialogDescription>{formatMessage(
+                "sidebar.section.deleteConfirmBody",
+                sectionDeleteConfirmBodyRef(name).values
+              )}</DialogDescription>
           </div>
           <div className="flex items-center justify-end gap-2">
             <Button
@@ -243,7 +249,7 @@ export function SectionDeleteConfirmDialog({
               }}
               data-testid="sidebar-section-delete-action"
             >
-              {SECTION_DELETE_CONFIRM_LABEL}
+              {formatMessage(SECTION_DELETE_CONFIRM_LABEL_KEY)}
             </Button>
           </div>
       </DialogContent>
@@ -285,6 +291,7 @@ export function SidebarSectionMenu({
   onRename?: (opener: HTMLElement | null) => void;
   onDelete?: (opener: HTMLElement | null) => void;
 }) {
+  const formatMessage = useFormatMessage();
   const trigger = useRef<HTMLButtonElement>(null);
   return (
     <DropdownMenu onOpenChange={onOpenChange}>
@@ -315,14 +322,14 @@ export function SidebarSectionMenu({
               data-testid={`section-menu-${sectionId}-up`}
               onSelect={() => order.onMove(-1)}
             >
-              {SECTION_MOVE_UP_LABEL}
+              {formatMessage(SECTION_MOVE_UP_KEY)}
             </DropdownMenuItem>
             <DropdownMenuItem
               disabled={!order.canDown}
               data-testid={`section-menu-${sectionId}-down`}
               onSelect={() => order.onMove(1)}
             >
-              {SECTION_MOVE_DOWN_LABEL}
+              {formatMessage(SECTION_MOVE_DOWN_KEY)}
             </DropdownMenuItem>
           </>
         )}
@@ -333,7 +340,7 @@ export function SidebarSectionMenu({
               data-testid={`section-menu-${sectionId}-rename`}
               onSelect={() => onRename(trigger.current)}
             >
-              {SECTION_RENAME_LABEL}
+              {formatMessage(SECTION_RENAME_LABEL_KEY)}
             </DropdownMenuItem>
           </>
         )}
@@ -345,7 +352,7 @@ export function SidebarSectionMenu({
               data-testid={`section-menu-${sectionId}-delete`}
               onSelect={() => onDelete(trigger.current)}
             >
-              {SECTION_DELETE_LABEL}
+              {formatMessage(SECTION_DELETE_LABEL_KEY)}
             </DropdownMenuItem>
           </>
         )}

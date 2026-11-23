@@ -28,7 +28,7 @@ import {
   AI_CONNECT_SKIPPED_LINE,
   LOGIN_POLL_WINDOW_MS,
 } from "@momo/core/features/onboarding/aiConnect";
-import { LOGIN_ACTION_LABEL } from "@momo/core/features/onboarding/harnessLogin";
+import { LOGIN_ACTION_KEYS } from "@momo/core/features/onboarding/harnessLogin";
 import { clearAllDrafts, draftKey, readDraft } from "@/features/chat/draftStore";
 import { SessionProvider, type SessionContextValue } from "@/app/session";
 import { detectLocalHarnesses, openTerminalApp } from "@/lib/tauri";
@@ -49,6 +49,16 @@ import { FirstAgentStage } from "./FirstAgentStage";
 import { PersonalAgentError } from "@/features/aiHub/tools/personalAgentPort";
 import type { PersonalAgentSummary } from "@momo/core/features/ai/harnessCard";
 import { openAiConnectReentry } from "./aiConnectReentry";
+import { LocaleProvider } from "@/i18n/LocaleProvider";
+import { koreanLocale } from "@/testing/koLocale";
+import { catalog as koCatalog } from "@momo/core/i18n/generated/ko-KR";
+import { createMessageCopy } from "@momo/core/testkit";
+
+// 로그인 모달의 문장은 사전(`onboarding.json`)에 있다(#6064). 화면은 한국어 언어 객체 아래에서 그리고, 시험은 같은 한국어
+// 생성물로 키를 풀어 예전 한국어를 그대로 단정한다.
+const ko = createMessageCopy({ messageLocale: "ko-KR", catalog: koCatalog });
+const koLocale = await koreanLocale();
+
 
 const poseSlot = vi.hoisted(() => ({ current: null as string | null }));
 const envSlot = vi.hoisted(() => ({ tauri: false, flag: false }));
@@ -394,7 +404,7 @@ function mountStage(
     )
   );
   act(() => {
-    mountedRoot?.render(tree);
+    mountedRoot?.render(createElement(LocaleProvider, { locale: koLocale, children: tree }));
   });
   return host;
 }
@@ -634,7 +644,7 @@ describe("로그인 버튼은 공식 CLI 이름이다 (ADR-0193 D2 개정)", () 
       /(Claude|ChatGPT|OpenAI|Anthropic)\s*(로|으로)\s*로그인/.test(text)
     );
     expect(offenders).toEqual([]);
-    expect(q(host, "ai-connect-login-open-codex")?.textContent).toBe(LOGIN_ACTION_LABEL.codex);
+    expect(q(host, "ai-connect-login-open-codex")?.textContent).toBe(ko(LOGIN_ACTION_KEYS.codex));
     expect(host.textContent).not.toContain("codex login");
     expect(host.querySelector("code")).toBeNull();
     expect(q(host, "ai-connect-login-claude")).toBeNull();

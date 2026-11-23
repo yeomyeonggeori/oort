@@ -1,6 +1,7 @@
 import { ApiError } from "../../lib/api";
 import { NetworkError } from "../../lib/http";
 import { sha256Utf8 } from "../../lib/sha256";
+import type { PlainMessageKey } from "../../i18n/keys";
 import type { ConnectFailure } from "./connectModel";
 
 // =============================================================================
@@ -19,31 +20,25 @@ export const DEVICE_LINK_POLL_MS = 2_000;
 
 const TOKEN_RE = /^[A-Za-z0-9_-]{43}$/;
 
-export const DEVICE_LINK_EXPIRED_COPY =
-  "이 연결 코드는 만료되었거나 알 수 없습니다.";
-export const DEVICE_LINK_USED_COPY =
-  "이 연결 코드는 이미 사용되었습니다.";
-export const DEVICE_LINK_MALFORMED_COPY =
-  "연결 코드 형식이 아닙니다. QR을 다시 찍으세요.";
-export const DEVICE_LINK_SAS_WAIT_COPY =
-  "데스크탑에서 확인을 누르면 진행됩니다.";
-export const DEVICE_LINK_PERMISSION_COPY =
-  "카메라 권한이 없어 QR을 찍을 수 없습니다. 주소로 연결하세요.";
-export const DEVICE_LINK_UNREACHABLE_COPY =
-  "서버에 닿지 못했습니다. 다시 연결을 시도합니다.";
-export const DEVICE_LINK_RETRY_LABEL = "QR 다시 찍기";
-export const DEVICE_LINK_QR_LABEL = "QR로 연결";
-export const DEVICE_LINK_ADDRESS_FALLBACK_LABEL = "주소로 연결";
-export const DEVICE_LINK_SETTINGS_LABEL = "설정에서 허용";
-export const DEVICE_LINK_QR_INSTRUCTION =
-  "데스크탑 화면의 QR을 카메라에 맞추세요.";
-export const DEVICE_LINK_CAMERA_OPENING_COPY = "카메라 여는 중";
-export const DEVICE_LINK_CAMERA_ERROR_COPY =
-  "카메라를 열 수 없습니다. 주소로 연결하세요.";
+// 문구는 `i18n/catalogs/<언어>/auth.json`의 `auth.deviceLink.*`에 있다. 화면이 그릴 때 지금 언어로 푼다.
+export const DEVICE_LINK_EXPIRED_KEY = "auth.deviceLink.expired" satisfies PlainMessageKey;
+export const DEVICE_LINK_USED_KEY = "auth.deviceLink.used" satisfies PlainMessageKey;
+export const DEVICE_LINK_MALFORMED_KEY = "auth.deviceLink.malformed" satisfies PlainMessageKey;
+export const DEVICE_LINK_SAS_WAIT_KEY = "auth.deviceLink.sasWait" satisfies PlainMessageKey;
+export const DEVICE_LINK_PERMISSION_KEY = "auth.deviceLink.permission" satisfies PlainMessageKey;
+export const DEVICE_LINK_UNREACHABLE_KEY = "auth.deviceLink.unreachable" satisfies PlainMessageKey;
+export const DEVICE_LINK_RETRY_KEY = "auth.deviceLink.retryLabel" satisfies PlainMessageKey;
+export const DEVICE_LINK_QR_KEY = "auth.deviceLink.qrLabel" satisfies PlainMessageKey;
+export const DEVICE_LINK_ADDRESS_FALLBACK_KEY = "auth.deviceLink.addressFallbackLabel" satisfies PlainMessageKey;
+export const DEVICE_LINK_SETTINGS_KEY = "auth.deviceLink.settingsLabel" satisfies PlainMessageKey;
+export const DEVICE_LINK_QR_INSTRUCTION_KEY = "auth.deviceLink.qrInstruction" satisfies PlainMessageKey;
+export const DEVICE_LINK_CAMERA_OPENING_KEY = "auth.deviceLink.cameraOpening" satisfies PlainMessageKey;
+export const DEVICE_LINK_CAMERA_ERROR_KEY = "auth.deviceLink.cameraError" satisfies PlainMessageKey;
 
 export class DeviceLinkFormatError extends Error {
   constructor() {
-    super(DEVICE_LINK_MALFORMED_COPY);
+    // 사람이 읽지 않는 진단 글이다. 화면은 `deviceLinkFailureCopy`로 문장을 짓는다.
+    super("not a device link code");
     this.name = "DeviceLinkFormatError";
   }
 }
@@ -65,7 +60,7 @@ export function deviceLinkSasDigits(token: string): string {
 
 function transportFailure(cause: unknown): ConnectFailure | null {
   if (cause instanceof NetworkError) {
-    return { message: cause.message, suggestSignIn: false, retryable: true };
+    return { message: { raw: cause.message }, suggestSignIn: false, retryable: true };
   }
   if (cause instanceof ApiError) return null;
   return null;
@@ -74,7 +69,7 @@ function transportFailure(cause: unknown): ConnectFailure | null {
 export function deviceLinkFailureCopy(cause: unknown): ConnectFailure {
   if (cause instanceof DeviceLinkFormatError) {
     return {
-      message: DEVICE_LINK_MALFORMED_COPY,
+      message: { key: DEVICE_LINK_MALFORMED_KEY },
       suggestSignIn: false,
       retryable: false,
     };
@@ -83,7 +78,7 @@ export function deviceLinkFailureCopy(cause: unknown): ConnectFailure {
   if (transport) return transport;
   if (!(cause instanceof ApiError)) {
     return {
-      message: DEVICE_LINK_MALFORMED_COPY,
+      message: { key: DEVICE_LINK_MALFORMED_KEY },
       suggestSignIn: false,
       retryable: false,
     };
@@ -92,25 +87,25 @@ export function deviceLinkFailureCopy(cause: unknown): ConnectFailure {
   switch (failure.status) {
     case 401:
       return {
-        message: DEVICE_LINK_EXPIRED_COPY,
+        message: { key: DEVICE_LINK_EXPIRED_KEY },
         suggestSignIn: false,
         retryable: false,
       };
     case 409:
       return {
-        message: DEVICE_LINK_USED_COPY,
+        message: { key: DEVICE_LINK_USED_KEY },
         suggestSignIn: false,
         retryable: false,
       };
     case 400:
       return {
-        message: DEVICE_LINK_MALFORMED_COPY,
+        message: { key: DEVICE_LINK_MALFORMED_KEY },
         suggestSignIn: false,
         retryable: false,
       };
     case 429:
       return {
-        message: "요청이 너무 잦습니다. 잠시 뒤에 다시 시도하세요.",
+        message: { key: "auth.failure.tooManyRequests" },
         suggestSignIn: false,
         retryable: false,
       };
@@ -118,8 +113,8 @@ export function deviceLinkFailureCopy(cause: unknown): ConnectFailure {
       return {
         message:
           failure.status >= 500
-            ? "서버에서 오류가 났습니다. 잠시 뒤에 다시 시도하세요."
-            : DEVICE_LINK_MALFORMED_COPY,
+            ? { key: "auth.failure.serverError" }
+            : { key: DEVICE_LINK_MALFORMED_KEY },
         suggestSignIn: false,
         retryable: failure.status >= 500,
       };

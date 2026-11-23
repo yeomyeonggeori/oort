@@ -350,7 +350,7 @@ function CreateChannelPanel({
           label="주제"
           htmlFor="create-channel-topic"
           hint="선택 사항이에요. 280자까지 쓸 수 있어요."
-          error={topicError}
+          error={topicError === null ? null : formatMessage(topicError.key, topicError.values as never)}
         >
           <Input
             id="create-channel-topic"

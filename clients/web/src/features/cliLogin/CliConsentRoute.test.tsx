@@ -6,15 +6,19 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-libra
 import type { LoginResponse } from "@momo/core/lib/api";
 import { installCoreHost, resetCoreHost, type SessionPort } from "@momo/core/runtime/host";
 import {
-  CLI_CONSENT_APPROVE_LABEL,
-  CLI_CONSENT_CREDENTIAL_LIMIT,
-  CLI_CONSENT_DENY_LABEL,
-  CLI_CONSENT_DEVICE_MISSING,
-  CLI_CONSENT_PASSWORD_LABEL,
-  CLI_CONSENT_RETRY_ACTION,
+  CLI_CONSENT_APPROVE_LABEL_KEY,
+  CLI_CONSENT_CREDENTIAL_LIMIT_KEY,
+  CLI_CONSENT_DENY_LABEL_KEY,
+  CLI_CONSENT_DEVICE_MISSING_KEY,
+  CLI_CONSENT_PASSWORD_LABEL_KEY,
+  CLI_CONSENT_RETRY_ACTION_KEY,
   CLI_SCOPES,
-  cliScopeSentences,
+  cliScopeSentenceKeys,
 } from "@momo/core/features/cliLogin/consent";
+import { catalog as koCatalog } from "@momo/core/i18n/generated/ko-KR";
+import { createMessageCopy } from "@momo/core/testkit";
+import { LocaleProvider } from "@/i18n/LocaleProvider";
+import { koreanLocale } from "@/testing/koLocale";
 import type { SessionRestoreStatus } from "@/app/session";
 import { CliConsentRoute } from "./CliConsentRoute";
 
@@ -23,6 +27,17 @@ import { CliConsentRoute } from "./CliConsentRoute";
 // 나가는 요청, 그리고 돌아가는 곳만 본다. 서버와 브라우저 이동만 대신하고 코어의
 // 파서·분류는 진짜를 쓴다.
 // =============================================================================
+
+// 문장은 사전(`cliLogin.json`)에 있다(#6064). 화면은 한국어 언어 객체 아래에서 그리고, 시험은 같은 한국어 생성물로
+// 키를 풀어 예전 한국어를 그대로 단정한다.
+const ko = createMessageCopy({ messageLocale: "ko-KR", catalog: koCatalog });
+const koLocale = await koreanLocale();
+const CLI_CONSENT_APPROVE_LABEL = ko(CLI_CONSENT_APPROVE_LABEL_KEY);
+const CLI_CONSENT_CREDENTIAL_LIMIT = ko(CLI_CONSENT_CREDENTIAL_LIMIT_KEY);
+const CLI_CONSENT_DENY_LABEL = ko(CLI_CONSENT_DENY_LABEL_KEY);
+const CLI_CONSENT_DEVICE_MISSING = ko(CLI_CONSENT_DEVICE_MISSING_KEY);
+const CLI_CONSENT_PASSWORD_LABEL = ko(CLI_CONSENT_PASSWORD_LABEL_KEY);
+const CLI_CONSENT_RETRY_ACTION = ko(CLI_CONSENT_RETRY_ACTION_KEY);
 
 const WS = "00000000-0000-7000-8000-000000000001";
 const REQUEST = "signed.envelope.value";
@@ -187,13 +202,15 @@ function mountRoute(opts: {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const onLoggedIn = vi.fn();
   render(
-    <QueryClientProvider client={client}>
-      <CliConsentRoute
-        status={opts.status ?? "signed-in"}
-        session={opts.session === undefined ? session : opts.session}
-        onLoggedIn={onLoggedIn}
-      />
-    </QueryClientProvider>
+    <LocaleProvider locale={koLocale}>
+      <QueryClientProvider client={client}>
+        <CliConsentRoute
+          status={opts.status ?? "signed-in"}
+          session={opts.session === undefined ? session : opts.session}
+          onLoggedIn={onLoggedIn}
+        />
+      </QueryClientProvider>
+    </LocaleProvider>
   );
   return { onLoggedIn };
 }
@@ -318,7 +335,7 @@ describe("동의 화면: 보여 주는 것", () => {
       const ids = (radio(value).getAttribute("aria-describedby") ?? "").split(" ");
       return ids.map((id) => document.getElementById(id)?.textContent ?? "").join(" ");
     };
-    const [identity, channels, messages, write, inbox] = cliScopeSentences([...CLI_SCOPES]);
+    const [identity, channels, messages, write, inbox] = cliScopeSentenceKeys([...CLI_SCOPES]).map((key) => ko(key));
     // 읽기만: 요청 ∩ 읽기. 요청에 없는 것(메시지 읽기·받은 편지함)과 쓰기는 없다.
     for (const line of [identity, channels]) expect(described("read")).toContain(line);
     for (const line of [messages, inbox, write]) expect(described("read")).not.toContain(line);

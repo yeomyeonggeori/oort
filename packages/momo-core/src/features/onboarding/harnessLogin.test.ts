@@ -3,24 +3,30 @@ import type { LocalHarnessProbe } from "../hostedAgents/detect";
 import {
   HARNESS_LOGIN_METHODS,
   HARNESS_LOGIN_TIMEOUT_MS,
-  LOGIN_ACTION_LABEL,
-  LOGIN_CODE_HINT,
+  LOGIN_ACTION_KEYS,
+  LOGIN_CODE_HINT_KEY,
   harnessLoginVerdict,
   loginAcceptsCode,
-  loginActionLabel,
+  loginActionKey,
   loginFailedDetail,
-  loginFailedLine,
+  loginFailedLineKey,
   loginWaitingDetail,
-  loginWaitingLine,
+  loginWaitingLineKey,
 } from "./harnessLogin";
+import { catalog as koCatalog } from "../../i18n/generated/ko-KR";
+import { createMessageCopy } from "../../testkit";
+
+// 문장은 사전(`onboarding.json`)에 있다(#6064). 시험은 제품과 같은 한국어 생성물로 키를 풀어 예전 한국어를 그대로 단정한다.
+const ko = createMessageCopy({ messageLocale: "ko-KR", catalog: koCatalog });
+const koRef = (ref: { key: never; values?: never }): string => ko(ref.key, ...((ref.values === undefined ? [] : [ref.values]) as never[]));
 
 describe("로그인 버튼 이름 (ADR-0193 D2 개정)", () => {
   it("is exactly the two names the ADR allows", () => {
-    expect(LOGIN_ACTION_LABEL).toEqual({
+    expect({ claude: ko(LOGIN_ACTION_KEYS.claude), codex: ko(LOGIN_ACTION_KEYS.codex) }).toEqual({
       claude: "Claude Code로 로그인",
       codex: "Codex로 로그인",
     });
-    expect(loginActionLabel("claude")).toBe("Claude Code로 로그인");
+    expect(ko(loginActionKey("claude"))).toBe("Claude Code로 로그인");
   });
 });
 
@@ -65,20 +71,20 @@ describe("판정은 상태 명령만 (ADR-0190 D3-f)", () => {
 
 describe("문장", () => {
   it("the waiting line states who signs in and that oort does not see it", () => {
-    expect(loginWaitingLine("browser")).toBe("브라우저에서 로그인하고 있어요.");
-    expect(loginWaitingDetail("claude")).toBe(
+    expect(ko(loginWaitingLineKey("browser"))).toBe("브라우저에서 로그인하고 있어요.");
+    expect(koRef(loginWaitingDetail("claude") as never)).toBe(
       "로그인은 Claude Code가 연 브라우저 창에서 끝나요. oort는 로그인 정보를 보지 않아요."
     );
-    expect(loginWaitingDetail("codex")).toContain("Codex가");
-    expect(LOGIN_CODE_HINT).toContain("저장하지 않습니다");
+    expect(koRef(loginWaitingDetail("codex") as never)).toContain("Codex가");
+    expect(ko(LOGIN_CODE_HINT_KEY)).toContain("저장하지 않습니다");
   });
 
   it("each failure says what happened in 해요체", () => {
     for (const reason of ["timeout", "not-logged-in", "spawn"] as const) {
-      expect(loginFailedLine(reason)).toMatch(/요\.$/);
-      expect(loginFailedDetail("claude", reason)).toMatch(/요\.$/);
+      expect(ko(loginFailedLineKey(reason))).toMatch(/요\.$/);
+      expect(koRef(loginFailedDetail("claude", reason) as never)).toMatch(/요\.$/);
     }
-    expect(loginFailedDetail("claude", "timeout")).toContain(
+    expect(koRef(loginFailedDetail("claude", "timeout") as never)).toContain(
       `${HARNESS_LOGIN_TIMEOUT_MS / 60_000}분`
     );
   });

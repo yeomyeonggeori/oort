@@ -25,11 +25,11 @@ import {
 import {listAllScheduledMessages} from '@momo/core/features/scheduled/api';
 import {isScheduledAbsent} from '@momo/core/features/scheduled/errors';
 import {
-  CHANNEL_COPY_FAILURE,
-  CHANNEL_MARK_READ_FAILURE,
-  CHANNEL_MARK_UNREAD_FAILURE,
-  CHANNEL_MUTE_FAILURE,
-  DM_CLOSE_FAILURE,
+  CHANNEL_COPY_FAILURE_KEY,
+  CHANNEL_MARK_READ_FAILURE_KEY,
+  CHANNEL_MARK_UNREAD_FAILURE_KEY,
+  CHANNEL_MUTE_FAILURE_KEY,
+  DM_CLOSE_FAILURE_KEY,
   channelLeaveFailure,
 } from '@momo/core/features/channels/model';
 import {channelShareUrlFromServerBase} from '@momo/core/features/channels/shareLink';
@@ -306,13 +306,13 @@ export function useChannelRowActions(
                 : channelShareUrlFromServerBase(apiBase(), channel.id);
           const which = key === 'copy-name' ? 'name' : key === 'copy-id' ? 'id' : 'link';
           if (text === null) {
-            failed(target, CHANNEL_COPY_FAILURE);
+            failed(target, formatMessage(CHANNEL_COPY_FAILURE_KEY));
             return;
           }
           void copyText(text).then(ok => {
             if (!mounted.current) return;
             if (ok) flashCopied(which, target);
-            else failed(target, CHANNEL_COPY_FAILURE);
+            else failed(target, formatMessage(CHANNEL_COPY_FAILURE_KEY));
           });
           return;
         }
@@ -322,7 +322,7 @@ export function useChannelRowActions(
           void track(
             key,
             target,
-            CHANNEL_MARK_READ_FAILURE,
+            formatMessage(CHANNEL_MARK_READ_FAILURE_KEY),
             () => markRead(channel.id, state.latestSeq, 'mark_read_menu'),
             '읽음으로 처리했습니다.',
           );
@@ -334,7 +334,7 @@ export function useChannelRowActions(
           void track(
             key,
             target,
-            CHANNEL_MARK_UNREAD_FAILURE,
+            formatMessage(CHANNEL_MARK_UNREAD_FAILURE_KEY),
             // 읽음 커서는 그대로 광고하고 마크만 최신 seq 에 건다. 사유 `mark_unread` 는 explicit_open 을
             // 싣지 않는다 — 실으면 마크를 건 같은 트랜잭션이 마크를 지운다(`advertise.ts`).
             () =>
@@ -363,7 +363,7 @@ export function useChannelRowActions(
           void track(
             key,
             target,
-            CHANNEL_MUTE_FAILURE,
+            formatMessage(CHANNEL_MUTE_FAILURE_KEY),
             async () => {
               try {
                 await client.cancelQueries({queryKey});
@@ -389,7 +389,7 @@ export function useChannelRowActions(
           void track(
             key,
             target,
-            DM_CLOSE_FAILURE,
+            formatMessage(DM_CLOSE_FAILURE_KEY),
             async () => {
               await closeDm(workspaceId, channel.id, seenSeq);
               // 서버가 답한 **뒤에** 이 기기의 투영 행에 적는다(낙관 갱신 없음, 머리말). 다른 기기는 다음 투영에서 맞춘다.
@@ -456,7 +456,7 @@ export function useChannelRowActions(
           return;
       }
     },
-    [client, failed, flashCopied, markRead, onLeft, reset, track, workspaceId],
+    [client, failed, flashCopied, formatMessage, markRead, onLeft, reset, track, workspaceId],
   );
 
   const confirmLeave = useCallback(() => {

@@ -28,6 +28,11 @@ import {
   S2_TITLE,
   S2_TROUBLE_LINE,
 } from "./s2Copy";
+import { LocaleProvider } from "@/i18n/LocaleProvider";
+import { koreanLocale } from "@/testing/koLocale";
+
+// 진행 점의 숨김 문장 등은 사전에서 오므로(#6064) 화면을 한국어 언어 객체 아래에서 그린다.
+const koLocale = await koreanLocale();
 
 const createInvite = vi.hoisted(() => vi.fn());
 const fetchWorkspace = vi.hoisted(() => vi.fn());
@@ -129,23 +134,25 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-function wrap(node: ReactElement): ReactElement {
+/** `english`: 공급자 없이 세워 번들된 영어 사전이 읽는 장면(영어 틀을 직접 단정하는 시험). */
+function wrap(node: ReactElement, english = false): ReactElement {
   const client = new QueryClient({
     defaultOptions: {
       queries: { retry: false },
       mutations: { retry: false },
     },
   });
-  return createElement(QueryClientProvider, { client }, node);
+  const tree = createElement(QueryClientProvider, { client }, node);
+  return english ? tree : createElement(LocaleProvider, { locale: koLocale, children: tree });
 }
 
-function mount(node: ReactElement): HTMLElement {
+function mount(node: ReactElement, english = false): HTMLElement {
   const host = document.createElement("div");
   document.body.append(host);
   mountedHost = host;
   mountedRoot = createRoot(host);
   act(() => {
-    mountedRoot?.render(wrap(node));
+    mountedRoot?.render(wrap(node, english));
   });
   return host;
 }
@@ -319,7 +326,8 @@ describe("onboarding S2 팀원 초대 (#2333)", () => {
         workspaceId: WS,
         onSkip: vi.fn(),
         onContinue: vi.fn(),
-      })
+      }),
+      true
     );
     await act(async () => {
       click("onboarding-s2-issue");

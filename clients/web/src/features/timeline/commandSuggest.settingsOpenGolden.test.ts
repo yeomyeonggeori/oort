@@ -9,9 +9,14 @@ import {
   COMMAND_SUGGEST_PROP_KEY,
   SETTINGS_OPEN_SECTIONS,
   commandSuggestCard,
-  settingsOpenLabel,
+  settingsOpenLabelKey,
 } from "@momo/core/features/timeline/commandSuggest";
+import { catalog as koCatalog } from "@momo/core/i18n/generated/ko-KR";
+import { createMessageService } from "@momo/core/i18n/service";
 import golden from "../../../../../docs/api/command-suggest-settings-open.golden.json";
+
+// 문장은 사전에 있다(#6044): 한국어 생성물로 키를 풀어 서버 표와 견준다.
+const ko = createMessageService({ messageLocale: "ko-KR", catalog: koCatalog }).formatMessage;
 
 const HUMAN = golden.for_member_id_placeholder;
 const AGENT = "019f9a01-0000-7000-8000-000000000401";
@@ -41,7 +46,7 @@ describe("settings.open 서버 골든 ↔ 코어 표", () => {
       const card = commandSuggestCard(message, directory);
       expect(card?.shape, golden_case.name).toBe("ok");
       expect(card?.section, golden_case.name).toBe(golden_case.name);
-      expect(settingsOpenLabel(card!.section!), golden_case.name).toBe(envelope.label);
+      expect(ko(settingsOpenLabelKey(card!.section!)), golden_case.name).toBe(envelope.label);
     }
   });
 });

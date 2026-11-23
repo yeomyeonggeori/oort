@@ -137,15 +137,15 @@ export interface ApprovalNoteToneSpec {
  */
 export const APPROVAL_NOTE_TONE_SPEC = {
   receipt: {
-    meaning: "방금 내가 한, 되돌릴 수 없는 행동의 기록",
+    meaning: "A record of something I just did that cannot be undone",
     mustDifferFrom: ["blocked", "guidance"],
   },
   blocked: {
-    meaning: "지금은 못 한다. 사고가 아니라 때의 문제다",
+    meaning: "Cannot be done right now; a matter of timing, not an accident",
     mustDifferFrom: ["receipt", "guidance", "attention", "danger"],
   },
   guidance: {
-    meaning: "길 안내. 읽으면 좋고 안 읽어도 잃는 것이 없다",
+    meaning: "Guidance: worth reading, but nothing is lost if skipped",
     mustDifferFrom: ["receipt", "blocked"],
   },
 } as const satisfies Record<ApprovalNoteTone, ApprovalNoteToneSpec>;

@@ -16,6 +16,7 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { withCaptureLocale } from "./capture-locale.mjs";
 import { chromium, webkit } from "playwright";
 import { startGuardedPreview } from "../gates/preview-guard.mjs";
 import { advanceToAccount } from "../e2e/advanceOnboarding.mjs";
@@ -165,7 +166,7 @@ async function login(page) {
 
 async function open(browserType, origin, scheme) {
   const browser = await browserType.launch();
-  const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, colorScheme: scheme, serviceWorkers: "block", reducedMotion: "reduce" });
+  const context = await browser.newContext(withCaptureLocale({ viewport: { width: 1440, height: 900 }, colorScheme: scheme, serviceWorkers: "block", reducedMotion: "reduce" }));
   await installMocks(context);
   await context.addInitScript((serverOrigin) => { try { if (!localStorage.getItem("momo.web.server.v1")) localStorage.setItem("momo.web.server.v1", serverOrigin); } catch { /* 저장소 없는 캡처 */ } }, origin);
   const page = await context.newPage();

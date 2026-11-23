@@ -114,8 +114,8 @@ import {
 import type { SecretOnce } from "@momo/core/features/approvals/secretOnce";
 import { APPROVAL_NOTE_TONE_CLASS } from "./approvalNoteTone";
 import {
-  TEAM_AI_PROPOSAL_AUTHORITY,
-  TEAM_AI_PROPOSAL_LABEL,
+  TEAM_AI_PROPOSAL_AUTHORITY_KEY,
+  TEAM_AI_PROPOSAL_LABEL_KEY,
   teamAiProposalLine,
 } from "@momo/core/features/timeline/teamAi";
 import {
@@ -522,12 +522,12 @@ function ApprovalBody({
   const context = approvalBundleContext(card, session.member, directory, run);
   const isAdmin = context.isWorkspaceAdmin;
   const bundle = card.isResumeOffer ? undefined : requestBundleModel(
-    approvalBundleCard(card, receipt), { ...context, nowMs }
+    approvalBundleCard(formatMessage, card, receipt), { ...context, nowMs }
   );
   // open을 명시하지 않은 서버 카드는 인라인 [승인][거부]를 그대로 유지해요.
   const openStage = card.bundle?.decisionMode === "open" ? (event?: React.MouseEvent<HTMLButtonElement>) => {
     if (onOpenStage) { onOpenStage(); return; }
-    openApprovalDecisionStage({ card, member: session.member, directory, workspaceId,
+    openApprovalDecisionStage({ formatMessage, card, member: session.member, directory, workspaceId,
       opener: event?.currentTarget ?? null, source: () => cardRef.current });
   } : undefined;
   const terminalStatus: Partial<Record<NonNullable<typeof bundle>["state"], ApprovalStatus>> = {
@@ -594,7 +594,7 @@ function ApprovalBody({
       sectionRef={cardRef}
       icon={<ShieldQuestion className="size-4" aria-hidden="true" />}
       // 먼저 제안 카드는 제목 끝의 짧은 꼬리표 하나로만 말한다(#4705). 제안자는 카드 작성자라 줄이 이미 말한다.
-      title={approvalHeadTitle(card)}
+      title={approvalHeadTitle(formatMessage, card)}
       bundle={bundle}
       onOpenStage={openStage}
       chip={<ApprovalChip status={status} />}
@@ -724,13 +724,14 @@ function ApprovalBody({
       {/* 도우미가 올린 카드 (ADR-0201 D6-3). 누가 부탁했고 누가 제안했는지를 결정
           **전에** 말한다. 이름은 디렉터리가 먼저고, 없으면 서버가 박은 이름이다. */}
       {card.proposedVia && (
-        <LabeledRow label={TEAM_AI_PROPOSAL_LABEL} testId="approval-team-ai">
+        <LabeledRow label={formatMessage(TEAM_AI_PROPOSAL_LABEL_KEY)} testId="approval-team-ai">
           {teamAiProposalLine(
+            formatMessage,
             memberFor(directory, card.proposedVia.requesterId ?? undefined)
               ?.displayName ?? card.proposedVia.requesterName
           )}
           <span className="mt-1 block text-meta text-ink-muted">
-            {TEAM_AI_PROPOSAL_AUTHORITY}
+            {formatMessage(TEAM_AI_PROPOSAL_AUTHORITY_KEY)}
           </span>
         </LabeledRow>
       )}
@@ -781,14 +782,14 @@ function ApprovalBody({
       {card.action?.rationale && (
         // 도우미 카드의 사유는 모델이 쓴 글이다. 서버가 검증한 위 행과 다른 층이라는
         // 것을 이름과 한 줄로 말한다(ADR-0201 D6-1 ③: 모델 출력을 믿지 않는다).
-        <LabeledRow label={rationaleTag(card).label} testId="approval-action-rationale">
+        <LabeledRow label={formatMessage(rationaleTag(card).labelKey)} testId="approval-action-rationale">
           {card.action.rationale}
-          {rationaleTag(card).note !== null && (
+          {rationaleTag(card).noteKey !== null && (
             <span
               className="mt-1 block text-meta text-ink-muted"
               data-testid="approval-team-ai-rationale-note"
             >
-              {rationaleTag(card).note}
+              {formatMessage(rationaleTag(card).noteKey!)}
             </span>
           )}
         </LabeledRow>

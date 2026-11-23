@@ -37,7 +37,7 @@ export function notifyThisDevice(
   const question = event.payload.body?.trim();
   // 서버 질문이 없는 옛 카드는 현재 제목을 본문으로 읽어요. 문구를 새로 짓지 않아요.
   const body = question && /[?？]/.test(question) && requestLoopCopyViolations(question).length === 0
-    ? notificationBody(question) : decision.notification.body;
+    ? notificationBody(question, context.formatMessage) : decision.notification.body;
   return { ...decision, notification: {
     ...decision.notification,
     title: context.actorFor(event.payload.author_member_id),

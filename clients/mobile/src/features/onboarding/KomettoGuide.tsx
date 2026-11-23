@@ -28,6 +28,7 @@ import {
 
 import {useStyles} from '../../design/theme';
 import {type Palette, font} from '../../design/tokens';
+import {useFormatMessage} from '../../i18n/useFormatMessage';
 import {useReduceMotion} from '../../lib/useReduceMotion';
 import {KOMETTO_EXPRESSION_ASSETS} from './komettoExpressions';
 
@@ -268,13 +269,14 @@ export function OnboardingDots({
   dots: OnboardingDotsModel | null;
 }): React.JSX.Element | null {
   const styles = useStyles(buildStyles);
+  const formatMessage = useFormatMessage();
   if (dots === null) return null;
   return (
     <View
       style={styles.dots}
       accessible
       accessibilityRole="text"
-      accessibilityLabel={dots.label}
+      accessibilityLabel={formatMessage(dots.labelRef.key, dots.labelRef.values)}
       testID="onboarding-dots">
       {dots.dots.map((state, index) => (
         <View

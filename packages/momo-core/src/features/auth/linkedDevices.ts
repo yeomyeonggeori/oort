@@ -10,6 +10,7 @@
 // Distinct from the issuer QR flow (`./deviceLink`) and from the push-token
 // registry at `/v1/workspaces/{ws}/devices`. This file does not log.
 
+import type { LocaleService } from "../../i18n/context";
 import { ApiError, authedRequest } from "../../lib/api";
 import { arrayField, bool, num, record, str, WireShapeError } from "../../lib/wire";
 
@@ -80,7 +81,10 @@ export function isCannotRevokeCurrent(error: unknown): boolean {
 }
 
 /** Product label for a redeem `platform` token. Unknown values pass through. */
-export function linkedDevicePlatformLabel(platform: string): string {
+export function linkedDevicePlatformLabel(
+  formatMessage: LocaleService["formatMessage"],
+  platform: string
+): string {
   const key = platform.trim().toLowerCase();
   switch (key) {
     case "ios":
@@ -101,7 +105,7 @@ export function linkedDevicePlatformLabel(platform: string): string {
     case "linux":
       return "Linux";
     case "web":
-      return "웹";
+      return formatMessage("auth.linkedDevice.platformWeb");
     default:
       return platform.trim();
   }

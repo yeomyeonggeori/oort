@@ -16,11 +16,11 @@ import {
   type UnlinkPhase,
 } from "@momo/core/features/settings/harnessProfiles";
 import {
-  LOGIN_CANCEL_LABEL,
-  LOGIN_CLOSE_LABEL,
-  LOGIN_RETRY_LABEL,
-  LOGIN_TERMINAL_HIDE_LABEL,
-  LOGIN_TERMINAL_SHOW_LABEL,
+  LOGIN_CANCEL_KEY,
+  LOGIN_CLOSE_KEY,
+  LOGIN_RETRY_KEY,
+  LOGIN_TERMINAL_HIDE_KEY,
+  LOGIN_TERMINAL_SHOW_KEY,
 } from "@momo/core/features/onboarding/harnessLogin";
 import { keyPlatformOf } from "@momo/core/features/workbench/keymap";
 import {
@@ -34,6 +34,7 @@ import { loadBrowserMirror } from "@/features/workbench/local/localSessions";
 import { LocalTerminalPane } from "@/features/workbench/local/LocalTerminalPane";
 import { desktopPty, harnessProfileRemove } from "@/lib/tauri";
 import { createUnlinkController, type UnlinkController } from "./unlinkController";
+import { useFormatMessage } from "@/i18n/useFormatMessage";
 
 // Reading this as: settings (AI 연결 · 내 계정) for internal team users on Tauri
 // desktop, density 5/10, motion 1/10 (the dialog's own enter/exit only).
@@ -160,6 +161,7 @@ function RemoveFromListBody({
   onCancel: () => void;
   onConfirm: () => void;
 }) {
+  const formatMessage = useFormatMessage();
   return (
     <>
       <DialogTitle className="text-title font-bold [overflow-wrap:anywhere]">
@@ -171,7 +173,7 @@ function RemoveFromListBody({
       <ImpactList impact={impact} />
       <div className="flex flex-wrap items-center justify-end gap-2 pt-1">
         <Button type="button" variant="ghost" size="sm" className="tap-target" onClick={onCancel} data-testid="my-account-unlink-cancel">
-          {LOGIN_CANCEL_LABEL}
+          {formatMessage(LOGIN_CANCEL_KEY)}
         </Button>
         {/* 되돌릴 수 있는 이 기기 숨김이라 파괴 빨강이 아니다(「다시 보이기」가 있다). */}
         <Button
@@ -209,6 +211,7 @@ function UnlinkProfileBody({
   onLockChange: (locked: boolean) => void;
   fixture: HarnessUnlinkFixture | null;
 }) {
+  const formatMessage = useFormatMessage();
   const controller: UnlinkController | null = useMemo(
     () =>
       fixture
@@ -308,7 +311,7 @@ function UnlinkProfileBody({
             onClick={() => setTerminalOpen((open) => !open)}
             data-testid="my-account-unlink-terminal-toggle"
           >
-            {terminalOpen ? LOGIN_TERMINAL_HIDE_LABEL : LOGIN_TERMINAL_SHOW_LABEL}
+            {formatMessage(terminalOpen ? LOGIN_TERMINAL_HIDE_KEY : LOGIN_TERMINAL_SHOW_KEY)}
           </button>
           {terminalOpen && controller !== null && (
             <div id={`${lineId}-terminal`} className="harness-login-terminal" data-testid="my-account-unlink-terminal">
@@ -337,7 +340,7 @@ function UnlinkProfileBody({
               onClick={onClose}
               data-testid="my-account-unlink-cancel"
             >
-              {LOGIN_CANCEL_LABEL}
+              {formatMessage(LOGIN_CANCEL_KEY)}
             </Button>
             <Button
               type="button"
@@ -361,7 +364,7 @@ function UnlinkProfileBody({
               onClick={onClose}
               data-testid="my-account-unlink-close"
             >
-              {LOGIN_CLOSE_LABEL}
+              {formatMessage(LOGIN_CLOSE_KEY)}
             </Button>
             <Button
               type="button"
@@ -371,7 +374,7 @@ function UnlinkProfileBody({
               onClick={() => controller?.confirm()}
               data-testid="my-account-unlink-retry"
             >
-              {LOGIN_RETRY_LABEL}
+              {formatMessage(LOGIN_RETRY_KEY)}
             </Button>
           </>
         ) : (
@@ -388,7 +391,7 @@ function UnlinkProfileBody({
                 onClick={onClose}
                 data-testid="my-account-unlink-cancel"
               >
-                {LOGIN_CANCEL_LABEL}
+                {formatMessage(LOGIN_CANCEL_KEY)}
               </Button>
             )}
             <Button

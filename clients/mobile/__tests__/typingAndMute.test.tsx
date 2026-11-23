@@ -4,10 +4,15 @@ import {act, cleanup, render, renderHook, screen} from '@testing-library/react-n
 import {QueryClient, QueryClientProvider} from '@tanstack/react-query';
 import {type Channel, setChannelNotificationPref} from '@momo/core/lib/api';
 import {typingLabel, typingVisualSegments} from '@momo/core/features/chat/typing';
-import {CHANNEL_MUTE_FAILURE} from '@momo/core/features/channels/model';
+import {CHANNEL_MUTE_FAILURE_KEY} from '@momo/core/features/channels/model';
 import {TypingBar, typingReserve} from '../src/features/conversation/TypingBar';
 import {useChannelRowActions} from '../src/features/sidebar/useChannelRowActions';
 import type {ChannelRowTarget} from '../src/features/sidebar/channelRowActions';
+import {catalog as koCatalog} from '@momo/core/i18n/generated/ko-KR';
+import {createMessageService} from '@momo/core/i18n/service';
+
+// 낱말은 사전에 있다(#6045). 시험은 한국어 생성물로 풀어 같은 문장을 그대로 단정한다.
+const koFormat = createMessageService({messageLocale: 'ko-KR', catalog: koCatalog}).formatMessage;
 
 jest.mock('../src/features/inbox/useInbox', () => ({useMarkRead: () => jest.fn()}));
 
@@ -68,7 +73,7 @@ it('폰은 응답 전에 알림을 바꾸고 중복 요청을 막으며 실패�
   await act(async () => { reject(new Error('offline')); });
   expect(rows().map(row => row.muted)).toEqual([false, true]);
   expect(result.current.active?.muted).toBe(false);
-  expect(result.current.error).toBe(CHANNEL_MUTE_FAILURE);
+  expect(result.current.error).toBe(koFormat(CHANNEL_MUTE_FAILURE_KEY));
   api.mockImplementationOnce(() => new Promise<boolean>(yes => { resolve = yes; }));
   act(() => result.current.run(target, 'mute'));
   await act(async () => {});

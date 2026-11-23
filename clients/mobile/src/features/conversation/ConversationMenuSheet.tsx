@@ -139,7 +139,7 @@ export function ConversationMenuSheet({
     <PageSheet
       height="fit"
       onClose={onClose}
-      accessibilityLabel={conversationMenuAccessibleLabel(title, kind)}
+      accessibilityLabel={conversationMenuAccessibleLabel(title, kind, formatMessage)}
       scrimLabel="대화 메뉴 닫기"
       scrimTestID="conversation-menu-backdrop"
       // 1:1 나가기 요청이 가는 동안은 몸짓으로 닫히지 않는다(요청은 이미 나갔다).

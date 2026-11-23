@@ -2,19 +2,31 @@ import { describe, expect, it } from "vitest";
 import { ApiError, ClaimApiError } from "../../lib/api";
 import { NetworkError } from "../../lib/http";
 import { claimFailureCopy } from "./claimModel";
+import { catalog as koCatalog } from "../../i18n/generated/ko-KR";
+import { createLocaleService, resolveLocaleContext } from "../../i18n";
+import { failureMessageText, type FailureMessage } from "./failureMessage";
+
+// 문장은 사전(`auth.json`)에 있다(#6064). 시험은 제품과 같은 한국어 생성물로 문장을 풀어 예전 한국어를 그대로 단정한다.
+const { formatMessage } = createLocaleService({
+  ...resolveLocaleContext("ko-KR", { languages: ["ko-KR"] }),
+  catalog: koCatalog,
+});
+const msg = (failure: { message: FailureMessage }): string =>
+  failureMessageText(formatMessage, failure.message);
+
 
 describe("claimFailureCopy", () => {
   it("maps an invalid token to a next-step sentence, not the server English", () => {
     const copy = claimFailureCopy(new ApiError(404, "claim token is invalid"));
-    expect(copy.message).toContain("유효하지 않습니다");
-    expect(copy.message).not.toContain("invalid");
+    expect(msg(copy)).toContain("유효하지 않습니다");
+    expect(msg(copy)).not.toContain("invalid");
     expect(copy.retryable).toBe(false);
     expect(copy.keepForm).toBe(false);
   });
 
   it("maps expiry to a request-a-new-link sentence", () => {
     const copy = claimFailureCopy(new ApiError(410, "claim token has expired"));
-    expect(copy.message).toContain("만료");
+    expect(msg(copy)).toContain("만료");
     expect(copy.suggestSignIn).toBe(false);
   });
 
@@ -24,14 +36,14 @@ describe("claimFailureCopy", () => {
     );
     expect(copy.suggestSignIn).toBe(true);
     expect(copy.keepForm).toBe(false);
-    expect(copy.message).toContain("이미 사용");
+    expect(msg(copy)).toContain("이미 사용");
   });
 
   it("passes a transport failure through", () => {
     const copy = claimFailureCopy(new NetworkError("unreachable", 15_000));
     expect(copy.retryable).toBe(true);
     expect(copy.keepForm).toBe(true);
-    expect(copy.message.length).toBeGreaterThan(0);
+    expect(msg(copy).length).toBeGreaterThan(0);
   });
 
   // ADR-0215 D2 (#4593): the 400 names which rule the new password broke.
@@ -43,8 +55,8 @@ describe("claimFailureCopy", () => {
         "password_too_short"
       )
     );
-    expect(copy.message).toContain("10자 이상");
-    expect(copy.message).not.toContain("72");
+    expect(msg(copy)).toContain("10자 이상");
+    expect(msg(copy)).not.toContain("72");
     expect(copy.keepForm).toBe(true);
     expect(copy.retryable).toBe(false);
     expect(copy.suggestSignIn).toBe(false);
@@ -58,10 +70,10 @@ describe("claimFailureCopy", () => {
         "password_too_long"
       )
     );
-    expect(copy.message).toContain("72바이트");
-    expect(copy.message).toContain("한글은 한 자에 3바이트");
-    expect(copy.message).toContain("한글만이면 24자");
-    expect(copy.message).not.toContain("10자 이상");
+    expect(msg(copy)).toContain("72바이트");
+    expect(msg(copy)).toContain("한글은 한 자에 3바이트");
+    expect(msg(copy)).toContain("한글만이면 24자");
+    expect(msg(copy)).not.toContain("10자 이상");
     expect(copy.keepForm).toBe(true);
     expect(copy.retryable).toBe(false);
   });
@@ -69,16 +81,16 @@ describe("claimFailureCopy", () => {
   it("keeps the generic line for a 400 that names no password rule", () => {
     const generic = "비어 있거나 너무 깁니다";
     // No code (an empty password, or any 400 older than the named rules).
-    expect(claimFailureCopy(new ApiError(400, "password is required")).message).toContain(
+    expect(msg(claimFailureCopy(new ApiError(400, "password is required")))).toContain(
       generic
     );
     // A code this screen does not know must not borrow another rule's sentence, nor name a dictionary one.
     const unknown = claimFailureCopy(new ApiError(400, "a rule from the future", "password_future_rule"));
-    expect(unknown.message).toContain(generic);
+    expect(msg(unknown)).toContain(generic);
     expect(unknown.messageKey).toBeUndefined();
     // A rule code on a different status is not a password refusal.
     expect(
-      claimFailureCopy(new ApiError(429, "rate limit exceeded", "password_too_short")).message
+      msg(claimFailureCopy(new ApiError(429, "rate limit exceeded", "password_too_short")))
     ).toContain("잠시");
   });
 
@@ -86,7 +98,7 @@ describe("claimFailureCopy", () => {
     const copy = claimFailureCopy(new ApiError(429, "rate limit exceeded"));
     expect(copy.retryable).toBe(false);
     expect(copy.keepForm).toBe(true);
-    expect(copy.message).toContain("잠시");
+    expect(msg(copy)).toContain("잠시");
   });
 });
 
@@ -113,16 +125,16 @@ describe("claimFailureCopy by claimKind", () => {
   it("keeps the first-owner sentences for a first-owner link", () => {
     const expired = claimFailureCopy(refused(410, "owner_bootstrap"));
     expect(expired.messageKey).toBeUndefined();
-    expect(expired.message).toContain("설치를 실행한 쪽에 새 링크를 요청하세요");
+    expect(msg(expired)).toContain("설치를 실행한 쪽에 새 링크를 요청하세요");
     const used = claimFailureCopy(refused(409, "owner_bootstrap"));
     expect(used.messageKey).toBeUndefined();
-    expect(used.message).toBe("이 링크는 이미 사용되었습니다. 로그인하세요.");
+    expect(msg(used)).toBe("이 링크는 이미 사용되었습니다. 로그인하세요.");
   });
 
   it("keeps the first-owner sentences when no kind was named (an older server)", () => {
     const expired = claimFailureCopy(new ApiError(410, "claim token has expired"));
     expect(expired.messageKey).toBeUndefined();
-    expect(expired.message).toContain("설치를 실행한 쪽에 새 링크를 요청하세요");
+    expect(msg(expired)).toContain("설치를 실행한 쪽에 새 링크를 요청하세요");
     expect(claimFailureCopy(new ApiError(409, "used")).messageKey).toBeUndefined();
   });
 
