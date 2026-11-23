@@ -27,6 +27,13 @@ import { SessionProvider, type SessionContextValue } from "@/app/session";
 import { detectLocalHarnesses } from "@/lib/tauri";
 import { AiLinkSection } from "@/features/settings/AiLinkSection";
 import { AiConnectCard } from "./AiConnectCard";
+import { LocaleProvider } from "@/i18n/LocaleProvider";
+import { koreanLocale } from "@/testing/koLocale";
+
+// 로그인 줄의 문장은 사전(`onboarding.json`)에 있다(#6064). 그 문장을 한국어로 단정하는 시험만 한국어 언어 객체 아래에서 그린다
+// (공급자가 없으면 번들된 영어로 물러나고, 다른 시험은 그 영어를 그대로 쓴다).
+const koLocale = await koreanLocale();
+let koreanMode = false;
 
 // =============================================================================
 // 로컬 연결 카드 (#2944 GC-3). brief §3.3~3.5, §5.
@@ -200,17 +207,16 @@ let client: QueryClient;
 
 function renderInto(root: Root, element: ReturnType<typeof createElement>) {
   act(() => {
-    root.render(
+    const tree = createElement(
+      QueryClientProvider,
+      { client },
       createElement(
-        QueryClientProvider,
-        { client },
-        createElement(
-          SessionProvider,
-          { value: session() },
-          createElement(MemoryRouter, null, element)
-        )
+        SessionProvider,
+        { value: session() },
+        createElement(MemoryRouter, null, element)
       )
     );
+    root.render(koreanMode ? createElement(LocaleProvider, { locale: koLocale, children: tree }) : tree);
   });
 }
 
@@ -286,10 +292,12 @@ afterEach(() => {
   for (const host of hosts) host.remove();
   roots = [];
   hosts = [];
+  koreanMode = false;
 });
 
 describe("카드의 겉 (#2944 시안 ①)", () => {
   it("「나에게만 보여요」, 에이전트 이름·아바타 없음, 두 절과 Grok 준비 중", async () => {
+    koreanMode = true;
     const host = mountCard();
     await until(host, "ai-connect-card-team");
     await until(host, "ai-connect-card-claude");

@@ -203,6 +203,446 @@ export const catalog: MessageCatalog = {
       "value": "번째"
     }
   ],
+  "auth.claim.expired": [
+    {
+      "type": 0,
+      "value": "이 링크는 만료되었습니다. 설치를 실행한 쪽에 새 링크를 요청하세요."
+    }
+  ],
+  "auth.claim.invalidLink": [
+    {
+      "type": 0,
+      "value": "이 링크는 유효하지 않습니다. 받은 주소를 그대로 여세요."
+    }
+  ],
+  "auth.claim.passwordRecheck": [
+    {
+      "type": 0,
+      "value": "비밀번호를 다시 확인하세요. 비어 있거나 너무 깁니다."
+    }
+  ],
+  "auth.claim.unmapped": [
+    {
+      "type": 0,
+      "value": "요청을 처리하지 못했습니다. 받은 주소를 확인하고 다시 시도하세요."
+    }
+  ],
+  "auth.claim.used": [
+    {
+      "type": 0,
+      "value": "이 링크는 이미 사용되었습니다. 로그인하세요."
+    }
+  ],
+  "auth.deviceKey.authFailed": [
+    {
+      "type": 0,
+      "value": "본인 확인에 실패했어요. 다시 시도해 주세요."
+    }
+  ],
+  "auth.deviceKey.cancelled": [
+    {
+      "type": 0,
+      "value": "Touch ID나 암호 확인을 취소했어요."
+    }
+  ],
+  "auth.deviceKey.changed": [
+    {
+      "type": 0,
+      "value": "이 맥의 서명 키가 바뀌었어요. 이 맥을 서명 기기로 다시 등록해 주세요."
+    }
+  ],
+  "auth.deviceKey.declined": [
+    {
+      "type": 0,
+      "value": "서명을 취소했어요."
+    }
+  ],
+  "auth.deviceKey.endorseConflict": [
+    {
+      "type": 0,
+      "value": "이 맥이 이미 다른 키를 이 이름으로 승인했거나 같은 키를 다른 이름으로 승인했어요. 목록을 다시 불러와서 확인해 주세요."
+    }
+  ],
+  "auth.deviceKey.entitlementMissing": [
+    {
+      "type": 0,
+      "value": "이 빌드에는 서명 키를 보관할 권한이 없어요. 팀 배포 앱에서 해 주세요."
+    }
+  ],
+  "auth.deviceKey.failed": [
+    {
+      "type": 0,
+      "value": "서명하지 못했어요. 다시 시도해 주세요."
+    }
+  ],
+  "auth.deviceKey.hostPinnedOther": [
+    {
+      "type": 0,
+      "value": "이 맥의 작업 호스트에 이미 다른 키가 서명 기기로 등록돼 있어요. 작업 호스트를 다시 등록해 주세요."
+    }
+  ],
+  "auth.deviceKey.kindNotEnabled": [
+    {
+      "type": 0,
+      "value": "이 종류의 서명은 아직 이 앱에서 할 수 없어요."
+    }
+  ],
+  "auth.deviceKey.noLetter": [
+    {
+      "type": 0,
+      "value": "이 맥에서 서명한 해제 기록이 없어서 다시 보낼 수 없어요."
+    }
+  ],
+  "auth.deviceKey.noSession": [
+    {
+      "type": 0,
+      "value": "이 로그인은 키를 옮길 수 없어요. 로그아웃한 뒤 다시 로그인해 주세요."
+    }
+  ],
+  "auth.deviceKey.notEndorsedHere": [
+    {
+      "type": 0,
+      "value": "이 맥에 이 키를 승인한 기록이 없어서 해제에 서명할 수 없어요. 그 기기의 연결을 끊으면 서버에서는 키가 해제되지만, 이 맥의 작업 호스트에는 알려지지 않아요."
+    }
+  ],
+  "auth.deviceKey.notRootHere": [
+    {
+      "type": 0,
+      "value": "이 맥이 이 워크스페이스의 서명 기기로 등록돼 있지 않아요."
+    }
+  ],
+  "auth.deviceKey.payloadRejected": [
+    {
+      "type": 0,
+      "value": "서명할 내용에 보이지 않는 문자나 올바르지 않은 값이 있어서 서명하지 않았어요."
+    }
+  ],
+  "auth.deviceKey.pinRefused": [
+    {
+      "type": 0,
+      "value": "이 맥의 작업 호스트가 이 키를 서명 기기로 받지 않았어요. 작업 호스트 상태를 확인해 주세요."
+    }
+  ],
+  "auth.deviceKey.rebindNotCurrent": [
+    {
+      "type": 0,
+      "value": "서버가 이 키를 이 로그인으로 옮기지 않았어요. 목록을 다시 불러와서 다시 시도해 주세요."
+    }
+  ],
+  "auth.deviceKey.serverAlreadyRegistered": [
+    {
+      "type": 0,
+      "value": "이 키는 이미 등록돼 있어요. 목록을 다시 불러오세요."
+    }
+  ],
+  "auth.deviceKey.serverLineageEnded": [
+    {
+      "type": 0,
+      "value": "이 로그인은 더 이상 키를 등록할 수 없어요. 다시 로그인해 주세요."
+    }
+  ],
+  "auth.deviceKey.serverLinkedSession": [
+    {
+      "type": 0,
+      "value": "QR로 연결한 기기는 서명 기기가 될 수 없어요. 이 맥에서 비밀번호로 로그인한 뒤 등록해 주세요."
+    }
+  ],
+  "auth.deviceKey.serverLinkNotFromMac": [
+    {
+      "type": 0,
+      "value": "이 폰은 맥이 아닌 곳에서 띄운 QR로 연결됐어요. 맥에서 QR로 다시 연결해 주세요."
+    }
+  ],
+  "auth.deviceKey.serverNotFound": [
+    {
+      "type": 0,
+      "value": "서버에 이 키가 더 이상 없어요. 목록을 다시 불러와서 새로 등록해 주세요."
+    }
+  ],
+  "auth.deviceKey.serverPasswordRequired": [
+    {
+      "type": 0,
+      "value": "비밀번호가 맞지 않아요. 이 계정의 현재 비밀번호를 적어 주세요."
+    }
+  ],
+  "auth.deviceKey.serverRebindRequired": [
+    {
+      "type": 0,
+      "value": "이 키는 끝난 로그인에 묶여 있어요. 다시 연결해 주세요."
+    }
+  ],
+  "auth.deviceKey.serverRequiresLinkedSession": [
+    {
+      "type": 0,
+      "value": "이 폰은 QR로 연결되지 않아서 지시를 보낼 수 없어요. 맥에서 QR로 한 번 연결해 주세요."
+    }
+  ],
+  "auth.deviceKey.serverSignatureInvalid": [
+    {
+      "type": 0,
+      "value": "서버가 이 기기의 서명을 받지 않았어요. 기기 시계가 맞는지 확인하고 다시 시도해 주세요."
+    }
+  ],
+  "auth.deviceKey.unsignedBuild": [
+    {
+      "type": 0,
+      "value": "이 빌드는 서명되지 않아서 Secure Enclave 키를 쓸 수 없어요. 팀 배포 앱에서 해 주세요."
+    }
+  ],
+  "auth.deviceKey.unsupported": [
+    {
+      "type": 0,
+      "value": "이 기기에서는 지시 서명 키를 만들 수 없어요."
+    }
+  ],
+  "auth.deviceKey.workdRefused": [
+    {
+      "type": 0,
+      "value": "이 맥의 작업 호스트가 요청을 받지 않았어요. 다시 시도해 주세요."
+    }
+  ],
+  "auth.deviceKey.workHostNotRunning": [
+    {
+      "type": 0,
+      "value": "이 맥의 작업 호스트가 켜져 있지 않아요. 작업 호스트를 켠 뒤 다시 시도해 주세요."
+    }
+  ],
+  "auth.deviceKey.workHostOtherWorkspace": [
+    {
+      "type": 0,
+      "value": "이 맥의 작업 호스트는 다른 워크스페이스 것이라 여기서 바꿀 수 없어요."
+    }
+  ],
+  "auth.deviceLink.addressFallbackLabel": [
+    {
+      "type": 0,
+      "value": "주소로 연결"
+    }
+  ],
+  "auth.deviceLink.cameraError": [
+    {
+      "type": 0,
+      "value": "카메라를 열 수 없습니다. 주소로 연결하세요."
+    }
+  ],
+  "auth.deviceLink.cameraOpening": [
+    {
+      "type": 0,
+      "value": "카메라 여는 중"
+    }
+  ],
+  "auth.deviceLink.expired": [
+    {
+      "type": 0,
+      "value": "이 연결 코드는 만료되었거나 알 수 없습니다."
+    }
+  ],
+  "auth.deviceLink.malformed": [
+    {
+      "type": 0,
+      "value": "연결 코드 형식이 아닙니다. QR을 다시 찍으세요."
+    }
+  ],
+  "auth.deviceLink.permission": [
+    {
+      "type": 0,
+      "value": "카메라 권한이 없어 QR을 찍을 수 없습니다. 주소로 연결하세요."
+    }
+  ],
+  "auth.deviceLink.qrInstruction": [
+    {
+      "type": 0,
+      "value": "데스크탑 화면의 QR을 카메라에 맞추세요."
+    }
+  ],
+  "auth.deviceLink.qrLabel": [
+    {
+      "type": 0,
+      "value": "QR로 연결"
+    }
+  ],
+  "auth.deviceLink.retryLabel": [
+    {
+      "type": 0,
+      "value": "QR 다시 찍기"
+    }
+  ],
+  "auth.deviceLink.sasWait": [
+    {
+      "type": 0,
+      "value": "데스크탑에서 확인을 누르면 진행됩니다."
+    }
+  ],
+  "auth.deviceLink.settingsLabel": [
+    {
+      "type": 0,
+      "value": "설정에서 허용"
+    }
+  ],
+  "auth.deviceLink.unreachable": [
+    {
+      "type": 0,
+      "value": "서버에 닿지 못했습니다. 다시 연결을 시도합니다."
+    }
+  ],
+  "auth.deviceLink.used": [
+    {
+      "type": 0,
+      "value": "이 연결 코드는 이미 사용되었습니다."
+    }
+  ],
+  "auth.failure.serverError": [
+    {
+      "type": 0,
+      "value": "서버에서 오류가 났습니다. 잠시 뒤에 다시 시도하세요."
+    }
+  ],
+  "auth.failure.tooManyRequests": [
+    {
+      "type": 0,
+      "value": "요청이 너무 잦습니다. 잠시 뒤에 다시 시도하세요."
+    }
+  ],
+  "auth.failure.unreadableResponse": [
+    {
+      "type": 0,
+      "value": "서버 응답을 읽지 못했습니다. 주소를 확인하고 다시 시도하세요."
+    }
+  ],
+  "auth.join.alreadyRedeemed": [
+    {
+      "type": 0,
+      "value": "이미 이 초대로 가입한 계정입니다. 로그인하세요."
+    }
+  ],
+  "auth.join.cannotJoin": [
+    {
+      "type": 0,
+      "value": "이 초대로는 가입할 수 없습니다. 워크스페이스 관리자에게 새 초대 링크를 요청하세요."
+    }
+  ],
+  "auth.join.exhausted": [
+    {
+      "type": 0,
+      "value": "사용 횟수가 모두 찬 초대입니다. 워크스페이스 관리자에게 새 초대 링크를 요청하세요."
+    }
+  ],
+  "auth.join.expired": [
+    {
+      "type": 0,
+      "value": "만료된 초대입니다. 워크스페이스 관리자에게 새 초대 링크를 요청하세요."
+    }
+  ],
+  "auth.join.guestPaused": [
+    {
+      "type": 0,
+      "value": "게스트 초대는 채널별 초대가 준비될 때까지 잠시 멈춰 있습니다. 워크스페이스 관리자에게 문의하세요."
+    }
+  ],
+  "auth.join.invalidCode": [
+    {
+      "type": 0,
+      "value": "유효하지 않은 초대 코드입니다. 초대한 사람에게 링크를 다시 확인하세요."
+    }
+  ],
+  "auth.join.notPermitted": [
+    {
+      "type": 0,
+      "value": "이 초대로는 가입 권한이 없습니다. 워크스페이스 관리자에게 새 초대 링크를 요청하세요."
+    }
+  ],
+  "auth.join.revoked": [
+    {
+      "type": 0,
+      "value": "회수된 초대입니다. 워크스페이스 관리자에게 새 초대 링크를 요청하세요."
+    }
+  ],
+  "auth.join.unmapped": [
+    {
+      "type": 0,
+      "value": "요청을 처리하지 못했습니다. 워크스페이스 관리자에게 새 초대 링크를 요청하세요."
+    }
+  ],
+  "auth.join.unusable": [
+    {
+      "type": 0,
+      "value": "더 이상 쓸 수 없는 초대입니다. 워크스페이스 관리자에게 새 초대 링크를 요청하세요."
+    }
+  ],
+  "auth.linkedDevice.platformWeb": [
+    {
+      "type": 0,
+      "value": "웹"
+    }
+  ],
+  "auth.passwordRule.tooLong": [
+    {
+      "type": 0,
+      "value": "비밀번호가 너무 깁니다. "
+    },
+    {
+      "type": 1,
+      "value": "maxBytes"
+    },
+    {
+      "type": 0,
+      "value": "바이트 이하로 입력하세요. 한글은 한 자에 "
+    },
+    {
+      "type": 1,
+      "value": "hangulBytes"
+    },
+    {
+      "type": 0,
+      "value": "바이트입니다(한글만이면 "
+    },
+    {
+      "type": 1,
+      "value": "maxHangul"
+    },
+    {
+      "type": 0,
+      "value": "자)."
+    }
+  ],
+  "auth.passwordRule.tooShort": [
+    {
+      "type": 0,
+      "value": "비밀번호가 너무 짧습니다. "
+    },
+    {
+      "type": 1,
+      "value": "minChars"
+    },
+    {
+      "type": 0,
+      "value": "자 이상으로 입력하세요."
+    }
+  ],
+  "auth.signIn.invalidCredentials": [
+    {
+      "type": 0,
+      "value": "이메일 또는 비밀번호가 맞지 않습니다."
+    }
+  ],
+  "auth.signIn.suspended": [
+    {
+      "type": 0,
+      "value": "이 계정은 지금 로그인할 수 없습니다. 워크스페이스 관리자에게 문의하세요."
+    }
+  ],
+  "auth.signIn.unmapped": [
+    {
+      "type": 0,
+      "value": "요청을 처리하지 못했습니다. 워크스페이스 관리자에게 문의하세요."
+    }
+  ],
+  "auth.signIn.workspaceIdFormat": [
+    {
+      "type": 0,
+      "value": "워크스페이스 ID 형식이 아닙니다. 비워 두면 기본 워크스페이스로 연결합니다."
+    }
+  ],
   "blocked.addMemberLater.offline": [
     {
       "type": 0,
@@ -2062,6 +2502,430 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "자 이내여야 합니다."
+    }
+  ],
+  "cliLogin.consent.approve": [
+    {
+      "type": 0,
+      "value": "허용"
+    }
+  ],
+  "cliLogin.consent.approveBusy": [
+    {
+      "type": 0,
+      "value": "허용 중"
+    }
+  ],
+  "cliLogin.consent.checkNote": [
+    {
+      "type": 0,
+      "value": "터미널에 표시된 서버 주소와 기기 이름이 아래와 같을 때만 허용해 주세요. 다르거나 내가 시작한 로그인이 아니면 허용하지 말고 거절해 주세요."
+    }
+  ],
+  "cliLogin.consent.clientLabel": [
+    {
+      "type": 0,
+      "value": "클라이언트"
+    }
+  ],
+  "cliLogin.consent.credentialLimit": [
+    {
+      "type": 0,
+      "value": "이 계정으로 로그인한 기기가 너무 많아요. 쓰지 않는 기존 연결을 정리한 뒤 다시 시도해 주세요."
+    }
+  ],
+  "cliLogin.consent.deny": [
+    {
+      "type": 0,
+      "value": "거절"
+    }
+  ],
+  "cliLogin.consent.denyBusy": [
+    {
+      "type": 0,
+      "value": "거절 중"
+    }
+  ],
+  "cliLogin.consent.deviceLabel": [
+    {
+      "type": 0,
+      "value": "기기 이름"
+    }
+  ],
+  "cliLogin.consent.deviceMissing": [
+    {
+      "type": 0,
+      "value": "기기 이름을 보내지 않았어요"
+    }
+  ],
+  "cliLogin.consent.deviceNote": [
+    {
+      "type": 0,
+      "value": "기기 이름은 연결하는 쪽이 정한 값이에요."
+    }
+  ],
+  "cliLogin.consent.dismiss": [
+    {
+      "type": 0,
+      "value": "닫기"
+    }
+  ],
+  "cliLogin.consent.hostLabel": [
+    {
+      "type": 0,
+      "value": "서버 호스트"
+    }
+  ],
+  "cliLogin.consent.lead": [
+    {
+      "type": 0,
+      "value": "터미널의 oort CLI가 내 계정으로 이 워크스페이스에 연결하려고 해요."
+    }
+  ],
+  "cliLogin.consent.lifetime": [
+    {
+      "type": 0,
+      "value": "연결은 최대 "
+    },
+    {
+      "type": 1,
+      "value": "maxDays"
+    },
+    {
+      "type": 0,
+      "value": "일 유지되고, "
+    },
+    {
+      "type": 1,
+      "value": "idleDays"
+    },
+    {
+      "type": 0,
+      "value": "일 동안 쓰지 않으면 끊겨요. 로그인 상태는 "
+    },
+    {
+      "type": 1,
+      "value": "accessMinutes"
+    },
+    {
+      "type": 0,
+      "value": "분마다 자동으로 갱신돼요. 비밀번호를 바꾸면 이 연결도 바로 끊겨요."
+    }
+  ],
+  "cliLogin.consent.loadingSr": [
+    {
+      "type": 0,
+      "value": "로그인 요청을 불러오는 중이에요."
+    }
+  ],
+  "cliLogin.consent.memberLabel": [
+    {
+      "type": 0,
+      "value": "승인하는 사람"
+    }
+  ],
+  "cliLogin.consent.offlineNote": [
+    {
+      "type": 0,
+      "value": "연결이 끊겼어요. 허용과 거절은 다시 연결된 뒤에 할 수 있어요."
+    }
+  ],
+  "cliLogin.consent.passwordHint": [
+    {
+      "type": 0,
+      "value": "허용하기 전에 내 비밀번호를 한 번 더 확인해요."
+    }
+  ],
+  "cliLogin.consent.passwordLabel": [
+    {
+      "type": 0,
+      "value": "현재 비밀번호"
+    }
+  ],
+  "cliLogin.consent.passwordWrong": [
+    {
+      "type": 0,
+      "value": "비밀번호가 맞지 않아요. 다시 입력해 주세요."
+    }
+  ],
+  "cliLogin.consent.presetHint": [
+    {
+      "type": 0,
+      "value": "허용한 뒤에는 범위를 바꿀 수 없어서, 바꾸려면 새로 연결해야 해요."
+    }
+  ],
+  "cliLogin.consent.presetLegend": [
+    {
+      "type": 0,
+      "value": "허용할 범위"
+    }
+  ],
+  "cliLogin.consent.rerun": [
+    {
+      "type": 0,
+      "value": "터미널에서 oort login을 다시 실행해 주세요."
+    }
+  ],
+  "cliLogin.consent.retryLater": [
+    {
+      "type": 0,
+      "value": "잠시 뒤에 다시 시도해 주세요."
+    }
+  ],
+  "cliLogin.consent.returning": [
+    {
+      "type": 0,
+      "value": "결정을 저장했어요. 터미널로 돌아가는 중이에요."
+    }
+  ],
+  "cliLogin.consent.signinDetail": [
+    {
+      "type": 0,
+      "value": "이 로그인 요청을 확인하려면 먼저 이 워크스페이스에 로그인해야 해요. 로그인하면 이 요청으로 돌아와요."
+    }
+  ],
+  "cliLogin.consent.title": [
+    {
+      "type": 0,
+      "value": "터미널 로그인 승인"
+    }
+  ],
+  "cliLogin.consent.workspaceLabel": [
+    {
+      "type": 0,
+      "value": "워크스페이스"
+    }
+  ],
+  "cliLogin.failure.approveLead": [
+    {
+      "type": 0,
+      "value": "허용을 저장하지 못했어요."
+    }
+  ],
+  "cliLogin.failure.busy": [
+    {
+      "type": 0,
+      "value": "서버가 잠깐 바빠요. "
+    },
+    {
+      "type": 1,
+      "value": "wait"
+    }
+  ],
+  "cliLogin.failure.denyLead": [
+    {
+      "type": 0,
+      "value": "거절을 저장하지 못했어요."
+    }
+  ],
+  "cliLogin.failure.frame": [
+    {
+      "type": 1,
+      "value": "lead"
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 1,
+      "value": "detail"
+    }
+  ],
+  "cliLogin.failure.previewLead": [
+    {
+      "type": 0,
+      "value": "로그인 요청을 불러오지 못했어요."
+    }
+  ],
+  "cliLogin.failure.retryAt": [
+    {
+      "type": 1,
+      "value": "when"
+    },
+    {
+      "type": 0,
+      "value": "에 다시 시도해 주세요."
+    }
+  ],
+  "cliLogin.failure.tooMany": [
+    {
+      "type": 0,
+      "value": "요청이 너무 잦아요. "
+    },
+    {
+      "type": 1,
+      "value": "wait"
+    }
+  ],
+  "cliLogin.preset.detail": [
+    {
+      "type": 1,
+      "value": "scopes"
+    },
+    {
+      "type": 0,
+      "value": ". "
+    },
+    {
+      "type": 1,
+      "value": "note"
+    }
+  ],
+  "cliLogin.preset.readClosed": [
+    {
+      "type": 0,
+      "value": "보내기, 고치기, 지우기와 설정 변경은 할 수 없어요."
+    }
+  ],
+  "cliLogin.preset.readLabel": [
+    {
+      "type": 0,
+      "value": "읽기만"
+    }
+  ],
+  "cliLogin.preset.sendCaution": [
+    {
+      "type": 0,
+      "value": "보낸 메시지는 바로 전송되고 고치거나 지울 수 없어요. 멘션은 에이전트를 깨울 수 있어요."
+    }
+  ],
+  "cliLogin.preset.sendLabel": [
+    {
+      "type": 0,
+      "value": "읽기와 보내기"
+    }
+  ],
+  "cliLogin.preset.sendUnavailable": [
+    {
+      "type": 0,
+      "value": "이 로그인 요청에는 메시지 보내기가 들어 있지 않아서 고를 수 없어요."
+    }
+  ],
+  "cliLogin.retry.inMinutes": [
+    {
+      "type": 0,
+      "value": "약 "
+    },
+    {
+      "type": 1,
+      "value": "minutes"
+    },
+    {
+      "type": 0,
+      "value": "분 뒤"
+    }
+  ],
+  "cliLogin.retry.inSeconds": [
+    {
+      "type": 1,
+      "value": "seconds"
+    },
+    {
+      "type": 0,
+      "value": "초 뒤"
+    }
+  ],
+  "cliLogin.scope.channelsRead": [
+    {
+      "type": 0,
+      "value": "채널 목록 읽기"
+    }
+  ],
+  "cliLogin.scope.identity": [
+    {
+      "type": 0,
+      "value": "내가 누구인지 확인"
+    }
+  ],
+  "cliLogin.scope.inboxRead": [
+    {
+      "type": 0,
+      "value": "받은 편지함 읽기"
+    }
+  ],
+  "cliLogin.scope.messagesRead": [
+    {
+      "type": 0,
+      "value": "채널의 메시지와 스레드 읽기"
+    }
+  ],
+  "cliLogin.scope.messagesWrite": [
+    {
+      "type": 0,
+      "value": "내 이름으로 메시지 보내기"
+    }
+  ],
+  "cliLogin.terminal.accessDeniedDetail": [
+    {
+      "type": 0,
+      "value": "관리자가 허용해야 쓸 수 있어요. 필요하면 워크스페이스 관리자에게 문의해 주세요. 이 화면에서는 아무것도 허용되지 않았어요."
+    }
+  ],
+  "cliLogin.terminal.accessDeniedHeadline": [
+    {
+      "type": 0,
+      "value": "이 워크스페이스에서는 명령줄 접근을 만들 수 없어요."
+    }
+  ],
+  "cliLogin.terminal.alreadyDecidedDetail": [
+    {
+      "type": 0,
+      "value": "결정은 한 번만 기록돼요. 필요하면 터미널에서 oort login을 다시 실행해 주세요."
+    }
+  ],
+  "cliLogin.terminal.alreadyDecidedHeadline": [
+    {
+      "type": 0,
+      "value": "이미 처리된 요청이에요."
+    }
+  ],
+  "cliLogin.terminal.expiredDetail": [
+    {
+      "type": 0,
+      "value": "만료된 요청은 허용할 수 없어요. 터미널에서 oort login을 다시 실행해 주세요."
+    }
+  ],
+  "cliLogin.terminal.expiredHeadline": [
+    {
+      "type": 0,
+      "value": "이 로그인 요청이 만료됐어요."
+    }
+  ],
+  "cliLogin.terminal.notFoundDetail": [
+    {
+      "type": 0,
+      "value": "이 화면에서는 아무것도 허용되지 않았어요. 터미널에서 oort login을 다시 실행해 주세요."
+    }
+  ],
+  "cliLogin.terminal.notFoundHeadline": [
+    {
+      "type": 0,
+      "value": "요청이 만료됐거나 올바르지 않아요."
+    }
+  ],
+  "cliLogin.terminal.passwordUnavailableDetail": [
+    {
+      "type": 0,
+      "value": "이 계정에는 비밀번호가 없어서 허용 전에 확인할 수 없어요. 지금은 이 방법으로 명령줄에 연결할 수 없고, 이 화면에서는 아무것도 허용되지 않았어요."
+    }
+  ],
+  "cliLogin.terminal.passwordUnavailableHeadline": [
+    {
+      "type": 0,
+      "value": "이 계정은 비밀번호를 확인할 수 없어요."
+    }
+  ],
+  "cliLogin.terminal.redirectRefusedDetail": [
+    {
+      "type": 0,
+      "value": "서버 응답에서 이 기기의 터미널(127.0.0.1)로 돌아가는 주소를 확인하지 못해서 따라가지 않았어요. 터미널에서 oort login을 다시 실행해 주세요."
+    }
+  ],
+  "cliLogin.terminal.redirectRefusedHeadline": [
+    {
+      "type": 0,
+      "value": "터미널로 돌아갈 주소를 확인하지 못했어요."
     }
   ],
   "common.action.cancel": [
@@ -6799,6 +7663,276 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "초대 링크를 올렸어요"
+    }
+  ],
+  "onboarding.guide.expressionFlustered": [
+    {
+      "type": 0,
+      "value": "당황"
+    }
+  ],
+  "onboarding.guide.expressionHappy": [
+    {
+      "type": 0,
+      "value": "기쁨"
+    }
+  ],
+  "onboarding.guide.expressionIdle": [
+    {
+      "type": 0,
+      "value": "대기"
+    }
+  ],
+  "onboarding.guide.expressionSleepy": [
+    {
+      "type": 0,
+      "value": "졸림"
+    }
+  ],
+  "onboarding.guide.expressionThinking": [
+    {
+      "type": 0,
+      "value": "생각"
+    }
+  ],
+  "onboarding.guide.expressionWorking": [
+    {
+      "type": 0,
+      "value": "작업 중"
+    }
+  ],
+  "onboarding.guide.stateAwaiting": [
+    {
+      "type": 0,
+      "value": "질문을 기다림"
+    }
+  ],
+  "onboarding.guide.stateChecking": [
+    {
+      "type": 0,
+      "value": "감지·확인·연결 중"
+    }
+  ],
+  "onboarding.guide.statePreparing": [
+    {
+      "type": 0,
+      "value": "에이전트 준비 중"
+    }
+  ],
+  "onboarding.guide.stateSkipped": [
+    {
+      "type": 0,
+      "value": "건너뛰고 나중에 할 때"
+    }
+  ],
+  "onboarding.guide.stateSuccess": [
+    {
+      "type": 0,
+      "value": "완료·감지 성공"
+    }
+  ],
+  "onboarding.guide.stateTrouble": [
+    {
+      "type": 0,
+      "value": "오류·오프라인"
+    }
+  ],
+  "onboarding.guide.stepLabel": [
+    {
+      "type": 1,
+      "value": "total"
+    },
+    {
+      "type": 0,
+      "value": "단계 중 "
+    },
+    {
+      "type": 1,
+      "value": "current"
+    },
+    {
+      "type": 0,
+      "value": "단계"
+    }
+  ],
+  "onboarding.harnessLogin.actionClaude": [
+    {
+      "type": 0,
+      "value": "Claude Code로 로그인"
+    }
+  ],
+  "onboarding.harnessLogin.actionCodex": [
+    {
+      "type": 0,
+      "value": "Codex로 로그인"
+    }
+  ],
+  "onboarding.harnessLogin.checking": [
+    {
+      "type": 0,
+      "value": "로그인을 확인하고 있어요."
+    }
+  ],
+  "onboarding.harnessLogin.codeHint": [
+    {
+      "type": 0,
+      "value": "붙여 넣은 코드는 Claude Code에만 전달하고 저장하지 않습니다."
+    }
+  ],
+  "onboarding.harnessLogin.codeLabel": [
+    {
+      "type": 0,
+      "value": "로그인 코드"
+    }
+  ],
+  "onboarding.harnessLogin.codeSent": [
+    {
+      "type": 0,
+      "value": "코드를 보냈습니다."
+    }
+  ],
+  "onboarding.harnessLogin.codeSubmit": [
+    {
+      "type": 0,
+      "value": "보내기"
+    }
+  ],
+  "onboarding.harnessLogin.codeToggle": [
+    {
+      "type": 0,
+      "value": "브라우저에 코드가 나왔나요?"
+    }
+  ],
+  "onboarding.harnessLogin.connected": [
+    {
+      "type": 0,
+      "value": "연결됐어요."
+    }
+  ],
+  "onboarding.harnessLogin.connectedDetail": [
+    {
+      "type": 0,
+      "value": "이제 "
+    },
+    {
+      "type": 1,
+      "value": "cli"
+    },
+    {
+      "type": 0,
+      "value": "를 내 에이전트로 고를 수 있어요."
+    }
+  ],
+  "onboarding.harnessLogin.detach": [
+    {
+      "type": 0,
+      "value": "닫고 계속하기"
+    }
+  ],
+  "onboarding.harnessLogin.deviceCode": [
+    {
+      "type": 0,
+      "value": "기기 코드로 로그인"
+    }
+  ],
+  "onboarding.harnessLogin.done": [
+    {
+      "type": 0,
+      "value": "완료"
+    }
+  ],
+  "onboarding.harnessLogin.failedDefault": [
+    {
+      "type": 0,
+      "value": "로그인을 마치지 못했어요."
+    }
+  ],
+  "onboarding.harnessLogin.failedSpawn": [
+    {
+      "type": 0,
+      "value": "이 앱에서 로그인을 열지 못했어요."
+    }
+  ],
+  "onboarding.harnessLogin.failedTimeout": [
+    {
+      "type": 0,
+      "value": "로그인이 끝나지 않았어요."
+    }
+  ],
+  "onboarding.harnessLogin.notLoggedInDetail": [
+    {
+      "type": 1,
+      "value": "cli"
+    },
+    {
+      "type": 0,
+      "value": "가 아직 로그인되지 않았다고 알려 왔어요."
+    }
+  ],
+  "onboarding.harnessLogin.rowHint": [
+    {
+      "type": 0,
+      "value": "로그인하면 고를 수 있어요."
+    }
+  ],
+  "onboarding.harnessLogin.spawnDetail": [
+    {
+      "type": 0,
+      "value": "명령을 복사해 터미널에서 직접 로그인해 주세요."
+    }
+  ],
+  "onboarding.harnessLogin.terminalAria": [
+    {
+      "type": 1,
+      "value": "title"
+    },
+    {
+      "type": 0,
+      "value": " 터미널"
+    }
+  ],
+  "onboarding.harnessLogin.terminalHide": [
+    {
+      "type": 0,
+      "value": "터미널 접기"
+    }
+  ],
+  "onboarding.harnessLogin.terminalShow": [
+    {
+      "type": 0,
+      "value": "터미널로 보기"
+    }
+  ],
+  "onboarding.harnessLogin.timeoutDetail": [
+    {
+      "type": 0,
+      "value": "5분 동안 브라우저에서 돌아오지 않아 멈췄어요."
+    }
+  ],
+  "onboarding.harnessLogin.waitingBrowser": [
+    {
+      "type": 0,
+      "value": "브라우저에서 로그인하고 있어요."
+    }
+  ],
+  "onboarding.harnessLogin.waitingDetail": [
+    {
+      "type": 0,
+      "value": "로그인은 "
+    },
+    {
+      "type": 1,
+      "value": "cli"
+    },
+    {
+      "type": 0,
+      "value": "가 연 브라우저 창에서 끝나요. oort는 로그인 정보를 보지 않아요."
+    }
+  ],
+  "onboarding.harnessLogin.waitingDevice": [
+    {
+      "type": 0,
+      "value": "터미널에 나온 코드를 브라우저에 넣어 주세요."
     }
   ],
   "readState.markUnread.action": [

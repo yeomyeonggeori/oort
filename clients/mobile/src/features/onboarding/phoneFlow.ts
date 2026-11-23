@@ -48,7 +48,7 @@ export function phoneOnboardingDots(
     total: screens.length,
     current: index + 1,
     dots,
-    label: onboardingDotsLabel(screens.length, index + 1),
+    labelRef: onboardingDotsLabel(screens.length, index + 1),
   };
 }
 

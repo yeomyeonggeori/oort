@@ -1,4 +1,4 @@
-import { attachParticle } from "../../lib/koreanParticle";
+import type { MessageRef, PlainMessageKey } from "../../i18n/keys";
 import type { LocalHarnessId, LocalHarnessProbe } from "../hostedAgents/detect";
 import { HARNESS_LABEL } from "./aiConnect";
 
@@ -34,13 +34,13 @@ export const HARNESS_LOGIN_METHODS: Record<LocalHarnessId, readonly HarnessLogin
  * 로그인 버튼. 로그인하는 것이 공식 CLI라는 것이 이름에 드러난다(ADR-0193 D2
  * 개정의 두 이름 그대로).
  */
-export const LOGIN_ACTION_LABEL: Record<LocalHarnessId, string> = {
-  claude: "Claude Code로 로그인",
-  codex: "Codex로 로그인",
-};
+export const LOGIN_ACTION_KEYS = {
+  claude: "onboarding.harnessLogin.actionClaude",
+  codex: "onboarding.harnessLogin.actionCodex",
+} as const satisfies Record<LocalHarnessId, PlainMessageKey>;
 
-export function loginActionLabel(harness: LocalHarnessId): string {
-  return LOGIN_ACTION_LABEL[harness];
+export function loginActionKey(harness: LocalHarnessId): PlainMessageKey {
+  return LOGIN_ACTION_KEYS[harness];
 }
 
 /** 브라우저에서 돌아오지 않으면 PTY를 끝내고 실패로 닫는다. */
@@ -81,71 +81,89 @@ export function harnessLoginVerdict(
 // ---- 문장 --------------------------------------------------------------------
 // 코메토 말풍선은 해요체, 폼 라벨·안내는 합니다체(ADR-0193 D11).
 
+// 문구는 `i18n/catalogs/<언어>/onboarding.json`의 `onboarding.harnessLogin.*`에 있다. 화면이 그릴 때 지금 언어로 푼다.
+// 한국어 틀의 「{cli}가」·「{cli}를」은 닫힌 두 이름(Claude Code · Codex)에서 받침과 관계없이 같은 조사가 나오는 자리라 고정이다
+// (ADR-0213 §4: 이름이 바뀌면 조사가 틀어지므로, 하네스를 더하는 사람이 이 틀을 다시 본다).
+
 /** 모달 제목(스크린리더 이름). 버튼과 같은 말이다. */
-export function loginDialogTitle(harness: LocalHarnessId): string {
-  return loginActionLabel(harness);
+export function loginDialogTitleKey(harness: LocalHarnessId): PlainMessageKey {
+  return loginActionKey(harness);
 }
 
-export function loginWaitingLine(method: HarnessLoginMethod): string {
+export function loginWaitingLineKey(method: HarnessLoginMethod): PlainMessageKey {
   return method === "device"
-    ? "터미널에 나온 코드를 브라우저에 넣어 주세요."
-    : "브라우저에서 로그인하고 있어요.";
+    ? "onboarding.harnessLogin.waitingDevice"
+    : "onboarding.harnessLogin.waitingBrowser";
 }
 
 /** 기다림의 사실 문장: 누가 로그인을 처리하고 oort는 무엇을 보지 않는가. */
-export function loginWaitingDetail(harness: LocalHarnessId): string {
-  return `로그인은 ${attachParticle(HARNESS_LABEL[harness], "subject")} 연 브라우저 창에서 끝나요. oort는 로그인 정보를 보지 않아요.`;
+export function loginWaitingDetail(
+  harness: LocalHarnessId
+): MessageRef<"onboarding.harnessLogin.waitingDetail"> {
+  return { key: "onboarding.harnessLogin.waitingDetail", values: { cli: HARNESS_LABEL[harness] } };
 }
 
-export const LOGIN_CHECKING_LINE = "로그인을 확인하고 있어요.";
+export const LOGIN_CHECKING_KEY = "onboarding.harnessLogin.checking" satisfies PlainMessageKey;
 
-export const LOGIN_CONNECTED_LINE = "연결됐어요.";
-export function loginConnectedDetail(harness: LocalHarnessId): string {
-  return `이제 ${attachParticle(HARNESS_LABEL[harness], "object")} 내 에이전트로 고를 수 있어요.`;
+export const LOGIN_CONNECTED_KEY = "onboarding.harnessLogin.connected" satisfies PlainMessageKey;
+export function loginConnectedDetail(
+  harness: LocalHarnessId
+): MessageRef<"onboarding.harnessLogin.connectedDetail"> {
+  return { key: "onboarding.harnessLogin.connectedDetail", values: { cli: HARNESS_LABEL[harness] } };
 }
 
-export function loginFailedLine(reason: HarnessLoginFailure): string {
+export function loginFailedLineKey(reason: HarnessLoginFailure): PlainMessageKey {
   switch (reason) {
     case "timeout":
-      return "로그인이 끝나지 않았어요.";
+      return "onboarding.harnessLogin.failedTimeout";
     case "spawn":
-      return "이 앱에서 로그인을 열지 못했어요.";
+      return "onboarding.harnessLogin.failedSpawn";
     default:
-      return "로그인을 마치지 못했어요.";
+      return "onboarding.harnessLogin.failedDefault";
   }
 }
 
-export function loginFailedDetail(harness: LocalHarnessId, reason: HarnessLoginFailure): string {
-  const cli = HARNESS_LABEL[harness];
+export function loginFailedDetail(
+  harness: LocalHarnessId,
+  reason: HarnessLoginFailure
+): MessageRef<
+  | "onboarding.harnessLogin.timeoutDetail"
+  | "onboarding.harnessLogin.spawnDetail"
+  | "onboarding.harnessLogin.notLoggedInDetail"
+> {
   switch (reason) {
     case "timeout":
-      return "5분 동안 브라우저에서 돌아오지 않아 멈췄어요.";
+      return { key: "onboarding.harnessLogin.timeoutDetail" };
     case "spawn":
-      return "명령을 복사해 터미널에서 직접 로그인해 주세요.";
+      return { key: "onboarding.harnessLogin.spawnDetail" };
     default:
-      return `${attachParticle(cli, "subject")} 아직 로그인되지 않았다고 알려 왔어요.`;
+      return {
+        key: "onboarding.harnessLogin.notLoggedInDetail",
+        values: { cli: HARNESS_LABEL[harness] },
+      };
   }
 }
 
-export const LOGIN_CANCEL_LABEL = "취소";
+// 취소 · 다시 시도 · 닫기(대화 상자를 닫는 쪽)는 공용 낱말이다.
+export const LOGIN_CANCEL_KEY = "common.action.cancel" satisfies PlainMessageKey;
 /** 「내 도구」 카드에서 연 모달: 창만 닫고 로그인은 카드에서 계속된다. */
-export const LOGIN_DETACH_LABEL = "닫고 계속하기";
-export const LOGIN_RETRY_LABEL = "다시 시도";
-export const LOGIN_CLOSE_LABEL = "닫기";
-export const LOGIN_DONE_LABEL = "완료";
+export const LOGIN_DETACH_KEY = "onboarding.harnessLogin.detach" satisfies PlainMessageKey;
+export const LOGIN_RETRY_KEY = "common.action.retry" satisfies PlainMessageKey;
+export const LOGIN_CLOSE_KEY = "common.action.close" satisfies PlainMessageKey;
+export const LOGIN_DONE_KEY = "onboarding.harnessLogin.done" satisfies PlainMessageKey;
 /** Codex의 브라우저 콜백이 안 될 때의 대안(ADR-0190 D3-f A4). */
-export const LOGIN_DEVICE_LABEL = "기기 코드로 로그인";
+export const LOGIN_DEVICE_KEY = "onboarding.harnessLogin.deviceCode" satisfies PlainMessageKey;
 
 /** 접힘 링크. 「터미널에서 로그인」은 이 링크로 남는다(ADR-0193 D2 개정). */
-export const LOGIN_TERMINAL_SHOW_LABEL = "터미널로 보기";
-export const LOGIN_TERMINAL_HIDE_LABEL = "터미널 접기";
+export const LOGIN_TERMINAL_SHOW_KEY = "onboarding.harnessLogin.terminalShow" satisfies PlainMessageKey;
+export const LOGIN_TERMINAL_HIDE_KEY = "onboarding.harnessLogin.terminalHide" satisfies PlainMessageKey;
 
 /** 코드 붙여 넣기 폴백: CLI가 콜백 대신 코드를 요구할 때. */
-export const LOGIN_CODE_TOGGLE_LABEL = "브라우저에 코드가 나왔나요?";
-export const LOGIN_CODE_LABEL = "로그인 코드";
-export const LOGIN_CODE_HINT = "붙여 넣은 코드는 Claude Code에만 전달하고 저장하지 않습니다.";
-export const LOGIN_CODE_SUBMIT_LABEL = "보내기";
-export const LOGIN_CODE_SENT_STATUS = "코드를 보냈습니다.";
+export const LOGIN_CODE_TOGGLE_KEY = "onboarding.harnessLogin.codeToggle" satisfies PlainMessageKey;
+export const LOGIN_CODE_LABEL_KEY = "onboarding.harnessLogin.codeLabel" satisfies PlainMessageKey;
+export const LOGIN_CODE_HINT_KEY = "onboarding.harnessLogin.codeHint" satisfies PlainMessageKey;
+export const LOGIN_CODE_SUBMIT_KEY = "onboarding.harnessLogin.codeSubmit" satisfies PlainMessageKey;
+export const LOGIN_CODE_SENT_KEY = "onboarding.harnessLogin.codeSent" satisfies PlainMessageKey;
 
 /** 코드 입력을 보여 줄 하네스. Codex의 브라우저 흐름은 코드를 묻지 않는다. */
 export function loginAcceptsCode(harness: LocalHarnessId, method: HarnessLoginMethod): boolean {
@@ -153,4 +171,4 @@ export function loginAcceptsCode(harness: LocalHarnessId, method: HarnessLoginMe
 }
 
 /** 로그인 필요 줄의 한 줄(버튼 옆). */
-export const LOGIN_ROW_HINT = "로그인하면 고를 수 있어요.";
+export const LOGIN_ROW_HINT_KEY = "onboarding.harnessLogin.rowHint" satisfies PlainMessageKey;

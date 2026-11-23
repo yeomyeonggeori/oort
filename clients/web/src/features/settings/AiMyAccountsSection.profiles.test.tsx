@@ -24,6 +24,11 @@ import {
 import { SessionProvider, type SessionContextValue } from "@/app/session";
 import type { PtyExit } from "@/lib/tauri";
 import { AiMyAccountsSection } from "./AiMyAccountsSection";
+import { LocaleProvider } from "@/i18n/LocaleProvider";
+import { koreanLocale } from "@/testing/koLocale";
+
+// 로그인 단추의 낱말은 사전(`onboarding.json`)에 있다(#6064). 화면은 한국어 언어 객체 아래에서 그린다.
+const koLocale = await koreanLocale();
 
 // #2878 AA-4: 내 계정 줄의 연결 지점. 가짜 셸·가짜 PTY로 잰다.
 // - 기본 로그인 줄: 「목록에서 빼기」는 PTY도 셸 호출도 없이 이 기기 설정만 바꾼다.
@@ -196,15 +201,18 @@ function mount(props: { onAddApiKey?: () => void } = {}) {
   root = createRoot(host);
   act(() => {
     root?.render(
-      createElement(
-        QueryClientProvider,
-        { client },
-        createElement(
-          SessionProvider,
-          { value: session },
-          createElement(AiMyAccountsSection, props),
+      createElement(LocaleProvider, {
+        locale: koLocale,
+        children: createElement(
+          QueryClientProvider,
+          { client },
+          createElement(
+            SessionProvider,
+            { value: session },
+            createElement(AiMyAccountsSection, props),
+          ),
         ),
-      ),
+      }),
     );
   });
 }

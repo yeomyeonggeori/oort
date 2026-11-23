@@ -35,6 +35,8 @@ import { readDraft, writeDraft } from "@/features/chat/draftStore";
 import { MessageRow, type MessageRowActions } from "./MessageRow";
 import { ThreadComposer } from "./ThreadComposer";
 
+// 로그인 단추 낱말은 사전에 있다(#6064). 화면은 한국어 언어 객체 아래에서 그린다.
+
 const envSlot = vi.hoisted(() => ({ tauri: true, flag: true }));
 
 vi.mock("@/lib/env", async (importOriginal) => {

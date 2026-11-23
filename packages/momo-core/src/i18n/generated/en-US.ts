@@ -224,6 +224,472 @@ export const catalog: MessageCatalog = {
       "style": null
     }
   ],
+  "auth.claim.expired": [
+    {
+      "type": 0,
+      "value": "This link has expired. Ask whoever ran the install for a new link."
+    }
+  ],
+  "auth.claim.invalidLink": [
+    {
+      "type": 0,
+      "value": "This link isn't valid. Open the address exactly as you received it."
+    }
+  ],
+  "auth.claim.passwordRecheck": [
+    {
+      "type": 0,
+      "value": "Check the password again. It is empty or too long."
+    }
+  ],
+  "auth.claim.unmapped": [
+    {
+      "type": 0,
+      "value": "The request couldn't be processed. Check the address you received and try again."
+    }
+  ],
+  "auth.claim.used": [
+    {
+      "type": 0,
+      "value": "This link has already been used. Sign in instead."
+    }
+  ],
+  "auth.deviceKey.authFailed": [
+    {
+      "type": 0,
+      "value": "Couldn't verify it's you. Try again."
+    }
+  ],
+  "auth.deviceKey.cancelled": [
+    {
+      "type": 0,
+      "value": "Touch ID or password confirmation was canceled."
+    }
+  ],
+  "auth.deviceKey.changed": [
+    {
+      "type": 0,
+      "value": "This Mac's signing key has changed. Register this Mac as a signing device again."
+    }
+  ],
+  "auth.deviceKey.declined": [
+    {
+      "type": 0,
+      "value": "Signing was canceled."
+    }
+  ],
+  "auth.deviceKey.endorseConflict": [
+    {
+      "type": 0,
+      "value": "This Mac already approved a different key under this name, or the same key under another name. Reload the list to check."
+    }
+  ],
+  "auth.deviceKey.entitlementMissing": [
+    {
+      "type": 0,
+      "value": "This build doesn't have permission to keep a signing key. Use the team release app."
+    }
+  ],
+  "auth.deviceKey.failed": [
+    {
+      "type": 0,
+      "value": "Couldn't sign. Try again."
+    }
+  ],
+  "auth.deviceKey.hostPinnedOther": [
+    {
+      "type": 0,
+      "value": "This Mac's work host already has a different key registered as the signing device. Register the work host again."
+    }
+  ],
+  "auth.deviceKey.kindNotEnabled": [
+    {
+      "type": 0,
+      "value": "This app can't make this kind of signature yet."
+    }
+  ],
+  "auth.deviceKey.noLetter": [
+    {
+      "type": 0,
+      "value": "There's no revocation signed on this Mac, so it can't be sent again."
+    }
+  ],
+  "auth.deviceKey.noSession": [
+    {
+      "type": 0,
+      "value": "This sign-in can't move keys. Sign out and sign in again."
+    }
+  ],
+  "auth.deviceKey.notEndorsedHere": [
+    {
+      "type": 0,
+      "value": "This Mac has no record of approving this key, so it can't sign the revocation. Disconnecting that device revokes the key on the server, but this Mac's work host won't be told."
+    }
+  ],
+  "auth.deviceKey.notRootHere": [
+    {
+      "type": 0,
+      "value": "This Mac isn't registered as a signing device for this workspace."
+    }
+  ],
+  "auth.deviceKey.payloadRejected": [
+    {
+      "type": 0,
+      "value": "It wasn't signed because the content has invisible characters or an invalid value."
+    }
+  ],
+  "auth.deviceKey.pinRefused": [
+    {
+      "type": 0,
+      "value": "This Mac's work host didn't accept this key as the signing device. Check the work host status."
+    }
+  ],
+  "auth.deviceKey.rebindNotCurrent": [
+    {
+      "type": 0,
+      "value": "The server didn't move this key to this sign-in. Reload the list and try again."
+    }
+  ],
+  "auth.deviceKey.serverAlreadyRegistered": [
+    {
+      "type": 0,
+      "value": "This key is already registered. Reload the list."
+    }
+  ],
+  "auth.deviceKey.serverLineageEnded": [
+    {
+      "type": 0,
+      "value": "This sign-in can't register keys anymore. Sign in again."
+    }
+  ],
+  "auth.deviceKey.serverLinkedSession": [
+    {
+      "type": 0,
+      "value": "A device connected with a QR code can't be a signing device. Sign in with a password on this Mac, then register it."
+    }
+  ],
+  "auth.deviceKey.serverLinkNotFromMac": [
+    {
+      "type": 0,
+      "value": "This phone was connected with a QR code shown somewhere other than a Mac. Connect again with a QR code from a Mac."
+    }
+  ],
+  "auth.deviceKey.serverNotFound": [
+    {
+      "type": 0,
+      "value": "The server no longer has this key. Reload the list and register it again."
+    }
+  ],
+  "auth.deviceKey.serverPasswordRequired": [
+    {
+      "type": 0,
+      "value": "That password isn't correct. Enter this account's current password."
+    }
+  ],
+  "auth.deviceKey.serverRebindRequired": [
+    {
+      "type": 0,
+      "value": "This key is tied to a sign-in that has ended. Connect again."
+    }
+  ],
+  "auth.deviceKey.serverRequiresLinkedSession": [
+    {
+      "type": 0,
+      "value": "This phone wasn't connected with a QR code, so it can't send commands. Connect it once with a QR code from a Mac."
+    }
+  ],
+  "auth.deviceKey.serverSignatureInvalid": [
+    {
+      "type": 0,
+      "value": "The server didn't accept this device's signature. Check that the device clock is right and try again."
+    }
+  ],
+  "auth.deviceKey.unsignedBuild": [
+    {
+      "type": 0,
+      "value": "This build isn't signed, so it can't use a Secure Enclave key. Use the team release app."
+    }
+  ],
+  "auth.deviceKey.unsupported": [
+    {
+      "type": 0,
+      "value": "This device can't create a command-signing key."
+    }
+  ],
+  "auth.deviceKey.workdRefused": [
+    {
+      "type": 0,
+      "value": "This Mac's work host didn't accept the request. Try again."
+    }
+  ],
+  "auth.deviceKey.workHostNotRunning": [
+    {
+      "type": 0,
+      "value": "This Mac's work host isn't running. Turn it on and try again."
+    }
+  ],
+  "auth.deviceKey.workHostOtherWorkspace": [
+    {
+      "type": 0,
+      "value": "This Mac's work host belongs to another workspace, so it can't be changed here."
+    }
+  ],
+  "auth.deviceLink.addressFallbackLabel": [
+    {
+      "type": 0,
+      "value": "Connect with an address"
+    }
+  ],
+  "auth.deviceLink.cameraError": [
+    {
+      "type": 0,
+      "value": "Couldn't open the camera. Connect with the address instead."
+    }
+  ],
+  "auth.deviceLink.cameraOpening": [
+    {
+      "type": 0,
+      "value": "Opening camera"
+    }
+  ],
+  "auth.deviceLink.expired": [
+    {
+      "type": 0,
+      "value": "This connection code has expired or isn't recognized."
+    }
+  ],
+  "auth.deviceLink.malformed": [
+    {
+      "type": 0,
+      "value": "That isn't a connection code. Scan the QR code again."
+    }
+  ],
+  "auth.deviceLink.permission": [
+    {
+      "type": 0,
+      "value": "Camera access is off, so the QR code can't be scanned. Connect with the address instead."
+    }
+  ],
+  "auth.deviceLink.qrInstruction": [
+    {
+      "type": 0,
+      "value": "Point the camera at the QR code on the desktop screen."
+    }
+  ],
+  "auth.deviceLink.qrLabel": [
+    {
+      "type": 0,
+      "value": "Connect with QR"
+    }
+  ],
+  "auth.deviceLink.retryLabel": [
+    {
+      "type": 0,
+      "value": "Scan again"
+    }
+  ],
+  "auth.deviceLink.sasWait": [
+    {
+      "type": 0,
+      "value": "This continues once you confirm on the desktop."
+    }
+  ],
+  "auth.deviceLink.settingsLabel": [
+    {
+      "type": 0,
+      "value": "Allow in Settings"
+    }
+  ],
+  "auth.deviceLink.unreachable": [
+    {
+      "type": 0,
+      "value": "Couldn't reach the server. Trying to connect again."
+    }
+  ],
+  "auth.deviceLink.used": [
+    {
+      "type": 0,
+      "value": "This connection code has already been used."
+    }
+  ],
+  "auth.failure.serverError": [
+    {
+      "type": 0,
+      "value": "The server ran into an error. Try again in a moment."
+    }
+  ],
+  "auth.failure.tooManyRequests": [
+    {
+      "type": 0,
+      "value": "Too many requests. Try again in a moment."
+    }
+  ],
+  "auth.failure.unreadableResponse": [
+    {
+      "type": 0,
+      "value": "The server's response couldn't be read. Check the address and try again."
+    }
+  ],
+  "auth.join.alreadyRedeemed": [
+    {
+      "type": 0,
+      "value": "This account has already joined with this invite. Sign in instead."
+    }
+  ],
+  "auth.join.cannotJoin": [
+    {
+      "type": 0,
+      "value": "You can't join with this invite. Ask a workspace admin for a new invite link."
+    }
+  ],
+  "auth.join.exhausted": [
+    {
+      "type": 0,
+      "value": "This invite has been used up. Ask a workspace admin for a new invite link."
+    }
+  ],
+  "auth.join.expired": [
+    {
+      "type": 0,
+      "value": "This invite has expired. Ask a workspace admin for a new invite link."
+    }
+  ],
+  "auth.join.guestPaused": [
+    {
+      "type": 0,
+      "value": "Guest invites are paused until per-channel invites are ready. Contact a workspace admin."
+    }
+  ],
+  "auth.join.invalidCode": [
+    {
+      "type": 0,
+      "value": "This invite code isn't valid. Ask the person who invited you to check the link again."
+    }
+  ],
+  "auth.join.notPermitted": [
+    {
+      "type": 0,
+      "value": "This invite doesn't give you permission to join. Ask a workspace admin for a new invite link."
+    }
+  ],
+  "auth.join.revoked": [
+    {
+      "type": 0,
+      "value": "This invite was revoked. Ask a workspace admin for a new invite link."
+    }
+  ],
+  "auth.join.unmapped": [
+    {
+      "type": 0,
+      "value": "The request couldn't be processed. Ask a workspace admin for a new invite link."
+    }
+  ],
+  "auth.join.unusable": [
+    {
+      "type": 0,
+      "value": "This invite can no longer be used. Ask a workspace admin for a new invite link."
+    }
+  ],
+  "auth.linkedDevice.platformWeb": [
+    {
+      "type": 0,
+      "value": "Web"
+    }
+  ],
+  "auth.passwordRule.tooLong": [
+    {
+      "type": 0,
+      "value": "The password is too long. Use "
+    },
+    {
+      "type": 1,
+      "value": "maxBytes"
+    },
+    {
+      "type": 0,
+      "value": " bytes or fewer. A Hangul character takes "
+    },
+    {
+      "type": 1,
+      "value": "hangulBytes"
+    },
+    {
+      "type": 0,
+      "value": " bytes (up to "
+    },
+    {
+      "type": 1,
+      "value": "maxHangul"
+    },
+    {
+      "type": 0,
+      "value": " characters if only Hangul)."
+    }
+  ],
+  "auth.passwordRule.tooShort": [
+    {
+      "type": 0,
+      "value": "The password is too short. Use at least "
+    },
+    {
+      "type": 6,
+      "value": "minChars",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " character"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " characters"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "auth.signIn.invalidCredentials": [
+    {
+      "type": 0,
+      "value": "Incorrect email or password."
+    }
+  ],
+  "auth.signIn.suspended": [
+    {
+      "type": 0,
+      "value": "This account can't sign in right now. Contact a workspace admin."
+    }
+  ],
+  "auth.signIn.unmapped": [
+    {
+      "type": 0,
+      "value": "The request couldn't be processed. Contact a workspace admin."
+    }
+  ],
+  "auth.signIn.workspaceIdFormat": [
+    {
+      "type": 0,
+      "value": "That isn't a workspace ID. Leave it empty to connect to the default workspace."
+    }
+  ],
   "blocked.addMemberLater.offline": [
     {
       "type": 0,
@@ -2129,6 +2595,560 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": " characters or fewer."
+    }
+  ],
+  "cliLogin.consent.approve": [
+    {
+      "type": 0,
+      "value": "Allow"
+    }
+  ],
+  "cliLogin.consent.approveBusy": [
+    {
+      "type": 0,
+      "value": "Allowing"
+    }
+  ],
+  "cliLogin.consent.checkNote": [
+    {
+      "type": 0,
+      "value": "Only allow this if the server address and device name shown in your terminal match the ones below. If they differ, or you did not start this sign-in, deny it."
+    }
+  ],
+  "cliLogin.consent.clientLabel": [
+    {
+      "type": 0,
+      "value": "Client"
+    }
+  ],
+  "cliLogin.consent.credentialLimit": [
+    {
+      "type": 0,
+      "value": "Too many devices are signed in with this account. Remove connections you no longer use, then try again."
+    }
+  ],
+  "cliLogin.consent.deny": [
+    {
+      "type": 0,
+      "value": "Deny"
+    }
+  ],
+  "cliLogin.consent.denyBusy": [
+    {
+      "type": 0,
+      "value": "Denying"
+    }
+  ],
+  "cliLogin.consent.deviceLabel": [
+    {
+      "type": 0,
+      "value": "Device name"
+    }
+  ],
+  "cliLogin.consent.deviceMissing": [
+    {
+      "type": 0,
+      "value": "No device name was sent"
+    }
+  ],
+  "cliLogin.consent.deviceNote": [
+    {
+      "type": 0,
+      "value": "The device name is chosen by whatever is connecting."
+    }
+  ],
+  "cliLogin.consent.dismiss": [
+    {
+      "type": 0,
+      "value": "Dismiss"
+    }
+  ],
+  "cliLogin.consent.hostLabel": [
+    {
+      "type": 0,
+      "value": "Server host"
+    }
+  ],
+  "cliLogin.consent.lead": [
+    {
+      "type": 0,
+      "value": "The oort CLI in your terminal wants to connect to this workspace with your account."
+    }
+  ],
+  "cliLogin.consent.lifetime": [
+    {
+      "type": 0,
+      "value": "The connection lasts up to "
+    },
+    {
+      "type": 6,
+      "value": "maxDays",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " day"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " days"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    },
+    {
+      "type": 0,
+      "value": " and ends after "
+    },
+    {
+      "type": 6,
+      "value": "idleDays",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " day"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " days"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    },
+    {
+      "type": 0,
+      "value": " without use. Sign-in refreshes automatically every "
+    },
+    {
+      "type": 6,
+      "value": "accessMinutes",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " minute"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " minutes"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    },
+    {
+      "type": 0,
+      "value": ". Changing your password ends this connection right away."
+    }
+  ],
+  "cliLogin.consent.loadingSr": [
+    {
+      "type": 0,
+      "value": "Loading the sign-in request."
+    }
+  ],
+  "cliLogin.consent.memberLabel": [
+    {
+      "type": 0,
+      "value": "Approving as"
+    }
+  ],
+  "cliLogin.consent.offlineNote": [
+    {
+      "type": 0,
+      "value": "You are offline. You can allow or deny once you are back online."
+    }
+  ],
+  "cliLogin.consent.passwordHint": [
+    {
+      "type": 0,
+      "value": "We ask for your password once more before you allow this."
+    }
+  ],
+  "cliLogin.consent.passwordLabel": [
+    {
+      "type": 0,
+      "value": "Current password"
+    }
+  ],
+  "cliLogin.consent.passwordWrong": [
+    {
+      "type": 0,
+      "value": "That password is not correct. Enter it again."
+    }
+  ],
+  "cliLogin.consent.presetHint": [
+    {
+      "type": 0,
+      "value": "Access cannot be changed after you allow it. To change it, connect again."
+    }
+  ],
+  "cliLogin.consent.presetLegend": [
+    {
+      "type": 0,
+      "value": "Access to allow"
+    }
+  ],
+  "cliLogin.consent.rerun": [
+    {
+      "type": 0,
+      "value": "Run oort login again in your terminal."
+    }
+  ],
+  "cliLogin.consent.retryLater": [
+    {
+      "type": 0,
+      "value": "Try again in a moment."
+    }
+  ],
+  "cliLogin.consent.returning": [
+    {
+      "type": 0,
+      "value": "Your decision is saved. Returning to your terminal."
+    }
+  ],
+  "cliLogin.consent.signinDetail": [
+    {
+      "type": 0,
+      "value": "To review this sign-in request, sign in to this workspace first. You will come back to this request afterward."
+    }
+  ],
+  "cliLogin.consent.title": [
+    {
+      "type": 0,
+      "value": "Approve terminal sign-in"
+    }
+  ],
+  "cliLogin.consent.workspaceLabel": [
+    {
+      "type": 0,
+      "value": "Workspace"
+    }
+  ],
+  "cliLogin.failure.approveLead": [
+    {
+      "type": 0,
+      "value": "Couldn't save your approval."
+    }
+  ],
+  "cliLogin.failure.busy": [
+    {
+      "type": 0,
+      "value": "The server is busy for a moment. "
+    },
+    {
+      "type": 1,
+      "value": "wait"
+    }
+  ],
+  "cliLogin.failure.denyLead": [
+    {
+      "type": 0,
+      "value": "Couldn't save your denial."
+    }
+  ],
+  "cliLogin.failure.frame": [
+    {
+      "type": 1,
+      "value": "lead"
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 1,
+      "value": "detail"
+    }
+  ],
+  "cliLogin.failure.previewLead": [
+    {
+      "type": 0,
+      "value": "Couldn't load the sign-in request."
+    }
+  ],
+  "cliLogin.failure.retryAt": [
+    {
+      "type": 0,
+      "value": "Try again "
+    },
+    {
+      "type": 1,
+      "value": "when"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "cliLogin.failure.tooMany": [
+    {
+      "type": 0,
+      "value": "Too many requests. "
+    },
+    {
+      "type": 1,
+      "value": "wait"
+    }
+  ],
+  "cliLogin.preset.detail": [
+    {
+      "type": 1,
+      "value": "scopes"
+    },
+    {
+      "type": 0,
+      "value": ". "
+    },
+    {
+      "type": 1,
+      "value": "note"
+    }
+  ],
+  "cliLogin.preset.readClosed": [
+    {
+      "type": 0,
+      "value": "It cannot send, edit, delete, or change settings."
+    }
+  ],
+  "cliLogin.preset.readLabel": [
+    {
+      "type": 0,
+      "value": "Read only"
+    }
+  ],
+  "cliLogin.preset.sendCaution": [
+    {
+      "type": 0,
+      "value": "Messages are sent right away and cannot be edited or deleted. Mentions can wake agents."
+    }
+  ],
+  "cliLogin.preset.sendLabel": [
+    {
+      "type": 0,
+      "value": "Read and send"
+    }
+  ],
+  "cliLogin.preset.sendUnavailable": [
+    {
+      "type": 0,
+      "value": "This sign-in request does not include sending messages, so you cannot choose this."
+    }
+  ],
+  "cliLogin.retry.inMinutes": [
+    {
+      "type": 0,
+      "value": "in about "
+    },
+    {
+      "type": 6,
+      "value": "minutes",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " minute"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " minutes"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "cliLogin.retry.inSeconds": [
+    {
+      "type": 0,
+      "value": "in "
+    },
+    {
+      "type": 6,
+      "value": "seconds",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " second"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " seconds"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "cliLogin.scope.channelsRead": [
+    {
+      "type": 0,
+      "value": "Read the channel list"
+    }
+  ],
+  "cliLogin.scope.identity": [
+    {
+      "type": 0,
+      "value": "Confirm your account"
+    }
+  ],
+  "cliLogin.scope.inboxRead": [
+    {
+      "type": 0,
+      "value": "Read your inbox"
+    }
+  ],
+  "cliLogin.scope.messagesRead": [
+    {
+      "type": 0,
+      "value": "Read messages and threads in channels"
+    }
+  ],
+  "cliLogin.scope.messagesWrite": [
+    {
+      "type": 0,
+      "value": "Send messages as you"
+    }
+  ],
+  "cliLogin.terminal.accessDeniedDetail": [
+    {
+      "type": 0,
+      "value": "An admin has to allow it first. Ask a workspace admin if you need it. Nothing was allowed from this page."
+    }
+  ],
+  "cliLogin.terminal.accessDeniedHeadline": [
+    {
+      "type": 0,
+      "value": "Command-line access cannot be created in this workspace."
+    }
+  ],
+  "cliLogin.terminal.alreadyDecidedDetail": [
+    {
+      "type": 0,
+      "value": "A decision is recorded only once. If you need to, run oort login again in your terminal."
+    }
+  ],
+  "cliLogin.terminal.alreadyDecidedHeadline": [
+    {
+      "type": 0,
+      "value": "This request was already handled."
+    }
+  ],
+  "cliLogin.terminal.expiredDetail": [
+    {
+      "type": 0,
+      "value": "An expired request cannot be allowed. Run oort login again in your terminal."
+    }
+  ],
+  "cliLogin.terminal.expiredHeadline": [
+    {
+      "type": 0,
+      "value": "This sign-in request has expired."
+    }
+  ],
+  "cliLogin.terminal.notFoundDetail": [
+    {
+      "type": 0,
+      "value": "Nothing was allowed from this page. Run oort login again in your terminal."
+    }
+  ],
+  "cliLogin.terminal.notFoundHeadline": [
+    {
+      "type": 0,
+      "value": "This request has expired or is not valid."
+    }
+  ],
+  "cliLogin.terminal.passwordUnavailableDetail": [
+    {
+      "type": 0,
+      "value": "This account has no password, so it cannot be checked before allowing. You cannot connect the command line this way for now, and nothing was allowed from this page."
+    }
+  ],
+  "cliLogin.terminal.passwordUnavailableHeadline": [
+    {
+      "type": 0,
+      "value": "This account's password can't be checked."
+    }
+  ],
+  "cliLogin.terminal.redirectRefusedDetail": [
+    {
+      "type": 0,
+      "value": "The server's response did not contain a verified address back to this device's terminal (127.0.0.1), so it was not followed. Run oort login again in your terminal."
+    }
+  ],
+  "cliLogin.terminal.redirectRefusedHeadline": [
+    {
+      "type": 0,
+      "value": "Couldn't verify the address back to your terminal."
     }
   ],
   "common.action.cancel": [
@@ -7226,6 +8246,276 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "Posted an invite link"
+    }
+  ],
+  "onboarding.guide.expressionFlustered": [
+    {
+      "type": 0,
+      "value": "Flustered"
+    }
+  ],
+  "onboarding.guide.expressionHappy": [
+    {
+      "type": 0,
+      "value": "Happy"
+    }
+  ],
+  "onboarding.guide.expressionIdle": [
+    {
+      "type": 0,
+      "value": "Idle"
+    }
+  ],
+  "onboarding.guide.expressionSleepy": [
+    {
+      "type": 0,
+      "value": "Sleepy"
+    }
+  ],
+  "onboarding.guide.expressionThinking": [
+    {
+      "type": 0,
+      "value": "Thinking"
+    }
+  ],
+  "onboarding.guide.expressionWorking": [
+    {
+      "type": 0,
+      "value": "Working"
+    }
+  ],
+  "onboarding.guide.stateAwaiting": [
+    {
+      "type": 0,
+      "value": "Waiting for an answer"
+    }
+  ],
+  "onboarding.guide.stateChecking": [
+    {
+      "type": 0,
+      "value": "Detecting, checking, or connecting"
+    }
+  ],
+  "onboarding.guide.statePreparing": [
+    {
+      "type": 0,
+      "value": "Getting the agent ready"
+    }
+  ],
+  "onboarding.guide.stateSkipped": [
+    {
+      "type": 0,
+      "value": "Skipped for later"
+    }
+  ],
+  "onboarding.guide.stateSuccess": [
+    {
+      "type": 0,
+      "value": "Done or detected"
+    }
+  ],
+  "onboarding.guide.stateTrouble": [
+    {
+      "type": 0,
+      "value": "Error or offline"
+    }
+  ],
+  "onboarding.guide.stepLabel": [
+    {
+      "type": 0,
+      "value": "Step "
+    },
+    {
+      "type": 1,
+      "value": "current"
+    },
+    {
+      "type": 0,
+      "value": " of "
+    },
+    {
+      "type": 1,
+      "value": "total"
+    }
+  ],
+  "onboarding.harnessLogin.actionClaude": [
+    {
+      "type": 0,
+      "value": "Sign in with Claude Code"
+    }
+  ],
+  "onboarding.harnessLogin.actionCodex": [
+    {
+      "type": 0,
+      "value": "Sign in with Codex"
+    }
+  ],
+  "onboarding.harnessLogin.checking": [
+    {
+      "type": 0,
+      "value": "Checking your sign-in."
+    }
+  ],
+  "onboarding.harnessLogin.codeHint": [
+    {
+      "type": 0,
+      "value": "The pasted code goes only to Claude Code and is not stored."
+    }
+  ],
+  "onboarding.harnessLogin.codeLabel": [
+    {
+      "type": 0,
+      "value": "Sign-in code"
+    }
+  ],
+  "onboarding.harnessLogin.codeSent": [
+    {
+      "type": 0,
+      "value": "Code sent."
+    }
+  ],
+  "onboarding.harnessLogin.codeSubmit": [
+    {
+      "type": 0,
+      "value": "Send"
+    }
+  ],
+  "onboarding.harnessLogin.codeToggle": [
+    {
+      "type": 0,
+      "value": "Did the browser show a code?"
+    }
+  ],
+  "onboarding.harnessLogin.connected": [
+    {
+      "type": 0,
+      "value": "Connected."
+    }
+  ],
+  "onboarding.harnessLogin.connectedDetail": [
+    {
+      "type": 0,
+      "value": "You can now choose "
+    },
+    {
+      "type": 1,
+      "value": "cli"
+    },
+    {
+      "type": 0,
+      "value": " as your agent."
+    }
+  ],
+  "onboarding.harnessLogin.detach": [
+    {
+      "type": 0,
+      "value": "Close and keep going"
+    }
+  ],
+  "onboarding.harnessLogin.deviceCode": [
+    {
+      "type": 0,
+      "value": "Sign in with a device code"
+    }
+  ],
+  "onboarding.harnessLogin.done": [
+    {
+      "type": 0,
+      "value": "Done"
+    }
+  ],
+  "onboarding.harnessLogin.failedDefault": [
+    {
+      "type": 0,
+      "value": "Couldn't finish signing in."
+    }
+  ],
+  "onboarding.harnessLogin.failedSpawn": [
+    {
+      "type": 0,
+      "value": "This app couldn't start the sign-in."
+    }
+  ],
+  "onboarding.harnessLogin.failedTimeout": [
+    {
+      "type": 0,
+      "value": "Sign-in didn't finish."
+    }
+  ],
+  "onboarding.harnessLogin.notLoggedInDetail": [
+    {
+      "type": 1,
+      "value": "cli"
+    },
+    {
+      "type": 0,
+      "value": " reported that you are not signed in yet."
+    }
+  ],
+  "onboarding.harnessLogin.rowHint": [
+    {
+      "type": 0,
+      "value": "Sign in to choose it."
+    }
+  ],
+  "onboarding.harnessLogin.spawnDetail": [
+    {
+      "type": 0,
+      "value": "Copy the command and sign in yourself in a terminal."
+    }
+  ],
+  "onboarding.harnessLogin.terminalAria": [
+    {
+      "type": 1,
+      "value": "title"
+    },
+    {
+      "type": 0,
+      "value": " terminal"
+    }
+  ],
+  "onboarding.harnessLogin.terminalHide": [
+    {
+      "type": 0,
+      "value": "Hide terminal"
+    }
+  ],
+  "onboarding.harnessLogin.terminalShow": [
+    {
+      "type": 0,
+      "value": "Show in terminal"
+    }
+  ],
+  "onboarding.harnessLogin.timeoutDetail": [
+    {
+      "type": 0,
+      "value": "It stopped because nothing came back from the browser for 5 minutes."
+    }
+  ],
+  "onboarding.harnessLogin.waitingBrowser": [
+    {
+      "type": 0,
+      "value": "Finishing sign-in in your browser."
+    }
+  ],
+  "onboarding.harnessLogin.waitingDetail": [
+    {
+      "type": 0,
+      "value": "Sign-in finishes in the browser window "
+    },
+    {
+      "type": 1,
+      "value": "cli"
+    },
+    {
+      "type": 0,
+      "value": " opened. oort doesn't see your login details."
+    }
+  ],
+  "onboarding.harnessLogin.waitingDevice": [
+    {
+      "type": 0,
+      "value": "Enter the code shown in the terminal into your browser."
     }
   ],
   "readState.markUnread.action": [

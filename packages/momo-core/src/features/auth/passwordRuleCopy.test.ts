@@ -5,6 +5,20 @@ import {
   NEW_PASSWORD_MIN_CHARS,
   passwordRuleCopy,
 } from "./passwordRuleCopy";
+import { catalog as koCatalog } from "../../i18n/generated/ko-KR";
+import { createLocaleService, resolveLocaleContext } from "../../i18n";
+import { failureMessageText } from "./failureMessage";
+
+// 문장은 사전(`auth.json`)에 있다(#6064). 시험은 제품과 같은 한국어 생성물로 문장을 풀어 예전 한국어를 그대로 단정한다.
+const { formatMessage } = createLocaleService({
+  ...resolveLocaleContext("ko-KR", { languages: ["ko-KR"] }),
+  catalog: koCatalog,
+});
+const rule = (code: string): string => {
+  const copy = passwordRuleCopy(code);
+  return copy === null ? "" : failureMessageText(formatMessage, copy);
+};
+
 
 // ADR-0215 D2 (#4593). The sentences and the numbers they print are pinned as
 // literals on purpose: a number or a sentence changed in this module goes red.
@@ -13,13 +27,13 @@ import {
 // reads `password_rules.rs` and compares.
 describe("passwordRuleCopy", () => {
   it("says the minimum for a too-short password", () => {
-    expect(passwordRuleCopy("password_too_short")).toBe(
+    expect(rule("password_too_short")).toBe(
       "비밀번호가 너무 짧습니다. 10자 이상으로 입력하세요."
     );
   });
 
   it("says the byte ceiling and the exchange rate for a too-long password", () => {
-    expect(passwordRuleCopy("password_too_long")).toBe(
+    expect(rule("password_too_long")).toBe(
       "비밀번호가 너무 깁니다. 72바이트 이하로 입력하세요. 한글은 한 자에 3바이트입니다(한글만이면 24자)."
     );
   });
@@ -29,7 +43,7 @@ describe("passwordRuleCopy", () => {
     // Latin" taken one at a time, and still 73 bytes. The sentence has to let a
     // person work that out: one byte budget, and what a Hangul syllable costs
     // against it. The old per-script pair read as two limits.
-    const sentence = passwordRuleCopy("password_too_long") ?? "";
+    const sentence = rule("password_too_long");
     expect(sentence).toContain("72바이트 이하");
     expect(sentence).toContain("한글은 한 자에 3바이트");
     expect(sentence).not.toContain("영문은 72자");

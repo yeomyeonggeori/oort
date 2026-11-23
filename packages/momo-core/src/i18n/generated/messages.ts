@@ -21,6 +21,74 @@ export const messageKeys = [
   "attachments.video.unmute",
   "attachments.viewer.mixedCaption",
   "attachments.viewer.mixedCaptionLabel",
+  "auth.claim.expired",
+  "auth.claim.invalidLink",
+  "auth.claim.passwordRecheck",
+  "auth.claim.unmapped",
+  "auth.claim.used",
+  "auth.deviceKey.authFailed",
+  "auth.deviceKey.cancelled",
+  "auth.deviceKey.changed",
+  "auth.deviceKey.declined",
+  "auth.deviceKey.endorseConflict",
+  "auth.deviceKey.entitlementMissing",
+  "auth.deviceKey.failed",
+  "auth.deviceKey.hostPinnedOther",
+  "auth.deviceKey.kindNotEnabled",
+  "auth.deviceKey.noLetter",
+  "auth.deviceKey.noSession",
+  "auth.deviceKey.notEndorsedHere",
+  "auth.deviceKey.notRootHere",
+  "auth.deviceKey.payloadRejected",
+  "auth.deviceKey.pinRefused",
+  "auth.deviceKey.rebindNotCurrent",
+  "auth.deviceKey.serverAlreadyRegistered",
+  "auth.deviceKey.serverLineageEnded",
+  "auth.deviceKey.serverLinkedSession",
+  "auth.deviceKey.serverLinkNotFromMac",
+  "auth.deviceKey.serverNotFound",
+  "auth.deviceKey.serverPasswordRequired",
+  "auth.deviceKey.serverRebindRequired",
+  "auth.deviceKey.serverRequiresLinkedSession",
+  "auth.deviceKey.serverSignatureInvalid",
+  "auth.deviceKey.unsignedBuild",
+  "auth.deviceKey.unsupported",
+  "auth.deviceKey.workdRefused",
+  "auth.deviceKey.workHostNotRunning",
+  "auth.deviceKey.workHostOtherWorkspace",
+  "auth.deviceLink.addressFallbackLabel",
+  "auth.deviceLink.cameraError",
+  "auth.deviceLink.cameraOpening",
+  "auth.deviceLink.expired",
+  "auth.deviceLink.malformed",
+  "auth.deviceLink.permission",
+  "auth.deviceLink.qrInstruction",
+  "auth.deviceLink.qrLabel",
+  "auth.deviceLink.retryLabel",
+  "auth.deviceLink.sasWait",
+  "auth.deviceLink.settingsLabel",
+  "auth.deviceLink.unreachable",
+  "auth.deviceLink.used",
+  "auth.failure.serverError",
+  "auth.failure.tooManyRequests",
+  "auth.failure.unreadableResponse",
+  "auth.join.alreadyRedeemed",
+  "auth.join.cannotJoin",
+  "auth.join.exhausted",
+  "auth.join.expired",
+  "auth.join.guestPaused",
+  "auth.join.invalidCode",
+  "auth.join.notPermitted",
+  "auth.join.revoked",
+  "auth.join.unmapped",
+  "auth.join.unusable",
+  "auth.linkedDevice.platformWeb",
+  "auth.passwordRule.tooLong",
+  "auth.passwordRule.tooShort",
+  "auth.signIn.invalidCredentials",
+  "auth.signIn.suspended",
+  "auth.signIn.unmapped",
+  "auth.signIn.workspaceIdFormat",
   "blocked.addMemberLater.offline",
   "blocked.addMemberLater.serverUnreachable",
   "blocked.aiKeysLead.offline",
@@ -307,6 +375,66 @@ export const messageKeys = [
   "channels.rename.submit",
   "channels.rename.title",
   "channels.topic.tooLong",
+  "cliLogin.consent.approve",
+  "cliLogin.consent.approveBusy",
+  "cliLogin.consent.checkNote",
+  "cliLogin.consent.clientLabel",
+  "cliLogin.consent.credentialLimit",
+  "cliLogin.consent.deny",
+  "cliLogin.consent.denyBusy",
+  "cliLogin.consent.deviceLabel",
+  "cliLogin.consent.deviceMissing",
+  "cliLogin.consent.deviceNote",
+  "cliLogin.consent.dismiss",
+  "cliLogin.consent.hostLabel",
+  "cliLogin.consent.lead",
+  "cliLogin.consent.lifetime",
+  "cliLogin.consent.loadingSr",
+  "cliLogin.consent.memberLabel",
+  "cliLogin.consent.offlineNote",
+  "cliLogin.consent.passwordHint",
+  "cliLogin.consent.passwordLabel",
+  "cliLogin.consent.passwordWrong",
+  "cliLogin.consent.presetHint",
+  "cliLogin.consent.presetLegend",
+  "cliLogin.consent.rerun",
+  "cliLogin.consent.retryLater",
+  "cliLogin.consent.returning",
+  "cliLogin.consent.signinDetail",
+  "cliLogin.consent.title",
+  "cliLogin.consent.workspaceLabel",
+  "cliLogin.failure.approveLead",
+  "cliLogin.failure.busy",
+  "cliLogin.failure.denyLead",
+  "cliLogin.failure.frame",
+  "cliLogin.failure.previewLead",
+  "cliLogin.failure.retryAt",
+  "cliLogin.failure.tooMany",
+  "cliLogin.preset.detail",
+  "cliLogin.preset.readClosed",
+  "cliLogin.preset.readLabel",
+  "cliLogin.preset.sendCaution",
+  "cliLogin.preset.sendLabel",
+  "cliLogin.preset.sendUnavailable",
+  "cliLogin.retry.inMinutes",
+  "cliLogin.retry.inSeconds",
+  "cliLogin.scope.channelsRead",
+  "cliLogin.scope.identity",
+  "cliLogin.scope.inboxRead",
+  "cliLogin.scope.messagesRead",
+  "cliLogin.scope.messagesWrite",
+  "cliLogin.terminal.accessDeniedDetail",
+  "cliLogin.terminal.accessDeniedHeadline",
+  "cliLogin.terminal.alreadyDecidedDetail",
+  "cliLogin.terminal.alreadyDecidedHeadline",
+  "cliLogin.terminal.expiredDetail",
+  "cliLogin.terminal.expiredHeadline",
+  "cliLogin.terminal.notFoundDetail",
+  "cliLogin.terminal.notFoundHeadline",
+  "cliLogin.terminal.passwordUnavailableDetail",
+  "cliLogin.terminal.passwordUnavailableHeadline",
+  "cliLogin.terminal.redirectRefusedDetail",
+  "cliLogin.terminal.redirectRefusedHeadline",
   "common.action.cancel",
   "common.action.checkAgain",
   "common.action.close",
@@ -977,6 +1105,45 @@ export const messageKeys = [
   "notifications.banner.code",
   "notifications.banner.secret",
   "notifications.inviteLink.fallback",
+  "onboarding.guide.expressionFlustered",
+  "onboarding.guide.expressionHappy",
+  "onboarding.guide.expressionIdle",
+  "onboarding.guide.expressionSleepy",
+  "onboarding.guide.expressionThinking",
+  "onboarding.guide.expressionWorking",
+  "onboarding.guide.stateAwaiting",
+  "onboarding.guide.stateChecking",
+  "onboarding.guide.statePreparing",
+  "onboarding.guide.stateSkipped",
+  "onboarding.guide.stateSuccess",
+  "onboarding.guide.stateTrouble",
+  "onboarding.guide.stepLabel",
+  "onboarding.harnessLogin.actionClaude",
+  "onboarding.harnessLogin.actionCodex",
+  "onboarding.harnessLogin.checking",
+  "onboarding.harnessLogin.codeHint",
+  "onboarding.harnessLogin.codeLabel",
+  "onboarding.harnessLogin.codeSent",
+  "onboarding.harnessLogin.codeSubmit",
+  "onboarding.harnessLogin.codeToggle",
+  "onboarding.harnessLogin.connected",
+  "onboarding.harnessLogin.connectedDetail",
+  "onboarding.harnessLogin.detach",
+  "onboarding.harnessLogin.deviceCode",
+  "onboarding.harnessLogin.done",
+  "onboarding.harnessLogin.failedDefault",
+  "onboarding.harnessLogin.failedSpawn",
+  "onboarding.harnessLogin.failedTimeout",
+  "onboarding.harnessLogin.notLoggedInDetail",
+  "onboarding.harnessLogin.rowHint",
+  "onboarding.harnessLogin.spawnDetail",
+  "onboarding.harnessLogin.terminalAria",
+  "onboarding.harnessLogin.terminalHide",
+  "onboarding.harnessLogin.terminalShow",
+  "onboarding.harnessLogin.timeoutDetail",
+  "onboarding.harnessLogin.waitingBrowser",
+  "onboarding.harnessLogin.waitingDetail",
+  "onboarding.harnessLogin.waitingDevice",
   "readState.markUnread.action",
   "readState.markUnread.done",
   "readState.markUnread.failed",
@@ -2121,6 +2288,80 @@ export const argumentSpecs = {
     "position": "number",
     "total": "number"
   },
+  "auth.claim.expired": {},
+  "auth.claim.invalidLink": {},
+  "auth.claim.passwordRecheck": {},
+  "auth.claim.unmapped": {},
+  "auth.claim.used": {},
+  "auth.deviceKey.authFailed": {},
+  "auth.deviceKey.cancelled": {},
+  "auth.deviceKey.changed": {},
+  "auth.deviceKey.declined": {},
+  "auth.deviceKey.endorseConflict": {},
+  "auth.deviceKey.entitlementMissing": {},
+  "auth.deviceKey.failed": {},
+  "auth.deviceKey.hostPinnedOther": {},
+  "auth.deviceKey.kindNotEnabled": {},
+  "auth.deviceKey.noLetter": {},
+  "auth.deviceKey.noSession": {},
+  "auth.deviceKey.notEndorsedHere": {},
+  "auth.deviceKey.notRootHere": {},
+  "auth.deviceKey.payloadRejected": {},
+  "auth.deviceKey.pinRefused": {},
+  "auth.deviceKey.rebindNotCurrent": {},
+  "auth.deviceKey.serverAlreadyRegistered": {},
+  "auth.deviceKey.serverLineageEnded": {},
+  "auth.deviceKey.serverLinkedSession": {},
+  "auth.deviceKey.serverLinkNotFromMac": {},
+  "auth.deviceKey.serverNotFound": {},
+  "auth.deviceKey.serverPasswordRequired": {},
+  "auth.deviceKey.serverRebindRequired": {},
+  "auth.deviceKey.serverRequiresLinkedSession": {},
+  "auth.deviceKey.serverSignatureInvalid": {},
+  "auth.deviceKey.unsignedBuild": {},
+  "auth.deviceKey.unsupported": {},
+  "auth.deviceKey.workdRefused": {},
+  "auth.deviceKey.workHostNotRunning": {},
+  "auth.deviceKey.workHostOtherWorkspace": {},
+  "auth.deviceLink.addressFallbackLabel": {},
+  "auth.deviceLink.cameraError": {},
+  "auth.deviceLink.cameraOpening": {},
+  "auth.deviceLink.expired": {},
+  "auth.deviceLink.malformed": {},
+  "auth.deviceLink.permission": {},
+  "auth.deviceLink.qrInstruction": {},
+  "auth.deviceLink.qrLabel": {},
+  "auth.deviceLink.retryLabel": {},
+  "auth.deviceLink.sasWait": {},
+  "auth.deviceLink.settingsLabel": {},
+  "auth.deviceLink.unreachable": {},
+  "auth.deviceLink.used": {},
+  "auth.failure.serverError": {},
+  "auth.failure.tooManyRequests": {},
+  "auth.failure.unreadableResponse": {},
+  "auth.join.alreadyRedeemed": {},
+  "auth.join.cannotJoin": {},
+  "auth.join.exhausted": {},
+  "auth.join.expired": {},
+  "auth.join.guestPaused": {},
+  "auth.join.invalidCode": {},
+  "auth.join.notPermitted": {},
+  "auth.join.revoked": {},
+  "auth.join.unmapped": {},
+  "auth.join.unusable": {},
+  "auth.linkedDevice.platformWeb": {},
+  "auth.passwordRule.tooLong": {
+    "hangulBytes": "string",
+    "maxBytes": "string",
+    "maxHangul": "string"
+  },
+  "auth.passwordRule.tooShort": {
+    "minChars": "number"
+  },
+  "auth.signIn.invalidCredentials": {},
+  "auth.signIn.suspended": {},
+  "auth.signIn.unmapped": {},
+  "auth.signIn.workspaceIdFormat": {},
   "blocked.addMemberLater.offline": {},
   "blocked.addMemberLater.serverUnreachable": {},
   "blocked.aiKeysLead.offline": {},
@@ -2459,6 +2700,86 @@ export const argumentSpecs = {
   "channels.topic.tooLong": {
     "max": "number"
   },
+  "cliLogin.consent.approve": {},
+  "cliLogin.consent.approveBusy": {},
+  "cliLogin.consent.checkNote": {},
+  "cliLogin.consent.clientLabel": {},
+  "cliLogin.consent.credentialLimit": {},
+  "cliLogin.consent.deny": {},
+  "cliLogin.consent.denyBusy": {},
+  "cliLogin.consent.deviceLabel": {},
+  "cliLogin.consent.deviceMissing": {},
+  "cliLogin.consent.deviceNote": {},
+  "cliLogin.consent.dismiss": {},
+  "cliLogin.consent.hostLabel": {},
+  "cliLogin.consent.lead": {},
+  "cliLogin.consent.lifetime": {
+    "accessMinutes": "number",
+    "idleDays": "number",
+    "maxDays": "number"
+  },
+  "cliLogin.consent.loadingSr": {},
+  "cliLogin.consent.memberLabel": {},
+  "cliLogin.consent.offlineNote": {},
+  "cliLogin.consent.passwordHint": {},
+  "cliLogin.consent.passwordLabel": {},
+  "cliLogin.consent.passwordWrong": {},
+  "cliLogin.consent.presetHint": {},
+  "cliLogin.consent.presetLegend": {},
+  "cliLogin.consent.rerun": {},
+  "cliLogin.consent.retryLater": {},
+  "cliLogin.consent.returning": {},
+  "cliLogin.consent.signinDetail": {},
+  "cliLogin.consent.title": {},
+  "cliLogin.consent.workspaceLabel": {},
+  "cliLogin.failure.approveLead": {},
+  "cliLogin.failure.busy": {
+    "wait": "string"
+  },
+  "cliLogin.failure.denyLead": {},
+  "cliLogin.failure.frame": {
+    "detail": "string",
+    "lead": "string"
+  },
+  "cliLogin.failure.previewLead": {},
+  "cliLogin.failure.retryAt": {
+    "when": "string"
+  },
+  "cliLogin.failure.tooMany": {
+    "wait": "string"
+  },
+  "cliLogin.preset.detail": {
+    "note": "string",
+    "scopes": "string"
+  },
+  "cliLogin.preset.readClosed": {},
+  "cliLogin.preset.readLabel": {},
+  "cliLogin.preset.sendCaution": {},
+  "cliLogin.preset.sendLabel": {},
+  "cliLogin.preset.sendUnavailable": {},
+  "cliLogin.retry.inMinutes": {
+    "minutes": "number"
+  },
+  "cliLogin.retry.inSeconds": {
+    "seconds": "number"
+  },
+  "cliLogin.scope.channelsRead": {},
+  "cliLogin.scope.identity": {},
+  "cliLogin.scope.inboxRead": {},
+  "cliLogin.scope.messagesRead": {},
+  "cliLogin.scope.messagesWrite": {},
+  "cliLogin.terminal.accessDeniedDetail": {},
+  "cliLogin.terminal.accessDeniedHeadline": {},
+  "cliLogin.terminal.alreadyDecidedDetail": {},
+  "cliLogin.terminal.alreadyDecidedHeadline": {},
+  "cliLogin.terminal.expiredDetail": {},
+  "cliLogin.terminal.expiredHeadline": {},
+  "cliLogin.terminal.notFoundDetail": {},
+  "cliLogin.terminal.notFoundHeadline": {},
+  "cliLogin.terminal.passwordUnavailableDetail": {},
+  "cliLogin.terminal.passwordUnavailableHeadline": {},
+  "cliLogin.terminal.redirectRefusedDetail": {},
+  "cliLogin.terminal.redirectRefusedHeadline": {},
   "common.action.cancel": {},
   "common.action.checkAgain": {},
   "common.action.close": {},
@@ -3339,6 +3660,56 @@ export const argumentSpecs = {
   "notifications.banner.code": {},
   "notifications.banner.secret": {},
   "notifications.inviteLink.fallback": {},
+  "onboarding.guide.expressionFlustered": {},
+  "onboarding.guide.expressionHappy": {},
+  "onboarding.guide.expressionIdle": {},
+  "onboarding.guide.expressionSleepy": {},
+  "onboarding.guide.expressionThinking": {},
+  "onboarding.guide.expressionWorking": {},
+  "onboarding.guide.stateAwaiting": {},
+  "onboarding.guide.stateChecking": {},
+  "onboarding.guide.statePreparing": {},
+  "onboarding.guide.stateSkipped": {},
+  "onboarding.guide.stateSuccess": {},
+  "onboarding.guide.stateTrouble": {},
+  "onboarding.guide.stepLabel": {
+    "current": "string",
+    "total": "string"
+  },
+  "onboarding.harnessLogin.actionClaude": {},
+  "onboarding.harnessLogin.actionCodex": {},
+  "onboarding.harnessLogin.checking": {},
+  "onboarding.harnessLogin.codeHint": {},
+  "onboarding.harnessLogin.codeLabel": {},
+  "onboarding.harnessLogin.codeSent": {},
+  "onboarding.harnessLogin.codeSubmit": {},
+  "onboarding.harnessLogin.codeToggle": {},
+  "onboarding.harnessLogin.connected": {},
+  "onboarding.harnessLogin.connectedDetail": {
+    "cli": "string"
+  },
+  "onboarding.harnessLogin.detach": {},
+  "onboarding.harnessLogin.deviceCode": {},
+  "onboarding.harnessLogin.done": {},
+  "onboarding.harnessLogin.failedDefault": {},
+  "onboarding.harnessLogin.failedSpawn": {},
+  "onboarding.harnessLogin.failedTimeout": {},
+  "onboarding.harnessLogin.notLoggedInDetail": {
+    "cli": "string"
+  },
+  "onboarding.harnessLogin.rowHint": {},
+  "onboarding.harnessLogin.spawnDetail": {},
+  "onboarding.harnessLogin.terminalAria": {
+    "title": "string"
+  },
+  "onboarding.harnessLogin.terminalHide": {},
+  "onboarding.harnessLogin.terminalShow": {},
+  "onboarding.harnessLogin.timeoutDetail": {},
+  "onboarding.harnessLogin.waitingBrowser": {},
+  "onboarding.harnessLogin.waitingDetail": {
+    "cli": "string"
+  },
+  "onboarding.harnessLogin.waitingDevice": {},
   "readState.markUnread.action": {},
   "readState.markUnread.done": {},
   "readState.markUnread.failed": {},
@@ -4885,6 +5256,74 @@ export interface MessageArgs {
   "attachments.video.unmute": Record<string, never>;
   "attachments.viewer.mixedCaption": { position: number; total: number };
   "attachments.viewer.mixedCaptionLabel": { position: number; total: number };
+  "auth.claim.expired": Record<string, never>;
+  "auth.claim.invalidLink": Record<string, never>;
+  "auth.claim.passwordRecheck": Record<string, never>;
+  "auth.claim.unmapped": Record<string, never>;
+  "auth.claim.used": Record<string, never>;
+  "auth.deviceKey.authFailed": Record<string, never>;
+  "auth.deviceKey.cancelled": Record<string, never>;
+  "auth.deviceKey.changed": Record<string, never>;
+  "auth.deviceKey.declined": Record<string, never>;
+  "auth.deviceKey.endorseConflict": Record<string, never>;
+  "auth.deviceKey.entitlementMissing": Record<string, never>;
+  "auth.deviceKey.failed": Record<string, never>;
+  "auth.deviceKey.hostPinnedOther": Record<string, never>;
+  "auth.deviceKey.kindNotEnabled": Record<string, never>;
+  "auth.deviceKey.noLetter": Record<string, never>;
+  "auth.deviceKey.noSession": Record<string, never>;
+  "auth.deviceKey.notEndorsedHere": Record<string, never>;
+  "auth.deviceKey.notRootHere": Record<string, never>;
+  "auth.deviceKey.payloadRejected": Record<string, never>;
+  "auth.deviceKey.pinRefused": Record<string, never>;
+  "auth.deviceKey.rebindNotCurrent": Record<string, never>;
+  "auth.deviceKey.serverAlreadyRegistered": Record<string, never>;
+  "auth.deviceKey.serverLineageEnded": Record<string, never>;
+  "auth.deviceKey.serverLinkedSession": Record<string, never>;
+  "auth.deviceKey.serverLinkNotFromMac": Record<string, never>;
+  "auth.deviceKey.serverNotFound": Record<string, never>;
+  "auth.deviceKey.serverPasswordRequired": Record<string, never>;
+  "auth.deviceKey.serverRebindRequired": Record<string, never>;
+  "auth.deviceKey.serverRequiresLinkedSession": Record<string, never>;
+  "auth.deviceKey.serverSignatureInvalid": Record<string, never>;
+  "auth.deviceKey.unsignedBuild": Record<string, never>;
+  "auth.deviceKey.unsupported": Record<string, never>;
+  "auth.deviceKey.workdRefused": Record<string, never>;
+  "auth.deviceKey.workHostNotRunning": Record<string, never>;
+  "auth.deviceKey.workHostOtherWorkspace": Record<string, never>;
+  "auth.deviceLink.addressFallbackLabel": Record<string, never>;
+  "auth.deviceLink.cameraError": Record<string, never>;
+  "auth.deviceLink.cameraOpening": Record<string, never>;
+  "auth.deviceLink.expired": Record<string, never>;
+  "auth.deviceLink.malformed": Record<string, never>;
+  "auth.deviceLink.permission": Record<string, never>;
+  "auth.deviceLink.qrInstruction": Record<string, never>;
+  "auth.deviceLink.qrLabel": Record<string, never>;
+  "auth.deviceLink.retryLabel": Record<string, never>;
+  "auth.deviceLink.sasWait": Record<string, never>;
+  "auth.deviceLink.settingsLabel": Record<string, never>;
+  "auth.deviceLink.unreachable": Record<string, never>;
+  "auth.deviceLink.used": Record<string, never>;
+  "auth.failure.serverError": Record<string, never>;
+  "auth.failure.tooManyRequests": Record<string, never>;
+  "auth.failure.unreadableResponse": Record<string, never>;
+  "auth.join.alreadyRedeemed": Record<string, never>;
+  "auth.join.cannotJoin": Record<string, never>;
+  "auth.join.exhausted": Record<string, never>;
+  "auth.join.expired": Record<string, never>;
+  "auth.join.guestPaused": Record<string, never>;
+  "auth.join.invalidCode": Record<string, never>;
+  "auth.join.notPermitted": Record<string, never>;
+  "auth.join.revoked": Record<string, never>;
+  "auth.join.unmapped": Record<string, never>;
+  "auth.join.unusable": Record<string, never>;
+  "auth.linkedDevice.platformWeb": Record<string, never>;
+  "auth.passwordRule.tooLong": { hangulBytes: string; maxBytes: string; maxHangul: string };
+  "auth.passwordRule.tooShort": { minChars: number };
+  "auth.signIn.invalidCredentials": Record<string, never>;
+  "auth.signIn.suspended": Record<string, never>;
+  "auth.signIn.unmapped": Record<string, never>;
+  "auth.signIn.workspaceIdFormat": Record<string, never>;
   "blocked.addMemberLater.offline": Record<string, never>;
   "blocked.addMemberLater.serverUnreachable": Record<string, never>;
   "blocked.aiKeysLead.offline": Record<string, never>;
@@ -5171,6 +5610,66 @@ export interface MessageArgs {
   "channels.rename.submit": Record<string, never>;
   "channels.rename.title": Record<string, never>;
   "channels.topic.tooLong": { max: number };
+  "cliLogin.consent.approve": Record<string, never>;
+  "cliLogin.consent.approveBusy": Record<string, never>;
+  "cliLogin.consent.checkNote": Record<string, never>;
+  "cliLogin.consent.clientLabel": Record<string, never>;
+  "cliLogin.consent.credentialLimit": Record<string, never>;
+  "cliLogin.consent.deny": Record<string, never>;
+  "cliLogin.consent.denyBusy": Record<string, never>;
+  "cliLogin.consent.deviceLabel": Record<string, never>;
+  "cliLogin.consent.deviceMissing": Record<string, never>;
+  "cliLogin.consent.deviceNote": Record<string, never>;
+  "cliLogin.consent.dismiss": Record<string, never>;
+  "cliLogin.consent.hostLabel": Record<string, never>;
+  "cliLogin.consent.lead": Record<string, never>;
+  "cliLogin.consent.lifetime": { accessMinutes: number; idleDays: number; maxDays: number };
+  "cliLogin.consent.loadingSr": Record<string, never>;
+  "cliLogin.consent.memberLabel": Record<string, never>;
+  "cliLogin.consent.offlineNote": Record<string, never>;
+  "cliLogin.consent.passwordHint": Record<string, never>;
+  "cliLogin.consent.passwordLabel": Record<string, never>;
+  "cliLogin.consent.passwordWrong": Record<string, never>;
+  "cliLogin.consent.presetHint": Record<string, never>;
+  "cliLogin.consent.presetLegend": Record<string, never>;
+  "cliLogin.consent.rerun": Record<string, never>;
+  "cliLogin.consent.retryLater": Record<string, never>;
+  "cliLogin.consent.returning": Record<string, never>;
+  "cliLogin.consent.signinDetail": Record<string, never>;
+  "cliLogin.consent.title": Record<string, never>;
+  "cliLogin.consent.workspaceLabel": Record<string, never>;
+  "cliLogin.failure.approveLead": Record<string, never>;
+  "cliLogin.failure.busy": { wait: string };
+  "cliLogin.failure.denyLead": Record<string, never>;
+  "cliLogin.failure.frame": { detail: string; lead: string };
+  "cliLogin.failure.previewLead": Record<string, never>;
+  "cliLogin.failure.retryAt": { when: string };
+  "cliLogin.failure.tooMany": { wait: string };
+  "cliLogin.preset.detail": { note: string; scopes: string };
+  "cliLogin.preset.readClosed": Record<string, never>;
+  "cliLogin.preset.readLabel": Record<string, never>;
+  "cliLogin.preset.sendCaution": Record<string, never>;
+  "cliLogin.preset.sendLabel": Record<string, never>;
+  "cliLogin.preset.sendUnavailable": Record<string, never>;
+  "cliLogin.retry.inMinutes": { minutes: number };
+  "cliLogin.retry.inSeconds": { seconds: number };
+  "cliLogin.scope.channelsRead": Record<string, never>;
+  "cliLogin.scope.identity": Record<string, never>;
+  "cliLogin.scope.inboxRead": Record<string, never>;
+  "cliLogin.scope.messagesRead": Record<string, never>;
+  "cliLogin.scope.messagesWrite": Record<string, never>;
+  "cliLogin.terminal.accessDeniedDetail": Record<string, never>;
+  "cliLogin.terminal.accessDeniedHeadline": Record<string, never>;
+  "cliLogin.terminal.alreadyDecidedDetail": Record<string, never>;
+  "cliLogin.terminal.alreadyDecidedHeadline": Record<string, never>;
+  "cliLogin.terminal.expiredDetail": Record<string, never>;
+  "cliLogin.terminal.expiredHeadline": Record<string, never>;
+  "cliLogin.terminal.notFoundDetail": Record<string, never>;
+  "cliLogin.terminal.notFoundHeadline": Record<string, never>;
+  "cliLogin.terminal.passwordUnavailableDetail": Record<string, never>;
+  "cliLogin.terminal.passwordUnavailableHeadline": Record<string, never>;
+  "cliLogin.terminal.redirectRefusedDetail": Record<string, never>;
+  "cliLogin.terminal.redirectRefusedHeadline": Record<string, never>;
   "common.action.cancel": Record<string, never>;
   "common.action.checkAgain": Record<string, never>;
   "common.action.close": Record<string, never>;
@@ -5841,6 +6340,45 @@ export interface MessageArgs {
   "notifications.banner.code": Record<string, never>;
   "notifications.banner.secret": Record<string, never>;
   "notifications.inviteLink.fallback": Record<string, never>;
+  "onboarding.guide.expressionFlustered": Record<string, never>;
+  "onboarding.guide.expressionHappy": Record<string, never>;
+  "onboarding.guide.expressionIdle": Record<string, never>;
+  "onboarding.guide.expressionSleepy": Record<string, never>;
+  "onboarding.guide.expressionThinking": Record<string, never>;
+  "onboarding.guide.expressionWorking": Record<string, never>;
+  "onboarding.guide.stateAwaiting": Record<string, never>;
+  "onboarding.guide.stateChecking": Record<string, never>;
+  "onboarding.guide.statePreparing": Record<string, never>;
+  "onboarding.guide.stateSkipped": Record<string, never>;
+  "onboarding.guide.stateSuccess": Record<string, never>;
+  "onboarding.guide.stateTrouble": Record<string, never>;
+  "onboarding.guide.stepLabel": { current: string; total: string };
+  "onboarding.harnessLogin.actionClaude": Record<string, never>;
+  "onboarding.harnessLogin.actionCodex": Record<string, never>;
+  "onboarding.harnessLogin.checking": Record<string, never>;
+  "onboarding.harnessLogin.codeHint": Record<string, never>;
+  "onboarding.harnessLogin.codeLabel": Record<string, never>;
+  "onboarding.harnessLogin.codeSent": Record<string, never>;
+  "onboarding.harnessLogin.codeSubmit": Record<string, never>;
+  "onboarding.harnessLogin.codeToggle": Record<string, never>;
+  "onboarding.harnessLogin.connected": Record<string, never>;
+  "onboarding.harnessLogin.connectedDetail": { cli: string };
+  "onboarding.harnessLogin.detach": Record<string, never>;
+  "onboarding.harnessLogin.deviceCode": Record<string, never>;
+  "onboarding.harnessLogin.done": Record<string, never>;
+  "onboarding.harnessLogin.failedDefault": Record<string, never>;
+  "onboarding.harnessLogin.failedSpawn": Record<string, never>;
+  "onboarding.harnessLogin.failedTimeout": Record<string, never>;
+  "onboarding.harnessLogin.notLoggedInDetail": { cli: string };
+  "onboarding.harnessLogin.rowHint": Record<string, never>;
+  "onboarding.harnessLogin.spawnDetail": Record<string, never>;
+  "onboarding.harnessLogin.terminalAria": { title: string };
+  "onboarding.harnessLogin.terminalHide": Record<string, never>;
+  "onboarding.harnessLogin.terminalShow": Record<string, never>;
+  "onboarding.harnessLogin.timeoutDetail": Record<string, never>;
+  "onboarding.harnessLogin.waitingBrowser": Record<string, never>;
+  "onboarding.harnessLogin.waitingDetail": { cli: string };
+  "onboarding.harnessLogin.waitingDevice": Record<string, never>;
   "readState.markUnread.action": Record<string, never>;
   "readState.markUnread.done": Record<string, never>;
   "readState.markUnread.failed": Record<string, never>;

@@ -17,9 +17,10 @@ import {
   PERSONAL_ASSISTANTS_COPY,
   soonPersonalAssistants,
 } from "@momo/core/features/hostedAgents/personalAssistants";
-import { LOGIN_ROW_HINT, loginActionLabel } from "@momo/core/features/onboarding/harnessLogin";
+import { LOGIN_ROW_HINT_KEY, loginActionKey } from "@momo/core/features/onboarding/harnessLogin";
 import { Button } from "@/design/ui/button";
 import { openExternalUrl } from "@/lib/tauri";
+import { useFormatMessage } from "@/i18n/useFormatMessage";
 
 // Reading this as: onboarding (AI 연결 목록) for internal team users on
 // web+Tauri, density 6/10, motion 1/10 (no row motion; the kometto carries it).
@@ -254,11 +255,12 @@ function LoginRow({
   id: LocalHarnessId;
   onLoginOpen: (id: LocalHarnessId) => void;
 }) {
+  const formatMessage = useFormatMessage();
   const hintId = `ai-connect-login-hint-${id}`;
   return (
     <div className="ai-connect-login" data-testid={`ai-connect-login-${id}`}>
       <p id={hintId} className="min-w-0 flex-1 break-keep text-meta text-ink-muted">
-        {LOGIN_ROW_HINT}
+        {formatMessage(LOGIN_ROW_HINT_KEY)}
       </p>
       <Button
         type="button"
@@ -269,7 +271,7 @@ function LoginRow({
         onClick={() => onLoginOpen(id)}
         data-testid={`ai-connect-login-open-${id}`}
       >
-        {loginActionLabel(id)}
+        {formatMessage(loginActionKey(id))}
       </Button>
     </div>
   );

@@ -13,7 +13,7 @@ import {
   HARNESS_LABEL,
   type HarnessPill,
 } from "@momo/core/features/onboarding/aiConnect";
-import { loginActionLabel } from "@momo/core/features/onboarding/harnessLogin";
+import { loginActionKey } from "@momo/core/features/onboarding/harnessLogin";
 import {
   fetchProviderLink,
   testProviderLink,
@@ -683,6 +683,7 @@ function harnessResultLine(result: HarnessResult | undefined, pill: HarnessPill)
 }
 
 function HarnessRows({ only }: { only: LocalHarnessId | null }) {
+  const formatMessage = useFormatMessage();
   const pose = readCardPose();
   const fixture = readProbeFixture();
   const harness = useLocalHarnessWatch({
@@ -779,7 +780,7 @@ function HarnessRows({ only }: { only: LocalHarnessId | null }) {
                 onClick={() => openLogin(id)}
                 data-testid={`ai-connect-card-${id}-login`}
               >
-                {loginActionLabel(id)}
+                {formatMessage(loginActionKey(id))}
               </Button>
             );
           } else {

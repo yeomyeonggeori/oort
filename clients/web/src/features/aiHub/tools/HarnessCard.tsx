@@ -2,7 +2,7 @@ import { useEffect, useId, useRef, useState, useSyncExternalStore } from "react"
 import { Link } from "react-router-dom";
 import type { LocalHarnessId } from "@momo/core/features/hostedAgents/detect";
 import { AI_CONNECT_ROW_COPY, HARNESS_LABEL, type HarnessPill } from "@momo/core/features/onboarding/aiConnect";
-import { loginFailedLine, loginWaitingLine } from "@momo/core/features/onboarding/harnessLogin";
+import { loginFailedLineKey, loginWaitingLineKey } from "@momo/core/features/onboarding/harnessLogin";
 import {
   DISCONNECT_FAILED_LINE,
   HARNESS_LOGIN_VIEW_LABEL,
@@ -25,6 +25,7 @@ import type { LoginController, LoginControllerState } from "@/features/welcome/h
 import type { UnlinkController, UnlinkControllerState } from "@/features/welcome/harnessLogin/unlinkController";
 import type { HarnessSessionStore } from "./harnessSessionStore";
 import { PersonalAgentRow, type PersonalAgentRowProps } from "./PersonalAgentRow";
+import { useFormatMessage } from "@/i18n/useFormatMessage";
 
 // Reading this as: AI hub › 내 도구 for internal team users on Tauri desktop and the
 // web tab, density 6/10, motion 1/10. One card per tool joins the login state (exit
@@ -104,6 +105,7 @@ export interface HarnessCardProps {
 }
 
 export function HarnessCard({ harness, desktop, pill, host, sessions, sessionsVersion, onRecheck, onRetryHost, personal }: HarnessCardProps) {
+  const formatMessage = useFormatMessage();
   void sessionsVersion; // 보관소가 바뀌면 이 카드가 다시 그려진다.
   const loginCtl = sessions.getSnapshot().login(harness);
   const unlinkCtl = sessions.getSnapshot().unlink(harness);
@@ -262,7 +264,7 @@ export function HarnessCard({ harness, desktop, pill, host, sessions, sessionsVe
 
       {desktop && view === "logging-in" && (
         <p className="break-keep text-meta text-ink" role="status" data-testid={`tool-card-${harness}-progress`}>
-          {loginState?.status.phase === "checking" ? "로그인을 확인하고 있어요." : loginWaitingLine(loginState?.method ?? "browser")}
+          {loginState?.status.phase === "checking" ? "로그인을 확인하고 있어요." : formatMessage(loginWaitingLineKey(loginState?.method ?? "browser"))}
         </p>
       )}
       {desktop && loginFailed && (
@@ -273,7 +275,7 @@ export function HarnessCard({ harness, desktop, pill, host, sessions, sessionsVe
           data-focus-slot="login-open"
           data-testid={`tool-card-${harness}-login-failed`}
         >
-          {loginFailedLine(loginFailed.reason)}
+          {formatMessage(loginFailedLineKey(loginFailed.reason))}
         </p>
       )}
       {desktop && disconnect.phase === "failed" && (
