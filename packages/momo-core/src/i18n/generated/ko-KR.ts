@@ -1601,6 +1601,202 @@ export const catalog: MessageCatalog = {
       "value": "이 대화에서는 나갈 수 없어요."
     }
   ],
+  "channels.memberAdd.forbidden": [
+    {
+      "type": 0,
+      "value": "멤버를 추가할 권한이 없습니다. 워크스페이스 소유자나 관리자에게 요청하세요."
+    }
+  ],
+  "channels.memberAdd.generic": [
+    {
+      "type": 0,
+      "value": "멤버를 추가하지 못했습니다. 잠시 뒤에 다시 시도하세요."
+    }
+  ],
+  "channels.memberAdd.network": [
+    {
+      "type": 0,
+      "value": "멤버를 추가하지 못했습니다. "
+    },
+    {
+      "type": 1,
+      "value": "reason"
+    }
+  ],
+  "channels.memberAdd.notFound": [
+    {
+      "type": 0,
+      "value": "이 채널에는 멤버를 추가할 수 없습니다. 채널이 보관되었거나 사라졌을 수 있습니다."
+    }
+  ],
+  "channels.memberAdd.rateLimited": [
+    {
+      "type": 0,
+      "value": "요청이 너무 잦습니다. 잠시 뒤에 다시 시도하세요."
+    }
+  ],
+  "channels.menu.ariaChannel": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " 채널 메뉴"
+    }
+  ],
+  "channels.menu.ariaDm": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " 다이렉트 메시지 메뉴"
+    }
+  ],
+  "channels.menu.copyFailed": [
+    {
+      "type": 0,
+      "value": "복사하지 못했습니다. 같은 항목을 다시 눌러 보세요."
+    }
+  ],
+  "channels.menu.copyGroup": [
+    {
+      "type": 0,
+      "value": "복사"
+    }
+  ],
+  "channels.menu.copyId": [
+    {
+      "type": 0,
+      "value": "ID 복사하기"
+    }
+  ],
+  "channels.menu.copyIdDone": [
+    {
+      "type": 0,
+      "value": "ID 복사됨"
+    }
+  ],
+  "channels.menu.copyName": [
+    {
+      "type": 0,
+      "value": "이름 복사하기"
+    }
+  ],
+  "channels.menu.copyNameDone": [
+    {
+      "type": 0,
+      "value": "이름 복사됨"
+    }
+  ],
+  "channels.menu.copyUnavailable": [
+    {
+      "type": 0,
+      "value": "복사하지 못했습니다. 이 브라우저에서는 클립보드를 쓸 수 없습니다."
+    }
+  ],
+  "channels.menu.dmClose": [
+    {
+      "type": 0,
+      "value": "목록에서 숨기기"
+    }
+  ],
+  "channels.menu.dmCloseAria": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": ", 목록에서 숨기기"
+    }
+  ],
+  "channels.menu.dmCloseFailed": [
+    {
+      "type": 0,
+      "value": "대화를 목록에서 숨기지 못했어요. 잠시 뒤에 다시 시도해 주세요."
+    }
+  ],
+  "channels.menu.dmReopenFailed": [
+    {
+      "type": 0,
+      "value": "대화를 다시 보이게 하지 못했어요. 잠시 뒤에 다시 시도해 주세요."
+    }
+  ],
+  "channels.menu.errorGroup": [
+    {
+      "type": 0,
+      "value": "이 메뉴의 알림"
+    }
+  ],
+  "channels.menu.leave": [
+    {
+      "type": 0,
+      "value": "채널 나가기"
+    }
+  ],
+  "channels.menu.markRead": [
+    {
+      "type": 0,
+      "value": "읽음 처리하기"
+    }
+  ],
+  "channels.menu.markReadBusy": [
+    {
+      "type": 0,
+      "value": "읽음 처리 중"
+    }
+  ],
+  "channels.menu.markReadFailed": [
+    {
+      "type": 0,
+      "value": "읽음 처리를 하지 못했습니다. 잠시 뒤에 다시 시도하세요."
+    }
+  ],
+  "channels.menu.markUnread": [
+    {
+      "type": 0,
+      "value": "읽지 않음으로 표시하기"
+    }
+  ],
+  "channels.menu.markUnreadBusy": [
+    {
+      "type": 0,
+      "value": "읽지 않음으로 표시 중"
+    }
+  ],
+  "channels.menu.markUnreadFailed": [
+    {
+      "type": 0,
+      "value": "읽지 않음으로 표시하지 못했습니다. 잠시 뒤에 다시 시도하세요."
+    }
+  ],
+  "channels.menu.muteFailed": [
+    {
+      "type": 0,
+      "value": "알림 설정을 바꾸지 못했어요. 잠시 뒤에 다시 시도해 주세요."
+    }
+  ],
+  "channels.menu.muteOff": [
+    {
+      "type": 0,
+      "value": "알림 꺼짐"
+    }
+  ],
+  "channels.menu.muteOn": [
+    {
+      "type": 0,
+      "value": "알림 켜짐"
+    }
+  ],
+  "channels.menu.topicView": [
+    {
+      "type": 0,
+      "value": "주제 보기"
+    }
+  ],
   "channels.nameRule.edge": [
     {
       "type": 0,
@@ -1851,6 +2047,21 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "채널 이름 바꾸기"
+    }
+  ],
+  "channels.topic.tooLong": [
+    {
+      "type": 0,
+      "value": "주제는 "
+    },
+    {
+      "type": 2,
+      "value": "max",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "자 이내여야 합니다."
     }
   ],
   "common.action.cancel": [
@@ -6562,6 +6773,28 @@ export const catalog: MessageCatalog = {
       "value": "다시 확인했지만 서명 설정을 아직 읽지 못했어요."
     }
   ],
+  "notifications.banner.approvalTitle": [
+    {
+      "type": 0,
+      "value": "승인 필요 · "
+    },
+    {
+      "type": 1,
+      "value": "actor"
+    }
+  ],
+  "notifications.banner.code": [
+    {
+      "type": 0,
+      "value": "코드"
+    }
+  ],
+  "notifications.banner.secret": [
+    {
+      "type": 0,
+      "value": "비공개 값"
+    }
+  ],
   "notifications.inviteLink.fallback": [
     {
       "type": 0,
@@ -10300,6 +10533,288 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "설치를 마쳤어요. 다시 시작하면 새 버전으로 열려요."
+    }
+  ],
+  "sidebar.channel.star": [
+    {
+      "type": 0,
+      "value": "별표 붙이기"
+    }
+  ],
+  "sidebar.channel.unstar": [
+    {
+      "type": 0,
+      "value": "별표 떼기"
+    }
+  ],
+  "sidebar.dms.allClosedHint": [
+    {
+      "type": 0,
+      "value": "숨긴 대화는 새 메시지가 오면 다시 나타납니다. ⌘⇧K로 시작하세요."
+    }
+  ],
+  "sidebar.dms.closedListEmpty": [
+    {
+      "type": 0,
+      "value": "숨긴 대화가 없어요."
+    }
+  ],
+  "sidebar.dms.closedListHint": [
+    {
+      "type": 0,
+      "value": "새 메시지가 오면 숨긴 대화는 사이드바로 돌아와요."
+    }
+  ],
+  "sidebar.dms.closedListLabel": [
+    {
+      "type": 0,
+      "value": "숨긴 대화"
+    }
+  ],
+  "sidebar.dms.closeStarFirst": [
+    {
+      "type": 0,
+      "value": "별표를 먼저 빼요"
+    }
+  ],
+  "sidebar.dms.goneDisclosure": [
+    {
+      "type": 0,
+      "value": "나간 멤버와의 대화 "
+    },
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "개"
+    }
+  ],
+  "sidebar.dms.open": [
+    {
+      "type": 0,
+      "value": "열기"
+    }
+  ],
+  "sidebar.dms.reasonClosed": [
+    {
+      "type": 0,
+      "value": "내가 숨겼어요"
+    }
+  ],
+  "sidebar.dms.reasonGone": [
+    {
+      "type": 0,
+      "value": "상대가 나갔고 안 읽은 메시지가 없어요"
+    }
+  ],
+  "sidebar.dms.reopen": [
+    {
+      "type": 0,
+      "value": "다시 보이기"
+    }
+  ],
+  "sidebar.dms.reopenAriaClosed": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": ", 다시 보이기"
+    }
+  ],
+  "sidebar.dms.reopenAriaOpen": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": ", 열기"
+    }
+  ],
+  "sidebar.prefs.loadFailed": [
+    {
+      "type": 0,
+      "value": "섹션을 불러오지 못했습니다."
+    }
+  ],
+  "sidebar.prefs.saveFailed": [
+    {
+      "type": 0,
+      "value": "섹션 변경을 저장하지 못했습니다. 잠시 후 다시 시도해 주세요."
+    }
+  ],
+  "sidebar.section.capChannels": [
+    {
+      "type": 0,
+      "value": "한 사이드바에 담을 수 있는 채널은 "
+    },
+    {
+      "type": 2,
+      "value": "max",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "개까지입니다."
+    }
+  ],
+  "sidebar.section.capSections": [
+    {
+      "type": 0,
+      "value": "섹션은 "
+    },
+    {
+      "type": 2,
+      "value": "max",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "개까지 만들 수 있습니다."
+    }
+  ],
+  "sidebar.section.channels": [
+    {
+      "type": 0,
+      "value": "채널"
+    }
+  ],
+  "sidebar.section.create": [
+    {
+      "type": 0,
+      "value": "새 섹션 만들기"
+    }
+  ],
+  "sidebar.section.deleteConfirm": [
+    {
+      "type": 0,
+      "value": "삭제"
+    }
+  ],
+  "sidebar.section.deleteConfirmBody": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " 섹션이 사이드바에서 사라집니다. 이 섹션의 채널은 채널 섹션으로 돌아가고, 채널에서 나가지는 않습니다."
+    }
+  ],
+  "sidebar.section.deleteConfirmTitle": [
+    {
+      "type": 0,
+      "value": "이 섹션을 삭제할까요?"
+    }
+  ],
+  "sidebar.section.deleteLabel": [
+    {
+      "type": 0,
+      "value": "섹션 삭제"
+    }
+  ],
+  "sidebar.section.dms": [
+    {
+      "type": 0,
+      "value": "다이렉트 메시지"
+    }
+  ],
+  "sidebar.section.emptyHintHover": [
+    {
+      "type": 0,
+      "value": "채널 행을 끌어다 놓거나 우클릭해서 옮겨요."
+    }
+  ],
+  "sidebar.section.emptyHintTouch": [
+    {
+      "type": 0,
+      "value": "비어 있어요. 채널은 넓은 화면에서 옮길 수 있어요."
+    }
+  ],
+  "sidebar.section.moveDown": [
+    {
+      "type": 0,
+      "value": "아래로 옮기기"
+    }
+  ],
+  "sidebar.section.moveGroup": [
+    {
+      "type": 0,
+      "value": "섹션으로 이동"
+    }
+  ],
+  "sidebar.section.moveToBase": [
+    {
+      "type": 0,
+      "value": "채널 섹션으로"
+    }
+  ],
+  "sidebar.section.moveUp": [
+    {
+      "type": 0,
+      "value": "위로 옮기기"
+    }
+  ],
+  "sidebar.section.nameEmpty": [
+    {
+      "type": 0,
+      "value": "섹션 이름을 입력해 주세요."
+    }
+  ],
+  "sidebar.section.nameField": [
+    {
+      "type": 0,
+      "value": "섹션 이름"
+    }
+  ],
+  "sidebar.section.namePlaceholder": [
+    {
+      "type": 0,
+      "value": "예: 출시 준비"
+    }
+  ],
+  "sidebar.section.nameTooLong": [
+    {
+      "type": 0,
+      "value": "섹션 이름은 "
+    },
+    {
+      "type": 2,
+      "value": "max",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "자까지입니다."
+    }
+  ],
+  "sidebar.section.renameLabel": [
+    {
+      "type": 0,
+      "value": "이름 바꾸기"
+    }
+  ],
+  "sidebar.section.renameTitle": [
+    {
+      "type": 0,
+      "value": "섹션 이름 바꾸기"
+    }
+  ],
+  "sidebar.section.starred": [
+    {
+      "type": 0,
+      "value": "별표"
+    }
+  ],
+  "sidebar.starred.touchHint": [
+    {
+      "type": 0,
+      "value": "별표는 넓은 화면에서 뗄 수 있습니다."
     }
   ],
   "teamAi.delegation.chipImage": [

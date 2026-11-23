@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { act, createElement, useMemo, type ReactNode } from "react";
+import { act, createElement, useMemo, type ReactNode, type ReactElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { MemoryRouter } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -17,12 +17,12 @@ import type { Channel } from "@momo/core/lib/api";
 import {
   deriveSidebarSections,
   emptySidebarPrefs,
-  sidebarChannelRefCapMessage,
-  sidebarEmptySectionHint,
-  sidebarSectionCapMessage,
+  sidebarChannelRefCapRef,
+  sidebarEmptySectionHintKey,
+  sidebarSectionCapRef,
   SIDEBAR_CHANNEL_REF_MAX,
-  SIDEBAR_PREFS_LOAD_FAILURE,
-  SIDEBAR_PREFS_SAVE_FAILURE,
+  SIDEBAR_PREFS_LOAD_FAILURE_KEY,
+  SIDEBAR_PREFS_SAVE_FAILURE_KEY,
   SIDEBAR_SECTION_MAX,
   type SidebarPrefs,
 } from "@momo/core/features/sidebar/sidebarSections";
@@ -37,7 +37,26 @@ import {
 import {
   SIDEBAR_PREFS_SAVE_DEBOUNCE_MS,
   useSidebarPrefs,
+  type SidebarPrefsMessage,
 } from "./useSidebarPrefs";
+import { catalog as koCatalog } from "@momo/core/i18n/generated/ko-KR";
+import { createMessageCopy } from "@momo/core/testkit";
+import { LocaleProvider } from "@/i18n/LocaleProvider";
+import type { AppLocale } from "@/i18n/localeStore";
+import { koreanLocale } from "@/testing/koLocale";
+
+const errorText = (message: { key: string; values?: object } | null | undefined) =>
+  message ? refText(message) : message;
+const refText = (ref: { key: string; values?: object }) => koCopy(ref.key as never, ref.values as never);
+
+// 화면 문구는 사전에서 읽는다(#6045). 한국어를 단정하던 시험은 한국어 언어 객체로 감싸 같은 문장을 그대로 단정한다.
+let koLocale: AppLocale;
+beforeAll(async () => {
+  koLocale = await koreanLocale();
+});
+const withKo = (element: ReactElement) => createElement(LocaleProvider, { locale: koLocale, children: element });
+
+const koCopy = createMessageCopy({ messageLocale: "ko-KR", catalog: koCatalog });
 
 // =============================================================================
 // BT-4(#1932) 클라 절반의 red proof.
@@ -133,8 +152,8 @@ interface Handle {
   move: (channelId: string, sectionId: string | null) => void;
   remove: (id: string) => void;
   rename: (id: string, name: string) => void;
-  error: () => string | null;
-  loadError: () => string | null;
+  error: () => SidebarPrefsMessage | null;
+  loadError: () => SidebarPrefsMessage | null;
   status: () => string;
   canEdit: () => boolean;
   canCreate: () => boolean;
@@ -178,7 +197,7 @@ function Harness({ unread }: { unread?: Record<string, number> }) {
       );
       return createElement(SidebarSection, {
         key: section.id,
-        title: section.title,
+        title: section.kind === "custom" ? section.title : koCopy(section.titleKey),
         sectionId: section.id,
         collapsed: collapsed[section.id] === true,
         onCollapsedChange: (next: boolean) =>
@@ -208,7 +227,7 @@ async function mount(props: { unread?: Record<string, number> } = {}) {
   });
   mountedRoot = createRoot(mountedHost);
   await act(async () => {
-    mountedRoot?.render(
+    mountedRoot?.render(withKo(
       createElement(
         MemoryRouter,
         null,
@@ -218,7 +237,7 @@ async function mount(props: { unread?: Record<string, number> } = {}) {
           createElement(Harness, props)
         )
       )
-    );
+    ));
   });
   // 부트스트랩 GET 은 프라미스다. 가짜 타이머 아래서도 마이크로태스크는 그냥
   // 흐르므로, 몇 번 비워 주면 첫 payload 가 화면에 앉는다.
@@ -404,7 +423,7 @@ describe("저장 실패", () => {
     // 화면이 성공을 말했다가 조용히 번복하지 않는다: 섹션은 사라지고, 사라진
     // 이유가 문장으로 선다.
     expect(sectionIds(host)).toEqual(["channels", "dms"]);
-    expect(handle?.error()).toBe(SIDEBAR_PREFS_SAVE_FAILURE);
+    expect(errorText(handle?.error())).toBe(koCopy(SIDEBAR_PREFS_SAVE_FAILURE_KEY));
   });
 
   it("실패 뒤 다시 만들면 다시 시도한다", async () => {
@@ -413,7 +432,7 @@ describe("저장 실패", () => {
     const host = await mount();
     await act(async () => handle?.create("가"));
     await settleSave();
-    expect(handle?.error()).toBe(SIDEBAR_PREFS_SAVE_FAILURE);
+    expect(errorText(handle?.error())).toBe(koCopy(SIDEBAR_PREFS_SAVE_FAILURE_KEY));
 
     await act(async () => handle?.create("나"));
     // 새 편집은 앞의 실패 문장을 걷는다 - 지금 화면에 있는 것은 실패가 아니다.
@@ -438,14 +457,14 @@ describe("B-1 — 배치를 못 읽은 동안에는 아무것도 쓰지 않는�
 
     expect(handle?.status()).toBe("error");
     expect(handle?.canEdit()).toBe(false);
-    expect(handle?.loadError()).toBe(SIDEBAR_PREFS_LOAD_FAILURE);
+    expect(handle?.loadError()).toEqual({ key: SIDEBAR_PREFS_LOAD_FAILURE_KEY });
 
     // 문이 닫혔는데도 훅을 부르면(다음 표면·경합) 훅이 거절한다. 두 겹이다.
     await act(async () => handle?.create("리뷰 프로브"));
     await act(async () => handle?.move(GENERAL, "sec-1"));
     await settleSave();
     expect(putSidebarPrefs).not.toHaveBeenCalled();
-    expect(handle?.error()).toBe(SIDEBAR_PREFS_LOAD_FAILURE);
+    expect(errorText(handle?.error())).toBe(koCopy(SIDEBAR_PREFS_LOAD_FAILURE_KEY));
   });
 
   it("GET 이 아직 안 왔을 때도 같다", async () => {
@@ -534,8 +553,8 @@ describe("M-3 — 상한이 말한다", () => {
     await act(async () => handle?.move(GENERAL, "sec-1"));
     await settleSave();
     expect(putSidebarPrefs).not.toHaveBeenCalled();
-    expect(handle?.error()).toBe(sidebarChannelRefCapMessage());
-    expect(handle?.error()).toContain(String(SIDEBAR_CHANNEL_REF_MAX));
+    expect(errorText(handle?.error())).toBe(refText(sidebarChannelRefCapRef()));
+    expect(errorText(handle?.error())).toContain(String(SIDEBAR_CHANNEL_REF_MAX));
   });
 
   it("섹션 50개에 닿으면 문은 남고 사유가 이름이 된다", async () => {
@@ -554,17 +573,17 @@ describe("M-3 — 상한이 말한다", () => {
     // 편집은 여전히 허용된다(이름 바꾸기·삭제·배치). 막힌 것은 만들기 하나다.
     expect(handle?.canEdit()).toBe(true);
     expect(handle?.canCreate()).toBe(false);
-    expect(sidebarSectionCapMessage()).toContain(String(SIDEBAR_SECTION_MAX));
+    expect(refText(sidebarSectionCapRef())).toContain(String(SIDEBAR_SECTION_MAX));
   });
 });
 
 describe("H-1 — 빈 섹션 문장은 그 표면이 실제로 가진 것을 말한다", () => {
   it("포인터와 터치가 다른 문장을 쓴다", () => {
-    expect(sidebarEmptySectionHint(true)).toContain("우클릭");
+    expect(koCopy(sidebarEmptySectionHintKey(true))).toContain("우클릭");
     // 터치에는 우클릭이 없다(BT-1 이 행 컨텍스트 메뉴를 hover:none 에서 닫아
     // 두었다). 없는 동작을 지시하지 않는다.
-    expect(sidebarEmptySectionHint(false)).not.toContain("우클릭");
-    expect(sidebarEmptySectionHint(false)).toContain("비어 있어요");
+    expect(koCopy(sidebarEmptySectionHintKey(false))).not.toContain("우클릭");
+    expect(koCopy(sidebarEmptySectionHintKey(false))).toContain("비어 있어요");
   });
 });
 

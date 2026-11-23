@@ -4,6 +4,12 @@ import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { DmClosedMenu, type DmClosedListItem } from "./DmClosedList";
+import { LocaleProvider } from "@/i18n/LocaleProvider";
+import type { AppLocale } from "@/i18n/localeStore";
+import { koreanLocale } from "@/testing/koLocale";
+
+// 화면 문구는 사전에서 읽는다(#6045). 한국어를 단정하던 시험은 한국어 언어 객체로 감싼다.
+let koLocale: AppLocale;
 
 // 「⋯ › 닫은 대화」 (ADR-0177 D11, #4228). 메뉴 항목이 목록 다이얼로그를 열고, 「다시 보이기」가 그 대화를 호출부에 넘긴다.
 
@@ -19,17 +25,21 @@ const ITEMS: DmClosedListItem[] = [
 function render(items: readonly DmClosedListItem[], handlers: { onOpenChange?: (open: boolean) => void; onReopen?: (item: DmClosedListItem) => void } = {}) {
   act(() => {
     root?.render(
-      createElement(DmClosedMenu, {
-        items,
-        onOpenChange: handlers.onOpenChange ?? (() => undefined),
-        onReopen: handlers.onReopen ?? (() => undefined),
+      createElement(LocaleProvider, {
+        locale: koLocale,
+        children: createElement(DmClosedMenu, {
+          items,
+          onOpenChange: handlers.onOpenChange ?? (() => undefined),
+          onReopen: handlers.onReopen ?? (() => undefined),
+        }),
       })
     );
   });
 }
 
-beforeAll(() => {
+beforeAll(async () => {
   reactActEnvironment.IS_REACT_ACT_ENVIRONMENT = true;
+  koLocale = await koreanLocale();
 });
 afterEach(() => {
   if (root) act(() => root?.unmount());

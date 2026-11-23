@@ -1,13 +1,13 @@
 import {
-  CHANNEL_COPY_FAILURE,
-  CHANNEL_LEAVE_LABEL,
-  CHANNEL_MUTE_FAILURE,
-  DM_CLOSE_FAILURE,
-  DM_CLOSE_LABEL,
-  channelCopyIdLabel,
-  channelCopyNameLabel,
+  CHANNEL_COPY_FAILURE_KEY,
+  CHANNEL_LEAVE_KEY,
+  CHANNEL_MUTE_FAILURE_KEY,
+  DM_CLOSE_FAILURE_KEY,
+  DM_CLOSE_KEY,
+  channelCopyIdKey,
+  channelCopyNameKey,
   channelLeaveConfirmBodyKey,
-  channelMuteToggleLabel,
+  channelMuteToggleKey,
 } from '@momo/core/features/channels/model';
 import {channelShareUrlFromServerBase} from '@momo/core/features/channels/shareLink';
 import {copyLinkActionLabel} from '@momo/core/features/timeline/copyLabels';
@@ -39,8 +39,8 @@ import {TOUCH_TARGET} from '../src/design/tokens';
 import {ConversationMenuSheet} from '../src/features/conversation/ConversationMenuSheet';
 import {
   CONVERSATION_MENU_ACTION_KEYS,
-  conversationMenuAccessibleLabel,
-  conversationMenuActionItems,
+  conversationMenuAccessibleLabel as base_conversationMenuAccessibleLabel,
+  conversationMenuActionItems as base_conversationMenuActionItems,
   conversationMenuTitle,
 } from '../src/features/conversation/conversationMenu';
 import {
@@ -60,6 +60,10 @@ import {finger, pane} from './fixtures/finger';
 import {installAppClock, SHELL_WAIT_TEST_TIMEOUT_MS} from './fixtures/fakeClock';
 import {pinReduceMotion} from './fixtures/reduceMotion';
 import {describeCloseContract} from './fixtures/sheetContract';
+// 낱말은 사전에 있다(#6045). 시험은 한국어 생성물로 풀어 같은 문장을 그대로 단정한다.
+const koFormat = createMessageService({messageLocale: 'ko-KR', catalog: koCatalog}).formatMessage;
+const conversationMenuActionItems = (target: Parameters<typeof base_conversationMenuActionItems>[0], f: typeof koFormat = koFormat) => base_conversationMenuActionItems(target, f);
+const conversationMenuAccessibleLabel = (name: string, kind: Parameters<typeof base_conversationMenuAccessibleLabel>[1], f: typeof koFormat = koFormat) => base_conversationMenuAccessibleLabel(name, kind, f);
 
 /**
  * 확인 단계의 위험 단추는 서고 나서 `CONFIRM_ARM_MS` 동안 눌림을 받지 않는다(#5818 검수 High): 사람이 읽고 누르는 것처럼
@@ -183,10 +187,10 @@ describe('항목은 코어 표의 답에서 거른다 — 새로 짓지 않는�
     const [on] = conversationMenuActionItems(target({muted: true}));
     expect([on.label, on.busyLabel]).toEqual(['알림 꺼짐', undefined]);
     const leave = conversationMenuActionItems(target()).find(item => item.key === 'leave');
-    expect([leave?.label, leave?.tone]).toEqual([CHANNEL_LEAVE_LABEL, 'danger']);
+    expect([leave?.label, leave?.tone]).toEqual([koFormat(CHANNEL_LEAVE_KEY), 'danger']);
     // 「목록에서 숨기기」는 되돌릴 수 있는 닫기라 위험색이 아니다(웹·사이드바 시트와 같은 표).
     const close = conversationMenuActionItems(dmTarget({closeOffered: true})).find(item => item.key === 'close-dm');
-    expect([close?.label, close?.tone]).toEqual([DM_CLOSE_LABEL, undefined]);
+    expect([close?.label, close?.tone]).toEqual([koFormat(DM_CLOSE_KEY), undefined]);
   });
 
   it('이 시트가 거르는 열쇠는 폰이 실행할 줄 아는 열쇠의 부분집합이다 — 실행 못 하는 항목을 내밀지 않는다', () => {
@@ -448,9 +452,9 @@ describe('시트 — 닫는 길: 문은 시트를 먼저 내리고, 행동은 �
   });
 
   it('알림·닫기가 거절되면 시트 안에서 이유를 말한다 — 토스트가 아니라 alert 문장', () => {
-    renderSheet({items: [MUTE_OFF], error: CHANNEL_MUTE_FAILURE});
+    renderSheet({items: [MUTE_OFF], error: koFormat(CHANNEL_MUTE_FAILURE_KEY)});
     const error = screen.getByTestId('conversation-menu-error');
-    expect(error).toHaveTextContent(CHANNEL_MUTE_FAILURE);
+    expect(error).toHaveTextContent(koFormat(CHANNEL_MUTE_FAILURE_KEY));
     expect(error.props.accessibilityRole).toBe('alert');
   });
 
@@ -474,7 +478,7 @@ describe('시트 — 채널 나가기의 확인 단계 (#4319)', () => {
     expect(screen.getByTestId('conversation-menu-leave-confirm-detail')).toHaveTextContent(
       ko.formatMessage(channelLeaveConfirmBodyKey('public'), {name: 'general'}),
     );
-    expect(screen.getByTestId('conversation-menu-leave-confirm-button')).toHaveTextContent(CHANNEL_LEAVE_LABEL);
+    expect(screen.getByTestId('conversation-menu-leave-confirm-button')).toHaveTextContent(koFormat(CHANNEL_LEAVE_KEY));
     for (const key of ['pins', 'mute-toggle', 'leave']) {
       expect([key, screen.queryByTestId(`conversation-menu-${key}`) === null]).toEqual([key, true]);
     }
@@ -850,7 +854,7 @@ describe('셸 — ⋮ 시트의 항목은 대화마다 다르다 (#4319)', () =>
     expect(screen.getByTestId('conversation-menu-title')).toHaveTextContent('# general');
     expect(menuKeys()).toEqual(['info', 'pins', 'mute-toggle', 'leave']);
     expect(screen.getByTestId('conversation-menu-mute-toggle')).toHaveTextContent(/알림 켜짐/);
-    expect(screen.getByTestId('conversation-menu-leave')).toHaveTextContent(CHANNEL_LEAVE_LABEL);
+    expect(screen.getByTestId('conversation-menu-leave')).toHaveTextContent(koFormat(CHANNEL_LEAVE_KEY));
   });
 
   it('일반 멤버에게도 채널 나가기가 선다 (#5778)', async () => {
@@ -873,7 +877,7 @@ describe('셸 — ⋮ 시트의 항목은 대화마다 다르다 (#4319)', () =>
     await openConversationMenu();
     expect(screen.getByTestId('conversation-menu-title')).toHaveTextContent('박서연');
     expect(menuKeys()).toEqual(['info', 'pins', 'mute-toggle', 'close-dm']);
-    expect(screen.getByTestId('conversation-menu-close-dm')).toHaveTextContent(DM_CLOSE_LABEL);
+    expect(screen.getByTestId('conversation-menu-close-dm')).toHaveTextContent(koFormat(DM_CLOSE_KEY));
   });
 
   it('에이전트 DM: 작업 맡기기가 고정 다음에 서고, 사람 DM 에는 서지 않는다', async () => {
@@ -1054,8 +1058,8 @@ describe('셸 — 알림 끄기·켜기 (#4319)', () => {
     await openConversationMenu();
     fireEvent.press(screen.getByTestId('conversation-menu-mute-toggle'));
     await waitFor(() => expect(screen.getByTestId('conversation-menu-error')).toBeTruthy());
-    expect(screen.getByTestId('conversation-menu-error')).toHaveTextContent(CHANNEL_MUTE_FAILURE);
-    expect(spoken).toHaveBeenCalledWith(CHANNEL_MUTE_FAILURE);
+    expect(screen.getByTestId('conversation-menu-error')).toHaveTextContent(koFormat(CHANNEL_MUTE_FAILURE_KEY));
+    expect(spoken).toHaveBeenCalledWith(koFormat(CHANNEL_MUTE_FAILURE_KEY));
     expect(screen.getByTestId('conversation-menu-sheet')).toBeTruthy();
     expect(screen.getByTestId('conversation-menu-mute-toggle')).toHaveTextContent(/알림 켜짐/);
     expect(muted.has('ch-general')).toBe(false);
@@ -1072,8 +1076,8 @@ describe('셸 — 알림 끄기·켜기 (#4319)', () => {
     await waitFor(() => expect(screen.queryByTestId('conversation-menu-sheet')).toBeNull());
     await act(async () => releaseHeld());
     await waitFor(() => expect(screen.getByTestId('conversation-menu-error')).toBeTruthy());
-    expect(screen.getByTestId('conversation-menu-error')).toHaveTextContent(CHANNEL_MUTE_FAILURE);
-    expect(spoken).toHaveBeenCalledWith(CHANNEL_MUTE_FAILURE);
+    expect(screen.getByTestId('conversation-menu-error')).toHaveTextContent(koFormat(CHANNEL_MUTE_FAILURE_KEY));
+    expect(spoken).toHaveBeenCalledWith(koFormat(CHANNEL_MUTE_FAILURE_KEY));
   });
 
   it('실패한 뒤 X 로 닫았다 다시 열면 지난 실패 문장이 없다 — X 가 훅의 상태를 비운다', async () => {
@@ -1204,8 +1208,8 @@ describe('셸 — DM 의 「목록에서 숨기기」 (#4319, ADR-0177 증보 D7
     await openConversationMenu();
     fireEvent.press(screen.getByTestId(closeRow));
     await waitFor(() => expect(screen.getByTestId('conversation-menu-error')).toBeTruthy());
-    expect(screen.getByTestId('conversation-menu-error')).toHaveTextContent(DM_CLOSE_FAILURE);
-    expect(spoken).toHaveBeenCalledWith(DM_CLOSE_FAILURE);
+    expect(screen.getByTestId('conversation-menu-error')).toHaveTextContent(koFormat(DM_CLOSE_FAILURE_KEY));
+    expect(spoken).toHaveBeenCalledWith(koFormat(DM_CLOSE_FAILURE_KEY));
     expect(screen.getByTestId('conversation-menu-sheet')).toBeTruthy();
     expect(screen.getByTestId('conversation-pane')).toBeTruthy();
     expect(closedDms.size).toBe(0);
@@ -1402,7 +1406,7 @@ describe('셸 — 정보 페이지의 복사: 영수증이 서도 페이지는 �
     await openInfoPage();
     fireEvent.press(screen.getByTestId('conversation-info-copy-name'));
     await waitFor(() =>
-      expect(screen.getByTestId('conversation-info-copy-name')).toHaveTextContent(channelCopyNameLabel(true)),
+      expect(screen.getByTestId('conversation-info-copy-name')).toHaveTextContent(koFormat(channelCopyNameKey(true))),
     );
     expect(clipboardBox.value).toBe('general');
     // 같은 훅이 시트를 세우던 길(`setActive`)을 타지 않는다 — 정보 페이지 위에 ⋮ 시트가 뜨면 안 된다.
@@ -1414,7 +1418,7 @@ describe('셸 — 정보 페이지의 복사: 영수증이 서도 페이지는 �
       await jest.advanceTimersByTimeAsync(COPY_RECEIPT_MS + 50);
     });
     expect(screen.getByTestId('conversation-info-page')).toBeTruthy();
-    expect(screen.getByTestId('conversation-info-copy-name')).toHaveTextContent(channelCopyNameLabel(false));
+    expect(screen.getByTestId('conversation-info-copy-name')).toHaveTextContent(koFormat(channelCopyNameKey(false)));
     expect(screen.queryByTestId('conversation-menu-sheet')).toBeNull();
   });
 
@@ -1429,7 +1433,7 @@ describe('셸 — 정보 페이지의 복사: 영수증이 서도 페이지는 �
     expect(clipboardBox.value).toBe(channelShareUrlFromServerBase(BASE, 'ch-general'));
     fireEvent.press(screen.getByTestId('conversation-info-copy-id'));
     await waitFor(() =>
-      expect(screen.getByTestId('conversation-info-copy-id')).toHaveTextContent(channelCopyIdLabel(true)),
+      expect(screen.getByTestId('conversation-info-copy-id')).toHaveTextContent(koFormat(channelCopyIdKey(true))),
     );
     expect(clipboardBox.value).toBe('ch-general');
     // 앞 줄의 영수증은 새 영수증이 밀어낸다.
@@ -1452,9 +1456,9 @@ describe('셸 — 정보 페이지의 복사: 영수증이 서도 페이지는 �
     await openInfoPage();
     fireEvent.press(screen.getByTestId('conversation-info-copy-name'));
     await waitFor(() => expect(screen.getByTestId('conversation-info-error')).toBeTruthy());
-    expect(screen.getByTestId('conversation-info-error')).toHaveTextContent(CHANNEL_COPY_FAILURE);
-    expect(spoken).toHaveBeenCalledWith(CHANNEL_COPY_FAILURE);
-    expect(screen.getByTestId('conversation-info-copy-name')).toHaveTextContent(channelCopyNameLabel(false));
+    expect(screen.getByTestId('conversation-info-error')).toHaveTextContent(koFormat(CHANNEL_COPY_FAILURE_KEY));
+    expect(spoken).toHaveBeenCalledWith(koFormat(CHANNEL_COPY_FAILURE_KEY));
+    expect(screen.getByTestId('conversation-info-copy-name')).toHaveTextContent(koFormat(channelCopyNameKey(false)));
     expect(screen.queryByTestId('conversation-menu-sheet')).toBeNull();
     expect(clipboardBox.value).toBeNull();
   });
@@ -1465,12 +1469,12 @@ describe('셸 — 정보 페이지의 복사: 영수증이 서도 페이지는 �
     await openInfoPage();
     fireEvent.press(screen.getByTestId('conversation-info-copy-name'));
     await waitFor(() =>
-      expect(screen.getByTestId('conversation-info-copy-name')).toHaveTextContent(channelCopyNameLabel(true)),
+      expect(screen.getByTestId('conversation-info-copy-name')).toHaveTextContent(koFormat(channelCopyNameKey(true))),
     );
     fireEvent.press(screen.getByTestId('conversation-info-back'));
     await waitFor(() => expect(screen.queryByTestId('conversation-info-page')).toBeNull());
     await openInfoPage();
-    expect(screen.getByTestId('conversation-info-copy-name')).toHaveTextContent(channelCopyNameLabel(false));
+    expect(screen.getByTestId('conversation-info-copy-name')).toHaveTextContent(koFormat(channelCopyNameKey(false)));
   });
 });
 
@@ -1482,14 +1486,14 @@ describe('셸 — 정보 페이지의 알림 끄기·켜기 (#4319)', () => {
     await mountShell();
     await openConversation(ROW.general);
     await openInfoPage();
-    expect(screen.getByTestId('conversation-info-mute-toggle')).toHaveTextContent(new RegExp(channelMuteToggleLabel(false)));
+    expect(screen.getByTestId('conversation-info-mute-toggle')).toHaveTextContent(new RegExp(koFormat(channelMuteToggleKey(false))));
     fireEvent.press(screen.getByTestId('conversation-info-mute-toggle'));
     await waitFor(() => expect(callsTo('/notification-pref')).toHaveLength(1));
     expect(callsTo('/notification-pref')[0].url).toContain('/channels/ch-general/notification-pref');
     expect(callsTo('/notification-pref')[0].body).toEqual({muted: true});
     // 서버가 진실이다: 채널 목록을 다시 읽어 새 값이 흘러 내려오면 같은 행이 다른 낱말을 말한다.
     await waitFor(() =>
-      expect(screen.getByTestId('conversation-info-mute-toggle')).toHaveTextContent(new RegExp(channelMuteToggleLabel(true))),
+      expect(screen.getByTestId('conversation-info-mute-toggle')).toHaveTextContent(new RegExp(koFormat(channelMuteToggleKey(true)))),
     );
     expect(spoken).toHaveBeenCalledWith('알림을 껐습니다.');
     // 시트였다면 성공에서 걷히는 자리다 — 페이지는 남고, ⋮ 시트는 서지 않는다.
@@ -1501,12 +1505,12 @@ describe('셸 — 정보 페이지의 알림 끄기·켜기 (#4319)', () => {
     await mountShell();
     await openConversation(ROW.quiet);
     await openInfoPage();
-    expect(screen.getByTestId('conversation-info-mute-toggle')).toHaveTextContent(new RegExp(channelMuteToggleLabel(true)));
+    expect(screen.getByTestId('conversation-info-mute-toggle')).toHaveTextContent(new RegExp(koFormat(channelMuteToggleKey(true))));
     fireEvent.press(screen.getByTestId('conversation-info-mute-toggle'));
     await waitFor(() => expect(callsTo('/notification-pref')).toHaveLength(1));
     expect(callsTo('/notification-pref')[0].body).toEqual({muted: false});
     await waitFor(() =>
-      expect(screen.getByTestId('conversation-info-mute-toggle')).toHaveTextContent(new RegExp(channelMuteToggleLabel(false))),
+      expect(screen.getByTestId('conversation-info-mute-toggle')).toHaveTextContent(new RegExp(koFormat(channelMuteToggleKey(false)))),
     );
   });
 
@@ -1523,7 +1527,7 @@ describe('셸 — 정보 페이지의 알림 끄기·켜기 (#4319)', () => {
     fireEvent.press(screen.getByTestId('conversation-info-mute-toggle'));
     await act(async () => releaseHeld());
     await waitFor(() =>
-      expect(screen.getByTestId('conversation-info-mute-toggle')).toHaveTextContent(new RegExp(channelMuteToggleLabel(true))),
+      expect(screen.getByTestId('conversation-info-mute-toggle')).toHaveTextContent(new RegExp(koFormat(channelMuteToggleKey(true)))),
     );
     expect(callsTo('/notification-pref')).toHaveLength(1);
   });
@@ -1535,11 +1539,11 @@ describe('셸 — 정보 페이지의 알림 끄기·켜기 (#4319)', () => {
     await openInfoPage();
     fireEvent.press(screen.getByTestId('conversation-info-mute-toggle'));
     await waitFor(() => expect(screen.getByTestId('conversation-info-error')).toBeTruthy());
-    expect(screen.getByTestId('conversation-info-error')).toHaveTextContent(CHANNEL_MUTE_FAILURE);
-    expect(spoken).toHaveBeenCalledWith(CHANNEL_MUTE_FAILURE);
+    expect(screen.getByTestId('conversation-info-error')).toHaveTextContent(koFormat(CHANNEL_MUTE_FAILURE_KEY));
+    expect(spoken).toHaveBeenCalledWith(koFormat(CHANNEL_MUTE_FAILURE_KEY));
     // 훅의 `failed` 는 시트를 다시 세우는 길(`setActive`)이다 — 정보 페이지는 둘째 인스턴스를 읽어서 ⋮ 시트가 서지 않는다.
     expect(screen.queryByTestId('conversation-menu-sheet')).toBeNull();
-    expect(screen.getByTestId('conversation-info-mute-toggle')).toHaveTextContent(new RegExp(channelMuteToggleLabel(false)));
+    expect(screen.getByTestId('conversation-info-mute-toggle')).toHaveTextContent(new RegExp(koFormat(channelMuteToggleKey(false))));
     expect(muted.has('ch-general')).toBe(false);
   });
 
@@ -1658,7 +1662,7 @@ describe('셸 — 정보 페이지의 DM 「목록에서 숨기기」 (#4319)', 
     await openConversation(ROW.human);
     await openInfoPage();
     expect(infoKeys()).toEqual(['mute-toggle', 'copy-name', 'copy-link', 'copy-id', 'close-dm']);
-    expect(screen.getByTestId('conversation-info-close-dm')).toHaveTextContent(DM_CLOSE_LABEL);
+    expect(screen.getByTestId('conversation-info-close-dm')).toHaveTextContent(koFormat(DM_CLOSE_KEY));
     fireEvent.press(screen.getByTestId('conversation-info-close-dm'));
     await waitFor(() => expect(callsTo('/closure')).toHaveLength(1));
     expect(callsTo('/closure')[0].body).toEqual({seenSeq: 2});
@@ -1682,7 +1686,7 @@ describe('셸 — 정보 페이지의 DM 「목록에서 숨기기」 (#4319)', 
     await openInfoPage();
     fireEvent.press(screen.getByTestId('conversation-info-close-dm'));
     await waitFor(() => expect(screen.getByTestId('conversation-info-error')).toBeTruthy());
-    expect(screen.getByTestId('conversation-info-error')).toHaveTextContent(DM_CLOSE_FAILURE);
+    expect(screen.getByTestId('conversation-info-error')).toHaveTextContent(koFormat(DM_CLOSE_FAILURE_KEY));
     expect(screen.getByTestId('conversation-pane')).toBeTruthy();
     expect(screen.getByTestId('conversation-info-page')).toBeTruthy();
     expect(screen.queryByTestId('conversation-menu-sheet')).toBeNull();

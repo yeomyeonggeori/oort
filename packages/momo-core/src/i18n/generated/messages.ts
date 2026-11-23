@@ -241,6 +241,36 @@ export const messageKeys = [
   "channels.dmLeave.failed",
   "channels.dmLeave.scheduledFailed",
   "channels.dmLeave.unavailable",
+  "channels.memberAdd.forbidden",
+  "channels.memberAdd.generic",
+  "channels.memberAdd.network",
+  "channels.memberAdd.notFound",
+  "channels.memberAdd.rateLimited",
+  "channels.menu.ariaChannel",
+  "channels.menu.ariaDm",
+  "channels.menu.copyFailed",
+  "channels.menu.copyGroup",
+  "channels.menu.copyId",
+  "channels.menu.copyIdDone",
+  "channels.menu.copyName",
+  "channels.menu.copyNameDone",
+  "channels.menu.copyUnavailable",
+  "channels.menu.dmClose",
+  "channels.menu.dmCloseAria",
+  "channels.menu.dmCloseFailed",
+  "channels.menu.dmReopenFailed",
+  "channels.menu.errorGroup",
+  "channels.menu.leave",
+  "channels.menu.markRead",
+  "channels.menu.markReadBusy",
+  "channels.menu.markReadFailed",
+  "channels.menu.markUnread",
+  "channels.menu.markUnreadBusy",
+  "channels.menu.markUnreadFailed",
+  "channels.menu.muteFailed",
+  "channels.menu.muteOff",
+  "channels.menu.muteOn",
+  "channels.menu.topicView",
   "channels.nameRule.edge",
   "channels.nameRule.hidden",
   "channels.nameRule.hint",
@@ -276,6 +306,7 @@ export const messageKeys = [
   "channels.rename.preview",
   "channels.rename.submit",
   "channels.rename.title",
+  "channels.topic.tooLong",
   "common.action.cancel",
   "common.action.checkAgain",
   "common.action.close",
@@ -942,6 +973,9 @@ export const messageKeys = [
   "mobile.workPermission.recheck",
   "mobile.workPermission.rechecking",
   "mobile.workPermission.recheckMissed",
+  "notifications.banner.approvalTitle",
+  "notifications.banner.code",
+  "notifications.banner.secret",
   "notifications.inviteLink.fallback",
   "readState.markUnread.action",
   "readState.markUnread.done",
@@ -1501,6 +1535,45 @@ export const messageKeys = [
   "settings.updates.restartNow",
   "settings.updates.stoppedChip",
   "settings.updates.stoppedSentence",
+  "sidebar.channel.star",
+  "sidebar.channel.unstar",
+  "sidebar.dms.allClosedHint",
+  "sidebar.dms.closedListEmpty",
+  "sidebar.dms.closedListHint",
+  "sidebar.dms.closedListLabel",
+  "sidebar.dms.closeStarFirst",
+  "sidebar.dms.goneDisclosure",
+  "sidebar.dms.open",
+  "sidebar.dms.reasonClosed",
+  "sidebar.dms.reasonGone",
+  "sidebar.dms.reopen",
+  "sidebar.dms.reopenAriaClosed",
+  "sidebar.dms.reopenAriaOpen",
+  "sidebar.prefs.loadFailed",
+  "sidebar.prefs.saveFailed",
+  "sidebar.section.capChannels",
+  "sidebar.section.capSections",
+  "sidebar.section.channels",
+  "sidebar.section.create",
+  "sidebar.section.deleteConfirm",
+  "sidebar.section.deleteConfirmBody",
+  "sidebar.section.deleteConfirmTitle",
+  "sidebar.section.deleteLabel",
+  "sidebar.section.dms",
+  "sidebar.section.emptyHintHover",
+  "sidebar.section.emptyHintTouch",
+  "sidebar.section.moveDown",
+  "sidebar.section.moveGroup",
+  "sidebar.section.moveToBase",
+  "sidebar.section.moveUp",
+  "sidebar.section.nameEmpty",
+  "sidebar.section.nameField",
+  "sidebar.section.namePlaceholder",
+  "sidebar.section.nameTooLong",
+  "sidebar.section.renameLabel",
+  "sidebar.section.renameTitle",
+  "sidebar.section.starred",
+  "sidebar.starred.touchHint",
   "teamAi.delegation.chipImage",
   "teamAi.delegation.chipSearch",
   "teamAi.delegation.hermesFallbackName",
@@ -2294,6 +2367,44 @@ export const argumentSpecs = {
   "channels.dmLeave.failed": {},
   "channels.dmLeave.scheduledFailed": {},
   "channels.dmLeave.unavailable": {},
+  "channels.memberAdd.forbidden": {},
+  "channels.memberAdd.generic": {},
+  "channels.memberAdd.network": {
+    "reason": "string"
+  },
+  "channels.memberAdd.notFound": {},
+  "channels.memberAdd.rateLimited": {},
+  "channels.menu.ariaChannel": {
+    "name": "string"
+  },
+  "channels.menu.ariaDm": {
+    "name": "string"
+  },
+  "channels.menu.copyFailed": {},
+  "channels.menu.copyGroup": {},
+  "channels.menu.copyId": {},
+  "channels.menu.copyIdDone": {},
+  "channels.menu.copyName": {},
+  "channels.menu.copyNameDone": {},
+  "channels.menu.copyUnavailable": {},
+  "channels.menu.dmClose": {},
+  "channels.menu.dmCloseAria": {
+    "name": "string"
+  },
+  "channels.menu.dmCloseFailed": {},
+  "channels.menu.dmReopenFailed": {},
+  "channels.menu.errorGroup": {},
+  "channels.menu.leave": {},
+  "channels.menu.markRead": {},
+  "channels.menu.markReadBusy": {},
+  "channels.menu.markReadFailed": {},
+  "channels.menu.markUnread": {},
+  "channels.menu.markUnreadBusy": {},
+  "channels.menu.markUnreadFailed": {},
+  "channels.menu.muteFailed": {},
+  "channels.menu.muteOff": {},
+  "channels.menu.muteOn": {},
+  "channels.menu.topicView": {},
   "channels.nameRule.edge": {},
   "channels.nameRule.hidden": {},
   "channels.nameRule.hint": {
@@ -2345,6 +2456,9 @@ export const argumentSpecs = {
   },
   "channels.rename.submit": {},
   "channels.rename.title": {},
+  "channels.topic.tooLong": {
+    "max": "number"
+  },
   "common.action.cancel": {},
   "common.action.checkAgain": {},
   "common.action.close": {},
@@ -3219,6 +3333,11 @@ export const argumentSpecs = {
   "mobile.workPermission.recheck": {},
   "mobile.workPermission.rechecking": {},
   "mobile.workPermission.recheckMissed": {},
+  "notifications.banner.approvalTitle": {
+    "actor": "string"
+  },
+  "notifications.banner.code": {},
+  "notifications.banner.secret": {},
   "notifications.inviteLink.fallback": {},
   "readState.markUnread.action": {},
   "readState.markUnread.done": {},
@@ -3887,6 +4006,59 @@ export const argumentSpecs = {
   "settings.updates.restartNow": {},
   "settings.updates.stoppedChip": {},
   "settings.updates.stoppedSentence": {},
+  "sidebar.channel.star": {},
+  "sidebar.channel.unstar": {},
+  "sidebar.dms.allClosedHint": {},
+  "sidebar.dms.closedListEmpty": {},
+  "sidebar.dms.closedListHint": {},
+  "sidebar.dms.closedListLabel": {},
+  "sidebar.dms.closeStarFirst": {},
+  "sidebar.dms.goneDisclosure": {
+    "count": "number"
+  },
+  "sidebar.dms.open": {},
+  "sidebar.dms.reasonClosed": {},
+  "sidebar.dms.reasonGone": {},
+  "sidebar.dms.reopen": {},
+  "sidebar.dms.reopenAriaClosed": {
+    "name": "string"
+  },
+  "sidebar.dms.reopenAriaOpen": {
+    "name": "string"
+  },
+  "sidebar.prefs.loadFailed": {},
+  "sidebar.prefs.saveFailed": {},
+  "sidebar.section.capChannels": {
+    "max": "number"
+  },
+  "sidebar.section.capSections": {
+    "max": "number"
+  },
+  "sidebar.section.channels": {},
+  "sidebar.section.create": {},
+  "sidebar.section.deleteConfirm": {},
+  "sidebar.section.deleteConfirmBody": {
+    "name": "string"
+  },
+  "sidebar.section.deleteConfirmTitle": {},
+  "sidebar.section.deleteLabel": {},
+  "sidebar.section.dms": {},
+  "sidebar.section.emptyHintHover": {},
+  "sidebar.section.emptyHintTouch": {},
+  "sidebar.section.moveDown": {},
+  "sidebar.section.moveGroup": {},
+  "sidebar.section.moveToBase": {},
+  "sidebar.section.moveUp": {},
+  "sidebar.section.nameEmpty": {},
+  "sidebar.section.nameField": {},
+  "sidebar.section.namePlaceholder": {},
+  "sidebar.section.nameTooLong": {
+    "max": "number"
+  },
+  "sidebar.section.renameLabel": {},
+  "sidebar.section.renameTitle": {},
+  "sidebar.section.starred": {},
+  "sidebar.starred.touchHint": {},
   "teamAi.delegation.chipImage": {
     "name": "string"
   },
@@ -4933,6 +5105,36 @@ export interface MessageArgs {
   "channels.dmLeave.failed": Record<string, never>;
   "channels.dmLeave.scheduledFailed": Record<string, never>;
   "channels.dmLeave.unavailable": Record<string, never>;
+  "channels.memberAdd.forbidden": Record<string, never>;
+  "channels.memberAdd.generic": Record<string, never>;
+  "channels.memberAdd.network": { reason: string };
+  "channels.memberAdd.notFound": Record<string, never>;
+  "channels.memberAdd.rateLimited": Record<string, never>;
+  "channels.menu.ariaChannel": { name: string };
+  "channels.menu.ariaDm": { name: string };
+  "channels.menu.copyFailed": Record<string, never>;
+  "channels.menu.copyGroup": Record<string, never>;
+  "channels.menu.copyId": Record<string, never>;
+  "channels.menu.copyIdDone": Record<string, never>;
+  "channels.menu.copyName": Record<string, never>;
+  "channels.menu.copyNameDone": Record<string, never>;
+  "channels.menu.copyUnavailable": Record<string, never>;
+  "channels.menu.dmClose": Record<string, never>;
+  "channels.menu.dmCloseAria": { name: string };
+  "channels.menu.dmCloseFailed": Record<string, never>;
+  "channels.menu.dmReopenFailed": Record<string, never>;
+  "channels.menu.errorGroup": Record<string, never>;
+  "channels.menu.leave": Record<string, never>;
+  "channels.menu.markRead": Record<string, never>;
+  "channels.menu.markReadBusy": Record<string, never>;
+  "channels.menu.markReadFailed": Record<string, never>;
+  "channels.menu.markUnread": Record<string, never>;
+  "channels.menu.markUnreadBusy": Record<string, never>;
+  "channels.menu.markUnreadFailed": Record<string, never>;
+  "channels.menu.muteFailed": Record<string, never>;
+  "channels.menu.muteOff": Record<string, never>;
+  "channels.menu.muteOn": Record<string, never>;
+  "channels.menu.topicView": Record<string, never>;
   "channels.nameRule.edge": Record<string, never>;
   "channels.nameRule.hidden": Record<string, never>;
   "channels.nameRule.hint": { max: number };
@@ -4968,6 +5170,7 @@ export interface MessageArgs {
   "channels.rename.preview": { name: string };
   "channels.rename.submit": Record<string, never>;
   "channels.rename.title": Record<string, never>;
+  "channels.topic.tooLong": { max: number };
   "common.action.cancel": Record<string, never>;
   "common.action.checkAgain": Record<string, never>;
   "common.action.close": Record<string, never>;
@@ -5634,6 +5837,9 @@ export interface MessageArgs {
   "mobile.workPermission.recheck": Record<string, never>;
   "mobile.workPermission.rechecking": Record<string, never>;
   "mobile.workPermission.recheckMissed": Record<string, never>;
+  "notifications.banner.approvalTitle": { actor: string };
+  "notifications.banner.code": Record<string, never>;
+  "notifications.banner.secret": Record<string, never>;
   "notifications.inviteLink.fallback": Record<string, never>;
   "readState.markUnread.action": Record<string, never>;
   "readState.markUnread.done": Record<string, never>;
@@ -6193,6 +6399,45 @@ export interface MessageArgs {
   "settings.updates.restartNow": Record<string, never>;
   "settings.updates.stoppedChip": Record<string, never>;
   "settings.updates.stoppedSentence": Record<string, never>;
+  "sidebar.channel.star": Record<string, never>;
+  "sidebar.channel.unstar": Record<string, never>;
+  "sidebar.dms.allClosedHint": Record<string, never>;
+  "sidebar.dms.closedListEmpty": Record<string, never>;
+  "sidebar.dms.closedListHint": Record<string, never>;
+  "sidebar.dms.closedListLabel": Record<string, never>;
+  "sidebar.dms.closeStarFirst": Record<string, never>;
+  "sidebar.dms.goneDisclosure": { count: number };
+  "sidebar.dms.open": Record<string, never>;
+  "sidebar.dms.reasonClosed": Record<string, never>;
+  "sidebar.dms.reasonGone": Record<string, never>;
+  "sidebar.dms.reopen": Record<string, never>;
+  "sidebar.dms.reopenAriaClosed": { name: string };
+  "sidebar.dms.reopenAriaOpen": { name: string };
+  "sidebar.prefs.loadFailed": Record<string, never>;
+  "sidebar.prefs.saveFailed": Record<string, never>;
+  "sidebar.section.capChannels": { max: number };
+  "sidebar.section.capSections": { max: number };
+  "sidebar.section.channels": Record<string, never>;
+  "sidebar.section.create": Record<string, never>;
+  "sidebar.section.deleteConfirm": Record<string, never>;
+  "sidebar.section.deleteConfirmBody": { name: string };
+  "sidebar.section.deleteConfirmTitle": Record<string, never>;
+  "sidebar.section.deleteLabel": Record<string, never>;
+  "sidebar.section.dms": Record<string, never>;
+  "sidebar.section.emptyHintHover": Record<string, never>;
+  "sidebar.section.emptyHintTouch": Record<string, never>;
+  "sidebar.section.moveDown": Record<string, never>;
+  "sidebar.section.moveGroup": Record<string, never>;
+  "sidebar.section.moveToBase": Record<string, never>;
+  "sidebar.section.moveUp": Record<string, never>;
+  "sidebar.section.nameEmpty": Record<string, never>;
+  "sidebar.section.nameField": Record<string, never>;
+  "sidebar.section.namePlaceholder": Record<string, never>;
+  "sidebar.section.nameTooLong": { max: number };
+  "sidebar.section.renameLabel": Record<string, never>;
+  "sidebar.section.renameTitle": Record<string, never>;
+  "sidebar.section.starred": Record<string, never>;
+  "sidebar.starred.touchHint": Record<string, never>;
   "teamAi.delegation.chipImage": { name: string };
   "teamAi.delegation.chipSearch": { name: string };
   "teamAi.delegation.hermesFallbackName": Record<string, never>;

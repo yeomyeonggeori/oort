@@ -1,4 +1,4 @@
-import {CHANNEL_MUTE_FAILURE} from '@momo/core/features/channels/model';
+import {CHANNEL_MUTE_FAILURE_KEY} from '@momo/core/features/channels/model';
 import {pinListHeaderLabel} from '@momo/core/features/timeline/pins';
 import React from 'react';
 
@@ -8,6 +8,10 @@ import type {ChannelRowTarget} from '../src/features/sidebar/channelRowActions';
 import type {ChannelRowActions, DmLeaveStepView} from '../src/features/sidebar/useChannelRowActions';
 import {useFormatMessage} from '../src/i18n/useFormatMessage';
 import {Backdrop, dmLeaveStep} from './sheetKit';
+import {catalog as koCatalog} from '@momo/core/i18n/generated/ko-KR';
+import {createMessageService} from '@momo/core/i18n/service';
+
+const koFormat = createMessageService({messageLocale: 'ko-KR', catalog: koCatalog}).formatMessage;
 
 // =============================================================================
 // 대화 머리 ⋮ 시트의 캡처 표면 (#4319). 배송되는 `ConversationMenuSheet` 에 고정 데이터를 건넨다 — 항목은 화면과 같은 길(`conversationMenuActionItems`,
@@ -153,7 +157,7 @@ export function ConversationMenuSurface({which}: {which: string}): React.JSX.Ele
     case 'channel-leave':
       return <Sheet target={CHANNEL_TARGET} confirmingLeave />;
     case 'mute-failure':
-      return <Sheet target={CHANNEL_TARGET} error={CHANNEL_MUTE_FAILURE} />;
+      return <Sheet target={CHANNEL_TARGET} error={koFormat(CHANNEL_MUTE_FAILURE_KEY)} />;
     default:
       return <Sheet target={DM_TARGET} />;
   }

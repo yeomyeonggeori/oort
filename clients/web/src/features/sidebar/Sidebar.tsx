@@ -48,8 +48,8 @@ import {
 } from "@momo/core/features/sidebar/rowEmphasis";
 import {
   canCreateChannelNow,
-  DM_CLOSE_FAILURE,
-  dmCloseButtonLabel,
+  DM_CLOSE_FAILURE_KEY,
+  dmCloseButtonRef,
 } from "@momo/core/features/channels/model";
 import {
   useCreateChannelOpen,
@@ -109,12 +109,12 @@ import {
 } from "./SidebarSectionDialogs";
 import {
   deriveSidebarSections,
-  SECTION_CREATE_TITLE,
-  sidebarEmptySectionHint,
-  sidebarSectionCapMessage,
-  SIDEBAR_DMS_ALL_CLOSED_HINT,
-  SIDEBAR_PREFS_LOAD_RETRY_LABEL,
-  SIDEBAR_STARRED_TOUCH_HINT,
+  SECTION_CREATE_TITLE_KEY,
+  sidebarEmptySectionHintKey,
+  sidebarSectionCapRef,
+  SIDEBAR_DMS_ALL_CLOSED_HINT_KEY,
+  SIDEBAR_PREFS_LOAD_RETRY_KEY,
+  SIDEBAR_STARRED_TOUCH_HINT_KEY,
 } from "@momo/core/features/sidebar/sidebarSections";
 import { useSidebarDrag, type SidebarDropAction } from "./sidebarDnd";
 import {
@@ -853,7 +853,11 @@ export function Sidebar({
         onClose={
           closeOffered && !touchSurface ? () => closeDmRow(channel) : undefined
         }
-        closeLabel={channel.kind === "dm" ? dmCloseButtonLabel(label.text) : undefined}
+        closeLabel={
+          channel.kind === "dm"
+            ? formatMessage("channels.menu.dmCloseAria", dmCloseButtonRef(label.text).values)
+            : undefined
+        }
         unreadCount={counts.unreadCount}
         mentionCount={counts.mentionCount}
         trailing={
@@ -1108,14 +1112,14 @@ export function Sidebar({
                   된다. 읽기 실패가 더 근본이므로 그것이 이긴다. */}
               {sidebarPrefs.loadError ? (
                 <InlineBanner
-                  message={sidebarPrefs.loadError}
-                  actionLabel={SIDEBAR_PREFS_LOAD_RETRY_LABEL}
+                  message={formatMessage(sidebarPrefs.loadError.key, sidebarPrefs.loadError.values as never)}
+                  actionLabel={formatMessage(SIDEBAR_PREFS_LOAD_RETRY_KEY)}
                   onAction={sidebarPrefs.retryLoad}
                   testId="sidebar-prefs-load-error"
                 />
               ) : sidebarPrefs.error ? (
                 <InlineBanner
-                  message={sidebarPrefs.error}
+                  message={formatMessage(sidebarPrefs.error.key, sidebarPrefs.error.values as never)}
                   actionLabel="닫기"
                   onAction={sidebarPrefs.dismissError}
                   testId="sidebar-prefs-error"
@@ -1133,7 +1137,7 @@ export function Sidebar({
                   별표를 붙이는 일이고, 그 뜻은 `resolveSidebarDrop` 이 갖는다. */}
               {starredSection.channels.length > 0 && (
                 <SidebarSection
-                  title={starredSection.title}
+                  title={formatMessage(starredSection.titleKey)}
                   sectionId={starredSection.id}
                   collapsed={collapsedSections[starredSection.id] === true}
                   onCollapsedChange={(next) =>
@@ -1153,14 +1157,14 @@ export function Sidebar({
                       표면이 자기 문에 대해 참말을 한다(BT-4 H-1 규율). */}
                   {touchSurface && (
                     <li className="px-2 py-1 text-meta text-ink-muted">
-                      {SIDEBAR_STARRED_TOUCH_HINT}
+                      {formatMessage(SIDEBAR_STARRED_TOUCH_HINT_KEY)}
                     </li>
                   )}
                 </SidebarSection>
               )}
 
               <SidebarSection
-                title={baseChannelSection.title}
+                title={formatMessage(baseChannelSection.titleKey)}
                 sectionId={baseChannelSection.id}
                 collapsed={collapsedSections[baseChannelSection.id] === true}
                 onCollapsedChange={(next) =>
@@ -1267,7 +1271,9 @@ export function Sidebar({
                         아직 못 찾은 문을 사람은 구분하지 못한다. */}
                     {canEditSections && (
                       <Tooltip
-                        label={sidebarPrefs.canCreate ? SECTION_CREATE_TITLE : sidebarSectionCapMessage()}
+                        label={sidebarPrefs.canCreate
+                            ? formatMessage(SECTION_CREATE_TITLE_KEY)
+                            : formatMessage(sidebarSectionCapRef().key, sidebarSectionCapRef().values)}
                         side="bottom"
                       >
                         <button
@@ -1284,8 +1290,8 @@ export function Sidebar({
                           }
                           aria-label={
                             sidebarPrefs.canCreate
-                              ? SECTION_CREATE_TITLE
-                              : sidebarSectionCapMessage()
+                              ? formatMessage(SECTION_CREATE_TITLE_KEY)
+                              : formatMessage(sidebarSectionCapRef().key, sidebarSectionCapRef().values)
                           }
                           data-testid="new-section"
                           data-section-action=""
@@ -1445,7 +1451,7 @@ export function Sidebar({
                         !channelsQuery.error &&
                         section.channels.length === 0 && (
                           <li className="px-2 py-1 text-meta text-ink-muted">
-                            {sidebarEmptySectionHint(!touchSurface)}
+                            {formatMessage(sidebarEmptySectionHintKey(!touchSurface))}
                           </li>
                         )}
                       {section.channels.map((channel) => rowFor(channel))}
@@ -1458,7 +1464,7 @@ export function Sidebar({
                   워크스페이스에서 DM을 시작할 길이 ⌘⇧K뿐이면 안 된다. 로딩 중에는 스켈레톤이
                   이미 위에서 한 번 말했으므로 빈 안내는 목록이 도착한 뒤에만 선다. */}
               <SidebarSection
-                title={dmSection.title}
+                title={formatMessage(dmSection.titleKey)}
                 sectionId={dmSection.id}
                 collapsed={collapsedSections[dmSection.id] === true}
                 onCollapsedChange={(next) =>
@@ -1527,7 +1533,7 @@ export function Sidebar({
                   <li>
                     <InlineBanner
                       tone="neutral"
-                      message={DM_CLOSE_FAILURE}
+                      message={formatMessage(DM_CLOSE_FAILURE_KEY)}
                       actionLabel="확인"
                       onAction={() => setDmCloseFailed(false)}
                       separator={false}
@@ -1554,7 +1560,7 @@ export function Sidebar({
                     >
                       {/* 닫은 대화가 있으면 「아직 대화가 없습니다」는 거짓이다(#3963). */}
                       {closedListItems.length > 0
-                        ? SIDEBAR_DMS_ALL_CLOSED_HINT
+                        ? formatMessage(SIDEBAR_DMS_ALL_CLOSED_HINT_KEY)
                         : "아직 대화가 없습니다. ⌘⇧K로 시작하세요."}
                     </li>
                   )}
