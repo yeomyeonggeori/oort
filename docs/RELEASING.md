@@ -118,16 +118,20 @@ migration이 든 릴리스면 PR 본문의 「되돌릴 때」 줄을 CHANGELOG 
 
 새 크레이트·빈이 들어간 릴리스면 `scripts/check_dockerfile_crates.sh` 도 통과시킨다 — `server-rust/Dockerfile` 의존성 캐시 COPY 목록이 워크스페이스 멤버와 어긋나면 이미지 빌드만 깨진다(v0.1.27 publish 실패, #3876). PR CI `alignment` 잡이 `scripts/check_ghcr_notice_bundle.sh` 경유로 같은 검사를 매 PR 돈다.
 
-서버 이미지의 `ort-payload` 단계는 ONNX Runtime 라이브러리를 Microsoft 릴리스에서 받지 못하면 `server-rust/Dockerfile` 머리의 `ORT_OWN_IMAGE`(이미 발행한 앱 이미지, 목록 digest 고정)에서 가져온다(#5995). 그 이미지는 빌드마다 당겨지므로 GHCR에서 그 digest를 지우면 둘째 길만이 아니라 이 단계가 늘 실패한다 — 지우기 전에 `ORT_OWN_IMAGE`를 같은 `ORT_VERSION`으로 만든 다른 발행본으로 옮긴다.
+서버 이미지의 `ort-payload` 단계는 ONNX Runtime 라이브러리를 두 길 중 **빌드 인자 `ORT_SOURCE`가 고른 한 길**로만 가져온다(#5995, #6012). 두 길 모두 같은 파일 해시 확인(라이브러리 · 라이선스 파일 둘)을 지난다.
 
-dispatch 전에 그 digest가 풀리는지 확인한다(종료 0). `imagetools inspect`는 셸의 ghcr.io 로그인을 쓰므로, 로그인된 맥이면 둘째 줄(익명 토큰으로 manifest 조회, 200)이 익명 확인이다:
+- `ORT_SOURCE=own-image`(**지금 기본값**): `server-rust/Dockerfile` 머리의 `ORT_OWN_IMAGE`(이미 발행한 앱 이미지, 목록 digest 고정)에서 파일 셋을 꺼낸다. github.com은 부르지 않는다.
+- `ORT_SOURCE=upstream`: Microsoft 릴리스 tgz를 받아 해시를 확인한다. `ORT_OWN_IMAGE`는 풀지 않는다. 받기에 실패하면 다른 길로 넘어가지 않고 빌드가 멈춘다(어느 길을 쓸지는 빌드를 거는 쪽이 정한다).
+
+**보존 규칙 — `ORT_OWN_IMAGE`의 digest는 지우지 않는다.** 기본값이 own-image인 동안 GHCR의 그 digest가 지워지거나 비공개가 되면 소스에서 빌드하는 모든 경로(발행 · 셀프호스트 · 로컬 게이트)가 `ort-payload`에서 멈춘다. 버전 정리 자동화를 넣게 되면 이 digest를 예외로 둔다. 지워야 하면 먼저 `ORT_OWN_IMAGE`를 같은 `ORT_VERSION`으로 만든 다른 발행본으로 옮기거나, 바깥 릴리스가 돌아온 것을 확인해 기본값을 `upstream`으로 옮긴다.
+
+dispatch 전에 그 digest가 읽히는지 확인한다(종료 0, 익명 토큰으로 manifest 조회):
 
 ```sh
-docker buildx imagetools inspect "$(sed -n 's/^ARG ORT_OWN_IMAGE=//p' server-rust/Dockerfile)"
-ref="$(sed -n 's/^ARG ORT_OWN_IMAGE=//p' server-rust/Dockerfile)"; tok="$(curl -fsS 'https://ghcr.io/token?scope=repository:yeomyeonggeori/oort:pull' | python3 -c 'import json,sys;print(json.load(sys.stdin)["token"])')"; curl -fsSI -o /dev/null -H "Authorization: Bearer $tok" -H 'Accept: application/vnd.oci.image.index.v1+json' "https://ghcr.io/v2/yeomyeonggeori/oort/manifests/${ref##*@}"
+scripts/check_ort_own_image.sh
 ```
 
-발행 런이 끝나면 두 아키텍처 빌드 로그의 `ort-payload: source=` 줄을 보고 어느 길을 탔는지(`upstream` / `own-image@…`) 발행 기록에 적는다 — 런은 어느 쪽이든 초록이라, 바깥 주소가 돌아온 뒤에도 둘째 길에 기대는지는 이 줄로만 보인다.
+발행 런이 끝나면 두 아키텍처 빌드 로그의 `ort-payload: source=` 줄을 보고 어느 길을 탔는지(`upstream` / `own-image@…`) 발행 기록에 적는다.
 
 ---
 
