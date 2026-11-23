@@ -3,6 +3,8 @@ use momo_expressions::media::{decode, Rejected};
 use std::io::Cursor;
 use std::time::{Duration, Instant};
 
+mod beside;
+
 fn still() -> Vec<u8> {
     let mut bytes = Cursor::new(Vec::new());
     DynamicImage::new_rgba8(200, 100)
@@ -39,6 +41,10 @@ async fn codec_subprocess_accepts_pixels_with_resource_limits_and_cleared_enviro
     // Exercise the real executable and supervisor used by HTTP, including its
     // platform resource limits. In-process decode alone cannot catch startup
     // failure (which otherwise turns a valid PNG upload into HTTP 415).
+    beside::place(
+        "momo-expression-decoder",
+        std::path::Path::new(env!("CARGO_BIN_EXE_momo-expression-decoder")),
+    );
     let media = momo_expressions::media::process(still()).await.unwrap();
     assert_eq!(
         (media.large.info.width, media.large.info.height),
