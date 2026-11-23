@@ -144,6 +144,8 @@ pub mod work_board;
 pub mod work_controls;
 pub mod work_hosts;
 pub mod work_instructions;
+/// #6066 (ADR-0222 원장-1) — work items: number, assignee, close (human only).
+pub mod work_items;
 pub mod work_kill;
 pub mod work_permissions;
 pub mod work_session_share;

@@ -2335,4 +2335,20 @@ mod tests {
             assert_eq!(required_dev_scope(method, path), None, "{method} {path}");
         }
     }
+
+    /// ADR-0222 원장-1 (#6066): work items are a signed-in person's (app session) — the closed
+    /// developer-token table has no work-item row, with any verb.
+    #[test]
+    fn a_developer_token_cannot_reach_work_items() {
+        for path in [
+            "/v1/workspaces/{ws}/work-items",
+            "/v1/workspaces/{ws}/work-items/{number}",
+            "/v1/workspaces/{ws}/work-items/{number}/close",
+            "/v1/workspaces/{ws}/work-items/{number}/assignee",
+        ] {
+            for method in ["GET", "POST", "PUT", "PATCH", "DELETE"] {
+                assert_eq!(required_dev_scope(method, path), None, "{method} {path}");
+            }
+        }
+    }
 }

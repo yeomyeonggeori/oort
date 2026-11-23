@@ -105,6 +105,10 @@ tags:
     description: >
       ADR-0197 M1 personal cloud box lifecycle (create, list, start, stop,
       delete, keep-awake). Off unless the operator sets MOMO_CLOUD_BOX_ENABLED=true.
+  - name: work-item
+    description: >
+      ADR-0222 원장-1 work items: a per-workspace number, a person assignee, close
+      and reassign by the assignee or an admin. People only.
   - name: channels
     description: Workspace channels.
   - name: huddles
@@ -4248,6 +4252,267 @@ paths:
                 $ref: "#/components/schemas/ErrorResponse"
         "409":
           description: "`cloud_box_state_conflict`: the box is not running or idle."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /v1/workspaces/{workspaceId}/work-items:
+    post:
+      tags: [work-item]
+      operationId: createWorkItem
+      summary: Create a work item (a person only).
+      description: >
+        ADR-0222 원장-1 (#6066). The body is closed: `title` and `homeChannelId`
+        only, so a body that names a requester, an on-behalf-of, an assignee or an
+        actor is a 400 and nothing is written. The server sets the requester, the
+        on-behalf-of, the creator and the assignee to the caller, and the number is
+        the next one of the workspace (from 1, no gap, no duplicate). The caller
+        must be an active member of the home channel; a channel they are not in,
+        an archived one and an unknown id are the same 404. A workspace guest
+        cannot create a work item (403, nothing written). An agent bearer and a
+        developer token are refused at the door (403); a signed work host is
+        refused at the door as an unknown credential (401). Audit
+        `work_item.created`.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateWorkItemRequest"
+      responses:
+        "201":
+          description: Created.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WorkItemResponse"
+        "400":
+          description: "An unknown body field, a title outside 1…200 characters or with a control or invisible character, or a malformed channel id."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: "Not a signed-in person (agent bearer, developer token), a workspace guest, or a workspace scope mismatch."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: The home channel does not exist or the caller is not an active member of it.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    get:
+      tags: [work-item]
+      operationId: listWorkItems
+      summary: List the work items the caller can see, highest number first.
+      description: >
+        Only items whose home channel the caller is an active member of. No total;
+        `nextCursor` appears only when more rows follow. A query parameter other
+        than `cursor` and `limit` is a 400.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: cursor
+          in: query
+          required: false
+          description: The `nextCursor` of the previous page (the last number it held).
+          schema:
+            type: string
+        - name: limit
+          in: query
+          required: false
+          description: Page size, 1…100 (default 50).
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+      responses:
+        "200":
+          description: One page.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WorkItemList"
+        "400":
+          description: A malformed cursor or limit, or an unknown query parameter.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: Not a signed-in person, or a workspace scope mismatch.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /v1/workspaces/{workspaceId}/work-items/{number}:
+    get:
+      tags: [work-item]
+      operationId: getWorkItem
+      summary: Read one work item by its number.
+      description: >
+        A number the caller cannot see, a number that does not exist and a number
+        that exists only in another workspace are the same 404 with the same body.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: number
+          in: path
+          required: true
+          description: The work item number (`#142`), a positive decimal without sign or leading zero.
+          schema:
+            type: string
+            pattern: "^[1-9][0-9]{0,18}$"
+      responses:
+        "200":
+          description: The item.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WorkItemResponse"
+        "400":
+          description: A malformed number.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: Not a signed-in person, or a workspace scope mismatch.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: No item the caller can see has this number.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /v1/workspaces/{workspaceId}/work-items/{number}/close:
+    post:
+      tags: [work-item]
+      operationId: closeWorkItem
+      summary: Close a work item as done or cancelled (the assignee or a workspace admin).
+      description: >
+        Visibility first (the same 404 as `getWorkItem`), then authority: the
+        assignee or a workspace owner/admin (ADR-0222 미결 7, current value); any
+        other person who can see the item gets 403 and nothing changes. There is
+        no reopen. Audit `work_item.closed`.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: number
+          in: path
+          required: true
+          description: The work item number (`#142`), a positive decimal without sign or leading zero.
+          schema:
+            type: string
+            pattern: "^[1-9][0-9]{0,18}$"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CloseWorkItemRequest"
+      responses:
+        "200":
+          description: Closed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WorkItemResponse"
+        "400":
+          description: "A malformed number or a body other than `{state: done|cancelled}`."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: Not a signed-in person, or neither the assignee nor a workspace owner/admin.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: No item the caller can see has this number.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: The item is already closed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /v1/workspaces/{workspaceId}/work-items/{number}/assignee:
+    put:
+      tags: [work-item]
+      operationId: setWorkItemAssignee
+      summary: Hand a work item to another person (the assignee or a workspace admin).
+      description: >
+        Same visibility and authority as `closeWorkItem`. The new assignee must be
+        an active person in the item's home channel who is not a workspace guest;
+        an agent, a guest, an unknown id and another workspace's id are one 400. The database refuses an agent assignee
+        as well. Audit `work_item.assignee_changed`.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: number
+          in: path
+          required: true
+          description: The work item number (`#142`), a positive decimal without sign or leading zero.
+          schema:
+            type: string
+            pattern: "^[1-9][0-9]{0,18}$"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SetWorkItemAssigneeRequest"
+      responses:
+        "200":
+          description: Reassigned.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WorkItemResponse"
+        "400":
+          description: "A malformed number or body, or a member who is not an active, non-guest person in the item's channel."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: Not a signed-in person, or neither the assignee nor a workspace owner/admin.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: No item the caller can see has this number.
           content:
             application/json:
               schema:
@@ -20486,6 +20751,108 @@ components:
         stoppedAtMs: {type: integer, format: int64, description: Present while stopped.}
         keepAwakeUntilMs: {type: integer, format: int64, description: Present while 「계속 켜 둠」 is on.}
         lastAttachedAtMs: {type: integer, format: int64}
+    CreateWorkItemRequest:
+      type: object
+      additionalProperties: false
+      required: [title, homeChannelId]
+      properties:
+        title:
+          type: string
+          description: Trimmed; 1…200 characters, no control or invisible characters.
+        homeChannelId:
+          type: string
+          format: uuid
+    CloseWorkItemRequest:
+      type: object
+      additionalProperties: false
+      required: [state]
+      properties:
+        state:
+          type: string
+          enum: [done, cancelled]
+    SetWorkItemAssigneeRequest:
+      type: object
+      additionalProperties: false
+      required: [memberId]
+      properties:
+        memberId:
+          type: string
+          format: uuid
+    WorkItem:
+      type: object
+      description: >
+        ADR-0222 D2. The assignee and the on-behalf-of are always people; the
+        requester is set when the item is created and never changes. Member ids
+        only — names come from the roster.
+      required:
+        - id
+        - number
+        - title
+        - homeChannelId
+        - state
+        - assigneeMemberId
+        - requestedByMemberId
+        - onBehalfOfMemberId
+        - createdByMemberId
+        - createdAtMs
+      properties:
+        id:
+          type: string
+          format: uuid
+        number:
+          type: integer
+          format: int64
+          minimum: 1
+        title:
+          type: string
+        homeChannelId:
+          type: string
+          format: uuid
+        state:
+          type: string
+          enum: [open, done, cancelled]
+        assigneeMemberId:
+          type: string
+          format: uuid
+        doerMemberId:
+          type: string
+          format: uuid
+          description: Who is doing it now (a person or an agent); absent means waiting.
+        requestedByMemberId:
+          type: string
+          format: uuid
+        onBehalfOfMemberId:
+          type: string
+          format: uuid
+        createdByMemberId:
+          type: string
+          format: uuid
+        createdAtMs:
+          type: integer
+          format: int64
+        closedAtMs:
+          type: integer
+          format: int64
+        closedByMemberId:
+          type: string
+          format: uuid
+    WorkItemResponse:
+      type: object
+      required: [workItem]
+      properties:
+        workItem:
+          $ref: "#/components/schemas/WorkItem"
+    WorkItemList:
+      type: object
+      required: [workItems]
+      properties:
+        workItems:
+          type: array
+          items:
+            $ref: "#/components/schemas/WorkItem"
+        nextCursor:
+          type: string
+          description: Present only when more rows follow.
     CloudBoxList:
       type: object
       required: [boxes]

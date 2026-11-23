@@ -8609,3 +8609,79 @@ impl std::fmt::Debug for DevLoginDecisionResponse {
             .finish()
     }
 }
+
+// ---- #6066 작업 원장 1 (ADR-0222 D2) -------------------------------------------------------------
+
+/// `POST …/work-items`. Closed: a body that names a requester, an on-behalf-of, an assignee or an
+/// actor is a 400 — the server sets all of them to the caller (ADR-0222 데이터 계약).
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct CreateWorkItemRequest {
+    pub title: String,
+    pub home_channel_id: String,
+}
+
+/// `POST …/work-items/{number}/close` — `done` (완료) or `cancelled` (취소).
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct CloseWorkItemRequest {
+    pub state: String,
+}
+
+/// `PUT …/work-items/{number}/assignee`.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct SetWorkItemAssigneeRequest {
+    pub member_id: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct WorkItemListQuery {
+    #[serde(default)]
+    pub cursor: Option<String>,
+    #[serde(default)]
+    pub limit: Option<String>,
+}
+
+/// One work item. Member ids only; names come from the roster the client already holds.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkItemDto {
+    pub id: String,
+    pub number: i64,
+    pub title: String,
+    pub home_channel_id: String,
+    /// `open` | `done` | `cancelled`.
+    pub state: String,
+    /// 담당자 — always a person.
+    pub assignee_member_id: String,
+    /// 진행 — a person or an agent; absent means 「대기 중」.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub doer_member_id: Option<String>,
+    /// 요청한 사람 — set by the server when the item is created, never changed.
+    pub requested_by_member_id: String,
+    /// 대신한 사람 — always a person, set by the server.
+    pub on_behalf_of_member_id: String,
+    pub created_by_member_id: String,
+    pub created_at_ms: i64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub closed_at_ms: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub closed_by_member_id: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkItemResponse {
+    pub work_item: WorkItemDto,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkItemListResponse {
+    pub work_items: Vec<WorkItemDto>,
+    /// Present only when more rows follow: the last number of this page.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub next_cursor: Option<String>,
+}

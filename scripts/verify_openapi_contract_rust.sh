@@ -3830,6 +3830,30 @@ sample channel-join post "/v1/workspaces/{workspaceId}/channels/{channelId}/memb
 guard_jq --arg id "$GATE_CHANNEL_ID" \
   '(.channel.id | ascii_downcase) == $id and .newlyJoined == false' \
   "joining a channel one is already in writes nothing"
+
+# ADR-0222 원장-1 (#6066) — 작업 원장. 방금 만든 공개 채널(만든 사람이 멤버)에 작업을 하나 만들고,
+# 읽고, 자기 자신에게 담당자를 다시 넘긴 뒤(바뀌는 것 없음) 완료로 닫는다. 다른 표본은 이 작업을 읽지 않는다.
+sample work-item-create post "/v1/workspaces/{workspaceId}/work-items" \
+  "/v1/workspaces/$WS/work-items" 201 \
+  "$(jq -cn --arg c "$GATE_CHANNEL_ID" '{title:"rust gate work item", homeChannelId:$c}')" "$ACCESS"
+GATE_WORK_ITEM_NUMBER="$(printf '%s' "$RESPONSE_BODY" | jq -er '.workItem.number')"
+GATE_WORK_ITEM_ASSIGNEE="$(printf '%s' "$RESPONSE_BODY" | jq -er '.workItem.assigneeMemberId')"
+guard_jq '.workItem.state == "open" and .workItem.requestedByMemberId == .workItem.assigneeMemberId
+  and .workItem.onBehalfOfMemberId == .workItem.assigneeMemberId' \
+  "a new work item names its creator as requester, on-behalf-of and assignee"
+sample work-item-list get "/v1/workspaces/{workspaceId}/work-items" \
+  "/v1/workspaces/$WS/work-items" 200 "" "$ACCESS"
+guard_jq --argjson n "$GATE_WORK_ITEM_NUMBER" 'any(.workItems[]; .number == $n)' \
+  "the work item list holds the new item"
+sample work-item-get get "/v1/workspaces/{workspaceId}/work-items/{number}" \
+  "/v1/workspaces/$WS/work-items/$GATE_WORK_ITEM_NUMBER" 200 "" "$ACCESS"
+sample work-item-assignee put "/v1/workspaces/{workspaceId}/work-items/{number}/assignee" \
+  "/v1/workspaces/$WS/work-items/$GATE_WORK_ITEM_NUMBER/assignee" 200 \
+  "$(jq -cn --arg m "$GATE_WORK_ITEM_ASSIGNEE" '{memberId:$m}')" "$ACCESS"
+sample work-item-close post "/v1/workspaces/{workspaceId}/work-items/{number}/close" \
+  "/v1/workspaces/$WS/work-items/$GATE_WORK_ITEM_NUMBER/close" 200 '{"state":"done"}' "$ACCESS"
+guard_jq '.workItem.state == "done" and (.workItem.closedAtMs | type) == "number"' \
+  "closing a work item records done"
 # ADR-0224 D5 — 참여 전 미리 보기. 읽기만 하므로 뒤 표본에 부작용이 없다.
 sample channel-preview get "/v1/workspaces/{workspaceId}/channels/{channelId}/preview" \
   "/v1/workspaces/$WS/channels/$GATE_CHANNEL_ID/preview" 200 "" "$ACCESS"

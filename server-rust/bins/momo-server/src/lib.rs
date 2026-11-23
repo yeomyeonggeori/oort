@@ -1971,6 +1971,24 @@ pub fn build_app(state: AppState) -> Router {
             "/v1/workspaces/{ws}/cloud-boxes/{box}/keep-awake",
             post(routes::cloud_boxes::keep_awake),
         )
+        // #6066 (ADR-0222 원장-1) — 작업 원장: 번호로 부르는 작업. 사람만 만들고, 닫기·담당자 바꾸기는
+        // 담당자 본인과 관리자만. 에이전트·개발자 토큰·서명 호스트 표에는 줄이 없다.
+        .route(
+            "/v1/workspaces/{ws}/work-items",
+            post(routes::work_items::create).get(routes::work_items::list),
+        )
+        .route(
+            "/v1/workspaces/{ws}/work-items/{number}",
+            get(routes::work_items::get_one),
+        )
+        .route(
+            "/v1/workspaces/{ws}/work-items/{number}/close",
+            post(routes::work_items::close),
+        )
+        .route(
+            "/v1/workspaces/{ws}/work-items/{number}/assignee",
+            put(routes::work_items::set_assignee),
+        )
         // #3505 (ADR-0197 M2) — 런너 등록·회전·폐기. 인스턴스 운영자만(D2 역할 분리). 런너가 쓰는
         // claim/complete/boxes 는 이 라우터가 아니라 아래 공개 라우터에 있다(런너 자격 하나만 받는다).
         .route(
