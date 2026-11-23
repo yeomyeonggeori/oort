@@ -29,8 +29,8 @@
 | 인증서 | 유효한 `Apple Distribution` 1개(2027-06-29 만료, 내보내기 서명)와 `Apple Development` 1개(2027-06-30 만료, 아카이브 서명) | `security find-identity -v -p codesigning` — 이름만 본다 |
 | App Store 프로파일 | `iOS Team Store Provisioning Profile: app.momo.ios` (aps `production`, App Group `group.app.momo.ios`), `iOS Team Store Provisioning Profile: app.momo.ios.NotificationService` — 둘 다 Xcode 관리형, 2027-07-09 만료 | `~/Library/Developer/Xcode/UserData/Provisioning Profiles`. 스크립트가 이름으로 찾고, 없으면 멈춘다 |
 | 개발 프로파일 | `iOS Team Provisioning Profile: app.momo.ios`, `iOS Team Provisioning Profile: app.momo.ios.NotificationService` — Xcode 관리형, 2027-07-17 만료. 아카이브 단계 서명에 쓰인다 | 같은 폴더. 스크립트가 같이 확인한다 |
-| 도구 | Xcode 26.5, 시스템 CocoaPods `1.17.0`(= `Podfile.lock`의 `COCOAPODS`), node ≥ `clients/mobile/.node-version` | `xcodebuild -version`, `pod --version`, `node --version` |
-| 업로드 도구 (§5-2) | (a) Transporter 앱, 또는 (b) Xcode 26.5에 든 `xcrun altool`(26.40.1) | Transporter는 2026-09-23 기준 이 Mac에 **설치돼 있지 않다**(Mac App Store에서 owner가 설치). altool은 `xcrun altool --help`로 확인 |
+| 도구 | Xcode 27.2(2026-11-20 3080.1 아카이브 기준, DTSDKName `iphoneos27.2`), 시스템 CocoaPods `1.17.0`(= `Podfile.lock`의 `COCOAPODS`), node ≥ `clients/mobile/.node-version`. Expo 모듈은 `expo-modules-core` 57.0.26 이상 · `expo-modules-jsi` 57.1.3 이상(`Podfile.lock`의 `ExpoModulesCore (57.0.26)` · `ExpoModulesJSI (57.1.3)`). 옛 판(57.0.8 · 57.0.4)으로 27.2 아카이브를 하면 「Build ExpoModulesJSI xcframework」 단계의 경고 컴파일에 error 줄이 붙어 실패한다(#5997) | `xcodebuild -version`, `pod --version`, `node --version`, `grep -E "ExpoModules(Core\|JSI) \(" clients/mobile/ios/Podfile.lock` |
+| 업로드 도구 (§5-2) | (a) Transporter 앱, 또는 (b) Xcode에 든 `xcrun altool`(26.40.1은 2026-09-23 Xcode 26.5 기준 — 27.2의 버전은 확인 못 함) | Transporter는 2026-09-23 기준 이 Mac에 **설치돼 있지 않다**(Mac App Store에서 owner가 설치). altool은 `xcrun altool --help`로 확인 |
 | 업로드 인증 (§5-2) | (a) owner Apple ID 로그인, (b) ASC API 키(`.p8` + Key ID + Issuer ID) 또는 Apple ID와 키체인의 앱 암호 | ASC › Users and Access › Integrations. **2026-09-23 기준 Issuer ID 기록이 없다.** 이 Mac에 있는 두 번째 `.p8`이 ASC 키인지 APNs 키인지도 확인되지 않았다. 앱 암호(app-specific password)를 담은 키체인 항목이 있는지도 확인되지 않았다 |
 | 업로드 인증 (§5-3 폴백) | Xcode › Settings › Accounts에 팀 계정 로그인, 또는 위 ASC API 키 | 계정 화면. 세션이 살아 있는지는 로컬에서 확인할 수 없다 |
 
@@ -114,7 +114,7 @@ bash "<작업 디렉터리>/clients/mobile/scripts/archive-release.sh"
 
 ## 5. 업로드 — owner 승인 뒤, 건마다
 
-**이 절의 명령은 #2568에서 실행하지 않았다(미검증).** 올릴 파일은 `build-info.txt`의 `ipa:` 줄이 가리키는 IPA다. 2026-09-23 실측 이름은 `export/oort.ipa`다.
+**실제 기록(2026-11-20, 빌드 3080.1).** 이 절의 명령 경로로 올렸다. 순서는 §5-1 5의 사전 검증 통과(15:00) → 업로드 15:01~15:13 KST, 결과 `UPLOAD SUCCEEDED`, 종료 코드 0, `INTERNAL_ONLY`, `usesNonExemptEncryption=false`, 처리 `VALID`(수출 규정 질문 없음)다. 업로드 전 ASC에는 `momo-internal-test`(internal, 자동 배포 꺼짐, 테스터 2)만 있었고, `owner-evidence` 그룹은 업로드 뒤(15:14)에 만들어 빌드 한 개를 넣었다. 이 순서는 §5-1 2와 다르다. 다음부터는 §5-1 순서대로 한다. 올릴 파일은 `build-info.txt`의 `ipa:` 줄이 가리키는 IPA다. 2026-09-23 실측 이름은 `export/oort.ipa`다.
 
 ### 5-1. 업로드 전 관문 — 순서대로, 하나라도 빠지면 올리지 않는다
 
@@ -296,3 +296,12 @@ TestFlight 빌드는 **production** APNs 토큰을 만든다. 네 곳이 모두 
 - 업로드가 반려되거나(ITMS-…) 처리에 실패한다.
 - 수출 규정 질문이 뜬다.
 - 실기기에서 푸시 환경이 맞지 않는다.
+
+### 10-1. `altool`이 연결에서 멈출 때
+
+`--validate-app`이나 `--upload-package`가 응답 없이 시간만 가면 연결에서 멈춘 것이다.
+1. 그 명령의 PID를 `ps`로 찾아 `kill <PID>`로 그 하나만 끝낸다. `pkill`·`killall`은 쓰지 않는다.
+2. 같은 명령을 한 번만 다시 돌린다.
+3. 두 번째도 멈추면 멈춘 시각 · 명령 종류 · 빌드 번호를 이슈로 남기고 멈춘다.
+
+업로드 명령이 멈춘 것이라면 다시 돌리기 전에 ASC › TestFlight에서 그 빌드 번호가 이미 들어왔는지 본다. 들어왔으면 같은 번호로 다시 올리지 않는다(§5-4).
