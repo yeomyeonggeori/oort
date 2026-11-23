@@ -50,36 +50,38 @@ import { advanceToAccount } from "../e2e/advanceOnboarding.mjs";
 const webRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
 /**
- * 세 액션의 낱말을 코어 소스에서 읽는다(gate-pin이 pins.ts에 하는 것과 같은 규율).
- * 게이트가 문자열을 다시 적으면 정본이 바뀐 날 게이트만 혼자 초록으로 남는다.
+ * 메뉴 낱말은 사전이 정본이다(#6045: `channels.menu.*`). 게이트가 문자열을 다시 적으면 정본이 바뀐 날 게이트만 혼자
+ * 초록으로 남으므로, 두 언어의 사전 값을 읽어 화면 언어의 값과 견준다.
  */
 function canonicalCopy(root) {
-  const model = readFileSync(
-    resolve(root, "../../packages/momo-core/src/features/channels/model.ts"),
-    "utf8"
-  );
-  const mute = /export const CHANNEL_MUTE_LABEL = "([^"]+)";/.exec(model);
-  const unmute = /export const CHANNEL_UNMUTE_LABEL = "([^"]+)";/.exec(model);
-  const leave = /export const CHANNEL_LEAVE_LABEL = "([^"]+)";/.exec(model);
-  const topicView = /export const CHANNEL_TOPIC_VIEW_LABEL = "([^"]+)";/.exec(model);
-  if (!mute || !unmute || !leave || !topicView) {
-    throw new Error(
-      "채널 헤더 메뉴의 낱말을 코어에서 찾지 못했다: 게이트가 검사할 문자열의 정본이 사라졌다"
+  const byLocale = {};
+  for (const locale of ["ko-KR", "en-US"]) {
+    const catalog = JSON.parse(
+      readFileSync(
+        resolve(root, `../../packages/momo-core/src/i18n/catalogs/${locale}/channels.json`),
+        "utf8"
+      )
     );
+    const pick = (key) => {
+      if (typeof catalog[key] !== "string") {
+        throw new Error(`채널 헤더 메뉴의 낱말(${key})을 사전에서 찾지 못했다: 게이트가 검사할 문자열의 정본이 사라졌다`);
+      }
+      return catalog[key];
+    };
+    byLocale[locale] = {
+      mute: pick("channels.menu.muteOn"),
+      unmute: pick("channels.menu.muteOff"),
+      topicView: pick("channels.menu.topicView"),
+    };
   }
-  return {
-    mute: mute[1],
-    unmute: unmute[1],
-    leave: leave[1],
-    topicView: topicView[1],
-  };
+  return byLocale;
 }
 
-const {
-  mute: MUTE_LABEL,
-  unmute: UNMUTE_LABEL,
-  topicView: TOPIC_VIEW_LABEL,
-} = canonicalCopy(webRoot);
+const CHANNEL_MENU_COPY = canonicalCopy(webRoot);
+const menuCopyFor = async (page) =>
+  CHANNEL_MENU_COPY[
+    (await page.evaluate(() => document.documentElement.lang)).startsWith("ko") ? "ko-KR" : "en-US"
+  ];
 
 /**
  * 멤버 패널에서 에이전트 줄을 **눈에 보이게** 가르는 글(#5686): 에이전트 줄이 든 묶음의 머리(「일하는 에이전트 N」·「그 밖의
@@ -454,6 +456,7 @@ async function exercise(browser) {
   if ((await topic.count()) !== 1) {
     throw new Error("the overflow menu did not offer 주제 보기");
   }
+  const { topicView: TOPIC_VIEW_LABEL } = await menuCopyFor(page);
   if (((await topic.textContent()) ?? "").trim() !== TOPIC_VIEW_LABEL) {
     throw new Error(
       `the topic item must read "${TOPIC_VIEW_LABEL}", read "${(await topic.textContent())?.trim()}"`
@@ -608,6 +611,7 @@ async function exercise(browser) {
     );
   }
   const muteItem = page.getByTestId("channel-mute-toggle");
+  const { mute: MUTE_LABEL, unmute: UNMUTE_LABEL } = await menuCopyFor(page);
   if (((await muteItem.textContent()) ?? "").trim() !== MUTE_LABEL) {
     throw new Error(
       `an unmuted channel's item must read "${MUTE_LABEL}", read "${(await muteItem.textContent())?.trim()}"`

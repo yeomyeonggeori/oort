@@ -8,6 +8,16 @@ import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { resetPointerTrailForTest } from "./pointerTrail";
 import { SidebarRow } from "./SidebarRow";
 import { tooltipTextOf } from "@/design/ui/tooltipTestKit";
+import { LocaleProvider } from "@/i18n/LocaleProvider";
+import type { AppLocale } from "@/i18n/localeStore";
+import { koreanLocale } from "@/testing/koLocale";
+
+// 화면 문구는 사전에서 읽는다(#6045). 한국어를 단정하던 시험은 한국어 언어 객체로 감싸 같은 문장을 그대로 단정한다.
+let koLocale: AppLocale;
+beforeAll(async () => {
+  koLocale = await koreanLocale();
+});
+const withKo = (element: ReactElement) => createElement(LocaleProvider, { locale: koLocale, children: element });
 
 // =============================================================================
 // DM 행의 호버 X (#3963). SidebarRow 가 지는 것만 잰다: 언제 서고 언제 내려가는가, 무엇을
@@ -75,14 +85,14 @@ function mount(
   document.body.append(host);
   root = createRoot(host);
   act(() => {
-    root?.render(tree(props, wrapLink));
+    root?.render(withKo(tree(props, wrapLink)));
   });
 }
 
 /** 같은 루트에 다른 프롭으로 다시 그린다 - 행 요소(`<li>`)는 그대로 남는다. */
 function update(props: Partial<Parameters<typeof SidebarRow>[0]>): void {
   act(() => {
-    root?.render(tree(props));
+    root?.render(withKo(tree(props)));
   });
 }
 

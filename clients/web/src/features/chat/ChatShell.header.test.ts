@@ -90,7 +90,7 @@ describe("BZ-2 channel header is one title row", () => {
     expect(MENU_CODE).toMatch(/prefix="channel"/);
     expect(MENU).toMatch(/data-testid="channel-title-menu"/);
     // `channel-topic` = prefix + testKey. 두 조각이 각자 자기 자리에 있다.
-    expect(ACTION_MODEL_CODE).toMatch(/CHANNEL_TOPIC_VIEW_LABEL/);
+    expect(ACTION_MODEL_CODE).toMatch(/CHANNEL_TOPIC_VIEW_KEY/);
     expect(ACTION_MODEL_CODE).toMatch(/key: "topic", testKey: "topic"/);
     expect(ACTION_MENU_CODE).toMatch(/`\$\{prefix\}-\$\{item\.testKey\}`/);
   });

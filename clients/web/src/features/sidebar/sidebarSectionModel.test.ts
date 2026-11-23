@@ -214,7 +214,7 @@ describe("H-2 — 커스텀 섹션에서도 로딩은 빈 상태가 아니다", 
 
   it("빈 상태 문장은 코어가 표면별로 고른다", () => {
     // 문장을 여기 하드코딩하면 터치 갈래가 웹에만 생기고 폰이 다시 짠다.
-    expect(sidebarSource).toContain("sidebarEmptySectionHint(!touchSurface)");
+    expect(sidebarSource).toContain("sidebarEmptySectionHintKey(!touchSurface)");
     expect(sidebarSource).not.toContain("채널 행을 우클릭해");
   });
 });

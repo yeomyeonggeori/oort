@@ -29,6 +29,13 @@ import {
   reloadClosedDmsForTest,
 } from "./sidebarDmClosure";
 
+// 화면 문구는 사전에서 읽는다(#6045). 한국어를 단정하던 시험은 한국어 언어 객체로 감싸 같은 문장을 그대로 단정한다.
+let koLocale: AppLocale;
+beforeAll(async () => {
+  koLocale = await koreanLocale();
+});
+const withKo = (element: ReactElement) => createElement(LocaleProvider, { locale: koLocale, children: element });
+
 const WS = "00000000-0000-7000-8000-000000000001";
 const MEMBER_ID = "00000000-0000-7000-8000-000000000101";
 const CH_GENERAL = "00000000-0000-7000-8000-000000000202";
@@ -408,7 +415,7 @@ async function mount(initialPath = "/"): Promise<HTMLElement> {
   queryClient = null;
   currentPath = initialPath;
   await act(async () => {
-    mountedRoot?.render(buildTree());
+    mountedRoot?.render(withKo(buildTree()));
     await Promise.resolve();
   });
   return host;
@@ -417,7 +424,7 @@ async function mount(initialPath = "/"): Promise<HTMLElement> {
 /** 같은 트리를 다시 그린다(라우터 상태는 남는다). 훅 대역의 값을 바꾼 뒤에 쓴다. */
 async function rerender(): Promise<void> {
   await act(async () => {
-    mountedRoot?.render(buildTree());
+    mountedRoot?.render(withKo(buildTree()));
     await Promise.resolve();
   });
 }

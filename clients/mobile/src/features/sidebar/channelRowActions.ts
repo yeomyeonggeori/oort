@@ -93,12 +93,12 @@ export const NOTHING_COPIED: ChannelRowCopied = {name: false, link: false, id: f
 
 /**
  * 안 읽음이 이미 있으면 「읽음 처리」, 다 읽었으면 「읽지 않음으로 표시」 — 웹 `useChannelActions` 와 같은 입력이다.
- * `formatMessage` 는 사전 키로 이름을 짓는 「대화 나가기」가 쓴다 - 없으면 코어 표가 그 항목을 세우지 않는다.
+ * `formatMessage` 는 사전 키로 이름을 짓는 「대화 나가기」가 쓴다 - 코어 표가 모든 항목의 이름을 이것으로 읽는다.
  */
 export function channelRowActionItems(
   target: ChannelRowTarget,
   copied: ChannelRowCopied = NOTHING_COPIED,
-  formatMessage?: MessageService['formatMessage'],
+  formatMessage: MessageService['formatMessage'],
 ): ChannelActionItem[] {
   const unreadCount = target.readState ? composedUnreadCount(target.readState) : 0;
   const available = channelActionAvailability({

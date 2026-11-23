@@ -26,7 +26,7 @@ import type { Channel } from "@momo/core/lib/api";
 import {
   deriveSidebarSections,
   emptySidebarPrefs,
-  SIDEBAR_STARRED_TOUCH_HINT,
+  SIDEBAR_STARRED_TOUCH_HINT_KEY,
   type SidebarPrefs,
 } from "@momo/core/features/sidebar/sidebarSections";
 import { SidebarRow, SidebarSection } from "./SidebarRow";
@@ -49,6 +49,10 @@ import {
   SIDEBAR_PREFS_SAVE_DEBOUNCE_MS,
   useSidebarPrefs,
 } from "./useSidebarPrefs";
+import { catalog as koCatalog } from "@momo/core/i18n/generated/ko-KR";
+import { createMessageCopy } from "@momo/core/testkit";
+
+const koCopy = createMessageCopy({ messageLocale: "ko-KR", catalog: koCatalog });
 
 // =============================================================================
 // BT-5(#1933) 상호작용의 red proof — 별표 · 정렬 · 끌어다 놓기.
@@ -301,7 +305,7 @@ function Harness({ enabled = true }: { enabled?: boolean }) {
       createElement(
         "li",
         { key: "starred-touch-hint", className: "px-2 py-1 text-meta text-ink-muted" },
-        SIDEBAR_STARRED_TOUCH_HINT
+        SIDEBAR_STARRED_TOUCH_HINT_KEY
       ),
     ];
   }
@@ -323,7 +327,7 @@ function Harness({ enabled = true }: { enabled?: boolean }) {
       derived.sections.map((section) =>
         createElement(SidebarSection, {
           key: section.id,
-          title: section.title,
+          title: section.kind === "custom" ? section.title : koCopy(section.titleKey),
           sectionId: section.id,
           collapsed: collapsed[section.id] === true,
           onCollapsedChange: (next: boolean) =>
@@ -1052,7 +1056,7 @@ describe("R1 M-1 — 터치의 별표 섹션이 자기 사정을 말한다", () 
     ).toBe(0);
     // 그래서 사정을 말한다.
     expect(sectionEl("starred").textContent).toContain(
-      SIDEBAR_STARRED_TOUCH_HINT
+      SIDEBAR_STARRED_TOUCH_HINT_KEY
     );
   });
 
@@ -1064,7 +1068,7 @@ describe("R1 M-1 — 터치의 별표 섹션이 자기 사정을 말한다", () 
     } satisfies SidebarPrefs);
     await mount();
     expect(sectionEl("starred").textContent).not.toContain(
-      SIDEBAR_STARRED_TOUCH_HINT
+      SIDEBAR_STARRED_TOUCH_HINT_KEY
     );
   });
 });
@@ -1168,7 +1172,7 @@ describe("하네스와 출하 배선", () => {
     expect(source).not.toContain("SidebarSortMenu");
     // R1 M-1 · R2-2: 터치의 별표 섹션이 사정을 말한다 — **조건까지** 읽는다.
     //
-    // 앞 회전의 단정은 `toContain("SIDEBAR_STARRED_TOUCH_HINT")` 하나였고, 그
+    // 앞 회전의 단정은 `toContain("SIDEBAR_STARRED_TOUCH_HINT_KEY")` 하나였고, 그
     // 문자열은 **임포트 줄만으로도** 참이었다. 그래서 출하 코드의 `touchSurface`
     // 를 `!touchSurface` 로 뒤집으면 — 즉 문장이 정확히 **반대 표면**에 서면 —
     // 웹 스위트도 tsc 도 캡처 레인도 전부 초록이었다(리뷰 실측 R2-2). 하네스는
@@ -1176,7 +1180,7 @@ describe("하네스와 출하 배선", () => {
     //
     // 그래서 여기서 재는 것은 **문장이 어느 조건 아래 서 있는가**다. 부정
     // (`!touchSurface`)이면 캡처 그룹이 비지 않으므로 그 자리에서 붉어진다.
-    const starredHintGuard = /\{(!?)touchSurface && \([\s\S]{0,400}?SIDEBAR_STARRED_TOUCH_HINT/.exec(
+    const starredHintGuard = /\{(!?)touchSurface && \([\s\S]{0,400}?SIDEBAR_STARRED_TOUCH_HINT_KEY/.exec(
       source
     );
     expect(starredHintGuard, "터치 별표 문장의 조건을 못 찾았다").not.toBeNull();
@@ -1187,7 +1191,7 @@ describe("하네스와 출하 배선", () => {
       source.indexOf("starredSection.channels.map"),
       source.indexOf("<SidebarSection\n              title={baseChannelSection.title}")
     );
-    expect(starredBlock).toContain("SIDEBAR_STARRED_TOUCH_HINT");
+    expect(starredBlock).toContain("SIDEBAR_STARRED_TOUCH_HINT_KEY");
 
     // R2-1: 드롭도 같은 인계를 부른다(넷째 문) — **가지별로** 읽는다.
     //

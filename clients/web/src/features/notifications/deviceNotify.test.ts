@@ -1,6 +1,8 @@
 import { afterEach, describe, expect, it } from "vitest";
 import type { MessageNewEvent } from "@momo/core/lib/realtimeEvents";
-import type { NotifyContext } from "@momo/core/features/notifications/model";
+import type { NotifyContext, NotifyFormat } from "@momo/core/features/notifications/model";
+import { catalog as koCatalog } from "@momo/core/i18n/generated/ko-KR";
+import { createMessageCopy } from "@momo/core/testkit";
 import { notifyThisDevice } from "./deviceNotify";
 import {
   reloadDesktopNotificationKindsForTest,
@@ -9,6 +11,8 @@ import {
 import { setServerPause } from "./serverPause";
 
 const NOW = 1_700_000_000_000;
+const koCopy = createMessageCopy({ messageLocale: "ko-KR", catalog: koCatalog });
+const koFormat: NotifyFormat = (key, values) => koCopy(key, values as never);
 const SELF = "00000000-0000-7000-8000-000000000101";
 const OTHER = "00000000-0000-7000-8000-0000000005d1";
 const AGENT = "00000000-0000-7000-8000-000000000103";
@@ -63,6 +67,7 @@ function context(): Omit<NotifyContext, "kindEnabled" | "paused"> {
     isAnnounced: () => false,
     actorFor: () => "한지후",
     inviteLinkSentence: () => "사전의 고정 문장",
+    formatMessage: koFormat,
     nowMs: NOW,
   };
 }
