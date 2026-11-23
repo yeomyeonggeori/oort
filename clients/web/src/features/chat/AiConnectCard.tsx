@@ -29,6 +29,7 @@ import { errorMessage, isOperatorDenied, maskedBearer } from "@momo/core/feature
 import { teamCheckClock, teamCheckResult, teamCheckSince } from "@momo/core/features/settings/teamKeyForm";
 import { Button } from "@/design/ui/button";
 import { cn } from "@/design/lib/cn";
+import { useFormatMessage } from "@/i18n/useFormatMessage";
 import { Skeleton } from "@/features/common/States";
 import { MESSAGE_AVATAR_GUTTER_CLASS } from "@/features/timeline/spacing";
 import { IS_TAURI } from "@/lib/env";
@@ -49,13 +50,13 @@ import { useSession } from "@/app/session";
 import { seedComposerText, seedThreadComposerText } from "@/features/chat/draftStore";
 import type { Directory } from "@momo/core/features/workspace/directory";
 import {
-  COMMAND_SUGGEST_ASK_BUSY,
-  COMMAND_SUGGEST_ASK_NONE,
-  COMMAND_SUGGEST_ASK_OPERATOR,
-  COMMAND_SUGGEST_ASK_THREAD,
-  COMMAND_SUGGEST_ONLY_ME,
-  COMMAND_SUGGEST_TEAM_CLOSE,
-  COMMAND_SUGGEST_TEAM_OPEN,
+  COMMAND_SUGGEST_ASK_BUSY_KEY,
+  COMMAND_SUGGEST_ASK_NONE_KEY,
+  COMMAND_SUGGEST_ASK_OPERATOR_KEY,
+  COMMAND_SUGGEST_ASK_THREAD_KEY,
+  COMMAND_SUGGEST_ONLY_ME_KEY,
+  COMMAND_SUGGEST_TEAM_CLOSE_KEY,
+  COMMAND_SUGGEST_TEAM_OPEN_KEY,
   commandSuggestHead,
   commandSuggestOneLine,
   commandSuggestViewer,
@@ -477,6 +478,7 @@ export function AiConnectSuggestion({
 
 /** 남에게 보이는 한 줄(시안 `.oneline`). 운영자면 「팀 AI 키 보기」가 팀 줄만 편다. */
 function SuggestionLine({ card, operator }: { card: CommandSuggestCard; operator: boolean }) {
+  const formatMessage = useFormatMessage();
   const [open, setOpen] = useState(false);
   const offline = useOffline();
   const panelId = useId();
@@ -488,7 +490,7 @@ function SuggestionLine({ card, operator }: { card: CommandSuggestCard; operator
         data-testid="ai-suggest-line"
       >
         <Plug className="size-4 shrink-0 text-icon" aria-hidden="true" />
-        <span className="min-w-0 flex-1 break-keep">{commandSuggestOneLine(card)}</span>
+        <span className="min-w-0 flex-1 break-keep">{commandSuggestOneLine(formatMessage, card)}</span>
         {operator && (
           <button
             type="button"
@@ -500,7 +502,7 @@ function SuggestionLine({ card, operator }: { card: CommandSuggestCard; operator
             className="tap-target press -my-3 shrink-0 rounded-md px-1 text-meta font-semibold text-agent hover:underline focus-visible:focus-ring"
             data-testid="ai-suggest-team-open"
           >
-            {open ? COMMAND_SUGGEST_TEAM_CLOSE : COMMAND_SUGGEST_TEAM_OPEN}
+            {formatMessage(open ? COMMAND_SUGGEST_TEAM_CLOSE_KEY : COMMAND_SUGGEST_TEAM_OPEN_KEY)}
           </button>
         )}
       </p>
@@ -540,19 +542,20 @@ function SuggestedCard({
 }) {
   const navigate = useNavigate();
   const { workspaceId } = useSession();
+  const formatMessage = useFormatMessage();
   // 「운영자에게 부탁하기」: 컴포저에 운영자 멘션만 채운다. 보내는 것은 사람이다.
   // 쓰던 글은 덮지 않는다(`seedComposerText`는 빈 입력창에만 심는다).
   const askOperator = (): string | null => {
     const draft = operatorMentionDraft(directory, viewerMemberId);
-    if (draft === null) return COMMAND_SUGGEST_ASK_NONE;
+    if (draft === null) return formatMessage(COMMAND_SUGGEST_ASK_NONE_KEY);
     // 스레드 안의 제안은 그 스레드 입력창에(design-review #2948 B). 채널 입력창은
     // 좁은 폭에서 서랍 뒤에 `inert`로 가려져 있어, 거기 심으면 아무 일도 안 난 것처럼 보인다.
     if (rootId) {
       const seeded = seedThreadComposerText(rootId, draft);
-      if (!seeded.mounted) return COMMAND_SUGGEST_ASK_THREAD;
-      return seeded.accepted ? null : COMMAND_SUGGEST_ASK_BUSY;
+      if (!seeded.mounted) return formatMessage(COMMAND_SUGGEST_ASK_THREAD_KEY);
+      return seeded.accepted ? null : formatMessage(COMMAND_SUGGEST_ASK_BUSY_KEY);
     }
-    if (!seedComposerText(workspaceId, channelId, draft)) return COMMAND_SUGGEST_ASK_BUSY;
+    if (!seedComposerText(workspaceId, channelId, draft)) return formatMessage(COMMAND_SUGGEST_ASK_BUSY_KEY);
     const input = document.getElementById("composer-input");
     if (input instanceof HTMLTextAreaElement) input.focus();
     return null;
@@ -602,7 +605,7 @@ function SuggestedCard({
             data-testid="ai-suggest-only-me"
           >
             <Eye className="size-3 shrink-0" aria-hidden="true" />
-            {COMMAND_SUGGEST_ONLY_ME}
+            {formatMessage(COMMAND_SUGGEST_ONLY_ME_KEY)}
           </span>
         </span>
         <span className="flex-1" />
@@ -885,6 +888,7 @@ function TeamSection({
   onAskOperator?: () => string | null;
 }) {
   const headId = useId();
+  const formatMessage = useFormatMessage();
   const client = useQueryClient();
   const query = useQuery({ queryKey: TEAM_QUERY_KEY, queryFn: fetchProviderLink, retry: false });
   const [editing, setEditing] = useState(false);
@@ -1025,7 +1029,7 @@ function TeamSection({
               onClick={() => setAskNote(onAskOperator())}
               data-testid="ai-connect-card-ask-operator"
             >
-              {COMMAND_SUGGEST_ASK_OPERATOR}
+              {formatMessage(COMMAND_SUGGEST_ASK_OPERATOR_KEY)}
             </Button>
             {askNote && (
               <span role="status" className="min-w-0 break-keep text-meta text-ink-muted" data-testid="ai-connect-card-ask-note">

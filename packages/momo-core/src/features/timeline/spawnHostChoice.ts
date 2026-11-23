@@ -1,3 +1,5 @@
+import type { LocaleService } from "../../i18n/context";
+import type { PlainMessageKey } from "../../i18n/keys";
 import { uuidEq } from "../../lib/api";
 import {
   UNAVAILABLE_OFFLINE,
@@ -145,14 +147,14 @@ export function decisionHostId(
  * 「사용 불가」라고 쓰면 영영 못 쓰는 것처럼 읽히고, 「곧 출시」라고 쓰면 우리가
  * 모르는 날짜를 약속한다.
  */
-export function unavailableReasonCopy(reason: string | undefined): string | null {
+export function unavailableReasonKey(reason: string | undefined): PlainMessageKey | null {
   if (reason === undefined) return null;
-  if (reason === UNAVAILABLE_OFFLINE) return "오프라인";
-  if (reason === UNAVAILABLE_REVOKED) return "해지됨";
-  if (reason === UNAVAILABLE_T3_DISABLED) return "준비 중";
+  if (reason === UNAVAILABLE_OFFLINE) return "timeline.spawnHost.offline";
+  if (reason === UNAVAILABLE_REVOKED) return "timeline.spawnHost.revoked";
+  if (reason === UNAVAILABLE_T3_DISABLED) return "timeline.spawnHost.notReady";
   // 이 빌드가 모르는 사유. 원문을 그대로 내보내지 않는다(서버 어휘는 화면의 말이
   // 아니다) — 대신 아는 것만 말한다: 지금은 못 고른다.
-  return "지금 선택할 수 없음";
+  return "timeline.spawnHost.unavailable";
 }
 
 /**
@@ -163,12 +165,18 @@ export function unavailableReasonCopy(reason: string | undefined): string | null
  * 이름이고, 사유가 이름과 떨어져 있으면 두 번째 줄을 안 읽은 사람에게는 그냥
  * 흐린 이름 하나다.
  */
-export function candidateLabel(candidate: SpawnHostCandidate): string {
+export function candidateLabel(
+  formatMessage: LocaleService["formatMessage"],
+  candidate: SpawnHostCandidate
+): string {
   if (candidate.selectable) return candidate.displayName;
-  const reason = unavailableReasonCopy(candidate.unavailableReason);
+  const reason = unavailableReasonKey(candidate.unavailableReason);
   return reason === null
     ? candidate.displayName
-    : `${candidate.displayName} (${reason})`;
+    : formatMessage("timeline.spawnHost.candidateWithReason", {
+        name: candidate.displayName,
+        reason: formatMessage(reason),
+      });
 }
 
 /**
@@ -177,15 +185,15 @@ export function candidateLabel(candidate: SpawnHostCandidate): string {
  * 등록기가 모르는 타입을 「로컬」로 적으면 정체를 모르는 기계에 「내 기기」라는
  * 뜻을 붙이는 것이다. 서버도 같은 이유로 추측하지 않는다(`host_tier`의 `_` 갈래).
  */
-export function tierLabel(tier: HostTier): string | null {
-  if (tier === "local") return "로컬";
-  if (tier === "remote") return "원격";
-  if (tier === "cloud") return "클라우드";
+export function tierLabelKey(tier: HostTier): PlainMessageKey | null {
+  if (tier === "local") return "timeline.spawnHost.tierLocal";
+  if (tier === "remote") return "timeline.spawnHost.tierRemote";
+  if (tier === "cloud") return "timeline.spawnHost.tierCloud";
   return null;
 }
 
 /** 픽커 그룹의 보이는 라벨. 스크린리더 전용이 아니다. */
-export const HOST_CHOICE_LABEL = "실행할 호스트";
+export const HOST_CHOICE_LABEL_KEY = "timeline.spawnHost.choiceLabel" satisfies PlainMessageKey;
 
 /**
  * 자격 있는 후보가 하나도 없을 때 픽커 자리에 서는 문장.
@@ -193,15 +201,14 @@ export const HOST_CHOICE_LABEL = "실행할 호스트";
  * 「없다」로 끝내지 않고 무엇이 그것을 바꾸는지까지 말한다. 이 상태의 원인은 거의
  * 항상 「내 맥이 꺼져 있다」이고, 그것은 사람이 30초 안에 고칠 수 있는 것이다.
  */
-export const NO_ELIGIBLE_HOST_COPY =
-  "지금 이 작업을 실행할 수 있는 호스트가 없습니다. 호스트 앱이 켜져 있는지 확인한 뒤 다시 시도하세요.";
+export const NO_ELIGIBLE_HOST_KEY = "timeline.spawnHost.noEligibleHost" satisfies PlainMessageKey;
 
 /** 승인 컨트롤이 지금 무엇을 할 수 있나. */
 export interface SpawnHostGate {
   /** 승인 버튼을 세울 수 있는가. 거부는 이 값과 무관하게 언제나 가능하다. */
   canApprove: boolean;
   /** `canApprove`가 거짓인 이유. 참이면 없다. */
-  blockedCopy?: string;
+  blockedKey?: PlainMessageKey;
 }
 
 /**
@@ -212,7 +219,7 @@ export function spawnHostGate(
 ): SpawnHostGate {
   if (!offersHostChoice(plan)) return { canApprove: true };
   if (selectableHosts(plan).length === 0) {
-    return { canApprove: false, blockedCopy: NO_ELIGIBLE_HOST_COPY };
+    return { canApprove: false, blockedKey: NO_ELIGIBLE_HOST_KEY };
   }
   return { canApprove: true };
 }

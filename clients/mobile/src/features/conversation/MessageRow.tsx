@@ -67,10 +67,10 @@ import {
 // 이 행이 쓰던 `body !== ''` 는 그보다 한 칸 좁았다 — 공백만 있는 본문이 칸을 얻어
 // 빈 줄을 그렸다. 왜 `trim()` 인지는 그 파일 머리말에.
 import {hasRenderableBody} from '@momo/core/features/timeline/bodySlot';
-import {isTruncated, omittedFileCount} from '@momo/core/features/timeline/artifacts';
+import {artifactTitleText, diffFilePathText, isTruncated, omittedFileCount} from '@momo/core/features/timeline/artifacts';
 import type {ArtifactPresentation} from '@momo/core/features/timeline/artifacts';
 import {attachmentMetaLine} from '@momo/core/features/attachments/model';
-import {deletedFoldLabel} from '@momo/core/features/timeline/deletedFold';
+import {deletedFoldRef} from '@momo/core/features/timeline/deletedFold';
 import {canQuoteMessage} from '@momo/core/features/timeline/quote';
 import type {QuoteBlock as QuoteBlockModel} from '@momo/core/features/timeline/quote';
 import {
@@ -85,15 +85,15 @@ import {
   type PendingMessage,
 } from '@momo/core/features/timeline/model';
 import {
-  PIN_ROW_MARK,
-  pinActionLabel,
+  PIN_ROW_MARK_KEY,
+  pinActionLabelKey,
 } from '@momo/core/features/timeline/pins';
-import {streamStopMark} from '@momo/core/features/timeline/streamStop';
+import {streamStopMarkKey} from '@momo/core/features/timeline/streamStop';
 import {
-  deleteFailureMessage,
-  editFailureMessage,
-  pinFailureMessage,
-  reactionFailureMessage,
+  deleteFailureKey,
+  editFailureKey,
+  pinFailureKey,
+  reactionFailureKey,
 } from '@momo/core/features/timeline/actionCopy';
 import type {ReactionChip} from '@momo/core/features/timeline/reactions';
 import type {MemoryEvidenceLink} from '@momo/core/features/memory/model';
@@ -188,8 +188,8 @@ import {
   delegateButtonLabel,
   teamAiDelegateFor,
   type TeamAiDelegate,
-  TEAM_AI_PROPOSAL_AUTHORITY,
-  TEAM_AI_PROPOSAL_LABEL,
+  TEAM_AI_PROPOSAL_AUTHORITY_KEY,
+  TEAM_AI_PROPOSAL_LABEL_KEY,
   teamAiCallNames,
   teamAiProposalLine,
 } from '@momo/core/features/timeline/teamAi';
@@ -524,11 +524,12 @@ export function DayDivider({
   atMs: number;
   nowMs: number;
 }): React.JSX.Element {
+  const formatMessage = useFormatMessage();
   const styles = useStyles(buildStyles);
   return (
     <View
       accessibilityRole="text"
-      accessibilityLabel={dayDividerLabel(atMs, nowMs)}
+      accessibilityLabel={dayDividerLabel(formatMessage, atMs, nowMs)}
       style={[styles.dayRow, styles.dividerDay]}
       testID="day-divider">
       {/* 시안 A `.a-day` — 가운데 유리 알약(DS2-4 #2716). 위 「앞 라벨 + rule 하나」
@@ -538,7 +539,7 @@ export function DayDivider({
           표지는 여전히 앞 라벨 + rule 이다(웹과 같은 문법). */}
       <View style={styles.dayPill}>
         <DividerLabel
-          segments={dayDividerSegments(atMs, nowMs)}
+          segments={dayDividerSegments(formatMessage, atMs, nowMs)}
           tone={DIVIDER_TONE.day}
           strong
         />
@@ -562,6 +563,7 @@ export function FloatingDayPill({
   atMs: number;
   nowMs: number;
 }): React.JSX.Element {
+  const formatMessage = useFormatMessage();
   const styles = useStyles(buildStyles);
   return (
     <View
@@ -572,7 +574,7 @@ export function FloatingDayPill({
       testID="floating-day">
       <GlassSurface radius={radius.pill} style={styles.dayPillFloat} testID="floating-day-glass">
         <Text style={styles.dayFloatLabel} maxFontSizeMultiplier={BAR_CONTROL_MAX_SCALE}>
-          {dayDividerSegments(atMs, nowMs).map(segment => segment.text).join('')}
+          {dayDividerSegments(formatMessage, atMs, nowMs).map(segment => segment.text).join('')}
         </Text>
       </GlassSurface>
     </View>
@@ -605,11 +607,12 @@ export function FloatingDayPill({
  * 한 경계는 한 색이다.
  */
 export function UnreadDivider({count}: {count: number}): React.JSX.Element {
+  const formatMessage = useFormatMessage();
   const styles = useStyles(buildStyles);
   return (
     <View style={styles.divider} testID="unread-divider">
       <DividerLabel
-        segments={unreadDividerSegments(count)}
+        segments={unreadDividerSegments(formatMessage, count)}
         tone={DIVIDER_TONE.unread}
       />
       <View style={[styles.dividerLine, styles.dividerLineBoundary]} />
@@ -657,15 +660,16 @@ export function RecoveryDivider({
   /** Which rail healed the gap. Stated, because they are not equally strong. */
   source: RecoverySource;
 }): React.JSX.Element {
+  const formatMessage = useFormatMessage();
   const styles = useStyles(buildStyles);
   return (
     <View
       accessibilityRole="text"
-      accessibilityLabel={recoveryDividerLabel(source)}
+      accessibilityLabel={recoveryDividerLabel(formatMessage, source)}
       style={styles.divider}
       testID="recovery-divider">
       <DividerLabel
-        segments={recoveryDividerSegments(seq, source)}
+        segments={recoveryDividerSegments(formatMessage, seq, source)}
         tone={DIVIDER_TONE.recovery}
       />
       <View style={styles.dividerLine} />
@@ -1550,6 +1554,7 @@ function ApprovalActionRows({
   origin: Pick<AgentApprovalCard, 'proposedVia' | 'agentInitiated'>;
   styles: ReturnType<typeof buildStyles>;
 }): React.JSX.Element {
+  const formatMessage = useFormatMessage();
   const tag = rationaleTag(origin);
   return (
     <View style={styles.factRows} testID="approval-action-rows">
@@ -1582,9 +1587,9 @@ function ApprovalActionRows({
       ) : null}
       {action.rationale !== null ? (
         <FactRow
-          label={tag.label}
+          label={formatMessage(tag.labelKey)}
           value={action.rationale}
-          {...(tag.note !== null ? {note: tag.note} : {})}
+          {...(tag.noteKey !== null ? {note: formatMessage(tag.noteKey)} : {})}
           styles={styles}
           testID="approval-action-rationale"
         />
@@ -1739,6 +1744,7 @@ function AgentCard({
    */
   onOpenMessage?: (channelId: string, messageId: string) => void;
 }): React.JSX.Element {
+  const formatMessage = useFormatMessage();
   const styles = useStyles(buildStyles);
   const approvalNoteStyle = useStyles(buildApprovalNoteStyle);
   const completionToneStyle = useStyles(buildCompletionToneStyle);
@@ -1812,7 +1818,7 @@ function AgentCard({
           {/* 먼저 제안 카드(#4705)는 제목 끝에 「 · 먼저 제안」 꼬리표 하나가 붙는다. 새 행도 배지도
               없다 — 제안자는 메시지 줄이 이미 말한다. */}
           <Text style={styles.cardTitle} numberOfLines={2} testID="approval-card-title">
-            {approvalHeadTitle(card)}
+            {approvalHeadTitle(formatMessage, card)}
           </Text>
           {/* 원장이 방금 답해 준 상태가 있으면 그것이 이긴다. 없으면 스냅샷.
               둘을 섞지 않는 이유는 사진이 잡아냈다 — 영수증이 「승인을
@@ -1835,12 +1841,13 @@ function AgentCard({
         {card.proposedVia !== undefined ? (
           <View style={styles.factRows}>
             <FactRow
-              label={TEAM_AI_PROPOSAL_LABEL}
+              label={formatMessage(TEAM_AI_PROPOSAL_LABEL_KEY)}
               value={teamAiProposalLine(
+                formatMessage,
                 memberFor(directory, card.proposedVia.requesterId ?? undefined)
                   ?.displayName ?? card.proposedVia.requesterName,
               )}
-              note={TEAM_AI_PROPOSAL_AUTHORITY}
+              note={formatMessage(TEAM_AI_PROPOSAL_AUTHORITY_KEY)}
               styles={styles}
               testID="approval-team-ai"
             />
@@ -2087,13 +2094,14 @@ function ArtifactCard({
   state: ArtifactState | null;
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
-  const note = state ? artifactNote(state) : null;
+  const formatMessage = useFormatMessage();
+  const note = state ? artifactNote(formatMessage, state) : null;
   const provisional = isProvisional(state);
   return (
     <View style={styles.card} testID="artifact-card">
       <View style={styles.cardHead}>
         <Text style={styles.cardTitle} numberOfLines={2}>
-          {artifact.title}
+          {artifactTitleText(formatMessage, artifact.title)}
         </Text>
         {state ? (
           <StatusChip label={TURN_STATUS_LABEL[state.status]} tone={toneForTurn(state.status)} />
@@ -2119,7 +2127,7 @@ function ArtifactCard({
           {artifact.files.slice(0, 6).map(file => (
             <View key={file.id} style={styles.fileRow}>
               <Text style={styles.filePath} numberOfLines={1} ellipsizeMode="head">
-                {file.path}
+                {diffFilePathText(formatMessage, file)}
               </Text>
               <Text style={styles.fileCounts}>
                 {`+${file.additions} −${file.deletions}`}
@@ -2987,20 +2995,20 @@ function MessageRowInner({
       const epoch = reactionEpochRef.current;
       const feedback = hapticScope(() => reactionEpochRef.current === epoch);
       void actions.onToggleReaction(message, emoji).catch((error: unknown) => {
-        setRowError(reactionFailureMessage(error));
+        setRowError(formatMessage(reactionFailureKey(error)));
         feedback('actionFailed');
       });
     },
-    [actions, message],
+    [actions, message, formatMessage],
   );
 
   const togglePin = useCallback(() => {
     if (!actions?.onTogglePin) return;
     setRowError(null);
     void actions.onTogglePin(message).catch((error: unknown) => {
-      setRowError(pinFailureMessage(error));
+      setRowError(formatMessage(pinFailureKey(error)));
     });
-  }, [actions, message]);
+  }, [actions, message, formatMessage]);
 
   const onChipPress = useCallback(
     (emoji: string) => {
@@ -3145,7 +3153,7 @@ function MessageRowInner({
     teamAiSend.pressable.forEach((candidate, index) => {
       list.push({
         name: `${TEAM_AI_DELEGATE_ACTION_PREFIX}${index}`,
-        label: delegateButtonLabel(candidate),
+        label: delegateButtonLabel(formatMessage, candidate),
       });
     });
     // 도우미 답의 웹 출처(ADR-0201 v2 H5). 꼬리의 링크와 같은 `openLink` 로 연다.
@@ -3166,7 +3174,7 @@ function MessageRowInner({
     // 이슈 #1112 — 시트를 열지 않고도 로터에서 바로 고정할 수 있다. 낱말은
     // 시트의 항목과 같은 코어 상수에서 오므로 둘이 갈라질 수 없다.
     if (available.pin) {
-      list.push({name: 'momoPin', label: pinActionLabel(pinned === true)});
+      list.push({name: 'momoPin', label: formatMessage(pinActionLabelKey(pinned === true))});
     }
     // 아래 넷이 H-1 이 더한 것이다. 묘비에는 하나도 붙지 않는다 — 지워진
     // 메시지에는 열 링크도 복사할 코드도 없다.
@@ -3245,7 +3253,8 @@ function MessageRowInner({
   // **문장을 여기서 짓지 않는다** (U4-6 코어 승격). 폰이 자기 파일에서 조사를
   // 붙이고 웹이 자기 파일에서 다른 조사를 붙이는 순간 같은 접기가 두 얼굴을
   // 갖는다 — U1 M-2 가 구분선에서 이미 겪은 실패 양식이다.
-  const tombstoneText = deletedFoldLabel(deletedRepeat);
+  const tombstoneRef = deletedFoldRef(deletedRepeat);
+  const tombstoneText = formatMessage(tombstoneRef.key, tombstoneRef.values as never);
 
   // 이슈 #1146 M3 — 이 행이 고정돼 있다는 흔적. 왜 그리는지·왜 이 줄인지·왜
   // accent 가 아닌지는 코어의 `PIN_ROW_MARK` 독스트링에 있다.
@@ -3258,7 +3267,8 @@ function MessageRowInner({
   // ADR-0155 — 멈춘 답. 왜 이 낱말인지·왜 accent 가 아닌지는 코어의
   // `streamStop.ts` 헤더에 있다. 묘비에는 그리지 않는다: 저자가 지운 메시지에
   // 대고 「중단됨」이라고 말하는 것은 이미 없는 본문을 서술하는 것이다.
-  const stopMark = deleted ? null : streamStopMark(message, runEnded === true);
+  const stopMarkKey = deleted ? null : streamStopMarkKey(message, runEnded === true);
+  const stopMark = stopMarkKey === null ? null : formatMessage(stopMarkKey);
 
   // 「수정됨」과 고친 시각 (#5326). 낱말은 사전, 시각 문장은 웹과 같은 코어 함수다. 지워진 행에는 없다.
   const editedTail = deleted ? null : editedMark(locale, message, nowMs);
@@ -3274,7 +3284,7 @@ function MessageRowInner({
     // 「수정됨」 다음, 「답글 N개」 앞 — 본문에 대한 서술 다음이고 바깥 스레드로
     // 나가는 문 앞이다. 안쪽에서 바깥쪽으로. 이 배열은 낭독 라벨의 재료이기도
     // 하므로(`rowAccessibilityLabel`), 여기 끼우는 것만으로 귀에도 닿는다.
-    showsPinMark ? PIN_ROW_MARK : null,
+    showsPinMark ? formatMessage(PIN_ROW_MARK_KEY) : null,
     threadView ? threadView.copy.spoken : null,
   ].filter((part): part is string => part !== null);
 
@@ -3339,6 +3349,7 @@ function MessageRowInner({
         }),
         // 도우미가 넘긴 줄의 띠(넘긴 이유·맡겼어요). 행이 원소 하나라 따로 읽히지 않는다.
         ...teamAiDelegateSpoken(
+          formatMessage,
           teamAiDelegate,
           teamAiSend,
           approvalOffline === true,
@@ -3665,7 +3676,7 @@ function MessageRowInner({
             )}
             {showsPinMark ? (
               <Text style={styles.tailMark} testID="pin-mark">
-                {PIN_ROW_MARK}
+                {formatMessage(PIN_ROW_MARK_KEY)}
               </Text>
             ) : null}
             {rollup && threadView ? (
@@ -3887,7 +3898,7 @@ function MessageRowInner({
               .onDelete(message)
               .then(() => setSheetOpen(false))
               .catch((error: unknown) => {
-                setRowError(deleteFailureMessage(error));
+                setRowError(formatMessage(deleteFailureKey(error)));
                 setSheetOpen(false);
               })
               .finally(() => setDeletePending(false));
@@ -3908,7 +3919,7 @@ function MessageRowInner({
             void actions
               .onEdit(message, next)
               .then(() => setEditing(false))
-              .catch((error: unknown) => setEditError(editFailureMessage(error)))
+              .catch((error: unknown) => setEditError(formatMessage(editFailureKey(error))))
               .finally(() => setEditPending(false));
           }}
         />

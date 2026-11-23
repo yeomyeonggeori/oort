@@ -14,9 +14,10 @@
 // 순수 모듈이다: DOM·fetch·React 없음. 웹과 폰이 같은 함수를 부른다.
 // =============================================================================
 
+import type { LocaleService } from "../../i18n/context";
+import type { PlainMessageKey } from "../../i18n/keys";
 import type { Message, RosterMember } from "../../lib/api";
 import { memberAliases } from "../routing/helperAliases";
-import { attachRecipient } from "../../lib/koreanParticle";
 
 type Props = Record<string, unknown> | undefined;
 
@@ -57,31 +58,32 @@ export function parseTeamAiProposal(value: unknown): TeamAiProposal | null {
 }
 
 /** 카드 맨 위 사실 줄의 이름표. */
-export const TEAM_AI_PROPOSAL_LABEL = "제안";
+export const TEAM_AI_PROPOSAL_LABEL_KEY = "timeline.teamAi.proposalLabel" satisfies PlainMessageKey;
 
 /**
  * 「도우미 제안 · 요청: 김하늘」. 이름을 모르면 「요청한 사람을 확인하지 못했어요」로
  * 말한다. 이름을 지어내지 않는다.
  */
-export function teamAiProposalLine(requesterName: string | null): string {
+export function teamAiProposalLine(
+  formatMessage: LocaleService["formatMessage"],
+  requesterName: string | null
+): string {
   return requesterName === null
-    ? "도우미 제안 · 요청한 사람을 확인하지 못했어요"
-    : `도우미 제안 · 요청: ${requesterName}`;
+    ? formatMessage("timeline.teamAi.proposalLineUnknown")
+    : formatMessage("timeline.teamAi.proposalLine", { name: requesterName });
 }
 
 /** D6-3 의 뒷부분. 실행은 도우미가 아니라 승인한 사람의 권한이다. */
-export const TEAM_AI_PROPOSAL_AUTHORITY =
-  "승인하면 승인한 사람의 권한으로 실행돼요.";
+export const TEAM_AI_PROPOSAL_AUTHORITY_KEY = "timeline.teamAi.proposalAuthority" satisfies PlainMessageKey;
 
 /**
  * 도우미 카드의 사유 줄 이름표. 사유는 모델이 쓴 글이라 「사유」만 쓰면 서버가 확인한
  * 사실처럼 읽힌다. 위의 행(서버가 검증한 값)과 다른 층이라는 것을 이름에서 말한다.
  */
-export const TEAM_AI_RATIONALE_LABEL = "도우미가 쓴 사유";
+export const TEAM_AI_RATIONALE_LABEL_KEY = "timeline.teamAi.rationaleLabel" satisfies PlainMessageKey;
 
 /** 사유 아래 한 줄. 판단의 근거는 사유가 아니라 위의 행이다. */
-export const TEAM_AI_RATIONALE_NOTE =
-  "AI가 쓴 글이에요. 실제로 바뀌는 내용은 위 칸을 보세요.";
+export const TEAM_AI_RATIONALE_NOTE_KEY = "timeline.teamAi.rationaleNote" satisfies PlainMessageKey;
 
 // ---- ② 넘기는 줄과 「○○에게 맡기기」 -------------------------------------------
 
@@ -95,13 +97,13 @@ export type TeamAiFallbackReason =
   | "could_not_propose"
   | "rate_limited";
 
-const REASON_LABEL: ReadonlyMap<string, string> = new Map([
-  ["out_of_scope", "도우미가 바로 하기엔 큰 일"],
-  ["slow", "도우미가 제때 답하지 못함"],
+const REASON_LABEL: ReadonlyMap<string, PlainMessageKey> = new Map<string, PlainMessageKey>([
+  ["out_of_scope", "timeline.teamAi.reasonOutOfScope"],
+  ["slow", "timeline.teamAi.reasonSlow"],
   // `props.limit` 가 없는 줄(한도가 하루 하나뿐이던 서버)의 말. 있으면 아래 `OVER_BUDGET_LIMIT_LABEL` 이 고른다.
-  ["over_budget", "오늘 도우미 사용량을 다 씀"],
-  ["could_not_propose", "승인 카드로 만들지 못함"],
-  ["rate_limited", "요청이 너무 잦음"],
+  ["over_budget", "timeline.teamAi.reasonOverBudget"],
+  ["could_not_propose", "timeline.teamAi.reasonCouldNotPropose"],
+  ["rate_limited", "timeline.teamAi.reasonRateLimited"],
 ]);
 
 /**
@@ -109,19 +111,19 @@ const REASON_LABEL: ReadonlyMap<string, string> = new Map([
  * 누구의 한도인지(`team` 관리자 / `operator` 서버 운영자)와 어느 창인지(`day` / `month` / `off` = 운영자의 끔 스위치)가
  * 이 넷으로만 짝지어진다. 「오늘」이라고만 말하면 월 한도와 운영자 끔에는 틀린 말이다.
  */
-const OVER_BUDGET_LIMIT_LABEL: ReadonlyMap<string, string> = new Map([
-  ["team:day", "오늘 도우미 사용량을 다 씀"],
-  ["team:month", "이번 달 도우미 사용량을 다 씀"],
-  ["operator:day", "서버 운영자가 정한 오늘 사용량을 다 씀"],
-  ["operator:off", "서버 운영자가 도우미를 멈춰 둠"],
+const OVER_BUDGET_LIMIT_LABEL: ReadonlyMap<string, PlainMessageKey> = new Map<string, PlainMessageKey>([
+  ["team:day", "timeline.teamAi.reasonOverBudget"],
+  ["team:month", "timeline.teamAi.limitTeamMonth"],
+  ["operator:day", "timeline.teamAi.limitOperatorDay"],
+  ["operator:off", "timeline.teamAi.limitOperatorOff"],
 ]);
 
 /** `limit` 은 있는데 이 클라이언트가 모르는 짝(앞으로 생길 한도): 창을 지어내지 않고 어느 창에도 맞는 말만 한다. */
-const OVER_BUDGET_UNKNOWN_LIMIT_LABEL = "도우미 사용량 한도에 닿음";
+const OVER_BUDGET_UNKNOWN_LIMIT_LABEL = "timeline.teamAi.limitUnknown" satisfies PlainMessageKey;
 
-function overBudgetLabel(limit: unknown): string {
+function overBudgetLabel(limit: unknown): PlainMessageKey {
   // 없는 `limit`(옛 서버, null)은 옛 줄이다. 한도가 하루 하나뿐이던 때의 `over_budget` 은 늘 「오늘」이었다.
-  if (limit === undefined || limit === null) return REASON_LABEL.get("over_budget") as string;
+  if (limit === undefined || limit === null) return REASON_LABEL.get("over_budget") as PlainMessageKey;
   const raw = record(limit);
   const source = raw !== null ? raw["source"] : undefined;
   const window = raw !== null ? raw["window"] : undefined;
@@ -140,7 +142,8 @@ export interface TeamAiDelegateCandidate {
 export interface TeamAiDelegate {
   reason: TeamAiFallbackReason | null;
   /** 「넘긴 이유: …」 한 줄. 모르는 이유면 null(줄을 세우지 않는다). */
-  reasonLine: string | null;
+  /** 「넘긴 이유」 뒤에 붙는 이유의 키. 문장은 `delegateReasonLine` 이 짓는다. */
+  reasonKey: PlainMessageKey | null;
   /** 도우미 자신(멘션을 지울 대상). */
   teamAiMemberId: string | null;
   /** 이 줄을 받을 사람(요청자). 버튼은 이 사람에게만 선다. */
@@ -198,7 +201,7 @@ export function parseTeamAiDelegate(props: Props): TeamAiDelegate | null {
   }
   return {
     reason,
-    reasonLine: reasonLabel !== undefined ? `넘긴 이유: ${reasonLabel}` : null,
+    reasonKey: reasonLabel !== undefined ? reasonLabel : null,
     teamAiMemberId: nonEmpty(props["agent_member_id"]),
     requesterId: nonEmpty(props["notice_for_member_id"]),
     sourceMessageId: nonEmpty(delegate?.["source_message_id"]),
@@ -222,13 +225,29 @@ export function canDelegate(
   return delegate.requesterId.toLowerCase() === viewerMemberId.toLowerCase();
 }
 
-export function delegateButtonLabel(candidate: TeamAiDelegateCandidate): string {
-  return `${attachRecipient(candidate.displayName, "person")} 맡기기`;
+/** 「넘긴 이유: …」 한 줄. 이유를 모르는 줄에는 없다. */
+export function delegateReasonLine(
+  formatMessage: LocaleService["formatMessage"],
+  delegate: Pick<TeamAiDelegate, "reasonKey">
+): string | null {
+  return delegate.reasonKey === null
+    ? null
+    : formatMessage("timeline.teamAi.delegateReason", { reason: formatMessage(delegate.reasonKey) });
+}
+
+export function delegateButtonLabel(
+  formatMessage: LocaleService["formatMessage"],
+  candidate: TeamAiDelegateCandidate
+): string {
+  return formatMessage("timeline.teamAi.delegateButton", { name: candidate.displayName });
 }
 
 /** 누른 뒤 버튼 자리에 서는 한 줄. */
-export function delegateSentLine(displayName: string): string {
-  return `${attachRecipient(displayName, "person")} 맡겼어요. 답은 이 채널에 와요.`;
+export function delegateSentLine(
+  formatMessage: LocaleService["formatMessage"],
+  displayName: string
+): string {
+  return formatMessage("timeline.teamAi.delegateSent", { name: displayName });
 }
 
 /**
@@ -271,10 +290,12 @@ function escapeRegExp(text: string): string {
  * 원문을 보라고 말한다.
  */
 export function delegateMessageBody({
+  formatMessage,
   targetHandle,
   sourceBody,
   teamAiHandles,
 }: {
+  formatMessage: LocaleService["formatMessage"];
   targetHandle: string;
   sourceBody: string | null | undefined;
   teamAiHandles: readonly string[];
@@ -301,6 +322,6 @@ export function delegateMessageBody({
   }
   text = text.replace(/[ \t]+/g, " ").trim();
   const mention = `@${targetHandle}`;
-  if (text === "") return `${mention} 인용한 요청을 맡아 주세요.`;
+  if (text === "") return formatMessage("timeline.teamAi.delegateQuoted", { mention });
   return `${mention} ${text}`;
 }

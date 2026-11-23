@@ -1,28 +1,29 @@
 import {
   canLeaveChannel,
-  CHANNEL_COPY_GROUP_LABEL,
-  CHANNEL_LEAVE_LABEL,
-  CHANNEL_MARK_READ_BUSY_LABEL,
-  CHANNEL_MARK_READ_LABEL,
-  CHANNEL_MARK_UNREAD_BUSY_LABEL,
-  CHANNEL_MARK_UNREAD_LABEL,
-  CHANNEL_TOPIC_VIEW_LABEL,
-  DM_CLOSE_LABEL,
-  channelCopyIdLabel,
-  channelCopyNameLabel,
-  channelMenuAccessibleLabel,
-  channelMuteToggleLabel,
+  CHANNEL_COPY_GROUP_KEY,
+  CHANNEL_LEAVE_KEY,
+  CHANNEL_MARK_READ_BUSY_KEY,
+  CHANNEL_MARK_READ_KEY,
+  CHANNEL_MARK_UNREAD_BUSY_KEY,
+  CHANNEL_MARK_UNREAD_KEY,
+  CHANNEL_TOPIC_VIEW_KEY,
+  DM_CLOSE_KEY,
+  channelCopyIdKey,
+  channelCopyNameKey,
+  channelMenuAccessibleRef,
+  channelMuteToggleKey,
   normalizeChannelTopic,
 } from "./model";
 import { copyLinkActionLabel } from "../timeline/copyLabels";
 import {
-  channelStarToggleLabel,
-  SECTION_MOVE_GROUP_LABEL,
+  channelStarToggleKey,
+  SECTION_MOVE_GROUP_KEY,
 } from "../sidebar/sidebarSections";
 import { CHANNEL_MEMORY_SETTINGS_LABEL } from "../memory/presentation";
 import { CHANNEL_GITHUB_LABEL } from "../github/model";
 import type { Channel, MembershipRole } from "../../lib/api";
 import type { MessageService } from "../../i18n/types";
+import type { MessageRef, PlainMessageKey } from "../../i18n/keys";
 import { DM_LEAVE_KEYS } from "./dmLeave";
 
 // =============================================================================
@@ -165,13 +166,13 @@ const CLUSTER_OF: Record<ChannelActionKey, ChannelActionCluster> = {
 };
 
 /** 제목을 이고 서는 무리. 나머지는 제목 없이 행만 선다(`place` 는 항목이 자기 제목을 든다). */
-const CLUSTER_TITLE: Partial<Record<ChannelActionCluster, string>> = {
-  copy: CHANNEL_COPY_GROUP_LABEL,
+const CLUSTER_TITLE: Partial<Record<ChannelActionCluster, PlainMessageKey>> = {
+  copy: CHANNEL_COPY_GROUP_KEY,
 };
 
-export function channelActionClusterTitle(
+export function channelActionClusterTitleKey(
   cluster: ChannelActionCluster
-): string | undefined {
+): PlainMessageKey | undefined {
   return CLUSTER_TITLE[cluster];
 }
 
@@ -211,7 +212,8 @@ export function isChannelActionStatusIcon(
 /** 하위 메뉴(›)로 접힌 무리의 얼굴: 그 줄의 이름 · 아이콘 · `data-testid` 접미사. */
 export interface ChannelActionSubmenu {
   testKey: string;
-  label: string;
+  /** The group word as a dictionary key; the screen formats it (the items' own `label`s are formatted when built). */
+  labelKey: PlainMessageKey;
   icon: ChannelActionIcon;
 }
 
@@ -229,8 +231,8 @@ export interface ChannelActionSubmenu {
  * 이동」)이다. `testKey` 도 예전 제목 줄이 쓰던 그대로다(캡처 레인이 그 이름을 읽는다).
  */
 const CLUSTER_SUBMENU: Partial<Record<ChannelActionCluster, ChannelActionSubmenu>> = {
-  copy: { testKey: "copy-group", label: CHANNEL_COPY_GROUP_LABEL, icon: "copy" },
-  place: { testKey: "move-to-section", label: SECTION_MOVE_GROUP_LABEL, icon: "section" },
+  copy: { testKey: "copy-group", labelKey: CHANNEL_COPY_GROUP_KEY, icon: "copy" },
+  place: { testKey: "move-to-section", labelKey: SECTION_MOVE_GROUP_KEY, icon: "section" },
 };
 
 export function channelActionClusterSubmenu(
@@ -498,24 +500,24 @@ function withClusterSeparators(items: ChannelActionItem[]): ChannelActionItem[] 
 export function channelActionItems(
   available: ChannelActionAvailability,
   state: ChannelActionState,
-  formatMessage?: MessageService["formatMessage"]
+  formatMessage: MessageService["formatMessage"]
 ): ChannelActionItem[] {
   const items: ChannelActionItem[] = [];
   const push = (item: Omit<ChannelActionItem, "cluster" | "separatorBefore">) => {
     items.push({ ...item, cluster: CLUSTER_OF[item.key] });
   };
   if (available.topic) {
-    push({ key: "topic", testKey: "topic", label: CHANNEL_TOPIC_VIEW_LABEL, icon: "topic" });
+    push({ key: "topic", testKey: "topic", label: formatMessage(CHANNEL_TOPIC_VIEW_KEY), icon: "topic" });
   }
   // 복사 무리: 이름 → 링크 → ID. Buzz 의 「복사 ▸」가 든 것과 같은 세 가지다.
-  if (available.rename === true && formatMessage !== undefined) {
+  if (available.rename === true) {
     push({ key: "rename", testKey: "rename", label: formatMessage("channels.rename.action"), icon: "rename" });
   }
   if (available.copyName) {
     push({
       key: "copy-name",
       testKey: "copy-name",
-      label: channelCopyNameLabel(state.copiedName),
+      label: formatMessage(channelCopyNameKey(state.copiedName)),
       icon: "copy-name",
     });
   }
@@ -531,7 +533,7 @@ export function channelActionItems(
     push({
       key: "copy-id",
       testKey: "copy-id",
-      label: channelCopyIdLabel(state.copiedId ?? false),
+      label: formatMessage(channelCopyIdKey(state.copiedId ?? false)),
       icon: "copy-id",
     });
   }
@@ -540,7 +542,7 @@ export function channelActionItems(
     push({
       key: "move-to-section",
       testKey: "move-to-section",
-      label: SECTION_MOVE_GROUP_LABEL,
+      label: formatMessage(SECTION_MOVE_GROUP_KEY),
       icon: "section",
       sections: state.sections ?? [],
       currentSectionId: state.currentSectionId ?? null,
@@ -551,25 +553,25 @@ export function channelActionItems(
     push({
       key: "mark-read",
       testKey: "mark-read",
-      label: CHANNEL_MARK_READ_LABEL,
+      label: formatMessage(CHANNEL_MARK_READ_KEY),
       icon: "mark-read",
-      busyLabel: CHANNEL_MARK_READ_BUSY_LABEL,
+      busyLabel: formatMessage(CHANNEL_MARK_READ_BUSY_KEY),
     });
   }
   if (available.markUnread) {
     push({
       key: "mark-unread",
       testKey: "mark-unread",
-      label: CHANNEL_MARK_UNREAD_LABEL,
+      label: formatMessage(CHANNEL_MARK_UNREAD_KEY),
       icon: "mark-unread",
-      busyLabel: CHANNEL_MARK_UNREAD_BUSY_LABEL,
+      busyLabel: formatMessage(CHANNEL_MARK_UNREAD_BUSY_KEY),
     });
   }
   if (available.mute) {
     push({
       key: "mute",
       testKey: "mute-toggle",
-      label: channelMuteToggleLabel(state.muted),
+      label: formatMessage(channelMuteToggleKey(state.muted)),
       icon: state.muted ? "bell-off" : "bell",
     });
   }
@@ -585,7 +587,7 @@ export function channelActionItems(
     push({ key: "github", testKey: "github-notifications", label: CHANNEL_GITHUB_LABEL, icon: "github" });
   }
   // 「둘러보기에 보이기」(#5843): 켜짐 · 꺼짐이 체크로 읽히는 줄. 낱말이 사전 키라 `formatMessage` 가 없으면 서지 않는다.
-  if (available.browseListed === true && formatMessage !== undefined) {
+  if (available.browseListed === true) {
     push({
       key: "browse-listed",
       testKey: "browse-listed",
@@ -596,7 +598,7 @@ export function channelActionItems(
   }
   // 「기본 채널로 지정」(#5845): 「둘러보기에 보이기」 바로 옆의 같은 모양의 체크 줄. 아래 한 줄은 「새로 합류하는 사람」에게만 적용된다는 뜻이고,
   // 내 목록에서 유일한 기본 채널이면 같은 자리에서 「하나 이상 있어야 해요」로 바뀐다(둘 다 한 줄).
-  if (available.defaultChannel === true && formatMessage !== undefined) {
+  if (available.defaultChannel === true) {
     push({
       key: "default-channel",
       testKey: "default-channel",
@@ -612,24 +614,24 @@ export function channelActionItems(
     push({
       key: "star",
       testKey: "star",
-      label: channelStarToggleLabel(state.starred ?? false),
+      label: formatMessage(channelStarToggleKey(state.starred ?? false)),
       icon: state.starred ? "unstar" : "star",
     });
   }
   if (available.closeDm) {
-    push({ key: "close-dm", testKey: "close-dm", label: DM_CLOSE_LABEL, icon: "hide" });
+    push({ key: "close-dm", testKey: "close-dm", label: formatMessage(DM_CLOSE_KEY), icon: "hide" });
   }
   if (available.leave) {
     push({
       key: "leave",
       testKey: "leave",
-      label: CHANNEL_LEAVE_LABEL,
+      label: formatMessage(CHANNEL_LEAVE_KEY),
       icon: "leave",
       tone: "danger",
     });
   }
   // 「대화 나가기」(D21): 맨 아래, 위험색. 확인 창으로 넘기는 항목이다.
-  if (available.leaveDm === true && formatMessage !== undefined) {
+  if (available.leaveDm === true) {
     push({
       key: "leave-dm",
       testKey: "leave-dm",
@@ -675,7 +677,7 @@ export function channelActionItemsForSurface(
   surface: ChannelActionSurface,
   available: ChannelActionAvailability,
   state: ChannelActionState,
-  formatMessage?: MessageService["formatMessage"]
+  formatMessage: MessageService["formatMessage"]
 ): ChannelActionItem[] {
   const keys = SURFACE_KEYS[surface];
   // 구분선은 거른 **뒤에** 다시 센다 (`withClusterSeparators`).
@@ -728,9 +730,9 @@ export function channelActionKeepsMenuOpen(key: ChannelActionKey): boolean {
  * 헤더 ⋮ 는 DM 에 서지 않으므로(ChatShell 의 `kind !== "dm"`) 이 갈래가 실제로
  * 갈라지는 자리는 사이드바 행뿐이고, 그래서 이 낱말이 DM 에 붙는 것도 처음이다.
  */
-export function channelActionMenuLabel(
+export function channelActionMenuRef(
   title: string,
   channel: Pick<Channel, "kind">
-): string {
-  return channelMenuAccessibleLabel(title, channel.kind === "dm");
+): MessageRef<"channels.menu.ariaChannel" | "channels.menu.ariaDm"> {
+  return channelMenuAccessibleRef(title, channel.kind === "dm");
 }

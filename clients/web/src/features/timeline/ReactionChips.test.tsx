@@ -11,11 +11,9 @@ import type { RosterMember } from "@momo/core/lib/api";
 import { makeDirectory } from "@momo/core/features/workspace/directory";
 import type { MessageActionAvailability } from "@momo/core/features/timeline/model";
 import type { ReactionChip } from "@momo/core/features/timeline/reactions";
-import {
-  REACTION_ADD_HINT,
-  REACTION_REMOVE_HINT,
-  REACTION_SELF_LABEL,
-} from "@momo/core/features/timeline/reactionNames";
+import { LocaleProvider } from "@/i18n/LocaleProvider";
+import { koreanLocale } from "@/testing/koLocale";
+import type { AppLocale } from "@/i18n/localeStore";
 import { resetEmojiFrequencyForTests } from "@/features/emoji/frequencyStore";
 import {
   MessageHoverToolbar,
@@ -29,9 +27,12 @@ const reactActEnvironment = globalThis as typeof globalThis & {
 };
 let mountedRoot: Root | null = null;
 let host: HTMLElement | null = null;
+// 이 파일은 한국어 문구를 단정한다(#6044): 공급자 밖의 화면은 번들된 영어로 그리므로 한국어 언어 객체로 감싼다.
+let ko: AppLocale;
 
-beforeAll(() => {
+beforeAll(async () => {
   reactActEnvironment.IS_REACT_ACT_ENVIRONMENT = true;
+  ko = await koreanLocale();
 });
 
 afterEach(() => {
@@ -75,7 +76,7 @@ function mount(node: ReactElement): HTMLElement {
   document.body.append(host);
   mountedRoot = createRoot(host);
   act(() => {
-    mountedRoot?.render(node);
+    mountedRoot?.render(createElement(LocaleProvider, { locale: ko, children: node }));
   });
   return host;
 }
@@ -118,7 +119,7 @@ describe("ReactionChips", () => {
     expect(chip).not.toBeNull();
     if (!chip) throw new Error("missing chip");
 
-    const names = `${REACTION_SELF_LABEL}(${REACTION_REMOVE_HINT}), 김민준`;
+    const names = "나(내 반응 취소), 김민준";
     expect(chip.getAttribute("title")).toBe(names);
     expect(chip.getAttribute("aria-label")).toBe(`👍 반응 2개, ${names}`);
     expect(chip.getAttribute("data-row-action")).toBe("");
@@ -167,7 +168,7 @@ describe("ReactionChips", () => {
     const chip = root.querySelector("[data-testid='reaction-chip']");
     expect(chip?.getAttribute("title")).toBe("김민준, 이서연");
     expect(chip?.getAttribute("aria-label")).toBe(
-      `🎉 반응 2개, 김민준, 이서연, ${REACTION_ADD_HINT}`
+      "🎉 반응 2개, 김민준, 이서연, 나도 반응하기"
     );
     expect(chip?.getAttribute("aria-pressed")).toBe("false");
   });

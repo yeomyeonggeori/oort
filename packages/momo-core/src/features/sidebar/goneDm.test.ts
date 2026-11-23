@@ -7,7 +7,7 @@ import {
 } from "../workspace/directory";
 import {
   dmHiddenAsGone,
-  goneDmDisclosureLabel,
+  goneDmDisclosureRef,
   goneUnreadProbeAfterSeq,
   goneUnreadSignature,
   goneUnreadVerdict,
@@ -19,6 +19,12 @@ import {
   type GoneUnreadVerdict,
   type ReadProjectionPhase,
 } from "./goneDm";
+import { catalog as koCatalog } from "../../i18n/generated/ko-KR";
+import { createMessageCopy } from "../../testkit";
+
+// 낱말은 사전에 있다(#6045). 시험은 한국어 생성물로 풀어 같은 문장을 그대로 단정한다.
+const ko = createMessageCopy({ messageLocale: "ko-KR", catalog: koCatalog });
+const refText = (ref: { key: string; values?: object }) => ko(ref.key as never, ref.values as never);
 
 // #4252: 나간 멤버와의 대화는 안 읽은 것이 없으면 사이드바에서 접힌다. 웹과 폰이 이 한 함수를 읽으므로
 // 규칙은 여기서 잰다. 이름 있는 시험이 사보타주(함수를 「절대 숨기지 않는다」로 되돌림)의 과녁이다.
@@ -283,9 +289,9 @@ describe("readProjectionPhase", () => {
   });
 });
 
-describe("goneDmDisclosureLabel", () => {
+describe("goneDmDisclosureRef", () => {
   it("접힌 대화의 수를 센다", () => {
-    expect(goneDmDisclosureLabel(1)).toBe("나간 멤버와의 대화 1개");
-    expect(goneDmDisclosureLabel(12)).toBe("나간 멤버와의 대화 12개");
+    expect(refText(goneDmDisclosureRef(1))).toBe("나간 멤버와의 대화 1개");
+    expect(refText(goneDmDisclosureRef(12))).toBe("나간 멤버와의 대화 12개");
   });
 });

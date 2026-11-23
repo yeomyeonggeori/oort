@@ -6,7 +6,7 @@ import {serverSurface} from '@momo/core/features/capabilities/serverSurfaces';
 import {shellSpeaksFor} from '@momo/core/features/connection/shellStrip';
 import {channelLabel, channelLabelParts, idKey, memberFor} from '@momo/core/features/workspace/directory';
 import {readProjectionPhase, rosterLoaded} from '@momo/core/features/sidebar/goneDm';
-import {DM_CLOSED_LIST_LABEL, dmCloseOffered} from '@momo/core/features/sidebar/dmVisibility';
+import {DM_CLOSED_LIST_KEY, dmCloseOffered} from '@momo/core/features/sidebar/dmVisibility';
 import {canBrowseChannelsNow} from '@momo/core/features/channels/browse';
 import {
   dmLeaveMode,
@@ -734,7 +734,7 @@ export default function SidebarScreen({
         }
         // 닫은 대화가 없으면 문이 서지 않는다(웹 `DmClosedMenu` 와 같다): 항목이 없는 문은 문이 아니다.
         if (closedEntries.length > 0) {
-          items.push({label: DM_CLOSED_LIST_LABEL, run: () => setClosedListOpen(true)});
+          items.push({label: formatMessage(DM_CLOSED_LIST_KEY), run: () => setClosedListOpen(true)});
         }
       }
       ActionSheetIOS.showActionSheetWithOptions(

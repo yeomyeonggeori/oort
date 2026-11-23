@@ -1,11 +1,11 @@
 import { useRef, useState } from "react";
 import { MoreHorizontal } from "lucide-react";
 import {
-  DM_CLOSED_LIST_EMPTY,
-  DM_CLOSED_LIST_HINT,
-  DM_CLOSED_LIST_LABEL,
-  dmClosedReasonLabel,
-  dmReopenLabelFor,
+  DM_CLOSED_LIST_EMPTY_KEY,
+  DM_CLOSED_LIST_HINT_KEY,
+  DM_CLOSED_LIST_KEY,
+  dmClosedReasonKey,
+  dmReopenKeyFor,
 } from "@momo/core/features/sidebar/dmVisibility";
 import { Button } from "@/design/ui/button";
 import {
@@ -22,6 +22,7 @@ import {
   DropdownMenuTrigger,
 } from "@/design/ui/dropdown-menu";
 import { Tooltip } from "@/design/ui/tooltip";
+import { useFormatMessage } from "@/i18n/useFormatMessage";
 
 // =============================================================================
 // DM 구역 머리 「⋯ › 숨긴 대화」 (ADR-0177 증보 D11, #4228). 「나간 멤버와의 대화 N개」 줄을 대신한다: 줄은 지울 수 없는 채로
@@ -47,6 +48,7 @@ export function DmClosedMenu({
   /** 한 대화를 다시 연다. 열고 주소를 옮기는 일까지 호출부가 한다. */
   onReopen: (item: DmClosedListItem) => void;
 }) {
+  const formatMessage = useFormatMessage();
   const trigger = useRef<HTMLButtonElement>(null);
   const [listOpen, setListOpen] = useState(false);
   if (items.length === 0 && !listOpen) return null;
@@ -76,7 +78,7 @@ export function DmClosedMenu({
               onOpenChange(true);
             }}
           >
-            {DM_CLOSED_LIST_LABEL}
+            {formatMessage(DM_CLOSED_LIST_KEY)}
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
@@ -92,13 +94,13 @@ export function DmClosedMenu({
       >
         <DialogContent className="gap-4 p-4" data-testid="dm-closed-list">
           <div className="flex flex-col gap-1">
-            <DialogTitle>{DM_CLOSED_LIST_LABEL}</DialogTitle>
-            <DialogDescription className="break-keep">{DM_CLOSED_LIST_HINT}</DialogDescription>
+            <DialogTitle>{formatMessage(DM_CLOSED_LIST_KEY)}</DialogTitle>
+            <DialogDescription className="break-keep">{formatMessage(DM_CLOSED_LIST_HINT_KEY)}</DialogDescription>
           </div>
           {/* 목록이 열린 채 비면(다른 기기에서 다시 열었다·새 메시지로 돌아왔다) 제목과 힌트만 남지 않게 빈 상태를 말한다. */}
           {items.length === 0 && (
             <p className="py-2 text-body text-ink-muted" data-testid="dm-closed-list-empty">
-              {DM_CLOSED_LIST_EMPTY}
+              {formatMessage(DM_CLOSED_LIST_EMPTY_KEY)}
             </p>
           )}
           <ul className="flex max-h-pane flex-col overflow-y-auto" data-testid="dm-closed-list-items">
@@ -112,7 +114,7 @@ export function DmClosedMenu({
                 <span className="flex min-w-0 flex-1 flex-col">
                   <span className="truncate text-body text-ink">{item.name}</span>
                   <span className="truncate text-meta text-ink-muted">
-                    {dmClosedReasonLabel(item.reason)}
+                    {formatMessage(dmClosedReasonKey(item.reason))}
                   </span>
                 </span>
                 <Button
@@ -120,14 +122,19 @@ export function DmClosedMenu({
                   variant="outline"
                   size="sm"
                   data-testid="dm-closed-list-reopen"
-                  aria-label={`${item.name}, ${dmReopenLabelFor(item.reason)}`}
+                  aria-label={formatMessage(
+                    item.reason === "closed"
+                      ? "sidebar.dms.reopenAriaClosed"
+                      : "sidebar.dms.reopenAriaOpen",
+                    { name: item.name }
+                  )}
                   onClick={() => {
                     setListOpen(false);
                     onOpenChange(false);
                     onReopen(item);
                   }}
                 >
-                  {dmReopenLabelFor(item.reason)}
+                  {formatMessage(dmReopenKeyFor(item.reason))}
                 </Button>
               </li>
             ))}

@@ -2130,6 +2130,202 @@ export const catalog: MessageCatalog = {
       "value": "You can't leave this conversation."
     }
   ],
+  "channels.memberAdd.forbidden": [
+    {
+      "type": 0,
+      "value": "You don't have permission to add members. Ask a workspace owner or admin."
+    }
+  ],
+  "channels.memberAdd.generic": [
+    {
+      "type": 0,
+      "value": "Couldn't add the member. Try again in a moment."
+    }
+  ],
+  "channels.memberAdd.network": [
+    {
+      "type": 0,
+      "value": "Couldn't add the member. "
+    },
+    {
+      "type": 1,
+      "value": "reason"
+    }
+  ],
+  "channels.memberAdd.notFound": [
+    {
+      "type": 0,
+      "value": "Members can't be added to this channel. It may have been archived or removed."
+    }
+  ],
+  "channels.memberAdd.rateLimited": [
+    {
+      "type": 0,
+      "value": "Too many requests. Try again in a moment."
+    }
+  ],
+  "channels.menu.ariaChannel": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " channel menu"
+    }
+  ],
+  "channels.menu.ariaDm": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " direct message menu"
+    }
+  ],
+  "channels.menu.copyFailed": [
+    {
+      "type": 0,
+      "value": "Couldn't copy. Try pressing the same item again."
+    }
+  ],
+  "channels.menu.copyGroup": [
+    {
+      "type": 0,
+      "value": "Copy"
+    }
+  ],
+  "channels.menu.copyId": [
+    {
+      "type": 0,
+      "value": "Copy ID"
+    }
+  ],
+  "channels.menu.copyIdDone": [
+    {
+      "type": 0,
+      "value": "ID copied"
+    }
+  ],
+  "channels.menu.copyName": [
+    {
+      "type": 0,
+      "value": "Copy name"
+    }
+  ],
+  "channels.menu.copyNameDone": [
+    {
+      "type": 0,
+      "value": "Name copied"
+    }
+  ],
+  "channels.menu.copyUnavailable": [
+    {
+      "type": 0,
+      "value": "Couldn't copy. This browser doesn't allow clipboard access."
+    }
+  ],
+  "channels.menu.dmClose": [
+    {
+      "type": 0,
+      "value": "Hide from list"
+    }
+  ],
+  "channels.menu.dmCloseAria": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": ", hide from list"
+    }
+  ],
+  "channels.menu.dmCloseFailed": [
+    {
+      "type": 0,
+      "value": "Couldn't hide the conversation. Try again in a moment."
+    }
+  ],
+  "channels.menu.dmReopenFailed": [
+    {
+      "type": 0,
+      "value": "Couldn't show the conversation again. Try again in a moment."
+    }
+  ],
+  "channels.menu.errorGroup": [
+    {
+      "type": 0,
+      "value": "Notices for this menu"
+    }
+  ],
+  "channels.menu.leave": [
+    {
+      "type": 0,
+      "value": "Leave channel"
+    }
+  ],
+  "channels.menu.markRead": [
+    {
+      "type": 0,
+      "value": "Mark as read"
+    }
+  ],
+  "channels.menu.markReadBusy": [
+    {
+      "type": 0,
+      "value": "Marking as read"
+    }
+  ],
+  "channels.menu.markReadFailed": [
+    {
+      "type": 0,
+      "value": "Couldn't mark as read. Try again in a moment."
+    }
+  ],
+  "channels.menu.markUnread": [
+    {
+      "type": 0,
+      "value": "Mark as unread"
+    }
+  ],
+  "channels.menu.markUnreadBusy": [
+    {
+      "type": 0,
+      "value": "Marking as unread"
+    }
+  ],
+  "channels.menu.markUnreadFailed": [
+    {
+      "type": 0,
+      "value": "Couldn't mark as unread. Try again in a moment."
+    }
+  ],
+  "channels.menu.muteFailed": [
+    {
+      "type": 0,
+      "value": "Couldn't change the notification setting. Try again in a moment."
+    }
+  ],
+  "channels.menu.muteOff": [
+    {
+      "type": 0,
+      "value": "Notifications off"
+    }
+  ],
+  "channels.menu.muteOn": [
+    {
+      "type": 0,
+      "value": "Notifications on"
+    }
+  ],
+  "channels.menu.topicView": [
+    {
+      "type": 0,
+      "value": "View topic"
+    }
+  ],
   "channels.nameRule.edge": [
     {
       "type": 0,
@@ -2384,6 +2580,21 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "Rename channel"
+    }
+  ],
+  "channels.topic.tooLong": [
+    {
+      "type": 0,
+      "value": "The topic must be "
+    },
+    {
+      "type": 2,
+      "value": "max",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": " characters or fewer."
     }
   ],
   "cliLogin.consent.approve": [
@@ -8009,6 +8220,28 @@ export const catalog: MessageCatalog = {
       "value": "Checked again, but the signing setting still couldn’t be read."
     }
   ],
+  "notifications.banner.approvalTitle": [
+    {
+      "type": 0,
+      "value": "Approval needed · "
+    },
+    {
+      "type": 1,
+      "value": "actor"
+    }
+  ],
+  "notifications.banner.code": [
+    {
+      "type": 0,
+      "value": "code"
+    }
+  ],
+  "notifications.banner.secret": [
+    {
+      "type": 0,
+      "value": "private value"
+    }
+  ],
   "notifications.inviteLink.fallback": [
     {
       "type": 0,
@@ -12128,6 +12361,309 @@ export const catalog: MessageCatalog = {
       "value": "Installed. Restart to open the new version."
     }
   ],
+  "sidebar.channel.star": [
+    {
+      "type": 0,
+      "value": "Star"
+    }
+  ],
+  "sidebar.channel.unstar": [
+    {
+      "type": 0,
+      "value": "Unstar"
+    }
+  ],
+  "sidebar.dms.allClosedHint": [
+    {
+      "type": 0,
+      "value": "Hidden conversations reappear when a new message arrives. Press ⌘⇧K to start one."
+    }
+  ],
+  "sidebar.dms.closedListEmpty": [
+    {
+      "type": 0,
+      "value": "No hidden conversations."
+    }
+  ],
+  "sidebar.dms.closedListHint": [
+    {
+      "type": 0,
+      "value": "Hidden conversations return to the sidebar when a new message arrives."
+    }
+  ],
+  "sidebar.dms.closedListLabel": [
+    {
+      "type": 0,
+      "value": "Hidden conversations"
+    }
+  ],
+  "sidebar.dms.closeStarFirst": [
+    {
+      "type": 0,
+      "value": "Unstar it first"
+    }
+  ],
+  "sidebar.dms.goneDisclosure": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " conversation with a member who left"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " conversations with members who left"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "sidebar.dms.open": [
+    {
+      "type": 0,
+      "value": "Open"
+    }
+  ],
+  "sidebar.dms.reasonClosed": [
+    {
+      "type": 0,
+      "value": "You hid this"
+    }
+  ],
+  "sidebar.dms.reasonGone": [
+    {
+      "type": 0,
+      "value": "They left and there's nothing unread"
+    }
+  ],
+  "sidebar.dms.reopen": [
+    {
+      "type": 0,
+      "value": "Show again"
+    }
+  ],
+  "sidebar.dms.reopenAriaClosed": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": ", show again"
+    }
+  ],
+  "sidebar.dms.reopenAriaOpen": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": ", open"
+    }
+  ],
+  "sidebar.prefs.loadFailed": [
+    {
+      "type": 0,
+      "value": "Couldn't load sections."
+    }
+  ],
+  "sidebar.prefs.saveFailed": [
+    {
+      "type": 0,
+      "value": "Couldn't save the section changes. Try again in a moment."
+    }
+  ],
+  "sidebar.section.capChannels": [
+    {
+      "type": 0,
+      "value": "A sidebar can hold up to "
+    },
+    {
+      "type": 2,
+      "value": "max",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": " channels."
+    }
+  ],
+  "sidebar.section.capSections": [
+    {
+      "type": 0,
+      "value": "You can create up to "
+    },
+    {
+      "type": 2,
+      "value": "max",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": " sections."
+    }
+  ],
+  "sidebar.section.channels": [
+    {
+      "type": 0,
+      "value": "Channels"
+    }
+  ],
+  "sidebar.section.create": [
+    {
+      "type": 0,
+      "value": "New section"
+    }
+  ],
+  "sidebar.section.deleteConfirm": [
+    {
+      "type": 0,
+      "value": "Delete"
+    }
+  ],
+  "sidebar.section.deleteConfirmBody": [
+    {
+      "type": 0,
+      "value": "The "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " section disappears from the sidebar. Its channels move back to the Channels section; you won't leave any of them."
+    }
+  ],
+  "sidebar.section.deleteConfirmTitle": [
+    {
+      "type": 0,
+      "value": "Delete this section?"
+    }
+  ],
+  "sidebar.section.deleteLabel": [
+    {
+      "type": 0,
+      "value": "Delete section"
+    }
+  ],
+  "sidebar.section.dms": [
+    {
+      "type": 0,
+      "value": "Direct messages"
+    }
+  ],
+  "sidebar.section.emptyHintHover": [
+    {
+      "type": 0,
+      "value": "Drag a channel row here or right-click it to move it."
+    }
+  ],
+  "sidebar.section.emptyHintTouch": [
+    {
+      "type": 0,
+      "value": "Empty. You can move channels on a wider screen."
+    }
+  ],
+  "sidebar.section.moveDown": [
+    {
+      "type": 0,
+      "value": "Move down"
+    }
+  ],
+  "sidebar.section.moveGroup": [
+    {
+      "type": 0,
+      "value": "Move to section"
+    }
+  ],
+  "sidebar.section.moveToBase": [
+    {
+      "type": 0,
+      "value": "Channels section"
+    }
+  ],
+  "sidebar.section.moveUp": [
+    {
+      "type": 0,
+      "value": "Move up"
+    }
+  ],
+  "sidebar.section.nameEmpty": [
+    {
+      "type": 0,
+      "value": "Enter a section name."
+    }
+  ],
+  "sidebar.section.nameField": [
+    {
+      "type": 0,
+      "value": "Section name"
+    }
+  ],
+  "sidebar.section.namePlaceholder": [
+    {
+      "type": 0,
+      "value": "e.g. Launch prep"
+    }
+  ],
+  "sidebar.section.nameTooLong": [
+    {
+      "type": 0,
+      "value": "Section names can be up to "
+    },
+    {
+      "type": 2,
+      "value": "max",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": " characters."
+    }
+  ],
+  "sidebar.section.renameLabel": [
+    {
+      "type": 0,
+      "value": "Rename"
+    }
+  ],
+  "sidebar.section.renameTitle": [
+    {
+      "type": 0,
+      "value": "Rename section"
+    }
+  ],
+  "sidebar.section.starred": [
+    {
+      "type": 0,
+      "value": "Starred"
+    }
+  ],
+  "sidebar.starred.touchHint": [
+    {
+      "type": 0,
+      "value": "You can remove stars on a wider screen."
+    }
+  ],
   "teamAi.delegation.chipImage": [
     {
       "type": 1,
@@ -12844,6 +13380,120 @@ export const catalog: MessageCatalog = {
       "value": "Checking the key."
     }
   ],
+  "timeline.actionFailure.deleteFailed": [
+    {
+      "type": 0,
+      "value": "Couldn't delete the message. Try again in a moment."
+    }
+  ],
+  "timeline.actionFailure.deleteNotAuthor": [
+    {
+      "type": 0,
+      "value": "You can only delete messages you sent."
+    }
+  ],
+  "timeline.actionFailure.editDeleted": [
+    {
+      "type": 0,
+      "value": "You can't edit a deleted message."
+    }
+  ],
+  "timeline.actionFailure.editFailed": [
+    {
+      "type": 0,
+      "value": "Couldn't edit the message. Try again in a moment."
+    }
+  ],
+  "timeline.actionFailure.editNotAuthor": [
+    {
+      "type": 0,
+      "value": "You can only edit messages you sent."
+    }
+  ],
+  "timeline.actionFailure.generic": [
+    {
+      "type": 0,
+      "value": "Couldn't finish the request. Try again in a moment."
+    }
+  ],
+  "timeline.actionFailure.messageNotFound": [
+    {
+      "type": 0,
+      "value": "Couldn't find the message. It may already be deleted."
+    }
+  ],
+  "timeline.actionFailure.pinDeleted": [
+    {
+      "type": 0,
+      "value": "You can't pin a deleted message."
+    }
+  ],
+  "timeline.actionFailure.pinFailed": [
+    {
+      "type": 0,
+      "value": "Couldn't pin the message. Try again in a moment."
+    }
+  ],
+  "timeline.actionFailure.pinLimit": [
+    {
+      "type": 0,
+      "value": "This channel has more than 100 pinned messages. Unpin one from the pinned list, then try again."
+    }
+  ],
+  "timeline.actionFailure.pinNotMember": [
+    {
+      "type": 0,
+      "value": "Only members of this channel can pin messages."
+    }
+  ],
+  "timeline.actionFailure.reactDeleted": [
+    {
+      "type": 0,
+      "value": "You can't react to a deleted message."
+    }
+  ],
+  "timeline.actionFailure.reactFailed": [
+    {
+      "type": 0,
+      "value": "Couldn't add the reaction. Try again in a moment."
+    }
+  ],
+  "timeline.actionFailure.reactLimit": [
+    {
+      "type": 0,
+      "value": "This message has more than 200 reactions. Remove one, then try again."
+    }
+  ],
+  "timeline.actionFailure.reactNotMember": [
+    {
+      "type": 0,
+      "value": "Only members of this channel can react."
+    }
+  ],
+  "timeline.actionFailure.replyFailed": [
+    {
+      "type": 0,
+      "value": "Couldn't send the reply. Try again in a moment."
+    }
+  ],
+  "timeline.actionFailure.replyNotAllowed": [
+    {
+      "type": 0,
+      "value": "You can't reply to this message. The original was deleted or is already a reply."
+    }
+  ],
+  "timeline.actionFailure.replyNotMember": [
+    {
+      "type": 0,
+      "value": "Only members of this channel can reply."
+    }
+  ],
+  "timeline.actionFailure.replyOriginalNotFound": [
+    {
+      "type": 0,
+      "value": "Couldn't find the original message. It may already be deleted."
+    }
+  ],
   "timeline.addMember.createdDescription": [
     {
       "type": 0,
@@ -12876,6 +13526,28 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "Later"
+    }
+  ],
+  "timeline.agentInitiative.headTitle": [
+    {
+      "type": 1,
+      "value": "title"
+    },
+    {
+      "type": 0,
+      "value": " · Suggested first"
+    }
+  ],
+  "timeline.agentInitiative.rationaleDefault": [
+    {
+      "type": 0,
+      "value": "Reason"
+    }
+  ],
+  "timeline.agentInitiative.rationaleLabel": [
+    {
+      "type": 0,
+      "value": "Written by the agent"
     }
   ],
   "timeline.agentRail.open": [
@@ -12954,6 +13626,270 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "If you do not decide, the agent has to propose it again."
+    }
+  ],
+  "timeline.artifactNote.awaitingApproval": [
+    {
+      "type": 0,
+      "value": "Waiting for approval, so the content below is not final yet."
+    }
+  ],
+  "timeline.artifactNote.cancelled": [
+    {
+      "type": 0,
+      "value": "The run was stopped, so only this much arrived."
+    }
+  ],
+  "timeline.artifactNote.done": [
+    {
+      "type": 0,
+      "value": "The run has finished. The content below is everything."
+    }
+  ],
+  "timeline.artifactNote.error": [
+    {
+      "type": 0,
+      "value": "This change didn't finish. The content below goes up to the point it failed."
+    }
+  ],
+  "timeline.artifactNote.inFlight": [
+    {
+      "type": 0,
+      "value": "Still receiving. The content and numbers below are what has arrived so far."
+    }
+  ],
+  "timeline.artifactNote.leadNote": [
+    {
+      "type": 0,
+      "value": "Attached note"
+    }
+  ],
+  "timeline.artifactNote.leadSignal": [
+    {
+      "type": 0,
+      "value": "Last signal"
+    }
+  ],
+  "timeline.artifactNote.queued": [
+    {
+      "type": 0,
+      "value": "Not started yet. The content and numbers below are not final."
+    }
+  ],
+  "timeline.artifactNote.stalled": [
+    {
+      "type": 0,
+      "value": "No response yet. It hasn't been confirmed as failed."
+    }
+  ],
+  "timeline.artifactNote.withNote": [
+    {
+      "type": 1,
+      "value": "sentence"
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 1,
+      "value": "lead"
+    },
+    {
+      "type": 0,
+      "value": ": "
+    },
+    {
+      "type": 1,
+      "value": "note"
+    }
+  ],
+  "timeline.artifacts.commitTitle": [
+    {
+      "type": 0,
+      "value": "Commit"
+    }
+  ],
+  "timeline.artifacts.diffTitle": [
+    {
+      "type": 0,
+      "value": "Code change"
+    }
+  ],
+  "timeline.artifacts.pullRequestTitle": [
+    {
+      "type": 0,
+      "value": "Pull request"
+    }
+  ],
+  "timeline.artifacts.toolTitle": [
+    {
+      "type": 0,
+      "value": "Ran "
+    },
+    {
+      "type": 1,
+      "value": "tool"
+    }
+  ],
+  "timeline.artifacts.toolTitleWithObject": [
+    {
+      "type": 0,
+      "value": "Ran "
+    },
+    {
+      "type": 1,
+      "value": "tool"
+    },
+    {
+      "type": 0,
+      "value": ", "
+    },
+    {
+      "type": 1,
+      "value": "object"
+    }
+  ],
+  "timeline.artifacts.unnamedFile": [
+    {
+      "type": 0,
+      "value": "Unnamed file"
+    }
+  ],
+  "timeline.cascade.noticeMulti": [
+    {
+      "type": 0,
+      "value": "Handled by "
+    },
+    {
+      "type": 1,
+      "value": "served"
+    },
+    {
+      "type": 0,
+      "value": " (after "
+    },
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " switch"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " switches"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    },
+    {
+      "type": 0,
+      "value": ", last reason: "
+    },
+    {
+      "type": 1,
+      "value": "reason"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "timeline.cascade.noticeSingle": [
+    {
+      "type": 0,
+      "value": "Handled by "
+    },
+    {
+      "type": 1,
+      "value": "served"
+    },
+    {
+      "type": 0,
+      "value": " ("
+    },
+    {
+      "type": 1,
+      "value": "reason"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "timeline.cascade.reasonRateLimited": [
+    {
+      "type": 0,
+      "value": "Rate limit exceeded"
+    }
+  ],
+  "timeline.cascade.reasonStatus": [
+    {
+      "type": 0,
+      "value": "Server error "
+    },
+    {
+      "type": 1,
+      "value": "status"
+    }
+  ],
+  "timeline.cascade.reasonUnknown": [
+    {
+      "type": 0,
+      "value": "Reason reported by the server: "
+    },
+    {
+      "type": 1,
+      "value": "reason"
+    }
+  ],
+  "timeline.cascade.reasonUnreachable": [
+    {
+      "type": 0,
+      "value": "No response"
+    }
+  ],
+  "timeline.cascade.route": [
+    {
+      "type": 0,
+      "value": "Switched from "
+    },
+    {
+      "type": 1,
+      "value": "label"
+    }
+  ],
+  "timeline.cascade.servedFallback": [
+    {
+      "type": 0,
+      "value": "Backup provider"
+    }
+  ],
+  "timeline.cascade.servedLabeled": [
+    {
+      "type": 1,
+      "value": "label"
+    },
+    {
+      "type": 0,
+      "value": " provider"
     }
   ],
   "timeline.channelLeave.bodyPrivate": [
@@ -13038,6 +13974,250 @@ export const catalog: MessageCatalog = {
       "value": "Leave this channel?"
     }
   ],
+  "timeline.commandSuggest.askBusy": [
+    {
+      "type": 0,
+      "value": "You have a draft in progress, so I didn't fill it in. Mention the operator yourself."
+    }
+  ],
+  "timeline.commandSuggest.askNone": [
+    {
+      "type": 0,
+      "value": "Couldn't find an operator in this workspace."
+    }
+  ],
+  "timeline.commandSuggest.askOperator": [
+    {
+      "type": 0,
+      "value": "Ask the operator"
+    }
+  ],
+  "timeline.commandSuggest.askThread": [
+    {
+      "type": 0,
+      "value": "Open the thread and mention the operator."
+    }
+  ],
+  "timeline.commandSuggest.oneLineAiConnect": [
+    {
+      "type": 0,
+      "value": "Suggested connecting an AI account to "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    }
+  ],
+  "timeline.commandSuggest.oneLineCard": [
+    {
+      "type": 0,
+      "value": "Suggested a “"
+    },
+    {
+      "type": 1,
+      "value": "what"
+    },
+    {
+      "type": 0,
+      "value": "” card to "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    }
+  ],
+  "timeline.commandSuggest.onlyMe": [
+    {
+      "type": 0,
+      "value": "Only you can use this"
+    }
+  ],
+  "timeline.commandSuggest.openAppearance": [
+    {
+      "type": 0,
+      "value": "Open appearance settings"
+    }
+  ],
+  "timeline.commandSuggest.openCode": [
+    {
+      "type": 0,
+      "value": "Open run host settings"
+    }
+  ],
+  "timeline.commandSuggest.openDevices": [
+    {
+      "type": 0,
+      "value": "Open device settings"
+    }
+  ],
+  "timeline.commandSuggest.openMembers": [
+    {
+      "type": 0,
+      "value": "Open members and invites"
+    }
+  ],
+  "timeline.commandSuggest.openMemory": [
+    {
+      "type": 0,
+      "value": "Open memory settings"
+    }
+  ],
+  "timeline.commandSuggest.openNotifications": [
+    {
+      "type": 0,
+      "value": "Open notification settings"
+    }
+  ],
+  "timeline.commandSuggest.openPlugins": [
+    {
+      "type": 0,
+      "value": "Open app settings"
+    }
+  ],
+  "timeline.commandSuggest.openProfile": [
+    {
+      "type": 0,
+      "value": "Open profile settings"
+    }
+  ],
+  "timeline.commandSuggest.openShortcuts": [
+    {
+      "type": 0,
+      "value": "Open shortcut settings"
+    }
+  ],
+  "timeline.commandSuggest.openUpdates": [
+    {
+      "type": 0,
+      "value": "Open update settings"
+    }
+  ],
+  "timeline.commandSuggest.openUsage": [
+    {
+      "type": 0,
+      "value": "Open usage"
+    }
+  ],
+  "timeline.commandSuggest.openWorkspace": [
+    {
+      "type": 0,
+      "value": "Open workspace settings"
+    }
+  ],
+  "timeline.commandSuggest.phoneFoot": [
+    {
+      "type": 0,
+      "value": "Enter keys on your Mac or the web"
+    }
+  ],
+  "timeline.commandSuggest.phoneMine": [
+    {
+      "type": 0,
+      "value": "Subscription sign-in happens on your Mac. Open this card on your Mac to sign in right away."
+    }
+  ],
+  "timeline.commandSuggest.settingsOpen": [
+    {
+      "type": 0,
+      "value": "Open"
+    }
+  ],
+  "timeline.commandSuggest.settingsOpenGeneric": [
+    {
+      "type": 0,
+      "value": "Open settings"
+    }
+  ],
+  "timeline.commandSuggest.settingsPhone": [
+    {
+      "type": 0,
+      "value": "Open this setting on your Mac or the web."
+    }
+  ],
+  "timeline.commandSuggest.targetAppearance": [
+    {
+      "type": 0,
+      "value": "Appearance settings"
+    }
+  ],
+  "timeline.commandSuggest.targetCode": [
+    {
+      "type": 0,
+      "value": "Run host settings"
+    }
+  ],
+  "timeline.commandSuggest.targetDevices": [
+    {
+      "type": 0,
+      "value": "Device settings"
+    }
+  ],
+  "timeline.commandSuggest.targetMembers": [
+    {
+      "type": 0,
+      "value": "Members and invites"
+    }
+  ],
+  "timeline.commandSuggest.targetMemory": [
+    {
+      "type": 0,
+      "value": "Memory settings"
+    }
+  ],
+  "timeline.commandSuggest.targetNotifications": [
+    {
+      "type": 0,
+      "value": "Notification settings"
+    }
+  ],
+  "timeline.commandSuggest.targetPlugins": [
+    {
+      "type": 0,
+      "value": "App settings"
+    }
+  ],
+  "timeline.commandSuggest.targetProfile": [
+    {
+      "type": 0,
+      "value": "Profile settings"
+    }
+  ],
+  "timeline.commandSuggest.targetShortcuts": [
+    {
+      "type": 0,
+      "value": "Shortcut settings"
+    }
+  ],
+  "timeline.commandSuggest.targetUpdates": [
+    {
+      "type": 0,
+      "value": "Update settings"
+    }
+  ],
+  "timeline.commandSuggest.targetUsage": [
+    {
+      "type": 0,
+      "value": "Usage"
+    }
+  ],
+  "timeline.commandSuggest.targetWorkspace": [
+    {
+      "type": 0,
+      "value": "Workspace settings"
+    }
+  ],
+  "timeline.commandSuggest.teamClose": [
+    {
+      "type": 0,
+      "value": "Hide team AI key"
+    }
+  ],
+  "timeline.commandSuggest.teamOpen": [
+    {
+      "type": 0,
+      "value": "Show team AI key"
+    }
+  ],
   "timeline.createChannel.privateDetail": [
     {
       "type": 0,
@@ -13048,6 +14228,168 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "Any full member of the workspace can find it in the channel browser and join."
+    }
+  ],
+  "timeline.decisionStage.position": [
+    {
+      "type": 1,
+      "value": "current"
+    },
+    {
+      "type": 0,
+      "value": " of "
+    },
+    {
+      "type": 1,
+      "value": "total"
+    }
+  ],
+  "timeline.decisionStage.positionNone": [
+    {
+      "type": 0,
+      "value": "0 items"
+    }
+  ],
+  "timeline.deletedFold.repeat": [
+    {
+      "type": 1,
+      "value": "count"
+    },
+    {
+      "type": 0,
+      "value": " deleted messages"
+    }
+  ],
+  "timeline.deletedFold.tombstone": [
+    {
+      "type": 0,
+      "value": "Deleted message"
+    }
+  ],
+  "timeline.divider.dateFull": [
+    {
+      "type": 1,
+      "value": "month"
+    },
+    {
+      "type": 0,
+      "value": "/"
+    },
+    {
+      "type": 1,
+      "value": "day"
+    },
+    {
+      "type": 0,
+      "value": "/"
+    },
+    {
+      "type": 1,
+      "value": "year"
+    }
+  ],
+  "timeline.divider.dateMonthDay": [
+    {
+      "type": 1,
+      "value": "month"
+    },
+    {
+      "type": 0,
+      "value": "/"
+    },
+    {
+      "type": 1,
+      "value": "day"
+    }
+  ],
+  "timeline.divider.labelToday": [
+    {
+      "type": 1,
+      "value": "date"
+    },
+    {
+      "type": 0,
+      "value": ", today"
+    }
+  ],
+  "timeline.divider.labelYesterday": [
+    {
+      "type": 1,
+      "value": "date"
+    },
+    {
+      "type": 0,
+      "value": ", yesterday"
+    }
+  ],
+  "timeline.divider.recovery": [
+    {
+      "type": 0,
+      "value": "Reconnected, recovered up to here"
+    }
+  ],
+  "timeline.divider.recoveryLabel": [
+    {
+      "type": 0,
+      "value": "The connection is back. Everything above this line was recovered."
+    }
+  ],
+  "timeline.divider.recoveryLabelReread": [
+    {
+      "type": 0,
+      "value": "The connection is back. Everything above this line was recovered. Messages you have already seen may arrive again."
+    }
+  ],
+  "timeline.divider.recoveryReread": [
+    {
+      "type": 0,
+      "value": " (read again)"
+    }
+  ],
+  "timeline.divider.today": [
+    {
+      "type": 0,
+      "value": "Today"
+    }
+  ],
+  "timeline.divider.unread": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "figure"
+            },
+            {
+              "type": 0,
+              "value": " new message, read up to here"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "figure"
+            },
+            {
+              "type": 0,
+              "value": " new messages, read up to here"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "timeline.divider.yesterday": [
+    {
+      "type": 0,
+      "value": "Yesterday"
     }
   ],
   "timeline.edited.atDate": [
@@ -13448,6 +14790,114 @@ export const catalog: MessageCatalog = {
       "value": " (agent report)"
     }
   ],
+  "timeline.pins.actionPin": [
+    {
+      "type": 0,
+      "value": "Pin"
+    }
+  ],
+  "timeline.pins.actionUnpin": [
+    {
+      "type": 0,
+      "value": "Unpin"
+    }
+  ],
+  "timeline.pins.emptyBody": [
+    {
+      "type": 0,
+      "value": "Message with no content"
+    }
+  ],
+  "timeline.pins.listCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " pinned message"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " pinned messages"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "timeline.pins.listEmptyDetail": [
+    {
+      "type": 0,
+      "value": "Messages you pin from message actions collect here."
+    }
+  ],
+  "timeline.pins.listEmptyHeadline": [
+    {
+      "type": 0,
+      "value": "No pinned messages."
+    }
+  ],
+  "timeline.pins.listEmptySentence": [
+    {
+      "type": 0,
+      "value": "No pinned messages. Messages you pin from message actions collect here."
+    }
+  ],
+  "timeline.pins.listFailedDetail": [
+    {
+      "type": 0,
+      "value": "Check your connection and try again."
+    }
+  ],
+  "timeline.pins.listFailedHeadline": [
+    {
+      "type": 0,
+      "value": "Couldn't load pinned messages."
+    }
+  ],
+  "timeline.pins.listFailedSentence": [
+    {
+      "type": 0,
+      "value": "Couldn't load pinned messages. Check your connection and try again."
+    }
+  ],
+  "timeline.pins.listNone": [
+    {
+      "type": 0,
+      "value": "Pinned messages"
+    }
+  ],
+  "timeline.pins.rowMark": [
+    {
+      "type": 0,
+      "value": "Pinned"
+    }
+  ],
+  "timeline.pins.stamp": [
+    {
+      "type": 0,
+      "value": "Pinned "
+    },
+    {
+      "type": 1,
+      "value": "date"
+    }
+  ],
   "timeline.quote.head": [
     {
       "type": 0,
@@ -13462,6 +14912,418 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "Replying to a message"
+    }
+  ],
+  "timeline.reaction.chipMine": [
+    {
+      "type": 1,
+      "value": "emoji"
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " reaction"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " reactions"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    },
+    {
+      "type": 0,
+      "value": ", "
+    },
+    {
+      "type": 1,
+      "value": "names"
+    }
+  ],
+  "timeline.reaction.chipMineNoNames": [
+    {
+      "type": 1,
+      "value": "emoji"
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " reaction"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " reactions"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    },
+    {
+      "type": 0,
+      "value": ", remove my reaction"
+    }
+  ],
+  "timeline.reaction.chipOther": [
+    {
+      "type": 1,
+      "value": "emoji"
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " reaction"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " reactions"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    },
+    {
+      "type": 0,
+      "value": ", "
+    },
+    {
+      "type": 1,
+      "value": "names"
+    },
+    {
+      "type": 0,
+      "value": ", react too"
+    }
+  ],
+  "timeline.reaction.chipOtherNoNames": [
+    {
+      "type": 1,
+      "value": "emoji"
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " reaction"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " reactions"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    },
+    {
+      "type": 0,
+      "value": ", react too"
+    }
+  ],
+  "timeline.reaction.names1": [
+    {
+      "type": 1,
+      "value": "a"
+    }
+  ],
+  "timeline.reaction.names2": [
+    {
+      "type": 1,
+      "value": "a"
+    },
+    {
+      "type": 0,
+      "value": " and "
+    },
+    {
+      "type": 1,
+      "value": "b"
+    }
+  ],
+  "timeline.reaction.names3": [
+    {
+      "type": 1,
+      "value": "a"
+    },
+    {
+      "type": 0,
+      "value": ", "
+    },
+    {
+      "type": 1,
+      "value": "b"
+    },
+    {
+      "type": 0,
+      "value": " and "
+    },
+    {
+      "type": 1,
+      "value": "c"
+    }
+  ],
+  "timeline.reaction.namesExtra0": [
+    {
+      "type": 6,
+      "value": "extra",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " other"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " others"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "timeline.reaction.namesExtra1": [
+    {
+      "type": 1,
+      "value": "a"
+    },
+    {
+      "type": 0,
+      "value": " and "
+    },
+    {
+      "type": 6,
+      "value": "extra",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " other"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " others"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "timeline.reaction.namesExtra2": [
+    {
+      "type": 1,
+      "value": "a"
+    },
+    {
+      "type": 0,
+      "value": ", "
+    },
+    {
+      "type": 1,
+      "value": "b"
+    },
+    {
+      "type": 0,
+      "value": " and "
+    },
+    {
+      "type": 6,
+      "value": "extra",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " other"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " others"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "timeline.reaction.namesExtra3": [
+    {
+      "type": 1,
+      "value": "a"
+    },
+    {
+      "type": 0,
+      "value": ", "
+    },
+    {
+      "type": 1,
+      "value": "b"
+    },
+    {
+      "type": 0,
+      "value": ", "
+    },
+    {
+      "type": 1,
+      "value": "c"
+    },
+    {
+      "type": 0,
+      "value": " and "
+    },
+    {
+      "type": 6,
+      "value": "extra",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " other"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " others"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "timeline.reaction.selfToken": [
+    {
+      "type": 0,
+      "value": "You (remove my reaction)"
     }
   ],
   "timeline.runException.open": [
@@ -13502,6 +15364,228 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "Sending"
+    }
+  ],
+  "timeline.spawnHost.candidateWithReason": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " ("
+    },
+    {
+      "type": 1,
+      "value": "reason"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "timeline.spawnHost.choiceLabel": [
+    {
+      "type": 0,
+      "value": "Host to run on"
+    }
+  ],
+  "timeline.spawnHost.noEligibleHost": [
+    {
+      "type": 0,
+      "value": "No host can run this right now. Check that the host app is running, then try again."
+    }
+  ],
+  "timeline.spawnHost.notReady": [
+    {
+      "type": 0,
+      "value": "Not ready yet"
+    }
+  ],
+  "timeline.spawnHost.offline": [
+    {
+      "type": 0,
+      "value": "Offline"
+    }
+  ],
+  "timeline.spawnHost.revoked": [
+    {
+      "type": 0,
+      "value": "Revoked"
+    }
+  ],
+  "timeline.spawnHost.tierCloud": [
+    {
+      "type": 0,
+      "value": "Cloud"
+    }
+  ],
+  "timeline.spawnHost.tierLocal": [
+    {
+      "type": 0,
+      "value": "Local"
+    }
+  ],
+  "timeline.spawnHost.tierRemote": [
+    {
+      "type": 0,
+      "value": "Remote"
+    }
+  ],
+  "timeline.spawnHost.unavailable": [
+    {
+      "type": 0,
+      "value": "Can't be chosen right now"
+    }
+  ],
+  "timeline.streamStop.cancelled": [
+    {
+      "type": 0,
+      "value": "Stopped"
+    }
+  ],
+  "timeline.streamStop.cutOff": [
+    {
+      "type": 0,
+      "value": "Response cut off"
+    }
+  ],
+  "timeline.teamAi.delegateButton": [
+    {
+      "type": 0,
+      "value": "Hand off to "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    }
+  ],
+  "timeline.teamAi.delegateQuoted": [
+    {
+      "type": 1,
+      "value": "mention"
+    },
+    {
+      "type": 0,
+      "value": " Please take the quoted request."
+    }
+  ],
+  "timeline.teamAi.delegateReason": [
+    {
+      "type": 0,
+      "value": "Passed on because: "
+    },
+    {
+      "type": 1,
+      "value": "reason"
+    }
+  ],
+  "timeline.teamAi.delegateSent": [
+    {
+      "type": 0,
+      "value": "Handed off to "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": ". The reply will arrive in this channel."
+    }
+  ],
+  "timeline.teamAi.limitOperatorDay": [
+    {
+      "type": 0,
+      "value": "Used up today’s usage set by the server operator"
+    }
+  ],
+  "timeline.teamAi.limitOperatorOff": [
+    {
+      "type": 0,
+      "value": "The server operator has paused the helper"
+    }
+  ],
+  "timeline.teamAi.limitTeamMonth": [
+    {
+      "type": 0,
+      "value": "Used up the helper’s usage for this month"
+    }
+  ],
+  "timeline.teamAi.limitUnknown": [
+    {
+      "type": 0,
+      "value": "Reached the helper’s usage limit"
+    }
+  ],
+  "timeline.teamAi.proposalAuthority": [
+    {
+      "type": 0,
+      "value": "If approved, it runs with the approver’s permissions."
+    }
+  ],
+  "timeline.teamAi.proposalLabel": [
+    {
+      "type": 0,
+      "value": "Proposal"
+    }
+  ],
+  "timeline.teamAi.proposalLine": [
+    {
+      "type": 0,
+      "value": "Helper proposal · requested by "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    }
+  ],
+  "timeline.teamAi.proposalLineUnknown": [
+    {
+      "type": 0,
+      "value": "Helper proposal · couldn't confirm who asked"
+    }
+  ],
+  "timeline.teamAi.rationaleLabel": [
+    {
+      "type": 0,
+      "value": "Reason written by the helper"
+    }
+  ],
+  "timeline.teamAi.rationaleNote": [
+    {
+      "type": 0,
+      "value": "Written by AI. See the fields above for what will actually change."
+    }
+  ],
+  "timeline.teamAi.reasonCouldNotPropose": [
+    {
+      "type": 0,
+      "value": "Couldn't turn it into an approval card"
+    }
+  ],
+  "timeline.teamAi.reasonOutOfScope": [
+    {
+      "type": 0,
+      "value": "Too big for the helper to do directly"
+    }
+  ],
+  "timeline.teamAi.reasonOverBudget": [
+    {
+      "type": 0,
+      "value": "Used up the helper’s usage for today"
+    }
+  ],
+  "timeline.teamAi.reasonRateLimited": [
+    {
+      "type": 0,
+      "value": "Too many requests"
+    }
+  ],
+  "timeline.teamAi.reasonSlow": [
+    {
+      "type": 0,
+      "value": "The helper didn't answer in time"
     }
   ],
   "timeline.thread.followDismiss": [

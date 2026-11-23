@@ -92,7 +92,7 @@ export function WorkRequestOpenSuggestion({
           data-testid="work-request-suggest-line"
         >
           <Laptop className="size-4 shrink-0 text-icon" aria-hidden="true" />
-          <span className="min-w-0 flex-1 break-keep">{commandSuggestOneLine(card)}</span>
+          <span className="min-w-0 flex-1 break-keep">{commandSuggestOneLine(formatMessage, card)}</span>
         </p>
       </div>
     );

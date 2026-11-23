@@ -85,40 +85,36 @@ const webRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const LANDING_CLASS = landingClass(webRoot);
 
 /**
- * 고정 액션의 두 낱말. 코어 소스에서 읽는다 (gate-quote가 `QUOTE_ACTION_LABEL`에
+ * 고정 액션의 두 낱말. 한국어 사전에서 읽는다(#6044 — 그전에는 코어 소스에서 읽었다. gate-quote가 `QUOTE_ACTION_LABEL`에
  * 대해 하는 것과 같은 규율이고 같은 이유다). `import`가 아니라 정규식인 이유도
  * 같다: 이 게이트는 node가 직접 도는 `.mjs`이고, 코어의 `.ts` 한 줄을 읽자고 TS
  * 로더를 끌어오는 것은 값에 비해 비싸다.
  */
 function canonicalPinCopy(root) {
-  const pins = readFileSync(
-    resolve(root, "../../packages/momo-core/src/features/timeline/pins.ts"),
-    "utf8"
+  // 409 문장은 한국어 사전이 정본이다(#6044): 코어는 키(`timeline.actionFailure.pinLimit`)만 안다.
+  const catalog = JSON.parse(
+    readFileSync(
+      resolve(root, "../../packages/momo-core/src/i18n/catalogs/ko-KR/timeline.json"),
+      "utf8"
+    )
   );
-  const labels = /return pinned \? "([^"]+)" : "([^"]+)";/.exec(pins);
-  if (!labels) {
-    throw new Error(
-      "pinActionLabel의 낱말을 코어에서 찾지 못했다: 게이트가 검사할 문자열의 정본이 사라졌다"
-    );
+  // 고정 단추의 두 낱말도 사전이 정본이다(#6044): 코어는 키(`timeline.pins.actionUnpin` · `timeline.pins.actionPin`)만 안다.
+  const labels = [null, catalog["timeline.pins.actionUnpin"], catalog["timeline.pins.actionPin"]];
+  if (!labels[1] || !labels[2]) {
+    throw new Error("timeline.pins.actionUnpin / actionPin 낱말을 한국어 사전에서 찾지 못했다: 게이트가 검사할 문자열의 정본이 사라졌다");
   }
-  const copy = readFileSync(
-    resolve(root, "../../packages/momo-core/src/features/timeline/actionCopy.ts"),
-    "utf8"
-  );
-  const conflict =
-    /export function pinFailureMessage[\s\S]*?case 409:\s*\n\s*return "([^"]+)";/.exec(
-      copy
-    );
-  if (!conflict) {
-    throw new Error("pinFailureMessage의 409 문장을 코어에서 찾지 못했다");
+  const conflict = [null, catalog["timeline.actionFailure.pinLimit"]];
+  if (!conflict[1]) {
+    throw new Error("timeline.actionFailure.pinLimit 문장을 한국어 사전에서 찾지 못했다");
   }
   // #1149 M2·M4 — 행의 표지, 빈 본문의 서술, 그리고 그 서술 앞에 서는 주(註)
   // 기호. 셋 다 코어에서 읽는 이유는 위와 같다: 게이트가 문자열을 다시 적으면
   // 정본이 바뀐 날 게이트만 혼자 초록으로 남는다.
-  const rowMark = /export const PIN_ROW_MARK = "([^"]+)";/.exec(pins);
-  const emptyBody = /export const PIN_EMPTY_BODY_TEXT = "([^"]+)";/.exec(pins);
-  if (!rowMark || !emptyBody) {
-    throw new Error("PIN_ROW_MARK / PIN_EMPTY_BODY_TEXT 를 코어에서 찾지 못했다");
+  // 두 낱말도 한국어 사전이 정본이다(#6044): 코어는 키(`timeline.pins.rowMark` · `timeline.pins.emptyBody`)만 안다.
+  const rowMark = [null, catalog["timeline.pins.rowMark"]];
+  const emptyBody = [null, catalog["timeline.pins.emptyBody"]];
+  if (!rowMark[1] || !emptyBody[1]) {
+    throw new Error("timeline.pins.rowMark / timeline.pins.emptyBody 를 한국어 사전에서 찾지 못했다");
   }
   const voice = readFileSync(
     resolve(root, "../../packages/momo-core/src/features/timeline/appVoice.ts"),
@@ -728,6 +724,8 @@ async function exercise(browser) {
   const context = await browser.newContext({
     viewport: { width: 1280, height: 900 },
     reducedMotion: "reduce",
+    // 한국어 문구를 단정한다(#6044): 브라우저 기본(en-US)이면 영어 사전이 서므로 한국어로 고정한다.
+    locale: "ko-KR",
   });
   const page = await context.newPage();
   await installRealtimeSocket(page);
@@ -1142,6 +1140,8 @@ async function exerciseHonesty(browser) {
   const context = await browser.newContext({
     viewport: { width: 1280, height: 900 },
     reducedMotion: "reduce",
+    // 한국어 문구를 단정한다(#6044): 브라우저 기본(en-US)이면 영어 사전이 서므로 한국어로 고정한다.
+    locale: "ko-KR",
   });
   const page = await context.newPage();
   await installRealtimeSocket(page);
@@ -1260,6 +1260,8 @@ async function exerciseKeepsWhatItHas(browser) {
   const context = await browser.newContext({
     viewport: { width: 1280, height: 900 },
     reducedMotion: "reduce",
+    // 한국어 문구를 단정한다(#6044): 브라우저 기본(en-US)이면 영어 사전이 서므로 한국어로 고정한다.
+    locale: "ko-KR",
   });
   const page = await context.newPage();
   await installRealtimeSocket(page);
@@ -1407,6 +1409,8 @@ async function captureShots(browser) {
     const context = await browser.newContext({
       viewport: { width: 1280, height: 900 },
       reducedMotion: "reduce",
+      // 한국어 문구를 단정한다(#6044): 브라우저 기본(en-US)이면 영어 사전이 서므로 한국어로 고정한다.
+      locale: "ko-KR",
       colorScheme: scheme,
     });
     const page = await context.newPage();
@@ -1457,6 +1461,8 @@ async function captureShots(browser) {
     const failedContext = await browser.newContext({
       viewport: { width: 1280, height: 900 },
       reducedMotion: "reduce",
+      // 한국어 문구를 단정한다(#6044): 브라우저 기본(en-US)이면 영어 사전이 서므로 한국어로 고정한다.
+      locale: "ko-KR",
       colorScheme: scheme,
     });
     const failedPage = await failedContext.newPage();

@@ -10,6 +10,9 @@ import {
   type Ref,
 } from "react";
 import { createRoot, type Root } from "react-dom/client";
+import { LocaleProvider } from "@/i18n/LocaleProvider";
+import type { AppLocale } from "@/i18n/localeStore";
+import { koreanLocale } from "@/testing/koLocale";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
@@ -381,7 +384,7 @@ function mountShell(client: QueryClient): HTMLElement {
     mountedRoot = createRoot(host);
   }
   act(() => {
-    mountedRoot?.render(
+    mountedRoot?.render(createElement(LocaleProvider, { locale: ko, children: 
       createElement(
         QueryClientProvider,
         { client },
@@ -402,12 +405,16 @@ function mountShell(client: QueryClient): HTMLElement {
           )
         )
       )
-    );
+     }));
   });
   return host;
 }
 
-beforeAll(() => {
+// 이 파일은 한국어 문구를 단정한다(#6044): 공급자 밖의 화면은 번들된 영어로 그리므로 한국어 언어 객체로 감싼다.
+let ko: AppLocale;
+
+beforeAll(async () => {
+  ko = await koreanLocale();
   reactActEnvironment.IS_REACT_ACT_ENVIRONMENT = true;
   Object.defineProperty(HTMLElement.prototype, "offsetParent", {
     configurable: true,

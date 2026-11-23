@@ -1,3 +1,4 @@
+import type { MessageRef } from "../../i18n/keys";
 import type { RequestBundleModel } from "./requestBundle";
 
 /** 무대는 묶음의 승인 상태를 빌려 읽고, 선택과 열린 순서만 소유해요. */
@@ -15,7 +16,8 @@ export interface DecisionStageModel {
   cards: readonly DecisionStageCard[];
   current: DecisionStageCard | null;
   index: number;
-  positionLabel: string;
+  /** 「N건 중 M번」 — 키와 값. 화면이 `formatMessage(position.key, position.values as never)`로 푼다. */
+  position: MessageRef<"timeline.decisionStage.position" | "timeline.decisionStage.positionNone">;
   pendingIds: readonly string[];
   allProcessed: boolean;
 }
@@ -51,7 +53,10 @@ export function decisionStageModel(
     cards,
     current: cards[index] ?? null,
     index,
-    positionLabel: cards.length > 0 ? `${cards.length}건 중 ${index + 1}번` : "0건",
+    position:
+      cards.length > 0
+        ? { key: "timeline.decisionStage.position", values: { total: String(cards.length), current: String(index + 1) } }
+        : { key: "timeline.decisionStage.positionNone" },
     pendingIds,
     allProcessed:
       cards.length > 0 &&

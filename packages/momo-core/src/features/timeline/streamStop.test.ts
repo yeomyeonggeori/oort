@@ -1,16 +1,21 @@
 import { describe, expect, it } from "vitest";
 
 import type { Message } from "../../lib/api";
+import { catalog as koCatalog } from "../../i18n/generated/ko-KR";
+import { createMessageCopy } from "../../testkit";
 import { TURN_STATUS_LABEL } from "./agentCardModel";
 import {
   endedStreamRunIds,
   isStreamRunEnded,
-  STREAM_CANCELLED_MARK,
-  STREAM_CUT_OFF_MARK,
+  STREAM_CANCELLED_MARK_KEY,
+  STREAM_CUT_OFF_MARK_KEY,
   STREAM_PROPS_KEY,
   streamMarker,
-  streamStopMark,
+  streamStopMarkKey,
 } from "./streamStop";
+
+// 문장은 사전(`timeline.json`)에 있다(#6044). 꼬리 낱말은 한국어 그대로 단정한다.
+const ko = createMessageCopy({ messageLocale: "ko-KR", catalog: koCatalog });
 
 function message(props?: Record<string, unknown>): Message {
   return {
@@ -60,33 +65,33 @@ describe("streamMarker", () => {
 
 describe("streamStopMark", () => {
   it("잘 끝난 답에는 아무 말도 붙지 않는다", () => {
-    expect(streamStopMark(streamed({ rev: 17, streaming: false }), true)).toBeNull();
+    expect(streamStopMarkKey(streamed({ rev: 17, streaming: false }), true)).toBeNull();
   });
 
   it("도착 중인 답에는 아무 말도 붙지 않는다", () => {
-    expect(streamStopMark(streamed({ rev: 4, streaming: true }), false)).toBeNull();
+    expect(streamStopMarkKey(streamed({ rev: 4, streaming: true }), false)).toBeNull();
   });
 
   it("사람이 친 글은 run 이 끝나 있어도 건드리지 않는다", () => {
-    expect(streamStopMark(message(), true)).toBeNull();
+    expect(streamStopMarkKey(message(), true)).toBeNull();
   });
 
   it("취소 도장은 사람의 행위를 말한다", () => {
     expect(
-      streamStopMark(
+      streamStopMarkKey(
         streamed({ rev: 5, streaming: false, outcome: "cancelled" }),
         true,
       ),
-    ).toBe(STREAM_CANCELLED_MARK);
+    ).toBe(STREAM_CANCELLED_MARK_KEY);
   });
 
   it("사망 도장은 끊김을 말한다", () => {
     expect(
-      streamStopMark(
+      streamStopMarkKey(
         streamed({ rev: 5, streaming: false, outcome: "failed" }),
         true,
       ),
-    ).toBe(STREAM_CUT_OFF_MARK);
+    ).toBe(STREAM_CUT_OFF_MARK_KEY);
   });
 
   /**
@@ -102,9 +107,9 @@ describe("streamStopMark", () => {
    */
   it("run 이 끝났는데 stream 이 열려 있으면 같은 꼬리를 그린다", () => {
     const orphan = streamed({ rev: 9, streaming: true });
-    expect(streamStopMark(orphan, true)).toBe(STREAM_CUT_OFF_MARK);
+    expect(streamStopMarkKey(orphan, true)).toBe(STREAM_CUT_OFF_MARK_KEY);
     expect(
-      streamStopMark(orphan, false),
+      streamStopMarkKey(orphan, false),
       "run 이 살아 있는 동안은 그냥 도착 중이다",
     ).toBeNull();
   });
@@ -116,11 +121,11 @@ describe("streamStopMark", () => {
    */
   it("도장이 있으면 run 을 몰라도 그린다", () => {
     expect(
-      streamStopMark(
+      streamStopMarkKey(
         streamed({ rev: 5, streaming: false, outcome: "cancelled" }),
         false,
       ),
-    ).toBe(STREAM_CANCELLED_MARK);
+    ).toBe(STREAM_CANCELLED_MARK_KEY);
   });
 
   /**
@@ -128,7 +133,8 @@ describe("streamStopMark", () => {
    * 부르면, 같은 화면에서 같은 일이 두 이름을 갖는다.
    */
   it("취소를 부르는 낱말은 턴 칩과 같다", () => {
-    expect(STREAM_CANCELLED_MARK).toBe(TURN_STATUS_LABEL.cancelled);
+    expect(ko(STREAM_CANCELLED_MARK_KEY)).toBe("중단됨");
+    expect(ko(STREAM_CANCELLED_MARK_KEY)).toBe(TURN_STATUS_LABEL.cancelled);
   });
 });
 
@@ -178,9 +184,7 @@ describe("endedStreamRunIds", () => {
     const orphan = streamedByRun("RuN-MiXeD", { rev: 9, streaming: true }, true);
     const seeded = new Set(endedStreamRunIds([orphan]));
     expect(isStreamRunEnded(orphan, seeded)).toBe(true);
-    expect(streamStopMark(orphan, isStreamRunEnded(orphan, seeded))).toBe(
-      STREAM_CUT_OFF_MARK,
-    );
+    expect(streamStopMarkKey(orphan, isStreamRunEnded(orphan, seeded))).toBe(STREAM_CUT_OFF_MARK_KEY);
   });
 
   /**

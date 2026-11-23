@@ -2,7 +2,7 @@ import {
   type ChannelActionItem,
   type ChannelActionKey,
 } from '@momo/core/features/channels/actionModel';
-import {channelMenuAccessibleLabel} from '@momo/core/features/channels/model';
+import {channelMenuAccessibleRef} from '@momo/core/features/channels/model';
 import type {MessageService} from '@momo/core/i18n/types';
 import type {Channel} from '@momo/core/lib/api';
 import {
@@ -42,11 +42,11 @@ export const CONVERSATION_MENU_ACTION_KEYS: ReadonlySet<ChannelActionKey> = new 
 
 /**
  * 코어 `row` 표의 답에서 이 시트의 넷만(알림 · DM 닫기 · 채널 나가기 · 대화 나가기) — 차례·낱말·위험색·진행 낱말은 표의 것 그대로다.
- * `formatMessage` 가 없으면 「대화 나가기」가 서지 않는다(코어 표의 규칙).
+ * `formatMessage` 는 코어 표가 모든 항목의 이름을 읽는 데 쓴다.
  */
 export function conversationMenuActionItems(
   target: ChannelRowTarget,
-  formatMessage?: MessageService['formatMessage'],
+  formatMessage: MessageService['formatMessage'],
 ): ChannelActionItem[] {
   return channelRowActionItems(target, NOTHING_COPIED, formatMessage).filter(item =>
     CONVERSATION_MENU_ACTION_KEYS.has(item.key),
@@ -75,7 +75,7 @@ export const CONVERSATION_INFO_ACTION_KEYS: ReadonlySet<ChannelActionKey> = new 
 export function conversationInfoActionItems(
   target: ChannelRowTarget,
   copied: ChannelRowCopied = NOTHING_COPIED,
-  formatMessage?: MessageService['formatMessage'],
+  formatMessage: MessageService['formatMessage'],
 ): ChannelActionItem[] {
   return channelRowActionItems(target, copied, formatMessage).filter(item =>
     CONVERSATION_INFO_ACTION_KEYS.has(item.key),
@@ -94,6 +94,12 @@ export function conversationMenuTitle(name: string, kind: Channel['kind'] | unde
 }
 
 /** 시트가 보조기술에 자기를 부르는 이름. 사이드바 행 시트와 같은 코어 문장이고, 종류를 모르면 이름 + 「메뉴」다. */
-export function conversationMenuAccessibleLabel(name: string, kind: Channel['kind'] | undefined): string {
-  return kind === undefined ? `${name} 메뉴` : channelMenuAccessibleLabel(name, kind === 'dm');
+export function conversationMenuAccessibleLabel(
+  name: string,
+  kind: Channel['kind'] | undefined,
+  formatMessage: MessageService['formatMessage'],
+): string {
+  if (kind === undefined) return `${name} 메뉴`;
+  const ref = channelMenuAccessibleRef(name, kind === 'dm');
+  return formatMessage(ref.key, ref.values as never);
 }

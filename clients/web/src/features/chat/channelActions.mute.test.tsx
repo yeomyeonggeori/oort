@@ -1,13 +1,28 @@
 // @vitest-environment jsdom
-import {act} from 'react';
+import {act, createElement, type ReactElement} from 'react';
+import { LocaleProvider } from "@/i18n/LocaleProvider";
+import type { AppLocale } from "@/i18n/localeStore";
+import { koreanLocale } from "@/testing/koLocale";
 import {createRoot} from 'react-dom/client';
 import {MemoryRouter} from 'react-router-dom';
 import {QueryClient, QueryClientProvider, useQuery} from '@tanstack/react-query';
 import {expect, it, vi} from 'vitest';
 import type {Channel} from '@momo/core/lib/api';
-import {CHANNEL_MUTE_FAILURE} from '@momo/core/features/channels/model';
+import {CHANNEL_MUTE_FAILURE_KEY} from '@momo/core/features/channels/model';
 import {channelActionItemsForSurface} from '@momo/core/features/channels/actionModel';
 import {useChannelActions, type ChannelActions} from './channelActions';
+import { catalog as koCatalog } from "@momo/core/i18n/generated/ko-KR";
+import { createMessageCopy } from "@momo/core/testkit";
+
+const koCopy = createMessageCopy({ messageLocale: "ko-KR", catalog: koCatalog });
+const itemsForSurface = (
+  surface: Parameters<typeof channelActionItemsForSurface>[0],
+  available: Parameters<typeof channelActionItemsForSurface>[1],
+  state: Parameters<typeof channelActionItemsForSurface>[2]
+) => channelActionItemsForSurface(surface, available, state, koCopy);
+
+let koLocale: AppLocale;
+const withKo = (element: ReactElement) => createElement(LocaleProvider, { locale: koLocale, children: element });
 
 const api = vi.hoisted(() => vi.fn());
 vi.mock('@momo/core/lib/api', async original => ({
@@ -17,6 +32,8 @@ vi.mock('@momo/core/lib/api', async original => ({
 
 it('웹 두 메뉴는 응답 전 현재 상태를 바꾸고 실패는 해당 채널만 되돌려요', async () => {
   api.mockReset();
+  // 화면 문구는 사전에서 읽는다(#6045). 한국어를 단정하던 시험은 한국어 언어 객체로 감싼다.
+  koLocale = await koreanLocale();
   (globalThis as {IS_REACT_ACT_ENVIRONMENT?: boolean}).IS_REACT_ACT_ENVIRONMENT = true;
   const client = new QueryClient({defaultOptions: {queries: {retry: false, staleTime: Infinity, gcTime: 0}}});
   const rows: Channel[] = [
@@ -37,12 +54,12 @@ it('웹 두 메뉴는 응답 전 현재 상태를 바꾸고 실패는 해당 채
   let resolve!: () => void;
   api.mockImplementationOnce(() => new Promise((_, no) => { reject = no; }));
   try {
-    act(() => root.render(<MemoryRouter future={{v7_startTransition: true, v7_relativeSplatPath: true}}><QueryClientProvider client={client}><Probe /></QueryClientProvider></MemoryRouter>));
+    act(() => root.render(withKo(<MemoryRouter future={{v7_startTransition: true, v7_relativeSplatPath: true}}><QueryClientProvider client={client}><Probe /></QueryClientProvider></MemoryRouter>)));
     act(() => actions.run('mute'));
     await flush();
     expect(actions.state.muted).toBe(true);
     for (const surface of ['header', 'row'] as const) {
-      const item = channelActionItemsForSurface(surface, actions.available, actions.state).find(row => row.key === 'mute');
+      const item = itemsForSurface(surface, actions.available, actions.state).find(row => row.key === 'mute');
       expect(item).toMatchObject({label: '알림 꺼짐', icon: 'bell-off'});
       expect(item?.busyLabel).toBeUndefined();
     }
@@ -50,7 +67,7 @@ it('웹 두 메뉴는 응답 전 현재 상태를 바꾸고 실패는 해당 채
     act(() => client.setQueryData<Channel[]>(['channels', 'ws'], old => old!.map(row => row.id === 'c2' ? {...row, muted: true} : row)));
     await act(async () => { reject(new Error('offline')); }); await flush();
     expect(client.getQueryData<Channel[]>(['channels', 'ws'])!.map(row => row.muted)).toEqual([false, true]);
-    expect(actions.state.muted).toBe(false); expect(actions.error).toBe(CHANNEL_MUTE_FAILURE);
+    expect(actions.state.muted).toBe(false); expect(actions.error).toBe(koCopy(CHANNEL_MUTE_FAILURE_KEY));
     api.mockImplementationOnce(() => new Promise<void>(yes => { resolve = yes; }));
     act(() => actions.run('mute')); await flush();
     expect(actions.state.muted).toBe(true);
@@ -85,11 +102,11 @@ it.each([
     return null;
   }
   const root = createRoot(document.createElement('div'));
-  const renderTarget = (workspaceId: string, channelId: string) => root.render(
+  const renderTarget = (workspaceId: string, channelId: string) => root.render(withKo(
     <MemoryRouter future={{v7_startTransition: true, v7_relativeSplatPath: true}}>
       <QueryClientProvider client={client}><Probe workspaceId={workspaceId} channelId={channelId} /></QueryClientProvider>
     </MemoryRouter>,
-  );
+  ));
   const flush = async () => { await act(async () => { await new Promise(yes => setTimeout(yes, 0)); }); };
   try {
     act(() => renderTarget('ws', 'c1'));

@@ -1,10 +1,12 @@
 import type {Message, RosterMember} from '@momo/core/lib/api';
 import type {PinnedMessageWire} from '@momo/core/lib/api';
 import {makeDirectory} from '@momo/core/features/workspace/directory';
+import {catalog as koCatalog} from '@momo/core/i18n/generated/ko-KR';
+import {createMessageService} from '@momo/core/i18n/service';
 import {
   applyPinned,
   emptyPins,
-  PIN_ROW_MARK,
+  PIN_ROW_MARK_KEY,
   type PinMap,
 } from '@momo/core/features/timeline/pins';
 import {act, cleanup, fireEvent, render, screen, waitFor} from '@testing-library/react-native';
@@ -12,6 +14,9 @@ import React from 'react';
 
 import {ThreadPanel} from '../src/features/conversation/ThreadPanel';
 import type {UseTimelineResult} from '../src/features/conversation/useTimeline';
+
+// 문장은 사전에 있다(#6044): 한국어 생성물로 키를 풀어 한국어 그대로 단정한다.
+const PIN_ROW_MARK = createMessageService({messageLocale: 'ko-KR', catalog: koCatalog}).formatMessage(PIN_ROW_MARK_KEY);
 
 // =============================================================================
 // 답글은 **읽는 자리에서** 고정된다 (이슈 #1146 M1).

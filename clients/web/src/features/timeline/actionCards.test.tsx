@@ -2,6 +2,9 @@
 
 import { act, createElement, type ReactElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
+import { LocaleProvider } from "@/i18n/LocaleProvider";
+import type { AppLocale } from "@/i18n/localeStore";
+import { koreanLocale } from "@/testing/koLocale";
 import {
   afterEach,
   beforeAll,
@@ -24,10 +27,9 @@ import { LINK_ONCE_LEAD } from "./ApprovalActions";
 import { APPROVED_RECEIPT } from "@/features/inbox/approvalsPanel";
 import { reachableSettingsSections } from "@/features/settings/settingsNav";
 import { actionDestination } from "@momo/core/features/commands/serverActions";
-import {
-  AGENT_INITIATIVE_LABEL,
-  AGENT_INITIATIVE_RATIONALE_LABEL,
-} from "@momo/core/features/timeline/agentInitiative";
+// 문장은 사전에 있다(#6044): 한국어로 열린 화면에서 한국어 그대로 단정한다.
+const AGENT_INITIATIVE_LABEL = "먼저 제안";
+const AGENT_INITIATIVE_RATIONALE_LABEL = "에이전트가 쓴 글";
 
 // =============================================================================
 // AX-4 (#2510): 행동 승인 카드 · 1회 링크 · 영속 결과 카드.
@@ -173,7 +175,10 @@ const reactActEnvironment = globalThis as typeof globalThis & {
 let mountedRoot: Root | null = null;
 let mountHost: HTMLElement | null = null;
 
-beforeAll(() => {
+let ko: AppLocale;
+
+beforeAll(async () => {
+  ko = await koreanLocale();
   reactActEnvironment.IS_REACT_ACT_ENVIRONMENT = true;
 });
 
@@ -219,7 +224,7 @@ function mountCard(
     createElement(AgentCard, { card, directory })
   );
   act(() => {
-    mountedRoot?.render(tree);
+    mountedRoot?.render(createElement(LocaleProvider, { locale: ko, children: tree }));
   });
   return mountHost;
 }

@@ -1,5 +1,6 @@
 import { ApiError, uuidEq, type RosterMember } from "../../lib/api";
 import { NetworkError } from "../../lib/http";
+import type { MessageRef } from "../../i18n/keys";
 import { groupDirectory, type DirectoryGroups } from "../directory/model";
 
 // =============================================================================
@@ -96,22 +97,24 @@ export function withChannelMemberAdded(
  * 채널만 받고 DM에는 404로 답한다. 이 모달은 실제 채널에서만 열리므로, 여기서의
  * 404는 그 사이 채널이 보관되었거나 사라졌다는 뜻이다.
  */
-export function addChannelMemberFailure(error: unknown): string {
+export function addChannelMemberFailure(
+  error: unknown
+): MessageRef<
+  | "channels.memberAdd.forbidden"
+  | "channels.memberAdd.notFound"
+  | "channels.memberAdd.rateLimited"
+  | "channels.memberAdd.network"
+  | "channels.memberAdd.generic"
+> {
   if (error instanceof ApiError) {
-    if (error.status === 403) {
-      return "멤버를 추가할 권한이 없습니다. 워크스페이스 소유자나 관리자에게 요청하세요.";
-    }
-    if (error.status === 404) {
-      return "이 채널에는 멤버를 추가할 수 없습니다. 채널이 보관되었거나 사라졌을 수 있습니다.";
-    }
-    if (error.status === 429) {
-      return "요청이 너무 잦습니다. 잠시 뒤에 다시 시도하세요.";
-    }
+    if (error.status === 403) return { key: "channels.memberAdd.forbidden" };
+    if (error.status === 404) return { key: "channels.memberAdd.notFound" };
+    if (error.status === 429) return { key: "channels.memberAdd.rateLimited" };
   }
   if (error instanceof NetworkError) {
     // 전송 계층이 이미 "아무도 답하지 않았다"의 문구(시간 초과 대 도달 불가,
     // 초 단위 데드라인 포함)를 쓴다. 한 실패에 두 어휘를 두지 않는다.
-    return `멤버를 추가하지 못했습니다. ${error.message}`;
+    return { key: "channels.memberAdd.network", values: { reason: error.message } };
   }
-  return "멤버를 추가하지 못했습니다. 잠시 뒤에 다시 시도하세요.";
+  return { key: "channels.memberAdd.generic" };
 }

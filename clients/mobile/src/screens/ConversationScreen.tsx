@@ -1021,7 +1021,7 @@ export default function ConversationScreen({
   const pinCount = Object.keys(timeline.pins).length;
   // 그리고 **셀 자격이 있을 때만** 센다 (#1146 M2): 목록을 못 불러온 채로
   // 「고정 3개」라고 적으면, 목록 안에서 고친 거짓말이 헤더로 옮겨 갈 뿐이다.
-  const pinLabel = pinListHeaderLabel(pinCount, timeline.pinsStatus);
+  const pinHeader = pinListHeaderLabel(pinCount, timeline.pinsStatus);
 
   // ---- 머리 ⋮ 시트 (#4319) -----------------------------------------------------
   //
@@ -2747,7 +2747,7 @@ export default function ConversationScreen({
         <ConversationMenuSheet
           title={title}
           kind={channel?.kind}
-          pinLabel={pinLabel}
+          pinLabel={formatMenuMessage(pinHeader.key, pinHeader.values as never)}
           onOpenPins={openPins}
           onOpenInfo={channel !== null ? openInfo : undefined}
           onDelegateWork={delegateWork}

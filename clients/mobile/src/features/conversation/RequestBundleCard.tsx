@@ -16,7 +16,7 @@ import {isMemberAvatarSetAction} from '@momo/core/features/approvals/avatarPrevi
 import {approvalHeadTitle} from '@momo/core/features/timeline/agentInitiative';
 import {
   teamAiProposalLine,
-  TEAM_AI_PROPOSAL_AUTHORITY,
+  TEAM_AI_PROPOSAL_AUTHORITY_KEY,
 } from '@momo/core/features/timeline/teamAi';
 import React, {useImperativeHandle, useRef, useState} from 'react';
 import {
@@ -136,7 +136,7 @@ export function RequestBundleCard({
   const details = admin
     ? model.details.rows
     : model.details.rows.filter(row => !card.detail.rows.includes(row));
-  const headline = approvalHeadTitle({...card, title: model.headline});
+  const headline = approvalHeadTitle(formatMessage, {...card, title: model.headline});
   // 닫힌 카드의 다음 행동 「다시 요청」(#5171). 서는 조건은 웹 `AgentCard` 와 같은 코어 함수 둘이 정한다: 상태·거부한 사람·영수증 줄(`cardReproposeReason`:
   // 만료 카드가 이미 영수증 줄을 말하면 서지 않는다), 올린 이가 에이전트인가(`reproposeTarget`). 거부한 사람은 영수증이 먼저 안다(카드의
   // `decided_by` 는 서버 프레임이 올 때까지 없다).
@@ -263,10 +263,11 @@ export function RequestBundleCard({
       {card.proposedVia !== undefined ? (
         <Sentence style={styles.meta}>
           {teamAiProposalLine(
+            formatMessage,
             memberFor(directory, card.proposedVia.requesterId ?? undefined)
               ?.displayName ?? card.proposedVia.requesterName,
           )}{' '}
-          · {TEAM_AI_PROPOSAL_AUTHORITY}
+          · {formatMessage(TEAM_AI_PROPOSAL_AUTHORITY_KEY)}
         </Sentence>
       ) : null}
       {model.state !== 'approval' ? (

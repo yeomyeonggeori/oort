@@ -2,7 +2,7 @@ import type {
   ChannelActionItem,
   ChannelActionKey,
 } from '@momo/core/features/channels/actionModel';
-import {channelActionClusterTitle, isChannelActionStatusIcon} from '@momo/core/features/channels/actionModel';
+import {channelActionClusterTitleKey, isChannelActionStatusIcon} from '@momo/core/features/channels/actionModel';
 import {
   channelLeaveConfirmBodyKey,
 } from '@momo/core/features/channels/model';
@@ -160,6 +160,8 @@ function InfoBody({
 }: ConversationInfoPageProps): React.JSX.Element {
   const styles = useStyles(buildStyles);
   const formatMessage = useFormatMessage();
+  const copyGroupKey = channelActionClusterTitleKey('copy');
+  const copyGroupTitle = copyGroupKey === undefined ? undefined : formatMessage(copyGroupKey);
   const insets = useSafeAreaInsets();
   // ‹ · VoiceOver escape 는 같은 길로 한 겹만 벗긴다: 들어온 길의 반대로 물러난 뒤 `onClose`(층 밖에서는 곧바로 `onClose`).
   const closeLayer = useLayerClose();
@@ -362,7 +364,7 @@ function InfoBody({
               </GroupCard> : null}
               {mute !== undefined ? <GroupCard>{row(mute)}</GroupCard> : null}
               {copies.length > 0 ? (
-                <GroupCard label={channelActionClusterTitle('copy')} testID="conversation-info-copy">
+                <GroupCard label={copyGroupTitle} testID="conversation-info-copy">
                   {copies.map(found => row(found, 'copy'))}
                 </GroupCard>
               ) : null}

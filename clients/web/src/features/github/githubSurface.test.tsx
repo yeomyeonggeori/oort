@@ -6,6 +6,15 @@ import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { channelActionAvailability, channelActionItemsForSurface } from "@momo/core/features/channels/actionModel";
 import { GITHUB_PLUGIN_ID, githubFacesFor } from "@momo/core/features/github/model";
+import { catalog as koCatalog } from "@momo/core/i18n/generated/ko-KR";
+import { createMessageCopy } from "@momo/core/testkit";
+
+const koCopy = createMessageCopy({ messageLocale: "ko-KR", catalog: koCatalog });
+const itemsForSurface = (
+  surface: Parameters<typeof channelActionItemsForSurface>[0],
+  available: Parameters<typeof channelActionItemsForSurface>[1],
+  state: Parameters<typeof channelActionItemsForSurface>[2]
+) => channelActionItemsForSurface(surface, available, state, koCopy);
 
 // serverSurfaces 숨김 시험 (#3955 수용): 서버가 GitHub 알림을 싣지 않으면
 //   · 채널 ⋮ 에 「GitHub 알림」이 없고
@@ -88,7 +97,7 @@ const available = (over: Partial<Parameters<typeof channelActionAvailability>[0]
     ...over,
   });
 const headerKeys = (over: Partial<Parameters<typeof channelActionAvailability>[0]> = {}) =>
-  channelActionItemsForSurface("header", available(over), { muted: false, copiedLink: false, copiedName: false }).map(
+  itemsForSurface("header", available(over), { muted: false, copiedLink: false, copiedName: false }).map(
     (item) => item.key
   );
 
@@ -112,7 +121,7 @@ describe("채널 ⋮ 의 GitHub 알림", () => {
   });
 
   it("행 우클릭에는 서지 않는다(구독은 채널 안에서 하는 일이다)", () => {
-    const rowKeys = channelActionItemsForSurface("row", available(), {
+    const rowKeys = itemsForSurface("row", available(), {
       muted: false,
       copiedLink: false,
       copiedName: false,
@@ -121,7 +130,7 @@ describe("채널 ⋮ 의 GitHub 알림", () => {
   });
 
   it("항목의 이름은 「GitHub 알림」이고 알림 무리에 선다", () => {
-    const item = channelActionItemsForSurface("header", available(), {
+    const item = itemsForSurface("header", available(), {
       muted: false,
       copiedLink: false,
       copiedName: false,

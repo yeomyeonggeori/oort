@@ -1,4 +1,6 @@
 import { describe, expect, it } from "vitest";
+import { catalog as koCatalog } from "../../i18n/generated/ko-KR";
+import { createMessageCopy } from "../../testkit";
 import {
   calendarDaysBetween,
   dayDividerLabel,
@@ -16,6 +18,8 @@ import {
   DIVIDER_TONE,
   DIVIDER_TONE_SPEC,
 } from "./divider";
+// 문장은 사전(`timeline.json`)에 있다(#6044). 시험은 제품과 같은 한국어 생성물로 키를 풀어 한국어 그대로 단정한다.
+const ko = createMessageCopy({ messageLocale: "ko-KR", catalog: koCatalog });
 
 /**
  * 로컬 시각으로 짓는다. 이 모듈이 판정하는 것은 **달력**이지 UTC 오프셋이 아니라서,
@@ -62,7 +66,7 @@ describe("dayDividerSegments", () => {
 
   it("says 오늘 for any hour of today", () => {
     for (const hour of [0, 9, 14, 23]) {
-      expect(dividerText(dayDividerSegments(at(2026, 8, 5, hour), now))).toBe(
+      expect(dividerText(dayDividerSegments(ko, at(2026, 8, 5, hour), now))).toBe(
         "오늘"
       );
     }
@@ -70,26 +74,26 @@ describe("dayDividerSegments", () => {
 
   it("says 어제 across the midnight boundary, not across 24 hours", () => {
     // 20시간 전이지만 어제다.
-    expect(dividerText(dayDividerSegments(at(2026, 8, 4, 18, 30), now))).toBe(
+    expect(dividerText(dayDividerSegments(ko, at(2026, 8, 4, 18, 30), now))).toBe(
       "어제"
     );
     // 15시간 전이고 오늘이다 — 시간 차로 판정했다면 이 둘이 뒤집힌다.
-    expect(dividerText(dayDividerSegments(at(2026, 8, 5, 0, 5), now))).toBe(
+    expect(dividerText(dayDividerSegments(ko, at(2026, 8, 5, 0, 5), now))).toBe(
       "오늘"
     );
   });
 
   /** 그저께부터는 낱말이 아니라 날짜다 — 읽는 사람에게 산수를 시키지 않는다. */
   it("falls back to the date from two days out", () => {
-    expect(dividerText(dayDividerSegments(at(2026, 8, 3), now))).toBe("8월 3일");
-    expect(dividerText(dayDividerSegments(at(2026, 1, 9), now))).toBe("1월 9일");
+    expect(dividerText(dayDividerSegments(ko, at(2026, 8, 3), now))).toBe("8월 3일");
+    expect(dividerText(dayDividerSegments(ko, at(2026, 1, 9), now))).toBe("1월 9일");
   });
 
   it("adds the year only when it differs", () => {
-    expect(dividerText(dayDividerSegments(at(2025, 12, 31), now))).toBe(
+    expect(dividerText(dayDividerSegments(ko, at(2025, 12, 31), now))).toBe(
       "2025년 12월 31일"
     );
-    expect(dividerText(dayDividerSegments(at(2026, 12, 31), now))).not.toContain(
+    expect(dividerText(dayDividerSegments(ko, at(2026, 12, 31), now))).not.toContain(
       "년"
     );
   });
@@ -100,7 +104,7 @@ describe("dayDividerSegments", () => {
    * 실측으로 적어 둔 결함이다("7월  29일"). 숫자만 figure여야 한다.
    */
   it("marks the figures and nothing else", () => {
-    expect(dayDividerSegments(at(2025, 12, 31), now)).toEqual([
+    expect(dayDividerSegments(ko, at(2025, 12, 31), now)).toEqual([
       { kind: "figure", text: "2025" },
       { kind: "prose", text: "년 " },
       { kind: "figure", text: "12" },
@@ -109,11 +113,11 @@ describe("dayDividerSegments", () => {
       { kind: "prose", text: "일" },
     ]);
     for (const segments of [
-      dayDividerSegments(at(2026, 8, 3), now),
-      dayDividerSegments(at(2025, 12, 31), now),
-      unreadDividerSegments(12),
-      recoveryDividerSegments(4821, "replay"),
-      recoveryDividerSegments(4821, "backfill"),
+      dayDividerSegments(ko, at(2026, 8, 3), now),
+      dayDividerSegments(ko, at(2025, 12, 31), now),
+      unreadDividerSegments(ko, 12),
+      recoveryDividerSegments(ko, 4821, "replay"),
+      recoveryDividerSegments(ko, 4821, "backfill"),
     ]) {
       for (const segment of segments) {
         if (segment.kind === "figure") {
@@ -129,7 +133,7 @@ describe("dayDividerSegments", () => {
   it("has no figure at all in the relative forms", () => {
     for (const atMs of [at(2026, 8, 5), at(2026, 8, 4)]) {
       expect(
-        dayDividerSegments(atMs, now).some((s) => s.kind === "figure")
+        dayDividerSegments(ko, atMs, now).some((s) => s.kind === "figure")
       ).toBe(false);
     }
   });
@@ -143,36 +147,36 @@ describe("dayDividerLabel", () => {
    * 낱말이지만, 낭독으로만 들으면 어느 날인지 알려주지 않는다.
    */
   it("always speaks the absolute date, even when the eye reads 오늘", () => {
-    expect(dayDividerLabel(at(2026, 8, 5, 9), now)).toBe("2026년 8월 5일, 오늘");
-    expect(dayDividerLabel(at(2026, 8, 4, 9), now)).toBe("2026년 8월 4일, 어제");
-    expect(dayDividerLabel(at(2025, 12, 31), now)).toBe("2025년 12월 31일");
+    expect(dayDividerLabel(ko, at(2026, 8, 5, 9), now)).toBe("2026년 8월 5일, 오늘");
+    expect(dayDividerLabel(ko, at(2026, 8, 4, 9), now)).toBe("2026년 8월 4일, 어제");
+    expect(dayDividerLabel(ko, at(2025, 12, 31), now)).toBe("2025년 12월 31일");
   });
 
   it("differs from the visible text exactly where the relative word is", () => {
     for (const atMs of [at(2026, 8, 5), at(2026, 8, 4)]) {
-      const visible = dividerText(dayDividerSegments(atMs, now));
-      expect(dayDividerLabel(atMs, now)).not.toBe(visible);
-      expect(dayDividerLabel(atMs, now)).toContain(visible);
+      const visible = dividerText(dayDividerSegments(ko, atMs, now));
+      expect(dayDividerLabel(ko, atMs, now)).not.toBe(visible);
+      expect(dayDividerLabel(ko, atMs, now)).toContain(visible);
     }
     // 절대 날짜만 그리는 날은 둘이 같아야 한다 — 다르면 어느 한쪽이 지어낸 것이다.
     const old = at(2026, 8, 3);
-    expect(dayDividerLabel(old, now)).toContain(
-      dividerText(dayDividerSegments(old, now))
+    expect(dayDividerLabel(ko, old, now)).toContain(
+      dividerText(dayDividerSegments(ko, old, now))
     );
   });
 });
 
 describe("unread / recovery", () => {
   it("keeps the count a figure and the rest prose", () => {
-    expect(unreadDividerSegments(3)).toEqual([
+    expect(unreadDividerSegments(ko, 3)).toEqual([
       { kind: "prose", text: "새 메시지 " },
       { kind: "figure", text: "3" },
       { kind: "prose", text: "개, 여기까지 읽음" },
     ]);
-    expect(dividerText(unreadDividerSegments(3))).toBe(
+    expect(dividerText(unreadDividerSegments(ko, 3))).toBe(
       "새 메시지 3개, 여기까지 읽음"
     );
-    expect(unreadDividerLabel(3)).toBe("새 메시지 3개, 여기까지 읽음");
+    expect(unreadDividerLabel(ko, 3)).toBe("새 메시지 3개, 여기까지 읽음");
   });
 
   /**
@@ -182,11 +186,11 @@ describe("unread / recovery", () => {
    * 않으므로 읽는 사람에게는 대조할 대상이 없다.
    */
   it("says where, not which number — seq는 화면 문구에서 사라진다", () => {
-    expect(dividerText(recoveryDividerSegments(4821, "replay"))).toBe(
+    expect(dividerText(recoveryDividerSegments(ko, 4821, "replay"))).toBe(
       "재연결됨, 여기까지 복구"
     );
     for (const source of ["replay", "backfill"] as const) {
-      const text = dividerText(recoveryDividerSegments(4821, source));
+      const text = dividerText(recoveryDividerSegments(ko, 4821, source));
       expect(text).not.toContain("seq");
       expect(text).not.toMatch(/\d/);
     }
@@ -198,8 +202,8 @@ describe("unread / recovery", () => {
    * 말을 하는 셈이다.
    */
   it("shares the 「여기까지 …」 grammar with the unread marker", () => {
-    expect(dividerText(unreadDividerSegments(3))).toContain("여기까지 읽음");
-    expect(dividerText(recoveryDividerSegments(4821, "replay"))).toContain(
+    expect(dividerText(unreadDividerSegments(ko, 3))).toContain("여기까지 읽음");
+    expect(dividerText(recoveryDividerSegments(ko, 4821, "replay"))).toContain(
       "여기까지 복구"
     );
   });
@@ -212,13 +216,13 @@ describe("unread / recovery", () => {
    */
   it("spells the position out for the ear, still without the number", () => {
     for (const source of ["replay", "backfill"] as const) {
-      const label = recoveryDividerLabel(source);
+      const label = recoveryDividerLabel(ko, source);
       expect(label).toContain("이 줄 위까지");
       expect(label).not.toContain("seq");
       expect(label).not.toMatch(/\d/);
     }
-    expect(recoveryDividerLabel("backfill")).toContain("이미 본 메시지");
-    expect(recoveryDividerLabel("replay")).not.toContain("이미 본 메시지");
+    expect(recoveryDividerLabel(ko, "backfill")).toContain("이미 본 메시지");
+    expect(recoveryDividerLabel(ko, "replay")).not.toContain("이미 본 메시지");
   });
 
   /**
@@ -227,19 +231,19 @@ describe("unread / recovery", () => {
    * 두 화면이 같은 배열을 받으므로 갈라질 자리가 없다.
    */
   it("names the rail that healed the gap — 되읽은 구간만 그렇게 말한다", () => {
-    expect(dividerText(recoveryDividerSegments(4821, "backfill"))).toBe(
+    expect(dividerText(recoveryDividerSegments(ko, 4821, "backfill"))).toBe(
       "재연결됨, 여기까지 복구 (다시 읽음)"
     );
     // 그리고 `replay`에는 붙지 않는다. 둘이 같은 문장이면 `source`가 인자인
     // 이유가 사라진다.
-    expect(dividerText(recoveryDividerSegments(4821, "replay"))).not.toContain(
+    expect(dividerText(recoveryDividerSegments(ko, 4821, "replay"))).not.toContain(
       "다시 읽음"
     );
   });
 
   it("차이가 꼬리에만 있다 — 앞부분은 두 레일이 같은 문장이다", () => {
-    const replay = recoveryDividerSegments(4821, "replay");
-    const backfill = recoveryDividerSegments(4821, "backfill");
+    const replay = recoveryDividerSegments(ko, 4821, "replay");
+    const backfill = recoveryDividerSegments(ko, 4821, "backfill");
     expect(backfill.slice(0, replay.length)).toEqual(replay);
     expect(backfill).toHaveLength(replay.length + 1);
   });

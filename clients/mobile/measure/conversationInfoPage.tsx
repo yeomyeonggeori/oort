@@ -1,4 +1,4 @@
-import {CHANNEL_MUTE_FAILURE} from '@momo/core/features/channels/model';
+import {CHANNEL_MUTE_FAILURE_KEY} from '@momo/core/features/channels/model';
 import {makeDirectory} from '@momo/core/features/workspace/directory';
 import type {RosterMember} from '@momo/core/lib/api';
 import React from 'react';
@@ -16,6 +16,10 @@ import type {ChannelRowTarget} from '../src/features/sidebar/channelRowActions';
 import {useFormatMessage} from '../src/i18n/useFormatMessage';
 import {PHOTO} from './profileSheet';
 import {dmLeaveStep} from './sheetKit';
+import {catalog as koCatalog} from '@momo/core/i18n/generated/ko-KR';
+import {createMessageService} from '@momo/core/i18n/service';
+
+const koFormat = createMessageService({messageLocale: 'ko-KR', catalog: koCatalog}).formatMessage;
 
 // =============================================================================
 // 대화·채널 정보 페이지의 캡처 표면 (#4319). 배송되는 `ConversationInfoPage` 에 고정 데이터를 건넨다 — 항목은 화면과 같은 길
@@ -118,7 +122,7 @@ function props(over: Partial<ConversationInfoPageProps>): ConversationInfoPagePr
     kind: 'dm',
     title: '박서연',
     directory: DIRECTORY,
-    items: conversationInfoActionItems(DM_TARGET),
+    items: conversationInfoActionItems(DM_TARGET, undefined, koFormat),
     confirmingLeave: false,
     isPending: () => false,
     error: null,
@@ -137,7 +141,7 @@ function props(over: Partial<ConversationInfoPageProps>): ConversationInfoPagePr
 const CHANNEL_PROPS: Partial<ConversationInfoPageProps> = {
   kind: 'public',
   title: '디자인',
-  items: conversationInfoActionItems(CHANNEL_TARGET),
+  items: conversationInfoActionItems(CHANNEL_TARGET, undefined, koFormat),
   peer: null,
   status: null,
   subtitle: '6명 · 달무리 도우미 참여 중',
@@ -180,7 +184,7 @@ export function ConversationInfoPageSurface({which}: {which: string}): React.JSX
           <ConversationInfoPage
             {...props({
               title: '달무리 도우미',
-              items: conversationInfoActionItems(AGENT_TARGET),
+              items: conversationInfoActionItems(AGENT_TARGET, undefined, koFormat),
               peer: HELPER,
               status: {tone: 'ok', label: '응답함 3분 전'},
               onOpenAgent: noop,
@@ -192,7 +196,7 @@ export function ConversationInfoPageSurface({which}: {which: string}): React.JSX
       return (
         <Frame>
           <ConversationInfoPage
-            {...props({items: conversationInfoActionItems({...DM_TARGET, muted: true})})}
+            {...props({items: conversationInfoActionItems({...DM_TARGET, muted: true}, undefined, koFormat)})}
           />
         </Frame>
       );
@@ -211,7 +215,7 @@ export function ConversationInfoPageSurface({which}: {which: string}): React.JSX
     case 'mute-failure':
       return (
         <Frame>
-          <ConversationInfoPage {...props({...CHANNEL_PROPS, error: CHANNEL_MUTE_FAILURE})} />
+          <ConversationInfoPage {...props({...CHANNEL_PROPS, error: koFormat(CHANNEL_MUTE_FAILURE_KEY)})} />
         </Frame>
       );
     case 'viewer':
