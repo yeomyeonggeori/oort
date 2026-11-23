@@ -12,6 +12,8 @@ use momo_expressions::assemble::*;
 use sha2::{Digest, Sha256};
 use tokio::sync::Semaphore;
 
+mod beside;
+
 const BG: [u8; 3] = [240, 240, 240];
 const FG: [u8; 3] = [200, 30, 30];
 const MIB: usize = 1024 * 1024;
@@ -1519,11 +1521,15 @@ async fn the_default_entry_finds_the_assembler_beside_this_binary_and_honours_th
         PathBuf::from("/somewhere/else/assembler")
     );
     std::env::remove_var("OORT_EXPRESSION_ASSEMBLER");
+    // Wherever cargo put this test, the default is the assembler beside it (one level above
+    // `deps/`), and that is the very program cargo built.
+    let beside = beside::place("momo-expression-assembler", program());
     let found = assembler_path().unwrap();
+    assert_eq!(found, beside, "the assembler beside this binary");
     assert_eq!(
-        found,
-        program(),
-        "target/debug/deps/<test> -> target/debug/momo-expression-assembler"
+        std::fs::canonicalize(&found).unwrap(),
+        std::fs::canonicalize(program()).unwrap(),
+        "the default finds the assembler cargo built"
     );
     let r = try_assemble(
         &presets(&[Preset::Pulse], 240),
