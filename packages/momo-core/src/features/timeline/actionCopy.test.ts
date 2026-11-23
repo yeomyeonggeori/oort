@@ -1,13 +1,18 @@
 import { describe, expect, it } from "vitest";
 import { ApiError } from "../../lib/api";
+import { catalog as koCatalog } from "../../i18n/generated/ko-KR";
+import { createMessageCopy } from "../../testkit";
 import {
-  deleteFailureMessage,
-  editFailureMessage,
-  genericActionFailureMessage,
-  pinFailureMessage,
-  reactionFailureMessage,
-  replyFailureMessage,
+  GENERIC_ACTION_FAILURE_KEY,
+  deleteFailureKey,
+  editFailureKey,
+  pinFailureKey,
+  reactionFailureKey,
+  replyFailureKey,
 } from "./actionCopy";
+
+// 문장은 사전(`timeline.json`)에 있다(#6044). 시험은 제품과 같은 한국어 생성물로 키를 풀어 문장을 단정한다.
+const ko = createMessageCopy({ messageLocale: "ko-KR", catalog: koCatalog });
 
 // The exact sentences the message routes answer with. They are the right thing
 // to log and the wrong thing to put under someone's message, and this file is
@@ -27,12 +32,12 @@ const WIRE_SENTENCES = [
 ];
 
 const MAPPERS = [
-  editFailureMessage,
-  deleteFailureMessage,
-  reactionFailureMessage,
-  pinFailureMessage,
-  replyFailureMessage,
-];
+  editFailureKey,
+  deleteFailureKey,
+  reactionFailureKey,
+  pinFailureKey,
+  replyFailureKey,
+].map((key) => (error: unknown) => ko(key(error)));
 
 describe("message action failure copy", () => {
   /**
@@ -75,23 +80,23 @@ describe("message action failure copy", () => {
    */
   it("distinguishes the statuses a person can actually provoke", () => {
     const edit = [403, 404, 400].map((s) =>
-      editFailureMessage(new ApiError(s, "x"))
+      ko(editFailureKey(new ApiError(s, "x")))
     );
     expect(new Set(edit).size).toBe(edit.length);
 
-    expect(reactionFailureMessage(new ApiError(409, "x"))).toContain("200");
+    expect(ko(reactionFailureKey(new ApiError(409, "x")))).toContain("200");
     // 이슈 #1112 — the pin cap is a *channel* fact, so its 409 must name the
     // channel number and send the person to the list, not to this message.
-    const pinConflict = pinFailureMessage(new ApiError(409, "x"));
+    const pinConflict = ko(pinFailureKey(new ApiError(409, "x")));
     expect(pinConflict).toContain("100");
     expect(pinConflict).toContain("고정 목록");
-    const pin = [400, 403, 404, 409].map((s) => pinFailureMessage(new ApiError(s, "x")));
+    const pin = [400, 403, 404, 409].map((s) => ko(pinFailureKey(new ApiError(s, "x"))));
     expect(new Set(pin).size).toBe(pin.length);
-    expect(editFailureMessage(new ApiError(403, "x"))).toContain("내가 보낸");
-    expect(deleteFailureMessage(new ApiError(403, "x"))).toContain("내가 보낸");
+    expect(ko(editFailureKey(new ApiError(403, "x")))).toContain("내가 보낸");
+    expect(ko(deleteFailureKey(new ApiError(403, "x")))).toContain("내가 보낸");
   });
 
   it("keeps one shared fallback line rather than four near-identical ones", () => {
-    expect(genericActionFailureMessage).toMatch(/다시 시도/);
+    expect(ko(GENERIC_ACTION_FAILURE_KEY)).toMatch(/다시 시도/);
   });
 });

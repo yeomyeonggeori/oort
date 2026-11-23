@@ -1,4 +1,6 @@
 import {dismissTemporarySurfaces} from '@momo/core/features/notifications/entryDismiss';
+import {catalog as koCatalog} from '@momo/core/i18n/generated/ko-KR';
+import {createMessageService} from '@momo/core/i18n/service';
 import type { MessageAttachment } from '@momo/core/lib/api';
 import {
   act,
@@ -1793,7 +1795,7 @@ describe('⑩ 보낸 사람·날짜·시각', () => {
     await mount({ senderName: '박서연', sentAtMs: SENT_AT });
     expect(screen.getByTestId('attachment-viewer-sender').props.children).toBe('박서연');
     expect(screen.getByTestId('attachment-viewer-sent-at').props.children).toBe('2026년 10월 29일 14:55');
-    expect(viewerStamp(SENT_AT)).toBe('2026년 10월 29일 14:55');
+    expect(viewerStamp(createMessageService({messageLocale: 'ko-KR', catalog: koCatalog}).formatMessage, SENT_AT)).toBe('2026년 10월 29일 14:55');
     const stamp = screen.getByTestId('attachment-viewer-stamp');
     expect(stamp.props.accessible).toBe(true);
     expect(stamp.props.accessibilityLabel).toBe('박서연, 2026년 10월 29일 14:55');

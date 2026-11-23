@@ -28,12 +28,9 @@ import {
 } from '@momo/core/features/approvals/actionRole';
 import {EXPIRED_LINE_NOTE} from '@momo/core/features/approvals/expiry';
 import {MESSAGE_PREVIEW_LINK_LABEL} from '@momo/core/features/approvals/messagePreview';
-import {
-  AGENT_INITIATIVE_LABEL,
-  AGENT_INITIATIVE_RATIONALE_LABEL,
-  approvalHeadTitle,
-  rationaleTag,
-} from '@momo/core/features/timeline/agentInitiative';
+import {approvalHeadTitle, rationaleTag} from '@momo/core/features/timeline/agentInitiative';
+import {catalog as koCatalog} from '@momo/core/i18n/generated/ko-KR';
+import {createMessageService} from '@momo/core/i18n/service';
 import {
   APPROVAL_STATUS_LABEL,
   TURN_STATUS_LABEL,
@@ -60,6 +57,11 @@ import {SessionProvider} from '../src/session/useSession';
 import AppShell from '../src/shell/AppShell';
 import {__resetSessionStore, sessionPort} from '../src/storage/secureSession';
 import {__resetServerBaseCache, setServerBase} from '../src/storage/serverBase';
+
+// 문장은 사전에 있다(#6044): 한국어 생성물로 키를 풀어 한국어 그대로 단정한다.
+const FORMAT = createMessageService({messageLocale: 'ko-KR', catalog: koCatalog}).formatMessage;
+const AGENT_INITIATIVE_LABEL = '먼저 제안';
+const AGENT_INITIATIVE_RATIONALE_LABEL = '에이전트가 쓴 글';
 
 // =============================================================================
 // AX-7 (#2513) + U4-g (#1084): 폰 타임라인의 행동 승인 카드 · 1회 링크 · 결과 카드
@@ -778,7 +780,7 @@ describe('#4705 — 먼저 제안 카드 (ADR-0186 증보 v5 U-c)', () => {
   it('제목 끝에 꼬리표가 붙고 사유 이름표가 「에이전트가 쓴 글」이다 — 새 행은 서지 않는다', () => {
     renderPin();
     const head = screen.getByTestId('approval-card-title').props.children as string;
-    expect(head).toBe(approvalHeadTitle({title: PIN_TITLE, agentInitiated: true}));
+    expect(head).toBe(approvalHeadTitle(FORMAT, {title: PIN_TITLE, agentInitiated: true}));
     // 위 문장이 코어와 같다는 것만으로는 꼬리표가 있다는 증거가 못 된다 — 눈에 닿는 글자를 잰다.
     expect(head.startsWith(PIN_TITLE)).toBe(true);
     expect(head).toContain(AGENT_INITIATIVE_LABEL);
@@ -812,7 +814,7 @@ describe('#4705 — 먼저 제안 카드 (ADR-0186 증보 v5 U-c)', () => {
   });
 
   it('origin 이 없거나 모르는 값이면 지금까지의 카드 그대로다 — 꼬리표도 이름표도 없다', () => {
-    const plainLabel = rationaleTag({}).label;
+    const plainLabel = FORMAT(rationaleTag({}).labelKey);
     expect(plainLabel).not.toBe(AGENT_INITIATIVE_RATIONALE_LABEL);
     const withoutOrigin = pinProps();
     delete withoutOrigin.origin;

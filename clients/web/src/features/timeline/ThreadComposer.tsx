@@ -16,7 +16,7 @@ import {
   type ComposerKeyIntent,
 } from "@momo/core/features/chat/composerKeys";
 import { InlineBanner } from "@/features/common/States";
-import { replyFailureMessage } from "@momo/core/features/timeline/actionCopy";
+import { replyFailureKey } from "@momo/core/features/timeline/actionCopy";
 import {
   bundleCarriesOptions,
   planSendBundle,
@@ -29,6 +29,7 @@ import { useSession } from "@/app/session";
 import { mentionRoutingTarget, calledAgents } from "@momo/core/features/routing/mentionTargets";
 import { composerAgentNotice } from "@momo/core/features/ai/aiMention";
 import { useIsMobileShell } from "@/app/shellNav";
+import { useFormatMessage } from "@/i18n/useFormatMessage";
 import type { Directory } from "@/features/workspace/useWorkspace";
 import { AttachmentTray } from "@/features/attachments/AttachmentTray";
 import {
@@ -165,6 +166,7 @@ export function ThreadComposer({
   const [draft, setDraft] = useState(() => readThreadDraft(workspaceId, rootId));
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const formatMessage = useFormatMessage();
   // 키 모양을 보고 전송을 막은 횟수 (#2942 GC-1). 채널 컴포저와 같은 문이다.
   const [secretBlocks, setSecretBlocks] = useState(0);
   const secretBlocked = secretBlocks > 0;
@@ -350,7 +352,7 @@ export function ThreadComposer({
           });
           replyId = reply.id;
         } catch (cause: unknown) {
-          setError(replyFailureMessage(cause));
+          setError(formatMessage(replyFailureKey(cause)));
           return;
         }
         expressionStore?.recordSuccess(message.body, replyId);

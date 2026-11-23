@@ -1,3 +1,5 @@
+import type { LocaleService } from "../../i18n/context";
+import type { PlainMessageKey } from "../../i18n/keys";
 import {
   idKey,
   memberFor,
@@ -22,22 +24,10 @@ import {
 /** How many people the sentence names before the rest become 「외 N명」. */
 const NAMED_LIMIT = 3;
 
-/** First-person token when the viewer is among the reactors. */
-export const REACTION_SELF_LABEL = "나";
+/** 내가 반응한 사람들 가운데 있을 때의 첫 사람 이름. 「나(내 반응 취소)」 — 칩이 누르면 무엇을 하는지도 함께 말한다. */
+export const REACTION_SELF_TOKEN_KEY = "timeline.reaction.selfToken" satisfies PlainMessageKey;
 
-/**
- * Toggle direction when the viewer already reacted. Same words the chip used
- * to put in its accessible name; the tooltip parenthetical reuses them so hover
- * and the screen reader do not disagree about what a click will do.
- */
-export const REACTION_REMOVE_HINT = "내 반응 취소";
-
-/** Toggle direction when the viewer has not reacted. */
-export const REACTION_ADD_HINT = "나도 반응하기";
-
-function selfToken(): string {
-  return `${REACTION_SELF_LABEL}(${REACTION_REMOVE_HINT})`;
-}
+type Format = LocaleService["formatMessage"];
 
 function resolvedLabel(
   directory: Directory,
@@ -50,10 +40,30 @@ function resolvedLabel(
   return parts.handle ? `${parts.name} ${parts.handle}` : parts.name;
 }
 
-function joinNames(shown: string[], extra: number): string {
-  if (shown.length === 0) return extra > 0 ? `외 ${extra}명` : "";
-  const head = shown.join(", ");
-  return extra > 0 ? `${head} 외 ${extra}명` : head;
+function joinNames(formatMessage: Format, shown: string[], extra: number): string {
+  const [a = "", b = "", c = ""] = shown;
+  if (extra > 0) {
+    switch (shown.length) {
+      case 0:
+        return formatMessage("timeline.reaction.namesExtra0", { extra });
+      case 1:
+        return formatMessage("timeline.reaction.namesExtra1", { a, extra });
+      case 2:
+        return formatMessage("timeline.reaction.namesExtra2", { a, b, extra });
+      default:
+        return formatMessage("timeline.reaction.namesExtra3", { a, b, c, extra });
+    }
+  }
+  switch (shown.length) {
+    case 0:
+      return "";
+    case 1:
+      return formatMessage("timeline.reaction.names1", { a });
+    case 2:
+      return formatMessage("timeline.reaction.names2", { a, b });
+    default:
+      return formatMessage("timeline.reaction.names3", { a, b, c });
+  }
 }
 
 /**
@@ -62,6 +72,7 @@ function joinNames(shown: string[], extra: number): string {
  * through the directory like anyone else.
  */
 export function formatReactionNames(
+  formatMessage: Format,
   memberIds: readonly string[],
   directory: Directory,
   myMemberId?: string
@@ -87,11 +98,11 @@ export function formatReactionNames(
   }
 
   const named: string[] = [];
-  if (self) named.push(selfToken());
+  if (self) named.push(formatMessage(REACTION_SELF_TOKEN_KEY));
   named.push(...others);
 
   const extra = Math.max(0, named.length - NAMED_LIMIT) + unresolved;
-  return joinNames(named.slice(0, NAMED_LIMIT), extra);
+  return joinNames(formatMessage, named.slice(0, NAMED_LIMIT), extra);
 }
 
 /**
@@ -99,18 +110,18 @@ export function formatReactionNames(
  * reacted) the add hint. The remove hint already sits on 「나」 when I have.
  */
 export function reactionChipAccessibleName(
+  formatMessage: Format,
   emoji: string,
   count: number,
   names: string,
   mine: boolean
 ): string {
-  const counted = `${emoji} 반응 ${count}개`;
   if (!names) {
     return mine
-      ? `${counted}, ${REACTION_REMOVE_HINT}`
-      : `${counted}, ${REACTION_ADD_HINT}`;
+      ? formatMessage("timeline.reaction.chipMineNoNames", { emoji, count })
+      : formatMessage("timeline.reaction.chipOtherNoNames", { emoji, count });
   }
   return mine
-    ? `${counted}, ${names}`
-    : `${counted}, ${names}, ${REACTION_ADD_HINT}`;
+    ? formatMessage("timeline.reaction.chipMine", { emoji, count, names })
+    : formatMessage("timeline.reaction.chipOther", { emoji, count, names });
 }

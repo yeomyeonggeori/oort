@@ -4,6 +4,7 @@ import { sendMessage } from "@momo/core/lib/api";
 import {
   canDelegate,
   delegateButtonLabel,
+  delegateReasonLine,
   delegateMessageBody,
   delegateSentLine,
   teamAiCallNames,
@@ -12,6 +13,7 @@ import {
 } from "@momo/core/features/timeline/teamAi";
 import { Button } from "@/design/ui/button";
 import { cn } from "@/design/lib/cn";
+import { useFormatMessage } from "@/i18n/useFormatMessage";
 import { useOffline } from "@/features/common/useOffline";
 import { memberFor, type Directory } from "@/features/workspace/useWorkspace";
 import { BlockedReason } from "@/features/common/BlockedReason";
@@ -52,6 +54,8 @@ export function TeamAiDelegateStrip({
   directory: Directory;
 }) {
   const offline = useOffline();
+  const formatMessage = useFormatMessage();
+  const reasonLine = delegateReasonLine(formatMessage, delegate);
   const [state, setState] = useState<SendState>({ kind: "idle" });
   // 보낸 뒤 버튼 묶음은 「맡겼어요」 한 줄로 바뀐다. 초점이 버튼에 있었다면 그대로 두면
   // 지워진 버튼과 함께 문서 맨 앞(body)으로 떨어져 키보드 사용자가 타임라인에서 자리를
@@ -66,7 +70,7 @@ export function TeamAiDelegateStrip({
     sentRef.current?.focus();
   }, [state.kind]);
   const showButtons = canDelegate(delegate, viewerMemberId);
-  if (delegate.reasonLine === null && !showButtons) return null;
+  if (reasonLine === null && !showButtons) return null;
 
   const teamAi = memberFor(
     directory,
@@ -79,6 +83,7 @@ export function TeamAiDelegateStrip({
       wrapRef.current?.contains(document.activeElement) ?? false;
     setState({ kind: "sending", memberId: candidate.memberId });
     const body = delegateMessageBody({
+      formatMessage,
       targetHandle: candidate.handle,
       sourceBody,
       teamAiHandles: teamAiCallNames(teamAi),
@@ -102,12 +107,12 @@ export function TeamAiDelegateStrip({
       className="mt-1 flex flex-col gap-2"
       data-testid="team-ai-delegate"
     >
-      {delegate.reasonLine !== null && (
+      {reasonLine !== null && (
         <p
           className="text-meta text-ink-muted"
           data-testid="team-ai-delegate-reason"
         >
-          {delegate.reasonLine}
+          {reasonLine}
         </p>
       )}
       {showButtons && state.kind === "sent" && (
@@ -118,7 +123,7 @@ export function TeamAiDelegateStrip({
           className="rounded-sm text-meta text-ink-muted focus-visible:focus-ring"
           data-testid="team-ai-delegate-sent"
         >
-          {delegateSentLine(state.name)}
+          {delegateSentLine(formatMessage, state.name)}
         </p>
       )}
       {showButtons && state.kind !== "sent" && (
@@ -142,7 +147,7 @@ export function TeamAiDelegateStrip({
                 {sending && (
                   <Loader2 aria-hidden="true" className="spinner-busy" />
                 )}
-                {delegateButtonLabel(candidate)}
+                {delegateButtonLabel(formatMessage, candidate)}
               </Button>
             );
           })}

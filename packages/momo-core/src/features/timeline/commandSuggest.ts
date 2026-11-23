@@ -1,5 +1,7 @@
+import type { LocaleService } from "../../i18n/context";
+import type { PlainMessageKey } from "../../i18n/keys";
 import type { Message } from "../../lib/api";
-import { attachParticle, attachRecipient } from "../../lib/koreanParticle";
+import { attachParticle } from "../../lib/koreanParticle";
 import { aiHubSection } from "../ai/aiHubModel";
 import {
   AGENT_SUGGESTABLE_COMMANDS,
@@ -102,31 +104,46 @@ export const SETTINGS_OPEN_SECTIONS = [
 export type SettingsOpenSection = (typeof SETTINGS_OPEN_SECTIONS)[number];
 
 /** 서버 `settings_open_label` 표와 같은 글자(골든 시험이 잰다). */
-const SETTINGS_OPEN_LABELS: Readonly<Record<SettingsOpenSection, string>> = {
-  profile: "프로필 설정 열기",
-  appearance: "모양 설정 열기",
-  notifications: "알림 설정 열기",
-  shortcuts: "단축키 설정 열기",
-  devices: "기기 설정 열기",
-  workspace: "워크스페이스 설정 열기",
-  members: "멤버와 초대 열기",
-  memory: "기억 설정 열기",
-  usage: "사용량 열기",
-  code: "실행 호스트 설정 열기",
-  updates: "업데이트 설정 열기",
-  plugins: "앱 설정 열기",
-};
+const SETTINGS_OPEN_LABEL_KEYS = {
+  profile: "timeline.commandSuggest.openProfile",
+  appearance: "timeline.commandSuggest.openAppearance",
+  notifications: "timeline.commandSuggest.openNotifications",
+  shortcuts: "timeline.commandSuggest.openShortcuts",
+  devices: "timeline.commandSuggest.openDevices",
+  workspace: "timeline.commandSuggest.openWorkspace",
+  members: "timeline.commandSuggest.openMembers",
+  memory: "timeline.commandSuggest.openMemory",
+  usage: "timeline.commandSuggest.openUsage",
+  code: "timeline.commandSuggest.openCode",
+  updates: "timeline.commandSuggest.openUpdates",
+  plugins: "timeline.commandSuggest.openPlugins",
+} as const satisfies Record<SettingsOpenSection, PlainMessageKey>;
 
-export function settingsOpenLabel(section: SettingsOpenSection): string {
-  return SETTINGS_OPEN_LABELS[section];
+export function settingsOpenLabelKey(section: SettingsOpenSection): PlainMessageKey {
+  return SETTINGS_OPEN_LABEL_KEYS[section];
 }
 
 /**
  * 카드 줄에 쓰는 대상 이름 — 라벨에서 동사 「열기」를 뗀 것(「알림 설정」). 줄 옆 버튼이
  * 이미 「열기」라, 같은 말을 두 번 읽지 않게 한다.
  */
-export function settingsOpenTarget(section: SettingsOpenSection): string {
-  return SETTINGS_OPEN_LABELS[section].replace(/ 열기$/, "");
+const SETTINGS_OPEN_TARGET_KEYS = {
+  profile: "timeline.commandSuggest.targetProfile",
+  appearance: "timeline.commandSuggest.targetAppearance",
+  notifications: "timeline.commandSuggest.targetNotifications",
+  shortcuts: "timeline.commandSuggest.targetShortcuts",
+  devices: "timeline.commandSuggest.targetDevices",
+  workspace: "timeline.commandSuggest.targetWorkspace",
+  members: "timeline.commandSuggest.targetMembers",
+  memory: "timeline.commandSuggest.targetMemory",
+  usage: "timeline.commandSuggest.targetUsage",
+  code: "timeline.commandSuggest.targetCode",
+  updates: "timeline.commandSuggest.targetUpdates",
+  plugins: "timeline.commandSuggest.targetPlugins",
+} as const satisfies Record<SettingsOpenSection, PlainMessageKey>;
+
+export function settingsOpenTargetKey(section: SettingsOpenSection): PlainMessageKey {
+  return SETTINGS_OPEN_TARGET_KEYS[section];
 }
 
 /**
@@ -162,14 +179,14 @@ export const WORK_REQUEST_SHEET_MODE = "work" as const;
 export const WORK_REQUEST_PROMPT_MAX_BYTES = 8_000;
 
 /** 서버 `work_request_open_label` 표와 같은 글자(골든 시험이 잰다). harness로만 가른다. */
-export function workRequestOpenLabel(harness: WorkRequestHarness | null): string {
+export function workRequestOpenLabelKey(harness: WorkRequestHarness | null): PlainMessageKey {
   switch (harness) {
     case "claude":
-      return "내 맥의 Claude Code에 맡기기";
+      return "timeline.workRequest.labelClaude";
     case "codex":
-      return "내 맥의 Codex에 맡기기";
+      return "timeline.workRequest.labelCodex";
     default:
-      return "내 맥에 작업 맡기기";
+      return "timeline.workRequest.labelAny";
   }
 }
 
@@ -407,17 +424,24 @@ function nameText(name: MemberNameParts): string {
  * `settings.open`은 「구민수에게 「알림 설정 열기」 카드를 제안했어요」 — 깨진 제안
  * (`section` 없음)은 어느 화면인지 말하지 않고 「설정 열기」만 말한다.
  */
-export function commandSuggestOneLine(card: CommandSuggestCard): string {
+export function commandSuggestOneLine(
+  formatMessage: LocaleService["formatMessage"],
+  card: CommandSuggestCard
+): string {
+  const name = nameText(card.forMemberName);
   if (card.commandId === "work.request.open") {
-    // 라벨은 harness로만 갈린다 — 글(prompt)은 남에게 보이는 줄에도 싣지 않는다.
-    const what = workRequestOpenLabel(card.workRequest?.harness ?? null);
-    return `${attachRecipient(nameText(card.forMemberName), "person")} 「${what}」 카드를 제안했어요`;
+    const what = formatMessage(workRequestOpenLabelKey(card.workRequest?.harness ?? null));
+    return formatMessage("timeline.commandSuggest.oneLineCard", { name, what });
   }
   if (card.commandId === "settings.open") {
-    const what = card.section === null ? "설정 열기" : settingsOpenLabel(card.section);
-    return `${attachRecipient(nameText(card.forMemberName), "person")} 「${what}」 카드를 제안했어요`;
+    const what = formatMessage(
+      card.section === null
+        ? "timeline.commandSuggest.settingsOpenGeneric"
+        : settingsOpenLabelKey(card.section)
+    );
+    return formatMessage("timeline.commandSuggest.oneLineCard", { name, what });
   }
-  return `${attachRecipient(nameText(card.forMemberName), "person")} AI 계정 연결을 제안했어요`;
+  return formatMessage("timeline.commandSuggest.oneLineAiConnect", { name });
 }
 
 /** 대상에게 보이는 카드 머리. 「hermes가 제안했어요」. */
@@ -426,37 +450,35 @@ export function commandSuggestHead(card: CommandSuggestCard): string {
 }
 
 /** 머리의 칩. 1단계 로컬 카드의 「나에게만 보여요」 자리. */
-export const COMMAND_SUGGEST_ONLY_ME = "나에게만 조작돼요";
+export const COMMAND_SUGGEST_ONLY_ME_KEY = "timeline.commandSuggest.onlyMe" satisfies PlainMessageKey;
 
 /** 운영자(대상 아님) 한 줄의 문. 팀 키 줄만 펼친다. */
-export const COMMAND_SUGGEST_TEAM_OPEN = "팀 AI 키 보기";
-export const COMMAND_SUGGEST_TEAM_CLOSE = "팀 AI 키 접기";
+export const COMMAND_SUGGEST_TEAM_OPEN_KEY = "timeline.commandSuggest.teamOpen" satisfies PlainMessageKey;
+export const COMMAND_SUGGEST_TEAM_CLOSE_KEY = "timeline.commandSuggest.teamClose" satisfies PlainMessageKey;
 
 /**
  * 폰 대상 카드의 내 계정 절(Q5, #2816 결재: 폰은 구독 로그인 불가).
  * A 레인 host 보고(#2781·#2782)가 오기 전이라 상태 줄 없이 이 한 줄이다.
  */
-export const COMMAND_SUGGEST_PHONE_MINE =
-  "구독 로그인은 맥에서 해요. 맥에서 이 카드를 열면 바로 로그인할 수 있어요.";
+export const COMMAND_SUGGEST_PHONE_MINE_KEY = "timeline.commandSuggest.phoneMine" satisfies PlainMessageKey;
 
 /** 폰 `settings.open` 카드의 안내: 폰에는 이 설정 화면이 없다(맥·웹에서 연다). */
-export const COMMAND_SUGGEST_SETTINGS_PHONE = "이 설정은 맥·웹에서 열어요.";
+export const COMMAND_SUGGEST_SETTINGS_PHONE_KEY = "timeline.commandSuggest.settingsPhone" satisfies PlainMessageKey;
 
 /** 대상 본인의 `settings.open` 카드에서 설정으로 가는 버튼. */
-export const COMMAND_SUGGEST_SETTINGS_OPEN = "열기";
+export const COMMAND_SUGGEST_SETTINGS_OPEN_KEY = "timeline.commandSuggest.settingsOpen" satisfies PlainMessageKey;
 
 /** 폰 카드의 발(키 입력은 폰에서 받지 않는다, Q5). */
-export const COMMAND_SUGGEST_PHONE_FOOT = "키 입력은 맥·웹에서 해요";
+export const COMMAND_SUGGEST_PHONE_FOOT_KEY = "timeline.commandSuggest.phoneFoot" satisfies PlainMessageKey;
 
 /** 비운영자에게 남는 다음 행동(G4 · brief §4.4). */
-export const COMMAND_SUGGEST_ASK_OPERATOR = "운영자에게 부탁하기";
+export const COMMAND_SUGGEST_ASK_OPERATOR_KEY = "timeline.commandSuggest.askOperator" satisfies PlainMessageKey;
 /** 쓰던 글이 있어 멘션을 채우지 않았을 때. */
-export const COMMAND_SUGGEST_ASK_BUSY =
-  "쓰던 글이 있어 채우지 않았어요. 운영자를 직접 멘션해 주세요.";
+export const COMMAND_SUGGEST_ASK_BUSY_KEY = "timeline.commandSuggest.askBusy" satisfies PlainMessageKey;
 /** 스레드 답글의 제안인데 그 스레드 입력창이 열려 있지 않을 때. */
-export const COMMAND_SUGGEST_ASK_THREAD = "스레드를 열고 운영자를 멘션해 주세요.";
+export const COMMAND_SUGGEST_ASK_THREAD_KEY = "timeline.commandSuggest.askThread" satisfies PlainMessageKey;
 /** 멤버 목록에 운영자가 없을 때. */
-export const COMMAND_SUGGEST_ASK_NONE = "이 워크스페이스에서 운영자를 찾지 못했어요.";
+export const COMMAND_SUGGEST_ASK_NONE_KEY = "timeline.commandSuggest.askNone" satisfies PlainMessageKey;
 
 /**
  * 「운영자에게 부탁하기」가 컴포저에 채울 멘션(보내는 것은 사람이다).

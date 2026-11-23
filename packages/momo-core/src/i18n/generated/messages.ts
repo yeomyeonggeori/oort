@@ -1666,9 +1666,31 @@ export const messageKeys = [
   "teamAi.stage.setupLine",
   "teamAi.stage.setupUnverifiedDetail",
   "teamAi.stage.verifyingLine",
+  "timeline.actionFailure.deleteFailed",
+  "timeline.actionFailure.deleteNotAuthor",
+  "timeline.actionFailure.editDeleted",
+  "timeline.actionFailure.editFailed",
+  "timeline.actionFailure.editNotAuthor",
+  "timeline.actionFailure.generic",
+  "timeline.actionFailure.messageNotFound",
+  "timeline.actionFailure.pinDeleted",
+  "timeline.actionFailure.pinFailed",
+  "timeline.actionFailure.pinLimit",
+  "timeline.actionFailure.pinNotMember",
+  "timeline.actionFailure.reactDeleted",
+  "timeline.actionFailure.reactFailed",
+  "timeline.actionFailure.reactLimit",
+  "timeline.actionFailure.reactNotMember",
+  "timeline.actionFailure.replyFailed",
+  "timeline.actionFailure.replyNotAllowed",
+  "timeline.actionFailure.replyNotMember",
+  "timeline.actionFailure.replyOriginalNotFound",
   "timeline.addMember.createdDescription",
   "timeline.addMember.createdDescriptionPublic",
   "timeline.addMember.later",
+  "timeline.agentInitiative.headTitle",
+  "timeline.agentInitiative.rationaleDefault",
+  "timeline.agentInitiative.rationaleLabel",
   "timeline.agentRail.open",
   "timeline.agentRail.openActivity",
   "timeline.agentRail.openRecord",
@@ -1680,6 +1702,31 @@ export const messageKeys = [
   "timeline.approval.reproposeBusy",
   "timeline.approval.reproposeSeeded",
   "timeline.approvalExpiry.soon",
+  "timeline.artifactNote.awaitingApproval",
+  "timeline.artifactNote.cancelled",
+  "timeline.artifactNote.done",
+  "timeline.artifactNote.error",
+  "timeline.artifactNote.inFlight",
+  "timeline.artifactNote.leadNote",
+  "timeline.artifactNote.leadSignal",
+  "timeline.artifactNote.queued",
+  "timeline.artifactNote.stalled",
+  "timeline.artifactNote.withNote",
+  "timeline.artifacts.commitTitle",
+  "timeline.artifacts.diffTitle",
+  "timeline.artifacts.pullRequestTitle",
+  "timeline.artifacts.toolTitle",
+  "timeline.artifacts.toolTitleWithObject",
+  "timeline.artifacts.unnamedFile",
+  "timeline.cascade.noticeMulti",
+  "timeline.cascade.noticeSingle",
+  "timeline.cascade.reasonRateLimited",
+  "timeline.cascade.reasonStatus",
+  "timeline.cascade.reasonUnknown",
+  "timeline.cascade.reasonUnreachable",
+  "timeline.cascade.route",
+  "timeline.cascade.servedFallback",
+  "timeline.cascade.servedLabeled",
   "timeline.channelLeave.bodyPrivate",
   "timeline.channelLeave.bodyPublic",
   "timeline.channelLeave.bodyPublicBrowse",
@@ -1691,8 +1738,61 @@ export const messageKeys = [
   "timeline.channelLeave.errorNetwork",
   "timeline.channelLeave.errorNotFound",
   "timeline.channelLeave.title",
+  "timeline.commandSuggest.askBusy",
+  "timeline.commandSuggest.askNone",
+  "timeline.commandSuggest.askOperator",
+  "timeline.commandSuggest.askThread",
+  "timeline.commandSuggest.oneLineAiConnect",
+  "timeline.commandSuggest.oneLineCard",
+  "timeline.commandSuggest.onlyMe",
+  "timeline.commandSuggest.openAppearance",
+  "timeline.commandSuggest.openCode",
+  "timeline.commandSuggest.openDevices",
+  "timeline.commandSuggest.openMembers",
+  "timeline.commandSuggest.openMemory",
+  "timeline.commandSuggest.openNotifications",
+  "timeline.commandSuggest.openPlugins",
+  "timeline.commandSuggest.openProfile",
+  "timeline.commandSuggest.openShortcuts",
+  "timeline.commandSuggest.openUpdates",
+  "timeline.commandSuggest.openUsage",
+  "timeline.commandSuggest.openWorkspace",
+  "timeline.commandSuggest.phoneFoot",
+  "timeline.commandSuggest.phoneMine",
+  "timeline.commandSuggest.settingsOpen",
+  "timeline.commandSuggest.settingsOpenGeneric",
+  "timeline.commandSuggest.settingsPhone",
+  "timeline.commandSuggest.targetAppearance",
+  "timeline.commandSuggest.targetCode",
+  "timeline.commandSuggest.targetDevices",
+  "timeline.commandSuggest.targetMembers",
+  "timeline.commandSuggest.targetMemory",
+  "timeline.commandSuggest.targetNotifications",
+  "timeline.commandSuggest.targetPlugins",
+  "timeline.commandSuggest.targetProfile",
+  "timeline.commandSuggest.targetShortcuts",
+  "timeline.commandSuggest.targetUpdates",
+  "timeline.commandSuggest.targetUsage",
+  "timeline.commandSuggest.targetWorkspace",
+  "timeline.commandSuggest.teamClose",
+  "timeline.commandSuggest.teamOpen",
   "timeline.createChannel.privateDetail",
   "timeline.createChannel.publicDetail",
+  "timeline.decisionStage.position",
+  "timeline.decisionStage.positionNone",
+  "timeline.deletedFold.repeat",
+  "timeline.deletedFold.tombstone",
+  "timeline.divider.dateFull",
+  "timeline.divider.dateMonthDay",
+  "timeline.divider.labelToday",
+  "timeline.divider.labelYesterday",
+  "timeline.divider.recovery",
+  "timeline.divider.recoveryLabel",
+  "timeline.divider.recoveryLabelReread",
+  "timeline.divider.recoveryReread",
+  "timeline.divider.today",
+  "timeline.divider.unread",
+  "timeline.divider.yesterday",
   "timeline.edited.atDate",
   "timeline.edited.atDay",
   "timeline.edited.atTime",
@@ -1736,14 +1836,70 @@ export const messageKeys = [
   "timeline.memberPanel.requestSpoken",
   "timeline.memberPanel.rowActions",
   "timeline.memberPanel.stageSpoken",
+  "timeline.pins.actionPin",
+  "timeline.pins.actionUnpin",
+  "timeline.pins.emptyBody",
+  "timeline.pins.listCount",
+  "timeline.pins.listEmptyDetail",
+  "timeline.pins.listEmptyHeadline",
+  "timeline.pins.listEmptySentence",
+  "timeline.pins.listFailedDetail",
+  "timeline.pins.listFailedHeadline",
+  "timeline.pins.listFailedSentence",
+  "timeline.pins.listNone",
+  "timeline.pins.rowMark",
+  "timeline.pins.stamp",
   "timeline.quote.head",
   "timeline.quote.headUnnamed",
+  "timeline.reaction.chipMine",
+  "timeline.reaction.chipMineNoNames",
+  "timeline.reaction.chipOther",
+  "timeline.reaction.chipOtherNoNames",
+  "timeline.reaction.names1",
+  "timeline.reaction.names2",
+  "timeline.reaction.names3",
+  "timeline.reaction.namesExtra0",
+  "timeline.reaction.namesExtra1",
+  "timeline.reaction.namesExtra2",
+  "timeline.reaction.namesExtra3",
+  "timeline.reaction.selfToken",
   "timeline.runException.open",
   "timeline.runException.settings",
   "timeline.send.discard",
   "timeline.send.failed",
   "timeline.send.resend",
   "timeline.send.sending",
+  "timeline.spawnHost.candidateWithReason",
+  "timeline.spawnHost.choiceLabel",
+  "timeline.spawnHost.noEligibleHost",
+  "timeline.spawnHost.notReady",
+  "timeline.spawnHost.offline",
+  "timeline.spawnHost.revoked",
+  "timeline.spawnHost.tierCloud",
+  "timeline.spawnHost.tierLocal",
+  "timeline.spawnHost.tierRemote",
+  "timeline.spawnHost.unavailable",
+  "timeline.streamStop.cancelled",
+  "timeline.streamStop.cutOff",
+  "timeline.teamAi.delegateButton",
+  "timeline.teamAi.delegateQuoted",
+  "timeline.teamAi.delegateReason",
+  "timeline.teamAi.delegateSent",
+  "timeline.teamAi.limitOperatorDay",
+  "timeline.teamAi.limitOperatorOff",
+  "timeline.teamAi.limitTeamMonth",
+  "timeline.teamAi.limitUnknown",
+  "timeline.teamAi.proposalAuthority",
+  "timeline.teamAi.proposalLabel",
+  "timeline.teamAi.proposalLine",
+  "timeline.teamAi.proposalLineUnknown",
+  "timeline.teamAi.rationaleLabel",
+  "timeline.teamAi.rationaleNote",
+  "timeline.teamAi.reasonCouldNotPropose",
+  "timeline.teamAi.reasonOutOfScope",
+  "timeline.teamAi.reasonOverBudget",
+  "timeline.teamAi.reasonRateLimited",
+  "timeline.teamAi.reasonSlow",
   "timeline.thread.followDismiss",
   "timeline.thread.followFailed",
   "timeline.thread.followHint",
@@ -4023,6 +4179,25 @@ export const argumentSpecs = {
   "teamAi.stage.setupLine": {},
   "teamAi.stage.setupUnverifiedDetail": {},
   "teamAi.stage.verifyingLine": {},
+  "timeline.actionFailure.deleteFailed": {},
+  "timeline.actionFailure.deleteNotAuthor": {},
+  "timeline.actionFailure.editDeleted": {},
+  "timeline.actionFailure.editFailed": {},
+  "timeline.actionFailure.editNotAuthor": {},
+  "timeline.actionFailure.generic": {},
+  "timeline.actionFailure.messageNotFound": {},
+  "timeline.actionFailure.pinDeleted": {},
+  "timeline.actionFailure.pinFailed": {},
+  "timeline.actionFailure.pinLimit": {},
+  "timeline.actionFailure.pinNotMember": {},
+  "timeline.actionFailure.reactDeleted": {},
+  "timeline.actionFailure.reactFailed": {},
+  "timeline.actionFailure.reactLimit": {},
+  "timeline.actionFailure.reactNotMember": {},
+  "timeline.actionFailure.replyFailed": {},
+  "timeline.actionFailure.replyNotAllowed": {},
+  "timeline.actionFailure.replyNotMember": {},
+  "timeline.actionFailure.replyOriginalNotFound": {},
   "timeline.addMember.createdDescription": {
     "name": "string"
   },
@@ -4030,6 +4205,11 @@ export const argumentSpecs = {
     "name": "string"
   },
   "timeline.addMember.later": {},
+  "timeline.agentInitiative.headTitle": {
+    "title": "string"
+  },
+  "timeline.agentInitiative.rationaleDefault": {},
+  "timeline.agentInitiative.rationaleLabel": {},
   "timeline.agentRail.open": {
     "label": "string"
   },
@@ -4045,6 +4225,55 @@ export const argumentSpecs = {
   "timeline.approval.reproposeBusy": {},
   "timeline.approval.reproposeSeeded": {},
   "timeline.approvalExpiry.soon": {},
+  "timeline.artifactNote.awaitingApproval": {},
+  "timeline.artifactNote.cancelled": {},
+  "timeline.artifactNote.done": {},
+  "timeline.artifactNote.error": {},
+  "timeline.artifactNote.inFlight": {},
+  "timeline.artifactNote.leadNote": {},
+  "timeline.artifactNote.leadSignal": {},
+  "timeline.artifactNote.queued": {},
+  "timeline.artifactNote.stalled": {},
+  "timeline.artifactNote.withNote": {
+    "lead": "string",
+    "note": "string",
+    "sentence": "string"
+  },
+  "timeline.artifacts.commitTitle": {},
+  "timeline.artifacts.diffTitle": {},
+  "timeline.artifacts.pullRequestTitle": {},
+  "timeline.artifacts.toolTitle": {
+    "tool": "string"
+  },
+  "timeline.artifacts.toolTitleWithObject": {
+    "object": "string",
+    "tool": "string"
+  },
+  "timeline.artifacts.unnamedFile": {},
+  "timeline.cascade.noticeMulti": {
+    "count": "number",
+    "reason": "string",
+    "served": "string"
+  },
+  "timeline.cascade.noticeSingle": {
+    "reason": "string",
+    "served": "string"
+  },
+  "timeline.cascade.reasonRateLimited": {},
+  "timeline.cascade.reasonStatus": {
+    "status": "string"
+  },
+  "timeline.cascade.reasonUnknown": {
+    "reason": "string"
+  },
+  "timeline.cascade.reasonUnreachable": {},
+  "timeline.cascade.route": {
+    "label": "string"
+  },
+  "timeline.cascade.servedFallback": {},
+  "timeline.cascade.servedLabeled": {
+    "label": "string"
+  },
   "timeline.channelLeave.bodyPrivate": {
     "name": "string"
   },
@@ -4064,8 +4293,85 @@ export const argumentSpecs = {
   },
   "timeline.channelLeave.errorNotFound": {},
   "timeline.channelLeave.title": {},
+  "timeline.commandSuggest.askBusy": {},
+  "timeline.commandSuggest.askNone": {},
+  "timeline.commandSuggest.askOperator": {},
+  "timeline.commandSuggest.askThread": {},
+  "timeline.commandSuggest.oneLineAiConnect": {
+    "name": "string"
+  },
+  "timeline.commandSuggest.oneLineCard": {
+    "name": "string",
+    "what": "string"
+  },
+  "timeline.commandSuggest.onlyMe": {},
+  "timeline.commandSuggest.openAppearance": {},
+  "timeline.commandSuggest.openCode": {},
+  "timeline.commandSuggest.openDevices": {},
+  "timeline.commandSuggest.openMembers": {},
+  "timeline.commandSuggest.openMemory": {},
+  "timeline.commandSuggest.openNotifications": {},
+  "timeline.commandSuggest.openPlugins": {},
+  "timeline.commandSuggest.openProfile": {},
+  "timeline.commandSuggest.openShortcuts": {},
+  "timeline.commandSuggest.openUpdates": {},
+  "timeline.commandSuggest.openUsage": {},
+  "timeline.commandSuggest.openWorkspace": {},
+  "timeline.commandSuggest.phoneFoot": {},
+  "timeline.commandSuggest.phoneMine": {},
+  "timeline.commandSuggest.settingsOpen": {},
+  "timeline.commandSuggest.settingsOpenGeneric": {},
+  "timeline.commandSuggest.settingsPhone": {},
+  "timeline.commandSuggest.targetAppearance": {},
+  "timeline.commandSuggest.targetCode": {},
+  "timeline.commandSuggest.targetDevices": {},
+  "timeline.commandSuggest.targetMembers": {},
+  "timeline.commandSuggest.targetMemory": {},
+  "timeline.commandSuggest.targetNotifications": {},
+  "timeline.commandSuggest.targetPlugins": {},
+  "timeline.commandSuggest.targetProfile": {},
+  "timeline.commandSuggest.targetShortcuts": {},
+  "timeline.commandSuggest.targetUpdates": {},
+  "timeline.commandSuggest.targetUsage": {},
+  "timeline.commandSuggest.targetWorkspace": {},
+  "timeline.commandSuggest.teamClose": {},
+  "timeline.commandSuggest.teamOpen": {},
   "timeline.createChannel.privateDetail": {},
   "timeline.createChannel.publicDetail": {},
+  "timeline.decisionStage.position": {
+    "current": "string",
+    "total": "string"
+  },
+  "timeline.decisionStage.positionNone": {},
+  "timeline.deletedFold.repeat": {
+    "count": "string"
+  },
+  "timeline.deletedFold.tombstone": {},
+  "timeline.divider.dateFull": {
+    "day": "string",
+    "month": "string",
+    "year": "string"
+  },
+  "timeline.divider.dateMonthDay": {
+    "day": "string",
+    "month": "string"
+  },
+  "timeline.divider.labelToday": {
+    "date": "string"
+  },
+  "timeline.divider.labelYesterday": {
+    "date": "string"
+  },
+  "timeline.divider.recovery": {},
+  "timeline.divider.recoveryLabel": {},
+  "timeline.divider.recoveryLabelReread": {},
+  "timeline.divider.recoveryReread": {},
+  "timeline.divider.today": {},
+  "timeline.divider.unread": {
+    "count": "number",
+    "figure": "string"
+  },
+  "timeline.divider.yesterday": {},
   "timeline.edited.atDate": {
     "date": "string",
     "time": "string"
@@ -4158,10 +4464,76 @@ export const argumentSpecs = {
   "timeline.memberPanel.stageSpoken": {
     "stage": "string"
   },
+  "timeline.pins.actionPin": {},
+  "timeline.pins.actionUnpin": {},
+  "timeline.pins.emptyBody": {},
+  "timeline.pins.listCount": {
+    "count": "number"
+  },
+  "timeline.pins.listEmptyDetail": {},
+  "timeline.pins.listEmptyHeadline": {},
+  "timeline.pins.listEmptySentence": {},
+  "timeline.pins.listFailedDetail": {},
+  "timeline.pins.listFailedHeadline": {},
+  "timeline.pins.listFailedSentence": {},
+  "timeline.pins.listNone": {},
+  "timeline.pins.rowMark": {},
+  "timeline.pins.stamp": {
+    "date": "string"
+  },
   "timeline.quote.head": {
     "name": "string"
   },
   "timeline.quote.headUnnamed": {},
+  "timeline.reaction.chipMine": {
+    "count": "number",
+    "emoji": "string",
+    "names": "string"
+  },
+  "timeline.reaction.chipMineNoNames": {
+    "count": "number",
+    "emoji": "string"
+  },
+  "timeline.reaction.chipOther": {
+    "count": "number",
+    "emoji": "string",
+    "names": "string"
+  },
+  "timeline.reaction.chipOtherNoNames": {
+    "count": "number",
+    "emoji": "string"
+  },
+  "timeline.reaction.names1": {
+    "a": "string"
+  },
+  "timeline.reaction.names2": {
+    "a": "string",
+    "b": "string"
+  },
+  "timeline.reaction.names3": {
+    "a": "string",
+    "b": "string",
+    "c": "string"
+  },
+  "timeline.reaction.namesExtra0": {
+    "extra": "number"
+  },
+  "timeline.reaction.namesExtra1": {
+    "a": "string",
+    "extra": "number"
+  },
+  "timeline.reaction.namesExtra2": {
+    "a": "string",
+    "b": "string",
+    "extra": "number"
+  },
+  "timeline.reaction.namesExtra3": {
+    "a": "string",
+    "b": "string",
+    "c": "string",
+    "extra": "number"
+  },
+  "timeline.reaction.selfToken": {},
   "timeline.runException.open": {
     "text": "string"
   },
@@ -4170,6 +4542,50 @@ export const argumentSpecs = {
   "timeline.send.failed": {},
   "timeline.send.resend": {},
   "timeline.send.sending": {},
+  "timeline.spawnHost.candidateWithReason": {
+    "name": "string",
+    "reason": "string"
+  },
+  "timeline.spawnHost.choiceLabel": {},
+  "timeline.spawnHost.noEligibleHost": {},
+  "timeline.spawnHost.notReady": {},
+  "timeline.spawnHost.offline": {},
+  "timeline.spawnHost.revoked": {},
+  "timeline.spawnHost.tierCloud": {},
+  "timeline.spawnHost.tierLocal": {},
+  "timeline.spawnHost.tierRemote": {},
+  "timeline.spawnHost.unavailable": {},
+  "timeline.streamStop.cancelled": {},
+  "timeline.streamStop.cutOff": {},
+  "timeline.teamAi.delegateButton": {
+    "name": "string"
+  },
+  "timeline.teamAi.delegateQuoted": {
+    "mention": "string"
+  },
+  "timeline.teamAi.delegateReason": {
+    "reason": "string"
+  },
+  "timeline.teamAi.delegateSent": {
+    "name": "string"
+  },
+  "timeline.teamAi.limitOperatorDay": {},
+  "timeline.teamAi.limitOperatorOff": {},
+  "timeline.teamAi.limitTeamMonth": {},
+  "timeline.teamAi.limitUnknown": {},
+  "timeline.teamAi.proposalAuthority": {},
+  "timeline.teamAi.proposalLabel": {},
+  "timeline.teamAi.proposalLine": {
+    "name": "string"
+  },
+  "timeline.teamAi.proposalLineUnknown": {},
+  "timeline.teamAi.rationaleLabel": {},
+  "timeline.teamAi.rationaleNote": {},
+  "timeline.teamAi.reasonCouldNotPropose": {},
+  "timeline.teamAi.reasonOutOfScope": {},
+  "timeline.teamAi.reasonOverBudget": {},
+  "timeline.teamAi.reasonRateLimited": {},
+  "timeline.teamAi.reasonSlow": {},
   "timeline.thread.followDismiss": {},
   "timeline.thread.followFailed": {},
   "timeline.thread.followHint": {},
@@ -6114,9 +6530,31 @@ export interface MessageArgs {
   "teamAi.stage.setupLine": Record<string, never>;
   "teamAi.stage.setupUnverifiedDetail": Record<string, never>;
   "teamAi.stage.verifyingLine": Record<string, never>;
+  "timeline.actionFailure.deleteFailed": Record<string, never>;
+  "timeline.actionFailure.deleteNotAuthor": Record<string, never>;
+  "timeline.actionFailure.editDeleted": Record<string, never>;
+  "timeline.actionFailure.editFailed": Record<string, never>;
+  "timeline.actionFailure.editNotAuthor": Record<string, never>;
+  "timeline.actionFailure.generic": Record<string, never>;
+  "timeline.actionFailure.messageNotFound": Record<string, never>;
+  "timeline.actionFailure.pinDeleted": Record<string, never>;
+  "timeline.actionFailure.pinFailed": Record<string, never>;
+  "timeline.actionFailure.pinLimit": Record<string, never>;
+  "timeline.actionFailure.pinNotMember": Record<string, never>;
+  "timeline.actionFailure.reactDeleted": Record<string, never>;
+  "timeline.actionFailure.reactFailed": Record<string, never>;
+  "timeline.actionFailure.reactLimit": Record<string, never>;
+  "timeline.actionFailure.reactNotMember": Record<string, never>;
+  "timeline.actionFailure.replyFailed": Record<string, never>;
+  "timeline.actionFailure.replyNotAllowed": Record<string, never>;
+  "timeline.actionFailure.replyNotMember": Record<string, never>;
+  "timeline.actionFailure.replyOriginalNotFound": Record<string, never>;
   "timeline.addMember.createdDescription": { name: string };
   "timeline.addMember.createdDescriptionPublic": { name: string };
   "timeline.addMember.later": Record<string, never>;
+  "timeline.agentInitiative.headTitle": { title: string };
+  "timeline.agentInitiative.rationaleDefault": Record<string, never>;
+  "timeline.agentInitiative.rationaleLabel": Record<string, never>;
   "timeline.agentRail.open": { label: string };
   "timeline.agentRail.openActivity": Record<string, never>;
   "timeline.agentRail.openRecord": { name: string };
@@ -6128,6 +6566,31 @@ export interface MessageArgs {
   "timeline.approval.reproposeBusy": Record<string, never>;
   "timeline.approval.reproposeSeeded": Record<string, never>;
   "timeline.approvalExpiry.soon": Record<string, never>;
+  "timeline.artifactNote.awaitingApproval": Record<string, never>;
+  "timeline.artifactNote.cancelled": Record<string, never>;
+  "timeline.artifactNote.done": Record<string, never>;
+  "timeline.artifactNote.error": Record<string, never>;
+  "timeline.artifactNote.inFlight": Record<string, never>;
+  "timeline.artifactNote.leadNote": Record<string, never>;
+  "timeline.artifactNote.leadSignal": Record<string, never>;
+  "timeline.artifactNote.queued": Record<string, never>;
+  "timeline.artifactNote.stalled": Record<string, never>;
+  "timeline.artifactNote.withNote": { lead: string; note: string; sentence: string };
+  "timeline.artifacts.commitTitle": Record<string, never>;
+  "timeline.artifacts.diffTitle": Record<string, never>;
+  "timeline.artifacts.pullRequestTitle": Record<string, never>;
+  "timeline.artifacts.toolTitle": { tool: string };
+  "timeline.artifacts.toolTitleWithObject": { object: string; tool: string };
+  "timeline.artifacts.unnamedFile": Record<string, never>;
+  "timeline.cascade.noticeMulti": { count: number; reason: string; served: string };
+  "timeline.cascade.noticeSingle": { reason: string; served: string };
+  "timeline.cascade.reasonRateLimited": Record<string, never>;
+  "timeline.cascade.reasonStatus": { status: string };
+  "timeline.cascade.reasonUnknown": { reason: string };
+  "timeline.cascade.reasonUnreachable": Record<string, never>;
+  "timeline.cascade.route": { label: string };
+  "timeline.cascade.servedFallback": Record<string, never>;
+  "timeline.cascade.servedLabeled": { label: string };
   "timeline.channelLeave.bodyPrivate": { name: string };
   "timeline.channelLeave.bodyPublic": { name: string };
   "timeline.channelLeave.bodyPublicBrowse": { name: string };
@@ -6139,8 +6602,61 @@ export interface MessageArgs {
   "timeline.channelLeave.errorNetwork": { reason: string };
   "timeline.channelLeave.errorNotFound": Record<string, never>;
   "timeline.channelLeave.title": Record<string, never>;
+  "timeline.commandSuggest.askBusy": Record<string, never>;
+  "timeline.commandSuggest.askNone": Record<string, never>;
+  "timeline.commandSuggest.askOperator": Record<string, never>;
+  "timeline.commandSuggest.askThread": Record<string, never>;
+  "timeline.commandSuggest.oneLineAiConnect": { name: string };
+  "timeline.commandSuggest.oneLineCard": { name: string; what: string };
+  "timeline.commandSuggest.onlyMe": Record<string, never>;
+  "timeline.commandSuggest.openAppearance": Record<string, never>;
+  "timeline.commandSuggest.openCode": Record<string, never>;
+  "timeline.commandSuggest.openDevices": Record<string, never>;
+  "timeline.commandSuggest.openMembers": Record<string, never>;
+  "timeline.commandSuggest.openMemory": Record<string, never>;
+  "timeline.commandSuggest.openNotifications": Record<string, never>;
+  "timeline.commandSuggest.openPlugins": Record<string, never>;
+  "timeline.commandSuggest.openProfile": Record<string, never>;
+  "timeline.commandSuggest.openShortcuts": Record<string, never>;
+  "timeline.commandSuggest.openUpdates": Record<string, never>;
+  "timeline.commandSuggest.openUsage": Record<string, never>;
+  "timeline.commandSuggest.openWorkspace": Record<string, never>;
+  "timeline.commandSuggest.phoneFoot": Record<string, never>;
+  "timeline.commandSuggest.phoneMine": Record<string, never>;
+  "timeline.commandSuggest.settingsOpen": Record<string, never>;
+  "timeline.commandSuggest.settingsOpenGeneric": Record<string, never>;
+  "timeline.commandSuggest.settingsPhone": Record<string, never>;
+  "timeline.commandSuggest.targetAppearance": Record<string, never>;
+  "timeline.commandSuggest.targetCode": Record<string, never>;
+  "timeline.commandSuggest.targetDevices": Record<string, never>;
+  "timeline.commandSuggest.targetMembers": Record<string, never>;
+  "timeline.commandSuggest.targetMemory": Record<string, never>;
+  "timeline.commandSuggest.targetNotifications": Record<string, never>;
+  "timeline.commandSuggest.targetPlugins": Record<string, never>;
+  "timeline.commandSuggest.targetProfile": Record<string, never>;
+  "timeline.commandSuggest.targetShortcuts": Record<string, never>;
+  "timeline.commandSuggest.targetUpdates": Record<string, never>;
+  "timeline.commandSuggest.targetUsage": Record<string, never>;
+  "timeline.commandSuggest.targetWorkspace": Record<string, never>;
+  "timeline.commandSuggest.teamClose": Record<string, never>;
+  "timeline.commandSuggest.teamOpen": Record<string, never>;
   "timeline.createChannel.privateDetail": Record<string, never>;
   "timeline.createChannel.publicDetail": Record<string, never>;
+  "timeline.decisionStage.position": { current: string; total: string };
+  "timeline.decisionStage.positionNone": Record<string, never>;
+  "timeline.deletedFold.repeat": { count: string };
+  "timeline.deletedFold.tombstone": Record<string, never>;
+  "timeline.divider.dateFull": { day: string; month: string; year: string };
+  "timeline.divider.dateMonthDay": { day: string; month: string };
+  "timeline.divider.labelToday": { date: string };
+  "timeline.divider.labelYesterday": { date: string };
+  "timeline.divider.recovery": Record<string, never>;
+  "timeline.divider.recoveryLabel": Record<string, never>;
+  "timeline.divider.recoveryLabelReread": Record<string, never>;
+  "timeline.divider.recoveryReread": Record<string, never>;
+  "timeline.divider.today": Record<string, never>;
+  "timeline.divider.unread": { count: number; figure: string };
+  "timeline.divider.yesterday": Record<string, never>;
   "timeline.edited.atDate": { date: string; time: string };
   "timeline.edited.atDay": { day: string; time: string };
   "timeline.edited.atTime": { time: string };
@@ -6184,14 +6700,70 @@ export interface MessageArgs {
   "timeline.memberPanel.requestSpoken": { text: string };
   "timeline.memberPanel.rowActions": { name: string };
   "timeline.memberPanel.stageSpoken": { stage: string };
+  "timeline.pins.actionPin": Record<string, never>;
+  "timeline.pins.actionUnpin": Record<string, never>;
+  "timeline.pins.emptyBody": Record<string, never>;
+  "timeline.pins.listCount": { count: number };
+  "timeline.pins.listEmptyDetail": Record<string, never>;
+  "timeline.pins.listEmptyHeadline": Record<string, never>;
+  "timeline.pins.listEmptySentence": Record<string, never>;
+  "timeline.pins.listFailedDetail": Record<string, never>;
+  "timeline.pins.listFailedHeadline": Record<string, never>;
+  "timeline.pins.listFailedSentence": Record<string, never>;
+  "timeline.pins.listNone": Record<string, never>;
+  "timeline.pins.rowMark": Record<string, never>;
+  "timeline.pins.stamp": { date: string };
   "timeline.quote.head": { name: string };
   "timeline.quote.headUnnamed": Record<string, never>;
+  "timeline.reaction.chipMine": { count: number; emoji: string; names: string };
+  "timeline.reaction.chipMineNoNames": { count: number; emoji: string };
+  "timeline.reaction.chipOther": { count: number; emoji: string; names: string };
+  "timeline.reaction.chipOtherNoNames": { count: number; emoji: string };
+  "timeline.reaction.names1": { a: string };
+  "timeline.reaction.names2": { a: string; b: string };
+  "timeline.reaction.names3": { a: string; b: string; c: string };
+  "timeline.reaction.namesExtra0": { extra: number };
+  "timeline.reaction.namesExtra1": { a: string; extra: number };
+  "timeline.reaction.namesExtra2": { a: string; b: string; extra: number };
+  "timeline.reaction.namesExtra3": { a: string; b: string; c: string; extra: number };
+  "timeline.reaction.selfToken": Record<string, never>;
   "timeline.runException.open": { text: string };
   "timeline.runException.settings": Record<string, never>;
   "timeline.send.discard": Record<string, never>;
   "timeline.send.failed": Record<string, never>;
   "timeline.send.resend": Record<string, never>;
   "timeline.send.sending": Record<string, never>;
+  "timeline.spawnHost.candidateWithReason": { name: string; reason: string };
+  "timeline.spawnHost.choiceLabel": Record<string, never>;
+  "timeline.spawnHost.noEligibleHost": Record<string, never>;
+  "timeline.spawnHost.notReady": Record<string, never>;
+  "timeline.spawnHost.offline": Record<string, never>;
+  "timeline.spawnHost.revoked": Record<string, never>;
+  "timeline.spawnHost.tierCloud": Record<string, never>;
+  "timeline.spawnHost.tierLocal": Record<string, never>;
+  "timeline.spawnHost.tierRemote": Record<string, never>;
+  "timeline.spawnHost.unavailable": Record<string, never>;
+  "timeline.streamStop.cancelled": Record<string, never>;
+  "timeline.streamStop.cutOff": Record<string, never>;
+  "timeline.teamAi.delegateButton": { name: string };
+  "timeline.teamAi.delegateQuoted": { mention: string };
+  "timeline.teamAi.delegateReason": { reason: string };
+  "timeline.teamAi.delegateSent": { name: string };
+  "timeline.teamAi.limitOperatorDay": Record<string, never>;
+  "timeline.teamAi.limitOperatorOff": Record<string, never>;
+  "timeline.teamAi.limitTeamMonth": Record<string, never>;
+  "timeline.teamAi.limitUnknown": Record<string, never>;
+  "timeline.teamAi.proposalAuthority": Record<string, never>;
+  "timeline.teamAi.proposalLabel": Record<string, never>;
+  "timeline.teamAi.proposalLine": { name: string };
+  "timeline.teamAi.proposalLineUnknown": Record<string, never>;
+  "timeline.teamAi.rationaleLabel": Record<string, never>;
+  "timeline.teamAi.rationaleNote": Record<string, never>;
+  "timeline.teamAi.reasonCouldNotPropose": Record<string, never>;
+  "timeline.teamAi.reasonOutOfScope": Record<string, never>;
+  "timeline.teamAi.reasonOverBudget": Record<string, never>;
+  "timeline.teamAi.reasonRateLimited": Record<string, never>;
+  "timeline.teamAi.reasonSlow": Record<string, never>;
   "timeline.thread.followDismiss": Record<string, never>;
   "timeline.thread.followFailed": Record<string, never>;
   "timeline.thread.followHint": Record<string, never>;

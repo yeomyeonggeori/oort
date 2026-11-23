@@ -12,12 +12,11 @@ import {
 import { Tooltip } from "@/design/ui/tooltip";
 import { InlineBanner, Skeleton } from "@/features/common/States";
 import { memberFor, type Directory } from "@/features/workspace/useWorkspace";
+import { useFormatMessage } from "@/i18n/useFormatMessage";
 import { appNote } from "@momo/core/features/timeline/appVoice";
 import {
-  PIN_LIST_EMPTY_DETAIL,
-  PIN_LIST_EMPTY_HEADLINE,
-  PIN_LIST_FAILED_DETAIL,
-  PIN_LIST_FAILED_HEADLINE,
+  PIN_LIST_EMPTY_SENTENCE_KEY,
+  PIN_LIST_FAILED_SENTENCE_KEY,
   pinExcerpt,
   pinList,
   pinListHeaderLabel,
@@ -86,10 +85,12 @@ export function PinListMenu({
   /** 목록만 다시 읽는다(채널 전체가 아니라). 실패 문장 뒤의 행동. */
   onRetry: () => void;
 }) {
+  const formatMessage = useFormatMessage();
   const entries = pinList(pins);
   // **셀 자격이 있을 때만** 센다 (#1146 M2): 목록을 못 불러온 채로 「고정 3개」라고
   // 적으면, 목록 안에서 고친 거짓말이 버튼으로 옮겨 갈 뿐이다.
-  const label = pinListHeaderLabel(entries.length, status);
+  const headerRef = pinListHeaderLabel(entries.length, status);
+  const label = formatMessage(headerRef.key, headerRef.values as never);
   // 메뉴가 열리는 순간의 시각. `Timeline`의 날짜 구분선이 쓰는 것과 같은 값이고
   // 같은 이유다 — 이 표면은 고르면 닫히므로 째깍이는 시계를 살 이유가 없다.
   const nowMs = Date.now();
@@ -161,7 +162,7 @@ export function PinListMenu({
         {status === "failed" && (
           <>
             <InlineBanner
-              message={`${PIN_LIST_FAILED_HEADLINE} ${PIN_LIST_FAILED_DETAIL}`}
+              message={formatMessage(PIN_LIST_FAILED_SENTENCE_KEY)}
               separator={false}
               testId="pin-list-failed"
             />
@@ -195,7 +196,7 @@ export function PinListMenu({
               className="px-2 py-2 text-meta text-ink-muted"
               data-testid="pin-list-empty"
             >
-              {`${PIN_LIST_EMPTY_HEADLINE} ${PIN_LIST_EMPTY_DETAIL}`}
+              {formatMessage(PIN_LIST_EMPTY_SENTENCE_KEY)}
             </p>
           )
         ) : (
@@ -203,7 +204,7 @@ export function PinListMenu({
             const author = memberFor(directory, entry.authorMemberId);
             const name =
               author?.displayName ?? missingMemberLabel(directory);
-            const excerpt = pinExcerpt(entry.body, EXCERPT_MAX_CHARS);
+            const excerpt = pinExcerpt(formatMessage, entry.body, EXCERPT_MAX_CHARS);
             return (
               <DropdownMenuItem
                 key={entry.messageId}
@@ -223,9 +224,9 @@ export function PinListMenu({
                   <span
                     className="ml-auto shrink-0"
                     data-testid="pin-list-stamp"
-                    aria-label={pinStampLabel(entry.pinnedAtMs)}
+                    aria-label={pinStampLabel(formatMessage, entry.pinnedAtMs)}
                   >
-                    {pinStampSegments(entry.pinnedAtMs, nowMs).map(
+                    {pinStampSegments(formatMessage, entry.pinnedAtMs, nowMs).map(
                       (segment, index) =>
                         segment.kind === "figure" ? (
                           <span key={index} data-numeric>
