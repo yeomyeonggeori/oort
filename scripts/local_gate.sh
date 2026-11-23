@@ -690,6 +690,7 @@ add_static_commands() {
   add_cmd_once "PostgreSQL >=18.6 pin consistency (SEC-06 #4244; registry/runtime modes run in the PR gate)" 'python3 scripts/tests/test_postgres_version_floor.py'
   add_cmd_once "self-host image day-2 tools syntax (#2346)" 'bash -n scripts/tests/test_image_day2_tools.sh'
   add_cmd_once "self-host local-build/published-digest mode contract" 'scripts/tests/test_self_host_env_modes.sh'
+  add_cmd_once "self-host MOMO_BUILD_SHA build-arg/Dockerfile stamp contract (#2258, #6011)" 'scripts/tests/test_self_host_build_sha.sh'
   add_cmd_once "livekit node_ip knob contract (#1856)" 'bash -n scripts/tests/test_livekit_node_ip.sh && scripts/tests/test_livekit_node_ip.sh'
   add_cmd_once "self-host pg_dump operator contract" 'bash -n scripts/lib/pg_dump_custom.sh scripts/self_host_pg_dump.sh scripts/self_host_pg_restore.sh scripts/verify_self_host_pg_dump_restore.sh scripts/tests/test_self_host_pg_dump.sh && scripts/tests/test_self_host_pg_dump.sh'
   add_cmd_once "pgBackRest/PITR verifier shell syntax" 'bash -n scripts/verify_pgbackrest_pitr.sh scripts/verify_pgbackrest_pitr_e2e.sh scripts/pgbackrest_pitr_restore.sh scripts/run_pitr_gated_migrate.sh scripts/tests/test_pgbackrest_pitr_contract.sh scripts/tests/test_run_pitr_gated_migrate.sh'
