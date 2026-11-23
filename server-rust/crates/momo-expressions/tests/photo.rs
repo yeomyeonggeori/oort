@@ -12,6 +12,17 @@ use std::time::{Duration, Instant};
 
 static TURN: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
+mod beside;
+
+/// A turn at the decoder, whose default entries run the decoder cargo built for this test.
+async fn turn() -> tokio::sync::MutexGuard<'static, ()> {
+    beside::place(
+        "momo-expression-decoder",
+        std::path::Path::new(env!("CARGO_BIN_EXE_momo-expression-decoder")),
+    );
+    TURN.lock().await
+}
+
 const LOCATION: &[u8] = b"GPS-37.5665N-126.9780E-MEMBER-HOME";
 const TAIL: &[u8] = b"TRAILING-BYTES-OF-THE-ORIGINAL";
 
@@ -89,7 +100,7 @@ fn gif(frames: usize) -> Vec<u8> {
 
 #[tokio::test]
 async fn a_photo_leaves_upright_small_and_without_what_it_arrived_with() {
-    let _turn = TURN.lock().await;
+    let _turn = turn().await;
     // 3000 x 2000, stored sideways (EXIF 6: turn it a quarter clockwise to see it upright). Its
     // top-left quarter is red, the rest blue, so the turn can be seen in the pixels.
     let mut stored = RgbImage::from_pixel(3000, 2000, Rgb([0, 0, 255]));
@@ -136,7 +147,7 @@ async fn a_photo_leaves_upright_small_and_without_what_it_arrived_with() {
 
 #[tokio::test]
 async fn a_photo_with_an_alpha_channel_stays_a_png_and_is_never_enlarged() {
-    let _turn = TURN.lock().await;
+    let _turn = turn().await;
     let mut picture = RgbaImage::from_pixel(300, 200, Rgba([10, 120, 60, 255]));
     disc(&mut picture, 150, 100, 40, [0, 0, 0, 0]);
     let mut with_tail = png_of(&picture);
@@ -181,7 +192,7 @@ fn noise_with_a_hole(width: u32, height: u32) -> RgbaImage {
 /// an alpha channel was refused as invalid media. Both sides of the boundary, through the real child.
 #[tokio::test]
 async fn a_large_photo_with_an_alpha_channel_comes_back_from_the_child_whole() {
-    let _turn = TURN.lock().await;
+    let _turn = turn().await;
     let old_break = 2_500_000; // above what the old encoding carried (about 2.3 MB), below the bound
     let sizes = [(900u32, 900u32), (1024, 1000)];
     for (width, height) in sizes {
@@ -225,7 +236,7 @@ async fn a_large_photo_with_an_alpha_channel_comes_back_from_the_child_whole() {
 
 #[tokio::test]
 async fn what_is_not_a_still_picture_is_refused_before_anything_can_leave() {
-    let _turn = TURN.lock().await;
+    let _turn = turn().await;
     let mp4 = vec![0, 0, 0, 12, b'f', b't', b'y', b'p', b'i', b's', b'o', b'm'];
     let svg = b"<svg xmlns='http://www.w3.org/2000/svg'><script>alert(1)</script></svg>".to_vec();
     let sideways = png_of(&RgbaImage::new(5000, 10));
@@ -252,7 +263,7 @@ async fn what_is_not_a_still_picture_is_refused_before_anything_can_leave() {
 
 #[tokio::test]
 async fn a_busy_decoder_refuses_a_photo_at_once_and_a_paid_for_picture_waits_its_turn() {
-    let _turn = TURN.lock().await;
+    let _turn = turn().await;
     let slots = media::decoder_slots();
     let first = slots.clone().acquire_owned().await.unwrap();
     let second = slots.clone().acquire_owned().await.unwrap();
@@ -289,7 +300,7 @@ async fn a_busy_decoder_refuses_a_photo_at_once_and_a_paid_for_picture_waits_its
 
 #[tokio::test]
 async fn a_picture_a_model_drew_is_cut_out_in_the_child_and_says_how() {
-    let _turn = TURN.lock().await;
+    let _turn = turn().await;
     let wait = Duration::from_secs(3);
     // Drawn on one flat colour: erased from the edges in.
     let mut flat = RgbaImage::from_pixel(600, 600, Rgba([0, 200, 0, 255]));
