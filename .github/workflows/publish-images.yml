@@ -10,10 +10,15 @@
 # into one OCI manifest list whose digest is also attested. The `sha-<gitsha>`
 # tag is applied only to that list. QEMU is intentionally absent.
 #
-# Attestation subjects: every platform digest (what each runner actually
-# built) and both manifest-list digests (the operator pin after the first
-# multi-arch publication). This workflow has not been dispatched in the
-# multi-arch shape; the published v0.1.0 digests remain linux/amd64-only.
+# Attestation subjects: six digests per publication. Each runner's pushed
+# digest (build-push-action `digest`; with provenance + SBOM on, this is a
+# per-architecture OCI index that wraps the platform image manifest and its
+# attestation manifest), four in all, plus both manifest-list digests (the
+# operator pin). The platform image manifests inside those indexes (the
+# linux/amd64 and linux/arm64 digests that releases/latest.json records under
+# images.*.digests) are NOT attestation subjects; gh attestation verify on them
+# answers HTTP 404 (measured on the v0.1.47 run, #6010). That run published in
+# the multi-arch shape; only the early v0.1.0 digests are linux/amd64-only.
 name: publish-images
 
 on:

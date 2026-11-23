@@ -118,16 +118,20 @@ migration이 든 릴리스면 PR 본문의 「되돌릴 때」 줄을 CHANGELOG 
 
 새 크레이트·빈이 들어간 릴리스면 `scripts/check_dockerfile_crates.sh` 도 통과시킨다 — `server-rust/Dockerfile` 의존성 캐시 COPY 목록이 워크스페이스 멤버와 어긋나면 이미지 빌드만 깨진다(v0.1.27 publish 실패, #3876). PR CI `alignment` 잡이 `scripts/check_ghcr_notice_bundle.sh` 경유로 같은 검사를 매 PR 돈다.
 
-서버 이미지의 `ort-payload` 단계는 ONNX Runtime 라이브러리를 Microsoft 릴리스에서 받지 못하면 `server-rust/Dockerfile` 머리의 `ORT_OWN_IMAGE`(이미 발행한 앱 이미지, 목록 digest 고정)에서 가져온다(#5995). 그 이미지는 빌드마다 당겨지므로 GHCR에서 그 digest를 지우면 둘째 길만이 아니라 이 단계가 늘 실패한다 — 지우기 전에 `ORT_OWN_IMAGE`를 같은 `ORT_VERSION`으로 만든 다른 발행본으로 옮긴다.
+서버 이미지의 `ort-payload` 단계는 ONNX Runtime 라이브러리를 두 길 중 **빌드 인자 `ORT_SOURCE`가 고른 한 길**로만 가져온다(#5995, #6012). 두 길 모두 같은 파일 해시 확인(라이브러리 · 라이선스 파일 둘)을 지난다.
 
-dispatch 전에 그 digest가 풀리는지 확인한다(종료 0). `imagetools inspect`는 셸의 ghcr.io 로그인을 쓰므로, 로그인된 맥이면 둘째 줄(익명 토큰으로 manifest 조회, 200)이 익명 확인이다:
+- `ORT_SOURCE=own-image`(**지금 기본값**): `server-rust/Dockerfile` 머리의 `ORT_OWN_IMAGE`(이미 발행한 앱 이미지, 목록 digest 고정)에서 파일 셋을 꺼낸다. github.com은 부르지 않는다.
+- `ORT_SOURCE=upstream`: Microsoft 릴리스 tgz를 받아 해시를 확인한다. `ORT_OWN_IMAGE`는 풀지 않는다. 받기에 실패하면 다른 길로 넘어가지 않고 빌드가 멈춘다(어느 길을 쓸지는 빌드를 거는 쪽이 정한다).
+
+**보존 규칙 — `ORT_OWN_IMAGE`의 digest는 지우지 않는다.** 기본값이 own-image인 동안 GHCR의 그 digest가 지워지거나 비공개가 되면 소스에서 빌드하는 모든 경로(발행 · 셀프호스트 · 로컬 게이트)가 `ort-payload`에서 멈춘다. 버전 정리 자동화를 넣게 되면 이 digest를 예외로 둔다. 지워야 하면 먼저 `ORT_OWN_IMAGE`를 같은 `ORT_VERSION`으로 만든 다른 발행본으로 옮기거나, 바깥 릴리스가 돌아온 것을 확인해 기본값을 `upstream`으로 옮긴다.
+
+dispatch 전에 그 digest가 읽히는지 확인한다(종료 0, 익명 토큰으로 manifest 조회):
 
 ```sh
-docker buildx imagetools inspect "$(sed -n 's/^ARG ORT_OWN_IMAGE=//p' server-rust/Dockerfile)"
-ref="$(sed -n 's/^ARG ORT_OWN_IMAGE=//p' server-rust/Dockerfile)"; tok="$(curl -fsS 'https://ghcr.io/token?scope=repository:yeomyeonggeori/oort:pull' | python3 -c 'import json,sys;print(json.load(sys.stdin)["token"])')"; curl -fsSI -o /dev/null -H "Authorization: Bearer $tok" -H 'Accept: application/vnd.oci.image.index.v1+json' "https://ghcr.io/v2/yeomyeonggeori/oort/manifests/${ref##*@}"
+scripts/check_ort_own_image.sh
 ```
 
-발행 런이 끝나면 두 아키텍처 빌드 로그의 `ort-payload: source=` 줄을 보고 어느 길을 탔는지(`upstream` / `own-image@…`) 발행 기록에 적는다 — 런은 어느 쪽이든 초록이라, 바깥 주소가 돌아온 뒤에도 둘째 길에 기대는지는 이 줄로만 보인다.
+발행 런이 끝나면 두 아키텍처 빌드 로그의 `ort-payload: source=` 줄을 보고 어느 길을 탔는지(`upstream` / `own-image@…`) 발행 기록에 적는다.
 
 ---
 
@@ -154,12 +158,16 @@ ref="$(sed -n 's/^ARG ORT_OWN_IMAGE=//p' server-rust/Dockerfile)"; tok="$(curl -
    (`ghcr.io/yeomyeonggeori/oort-postgres`) 을 **아키별 digest** 로
    push·attestation 한 뒤, `buildx imagetools create` 가 두 digest 를
    manifest list 로 묶고 그 list digest 에도 SLSA v1 provenance 를 OCI
-   referrer 로 붙인 뒤에만 summary 표를 낸다. 각 잡이 GitHub `release`
+   referrer 로 붙인 뒤에만 summary 표를 낸다. 이때 잡이 push 하는 「아키별
+   digest」는 이미지 매니페스트 하나가 아니라 provenance·SBOM 때문에
+   「이미지 매니페스트 + 증명 매니페스트」를 감싼 아키별 OCI **index** 다 —
+   증명은 이 index digest 4개(앱·postgres × amd64·arm64)와 list digest 2개,
+   발행 한 번에 6건에 붙는다(아래 §3 「무엇에 증명이 붙나」). 각 잡이 GitHub `release`
    Environment 를 거친다. `sha-<commit>` 태그는 list 에만 붙는 커밋
    locator 이지 불변 신원이 아니다. QEMU 는 쓰지 않는다.
 
-   **첫 multi-arch 발행 실측은 아직 없다.** 아래 §3 표의 v0.1.0 digest 는
-   amd64 단일 이다. 운영자 pin 은 다음 발행부터 list digest 다.
+   **multi-arch 발행은 v0.1.47 런에서 실측했다**(#6010, 아래 §3 「무엇에 증명이
+   붙나」). 초기 v0.1.0 digest 만 amd64 단일이다. 운영자 pin 은 list digest 다.
 
 ---
 
@@ -182,6 +190,22 @@ attestation 검증 PASS (같은 원장). 이후 릴리스는 **그 발행의** s
 이 표를 갈아끼운다. 이 문서의 표는 첫 발행 예시이지 영원히 최신이 아니다.
 최신 값은 GitHub Releases 가 정본이다.
 
+### 무엇에 증명이 붙나 (v0.1.47 발행 런 44543816087 실측, 2026-11-23)
+
+같은 `gh attestation verify "oci://…@<digest>" --repo yeomyeonggeori/oort
+--predicate-type https://slsa.dev/provenance/v1` 를 digest 만 바꿔 돌린 결과:
+
+| digest 종류 | 어디서 보나 | 종료 코드 |
+|---|---|---|
+| manifest list (운영자 pin) | Release 표 「운영자 pin」 · `latest.json` `images.*.digest_list` · workflow summary 「manifest list (pin)」 행 | 0 (통과) |
+| 아키별 OCI index (amd64 · arm64) | workflow summary 의 「linux/amd64」「linux/arm64」 행 (잡의 `digest` 출력) | 0 (통과) |
+| 플랫폼 이미지 매니페스트 (index 안쪽) | Release 본문 「아키별」 · `latest.json` `images.*.digests.{amd64,arm64}` | 1 (`HTTP 404: Not Found`) |
+
+즉 `latest.json` 의 `digests` 값은 **증명 대상이 아니다**. 운영자는 list digest
+(`attestation.verify_cmd` 가 바로 그것)로 확인한다. 플랫폼별 이미지를 쓰고 싶으면
+list digest 를 증명한 뒤 그 list 에 속한 매니페스트를 pull 한다. 같은 digest 를 인용해
+증명을 요구하지 않는다.
+
 검증 (`gh` 가 있는 운영자):
 
 ```sh
@@ -195,12 +219,12 @@ gh attestation verify "oci://$POSTGRES_REF" \
   --predicate-type https://slsa.dev/provenance/v1
 ```
 
-플랫폼: **다음 발행부터** 워크플로는 `linux/amd64`+`linux/arm64`
-manifest list 를 만든다. **현행 v0.1.0 digest(`main=45a154d2`)는 amd64
-단일** — Apple Silicon 에서 그 digest 의 native pull 은 불가했다(실측
-2026-08-21). 첫 multi-arch digest 실값은 아직 없다. 에뮬레이션 성공을
-가정하지 않는다. 다음 발행의 운영자 pin 은 summary 표의 manifest list
-digest 행이다.
+플랫폼: 워크플로는 `linux/amd64`+`linux/arm64` manifest list 를 만든다
+(v0.1.47 런에서 실측, 실값은 `releases/latest.json` 의 `digest_list`).
+**초기 v0.1.0 digest(`main=45a154d2`)만 amd64 단일**이다 — Apple Silicon
+에서 그 digest 의 native pull 은 불가했다(실측 2026-08-21). 에뮬레이션
+성공을 가정하지 않는다. 운영자 pin 은 summary 표의 manifest list digest
+행이다.
 
 ---
 
@@ -253,6 +277,10 @@ git add releases/latest.json
 scripts/check_release_manifest.sh
 git commit -m "chore(release): refresh releases/latest.json for v0.1.4"
 ```
+
+`images.*.digests` 는 list 안의 플랫폼 이미지 매니페스트 digest 이고 출처 증명 대상이
+아니다(§3 「무엇에 증명이 붙나」). `attestation.verify_cmd` 는 list digest 하나만
+확인한다.
 
 재실행은 바이트 동일해야 한다. `docs/SELF_HOST*.md`와 `README.md`에
 digest 리터럴을 되넣으면 `scripts/check_release_manifest.sh`가 거절한다.
