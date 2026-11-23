@@ -39,7 +39,7 @@ fn pack([r, g, b]: [u8; 3]) -> u32 {
 /// whether any pixel of it is see-through.
 fn colours_of(frame: &RgbaImage) -> (HashSet<u32>, bool, bool) {
     let (mut colors, mut wide, mut clear) = (HashSet::new(), false, false);
-    for p in frame.as_raw().chunks_exact(4) {
+    for p in frame.as_raw().as_chunks::<4>().0 {
         if p[3] == 0 {
             clear = true;
         } else if !wide {
@@ -100,7 +100,13 @@ impl Census {
             }
         }
         if !fits {
-            for p in frame.as_raw().chunks_exact(4).filter(|p| p[3] != 0) {
+            for p in frame
+                .as_raw()
+                .as_chunks::<4>()
+                .0
+                .iter()
+                .filter(|p| p[3] != 0)
+            {
                 self.take(p);
             }
         }
@@ -114,7 +120,9 @@ impl Census {
             if self.sample.len() == SAMPLE_PIXELS * 4 {
                 self.sample = self
                     .sample
-                    .chunks_exact(4)
+                    .as_chunks::<4>()
+                    .0
+                    .iter()
                     .step_by(2)
                     .flatten()
                     .copied()
@@ -222,10 +230,12 @@ impl Table {
                 .sum()
         };
         self.rgb
-            .chunks_exact(3)
+            .as_chunks::<3>()
+            .0
+            .iter()
             .take(visible)
             .enumerate()
-            .min_by_key(|(_, entry)| distance(entry))
+            .min_by_key(|(_, entry)| distance(*entry))
             .map_or(0, |(i, _)| i as u8)
     }
 }
@@ -294,7 +304,7 @@ impl Strip {
         // (left, top, right, bottom) of the visible pixels, inclusive.
         let mut visible: Option<(usize, usize, usize, usize)> = None;
         for (y, row) in image.as_raw().chunks_exact(w * 4).enumerate() {
-            for (x, p) in row.chunks_exact(4).enumerate() {
+            for (x, p) in row.as_chunks::<4>().0.iter().enumerate() {
                 if p[3] == 0 {
                     self.indices.push(nothing.ok_or(Rejected::Invalid)?);
                     continue;
@@ -380,7 +390,9 @@ mod tests {
         assert!(census.stride > 1, "the stride doubled as the sample filled");
         let last = census
             .sample
-            .chunks_exact(4)
+            .as_chunks::<4>()
+            .0
+            .iter()
             .filter(|p| p[0] == 250)
             .count();
         assert!(last > 0, "no sample came from the last frame");
