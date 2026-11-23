@@ -154,7 +154,11 @@ ref="$(sed -n 's/^ARG ORT_OWN_IMAGE=//p' server-rust/Dockerfile)"; tok="$(curl -
    (`ghcr.io/yeomyeonggeori/oort-postgres`) 을 **아키별 digest** 로
    push·attestation 한 뒤, `buildx imagetools create` 가 두 digest 를
    manifest list 로 묶고 그 list digest 에도 SLSA v1 provenance 를 OCI
-   referrer 로 붙인 뒤에만 summary 표를 낸다. 각 잡이 GitHub `release`
+   referrer 로 붙인 뒤에만 summary 표를 낸다. 이때 잡이 push 하는 「아키별
+   digest」는 이미지 매니페스트 하나가 아니라 provenance·SBOM 때문에
+   「이미지 매니페스트 + 증명 매니페스트」를 감싼 아키별 OCI **index** 다 —
+   증명은 이 index digest 4개(앱·postgres × amd64·arm64)와 list digest 2개,
+   발행 한 번에 6건에 붙는다(아래 §3 「무엇에 증명이 붙나」). 각 잡이 GitHub `release`
    Environment 를 거친다. `sha-<commit>` 태그는 list 에만 붙는 커밋
    locator 이지 불변 신원이 아니다. QEMU 는 쓰지 않는다.
 
@@ -181,6 +185,22 @@ manifest list digest 두 행이고, 같은 표에 아키별 digest 가 따라온
 attestation 검증 PASS (같은 원장). 이후 릴리스는 **그 발행의** summary 표로
 이 표를 갈아끼운다. 이 문서의 표는 첫 발행 예시이지 영원히 최신이 아니다.
 최신 값은 GitHub Releases 가 정본이다.
+
+### 무엇에 증명이 붙나 (v0.1.47 발행 런 44543816087 실측, 2026-11-23)
+
+같은 `gh attestation verify "oci://…@<digest>" --repo yeomyeonggeori/oort
+--predicate-type https://slsa.dev/provenance/v1` 를 digest 만 바꿔 돌린 결과:
+
+| digest 종류 | 어디서 보나 | 종료 코드 |
+|---|---|---|
+| manifest list (운영자 pin) | Release 표 「운영자 pin」 · `latest.json` `images.*.digest_list` · workflow summary 「manifest list (pin)」 행 | 0 (통과) |
+| 아키별 OCI index (amd64 · arm64) | workflow summary 의 「linux/amd64」「linux/arm64」 행 (잡의 `digest` 출력) | 0 (통과) |
+| 플랫폼 이미지 매니페스트 (index 안쪽) | Release 본문 「아키별」 · `latest.json` `images.*.digests.{amd64,arm64}` | 1 (`HTTP 404: Not Found`) |
+
+즉 `latest.json` 의 `digests` 값은 **증명 대상이 아니다**. 운영자는 list digest
+(`attestation.verify_cmd` 가 바로 그것)로 확인한다. 플랫폼별 이미지를 쓰고 싶으면
+list digest 를 증명한 뒤 그 list 에 속한 매니페스트를 pull 한다. 같은 digest 를 인용해
+증명을 요구하지 않는다.
 
 검증 (`gh` 가 있는 운영자):
 
@@ -253,6 +273,10 @@ git add releases/latest.json
 scripts/check_release_manifest.sh
 git commit -m "chore(release): refresh releases/latest.json for v0.1.4"
 ```
+
+`images.*.digests` 는 list 안의 플랫폼 이미지 매니페스트 digest 이고 출처 증명 대상이
+아니다(§3 「무엇에 증명이 붙나」). `attestation.verify_cmd` 는 list digest 하나만
+확인한다.
 
 재실행은 바이트 동일해야 한다. `docs/SELF_HOST*.md`와 `README.md`에
 digest 리터럴을 되넣으면 `scripts/check_release_manifest.sh`가 거절한다.
