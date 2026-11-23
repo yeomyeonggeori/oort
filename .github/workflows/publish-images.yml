@@ -17,9 +17,8 @@
 # operator pin). The platform image manifests inside those indexes (the
 # linux/amd64 and linux/arm64 digests that releases/latest.json records under
 # images.*.digests) are NOT attestation subjects; gh attestation verify on them
-# answers HTTP 404 (measured on the v0.1.47 run, #6010). This workflow has not
-# been dispatched in the multi-arch shape; the published v0.1.0 digests remain
-# linux/amd64-only.
+# answers HTTP 404 (measured on the v0.1.47 run, #6010). That run published in
+# the multi-arch shape; only the early v0.1.0 digests are linux/amd64-only.
 name: publish-images
 
 on:

@@ -162,8 +162,8 @@ ref="$(sed -n 's/^ARG ORT_OWN_IMAGE=//p' server-rust/Dockerfile)"; tok="$(curl -
    Environment 를 거친다. `sha-<commit>` 태그는 list 에만 붙는 커밋
    locator 이지 불변 신원이 아니다. QEMU 는 쓰지 않는다.
 
-   **첫 multi-arch 발행 실측은 아직 없다.** 아래 §3 표의 v0.1.0 digest 는
-   amd64 단일 이다. 운영자 pin 은 다음 발행부터 list digest 다.
+   **multi-arch 발행은 v0.1.47 런에서 실측했다**(#6010, 아래 §3 「무엇에 증명이
+   붙나」). 초기 v0.1.0 digest 만 amd64 단일이다. 운영자 pin 은 list digest 다.
 
 ---
 
@@ -215,12 +215,12 @@ gh attestation verify "oci://$POSTGRES_REF" \
   --predicate-type https://slsa.dev/provenance/v1
 ```
 
-플랫폼: **다음 발행부터** 워크플로는 `linux/amd64`+`linux/arm64`
-manifest list 를 만든다. **현행 v0.1.0 digest(`main=45a154d2`)는 amd64
-단일** — Apple Silicon 에서 그 digest 의 native pull 은 불가했다(실측
-2026-08-21). 첫 multi-arch digest 실값은 아직 없다. 에뮬레이션 성공을
-가정하지 않는다. 다음 발행의 운영자 pin 은 summary 표의 manifest list
-digest 행이다.
+플랫폼: 워크플로는 `linux/amd64`+`linux/arm64` manifest list 를 만든다
+(v0.1.47 런에서 실측, 실값은 `releases/latest.json` 의 `digest_list`).
+**초기 v0.1.0 digest(`main=45a154d2`)만 amd64 단일**이다 — Apple Silicon
+에서 그 digest 의 native pull 은 불가했다(실측 2026-08-21). 에뮬레이션
+성공을 가정하지 않는다. 운영자 pin 은 summary 표의 manifest list digest
+행이다.
 
 ---
 
