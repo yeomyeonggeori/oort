@@ -1,3 +1,6 @@
 {
-  "notifications.inviteLink.fallback": "초대 링크를 올렸어요"
+  "notifications.inviteLink.fallback": "초대 링크를 올렸어요",
+  "notifications.banner.code": "코드",
+  "notifications.banner.secret": "비공개 값",
+  "notifications.banner.approvalTitle": "승인 필요 · {actor}"
 }

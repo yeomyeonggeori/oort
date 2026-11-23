@@ -1,5 +1,7 @@
 import { uuidEq } from "../../lib/api";
-import type { DividerSegment } from "./divider";
+import type { LocaleService } from "../../i18n/context";
+import type { MessageRef, PlainMessageKey } from "../../i18n/keys";
+import { markFigure, segmentsFromMarked, type DividerSegment } from "./divider";
 import type { TimelineStreamItem } from "./model";
 
 // =============================================================================
@@ -201,12 +203,15 @@ export function foldedStandInIndex(
  * `삭제된 메시지 ${n}개` 를 짓고 웹이 자기 파일에서 다른 조사를 붙이는 순간, 같은
  * 접기가 두 얼굴을 갖는다 (U1 M-2 가 구분선에서 겪은 실패 양식 그대로다).
  */
-export const DELETED_TOMBSTONE_COPY = "삭제된 메시지";
+export const DELETED_TOMBSTONE_KEY = "timeline.deletedFold.tombstone" satisfies PlainMessageKey;
 
-export function deletedFoldLabel(deletedRepeat: number | undefined): string {
+/** 둘 이상이면 개수가 든 문장, 아니면 한 낱말이다. 화면이 `formatMessage(ref.key, ref.values as never)`로 푼다. */
+export function deletedFoldRef(
+  deletedRepeat: number | undefined
+): MessageRef<"timeline.deletedFold.tombstone" | "timeline.deletedFold.repeat"> {
   return deletedRepeat !== undefined && deletedRepeat > 1
-    ? `${DELETED_TOMBSTONE_COPY} ${deletedRepeat}개`
-    : DELETED_TOMBSTONE_COPY;
+    ? { key: "timeline.deletedFold.repeat", values: { count: String(deletedRepeat) } }
+    : { key: DELETED_TOMBSTONE_KEY };
 }
 
 /**
@@ -215,18 +220,18 @@ export function deletedFoldLabel(deletedRepeat: number | undefined): string {
  * 모양은 그 타입 하나이고(`divider.ts` 머리말), 「개」에까지 `tabular-nums` 가
  * 걸리면 한글 음절 사이가 벌어진다는 실측도 거기 적혀 있다.
  *
- * 문자열 판(`deletedFoldLabel`)이 함께 남는 이유는 낭독과 테스트가 문자열을
- * 요구하기 때문이고, 둘이 갈라지지 않게 이 함수가 그 문자열을 조립해 낸다.
+ * 문장 판(`deletedFoldRef`)이 함께 남는 이유는 낭독과 테스트가 문장을 요구하기 때문이고,
+ * 둘이 같은 사전 문장에서 나오므로 갈라지지 않는다.
  */
 export function deletedFoldSegments(
+  formatMessage: LocaleService["formatMessage"],
   deletedRepeat: number | undefined
 ): DividerSegment[] {
   if (deletedRepeat === undefined || deletedRepeat <= 1) {
-    return [{ kind: "prose", text: DELETED_TOMBSTONE_COPY }];
+    return [{ kind: "prose", text: formatMessage(DELETED_TOMBSTONE_KEY) }];
   }
-  return [
-    { kind: "prose", text: `${DELETED_TOMBSTONE_COPY} ` },
-    { kind: "figure", text: `${deletedRepeat}` },
-    { kind: "prose", text: "개" },
-  ];
+  // 숫자 자리만 figure로 가른다: 어순은 사전이 정하고, 감싼 값만 조각이 된다.
+  return segmentsFromMarked(
+    formatMessage("timeline.deletedFold.repeat", { count: markFigure(deletedRepeat) })
+  );
 }

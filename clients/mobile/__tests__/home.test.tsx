@@ -35,9 +35,9 @@ import {
   resetAgentWorking,
 } from '../src/features/agents/workingSignal';
 import {
-  DM_CLOSED_LIST_LABEL,
+  DM_CLOSED_LIST_KEY,
 } from '@momo/core/features/sidebar/dmVisibility';
-import {DM_REOPEN_FAILURE} from '@momo/core/features/channels/model';
+import {DM_REOPEN_FAILURE_KEY} from '@momo/core/features/channels/model';
 import {parseCollapsed, visibleRows} from '../src/features/home/collapsedSections';
 import {pendingApprovalsKey} from '../src/features/conversation/usePendingApprovals';
 import {workspaceKeys} from '../src/features/workspace/queries';
@@ -61,6 +61,11 @@ import AppShell from '../src/shell/AppShell';
 import {NON_SECRET_KEYS} from '../src/storage/kv';
 import {__resetSessionStore, sessionPort} from '../src/storage/secureSession';
 import {__resetServerBaseCache, setServerBase} from '../src/storage/serverBase';
+import {catalog as koCatalog} from '@momo/core/i18n/generated/ko-KR';
+import {createMessageService} from '@momo/core/i18n/service';
+
+// 낱말은 사전에 있다(#6045). 시험은 한국어 생성물로 풀어 같은 문장을 그대로 단정한다.
+const koFormat = createMessageService({messageLocale: 'ko-KR', catalog: koCatalog}).formatMessage;
 
 // =============================================================================
 // DS2-3 폰 홈 (#2715, ADR-0189 D1) — 시안 A `#a-home`.
@@ -1195,10 +1200,10 @@ describe('홈 — 닫은 대화·나간 멤버와의 대화 (#4367)', () => {
 
   /** DM 섹션 ⋯ 가 내놓는 항목들(눌러서 고르지 않고 취소한다). */
   const dmMenu = () => chooseFromMenu('dms', '취소');
-  const hasClosedDoor = () => dmMenu().includes(DM_CLOSED_LIST_LABEL);
+  const hasClosedDoor = () => dmMenu().includes(koFormat(DM_CLOSED_LIST_KEY));
   /** 숨은 DM 이 「숨긴 대화」 시트의 문으로 잡힐 때까지(= 판정이 자리 잡을 때까지) 기다린다. */
   const settledHidden = () => waitFor(() => expect(hasClosedDoor()).toBe(true));
-  const openClosedSheet = () => chooseFromMenu('dms', DM_CLOSED_LIST_LABEL);
+  const openClosedSheet = () => chooseFromMenu('dms', koFormat(DM_CLOSED_LIST_KEY));
   /** 닫기·다시 열기 쓰기(`…/closure`)만 센다: 같은 앱의 다른 쓰기(푸시 토큰 등)는 이 시험의 일이 아니다. */
   const writes = (fetchMock: jest.Mock) =>
     fetchMock.mock.calls
@@ -1247,7 +1252,7 @@ describe('홈 — 닫은 대화·나간 멤버와의 대화 (#4367)', () => {
     expect(screen.queryByTestId(GONE_ROW)).toBeNull();
     expect(screen.queryByTestId('sidebar-gone-toggle')).toBeNull();
     expect(screen.getByTestId(HUMAN_ROW)).toBeTruthy();
-    expect(dmMenu()).toEqual([FILTER_ACTION, AGENT_LIST_ACTION, DM_CLOSED_LIST_LABEL, '취소']);
+    expect(dmMenu()).toEqual([FILTER_ACTION, AGENT_LIST_ACTION, koFormat(DM_CLOSED_LIST_KEY), '취소']);
   });
 
   it('숨은 DM 이 없으면 ⋯ 에 「숨긴 대화」가 서지 않는다 (항목이 없는 문은 문이 아니다)', async () => {
@@ -1473,7 +1478,7 @@ describe('홈 — 닫은 대화·나간 멤버와의 대화 (#4367)', () => {
     expect(notice).not.toHaveTextContent(/목록은 그대로/);
     // 접지 않는다: 나간 멤버 DM 이 목록에 있고 「숨긴 대화」 문은 없다.
     expect(screen.getByTestId(GONE_ROW)).toBeTruthy();
-    expect(dmMenu()).not.toContain(DM_CLOSED_LIST_LABEL);
+    expect(dmMenu()).not.toContain(koFormat(DM_CLOSED_LIST_KEY));
   });
 
   it('읽음 투영 실패라도 나간 멤버 DM 이 없으면 목록은 그대로라고 말한다', async () => {
@@ -1613,7 +1618,7 @@ describe('홈 — 닫은 대화·나간 멤버와의 대화 (#4367)', () => {
     ) as unknown as typeof fetch;
     openClosedSheet();
     fireEvent.press(await screen.findByTestId('dm-closed-reopen-ch-dm-human'));
-    expect(await screen.findByTestId('dm-closed-error')).toHaveTextContent(DM_REOPEN_FAILURE);
+    expect(await screen.findByTestId('dm-closed-error')).toHaveTextContent(koFormat(DM_REOPEN_FAILURE_KEY));
     expect(screen.getByTestId('dm-closed-sheet')).toBeTruthy();
     expect(screen.queryByTestId('conversation-pane')).toBeNull();
   });

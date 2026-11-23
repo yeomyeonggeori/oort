@@ -17,13 +17,13 @@ import {
   type ConnectMode,
 } from '@momo/core/features/auth/connectModel';
 import {
-  DEVICE_LINK_EXPIRED_COPY,
+  DEVICE_LINK_EXPIRED_KEY,
   DEVICE_LINK_POLL_MS,
-  DEVICE_LINK_RETRY_LABEL,
-  DEVICE_LINK_SAS_WAIT_COPY,
-  DEVICE_LINK_SETTINGS_LABEL,
+  DEVICE_LINK_RETRY_KEY,
+  DEVICE_LINK_SAS_WAIT_KEY,
+  DEVICE_LINK_SETTINGS_KEY,
   DEVICE_LINK_TTL_MS,
-  DEVICE_LINK_UNREACHABLE_COPY,
+  DEVICE_LINK_UNREACHABLE_KEY,
   DeviceLinkFormatError,
   deviceLinkFailureCopy,
   deviceLinkSasDigits,
@@ -96,6 +96,7 @@ import {formRevealOffset, type RevealSpan} from '../lib/formReveal';
 import {useReduceMotionRef} from '../lib/useReduceMotion';
 import {isOnlineFromNetInfo} from '../query/queryClient';
 import {CONNECTION_KEYS} from '@momo/core/features/connection/copyKeys';
+import {failureMessageText} from '@momo/core/features/auth/failureMessage';
 import {useFormatMessage} from '../i18n/useFormatMessage';
 import {useSafeAreaInsets} from 'react-native-safe-area-context';
 import {createMobileRememberedLogin} from '../storage/rememberedLogin';
@@ -460,7 +461,7 @@ export default function ConnectScreen({
     const checked = normalizeServerUrl(serverUrl);
     if (!checked.ok) {
       // The core wrote this sentence; it is shown rather than paraphrased.
-      setPhase({busy: false, failure: {message: checked.message, suggestSignIn: false, retryable: false}});
+      setPhase({busy: false, failure: {message: {raw: checked.message}, suggestSignIn: false, retryable: false}});
       focusTextInput(fields.current.server);
       return;
     }
@@ -504,8 +505,8 @@ export default function ConnectScreen({
   // object, which `onSubmit` creates once per answer, so a re-render (the mode
   // following "로그인하세요") does not say it again.
   useEffect(() => {
-    if (phase.failure) AccessibilityInfo.announceForAccessibility(phase.failure.message);
-  }, [phase.failure]);
+    if (phase.failure) AccessibilityInfo.announceForAccessibility(failureMessageText(formatMessage, phase.failure.message));
+  }, [phase.failure, formatMessage]);
 
   /** Rows that leave with the join form report nothing as they go. */
   const forgetJoinRows = useCallback(() => {
@@ -744,9 +745,9 @@ export default function ConnectScreen({
   // ---- M2 확인 번호 -----------------------------------------------------------
   if (sasWait) {
     const sasFailure = sasWait.expired
-      ? DEVICE_LINK_EXPIRED_COPY
+      ? formatMessage(DEVICE_LINK_EXPIRED_KEY)
       : sasWait.unreachable
-        ? DEVICE_LINK_UNREACHABLE_COPY
+        ? formatMessage(DEVICE_LINK_UNREACHABLE_KEY)
         : null;
     const host = hostOf(serverUrl);
     return (
@@ -771,7 +772,7 @@ export default function ConnectScreen({
             {sasFailure || !online ? null : (
               <View style={styles.sys} testID="device-link-sas-wait">
                 <OnboardingSpinner color={palette.textMuted} />
-                <Sentence style={styles.sysText}>{DEVICE_LINK_SAS_WAIT_COPY}</Sentence>
+                <Sentence style={styles.sysText}>{formatMessage(DEVICE_LINK_SAS_WAIT_KEY)}</Sentence>
               </View>
             )}
             <OnboardingButton
@@ -823,7 +824,7 @@ export default function ConnectScreen({
         {sasFailure ? (
           <FailureBanner
             message={sasFailure}
-            retryLabel={DEVICE_LINK_RETRY_LABEL}
+            retryLabel={formatMessage(DEVICE_LINK_RETRY_KEY)}
             onRetry={retryQr}
             testID="device-link-failure"
           />
@@ -874,7 +875,7 @@ export default function ConnectScreen({
             <OnboardingLinkRow>
               {permissionDenied ? (
                 <OnboardingLink
-                  label={DEVICE_LINK_SETTINGS_LABEL}
+                  label={formatMessage(DEVICE_LINK_SETTINGS_KEY)}
                   onPress={() => void Linking.openSettings()}
                   accessibilityHint="iOS 설정의 이 앱 화면을 엽니다."
                   testID="qr-permission-settings"
@@ -921,8 +922,8 @@ export default function ConnectScreen({
         </View>
         {linkFailure ? (
           <FailureBanner
-            message={linkFailure.message}
-            retryLabel={DEVICE_LINK_RETRY_LABEL}
+            message={failureMessageText(formatMessage, linkFailure.message)}
+            retryLabel={formatMessage(DEVICE_LINK_RETRY_KEY)}
             onRetry={retryQr}
             testID="device-link-failure"
           />
@@ -975,8 +976,8 @@ export default function ConnectScreen({
 
             {linkFailure ? (
               <FailureBanner
-                message={linkFailure.message}
-                retryLabel={DEVICE_LINK_RETRY_LABEL}
+                message={failureMessageText(formatMessage, linkFailure.message)}
+                retryLabel={formatMessage(DEVICE_LINK_RETRY_KEY)}
                 onRetry={retryQr}
                 testID="device-link-failure"
               />
@@ -1185,7 +1186,7 @@ export default function ConnectScreen({
                 content coordinates only because its parent is the content. */}
             {phase.failure ? (
               <FailureBanner
-                message={phase.failure.message}
+                message={failureMessageText(formatMessage, phase.failure.message)}
                 // A retry is offered only where pressing again with the same input
                 // could work — nothing answered, or the server faulted. A wrong
                 // password or a spent invite needs the input to change first, and

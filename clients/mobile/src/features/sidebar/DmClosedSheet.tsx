@@ -1,9 +1,9 @@
 import {
-  DM_CLOSED_LIST_EMPTY,
-  DM_CLOSED_LIST_HINT,
-  DM_CLOSED_LIST_LABEL,
-  dmClosedReasonLabel,
-  dmReopenLabelFor,
+  DM_CLOSED_LIST_EMPTY_KEY,
+  DM_CLOSED_LIST_HINT_KEY,
+  DM_CLOSED_LIST_KEY,
+  dmClosedReasonKey,
+  dmReopenKeyFor,
 } from '@momo/core/features/sidebar/dmVisibility';
 import React from 'react';
 import {StyleSheet, View} from 'react-native';
@@ -14,6 +14,7 @@ import {GroupCard, ListRow, SheetScroll} from '../../design/sheetParts';
 import {font, line, space, type Palette} from '../../design/tokens';
 import {useStyles} from '../../design/theme';
 import type {DmClosedEntry} from './dmVerdicts';
+import {useFormatMessage} from '../../i18n/useFormatMessage';
 
 // =============================================================================
 // 「⋯ › 숨긴 대화」 시트 (ADR-0177 증보 D11, #4367). 웹 `DmClosedMenu` 의 폰판이다: 내가 **닫은** 대화와 상대가 **나간** 대화를
@@ -47,23 +48,24 @@ export function DmClosedSheet({
   onReopen: (entry: DmClosedEntry) => void;
   onClose: () => void;
 }): React.JSX.Element {
+  const formatMessage = useFormatMessage();
   const styles = useStyles(buildStyles);
   return (
     <PageSheet
       height="fit"
       onClose={onClose}
-      accessibilityLabel={DM_CLOSED_LIST_LABEL}
+      accessibilityLabel={formatMessage(DM_CLOSED_LIST_KEY)}
       scrimLabel="숨긴 대화 목록 닫기"
       scrimTestID="dm-closed-backdrop"
       testID="dm-closed-sheet">
       <SheetHeader
-        title={DM_CLOSED_LIST_LABEL}
+        title={formatMessage(DM_CLOSED_LIST_KEY)}
         closeLabel="숨긴 대화 목록 닫기"
         closeTestID="dm-closed-close"
       />
       <SheetScroll testID="dm-closed-scroll">
         <Sentence style={styles.hint} testID="dm-closed-hint">
-          {DM_CLOSED_LIST_HINT}
+          {formatMessage(DM_CLOSED_LIST_HINT_KEY)}
         </Sentence>
         {error !== null ? (
           <Sentence accessibilityRole="alert" style={styles.error} testID="dm-closed-error">
@@ -72,21 +74,24 @@ export function DmClosedSheet({
         ) : null}
         {items.length === 0 ? (
           <Sentence style={styles.empty} testID="dm-closed-empty">
-            {DM_CLOSED_LIST_EMPTY}
+            {formatMessage(DM_CLOSED_LIST_EMPTY_KEY)}
           </Sentence>
         ) : (
           <GroupCard>
             {items.map(({entry, name}) => {
               const id = entry.channel.id;
               const busy = pendingId === id;
-              const action = dmReopenLabelFor(entry.reason);
+              const action = formatMessage(dmReopenKeyFor(entry.reason));
               return (
                 <View key={id} testID={`dm-closed-item-${id}`}>
                   <ListRow
                     title={name}
-                    detail={dmClosedReasonLabel(entry.reason)}
+                    detail={formatMessage(dmClosedReasonKey(entry.reason))}
                     value={action}
-                    accessibilityLabel={`${name}, ${action}`}
+                    accessibilityLabel={formatMessage(
+                      entry.reason === 'closed' ? 'sidebar.dms.reopenAriaClosed' : 'sidebar.dms.reopenAriaOpen',
+                      {name},
+                    )}
                     busy={busy}
                     disabled={busy}
                     onPress={() => onReopen(entry)}

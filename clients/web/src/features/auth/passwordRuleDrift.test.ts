@@ -8,6 +8,19 @@ import {
   PASSWORD_TOO_SHORT_CODE,
   passwordRuleCopy,
 } from "@momo/core/features/auth/passwordRuleCopy";
+import { failureMessageText } from "@momo/core/features/auth/failureMessage";
+import { catalog as koCatalog } from "@momo/core/i18n/generated/ko-KR";
+import { createLocaleService, resolveLocaleContext } from "@momo/core/i18n";
+
+// 문장은 사전(`auth.json`)에 있다(#6064). 문장 속 숫자를 한국어 생성물에서 읽는다.
+const { formatMessage } = createLocaleService({
+  ...resolveLocaleContext("ko-KR", { languages: ["ko-KR"] }),
+  catalog: koCatalog,
+});
+const ruleSentence = (code: string): string | null => {
+  const copy = passwordRuleCopy(code);
+  return copy === null ? null : failureMessageText(formatMessage, copy);
+};
 
 // =============================================================================
 // 드리프트 가드: 새 비밀번호 규칙의 숫자와 오류 코드 (ADR-0215 D2, #4593).
@@ -122,18 +135,18 @@ describe("새 비밀번호 규칙: 서버 password_rules.rs와 화면 문구 (AD
     expect(PASSWORD_TOO_LONG_CODE).toBe(server.tooLongCode);
     // 서버의 이름으로 물어도 문장이 나온다(상수만 같고 분기가 다른 이름이면 빨개진다).
     expect(passwordRuleCopy(server.tooShortCode)).not.toBeNull();
-    expect(passwordRuleCopy(server.tooLongCode)).not.toBeNull();
-    expect(passwordRuleCopy(server.tooShortCode)).not.toBe(
-      passwordRuleCopy(server.tooLongCode),
+    expect(ruleSentence(server.tooLongCode)).not.toBeNull();
+    expect(ruleSentence(server.tooShortCode)).not.toBe(
+      ruleSentence(server.tooLongCode),
     );
   });
 
   it("사람이 읽는 문장에 서버의 숫자가 그대로 찍힌다", () => {
     const server = serverRule();
-    expect(numbersIn(passwordRuleCopy(server.tooShortCode))).toContain(
+    expect(numbersIn(ruleSentence(server.tooShortCode))).toContain(
       server.minChars,
     );
-    const long = numbersIn(passwordRuleCopy(server.tooLongCode));
+    const long = numbersIn(ruleSentence(server.tooLongCode));
     expect(long).toContain(server.maxBytes);
     expect(long).toContain(HANGUL_BYTES);
     expect(long).toContain(Math.floor(server.maxBytes / HANGUL_BYTES));

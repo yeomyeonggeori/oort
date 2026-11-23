@@ -14,6 +14,11 @@ import {
   markOwnerOnboardingStage,
   readOwnerOnboardingStage,
 } from "./ownerOnboardingStore";
+import { LocaleProvider } from "@/i18n/LocaleProvider";
+import { koreanLocale } from "@/testing/koLocale";
+
+// 진행 점의 숨김 문장 등은 사전에서 오므로(#6064) 화면을 한국어 언어 객체 아래에서 그린다.
+const koLocale = await koreanLocale();
 
 const fetchLink = vi.hoisted(() => vi.fn());
 const fetchWorkspace = vi.hoisted(() => vi.fn());
@@ -112,12 +117,15 @@ function mount(onFinished: () => void): HTMLElement {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   act(() => {
     root?.render(
-      createElement(QueryClientProvider, {
-        client,
-        children: createElement(OwnerOnboarding, {
-          session,
-          replaceSessionMember: vi.fn(),
-          onFinished,
+      createElement(LocaleProvider, {
+        locale: koLocale,
+        children: createElement(QueryClientProvider, {
+          client,
+          children: createElement(OwnerOnboarding, {
+            session,
+            replaceSessionMember: vi.fn(),
+            onFinished,
+          }),
         }),
       })
     );

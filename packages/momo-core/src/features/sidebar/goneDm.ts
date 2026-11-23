@@ -1,5 +1,6 @@
 import type { ChannelLabelKind } from "../workspace/directory";
 import { composedUnreadCount, type UnreadCountInput } from "../readState/model";
+import type { MessageRef } from "../../i18n/keys";
 
 // =============================================================================
 // 나간 멤버와의 대화는 사이드바에서 기본으로 접어 둔다 (#4252, 성재 2026-10-20·22:
@@ -200,6 +201,6 @@ export function resolveGoneUnreadVerdicts(
 }
 
 /** DM 구역 끝의 조용한 줄. 접힌 나간 멤버 DM 의 수를 센다. */
-export function goneDmDisclosureLabel(count: number): string {
-  return `나간 멤버와의 대화 ${count}개`;
+export function goneDmDisclosureRef(count: number): MessageRef<"sidebar.dms.goneDisclosure"> {
+  return { key: "sidebar.dms.goneDisclosure", values: { count } };
 }

@@ -1,5 +1,6 @@
 import type { ReadState } from "../../lib/api";
 import type { ReadProjectionPhase } from "./goneDm";
+import type { PlainMessageKey } from "../../i18n/keys";
 
 // =============================================================================
 // DM 보임 판정 - 웹·폰이 읽는 **한 함수** (ADR-0177 증보 D8, #4228).
@@ -191,7 +192,7 @@ export function dmCloseBlockedByStar(input: {
 }
 
 /** D7 이 닫기를 막는 DM 에 건네는 안내. */
-export const DM_CLOSE_STAR_FIRST_HINT = "별표를 먼저 빼요";
+export const DM_CLOSE_STAR_FIRST_KEY = "sidebar.dms.closeStarFirst" satisfies PlainMessageKey;
 
 /**
  * 「⋯ › 숨긴 대화」 목록에 들어가는가(D11): 숨겨진 DM 중 명시적 닫기(7)와 나간 상대(6)만이다. 지금 사이드바에 보이는
@@ -206,29 +207,29 @@ export function dmClosedListReason(rule: DmVisibilityRule): "closed" | "gone" | 
 // ---- 「⋯ › 숨긴 대화」 문구 (D11). 웹 다이얼로그와 폰 시트가 같은 낱말을 쓴다. ----------------------------------------
 
 /** DM 구역 머리의 「⋯」 메뉴 항목이자 목록의 제목. */
-export const DM_CLOSED_LIST_LABEL = "숨긴 대화";
+export const DM_CLOSED_LIST_KEY = "sidebar.dms.closedListLabel" satisfies PlainMessageKey;
 
 /** 목록 행의 동작. 숨긴 DM 을 다시 보이게 한다. */
-export const DM_REOPEN_LABEL = "다시 보이기";
+export const DM_REOPEN_KEY = "sidebar.dms.reopen" satisfies PlainMessageKey;
 
 /** 목록 머리의 한 줄. 숨기기는 지우기가 아니라는 것과 돌아오는 조건을 말한다. */
-export const DM_CLOSED_LIST_HINT = "새 메시지가 오면 숨긴 대화는 사이드바로 돌아와요.";
+export const DM_CLOSED_LIST_HINT_KEY = "sidebar.dms.closedListHint" satisfies PlainMessageKey;
 
 /**
  * 목록 행의 이유 줄. `closed` 는 내가 닫았다. `gone` 은 왜 숨었는지를 원인까지 말한다: 상대가 나갔고(원인) 안 읽은 메시지가 없다
  * (조건). 이름 줄의 「나간 멤버」만으로는 원인이 이름에 기대고, 이 줄이 그 뒤를 잇는다.
  */
-export function dmClosedReasonLabel(reason: "closed" | "gone"): string {
-  return reason === "closed" ? "내가 숨겼어요" : "상대가 나갔고 안 읽은 메시지가 없어요";
+export function dmClosedReasonKey(reason: "closed" | "gone"): PlainMessageKey {
+  return reason === "closed" ? "sidebar.dms.reasonClosed" : "sidebar.dms.reasonGone";
 }
 
 /**
  * 행의 동작 낱말. 내가 숨긴 대화는 「다시 보이기」(숨김을 푼다)이고, 나간 상대의 대화는 풀 닫힘이 없다 - 열려 있는 동안만 사이드바에 서고
  * 다 읽으면 다시 숨는다(D8). 그래서 「열기」다. 「다시 보이기」는 돌아와 머문다는 약속처럼 읽힌다.
  */
-export function dmReopenLabelFor(reason: "closed" | "gone"): string {
-  return reason === "closed" ? DM_REOPEN_LABEL : "열기";
+export function dmReopenKeyFor(reason: "closed" | "gone"): PlainMessageKey {
+  return reason === "closed" ? DM_REOPEN_KEY : "sidebar.dms.open";
 }
 
 /** 목록이 비었을 때 메뉴가 말하는 한 줄(항목이 없는 메뉴는 문이 아니다). */
-export const DM_CLOSED_LIST_EMPTY = "숨긴 대화가 없어요.";
+export const DM_CLOSED_LIST_EMPTY_KEY = "sidebar.dms.closedListEmpty" satisfies PlainMessageKey;

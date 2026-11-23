@@ -76,7 +76,7 @@ export function WorkRequestSuggestion({
             accessibilityIgnoresInvertColors
           />
           <Text style={styles.onelineText} lineBreakStrategyIOS="hangul-word">
-            {commandSuggestOneLine(card)}
+            {commandSuggestOneLine(formatMessage, card)}
           </Text>
         </View>
       </View>

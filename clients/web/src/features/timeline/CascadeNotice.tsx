@@ -1,6 +1,7 @@
 import { Shuffle } from "lucide-react";
 import { useCascadeFallbacks } from "./cascadeContext";
 import { cascadeNoticeText, cascadeRouteText } from "@momo/core/features/timeline/cascadeModel";
+import { useFormatMessage } from "@/i18n/useFormatMessage";
 
 // =============================================================================
 // "2차 프로바이더로 처리됨" (ADR-0135 D1). The user-facing half of the audit rule
@@ -28,9 +29,10 @@ import { cascadeNoticeText, cascadeRouteText } from "@momo/core/features/timelin
 
 export function CascadeNotice({ runId }: { runId: string | null }) {
   const fallbacks = useCascadeFallbacks(runId);
-  const text = cascadeNoticeText(fallbacks);
+  const formatMessage = useFormatMessage();
+  const text = cascadeNoticeText(formatMessage, fallbacks);
   if (text === null) return null;
-  const route = cascadeRouteText(fallbacks);
+  const route = cascadeRouteText(formatMessage, fallbacks);
 
   return (
     <p

@@ -9,7 +9,7 @@ import {
   type ChannelPreviewFailure,
   type PreviewMessage,
 } from "@momo/core/features/channels/browse";
-import { deletedFoldLabel } from "@momo/core/features/timeline/deletedFold";
+import { DELETED_TOMBSTONE_KEY } from "@momo/core/features/timeline/deletedFold";
 import { GONE_MEMBER_LABEL } from "@momo/core/features/workspace/directory";
 import { SidebarDrawerToggle } from "@/app/SidebarDrawerToggle";
 import { useSession } from "@/app/session";
@@ -68,7 +68,7 @@ export function PreviewRow({ message }: { message: PreviewMessage }) {
   const locked = message.attachmentNames.length > 0 ? formatMessage("channels.preview.attachmentLocked") : undefined;
   const replies =
     message.replyCount > 0 ? formatMessage("timeline.thread.replyCount", { count: message.replyCount }) : undefined;
-  const text = message.deleted ? deletedFoldLabel(undefined) : (message.body ?? "").trim();
+  const text = message.deleted ? formatMessage(DELETED_TOMBSTONE_KEY) : (message.body ?? "").trim();
   const spoken = [author, time, edited, text, ...message.attachmentNames, locked, replies].filter(Boolean).join(", ");
 
   return (

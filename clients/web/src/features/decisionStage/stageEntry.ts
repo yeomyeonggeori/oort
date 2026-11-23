@@ -1,3 +1,4 @@
+import type { LocaleService } from "@momo/core/i18n";
 import type { Member, AgentRunProgress, Message } from "@momo/core/lib/api";
 import { fetchMessages } from "@momo/core/lib/api";
 import { agentCardModel, resolveApprovalStatus, type AgentApprovalCard } from "@momo/core/features/timeline/agentCardModel";
@@ -35,10 +36,14 @@ export function approvalBundleContext(
   };
 }
 
-export function approvalBundleCard(card: AgentApprovalCard, receipt: SettledReceipt | null = settledApprovalFor(card.approvalId)): AgentApprovalCard {
+export function approvalBundleCard(
+  formatMessage: LocaleService["formatMessage"],
+  card: AgentApprovalCard,
+  receipt: SettledReceipt | null = settledApprovalFor(card.approvalId)
+): AgentApprovalCard {
   const status = resolveApprovalStatus(receipt?.status ?? null, card.status);
   return {
-    ...card, title: approvalHeadTitle(card), status,
+    ...card, title: approvalHeadTitle(formatMessage, card), status,
     decidedByMemberId: receipt?.decidedByMemberId ?? card.decidedByMemberId,
     ...(card.bundle ? { bundle: { ...card.bundle, ...(receipt ? { status } : {}) } } : {}),
   };
@@ -56,19 +61,21 @@ function settlement(cards: readonly DecisionStageEntry[]): NonNullable<DecisionS
   };
 }
 
-export function openApprovalDecisionStage({ card, member, directory, workspaceId, opener, source }: {
+export function openApprovalDecisionStage({ formatMessage, card, member, directory, workspaceId, opener, source }: {
+  formatMessage: LocaleService["formatMessage"];
   card: AgentApprovalCard; member: Member; directory: Directory; workspaceId: string;
   opener: HTMLElement | null; source: () => HTMLElement | null;
 }) {
   const context = approvalBundleContext(card, member, directory);
-  const prepared = approvalBundleCard(card);
+  const prepared = approvalBundleCard(formatMessage, card);
   if (!requestBundleModel(prepared, { ...context, nowMs: Date.now() }).canDecide) return;
   const cards = [{ id: card.approvalId!, card: prepared }];
   openDecisionStage({ workspaceId, cards, context, selectedId: cards[0].id, opener, source, onSettled: settlement(cards) });
 }
 
 /** 서버가 decision_mode를 안 보내는 동안에도 칩·요약 줄은 실제 카드를 찾아 열어요. */
-export function openRunDecisionStage({ runs, member, directory, workspaceId, channelId, triggerSeq, opener, fallback }: {
+export function openRunDecisionStage({ formatMessage, runs, member, directory, workspaceId, channelId, triggerSeq, opener, fallback }: {
+  formatMessage: LocaleService["formatMessage"];
   runs: readonly AgentRunProgress[]; member: Member; directory: Directory; workspaceId: string;
   channelId: string; triggerSeq: number; opener: HTMLElement | null; fallback: () => void;
 }) {
@@ -93,7 +100,7 @@ export function openRunDecisionStage({ runs, member, directory, workspaceId, cha
           if (card?.kind !== "approval" || card.isResumeOffer || !card.approvalId) continue;
           const runId = message.props?.run_id ?? message.props?.runId;
           if (!approvalIds.has(card.approvalId.toLowerCase()) && !(typeof runId === "string" && runIds.has(runId.toLowerCase()))) continue;
-          const prepared = approvalBundleCard(card);
+          const prepared = approvalBundleCard(formatMessage, card);
           // 그 승인을 가리키는 run의 bundle이 「못 한다」면 무대에 올리지 않아요(서버가 보는 사람 기준으로 판정).
           const run = runs.find((candidate) => runBundleCanDecide(candidate, card.approvalId) !== undefined);
           if (requestBundleModel(prepared, { ...approvalBundleContext(card, member, directory, run), nowMs: Date.now() }).canDecide) {

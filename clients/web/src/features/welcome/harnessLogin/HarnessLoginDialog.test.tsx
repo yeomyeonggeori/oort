@@ -6,10 +6,20 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { LocalHarnessId, LocalHarnessProbe } from "@momo/core/features/hostedAgents/detect";
 import {
   HARNESS_LOGIN_CONNECTED_CLOSE_MS,
-  LOGIN_TERMINAL_SHOW_LABEL,
+  LOGIN_TERMINAL_SHOW_KEY,
 } from "@momo/core/features/onboarding/harnessLogin";
 import type { PtyExit } from "@/lib/tauri";
 import { HarnessLoginDialog, type HarnessLoginFixture } from "./HarnessLoginDialog";
+import { LocaleProvider } from "@/i18n/LocaleProvider";
+import { koreanLocale } from "@/testing/koLocale";
+import { catalog as koCatalog } from "@momo/core/i18n/generated/ko-KR";
+import { createMessageCopy } from "@momo/core/testkit";
+
+// 로그인 모달의 문장은 사전(`onboarding.json`)에 있다(#6064). 화면은 한국어 언어 객체 아래에서 그리고, 시험은 같은 한국어
+// 생성물로 키를 풀어 예전 한국어를 그대로 단정한다.
+const ko = createMessageCopy({ messageLocale: "ko-KR", catalog: koCatalog });
+const koLocale = await koreanLocale();
+
 
 // 모달을 가짜 CLI(가짜 PTY)로 잰다: 기본 흐름에 터미널이 없고, 「터미널로 보기」를
 // 펼쳐야만 칸이 붙고, 코드 칸은 보낸 뒤 비고, 연결됨이면 부른 쪽에 알리고 닫힌다.
@@ -108,6 +118,7 @@ function mount(
   root = createRoot(host);
   act(() => {
     root!.render(
+      <LocaleProvider locale={koLocale}>
       <HarnessLoginDialog
         harness={harness}
         onClose={handlers.onClose ?? (() => undefined)}
@@ -115,6 +126,7 @@ function mount(
         onFallbackStarted={() => undefined}
         fixture={handlers.fixture ?? null}
       />
+      </LocaleProvider>
     );
   });
 }
@@ -148,7 +160,7 @@ describe("HarnessLoginDialog", () => {
     expect(dq("stub-terminal-pane")).toBeNull();
     expect(dq("harness-login-terminal")).toBeNull();
     const toggle = dq("harness-login-terminal-toggle");
-    expect(toggle?.textContent).toBe(LOGIN_TERMINAL_SHOW_LABEL);
+    expect(toggle?.textContent).toBe(ko(LOGIN_TERMINAL_SHOW_KEY));
     expect(toggle?.getAttribute("aria-expanded")).toBe("false");
     // 평문 단추: 단추 안에 로고·그림이 없다(ADR-0193 증보 약관 판단 2).
     expect(dq("harness-login-dialog")?.querySelectorAll("button svg, button img").length).toBe(0);
@@ -265,12 +277,14 @@ describe("HarnessLoginDialog", () => {
     const render = (open: boolean) =>
       act(() => {
         root!.render(
+          <LocaleProvider locale={koLocale}>
           <HarnessLoginDialog
             harness={open ? "claude" : null}
             onClose={() => render(false)}
             onConnected={() => undefined}
             onFallbackStarted={() => undefined}
           />
+          </LocaleProvider>
         );
       });
     render(true);

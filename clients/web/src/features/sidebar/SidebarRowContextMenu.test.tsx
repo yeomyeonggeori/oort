@@ -1,38 +1,52 @@
 // @vitest-environment jsdom
 
-import { act, createElement, type KeyboardEvent as ReactKeyboardEvent } from "react";
+import { act, createElement, type KeyboardEvent as ReactKeyboardEvent, type ReactElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { MemoryRouter } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Channel, MembershipRole, ReadState } from "@momo/core/lib/api";
 import {
-  CHANNEL_COPY_FAILURE,
-  CHANNEL_COPY_ID_DONE_LABEL,
-  CHANNEL_COPY_UNAVAILABLE,
-  CHANNEL_COPY_ID_LABEL,
-  CHANNEL_LEAVE_LABEL,
-  CHANNEL_MARK_READ_LABEL,
-  CHANNEL_MARK_UNREAD_BUSY_LABEL,
-  CHANNEL_MARK_UNREAD_FAILURE,
-  CHANNEL_MARK_UNREAD_LABEL,
-  CHANNEL_MUTE_FAILURE,
-  CHANNEL_MUTE_LABEL,
-  CHANNEL_UNMUTE_LABEL,
-  DM_CLOSE_LABEL,
+  CHANNEL_COPY_FAILURE_KEY,
+  CHANNEL_COPY_ID_DONE_KEY,
+  CHANNEL_COPY_UNAVAILABLE_KEY,
+  CHANNEL_COPY_ID_KEY,
+  CHANNEL_LEAVE_KEY,
+  CHANNEL_MARK_READ_KEY,
+  CHANNEL_MARK_UNREAD_BUSY_KEY,
+  CHANNEL_MARK_UNREAD_FAILURE_KEY,
+  CHANNEL_MARK_UNREAD_KEY,
+  CHANNEL_MUTE_FAILURE_KEY,
+  CHANNEL_MUTE_KEY,
+  CHANNEL_UNMUTE_KEY,
+  DM_CLOSE_KEY,
 } from "@momo/core/features/channels/model";
 import {
   COPY_LINK_ACTION_LABEL,
   COPY_LINK_DONE_LABEL,
 } from "@momo/core/features/timeline/copyLabels";
 import {
-  CHANNEL_STAR_LABEL,
-  CHANNEL_UNSTAR_LABEL,
+  CHANNEL_STAR_KEY,
+  CHANNEL_UNSTAR_KEY,
 } from "@momo/core/features/sidebar/sidebarSections";
 import { resetEscapeLayers } from "@/design/ui/escapeLayer";
 import { SidebarRow } from "./SidebarRow";
 import { roveSidebarRows } from "./sidebarRoving";
 import { SidebarRowContextMenu } from "./SidebarRowContextMenu";
+import { LocaleProvider } from "@/i18n/LocaleProvider";
+import type { AppLocale } from "@/i18n/localeStore";
+import { koreanLocale } from "@/testing/koLocale";
+import { catalog as koCatalog } from "@momo/core/i18n/generated/ko-KR";
+import { createMessageCopy } from "@momo/core/testkit";
+
+const koCopy = createMessageCopy({ messageLocale: "ko-KR", catalog: koCatalog });
+
+// 화면 문구는 사전에서 읽는다(#6045). 한국어를 단정하던 시험은 한국어 언어 객체로 감싸 같은 문장을 그대로 단정한다.
+let koLocale: AppLocale;
+beforeAll(async () => {
+  koLocale = await koreanLocale();
+});
+const withKo = (element: ReactElement) => createElement(LocaleProvider, { locale: koLocale, children: element });
 
 const WS = "00000000-0000-7000-8000-000000000001";
 const ME = "00000000-0000-7000-8000-000000000101";
@@ -183,7 +197,7 @@ function mountRow({
   mountedHost = host;
   mountedRoot = createRoot(host);
   act(() => {
-    mountedRoot?.render(
+    mountedRoot?.render(withKo(
       createElement(
         MemoryRouter,
         // 이 채널이 아닌 곳에 서 있다: 사이드바에서 조작하는 상황 그대로.
@@ -242,7 +256,7 @@ function mountRow({
           )
         )
       )
-    );
+    ));
   });
   return host;
 }
@@ -265,7 +279,7 @@ function plainRowClass(): string {
   document.body.append(host);
   const root = createRoot(host);
   act(() => {
-    root.render(
+    root.render(withKo(
       createElement(
         MemoryRouter,
         { initialEntries: ["/c/00000000-0000-7000-8000-000000000299"] },
@@ -280,7 +294,7 @@ function plainRowClass(): string {
           })
         )
       )
-    );
+    ));
   });
   const cls =
     document.querySelector('[data-testid="plain-row"]')?.getAttribute("class") ??
@@ -377,9 +391,9 @@ describe("사이드바 행 우클릭 (BT-1 / #1929)", () => {
     // 하위 판 안에 있고, 머리글 줄은 없다.
     expect(labels()).toEqual([
       "복사",
-      CHANNEL_MARK_READ_LABEL,
-      CHANNEL_MUTE_LABEL,
-      CHANNEL_LEAVE_LABEL,
+      koCopy(CHANNEL_MARK_READ_KEY),
+      koCopy(CHANNEL_MUTE_KEY),
+      koCopy(CHANNEL_LEAVE_KEY),
     ]);
     expect(item("copy-name")).toBeNull();
     // 메뉴가 열려 있는 동안 행 자리가 그것을 말한다: 포털로 떠 있는 패널이
@@ -431,7 +445,7 @@ describe("음소거 토글 왕복", () => {
   it("낱말이 상태를 따라 뒤집힌다", () => {
     mountRow({ channel: channelFixture({ muted: true }) });
     rightClick();
-    expect(item("mute-toggle")?.textContent?.trim()).toBe(CHANNEL_UNMUTE_LABEL);
+    expect(item("mute-toggle")?.textContent?.trim()).toBe(koCopy(CHANNEL_UNMUTE_KEY));
     expect(item("mute-toggle")?.hasAttribute("data-muted")).toBe(true);
   });
 
@@ -451,7 +465,7 @@ describe("음소거 토글 왕복", () => {
     await flush();
     expect(menu()).not.toBeNull();
     const banner = document.querySelector('[data-testid="channel-row-action-error"]');
-    expect(banner?.textContent).toContain(CHANNEL_MUTE_FAILURE);
+    expect(banner?.textContent).toContain(koCopy(CHANNEL_MUTE_FAILURE_KEY));
   });
 });
 
@@ -478,7 +492,7 @@ describe("읽음 처리", () => {
     rightClick();
     expect(item("mark-read")).toBeNull();
     // 읽음 처리의 자리에는 그 반대 방향이 선다(#3963). 다 읽었고 메시지가 있다.
-    expect(item("mark-unread")?.textContent?.trim()).toBe(CHANNEL_MARK_UNREAD_LABEL);
+    expect(item("mark-unread")?.textContent?.trim()).toBe(koCopy(CHANNEL_MARK_UNREAD_KEY));
   });
 
   it("서버 unread_count 가 0 이어도 마크가 있으면 「읽음 처리」가 선다", () => {
@@ -582,15 +596,15 @@ describe("나가기", () => {
     // 「복사 ›」(하위 메뉴) │ 읽음 · 알림 (#5777). 복사 셋은 하위 판 안에 있다.
     expect(labels()).toEqual([
       "복사",
-      CHANNEL_MARK_READ_LABEL,
-      CHANNEL_MUTE_LABEL,
+      koCopy(CHANNEL_MARK_READ_KEY),
+      koCopy(CHANNEL_MUTE_KEY),
     ]);
     openSub("copy-group");
     expect(
       Array.from(subMenu("copy-group")?.querySelectorAll('[role="menuitem"]') ?? []).map(
         (el) => el.textContent?.trim()
       )
-    ).toEqual(["이름 복사하기", COPY_LINK_ACTION_LABEL, CHANNEL_COPY_ID_LABEL]);
+    ).toEqual(["이름 복사하기", COPY_LINK_ACTION_LABEL, koCopy(CHANNEL_COPY_ID_KEY)]);
   });
 
   it("일반 멤버에게도 나가기가 선다 — 본인 나가기 길이다 (#5778)", () => {
@@ -875,7 +889,7 @@ describe("design-review #1937 R1 수리", () => {
     setChannelNotificationPref.mockReturnValue(new Promise(() => undefined));
     mountRow();
     rightClick();
-    expect(item("mute-toggle")?.textContent?.trim()).toBe(CHANNEL_MUTE_LABEL);
+    expect(item("mute-toggle")?.textContent?.trim()).toBe(koCopy(CHANNEL_MUTE_KEY));
     clickItem("mute-toggle");
     await flush();
     const busyRow = item("mute-toggle");
@@ -913,7 +927,7 @@ describe("design-review #1937 R1 수리", () => {
     await flush();
     // 알림은 도는 중이고, 읽음 항목은 쉬는 낱말을 이고 있다.
     expect(item("mute-toggle")?.getAttribute("aria-busy")).toBe("true");
-    expect(item("mark-read")?.textContent?.trim()).toBe(CHANNEL_MARK_READ_LABEL);
+    expect(item("mark-read")?.textContent?.trim()).toBe(koCopy(CHANNEL_MARK_READ_KEY));
     expect(item("mark-read")?.getAttribute("aria-busy")).toBeNull();
 
     clickItem("mark-read");
@@ -1200,7 +1214,7 @@ describe("별표", () => {
   it("낱말이 상태다 — 붙어 있으면 「떼기」", () => {
     mountRow({ onToggleStar: () => undefined });
     rightClick();
-    expect(item("star")?.textContent).toBe(CHANNEL_STAR_LABEL);
+    expect(item("star")?.textContent).toBe(koCopy(CHANNEL_STAR_KEY));
     act(() => {
       document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
     });
@@ -1210,7 +1224,7 @@ describe("별표", () => {
     mountedHost?.remove();
     mountRow({ starred: true, onToggleStar: () => undefined });
     rightClick();
-    expect(item("star")?.textContent).toBe(CHANNEL_UNSTAR_LABEL);
+    expect(item("star")?.textContent).toBe(koCopy(CHANNEL_UNSTAR_KEY));
   });
 
   it("고르면 토글이 발화하고 메뉴가 닫힌다", () => {
@@ -1347,13 +1361,13 @@ describe("ID 복사 (#3963)", () => {
     mountRow();
     rightClick();
     openSub("copy-group");
-    expect(item("copy-id")?.textContent?.trim()).toBe(CHANNEL_COPY_ID_LABEL);
+    expect(item("copy-id")?.textContent?.trim()).toBe(koCopy(CHANNEL_COPY_ID_KEY));
     clickItem("copy-id");
     await flush();
     expect(writeText).toHaveBeenCalledTimes(1);
     expect(writeText).toHaveBeenCalledWith(CHANNEL_ID);
     expect(menu()).not.toBeNull();
-    expect(item("copy-id")?.textContent?.trim()).toBe(CHANNEL_COPY_ID_DONE_LABEL);
+    expect(item("copy-id")?.textContent?.trim()).toBe(koCopy(CHANNEL_COPY_ID_DONE_KEY));
   });
 
   it("DM 행도 같은 열쇠로 자기 id 를 올린다", async () => {
@@ -1386,7 +1400,7 @@ describe("복사 실패는 누른 줄이 말한다 (#5777 M1)", () => {
     expect(Array.from(menu()?.children ?? []).length).toBe(before + 1);
     expect(item("copy-id")?.hasAttribute("data-copy-failed")).toBe(true);
     expect(item("copy-id")?.textContent?.trim()).toBe("복사하지 못했습니다");
-    expect(item("copy-id")?.getAttribute("title")).toBe(CHANNEL_COPY_FAILURE);
+    expect(item("copy-id")?.getAttribute("title")).toBe(koCopy(CHANNEL_COPY_FAILURE_KEY));
     // 같은 줄을 다시 누르면 다시 복사한다(다른 줄이 아니다).
     clickItem("copy-id");
     await flush();
@@ -1401,10 +1415,10 @@ describe("복사 실패는 누른 줄이 말한다 (#5777 M1)", () => {
     clickItem("copy-link");
     await flush();
     expect(item("copy-link")?.hasAttribute("data-copy-failed")).toBe(true);
-    expect(item("copy-link")?.getAttribute("title")).toBe(CHANNEL_COPY_UNAVAILABLE);
+    expect(item("copy-link")?.getAttribute("title")).toBe(koCopy(CHANNEL_COPY_UNAVAILABLE_KEY));
     expect(
       document.querySelector('[data-testid="channel-row-action-error"]')?.textContent
-    ).toBe(CHANNEL_COPY_UNAVAILABLE);
+    ).toBe(koCopy(CHANNEL_COPY_UNAVAILABLE_KEY));
   });
 });
 
@@ -1473,7 +1487,7 @@ describe("읽지 않음으로 표시 (#3963)", () => {
     await flush();
     const busy = item("mark-unread");
     expect(busy?.getAttribute("aria-busy")).toBe("true");
-    expect(busy?.textContent?.trim()).toBe(CHANNEL_MARK_UNREAD_BUSY_LABEL);
+    expect(busy?.textContent?.trim()).toBe(koCopy(CHANNEL_MARK_UNREAD_BUSY_KEY));
     expect(busy?.hasAttribute("data-disabled")).toBe(false);
     // 같은 항목을 다시 눌러도 두 번째 PUT 은 나가지 않는다.
     clickItem("mark-unread");
@@ -1489,7 +1503,7 @@ describe("읽지 않음으로 표시 (#3963)", () => {
     await flush();
     expect(menu()).not.toBeNull();
     const banner = document.querySelector('[data-testid="channel-row-action-error"]');
-    expect(banner?.textContent).toContain(CHANNEL_MARK_UNREAD_FAILURE);
+    expect(banner?.textContent).toContain(koCopy(CHANNEL_MARK_UNREAD_FAILURE_KEY));
   });
 });
 
@@ -1503,7 +1517,7 @@ describe("DM 닫기 (#3963)", () => {
   it("DM 이고 닫을 손이 있을 때만 선다", () => {
     mountRow({ channel: dmChannel(), title: "이도현", onCloseDm: () => undefined });
     rightClick();
-    expect(item("close-dm")?.textContent?.trim()).toBe(DM_CLOSE_LABEL);
+    expect(item("close-dm")?.textContent?.trim()).toBe(koCopy(DM_CLOSE_KEY));
   });
 
   it("손이 없으면 서지 않는다", () => {

@@ -7,6 +7,7 @@ import {
 } from "@momo/core/features/channels/memberAdd";
 import { useSession } from "@/app/session";
 import type { DialogFocusTarget } from "@/design/ui/dialog";
+import { useFormatMessage } from "@/i18n/useFormatMessage";
 
 // =============================================================================
 // 채널에 멤버 추가 (검수 #2): one dialog for the whole shell adds people to a
@@ -54,6 +55,7 @@ export interface AddChannelMemberHandle {
 export function useAddChannelMember(channelId: string): AddChannelMemberHandle {
   const { workspaceId } = useSession();
   const client = useQueryClient();
+  const formatMessage = useFormatMessage();
   const [pendingIds, setPendingIds] = useState<ReadonlySet<string>>(new Set());
   const [failures, setFailures] = useState<ReadonlyMap<string, string>>(
     new Map()
@@ -91,8 +93,9 @@ export function useAddChannelMember(channelId: string): AddChannelMemberHandle {
         // 실패하면 낙관적 편집을 통째로 되돌린다. `withChannelMemberAdded`가
         // 입력을 건드리지 않으므로 previous는 추가 이전 상태 그대로다.
         client.setQueryData<RosterMember[]>(key, previous);
+        const failure = addChannelMemberFailure(error);
         setFailures((prev) =>
-          new Map(prev).set(memberId, addChannelMemberFailure(error))
+          new Map(prev).set(memberId, formatMessage(failure.key, failure.values as never))
         );
         return false;
       } finally {
@@ -103,7 +106,7 @@ export function useAddChannelMember(channelId: string): AddChannelMemberHandle {
         });
       }
     },
-    [pendingIds, workspaceId, channelId, client]
+    [pendingIds, workspaceId, channelId, client, formatMessage]
   );
 
   const clearFailure = useCallback((memberId: string) => {

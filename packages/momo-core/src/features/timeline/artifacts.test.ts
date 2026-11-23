@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
+import { catalog as koCatalog } from "../../i18n/generated/ko-KR";
+import { createMessageCopy } from "../../testkit";
 import type { Message } from "../../lib/api";
 import {
+  artifactTitleText,
   artifactKeepsBody,
   isTruncated,
   omittedFileCount,
@@ -10,6 +13,13 @@ import {
   type OversizedArtifact,
 } from "./artifacts";
 import { rowPresentation } from "./rowModel";
+// 문장은 사전(`timeline.json`)에 있다(#6044). 시험은 제품과 같은 한국어 생성물로 키를 풀어 한국어 그대로 단정한다.
+const ko = createMessageCopy({ messageLocale: "ko-KR", catalog: koCatalog });
+
+// 제목은 키와 값일 수 있다: 시험은 한국어 사전으로 푼 글 `titleText` 로 견준다.
+type WithText<A extends { title: unknown }> = A & { titleText: string };
+const withText = <A extends { title: Parameters<typeof artifactTitleText>[1] }>(artifact: A): WithText<A> =>
+  Object.assign(artifact, { titleText: artifactTitleText(ko, artifact.title) });
 
 // =============================================================================
 // The web half of the ADR-0126 D2 artifact contract (MOMO-620). Every case here
@@ -46,16 +56,16 @@ const PATCH = [
   "     func drain() async throws {",
 ].join("\n");
 
-function asDiff(message: Message): DiffArtifact {
+function asDiff(message: Message): WithText<DiffArtifact> {
   const artifact = resolveArtifact(message);
   expect(artifact?.kind).toBe("diff");
-  return artifact as DiffArtifact;
+  return withText(artifact as DiffArtifact);
 }
 
-function asLink(message: Message): LinkArtifact {
+function asLink(message: Message): WithText<LinkArtifact> {
   const artifact = resolveArtifact(message);
   expect(artifact?.kind === "commit" || artifact?.kind === "pr").toBe(true);
-  return artifact as LinkArtifact;
+  return withText(artifact as LinkArtifact);
 }
 
 describe("artifact detection order", () => {
@@ -67,7 +77,7 @@ describe("artifact detection order", () => {
         props: { artifact_kind: "diff", patch: PATCH, title: "outbox 샤딩" },
       })
     );
-    expect(diff.title).toBe("outbox 샤딩");
+    expect(diff.titleText).toBe("outbox 샤딩");
     expect(diff.files).toHaveLength(1);
     expect(diff.files[0].path).toBe("relay/Sources/Relay/OutboxDrain.swift");
     expect(diff.additions).toBe(2);
@@ -91,7 +101,7 @@ describe("artifact detection order", () => {
 
   it("treats a type=diff message body as the patch", () => {
     const diff = asDiff(msg({ type: "diff", body: PATCH }));
-    expect(diff.title).toBe("코드 변경");
+    expect(diff.titleText).toBe("코드 변경");
     expect(diff.totalLineCount).toBe(diff.displayedLineCount);
   });
 
@@ -159,10 +169,10 @@ describe("a patch past the 200,000 byte ceiling", () => {
     ...Array.from({ length: 12_000 }, (_, i) => `+${"가".repeat(20)}${i}`),
   ].join("\n");
 
-  function asOversized(message: Message): OversizedArtifact {
+  function asOversized(message: Message): WithText<OversizedArtifact> {
     const artifact = resolveArtifact(message);
     expect(artifact?.kind).toBe("oversized");
-    return artifact as OversizedArtifact;
+    return withText(artifact as OversizedArtifact);
   }
 
   it("is contained rather than parsed, so the row still has a ceiling", () => {
@@ -355,7 +365,7 @@ describe("commit and pull request link cards", () => {
       })
     );
     expect(link.kind).toBe("pr");
-    expect(link.title).toBe("웹 diff 카드 (MOMO-620)");
+    expect(link.titleText).toBe("웹 diff 카드 (MOMO-620)");
     expect(link.repository).toBe("Dawn-kim-official/momo");
     expect(link.branch).toBe("feat/803-momo-620");
     expect(link.status).toBe("open");
@@ -378,8 +388,8 @@ describe("commit and pull request link cards", () => {
   });
 
   it("names the kind when the sender gave no title", () => {
-    expect(asLink(msg({ props: { artifact_kind: "commit" } })).title).toBe("커밋");
-    expect(asLink(msg({ props: { artifact_kind: "pr" } })).title).toBe(
+    expect(asLink(msg({ props: { artifact_kind: "commit" } })).titleText).toBe("커밋");
+    expect(asLink(msg({ props: { artifact_kind: "pr" } })).titleText).toBe(
       "풀 리퀘스트"
     );
   });
@@ -450,7 +460,7 @@ describe("commit and pull request link cards", () => {
     expect(link.branch).toBe(`${"b".repeat(119)}…`);
     expect(link.status).toBe(`${"s".repeat(79)}…`);
     expect(link.repository).toBe(`${"r".repeat(159)}…`);
-    expect(link.title).toBe(`${"t".repeat(199)}…`);
+    expect(link.titleText).toBe(`${"t".repeat(199)}…`);
   });
 
   it("never cuts a value that fits", () => {
@@ -482,7 +492,7 @@ describe("[R2-M1] the tool's verb and object survive the artifact swap", () => {
         },
       })
     );
-    expect(diff.title).toBe(
+    expect(diff.titleText).toBe(
       "apply_patch 실행, relay/Sources/Relay/OutboxDrain.swift"
     );
   });
@@ -490,7 +500,7 @@ describe("[R2-M1] the tool's verb and object survive the artifact swap", () => {
   it("reads the legacy `tool` key too, and needs no label", () => {
     expect(
       asDiff(msg({ type: "diff", body: PATCH, props: { tool: "git apply" } }))
-        .title
+        .titleText
     ).toBe("git apply 실행");
   });
 
@@ -502,12 +512,12 @@ describe("[R2-M1] the tool's verb and object survive the artifact swap", () => {
           body: PATCH,
           props: { tool_name: "apply_patch", title: "outbox 샤딩" },
         })
-      ).title
+      ).titleText
     ).toBe("outbox 샤딩");
   });
 
   it("keeps the generic name when the message names no tool", () => {
-    expect(asDiff(msg({ type: "diff", body: PATCH })).title).toBe("코드 변경");
+    expect(asDiff(msg({ type: "diff", body: PATCH })).titleText).toBe("코드 변경");
   });
 
   it("composes a title that fits the 200 character ceiling", () => {
@@ -518,8 +528,8 @@ describe("[R2-M1] the tool's verb and object survive the artifact swap", () => {
         props: { tool_name: "t".repeat(90), label: "l".repeat(120) },
       })
     );
-    expect([...diff.title].length).toBeLessThanOrEqual(200);
-    expect(diff.title.startsWith(`${"t".repeat(79)}… 실행, `)).toBe(true);
+    expect([...diff.titleText].length).toBeLessThanOrEqual(200);
+    expect(diff.titleText.startsWith(`${"t".repeat(79)}… 실행, `)).toBe(true);
   });
 });
 
@@ -611,7 +621,7 @@ describe("#1476 a runtime null body", () => {
     const message = nullBodyMsg({
       props: { artifact_kind: "pr", title: "웹 diff 카드" },
     });
-    expect(asLink(message).title).toBe("웹 diff 카드");
+    expect(asLink(message).titleText).toBe("웹 diff 카드");
   });
 
   it("still promotes a real diff body: the guard reads the body, it does not drop it", () => {

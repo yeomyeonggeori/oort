@@ -2,16 +2,17 @@ import React from 'react';
 import {Image, StyleSheet, Text, View} from 'react-native';
 import {isSurfaceProvided} from '@momo/core/features/capabilities/serverSurfaces';
 import {
-  COMMAND_SUGGEST_SETTINGS_PHONE,
+  COMMAND_SUGGEST_SETTINGS_PHONE_KEY,
   commandSuggestHead,
   commandSuggestOneLine,
   commandSuggestViewer,
-  settingsOpenTarget,
+  settingsOpenTargetKey,
   type CommandSuggestCard,
 } from '@momo/core/features/timeline/commandSuggest';
 import {font, line, space, TOUCH_TARGET, type Palette} from '../../design/tokens';
 import {Sentence} from '../../design/atoms';
 import {usePalette, useStyles} from '../../design/theme';
+import {useFormatMessage} from '../../i18n/useFormatMessage';
 import {AI_CONNECT_ICON_SIZE, AI_CONNECT_ICONS} from '../../design/icons';
 import {CONV} from './convDesign';
 import {AI_SUGGEST} from './AiConnectSuggestion';
@@ -39,6 +40,7 @@ export function SettingsOpenSuggestion({
 }): React.JSX.Element | null {
   const styles = useStyles(build);
   const palette = usePalette();
+  const formatMessage = useFormatMessage();
   if (!isSurfaceProvided('settingsOpenCard')) return null;
   const section = card.section;
   // 모르는 section(깨진 제안)은 카드를 세우지 않는다: 행의 본문 글이 안내를 한다.
@@ -49,7 +51,7 @@ export function SettingsOpenSuggestion({
       <View style={styles.wrap} testID="settings-suggest-other">
         <View style={styles.oneline} testID="settings-suggest-line">
           <Text style={styles.onelineText} lineBreakStrategyIOS="hangul-word">
-            {commandSuggestOneLine(card)}
+            {commandSuggestOneLine(formatMessage, card)}
           </Text>
         </View>
       </View>
@@ -75,7 +77,7 @@ export function SettingsOpenSuggestion({
           style={styles.label}
           lineBreakStrategyIOS="hangul-word"
           testID="settings-suggest-label">
-          {settingsOpenTarget(section)}
+          {formatMessage(settingsOpenTargetKey(section))}
         </Text>
         <View style={styles.note}>
           <Image
@@ -83,7 +85,7 @@ export function SettingsOpenSuggestion({
             style={[styles.icon, styles.noteIcon, {tintColor: palette.icon}]}
             accessibilityIgnoresInvertColors
           />
-          <Sentence style={styles.noteText}>{COMMAND_SUGGEST_SETTINGS_PHONE}</Sentence>
+          <Sentence style={styles.noteText}>{formatMessage(COMMAND_SUGGEST_SETTINGS_PHONE_KEY)}</Sentence>
         </View>
       </View>
     </View>

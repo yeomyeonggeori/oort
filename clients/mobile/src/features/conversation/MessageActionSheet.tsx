@@ -4,7 +4,7 @@ import {attachmentPreviewLine} from '@momo/core/features/attachments/model';
 import type {MessageActionAvailability} from '@momo/core/features/timeline/model';
 import {QUOTE_ACTION_LABEL} from '@momo/core/features/timeline/quote';
 import {editedMark} from '@momo/core/features/timeline/editedLabel';
-import {pinActionLabel} from '@momo/core/features/timeline/pins';
+import {pinActionLabelKey} from '@momo/core/features/timeline/pins';
 import {COPY_MESSAGE_ACTION_LABEL} from '@momo/core/features/timeline/copyLabels';
 import {
   QUICK_REACTIONS,
@@ -255,7 +255,7 @@ function SheetBody({
     availability.pin && onPin ? (
       <ListRow
         key="pin"
-        title={pinActionLabel(pinned === true)}
+        title={locale.formatMessage(pinActionLabelKey(pinned === true))}
         onPress={onPin}
         closesSheet
         testID="sheet-pin"

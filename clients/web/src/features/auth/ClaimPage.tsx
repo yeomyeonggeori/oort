@@ -20,6 +20,7 @@ import { Input } from "@/design/ui/input";
 import { titlebarDragProps } from "@/app/sidebarPane";
 import { IS_TAURI } from "@/lib/env";
 import { absoluteApiBase, setServerBase } from "@/lib/serverBase";
+import { failureMessageText } from "@momo/core/features/auth/failureMessage";
 import { useMessages } from "@/i18n/useMessages";
 import { ClaimHostGate } from "@/features/recovery/ClaimHostGate";
 import { InlineBanner } from "@/features/common/States";
@@ -235,7 +236,7 @@ export function ClaimPage({
       ? ""
       : failure.messageKey !== undefined
         ? messages.formatMessage(failure.messageKey)
-        : failure.message;
+        : failureMessageText(messages.formatMessage, failure.message);
   const showGate = showForm && !hostConfirmed;
   const serverBase = absoluteApiBase();
   const passwordRuleRefused = claimRefusesPassword(failure);

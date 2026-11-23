@@ -1,5 +1,7 @@
 import { useEffect, useId, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import type { LocalHarnessId } from "@momo/core/features/hostedAgents/detect";
+import type { LocaleService } from "@momo/core/i18n";
+import { useFormatMessage } from "@/i18n/useFormatMessage";
 import {
   COPIED_LABEL,
   COPY_ACTION_LABEL,
@@ -11,28 +13,28 @@ import { expressionForState } from "@momo/core/features/onboarding/guide";
 import {
   HARNESS_LOGIN_CONNECTED_CLOSE_MS,
   HARNESS_LOGIN_METHODS,
-  LOGIN_CANCEL_LABEL,
-  LOGIN_CHECKING_LINE,
-  LOGIN_CLOSE_LABEL,
-  LOGIN_CODE_HINT,
-  LOGIN_CODE_LABEL,
-  LOGIN_CODE_SENT_STATUS,
-  LOGIN_CODE_SUBMIT_LABEL,
-  LOGIN_CODE_TOGGLE_LABEL,
-  LOGIN_CONNECTED_LINE,
-  LOGIN_DETACH_LABEL,
-  LOGIN_DEVICE_LABEL,
-  LOGIN_DONE_LABEL,
-  LOGIN_RETRY_LABEL,
-  LOGIN_TERMINAL_HIDE_LABEL,
-  LOGIN_TERMINAL_SHOW_LABEL,
+  LOGIN_CANCEL_KEY,
+  LOGIN_CHECKING_KEY,
+  LOGIN_CLOSE_KEY,
+  LOGIN_CODE_HINT_KEY,
+  LOGIN_CODE_LABEL_KEY,
+  LOGIN_CODE_SENT_KEY,
+  LOGIN_CODE_SUBMIT_KEY,
+  LOGIN_CODE_TOGGLE_KEY,
+  LOGIN_CONNECTED_KEY,
+  LOGIN_DETACH_KEY,
+  LOGIN_DEVICE_KEY,
+  LOGIN_DONE_KEY,
+  LOGIN_RETRY_KEY,
+  LOGIN_TERMINAL_HIDE_KEY,
+  LOGIN_TERMINAL_SHOW_KEY,
   loginAcceptsCode,
   loginConnectedDetail,
-  loginDialogTitle,
+  loginDialogTitleKey,
   loginFailedDetail,
-  loginFailedLine,
+  loginFailedLineKey,
   loginWaitingDetail,
-  loginWaitingLine,
+  loginWaitingLineKey,
   type HarnessLoginMethod,
   type HarnessLoginPhase,
 } from "@momo/core/features/onboarding/harnessLogin";
@@ -274,6 +276,7 @@ function LoginDialogBody({
   onFallbackStarted: (harness: LocalHarnessId) => void;
   fixture: HarnessLoginFixture | null;
 }) {
+  const formatMessage = useFormatMessage();
   const skipLogin = register !== null && startAt === "register";
   const controller = useController(
     harness,
@@ -322,7 +325,7 @@ function LoginDialogBody({
     return () => window.clearTimeout(timer);
   }, [fixture, status.phase, harness, onClose, onConnected, register]);
 
-  const guide = guideFor(harness, currentMethod, status, profile);
+  const guide = guideFor(formatMessage, harness, currentMethod, status, profile);
   const spawnFailed = status.phase === "failed" && status.reason === "spawn";
   // 캡처(픽스처)는 PTY가 없어 접힘 링크만 그린다.
   const canShowTerminal =
@@ -355,7 +358,7 @@ function LoginDialogBody({
         }}
         onOpenAutoFocus={(event) => event.preventDefault()}
       >
-        <DialogTitle className="sr-only">{loginDialogTitle(harness)}</DialogTitle>
+        <DialogTitle className="sr-only">{formatMessage(loginDialogTitleKey(harness))}</DialogTitle>
         <RegisterStepBody
           onGuard={(guarded) => {
             guardRef.current = guarded;
@@ -400,7 +403,7 @@ function LoginDialogBody({
         }
       }}
     >
-      <DialogTitle className="sr-only">{loginDialogTitle(harness)}</DialogTitle>
+      <DialogTitle className="sr-only">{formatMessage(loginDialogTitleKey(harness))}</DialogTitle>
       <KomettoGuide
         expression={guide.expression}
         line={guide.line}
@@ -439,7 +442,7 @@ function LoginDialogBody({
               onClick={() => setTerminalOpen((open) => !open)}
               data-testid="harness-login-terminal-toggle"
             >
-              {terminalOpen ? LOGIN_TERMINAL_HIDE_LABEL : LOGIN_TERMINAL_SHOW_LABEL}
+              {formatMessage(terminalOpen ? LOGIN_TERMINAL_HIDE_KEY : LOGIN_TERMINAL_SHOW_KEY)}
             </button>
             {terminalOpen && controller !== null && (
               <div
@@ -452,7 +455,9 @@ function LoginDialogBody({
                   pane={{ id: live.paneId, index: 1, focused: true, maximized: false }}
                   platform={keyPlatformOf(navigator.platform || navigator.userAgent)}
                   sessions={controller.sessions}
-                  label={`${loginDialogTitle(harness)} 터미널`}
+                  label={formatMessage("onboarding.harnessLogin.terminalAria", {
+                    title: formatMessage(loginDialogTitleKey(harness)),
+                  })}
                   restartable={false}
                 />
               </div>
@@ -470,12 +475,12 @@ function LoginDialogBody({
             onClick={() => retry("device")}
             data-testid="harness-login-device"
           >
-            {LOGIN_DEVICE_LABEL}
+            {formatMessage(LOGIN_DEVICE_KEY)}
           </Button>
         )}
         {status.phase === "connected" ? (
           <Button ref={primaryRef} type="button" onClick={onClose} data-testid="harness-login-done">
-            {LOGIN_DONE_LABEL}
+            {formatMessage(LOGIN_DONE_KEY)}
           </Button>
         ) : status.phase === "failed" ? (
           <>
@@ -487,7 +492,7 @@ function LoginDialogBody({
               onClick={onClose}
               data-testid="harness-login-close"
             >
-              {LOGIN_CLOSE_LABEL}
+              {formatMessage(LOGIN_CLOSE_KEY)}
             </Button>
             {!spawnFailed && (
               <Button
@@ -496,7 +501,7 @@ function LoginDialogBody({
                 onClick={() => retry()}
                 data-testid="harness-login-retry"
               >
-                {LOGIN_RETRY_LABEL}
+                {formatMessage(LOGIN_RETRY_KEY)}
               </Button>
             )}
           </>
@@ -510,7 +515,7 @@ function LoginDialogBody({
                 onClick={onClose}
                 data-testid="harness-login-detach"
               >
-                {LOGIN_DETACH_LABEL}
+                {formatMessage(LOGIN_DETACH_KEY)}
               </Button>
             )}
           <Button
@@ -526,7 +531,7 @@ function LoginDialogBody({
             }}
             data-testid="harness-login-cancel"
           >
-            {LOGIN_CANCEL_LABEL}
+            {formatMessage(LOGIN_CANCEL_KEY)}
           </Button>
           </>
         )}
@@ -540,37 +545,44 @@ function noopSubscribe(): () => void {
 }
 
 function guideFor(
+  formatMessage: LocaleService["formatMessage"],
   harness: LocalHarnessId,
   method: HarnessLoginMethod,
   status: HarnessLoginPhase,
   profile: string | null
 ): { expression: ReturnType<typeof expressionForState>; line: string; detail?: string } {
   switch (status.phase) {
-    case "waiting":
+    case "waiting": {
+      const detail = loginWaitingDetail(harness);
       return {
         expression: expressionForState("checking"),
-        line: loginWaitingLine(method),
-        detail: loginWaitingDetail(harness),
+        line: formatMessage(loginWaitingLineKey(method)),
+        detail: formatMessage(detail.key, detail.values),
       };
+    }
     case "checking":
-      return { expression: expressionForState("checking"), line: LOGIN_CHECKING_LINE };
-    case "connected":
+      return { expression: expressionForState("checking"), line: formatMessage(LOGIN_CHECKING_KEY) };
+    case "connected": {
+      const detail = loginConnectedDetail(harness);
       return {
         expression: expressionForState("success"),
-        line: LOGIN_CONNECTED_LINE,
-        detail: loginConnectedDetail(harness),
+        line: formatMessage(LOGIN_CONNECTED_KEY),
+        detail: formatMessage(detail.key, detail.values),
       };
-    default:
+    }
+    default: {
+      const failed = loginFailedDetail(harness, status.reason);
       return {
         expression: expressionForState("trouble"),
-        line: loginFailedLine(status.reason),
+        line: formatMessage(loginFailedLineKey(status.reason)),
         // 프로필 폴더로 로그인하는 복사 명령은 없다: 기본 위치 명령을 주면 다른
         // 계정 폴더에 로그인된다(#2878).
         detail:
           profile !== null && status.reason === "spawn"
             ? PROFILE_LOGIN_SPAWN_DETAIL
-            : loginFailedDetail(harness, status.reason),
+            : formatMessage(failed.key, failed.values as never),
       };
+    }
   }
 }
 
@@ -583,6 +595,7 @@ function CodeField({
 }: {
   onSubmit: (code: string) => void;
 }) {
+  const formatMessage = useFormatMessage();
   const [open, setOpen] = useState(false);
   const [code, setCode] = useState("");
   const [sent, setSent] = useState(false);
@@ -596,7 +609,7 @@ function CodeField({
         onClick={() => setOpen(true)}
         data-testid="harness-login-code-toggle"
       >
-        {LOGIN_CODE_TOGGLE_LABEL}
+        {formatMessage(LOGIN_CODE_TOGGLE_KEY)}
       </button>
     );
   }
@@ -613,7 +626,7 @@ function CodeField({
       data-testid="harness-login-code-form"
     >
       <label htmlFor={inputId} className="text-meta text-ink-muted">
-        {LOGIN_CODE_LABEL}
+        {formatMessage(LOGIN_CODE_LABEL_KEY)}
       </label>
       <div className="flex min-w-0 items-center gap-2">
         <Input
@@ -638,11 +651,11 @@ function CodeField({
           disabled={code.trim() === ""}
           data-testid="harness-login-code-submit"
         >
-          {LOGIN_CODE_SUBMIT_LABEL}
+          {formatMessage(LOGIN_CODE_SUBMIT_KEY)}
         </Button>
       </div>
       <p id={hintId} className="break-keep text-meta text-ink-muted" role="status">
-        {sent ? LOGIN_CODE_SENT_STATUS : LOGIN_CODE_HINT}
+        {formatMessage(sent ? LOGIN_CODE_SENT_KEY : LOGIN_CODE_HINT_KEY)}
       </p>
     </form>
   );

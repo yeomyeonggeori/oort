@@ -1,5 +1,7 @@
 import type { AgentApprovalCard } from "./agentCardModel";
-import { TEAM_AI_RATIONALE_LABEL, TEAM_AI_RATIONALE_NOTE } from "./teamAi";
+import type { LocaleService } from "../../i18n/context";
+import type { PlainMessageKey } from "../../i18n/keys";
+import { TEAM_AI_RATIONALE_LABEL_KEY, TEAM_AI_RATIONALE_NOTE_KEY } from "./teamAi";
 
 // =============================================================================
 // 「먼저 제안」 카드의 표시 (ADR-0186 증보 v5 U-c, #4705)
@@ -24,27 +26,27 @@ import { TEAM_AI_RATIONALE_LABEL, TEAM_AI_RATIONALE_NOTE } from "./teamAi";
 export const AGENT_INITIATED_ORIGIN = "agent_initiated";
 
 /** 카드 머리 제목 끝에 붙는 꼬리표. */
-export const AGENT_INITIATIVE_LABEL = "먼저 제안";
 
 /**
  * 카드 머리에 그릴 제목. 먼저 제안 카드는 제목 끝에 「 · 먼저 제안」이 붙고, 그 밖의 카드는 서버가
  * 준 제목 그대로다. 웹과 폰이 같은 규칙을 두 벌로 갖지 않게 코어에 둔다.
  */
 export function approvalHeadTitle(
+  formatMessage: LocaleService["formatMessage"],
   card: Pick<AgentApprovalCard, "title" | "agentInitiated">
 ): string {
   return card.agentInitiated === true
-    ? `${card.title} · ${AGENT_INITIATIVE_LABEL}`
+    ? formatMessage("timeline.agentInitiative.headTitle", { title: card.title })
     : card.title;
 }
 
 /** 사유 줄의 이름표. 모델이 아니라 **에이전트**가 쓴 글이라는 것을 이름에서 말한다. */
-export const AGENT_INITIATIVE_RATIONALE_LABEL = "에이전트가 쓴 글";
+export const AGENT_INITIATIVE_RATIONALE_LABEL_KEY = "timeline.agentInitiative.rationaleLabel" satisfies PlainMessageKey;
 
 export interface RationaleTag {
-  label: string;
+  labelKey: PlainMessageKey;
   /** 사유 아래 한 줄. 없으면 그리지 않는다. */
-  note: string | null;
+  noteKey: PlainMessageKey | null;
 }
 
 /**
@@ -56,10 +58,10 @@ export function rationaleTag(
   card: Pick<AgentApprovalCard, "proposedVia" | "agentInitiated">
 ): RationaleTag {
   if (card.proposedVia !== undefined) {
-    return { label: TEAM_AI_RATIONALE_LABEL, note: TEAM_AI_RATIONALE_NOTE };
+    return { labelKey: TEAM_AI_RATIONALE_LABEL_KEY, noteKey: TEAM_AI_RATIONALE_NOTE_KEY };
   }
   if (card.agentInitiated === true) {
-    return { label: AGENT_INITIATIVE_RATIONALE_LABEL, note: null };
+    return { labelKey: AGENT_INITIATIVE_RATIONALE_LABEL_KEY, noteKey: null };
   }
-  return { label: "사유", note: null };
+  return { labelKey: "timeline.agentInitiative.rationaleDefault", noteKey: null };
 }

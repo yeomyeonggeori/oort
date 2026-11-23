@@ -1,7 +1,7 @@
 import { useEffect, useId, useRef, useState, type RefObject } from "react";
 import type { LocalHarnessId } from "@momo/core/features/hostedAgents/detect";
 import { LOCAL_HARNESS_IDS } from "@momo/core/features/hostedAgents/detect";
-import { loginActionLabel } from "@momo/core/features/onboarding/harnessLogin";
+import { loginActionKey } from "@momo/core/features/onboarding/harnessLogin";
 import {
   ADD_SUBSCRIPTION_CHIP,
   ADD_SUBSCRIPTION_CLI_LABEL,
@@ -27,6 +27,7 @@ import {
   DialogTitle,
 } from "@/design/ui/dialog";
 import { Input } from "@/design/ui/input";
+import { useFormatMessage } from "@/i18n/useFormatMessage";
 
 // Reading this as: settings (AI 연결 · 내 계정) for internal team users on Tauri
 // desktop, density 5/10, motion 1/10 (the dialog's own enter/exit only).
@@ -119,6 +120,7 @@ function AddBody({
   onSubmit: (draft: AddSubscriptionDraft) => void;
   onAddApiKey: (() => void) | undefined;
 }) {
+  const formatMessage = useFormatMessage();
   const [kind, setKind] = useState<"subscription" | "api-key">("subscription");
   const firstInstalled =
     LOCAL_HARNESS_IDS.find((id) => installed.includes(id)) ?? "claude";
@@ -393,7 +395,7 @@ function AddBody({
           )}
           data-testid="add-subscription-submit"
         >
-          {kind === "api-key" ? ADD_API_KEY_NEXT : loginActionLabel(harness)}
+          {kind === "api-key" ? ADD_API_KEY_NEXT : formatMessage(loginActionKey(harness))}
         </Button>
       </div>
     </form>

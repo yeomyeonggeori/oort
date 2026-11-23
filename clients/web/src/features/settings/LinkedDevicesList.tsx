@@ -10,6 +10,7 @@ import {
   revokeLinkedDevice,
   type LinkedDevice,
 } from "@momo/core/features/auth/linkedDevices";
+import { useFormatMessage } from "@/i18n/useFormatMessage";
 import { cn } from "@/design/lib/cn";
 import { InlineBanner, Skeleton } from "@/features/common/States";
 import { ConfirmButton } from "./SettingsFields";
@@ -314,6 +315,7 @@ function LinkedDeviceRow({
   offlineReasonId: string;
   onRevoke: () => void;
 }) {
+  const formatMessage = useFormatMessage();
   const [asking, setAsking] = useState(false);
   const Icon = isPhonePlatform(device.platform) ? Smartphone : Monitor;
   const locked = device.current || offline || (busy && !revoking);
@@ -322,7 +324,7 @@ function LinkedDeviceRow({
     : offline
       ? offlineReasonId
       : undefined;
-  const platformLabel = linkedDevicePlatformLabel(device.platform);
+  const platformLabel = linkedDevicePlatformLabel(formatMessage, device.platform);
 
   return (
     <li

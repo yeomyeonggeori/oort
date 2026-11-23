@@ -155,9 +155,9 @@ describe("두 표면이 같은 모델을 소비한다", () => {
       expect(code).toMatch(/useChannelActions/);
       expect(code).toMatch(/ChannelLeaveConfirmDialog/);
       // 낱말을 표면이 직접 적으면 두 메뉴가 다른 문장을 말할 수 있다.
-      expect(code).not.toMatch(/CHANNEL_LEAVE_LABEL/);
-      expect(code).not.toMatch(/channelMuteToggleLabel/);
-      expect(code).not.toMatch(/CHANNEL_MARK_READ_LABEL/);
+      expect(code).not.toMatch(/CHANNEL_LEAVE_KEY/);
+      expect(code).not.toMatch(/channelMuteToggleKey/);
+      expect(code).not.toMatch(/CHANNEL_MARK_READ_KEY/);
     }
   });
 
@@ -185,11 +185,11 @@ describe("#3963: 새 낱말과 새 쓰기 길도 한 곳이다", () => {
   it("두 표면은 새 낱말을 직접 적지 않는다 — 모델과 코어만 안다", () => {
     for (const path of [HEADER, ROW]) {
       const code = fileCode(path);
-      expect(code).not.toMatch(/CHANNEL_MARK_UNREAD_LABEL/);
-      expect(code).not.toMatch(/CHANNEL_COPY_ID_LABEL/);
-      expect(code).not.toMatch(/CHANNEL_COPY_GROUP_LABEL/);
-      expect(code).not.toMatch(/DM_CLOSE_LABEL/);
-      expect(code).not.toMatch(/channelCopyIdLabel/);
+      expect(code).not.toMatch(/CHANNEL_MARK_UNREAD_KEY/);
+      expect(code).not.toMatch(/CHANNEL_COPY_ID_KEY/);
+      expect(code).not.toMatch(/CHANNEL_COPY_GROUP_KEY/);
+      expect(code).not.toMatch(/DM_CLOSE_KEY/);
+      expect(code).not.toMatch(/channelCopyIdKey/);
     }
   });
 

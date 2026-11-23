@@ -1,3 +1,4 @@
+import type { LocaleService } from "../../i18n/context";
 import type { Message } from "../../lib/api";
 import type { CascadeFallbackFrame } from "../../lib/realtimeEvents";
 import { isAgentAuthored, type AuthorKind } from "./serverResultAuthor";
@@ -211,10 +212,13 @@ export function turnRecordRunId(
  * numbered: "예비" says a fallback served the turn, which is exactly what is
  * known, where "2차" would be a guess about a list this surface cannot read.
  */
-export function cascadeServedSubject(fallback: CascadeFallback): string {
+export function cascadeServedSubject(
+  formatMessage: LocaleService["formatMessage"],
+  fallback: CascadeFallback
+): string {
   return fallback.toEndpointLabel === ""
-    ? "예비 프로바이더"
-    : `${fallback.toEndpointLabel} 프로바이더`;
+    ? formatMessage("timeline.cascade.servedFallback")
+    : formatMessage("timeline.cascade.servedLabeled", { label: fallback.toEndpointLabel });
 }
 
 /**
@@ -225,12 +229,15 @@ export function cascadeServedSubject(fallback: CascadeFallback): string {
  * the server's own report instead of being printed bare, which is the same rule
  * `providerTestMessage` already follows in settings.
  */
-export function cascadeReasonLabel(reason: string): string {
-  if (reason === "provider_unreachable") return "응답 없음";
-  if (reason === "provider_rate_limited") return "요청 한도 초과";
+export function cascadeReasonLabel(
+  formatMessage: LocaleService["formatMessage"],
+  reason: string
+): string {
+  if (reason === "provider_unreachable") return formatMessage("timeline.cascade.reasonUnreachable");
+  if (reason === "provider_rate_limited") return formatMessage("timeline.cascade.reasonRateLimited");
   const status = /^provider_status_(\d{3})$/.exec(reason);
-  if (status) return `서버 오류 ${status[1]}`;
-  return `서버가 보고한 사유: ${reason}`;
+  if (status) return formatMessage("timeline.cascade.reasonStatus", { status: status[1] as string });
+  return formatMessage("timeline.cascade.reasonUnknown", { reason });
 }
 
 /**
@@ -242,16 +249,17 @@ export function cascadeReasonLabel(reason: string): string {
  * only the survivor hides that two budgets were touched on the way.
  */
 export function cascadeNoticeText(
+  formatMessage: LocaleService["formatMessage"],
   fallbacks: readonly CascadeFallback[]
 ): string | null {
   const last = fallbacks[fallbacks.length - 1];
   if (last === undefined) return null;
-  const served = cascadeServedSubject(last);
-  const reason = cascadeReasonLabel(last.reason);
+  const served = cascadeServedSubject(formatMessage, last);
+  const reason = cascadeReasonLabel(formatMessage, last.reason);
   if (fallbacks.length === 1) {
-    return `${served}로 처리됨 (${reason})`;
+    return formatMessage("timeline.cascade.noticeSingle", { served, reason });
   }
-  return `${served}로 처리됨 (전환 ${fallbacks.length}번, 마지막 사유: ${reason})`;
+  return formatMessage("timeline.cascade.noticeMulti", { served, count: fallbacks.length, reason });
 }
 
 /**
@@ -264,9 +272,10 @@ export function cascadeNoticeText(
  * that put one there.
  */
 export function cascadeRouteText(
+  formatMessage: LocaleService["formatMessage"],
   fallbacks: readonly CascadeFallback[]
 ): string | null {
   const first = fallbacks[0];
   if (first === undefined || first.fromEndpointLabel === "") return null;
-  return `${first.fromEndpointLabel}에서 넘어왔습니다`;
+  return formatMessage("timeline.cascade.route", { label: first.fromEndpointLabel });
 }

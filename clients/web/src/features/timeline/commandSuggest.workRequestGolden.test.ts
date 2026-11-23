@@ -9,9 +9,12 @@ import { makeDirectory } from "@momo/core/features/workspace/directory";
 import {
   COMMAND_SUGGEST_PROP_KEY,
   commandSuggestCard,
-  workRequestOpenLabel,
+  workRequestOpenLabelKey,
 } from "@momo/core/features/timeline/commandSuggest";
-import { createAppLocale } from "@/i18n/localeStore";
+import { catalog as koCatalog } from "@momo/core/i18n/generated/ko-KR";
+import { createMessageService } from "@momo/core/i18n/service";
+// 문장은 사전에 있다(#6044): 한국어 생성물로 키를 풀어 서버 표와 견준다.
+const ko = createMessageService({ messageLocale: "ko-KR", catalog: koCatalog }).formatMessage;
 import golden from "../../../../../docs/api/command-suggest-work-request-open.golden.json";
 
 const HUMAN = golden.for_member_id_placeholder;
@@ -48,7 +51,7 @@ describe("work.request.open 서버 골든 ↔ 코어 파서·라벨 표", () => 
         harness: args.harness ?? null,
         prompt: args.prompt,
       });
-      expect(workRequestOpenLabel(card!.workRequest!.harness), golden_case.name).toBe(envelope.label);
+      expect(ko(workRequestOpenLabelKey(card!.workRequest!.harness)), golden_case.name).toBe(envelope.label);
     }
   });
 
@@ -60,18 +63,9 @@ describe("work.request.open 서버 골든 ↔ 코어 파서·라벨 표", () => 
     expect(kept).toBe(kept.trim());
   });
 
-  it("ko-KR 사전의 라벨 세 줄이 서버 표와 같은 글자다", async () => {
-    const locale = await createAppLocale(
-      {
-        readPreference: () => "ko-KR",
-        writePreference: () => {},
-        readDevice: () => ({ languages: ["ko-KR"], timeZone: "Asia/Seoul" }),
-      },
-      { applyLang: () => {} }
-    );
-    const say = locale.service.formatMessage;
-    expect(say("timeline.workRequest.labelAny")).toBe(workRequestOpenLabel(null));
-    expect(say("timeline.workRequest.labelClaude")).toBe(workRequestOpenLabel("claude"));
-    expect(say("timeline.workRequest.labelCodex")).toBe(workRequestOpenLabel("codex"));
+  it("ko-KR 사전의 라벨 세 줄이 서버 표와 같은 글자다", () => {
+    expect(ko(workRequestOpenLabelKey(null))).toBe("내 맥에 작업 맡기기");
+    expect(ko(workRequestOpenLabelKey("claude"))).toBe("내 맥의 Claude Code에 맡기기");
+    expect(ko(workRequestOpenLabelKey("codex"))).toBe("내 맥의 Codex에 맡기기");
   });
 });
