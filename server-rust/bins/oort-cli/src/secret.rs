@@ -59,10 +59,9 @@ const MAX_SECRET_CHARS: usize = 512;
 pub fn parse_envelope(raw: &str) -> Option<Envelope> {
     let (kind, rest) = if let Some(rest) = raw.strip_prefix(ACCESS_PREFIX) {
         (EnvelopeKind::Access, rest)
-    } else if let Some(rest) = raw.strip_prefix(REFRESH_PREFIX) {
-        (EnvelopeKind::Refresh, rest)
     } else {
-        return None;
+        let rest = raw.strip_prefix(REFRESH_PREFIX)?;
+        (EnvelopeKind::Refresh, rest)
     };
     let (workspace, secret) = rest.split_once('.')?;
     if workspace.len() != 36 {

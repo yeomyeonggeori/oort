@@ -12,6 +12,9 @@
 //! terminal run cannot be re-completed, and that a hosted agent whose connection
 //! is not active is refused rather than silently handed to a managed provider.
 
+#[path = "common/expression_children.rs"]
+mod expression_children;
+
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::process::Command;
@@ -28140,14 +28143,9 @@ fn require_decoder_4947() {
     if std::env::var_os("OORT_EXPRESSION_DECODER").is_some() {
         return;
     }
-    let exe = std::env::current_exe().expect("test executable");
-    let mut dir = exe.parent().expect("target dir").to_path_buf();
-    if dir.file_name() == Some(std::ffi::OsStr::new("deps")) {
-        dir.pop();
-    }
-    let path = dir.join("momo-expression-decoder");
+    let path = expression_children::ready("momo-expression-decoder");
     assert!(
-        path.is_file(),
+        path.is_ok(),
         "build the decoder first: cargo build -p momo-expressions --bins ({path:?}); without it \
          every picture is invalid media and a proposal answers -32602"
     );
@@ -29741,17 +29739,9 @@ fn assembler_4820() -> std::path::PathBuf {
     if let Some(path) = std::env::var_os("OORT_EXPRESSION_ASSEMBLER") {
         return path.into();
     }
-    let exe = std::env::current_exe().expect("test executable");
-    let mut dir = exe.parent().expect("target dir").to_path_buf();
-    if dir.file_name() == Some(std::ffi::OsStr::new("deps")) {
-        dir.pop();
-    }
-    let path = dir.join("momo-expression-assembler");
-    assert!(
-        path.is_file(),
-        "build the assembler first: cargo build -p momo-expressions --bins ({path:?})"
-    );
-    path
+    expression_children::ready("momo-expression-assembler").unwrap_or_else(|path| {
+        panic!("build the assembler first: cargo build -p momo-expressions --bins ({path:?})")
+    })
 }
 
 /// How many content reads have **begun** in a [`SlowDrive4820`] (the wait comes after the count, so

@@ -133,6 +133,8 @@ impl Line<'static> {
 struct Place<'a>(&'a std::sync::atomic::AtomicUsize);
 
 impl<'a> Place<'a> {
+    // `try_update` (the new name) is stable only from Rust 1.95; the workspace MSRV is 1.88.
+    #[allow(deprecated)]
     fn take(line: &Line<'a>) -> Option<Self> {
         use std::sync::atomic::Ordering;
         line.standing
