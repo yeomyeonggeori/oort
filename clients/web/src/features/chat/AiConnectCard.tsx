@@ -76,7 +76,6 @@ import {
 } from "@/features/welcome/harnessLogin/registerFixtures";
 import { START_CREATE_LABEL } from "@momo/core/features/onboarding/subscriptionRegister";
 import { BlockedReason, type BlockedFrame } from "@/features/common/BlockedReason";
-import { useFormatMessage } from "@/i18n/useFormatMessage";
 
 // Reading this as: agent card family (local tool card at the timeline tail) for
 // internal team users on web+Tauri, density 6/10, motion 2/10.
