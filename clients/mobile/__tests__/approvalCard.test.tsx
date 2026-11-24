@@ -18,7 +18,7 @@ import {
   type ApprovalReceipt,
 } from '../src/features/conversation/approvalGate';
 import {pendingApprovalsKey} from '../src/features/conversation/usePendingApprovals';
-import {APPROVAL_OFFLINE_COPY} from '../src/features/inbox/useOnline';
+import {APPROVAL_OFFLINE_KEY} from '../src/features/inbox/useOnline';
 import {
   approvalNoteRank,
   APPROVAL_NOTE_BLOCKED_TWIN,
@@ -32,6 +32,10 @@ import {
   UnreadDivider,
 } from '../src/features/conversation/MessageRow';
 import {SessionProvider} from '../src/session/useSession';
+import {catalog as koCatalog} from '@momo/core/i18n/generated/ko-KR';
+import {createMessageService} from '@momo/core/i18n/service';
+
+const APPROVAL_OFFLINE_COPY = createMessageService({messageLocale: 'ko-KR', catalog: koCatalog}).formatMessage(APPROVAL_OFFLINE_KEY);
 
 // =============================================================================
 // 타임라인 승인 카드 (감사 H-1 / goal U4-g)
@@ -527,7 +531,7 @@ describe('오프라인 — 같은 컨트롤은 화면마다 같은 결을 갖는
     // 인박스는 이름으로 부르고(그 화면의 진입점이 `useOnline.ts` 다), 그 이름은
     // 코어에서 다시 내보내는 것이다.
     expect(codeOnly2(SRC2('screens/InboxScreen.tsx'))).toContain(
-      'APPROVAL_OFFLINE_COPY',
+      'APPROVAL_OFFLINE_KEY',
     );
     expect(codeOnly2(SRC2('features/inbox/useOnline.ts'))).toContain(
       "from '@momo/core/features/timeline/approvalNote'",

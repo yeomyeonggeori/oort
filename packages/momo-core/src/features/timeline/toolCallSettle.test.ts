@@ -2,6 +2,10 @@ import { describe, expect, it } from "vitest";
 import type { Message } from "../../lib/api";
 import { agentCardModel, agentRequestBundle } from "./agentCardModel";
 import { presentableRows, settleToolCalls } from "./toolCallSettle";
+import { catalog as koCatalog } from "../../i18n/generated/ko-KR";
+import { createMessageCopy } from "../../testkit";
+
+const ko = createMessageCopy({ messageLocale: "ko-KR", catalog: koCatalog });
 
 // #4986. 서버는 `tool_call` 행을 한 번 쓰고 고치지 않는다(`{name, arguments, call_id}` 가 전부).
 // 결과는 같은 `call_id` 의 `tool_result` 행으로 따로 온다. 결과가 이미 도착했는데도 호출 카드가
@@ -230,7 +234,7 @@ describe("승인한 도구 호출은 같은 call_id 의 결과로 닫히고 결�
   const finished = (callId = "a", extra: Record<string, unknown> = {}, over: Partial<Message> = {}): Message => ({
     ...result(callId, extra), seq: 3, ...over,
   });
-  const stateOf = (message: Message) => agentRequestBundle(message, { nowMs: 1 })?.state;
+  const stateOf = (message: Message) => agentRequestBundle(message, { nowMs: 1, formatMessage: ko })?.state;
 
   it("바탕: 승인됨 카드는 결과를 모르면 「실행 중」이다 — 완료를 추측하지 않는다", () => {
     const rows = presentableRows([started(), approved()]);

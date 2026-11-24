@@ -228,7 +228,7 @@ function check(name, ok, detail = "") {
 }
 
 async function open(browser, origin, scheme, scene, hash) {
-  const context = await browser.newContext({
+  const context = await browser.newContext({ locale: "ko-KR",
     viewport: { width: 1440, height: 900 }, colorScheme: scheme, reducedMotion: "reduce", serviceWorkers: "block",
   });
   await installRoutes(context, scene);

@@ -13,12 +13,24 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vite
 import type { Message, RosterMember } from "@momo/core/lib/api";
 import { makeDirectory, type DmGroupFacts } from "@momo/core/features/workspace/directory";
 import {
-  EMPTY_ADD_MEMBER_ACTION_LABEL,
-  EMPTY_WRITE_ACTION_LABEL,
+  EMPTY_ADD_MEMBER_ACTION_KEY,
+  EMPTY_WRITE_ACTION_KEY,
 } from "@momo/core/features/timeline/model";
 import { CHANNEL_INTRO_STARTED, DM_INTRO_STARTED } from "./channelIntro";
 import { Timeline } from "./Timeline";
 import { payloadToMessage, type MessageNewEvent } from "@momo/core/lib/realtimeEvents";
+import { catalog as koCatalog } from "@momo/core/i18n/generated/ko-KR";
+import { createMessageCopy } from "@momo/core/testkit";
+import { LocaleProvider } from "@/i18n/LocaleProvider";
+import type { AppLocale } from "@/i18n/localeStore";
+import { koreanLocale } from "@/testing/koLocale";
+let koLocale: AppLocale;
+const withKo = (node: ReturnType<typeof createElement>) => createElement(LocaleProvider, { locale: koLocale, children: node });
+beforeAll(async () => { koLocale = await koreanLocale(); });
+
+const ko = createMessageCopy({ messageLocale: "ko-KR", catalog: koCatalog });
+const EMPTY_ADD_MEMBER_ACTION_LABEL = ko(EMPTY_ADD_MEMBER_ACTION_KEY);
+const EMPTY_WRITE_ACTION_LABEL = ko(EMPTY_WRITE_ACTION_KEY);
 
 const virtuoso = vi.hoisted(() => ({
   data: [] as { kind: string; key: string }[],
@@ -143,7 +155,7 @@ function mount(
   }
   act(() => {
     mountedRoot?.render(
-      createElement(Timeline, {
+      withKo(createElement(Timeline, {
         messages: over.messages ?? [],
         directory: DIRECTORY,
         status: "ready",
@@ -158,7 +170,7 @@ function mount(
         onAddMember: over.onAddMember,
         welcomePhase: over.welcomePhase,
         welcomeHoldWriteAction: over.welcomeHoldWriteAction,
-      })
+      }))
     );
   });
   return host;

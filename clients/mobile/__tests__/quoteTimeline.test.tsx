@@ -1,5 +1,7 @@
 import type {Message, RosterMember} from '@momo/core/lib/api';
-import {QUOTE_DELETED_TEXT} from '@momo/core/features/timeline/quote';
+import {QUOTE_DELETED_KEY} from '@momo/core/features/timeline/quote';
+import {catalog as koCatalog} from '@momo/core/i18n/generated/ko-KR';
+import {createMessageService} from '@momo/core/i18n/service';
 import type {PendingMessage} from '@momo/core/features/timeline/model';
 import {makeDirectory} from '@momo/core/features/workspace/directory';
 import {cleanup, render, screen} from '@testing-library/react-native';
@@ -8,6 +10,8 @@ import React from 'react';
 
 import type {MessageRowActions} from '../src/features/conversation/MessageRow';
 import {Timeline} from '../src/features/conversation/Timeline';
+
+const QUOTE_DELETED_TEXT = createMessageService({messageLocale: 'ko-KR', catalog: koCatalog}).formatMessage(QUOTE_DELETED_KEY);
 
 // =============================================================================
 // 인용이 **목록 위에서** 성립하는가 (ADR-0148 · goal B3 M1).

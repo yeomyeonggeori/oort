@@ -69,7 +69,7 @@ export function SettingsOpenSuggestion({
           numberOfLines={2}
           lineBreakStrategyIOS="hangul-word"
           accessibilityRole="header">
-          {commandSuggestHead(card)}
+          {commandSuggestHead(formatMessage, card)}
         </Text>
       </View>
       <View style={styles.section}>

@@ -4,6 +4,8 @@ import {
   type ApprovalStatus,
   type PayloadDetail,
 } from "./agentCardModel";
+import type { LocaleService } from "../../i18n/context";
+import type { PlainMessageKey } from "../../i18n/keys";
 import type { ApprovalNoteTone } from "./approvalNote";
 
 // =============================================================================
@@ -114,7 +116,8 @@ export interface LoginHandoffCard {
    * 같은 격). 없을 수 있고, 없으면 딥링크가 서지 않는다.
    */
   sessionId: string | null;
-  title: string;
+  /** 서버가 실어 보낸 제목. 없으면 `null`이고 화면이 `loginHandoffTitle`로 기본 제목을 푼다. */
+  titleText: string | null;
   /** 에이전트가 쓴 요청 사유. 서버가 실어 보낸 것만, 쓰인 그대로. */
   reason?: string;
   phase: LoginHandoffPhase;
@@ -129,7 +132,15 @@ export interface LoginHandoffCard {
 
 // ---- copy -------------------------------------------------------------------
 
-export const LOGIN_HANDOFF_TITLE = "로그인 핸드오프 요청";
+export const LOGIN_HANDOFF_TITLE_KEY = "timeline.loginHandoff.title" satisfies PlainMessageKey;
+
+/** 카드 제목: 서버가 준 제목이 먼저이고, 없으면 이 빌드의 기본 제목이다. */
+export function loginHandoffTitle(
+  formatMessage: LocaleService["formatMessage"],
+  card: Pick<LoginHandoffCard, "titleText">
+): string {
+  return card.titleText ?? formatMessage(LOGIN_HANDOFF_TITLE_KEY);
+}
 
 /**
  * 배포 사실. **세션 사실이 아니다** — 다시 시도해서 달라지는 것이 아니고,
@@ -139,8 +150,7 @@ export const LOGIN_HANDOFF_TITLE = "로그인 핸드오프 요청";
  * 이 문장이 「연결 안 됨」과 같은 옷을 입으면 사람이 새로고침을 반복한다. 그
  * 구분이 2분법의 전부다.
  */
-export const LOGIN_HANDOFF_DEPLOYMENT_COPY =
-  "이 배포에서는 아직 화면 전송이 준비되지 않아, 채팅에서 화면을 여는 동선이 없습니다. 세션 화면을 연 뒤 개입을 마쳤다면 여기서 재개를 누르세요.";
+export const LOGIN_HANDOFF_DEPLOYMENT_KEY = "timeline.loginHandoff.deploymentNotice" satisfies PlainMessageKey;
 
 /**
  * 지금 누군가 이 세션 화면을 잡고 있다는 **사실 한 문장**. 사고가 아니라 때의
@@ -152,15 +162,13 @@ export const LOGIN_HANDOFF_DEPLOYMENT_COPY =
  * 다시 적어 두었다 — 같은 낱말을 두 곳에서 관리하면 둘 중 하나가 낡는다.
  * 부분열을 손으로 베끼는 대신 **자를 곳을 코어가 정한다**.
  */
-export const LOGIN_HANDOFF_IN_CONTROL_LEAD =
-  "지금 이 세션 화면을 직접 조작하는 사람이 있습니다.";
+export const LOGIN_HANDOFF_IN_CONTROL_LEAD_KEY = "timeline.loginHandoff.inControlLead" satisfies PlainMessageKey;
 
 /** 결정 동선이 있는 표면이 말할 것: 사실 한 문장 + 다음에 할 수 있는 일. */
-export const LOGIN_HANDOFF_IN_CONTROL_COPY = `${LOGIN_HANDOFF_IN_CONTROL_LEAD} 조작이 끝나면 여기서 재개하거나 중단할 수 있습니다.`;
+export const LOGIN_HANDOFF_IN_CONTROL_KEY = "timeline.loginHandoff.inControl" satisfies PlainMessageKey;
 
 /** 폰처럼 결정 동선이 없는 표면이 말할 문장. */
-export const LOGIN_HANDOFF_ELSEWHERE_COPY =
-  "직접 조작은 데스크탑이나 웹에서 할 수 있습니다. 이 화면에서는 진행 상황만 보여 줍니다.";
+export const LOGIN_HANDOFF_ELSEWHERE_KEY = "timeline.loginHandoff.elsewhere" satisfies PlainMessageKey;
 
 /**
  * 이 기기가 지금 결정을 보낼 수 없을 때. `approvalNote` 의 문장과 같은 꼴이다.
@@ -168,32 +176,25 @@ export const LOGIN_HANDOFF_ELSEWHERE_COPY =
  * **원인을 가리지 않는 문장**이다. 웹은 막은 원인을 알면 그 원인의 문장을 `offlineText` 로 넘긴다(#5260):
  * 서버에 닿지 못한 것을 「연결이 끊겨」라고만 말하지 않는다. 이 문장은 그 입력을 넘기지 않는 클라이언트(폰)의 몫이다.
  */
-export const LOGIN_HANDOFF_OFFLINE_COPY =
-  "연결이 끊겨 지금은 결정할 수 없습니다. 다시 연결되면 여기서 재개하거나 중단할 수 있습니다.";
+export const LOGIN_HANDOFF_OFFLINE_KEY = "timeline.loginHandoff.offline" satisfies PlainMessageKey;
 
 /** 개입이 끝난 방식의 이름. 칩 한 낱말. */
-export const LOGIN_HANDOFF_OUTCOME_LABEL: Readonly<
-  Record<LoginHandoffOutcome, string>
-> = {
-  returned: "개입 완료",
-  expired: "완료 불확실",
-  session_ended: "세션 종료",
-};
+export const LOGIN_HANDOFF_OUTCOME_LABEL_KEY = {
+  returned: "timeline.loginHandoff.outcomeReturned",
+  expired: "timeline.loginHandoff.outcomeExpired",
+  session_ended: "timeline.loginHandoff.outcomeSessionEnded",
+} as const satisfies Record<LoginHandoffOutcome, PlainMessageKey>;
 
 /**
  * 그 방식이 **에이전트에게 무엇을 뜻하는가**. 세 문장이 다른 이유가 이 카드가
  * 존재하는 이유다: `expired` 를 「완료」로 읽으면 에이전트가 로그인되지 않은
  * 화면 위에서 다음 단계를 밟는다.
  */
-export const LOGIN_HANDOFF_OUTCOME_DETAIL: Readonly<
-  Record<LoginHandoffOutcome, string>
-> = {
-  returned:
-    "사람이 개입을 마치고 화면을 돌려주었습니다. 에이전트는 로그인이 끝났다고 보고 이어서 진행합니다.",
-  expired:
-    "개입이 끝났다는 신호 없이 연결이 끊겼습니다. 에이전트는 완료를 가정하지 않고, 자기 화면에서 상태를 확인한 뒤 진행합니다.",
-  session_ended: "작업 세션이 끝나면서 조작 창도 닫혔습니다.",
-};
+export const LOGIN_HANDOFF_OUTCOME_DETAIL_KEY = {
+  returned: "timeline.loginHandoff.detailReturned",
+  expired: "timeline.loginHandoff.detailExpired",
+  session_ended: "timeline.loginHandoff.detailSessionEnded",
+} as const satisfies Record<LoginHandoffOutcome, PlainMessageKey>;
 
 /**
  * `returned` 인데 **창 기록이 없을 때** 카드가 말할 것.
@@ -209,8 +210,8 @@ export const LOGIN_HANDOFF_OUTCOME_DETAIL: Readonly<
  * 사실을 두 가지로 말하면, 나중에 둘을 나란히 본 사람은 어느 쪽이 참인지 물어야
  * 한다. 그래서 문장을 실행기 쪽에 맞춘다.
  */
-export const LOGIN_HANDOFF_RETURNED_WITHOUT_WINDOW_DETAIL =
-  "사람이 개입을 마쳤다고 알렸습니다. 이 배포에서는 조작 창이 열리지 않았으므로, 에이전트가 세션 화면에서 상태를 확인한 뒤 이어서 진행합니다.";
+export const LOGIN_HANDOFF_RETURNED_WITHOUT_WINDOW_DETAIL_KEY =
+  "timeline.loginHandoff.detailReturnedWithoutWindow" satisfies PlainMessageKey;
 
 /**
  * 결과 줄이 말할 문장, 또는 `null`(결과가 없으면 줄이 서지 않는다).
@@ -223,27 +224,25 @@ export const LOGIN_HANDOFF_RETURNED_WITHOUT_WINDOW_DETAIL =
  * 없기 때문이고, 없는 갈래를 위해 창 여부를 물으면 답이 언제나 같은 질문을 화면이
  * 하게 된다.
  */
-export function loginHandoffOutcomeDetail(
+export function loginHandoffOutcomeDetailKey(
   card: Pick<LoginHandoffCard, "outcome" | "control">
-): string | null {
+): PlainMessageKey | null {
   if (card.outcome === null) return null;
   return card.outcome === "returned" && card.control === null
-    ? LOGIN_HANDOFF_RETURNED_WITHOUT_WINDOW_DETAIL
-    : LOGIN_HANDOFF_OUTCOME_DETAIL[card.outcome];
+    ? LOGIN_HANDOFF_RETURNED_WITHOUT_WINDOW_DETAIL_KEY
+    : LOGIN_HANDOFF_OUTCOME_DETAIL_KEY[card.outcome];
 }
 
 /** 카드 국면의 이름. `stopped` 은 run 의 낱말을 그대로 쓴다. */
-export const LOGIN_HANDOFF_PHASE_LABEL: Readonly<
-  Record<LoginHandoffPhase, string>
-> = {
-  waiting: "개입 대기",
-  resolved: "개입 완료",
-  stopped: "중단됨",
-};
+export const LOGIN_HANDOFF_PHASE_LABEL_KEY = {
+  waiting: "timeline.loginHandoff.phaseWaiting",
+  // 국면 「끝남」은 결과가 없을 때의 낱말이고, 결과의 「개입 완료」와 같은 글자다.
+  resolved: "timeline.loginHandoff.outcomeReturned",
+  stopped: "timeline.loginHandoff.phaseStopped",
+} as const satisfies Record<LoginHandoffPhase, PlainMessageKey>;
 
 /** 대기 중인 카드가 사람에게 무엇을 부탁하는지. */
-export const LOGIN_HANDOFF_WAITING_COPY =
-  "에이전트가 멈춰서 사람을 기다립니다. 비밀번호는 에이전트에게 전달되지 않고, 사람이 세션 화면에 직접 넣습니다.";
+export const LOGIN_HANDOFF_WAITING_KEY = "timeline.loginHandoff.waiting" satisfies PlainMessageKey;
 
 /**
  * 아직 대기인데 **조작 창은 이미 닫혔을 때** 덧붙는 한 문장.
@@ -260,14 +259,11 @@ export const LOGIN_HANDOFF_WAITING_COPY =
  * 있습니다」는 세션이 살아 있을 때만 참이고, 끝난 세션에 그렇게 말하면 없는 방으로
  * 가는 문을 그리는 것이다.
  */
-export const LOGIN_HANDOFF_WAITING_WINDOW_CLOSED: Readonly<
-  Record<LoginHandoffOutcome, string>
-> = {
-  returned: "직접 조작 창은 닫혔습니다. 필요하면 다시 열 수 있습니다.",
-  expired:
-    "직접 조작 창은 연결이 끊겨 닫혔습니다. 필요하면 다시 열 수 있습니다.",
-  session_ended: "작업 세션이 끝나면서 직접 조작 창도 닫혔습니다.",
-};
+export const LOGIN_HANDOFF_WAITING_WINDOW_CLOSED_KEY = {
+  returned: "timeline.loginHandoff.waitingClosedReturned",
+  expired: "timeline.loginHandoff.waitingClosedExpired",
+  session_ended: "timeline.loginHandoff.waitingClosedSessionEnded",
+} as const satisfies Record<LoginHandoffOutcome, PlainMessageKey>;
 
 /**
  * 대기 중인 카드가 말할 문장. 판정이 코어에 있는 이유는
@@ -277,13 +273,13 @@ export const LOGIN_HANDOFF_WAITING_WINDOW_CLOSED: Readonly<
  * **더해질 뿐** 대기를 뒤집지 않는다: 승인 원장은 여전히 아무 답도 받지 않았고,
  * 그것이 이 카드가 아직 서 있는 이유다.
  */
-export function loginHandoffWaitingCopy(
+export function loginHandoffWaitingKey(
   card: Pick<LoginHandoffCard, "control">
-): string {
+): PlainMessageKey {
   const endReason = card.control?.endReason;
   return endReason
-    ? `${LOGIN_HANDOFF_WAITING_COPY} ${LOGIN_HANDOFF_WAITING_WINDOW_CLOSED[endReason]}`
-    : LOGIN_HANDOFF_WAITING_COPY;
+    ? LOGIN_HANDOFF_WAITING_WINDOW_CLOSED_KEY[endReason]
+    : LOGIN_HANDOFF_WAITING_KEY;
 }
 
 /**
@@ -303,12 +299,12 @@ export function loginHandoffWaitingCopy(
  * 아랫줄이 「개입은 시작되지 않았습니다」라고 말하면 한 카드가 자기 자신과
  * 싸운다.
  */
-export const LOGIN_HANDOFF_STOPPED_COPY = {
+export const LOGIN_HANDOFF_STOPPED_KEY = {
   /** 승인 원장이 답한 사실. 창이 있었든 없었든 참이다. */
-  cancelled: "대기 중이던 실행이 취소됐습니다.",
-  /** 창이 열린 적이 없을 때만 참인 문장. */
-  neverStarted: "개입은 시작되지 않았습니다.",
-} as const;
+  cancelled: "timeline.loginHandoff.stoppedCancelled",
+  /** 위 문장에 「창이 열린 적이 없을 때만 참인」 둘째 문장을 이은 한 문장. */
+  cancelledNeverStarted: "timeline.loginHandoff.stoppedNeverStarted",
+} as const satisfies Record<string, PlainMessageKey>;
 
 /**
  * 멈춘 카드가 말할 문장. 판정이 코어에 있는 이유는 낱말이 코어에 있는 이유와
@@ -318,12 +314,12 @@ export const LOGIN_HANDOFF_STOPPED_COPY = {
  * 사실을 말하고 있고, 화면에 서 있는 사실을 바로 아래 문장이 부정하는 것보다
  * 나쁜 카피는 없다.
  */
-export function loginHandoffStoppedCopy(
+export function loginHandoffStoppedKey(
   card: Pick<LoginHandoffCard, "control">
-): string {
+): PlainMessageKey {
   return card.control === null
-    ? `${LOGIN_HANDOFF_STOPPED_COPY.cancelled} ${LOGIN_HANDOFF_STOPPED_COPY.neverStarted}`
-    : LOGIN_HANDOFF_STOPPED_COPY.cancelled;
+    ? LOGIN_HANDOFF_STOPPED_KEY.cancelledNeverStarted
+    : LOGIN_HANDOFF_STOPPED_KEY.cancelled;
 }
 
 /**
@@ -366,13 +362,13 @@ export function loginHandoffSeeksControl(
  * 낱말을 **그리지 않는 것이 계약**이고(안내 동선), 그 부재는 낱말이 한 곳에
  * 있어야 시험으로 지킬 수 있다.
  */
-export const LOGIN_HANDOFF_DECISION = {
+export const LOGIN_HANDOFF_DECISION_KEY = {
   /** 에이전트를 이어서 진행시킨다. 승인과 같은 REST. */
-  resume: "재개",
+  resume: "timeline.loginHandoff.decisionResume",
   /** run 을 멈춘다. 거부와 같은 REST. */
-  stop: "중단",
-  lead: "에이전트가 사람의 개입을 기다립니다.",
-} as const;
+  stop: "timeline.loginHandoff.decisionStop",
+  lead: "timeline.loginHandoff.decisionLead",
+} as const satisfies Record<string, PlainMessageKey>;
 
 /**
  * 칩에 서는 한 낱말.
@@ -383,12 +379,12 @@ export const LOGIN_HANDOFF_DECISION = {
  *
  * 두 클라가 같은 자리에서 같은 낱말을 쓰게 하려고 코어가 답한다.
  */
-export function loginHandoffStatusLabel(
+export function loginHandoffStatusKey(
   card: Pick<LoginHandoffCard, "phase" | "outcome">
-): string {
+): PlainMessageKey {
   return card.outcome !== null
-    ? LOGIN_HANDOFF_OUTCOME_LABEL[card.outcome]
-    : LOGIN_HANDOFF_PHASE_LABEL[card.phase];
+    ? LOGIN_HANDOFF_OUTCOME_LABEL_KEY[card.outcome]
+    : LOGIN_HANDOFF_PHASE_LABEL_KEY[card.phase];
 }
 
 // ---- the note that stands where a control would --------------------------
@@ -426,7 +422,7 @@ export interface LoginHandoffNoteInput {
   /**
    * 막은 원인(기기 오프라인 · 서버에 닿지 못함)을 말하는 문장. 웹이 사전(`blocked.loginHandoff.*`)에서 원인에
    * 맞게 골라 넘긴다(#5260). 코어는 사전을 모르므로 받기만 한다. 없거나 비면 원인을 가리지 않는
-   * `LOGIN_HANDOFF_OFFLINE_COPY` 이다 — 이 입력을 넘기지 않는 클라이언트(폰)는 동작이 같다.
+   * `LOGIN_HANDOFF_OFFLINE_KEY` 이다 — 이 입력을 넘기지 않는 클라이언트(폰)는 동작이 같다.
    */
   offlineText?: string | null;
   /** 이 서버에 승인 원장 표면이 있는가. */
@@ -454,7 +450,8 @@ export interface LoginHandoffNoteInput {
  *   6. **지금 보낼 수 없다** → 때의 문제.
  */
 export function loginHandoffNote(
-  input: LoginHandoffNoteInput
+  input: LoginHandoffNoteInput,
+  formatMessage: LocaleService["formatMessage"]
 ): LoginHandoffNote | null {
   const receipt = input.receiptNote?.trim();
   if (receipt) {
@@ -464,7 +461,7 @@ export function loginHandoffNote(
     return {
       kind: "in-control",
       tone: "blocked",
-      text: LOGIN_HANDOFF_IN_CONTROL_COPY,
+      text: formatMessage(LOGIN_HANDOFF_IN_CONTROL_KEY),
     };
   }
   if (input.settled || !input.hasTarget) return null;
@@ -473,14 +470,14 @@ export function loginHandoffNote(
     return {
       kind: "unsupported",
       tone: "guidance",
-      text: text ? text : LOGIN_HANDOFF_ELSEWHERE_COPY,
+      text: text ? text : formatMessage(LOGIN_HANDOFF_ELSEWHERE_KEY),
     };
   }
   if (!input.decidableHere) {
     return {
       kind: "elsewhere",
       tone: "guidance",
-      text: LOGIN_HANDOFF_ELSEWHERE_COPY,
+      text: formatMessage(LOGIN_HANDOFF_ELSEWHERE_KEY),
     };
   }
   if (input.offline) {
@@ -488,7 +485,7 @@ export function loginHandoffNote(
     return {
       kind: "offline",
       tone: "blocked",
-      text: cause ? cause : LOGIN_HANDOFF_OFFLINE_COPY,
+      text: cause ? cause : formatMessage(LOGIN_HANDOFF_OFFLINE_KEY),
     };
   }
   return null;
@@ -596,7 +593,7 @@ export function loginHandoffCard(
     kind: "login_handoff",
     approvalId,
     sessionId: readString(props, "session_id") ?? null,
-    title: readString(props, "title") ?? LOGIN_HANDOFF_TITLE,
+    titleText: readString(props, "title") ?? null,
     phase,
     outcome,
     control,

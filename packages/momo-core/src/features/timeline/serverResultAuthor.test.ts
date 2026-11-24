@@ -9,9 +9,17 @@ import teamAiReplyFixture from "./__fixtures__/team-ai-reply-props.json";
 import { agentCardModel } from "./agentCardModel";
 import { rowPresentation } from "./rowModel";
 import { turnRecordRunId } from "./cascadeModel";
-import { parseTeamAiReplyMeta, teamAiReplyMetaFor } from "./teamAiReply";
+import { parseTeamAiReplyMeta as parseAs, teamAiReplyMetaFor as metaForAs } from "./teamAiReply";
 import { teamAiDelegationsFor, teamAiDelegationsOf } from "./teamAiDelegation";
 import { isAgentAuthored, type AuthorKind } from "./serverResultAuthor";
+import { catalog as koCatalog } from "../../i18n/generated/ko-KR";
+import { createMessageCopy } from "../../testkit";
+
+const ko = createMessageCopy({ messageLocale: "ko-KR", catalog: koCatalog });
+const parseTeamAiReplyMeta = (...args: Parameters<typeof parseAs> extends [unknown, ...infer Rest] ? Rest : never) =>
+  parseAs(ko, ...args);
+const teamAiReplyMetaFor = (...args: Parameters<typeof metaForAs> extends [unknown, ...infer Rest] ? Rest : never) =>
+  metaForAs(ko, ...args);
 
 const RUN = "0199aa11-2222-7000-8000-0000000000b2";
 const HERMES = "0195f0a8-1c2d-7e3f-8a4b-5c6d7e8f9a0b";

@@ -2,6 +2,7 @@ import {uuidEq, type Message, type MessageAttachment} from '@momo/core/lib/api';
 import type {Expression} from '@momo/core/features/expressions/types';
 import {useCallback, useEffect, useRef, useState} from 'react';
 
+import {useFormatMessage} from '../../i18n/useFormatMessage';
 import {useExpressionItems} from '../expressions/ExpressionProvider';
 import type {TimelineSendFlags} from './useTimeline';
 import {
@@ -80,6 +81,9 @@ export function useReplyDraft({
     if (!replyTargetStillValid(replyTarget, lookup)) setReplyTarget(null);
   }, [replyTarget, messages]);
 
+  const formatMessage = useFormatMessage();
+  const formatMessageRef = useRef(formatMessage);
+  formatMessageRef.current = formatMessage;
   const expressions = useExpressionItems();
   const expressionsRef = useRef(expressions);
   expressionsRef.current = expressions;
@@ -94,6 +98,7 @@ export function useReplyDraft({
     const next = replyTargetFor(message, {
       myMemberId: myMemberRef.current,
       expressions: expressionsRef.current,
+      formatMessage: formatMessageRef.current,
     });
     if (next === null) return;
     setReplyTarget(next);

@@ -147,7 +147,7 @@ export function WorkRequestOpenSuggestion({
           {initial}
         </span>
         <h3 id={headingId} className="min-w-0 break-keep text-meta font-semibold text-agent">
-          {commandSuggestHead(card)}
+          {commandSuggestHead(formatMessage, card)}
         </h3>
       </div>
       <div className="flex min-w-0 items-center gap-3 px-3 py-3">

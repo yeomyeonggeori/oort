@@ -5,10 +5,18 @@ import {
   CONTROL_CLOSED_HEADLINE,
   CONTROL_OPEN_DETAIL,
   CONTROL_OPEN_HEADLINE,
-  controlWindowLabel,
-  controlWindowNotice,
-  latestControlNotice,
+  controlWindowLabel as buildLabel,
+  controlWindowNotice as buildNotice,
+  latestControlNotice as buildLatest,
 } from "./controlWindow";
+import { catalog as koCatalog } from "../../i18n/generated/ko-KR";
+import { createMessageCopy } from "../../testkit";
+
+const ko = createMessageCopy({ messageLocale: "ko-KR", catalog: koCatalog });
+const controlWindowNotice = (f: WorkSessionControlFrame, sessionId: string) => buildNotice(f, sessionId, ko);
+const controlWindowLabel = (notice: Parameters<typeof buildLabel>[0]) => buildLabel(notice, ko);
+const latestControlNotice = (frames: readonly WorkSessionControlFrame[], sessionId: string) =>
+  buildLatest(frames, sessionId, ko);
 
 const SESSION = "019FA1C4-3B21-7D0E-9AA1-5E6C82F41B77";
 

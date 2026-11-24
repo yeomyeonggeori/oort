@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import type { AgentRunBundle, AgentRunProgress, Message } from "../../lib/api";
 import { agentCardModel, agentRequestBundle } from "./agentCardModel";
+import { catalog as koCatalog } from "../../i18n/generated/ko-KR";
+import { createMessageCopy } from "../../testkit";
 import {
   remainingTime,
   requestBundleDecisionMode,
@@ -15,7 +17,8 @@ const MIN = 60_000;
 const HOUR = 60 * MIN;
 const DAY = 24 * HOUR;
 const NOW = 1_800_000_000_000;
-const after = (ms: number) => remainingTime(NOW + ms, NOW);
+const ko = createMessageCopy({ messageLocale: "ko-KR", catalog: koCatalog });
+const after = (ms: number) => remainingTime(NOW + ms, NOW, ko);
 
 describe("조용한 줄의 남은 시간 (#4986)", () => {
   it("한 시간이 안 되면 분으로 말한다: 15분짜리가 「1시간」이 되지 않는다", () => {
@@ -42,9 +45,9 @@ describe("조용한 줄의 남은 시간 (#4986)", () => {
   });
 
   it("기한을 모르거나 이미 지났으면 말하지 않는다", () => {
-    expect(remainingTime(undefined, NOW)).toBeUndefined();
-    expect(remainingTime(NOW, NOW)).toBeUndefined();
-    expect(remainingTime(NOW - 1, NOW)).toBeUndefined();
+    expect(remainingTime(undefined, NOW, ko)).toBeUndefined();
+    expect(remainingTime(NOW, NOW, ko)).toBeUndefined();
+    expect(remainingTime(NOW - 1, NOW, ko)).toBeUndefined();
   });
 
   it("값은 분 단위로만 움직인다: 같은 분 안의 초는 같은 글자다", () => {
@@ -59,7 +62,7 @@ describe("묶음 모델의 남은 시간 줄 (#4986)", () => {
     type: "approval_request", body: "", state: "sent", createdAtMs: 1,
     props: { approval_id: "approval", action_type: "tool_call", tool_name: "shell", status: "pending", expires_at_ms: expiresAtMs, ...extra },
   } as Message);
-  const context = { nowMs: NOW, viewerMemberId: "human", viewerKind: "human" as const, canDecide: true };
+  const context = { nowMs: NOW, formatMessage: ko, viewerMemberId: "human", viewerKind: "human" as const, canDecide: true };
 
   it("15분 남은 대기 카드는 「15분 남음」을 말하고, 눌리지 않는 표면용으로 「자세히」 없는 줄을 따로 낸다", () => {
     const model = agentRequestBundle(approval(NOW + 15 * MIN), context)!;

@@ -102,7 +102,7 @@ function latinEndsClosed(word: string): boolean {
 }
 
 /** Final consonant for the purpose of choosing a particle: Hangul or a Latin reading. */
-function takesFinalForm(word: string): boolean {
+export function takesFinalForm(word: string): boolean {
   if (hasFinalConsonant(word)) return true;
   const codePoint = lastSpokenCodePoint(word);
   if (codePoint === null) return false;

@@ -64,17 +64,20 @@ const LANDING_CLASS = landingClass(webRoot);
  * 못한다. 상수 한 줄을 읽는 데 TS 로더를 끌어오는 것은 값에 비해 비싸다.
  */
 function canonicalActionLabel(root) {
-  const source = readFileSync(
-    resolve(root, "../../packages/momo-core/src/features/timeline/quote.ts"),
-    "utf8"
+  // 낱말의 정본은 한국어 사전이다(#6044): 코어는 키(`timeline.quote.action`)만 안다.
+  const catalog = JSON.parse(
+    readFileSync(
+      resolve(root, "../../packages/momo-core/src/i18n/catalogs/ko-KR/timeline.json"),
+      "utf8"
+    )
   );
-  const match = /export const QUOTE_ACTION_LABEL = "([^"]+)"/.exec(source);
-  if (!match) {
+  const text = catalog["timeline.quote.action"];
+  if (typeof text !== "string" || text === "") {
     throw new Error(
-      "QUOTE_ACTION_LABEL을 코어에서 찾지 못했다: 게이트가 검사할 낱말의 정본이 사라졌다"
+      "timeline.quote.action 낱말을 한국어 사전에서 찾지 못했다: 게이트가 검사할 낱말의 정본이 사라졌다"
     );
   }
-  return match[1];
+  return text;
 }
 const port = Number(process.env.QUOTE_GATE_PORT || 5191);
 const origin = `http://127.0.0.1:${port}`;
@@ -508,6 +511,7 @@ async function exercise(browser) {
   const context = await browser.newContext({
     viewport: { width: 1280, height: 900 },
     reducedMotion: "reduce",
+    locale: "ko-KR",
   });
   await context.grantPermissions(["clipboard-read", "clipboard-write"], {
     origin,
@@ -1204,6 +1208,7 @@ async function exerciseTouch(browser, menuKeys) {
     viewport: { width: 800, height: 900 },
     hasTouch: true,
     reducedMotion: "reduce",
+    locale: "ko-KR",
   });
   await context.grantPermissions(["clipboard-read", "clipboard-write"], {
     origin,
@@ -1272,6 +1277,7 @@ async function captureShots(browser) {
       viewport: { width: 1280, height: 900 },
       reducedMotion: "reduce",
       colorScheme: scheme,
+      locale: "ko-KR",
     });
     const page = await context.newPage();
     await installRealtimeSocket(page);

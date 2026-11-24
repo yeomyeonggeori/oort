@@ -553,20 +553,16 @@ export const space = {
   xl: 24,
 } as const;
 
+/**
+ * 폰 반경 표 — 하나 (#6077, DS-07). 이름만 한 표로 모았고 값은 하나도 바꾸지 않았다.
+ *
+ * 예전에는 `radius`(여명 3단)와 `ds2Radius`(DS2 사다리)가 따로 살아 화면마다 다른 표를
+ * 봤다. 이제 정의는 여기 하나이고, 옛 `ds2Radius` 는 이 표의 같은 이름을 가리키는 얇은
+ * 별칭이다. ADR-0189 D6: 폰·웹 반경은 값을 대조하지 않고 이름만 공유한다.
+ */
 export const radius = {
   sm: 6,
   md: 8,
-  pill: 999,
-} as const;
-
-/**
- * 디자인 시스템 2.0 폰 반경 사다리 (ADR-0189 D6, themes-2.0 §5).
- *
- * `radius`(여명 3단)와 따로 둔다: 그 표는 웹 `--radius-*`와 이름을 대조하는
- * 시험(`designSystem.test.ts`)이 아직 읽고, ADR-0189 D6은 폰·웹 반경의 값 대조를
- * 폐기했다 — 이름만 공유하고 값은 플랫폼마다다. DS2 화면(셸부터)은 이 사다리를 쓴다.
- */
-export const ds2Radius = {
   /** 배지·태그. */
   badge: 10,
   /** 행 선택·입력. */
@@ -582,6 +578,16 @@ export const ds2Radius = {
   /** 페이지 시트 위 모서리. */
   sheet: 30,
   pill: 999,
+} as const;
+
+/** 옛 이름(DS2 사다리) — `radius` 의 같은 이름을 가리키는 별칭. 새 코드는 `radius` 를 쓴다. */
+export const ds2Radius = {
+  badge: radius.badge,
+  row: radius.row,
+  card: radius.card,
+  composer: radius.composer,
+  sheet: radius.sheet,
+  pill: radius.pill,
 } as const;
 
 /**

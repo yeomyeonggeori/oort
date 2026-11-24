@@ -429,7 +429,7 @@ function assertSameRing(a, b) {
 }
 
 async function shoot(browser, { name, scheme, viewport, drive, after, rings, ...mocks }) {
-  const context = await browser.newContext({
+  const context = await browser.newContext({ locale: "ko-KR",
     viewport,
     deviceScaleFactor: 2,
     colorScheme: scheme,

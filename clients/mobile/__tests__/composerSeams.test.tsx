@@ -3,10 +3,16 @@ import {cleanup, fireEvent, render, screen} from '@testing-library/react-native'
 import React from 'react';
 import {Text} from 'react-native';
 
-import {quoteDraftFor, type QuoteDraft} from '@momo/core/features/timeline/quote';
+import {quoteDraftFor as buildQuoteDraftFor, type QuoteDraft} from '@momo/core/features/timeline/quote';
 
 import {Composer} from '../src/features/conversation/Composer';
 import {Sentence} from '../src/design/atoms';
+import {catalog as koCatalog} from '@momo/core/i18n/generated/ko-KR';
+import {createMessageService} from '@momo/core/i18n/service';
+
+const quoteFormat = createMessageService({messageLocale: 'ko-KR', catalog: koCatalog}).formatMessage;
+const quoteDraftFor = (...args: Parameters<typeof buildQuoteDraftFor> extends [unknown, ...infer Rest] ? Rest : never) =>
+  buildQuoteDraftFor(quoteFormat, ...args);
 
 // =============================================================================
 // 컴포저가 새로 낸 두 개의 이음매 — 그리고 **한글이 아직 조합되는가**.

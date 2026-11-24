@@ -35,6 +35,7 @@ import {
   type OpenedReadSnapshot,
 } from "@/features/chat/openedReadState";
 import { useSession } from "@/app/session";
+import { useFormatMessage } from "@/i18n/useFormatMessage";
 import { useChannelViewingBeat, useDocumentForeground } from "@/features/chat/useChannelViewingBeat";
 import { indexFallbackChannelId } from "@/features/sidebar/sidebarDmClosure";
 import { useDmVisibility } from "@/features/sidebar/useDmVisibility";
@@ -202,6 +203,7 @@ function isOneToOneDm(channel: { memberIds?: string[]; dmKey?: string }, selfMem
 }
 
 export function ChatShell() {
+  const formatMessage = useFormatMessage();
   const { session, workspaceId, realtime, connStatus } = useSession();
   const isOffline = useOffline();
   const params = useParams();
@@ -694,12 +696,12 @@ export function ChatShell() {
   }, [quote, messages]);
 
   const onQuoteMessage = useCallback((message: Message) => {
-    setQuote(quoteDraftFor(message));
+    setQuote(quoteDraftFor(formatMessage, message));
     // 인용을 건 사람의 다음 동작은 100% 글쓰기다. 캐럿을 옮겨 주지 않으면 칩이
     // 떴는데 손은 아직 타임라인에 있다.
     const input = document.getElementById("composer-input");
     if (input instanceof HTMLTextAreaElement) input.focus();
-  }, []);
+  }, [formatMessage]);
 
   // ── URL이 데리고 온 자리 (MOMO-679) ────────────────────────────────────────
   //

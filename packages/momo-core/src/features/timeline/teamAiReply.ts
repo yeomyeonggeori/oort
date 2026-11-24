@@ -42,6 +42,8 @@
 // 순수 모듈이다. 웹과 폰이 같은 함수를 부른다.
 // =============================================================================
 
+import type { LocaleService } from "../../i18n/context";
+import type { PlainMessageKey } from "../../i18n/keys";
 import { appsUsedFromWire, type AppsUsedEntry, type Message } from "../../lib/api";
 import { modelLabel } from "../settings/cohostedModels";
 import { isModelId } from "../settings/defaultAi";
@@ -50,16 +52,16 @@ import { isAgentAuthored, type AuthorKind } from "./serverResultAuthor";
 type Props = Record<string, unknown> | undefined;
 
 /** H4-1 읽기 도구 8개 + H5 웹 검색. 이름은 서버 도구 이름 그대로다. */
-const TOOL_LABELS: ReadonlyMap<string, string> = new Map([
-  ["search_messages", "메시지 검색"],
-  ["read_channel", "채널 읽기"],
-  ["read_thread", "스레드 읽기"],
-  ["list_members", "멤버 목록"],
-  ["list_agent_runs", "에이전트 작업 기록"],
-  ["get_agent_run", "작업 단계 보기"],
-  ["list_plugins", "앱 목록"],
-  ["read_workspace_settings", "워크스페이스 설정"],
-  ["web_search", "웹 검색"],
+const TOOL_LABEL_KEYS: ReadonlyMap<string, PlainMessageKey> = new Map<string, PlainMessageKey>([
+  ["search_messages", "timeline.teamAiReply.toolSearchMessages"],
+  ["read_channel", "timeline.teamAiReply.toolReadChannel"],
+  ["read_thread", "timeline.teamAiReply.toolReadThread"],
+  ["list_members", "timeline.teamAiReply.toolListMembers"],
+  ["list_agent_runs", "timeline.teamAiReply.toolListAgentRuns"],
+  ["get_agent_run", "timeline.teamAiReply.toolGetAgentRun"],
+  ["list_plugins", "timeline.teamAiReply.toolListPlugins"],
+  ["read_workspace_settings", "timeline.teamAiReply.toolReadWorkspaceSettings"],
+  ["web_search", "timeline.teamAiReply.toolWebSearch"],
 ]);
 
 /** 한 줄에 보이는 도구 수. 넘치면 「외 N개」. */
@@ -176,8 +178,13 @@ export function appsRunIdOf(message: Pick<Message, "props" | "state">): string |
   return typeof runId === "string" && runId !== "" ? runId : null;
 }
 
-export function appsRunSiteLabel(site: AppsRunSite): string {
-  return site === "hermes" ? "Hermes" : "내 맥";
+export function appsRunSiteLabel(
+  formatMessage: LocaleService["formatMessage"],
+  site: AppsRunSite
+): string {
+  return formatMessage(
+    site === "hermes" ? "timeline.teamAiReply.siteHermes" : "timeline.teamAiReply.siteMac"
+  );
 }
 
 export interface TeamAiReplyMeta {
@@ -203,18 +210,20 @@ export interface TeamAiReplyMeta {
   modelChip: string | null;
 }
 
-function toolLabel(value: unknown): string | null {
+function toolLabel(formatMessage: LocaleService["formatMessage"], value: unknown): string | null {
   const raw = record(value);
   if (raw === null) return null;
   const name = typeof raw["name"] === "string" ? raw["name"] : null;
   if (name === null) return null;
-  const label = TOOL_LABELS.get(name);
-  if (label === undefined) return null;
+  const labelKey = TOOL_LABEL_KEYS.get(name);
+  if (labelKey === undefined) return null;
   if (name === "read_channel") {
     const channel = clean(raw["channel"], CHANNEL_MAX)?.replace(/^#+/, "");
-    return channel ? `#${channel} 읽기` : label;
+    return channel
+      ? formatMessage("timeline.teamAiReply.toolReadChannelNamed", { channel })
+      : formatMessage(labelKey);
   }
-  return label;
+  return formatMessage(labelKey);
 }
 
 /** http(s) 절대 주소만. 사람·자격이 든 주소(`user:pass@`)는 버린다. */
@@ -246,26 +255,24 @@ const NO_APPS_CONTEXT: AppsTailContext = {
   audience: null,
 };
 
-export const APPS_TAIL_PREFIX = "쓴 앱";
-export const APPS_TAIL_SELF_REPORT = "앱과 횟수는 에이전트가 알려 준 대로예요. oort는 확인하지 못해요.";
-export const APPS_DETAIL_TOGGLE = { open: "자세히", close: "접기" } as const;
-/** 개인 앱 안내: 「요약만」은 원칙이고, 지키는지는 oort 가 확인하지 못한다(강제가 아니다). */
-export const APPS_PERSONAL_NOTE =
-  "개인 앱은 요약만 올리는 게 원칙이에요. oort는 지키는지 확인하지 못해요.";
+export const APPS_DETAIL_TOGGLE_KEY = {
+  open: "timeline.teamAiReply.detailsOpen",
+  close: "timeline.teamAiReply.detailsClose",
+} as const satisfies Record<string, PlainMessageKey>;
 const DOMAINS_SHOWN = 2;
 
 /** 도구 이름 앞 낱말 → 사람 말. 모르는 앞 낱말은 말하지 않는다(원문 id 를 보이지 않는다). */
-const TOOL_VERBS: ReadonlyMap<string, string> = new Map([
-  ["search", "검색"],
-  ["list", "목록"],
-  ["get", "읽기"],
-  ["read", "읽기"],
-  ["create", "만들기"],
-  ["update", "고치기"],
+const TOOL_VERB_KEYS: ReadonlyMap<string, PlainMessageKey> = new Map<string, PlainMessageKey>([
+  ["search", "timeline.teamAiReply.verbSearch"],
+  ["list", "timeline.teamAiReply.verbList"],
+  ["get", "timeline.teamAiReply.verbRead"],
+  ["read", "timeline.teamAiReply.verbRead"],
+  ["create", "timeline.teamAiReply.verbCreate"],
+  ["update", "timeline.teamAiReply.verbUpdate"],
 ]);
 
-function verbOf(tool: string): string | null {
-  return TOOL_VERBS.get(tool.split(/[_.-]/, 1)[0]?.toLowerCase() ?? "") ?? null;
+function verbOf(tool: string): PlainMessageKey | null {
+  return TOOL_VERB_KEYS.get(tool.split(/[_.-]/, 1)[0]?.toLowerCase() ?? "") ?? null;
 }
 
 interface AppsTail {
@@ -276,7 +283,11 @@ interface AppsTail {
   personalNote: string | null;
 }
 
-function appsTail(ctx: AppsTailContext, entries: readonly AppsUsedEntry[]): AppsTail {
+function appsTail(
+  formatMessage: LocaleService["formatMessage"],
+  ctx: AppsTailContext,
+  entries: readonly AppsUsedEntry[]
+): AppsTail {
   const order: string[] = [];
   const byApp = new Map<string, AppsUsedEntry[]>();
   for (const entry of entries) {
@@ -297,8 +308,12 @@ function appsTail(ctx: AppsTailContext, entries: readonly AppsUsedEntry[]): Apps
     const verbs = new Set(list.map((item) => verbOf(item.tool)));
     const verb = verbs.size === 1 ? [...verbs][0] : null;
     // 목록에 없는 앱은 원문 id 대신 「다른 앱」이라고만 말한다.
-    const name = clean(plugin?.name, 24) ?? "다른 앱";
-    apps.push(`${name}${verb ? ` ${verb}` : ""} ${calls}회`);
+    const name = clean(plugin?.name, 24) ?? formatMessage("timeline.teamAiReply.otherApp");
+    apps.push(
+      verb
+        ? formatMessage("timeline.teamAiReply.appItemVerb", { name, verb: formatMessage(verb), calls })
+        : formatMessage("timeline.teamAiReply.appItem", { name, calls })
+    );
     for (const domain of plugin?.egressDomains ?? []) {
       const host = clean(domain, 80);
       if (host !== null && !domains.includes(host)) domains.push(host);
@@ -312,8 +327,10 @@ function appsTail(ctx: AppsTailContext, entries: readonly AppsUsedEntry[]): Apps
     ctx.audience !== null && Number.isInteger(ctx.audience) && ctx.audience > 0
       ? ctx.audience
       : null;
-  const exposure = audience === null ? null : `이 채널 ${audience}명에게 보여요`;
-  const personalNote = audience !== null && personal ? APPS_PERSONAL_NOTE : null;
+  const exposure =
+    audience === null ? null : formatMessage("timeline.teamAiReply.exposure", { count: audience });
+  const personalNote =
+    audience !== null && personal ? formatMessage("timeline.teamAiReply.personalNote") : null;
   // 기본 꼬리는 **한 줄**이고 메시지마다 달라지는 사실만 싣는다(채널·에이전트 상수를 되풀이하지
   // 않는다): 앱·횟수. 채널에 새기 쉬운 **개인 앱**일 때만 노출 수가 그 줄에 붙는다.
   const parts = [apps.join(", "), personal ? exposure : null].filter(
@@ -322,19 +339,28 @@ function appsTail(ctx: AppsTailContext, entries: readonly AppsUsedEntry[]): Apps
   // 나머지는 「자세히」 뒤에 둔다: 실행 장소, 노출(개인 앱이 아닐 때), 명의·연결 주소(oort 가 아는
   // 값), 자기 보고 안내, 개인 앱 안내.
   const details = [
-    ctx.site ? `${appsRunSiteLabel(ctx.site)}에서 실행했어요.` : null,
-    personal ? null : exposure,
-    owner ? `${owner} 명의로 썼어요.` : null,
-    shown.length > 0
-      ? `연결: ${shown.join(", ")}${domains.length > shown.length ? ` 외 ${domains.length - shown.length}곳` : ""}`
+    ctx.site
+      ? formatMessage("timeline.teamAiReply.ranOn", { site: appsRunSiteLabel(formatMessage, ctx.site) })
       : null,
-    APPS_TAIL_SELF_REPORT,
+    personal ? null : exposure,
+    owner ? formatMessage("timeline.teamAiReply.onBehalfOf", { owner }) : null,
+    shown.length > 0
+      ? domains.length > shown.length
+        ? formatMessage("timeline.teamAiReply.connectedMore", {
+            domains: shown.join(", "),
+            rest: domains.length - shown.length,
+          })
+        : formatMessage("timeline.teamAiReply.connected", { domains: shown.join(", ") })
+      : null,
+    formatMessage("timeline.teamAiReply.selfReport"),
     personalNote,
   ].filter((part): part is string => part !== null);
   return {
-    line: `${APPS_TAIL_PREFIX}: ${parts.join(" · ")}`,
+    line: formatMessage("timeline.teamAiReply.appsLine", { parts: parts.join(" · ") }),
     // 낭독은 접힌 것도 전부 읽는다.
-    spoken: `${APPS_TAIL_PREFIX}, ${[...parts, ...details].join(", ")}`,
+    spoken: formatMessage("timeline.teamAiReply.appsSpoken", {
+      parts: [...parts, ...details].join(", "),
+    }),
     details,
     exposure,
     personalNote,
@@ -354,8 +380,7 @@ export function appsUsedOf(
   return appsUsedFromWire(props?.["appsUsed"] ?? props?.["apps_used"]);
 }
 
-export const TEAM_AI_TOOLS_PREFIX = "찾아본 것";
-export const TEAM_AI_SOURCES_LABEL = "출처";
+export const TEAM_AI_SOURCES_LABEL_KEY = "timeline.teamAiReply.sourcesLabel" satisfies PlainMessageKey;
 
 /**
  * 도우미 답의 꼬리를 읽는다. 총 파싱, 던지지 않는다. 그릴 것이 없으면 null.
@@ -369,6 +394,7 @@ export const TEAM_AI_SOURCES_LABEL = "출처";
  * 이미 작성자를 보고 `apps` 를 넘긴다(`appsTail`).
  */
 export function parseTeamAiReplyMeta(
+  formatMessage: LocaleService["formatMessage"],
   props: Props,
   apps?: AppsTailContext,
   authorKind?: AuthorKind | null
@@ -378,7 +404,7 @@ export function parseTeamAiReplyMeta(
   if (isTeamAi && props?.["kind"] === "team_ai.delegate.v1") return null;
 
   const entries = isTeamAi ? null : appsUsedOf(props, apps);
-  const tail = entries !== null ? appsTail(apps ?? NO_APPS_CONTEXT, entries) : null;
+  const tail = entries !== null ? appsTail(formatMessage, apps ?? NO_APPS_CONTEXT, entries) : null;
   if (!isTeamAi && tail === null) return null;
 
   const labels: string[] = [];
@@ -386,7 +412,7 @@ export function parseTeamAiReplyMeta(
   for (const value of isTeamAi && Array.isArray(props?.["tools_used"])
     ? (props["tools_used"] as unknown[])
     : []) {
-    const label = toolLabel(value);
+    const label = toolLabel(formatMessage, value);
     if (label === null || seen.has(label)) continue;
     seen.add(label);
     labels.push(label);
@@ -410,7 +436,9 @@ export function parseTeamAiReplyMeta(
   const toolsLine =
     labels.length === 0
       ? null
-      : `${TEAM_AI_TOOLS_PREFIX}: ${shown.join(" · ")}${rest > 0 ? ` 외 ${rest}개` : ""}`;
+      : rest > 0
+        ? formatMessage("timeline.teamAiReply.toolsLineMore", { tools: shown.join(" · "), rest })
+        : formatMessage("timeline.teamAiReply.toolsLine", { tools: shown.join(" · ") });
   const meta: TeamAiReplyMeta = {
     appsLine: tail?.line ?? null,
     appsSpoken: tail?.spoken ?? null,
@@ -419,9 +447,12 @@ export function parseTeamAiReplyMeta(
     personalNote: tail?.personalNote ?? null,
     toolsLine,
     toolsSpoken:
-      labels.length === 0 ? null : `${TEAM_AI_TOOLS_PREFIX}: ${labels.join(", ")}`,
+      labels.length === 0
+        ? null
+        : formatMessage("timeline.teamAiReply.toolsLine", { tools: labels.join(", ") }),
     citations,
-    modelChip: modelName === null ? null : `팀 AI · ${modelName}`,
+    modelChip:
+      modelName === null ? null : formatMessage("timeline.teamAiReply.modelChip", { model: modelName }),
   };
   if (
     meta.appsLine === null &&
@@ -436,17 +467,21 @@ export function parseTeamAiReplyMeta(
 
 /** 행이 부르는 입구. 지워진 행에는 없다. `authorKind` 는 멤버 목록의 작성자 종류다(#5577). */
 export function teamAiReplyMetaFor(
+  formatMessage: LocaleService["formatMessage"],
   message: Pick<Message, "props" | "state">,
   apps?: AppsTailContext,
   authorKind?: AuthorKind | null
 ): TeamAiReplyMeta | null {
   if (message.state === "deleted") return null;
-  return parseTeamAiReplyMeta(message.props, apps, authorKind);
+  return parseTeamAiReplyMeta(formatMessage, message.props, apps, authorKind);
 }
 
 /** 출처 링크의 접근 이름. 새 창으로 열린다는 것을 말한다. */
-export function citationAccessibleName(item: TeamAiWebCitation): string {
+export function citationAccessibleName(
+  formatMessage: LocaleService["formatMessage"],
+  item: TeamAiWebCitation
+): string {
   return item.title === item.host
-    ? `${item.host}, 새 창에서 열기`
-    : `${item.title}, ${item.host}, 새 창에서 열기`;
+    ? formatMessage("timeline.teamAiReply.citationOpenHost", { host: item.host })
+    : formatMessage("timeline.teamAiReply.citationOpenTitled", { title: item.title, host: item.host });
 }

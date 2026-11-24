@@ -5,9 +5,10 @@ import {
   COMPLETION_TONE_SOFT_CLASS,
 } from "@/features/timeline/completionTone";
 import {
-  COMPLETION_CHECK_OUTCOME_LABEL,
+  COMPLETION_CHECK_OUTCOME_LABEL_KEY,
   COMPLETION_CHECK_TONE,
 } from "@momo/core/features/timeline/completionReportCard";
+import { useFormatMessage } from "@/i18n/useFormatMessage";
 import type { SessionVerification } from "@momo/core/features/work/sessionVerification";
 
 // =============================================================================
@@ -15,7 +16,7 @@ import type { SessionVerification } from "@momo/core/features/work/sessionVerifi
 //
 // 완료 리포트 카드가 표 밑에 쓰는 집계 줄(「통과 12 · 실패 1」)을 **한 칸으로
 // 접은 것**이다. 그래서 새 낱말이 없다: 어휘는 코어의
-// `COMPLETION_CHECK_OUTCOME_LABEL` 그대로이고, 어느 칸을 그릴지는 코어의 심각도
+// `COMPLETION_CHECK_OUTCOME_LABEL_KEY` 그대로이고, 어느 칸을 그릴지는 코어의 심각도
 // 순위가 정한다(`sessionVerification` — 실패는 어떤 접기로도 사라지지 않는다).
 //
 // 세션 상태 칩(`SESSION_STATUS_CLASS`)을 **대체하지 않는다.** 그 칩은 원장이
@@ -74,6 +75,7 @@ export function SessionVerificationChip({
   /** 이 칩이 선 표면. 표면마다 달라서 게이트가 어디를 보는지 말할 수 있다. */
   testId: string;
 }) {
+  const formatMessage = useFormatMessage();
   return (
     <span
       data-testid={testId}
@@ -85,7 +87,7 @@ export function SessionVerificationChip({
         COMPLETION_TONE_CLASS[COMPLETION_CHECK_TONE[verification.lead]]
       )}
     >
-      {COMPLETION_CHECK_OUTCOME_LABEL[verification.lead]}{" "}
+      {formatMessage(COMPLETION_CHECK_OUTCOME_LABEL_KEY[verification.lead])}{" "}
       {/* 숫자만 자릿폭 고정. 낱말은 한글이라 tabular-nums 를 걸면 음절 사이가
           벌어진다(카드의 집계 줄과 같은 규율). */}
       <span data-numeric>{verification.leadCount}</span>

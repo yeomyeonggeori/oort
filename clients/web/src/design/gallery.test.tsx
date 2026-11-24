@@ -430,6 +430,26 @@ describe("src/design/ui export 전수", () => {
   });
 });
 
+describe("단추 종류 × 상태 (DS-05 #6074)", () => {
+  it("종류 4 × 상태 6 = 24칸이 서고, 진행 중 칸만 aria-busy다", () => {
+    const host = renderGallery();
+    const grid = host.querySelector('[data-testid="button-kind-state-grid"]');
+    const cells = [...(grid?.querySelectorAll("[data-button-cell]") ?? [])];
+    const kinds = ["default", "secondary", "ghost", "destructive"];
+    const states = ["rest", "hover", "active", "focus", "disabled", "busy"];
+    const expected = kinds.flatMap((kind) => states.map((state) => `${kind}|${state}`));
+    expect(cells.map((cell) => cell.getAttribute("data-button-cell")).sort()).toEqual(
+      [...expected].sort()
+    );
+    for (const cell of cells) {
+      const busy = cell.querySelector("button")?.getAttribute("aria-busy") === "true";
+      expect(busy, cell.getAttribute("data-button-cell") ?? "").toBe(
+        cell.getAttribute("data-button-cell")?.endsWith("|busy")
+      );
+    }
+  });
+});
+
 describe("production hover 변이", () => {
   it("@media (hover: hover) 가 hover 변이를 지키고 강제 미리보기 규칙은 없다", async () => {
     const css = await buildCss(["hover:bg-surface-hover", "touch-only"]);

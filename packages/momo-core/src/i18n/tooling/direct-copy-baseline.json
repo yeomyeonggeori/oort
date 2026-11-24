@@ -660,9 +660,11 @@
   "lowered": {
     "clients/mobile/src/features/conversation/ConversationInfoPage.tsx": {"ko": 11, "en": 0},
     "clients/mobile/src/features/conversation/ConversationMenuSheet.tsx": {"ko": 5, "en": 0},
+    "clients/mobile/src/features/conversation/TeamAiReplyMeta.tsx": {"ko": 0, "en": 0},
     "clients/mobile/src/features/sidebar/ChannelActionSheet.tsx": {"ko": 2, "en": 0},
     "clients/mobile/src/shell/NewChannelSheet.tsx": {"ko": 11, "en": 0},
     "clients/web/src/app/ShortcutHelpDialog.tsx": {"ko": 3, "en": 0},
+    "clients/web/src/design/Gallery.tsx": {"ko": 112, "en": 25},
     "clients/web/src/features/channels/ChannelContextControls.tsx": {"ko": 19, "en": 0},
     "clients/web/src/features/channels/CreateChannelDialog.tsx": {"ko": 12, "en": 0},
     "clients/web/src/features/chat/ChatShell.tsx": {"ko": 18, "en": 0},
@@ -708,20 +710,31 @@
     "packages/momo-core/src/features/sidebar/goneDm.ts": {"ko": 0, "en": 0},
     "packages/momo-core/src/features/sidebar/sidebarSections.ts": {"ko": 0, "en": 0},
     "packages/momo-core/src/features/timeline/actionCopy.ts": {"ko": 0, "en": 0},
+    "packages/momo-core/src/features/timeline/actionResultCard.ts": {"ko": 0, "en": 0},
     "packages/momo-core/src/features/timeline/agentInitiative.ts": {"ko": 0, "en": 0},
-    "packages/momo-core/src/features/timeline/approvalNote.ts": {"ko": 4, "en": 0},
+    "packages/momo-core/src/features/timeline/appNotice.ts": {"ko": 0, "en": 0},
+    "packages/momo-core/src/features/timeline/approvalDecision.ts": {"ko": 0, "en": 0},
+    "packages/momo-core/src/features/timeline/approvalNote.ts": {"ko": 0, "en": 0},
     "packages/momo-core/src/features/timeline/artifacts.ts": {"ko": 0, "en": 0},
     "packages/momo-core/src/features/timeline/cascadeModel.ts": {"ko": 0, "en": 0},
-    "packages/momo-core/src/features/timeline/commandSuggest.ts": {"ko": 1, "en": 0},
+    "packages/momo-core/src/features/timeline/commandSuggest.ts": {"ko": 0, "en": 0},
+    "packages/momo-core/src/features/timeline/completionReportCard.ts": {"ko": 0, "en": 0},
+    "packages/momo-core/src/features/timeline/copyLabels.ts": {"ko": 0, "en": 0},
     "packages/momo-core/src/features/timeline/decisionStage.ts": {"ko": 0, "en": 0},
     "packages/momo-core/src/features/timeline/deletedFold.ts": {"ko": 0, "en": 0},
     "packages/momo-core/src/features/timeline/divider.ts": {"ko": 0, "en": 0},
+    "packages/momo-core/src/features/timeline/loginHandoffCard.ts": {"ko": 0, "en": 0},
+    "packages/momo-core/src/features/timeline/model.ts": {"ko": 0, "en": 0},
     "packages/momo-core/src/features/timeline/pins.ts": {"ko": 0, "en": 0},
+    "packages/momo-core/src/features/timeline/quote.ts": {"ko": 0, "en": 0},
     "packages/momo-core/src/features/timeline/reactionNames.ts": {"ko": 0, "en": 0},
+    "packages/momo-core/src/features/timeline/requestBundle.ts": {"ko": 1, "en": 0},
     "packages/momo-core/src/features/timeline/rowModel.ts": {"ko": 0, "en": 0},
     "packages/momo-core/src/features/timeline/spawnHostChoice.ts": {"ko": 0, "en": 0},
     "packages/momo-core/src/features/timeline/streamStop.ts": {"ko": 0, "en": 0},
     "packages/momo-core/src/features/timeline/teamAi.ts": {"ko": 0, "en": 0},
+    "packages/momo-core/src/features/timeline/teamAiReply.ts": {"ko": 0, "en": 0},
+    "packages/momo-core/src/features/work/workSessionFormat.ts": {"ko": 7, "en": 0},
     "packages/momo-core/src/features/work/workSessionModel.ts": {"ko": 59, "en": 0}
   },
   "raises": [
@@ -735,6 +748,6 @@
     {"file": "packages/momo-core/src/features/workbench/workJobs.ts", "issue": 5593, "ko": 1, "reason": "The permission request hint on a session row (permissionHint) that #5621 added to the needs-reply section; it waits for the P1 workbench namespace."},
     {"file": "packages/momo-core/src/features/timeline/teamAiDelegationView.ts", "issue": 5375, "ko": 1, "reason": "The kind word 그림 that #5375 matches in the server's Korean delegation stage label (위임: {name} · 그림/검색) to start the Hermes wait line; it is parsed, not shown, and waits for P1 to carry the delegation kind as a field instead of a Korean word."},
     {"file": "clients/web/src/features/settings/TeamAiRolesList.tsx", "issue": 5375, "cat": 1, "reason": "The Hermes help row's unavailable line that #5375 builds by joining teamAi.delegation.unavailable with the closed reason sentence; it waits for P1 to become one key with the reason as an argument."},
-    {"file": "clients/web/src/design/Gallery.tsx", "issue": 5782, "ko": 5, "en": 2, "reason": "Design gallery specimen of the shared list row (fictional people, role chips, a caption); the gallery is a diagnostic surface that never ships and quotes product copy as fixtures."}
+    {"file": "clients/web/src/design/Gallery.tsx", "issue": 5782, "en": 2, "reason": "Design gallery specimen of the shared list row (fictional people, role chips, a caption); the gallery is a diagnostic surface that never ships and quotes product copy as fixtures."}
   ]
 }

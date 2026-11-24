@@ -133,6 +133,7 @@ export function DecisionStage({
       entries.map(entry => ({
         id: entry.id,
         bundle: phoneRequestBundle(
+          formatMessage,
           entry.card,
           directory,
           viewerMemberId,
@@ -143,7 +144,7 @@ export function DecisionStage({
           entry.run,
         ),
       })),
-    [entries, directory, viewerMemberId, receipts, time, offline],
+    [entries, directory, viewerMemberId, receipts, time, offline, formatMessage],
   );
   const [selection, setSelection] = useState(() =>
     createDecisionStage(cards, selectedId),
@@ -336,7 +337,7 @@ export function DecisionStage({
     }
     const receipt: ApprovalReceipt = {
       status: outcome.status,
-      note: decisionReceiptCopy(outcome),
+      note: decisionReceiptCopy(outcome, formatMessage),
       secretOnce: linkOnceFrom(outcome),
     };
     setReceipts(previous => new Map(previous).set(id, receipt));

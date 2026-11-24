@@ -10,6 +10,12 @@ import { presentableRows } from "@momo/core/features/timeline/toolCallSettle";
 import { agentRunProgressFromWire, type AgentRunProgress, type Message } from "@momo/core/lib/api";
 import { nudgeRunProgress, resetRunProgress, startRunProgress } from "@/features/agents/agentRunProgressStore";
 import { AgentCard } from "./AgentCard";
+import { LocaleProvider } from "@/i18n/LocaleProvider";
+import type { AppLocale } from "@/i18n/localeStore";
+import { koreanLocale } from "@/testing/koLocale";
+
+let koLocale: AppLocale;
+const withKo = (node: ReturnType<typeof createElement>) => createElement(LocaleProvider, { locale: koLocale, children: node });
 
 // =============================================================================
 // #5168 (검증 줄 3회차, #5066의 다음 국면). 승인한 도구 호출은 결정 뒤 워커에서 실행되고 끝은 같은 `call_id` 의 `tool_result`
@@ -71,7 +77,7 @@ let root: Root | null = null;
 let host: HTMLElement | null = null;
 let stopProgress: (() => void) | null = null;
 
-beforeAll(() => { reactActEnvironment.IS_REACT_ACT_ENVIRONMENT = true; });
+beforeAll(async () => { koLocale = await koreanLocale(); reactActEnvironment.IS_REACT_ACT_ENVIRONMENT = true; });
 beforeEach(() => {
   vi.useFakeTimers({ now: T0, toFake: ["Date", "setTimeout", "clearTimeout"] });
   localStorage.clear();
@@ -99,12 +105,12 @@ function mount(messages: Message[]): HTMLElement {
   host = document.createElement("div");
   document.body.append(host);
   root = createRoot(host);
-  act(() => { root?.render(elements(messages)); });
+  act(() => { root?.render(withKo(elements(messages))); });
   return host;
 }
 /** 같은 마운트에 목록이 자라는 것(메시지가 실시간으로 늘고 카드가 제자리에서 고쳐지는 것)을 흉내 낸다. */
 function update(messages: Message[]) {
-  act(() => { root?.render(elements(messages)); });
+  act(() => { root?.render(withKo(elements(messages))); });
 }
 
 /** 화면의 상태 낱말들: 묶음 카드의 상태 표지와 카드 칩을 모두 센다. 한 번의 승인은 하나만 말해야 한다. */

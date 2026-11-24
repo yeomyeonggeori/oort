@@ -1,6 +1,6 @@
 import type { RosterMember } from "../../lib/api";
 import { APPROVAL_EXPIRED_SENTENCE, REQUEST_WORD } from "../agents/runPhase";
-import { approvalCardNote } from "../timeline/approvalNote";
+import { approvalCardNoteSpoken } from "../timeline/approvalNote";
 import { memberFor, type Directory } from "../workspace/directory";
 
 // =============================================================================
@@ -84,7 +84,7 @@ export function closedCardReproposeReason(
  *
  * - **만료**: 보는 사람과 상관없이. 다만 카드가 이미 **영수증 줄**을 말하고 있으면(이 사람이 결정을 보냈다가 「이미 만료」로
  *   따라잡은 카드 등) 서지 않는다: 그 카드의 푸터는 영수증 줄이 차지하고 만료 푸터(이유 문장 + 단추)는 그때 서지 않는다. 영수증 줄이
- *   있는지는 카드가 컨트롤 대신 말할 줄을 정하는 그 함수(`approvalCardNote`)에게 묻는다 — 닫힌 카드에서 그 줄은 영수증뿐이고, 공백뿐인
+ *   있는지는 카드가 컨트롤 대신 말할 줄을 정하는 그 함수(`approvalCardNoteSpoken`)에게 묻는다 — 닫힌 카드에서 그 줄은 영수증뿐이고, 공백뿐인
  *   줄은 줄이 아니다.
  * - **실패**: 늘. 영수증 줄과 함께 서기도 한다(방금 내가 승인했다가 실패로 닫힌 카드, #4986).
  * - **거부**: 거부한 본인을 빼고. 영수증 줄과 함께 서기도 한다.
@@ -99,13 +99,13 @@ export function cardReproposeReason(
 ): ReproposeReason | null {
   if (state === "expired") {
     const spoken =
-      approvalCardNote({
+      approvalCardNoteSpoken({
         receiptNote,
         settled: true,
         hasTarget: true,
         pendingHere: false,
         offline: false,
-      }) !== null;
+      });
     return spoken ? null : "expired";
   }
   return closedCardReproposeReason(state, viewerDecided);

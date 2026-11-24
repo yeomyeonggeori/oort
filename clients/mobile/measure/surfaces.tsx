@@ -158,6 +158,8 @@ import {pushDeviceId} from '../src/push/registration';
 import {AppUpdateSheet} from '../src/features/appUpdate/AppUpdateBanner';
 import {RELEASE_NOTES} from '@momo/core/features/releaseNotes/notes';
 import {ReleaseNotesSheet} from '../src/features/releaseNotes/ReleaseNotesSheet';
+import {catalog as koCatalog} from '@momo/core/i18n/generated/ko-KR';
+import {createMessageService} from '@momo/core/i18n/service';
 import {createMobileLocaleController} from '../src/i18n/controller';
 import {MobileLocaleProvider} from '../src/i18n/LocaleProvider';
 import {seedIosFeedCacheForCapture} from '../src/features/appUpdate/feed';
@@ -254,6 +256,8 @@ import type {
   WorkHost,
   WorkSession,
 } from '@momo/core/lib/api';
+// 측정 하네스는 한국어 화면을 잰다(#6044): 인용 낱말도 한국어 사전으로 푼다.
+const MEASURE_FORMAT_MESSAGE = createMessageService({messageLocale: 'ko-KR', catalog: koCatalog}).formatMessage;
 
 // =============================================================================
 // goal RN-C5 의 표면들을 사진 찍을 수 있게 세워 두는 하네스. **앱 코드가 아니다.**
@@ -2417,7 +2421,7 @@ export function Surface({name}: {name: string}): React.JSX.Element {
     case 'responding':
       return <RespondingSurface />;
     case 'quote-ready': {
-      const draft = quoteDraftFor({
+      const draft = quoteDraftFor(MEASURE_FORMAT_MESSAGE, {
         ...MESSAGE,
         id: 'orig-1',
         seq: 4,
@@ -2457,7 +2461,7 @@ export function Surface({name}: {name: string}): React.JSX.Element {
     // #5381 Q4: 말풍선 안 윗칸 머리의 네 장면을 한 화면에 — 남 말풍선(긴 원문은 1줄 말줄임) · 내 말풍선(신호색 위) · 지워진 원본 · 입력창 초안.
     case 'quote-q4': {
       const original = (body: string) =>
-        quoteDraftFor({...MESSAGE, id: 'orig-1', seq: 4, authorMemberId: OTHER, body})?.block;
+        quoteDraftFor(MEASURE_FORMAT_MESSAGE, {...MESSAGE, id: 'orig-1', seq: 4, authorMemberId: OTHER, body})?.block;
       const long = original(
         '배포 되돌리기 절차 정리해 줄래요? 릴리스 태그 확인, 이전 이미지 롤백, 헬스체크까지 순서대로 알려 주면 좋겠어요.\n둘째 줄은 보이지 않아요',
       );
@@ -3116,7 +3120,7 @@ export function Surface({name}: {name: string}): React.JSX.Element {
           approval_status: 'pending',
         },
       } as unknown as Message;
-      const leadQuote = quoteDraftFor({
+      const leadQuote = quoteDraftFor(MEASURE_FORMAT_MESSAGE, {
         ...MESSAGE,
         id: 'orig-lead',
         seq: 7,

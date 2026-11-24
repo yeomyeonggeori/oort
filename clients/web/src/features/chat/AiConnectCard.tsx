@@ -596,7 +596,7 @@ function SuggestedCard({
           {initial}
         </span>
         <h3 id={headingId} className="min-w-0 break-keep text-meta font-semibold text-agent">
-          {commandSuggestHead(card)}
+          {commandSuggestHead(formatMessage, card)}
         </h3>
         <span className="ai-card-chipline flex">
           <span

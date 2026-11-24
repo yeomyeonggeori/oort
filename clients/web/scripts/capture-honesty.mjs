@@ -341,7 +341,7 @@ async function shoot(page, name) {
 }
 
 async function captureScheme(browser, scheme, viewport, suffix) {
-  const context = await browser.newContext({
+  const context = await browser.newContext({ locale: "ko-KR",
     viewport,
     colorScheme: scheme,
     reducedMotion: "reduce",
@@ -452,7 +452,7 @@ async function captureScheme(browser, scheme, viewport, suffix) {
 async function captureRemainingStates(browser, scheme, viewport, suffix) {
   // 검색 중 (느린 응답 위의 스켈레톤)
   {
-    const context = await browser.newContext({ viewport, colorScheme: scheme, reducedMotion: "reduce" });
+    const context = await browser.newContext({ locale: "ko-KR", viewport, colorScheme: scheme, reducedMotion: "reduce" });
     const page = await context.newPage();
     await installRealtimeSocket(page);
     await installRoutes(context, "slow");
@@ -466,7 +466,7 @@ async function captureRemainingStates(browser, scheme, viewport, suffix) {
 
   // 검색 오류 (5xx는 미제공이 아니라 장애다: 재시도가 함께 선다)
   {
-    const context = await browser.newContext({ viewport, colorScheme: scheme, reducedMotion: "reduce" });
+    const context = await browser.newContext({ locale: "ko-KR", viewport, colorScheme: scheme, reducedMotion: "reduce" });
     const page = await context.newPage();
     await installRealtimeSocket(page);
     await installRoutes(context, "error");
@@ -480,7 +480,7 @@ async function captureRemainingStates(browser, scheme, viewport, suffix) {
 
   // 검색 미제공 (404는 오류가 아니라 접힘 — 재시도를 권하지 않는다)
   {
-    const context = await browser.newContext({ viewport, colorScheme: scheme, reducedMotion: "reduce" });
+    const context = await browser.newContext({ locale: "ko-KR", viewport, colorScheme: scheme, reducedMotion: "reduce" });
     const page = await context.newPage();
     await installRealtimeSocket(page);
     await installRoutes(context, "absent");
@@ -497,7 +497,7 @@ async function captureRemainingStates(browser, scheme, viewport, suffix) {
 
   // 더 보기 (nextCursor가 실린 페이지)
   {
-    const context = await browser.newContext({ viewport, colorScheme: scheme, reducedMotion: "reduce" });
+    const context = await browser.newContext({ locale: "ko-KR", viewport, colorScheme: scheme, reducedMotion: "reduce" });
     const page = await context.newPage();
     await installRealtimeSocket(page);
     await installRoutes(context, "paged");
@@ -520,7 +520,7 @@ async function captureRemainingStates(browser, scheme, viewport, suffix) {
   // 서지 않는다. B12 의 요점(「없는 것을 있다고 말하지 않는다」)은 그대로 지킨다 —
   // 방향만 반대로: **있는 것을 없다고 말하지 않는가**를 잰다.
   {
-    const context = await browser.newContext({ viewport, colorScheme: scheme, reducedMotion: "reduce" });
+    const context = await browser.newContext({ locale: "ko-KR", viewport, colorScheme: scheme, reducedMotion: "reduce" });
     const page = await context.newPage();
     await installRealtimeSocket(page);
     await installRoutes(context);
@@ -540,7 +540,7 @@ async function captureRemainingStates(browser, scheme, viewport, suffix) {
   // 예전에는 여기서 아무 자국도 남지 않았다: 사용자는 방금 읽은 문장을 눌렀는데
   // 전혀 다른 메시지가 있는 채널 바닥에 도착했다.
   {
-    const context = await browser.newContext({ viewport, colorScheme: scheme, reducedMotion: "reduce" });
+    const context = await browser.newContext({ locale: "ko-KR", viewport, colorScheme: scheme, reducedMotion: "reduce" });
     const page = await context.newPage();
     await installRealtimeSocket(page);
     await installRoutes(context);
@@ -562,7 +562,7 @@ async function captureRemainingStates(browser, scheme, viewport, suffix) {
 
   // 에이전트 허브: 죽은 탭(메모리·이력)이 사라진 탭 행
   {
-    const context = await browser.newContext({ viewport, colorScheme: scheme, reducedMotion: "reduce" });
+    const context = await browser.newContext({ locale: "ko-KR", viewport, colorScheme: scheme, reducedMotion: "reduce" });
     const page = await context.newPage();
     await installRealtimeSocket(page);
     await installRoutes(context);

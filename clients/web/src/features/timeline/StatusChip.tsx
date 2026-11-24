@@ -7,21 +7,22 @@ import {
   type ApprovalStatus,
 } from "@momo/core/features/timeline/agentCardModel";
 import {
-  loginHandoffStatusLabel,
+  loginHandoffStatusKey,
   type LoginHandoffCard,
   type LoginHandoffOutcome,
   type LoginHandoffPhase,
 } from "@momo/core/features/timeline/loginHandoffCard";
 import {
-  COMPLETION_OUTCOME_LABEL,
+  COMPLETION_OUTCOME_LABEL_KEY,
   COMPLETION_OUTCOME_TONE,
   type CompletionOutcome,
 } from "@momo/core/features/timeline/completionReportCard";
 import {
-  ACTION_RESULT_STATUS_LABEL,
+  actionResultStatusLabel,
   type ActionResultStatus,
 } from "@momo/core/features/timeline/actionResultCard";
 import { COMPLETION_TONE_CLASS } from "./completionTone";
+import { useFormatMessage } from "@/i18n/useFormatMessage";
 
 // =============================================================================
 // The one status chip vocabulary for agent surfaces (R-1 §4).
@@ -111,6 +112,7 @@ const LOGIN_HANDOFF_CHIP_CLASS: Readonly<
 };
 
 export function LoginHandoffChip({ card }: { card: LoginHandoffCard }) {
+  const formatMessage = useFormatMessage();
   const key = card.outcome ?? card.phase;
   return (
     <span
@@ -118,7 +120,7 @@ export function LoginHandoffChip({ card }: { card: LoginHandoffCard }) {
       data-status={key}
       className={cn(CHIP_CLASS, LOGIN_HANDOFF_CHIP_CLASS[key])}
     >
-      {loginHandoffStatusLabel(card)}
+      {formatMessage(loginHandoffStatusKey(card))}
     </span>
   );
 }
@@ -139,6 +141,7 @@ export function LoginHandoffChip({ card }: { card: LoginHandoffCard }) {
  * 의 tokens 락에 걸린다.
  */
 export function CompletionReportChip({ outcome }: { outcome: CompletionOutcome }) {
+  const formatMessage = useFormatMessage();
   return (
     <span
       data-testid="agent-status-chip"
@@ -149,7 +152,7 @@ export function CompletionReportChip({ outcome }: { outcome: CompletionOutcome }
         COMPLETION_TONE_CLASS[COMPLETION_OUTCOME_TONE[outcome]]
       )}
     >
-      {COMPLETION_OUTCOME_LABEL[outcome]}
+      {formatMessage(COMPLETION_OUTCOME_LABEL_KEY[outcome])}
     </span>
   );
 }
@@ -180,13 +183,14 @@ const ACTION_RESULT_CHIP_CLASS: Readonly<
 };
 
 export function ActionResultChip({ status }: { status: ActionResultStatus }) {
+  const formatMessage = useFormatMessage();
   return (
     <span
       data-testid="agent-status-chip"
       data-status={status}
       className={cn(CHIP_CLASS, ACTION_RESULT_CHIP_CLASS[status])}
     >
-      {ACTION_RESULT_STATUS_LABEL[status]}
+      {actionResultStatusLabel(formatMessage, status)}
     </span>
   );
 }

@@ -165,7 +165,7 @@ function SuggestedCard({
           numberOfLines={2}
           lineBreakStrategyIOS="hangul-word"
           accessibilityRole="header">
-          {commandSuggestHead(card)}
+          {commandSuggestHead(formatMessage, card)}
         </Text>
       </View>
       {showMine ? (
