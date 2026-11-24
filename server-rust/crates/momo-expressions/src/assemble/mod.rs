@@ -786,6 +786,8 @@ fn from_wire(wire: WireResult) -> Result<Vec<Outcome>, AssembleError> {
                         small: c.small.into(),
                         large: c.large.into(),
                         thumb: c.thumb.into(),
+                        // An assembled picture is made at the old table (ADR-0218 §20 Z2-4).
+                        still: None,
                     },
                 })
             })
@@ -1048,6 +1050,7 @@ mod tests {
                 small: rendition(1),
                 large: rendition(2),
                 thumb: rendition(3),
+                still: None,
             },
         }
     }

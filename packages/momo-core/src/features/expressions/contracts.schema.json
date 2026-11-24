@@ -282,17 +282,17 @@
             "bytes": {
               "type": "integer",
               "minimum": 1,
-              "maximum": 1048576
+              "maximum": 2097152
             },
             "width": {
               "type": "integer",
               "minimum": 1,
-              "maximum": 512
+              "maximum": 768
             },
             "height": {
               "type": "integer",
               "minimum": 1,
-              "maximum": 512
+              "maximum": 768
             },
             "frameCount": {
               "const": 1
@@ -327,17 +327,17 @@
             "bytes": {
               "type": "integer",
               "minimum": 1,
-              "maximum": 1048576
+              "maximum": 2097152
             },
             "width": {
               "type": "integer",
               "minimum": 1,
-              "maximum": 512
+              "maximum": 768
             },
             "height": {
               "type": "integer",
               "minimum": 1,
-              "maximum": 512
+              "maximum": 768
             },
             "frameCount": {
               "type": "integer",
@@ -378,17 +378,62 @@
         "bytes": {
           "type": "integer",
           "minimum": 1,
-          "maximum": 262144
+          "maximum": 524288
         },
         "width": {
           "type": "integer",
           "minimum": 1,
-          "maximum": 128
+          "maximum": 256
         },
         "height": {
           "type": "integer",
           "minimum": 1,
-          "maximum": 128
+          "maximum": 256
+        },
+        "frameCount": {
+          "const": 1
+        },
+        "durationMs": {
+          "const": 0
+        }
+      }
+    },
+    "StillImage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "mime",
+        "sha256",
+        "bytes",
+        "width",
+        "height",
+        "frameCount",
+        "durationMs"
+      ],
+      "properties": {
+        "mime": {
+          "const": "image/png"
+        },
+        "sha256": {
+          "type": "string",
+          "minLength": 64,
+          "maxLength": 64,
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "bytes": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 2097152
+        },
+        "width": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 768
+        },
+        "height": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 768
         },
         "frameCount": {
           "const": 1
@@ -415,6 +460,9 @@
         },
         "thumb": {
           "$ref": "#/$defs/ThumbImage"
+        },
+        "still": {
+          "$ref": "#/$defs/StillImage"
         }
       }
     },

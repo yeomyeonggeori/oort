@@ -279,9 +279,13 @@ async fn a_busy_decoder_refuses_a_photo_at_once_and_a_paid_for_picture_waits_its
     );
     let started = Instant::now();
     assert_eq!(
-        media::process_cutout(photo.clone(), Duration::from_millis(250))
-            .await
-            .unwrap_err(),
+        media::process_cutout(
+            photo.clone(),
+            Duration::from_millis(250),
+            Default::default()
+        )
+        .await
+        .unwrap_err(),
         Rejected::Busy,
         "the wait ran out"
     );
@@ -291,7 +295,11 @@ async fn a_busy_decoder_refuses_a_photo_at_once_and_a_paid_for_picture_waits_its
         started.elapsed()
     );
     // A slot frees up while it waits: the picture gets it.
-    let waiting = tokio::spawn(media::process_cutout(photo, Duration::from_secs(2)));
+    let waiting = tokio::spawn(media::process_cutout(
+        photo,
+        Duration::from_secs(2),
+        Default::default(),
+    ));
     tokio::time::sleep(Duration::from_millis(100)).await;
     drop(first);
     assert!(waiting.await.unwrap().is_ok());
@@ -305,7 +313,7 @@ async fn a_picture_a_model_drew_is_cut_out_in_the_child_and_says_how() {
     // Drawn on one flat colour: erased from the edges in.
     let mut flat = RgbaImage::from_pixel(600, 600, Rgba([0, 200, 0, 255]));
     disc(&mut flat, 300, 300, 200, [255, 0, 0, 255]);
-    let cut = media::process_cutout(png_of(&flat), wait)
+    let cut = media::process_cutout(png_of(&flat), wait, Default::default())
         .await
         .expect("cut out");
     assert_eq!(cut.outcome, Outcome::Erased);
@@ -339,7 +347,9 @@ async fn a_picture_a_model_drew_is_cut_out_in_the_child_and_says_how() {
     // Drawn with a transparent background by the model: kept, and only cropped.
     let mut drawn = RgbaImage::from_pixel(600, 600, Rgba([0, 0, 0, 0]));
     disc(&mut drawn, 300, 300, 150, [20, 40, 220, 255]);
-    let cut = media::process_cutout(png_of(&drawn), wait).await.unwrap();
+    let cut = media::process_cutout(png_of(&drawn), wait, Default::default())
+        .await
+        .unwrap();
     assert_eq!(cut.outcome, Outcome::Model);
 
     // Not provably flat: untouched, and the renditions are an ordinary picture's.
@@ -349,7 +359,7 @@ async fn a_picture_a_model_drew_is_cut_out_in_the_child_and_says_how() {
         *pixel = Rgba([v, v, v, 255]);
     }
     disc(&mut gradient, 300, 300, 150, [255, 0, 0, 255]);
-    let cut = media::process_cutout(png_of(&gradient), wait)
+    let cut = media::process_cutout(png_of(&gradient), wait, Default::default())
         .await
         .unwrap();
     assert_eq!(cut.outcome, Outcome::Untouched);
@@ -363,7 +373,7 @@ async fn a_picture_a_model_drew_is_cut_out_in_the_child_and_says_how() {
 
     // What is not a picture is refused the same way as anywhere.
     assert_eq!(
-        media::process_cutout(b"<html>".to_vec(), wait)
+        media::process_cutout(b"<html>".to_vec(), wait, Default::default())
             .await
             .unwrap_err(),
         Rejected::Invalid

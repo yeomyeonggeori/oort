@@ -8,7 +8,7 @@ use std::time::Duration;
 
 use tokio::sync::Semaphore;
 
-use crate::media::{self, Processed, Rejected, Sniffed};
+use crate::media::{self, Processed, Rejected, RenditionTable, Sniffed};
 
 /// Link imports (and action `url` candidates) in flight at once. Each holds up to 5 MiB of
 /// fetched bytes and then waits for one of the two decoder slots, and a member can start many
@@ -23,7 +23,7 @@ pub fn import_slots() -> &'static Arc<Semaphore> {
 /// What a received body became.
 #[derive(Debug)]
 pub enum Picture {
-    /// A stored-ready picture (three renditions).
+    /// A stored-ready picture (three renditions, or four with a moving picture's `still`).
     Ready(Box<Processed>),
     /// The one closed reason it did not (ADR-0218 appendix C). A card, never an error.
     Manual(&'static str),
@@ -36,18 +36,20 @@ pub struct DecoderBusy;
 
 /// What a fetched body becomes: a picture, or the one reason it did not. The format is
 /// decided by the bytes, never by the `Content-Type` the server claimed. `wait` is how long a
-/// busy decoder may be waited for (`None`: refuse at once, the direct import's behaviour).
+/// busy decoder may be waited for (`None`: refuse at once, the direct import's behaviour); `table` is
+/// the size table the picture is stored at (ADR-0218 §20).
 pub async fn picture_or_reason(
     bytes: Vec<u8>,
     wait: Option<Duration>,
+    table: RenditionTable,
 ) -> Result<Picture, DecoderBusy> {
     if media::sniff(&bytes) == Sniffed::Unsupported {
         // A web page, SVG, HEIC/AVIF, a script, an empty body: nothing to decode.
         return Ok(Picture::Manual("source_unsupported"));
     }
     let processed = match wait {
-        None => media::process(bytes).await,
-        Some(wait) => media::process_waiting(bytes, wait).await,
+        None => media::process(bytes, table).await,
+        Some(wait) => media::process_waiting(bytes, wait, table).await,
     };
     match processed {
         Ok(processed) => Ok(Picture::Ready(Box::new(processed))),

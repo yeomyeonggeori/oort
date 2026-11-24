@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { assertExpressionContract, matchesExpressionContract } from "./contracts";
 import { FIXTURE_AI_APPROVAL, FIXTURE_APPROVAL, FIXTURE_CHANNEL_ID, FIXTURE_EXPRESSIONS, FIXTURE_HIDDEN_DELTA, FIXTURE_LIST, FIXTURE_MEDIA_SET, FIXTURE_READY_DRAFT, FIXTURE_RESULT, fixtureManualDraft } from "./fixtures";
 import { expressionChoice } from "./cards";
-import { EXPRESSION_FAILURE_CODES, LINK_AWAITING_APPROVAL_CODE, MANUAL_UPLOAD_CODES } from "./types";
+import { EXPRESSION_FAILURE_CODES, EXPRESSION_LIMITS, LINK_AWAITING_APPROVAL_CODE, MANUAL_UPLOAD_CODES } from "./types";
 
 const choice = expressionChoice(FIXTURE_READY_DRAFT, 0)!;
 const metadata = { name: "happy_dance", displayName: "신나는 춤", tags: ["축하"], subjectMemberId: null };
@@ -117,6 +117,37 @@ describe("ADR-0218 closed wire-schema fixture assertions", () => {
     expect(matchesExpressionContract("Media", invalid)).toBe(false);
     invalid.large.durationMs = 200; invalid.thumb.mime = "image/gif";
     expect(matchesExpressionContract("Media", invalid)).toBe(false);
+  });
+  // ADR-0218 §20 ZA9 (#6071): the reader goes first. A list stored at the server's new table — `large` up to
+  // 768 · 2 MiB, `thumb` up to 256 · 512 KiB, and a moving registration's `still` — reads, and so does one
+  // from before it (no `still`) and one that mixes both. One pixel or one byte past a bound does not.
+  it("reads the wide size table and a still, and refuses one past either bound", () => {
+    const wide = copy(FIXTURE_MEDIA_SET);
+    Object.assign(wide.large, { width: 768, height: 576, bytes: 2097152 });
+    Object.assign(wide.thumb, { width: 256, height: 192, bytes: 524288 });
+    const still = { mime: "image/png", sha256: "c".repeat(64), bytes: 2097152, width: 768, height: 576, frameCount: 1, durationMs: 0 };
+    assertExpressionContract("Media", wide);
+    assertExpressionContract("Media", { ...wide, still });
+    assertExpressionContract("Media", FIXTURE_MEDIA_SET);
+    const newer = { ...copy(FIXTURE_EXPRESSIONS[0]), media: { ...wide, still } };
+    assertExpressionContract("List", { ...FIXTURE_LIST, items: [newer, FIXTURE_EXPRESSIONS[1]] });
+    expect(EXPRESSION_LIMITS).toMatchObject({
+      smallPixels: 128, smallBytes: 262144, thumbPixels: 256, thumbBytes: 524288,
+      largePixels: 768, largeBytes: 2097152, stillPixels: 768, stillBytes: 2097152, motionCanvasPixels: 768,
+    });
+    const past: Array<[string, unknown]> = [
+      ["large 769", { ...wide, large: { ...wide.large, width: 769 } }],
+      ["large 2 MiB + 1", { ...wide, large: { ...wide.large, bytes: 2097153 } }],
+      ["thumb 257", { ...wide, thumb: { ...wide.thumb, height: 257 } }],
+      ["thumb 512 KiB + 1", { ...wide, thumb: { ...wide.thumb, bytes: 524289 } }],
+      ["small 129", { ...wide, small: { ...wide.small, width: 129 } }],
+      ["still 769", { ...wide, still: { ...still, width: 769 } }],
+      ["still 2 MiB + 1", { ...wide, still: { ...still, bytes: 2097153 } }],
+      ["still is a gif", { ...wide, still: { ...still, mime: "image/gif", frameCount: 2, durationMs: 200 } }],
+      ["still with two frames", { ...wide, still: { ...still, frameCount: 2 } }],
+      ["a size nobody named", { ...wide, poster: still }],
+    ];
+    for (const [why, media] of past) expect(matchesExpressionContract("Media", media), why).toBe(false);
   });
   it("rejects more than four candidates and semantic metadata bounds", () => {
     expect(matchesExpressionContract("AgentAction", { ...action, args: { candidates: [] } })).toBe(false);

@@ -271,7 +271,12 @@ pub(crate) async fn media_json(
             "bytes":row.try_get::<i32,_>("size")?,"width":row.try_get::<i32,_>("width")?,"height":row.try_get::<i32,_>("height")?,
             "frameCount":row.try_get::<i32,_>("frame_count")?,"durationMs":row.try_get::<i32,_>("duration_ms")?}));
     }
-    if media.len() != 3 {
+    // Three renditions, or four with a moving picture's `still` (ADR-0218 §20): never anything else.
+    if !["small", "large", "thumb"]
+        .iter()
+        .all(|variant| media.contains_key(*variant))
+        || media.len() > 3 + usize::from(media.contains_key("still"))
+    {
         return Err(Error::NotFound);
     }
     Ok(Value::Object(media))
@@ -798,7 +803,9 @@ pub async fn image(
     sha: String,
     draft: bool,
 ) -> Result<Rendition, Error> {
-    if !["small", "large", "thumb"].contains(&variant.as_str()) || !hash(&sha) {
+    // `still` (ADR-0218 §20 Z2-5) goes through the same authorization as every size; an expression
+    // that has none answers the same 404 as a hidden one or a wrong sha.
+    if !["small", "large", "thumb", "still"].contains(&variant.as_str()) || !hash(&sha) {
         return Err(Error::NotFound);
     }
     transaction(pool,actor,move|conn|Box::pin(async move {

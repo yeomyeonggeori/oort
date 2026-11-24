@@ -6,7 +6,7 @@ components:
     ws: {in: path, name: ws, required: true, schema: {type: string, format: uuid}}
     id: {in: path, name: id, required: true, schema: {type: string, format: uuid}}
     draftId: {in: path, name: draftId, required: true, schema: {type: string, format: uuid}}
-    size: {in: query, name: size, required: true, schema: {type: string, enum: [small, large, thumb]}}
+    size: {in: query, name: size, required: true, schema: {type: string, enum: [small, large, thumb, still]}}
     v: {in: query, name: v, required: true, schema: {type: string, pattern: '^[a-f0-9]{64}$'}}
   securitySchemes:
     bearerAuth: {type: http, scheme: bearer}

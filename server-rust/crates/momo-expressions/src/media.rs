@@ -46,6 +46,10 @@ pub enum Rejected {
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Rendition {
     pub info: ImageInfo,
+    /// On the codec child's wire this is **base64**, as [`Prepared::data`] is: a JSON array of
+    /// numbers takes up to four characters a byte, and the four renditions of the §20 table (up to
+    /// 4.75 MiB) would not fit [`CHILD_OUTPUT_MAX`] that way (#6071).
+    #[serde(with = "wire_bytes")]
     pub data: Vec<u8>,
 }
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -53,14 +57,122 @@ pub struct Processed {
     pub small: Rendition,
     pub large: Rendition,
     pub thumb: Rendition,
+    /// ADR-0218 §20 (#6071): the stopped frame of a **moving** picture stored at the wide table
+    /// ([`RenditionTable::Wide`]): its first composited frame as a still PNG, at `large`'s size.
+    /// `None` for a still picture, for the old table and for every assembled or set picture.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub still: Option<Rendition>,
 }
 impl Processed {
-    pub fn variants(&self) -> [(&'static str, &Rendition); 3] {
-        [
+    /// The stored rows of this picture: three, or four when it has a stopped frame.
+    pub fn variants(&self) -> Vec<(&'static str, &Rendition)> {
+        let mut rows = vec![
             ("small", &self.small),
             ("large", &self.large),
             ("thumb", &self.thumb),
-        ]
+        ];
+        if let Some(still) = &self.still {
+            rows.push(("still", still));
+        }
+        rows
+    }
+}
+
+/// ADR-0218 §20 (#6071): the size table a picture is stored at when the server encodes it from its
+/// input bytes. [`Legacy`](Self::Legacy) is the table every client reads (`small` 128 · `thumb` 128 ·
+/// `large` 512, moving canvas 512); [`Wide`](Self::Wide) is §20's (`thumb` 256 · `large` 768 · a
+/// `still` for a moving picture, moving canvas 768). The server stores at `Wide` only when the
+/// operator turns it on (Z2-7, `EXPRESSION_RENDITION_TABLE`): an older client cannot read a list
+/// that holds one wide row. The assembler and the set path never take this; they stay at the old
+/// table (Z2-4).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum RenditionTable {
+    #[default]
+    Legacy,
+    Wide,
+}
+
+/// The longest side and the most bytes of each rendition, and the widest moving canvas, of one
+/// [`RenditionTable`]. The decoder limits are **not** here: they are the same for both tables (Z2-2).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Sizes {
+    pub small_edge: u32,
+    pub small_bytes: usize,
+    pub thumb_edge: u32,
+    pub thumb_bytes: usize,
+    /// `large`, and `still` when there is one (`still` is `large`'s size, Z1).
+    pub large_edge: u32,
+    pub large_bytes: usize,
+    /// Whether a moving picture also gets a `still`.
+    pub still: bool,
+    /// The widest and tallest canvas a moving input may have.
+    pub motion_canvas: u32,
+}
+
+impl Sizes {
+    /// The most one stored picture may weigh (Z4): `small + thumb + large`, and `+ still` when
+    /// `moving` and the table makes one.
+    pub const fn worst_bytes(&self, moving: bool) -> usize {
+        self.small_bytes
+            + self.thumb_bytes
+            + self.large_bytes
+            + if moving && self.still {
+                self.large_bytes
+            } else {
+                0
+            }
+    }
+}
+
+impl RenditionTable {
+    /// The name of the server setting that chooses the table (ADR-0218 §20 Z2-7).
+    pub const SETTING: &'static str = "EXPRESSION_RENDITION_TABLE";
+
+    pub const fn sizes(self) -> Sizes {
+        match self {
+            RenditionTable::Legacy => Sizes {
+                small_edge: 128,
+                small_bytes: 256 * 1024,
+                thumb_edge: 128,
+                thumb_bytes: 256 * 1024,
+                large_edge: 512,
+                large_bytes: 1024 * 1024,
+                still: false,
+                motion_canvas: 512,
+            },
+            RenditionTable::Wide => Sizes {
+                small_edge: 128,
+                small_bytes: 256 * 1024,
+                thumb_edge: 256,
+                thumb_bytes: 512 * 1024,
+                large_edge: 768,
+                large_bytes: 2 * 1024 * 1024,
+                still: true,
+                motion_canvas: 768,
+            },
+        }
+    }
+
+    /// The setting's value: unset or empty is the old table, `768` the §20 table, and `512` names the
+    /// old table explicitly (the way back, Z7). Anything else is `None`: the caller keeps the old table
+    /// and says so, because a mistyped way back must not leave the wide table on.
+    pub fn from_setting(value: Option<&str>) -> Option<Self> {
+        match value.map(str::trim) {
+            None | Some("") | Some("512") => Some(RenditionTable::Legacy),
+            Some("768") => Some(RenditionTable::Wide),
+            Some(_) => None,
+        }
+    }
+
+    /// The codec child's fixed arguments for this table (see `main.rs`): nothing for the old table,
+    /// `--wide` for §20's.
+    fn child_args(self, cutout: bool) -> &'static [&'static str] {
+        match (cutout, self) {
+            (false, RenditionTable::Legacy) => &[],
+            (false, RenditionTable::Wide) => &["--wide"],
+            (true, RenditionTable::Legacy) => &["--cutout"],
+            (true, RenditionTable::Wide) => &["--cutout", "--wide"],
+        }
     }
 }
 
@@ -73,11 +185,13 @@ pub fn decoder_slots() -> Arc<Semaphore> {
     SEM.get_or_init(|| Arc::new(Semaphore::new(2))).clone()
 }
 
-pub async fn process(bytes: Vec<u8>) -> Result<Processed, Rejected> {
+/// A picture's renditions at `table`, made in the isolated codec child. A busy decoder is refused at
+/// once ([`Rejected::Busy`]).
+pub async fn process(bytes: Vec<u8>, table: RenditionTable) -> Result<Processed, Rejected> {
     if bytes.len() > INPUT_BYTES {
         return Err(Rejected::TooLarge);
     }
-    supervised(bytes, decoder_path()?, DEADLINE, decoder_slots()).await
+    supervised(bytes, decoder_path()?, DEADLINE, decoder_slots(), table).await
 }
 
 /// The longest [`process_waiting`] stands in line for a decoder slot, whatever its caller's
@@ -95,7 +209,11 @@ pub const WAITERS_MAX: usize = 2;
 /// inside one deadline. The wait is the only difference: the input bound, the two slots, the
 /// supervised child and its limits are the same ones, and a line that is full or a wait that
 /// runs out is [`Rejected::Busy`], never `Timeout`.
-pub async fn process_waiting(bytes: Vec<u8>, wait: Duration) -> Result<Processed, Rejected> {
+pub async fn process_waiting(
+    bytes: Vec<u8>,
+    wait: Duration,
+    table: RenditionTable,
+) -> Result<Processed, Rejected> {
     if bytes.len() > INPUT_BYTES {
         return Err(Rejected::TooLarge);
     }
@@ -106,6 +224,7 @@ pub async fn process_waiting(bytes: Vec<u8>, wait: Duration) -> Result<Processed
         decoder_slots(),
         &Line::process_wide(),
         wait,
+        table,
     )
     .await
 }
@@ -159,12 +278,13 @@ async fn waiting(
     semaphore: Arc<Semaphore>,
     line: &Line<'_>,
     wait: Duration,
+    table: RenditionTable,
 ) -> Result<Processed, Rejected> {
     if let Some(rejected) = refused_before_a_slot(&bytes) {
         return Err(rejected);
     }
     let permit = permit_waiting(semaphore, line, wait).await?;
-    run_with_permit(bytes, path, deadline, permit).await
+    run_with_permit(bytes, path, deadline, permit, table).await
 }
 
 /// What the **parent** can refuse from a body's first bytes alone, before it takes a decoder slot,
@@ -202,6 +322,7 @@ async fn supervised(
     path: std::path::PathBuf,
     deadline: Duration,
     semaphore: Arc<Semaphore>,
+    table: RenditionTable,
 ) -> Result<Processed, Rejected> {
     if let Some(rejected) = refused_before_a_slot(&bytes) {
         return Err(rejected);
@@ -209,7 +330,7 @@ async fn supervised(
     // Admission happens before detaching: canceled callers cannot accumulate
     // an unbounded queue of 5 MiB inputs waiting behind the two codec slots.
     let permit = semaphore.try_acquire_owned().map_err(|_| Rejected::Busy)?;
-    run_with_permit(bytes, path, deadline, permit).await
+    run_with_permit(bytes, path, deadline, permit, table).await
 }
 
 async fn run_with_permit(
@@ -217,12 +338,13 @@ async fn run_with_permit(
     path: std::path::PathBuf,
     deadline: Duration,
     permit: tokio::sync::OwnedSemaphorePermit,
+    table: RenditionTable,
 ) -> Result<Processed, Rejected> {
     // The supervisor survives cancellation of the HTTP request and retains its
     // permit until the actual child has exited and been reaped.
     let task = tokio::spawn(async move {
         let _permit = permit;
-        child(bytes, path, deadline).await
+        child_typed::<Processed>(bytes, path, deadline, table.child_args(false)).await
     });
     task.await.map_err(|_| Rejected::Invalid)?
 }
@@ -239,28 +361,27 @@ fn decoder_path() -> Result<std::path::PathBuf, Rejected> {
     };
     Ok(parent.join("momo-expression-decoder"))
 }
+#[cfg(test)]
 async fn child(
     bytes: Vec<u8>,
     path: std::path::PathBuf,
     deadline: Duration,
 ) -> Result<Processed, Rejected> {
-    child_typed::<Processed>(bytes, path, deadline, None).await
+    child_typed::<Processed>(bytes, path, deadline, &[]).await
 }
 
-/// One job in the codec subprocess. `mode` is a fixed argument of the child (`--prepare`,
-/// `--cutout`), never anything a member wrote; the bytes go in on stdin, the answer comes back as
-/// JSON on stdout, and nothing else (no URL, path, environment or database) is passed.
+/// One job in the codec subprocess. `args` are fixed arguments of the child (`--prepare`,
+/// `--cutout`, `--wide`), never anything a member wrote; the bytes go in on stdin, the answer comes
+/// back as JSON on stdout, and nothing else (no URL, path, environment or database) is passed.
 async fn child_typed<T: serde::de::DeserializeOwned>(
     bytes: Vec<u8>,
     path: std::path::PathBuf,
     deadline: Duration,
-    mode: Option<&'static str>,
+    args: &'static [&'static str],
 ) -> Result<T, Rejected> {
     let mut command = tokio::process::Command::new(path);
     command.env_clear();
-    if let Some(mode) = mode {
-        command.arg(mode);
-    }
+    command.args(args);
     let mut child = command
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
@@ -313,13 +434,13 @@ async fn child_typed<T: serde::de::DeserializeOwned>(
 /// asked for it is cancelled.
 async fn job<T: serde::de::DeserializeOwned + Send + 'static>(
     bytes: Vec<u8>,
-    mode: &'static str,
+    args: &'static [&'static str],
     permit: tokio::sync::OwnedSemaphorePermit,
 ) -> Result<T, Rejected> {
     let path = decoder_path()?;
     let task = tokio::spawn(async move {
         let _permit = permit;
-        child_typed::<T>(bytes, path, DEADLINE, Some(mode)).await
+        child_typed::<T>(bytes, path, DEADLINE, args).await
     });
     task.await.map_err(|_| Rejected::Invalid)?
 }
@@ -334,7 +455,7 @@ pub async fn prepare_photo(bytes: Vec<u8>) -> Result<Prepared, Rejected> {
     let permit = decoder_slots()
         .try_acquire_owned()
         .map_err(|_| Rejected::Busy)?;
-    job(bytes, "--prepare", permit).await
+    job(bytes, &["--prepare"], permit).await
 }
 
 /// [`prepare_photo`] for a picture the **server** holds and a person is waiting on (ADR-0151 증보 8 W5,
@@ -351,7 +472,7 @@ pub async fn prepare_photo_waiting(bytes: Vec<u8>, wait: Duration) -> Result<Pre
         return Err(rejected);
     }
     let permit = permit_waiting(decoder_slots(), &Line::process_wide(), wait).await?;
-    job(bytes, "--prepare", permit).await
+    job(bytes, &["--prepare"], permit).await
 }
 
 /// How many codec child processes this process has started (ADR-0151 증보 8 WA7). A counter of the
@@ -376,12 +497,16 @@ static IN_PROCESS_CODEC_STARTS: std::sync::atomic::AtomicU64 = std::sync::atomic
 /// What an image model drew, as a cut-out ([`decode_cutout`], in the isolated child). The model
 /// call has been paid for by now, so a busy decoder is **waited for** (as an agent's candidates
 /// are, [`WAIT_MAX`]) instead of refused at once.
-pub async fn process_cutout(bytes: Vec<u8>, wait: Duration) -> Result<Cutout, Rejected> {
+pub async fn process_cutout(
+    bytes: Vec<u8>,
+    wait: Duration,
+    table: RenditionTable,
+) -> Result<Cutout, Rejected> {
     if bytes.len() > INPUT_BYTES {
         return Err(Rejected::TooLarge);
     }
     let permit = permit_waiting(decoder_slots(), &Line::process_wide(), wait).await?;
-    job(bytes, "--cutout", permit).await
+    job(bytes, table.child_args(true), permit).await
 }
 
 /// The pause between two asks for a decoder slot in [`permit_patiently`]. A full line is refused at
@@ -422,6 +547,7 @@ async fn permit_patiently(
 pub async fn process_cutout_patiently(
     bytes: Vec<u8>,
     patience: Duration,
+    table: RenditionTable,
 ) -> Result<Cutout, Rejected> {
     if bytes.len() > INPUT_BYTES {
         return Err(Rejected::TooLarge);
@@ -433,7 +559,7 @@ pub async fn process_cutout_patiently(
         ASK_AGAIN_AFTER,
     )
     .await?;
-    job(bytes, "--cutout", permit).await
+    job(bytes, table.child_args(true), permit).await
 }
 
 /// [`process_waiting`] with [`process_cutout_patiently`]'s patience: the ordinary picture path for a
@@ -441,6 +567,7 @@ pub async fn process_cutout_patiently(
 pub async fn process_waiting_patiently(
     bytes: Vec<u8>,
     patience: Duration,
+    table: RenditionTable,
 ) -> Result<Processed, Rejected> {
     if bytes.len() > INPUT_BYTES {
         return Err(Rejected::TooLarge);
@@ -455,7 +582,7 @@ pub async fn process_waiting_patiently(
         ASK_AGAIN_AFTER,
     )
     .await?;
-    run_with_permit(bytes, decoder_path()?, DEADLINE, permit).await
+    run_with_permit(bytes, decoder_path()?, DEADLINE, permit, table).await
 }
 
 struct TimedReader<'a> {
@@ -601,7 +728,7 @@ fn png(image: &image::RgbaImage, max: usize, end: Instant) -> Result<Rendition, 
 
 /// Container preflight for GIF: count ALL images and delays without allocating
 /// frames. Reject oversized subrects before the decoder allocates its buffer.
-fn gif_spec(b: &[u8]) -> Result<(u32, u32, u32, u32), Rejected> {
+fn gif_spec(b: &[u8], canvas: u32) -> Result<(u32, u32, u32, u32), Rejected> {
     let bad = || Rejected::Invalid;
     if b.len() < 13 {
         return Err(bad());
@@ -666,7 +793,7 @@ fn gif_spec(b: &[u8]) -> Result<(u32, u32, u32, u32), Rejected> {
                 ms = ms.checked_add(delay).ok_or_else(bad)?;
                 delay = 20;
                 if frames > 100
-                    || (frames > 1 && (w > 512 || h > 512 || ms > 10000))
+                    || (frames > 1 && (w > canvas || h > canvas || ms > 10000))
                     || u64::from(w) * u64::from(h) * u64::from(frames) > 32_000_000
                 {
                     return Err(bad());
@@ -711,7 +838,7 @@ fn dimensions(w: u32, h: u32) -> Result<(u32, u32), Rejected> {
 
 /// This runs BEFORE any codec constructor (some constructors allocate). In
 /// particular, image-webp checks VP8X/VP8 agreement only AFTER VP8 allocation.
-fn preflight(format: ImageFormat, b: &[u8]) -> Result<(u32, u32), Rejected> {
+fn preflight(format: ImageFormat, b: &[u8], canvas: u32) -> Result<(u32, u32), Rejected> {
     match format {
         ImageFormat::Png => {
             if b.len() < 33 || &b[12..16] != b"IHDR" {
@@ -835,7 +962,7 @@ fn preflight(format: ImageFormat, b: &[u8]) -> Result<(u32, u32), Rejected> {
             Ok(inner)
         }
         ImageFormat::Gif => {
-            let (w, h, _, _) = gif_spec(b)?;
+            let (w, h, _, _) = gif_spec(b, canvas)?;
             Ok((w, h))
         }
         _ => Err(Rejected::Invalid),
@@ -896,8 +1023,10 @@ enum Opened {
 }
 
 /// Every check that precedes a picture's pixels, then the pixels: the one place a still image is
-/// opened, whatever it is opened for. Bounds come first, animations are never collected.
-fn open(bytes: &[u8], end: Instant) -> Result<Opened, Rejected> {
+/// opened, whatever it is opened for. Bounds come first, animations are never collected. `canvas` is
+/// the widest moving canvas the caller's table admits ([`Sizes::motion_canvas`]); every other bound is
+/// the same for every caller.
+fn open(bytes: &[u8], end: Instant, canvas: u32) -> Result<Opened, Rejected> {
     if bytes.len() > INPUT_BYTES {
         return Err(Rejected::TooLarge);
     }
@@ -924,8 +1053,8 @@ fn open(bytes: &[u8], end: Instant) -> Result<Opened, Rejected> {
     if format == ImageFormat::Png {
         no_apng(bytes)?;
     }
-    let expected = preflight(format, bytes)?;
-    if format == ImageFormat::Gif && gif_spec(bytes)?.2 > 1 {
+    let expected = preflight(format, bytes, canvas)?;
+    if format == ImageFormat::Gif && gif_spec(bytes, canvas)?.2 > 1 {
         return Ok(Opened::Animated);
     }
     let input = || {
@@ -956,19 +1085,46 @@ fn open(bytes: &[u8], end: Instant) -> Result<Opened, Rejected> {
     Ok(Opened::Still(image, orientation))
 }
 
+/// The renditions of a picture at the old table: what the assembler and every test that reads the
+/// old sizes use. [`decode_with`] chooses the table.
 pub fn decode(bytes: &[u8], end: Instant) -> Result<Processed, Rejected> {
-    match open(bytes, end)? {
-        Opened::Animated => animated(bytes, end),
-        Opened::Still(image, _) => {
-            let small = png(&shrink(&image, 128), 256 * 1024, end)?;
-            let large = png(&shrink(&image, 512), 1024 * 1024, end)?;
-            Ok(Processed {
-                thumb: small.clone(),
-                small,
-                large,
-            })
-        }
+    decode_with(bytes, end, RenditionTable::Legacy)
+}
+
+/// The renditions of a picture at `table` (D3, ADR-0218 §20 Z1): a still gets `small`, `thumb` and
+/// `large`; a moving picture also gets `still` when the table makes one. Never larger than the input.
+pub fn decode_with(
+    bytes: &[u8],
+    end: Instant,
+    table: RenditionTable,
+) -> Result<Processed, Rejected> {
+    let sizes = table.sizes();
+    match open(bytes, end, sizes.motion_canvas)? {
+        Opened::Animated => animated(bytes, end, sizes),
+        Opened::Still(image, _) => still_renditions(&image, end, sizes),
     }
+}
+
+/// The three renditions of a still picture. At the old table `thumb` is `small` itself (the same
+/// edge and cap); at a table where they differ it is drawn on its own.
+fn still_renditions(
+    image: &DynamicImage,
+    end: Instant,
+    sizes: Sizes,
+) -> Result<Processed, Rejected> {
+    let small = png(&shrink(image, sizes.small_edge), sizes.small_bytes, end)?;
+    let thumb = if (sizes.thumb_edge, sizes.thumb_bytes) == (sizes.small_edge, sizes.small_bytes) {
+        small.clone()
+    } else {
+        png(&shrink(image, sizes.thumb_edge), sizes.thumb_bytes, end)?
+    };
+    let large = png(&shrink(image, sizes.large_edge), sizes.large_bytes, end)?;
+    Ok(Processed {
+        small,
+        large,
+        thumb,
+        still: None,
+    })
 }
 
 /// The longest side of a photo that is sent to an image model (ADR-0218 §8 H9): enough for a
@@ -1025,7 +1181,10 @@ mod wire_bytes {
 
 pub fn prepare(bytes: &[u8], end: Instant) -> Result<Prepared, Rejected> {
     // A moving picture is not a photo: it is refused here, not sampled.
-    let Opened::Still(mut image, orientation) = open(bytes, end)? else {
+    // A moving picture is refused whatever its canvas, so the old canvas is as good as any.
+    let Opened::Still(mut image, orientation) =
+        open(bytes, end, RenditionTable::Legacy.sizes().motion_canvas)?
+    else {
         return Err(Rejected::Invalid);
     };
     let has_alpha = image.color().has_alpha();
@@ -1076,7 +1235,18 @@ pub struct Cutout {
 }
 
 pub fn decode_cutout(bytes: &[u8], end: Instant) -> Result<Cutout, Rejected> {
-    let Opened::Still(image, _) = open(bytes, end)? else {
+    decode_cutout_with(bytes, end, RenditionTable::Legacy)
+}
+
+/// [`decode_cutout`] at `table`: the photo path's result is a picture the server encodes from bytes,
+/// so it is stored at the table every such picture is (ADR-0218 §20 Z2-4).
+pub fn decode_cutout_with(
+    bytes: &[u8],
+    end: Instant,
+    table: RenditionTable,
+) -> Result<Cutout, Rejected> {
+    let sizes = table.sizes();
+    let Opened::Still(image, _) = open(bytes, end, sizes.motion_canvas)? else {
         return Err(Rejected::Invalid);
     };
     // A picture a model drew is 1024 or 1536 px a side. A larger one is not worked on: it gets the
@@ -1088,27 +1258,21 @@ pub fn decode_cutout(bytes: &[u8], end: Instant) -> Result<Cutout, Rejected> {
             let cut = crate::cutout::cut_out(&image.to_rgba8());
             (DynamicImage::ImageRgba8(cut.image), cut.outcome)
         };
-    let small = png(&shrink(&image, 128), 256 * 1024, end)?;
-    let large = png(&shrink(&image, 512), 1024 * 1024, end)?;
     Ok(Cutout {
-        processed: Processed {
-            thumb: small.clone(),
-            small,
-            large,
-        },
+        processed: still_renditions(&image, end, sizes)?,
         outcome,
     })
 }
 
 /// The composited frames of a GIF, read with the same limits every time it is read.
-fn motion_frames(bytes: &[u8], end: Instant) -> Result<image::Frames<'_>, Rejected> {
+fn motion_frames(bytes: &[u8], end: Instant, canvas: u32) -> Result<image::Frames<'_>, Rejected> {
     let input = std::io::BufReader::new(TimedReader {
         input: Cursor::new(bytes),
         end,
     });
     let mut decoder = GifDecoder::new(input).map_err(|_| Rejected::Invalid)?;
     decoder
-        .set_limits(limits(512))
+        .set_limits(limits(canvas))
         .map_err(|_| Rejected::Invalid)?;
     Ok(decoder.into_frames())
 }
@@ -1121,34 +1285,44 @@ fn centiseconds(frame: &image::Frame) -> u16 {
 
 /// Two passes over the animation, neither holding more than one frame: the first learns the colours
 /// each size will use, the second writes the frames with them (#5455, see [`motion`]).
-fn animated(bytes: &[u8], end: Instant) -> Result<Processed, Rejected> {
-    let (_, _, count, ms) = gif_spec(bytes)?;
+/// The `thumb` (and, at a table that makes one, the `still`) is the **first composited frame**, the
+/// same frame for both (ADR-0218 §20 Z2-1).
+fn animated(bytes: &[u8], end: Instant, sizes: Sizes) -> Result<Processed, Rejected> {
+    let (_, _, count, ms) = gif_spec(bytes, sizes.motion_canvas)?;
     let (mut small_colors, mut large_colors) = (motion::Census::new(), motion::Census::new());
     let mut seen = 0;
-    for frame in motion_frames(bytes, end)? {
+    for frame in motion_frames(bytes, end, sizes.motion_canvas)? {
         check(end).map_err(|_| Rejected::Timeout)?;
         let image = DynamicImage::ImageRgba8(frame.map_err(|_| Rejected::Invalid)?.into_buffer());
-        small_colors.add(&shrink(&image, 128));
-        large_colors.add(&shrink(&image, 512));
+        small_colors.add(&shrink(&image, sizes.small_edge));
+        large_colors.add(&shrink(&image, sizes.large_edge));
         seen += 1;
     }
     if seen != count {
         return Err(Rejected::Invalid);
     }
-    let mut small = motion::Strip::new(output(256 * 1024, end), small_colors.finish())?;
-    let mut large = motion::Strip::new(output(1024 * 1024, end), large_colors.finish())?;
+    let mut small = motion::Strip::new(output(sizes.small_bytes, end), small_colors.finish())?;
+    let mut large = motion::Strip::new(output(sizes.large_bytes, end), large_colors.finish())?;
     let (small_wh, large_wh) = (small.size(), large.size());
     let mut thumb = None;
+    let mut still = None;
     let mut seen = 0;
-    for frame in motion_frames(bytes, end)? {
+    for frame in motion_frames(bytes, end, sizes.motion_canvas)? {
         check(end).map_err(|_| Rejected::Timeout)?;
         let frame = frame.map_err(|_| Rejected::Invalid)?;
         let delay = centiseconds(&frame);
         let image = DynamicImage::ImageRgba8(frame.into_buffer());
-        let s = shrink(&image, 128);
-        let l = shrink(&image, 512);
+        let s = shrink(&image, sizes.small_edge);
+        let l = shrink(&image, sizes.large_edge);
         if thumb.is_none() {
-            thumb = Some(png(&s, 256 * 1024, end)?);
+            thumb = Some(if sizes.thumb_edge == sizes.small_edge {
+                png(&s, sizes.thumb_bytes, end)?
+            } else {
+                png(&shrink(&image, sizes.thumb_edge), sizes.thumb_bytes, end)?
+            });
+            if sizes.still {
+                still = Some(png(&l, sizes.large_bytes, end)?);
+            }
         }
         small.push(&s, delay)?;
         large.push(&l, delay)?;
@@ -1175,6 +1349,7 @@ fn animated(bytes: &[u8], end: Instant) -> Result<Processed, Rejected> {
             ms,
         ),
         thumb: thumb.ok_or(Rejected::Invalid)?,
+        still,
     })
 }
 
@@ -1193,6 +1368,7 @@ mod tests {
                     std::path::PathBuf::from("/nonexistent-expression-decoder"),
                     DEADLINE,
                     sem.clone(),
+                    RenditionTable::Legacy,
                 ),
             )
             .await;
@@ -1244,6 +1420,7 @@ mod tests {
                 sem.clone(),
                 &line,
                 Duration::from_secs(40),
+                RenditionTable::Legacy,
             ),
         )
         .await;
@@ -1289,6 +1466,7 @@ mod tests {
                     sem,
                     &line(),
                     Duration::from_secs(5),
+                    RenditionTable::Legacy,
                 )
                 .await
             }));
@@ -1305,6 +1483,7 @@ mod tests {
                 sem.clone(),
                 &line(),
                 Duration::from_secs(5),
+                RenditionTable::Legacy,
             ),
         )
         .await;
@@ -1354,6 +1533,7 @@ mod tests {
                         longest: Duration::from_secs(30),
                     },
                     Duration::from_secs(30),
+                    RenditionTable::Legacy,
                 )
                 .await
             }
@@ -1389,7 +1569,7 @@ mod tests {
         let started = Instant::now();
         let outcome = tokio::time::timeout(
             Duration::from_secs(7),
-            process_waiting(vec![0; 8], Duration::from_secs(40)),
+            process_waiting(vec![0; 8], Duration::from_secs(40), RenditionTable::Legacy),
         )
         .await;
         let waited = started.elapsed();
@@ -1403,13 +1583,19 @@ mod tests {
         );
         // Two callers fill the line; the third is refused at once.
         let queued: Vec<_> = (0..2)
-            .map(|_| tokio::spawn(process_waiting(vec![0; 8], Duration::from_secs(40))))
+            .map(|_| {
+                tokio::spawn(process_waiting(
+                    vec![0; 8],
+                    Duration::from_secs(40),
+                    RenditionTable::Legacy,
+                ))
+            })
             .collect();
         until_standing(Line::process_wide().standing, 2).await;
         let started = Instant::now();
         let third = tokio::time::timeout(
             Duration::from_millis(500),
-            process_waiting(vec![0; 8], Duration::from_secs(40)),
+            process_waiting(vec![0; 8], Duration::from_secs(40), RenditionTable::Legacy),
         )
         .await;
         assert!(
@@ -1479,6 +1665,7 @@ mod tests {
                     std::path::PathBuf::from(NO_DECODER),
                     DEADLINE,
                     sem.clone(),
+                    RenditionTable::Legacy,
                 ),
             )
             .await;
@@ -1496,6 +1683,7 @@ mod tests {
                     sem.clone(),
                     &no_room(),
                     Duration::from_secs(40),
+                    RenditionTable::Legacy,
                 ),
             )
             .await;
@@ -1514,6 +1702,7 @@ mod tests {
                 std::path::PathBuf::from(NO_DECODER),
                 DEADLINE,
                 sem.clone(),
+                RenditionTable::Legacy,
             ),
         )
         .await;
@@ -1527,6 +1716,7 @@ mod tests {
                 sem.clone(),
                 &no_room(),
                 Duration::from_secs(40),
+                RenditionTable::Legacy,
             ),
         )
         .await;
@@ -1582,6 +1772,7 @@ mod tests {
                 p,
                 Duration::from_secs(1),
                 s,
+                RenditionTable::Legacy,
             )));
         }
         tokio::time::timeout(Duration::from_secs(5), async {
@@ -1652,6 +1843,143 @@ mod tests {
             Err(Rejected::Invalid)
         ));
         std::fs::remove_file(path).unwrap();
+    }
+
+    /// #6071: the four renditions of the §20 table at their byte caps (4.75 MiB) come back through the
+    /// child's stdout. As a JSON array of numbers they would be about 19 MiB, past the 8 MiB the parent
+    /// reads, and a valid moving picture would end as `Invalid`.
+    #[test]
+    fn the_largest_wide_picture_fits_what_the_parent_reads_back() {
+        let sizes = RenditionTable::Wide.sizes();
+        let full = |bytes: usize| rendition(vec![0xFF; bytes], "image/png", 1, 1, 1, 0);
+        let worst = Processed {
+            small: full(sizes.small_bytes),
+            thumb: full(sizes.thumb_bytes),
+            large: full(sizes.large_bytes),
+            still: Some(full(sizes.large_bytes)),
+        };
+        let wire = serde_json::to_vec(&Ok::<Processed, Rejected>(worst.clone())).unwrap();
+        assert!(
+            wire.len() <= CHILD_OUTPUT_MAX,
+            "{} bytes of answer, the parent reads {CHILD_OUTPUT_MAX}",
+            wire.len()
+        );
+        let back: Result<Processed, Rejected> = serde_json::from_slice(&wire).unwrap();
+        let back = back.unwrap();
+        assert!(
+            back.large.data == worst.large.data && back.still.unwrap().data == worst.large.data
+        );
+        // An answer from before this field (no `still`) still reads.
+        let mut old = serde_json::to_value(Ok::<Processed, Rejected>(Processed {
+            still: None,
+            ..worst
+        }))
+        .unwrap();
+        assert!(old["Ok"].get("still").is_none(), "no still, no key");
+        old["Ok"].as_object_mut().unwrap().remove("still");
+        let back: Result<Processed, Rejected> = serde_json::from_value(old).unwrap();
+        assert!(back.unwrap().still.is_none());
+    }
+
+    /// The tables are the shared vectors (`docs/api/expression-rendition-table.vectors.json`), which the
+    /// core's reader bounds are checked against too: the server cannot start storing a size the readers
+    /// it was turned on for refuse, without one of the two tests going red.
+    #[test]
+    fn the_tables_are_the_shared_vectors_the_readers_are_checked_against() {
+        let path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../../docs/api/expression-rendition-table.vectors.json"
+        );
+        let vectors: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(path).expect("the shared vectors"))
+                .expect("vectors are JSON");
+        for (name, table) in [
+            ("legacy", RenditionTable::Legacy),
+            ("wide", RenditionTable::Wide),
+        ] {
+            let v = &vectors[name];
+            let s = table.sizes();
+            let pair = |key: &str| (v[key]["edge"].as_u64(), v[key]["bytes"].as_u64());
+            let ours = |edge: u32, bytes: usize| (Some(u64::from(edge)), Some(bytes as u64));
+            assert_eq!(
+                pair("small"),
+                ours(s.small_edge, s.small_bytes),
+                "{name} small"
+            );
+            assert_eq!(
+                pair("thumb"),
+                ours(s.thumb_edge, s.thumb_bytes),
+                "{name} thumb"
+            );
+            assert_eq!(
+                pair("large"),
+                ours(s.large_edge, s.large_bytes),
+                "{name} large"
+            );
+            if s.still {
+                assert_eq!(
+                    pair("still"),
+                    ours(s.large_edge, s.large_bytes),
+                    "{name} still"
+                );
+            } else {
+                assert!(v["still"].is_null(), "{name} still");
+            }
+            assert_eq!(v["motionCanvas"].as_u64(), Some(u64::from(s.motion_canvas)));
+            let worst = &vectors["worstBytes"][name];
+            assert_eq!(worst["still"].as_u64(), Some(s.worst_bytes(false) as u64));
+            assert_eq!(worst["moving"].as_u64(), Some(s.worst_bytes(true) as u64));
+        }
+    }
+
+    /// ZA11 · ZA6: the worst stored bytes of one picture are the sum of the caps (Z4), and the table
+    /// moves only the rendition caps and the canvas — the decoder's own limits are one set of
+    /// constants that neither table names.
+    #[test]
+    fn the_tables_worst_bytes_are_the_sum_of_their_caps() {
+        const MIB: usize = 1024 * 1024;
+        let wide = RenditionTable::Wide.sizes();
+        assert_eq!(wide.worst_bytes(false) * 4, 11 * MIB, "a still: 2.75 MiB");
+        assert_eq!(
+            wide.worst_bytes(true) * 4,
+            19 * MIB,
+            "a moving picture: 4.75 MiB"
+        );
+        let old = RenditionTable::Legacy.sizes();
+        assert_eq!(old.worst_bytes(false) * 2, 3 * MIB, "1.5 MiB, as D2 said");
+        assert_eq!(
+            old.worst_bytes(true),
+            old.worst_bytes(false),
+            "no still at the old table"
+        );
+        assert_eq!(
+            (ALLOCATION_LIMIT, DEADLINE),
+            (192 * MIB as u64, Duration::from_secs(10))
+        );
+        assert_eq!(RenditionTable::default(), RenditionTable::Legacy);
+        assert_eq!(
+            RenditionTable::from_setting(None),
+            Some(RenditionTable::Legacy)
+        );
+        assert_eq!(
+            RenditionTable::from_setting(Some(" ")),
+            Some(RenditionTable::Legacy)
+        );
+        assert_eq!(
+            RenditionTable::from_setting(Some("512")),
+            Some(RenditionTable::Legacy)
+        );
+        assert_eq!(
+            RenditionTable::from_setting(Some("768")),
+            Some(RenditionTable::Wide)
+        );
+        for unreadable in ["wide", "1", "true", "7680", "768px"] {
+            assert_eq!(
+                RenditionTable::from_setting(Some(unreadable)),
+                None,
+                "{unreadable}"
+            );
+        }
     }
 
     /// What the child writes for a prepared photo, the way it writes it (`main.rs`).

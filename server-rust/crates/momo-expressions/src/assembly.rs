@@ -372,6 +372,8 @@ pub async fn get_in_tx(
                 small,
                 large,
                 thumb,
+                // Held assemblies are made at the old table and have no stopped frame (§20 Z2-4).
+                still: None,
             },
         });
     }

@@ -568,15 +568,19 @@ async fn fill_in_tx(
     }))
 }
 
+/// A set slot holds the old table's three renditions and never a `still` (ADR-0218 §20 Z2-4): the set
+/// store's CHECKs are 158's old ones, and its budget (L4) counts three.
 fn is_still(media: &Processed) -> bool {
-    media
-        .variants()
-        .iter()
-        .all(|(_, r)| r.info.mime == "image/png" && r.info.frame_count == 1)
+    media.still.is_none()
+        && media
+            .variants()
+            .iter()
+            .all(|(_, r)| r.info.mime == "image/png" && r.info.frame_count == 1)
 }
 
 fn is_gif(media: &Processed) -> bool {
-    media.large.info.mime == "image/gif"
+    media.still.is_none()
+        && media.large.info.mime == "image/gif"
         && media.small.info.mime == "image/gif"
         && media.thumb.info.mime == "image/png"
 }

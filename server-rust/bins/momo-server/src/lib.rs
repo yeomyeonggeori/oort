@@ -405,6 +405,11 @@ pub struct AppState {
     /// the helper cannot hand work to Hermes now. The agent-worker enforces with its own copy; the templates
     /// keep the two equal. Default: nothing declared — the screen reads `tools_not_locked` (closed).
     pub team_ai_hermes: momo_workspace_actions::team_ai_hermes::HermesDeclarations,
+    /// ADR-0218 §20 (#6071) — the size table this api stores a picture at when it encodes one from its
+    /// input bytes (`EXPRESSION_RENDITION_TABLE`). Default: the old table, so a deployment that sets
+    /// nothing stores exactly what every client reads. The operator turns on the §20 table only after the
+    /// team's apps can read it (Z2-7); the agent-worker reads the same variable for its own path.
+    pub expression_rendition_table: momo_expressions::media::RenditionTable,
 }
 
 impl AppState {
@@ -486,7 +491,18 @@ impl AppState {
             )),
             team_ai_caps: momo_workspace_actions::team_ai_limits::OperatorCaps::default(),
             team_ai_hermes: momo_workspace_actions::team_ai_hermes::HermesDeclarations::default(),
+            expression_rendition_table: momo_expressions::media::RenditionTable::Legacy,
         }
+    }
+
+    /// ADR-0218 §20 (#6071) — the size table pictures are stored at (`main.rs` from the env, a test
+    /// with an explicit value). Never read from the process environment here: a test must not set one.
+    pub fn with_expression_rendition_table(
+        mut self,
+        table: momo_expressions::media::RenditionTable,
+    ) -> Self {
+        self.expression_rendition_table = table;
+        self
     }
 
     /// ADR-0201 증보 v4 P8 (#5374) — attach the operator's delegation declarations (`main.rs` from the env,
