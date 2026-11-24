@@ -2624,8 +2624,8 @@ function MessageRowInner({
   // 같은 꼬리에 「쓴 앱」 줄(E8·E10, #3950)이 붙는다: 보고가 있는 에이전트 답에만.
   const appsTail = useAppsTailContext(message, directory, actions?.workspaceId);
   const teamAiReply = useMemo(
-    () => teamAiReplyMetaFor(message, appsTail, authorKind),
-    [message, appsTail, authorKind],
+    () => teamAiReplyMetaFor(formatMessage, message, appsTail, authorKind),
+    [formatMessage, message, appsTail, authorKind],
   );
   // 앱을 쓰다 막혔을 때의 한 문장(+ 행동 하나). 칸이 없으면 null.
   const appNotice = useAppNotice(message, actions?.workspaceId, nowMs, formatMessage);
@@ -3171,7 +3171,7 @@ function MessageRowInner({
       });
     });
     // 도우미 답의 웹 출처(ADR-0201 v2 H5). 꼬리의 링크와 같은 `openLink` 로 연다.
-    if (!deleted) list.push(...teamAiCitationActions(teamAiReply));
+    if (!deleted) list.push(...teamAiCitationActions(formatMessage, teamAiReply));
     // 막힘 문장의 행동(웹에서 열기). 손가락은 문장 옆 링크를 누른다.
     if (!deleted && appNotice?.action && appNoticeWebUrl !== null) {
       list.push({name: APP_NOTICE_ACTION_NAME, label: appNotice.action.label});
@@ -3371,7 +3371,7 @@ function MessageRowInner({
         // 앱을 쓰다 막힌 문장, 그리고 도우미 답의 꼬리(쓴 앱 · 찾아본 것 · 모델 라벨 · 출처 수).
         ...appNoticeSpoken(appNotice),
         ...(githubNotice !== null && !deleted ? [githubNoticeLabel(githubNotice)] : []),
-        ...teamAiReplySpoken(teamAiReply),
+        ...teamAiReplySpoken(formatMessage, teamAiReply),
         // 링크 카드(#4883): 「링크 미리보기: 제목, 도메인」(동영상이면 「, 동영상」). 행이 원소 하나라 귀에는 여기로만 닿는다.
         ...unfurlSpoken,
       ].join(', ')}

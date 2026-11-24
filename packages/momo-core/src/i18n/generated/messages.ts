@@ -2179,6 +2179,45 @@ export const messageKeys = [
   "timeline.teamAi.reasonOverBudget",
   "timeline.teamAi.reasonRateLimited",
   "timeline.teamAi.reasonSlow",
+  "timeline.teamAiReply.appItem",
+  "timeline.teamAiReply.appItemVerb",
+  "timeline.teamAiReply.appsLine",
+  "timeline.teamAiReply.appsSpoken",
+  "timeline.teamAiReply.citationOpenHost",
+  "timeline.teamAiReply.citationOpenTitled",
+  "timeline.teamAiReply.connected",
+  "timeline.teamAiReply.connectedMore",
+  "timeline.teamAiReply.detailsClose",
+  "timeline.teamAiReply.detailsOpen",
+  "timeline.teamAiReply.exposure",
+  "timeline.teamAiReply.modelChip",
+  "timeline.teamAiReply.onBehalfOf",
+  "timeline.teamAiReply.otherApp",
+  "timeline.teamAiReply.personalNote",
+  "timeline.teamAiReply.ranOn",
+  "timeline.teamAiReply.selfReport",
+  "timeline.teamAiReply.siteHermes",
+  "timeline.teamAiReply.siteMac",
+  "timeline.teamAiReply.sourceOpen",
+  "timeline.teamAiReply.sourcesCount",
+  "timeline.teamAiReply.sourcesLabel",
+  "timeline.teamAiReply.toolGetAgentRun",
+  "timeline.teamAiReply.toolListAgentRuns",
+  "timeline.teamAiReply.toolListMembers",
+  "timeline.teamAiReply.toolListPlugins",
+  "timeline.teamAiReply.toolReadChannel",
+  "timeline.teamAiReply.toolReadChannelNamed",
+  "timeline.teamAiReply.toolReadThread",
+  "timeline.teamAiReply.toolReadWorkspaceSettings",
+  "timeline.teamAiReply.toolSearchMessages",
+  "timeline.teamAiReply.toolsLine",
+  "timeline.teamAiReply.toolsLineMore",
+  "timeline.teamAiReply.toolWebSearch",
+  "timeline.teamAiReply.verbCreate",
+  "timeline.teamAiReply.verbList",
+  "timeline.teamAiReply.verbRead",
+  "timeline.teamAiReply.verbSearch",
+  "timeline.teamAiReply.verbUpdate",
   "timeline.thread.followDismiss",
   "timeline.thread.followFailed",
   "timeline.thread.followHint",
@@ -5243,6 +5282,86 @@ export const argumentSpecs = {
   "timeline.teamAi.reasonOverBudget": {},
   "timeline.teamAi.reasonRateLimited": {},
   "timeline.teamAi.reasonSlow": {},
+  "timeline.teamAiReply.appItem": {
+    "calls": "number",
+    "name": "string"
+  },
+  "timeline.teamAiReply.appItemVerb": {
+    "calls": "number",
+    "name": "string",
+    "verb": "string"
+  },
+  "timeline.teamAiReply.appsLine": {
+    "parts": "string"
+  },
+  "timeline.teamAiReply.appsSpoken": {
+    "parts": "string"
+  },
+  "timeline.teamAiReply.citationOpenHost": {
+    "host": "string"
+  },
+  "timeline.teamAiReply.citationOpenTitled": {
+    "host": "string",
+    "title": "string"
+  },
+  "timeline.teamAiReply.connected": {
+    "domains": "string"
+  },
+  "timeline.teamAiReply.connectedMore": {
+    "domains": "string",
+    "rest": "number"
+  },
+  "timeline.teamAiReply.detailsClose": {},
+  "timeline.teamAiReply.detailsOpen": {},
+  "timeline.teamAiReply.exposure": {
+    "count": "number"
+  },
+  "timeline.teamAiReply.modelChip": {
+    "model": "string"
+  },
+  "timeline.teamAiReply.onBehalfOf": {
+    "owner": "string"
+  },
+  "timeline.teamAiReply.otherApp": {},
+  "timeline.teamAiReply.personalNote": {},
+  "timeline.teamAiReply.ranOn": {
+    "site": "string"
+  },
+  "timeline.teamAiReply.selfReport": {},
+  "timeline.teamAiReply.siteHermes": {},
+  "timeline.teamAiReply.siteMac": {},
+  "timeline.teamAiReply.sourceOpen": {
+    "index": "number",
+    "title": "string"
+  },
+  "timeline.teamAiReply.sourcesCount": {
+    "count": "number"
+  },
+  "timeline.teamAiReply.sourcesLabel": {},
+  "timeline.teamAiReply.toolGetAgentRun": {},
+  "timeline.teamAiReply.toolListAgentRuns": {},
+  "timeline.teamAiReply.toolListMembers": {},
+  "timeline.teamAiReply.toolListPlugins": {},
+  "timeline.teamAiReply.toolReadChannel": {},
+  "timeline.teamAiReply.toolReadChannelNamed": {
+    "channel": "string"
+  },
+  "timeline.teamAiReply.toolReadThread": {},
+  "timeline.teamAiReply.toolReadWorkspaceSettings": {},
+  "timeline.teamAiReply.toolSearchMessages": {},
+  "timeline.teamAiReply.toolsLine": {
+    "tools": "string"
+  },
+  "timeline.teamAiReply.toolsLineMore": {
+    "rest": "number",
+    "tools": "string"
+  },
+  "timeline.teamAiReply.toolWebSearch": {},
+  "timeline.teamAiReply.verbCreate": {},
+  "timeline.teamAiReply.verbList": {},
+  "timeline.teamAiReply.verbRead": {},
+  "timeline.teamAiReply.verbSearch": {},
+  "timeline.teamAiReply.verbUpdate": {},
   "timeline.thread.followDismiss": {},
   "timeline.thread.followFailed": {},
   "timeline.thread.followHint": {},
@@ -7700,6 +7819,45 @@ export interface MessageArgs {
   "timeline.teamAi.reasonOverBudget": Record<string, never>;
   "timeline.teamAi.reasonRateLimited": Record<string, never>;
   "timeline.teamAi.reasonSlow": Record<string, never>;
+  "timeline.teamAiReply.appItem": { calls: number; name: string };
+  "timeline.teamAiReply.appItemVerb": { calls: number; name: string; verb: string };
+  "timeline.teamAiReply.appsLine": { parts: string };
+  "timeline.teamAiReply.appsSpoken": { parts: string };
+  "timeline.teamAiReply.citationOpenHost": { host: string };
+  "timeline.teamAiReply.citationOpenTitled": { host: string; title: string };
+  "timeline.teamAiReply.connected": { domains: string };
+  "timeline.teamAiReply.connectedMore": { domains: string; rest: number };
+  "timeline.teamAiReply.detailsClose": Record<string, never>;
+  "timeline.teamAiReply.detailsOpen": Record<string, never>;
+  "timeline.teamAiReply.exposure": { count: number };
+  "timeline.teamAiReply.modelChip": { model: string };
+  "timeline.teamAiReply.onBehalfOf": { owner: string };
+  "timeline.teamAiReply.otherApp": Record<string, never>;
+  "timeline.teamAiReply.personalNote": Record<string, never>;
+  "timeline.teamAiReply.ranOn": { site: string };
+  "timeline.teamAiReply.selfReport": Record<string, never>;
+  "timeline.teamAiReply.siteHermes": Record<string, never>;
+  "timeline.teamAiReply.siteMac": Record<string, never>;
+  "timeline.teamAiReply.sourceOpen": { index: number; title: string };
+  "timeline.teamAiReply.sourcesCount": { count: number };
+  "timeline.teamAiReply.sourcesLabel": Record<string, never>;
+  "timeline.teamAiReply.toolGetAgentRun": Record<string, never>;
+  "timeline.teamAiReply.toolListAgentRuns": Record<string, never>;
+  "timeline.teamAiReply.toolListMembers": Record<string, never>;
+  "timeline.teamAiReply.toolListPlugins": Record<string, never>;
+  "timeline.teamAiReply.toolReadChannel": Record<string, never>;
+  "timeline.teamAiReply.toolReadChannelNamed": { channel: string };
+  "timeline.teamAiReply.toolReadThread": Record<string, never>;
+  "timeline.teamAiReply.toolReadWorkspaceSettings": Record<string, never>;
+  "timeline.teamAiReply.toolSearchMessages": Record<string, never>;
+  "timeline.teamAiReply.toolsLine": { tools: string };
+  "timeline.teamAiReply.toolsLineMore": { rest: number; tools: string };
+  "timeline.teamAiReply.toolWebSearch": Record<string, never>;
+  "timeline.teamAiReply.verbCreate": Record<string, never>;
+  "timeline.teamAiReply.verbList": Record<string, never>;
+  "timeline.teamAiReply.verbRead": Record<string, never>;
+  "timeline.teamAiReply.verbSearch": Record<string, never>;
+  "timeline.teamAiReply.verbUpdate": Record<string, never>;
   "timeline.thread.followDismiss": Record<string, never>;
   "timeline.thread.followFailed": Record<string, never>;
   "timeline.thread.followHint": Record<string, never>;

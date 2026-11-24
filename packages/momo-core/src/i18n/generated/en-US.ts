@@ -16712,6 +16712,429 @@ export const catalog: MessageCatalog = {
       "value": "The helper didn't answer in time"
     }
   ],
+  "timeline.teamAiReply.appItem": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " ×"
+    },
+    {
+      "type": 2,
+      "value": "calls",
+      "style": null
+    }
+  ],
+  "timeline.teamAiReply.appItemVerb": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 1,
+      "value": "verb"
+    },
+    {
+      "type": 0,
+      "value": " ×"
+    },
+    {
+      "type": 2,
+      "value": "calls",
+      "style": null
+    }
+  ],
+  "timeline.teamAiReply.appsLine": [
+    {
+      "type": 0,
+      "value": "Apps used: "
+    },
+    {
+      "type": 1,
+      "value": "parts"
+    }
+  ],
+  "timeline.teamAiReply.appsSpoken": [
+    {
+      "type": 0,
+      "value": "Apps used, "
+    },
+    {
+      "type": 1,
+      "value": "parts"
+    }
+  ],
+  "timeline.teamAiReply.citationOpenHost": [
+    {
+      "type": 1,
+      "value": "host"
+    },
+    {
+      "type": 0,
+      "value": ", opens in a new window"
+    }
+  ],
+  "timeline.teamAiReply.citationOpenTitled": [
+    {
+      "type": 1,
+      "value": "title"
+    },
+    {
+      "type": 0,
+      "value": ", "
+    },
+    {
+      "type": 1,
+      "value": "host"
+    },
+    {
+      "type": 0,
+      "value": ", opens in a new window"
+    }
+  ],
+  "timeline.teamAiReply.connected": [
+    {
+      "type": 0,
+      "value": "Connected: "
+    },
+    {
+      "type": 1,
+      "value": "domains"
+    }
+  ],
+  "timeline.teamAiReply.connectedMore": [
+    {
+      "type": 0,
+      "value": "Connected: "
+    },
+    {
+      "type": 1,
+      "value": "domains"
+    },
+    {
+      "type": 0,
+      "value": " and "
+    },
+    {
+      "type": 2,
+      "value": "rest",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": " more"
+    }
+  ],
+  "timeline.teamAiReply.detailsClose": [
+    {
+      "type": 0,
+      "value": "Hide"
+    }
+  ],
+  "timeline.teamAiReply.detailsOpen": [
+    {
+      "type": 0,
+      "value": "Details"
+    }
+  ],
+  "timeline.teamAiReply.exposure": [
+    {
+      "type": 0,
+      "value": "Visible to "
+    },
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " person"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " people"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    },
+    {
+      "type": 0,
+      "value": " in this channel"
+    }
+  ],
+  "timeline.teamAiReply.modelChip": [
+    {
+      "type": 0,
+      "value": "Team AI · "
+    },
+    {
+      "type": 1,
+      "value": "model"
+    }
+  ],
+  "timeline.teamAiReply.onBehalfOf": [
+    {
+      "type": 0,
+      "value": "Used on behalf of "
+    },
+    {
+      "type": 1,
+      "value": "owner"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "timeline.teamAiReply.otherApp": [
+    {
+      "type": 0,
+      "value": "Another app"
+    }
+  ],
+  "timeline.teamAiReply.personalNote": [
+    {
+      "type": 0,
+      "value": "Personal apps should only post summaries. oort can't verify that."
+    }
+  ],
+  "timeline.teamAiReply.ranOn": [
+    {
+      "type": 0,
+      "value": "Ran on "
+    },
+    {
+      "type": 1,
+      "value": "site"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "timeline.teamAiReply.selfReport": [
+    {
+      "type": 0,
+      "value": "Apps and counts are as the agent reported them. oort can't verify them."
+    }
+  ],
+  "timeline.teamAiReply.siteHermes": [
+    {
+      "type": 0,
+      "value": "Hermes"
+    }
+  ],
+  "timeline.teamAiReply.siteMac": [
+    {
+      "type": 0,
+      "value": "your Mac"
+    }
+  ],
+  "timeline.teamAiReply.sourceOpen": [
+    {
+      "type": 0,
+      "value": "Open source "
+    },
+    {
+      "type": 2,
+      "value": "index",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": ", "
+    },
+    {
+      "type": 1,
+      "value": "title"
+    }
+  ],
+  "timeline.teamAiReply.sourcesCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " source"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " sources"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "timeline.teamAiReply.sourcesLabel": [
+    {
+      "type": 0,
+      "value": "Sources"
+    }
+  ],
+  "timeline.teamAiReply.toolGetAgentRun": [
+    {
+      "type": 0,
+      "value": "View work steps"
+    }
+  ],
+  "timeline.teamAiReply.toolListAgentRuns": [
+    {
+      "type": 0,
+      "value": "Agent work history"
+    }
+  ],
+  "timeline.teamAiReply.toolListMembers": [
+    {
+      "type": 0,
+      "value": "Member list"
+    }
+  ],
+  "timeline.teamAiReply.toolListPlugins": [
+    {
+      "type": 0,
+      "value": "App list"
+    }
+  ],
+  "timeline.teamAiReply.toolReadChannel": [
+    {
+      "type": 0,
+      "value": "Read channel"
+    }
+  ],
+  "timeline.teamAiReply.toolReadChannelNamed": [
+    {
+      "type": 0,
+      "value": "Read #"
+    },
+    {
+      "type": 1,
+      "value": "channel"
+    }
+  ],
+  "timeline.teamAiReply.toolReadThread": [
+    {
+      "type": 0,
+      "value": "Read thread"
+    }
+  ],
+  "timeline.teamAiReply.toolReadWorkspaceSettings": [
+    {
+      "type": 0,
+      "value": "Workspace settings"
+    }
+  ],
+  "timeline.teamAiReply.toolSearchMessages": [
+    {
+      "type": 0,
+      "value": "Search messages"
+    }
+  ],
+  "timeline.teamAiReply.toolsLine": [
+    {
+      "type": 0,
+      "value": "Looked up: "
+    },
+    {
+      "type": 1,
+      "value": "tools"
+    }
+  ],
+  "timeline.teamAiReply.toolsLineMore": [
+    {
+      "type": 0,
+      "value": "Looked up: "
+    },
+    {
+      "type": 1,
+      "value": "tools"
+    },
+    {
+      "type": 0,
+      "value": " and "
+    },
+    {
+      "type": 2,
+      "value": "rest",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": " more"
+    }
+  ],
+  "timeline.teamAiReply.toolWebSearch": [
+    {
+      "type": 0,
+      "value": "Web search"
+    }
+  ],
+  "timeline.teamAiReply.verbCreate": [
+    {
+      "type": 0,
+      "value": "create"
+    }
+  ],
+  "timeline.teamAiReply.verbList": [
+    {
+      "type": 0,
+      "value": "list"
+    }
+  ],
+  "timeline.teamAiReply.verbRead": [
+    {
+      "type": 0,
+      "value": "read"
+    }
+  ],
+  "timeline.teamAiReply.verbSearch": [
+    {
+      "type": 0,
+      "value": "search"
+    }
+  ],
+  "timeline.teamAiReply.verbUpdate": [
+    {
+      "type": 0,
+      "value": "update"
+    }
+  ],
   "timeline.thread.followDismiss": [
     {
       "type": 0,

@@ -566,8 +566,8 @@ export function MessageRow({
   // 같은 꼬리에 「쓴 앱」 줄(E8·E10, #3950)이 붙는다: 보고가 있는 에이전트 답에만.
   const appsTail = useAppsTailContext(message, directory);
   const teamAiReply = useMemo(
-    () => teamAiReplyMetaFor(message, appsTail, authorKind),
-    [message, appsTail, authorKind]
+    () => teamAiReplyMetaFor(formatMessage, message, appsTail, authorKind),
+    [formatMessage, message, appsTail, authorKind]
   );
   // Hermes에 맡겨 끝낸 답(서버 소유 칩 칸, ADR-0201 v4 P8 · #5375): 칩·쓴 양 줄·그림 자리. 칸이 없으면 null.
   const delegatedAnswer = useMemo(() => teamAiDelegatedAnswerOf(message, authorKind), [message, authorKind]);

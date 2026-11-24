@@ -1,15 +1,17 @@
 import React, {useState} from 'react';
 import {Pressable, StyleSheet, Text, View} from 'react-native';
 import type {AppNotice} from '@momo/core/features/timeline/appNotice';
+import type {LocaleService} from '@momo/core/i18n';
 import {
-  APPS_DETAIL_TOGGLE,
-  TEAM_AI_SOURCES_LABEL,
+  APPS_DETAIL_TOGGLE_KEY,
+  TEAM_AI_SOURCES_LABEL_KEY,
   type TeamAiReplyMeta as Meta,
 } from '@momo/core/features/timeline/teamAiReply';
 import {font, line, PRESSED_OPACITY, radius, slopTo, space, TOUCH_TARGET, type Palette} from '../../design/tokens';
 import {Sentence} from '../../design/atoms';
 import {useStyles} from '../../design/theme';
 import {openLink} from './MessageBody';
+import {useFormatMessage} from '../../i18n/useFormatMessage';
 
 // =============================================================================
 // 도우미 답 아래의 꼬리 — 폰 (ADR-0201 증보 v2 H4·H5·H9-I9, #3893).
@@ -30,6 +32,7 @@ const DETAIL_HIT_SLOP = {top: DETAIL_SLOP, bottom: DETAIL_SLOP, left: space.sm, 
 export const TEAM_AI_CITATION_ACTION_PREFIX = 'momoCitation:';
 
 export function TeamAiReplyMeta({meta}: {meta: Meta}): React.JSX.Element {
+  const formatMessage = useFormatMessage();
   const styles = useStyles(build);
   const [detailsOpen, setDetailsOpen] = useState(false);
   return (
@@ -48,7 +51,7 @@ export function TeamAiReplyMeta({meta}: {meta: Meta}): React.JSX.Element {
               <Text testID="apps-used-line">{meta.appsLine}</Text>
               {' '}
               <Text style={styles.detailToggle}>
-                {detailsOpen ? APPS_DETAIL_TOGGLE.close : APPS_DETAIL_TOGGLE.open}
+                {formatMessage(detailsOpen ? APPS_DETAIL_TOGGLE_KEY.close : APPS_DETAIL_TOGGLE_KEY.open)}
               </Text>
             </Sentence>
           </Pressable>
@@ -79,7 +82,7 @@ export function TeamAiReplyMeta({meta}: {meta: Meta}): React.JSX.Element {
       ) : null}
       {meta.citations.length > 0 ? (
         <View style={styles.sources} testID="team-ai-citations">
-          <Text style={styles.meta}>{TEAM_AI_SOURCES_LABEL}</Text>
+          <Text style={styles.meta}>{formatMessage(TEAM_AI_SOURCES_LABEL_KEY)}</Text>
           {meta.citations.map((item, index) => (
             <Pressable
               key={item.url}
@@ -105,26 +108,30 @@ export function TeamAiReplyMeta({meta}: {meta: Meta}): React.JSX.Element {
 }
 
 /** 행의 낭독 라벨 뒤에 붙일 꼬리 문장. 보인 것과 같은 사실을 같은 순서로(접은 줄은 펴서). */
-export function teamAiReplySpoken(meta: Meta | null): string[] {
+export function teamAiReplySpoken(
+  formatMessage: LocaleService['formatMessage'],
+  meta: Meta | null,
+): string[] {
   if (meta === null) return [];
   const parts: string[] = [];
   if (meta.appsSpoken !== null) parts.push(meta.appsSpoken);
   if (meta.toolsSpoken !== null) parts.push(meta.toolsSpoken);
   if (meta.modelChip !== null) parts.push(meta.modelChip);
   if (meta.citations.length > 0) {
-    parts.push(`${TEAM_AI_SOURCES_LABEL} ${meta.citations.length}개`);
+    parts.push(formatMessage('timeline.teamAiReply.sourcesCount', {count: meta.citations.length}));
   }
   return parts;
 }
 
 /** 로터에 세울 출처 열기 행동들. */
 export function teamAiCitationActions(
+  formatMessage: LocaleService['formatMessage'],
   meta: Meta | null,
 ): {name: string; label: string}[] {
   if (meta === null) return [];
   return meta.citations.map((item, index) => ({
     name: `${TEAM_AI_CITATION_ACTION_PREFIX}${index}`,
-    label: `${TEAM_AI_SOURCES_LABEL} ${index + 1} 열기, ${item.title}`,
+    label: formatMessage('timeline.teamAiReply.sourceOpen', {index: index + 1, title: item.title}),
   }));
 }
 

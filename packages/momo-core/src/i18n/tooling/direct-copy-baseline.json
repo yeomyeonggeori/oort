@@ -660,6 +660,7 @@
   "lowered": {
     "clients/mobile/src/features/conversation/ConversationInfoPage.tsx": {"ko": 11, "en": 0},
     "clients/mobile/src/features/conversation/ConversationMenuSheet.tsx": {"ko": 5, "en": 0},
+    "clients/mobile/src/features/conversation/TeamAiReplyMeta.tsx": {"ko": 0, "en": 0},
     "clients/mobile/src/features/sidebar/ChannelActionSheet.tsx": {"ko": 2, "en": 0},
     "clients/mobile/src/shell/NewChannelSheet.tsx": {"ko": 11, "en": 0},
     "clients/web/src/features/channels/ChannelContextControls.tsx": {"ko": 19, "en": 0},
@@ -728,6 +729,7 @@
     "packages/momo-core/src/features/timeline/spawnHostChoice.ts": {"ko": 0, "en": 0},
     "packages/momo-core/src/features/timeline/streamStop.ts": {"ko": 0, "en": 0},
     "packages/momo-core/src/features/timeline/teamAi.ts": {"ko": 0, "en": 0},
+    "packages/momo-core/src/features/timeline/teamAiReply.ts": {"ko": 0, "en": 0},
     "packages/momo-core/src/features/work/workSessionModel.ts": {"ko": 59, "en": 0}
   },
   "raises": [

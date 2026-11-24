@@ -15556,6 +15556,389 @@ export const catalog: MessageCatalog = {
       "value": "도우미가 제때 답하지 못함"
     }
   ],
+  "timeline.teamAiReply.appItem": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 2,
+      "value": "calls",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "회"
+    }
+  ],
+  "timeline.teamAiReply.appItemVerb": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 1,
+      "value": "verb"
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 2,
+      "value": "calls",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "회"
+    }
+  ],
+  "timeline.teamAiReply.appsLine": [
+    {
+      "type": 0,
+      "value": "쓴 앱: "
+    },
+    {
+      "type": 1,
+      "value": "parts"
+    }
+  ],
+  "timeline.teamAiReply.appsSpoken": [
+    {
+      "type": 0,
+      "value": "쓴 앱, "
+    },
+    {
+      "type": 1,
+      "value": "parts"
+    }
+  ],
+  "timeline.teamAiReply.citationOpenHost": [
+    {
+      "type": 1,
+      "value": "host"
+    },
+    {
+      "type": 0,
+      "value": ", 새 창에서 열기"
+    }
+  ],
+  "timeline.teamAiReply.citationOpenTitled": [
+    {
+      "type": 1,
+      "value": "title"
+    },
+    {
+      "type": 0,
+      "value": ", "
+    },
+    {
+      "type": 1,
+      "value": "host"
+    },
+    {
+      "type": 0,
+      "value": ", 새 창에서 열기"
+    }
+  ],
+  "timeline.teamAiReply.connected": [
+    {
+      "type": 0,
+      "value": "연결: "
+    },
+    {
+      "type": 1,
+      "value": "domains"
+    }
+  ],
+  "timeline.teamAiReply.connectedMore": [
+    {
+      "type": 0,
+      "value": "연결: "
+    },
+    {
+      "type": 1,
+      "value": "domains"
+    },
+    {
+      "type": 0,
+      "value": " 외 "
+    },
+    {
+      "type": 2,
+      "value": "rest",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "곳"
+    }
+  ],
+  "timeline.teamAiReply.detailsClose": [
+    {
+      "type": 0,
+      "value": "접기"
+    }
+  ],
+  "timeline.teamAiReply.detailsOpen": [
+    {
+      "type": 0,
+      "value": "자세히"
+    }
+  ],
+  "timeline.teamAiReply.exposure": [
+    {
+      "type": 0,
+      "value": "이 채널 "
+    },
+    {
+      "type": 1,
+      "value": "count"
+    },
+    {
+      "type": 0,
+      "value": "명에게 보여요"
+    }
+  ],
+  "timeline.teamAiReply.modelChip": [
+    {
+      "type": 0,
+      "value": "팀 AI · "
+    },
+    {
+      "type": 1,
+      "value": "model"
+    }
+  ],
+  "timeline.teamAiReply.onBehalfOf": [
+    {
+      "type": 1,
+      "value": "owner"
+    },
+    {
+      "type": 0,
+      "value": " 명의로 썼어요."
+    }
+  ],
+  "timeline.teamAiReply.otherApp": [
+    {
+      "type": 0,
+      "value": "다른 앱"
+    }
+  ],
+  "timeline.teamAiReply.personalNote": [
+    {
+      "type": 0,
+      "value": "개인 앱은 요약만 올리는 게 원칙이에요. oort는 지키는지 확인하지 못해요."
+    }
+  ],
+  "timeline.teamAiReply.ranOn": [
+    {
+      "type": 1,
+      "value": "site"
+    },
+    {
+      "type": 0,
+      "value": "에서 실행했어요."
+    }
+  ],
+  "timeline.teamAiReply.selfReport": [
+    {
+      "type": 0,
+      "value": "앱과 횟수는 에이전트가 알려 준 대로예요. oort는 확인하지 못해요."
+    }
+  ],
+  "timeline.teamAiReply.siteHermes": [
+    {
+      "type": 0,
+      "value": "Hermes"
+    }
+  ],
+  "timeline.teamAiReply.siteMac": [
+    {
+      "type": 0,
+      "value": "내 맥"
+    }
+  ],
+  "timeline.teamAiReply.sourceOpen": [
+    {
+      "type": 0,
+      "value": "출처 "
+    },
+    {
+      "type": 2,
+      "value": "index",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": " 열기, "
+    },
+    {
+      "type": 1,
+      "value": "title"
+    }
+  ],
+  "timeline.teamAiReply.sourcesCount": [
+    {
+      "type": 0,
+      "value": "출처 "
+    },
+    {
+      "type": 1,
+      "value": "count"
+    },
+    {
+      "type": 0,
+      "value": "개"
+    }
+  ],
+  "timeline.teamAiReply.sourcesLabel": [
+    {
+      "type": 0,
+      "value": "출처"
+    }
+  ],
+  "timeline.teamAiReply.toolGetAgentRun": [
+    {
+      "type": 0,
+      "value": "작업 단계 보기"
+    }
+  ],
+  "timeline.teamAiReply.toolListAgentRuns": [
+    {
+      "type": 0,
+      "value": "에이전트 작업 기록"
+    }
+  ],
+  "timeline.teamAiReply.toolListMembers": [
+    {
+      "type": 0,
+      "value": "멤버 목록"
+    }
+  ],
+  "timeline.teamAiReply.toolListPlugins": [
+    {
+      "type": 0,
+      "value": "앱 목록"
+    }
+  ],
+  "timeline.teamAiReply.toolReadChannel": [
+    {
+      "type": 0,
+      "value": "채널 읽기"
+    }
+  ],
+  "timeline.teamAiReply.toolReadChannelNamed": [
+    {
+      "type": 0,
+      "value": "#"
+    },
+    {
+      "type": 1,
+      "value": "channel"
+    },
+    {
+      "type": 0,
+      "value": " 읽기"
+    }
+  ],
+  "timeline.teamAiReply.toolReadThread": [
+    {
+      "type": 0,
+      "value": "스레드 읽기"
+    }
+  ],
+  "timeline.teamAiReply.toolReadWorkspaceSettings": [
+    {
+      "type": 0,
+      "value": "워크스페이스 설정"
+    }
+  ],
+  "timeline.teamAiReply.toolSearchMessages": [
+    {
+      "type": 0,
+      "value": "메시지 검색"
+    }
+  ],
+  "timeline.teamAiReply.toolsLine": [
+    {
+      "type": 0,
+      "value": "찾아본 것: "
+    },
+    {
+      "type": 1,
+      "value": "tools"
+    }
+  ],
+  "timeline.teamAiReply.toolsLineMore": [
+    {
+      "type": 0,
+      "value": "찾아본 것: "
+    },
+    {
+      "type": 1,
+      "value": "tools"
+    },
+    {
+      "type": 0,
+      "value": " 외 "
+    },
+    {
+      "type": 2,
+      "value": "rest",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "개"
+    }
+  ],
+  "timeline.teamAiReply.toolWebSearch": [
+    {
+      "type": 0,
+      "value": "웹 검색"
+    }
+  ],
+  "timeline.teamAiReply.verbCreate": [
+    {
+      "type": 0,
+      "value": "만들기"
+    }
+  ],
+  "timeline.teamAiReply.verbList": [
+    {
+      "type": 0,
+      "value": "목록"
+    }
+  ],
+  "timeline.teamAiReply.verbRead": [
+    {
+      "type": 0,
+      "value": "읽기"
+    }
+  ],
+  "timeline.teamAiReply.verbSearch": [
+    {
+      "type": 0,
+      "value": "검색"
+    }
+  ],
+  "timeline.teamAiReply.verbUpdate": [
+    {
+      "type": 0,
+      "value": "고치기"
+    }
+  ],
   "timeline.thread.followDismiss": [
     {
       "type": 0,
