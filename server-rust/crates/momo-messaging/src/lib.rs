@@ -56,6 +56,10 @@ mod agent_picture;
 // #6013 (ADR-0151 증보 10): the Agent Port agent's own picture road. Private like `agent_picture`: callers
 // use the names exported below.
 mod agent_port_picture;
+/// ADR-0162 증보 8 / #6068 — the agent's own reactions through `oort_reaction_set`: what (R6), where
+/// (R5), how many (R7) and the record (R11), in front of the REST path's own reaction statement.
+pub mod agent_reaction;
+mod agent_reaction_emoji;
 pub mod approval_card;
 pub mod attachment;
 pub mod attachment_media;

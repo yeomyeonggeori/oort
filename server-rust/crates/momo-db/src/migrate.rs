@@ -873,12 +873,15 @@ mod tests {
     /// tokens, **no foreign key in either direction**, the single-use guard trigger of 175, privileges for
     /// `momo_app` alone — `agent-upload-token-lockdown`) and `agent_picture_mark.run_id` losing NOT NULL
     /// (this road's marks have no run). No other grant changes.
+    /// 190 is #6071's (landing order: it lands before 191). 191 is #6068's agent reaction tool
+    /// (ADR-0162 증보 8 R7): `agent_run.agent_reaction_count` (0..3, the per-run count of the agent's
+    /// own reactions, which a removal never gives back). No new table, trigger, definer or grant.
     #[test]
-    fn discovers_contiguous_migrations_001_to_189() {
+    fn discovers_contiguous_migrations_001_to_191() {
         let dir = default_migrations_dir();
         let migrations = discover_migrations(&dir).expect("migrations directory readable");
 
-        let expected: Vec<i64> = (1..=189).collect();
+        let expected: Vec<i64> = (1..=191).collect();
         let found: Vec<i64> = migrations
             .iter()
             .map(|migration| migration.version)
@@ -886,7 +889,7 @@ mod tests {
         assert_eq!(
             found,
             expected,
-            "expected contiguous 001..=189 under {}",
+            "expected contiguous 001..=191 under {}",
             dir.display()
         );
         assert!(migrations.first().unwrap().name.starts_with("001_init"));
@@ -894,7 +897,7 @@ mod tests {
             .last()
             .unwrap()
             .name
-            .starts_with("189_agent_upload_token"));
+            .starts_with("191_agent_reaction_count"));
     }
 
     #[test]

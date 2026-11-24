@@ -489,9 +489,9 @@ fn every_tool_failure_has_a_token() {
                 | ReactionRefusal::StatusEmoji
                 | ReactionRefusal::ExpressionUnavailable,
             ) => "tool_arguments",
-            ToolFailure::ReactionRefused(ReactionRefusal::MessageLimit | ReactionRefusal::RunLimit) => {
-                "tool_conflict"
-            }
+            ToolFailure::ReactionRefused(
+                ReactionRefusal::MessageLimit | ReactionRefusal::RunLimit,
+            ) => "tool_conflict",
             ToolFailure::AlreadyClaimed => "tool_already_claimed",
             ToolFailure::ClaimExpired => "tool_claim_expired",
             ToolFailure::Internal => "tool_internal",
@@ -554,7 +554,10 @@ fn a_reaction_refusal_is_the_plain_answer_on_the_wire() {
         let refused = tool_failure(&call, ToolFailure::ReactionRefused(refusal));
         let answered = tool_failure(&call, plain);
         assert_eq!(refused.status, answered.status, "{refusal:?}");
-        assert_eq!(refused.body, answered.body, "{refusal:?}: the wire says no cause");
+        assert_eq!(
+            refused.body, answered.body,
+            "{refusal:?}: the wire says no cause"
+        );
         assert_eq!(ToolFailure::ReactionRefused(refusal).code(), plain.code());
         let token = ToolFailure::ReactionRefused(refusal)
             .trace_reason()
@@ -568,7 +571,11 @@ fn a_reaction_refusal_is_the_plain_answer_on_the_wire() {
     }
     seen.sort_unstable();
     seen.dedup();
-    assert_eq!(seen.len(), REACTION_REFUSAL_REASONS.len(), "one token per cause");
+    assert_eq!(
+        seen.len(),
+        REACTION_REFUSAL_REASONS.len(),
+        "one token per cause"
+    );
     assert_eq!(ToolFailure::InvalidArguments.trace_reason(), None);
 }
 

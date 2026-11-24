@@ -3697,7 +3697,11 @@ mod tests {
         assert_eq!(open.names().len() - closed.names().len(), 2);
         for name in AGENT_REACTION_TOOLS {
             assert!(open.callable(name).is_some(), "{name}");
-            assert_eq!(closed.callable(name), closed.callable("oort_nope"), "{name}");
+            assert_eq!(
+                closed.callable(name),
+                closed.callable("oort_nope"),
+                "{name}"
+            );
             assert!(!closed.listing().to_string().contains(name), "{name}");
         }
         let rest: Vec<_> = open
