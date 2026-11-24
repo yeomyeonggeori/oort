@@ -5,7 +5,7 @@ import {
   pauseBanner,
   type PauseBannerKind,
 } from "@momo/core/features/presence/pauseBanner";
-import { PRESENCE_WRITE_FAILED } from "@momo/core/features/presence/model";
+import { PRESENCE_WRITE_FAILED_KEY } from "@momo/core/features/presence/model";
 import {
   fetchNotificationRules,
   NOTIFICATION_PAUSE_SAVE_FAILED,
@@ -19,6 +19,7 @@ import { useRecheckWhenElapsed } from "@/features/settings/useRecheckWhenElapsed
 import { useSelfPresenceWrite } from "./useSelfPresenceWrite";
 import { BlockedReason } from "@/features/common/BlockedReason";
 
+import { useFormatMessage } from "@/i18n/useFormatMessage";
 // =============================================================================
 // 멈춤이 보인다 — 사이드바 프로필 줄 위의 한 줄 (ADR-0204 D3, #3923, 위치 #4107).
 //
@@ -104,6 +105,7 @@ export function PauseBanner({
   /** 명부의 내 행. 아직 못 읽었으면 없다. */
   selfMember: RosterMember | null | undefined;
 }) {
+  const formatMessage = useFormatMessage();
   const client = useQueryClient();
   const offline = useOffline();
   const rulesKey = notificationRulesQueryKey(workspaceId);
@@ -130,6 +132,7 @@ export function PauseBanner({
 
   const data = rules.data;
   const banner = pauseBanner(
+    formatMessage,
     {
       rulesReady: data !== undefined,
       paused: data?.dnd ?? false,
@@ -182,7 +185,7 @@ export function PauseBanner({
   const failureText = failed
     ? banner.kind === "paused"
       ? NOTIFICATION_PAUSE_SAVE_FAILED
-      : PRESENCE_WRITE_FAILED
+      : formatMessage(PRESENCE_WRITE_FAILED_KEY)
     : null;
 
   const press = () => {

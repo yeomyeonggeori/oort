@@ -30,6 +30,12 @@ import {
   upsertChannel,
 } from "./model";
 
+import { catalog as koCatalog } from "../../i18n/generated/ko-KR";
+import { createMessageCopy } from "../../testkit";
+
+// 낱말은 사전에 있다(#6045). 시험은 한국어 생성물로 풀어 예전과 같은 문장을 그대로 단정한다.
+const ko = createMessageCopy({ messageLocale: "ko-KR", catalog: koCatalog });
+
 // Real momowebqa shapes, including the pair this workspace actually has: two
 // members displayed as 김인턴, one human and one agent, told apart only by the
 // handle. Ids are the demo workspace's, in the case the server sends them.
@@ -554,10 +560,10 @@ describe("countLabel", () => {
 
 describe("memberRowLabel", () => {
   it("names the human, the handle and the workspace role before the action", () => {
-    expect(memberRowLabel(MINSU, null)).toBe(
+    expect(memberRowLabel(ko, MINSU, null)).toBe(
       "구민수 @minsu, 관리자, 다이렉트 메시지 열기"
     );
-    expect(memberRowLabel(MINSU, null, { admin: "리드" })).toBe(
+    expect(memberRowLabel(ko, MINSU, null, { admin: "리드" })).toBe(
       "구민수 @minsu, 리드, 다이렉트 메시지 열기"
     );
   });
@@ -565,8 +571,8 @@ describe("memberRowLabel", () => {
   it("gives the two 김인턴 two different accessible names", () => {
     // The whole point: aria-label replaces the subtree, so a label of the
     // display name alone would offer a screen reader the same action twice.
-    const human = memberRowLabel(INTERN_HUMAN, null);
-    const agent = memberRowLabel(INTERN_AGENT, DEMO.displayName);
+    const human = memberRowLabel(ko, INTERN_HUMAN, null);
+    const agent = memberRowLabel(ko, INTERN_AGENT, DEMO.displayName);
     expect(human).not.toBe(agent);
     expect(human).toContain("@intern-kim");
     expect(agent).toContain("@kim-intern");
@@ -575,13 +581,13 @@ describe("memberRowLabel", () => {
   it("says an agent is an agent and who it is attributed to", () => {
     // Colour (--agent) reaches no screen reader, and "데모 사용자 님이 관리" is
     // on screen, so both are in the name (WCAG 2.5.3).
-    expect(memberRowLabel(INTERN_AGENT, DEMO.displayName)).toBe(
+    expect(memberRowLabel(ko, INTERN_AGENT, DEMO.displayName)).toBe(
       "김인턴 @kim-intern, 에이전트, 데모 사용자 님이 관리, 다이렉트 메시지 열기"
     );
   });
 
   it("still says 에이전트 when the roster has no row for the owner", () => {
-    expect(memberRowLabel(HERMES, null)).toBe(
+    expect(memberRowLabel(ko, HERMES, null)).toBe(
       "Hermes @hermes, 에이전트, 다이렉트 메시지 열기"
     );
   });
@@ -594,7 +600,7 @@ describe("memberRowLabel", () => {
       role: "member",
       status: "invited",
     });
-    expect(memberRowLabel(invited, null)).toBe(
+    expect(memberRowLabel(ko, invited, null)).toBe(
       "이서연 @seoyeon, 멤버, 초대됨, 다이렉트 메시지 열기"
     );
   });
@@ -610,23 +616,23 @@ describe("memberRowLabel", () => {
         role: "admin",
         ...over,
       });
-    expect(memberRowLabel(person({ online: true }), null, undefined, NOW)).toBe(
+    expect(memberRowLabel(ko, person({ online: true }), null, undefined, NOW)).toBe(
       "박서연 @seoyeon, 관리자, 온라인, 다이렉트 메시지 열기"
     );
-    expect(memberRowLabel(person({ online: false }), null, undefined, NOW)).toBe(
+    expect(memberRowLabel(ko, person({ online: false }), null, undefined, NOW)).toBe(
       "박서연 @seoyeon, 관리자, 오프라인, 다이렉트 메시지 열기"
     );
     // A declared status wins over connection, exactly as the dot does.
     expect(
-      memberRowLabel(person({ online: true, presenceStatus: "away" }), null, undefined, NOW)
+      memberRowLabel(ko, person({ online: true, presenceStatus: "away" }), null, undefined, NOW)
     ).toBe("박서연 @seoyeon, 관리자, 자리 비움, 다이렉트 메시지 열기");
     // Unknown availability says nothing: absence is not 오프라인.
-    expect(memberRowLabel(person({}), null, undefined, NOW)).toBe(
+    expect(memberRowLabel(ko, person({}), null, undefined, NOW)).toBe(
       "박서연 @seoyeon, 관리자, 다이렉트 메시지 열기"
     );
     // An agent's liveness is its own chip; `online` is never read for it.
     expect(
-      memberRowLabel({ ...INTERN_AGENT, online: true } as RosterMember, DEMO.displayName)
+      memberRowLabel(ko, { ...INTERN_AGENT, online: true } as RosterMember, DEMO.displayName)
     ).toBe("김인턴 @kim-intern, 에이전트, 데모 사용자 님이 관리, 다이렉트 메시지 열기");
   });
 
@@ -639,10 +645,10 @@ describe("memberRowLabel", () => {
       statusEmoji: "📅",
       statusText: "회의 중",
     });
-    expect(memberRowLabel(working, null, undefined, 1_800_000_000_000)).toBe(
+    expect(memberRowLabel(ko, working, null, undefined, 1_800_000_000_000)).toBe(
       "구민수 @minsu, 관리자, 회의 중, 다이렉트 메시지 열기"
     );
-    expect(memberRowLabel(working, null, undefined, 1_800_000_000_000)).not.toContain(
+    expect(memberRowLabel(ko, working, null, undefined, 1_800_000_000_000)).not.toContain(
       "📅"
     );
   });
@@ -655,7 +661,7 @@ describe("memberRowLabel", () => {
       role: "admin",
       statusEmoji: "🤒",
     });
-    expect(memberRowLabel(emojiOnly, null, undefined, 1_800_000_000_000)).toBe(
+    expect(memberRowLabel(ko, emojiOnly, null, undefined, 1_800_000_000_000)).toBe(
       "구민수 @minsu, 관리자, 🤒, 다이렉트 메시지 열기"
     );
   });
@@ -670,14 +676,14 @@ describe("memberRowLabel", () => {
       statusText: "회의 중",
       statusExpiresAtMs: 1,
     });
-    expect(memberRowLabel(expired, null, undefined, 1_800_000_000_000)).toBe(
+    expect(memberRowLabel(ko, expired, null, undefined, 1_800_000_000_000)).toBe(
       "구민수 @minsu, 관리자, 다이렉트 메시지 열기"
     );
   });
 
   it("ends with the action, so the row reads as a thing then a verb", () => {
     for (const m of ROSTER) {
-      expect(memberRowLabel(m, DEMO.displayName)).toMatch(
+      expect(memberRowLabel(ko, m, DEMO.displayName)).toMatch(
         /, 다이렉트 메시지 열기$/
       );
     }

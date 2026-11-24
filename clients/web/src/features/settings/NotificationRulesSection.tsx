@@ -14,9 +14,9 @@ import {
   type NotificationRulesPatch,
 } from "@momo/core/features/settings/notificationRules";
 import {
-  PAUSE_ACTIVE_NOTE,
-  PAUSE_UNTIL_CHANGE_ACTION,
-  PAUSE_UNTIL_NONE_ACTION_LABEL,
+  PAUSE_ACTIVE_NOTE_KEY,
+  PAUSE_UNTIL_CHANGE_ACTION_KEY,
+  PAUSE_UNTIL_NONE_ACTION_LABEL_KEY,
   pauseUntilLabel,
 } from "@momo/core/features/presence/pauseUntil";
 import { InlineBanner, Skeleton } from "@/features/common/States";
@@ -35,6 +35,7 @@ import { loadCauseOf } from "@/features/common/loadFailure";
 import { CONNECTION_KEYS } from "@momo/core/features/connection/copyKeys";
 import { BlockedReason, type BlockedFrame } from "@/features/common/BlockedReason";
 
+import { useFormatMessage } from "@/i18n/useFormatMessage";
 // Design Read: settings for internal team users on web+Tauri, density 6/10,
 // motion 2/10.
 //
@@ -86,6 +87,7 @@ function loadFailureCopy(error: unknown): { message: string; retry: false } | { 
 }
 
 export function NotificationRulesSection({ offline }: { offline: boolean }) {
+  const formatMessage = useFormatMessage();
   const { workspaceId } = useSession();
   const client = useQueryClient();
   const queryKey = notificationRulesQueryKey(workspaceId);
@@ -221,10 +223,10 @@ export function NotificationRulesSection({ offline }: { offline: boolean }) {
                   label={
                     current.dndUntilMs !== undefined
                       ? pauseUntilLabel(current.dndUntilMs, Date.now())
-                      : PAUSE_ACTIVE_NOTE
+                      : formatMessage(PAUSE_ACTIVE_NOTE_KEY)
                   }
                   description={
-                    current.dndUntilMs !== undefined ? PAUSE_ACTIVE_NOTE : undefined
+                    current.dndUntilMs !== undefined ? formatMessage(PAUSE_ACTIVE_NOTE_KEY) : undefined
                   }
                   plain={current.dndUntilMs === undefined}
                   testId="notification-rules-until"
@@ -239,8 +241,8 @@ export function NotificationRulesSection({ offline }: { offline: boolean }) {
                     onClick={(event) => openPauseDialog(event.currentTarget)}
                   >
                     {current.dndUntilMs !== undefined
-                      ? PAUSE_UNTIL_CHANGE_ACTION
-                      : PAUSE_UNTIL_NONE_ACTION_LABEL}
+                      ? formatMessage(PAUSE_UNTIL_CHANGE_ACTION_KEY)
+                      : formatMessage(PAUSE_UNTIL_NONE_ACTION_LABEL_KEY)}
                   </Button>
                 </SettingsRow>
               ) : null}

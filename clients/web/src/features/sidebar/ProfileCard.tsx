@@ -10,8 +10,8 @@ import {
   Smile,
 } from "lucide-react";
 import { effectivePresence, type RosterMember } from "@momo/core/lib/api";
-import { CUSTOM_STATUS_MENU_LABEL } from "@momo/core/features/presence/customStatus";
-import { presenceTriggerLabel } from "@momo/core/features/presence/model";
+import { CUSTOM_STATUS_MENU_LABEL_KEY } from "@momo/core/features/presence/customStatus";
+import { effectivePresenceLabelKey } from "@momo/core/features/presence/model";
 import { useSession } from "@/app/session";
 import { useOpenAddWorkspace } from "@/features/workspace/useAddWorkspace";
 import { rememberSettingsOpener } from "@/features/settings/settingsFocus";
@@ -133,8 +133,15 @@ export function ProfileCard({
   const { visible: custom, accessible: customName } =
     useCustomStatusView(selfMember);
   const triggerName = customName
-    ? `${selfName}. ${presenceTriggerLabel(effective)}. ${customName}`
-    : `${selfName}. ${presenceTriggerLabel(effective)}`;
+    ? formatMessage("presence.menu.cardLabelCustom", {
+        name: selfName,
+        status: formatMessage(effectivePresenceLabelKey(effective)),
+        custom: customName,
+      })
+    : formatMessage("presence.menu.cardLabel", {
+        name: selfName,
+        status: formatMessage(effectivePresenceLabelKey(effective)),
+      });
   const statusHead = custom
     ? [custom.emoji, custom.text].filter(Boolean).join(" ")
     : null;
@@ -251,7 +258,7 @@ export function ProfileCard({
             onSelect={() => setSetStatusOpen(true)}
           >
             <Smile className="size-4" aria-hidden="true" />
-            {CUSTOM_STATUS_MENU_LABEL}
+            {formatMessage(CUSTOM_STATUS_MENU_LABEL_KEY)}
           </DropdownMenuItem>
           <DropdownMenuSeparator />
           {/* Title over visible rows, not a submenu (#1383). The title is this

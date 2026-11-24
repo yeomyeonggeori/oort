@@ -100,10 +100,9 @@ async function mount(): Promise<HTMLElement> {
   document.body.append(host);
   mountedHost = host;
   mountedRoot = createRoot(host);
-  const tree: ReactElement = createElement(
-    LocaleProvider,
-    { locale: koLocale },
-    createElement(
+  const tree: ReactElement = createElement(LocaleProvider, {
+    locale: koLocale,
+    children: createElement(
       SessionProvider,
       { value: sessionValue() },
       createElement(
@@ -111,8 +110,8 @@ async function mount(): Promise<HTMLElement> {
         { initialEntries: ["/activity"] },
         createElement(ActivityRoute)
       )
-    )
-  );
+    ),
+  });
   await act(async () => {
     mountedRoot?.render(tree);
     await Promise.resolve();

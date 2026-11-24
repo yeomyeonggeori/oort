@@ -5,6 +5,7 @@ import {
 } from "@momo/core/features/presence/statusDot";
 import { useAgentLiveness } from "@/features/agents/useAgentLiveness";
 
+import { useFormatMessage } from "@/i18n/useFormatMessage";
 // =============================================================================
 // DM 상대 한 명의 상태 점 (#3964). 판정은 코어의 `dmPeerStatusDot` 한 함수이고, 이 훅이 하는 일은 에이전트의
 // 생존 판정을 **가져다 넣는 것**뿐이다(`useAgentLiveness`: 쿼리 키가 폰과 같고, 같은 에이전트를 묻는 다른
@@ -20,9 +21,11 @@ export function useDmStatusDot(
   mayAct: boolean,
   nowMs: number
 ): StatusDot | null {
+  const formatMessage = useFormatMessage();
   const agentId = member?.kind === "agent" ? member.id : null;
   const read = useAgentLiveness(agentId);
   return dmPeerStatusDot({
+    formatMessage,
     member,
     liveness: agentId === null ? undefined : read.liveness,
     mayAct,

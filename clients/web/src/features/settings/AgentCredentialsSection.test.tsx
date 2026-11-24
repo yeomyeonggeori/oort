@@ -307,7 +307,7 @@ function mountSection(offline = false, korean = false): HTMLElement {
     )
   );
   // 한국어 문구를 단정하는 시험만 한국어 언어 객체로 감싼다. 감싸지 않으면 번들된 영어로 그려진다.
-  const tree = korean ? createElement(LocaleProvider, { locale: koLocale }, page) : page;
+  const tree = korean ? createElement(LocaleProvider, { locale: koLocale, children: page }) : page;
   act(() => mountedRoot?.render(tree));
   return host;
 }

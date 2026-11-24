@@ -8664,6 +8664,502 @@ export const catalog: MessageCatalog = {
       "value": "터미널에 나온 코드를 브라우저에 넣어 주세요."
     }
   ],
+  "presence.dnd.hint": [
+    {
+      "type": 0,
+      "value": "다른 사람에게 보이는 표시예요. 알림도 함께 멈춰요."
+    }
+  ],
+  "presence.dnd.hintPick": [
+    {
+      "type": 0,
+      "value": "다른 사람에게 보이는 표시예요. 알림도 함께 멈춰요. 누르면 기한을 골라요."
+    }
+  ],
+  "presence.menu.cardLabel": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": ". 내 상태: "
+    },
+    {
+      "type": 1,
+      "value": "status"
+    },
+    {
+      "type": 0,
+      "value": " (변경하려면 누르세요)"
+    }
+  ],
+  "presence.menu.cardLabelCustom": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": ". 내 상태: "
+    },
+    {
+      "type": 1,
+      "value": "status"
+    },
+    {
+      "type": 0,
+      "value": " (변경하려면 누르세요). "
+    },
+    {
+      "type": 1,
+      "value": "custom"
+    }
+  ],
+  "presence.menu.label": [
+    {
+      "type": 0,
+      "value": "내 상태"
+    }
+  ],
+  "presence.menu.statusLine": [
+    {
+      "type": 0,
+      "value": "내 상태: "
+    },
+    {
+      "type": 1,
+      "value": "status"
+    }
+  ],
+  "presence.menu.triggerLabel": [
+    {
+      "type": 0,
+      "value": "내 상태: "
+    },
+    {
+      "type": 1,
+      "value": "status"
+    },
+    {
+      "type": 0,
+      "value": " (변경하려면 누르세요)"
+    }
+  ],
+  "presence.pauseBanner.dndAction": [
+    {
+      "type": 0,
+      "value": "풀기"
+    }
+  ],
+  "presence.pauseBanner.dndLabel": [
+    {
+      "type": 1,
+      "value": "title"
+    },
+    {
+      "type": 0,
+      "value": " · "
+    },
+    {
+      "type": 1,
+      "value": "action"
+    }
+  ],
+  "presence.pauseBanner.dndTitle": [
+    {
+      "type": 0,
+      "value": "상태는 아직 방해 금지예요"
+    }
+  ],
+  "presence.pauseBanner.pausedLabel": [
+    {
+      "type": 1,
+      "value": "title"
+    },
+    {
+      "type": 0,
+      "value": " · "
+    },
+    {
+      "type": 1,
+      "value": "detail"
+    },
+    {
+      "type": 0,
+      "value": " · "
+    },
+    {
+      "type": 1,
+      "value": "action"
+    }
+  ],
+  "presence.pauseBanner.pausedTitle": [
+    {
+      "type": 0,
+      "value": "알림 일시 중지 중"
+    }
+  ],
+  "presence.pauseBanner.resumeAction": [
+    {
+      "type": 0,
+      "value": "다시 켜기"
+    }
+  ],
+  "presence.pausePreset.custom": [
+    {
+      "type": 0,
+      "value": "직접 고르기"
+    }
+  ],
+  "presence.pausePreset.hour1": [
+    {
+      "type": 0,
+      "value": "1시간"
+    }
+  ],
+  "presence.pausePreset.hour2": [
+    {
+      "type": 0,
+      "value": "2시간"
+    }
+  ],
+  "presence.pausePreset.min30": [
+    {
+      "type": 0,
+      "value": "30분"
+    }
+  ],
+  "presence.pausePreset.nextMonday": [
+    {
+      "type": 0,
+      "value": "다음 주 월요일 오전 9시까지"
+    }
+  ],
+  "presence.pausePreset.tomorrow": [
+    {
+      "type": 0,
+      "value": "내일 오전 9시까지"
+    }
+  ],
+  "presence.pauseUntil.activeNote": [
+    {
+      "type": 0,
+      "value": "이 워크스페이스의 알림을 받지 않아요."
+    }
+  ],
+  "presence.pauseUntil.changeAction": [
+    {
+      "type": 0,
+      "value": "기한 바꾸기"
+    }
+  ],
+  "presence.pauseUntil.dndConfirm": [
+    {
+      "type": 0,
+      "value": "방해 금지 켜기"
+    }
+  ],
+  "presence.pauseUntil.dndDescription": [
+    {
+      "type": 0,
+      "value": "다른 사람에게 보이는 표시예요. 알림도 함께 멈춰요. 시각이 지나면 저절로 풀려요."
+    }
+  ],
+  "presence.pauseUntil.dndPresetHint": [
+    {
+      "type": 0,
+      "value": "누르면 이 시각까지 방해 금지를 켜요."
+    }
+  ],
+  "presence.pauseUntil.dndTitle": [
+    {
+      "type": 0,
+      "value": "방해 금지를 언제까지 켤까요?"
+    }
+  ],
+  "presence.pauseUntil.invalid": [
+    {
+      "type": 0,
+      "value": "날짜와 시각을 확인하세요."
+    }
+  ],
+  "presence.pauseUntil.labelWithChange": [
+    {
+      "type": 1,
+      "value": "label"
+    },
+    {
+      "type": 0,
+      "value": " · 기한 바꾸기"
+    }
+  ],
+  "presence.pauseUntil.none": [
+    {
+      "type": 0,
+      "value": "기한 없음"
+    }
+  ],
+  "presence.pauseUntil.noneActionLabel": [
+    {
+      "type": 0,
+      "value": "기한 없음 · 기한 정하기"
+    }
+  ],
+  "presence.pauseUntil.offlineReason": [
+    {
+      "type": 0,
+      "value": "연결이 끊겨 지금은 바꿀 수 없어요."
+    }
+  ],
+  "presence.pauseUntil.optionWithHint": [
+    {
+      "type": 1,
+      "value": "label"
+    },
+    {
+      "type": 0,
+      "value": ", "
+    },
+    {
+      "type": 1,
+      "value": "hint"
+    }
+  ],
+  "presence.pauseUntil.past": [
+    {
+      "type": 0,
+      "value": "지난 시각은 고를 수 없어요. 다른 시각을 고르세요."
+    }
+  ],
+  "presence.pauseUntil.pauseConfirm": [
+    {
+      "type": 0,
+      "value": "알림 멈추기"
+    }
+  ],
+  "presence.pauseUntil.pauseDescription": [
+    {
+      "type": 0,
+      "value": "이 워크스페이스의 알림을 고른 시각까지 받지 않아요. 멘션과 승인 요청도 멈춰요. 시각이 지나면 저절로 다시 와요."
+    }
+  ],
+  "presence.pauseUntil.pausePresetHint": [
+    {
+      "type": 0,
+      "value": "누르면 이 시각까지 알림을 멈춰요."
+    }
+  ],
+  "presence.pauseUntil.pauseTitle": [
+    {
+      "type": 0,
+      "value": "알림을 언제까지 멈출까요?"
+    }
+  ],
+  "presence.pauseUntil.setAction": [
+    {
+      "type": 0,
+      "value": "기한 정하기"
+    }
+  ],
+  "presence.status.away": [
+    {
+      "type": 0,
+      "value": "자리 비움"
+    }
+  ],
+  "presence.status.dnd": [
+    {
+      "type": 0,
+      "value": "방해 금지"
+    }
+  ],
+  "presence.status.offline": [
+    {
+      "type": 0,
+      "value": "오프라인"
+    }
+  ],
+  "presence.status.online": [
+    {
+      "type": 0,
+      "value": "온라인"
+    }
+  ],
+  "presence.statusDialog.clear": [
+    {
+      "type": 0,
+      "value": "상태 지우기"
+    }
+  ],
+  "presence.statusDialog.clearFailed": [
+    {
+      "type": 0,
+      "value": "상태를 지우지 못했습니다. 다시 시도하세요."
+    }
+  ],
+  "presence.statusDialog.closeLabel": [
+    {
+      "type": 0,
+      "value": "상태 설정 닫기"
+    }
+  ],
+  "presence.statusDialog.description": [
+    {
+      "type": 0,
+      "value": "이모지와 짧은 글로 지금 하는 일을 알립니다."
+    }
+  ],
+  "presence.statusDialog.emojiClear": [
+    {
+      "type": 0,
+      "value": "이모지 지우기"
+    }
+  ],
+  "presence.statusDialog.emojiLabel": [
+    {
+      "type": 0,
+      "value": "상태 이모지 고르기"
+    }
+  ],
+  "presence.statusDialog.expiryLabel": [
+    {
+      "type": 0,
+      "value": "만료"
+    }
+  ],
+  "presence.statusDialog.expiryRow": [
+    {
+      "type": 1,
+      "value": "label"
+    },
+    {
+      "type": 0,
+      "value": ", "
+    },
+    {
+      "type": 1,
+      "value": "value"
+    }
+  ],
+  "presence.statusDialog.menuAria": [
+    {
+      "type": 0,
+      "value": "상태 설정, "
+    },
+    {
+      "type": 1,
+      "value": "line"
+    }
+  ],
+  "presence.statusDialog.menuLabel": [
+    {
+      "type": 0,
+      "value": "상태 설정"
+    }
+  ],
+  "presence.statusDialog.save": [
+    {
+      "type": 0,
+      "value": "상태 저장"
+    }
+  ],
+  "presence.statusDialog.saveFailed": [
+    {
+      "type": 0,
+      "value": "상태를 저장하지 못했습니다. 다시 시도하세요."
+    }
+  ],
+  "presence.statusDialog.saving": [
+    {
+      "type": 0,
+      "value": "저장 중…"
+    }
+  ],
+  "presence.statusDialog.textLabel": [
+    {
+      "type": 0,
+      "value": "상태 글"
+    }
+  ],
+  "presence.statusDialog.textPlaceholder": [
+    {
+      "type": 0,
+      "value": "지금 하는 일"
+    }
+  ],
+  "presence.statusDialog.title": [
+    {
+      "type": 0,
+      "value": "상태 설정"
+    }
+  ],
+  "presence.statusExpiry.custom": [
+    {
+      "type": 0,
+      "value": "시각 고르기"
+    }
+  ],
+  "presence.statusExpiry.hour1": [
+    {
+      "type": 0,
+      "value": "1시간"
+    }
+  ],
+  "presence.statusExpiry.min30": [
+    {
+      "type": 0,
+      "value": "30분"
+    }
+  ],
+  "presence.statusExpiry.none": [
+    {
+      "type": 0,
+      "value": "지우지 않음"
+    }
+  ],
+  "presence.statusExpiry.today": [
+    {
+      "type": 0,
+      "value": "오늘까지"
+    }
+  ],
+  "presence.statusPreset.commute": [
+    {
+      "type": 0,
+      "value": "이동 중"
+    }
+  ],
+  "presence.statusPreset.meeting": [
+    {
+      "type": 0,
+      "value": "회의 중"
+    }
+  ],
+  "presence.statusPreset.sick": [
+    {
+      "type": 0,
+      "value": "병가"
+    }
+  ],
+  "presence.statusPreset.vacation": [
+    {
+      "type": 0,
+      "value": "휴가"
+    }
+  ],
+  "presence.statusPreset.wfh": [
+    {
+      "type": 0,
+      "value": "재택"
+    }
+  ],
+  "presence.write.failed": [
+    {
+      "type": 0,
+      "value": "상태를 바꾸지 못했습니다. 다시 시도하세요."
+    }
+  ],
   "readState.markUnread.action": [
     {
       "type": 0,

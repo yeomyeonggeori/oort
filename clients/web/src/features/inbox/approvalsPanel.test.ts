@@ -31,8 +31,6 @@ import {
   APPROVED_RECEIPT,
   REJECTED_RECEIPT,
 } from "./approvalsPanel";
-import { createMessageCopy } from "@momo/core/testkit";
-
 // 낱말은 사전에 있다(#6045). 시험은 한국어 생성물로 풀어 예전과 같은 문장을 그대로 단정한다.
 const koCopy = createMessageCopy({ messageLocale: "ko-KR", catalog: koCatalog });
 

@@ -59,6 +59,7 @@ export function MemberRow({
   selfMemberId: string;
   onOpenProfile: (member: RosterMember, opener: HTMLElement) => void;
 }) {
+  const formatMessage = useFormatMessage();
   const { workspaceId, connStatus } = useSession();
   const t = useFormatMessage();
   const labels = useRoleLabels(workspaceId);
@@ -86,6 +87,7 @@ export function MemberRow({
   // inside the accessible name). The core sentence ends with its action by
   // contract (`memberRowLabel`: "the action comes last").
   const coreLabel = memberRowLabel(
+    formatMessage,
     // 점이 눈에 말하는 것을 이름이 이어 말한다. 자기 행의 접속 여부는 이 클라이언트의 연결이다.
     withOwnConnection(member, selfMemberId, connStatus === "connected"),
     owner?.displayName ?? null,

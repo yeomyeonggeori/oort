@@ -1,6 +1,6 @@
 import {
-  CUSTOM_STATUS_CLEAR_LABEL,
-  CUSTOM_STATUS_EXPIRY_LABEL,
+  CUSTOM_STATUS_CLEAR_LABEL_KEY,
+  CUSTOM_STATUS_EXPIRY_LABEL_KEY,
   CUSTOM_STATUS_PRESETS,
 } from '@momo/core/features/presence/customStatus';
 import type {Member} from '@momo/core/lib/api';
@@ -33,6 +33,12 @@ import {
 } from '../src/storage/secureSession';
 import {__resetServerBaseCache, setServerBase} from '../src/storage/serverBase';
 import * as phoneEmojiCatalog from '../src/features/emoji/catalog';
+import {catalog as koCatalog} from '@momo/core/i18n/generated/ko-KR';
+import {createMessageCopy} from '@momo/core/testkit';
+
+// 낱말은 사전에 있다(#6045). 시험은 한국어 생성물로 풀어 예전과 같은 문장을 그대로 단정한다.
+const koCopy = createMessageCopy({messageLocale: 'ko-KR', catalog: koCatalog});
+
 
 // =============================================================================
 // #2848 · #4457 — 설정 페이지에서 상태와 알림을 바로 바꾼다.
@@ -795,13 +801,13 @@ describe('상태 설정 시트 — design-review r1 반영 (#4457)', () => {
     server.self = {...baseSelf(), statusEmoji: '🌴', statusText: '휴가'};
     const sheet = await openStatusSheet();
     const row = sheet.getByTestId('status-expiry-row');
-    expect(row).toHaveTextContent(new RegExp(CUSTOM_STATUS_EXPIRY_LABEL));
-    expect(row.props.accessibilityLabel).toBe(`${CUSTOM_STATUS_EXPIRY_LABEL}, 지우지 않음`);
+    expect(row).toHaveTextContent(new RegExp(koCopy(CUSTOM_STATUS_EXPIRY_LABEL_KEY)));
+    expect(row.props.accessibilityLabel).toBe(`${koCopy(CUSTOM_STATUS_EXPIRY_LABEL_KEY)}, 지우지 않음`);
     // 시트 안에서 「지우기」가 들어간 글자는 파괴 행의 이름 하나뿐이다(대조: 그 행은 실제로 있다). 인스턴스가 아니라 글자로 비교한다 —
     // 실패했을 때 React 트리 전체를 찍다가 메모리가 터진다.
     const withVerb = sheet.getAllByText(/지우기/).map(node => node.props.children);
-    expect(withVerb).toEqual([CUSTOM_STATUS_CLEAR_LABEL]);
-    expect(within(sheet.getByTestId('status-clear')).getByText(CUSTOM_STATUS_CLEAR_LABEL)).toBeTruthy();
+    expect(withVerb).toEqual([koCopy(CUSTOM_STATUS_CLEAR_LABEL_KEY)]);
+    expect(within(sheet.getByTestId('status-clear')).getByText(koCopy(CUSTOM_STATUS_CLEAR_LABEL_KEY))).toBeTruthy();
     // 접근성 이름도 같다 — 파괴 행 말고는 「지우기」로 시작하지 않는다.
     expect(row.props.accessibilityLabel).not.toMatch(/지우기/);
   });
@@ -815,9 +821,9 @@ describe('상태 설정 시트 — design-review r1 반영 (#4457)', () => {
     ).toEqual([]);
     for (const preset of CUSTOM_STATUS_PRESETS) {
       const row = sheet.getByTestId(`status-preset-${preset.id}`);
-      expect(row).toHaveTextContent(`${preset.emoji}  ${preset.label}`);
+      expect(row).toHaveTextContent(`${preset.emoji}  ${koCopy(preset.labelKey)}`);
       // 낭독에는 이모지 없이 이름만 읽힌다.
-      expect(row.props.accessibilityLabel).toBe(preset.label);
+      expect(row.props.accessibilityLabel).toBe(koCopy(preset.labelKey));
     }
     const indents = sheet
       .getAllByTestId('group-divider')

@@ -15,6 +15,12 @@ import type { Channel, RosterMember } from "@momo/core/lib/api";
 import { makeDirectory } from "@momo/core/features/workspace/directory";
 import { SessionProvider, type SessionContextValue } from "@/app/session";
 import { ChatShell } from "./ChatShell";
+import { LocaleProvider } from "@/i18n/LocaleProvider";
+import type { AppLocale } from "@/i18n/localeStore";
+import { koreanLocale } from "@/testing/koLocale";
+
+// 한국어 문구를 단정하는 시험이라 한국어 언어 객체로 감싼다(감싸지 않으면 번들된 영어로 그려진다).
+let koLocale: AppLocale;
 
 const WS = "00000000-0000-7000-8000-000000000001";
 const ME = "00000000-0000-7000-8000-000000000101";
@@ -264,13 +270,14 @@ async function mount(path = `/c/${DM_ID}`): Promise<HTMLElement> {
     )
   );
   await act(async () => {
-    mountedRoot?.render(tree);
+    mountedRoot?.render(createElement(LocaleProvider, { locale: koLocale, children: tree }));
     await Promise.resolve();
   });
   return host;
 }
 
-beforeAll(() => {
+beforeAll(async () => {
+  koLocale = await koreanLocale();
   reactActEnvironment.IS_REACT_ACT_ENVIRONMENT = true;
 });
 

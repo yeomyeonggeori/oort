@@ -1230,6 +1230,74 @@ export const messageKeys = [
   "onboarding.harnessLogin.waitingBrowser",
   "onboarding.harnessLogin.waitingDetail",
   "onboarding.harnessLogin.waitingDevice",
+  "presence.dnd.hint",
+  "presence.dnd.hintPick",
+  "presence.menu.cardLabel",
+  "presence.menu.cardLabelCustom",
+  "presence.menu.label",
+  "presence.menu.statusLine",
+  "presence.menu.triggerLabel",
+  "presence.pauseBanner.dndAction",
+  "presence.pauseBanner.dndLabel",
+  "presence.pauseBanner.dndTitle",
+  "presence.pauseBanner.pausedLabel",
+  "presence.pauseBanner.pausedTitle",
+  "presence.pauseBanner.resumeAction",
+  "presence.pausePreset.custom",
+  "presence.pausePreset.hour1",
+  "presence.pausePreset.hour2",
+  "presence.pausePreset.min30",
+  "presence.pausePreset.nextMonday",
+  "presence.pausePreset.tomorrow",
+  "presence.pauseUntil.activeNote",
+  "presence.pauseUntil.changeAction",
+  "presence.pauseUntil.dndConfirm",
+  "presence.pauseUntil.dndDescription",
+  "presence.pauseUntil.dndPresetHint",
+  "presence.pauseUntil.dndTitle",
+  "presence.pauseUntil.invalid",
+  "presence.pauseUntil.labelWithChange",
+  "presence.pauseUntil.none",
+  "presence.pauseUntil.noneActionLabel",
+  "presence.pauseUntil.offlineReason",
+  "presence.pauseUntil.optionWithHint",
+  "presence.pauseUntil.past",
+  "presence.pauseUntil.pauseConfirm",
+  "presence.pauseUntil.pauseDescription",
+  "presence.pauseUntil.pausePresetHint",
+  "presence.pauseUntil.pauseTitle",
+  "presence.pauseUntil.setAction",
+  "presence.status.away",
+  "presence.status.dnd",
+  "presence.status.offline",
+  "presence.status.online",
+  "presence.statusDialog.clear",
+  "presence.statusDialog.clearFailed",
+  "presence.statusDialog.closeLabel",
+  "presence.statusDialog.description",
+  "presence.statusDialog.emojiClear",
+  "presence.statusDialog.emojiLabel",
+  "presence.statusDialog.expiryLabel",
+  "presence.statusDialog.expiryRow",
+  "presence.statusDialog.menuAria",
+  "presence.statusDialog.menuLabel",
+  "presence.statusDialog.save",
+  "presence.statusDialog.saveFailed",
+  "presence.statusDialog.saving",
+  "presence.statusDialog.textLabel",
+  "presence.statusDialog.textPlaceholder",
+  "presence.statusDialog.title",
+  "presence.statusExpiry.custom",
+  "presence.statusExpiry.hour1",
+  "presence.statusExpiry.min30",
+  "presence.statusExpiry.none",
+  "presence.statusExpiry.today",
+  "presence.statusPreset.commute",
+  "presence.statusPreset.meeting",
+  "presence.statusPreset.sick",
+  "presence.statusPreset.vacation",
+  "presence.statusPreset.wfh",
+  "presence.write.failed",
   "readState.markUnread.action",
   "readState.markUnread.done",
   "readState.markUnread.failed",
@@ -4113,6 +4181,102 @@ export const argumentSpecs = {
     "cli": "string"
   },
   "onboarding.harnessLogin.waitingDevice": {},
+  "presence.dnd.hint": {},
+  "presence.dnd.hintPick": {},
+  "presence.menu.cardLabel": {
+    "name": "string",
+    "status": "string"
+  },
+  "presence.menu.cardLabelCustom": {
+    "custom": "string",
+    "name": "string",
+    "status": "string"
+  },
+  "presence.menu.label": {},
+  "presence.menu.statusLine": {
+    "status": "string"
+  },
+  "presence.menu.triggerLabel": {
+    "status": "string"
+  },
+  "presence.pauseBanner.dndAction": {},
+  "presence.pauseBanner.dndLabel": {
+    "action": "string",
+    "title": "string"
+  },
+  "presence.pauseBanner.dndTitle": {},
+  "presence.pauseBanner.pausedLabel": {
+    "action": "string",
+    "detail": "string",
+    "title": "string"
+  },
+  "presence.pauseBanner.pausedTitle": {},
+  "presence.pauseBanner.resumeAction": {},
+  "presence.pausePreset.custom": {},
+  "presence.pausePreset.hour1": {},
+  "presence.pausePreset.hour2": {},
+  "presence.pausePreset.min30": {},
+  "presence.pausePreset.nextMonday": {},
+  "presence.pausePreset.tomorrow": {},
+  "presence.pauseUntil.activeNote": {},
+  "presence.pauseUntil.changeAction": {},
+  "presence.pauseUntil.dndConfirm": {},
+  "presence.pauseUntil.dndDescription": {},
+  "presence.pauseUntil.dndPresetHint": {},
+  "presence.pauseUntil.dndTitle": {},
+  "presence.pauseUntil.invalid": {},
+  "presence.pauseUntil.labelWithChange": {
+    "label": "string"
+  },
+  "presence.pauseUntil.none": {},
+  "presence.pauseUntil.noneActionLabel": {},
+  "presence.pauseUntil.offlineReason": {},
+  "presence.pauseUntil.optionWithHint": {
+    "hint": "string",
+    "label": "string"
+  },
+  "presence.pauseUntil.past": {},
+  "presence.pauseUntil.pauseConfirm": {},
+  "presence.pauseUntil.pauseDescription": {},
+  "presence.pauseUntil.pausePresetHint": {},
+  "presence.pauseUntil.pauseTitle": {},
+  "presence.pauseUntil.setAction": {},
+  "presence.status.away": {},
+  "presence.status.dnd": {},
+  "presence.status.offline": {},
+  "presence.status.online": {},
+  "presence.statusDialog.clear": {},
+  "presence.statusDialog.clearFailed": {},
+  "presence.statusDialog.closeLabel": {},
+  "presence.statusDialog.description": {},
+  "presence.statusDialog.emojiClear": {},
+  "presence.statusDialog.emojiLabel": {},
+  "presence.statusDialog.expiryLabel": {},
+  "presence.statusDialog.expiryRow": {
+    "label": "string",
+    "value": "string"
+  },
+  "presence.statusDialog.menuAria": {
+    "line": "string"
+  },
+  "presence.statusDialog.menuLabel": {},
+  "presence.statusDialog.save": {},
+  "presence.statusDialog.saveFailed": {},
+  "presence.statusDialog.saving": {},
+  "presence.statusDialog.textLabel": {},
+  "presence.statusDialog.textPlaceholder": {},
+  "presence.statusDialog.title": {},
+  "presence.statusExpiry.custom": {},
+  "presence.statusExpiry.hour1": {},
+  "presence.statusExpiry.min30": {},
+  "presence.statusExpiry.none": {},
+  "presence.statusExpiry.today": {},
+  "presence.statusPreset.commute": {},
+  "presence.statusPreset.meeting": {},
+  "presence.statusPreset.sick": {},
+  "presence.statusPreset.vacation": {},
+  "presence.statusPreset.wfh": {},
+  "presence.write.failed": {},
   "readState.markUnread.action": {},
   "readState.markUnread.done": {},
   "readState.markUnread.failed": {},
@@ -7154,6 +7318,74 @@ export interface MessageArgs {
   "onboarding.harnessLogin.waitingBrowser": Record<string, never>;
   "onboarding.harnessLogin.waitingDetail": { cli: string };
   "onboarding.harnessLogin.waitingDevice": Record<string, never>;
+  "presence.dnd.hint": Record<string, never>;
+  "presence.dnd.hintPick": Record<string, never>;
+  "presence.menu.cardLabel": { name: string; status: string };
+  "presence.menu.cardLabelCustom": { custom: string; name: string; status: string };
+  "presence.menu.label": Record<string, never>;
+  "presence.menu.statusLine": { status: string };
+  "presence.menu.triggerLabel": { status: string };
+  "presence.pauseBanner.dndAction": Record<string, never>;
+  "presence.pauseBanner.dndLabel": { action: string; title: string };
+  "presence.pauseBanner.dndTitle": Record<string, never>;
+  "presence.pauseBanner.pausedLabel": { action: string; detail: string; title: string };
+  "presence.pauseBanner.pausedTitle": Record<string, never>;
+  "presence.pauseBanner.resumeAction": Record<string, never>;
+  "presence.pausePreset.custom": Record<string, never>;
+  "presence.pausePreset.hour1": Record<string, never>;
+  "presence.pausePreset.hour2": Record<string, never>;
+  "presence.pausePreset.min30": Record<string, never>;
+  "presence.pausePreset.nextMonday": Record<string, never>;
+  "presence.pausePreset.tomorrow": Record<string, never>;
+  "presence.pauseUntil.activeNote": Record<string, never>;
+  "presence.pauseUntil.changeAction": Record<string, never>;
+  "presence.pauseUntil.dndConfirm": Record<string, never>;
+  "presence.pauseUntil.dndDescription": Record<string, never>;
+  "presence.pauseUntil.dndPresetHint": Record<string, never>;
+  "presence.pauseUntil.dndTitle": Record<string, never>;
+  "presence.pauseUntil.invalid": Record<string, never>;
+  "presence.pauseUntil.labelWithChange": { label: string };
+  "presence.pauseUntil.none": Record<string, never>;
+  "presence.pauseUntil.noneActionLabel": Record<string, never>;
+  "presence.pauseUntil.offlineReason": Record<string, never>;
+  "presence.pauseUntil.optionWithHint": { hint: string; label: string };
+  "presence.pauseUntil.past": Record<string, never>;
+  "presence.pauseUntil.pauseConfirm": Record<string, never>;
+  "presence.pauseUntil.pauseDescription": Record<string, never>;
+  "presence.pauseUntil.pausePresetHint": Record<string, never>;
+  "presence.pauseUntil.pauseTitle": Record<string, never>;
+  "presence.pauseUntil.setAction": Record<string, never>;
+  "presence.status.away": Record<string, never>;
+  "presence.status.dnd": Record<string, never>;
+  "presence.status.offline": Record<string, never>;
+  "presence.status.online": Record<string, never>;
+  "presence.statusDialog.clear": Record<string, never>;
+  "presence.statusDialog.clearFailed": Record<string, never>;
+  "presence.statusDialog.closeLabel": Record<string, never>;
+  "presence.statusDialog.description": Record<string, never>;
+  "presence.statusDialog.emojiClear": Record<string, never>;
+  "presence.statusDialog.emojiLabel": Record<string, never>;
+  "presence.statusDialog.expiryLabel": Record<string, never>;
+  "presence.statusDialog.expiryRow": { label: string; value: string };
+  "presence.statusDialog.menuAria": { line: string };
+  "presence.statusDialog.menuLabel": Record<string, never>;
+  "presence.statusDialog.save": Record<string, never>;
+  "presence.statusDialog.saveFailed": Record<string, never>;
+  "presence.statusDialog.saving": Record<string, never>;
+  "presence.statusDialog.textLabel": Record<string, never>;
+  "presence.statusDialog.textPlaceholder": Record<string, never>;
+  "presence.statusDialog.title": Record<string, never>;
+  "presence.statusExpiry.custom": Record<string, never>;
+  "presence.statusExpiry.hour1": Record<string, never>;
+  "presence.statusExpiry.min30": Record<string, never>;
+  "presence.statusExpiry.none": Record<string, never>;
+  "presence.statusExpiry.today": Record<string, never>;
+  "presence.statusPreset.commute": Record<string, never>;
+  "presence.statusPreset.meeting": Record<string, never>;
+  "presence.statusPreset.sick": Record<string, never>;
+  "presence.statusPreset.vacation": Record<string, never>;
+  "presence.statusPreset.wfh": Record<string, never>;
+  "presence.write.failed": Record<string, never>;
   "readState.markUnread.action": Record<string, never>;
   "readState.markUnread.done": Record<string, never>;
   "readState.markUnread.failed": Record<string, never>;

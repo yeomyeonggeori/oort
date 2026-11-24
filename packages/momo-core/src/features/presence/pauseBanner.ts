@@ -1,5 +1,10 @@
 import type { PresenceStatus } from "../../lib/api";
+import type { LocaleService } from "../../i18n/context";
+import type { PlainMessageKey } from "../../i18n/keys";
 import { pauseUntilStateLabel } from "./pauseUntil";
+
+// 문구는 `i18n/catalogs/<언어>/presence.json`에 있다. 줄의 글을 짓는 `pauseBanner`만 `formatMessage`를 첫 인자로 받는다.
+type FormatMessage = LocaleService["formatMessage"];
 
 // =============================================================================
 // 멈춤이 보인다 (ADR-0204 D3, #3923).
@@ -37,15 +42,13 @@ import { pauseUntilStateLabel } from "./pauseUntil";
 export type PauseBannerKind = "paused" | "dnd";
 
 /** 줄의 제목 — 알림 일시 중지가 켜져 있을 때. */
-export const PAUSE_BANNER_PAUSED_TITLE = "알림 일시 중지 중";
+export const PAUSE_BANNER_PAUSED_TITLE_KEY = "presence.pauseBanner.pausedTitle" satisfies PlainMessageKey;
 /** 알림 일시 중지만 끄는 단추. 방해 금지 상태는 건드리지 않는다. */
-export const PAUSE_BANNER_RESUME_ACTION = "다시 켜기";
+export const PAUSE_BANNER_RESUME_ACTION_KEY = "presence.pauseBanner.resumeAction" satisfies PlainMessageKey;
 /** 줄의 제목 — 일시 중지는 꺼졌지만 선언 상태가 아직 방해 금지일 때. */
-export const PAUSE_BANNER_DND_TITLE = "상태는 아직 방해 금지예요";
+export const PAUSE_BANNER_DND_TITLE_KEY = "presence.pauseBanner.dndTitle" satisfies PlainMessageKey;
 /** 선언 상태를 풀어(`auto`) 방해 금지를 끄는 단추. */
-export const PAUSE_BANNER_DND_ACTION = "풀기";
-
-const SEPARATOR = " · ";
+export const PAUSE_BANNER_DND_ACTION_KEY = "presence.pauseBanner.dndAction" satisfies PlainMessageKey;
 
 export interface PauseBannerInput {
   /** 알림 규칙을 서버에서 한 번이라도 읽었는가. 못 읽었으면 어느 줄도 세우지 않는다. */
@@ -80,29 +83,32 @@ export interface PauseBanner {
  * 일시 중지가 먼저다: 방해 금지에 묶여 둘 다 켜져 있으면 알림이 멈춘 줄을 말한다.
  */
 export function pauseBanner(
+  formatMessage: FormatMessage,
   input: PauseBannerInput,
   nowMs: number
 ): PauseBanner | null {
   if (!input.rulesReady) return null;
   if (input.paused) {
-    const detail = pauseUntilStateLabel(input.untilMs, nowMs);
+    const title = formatMessage(PAUSE_BANNER_PAUSED_TITLE_KEY);
+    const action = formatMessage(PAUSE_BANNER_RESUME_ACTION_KEY);
+    const detail = pauseUntilStateLabel(formatMessage, input.untilMs, nowMs);
     return {
       kind: "paused",
-      title: PAUSE_BANNER_PAUSED_TITLE,
+      title,
       detail,
-      action: PAUSE_BANNER_RESUME_ACTION,
-      label: [PAUSE_BANNER_PAUSED_TITLE, detail, PAUSE_BANNER_RESUME_ACTION].join(
-        SEPARATOR
-      ),
+      action,
+      label: formatMessage("presence.pauseBanner.pausedLabel", { title, detail, action }),
       untilMs: input.untilMs,
     };
   }
   if (input.declared === "dnd") {
+    const title = formatMessage(PAUSE_BANNER_DND_TITLE_KEY);
+    const action = formatMessage(PAUSE_BANNER_DND_ACTION_KEY);
     return {
       kind: "dnd",
-      title: PAUSE_BANNER_DND_TITLE,
-      action: PAUSE_BANNER_DND_ACTION,
-      label: [PAUSE_BANNER_DND_TITLE, PAUSE_BANNER_DND_ACTION].join(SEPARATOR),
+      title,
+      action,
+      label: formatMessage("presence.pauseBanner.dndLabel", { title, action }),
       untilMs: input.declaredUntilMs,
     };
   }

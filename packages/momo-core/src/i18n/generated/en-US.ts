@@ -9322,6 +9322,502 @@ export const catalog: MessageCatalog = {
       "value": "Enter the code shown in the terminal into your browser."
     }
   ],
+  "presence.dnd.hint": [
+    {
+      "type": 0,
+      "value": "Others can see this. Notifications are paused too."
+    }
+  ],
+  "presence.dnd.hintPick": [
+    {
+      "type": 0,
+      "value": "Others can see this. Notifications are paused too. Select to pick an end time."
+    }
+  ],
+  "presence.menu.cardLabel": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": ". My status: "
+    },
+    {
+      "type": 1,
+      "value": "status"
+    },
+    {
+      "type": 0,
+      "value": " (select to change)"
+    }
+  ],
+  "presence.menu.cardLabelCustom": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": ". My status: "
+    },
+    {
+      "type": 1,
+      "value": "status"
+    },
+    {
+      "type": 0,
+      "value": " (select to change). "
+    },
+    {
+      "type": 1,
+      "value": "custom"
+    }
+  ],
+  "presence.menu.label": [
+    {
+      "type": 0,
+      "value": "My status"
+    }
+  ],
+  "presence.menu.statusLine": [
+    {
+      "type": 0,
+      "value": "My status: "
+    },
+    {
+      "type": 1,
+      "value": "status"
+    }
+  ],
+  "presence.menu.triggerLabel": [
+    {
+      "type": 0,
+      "value": "My status: "
+    },
+    {
+      "type": 1,
+      "value": "status"
+    },
+    {
+      "type": 0,
+      "value": " (select to change)"
+    }
+  ],
+  "presence.pauseBanner.dndAction": [
+    {
+      "type": 0,
+      "value": "Turn off"
+    }
+  ],
+  "presence.pauseBanner.dndLabel": [
+    {
+      "type": 1,
+      "value": "title"
+    },
+    {
+      "type": 0,
+      "value": " · "
+    },
+    {
+      "type": 1,
+      "value": "action"
+    }
+  ],
+  "presence.pauseBanner.dndTitle": [
+    {
+      "type": 0,
+      "value": "Your status is still Do not disturb"
+    }
+  ],
+  "presence.pauseBanner.pausedLabel": [
+    {
+      "type": 1,
+      "value": "title"
+    },
+    {
+      "type": 0,
+      "value": " · "
+    },
+    {
+      "type": 1,
+      "value": "detail"
+    },
+    {
+      "type": 0,
+      "value": " · "
+    },
+    {
+      "type": 1,
+      "value": "action"
+    }
+  ],
+  "presence.pauseBanner.pausedTitle": [
+    {
+      "type": 0,
+      "value": "Notifications paused"
+    }
+  ],
+  "presence.pauseBanner.resumeAction": [
+    {
+      "type": 0,
+      "value": "Turn back on"
+    }
+  ],
+  "presence.pausePreset.custom": [
+    {
+      "type": 0,
+      "value": "Pick a time"
+    }
+  ],
+  "presence.pausePreset.hour1": [
+    {
+      "type": 0,
+      "value": "1 hour"
+    }
+  ],
+  "presence.pausePreset.hour2": [
+    {
+      "type": 0,
+      "value": "2 hours"
+    }
+  ],
+  "presence.pausePreset.min30": [
+    {
+      "type": 0,
+      "value": "30 minutes"
+    }
+  ],
+  "presence.pausePreset.nextMonday": [
+    {
+      "type": 0,
+      "value": "Until next Monday 9:00 AM"
+    }
+  ],
+  "presence.pausePreset.tomorrow": [
+    {
+      "type": 0,
+      "value": "Until tomorrow 9:00 AM"
+    }
+  ],
+  "presence.pauseUntil.activeNote": [
+    {
+      "type": 0,
+      "value": "You won't get notifications from this workspace."
+    }
+  ],
+  "presence.pauseUntil.changeAction": [
+    {
+      "type": 0,
+      "value": "Change end time"
+    }
+  ],
+  "presence.pauseUntil.dndConfirm": [
+    {
+      "type": 0,
+      "value": "Turn on Do not disturb"
+    }
+  ],
+  "presence.pauseUntil.dndDescription": [
+    {
+      "type": 0,
+      "value": "Others can see this. Notifications are paused too. It turns off on its own afterward."
+    }
+  ],
+  "presence.pauseUntil.dndPresetHint": [
+    {
+      "type": 0,
+      "value": "Select to turn on Do not disturb until this time."
+    }
+  ],
+  "presence.pauseUntil.dndTitle": [
+    {
+      "type": 0,
+      "value": "Keep Do not disturb on until when?"
+    }
+  ],
+  "presence.pauseUntil.invalid": [
+    {
+      "type": 0,
+      "value": "Check the date and time."
+    }
+  ],
+  "presence.pauseUntil.labelWithChange": [
+    {
+      "type": 1,
+      "value": "label"
+    },
+    {
+      "type": 0,
+      "value": " · Change end time"
+    }
+  ],
+  "presence.pauseUntil.none": [
+    {
+      "type": 0,
+      "value": "No end time"
+    }
+  ],
+  "presence.pauseUntil.noneActionLabel": [
+    {
+      "type": 0,
+      "value": "No end time · Set end time"
+    }
+  ],
+  "presence.pauseUntil.offlineReason": [
+    {
+      "type": 0,
+      "value": "You're offline, so this can't be changed right now."
+    }
+  ],
+  "presence.pauseUntil.optionWithHint": [
+    {
+      "type": 1,
+      "value": "label"
+    },
+    {
+      "type": 0,
+      "value": ", "
+    },
+    {
+      "type": 1,
+      "value": "hint"
+    }
+  ],
+  "presence.pauseUntil.past": [
+    {
+      "type": 0,
+      "value": "That time has passed. Pick another time."
+    }
+  ],
+  "presence.pauseUntil.pauseConfirm": [
+    {
+      "type": 0,
+      "value": "Pause notifications"
+    }
+  ],
+  "presence.pauseUntil.pauseDescription": [
+    {
+      "type": 0,
+      "value": "You won't get notifications from this workspace until the time you pick. Mentions and approval requests are paused too. They resume on their own afterward."
+    }
+  ],
+  "presence.pauseUntil.pausePresetHint": [
+    {
+      "type": 0,
+      "value": "Select to pause notifications until this time."
+    }
+  ],
+  "presence.pauseUntil.pauseTitle": [
+    {
+      "type": 0,
+      "value": "Pause notifications until when?"
+    }
+  ],
+  "presence.pauseUntil.setAction": [
+    {
+      "type": 0,
+      "value": "Set end time"
+    }
+  ],
+  "presence.status.away": [
+    {
+      "type": 0,
+      "value": "Away"
+    }
+  ],
+  "presence.status.dnd": [
+    {
+      "type": 0,
+      "value": "Do not disturb"
+    }
+  ],
+  "presence.status.offline": [
+    {
+      "type": 0,
+      "value": "Offline"
+    }
+  ],
+  "presence.status.online": [
+    {
+      "type": 0,
+      "value": "Online"
+    }
+  ],
+  "presence.statusDialog.clear": [
+    {
+      "type": 0,
+      "value": "Clear status"
+    }
+  ],
+  "presence.statusDialog.clearFailed": [
+    {
+      "type": 0,
+      "value": "Couldn't clear your status. Try again."
+    }
+  ],
+  "presence.statusDialog.closeLabel": [
+    {
+      "type": 0,
+      "value": "Close set status"
+    }
+  ],
+  "presence.statusDialog.description": [
+    {
+      "type": 0,
+      "value": "Share what you're doing with an emoji and a short note."
+    }
+  ],
+  "presence.statusDialog.emojiClear": [
+    {
+      "type": 0,
+      "value": "Clear emoji"
+    }
+  ],
+  "presence.statusDialog.emojiLabel": [
+    {
+      "type": 0,
+      "value": "Choose a status emoji"
+    }
+  ],
+  "presence.statusDialog.expiryLabel": [
+    {
+      "type": 0,
+      "value": "Expires"
+    }
+  ],
+  "presence.statusDialog.expiryRow": [
+    {
+      "type": 1,
+      "value": "label"
+    },
+    {
+      "type": 0,
+      "value": ", "
+    },
+    {
+      "type": 1,
+      "value": "value"
+    }
+  ],
+  "presence.statusDialog.menuAria": [
+    {
+      "type": 0,
+      "value": "Set status, "
+    },
+    {
+      "type": 1,
+      "value": "line"
+    }
+  ],
+  "presence.statusDialog.menuLabel": [
+    {
+      "type": 0,
+      "value": "Set status"
+    }
+  ],
+  "presence.statusDialog.save": [
+    {
+      "type": 0,
+      "value": "Save status"
+    }
+  ],
+  "presence.statusDialog.saveFailed": [
+    {
+      "type": 0,
+      "value": "Couldn't save your status. Try again."
+    }
+  ],
+  "presence.statusDialog.saving": [
+    {
+      "type": 0,
+      "value": "Saving…"
+    }
+  ],
+  "presence.statusDialog.textLabel": [
+    {
+      "type": 0,
+      "value": "Status text"
+    }
+  ],
+  "presence.statusDialog.textPlaceholder": [
+    {
+      "type": 0,
+      "value": "What you're doing now"
+    }
+  ],
+  "presence.statusDialog.title": [
+    {
+      "type": 0,
+      "value": "Set status"
+    }
+  ],
+  "presence.statusExpiry.custom": [
+    {
+      "type": 0,
+      "value": "Pick a time"
+    }
+  ],
+  "presence.statusExpiry.hour1": [
+    {
+      "type": 0,
+      "value": "1 hour"
+    }
+  ],
+  "presence.statusExpiry.min30": [
+    {
+      "type": 0,
+      "value": "30 minutes"
+    }
+  ],
+  "presence.statusExpiry.none": [
+    {
+      "type": 0,
+      "value": "Don't clear"
+    }
+  ],
+  "presence.statusExpiry.today": [
+    {
+      "type": 0,
+      "value": "Until today"
+    }
+  ],
+  "presence.statusPreset.commute": [
+    {
+      "type": 0,
+      "value": "Commuting"
+    }
+  ],
+  "presence.statusPreset.meeting": [
+    {
+      "type": 0,
+      "value": "In a meeting"
+    }
+  ],
+  "presence.statusPreset.sick": [
+    {
+      "type": 0,
+      "value": "Out sick"
+    }
+  ],
+  "presence.statusPreset.vacation": [
+    {
+      "type": 0,
+      "value": "On vacation"
+    }
+  ],
+  "presence.statusPreset.wfh": [
+    {
+      "type": 0,
+      "value": "Working from home"
+    }
+  ],
+  "presence.write.failed": [
+    {
+      "type": 0,
+      "value": "Couldn't change your status. Try again."
+    }
+  ],
   "readState.markUnread.action": [
     {
       "type": 0,
