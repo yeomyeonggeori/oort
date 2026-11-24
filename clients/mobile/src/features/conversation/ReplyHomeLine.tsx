@@ -50,7 +50,7 @@ export function ReplyHomeLine({
   const styles = useStyles(buildStyles);
   const formatMessage = useFormatMessage();
   const expressions = useExpressionItems();
-  const copy = replyHomeCopy(replyHomeLineOf(rootId, root ?? undefined, expressions), {
+  const copy = replyHomeCopy(replyHomeLineOf(formatMessage, rootId, root ?? undefined, expressions), {
     directory,
     myMemberId,
     formatMessage,

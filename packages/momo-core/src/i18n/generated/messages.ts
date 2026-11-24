@@ -1860,6 +1860,18 @@ export const messageKeys = [
   "timeline.actionFailure.replyNotAllowed",
   "timeline.actionFailure.replyNotMember",
   "timeline.actionFailure.replyOriginalNotFound",
+  "timeline.actionResult.avatarExpired",
+  "timeline.actionResult.avatarRejected",
+  "timeline.actionResult.avatarRoleRequired",
+  "timeline.actionResult.fallbackTitle",
+  "timeline.actionResult.nameExpired",
+  "timeline.actionResult.nameRejected",
+  "timeline.actionResult.nameRoleRequired",
+  "timeline.actionResult.noteExecuted",
+  "timeline.actionResult.noteRejected",
+  "timeline.actionResult.noteRoleRequired",
+  "timeline.actionResult.permissionNeeded",
+  "timeline.actionResult.secretOnce",
   "timeline.addMember.createdDescription",
   "timeline.addMember.createdDescriptionPublic",
   "timeline.addMember.later",
@@ -1871,12 +1883,47 @@ export const messageKeys = [
   "timeline.agentRail.openRecord",
   "timeline.agentRail.sheetClose",
   "timeline.agentRail.sheetTitle",
+  "timeline.appNotice.egressKnown",
+  "timeline.appNotice.egressOutside",
+  "timeline.appNotice.grantRevoked",
+  "timeline.appNotice.loginLostHermesNamed",
+  "timeline.appNotice.loginLostHermesUnnamed",
+  "timeline.appNotice.loginLostNamed",
+  "timeline.appNotice.loginLostUnnamed",
+  "timeline.appNotice.notAllowedPhone",
+  "timeline.appNotice.notAllowedWeb",
+  "timeline.appNotice.openApp",
+  "timeline.appNotice.openOnWeb",
+  "timeline.appNotice.rateLimitedNamed",
+  "timeline.appNotice.rateLimitedUnnamed",
+  "timeline.appNotice.signInAgain",
+  "timeline.appNotice.siteOff",
+  "timeline.appNotice.siteSilent",
+  "timeline.appNotice.working",
+  "timeline.appNotice.workingMinutes",
   "timeline.approval.channelAgentIn",
   "timeline.approval.channelNeedsMember",
   "timeline.approval.channelsRefused",
   "timeline.approval.reproposeBusy",
   "timeline.approval.reproposeSeeded",
+  "timeline.approvalDecision.decidedElsewhere",
+  "timeline.approvalDecision.expiredFirst",
+  "timeline.approvalDecision.failedLoginExpired",
+  "timeline.approvalDecision.failedNotAccepted",
+  "timeline.approvalDecision.failedRateLimited",
+  "timeline.approvalDecision.failedServerError",
+  "timeline.approvalDecision.forbidden",
+  "timeline.approvalDecision.idempotencyConflict",
+  "timeline.approvalDecision.notFound",
+  "timeline.approvalDecision.roleRequired",
+  "timeline.approvalDecision.sendTimeout",
+  "timeline.approvalDecision.sendUnreached",
+  "timeline.approvalDecision.unreadable",
   "timeline.approvalExpiry.soon",
+  "timeline.approvalNote.elsewhere",
+  "timeline.approvalNote.offline",
+  "timeline.approvalNote.waitingNamed",
+  "timeline.approvalNote.waitingOther",
   "timeline.artifactNote.awaitingApproval",
   "timeline.artifactNote.cancelled",
   "timeline.artifactNote.done",
@@ -1917,6 +1964,7 @@ export const messageKeys = [
   "timeline.commandSuggest.askNone",
   "timeline.commandSuggest.askOperator",
   "timeline.commandSuggest.askThread",
+  "timeline.commandSuggest.head",
   "timeline.commandSuggest.oneLineAiConnect",
   "timeline.commandSuggest.oneLineCard",
   "timeline.commandSuggest.onlyMe",
@@ -1951,6 +1999,26 @@ export const messageKeys = [
   "timeline.commandSuggest.targetWorkspace",
   "timeline.commandSuggest.teamClose",
   "timeline.commandSuggest.teamOpen",
+  "timeline.completion.checkDetailSpoken",
+  "timeline.completion.checkFail",
+  "timeline.completion.checkPass",
+  "timeline.completion.checkPending",
+  "timeline.completion.checkSkip",
+  "timeline.completion.checkUnknown",
+  "timeline.completion.elapsedClock",
+  "timeline.completion.elapsedHours",
+  "timeline.completion.elapsedMinutes",
+  "timeline.completion.elapsedSeconds",
+  "timeline.completion.elapsedSubSecond",
+  "timeline.completion.outcomeAttention",
+  "timeline.completion.outcomeClean",
+  "timeline.completion.surface",
+  "timeline.completion.tallyItem",
+  "timeline.completion.workedLabel",
+  "timeline.completion.workedWithElapsed",
+  "timeline.copy.linkAction",
+  "timeline.copy.messageAction",
+  "timeline.copy.messageDone",
   "timeline.createChannel.privateDetail",
   "timeline.createChannel.publicDetail",
   "timeline.decisionStage.position",
@@ -1973,11 +2041,46 @@ export const messageKeys = [
   "timeline.edited.atTime",
   "timeline.edited.mark",
   "timeline.edited.pressHint",
+  "timeline.emptyChannel.addMemberAction",
+  "timeline.emptyChannel.channelDetail",
+  "timeline.emptyChannel.channelHeadline",
+  "timeline.emptyChannel.connectAgentAction",
+  "timeline.emptyChannel.dmAgentHeadline",
+  "timeline.emptyChannel.dmDetailGroup",
+  "timeline.emptyChannel.dmDetailGroupAgents",
+  "timeline.emptyChannel.dmDetailPair",
+  "timeline.emptyChannel.dmHeadline",
+  "timeline.emptyChannel.dmPeerHeadline",
+  "timeline.emptyChannel.writeAction",
   "timeline.lightbox.copied",
   "timeline.lightbox.copy",
   "timeline.lightbox.copyFailed",
   "timeline.lightbox.zoomIn",
   "timeline.lightbox.zoomOut",
+  "timeline.loginHandoff.decisionLead",
+  "timeline.loginHandoff.decisionResume",
+  "timeline.loginHandoff.decisionStop",
+  "timeline.loginHandoff.deploymentNotice",
+  "timeline.loginHandoff.detailExpired",
+  "timeline.loginHandoff.detailReturned",
+  "timeline.loginHandoff.detailReturnedWithoutWindow",
+  "timeline.loginHandoff.detailSessionEnded",
+  "timeline.loginHandoff.elsewhere",
+  "timeline.loginHandoff.inControl",
+  "timeline.loginHandoff.inControlLead",
+  "timeline.loginHandoff.offline",
+  "timeline.loginHandoff.outcomeExpired",
+  "timeline.loginHandoff.outcomeReturned",
+  "timeline.loginHandoff.outcomeSessionEnded",
+  "timeline.loginHandoff.phaseStopped",
+  "timeline.loginHandoff.phaseWaiting",
+  "timeline.loginHandoff.stoppedCancelled",
+  "timeline.loginHandoff.stoppedNeverStarted",
+  "timeline.loginHandoff.title",
+  "timeline.loginHandoff.waiting",
+  "timeline.loginHandoff.waitingClosedExpired",
+  "timeline.loginHandoff.waitingClosedReturned",
+  "timeline.loginHandoff.waitingClosedSessionEnded",
   "timeline.memberPanel.agentKind",
   "timeline.memberPanel.elapsedDays",
   "timeline.memberPanel.elapsedHours",
@@ -2024,8 +2127,22 @@ export const messageKeys = [
   "timeline.pins.listNone",
   "timeline.pins.rowMark",
   "timeline.pins.stamp",
+  "timeline.quote.action",
+  "timeline.quote.cancel",
+  "timeline.quote.deleted",
+  "timeline.quote.deletedSpoken",
   "timeline.quote.head",
   "timeline.quote.headUnnamed",
+  "timeline.quote.jump",
+  "timeline.quote.kindApproval",
+  "timeline.quote.kindArtifact",
+  "timeline.quote.kindCard",
+  "timeline.quote.kindCompletionReport",
+  "timeline.quote.kindDiff",
+  "timeline.quote.kindSystem",
+  "timeline.quote.kindToolCall",
+  "timeline.quote.kindToolResult",
+  "timeline.quote.nestedMark",
   "timeline.reaction.chipMine",
   "timeline.reaction.chipMineNoNames",
   "timeline.reaction.chipOther",
@@ -2038,6 +2155,27 @@ export const messageKeys = [
   "timeline.reaction.namesExtra2",
   "timeline.reaction.namesExtra3",
   "timeline.reaction.selfToken",
+  "timeline.requestBundle.approvalRequest",
+  "timeline.requestBundle.cancelled",
+  "timeline.requestBundle.chipAfterOnly",
+  "timeline.requestBundle.chipBeforeAfter",
+  "timeline.requestBundle.daysLeft",
+  "timeline.requestBundle.declined",
+  "timeline.requestBundle.declinedBy",
+  "timeline.requestBundle.details",
+  "timeline.requestBundle.done",
+  "timeline.requestBundle.executing",
+  "timeline.requestBundle.expiresSoon",
+  "timeline.requestBundle.failed",
+  "timeline.requestBundle.hoursLeft",
+  "timeline.requestBundle.minutesLeft",
+  "timeline.requestBundle.quietWithDetails",
+  "timeline.requestBundle.rationale",
+  "timeline.requestBundle.requiredRole",
+  "timeline.requestBundle.thinking",
+  "timeline.requestBundle.toolRunNamed",
+  "timeline.requestBundle.waitingAdmin",
+  "timeline.requestBundle.waitingNamed",
   "timeline.runException.open",
   "timeline.runException.settings",
   "timeline.send.discard",
@@ -2075,6 +2213,45 @@ export const messageKeys = [
   "timeline.teamAi.reasonOverBudget",
   "timeline.teamAi.reasonRateLimited",
   "timeline.teamAi.reasonSlow",
+  "timeline.teamAiReply.appItem",
+  "timeline.teamAiReply.appItemVerb",
+  "timeline.teamAiReply.appsLine",
+  "timeline.teamAiReply.appsSpoken",
+  "timeline.teamAiReply.citationOpenHost",
+  "timeline.teamAiReply.citationOpenTitled",
+  "timeline.teamAiReply.connected",
+  "timeline.teamAiReply.connectedMore",
+  "timeline.teamAiReply.detailsClose",
+  "timeline.teamAiReply.detailsOpen",
+  "timeline.teamAiReply.exposure",
+  "timeline.teamAiReply.modelChip",
+  "timeline.teamAiReply.onBehalfOf",
+  "timeline.teamAiReply.otherApp",
+  "timeline.teamAiReply.personalNote",
+  "timeline.teamAiReply.ranOn",
+  "timeline.teamAiReply.selfReport",
+  "timeline.teamAiReply.siteHermes",
+  "timeline.teamAiReply.siteMac",
+  "timeline.teamAiReply.sourceOpen",
+  "timeline.teamAiReply.sourcesCount",
+  "timeline.teamAiReply.sourcesLabel",
+  "timeline.teamAiReply.toolGetAgentRun",
+  "timeline.teamAiReply.toolListAgentRuns",
+  "timeline.teamAiReply.toolListMembers",
+  "timeline.teamAiReply.toolListPlugins",
+  "timeline.teamAiReply.toolReadChannel",
+  "timeline.teamAiReply.toolReadChannelNamed",
+  "timeline.teamAiReply.toolReadThread",
+  "timeline.teamAiReply.toolReadWorkspaceSettings",
+  "timeline.teamAiReply.toolSearchMessages",
+  "timeline.teamAiReply.toolsLine",
+  "timeline.teamAiReply.toolsLineMore",
+  "timeline.teamAiReply.toolWebSearch",
+  "timeline.teamAiReply.verbCreate",
+  "timeline.teamAiReply.verbList",
+  "timeline.teamAiReply.verbRead",
+  "timeline.teamAiReply.verbSearch",
+  "timeline.teamAiReply.verbUpdate",
   "timeline.thread.followDismiss",
   "timeline.thread.followFailed",
   "timeline.thread.followHint",
@@ -4595,6 +4772,18 @@ export const argumentSpecs = {
   "timeline.actionFailure.replyNotAllowed": {},
   "timeline.actionFailure.replyNotMember": {},
   "timeline.actionFailure.replyOriginalNotFound": {},
+  "timeline.actionResult.avatarExpired": {},
+  "timeline.actionResult.avatarRejected": {},
+  "timeline.actionResult.avatarRoleRequired": {},
+  "timeline.actionResult.fallbackTitle": {},
+  "timeline.actionResult.nameExpired": {},
+  "timeline.actionResult.nameRejected": {},
+  "timeline.actionResult.nameRoleRequired": {},
+  "timeline.actionResult.noteExecuted": {},
+  "timeline.actionResult.noteRejected": {},
+  "timeline.actionResult.noteRoleRequired": {},
+  "timeline.actionResult.permissionNeeded": {},
+  "timeline.actionResult.secretOnce": {},
   "timeline.addMember.createdDescription": {
     "name": "string"
   },
@@ -4616,12 +4805,67 @@ export const argumentSpecs = {
   },
   "timeline.agentRail.sheetClose": {},
   "timeline.agentRail.sheetTitle": {},
+  "timeline.appNotice.egressKnown": {
+    "host": "string"
+  },
+  "timeline.appNotice.egressOutside": {},
+  "timeline.appNotice.grantRevoked": {},
+  "timeline.appNotice.loginLostHermesNamed": {
+    "app": "string"
+  },
+  "timeline.appNotice.loginLostHermesUnnamed": {},
+  "timeline.appNotice.loginLostNamed": {
+    "app": "string"
+  },
+  "timeline.appNotice.loginLostUnnamed": {},
+  "timeline.appNotice.notAllowedPhone": {},
+  "timeline.appNotice.notAllowedWeb": {},
+  "timeline.appNotice.openApp": {},
+  "timeline.appNotice.openOnWeb": {},
+  "timeline.appNotice.rateLimitedNamed": {
+    "app": "string",
+    "josa": "string"
+  },
+  "timeline.appNotice.rateLimitedUnnamed": {},
+  "timeline.appNotice.signInAgain": {},
+  "timeline.appNotice.siteOff": {
+    "site": "string"
+  },
+  "timeline.appNotice.siteSilent": {
+    "site": "string"
+  },
+  "timeline.appNotice.working": {
+    "site": "string"
+  },
+  "timeline.appNotice.workingMinutes": {
+    "minutes": "number",
+    "site": "string"
+  },
   "timeline.approval.channelAgentIn": {},
   "timeline.approval.channelNeedsMember": {},
   "timeline.approval.channelsRefused": {},
   "timeline.approval.reproposeBusy": {},
   "timeline.approval.reproposeSeeded": {},
+  "timeline.approvalDecision.decidedElsewhere": {},
+  "timeline.approvalDecision.expiredFirst": {},
+  "timeline.approvalDecision.failedLoginExpired": {},
+  "timeline.approvalDecision.failedNotAccepted": {},
+  "timeline.approvalDecision.failedRateLimited": {},
+  "timeline.approvalDecision.failedServerError": {},
+  "timeline.approvalDecision.forbidden": {},
+  "timeline.approvalDecision.idempotencyConflict": {},
+  "timeline.approvalDecision.notFound": {},
+  "timeline.approvalDecision.roleRequired": {},
+  "timeline.approvalDecision.sendTimeout": {},
+  "timeline.approvalDecision.sendUnreached": {},
+  "timeline.approvalDecision.unreadable": {},
   "timeline.approvalExpiry.soon": {},
+  "timeline.approvalNote.elsewhere": {},
+  "timeline.approvalNote.offline": {},
+  "timeline.approvalNote.waitingNamed": {
+    "name": "string"
+  },
+  "timeline.approvalNote.waitingOther": {},
   "timeline.artifactNote.awaitingApproval": {},
   "timeline.artifactNote.cancelled": {},
   "timeline.artifactNote.done": {},
@@ -4694,6 +4938,10 @@ export const argumentSpecs = {
   "timeline.commandSuggest.askNone": {},
   "timeline.commandSuggest.askOperator": {},
   "timeline.commandSuggest.askThread": {},
+  "timeline.commandSuggest.head": {
+    "josa": "string",
+    "name": "string"
+  },
   "timeline.commandSuggest.oneLineAiConnect": {
     "name": "string"
   },
@@ -4733,6 +4981,40 @@ export const argumentSpecs = {
   "timeline.commandSuggest.targetWorkspace": {},
   "timeline.commandSuggest.teamClose": {},
   "timeline.commandSuggest.teamOpen": {},
+  "timeline.completion.checkDetailSpoken": {
+    "detail": "string",
+    "label": "string"
+  },
+  "timeline.completion.checkFail": {},
+  "timeline.completion.checkPass": {},
+  "timeline.completion.checkPending": {},
+  "timeline.completion.checkSkip": {},
+  "timeline.completion.checkUnknown": {},
+  "timeline.completion.elapsedClock": {},
+  "timeline.completion.elapsedHours": {
+    "count": "number"
+  },
+  "timeline.completion.elapsedMinutes": {
+    "count": "number"
+  },
+  "timeline.completion.elapsedSeconds": {
+    "count": "number"
+  },
+  "timeline.completion.elapsedSubSecond": {},
+  "timeline.completion.outcomeAttention": {},
+  "timeline.completion.outcomeClean": {},
+  "timeline.completion.surface": {},
+  "timeline.completion.tallyItem": {
+    "count": "number",
+    "label": "string"
+  },
+  "timeline.completion.workedLabel": {},
+  "timeline.completion.workedWithElapsed": {
+    "elapsed": "string"
+  },
+  "timeline.copy.linkAction": {},
+  "timeline.copy.messageAction": {},
+  "timeline.copy.messageDone": {},
   "timeline.createChannel.privateDetail": {},
   "timeline.createChannel.publicDetail": {},
   "timeline.decisionStage.position": {
@@ -4782,11 +5064,54 @@ export const argumentSpecs = {
   },
   "timeline.edited.mark": {},
   "timeline.edited.pressHint": {},
+  "timeline.emptyChannel.addMemberAction": {},
+  "timeline.emptyChannel.channelDetail": {},
+  "timeline.emptyChannel.channelHeadline": {},
+  "timeline.emptyChannel.connectAgentAction": {},
+  "timeline.emptyChannel.dmAgentHeadline": {
+    "name": "string"
+  },
+  "timeline.emptyChannel.dmDetailGroup": {
+    "count": "number"
+  },
+  "timeline.emptyChannel.dmDetailGroupAgents": {
+    "count": "number"
+  },
+  "timeline.emptyChannel.dmDetailPair": {},
+  "timeline.emptyChannel.dmHeadline": {},
+  "timeline.emptyChannel.dmPeerHeadline": {
+    "name": "string"
+  },
+  "timeline.emptyChannel.writeAction": {},
   "timeline.lightbox.copied": {},
   "timeline.lightbox.copy": {},
   "timeline.lightbox.copyFailed": {},
   "timeline.lightbox.zoomIn": {},
   "timeline.lightbox.zoomOut": {},
+  "timeline.loginHandoff.decisionLead": {},
+  "timeline.loginHandoff.decisionResume": {},
+  "timeline.loginHandoff.decisionStop": {},
+  "timeline.loginHandoff.deploymentNotice": {},
+  "timeline.loginHandoff.detailExpired": {},
+  "timeline.loginHandoff.detailReturned": {},
+  "timeline.loginHandoff.detailReturnedWithoutWindow": {},
+  "timeline.loginHandoff.detailSessionEnded": {},
+  "timeline.loginHandoff.elsewhere": {},
+  "timeline.loginHandoff.inControl": {},
+  "timeline.loginHandoff.inControlLead": {},
+  "timeline.loginHandoff.offline": {},
+  "timeline.loginHandoff.outcomeExpired": {},
+  "timeline.loginHandoff.outcomeReturned": {},
+  "timeline.loginHandoff.outcomeSessionEnded": {},
+  "timeline.loginHandoff.phaseStopped": {},
+  "timeline.loginHandoff.phaseWaiting": {},
+  "timeline.loginHandoff.stoppedCancelled": {},
+  "timeline.loginHandoff.stoppedNeverStarted": {},
+  "timeline.loginHandoff.title": {},
+  "timeline.loginHandoff.waiting": {},
+  "timeline.loginHandoff.waitingClosedExpired": {},
+  "timeline.loginHandoff.waitingClosedReturned": {},
+  "timeline.loginHandoff.waitingClosedSessionEnded": {},
   "timeline.memberPanel.agentKind": {},
   "timeline.memberPanel.elapsedDays": {
     "count": "number"
@@ -4878,10 +5203,26 @@ export const argumentSpecs = {
   "timeline.pins.stamp": {
     "date": "string"
   },
+  "timeline.quote.action": {},
+  "timeline.quote.cancel": {},
+  "timeline.quote.deleted": {},
+  "timeline.quote.deletedSpoken": {
+    "head": "string"
+  },
   "timeline.quote.head": {
     "name": "string"
   },
   "timeline.quote.headUnnamed": {},
+  "timeline.quote.jump": {},
+  "timeline.quote.kindApproval": {},
+  "timeline.quote.kindArtifact": {},
+  "timeline.quote.kindCard": {},
+  "timeline.quote.kindCompletionReport": {},
+  "timeline.quote.kindDiff": {},
+  "timeline.quote.kindSystem": {},
+  "timeline.quote.kindToolCall": {},
+  "timeline.quote.kindToolResult": {},
+  "timeline.quote.nestedMark": {},
   "timeline.reaction.chipMine": {
     "count": "number",
     "emoji": "string",
@@ -4931,6 +5272,48 @@ export const argumentSpecs = {
     "extra": "number"
   },
   "timeline.reaction.selfToken": {},
+  "timeline.requestBundle.approvalRequest": {},
+  "timeline.requestBundle.cancelled": {},
+  "timeline.requestBundle.chipAfterOnly": {
+    "after": "string",
+    "label": "string"
+  },
+  "timeline.requestBundle.chipBeforeAfter": {
+    "after": "string",
+    "before": "string",
+    "label": "string"
+  },
+  "timeline.requestBundle.daysLeft": {
+    "count": "number"
+  },
+  "timeline.requestBundle.declined": {},
+  "timeline.requestBundle.declinedBy": {
+    "name": "string"
+  },
+  "timeline.requestBundle.details": {},
+  "timeline.requestBundle.done": {},
+  "timeline.requestBundle.executing": {},
+  "timeline.requestBundle.expiresSoon": {},
+  "timeline.requestBundle.failed": {},
+  "timeline.requestBundle.hoursLeft": {
+    "count": "number"
+  },
+  "timeline.requestBundle.minutesLeft": {
+    "count": "number"
+  },
+  "timeline.requestBundle.quietWithDetails": {
+    "quiet": "string"
+  },
+  "timeline.requestBundle.rationale": {},
+  "timeline.requestBundle.requiredRole": {},
+  "timeline.requestBundle.thinking": {},
+  "timeline.requestBundle.toolRunNamed": {
+    "tool": "string"
+  },
+  "timeline.requestBundle.waitingAdmin": {},
+  "timeline.requestBundle.waitingNamed": {
+    "name": "string"
+  },
   "timeline.runException.open": {
     "text": "string"
   },
@@ -4983,6 +5366,86 @@ export const argumentSpecs = {
   "timeline.teamAi.reasonOverBudget": {},
   "timeline.teamAi.reasonRateLimited": {},
   "timeline.teamAi.reasonSlow": {},
+  "timeline.teamAiReply.appItem": {
+    "calls": "number",
+    "name": "string"
+  },
+  "timeline.teamAiReply.appItemVerb": {
+    "calls": "number",
+    "name": "string",
+    "verb": "string"
+  },
+  "timeline.teamAiReply.appsLine": {
+    "parts": "string"
+  },
+  "timeline.teamAiReply.appsSpoken": {
+    "parts": "string"
+  },
+  "timeline.teamAiReply.citationOpenHost": {
+    "host": "string"
+  },
+  "timeline.teamAiReply.citationOpenTitled": {
+    "host": "string",
+    "title": "string"
+  },
+  "timeline.teamAiReply.connected": {
+    "domains": "string"
+  },
+  "timeline.teamAiReply.connectedMore": {
+    "domains": "string",
+    "rest": "number"
+  },
+  "timeline.teamAiReply.detailsClose": {},
+  "timeline.teamAiReply.detailsOpen": {},
+  "timeline.teamAiReply.exposure": {
+    "count": "number"
+  },
+  "timeline.teamAiReply.modelChip": {
+    "model": "string"
+  },
+  "timeline.teamAiReply.onBehalfOf": {
+    "owner": "string"
+  },
+  "timeline.teamAiReply.otherApp": {},
+  "timeline.teamAiReply.personalNote": {},
+  "timeline.teamAiReply.ranOn": {
+    "site": "string"
+  },
+  "timeline.teamAiReply.selfReport": {},
+  "timeline.teamAiReply.siteHermes": {},
+  "timeline.teamAiReply.siteMac": {},
+  "timeline.teamAiReply.sourceOpen": {
+    "index": "number",
+    "title": "string"
+  },
+  "timeline.teamAiReply.sourcesCount": {
+    "count": "number"
+  },
+  "timeline.teamAiReply.sourcesLabel": {},
+  "timeline.teamAiReply.toolGetAgentRun": {},
+  "timeline.teamAiReply.toolListAgentRuns": {},
+  "timeline.teamAiReply.toolListMembers": {},
+  "timeline.teamAiReply.toolListPlugins": {},
+  "timeline.teamAiReply.toolReadChannel": {},
+  "timeline.teamAiReply.toolReadChannelNamed": {
+    "channel": "string"
+  },
+  "timeline.teamAiReply.toolReadThread": {},
+  "timeline.teamAiReply.toolReadWorkspaceSettings": {},
+  "timeline.teamAiReply.toolSearchMessages": {},
+  "timeline.teamAiReply.toolsLine": {
+    "tools": "string"
+  },
+  "timeline.teamAiReply.toolsLineMore": {
+    "rest": "number",
+    "tools": "string"
+  },
+  "timeline.teamAiReply.toolWebSearch": {},
+  "timeline.teamAiReply.verbCreate": {},
+  "timeline.teamAiReply.verbList": {},
+  "timeline.teamAiReply.verbRead": {},
+  "timeline.teamAiReply.verbSearch": {},
+  "timeline.teamAiReply.verbUpdate": {},
   "timeline.thread.followDismiss": {},
   "timeline.thread.followFailed": {},
   "timeline.thread.followHint": {},
@@ -7121,6 +7584,18 @@ export interface MessageArgs {
   "timeline.actionFailure.replyNotAllowed": Record<string, never>;
   "timeline.actionFailure.replyNotMember": Record<string, never>;
   "timeline.actionFailure.replyOriginalNotFound": Record<string, never>;
+  "timeline.actionResult.avatarExpired": Record<string, never>;
+  "timeline.actionResult.avatarRejected": Record<string, never>;
+  "timeline.actionResult.avatarRoleRequired": Record<string, never>;
+  "timeline.actionResult.fallbackTitle": Record<string, never>;
+  "timeline.actionResult.nameExpired": Record<string, never>;
+  "timeline.actionResult.nameRejected": Record<string, never>;
+  "timeline.actionResult.nameRoleRequired": Record<string, never>;
+  "timeline.actionResult.noteExecuted": Record<string, never>;
+  "timeline.actionResult.noteRejected": Record<string, never>;
+  "timeline.actionResult.noteRoleRequired": Record<string, never>;
+  "timeline.actionResult.permissionNeeded": Record<string, never>;
+  "timeline.actionResult.secretOnce": Record<string, never>;
   "timeline.addMember.createdDescription": { name: string };
   "timeline.addMember.createdDescriptionPublic": { name: string };
   "timeline.addMember.later": Record<string, never>;
@@ -7132,12 +7607,47 @@ export interface MessageArgs {
   "timeline.agentRail.openRecord": { name: string };
   "timeline.agentRail.sheetClose": Record<string, never>;
   "timeline.agentRail.sheetTitle": Record<string, never>;
+  "timeline.appNotice.egressKnown": { host: string };
+  "timeline.appNotice.egressOutside": Record<string, never>;
+  "timeline.appNotice.grantRevoked": Record<string, never>;
+  "timeline.appNotice.loginLostHermesNamed": { app: string };
+  "timeline.appNotice.loginLostHermesUnnamed": Record<string, never>;
+  "timeline.appNotice.loginLostNamed": { app: string };
+  "timeline.appNotice.loginLostUnnamed": Record<string, never>;
+  "timeline.appNotice.notAllowedPhone": Record<string, never>;
+  "timeline.appNotice.notAllowedWeb": Record<string, never>;
+  "timeline.appNotice.openApp": Record<string, never>;
+  "timeline.appNotice.openOnWeb": Record<string, never>;
+  "timeline.appNotice.rateLimitedNamed": { app: string; josa: string };
+  "timeline.appNotice.rateLimitedUnnamed": Record<string, never>;
+  "timeline.appNotice.signInAgain": Record<string, never>;
+  "timeline.appNotice.siteOff": { site: string };
+  "timeline.appNotice.siteSilent": { site: string };
+  "timeline.appNotice.working": { site: string };
+  "timeline.appNotice.workingMinutes": { minutes: number; site: string };
   "timeline.approval.channelAgentIn": Record<string, never>;
   "timeline.approval.channelNeedsMember": Record<string, never>;
   "timeline.approval.channelsRefused": Record<string, never>;
   "timeline.approval.reproposeBusy": Record<string, never>;
   "timeline.approval.reproposeSeeded": Record<string, never>;
+  "timeline.approvalDecision.decidedElsewhere": Record<string, never>;
+  "timeline.approvalDecision.expiredFirst": Record<string, never>;
+  "timeline.approvalDecision.failedLoginExpired": Record<string, never>;
+  "timeline.approvalDecision.failedNotAccepted": Record<string, never>;
+  "timeline.approvalDecision.failedRateLimited": Record<string, never>;
+  "timeline.approvalDecision.failedServerError": Record<string, never>;
+  "timeline.approvalDecision.forbidden": Record<string, never>;
+  "timeline.approvalDecision.idempotencyConflict": Record<string, never>;
+  "timeline.approvalDecision.notFound": Record<string, never>;
+  "timeline.approvalDecision.roleRequired": Record<string, never>;
+  "timeline.approvalDecision.sendTimeout": Record<string, never>;
+  "timeline.approvalDecision.sendUnreached": Record<string, never>;
+  "timeline.approvalDecision.unreadable": Record<string, never>;
   "timeline.approvalExpiry.soon": Record<string, never>;
+  "timeline.approvalNote.elsewhere": Record<string, never>;
+  "timeline.approvalNote.offline": Record<string, never>;
+  "timeline.approvalNote.waitingNamed": { name: string };
+  "timeline.approvalNote.waitingOther": Record<string, never>;
   "timeline.artifactNote.awaitingApproval": Record<string, never>;
   "timeline.artifactNote.cancelled": Record<string, never>;
   "timeline.artifactNote.done": Record<string, never>;
@@ -7178,6 +7688,7 @@ export interface MessageArgs {
   "timeline.commandSuggest.askNone": Record<string, never>;
   "timeline.commandSuggest.askOperator": Record<string, never>;
   "timeline.commandSuggest.askThread": Record<string, never>;
+  "timeline.commandSuggest.head": { josa: string; name: string };
   "timeline.commandSuggest.oneLineAiConnect": { name: string };
   "timeline.commandSuggest.oneLineCard": { name: string; what: string };
   "timeline.commandSuggest.onlyMe": Record<string, never>;
@@ -7212,6 +7723,26 @@ export interface MessageArgs {
   "timeline.commandSuggest.targetWorkspace": Record<string, never>;
   "timeline.commandSuggest.teamClose": Record<string, never>;
   "timeline.commandSuggest.teamOpen": Record<string, never>;
+  "timeline.completion.checkDetailSpoken": { detail: string; label: string };
+  "timeline.completion.checkFail": Record<string, never>;
+  "timeline.completion.checkPass": Record<string, never>;
+  "timeline.completion.checkPending": Record<string, never>;
+  "timeline.completion.checkSkip": Record<string, never>;
+  "timeline.completion.checkUnknown": Record<string, never>;
+  "timeline.completion.elapsedClock": Record<string, never>;
+  "timeline.completion.elapsedHours": { count: number };
+  "timeline.completion.elapsedMinutes": { count: number };
+  "timeline.completion.elapsedSeconds": { count: number };
+  "timeline.completion.elapsedSubSecond": Record<string, never>;
+  "timeline.completion.outcomeAttention": Record<string, never>;
+  "timeline.completion.outcomeClean": Record<string, never>;
+  "timeline.completion.surface": Record<string, never>;
+  "timeline.completion.tallyItem": { count: number; label: string };
+  "timeline.completion.workedLabel": Record<string, never>;
+  "timeline.completion.workedWithElapsed": { elapsed: string };
+  "timeline.copy.linkAction": Record<string, never>;
+  "timeline.copy.messageAction": Record<string, never>;
+  "timeline.copy.messageDone": Record<string, never>;
   "timeline.createChannel.privateDetail": Record<string, never>;
   "timeline.createChannel.publicDetail": Record<string, never>;
   "timeline.decisionStage.position": { current: string; total: string };
@@ -7234,11 +7765,46 @@ export interface MessageArgs {
   "timeline.edited.atTime": { time: string };
   "timeline.edited.mark": Record<string, never>;
   "timeline.edited.pressHint": Record<string, never>;
+  "timeline.emptyChannel.addMemberAction": Record<string, never>;
+  "timeline.emptyChannel.channelDetail": Record<string, never>;
+  "timeline.emptyChannel.channelHeadline": Record<string, never>;
+  "timeline.emptyChannel.connectAgentAction": Record<string, never>;
+  "timeline.emptyChannel.dmAgentHeadline": { name: string };
+  "timeline.emptyChannel.dmDetailGroup": { count: number };
+  "timeline.emptyChannel.dmDetailGroupAgents": { count: number };
+  "timeline.emptyChannel.dmDetailPair": Record<string, never>;
+  "timeline.emptyChannel.dmHeadline": Record<string, never>;
+  "timeline.emptyChannel.dmPeerHeadline": { name: string };
+  "timeline.emptyChannel.writeAction": Record<string, never>;
   "timeline.lightbox.copied": Record<string, never>;
   "timeline.lightbox.copy": Record<string, never>;
   "timeline.lightbox.copyFailed": Record<string, never>;
   "timeline.lightbox.zoomIn": Record<string, never>;
   "timeline.lightbox.zoomOut": Record<string, never>;
+  "timeline.loginHandoff.decisionLead": Record<string, never>;
+  "timeline.loginHandoff.decisionResume": Record<string, never>;
+  "timeline.loginHandoff.decisionStop": Record<string, never>;
+  "timeline.loginHandoff.deploymentNotice": Record<string, never>;
+  "timeline.loginHandoff.detailExpired": Record<string, never>;
+  "timeline.loginHandoff.detailReturned": Record<string, never>;
+  "timeline.loginHandoff.detailReturnedWithoutWindow": Record<string, never>;
+  "timeline.loginHandoff.detailSessionEnded": Record<string, never>;
+  "timeline.loginHandoff.elsewhere": Record<string, never>;
+  "timeline.loginHandoff.inControl": Record<string, never>;
+  "timeline.loginHandoff.inControlLead": Record<string, never>;
+  "timeline.loginHandoff.offline": Record<string, never>;
+  "timeline.loginHandoff.outcomeExpired": Record<string, never>;
+  "timeline.loginHandoff.outcomeReturned": Record<string, never>;
+  "timeline.loginHandoff.outcomeSessionEnded": Record<string, never>;
+  "timeline.loginHandoff.phaseStopped": Record<string, never>;
+  "timeline.loginHandoff.phaseWaiting": Record<string, never>;
+  "timeline.loginHandoff.stoppedCancelled": Record<string, never>;
+  "timeline.loginHandoff.stoppedNeverStarted": Record<string, never>;
+  "timeline.loginHandoff.title": Record<string, never>;
+  "timeline.loginHandoff.waiting": Record<string, never>;
+  "timeline.loginHandoff.waitingClosedExpired": Record<string, never>;
+  "timeline.loginHandoff.waitingClosedReturned": Record<string, never>;
+  "timeline.loginHandoff.waitingClosedSessionEnded": Record<string, never>;
   "timeline.memberPanel.agentKind": Record<string, never>;
   "timeline.memberPanel.elapsedDays": { count: number };
   "timeline.memberPanel.elapsedHours": { count: number };
@@ -7285,8 +7851,22 @@ export interface MessageArgs {
   "timeline.pins.listNone": Record<string, never>;
   "timeline.pins.rowMark": Record<string, never>;
   "timeline.pins.stamp": { date: string };
+  "timeline.quote.action": Record<string, never>;
+  "timeline.quote.cancel": Record<string, never>;
+  "timeline.quote.deleted": Record<string, never>;
+  "timeline.quote.deletedSpoken": { head: string };
   "timeline.quote.head": { name: string };
   "timeline.quote.headUnnamed": Record<string, never>;
+  "timeline.quote.jump": Record<string, never>;
+  "timeline.quote.kindApproval": Record<string, never>;
+  "timeline.quote.kindArtifact": Record<string, never>;
+  "timeline.quote.kindCard": Record<string, never>;
+  "timeline.quote.kindCompletionReport": Record<string, never>;
+  "timeline.quote.kindDiff": Record<string, never>;
+  "timeline.quote.kindSystem": Record<string, never>;
+  "timeline.quote.kindToolCall": Record<string, never>;
+  "timeline.quote.kindToolResult": Record<string, never>;
+  "timeline.quote.nestedMark": Record<string, never>;
   "timeline.reaction.chipMine": { count: number; emoji: string; names: string };
   "timeline.reaction.chipMineNoNames": { count: number; emoji: string };
   "timeline.reaction.chipOther": { count: number; emoji: string; names: string };
@@ -7299,6 +7879,27 @@ export interface MessageArgs {
   "timeline.reaction.namesExtra2": { a: string; b: string; extra: number };
   "timeline.reaction.namesExtra3": { a: string; b: string; c: string; extra: number };
   "timeline.reaction.selfToken": Record<string, never>;
+  "timeline.requestBundle.approvalRequest": Record<string, never>;
+  "timeline.requestBundle.cancelled": Record<string, never>;
+  "timeline.requestBundle.chipAfterOnly": { after: string; label: string };
+  "timeline.requestBundle.chipBeforeAfter": { after: string; before: string; label: string };
+  "timeline.requestBundle.daysLeft": { count: number };
+  "timeline.requestBundle.declined": Record<string, never>;
+  "timeline.requestBundle.declinedBy": { name: string };
+  "timeline.requestBundle.details": Record<string, never>;
+  "timeline.requestBundle.done": Record<string, never>;
+  "timeline.requestBundle.executing": Record<string, never>;
+  "timeline.requestBundle.expiresSoon": Record<string, never>;
+  "timeline.requestBundle.failed": Record<string, never>;
+  "timeline.requestBundle.hoursLeft": { count: number };
+  "timeline.requestBundle.minutesLeft": { count: number };
+  "timeline.requestBundle.quietWithDetails": { quiet: string };
+  "timeline.requestBundle.rationale": Record<string, never>;
+  "timeline.requestBundle.requiredRole": Record<string, never>;
+  "timeline.requestBundle.thinking": Record<string, never>;
+  "timeline.requestBundle.toolRunNamed": { tool: string };
+  "timeline.requestBundle.waitingAdmin": Record<string, never>;
+  "timeline.requestBundle.waitingNamed": { name: string };
   "timeline.runException.open": { text: string };
   "timeline.runException.settings": Record<string, never>;
   "timeline.send.discard": Record<string, never>;
@@ -7336,6 +7937,45 @@ export interface MessageArgs {
   "timeline.teamAi.reasonOverBudget": Record<string, never>;
   "timeline.teamAi.reasonRateLimited": Record<string, never>;
   "timeline.teamAi.reasonSlow": Record<string, never>;
+  "timeline.teamAiReply.appItem": { calls: number; name: string };
+  "timeline.teamAiReply.appItemVerb": { calls: number; name: string; verb: string };
+  "timeline.teamAiReply.appsLine": { parts: string };
+  "timeline.teamAiReply.appsSpoken": { parts: string };
+  "timeline.teamAiReply.citationOpenHost": { host: string };
+  "timeline.teamAiReply.citationOpenTitled": { host: string; title: string };
+  "timeline.teamAiReply.connected": { domains: string };
+  "timeline.teamAiReply.connectedMore": { domains: string; rest: number };
+  "timeline.teamAiReply.detailsClose": Record<string, never>;
+  "timeline.teamAiReply.detailsOpen": Record<string, never>;
+  "timeline.teamAiReply.exposure": { count: number };
+  "timeline.teamAiReply.modelChip": { model: string };
+  "timeline.teamAiReply.onBehalfOf": { owner: string };
+  "timeline.teamAiReply.otherApp": Record<string, never>;
+  "timeline.teamAiReply.personalNote": Record<string, never>;
+  "timeline.teamAiReply.ranOn": { site: string };
+  "timeline.teamAiReply.selfReport": Record<string, never>;
+  "timeline.teamAiReply.siteHermes": Record<string, never>;
+  "timeline.teamAiReply.siteMac": Record<string, never>;
+  "timeline.teamAiReply.sourceOpen": { index: number; title: string };
+  "timeline.teamAiReply.sourcesCount": { count: number };
+  "timeline.teamAiReply.sourcesLabel": Record<string, never>;
+  "timeline.teamAiReply.toolGetAgentRun": Record<string, never>;
+  "timeline.teamAiReply.toolListAgentRuns": Record<string, never>;
+  "timeline.teamAiReply.toolListMembers": Record<string, never>;
+  "timeline.teamAiReply.toolListPlugins": Record<string, never>;
+  "timeline.teamAiReply.toolReadChannel": Record<string, never>;
+  "timeline.teamAiReply.toolReadChannelNamed": { channel: string };
+  "timeline.teamAiReply.toolReadThread": Record<string, never>;
+  "timeline.teamAiReply.toolReadWorkspaceSettings": Record<string, never>;
+  "timeline.teamAiReply.toolSearchMessages": Record<string, never>;
+  "timeline.teamAiReply.toolsLine": { tools: string };
+  "timeline.teamAiReply.toolsLineMore": { rest: number; tools: string };
+  "timeline.teamAiReply.toolWebSearch": Record<string, never>;
+  "timeline.teamAiReply.verbCreate": Record<string, never>;
+  "timeline.teamAiReply.verbList": Record<string, never>;
+  "timeline.teamAiReply.verbRead": Record<string, never>;
+  "timeline.teamAiReply.verbSearch": Record<string, never>;
+  "timeline.teamAiReply.verbUpdate": Record<string, never>;
   "timeline.thread.followDismiss": Record<string, never>;
   "timeline.thread.followFailed": Record<string, never>;
   "timeline.thread.followHint": Record<string, never>;

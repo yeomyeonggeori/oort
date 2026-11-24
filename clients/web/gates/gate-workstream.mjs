@@ -1805,6 +1805,7 @@ async function assertDenialAsymmetry(browser) {
   const context = await browser.newContext({
     viewport: { width: 1280, height: 800 },
     reducedMotion: "reduce",
+    locale: "ko-KR",
   });
   const page = await context.newPage();
   await installRealtimeSocket(page);
@@ -1848,6 +1849,7 @@ async function assertDenialAsymmetry(browser) {
   const outsiderContext = await browser.newContext({
     viewport: { width: 1280, height: 800 },
     reducedMotion: "reduce",
+    locale: "ko-KR",
   });
   const outsiderPage = await outsiderContext.newPage();
   await installRealtimeSocket(outsiderPage);

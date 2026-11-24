@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import {
-  COMPLETION_CHECK_OUTCOME_LABEL,
+  COMPLETION_CHECK_OUTCOME_LABEL_KEY,
   COMPLETION_CHECK_TONE,
   type CompletionCheckOutcome,
   type CompletionTone,
@@ -83,9 +83,9 @@ describe("칩의 색이 코어 역할표를 지난다", () => {
   });
 
   it("어휘도 코어 표 그대로다 — 세션 표면 전용 낱말이 없다", () => {
-    expect(chip).toContain("COMPLETION_CHECK_OUTCOME_LABEL[");
+    expect(chip).toContain("COMPLETION_CHECK_OUTCOME_LABEL_KEY[");
     for (const outcome of OUTCOMES) {
-      expect(COMPLETION_CHECK_OUTCOME_LABEL[outcome]).toBeTruthy();
+      expect(COMPLETION_CHECK_OUTCOME_LABEL_KEY[outcome]).toBeTruthy();
       expect(COMPLETION_TONE_CLASS[COMPLETION_CHECK_TONE[outcome]]).toBeTruthy();
     }
   });

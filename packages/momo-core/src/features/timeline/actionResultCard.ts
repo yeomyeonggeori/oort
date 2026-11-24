@@ -1,3 +1,5 @@
+import type { LocaleService } from "../../i18n/context";
+import type { PlainMessageKey } from "../../i18n/keys";
 import { APPROVAL_EXPIRED_SENTENCE, REQUEST_WORD } from "../agents/runPhase";
 import { payloadDetail, type PayloadDetail, type PayloadRow } from "./agentCardModel";
 
@@ -72,14 +74,23 @@ const STATUSES: ReadonlySet<string> = new Set<ActionResultStatus>([
  * 할 수 있는 다음 행동이 분명히 있다 — 권한을 가진 사람이 결정하면 된다. 침묵을
  * 실패로 승격하지 않는다는 이 저장소의 규율(ADR-0132)과 같은 계열이다.
  */
-export const ACTION_RESULT_STATUS_LABEL: Readonly<
-  Record<ActionResultStatus, string>
-> = {
+const ACTION_RESULT_STATUS_WORD = {
   executed: REQUEST_WORD.done,
   rejected: REQUEST_WORD.declined,
   expired: REQUEST_WORD.expired,
-  role_required: "권한 필요",
-};
+} as const;
+
+export const ACTION_RESULT_ROLE_REQUIRED_LABEL_KEY =
+  "timeline.actionResult.permissionNeeded" satisfies PlainMessageKey;
+
+export function actionResultStatusLabel(
+  formatMessage: LocaleService["formatMessage"],
+  status: ActionResultStatus
+): string {
+  return status === "role_required"
+    ? formatMessage(ACTION_RESULT_ROLE_REQUIRED_LABEL_KEY)
+    : ACTION_RESULT_STATUS_WORD[status];
+}
 
 /**
  * 카드가 상태에 대해 말하는 한 문장.
@@ -88,14 +99,11 @@ export const ACTION_RESULT_STATUS_LABEL: Readonly<
  * 안에 감탄도 사과도 없다 — 무슨 일이 일어났는지와, 사람이 그다음에 무엇을 할 수
  * 있는지만 말한다.
  */
-export const ACTION_RESULT_STATUS_NOTE: Readonly<
-  Record<ActionResultStatus, string>
-> = {
-  executed: "실행을 마쳤어요.",
-  rejected: "승인하지 않아 실행하지 않았어요.",
-  expired: APPROVAL_EXPIRED_SENTENCE,
-  role_required: "관리자가 승인해야 해요.",
-};
+const ACTION_RESULT_STATUS_NOTE_KEY = {
+  executed: "timeline.actionResult.noteExecuted",
+  rejected: "timeline.actionResult.noteRejected",
+  role_required: "timeline.actionResult.noteRoleRequired",
+} as const satisfies Partial<Record<ActionResultStatus, PlainMessageKey>>;
 
 /**
  * 행동마다 다른 상태 문장 (#4394). 기본 문장은 「관리자가 승인해야 해요」처럼 **관리자**를
@@ -104,21 +112,22 @@ export const ACTION_RESULT_STATUS_NOTE: Readonly<
  * (fail-closed: 새 행동이 이 표를 모르면 지금까지의 문장 그대로다).
  */
 const ACTION_RESULT_NOTE_OVERRIDES: Readonly<
-  Record<string, Partial<Record<ActionResultStatus, string>>>
+  Record<string, Partial<Record<ActionResultStatus, PlainMessageKey>>>
 > = {
   "member.display_name.set": {
-    rejected: "승인하지 않아 이름은 그대로예요.",
-    expired: "기한이 지나 이름은 그대로예요.",
-    role_required: "요청한 본인이 승인해야 해요.",
+    rejected: "timeline.actionResult.nameRejected",
+    expired: "timeline.actionResult.nameExpired",
+    role_required: "timeline.actionResult.nameRoleRequired",
   },
   "member.avatar.set": {
-    rejected: "승인하지 않아 프로필 사진은 그대로예요.",
-    expired: "기한이 지나 프로필 사진은 그대로예요.",
-    role_required: "사진 주인 본인이 승인해야 해요.",
+    rejected: "timeline.actionResult.avatarRejected",
+    expired: "timeline.actionResult.avatarExpired",
+    role_required: "timeline.actionResult.avatarRoleRequired",
   },
 };
 
 export function actionResultStatusNote(
+  formatMessage: LocaleService["formatMessage"],
   status: ActionResultStatus,
   actionId: string
 ): string {
@@ -128,7 +137,12 @@ export function actionResultStatusNote(
   )
     ? ACTION_RESULT_NOTE_OVERRIDES[actionId]
     : undefined;
-  return table?.[status] ?? ACTION_RESULT_STATUS_NOTE[status];
+  const key = table?.[status];
+  if (key !== undefined) return formatMessage(key);
+  // 기한이 지난 기본 문장은 요청 고리의 낱말(`APPROVAL_EXPIRED_SENTENCE`) 그대로다.
+  return status === "expired"
+    ? APPROVAL_EXPIRED_SENTENCE
+    : formatMessage(ACTION_RESULT_STATUS_NOTE_KEY[status]);
 }
 
 /**
@@ -137,8 +151,7 @@ export function actionResultStatusNote(
  * 「없다」가 아니라 「한 번 보여 줬고 그 자리는 결정한 사람의 화면이었다」이다.
  * 없는 것을 없다고만 하면 사람은 화면이 잃어버렸다고 읽는다.
  */
-export const ACTION_RESULT_SECRET_ONCE_NOTE =
-  "링크는 승인한 사람에게 1회 표시됐어요. 다시 필요하면 새로 만드세요.";
+export const ACTION_RESULT_SECRET_ONCE_KEY = "timeline.actionResult.secretOnce" satisfies PlainMessageKey;
 
 /** 카드가 그리는 행의 상한. 넘은 것은 개수로 말한다(정직 카운트). */
 export const MAX_ACTION_RESULT_ROWS = 12;
@@ -165,7 +178,7 @@ export interface AgentActionResultCard {
    * 빌드의 중립 낱말이 선다. 카드가 본문을 되풀이하지 않는 것은
    * `cardKeepsBody` 가 답한다.
    */
-  title: string;
+  titleText: string | null;
   /** 레지스트리의 행동 id(`invite.create` 등). 화면에는 그리지 않는다. */
   actionId: string;
   status: ActionResultStatus;
@@ -184,7 +197,15 @@ export interface AgentActionResultCard {
 }
 
 /** 이 카드의 기본 제목. 본문도 없는 메시지에만 쓰인다. */
-export const ACTION_RESULT_FALLBACK_TITLE = "워크스페이스 행동";
+export const ACTION_RESULT_FALLBACK_TITLE_KEY = "timeline.actionResult.fallbackTitle" satisfies PlainMessageKey;
+
+/** 카드 제목: 서버가 쓴 본문이 먼저이고, 없으면 이 빌드의 중립 낱말이다. */
+export function actionResultTitle(
+  formatMessage: LocaleService["formatMessage"],
+  card: Pick<AgentActionResultCard, "titleText">
+): string {
+  return card.titleText ?? formatMessage(ACTION_RESULT_FALLBACK_TITLE_KEY);
+}
 
 type Props = Record<string, unknown> | undefined;
 
@@ -265,7 +286,7 @@ export function actionResultCard(
 
   return {
     kind: "action_result",
-    title: nonEmptyString(body) ?? ACTION_RESULT_FALLBACK_TITLE,
+    titleText: nonEmptyString(body),
     actionId,
     status,
     approvalId: nonEmptyString(raw.approval_id),

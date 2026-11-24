@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { afterAll, afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { act, cleanup, render, within } from "@testing-library/react";
 import "@/lib/coreHost";
 import { SessionProvider, type SessionContextValue } from "@/app/session";
@@ -8,6 +8,12 @@ import { agentCardModel } from "@momo/core/features/timeline/agentCardModel";
 import type { Message } from "@momo/core/lib/api";
 import { AgentCard } from "@/features/timeline/AgentCard";
 import { resetSettledApprovalsForTest } from "@/features/timeline/settledApprovals";
+import { LocaleProvider } from "@/i18n/LocaleProvider";
+import type { AppLocale } from "@/i18n/localeStore";
+import { koreanLocale } from "@/testing/koLocale";
+
+let ko: AppLocale;
+beforeAll(async () => { ko = await koreanLocale(); });
 
 // #4914. The merged tree draws every approval card as the request bundle card. A card that closed on
 // one of the six generation or assembly failure codes (ADR-0218 section 7 G3.8) says the code's golden
@@ -38,7 +44,7 @@ function closedCard(extra: Record<string, unknown>): Message {
 function draw(message: Message, directory: typeof AS_MEMBER) {
   const card = agentCardModel(message);
   if (card === null) throw new Error("no card for these props");
-  return render(<SessionProvider value={SESSION}><AgentCard card={card} directory={directory} viewerMemberId={ME} /></SessionProvider>);
+  return render(<LocaleProvider locale={ko}><SessionProvider value={SESSION}><AgentCard card={card} directory={directory} viewerMemberId={ME} /></SessionProvider></LocaleProvider>);
 }
 
 function openDetails(container: HTMLElement) {

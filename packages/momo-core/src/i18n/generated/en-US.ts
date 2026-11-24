@@ -13578,6 +13578,78 @@ export const catalog: MessageCatalog = {
       "value": "Couldn't find the original message. It may already be deleted."
     }
   ],
+  "timeline.actionResult.avatarExpired": [
+    {
+      "type": 0,
+      "value": "The deadline passed, so the profile photo stays as it is."
+    }
+  ],
+  "timeline.actionResult.avatarRejected": [
+    {
+      "type": 0,
+      "value": "It wasn't approved, so the profile photo stays as it is."
+    }
+  ],
+  "timeline.actionResult.avatarRoleRequired": [
+    {
+      "type": 0,
+      "value": "The photo's owner needs to approve this."
+    }
+  ],
+  "timeline.actionResult.fallbackTitle": [
+    {
+      "type": 0,
+      "value": "Workspace action"
+    }
+  ],
+  "timeline.actionResult.nameExpired": [
+    {
+      "type": 0,
+      "value": "The deadline passed, so the name stays as it is."
+    }
+  ],
+  "timeline.actionResult.nameRejected": [
+    {
+      "type": 0,
+      "value": "It wasn't approved, so the name stays as it is."
+    }
+  ],
+  "timeline.actionResult.nameRoleRequired": [
+    {
+      "type": 0,
+      "value": "The person who asked needs to approve this."
+    }
+  ],
+  "timeline.actionResult.noteExecuted": [
+    {
+      "type": 0,
+      "value": "Finished running."
+    }
+  ],
+  "timeline.actionResult.noteRejected": [
+    {
+      "type": 0,
+      "value": "It wasn't approved, so it didn't run."
+    }
+  ],
+  "timeline.actionResult.noteRoleRequired": [
+    {
+      "type": 0,
+      "value": "An admin needs to approve this."
+    }
+  ],
+  "timeline.actionResult.permissionNeeded": [
+    {
+      "type": 0,
+      "value": "Permission needed"
+    }
+  ],
+  "timeline.actionResult.secretOnce": [
+    {
+      "type": 0,
+      "value": "The link was shown once to the person who approved. Create a new one if you need it again."
+    }
+  ],
   "timeline.addMember.createdDescription": [
     {
       "type": 0,
@@ -13676,6 +13748,288 @@ export const catalog: MessageCatalog = {
       "value": "Working agents"
     }
   ],
+  "timeline.appNotice.egressKnown": [
+    {
+      "type": 0,
+      "value": "The agent can't connect to "
+    },
+    {
+      "type": 1,
+      "value": "host"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "timeline.appNotice.egressOutside": [
+    {
+      "type": 0,
+      "value": "The agent can't connect to the outside."
+    }
+  ],
+  "timeline.appNotice.grantRevoked": [
+    {
+      "type": 0,
+      "value": "Access was revoked while this was running, so it stopped here. What's already done stays as it is."
+    }
+  ],
+  "timeline.appNotice.loginLostHermesNamed": [
+    {
+      "type": 1,
+      "value": "app"
+    },
+    {
+      "type": 0,
+      "value": " was signed out. An admin needs to sign in again."
+    }
+  ],
+  "timeline.appNotice.loginLostHermesUnnamed": [
+    {
+      "type": 0,
+      "value": "This app was signed out. An admin needs to sign in again."
+    }
+  ],
+  "timeline.appNotice.loginLostNamed": [
+    {
+      "type": 1,
+      "value": "app"
+    },
+    {
+      "type": 0,
+      "value": " was signed out."
+    }
+  ],
+  "timeline.appNotice.loginLostUnnamed": [
+    {
+      "type": 0,
+      "value": "This app was signed out."
+    }
+  ],
+  "timeline.appNotice.notAllowedPhone": [
+    {
+      "type": 0,
+      "value": "Allow this app on the desktop or the web."
+    }
+  ],
+  "timeline.appNotice.notAllowedWeb": [
+    {
+      "type": 0,
+      "value": "Allow your own use first."
+    }
+  ],
+  "timeline.appNotice.openApp": [
+    {
+      "type": 0,
+      "value": "Open app"
+    }
+  ],
+  "timeline.appNotice.openOnWeb": [
+    {
+      "type": 0,
+      "value": "Open on the web"
+    }
+  ],
+  "timeline.appNotice.rateLimitedNamed": [
+    {
+      "type": 1,
+      "value": "app"
+    },
+    {
+      "type": 0,
+      "value": " is limiting requests for now. Try again in a minute."
+    },
+    {
+      "type": 5,
+      "value": "josa",
+      "options": {
+        "final": {
+          "value": []
+        },
+        "other": {
+          "value": []
+        }
+      }
+    }
+  ],
+  "timeline.appNotice.rateLimitedUnnamed": [
+    {
+      "type": 0,
+      "value": "This app is limiting requests for now. Try again in a minute."
+    }
+  ],
+  "timeline.appNotice.signInAgain": [
+    {
+      "type": 0,
+      "value": "Sign in again"
+    }
+  ],
+  "timeline.appNotice.siteOff": [
+    {
+      "type": 5,
+      "value": "site",
+      "options": {
+        "mac": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Your Mac is off, so this didn't run. Turn it on and I'll try again."
+            }
+          ]
+        },
+        "hermes": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Hermes is off, so this didn't run."
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "The place the agent runs is off, so this didn't run."
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "timeline.appNotice.siteSilent": [
+    {
+      "type": 5,
+      "value": "site",
+      "options": {
+        "mac": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Your Mac isn't"
+            }
+          ]
+        },
+        "hermes": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Hermes isn't"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "The agent isn't"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": 0,
+      "value": " responding."
+    }
+  ],
+  "timeline.appNotice.working": [
+    {
+      "type": 5,
+      "value": "site",
+      "options": {
+        "mac": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Working on your Mac"
+            }
+          ]
+        },
+        "hermes": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Working on Hermes"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Working on the agent's host"
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "timeline.appNotice.workingMinutes": [
+    {
+      "type": 5,
+      "value": "site",
+      "options": {
+        "mac": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Working on your Mac"
+            }
+          ]
+        },
+        "hermes": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Working on Hermes"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Working on the agent's host"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": 0,
+      "value": " · for "
+    },
+    {
+      "type": 6,
+      "value": "minutes",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " minute"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " minutes"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "timeline.approval.channelAgentIn": [
     {
       "type": 0,
@@ -13706,10 +14060,120 @@ export const catalog: MessageCatalog = {
       "value": "Added to the message box. Send it and the agent will propose it again."
     }
   ],
+  "timeline.approvalDecision.decidedElsewhere": [
+    {
+      "type": 0,
+      "value": "It was already decided somewhere else."
+    }
+  ],
+  "timeline.approvalDecision.expiredFirst": [
+    {
+      "type": 0,
+      "value": "It expired before a decision."
+    }
+  ],
+  "timeline.approvalDecision.failedLoginExpired": [
+    {
+      "type": 0,
+      "value": "Couldn't process the decision. You were signed out. Sign in again to decide."
+    }
+  ],
+  "timeline.approvalDecision.failedNotAccepted": [
+    {
+      "type": 0,
+      "value": "Couldn't process the decision. The server didn't accept it. Press again."
+    }
+  ],
+  "timeline.approvalDecision.failedRateLimited": [
+    {
+      "type": 0,
+      "value": "Couldn't process the decision. There were too many requests, so the server didn't take this decision."
+    }
+  ],
+  "timeline.approvalDecision.failedServerError": [
+    {
+      "type": 0,
+      "value": "Couldn't process the decision. The server answered with an error. Press again in a moment."
+    }
+  ],
+  "timeline.approvalDecision.forbidden": [
+    {
+      "type": 0,
+      "value": "You don't have permission to decide this approval. Check that you're a channel member."
+    }
+  ],
+  "timeline.approvalDecision.idempotencyConflict": [
+    {
+      "type": 0,
+      "value": "The same request is already recorded with a different decision. Press again."
+    }
+  ],
+  "timeline.approvalDecision.notFound": [
+    {
+      "type": 0,
+      "value": "Couldn't find this approval request. It may have been cleaned up already."
+    }
+  ],
+  "timeline.approvalDecision.roleRequired": [
+    {
+      "type": 0,
+      "value": "You don't have the role to decide this. The request is still waiting."
+    }
+  ],
+  "timeline.approvalDecision.sendTimeout": [
+    {
+      "type": 0,
+      "value": "The server didn't respond in time, so the decision wasn't sent. Press again."
+    }
+  ],
+  "timeline.approvalDecision.sendUnreached": [
+    {
+      "type": 0,
+      "value": "The decision didn't reach the server. Check your connection and press again."
+    }
+  ],
+  "timeline.approvalDecision.unreadable": [
+    {
+      "type": 0,
+      "value": "Couldn't read the server's answer. Press again."
+    }
+  ],
   "timeline.approvalExpiry.soon": [
     {
       "type": 0,
       "value": "If you do not decide, the agent has to propose it again."
+    }
+  ],
+  "timeline.approvalNote.elsewhere": [
+    {
+      "type": 0,
+      "value": "You can make this decision from the inbox or the desktop app."
+    }
+  ],
+  "timeline.approvalNote.offline": [
+    {
+      "type": 0,
+      "value": "You're offline, so you can't decide right now. Once you're back online you can approve or deny here."
+    }
+  ],
+  "timeline.approvalNote.waitingNamed": [
+    {
+      "type": 0,
+      "value": "Waiting for "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " to allow this"
+    }
+  ],
+  "timeline.approvalNote.waitingOther": [
+    {
+      "type": 0,
+      "value": "Waiting for another participant to allow this"
     }
   ],
   "timeline.artifactNote.awaitingApproval": [
@@ -14082,6 +14546,28 @@ export const catalog: MessageCatalog = {
       "value": "Open the thread and mention the operator."
     }
   ],
+  "timeline.commandSuggest.head": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " suggested this"
+    },
+    {
+      "type": 5,
+      "value": "josa",
+      "options": {
+        "final": {
+          "value": []
+        },
+        "other": {
+          "value": []
+        }
+      }
+    }
+  ],
   "timeline.commandSuggest.oneLineAiConnect": [
     {
       "type": 0,
@@ -14300,6 +14786,162 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "Show team AI key"
+    }
+  ],
+  "timeline.completion.checkDetailSpoken": [
+    {
+      "type": 1,
+      "value": "detail"
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 1,
+      "value": "label"
+    }
+  ],
+  "timeline.completion.checkFail": [
+    {
+      "type": 0,
+      "value": "Failed"
+    }
+  ],
+  "timeline.completion.checkPass": [
+    {
+      "type": 0,
+      "value": "Passed"
+    }
+  ],
+  "timeline.completion.checkPending": [
+    {
+      "type": 0,
+      "value": "In progress"
+    }
+  ],
+  "timeline.completion.checkSkip": [
+    {
+      "type": 0,
+      "value": "Skipped"
+    }
+  ],
+  "timeline.completion.checkUnknown": [
+    {
+      "type": 0,
+      "value": "Unknown result"
+    }
+  ],
+  "timeline.completion.elapsedClock": [
+    {
+      "type": 0,
+      "value": "Elapsed"
+    }
+  ],
+  "timeline.completion.elapsedHours": [
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "h"
+    }
+  ],
+  "timeline.completion.elapsedMinutes": [
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "m"
+    }
+  ],
+  "timeline.completion.elapsedSeconds": [
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "s"
+    }
+  ],
+  "timeline.completion.elapsedSubSecond": [
+    {
+      "type": 0,
+      "value": "Under 1s"
+    }
+  ],
+  "timeline.completion.outcomeAttention": [
+    {
+      "type": 0,
+      "value": "Needs a look"
+    }
+  ],
+  "timeline.completion.outcomeClean": [
+    {
+      "type": 0,
+      "value": "Done"
+    }
+  ],
+  "timeline.completion.surface": [
+    {
+      "type": 0,
+      "value": "Surface"
+    }
+  ],
+  "timeline.completion.tallyItem": [
+    {
+      "type": 1,
+      "value": "label"
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    }
+  ],
+  "timeline.completion.workedLabel": [
+    {
+      "type": 0,
+      "value": "Work time"
+    }
+  ],
+  "timeline.completion.workedWithElapsed": [
+    {
+      "type": 0,
+      "value": "Work time "
+    },
+    {
+      "type": 1,
+      "value": "elapsed"
+    }
+  ],
+  "timeline.copy.linkAction": [
+    {
+      "type": 0,
+      "value": "Copy link"
+    }
+  ],
+  "timeline.copy.messageAction": [
+    {
+      "type": 0,
+      "value": "Copy message"
+    }
+  ],
+  "timeline.copy.messageDone": [
+    {
+      "type": 0,
+      "value": "Message copied"
     }
   ],
   "timeline.createChannel.privateDetail": [
@@ -14534,6 +15176,156 @@ export const catalog: MessageCatalog = {
       "value": "Shows when it was edited"
     }
   ],
+  "timeline.emptyChannel.addMemberAction": [
+    {
+      "type": 0,
+      "value": "Add members"
+    }
+  ],
+  "timeline.emptyChannel.channelDetail": [
+    {
+      "type": 0,
+      "value": "People and agents who join later can read what you write now, just the same."
+    }
+  ],
+  "timeline.emptyChannel.channelHeadline": [
+    {
+      "type": 0,
+      "value": "Start this channel with a first message."
+    }
+  ],
+  "timeline.emptyChannel.connectAgentAction": [
+    {
+      "type": 0,
+      "value": "Connect an agent"
+    }
+  ],
+  "timeline.emptyChannel.dmAgentHeadline": [
+    {
+      "type": 0,
+      "value": "Give "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " a first task."
+    }
+  ],
+  "timeline.emptyChannel.dmDetailGroup": [
+    {
+      "type": 0,
+      "value": "Messages here are seen by the "
+    },
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " person"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " people"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    },
+    {
+      "type": 0,
+      "value": " in this conversation."
+    }
+  ],
+  "timeline.emptyChannel.dmDetailGroupAgents": [
+    {
+      "type": 0,
+      "value": "Messages here are seen by the "
+    },
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " person"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " people"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    },
+    {
+      "type": 0,
+      "value": " in this conversation. Agents only see what is written after they join."
+    }
+  ],
+  "timeline.emptyChannel.dmDetailPair": [
+    {
+      "type": 0,
+      "value": "Only the two of you can see messages here. The participants are fixed to the two of you."
+    }
+  ],
+  "timeline.emptyChannel.dmHeadline": [
+    {
+      "type": 0,
+      "value": "Start a direct message."
+    }
+  ],
+  "timeline.emptyChannel.dmPeerHeadline": [
+    {
+      "type": 0,
+      "value": "Start a conversation with "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "timeline.emptyChannel.writeAction": [
+    {
+      "type": 0,
+      "value": "Write the first message"
+    }
+  ],
   "timeline.lightbox.copied": [
     {
       "type": 0,
@@ -14562,6 +15354,150 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "Zoom out"
+    }
+  ],
+  "timeline.loginHandoff.decisionLead": [
+    {
+      "type": 0,
+      "value": "The agent is waiting for a person to step in."
+    }
+  ],
+  "timeline.loginHandoff.decisionResume": [
+    {
+      "type": 0,
+      "value": "Resume"
+    }
+  ],
+  "timeline.loginHandoff.decisionStop": [
+    {
+      "type": 0,
+      "value": "Stop"
+    }
+  ],
+  "timeline.loginHandoff.deploymentNotice": [
+    {
+      "type": 0,
+      "value": "Screen streaming isn't ready on this deployment yet, so there is no way to open the screen from chat. After you open the session screen and finish stepping in, press Resume here."
+    }
+  ],
+  "timeline.loginHandoff.detailExpired": [
+    {
+      "type": 0,
+      "value": "The connection dropped without a sign that the person finished. The agent does not assume it is done and checks the state on its own screen before continuing."
+    }
+  ],
+  "timeline.loginHandoff.detailReturned": [
+    {
+      "type": 0,
+      "value": "The person finished stepping in and handed the screen back. The agent treats the sign-in as done and continues."
+    }
+  ],
+  "timeline.loginHandoff.detailReturnedWithoutWindow": [
+    {
+      "type": 0,
+      "value": "The person said they finished. No control window was opened on this deployment, so the agent checks the state on the session screen and continues."
+    }
+  ],
+  "timeline.loginHandoff.detailSessionEnded": [
+    {
+      "type": 0,
+      "value": "The work session ended, so the control window closed too."
+    }
+  ],
+  "timeline.loginHandoff.elsewhere": [
+    {
+      "type": 0,
+      "value": "You can take control from the desktop or the web. This screen only shows progress."
+    }
+  ],
+  "timeline.loginHandoff.inControl": [
+    {
+      "type": 0,
+      "value": "Someone is controlling this session screen right now. When they finish, you can resume or stop here."
+    }
+  ],
+  "timeline.loginHandoff.inControlLead": [
+    {
+      "type": 0,
+      "value": "Someone is controlling this session screen right now."
+    }
+  ],
+  "timeline.loginHandoff.offline": [
+    {
+      "type": 0,
+      "value": "You're offline, so you can't decide right now. Once you're back online you can resume or stop here."
+    }
+  ],
+  "timeline.loginHandoff.outcomeExpired": [
+    {
+      "type": 0,
+      "value": "Unconfirmed"
+    }
+  ],
+  "timeline.loginHandoff.outcomeReturned": [
+    {
+      "type": 0,
+      "value": "Handled"
+    }
+  ],
+  "timeline.loginHandoff.outcomeSessionEnded": [
+    {
+      "type": 0,
+      "value": "Session ended"
+    }
+  ],
+  "timeline.loginHandoff.phaseStopped": [
+    {
+      "type": 0,
+      "value": "Stopped"
+    }
+  ],
+  "timeline.loginHandoff.phaseWaiting": [
+    {
+      "type": 0,
+      "value": "Waiting for a person"
+    }
+  ],
+  "timeline.loginHandoff.stoppedCancelled": [
+    {
+      "type": 0,
+      "value": "The run that was waiting was cancelled."
+    }
+  ],
+  "timeline.loginHandoff.stoppedNeverStarted": [
+    {
+      "type": 0,
+      "value": "The run that was waiting was cancelled. The hand-off never started."
+    }
+  ],
+  "timeline.loginHandoff.title": [
+    {
+      "type": 0,
+      "value": "Login handoff request"
+    }
+  ],
+  "timeline.loginHandoff.waiting": [
+    {
+      "type": 0,
+      "value": "The agent has paused and is waiting for a person. The password is never passed to the agent; the person enters it on the session screen."
+    }
+  ],
+  "timeline.loginHandoff.waitingClosedExpired": [
+    {
+      "type": 0,
+      "value": "The agent has paused and is waiting for a person. The password is never passed to the agent; the person enters it on the session screen. The control window closed because the connection dropped. You can open it again if needed."
+    }
+  ],
+  "timeline.loginHandoff.waitingClosedReturned": [
+    {
+      "type": 0,
+      "value": "The agent has paused and is waiting for a person. The password is never passed to the agent; the person enters it on the session screen. The control window is closed. You can open it again if needed."
+    }
+  ],
+  "timeline.loginHandoff.waitingClosedSessionEnded": [
+    {
+      "type": 0,
+      "value": "The agent has paused and is waiting for a person. The password is never passed to the agent; the person enters it on the session screen. The work session ended, so the control window closed too."
     }
   ],
   "timeline.memberPanel.agentKind": [
@@ -14982,6 +15918,34 @@ export const catalog: MessageCatalog = {
       "value": "date"
     }
   ],
+  "timeline.quote.action": [
+    {
+      "type": 0,
+      "value": "Quote and reply"
+    }
+  ],
+  "timeline.quote.cancel": [
+    {
+      "type": 0,
+      "value": "Remove quote"
+    }
+  ],
+  "timeline.quote.deleted": [
+    {
+      "type": 0,
+      "value": "Deleted message"
+    }
+  ],
+  "timeline.quote.deletedSpoken": [
+    {
+      "type": 1,
+      "value": "head"
+    },
+    {
+      "type": 0,
+      "value": ", deleted message"
+    }
+  ],
   "timeline.quote.head": [
     {
       "type": 0,
@@ -14996,6 +15960,66 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "Replying to a message"
+    }
+  ],
+  "timeline.quote.jump": [
+    {
+      "type": 0,
+      "value": "Go to the original"
+    }
+  ],
+  "timeline.quote.kindApproval": [
+    {
+      "type": 0,
+      "value": "Approval request"
+    }
+  ],
+  "timeline.quote.kindArtifact": [
+    {
+      "type": 0,
+      "value": "Output"
+    }
+  ],
+  "timeline.quote.kindCard": [
+    {
+      "type": 0,
+      "value": "Card message"
+    }
+  ],
+  "timeline.quote.kindCompletionReport": [
+    {
+      "type": 0,
+      "value": "Work completion report"
+    }
+  ],
+  "timeline.quote.kindDiff": [
+    {
+      "type": 0,
+      "value": "Code change"
+    }
+  ],
+  "timeline.quote.kindSystem": [
+    {
+      "type": 0,
+      "value": "System notice"
+    }
+  ],
+  "timeline.quote.kindToolCall": [
+    {
+      "type": 0,
+      "value": "Tool run"
+    }
+  ],
+  "timeline.quote.kindToolResult": [
+    {
+      "type": 0,
+      "value": "Tool result"
+    }
+  ],
+  "timeline.quote.nestedMark": [
+    {
+      "type": 0,
+      "value": "Includes a quote"
     }
   ],
   "timeline.reaction.chipMine": [
@@ -15410,6 +16434,270 @@ export const catalog: MessageCatalog = {
       "value": "You (remove my reaction)"
     }
   ],
+  "timeline.requestBundle.approvalRequest": [
+    {
+      "type": 0,
+      "value": "Approval request"
+    }
+  ],
+  "timeline.requestBundle.cancelled": [
+    {
+      "type": 0,
+      "value": "The request was cancelled"
+    }
+  ],
+  "timeline.requestBundle.chipAfterOnly": [
+    {
+      "type": 1,
+      "value": "label"
+    },
+    {
+      "type": 0,
+      "value": ": new value "
+    },
+    {
+      "type": 1,
+      "value": "after"
+    }
+  ],
+  "timeline.requestBundle.chipBeforeAfter": [
+    {
+      "type": 1,
+      "value": "label"
+    },
+    {
+      "type": 0,
+      "value": ": old value "
+    },
+    {
+      "type": 1,
+      "value": "before"
+    },
+    {
+      "type": 0,
+      "value": ", new value "
+    },
+    {
+      "type": 1,
+      "value": "after"
+    }
+  ],
+  "timeline.requestBundle.daysLeft": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " day"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " days"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    },
+    {
+      "type": 0,
+      "value": " left"
+    }
+  ],
+  "timeline.requestBundle.declined": [
+    {
+      "type": 0,
+      "value": "Declined"
+    }
+  ],
+  "timeline.requestBundle.declinedBy": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " declined"
+    }
+  ],
+  "timeline.requestBundle.details": [
+    {
+      "type": 0,
+      "value": "Details"
+    }
+  ],
+  "timeline.requestBundle.done": [
+    {
+      "type": 0,
+      "value": "Finished running"
+    }
+  ],
+  "timeline.requestBundle.executing": [
+    {
+      "type": 0,
+      "value": "Approved · continuing"
+    }
+  ],
+  "timeline.requestBundle.expiresSoon": [
+    {
+      "type": 0,
+      "value": "Expires in under 10 minutes"
+    }
+  ],
+  "timeline.requestBundle.failed": [
+    {
+      "type": 0,
+      "value": "Couldn't finish running · Try asking again"
+    }
+  ],
+  "timeline.requestBundle.hoursLeft": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " hour"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " hours"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    },
+    {
+      "type": 0,
+      "value": " left"
+    }
+  ],
+  "timeline.requestBundle.minutesLeft": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " minute"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " minutes"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    },
+    {
+      "type": 0,
+      "value": " left"
+    }
+  ],
+  "timeline.requestBundle.quietWithDetails": [
+    {
+      "type": 1,
+      "value": "quiet"
+    },
+    {
+      "type": 0,
+      "value": " · Details"
+    }
+  ],
+  "timeline.requestBundle.rationale": [
+    {
+      "type": 0,
+      "value": "Reason"
+    }
+  ],
+  "timeline.requestBundle.requiredRole": [
+    {
+      "type": 0,
+      "value": "Who can decide"
+    }
+  ],
+  "timeline.requestBundle.thinking": [
+    {
+      "type": 0,
+      "value": "Looking at the request"
+    }
+  ],
+  "timeline.requestBundle.toolRunNamed": [
+    {
+      "type": 0,
+      "value": "Run tool \""
+    },
+    {
+      "type": 1,
+      "value": "tool"
+    },
+    {
+      "type": 0,
+      "value": "\""
+    }
+  ],
+  "timeline.requestBundle.waitingAdmin": [
+    {
+      "type": 0,
+      "value": "Waiting for an admin to approve"
+    }
+  ],
+  "timeline.requestBundle.waitingNamed": [
+    {
+      "type": 0,
+      "value": "Waiting for "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " to approve"
+    }
+  ],
   "timeline.runException.open": [
     {
       "type": 1,
@@ -15670,6 +16958,429 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "The helper didn't answer in time"
+    }
+  ],
+  "timeline.teamAiReply.appItem": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " ×"
+    },
+    {
+      "type": 2,
+      "value": "calls",
+      "style": null
+    }
+  ],
+  "timeline.teamAiReply.appItemVerb": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 1,
+      "value": "verb"
+    },
+    {
+      "type": 0,
+      "value": " ×"
+    },
+    {
+      "type": 2,
+      "value": "calls",
+      "style": null
+    }
+  ],
+  "timeline.teamAiReply.appsLine": [
+    {
+      "type": 0,
+      "value": "Apps used: "
+    },
+    {
+      "type": 1,
+      "value": "parts"
+    }
+  ],
+  "timeline.teamAiReply.appsSpoken": [
+    {
+      "type": 0,
+      "value": "Apps used, "
+    },
+    {
+      "type": 1,
+      "value": "parts"
+    }
+  ],
+  "timeline.teamAiReply.citationOpenHost": [
+    {
+      "type": 1,
+      "value": "host"
+    },
+    {
+      "type": 0,
+      "value": ", opens in a new window"
+    }
+  ],
+  "timeline.teamAiReply.citationOpenTitled": [
+    {
+      "type": 1,
+      "value": "title"
+    },
+    {
+      "type": 0,
+      "value": ", "
+    },
+    {
+      "type": 1,
+      "value": "host"
+    },
+    {
+      "type": 0,
+      "value": ", opens in a new window"
+    }
+  ],
+  "timeline.teamAiReply.connected": [
+    {
+      "type": 0,
+      "value": "Connected: "
+    },
+    {
+      "type": 1,
+      "value": "domains"
+    }
+  ],
+  "timeline.teamAiReply.connectedMore": [
+    {
+      "type": 0,
+      "value": "Connected: "
+    },
+    {
+      "type": 1,
+      "value": "domains"
+    },
+    {
+      "type": 0,
+      "value": " and "
+    },
+    {
+      "type": 2,
+      "value": "rest",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": " more"
+    }
+  ],
+  "timeline.teamAiReply.detailsClose": [
+    {
+      "type": 0,
+      "value": "Hide"
+    }
+  ],
+  "timeline.teamAiReply.detailsOpen": [
+    {
+      "type": 0,
+      "value": "Details"
+    }
+  ],
+  "timeline.teamAiReply.exposure": [
+    {
+      "type": 0,
+      "value": "Visible to "
+    },
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " person"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " people"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    },
+    {
+      "type": 0,
+      "value": " in this channel"
+    }
+  ],
+  "timeline.teamAiReply.modelChip": [
+    {
+      "type": 0,
+      "value": "Team AI · "
+    },
+    {
+      "type": 1,
+      "value": "model"
+    }
+  ],
+  "timeline.teamAiReply.onBehalfOf": [
+    {
+      "type": 0,
+      "value": "Used on behalf of "
+    },
+    {
+      "type": 1,
+      "value": "owner"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "timeline.teamAiReply.otherApp": [
+    {
+      "type": 0,
+      "value": "Another app"
+    }
+  ],
+  "timeline.teamAiReply.personalNote": [
+    {
+      "type": 0,
+      "value": "Personal apps should only post summaries. oort can't verify that."
+    }
+  ],
+  "timeline.teamAiReply.ranOn": [
+    {
+      "type": 0,
+      "value": "Ran on "
+    },
+    {
+      "type": 1,
+      "value": "site"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "timeline.teamAiReply.selfReport": [
+    {
+      "type": 0,
+      "value": "Apps and counts are as the agent reported them. oort can't verify them."
+    }
+  ],
+  "timeline.teamAiReply.siteHermes": [
+    {
+      "type": 0,
+      "value": "Hermes"
+    }
+  ],
+  "timeline.teamAiReply.siteMac": [
+    {
+      "type": 0,
+      "value": "your Mac"
+    }
+  ],
+  "timeline.teamAiReply.sourceOpen": [
+    {
+      "type": 0,
+      "value": "Open source "
+    },
+    {
+      "type": 2,
+      "value": "index",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": ", "
+    },
+    {
+      "type": 1,
+      "value": "title"
+    }
+  ],
+  "timeline.teamAiReply.sourcesCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " source"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " sources"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "timeline.teamAiReply.sourcesLabel": [
+    {
+      "type": 0,
+      "value": "Sources"
+    }
+  ],
+  "timeline.teamAiReply.toolGetAgentRun": [
+    {
+      "type": 0,
+      "value": "View work steps"
+    }
+  ],
+  "timeline.teamAiReply.toolListAgentRuns": [
+    {
+      "type": 0,
+      "value": "Agent work history"
+    }
+  ],
+  "timeline.teamAiReply.toolListMembers": [
+    {
+      "type": 0,
+      "value": "Member list"
+    }
+  ],
+  "timeline.teamAiReply.toolListPlugins": [
+    {
+      "type": 0,
+      "value": "App list"
+    }
+  ],
+  "timeline.teamAiReply.toolReadChannel": [
+    {
+      "type": 0,
+      "value": "Read channel"
+    }
+  ],
+  "timeline.teamAiReply.toolReadChannelNamed": [
+    {
+      "type": 0,
+      "value": "Read #"
+    },
+    {
+      "type": 1,
+      "value": "channel"
+    }
+  ],
+  "timeline.teamAiReply.toolReadThread": [
+    {
+      "type": 0,
+      "value": "Read thread"
+    }
+  ],
+  "timeline.teamAiReply.toolReadWorkspaceSettings": [
+    {
+      "type": 0,
+      "value": "Workspace settings"
+    }
+  ],
+  "timeline.teamAiReply.toolSearchMessages": [
+    {
+      "type": 0,
+      "value": "Search messages"
+    }
+  ],
+  "timeline.teamAiReply.toolsLine": [
+    {
+      "type": 0,
+      "value": "Looked up: "
+    },
+    {
+      "type": 1,
+      "value": "tools"
+    }
+  ],
+  "timeline.teamAiReply.toolsLineMore": [
+    {
+      "type": 0,
+      "value": "Looked up: "
+    },
+    {
+      "type": 1,
+      "value": "tools"
+    },
+    {
+      "type": 0,
+      "value": " and "
+    },
+    {
+      "type": 2,
+      "value": "rest",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": " more"
+    }
+  ],
+  "timeline.teamAiReply.toolWebSearch": [
+    {
+      "type": 0,
+      "value": "Web search"
+    }
+  ],
+  "timeline.teamAiReply.verbCreate": [
+    {
+      "type": 0,
+      "value": "create"
+    }
+  ],
+  "timeline.teamAiReply.verbList": [
+    {
+      "type": 0,
+      "value": "list"
+    }
+  ],
+  "timeline.teamAiReply.verbRead": [
+    {
+      "type": 0,
+      "value": "read"
+    }
+  ],
+  "timeline.teamAiReply.verbSearch": [
+    {
+      "type": 0,
+      "value": "search"
+    }
+  ],
+  "timeline.teamAiReply.verbUpdate": [
+    {
+      "type": 0,
+      "value": "update"
     }
   ],
   "timeline.thread.followDismiss": [

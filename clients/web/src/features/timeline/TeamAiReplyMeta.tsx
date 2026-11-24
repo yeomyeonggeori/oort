@@ -7,11 +7,12 @@ import {
 } from "@momo/core/features/timeline/appNotice";
 import {
   citationAccessibleName,
-  TEAM_AI_SOURCES_LABEL,
-  APPS_DETAIL_TOGGLE,
+  TEAM_AI_SOURCES_LABEL_KEY,
+  APPS_DETAIL_TOGGLE_KEY,
   type TeamAiReplyMeta as Meta,
 } from "@momo/core/features/timeline/teamAiReply";
 import { isDesktop, openExternalUrl } from "@/lib/tauri";
+import { useFormatMessage } from "@/i18n/useFormatMessage";
 
 // =============================================================================
 // 도우미 답 아래의 꼬리 (ADR-0201 증보 v2 H4·H5·H9-I9, #3893).
@@ -41,6 +42,7 @@ export function TeamAiReplyMeta({
   /** 모델 칩 옆에 서는 칩들(Hermes 도움, #5375). 같은 줄·같은 모양이다. */
   chips?: ReactNode;
 }) {
+  const formatMessage = useFormatMessage();
   const sourcesId = useId();
   const [detailsOpen, setDetailsOpen] = useState(false);
   return (
@@ -62,7 +64,7 @@ export function TeamAiReplyMeta({
               onClick={() => setDetailsOpen((open) => !open)}
               className="press rounded-sm py-1 text-ink-muted underline decoration-line-strong underline-offset-2 hover:text-ink focus-visible:focus-ring"
             >
-              {detailsOpen ? APPS_DETAIL_TOGGLE.close : APPS_DETAIL_TOGGLE.open}
+              {formatMessage(detailsOpen ? APPS_DETAIL_TOGGLE_KEY.close : APPS_DETAIL_TOGGLE_KEY.open)}
             </button>
           </p>
           {detailsOpen && (
@@ -106,7 +108,7 @@ export function TeamAiReplyMeta({
           data-testid="team-ai-citations"
         >
           <span className="text-ink-muted" id={sourcesId}>
-            {TEAM_AI_SOURCES_LABEL}
+            {formatMessage(TEAM_AI_SOURCES_LABEL_KEY)}
           </span>
           <ol
             aria-labelledby={sourcesId}
@@ -118,7 +120,7 @@ export function TeamAiReplyMeta({
                   href={item.url}
                   target="_blank"
                   rel="noreferrer noopener"
-                  aria-label={citationAccessibleName(item)}
+                  aria-label={citationAccessibleName(formatMessage, item)}
                   data-testid="team-ai-citation"
                   onClick={(event) => {
                     // 데스크탑 셸에서 `target="_blank"` 는 죽은 컨트롤이다. 본문 링크

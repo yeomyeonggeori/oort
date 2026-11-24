@@ -49,8 +49,19 @@ import {
   writeShownMarker,
 } from "./welcomeKickoff";
 import { AGENTS_NAV } from "@/features/sidebar/workspaceNav";
-import { EMPTY_WRITE_ACTION_LABEL } from "@momo/core/features/timeline/model";
+import { EMPTY_WRITE_ACTION_KEY } from "@momo/core/features/timeline/model";
 import { browserLaunchBlocked } from "@/testing/agentSandbox";
+import { catalog as koCatalog } from "@momo/core/i18n/generated/ko-KR";
+import { createMessageCopy } from "@momo/core/testkit";
+import { LocaleProvider } from "@/i18n/LocaleProvider";
+import type { AppLocale } from "@/i18n/localeStore";
+import { koreanLocale } from "@/testing/koLocale";
+let koLocale: AppLocale;
+const withKo = (node: ReturnType<typeof createElement>) => createElement(LocaleProvider, { locale: koLocale, children: node });
+beforeAll(async () => { koLocale = await koreanLocale(); });
+
+const ko = createMessageCopy({ messageLocale: "ko-KR", catalog: koCatalog });
+const EMPTY_WRITE_ACTION_LABEL = ko(EMPTY_WRITE_ACTION_KEY);
 
 const WS = "00000000-0000-7000-8000-000000000001";
 const OTHER_WS = "00000000-0000-7000-8000-000000000002";
@@ -426,7 +437,7 @@ async function mountWelcome(over: {
   });
   await act(async () => {
     mountedRoot?.render(
-      wrap(
+      withKo(wrap(
         createElement(WelcomeTimeline, {
           channelKind: over.channelKind,
           channelName: over.channelName,
@@ -434,7 +445,7 @@ async function mountWelcome(over: {
           directoryStatus: over.directoryStatus,
         }),
         client
-      )
+      ))
     );
   });
   await settle();
@@ -643,12 +654,12 @@ describe("welcome kickoff product path", () => {
     const fed = (messages: Message[]) =>
       wrap(createElement(WelcomeFed, { messages }), client);
     await act(async () => {
-      mountedRoot?.render(fed([restAgentMessage()]));
+      mountedRoot?.render(withKo(fed([restAgentMessage()])));
     });
     await settle();
     expect(host.querySelector("[data-testid='welcome-kickoff-stage']")).toBeNull();
     await act(async () => {
-      mountedRoot?.render(fed([]));
+      mountedRoot?.render(withKo(fed([])));
     });
     await settle();
     expect(
@@ -755,13 +766,13 @@ describe("welcome kickoff product path", () => {
     expect(root.querySelector("[data-testid='welcome-kickoff-stage']")).toBeNull();
     await act(async () => {
       mountedRoot?.render(
-        wrap(
+        withKo(wrap(
           createElement(WelcomeTimeline, {
             directory,
             directoryStatus: "success",
           }),
           new QueryClient({ defaultOptions: { queries: { retry: false } } })
-        )
+        ))
       );
     });
     await settle();
@@ -793,7 +804,7 @@ describe("welcome kickoff product path", () => {
       });
     }
     await act(async () => {
-      mountedRoot?.render(wrap(createElement(DelayedRoster), client));
+      mountedRoot?.render(withKo(wrap(createElement(DelayedRoster), client)));
     });
     await settle();
     await act(async () => {

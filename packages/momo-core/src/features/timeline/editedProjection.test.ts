@@ -6,7 +6,12 @@ import {
   type QuotedMessage,
 } from "../../lib/api";
 import { payloadToMessage } from "../../lib/realtimeEvents";
-import { resolveQuote } from "./quote";
+import { catalog as koCatalog } from "../../i18n/generated/ko-KR";
+import { createMessageService } from "../../i18n/service";
+import { resolveQuote as buildResolveQuote } from "./quote";
+
+const resolveQuote = (...args: Parameters<typeof buildResolveQuote> extends [unknown, ...infer Rest] ? Rest : never) =>
+  buildResolveQuote(createMessageService({ messageLocale: "ko-KR", catalog: koCatalog }).formatMessage, ...args);
 import {
   applyEditedMessage,
   applyTombstone,

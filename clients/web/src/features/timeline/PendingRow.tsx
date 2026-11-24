@@ -131,7 +131,7 @@ export function PendingRow({
   const quote =
     pending.replyToId === undefined
       ? null
-      : resolveQuote({ replyToId: pending.replyToId }, quoteLookup);
+      : resolveQuote(formatMessage, { replyToId: pending.replyToId }, quoteLookup);
 
   return (
     <article

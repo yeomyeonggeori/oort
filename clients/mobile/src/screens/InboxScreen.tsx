@@ -53,7 +53,7 @@ import {
   decisionReceiptCopy,
 } from '../features/inbox/ApprovalDecision';
 import {ShellConnectionStrip} from '../features/connection/ShellConnectionStrip';
-import {APPROVAL_OFFLINE_COPY, useOnline} from '../features/inbox/useOnline';
+import {APPROVAL_OFFLINE_KEY, useOnline} from '../features/inbox/useOnline';
 import {usePhoneNeedsMe} from '../features/inbox/useNeedsMe';
 import {
   useInvalidateMailbox,
@@ -409,7 +409,7 @@ export default function InboxScreen({
   const [receipts, setReceipts] = useState<{id: string; note: string}[]>([]);
   const onDecided = useCallback(
     (approvalId: string, outcome: DecisionOutcome) => {
-      const note = decisionReceiptCopy(outcome);
+      const note = decisionReceiptCopy(outcome, formatMessage);
       setReceipts(previous => [
         ...previous.filter(entry => entry.id !== approvalId),
         {id: approvalId, note},
@@ -419,7 +419,7 @@ export default function InboxScreen({
       AccessibilityInfo.announceForAccessibility(note);
       invalidateApprovals();
     },
-    [invalidateApprovals],
+    [formatMessage, invalidateApprovals],
   );
   const dismissReceipt = useCallback((approvalId: string) => {
     setReceipts(previous => previous.filter(entry => entry.id !== approvalId));
@@ -496,7 +496,7 @@ export default function InboxScreen({
       if (!online) {
         return (
           <Text style={styles.managed} testID={`decision-offline-${item.key}`}>
-            {APPROVAL_OFFLINE_COPY}
+            {formatMessage(APPROVAL_OFFLINE_KEY)}
           </Text>
         );
       }

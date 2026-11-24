@@ -3,10 +3,21 @@ import { installCoreHost, resetCoreHost } from "../../runtime/host";
 import { serverSurface } from "../capabilities/serverSurfaces";
 import {
   decideApproval,
+  decisionErrorText,
+  decisionNoteText,
   interpretReceipt,
   unreadableAnswerOutcome,
-  unsettledAnswerClause,
+  unsettledAnswerKey,
+  type DecisionOutcome,
 } from "./approvalDecision";
+import { catalog as koCatalog } from "../../i18n/generated/ko-KR";
+import { createMessageCopy } from "../../testkit";
+
+// 문장은 사전에 있다(#6044). 시험은 한국어 생성물로 풀어 예전과 같은 한국어를 단정한다.
+const ko = createMessageCopy({ messageLocale: "ko-KR", catalog: koCatalog });
+const errorText = (outcome: DecisionOutcome) => decisionErrorText(outcome, ko);
+const noteText = (outcome: DecisionOutcome) => decisionNoteText(outcome, ko);
+const unsettledAnswerClause = (status: number) => ko(unsettledAnswerKey(status));
 
 // goal B12: 승인 라우트가 없는 서버의 404를 원장의 답으로 읽지 않는다.
 //
@@ -19,10 +30,10 @@ describe("읽을 수 없는 답", () => {
   it("본문 없는 404는 미제공이라고 말하고 재시도를 권하지 않는다", () => {
     const outcome = unreadableAnswerOutcome(404, "");
     expect(outcome.kind).toBe("error");
-    expect(outcome.errorCopy).toBe(serverSurface("approvals").absentReason);
+    expect(errorText(outcome)).toBe(serverSurface("approvals").absentReason);
     // 예전 문구는 "다시 시도하세요"였다. 결코 성공할 수 없는 재시도를 시키는
     // 문장이었고, 사용자 자리에서는 앱이 고장난 것으로 읽혔다.
-    expect(outcome.errorCopy).not.toMatch(/다시 시도/);
+    expect(errorText(outcome)).not.toMatch(/다시 시도/);
   });
 
   it("미제공은 이유를 코드로도 싣는다: 화면이 빨간 alert 대신 미제공으로 그릴 수 있게", () => {
@@ -46,14 +57,14 @@ describe("읽을 수 없는 답", () => {
   });
 
   it("공백뿐인 본문도 같다", () => {
-    expect(unreadableAnswerOutcome(404, "  \n ").errorCopy).toBe(
+    expect(errorText(unreadableAnswerOutcome(404, "  \n "))).toBe(
       serverSurface("approvals").absentReason
     );
   });
 
   it("405와 501도 같은 판정을 받는다", () => {
     for (const status of [405, 501]) {
-      expect(unreadableAnswerOutcome(status, "").errorCopy).toBe(
+      expect(errorText(unreadableAnswerOutcome(status, ""))).toBe(
         serverSurface("approvals").absentReason
       );
     }
@@ -62,13 +73,13 @@ describe("읽을 수 없는 답", () => {
   it("본문이 있는데 못 읽은 것은 미제공이 아니다", () => {
     // 원장을 가진 서버가 깨진 JSON을 보낸 경우다. 그때는 다시 시도할 값이 있다.
     const outcome = unreadableAnswerOutcome(404, "<html>gateway</html>");
-    expect(outcome.errorCopy).toMatch(/다시 눌러/);
-    expect(outcome.errorCopy).not.toBe(serverSurface("approvals").absentReason);
+    expect(errorText(outcome)).toMatch(/다시 눌러/);
+    expect(errorText(outcome)).not.toBe(serverSurface("approvals").absentReason);
   });
 
   it("미제공 코드가 아닌 상태는 기존 문구를 그대로 쓴다", () => {
     for (const status of [200, 403, 409, 500]) {
-      expect(unreadableAnswerOutcome(status, "").errorCopy).toMatch(/다시 눌러/);
+      expect(errorText(unreadableAnswerOutcome(status, ""))).toMatch(/다시 눌러/);
     }
   });
 });
@@ -217,7 +228,7 @@ describe("영수증 해석은 그대로다", () => {
       status: "rejected",
     });
     expect(outcome.kind).toBe("superseded");
-    expect(outcome.note).toBe("다른 곳에서 이미 결정됐어요.");
+    expect(noteText(outcome)).toBe("다른 곳에서 이미 결정됐어요.");
   });
 
   it("만료는 만료라고 말한다: 실패로 승격하지 않는다 (ADR-0132)", () => {
@@ -226,7 +237,7 @@ describe("영수증 해석은 그대로다", () => {
       status: "expired",
     });
     expect(outcome.kind).toBe("superseded");
-    expect(outcome.note).toBe("결정 전에 만료됐어요.");
+    expect(noteText(outcome)).toBe("결정 전에 만료됐어요.");
   });
 
   it("영수증을 실은 404는 여전히 '찾을 수 없다'로 읽는다", () => {
@@ -236,7 +247,7 @@ describe("영수증 해석은 그대로다", () => {
       status: "unknown-to-this-client",
     });
     expect(outcome.kind).toBe("error");
-    expect(outcome.errorCopy).toMatch(/찾지 못했어요/);
+    expect(errorText(outcome)).toMatch(/찾지 못했어요/);
   });
 });
 
@@ -384,7 +395,7 @@ describe("결정 전송은 401이면 한 번 갱신하고 같은 요청을 다�
     const outcome = await decideApproval(WS, APPROVAL, true, KEY);
 
     expect(outcome.kind).toBe("error");
-    expect(outcome.errorCopy).toMatch(/로그인이 만료/);
+    expect(errorText(outcome)).toMatch(/로그인이 만료/);
     // 결정 한 번, 갱신 한 번. 갱신이 실패했으니 두 번째 결정은 없다.
     expect(sent.map((request) => request.path)).toEqual([
       DECISION_PATH,
@@ -407,8 +418,8 @@ describe("결정 전송은 401이면 한 번 갱신하고 같은 요청을 다�
     // 닿지 못한 것은 세션이 끝났다는 뜻이 아니다 (#3993). 잠금 화면에서 돌아와 누른 순간
     // 무선이 아직 깨는 중이었을 뿐이므로, 「다시 로그인」이 아니라 「연결을 확인하고 다시
     // 눌러 주세요」라고 말하고, 만료를 선언하지 않는다.
-    expect(outcome.errorCopy).toMatch(/서버에 닿지 못했어요/);
-    expect(outcome.errorCopy).not.toMatch(/로그인이 만료/);
+    expect(errorText(outcome)).toMatch(/서버에 닿지 못했어요/);
+    expect(errorText(outcome)).not.toMatch(/로그인이 만료/);
     expect(session.expired).toBe(0);
   });
 
@@ -421,8 +432,8 @@ describe("결정 전송은 401이면 한 번 갱신하고 같은 요청을 다�
     const outcome = await decideApproval(WS, APPROVAL, true, KEY);
 
     expect(outcome.kind).toBe("error");
-    expect(outcome.errorCopy).toMatch(/서버에 닿지 못했어요/);
-    expect(outcome.errorCopy).not.toMatch(/로그인이 만료/);
+    expect(errorText(outcome)).toMatch(/서버에 닿지 못했어요/);
+    expect(errorText(outcome)).not.toMatch(/로그인이 만료/);
     expect(session.expired).toBe(0);
   });
 
@@ -470,7 +481,7 @@ describe("결정 전송은 401이면 한 번 갱신하고 같은 요청을 다�
     const outcome = await decideApproval(WS, APPROVAL, true, KEY);
 
     expect(outcome.kind).toBe("error");
-    expect(outcome.errorCopy).toMatch(/로그인이 만료/);
+    expect(errorText(outcome)).toMatch(/로그인이 만료/);
     expect(sent.map((request) => request.path)).toEqual([
       DECISION_PATH,
       REFRESH_PATH,
@@ -529,7 +540,7 @@ describe("401이 아닌 답은 갱신 없이 영수증으로 읽힌다 (#3926)",
     const outcome = await decideApproval(WS, APPROVAL, true, KEY);
 
     expect(outcome.kind).toBe("error");
-    expect(outcome.errorCopy).toMatch(/서버가 오류로 답했어요/);
+    expect(errorText(outcome)).toMatch(/서버가 오류로 답했어요/);
     expect(sent).toHaveLength(1);
   });
 });

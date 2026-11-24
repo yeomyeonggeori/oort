@@ -141,6 +141,7 @@ function drawnRows(rows: Message[], mainFlow: boolean): Message[] {
 import type {DecisionOutcome} from '@momo/core/features/timeline/approvalDecision';
 import type {ApprovalGate, ApprovalReceipt} from './approvalGate';
 import {buildThreadContext, parentOf, rollupFor} from './threadContext';
+import {useFormatMessage} from '../../i18n/useFormatMessage';
 import {phoneMainFlowMessages} from '@momo/core/features/timeline/threadHome';
 // 접기는 이제 **코어 정본**이다 (U4-6, #1102). 이 파일이 부르던 폰 로컬 판은
 // 자기 머리말에 「정본 자리는 코어다」라고 적어 두고 폰에 있는 이유가 설계가
@@ -1270,6 +1271,7 @@ function TimelineInner({
   /** Same seam: lets the harness put the reader mid-history before measuring. */
   listRef?: React.MutableRefObject<FlatList<TimelineStreamItem> | null>;
 }): React.JSX.Element {
+  const formatMessage = useFormatMessage();
   const styles = useStyles(buildStyles);
   const palette = usePalette();
   const ownListRef = useRef<FlatList<TimelineStreamItem> | null>(null);
@@ -3226,6 +3228,7 @@ function TimelineInner({
             serverOffsetMs={serverOffsetMs}
             directory={directory}
             quote={resolveQuote(
+              formatMessage,
               {replyToId: item.pending.replyToId},
               quoteLookup,
             )}
@@ -3295,7 +3298,7 @@ function TimelineInner({
       }
       const requestKey = item.message.id.toLowerCase();
       // 걸러지기 전의 블록은 그대로 내려 보낸다(위임 줄이 원문을 읽는다). 그릴지는 행이 `quoteRedundant` 로 정한다.
-      const quote = resolveQuote(item.message, quoteLookup);
+      const quote = resolveQuote(formatMessage, item.message, quoteLookup);
       const quoteRedundant = isQuoteRedundant(quote, {
         directory,
         authorMemberId: item.message.authorMemberId,
@@ -3380,6 +3383,7 @@ function TimelineInner({
     },
     [
       directory,
+      formatMessage,
       serverOffsetMs,
       reactions,
       pins,
@@ -3801,7 +3805,7 @@ function TimelineInner({
   }
 
   if (status === 'ready' && empty) {
-    const copy = emptyOverride ?? emptyChannelCopy(channelKind, peer ?? null, dmGroup);
+    const copy = emptyOverride ?? emptyChannelCopy(formatMessage, channelKind, peer ?? null, dmGroup);
     // 고지(머리 내용)가 있으면 바깥 스크롤이 당김을 받는다 — 안쪽 빈 상태의 스크롤은 내용 높이로 늘어나 당김을 못 받는다.
     const emptyState = (
       <EmptyState

@@ -3,13 +3,24 @@ import type { Message } from "../../lib/api";
 import { agentCardModel, cardKeepsBody } from "./agentCardModel";
 import {
   ACTION_RESULT_PROP_KEY,
-  ACTION_RESULT_STATUS_LABEL,
-  ACTION_RESULT_STATUS_NOTE,
-  actionResultStatusNote,
+  actionResultStatusLabel,
+  actionResultStatusNote as buildStatusNote,
+  actionResultTitle,
   MAX_ACTION_RESULT_ROWS,
   actionResultCard,
   parseActionResultStatus,
 } from "./actionResultCard";
+import { catalog as koCatalog } from "../../i18n/generated/ko-KR";
+import { createMessageCopy } from "../../testkit";
+
+// 문장은 사전에 있다(#6044). 시험은 한국어 생성물로 풀어 예전과 같은 한국어를 단정한다.
+const ko = createMessageCopy({ messageLocale: "ko-KR", catalog: koCatalog });
+const actionResultStatusNote = (status: Parameters<typeof buildStatusNote>[1], actionId: string) =>
+  buildStatusNote(ko, status, actionId);
+const ACTION_RESULT_STATUS_NOTE = {
+  executed: "실행을 마쳤어요.",
+  role_required: "관리자가 승인해야 해요.",
+};
 
 // ADR-0186 부록 B 의 샘플 그대로. 서버(AX-3b)가 아직 없으므로 이것이 계약이다.
 const APPENDIX_B = {
@@ -62,7 +73,7 @@ describe("action_result 카드 (ADR-0186 부록 B)", () => {
       id: "0199aa11-2222-7000-8000-0000000000f1",
     });
     // 제목은 본문이고, 그래서 본문은 위에 한 번 더 서지 않는다.
-    expect(card.title).toBe("초대 링크를 만들었습니다.");
+    expect(actionResultTitle(ko, card)).toBe("초대 링크를 만들었습니다.");
     expect(cardKeepsBody(card)).toBe(false);
   });
 
@@ -71,10 +82,10 @@ describe("action_result 카드 (ADR-0186 부록 B)", () => {
       const card = agentCardModel(resultMessage({ status }));
       if (card?.kind !== "action_result") throw new Error(`no card for ${status}`);
       expect(card.status).toBe(status);
-      expect(ACTION_RESULT_STATUS_LABEL[status]).not.toBe("");
-      expect(ACTION_RESULT_STATUS_NOTE[status]).not.toBe("");
+      expect(actionResultStatusLabel(ko, status)).not.toBe("");
+      expect(actionResultStatusNote(status, "invite.create")).not.toBe("");
     }
-    expect(ACTION_RESULT_STATUS_NOTE.role_required).toBe(
+    expect(actionResultStatusNote("role_required", "invite.create")).toBe(
       "관리자가 승인해야 해요."
     );
   });
@@ -158,7 +169,15 @@ describe("action_result 카드 (ADR-0186 부록 B)", () => {
     const message = { ...resultMessage(), body: null } as unknown as Message;
     const card = agentCardModel(message);
     if (card?.kind !== "action_result") throw new Error("not an action_result");
-    expect(card.title).toBe("워크스페이스 행동");
+    expect(card.titleText).toBeNull();
+    expect(actionResultTitle(ko, card)).toBe("워크스페이스 행동");
+  });
+});
+
+describe("상태 낱말", () => {
+  it("권한 필요만 이 카드의 낱말이고 나머지는 요청 고리의 낱말이다", () => {
+    expect(actionResultStatusLabel(ko, "role_required")).toBe("권한 필요");
+    expect(actionResultStatusLabel(ko, "executed")).not.toBe(actionResultStatusLabel(ko, "rejected"));
   });
 });
 

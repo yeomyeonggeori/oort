@@ -4,9 +4,11 @@ import {agentCardModel} from '@momo/core/features/timeline/agentCardModel';
 import {
   COMPLETION_CHECK_TONE,
   COMPLETION_REPORT_KIND,
-  formatElapsed,
-  WORKED_ELAPSED_LABEL,
+  formatElapsed as buildFormatElapsed,
+  WORKED_ELAPSED_LABEL_KEY,
 } from '@momo/core/features/timeline/completionReportCard';
+import {catalog as koCatalog} from '@momo/core/i18n/generated/ko-KR';
+import {createMessageService} from '@momo/core/i18n/service';
 import type {Message} from '@momo/core/lib/api';
 import {makeDirectory} from '@momo/core/features/workspace/directory';
 import {render} from '@testing-library/react-native';
@@ -40,6 +42,10 @@ function codeOnly(source: string): string {
     .replace(/\/\*[\s\S]*?\*\//g, '')
     .replace(/(?<!:)\/\/.*$/gm, '');
 }
+
+// 낱말은 사전에 있다(#6044). 시험은 한국어 사전으로 풀어 예전과 같은 한국어를 단정한다.
+const koFormat = createMessageService({messageLocale: 'ko-KR', catalog: koCatalog}).formatMessage;
+const WORKED_ELAPSED_LABEL = koFormat(WORKED_ELAPSED_LABEL_KEY);
 
 const MESSAGE_ROW_CODE = codeOnly(MESSAGE_ROW);
 
@@ -104,8 +110,8 @@ describe('폰이 완료 리포트를 그린다 — 결정 없이', () => {
 
 describe('폰이 코어의 낱말과 색을 다시 짓지 않는다', () => {
   it('경과 서식·결과 낱말·집계는 코어 헬퍼가 답한다', () => {
-    expect(MESSAGE_ROW_CODE).toContain('formatElapsed(card.elapsedMs)');
-    expect(MESSAGE_ROW_CODE).toContain('COMPLETION_CHECK_OUTCOME_LABEL[');
+    expect(MESSAGE_ROW_CODE).toContain('formatElapsed(formatMessage, card.elapsedMs)');
+    expect(MESSAGE_ROW_CODE).toContain('COMPLETION_CHECK_OUTCOME_LABEL_KEY[');
     expect(MESSAGE_ROW_CODE).toContain('completionCheckCounts(');
   });
 
@@ -113,7 +119,7 @@ describe('폰이 코어의 낱말과 색을 다시 짓지 않는다', () => {
     // 웹은 `label={WORKED_ELAPSED_LABEL}` 로 두 칸을 세우고 폰은 한 줄로 잇는다 —
     // 배치는 달라도 낱말은 한 곳에서만 산다. 리터럴로 들고 있으면 카드와 작업
     // 세션 정보가 언젠가 다른 낱말로 같은 숫자를 부른다(그게 이 티켓의 유래).
-    expect(MESSAGE_ROW_CODE).toContain('`${WORKED_ELAPSED_LABEL} ${elapsed}`');
+    expect(MESSAGE_ROW_CODE).toContain("formatMessage('timeline.completion.workedWithElapsed', {elapsed})");
     expect(MESSAGE_ROW_CODE).not.toContain(`\`${WORKED_ELAPSED_LABEL} `);
   });
 
@@ -122,7 +128,7 @@ describe('폰이 코어의 낱말과 색을 다시 짓지 않는다', () => {
     // 코어 값과 만나 예전과 같은 줄을 만든다.
     const card = agentCardModel(reportMessage());
     if (card?.kind !== 'completion_report') throw new Error('완료 리포트가 아니다');
-    const elapsed = formatElapsed(card.elapsedMs ?? 0);
+    const elapsed = buildFormatElapsed(koFormat, card.elapsedMs ?? 0);
     expect(`${WORKED_ELAPSED_LABEL} ${elapsed}`).toBe('작업 시간 24분 28초');
   });
 

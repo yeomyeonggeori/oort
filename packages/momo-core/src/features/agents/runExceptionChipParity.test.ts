@@ -17,6 +17,10 @@ import {
   type RoutineHint,
 } from "./runWaiting";
 import { CHIP_WORD_UNCOLLECTED, triggerChip } from "./triggerChip";
+import { catalog as koCatalog } from "../../i18n/generated/ko-KR";
+import { createMessageCopy } from "../../testkit";
+
+const ko = createMessageCopy({ messageLocale: "ko-KR", catalog: koCatalog });
 
 // =============================================================================
 // 같은 run을 부르는 표면들의 판정과 낱말 (#4619 planner 결정 1: 유예 하나로·낱말 하나로).
@@ -325,7 +329,7 @@ it("승인 종결은 카드·칩·인박스·문장이 같은 낱말이고 예�
       createdAtMs: T,
       props: { approval_id: "approval", status, action_type: "tool_call" },
     };
-    const card = agentRequestBundle(message, { nowMs: T })!;
+    const card = agentRequestBundle(message, { nowMs: T, formatMessage: ko })!;
     const chip = triggerChip([r], nameFor, T)!;
     const approval: Approval = {
       id: "approval",
@@ -380,7 +384,7 @@ it.each([
     id: "card", channelId: "channel", authorMemberId: AGENT, type: "approval_request",
     seq: 1, hlcTs: T, hlcCount: 0, createdAtMs: T,
     props: { approval_id: "approval", status: row.status, action_type: "tool_call", result },
-  }, { nowMs: T, run: r })!;
+  }, { nowMs: T, formatMessage: ko, run: r })!;
   const inbox = approvalItem({
     id: "approval", workspaceId: "workspace", runId: "run", channelId: "channel",
     requestedBy: AGENT, actionType: "tool_call", status: row.status,

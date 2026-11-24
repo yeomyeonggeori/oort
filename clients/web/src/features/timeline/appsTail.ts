@@ -14,6 +14,7 @@ import {
   type AppsTailPlugin,
 } from "@momo/core/features/timeline/teamAiReply";
 import { useSession } from "@/app/session";
+import { useFormatMessage } from "@/i18n/useFormatMessage";
 import { memberFor, type Directory } from "@/features/workspace/useWorkspace";
 
 // =============================================================================
@@ -111,6 +112,7 @@ function useMinuteNow(active: boolean): number {
  */
 export function useAppNotice(message: Message): AppNotice | null {
   const { workspaceId } = useSession();
+  const formatMessage = useFormatMessage();
   const has = hasAppNotice(message);
   const provided = isSurfaceProvided("plugins");
   const catalog = useQuery({
@@ -129,5 +131,5 @@ export function useAppNotice(message: Message): AppNotice | null {
   }, [catalog.data]);
   const working = has && isWorkingAppNotice(message);
   const nowMs = useMinuteNow(working);
-  return has ? appNoticeFor(message, { surface: "web", plugins, nowMs }) : null;
+  return has ? appNoticeFor(message, { surface: "web", plugins, nowMs, formatMessage }) : null;
 }

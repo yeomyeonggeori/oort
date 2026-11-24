@@ -10,7 +10,7 @@ import {
 import type {ChannelActionKey} from '@momo/core/features/channels/actionModel';
 import {catalog as koCatalog} from '@momo/core/i18n/generated/ko-KR';
 import {createMessageService} from '@momo/core/i18n/service';
-import {copyLinkActionLabel} from '@momo/core/features/timeline/copyLabels';
+import {copyLinkActionKey} from '@momo/core/features/timeline/copyLabels';
 import type {StatusDot as PeerStatus} from '@momo/core/features/presence/statusDot';
 import {makeDirectory} from '@momo/core/features/workspace/directory';
 import type {RosterMember} from '@momo/core/lib/api';
@@ -412,7 +412,7 @@ describe('정보 페이지 — 행은 코어 표의 답이다 (#4319)', () => {
     expect(rowKeys()).toEqual(['mute-toggle', 'copy-name', 'copy-link', 'copy-id', 'close-dm']);
     expect(screen.getByTestId('conversation-info-mute-toggle')).toHaveTextContent(new RegExp(koFormat(channelMuteToggleKey(false))));
     expect(screen.getByTestId('conversation-info-copy-name')).toHaveTextContent(koFormat(channelCopyNameKey(false)));
-    expect(screen.getByTestId('conversation-info-copy-link')).toHaveTextContent(copyLinkActionLabel(false));
+    expect(screen.getByTestId('conversation-info-copy-link')).toHaveTextContent(koFormat(copyLinkActionKey(false)));
     expect(screen.getByTestId('conversation-info-copy-id')).toHaveTextContent(koFormat(channelCopyIdKey(false)));
     expect(screen.getByTestId('conversation-info-close-dm')).toHaveTextContent(koFormat(DM_CLOSE_KEY));
     // 복사 카드는 코어의 제목 하나를 이고 선다.
@@ -512,7 +512,7 @@ describe('정보 페이지 — 행은 코어 표의 답이다 (#4319)', () => {
   it('복사 영수증은 코어의 「복사됨」 낱말이고 그 줄만 바뀐다 — 페이지는 그대로다', () => {
     const props = renderPage({items: conversationInfoActionItems(dmTarget(), {name: true, link: false, id: false})});
     expect(screen.getByTestId('conversation-info-copy-name')).toHaveTextContent(koFormat(channelCopyNameKey(true)));
-    expect(screen.getByTestId('conversation-info-copy-link')).toHaveTextContent(copyLinkActionLabel(false));
+    expect(screen.getByTestId('conversation-info-copy-link')).toHaveTextContent(koFormat(copyLinkActionKey(false)));
     expect(screen.getByTestId('conversation-info-copy-id')).toHaveTextContent(koFormat(channelCopyIdKey(false)));
     expect(koFormat(channelCopyNameKey(true))).not.toBe(koFormat(channelCopyNameKey(false)));
     expect(screen.getByTestId('conversation-info-name')).toBeTruthy();

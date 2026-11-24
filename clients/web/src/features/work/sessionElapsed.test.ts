@@ -1,10 +1,16 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import {
-  SESSION_ELAPSED_META_LABEL,
-  sessionElapsedReadout,
+  SESSION_ELAPSED_META_LABEL_KEY,
+  sessionElapsedReadout as buildReadout,
 } from "@momo/core/features/work/workSessionFormat";
-import { WORKED_ELAPSED_LABEL } from "@momo/core/features/timeline/completionReportCard";
+import { WORKED_ELAPSED_LABEL_KEY } from "@momo/core/features/timeline/completionReportCard";
+import { catalog as koCatalog } from "@momo/core/i18n/generated/ko-KR";
+import { createMessageService } from "@momo/core/i18n/service";
+
+const koFormat = createMessageService({ messageLocale: "ko-KR", catalog: koCatalog }).formatMessage;
+const sessionElapsedReadout = (session: Parameters<typeof buildReadout>[0], nowMs: number) =>
+  buildReadout(session, nowMs, koFormat);
 
 // =============================================================================
 // 세션 경과가 화면에서 세 갈래를 지키는가 (UXC-C).
@@ -34,7 +40,7 @@ const START = 1_700_000_000_000;
 describe("세 갈래가 화면까지 온다", () => {
   it("두 표면이 코어의 한 판정을 부른다 — 시계 함수를 직접 부르지 않는다", () => {
     for (const [name, source] of SURFACES) {
-      expect(source, name).toContain("sessionElapsedReadout(session, nowMs)");
+      expect(source, name).toContain("sessionElapsedReadout(session, nowMs, formatMessage)");
       // `elapsedLabel(startedAtMs, endedAtMs ?? nowMs)` 로 돌아가면 끝난 세션이
       // 다시 시계가 되고, 두 표면이 서로 다른 격으로 같은 세션을 말하게 된다.
       expect(source, name).not.toContain("elapsedLabel(session.startedAtMs");
@@ -96,9 +102,9 @@ describe("세 갈래가 화면까지 온다", () => {
   it("세션 정보의 라벨은 코어가 준다 — 카드와 같은 낱말 (#1468)", () => {
     // 그 자리는 라벨:값 쌍이라 위 조각과 형태가 다르지만 어근은 같아야 한다.
     // 「실행 시간」이 이 파일에 남아 있으면 한 화면의 한 숫자가 두 어근으로 불린다.
-    expect(detail).toContain("SESSION_ELAPSED_META_LABEL[elapsed.kind]");
+    expect(detail).toContain("SESSION_ELAPSED_META_LABEL_KEY[elapsed.kind]");
     expect(detail).not.toContain("실행 시간");
-    expect(SESSION_ELAPSED_META_LABEL.worked).toBe(WORKED_ELAPSED_LABEL);
+    expect(SESSION_ELAPSED_META_LABEL_KEY.worked).toBe(WORKED_ELAPSED_LABEL_KEY);
   });
 
   it("그 라벨의 갈림은 화면이 다시 판정하지 않는다 (#1468)", () => {

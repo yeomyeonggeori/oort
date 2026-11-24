@@ -1,8 +1,10 @@
+import type { LocaleService } from "../../i18n/context";
+import type { PlainMessageKey } from "../../i18n/keys";
 import { elapsedLabel } from "../agents/workingSignal";
 import {
-  ELAPSED_SUB_SECOND,
-  WORKED_ELAPSED_LABEL,
+  WORKED_ELAPSED_LABEL_KEY,
   formatElapsed,
+  isSubSecondElapsed,
 } from "../timeline/completionReportCard";
 import type { WorkRowState, WorkSessionStatusKey } from "./workSessionModel";
 
@@ -174,7 +176,7 @@ export interface SessionElapsedReadout {
 export const SESSION_WORKED_SUFFIX = "동안 작업";
 
 /**
- * 같은 격, 조사 없이. 「동안」은 기간 명사만 받는데 `ELAPSED_SUB_SECOND` 는 기간이
+ * 같은 격, 조사 없이. 「동안」은 기간 명사만 받는데 `isSubSecondElapsed` 가 가리키는 값은 기간이
  * 아니라 비교 표현이라 「1초 미만 동안 작업」은 문장이 되지 못한다. 값을 바꾸는
  * 대신(그 값은 카드도 함께 쓴다) 이 한 자리에서 조사를 떨어뜨린다 — 라벨 자리는
  * 「작업 시간 1초 미만」으로 이미 문법이 서 있어 손댈 것이 없다.
@@ -189,12 +191,10 @@ export const SESSION_WORKED_BARE_SUFFIX = "작업";
  * 삼항이 아니라 `SessionElapsedReadout.kind` 다 — 위에 선 조각이 시계인지 성과인지와
  * **같은 판정**이 라벨을 고른다.
  */
-export const SESSION_ELAPSED_META_LABEL: Readonly<
-  Record<SessionElapsedReadout["kind"], string>
-> = {
-  clock: "경과",
-  worked: WORKED_ELAPSED_LABEL,
-};
+export const SESSION_ELAPSED_META_LABEL_KEY = {
+  clock: "timeline.completion.elapsedClock",
+  worked: WORKED_ELAPSED_LABEL_KEY,
+} as const satisfies Record<SessionElapsedReadout["kind"], PlainMessageKey>;
 
 /**
  * 이 세션의 경과를 무엇으로 말할 것인가 (UXC-C).
@@ -207,7 +207,8 @@ export const SESSION_ELAPSED_META_LABEL: Readonly<
  */
 export function sessionElapsedReadout(
   session: { startedAtMs?: number | null; endedAtMs?: number | null },
-  nowMs: number
+  nowMs: number,
+  formatMessage: LocaleService["formatMessage"]
 ): SessionElapsedReadout | null {
   const startedAtMs = session.startedAtMs;
   if (typeof startedAtMs !== "number" || !Number.isFinite(startedAtMs)) {
@@ -215,10 +216,10 @@ export function sessionElapsedReadout(
   }
   const endedAtMs = session.endedAtMs;
   if (typeof endedAtMs === "number" && Number.isFinite(endedAtMs)) {
-    const value = formatElapsed(endedAtMs - startedAtMs);
+    const value = formatElapsed(formatMessage, endedAtMs - startedAtMs);
     if (value === "") return null;
     const suffix =
-      value === ELAPSED_SUB_SECOND
+      isSubSecondElapsed(endedAtMs - startedAtMs)
         ? SESSION_WORKED_BARE_SUFFIX
         : SESSION_WORKED_SUFFIX;
     return {

@@ -7,7 +7,12 @@ import {
   channelLabelParts,
 } from "../workspace/directory";
 import { parseApprovalAction } from "../timeline/agentCardModel";
-import { approvalCardNote } from "../timeline/approvalNote";
+import { approvalCardNote as buildApprovalCardNote } from "../timeline/approvalNote";
+import { catalog as koCatalog } from "../../i18n/generated/ko-KR";
+import { createMessageCopy } from "../../testkit";
+
+const ko = createMessageCopy({ messageLocale: "ko-KR", catalog: koCatalog });
+const approvalCardNote = (input: Parameters<typeof buildApprovalCardNote>[0]) => buildApprovalCardNote(input, ko);
 import {
   dmAdmissionCandidates,
   dmAdmissionHint,

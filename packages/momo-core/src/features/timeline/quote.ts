@@ -1,10 +1,9 @@
+import type { LocaleService } from "../../i18n/context";
+import type { PlainMessageKey } from "../../i18n/keys";
 import { uuidEq, type Message, type QuotedMessage } from "../../lib/api";
 import { memberFor, type Directory } from "../workspace/directory";
 import { hasRenderableBody } from "./bodySlot";
-import {
-  COMPLETION_REPORT_KIND,
-  COMPLETION_REPORT_TITLE,
-} from "./completionReportCard";
+import { COMPLETION_REPORT_KIND } from "./completionReportCard";
 
 // =============================================================================
 // 인용 답글 — 두 클라이언트가 공유하는 정본 (ADR-0148, goal B3 W1/M1).
@@ -55,14 +54,14 @@ export const QUOTE_EXCERPT_MAX_LINES = 1;
 export const QUOTE_EXCERPT_MAX_CHARS = 140;
 
 /** 삭제된 원본이 인용된 자리. 우리 문장이므로 마크다운을 타지 않는다. */
-export const QUOTE_DELETED_TEXT = "삭제된 메시지";
+export const QUOTE_DELETED_KEY = "timeline.quote.deleted" satisfies PlainMessageKey;
 
 /**
  * 규칙 4 — 인용의 인용은 원본만 그린다. 두 번째 겹은 이 표시뿐이고, 대상 id가
  * 애초에 와이어에 없으므로(`quotesAnother`는 boolean이다) 계단을 만들 재료 자체가
  * 없다.
  */
-export const QUOTE_NESTED_MARK = "인용 포함";
+export const QUOTE_NESTED_KEY = "timeline.quote.nestedMark" satisfies PlainMessageKey;
 
 /**
  * 컴포저 칩과 행 액션이 쓰는 어휘. 스레드의 「답글」과 절대 겹치지 않는다.
@@ -73,9 +72,9 @@ export const QUOTE_NESTED_MARK = "인용 포함";
  * 스레드로 치우고, 인용은 본류에 남기면서 맥락만 끌어온다(ADR-0148의 핵심 문장).
  * 「해서 답하기」가 그 「본류에 남는다」를 낱말 안에 넣는다.
  */
-export const QUOTE_ACTION_LABEL = "인용해서 답하기";
-export const QUOTE_CANCEL_LABEL = "인용 취소";
-export const QUOTE_JUMP_HINT = "원본으로 이동";
+export const QUOTE_ACTION_KEY = "timeline.quote.action" satisfies PlainMessageKey;
+export const QUOTE_CANCEL_KEY = "timeline.quote.cancel" satisfies PlainMessageKey;
+export const QUOTE_JUMP_KEY = "timeline.quote.jump" satisfies PlainMessageKey;
 
 /**
  * 본문이 내용이 아닌 메시지 종류의 이름 (ADR-0148 미결 2).
@@ -84,13 +83,13 @@ export const QUOTE_JUMP_HINT = "원본으로 이동";
  * diff의 `body`는 사람이 읽을 문장이 아니고, 우리가 `detail.rows`를 전부 펼치는
  * 문제를 인용 블록 안으로 한 번 더 들여오는 일이다. 종류를 말하고 원본으로 보낸다.
  */
-const KIND_LABELS: Readonly<Record<string, string>> = {
-  tool_call: "도구 실행",
-  tool_result: "도구 결과",
-  diff: "코드 변경",
-  artifact: "산출물",
-  approval_request: "승인 요청",
-  system: "시스템 알림",
+const KIND_LABELS: Readonly<Record<string, PlainMessageKey>> = {
+  tool_call: "timeline.quote.kindToolCall",
+  tool_result: "timeline.quote.kindToolResult",
+  diff: "timeline.quote.kindDiff",
+  artifact: "timeline.quote.kindArtifact",
+  approval_request: "timeline.quote.kindApproval",
+  system: "timeline.quote.kindSystem",
 };
 
 /**
@@ -109,8 +108,8 @@ const KIND_LABELS: Readonly<Record<string, string>> = {
  * 낱말은 카드가 스스로를 부르는 그 이름을 그대로 쓴다 — 인용이 카드와 다른 낱말을
  * 쓰면 「저기서 저것을 가리킨다」가 두 이름을 갖게 된다.
  */
-const PROPS_KIND_LABELS: Readonly<Record<string, string>> = {
-  [COMPLETION_REPORT_KIND]: COMPLETION_REPORT_TITLE,
+const PROPS_KIND_LABELS: Readonly<Record<string, PlainMessageKey>> = {
+  [COMPLETION_REPORT_KIND]: "timeline.quote.kindCompletionReport",
 };
 
 /**
@@ -120,7 +119,7 @@ const PROPS_KIND_LABELS: Readonly<Record<string, string>> = {
  * 온다. 그때 「내용 없는 메시지」로 떨어뜨리면 **내용이 있는 것을 없다고** 말한다 —
  * 카드는 자기 내용을 `props` 에 들고 있다. 아는 만큼만 말한다: 카드다.
  */
-export const QUOTE_CARD_TEXT = "카드 메시지";
+export const QUOTE_CARD_KEY = "timeline.quote.kindCard" satisfies PlainMessageKey;
 
 /**
  * 인용 블록이 그리는 것. `kind`는 세 갈래뿐이고 그 셋이 서로 배타인 것이 요점이다
@@ -208,13 +207,13 @@ export function quoteExcerpt(
 }
 
 /** 이 종류의 메시지가 인용됐을 때 본문 대신 말할 이름, 또는 null(본문을 쓴다). */
-export function quotedKindLabel(type: string): string | null {
+export function quotedKindKey(type: string): PlainMessageKey | null {
   return KIND_LABELS[type] ?? null;
 }
 
 /** 이 `props.kind` 카드가 인용됐을 때 말할 이름. 모르는 종류는 「카드 메시지」다. */
-export function quotedPropsKindLabel(propsKind: string): string {
-  return PROPS_KIND_LABELS[propsKind] ?? QUOTE_CARD_TEXT;
+export function quotedPropsKindKey(propsKind: string): PlainMessageKey {
+  return PROPS_KIND_LABELS[propsKind] ?? QUOTE_CARD_KEY;
 }
 
 /**
@@ -291,7 +290,10 @@ function isDeletedQuote(
 }
 
 /** 서버가 풀어 준 인용 하나를 블록으로. */
-export function quoteBlockFrom(quoted: QuotedMessage): QuoteBlock {
+export function quoteBlockFrom(
+  formatMessage: LocaleService["formatMessage"],
+  quoted: QuotedMessage
+): QuoteBlock {
   // 본문은 여기서 **한 번만** 읽는다: 묘비 판정과 발췌가 같은 값을 본다.
   const body = presentBody(quoted.body);
   const propsKind = presentPropsKind(quoted.propsKind);
@@ -307,11 +309,12 @@ export function quoteBlockFrom(quoted: QuotedMessage): QuoteBlock {
   // 답하고, 답하지 못한 타입(`text`)에서만 카드 종류를 묻는다. 그리고 카드 종류는
   // **읽을 본문이 없을 때만** 말한다 — 요약을 쓴 완료 리포트에서 그 요약이 카드
   // 이름으로 덮이면, 인용이 원본의 문장 대신 분류명을 가리키게 된다.
-  const label =
-    quotedKindLabel(quoted.type) ??
+  const labelKey =
+    quotedKindKey(quoted.type) ??
     (propsKind !== undefined && !hasRenderableBody(body)
-      ? quotedPropsKindLabel(propsKind)
+      ? quotedPropsKindKey(propsKind)
       : null);
+  const label = labelKey === null ? null : formatMessage(labelKey);
   const excerpt =
     label === null
       ? quoteExcerpt(body ?? "")
@@ -344,10 +347,13 @@ export function quoteBlockFrom(quoted: QuotedMessage): QuoteBlock {
  * **실시간으로 도착했을 때만** 묘비로 서고, 새로고침하면 멀쩡해진다 — 같은 원본이
  * 두 경로에서 다르게 읽히는 것이 이 함수가 막으라고 있는 그 결함이다.
  */
-function quoteBlockFromLocal(message: Message): QuoteBlock {
+function quoteBlockFromLocal(
+  formatMessage: LocaleService["formatMessage"],
+  message: Message
+): QuoteBlock {
   const body = presentBody(message.body);
   const propsKind = presentPropsKind(message.props?.["kind"]);
-  return quoteBlockFrom({
+  return quoteBlockFrom(formatMessage, {
     id: message.id,
     seq: message.seq,
     authorMemberId: message.authorMemberId,
@@ -376,14 +382,15 @@ function quoteBlockFromLocal(message: Message): QuoteBlock {
  * `loaded`는 「id로 행을 찾는다」 하나만 요구한다(배열 순회든 Map이든 호출자 사정).
  */
 export function resolveQuote(
+  formatMessage: LocaleService["formatMessage"],
   message: Pick<Message, "replyToId" | "replyTo">,
   loaded?: (messageId: string) => Message | undefined
 ): QuoteBlock | null {
   const targetId = message.replyToId;
   if (targetId === undefined) return null;
-  if (message.replyTo !== undefined) return quoteBlockFrom(message.replyTo);
+  if (message.replyTo !== undefined) return quoteBlockFrom(formatMessage, message.replyTo);
   const local = loaded?.(targetId);
-  if (local !== undefined) return quoteBlockFromLocal(local);
+  if (local !== undefined) return quoteBlockFromLocal(formatMessage, local);
   return { kind: "unresolved", targetId, targetSeq: null };
 }
 
@@ -562,13 +569,16 @@ export function canQuoteMessage(message: Message): boolean {
 }
 
 /** 행 하나를 컴포저에 걸 인용 초안으로. 걸 수 없으면 null. */
-export function quoteDraftFor(message: Message): QuoteDraft | null {
+export function quoteDraftFor(
+  formatMessage: LocaleService["formatMessage"],
+  message: Message
+): QuoteDraft | null {
   if (!canQuoteMessage(message)) return null;
   return {
     targetId: message.id,
     targetSeq: message.seq,
     authorMemberId: message.authorMemberId,
-    block: quoteBlockFromLocal(message),
+    block: quoteBlockFromLocal(formatMessage, message),
   };
 }
 

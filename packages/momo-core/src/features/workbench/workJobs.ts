@@ -167,7 +167,11 @@ export function workJobStateLabel(
   return row.statusLabel;
 }
 
-export function workJobRow(item: SharedWorkSession, nowMs: number): WorkJobRow {
+export function workJobRow(
+  item: SharedWorkSession,
+  nowMs: number,
+  formatMessage: MessageService["formatMessage"]
+): WorkJobRow {
   const run = isRunItem(item);
   const requester: WorkJobPerson | null = run
     ? item.requestedBy != null
@@ -178,7 +182,8 @@ export function workJobRow(item: SharedWorkSession, nowMs: number): WorkJobRow {
   const awaitingApproval = isAwaitingApproval(item);
   const duration = sessionElapsedReadout(
     { startedAtMs: item.startedAtMs > 0 ? item.startedAtMs : null, endedAtMs: item.endedAtMs },
-    nowMs
+    nowMs,
+    formatMessage
   );
   return {
     id: item.sessionId,

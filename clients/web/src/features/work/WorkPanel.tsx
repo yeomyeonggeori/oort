@@ -184,6 +184,7 @@ function SessionRow({
   onPeek: () => void;
   rowRef: (element: HTMLButtonElement | null) => void;
 }) {
+  const formatMessage = useFormatMessage();
   const { workspaceId } = useSession();
   // 이 행의 검증 칩 (#1463). 스레드를 넘기지 않으므로 이 행은 `/replies` 를 열지
   // 않는다 — 원천은 채널 히스토리 스캔이고, 같은 채널의 행이 몇 개든 요청은
@@ -197,7 +198,7 @@ function SessionRow({
   // (코어 `sessionElapsedReadout`). 판정이 코어에 있는 이유는 상세가 같은 답을
   // 그려야 하기 때문이다 — 목록과 상세가 서로 다른 격으로 같은 세션을 말하면
   // 안 된다.
-  const elapsed = sessionElapsedReadout(session, nowMs);
+  const elapsed = sessionElapsedReadout(session, nowMs, formatMessage);
   return (
     <button
       ref={rowRef}

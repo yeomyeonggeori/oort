@@ -1,8 +1,11 @@
 import {
   decideApproval,
+  decisionErrorText,
+  decisionNoteText,
   newDecisionId,
   type DecisionOutcome,
 } from '@momo/core/features/timeline/approvalDecision';
+import type {LocaleService} from '@momo/core/i18n';
 import type {SpawnExecutionPlan} from '@momo/core/lib/executionPlan';
 import {
   decisionHostId,
@@ -19,6 +22,7 @@ import {Sentence} from '../../design/atoms';
 import {useStyles} from '../../design/theme';
 import {dismissApprovalNotifications} from '../../push/approvalNotifications';
 import {useSession} from '../../session/useSession';
+import {useFormatMessage} from '../../i18n/useFormatMessage';
 import {SpawnHostChoice} from './SpawnHostChoice';
 
 // =============================================================================
@@ -160,6 +164,7 @@ export function ApprovalDecision({
   const pill = shape === 'pill' || shape === 'request';
   const request = shape === 'request';
   const {workspaceId} = useSession();
+  const formatMessage = useFormatMessage();
   const queryClient = useContext(QueryClientContext);
   /** 지금 서버에 나가 있는 결정의 방향. 없으면 `null`. */
   const [sending, setSending] = useState<Direction | null>(null);
@@ -225,7 +230,7 @@ export function ApprovalDecision({
             return;
           }
           setNoticeTone('error');
-          const copy = outcome.errorCopy ?? '결정을 처리하지 못했어요.';
+          const copy = decisionErrorText(outcome, formatMessage) ?? '결정을 처리하지 못했어요.';
           setErrorCopy(copy);
           // 로터로 결정한 사람의 초점은 행 위에 있고, 이 줄은 그 행의 낭독 라벨에
           // 들어가지 않는다. 소리로 한 번 말하지 않으면 실패가 들리지 않는다.
@@ -248,7 +253,7 @@ export function ApprovalDecision({
         // 카드에 서는 영수증은 행의 낭독 라벨에 들어가지 않고, 로터의 「승인」·
         // 「거부」는 말없이 사라진다. 낱말은 카드 영수증과 같은 함수가 짓는다.
         if (spoken) {
-          AccessibilityInfo.announceForAccessibility(decisionReceiptCopy(outcome));
+          AccessibilityInfo.announceForAccessibility(decisionReceiptCopy(outcome, formatMessage));
         }
       } finally {
         sendingRef.current = false;
@@ -261,6 +266,7 @@ export function ApprovalDecision({
       chosenHostId,
       execution,
       forbiddenCopy,
+      formatMessage,
       canApprove,
       onSettled,
       onBusyChange,
@@ -459,7 +465,10 @@ const buildStyles = (color: Palette) => StyleSheet.create({
  * 기록된 방향**을 말한다 — 내가 승인을 눌렀는데 원장에 거부가 적혀 있을 수 있고,
  * 그때 "이미 결정되었습니다"만 말하면 사람은 자기가 누른 대로 됐다고 읽는다.
  */
-export function decisionReceiptCopy(outcome: DecisionOutcome): string {
+export function decisionReceiptCopy(
+  outcome: DecisionOutcome,
+  formatMessage: LocaleService['formatMessage'],
+): string {
   if (outcome.kind === 'committed' && outcome.status === 'cancelled') {
     return '이 요청은 취소되어 있었어요.';
   }
@@ -476,7 +485,7 @@ export function decisionReceiptCopy(outcome: DecisionOutcome): string {
     if (outcome.status === 'cancelled') {
       return '이 요청은 취소되어 있었어요.';
     }
-    return outcome.note ?? '이 요청은 이미 결정되어 있었어요.';
+    return decisionNoteText(outcome, formatMessage) ?? '이 요청은 이미 결정되어 있었어요.';
   }
   if (outcome.status === 'approved') return '승인을 기록했어요.';
   if (outcome.status === 'rejected') return '거부를 기록했어요.';

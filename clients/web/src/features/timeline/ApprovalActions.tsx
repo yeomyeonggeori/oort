@@ -6,9 +6,11 @@ import { cn } from "@/design/lib/cn";
 import { useSession } from "@/app/session";
 import {
   decideApproval,
+  decisionErrorText,
   newDecisionId,
   type DecisionOutcome,
 } from "@momo/core/features/timeline/approvalDecision";
+import { useFormatMessage } from "@/i18n/useFormatMessage";
 import type { SpawnExecutionPlan } from "@momo/core/lib/executionPlan";
 import {
   decisionHostId,
@@ -263,6 +265,7 @@ export function ApprovalActions({
   /** 결정이 서버에 나가 있는 동안 true, 답(성공·실패)이 오면 false. 「작업」 칸이 답을 받을 때까지 자리를 지키는 데 쓴다(#5738). */
   onBusyChange?: (busy: boolean) => void;
 }) {
+  const formatMessage = useFormatMessage();
   // workspaceId comes from session context rather than a prop chain: both
   // callers sit several components below the shell.
   const { workspaceId, replaceSessionMember } = useSession();
@@ -337,7 +340,7 @@ export function ApprovalActions({
           // 그 자리에 있다.
           return;
         }
-        setErrorCopy(outcome.errorCopy ?? "결정을 처리하지 못했어요.");
+        setErrorCopy(decisionErrorText(outcome, formatMessage) ?? "결정을 처리하지 못했어요.");
         return;
       }
       // 성공하면 호출자가 이 컨트롤을 영수증 줄로 바꾸면서 언마운트한다. 초점은

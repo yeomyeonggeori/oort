@@ -46,6 +46,9 @@
 // 안 된다.
 // =============================================================================
 
+import type { LocaleService } from "../../i18n/context";
+import type { PlainMessageKey } from "../../i18n/keys";
+
 /** 문장이 지는 격. 값이 아니라 순서다 — 굵기·색은 각 클라가 정한다. */
 export type ApprovalNoteTone = "receipt" | "blocked" | "guidance";
 
@@ -245,11 +248,14 @@ export function waitsForParticipant(
  * 참여자 동의 카드가 결정을 기다리는 한 줄. 이름을 풀 수 있으면 그 사람의 이름으로 말하고, 명부에서
  * 못 풀면 이름 없이 말한다. 어느 쪽도 「관리자」를 대신 세우지 않는다.
  */
-export function participantWaitingLine(name?: string | null): string {
+export function participantWaitingLine(
+  formatMessage: LocaleService["formatMessage"],
+  name?: string | null
+): string {
   const person = name?.trim();
   return person
-    ? `${person} 님의 허락을 기다려요`
-    : "다른 참여자의 허락을 기다려요";
+    ? formatMessage("timeline.approvalNote.waitingNamed", { name: person })
+    : formatMessage("timeline.approvalNote.waitingOther");
 }
 
 export interface ApprovalCardNoteInput {
@@ -292,7 +298,7 @@ export interface ApprovalCardNoteInput {
   /**
    * `offline` 일 때 줄이 말할 문장. 막은 **원인**(기기 오프라인 · 서버에 닿지 못함)이 문장을 가르므로 연결 상태 모델이 고른
    * 사전 키를 클라이언트가 읽어 넘긴다(#5239). 코어는 사전을 모르므로 받기만 한다. 없거나 비면 원인을 가리지 않는
-   * `APPROVAL_OFFLINE_COPY` 이다.
+   * `APPROVAL_OFFLINE_KEY` 이다.
    */
   offlineText?: string | null;
   /** 이 서버에 승인 원장 표면이 있는가. 없으면 버튼은 결코 성공하지 못한다. */
@@ -313,12 +319,10 @@ export interface ApprovalCardNoteInput {
  * 원인 문장을 아직 넘기지 않는 클라이언트의 몫이다. 서버에 닿지 못한 것을 「오프라인」이라고 말하지 않으려는 것이
  * 그 이유다.
  */
-export const APPROVAL_OFFLINE_COPY =
-  "연결이 끊겨 지금은 결정할 수 없어요. 다시 연결되면 여기서 승인하거나 거부할 수 있어요.";
+export const APPROVAL_OFFLINE_KEY = "timeline.approvalNote.offline" satisfies PlainMessageKey;
 
 /** 이 표면에서는 결정할 수 없고 다른 자리가 있는 경우. 폰의 문장 그대로. */
-export const APPROVAL_ELSEWHERE_COPY =
-  "이 결정은 인박스나 데스크탑 앱에서 할 수 있어요.";
+export const APPROVAL_ELSEWHERE_KEY = "timeline.approvalNote.elsewhere" satisfies PlainMessageKey;
 
 /**
  * 카드가 컨트롤 대신 말할 줄. `null`이면 **컨트롤을 세우거나, 할 말이 없다**.
@@ -349,7 +353,33 @@ export const APPROVAL_ELSEWHERE_COPY =
  * 연결되면 여기서」는 둘 다 거짓말이다.
  */
 export function approvalCardNote(
-  input: ApprovalCardNoteInput
+  input: ApprovalCardNoteInput,
+  formatMessage: LocaleService["formatMessage"]
+): ApprovalCardNote | null {
+  return decideApprovalCardNote(input, {
+    elsewhere: () => formatMessage(APPROVAL_ELSEWHERE_KEY),
+    offline: () => formatMessage(APPROVAL_OFFLINE_KEY),
+    waiting: (name) => participantWaitingLine(formatMessage, name),
+  });
+}
+
+/**
+ * 카드가 컨트롤 대신 할 말이 있는가. 줄이 서는지만 묻는 자리(승인 기한)를 위해, 문장을 짓지 않고 같은 판정을 부른다.
+ */
+export function approvalCardNoteSpoken(input: ApprovalCardNoteInput): boolean {
+  const none = () => "";
+  return decideApprovalCardNote(input, { elsewhere: none, offline: none, waiting: none }) !== null;
+}
+
+interface ApprovalCardNoteWords {
+  elsewhere: () => string;
+  offline: () => string;
+  waiting: (name?: string | null) => string;
+}
+
+function decideApprovalCardNote(
+  input: ApprovalCardNoteInput,
+  say: ApprovalCardNoteWords
 ): ApprovalCardNote | null {
   const receipt = input.receiptNote?.trim();
   if (receipt) {
@@ -365,21 +395,21 @@ export function approvalCardNote(
     return {
       kind: "unsupported",
       tone: "guidance",
-      text: text ? text : APPROVAL_ELSEWHERE_COPY,
+      text: text ? text : say.elsewhere(),
     };
   }
   if (!input.pendingHere) {
     return {
       kind: "elsewhere",
       tone: "guidance",
-      text: APPROVAL_ELSEWHERE_COPY,
+      text: say.elsewhere(),
     };
   }
   if (input.waitingForParticipant) {
     return {
       kind: "participant",
       tone: "guidance",
-      text: participantWaitingLine(input.participantName),
+      text: say.waiting(input.participantName),
     };
   }
   if (input.offline) {
@@ -387,7 +417,7 @@ export function approvalCardNote(
     return {
       kind: "offline",
       tone: "blocked",
-      text: cause ? cause : APPROVAL_OFFLINE_COPY,
+      text: cause ? cause : say.offline(),
     };
   }
   return null;

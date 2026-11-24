@@ -177,7 +177,7 @@ async function login(page) {
 
 async function open(browserType, origin, scheme, state, viewport = { width: 1440, height: 900 }, ready = "sidebar-section-sec-1", launch = {}) {
   const browser = await browserType.launch(launch);
-  const context = await browser.newContext({ viewport, colorScheme: scheme, serviceWorkers: "block", reducedMotion: "reduce" });
+  const context = await browser.newContext({ viewport, colorScheme: scheme, serviceWorkers: "block", reducedMotion: "reduce", locale: "ko-KR" });
   await installMocks(context, state);
   await context.addInitScript((server) => { try { if (!localStorage.getItem("momo.web.server.v1")) localStorage.setItem("momo.web.server.v1", server); } catch { /* 저장소 없는 캡처 */ } }, origin);
   const page = await context.newPage();

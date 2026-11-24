@@ -1,3 +1,4 @@
+import type { LocaleService } from "../../i18n/context";
 import type { Message } from "../../lib/api";
 import { isPhotoAttachment } from "../attachments/model";
 import { expressionMessageSize, tokenizeExpressions } from "../expressions/message";
@@ -97,6 +98,7 @@ export type MessageExcerpt =
  * `expressions` 는 이모티콘만 보낸 메시지(본문이 `:이름:` 토큰)를 알아보려는 명부다. 주지 않으면 그 판정은 하지 않는다.
  */
 export function messageExcerpt(
+  formatMessage: LocaleService["formatMessage"],
   message: Message,
   expressions: readonly Expression[] = []
 ): MessageExcerpt {
@@ -109,7 +111,7 @@ export function messageExcerpt(
   ) {
     return { kind: "expression" };
   }
-  const draft = quoteDraftFor(message);
+  const draft = quoteDraftFor(formatMessage, message);
   const lines = draft?.block.kind === "ready" ? draft.block.lines : [];
   if (lines.length > 0) return { kind: "text", text: lines.join(" ") };
   const attachments = message.attachments ?? [];
@@ -147,6 +149,7 @@ export type ReplyHomeLine =
  * 쓴다. **여기서 요청은 일어나지 않는다.**
  */
 export function replyHomeLineOf(
+  formatMessage: LocaleService["formatMessage"],
   rootId: string,
   root: Message | undefined,
   expressions: readonly Expression[] = []
@@ -159,6 +162,6 @@ export function replyHomeLineOf(
     kind: "ready",
     rootId: root.id,
     rootAuthorMemberId: root.authorMemberId,
-    excerpt: messageExcerpt(root, expressions),
+    excerpt: messageExcerpt(formatMessage, root, expressions),
   };
 }

@@ -1,11 +1,12 @@
 import type { Channel, RosterMember } from "@momo/core/lib/api";
 import type { DmGroupFacts } from "@momo/core/features/workspace/directory";
+import type { LocaleService } from "@momo/core/i18n";
 import { normalizeChannelTopic } from "@momo/core/features/channels/model";
 import {
   emptyChannelCopy,
-  EMPTY_ADD_MEMBER_ACTION_LABEL,
-  EMPTY_CONNECT_AGENT_ACTION_LABEL,
-  EMPTY_WRITE_ACTION_LABEL,
+  EMPTY_ADD_MEMBER_ACTION_KEY,
+  EMPTY_CONNECT_AGENT_ACTION_KEY,
+  EMPTY_WRITE_ACTION_KEY,
 } from "@momo/core/features/timeline/model";
 
 // =============================================================================
@@ -77,6 +78,7 @@ function untitledChannelName(name: string): string {
 }
 
 export function buildChannelIntro(input: {
+  formatMessage: LocaleService["formatMessage"];
   kind: Channel["kind"] | undefined;
   /** Header label: channel name, or DM `displayName` plus `@handle` when needed. */
   name: string;
@@ -96,10 +98,11 @@ export function buildChannelIntro(input: {
   /** Message count is 0. Actions and "첫…" copy only then. */
   empty: boolean;
 }): ChannelIntroView {
-  const copy = emptyChannelCopy(input.kind, input.peer, input.dmGroup);
+  const { formatMessage } = input;
+  const copy = emptyChannelCopy(formatMessage, input.kind, input.peer, input.dmGroup);
   const write: ChannelIntroActionView = {
     kind: "write",
-    label: EMPTY_WRITE_ACTION_LABEL,
+    label: formatMessage(EMPTY_WRITE_ACTION_KEY),
   };
   if (copy.surface === "dm") {
     const named = input.name.trim();
@@ -127,13 +130,13 @@ export function buildChannelIntro(input: {
     if (input.canAddMember) {
       actions.push({
         kind: "add-member",
-        label: EMPTY_ADD_MEMBER_ACTION_LABEL,
+        label: formatMessage(EMPTY_ADD_MEMBER_ACTION_KEY),
       });
     }
     if (input.canConnectAgent) {
       actions.push({
         kind: "connect-agent",
-        label: EMPTY_CONNECT_AGENT_ACTION_LABEL,
+        label: formatMessage(EMPTY_CONNECT_AGENT_ACTION_KEY),
       });
     }
   }

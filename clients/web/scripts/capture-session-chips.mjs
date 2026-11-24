@@ -844,7 +844,7 @@ async function peek(page, sessionId) {
 
 async function captureScheme(browser, scheme) {
   const shots = [];
-  const context = await browser.newContext({
+  const context = await browser.newContext({ locale: "ko-KR",
     viewport: VIEWPORT,
     deviceScaleFactor: 2,
     colorScheme: scheme,

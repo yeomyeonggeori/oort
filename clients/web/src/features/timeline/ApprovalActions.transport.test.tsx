@@ -4,6 +4,8 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { installCoreHost, resetCoreHost } from "@momo/core/runtime/host";
+import { LocaleProvider } from "@/i18n/LocaleProvider";
+import { koreanLocale } from "@/testing/koLocale";
 
 // 승인 결정의 401 갱신 (#3926).
 //
@@ -20,6 +22,8 @@ vi.mock("@/app/session", () => ({
 }));
 
 const { ApprovalActions } = await import("./ApprovalActions");
+// 결정 오류 문장은 사전에 있다(#6044): 한국어로 열어 예전과 같은 한국어를 단정한다.
+const koLocale = await koreanLocale();
 
 const WS = "019f9b10-0000-7000-8000-000000000001";
 const APPROVAL = "019f9b10-0000-7000-8000-0000000000a1";
@@ -105,7 +109,11 @@ afterEach(() => {
 
 async function pressApprove(onSettled: ReturnType<typeof vi.fn>) {
   act(() => {
-    root.render(<ApprovalActions approvalId={APPROVAL} onSettled={onSettled} />);
+    root.render(
+      <LocaleProvider locale={koLocale}>
+        <ApprovalActions approvalId={APPROVAL} onSettled={onSettled} />
+      </LocaleProvider>
+    );
   });
   const button = host.querySelector<HTMLButtonElement>('[data-testid="approval-approve"]');
   expect(button).not.toBeNull();

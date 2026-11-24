@@ -36,11 +36,20 @@ import {
   type DisplayFailure,
 } from "./displayStream";
 import {
-  LOGIN_HANDOFF_DEPLOYMENT_COPY,
-  LOGIN_HANDOFF_OFFLINE_COPY,
-  LOGIN_HANDOFF_OUTCOME_DETAIL,
+  LOGIN_HANDOFF_DEPLOYMENT_KEY,
+  LOGIN_HANDOFF_OFFLINE_KEY,
+  LOGIN_HANDOFF_OUTCOME_DETAIL_KEY,
   loginHandoffCard,
 } from "@momo/core/features/timeline/loginHandoffCard";
+import { catalog as koCatalog } from "@momo/core/i18n/generated/ko-KR";
+import { createMessageService } from "@momo/core/i18n/service";
+
+const koPlain = createMessageService({ messageLocale: "ko-KR", catalog: koCatalog }).formatMessage as unknown as (
+  key: string
+) => string;
+const LOGIN_HANDOFF_DEPLOYMENT_COPY = koPlain(LOGIN_HANDOFF_DEPLOYMENT_KEY);
+const LOGIN_HANDOFF_OFFLINE_COPY = koPlain(LOGIN_HANDOFF_OFFLINE_KEY);
+const LOGIN_HANDOFF_OUTCOME_DETAIL = Object.values(LOGIN_HANDOFF_OUTCOME_DETAIL_KEY).map((key) => koPlain(key));
 
 // =============================================================================
 // LIVE-2 / ADR-0165. Two kinds of test live here and they prove different
@@ -350,7 +359,7 @@ describe("control exists in the ledger and this client's door to it is named", (
     for (const text of [
       LOGIN_HANDOFF_DEPLOYMENT_COPY,
       LOGIN_HANDOFF_OFFLINE_COPY,
-      ...Object.values(LOGIN_HANDOFF_OUTCOME_DETAIL),
+      ...LOGIN_HANDOFF_OUTCOME_DETAIL,
     ]) {
       expect(text).not.toContain("인수");
       expect(text).not.toMatch(/[–—]/);

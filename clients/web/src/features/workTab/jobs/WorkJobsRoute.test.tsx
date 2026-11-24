@@ -4,11 +4,14 @@ import { type ReactNode } from "react";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError, type SharedWorkSession, type WorkJobsMode } from "@momo/core/lib/api";
 import { WORK_FILTER_STORAGE_KEY } from "@momo/core/features/workbench/workJobs";
 import { makeDirectory } from "@momo/core/features/workspace/directory";
 import { SessionProvider, type SessionContextValue } from "@/app/session";
+import { LocaleProvider } from "@/i18n/LocaleProvider";
+import type { AppLocale } from "@/i18n/localeStore";
+import { koreanLocale } from "@/testing/koLocale";
 import { resetEscapeLayers } from "@/design/ui/escapeLayer";
 import type { RealtimeHandle } from "@/lib/realtime";
 import { CH_AGENT_LAB, ME, WS, runRow, sharedRow } from "../teamBoard/teamBoardFixtures";
@@ -70,21 +73,28 @@ function Probe() {
   return null;
 }
 
+let koLocale: AppLocale;
+beforeAll(async () => {
+  koLocale = await koreanLocale();
+});
+
 function mount(entry = "/work"): ReactNode {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return (
-    <QueryClientProvider client={client}>
-      <SessionProvider value={sessionValue()}>
-        <MemoryRouter initialEntries={[entry]}>
-          <Probe />
-          <Routes>
-            <Route path="/work" element={<WorkJobsRoute />} />
-            <Route path="/c/:id" element={<div data-testid="channel-page" />} />
-            <Route path="/" element={<div data-testid="home" />} />
-          </Routes>
-        </MemoryRouter>
-      </SessionProvider>
-    </QueryClientProvider>
+    <LocaleProvider locale={koLocale}>
+      <QueryClientProvider client={client}>
+        <SessionProvider value={sessionValue()}>
+          <MemoryRouter initialEntries={[entry]}>
+            <Probe />
+            <Routes>
+              <Route path="/work" element={<WorkJobsRoute />} />
+              <Route path="/c/:id" element={<div data-testid="channel-page" />} />
+              <Route path="/" element={<div data-testid="home" />} />
+            </Routes>
+          </MemoryRouter>
+        </SessionProvider>
+      </QueryClientProvider>
+    </LocaleProvider>
   );
 }
 

@@ -1,3 +1,4 @@
+import type {LocaleService} from '@momo/core/i18n';
 import type {AgentRunProgress, Message} from '@momo/core/lib/api';
 import {
   agentCardModel,
@@ -36,6 +37,7 @@ export function hasRequestBundle(card: AgentApprovalCard): boolean {
 
 /** 낱말·상태·값은 코어가 정하고, 폰은 현재 원장의 문과 명부만 보태요. */
 export function phoneRequestBundle(
+  formatMessage: LocaleService['formatMessage'],
   card: AgentApprovalCard,
   directory: Directory,
   viewerMemberId: string | undefined,
@@ -59,6 +61,7 @@ export function phoneRequestBundle(
     },
     {
       nowMs,
+      formatMessage,
       run,
       viewerMemberId,
       viewerKind: viewer?.kind,

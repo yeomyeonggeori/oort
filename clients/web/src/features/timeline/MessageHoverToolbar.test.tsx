@@ -10,10 +10,9 @@ import {
 import { createRoot, type Root } from "react-dom/client";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { MessageActionAvailability } from "@momo/core/features/timeline/model";
-import {
-  COPY_LINK_ACTION_LABEL,
-  COPY_MESSAGE_ACTION_LABEL,
-} from "@momo/core/features/timeline/copyLabels";
+import { COPY_LINK_ACTION_KEY, COPY_MESSAGE_ACTION_KEY } from "@momo/core/features/timeline/copyLabels";
+import { catalog as koCatalog } from "@momo/core/i18n/generated/ko-KR";
+import { createMessageCopy } from "@momo/core/testkit";
 import {
   frequentEmojis,
   recordEmojiUse,
@@ -32,6 +31,12 @@ import {
   shouldShowHoverToolbar,
 } from "./hoverToolbarModel";
 import { useHoverToolbarFocusHandoff, useRowRovingFocus } from "./rowFocus";
+import { LocaleProvider } from "@/i18n/LocaleProvider";
+import type { AppLocale } from "@/i18n/localeStore";
+import { koreanLocale } from "@/testing/koLocale";
+
+let koLocale: AppLocale;
+const withKo = (node: ReturnType<typeof createElement>) => createElement(LocaleProvider, { locale: koLocale, children: node });
 
 function stubFocusVisible(el: HTMLElement, visible: boolean) {
   const proto = HTMLElement.prototype.matches;
@@ -53,7 +58,8 @@ let offsetParentDescriptor: PropertyDescriptor | undefined;
 let mountedRoot: Root | null = null;
 const memory = new Map<string, string>();
 
-beforeAll(() => {
+beforeAll(async () => {
+  koLocale = await koreanLocale();
   reactActEnvironment.IS_REACT_ACT_ENVIRONMENT = true;
   offsetParentDescriptor = Object.getOwnPropertyDescriptor(
     HTMLElement.prototype,
@@ -146,7 +152,7 @@ function mountToolbar(open = true, menuOpenInit = false): HTMLElement {
       mineEmojis: new Set<string>(),
     });
   }
-  act(() => mountedRoot?.render(createElement(Harness)));
+  act(() => mountedRoot?.render(withKo(createElement(Harness))));
   return host;
 }
 
@@ -245,7 +251,7 @@ function mountTimeline(
   mountedRoot = createRoot(host);
   act(() =>
     mountedRoot?.render(
-      createElement(TimelineHarness, { hovered, focused, withChip })
+      withKo(createElement(TimelineHarness, { hovered, focused, withChip }))
     )
   );
   return host;
@@ -297,10 +303,11 @@ describe("MessageHoverToolbar", () => {
     const copyLink = document.querySelector('[data-testid="menu-copy-link"]');
     expect(copy).not.toBeNull();
     expect(copyLink).not.toBeNull();
-    expect(COPY_MESSAGE_ACTION_LABEL).toBe("메시지 복사하기");
-    expect(COPY_LINK_ACTION_LABEL).toBe("링크 복사하기");
-    expect(copy?.textContent).toContain(COPY_MESSAGE_ACTION_LABEL);
-    expect(copyLink?.textContent).toContain(COPY_LINK_ACTION_LABEL);
+    const ko = createMessageCopy({ messageLocale: "ko-KR", catalog: koCatalog });
+    expect(ko(COPY_MESSAGE_ACTION_KEY)).toBe("메시지 복사하기");
+    expect(ko(COPY_LINK_ACTION_KEY)).toBe("링크 복사하기");
+    expect(copy?.textContent).toContain(ko(COPY_MESSAGE_ACTION_KEY));
+    expect(copyLink?.textContent).toContain(ko(COPY_LINK_ACTION_KEY));
   });
 
   it("슬롯은 빈도 store 순서를 따른다", () => {

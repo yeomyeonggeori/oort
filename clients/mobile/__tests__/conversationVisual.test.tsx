@@ -1,7 +1,7 @@
 import type {Message, RosterMember} from '@momo/core/lib/api';
-import {COPY_MESSAGE_ACTION_LABEL} from '@momo/core/features/timeline/copyLabels';
+import {COPY_MESSAGE_ACTION_KEY} from '@momo/core/features/timeline/copyLabels';
 import type {QuoteBlock as QuoteBlockModel} from '@momo/core/features/timeline/quote';
-import {quoteDraftFor} from '@momo/core/features/timeline/quote';
+import {quoteDraftFor as buildQuoteDraftFor} from '@momo/core/features/timeline/quote';
 import {makeDirectory} from '@momo/core/features/workspace/directory';
 import {catalog as koCatalog} from '@momo/core/i18n/generated/ko-KR';
 import {createMessageService} from '@momo/core/i18n/service';
@@ -39,6 +39,10 @@ import {
   QuoteBlock,
   quoteAccessibilityPhrase,
 } from '../src/features/conversation/Quote';
+
+const quoteFormat = createMessageService({messageLocale: 'ko-KR', catalog: koCatalog}).formatMessage;
+const quoteDraftFor = (...args: Parameters<typeof buildQuoteDraftFor> extends [unknown, ...infer Rest] ? Rest : never) =>
+  buildQuoteDraftFor(quoteFormat, ...args);
 
 // =============================================================================
 // 시각·위계 — design-review H-2·H-4·N-1·N-2 를 **값으로** 잠근다.
@@ -591,8 +595,8 @@ describe('#1079 N-1 — 같은 동사에 한 이름', () => {
     // 이 둘은 마크다운 답 하나에서 **동시에** 만날 수 있는 두 문이다.
     // 식별자만 보면 상수 값이 「메시지 담기」로 바뀌는 날도 초록이다.
     const sheet = codeOnly(SRC('MessageActionSheet.tsx'));
-    expect(sheet).toContain('COPY_MESSAGE_ACTION_LABEL');
-    expect(COPY_MESSAGE_ACTION_LABEL).toBe('메시지 복사하기');
+    expect(sheet).toContain('COPY_MESSAGE_ACTION_KEY');
+    expect(FORMAT(COPY_MESSAGE_ACTION_KEY)).toBe('메시지 복사하기');
     expect(codeOnly(SRC('MessageBody.tsx'))).toContain('복사하기');
   });
 });
