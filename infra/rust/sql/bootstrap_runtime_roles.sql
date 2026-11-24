@@ -1166,3 +1166,46 @@ BEGIN
 END
 $$;
 -- END helper-read
+
+-- BEGIN agent-upload-token-lockdown (#6013; ADR-0151 증보 10 P2, PA13). Identical in 189_agent_upload_token.sql,
+-- bootstrap_roles.sql and bootstrap_runtime_roles.sql; tests compare the text between the markers. A row of this
+-- table lets whoever presents the token upload one re-encoded picture as an Agent Port agent into one approved
+-- channel, and it is also the source of that agent's daily issue count, live-token count and unlinked-picture
+-- count, and the BYPASSRLS roles skip RLS, so their table privileges are what keeps a forged or deleted row away
+-- from a role with no business touching one. Only the api uses this table: momo_app issues (INSERT), counts and
+-- reads (SELECT), spends a token and records the attachment it made (UPDATE) and sweeps the rows a day past their
+-- expiry (DELETE). Nobody else holds anything — not the worker (unlike attachment_write_token, this path's tokens
+-- are never minted by the worker), relay, notifier, platform_admin, nor the two roles the worker may SET ROLE to
+-- (the helper's read role and momo_memory; named because a membership granted WITH INHERIT FALSE is invisible to
+-- has_table_privilege('momo_worker', ...)). The table has no foreign key in either direction on purpose (a cascade
+-- runs as the table's owner). Idempotent and order-proof (a pass before the table or the roles exist finishes what
+-- it can, the pass after lands the rest), and it fails loudly if the result is not what is written here.
+DO $$
+DECLARE
+  r text;
+  p text;
+  allowed text[];
+BEGIN
+  IF to_regclass('public.agent_upload_token') IS NULL THEN
+    RETURN;
+  END IF;
+  REVOKE ALL ON TABLE public.agent_upload_token FROM PUBLIC;
+  FOREACH r IN ARRAY ARRAY['momo_app', 'momo_relay', 'momo_worker', 'momo_notifier', 'momo_platform_admin', 'momo_helper_read', 'momo_memory'] LOOP
+    CONTINUE WHEN NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = r);
+    allowed := CASE r
+      WHEN 'momo_app' THEN ARRAY['SELECT', 'INSERT', 'UPDATE', 'DELETE']
+      ELSE ARRAY[]::text[]
+    END;
+    EXECUTE format('REVOKE ALL ON TABLE public.agent_upload_token FROM %I', r);
+    IF cardinality(allowed) > 0 THEN
+      EXECUTE format('GRANT %s ON TABLE public.agent_upload_token TO %I', array_to_string(allowed, ', '), r);
+    END IF;
+    FOREACH p IN ARRAY ARRAY['SELECT', 'INSERT', 'UPDATE', 'DELETE', 'TRUNCATE', 'REFERENCES', 'TRIGGER'] LOOP
+      IF has_table_privilege(r, 'public.agent_upload_token', p) IS DISTINCT FROM (p = ANY (allowed)) THEN
+        RAISE EXCEPTION 'role % must % % on agent_upload_token',
+          r, CASE WHEN p = ANY (allowed) THEN 'hold' ELSE 'not hold' END, p;
+      END IF;
+    END LOOP;
+  END LOOP;
+END $$;
+-- END agent-upload-token-lockdown

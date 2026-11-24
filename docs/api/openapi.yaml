@@ -2211,6 +2211,9 @@ paths:
         `oort_action_initiate` is refused, and a card already waiting is not
         executed when approved, while rejecting it still works; only an
         administrator writes it here, never an agent proposal), and
+        `agent_reactions` (`off` · `status` · `free`, ADR-0200 증보 8 L10 /
+        #6067: absent = status; written only from a person's full app session,
+        never an agent proposal), and
         `team_ai_roles` (object of booleans, ADR-0201 증보 v3 B3 / #4964: which
         role bundles of the helper are on — `workspace_admin`, `invite_access`,
         `long_research`, `files`, `memory`, `code`, `hermes` (ADR-0201 증보 v4 /
@@ -21210,6 +21213,18 @@ components:
             agent starts with it on). Off means a person's reply without a
             mention in a thread this agent opened does not wake it; mentions
             are unaffected.
+        agentReactions:
+          type: string
+          nullable: true
+          enum: ["off", status, free, null]
+          description: >-
+            On a profile PUT (ADR-0200 증보 8 L10, #6067): the agent's own
+            status-reaction switch — `off`, `status` (상태 표시만) or `free`
+            (자유롭게); null follows the workspace again; omitted leaves it
+            unchanged. A value wider than the workspace's is stored and read as
+            the workspace's (the effective value is the narrower one). Taken
+            only from a person's full app session (403 otherwise). Ignored on
+            create.
         instructions:
           type: string
           description: UTF-8 content is limited to 8192 bytes by the server.
@@ -21255,9 +21270,17 @@ components:
       type: object
       required:
         [agentMemberId, workspaceId, instructions, enabledTools, triggers, paused,
-         version, updatedBy, updatedAtMs, modelSource, threadReplyWake]
+         version, updatedBy, updatedAtMs, modelSource, threadReplyWake, agentReactions]
       properties:
         modelSource: {$ref: "#/components/schemas/AgentModelSource"}
+        agentReactions:
+          type: string
+          nullable: true
+          enum: ["off", status, free, null]
+          description: >-
+            ADR-0200 증보 8 L10 (#6067) — the agent's own status-reaction
+            switch as stored; null = follows the workspace. The effective value
+            is the narrower of this and the workspace's `agent_reactions`.
         threadReplyWake:
           type: boolean
           description: >-
@@ -27440,6 +27463,12 @@ components:
           description: >
             ADR-0186 증보 v5 U-b-3: the switch for cards an agent raises
             unasked. Absent = on; false = off.
+        agent_reactions:
+          type: string
+          enum: ["off", status, free]
+          description: >
+            ADR-0200 증보 8 L10 (#6067): the agents' status-reaction switch.
+            Absent = status; a stored value outside the three words reads as off.
         team_ai_roles:
           type: object
           description: >
@@ -27552,6 +27581,16 @@ components:
             boolean is stored: a string or a number is 400, because the door
             reads anything else as off. An agent's
             `workspace.settings.update` proposal cannot name this key.
+        agent_reactions:
+          nullable: true
+          type: string
+          enum: ["off", status, free, null]
+          description: >
+            ADR-0200 증보 8 L10 (#6067): the agents' status-reaction switch —
+            off (끔), status (상태 표시만, the default when absent) or free
+            (자유롭게). null deletes the key (status). Any other value is 400.
+            Written only from a person's full app session (a developer or
+            narrow token is 403), and no agent proposal can name it.
         team_ai_roles:
           nullable: true
           type: object

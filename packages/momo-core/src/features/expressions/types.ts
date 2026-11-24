@@ -11,8 +11,20 @@ export const EXPRESSION_LIMITS = {
   agentRequestBytes: 6 * 1024 * 1024,
   smallPixels: 128,
   smallBytes: 256 * 1024,
-  largePixels: 512,
-  largeBytes: 1024 * 1024,
+  /**
+   * ADR-0218 §20 (#6071): what a reader accepts. The server stores at the old table (thumb 128 · 256 KiB,
+   * large 512 · 1 MiB) until the operator turns the new one on, and a list may then hold both: a client
+   * that reads these bounds reads every row of either table.
+   */
+  thumbPixels: 256,
+  thumbBytes: 512 * 1024,
+  largePixels: 768,
+  largeBytes: 2 * 1024 * 1024,
+  /** A moving registration's stopped frame (`still`) is `large`'s size. */
+  stillPixels: 768,
+  stillBytes: 2 * 1024 * 1024,
+  /** The widest canvas a moving input may have on the server's new table (the old one is 512). */
+  motionCanvasPixels: 768,
   frames: 100,
   durationMs: 10000,
 } as const;
@@ -27,6 +39,11 @@ export const EXPRESSION_KINDS = ["emoji", "sticker"] as const;
 export type ExpressionKind = (typeof EXPRESSION_KINDS)[number];
 export type ExpressionStatus = "active" | "hidden" | "deleted";
 export type ExpressionAddPolicy = "members" | "admins";
+/**
+ * The three sizes every registration has. A moving registration stored at the §20 table also has
+ * `still` (ADR-0218 Z2-5) — optional, so it is `ExpressionMedia.still` and not one of these: a client that
+ * indexes `media[variant]` with one of these always gets a picture.
+ */
 export type ExpressionVariant = "small" | "large" | "thumb";
 export interface ExpressionOrigin {
   kind: "upload" | "attachment" | "generated" | "url";
@@ -57,6 +74,12 @@ export interface ExpressionMedia {
   small: ExpressionImage;
   large: ExpressionImage;
   thumb: ExpressionImage;
+  /**
+   * ADR-0218 §20 Z2-5 (#6071): a moving registration's stopped frame — its first frame as a still PNG at
+   * `large`'s size. Absent on a still registration, on one stored before the server's new table, and on
+   * an assembled or set picture. Optional on purpose: a list without it reads exactly as before.
+   */
+  still?: ExpressionImage;
 }
 
 export interface ExpressionMetadata {

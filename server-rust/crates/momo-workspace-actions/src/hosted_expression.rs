@@ -690,13 +690,16 @@ pub async fn prepare(
     picture: Picture,
     assembler_program: &Path,
     slots: &Arc<Semaphore>,
+    table: media::RenditionTable,
 ) -> Prepared {
     let bytes = match picture_bytes(picture) {
         Ok(bytes) => bytes,
         Err(fault) => return card_or_retry(&fault),
     };
     match &request.motion {
-        DoorMotion::Still => match media::process_waiting(bytes, media::WAIT_MAX).await {
+        // The still is encoded from the answer's bytes at the table the caller names (ADR-0218 §20; the
+        // worker's door names the old one until #6117); an assembled motion stays at the old table.
+        DoorMotion::Still => match media::process_waiting(bytes, media::WAIT_MAX, table).await {
             Ok(processed) => Prepared::Ready(vec![Slot::Ready(Box::new(processed))]),
             Err(rejected) => card_or_retry(&Fault::Rejected(rejected)),
         },
@@ -966,6 +969,8 @@ pub async fn propose_in_tx(
     // A re-claimed job finds its run `failed` (the between-attempts mark): this attempt takes it back.
     momo_agent::run::resume_run_between_attempts_in_tx(conn, run.run_id).await?;
     momo_agent::mark_run_started_in_tx(conn, run.run_id).await?;
+    // ADR-0200 증보 8 L3 (#6067): a start is a take — the eye, in this tx.
+    momo_messaging::status_reaction::on_run_taken_in_tx(conn, workspace_id, run.run_id).await?;
     if !momo_agent::park_run_for_approval_in_tx(conn, run.run_id, run.expires_at).await? {
         return Ok(Err(Refusal::RunNotParkable));
     }

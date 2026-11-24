@@ -1032,7 +1032,8 @@ async fn fetch_claimed_link(
     drop(permit);
     let bytes = fetched.map_err(|refused| refused.code())?;
     let remaining = momo_expressions::action::PREPARE_DEADLINE.saturating_sub(started.elapsed());
-    match intake::picture_or_reason(bytes, Some(remaining)).await {
+    match intake::picture_or_reason(bytes, Some(remaining), state.expression_rendition_table).await
+    {
         Ok(intake::Picture::Ready(processed)) => Ok(*processed),
         Ok(intake::Picture::Manual(code)) => Err(code),
         // The bytes came and no decoder did: the link is not at fault, and it was fetched once.
@@ -1983,6 +1984,13 @@ async fn approve_run(
         // is a job for a run that is no longer parked.
         return Ok(());
     }
+    // ADR-0200 증보 8 L3 (#6067): the run reads `queued` again — nobody holds it, the eye comes off.
+    momo_messaging::status_reaction::on_run_released_in_tx(
+        conn,
+        approval.workspace_id,
+        approval.run_id,
+    )
+    .await?;
 
     let payload = resume_job_payload(
         approval.workspace_id,
@@ -3217,6 +3225,13 @@ async fn execute_workspace_action(
         if !requeue_run_from_approval_in_tx(conn, approval.run_id).await? {
             return Err(protocol_error(RUN_NOT_PARKED_SENTINEL));
         }
+        // ADR-0200 증보 8 L3 (#6067): the run reads `queued` again — nobody holds it, the eye comes off.
+        momo_messaging::status_reaction::on_run_released_in_tx(
+            conn,
+            approval.workspace_id,
+            approval.run_id,
+        )
+        .await?;
         // The hold marker leaves with the hold: a released run that later parks
         // on an ordinary approval must count against the concurrency cap again.
         momo_agent::in_place_grant::clear_channel_grant_hold_in_tx(
@@ -3327,6 +3342,13 @@ async fn execute_workspace_action(
         // transaction, and `Err` is the only channel that rolls it back.
         return Err(protocol_error(RUN_NOT_PARKED_SENTINEL));
     }
+    // ADR-0200 증보 8 L4 (#6067): the eye comes off (a success adds the check) — same tx.
+    momo_messaging::status_reaction::on_run_terminal_in_tx(
+        conn,
+        approval.workspace_id,
+        approval.run_id,
+    )
+    .await?;
     emit_terminal_agent_status(
         conn,
         input.workspace_id,
@@ -5574,6 +5596,13 @@ async fn reject_run(
     if !ended {
         return Ok(());
     }
+    // ADR-0200 증보 8 L4 (#6067): the eye comes off (a success adds the check) — same tx.
+    momo_messaging::status_reaction::on_run_terminal_in_tx(
+        conn,
+        approval.workspace_id,
+        approval.run_id,
+    )
+    .await?;
 
     // ADR-0186 증보 v5 U-f — the proposer's inbox hears the rejection too, and
     // **before** the outcome line below (`wake_proposer_in_tx` says why). Behind
@@ -5727,6 +5756,13 @@ pub(crate) async fn expire_run(
     )
     .await?;
     if ended {
+        // ADR-0200 증보 8 L4 (#6067): the eye comes off (a success adds the check) — same tx.
+        momo_messaging::status_reaction::on_run_terminal_in_tx(
+            conn,
+            approval.workspace_id,
+            approval.run_id,
+        )
+        .await?;
         emit_terminal_agent_status(
             conn,
             approval.workspace_id,

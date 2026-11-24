@@ -387,6 +387,14 @@ pub(crate) async fn authenticate_and_admit_agent_port_credential(
                             )
                             .await
                             .map_err(DbError::from)?;
+                            // ADR-0200 증보 8 L3 (#6067): a lease handed back (or a job closed) — the eye of a run no
+                            // longer taken comes off, in this tx.
+                            momo_messaging::status_reaction::on_agent_jobs_released_in_tx(
+                                conn,
+                                claimed_workspace,
+                                agent_member_id,
+                            )
+                            .await?;
                             write_audit(
                                 conn,
                                 &AuditEntry::new(
@@ -573,6 +581,14 @@ pub(crate) async fn authenticate_and_admit_agent_port_credential(
                     )
                     .await
                     .map_err(DbError::from)?;
+                    // ADR-0200 증보 8 L3 (#6067): a lease handed back (or a job closed) — the eye of a run no
+                    // longer taken comes off, in this tx.
+                    momo_messaging::status_reaction::on_agent_jobs_released_in_tx(
+                        conn,
+                        identity.workspace_id,
+                        identity.member_id,
+                    )
+                    .await?;
                     write_audit(
                         conn,
                         &AuditEntry::new(
@@ -748,6 +764,8 @@ pub async fn require_principal(
     if let Some(claimed_workspace) = agent_bearer_workspace_id(&raw_token) {
         let principal =
             authenticate_agent(&state, &raw_token, claimed_workspace, &method, &path).await?;
+        // #6067 (ADR-0200 증보 8 L7 5): the credential's own workspace, after authentication.
+        state.status_reaction_touched.touch(principal.workspace_id);
         let agent = principal.member_id;
         request.extensions_mut().insert(principal);
         return Ok(momo_db::tenant::REQUEST_AGENT_MEMBER
@@ -862,6 +880,8 @@ pub async fn require_principal(
             request.extensions_mut().insert(FullPersonSession);
         }
     }
+    // #6067 (ADR-0200 증보 8 L7 5): the credential's own workspace, after the token was found live.
+    state.status_reaction_touched.touch(principal.workspace_id);
     let kind = principal.kind;
     let member_id = principal.member_id;
     request.extensions_mut().insert(principal);

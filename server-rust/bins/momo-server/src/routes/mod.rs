@@ -15,6 +15,7 @@ pub mod agent_port_oauth;
 pub mod agent_port_tools;
 pub mod agent_provider_pin;
 pub mod agent_runs;
+pub mod agent_uploads;
 pub mod agents;
 pub mod app_notice;
 /// ADR-0113 증보 3 F8 / #4313 — `GET …/members/me/app-runtimes`: which of my agents run my

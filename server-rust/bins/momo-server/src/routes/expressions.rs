@@ -173,7 +173,8 @@ async fn prepare(
     origin: Origin,
     bytes: Vec<u8>,
 ) -> Result<Response, ApiError> {
-    let (media, code, status) = match media::process(bytes).await {
+    let (media, code, status) = match media::process(bytes, state.expression_rendition_table).await
+    {
         Ok(media) => (Some(media), None, StatusCode::CREATED),
         Err(media::Rejected::Video) => (None, Some("video_processing_unavailable"), StatusCode::OK),
         Err(e) => return Err(media_error(e)),
@@ -223,7 +224,9 @@ pub async fn replace(
         return Err(failure(Error::NotFound));
     }
     let (_, bytes) = multipart(&state, request, false).await?;
-    let media = media::process(bytes).await.map_err(media_error)?;
+    let media = media::process(bytes, state.expression_rendition_table)
+        .await
+        .map_err(media_error)?;
     let replaced = match expressions::replace_draft(&state.pool, actor, id, media.clone()).await {
         // Not the caller's own direct draft: it may be a candidate of an open approval card.
         Err(Error::NotFound) => replace_candidate(&state, actor, id, media).await,
@@ -510,11 +513,14 @@ pub async fn import(
         let outcome = match fetch_source(&*state.unfurl_http, &source, SOURCE_DEADLINE).await {
             // A busy decoder is the server's retryable state, not the picture's: a 503 with
             // `Retry-After` and no draft, never a `source_timeout` card.
-            Ok(bytes) => match intake::picture_or_reason(bytes, None).await {
-                Ok(intake::Picture::Ready(processed)) => (Some(*processed), None),
-                Ok(intake::Picture::Manual(reason)) => (None, Some(reason)),
-                Err(intake::DecoderBusy) => return Err(ApiError::busy(2)),
-            },
+            Ok(bytes) => {
+                match intake::picture_or_reason(bytes, None, state.expression_rendition_table).await
+                {
+                    Ok(intake::Picture::Ready(processed)) => (Some(*processed), None),
+                    Ok(intake::Picture::Manual(reason)) => (None, Some(reason)),
+                    Err(intake::DecoderBusy) => return Err(ApiError::busy(2)),
+                }
+            }
             // The first hop is the address the caller named: private from the start is a
             // 400 with nothing stored, like a literal. (A refusal after a redirect is a card.)
             Err(refused) if refused.is_private_origin() => return Err(invalid()),

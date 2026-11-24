@@ -1988,7 +1988,7 @@ async fn the_other_runtime_roles_reach_every_table_the_migrations_created() {
     // `self_media_token` (#4820 C2a L6 lockdown, see below), `team_ai_task` (#4967 r1 M1
     // lockdown, see below), `attachment_media` (#4673 C5 lockdown, see below),
     // `attachment_write_token` (#5371 lockdown, see below), `agent_picture_mark` (#5530 lockdown, see
-    // below) and the four `expression_set*` tables (#5459 S1a lockdown, see below) are the only tables
+    // below), `agent_upload_token` (#6013 lockdown, see below) and the four `expression_set*` tables (#5459 S1a lockdown, see below) are the only tables
     // outside the rule; everything else must be readable and writable by the three ALL-TABLES roles.
     let missing: Vec<String> = sqlx::query_scalar(
         "SELECT format('%s:%s:%s', r.rolname, c.relname, p.priv) \
@@ -2004,6 +2004,7 @@ async fn the_other_runtime_roles_reach_every_table_the_migrations_created() {
             AND c.relname <> 'attachment_media' \
             AND c.relname <> 'attachment_write_token' \
             AND c.relname <> 'agent_picture_mark' \
+            AND c.relname <> 'agent_upload_token' \
             AND c.relname NOT LIKE 'expression\\_set%' \
             AND NOT has_table_privilege(r.rolname, c.oid, p.priv) \
           ORDER BY 1",
@@ -2233,6 +2234,33 @@ async fn the_other_runtime_roles_reach_every_table_the_migrations_created() {
     .fetch_one(&db.su)
     .await
     .expect("agent picture mark table count");
+    // `agent-upload-token-lockdown` (bootstrap_runtime_roles.sql, #6013; ADR-0151 증보 10 P2, PA13): a row
+    // lets whoever presents the token upload one picture as an Agent Port agent, and the table is the source
+    // of that agent's counts. Only the api uses it (`momo_app` SELECT/INSERT/UPDATE/DELETE); the worker, relay,
+    // notifier, platform_admin and the two roles the worker may SET to hold nothing.
+    let agent_upload_token_drift: Vec<String> = sqlx::query_scalar(
+        "SELECT format('%s:%s:%s has=%s', r.rolname, c.relname, p.priv, \
+                       has_table_privilege(r.rolname, c.oid, p.priv)) \
+           FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace \
+           CROSS JOIN (SELECT rolname FROM pg_roles WHERE rolname IN ('momo_app', 'momo_relay', 'momo_worker', \
+                       'momo_notifier', 'momo_platform_admin', 'momo_helper_read', 'momo_memory')) AS r \
+           CROSS JOIN (VALUES ('SELECT'), ('INSERT'), ('UPDATE'), ('DELETE'), ('TRUNCATE'), ('REFERENCES'), ('TRIGGER')) AS p(priv) \
+          WHERE n.nspname = 'public' AND c.relkind IN ('r', 'p') \
+            AND c.relname = 'agent_upload_token' \
+            AND has_table_privilege(r.rolname, c.oid, p.priv) \
+                IS DISTINCT FROM (r.rolname = 'momo_app' AND p.priv IN ('SELECT', 'INSERT', 'UPDATE', 'DELETE')) \
+          ORDER BY 1",
+    )
+    .fetch_all(&db.su)
+    .await
+    .expect("agent upload token privilege scan");
+    let agent_upload_token_tables: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace \
+          WHERE n.nspname = 'public' AND c.relkind IN ('r', 'p') AND c.relname = 'agent_upload_token'",
+    )
+    .fetch_one(&db.su)
+    .await
+    .expect("agent upload token table count");
     // `expression-set-lockdown` (bootstrap_runtime_roles.sql, #5459 S1a; ADR-0218 증보 6 §12 L10.1):
     // the set tables hold what the team AI planned and made before any person approved it, the writer
     // is the BYPASSRLS `momo_worker`, and the BYPASSRLS roles skip RLS, so their table privileges are
@@ -2395,6 +2423,15 @@ async fn the_other_runtime_roles_reach_every_table_the_migrations_created() {
         agent_picture_mark_drift.is_empty(),
         "agent_picture_mark privileges drifted from the lockdown (momo_app alone holds SELECT/INSERT/DELETE): \
          {agent_picture_mark_drift:?}"
+    );
+    assert_eq!(
+        agent_upload_token_tables, 1,
+        "the scan must actually see the agent_upload_token table, or it proves nothing"
+    );
+    assert!(
+        agent_upload_token_drift.is_empty(),
+        "agent_upload_token privileges drifted from the lockdown (momo_app alone holds SELECT/INSERT/UPDATE/DELETE): \
+         {agent_upload_token_drift:?}"
     );
 }
 

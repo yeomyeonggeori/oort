@@ -575,13 +575,34 @@ pub(crate) async fn per_ip_refused_by(
     limit_of: fn(&RateLimitConfig) -> u32,
     refused: StatusCode,
 ) -> Response {
-    let config: &RateLimitConfig = &state.rate_limit.config;
-    let limit = limit_of(config);
     let peer = request
         .extensions()
         .get::<ConnectInfo<SocketAddr>>()
         .map(|ConnectInfo(address)| *address);
     let ip = client_ip(request.headers(), peer);
+    refused_budget_for(
+        state, request, next, key_prefix, scope, ip, limit_of, refused,
+    )
+    .await
+}
+
+/// [`per_ip_refused_by`] for a caller the surface has already named: `ip` is the budget's key (`None`
+/// does not limit — a limiter that cannot name the caller cannot fairly limit them). Split out for the
+/// Agent Port upload road (#6013, ADR-0151 증보 10 P3 5), whose key depends on the operator's edge
+/// setting rather than on [`client_ip`] as written.
+#[allow(clippy::too_many_arguments)]
+async fn refused_budget_for(
+    state: AppState,
+    request: Request,
+    next: Next,
+    key_prefix: &'static str,
+    scope: Option<&str>,
+    ip: Option<String>,
+    limit_of: fn(&RateLimitConfig) -> u32,
+    refused: StatusCode,
+) -> Response {
+    let config: &RateLimitConfig = &state.rate_limit.config;
+    let limit = limit_of(config);
     // Pre-check: an address whose refused-credential budget is already spent is turned away
     // before the handler (and its database transaction) runs.
     if let Some(ip) = ip.as_deref() {
@@ -772,6 +793,93 @@ pub async fn per_ip_agent_media_ceiling(
 /// `/v1/agent-media/{ws}/…`, else the shared `other` bucket.
 fn agent_media_scope(path: &str) -> String {
     path.strip_prefix(momo_messaging::AGENT_MEDIA_PATH_PREFIX)
+        .and_then(|rest| rest.split('/').next())
+        .filter(|segment| Uuid::parse_str(segment).is_ok_and(|id| id.to_string() == *segment))
+        .map_or_else(|| SELF_MEDIA_OTHER_SCOPE.to_string(), str::to_string)
+}
+
+/// ADR-0151 증보 10 P3 5 · PA4 (#6013) — **who** an Agent Port upload request is, for its refusal budget.
+///
+/// The prefix is public (the edge does not block it), so the key must be the real caller behind the
+/// public edge, and a header a caller writes must not choose it:
+///
+/// * the operator declared a trusted edge (`MOMO_AGENT_UPLOADS_TRUSTED_EDGE=true`): the first
+///   `X-Forwarded-For` hop, as the edge wrote it ([`client_ip`]);
+/// * otherwise: the socket peer, and `X-Forwarded-For` is not read at all.
+fn agent_uploads_caller(state: &AppState, request: &Request) -> Option<String> {
+    let peer = request
+        .extensions()
+        .get::<ConnectInfo<SocketAddr>>()
+        .map(|ConnectInfo(address)| *address);
+    if state.agent_uploads.config.trusted_edge {
+        client_ip(request.headers(), peer)
+    } else {
+        peer.map(|address| address.ip().to_string())
+    }
+}
+
+/// The one key of the prefix-wide ceiling when the edge is not trusted: every caller is the same caller.
+const AGENT_UPLOADS_ANY_CALLER: &str = "any";
+
+/// Budget for **refused** Agent Port upload addresses (ADR-0151 증보 10 P3 5, #6013): the first of the two
+/// layers, keyed by the caller ([`agent_uploads_caller`]) and the workspace the path names, in buckets of
+/// its own (the worker road's and the read road's are never spent here). Only the route's one 404 spends
+/// it; a 405, 411, 413 or 503 is decided before the token and spends nothing.
+pub async fn per_ip_agent_uploads(
+    State(state): State<AppState>,
+    request: Request,
+    next: Next,
+) -> Response {
+    let scope = agent_uploads_scope(request.uri().path());
+    let ip = agent_uploads_caller(&state, &request);
+    refused_budget_for(
+        state,
+        request,
+        next,
+        "ip:agent-uploads",
+        Some(&scope),
+        ip,
+        |config| config.self_media_per_workspace_limit,
+        StatusCode::NOT_FOUND,
+    )
+    .await
+}
+
+/// The second layer (P3 5 ②): the caller's budget across **every** workspace id in the path, so rotating
+/// the id does not walk around the first layer. With no trusted edge it keys on nobody in particular and is
+/// one ceiling for the whole prefix (PA4): a caller who could choose its own address cannot choose a fresh
+/// bucket. The price, accepted by the amendment: while that ceiling is spent, real uploads wait as well.
+pub async fn agent_uploads_ceiling(
+    State(state): State<AppState>,
+    request: Request,
+    next: Next,
+) -> Response {
+    let ip = if state.agent_uploads.config.trusted_edge {
+        agent_uploads_caller(&state, &request)
+    } else {
+        Some(AGENT_UPLOADS_ANY_CALLER.to_string())
+    };
+    refused_budget_for(
+        state,
+        request,
+        next,
+        "ip:agent-uploads-all",
+        None,
+        ip,
+        |config| {
+            config
+                .self_media_per_workspace_limit
+                .saturating_mul(SELF_MEDIA_ADDRESS_CEILING_FACTOR)
+        },
+        StatusCode::NOT_FOUND,
+    )
+    .await
+}
+
+/// [`self_media_scope`] for the upload prefix: the canonical workspace id in `/v1/agent-uploads/{ws}/…`,
+/// else the shared `other` bucket.
+fn agent_uploads_scope(path: &str) -> String {
+    path.strip_prefix(momo_messaging::AGENT_UPLOADS_PATH_PREFIX)
         .and_then(|rest| rest.split('/').next())
         .filter(|segment| Uuid::parse_str(segment).is_ok_and(|id| id.to_string() == *segment))
         .map_or_else(|| SELF_MEDIA_OTHER_SCOPE.to_string(), str::to_string)

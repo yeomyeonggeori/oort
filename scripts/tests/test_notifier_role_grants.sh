@@ -45,6 +45,10 @@ for denied_table in hosted_agent_inbox_event hosted_agent_inbox_counter token; d
   printf '%s\n' "$granted" | grep -Fxq "$denied_table" && \
     fail "GRANT list names $denied_table for momo_notifier (ADR-0186 v5 U-f: the sweep writes no inbox reference; no credential reads for a BYPASSRLS role)"
 done
+# ADR-0200 증보 8 LA12 (#6067): the notifier never writes a reaction — no INSERT, no DELETE on
+# `reaction` (no grant at all). The eye of a run the notifier ended is removed by the api.
+printf '%s\n' "$granted" | grep -Fxq reaction && \
+  fail "GRANT list names reaction for momo_notifier (ADR-0200 증보 8 LA12: no INSERT, no DELETE)"
 pass "parsed GRANT ON TABLE allowlist ($(printf '%s\n' "$granted" | grep -c .))"
 
 python3 - "$ROOT" "$BOOTSTRAP" <<'PY'

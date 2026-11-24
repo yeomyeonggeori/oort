@@ -476,11 +476,12 @@ fn every_tool_failure_has_a_token() {
             // same two keys.
             ToolFailure::InvalidArguments
             | ToolFailure::InvalidAssembleParams(_)
-            | ToolFailure::InvalidRunEvent(_) => "tool_arguments",
+            | ToolFailure::InvalidRunEvent(_)
+            | ToolFailure::AttachmentNotLinkable => "tool_arguments",
             ToolFailure::InvalidArtifacts(_) => REASON_TOOL_ARTIFACTS,
             ToolFailure::NotAuthorized | ToolFailure::HandleRefused => "tool_not_authorized",
             ToolFailure::Unavailable => "tool_unavailable",
-            ToolFailure::Conflict => "tool_conflict",
+            ToolFailure::Conflict | ToolFailure::PictureLimitReached => "tool_conflict",
             ToolFailure::AlreadyClaimed => "tool_already_claimed",
             ToolFailure::ClaimExpired => "tool_claim_expired",
             ToolFailure::Internal => "tool_internal",
@@ -506,6 +507,8 @@ fn every_tool_failure_has_a_token() {
         ToolFailure::HandleRefused,
         ToolFailure::Unavailable,
         ToolFailure::Conflict,
+        ToolFailure::AttachmentNotLinkable,
+        ToolFailure::PictureLimitReached,
         ToolFailure::AlreadyClaimed,
         ToolFailure::ClaimExpired,
         ToolFailure::Internal,

@@ -1348,3 +1348,243 @@ async fn a_detail_that_cannot_be_written_rolls_the_whole_change_back() {
     let rows = rail(&su, ws).await;
     pair_after(&rows, before.1, ws, receipt["version"].as_str().unwrap());
 }
+
+// ---- #6071: ADR-0218 §20 — the wide size table in the database ---------------------------------
+
+fn rendition_of(len: usize, w: u32, h: u32, mime: &str, frames: u32) -> e::media::Rendition {
+    use sha2::{Digest, Sha256};
+    // A byte that differs per size keeps the four rows' hashes apart.
+    let data = vec![(len % 251) as u8; len];
+    e::media::Rendition {
+        info: e::ImageInfo {
+            mime: mime.into(),
+            sha256: hex::encode(Sha256::digest(&data)),
+            bytes: len,
+            width: w,
+            height: h,
+            frame_count: frames,
+            duration_ms: if frames > 1 { 80 * frames } else { 0 },
+        },
+        data,
+    }
+}
+
+/// The largest picture the wide table makes, at every cap: a moving one with its `still`.
+fn wide_at_caps() -> e::media::Processed {
+    e::media::Processed {
+        small: rendition_of(262_144, 128, 96, "image/gif", 4),
+        thumb: rendition_of(524_288, 256, 192, "image/png", 1),
+        large: rendition_of(2_097_152, 768, 576, "image/gif", 4),
+        still: Some(rendition_of(2_097_151, 768, 576, "image/png", 1)),
+    }
+}
+
+/// ZA4 (the database half) · ZA7 · ZA8. The four rendition CHECKs stand by themselves: the store writes
+/// whatever `Processed` it is handed (no size check of its own), so every refusal below is the database's.
+/// Then `still` is one more size behind the same door: served to a member of the workspace for the
+/// exact sha, and the same 404 for an expression without one, a wrong sha, another workspace, a hidden
+/// and a deleted expression.
+#[tokio::test]
+#[ignore = "real PG; security-nightly workspace ignored pass"]
+async fn the_database_alone_holds_the_wide_caps_and_still_is_one_more_guarded_size() {
+    let (su, api, owner, member, foreign) = setup().await;
+    let make = |media: e::media::Processed, name: &'static str| {
+        let api = api.clone();
+        async move {
+            e::create_draft(&api, owner, meta(name), Origin::upload(), Some(media), None).await
+        }
+    };
+    // At every cap: stored.
+    assert!(make(wide_at_caps(), "rt-caps").await.is_ok());
+    // One byte or one pixel past any cap: refused, nothing stored.
+    let over: Vec<(&str, e::media::Processed)> = vec![
+        (
+            "small bytes",
+            e::media::Processed {
+                small: rendition_of(262_145, 128, 96, "image/gif", 4),
+                ..wide_at_caps()
+            },
+        ),
+        (
+            "small edge",
+            e::media::Processed {
+                small: rendition_of(1000, 129, 96, "image/gif", 4),
+                ..wide_at_caps()
+            },
+        ),
+        (
+            "thumb bytes",
+            e::media::Processed {
+                thumb: rendition_of(524_289, 256, 192, "image/png", 1),
+                ..wide_at_caps()
+            },
+        ),
+        (
+            "thumb edge",
+            e::media::Processed {
+                thumb: rendition_of(1000, 257, 192, "image/png", 1),
+                ..wide_at_caps()
+            },
+        ),
+        (
+            "large bytes",
+            e::media::Processed {
+                large: rendition_of(2_097_153, 768, 576, "image/gif", 4),
+                ..wide_at_caps()
+            },
+        ),
+        (
+            "large edge",
+            e::media::Processed {
+                large: rendition_of(1000, 769, 576, "image/gif", 4),
+                ..wide_at_caps()
+            },
+        ),
+        (
+            "still bytes",
+            e::media::Processed {
+                still: Some(rendition_of(2_097_153, 768, 576, "image/png", 1)),
+                ..wide_at_caps()
+            },
+        ),
+        (
+            "still edge",
+            e::media::Processed {
+                still: Some(rendition_of(1000, 576, 769, "image/png", 1)),
+                ..wide_at_caps()
+            },
+        ),
+        (
+            "still is a gif",
+            e::media::Processed {
+                still: Some(rendition_of(1000, 768, 576, "image/gif", 4)),
+                ..wide_at_caps()
+            },
+        ),
+        (
+            "thumb is a gif",
+            e::media::Processed {
+                thumb: rendition_of(1000, 256, 192, "image/gif", 4),
+                ..wide_at_caps()
+            },
+        ),
+    ];
+    for (n, (why, media)) in over.into_iter().enumerate() {
+        let name: &'static str = Box::leak(format!("rt-over-{n}").into_boxed_str());
+        assert!(
+            make(media, name).await.is_err(),
+            "{why}: the database must refuse it"
+        );
+    }
+    let refused: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM expression_draft d JOIN expression_draft_image i ON i.draft_id = d.id \
+          WHERE d.workspace_id = $1 AND d.name LIKE 'rt-over-%'",
+    )
+    .bind(owner.workspace)
+    .fetch_one(&su)
+    .await
+    .unwrap();
+    assert_eq!(refused, 0, "a refused picture leaves no row behind");
+    // ZA7: a picture of the old table (512 · 128 · 128, no still) is stored and read as before.
+    let old = register(&api, owner, "rt-old", still_of(700, 700), None).await;
+    let old_id = expression_id(&old);
+    let old_media = &old["expression"]["media"];
+    assert_eq!(old_media["large"]["width"], 512);
+    assert!(old_media.get("still").is_none(), "no still, no key");
+    // A moving registration with its stopped frame: the list carries `still`, and the image door serves it.
+    let d = make(wide_at_caps(), "rt-moving").await.unwrap();
+    let moving = e::activate(&api, owner, choice(&d)).await.unwrap();
+    let id = expression_id(&moving);
+    let still_sha = moving["expression"]["media"]["still"]["sha256"]
+        .as_str()
+        .expect("the list's media carries still when it is stored")
+        .to_string();
+    let listed = e::list(&api, member, None).await.unwrap();
+    let row = listed["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|x| x["id"] == moving["expression"]["id"])
+        .unwrap()
+        .clone();
+    assert_eq!(row["media"]["still"]["sha256"], still_sha.as_str());
+    assert_eq!(row["media"]["still"]["width"], 768);
+    let got = e::image(&api, member, id, "still".into(), still_sha.clone(), false)
+        .await
+        .unwrap();
+    assert_eq!(
+        (got.info.mime.as_str(), got.data.len()),
+        ("image/png", 2_097_151)
+    );
+    let not_found = |r: Result<e::media::Rendition, Error>| matches!(r, Err(Error::NotFound));
+    assert!(
+        not_found(e::image(&api, member, id, "still".into(), "0".repeat(64), false).await),
+        "wrong sha"
+    );
+    assert!(
+        not_found(e::image(&api, foreign, id, "still".into(), still_sha.clone(), false).await),
+        "another workspace"
+    );
+    let old_large = old_media["large"]["sha256"].as_str().unwrap().to_string();
+    assert!(
+        not_found(e::image(&api, member, old_id, "still".into(), old_large, false).await),
+        "no still"
+    );
+    assert!(
+        not_found(e::image(&api, member, id, "poster".into(), still_sha.clone(), false).await),
+        "not a size"
+    );
+    e::mutate(
+        &api,
+        member,
+        id,
+        None,
+        Some(Report {
+            reason: "other".into(),
+            detail: None,
+        }),
+    )
+    .await
+    .unwrap();
+    assert!(
+        not_found(e::image(&api, owner, id, "still".into(), still_sha.clone(), false).await),
+        "hidden"
+    );
+    let gone = make(wide_at_caps(), "rt-gone").await.unwrap();
+    let gone = e::activate(&api, owner, choice(&gone)).await.unwrap();
+    let gone_sha = gone["expression"]["media"]["still"]["sha256"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let gone_id = expression_id(&gone);
+    assert!(e::image(
+        &api,
+        owner,
+        gone_id,
+        "still".into(),
+        gone_sha.clone(),
+        false
+    )
+    .await
+    .is_ok());
+    e::mutate(&api, owner, gone_id, None, None).await.unwrap();
+    assert!(
+        not_found(e::image(&api, owner, gone_id, "still".into(), gone_sha, false).await),
+        "deleted"
+    );
+    // ZA10: the set store keeps 158's old caps (its own copies of the constraints, untouched).
+    let set_caps: Vec<String> = sqlx::query_scalar(
+        "SELECT pg_get_constraintdef(oid) FROM pg_constraint \
+          WHERE conrelid = 'expression_set_image'::regclass AND contype = 'c' ORDER BY conname",
+    )
+    .fetch_all(&su)
+    .await
+    .unwrap();
+    assert!(
+        set_caps.iter().any(|c| c.contains("1048576"))
+            && set_caps.iter().any(|c| c.contains("512"))
+    );
+    assert!(!set_caps
+        .iter()
+        .any(|c| c.contains("still") || c.contains("2097152")));
+}

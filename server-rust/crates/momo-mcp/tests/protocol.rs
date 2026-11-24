@@ -861,6 +861,8 @@ fn both_eras_advertise_exactly_the_view_they_can_call() {
             "oort_inbox_read",
             "oort_conversation_read",
             "oort_message_post",
+            // #6013 (ADR-0162 증보 7 I1): opened by messages:write like the post
+            "oort_picture_upload_begin",
             "oort_jobs_claim",
             "oort_job_start",
             "oort_job_renew",

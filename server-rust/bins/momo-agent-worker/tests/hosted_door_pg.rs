@@ -1152,6 +1152,61 @@ async fn a_still_photo_turn_becomes_one_generated_candidate_card_and_commits_no_
     assert!(approvals_of(&app, &b, run).await.is_empty());
 }
 
+/// ADR-0218 §20 (#6071): the hosted door stores its `generated` still at the **old** size table whatever
+/// the api's switch says — the worker reads no such setting (opening this door to it is #6117). A 1024
+/// picture becomes `large` 512 · `thumb` 128 · `small` 128 and no `still` row.
+#[tokio::test]
+#[ignore = "requires an isolated PostgreSQL 18 (see module docs)"]
+async fn the_hosted_door_stores_its_picture_at_the_old_size_table() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    reset_instance(&su).await;
+    let t = seed(&su).await;
+    pin_env(&su, &t).await;
+    let worker_pool = pool_as("momo_worker", "MOMO_WORKER_PASSWORD", "momo_worker_dev_pw").await;
+    let provider = Scripted::new();
+    let w = worker(
+        &provider,
+        &Opts {
+            origin: Some(ORIGIN),
+            strict: true,
+            ..Opts::default()
+        },
+    )
+    .await;
+    provider.say(answer(
+        "크게 만들었어요",
+        Some(&picture(1024, 1024)),
+        Some(&still_request()),
+    ));
+    enqueue_mention(
+        &su,
+        &worker_pool,
+        &t,
+        "@hermes 이 사진으로 크게 (table-6071)",
+        Some(PHOTO),
+    )
+    .await;
+    let stats = drain(&w).await;
+    assert_eq!(stats.claimed, 1, "{stats:?}");
+    let rows: Vec<(String, i32, i32)> = sqlx::query_as(
+        "SELECT variant, width, height FROM expression_draft_image WHERE workspace_id = $1 ORDER BY variant",
+    )
+    .bind(t.workspace_id)
+    .fetch_all(&su)
+    .await
+    .unwrap();
+    assert_eq!(
+        rows,
+        vec![
+            ("large".to_string(), 512, 512),
+            ("small".to_string(), 128, 128),
+            ("thumb".to_string(), 128, 128),
+        ],
+        "the old table, and no still"
+    );
+}
+
 /// A job re-claimed after a transient failure finds its run `failed` (the between-attempts mark): the
 /// door still opens, and the card parks the run again — the retry is not silently skipped.
 #[tokio::test]

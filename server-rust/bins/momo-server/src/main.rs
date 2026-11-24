@@ -365,6 +365,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         // ADR-0162: the Agent Port has its own token/agent/IP bounds and an optional
         // trusted Origin comparison. It never borrows the public join knobs.
         .with_agent_port(config.agent_port)
+        // ADR-0151 증보 10 P8 (#6013): the Agent Port picture road — on unless the operator turns
+        // MOMO_AGENT_PORT_PICTURES off, and only while MOMO_PUBLIC_BASE_URL is an https address.
+        .with_agent_uploads(momo_server::config::agent_uploads_from_env())
         // ADR-0216 D9 (#4660): the developer-token door's budgets. Always on; a 0 or a
         // value that does not parse keeps the default rather than switching one off.
         .with_dev_access(config.dev_access)
@@ -394,6 +397,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         // ADR-0201 증보 v4 P8 (#5374): the delegation door's G4 declarations, so the same screen can say
         // 「지금은 쓸 수 없어요」 with the door's own word. The agent-worker enforces; this only explains.
         .with_team_ai_hermes(momo_server::config::team_ai_hermes_from_env())
+        // ADR-0218 §20 Z2-7 (#6071): the old size table unless the operator set EXPRESSION_RENDITION_TABLE=768.
+        .with_expression_rendition_table(momo_server::config::expression_rendition_table_from_env())
         // ADR-0149 (SRV-T2): 휘발 신호 stays 503 unless the operator handed this
         // process the Centrifugo publish credential (CENT_API_URL + CENT_API_KEY).
         // No deployment did before this batch, so an un-updated env block keeps the
@@ -482,6 +487,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         } else {
             None
         };
+    // #6067 (ADR-0200 증보 8 L7 5): the follow-up removal of the status eyes the notifier's two
+    // sweeps leave (the notifier has no reaction privilege). Its own two-connection `momo_app`
+    // pool; `start` refuses a role that bypasses row security.
+    let (stop_status_eyes, status_eyes_stop) = tokio::sync::watch::channel(false);
+    let status_eyes_pool = momo_db::connect(&momo_db::PoolConfig {
+        max_connections: 2,
+        ..config.db.clone()
+    })
+    .await?;
+    let status_eyes_task = momo_server::status_reaction_sweep::start(
+        std::sync::Arc::clone(&state.status_reaction_touched),
+        status_eyes_pool,
+        status_eyes_stop,
+    )
+    .await;
     let app = build_app(state);
 
     let address: SocketAddr = format!("{}:{}", config.host, config.port).parse()?;
@@ -505,6 +525,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         // most `batch` files); a file whose archive delete has not answered by the time the process
         // exits keeps its row (the savepoint is never committed), and the next process retries.
         let _ = stop_reclaim.send(true);
+        let _ = stop_status_eyes.send(true);
     })
     .await?;
     if let Some(task) = scheduler_task {
@@ -522,6 +543,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             .is_err()
         {
             tracing::warn!("the attachment reclaim tick did not stop within 35 seconds");
+        }
+    }
+    if let Some(task) = status_eyes_task {
+        if tokio::time::timeout(std::time::Duration::from_secs(10), task)
+            .await
+            .is_err()
+        {
+            tracing::warn!("the agent status eye follow-up removal did not stop within 10 seconds");
         }
     }
     Ok(())
