@@ -11,7 +11,7 @@
 // =============================================================================
 
 import { ApiError } from "../../lib/api";
-import { hasFinalConsonant } from "../../lib/koreanParticle";
+import { takesFinalForm } from "../../lib/koreanParticle";
 import type { LocaleService } from "../../i18n/context";
 import type { PlainMessageKey } from "../../i18n/keys";
 import type { FilterTabsSpec } from "../common/filterTabs";
@@ -407,7 +407,7 @@ export function noResultsCopy(
   // 나온다. 여기서 두 번째 규칙을 세우면 같은 판정이 두 벌로 갈라진다.
   // 판정은 여기서 하고(`josa`), 사전의 `select`가 이/가를 고른다.
   const quoted = `'${clampQueryForCopy(query)}'`;
-  const josa = hasFinalConsonant(quoted) ? "final" : "other";
+  const josa = takesFinalForm(quoted) ? "final" : "other";
   // 범위를 좁혀 놓고 「찾지 못했습니다」로만 끝내면, 그 말은 워크스페이스
   // 전체에서 못 찾았다는 뜻으로 읽힌다 — 사람은 검색을 그만두는데 실제로는
   // 옆 채널에 있을 수 있다. **어디서** 못 찾았는지가 이 문장의 절반이다.

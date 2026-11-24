@@ -4281,12 +4281,12 @@ export const argumentSpecs = {
   "presence.dnd.hintPick": {},
   "presence.menu.cardLabel": {
     "name": "string",
-    "status": "string"
+    "trigger": "string"
   },
   "presence.menu.cardLabelCustom": {
     "custom": "string",
     "name": "string",
-    "status": "string"
+    "trigger": "string"
   },
   "presence.menu.label": {},
   "presence.menu.statusLine": {
@@ -7500,8 +7500,8 @@ export interface MessageArgs {
   "onboarding.harnessLogin.waitingDevice": Record<string, never>;
   "presence.dnd.hint": Record<string, never>;
   "presence.dnd.hintPick": Record<string, never>;
-  "presence.menu.cardLabel": { name: string; status: string };
-  "presence.menu.cardLabelCustom": { custom: string; name: string; status: string };
+  "presence.menu.cardLabel": { name: string; trigger: string };
+  "presence.menu.cardLabelCustom": { custom: string; name: string; trigger: string };
   "presence.menu.label": Record<string, never>;
   "presence.menu.statusLine": { status: string };
   "presence.menu.triggerLabel": { status: string };

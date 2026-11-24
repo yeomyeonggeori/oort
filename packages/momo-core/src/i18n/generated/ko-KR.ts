@@ -8887,15 +8887,11 @@ export const catalog: MessageCatalog = {
     },
     {
       "type": 0,
-      "value": ". 내 상태: "
+      "value": ". "
     },
     {
       "type": 1,
-      "value": "status"
-    },
-    {
-      "type": 0,
-      "value": " (변경하려면 누르세요)"
+      "value": "trigger"
     }
   ],
   "presence.menu.cardLabelCustom": [
@@ -8905,15 +8901,15 @@ export const catalog: MessageCatalog = {
     },
     {
       "type": 0,
-      "value": ". 내 상태: "
+      "value": ". "
     },
     {
       "type": 1,
-      "value": "status"
+      "value": "trigger"
     },
     {
       "type": 0,
-      "value": " (변경하려면 누르세요). "
+      "value": ". "
     },
     {
       "type": 1,

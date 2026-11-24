@@ -378,6 +378,19 @@ describe("범위 전환은 커서를 버린다", () => {
   });
 });
 
+describe("빈 결과의 이/가는 옛 attachParticle과 같은 판정이다 (r1 H1)", () => {
+  it.each([
+    ["grok", "이"],
+    ["Slack", "이"],
+    ["deploy", "가"],
+    ["회의록", "이"],
+    ["배포", "가"],
+  ])("'%s' → %s", (query, josa) => {
+    expect(noResultsCopy(ko, query)).toBe(`'${query}'${josa} 들어간 메시지를 찾지 못했습니다.`);
+    expect(noResultsCopy(ko, query, "channel", CHANNEL)).toContain(`'${query}'${josa} 들어간`);
+  });
+});
+
 describe("빈 결과는 범위를 말한다", () => {
   it("전체에서 빈손이면 지금까지의 그 문장이다", () => {
     expect(noResultsCopy(ko, "배포")).toBe(

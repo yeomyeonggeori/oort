@@ -9595,15 +9595,11 @@ export const catalog: MessageCatalog = {
     },
     {
       "type": 0,
-      "value": ". My status: "
+      "value": ". "
     },
     {
       "type": 1,
-      "value": "status"
-    },
-    {
-      "type": 0,
-      "value": " (select to change)"
+      "value": "trigger"
     }
   ],
   "presence.menu.cardLabelCustom": [
@@ -9613,15 +9609,15 @@ export const catalog: MessageCatalog = {
     },
     {
       "type": 0,
-      "value": ". My status: "
+      "value": ". "
     },
     {
       "type": 1,
-      "value": "status"
+      "value": "trigger"
     },
     {
       "type": 0,
-      "value": " (select to change). "
+      "value": ". "
     },
     {
       "type": 1,

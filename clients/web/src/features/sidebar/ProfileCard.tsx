@@ -11,7 +11,7 @@ import {
 } from "lucide-react";
 import { effectivePresence, type RosterMember } from "@momo/core/lib/api";
 import { CUSTOM_STATUS_MENU_LABEL_KEY } from "@momo/core/features/presence/customStatus";
-import { effectivePresenceLabelKey } from "@momo/core/features/presence/model";
+import { presenceTriggerLabel } from "@momo/core/features/presence/model";
 import { useSession } from "@/app/session";
 import { useOpenAddWorkspace } from "@/features/workspace/useAddWorkspace";
 import { rememberSettingsOpener } from "@/features/settings/settingsFocus";
@@ -135,12 +135,12 @@ export function ProfileCard({
   const triggerName = customName
     ? formatMessage("presence.menu.cardLabelCustom", {
         name: selfName,
-        status: formatMessage(effectivePresenceLabelKey(effective)),
+        trigger: presenceTriggerLabel(formatMessage, effective),
         custom: customName,
       })
     : formatMessage("presence.menu.cardLabel", {
         name: selfName,
-        status: formatMessage(effectivePresenceLabelKey(effective)),
+        trigger: presenceTriggerLabel(formatMessage, effective),
       });
   const statusHead = custom
     ? [custom.emoji, custom.text].filter(Boolean).join(" ")
