@@ -662,6 +662,7 @@
     "clients/mobile/src/features/conversation/ConversationMenuSheet.tsx": {"ko": 5, "en": 0},
     "clients/mobile/src/features/sidebar/ChannelActionSheet.tsx": {"ko": 2, "en": 0},
     "clients/mobile/src/shell/NewChannelSheet.tsx": {"ko": 11, "en": 0},
+    "clients/web/src/app/ShortcutHelpDialog.tsx": {"ko": 3, "en": 0},
     "clients/web/src/features/channels/ChannelContextControls.tsx": {"ko": 19, "en": 0},
     "clients/web/src/features/channels/CreateChannelDialog.tsx": {"ko": 12, "en": 0},
     "clients/web/src/features/chat/ChatShell.tsx": {"ko": 18, "en": 0},

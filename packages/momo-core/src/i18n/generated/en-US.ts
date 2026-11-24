@@ -2,6 +2,38 @@
 import type { MessageCatalog } from "../types";
 
 export const catalog: MessageCatalog = {
+  "app.shortcutHelp.change": [
+    {
+      "type": 0,
+      "value": "Change shortcuts"
+    }
+  ],
+  "app.shortcutHelp.empty": [
+    {
+      "type": 0,
+      "value": "No matching shortcuts"
+    }
+  ],
+  "app.shortcutHelp.reopenHint": [
+    {
+      "type": 0,
+      "value": "Press "
+    },
+    {
+      "type": 1,
+      "value": "key"
+    },
+    {
+      "type": 0,
+      "value": " to open this again"
+    }
+  ],
+  "app.shortcutHelp.search": [
+    {
+      "type": 0,
+      "value": "Search shortcuts"
+    }
+  ],
   "attachments.tray.noticeDismiss": [
     {
       "type": 0,
