@@ -444,7 +444,7 @@ async function goToBottom(page, cards) {
 
 async function captureScheme(browser, scheme) {
   const shots = [];
-  const context = await browser.newContext({
+  const context = await browser.newContext({ locale: "ko-KR",
     viewport: VIEWPORT,
     deviceScaleFactor: 2,
     colorScheme: scheme,
