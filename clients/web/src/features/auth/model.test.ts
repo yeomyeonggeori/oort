@@ -20,6 +20,17 @@ import {
   prefillFocus,
   signInFailureCopy,
 } from "@momo/core/features/auth/connectModel";
+import { failureMessageText, type FailureMessage } from "@momo/core/features/auth/failureMessage";
+import { catalog as koCatalog } from "@momo/core/i18n/generated/ko-KR";
+import { createLocaleService, resolveLocaleContext } from "@momo/core/i18n";
+
+// 문장은 사전(`auth.json`)에 있다(#6064). 시험은 제품과 같은 한국어 생성물로 풀어 예전 한국어를 그대로 단정한다.
+const { formatMessage } = createLocaleService({
+  ...resolveLocaleContext("ko-KR", { languages: ["ko-KR"] }),
+  catalog: koCatalog,
+});
+const msg = (failure: { message: FailureMessage }): string =>
+  failureMessageText(formatMessage, failure.message);
 
 // The connect surface is mostly decisions about untrusted text: a URL someone
 // typed, a link someone forwarded, a service record a shell reported. Those are
@@ -282,14 +293,14 @@ describe("prefill focus", () => {
 
 describe("failure copy", () => {
   it("splits the two meanings each invite status carries", () => {
-    expect(joinFailureCopy(new ApiError(410, "invite expired")).message).toContain(
+    expect(msg(joinFailureCopy(new ApiError(410, "invite expired")))).toContain(
       "만료"
     );
-    expect(joinFailureCopy(new ApiError(410, "invite revoked")).message).toContain(
+    expect(msg(joinFailureCopy(new ApiError(410, "invite revoked")))).toContain(
       "회수"
     );
     expect(
-      joinFailureCopy(new ApiError(409, "invite exhausted")).message
+      msg(joinFailureCopy(new ApiError(409, "invite exhausted")))
     ).toContain("사용 횟수");
   });
 
@@ -332,9 +343,9 @@ describe("failure copy", () => {
     expect(failure.onGateway).toBe(true);
     expect(failure.suggestSignIn).toBe(false);
     expect(failure.retryable).toBe(false);
-    expect(failure.message).toContain("게스트 초대");
-    expect(failure.message).toContain("멈춰");
-    expect(failure.message).not.toContain("새 초대 링크");
+    expect(msg(failure)).toContain("게스트 초대");
+    expect(msg(failure)).toContain("멈춰");
+    expect(msg(failure)).not.toContain("새 초대 링크");
     // The bare 400 and a 400 with some other code stay where they were.
     expect(joinFailureBelongsOnGateway(new ApiError(400, "invite code is invalid"))).toBe(false);
     expect(
@@ -355,8 +366,8 @@ describe("failure copy", () => {
         "password_too_short"
       )
     );
-    expect(short.message).toContain("10자 이상");
-    expect(short.message).not.toContain("초대");
+    expect(msg(short)).toContain("10자 이상");
+    expect(msg(short)).not.toContain("초대");
     expect(short.onGateway).toBeUndefined();
     expect(short.retryable).toBe(false);
     expect(short.suggestSignIn).toBe(false);
@@ -368,9 +379,9 @@ describe("failure copy", () => {
         "password_too_long"
       )
     );
-    expect(long.message).toContain("72바이트");
-    expect(long.message).toContain("한글은 한 자에 3바이트");
-    expect(long.message).not.toContain("초대");
+    expect(msg(long)).toContain("72바이트");
+    expect(msg(long)).toContain("한글은 한 자에 3바이트");
+    expect(msg(long)).not.toContain("초대");
     expect(long.onGateway).toBeUndefined();
     expect(long.retryable).toBe(false);
   });
@@ -379,38 +390,37 @@ describe("failure copy", () => {
     const generic = "요청을 처리하지 못했습니다";
     // No code (an empty password, or any 400 older than the named rules).
     expect(
-      joinFailureCopy(new ApiError(400, "password is required")).message
+      msg(joinFailureCopy(new ApiError(400, "password is required")))
     ).toContain(generic);
     // A code this screen does not know must not borrow another rule's sentence.
     expect(
-      joinFailureCopy(
+      msg(joinFailureCopy(
         new ApiError(
           400,
           "password must not contain a NUL character",
           "password_invalid_char"
         )
-      ).message
+      ))
     ).toContain(generic);
     // A rule code on another status is not a password refusal.
     expect(
-      joinFailureCopy(new ApiError(429, "rate limit", "password_too_short"))
-        .message
+      msg(joinFailureCopy(new ApiError(429, "rate limit", "password_too_short")))
     ).toContain("잠시");
     const gateway = joinFailureCopy(
       new ApiError(404, "invite not found", "password_too_long")
     );
-    expect(gateway.message).toContain("유효하지 않은 초대 코드");
+    expect(msg(gateway)).toContain("유효하지 않은 초대 코드");
     expect(gateway.onGateway).toBe(true);
   });
 
   it("never shows a raw transport failure as an invite verdict", () => {
     const unreachable = new NetworkError("unreachable", 15_000);
-    expect(joinFailureCopy(unreachable).message).toContain("서버에 닿지 못했어요");
-    expect(signInFailureCopy(unreachable).message).toContain(
+    expect(msg(joinFailureCopy(unreachable))).toContain("서버에 닿지 못했어요");
+    expect(msg(signInFailureCopy(unreachable))).toContain(
       "서버에 닿지 못했어요"
     );
     // A body that is not JSON is a client-side fault, not a verdict either.
-    expect(signInFailureCopy(new SyntaxError("bad json")).message).toContain(
+    expect(msg(signInFailureCopy(new SyntaxError("bad json")))).toContain(
       "서버 응답을 읽지 못했습니다"
     );
   });
@@ -429,18 +439,18 @@ describe("failure copy", () => {
   });
 
   it("names which absence happened, because the next move differs", () => {
-    expect(signInFailureCopy(new NetworkError("timeout", 15_000)).message).toContain(
+    expect(msg(signInFailureCopy(new NetworkError("timeout", 15_000)))).toContain(
       "15초"
     );
   });
 
   it("rewords every sign-in status, including the ones nothing claims", () => {
-    expect(signInFailureCopy(new ApiError(401, "invalid credentials")).message).toBe(
+    expect(msg(signInFailureCopy(new ApiError(401, "invalid credentials")))).toBe(
       "이메일 또는 비밀번호가 맞지 않습니다."
     );
     // A suspended account is not a wrong password, and the next move is a
     // person rather than the keyboard.
-    expect(signInFailureCopy(new ApiError(403, "member is suspended")).message).toContain(
+    expect(msg(signInFailureCopy(new ApiError(403, "member is suspended")))).toContain(
       "관리자"
     );
   });
@@ -455,12 +465,12 @@ describe("failure copy", () => {
         "workspace must be a workspace id (uuid), or omitted to use the default workspace"
       )
     );
-    expect(copy.message).toContain("비워 두면");
+    expect(msg(copy)).toContain("비워 두면");
     expect(copy.retryable).toBe(false);
-    expect(/[a-z]{4,}/.test(copy.message)).toBe(false);
+    expect(/[a-z]{4,}/.test(msg(copy))).toBe(false);
     // A 400 that is NOT about the workspace must not borrow that sentence.
     expect(
-      signInFailureCopy(new ApiError(400, "body shape rejected")).message
+      msg(signInFailureCopy(new ApiError(400, "body shape rejected")))
     ).not.toContain("비워 두면");
   });
 
@@ -474,12 +484,12 @@ describe("failure copy", () => {
       new ApiError(418, "server is a teapot"),
       new ApiError(400, "invalid workspace"),
     ]) {
-      const message = signInFailureCopy(failure).message;
+      const message = msg(signInFailureCopy(failure));
       expect(message).not.toContain(failure.message);
       expect(/[a-z]{4,}/.test(message)).toBe(false);
     }
     // …and the same on the invite side, whose doc comment already promised it.
-    const join = joinFailureCopy(new ApiError(500, "boom")).message;
+    const join = msg(joinFailureCopy(new ApiError(500, "boom")));
     expect(join).not.toContain("boom");
   });
 });

@@ -733,6 +733,8 @@ async function newPage(browser, scenario, delayMs, { open = true, hasText } = {}
     // 900x600: 이 레포에는 결정 컨트롤이 뷰포트 밖으로 밀린 전과가 두 번 있다.
     viewport: { width: gateWidth, height: gateHeight },
     reducedMotion: "reduce",
+    // 한국어 문구를 단정한다(#6044): 브라우저 기본(en-US)이면 영어 사전이 서므로 한국어로 고정한다.
+    locale: "ko-KR",
     ...(gateScheme ? { colorScheme: gateScheme } : {}),
   });
   const page = await context.newPage();

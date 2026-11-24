@@ -11,6 +11,7 @@ import {sendMessage} from '@momo/core/lib/api';
 import {
   canDelegate,
   delegateButtonLabel,
+  delegateReasonLine,
   delegateMessageBody,
   delegateSentLine,
   type TeamAiDelegate,
@@ -19,6 +20,7 @@ import {
 import {font, line, PRESSED_OPACITY, radius, space, TOUCH_TARGET, type Palette} from '../../design/tokens';
 import {Sentence} from '../../design/atoms';
 import {usePalette, useStyles} from '../../design/theme';
+import {useFormatMessage} from '../../i18n/useFormatMessage';
 
 // =============================================================================
 // 도우미가 넘기는 줄 아래의 「○○에게 맡기기」 — 폰 (ADR-0201 D5, #3836).
@@ -71,6 +73,7 @@ export function useTeamAiDelegateSend({
   teamAiNames: readonly string[];
   offline: boolean;
 }): TeamAiDelegateSend {
+  const formatMessage = useFormatMessage();
   const [state, setState] = useState<TeamAiDelegateSendState>({kind: 'idle'});
   const showButtons =
     delegate !== null &&
@@ -90,6 +93,7 @@ export function useTeamAiDelegateSend({
       }
       setState({kind: 'sending', memberId: candidate.memberId});
       const body = delegateMessageBody({
+        formatMessage,
         targetHandle: candidate.handle,
         sourceBody,
         teamAiHandles: teamAiNames,
@@ -106,7 +110,7 @@ export function useTeamAiDelegateSend({
         .then(() => {
           setState({kind: 'sent', name: candidate.displayName});
           AccessibilityInfo.announceForAccessibility(
-            delegateSentLine(candidate.displayName),
+            delegateSentLine(formatMessage, candidate.displayName),
           );
         })
         .catch(() => {
@@ -114,7 +118,7 @@ export function useTeamAiDelegateSend({
           AccessibilityInfo.announceForAccessibility(SEND_ERROR_LINE);
         });
     },
-    [delegate, workspaceId, channelId, offline, state.kind, sourceBody, teamAiNames],
+    [delegate, workspaceId, channelId, offline, state.kind, sourceBody, teamAiNames, formatMessage],
   );
 
   const pressable =
@@ -140,18 +144,20 @@ export function TeamAiDelegateStrip({
   const styles = useStyles(build);
   const palette = usePalette();
   const {showButtons, state, press} = send;
-  if (delegate.reasonLine === null && !showButtons) return null;
+  const formatMessage = useFormatMessage();
+  const reasonLine = delegateReasonLine(formatMessage, delegate);
+  if (reasonLine === null && !showButtons) return null;
 
   return (
     <View style={styles.wrap} testID="team-ai-delegate">
-      {delegate.reasonLine !== null ? (
+      {reasonLine !== null ? (
         <Sentence style={styles.meta} testID="team-ai-delegate-reason">
-          {delegate.reasonLine}
+          {reasonLine}
         </Sentence>
       ) : null}
       {showButtons && state.kind === 'sent' ? (
         <Sentence style={styles.meta} testID="team-ai-delegate-sent">
-          {delegateSentLine(state.name)}
+          {delegateSentLine(formatMessage, state.name)}
         </Sentence>
       ) : null}
       {showButtons && state.kind !== 'sent' ? (
@@ -176,7 +182,7 @@ export function TeamAiDelegateStrip({
                   <ActivityIndicator size="small" color={palette.textMuted} />
                 ) : null}
                 <Text style={styles.pillLabel}>
-                  {delegateButtonLabel(candidate)}
+                  {delegateButtonLabel(formatMessage, candidate)}
                 </Text>
               </Pressable>
             );
@@ -200,15 +206,17 @@ export function TeamAiDelegateStrip({
  * 않는다. 보인 것과 같은 글자를 같은 순서로 말한다.
  */
 export function teamAiDelegateSpoken(
+  formatMessage: ReturnType<typeof useFormatMessage>,
   delegate: TeamAiDelegate | null,
   send: TeamAiDelegateSend,
   offline: boolean,
 ): string[] {
   if (delegate === null) return [];
   const parts: string[] = [];
-  if (delegate.reasonLine !== null) parts.push(delegate.reasonLine);
+  const reasonLine = delegateReasonLine(formatMessage, delegate);
+  if (reasonLine !== null) parts.push(reasonLine);
   if (send.showButtons) {
-    if (send.state.kind === 'sent') parts.push(delegateSentLine(send.state.name));
+    if (send.state.kind === 'sent') parts.push(delegateSentLine(formatMessage, send.state.name));
     else if (offline) parts.push(OFFLINE_LINE);
     if (send.state.kind === 'error') parts.push(SEND_ERROR_LINE);
   }

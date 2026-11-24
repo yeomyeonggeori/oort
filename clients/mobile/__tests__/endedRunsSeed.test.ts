@@ -3,9 +3,9 @@ import type {AgentProgressEvent} from '@momo/core/lib/realtimeEvents';
 import {
   endedStreamRunIds,
   isStreamRunEnded,
-  STREAM_CUT_OFF_MARK,
+  STREAM_CUT_OFF_MARK_KEY,
   STREAM_PROPS_KEY,
-  streamStopMark,
+  streamStopMarkKey,
 } from '@momo/core/features/timeline/streamStop';
 
 import {
@@ -69,13 +69,13 @@ describe('endedRuns 씨딩', () => {
    */
   it('페이지가 들고 온 종결은 프레임을 못 본 세션에서도 꼬리를 세운다', () => {
     const row = orphan('RUN-A', true);
-    expect(streamStopMark(row, isStreamRunEnded(row, endedRunIds()))).toBeNull();
+    expect(streamStopMarkKey(row, isStreamRunEnded(row, endedRunIds()))).toBeNull();
 
     seedEndedRuns(endedStreamRunIds([row]));
 
     expect(endedRunIds().has('run-a')).toBe(true);
-    expect(streamStopMark(row, isStreamRunEnded(row, endedRunIds()))).toBe(
-      STREAM_CUT_OFF_MARK,
+    expect(streamStopMarkKey(row, isStreamRunEnded(row, endedRunIds()))).toBe(
+      STREAM_CUT_OFF_MARK_KEY,
     );
   });
 
@@ -88,7 +88,7 @@ describe('endedRuns 씨딩', () => {
     seedEndedRuns(endedStreamRunIds([live]));
     expect(endedRunIds().size).toBe(0);
     expect(
-      streamStopMark(live, isStreamRunEnded(live, endedRunIds())),
+      streamStopMarkKey(live, isStreamRunEnded(live, endedRunIds())),
     ).toBeNull();
   });
 

@@ -5,8 +5,8 @@ import { ApiError } from "@momo/core/lib/api";
 import { NetworkError } from "@momo/core/lib/http";
 import {
   DEVICE_KEY_REFUSAL,
-  deviceKeyErrorMessage,
-  deviceKeyServerMessage,
+  deviceKeyErrorKey,
+  deviceKeyServerKey,
   fetchSigningContext,
   listDeviceKeys,
   phoneKeys,
@@ -18,6 +18,8 @@ import {
   unapprovablePhoneKeys,
   type DeviceKey,
 } from "@momo/core/features/auth/deviceKeys";
+import type { LocaleService } from "@momo/core/i18n";
+import { useFormatMessage } from "@/i18n/useFormatMessage";
 import { Button } from "@/design/ui/button";
 import { Input } from "@/design/ui/input";
 import { InlineBanner, Skeleton } from "@/features/common/States";
@@ -80,10 +82,15 @@ const LINES = [
   "에이전트에게 보내는 지시와 권한 허용에는 기기 서명이 필요해요. 이 맥이 서명 기기가 되고, 폰은 이 맥에서 승인해야 지시를 보낼 수 있어요.",
 ];
 
-function serverError(error: unknown, fallback: string): string {
+type FormatMessage = LocaleService["formatMessage"];
+
+function serverError(formatMessage: FormatMessage, error: unknown, fallback: string): string {
   if (error instanceof NetworkError) return error.message;
-  if (error instanceof ApiError) return deviceKeyServerMessage(error.code, fallback);
-  return deviceKeyErrorMessage(error);
+  if (error instanceof ApiError) {
+    const key = deviceKeyServerKey(error.code);
+    return key === null ? fallback : formatMessage(key);
+  }
+  return formatMessage(deviceKeyErrorKey(error));
 }
 
 function useFingerprint(publicKey: string | undefined): string | null {
@@ -292,13 +299,13 @@ function DeviceKeysBody({
 
 // ---- this Mac -----------------------------------------------------------------
 
-function unsupportedCopy(local: DesktopDeviceKeyStatus): string | null {
+function unsupportedCopy(formatMessage: FormatMessage, local: DesktopDeviceKeyStatus): string | null {
   switch (local.support) {
     case "unsigned_build":
     case "entitlement_missing":
     case "unsupported":
     case "error":
-      return deviceKeyErrorMessage(local.detail ?? `device_key_${local.support}`);
+      return formatMessage(deviceKeyErrorKey(local.detail ?? `device_key_${local.support}`));
     default:
       return null;
   }
@@ -387,6 +394,7 @@ function ThisMacRoot({
   bound: boolean;
 }) {
   const client = useQueryClient();
+  const formatMessage = useFormatMessage();
   const passwordId = useId();
   const reasonId = useId();
   const [asking, setAsking] = useState(false);
@@ -472,7 +480,7 @@ function ThisMacRoot({
     relinkMutate();
   }, [autoId, relinkMutate]);
 
-  const blocked = unsupportedCopy(local);
+  const blocked = unsupportedCopy(formatMessage, local);
   if (blocked) {
     return (
       <RootRow
@@ -486,7 +494,7 @@ function ThisMacRoot({
 
   if (mute && rootRow) {
     const relinkError = relink.isError
-      ? serverError(relink.error, "다시 연결하지 못했어요. 다시 시도해 주세요.")
+      ? serverError(formatMessage, relink.error, "다시 연결하지 못했어요. 다시 시도해 주세요.")
       : null;
     return (
       <div className="flex min-w-0 flex-col gap-3" data-testid="device-key-root-relink">
@@ -569,7 +577,7 @@ function ThisMacRoot({
   const needsPassword = rootRow === undefined;
   const canSubmit = !offline && (!needsPassword || password.length > 0);
   const errorText = register.isError
-    ? serverError(register.error, "이 맥을 서명 기기로 등록하지 못했어요. 다시 시도해 주세요.")
+    ? serverError(formatMessage, register.error, "이 맥을 서명 기기로 등록하지 못했어요. 다시 시도해 주세요.")
     : null;
 
   return (
@@ -785,6 +793,7 @@ function PhoneKeyRow({
   lockedReasonId: string;
 }) {
   const client = useQueryClient();
+  const formatMessage = useFormatMessage();
   const fingerprint = useFingerprint(phone.publicKey);
   const [asking, setAsking] = useState(false);
   const [revokeAsking, setRevokeAsking] = useState(false);
@@ -885,15 +894,15 @@ function PhoneKeyRow({
     endorse.reset();
   };
   const error = endorse.isError
-    ? serverError(endorse.error, "승인하지 못했어요. 다시 시도해 주세요.")
+    ? serverError(formatMessage, endorse.error, "승인하지 못했어요. 다시 시도해 주세요.")
     : revoke.isError
       ? letter
         ? `${
             letter.host.state === "delivered"
               ? "이 맥의 작업 호스트에는 알렸지만 서버에는 알리지 못했어요."
               : "서명은 했지만 서버에 알리지 못했어요."
-          } ${serverError(revoke.error, "다시 보내세요.")}`
-        : serverError(revoke.error, "지시 권한을 끊지 못했어요. 다시 시도해 주세요.")
+          } ${serverError(formatMessage, revoke.error, "다시 보내세요.")}`
+        : serverError(formatMessage, revoke.error, "지시 권한을 끊지 못했어요. 다시 시도해 주세요.")
       : null;
 
   const identity = (
@@ -1236,6 +1245,7 @@ function HostSignatureRow({
   pinned: boolean;
 }) {
   const client = useQueryClient();
+  const formatMessage = useFormatMessage();
   const hintId = useId();
   const [notice, setNotice] = useState<string | null>(null);
   const reset = useMutation({
@@ -1258,7 +1268,7 @@ function HostSignatureRow({
   const failure: unknown = reset.error;
   // Choosing 취소 in the dialog is the person's answer, not a failure.
   const declined = reset.isError && failure === "device_key_declined";
-  const error = reset.isError && !declined ? deviceKeyErrorMessage(failure) : null;
+  const error = reset.isError && !declined ? formatMessage(deviceKeyErrorKey(failure)) : null;
   // A local socket call: no server needed, so being offline does not block it.
   const disabled = reset.isPending;
   return (

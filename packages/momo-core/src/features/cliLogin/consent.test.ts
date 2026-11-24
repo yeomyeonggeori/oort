@@ -2,14 +2,18 @@ import { describe, expect, it } from "vitest";
 import { ApiError } from "../../lib/api";
 import { NetworkError } from "../../lib/http";
 import { WireShapeError } from "../../lib/wire";
+import { catalog as koCatalog } from "../../i18n/generated/ko-KR";
+import { createLocaleService, resolveLocaleContext } from "../../i18n";
+import { createMessageCopy } from "../../testkit";
 import {
   buildCliApprove,
   buildCliDeny,
   classifyCliDecisionError,
-  CLI_CONSENT_CREDENTIAL_LIMIT,
-  CLI_CONSENT_RERUN,
-  CLI_CONSENT_RETRY_LATER,
-  CLI_PRESET_SEND_UNAVAILABLE,
+  CLI_CONSENT_CREDENTIAL_LIMIT_KEY,
+  CLI_CONSENT_RERUN_KEY,
+  CLI_CONSENT_RETRY_LATER_KEY,
+  CLI_PRESET_SEND_UNAVAILABLE_KEY,
+  cliConsentFailureMessage,
   CLI_SCOPES,
   cliCanApprove,
   cliCanDeny,
@@ -19,7 +23,7 @@ import {
   cliGrantedScopes,
   cliRetryWhen,
   cliScopePresetChoices,
-  cliScopeSentences,
+  cliScopeSentenceKeys,
   CliRedirectRefusedError,
   displayDeviceName,
   effectiveCliPreset,
@@ -27,6 +31,7 @@ import {
   parseCliDecision,
   safeCliRedirect,
   type CliConsentPreview,
+  type CliDecisionOutcome,
   type CliScope,
 } from "./consent";
 
@@ -36,6 +41,19 @@ import {
 // =============================================================================
 
 const WRITE: CliScope = "dev:messages:write";
+
+// 문장은 사전(`cliLogin.json`)에 있다(#6064). 시험은 제품과 같은 한국어 생성물로 키를 풀어 예전 한국어를 그대로 단정한다.
+const ko = createMessageCopy({ messageLocale: "ko-KR", catalog: koCatalog });
+const { formatMessage } = createLocaleService({
+  ...resolveLocaleContext("ko-KR", { languages: ["ko-KR"] }),
+  catalog: koCatalog,
+});
+const koScopes = (granted: readonly CliScope[]): string[] =>
+  cliScopeSentenceKeys(granted).map((key) => ko(key));
+const failureText = (outcome: CliDecisionOutcome): string => {
+  if (outcome.kind !== "failure") throw new Error("not a failure: " + outcome.kind);
+  return cliConsentFailureMessage(formatMessage, outcome.action, outcome.error);
+};
 
 function wirePreview(overrides: Record<string, unknown> = {}): Record<string, unknown> {
   return {
@@ -248,20 +266,21 @@ describe("허용 범위 프리셋", () => {
   });
 
   it("보낼 수 없는 요청에서는 읽기와 보내기가 이유와 함께 막힌다", () => {
-    const blocked = cliScopePresetChoices({
+    const blocked = cliScopePresetChoices(formatMessage, {
       canSend: false,
       requestedScopes: [...CLI_SCOPES],
     });
     expect(blocked.map((choice) => choice.id)).toEqual(["read", "read-send"]);
     expect(blocked[0]?.disabled).toBeUndefined();
     expect(blocked[1]?.disabled).toBe(true);
-    expect(blocked[1]?.detail).toBe(CLI_PRESET_SEND_UNAVAILABLE);
-    const open = cliScopePresetChoices({
+    expect(blocked[1]?.detail).toBe(ko(CLI_PRESET_SEND_UNAVAILABLE_KEY));
+    expect(blocked[1]?.detail).toBe("이 로그인 요청에는 메시지 보내기가 들어 있지 않아서 고를 수 없어요.");
+    const open = cliScopePresetChoices(formatMessage, {
       canSend: true,
       requestedScopes: [...CLI_SCOPES],
     });
     expect(open[1]?.disabled).toBeUndefined();
-    expect(open[1]?.detail).not.toBe(CLI_PRESET_SEND_UNAVAILABLE);
+    expect(open[1]?.detail).not.toBe(ko(CLI_PRESET_SEND_UNAVAILABLE_KEY));
   });
 
   it("프리셋 설명은 이 요청이 실제로 담은 범위를 풀어쓴다", () => {
@@ -271,11 +290,11 @@ describe("허용 범위 프리셋", () => {
       "dev:messages:read",
       "dev:messages:write",
     ];
-    const [read, readSend] = cliScopePresetChoices({
+    const [read, readSend] = cliScopePresetChoices(formatMessage, {
       canSend: true,
       requestedScopes: requested,
     });
-    const all = cliScopeSentences([...CLI_SCOPES]);
+    const all = koScopes([...CLI_SCOPES]);
     const [identity, channels, messages, write, inbox] = [
       all[0],
       all[1],
@@ -300,8 +319,8 @@ describe("허용 범위 프리셋", () => {
   });
 
   it("범위를 사람 말로 정규 순서로 풀어쓴다", () => {
-    const read = cliScopeSentences(cliGrantedScopes([...CLI_SCOPES], "read"));
-    const send = cliScopeSentences(cliGrantedScopes([...CLI_SCOPES], "read-send"));
+    const read = koScopes(cliGrantedScopes([...CLI_SCOPES], "read"));
+    const send = koScopes(cliGrantedScopes([...CLI_SCOPES], "read-send"));
     expect(read).toHaveLength(4);
     expect(send).toHaveLength(5);
     expect(new Set(send).size).toBe(5);
@@ -408,23 +427,28 @@ describe("classifyCliDecisionError", () => {
   it("로그인 기기 한도는 종료가 아니라 폼 위 안내다", () => {
     expect(
       classifyCliDecisionError("approve", apiError(409, "dev_credential_limit"))
-    ).toEqual({ kind: "failure", message: CLI_CONSENT_CREDENTIAL_LIMIT });
+    ).toMatchObject({ kind: "failure" });
+    expect(
+      failureText(classifyCliDecisionError("approve", apiError(409, "dev_credential_limit")))
+    ).toBe(ko(CLI_CONSENT_CREDENTIAL_LIMIT_KEY));
   });
 
   it("429 와 503 은 서버가 알려 준 기다릴 시간을 말한다", () => {
     const limited = classifyCliDecisionError("approve", apiError(429, undefined, 42));
     expect(limited.kind).toBe("failure");
-    expect(limited.kind === "failure" && limited.message).toContain("42");
+    expect(failureText(limited)).toBe(
+      "허용을 저장하지 못했어요. 요청이 너무 잦아요. 42초 뒤에 다시 시도해 주세요."
+    );
     const busy = classifyCliDecisionError("approve", apiError(503, undefined, 2));
-    expect(busy.kind === "failure" && busy.message).toContain("2");
+    expect(failureText(busy)).toBe(
+      "허용을 저장하지 못했어요. 서버가 잠깐 바빠요. 2초 뒤에 다시 시도해 주세요."
+    );
   });
 
   it("기다릴 시간을 모르면 일반 문구로 말한다", () => {
     for (const status of [429, 503]) {
       const outcome = classifyCliDecisionError("approve", apiError(status));
-      expect(outcome.kind === "failure" && outcome.message).toContain(
-        CLI_CONSENT_RETRY_LATER
-      );
+      expect(failureText(outcome)).toContain(ko(CLI_CONSENT_RETRY_LATER_KEY));
     }
   });
 
@@ -437,14 +461,17 @@ describe("classifyCliDecisionError", () => {
 
   it("400 은 터미널에서 다시 시작하라고 말한다", () => {
     const outcome = classifyCliDecisionError("approve", apiError(400));
-    expect(outcome.kind === "failure" && outcome.message).toContain(CLI_CONSENT_RERUN);
+    expect(failureText(outcome)).toBe(
+      "허용을 저장하지 못했어요. 터미널에서 oort login을 다시 실행해 주세요."
+    );
+    expect(failureText(outcome)).toContain(ko(CLI_CONSENT_RERUN_KEY));
   });
 
   it("네트워크 실패는 그 문장을 그대로 싣고 폼에 남는다", () => {
     const network = new NetworkError("unreachable", 15_000);
     const outcome = classifyCliDecisionError("approve", network);
     expect(outcome.kind).toBe("failure");
-    expect(outcome.kind === "failure" && outcome.message).toContain(network.message);
+    expect(failureText(outcome)).toContain(network.message);
   });
 
   it("200 인데 읽을 수 없는 응답과 안전하지 않은 돌아갈 곳은 다시 시도시키지 않는다", () => {
@@ -462,16 +489,14 @@ describe("classifyCliDecisionError", () => {
       classifyCliDecisionError("approve", apiError(409, "dev_credential_limit")),
     ];
     for (const outcome of outcomes) {
-      expect(outcome.kind === "failure" && outcome.message).not.toContain(
-        "server sentence"
-      );
+      expect(failureText(outcome)).not.toContain("server sentence");
     }
   });
 
   it("ApiError 가 아닌 오류는 일반 실패다", () => {
     const outcome = classifyCliDecisionError("approve", new Error("boom"));
     expect(outcome.kind).toBe("failure");
-    expect(outcome.kind === "failure" && outcome.message).not.toContain("boom");
+    expect(failureText(outcome)).not.toContain("boom");
     expect(
       classifyCliDecisionError("approve", new ApiError(401, "x")).kind
     ).toBe("session-expired");
@@ -480,18 +505,18 @@ describe("classifyCliDecisionError", () => {
 
 describe("cliRetryWhen", () => {
   it("초는 초로, 길면 분으로 올려 말한다", () => {
-    expect(cliRetryWhen(1)).toBe("1초 뒤");
-    expect(cliRetryWhen(41.2)).toBe("42초 뒤");
-    expect(cliRetryWhen(90)).toBe("90초 뒤");
-    expect(cliRetryWhen(91)).toBe("약 2분 뒤");
-    expect(cliRetryWhen(600)).toBe("약 10분 뒤");
+    expect(cliRetryWhen(formatMessage, 1)).toBe("1초 뒤");
+    expect(cliRetryWhen(formatMessage, 41.2)).toBe("42초 뒤");
+    expect(cliRetryWhen(formatMessage, 90)).toBe("90초 뒤");
+    expect(cliRetryWhen(formatMessage, 91)).toBe("약 2분 뒤");
+    expect(cliRetryWhen(formatMessage, 600)).toBe("약 10분 뒤");
   });
 
   it("모르거나 쓸 수 없는 값은 null 이다", () => {
-    expect(cliRetryWhen(undefined)).toBeNull();
-    expect(cliRetryWhen(0)).toBeNull();
-    expect(cliRetryWhen(Number.NaN)).toBeNull();
-    expect(cliRetryWhen(-3)).toBeNull();
+    expect(cliRetryWhen(formatMessage, undefined)).toBeNull();
+    expect(cliRetryWhen(formatMessage, 0)).toBeNull();
+    expect(cliRetryWhen(formatMessage, Number.NaN)).toBeNull();
+    expect(cliRetryWhen(formatMessage, -3)).toBeNull();
   });
 });
 
@@ -560,7 +585,9 @@ describe("cliConsentScreen", () => {
       data: null,
       previewError: apiError(503, undefined, 3),
     });
-    expect(busy.kind === "retry" && busy.message).toContain("3");
+    expect(busy.kind === "retry" && cliConsentFailureMessage(formatMessage, "preview", busy.error)).toBe(
+      "로그인 요청을 불러오지 못했어요. 서버가 잠깐 바빠요. 3초 뒤에 다시 시도해 주세요."
+    );
   });
 
   it("만료된 요청에는 폼을 세우지 않는다", () => {
@@ -593,9 +620,16 @@ describe("cliCanApprove / cliCanDeny", () => {
 
 describe("cliConsentLifetime", () => {
   it("서버가 준 숫자를 그대로 말한다", () => {
-    const text = cliConsentLifetime({ maxDays: 90, idleDays: 30, accessMinutes: 15 });
+    const life = (input: { maxDays: number; idleDays: number; accessMinutes: number }): string => {
+      const ref = cliConsentLifetime(input);
+      return ko(ref.key, ref.values);
+    };
+    const text = life({ maxDays: 90, idleDays: 30, accessMinutes: 15 });
+    expect(text).toBe(
+      "연결은 최대 90일 유지되고, 30일 동안 쓰지 않으면 끊겨요. 로그인 상태는 15분마다 자동으로 갱신돼요. 비밀번호를 바꾸면 이 연결도 바로 끊겨요."
+    );
     for (const value of ["90", "30", "15"]) expect(text).toContain(value);
-    const other = cliConsentLifetime({ maxDays: 7, idleDays: 3, accessMinutes: 5 });
+    const other = life({ maxDays: 7, idleDays: 3, accessMinutes: 5 });
     expect(other).not.toContain("90");
     for (const value of ["7", "3", "5"]) expect(other).toContain(value);
   });

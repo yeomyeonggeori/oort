@@ -3,6 +3,7 @@ import type { MessageNewEvent } from "../../lib/realtimeEvents";
 import { catalog as enCatalog } from "../../i18n/generated/en-US";
 import { catalog as koCatalog } from "../../i18n/generated/ko-KR";
 import { createMessageService } from "../../i18n/service";
+import { createMessageCopy } from "../../testkit";
 import {
   admitThreadBanner,
   ANNOUNCED_CAP,
@@ -14,6 +15,7 @@ import {
   notifiableKind,
   notificationBody,
   notifyDecision,
+  type NotifyFormat,
   windowIsFront,
   openTarget,
   OPEN_ARM_TTL_MS,
@@ -55,6 +57,10 @@ function event(
   };
 }
 
+// 배너의 낱말은 사전에 있다(#6045). 시험은 한국어 생성물로 풀어 같은 문장을 단정한다.
+const koCopy = createMessageCopy({ messageLocale: "ko-KR", catalog: koCatalog });
+const koFormat: NotifyFormat = (key, values) => koCopy(key, values as never);
+
 function context(overrides: Partial<NotifyContext> = {}): NotifyContext {
   return {
     isDesktop: true,
@@ -64,6 +70,7 @@ function context(overrides: Partial<NotifyContext> = {}): NotifyContext {
     isAnnounced: () => false,
     actorFor: (id) => (id === AGENT ? "@hermes" : "구민수"),
     inviteLinkSentence: () => "사전의 고정 문장",
+    formatMessage: koFormat,
     nowMs: NOW,
     ...overrides,
   };
@@ -160,43 +167,45 @@ describe("notifiableKind", () => {
 });
 
 describe("notificationBody", () => {
+  const bodyOf = (raw: string | undefined) => notificationBody(raw, koFormat);
+
   it("keeps the first line and drops the rest", () => {
-    expect(notificationBody("첫 줄입니다\n둘째 줄입니다")).toBe("첫 줄입니다");
+    expect(bodyOf("첫 줄입니다\n둘째 줄입니다")).toBe("첫 줄입니다");
   });
 
   it("skips leading blank lines instead of returning nothing", () => {
-    expect(notificationBody("\n\n  실제 내용  ")).toBe("실제 내용");
+    expect(bodyOf("\n\n  실제 내용  ")).toBe("실제 내용");
   });
 
   it("returns undefined when there is nothing to say", () => {
-    expect(notificationBody(undefined)).toBeUndefined();
-    expect(notificationBody("   \n  ")).toBeUndefined();
+    expect(bodyOf(undefined)).toBeUndefined();
+    expect(bodyOf("   \n  ")).toBeUndefined();
   });
 
   it("replaces code rather than quoting it", () => {
-    expect(notificationBody("배포 명령은 `kubectl apply -f x.yaml` 입니다")).toBe(
+    expect(bodyOf("배포 명령은 `kubectl apply -f x.yaml` 입니다")).toBe(
       "배포 명령은 코드 입니다"
     );
     // The block goes; the sentence that explains it is what someone needs.
-    expect(notificationBody("```\nexport TOKEN=abc\n```\n확인 부탁")).toBe(
+    expect(bodyOf("```\nexport TOKEN=abc\n```\n확인 부탁")).toBe(
       "확인 부탁"
     );
   });
 
   it("says 코드 when the message is nothing but code", () => {
-    expect(notificationBody("```\nexport TOKEN=abcdef\n```")).toBe("코드");
-    expect(notificationBody("`npm run build`")).toBe("코드");
+    expect(bodyOf("```\nexport TOKEN=abcdef\n```")).toBe("코드");
+    expect(bodyOf("`npm run build`")).toBe("코드");
   });
 
   it("redacts secret-shaped tokens", () => {
-    expect(notificationBody("헤더에 Bearer abcdefgh12345678 넣으세요")).toBe(
+    expect(bodyOf("헤더에 Bearer abcdefgh12345678 넣으세요")).toBe(
       "헤더에 비공개 값 넣으세요"
     );
     expect(
-      notificationBody("키는 sk-abcdefghijkl1234 입니다")
+      bodyOf("키는 sk-abcdefghijkl1234 입니다")
     ).toBe("키는 비공개 값 입니다");
     expect(
-      notificationBody(
+      bodyOf(
         "토큰 eyJhbGciOi.eyJzdWIiOj.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c"
       )
     ).toBe("토큰 비공개 값");
@@ -204,11 +213,11 @@ describe("notificationBody", () => {
 
   it("leaves ordinary prose, ids and urls alone", () => {
     const plain = "019f94e3-0e04-79cd-9dee-208f47edd9a8 채널 확인 부탁";
-    expect(notificationBody(plain)).toBe(plain);
+    expect(bodyOf(plain)).toBe(plain);
   });
 
   it("truncates to the banner budget with an ellipsis", () => {
-    const body = notificationBody("가".repeat(200));
+    const body = bodyOf("가".repeat(200));
     expect(body).toHaveLength(BODY_MAX);
     expect(body?.endsWith("…")).toBe(true);
   });

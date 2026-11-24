@@ -203,6 +203,446 @@ export const catalog: MessageCatalog = {
       "value": "번째"
     }
   ],
+  "auth.claim.expired": [
+    {
+      "type": 0,
+      "value": "이 링크는 만료되었습니다. 설치를 실행한 쪽에 새 링크를 요청하세요."
+    }
+  ],
+  "auth.claim.invalidLink": [
+    {
+      "type": 0,
+      "value": "이 링크는 유효하지 않습니다. 받은 주소를 그대로 여세요."
+    }
+  ],
+  "auth.claim.passwordRecheck": [
+    {
+      "type": 0,
+      "value": "비밀번호를 다시 확인하세요. 비어 있거나 너무 깁니다."
+    }
+  ],
+  "auth.claim.unmapped": [
+    {
+      "type": 0,
+      "value": "요청을 처리하지 못했습니다. 받은 주소를 확인하고 다시 시도하세요."
+    }
+  ],
+  "auth.claim.used": [
+    {
+      "type": 0,
+      "value": "이 링크는 이미 사용되었습니다. 로그인하세요."
+    }
+  ],
+  "auth.deviceKey.authFailed": [
+    {
+      "type": 0,
+      "value": "본인 확인에 실패했어요. 다시 시도해 주세요."
+    }
+  ],
+  "auth.deviceKey.cancelled": [
+    {
+      "type": 0,
+      "value": "Touch ID나 암호 확인을 취소했어요."
+    }
+  ],
+  "auth.deviceKey.changed": [
+    {
+      "type": 0,
+      "value": "이 맥의 서명 키가 바뀌었어요. 이 맥을 서명 기기로 다시 등록해 주세요."
+    }
+  ],
+  "auth.deviceKey.declined": [
+    {
+      "type": 0,
+      "value": "서명을 취소했어요."
+    }
+  ],
+  "auth.deviceKey.endorseConflict": [
+    {
+      "type": 0,
+      "value": "이 맥이 이미 다른 키를 이 이름으로 승인했거나 같은 키를 다른 이름으로 승인했어요. 목록을 다시 불러와서 확인해 주세요."
+    }
+  ],
+  "auth.deviceKey.entitlementMissing": [
+    {
+      "type": 0,
+      "value": "이 빌드에는 서명 키를 보관할 권한이 없어요. 팀 배포 앱에서 해 주세요."
+    }
+  ],
+  "auth.deviceKey.failed": [
+    {
+      "type": 0,
+      "value": "서명하지 못했어요. 다시 시도해 주세요."
+    }
+  ],
+  "auth.deviceKey.hostPinnedOther": [
+    {
+      "type": 0,
+      "value": "이 맥의 작업 호스트에 이미 다른 키가 서명 기기로 등록돼 있어요. 작업 호스트를 다시 등록해 주세요."
+    }
+  ],
+  "auth.deviceKey.kindNotEnabled": [
+    {
+      "type": 0,
+      "value": "이 종류의 서명은 아직 이 앱에서 할 수 없어요."
+    }
+  ],
+  "auth.deviceKey.noLetter": [
+    {
+      "type": 0,
+      "value": "이 맥에서 서명한 해제 기록이 없어서 다시 보낼 수 없어요."
+    }
+  ],
+  "auth.deviceKey.noSession": [
+    {
+      "type": 0,
+      "value": "이 로그인은 키를 옮길 수 없어요. 로그아웃한 뒤 다시 로그인해 주세요."
+    }
+  ],
+  "auth.deviceKey.notEndorsedHere": [
+    {
+      "type": 0,
+      "value": "이 맥에 이 키를 승인한 기록이 없어서 해제에 서명할 수 없어요. 그 기기의 연결을 끊으면 서버에서는 키가 해제되지만, 이 맥의 작업 호스트에는 알려지지 않아요."
+    }
+  ],
+  "auth.deviceKey.notRootHere": [
+    {
+      "type": 0,
+      "value": "이 맥이 이 워크스페이스의 서명 기기로 등록돼 있지 않아요."
+    }
+  ],
+  "auth.deviceKey.payloadRejected": [
+    {
+      "type": 0,
+      "value": "서명할 내용에 보이지 않는 문자나 올바르지 않은 값이 있어서 서명하지 않았어요."
+    }
+  ],
+  "auth.deviceKey.pinRefused": [
+    {
+      "type": 0,
+      "value": "이 맥의 작업 호스트가 이 키를 서명 기기로 받지 않았어요. 작업 호스트 상태를 확인해 주세요."
+    }
+  ],
+  "auth.deviceKey.rebindNotCurrent": [
+    {
+      "type": 0,
+      "value": "서버가 이 키를 이 로그인으로 옮기지 않았어요. 목록을 다시 불러와서 다시 시도해 주세요."
+    }
+  ],
+  "auth.deviceKey.serverAlreadyRegistered": [
+    {
+      "type": 0,
+      "value": "이 키는 이미 등록돼 있어요. 목록을 다시 불러오세요."
+    }
+  ],
+  "auth.deviceKey.serverLineageEnded": [
+    {
+      "type": 0,
+      "value": "이 로그인은 더 이상 키를 등록할 수 없어요. 다시 로그인해 주세요."
+    }
+  ],
+  "auth.deviceKey.serverLinkedSession": [
+    {
+      "type": 0,
+      "value": "QR로 연결한 기기는 서명 기기가 될 수 없어요. 이 맥에서 비밀번호로 로그인한 뒤 등록해 주세요."
+    }
+  ],
+  "auth.deviceKey.serverLinkNotFromMac": [
+    {
+      "type": 0,
+      "value": "이 폰은 맥이 아닌 곳에서 띄운 QR로 연결됐어요. 맥에서 QR로 다시 연결해 주세요."
+    }
+  ],
+  "auth.deviceKey.serverNotFound": [
+    {
+      "type": 0,
+      "value": "서버에 이 키가 더 이상 없어요. 목록을 다시 불러와서 새로 등록해 주세요."
+    }
+  ],
+  "auth.deviceKey.serverPasswordRequired": [
+    {
+      "type": 0,
+      "value": "비밀번호가 맞지 않아요. 이 계정의 현재 비밀번호를 적어 주세요."
+    }
+  ],
+  "auth.deviceKey.serverRebindRequired": [
+    {
+      "type": 0,
+      "value": "이 키는 끝난 로그인에 묶여 있어요. 다시 연결해 주세요."
+    }
+  ],
+  "auth.deviceKey.serverRequiresLinkedSession": [
+    {
+      "type": 0,
+      "value": "이 폰은 QR로 연결되지 않아서 지시를 보낼 수 없어요. 맥에서 QR로 한 번 연결해 주세요."
+    }
+  ],
+  "auth.deviceKey.serverSignatureInvalid": [
+    {
+      "type": 0,
+      "value": "서버가 이 기기의 서명을 받지 않았어요. 기기 시계가 맞는지 확인하고 다시 시도해 주세요."
+    }
+  ],
+  "auth.deviceKey.unsignedBuild": [
+    {
+      "type": 0,
+      "value": "이 빌드는 서명되지 않아서 Secure Enclave 키를 쓸 수 없어요. 팀 배포 앱에서 해 주세요."
+    }
+  ],
+  "auth.deviceKey.unsupported": [
+    {
+      "type": 0,
+      "value": "이 기기에서는 지시 서명 키를 만들 수 없어요."
+    }
+  ],
+  "auth.deviceKey.workdRefused": [
+    {
+      "type": 0,
+      "value": "이 맥의 작업 호스트가 요청을 받지 않았어요. 다시 시도해 주세요."
+    }
+  ],
+  "auth.deviceKey.workHostNotRunning": [
+    {
+      "type": 0,
+      "value": "이 맥의 작업 호스트가 켜져 있지 않아요. 작업 호스트를 켠 뒤 다시 시도해 주세요."
+    }
+  ],
+  "auth.deviceKey.workHostOtherWorkspace": [
+    {
+      "type": 0,
+      "value": "이 맥의 작업 호스트는 다른 워크스페이스 것이라 여기서 바꿀 수 없어요."
+    }
+  ],
+  "auth.deviceLink.addressFallbackLabel": [
+    {
+      "type": 0,
+      "value": "주소로 연결"
+    }
+  ],
+  "auth.deviceLink.cameraError": [
+    {
+      "type": 0,
+      "value": "카메라를 열 수 없습니다. 주소로 연결하세요."
+    }
+  ],
+  "auth.deviceLink.cameraOpening": [
+    {
+      "type": 0,
+      "value": "카메라 여는 중"
+    }
+  ],
+  "auth.deviceLink.expired": [
+    {
+      "type": 0,
+      "value": "이 연결 코드는 만료되었거나 알 수 없습니다."
+    }
+  ],
+  "auth.deviceLink.malformed": [
+    {
+      "type": 0,
+      "value": "연결 코드 형식이 아닙니다. QR을 다시 찍으세요."
+    }
+  ],
+  "auth.deviceLink.permission": [
+    {
+      "type": 0,
+      "value": "카메라 권한이 없어 QR을 찍을 수 없습니다. 주소로 연결하세요."
+    }
+  ],
+  "auth.deviceLink.qrInstruction": [
+    {
+      "type": 0,
+      "value": "데스크탑 화면의 QR을 카메라에 맞추세요."
+    }
+  ],
+  "auth.deviceLink.qrLabel": [
+    {
+      "type": 0,
+      "value": "QR로 연결"
+    }
+  ],
+  "auth.deviceLink.retryLabel": [
+    {
+      "type": 0,
+      "value": "QR 다시 찍기"
+    }
+  ],
+  "auth.deviceLink.sasWait": [
+    {
+      "type": 0,
+      "value": "데스크탑에서 확인을 누르면 진행됩니다."
+    }
+  ],
+  "auth.deviceLink.settingsLabel": [
+    {
+      "type": 0,
+      "value": "설정에서 허용"
+    }
+  ],
+  "auth.deviceLink.unreachable": [
+    {
+      "type": 0,
+      "value": "서버에 닿지 못했습니다. 다시 연결을 시도합니다."
+    }
+  ],
+  "auth.deviceLink.used": [
+    {
+      "type": 0,
+      "value": "이 연결 코드는 이미 사용되었습니다."
+    }
+  ],
+  "auth.failure.serverError": [
+    {
+      "type": 0,
+      "value": "서버에서 오류가 났습니다. 잠시 뒤에 다시 시도하세요."
+    }
+  ],
+  "auth.failure.tooManyRequests": [
+    {
+      "type": 0,
+      "value": "요청이 너무 잦습니다. 잠시 뒤에 다시 시도하세요."
+    }
+  ],
+  "auth.failure.unreadableResponse": [
+    {
+      "type": 0,
+      "value": "서버 응답을 읽지 못했습니다. 주소를 확인하고 다시 시도하세요."
+    }
+  ],
+  "auth.join.alreadyRedeemed": [
+    {
+      "type": 0,
+      "value": "이미 이 초대로 가입한 계정입니다. 로그인하세요."
+    }
+  ],
+  "auth.join.cannotJoin": [
+    {
+      "type": 0,
+      "value": "이 초대로는 가입할 수 없습니다. 워크스페이스 관리자에게 새 초대 링크를 요청하세요."
+    }
+  ],
+  "auth.join.exhausted": [
+    {
+      "type": 0,
+      "value": "사용 횟수가 모두 찬 초대입니다. 워크스페이스 관리자에게 새 초대 링크를 요청하세요."
+    }
+  ],
+  "auth.join.expired": [
+    {
+      "type": 0,
+      "value": "만료된 초대입니다. 워크스페이스 관리자에게 새 초대 링크를 요청하세요."
+    }
+  ],
+  "auth.join.guestPaused": [
+    {
+      "type": 0,
+      "value": "게스트 초대는 채널별 초대가 준비될 때까지 잠시 멈춰 있습니다. 워크스페이스 관리자에게 문의하세요."
+    }
+  ],
+  "auth.join.invalidCode": [
+    {
+      "type": 0,
+      "value": "유효하지 않은 초대 코드입니다. 초대한 사람에게 링크를 다시 확인하세요."
+    }
+  ],
+  "auth.join.notPermitted": [
+    {
+      "type": 0,
+      "value": "이 초대로는 가입 권한이 없습니다. 워크스페이스 관리자에게 새 초대 링크를 요청하세요."
+    }
+  ],
+  "auth.join.revoked": [
+    {
+      "type": 0,
+      "value": "회수된 초대입니다. 워크스페이스 관리자에게 새 초대 링크를 요청하세요."
+    }
+  ],
+  "auth.join.unmapped": [
+    {
+      "type": 0,
+      "value": "요청을 처리하지 못했습니다. 워크스페이스 관리자에게 새 초대 링크를 요청하세요."
+    }
+  ],
+  "auth.join.unusable": [
+    {
+      "type": 0,
+      "value": "더 이상 쓸 수 없는 초대입니다. 워크스페이스 관리자에게 새 초대 링크를 요청하세요."
+    }
+  ],
+  "auth.linkedDevice.platformWeb": [
+    {
+      "type": 0,
+      "value": "웹"
+    }
+  ],
+  "auth.passwordRule.tooLong": [
+    {
+      "type": 0,
+      "value": "비밀번호가 너무 깁니다. "
+    },
+    {
+      "type": 1,
+      "value": "maxBytes"
+    },
+    {
+      "type": 0,
+      "value": "바이트 이하로 입력하세요. 한글은 한 자에 "
+    },
+    {
+      "type": 1,
+      "value": "hangulBytes"
+    },
+    {
+      "type": 0,
+      "value": "바이트입니다(한글만이면 "
+    },
+    {
+      "type": 1,
+      "value": "maxHangul"
+    },
+    {
+      "type": 0,
+      "value": "자)."
+    }
+  ],
+  "auth.passwordRule.tooShort": [
+    {
+      "type": 0,
+      "value": "비밀번호가 너무 짧습니다. "
+    },
+    {
+      "type": 1,
+      "value": "minChars"
+    },
+    {
+      "type": 0,
+      "value": "자 이상으로 입력하세요."
+    }
+  ],
+  "auth.signIn.invalidCredentials": [
+    {
+      "type": 0,
+      "value": "이메일 또는 비밀번호가 맞지 않습니다."
+    }
+  ],
+  "auth.signIn.suspended": [
+    {
+      "type": 0,
+      "value": "이 계정은 지금 로그인할 수 없습니다. 워크스페이스 관리자에게 문의하세요."
+    }
+  ],
+  "auth.signIn.unmapped": [
+    {
+      "type": 0,
+      "value": "요청을 처리하지 못했습니다. 워크스페이스 관리자에게 문의하세요."
+    }
+  ],
+  "auth.signIn.workspaceIdFormat": [
+    {
+      "type": 0,
+      "value": "워크스페이스 ID 형식이 아닙니다. 비워 두면 기본 워크스페이스로 연결합니다."
+    }
+  ],
   "blocked.addMemberLater.offline": [
     {
       "type": 0,
@@ -1601,6 +2041,202 @@ export const catalog: MessageCatalog = {
       "value": "이 대화에서는 나갈 수 없어요."
     }
   ],
+  "channels.memberAdd.forbidden": [
+    {
+      "type": 0,
+      "value": "멤버를 추가할 권한이 없습니다. 워크스페이스 소유자나 관리자에게 요청하세요."
+    }
+  ],
+  "channels.memberAdd.generic": [
+    {
+      "type": 0,
+      "value": "멤버를 추가하지 못했습니다. 잠시 뒤에 다시 시도하세요."
+    }
+  ],
+  "channels.memberAdd.network": [
+    {
+      "type": 0,
+      "value": "멤버를 추가하지 못했습니다. "
+    },
+    {
+      "type": 1,
+      "value": "reason"
+    }
+  ],
+  "channels.memberAdd.notFound": [
+    {
+      "type": 0,
+      "value": "이 채널에는 멤버를 추가할 수 없습니다. 채널이 보관되었거나 사라졌을 수 있습니다."
+    }
+  ],
+  "channels.memberAdd.rateLimited": [
+    {
+      "type": 0,
+      "value": "요청이 너무 잦습니다. 잠시 뒤에 다시 시도하세요."
+    }
+  ],
+  "channels.menu.ariaChannel": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " 채널 메뉴"
+    }
+  ],
+  "channels.menu.ariaDm": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " 다이렉트 메시지 메뉴"
+    }
+  ],
+  "channels.menu.copyFailed": [
+    {
+      "type": 0,
+      "value": "복사하지 못했습니다. 같은 항목을 다시 눌러 보세요."
+    }
+  ],
+  "channels.menu.copyGroup": [
+    {
+      "type": 0,
+      "value": "복사"
+    }
+  ],
+  "channels.menu.copyId": [
+    {
+      "type": 0,
+      "value": "ID 복사하기"
+    }
+  ],
+  "channels.menu.copyIdDone": [
+    {
+      "type": 0,
+      "value": "ID 복사됨"
+    }
+  ],
+  "channels.menu.copyName": [
+    {
+      "type": 0,
+      "value": "이름 복사하기"
+    }
+  ],
+  "channels.menu.copyNameDone": [
+    {
+      "type": 0,
+      "value": "이름 복사됨"
+    }
+  ],
+  "channels.menu.copyUnavailable": [
+    {
+      "type": 0,
+      "value": "복사하지 못했습니다. 이 브라우저에서는 클립보드를 쓸 수 없습니다."
+    }
+  ],
+  "channels.menu.dmClose": [
+    {
+      "type": 0,
+      "value": "목록에서 숨기기"
+    }
+  ],
+  "channels.menu.dmCloseAria": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": ", 목록에서 숨기기"
+    }
+  ],
+  "channels.menu.dmCloseFailed": [
+    {
+      "type": 0,
+      "value": "대화를 목록에서 숨기지 못했어요. 잠시 뒤에 다시 시도해 주세요."
+    }
+  ],
+  "channels.menu.dmReopenFailed": [
+    {
+      "type": 0,
+      "value": "대화를 다시 보이게 하지 못했어요. 잠시 뒤에 다시 시도해 주세요."
+    }
+  ],
+  "channels.menu.errorGroup": [
+    {
+      "type": 0,
+      "value": "이 메뉴의 알림"
+    }
+  ],
+  "channels.menu.leave": [
+    {
+      "type": 0,
+      "value": "채널 나가기"
+    }
+  ],
+  "channels.menu.markRead": [
+    {
+      "type": 0,
+      "value": "읽음 처리하기"
+    }
+  ],
+  "channels.menu.markReadBusy": [
+    {
+      "type": 0,
+      "value": "읽음 처리 중"
+    }
+  ],
+  "channels.menu.markReadFailed": [
+    {
+      "type": 0,
+      "value": "읽음 처리를 하지 못했습니다. 잠시 뒤에 다시 시도하세요."
+    }
+  ],
+  "channels.menu.markUnread": [
+    {
+      "type": 0,
+      "value": "읽지 않음으로 표시하기"
+    }
+  ],
+  "channels.menu.markUnreadBusy": [
+    {
+      "type": 0,
+      "value": "읽지 않음으로 표시 중"
+    }
+  ],
+  "channels.menu.markUnreadFailed": [
+    {
+      "type": 0,
+      "value": "읽지 않음으로 표시하지 못했습니다. 잠시 뒤에 다시 시도하세요."
+    }
+  ],
+  "channels.menu.muteFailed": [
+    {
+      "type": 0,
+      "value": "알림 설정을 바꾸지 못했어요. 잠시 뒤에 다시 시도해 주세요."
+    }
+  ],
+  "channels.menu.muteOff": [
+    {
+      "type": 0,
+      "value": "알림 꺼짐"
+    }
+  ],
+  "channels.menu.muteOn": [
+    {
+      "type": 0,
+      "value": "알림 켜짐"
+    }
+  ],
+  "channels.menu.topicView": [
+    {
+      "type": 0,
+      "value": "주제 보기"
+    }
+  ],
   "channels.nameRule.edge": [
     {
       "type": 0,
@@ -1851,6 +2487,445 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "채널 이름 바꾸기"
+    }
+  ],
+  "channels.topic.tooLong": [
+    {
+      "type": 0,
+      "value": "주제는 "
+    },
+    {
+      "type": 2,
+      "value": "max",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "자 이내여야 합니다."
+    }
+  ],
+  "cliLogin.consent.approve": [
+    {
+      "type": 0,
+      "value": "허용"
+    }
+  ],
+  "cliLogin.consent.approveBusy": [
+    {
+      "type": 0,
+      "value": "허용 중"
+    }
+  ],
+  "cliLogin.consent.checkNote": [
+    {
+      "type": 0,
+      "value": "터미널에 표시된 서버 주소와 기기 이름이 아래와 같을 때만 허용해 주세요. 다르거나 내가 시작한 로그인이 아니면 허용하지 말고 거절해 주세요."
+    }
+  ],
+  "cliLogin.consent.clientLabel": [
+    {
+      "type": 0,
+      "value": "클라이언트"
+    }
+  ],
+  "cliLogin.consent.credentialLimit": [
+    {
+      "type": 0,
+      "value": "이 계정으로 로그인한 기기가 너무 많아요. 쓰지 않는 기존 연결을 정리한 뒤 다시 시도해 주세요."
+    }
+  ],
+  "cliLogin.consent.deny": [
+    {
+      "type": 0,
+      "value": "거절"
+    }
+  ],
+  "cliLogin.consent.denyBusy": [
+    {
+      "type": 0,
+      "value": "거절 중"
+    }
+  ],
+  "cliLogin.consent.deviceLabel": [
+    {
+      "type": 0,
+      "value": "기기 이름"
+    }
+  ],
+  "cliLogin.consent.deviceMissing": [
+    {
+      "type": 0,
+      "value": "기기 이름을 보내지 않았어요"
+    }
+  ],
+  "cliLogin.consent.deviceNote": [
+    {
+      "type": 0,
+      "value": "기기 이름은 연결하는 쪽이 정한 값이에요."
+    }
+  ],
+  "cliLogin.consent.dismiss": [
+    {
+      "type": 0,
+      "value": "닫기"
+    }
+  ],
+  "cliLogin.consent.hostLabel": [
+    {
+      "type": 0,
+      "value": "서버 호스트"
+    }
+  ],
+  "cliLogin.consent.lead": [
+    {
+      "type": 0,
+      "value": "터미널의 oort CLI가 내 계정으로 이 워크스페이스에 연결하려고 해요."
+    }
+  ],
+  "cliLogin.consent.lifetime": [
+    {
+      "type": 0,
+      "value": "연결은 최대 "
+    },
+    {
+      "type": 1,
+      "value": "maxDays"
+    },
+    {
+      "type": 0,
+      "value": "일 유지되고, "
+    },
+    {
+      "type": 1,
+      "value": "idleDays"
+    },
+    {
+      "type": 0,
+      "value": "일 동안 쓰지 않으면 끊겨요. 로그인 상태는 "
+    },
+    {
+      "type": 1,
+      "value": "accessMinutes"
+    },
+    {
+      "type": 0,
+      "value": "분마다 자동으로 갱신돼요. 비밀번호를 바꾸면 이 연결도 바로 끊겨요."
+    }
+  ],
+  "cliLogin.consent.loadingSr": [
+    {
+      "type": 0,
+      "value": "로그인 요청을 불러오는 중이에요."
+    }
+  ],
+  "cliLogin.consent.memberLabel": [
+    {
+      "type": 0,
+      "value": "승인하는 사람"
+    }
+  ],
+  "cliLogin.consent.offlineNote": [
+    {
+      "type": 0,
+      "value": "연결이 끊겼어요. 허용과 거절은 다시 연결된 뒤에 할 수 있어요."
+    }
+  ],
+  "cliLogin.consent.passwordHint": [
+    {
+      "type": 0,
+      "value": "허용하기 전에 내 비밀번호를 한 번 더 확인해요."
+    }
+  ],
+  "cliLogin.consent.passwordLabel": [
+    {
+      "type": 0,
+      "value": "현재 비밀번호"
+    }
+  ],
+  "cliLogin.consent.passwordWrong": [
+    {
+      "type": 0,
+      "value": "비밀번호가 맞지 않아요. 다시 입력해 주세요."
+    }
+  ],
+  "cliLogin.consent.presetHint": [
+    {
+      "type": 0,
+      "value": "허용한 뒤에는 범위를 바꿀 수 없어서, 바꾸려면 새로 연결해야 해요."
+    }
+  ],
+  "cliLogin.consent.presetLegend": [
+    {
+      "type": 0,
+      "value": "허용할 범위"
+    }
+  ],
+  "cliLogin.consent.rerun": [
+    {
+      "type": 0,
+      "value": "터미널에서 oort login을 다시 실행해 주세요."
+    }
+  ],
+  "cliLogin.consent.retryLater": [
+    {
+      "type": 0,
+      "value": "잠시 뒤에 다시 시도해 주세요."
+    }
+  ],
+  "cliLogin.consent.returning": [
+    {
+      "type": 0,
+      "value": "결정을 저장했어요. 터미널로 돌아가는 중이에요."
+    }
+  ],
+  "cliLogin.consent.signinDetail": [
+    {
+      "type": 0,
+      "value": "이 로그인 요청을 확인하려면 먼저 이 워크스페이스에 로그인해야 해요. 로그인하면 이 요청으로 돌아와요."
+    }
+  ],
+  "cliLogin.consent.title": [
+    {
+      "type": 0,
+      "value": "터미널 로그인 승인"
+    }
+  ],
+  "cliLogin.consent.workspaceLabel": [
+    {
+      "type": 0,
+      "value": "워크스페이스"
+    }
+  ],
+  "cliLogin.failure.approveLead": [
+    {
+      "type": 0,
+      "value": "허용을 저장하지 못했어요."
+    }
+  ],
+  "cliLogin.failure.busy": [
+    {
+      "type": 0,
+      "value": "서버가 잠깐 바빠요. "
+    },
+    {
+      "type": 1,
+      "value": "wait"
+    }
+  ],
+  "cliLogin.failure.denyLead": [
+    {
+      "type": 0,
+      "value": "거절을 저장하지 못했어요."
+    }
+  ],
+  "cliLogin.failure.frame": [
+    {
+      "type": 1,
+      "value": "lead"
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 1,
+      "value": "detail"
+    }
+  ],
+  "cliLogin.failure.previewLead": [
+    {
+      "type": 0,
+      "value": "로그인 요청을 불러오지 못했어요."
+    }
+  ],
+  "cliLogin.failure.retryAt": [
+    {
+      "type": 1,
+      "value": "when"
+    },
+    {
+      "type": 0,
+      "value": "에 다시 시도해 주세요."
+    }
+  ],
+  "cliLogin.failure.tooMany": [
+    {
+      "type": 0,
+      "value": "요청이 너무 잦아요. "
+    },
+    {
+      "type": 1,
+      "value": "wait"
+    }
+  ],
+  "cliLogin.preset.detail": [
+    {
+      "type": 1,
+      "value": "scopes"
+    },
+    {
+      "type": 0,
+      "value": ". "
+    },
+    {
+      "type": 1,
+      "value": "note"
+    }
+  ],
+  "cliLogin.preset.readClosed": [
+    {
+      "type": 0,
+      "value": "보내기, 고치기, 지우기와 설정 변경은 할 수 없어요."
+    }
+  ],
+  "cliLogin.preset.readLabel": [
+    {
+      "type": 0,
+      "value": "읽기만"
+    }
+  ],
+  "cliLogin.preset.sendCaution": [
+    {
+      "type": 0,
+      "value": "보낸 메시지는 바로 전송되고 고치거나 지울 수 없어요. 멘션은 에이전트를 깨울 수 있어요."
+    }
+  ],
+  "cliLogin.preset.sendLabel": [
+    {
+      "type": 0,
+      "value": "읽기와 보내기"
+    }
+  ],
+  "cliLogin.preset.sendUnavailable": [
+    {
+      "type": 0,
+      "value": "이 로그인 요청에는 메시지 보내기가 들어 있지 않아서 고를 수 없어요."
+    }
+  ],
+  "cliLogin.retry.inMinutes": [
+    {
+      "type": 0,
+      "value": "약 "
+    },
+    {
+      "type": 1,
+      "value": "minutes"
+    },
+    {
+      "type": 0,
+      "value": "분 뒤"
+    }
+  ],
+  "cliLogin.retry.inSeconds": [
+    {
+      "type": 1,
+      "value": "seconds"
+    },
+    {
+      "type": 0,
+      "value": "초 뒤"
+    }
+  ],
+  "cliLogin.scope.channelsRead": [
+    {
+      "type": 0,
+      "value": "채널 목록 읽기"
+    }
+  ],
+  "cliLogin.scope.identity": [
+    {
+      "type": 0,
+      "value": "내가 누구인지 확인"
+    }
+  ],
+  "cliLogin.scope.inboxRead": [
+    {
+      "type": 0,
+      "value": "받은 편지함 읽기"
+    }
+  ],
+  "cliLogin.scope.messagesRead": [
+    {
+      "type": 0,
+      "value": "채널의 메시지와 스레드 읽기"
+    }
+  ],
+  "cliLogin.scope.messagesWrite": [
+    {
+      "type": 0,
+      "value": "내 이름으로 메시지 보내기"
+    }
+  ],
+  "cliLogin.terminal.accessDeniedDetail": [
+    {
+      "type": 0,
+      "value": "관리자가 허용해야 쓸 수 있어요. 필요하면 워크스페이스 관리자에게 문의해 주세요. 이 화면에서는 아무것도 허용되지 않았어요."
+    }
+  ],
+  "cliLogin.terminal.accessDeniedHeadline": [
+    {
+      "type": 0,
+      "value": "이 워크스페이스에서는 명령줄 접근을 만들 수 없어요."
+    }
+  ],
+  "cliLogin.terminal.alreadyDecidedDetail": [
+    {
+      "type": 0,
+      "value": "결정은 한 번만 기록돼요. 필요하면 터미널에서 oort login을 다시 실행해 주세요."
+    }
+  ],
+  "cliLogin.terminal.alreadyDecidedHeadline": [
+    {
+      "type": 0,
+      "value": "이미 처리된 요청이에요."
+    }
+  ],
+  "cliLogin.terminal.expiredDetail": [
+    {
+      "type": 0,
+      "value": "만료된 요청은 허용할 수 없어요. 터미널에서 oort login을 다시 실행해 주세요."
+    }
+  ],
+  "cliLogin.terminal.expiredHeadline": [
+    {
+      "type": 0,
+      "value": "이 로그인 요청이 만료됐어요."
+    }
+  ],
+  "cliLogin.terminal.notFoundDetail": [
+    {
+      "type": 0,
+      "value": "이 화면에서는 아무것도 허용되지 않았어요. 터미널에서 oort login을 다시 실행해 주세요."
+    }
+  ],
+  "cliLogin.terminal.notFoundHeadline": [
+    {
+      "type": 0,
+      "value": "요청이 만료됐거나 올바르지 않아요."
+    }
+  ],
+  "cliLogin.terminal.passwordUnavailableDetail": [
+    {
+      "type": 0,
+      "value": "이 계정에는 비밀번호가 없어서 허용 전에 확인할 수 없어요. 지금은 이 방법으로 명령줄에 연결할 수 없고, 이 화면에서는 아무것도 허용되지 않았어요."
+    }
+  ],
+  "cliLogin.terminal.passwordUnavailableHeadline": [
+    {
+      "type": 0,
+      "value": "이 계정은 비밀번호를 확인할 수 없어요."
+    }
+  ],
+  "cliLogin.terminal.redirectRefusedDetail": [
+    {
+      "type": 0,
+      "value": "서버 응답에서 이 기기의 터미널(127.0.0.1)로 돌아가는 주소를 확인하지 못해서 따라가지 않았어요. 터미널에서 oort login을 다시 실행해 주세요."
+    }
+  ],
+  "cliLogin.terminal.redirectRefusedHeadline": [
+    {
+      "type": 0,
+      "value": "터미널로 돌아갈 주소를 확인하지 못했어요."
     }
   ],
   "common.action.cancel": [
@@ -2741,6 +3816,16 @@ export const catalog: MessageCatalog = {
       "value": "승인은 목록에서도 할 수 있어요"
     }
   ],
+  "desktop.workJobs.newAsksCount": [
+    {
+      "type": 0,
+      "value": "새 요청 "
+    },
+    {
+      "type": 1,
+      "value": "count"
+    }
+  ],
   "desktop.workJobs.openToAnswer": [
     {
       "type": 0,
@@ -2755,6 +3840,48 @@ export const catalog: MessageCatalog = {
     {
       "type": 1,
       "value": "summary"
+    }
+  ],
+  "desktop.workJobs.revealNewAsks": [
+    {
+      "type": 0,
+      "value": "새 요청 "
+    },
+    {
+      "type": 1,
+      "value": "count"
+    },
+    {
+      "type": 0,
+      "value": " · 보기"
+    }
+  ],
+  "desktop.workJobs.sectionWithNewAsks": [
+    {
+      "type": 1,
+      "value": "section"
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 1,
+      "value": "count"
+    },
+    {
+      "type": 0,
+      "value": "개 · 새 요청 "
+    },
+    {
+      "type": 1,
+      "value": "pending"
+    }
+  ],
+  "desktop.workJobs.settledElsewhere": [
+    {
+      "type": 0,
+      "value": "이제 응답하지 않아도 돼요"
     }
   ],
   "desktop.workJobs.stateAwaitingApproval": [
@@ -6482,6 +7609,30 @@ export const catalog: MessageCatalog = {
       "value": "언어를 적용하는 중이에요."
     }
   ],
+  "mobile.pushReply.drafted": [
+    {
+      "type": 0,
+      "value": "답장을 보내지 못해 초안으로 남겼어요"
+    }
+  ],
+  "mobile.pushReply.notSentBody": [
+    {
+      "type": 0,
+      "value": "앱을 열어 다시 보내 주세요"
+    }
+  ],
+  "mobile.pushReply.notSentTitle": [
+    {
+      "type": 0,
+      "value": "답장을 보내지 못했어요"
+    }
+  ],
+  "mobile.pushReply.queued": [
+    {
+      "type": 0,
+      "value": "답장은 앱을 열면 보내요"
+    }
+  ],
   "mobile.workPermission.elsewhereOnHost": [
     {
       "type": 0,
@@ -6538,10 +7689,302 @@ export const catalog: MessageCatalog = {
       "value": "다시 확인했지만 서명 설정을 아직 읽지 못했어요."
     }
   ],
+  "notifications.banner.approvalTitle": [
+    {
+      "type": 0,
+      "value": "승인 필요 · "
+    },
+    {
+      "type": 1,
+      "value": "actor"
+    }
+  ],
+  "notifications.banner.code": [
+    {
+      "type": 0,
+      "value": "코드"
+    }
+  ],
+  "notifications.banner.secret": [
+    {
+      "type": 0,
+      "value": "비공개 값"
+    }
+  ],
   "notifications.inviteLink.fallback": [
     {
       "type": 0,
       "value": "초대 링크를 올렸어요"
+    }
+  ],
+  "onboarding.guide.expressionFlustered": [
+    {
+      "type": 0,
+      "value": "당황"
+    }
+  ],
+  "onboarding.guide.expressionHappy": [
+    {
+      "type": 0,
+      "value": "기쁨"
+    }
+  ],
+  "onboarding.guide.expressionIdle": [
+    {
+      "type": 0,
+      "value": "대기"
+    }
+  ],
+  "onboarding.guide.expressionSleepy": [
+    {
+      "type": 0,
+      "value": "졸림"
+    }
+  ],
+  "onboarding.guide.expressionThinking": [
+    {
+      "type": 0,
+      "value": "생각"
+    }
+  ],
+  "onboarding.guide.expressionWorking": [
+    {
+      "type": 0,
+      "value": "작업 중"
+    }
+  ],
+  "onboarding.guide.stateAwaiting": [
+    {
+      "type": 0,
+      "value": "질문을 기다림"
+    }
+  ],
+  "onboarding.guide.stateChecking": [
+    {
+      "type": 0,
+      "value": "감지·확인·연결 중"
+    }
+  ],
+  "onboarding.guide.statePreparing": [
+    {
+      "type": 0,
+      "value": "에이전트 준비 중"
+    }
+  ],
+  "onboarding.guide.stateSkipped": [
+    {
+      "type": 0,
+      "value": "건너뛰고 나중에 할 때"
+    }
+  ],
+  "onboarding.guide.stateSuccess": [
+    {
+      "type": 0,
+      "value": "완료·감지 성공"
+    }
+  ],
+  "onboarding.guide.stateTrouble": [
+    {
+      "type": 0,
+      "value": "오류·오프라인"
+    }
+  ],
+  "onboarding.guide.stepLabel": [
+    {
+      "type": 1,
+      "value": "total"
+    },
+    {
+      "type": 0,
+      "value": "단계 중 "
+    },
+    {
+      "type": 1,
+      "value": "current"
+    },
+    {
+      "type": 0,
+      "value": "단계"
+    }
+  ],
+  "onboarding.harnessLogin.actionClaude": [
+    {
+      "type": 0,
+      "value": "Claude Code로 로그인"
+    }
+  ],
+  "onboarding.harnessLogin.actionCodex": [
+    {
+      "type": 0,
+      "value": "Codex로 로그인"
+    }
+  ],
+  "onboarding.harnessLogin.checking": [
+    {
+      "type": 0,
+      "value": "로그인을 확인하고 있어요."
+    }
+  ],
+  "onboarding.harnessLogin.codeHint": [
+    {
+      "type": 0,
+      "value": "붙여 넣은 코드는 Claude Code에만 전달하고 저장하지 않습니다."
+    }
+  ],
+  "onboarding.harnessLogin.codeLabel": [
+    {
+      "type": 0,
+      "value": "로그인 코드"
+    }
+  ],
+  "onboarding.harnessLogin.codeSent": [
+    {
+      "type": 0,
+      "value": "코드를 보냈습니다."
+    }
+  ],
+  "onboarding.harnessLogin.codeSubmit": [
+    {
+      "type": 0,
+      "value": "보내기"
+    }
+  ],
+  "onboarding.harnessLogin.codeToggle": [
+    {
+      "type": 0,
+      "value": "브라우저에 코드가 나왔나요?"
+    }
+  ],
+  "onboarding.harnessLogin.connected": [
+    {
+      "type": 0,
+      "value": "연결됐어요."
+    }
+  ],
+  "onboarding.harnessLogin.connectedDetail": [
+    {
+      "type": 0,
+      "value": "이제 "
+    },
+    {
+      "type": 1,
+      "value": "cli"
+    },
+    {
+      "type": 0,
+      "value": "를 내 에이전트로 고를 수 있어요."
+    }
+  ],
+  "onboarding.harnessLogin.detach": [
+    {
+      "type": 0,
+      "value": "닫고 계속하기"
+    }
+  ],
+  "onboarding.harnessLogin.deviceCode": [
+    {
+      "type": 0,
+      "value": "기기 코드로 로그인"
+    }
+  ],
+  "onboarding.harnessLogin.done": [
+    {
+      "type": 0,
+      "value": "완료"
+    }
+  ],
+  "onboarding.harnessLogin.failedDefault": [
+    {
+      "type": 0,
+      "value": "로그인을 마치지 못했어요."
+    }
+  ],
+  "onboarding.harnessLogin.failedSpawn": [
+    {
+      "type": 0,
+      "value": "이 앱에서 로그인을 열지 못했어요."
+    }
+  ],
+  "onboarding.harnessLogin.failedTimeout": [
+    {
+      "type": 0,
+      "value": "로그인이 끝나지 않았어요."
+    }
+  ],
+  "onboarding.harnessLogin.notLoggedInDetail": [
+    {
+      "type": 1,
+      "value": "cli"
+    },
+    {
+      "type": 0,
+      "value": "가 아직 로그인되지 않았다고 알려 왔어요."
+    }
+  ],
+  "onboarding.harnessLogin.rowHint": [
+    {
+      "type": 0,
+      "value": "로그인하면 고를 수 있어요."
+    }
+  ],
+  "onboarding.harnessLogin.spawnDetail": [
+    {
+      "type": 0,
+      "value": "명령을 복사해 터미널에서 직접 로그인해 주세요."
+    }
+  ],
+  "onboarding.harnessLogin.terminalAria": [
+    {
+      "type": 1,
+      "value": "title"
+    },
+    {
+      "type": 0,
+      "value": " 터미널"
+    }
+  ],
+  "onboarding.harnessLogin.terminalHide": [
+    {
+      "type": 0,
+      "value": "터미널 접기"
+    }
+  ],
+  "onboarding.harnessLogin.terminalShow": [
+    {
+      "type": 0,
+      "value": "터미널로 보기"
+    }
+  ],
+  "onboarding.harnessLogin.timeoutDetail": [
+    {
+      "type": 0,
+      "value": "5분 동안 브라우저에서 돌아오지 않아 멈췄어요."
+    }
+  ],
+  "onboarding.harnessLogin.waitingBrowser": [
+    {
+      "type": 0,
+      "value": "브라우저에서 로그인하고 있어요."
+    }
+  ],
+  "onboarding.harnessLogin.waitingDetail": [
+    {
+      "type": 0,
+      "value": "로그인은 "
+    },
+    {
+      "type": 1,
+      "value": "cli"
+    },
+    {
+      "type": 0,
+      "value": "가 연 브라우저 창에서 끝나요. oort는 로그인 정보를 보지 않아요."
+    }
+  ],
+  "onboarding.harnessLogin.waitingDevice": [
+    {
+      "type": 0,
+      "value": "터미널에 나온 코드를 브라우저에 넣어 주세요."
     }
   ],
   "readState.markUnread.action": [
@@ -10278,6 +11721,288 @@ export const catalog: MessageCatalog = {
       "value": "설치를 마쳤어요. 다시 시작하면 새 버전으로 열려요."
     }
   ],
+  "sidebar.channel.star": [
+    {
+      "type": 0,
+      "value": "별표 붙이기"
+    }
+  ],
+  "sidebar.channel.unstar": [
+    {
+      "type": 0,
+      "value": "별표 떼기"
+    }
+  ],
+  "sidebar.dms.allClosedHint": [
+    {
+      "type": 0,
+      "value": "숨긴 대화는 새 메시지가 오면 다시 나타납니다. ⌘⇧K로 시작하세요."
+    }
+  ],
+  "sidebar.dms.closedListEmpty": [
+    {
+      "type": 0,
+      "value": "숨긴 대화가 없어요."
+    }
+  ],
+  "sidebar.dms.closedListHint": [
+    {
+      "type": 0,
+      "value": "새 메시지가 오면 숨긴 대화는 사이드바로 돌아와요."
+    }
+  ],
+  "sidebar.dms.closedListLabel": [
+    {
+      "type": 0,
+      "value": "숨긴 대화"
+    }
+  ],
+  "sidebar.dms.closeStarFirst": [
+    {
+      "type": 0,
+      "value": "별표를 먼저 빼요"
+    }
+  ],
+  "sidebar.dms.goneDisclosure": [
+    {
+      "type": 0,
+      "value": "나간 멤버와의 대화 "
+    },
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "개"
+    }
+  ],
+  "sidebar.dms.open": [
+    {
+      "type": 0,
+      "value": "열기"
+    }
+  ],
+  "sidebar.dms.reasonClosed": [
+    {
+      "type": 0,
+      "value": "내가 숨겼어요"
+    }
+  ],
+  "sidebar.dms.reasonGone": [
+    {
+      "type": 0,
+      "value": "상대가 나갔고 안 읽은 메시지가 없어요"
+    }
+  ],
+  "sidebar.dms.reopen": [
+    {
+      "type": 0,
+      "value": "다시 보이기"
+    }
+  ],
+  "sidebar.dms.reopenAriaClosed": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": ", 다시 보이기"
+    }
+  ],
+  "sidebar.dms.reopenAriaOpen": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": ", 열기"
+    }
+  ],
+  "sidebar.prefs.loadFailed": [
+    {
+      "type": 0,
+      "value": "섹션을 불러오지 못했습니다."
+    }
+  ],
+  "sidebar.prefs.saveFailed": [
+    {
+      "type": 0,
+      "value": "섹션 변경을 저장하지 못했습니다. 잠시 후 다시 시도해 주세요."
+    }
+  ],
+  "sidebar.section.capChannels": [
+    {
+      "type": 0,
+      "value": "한 사이드바에 담을 수 있는 채널은 "
+    },
+    {
+      "type": 2,
+      "value": "max",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "개까지입니다."
+    }
+  ],
+  "sidebar.section.capSections": [
+    {
+      "type": 0,
+      "value": "섹션은 "
+    },
+    {
+      "type": 2,
+      "value": "max",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "개까지 만들 수 있습니다."
+    }
+  ],
+  "sidebar.section.channels": [
+    {
+      "type": 0,
+      "value": "채널"
+    }
+  ],
+  "sidebar.section.create": [
+    {
+      "type": 0,
+      "value": "새 섹션 만들기"
+    }
+  ],
+  "sidebar.section.deleteConfirm": [
+    {
+      "type": 0,
+      "value": "삭제"
+    }
+  ],
+  "sidebar.section.deleteConfirmBody": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " 섹션이 사이드바에서 사라집니다. 이 섹션의 채널은 채널 섹션으로 돌아가고, 채널에서 나가지는 않습니다."
+    }
+  ],
+  "sidebar.section.deleteConfirmTitle": [
+    {
+      "type": 0,
+      "value": "이 섹션을 삭제할까요?"
+    }
+  ],
+  "sidebar.section.deleteLabel": [
+    {
+      "type": 0,
+      "value": "섹션 삭제"
+    }
+  ],
+  "sidebar.section.dms": [
+    {
+      "type": 0,
+      "value": "다이렉트 메시지"
+    }
+  ],
+  "sidebar.section.emptyHintHover": [
+    {
+      "type": 0,
+      "value": "채널 행을 끌어다 놓거나 우클릭해서 옮겨요."
+    }
+  ],
+  "sidebar.section.emptyHintTouch": [
+    {
+      "type": 0,
+      "value": "비어 있어요. 채널은 넓은 화면에서 옮길 수 있어요."
+    }
+  ],
+  "sidebar.section.moveDown": [
+    {
+      "type": 0,
+      "value": "아래로 옮기기"
+    }
+  ],
+  "sidebar.section.moveGroup": [
+    {
+      "type": 0,
+      "value": "섹션으로 이동"
+    }
+  ],
+  "sidebar.section.moveToBase": [
+    {
+      "type": 0,
+      "value": "채널 섹션으로"
+    }
+  ],
+  "sidebar.section.moveUp": [
+    {
+      "type": 0,
+      "value": "위로 옮기기"
+    }
+  ],
+  "sidebar.section.nameEmpty": [
+    {
+      "type": 0,
+      "value": "섹션 이름을 입력해 주세요."
+    }
+  ],
+  "sidebar.section.nameField": [
+    {
+      "type": 0,
+      "value": "섹션 이름"
+    }
+  ],
+  "sidebar.section.namePlaceholder": [
+    {
+      "type": 0,
+      "value": "예: 출시 준비"
+    }
+  ],
+  "sidebar.section.nameTooLong": [
+    {
+      "type": 0,
+      "value": "섹션 이름은 "
+    },
+    {
+      "type": 2,
+      "value": "max",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "자까지입니다."
+    }
+  ],
+  "sidebar.section.renameLabel": [
+    {
+      "type": 0,
+      "value": "이름 바꾸기"
+    }
+  ],
+  "sidebar.section.renameTitle": [
+    {
+      "type": 0,
+      "value": "섹션 이름 바꾸기"
+    }
+  ],
+  "sidebar.section.starred": [
+    {
+      "type": 0,
+      "value": "별표"
+    }
+  ],
+  "sidebar.starred.touchHint": [
+    {
+      "type": 0,
+      "value": "별표는 넓은 화면에서 뗄 수 있습니다."
+    }
+  ],
   "teamAi.delegation.chipImage": [
     {
       "type": 1,
@@ -10941,6 +12666,120 @@ export const catalog: MessageCatalog = {
       "value": "키를 확인하는 중이에요."
     }
   ],
+  "timeline.actionFailure.deleteFailed": [
+    {
+      "type": 0,
+      "value": "메시지를 지우지 못했습니다. 잠시 뒤에 다시 시도하세요."
+    }
+  ],
+  "timeline.actionFailure.deleteNotAuthor": [
+    {
+      "type": 0,
+      "value": "내가 보낸 메시지만 지울 수 있습니다."
+    }
+  ],
+  "timeline.actionFailure.editDeleted": [
+    {
+      "type": 0,
+      "value": "이미 삭제된 메시지는 고칠 수 없습니다."
+    }
+  ],
+  "timeline.actionFailure.editFailed": [
+    {
+      "type": 0,
+      "value": "메시지를 고치지 못했습니다. 잠시 뒤에 다시 시도하세요."
+    }
+  ],
+  "timeline.actionFailure.editNotAuthor": [
+    {
+      "type": 0,
+      "value": "내가 보낸 메시지만 고칠 수 있습니다."
+    }
+  ],
+  "timeline.actionFailure.generic": [
+    {
+      "type": 0,
+      "value": "요청을 끝내지 못했습니다. 잠시 뒤에 다시 시도하세요."
+    }
+  ],
+  "timeline.actionFailure.messageNotFound": [
+    {
+      "type": 0,
+      "value": "메시지를 찾지 못했습니다. 이미 지워졌을 수 있습니다."
+    }
+  ],
+  "timeline.actionFailure.pinDeleted": [
+    {
+      "type": 0,
+      "value": "삭제된 메시지는 고정할 수 없습니다."
+    }
+  ],
+  "timeline.actionFailure.pinFailed": [
+    {
+      "type": 0,
+      "value": "메시지를 고정하지 못했습니다. 잠시 뒤에 다시 시도하세요."
+    }
+  ],
+  "timeline.actionFailure.pinLimit": [
+    {
+      "type": 0,
+      "value": "이 채널에 고정된 메시지가 100개를 넘었습니다. 고정 목록에서 하나를 해제한 뒤 다시 눌러 보세요."
+    }
+  ],
+  "timeline.actionFailure.pinNotMember": [
+    {
+      "type": 0,
+      "value": "이 채널의 멤버만 메시지를 고정할 수 있습니다."
+    }
+  ],
+  "timeline.actionFailure.reactDeleted": [
+    {
+      "type": 0,
+      "value": "삭제된 메시지에는 반응을 남길 수 없습니다."
+    }
+  ],
+  "timeline.actionFailure.reactFailed": [
+    {
+      "type": 0,
+      "value": "반응을 남기지 못했습니다. 잠시 뒤에 다시 시도하세요."
+    }
+  ],
+  "timeline.actionFailure.reactLimit": [
+    {
+      "type": 0,
+      "value": "이 메시지에 달린 반응이 200개를 넘었습니다. 기존 반응을 하나 지운 뒤 다시 눌러 보세요."
+    }
+  ],
+  "timeline.actionFailure.reactNotMember": [
+    {
+      "type": 0,
+      "value": "이 채널의 멤버만 반응할 수 있습니다."
+    }
+  ],
+  "timeline.actionFailure.replyFailed": [
+    {
+      "type": 0,
+      "value": "답글을 보내지 못했습니다. 잠시 뒤에 다시 시도하세요."
+    }
+  ],
+  "timeline.actionFailure.replyNotAllowed": [
+    {
+      "type": 0,
+      "value": "이 메시지에는 답글을 달 수 없습니다. 원본이 삭제됐거나 이미 답글입니다."
+    }
+  ],
+  "timeline.actionFailure.replyNotMember": [
+    {
+      "type": 0,
+      "value": "이 채널의 멤버만 답글을 달 수 있습니다."
+    }
+  ],
+  "timeline.actionFailure.replyOriginalNotFound": [
+    {
+      "type": 0,
+      "value": "원본 메시지를 찾지 못했습니다. 이미 지워졌을 수 있습니다."
+    }
+  ],
   "timeline.addMember.createdDescription": [
     {
       "type": 1,
@@ -10965,6 +12804,28 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "나중에"
+    }
+  ],
+  "timeline.agentInitiative.headTitle": [
+    {
+      "type": 1,
+      "value": "title"
+    },
+    {
+      "type": 0,
+      "value": " · 먼저 제안"
+    }
+  ],
+  "timeline.agentInitiative.rationaleDefault": [
+    {
+      "type": 0,
+      "value": "사유"
+    }
+  ],
+  "timeline.agentInitiative.rationaleLabel": [
+    {
+      "type": 0,
+      "value": "에이전트가 쓴 글"
     }
   ],
   "timeline.agentRail.open": [
@@ -11039,6 +12900,233 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "결정하지 않으면 에이전트가 다시 제안해야 해요."
+    }
+  ],
+  "timeline.artifactNote.awaitingApproval": [
+    {
+      "type": 0,
+      "value": "승인을 기다리는 중이라 아래 내용은 아직 확정이 아닙니다."
+    }
+  ],
+  "timeline.artifactNote.cancelled": [
+    {
+      "type": 0,
+      "value": "실행이 중단되어 여기까지만 도착했습니다."
+    }
+  ],
+  "timeline.artifactNote.done": [
+    {
+      "type": 0,
+      "value": "실행이 끝났습니다. 아래 내용이 전부입니다."
+    }
+  ],
+  "timeline.artifactNote.error": [
+    {
+      "type": 0,
+      "value": "이 변경을 끝내지 못했습니다. 아래 내용은 실패한 시점까지입니다."
+    }
+  ],
+  "timeline.artifactNote.inFlight": [
+    {
+      "type": 0,
+      "value": "아직 받는 중입니다. 아래 내용과 숫자는 지금까지 도착한 부분입니다."
+    }
+  ],
+  "timeline.artifactNote.leadNote": [
+    {
+      "type": 0,
+      "value": "함께 온 메모"
+    }
+  ],
+  "timeline.artifactNote.leadSignal": [
+    {
+      "type": 0,
+      "value": "마지막 신호"
+    }
+  ],
+  "timeline.artifactNote.queued": [
+    {
+      "type": 0,
+      "value": "아직 시작하지 않았습니다. 아래 내용과 숫자는 확정이 아닙니다."
+    }
+  ],
+  "timeline.artifactNote.stalled": [
+    {
+      "type": 0,
+      "value": "아직 응답이 없습니다. 실패로 확정되지 않았습니다."
+    }
+  ],
+  "timeline.artifactNote.withNote": [
+    {
+      "type": 1,
+      "value": "sentence"
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 1,
+      "value": "lead"
+    },
+    {
+      "type": 0,
+      "value": ": "
+    },
+    {
+      "type": 1,
+      "value": "note"
+    }
+  ],
+  "timeline.artifacts.commitTitle": [
+    {
+      "type": 0,
+      "value": "커밋"
+    }
+  ],
+  "timeline.artifacts.diffTitle": [
+    {
+      "type": 0,
+      "value": "코드 변경"
+    }
+  ],
+  "timeline.artifacts.pullRequestTitle": [
+    {
+      "type": 0,
+      "value": "풀 리퀘스트"
+    }
+  ],
+  "timeline.artifacts.toolTitle": [
+    {
+      "type": 1,
+      "value": "tool"
+    },
+    {
+      "type": 0,
+      "value": " 실행"
+    }
+  ],
+  "timeline.artifacts.toolTitleWithObject": [
+    {
+      "type": 1,
+      "value": "tool"
+    },
+    {
+      "type": 0,
+      "value": " 실행, "
+    },
+    {
+      "type": 1,
+      "value": "object"
+    }
+  ],
+  "timeline.artifacts.unnamedFile": [
+    {
+      "type": 0,
+      "value": "이름 없는 파일"
+    }
+  ],
+  "timeline.cascade.noticeMulti": [
+    {
+      "type": 1,
+      "value": "served"
+    },
+    {
+      "type": 0,
+      "value": "로 처리됨 (전환 "
+    },
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "번, 마지막 사유: "
+    },
+    {
+      "type": 1,
+      "value": "reason"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "timeline.cascade.noticeSingle": [
+    {
+      "type": 1,
+      "value": "served"
+    },
+    {
+      "type": 0,
+      "value": "로 처리됨 ("
+    },
+    {
+      "type": 1,
+      "value": "reason"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "timeline.cascade.reasonRateLimited": [
+    {
+      "type": 0,
+      "value": "요청 한도 초과"
+    }
+  ],
+  "timeline.cascade.reasonStatus": [
+    {
+      "type": 0,
+      "value": "서버 오류 "
+    },
+    {
+      "type": 1,
+      "value": "status"
+    }
+  ],
+  "timeline.cascade.reasonUnknown": [
+    {
+      "type": 0,
+      "value": "서버가 보고한 사유: "
+    },
+    {
+      "type": 1,
+      "value": "reason"
+    }
+  ],
+  "timeline.cascade.reasonUnreachable": [
+    {
+      "type": 0,
+      "value": "응답 없음"
+    }
+  ],
+  "timeline.cascade.route": [
+    {
+      "type": 1,
+      "value": "label"
+    },
+    {
+      "type": 0,
+      "value": "에서 넘어왔습니다"
+    }
+  ],
+  "timeline.cascade.servedFallback": [
+    {
+      "type": 0,
+      "value": "예비 프로바이더"
+    }
+  ],
+  "timeline.cascade.servedLabeled": [
+    {
+      "type": 1,
+      "value": "label"
+    },
+    {
+      "type": 0,
+      "value": " 프로바이더"
     }
   ],
   "timeline.channelLeave.bodyPrivate": [
@@ -11123,6 +13211,250 @@ export const catalog: MessageCatalog = {
       "value": "이 채널에서 나갈까요?"
     }
   ],
+  "timeline.commandSuggest.askBusy": [
+    {
+      "type": 0,
+      "value": "쓰던 글이 있어 채우지 않았어요. 운영자를 직접 멘션해 주세요."
+    }
+  ],
+  "timeline.commandSuggest.askNone": [
+    {
+      "type": 0,
+      "value": "이 워크스페이스에서 운영자를 찾지 못했어요."
+    }
+  ],
+  "timeline.commandSuggest.askOperator": [
+    {
+      "type": 0,
+      "value": "운영자에게 부탁하기"
+    }
+  ],
+  "timeline.commandSuggest.askThread": [
+    {
+      "type": 0,
+      "value": "스레드를 열고 운영자를 멘션해 주세요."
+    }
+  ],
+  "timeline.commandSuggest.oneLineAiConnect": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "에게 AI 계정 연결을 제안했어요"
+    }
+  ],
+  "timeline.commandSuggest.oneLineCard": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "에게 「"
+    },
+    {
+      "type": 1,
+      "value": "what"
+    },
+    {
+      "type": 0,
+      "value": "」 카드를 제안했어요"
+    }
+  ],
+  "timeline.commandSuggest.onlyMe": [
+    {
+      "type": 0,
+      "value": "나에게만 조작돼요"
+    }
+  ],
+  "timeline.commandSuggest.openAppearance": [
+    {
+      "type": 0,
+      "value": "모양 설정 열기"
+    }
+  ],
+  "timeline.commandSuggest.openCode": [
+    {
+      "type": 0,
+      "value": "실행 호스트 설정 열기"
+    }
+  ],
+  "timeline.commandSuggest.openDevices": [
+    {
+      "type": 0,
+      "value": "기기 설정 열기"
+    }
+  ],
+  "timeline.commandSuggest.openMembers": [
+    {
+      "type": 0,
+      "value": "멤버와 초대 열기"
+    }
+  ],
+  "timeline.commandSuggest.openMemory": [
+    {
+      "type": 0,
+      "value": "기억 설정 열기"
+    }
+  ],
+  "timeline.commandSuggest.openNotifications": [
+    {
+      "type": 0,
+      "value": "알림 설정 열기"
+    }
+  ],
+  "timeline.commandSuggest.openPlugins": [
+    {
+      "type": 0,
+      "value": "앱 설정 열기"
+    }
+  ],
+  "timeline.commandSuggest.openProfile": [
+    {
+      "type": 0,
+      "value": "프로필 설정 열기"
+    }
+  ],
+  "timeline.commandSuggest.openShortcuts": [
+    {
+      "type": 0,
+      "value": "단축키 설정 열기"
+    }
+  ],
+  "timeline.commandSuggest.openUpdates": [
+    {
+      "type": 0,
+      "value": "업데이트 설정 열기"
+    }
+  ],
+  "timeline.commandSuggest.openUsage": [
+    {
+      "type": 0,
+      "value": "사용량 열기"
+    }
+  ],
+  "timeline.commandSuggest.openWorkspace": [
+    {
+      "type": 0,
+      "value": "워크스페이스 설정 열기"
+    }
+  ],
+  "timeline.commandSuggest.phoneFoot": [
+    {
+      "type": 0,
+      "value": "키 입력은 맥·웹에서 해요"
+    }
+  ],
+  "timeline.commandSuggest.phoneMine": [
+    {
+      "type": 0,
+      "value": "구독 로그인은 맥에서 해요. 맥에서 이 카드를 열면 바로 로그인할 수 있어요."
+    }
+  ],
+  "timeline.commandSuggest.settingsOpen": [
+    {
+      "type": 0,
+      "value": "열기"
+    }
+  ],
+  "timeline.commandSuggest.settingsOpenGeneric": [
+    {
+      "type": 0,
+      "value": "설정 열기"
+    }
+  ],
+  "timeline.commandSuggest.settingsPhone": [
+    {
+      "type": 0,
+      "value": "이 설정은 맥·웹에서 열어요."
+    }
+  ],
+  "timeline.commandSuggest.targetAppearance": [
+    {
+      "type": 0,
+      "value": "모양 설정"
+    }
+  ],
+  "timeline.commandSuggest.targetCode": [
+    {
+      "type": 0,
+      "value": "실행 호스트 설정"
+    }
+  ],
+  "timeline.commandSuggest.targetDevices": [
+    {
+      "type": 0,
+      "value": "기기 설정"
+    }
+  ],
+  "timeline.commandSuggest.targetMembers": [
+    {
+      "type": 0,
+      "value": "멤버와 초대"
+    }
+  ],
+  "timeline.commandSuggest.targetMemory": [
+    {
+      "type": 0,
+      "value": "기억 설정"
+    }
+  ],
+  "timeline.commandSuggest.targetNotifications": [
+    {
+      "type": 0,
+      "value": "알림 설정"
+    }
+  ],
+  "timeline.commandSuggest.targetPlugins": [
+    {
+      "type": 0,
+      "value": "앱 설정"
+    }
+  ],
+  "timeline.commandSuggest.targetProfile": [
+    {
+      "type": 0,
+      "value": "프로필 설정"
+    }
+  ],
+  "timeline.commandSuggest.targetShortcuts": [
+    {
+      "type": 0,
+      "value": "단축키 설정"
+    }
+  ],
+  "timeline.commandSuggest.targetUpdates": [
+    {
+      "type": 0,
+      "value": "업데이트 설정"
+    }
+  ],
+  "timeline.commandSuggest.targetUsage": [
+    {
+      "type": 0,
+      "value": "사용량"
+    }
+  ],
+  "timeline.commandSuggest.targetWorkspace": [
+    {
+      "type": 0,
+      "value": "워크스페이스 설정"
+    }
+  ],
+  "timeline.commandSuggest.teamClose": [
+    {
+      "type": 0,
+      "value": "팀 AI 키 접기"
+    }
+  ],
+  "timeline.commandSuggest.teamOpen": [
+    {
+      "type": 0,
+      "value": "팀 AI 키 보기"
+    }
+  ],
   "timeline.createChannel.privateDetail": [
     {
       "type": 0,
@@ -11133,6 +13465,176 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "워크스페이스의 정식 멤버 누구나 채널 둘러보기에서 찾아 참여할 수 있어요."
+    }
+  ],
+  "timeline.decisionStage.position": [
+    {
+      "type": 1,
+      "value": "total"
+    },
+    {
+      "type": 0,
+      "value": "건 중 "
+    },
+    {
+      "type": 1,
+      "value": "current"
+    },
+    {
+      "type": 0,
+      "value": "번"
+    }
+  ],
+  "timeline.decisionStage.positionNone": [
+    {
+      "type": 0,
+      "value": "0건"
+    }
+  ],
+  "timeline.deletedFold.repeat": [
+    {
+      "type": 0,
+      "value": "삭제된 메시지 "
+    },
+    {
+      "type": 1,
+      "value": "count"
+    },
+    {
+      "type": 0,
+      "value": "개"
+    }
+  ],
+  "timeline.deletedFold.tombstone": [
+    {
+      "type": 0,
+      "value": "삭제된 메시지"
+    }
+  ],
+  "timeline.divider.dateFull": [
+    {
+      "type": 1,
+      "value": "year"
+    },
+    {
+      "type": 0,
+      "value": "년 "
+    },
+    {
+      "type": 1,
+      "value": "month"
+    },
+    {
+      "type": 0,
+      "value": "월 "
+    },
+    {
+      "type": 1,
+      "value": "day"
+    },
+    {
+      "type": 0,
+      "value": "일"
+    }
+  ],
+  "timeline.divider.dateMonthDay": [
+    {
+      "type": 1,
+      "value": "month"
+    },
+    {
+      "type": 0,
+      "value": "월 "
+    },
+    {
+      "type": 1,
+      "value": "day"
+    },
+    {
+      "type": 0,
+      "value": "일"
+    }
+  ],
+  "timeline.divider.labelToday": [
+    {
+      "type": 1,
+      "value": "date"
+    },
+    {
+      "type": 0,
+      "value": ", 오늘"
+    }
+  ],
+  "timeline.divider.labelYesterday": [
+    {
+      "type": 1,
+      "value": "date"
+    },
+    {
+      "type": 0,
+      "value": ", 어제"
+    }
+  ],
+  "timeline.divider.recovery": [
+    {
+      "type": 0,
+      "value": "재연결됨, 여기까지 복구"
+    }
+  ],
+  "timeline.divider.recoveryLabel": [
+    {
+      "type": 0,
+      "value": "연결이 다시 이어졌습니다. 이 줄 위까지 복구했습니다."
+    }
+  ],
+  "timeline.divider.recoveryLabelReread": [
+    {
+      "type": 0,
+      "value": "연결이 다시 이어졌습니다. 이 줄 위까지 복구했습니다. 이미 본 메시지가 다시 올 수 있습니다."
+    }
+  ],
+  "timeline.divider.recoveryReread": [
+    {
+      "type": 0,
+      "value": " (다시 읽음)"
+    }
+  ],
+  "timeline.divider.today": [
+    {
+      "type": 0,
+      "value": "오늘"
+    }
+  ],
+  "timeline.divider.unread": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "새 메시지 "
+            },
+            {
+              "type": 1,
+              "value": "figure"
+            },
+            {
+              "type": 0,
+              "value": "개, 여기까지 읽음"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "timeline.divider.yesterday": [
+    {
+      "type": 0,
+      "value": "어제"
     }
   ],
   "timeline.edited.atDate": [
@@ -11529,6 +14031,97 @@ export const catalog: MessageCatalog = {
       "value": " (에이전트 보고)"
     }
   ],
+  "timeline.pins.actionPin": [
+    {
+      "type": 0,
+      "value": "고정하기"
+    }
+  ],
+  "timeline.pins.actionUnpin": [
+    {
+      "type": 0,
+      "value": "고정 해제하기"
+    }
+  ],
+  "timeline.pins.emptyBody": [
+    {
+      "type": 0,
+      "value": "내용 없는 메시지"
+    }
+  ],
+  "timeline.pins.listCount": [
+    {
+      "type": 0,
+      "value": "고정 "
+    },
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "개"
+    }
+  ],
+  "timeline.pins.listEmptyDetail": [
+    {
+      "type": 0,
+      "value": "메시지 액션에서 고정하면 여기 모입니다."
+    }
+  ],
+  "timeline.pins.listEmptyHeadline": [
+    {
+      "type": 0,
+      "value": "고정한 메시지가 없습니다."
+    }
+  ],
+  "timeline.pins.listEmptySentence": [
+    {
+      "type": 0,
+      "value": "고정한 메시지가 없습니다. 메시지 액션에서 고정하면 여기 모입니다."
+    }
+  ],
+  "timeline.pins.listFailedDetail": [
+    {
+      "type": 0,
+      "value": "연결을 확인한 뒤 다시 시도하세요."
+    }
+  ],
+  "timeline.pins.listFailedHeadline": [
+    {
+      "type": 0,
+      "value": "고정 목록을 불러오지 못했습니다."
+    }
+  ],
+  "timeline.pins.listFailedSentence": [
+    {
+      "type": 0,
+      "value": "고정 목록을 불러오지 못했습니다. 연결을 확인한 뒤 다시 시도하세요."
+    }
+  ],
+  "timeline.pins.listNone": [
+    {
+      "type": 0,
+      "value": "고정한 메시지"
+    }
+  ],
+  "timeline.pins.rowMark": [
+    {
+      "type": 0,
+      "value": "고정됨"
+    }
+  ],
+  "timeline.pins.stamp": [
+    {
+      "type": 1,
+      "value": "date"
+    },
+    {
+      "type": 0,
+      "value": "에 고정"
+    }
+  ],
   "timeline.quote.head": [
     {
       "type": 1,
@@ -11543,6 +14136,238 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "메시지에 답장"
+    }
+  ],
+  "timeline.reaction.chipMine": [
+    {
+      "type": 1,
+      "value": "emoji"
+    },
+    {
+      "type": 0,
+      "value": " 반응 "
+    },
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "개, "
+    },
+    {
+      "type": 1,
+      "value": "names"
+    }
+  ],
+  "timeline.reaction.chipMineNoNames": [
+    {
+      "type": 1,
+      "value": "emoji"
+    },
+    {
+      "type": 0,
+      "value": " 반응 "
+    },
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "개, 내 반응 취소"
+    }
+  ],
+  "timeline.reaction.chipOther": [
+    {
+      "type": 1,
+      "value": "emoji"
+    },
+    {
+      "type": 0,
+      "value": " 반응 "
+    },
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "개, "
+    },
+    {
+      "type": 1,
+      "value": "names"
+    },
+    {
+      "type": 0,
+      "value": ", 나도 반응하기"
+    }
+  ],
+  "timeline.reaction.chipOtherNoNames": [
+    {
+      "type": 1,
+      "value": "emoji"
+    },
+    {
+      "type": 0,
+      "value": " 반응 "
+    },
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "개, 나도 반응하기"
+    }
+  ],
+  "timeline.reaction.names1": [
+    {
+      "type": 1,
+      "value": "a"
+    }
+  ],
+  "timeline.reaction.names2": [
+    {
+      "type": 1,
+      "value": "a"
+    },
+    {
+      "type": 0,
+      "value": ", "
+    },
+    {
+      "type": 1,
+      "value": "b"
+    }
+  ],
+  "timeline.reaction.names3": [
+    {
+      "type": 1,
+      "value": "a"
+    },
+    {
+      "type": 0,
+      "value": ", "
+    },
+    {
+      "type": 1,
+      "value": "b"
+    },
+    {
+      "type": 0,
+      "value": ", "
+    },
+    {
+      "type": 1,
+      "value": "c"
+    }
+  ],
+  "timeline.reaction.namesExtra0": [
+    {
+      "type": 0,
+      "value": "외 "
+    },
+    {
+      "type": 2,
+      "value": "extra",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "명"
+    }
+  ],
+  "timeline.reaction.namesExtra1": [
+    {
+      "type": 1,
+      "value": "a"
+    },
+    {
+      "type": 0,
+      "value": " 외 "
+    },
+    {
+      "type": 2,
+      "value": "extra",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "명"
+    }
+  ],
+  "timeline.reaction.namesExtra2": [
+    {
+      "type": 1,
+      "value": "a"
+    },
+    {
+      "type": 0,
+      "value": ", "
+    },
+    {
+      "type": 1,
+      "value": "b"
+    },
+    {
+      "type": 0,
+      "value": " 외 "
+    },
+    {
+      "type": 2,
+      "value": "extra",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "명"
+    }
+  ],
+  "timeline.reaction.namesExtra3": [
+    {
+      "type": 1,
+      "value": "a"
+    },
+    {
+      "type": 0,
+      "value": ", "
+    },
+    {
+      "type": 1,
+      "value": "b"
+    },
+    {
+      "type": 0,
+      "value": ", "
+    },
+    {
+      "type": 1,
+      "value": "c"
+    },
+    {
+      "type": 0,
+      "value": " 외 "
+    },
+    {
+      "type": 2,
+      "value": "extra",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "명"
+    }
+  ],
+  "timeline.reaction.selfToken": [
+    {
+      "type": 0,
+      "value": "나(내 반응 취소)"
     }
   ],
   "timeline.runException.open": [
@@ -11583,6 +14408,224 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "전송 중"
+    }
+  ],
+  "timeline.spawnHost.candidateWithReason": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " ("
+    },
+    {
+      "type": 1,
+      "value": "reason"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "timeline.spawnHost.choiceLabel": [
+    {
+      "type": 0,
+      "value": "실행할 호스트"
+    }
+  ],
+  "timeline.spawnHost.noEligibleHost": [
+    {
+      "type": 0,
+      "value": "지금 이 작업을 실행할 수 있는 호스트가 없습니다. 호스트 앱이 켜져 있는지 확인한 뒤 다시 시도하세요."
+    }
+  ],
+  "timeline.spawnHost.notReady": [
+    {
+      "type": 0,
+      "value": "준비 중"
+    }
+  ],
+  "timeline.spawnHost.offline": [
+    {
+      "type": 0,
+      "value": "오프라인"
+    }
+  ],
+  "timeline.spawnHost.revoked": [
+    {
+      "type": 0,
+      "value": "해지됨"
+    }
+  ],
+  "timeline.spawnHost.tierCloud": [
+    {
+      "type": 0,
+      "value": "클라우드"
+    }
+  ],
+  "timeline.spawnHost.tierLocal": [
+    {
+      "type": 0,
+      "value": "로컬"
+    }
+  ],
+  "timeline.spawnHost.tierRemote": [
+    {
+      "type": 0,
+      "value": "원격"
+    }
+  ],
+  "timeline.spawnHost.unavailable": [
+    {
+      "type": 0,
+      "value": "지금 선택할 수 없음"
+    }
+  ],
+  "timeline.streamStop.cancelled": [
+    {
+      "type": 0,
+      "value": "중단됨"
+    }
+  ],
+  "timeline.streamStop.cutOff": [
+    {
+      "type": 0,
+      "value": "응답이 끊김"
+    }
+  ],
+  "timeline.teamAi.delegateButton": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "에게 맡기기"
+    }
+  ],
+  "timeline.teamAi.delegateQuoted": [
+    {
+      "type": 1,
+      "value": "mention"
+    },
+    {
+      "type": 0,
+      "value": " 인용한 요청을 맡아 주세요."
+    }
+  ],
+  "timeline.teamAi.delegateReason": [
+    {
+      "type": 0,
+      "value": "넘긴 이유: "
+    },
+    {
+      "type": 1,
+      "value": "reason"
+    }
+  ],
+  "timeline.teamAi.delegateSent": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "에게 맡겼어요. 답은 이 채널에 와요."
+    }
+  ],
+  "timeline.teamAi.limitOperatorDay": [
+    {
+      "type": 0,
+      "value": "서버 운영자가 정한 오늘 사용량을 다 씀"
+    }
+  ],
+  "timeline.teamAi.limitOperatorOff": [
+    {
+      "type": 0,
+      "value": "서버 운영자가 도우미를 멈춰 둠"
+    }
+  ],
+  "timeline.teamAi.limitTeamMonth": [
+    {
+      "type": 0,
+      "value": "이번 달 도우미 사용량을 다 씀"
+    }
+  ],
+  "timeline.teamAi.limitUnknown": [
+    {
+      "type": 0,
+      "value": "도우미 사용량 한도에 닿음"
+    }
+  ],
+  "timeline.teamAi.proposalAuthority": [
+    {
+      "type": 0,
+      "value": "승인하면 승인한 사람의 권한으로 실행돼요."
+    }
+  ],
+  "timeline.teamAi.proposalLabel": [
+    {
+      "type": 0,
+      "value": "제안"
+    }
+  ],
+  "timeline.teamAi.proposalLine": [
+    {
+      "type": 0,
+      "value": "도우미 제안 · 요청: "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    }
+  ],
+  "timeline.teamAi.proposalLineUnknown": [
+    {
+      "type": 0,
+      "value": "도우미 제안 · 요청한 사람을 확인하지 못했어요"
+    }
+  ],
+  "timeline.teamAi.rationaleLabel": [
+    {
+      "type": 0,
+      "value": "도우미가 쓴 사유"
+    }
+  ],
+  "timeline.teamAi.rationaleNote": [
+    {
+      "type": 0,
+      "value": "AI가 쓴 글이에요. 실제로 바뀌는 내용은 위 칸을 보세요."
+    }
+  ],
+  "timeline.teamAi.reasonCouldNotPropose": [
+    {
+      "type": 0,
+      "value": "승인 카드로 만들지 못함"
+    }
+  ],
+  "timeline.teamAi.reasonOutOfScope": [
+    {
+      "type": 0,
+      "value": "도우미가 바로 하기엔 큰 일"
+    }
+  ],
+  "timeline.teamAi.reasonOverBudget": [
+    {
+      "type": 0,
+      "value": "오늘 도우미 사용량을 다 씀"
+    }
+  ],
+  "timeline.teamAi.reasonRateLimited": [
+    {
+      "type": 0,
+      "value": "요청이 너무 잦음"
+    }
+  ],
+  "timeline.teamAi.reasonSlow": [
+    {
+      "type": 0,
+      "value": "도우미가 제때 답하지 못함"
     }
   ],
   "timeline.thread.followDismiss": [

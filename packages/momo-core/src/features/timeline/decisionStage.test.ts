@@ -1,10 +1,15 @@
 import { describe, expect, it } from "vitest";
+import { catalog as koCatalog } from "../../i18n/generated/ko-KR";
+import { createMessageCopy } from "../../testkit";
 import type { AgentApprovalCard } from "./agentCardModel";
 import { requestBundleModel, type RequestBundleContext } from "./requestBundle";
 import {
   createDecisionStage, decisionStageModel, moveDecisionStage,
   nextPendingDecisionStage, decisionStageDragAction,
 } from "./decisionStage";
+// 문장은 사전(`timeline.json`)에 있다(#6044). 시험은 제품과 같은 한국어 생성물로 키를 풀어 한국어 그대로 단정한다.
+const ko = createMessageCopy({ messageLocale: "ko-KR", catalog: koCatalog });
+
 
 const context: RequestBundleContext = {
   nowMs: 1000, viewerKind: "human", viewerMemberId: "reviewer", canDecide: true,
@@ -26,7 +31,7 @@ describe("decision stage selection", () => {
     expect(selection.cardIds).toEqual(["a", "b"]);
     expect(view.cards.map((item) => item.id)).toEqual(["a", "b"]);
     expect(view.current?.bundle).toBe(cards[1].bundle);
-    expect(view.positionLabel).toBe("2건 중 2번");
+    expect(ko(view.position.key, view.position.values as never)).toBe("2건 중 2번");
     expect(createDecisionStage(cards, "missing").selectedId).toBe("a");
   });
 
@@ -68,7 +73,7 @@ describe("decision stage selection", () => {
     expect(model.pendingIds).toEqual(["a"]);
     expect(model.allProcessed).toBe(false);
     expect(decisionStageModel(createDecisionStage([]), [])).toMatchObject({
-      current: null, index: -1, positionLabel: "0건", allProcessed: false,
+      current: null, index: -1, position: { key: "timeline.decisionStage.positionNone" }, allProcessed: false,
     });
   });
 });

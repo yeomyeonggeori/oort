@@ -1,16 +1,21 @@
 import { describe, expect, it } from "vitest";
+import { catalog as koCatalog } from "../../i18n/generated/ko-KR";
+import { createMessageCopy } from "../../testkit";
 import type { SpawnExecutionPlan } from "../../lib/executionPlan";
 import {
   candidateLabel,
   decisionHostId,
-  NO_ELIGIBLE_HOST_COPY,
+  NO_ELIGIBLE_HOST_KEY,
   offersHostChoice,
   preselectedHostId,
   selectableHosts,
   spawnHostGate,
-  tierLabel,
-  unavailableReasonCopy,
+  tierLabelKey,
+  unavailableReasonKey,
 } from "./spawnHostChoice";
+// 문장은 사전(`timeline.json`)에 있다(#6044). 시험은 제품과 같은 한국어 생성물로 키를 풀어 한국어 그대로 단정한다.
+const ko = createMessageCopy({ messageLocale: "ko-KR", catalog: koCatalog });
+
 
 // =============================================================================
 // #1114 클라 축 — 픽커의 선택 규칙.
@@ -153,7 +158,8 @@ describe("등록된 호스트가 하나도 없을 때 (빈 후보 목록)", () =
   it("승인이 막히고, 그 이유를 결정 전에 말한다", () => {
     const gate = spawnHostGate(empty);
     expect(gate.canApprove).toBe(false);
-    expect(gate.blockedCopy).toBe(NO_ELIGIBLE_HOST_COPY);
+    expect(gate.blockedKey).toBe(NO_ELIGIBLE_HOST_KEY);
+    expect(ko(NO_ELIGIBLE_HOST_KEY)).toContain("호스트 앱이 켜져 있는지");
   });
 
   it("찍히는 것도, 보낼 것도 없다", () => {
@@ -180,33 +186,34 @@ describe("승인 게이트", () => {
     });
     const gate = spawnHostGate(none);
     expect(gate.canApprove).toBe(false);
-    expect(gate.blockedCopy).toBe(NO_ELIGIBLE_HOST_COPY);
+    expect(gate.blockedKey).toBe(NO_ELIGIBLE_HOST_KEY);
+    expect(ko(NO_ELIGIBLE_HOST_KEY)).toContain("호스트 앱이 켜져 있는지");
   });
 });
 
 describe("문구", () => {
   it("T3 자리는 「momo Cloud (준비 중)」이다", () => {
     const cloud = plan().candidates.find((c) => c.hostId === CLOUD)!;
-    expect(candidateLabel(cloud)).toBe("momo Cloud (준비 중)");
+    expect(candidateLabel(ko, cloud)).toBe("momo Cloud (준비 중)");
   });
 
   it("오프라인 호스트는 이름 옆에서 그 사실을 말한다", () => {
     const dead = plan().candidates.find((c) => c.hostId === DEAD)!;
-    expect(candidateLabel(dead)).toBe("낡은 맥 (오프라인)");
+    expect(candidateLabel(ko, dead)).toBe("낡은 맥 (오프라인)");
   });
 
   it("고를 수 있는 호스트에는 아무 꼬리표도 붙지 않는다", () => {
     const local = plan().candidates.find((c) => c.hostId === LOCAL)!;
-    expect(candidateLabel(local)).toBe("내 맥");
+    expect(candidateLabel(ko, local)).toBe("내 맥");
   });
 
   it("모르는 사유는 서버 어휘를 화면에 내보내지 않는다", () => {
-    expect(unavailableReasonCopy("quota_exhausted")).toBe("지금 선택할 수 없음");
-    expect(unavailableReasonCopy(undefined)).toBeNull();
+    expect(ko(unavailableReasonKey("quota_exhausted")!)).toBe("지금 선택할 수 없음");
+    expect(unavailableReasonKey(undefined)).toBeNull();
   });
 
   it("모르는 tier에는 아무 말도 하지 않는다", () => {
-    expect(tierLabel("unknown")).toBeNull();
-    expect(tierLabel("local")).toBe("로컬");
+    expect(tierLabelKey("unknown")).toBeNull();
+    expect(ko(tierLabelKey("local")!)).toBe("로컬");
   });
 });

@@ -1088,7 +1088,7 @@ describe('#1092 D-1 — 복구 구분선의 낱말이 코어의 것이다', () =
     source => {
       // 이 단정이 잡는 것은 두 방향이다: 화면이 코어보다 더 말하거나(로컬 접합),
       // 덜 말하거나(웹의 현행). 둘 다 두 클라를 갈라놓는다.
-      const expected = dividerText(recoveryDividerSegments(4821, source));
+      const expected = dividerText(recoveryDividerSegments(FORMAT, 4821, source));
       expect(rendered(source).getByText(expected)).toBeTruthy();
     },
   );

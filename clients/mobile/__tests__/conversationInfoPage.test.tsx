@@ -1,11 +1,11 @@
 import {
-  CHANNEL_COPY_GROUP_LABEL,
-  CHANNEL_LEAVE_LABEL,
-  DM_CLOSE_LABEL,
-  channelCopyIdLabel,
-  channelCopyNameLabel,
+  CHANNEL_COPY_GROUP_KEY,
+  CHANNEL_LEAVE_KEY,
+  DM_CLOSE_KEY,
+  channelCopyIdKey,
+  channelCopyNameKey,
   channelLeaveConfirmBodyKey,
-  channelMuteToggleLabel,
+  channelMuteToggleKey,
 } from '@momo/core/features/channels/model';
 import type {ChannelActionKey} from '@momo/core/features/channels/actionModel';
 import {catalog as koCatalog} from '@momo/core/i18n/generated/ko-KR';
@@ -29,7 +29,7 @@ import {
 } from '../src/features/conversation/ConversationInfoPage';
 import {
   CONVERSATION_INFO_ACTION_KEYS,
-  conversationInfoActionItems,
+  conversationInfoActionItems as base_conversationInfoActionItems,
 } from '../src/features/conversation/conversationMenu';
 import {PROFILE_FACE_SQUARE_RING_RADIUS} from '../src/features/profile/ProfileFace';
 import type {ChannelRowTarget} from '../src/features/sidebar/channelRowActions';
@@ -37,6 +37,9 @@ import {endGlyphInk} from './fixtures/endGlyphInk';
 import {finger, pane} from './fixtures/finger';
 import {pinReduceMotion} from './fixtures/reduceMotion';
 import {releaseReduceMotion, setReduceMotion} from './fixtures/sheetContract';
+// 낱말은 사전에 있다(#6045). 시험은 한국어 생성물로 풀어 같은 문장을 그대로 단정한다.
+const koFormat = createMessageService({messageLocale: 'ko-KR', catalog: koCatalog}).formatMessage;
+const conversationInfoActionItems = (target: Parameters<typeof base_conversationInfoActionItems>[0], copied?: Parameters<typeof base_conversationInfoActionItems>[1], f: typeof koFormat = koFormat) => base_conversationInfoActionItems(target, copied, f);
 
 /**
  * 확인 단계의 위험 단추는 서고 나서 `CONFIRM_ARM_MS` 동안 눌림을 받지 않는다(#5818 검수 High): 사람이 읽고 누르는 것처럼
@@ -407,13 +410,13 @@ describe('정보 페이지 — 행은 코어 표의 답이다 (#4319)', () => {
   it('DM(닫기를 내밂): 알림 → 복사 셋 → 목록에서 숨기기, 낱말은 코어 것이다', () => {
     renderPage();
     expect(rowKeys()).toEqual(['mute-toggle', 'copy-name', 'copy-link', 'copy-id', 'close-dm']);
-    expect(screen.getByTestId('conversation-info-mute-toggle')).toHaveTextContent(new RegExp(channelMuteToggleLabel(false)));
-    expect(screen.getByTestId('conversation-info-copy-name')).toHaveTextContent(channelCopyNameLabel(false));
+    expect(screen.getByTestId('conversation-info-mute-toggle')).toHaveTextContent(new RegExp(koFormat(channelMuteToggleKey(false))));
+    expect(screen.getByTestId('conversation-info-copy-name')).toHaveTextContent(koFormat(channelCopyNameKey(false)));
     expect(screen.getByTestId('conversation-info-copy-link')).toHaveTextContent(copyLinkActionLabel(false));
-    expect(screen.getByTestId('conversation-info-copy-id')).toHaveTextContent(channelCopyIdLabel(false));
-    expect(screen.getByTestId('conversation-info-close-dm')).toHaveTextContent(DM_CLOSE_LABEL);
+    expect(screen.getByTestId('conversation-info-copy-id')).toHaveTextContent(koFormat(channelCopyIdKey(false)));
+    expect(screen.getByTestId('conversation-info-close-dm')).toHaveTextContent(koFormat(DM_CLOSE_KEY));
     // 복사 카드는 코어의 제목 하나를 이고 선다.
-    expect(within(screen.getByTestId('conversation-info-copy')).getByText(CHANNEL_COPY_GROUP_LABEL)).toBeTruthy();
+    expect(within(screen.getByTestId('conversation-info-copy')).getByText(koFormat(CHANNEL_COPY_GROUP_KEY))).toBeTruthy();
   });
 
   it('DM: 닫기를 내밀지 않으면(`closeOffered` 거짓) 「목록에서 숨기기」가 없다 — 나머지는 그대로다', () => {
@@ -423,14 +426,14 @@ describe('정보 페이지 — 행은 코어 표의 답이다 (#4319)', () => {
 
   it('알림이 꺼진 대화는 「알림 켜기」다', () => {
     renderPage({items: conversationInfoActionItems(dmTarget({muted: true}))});
-    expect(screen.getByTestId('conversation-info-mute-toggle')).toHaveTextContent(new RegExp(channelMuteToggleLabel(true)));
+    expect(screen.getByTestId('conversation-info-mute-toggle')).toHaveTextContent(new RegExp(koFormat(channelMuteToggleKey(true))));
   });
 
   it('채널: 소유자·관리자에게는 「채널 나가기」가 선다 — 위험색이고 DM 의 「목록에서 숨기기」는 없다', () => {
     renderPage({kind: 'public', title: 'general', peer: null, items: conversationInfoActionItems(channelTarget())});
     expect(rowKeys()).toEqual(['mute-toggle', 'copy-name', 'copy-link', 'copy-id', 'leave']);
     const leave = screen.getByTestId('conversation-info-leave');
-    expect(leave).toHaveTextContent(CHANNEL_LEAVE_LABEL);
+    expect(leave).toHaveTextContent(koFormat(CHANNEL_LEAVE_KEY));
     const color = (id: string) =>
       flatten(within(screen.getByTestId(id)).getAllByText(/\S/)[0].props.style).color;
     expect(color('conversation-info-leave')).not.toBe(color('conversation-info-mute-toggle'));
@@ -508,10 +511,10 @@ describe('정보 페이지 — 행은 코어 표의 답이다 (#4319)', () => {
 
   it('복사 영수증은 코어의 「복사됨」 낱말이고 그 줄만 바뀐다 — 페이지는 그대로다', () => {
     const props = renderPage({items: conversationInfoActionItems(dmTarget(), {name: true, link: false, id: false})});
-    expect(screen.getByTestId('conversation-info-copy-name')).toHaveTextContent(channelCopyNameLabel(true));
+    expect(screen.getByTestId('conversation-info-copy-name')).toHaveTextContent(koFormat(channelCopyNameKey(true)));
     expect(screen.getByTestId('conversation-info-copy-link')).toHaveTextContent(copyLinkActionLabel(false));
-    expect(screen.getByTestId('conversation-info-copy-id')).toHaveTextContent(channelCopyIdLabel(false));
-    expect(channelCopyNameLabel(true)).not.toBe(channelCopyNameLabel(false));
+    expect(screen.getByTestId('conversation-info-copy-id')).toHaveTextContent(koFormat(channelCopyIdKey(false)));
+    expect(koFormat(channelCopyNameKey(true))).not.toBe(koFormat(channelCopyNameKey(false)));
     expect(screen.getByTestId('conversation-info-name')).toBeTruthy();
     expect(props.onClose).not.toHaveBeenCalled();
   });
@@ -613,7 +616,7 @@ describe('정보 페이지 — 채널 나가기의 확인 단계 (#4319)', () =>
     expect(screen.getByTestId('conversation-info-leave-confirm-detail')).toHaveTextContent(
       ko.formatMessage(channelLeaveConfirmBodyKey('public'), {name: 'general'}),
     );
-    expect(screen.getByTestId('conversation-info-leave-confirm-button')).toHaveTextContent(CHANNEL_LEAVE_LABEL);
+    expect(screen.getByTestId('conversation-info-leave-confirm-button')).toHaveTextContent(koFormat(CHANNEL_LEAVE_KEY));
     expect(rowKeys()).toEqual([]);
     expect(screen.getByTestId('conversation-info-name')).toHaveTextContent('general');
     expect(screen.getByTestId('conversation-info-back')).toBeTruthy();

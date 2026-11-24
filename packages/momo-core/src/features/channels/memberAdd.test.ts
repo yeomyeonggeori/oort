@@ -8,6 +8,12 @@ import {
   isChannelMember,
   withChannelMemberAdded,
 } from "./memberAdd";
+import { catalog as koCatalog } from "../../i18n/generated/ko-KR";
+import { createMessageCopy } from "../../testkit";
+
+// 낱말은 사전에 있다(#6045). 시험은 한국어 생성물로 풀어 같은 문장을 그대로 단정한다.
+const ko = createMessageCopy({ messageLocale: "ko-KR", catalog: koCatalog });
+const refText = (ref: { key: string; values?: object }) => ko(ref.key as never, ref.values as never);
 
 // The demo workspace really holds two members displayed as 김인턴, a human
 // (@intern-kim) and an agent (@kim-intern), so the split and the ids below are
@@ -163,24 +169,24 @@ describe("withChannelMemberAdded (optimistic)", () => {
 
 describe("addChannelMemberFailure", () => {
   it("403 asks the reader to reach an admin", () => {
-    expect(addChannelMemberFailure(new ApiError(403, "forbidden"))).toContain("권한이 없습니다");
+    expect(refText(addChannelMemberFailure(new ApiError(403, "forbidden")))).toContain("권한이 없습니다");
   });
 
   it("404 names an archived or vanished channel", () => {
-    expect(addChannelMemberFailure(new ApiError(404, "not found"))).toContain("보관");
+    expect(refText(addChannelMemberFailure(new ApiError(404, "not found")))).toContain("보관");
   });
 
   it("429 asks to slow down", () => {
-    expect(addChannelMemberFailure(new ApiError(429, "rate"))).toContain("잦습니다");
+    expect(refText(addChannelMemberFailure(new ApiError(429, "rate")))).toContain("잦습니다");
   });
 
   it("a network failure reuses the transport's own measured sentence", () => {
-    const message = addChannelMemberFailure(new NetworkError("timeout", 15_000));
+    const message = refText(addChannelMemberFailure(new NetworkError("timeout", 15_000)));
     expect(message).toContain("멤버를 추가하지 못했습니다");
   });
 
   it("an unknown error gets a plain retry line, never a stack", () => {
-    expect(addChannelMemberFailure(new Error("boom"))).toBe(
+    expect(refText(addChannelMemberFailure(new Error("boom")))).toBe(
       "멤버를 추가하지 못했습니다. 잠시 뒤에 다시 시도하세요."
     );
   });

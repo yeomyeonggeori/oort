@@ -74,6 +74,7 @@ export function ChannelMemberAddSheet({
  * 않게 먼저 세우고, 서버가 받으면 다시 읽어 진짜 행으로 맞춘다.
  */
 function useAddMember(workspaceId: string, channelId: string) {
+  const formatMessage = useFormatMessage();
   const client = useQueryClient();
   const [pendingIds, setPendingIds] = useState<ReadonlySet<string>>(new Set());
   const [failure, setFailure] = useState<{memberId: string; message: string} | null>(null);
@@ -96,7 +97,8 @@ function useAddMember(workspaceId: string, channelId: string) {
         void client.invalidateQueries({queryKey: key});
       } catch (error) {
         client.setQueryData<RosterMember[]>(key, previous);
-        setFailure({memberId, message: addChannelMemberFailure(error)});
+        const refused = addChannelMemberFailure(error);
+        setFailure({memberId, message: formatMessage(refused.key, refused.values as never)});
       } finally {
         inFlight.current.delete(memberId);
         setPendingIds(prev => {
@@ -106,7 +108,7 @@ function useAddMember(workspaceId: string, channelId: string) {
         });
       }
     },
-    [client, workspaceId, channelId],
+    [client, workspaceId, channelId, formatMessage],
   );
 
   return {pendingIds, failure, add};

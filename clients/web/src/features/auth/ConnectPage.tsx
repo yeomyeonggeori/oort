@@ -47,6 +47,7 @@ import {
 } from "@/features/welcome/freshSignupFirstRun";
 import { titlebarDragProps } from "@/app/sidebarPane";
 import { UpdateNotice } from "@/features/updates/UpdateNotice";
+import { failureMessageText } from "@momo/core/features/auth/failureMessage";
 import { onboardingDots } from "@momo/core/features/onboarding/guide";
 import { KomettoGuide } from "@/features/onboarding/guide/KomettoGuide";
 import { OnboardingDots } from "@/features/onboarding/guide/OnboardingDots";
@@ -448,7 +449,8 @@ export function ConnectPage({
         // 이메일·비밀번호 판정은 문제 자리(비밀번호 칸)에서 다음 행동과 함께 말한다.
         setFieldError({
           field: "password",
-          message: `${copy.message} 비밀번호를 다시 넣고 들어가기를 누르세요.`,
+          // 이 칸의 안내 문장은 가입·연결 화면 칸(L-C2)이 옮긴다. 그때까지는 짓는 자리에서 지금 언어로 풀어 붙인다.
+          message: `${failureMessageText(messages.formatMessage, copy.message)} 비밀번호를 다시 넣고 들어가기를 누르세요.`,
         });
       } else {
         setFailure(copy);
@@ -619,7 +621,7 @@ export function ConnectPage({
     return (
       <InlineBanner
         tone="error"
-        message={failure.message}
+        message={failureMessageText(messages.formatMessage, failure.message)}
         actionLabel={relink ? "링크 다시 넣기" : retry ? "다시 시도" : undefined}
         onAction={relink ? () => backToWelcome() : retry ? () => void join() : undefined}
         testId="login-error"

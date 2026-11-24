@@ -232,6 +232,7 @@ export function DesktopNotifications() {
       },
       inviteLinkSentence: () =>
         messagesRef.current.formatMessage("notifications.inviteLink.fallback"),
+      formatMessage: (key, values) => messagesRef.current.formatMessage(key, values as never),
       // 작업 권한 요청(#5595): 승인 카드를 열 수 있는 데스크탑 셸만 원장을 준다. 원장은 서버가 말한 값(캐시)뿐이다.
       ...(isDesktop()
         ? {

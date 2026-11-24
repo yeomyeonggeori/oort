@@ -931,7 +931,7 @@ function ViewerFrame({
 
   const hasSender = senderName !== undefined && senderName.trim() !== '';
   const hasTime = sentAtMs !== undefined && Number.isFinite(sentAtMs);
-  const stamp = hasTime ? viewerStamp(sentAtMs) : null;
+  const stamp = hasTime ? viewerStamp(formatMessage, sentAtMs) : null;
   const total = images.length;
 
   // 조작 덩어리의 공통: 보일 때는 빈 곳을 통과시키고(`box-none`), 숨으면 통째로 닿지도 읽히지도 않는다.

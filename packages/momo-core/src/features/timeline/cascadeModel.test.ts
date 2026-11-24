@@ -1,4 +1,6 @@
 import { describe, expect, it } from "vitest";
+import { catalog as koCatalog } from "../../i18n/generated/ko-KR";
+import { createMessageCopy } from "../../testkit";
 import type { Message } from "../../lib/api";
 import type { CascadeFallbackFrame } from "../../lib/realtimeEvents";
 import {
@@ -14,6 +16,9 @@ import {
   turnRecordRunId as recordRunIdAs,
   type CascadeByRun,
 } from "./cascadeModel";
+// 문장은 사전(`timeline.json`)에 있다(#6044). 시험은 제품과 같은 한국어 생성물로 키를 풀어 한국어 그대로 단정한다.
+const ko = createMessageCopy({ messageLocale: "ko-KR", catalog: koCatalog });
+
 
 // #5577 — 이 파일의 픽스처는 모두 에이전트(게이트웨이·워커·도우미)가 쓴 서버 결과다. 사람·모르는 작성자는
 // `serverResultAuthor.test.ts` 가 잰다.
@@ -297,7 +302,7 @@ describe("which row carries the notice", () => {
 
 describe("copy", () => {
   it("names the provider that served the turn, never an attempt number", () => {
-    expect(cascadeServedSubject(parseCascadeFallback(frame())!)).toBe(
+    expect(cascadeServedSubject(ko, parseCascadeFallback(frame())!)).toBe(
       "gateway.dawn.internal:8443 프로바이더"
     );
   });
@@ -312,13 +317,13 @@ describe("copy", () => {
     const gapped = parseCascadeFallback(
       frame({ from: 0, to: 2, to_endpoint_label: "backup.dawn.internal" })
     )!;
-    const text = cascadeNoticeText([gapped])!;
+    const text = cascadeNoticeText(ko, [gapped])!;
     expect(text).toBe("backup.dawn.internal 프로바이더로 처리됨 (응답 없음)");
     expect(text).not.toContain("차");
   });
 
   it("says which provider served the turn and why the first did not", () => {
-    expect(cascadeNoticeText([parseCascadeFallback(frame())!])).toBe(
+    expect(cascadeNoticeText(ko, [parseCascadeFallback(frame())!])).toBe(
       "gateway.dawn.internal:8443 프로바이더로 처리됨 (응답 없음)"
     );
   });
@@ -337,7 +342,7 @@ describe("copy", () => {
         })
       )!,
     ];
-    expect(cascadeNoticeText(hops)).toBe(
+    expect(cascadeNoticeText(ko, hops)).toBe(
       "backup.dawn.internal 프로바이더로 처리됨 (전환 2번, 마지막 사유: 요청 한도 초과)"
     );
   });
@@ -346,7 +351,7 @@ describe("copy", () => {
   // hedged, not numbered: "예비" is what is actually known.
   it("hedges rather than numbering when the server sent no label", () => {
     expect(
-      cascadeNoticeText([parseCascadeFallback(frame({ to_endpoint_label: "" }))!])
+      cascadeNoticeText(ko, [parseCascadeFallback(frame({ to_endpoint_label: "" }))!])
     ).toBe("예비 프로바이더로 처리됨 (응답 없음)");
   });
 
@@ -354,18 +359,18 @@ describe("copy", () => {
   // this frame, so a session that was not listening has nothing to say and must
   // not claim the turn ran on the first provider.
   it("says nothing at all when no transition was recorded", () => {
-    expect(cascadeNoticeText([])).toBeNull();
-    expect(cascadeRouteText([])).toBeNull();
+    expect(cascadeNoticeText(ko, [])).toBeNull();
+    expect(cascadeRouteText(ko, [])).toBeNull();
   });
 
   it("translates the classifier's reasons, generated ones included", () => {
-    expect(cascadeReasonLabel("provider_unreachable")).toBe("응답 없음");
-    expect(cascadeReasonLabel("provider_rate_limited")).toBe("요청 한도 초과");
-    expect(cascadeReasonLabel("provider_status_503")).toBe("서버 오류 503");
+    expect(cascadeReasonLabel(ko, "provider_unreachable")).toBe("응답 없음");
+    expect(cascadeReasonLabel(ko, "provider_rate_limited")).toBe("요청 한도 초과");
+    expect(cascadeReasonLabel(ko, "provider_status_503")).toBe("서버 오류 503");
   });
 
   it("names an unmapped reason as the server's report, never bare", () => {
-    expect(cascadeReasonLabel("brand_new_label")).toBe(
+    expect(cascadeReasonLabel(ko, "brand_new_label")).toBe(
       "서버가 보고한 사유: brand_new_label"
     );
   });
@@ -380,12 +385,12 @@ describe("copy", () => {
         frame({ from: 1, to: 2, to_endpoint_label: "backup.dawn.internal" })
       )!,
     ];
-    expect(cascadeRouteText(hops)).toBe("api.anthropic.com에서 넘어왔습니다");
+    expect(cascadeRouteText(ko, hops)).toBe("api.anthropic.com에서 넘어왔습니다");
   });
 
   it("stays silent rather than half-naming a route", () => {
     expect(
-      cascadeRouteText([
+      cascadeRouteText(ko, [
         parseCascadeFallback(frame({ from_endpoint_label: "" }))!,
       ])
     ).toBeNull();

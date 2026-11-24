@@ -1,11 +1,12 @@
 import { useState } from "react";
 import {
   GUIDE_STATE_TABLE,
-  KOMETTO_EXPRESSION_NAMES,
+  KOMETTO_EXPRESSION_NAME_KEYS,
   expressionForState,
   onboardingDots,
   type GuideState,
 } from "@momo/core/features/onboarding/guide";
+import { useFormatMessage } from "@/i18n/useFormatMessage";
 import { Button } from "@/design/ui/button";
 import { Input } from "@/design/ui/input";
 import { KOMETTO_ASSETS_PLACEHOLDER } from "./komettoExpressions";
@@ -29,6 +30,7 @@ const SAMPLE_LINES: Record<GuideState, string> = {
  * 직접 눌러 보는 칸, 히어로 크기, 입력 그릇과 행동을 둔다.
  */
 export function OnboardingGuideGallery() {
+  const formatMessage = useFormatMessage();
   const [live, setLive] = useState<GuideState>("checking");
   return (
     <section
@@ -74,7 +76,7 @@ export function OnboardingGuideGallery() {
             {GUIDE_STATE_TABLE.map((row) => (
               <li key={row.state} className="flex flex-col gap-2">
                 <span className="text-meta text-ink-muted">
-                  {KOMETTO_EXPRESSION_NAMES[row.expression]}: {row.meaning}
+                  {formatMessage(KOMETTO_EXPRESSION_NAME_KEYS[row.expression])}: {formatMessage(row.meaningKey)}
                 </span>
                 <KomettoGuide expression={row.expression} line={SAMPLE_LINES[row.state]} />
               </li>
@@ -97,7 +99,7 @@ export function OnboardingGuideGallery() {
                 data-testid={`onboarding-guide-live-${row.state}`}
                 onClick={() => setLive(row.state)}
               >
-                {KOMETTO_EXPRESSION_NAMES[row.expression]}
+                {formatMessage(KOMETTO_EXPRESSION_NAME_KEYS[row.expression])}
               </Button>
             ))}
           </div>

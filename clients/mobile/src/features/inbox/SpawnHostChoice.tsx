@@ -1,15 +1,16 @@
 import type {SpawnExecutionPlan} from '@momo/core/lib/executionPlan';
 import {
   candidateLabel,
-  HOST_CHOICE_LABEL,
+  HOST_CHOICE_LABEL_KEY,
   spawnHostGate,
-  tierLabel,
+  tierLabelKey,
 } from '@momo/core/features/timeline/spawnHostChoice';
 import React from 'react';
 import {Pressable, StyleSheet, View} from 'react-native';
 import {Sentence} from '../../design/atoms';
 import {font, line, radius, space, TOUCH_TARGET, type Palette} from '../../design/tokens';
 import {useStyles} from '../../design/theme';
+import {useFormatMessage} from '../../i18n/useFormatMessage';
 
 // =============================================================================
 // 승인 카드의 호스트 선택기 — 폰 (ADR-0125 D6-A, 이슈 1114).
@@ -67,12 +68,13 @@ export function SpawnHostChoice({
   testIDPrefix: string;
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
+  const formatMessage = useFormatMessage();
   const gate = spawnHostGate(plan);
   return (
     <View style={styles.group} testID={`${testIDPrefix}-host-group`}>
       {/* 보이는 라벨이다. 라디오 목록이 무엇을 묻는지 모른 채 기계 이름 서너 개만
           보는 화면은 선택기가 아니라 수수께끼다. */}
-      <Sentence style={styles.legend}>{HOST_CHOICE_LABEL}</Sentence>
+      <Sentence style={styles.legend}>{formatMessage(HOST_CHOICE_LABEL_KEY)}</Sentence>
       {/* 후보가 0이면 상자 자체를 세우지 않는다. 빈 테두리는 「로딩 중」으로
           읽히는데, 실제로 일어난 일은 등록된 호스트가 없다는 것이고 그것은 아래
           문장이 말한다. */}
@@ -86,7 +88,8 @@ export function SpawnHostChoice({
           const disabled = !candidate.selectable || locked;
           /** 지금 이 줄을 누를 수 있는가 — 자격과 잠금을 **둘 다** 읽는다. */
           const live = candidate.selectable && !locked;
-          const tier = tierLabel(candidate.tier);
+          const tierKey = tierLabelKey(candidate.tier);
+          const tier = tierKey === null ? null : formatMessage(tierKey);
           return (
             <Pressable
               key={candidate.hostId}
@@ -94,7 +97,7 @@ export function SpawnHostChoice({
               // 사유는 라벨 안에 있다(`candidateLabel`). 별도 힌트로 떼면
               // VoiceOver가 이름을 읽고 잠시 뒤 사유를 읽어, 목록을 훑는 사람은
               // 왜 이 줄이 안 눌리는지 모른 채 지나간다.
-              accessibilityLabel={candidateLabel(candidate)}
+              accessibilityLabel={candidateLabel(formatMessage, candidate)}
               // `selected`는 달지 않는다 (design-review N2). iOS의 radio 역할에서
               // `checked`와 겹치고, 겹치면 보이스오버가 같은 사실을 두 번 말한다.
               accessibilityState={{checked, disabled}}
@@ -127,7 +130,7 @@ export function SpawnHostChoice({
               </View>
               <View style={styles.rowText}>
                 <Sentence style={[styles.name, !live && styles.nameQuiet]}>
-                  {candidateLabel(candidate)}
+                  {candidateLabel(formatMessage, candidate)}
                 </Sentence>
                 {tier !== null ? <Sentence style={styles.tier}>{tier}</Sentence> : null}
               </View>
@@ -136,9 +139,9 @@ export function SpawnHostChoice({
         })}
       </View>
       ) : null}
-      {gate.blockedCopy !== undefined ? (
+      {gate.blockedKey !== undefined ? (
         <Sentence style={styles.blocked} testID={`${testIDPrefix}-host-blocked`}>
-          {gate.blockedCopy}
+          {formatMessage(gate.blockedKey)}
         </Sentence>
       ) : null}
     </View>

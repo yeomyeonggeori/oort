@@ -15,6 +15,8 @@
 // 산다. 바뀌는 것은 보이는 점뿐이다(ADR-0185 증보 §5-2 해석).
 // =============================================================================
 
+import type { MessageRef, PlainMessageKey } from "../../i18n/keys";
+
 /** 코메토 표정 id. #2806 규격 시트(`docs/brand/kometto/expressions.md`)와 같은 이름이다. */
 export const KOMETTO_EXPRESSIONS = [
   "idle",
@@ -27,15 +29,15 @@ export const KOMETTO_EXPRESSIONS = [
 
 export type KomettoExpression = (typeof KOMETTO_EXPRESSIONS)[number];
 
-/** 표정의 한국어 이름(규격 시트·갤러리 표기). 화면 문장이 아니다. */
-export const KOMETTO_EXPRESSION_NAMES: Readonly<Record<KomettoExpression, string>> = {
-  idle: "대기",
-  thinking: "생각",
-  happy: "기쁨",
-  flustered: "당황",
-  working: "작업 중",
-  sleepy: "졸림",
-};
+/** 표정의 이름(규격 시트·갤러리 표기)의 사전 키. 화면 문장이 아니고, 갤러리가 지금 언어로 푼다. */
+export const KOMETTO_EXPRESSION_NAME_KEYS = {
+  idle: "onboarding.guide.expressionIdle",
+  thinking: "onboarding.guide.expressionThinking",
+  happy: "onboarding.guide.expressionHappy",
+  flustered: "onboarding.guide.expressionFlustered",
+  working: "onboarding.guide.expressionWorking",
+  sleepy: "onboarding.guide.expressionSleepy",
+} as const satisfies Record<KomettoExpression, PlainMessageKey>;
 
 /** 온보딩 화면이 놓일 수 있는 상태. 화면은 상태를 고르고, 표정은 표가 고른다. */
 export const GUIDE_STATES = [
@@ -52,18 +54,18 @@ export type GuideState = (typeof GUIDE_STATES)[number];
 export type GuideStateRow = {
   readonly state: GuideState;
   readonly expression: KomettoExpression;
-  /** ADR-0193 D11 표의 뜻. 사람이 읽는 설명이고 화면 문장이 아니다. */
-  readonly meaning: string;
+  /** ADR-0193 D11 표의 뜻의 사전 키. 사람이 읽는 설명이고 화면 문장이 아니다. */
+  readonly meaningKey: PlainMessageKey;
 };
 
 /** ADR-0193 D11 상태 → 표정 표. 순서가 표다. 한 상태에 한 표정, 한 표정에 한 상태. */
 export const GUIDE_STATE_TABLE: readonly GuideStateRow[] = [
-  { state: "awaiting", expression: "idle", meaning: "질문을 기다림" },
-  { state: "checking", expression: "thinking", meaning: "감지·확인·연결 중" },
-  { state: "success", expression: "happy", meaning: "완료·감지 성공" },
-  { state: "trouble", expression: "flustered", meaning: "오류·오프라인" },
-  { state: "preparing", expression: "working", meaning: "에이전트 준비 중" },
-  { state: "skipped", expression: "sleepy", meaning: "건너뛰고 나중에 할 때" },
+  { state: "awaiting", expression: "idle", meaningKey: "onboarding.guide.stateAwaiting" },
+  { state: "checking", expression: "thinking", meaningKey: "onboarding.guide.stateChecking" },
+  { state: "success", expression: "happy", meaningKey: "onboarding.guide.stateSuccess" },
+  { state: "trouble", expression: "flustered", meaningKey: "onboarding.guide.stateTrouble" },
+  { state: "preparing", expression: "working", meaningKey: "onboarding.guide.statePreparing" },
+  { state: "skipped", expression: "sleepy", meaningKey: "onboarding.guide.stateSkipped" },
 ];
 
 export function expressionForState(state: GuideState): KomettoExpression {
@@ -149,12 +151,18 @@ export type OnboardingDots = {
   /** 1부터 센다. */
   readonly current: number;
   readonly dots: readonly OnboardingDotState[];
-  /** 스크린리더용 숨김 문장(「4단계 중 2단계」). */
-  readonly label: string;
+  /** 스크린리더용 숨김 문장(「4단계 중 2단계」)의 키와 값. 화면이 지금 언어로 푼다. */
+  readonly labelRef: MessageRef<"onboarding.guide.stepLabel">;
 };
 
-export function onboardingDotsLabel(total: number, current: number): string {
-  return `${total}단계 중 ${current}단계`;
+export function onboardingDotsLabel(
+  total: number,
+  current: number
+): MessageRef<"onboarding.guide.stepLabel"> {
+  return {
+    key: "onboarding.guide.stepLabel",
+    values: { total: String(total), current: String(current) },
+  };
 }
 
 /**
@@ -177,6 +185,6 @@ export function onboardingDots(
     dots: screens.map((_, i) =>
       i < index ? "done" : i === index ? "current" : "todo"
     ),
-    label: onboardingDotsLabel(total, current),
+    labelRef: onboardingDotsLabel(total, current),
   };
 }

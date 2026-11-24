@@ -1,26 +1,45 @@
 import { describe, expect, it } from "vitest";
+import { catalog as koCatalog } from "../../i18n/generated/ko-KR";
+import { createMessageCopy } from "../../testkit";
 import type { PinnedMessageWire } from "../../lib/api";
 import {
   CHANNEL_PIN_LIMIT,
-  PIN_EMPTY_BODY_TEXT,
-  PIN_LIST_EMPTY_DETAIL,
-  PIN_LIST_EMPTY_HEADLINE,
-  PIN_LIST_FAILED_DETAIL,
-  PIN_LIST_FAILED_HEADLINE,
-  PIN_ROW_MARK,
+  PIN_EMPTY_BODY_KEY,
+  PIN_LIST_EMPTY_DETAIL_KEY,
+  PIN_LIST_EMPTY_HEADLINE_KEY,
+  PIN_LIST_FAILED_DETAIL_KEY,
+  PIN_LIST_FAILED_HEADLINE_KEY,
+  PIN_ROW_MARK_KEY,
   applyPinned,
   emptyPins,
   isPinned,
   normalizePinList,
-  pinActionLabel,
+  pinActionLabelKey,
   pinExcerpt,
   pinList,
-  pinListHeaderLabel,
-  pinListLabel,
+  pinListHeaderLabel as pinListHeaderRef,
+  pinListLabel as pinListRef,
   pinStampLabel,
   pinStampSegments,
   removePin,
 } from "./pins";
+// 문장은 사전(`timeline.json`)에 있다(#6044). 시험은 제품과 같은 한국어 생성물로 키를 풀어 한국어 그대로 단정한다.
+const ko = createMessageCopy({ messageLocale: "ko-KR", catalog: koCatalog });
+// 문장은 사전에 있다: 한국어 그대로 단정하려고 키를 한국어로 푼다.
+const PIN_EMPTY_BODY_TEXT = ko(PIN_EMPTY_BODY_KEY);
+const PIN_LIST_EMPTY_HEADLINE = ko(PIN_LIST_EMPTY_HEADLINE_KEY);
+const PIN_LIST_EMPTY_DETAIL = ko(PIN_LIST_EMPTY_DETAIL_KEY);
+const PIN_LIST_FAILED_HEADLINE = ko(PIN_LIST_FAILED_HEADLINE_KEY);
+const PIN_LIST_FAILED_DETAIL = ko(PIN_LIST_FAILED_DETAIL_KEY);
+const PIN_ROW_MARK = ko(PIN_ROW_MARK_KEY);
+const pinListLabel = (count: number) => {
+  const ref = pinListRef(count);
+  return ko(ref.key, ref.values as never);
+};
+const pinListHeaderLabel = (count: number, status: Parameters<typeof pinListHeaderRef>[1]) => {
+  const ref = pinListHeaderRef(count, status);
+  return ko(ref.key, ref.values as never);
+};
 
 // =============================================================================
 // 이슈 #1112 — what this file pins.
@@ -190,10 +209,10 @@ describe("낱말", () => {
    * it must be a verb phrase, which the phone's a11y test enforces mechanically.
    */
   it("고정 라벨은 상태에 따라 뒤집히고 둘 다 동사형이다", () => {
-    expect(pinActionLabel(false)).toBe("고정하기");
-    expect(pinActionLabel(true)).toBe("고정 해제하기");
-    expect(pinActionLabel(false)).not.toBe(pinActionLabel(true));
-    for (const label of [pinActionLabel(false), pinActionLabel(true)]) {
+    expect(ko(pinActionLabelKey(false))).toBe("고정하기");
+    expect(ko(pinActionLabelKey(true))).toBe("고정 해제하기");
+    expect(ko(pinActionLabelKey(false))).not.toBe(ko(pinActionLabelKey(true)));
+    for (const label of [ko(pinActionLabelKey(false)), ko(pinActionLabelKey(true))]) {
       expect(label.endsWith("하기")).toBe(true);
     }
   });
@@ -246,7 +265,7 @@ describe("발췌는 사람이 쓴 글을 깨뜨리지 않는다 (#1146 N2)", () 
   it("서로게이트 쌍을 반토막 내지 않는다", () => {
     // 한 글자짜리 이모지 셋. `slice(0, 2)` 는 두 번째 이모지의 앞 절반에서 끊는다.
     const body = "🙂🙃🙂";
-    const cut = pinExcerpt(body, 2);
+    const cut = pinExcerpt(ko, body, 2);
     expect(cut.text).toBe("🙂🙃…");
     expect(cut.text).not.toContain("\uFFFD");
     // 잘린 문자열을 다시 코드포인트로 세면 온전한 글자만 남는다.
@@ -257,8 +276,8 @@ describe("발췌는 사람이 쓴 글을 깨뜨리지 않는다 (#1146 N2)", () 
 
   /** 한도는 **코드포인트**로 센다. 이모지 하나가 두 글자로 세어지면 안 된다. */
   it("한도를 코드 단위가 아니라 글자로 센다", () => {
-    expect(pinExcerpt("🙂🙂🙂", 3).text).toBe("🙂🙂🙂");
-    expect(pinExcerpt("🙂🙂🙂", 3).text).not.toContain("…");
+    expect(pinExcerpt(ko, "🙂🙂🙂", 3).text).toBe("🙂🙂🙂");
+    expect(pinExcerpt(ko, "🙂🙂🙂", 3).text).not.toContain("…");
   });
 
   /**
@@ -269,30 +288,30 @@ describe("발췌는 사람이 쓴 글을 깨뜨리지 않는다 (#1146 N2)", () 
   it("끝에 남은 연결자를 떨어낸다", () => {
     // 👨(1) + ZWJ(2) 에서 끊기면 연결자가 홀로 남는다.
     const family = "👨\u200D👩\u200D👧";
-    const cut = pinExcerpt(family, 2);
+    const cut = pinExcerpt(ko, family, 2);
     expect(cut.text.includes("\u200D…")).toBe(false);
     expect(cut.text).toBe("👨…");
   });
 
   it("줄바꿈은 한 줄로 접히고, 본문이 없으면 앱의 문장이 선다", () => {
-    expect(pinExcerpt("첫 줄\n\n둘째 줄", 40).text).toBe("첫 줄 둘째 줄");
-    expect(pinExcerpt(null, 40)).toEqual({
+    expect(pinExcerpt(ko, "첫 줄\n\n둘째 줄", 40).text).toBe("첫 줄 둘째 줄");
+    expect(pinExcerpt(ko, null, 40)).toEqual({
       text: PIN_EMPTY_BODY_TEXT,
       empty: true,
     });
-    expect(pinExcerpt("   ", 40).empty).toBe(true);
+    expect(pinExcerpt(ko, "   ", 40).empty).toBe(true);
   });
 
   /** 한도 안이면 말줄임을 붙이지 않는다 — 붙이면 없는 뒷말을 약속하는 것이다. */
   it("한도 안의 본문은 그대로 선다", () => {
-    expect(pinExcerpt("짧은 글", 40)).toEqual({ text: "짧은 글", empty: false });
+    expect(pinExcerpt(ko, "짧은 글", 40)).toEqual({ text: "짧은 글", empty: false });
   });
 });
 
 describe("시각 도장은 정렬 근거다 (#1146 N1)", () => {
   const now = new Date(2026, 7, 5, 12, 0, 0).getTime();
   const flat = (atMs: number): string =>
-    pinStampSegments(atMs, now)
+    pinStampSegments(ko, atMs, now)
       .map((segment) => segment.text)
       .join("");
 
@@ -315,7 +334,7 @@ describe("시각 도장은 정렬 근거다 (#1146 N1)", () => {
 
   /** 숫자와 산문이 갈라져 온다: 자릿폭 표지가 한글 음절을 함께 잡으면 벌어진다. */
   it("숫자만 figure 로 나온다", () => {
-    const segments = pinStampSegments(
+    const segments = pinStampSegments(ko, 
       new Date(2026, 6, 29, 9, 0, 0).getTime(),
       now
     );
@@ -333,10 +352,10 @@ describe("시각 도장은 정렬 근거다 (#1146 N1)", () => {
    * 날짜가 두 가지일 수 있고, 낭독에는 어느 열인지 알려 줄 위치가 없다.
    */
   it("낭독 라벨은 절대 날짜에 「고정」을 붙인다", () => {
-    expect(pinStampLabel(new Date(2025, 11, 31, 9, 0, 0).getTime())).toBe(
+    expect(pinStampLabel(ko, new Date(2025, 11, 31, 9, 0, 0).getTime())).toBe(
       "2025년 12월 31일에 고정"
     );
-    expect(pinStampLabel(now)).toBe("2026년 8월 5일에 고정");
+    expect(pinStampLabel(ko, now)).toBe("2026년 8월 5일에 고정");
   });
 });
 
@@ -381,8 +400,8 @@ describe("행의 흔적 (#1146 M3)", () => {
    */
   it("행의 표지는 서술형이고, 액션 낱말과 다르다", () => {
     expect(PIN_ROW_MARK).toBe("고정됨");
-    expect(PIN_ROW_MARK).not.toBe(pinActionLabel(true));
-    expect(PIN_ROW_MARK).not.toBe(pinActionLabel(false));
+    expect(PIN_ROW_MARK).not.toBe(ko(pinActionLabelKey(true)));
+    expect(PIN_ROW_MARK).not.toBe(ko(pinActionLabelKey(false)));
     expect(PIN_ROW_MARK.endsWith("하기")).toBe(false);
   });
 });

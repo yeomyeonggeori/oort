@@ -45,10 +45,10 @@ import {
   ContextMenuTrigger,
 } from "@/design/ui/context-menu";
 // 하위 메뉴 견본(#5777)의 낱말은 채널 메뉴가 쓰는 이름 그대로다(새 문구를 만들지 않는다).
-import { CHANNEL_COPY_GROUP_LABEL } from "@momo/core/features/channels/model";
+import { CHANNEL_COPY_GROUP_KEY } from "@momo/core/features/channels/model";
 import {
-  SECTION_MOVE_GROUP_LABEL,
-  SECTION_MOVE_TO_BASE_LABEL,
+  SECTION_MOVE_GROUP_KEY,
+  SECTION_MOVE_TO_BASE_KEY,
 } from "@momo/core/features/sidebar/sidebarSections";
 import { COPY_LINK_ACTION_LABEL } from "@momo/core/features/timeline/copyLabels";
 import {
@@ -539,6 +539,7 @@ function SchemeToggle() {
 }
 
 function OverlayExamples() {
+  const t = useFormatMessage();
   return (
     <section className="flex flex-col gap-4 border-b border-line py-6">
       <h2 className="text-title font-medium text-ink">떠 있는 표면</h2>
@@ -660,7 +661,7 @@ function OverlayExamples() {
                     <Export name="DropdownMenuSub">
                       <DropdownMenuSub open>
                         <DropdownMenuSubTrigger data-gallery-export="DropdownMenuSubTrigger">
-                          {CHANNEL_COPY_GROUP_LABEL}
+                          {t(CHANNEL_COPY_GROUP_KEY)}
                         </DropdownMenuSubTrigger>
                         <OverlayCell className="mt-2 w-max max-w-full">
                           {(subHost) => (
@@ -804,6 +805,7 @@ function OverlayExamples() {
 }
 
 function ContextMenuSpecimen() {
+  const t = useFormatMessage();
   return (
     <ContextMenu open modal={false}>
       <ContextMenuTrigger asChild>
@@ -847,7 +849,7 @@ function ContextMenuSpecimen() {
             <Export name="ContextMenuSub">
               <ContextMenuSub open>
                 <ContextMenuSubTrigger data-gallery-export="ContextMenuSubTrigger">
-                  {SECTION_MOVE_GROUP_LABEL}
+                  {t(SECTION_MOVE_GROUP_KEY)}
                 </ContextMenuSubTrigger>
                 <OverlayCell className="mt-2 w-max max-w-full">
                   {(subHost) => (
@@ -855,7 +857,7 @@ function ContextMenuSpecimen() {
                       container={subHost}
                       data-gallery-export="ContextMenuSubContent"
                     >
-                      <ContextMenuItem>{SECTION_MOVE_TO_BASE_LABEL}</ContextMenuItem>
+                      <ContextMenuItem>{t(SECTION_MOVE_TO_BASE_KEY)}</ContextMenuItem>
                     </ContextMenuSubContent>
                   )}
                 </OverlayCell>

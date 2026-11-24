@@ -1,4 +1,6 @@
 import { describe, expect, it } from "vitest";
+import { catalog as koCatalog } from "../../i18n/generated/ko-KR";
+import { createMessageCopy } from "../../testkit";
 import type { Message, RosterMember } from "../../lib/api";
 import { makeDirectory } from "../workspace/directory";
 import { agentCardModel } from "./agentCardModel";
@@ -11,13 +13,16 @@ import {
   commandSuggestViewer,
   operatorMentionDraft,
   SETTINGS_OPEN_SECTIONS,
-  settingsOpenLabel,
+  settingsOpenLabelKey,
   settingsOpenSection,
   WORK_REQUEST_OPEN_HARNESSES,
   WORK_REQUEST_PROMPT_MAX_BYTES,
   workRequestOpenArgs,
-  workRequestOpenLabel,
+  workRequestOpenLabelKey,
 } from "./commandSuggest";
+// 문장은 사전(`timeline.json`)에 있다(#6044). 시험은 제품과 같은 한국어 생성물로 키를 풀어 한국어 그대로 단정한다.
+const ko = createMessageCopy({ messageLocale: "ko-KR", catalog: koCatalog });
+
 
 const HUMAN = "019f9a01-0000-7000-8000-000000000101";
 const OTHER = "019f9a01-0000-7000-8000-000000000102";
@@ -83,7 +88,7 @@ describe("command_suggest(ai.connect) 파서 (ADR-0186 G3·G4, #2948)", () => {
       agentName: "hermes",
     });
     expect(commandSuggestHead(card!)).toBe("hermes가 제안했어요");
-    expect(commandSuggestOneLine(card!)).toBe("구민수에게 AI 계정 연결을 제안했어요");
+    expect(commandSuggestOneLine(ko, card!)).toBe("구민수에게 AI 계정 연결을 제안했어요");
   });
 
   it("평범한 에이전트 문장처럼 턴 카드를 만들지 않는다(본문은 그대로 남는다)", () => {
@@ -214,7 +219,7 @@ describe("command_suggest(settings.open) (U-S6)", () => {
       );
       expect(card?.shape, section).toBe("ok");
       expect(card?.section, section).toBe(section);
-      expect(settingsOpenLabel(section), section).toBe(labels[section]);
+      expect(ko(settingsOpenLabelKey(section)), section).toBe(labels[section]);
     }
   });
 
@@ -264,8 +269,8 @@ describe("command_suggest(settings.open) (U-S6)", () => {
       }),
       directory
     )!;
-    expect(commandSuggestOneLine(card)).not.toContain("비밀번호");
-    expect(commandSuggestOneLine(card)).toBe("구민수에게 「알림 설정 열기」 카드를 제안했어요");
+    expect(commandSuggestOneLine(ko, card)).not.toContain("비밀번호");
+    expect(commandSuggestOneLine(ko, card)).toBe("구민수에게 「알림 설정 열기」 카드를 제안했어요");
   });
 
   it("section 파서는 서버 normalize와 같다", () => {
@@ -397,11 +402,11 @@ describe("command_suggest(work.request.open) (#4972 S9)", () => {
   });
 
   it("라벨 표는 harness로만 갈리고 서버 표와 같은 글자다(40자 안)", () => {
-    expect(workRequestOpenLabel(null)).toBe("내 맥에 작업 맡기기");
-    expect(workRequestOpenLabel("claude")).toBe("내 맥의 Claude Code에 맡기기");
-    expect(workRequestOpenLabel("codex")).toBe("내 맥의 Codex에 맡기기");
+    expect(ko(workRequestOpenLabelKey(null))).toBe("내 맥에 작업 맡기기");
+    expect(ko(workRequestOpenLabelKey("claude"))).toBe("내 맥의 Claude Code에 맡기기");
+    expect(ko(workRequestOpenLabelKey("codex"))).toBe("내 맥의 Codex에 맡기기");
     for (const harness of [null, ...WORK_REQUEST_OPEN_HARNESSES]) {
-      expect([...workRequestOpenLabel(harness)].length).toBeLessThanOrEqual(40);
+      expect([...ko(workRequestOpenLabelKey(harness))].length).toBeLessThanOrEqual(40);
     }
   });
 
@@ -415,13 +420,13 @@ describe("command_suggest(work.request.open) (#4972 S9)", () => {
       ),
       directory
     )!;
-    const line = commandSuggestOneLine(card);
+    const line = commandSuggestOneLine(ko, card);
     expect(line).toBe("구민수에게 「내 맥의 Claude Code에 맡기기」 카드를 제안했어요");
     expect(line).not.toContain("비밀번호");
     expect(line).not.toContain("evil");
     // 깨진 제안은 어느 도구인지도 말하지 않고 기본 라벨만 말한다.
     const broken = commandSuggestCard(suggestMessage(envelope({})), directory)!;
-    expect(commandSuggestOneLine(broken)).toBe("구민수에게 「내 맥에 작업 맡기기」 카드를 제안했어요");
+    expect(commandSuggestOneLine(ko, broken)).toBe("구민수에게 「내 맥에 작업 맡기기」 카드를 제안했어요");
   });
 
   it("args 파서는 서버 normalize와 같다", () => {

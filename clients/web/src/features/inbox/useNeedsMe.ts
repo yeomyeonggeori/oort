@@ -137,6 +137,8 @@ export interface WorkDecisions {
   byRun: ReadonlyMap<string, DecidableApproval>;
   /** 원장이 답했다(로딩·미제공·첫 실패가 아니다). 이때만 「원장에 없다」가 사실이다. */
   ledgerKnown: boolean;
+  /** 원장의 첫 읽기가 끝났다(답했든 · 실패했든 · 없는 서버든). 「작업」의 첫 그림이 기다리는 때다(#5738). */
+  ledgerSettled: boolean;
   /**
    * 그 run이 지금 묻는 승인의 카드 문장(서버가 쓴 것, run 진행 bundle의 `intent`). 모르면 null. `approvalId`를 주면 그 승인의 문장일
    * 때만 준다(다른 승인의 문장을 이 승인의 내용으로 말하지 않는다).
@@ -159,6 +161,7 @@ export function useWorkDecisions(): WorkDecisions {
     return {
       byRun: workDecisionsByRun(needsAction.items, runFor),
       ledgerKnown,
+      ledgerSettled: !needsAction.ledgerLoading,
       intentFor: (channelId: string, runId: string, approvalId?: string) => {
         const run = runFor(channelId, runId);
         const snapshot = run === undefined ? undefined : runBundleSnapshot(run);
@@ -167,7 +170,7 @@ export function useWorkDecisions(): WorkDecisions {
         return snapshot.intent ?? null;
       },
     };
-  }, [needsAction.items, progress, ledgerKnown]);
+  }, [needsAction.items, progress, ledgerKnown, needsAction.ledgerLoading]);
 }
 
 export function useNeedsMeCount(): number {

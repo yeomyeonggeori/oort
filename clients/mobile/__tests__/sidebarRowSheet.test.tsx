@@ -15,7 +15,7 @@ import {Image, PixelRatio} from 'react-native';
 import '../src/boot/polyfills';
 import '../src/boot/coreHost';
 
-import {DM_CLOSE_FAILURE, DM_CLOSE_LABEL} from '@momo/core/features/channels/model';
+import {DM_CLOSE_FAILURE_KEY, DM_CLOSE_KEY} from '@momo/core/features/channels/model';
 import {LONG_PRESS_MS} from '@momo/core/features/timeline/longPressModel';
 import {CONV_ICONS} from '../src/design/icons';
 import {PRESS_VISUAL_DELAY_MS} from '../src/design/motion';
@@ -27,6 +27,11 @@ import {__resetServerBaseCache, setServerBase} from '../src/storage/serverBase';
 import {endGlyphInk} from './fixtures/endGlyphInk';
 import {installAppClock} from './fixtures/fakeClock';
 import {flat} from './testkit';
+import {catalog as koCatalog} from '@momo/core/i18n/generated/ko-KR';
+import {createMessageService} from '@momo/core/i18n/service';
+
+// 낱말은 사전에 있다(#6045). 시험은 한국어 생성물로 풀어 같은 문장을 그대로 단정한다.
+const koFormat = createMessageService({messageLocale: 'ko-KR', catalog: koCatalog}).formatMessage;
 
 /**
  * 확인 단계의 위험 단추는 서고 나서 `CONFIRM_ARM_MS` 동안 눌림을 받지 않는다(#5818 검수 High): 사람이 읽고 누르는 것처럼
@@ -648,7 +653,7 @@ describe('DM 의 「목록에서 숨기기」 (#4367, ADR-0177 증보 D7)', () =
       'mute-toggle',
       'close-dm',
     ]);
-    expect(screen.getByTestId('channel-sheet-close-dm')).toHaveTextContent(DM_CLOSE_LABEL);
+    expect(screen.getByTestId('channel-sheet-close-dm')).toHaveTextContent(koFormat(DM_CLOSE_KEY));
   });
 
   it('안 읽은 메시지가 있는 DM 에는 내밀지 않는다 (2026-10-17 소유자 결정)', async () => {
@@ -698,7 +703,7 @@ describe('DM 의 「목록에서 숨기기」 (#4367, ADR-0177 증보 D7)', () =
     longPress(DM_ROW);
     fireEvent.press(screen.getByTestId('channel-sheet-close-dm'));
     await waitFor(() => expect(screen.getByTestId('channel-sheet-error')).toBeTruthy());
-    expect(screen.getByTestId('channel-sheet-error')).toHaveTextContent(DM_CLOSE_FAILURE);
+    expect(screen.getByTestId('channel-sheet-error')).toHaveTextContent(koFormat(DM_CLOSE_FAILURE_KEY));
     expect(screen.getByTestId('channel-action-sheet')).toBeTruthy();
     expect(screen.getByTestId(DM_ROW)).toBeTruthy();
     expect(closedDms.size).toBe(0);
@@ -718,7 +723,7 @@ describe('DM 의 「목록에서 숨기기」 (#4367, ADR-0177 증보 D7)', () =
     await mount({serverClosure: true, dmRead: true});
     const row = screen.getByTestId(DM_ROW);
     const actions = row.props.accessibilityActions as {name: string; label: string}[];
-    expect(actions.map(action => action.label)).toContain(DM_CLOSE_LABEL);
+    expect(actions.map(action => action.label)).toContain(koFormat(DM_CLOSE_KEY));
     fireEvent(row, 'accessibilityAction', {nativeEvent: {actionName: 'momoChannel:close-dm'}});
     await waitFor(() => expect(closureCalls()).toHaveLength(1));
     expect(closureCalls()[0].body).toEqual({seenSeq: 2});

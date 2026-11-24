@@ -16,7 +16,7 @@ import {
 import { attachmentPreviewLine } from "@momo/core/features/attachments/model";
 import { isComposingEvent } from "@momo/core/features/chat/composerKeys";
 import { hasRenderableBody } from "@momo/core/features/timeline/bodySlot";
-import { replyFailureMessage } from "@momo/core/features/timeline/actionCopy";
+import { replyFailureKey } from "@momo/core/features/timeline/actionCopy";
 import { Button } from "@/design/ui/button";
 import { cn } from "@/design/lib/cn";
 import { useSession } from "@/app/session";
@@ -219,6 +219,7 @@ function ReplyBox({
   onSent: () => void;
 }) {
   const { workspaceId } = useSession();
+  const formatMessage = useFormatMessage();
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -242,11 +243,11 @@ function ReplyBox({
       setDraft("");
       onSent();
     } catch (err) {
-      setError(replyFailureMessage(err));
+      setError(formatMessage(replyFailureKey(err)));
     } finally {
       setSending(false);
     }
-  }, [body, sending, workspaceId, entry, onSent]);
+  }, [body, sending, workspaceId, entry, onSent, formatMessage]);
 
   return (
     <div className="flex flex-col gap-2 border-t border-line px-4 py-3">

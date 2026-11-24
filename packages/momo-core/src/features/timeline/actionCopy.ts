@@ -1,4 +1,5 @@
 import { ApiError } from "../../lib/api";
+import type { PlainMessageKey } from "../../i18n/keys";
 
 // =============================================================================
 // Message-action failure copy (B11), following the B8 rule: the server's wire
@@ -12,6 +13,7 @@ import { ApiError } from "../../lib/api";
 // line rather than leaking the wire string.
 //
 // Pure and exported so the tests assert the mapping without mounting anything.
+// 문장은 `i18n/catalogs/<언어>/timeline.json`(`timeline.actionFailure.*`)에 있고, 여기는 상태 → 키만 정한다(#6044).
 // =============================================================================
 
 function statusOf(error: unknown): number {
@@ -19,51 +21,51 @@ function statusOf(error: unknown): number {
 }
 
 /** The line every unmapped failure shares — never a raw status or wire text. */
-const GENERIC = "요청을 끝내지 못했습니다. 잠시 뒤에 다시 시도하세요.";
+const GENERIC = "timeline.actionFailure.generic" satisfies PlainMessageKey;
 
-export function editFailureMessage(error: unknown): string {
+export function editFailureKey(error: unknown): PlainMessageKey {
   switch (statusOf(error)) {
     case 400:
       // Two 400s reach here: an empty body, and an edit of a message someone
       // already deleted. The empty body is caught before the request, so the
       // one a person actually sees is the tombstone.
-      return "이미 삭제된 메시지는 고칠 수 없습니다.";
+      return "timeline.actionFailure.editDeleted";
     case 403:
-      return "내가 보낸 메시지만 고칠 수 있습니다.";
+      return "timeline.actionFailure.editNotAuthor";
     case 404:
-      return "메시지를 찾지 못했습니다. 이미 지워졌을 수 있습니다.";
+      return "timeline.actionFailure.messageNotFound";
     default:
-      return "메시지를 고치지 못했습니다. 잠시 뒤에 다시 시도하세요.";
+      return "timeline.actionFailure.editFailed";
   }
 }
 
-export function deleteFailureMessage(error: unknown): string {
+export function deleteFailureKey(error: unknown): PlainMessageKey {
   switch (statusOf(error)) {
     case 403:
-      return "내가 보낸 메시지만 지울 수 있습니다.";
+      return "timeline.actionFailure.deleteNotAuthor";
     case 404:
       // The delete is idempotent server-side, so a 404 means the row is gone
       // entirely rather than already tombstoned — nothing left to do.
-      return "메시지를 찾지 못했습니다. 이미 지워졌을 수 있습니다.";
+      return "timeline.actionFailure.messageNotFound";
     default:
-      return "메시지를 지우지 못했습니다. 잠시 뒤에 다시 시도하세요.";
+      return "timeline.actionFailure.deleteFailed";
   }
 }
 
-export function reactionFailureMessage(error: unknown): string {
+export function reactionFailureKey(error: unknown): PlainMessageKey {
   switch (statusOf(error)) {
     case 400:
-      return "삭제된 메시지에는 반응을 남길 수 없습니다.";
+      return "timeline.actionFailure.reactDeleted";
     case 403:
-      return "이 채널의 멤버만 반응할 수 있습니다.";
+      return "timeline.actionFailure.reactNotMember";
     case 404:
-      return "메시지를 찾지 못했습니다. 이미 지워졌을 수 있습니다.";
+      return "timeline.actionFailure.messageNotFound";
     case 409:
       // The per-message cap. Naming the number is what makes this actionable —
       // "한도" alone reads as a bug rather than a rule.
-      return "이 메시지에 달린 반응이 200개를 넘었습니다. 기존 반응을 하나 지운 뒤 다시 눌러 보세요.";
+      return "timeline.actionFailure.reactLimit";
     default:
-      return "반응을 남기지 못했습니다. 잠시 뒤에 다시 시도하세요.";
+      return "timeline.actionFailure.reactFailed";
   }
 }
 
@@ -73,33 +75,33 @@ export function reactionFailureMessage(error: unknown): string {
  * fact — the thing to unpin is somewhere else. So the sentence sends them to the
  * list rather than telling them to undo something here.
  */
-export function pinFailureMessage(error: unknown): string {
+export function pinFailureKey(error: unknown): PlainMessageKey {
   switch (statusOf(error)) {
     case 400:
-      return "삭제된 메시지는 고정할 수 없습니다.";
+      return "timeline.actionFailure.pinDeleted";
     case 403:
-      return "이 채널의 멤버만 메시지를 고정할 수 있습니다.";
+      return "timeline.actionFailure.pinNotMember";
     case 404:
-      return "메시지를 찾지 못했습니다. 이미 지워졌을 수 있습니다.";
+      return "timeline.actionFailure.messageNotFound";
     case 409:
-      return "이 채널에 고정된 메시지가 100개를 넘었습니다. 고정 목록에서 하나를 해제한 뒤 다시 눌러 보세요.";
+      return "timeline.actionFailure.pinLimit";
     default:
-      return "메시지를 고정하지 못했습니다. 잠시 뒤에 다시 시도하세요.";
+      return "timeline.actionFailure.pinFailed";
   }
 }
 
-export function replyFailureMessage(error: unknown): string {
+export function replyFailureKey(error: unknown): PlainMessageKey {
   switch (statusOf(error)) {
     case 400:
-      return "이 메시지에는 답글을 달 수 없습니다. 원본이 삭제됐거나 이미 답글입니다.";
+      return "timeline.actionFailure.replyNotAllowed";
     case 403:
-      return "이 채널의 멤버만 답글을 달 수 있습니다.";
+      return "timeline.actionFailure.replyNotMember";
     case 404:
-      return "원본 메시지를 찾지 못했습니다. 이미 지워졌을 수 있습니다.";
+      return "timeline.actionFailure.replyOriginalNotFound";
     default:
-      return "답글을 보내지 못했습니다. 잠시 뒤에 다시 시도하세요.";
+      return "timeline.actionFailure.replyFailed";
   }
 }
 
-/** The shared fallback, exported so a caller can reuse it verbatim. */
-export const genericActionFailureMessage = GENERIC;
+/** The shared fallback key, exported so a caller can reuse it verbatim. */
+export const GENERIC_ACTION_FAILURE_KEY = GENERIC;

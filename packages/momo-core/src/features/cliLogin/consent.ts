@@ -1,4 +1,6 @@
 import { ApiError } from "../../lib/api";
+import type { LocaleService } from "../../i18n/context";
+import type { MessageRef, PlainMessageKey } from "../../i18n/keys";
 import { NetworkError } from "../../lib/http";
 import {
   bool,
@@ -10,6 +12,10 @@ import {
 } from "../../lib/wire";
 import { DEFAULT_ROLE_LABELS } from "../directory/model";
 import { oauthRequestExpiry } from "../hostedAgents/oauthConsent";
+
+// 문구는 `i18n/catalogs/<언어>/cliLogin.json`에 있다. 여기는 어느 자리가 어느 키를 읽는지만 정하고, 문장은 화면이
+// 그릴 때 지금 언어로 푼다. 값 둘 이상을 엮어 문장을 짓는 함수만 `formatMessage`를 첫 인자로 받는다.
+type FormatMessage = LocaleService["formatMessage"];
 
 // =============================================================================
 // 명령줄(oort CLI) 브라우저 로그인 동의 (ADR-0216 D6-나, #4700).
@@ -215,45 +221,52 @@ export interface CliScopePresetChoice {
   disabled?: boolean;
 }
 
-const SCOPE_PLAIN: Record<CliScope, string> = {
-  [CLI_SCOPE_IDENTITY]: "내가 누구인지 확인",
-  [CLI_SCOPE_CHANNELS_READ]: "채널 목록 읽기",
-  [CLI_SCOPE_MESSAGES_READ]: "채널의 메시지와 스레드 읽기",
-  [CLI_SCOPE_MESSAGES_WRITE]: "내 이름으로 메시지 보내기",
-  [CLI_SCOPE_INBOX_READ]: "받은 편지함 읽기",
-};
+const SCOPE_PLAIN_KEYS = {
+  [CLI_SCOPE_IDENTITY]: "cliLogin.scope.identity",
+  [CLI_SCOPE_CHANNELS_READ]: "cliLogin.scope.channelsRead",
+  [CLI_SCOPE_MESSAGES_READ]: "cliLogin.scope.messagesRead",
+  [CLI_SCOPE_MESSAGES_WRITE]: "cliLogin.scope.messagesWrite",
+  [CLI_SCOPE_INBOX_READ]: "cliLogin.scope.inboxRead",
+} as const satisfies Record<CliScope, PlainMessageKey>;
 
-/** 허용했을 때 열리는 일을 사람 말로, 정규 순서로. */
-export function cliScopeSentences(granted: readonly CliScope[]): string[] {
+/** 허용했을 때 열리는 일의 문장 키, 정규 순서로. 화면이 지금 언어로 푼다. */
+export function cliScopeSentenceKeys(granted: readonly CliScope[]): PlainMessageKey[] {
   return CLI_SCOPES.filter((scope) => granted.includes(scope)).map(
-    (scope) => SCOPE_PLAIN[scope]
+    (scope) => SCOPE_PLAIN_KEYS[scope]
   );
 }
 
 /**
  * 프리셋 둘과 그 설명. 설명은 **이 요청이 실제로 담은 범위**에서 풀어쓴다: 요청에
  * 받은 편지함이 없으면 「읽기만」의 설명에도 없다. 그래서 고르는 줄이 곧 허용되는
- * 일의 목록이고, 따로 결과 상자를 두지 않는다.
+ * 일의 목록이고, 따로 결과 상자를 두지 않는다. 설명이 허용되는 일의 문장들을 이어 지으므로 `formatMessage`를 받는다.
  */
 export function cliScopePresetChoices(
+  formatMessage: FormatMessage,
   preview: Pick<CliConsentPreview, "canSend" | "requestedScopes">
 ): CliScopePresetChoice[] {
-  const reads = cliScopeSentences(cliGrantedScopes(preview.requestedScopes, "read"));
-  const readSend = cliScopeSentences(
-    cliGrantedScopes(preview.requestedScopes, "read-send")
-  );
+  const scopes = (preset: CliScopePreset): string =>
+    cliScopeSentenceKeys(cliGrantedScopes(preview.requestedScopes, preset))
+      .map((key) => formatMessage(key))
+      .join(CLI_SCOPE_JOINER);
   return [
     {
       id: "read",
-      label: CLI_PRESET_READ_LABEL,
-      detail: `${reads.join(CLI_SCOPE_JOINER)}. ${CLI_PRESET_READ_CLOSED}`,
+      label: formatMessage(CLI_PRESET_READ_LABEL_KEY),
+      detail: formatMessage("cliLogin.preset.detail", {
+        scopes: scopes("read"),
+        note: formatMessage(CLI_PRESET_READ_CLOSED_KEY),
+      }),
     },
     {
       id: "read-send",
-      label: CLI_PRESET_SEND_LABEL,
+      label: formatMessage(CLI_PRESET_SEND_LABEL_KEY),
       detail: preview.canSend
-        ? `${readSend.join(CLI_SCOPE_JOINER)}. ${CLI_PRESET_SEND_CAUTION}`
-        : CLI_PRESET_SEND_UNAVAILABLE,
+        ? formatMessage("cliLogin.preset.detail", {
+            scopes: scopes("read-send"),
+            note: formatMessage(CLI_PRESET_SEND_CAUTION_KEY),
+          })
+        : formatMessage(CLI_PRESET_SEND_UNAVAILABLE_KEY),
       ...(preview.canSend ? {} : { disabled: true }),
     },
   ];
@@ -403,19 +416,22 @@ function retryAfterOf(error: unknown): number | undefined {
   return error instanceof CliLoginApiError ? error.retryAfterSeconds : undefined;
 }
 
-/** 「N초 뒤」·「약 N분 뒤」. 모르면 null. */
-export function cliRetryWhen(seconds: number | undefined): string | null {
+/** 「N초 뒤」·「약 N분 뒤」(`cliLogin.retry.*`). 모르면 null. */
+export function cliRetryWhen(
+  formatMessage: FormatMessage,
+  seconds: number | undefined
+): string | null {
   if (seconds === undefined || !Number.isFinite(seconds) || seconds < 1) return null;
   const whole = Math.ceil(seconds);
-  if (whole <= 90) return `${whole}초 뒤`;
-  return `약 ${Math.ceil(whole / 60)}분 뒤`;
+  if (whole <= 90) return formatMessage("cliLogin.retry.inSeconds", { seconds: whole });
+  return formatMessage("cliLogin.retry.inMinutes", { minutes: Math.ceil(whole / 60) });
 }
 
-function waitSentence(error: unknown): string {
-  const when = cliRetryWhen(retryAfterOf(error));
+function waitSentence(formatMessage: FormatMessage, error: unknown): string {
+  const when = cliRetryWhen(formatMessage, retryAfterOf(error));
   return when === null
-    ? CLI_CONSENT_RETRY_LATER
-    : `${when}에 다시 시도해 주세요.`;
+    ? formatMessage(CLI_CONSENT_RETRY_LATER_KEY)
+    : formatMessage("cliLogin.failure.retryAt", { when });
 }
 
 /**
@@ -423,37 +439,39 @@ function waitSentence(error: unknown): string {
  * STATUS와 코드로만 가르고 서버 문장은 이어 붙이지 않는다.
  */
 export function cliConsentFailureMessage(
+  formatMessage: FormatMessage,
   action: CliConsentAction,
   error: unknown
 ): string {
-  const prefix = cliActionPrefix(action);
-  if (error instanceof NetworkError) return `${prefix} ${error.message}`;
-  if (error instanceof WireShapeError) return `${prefix} ${CLI_CONSENT_RERUN}`;
+  const lead = formatMessage(CLI_ACTION_LEAD_KEYS[action]);
+  const framed = (detail: string): string =>
+    formatMessage("cliLogin.failure.frame", { lead, detail });
+  if (error instanceof NetworkError) return framed(error.message);
+  if (error instanceof WireShapeError) return framed(formatMessage(CLI_CONSENT_RERUN_KEY));
   if (error instanceof ApiError) {
-    if (error.status === 400) return `${prefix} ${CLI_CONSENT_RERUN}`;
+    if (error.status === 400) return framed(formatMessage(CLI_CONSENT_RERUN_KEY));
     if (error.status === 429) {
-      return `${prefix} 요청이 너무 잦아요. ${waitSentence(error)}`;
+      return framed(
+        formatMessage("cliLogin.failure.tooMany", { wait: waitSentence(formatMessage, error) })
+      );
     }
     if (error.status === 503) {
-      return `${prefix} 서버가 잠깐 바빠요. ${waitSentence(error)}`;
+      return framed(
+        formatMessage("cliLogin.failure.busy", { wait: waitSentence(formatMessage, error) })
+      );
     }
     if (error.status === 409 && error.code === CLI_ERROR_CREDENTIAL_LIMIT) {
-      return CLI_CONSENT_CREDENTIAL_LIMIT;
+      return formatMessage(CLI_CONSENT_CREDENTIAL_LIMIT_KEY);
     }
   }
-  return `${prefix} ${CLI_CONSENT_RETRY_LATER}`;
+  return framed(formatMessage(CLI_CONSENT_RETRY_LATER_KEY));
 }
 
-function cliActionPrefix(action: CliConsentAction): string {
-  switch (action) {
-    case "preview":
-      return "로그인 요청을 불러오지 못했어요.";
-    case "approve":
-      return "허용을 저장하지 못했어요.";
-    case "deny":
-      return "거절을 저장하지 못했어요.";
-  }
-}
+const CLI_ACTION_LEAD_KEYS = {
+  preview: "cliLogin.failure.previewLead",
+  approve: "cliLogin.failure.approveLead",
+  deny: "cliLogin.failure.denyLead",
+} as const satisfies Record<CliConsentAction, PlainMessageKey>;
 
 /** 로그인 세션이 끝난 경우. 화면은 이때만 다시 로그인으로 되돌린다. */
 export function isCliSessionExpired(error: unknown): boolean {
@@ -490,7 +508,7 @@ export type CliDecisionOutcome =
   | { kind: "session-expired" }
   | { kind: "terminal"; terminal: CliTerminalKind }
   | { kind: "wrong-password" }
-  | { kind: "failure"; message: string };
+  | { kind: "failure"; action: Exclude<CliConsentAction, "preview">; error: unknown };
 
 /**
  * 결정(허용·거절) 실패를 어떻게 접는가.
@@ -518,7 +536,8 @@ export function classifyCliDecisionError(
   }
   const terminal = cliTerminalOf(error);
   if (terminal !== null) return { kind: "terminal", terminal };
-  return { kind: "failure", message: cliConsentFailureMessage(action, error) };
+  // 문장은 화면이 지금 언어로 짓는다(`cliConsentFailureMessage`).
+  return { kind: "failure", action, error };
 }
 
 // ---- 화면 선택 (순수) -------------------------------------------------------
@@ -528,7 +547,7 @@ export type CliConsentScreen =
   | { kind: "returning" }
   | { kind: "form" }
   | { kind: "terminal"; terminal: CliTerminalKind }
-  | { kind: "retry"; message: string };
+  | { kind: "retry"; error: unknown };
 
 export interface CliConsentScreenInput {
   /** 결정(허용·거절)이 낸 종료. 있으면 폼으로 되돌아가지 않는다. */
@@ -557,10 +576,7 @@ export function cliConsentScreen(input: CliConsentScreenInput): CliConsentScreen
     if (isCliSessionExpired(input.previewError)) return { kind: "loading" };
     const terminal = cliTerminalOf(input.previewError);
     if (terminal !== null) return { kind: "terminal", terminal };
-    return {
-      kind: "retry",
-      message: cliConsentFailureMessage("preview", input.previewError),
-    };
+    return { kind: "retry", error: input.previewError };
   }
   if (input.data === null) return { kind: "loading" };
   if (oauthRequestExpiry(input.data.expiresAtMs, input.nowMs).expired) {
@@ -591,116 +607,109 @@ export function cliCanDeny(input: Omit<CliDecideEnablement, "hasPassword">): boo
 
 // ---- 문구 -------------------------------------------------------------------
 
-export const CLI_CONSENT_TITLE = "터미널 로그인 승인";
-
-export const CLI_CONSENT_LEAD =
-  "터미널의 oort CLI가 내 계정으로 이 워크스페이스에 연결하려고 해요.";
+export const CLI_CONSENT_TITLE_KEY = "cliLogin.consent.title" satisfies PlainMessageKey;
+export const CLI_CONSENT_LEAD_KEY = "cliLogin.consent.lead" satisfies PlainMessageKey;
 
 /** 중계 피싱을 막는 한 줄(ADR-0216 T4): 터미널에 보이는 값과 대조한다. */
-export const CLI_CONSENT_CHECK_NOTE =
-  "터미널에 표시된 서버 주소와 기기 이름이 아래와 같을 때만 허용해 주세요. 다르거나 내가 시작한 로그인이 아니면 허용하지 말고 거절해 주세요.";
+export const CLI_CONSENT_CHECK_NOTE_KEY = "cliLogin.consent.checkNote" satisfies PlainMessageKey;
 
-export const CLI_CONSENT_CLIENT_KEY = "클라이언트";
-export const CLI_CONSENT_HOST_KEY = "서버 호스트";
-export const CLI_CONSENT_DEVICE_KEY = "기기 이름";
-export const CLI_CONSENT_DEVICE_MISSING = "기기 이름을 보내지 않았어요";
-export const CLI_CONSENT_WORKSPACE_KEY = "워크스페이스";
-export const CLI_CONSENT_MEMBER_KEY = "승인하는 사람";
+export const CLI_CONSENT_CLIENT_KEY = "cliLogin.consent.clientLabel" satisfies PlainMessageKey;
+export const CLI_CONSENT_HOST_KEY = "cliLogin.consent.hostLabel" satisfies PlainMessageKey;
+export const CLI_CONSENT_DEVICE_KEY = "cliLogin.consent.deviceLabel" satisfies PlainMessageKey;
+export const CLI_CONSENT_DEVICE_MISSING_KEY = "cliLogin.consent.deviceMissing" satisfies PlainMessageKey;
+export const CLI_CONSENT_WORKSPACE_KEY = "cliLogin.consent.workspaceLabel" satisfies PlainMessageKey;
+export const CLI_CONSENT_MEMBER_KEY = "cliLogin.consent.memberLabel" satisfies PlainMessageKey;
 
 /** 기기 이름이 보증된 값이 아니라는 사실. 이름이 있든 없든 늘 붙는다. */
-export const CLI_CONSENT_DEVICE_NOTE = "기기 이름은 연결하는 쪽이 정한 값이에요.";
+export const CLI_CONSENT_DEVICE_NOTE_KEY = "cliLogin.consent.deviceNote" satisfies PlainMessageKey;
 
-export const CLI_PRESET_LEGEND = "허용할 범위";
-export const CLI_PRESET_HINT =
-  "허용한 뒤에는 범위를 바꿀 수 없어서, 바꾸려면 새로 연결해야 해요.";
-export const CLI_PRESET_READ_LABEL = "읽기만";
-export const CLI_PRESET_SEND_LABEL = "읽기와 보내기";
+export const CLI_PRESET_LEGEND_KEY = "cliLogin.consent.presetLegend" satisfies PlainMessageKey;
+export const CLI_PRESET_HINT_KEY = "cliLogin.consent.presetHint" satisfies PlainMessageKey;
+export const CLI_PRESET_READ_LABEL_KEY = "cliLogin.preset.readLabel" satisfies PlainMessageKey;
+export const CLI_PRESET_SEND_LABEL_KEY = "cliLogin.preset.sendLabel" satisfies PlainMessageKey;
 /** 설명 안에서 허용되는 일들을 잇는 구분자. */
 export const CLI_SCOPE_JOINER = " · ";
-export const CLI_PRESET_READ_CLOSED = "보내기, 고치기, 지우기와 설정 변경은 할 수 없어요.";
-export const CLI_PRESET_SEND_CAUTION =
-  "보낸 메시지는 바로 전송되고 고치거나 지울 수 없어요. 멘션은 에이전트를 깨울 수 있어요.";
-export const CLI_PRESET_SEND_UNAVAILABLE =
-  "이 로그인 요청에는 메시지 보내기가 들어 있지 않아서 고를 수 없어요.";
+export const CLI_PRESET_READ_CLOSED_KEY = "cliLogin.preset.readClosed" satisfies PlainMessageKey;
+export const CLI_PRESET_SEND_CAUTION_KEY = "cliLogin.preset.sendCaution" satisfies PlainMessageKey;
+export const CLI_PRESET_SEND_UNAVAILABLE_KEY =
+  "cliLogin.preset.sendUnavailable" satisfies PlainMessageKey;
 
 /** 연결의 수명. 숫자는 서버가 preview로 준 값이다. */
 export function cliConsentLifetime(preview: {
   maxDays: number;
   idleDays: number;
   accessMinutes: number;
-}): string {
-  return `연결은 최대 ${preview.maxDays}일 유지되고, ${preview.idleDays}일 동안 쓰지 않으면 끊겨요. 로그인 상태는 ${preview.accessMinutes}분마다 자동으로 갱신돼요. 비밀번호를 바꾸면 이 연결도 바로 끊겨요.`;
+}): MessageRef<"cliLogin.consent.lifetime"> {
+  return {
+    key: "cliLogin.consent.lifetime",
+    values: {
+      maxDays: preview.maxDays,
+      idleDays: preview.idleDays,
+      accessMinutes: preview.accessMinutes,
+    },
+  };
 }
 
-export const CLI_CONSENT_PASSWORD_LABEL = "현재 비밀번호";
-export const CLI_CONSENT_PASSWORD_HINT =
-  "허용하기 전에 내 비밀번호를 한 번 더 확인해요.";
-export const CLI_CONSENT_PASSWORD_WRONG =
-  "비밀번호가 맞지 않아요. 다시 입력해 주세요.";
+export const CLI_CONSENT_PASSWORD_LABEL_KEY = "cliLogin.consent.passwordLabel" satisfies PlainMessageKey;
+export const CLI_CONSENT_PASSWORD_HINT_KEY = "cliLogin.consent.passwordHint" satisfies PlainMessageKey;
+export const CLI_CONSENT_PASSWORD_WRONG_KEY = "cliLogin.consent.passwordWrong" satisfies PlainMessageKey;
 
-export const CLI_CONSENT_APPROVE_LABEL = "허용";
-export const CLI_CONSENT_APPROVE_BUSY = "허용 중";
-export const CLI_CONSENT_DENY_LABEL = "거절";
-export const CLI_CONSENT_DENY_BUSY = "거절 중";
+export const CLI_CONSENT_APPROVE_LABEL_KEY = "cliLogin.consent.approve" satisfies PlainMessageKey;
+export const CLI_CONSENT_APPROVE_BUSY_KEY = "cliLogin.consent.approveBusy" satisfies PlainMessageKey;
+export const CLI_CONSENT_DENY_LABEL_KEY = "cliLogin.consent.deny" satisfies PlainMessageKey;
+export const CLI_CONSENT_DENY_BUSY_KEY = "cliLogin.consent.denyBusy" satisfies PlainMessageKey;
 
-export const CLI_CONSENT_OFFLINE_NOTE =
-  "연결이 끊겼어요. 허용과 거절은 다시 연결된 뒤에 할 수 있어요.";
+export const CLI_CONSENT_OFFLINE_NOTE_KEY = "cliLogin.consent.offlineNote" satisfies PlainMessageKey;
 
-export const CLI_CONSENT_RETRY_LATER = "잠시 뒤에 다시 시도해 주세요.";
+export const CLI_CONSENT_RETRY_LATER_KEY = "cliLogin.consent.retryLater" satisfies PlainMessageKey;
 
 /** 다시 눌러도 달라지지 않는 실패의 다음 걸음. */
-export const CLI_CONSENT_RERUN = "터미널에서 oort login을 다시 실행해 주세요.";
+export const CLI_CONSENT_RERUN_KEY = "cliLogin.consent.rerun" satisfies PlainMessageKey;
 
-export const CLI_CONSENT_CREDENTIAL_LIMIT =
-  "이 계정으로 로그인한 기기가 너무 많아요. 쓰지 않는 기존 연결을 정리한 뒤 다시 시도해 주세요.";
+export const CLI_CONSENT_CREDENTIAL_LIMIT_KEY =
+  "cliLogin.consent.credentialLimit" satisfies PlainMessageKey;
 
 /** 결정 뒤 터미널로 돌아가는 짧은 종료. */
-export const CLI_CONSENT_RETURNING =
-  "결정을 저장했어요. 터미널로 돌아가는 중이에요.";
+export const CLI_CONSENT_RETURNING_KEY = "cliLogin.consent.returning" satisfies PlainMessageKey;
 
-export const CLI_CONSENT_SIGNIN_DETAIL =
-  "이 로그인 요청을 확인하려면 먼저 이 워크스페이스에 로그인해야 해요. 로그인하면 이 요청으로 돌아와요.";
+export const CLI_CONSENT_SIGNIN_DETAIL_KEY = "cliLogin.consent.signinDetail" satisfies PlainMessageKey;
 
-export const CLI_CONSENT_LOADING_SR = "로그인 요청을 불러오는 중이에요.";
+export const CLI_CONSENT_LOADING_SR_KEY = "cliLogin.consent.loadingSr" satisfies PlainMessageKey;
 
-export const CLI_CONSENT_RETRY_ACTION = "다시 시도";
-export const CLI_CONSENT_DISMISS_ACTION = "닫기";
+/** 다시 시도 단추는 공용 낱말이다. */
+export const CLI_CONSENT_RETRY_ACTION_KEY = "common.action.retry" satisfies PlainMessageKey;
+/** 알림을 닫는 닫기(Dismiss)는 이 화면의 문장이다 — 대화 상자를 닫는 `common.action.close`가 아니다. */
+export const CLI_CONSENT_DISMISS_ACTION_KEY = "cliLogin.consent.dismiss" satisfies PlainMessageKey;
 
-export interface CliTerminalCopy {
-  headline: string;
-  detail: string;
+export interface CliTerminalCopyKeys {
+  headline: PlainMessageKey;
+  detail: PlainMessageKey;
 }
 
 /** 종료 화면의 문구. 모두 「아무것도 허용되지 않았다」를 먼저 말한다. */
-export const CLI_TERMINAL_COPY: Readonly<Record<CliTerminalKind, CliTerminalCopy>> = {
+export const CLI_TERMINAL_KEYS: Readonly<Record<CliTerminalKind, CliTerminalCopyKeys>> = {
   "not-found": {
-    headline: "요청이 만료됐거나 올바르지 않아요.",
-    detail:
-      "이 화면에서는 아무것도 허용되지 않았어요. 터미널에서 oort login을 다시 실행해 주세요.",
+    headline: "cliLogin.terminal.notFoundHeadline",
+    detail: "cliLogin.terminal.notFoundDetail",
   },
   expired: {
-    headline: "이 로그인 요청이 만료됐어요.",
-    detail:
-      "만료된 요청은 허용할 수 없어요. 터미널에서 oort login을 다시 실행해 주세요.",
+    headline: "cliLogin.terminal.expiredHeadline",
+    detail: "cliLogin.terminal.expiredDetail",
   },
   "already-decided": {
-    headline: "이미 처리된 요청이에요.",
-    detail:
-      "결정은 한 번만 기록돼요. 필요하면 터미널에서 oort login을 다시 실행해 주세요.",
+    headline: "cliLogin.terminal.alreadyDecidedHeadline",
+    detail: "cliLogin.terminal.alreadyDecidedDetail",
   },
   "access-denied": {
-    headline: "이 워크스페이스에서는 명령줄 접근을 만들 수 없어요.",
-    detail:
-      "관리자가 허용해야 쓸 수 있어요. 필요하면 워크스페이스 관리자에게 문의해 주세요. 이 화면에서는 아무것도 허용되지 않았어요.",
+    headline: "cliLogin.terminal.accessDeniedHeadline",
+    detail: "cliLogin.terminal.accessDeniedDetail",
   },
   "password-unavailable": {
-    headline: "이 계정은 비밀번호를 확인할 수 없어요.",
-    detail:
-      "이 계정에는 비밀번호가 없어서 허용 전에 확인할 수 없어요. 지금은 이 방법으로 명령줄에 연결할 수 없고, 이 화면에서는 아무것도 허용되지 않았어요.",
+    headline: "cliLogin.terminal.passwordUnavailableHeadline",
+    detail: "cliLogin.terminal.passwordUnavailableDetail",
   },
   "redirect-refused": {
-    headline: "터미널로 돌아갈 주소를 확인하지 못했어요.",
-    detail:
-      "서버 응답에서 이 기기의 터미널(127.0.0.1)로 돌아가는 주소를 확인하지 못해서 따라가지 않았어요. 터미널에서 oort login을 다시 실행해 주세요.",
+    headline: "cliLogin.terminal.redirectRefusedHeadline",
+    detail: "cliLogin.terminal.redirectRefusedDetail",
   },
 };

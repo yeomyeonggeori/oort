@@ -20,6 +20,8 @@
 //     number moves and this module does not.
 // =============================================================================
 
+import type { FailureMessage } from "./failureMessage";
+
 /** Fewest characters a new password may have (input as typed). */
 export const NEW_PASSWORD_MIN_CHARS = 10;
 
@@ -53,12 +55,19 @@ export const PASSWORD_TOO_LONG_CODE = "password_too_long";
  * and "72 Latin" and still 73 bytes. The register is the form's (합니다체); the
  * rate is stated the way `eventSubscriptions.ts` states its own byte ceiling.
  */
-export function passwordRuleCopy(code: string | undefined): string | null {
+export function passwordRuleCopy(code: string | undefined): FailureMessage | null {
   switch (code) {
     case PASSWORD_TOO_SHORT_CODE:
-      return `비밀번호가 너무 짧습니다. ${NEW_PASSWORD_MIN_CHARS}자 이상으로 입력하세요.`;
+      return { key: "auth.passwordRule.tooShort", values: { minChars: NEW_PASSWORD_MIN_CHARS } };
     case PASSWORD_TOO_LONG_CODE:
-      return `비밀번호가 너무 깁니다. ${NEW_PASSWORD_MAX_BYTES}바이트 이하로 입력하세요. 한글은 한 자에 ${HANGUL_SYLLABLE_BYTES}바이트입니다(한글만이면 ${NEW_PASSWORD_MAX_HANGUL}자).`;
+      return {
+        key: "auth.passwordRule.tooLong",
+        values: {
+          maxBytes: String(NEW_PASSWORD_MAX_BYTES),
+          hangulBytes: String(HANGUL_SYLLABLE_BYTES),
+          maxHangul: String(NEW_PASSWORD_MAX_HANGUL),
+        },
+      };
     default:
       return null;
   }

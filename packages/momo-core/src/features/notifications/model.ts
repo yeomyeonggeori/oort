@@ -121,6 +121,13 @@ export type NotifyDecision =
 
 // ---- copy ------------------------------------------------------------------
 
+/** The three words a banner says itself (dictionary `notifications.banner.*`); the caller formats them in the current language. */
+export type NotifyCopyKey =
+  | "notifications.banner.code"
+  | "notifications.banner.secret"
+  | "notifications.banner.approvalTitle";
+export type NotifyFormat = (key: NotifyCopyKey, values?: { actor: string }) => string;
+
 /** Body budget. Longer than a macOS banner renders anyway. */
 export const BODY_MAX = 80;
 
@@ -152,18 +159,18 @@ const INLINE_CODE = /`[^`\n]*`/g;
  * line is dropped for the same reason the line is truncated: the notification
  * is a pointer to the message, not a copy of it.
  */
-export function notificationBody(raw: string | undefined): string | undefined {
+export function notificationBody(raw: string | undefined, formatMessage: NotifyFormat): string | undefined {
   if (raw === undefined) return undefined;
-  let text = raw.replace(FENCED_CODE, "\n").replace(INLINE_CODE, " 코드 ");
+  let text = raw.replace(FENCED_CODE, "\n").replace(INLINE_CODE, ` ${formatMessage("notifications.banner.code")} `);
   const hadCode = text !== raw;
   for (const pattern of SECRET_PATTERNS) {
-    text = text.replace(pattern, "비공개 값");
+    text = text.replace(pattern, formatMessage("notifications.banner.secret"));
   }
   const line = text
     .split("\n")
     .map((candidate) => candidate.replace(/\s+/g, " ").trim())
     .find((candidate) => candidate.length > 0);
-  if (line === undefined || line === "") return hadCode ? "코드" : undefined;
+  if (line === undefined || line === "") return hadCode ? formatMessage("notifications.banner.code") : undefined;
   if (line.length <= BODY_MAX) return line;
   return `${line.slice(0, BODY_MAX - 1).trimEnd()}…`;
 }
@@ -356,6 +363,8 @@ export interface NotifyContext {
    * 이 모듈은 사전도 언어도 모른다. 함수인 이유는 그런 메시지가 올 때만 읽기 위해서다.
    */
   inviteLinkSentence: () => string;
+  /** The banner's own words (`NotifyCopyKey`), read by the caller in the current language like `inviteLinkSentence`. */
+  formatMessage: NotifyFormat;
   nowMs: number;
   maxAgeMs?: number;
   /**
@@ -424,9 +433,11 @@ export function notifyDecision(
     title: context.actorFor(message.authorMemberId),
   };
   // 「무엇이 일어났나 + 어디서」 순서(#3339 시안): 승인은 종류 이름이 먼저다.
-  if (kind === "approval") notification.title = `승인 필요 · ${notification.title}`;
+  if (kind === "approval") {
+    notification.title = context.formatMessage("notifications.banner.approvalTitle", { actor: notification.title });
+  }
   const body =
-    notificationBody(notificationSource(message, kind, context.inviteLinkSentence)) ??
+    notificationBody(notificationSource(message, kind, context.inviteLinkSentence), context.formatMessage) ??
     // 글 없이 사진·파일만 보낸 DM·멘션(#4294): 제목만 있는 배너가 되지 않게 개수로 말한다.
     // 본문이 있으면 본문이 이긴다(위 식이 이미 답했다). 승인 카드에는 첨부가 없다.
     (kind === "approval" ? undefined : (attachmentPreviewLine(message.attachments) ?? undefined));
@@ -488,7 +499,7 @@ function workPermissionDecision(
     bannerGroup: "waiting",
   };
   const body = context.workPermissionSentence?.(subject);
-  if (body !== undefined && body !== "") notification.body = notificationBody(body) ?? body;
+  if (body !== undefined && body !== "") notification.body = notificationBody(body, context.formatMessage) ?? body;
   return { show: true, notification };
 }
 

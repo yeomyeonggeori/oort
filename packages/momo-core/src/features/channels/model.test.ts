@@ -5,44 +5,49 @@ import { NetworkError } from "../../lib/http";
 import { createMessageService } from "../../i18n/service";
 import { catalog as ko } from "../../i18n/generated/ko-KR";
 import {
-  CHANNEL_COPY_FAILURE,
-  CHANNEL_COPY_GROUP_LABEL,
-  CHANNEL_COPY_ID_DONE_LABEL,
-  CHANNEL_COPY_ID_LABEL,
-  CHANNEL_COPY_NAME_DONE_LABEL,
-  CHANNEL_COPY_NAME_LABEL,
-  CHANNEL_COPY_UNAVAILABLE,
-  CHANNEL_LEAVE_LABEL,
-  CHANNEL_MARK_READ_FAILURE,
-  CHANNEL_MARK_READ_LABEL,
-  CHANNEL_MARK_UNREAD_BUSY_LABEL,
-  CHANNEL_MARK_UNREAD_FAILURE,
-  CHANNEL_MARK_UNREAD_LABEL,
-  CHANNEL_MUTE_LABEL,
+  CHANNEL_COPY_FAILURE_KEY,
+  CHANNEL_COPY_GROUP_KEY,
+  CHANNEL_COPY_ID_DONE_KEY,
+  CHANNEL_COPY_ID_KEY,
+  CHANNEL_COPY_NAME_DONE_KEY,
+  CHANNEL_COPY_NAME_KEY,
+  CHANNEL_COPY_UNAVAILABLE_KEY,
+  CHANNEL_LEAVE_KEY,
+  CHANNEL_MARK_READ_FAILURE_KEY,
+  CHANNEL_MARK_READ_KEY,
+  CHANNEL_MARK_UNREAD_BUSY_KEY,
+  CHANNEL_MARK_UNREAD_FAILURE_KEY,
+  CHANNEL_MARK_UNREAD_KEY,
+  CHANNEL_MUTE_KEY,
   CHANNEL_NAME_MAX,
   CHANNEL_NAME_SERVER_REJECTED_KEY,
   CHANNEL_TOPIC_MAX,
-  CHANNEL_TOPIC_VIEW_LABEL,
-  CHANNEL_UNMUTE_LABEL,
-  DM_CLOSE_LABEL,
+  CHANNEL_TOPIC_VIEW_KEY,
+  CHANNEL_UNMUTE_KEY,
+  DM_CLOSE_KEY,
   canCreateChannel,
   canCreateChannelNow,
   canLeaveChannel,
-  channelCopyIdLabel,
-  channelCopyNameLabel,
+  channelCopyIdKey,
+  channelCopyNameKey,
   channelLeaveConfirmBodyKey,
   channelLeaveFailure,
-  channelMenuAccessibleLabel,
-  channelMuteToggleLabel,
+  channelMenuAccessibleRef,
+  channelMuteToggleKey,
   channelNameIssue,
   channelNameIssueKey,
   judgeChannelName,
   channelTopicIssue,
   createChannelFailure,
-  dmCloseButtonLabel,
+  dmCloseButtonRef,
   normalizeChannelName,
   normalizeChannelTopic,
 } from "./model";
+import { createMessageCopy } from "../../testkit";
+
+// 낱말은 사전에 있다(#6045). 시험은 한국어 생성물로 풀어 같은 문장을 그대로 단정한다.
+const koText = createMessageCopy({ messageLocale: "ko-KR", catalog: ko });
+const refText = (ref: { key: string; values?: object }) => koText(ref.key as never, ref.values as never);
 
 // The contract under test is the server's (ADR-0225 D1-D5). The rows live in one
 // shared vectors file; the Rust server test and this one read the same bytes.
@@ -436,12 +441,12 @@ describe("createChannelFailure", () => {
 
 // 검수 피드백 #3 — 채널 헤더 메뉴. 낱말과 「어떤 항목이 서는가」의 규칙이 정본이다.
 
-describe("channelMuteToggleLabel", () => {
+describe("channelMuteToggleKey", () => {
   it("makes the word the state: 켜져 있으면 「끄기」, 꺼져 있으면 「켜기」", () => {
-    expect(channelMuteToggleLabel(false)).toBe(CHANNEL_MUTE_LABEL);
-    expect(channelMuteToggleLabel(true)).toBe(CHANNEL_UNMUTE_LABEL);
+    expect(koText(channelMuteToggleKey(false))).toBe(koText(CHANNEL_MUTE_KEY));
+    expect(koText(channelMuteToggleKey(true))).toBe(koText(CHANNEL_UNMUTE_KEY));
     // 두 낱말이 뒤바뀌지 않는다: 껐다 켰다가 같은 글자면 항목이 상태를 잃는다.
-    expect(CHANNEL_MUTE_LABEL).not.toBe(CHANNEL_UNMUTE_LABEL);
+    expect(koText(CHANNEL_MUTE_KEY)).not.toBe(koText(CHANNEL_UNMUTE_KEY));
   });
 });
 
@@ -526,104 +531,104 @@ describe("channelLeaveConfirmBodyKey", () => {
 describe("channel header menu labels", () => {
   it("keeps the action words distinct", () => {
     const words = new Set([
-      CHANNEL_MUTE_LABEL,
-      CHANNEL_UNMUTE_LABEL,
-      CHANNEL_LEAVE_LABEL,
-      CHANNEL_TOPIC_VIEW_LABEL,
+      koText(CHANNEL_MUTE_KEY),
+      koText(CHANNEL_UNMUTE_KEY),
+      koText(CHANNEL_LEAVE_KEY),
+      koText(CHANNEL_TOPIC_VIEW_KEY),
     ]);
     expect(words.size).toBe(4);
   });
 
   it("names the topic item as view, because there is no topic PATCH", () => {
-    expect(CHANNEL_TOPIC_VIEW_LABEL).toBe("주제 보기");
+    expect(koText(CHANNEL_TOPIC_VIEW_KEY)).toBe("주제 보기");
   });
 });
 
 // ---- BT-1 (#1929): 행에서 채널을 조작하는 낱말 -------------------------------
 
-describe("channelCopyNameLabel", () => {
+describe("channelCopyNameKey", () => {
   it("낱말이 상태다: 복사 전과 후가 다른 문장이다", () => {
-    expect(channelCopyNameLabel(false)).toBe(CHANNEL_COPY_NAME_LABEL);
-    expect(channelCopyNameLabel(true)).toBe(CHANNEL_COPY_NAME_DONE_LABEL);
-    expect(CHANNEL_COPY_NAME_LABEL).not.toBe(CHANNEL_COPY_NAME_DONE_LABEL);
+    expect(koText(channelCopyNameKey(false))).toBe(koText(CHANNEL_COPY_NAME_KEY));
+    expect(koText(channelCopyNameKey(true))).toBe(koText(CHANNEL_COPY_NAME_DONE_KEY));
+    expect(koText(CHANNEL_COPY_NAME_KEY)).not.toBe(koText(CHANNEL_COPY_NAME_DONE_KEY));
   });
 
   it("동사구다: 메뉴의 형제 항목들과 같은 꼴", () => {
     // 「메시지 복사하기」·「링크 복사하기」·「채널 나가기」와 같은 결.
-    expect(CHANNEL_COPY_NAME_LABEL.endsWith("하기")).toBe(true);
-    expect(CHANNEL_MARK_READ_LABEL.endsWith("하기")).toBe(true);
+    expect(koText(CHANNEL_COPY_NAME_KEY).endsWith("하기")).toBe(true);
+    expect(koText(CHANNEL_MARK_READ_KEY).endsWith("하기")).toBe(true);
   });
 });
 
 describe("복사·읽음 실패 문장", () => {
   it("클립보드가 없을 때와 쓰기가 실패했을 때를 갈라 말한다", () => {
     // 다시 눌러도 같은 경우에 「다시」라고 말하면 거짓말이 된다.
-    expect(CHANNEL_COPY_UNAVAILABLE).not.toContain("다시");
-    expect(CHANNEL_COPY_FAILURE).toContain("다시");
-    expect(CHANNEL_COPY_UNAVAILABLE).not.toBe(CHANNEL_COPY_FAILURE);
+    expect(koText(CHANNEL_COPY_UNAVAILABLE_KEY)).not.toContain("다시");
+    expect(koText(CHANNEL_COPY_FAILURE_KEY)).toContain("다시");
+    expect(koText(CHANNEL_COPY_UNAVAILABLE_KEY)).not.toBe(koText(CHANNEL_COPY_FAILURE_KEY));
   });
 
   it("읽음 실패는 그 자리에서 다음 행동을 준다", () => {
-    expect(CHANNEL_MARK_READ_FAILURE).toContain("다시 시도");
+    expect(koText(CHANNEL_MARK_READ_FAILURE_KEY)).toContain("다시 시도");
   });
 });
 
 // ---- design-review #1937 R1: 진행 낱말과 DM 낱말 -----------------------------
 
-describe("channelMenuAccessibleLabel", () => {
+describe("channelMenuAccessibleRef", () => {
   it("DM 을 「채널」이라 부르지 않는다", () => {
-    expect(channelMenuAccessibleLabel("이도현", true)).toBe(
+    expect(refText(channelMenuAccessibleRef("이도현", true))).toBe(
       "이도현 다이렉트 메시지 메뉴"
     );
-    expect(channelMenuAccessibleLabel("이도현", true)).not.toContain("채널");
+    expect(refText(channelMenuAccessibleRef("이도현", true))).not.toContain("채널");
   });
 
   it("채널은 채널이라 부른다", () => {
-    expect(channelMenuAccessibleLabel("general", false)).toBe("general 채널 메뉴");
+    expect(refText(channelMenuAccessibleRef("general", false))).toBe("general 채널 메뉴");
   });
 });
 
 // ---- #3963: 복사 무리 · 읽지 않음으로 표시 · DM 닫기 --------------------------
 
-describe("channelCopyIdLabel", () => {
+describe("channelCopyIdKey", () => {
   it("낱말이 상태다: 복사 전과 후가 다른 문장이다", () => {
-    expect(channelCopyIdLabel(false)).toBe(CHANNEL_COPY_ID_LABEL);
-    expect(channelCopyIdLabel(true)).toBe(CHANNEL_COPY_ID_DONE_LABEL);
-    expect(CHANNEL_COPY_ID_LABEL).not.toBe(CHANNEL_COPY_ID_DONE_LABEL);
+    expect(koText(channelCopyIdKey(false))).toBe(koText(CHANNEL_COPY_ID_KEY));
+    expect(koText(channelCopyIdKey(true))).toBe(koText(CHANNEL_COPY_ID_DONE_KEY));
+    expect(koText(CHANNEL_COPY_ID_KEY)).not.toBe(koText(CHANNEL_COPY_ID_DONE_KEY));
   });
 
   it("이름 복사와 같은 결의 동사구다", () => {
-    expect(CHANNEL_COPY_ID_LABEL.endsWith("복사하기")).toBe(true);
-    expect(CHANNEL_COPY_NAME_LABEL.endsWith("복사하기")).toBe(true);
-    expect(CHANNEL_COPY_GROUP_LABEL).toBe("복사");
+    expect(koText(CHANNEL_COPY_ID_KEY).endsWith("복사하기")).toBe(true);
+    expect(koText(CHANNEL_COPY_NAME_KEY).endsWith("복사하기")).toBe(true);
+    expect(koText(CHANNEL_COPY_GROUP_KEY)).toBe("복사");
   });
 });
 
 describe("읽지 않음으로 표시 · DM 닫기 낱말", () => {
   it("읽음 처리와 서로 다른 낱말이고, 같은 메뉴의 형제 항목처럼 -기 동사구다", () => {
-    expect(CHANNEL_MARK_UNREAD_LABEL).toBe("읽지 않음으로 표시하기");
-    expect(CHANNEL_MARK_UNREAD_LABEL).not.toBe(CHANNEL_MARK_READ_LABEL);
-    expect(CHANNEL_MARK_UNREAD_BUSY_LABEL).not.toBe(CHANNEL_MARK_UNREAD_LABEL);
+    expect(koText(CHANNEL_MARK_UNREAD_KEY)).toBe("읽지 않음으로 표시하기");
+    expect(koText(CHANNEL_MARK_UNREAD_KEY)).not.toBe(koText(CHANNEL_MARK_READ_KEY));
+    expect(koText(CHANNEL_MARK_UNREAD_BUSY_KEY)).not.toBe(koText(CHANNEL_MARK_UNREAD_KEY));
   });
 
   it("진행 낱말은 「명사 + 중」이다(프리플라이트 분류 11 이 재는 축)", () => {
-    expect(CHANNEL_MARK_UNREAD_BUSY_LABEL).not.toMatch(/하는 중$/);
-    expect(CHANNEL_MARK_UNREAD_BUSY_LABEL.endsWith("중")).toBe(true);
+    expect(koText(CHANNEL_MARK_UNREAD_BUSY_KEY)).not.toMatch(/하는 중$/);
+    expect(koText(CHANNEL_MARK_UNREAD_BUSY_KEY).endsWith("중")).toBe(true);
   });
 
   it("실패 문장은 그 자리에서 다음 행동을 준다", () => {
-    expect(CHANNEL_MARK_UNREAD_FAILURE).toContain("다시 시도");
+    expect(koText(CHANNEL_MARK_UNREAD_FAILURE_KEY)).toContain("다시 시도");
   });
 
   it("DM 숨기기는 삭제도 나가기도 아니라 목록에서 숨기는 것이라고 말한다", () => {
-    expect(DM_CLOSE_LABEL).toBe("목록에서 숨기기");
-    expect(DM_CLOSE_LABEL).not.toContain("삭제");
-    expect(DM_CLOSE_LABEL).not.toContain("닫");
-    expect(DM_CLOSE_LABEL).not.toContain("나가기");
+    expect(koText(DM_CLOSE_KEY)).toBe("목록에서 숨기기");
+    expect(koText(DM_CLOSE_KEY)).not.toContain("삭제");
+    expect(koText(DM_CLOSE_KEY)).not.toContain("닫");
+    expect(koText(DM_CLOSE_KEY)).not.toContain("나가기");
   });
 
   it("호버 X 의 이름은 어느 대화인지 말한다(행의 링크 이름 꼴: 이름, 뜻)", () => {
-    expect(dmCloseButtonLabel("이도현")).toBe("이도현, 목록에서 숨기기");
-    expect(dmCloseButtonLabel("하윤의 Claude")).toBe("하윤의 Claude, 목록에서 숨기기");
+    expect(refText(dmCloseButtonRef("이도현"))).toBe("이도현, 목록에서 숨기기");
+    expect(refText(dmCloseButtonRef("하윤의 Claude"))).toBe("하윤의 Claude, 목록에서 숨기기");
   });
 });

@@ -8,6 +8,12 @@ import { HARNESS_LOGIN_CONNECTED_CLOSE_MS } from "@momo/core/features/onboarding
 import { ApiError } from "@momo/core/lib/api";
 import type { PtyExit } from "@/lib/tauri";
 import { HarnessLoginDialog, type RegisterContext } from "./HarnessLoginDialog";
+import { LocaleProvider } from "@/i18n/LocaleProvider";
+import { koreanLocale } from "@/testing/koLocale";
+
+// 로그인 모달의 문장은 사전(`onboarding.json`)에 있다(#6064). 화면은 한국어 언어 객체 아래에서 그린다.
+const koLocale = await koreanLocale();
+
 
 // 로그인이 끝난 같은 창이 「이 맥의 Claude Code를 @이름으로 부를 수 있게 할까요?」를
 // 묻고, 사람이 누르기 전에는 서버도 셸도 부르지 않으며, 멈춤(Claude 기본 꺼짐)은
@@ -143,6 +149,7 @@ function mount(
   root = createRoot(host);
   act(() => {
     root!.render(
+      <LocaleProvider locale={koLocale}>
       <HarnessLoginDialog
         harness={harness}
         onClose={extra.onClose ?? (() => undefined)}
@@ -151,6 +158,7 @@ function mount(
         register={extra.register === undefined ? context() : extra.register}
         startAt={extra.startAt}
       />
+      </LocaleProvider>
     );
   });
 }

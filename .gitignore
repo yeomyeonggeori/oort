@@ -84,3 +84,6 @@ override.tf.json
 *_override.tf.json
 terraform.tfvars
 *.auto.tfvars
+
+# 파일 감시 도구(watchman)의 0바이트 표식 파일
+.watchman-cookie-*

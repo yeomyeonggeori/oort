@@ -1,11 +1,12 @@
 import { useId } from "react";
 import { cn } from "@/design/lib/cn";
+import { useFormatMessage } from "@/i18n/useFormatMessage";
 import type { SpawnExecutionPlan } from "@momo/core/lib/executionPlan";
 import {
   candidateLabel,
-  HOST_CHOICE_LABEL,
+  HOST_CHOICE_LABEL_KEY,
   spawnHostGate,
-  tierLabel,
+  tierLabelKey,
 } from "@momo/core/features/timeline/spawnHostChoice";
 
 // =============================================================================
@@ -88,6 +89,7 @@ export function SpawnHostChoice({
   testIdPrefix: string;
 }) {
   const groupId = useId();
+  const formatMessage = useFormatMessage();
   const gate = spawnHostGate(plan);
 
   return (
@@ -103,7 +105,7 @@ export function SpawnHostChoice({
           라디오 목록이 무엇을 묻는지 모른 채 기계 이름 서너 개만 본다 —
           HostPicker가 v1에서 같은 결함을 고쳤다. */}
       <legend className="pb-1 text-meta text-ink-muted">
-        {HOST_CHOICE_LABEL}
+        {formatMessage(HOST_CHOICE_LABEL_KEY)}
       </legend>
       {/* 후보가 0이면 상자 자체를 세우지 않는다. 빈 테두리는 「목록이 로딩 중」
           으로 읽히는데, 실제로 일어난 일은 **등록된 호스트가 없다**이고 그것은
@@ -117,7 +119,8 @@ export function SpawnHostChoice({
             const checked = candidate.hostId === pickedHostId;
             /** 지금 이 줄을 누를 수 있는가 — 자격과 잠금을 **둘 다** 읽는다. */
             const live = candidate.selectable && !locked;
-            const tier = tierLabel(candidate.tier);
+            const tierKey = tierLabelKey(candidate.tier);
+            const tier = tierKey === null ? null : formatMessage(tierKey);
             const inputId = `${groupId}-${candidate.hostId}`;
             return (
               <label
@@ -166,7 +169,7 @@ export function SpawnHostChoice({
                       live ? "text-ink" : "text-ink-muted"
                     )}
                   >
-                    {candidateLabel(candidate)}
+                    {candidateLabel(formatMessage, candidate)}
                   </span>
                   {tier !== null && (
                     // 이름이 이미 말하는 경우가 많다(「팀 VPS」). 그래도 두는
@@ -183,7 +186,7 @@ export function SpawnHostChoice({
           })}
         </div>
       )}
-      {gate.blockedCopy !== undefined && (
+      {gate.blockedKey !== undefined && (
         // `role="status"`가 아니다 (design-review M5). 라이브 리전은 **바뀐** 내용을
         // 읽는데 이 문장은 첫 페인트부터 거기 있어서 아무것도 발화되지 않았다.
         // 대신 승인 버튼이 `aria-describedby`로 이 id를 되짚는다 — 그 버튼에 초점이
@@ -193,7 +196,7 @@ export function SpawnHostChoice({
           data-testid={`${testIdPrefix}-host-blocked`}
           className="pt-1 text-meta text-ink-muted"
         >
-          {gate.blockedCopy}
+          {formatMessage(gate.blockedKey)}
         </p>
       )}
     </fieldset>

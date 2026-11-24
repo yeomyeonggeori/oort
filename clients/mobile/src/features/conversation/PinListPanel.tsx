@@ -1,10 +1,10 @@
 import {missingMemberLabel} from '@momo/core/features/workspace/directory';
 import {
-  PIN_EMPTY_BODY_TEXT,
-  PIN_LIST_EMPTY_DETAIL,
-  PIN_LIST_EMPTY_HEADLINE,
-  PIN_LIST_FAILED_DETAIL,
-  PIN_LIST_FAILED_HEADLINE,
+  PIN_EMPTY_BODY_KEY,
+  PIN_LIST_EMPTY_DETAIL_KEY,
+  PIN_LIST_EMPTY_HEADLINE_KEY,
+  PIN_LIST_FAILED_DETAIL_KEY,
+  PIN_LIST_FAILED_HEADLINE_KEY,
   pinExcerpt,
   pinList,
   pinListHeaderLabel,
@@ -22,6 +22,7 @@ import {EmptyState, ErrorState, Screen} from '../../design/atoms';
 import {PageHeader} from '../../design/SheetChrome';
 import {font, line, radius, SAFE_GUTTER, space, TOUCH_TARGET, type Palette} from '../../design/tokens';
 import {useStyles} from '../../design/theme';
+import {useFormatMessage} from '../../i18n/useFormatMessage';
 import {EdgeSwipeBack} from '../../nav/EdgeSwipeBack';
 import {appNote} from './appVoice';
 
@@ -72,8 +73,11 @@ const EXCERPT_MAX_CHARS = 80;
  * 앱의 서술은 `※` 를 달고 흐린 색으로 선다(`appVoice.ts`). 카드 안에서 그 둘이
  * 같은 결로 서면 사람은 앱의 해명을 남의 말로 읽는다.
  */
-function excerptLine(body: string | null): {text: string; ours: boolean} {
-  const excerpt = pinExcerpt(body, EXCERPT_MAX_CHARS);
+function excerptLine(
+  formatMessage: ReturnType<typeof useFormatMessage>,
+  body: string | null,
+): {text: string; ours: boolean} {
+  const excerpt = pinExcerpt(formatMessage, body, EXCERPT_MAX_CHARS);
   return excerpt.empty
     ? {text: appNote(excerpt.text), ours: true}
     : {text: excerpt.text, ours: false};
@@ -100,8 +104,10 @@ export function PinListPanel({
   /** 목록만 다시 읽는다(채널 전체가 아니라). 실패 문장 뒤의 행동. */
   onRetry: () => void;
 }): React.JSX.Element {
+  const formatMessage = useFormatMessage();
   const styles = useStyles(buildStyles);
   const entries = useMemo(() => pinList(pins), [pins]);
+  const headerRef = pinListHeaderLabel(entries.length, status);
 
   const openEntry = useCallback(
     (entry: PinnedMessage) => {
@@ -125,7 +131,7 @@ export function PinListPanel({
       testID="pin-list-pane">
       <Screen>
         <PageHeader
-          title={pinListHeaderLabel(entries.length, status)}
+          title={formatMessage(headerRef.key, headerRef.values as never)}
           // 대화 위에 쌓인 안쪽 장이라 X 가 아니라 ‹ 이고, ‹ 의 이름은 돌아갈 곳을 말한다(`phone-sheets.md` §3, 「대화 정보」와 같은 이름).
           back={{label: '대화로 돌아가기', onPress: onClose, testID: 'header-back'}}
           titleTestID="pin-list-title"
@@ -146,8 +152,8 @@ export function PinListPanel({
           ListHeaderComponent={
             status === 'failed' ? (
               <ErrorState
-                headline={PIN_LIST_FAILED_HEADLINE}
-                detail={PIN_LIST_FAILED_DETAIL}
+                headline={formatMessage(PIN_LIST_FAILED_HEADLINE_KEY)}
+                detail={formatMessage(PIN_LIST_FAILED_DETAIL_KEY)}
                 onRetry={onRetry}
                 testID="pin-list-failed"
               />
@@ -163,8 +169,8 @@ export function PinListPanel({
               <EmptyState
                 // 두 조각을 코어에서 든다. 제목을 손으로 적으면 설명과 갈라지고,
                 // 한 문자열을 둘 다에 넘기면 같은 문장이 두 번 인쇄된다(실측).
-                headline={PIN_LIST_EMPTY_HEADLINE}
-                detail={PIN_LIST_EMPTY_DETAIL}
+                headline={formatMessage(PIN_LIST_EMPTY_HEADLINE_KEY)}
+                detail={formatMessage(PIN_LIST_EMPTY_DETAIL_KEY)}
                 testID="pin-list-empty"
               />
             ) : null
@@ -175,7 +181,7 @@ export function PinListPanel({
               item.authorMemberId,
               missingMemberLabel(directory),
             ).name;
-            const excerpt = excerptLine(item.body);
+            const excerpt = excerptLine(formatMessage, item.body);
             return (
               <Pressable
                 accessibilityRole="button"
@@ -188,8 +194,9 @@ export function PinListPanel({
                 // 도장은 **절대 날짜로** 읽힌다: 눈은 「오늘」로 충분하지만 귀에
                 // 「오늘」만 남기는 것은 정보를 빼는 것이다(`pinStampLabel`).
                 accessibilityLabel={`${name}, ${pinStampLabel(
+                  formatMessage,
                   item.pinnedAtMs,
-                )}, ${excerpt.ours ? PIN_EMPTY_BODY_TEXT : excerpt.text}, 원본으로 이동`}
+                )}, ${excerpt.ours ? formatMessage(PIN_EMPTY_BODY_KEY) : excerpt.text}, 원본으로 이동`}
                 onPress={() => openEntry(item)}
                 style={({pressed}) => [styles.card, pressed && styles.pressed]}
                 testID="pin-list-item">
@@ -202,7 +209,7 @@ export function PinListPanel({
                       자릿폭 표지는 숫자에만 — 한글 음절이 함께 잡히면
                       「8월  5일」로 벌어진다(`divider.ts` 실측). */}
                   <Text style={styles.day} testID="pin-list-stamp">
-                    {pinStampSegments(item.pinnedAtMs, nowMs).map(
+                    {pinStampSegments(formatMessage, item.pinnedAtMs, nowMs).map(
                       (segment, index) =>
                         segment.kind === 'figure' ? (
                           <Text key={index} style={styles.figure}>
