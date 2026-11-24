@@ -178,7 +178,7 @@ export async function decideFromNotification(
     clientDecisionId,
   );
   if (outcome.kind === 'error') {
-    return {kind: 'failed', reason: outcome.errorCopy ?? 'decision failed'};
+    return {kind: 'failed', reason: outcome.errorCopy ?? outcome.errorKey ?? 'decision failed'};
   }
   // 기록됐든 이미 결정돼 있든 이 승인은 끝났다. 걷는 일이 실패해도 결정의 결과는
   // 바뀌지 않으므로(`dismissApprovalNotifications`는 던지지 않는다) 기다리되 묻지 않는다.

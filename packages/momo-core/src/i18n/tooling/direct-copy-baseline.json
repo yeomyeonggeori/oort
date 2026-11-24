@@ -711,6 +711,7 @@
     "packages/momo-core/src/features/timeline/actionResultCard.ts": {"ko": 0, "en": 0},
     "packages/momo-core/src/features/timeline/agentInitiative.ts": {"ko": 0, "en": 0},
     "packages/momo-core/src/features/timeline/appNotice.ts": {"ko": 0, "en": 0},
+    "packages/momo-core/src/features/timeline/approvalDecision.ts": {"ko": 0, "en": 0},
     "packages/momo-core/src/features/timeline/approvalNote.ts": {"ko": 0, "en": 0},
     "packages/momo-core/src/features/timeline/artifacts.ts": {"ko": 0, "en": 0},
     "packages/momo-core/src/features/timeline/cascadeModel.ts": {"ko": 0, "en": 0},

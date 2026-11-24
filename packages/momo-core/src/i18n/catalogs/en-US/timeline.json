@@ -519,5 +519,18 @@
   "timeline.completion.workedWithElapsed": "Work time {elapsed}",
   "timeline.completion.elapsedClock": "Elapsed",
   "timeline.completion.tallyItem": "{label} {count, number}",
-  "timeline.completion.checkDetailSpoken": "{detail} {label}"
+  "timeline.completion.checkDetailSpoken": "{detail} {label}",
+  "timeline.approvalDecision.sendTimeout": "The server didn't respond in time, so the decision wasn't sent. Press again.",
+  "timeline.approvalDecision.sendUnreached": "The decision didn't reach the server. Check your connection and press again.",
+  "timeline.approvalDecision.failedLoginExpired": "Couldn't process the decision. You were signed out. Sign in again to decide.",
+  "timeline.approvalDecision.failedRateLimited": "Couldn't process the decision. There were too many requests, so the server didn't take this decision.",
+  "timeline.approvalDecision.failedServerError": "Couldn't process the decision. The server answered with an error. Press again in a moment.",
+  "timeline.approvalDecision.failedNotAccepted": "Couldn't process the decision. The server didn't accept it. Press again.",
+  "timeline.approvalDecision.unreadable": "Couldn't read the server's answer. Press again.",
+  "timeline.approvalDecision.expiredFirst": "It expired before a decision.",
+  "timeline.approvalDecision.decidedElsewhere": "It was already decided somewhere else.",
+  "timeline.approvalDecision.idempotencyConflict": "The same request is already recorded with a different decision. Press again.",
+  "timeline.approvalDecision.notFound": "Couldn't find this approval request. It may have been cleaned up already.",
+  "timeline.approvalDecision.roleRequired": "You don't have the role to decide this. The request is still waiting.",
+  "timeline.approvalDecision.forbidden": "You don't have permission to decide this approval. Check that you're a channel member."
 }

@@ -13242,6 +13242,84 @@ export const catalog: MessageCatalog = {
       "value": "입력창에 넣어 뒀어요. 보내면 에이전트가 다시 제안해요."
     }
   ],
+  "timeline.approvalDecision.decidedElsewhere": [
+    {
+      "type": 0,
+      "value": "다른 곳에서 이미 결정됐어요."
+    }
+  ],
+  "timeline.approvalDecision.expiredFirst": [
+    {
+      "type": 0,
+      "value": "결정 전에 만료됐어요."
+    }
+  ],
+  "timeline.approvalDecision.failedLoginExpired": [
+    {
+      "type": 0,
+      "value": "결정을 처리하지 못했습니다. 로그인이 만료됐어요. 다시 로그인하면 결정할 수 있어요."
+    }
+  ],
+  "timeline.approvalDecision.failedNotAccepted": [
+    {
+      "type": 0,
+      "value": "결정을 처리하지 못했습니다. 서버가 이 결정을 받지 않았어요. 다시 눌러 주세요."
+    }
+  ],
+  "timeline.approvalDecision.failedRateLimited": [
+    {
+      "type": 0,
+      "value": "결정을 처리하지 못했습니다. 요청이 잦아 서버가 이번 결정을 받지 않았어요."
+    }
+  ],
+  "timeline.approvalDecision.failedServerError": [
+    {
+      "type": 0,
+      "value": "결정을 처리하지 못했습니다. 서버가 오류로 답했어요. 잠시 뒤에 다시 눌러 주세요."
+    }
+  ],
+  "timeline.approvalDecision.forbidden": [
+    {
+      "type": 0,
+      "value": "이 승인을 결정할 권한이 없어요. 채널 멤버인지 확인해 주세요."
+    }
+  ],
+  "timeline.approvalDecision.idempotencyConflict": [
+    {
+      "type": 0,
+      "value": "같은 요청이 다른 결정으로 기록돼 있어요. 다시 눌러 주세요."
+    }
+  ],
+  "timeline.approvalDecision.notFound": [
+    {
+      "type": 0,
+      "value": "이 승인 요청을 찾지 못했어요. 이미 정리됐을 수 있어요."
+    }
+  ],
+  "timeline.approvalDecision.roleRequired": [
+    {
+      "type": 0,
+      "value": "이 결정을 내릴 수 있는 역할이 아니에요. 이 요청은 아직 기다리고 있어요."
+    }
+  ],
+  "timeline.approvalDecision.sendTimeout": [
+    {
+      "type": 0,
+      "value": "서버가 제때 응답하지 않아 결정을 보내지 못했어요. 다시 눌러 주세요."
+    }
+  ],
+  "timeline.approvalDecision.sendUnreached": [
+    {
+      "type": 0,
+      "value": "결정이 서버에 닿지 못했어요. 연결을 확인하고 다시 눌러 주세요."
+    }
+  ],
+  "timeline.approvalDecision.unreadable": [
+    {
+      "type": 0,
+      "value": "서버 응답을 읽지 못했어요. 다시 눌러 주세요."
+    }
+  ],
   "timeline.approvalExpiry.soon": [
     {
       "type": 0,

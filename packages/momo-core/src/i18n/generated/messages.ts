@@ -1902,6 +1902,19 @@ export const messageKeys = [
   "timeline.approval.channelsRefused",
   "timeline.approval.reproposeBusy",
   "timeline.approval.reproposeSeeded",
+  "timeline.approvalDecision.decidedElsewhere",
+  "timeline.approvalDecision.expiredFirst",
+  "timeline.approvalDecision.failedLoginExpired",
+  "timeline.approvalDecision.failedNotAccepted",
+  "timeline.approvalDecision.failedRateLimited",
+  "timeline.approvalDecision.failedServerError",
+  "timeline.approvalDecision.forbidden",
+  "timeline.approvalDecision.idempotencyConflict",
+  "timeline.approvalDecision.notFound",
+  "timeline.approvalDecision.roleRequired",
+  "timeline.approvalDecision.sendTimeout",
+  "timeline.approvalDecision.sendUnreached",
+  "timeline.approvalDecision.unreadable",
   "timeline.approvalExpiry.soon",
   "timeline.approvalNote.elsewhere",
   "timeline.approvalNote.offline",
@@ -4823,6 +4836,19 @@ export const argumentSpecs = {
   "timeline.approval.channelsRefused": {},
   "timeline.approval.reproposeBusy": {},
   "timeline.approval.reproposeSeeded": {},
+  "timeline.approvalDecision.decidedElsewhere": {},
+  "timeline.approvalDecision.expiredFirst": {},
+  "timeline.approvalDecision.failedLoginExpired": {},
+  "timeline.approvalDecision.failedNotAccepted": {},
+  "timeline.approvalDecision.failedRateLimited": {},
+  "timeline.approvalDecision.failedServerError": {},
+  "timeline.approvalDecision.forbidden": {},
+  "timeline.approvalDecision.idempotencyConflict": {},
+  "timeline.approvalDecision.notFound": {},
+  "timeline.approvalDecision.roleRequired": {},
+  "timeline.approvalDecision.sendTimeout": {},
+  "timeline.approvalDecision.sendUnreached": {},
+  "timeline.approvalDecision.unreadable": {},
   "timeline.approvalExpiry.soon": {},
   "timeline.approvalNote.elsewhere": {},
   "timeline.approvalNote.offline": {},
@@ -7590,6 +7616,19 @@ export interface MessageArgs {
   "timeline.approval.channelsRefused": Record<string, never>;
   "timeline.approval.reproposeBusy": Record<string, never>;
   "timeline.approval.reproposeSeeded": Record<string, never>;
+  "timeline.approvalDecision.decidedElsewhere": Record<string, never>;
+  "timeline.approvalDecision.expiredFirst": Record<string, never>;
+  "timeline.approvalDecision.failedLoginExpired": Record<string, never>;
+  "timeline.approvalDecision.failedNotAccepted": Record<string, never>;
+  "timeline.approvalDecision.failedRateLimited": Record<string, never>;
+  "timeline.approvalDecision.failedServerError": Record<string, never>;
+  "timeline.approvalDecision.forbidden": Record<string, never>;
+  "timeline.approvalDecision.idempotencyConflict": Record<string, never>;
+  "timeline.approvalDecision.notFound": Record<string, never>;
+  "timeline.approvalDecision.roleRequired": Record<string, never>;
+  "timeline.approvalDecision.sendTimeout": Record<string, never>;
+  "timeline.approvalDecision.sendUnreached": Record<string, never>;
+  "timeline.approvalDecision.unreadable": Record<string, never>;
   "timeline.approvalExpiry.soon": Record<string, never>;
   "timeline.approvalNote.elsewhere": Record<string, never>;
   "timeline.approvalNote.offline": Record<string, never>;

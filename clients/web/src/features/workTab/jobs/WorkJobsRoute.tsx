@@ -268,7 +268,7 @@ export function WorkJobsRoute() {
   }, [scope, asks, rows, decisions.byRun, receipts, sending, seeding, revealTick]);
   const onDecided = useCallback(
     (outcome: DecisionOutcome, slotKey: string) => {
-      const receipt = decisionNote(outcome).text;
+      const receipt = decisionNote(outcome, formatMessage).text;
       setDecisionText(receipt);
       setReceiptsState((current) => ({
         scope,

@@ -337,7 +337,7 @@ export function DecisionStage({
     }
     const receipt: ApprovalReceipt = {
       status: outcome.status,
-      note: decisionReceiptCopy(outcome),
+      note: decisionReceiptCopy(outcome, formatMessage),
       secretOnce: linkOnceFrom(outcome),
     };
     setReceipts(previous => new Map(previous).set(id, receipt));

@@ -712,7 +712,7 @@ function ApprovalBody({
               ) {
                 next.secretOnce = outcome.result.secretOnce;
               }
-              next.note = decisionNote(outcome).text;
+              next.note = decisionNote(outcome, formatMessage).text;
               setLocal(next);
               // 1회 값은 저장소에 넘기지 않는다(ADR-0186 D4).
               const { secretOnce: _once, ...receiptOnly } = next;
@@ -996,7 +996,7 @@ function LoginHandoffBody({
               if (outcome.decidedByMemberId !== undefined) {
                 next.decidedByMemberId = outcome.decidedByMemberId;
               }
-              next.note = decisionNote(outcome).text;
+              next.note = decisionNote(outcome, formatMessage).text;
               setLocal(next);
               rememberSettledApproval(card.approvalId, next);
             }}

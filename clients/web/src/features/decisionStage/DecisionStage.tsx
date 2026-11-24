@@ -15,7 +15,7 @@ import { requestBundleModel } from "@momo/core/features/timeline/requestBundle";
 import {
   createDecisionStage, decisionStageModel, moveDecisionStage, nextPendingDecisionStage,
 } from "@momo/core/features/timeline/decisionStage";
-import type { DecisionOutcome } from "@momo/core/features/timeline/approvalDecision";
+import { decisionNoteText, type DecisionOutcome } from "@momo/core/features/timeline/approvalDecision";
 import type { SecretOnce } from "@momo/core/features/approvals/secretOnce";
 import { approvalRoleCopy, roleRequiredCopy } from "@momo/core/features/approvals/actionRole";
 import { formatMicroUsd } from "@momo/core/features/timeline/agentCardModel";
@@ -168,13 +168,13 @@ export function DecisionStage({ request, open, onClose }: {
         status: outcome.status,
         decidedAtMs: outcome.decidedAtMs,
         decidedByMemberId: outcome.decidedByMemberId,
-        note: outcome.note,
+        note: decisionNoteText(outcome, formatMessage),
       });
       if (activeId.current === id) {
         const approved = outcome.kind === "committed" && outcome.status === "approved";
         setFeedback({
           id, approved,
-          text: outcome.note ?? (approved ? "승인했어요" : outcome.status === "rejected" ? "거부했어요" : "결정 상태가 바뀌었어요"),
+          text: decisionNoteText(outcome, formatMessage) ?? (approved ? "승인했어요" : outcome.status === "rejected" ? "거부했어요" : "결정 상태가 바뀌었어요"),
           ...(approved && outcome.result?.secretOnce ? { secretOnce: outcome.result.secretOnce } : {}),
         });
       }

@@ -14028,6 +14028,84 @@ export const catalog: MessageCatalog = {
       "value": "Added to the message box. Send it and the agent will propose it again."
     }
   ],
+  "timeline.approvalDecision.decidedElsewhere": [
+    {
+      "type": 0,
+      "value": "It was already decided somewhere else."
+    }
+  ],
+  "timeline.approvalDecision.expiredFirst": [
+    {
+      "type": 0,
+      "value": "It expired before a decision."
+    }
+  ],
+  "timeline.approvalDecision.failedLoginExpired": [
+    {
+      "type": 0,
+      "value": "Couldn't process the decision. You were signed out. Sign in again to decide."
+    }
+  ],
+  "timeline.approvalDecision.failedNotAccepted": [
+    {
+      "type": 0,
+      "value": "Couldn't process the decision. The server didn't accept it. Press again."
+    }
+  ],
+  "timeline.approvalDecision.failedRateLimited": [
+    {
+      "type": 0,
+      "value": "Couldn't process the decision. There were too many requests, so the server didn't take this decision."
+    }
+  ],
+  "timeline.approvalDecision.failedServerError": [
+    {
+      "type": 0,
+      "value": "Couldn't process the decision. The server answered with an error. Press again in a moment."
+    }
+  ],
+  "timeline.approvalDecision.forbidden": [
+    {
+      "type": 0,
+      "value": "You don't have permission to decide this approval. Check that you're a channel member."
+    }
+  ],
+  "timeline.approvalDecision.idempotencyConflict": [
+    {
+      "type": 0,
+      "value": "The same request is already recorded with a different decision. Press again."
+    }
+  ],
+  "timeline.approvalDecision.notFound": [
+    {
+      "type": 0,
+      "value": "Couldn't find this approval request. It may have been cleaned up already."
+    }
+  ],
+  "timeline.approvalDecision.roleRequired": [
+    {
+      "type": 0,
+      "value": "You don't have the role to decide this. The request is still waiting."
+    }
+  ],
+  "timeline.approvalDecision.sendTimeout": [
+    {
+      "type": 0,
+      "value": "The server didn't respond in time, so the decision wasn't sent. Press again."
+    }
+  ],
+  "timeline.approvalDecision.sendUnreached": [
+    {
+      "type": 0,
+      "value": "The decision didn't reach the server. Check your connection and press again."
+    }
+  ],
+  "timeline.approvalDecision.unreadable": [
+    {
+      "type": 0,
+      "value": "Couldn't read the server's answer. Press again."
+    }
+  ],
   "timeline.approvalExpiry.soon": [
     {
       "type": 0,

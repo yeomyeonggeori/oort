@@ -1,6 +1,15 @@
 import { describe, expect, it } from "vitest";
 import { parseDecisionResult, parseSecretOnce } from "./secretOnce";
-import { interpretReceipt } from "../timeline/approvalDecision";
+import {
+  decisionErrorText,
+  interpretReceipt,
+  type DecisionOutcome,
+} from "../timeline/approvalDecision";
+import { catalog as koCatalog } from "../../i18n/generated/ko-KR";
+import { createMessageCopy } from "../../testkit";
+
+const ko = createMessageCopy({ messageLocale: "ko-KR", catalog: koCatalog });
+const errorText = (outcome: DecisionOutcome) => decisionErrorText(outcome, ko);
 
 // ADR-0186 부록 C 의 샘플 그대로.
 const APPENDIX_C = {
@@ -80,7 +89,7 @@ describe("403 영수증의 role_required (AX-3b #2549 계약)", () => {
     } as never);
     expect(outcome.kind).toBe("error");
     expect(outcome.errorCode).toBe("role_required");
-    expect(outcome.errorCopy).toContain("아직 기다리고 있어요");
+    expect(errorText(outcome)).toContain("아직 기다리고 있어요");
     // 승인의 **상태**는 뒤집지 않는다 — 여전히 pending 이다(§5). 그 값은
     // `approval_status` enum 밖이라 상태로 읽히지 않아야 한다.
     expect(outcome.status).toBeUndefined();
@@ -89,7 +98,7 @@ describe("403 영수증의 role_required (AX-3b #2549 계약)", () => {
   it("그 밖의 403 은 기존 forbidden 그대로다 (도구 호출 승인 회귀 0)", () => {
     const outcome = interpretReceipt(403, { status: "pending" } as never);
     expect(outcome.errorCode).toBe("forbidden");
-    expect(outcome.errorCopy).toContain("채널 멤버인지 확인해 주세요");
+    expect(errorText(outcome)).toContain("채널 멤버인지 확인해 주세요");
   });
 
   it("role_required 는 200·409 에서 읽지 않는다", () => {

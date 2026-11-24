@@ -1652,7 +1652,7 @@ export default function ConversationScreen({
   useEffect(() => setApprovalReceipts(NO_RECEIPTS), [channelId]);
   const onApprovalSettled = useCallback(
     (approvalId: string, outcome: DecisionOutcome) => {
-      const note = decisionReceiptCopy(outcome);
+      const note = decisionReceiptCopy(outcome, formatMenuMessage);
       // 1회 값은 **결정 응답에서만** 온다(부록 C). 판정은 `linkOnceFrom` 한
       // 곳이고, 값은 이 표 — React 상태 — 에만 든다. 어디에도 적지 않는다.
       const secretOnce = linkOnceFrom(outcome);
@@ -1680,7 +1680,7 @@ export default function ConversationScreen({
       );
       invalidateApprovals();
     },
-    [invalidateApprovals],
+    [formatMenuMessage, invalidateApprovals],
   );
 
   // 문장은 `jumpNotice.ts` 가 든다 — **측정 하네스가 같은 상수를 읽어 사진을

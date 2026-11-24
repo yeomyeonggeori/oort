@@ -409,7 +409,7 @@ export default function InboxScreen({
   const [receipts, setReceipts] = useState<{id: string; note: string}[]>([]);
   const onDecided = useCallback(
     (approvalId: string, outcome: DecisionOutcome) => {
-      const note = decisionReceiptCopy(outcome);
+      const note = decisionReceiptCopy(outcome, formatMessage);
       setReceipts(previous => [
         ...previous.filter(entry => entry.id !== approvalId),
         {id: approvalId, note},
@@ -419,7 +419,7 @@ export default function InboxScreen({
       AccessibilityInfo.announceForAccessibility(note);
       invalidateApprovals();
     },
-    [invalidateApprovals],
+    [formatMessage, invalidateApprovals],
   );
   const dismissReceipt = useCallback((approvalId: string) => {
     setReceipts(previous => previous.filter(entry => entry.id !== approvalId));

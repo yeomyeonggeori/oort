@@ -1,3 +1,5 @@
+import type { LocaleService } from "../../i18n/context";
+import type { PlainMessageKey } from "../../i18n/keys";
 import { authedResponse } from "../../lib/api";
 import { NetworkError, type HttpResponse } from "../../lib/http";
 import {
@@ -115,8 +117,10 @@ export interface DecisionOutcome {
   decidedAtMs?: number;
   /** Member the server credited the decision to (the audit trail line). */
   decidedByMemberId?: string;
-  /** Quiet note for `superseded` (decided elsewhere, or expired first). */
+  /** Quiet note for `superseded` (decided elsewhere, or expired first). 서버가 준 글이 아니라 이 빌드의 문장이면 `noteKey`다. */
   note?: string;
+  /** `superseded` 의 조용한 안내 문장의 사전 키. 읽는 쪽은 `decisionNoteText`로 푼다. */
+  noteKey?: PlainMessageKey;
   /**
    * 승인 성공에만 있는 행동 결과 (ADR-0186 부록 C).
    *
@@ -126,8 +130,10 @@ export interface DecisionOutcome {
    * ADR 이 이름으로 금지한 위반이다.
    */
   result?: DecisionActionResult;
-  /** User copy for `error`. States what happened and what to do next. */
+  /** 서버·연결 모델이 준 글(미제공 사유 등)로 지은 `error` 문장. 이 빌드의 문장은 `errorKey`다. */
   errorCopy?: string;
+  /** `error` 문장의 사전 키: 무슨 일이 있었는지와 다음에 할 일. 읽는 쪽은 `decisionErrorText`로 푼다. */
+  errorKey?: PlainMessageKey;
   /**
    * 왜 `error`인지를 읽는 쪽이 **색으로** 구분할 수 있게 하는 갈래
    * (goal W-AP1 2R M1).
@@ -188,11 +194,28 @@ export function newDecisionId(): string {
  * happened, because "the server took too long" and "nothing was there" lead to
  * different next moves, and neither is "the decision was recorded".
  */
-export function sendFailureCopy(cause: unknown): string {
-  if (cause instanceof NetworkError && cause.failure === "timeout") {
-    return "서버가 제때 응답하지 않아 결정을 보내지 못했어요. 다시 눌러 주세요.";
-  }
-  return "결정이 서버에 닿지 못했어요. 연결을 확인하고 다시 눌러 주세요.";
+export function sendFailureKey(cause: unknown): PlainMessageKey {
+  return cause instanceof NetworkError && cause.failure === "timeout"
+    ? "timeline.approvalDecision.sendTimeout"
+    : "timeline.approvalDecision.sendUnreached";
+}
+
+/** `error` 결과를 사람의 말로: 서버가 준 글이 먼저이고, 없으면 이 빌드의 문장(사전 키)이다. */
+export function decisionErrorText(
+  outcome: DecisionOutcome,
+  formatMessage: LocaleService["formatMessage"]
+): string | undefined {
+  if (outcome.errorCopy !== undefined) return outcome.errorCopy;
+  return outcome.errorKey === undefined ? undefined : formatMessage(outcome.errorKey);
+}
+
+/** `superseded` 의 조용한 안내를 사람의 말로(`note` 가 먼저, 없으면 사전 키). */
+export function decisionNoteText(
+  outcome: DecisionOutcome,
+  formatMessage: LocaleService["formatMessage"]
+): string | undefined {
+  if (outcome.note !== undefined) return outcome.note;
+  return outcome.noteKey === undefined ? undefined : formatMessage(outcome.noteKey);
 }
 
 /**
@@ -208,14 +231,14 @@ export function sendFailureCopy(cause: unknown): string {
  * (clients/web/src/features/routing/capability.ts `unsettledAnswerClause`).
  * 규칙이 두 벌로 갈라지면 한쪽만 고쳐지는 날이 온다.
  */
-export function unsettledAnswerClause(status: number): string {
+export function unsettledAnswerKey(status: number): PlainMessageKey {
   // 401은 세션을 한 번 갱신하고 다시 보낸 뒤에도 서버가 로그인을 알아보지 못한
   // 답이다(`authedResponse`). 「다시 눌러 주세요」는 성공할 수 없는 재시도를
   // 시키는 문장이라, 눌러서 될 일이 아니라 다시 로그인할 일이라고 말한다.
-  if (status === 401) return "로그인이 만료됐어요. 다시 로그인하면 결정할 수 있어요.";
-  if (status === 429) return "요청이 잦아 서버가 이번 결정을 받지 않았어요.";
-  if (status >= 500) return "서버가 오류로 답했어요. 잠시 뒤에 다시 눌러 주세요.";
-  return "서버가 이 결정을 받지 않았어요. 다시 눌러 주세요.";
+  if (status === 401) return "timeline.approvalDecision.failedLoginExpired";
+  if (status === 429) return "timeline.approvalDecision.failedRateLimited";
+  if (status >= 500) return "timeline.approvalDecision.failedServerError";
+  return "timeline.approvalDecision.failedNotAccepted";
 }
 
 /**
@@ -277,14 +300,14 @@ export async function decideApproval(
   } catch (error) {
     // The idempotency key is caller-held and unchanged, so pressing the same
     // button again replays this decision rather than minting a second one.
-    return { kind: "error", errorCopy: sendFailureCopy(error) };
+    return { kind: "error", errorKey: sendFailureKey(error) };
   }
 
   const receiptStatuses = new Set([200, 403, 404, 409]);
   if (!receiptStatuses.has(response.status)) {
     return {
       kind: "error",
-      errorCopy: `결정을 처리하지 못했습니다. ${unsettledAnswerClause(response.status)}`,
+      errorKey: unsettledAnswerKey(response.status),
     };
   }
 
@@ -328,7 +351,7 @@ export function unreadableAnswerOutcome(
   }
   return {
     kind: "error",
-    errorCopy: "서버 응답을 읽지 못했어요. 다시 눌러 주세요.",
+    errorKey: "timeline.approvalDecision.unreadable",
   };
 }
 
@@ -361,10 +384,10 @@ export function interpretReceipt(
       const outcome: DecisionOutcome = {
         kind: "superseded",
         status,
-        note:
+        noteKey:
           status === "expired"
-            ? "결정 전에 만료됐어요."
-            : "다른 곳에서 이미 결정됐어요.",
+            ? "timeline.approvalDecision.expiredFirst"
+            : "timeline.approvalDecision.decidedElsewhere",
       };
       if (decidedAtMs !== undefined) outcome.decidedAtMs = decidedAtMs;
       if (decidedBy !== undefined) outcome.decidedByMemberId = decidedBy;
@@ -373,13 +396,13 @@ export function interpretReceipt(
     return {
       kind: "error",
       errorCode: "idempotency_conflict",
-      errorCopy: "같은 요청이 다른 결정으로 기록돼 있어요. 다시 눌러 주세요.",
+      errorKey: "timeline.approvalDecision.idempotencyConflict",
     };
   }
   if (httpStatus === 404) {
     return {
       kind: "error",
-      errorCopy: "이 승인 요청을 찾지 못했어요. 이미 정리됐을 수 있어요.",
+      errorKey: "timeline.approvalDecision.notFound",
     };
   }
   // AX-3b #2549: 역할 부족만 영수증이 이름을 댄다. 그 밖의 403 은 지금까지처럼
@@ -390,13 +413,12 @@ export function interpretReceipt(
       errorCode: "role_required",
       // 역할 이름 없이도 참인 문장. 어느 역할인지 아는 카드는 이것을 자기
       // 문장으로 덮는다(`ApprovalActions.forbiddenCopy`).
-      errorCopy:
-        "이 결정을 내릴 수 있는 역할이 아니에요. 이 요청은 아직 기다리고 있어요.",
+      errorKey: "timeline.approvalDecision.roleRequired",
     };
   }
   return {
     kind: "error",
     errorCode: "forbidden",
-    errorCopy: "이 승인을 결정할 권한이 없어요. 채널 멤버인지 확인해 주세요.",
+    errorKey: "timeline.approvalDecision.forbidden",
   };
 }
