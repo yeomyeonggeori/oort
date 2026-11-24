@@ -1557,6 +1557,8 @@ pub(super) async fn cancel_run_and_cleanup_in_tx(
         return Ok(false);
     }
     retire_pending_agent_jobs_for_run_in_tx(conn, workspace_id, run_id).await?;
+    // ADR-0200 증보 8 L4 (#6067): the eye comes off (a success adds the check) — same tx.
+    momo_messaging::status_reaction::on_run_terminal_in_tx(conn, workspace_id, run_id).await?;
     let decided_at = chrono::Utc::now();
     let cancelled_approvals =
         cancel_pending_approvals_for_run_in_tx(conn, workspace_id, run_id, decided_at).await?;

@@ -895,6 +895,9 @@ impl AgentWorker {
         let started = with_tenant_tx(&self.pool, job.workspace_id, move |conn| {
             Box::pin(async move {
                 let started = mark_run_started_in_tx(conn, run_id).await?;
+                // ADR-0200 증보 8 L3 (#6067): a start is a take — the eye, in this tx.
+                momo_messaging::status_reaction::on_run_taken_in_tx(conn, job_workspace_id, run_id)
+                    .await?;
                 // #1161 — read here because the *first slice* of a streamed
                 // answer needs it, and that slice happens before `commit_turn`
                 // ever locks the run. Same source as the commit's
@@ -2463,6 +2466,9 @@ impl AgentWorker {
                 });
                 finish_run_in_tx(conn, run_id, outcome.succeeded(), &output, error.as_ref())
                     .await?;
+                // ADR-0200 증보 8 L4 (#6067): the eye comes off (a success adds the check) — same tx.
+                momo_messaging::status_reaction::on_run_terminal_in_tx(conn, workspace_id, run_id)
+                    .await?;
 
                 // The progress rail is told the turn is over (goal SRV-B3c).
                 // THIS is the path a default deployment takes — `AGENT_GATEWAY_MODE`
@@ -2864,6 +2870,9 @@ impl AgentWorker {
                 }
                 let error = json!({"code": PROVIDER_FAILED, "reason": reason});
                 finish_run_in_tx(conn, run_id, false, &json!({}), Some(&error)).await?;
+                // ADR-0200 증보 8 L4 (#6067): the eye comes off (a success adds the check) — same tx.
+                momo_messaging::status_reaction::on_run_terminal_in_tx(conn, workspace_id, run_id)
+                    .await?;
                 // A turn that died before it could answer still ended, and the
                 // badge has to learn that from somewhere (goal SRV-B3c). This is
                 // the path where it matters most: on the non-streaming path
@@ -3081,6 +3090,9 @@ impl AgentWorker {
                     return Ok(created.id);
                 }
                 mark_run_started_in_tx(conn, created.id).await?;
+                // ADR-0200 증보 8 L3 (#6067): a start is a take — the eye, in this tx.
+                momo_messaging::status_reaction::on_run_taken_in_tx(conn, workspace_id, created.id)
+                    .await?;
                 send_message_in_tx(
                     conn,
                     workspace_id,
@@ -3125,6 +3137,13 @@ impl AgentWorker {
                     true,
                     &json!({ "source": "welcome.provider_required" }),
                     None,
+                )
+                .await?;
+                // ADR-0200 증보 8 L4 (#6067): the eye comes off (a success adds the check) — same tx.
+                momo_messaging::status_reaction::on_run_terminal_in_tx(
+                    conn,
+                    workspace_id,
+                    created.id,
                 )
                 .await?;
                 Ok(created.id)
@@ -3218,6 +3237,8 @@ impl AgentWorker {
                         &json!({"code": code, "reason": "job queued before the agent was marked or the workspace grew"}),
                     )
                     .await?;
+                    // ADR-0200 증보 8 L4 (#6067): the eye comes off (a success adds the check) — same tx.
+                    momo_messaging::status_reaction::on_run_terminal_in_tx(conn, workspace_id, run_id).await?;
                 }
                 let mut entry = AuditEntry::new(workspace_id, "agent.connector_owner.job_closed")
                     .about(agent_member_id)
@@ -3492,6 +3513,9 @@ impl AgentWorker {
                 )
                 .await?;
                 finish_run_in_tx(conn, run_id, false, &json!({}), Some(&error)).await?;
+                // ADR-0200 증보 8 L4 (#6067): the eye comes off (a success adds the check) — same tx.
+                momo_messaging::status_reaction::on_run_terminal_in_tx(conn, workspace_id, run_id)
+                    .await?;
                 emit_terminal_agent_status(
                     conn,
                     workspace_id,

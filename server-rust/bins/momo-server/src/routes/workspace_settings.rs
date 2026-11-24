@@ -169,6 +169,7 @@ pub async fn get(
 pub async fn patch(
     State(state): State<AppState>,
     Extension(principal): Extension<Principal>,
+    full_person_session: Option<Extension<crate::auth::FullPersonSession>>,
     Path(workspace): Path<String>,
     Query(query): Query<SettingsQuery>,
     Json(mut request): Json<Value>,
@@ -176,6 +177,17 @@ pub async fn patch(
     require_human(&principal, "workspace settings require a human bearer")?;
     let workspace_id = workspace_scope(&workspace, &principal)?;
     require_workspace_operator(&state, &principal, workspace_id).await?;
+    // ADR-0200 증보 8 L10 (#6067): the agent reaction switch moves only on a person's full app
+    // session — never on a developer token, a narrow push token, or anything an agent holds.
+    if request
+        .get(momo_settings::AGENT_REACTIONS_SETTING)
+        .is_some()
+        && full_person_session.is_none()
+    {
+        return Err(ApiError::forbidden(
+            "agent_reactions can only be changed from a person's app session",
+        ));
+    }
     let include_status = wants_limits_status(&query)?;
     // ADR-0201 증보 v3 B3 (#5040): a screen may carry the consent record of the 「공급자로 가는
     // 내용」 line on the PATCH it already sends. It is a record, not a setting — so it is taken out

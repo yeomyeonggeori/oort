@@ -278,6 +278,8 @@ impl AgentWorker {
                     });
                     finish_run_in_tx(conn, run.run_id, run_succeeded, &output, error.as_ref())
                         .await?;
+                    // ADR-0200 증보 8 L4 (#6067): the eye comes off (a success adds the check) — same tx.
+                    momo_messaging::status_reaction::on_run_terminal_in_tx(conn, run.workspace_id, run.run_id).await?;
                     emit_terminal_agent_status(
                         conn,
                         run.workspace_id,

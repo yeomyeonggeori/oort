@@ -863,12 +863,17 @@ mod tests {
     /// number from the RLS-FORCE `work_item_counter`, assignee and on-behalf-of human by trigger,
     /// requester immutable) and the nullable `work_item_id` on `agent_run`/`work_session` plus
     /// `agent_run`'s requester and on-behalf-of columns (a child run carries its parent's item).
+    ///
+    /// 188 is #6067's agent status reaction (ADR-0200 증보 8): `agent.agent_reactions` (the
+    /// agent's narrowing value, NULL = follow the workspace), `agent_run.status_eye_attach_count`
+    /// (L3's per-run cap) and a partial index on the eye rows the api's follow-up removal starts
+    /// from. No new table, trigger, definer or grant.
     #[test]
-    fn discovers_contiguous_migrations_001_to_187() {
+    fn discovers_contiguous_migrations_001_to_188() {
         let dir = default_migrations_dir();
         let migrations = discover_migrations(&dir).expect("migrations directory readable");
 
-        let expected: Vec<i64> = (1..=187).collect();
+        let expected: Vec<i64> = (1..=188).collect();
         let found: Vec<i64> = migrations
             .iter()
             .map(|migration| migration.version)
@@ -876,11 +881,15 @@ mod tests {
         assert_eq!(
             found,
             expected,
-            "expected contiguous 001..=187 under {}",
+            "expected contiguous 001..=188 under {}",
             dir.display()
         );
         assert!(migrations.first().unwrap().name.starts_with("001_init"));
-        assert!(migrations.last().unwrap().name.starts_with("187_work_item"));
+        assert!(migrations
+            .last()
+            .unwrap()
+            .name
+            .starts_with("188_agent_status_reaction"));
     }
 
     #[test]
