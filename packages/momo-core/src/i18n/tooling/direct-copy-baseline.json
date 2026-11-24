@@ -709,6 +709,8 @@
     "packages/momo-core/src/features/onboarding/guide.ts": {"ko": 0, "en": 0},
     "packages/momo-core/src/features/onboarding/harnessLogin.ts": {"ko": 0, "en": 0},
     "packages/momo-core/src/features/readState/copy.ts": {"ko": 0, "en": 0},
+    "packages/momo-core/src/features/reminders/model.ts": {"ko": 1, "en": 0},
+    "packages/momo-core/src/features/reminders/presets.ts": {"ko": 0, "en": 0},
     "packages/momo-core/src/features/scheduled/copy.ts": {"ko": 0, "en": 0},
     "packages/momo-core/src/features/sidebar/dmVisibility.ts": {"ko": 0, "en": 0},
     "packages/momo-core/src/features/sidebar/goneDm.ts": {"ko": 0, "en": 0},
