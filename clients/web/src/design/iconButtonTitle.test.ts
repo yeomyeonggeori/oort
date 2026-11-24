@@ -63,7 +63,7 @@ const ALLOWED: readonly Allowed[] = [
   },
   {
     file: "features/timeline/QuoteBlock.tsx",
-    title: "{QUOTE_JUMP_HINT}",
+    title: "{formatMessage(QUOTE_JUMP_KEY)}",
     reason: "인용 카드 전체가 단추이고 글이 보인다. title은 「원문으로 이동」 안내다. aria-label이 없는 글 단추라 아이콘 단추가 아니다.",
   },
   {
