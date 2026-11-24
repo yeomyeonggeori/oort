@@ -2,6 +2,38 @@
 import type { MessageCatalog } from "../types";
 
 export const catalog: MessageCatalog = {
+  "app.shortcutHelp.change": [
+    {
+      "type": 0,
+      "value": "Change shortcuts"
+    }
+  ],
+  "app.shortcutHelp.empty": [
+    {
+      "type": 0,
+      "value": "No matching shortcuts"
+    }
+  ],
+  "app.shortcutHelp.reopenHint": [
+    {
+      "type": 0,
+      "value": "Press "
+    },
+    {
+      "type": 1,
+      "value": "key"
+    },
+    {
+      "type": 0,
+      "value": " to open this again"
+    }
+  ],
+  "app.shortcutHelp.search": [
+    {
+      "type": 0,
+      "value": "Search shortcuts"
+    }
+  ],
   "attachments.tray.noticeDismiss": [
     {
       "type": 0,
@@ -12271,38 +12303,6 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "Use device language"
-    }
-  ],
-  "settings.shortcutHelp.change": [
-    {
-      "type": 0,
-      "value": "Change shortcuts"
-    }
-  ],
-  "settings.shortcutHelp.empty": [
-    {
-      "type": 0,
-      "value": "No matching shortcuts"
-    }
-  ],
-  "settings.shortcutHelp.reopenHint": [
-    {
-      "type": 0,
-      "value": "Press "
-    },
-    {
-      "type": 1,
-      "value": "key"
-    },
-    {
-      "type": 0,
-      "value": " to open this again"
-    }
-  ],
-  "settings.shortcutHelp.search": [
-    {
-      "type": 0,
-      "value": "Search shortcuts"
     }
   ],
   "settings.updates.cutLine": [
