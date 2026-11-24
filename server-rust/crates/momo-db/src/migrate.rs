@@ -875,6 +875,9 @@ mod tests {
     /// (this road's marks have no run). No other grant changes.
     /// 190 is #6071's expression rendition table (ADR-0218 §20): the `still` variant and the wider
     /// per-variant size CHECKs on `expression_image` · `expression_draft_image`. No grant changes.
+    /// 191 is #6068's agent reaction tool (ADR-0162 증보 8 R7): `agent_run.agent_reaction_count`
+    /// (0..3, the per-run count of the agent's own reactions, which a removal never gives back). No new
+    /// table, trigger, definer or grant.
     /// 192 is #6069's standing agent expression grant (ADR-0218 §19): the RLS-FORCE tables
     /// `expression_agent_grant` (one live row per agent, written by an active human administrator —
     /// trigger) and `expression_agent_call` (the count source, no foreign key), `expression.grant_id`,

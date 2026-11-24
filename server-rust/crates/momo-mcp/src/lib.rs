@@ -45,6 +45,11 @@ pub use tools::{
 };
 // #6069 (ADR-0218 증보 13 §19, ADR-0162 D3): the register tool, its refusal words and its body budget.
 pub use tools::{RegisterRefusal, TOOL_EXPRESSION_REGISTER};
+// #6068 (ADR-0162 증보 8): the agent's own reaction and the expression names it may use.
+pub use tools::{
+    ReactionRefusal, AGENT_REACTION_TOOLS, MAX_REACTION_EMOJI_BYTES, REACTION_REFUSAL_REASONS,
+    REACTION_SET_ACTIONS, TOOL_EXPRESSION_NAMES, TOOL_REACTION_SET,
+};
 
 pub const MODERN_PROTOCOL_VERSION: &str = "2026-07-28";
 pub const LEGACY_PROTOCOL_VERSION: &str = "2025-11-25";

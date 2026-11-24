@@ -18,6 +18,7 @@
 //! | `the_ceilings_are_judged_before_the_decoder_and_again_after` | YA2 · YA12 · YA16 · YA19 | drop a count in `counts_in_tx` or move `ceiling(…, true)` after the decode |
 //! | `only_a_persons_session_reaches_the_grant` | YA5 · YA8 · YA20 | drop `require_human` / the `FullPersonSession` check; let a member give a grant |
 //! | `a_picture_that_is_not_generated_is_an_argument_error` | YA6 · YA7 | widen the tool schema; skip the name rule |
+//! | `a_self_registered_expression_is_not_an_agents_reaction` | YA21 (ADR-0162 증보 8 RA4 · RA8) | drop `grant_id IS NULL` from `AGENT_USABLE_EXPRESSION` |
 //! | `only_the_api_holds_the_grant_tables` | Y2.1 「쓰기 권한」 | a grant to any other role in `expression-agent-grant-lockdown` |
 
 #[path = "common/expression_children.rs"]
@@ -1146,4 +1147,37 @@ async fn only_the_api_holds_the_grant_tables() {
     .unwrap();
     assert_eq!(tables, 2, "the scan must see both tables");
     assert!(drift.is_empty(), "{drift:?}");
+}
+
+/// YA21 (ADR-0162 증보 8 RA8 · R6 3): an expression registered without a card is not in the names an agent
+/// may react with; the same workspace's card-less-free registration is.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "needs DATABASE_URL to a disposable PG18"]
+async fn a_self_registered_expression_is_not_an_agents_reaction() {
+    let _gate = GATE.lock().await;
+    let w = boot(media::RenditionTable::Wide).await;
+    let t = seed(&w.su).await;
+    give(&w, &t).await;
+    let (status, body) = call(&w, &t.a.bearer, args("self-made")).await;
+    assert_eq!(status, 200, "{body}");
+    sqlx::query(
+        "INSERT INTO expression(workspace_id, name, display_name, tags, origin, created_by, version, kind) \
+         VALUES($1, 'person-made', '별', '[]'::jsonb, '{\"kind\":\"upload\",\"sourceUrl\":null,\"prompt\":null}'::jsonb, $2, 99, 'emoji')",
+    )
+    .bind(t.ws)
+    .bind(t.admin.member)
+    .execute(&w.su)
+    .await
+    .expect("a person's expression");
+    let app = pool_as("momo_app", "MOMO_APP_PASSWORD", "momo_app_dev_pw", 2).await;
+    let ws = t.ws;
+    let (names, _) = momo_db::with_tenant_tx(&app, ws, move |conn| {
+        Box::pin(async move {
+            momo_messaging::agent_reaction::agent_expression_names_in_tx(conn, ws).await
+        })
+    })
+    .await
+    .expect("names");
+    assert!(names.iter().any(|name| name == "person-made"), "{names:?}");
+    assert!(!names.iter().any(|name| name == "self-made"), "{names:?}");
 }
