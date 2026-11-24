@@ -1995,6 +1995,17 @@ export const messageKeys = [
   "timeline.edited.atTime",
   "timeline.edited.mark",
   "timeline.edited.pressHint",
+  "timeline.emptyChannel.addMemberAction",
+  "timeline.emptyChannel.channelDetail",
+  "timeline.emptyChannel.channelHeadline",
+  "timeline.emptyChannel.connectAgentAction",
+  "timeline.emptyChannel.dmAgentHeadline",
+  "timeline.emptyChannel.dmDetailGroup",
+  "timeline.emptyChannel.dmDetailGroupAgents",
+  "timeline.emptyChannel.dmDetailPair",
+  "timeline.emptyChannel.dmHeadline",
+  "timeline.emptyChannel.dmPeerHeadline",
+  "timeline.emptyChannel.writeAction",
   "timeline.lightbox.copied",
   "timeline.lightbox.copy",
   "timeline.lightbox.copyFailed",
@@ -2046,8 +2057,22 @@ export const messageKeys = [
   "timeline.pins.listNone",
   "timeline.pins.rowMark",
   "timeline.pins.stamp",
+  "timeline.quote.action",
+  "timeline.quote.cancel",
+  "timeline.quote.deleted",
+  "timeline.quote.deletedSpoken",
   "timeline.quote.head",
   "timeline.quote.headUnnamed",
+  "timeline.quote.jump",
+  "timeline.quote.kindApproval",
+  "timeline.quote.kindArtifact",
+  "timeline.quote.kindCard",
+  "timeline.quote.kindCompletionReport",
+  "timeline.quote.kindDiff",
+  "timeline.quote.kindSystem",
+  "timeline.quote.kindToolCall",
+  "timeline.quote.kindToolResult",
+  "timeline.quote.nestedMark",
   "timeline.reaction.chipMine",
   "timeline.reaction.chipMineNoNames",
   "timeline.reaction.chipOther",
@@ -4868,6 +4893,25 @@ export const argumentSpecs = {
   },
   "timeline.edited.mark": {},
   "timeline.edited.pressHint": {},
+  "timeline.emptyChannel.addMemberAction": {},
+  "timeline.emptyChannel.channelDetail": {},
+  "timeline.emptyChannel.channelHeadline": {},
+  "timeline.emptyChannel.connectAgentAction": {},
+  "timeline.emptyChannel.dmAgentHeadline": {
+    "name": "string"
+  },
+  "timeline.emptyChannel.dmDetailGroup": {
+    "count": "number"
+  },
+  "timeline.emptyChannel.dmDetailGroupAgents": {
+    "count": "number"
+  },
+  "timeline.emptyChannel.dmDetailPair": {},
+  "timeline.emptyChannel.dmHeadline": {},
+  "timeline.emptyChannel.dmPeerHeadline": {
+    "name": "string"
+  },
+  "timeline.emptyChannel.writeAction": {},
   "timeline.lightbox.copied": {},
   "timeline.lightbox.copy": {},
   "timeline.lightbox.copyFailed": {},
@@ -4964,10 +5008,26 @@ export const argumentSpecs = {
   "timeline.pins.stamp": {
     "date": "string"
   },
+  "timeline.quote.action": {},
+  "timeline.quote.cancel": {},
+  "timeline.quote.deleted": {},
+  "timeline.quote.deletedSpoken": {
+    "head": "string"
+  },
   "timeline.quote.head": {
     "name": "string"
   },
   "timeline.quote.headUnnamed": {},
+  "timeline.quote.jump": {},
+  "timeline.quote.kindApproval": {},
+  "timeline.quote.kindArtifact": {},
+  "timeline.quote.kindCard": {},
+  "timeline.quote.kindCompletionReport": {},
+  "timeline.quote.kindDiff": {},
+  "timeline.quote.kindSystem": {},
+  "timeline.quote.kindToolCall": {},
+  "timeline.quote.kindToolResult": {},
+  "timeline.quote.nestedMark": {},
   "timeline.reaction.chipMine": {
     "count": "number",
     "emoji": "string",
@@ -7384,6 +7444,17 @@ export interface MessageArgs {
   "timeline.edited.atTime": { time: string };
   "timeline.edited.mark": Record<string, never>;
   "timeline.edited.pressHint": Record<string, never>;
+  "timeline.emptyChannel.addMemberAction": Record<string, never>;
+  "timeline.emptyChannel.channelDetail": Record<string, never>;
+  "timeline.emptyChannel.channelHeadline": Record<string, never>;
+  "timeline.emptyChannel.connectAgentAction": Record<string, never>;
+  "timeline.emptyChannel.dmAgentHeadline": { name: string };
+  "timeline.emptyChannel.dmDetailGroup": { count: number };
+  "timeline.emptyChannel.dmDetailGroupAgents": { count: number };
+  "timeline.emptyChannel.dmDetailPair": Record<string, never>;
+  "timeline.emptyChannel.dmHeadline": Record<string, never>;
+  "timeline.emptyChannel.dmPeerHeadline": { name: string };
+  "timeline.emptyChannel.writeAction": Record<string, never>;
   "timeline.lightbox.copied": Record<string, never>;
   "timeline.lightbox.copy": Record<string, never>;
   "timeline.lightbox.copyFailed": Record<string, never>;
@@ -7435,8 +7506,22 @@ export interface MessageArgs {
   "timeline.pins.listNone": Record<string, never>;
   "timeline.pins.rowMark": Record<string, never>;
   "timeline.pins.stamp": { date: string };
+  "timeline.quote.action": Record<string, never>;
+  "timeline.quote.cancel": Record<string, never>;
+  "timeline.quote.deleted": Record<string, never>;
+  "timeline.quote.deletedSpoken": { head: string };
   "timeline.quote.head": { name: string };
   "timeline.quote.headUnnamed": Record<string, never>;
+  "timeline.quote.jump": Record<string, never>;
+  "timeline.quote.kindApproval": Record<string, never>;
+  "timeline.quote.kindArtifact": Record<string, never>;
+  "timeline.quote.kindCard": Record<string, never>;
+  "timeline.quote.kindCompletionReport": Record<string, never>;
+  "timeline.quote.kindDiff": Record<string, never>;
+  "timeline.quote.kindSystem": Record<string, never>;
+  "timeline.quote.kindToolCall": Record<string, never>;
+  "timeline.quote.kindToolResult": Record<string, never>;
+  "timeline.quote.nestedMark": Record<string, never>;
   "timeline.reaction.chipMine": { count: number; emoji: string; names: string };
   "timeline.reaction.chipMineNoNames": { count: number; emoji: string };
   "timeline.reaction.chipOther": { count: number; emoji: string; names: string };

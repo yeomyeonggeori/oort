@@ -1251,13 +1251,13 @@ export default function ConversationScreen({
   }, [quote, messages]);
 
   const onQuoteMessage = useCallback((message: Message) => {
-    setQuote(quoteDraftFor(message));
+    setQuote(quoteDraftFor(formatMenuMessage, message));
     // 한 입력칸에는 한 가지 머리말이다: 인용을 걸면 걸려 있던 답글 대상은 떨어진다(#4869).
     cancelReply();
     // 인용을 건 사람의 다음 동작은 100% 글쓰기다. 캐럿을 옮겨 주지 않으면 줄은
     // 떴는데 손은 아직 타임라인에 있다.
     focusComposer();
-  }, [cancelReply, focusComposer]);
+  }, [cancelReply, focusComposer, formatMenuMessage]);
   const onCancelQuote = useCallback(() => setQuote(null), []);
 
   // ---- 인용이 가리키는 줄로 이동 --------------------------------------------

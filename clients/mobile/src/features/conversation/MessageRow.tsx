@@ -2809,7 +2809,7 @@ function MessageRowInner({
   // 한 접근성 원소가 읽는 답글 머리(「○○님 스레드에 답글」) — 줄(`ReplyHomeLine`)과 **같은 코어 문장**이고 화살표는 읽지 않는다(#4888).
   const replyToSpoken =
     isMarkedReply && !deleted && message.rootId !== undefined
-      ? replyHomeCopy(replyHomeLineOf(message.rootId, replyParent ?? undefined), {
+      ? replyHomeCopy(replyHomeLineOf(formatMessage, message.rootId, replyParent ?? undefined), {
           directory,
           myMemberId: actions?.myMemberId,
           formatMessage,

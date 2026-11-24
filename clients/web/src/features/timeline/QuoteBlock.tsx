@@ -2,10 +2,10 @@ import { missingMemberLabel } from "@momo/core/features/workspace/directory";
 import { CornerUpLeft, X } from "lucide-react";
 import type { ReactNode } from "react";
 import {
-  QUOTE_CANCEL_LABEL,
-  QUOTE_DELETED_TEXT,
-  QUOTE_JUMP_HINT,
-  QUOTE_NESTED_MARK,
+  QUOTE_CANCEL_KEY,
+  QUOTE_DELETED_KEY,
+  QUOTE_JUMP_KEY,
+  QUOTE_NESTED_KEY,
   quoteHeadAuthorId,
   type QuoteBlock as QuoteBlockModel,
 } from "@momo/core/features/timeline/quote";
@@ -106,6 +106,7 @@ function QuoteHeadContent({
   block: QuoteBlockModel;
   directory: Directory;
 }) {
+  const formatMessage = useFormatMessage();
   const label = useQuoteHeadLabel(block, directory);
   return (
     <>
@@ -130,7 +131,7 @@ function QuoteHeadContent({
           {block.kind === "deleted" ? (
             // 삭제된 원본을 정직하게 말한다 (규칙 3). 사본을 남기지 않는 것이
             // 삭제의 뜻이므로, 여기에 있던 글자는 여기에 없다.
-            <span data-testid="quote-deleted">{QUOTE_DELETED_TEXT}</span>
+            <span data-testid="quote-deleted">{formatMessage(QUOTE_DELETED_KEY)}</span>
           ) : block.kind === "unresolved" ? (
             // 「인용했다」는 참이고 「무엇을」은 모른다. 실시간 프레임에는 원문이
             // 실리지 않고(ADR-0148 규칙 3), 원본이 아직 안 불러온 위쪽에 있는 경우다.
@@ -148,7 +149,7 @@ function QuoteHeadContent({
         {block.kind === "ready" && block.quotesAnother && (
           <span className="shrink-0 text-timestamp" data-testid="quote-nested">
             {"· "}
-            {QUOTE_NESTED_MARK}
+            {formatMessage(QUOTE_NESTED_KEY)}
           </span>
         )}
       </span>
@@ -210,6 +211,7 @@ export function QuoteBlock({
   onJump?: (targetId: string, targetSeq: number | null) => void;
   divider?: boolean;
 }) {
+  const formatMessage = useFormatMessage();
   const shared = {
     "data-testid": "quote-block",
     "data-kind": block.kind,
@@ -231,7 +233,7 @@ export function QuoteBlock({
       // 탭 스톱을 하나 더 늘리면 컴포저까지 가는 키보드 경로가 메시지 수만큼
       // 길어진다.
       data-row-action=""
-      title={QUOTE_JUMP_HINT}
+      title={formatMessage(QUOTE_JUMP_KEY)}
       onClick={() => onJump(block.targetId, block.targetSeq)}
       className={cn(
         HEAD,
@@ -242,7 +244,7 @@ export function QuoteBlock({
       )}
     >
       <QuoteHeadContent block={block} directory={directory} />
-      <span className="sr-only">{QUOTE_JUMP_HINT}</span>
+      <span className="sr-only">{formatMessage(QUOTE_JUMP_KEY)}</span>
     </button>
   );
 }
@@ -335,6 +337,7 @@ export function QuoteChip({
   /** 입력창 카드의 맥락 띠 안에 선다(#4317): 띠가 구분선을 지므로 자기 윗선은 없다. */
   attached?: boolean;
 }) {
+  const formatMessage = useFormatMessage();
   return (
     <div
       className={cn(
@@ -347,11 +350,11 @@ export function QuoteChip({
       <div className="flex min-w-0 flex-1 flex-col text-left text-meta text-ink-muted">
         <QuoteHeadContent block={block} directory={directory} />
       </div>
-      <Tooltip label={QUOTE_CANCEL_LABEL} side="bottom">
+      <Tooltip label={formatMessage(QUOTE_CANCEL_KEY)} side="bottom">
         <button
           type="button"
           onClick={onCancel}
-          aria-label={QUOTE_CANCEL_LABEL}
+          aria-label={formatMessage(QUOTE_CANCEL_KEY)}
           data-testid="composer-quote-cancel"
           className="flex size-control-sm shrink-0 items-center justify-center rounded-sm text-ink-muted press hover:bg-surface-hover hover:text-ink focus-visible:focus-ring"
         >

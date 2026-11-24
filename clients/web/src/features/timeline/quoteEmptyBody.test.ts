@@ -1,8 +1,14 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { quoteBlockFrom } from "@momo/core/features/timeline/quote";
+import { quoteBlockFrom as buildQuoteBlock } from "@momo/core/features/timeline/quote";
+import { catalog as koCatalog } from "@momo/core/i18n/generated/ko-KR";
+import { createMessageService } from "@momo/core/i18n/service";
 import type { QuotedMessage } from "@momo/core/lib/api";
+
+const koFormat = createMessageService({ messageLocale: "ko-KR", catalog: koCatalog }).formatMessage;
+const quoteBlockFrom = (...args: Parameters<typeof buildQuoteBlock> extends [unknown, ...infer Rest] ? Rest : never) =>
+  buildQuoteBlock(koFormat, ...args);
 
 // =============================================================================
 // 본문 없는 인용 — 「지워졌다」와 「내용이 없다」가 웹에서 갈라져 있는가 (이슈 #1498).

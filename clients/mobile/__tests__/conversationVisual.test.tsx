@@ -1,7 +1,7 @@
 import type {Message, RosterMember} from '@momo/core/lib/api';
 import {COPY_MESSAGE_ACTION_KEY} from '@momo/core/features/timeline/copyLabels';
 import type {QuoteBlock as QuoteBlockModel} from '@momo/core/features/timeline/quote';
-import {quoteDraftFor} from '@momo/core/features/timeline/quote';
+import {quoteDraftFor as buildQuoteDraftFor} from '@momo/core/features/timeline/quote';
 import {makeDirectory} from '@momo/core/features/workspace/directory';
 import {catalog as koCatalog} from '@momo/core/i18n/generated/ko-KR';
 import {createMessageService} from '@momo/core/i18n/service';
@@ -39,6 +39,10 @@ import {
   QuoteBlock,
   quoteAccessibilityPhrase,
 } from '../src/features/conversation/Quote';
+
+const quoteFormat = createMessageService({messageLocale: 'ko-KR', catalog: koCatalog}).formatMessage;
+const quoteDraftFor = (...args: Parameters<typeof buildQuoteDraftFor> extends [unknown, ...infer Rest] ? Rest : never) =>
+  buildQuoteDraftFor(quoteFormat, ...args);
 
 // =============================================================================
 // 시각·위계 — design-review H-2·H-4·N-1·N-2 를 **값으로** 잠근다.

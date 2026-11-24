@@ -1,5 +1,5 @@
 import type {Message, RosterMember} from '@momo/core/lib/api';
-import {quoteDraftFor} from '@momo/core/features/timeline/quote';
+import {quoteDraftFor as buildQuoteDraftFor} from '@momo/core/features/timeline/quote';
 import {COPY_MESSAGE_ACTION_KEY} from '@momo/core/features/timeline/copyLabels';
 import {catalog as koCatalog} from '@momo/core/i18n/generated/ko-KR';
 import {createMessageService} from '@momo/core/i18n/service';
@@ -25,6 +25,10 @@ import {
   type MessageRowActions,
 } from '../src/features/conversation/MessageRow';
 import {QuoteBlock} from '../src/features/conversation/Quote';
+
+const quoteFormat = createMessageService({messageLocale: 'ko-KR', catalog: koCatalog}).formatMessage;
+const quoteDraftFor = (...args: Parameters<typeof buildQuoteDraftFor> extends [unknown, ...infer Rest] ? Rest : never) =>
+  buildQuoteDraftFor(quoteFormat, ...args);
 
 // =============================================================================
 // 접근성·타깃 — design-review H-1·M-1·M-2·M-8·M-9.

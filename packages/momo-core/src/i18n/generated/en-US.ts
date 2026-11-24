@@ -14856,6 +14856,156 @@ export const catalog: MessageCatalog = {
       "value": "Shows when it was edited"
     }
   ],
+  "timeline.emptyChannel.addMemberAction": [
+    {
+      "type": 0,
+      "value": "Add members"
+    }
+  ],
+  "timeline.emptyChannel.channelDetail": [
+    {
+      "type": 0,
+      "value": "People and agents who join later can read what you write now, just the same."
+    }
+  ],
+  "timeline.emptyChannel.channelHeadline": [
+    {
+      "type": 0,
+      "value": "Start this channel with a first message."
+    }
+  ],
+  "timeline.emptyChannel.connectAgentAction": [
+    {
+      "type": 0,
+      "value": "Connect an agent"
+    }
+  ],
+  "timeline.emptyChannel.dmAgentHeadline": [
+    {
+      "type": 0,
+      "value": "Give "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " a first task."
+    }
+  ],
+  "timeline.emptyChannel.dmDetailGroup": [
+    {
+      "type": 0,
+      "value": "Messages here are seen by the "
+    },
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " person"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " people"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    },
+    {
+      "type": 0,
+      "value": " in this conversation."
+    }
+  ],
+  "timeline.emptyChannel.dmDetailGroupAgents": [
+    {
+      "type": 0,
+      "value": "Messages here are seen by the "
+    },
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " person"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " people"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    },
+    {
+      "type": 0,
+      "value": " in this conversation. Agents only see what is written after they join."
+    }
+  ],
+  "timeline.emptyChannel.dmDetailPair": [
+    {
+      "type": 0,
+      "value": "Only the two of you can see messages here. The participants are fixed to the two of you."
+    }
+  ],
+  "timeline.emptyChannel.dmHeadline": [
+    {
+      "type": 0,
+      "value": "Start a direct message."
+    }
+  ],
+  "timeline.emptyChannel.dmPeerHeadline": [
+    {
+      "type": 0,
+      "value": "Start a conversation with "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "timeline.emptyChannel.writeAction": [
+    {
+      "type": 0,
+      "value": "Write the first message"
+    }
+  ],
   "timeline.lightbox.copied": [
     {
       "type": 0,
@@ -15304,6 +15454,34 @@ export const catalog: MessageCatalog = {
       "value": "date"
     }
   ],
+  "timeline.quote.action": [
+    {
+      "type": 0,
+      "value": "Quote and reply"
+    }
+  ],
+  "timeline.quote.cancel": [
+    {
+      "type": 0,
+      "value": "Remove quote"
+    }
+  ],
+  "timeline.quote.deleted": [
+    {
+      "type": 0,
+      "value": "Deleted message"
+    }
+  ],
+  "timeline.quote.deletedSpoken": [
+    {
+      "type": 1,
+      "value": "head"
+    },
+    {
+      "type": 0,
+      "value": ", deleted message"
+    }
+  ],
   "timeline.quote.head": [
     {
       "type": 0,
@@ -15318,6 +15496,66 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "Replying to a message"
+    }
+  ],
+  "timeline.quote.jump": [
+    {
+      "type": 0,
+      "value": "Go to the original"
+    }
+  ],
+  "timeline.quote.kindApproval": [
+    {
+      "type": 0,
+      "value": "Approval request"
+    }
+  ],
+  "timeline.quote.kindArtifact": [
+    {
+      "type": 0,
+      "value": "Output"
+    }
+  ],
+  "timeline.quote.kindCard": [
+    {
+      "type": 0,
+      "value": "Card message"
+    }
+  ],
+  "timeline.quote.kindCompletionReport": [
+    {
+      "type": 0,
+      "value": "Work completion report"
+    }
+  ],
+  "timeline.quote.kindDiff": [
+    {
+      "type": 0,
+      "value": "Code change"
+    }
+  ],
+  "timeline.quote.kindSystem": [
+    {
+      "type": 0,
+      "value": "System notice"
+    }
+  ],
+  "timeline.quote.kindToolCall": [
+    {
+      "type": 0,
+      "value": "Tool run"
+    }
+  ],
+  "timeline.quote.kindToolResult": [
+    {
+      "type": 0,
+      "value": "Tool result"
+    }
+  ],
+  "timeline.quote.nestedMark": [
+    {
+      "type": 0,
+      "value": "Includes a quote"
     }
   ],
   "timeline.reaction.chipMine": [

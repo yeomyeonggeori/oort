@@ -1,7 +1,7 @@
 import type { MessageActionAvailability } from "@momo/core/features/timeline/model";
 import { pinActionLabelKey } from "@momo/core/features/timeline/pins";
 import { QUICK_REACTIONS } from "@momo/core/features/timeline/reactions";
-import { QUOTE_ACTION_LABEL } from "@momo/core/features/timeline/quote";
+import { QUOTE_ACTION_KEY } from "@momo/core/features/timeline/quote";
 import {
   copyLinkActionKey,
   copyMessageActionKey,
@@ -195,7 +195,7 @@ export function messageActionItems(
     items.push({
       key: "quote",
       testKey: "quote",
-      label: QUOTE_ACTION_LABEL,
+      labelKey: QUOTE_ACTION_KEY,
       group: MESSAGE_ACTION_GROUP.message,
     });
   }

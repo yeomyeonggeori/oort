@@ -14047,6 +14047,96 @@ export const catalog: MessageCatalog = {
       "value": "누르면 고친 시각을 보여 줘요"
     }
   ],
+  "timeline.emptyChannel.addMemberAction": [
+    {
+      "type": 0,
+      "value": "멤버 추가하기"
+    }
+  ],
+  "timeline.emptyChannel.channelDetail": [
+    {
+      "type": 0,
+      "value": "지금 쓴 메시지는 나중에 들어올 사람과 에이전트도 같은 자격으로 읽습니다."
+    }
+  ],
+  "timeline.emptyChannel.channelHeadline": [
+    {
+      "type": 0,
+      "value": "이 채널을 첫 메시지로 시작하세요."
+    }
+  ],
+  "timeline.emptyChannel.connectAgentAction": [
+    {
+      "type": 0,
+      "value": "에이전트 연결"
+    }
+  ],
+  "timeline.emptyChannel.dmAgentHeadline": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "님에게 첫 일을 맡겨보세요."
+    }
+  ],
+  "timeline.emptyChannel.dmDetailGroup": [
+    {
+      "type": 0,
+      "value": "여기 쓴 메시지는 이 대화에 있는 "
+    },
+    {
+      "type": 1,
+      "value": "count"
+    },
+    {
+      "type": 0,
+      "value": "명이 함께 봅니다."
+    }
+  ],
+  "timeline.emptyChannel.dmDetailGroupAgents": [
+    {
+      "type": 0,
+      "value": "여기 쓴 메시지는 이 대화에 있는 "
+    },
+    {
+      "type": 1,
+      "value": "count"
+    },
+    {
+      "type": 0,
+      "value": "명이 함께 봅니다. 에이전트는 이 대화에 들어온 뒤에 쓴 글만 봅니다."
+    }
+  ],
+  "timeline.emptyChannel.dmDetailPair": [
+    {
+      "type": 0,
+      "value": "여기 쓴 메시지는 둘만 봅니다. 참여자는 이 둘로 고정됩니다."
+    }
+  ],
+  "timeline.emptyChannel.dmHeadline": [
+    {
+      "type": 0,
+      "value": "다이렉트 메시지를 시작하세요."
+    }
+  ],
+  "timeline.emptyChannel.dmPeerHeadline": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "님과의 대화를 시작하세요."
+    }
+  ],
+  "timeline.emptyChannel.writeAction": [
+    {
+      "type": 0,
+      "value": "첫 메시지 쓰기"
+    }
+  ],
   "timeline.lightbox.copied": [
     {
       "type": 0,
@@ -14474,6 +14564,34 @@ export const catalog: MessageCatalog = {
       "value": "에 고정"
     }
   ],
+  "timeline.quote.action": [
+    {
+      "type": 0,
+      "value": "인용해서 답하기"
+    }
+  ],
+  "timeline.quote.cancel": [
+    {
+      "type": 0,
+      "value": "인용 취소"
+    }
+  ],
+  "timeline.quote.deleted": [
+    {
+      "type": 0,
+      "value": "삭제된 메시지"
+    }
+  ],
+  "timeline.quote.deletedSpoken": [
+    {
+      "type": 1,
+      "value": "head"
+    },
+    {
+      "type": 0,
+      "value": ", 삭제된 메시지"
+    }
+  ],
   "timeline.quote.head": [
     {
       "type": 1,
@@ -14488,6 +14606,66 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "메시지에 답장"
+    }
+  ],
+  "timeline.quote.jump": [
+    {
+      "type": 0,
+      "value": "원본으로 이동"
+    }
+  ],
+  "timeline.quote.kindApproval": [
+    {
+      "type": 0,
+      "value": "승인 요청"
+    }
+  ],
+  "timeline.quote.kindArtifact": [
+    {
+      "type": 0,
+      "value": "산출물"
+    }
+  ],
+  "timeline.quote.kindCard": [
+    {
+      "type": 0,
+      "value": "카드 메시지"
+    }
+  ],
+  "timeline.quote.kindCompletionReport": [
+    {
+      "type": 0,
+      "value": "작업 완료 리포트"
+    }
+  ],
+  "timeline.quote.kindDiff": [
+    {
+      "type": 0,
+      "value": "코드 변경"
+    }
+  ],
+  "timeline.quote.kindSystem": [
+    {
+      "type": 0,
+      "value": "시스템 알림"
+    }
+  ],
+  "timeline.quote.kindToolCall": [
+    {
+      "type": 0,
+      "value": "도구 실행"
+    }
+  ],
+  "timeline.quote.kindToolResult": [
+    {
+      "type": 0,
+      "value": "도구 결과"
+    }
+  ],
+  "timeline.quote.nestedMark": [
+    {
+      "type": 0,
+      "value": "인용 포함"
     }
   ],
   "timeline.reaction.chipMine": [

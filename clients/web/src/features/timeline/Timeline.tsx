@@ -72,6 +72,7 @@ import { isStreamRunEnded } from "@momo/core/features/timeline/streamStop";
 import { groupRepliesByRoot, liveThreadRollup } from "@momo/core/features/timeline/threadSummary";
 import { mainFlowMessages } from "@momo/core/features/timeline/threadHome";
 import { messageAboveIds } from "@momo/core/features/timeline/quote";
+import { useFormatMessage } from "@/i18n/useFormatMessage";
 import { useEndedRuns } from "@/features/agents/endedRuns";
 import { useChannelRuns } from "@/features/agents/agentRunProgressStore";
 import { runsByTriggerMessage } from "@momo/core/features/agents/runStatusLine";
@@ -519,9 +520,11 @@ export function Timeline({
   // 값(수)으로 의존한다: 부모가 렌더마다 새 객체를 줘도 소개 행이 다시 만들어지지 않는다.
   const groupCount = dmGroup?.count;
   const groupAgents = dmGroup?.agentCount;
+  const formatMessage = useFormatMessage();
   const intro = useMemo(
     () =>
       buildChannelIntro({
+        formatMessage,
         kind: channelKind,
         name: channelName ?? "",
         topic: channelTopic,
@@ -535,6 +538,7 @@ export function Timeline({
         empty,
       }),
     [
+      formatMessage,
       channelKind,
       channelName,
       channelTopic,

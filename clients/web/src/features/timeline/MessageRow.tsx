@@ -597,7 +597,7 @@ export function MessageRow({
   // ADR-0148. 인용은 **받은 것으로** 그린다: 서버가 페이지에 동봉한 `replyTo`가
   // 있으면 그것, 없으면(라이브 프레임) 이미 로드된 같은 채널의 행. 어느 쪽도
   // 재조회가 아니고, 이 행에 fetch 씨앗이 아예 없다.
-  const quote = resolveQuote(message, quoteLookup);
+  const quote = resolveQuote(formatMessage, message, quoteLookup);
   // #5357 — 에이전트의 답이 바로 위 메시지를 가리키면 그 인용은 정보를 더하지 못한다. 그리는 마지막 걸음에서만 거르고 데이터는 건드리지 않는다.
   // #5381 — 스레드 화면(`ThreadSurfaceRoot`)에서 인용 대상이 그 스레드의 root면 그것도 같은 함수가 거른다: root는 맨 위 행으로 이미 서 있다(요청 고리 §4.2).
   const quoteRedundant = isQuoteRedundant(quote, {

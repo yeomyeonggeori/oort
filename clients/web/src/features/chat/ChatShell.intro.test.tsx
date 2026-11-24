@@ -14,10 +14,21 @@ import { createRoot, type Root } from "react-dom/client";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Channel, RosterMember } from "@momo/core/lib/api";
-import { EMPTY_ADD_MEMBER_ACTION_LABEL } from "@momo/core/features/timeline/model";
+import { EMPTY_ADD_MEMBER_ACTION_KEY } from "@momo/core/features/timeline/model";
 import { makeDirectory } from "@momo/core/features/workspace/directory";
 import { SessionProvider, type SessionContextValue } from "@/app/session";
 import { canAddChannelMemberNow, ChatShell } from "./ChatShell";
+import { catalog as koCatalog } from "@momo/core/i18n/generated/ko-KR";
+import { createMessageCopy } from "@momo/core/testkit";
+import { LocaleProvider } from "@/i18n/LocaleProvider";
+import type { AppLocale } from "@/i18n/localeStore";
+import { koreanLocale } from "@/testing/koLocale";
+let koLocale: AppLocale;
+const withKo = (node: ReturnType<typeof createElement>) => createElement(LocaleProvider, { locale: koLocale, children: node });
+beforeAll(async () => { koLocale = await koreanLocale(); });
+
+const ko = createMessageCopy({ messageLocale: "ko-KR", catalog: koCatalog });
+const EMPTY_ADD_MEMBER_ACTION_LABEL = ko(EMPTY_ADD_MEMBER_ACTION_KEY);
 
 const WS = "00000000-0000-7000-8000-000000000001";
 const CHANNEL = "00000000-0000-7000-8000-000000000201";
@@ -264,7 +275,7 @@ function mountShell(): HTMLElement {
   }
   act(() => {
     mountedRoot?.render(
-      createElement(
+      withKo(createElement(
         SessionProvider,
         { value: sessionValue() },
         createElement(
@@ -279,7 +290,7 @@ function mountShell(): HTMLElement {
             })
           )
         )
-      )
+      ))
     );
   });
   return host;

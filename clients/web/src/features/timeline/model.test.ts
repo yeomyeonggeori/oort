@@ -5,10 +5,10 @@ import {
   buildTimelineItems,
   confirmsPending,
   foldPausedNotices,
-  emptyChannelCopy,
+  emptyChannelCopy as buildEmptyChannelCopy,
   emptyTimeline,
-  EMPTY_ADD_MEMBER_ACTION_LABEL,
-  EMPTY_WRITE_ACTION_LABEL,
+  EMPTY_ADD_MEMBER_ACTION_KEY,
+  EMPTY_WRITE_ACTION_KEY,
   failPending,
   isStrictlyOrdered,
   mergeMessages,
@@ -25,6 +25,14 @@ import {
   mentionQueryAt,
 } from "@/features/chat/composerAutocomplete";
 import type { RosterMember } from "@momo/core/lib/api";
+import { catalog as koCatalog } from "@momo/core/i18n/generated/ko-KR";
+import { createMessageCopy } from "@momo/core/testkit";
+
+const ko = createMessageCopy({ messageLocale: "ko-KR", catalog: koCatalog });
+const emptyChannelCopy = (...args: Parameters<typeof buildEmptyChannelCopy> extends [unknown, ...infer Rest] ? Rest : never) =>
+  buildEmptyChannelCopy(ko, ...args);
+const EMPTY_ADD_MEMBER_ACTION_LABEL = ko(EMPTY_ADD_MEMBER_ACTION_KEY);
+const EMPTY_WRITE_ACTION_LABEL = ko(EMPTY_WRITE_ACTION_KEY);
 
 const DAY = new Date(2026, 6, 25, 14, 0, 0).getTime();
 
