@@ -2479,6 +2479,15 @@ const MOUNTED_WITHOUT_CONTRACT: Drift = &[
         "The upload address an Agent Port agent spends once to put ONE re-encoded picture into its own next message (#6013, ADR-0151 증보 10 P3): a capacity URL like the two above rather than a client API — its caller is the agent's own shell, not a client, and the one-time, hash-only, 120-second token in the path is the only authority — so it is listed in neither contract file this test reads",
         &[("PUT", "/v1/agent-uploads/{}/{}")],
     ),
+    (
+        "The standing grant for an agent's own expressions (#6069, ADR-0218 증보 13 §19 Y2.1): a person's full app session only (the handler refuses an agent bearer, a developer token and the push tokens). Its openapi.yaml entries come with the core contract change for `proposedBy` · `selfRegistered` (the #6069 follow-up the handoff names) — listed here until then",
+        &[
+            ("DELETE", "/v1/workspaces/{}/agents/{}/expression-grant"),
+            ("GET", "/v1/workspaces/{}/agents/{}/expression-grant"),
+            ("GET", "/v1/workspaces/{}/expression-grants"),
+            ("PUT", "/v1/workspaces/{}/agents/{}/expression-grant"),
+        ],
+    ),
 ];
 
 /// **Drift that predates #4660**, the other direction: operations a contract file declares that the
