@@ -787,6 +787,14 @@ pub async fn disconnect(
                     )
                     .await
                     .map_err(momo_db::DbError::from)?;
+                    // ADR-0200 증보 8 L3 (#6067): a lease handed back (or a job closed) — the eye of a run no
+                    // longer taken comes off, in this tx.
+                    momo_messaging::status_reaction::on_agent_jobs_released_in_tx(
+                        conn,
+                        workspace_id,
+                        started.connection.agent_member_id,
+                    )
+                    .await?;
                     write_audit(
                         conn,
                         &AuditEntry::new(

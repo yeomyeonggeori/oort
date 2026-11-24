@@ -383,6 +383,14 @@ pub(crate) async fn authenticate_and_admit_agent_port_credential(
                             )
                             .await
                             .map_err(DbError::from)?;
+                            // ADR-0200 증보 8 L3 (#6067): a lease handed back (or a job closed) — the eye of a run no
+                            // longer taken comes off, in this tx.
+                            momo_messaging::status_reaction::on_agent_jobs_released_in_tx(
+                                conn,
+                                claimed_workspace,
+                                agent_member_id,
+                            )
+                            .await?;
                             write_audit(
                                 conn,
                                 &AuditEntry::new(
@@ -569,6 +577,14 @@ pub(crate) async fn authenticate_and_admit_agent_port_credential(
                     )
                     .await
                     .map_err(DbError::from)?;
+                    // ADR-0200 증보 8 L3 (#6067): a lease handed back (or a job closed) — the eye of a run no
+                    // longer taken comes off, in this tx.
+                    momo_messaging::status_reaction::on_agent_jobs_released_in_tx(
+                        conn,
+                        identity.workspace_id,
+                        identity.member_id,
+                    )
+                    .await?;
                     write_audit(
                         conn,
                         &AuditEntry::new(

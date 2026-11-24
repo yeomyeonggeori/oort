@@ -47,7 +47,80 @@ pub const ALLOWED_SETTINGS_KEYS: &[&str] = &[
     // `workspace.settings.update` names two other keys, so a helper's card cannot raise the limit
     // that bounds the helper (B13-I9).
     "team_ai_limits",
+    // ADR-0200 증보 8 L10 (#6067): the agent reaction switch, one of three words. The route stores
+    // it only from a person's full app session ([`AGENT_REACTIONS_SETTING`]).
+    "agent_reactions",
 ];
+
+/// The workspace settings key of the agent reaction switch (ADR-0200 증보 8 L10, #6067): one of
+/// [`AgentReactionsMode`]'s three words. Written by an administrator through `PATCH …/settings`
+/// on a person's full app session only — an agent's `workspace.settings.update` names two other
+/// keys, and no agent, developer, MCP or push token reaches this one (L10 「사람 세션의 저장 길로만」).
+pub const AGENT_REACTIONS_SETTING: &str = "agent_reactions";
+
+/// The agent reaction switch (ADR-0200 증보 8 L10). Ordered from narrowest to widest, so the
+/// effective value of a workspace value and an agent value is their minimum.
+///
+/// | wire | 화면 | 서버 눈 · 체크 | 에이전트가 고르는 반응 도구 |
+/// |---|---|---|---|
+/// | `off` | 끔 | 달지 않는다 | 없음 |
+/// | `status` | 상태 표시만 | 단다 | 없음 |
+/// | `free` | 자유롭게 | 단다 | 실린다(ADR-0162 증보 8, #6068) |
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum AgentReactionsMode {
+    Off,
+    Status,
+    Free,
+}
+
+impl AgentReactionsMode {
+    /// What a workspace that never set the key gets (L10, owner 값 ② 2026-11-23).
+    pub const DEFAULT: AgentReactionsMode = AgentReactionsMode::Status;
+
+    pub fn as_wire(self) -> &'static str {
+        match self {
+            AgentReactionsMode::Off => "off",
+            AgentReactionsMode::Status => "status",
+            AgentReactionsMode::Free => "free",
+        }
+    }
+
+    /// One of the three words exactly, or nothing.
+    pub fn from_wire(raw: &str) -> Option<Self> {
+        match raw {
+            "off" => Some(AgentReactionsMode::Off),
+            "status" => Some(AgentReactionsMode::Status),
+            "free" => Some(AgentReactionsMode::Free),
+            _ => None,
+        }
+    }
+
+    /// The workspace value read from the settings bag: absent key = [`Self::DEFAULT`], anything
+    /// that is not one of the three words (`true`, `""`, an unknown word) = **off** — the reading
+    /// closes rather than opens. `None` (the workspace row is hidden from this transaction) is off.
+    pub fn from_workspace_settings(settings: Option<&Value>) -> Self {
+        let Some(bag) = settings else {
+            return AgentReactionsMode::Off;
+        };
+        match bag.get(AGENT_REACTIONS_SETTING) {
+            None => AgentReactionsMode::DEFAULT,
+            Some(Value::String(word)) => {
+                AgentReactionsMode::from_wire(word).unwrap_or(AgentReactionsMode::Off)
+            }
+            Some(_) => AgentReactionsMode::Off,
+        }
+    }
+
+    /// The effective value: the narrower of the workspace value and the agent's own value
+    /// (`None` = follow the workspace). An agent value wider than the workspace's is stored but
+    /// never widens it (L10, LA5).
+    pub fn effective(workspace: Self, agent: Option<Self>) -> Self {
+        match agent {
+            Some(agent) => workspace.min(agent),
+            None => workspace,
+        }
+    }
+}
 
 /// The seven role bundles that can be switched (`chat_read` is not one: it is always on; `hermes`
 /// is the seventh, ADR-0201 증보 v4 P10, #5369). A copy of
@@ -157,6 +230,8 @@ pub enum WorkspaceSettingsInvalid {
     TeamAiWebSearchShape,
     #[error("agent_initiative must be true or false")]
     AgentInitiativeShape,
+    #[error("agent_reactions must be one of off, status, free")]
+    AgentReactionsShape,
     #[error("team_ai_roles must be an object of bundle → true or false")]
     TeamAiRolesShape,
     #[error("unknown team_ai_roles bundle: {0}")]
@@ -265,6 +340,12 @@ fn validate_settings_value(key: &str, value: &Value) -> Result<(), WorkspaceSett
         }
         TEAM_AI_ROLES_SETTING => validate_team_ai_roles(value),
         TEAM_AI_LIMITS_SETTING => validate_team_ai_limits(value),
+        // One of the three words. The reader closes anything else to off, so a person who sent
+        // `true` meaning "on" is told here instead of silently getting off.
+        AGENT_REACTIONS_SETTING => match value.as_str().and_then(AgentReactionsMode::from_wire) {
+            Some(_) => Ok(()),
+            None => Err(WorkspaceSettingsInvalid::AgentReactionsShape),
+        },
         _ => Err(WorkspaceSettingsInvalid::UnknownKey(key.to_string())),
     }
 }

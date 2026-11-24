@@ -1174,6 +1174,14 @@ async fn jobs_claim(
             )
             .await
             .map_err(DbError::from)?;
+            // ADR-0200 증보 8 L3 (#6067): a lease handed back (or a job closed) — the eye of a run no
+            // longer taken comes off, in this tx.
+            momo_messaging::status_reaction::on_agent_jobs_released_in_tx(
+                conn,
+                caller.workspace_id,
+                caller.agent_member_id,
+            )
+            .await?;
 
             let mut jobs = Vec::with_capacity(claimed.len());
             for job in claimed {
@@ -1220,6 +1228,13 @@ async fn jobs_claim(
                     run_id,
                     momo_agent::AppendedRunEvent::Claimed,
                     caller.agent_member_id,
+                )
+                .await?;
+                // ADR-0200 증보 8 L3 (#6067): the take is recorded — the eye, in this tx.
+                momo_messaging::status_reaction::on_run_taken_in_tx(
+                    conn,
+                    caller.workspace_id,
+                    run_id,
                 )
                 .await?;
                 let mut entry = json!({
@@ -1394,6 +1409,14 @@ async fn job_start(
                     )
                     .await
                     .map_err(DbError::from)?;
+                    // ADR-0200 증보 8 L3 (#6067): a lease handed back (or a job closed) — the eye of a run no
+                    // longer taken comes off, in this tx.
+                    momo_messaging::status_reaction::on_agent_jobs_released_in_tx(
+                        conn,
+                        caller.workspace_id,
+                        caller.agent_member_id,
+                    )
+                    .await?;
                     match claimed.into_iter().next() {
                         Some(job) => job,
                         None => {
@@ -1438,6 +1461,13 @@ async fn job_start(
                     run_id,
                     momo_agent::AppendedRunEvent::Claimed,
                     caller.agent_member_id,
+                )
+                .await?;
+                // ADR-0200 증보 8 L3 (#6067): the take is recorded — the eye, in this tx.
+                momo_messaging::status_reaction::on_run_taken_in_tx(
+                    conn,
+                    caller.workspace_id,
+                    run_id,
                 )
                 .await?;
             }
@@ -1624,6 +1654,14 @@ async fn job_lease(
                     )
                     .await
                     .map_err(DbError::from)?;
+                    // ADR-0200 증보 8 L3 (#6067): a lease handed back (or a job closed) — the eye of a run no
+                    // longer taken comes off, in this tx.
+                    momo_messaging::status_reaction::on_agent_jobs_released_in_tx(
+                        conn,
+                        caller.workspace_id,
+                        caller.agent_member_id,
+                    )
+                    .await?;
                     Ok(if released {
                         Ok(json!({"status": "released"}))
                     } else {
@@ -2497,6 +2535,13 @@ async fn action_propose(
                 _ => None,
             };
             momo_agent::mark_run_started_in_tx(conn, handle.run_id).await?;
+            // ADR-0200 증보 8 L3 (#6067): a start is a take.
+            momo_messaging::status_reaction::on_run_taken_in_tx(
+                conn,
+                caller.workspace_id,
+                handle.run_id,
+            )
+            .await?;
             // **The park happens before the approval, not after.**
             //
             // Its `status = 'running'` guard is the one thing in this
