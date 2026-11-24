@@ -43,7 +43,7 @@ const TEXT_PAIRS: ReadonlyArray<readonly [keyof Palette, keyof Palette]> = [
   ['textMuted', 'sheet'],
   ['textMuted', 'canvasTop'],
   ['textMuted', 'canvasBottom'],
-  // 못 누르는 주 단추의 라벨(`PrimaryButton`·`OnboardingButton` 의 잠김, #5100) — 옅은 칸 위에서 읽혀야 한다.
+  // 못 누르는 승인 상자의 라벨(`ApprovalDecision` 의 잠김, #5100) — 옅은 칸 위에서 읽혀야 한다. 공용 단추 네 종류는 #6075 부터 같은 채움을 흐려 잠근다.
   ['textMuted', 'surfaceMuted'],
   ['onPrimary', 'primary'],
   ['accentText', 'bg'],
