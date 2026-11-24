@@ -1803,7 +1803,8 @@ pub const TOOL_CATALOG: [ToolDescriptor; 19] = [
         name: TOOL_EXPRESSION_REGISTER,
         title: "Register a team emoji you made",
         // ADR-0218 증보 13 §19 Y2.2 · Y2.3 (#6069). Listed only for an agent a person approved once
-        // (`ToolView::hide` otherwise). A golden test over the key words is a follow-up (#6069 handoff).
+        // (`ToolView::hide` otherwise). The golden in `bins/momo-server/tests/agent_conversation_rules.rs`
+        // (`the_register_tool_carries_its_three_promises`) holds the key words.
         description: "Register ONE team emoji you drew yourself, without an approval card. A person \
                       approved you once for this; nobody sees the picture before it is saved, so \
                       register only what you would show the whole team. Send clientRequestId (a new \

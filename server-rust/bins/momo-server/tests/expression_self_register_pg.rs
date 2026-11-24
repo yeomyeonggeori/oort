@@ -19,6 +19,7 @@
 //! | `only_a_persons_session_reaches_the_grant` | YA5 · YA8 · YA20 | drop `require_human` / the `FullPersonSession` check; let a member give a grant |
 //! | `a_picture_that_is_not_generated_is_an_argument_error` | YA6 · YA7 | widen the tool schema; skip the name rule |
 //! | `a_self_registered_expression_is_not_an_agents_reaction` | YA21 (ADR-0162 증보 8 RA4 · RA8) | drop `grant_id IS NULL` from `AGENT_USABLE_EXPRESSION` |
+//! | `the_big_body_is_read_only_through_an_open_door` | Y2.2 「큰 본문을 읽기 전에」 · `MAX_REGISTER_REQUEST_BYTES` | read 2 MiB for any propose-scoped agent (drop `register_door_open` in `agent_port.rs`); drop the register branch of the MCP budget |
 //! | `only_the_api_holds_the_grant_tables` | Y2.1 「쓰기 권한」 | a grant to any other role in `expression-agent-grant-lockdown` |
 
 #[path = "common/expression_children.rs"]
@@ -125,6 +126,7 @@ async fn pool_as(role: &str, password_env: &str, fallback: &str, max: u32) -> Pg
 
 struct World {
     base: String,
+    addr: SocketAddr,
     su: PgPool,
 }
 
@@ -164,6 +166,7 @@ async fn boot(table: media::RenditionTable) -> World {
     });
     World {
         base: format!("http://{addr}"),
+        addr,
         su,
     }
 }
@@ -1180,4 +1183,140 @@ async fn a_self_registered_expression_is_not_an_agents_reaction() {
     .expect("names");
     assert!(names.iter().any(|name| name == "person-made"), "{names:?}");
     assert!(!names.iter().any(|name| name == "self-made"), "{names:?}");
+}
+
+/// A noise PNG: incompressible, so its base64 is well past the 64 KiB ceiling and under 1 MiB decoded.
+fn noise_png(side: u32) -> Vec<u8> {
+    let mut seed: u32 = 0x6069_2026;
+    let image = image::RgbaImage::from_fn(side, side, |_, _| {
+        seed ^= seed << 13;
+        seed ^= seed >> 17;
+        seed ^= seed << 5;
+        let [a, b, c, _] = seed.to_le_bytes();
+        image::Rgba([a, b, c, 255])
+    });
+    let mut out = Cursor::new(Vec::new());
+    image::DynamicImage::ImageRgba8(image)
+        .write_to(&mut out, image::ImageFormat::Png)
+        .unwrap();
+    out.into_inner()
+}
+
+/// A `tools/call` head of `oort_expression_register` announcing `declared` bytes, then only `sent` of them,
+/// reading the answer meanwhile. `None`: no answer within `patience` — the server is waiting for the rest.
+async fn register_head_then_part(
+    addr: SocketAddr,
+    bearer: &str,
+    declared: usize,
+    sent: usize,
+    patience: std::time::Duration,
+) -> Option<u16> {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let socket = tokio::net::TcpStream::connect(addr).await.expect("connect");
+    let (mut reader, mut writer) = socket.into_split();
+    let head = format!(
+        "POST {MCP_PATH} HTTP/1.1\r\nHost: {addr}\r\nContent-Type: application/json\r\n\
+         Accept: application/json, text/event-stream\r\nMCP-Protocol-Version: {MODERN_VERSION}\r\n\
+         Mcp-Method: tools/call\r\nMcp-Name: {TOOL}\r\nAuthorization: Bearer {bearer}\r\n\
+         Content-Length: {declared}\r\n\r\n"
+    );
+    let sender = tokio::spawn(async move {
+        if writer.write_all(head.as_bytes()).await.is_err() {
+            return;
+        }
+        let _ = writer.write_all(&vec![b' '; sent]).await;
+        std::future::pending::<()>().await;
+    });
+    let mut received = Vec::new();
+    let _ = tokio::time::timeout(patience, async {
+        let mut buffer = [0u8; 4096];
+        loop {
+            let n = reader.read(&mut buffer).await.unwrap_or(0);
+            if n == 0 {
+                break;
+            }
+            received.extend_from_slice(&buffer[..n]);
+            if received.windows(4).any(|window| window == b"\r\n\r\n") {
+                break;
+            }
+        }
+    })
+    .await;
+    sender.abort();
+    let line = String::from_utf8_lossy(&received)
+        .lines()
+        .next()?
+        .to_string();
+    line.split_whitespace().nth(1)?.parse().ok()
+}
+
+/// Y2.2 「인증 · scope · 승인 기록을 큰 본문을 읽기 전에」: a real picture past 64 KiB registers through an open
+/// door (200), the same body to a closed door is 413 with nothing written, and a closed door answers while
+/// only 100 KiB of an announced 1.5 MiB has arrived — the rest is never waited for — where an open door
+/// waits for the body it is allowed to read.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "needs DATABASE_URL to a disposable PG18"]
+async fn the_big_body_is_read_only_through_an_open_door() {
+    let _gate = GATE.lock().await;
+    let w = boot(media::RenditionTable::Wide).await;
+    let open = seed(&w.su).await;
+    give(&w, &open).await;
+    let closed = seed(&w.su).await;
+
+    let picture = noise_png(300);
+    let mut big = args("big-one");
+    big["image"]["dataBase64"] = json!(base64::engine::general_purpose::STANDARD.encode(&picture));
+    let body = serde_json::to_vec(&modern_body(
+        "tools/call",
+        json!({"name": TOOL, "arguments": big.clone()}),
+    ))
+    .unwrap();
+    assert!(
+        body.len() > 64 * 1024 && picture.len() <= 1024 * 1024,
+        "the case is past the standard ceiling and within the picture limit: body {} picture {}",
+        body.len(),
+        picture.len()
+    );
+
+    let (status, value) = call(&w, &open.a.bearer, big.clone()).await;
+    assert_eq!(status, 200, "{value}");
+    assert_eq!(expressions(&w, &open).await, 1);
+
+    let (status, value) = call(&w, &closed.a.bearer, big).await;
+    assert_eq!(status, 413, "{value}");
+    assert_eq!(expressions(&w, &closed).await, 0);
+    assert_eq!(
+        count(
+            &w,
+            "SELECT count(*) FROM expression_agent_call WHERE workspace_id = $1",
+            &[closed.ws]
+        )
+        .await,
+        0
+    );
+
+    let declared = 1536 * 1024;
+    let sent = 100 * 1024;
+    let answered = register_head_then_part(
+        w.addr,
+        &closed.a.bearer,
+        declared,
+        sent,
+        std::time::Duration::from_secs(5),
+    )
+    .await;
+    assert_eq!(
+        answered,
+        Some(413),
+        "a closed door answers before the body has arrived"
+    );
+    let waited = register_head_then_part(
+        w.addr,
+        &open.a.bearer,
+        declared,
+        sent,
+        std::time::Duration::from_secs(3),
+    )
+    .await;
+    assert_eq!(waited, None, "an open door waits for the body it may read");
 }

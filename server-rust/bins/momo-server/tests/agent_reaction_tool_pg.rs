@@ -20,10 +20,11 @@
 //! | `the_emoji_is_the_pickers_spelling_and_never_a_work_state` | RA4 | the status set, the respelling or the expression clause |
 //! | `a_reaction_moves_no_seq_inbox_push_or_run` | RA7 | the tool writes anything but the reaction row, its frame and its audit line |
 //! | `names_are_names_of_usable_expressions_only` | RA8 | a field beside the name, or a hidden/deleted name |
+//! | `a_card_less_registration_is_neither_a_reaction_nor_a_name` | RA4 · RA8 (#6069, ADR-0218 §19 Y2.5) | `grant_id IS NULL` leaves `AGENT_USABLE_EXPRESSION` |
 //! | `adds_and_removals_are_audited_and_refusals_only_traced` | RA9 | the audit's `via`/run, an audit row for a refusal, or the trace token |
 //!
 //! RA6 (the agent's REST reaction door stays closed) is `momo-auth`'s own test, unchanged. The card-less
-//! registrations of RA4/RA8 have no column yet — #6069's (`AGENT_USABLE_EXPRESSION` is where they go).
+//! registrations of RA4/RA8 (#6069's `expression.grant_id`) are `a_card_less_registration_is_neither_a_reaction_nor_a_name`.
 
 use std::net::SocketAddr;
 use std::path::PathBuf;
@@ -968,6 +969,68 @@ async fn the_emoji_is_the_pickers_spelling_and_never_a_work_state() {
     let (status, value) = react(&w, &handle, other_target, ":party:", "remove").await;
     assert_eq!(ok(status, &value)["changed"], json!(true));
     assert!(agent_rows(&w, other_target).await.is_empty());
+}
+
+/// RA4 · RA8 for the card-less registrations (#6069, ADR-0218 증보 13 §19 Y2.5 · ADR-0162 증보 8 R6 3): an
+/// active expression that carries a standing grant is not something an agent may react with — the plain
+/// argument answer and no row — and its name is not in the list, while a person's active one is both.
+#[tokio::test]
+#[ignore = "needs an isolated PostgreSQL 18 (DATABASE_URL) + bootstrap_roles.sql"]
+async fn a_card_less_registration_is_neither_a_reaction_nor_a_name() {
+    let w = world().await;
+    let (trigger, _run, handle) = mentioned_run(&w).await;
+    let human: Uuid = sqlx::query_scalar("SELECT author_member_id FROM message WHERE id=$1")
+        .bind(trigger)
+        .fetch_one(&w.su)
+        .await
+        .unwrap();
+    seed_expression(&w.su, w.ws, human, "party", "active").await;
+    let grant: Uuid = sqlx::query_scalar(
+        "INSERT INTO expression_agent_grant(workspace_id, agent_member_id, granted_by, connection_id, granted_via) \
+         VALUES($1, $2, $3, $4, 'settings') RETURNING id",
+    )
+    .bind(w.ws)
+    .bind(w.agent.id)
+    .bind(human)
+    .bind(Uuid::new_v4())
+    .fetch_one(&w.su)
+    .await
+    .expect("a standing grant");
+    sqlx::query(
+        "INSERT INTO expression(workspace_id, name, display_name, tags, origin, created_by, proposed_by, grant_id, version) \
+         VALUES($1, 'selfmade', 'selfmade', '[]'::jsonb, '{\"kind\":\"generated\"}'::jsonb, $2, $3, $4, 1)",
+    )
+    .bind(w.ws)
+    .bind(human)
+    .bind(w.agent.id)
+    .bind(grant)
+    .execute(&w.su)
+    .await
+    .expect("a card-less registration");
+
+    let target = say(&w, w.channel, "새 이모티콘 어때요").await;
+    let plain_argument = {
+        let (status, value) = react(&w, &handle, target, "not-an-emoji", "add").await;
+        shape(status, &value)
+    };
+    let (status, refused) = react(&w, &handle, target, ":selfmade:", "add").await;
+    assert_eq!(shape(status, &refused), plain_argument);
+    assert!(agent_rows(&w, target).await.is_empty(), "no row for it");
+    let (status, value) = react(&w, &handle, target, ":party:", "add").await;
+    ok(status, &value);
+    assert_eq!(agent_rows(&w, target).await, vec![":party:".to_string()]);
+
+    let (status, value) = call(
+        &w,
+        &w.agent.bearer,
+        "oort_expression_names",
+        json!({"handle": handle}),
+    )
+    .await;
+    assert_eq!(
+        ok(status, &value),
+        &json!({"names": ["party"], "truncated": false})
+    );
 }
 
 // ---------------------------------------------------------------------------
