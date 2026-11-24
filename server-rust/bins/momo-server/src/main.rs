@@ -380,6 +380,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         // ADR-0208 D15: scheduled messages are on unless an operator turns them off; off is
         // visible (503 `scheduler_disabled`), never a silent accept.
         .with_scheduler(config.scheduler)
+        // ADR-0204 증보 7 A7-4 (#6072): the lock-screen reply is on unless an operator sets
+        // MOMO_PUSH_REPLY_ENABLED to anything but `true`; off, the phone keeps the reply and
+        // the app sends it through the ordinary send when it opens.
+        .with_push_reply_enabled(momo_server::config::push_reply_enabled_from_env())
         // ADR-0146 개정 (#3022): member-scoped host registration signatures are
         // verified when sent and required only when the operator turned on
         // MOMO_HOST_REGISTER_SIGNATURE_REQUIRED (off until the R1 re-review PASS).
@@ -393,6 +397,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         // ADR-0201 증보 v4 P8 (#5374): the delegation door's G4 declarations, so the same screen can say
         // 「지금은 쓸 수 없어요」 with the door's own word. The agent-worker enforces; this only explains.
         .with_team_ai_hermes(momo_server::config::team_ai_hermes_from_env())
+        // ADR-0218 §20 Z2-7 (#6071): the old size table unless the operator set EXPRESSION_RENDITION_TABLE=768.
+        .with_expression_rendition_table(momo_server::config::expression_rendition_table_from_env())
         // ADR-0149 (SRV-T2): 휘발 신호 stays 503 unless the operator handed this
         // process the Centrifugo publish credential (CENT_API_URL + CENT_API_KEY).
         // No deployment did before this batch, so an un-updated env block keeps the

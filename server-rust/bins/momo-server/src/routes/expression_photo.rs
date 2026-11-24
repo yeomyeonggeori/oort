@@ -644,15 +644,23 @@ async fn finish(
     };
     let (processed, outcome) = match asked.branch {
         Branch::Cutout => {
-            let cut = media::process_cutout_patiently(generated.bytes, DECODE_PATIENCE)
-                .await
-                .map_err(picture_failure)?;
+            let cut = media::process_cutout_patiently(
+                generated.bytes,
+                DECODE_PATIENCE,
+                state.expression_rendition_table,
+            )
+            .await
+            .map_err(picture_failure)?;
             (cut.processed, Some(cut.outcome))
         }
         Branch::Caricature => (
-            media::process_waiting_patiently(generated.bytes, DECODE_PATIENCE)
-                .await
-                .map_err(picture_failure)?,
+            media::process_waiting_patiently(
+                generated.bytes,
+                DECODE_PATIENCE,
+                state.expression_rendition_table,
+            )
+            .await
+            .map_err(picture_failure)?,
             None,
         ),
     };

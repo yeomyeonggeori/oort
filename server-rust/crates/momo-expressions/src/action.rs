@@ -302,7 +302,8 @@ pub async fn choose_in_tx(
             }
         }
     }
-    if stored.len() != 3 || !seen_large {
+    // Three renditions, or four with a moving picture's `still` (ADR-0218 §20 Z2-6).
+    if !(3..=4).contains(&stored.len()) || !seen_large {
         return Err(Error::Stale);
     }
     let meta = metadata(row)?;

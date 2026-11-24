@@ -251,6 +251,12 @@ pub struct AppState {
     /// `enabled`; the tick itself is started by `main`, never by [`AppState::new`], so a
     /// test drives `scheduler::run_tick` explicitly).
     pub scheduler: Arc<SchedulerSettings>,
+    /// ADR-0204 증보 7 A7-4 (#6072) — the operator's switch for the lock-screen reply
+    /// (`POST …/messages/{message}/push-reply`). **On** by default, read once when the
+    /// process starts (`MOMO_PUSH_REPLY_ENABLED`); off makes the route the same 403 as
+    /// a path off the push-action list, decided before any query. The decision route
+    /// does not read it.
+    pub push_reply_enabled: bool,
     /// Set by [`scheduler::start`] when the tick **refused** its database role (a superuser or
     /// BYPASSRLS pool). The scheduled-message routes then answer 503 `scheduler_disabled` like an
     /// operator's off switch: a server that will not send a schedule must not accept one
@@ -405,6 +411,11 @@ pub struct AppState {
     /// the helper cannot hand work to Hermes now. The agent-worker enforces with its own copy; the templates
     /// keep the two equal. Default: nothing declared — the screen reads `tools_not_locked` (closed).
     pub team_ai_hermes: momo_workspace_actions::team_ai_hermes::HermesDeclarations,
+    /// ADR-0218 §20 (#6071) — the size table this api stores a picture at when it encodes one from its
+    /// input bytes (`EXPRESSION_RENDITION_TABLE`). Default: the old table, so a deployment that sets
+    /// nothing stores exactly what every client reads. The operator turns on the §20 table only after the
+    /// team's apps can read it (Z2-7); the agent-worker reads the same variable for its own path.
+    pub expression_rendition_table: momo_expressions::media::RenditionTable,
 }
 
 impl AppState {
@@ -428,6 +439,7 @@ impl AppState {
             dev_access: Arc::new(config::DevAccessConfig::default()),
             mentions: Arc::new(MentionSettings::default()),
             scheduler: Arc::new(SchedulerSettings::default()),
+            push_reply_enabled: true,
             scheduler_blocked: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             attachment_reclaim_touched: Arc::new(attachment_reclaim::TouchedWorkspaces::default()),
             status_reaction_touched: Arc::new(
@@ -486,7 +498,18 @@ impl AppState {
             )),
             team_ai_caps: momo_workspace_actions::team_ai_limits::OperatorCaps::default(),
             team_ai_hermes: momo_workspace_actions::team_ai_hermes::HermesDeclarations::default(),
+            expression_rendition_table: momo_expressions::media::RenditionTable::Legacy,
         }
+    }
+
+    /// ADR-0218 §20 (#6071) — the size table pictures are stored at (`main.rs` from the env, a test
+    /// with an explicit value). Never read from the process environment here: a test must not set one.
+    pub fn with_expression_rendition_table(
+        mut self,
+        table: momo_expressions::media::RenditionTable,
+    ) -> Self {
+        self.expression_rendition_table = table;
+        self
     }
 
     /// ADR-0201 증보 v4 P8 (#5374) — attach the operator's delegation declarations (`main.rs` from the env,
@@ -811,6 +834,12 @@ impl AppState {
         self
     }
 
+    /// Set the lock-screen reply switch (ADR-0204 증보 7 A7-4). Default: on.
+    pub fn with_push_reply_enabled(mut self, enabled: bool) -> Self {
+        self.push_reply_enabled = enabled;
+        self
+    }
+
     /// Attach the device-key settings (#3022). Default: no instance id and no
     /// host-registration signature requirement.
     pub fn with_device_keys(mut self, settings: DeviceKeySettings) -> Self {
@@ -963,6 +992,18 @@ pub fn build_app(state: AppState) -> Router {
                 ))
                 .route_layer(member_write(rate_limit::MemberWrite::MessageSend))
                 .get(routes::messages::history),
+        )
+        // #6072 (ADR-0204 증보 7) — the lock screen's reply to the notification it was woken
+        // by. Not a second write path: the handler calls the send's own write function. Its
+        // body ceiling is this route's own (16 KiB), and it spends the same member send budget
+        // as the send above, so alternating the two cannot double it (A7-4).
+        .route(
+            "/v1/workspaces/{ws}/messages/{id}/push-reply",
+            post(routes::push_reply::reply)
+                .layer(axum::extract::DefaultBodyLimit::max(
+                    routes::push_reply::PUSH_REPLY_MAX_BODY_BYTES,
+                ))
+                .route_layer(member_write(rate_limit::MemberWrite::MessageSend)),
         )
         // B4.1 — one level of threads, the way the client already asks for them:
         // replies are read here and written through the send above with a
@@ -1603,7 +1644,7 @@ pub fn build_app(state: AppState) -> Router {
             "/v1/auth/push-fetch-token",
             post(routes::push_fetch::issue),
         )
-        // #3927 (ADR-0204 D6) — the lock screen's one-request token. Minted by
+        // #3927 (ADR-0204 D6, 증보 7) — the lock screen's decision-and-reply token. Minted by
         // the app from its ordinary session; neither narrow token can reach it.
         .route(
             "/v1/auth/push-action-token",

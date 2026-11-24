@@ -873,9 +873,11 @@ mod tests {
     /// tokens, **no foreign key in either direction**, the single-use guard trigger of 175, privileges for
     /// `momo_app` alone — `agent-upload-token-lockdown`) and `agent_picture_mark.run_id` losing NOT NULL
     /// (this road's marks have no run). No other grant changes.
-    /// 190 is #6071's (landing order: it lands before 191). 191 is #6068's agent reaction tool
-    /// (ADR-0162 증보 8 R7): `agent_run.agent_reaction_count` (0..3, the per-run count of the agent's
-    /// own reactions, which a removal never gives back). No new table, trigger, definer or grant.
+    /// 190 is #6071's expression rendition table (ADR-0218 §20): the `still` variant and the wider
+    /// per-variant size CHECKs on `expression_image` · `expression_draft_image`. No grant changes.
+    /// 191 is #6068's agent reaction tool (ADR-0162 증보 8 R7): `agent_run.agent_reaction_count`
+    /// (0..3, the per-run count of the agent's own reactions, which a removal never gives back). No new
+    /// table, trigger, definer or grant.
     #[test]
     fn discovers_contiguous_migrations_001_to_191() {
         let dir = default_migrations_dir();

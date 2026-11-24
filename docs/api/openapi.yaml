@@ -1033,13 +1033,15 @@ paths:
     post:
       tags: [auth]
       operationId: authPushActionToken
-      summary: Mint the lock screen's one-request approval token (ADR-0204 D6, #3927).
+      summary: Mint the lock screen's approval-decision and reply token (ADR-0204 D6 and addendum 7).
       description: >
         Human access bearer only. Returns a `typ = push_action` token that the
         phone parks in its app-only keychain group (never the group the
         notification extension reads) so a native handler, woken by a
         lock-screen 승인/거절 button with no screen and no JS runtime, can send
-        exactly ONE request: `POST /v1/workspaces/{workspaceId}/approvals/{approvalId}/decision`
+        the approval decision `POST /v1/workspaces/{workspaceId}/approvals/{approvalId}/decision`
+        or, since ADR-0204 addendum 7 (#6072), the lock-screen reply
+        `POST /v1/workspaces/{workspaceId}/messages/{messageId}/push-reply`,
         in the token's own workspace (403 anywhere else - any other path,
         method, trailing segment, another workspace, the compatibility route
         `POST /v1/agent-runs/{runId}/approval-decisions` - before any query).
@@ -12810,6 +12812,88 @@ paths:
               schema: {$ref: "#/components/schemas/ErrorResponse"}
         "429": {$ref: "#/components/responses/RateLimited"}
 
+  /v1/workspaces/{workspaceId}/messages/{messageId}/push-reply:
+    post:
+      tags: [messages]
+      operationId: pushReply
+      summary: Reply to a notification from the lock screen (ADR-0204 addendum 7, #6072).
+      description: >
+        The lock screen's reply to the notification it was woken by. Only a
+        `typ = push_action` token may call it (a person's session, an agent
+        bearer, a developer token and the `push_fetch` token are refused with
+        403); the app keeps using `POST …/channels/{channelId}/messages`, which
+        stays closed to the push-action token. `messageId` is the notified
+        message (the push payload's `message_id`). The server picks the
+        conversation: the notified message's channel, inside its thread when the
+        notified message is a thread reply, otherwise the channel itself. The
+        message is written by the ordinary send's own write function
+        (`channel_seq` + message + outbox in one transaction, membership check,
+        mentions, runs and pushes as from the app), as plain text.
+
+
+        Taken only when this server notified this member of that message (an
+        APNs-accepted dispatch) within the last 24 hours, on a message that is not
+        deleted. Never notified, notified only to someone else, notified too long
+        ago, deleted, unknown, or in another workspace all answer the same 403
+        `push_reply_unavailable` with the same sentence and write nothing. One
+        reply per notification (409 `push_reply_limit`); text 1-2,000
+        characters (400 `push_reply_text`); a request body over 16 KiB is 413.
+        The same `clientMsgId` is the same message on this route and on the
+        ordinary send alike: a retry answers the stored message's id and seq and
+        does not count against the limit. Spends the member's `message_send`
+        budget (shared with the ordinary send). Off when the operator sets
+        `MOMO_PUSH_REPLY_ENABLED` to anything but `true`: the route is then the
+        same 403 as a path off the token's list, decided before any query. Each
+        written reply leaves an `audit_log` row `message.push_reply` with
+        `detail.via = "push_action"` and ids only.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: messageId
+          in: path
+          required: true
+          description: The notified message (canonical 36-character UUID).
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PushReplyRequest"
+      responses:
+        "201":
+          description: Written, or the same `clientMsgId` answered with the stored message.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PushReplyResponse"
+        "400":
+          description: A key other than `clientMsgId` and `body`, a missing key, or text that is empty or over 2,000 characters (`push_reply_text`).
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ErrorResponse"}
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: >
+            Not a push-action token; the switch is off; no live notification of
+            this message for this member (`push_reply_unavailable`); or no longer
+            a member of the channel (the ordinary send's refusal).
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ErrorResponse"}
+        "409":
+          description: This notification has already carried its reply (`push_reply_limit`), or a send refusal the ordinary send answers with 409.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ErrorResponse"}
+        "413":
+          description: Request body over 16 KiB.
+        "429": {$ref: "#/components/responses/RateLimited"}
+
   /v1/workspaces/{workspaceId}/messages/{messageId}/reactions/{emoji}:
     put:
       tags: [messages]
@@ -14640,9 +14724,10 @@ paths:
         Port door is unchanged).
 
 
-        ADR-0204 D6 (#3927) - besides an access token, this is the ONE route a
-        `typ = push_action` token (`POST /v1/auth/push-action-token`) may call,
-        and only in its own workspace. The token substitutes for the access
+        ADR-0204 D6 (#3927) - besides an access token, a `typ = push_action`
+        token (`POST /v1/auth/push-action-token`) may call this route, in its own
+        workspace only; its one other route is the lock-screen reply
+        (`POST …/messages/{messageId}/push-reply`, ADR-0204 addendum 7). The token substitutes for the access
         bearer and adds nothing: every check above applies to the person it was
         minted for exactly as it would to their access token, so a token minted
         for someone who may not decide this approval gets the same 403
@@ -19924,13 +20009,38 @@ components:
           type: string
           format: uuid
 
+    PushReplyRequest:
+      type: object
+      additionalProperties: false
+      required: [clientMsgId, body]
+      properties:
+        clientMsgId:
+          type: string
+          format: uuid
+          description: One key per reply, chosen once by the device and reused by every retry and by the app's later send of the same reply.
+        body:
+          type: string
+          minLength: 1
+          maxLength: 2000
+          description: Plain text, 1-2,000 characters.
+    PushReplyResponse:
+      type: object
+      additionalProperties: false
+      required: [id, seq]
+      properties:
+        id:
+          type: string
+          format: uuid
+        seq:
+          type: integer
+          format: int64
     PushActionTokenResponse:
       type: object
       required: [token, expiresAtMs, ttlSeconds, workspaceId]
       properties:
         token:
           type: string
-          description: A `typ = push_action` JWT. Not an access token and not a `push_fetch` token; refused everywhere but the approval decision of its own workspace.
+          description: A `typ = push_action` JWT. Not an access token and not a `push_fetch` token; refused everywhere but the approval decision and the lock-screen reply (`POST …/messages/{messageId}/push-reply`, ADR-0204 addendum 7) of its own workspace.
         expiresAtMs:
           type: integer
           format: int64

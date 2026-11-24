@@ -357,6 +357,7 @@ fn still_media(seed: u8) -> Processed {
         large: rendition(seed, 3000, 512, "image/png", 1),
         small: rendition(seed.wrapping_add(7), 900, 128, "image/png", 1),
         thumb: rendition(seed.wrapping_add(13), 700, 64, "image/png", 1),
+        still: None,
     }
 }
 
@@ -365,6 +366,7 @@ fn gif_media(seed: u8) -> Processed {
         large: rendition(seed, 5000, 480, "image/gif", 4),
         small: rendition(seed.wrapping_add(7), 2000, 128, "image/gif", 4),
         thumb: rendition(seed.wrapping_add(13), 700, 64, "image/png", 1),
+        still: None,
     }
 }
 
