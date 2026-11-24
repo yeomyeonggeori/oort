@@ -139,12 +139,43 @@ const CHIP_STATES = ["rest", "hover", "focus", "disabled"] as const;
 /** DS2-1 새 프리미티브의 네 상태 (#2713 수용기준: 새 프리미티브 × 4상태). */
 const PRIMITIVE_STATES = ["rest", "hover", "focus", "disabled"] as const;
 
-/** 채움 알약 네 변형. outline 은 secondary 와 같은 채움이라 따로 두지 않는다. */
-const PILL_VARIANTS = [
-  { variant: "default", label: "초안 미리 보기", title: "주 행동 · 잉크 채움" },
-  { variant: "secondary", label: "멈추기", title: "보조 · surface-muted 채움" },
-  { variant: "ghost", label: "나중에", title: "조용한 행동 · 채움 없음" },
-  { variant: "destructive", label: "채널 삭제", title: "파괴 · danger-fill 채움" },
+/**
+ * 단추 종류 넷(DS-05 #6074, components.md 「단추」 절). outline 은 secondary 의 옛 이름이라
+ * 따로 두지 않는다. 낱말은 제품 사전의 쌍(쉼 · 진행 중)을 빌린다 — 갤러리가 글을 새로 박지 않는다.
+ */
+const BUTTON_KINDS = [
+  {
+    variant: "default",
+    title: "주 행동 · 잉크 채움",
+    label: "common.action.save",
+    busyLabel: "common.state.saving",
+  },
+  {
+    variant: "secondary",
+    title: "보조 · surface-muted 채움",
+    label: "common.action.reload",
+    busyLabel: "common.state.loading",
+  },
+  {
+    variant: "ghost",
+    title: "조용한 행동 · 채움 없음",
+    label: "common.action.checkAgain",
+    busyLabel: "common.state.checking",
+  },
+  {
+    variant: "destructive",
+    title: "파괴 · danger-fill 채움",
+    label: "workspace.leave.confirm",
+    busyLabel: "workspace.leave.busy",
+  },
+] as const;
+
+/** 크기 넷과 브라우저에서 재는 높이(px). 원형 `icon` 은 너비도 같다. */
+const BUTTON_SIZES = [
+  { size: "sm", px: 28 },
+  { size: "default", px: 38 },
+  { size: "lg", px: 40 },
+  { size: "icon", px: 34 },
 ] as const;
 
 const MOTION_VOCABULARY = [
@@ -191,6 +222,56 @@ function previewOf(
 ): "hover" | "active" | "focus" | undefined {
   if (state === "hover" || state === "active" || state === "focus") return state;
   return undefined;
+}
+
+/** 공용 단추의 상태: 「진행 중」은 aria-busy 덧찍기가 아니라 부품의 `busy` 상태다. */
+function buttonStateProps(state: InteractionState) {
+  return {
+    "data-gallery-preview": previewOf(state),
+    disabled: state === "disabled" ? true : undefined,
+    busy: state === "busy",
+  };
+}
+
+/** 단추 종류 4 × 상태 6 = 24칸, 그 아래 크기 넷 (DS-05 #6074). */
+function ButtonSpecGallery() {
+  const t = useFormatMessage();
+  return (
+    <div data-testid="button-kind-state-grid">
+      {BUTTON_KINDS.map(({ variant, title, label, busyLabel }) => (
+        <StateRow key={variant} title={`Button ${variant}: ${title}`} states={BUTTON_STATES}>
+          {(state) => (
+            <div className="flex" data-button-cell={`${variant}|${state}`}>
+              <Button type="button" variant={variant} {...buttonStateProps(state)}>
+                {t(state === "busy" ? busyLabel : label)}
+              </Button>
+            </div>
+          )}
+        </StateRow>
+      ))}
+      <section className="flex flex-col gap-3 border-b border-line py-6">
+        <h2 className="text-title font-medium text-ink">Button size</h2>
+        <div className="flex flex-wrap items-start gap-4">
+          {BUTTON_SIZES.map(({ size, px }) => (
+            <figure key={size} className="flex flex-col items-start gap-2" data-button-size={size}>
+              <figcaption className="text-meta text-ink-muted">{`${size} · ${px}`}</figcaption>
+              <Export name="Button">
+                {size === "icon" ? (
+                  <Button type="button" size="icon" aria-label={t("common.action.save")}>
+                    <ArrowUp aria-hidden="true" />
+                  </Button>
+                ) : (
+                  <Button type="button" size={size}>
+                    {t("common.action.save")}
+                  </Button>
+                )}
+              </Export>
+            </figure>
+          ))}
+        </div>
+      </section>
+    </div>
+  );
 }
 
 function controlProps(state: InteractionState) {
@@ -1053,19 +1134,7 @@ function GalleryBody() {
         </div>
       </section>
 
-      <StateRow
-        title="Button"
-        states={BUTTON_STATES}
-        note="busy는 aria-busy만 있고 시각 유틸이 없다."
-      >
-        {(state) => (
-          <Export name="Button">
-            <Button type="button" variant="secondary" {...controlProps(state)}>
-              변경 저장
-            </Button>
-          </Export>
-        )}
-      </StateRow>
+      <ButtonSpecGallery />
 
       <OnboardingGuideGallery />
 
@@ -1078,18 +1147,6 @@ function GalleryBody() {
           채움 알약·원형 아이콘 버튼·카드(rest)·유리. 위 스킴 토글로 라이트·다크를 본다.
         </p>
       </section>
-
-      {PILL_VARIANTS.map(({ variant, label, title }) => (
-        <StateRow key={variant} title={`Button ${variant}: ${title}`} states={PRIMITIVE_STATES}>
-          {(state) => (
-            <div className="flex">
-              <Button type="button" variant={variant} {...controlProps(state)}>
-                {label}
-              </Button>
-            </div>
-          )}
-        </StateRow>
-      ))}
 
       <StateRow title="Button icon: 원형 아이콘 버튼" states={PRIMITIVE_STATES}>
         {(state) => (
@@ -1440,7 +1497,6 @@ function GalleryBody() {
         <ul className="flex max-w-pane-lg list-disc flex-col gap-1 pl-6 text-body text-ink-muted">
           <li>Card, Input, Select는 hover·active·busy 시각 상태가 없다.</li>
           <li>SidebarRow는 disabled·busy가 없다. unread 배지는 busy가 아니다.</li>
-          <li>Button busy는 aria-busy만 있고 시각 유틸이 없다.</li>
           <li>
             DialogPortal·PopoverPortal은 목적지 칸이다. 포털 자체는 상자가 없다.
           </li>
