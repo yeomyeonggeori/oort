@@ -43,6 +43,11 @@ pub use tools::{
 pub use tools::{
     ATTACHMENT_NOT_LINKABLE, MAX_MESSAGE_PICTURES, PICTURE_LIMIT_REACHED, TOOL_PICTURE_UPLOAD_BEGIN,
 };
+// #6068 (ADR-0162 증보 8): the agent's own reaction and the expression names it may use.
+pub use tools::{
+    ReactionRefusal, AGENT_REACTION_TOOLS, MAX_REACTION_EMOJI_BYTES, REACTION_REFUSAL_REASONS,
+    REACTION_SET_ACTIONS, TOOL_EXPRESSION_NAMES, TOOL_REACTION_SET,
+};
 
 pub const MODERN_PROTOCOL_VERSION: &str = "2026-07-28";
 pub const LEGACY_PROTOCOL_VERSION: &str = "2025-11-25";

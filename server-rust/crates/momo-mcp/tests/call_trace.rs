@@ -16,8 +16,8 @@
 
 use momo_mcp::{
     call_shape, dispatch, outcome_code, response_rpc_code, result_counts, ArtifactRule,
-    ArtifactViolation, AssembleParams, CallShape, HttpRequest, ResultCounts, RunEventViolation,
-    ToolFailure, CALL_METHODS, CALL_METHOD_NONE, CALL_METHOD_OTHER, CALL_METHOD_UNPARSED,
+    ArtifactViolation, AssembleParams, CallShape, HttpRequest, ReactionRefusal, ResultCounts,
+    RunEventViolation, ToolFailure, CALL_METHODS, CALL_METHOD_NONE, CALL_METHOD_OTHER, CALL_METHOD_UNPARSED,
     CALL_TOOL_UNKNOWN, JSON_CONTENT_TYPE, LEGACY_PROTOCOL_VERSION, MODERN_PROTOCOL_VERSION,
     TOOL_CATALOG, TOOL_INBOX_READ, TOOL_JOBS_CLAIM, TOOL_JOB_START, TOOL_PING,
 };
@@ -206,6 +206,7 @@ fn every_failure_has_a_row() -> Vec<ToolFailure> {
             | ToolFailure::ClaimExpired
             | ToolFailure::AttachmentNotLinkable
             | ToolFailure::PictureLimitReached
+            | ToolFailure::ReactionRefused(_)
             | ToolFailure::Internal => {}
         }
     }
@@ -231,6 +232,8 @@ fn every_failure_has_a_row() -> Vec<ToolFailure> {
         ToolFailure::Conflict,
         ToolFailure::AttachmentNotLinkable,
         ToolFailure::PictureLimitReached,
+        ToolFailure::ReactionRefused(ReactionRefusal::StatusEmoji),
+        ToolFailure::ReactionRefused(ReactionRefusal::RunLimit),
         ToolFailure::AlreadyClaimed,
         ToolFailure::ClaimExpired,
         ToolFailure::Internal,
