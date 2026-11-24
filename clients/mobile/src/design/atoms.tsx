@@ -12,9 +12,21 @@ import {
   type ViewStyle,
 } from 'react-native';
 import {useSafeAreaInsets} from 'react-native-safe-area-context';
-import {DISABLED_OPACITY, font, radius, SAFE_GUTTER, space, TOUCH_TARGET, type Palette} from './tokens';
+import {
+  BUTTON,
+  DISABLED_OPACITY,
+  font,
+  line,
+  PRESSED_OPACITY,
+  radius,
+  SAFE_GUTTER,
+  slopTo,
+  space,
+  TOUCH_TARGET,
+  type Palette,
+} from './tokens';
 import {circleLook} from './sheetModel';
-import {SHEET_ICON_SIZE, SHEET_ICONS} from './icons';
+import {HOME_ICON_SIZE, HOME_ICONS, SHEET_ICON_SIZE, SHEET_ICONS} from './icons';
 import {usePalette, useStyles} from './theme';
 import {PULL_FILL} from './pullRefresh';
 import {withLineHeadroom} from './lineHeadroom';
@@ -73,6 +85,11 @@ export const HEAD_MAX_SCALE = 1.3;
 export const FOLDED_MAX_SCALE = BAR_CONTROL_MAX_SCALE;
 /** 이 배수부터 AI 카드의 알약, 홈 「작업 중」 카드의 상태 낱말, 대화 아래 활동 줄의 「이름: 낱말」이 줄을 바꾼다(상한이 아니라 줄바꿈 문턱). */
 export const STACK_PILL_SCALE = 1.5;
+/**
+ * 단추 네 종류의 낱말(`ButtonFace`, #6075). 단추는 크롬이라 바 컨트롤과 같은 끝에서 멈춘다 — 그 너머에서는 알약 하나가 폭을 넘겨
+ * 낱말이 세 줄로 접혔다. 단추 곁의 설명 문장은 상한이 없다.
+ */
+export const BUTTON_MAX_SCALE = BAR_CONTROL_MAX_SCALE;
 /** SAS 숫자는 이미 크다(40). 큰 글씨에서 네 칸이 375 폭을 넘지 않게 멈춘다. */
 export const SAS_MAX_SCALE = 1.35;
 /** 아바타 이니셜 — 32 상자에 13pt 한 글자가 여백을 지키는 끝. */
@@ -227,92 +244,151 @@ export function TapRow({
   );
 }
 
-/**
- * 셸의 주 단추. **주 행동은 잉크(`primary`)다** — 첫 화면·로그인·승인 알약과 같은 역할이고
- * 커스텀 강조색(ADR-0174)이 칠하지 않는다(ADR-0189 D3 「주 버튼 검정」, #5100). 신호색
- * (`accent`)은 안 읽음·경계·커서이지 주 행동이 아니다.
- *
- * 세 얼굴은 형제 `OnboardingButton`(`features/onboarding/OnboardingControls.tsx`)과 같은 규칙이다:
- *
- *   쉼      잉크 채움 + `onPrimary` 라벨
- *   잠김    `disabled` 이고 일하는 중이 아닐 때 — 채움을 걷고 **시트 위 문법의 옅은 칸**(`circleLook` 채움·가장자리 +
- *           `elevationRest` 그림자)으로 두되 **라벨은 `textMuted` 로 읽힌다**(옅은 칸 위 흰 글자는 1.26:1 로 사라졌다).
- *           칸을 `surfaceMuted` 로 두었을 때는 밝은 시트 위에서 칸이 시트와 1.000~1.009:1 이라 단추가 문장처럼 섰다 —
- *           이 부품의 소비처 열 곳 중 일곱이 시트 위다(#5170 L1). 형제 알약(`ExpressionAddMenu`·`ExpressionChapter`,
- *           #5099·#5065)이 시트 위에서 하는 답과 같다. 형제 `OnboardingButton` 은 바닥 위에 서고 아직 `surfaceMuted` 다.
- *   진행    `busy` — 잉크 채움을 그대로 두어 표시기와 낱말이 그 위에서 읽힌다(`disabled` 를 같이
- *           주어도 진행이 이긴다). 누를 수 없는 것은 잠김과 같다.
- *
- * 눌림은 채움을 갈아 끼우지 않고 흐림만 낮춘다(옅은 눌림 색 위 라벨이 사라지는 것을 막는다).
- */
-export function PrimaryButton({
-  label,
-  busyLabel,
-  onPress,
-  disabled,
-  busy,
-  testID,
-  accessibilityLabel,
-}: {
+// =============================================================================
+// 단추 네 종류 (#6075) — 규격은 `docs/design-system/components.md` 「폰 단추」 절이다.
+//
+//   주      `PrimaryButton`  잉크 채움(`primary` · `onPrimary`). 주 행동은 잉크다 — 커스텀 강조색(ADR-0174)이 칠하지
+//                             않는다(ADR-0189 D3 「주 버튼 검정」, #5100). 신호색(`accent`)은 안 읽음·경계·커서이지 주 행동이 아니다.
+//   보조    `OutlineButton`  옅은 채움 — 시트 위 알약 문법(`circleLook`: 라이트 `surface` + 쉼 그림자, 다크 `surfaceMuted` + 가장자리)
+//                             · `text`. 이름은 옛 모양(테두리)에서 왔고 호출 모양을 지키려고 둔다.
+//   조용한  `QuietButton`    채움 없음(`text`). 막대 끝의 「뒤로」·「취소」·언어 칩.
+//   위험    `DangerButton`   빨강 채움(`dangerFill` · `onDangerFill`). 되돌리기 어려운 행동의 확인.
+//
+// 네 종류가 같은 몸을 쓴다(`ButtonFace`): 알약(`radius.pill`), 높이 기본 44 · 작게 38(누르는 자리는 위아래 슬롭으로 44),
+// 낱말은 `font.body` 600(작게는 `font.label`), 상태는 채움을 갈아 끼우지 않고 흐림만 바꾼다 —
+//
+//   쉼      제 채움 + 제 글자색
+//   눌림    `PRESSED_OPACITY`(0.6)
+//   잠김    `disabled` 이고 진행 중이 아닐 때 `DISABLED_OPACITY`(0.55). 시트 행의 `rowDisabled` 와 같은 값이다. 앞 판의 주
+//           단추는 잠기면 채움을 걷고 옅은 칸 + `textMuted` 글자로 섰다(#5100 · #5170 L1). 시안 장면 4의 확정안이 「잠김 = 같은
+//           채움을 흐리게」라서 그 칸을 걷었다. 잠긴 단추는 WCAG 1.4.3 의 예외지만 이 앱은 「못 누르는 단추도 낱말은 읽힌다」를
+//           세웠었다 — 흐린 채 바탕 위에 합성한 낱말 대비는 주 · 보조 · 조용한 3.7~3.8, 위험 2.5 로 그 바닥(4.5) 아래다. 이 값과
+//           거래는 부품 장부 「폰 단추」 절이 적는다(규격 표의 주인 시험은 `__tests__/buttonFamily.test.tsx`).
+//   진행 중 `busy` — 채움을 그대로 두고 표시기와 낱말(`busyLabel`, 없으면 `label`)이 선다. `disabled` 를 같이 줘도 진행이
+//           이긴다. 누를 수 없는 것은 잠김과 같다.
+//
+// `busyLabel` 은 맨몸이다(「저장 중」): 표시기가 함께 돌므로 말줄임표(U+2026)까지 붙이면 같은 사실을 두 자리에서 말한다. 레포
+// 전체의 규칙은 아니다(#1511 회전 1 — 스피너 없는 맨몸 자리가 다수이고 말줄임은 소수 잔량이다).
+//
+// 낱말은 `BUTTON_MAX_SCALE` 에서 멈춘다(단추는 크롬이다 — 이 파일 머리의 상한 정책). 낱말은 `Sentence`(어절 줄바꿈)라 좁은
+// 폭에서 두 줄로 접혀도 한 음절이 홀로 남지 않는다.
+// =============================================================================
+
+export type ButtonKind = 'primary' | 'secondary' | 'quiet' | 'danger';
+export type ButtonSize = 'regular' | 'small';
+
+/** 네 종류가 같이 받는 props. 지금 있던 `PrimaryButton` · `OutlineButton` 의 이름은 그대로이고, 나머지는 덧붙인 선택지다. */
+export interface ButtonProps {
   label: string;
-  /** 눈에 보이는 낱말보다 긴 낭독 문장이 필요할 때(「김인턴과의 대화 열기」). 없으면 낱말 그대로. */
-  accessibilityLabel?: string;
-  /**
-   * 진행 중에 라벨을 대체하는 낱말. **이 컴포넌트의 지역 관례는 맨몸이다**
-   * (「저장 중」): 이 버튼은 낱말 옆에서 `ActivityIndicator` 를 함께 돌리므로,
-   * 말줄임표(U+2026)까지 붙이면 같은 사실을 두 자리에서 말한다. 그것이 여기서
-   * `busyLabel` 에 말줄임을 넘기지 않는 이유다.
-   *
-   * **레포 전체의 규칙은 아니다** (#1511 회전 1). 앞 판의 이 주석은 「말줄임표는
-   * 스피너가 없는 자리의 진행 신호」라는 일반 판정을 세웠는데, 트리를 재 보면
-   * 그렇지 않다 — 스피너 없이 맨몸인 자리가 다수이고 말줄임은 소수 잔량이다
-   * (2026-08-19 AST 실측, 렌더 문자열만: 맨몸 웹 100·폰 6·코어 49 / 말줄임
-   * 웹 6·폰 7·코어 3 = 16. 맨몸 쪽 수에는 「작업 중」 같은 상태 낱말도 섞여
-   * 있어 상한으로 읽어야 하지만, 말줄임 16 은 정확한 잔량이다). 스피너 없이
-   * 맨몸인 자리는 공유 프리미티브에도 있다: 웹 `SettingsFields` 의 기본
-   * 「저장 중」, `InlineBanner` 의 `actionBusy`(스피너를 그리지 않는다), 그리고
-   * 코어 `CANCEL_BUSY_LABEL` 을 스피너 없이 렌더하는 폰 `StopTurnControl`.
-   *
-   * 그래서 웹 `ConnectPage` 가 「참여 중…」이고 폰이 「참여 중」인 것은 정책의
-   * 결과가 아니라 **관측된 갈림**이다. 잔량 16 을 한 관례로 모을지는 이 goal
-   * 에서 정하지 않았다(별도 goal 후보 — 카피 변경이라 표면마다 판단이 든다).
-   */
-  busyLabel?: string;
   onPress: () => void;
-  disabled?: boolean;
+  /** 진행 중에 낱말 자리에 서는 말(맨몸 — 위 주석). 없으면 `label` 이 표시기 곁에 남는다. */
+  busyLabel?: string;
   busy?: boolean;
+  disabled?: boolean;
+  /** 기본 44 · 작게 38(누르는 자리는 44). */
+  size?: ButtonSize;
+  /** 낱말 앞의 글리프(QR 모서리 · 새로 고침). 색은 부르는 쪽이 그 종류의 글자색으로 칠한다. 진행 중이면 표시기가 이 자리에 선다. */
+  icon?: React.ReactNode;
+  /** `expand`: 낱말 뒤 ⌄ — 「여기서 고른다」(언어 칩, #5101). `ListRow accessory="expand"` 와 같은 글리프다. */
+  accessory?: 'expand';
+  /**
+   * 막대 끝에 붙는 조용한 단추(「뒤로」·「취소」·언어 칩): 옆 여백을 걷고 낱말을 상자의 그쪽 끝에 붙인다. 채움이 없는 종류라
+   * 여백은 보이지 않고, 막대의 여백 선과 글자가 맞는다. 상자는 `TOUCH_TARGET` 아래로 좁아지지 않는다.
+   */
+  flush?: 'start' | 'end';
+  /** 눈에 보이는 낱말보다 긴 낭독 문장이 필요할 때(「김인턴과의 대화 열기」). 진행 중이면 `busyLabel` 이 이긴다. */
+  accessibilityLabel?: string;
+  accessibilityHint?: string;
   testID?: string;
-}): React.JSX.Element {
+}
+
+/** 작게의 위아래 슬롭 — 그려지는 38 에 더해 누르는 자리 44 를 만든다. */
+const SMALL_SLOP = {top: slopTo(BUTTON.smallHeight), bottom: slopTo(BUTTON.smallHeight)};
+
+function ButtonFace({
+  kind,
+  label,
+  onPress,
+  busyLabel,
+  busy,
+  disabled,
+  size = 'regular',
+  icon,
+  accessory,
+  flush,
+  accessibilityLabel,
+  accessibilityHint,
+  testID,
+}: ButtonProps & {kind: ButtonKind}): React.JSX.Element {
   const styles = useStyles(buildStyles);
   const palette = usePalette();
-  // 누를 수 없는 것: 잠김과 진행 둘 다. 다만 **칠**은 잠김만 바꾼다(위 주석).
-  const inert = disabled === true || busy === true;
-  const locked = disabled === true && busy !== true;
+  const working = busy === true;
+  // 누를 수 없는 것: 잠김과 진행 둘 다. 다만 흐림은 잠김만 입는다(진행 중에는 채움 위 표시기가 읽혀야 한다).
+  const inert = disabled === true || working;
+  const locked = disabled === true && !working;
+  const small = size === 'small';
+  const ink = buttonInk(palette, kind);
+  const shown = working && busyLabel ? busyLabel : label;
   return (
     <Pressable
       accessibilityRole="button"
-      accessibilityLabel={accessibilityLabel}
-      accessibilityState={{disabled: inert, busy}}
+      accessibilityLabel={working && busyLabel ? busyLabel : accessibilityLabel ?? label}
+      accessibilityHint={accessibilityHint}
+      accessibilityState={{disabled: inert, busy: working}}
       disabled={inert}
       onPress={onPress}
+      hitSlop={small ? SMALL_SLOP : undefined}
       style={({pressed}) => [
-        styles.button,
-        locked && styles.buttonDisabled,
-        pressed && !inert && styles.buttonPressed,
+        styles.btn,
+        small && styles.btnSmall,
+        styles[BUTTON_FILL[kind]],
+        flush === 'start' && styles.btnFlushStart,
+        flush === 'end' && styles.btnFlushEnd,
+        locked && styles.btnLocked,
+        pressed && !inert && styles.btnPressed,
       ]}
       testID={testID}>
-      {busy ? (
-        <View style={styles.buttonBusy}>
-          <ActivityIndicator color={palette.onPrimary} />
-          {busyLabel ? <Text style={styles.buttonLabel}>{busyLabel}</Text> : null}
-        </View>
-      ) : (
-        <Text style={[styles.buttonLabel, locked && styles.buttonLabelDisabled]}>
-          {label}
-        </Text>
-      )}
+      {working ? <ActivityIndicator color={ink} /> : icon ?? null}
+      <Sentence
+        style={[styles.btnLabel, small && styles.btnLabelSmall, {color: ink}]}
+        maxFontSizeMultiplier={BUTTON_MAX_SCALE}>
+        {shown}
+      </Sentence>
+      {accessory === 'expand' ? (
+        <Image
+          source={HOME_ICONS.down}
+          style={[styles.btnGlyph, {tintColor: ink}]}
+          accessibilityElementsHidden
+          testID={testID ? `${testID}-expand` : undefined}
+        />
+      ) : null}
     </Pressable>
   );
+}
+
+/** 종류의 글자색 — 낱말 · 표시기 · 글리프가 같은 값을 쓴다. 부르는 쪽이 `icon` 을 칠할 때도 이 값이다. */
+export function buttonInk(palette: Palette, kind: ButtonKind): string {
+  switch (kind) {
+    case 'primary':
+      return palette.onPrimary;
+    case 'danger':
+      return palette.onDangerFill;
+    case 'secondary':
+    case 'quiet':
+      return palette.text;
+  }
+}
+
+const BUTTON_FILL = {
+  primary: 'btnPrimary',
+  secondary: 'btnSecondary',
+  quiet: 'btnQuiet',
+  danger: 'btnDanger',
+} as const;
+
+/** 주 — 잉크 채움. 화면의 주 행동 하나. */
+export function PrimaryButton(buttonProps: ButtonProps): React.JSX.Element {
+  return <ButtonFace kind="primary" {...buttonProps} />;
 }
 
 /** A count the SERVER supplied. Never rendered from a locally derived number. */
@@ -532,50 +608,22 @@ export function Sentence(
   return <Text lineBreakStrategyIOS="hangul-word" {...rest} style={withLineHeadroom(style)} />;
 }
 
-/** An inline failure attached to a form, rather than a whole-surface state. */
-export function OutlineButton({
-  label,
-  onPress,
-  testID,
-  accessibilityLabel,
-  busy,
-  busyLabel,
-}: {
-  label: string;
-  onPress: () => void;
-  testID?: string;
-  accessibilityLabel?: string;
-  /**
-   * 누른 일이 도는 중이다(#5593 수리 3회차 M1): 표시기와 `busyLabel` 이 낱말 자리에 서고 다시 누를 수 없다.
-   * `PrimaryButton` 의 진행과 같은 규칙이다 — 표시기가 함께 돌므로 `busyLabel` 에 말줄임을 붙이지 않는다.
-   */
-  busy?: boolean;
-  busyLabel?: string;
-}): React.JSX.Element {
-  const styles = useStyles(buildStyles);
-  const palette = usePalette();
-  const shown = busy === true ? busyLabel ?? label : label;
-  return (
-    <Pressable
-      accessibilityRole="button"
-      accessibilityLabel={busy === true ? shown : accessibilityLabel ?? label}
-      accessibilityState={busy === true ? {busy: true, disabled: true} : undefined}
-      disabled={busy === true ? true : undefined}
-      onPress={onPress}
-      style={({pressed}) => [styles.outline, pressed && styles.pressed]}
-      testID={testID}>
-      {busy === true ? (
-        <View style={styles.buttonBusy}>
-          <ActivityIndicator color={palette.accentText} />
-          <Sentence style={styles.retryLabel}>{shown}</Sentence>
-        </View>
-      ) : (
-        <Sentence style={styles.retryLabel}>{label}</Sentence>
-      )}
-    </Pressable>
-  );
+/** 보조 — 옅은 채움. 주 행동 곁의 다른 길(「취소」·「다시 불러오기」). */
+export function OutlineButton(buttonProps: ButtonProps): React.JSX.Element {
+  return <ButtonFace kind="secondary" {...buttonProps} />;
 }
 
+/** 조용한 — 채움 없음. 막대 끝의 「뒤로」·「취소」는 `flush` 로 여백 선에 붙인다. */
+export function QuietButton(buttonProps: ButtonProps): React.JSX.Element {
+  return <ButtonFace kind="quiet" {...buttonProps} />;
+}
+
+/** 위험 — 빨강 채움. 지우기 · 멈추기 · 거부처럼 되돌리기 어려운 행동을 확인하는 자리. */
+export function DangerButton(buttonProps: ButtonProps): React.JSX.Element {
+  return <ButtonFace kind="danger" {...buttonProps} />;
+}
+
+/** An inline failure attached to a form, rather than a whole-surface state. */
 export function FailureBanner({
   message,
   onRetry,
@@ -800,33 +848,37 @@ const buildStyles = (color: Palette) => StyleSheet.create({
   },
   rowSelected: {backgroundColor: color.surface},
   pressed: {backgroundColor: color.surfacePressed},
-  button: {
-    ...hitStyle,
-    borderRadius: radius.md,
-    paddingVertical: space.md,
+  btn: {
+    minHeight: BUTTON.height,
+    paddingHorizontal: BUTTON.padX,
+    paddingVertical: BUTTON.padY,
+    borderRadius: radius.pill,
+    flexDirection: 'row',
     alignItems: 'center',
-    // 주 행동 = 잉크. `accent` 는 신호라 이 단추를 칠하지 않는다(#5100, `PrimaryButton` 주석).
-    backgroundColor: color.primary,
-    // 가장자리 두께는 쉼·잠김이 같다: 쉼은 가장자리가 채움과 같은 잉크라 보이지 않고, 잠김만 색을 입는다. 잠길 때만 두께가
-    // 생기면 단추가 0.66pt 뛴다. (투명 글자 값을 새로 적지 않는 것은 직접 문구 장부가 그 낱말을 문구로 세기 때문이다.)
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: color.primary,
+    justifyContent: 'center',
+    gap: BUTTON.gap,
   },
-  // 못 누르는 주 행동: 채움을 걷고 옅은 칸으로 둔다(잉크가 서 있으면 눌러도 되는 줄 안다). 칸은 **시트 위 문법**이다 —
-  // 라이트는 `surface` 가 시트 위에 서고 그림자가 띄우며, 다크는 한 단 위 `surfaceMuted` + 가장자리 한 줄이다(`circleLook`).
-  // `surfaceMuted` 만으로는 밝은 시트 위에서 칸이 사라진다(#5170 L1, 새벽하늘 1.009 · 흑연·노을 1.000).
-  buttonDisabled: {
+  btnSmall: {minHeight: BUTTON.smallHeight, paddingHorizontal: BUTTON.smallPadX},
+  btnPrimary: {backgroundColor: color.primary},
+  // 보조의 「옅은 채움」은 폰의 시트 위 알약 문법이다(`circleLook`, phone-sheets §4): 라이트는 `surface` + 쉼 그림자, 다크는 한 단 위
+  // `surfaceMuted` + 가장자리 한 줄. 시안이 적은 `surfaceMuted` 만으로는 라이트의 바닥·시트와 같은 색이 되어(흑연·노을 1.000:1, 새벽하늘
+  // 시트 위 1.009:1) 보조 단추가 조용한 단추와 갈리지 않았다 — #5170 L1 이 잠긴 주 단추에서 잰 것과 같은 함정이다.
+  btnSecondary: {
     backgroundColor: circleLook(color).fill,
     borderColor: circleLook(color).ring,
+    borderWidth: StyleSheet.hairlineWidth,
     boxShadow: color.elevationRest,
   },
-  // 잉크 채움은 눌려도 잉크다 — 흐림만 낮춘다(온보딩 `buttonPrimaryPressed`, 웹 `hover:opacity-90` 의 짝).
-  buttonPressed: {opacity: 0.86},
-  buttonBusy: {flexDirection: 'row', alignItems: 'center', gap: space.sm},
-  buttonLabel: {color: color.onPrimary, fontSize: font.body, fontWeight: '600'},
-  // 옅은 칸 위에서는 채움 위 글자색(`onPrimary`)이 사라진다(옛 판의 흰 글자가 1.26:1 이었다).
-  // 못 누르는 버튼도 라벨은 읽혀야 한다 — 온보딩 `labelInert`.
-  buttonLabelDisabled: {color: color.textMuted},
+  btnQuiet: {},
+  btnDanger: {backgroundColor: color.dangerFill},
+  // 막대 끝의 조용한 단추: 여백을 걷고 낱말을 그쪽 끝에 붙인다. 상자는 44 아래로 좁아지지 않는다.
+  btnFlushStart: {paddingHorizontal: 0, minWidth: TOUCH_TARGET, justifyContent: 'flex-start'},
+  btnFlushEnd: {paddingHorizontal: 0, minWidth: TOUCH_TARGET, justifyContent: 'flex-end'},
+  btnLocked: {opacity: DISABLED_OPACITY},
+  btnPressed: {opacity: PRESSED_OPACITY},
+  btnLabel: {fontSize: font.body, lineHeight: line.body, fontWeight: '600', textAlign: 'center', flexShrink: 1},
+  btnLabelSmall: {fontSize: font.label, lineHeight: line.label},
+  btnGlyph: {width: HOME_ICON_SIZE.down, height: HOME_ICON_SIZE.down},
   badge: {
     minWidth: 22,
     paddingHorizontal: 6,
@@ -847,14 +899,6 @@ const buildStyles = (color: Palette) => StyleSheet.create({
   stateHeadline: {fontSize: font.body, color: color.text, fontWeight: '600'},
   stateHeadlineDanger: {color: color.danger},
   stateDetail: {fontSize: font.label, color: color.textMuted, lineHeight: 20},
-  outline: {
-    ...hitStyle,
-    paddingHorizontal: space.md,
-    borderRadius: radius.sm,
-    borderWidth: 1,
-    borderColor: color.border,
-    alignItems: 'center',
-  },
   retry: {
     ...hitStyle,
     paddingHorizontal: space.md,

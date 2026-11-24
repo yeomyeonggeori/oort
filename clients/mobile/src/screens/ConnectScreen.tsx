@@ -49,7 +49,15 @@ import {
   type NativeScrollEvent,
   type NativeSyntheticEvent,
 } from 'react-native';
-import {FailureBanner, NoticeBlock, SAS_MAX_SCALE, Sentence} from '../design/atoms';
+import {
+  FailureBanner,
+  NoticeBlock,
+  OutlineButton,
+  PrimaryButton,
+  QuietButton,
+  SAS_MAX_SCALE,
+  Sentence,
+} from '../design/atoms';
 import {font, PRESSED_OPACITY, space, TOUCH_TARGET, type Palette} from '../design/tokens';
 import {useKeyboardAppearance, usePalette, useStyles, useTheme} from '../design/theme';
 import {
@@ -64,8 +72,6 @@ import {QrScannerSheet} from '../features/deviceLink/QrScannerSheet';
 import {RememberEmailRow} from '../features/onboarding/RememberEmailRow';
 import {KomettoGuide, OnboardingCanvas} from '../features/onboarding/KomettoGuide';
 import {
-  OnboardingButton,
-  OnboardingGhostButton,
   OnboardingLink,
   OnboardingLinkRow,
   OnboardingPhoneScreen,
@@ -757,7 +763,8 @@ export default function ConnectScreen({
         top={
           <OnboardingTopBar
             left={
-              <OnboardingGhostButton
+              <QuietButton
+                flush="start"
                 label={SAS_CANCEL_LABEL}
                 onPress={leaveSas}
                 accessibilityHint="이 연결을 그만두고 첫 화면으로 돌아갑니다."
@@ -775,8 +782,7 @@ export default function ConnectScreen({
                 <Sentence style={styles.sysText}>{formatMessage(DEVICE_LINK_SAS_WAIT_KEY)}</Sentence>
               </View>
             )}
-            <OnboardingButton
-              kind="secondary"
+            <OutlineButton
               label={SAS_MISMATCH_LABEL}
               onPress={leaveSas}
               accessibilityHint="이 연결 코드를 버리고 첫 화면으로 돌아갑니다."
@@ -858,13 +864,13 @@ export default function ConnectScreen({
         bottom={
           <>
             {permissionDenied ? (
-              <OnboardingButton
+              <PrimaryButton
                 label={ADDRESS_LOGIN_LABEL}
                 onPress={() => openForm('signIn', 'server')}
                 testID="qr-permission-fallback"
               />
             ) : (
-              <OnboardingButton
+              <PrimaryButton
                 label={WELCOME_QR_LABEL}
                 icon={<QrGlyph color={palette.onPrimary} />}
                 onPress={() => void openScanner()}
@@ -954,7 +960,8 @@ export default function ConnectScreen({
             testID="connect-form">
             <OnboardingTopBar
               left={
-                <OnboardingGhostButton
+                <QuietButton
+                  flush="start"
                   label="뒤로"
                   onPress={backToWelcome}
                   accessibilityHint="QR 연결이 있는 첫 화면으로 돌아갑니다."
@@ -1203,7 +1210,7 @@ export default function ConnectScreen({
             {/* A plain wrapper, only to report where the button is (#2678). One
                 child in the content's gap chain, as the button alone was. */}
             <View onLayout={rowLayout.action}>
-              <OnboardingButton
+              <PrimaryButton
                 label={joining ? JOIN_SUBMIT_LABEL : '로그인'}
                 busyLabel={joining ? '참여 중' : '로그인 중'}
                 busy={phase.busy}
