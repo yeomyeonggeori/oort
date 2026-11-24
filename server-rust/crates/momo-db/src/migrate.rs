@@ -868,12 +868,17 @@ mod tests {
     /// agent's narrowing value, NULL = follow the workspace), `agent_run.status_eye_attach_count`
     /// (L3's per-run cap) and a partial index on the eye rows the api's follow-up removal starts
     /// from. No new table, trigger, definer or grant.
+    /// 188 is #6067's (landing order: it lands before 189). 189 is #6013's Agent Port picture road
+    /// (ADR-0151 증보 10 P2 · P7): the RLS-FORCE table `agent_upload_token` (hash-only one-time upload
+    /// tokens, **no foreign key in either direction**, the single-use guard trigger of 175, privileges for
+    /// `momo_app` alone — `agent-upload-token-lockdown`) and `agent_picture_mark.run_id` losing NOT NULL
+    /// (this road's marks have no run). No other grant changes.
     #[test]
-    fn discovers_contiguous_migrations_001_to_188() {
+    fn discovers_contiguous_migrations_001_to_189() {
         let dir = default_migrations_dir();
         let migrations = discover_migrations(&dir).expect("migrations directory readable");
 
-        let expected: Vec<i64> = (1..=188).collect();
+        let expected: Vec<i64> = (1..=189).collect();
         let found: Vec<i64> = migrations
             .iter()
             .map(|migration| migration.version)
@@ -881,7 +886,7 @@ mod tests {
         assert_eq!(
             found,
             expected,
-            "expected contiguous 001..=188 under {}",
+            "expected contiguous 001..=189 under {}",
             dir.display()
         );
         assert!(migrations.first().unwrap().name.starts_with("001_init"));
@@ -889,7 +894,7 @@ mod tests {
             .last()
             .unwrap()
             .name
-            .starts_with("188_agent_status_reaction"));
+            .starts_with("189_agent_upload_token"));
     }
 
     #[test]

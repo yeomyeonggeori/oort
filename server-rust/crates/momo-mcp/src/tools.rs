@@ -238,6 +238,21 @@ pub const TOOL_CARD_SUGGEST: &str = "oort_card_suggest";
 /// It proves the runtime is up, never that it takes work: the derived liveness
 /// keeps that apart (`alive_idle`).
 pub const TOOL_PING: &str = "oort_ping";
+/// ADR-0151 증보 10 P2 · ADR-0162 증보 7 I1 (#6013) — a single-use, 120-second address to upload ONE
+/// picture for the agent's own next message in an approved channel. Opened by `messages:write` (no new
+/// scope, I2) and served only while the operator's switch is on (I3): [`ToolCapability::WITHOUT_PICTURES`]
+/// is the capability without it.
+pub const TOOL_PICTURE_UPLOAD_BEGIN: &str = "oort_picture_upload_begin";
+/// ADR-0151 증보 10 P6 · P7 — how many pictures `oort_message_post.attachmentIds` may name.
+pub const MAX_MESSAGE_PICTURES: u64 = 4;
+/// ADR-0151 증보 10 P6 — the closed `error.data.code` of the one refusal every unbindable
+/// `attachmentIds` gets (another agent's, another channel's, the worker's road's, a person's, already
+/// bound, unknown, repeated): the -32602 argument branch, never which id or why.
+pub const ATTACHMENT_NOT_LINKABLE: &str = "attachment_not_linkable";
+/// ADR-0151 증보 10 P7 — the closed `error.data.code` of an `oort_picture_upload_begin` refused by one
+/// of its ceilings (per message, per agent per day, per workspace per day, live addresses, unbound
+/// pictures, issues per day): the 409 conflict branch.
+pub const PICTURE_LIMIT_REACHED: &str = "picture_limit_reached";
 
 pub const SCOPE_PORT_CONNECT: &str = "agent:port:connect";
 pub const SCOPE_INBOX_READ: &str = "agent:inbox:read";
@@ -347,6 +362,21 @@ fn conversation_read_schema() -> Value {
 }
 
 fn message_post_schema() -> Value {
+    let mut schema = message_post_schema_without_pictures();
+    // ADR-0151 증보 10 P6 (#6013): up to four pictures this agent uploaded through
+    // oort_picture_upload_begin into this channel, in the order they are shown.
+    schema["properties"]["attachmentIds"] = nullable(json!({
+        "type": "array",
+        "minItems": 1,
+        "maxItems": MAX_MESSAGE_PICTURES,
+        "items": uuid_property(),
+    }));
+    schema
+}
+
+/// `oort_message_post` while the operator's picture switch is off (ADR-0162 증보 7 I3): the same schema
+/// without `attachmentIds`, so `additionalProperties: false` refuses the argument.
+fn message_post_schema_without_pictures() -> Value {
     json!({
         "type": "object",
         "additionalProperties": false,
@@ -357,6 +387,17 @@ fn message_post_schema() -> Value {
             "body": required_text(8_000),
             "rootId": nullable(uuid_property()),
             "replyToId": nullable(uuid_property())
+        }
+    })
+}
+
+fn picture_upload_begin_schema() -> Value {
+    json!({
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["channelId"],
+        "properties": {
+            "channelId": uuid_property()
         }
     })
 }
@@ -1445,7 +1486,7 @@ fn card_suggest_schema() -> Value {
 
 /// The complete catalog. Order is the `tools/list` order and is stable so a
 /// client diffing two listings sees only real capability changes.
-pub const TOOL_CATALOG: [ToolDescriptor; 15] = [
+pub const TOOL_CATALOG: [ToolDescriptor; 16] = [
     ToolDescriptor {
         name: TOOL_INBOX_READ,
         title: "Read the hosted inbox",
@@ -1483,9 +1524,26 @@ pub const TOOL_CATALOG: [ToolDescriptor; 15] = [
                       message you answer); anywhere else (a top-level mention in a channel, a \
                       group direct message), rootId is the id of the message that called you, \
                       so your message opens a thread under it. If a top-level message might \
-                      be a 1:1 direct message and you cannot tell, leave rootId out.",
+                      be a 1:1 direct message and you cannot tell, leave rootId out. To show \
+                      pictures, pass attachmentIds from oort_picture_upload_begin (at most 4), \
+                      always with a body that says what they show, and only as many as needed.",
         required_scope: SCOPE_MESSAGES_WRITE,
         schema: message_post_schema,
+        annotations: None,
+    },
+    ToolDescriptor {
+        name: TOOL_PICTURE_UPLOAD_BEGIN,
+        title: "Get a picture upload address",
+        description: "Get a one-time address (uploadUrl, valid for expiresInSeconds, once) to \
+                      upload ONE picture (PNG, JPEG or WebP, at most maxBytes) for your own next \
+                      message in this channel. Send it yourself with an HTTP PUT of the raw file \
+                      bytes and a Content-Length (e.g. curl -T shot.png \"<uploadUrl>\"); the \
+                      answer's attachmentId goes in oort_message_post attachmentIds. The server \
+                      re-encodes the picture (longest side at most 1024). Nothing appears in the \
+                      conversation until you post the message. Pictures go with a body that says \
+                      what they show, and only as many as needed.",
+        required_scope: SCOPE_MESSAGES_WRITE,
+        schema: picture_upload_begin_schema,
         annotations: None,
     },
     ToolDescriptor {
@@ -1717,6 +1775,17 @@ pub const TOOL_CATALOG: [ToolDescriptor; 15] = [
     },
 ];
 
+/// `oort_message_post` as a server with the picture switch off serves it (ADR-0162 증보 7 I3): the
+/// catalog's descriptor with the schema that has no `attachmentIds`. The description is the catalog's own.
+static MESSAGE_POST_WITHOUT_PICTURES: ToolDescriptor = ToolDescriptor {
+    name: TOOL_MESSAGE_POST,
+    title: TOOL_CATALOG[2].title,
+    description: TOOL_CATALOG[2].description,
+    required_scope: SCOPE_MESSAGES_WRITE,
+    schema: message_post_schema_without_pictures,
+    annotations: None,
+};
+
 /// What this server build is able to serve, independent of any credential.
 ///
 /// A separate axis from the credential's scopes so a deployment can withdraw a
@@ -1730,6 +1799,30 @@ pub struct ToolCapability {
 impl ToolCapability {
     /// Every tool in [`TOOL_CATALOG`].
     pub const FULL: ToolCapability = ToolCapability {
+        served: &[
+            TOOL_INBOX_READ,
+            TOOL_CONVERSATION_READ,
+            TOOL_MESSAGE_POST,
+            TOOL_JOBS_CLAIM,
+            TOOL_JOB_START,
+            TOOL_JOB_RENEW,
+            TOOL_JOB_RELEASE,
+            TOOL_RUN_EVENT,
+            TOOL_RUN_COMPLETE,
+            TOOL_ACTION_PROPOSE,
+            TOOL_ACTION_CLAIM_SECRET,
+            TOOL_EXPRESSION_ASSEMBLE,
+            TOOL_ACTION_INITIATE,
+            TOOL_CARD_SUGGEST,
+            TOOL_PING,
+            TOOL_PICTURE_UPLOAD_BEGIN,
+        ],
+    };
+
+    /// Every tool but [`TOOL_PICTURE_UPLOAD_BEGIN`] — what a server whose operator turned the picture
+    /// switch off serves (ADR-0151 증보 10 P8, ADR-0162 증보 7 I3). A view built over it also lists and
+    /// validates `oort_message_post` **without** `attachmentIds` ([`ToolView::intersect`]).
+    pub const WITHOUT_PICTURES: ToolCapability = ToolCapability {
         served: &[
             TOOL_INBOX_READ,
             TOOL_CONVERSATION_READ,
@@ -1808,17 +1901,29 @@ impl ToolView {
     /// Both scope lists are required to carry a tool's scope. A human's approval
     /// that the credential no longer carries is stale authority; a credential
     /// scope no human approved is unapproved authority. Neither opens a tool.
+    ///
+    /// A capability that does not serve [`TOOL_PICTURE_UPLOAD_BEGIN`] also swaps `oort_message_post` for
+    /// its descriptor without `attachmentIds` (ADR-0162 증보 7 I3): with the operator's switch off the
+    /// argument is neither listed nor accepted, and the listing is otherwise the same.
     pub fn intersect(
         approved_scopes: &[String],
         token_scopes: &[String],
         capability: ToolCapability,
     ) -> ToolView {
+        let pictures = capability.serves(TOOL_PICTURE_UPLOAD_BEGIN);
         let visible = TOOL_CATALOG
             .iter()
             .filter(|tool| {
                 capability.serves(tool.name)
                     && has_scope(approved_scopes, tool.required_scope)
                     && has_scope(token_scopes, tool.required_scope)
+            })
+            .map(|tool| {
+                if !pictures && tool.name == TOOL_MESSAGE_POST {
+                    &MESSAGE_POST_WITHOUT_PICTURES
+                } else {
+                    tool
+                }
             })
             .collect();
         ToolView {
@@ -2615,6 +2720,14 @@ pub enum ToolFailure {
     AlreadyClaimed,
     /// Same, and same audience: the 30-minute window has passed.
     ClaimExpired,
+    /// ADR-0151 증보 10 P6 (#6013): `oort_message_post.attachmentIds` named a picture the caller may not
+    /// bind (another agent's, another channel's, the worker's road's, a person's, already bound, unknown,
+    /// repeated). The same -32602 and fixed sentence as [`Self::InvalidArguments`], plus `error.data
+    /// {code: "attachment_not_linkable"}` — never which id or why.
+    AttachmentNotLinkable,
+    /// ADR-0151 증보 10 P7 (#6013): `oort_picture_upload_begin` refused by a ceiling. The same 409 and
+    /// fixed sentence as [`Self::Conflict`], plus `error.data {code: "picture_limit_reached"}`.
+    PictureLimitReached,
     /// The server failed. Never carries a cause.
     Internal,
 }
@@ -2631,10 +2744,11 @@ impl ToolFailure {
             ToolFailure::InvalidArguments
             | ToolFailure::InvalidArtifacts(_)
             | ToolFailure::InvalidAssembleParams(_)
-            | ToolFailure::InvalidRunEvent(_) => "invalid_arguments",
+            | ToolFailure::InvalidRunEvent(_)
+            | ToolFailure::AttachmentNotLinkable => "invalid_arguments",
             ToolFailure::NotAuthorized | ToolFailure::HandleRefused => "not_authorized",
             ToolFailure::Unavailable => "unavailable",
-            ToolFailure::Conflict => "conflict",
+            ToolFailure::Conflict | ToolFailure::PictureLimitReached => "conflict",
             ToolFailure::AlreadyClaimed => "already_claimed",
             ToolFailure::ClaimExpired => "claim_expired",
             ToolFailure::Internal => "internal",
@@ -2647,12 +2761,15 @@ impl ToolFailure {
             ToolFailure::InvalidArguments
             | ToolFailure::InvalidArtifacts(_)
             | ToolFailure::InvalidAssembleParams(_)
-            | ToolFailure::InvalidRunEvent(_) => (400, -32602, "invalid tool arguments"),
+            | ToolFailure::InvalidRunEvent(_)
+            | ToolFailure::AttachmentNotLinkable => (400, -32602, "invalid tool arguments"),
             ToolFailure::NotAuthorized | ToolFailure::HandleRefused => {
                 (403, -32003, "tool is not authorized for this connection")
             }
             ToolFailure::Unavailable => (409, -32004, "tool target is unavailable"),
-            ToolFailure::Conflict => (409, -32005, "tool target refused the transition"),
+            ToolFailure::Conflict | ToolFailure::PictureLimitReached => {
+                (409, -32005, "tool target refused the transition")
+            }
             ToolFailure::AlreadyClaimed => (409, -32006, "secret was already claimed"),
             ToolFailure::ClaimExpired => (409, -32007, "claim window has passed"),
             ToolFailure::Internal => (500, -32603, "internal error"),
@@ -2681,6 +2798,8 @@ impl ToolFailure {
                 "code": ASSEMBLY_PARAMS_INVALID,
                 "params": params.names().collect::<Vec<_>>(),
             })),
+            ToolFailure::AttachmentNotLinkable => Some(json!({"code": ATTACHMENT_NOT_LINKABLE})),
+            ToolFailure::PictureLimitReached => Some(json!({"code": PICTURE_LIMIT_REACHED})),
             _ => None,
         }
     }
@@ -3084,13 +3203,15 @@ mod tests {
     }
 
     #[test]
-    fn the_catalog_is_exactly_the_fifteen_named_tools() {
+    fn the_catalog_is_exactly_the_named_tools() {
         assert_eq!(
             TOOL_CATALOG.iter().map(|t| t.name).collect::<Vec<_>>(),
             vec![
                 "oort_inbox_read",
                 "oort_conversation_read",
                 "oort_message_post",
+                // #6013 (ADR-0162 증보 7 I1)
+                "oort_picture_upload_begin",
                 "oort_jobs_claim",
                 "oort_job_start",
                 "oort_job_renew",
@@ -3133,7 +3254,7 @@ mod tests {
             SCOPE_WORKSPACE_INITIATE,
         ]);
         let view = ToolView::intersect(&all, &all, ToolCapability::FULL);
-        assert_eq!(view.names().len(), 15);
+        assert_eq!(view.names().len(), 16);
         for (name, scope) in [
             (TOOL_INBOX_READ, SCOPE_INBOX_READ),
             (TOOL_CONVERSATION_READ, SCOPE_MESSAGES_READ),
@@ -3383,7 +3504,11 @@ mod tests {
         assert!(ToolView::intersect(&token, &approved, ToolCapability::FULL).is_empty());
         assert_eq!(
             ToolView::intersect(&approved, &approved, ToolCapability::FULL).names(),
-            vec![TOOL_MESSAGE_POST, TOOL_CARD_SUGGEST]
+            vec![
+                TOOL_MESSAGE_POST,
+                TOOL_PICTURE_UPLOAD_BEGIN,
+                TOOL_CARD_SUGGEST
+            ]
         );
     }
 
@@ -4723,5 +4848,86 @@ mod tests {
                 "internal"
             ]
         );
+    }
+
+    /// ADR-0151 증보 10 P8 · PA12, ADR-0162 증보 7 I3 (#6013): with the operator's picture switch off, the
+    /// listing is exactly one tool shorter (measured as a difference, not a total: other amendments add
+    /// tools), `oort_message_post` lists no `attachmentIds` and the validator refuses one, and the picture
+    /// tool is not callable. With the switch on, the same message validates.
+    #[test]
+    fn the_picture_switch_removes_exactly_one_tool_and_the_argument() {
+        let all = scopes(&[
+            SCOPE_PORT_CONNECT,
+            SCOPE_INBOX_READ,
+            SCOPE_MESSAGES_READ,
+            SCOPE_MESSAGES_WRITE,
+            SCOPE_JOBS_READ,
+            SCOPE_RUNS_CALLBACK,
+            SCOPE_WORKSPACE_PROPOSE,
+            SCOPE_WORKSPACE_INITIATE,
+        ]);
+        let on = ToolView::intersect(&all, &all, ToolCapability::FULL);
+        let off = ToolView::intersect(&all, &all, ToolCapability::WITHOUT_PICTURES);
+        assert_eq!(on.names().len(), off.names().len() + 1);
+        assert!(on.callable(TOOL_PICTURE_UPLOAD_BEGIN).is_some());
+        assert!(off.callable(TOOL_PICTURE_UPLOAD_BEGIN).is_none());
+        let listed = |view: &ToolView| {
+            view.listing()
+                .as_array()
+                .expect("an array")
+                .iter()
+                .find(|tool| tool["name"] == TOOL_MESSAGE_POST)
+                .expect("message post listed")
+                .clone()
+        };
+        assert!(listed(&on)["inputSchema"]["properties"]["attachmentIds"].is_object());
+        assert!(listed(&off)["inputSchema"]["properties"]
+            .get("attachmentIds")
+            .is_none());
+        // the swapped descriptor is the catalog's message post, word for word, but for the argument
+        assert_eq!(listed(&on)["description"], listed(&off)["description"]);
+        let arguments = json!({
+            "channelId": "01234567-89ab-cdef-0123-456789abcdef",
+            "clientMsgId": "01234567-89ab-cdef-0123-456789abcdee",
+            "body": "전 · 후 화면",
+            "attachmentIds": ["01234567-89ab-cdef-0123-456789abcded"],
+        });
+        let post_on = on.callable(TOOL_MESSAGE_POST).expect("callable");
+        let post_off = off.callable(TOOL_MESSAGE_POST).expect("callable");
+        assert!(validate_arguments(post_on, &arguments).is_ok());
+        assert_eq!(
+            validate_arguments(post_off, &arguments),
+            Err(ToolFailure::InvalidArguments)
+        );
+        // five pictures is one too many, by the schema
+        let mut five = arguments.clone();
+        five["attachmentIds"] = json!([
+            "01234567-89ab-cdef-0123-456789abcd01",
+            "01234567-89ab-cdef-0123-456789abcd02",
+            "01234567-89ab-cdef-0123-456789abcd03",
+            "01234567-89ab-cdef-0123-456789abcd04",
+            "01234567-89ab-cdef-0123-456789abcd05",
+        ]);
+        assert_eq!(
+            validate_arguments(post_on, &five),
+            Err(ToolFailure::InvalidArguments)
+        );
+    }
+
+    /// ADR-0151 증보 10 P6 · P7: the two picture refusals ride existing wire branches and recorded codes
+    /// (migration 133's closed set does not grow), each with one closed `error.data.code`.
+    #[test]
+    fn the_picture_refusals_ride_existing_branches_with_a_closed_code() {
+        let not_linkable = ToolFailure::AttachmentNotLinkable;
+        assert_eq!(not_linkable.code(), "invalid_arguments");
+        assert_eq!(not_linkable.wire(), ToolFailure::InvalidArguments.wire());
+        assert_eq!(
+            not_linkable.data(),
+            Some(json!({"code": "attachment_not_linkable"}))
+        );
+        let limit = ToolFailure::PictureLimitReached;
+        assert_eq!(limit.code(), "conflict");
+        assert_eq!(limit.wire(), ToolFailure::Conflict.wire());
+        assert_eq!(limit.data(), Some(json!({"code": "picture_limit_reached"})));
     }
 }

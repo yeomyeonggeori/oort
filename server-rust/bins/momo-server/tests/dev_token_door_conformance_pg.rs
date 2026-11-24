@@ -162,6 +162,10 @@ const PUBLIC_TEMPLATES: &[&str] = &[
     // by construction like its read twin (the one-time token in the path is the only authority), and
     // reached only on the private network: the public edge answers 403 for this prefix.
     "/v1/agent-media/{ws}/{token}",
+    // #6013: the address an Agent Port agent uploads ONE picture for its own message to (ADR-0151
+    // 증보 10 P3). Public by design — the agent's shell holds no oort credential; the one-time, hash-only,
+    // 120-second token in the path is the only authority — and not blocked at the public edge.
+    "/v1/agent-uploads/{ws}/{token}",
 ];
 
 /// Public only when the Drive archive accepts stub uploads (an in-memory or local archive); the
@@ -2470,6 +2474,10 @@ const MOUNTED_WITHOUT_CONTRACT: Drift = &[
     (
         "The write address the agent-worker spends once to put ONE re-encoded picture into its run's conversation (#5371, ADR-0151 증보 8): a capacity URL like the read address above rather than a client API — its caller is the worker on the private network, not a client, and the one-time, hash-only, 60-second token in the path is the only authority — so it is listed in neither contract file this test reads",
         &[("PUT", "/v1/agent-media/{}/{}")],
+    ),
+    (
+        "The upload address an Agent Port agent spends once to put ONE re-encoded picture into its own next message (#6013, ADR-0151 증보 10 P3): a capacity URL like the two above rather than a client API — its caller is the agent's own shell, not a client, and the one-time, hash-only, 120-second token in the path is the only authority — so it is listed in neither contract file this test reads",
+        &[("PUT", "/v1/agent-uploads/{}/{}")],
     ),
 ];
 

@@ -204,6 +204,8 @@ fn every_failure_has_a_row() -> Vec<ToolFailure> {
             | ToolFailure::Conflict
             | ToolFailure::AlreadyClaimed
             | ToolFailure::ClaimExpired
+            | ToolFailure::AttachmentNotLinkable
+            | ToolFailure::PictureLimitReached
             | ToolFailure::Internal => {}
         }
     }
@@ -227,6 +229,8 @@ fn every_failure_has_a_row() -> Vec<ToolFailure> {
         ToolFailure::HandleRefused,
         ToolFailure::Unavailable,
         ToolFailure::Conflict,
+        ToolFailure::AttachmentNotLinkable,
+        ToolFailure::PictureLimitReached,
         ToolFailure::AlreadyClaimed,
         ToolFailure::ClaimExpired,
         ToolFailure::Internal,

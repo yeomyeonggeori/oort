@@ -658,8 +658,12 @@ pub async fn redeem_in_tx(
 /// also understands the JSON-escaped (`\/`) and percent-encoded (`%2F`) separators.
 pub fn redact_self_media_urls(text: &str) -> String {
     // ADR-0151 증보 8 W2: the worker's write address (`…/agent-media/{workspace}/{token}`) has the same
-    // shape behind a second mark, and the same scrub covers it.
-    redact_after_mark(&redact_after_mark(text, "self-media"), "agent-media")
+    // shape behind a second mark, and the same scrub covers it. ADR-0151 증보 10 P12 (#6013): so does the
+    // Agent Port agent's public upload address (`…/agent-uploads/{workspace}/{token}`), a third mark.
+    redact_after_mark(
+        &redact_after_mark(&redact_after_mark(text, "self-media"), "agent-media"),
+        "agent-uploads",
+    )
 }
 
 /// [`redact_self_media_urls`] for one mark: every `{mark}/{workspace}/{token}` in `text` loses its token.
@@ -856,6 +860,11 @@ mod tests {
             redact_self_media_urls("agent-media is a word"),
             "agent-media is a word"
         );
+        // #6013 (ADR-0151 증보 10 P12): the Agent Port agent's public upload address is the third mark
+        let upload = format!("curl -T a.png https://oort.example/v1/agent-uploads/{uuid}/{token}");
+        let cleaned = redact_self_media_urls(&upload);
+        assert!(!cleaned.contains(token), "{cleaned}");
+        assert!(cleaned.ends_with(&format!("/v1/agent-uploads/{uuid}/<redacted>")));
     }
 
     /// The grant carries the live token, so no `{:?}` — plain or pretty, the value or a container of

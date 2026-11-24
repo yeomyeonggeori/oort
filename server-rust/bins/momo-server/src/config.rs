@@ -1104,6 +1104,52 @@ fn subscription_agents_from_env() -> bool {
     subscription_agents_switch_on(env("MOMO_SUBSCRIPTION_AGENTS_ENABLED").as_deref())
 }
 
+/// ADR-0151 증보 10 P8 · P3 5, ADR-0162 증보 7 I3 (#6013) — the Agent Port picture road, as this process
+/// reads it **at boot** (a switch is turned by changing the value and restarting the api; there is no code
+/// deploy and no live toggle).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AgentUploadsConfig {
+    /// `MOMO_AGENT_PORT_PICTURES` — **on by default** (P8, 정할 값 ④ 추천대로). Off means: the tool
+    /// `oort_picture_upload_begin` is neither listed nor callable, `oort_message_post` has no
+    /// `attachmentIds`, and `PUT /v1/agent-uploads/…` answers its one 404 even for a live token. The parse
+    /// leans toward *off* like the subscription-agent kill switch: unset, blank and `true` keep it on, every
+    /// other value — `false`, `0`, `off`, a typo — turns it off, so a misspelled kill never leaves it open.
+    /// The road also stays shut while `MOMO_PUBLIC_BASE_URL` is not an absolute https address: the upload
+    /// address is built from that value and nothing a request says (P2, PT3).
+    pub pictures_enabled: bool,
+    /// `MOMO_AGENT_UPLOADS_TRUSTED_EDGE` — **off by default**, on only for an exact `true` (P3 5). On, the
+    /// refusal budget of the upload route keys on the first `X-Forwarded-For` hop: set it only where the
+    /// operator's own edge (the Caddyfiles of this repository) writes that header and the api is reachable
+    /// through that edge alone. Off, the header is not read at all: the per-address budget keys on the socket
+    /// peer, and the address-wide ceiling becomes one ceiling for the whole prefix, whoever asks.
+    pub trusted_edge: bool,
+}
+
+impl Default for AgentUploadsConfig {
+    fn default() -> Self {
+        AgentUploadsConfig {
+            pictures_enabled: true,
+            trusted_edge: false,
+        }
+    }
+}
+
+/// [`AgentUploadsConfig`] from the process environment.
+pub fn agent_uploads_from_env() -> AgentUploadsConfig {
+    agent_uploads_from_lookup(env)
+}
+
+/// [`agent_uploads_from_env`] over a given lookup (tests do not touch the process environment).
+pub fn agent_uploads_from_lookup(lookup: impl Fn(&str) -> Option<String>) -> AgentUploadsConfig {
+    AgentUploadsConfig {
+        pictures_enabled: subscription_agents_switch_on(
+            lookup("MOMO_AGENT_PORT_PICTURES").as_deref(),
+        ),
+        trusted_edge: lookup("MOMO_AGENT_UPLOADS_TRUSTED_EDGE")
+            .is_some_and(|value| value.trim() == "true"),
+    }
+}
+
 /// #3397 — read the Claude subscription-agent opt-in. Off unless an exact `true`.
 /// The operator's team-AI ceilings as this process reads them (ADR-0201 증보 v3 B9-3, #4944) — the
 /// same rule the agent-worker enforces by (`parse_operator_cap`): unset or empty = no ceiling, `0` =
@@ -5478,5 +5524,28 @@ mod tests {
         assert!(hosted.is_enabled() && !hosted.dev_login_enabled());
         let both = hosted.with_dev_login_for_tests("https://oort.example/oauth/cli");
         assert!(both.is_enabled() && both.dev_login_enabled());
+    }
+
+    /// ADR-0151 증보 10 P8 · P3 5 (#6013): the picture switch is on unless set to anything but `true`
+    /// (a misspelled kill closes it), and the edge is trusted only for an exact `true`.
+    #[test]
+    fn the_agent_uploads_switches_lean_closed_on_a_typo() {
+        let with = |pictures: Option<&str>, edge: Option<&str>| {
+            agent_uploads_from_lookup(|key| match key {
+                "MOMO_AGENT_PORT_PICTURES" => pictures.map(str::to_string),
+                "MOMO_AGENT_UPLOADS_TRUSTED_EDGE" => edge.map(str::to_string),
+                _ => None,
+            })
+        };
+        assert_eq!(with(None, None), AgentUploadsConfig::default());
+        assert!(with(None, None).pictures_enabled && !with(None, None).trusted_edge);
+        assert!(with(Some("true"), None).pictures_enabled);
+        for off in ["false", "0", "off", "True", "flase"] {
+            assert!(!with(Some(off), None).pictures_enabled, "{off}");
+        }
+        assert!(with(None, Some("true")).trusted_edge);
+        for not_trusted in ["1", "yes", "True", "on"] {
+            assert!(!with(None, Some(not_trusted)).trusted_edge, "{not_trusted}");
+        }
     }
 }
