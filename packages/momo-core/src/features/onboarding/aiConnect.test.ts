@@ -2,28 +2,36 @@ import { describe, expect, it } from "vitest";
 import { toHostedConnection } from "../hostedAgents/model";
 import * as harnessLogin from "./harnessLogin";
 import {
-  AI_CONNECT_BOUNDARY_NOTE,
+  AI_CONNECT_BOUNDARY_NOTE_KEY,
   HARNESS_LOGIN_COMMAND,
-  HARNESS_PILL_LABEL,
+  HARNESS_PILL_KEYS,
   LOGIN_POLL_INTERVAL_MS,
   LOGIN_POLL_WINDOW_MS,
   SUBSCRIPTION_HARNESS_WIRE,
-  aiConnectFoundLine,
-  AI_CONNECT_GROUP_LABEL,
+  aiConnectFoundKey,
+  AI_CONNECT_GROUP_KEYS,
   AI_CONNECT_ROW_COPY,
   aiConnectRowGroup,
   aiConnectRows,
   classifyJoinConflict,
   harnessPill,
-  joinJoinedLine,
+  joinJoinedMessage,
   loginPollNext,
-  primaryActionLabel,
+  primaryActionKey,
   subscriptionAgentIdentity,
   subscriptionConnectPlan,
   subscriptionRowSelectable,
   subscriptionSurface,
 } from "./aiConnect";
 import * as aiConnect from "./aiConnect";
+import { catalog as koCatalog } from "../../i18n/generated/ko-KR";
+import { createLocaleService, resolveLocaleContext } from "../../i18n";
+
+// 문장은 사전(`onboarding.json`)에 있다(#6064). 시험은 제품과 같은 한국어 생성물로 문장을 풀어 예전 한국어를 그대로 단정한다.
+const { formatMessage } = createLocaleService({
+  ...resolveLocaleContext("ko-KR", { languages: ["ko-KR"] }),
+  catalog: koCatalog,
+});
 
 describe("구독 줄 노출은 세 게이트 AND (ADR-0193 D6, #2814)", () => {
   it("opens only for desktop + build flag + server true", () => {
@@ -69,7 +77,14 @@ describe("구독 줄 노출은 세 게이트 AND (ADR-0193 D6, #2814)", () => {
 
 describe("알약 다섯 (이슈 계약 문구)", () => {
   it("keeps the five labels", () => {
-    expect(HARNESS_PILL_LABEL).toEqual({
+    const label = (pill: keyof typeof HARNESS_PILL_KEYS) => formatMessage(HARNESS_PILL_KEYS[pill]);
+    expect({
+      install: label("install"),
+      login: label("login"),
+      checking: label("checking"),
+      ready: label("ready"),
+      recheck: label("recheck"),
+    }).toEqual({
       install: "설치 필요",
       login: "로그인 필요",
       checking: "확인 중…",
@@ -164,7 +179,7 @@ describe("「Claude로 로그인」 버튼을 만들 문장이 없다 (ADR-0193 
   });
 
   it("the boundary note says oort does not read the login", () => {
-    expect(AI_CONNECT_BOUNDARY_NOTE).toContain("로그인 정보를 읽거나 옮기지 않아요");
+    expect(formatMessage(AI_CONNECT_BOUNDARY_NOTE_KEY)).toContain("로그인 정보를 읽거나 옮기지 않아요");
   });
 });
 
@@ -222,8 +237,15 @@ describe("구독으로 쓰는 에이전트 정체성", () => {
   });
 
   it("joined line reads naturally", () => {
-    expect(joinJoinedLine("민수의 Claude")).toBe("민수의 Claude가 들어왔어요.");
-    expect(aiConnectFoundLine("claude")).toBe("이 맥에서 Claude Code를 찾았어요.");
+    const joined = (name: string) => {
+      const message = joinJoinedMessage(name);
+      return formatMessage(message.key, message.values);
+    };
+    expect(joined("민수의 Claude")).toBe("민수의 Claude가 들어왔어요.");
+    // 받침이 있는 이름은 「이」, 없으면 「가」다(한국어 틀의 josa를 호출부가 정한다).
+    expect(joined("김인턴")).toBe("김인턴이 들어왔어요.");
+    expect(joined("Hermes")).toBe("Hermes가 들어왔어요.");
+    expect(formatMessage(aiConnectFoundKey("claude"))).toBe("이 맥에서 Claude Code를 찾았어요.");
   });
 });
 
@@ -295,10 +317,10 @@ describe("서버 필드 계약 (openapi HostedAgentConnection, #2815)", () => {
 
 describe("줄 문구", () => {
   it("matches the mockup rows and primary labels", () => {
-    expect(AI_CONNECT_ROW_COPY.claude.title).toBe("Claude Code · 내 도구");
-    expect(AI_CONNECT_ROW_COPY["api-key"].title).toBe("API 키 · 팀 에이전트");
-    expect(primaryActionLabel("claude")).toBe("Claude Code를 개인 에이전트로");
-    expect(primaryActionLabel(null)).toBe("계속");
+    expect(formatMessage(AI_CONNECT_ROW_COPY.claude.titleKey)).toBe("Claude Code · 내 도구");
+    expect(formatMessage(AI_CONNECT_ROW_COPY["api-key"].titleKey)).toBe("API 키 · 팀 에이전트");
+    expect(formatMessage(primaryActionKey("claude"))).toBe("Claude Code를 개인 에이전트로");
+    expect(formatMessage(primaryActionKey(null))).toBe("계속");
   });
 });
 
@@ -312,12 +334,15 @@ describe("ADR-0198 정합: 에이전트가 먼저, 구독 CLI는 내 도구 (#36
     expect(rows.findIndex((id) => aiConnectRowGroup(id) === "tools")).toBeGreaterThan(
       rows.map((id) => aiConnectRowGroup(id)).lastIndexOf("agents")
     );
-    expect(AI_CONNECT_GROUP_LABEL).toEqual({ agents: "에이전트", tools: "내 도구" });
+    expect({
+      agents: formatMessage(AI_CONNECT_GROUP_KEYS.agents),
+      tools: formatMessage(AI_CONNECT_GROUP_KEYS.tools),
+    }).toEqual({ agents: "에이전트", tools: "내 도구" });
   });
 
   it("구독 줄 이름은 「내 도구」이고 에이전트 1순위를 말하지 않는다", () => {
-    expect(AI_CONNECT_ROW_COPY.claude.title).toBe("Claude Code · 내 도구");
-    expect(AI_CONNECT_ROW_COPY.codex.title).toBe("Codex · 내 도구");
-    expect(AI_CONNECT_ROW_COPY.claude.title).not.toContain("구독");
+    expect(formatMessage(AI_CONNECT_ROW_COPY.claude.titleKey)).toBe("Claude Code · 내 도구");
+    expect(formatMessage(AI_CONNECT_ROW_COPY.codex.titleKey)).toBe("Codex · 내 도구");
+    expect(formatMessage(AI_CONNECT_ROW_COPY.claude.titleKey)).not.toContain("구독");
   });
 });

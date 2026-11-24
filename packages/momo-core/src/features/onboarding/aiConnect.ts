@@ -1,4 +1,5 @@
-import { attachParticle } from "../../lib/koreanParticle";
+import type { MessageRef, PlainMessageKey } from "../../i18n/keys";
+import { takesFinalForm } from "../../lib/koreanParticle";
 import type {
   LocalHarnessId,
   LocalHarnessProbe,
@@ -40,7 +41,7 @@ export const SUBSCRIPTION_HARNESS_WIRE: Record<LocalHarnessId, SubscriptionHarne
   codex: "codex",
 };
 
-/** 사람이 읽는 CLI 이름. */
+/** 사람이 읽는 CLI 이름. 제품 이름이라 언어마다 같다(번역하는 문장이 아니다). */
 export const HARNESS_LABEL: Record<LocalHarnessId, string> = {
   claude: "Claude Code",
   codex: "Codex",
@@ -92,10 +93,10 @@ export function aiConnectRowGroup(id: AiConnectRowId): AiConnectRowGroup {
   return isSubscriptionRow(id) ? "tools" : "agents";
 }
 
-export const AI_CONNECT_GROUP_LABEL: Record<AiConnectRowGroup, string> = {
-  agents: "에이전트",
-  tools: "내 도구",
-};
+export const AI_CONNECT_GROUP_KEYS = {
+  agents: "onboarding.aiConnectGroup.agents",
+  tools: "onboarding.aiConnectGroup.tools",
+} as const satisfies Record<AiConnectRowGroup, PlainMessageKey>;
 
 // ---- 알약 ---------------------------------------------------------------------
 
@@ -106,13 +107,13 @@ export const AI_CONNECT_GROUP_LABEL: Record<AiConnectRowGroup, string> = {
  */
 export type HarnessPill = "install" | "login" | "checking" | "ready" | "recheck";
 
-export const HARNESS_PILL_LABEL: Record<HarnessPill, string> = {
-  install: "설치 필요",
-  login: "로그인 필요",
-  checking: "확인 중…",
-  ready: "준비됨",
-  recheck: "다시 확인",
-};
+export const HARNESS_PILL_KEYS = {
+  install: "onboarding.aiConnectPill.install",
+  login: "onboarding.aiConnectPill.login",
+  checking: "onboarding.aiConnectPill.checking",
+  ready: "onboarding.aiConnectPill.ready",
+  recheck: "common.action.checkAgain",
+} as const satisfies Record<HarnessPill, PlainMessageKey>;
 
 /**
  * 감지 결과 + 로그인 대기 상태 → 알약.
@@ -280,109 +281,126 @@ export function classifyJoinConflict(error: {
 
 // ---- 코메토 문장 --------------------------------------------------------------
 
-export const AI_CONNECT_QUESTION = "누구의 AI로 생각할까요?";
-export const AI_CONNECT_QUESTION_DETAIL = "에이전트가 누구의 AI로 생각할지 골라요.";
-export const AI_CONNECT_PROBING_LINE = "이 맥의 CLI를 확인하고 있어요.";
+export const AI_CONNECT_QUESTION_KEY = "onboarding.aiConnectStage.question" satisfies PlainMessageKey;
+export const AI_CONNECT_QUESTION_DETAIL_KEY =
+  "onboarding.aiConnectStage.questionDetail" satisfies PlainMessageKey;
+export const AI_CONNECT_PROBING_KEY = "onboarding.aiConnectStage.probing" satisfies PlainMessageKey;
 
-export function aiConnectFoundLine(harness: LocalHarnessId): string {
-  return `이 맥에서 ${attachParticle(HARNESS_LABEL[harness], "object")} 찾았어요.`;
+const FOUND_LINE_KEYS = {
+  claude: "onboarding.aiConnectStage.foundClaude",
+  codex: "onboarding.aiConnectStage.foundCodex",
+} as const satisfies Record<LocalHarnessId, PlainMessageKey>;
+
+export function aiConnectFoundKey(harness: LocalHarnessId): PlainMessageKey {
+  return FOUND_LINE_KEYS[harness];
 }
 
 export interface AiConnectRowCopy {
-  title: string;
-  detail: string;
-  /** 줄 머리의 글자 타일(시안 `.opt .lg`). */
-  mark: string;
+  titleKey: PlainMessageKey;
+  detailKey: PlainMessageKey;
+  /** 줄 머리의 글자 타일(시안 `.opt .lg`)의 키. */
+  markKey: PlainMessageKey;
 }
 
-export const AI_CONNECT_ROW_COPY: Record<AiConnectRowId, AiConnectRowCopy> = {
+export const AI_CONNECT_ROW_COPY = {
   claude: {
-    title: "Claude Code · 내 도구",
-    detail: "이 맥의 공식 CLI · 나만 부르는 개인 에이전트",
-    mark: "C",
+    titleKey: "onboarding.aiConnectRow.claudeTitle",
+    detailKey: "onboarding.aiConnectRow.cliDetail",
+    markKey: "onboarding.aiConnectRow.claudeMark",
   },
   codex: {
-    title: "Codex · 내 도구",
-    detail: "이 맥의 공식 CLI · 나만 부르는 개인 에이전트",
-    mark: "X",
+    titleKey: "onboarding.aiConnectRow.codexTitle",
+    detailKey: "onboarding.aiConnectRow.cliDetail",
+    markKey: "onboarding.aiConnectRow.codexMark",
   },
   "api-key": {
-    title: "API 키 · 팀 에이전트",
-    detail: "OpenAI 호환 API 키 · 팀 누구나 부를 수 있어요",
-    mark: "키",
+    titleKey: "onboarding.aiConnectRow.apiKeyTitle",
+    detailKey: "onboarding.aiConnectRow.apiKeyDetail",
+    markKey: "onboarding.aiConnectRow.apiKeyMark",
   },
   grok: {
-    title: "그록봇",
-    detail: "그록봇 앱을 팀에 초대해요",
-    mark: "G",
+    titleKey: "onboarding.aiConnectRow.grokTitle",
+    detailKey: "onboarding.aiConnectRow.grokDetail",
+    markKey: "onboarding.aiConnectRow.grokMark",
   },
-};
+} as const satisfies Record<AiConnectRowId, AiConnectRowCopy>;
 
 /** API 키 줄의 알약: 설정 화면으로 가는 줄이라는 표지. */
-export const API_KEY_PILL_LABEL = "설정";
+export const API_KEY_PILL_KEY = "onboarding.aiConnectStage.apiKeyPill" satisfies PlainMessageKey;
 /** 그록봇이 이 맥에서 감지되지 않았을 때(데스크탑만). */
-export const GROK_NOT_INSTALLED_PILL_LABEL = "설치 안 됨";
+export const GROK_NOT_INSTALLED_PILL_KEY =
+  "onboarding.aiConnectStage.grokNotInstalledPill" satisfies PlainMessageKey;
 
-export const AI_CONNECT_BOUNDARY_NOTE =
-  "상태는 CLI가 스스로 알려 준 값이에요. oort는 로그인 정보를 읽거나 옮기지 않아요. 내 도구는 나만 쓸 수 있고, 팀 모두가 부를 에이전트는 그록봇이나 API 키로 붙여요.";
+export const AI_CONNECT_BOUNDARY_NOTE_KEY =
+  "onboarding.aiConnectStage.boundaryNote" satisfies PlainMessageKey;
 
-export const AI_CONNECT_DESKTOP_ONLY_NOTE =
-  "데스크탑 앱에서 이 맥의 Claude Code·Codex를 붙일 수 있어요.";
+export const AI_CONNECT_DESKTOP_ONLY_NOTE_KEY =
+  "onboarding.aiConnectStage.desktopOnlyNote" satisfies PlainMessageKey;
 
-export const AI_CONNECT_SERVER_OFF_NOTE =
-  "이 서버는 지금 구독으로 쓰는 에이전트를 받지 않아요. 팀 에이전트는 API 키로 붙여요.";
+export const AI_CONNECT_SERVER_OFF_NOTE_KEY =
+  "onboarding.aiConnectStage.serverOffNote" satisfies PlainMessageKey;
 
-export const COPY_ACTION_LABEL = "복사";
-export const COPIED_LABEL = "복사됨";
-export const OPEN_TERMINAL_LABEL = "터미널에서 열기";
+export const COPY_ACTION_KEY = "onboarding.aiConnectCopy.copy" satisfies PlainMessageKey;
+export const COPIED_KEY = "onboarding.aiConnectCopy.copied" satisfies PlainMessageKey;
+export const OPEN_TERMINAL_KEY = "onboarding.aiConnectCopy.openTerminal" satisfies PlainMessageKey;
 
-export function loginCommandAria(harness: LocalHarnessId): string {
-  return `${HARNESS_LABEL[harness]} 로그인 명령`;
+const LOGIN_ARIA_KEYS = {
+  claude: "onboarding.aiConnectCopy.loginAriaClaude",
+  codex: "onboarding.aiConnectCopy.loginAriaCodex",
+} as const satisfies Record<LocalHarnessId, PlainMessageKey>;
+
+export function loginCommandAriaKey(harness: LocalHarnessId): PlainMessageKey {
+  return LOGIN_ARIA_KEYS[harness];
 }
 
-export const LOGIN_OPENED_STATUS =
-  "명령을 복사했어요. 터미널에 붙여 넣고 로그인을 마치면 이 줄이 바뀌어요.";
-export const TERMINAL_OPEN_FAILED =
-  "터미널을 열지 못했어요. 명령을 복사해 직접 여세요.";
+export const LOGIN_OPENED_STATUS_KEY =
+  "onboarding.aiConnectCopy.loginOpenedStatus" satisfies PlainMessageKey;
+export const TERMINAL_OPEN_FAILED_KEY =
+  "onboarding.aiConnectCopy.terminalOpenFailed" satisfies PlainMessageKey;
 
-export function primaryActionLabel(id: AiConnectRowId | null): string {
+export function primaryActionKey(id: AiConnectRowId | null): PlainMessageKey {
   switch (id) {
     case "claude":
-      return "Claude Code를 개인 에이전트로";
+      return "onboarding.aiConnectStage.primaryClaude";
     case "codex":
-      return "Codex를 개인 에이전트로";
+      return "onboarding.aiConnectStage.primaryCodex";
     case "api-key":
-      return "API 키로 연결하기";
+      return "onboarding.aiConnectStage.primaryApiKey";
     case "grok":
-      return "그록봇 초대하기";
+      return "onboarding.aiConnectStage.primaryGrok";
     default:
-      return "계속";
+      return AI_CONNECT_CONTINUE_KEY;
   }
 }
 
-export const AI_CONNECT_SKIP_LABEL = "지금은 건너뛰기";
-export const AI_CONNECT_REENTRY = "나중에 AI 화면에서 이어갈 수 있어요.";
-export const AI_CONNECT_SKIPPED_LINE = "AI 화면에서 언제든 이어서 할 수 있어요.";
+export const AI_CONNECT_SKIP_KEY = "onboarding.aiConnectStage.skip" satisfies PlainMessageKey;
+export const AI_CONNECT_REENTRY_KEY = "onboarding.aiConnectStage.reentry" satisfies PlainMessageKey;
+export const AI_CONNECT_SKIPPED_KEY =
+  "onboarding.aiConnectStage.skippedLine" satisfies PlainMessageKey;
 
 /** 관리자가 아닌 멤버(#3697): 연결 목록이 403이라 목록을 세우지 않고 요청 안내만 한다. */
-export const AI_CONNECT_NON_ADMIN_LINE = "에이전트 연결은 관리자가 해요.";
-export const AI_CONNECT_NON_ADMIN_DETAIL =
-  "에이전트가 필요하면 워크스페이스 관리자에게 부탁해 주세요. 그동안 대화는 바로 시작할 수 있어요.";
-export const AI_CONNECT_CONTINUE_LABEL = "계속";
+export const AI_CONNECT_NON_ADMIN_LINE_KEY =
+  "onboarding.aiConnectStage.nonAdminLine" satisfies PlainMessageKey;
+export const AI_CONNECT_NON_ADMIN_DETAIL_KEY =
+  "onboarding.aiConnectStage.nonAdminDetail" satisfies PlainMessageKey;
+export const AI_CONNECT_CONTINUE_KEY = "onboarding.aiConnectStage.continue" satisfies PlainMessageKey;
 
 // ---- 재진입 (#2870, RCA 1-b·1-c) -------------------------------------------
 //
 // AI과 에이전트 화면에서 같은 화면을 다시 연다. 온보딩의 [지금은
 // 건너뛰기]는 재진입에서 [닫기]가 되고, 진행 점 자리에 [뒤로]가 선다.
 
-export const AI_CONNECT_BACK_LABEL = "뒤로";
-export const AI_CONNECT_CLOSE_LABEL = "닫기";
+export const AI_CONNECT_BACK_KEY = "onboarding.aiConnectStage.back" satisfies PlainMessageKey;
+/** 화면을 닫는 단추라 공용 「닫기」다. */
+export const AI_CONNECT_CLOSE_KEY = "common.action.close" satisfies PlainMessageKey;
 
 /** AI 맨 위 블록의 제목·설명·행동. 해요체(ADR-0193 D11 구독 문구). */
-export const SUBSCRIPTION_ENTRY_TITLE = "내 구독으로 쓰는 에이전트";
-export const SUBSCRIPTION_ENTRY_DETAIL =
-  "이 맥의 Claude Code·Codex 로그인으로 생각하는 개인 에이전트예요. 나만 부를 수 있어요.";
-export const SUBSCRIPTION_ENTRY_ACTION = "내 구독으로 에이전트 만들기";
+export const SUBSCRIPTION_ENTRY_TITLE_KEY =
+  "onboarding.aiConnectEntry.title" satisfies PlainMessageKey;
+export const SUBSCRIPTION_ENTRY_DETAIL_KEY =
+  "onboarding.aiConnectEntry.detail" satisfies PlainMessageKey;
+export const SUBSCRIPTION_ENTRY_ACTION_KEY =
+  "onboarding.aiConnectEntry.action" satisfies PlainMessageKey;
 
 // ---- 합류 세 상태 (같은 화면) -------------------------------------------------
 
@@ -394,48 +412,77 @@ export type SubscriptionJoinPhase =
   | "joined"
   | "error";
 
-export function joinConnectLine(harness: LocalHarnessId): string {
-  return harness === "claude"
-    ? "터미널에서 이 명령을 한 번 실행해 주세요."
-    : "Codex의 MCP 서버에 이 주소와 연결 값을 넣어 주세요.";
+const JOIN_CONNECT_KEYS = {
+  claude: "onboarding.aiConnectJoin.connectClaude",
+  codex: "onboarding.aiConnectJoin.connectCodex",
+} as const satisfies Record<LocalHarnessId, PlainMessageKey>;
+
+export function joinConnectKey(harness: LocalHarnessId): PlainMessageKey {
+  return JOIN_CONNECT_KEYS[harness];
 }
 
-export function joinConnectDetail(harness: LocalHarnessId): string {
-  return `${attachParticle(HARNESS_LABEL[harness], "subject")} 이 연결로 oort에 들어와요. 연결 값은 지금 한 번만 보여요.`;
+const JOIN_CONNECT_DETAIL_KEYS = {
+  claude: "onboarding.aiConnectJoin.connectDetailClaude",
+  codex: "onboarding.aiConnectJoin.connectDetailCodex",
+} as const satisfies Record<LocalHarnessId, PlainMessageKey>;
+
+export function joinConnectDetailKey(harness: LocalHarnessId): PlainMessageKey {
+  return JOIN_CONNECT_DETAIL_KEYS[harness];
 }
 
-/** ② 감지 대기. `label`은 CLI 이름(Claude Code·Codex) 또는 그록봇. */
-export function joinWaitingLine(label: string): string {
-  return `${attachParticle(label, "subject")} oort에 들어오기를 기다리고 있어요.`;
+/** ② 감지 대기. 기다리는 쪽은 CLI(Claude Code·Codex) 또는 그록봇이다. */
+export type JoinWaitingSubject = LocalHarnessId | "grok";
+
+const JOIN_WAITING_KEYS = {
+  claude: "onboarding.aiConnectJoin.waitingClaude",
+  codex: "onboarding.aiConnectJoin.waitingCodex",
+  grok: "onboarding.aiConnectJoin.waitingGrok",
+} as const satisfies Record<JoinWaitingSubject, PlainMessageKey>;
+
+export function joinWaitingKey(subject: JoinWaitingSubject): PlainMessageKey {
+  return JOIN_WAITING_KEYS[subject];
 }
 
-export const AI_CONNECT_LIST_ERROR_LINE = "연결 목록을 불러오지 못했어요.";
-export const AI_CONNECT_OFFLINE_LINE = "지금은 서버에 닿지 않아요.";
-export const GROK_LABEL = "그록봇";
-export const CONNECT_COMMAND_ARIA = "연결 명령";
-export const CONNECT_HANDED_OFF_STATUS =
-  "명령을 복사했어요. 터미널에 붙여 넣어 실행하세요.";
+export const AI_CONNECT_LIST_ERROR_KEY = "onboarding.aiConnectList.error" satisfies PlainMessageKey;
+export const AI_CONNECT_OFFLINE_KEY = "onboarding.aiConnectList.offline" satisfies PlainMessageKey;
+export const GROK_LABEL_KEY = "onboarding.aiConnectHarness.grok" satisfies PlainMessageKey;
+export const CONNECT_COMMAND_ARIA_KEY =
+  "onboarding.aiConnectCopy.commandAria" satisfies PlainMessageKey;
+export const CONNECT_HANDED_OFF_STATUS_KEY =
+  "onboarding.aiConnectCopy.handedOffStatus" satisfies PlainMessageKey;
 
-export const JOIN_CREATING_LINE = "연결을 준비하고 있어요.";
-export const JOIN_CAP_LINE = "5분 동안 들어오지 않았어요.";
-export const JOIN_CAP_DETAIL = "명령을 실행했는지 확인하고 다시 확인을 눌러 주세요.";
-export const JOIN_ERROR_LINE = "연결을 만들지 못했어요.";
-export const JOIN_OFF_LINE = "지금은 이 서버에서 구독으로 쓰는 에이전트를 쓸 수 없어요.";
+export const JOIN_CREATING_KEY = "onboarding.aiConnectJoin.creating" satisfies PlainMessageKey;
+export const JOIN_CAP_KEY = "onboarding.aiConnectJoin.cap" satisfies PlainMessageKey;
+export const JOIN_CAP_DETAIL_KEY = "onboarding.aiConnectJoin.capDetail" satisfies PlainMessageKey;
+export const JOIN_ERROR_KEY = "onboarding.aiConnectJoin.error" satisfies PlainMessageKey;
+export const JOIN_OFF_KEY = "onboarding.aiConnectJoin.off" satisfies PlainMessageKey;
 /** Claude 줄만 닫혀 있을 때(ADR-0193 D17). 오류가 아니라 서버 쪽 결정이다. */
-export const JOIN_CLAUDE_PAUSED_LINE =
-  "이 서버에서는 Claude Code로 에이전트를 만들 수 없어요. Codex나 API 키로는 이어갈 수 있어요.";
+export const JOIN_CLAUDE_PAUSED_KEY =
+  "onboarding.aiConnectJoin.claudePaused" satisfies PlainMessageKey;
 /** 줄 알약(짧게: 좁은 폭에서 제목이 쪼개지지 않는다)과 줄 설명. 서버가 닫아 둔 줄은 고를 수 없다. */
-export const CLAUDE_PAUSED_PILL_LABEL = "꺼짐";
-export const CLAUDE_PAUSED_DETAIL = "이 서버에서 꺼져 있어요";
-export const JOIN_RECHECK_LABEL = "다시 확인";
-export const JOIN_RETRY_LABEL = "다시 시도";
-export const JOIN_BACK_LABEL = "다른 AI 고르기";
+export const CLAUDE_PAUSED_PILL_KEY =
+  "onboarding.aiConnectJoin.claudePausedPill" satisfies PlainMessageKey;
+export const CLAUDE_PAUSED_DETAIL_KEY =
+  "onboarding.aiConnectJoin.claudePausedDetail" satisfies PlainMessageKey;
+export const JOIN_RECHECK_KEY = "common.action.checkAgain" satisfies PlainMessageKey;
+export const JOIN_RETRY_KEY = "common.action.retry" satisfies PlainMessageKey;
+export const JOIN_BACK_KEY = "onboarding.aiConnectJoin.back" satisfies PlainMessageKey;
 
-export function joinJoinedLine(agentDisplayName: string): string {
-  return `${attachParticle(agentDisplayName, "subject")} 들어왔어요.`;
+/**
+ * 「{이름}이/가 들어왔어요」. 이름은 사람이 정한 글이라 받침에 따라 이/가가 갈린다: 고르는 것은 한국어 틀의
+ * `josa`이고, 받침 판정은 호출부(여기)가 기존 조사 함수로 계산해 넘긴다(영어는 같은 인자를 쓰지 않는다).
+ */
+export function joinJoinedMessage(
+  agentDisplayName: string
+): MessageRef<"onboarding.aiConnectJoin.joined"> {
+  return {
+    key: "onboarding.aiConnectJoin.joined",
+    values: { name: agentDisplayName, josa: takesFinalForm(agentDisplayName) ? "final" : "other" },
+  };
 }
 
-export const JOIN_JOINED_DETAIL = "나만 부를 수 있는 개인 에이전트예요.";
+export const JOIN_JOINED_DETAIL_KEY =
+  "onboarding.aiConnectJoin.joinedDetail" satisfies PlainMessageKey;
 
 // ---- 개인 에이전트 켜기 (ADR-0198 증보 1 D7·T3, #3713) ------------------------------
 //
@@ -443,12 +490,15 @@ export const JOIN_JOINED_DETAIL = "나만 부를 수 있는 개인 에이전트�
 // 에이전트 켜기다. 로그인은 공식 CLI가 이미 끝냈고(`준비됨` 줄만 고를 수 있다), 서버는
 // 하네스 로그인을 모른다. 별칭이 곧 핸들이고, 부르는 것은 나만, 답은 내 맥이 켜져
 // 있을 때만이다.
-export const PERSONAL_ENABLING_LINE = "개인 에이전트를 켜고 있어요.";
-export const PERSONAL_JOINED_HINT = "내 맥이 켜져 있을 때만 답해요.";
+export const PERSONAL_ENABLING_KEY = "onboarding.aiConnectPersonal.enabling" satisfies PlainMessageKey;
+/** 개인 에이전트가 켜졌을 때의 설명: 「나만 부를 수 있어요」와 「내 맥이 켜져 있을 때만 답해요」를 한 문장 묶음으로. */
+export const JOIN_JOINED_PERSONAL_DETAIL_KEY =
+  "onboarding.aiConnectJoin.joinedPersonalDetail" satisfies PlainMessageKey;
 /** 서버에 개인 에이전트 라우트가 없을 때(404/405): 줄을 고를 수 없게 하고 이유를 말한다. */
-export const PERSONAL_UNAVAILABLE_LINE =
-  "이 서버에서는 아직 개인 에이전트를 켤 수 없어요. 서버가 업데이트되면 열려요.";
-export const PERSONAL_UNAVAILABLE_DETAIL = "이 서버에서는 아직 켤 수 없어요";
+export const PERSONAL_UNAVAILABLE_KEY =
+  "onboarding.aiConnectPersonal.unavailable" satisfies PlainMessageKey;
+export const PERSONAL_UNAVAILABLE_DETAIL_KEY =
+  "onboarding.aiConnectPersonal.unavailableDetail" satisfies PlainMessageKey;
 
-export const CONNECT_ENDPOINT_LABEL = "주소";
-export const CONNECT_CREDENTIAL_LABEL = "연결 값";
+export const CONNECT_ENDPOINT_KEY = "onboarding.aiConnectCopy.endpoint" satisfies PlainMessageKey;
+export const CONNECT_CREDENTIAL_KEY = "onboarding.aiConnectCopy.credential" satisfies PlainMessageKey;

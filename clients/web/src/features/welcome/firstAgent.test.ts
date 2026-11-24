@@ -3,10 +3,22 @@ import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { HOSTED_PRESETS } from "@momo/core/features/hostedAgents/presets";
 import {
-  JOIN_CAP_DETAIL,
-  JOIN_CAP_LINE,
-  joinWaitingLine,
+  JOIN_CAP_DETAIL_KEY,
+  JOIN_CAP_KEY,
+  joinWaitingKey,
 } from "@momo/core/features/onboarding/aiConnect";
+import { createLocaleService, resolveLocaleContext } from "@momo/core/i18n";
+import { catalog as koCatalog } from "@momo/core/i18n/generated/ko-KR";
+
+// 문장은 사전에 있다(#6064). 한국어 생성물로 풀어 예전 한국어를 그대로 단정한다.
+const { formatMessage } = createLocaleService({
+  ...resolveLocaleContext("ko-KR", { languages: ["ko-KR"] }),
+  catalog: koCatalog,
+});
+const JOIN_CAP_LINE = formatMessage(JOIN_CAP_KEY);
+const JOIN_CAP_DETAIL = formatMessage(JOIN_CAP_DETAIL_KEY);
+const joinWaitingLine = (label: "Claude Code" | "그록봇"): string =>
+  formatMessage(joinWaitingKey(label === "그록봇" ? "grok" : "claude"));
 import {
   DETECT_CAP_MS,
   DETECT_INITIAL_MS,

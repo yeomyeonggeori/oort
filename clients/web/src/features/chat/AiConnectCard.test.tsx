@@ -437,6 +437,7 @@ describe("같은 입력 → 같은 알약: 설정 × 카드 (#2941·#2944)", () 
   });
 
   it("구독 줄: 같은 CLI 감지에 같은 알약", async () => {
+    koreanMode = true;
     vi.mocked(detectLocalHarnesses).mockResolvedValue(READY);
     const settings = mountEl(createElement(AiLinkSection, { offline: false, workspaceId: "ws-1" }));
     const card = mountCard();
@@ -622,6 +623,7 @@ describe("같은 폼 · 같은 결과 문장: 설정 × 카드 (#2880)", () => {
 
 describe("흐름 ① 구독 로그인 (#2816 모달)", () => {
   it("로그인 성공: 모달이 닫히면 그 줄만 「준비됨」+ 결과 줄", async () => {
+    koreanMode = true;
     const host = mountCard();
     const login = await until(host, "ai-connect-card-claude-login");
     act(() => login.click());
@@ -944,6 +946,7 @@ describe("흐름 ③ 연결 확인 · ④ 실패 제자리", () => {
   });
 
   it("구독 연결 확인은 상태 명령만 다시 묻는다", async () => {
+    koreanMode = true;
     vi.mocked(detectLocalHarnesses).mockResolvedValue(READY);
     const host = mountCard();
     const check = await until(host, "ai-connect-card-claude-check");

@@ -1,5 +1,6 @@
+import type { LocaleService } from "../../i18n/context";
 import type { HarnessPill } from "../onboarding/aiConnect";
-import { HARNESS_PILL_LABEL } from "../onboarding/aiConnect";
+import { HARNESS_PILL_KEYS } from "../onboarding/aiConnect";
 import type { ProviderLink, ProviderLinkTest } from "./api";
 
 // =============================================================================
@@ -73,7 +74,13 @@ const HARNESS_PILL_TONE: Record<HarnessPill, AiPillTone> = {
   install: "mute",
 };
 
-/** 구독 줄(이 맥의 공식 CLI)의 알약. 판정은 `harnessPill`, 여기는 색과 낱말. */
-export function harnessPillView(pill: HarnessPill): AiPillView {
-  return { tone: HARNESS_PILL_TONE[pill], text: HARNESS_PILL_LABEL[pill] };
+/**
+ * 구독 줄(이 맥의 공식 CLI)의 알약. 판정은 `harnessPill`, 여기는 색과 낱말. 같은 모양(`AiPillView`)의 팀 키 알약과
+ * 한 갈래로 읽히도록 낱말은 글로 돌려주므로 글을 푸는 함수를 받는다.
+ */
+export function harnessPillView(
+  formatMessage: LocaleService["formatMessage"],
+  pill: HarnessPill
+): AiPillView {
+  return { tone: HARNESS_PILL_TONE[pill], text: formatMessage(HARNESS_PILL_KEYS[pill]) };
 }

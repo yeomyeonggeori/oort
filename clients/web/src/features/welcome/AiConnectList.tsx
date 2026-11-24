@@ -1,12 +1,12 @@
 import type { LocalHarnessId } from "@momo/core/features/hostedAgents/detect";
 import {
-  AI_CONNECT_GROUP_LABEL,
+  AI_CONNECT_GROUP_KEYS,
   AI_CONNECT_ROW_COPY,
-  CLAUDE_PAUSED_PILL_LABEL,
-  API_KEY_PILL_LABEL,
+  CLAUDE_PAUSED_PILL_KEY,
+  API_KEY_PILL_KEY,
   HARNESS_INSTALL_URL,
   HARNESS_LABEL,
-  HARNESS_PILL_LABEL,
+  HARNESS_PILL_KEYS,
   aiConnectRowGroup,
   isSubscriptionRow,
   subscriptionRowSelectable,
@@ -69,6 +69,7 @@ export function AiConnectList({
   probed: boolean;
   describedBy?: string;
 }) {
+  const formatMessage = useFormatMessage();
   const grouped =
     rows.some((id) => aiConnectRowGroup(id) === "tools") &&
     rows.some((id) => aiConnectRowGroup(id) === "agents");
@@ -87,7 +88,7 @@ export function AiConnectList({
         const group = aiConnectRowGroup(id);
         const groupHeading =
           grouped && (index === 0 || aiConnectRowGroup(rows[index - 1]) !== group)
-            ? AI_CONNECT_GROUP_LABEL[group]
+            ? formatMessage(AI_CONNECT_GROUP_KEYS[group])
             : null;
         const harnessPill = isSubscriptionRow(id) ? pill(id) : null;
         const serverClosed = disabledRows?.[id];
@@ -137,12 +138,12 @@ export function AiConnectList({
                   data-testid={`ai-connect-radio-${id}`}
                 />
                 <span className="ai-connect-mark" data-mark={id} aria-hidden="true">
-                  {copy.mark}
+                  {formatMessage(copy.markKey)}
                 </span>
                 <span className="flex min-w-0 flex-1 flex-col">
-                  <span className="ai-connect-title">{copy.title}</span>
+                  <span className="ai-connect-title">{formatMessage(copy.titleKey)}</span>
                   <span id={detailId} className="ai-connect-detail">
-                    {serverClosed ?? copy.detail}
+                    {serverClosed ?? formatMessage(copy.detailKey)}
                   </span>
                 </span>
               </label>
@@ -154,7 +155,7 @@ export function AiConnectList({
                   data-testid={`ai-connect-pill-${id}`}
                   data-pill="server-closed"
                 >
-                  {CLAUDE_PAUSED_PILL_LABEL}
+                  {formatMessage(CLAUDE_PAUSED_PILL_KEY)}
                 </span>
               ) : isSubscriptionRow(id) && harnessPill !== null ? (
                 <HarnessPillControl
@@ -165,7 +166,7 @@ export function AiConnectList({
                 />
               ) : id === "api-key" ? (
                 <span className="ai-connect-pill" data-tone="mute" id={pillId}>
-                  {API_KEY_PILL_LABEL}
+                  {formatMessage(API_KEY_PILL_KEY)}
                 </span>
               ) : id === "grok" && grokPill ? (
                 <span className="ai-connect-pill" data-tone="mute" id={pillId}>
@@ -195,7 +196,8 @@ function HarnessPillControl({
   pillId: string;
   onRecheck: (id: LocalHarnessId) => void;
 }) {
-  const label = HARNESS_PILL_LABEL[pill];
+  const formatMessage = useFormatMessage();
+  const label = formatMessage(HARNESS_PILL_KEYS[pill]);
   if (pill === "install") {
     return (
       <button

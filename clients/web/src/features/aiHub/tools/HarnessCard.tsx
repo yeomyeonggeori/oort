@@ -192,7 +192,7 @@ export function HarnessCard({ harness, desktop, pill, host, sessions, sessionsVe
     >
       <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2">
         <div className="flex min-w-0 flex-1 basis-full items-center gap-3 sm:basis-0">
-          <AiLogo mark={AI_CONNECT_ROW_COPY[harness].mark} />
+          <AiLogo mark={formatMessage(AI_CONNECT_ROW_COPY[harness].markKey)} />
           <div className="flex min-w-0 flex-1 flex-col">
             <span className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
               <span id={titleId} className="break-keep text-body font-semibold text-ink">

@@ -9458,6 +9458,498 @@ export const catalog: MessageCatalog = {
       "value": "Posted an invite link"
     }
   ],
+  "onboarding.aiConnectCopy.commandAria": [
+    {
+      "type": 0,
+      "value": "Connection command"
+    }
+  ],
+  "onboarding.aiConnectCopy.copied": [
+    {
+      "type": 0,
+      "value": "Copied"
+    }
+  ],
+  "onboarding.aiConnectCopy.copy": [
+    {
+      "type": 0,
+      "value": "Copy"
+    }
+  ],
+  "onboarding.aiConnectCopy.credential": [
+    {
+      "type": 0,
+      "value": "Connection value"
+    }
+  ],
+  "onboarding.aiConnectCopy.endpoint": [
+    {
+      "type": 0,
+      "value": "Address"
+    }
+  ],
+  "onboarding.aiConnectCopy.handedOffStatus": [
+    {
+      "type": 0,
+      "value": "Command copied. Paste it into Terminal and run it."
+    }
+  ],
+  "onboarding.aiConnectCopy.loginAriaClaude": [
+    {
+      "type": 0,
+      "value": "Claude Code login command"
+    }
+  ],
+  "onboarding.aiConnectCopy.loginAriaCodex": [
+    {
+      "type": 0,
+      "value": "Codex login command"
+    }
+  ],
+  "onboarding.aiConnectCopy.loginOpenedStatus": [
+    {
+      "type": 0,
+      "value": "Command copied. Paste it into Terminal and finish logging in, and this row will update."
+    }
+  ],
+  "onboarding.aiConnectCopy.openTerminal": [
+    {
+      "type": 0,
+      "value": "Open in Terminal"
+    }
+  ],
+  "onboarding.aiConnectCopy.spaced": [
+    {
+      "type": 1,
+      "value": "first"
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 1,
+      "value": "second"
+    }
+  ],
+  "onboarding.aiConnectCopy.terminalOpenFailed": [
+    {
+      "type": 0,
+      "value": "Couldn't open Terminal. Copy the command and open it yourself."
+    }
+  ],
+  "onboarding.aiConnectEntry.action": [
+    {
+      "type": 0,
+      "value": "Create an agent with my subscription"
+    }
+  ],
+  "onboarding.aiConnectEntry.detail": [
+    {
+      "type": 0,
+      "value": "A personal agent that thinks with your Claude Code or Codex login on this Mac. Only you can call it."
+    }
+  ],
+  "onboarding.aiConnectEntry.title": [
+    {
+      "type": 0,
+      "value": "Agents that use my subscription"
+    }
+  ],
+  "onboarding.aiConnectGroup.agents": [
+    {
+      "type": 0,
+      "value": "Agents"
+    }
+  ],
+  "onboarding.aiConnectGroup.tools": [
+    {
+      "type": 0,
+      "value": "My tools"
+    }
+  ],
+  "onboarding.aiConnectHarness.grok": [
+    {
+      "type": 0,
+      "value": "Grokbot"
+    }
+  ],
+  "onboarding.aiConnectJoin.back": [
+    {
+      "type": 0,
+      "value": "Choose a different AI"
+    }
+  ],
+  "onboarding.aiConnectJoin.cap": [
+    {
+      "type": 0,
+      "value": "Nobody joined in 5 minutes."
+    }
+  ],
+  "onboarding.aiConnectJoin.capDetail": [
+    {
+      "type": 0,
+      "value": "Check that you ran the command, then press Check again."
+    }
+  ],
+  "onboarding.aiConnectJoin.claudePaused": [
+    {
+      "type": 0,
+      "value": "Agents can't be created with Claude Code on this server. You can continue with Codex or an API key."
+    }
+  ],
+  "onboarding.aiConnectJoin.claudePausedDetail": [
+    {
+      "type": 0,
+      "value": "Turned off on this server"
+    }
+  ],
+  "onboarding.aiConnectJoin.claudePausedPill": [
+    {
+      "type": 0,
+      "value": "Off"
+    }
+  ],
+  "onboarding.aiConnectJoin.connectClaude": [
+    {
+      "type": 0,
+      "value": "Run this command in Terminal once."
+    }
+  ],
+  "onboarding.aiConnectJoin.connectCodex": [
+    {
+      "type": 0,
+      "value": "Enter this address and connection value into Codex's MCP servers."
+    }
+  ],
+  "onboarding.aiConnectJoin.connectDetailClaude": [
+    {
+      "type": 0,
+      "value": "Claude Code joins oort through this connection. The connection value is shown only once, now."
+    }
+  ],
+  "onboarding.aiConnectJoin.connectDetailCodex": [
+    {
+      "type": 0,
+      "value": "Codex joins oort through this connection. The connection value is shown only once, now."
+    }
+  ],
+  "onboarding.aiConnectJoin.creating": [
+    {
+      "type": 0,
+      "value": "Preparing the connection."
+    }
+  ],
+  "onboarding.aiConnectJoin.error": [
+    {
+      "type": 0,
+      "value": "Couldn't create the connection."
+    }
+  ],
+  "onboarding.aiConnectJoin.joined": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " has joined."
+    },
+    {
+      "type": 5,
+      "value": "josa",
+      "options": {
+        "final": {
+          "value": []
+        },
+        "other": {
+          "value": []
+        }
+      }
+    }
+  ],
+  "onboarding.aiConnectJoin.joinedDetail": [
+    {
+      "type": 0,
+      "value": "A personal agent only you can call."
+    }
+  ],
+  "onboarding.aiConnectJoin.joinedPersonalDetail": [
+    {
+      "type": 0,
+      "value": "A personal agent only you can call. It only answers while your Mac is on."
+    }
+  ],
+  "onboarding.aiConnectJoin.off": [
+    {
+      "type": 0,
+      "value": "Subscription-based agents aren't available on this server right now."
+    }
+  ],
+  "onboarding.aiConnectJoin.waitingClaude": [
+    {
+      "type": 0,
+      "value": "Waiting for Claude Code to join oort."
+    }
+  ],
+  "onboarding.aiConnectJoin.waitingCodex": [
+    {
+      "type": 0,
+      "value": "Waiting for Codex to join oort."
+    }
+  ],
+  "onboarding.aiConnectJoin.waitingGrok": [
+    {
+      "type": 0,
+      "value": "Waiting for Grokbot to join oort."
+    }
+  ],
+  "onboarding.aiConnectList.error": [
+    {
+      "type": 0,
+      "value": "Couldn't load the connection list."
+    }
+  ],
+  "onboarding.aiConnectList.offline": [
+    {
+      "type": 0,
+      "value": "Can't reach the server right now."
+    }
+  ],
+  "onboarding.aiConnectPersonal.enabling": [
+    {
+      "type": 0,
+      "value": "Turning on your personal agent."
+    }
+  ],
+  "onboarding.aiConnectPersonal.unavailable": [
+    {
+      "type": 0,
+      "value": "Personal agents can't be turned on for this server yet. This opens once the server is updated."
+    }
+  ],
+  "onboarding.aiConnectPersonal.unavailableDetail": [
+    {
+      "type": 0,
+      "value": "Can't be turned on for this server yet"
+    }
+  ],
+  "onboarding.aiConnectPill.checking": [
+    {
+      "type": 0,
+      "value": "Checking…"
+    }
+  ],
+  "onboarding.aiConnectPill.install": [
+    {
+      "type": 0,
+      "value": "Install needed"
+    }
+  ],
+  "onboarding.aiConnectPill.login": [
+    {
+      "type": 0,
+      "value": "Login needed"
+    }
+  ],
+  "onboarding.aiConnectPill.ready": [
+    {
+      "type": 0,
+      "value": "Ready"
+    }
+  ],
+  "onboarding.aiConnectRow.apiKeyDetail": [
+    {
+      "type": 0,
+      "value": "OpenAI-compatible API key · Anyone on the team can call it"
+    }
+  ],
+  "onboarding.aiConnectRow.apiKeyMark": [
+    {
+      "type": 0,
+      "value": "Key"
+    }
+  ],
+  "onboarding.aiConnectRow.apiKeyTitle": [
+    {
+      "type": 0,
+      "value": "API key · Team agent"
+    }
+  ],
+  "onboarding.aiConnectRow.claudeMark": [
+    {
+      "type": 0,
+      "value": "C"
+    }
+  ],
+  "onboarding.aiConnectRow.claudeTitle": [
+    {
+      "type": 0,
+      "value": "Claude Code · My tool"
+    }
+  ],
+  "onboarding.aiConnectRow.cliDetail": [
+    {
+      "type": 0,
+      "value": "The official CLI on this Mac · Your personal agent, only you can call it"
+    }
+  ],
+  "onboarding.aiConnectRow.codexMark": [
+    {
+      "type": 0,
+      "value": "X"
+    }
+  ],
+  "onboarding.aiConnectRow.codexTitle": [
+    {
+      "type": 0,
+      "value": "Codex · My tool"
+    }
+  ],
+  "onboarding.aiConnectRow.grokDetail": [
+    {
+      "type": 0,
+      "value": "Invite the Grokbot app to your team"
+    }
+  ],
+  "onboarding.aiConnectRow.grokMark": [
+    {
+      "type": 0,
+      "value": "G"
+    }
+  ],
+  "onboarding.aiConnectRow.grokTitle": [
+    {
+      "type": 0,
+      "value": "Grokbot"
+    }
+  ],
+  "onboarding.aiConnectStage.apiKeyPill": [
+    {
+      "type": 0,
+      "value": "Settings"
+    }
+  ],
+  "onboarding.aiConnectStage.back": [
+    {
+      "type": 0,
+      "value": "Back"
+    }
+  ],
+  "onboarding.aiConnectStage.boundaryNote": [
+    {
+      "type": 0,
+      "value": "Status is whatever the CLI reports itself. oort never reads or moves your login details. My tools are for you only; connect agents the whole team can call through Grokbot or an API key."
+    }
+  ],
+  "onboarding.aiConnectStage.continue": [
+    {
+      "type": 0,
+      "value": "Continue"
+    }
+  ],
+  "onboarding.aiConnectStage.desktopOnlyNote": [
+    {
+      "type": 0,
+      "value": "Connect Claude Code and Codex from this Mac in the desktop app."
+    }
+  ],
+  "onboarding.aiConnectStage.foundClaude": [
+    {
+      "type": 0,
+      "value": "Found Claude Code on this Mac."
+    }
+  ],
+  "onboarding.aiConnectStage.foundCodex": [
+    {
+      "type": 0,
+      "value": "Found Codex on this Mac."
+    }
+  ],
+  "onboarding.aiConnectStage.grokNotInstalledPill": [
+    {
+      "type": 0,
+      "value": "Not installed"
+    }
+  ],
+  "onboarding.aiConnectStage.nonAdminDetail": [
+    {
+      "type": 0,
+      "value": "If you need an agent, ask a workspace admin. You can start chatting right away in the meantime."
+    }
+  ],
+  "onboarding.aiConnectStage.nonAdminLine": [
+    {
+      "type": 0,
+      "value": "An admin connects agents."
+    }
+  ],
+  "onboarding.aiConnectStage.primaryApiKey": [
+    {
+      "type": 0,
+      "value": "Connect with an API key"
+    }
+  ],
+  "onboarding.aiConnectStage.primaryClaude": [
+    {
+      "type": 0,
+      "value": "Use Claude Code as my personal agent"
+    }
+  ],
+  "onboarding.aiConnectStage.primaryCodex": [
+    {
+      "type": 0,
+      "value": "Use Codex as my personal agent"
+    }
+  ],
+  "onboarding.aiConnectStage.primaryGrok": [
+    {
+      "type": 0,
+      "value": "Invite Grokbot"
+    }
+  ],
+  "onboarding.aiConnectStage.probing": [
+    {
+      "type": 0,
+      "value": "Checking the CLIs on this Mac."
+    }
+  ],
+  "onboarding.aiConnectStage.question": [
+    {
+      "type": 0,
+      "value": "Whose AI should do the thinking?"
+    }
+  ],
+  "onboarding.aiConnectStage.questionDetail": [
+    {
+      "type": 0,
+      "value": "Choose whose AI your agent thinks with."
+    }
+  ],
+  "onboarding.aiConnectStage.reentry": [
+    {
+      "type": 0,
+      "value": "You can pick this up later from the AI screen."
+    }
+  ],
+  "onboarding.aiConnectStage.serverOffNote": [
+    {
+      "type": 0,
+      "value": "This server doesn't accept subscription-based agents right now. Connect team agents with an API key."
+    }
+  ],
+  "onboarding.aiConnectStage.skip": [
+    {
+      "type": 0,
+      "value": "Skip for now"
+    }
+  ],
+  "onboarding.aiConnectStage.skippedLine": [
+    {
+      "type": 0,
+      "value": "You can continue any time from the AI screen."
+    }
+  ],
   "onboarding.guide.expressionFlustered": [
     {
       "type": 0,

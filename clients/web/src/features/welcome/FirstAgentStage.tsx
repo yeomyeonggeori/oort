@@ -16,50 +16,48 @@ import type {
   LocalHarnessProbe,
 } from "@momo/core/features/hostedAgents/detect";
 import {
-  AI_CONNECT_BACK_LABEL,
-  AI_CONNECT_BOUNDARY_NOTE,
-  AI_CONNECT_CLOSE_LABEL,
-  AI_CONNECT_CONTINUE_LABEL,
-  AI_CONNECT_DESKTOP_ONLY_NOTE,
-  AI_CONNECT_LIST_ERROR_LINE,
-  AI_CONNECT_OFFLINE_LINE,
-  GROK_LABEL,
-  AI_CONNECT_PROBING_LINE,
-  AI_CONNECT_NON_ADMIN_DETAIL,
-  AI_CONNECT_NON_ADMIN_LINE,
-  AI_CONNECT_QUESTION,
-  AI_CONNECT_QUESTION_DETAIL,
-  AI_CONNECT_REENTRY,
-  AI_CONNECT_SERVER_OFF_NOTE,
-  AI_CONNECT_SKIP_LABEL,
-  AI_CONNECT_SKIPPED_LINE,
-  GROK_NOT_INSTALLED_PILL_LABEL,
-  HARNESS_LABEL,
-  JOIN_BACK_LABEL,
-  JOIN_CAP_DETAIL,
-  JOIN_CLAUDE_PAUSED_LINE,
-  PERSONAL_ENABLING_LINE,
-  PERSONAL_JOINED_HINT,
-  PERSONAL_UNAVAILABLE_DETAIL,
-  PERSONAL_UNAVAILABLE_LINE,
-  JOIN_CAP_LINE,
-  JOIN_CREATING_LINE,
-  JOIN_ERROR_LINE,
-  JOIN_JOINED_DETAIL,
-  JOIN_OFF_LINE,
-  JOIN_RECHECK_LABEL,
-  JOIN_RETRY_LABEL,
+  AI_CONNECT_BACK_KEY,
+  AI_CONNECT_BOUNDARY_NOTE_KEY,
+  AI_CONNECT_CLOSE_KEY,
+  AI_CONNECT_CONTINUE_KEY,
+  AI_CONNECT_DESKTOP_ONLY_NOTE_KEY,
+  AI_CONNECT_LIST_ERROR_KEY,
+  AI_CONNECT_OFFLINE_KEY,
+  AI_CONNECT_PROBING_KEY,
+  AI_CONNECT_NON_ADMIN_DETAIL_KEY,
+  AI_CONNECT_NON_ADMIN_LINE_KEY,
+  AI_CONNECT_QUESTION_KEY,
+  AI_CONNECT_QUESTION_DETAIL_KEY,
+  AI_CONNECT_REENTRY_KEY,
+  AI_CONNECT_SERVER_OFF_NOTE_KEY,
+  AI_CONNECT_SKIP_KEY,
+  AI_CONNECT_SKIPPED_KEY,
+  GROK_NOT_INSTALLED_PILL_KEY,
+  JOIN_BACK_KEY,
+  JOIN_CAP_DETAIL_KEY,
+  JOIN_CLAUDE_PAUSED_KEY,
+  PERSONAL_ENABLING_KEY,
+  JOIN_JOINED_PERSONAL_DETAIL_KEY,
+  PERSONAL_UNAVAILABLE_DETAIL_KEY,
+  PERSONAL_UNAVAILABLE_KEY,
+  JOIN_CAP_KEY,
+  JOIN_CREATING_KEY,
+  JOIN_ERROR_KEY,
+  JOIN_JOINED_DETAIL_KEY,
+  JOIN_OFF_KEY,
+  JOIN_RECHECK_KEY,
+  JOIN_RETRY_KEY,
   SUBSCRIPTION_HARNESS_WIRE,
-  aiConnectFoundLine,
+  aiConnectFoundKey,
   aiConnectRows,
-  CLAUDE_PAUSED_DETAIL,
+  CLAUDE_PAUSED_DETAIL_KEY,
   classifyJoinConflict,
   isSubscriptionRow,
-  joinConnectDetail,
-  joinConnectLine,
-  joinJoinedLine,
-  joinWaitingLine,
-  primaryActionLabel,
+  joinConnectDetailKey,
+  joinConnectKey,
+  joinJoinedMessage,
+  joinWaitingKey,
+  primaryActionKey,
   subscriptionAgentIdentity,
   subscriptionConnectPlan,
   subscriptionRowSelectable,
@@ -165,6 +163,12 @@ import {
   dismissFirstAgentDeferred,
 } from "./firstAgentStore";
 import { BlockedReason } from "@/features/common/BlockedReason";
+import { useFormatMessage } from "@/i18n/useFormatMessage";
+import type { JoinWaitingSubject } from "@momo/core/features/onboarding/aiConnect";
+import type { PlainMessageKey } from "@momo/core/i18n";
+
+/** 합류 실패 문장: 사전의 문장이면 키, 서버·다른 모듈이 지어 온 글이면 그 글. */
+type JoinFailure = { key: PlainMessageKey; raw?: undefined } | { raw: string; key?: undefined };
 
 // Reading this as: onboarding (D4 AI 연결, #2814) for internal team users on
 // web+Tauri, density 6/10, motion 2/10 (line-slide between steps, kometto
@@ -310,6 +314,7 @@ export function FirstAgentStage({
   reentryFrom?: AiConnectReentryFrom;
 }) {
   const reentry = mode === "reentry";
+  const formatMessage = useFormatMessage();
   const { workspaceId, session } = useSession();
   const queryClient = useQueryClient();
   const offline = useOffline();
@@ -338,11 +343,12 @@ export function FirstAgentStage({
       plan: subscriptionConnectPlan("claude", fixture.endpoint, fixture.credential),
     };
   });
-  const [joinFailure, setJoinFailure] = useState<string | null>(
+  // 실패 문장: 사전의 문장은 키로 들고(언어를 바꾸면 서 있는 문장도 따라간다), 서버·다른 모듈이 지어 온 글은 그대로 든다.
+  const [joinFailure, setJoinFailure] = useState<JoinFailure | null>(
     pose === "sub-paused"
-      ? JOIN_CLAUDE_PAUSED_LINE
+      ? { key: JOIN_CLAUDE_PAUSED_KEY }
       : pose === "sub-unavailable"
-        ? PERSONAL_UNAVAILABLE_LINE
+        ? { key: PERSONAL_UNAVAILABLE_KEY }
         : null
   );
   const [joinPending, setJoinPending] = useState(false);
@@ -418,9 +424,12 @@ export function FirstAgentStage({
   });
   const rows = aiConnectRows(surface);
   const pausedRows: Partial<Record<AiConnectRowId, string>> = personalUnavailable
-    ? { claude: PERSONAL_UNAVAILABLE_DETAIL, codex: PERSONAL_UNAVAILABLE_DETAIL }
+    ? {
+        claude: formatMessage(PERSONAL_UNAVAILABLE_DETAIL_KEY),
+        codex: formatMessage(PERSONAL_UNAVAILABLE_DETAIL_KEY),
+      }
     : claudePaused
-      ? { claude: CLAUDE_PAUSED_DETAIL }
+      ? { claude: formatMessage(CLAUDE_PAUSED_DETAIL_KEY) }
       : {};
   const rowReady = (id: AiConnectRowId) =>
     isSubscriptionRow(id) && pausedRows[id] === undefined && subscriptionRowSelectable(harness.pill(id));
@@ -609,7 +618,7 @@ export function FirstAgentStage({
         setDetectStartedAtMs(Date.now());
         setNextPollMs(DETECT_INITIAL_MS);
       } catch (error) {
-        setJoinFailure(hostedFailureMessage("regenerate", error));
+        setJoinFailure({ raw: hostedFailureMessage("regenerate", error) });
       }
       setJoinPending(false);
       return;
@@ -656,7 +665,7 @@ export function FirstAgentStage({
           setJoin(null);
           setSelected(null);
           setStep("cards");
-          setJoinFailure(JOIN_CLAUDE_PAUSED_LINE);
+          setJoinFailure({ key: JOIN_CLAUDE_PAUSED_KEY });
           return;
         }
         if (refusal === "subscription-off") {
@@ -665,7 +674,7 @@ export function FirstAgentStage({
           setJoin(null);
           setSelected(null);
           setStep("cards");
-          setJoinFailure(JOIN_OFF_LINE);
+          setJoinFailure({ key: JOIN_OFF_KEY });
           return;
         }
         if (refusal === "handle-taken" && extraTaken.length === 0) {
@@ -673,9 +682,12 @@ export function FirstAgentStage({
           return;
         }
       }
-      setJoinFailure(
-        endpoint === null ? hostedFailureMessage("create", new Error()) : hostedFailureMessage("create", error)
-      );
+      setJoinFailure({
+        raw:
+          endpoint === null
+            ? hostedFailureMessage("create", new Error())
+            : hostedFailureMessage("create", error),
+      });
     }
   };
 
@@ -730,10 +742,10 @@ export function FirstAgentStage({
       if ((status === 404 || status === 405) && code === null) {
         setPersonalUnavailable(true);
         setSelected(null);
-        setJoinFailure(PERSONAL_UNAVAILABLE_LINE);
+        setJoinFailure({ key: PERSONAL_UNAVAILABLE_KEY });
         return;
       }
-      setJoinFailure(personalAgentErrorLine(code));
+      setJoinFailure({ raw: personalAgentErrorLine(code) });
     }
   };
 
@@ -853,71 +865,89 @@ export function FirstAgentStage({
     grokProbe.desktop &&
     grokProbe.ready &&
     !grokProbe.probes.some((probe) => probe.id === GROK_HOSTED_AGENT_ID && (probe.bundlePresent || probe.processRunning))
-      ? GROK_NOT_INSTALLED_PILL_LABEL
+      ? formatMessage(GROK_NOT_INSTALLED_PILL_KEY)
       : null;
 
   // ---- 코메토 한 문장 (D11: 상태와 표정 1:1, 문장이 함께 간다) ----------------
-  const harnessLabel = join ? HARNESS_LABEL[join.harness] : GROK_LABEL;
+  const waitingSubject: JoinWaitingSubject = join ? join.harness : "grok";
+  const joinFailureText =
+    joinFailure === null
+      ? null
+      : joinFailure.key === undefined
+        ? joinFailure.raw
+        : formatMessage(joinFailure.key);
   const joinedName =
     join?.agentDisplayName ||
     (mentionAgent && mentionAgent.displayName !== "" ? mentionAgent.displayName : "에이전트");
   const guide = ((): { state: GuideState; line: string; detail?: string } => {
     switch (step) {
       case "skipped":
-        return { state: "skipped", line: AI_CONNECT_SKIPPED_LINE };
+        return { state: "skipped", line: formatMessage(AI_CONNECT_SKIPPED_KEY) };
       case "connect":
-        if (joinFailure) return { state: "trouble", line: JOIN_ERROR_LINE };
-        if (joinPending || !join?.plan) return { state: "checking", line: JOIN_CREATING_LINE };
+        if (joinFailure) return { state: "trouble", line: formatMessage(JOIN_ERROR_KEY) };
+        if (joinPending || !join?.plan) {
+          return { state: "checking", line: formatMessage(JOIN_CREATING_KEY) };
+        }
         return {
           state: "awaiting",
-          line: joinConnectLine(join.harness),
-          detail: joinConnectDetail(join.harness),
+          line: formatMessage(joinConnectKey(join.harness)),
+          detail: formatMessage(joinConnectDetailKey(join.harness)),
         };
       case "issuing":
-        return { state: "awaiting", line: AI_CONNECT_QUESTION };
+        return { state: "awaiting", line: formatMessage(AI_CONNECT_QUESTION_KEY) };
       case "detecting":
-        return { state: "checking", line: joinWaitingLine(harnessLabel) };
+        return { state: "checking", line: formatMessage(joinWaitingKey(waitingSubject)) };
       case "cap-exceeded":
-        return { state: "trouble", line: JOIN_CAP_LINE, detail: JOIN_CAP_DETAIL };
+        return {
+          state: "trouble",
+          line: formatMessage(JOIN_CAP_KEY),
+          detail: formatMessage(JOIN_CAP_DETAIL_KEY),
+        };
       case "mention":
-      case "done":
+      case "done": {
+        const joined = joinJoinedMessage(joinedName);
         return {
           state: "success",
-          line: joinJoinedLine(joinedName),
+          line: formatMessage(joined.key, joined.values),
           detail: personalDone
-            ? `${JOIN_JOINED_DETAIL} ${PERSONAL_JOINED_HINT}`
+            ? formatMessage(JOIN_JOINED_PERSONAL_DETAIL_KEY)
             : join
-              ? JOIN_JOINED_DETAIL
+              ? formatMessage(JOIN_JOINED_DETAIL_KEY)
               : undefined,
         };
+      }
       default: {
         if (personalPending !== null) {
-          return { state: "checking", line: PERSONAL_ENABLING_LINE };
+          return { state: "checking", line: formatMessage(PERSONAL_ENABLING_KEY) };
         }
         if (nonAdmin) {
           return {
             state: "awaiting",
-            line: AI_CONNECT_NON_ADMIN_LINE,
-            detail: AI_CONNECT_NON_ADMIN_DETAIL,
+            line: formatMessage(AI_CONNECT_NON_ADMIN_LINE_KEY),
+            detail: formatMessage(AI_CONNECT_NON_ADMIN_DETAIL_KEY),
           };
         }
-        if (joinFailure) return { state: "trouble", line: joinFailure };
-        if (showError) return { state: "trouble", line: AI_CONNECT_LIST_ERROR_LINE };
-        if (showOffline) return { state: "trouble", line: AI_CONNECT_OFFLINE_LINE };
+        if (joinFailureText !== null) return { state: "trouble", line: joinFailureText };
+        if (showError) return { state: "trouble", line: formatMessage(AI_CONNECT_LIST_ERROR_KEY) };
+        if (showOffline) return { state: "trouble", line: formatMessage(AI_CONNECT_OFFLINE_KEY) };
         if (surface === "rows") {
           if (harness.probes === null) {
-            return { state: "checking", line: AI_CONNECT_PROBING_LINE };
+            return { state: "checking", line: formatMessage(AI_CONNECT_PROBING_KEY) };
           }
           const ready = rows.find((id) => rowReady(id));
           if (ready && isSubscriptionRow(ready)) {
             return {
               state: "success",
-              line: aiConnectFoundLine(ready),
-              detail: AI_CONNECT_QUESTION_DETAIL,
+              line: formatMessage(aiConnectFoundKey(ready)),
+              detail: formatMessage(AI_CONNECT_QUESTION_DETAIL_KEY),
             };
           }
         }
-        return { state: "awaiting", line: AI_CONNECT_QUESTION, detail: AI_CONNECT_QUESTION_DETAIL };
+        return {
+          state: "awaiting",
+          line: formatMessage(AI_CONNECT_QUESTION_KEY),
+          detail: formatMessage(AI_CONNECT_QUESTION_DETAIL_KEY),
+        };
       }
     }
   })();
@@ -926,7 +956,7 @@ export function FirstAgentStage({
   // 화면에는 필요 없다.
   const reentryLine = reentry ? null : (
     <p className="onboarding-reentry" data-testid="first-agent-reentry-line">
-      {AI_CONNECT_REENTRY}
+      {formatMessage(AI_CONNECT_REENTRY_KEY)}
     </p>
   );
 
@@ -938,7 +968,7 @@ export function FirstAgentStage({
       onClick={handleSkip}
       data-testid="first-agent-skip"
     >
-      {reentry ? AI_CONNECT_CLOSE_LABEL : AI_CONNECT_SKIP_LABEL}
+      {formatMessage(reentry ? AI_CONNECT_CLOSE_KEY : AI_CONNECT_SKIP_KEY)}
     </Button>
   );
 
@@ -957,7 +987,7 @@ export function FirstAgentStage({
             }}
             data-testid="first-agent-skipped-continue"
           >
-            {AI_CONNECT_CONTINUE_LABEL}
+            {formatMessage(AI_CONNECT_CONTINUE_KEY)}
           </Button>
         </div>
       );
@@ -995,8 +1025,8 @@ export function FirstAgentStage({
       const blockSlot = join ? (
         joinFailure ? (
           <InlineBanner
-            message={joinFailure}
-            actionLabel={JOIN_RETRY_LABEL}
+            message={joinFailureText ?? ""}
+            actionLabel={formatMessage(JOIN_RETRY_KEY)}
             onAction={() => {
               void startSubscriptionJoin(join.harness);
             }}
@@ -1055,7 +1085,7 @@ export function FirstAgentStage({
                 }}
                 data-testid="first-agent-recheck"
               >
-                {JOIN_RECHECK_LABEL}
+                {formatMessage(JOIN_RECHECK_KEY)}
               </Button>
             )}
             {join && step === "connect" && (
@@ -1066,7 +1096,7 @@ export function FirstAgentStage({
                 onClick={handleBackToList}
                 data-testid="first-agent-back"
               >
-                {JOIN_BACK_LABEL}
+                {formatMessage(JOIN_BACK_KEY)}
               </Button>
             )}
             {skipButton}
@@ -1128,7 +1158,7 @@ export function FirstAgentStage({
             data-testid="first-agent-mention-action"
             data-href={`#${actionHref}`}
           >
-            {AI_CONNECT_CONTINUE_LABEL}
+            {formatMessage(AI_CONNECT_CONTINUE_KEY)}
           </Button>
         </div>
       );
@@ -1150,7 +1180,7 @@ export function FirstAgentStage({
             }}
             data-testid="first-agent-non-admin-continue"
           >
-            {reentry ? AI_CONNECT_CLOSE_LABEL : AI_CONNECT_CONTINUE_LABEL}
+            {formatMessage(reentry ? AI_CONNECT_CLOSE_KEY : AI_CONNECT_CONTINUE_KEY)}
           </Button>
         </div>
       );
@@ -1191,13 +1221,13 @@ export function FirstAgentStage({
             {surface === "desktop-only" && (
               <p className="ai-connect-note" data-testid="first-agent-desktop-only">
                 <NoteIcon />
-                <span>{AI_CONNECT_DESKTOP_ONLY_NOTE}</span>
+                <span>{formatMessage(AI_CONNECT_DESKTOP_ONLY_NOTE_KEY)}</span>
               </p>
             )}
             {surface === "server-off" && (
               <p className="ai-connect-note" data-testid="first-agent-server-off">
                 <NoteIcon />
-                <span>{AI_CONNECT_SERVER_OFF_NOTE}</span>
+                <span>{formatMessage(AI_CONNECT_SERVER_OFF_NOTE_KEY)}</span>
               </p>
             )}
             <AiConnectList
@@ -1222,7 +1252,7 @@ export function FirstAgentStage({
             {surface === "rows" && (
               <p className="ai-connect-note" data-testid="first-agent-boundary-note">
                 <NoteIcon />
-                <span>{AI_CONNECT_BOUNDARY_NOTE}</span>
+                <span>{formatMessage(AI_CONNECT_BOUNDARY_NOTE_KEY)}</span>
               </p>
             )}
             <CohostedModelLogin workspaceId={workspaceId} offline={showOffline} />
@@ -1242,7 +1272,7 @@ export function FirstAgentStage({
                 }}
                 data-testid="first-agent-continue"
               >
-                {primaryActionLabel(selected)}
+                {formatMessage(primaryActionKey(selected))}
               </Button>
               {skipButton}
             </div>
@@ -1277,7 +1307,7 @@ export function FirstAgentStage({
               }}
             >
               <ArrowLeft aria-hidden="true" />
-              {AI_CONNECT_BACK_LABEL}
+              {formatMessage(AI_CONNECT_BACK_KEY)}
             </Button>
           ) : (
             <span />

@@ -8,7 +8,9 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vite
 import { ApiError, fetchRoster, type RosterMember } from "@momo/core/lib/api";
 import { fetchProviderLink, fetchWorkspace } from "@momo/core/features/settings/api";
 import type { LocalHarnessProbe } from "@momo/core/features/hostedAgents/detect";
-import { HARNESS_PILL_LABEL } from "@momo/core/features/onboarding/aiConnect";
+import { HARNESS_PILL_KEYS } from "@momo/core/features/onboarding/aiConnect";
+import { LocaleProvider } from "@/i18n/LocaleProvider";
+import { koreanLocale } from "@/testing/koLocale";
 import { SessionProvider, type SessionContextValue } from "@/app/session";
 import { AiLinkSection } from "@/features/settings/AiLinkSection";
 import { AiMyAccountsSection } from "@/features/settings/AiMyAccountsSection";
@@ -100,6 +102,8 @@ const session: SessionContextValue = {
 const act_ = globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean };
 let root: Root | null = null;
 let host: HTMLElement | null = null;
+// 알약 낱말은 사전에 있다(#6064): 한국어 언어 객체 아래에서 예전 한국어를 그대로 단정한다.
+const koLocale = await koreanLocale();
 
 function mount(node: ReturnType<typeof createElement>): HTMLElement {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -108,11 +112,14 @@ function mount(node: ReturnType<typeof createElement>): HTMLElement {
   root = createRoot(host);
   act(() => {
     root?.render(
-      createElement(
-        QueryClientProvider,
-        { client },
-        createElement(SessionProvider, { value: session }, node)
-      )
+      createElement(LocaleProvider, {
+        locale: koLocale,
+        children: createElement(
+          QueryClientProvider,
+          { client },
+          createElement(SessionProvider, { value: session }, node)
+        ),
+      })
     );
   });
   return host;
@@ -180,8 +187,8 @@ describe("AI 입구 (#2870)", () => {
       if (!q("my-account-claude")) throw new Error("claude row");
     });
     expect(q("my-account-claude")?.textContent).toContain("Claude Code");
-    expect(q("my-account-claude-state")?.textContent).toBe(HARNESS_PILL_LABEL.ready);
-    expect(q("my-account-codex-state")?.textContent).toBe(HARNESS_PILL_LABEL.login);
+    expect(q("my-account-claude-state")?.textContent).toBe(koLocale.service.formatMessage(HARNESS_PILL_KEYS.ready));
+    expect(q("my-account-codex-state")?.textContent).toBe(koLocale.service.formatMessage(HARNESS_PILL_KEYS.login));
     // 로그인 필요 줄에는 회복 행동이 있고, 준비된 줄에는 없다.
     expect(q("my-account-claude-login")).toBeNull();
     expect(q("my-account-codex-login")).not.toBeNull();

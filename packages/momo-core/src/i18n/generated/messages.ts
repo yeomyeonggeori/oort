@@ -1213,6 +1213,84 @@ export const messageKeys = [
   "notifications.banner.code",
   "notifications.banner.secret",
   "notifications.inviteLink.fallback",
+  "onboarding.aiConnectCopy.commandAria",
+  "onboarding.aiConnectCopy.copied",
+  "onboarding.aiConnectCopy.copy",
+  "onboarding.aiConnectCopy.credential",
+  "onboarding.aiConnectCopy.endpoint",
+  "onboarding.aiConnectCopy.handedOffStatus",
+  "onboarding.aiConnectCopy.loginAriaClaude",
+  "onboarding.aiConnectCopy.loginAriaCodex",
+  "onboarding.aiConnectCopy.loginOpenedStatus",
+  "onboarding.aiConnectCopy.openTerminal",
+  "onboarding.aiConnectCopy.spaced",
+  "onboarding.aiConnectCopy.terminalOpenFailed",
+  "onboarding.aiConnectEntry.action",
+  "onboarding.aiConnectEntry.detail",
+  "onboarding.aiConnectEntry.title",
+  "onboarding.aiConnectGroup.agents",
+  "onboarding.aiConnectGroup.tools",
+  "onboarding.aiConnectHarness.grok",
+  "onboarding.aiConnectJoin.back",
+  "onboarding.aiConnectJoin.cap",
+  "onboarding.aiConnectJoin.capDetail",
+  "onboarding.aiConnectJoin.claudePaused",
+  "onboarding.aiConnectJoin.claudePausedDetail",
+  "onboarding.aiConnectJoin.claudePausedPill",
+  "onboarding.aiConnectJoin.connectClaude",
+  "onboarding.aiConnectJoin.connectCodex",
+  "onboarding.aiConnectJoin.connectDetailClaude",
+  "onboarding.aiConnectJoin.connectDetailCodex",
+  "onboarding.aiConnectJoin.creating",
+  "onboarding.aiConnectJoin.error",
+  "onboarding.aiConnectJoin.joined",
+  "onboarding.aiConnectJoin.joinedDetail",
+  "onboarding.aiConnectJoin.joinedPersonalDetail",
+  "onboarding.aiConnectJoin.off",
+  "onboarding.aiConnectJoin.waitingClaude",
+  "onboarding.aiConnectJoin.waitingCodex",
+  "onboarding.aiConnectJoin.waitingGrok",
+  "onboarding.aiConnectList.error",
+  "onboarding.aiConnectList.offline",
+  "onboarding.aiConnectPersonal.enabling",
+  "onboarding.aiConnectPersonal.unavailable",
+  "onboarding.aiConnectPersonal.unavailableDetail",
+  "onboarding.aiConnectPill.checking",
+  "onboarding.aiConnectPill.install",
+  "onboarding.aiConnectPill.login",
+  "onboarding.aiConnectPill.ready",
+  "onboarding.aiConnectRow.apiKeyDetail",
+  "onboarding.aiConnectRow.apiKeyMark",
+  "onboarding.aiConnectRow.apiKeyTitle",
+  "onboarding.aiConnectRow.claudeMark",
+  "onboarding.aiConnectRow.claudeTitle",
+  "onboarding.aiConnectRow.cliDetail",
+  "onboarding.aiConnectRow.codexMark",
+  "onboarding.aiConnectRow.codexTitle",
+  "onboarding.aiConnectRow.grokDetail",
+  "onboarding.aiConnectRow.grokMark",
+  "onboarding.aiConnectRow.grokTitle",
+  "onboarding.aiConnectStage.apiKeyPill",
+  "onboarding.aiConnectStage.back",
+  "onboarding.aiConnectStage.boundaryNote",
+  "onboarding.aiConnectStage.continue",
+  "onboarding.aiConnectStage.desktopOnlyNote",
+  "onboarding.aiConnectStage.foundClaude",
+  "onboarding.aiConnectStage.foundCodex",
+  "onboarding.aiConnectStage.grokNotInstalledPill",
+  "onboarding.aiConnectStage.nonAdminDetail",
+  "onboarding.aiConnectStage.nonAdminLine",
+  "onboarding.aiConnectStage.primaryApiKey",
+  "onboarding.aiConnectStage.primaryClaude",
+  "onboarding.aiConnectStage.primaryCodex",
+  "onboarding.aiConnectStage.primaryGrok",
+  "onboarding.aiConnectStage.probing",
+  "onboarding.aiConnectStage.question",
+  "onboarding.aiConnectStage.questionDetail",
+  "onboarding.aiConnectStage.reentry",
+  "onboarding.aiConnectStage.serverOffNote",
+  "onboarding.aiConnectStage.skip",
+  "onboarding.aiConnectStage.skippedLine",
   "onboarding.guide.expressionFlustered",
   "onboarding.guide.expressionHappy",
   "onboarding.guide.expressionIdle",
@@ -4117,6 +4195,90 @@ export const argumentSpecs = {
   "notifications.banner.code": {},
   "notifications.banner.secret": {},
   "notifications.inviteLink.fallback": {},
+  "onboarding.aiConnectCopy.commandAria": {},
+  "onboarding.aiConnectCopy.copied": {},
+  "onboarding.aiConnectCopy.copy": {},
+  "onboarding.aiConnectCopy.credential": {},
+  "onboarding.aiConnectCopy.endpoint": {},
+  "onboarding.aiConnectCopy.handedOffStatus": {},
+  "onboarding.aiConnectCopy.loginAriaClaude": {},
+  "onboarding.aiConnectCopy.loginAriaCodex": {},
+  "onboarding.aiConnectCopy.loginOpenedStatus": {},
+  "onboarding.aiConnectCopy.openTerminal": {},
+  "onboarding.aiConnectCopy.spaced": {
+    "first": "string",
+    "second": "string"
+  },
+  "onboarding.aiConnectCopy.terminalOpenFailed": {},
+  "onboarding.aiConnectEntry.action": {},
+  "onboarding.aiConnectEntry.detail": {},
+  "onboarding.aiConnectEntry.title": {},
+  "onboarding.aiConnectGroup.agents": {},
+  "onboarding.aiConnectGroup.tools": {},
+  "onboarding.aiConnectHarness.grok": {},
+  "onboarding.aiConnectJoin.back": {},
+  "onboarding.aiConnectJoin.cap": {},
+  "onboarding.aiConnectJoin.capDetail": {},
+  "onboarding.aiConnectJoin.claudePaused": {},
+  "onboarding.aiConnectJoin.claudePausedDetail": {},
+  "onboarding.aiConnectJoin.claudePausedPill": {},
+  "onboarding.aiConnectJoin.connectClaude": {},
+  "onboarding.aiConnectJoin.connectCodex": {},
+  "onboarding.aiConnectJoin.connectDetailClaude": {},
+  "onboarding.aiConnectJoin.connectDetailCodex": {},
+  "onboarding.aiConnectJoin.creating": {},
+  "onboarding.aiConnectJoin.error": {},
+  "onboarding.aiConnectJoin.joined": {
+    "josa": "string",
+    "name": "string"
+  },
+  "onboarding.aiConnectJoin.joinedDetail": {},
+  "onboarding.aiConnectJoin.joinedPersonalDetail": {},
+  "onboarding.aiConnectJoin.off": {},
+  "onboarding.aiConnectJoin.waitingClaude": {},
+  "onboarding.aiConnectJoin.waitingCodex": {},
+  "onboarding.aiConnectJoin.waitingGrok": {},
+  "onboarding.aiConnectList.error": {},
+  "onboarding.aiConnectList.offline": {},
+  "onboarding.aiConnectPersonal.enabling": {},
+  "onboarding.aiConnectPersonal.unavailable": {},
+  "onboarding.aiConnectPersonal.unavailableDetail": {},
+  "onboarding.aiConnectPill.checking": {},
+  "onboarding.aiConnectPill.install": {},
+  "onboarding.aiConnectPill.login": {},
+  "onboarding.aiConnectPill.ready": {},
+  "onboarding.aiConnectRow.apiKeyDetail": {},
+  "onboarding.aiConnectRow.apiKeyMark": {},
+  "onboarding.aiConnectRow.apiKeyTitle": {},
+  "onboarding.aiConnectRow.claudeMark": {},
+  "onboarding.aiConnectRow.claudeTitle": {},
+  "onboarding.aiConnectRow.cliDetail": {},
+  "onboarding.aiConnectRow.codexMark": {},
+  "onboarding.aiConnectRow.codexTitle": {},
+  "onboarding.aiConnectRow.grokDetail": {},
+  "onboarding.aiConnectRow.grokMark": {},
+  "onboarding.aiConnectRow.grokTitle": {},
+  "onboarding.aiConnectStage.apiKeyPill": {},
+  "onboarding.aiConnectStage.back": {},
+  "onboarding.aiConnectStage.boundaryNote": {},
+  "onboarding.aiConnectStage.continue": {},
+  "onboarding.aiConnectStage.desktopOnlyNote": {},
+  "onboarding.aiConnectStage.foundClaude": {},
+  "onboarding.aiConnectStage.foundCodex": {},
+  "onboarding.aiConnectStage.grokNotInstalledPill": {},
+  "onboarding.aiConnectStage.nonAdminDetail": {},
+  "onboarding.aiConnectStage.nonAdminLine": {},
+  "onboarding.aiConnectStage.primaryApiKey": {},
+  "onboarding.aiConnectStage.primaryClaude": {},
+  "onboarding.aiConnectStage.primaryCodex": {},
+  "onboarding.aiConnectStage.primaryGrok": {},
+  "onboarding.aiConnectStage.probing": {},
+  "onboarding.aiConnectStage.question": {},
+  "onboarding.aiConnectStage.questionDetail": {},
+  "onboarding.aiConnectStage.reentry": {},
+  "onboarding.aiConnectStage.serverOffNote": {},
+  "onboarding.aiConnectStage.skip": {},
+  "onboarding.aiConnectStage.skippedLine": {},
   "onboarding.guide.expressionFlustered": {},
   "onboarding.guide.expressionHappy": {},
   "onboarding.guide.expressionIdle": {},
@@ -7191,6 +7353,84 @@ export interface MessageArgs {
   "notifications.banner.code": Record<string, never>;
   "notifications.banner.secret": Record<string, never>;
   "notifications.inviteLink.fallback": Record<string, never>;
+  "onboarding.aiConnectCopy.commandAria": Record<string, never>;
+  "onboarding.aiConnectCopy.copied": Record<string, never>;
+  "onboarding.aiConnectCopy.copy": Record<string, never>;
+  "onboarding.aiConnectCopy.credential": Record<string, never>;
+  "onboarding.aiConnectCopy.endpoint": Record<string, never>;
+  "onboarding.aiConnectCopy.handedOffStatus": Record<string, never>;
+  "onboarding.aiConnectCopy.loginAriaClaude": Record<string, never>;
+  "onboarding.aiConnectCopy.loginAriaCodex": Record<string, never>;
+  "onboarding.aiConnectCopy.loginOpenedStatus": Record<string, never>;
+  "onboarding.aiConnectCopy.openTerminal": Record<string, never>;
+  "onboarding.aiConnectCopy.spaced": { first: string; second: string };
+  "onboarding.aiConnectCopy.terminalOpenFailed": Record<string, never>;
+  "onboarding.aiConnectEntry.action": Record<string, never>;
+  "onboarding.aiConnectEntry.detail": Record<string, never>;
+  "onboarding.aiConnectEntry.title": Record<string, never>;
+  "onboarding.aiConnectGroup.agents": Record<string, never>;
+  "onboarding.aiConnectGroup.tools": Record<string, never>;
+  "onboarding.aiConnectHarness.grok": Record<string, never>;
+  "onboarding.aiConnectJoin.back": Record<string, never>;
+  "onboarding.aiConnectJoin.cap": Record<string, never>;
+  "onboarding.aiConnectJoin.capDetail": Record<string, never>;
+  "onboarding.aiConnectJoin.claudePaused": Record<string, never>;
+  "onboarding.aiConnectJoin.claudePausedDetail": Record<string, never>;
+  "onboarding.aiConnectJoin.claudePausedPill": Record<string, never>;
+  "onboarding.aiConnectJoin.connectClaude": Record<string, never>;
+  "onboarding.aiConnectJoin.connectCodex": Record<string, never>;
+  "onboarding.aiConnectJoin.connectDetailClaude": Record<string, never>;
+  "onboarding.aiConnectJoin.connectDetailCodex": Record<string, never>;
+  "onboarding.aiConnectJoin.creating": Record<string, never>;
+  "onboarding.aiConnectJoin.error": Record<string, never>;
+  "onboarding.aiConnectJoin.joined": { josa: string; name: string };
+  "onboarding.aiConnectJoin.joinedDetail": Record<string, never>;
+  "onboarding.aiConnectJoin.joinedPersonalDetail": Record<string, never>;
+  "onboarding.aiConnectJoin.off": Record<string, never>;
+  "onboarding.aiConnectJoin.waitingClaude": Record<string, never>;
+  "onboarding.aiConnectJoin.waitingCodex": Record<string, never>;
+  "onboarding.aiConnectJoin.waitingGrok": Record<string, never>;
+  "onboarding.aiConnectList.error": Record<string, never>;
+  "onboarding.aiConnectList.offline": Record<string, never>;
+  "onboarding.aiConnectPersonal.enabling": Record<string, never>;
+  "onboarding.aiConnectPersonal.unavailable": Record<string, never>;
+  "onboarding.aiConnectPersonal.unavailableDetail": Record<string, never>;
+  "onboarding.aiConnectPill.checking": Record<string, never>;
+  "onboarding.aiConnectPill.install": Record<string, never>;
+  "onboarding.aiConnectPill.login": Record<string, never>;
+  "onboarding.aiConnectPill.ready": Record<string, never>;
+  "onboarding.aiConnectRow.apiKeyDetail": Record<string, never>;
+  "onboarding.aiConnectRow.apiKeyMark": Record<string, never>;
+  "onboarding.aiConnectRow.apiKeyTitle": Record<string, never>;
+  "onboarding.aiConnectRow.claudeMark": Record<string, never>;
+  "onboarding.aiConnectRow.claudeTitle": Record<string, never>;
+  "onboarding.aiConnectRow.cliDetail": Record<string, never>;
+  "onboarding.aiConnectRow.codexMark": Record<string, never>;
+  "onboarding.aiConnectRow.codexTitle": Record<string, never>;
+  "onboarding.aiConnectRow.grokDetail": Record<string, never>;
+  "onboarding.aiConnectRow.grokMark": Record<string, never>;
+  "onboarding.aiConnectRow.grokTitle": Record<string, never>;
+  "onboarding.aiConnectStage.apiKeyPill": Record<string, never>;
+  "onboarding.aiConnectStage.back": Record<string, never>;
+  "onboarding.aiConnectStage.boundaryNote": Record<string, never>;
+  "onboarding.aiConnectStage.continue": Record<string, never>;
+  "onboarding.aiConnectStage.desktopOnlyNote": Record<string, never>;
+  "onboarding.aiConnectStage.foundClaude": Record<string, never>;
+  "onboarding.aiConnectStage.foundCodex": Record<string, never>;
+  "onboarding.aiConnectStage.grokNotInstalledPill": Record<string, never>;
+  "onboarding.aiConnectStage.nonAdminDetail": Record<string, never>;
+  "onboarding.aiConnectStage.nonAdminLine": Record<string, never>;
+  "onboarding.aiConnectStage.primaryApiKey": Record<string, never>;
+  "onboarding.aiConnectStage.primaryClaude": Record<string, never>;
+  "onboarding.aiConnectStage.primaryCodex": Record<string, never>;
+  "onboarding.aiConnectStage.primaryGrok": Record<string, never>;
+  "onboarding.aiConnectStage.probing": Record<string, never>;
+  "onboarding.aiConnectStage.question": Record<string, never>;
+  "onboarding.aiConnectStage.questionDetail": Record<string, never>;
+  "onboarding.aiConnectStage.reentry": Record<string, never>;
+  "onboarding.aiConnectStage.serverOffNote": Record<string, never>;
+  "onboarding.aiConnectStage.skip": Record<string, never>;
+  "onboarding.aiConnectStage.skippedLine": Record<string, never>;
   "onboarding.guide.expressionFlustered": Record<string, never>;
   "onboarding.guide.expressionHappy": Record<string, never>;
   "onboarding.guide.expressionIdle": Record<string, never>;

@@ -8663,6 +8663,508 @@ export const catalog: MessageCatalog = {
       "value": "초대 링크를 올렸어요"
     }
   ],
+  "onboarding.aiConnectCopy.commandAria": [
+    {
+      "type": 0,
+      "value": "연결 명령"
+    }
+  ],
+  "onboarding.aiConnectCopy.copied": [
+    {
+      "type": 0,
+      "value": "복사됨"
+    }
+  ],
+  "onboarding.aiConnectCopy.copy": [
+    {
+      "type": 0,
+      "value": "복사"
+    }
+  ],
+  "onboarding.aiConnectCopy.credential": [
+    {
+      "type": 0,
+      "value": "연결 값"
+    }
+  ],
+  "onboarding.aiConnectCopy.endpoint": [
+    {
+      "type": 0,
+      "value": "주소"
+    }
+  ],
+  "onboarding.aiConnectCopy.handedOffStatus": [
+    {
+      "type": 0,
+      "value": "명령을 복사했어요. 터미널에 붙여 넣어 실행하세요."
+    }
+  ],
+  "onboarding.aiConnectCopy.loginAriaClaude": [
+    {
+      "type": 0,
+      "value": "Claude Code 로그인 명령"
+    }
+  ],
+  "onboarding.aiConnectCopy.loginAriaCodex": [
+    {
+      "type": 0,
+      "value": "Codex 로그인 명령"
+    }
+  ],
+  "onboarding.aiConnectCopy.loginOpenedStatus": [
+    {
+      "type": 0,
+      "value": "명령을 복사했어요. 터미널에 붙여 넣고 로그인을 마치면 이 줄이 바뀌어요."
+    }
+  ],
+  "onboarding.aiConnectCopy.openTerminal": [
+    {
+      "type": 0,
+      "value": "터미널에서 열기"
+    }
+  ],
+  "onboarding.aiConnectCopy.spaced": [
+    {
+      "type": 1,
+      "value": "first"
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 1,
+      "value": "second"
+    }
+  ],
+  "onboarding.aiConnectCopy.terminalOpenFailed": [
+    {
+      "type": 0,
+      "value": "터미널을 열지 못했어요. 명령을 복사해 직접 여세요."
+    }
+  ],
+  "onboarding.aiConnectEntry.action": [
+    {
+      "type": 0,
+      "value": "내 구독으로 에이전트 만들기"
+    }
+  ],
+  "onboarding.aiConnectEntry.detail": [
+    {
+      "type": 0,
+      "value": "이 맥의 Claude Code·Codex 로그인으로 생각하는 개인 에이전트예요. 나만 부를 수 있어요."
+    }
+  ],
+  "onboarding.aiConnectEntry.title": [
+    {
+      "type": 0,
+      "value": "내 구독으로 쓰는 에이전트"
+    }
+  ],
+  "onboarding.aiConnectGroup.agents": [
+    {
+      "type": 0,
+      "value": "에이전트"
+    }
+  ],
+  "onboarding.aiConnectGroup.tools": [
+    {
+      "type": 0,
+      "value": "내 도구"
+    }
+  ],
+  "onboarding.aiConnectHarness.grok": [
+    {
+      "type": 0,
+      "value": "그록봇"
+    }
+  ],
+  "onboarding.aiConnectJoin.back": [
+    {
+      "type": 0,
+      "value": "다른 AI 고르기"
+    }
+  ],
+  "onboarding.aiConnectJoin.cap": [
+    {
+      "type": 0,
+      "value": "5분 동안 들어오지 않았어요."
+    }
+  ],
+  "onboarding.aiConnectJoin.capDetail": [
+    {
+      "type": 0,
+      "value": "명령을 실행했는지 확인하고 다시 확인을 눌러 주세요."
+    }
+  ],
+  "onboarding.aiConnectJoin.claudePaused": [
+    {
+      "type": 0,
+      "value": "이 서버에서는 Claude Code로 에이전트를 만들 수 없어요. Codex나 API 키로는 이어갈 수 있어요."
+    }
+  ],
+  "onboarding.aiConnectJoin.claudePausedDetail": [
+    {
+      "type": 0,
+      "value": "이 서버에서 꺼져 있어요"
+    }
+  ],
+  "onboarding.aiConnectJoin.claudePausedPill": [
+    {
+      "type": 0,
+      "value": "꺼짐"
+    }
+  ],
+  "onboarding.aiConnectJoin.connectClaude": [
+    {
+      "type": 0,
+      "value": "터미널에서 이 명령을 한 번 실행해 주세요."
+    }
+  ],
+  "onboarding.aiConnectJoin.connectCodex": [
+    {
+      "type": 0,
+      "value": "Codex의 MCP 서버에 이 주소와 연결 값을 넣어 주세요."
+    }
+  ],
+  "onboarding.aiConnectJoin.connectDetailClaude": [
+    {
+      "type": 0,
+      "value": "Claude Code가 이 연결로 oort에 들어와요. 연결 값은 지금 한 번만 보여요."
+    }
+  ],
+  "onboarding.aiConnectJoin.connectDetailCodex": [
+    {
+      "type": 0,
+      "value": "Codex가 이 연결로 oort에 들어와요. 연결 값은 지금 한 번만 보여요."
+    }
+  ],
+  "onboarding.aiConnectJoin.creating": [
+    {
+      "type": 0,
+      "value": "연결을 준비하고 있어요."
+    }
+  ],
+  "onboarding.aiConnectJoin.error": [
+    {
+      "type": 0,
+      "value": "연결을 만들지 못했어요."
+    }
+  ],
+  "onboarding.aiConnectJoin.joined": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 5,
+      "value": "josa",
+      "options": {
+        "final": {
+          "value": [
+            {
+              "type": 0,
+              "value": "이"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "가"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": 0,
+      "value": " 들어왔어요."
+    }
+  ],
+  "onboarding.aiConnectJoin.joinedDetail": [
+    {
+      "type": 0,
+      "value": "나만 부를 수 있는 개인 에이전트예요."
+    }
+  ],
+  "onboarding.aiConnectJoin.joinedPersonalDetail": [
+    {
+      "type": 0,
+      "value": "나만 부를 수 있는 개인 에이전트예요. 내 맥이 켜져 있을 때만 답해요."
+    }
+  ],
+  "onboarding.aiConnectJoin.off": [
+    {
+      "type": 0,
+      "value": "지금은 이 서버에서 구독으로 쓰는 에이전트를 쓸 수 없어요."
+    }
+  ],
+  "onboarding.aiConnectJoin.waitingClaude": [
+    {
+      "type": 0,
+      "value": "Claude Code가 oort에 들어오기를 기다리고 있어요."
+    }
+  ],
+  "onboarding.aiConnectJoin.waitingCodex": [
+    {
+      "type": 0,
+      "value": "Codex가 oort에 들어오기를 기다리고 있어요."
+    }
+  ],
+  "onboarding.aiConnectJoin.waitingGrok": [
+    {
+      "type": 0,
+      "value": "그록봇이 oort에 들어오기를 기다리고 있어요."
+    }
+  ],
+  "onboarding.aiConnectList.error": [
+    {
+      "type": 0,
+      "value": "연결 목록을 불러오지 못했어요."
+    }
+  ],
+  "onboarding.aiConnectList.offline": [
+    {
+      "type": 0,
+      "value": "지금은 서버에 닿지 않아요."
+    }
+  ],
+  "onboarding.aiConnectPersonal.enabling": [
+    {
+      "type": 0,
+      "value": "개인 에이전트를 켜고 있어요."
+    }
+  ],
+  "onboarding.aiConnectPersonal.unavailable": [
+    {
+      "type": 0,
+      "value": "이 서버에서는 아직 개인 에이전트를 켤 수 없어요. 서버가 업데이트되면 열려요."
+    }
+  ],
+  "onboarding.aiConnectPersonal.unavailableDetail": [
+    {
+      "type": 0,
+      "value": "이 서버에서는 아직 켤 수 없어요"
+    }
+  ],
+  "onboarding.aiConnectPill.checking": [
+    {
+      "type": 0,
+      "value": "확인 중…"
+    }
+  ],
+  "onboarding.aiConnectPill.install": [
+    {
+      "type": 0,
+      "value": "설치 필요"
+    }
+  ],
+  "onboarding.aiConnectPill.login": [
+    {
+      "type": 0,
+      "value": "로그인 필요"
+    }
+  ],
+  "onboarding.aiConnectPill.ready": [
+    {
+      "type": 0,
+      "value": "준비됨"
+    }
+  ],
+  "onboarding.aiConnectRow.apiKeyDetail": [
+    {
+      "type": 0,
+      "value": "OpenAI 호환 API 키 · 팀 누구나 부를 수 있어요"
+    }
+  ],
+  "onboarding.aiConnectRow.apiKeyMark": [
+    {
+      "type": 0,
+      "value": "키"
+    }
+  ],
+  "onboarding.aiConnectRow.apiKeyTitle": [
+    {
+      "type": 0,
+      "value": "API 키 · 팀 에이전트"
+    }
+  ],
+  "onboarding.aiConnectRow.claudeMark": [
+    {
+      "type": 0,
+      "value": "C"
+    }
+  ],
+  "onboarding.aiConnectRow.claudeTitle": [
+    {
+      "type": 0,
+      "value": "Claude Code · 내 도구"
+    }
+  ],
+  "onboarding.aiConnectRow.cliDetail": [
+    {
+      "type": 0,
+      "value": "이 맥의 공식 CLI · 나만 부르는 개인 에이전트"
+    }
+  ],
+  "onboarding.aiConnectRow.codexMark": [
+    {
+      "type": 0,
+      "value": "X"
+    }
+  ],
+  "onboarding.aiConnectRow.codexTitle": [
+    {
+      "type": 0,
+      "value": "Codex · 내 도구"
+    }
+  ],
+  "onboarding.aiConnectRow.grokDetail": [
+    {
+      "type": 0,
+      "value": "그록봇 앱을 팀에 초대해요"
+    }
+  ],
+  "onboarding.aiConnectRow.grokMark": [
+    {
+      "type": 0,
+      "value": "G"
+    }
+  ],
+  "onboarding.aiConnectRow.grokTitle": [
+    {
+      "type": 0,
+      "value": "그록봇"
+    }
+  ],
+  "onboarding.aiConnectStage.apiKeyPill": [
+    {
+      "type": 0,
+      "value": "설정"
+    }
+  ],
+  "onboarding.aiConnectStage.back": [
+    {
+      "type": 0,
+      "value": "뒤로"
+    }
+  ],
+  "onboarding.aiConnectStage.boundaryNote": [
+    {
+      "type": 0,
+      "value": "상태는 CLI가 스스로 알려 준 값이에요. oort는 로그인 정보를 읽거나 옮기지 않아요. 내 도구는 나만 쓸 수 있고, 팀 모두가 부를 에이전트는 그록봇이나 API 키로 붙여요."
+    }
+  ],
+  "onboarding.aiConnectStage.continue": [
+    {
+      "type": 0,
+      "value": "계속"
+    }
+  ],
+  "onboarding.aiConnectStage.desktopOnlyNote": [
+    {
+      "type": 0,
+      "value": "데스크탑 앱에서 이 맥의 Claude Code·Codex를 붙일 수 있어요."
+    }
+  ],
+  "onboarding.aiConnectStage.foundClaude": [
+    {
+      "type": 0,
+      "value": "이 맥에서 Claude Code를 찾았어요."
+    }
+  ],
+  "onboarding.aiConnectStage.foundCodex": [
+    {
+      "type": 0,
+      "value": "이 맥에서 Codex를 찾았어요."
+    }
+  ],
+  "onboarding.aiConnectStage.grokNotInstalledPill": [
+    {
+      "type": 0,
+      "value": "설치 안 됨"
+    }
+  ],
+  "onboarding.aiConnectStage.nonAdminDetail": [
+    {
+      "type": 0,
+      "value": "에이전트가 필요하면 워크스페이스 관리자에게 부탁해 주세요. 그동안 대화는 바로 시작할 수 있어요."
+    }
+  ],
+  "onboarding.aiConnectStage.nonAdminLine": [
+    {
+      "type": 0,
+      "value": "에이전트 연결은 관리자가 해요."
+    }
+  ],
+  "onboarding.aiConnectStage.primaryApiKey": [
+    {
+      "type": 0,
+      "value": "API 키로 연결하기"
+    }
+  ],
+  "onboarding.aiConnectStage.primaryClaude": [
+    {
+      "type": 0,
+      "value": "Claude Code를 개인 에이전트로"
+    }
+  ],
+  "onboarding.aiConnectStage.primaryCodex": [
+    {
+      "type": 0,
+      "value": "Codex를 개인 에이전트로"
+    }
+  ],
+  "onboarding.aiConnectStage.primaryGrok": [
+    {
+      "type": 0,
+      "value": "그록봇 초대하기"
+    }
+  ],
+  "onboarding.aiConnectStage.probing": [
+    {
+      "type": 0,
+      "value": "이 맥의 CLI를 확인하고 있어요."
+    }
+  ],
+  "onboarding.aiConnectStage.question": [
+    {
+      "type": 0,
+      "value": "누구의 AI로 생각할까요?"
+    }
+  ],
+  "onboarding.aiConnectStage.questionDetail": [
+    {
+      "type": 0,
+      "value": "에이전트가 누구의 AI로 생각할지 골라요."
+    }
+  ],
+  "onboarding.aiConnectStage.reentry": [
+    {
+      "type": 0,
+      "value": "나중에 AI 화면에서 이어갈 수 있어요."
+    }
+  ],
+  "onboarding.aiConnectStage.serverOffNote": [
+    {
+      "type": 0,
+      "value": "이 서버는 지금 구독으로 쓰는 에이전트를 받지 않아요. 팀 에이전트는 API 키로 붙여요."
+    }
+  ],
+  "onboarding.aiConnectStage.skip": [
+    {
+      "type": 0,
+      "value": "지금은 건너뛰기"
+    }
+  ],
+  "onboarding.aiConnectStage.skippedLine": [
+    {
+      "type": 0,
+      "value": "AI 화면에서 언제든 이어서 할 수 있어요."
+    }
+  ],
   "onboarding.guide.expressionFlustered": [
     {
       "type": 0,
