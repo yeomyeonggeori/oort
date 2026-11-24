@@ -482,6 +482,15 @@ fn every_tool_failure_has_a_token() {
             ToolFailure::NotAuthorized | ToolFailure::HandleRefused => "tool_not_authorized",
             ToolFailure::Unavailable => "tool_unavailable",
             ToolFailure::Conflict | ToolFailure::PictureLimitReached => "tool_conflict",
+            // #6069: a closed door is the not-authorized answer, a refused picture the argument one,
+            // every ceiling the conflict one (each with its closed `error.data.code`).
+            ToolFailure::RegisterRefused(momo_mcp::RegisterRefusal::NotAllowed) => {
+                "tool_not_authorized"
+            }
+            ToolFailure::RegisterRefused(momo_mcp::RegisterRefusal::MediaInvalid) => {
+                "tool_arguments"
+            }
+            ToolFailure::RegisterRefused(_) => "tool_conflict",
             ToolFailure::AlreadyClaimed => "tool_already_claimed",
             ToolFailure::ClaimExpired => "tool_claim_expired",
             ToolFailure::Internal => "tool_internal",
@@ -509,6 +518,9 @@ fn every_tool_failure_has_a_token() {
         ToolFailure::Conflict,
         ToolFailure::AttachmentNotLinkable,
         ToolFailure::PictureLimitReached,
+        ToolFailure::RegisterRefused(momo_mcp::RegisterRefusal::NotAllowed),
+        ToolFailure::RegisterRefused(momo_mcp::RegisterRefusal::AttemptCap),
+        ToolFailure::RegisterRefused(momo_mcp::RegisterRefusal::MediaInvalid),
         ToolFailure::AlreadyClaimed,
         ToolFailure::ClaimExpired,
         ToolFailure::Internal,

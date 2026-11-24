@@ -206,6 +206,7 @@ fn every_failure_has_a_row() -> Vec<ToolFailure> {
             | ToolFailure::ClaimExpired
             | ToolFailure::AttachmentNotLinkable
             | ToolFailure::PictureLimitReached
+            | ToolFailure::RegisterRefused(_)
             | ToolFailure::Internal => {}
         }
     }
@@ -231,6 +232,10 @@ fn every_failure_has_a_row() -> Vec<ToolFailure> {
         ToolFailure::Conflict,
         ToolFailure::AttachmentNotLinkable,
         ToolFailure::PictureLimitReached,
+        // #6069: the register door's three wire branches
+        ToolFailure::RegisterRefused(momo_mcp::RegisterRefusal::NotAllowed),
+        ToolFailure::RegisterRefused(momo_mcp::RegisterRefusal::DailyCap),
+        ToolFailure::RegisterRefused(momo_mcp::RegisterRefusal::MediaInvalid),
         ToolFailure::AlreadyClaimed,
         ToolFailure::ClaimExpired,
         ToolFailure::Internal,

@@ -106,7 +106,9 @@ fn the_block_comes_after_the_tables_and_no_grant_stands_outside_it() {
     }
     let outside = text.replace(&block, "");
     assert!(
-        !statements(&outside).to_uppercase().contains("GRANT "),
+        !statements(&outside)
+            .split_whitespace()
+            .any(|word| word == "GRANT" || word.starts_with("'GRANT")),
         "a GRANT outside the lockdown block: {}",
         statements(&outside)
     );

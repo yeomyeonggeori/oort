@@ -1499,8 +1499,8 @@ fn expression_register_schema() -> Value {
         "required": ["clientRequestId", "name", "displayName", "tags", "image"],
         "properties": {
             "clientRequestId": uuid_property(),
-            "name": {"type": "string", "minLength": 2, "maxLength": 30},
-            "displayName": {"type": "string", "minLength": 1, "maxLength": 160},
+            "name": {"type": "string", "minLength": 2, "maxLength": 30, "description": BYTE_BOUND_NOTE},
+            "displayName": {"type": "string", "minLength": 1, "maxLength": 160, "description": BYTE_BOUND_NOTE},
             "tags": {"type": "array", "maxItems": 8, "items": {"type": "string", "minLength": 1, "maxLength": 64}},
             "image": {
                 "type": "object",
@@ -1509,8 +1509,8 @@ fn expression_register_schema() -> Value {
                 "properties": {
                     "source": {"type": "string", "enum": ["generated"]},
                     "mime": {"type": "string", "enum": ["image/png", "image/jpeg", "image/gif", "image/webp"]},
-                    "dataBase64": {"type": "string", "minLength": 4, "maxLength": crate::MAX_EXPRESSION_BASE64_BYTES},
-                    "prompt": {"type": "string", "minLength": 1, "maxLength": 8000}
+                    "dataBase64": {"type": "string", "minLength": 4, "maxLength": crate::MAX_EXPRESSION_BASE64_BYTES, "description": BYTE_BOUND_NOTE},
+                    "prompt": {"type": "string", "minLength": 1, "maxLength": 8000, "description": BYTE_BOUND_NOTE}
                 }
             }
         }
@@ -3352,11 +3352,38 @@ mod tests {
                 "oort_action_propose",
                 "oort_action_claim_secret",
                 "oort_expression_assemble",
+                // #6069 (ADR-0218 증보 13 §19 Y2.2)
+                "oort_expression_register",
                 "oort_action_initiate",
                 "oort_card_suggest",
                 "oort_ping",
             ]
         );
+    }
+
+    /// #6069 (ADR-0218 증보 13 §19 Y2.2): a hidden tool leaves the listing and the listed names, and only
+    /// that tool; it is still callable (the tool's own judgement is the boundary).
+    #[test]
+    fn a_hidden_tool_is_unlisted_but_still_reaches_its_judgement() {
+        let all = scopes(&[SCOPE_PORT_CONNECT, SCOPE_WORKSPACE_PROPOSE]);
+        let open = ToolView::intersect(&all, &all, ToolCapability::FULL);
+        let hidden = open.clone().hide(&[TOOL_EXPRESSION_REGISTER]);
+        assert_eq!(open.names().len() - hidden.names().len(), 1);
+        assert!(!hidden
+            .listing()
+            .to_string()
+            .contains(TOOL_EXPRESSION_REGISTER));
+        assert!(open
+            .listing()
+            .to_string()
+            .contains(TOOL_EXPRESSION_REGISTER));
+        assert!(hidden.callable(TOOL_EXPRESSION_REGISTER).is_some());
+        let rest: Vec<_> = open
+            .names()
+            .into_iter()
+            .filter(|name| *name != TOOL_EXPRESSION_REGISTER)
+            .collect();
+        assert_eq!(hidden.names(), rest);
     }
 
     /// The whole point of the connect scope: it is reachability, not capability.
@@ -3385,7 +3412,7 @@ mod tests {
             SCOPE_WORKSPACE_INITIATE,
         ]);
         let view = ToolView::intersect(&all, &all, ToolCapability::FULL);
-        assert_eq!(view.names().len(), 16);
+        assert_eq!(view.names().len(), 17);
         for (name, scope) in [
             (TOOL_INBOX_READ, SCOPE_INBOX_READ),
             (TOOL_CONVERSATION_READ, SCOPE_MESSAGES_READ),
@@ -3400,6 +3427,8 @@ mod tests {
             (TOOL_ACTION_CLAIM_SECRET, SCOPE_WORKSPACE_PROPOSE),
             // ADR-0218 G3.7 (a): the picture-motion tool rides the propose scope, adds none.
             (TOOL_EXPRESSION_ASSEMBLE, SCOPE_WORKSPACE_PROPOSE),
+            // ADR-0218 증보 13 §19 Y2.2 (#6069): no new scope for the register door.
+            (TOOL_EXPRESSION_REGISTER, SCOPE_WORKSPACE_PROPOSE),
             (TOOL_ACTION_INITIATE, SCOPE_WORKSPACE_INITIATE),
             (TOOL_CARD_SUGGEST, SCOPE_MESSAGES_WRITE),
             (TOOL_PING, SCOPE_INBOX_READ),
