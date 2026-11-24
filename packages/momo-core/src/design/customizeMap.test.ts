@@ -68,7 +68,16 @@ describe("꾸미기 지도: 값 모양은 모두 닫혀 있다", () => {
 
   it.each(SHAPED)("$id: 주소 · CSS · 모르는 열쇠를 받지 않고, 제 값은 받는다", ({ shape }) => {
     for (const bad of HOSTILE) expect(acceptsCustomizeValue(shape, bad), JSON.stringify(bad)).toBe(false);
-    for (const good of goodValues(shape)) expect(acceptsCustomizeValue(shape, good), JSON.stringify(good)).toBe(true);
+    for (const good of goodValues(shape)) expect(acceptsCustomizeValue(shape, good, "this-device"), JSON.stringify(good)).toBe(true);
+  });
+
+  it("이 기기의 사진은 기기 밖에서 온 값(파일 · 에이전트)으로는 받지 않는다", () => {
+    const { shape } = CUSTOMIZE_MAP.wallpaper;
+    const photo = { kind: "image", rev: 1 };
+    expect(acceptsCustomizeValue(shape, photo, "this-device")).toBe(true);
+    expect(acceptsCustomizeValue(shape, photo, "outside")).toBe(false);
+    expect(acceptsCustomizeValue(shape, photo)).toBe(false);
+    expect(acceptsCustomizeValue(shape, { kind: "preset", id: shape.presets[0] }, "outside")).toBe(true);
   });
 
   it("경계: 범위 밖 퍼센트 · 카탈로그에 없는 테마 · 목록 밖 배경 · 닫힌 키 밖은 받지 않는다", () => {

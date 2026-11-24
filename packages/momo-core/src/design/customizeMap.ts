@@ -1,28 +1,30 @@
 // =============================================================================
 // 꾸미기 지도 (#6085, #6031 CZ-0): 「무엇을 꾸밀 수 있나」의 정본 표 하나.
 //
-// 설정 화면의 줄 · (앞으로의) 테마 파일의 열쇠 · 에이전트 명령의 허용 목록이 각자 목록을 적지 않고 이 표에서 나온다.
-// 지금은 표와 시험까지다: 설정 › 모양의 줄이 이 표와 어긋나면 웹 시험(`customizeMapBinding.test.tsx`)이 빨갛다.
+// 설정 화면의 줄 · (앞으로의) 테마 파일의 열쇠(CZ-3) · 에이전트 명령의 허용 목록(CZ-5)이 각자 목록을 적지 않고 이 표를
+// 읽게 하려는 표다. 지금은 표와 시험까지다: 아직 이 표를 읽는 제품 코드는 없고, 설정 › 모양의 줄이 이 표와 어긋나면
+// 웹 시험(`customizeMapBinding.test.tsx`)이 빨갛다.
 //
 // 칸 다섯
-//   id        항목 이름. 저장 레코드의 필드 이름을 따른다(`AppearanceV2`). 앞으로 에이전트 명령은 `appearance.<id>`다
+//   id        항목 이름. 저장 레코드가 있는 것은 그 필드 이름을 따른다(`AppearanceV2`). 명령 이름은 CZ-5가 정한다
 //   shape     값의 **닫힌** 모양. 자유 문자열 · 주소 · CSS를 받는 모양은 없다(`acceptsCustomizeValue`가 그 판정이다)
 //   scope     누구에게: 나(이 기기) · 팀 기본(워크스페이스가 정한 처음 값) · 공유(팀원에게 건네 적용하게 함)
 //   settings  설정 화면의 자리. 모양 페이지 안의 카드와 차례는 `APPEARANCE_LAYOUT`이 정한다
 //   agent     에이전트가 바꾸자고 제안할 수 있는지
 //
-// 값 셋: live = 지금 된다 · planned = 이슈가 있고 아직 안 된다 · none = 하지 않는다(또는 아직 계획이 없다).
+// 값 셋: live = 지금 된다 · planned = 아직 안 되고 계획에 있다 · none = 하지 않는다(또는 계획에 없다).
+// 2026-11-20 계획(`plan-0148/customize.md` §2)의 「이번 · 다음 · 묶음」은 planned, 「— · 넣지 않음 · 안 함」과 표에 없는 칸은 none이다.
 // 지금 모든 항목은 「나」만 live다. 저장은 전부 이 기기이고(ADR-0174 D3), 팀 기본 · 공유는 CZ-3 · CZ-8 몫이다.
-// 에이전트 명령은 아직 하나도 live가 아니다: `appearance.*` 명령은 지금 서버가 거절한다(ADR-0186 293행). planned는
-// 2026-11-20 계획(CZ-5)의 다섯 가지 — 테마 · 화면 모드 · 강조색 · 글자 크기와 밀도 · 배경화면의 단색과 기본 제공이다.
+// 에이전트 명령은 아직 하나도 live가 아니다: `appearance.*` 명령은 지금 서버가 거절한다(ADR-0186 293행). CZ-5가 여는
+// 다섯 가지는 테마 · 화면 모드 · 강조색 · 글자 크기와 밀도 · 배경화면의 단색과 기본 제공이다.
 //
 // 이 파일에는 화면 문구가 없다. 줄의 이름과 설명은 지금 그 줄을 그리는 파일에 있고, 표는 그 줄을 `anchor`
-// (줄 자신이나 줄 안 컨트롤의 `data-testid`)로 가리킨다. 같은 anchor는 에이전트 안내가 「그 줄로 가기」에 쓴다.
+// (줄 자신이나 줄 안 컨트롤의 `data-testid`)로 가리킨다. 에이전트 안내(CZ-5)의 「그 줄로 가기」도 같은 anchor를 쓸 수 있다.
 //
 // 항목을 더하는 법은 디자인 시스템 README §2.17이다.
 // =============================================================================
 
-import { FONT_SIZE_IDS } from "./appearance";
+import { FONT_SIZE_IDS, THREAD_LAYOUT_IDS, type SchemeChoice } from "./appearance";
 import { DENSITY_DISPLAY_ORDER } from "./density";
 import { FONT_NAME_MAX, FONT_NAME_PATTERN, parseFontName } from "./fontName";
 import { GLASS_OPACITY_MAX, GLASS_STEP } from "./glass";
@@ -46,8 +48,11 @@ export type CustomizeShape =
   | { kind: "percent"; min: number; max: number; step: number }
   /** 테마 참조: 첫 파티 id 또는 카탈로그에 있는 `catalog:<id>`. `user:<id>`(내 테마)는 CZ-2가 연다. */
   | { kind: "themeRef" }
-  /** 배경화면 참조: 없음 · 단색 id · 기본 제공 id · 이 기기의 사진(바이트도 주소도 레코드에 들지 않는다). */
-  | { kind: "wallpaper"; solids: readonly string[]; presets: readonly string[] }
+  /**
+   * 배경화면 참조: 없음 · 단색 id · 기본 제공 id · 이 기기의 사진(바이트도 주소도 레코드에 들지 않는다).
+   * `deviceOnly`의 갈래는 이 기기의 설정 화면에서만 받는다: 테마 파일 · 에이전트 제안 같은 바깥 값으로는 받지 않는다.
+   */
+  | { kind: "wallpaper"; solids: readonly string[]; presets: readonly string[]; deviceOnly: readonly "image"[] }
   /** 이 기기에 설치된 글꼴의 이름(`fontName.ts`의 허용 글자 · 길이). 빈 값은 시스템 서체다. */
   | { kind: "fontName"; pattern: string; max: number }
   /** 물리 키 하나 + ⇧ · ⌥. 키는 `KEY_COMBO_CODE_PATTERN`의 닫힌 집합이다(⌘ · Ctrl은 늘 붙는다). */
@@ -105,22 +110,23 @@ export type CustomizeItem = LiveCustomizeItem | ReservedCustomizeItem;
 const ME_ONLY: CustomizeScope = { me: "live", teamDefault: "none", share: "none" };
 const ME_TEAM_SHARE: CustomizeScope = { me: "live", teamDefault: "planned", share: "planned" };
 const ME_SHARE: CustomizeScope = { me: "live", teamDefault: "none", share: "planned" };
-const RESERVED: CustomizeScope = { me: "planned", teamDefault: "none", share: "planned" };
+const LATER_SHARE: CustomizeScope = { me: "planned", teamDefault: "none", share: "planned" };
+const LATER_TEAM_SHARE: CustomizeScope = { me: "planned", teamDefault: "planned", share: "planned" };
 
 export const CUSTOMIZE_MAP = {
   // 카드 「색상」
-  scheme: { status: "live", shape: { kind: "choice", options: ["system", "light", "dark"] }, scope: ME_TEAM_SHARE, settings: "appearance", agent: "planned" },
+  scheme: { status: "live", shape: { kind: "choice", options: ["system", "light", "dark"] satisfies readonly SchemeChoice[] }, scope: ME_TEAM_SHARE, settings: "appearance", agent: "planned" },
   theme: { status: "live", shape: { kind: "themeRef" }, scope: ME_TEAM_SHARE, settings: "appearance", agent: "planned" },
   // 「기본」(새벽) + 프리셋 넷. 저장 레코드의 직접 고른 색(`signal.custom`)은 설정 화면이 아직 받지 않는다.
   accent: { status: "live", shape: { kind: "choice", options: ["dawn", ...SIGNAL_PRESET_IDS] }, scope: ME_TEAM_SHARE, settings: "appearance", agent: "planned" },
   // 유리는 기기 성질(맥 데스크탑 앱)이라 팀 기본 · 공유에 넣지 않는다.
-  glass: { status: "live", shape: { kind: "toggle" }, scope: ME_ONLY, settings: "appearance", agent: "none" },
-  glassOpacity: { status: "live", shape: { kind: "percent", min: 0, max: GLASS_OPACITY_MAX, step: GLASS_STEP }, scope: ME_ONLY, settings: "appearance", agent: "none" },
-  prominentActive: { status: "reserved", issue: 4193, shape: { kind: "toggle" }, scope: RESERVED, settings: "appearance", agent: "none" },
-  // 카드 「배경」. 공유 · 에이전트는 단색 · 기본 제공만이다: 이 기기의 사진은 기기를 떠나지 않는다.
-  wallpaper: { status: "live", shape: { kind: "wallpaper", solids: SOLID_IDS, presets: PRESET_IDS }, scope: ME_TEAM_SHARE, settings: "appearance", agent: "planned" },
-  sidebarColor: { status: "reserved", issue: 4192, shape: { kind: "hexColor" }, scope: RESERVED, settings: "appearance", agent: "none" },
-  conversationBackdrop: { status: "reserved", issue: 6086, shape: { kind: "toggle" }, scope: RESERVED, settings: "appearance", agent: "none" },
+  glass: { status: "live", shape: { kind: "toggle" }, scope: ME_ONLY, settings: "appearance", agent: "planned" },
+  glassOpacity: { status: "live", shape: { kind: "percent", min: 0, max: GLASS_OPACITY_MAX, step: GLASS_STEP }, scope: ME_ONLY, settings: "appearance", agent: "planned" },
+  prominentActive: { status: "reserved", issue: 4193, shape: { kind: "toggle" }, scope: LATER_SHARE, settings: "appearance", agent: "planned" },
+  // 카드 「배경」. 팀 기본 · 공유 · 에이전트는 단색 · 기본 제공만이다: 이 기기의 사진은 기기를 떠나지 않는다(`deviceOnly`).
+  wallpaper: { status: "live", shape: { kind: "wallpaper", solids: SOLID_IDS, presets: PRESET_IDS, deviceOnly: ["image"] }, scope: ME_TEAM_SHARE, settings: "appearance", agent: "planned" },
+  sidebarColor: { status: "reserved", issue: 4192, shape: { kind: "hexColor" }, scope: LATER_TEAM_SHARE, settings: "appearance", agent: "planned" },
+  conversationBackdrop: { status: "reserved", issue: 6086, shape: { kind: "toggle" }, scope: LATER_SHARE, settings: "appearance", agent: "planned" },
   // 카드 「글꼴」. 공유는 이름만(글꼴 파일은 내려받지 않는다).
   fontSans: { status: "live", shape: { kind: "fontName", pattern: FONT_NAME_PATTERN, max: FONT_NAME_MAX }, scope: ME_SHARE, settings: "appearance", agent: "none" },
   fontMono: { status: "live", shape: { kind: "fontName", pattern: FONT_NAME_PATTERN, max: FONT_NAME_MAX }, scope: ME_SHARE, settings: "appearance", agent: "none" },
@@ -131,15 +137,15 @@ export const CUSTOMIZE_MAP = {
   linkPreview: { status: "live", shape: { kind: "choice", options: ["compact", "rich", "off"] }, scope: ME_ONLY, settings: "appearance", agent: "none" },
   // 이 기기 · 이 워크스페이스 · 이 사람에게 저장된다.
   expressionSuggest: { status: "live", shape: { kind: "toggle" }, scope: ME_ONLY, settings: "appearance", agent: "none" },
-  threadLayout: { status: "reserved", issue: 4193, shape: { kind: "choice", options: ["split", "focus"] }, scope: RESERVED, settings: "appearance", agent: "none" },
-  bubble: { status: "reserved", issue: 4307, scope: RESERVED, settings: "appearance", agent: "none" },
+  threadLayout: { status: "reserved", issue: 4193, shape: { kind: "choice", options: THREAD_LAYOUT_IDS }, scope: LATER_SHARE, settings: "appearance", agent: "planned" },
+  bubble: { status: "reserved", issue: 4307, scope: LATER_TEAM_SHARE, settings: "appearance", agent: "planned" },
   // 카드 「내 테마」(토큰 직접 고치기 · 저장 · 내보내기 · 가져오기)
-  myThemes: { status: "reserved", issue: 4192, scope: RESERVED, settings: "appearance", agent: "none" },
+  myThemes: { status: "reserved", issue: 4192, scope: LATER_TEAM_SHARE, settings: "appearance", agent: "planned" },
   // 설정 › 단축키. 줄은 등록표(`keyboardShortcuts.ts`)에서 나오므로 이 표는 갈래와 값 모양만 적는다.
-  shortcuts: { status: "live", shape: { kind: "keyCombo", codePattern: KEY_COMBO_CODE_PATTERN }, scope: ME_SHARE, settings: "shortcuts", agent: "none" },
+  shortcuts: { status: "live", shape: { kind: "keyCombo", codePattern: KEY_COMBO_CODE_PATTERN }, scope: ME_SHARE, settings: "shortcuts", agent: "planned" },
   // 자리가 아직 없는 것
-  navIcons: { status: "reserved", issue: 4260, scope: { me: "planned", teamDefault: "none", share: "planned" }, settings: null, agent: "none" },
-  sounds: { status: "reserved", issue: null, scope: { me: "planned", teamDefault: "none", share: "none" }, settings: null, agent: "none" },
+  navIcons: { status: "reserved", issue: 4260, scope: LATER_SHARE, settings: null, agent: "planned" },
+  sounds: { status: "reserved", issue: null, scope: { me: "planned", teamDefault: "none", share: "none" }, settings: null, agent: "planned" },
 } as const satisfies Record<string, CustomizeItem>;
 
 export type CustomizeItemId = keyof typeof CUSTOMIZE_MAP;
@@ -242,10 +248,17 @@ function hasOnlyKeys(value: Record<string, unknown>, keys: ReadonlySet<string>):
 }
 
 /**
- * 이 모양이 받는 값인가. 테마 파일 가져오기(CZ-3)와 에이전트 제안(CZ-5)이 바깥에서 온 값을 들이기 전에 이
- * 판정을 거친다. 모르는 열쇠가 붙은 객체 · 주소 · CSS 조각은 어느 모양도 받지 않는다.
+ * 이 모양이 받는 값인가. 모르는 열쇠가 붙은 객체 · 주소 · CSS 조각은 어느 모양도 받지 않는다. 아직 부르는 제품 코드는
+ * 없다: 테마 파일 가져오기(CZ-3)와 에이전트 제안(CZ-5)이 바깥 값을 들일 때 쓰도록 둔 판정이다.
+ *
+ * `from`: `"this-device"`는 이 기기의 설정 화면이 고른 값, `"outside"`(기본)는 파일 · 에이전트처럼 기기 밖에서 온 값이다.
+ * 바깥 값은 기기 전용 갈래(이 기기의 사진)를 받지 않는다.
  */
-export function acceptsCustomizeValue(shape: CustomizeShape, value: unknown): boolean {
+export function acceptsCustomizeValue(
+  shape: CustomizeShape,
+  value: unknown,
+  from: "this-device" | "outside" = "outside"
+): boolean {
   switch (shape.kind) {
     case "choice":
       return typeof value === "string" && shape.options.includes(value);
@@ -272,6 +285,7 @@ export function acceptsCustomizeValue(shape: CustomizeShape, value: unknown): bo
         return hasOnlyKeys(value, new Set(["kind", "id"])) && typeof value.id === "string" && ids.includes(value.id);
       }
       if (value.kind === "image") {
+        if (from === "outside" && shape.deviceOnly.includes("image")) return false;
         return (
           hasOnlyKeys(value, WALLPAPER_IMAGE_FIELDS) &&
           ["width", "height", "rev"].every((key) => value[key] === undefined || Number.isInteger(value[key]))
