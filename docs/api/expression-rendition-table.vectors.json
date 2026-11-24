@@ -1,0 +1,48 @@
+{
+  "$comment": "ADR-0218 §20 (#6071): the size tables the server stores at and the bounds every reader accepts. The server's RenditionTable::sizes() and the core's EXPRESSION_LIMITS and contracts.schema.json are each checked against this file; the reader's bounds are the wide table's, so a reader of these bounds reads every row of either table.",
+  "legacy": {
+    "small": {
+      "edge": 128,
+      "bytes": 262144
+    },
+    "thumb": {
+      "edge": 128,
+      "bytes": 262144
+    },
+    "large": {
+      "edge": 512,
+      "bytes": 1048576
+    },
+    "still": null,
+    "motionCanvas": 512
+  },
+  "wide": {
+    "small": {
+      "edge": 128,
+      "bytes": 262144
+    },
+    "thumb": {
+      "edge": 256,
+      "bytes": 524288
+    },
+    "large": {
+      "edge": 768,
+      "bytes": 2097152
+    },
+    "still": {
+      "edge": 768,
+      "bytes": 2097152
+    },
+    "motionCanvas": 768
+  },
+  "worstBytes": {
+    "legacy": {
+      "still": 1572864,
+      "moving": 1572864
+    },
+    "wide": {
+      "still": 2883584,
+      "moving": 4980736
+    }
+  }
+}

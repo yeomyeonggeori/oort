@@ -1881,6 +1881,38 @@ mod tests {
         assert!(back.unwrap().still.is_none());
     }
 
+    /// The tables are the shared vectors (`docs/api/expression-rendition-table.vectors.json`), which the
+    /// core's reader bounds are checked against too: the server cannot start storing a size the readers
+    /// it was turned on for refuse, without one of the two tests going red.
+    #[test]
+    fn the_tables_are_the_shared_vectors_the_readers_are_checked_against() {
+        let path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../../docs/api/expression-rendition-table.vectors.json"
+        );
+        let vectors: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(path).expect("the shared vectors"))
+                .expect("vectors are JSON");
+        for (name, table) in [("legacy", RenditionTable::Legacy), ("wide", RenditionTable::Wide)] {
+            let v = &vectors[name];
+            let s = table.sizes();
+            let pair = |key: &str| (v[key]["edge"].as_u64(), v[key]["bytes"].as_u64());
+            let ours = |edge: u32, bytes: usize| (Some(u64::from(edge)), Some(bytes as u64));
+            assert_eq!(pair("small"), ours(s.small_edge, s.small_bytes), "{name} small");
+            assert_eq!(pair("thumb"), ours(s.thumb_edge, s.thumb_bytes), "{name} thumb");
+            assert_eq!(pair("large"), ours(s.large_edge, s.large_bytes), "{name} large");
+            if s.still {
+                assert_eq!(pair("still"), ours(s.large_edge, s.large_bytes), "{name} still");
+            } else {
+                assert!(v["still"].is_null(), "{name} still");
+            }
+            assert_eq!(v["motionCanvas"].as_u64(), Some(u64::from(s.motion_canvas)));
+            let worst = &vectors["worstBytes"][name];
+            assert_eq!(worst["still"].as_u64(), Some(s.worst_bytes(false) as u64));
+            assert_eq!(worst["moving"].as_u64(), Some(s.worst_bytes(true) as u64));
+        }
+    }
+
     /// ZA11 · ZA6: the worst stored bytes of one picture are the sum of the caps (Z4), and the table
     /// moves only the rendition caps and the canvas — the decoder's own limits are one set of
     /// constants that neither table names.
