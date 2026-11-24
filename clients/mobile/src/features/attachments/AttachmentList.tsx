@@ -141,7 +141,8 @@ function ImageTile({
   registerSource: (id: string, node: View | null) => void;
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
-  const label = attachmentDisplayName(attachment);
+  const formatMessage = useFormatMessage();
+  const label = attachmentDisplayName(formatMessage, attachment);
   const preview = useAttachmentPreview(
     workspaceId,
     channelId,
@@ -226,9 +227,9 @@ function ImageTile({
         testID="attachment-preview"
         accessibilityLabel={
           preview.status === 'loading'
-            ? ATTACH_COPY.previewLoading
+            ? formatMessage(ATTACH_COPY.previewLoading)
             : preview.status === 'failed'
-            ? ATTACH_COPY.previewFailed
+            ? formatMessage(ATTACH_COPY.previewFailed)
             : label
         }
         accessibilityValue={{ text: preview.status }}
@@ -249,9 +250,11 @@ function ImageTile({
             style={styles.previewState}
             testID={`attachment-preview-${preview.status}`}
           >
-            {preview.status === 'loading'
-              ? ATTACH_COPY.previewLoading
-              : ATTACH_COPY.previewFailed}
+            {formatMessage(
+              preview.status === 'loading'
+                ? ATTACH_COPY.previewLoading
+                : ATTACH_COPY.previewFailed,
+            )}
           </Text>
         )}
       </View>
@@ -325,7 +328,7 @@ function DownloadStatus({
   if (savedLast) {
     return (
       <Text style={styles.downloadIdle} testID="attachment-download-idle">
-        {ATTACH_COPY.download}
+        {formatMessage(ATTACH_COPY.download)}
       </Text>
     );
   }
@@ -335,21 +338,24 @@ function DownloadStatus({
     return (
       <Text style={styles.downloadBusy} testID="attachment-downloading">
         {percent === null
-          ? ATTACH_COPY.downloading
-          : `${ATTACH_COPY.downloading} ${percent}%`}
+          ? formatMessage(ATTACH_COPY.downloading)
+          : formatMessage('attachments.status.downloadingPercent', { percent })}
       </Text>
     );
   }
   if (state.status === 'failed') {
     return (
       <Text style={styles.downloadFailed} testID="attachment-download-failed">
-        {`${ATTACH_COPY.downloadFailed} · ${ATTACH_COPY.retry}`}
+        {formatMessage('attachments.status.pairDot', {
+          first: formatMessage(ATTACH_COPY.downloadFailed),
+          second: formatMessage(ATTACH_COPY.retry),
+        })}
       </Text>
     );
   }
   return (
     <Text style={styles.downloadIdle} testID="attachment-download-idle">
-      {ATTACH_COPY.download}
+      {formatMessage(ATTACH_COPY.download)}
     </Text>
   );
 }
@@ -371,7 +377,7 @@ function FileCard({
   const styles = useStyles(buildStyles);
   const palette = usePalette();
   const formatMessage = useFormatMessage();
-  const label = attachmentDisplayName(attachment);
+  const label = attachmentDisplayName(formatMessage, attachment);
   const [download, share] = useShareAttachment(
     workspaceId,
     channelId,
@@ -428,13 +434,19 @@ function FileCard({
                 name: label,
                 duration: formatVideoDuration(duration.durationMs),
               })
-          : `${label}, ${attachmentMetaLine(attachment)}, ${
-              download.status === 'failed'
-                ? `${ATTACH_COPY.downloadFailed}, ${ATTACH_COPY.retry}`
-                : download.status === 'downloading'
-                ? ATTACH_COPY.downloading
-                : `${ATTACH_COPY.download}, 공유하기`
-            }`
+          : formatMessage('attachments.card.aria', {
+              label,
+              meta: attachmentMetaLine(formatMessage, attachment),
+              state:
+                download.status === 'failed'
+                  ? formatMessage('attachments.announce.pair', {
+                      first: formatMessage(ATTACH_COPY.downloadFailed),
+                      second: formatMessage(ATTACH_COPY.retry),
+                    })
+                  : download.status === 'downloading'
+                  ? formatMessage(ATTACH_COPY.downloading)
+                  : formatMessage('attachments.card.stateIdle'),
+            })
       }
       // 안쪽 ↓ 단추는 VoiceOver 에 따로 서지 않는다(카드가 하나의 요소다) — 저장은 로터의 동작으로 간다. 재생 카드에는 ↓ 가 없어 동작도 없다.
       accessibilityActions={onPlay === undefined ? [{ name: 'save', label: saveLabel }] : undefined}
@@ -473,7 +485,7 @@ function FileCard({
         <View style={styles.metaText}>
           <FileName name={label} />
           <Text style={styles.fileMeta} testID="attachment-meta">
-            {attachmentMetaLine(attachment)}
+            {attachmentMetaLine(formatMessage, attachment)}
           </Text>
           {onPlay === undefined ? (
             <DownloadStatus

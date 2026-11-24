@@ -44,6 +44,8 @@
 // 판정은 여전히 서버의 것이고, 이쪽은 그 판정을 앞당겨 말할 뿐이다.
 // =============================================================================
 
+import type { LocaleService } from "../../i18n/context";
+import type { PlainMessageKey } from "../../i18n/keys";
 import type { AttachmentMedia, ImageMedia, MessageAttachment, VideoMedia } from "../../lib/api";
 import { attachmentMediaFromWire } from "../../lib/attachmentMedia";
 import type { ConnectionCause } from "../connection/model";
@@ -146,11 +148,16 @@ export type DraftStatus =
 // (`composerCopy.ts`, `actionCopy.ts`): 같은 문장을 두 클라가 각자 적으면 같은
 // 주에 갈라진다. 갈라진 뒤에 리뷰가 그것을 실측한 전례가 있다(U4-6 H-1).
 
+/** 이 칸의 키(`attachments.*`)와 공용 낱말(`common.*`)만 담는 값 없는 문장의 키(#6058). */
+export type AttachPlainKey = Extract<PlainMessageKey, `attachments.${string}` | `common.${string}`>;
+
+type FormatMessage = LocaleService["formatMessage"];
+
 export const ATTACH_COPY = {
   /** 클립 버튼의 접근성 이름 (macOS `fileUpload`). */
-  attach: "파일 첨부",
+  attach: "attachments.action.attach",
   /** 트레이의 제목 (macOS `localDraft`). */
-  tray: "첨부 파일",
+  tray: "attachments.tray.title",
   // macOS 의 `connectionPending`("전송할 때 채널에 업로드합니다. 파일당 최대
   // 100MB입니다.")은 여기 없다. 앞절이 웹에서 거짓이기 때문이다 — 이 클라는
   // 고르는 즉시 올린다(그래야 진행률을 잴 수 있고 전송이 즉시 끝난다). 뒷절인
@@ -158,41 +165,41 @@ export const ATTACH_COPY = {
   // 판정이 로컬이라 왕복 비용이 0이고, 컴포저 위에 늘 서 있는 안내 한 줄은
   // 이 앱이 밀어내는 종류의 상시 소음이다.
   /** 앞 파일이 끝나기를 기다리는 중. macOS `localOnlyStatus`가 선 자리다. */
-  queued: "대기 중",
+  queued: "attachments.status.queued",
   /** 바이트가 아직 가는 중 (macOS `uploading`). */
-  uploading: "업로드 중",
+  uploading: "attachments.status.uploading",
   /** 바이트는 갔고 서버가 대조 중. macOS에 대응이 없는 칸이다. */
-  verifying: "확인 중",
+  verifying: "common.state.checking",
   /** 올라갔고 묶을 수 있다 (macOS `uploaded`). */
-  uploaded: "업로드 완료",
+  uploaded: "attachments.status.uploaded",
   /** 한 건 제거 (macOS `remove`). */
-  remove: "첨부 제거",
+  remove: "attachments.action.remove",
   /** 전부 제거 (macOS `clearAll`). */
-  clearAll: "모두 지우기",
+  clearAll: "attachments.action.clearAll",
   /** 타임라인 이미지를 크게 본다 (#3820). */
-  expandImage: "크게 보기",
+  expandImage: "attachments.action.expandImage",
   /** 이름을 보여 줄 수 없는 이미지의 일반 이름 (#3820). */
-  genericImage: "이미지",
+  genericImage: "attachments.kind.image",
   /** 이름을 보여 줄 수 없는 PDF 의 일반 이름. */
-  genericPdf: "PDF 문서",
+  genericPdf: "attachments.kind.pdfDocument",
   /** 그 밖의 종류별 일반 이름. */
-  genericVideo: "동영상",
-  genericAudio: "오디오",
-  genericFile: "파일",
+  genericVideo: "attachments.kind.video",
+  genericAudio: "attachments.kind.audio",
+  genericFile: "attachments.kind.file",
   /** 실패한 건 다시 (macOS `retryUpload`). */
-  retry: "다시 시도",
+  retry: "common.action.retry",
   /** 타임라인 카드의 내려받기 (macOS `downloadAttachment`). */
-  download: "첨부파일 내려받기",
+  download: "attachments.action.download",
   /** 그 내려받기가 진행 중. 바쁜 버튼은 비활성 버튼이 아니다(tokens.md §5b). */
-  downloading: "내려받는 중",
+  downloading: "attachments.status.downloading",
   /** 내려받기가 실패했다 (macOS `attachmentDownloadFailed`). */
-  downloadFailed: "내려받기 실패",
+  downloadFailed: "attachments.status.downloadFailed",
   /** 미리보기를 여는 중 */
-  previewLoading: "미리보기 불러오는 중",
+  previewLoading: "attachments.preview.loading",
   /** 미리보기를 못 열었다. 파일 자체는 멀쩡할 수 있으므로 카드는 남는다. */
-  previewFailed: "미리보기를 불러오지 못했습니다",
+  previewFailed: "attachments.preview.failed",
   /** 업로드가 끝나기 전에는 보내지 않는다. */
-  sendBlocked: "업로드가 끝나면 보낼 수 있습니다.",
+  sendBlocked: "attachments.sendBlock.uploading",
   /**
    * 실패한 첨부를 달고 보낼 수는 없다 — **다시 눌러 볼 값이 있을 때**.
    *
@@ -200,24 +207,24 @@ export const ATTACH_COPY = {
    * 말했는데, 6종 중 3종은 재시도 버튼이 서지도 않는다(`isRetryableIssue`).
    * 그러면 이 줄은 화면에 없는 버튼을 가리키는 안내가 된다.
    */
-  sendBlockedRetryable: "실패한 첨부를 다시 시도하거나 지운 뒤 보낼 수 있습니다.",
+  sendBlockedRetryable: "attachments.sendBlock.retryable",
   /** 되돌릴 값이 없는 실패만 남았을 때. 남은 행동은 제거뿐이다. */
-  sendBlockedFailed: "실패한 첨부를 지운 뒤 보낼 수 있습니다.",
+  sendBlockedFailed: "attachments.sendBlock.failed",
   /** 드롭이 폴더를 받았다. 폴더는 첨부가 아니다. */
-  folderRejected: "폴더는 붙일 수 없습니다. 안에 있는 파일을 골라 주세요.",
+  folderRejected: "attachments.tray.folderRejected",
   /** PDF 카드의 열기 (#2701). 어디서 열리는지까지가 이름이다. */
-  openPdf: "새 창에서 PDF 열기",
+  openPdf: "attachments.pdf.open",
   /** 데스크탑 셸의 같은 행동. 셸은 새 창 대신 OS 의 PDF 뷰어로 연다. */
-  openPdfDesktop: "기본 앱에서 PDF 열기",
+  openPdfDesktop: "attachments.pdf.openDesktop",
   /** 그 열기가 진행 중. 바이트를 받는 동안이다. */
-  openingPdf: "PDF 여는 중",
+  openingPdf: "attachments.pdf.opening",
   /** 프록시가 바이트를 주지 못했다. */
-  pdfOpenFailed: "PDF를 열지 못했습니다. 다시 시도하거나 파일을 내려받으세요.",
+  pdfOpenFailed: "attachments.pdf.openFailed",
   /** 선언은 PDF 인데 바이트가 아니다. 이 출처의 문서로 열지 않는다. */
-  pdfNotPdf: "PDF 형식이 아니어서 열 수 없습니다. 파일을 내려받아 확인하세요.",
+  pdfNotPdf: "attachments.pdf.notPdf",
   /** 브라우저가 새 창을 막았다. 다음 행동은 사람 쪽 설정이다. */
-  pdfPopupBlocked: "새 창이 막혔습니다. 브라우저의 팝업 차단을 풀거나 파일을 내려받으세요.",
-} as const;
+  pdfPopupBlocked: "attachments.pdf.popupBlocked",
+} as const satisfies Record<string, AttachPlainKey>;
 
 /**
  * 실패 한 건의 문장. macOS의 두 문장은 글자 그대로 남아 있다
@@ -227,28 +234,28 @@ export const ATTACH_COPY = {
  * 버튼이 **바로 옆에** 서고 트레이 발치도 같은 말을 하므로, 두 줄에 같은 동사가
  * 세 번 찍혔다. 지시는 컨트롤이 하고 이 문장은 사실만 말한다.
  */
-export function uploadIssueCopy(issue: UploadIssue): string {
+export function uploadIssueKey(issue: UploadIssue): AttachPlainKey {
   switch (issue) {
     case "selection-cancelled":
-      return "선택을 취소했습니다";
+      return "attachments.issue.selectionCancelled";
     case "permission-denied":
-      return "사진 접근 권한이 꺼져 있습니다";
+      return "attachments.issue.permissionDenied";
     case "camera-permission-denied":
-      return "카메라 접근 권한이 꺼져 있어요";
+      return "attachments.issue.cameraPermissionDenied";
     case "camera-unavailable":
-      return "카메라를 열지 못했어요";
+      return "attachments.issue.cameraUnavailable";
     case "too-large":
-      return "100MB를 초과함";
+      return "attachments.issue.tooLarge";
     case "forbidden":
-      return "이 채널에 파일을 올릴 수 없습니다";
+      return "attachments.issue.forbidden";
     case "no-archive":
-      return "파일 보관소가 연결돼 있지 않습니다";
+      return "attachments.issue.noArchive";
     case "mismatch":
-      return "올라간 파일이 고른 파일과 다릅니다";
+      return "attachments.issue.mismatch";
     case "blocked":
-      return "이 배포의 보안 정책이 보관소 주소를 막았습니다";
+      return "attachments.issue.blocked";
     case "unavailable":
-      return "업로드 실패";
+      return "attachments.issue.unavailable";
   }
 }
 
@@ -260,22 +267,22 @@ export function uploadIssueCopy(issue: UploadIssue): string {
  * 셋에만 있고, 값은 `UploadIssue` 독스트링이 이미 알고 있던 것을 화면까지
  * 옮긴 것이다.
  */
-export function uploadIssueNext(issue: UploadIssue): string | null {
+export function uploadIssueNextKey(issue: UploadIssue): AttachPlainKey | null {
   switch (issue) {
     case "permission-denied":
-      return "기기 설정에서 사진 접근을 허용한 뒤 다시 시도하세요";
+      return "attachments.next.permissionDenied";
     case "camera-permission-denied":
-      return "기기 설정에서 카메라 접근을 허용한 뒤 다시 시도해 주세요";
+      return "attachments.next.cameraPermissionDenied";
     case "selection-cancelled":
       return null;
     case "too-large":
-      return "더 작은 파일을 고르세요";
+      return "attachments.next.tooLarge";
     case "forbidden":
-      return "채널 관리자에게 문의하세요";
+      return "attachments.next.forbidden";
     case "no-archive":
-      return "서버 관리자에게 알리세요";
+      return "attachments.next.noArchive";
     case "blocked":
-      return "서버 설정을 확인하세요";
+      return "attachments.next.blocked";
     case "mismatch":
     case "unavailable":
     case "camera-unavailable":
@@ -295,21 +302,27 @@ export function isRetryableIssue(issue: UploadIssue): boolean {
  * 이 값은 바뀌지 않는다 — 보조기술이 초당 몇 번씩 같은 줄을 다시 읽지 않는 이유가
  * 여기 있다(리뷰 H-3).
  */
-export function draftStatusWord(draft: AttachmentDraft, reasonFor?: UploadReasonFor): string {
+export function draftStatusWord(
+  formatMessage: FormatMessage,
+  draft: AttachmentDraft,
+  reasonFor?: UploadReasonFor
+): string {
   switch (draft.status) {
     case "ready":
-      return ATTACH_COPY.queued;
+      return formatMessage(ATTACH_COPY.queued);
     case "uploading":
-      return ATTACH_COPY.uploading;
+      return formatMessage(ATTACH_COPY.uploading);
     case "verifying":
-      return ATTACH_COPY.verifying;
+      return formatMessage(ATTACH_COPY.verifying);
     case "uploaded":
-      return ATTACH_COPY.uploaded;
+      return formatMessage(ATTACH_COPY.uploaded);
     case "failed": {
       const issue = draft.issue ?? "unavailable";
-      const next = uploadIssueNext(issue);
-      const reason = reasonFor?.(draft) ?? uploadIssueCopy(issue);
-      return `${reason}${next === null ? "" : `. ${next}`}`;
+      const nextKey = uploadIssueNextKey(issue);
+      const reason = reasonFor?.(draft) ?? formatMessage(uploadIssueKey(issue));
+      return nextKey === null
+        ? reason
+        : formatMessage("attachments.status.failedWithNext", { reason, next: formatMessage(nextKey) });
     }
   }
 }
@@ -326,7 +339,11 @@ export function draftStatusWord(draft: AttachmentDraft, reasonFor?: UploadReason
  * 두 번 바뀌었다 — 파일명이 잘렸다 풀렸다 한다. 아래 줄에 두면 이름 열은 칩이
  * 사는 내내 같은 폭이다.
  */
-export function draftStatusLine(draft: AttachmentDraft, reasonFor?: UploadReasonFor): {
+export function draftStatusLine(
+  formatMessage: FormatMessage,
+  draft: AttachmentDraft,
+  reasonFor?: UploadReasonFor
+): {
   text: string;
   danger: boolean;
   /** 잰 값이 있을 때만. 없으면 화면도 낭독도 수를 말하지 않는다. */
@@ -335,13 +352,13 @@ export function draftStatusLine(draft: AttachmentDraft, reasonFor?: UploadReason
   // 폰 picker가 provider 메타데이터도 native 재측정도 얻지 못한 경우만 생략한다.
   // 실제 0-byte 파일은 `sizeKnown=true`라서 정직하게 「0 B」를 말한다 (#1703 Nit-2).
   const size = draft.sizeKnown ? formatBytes(draft.sizeBytes) : null;
-  const word = draftStatusWord(draft, reasonFor);
+  const word = draftStatusWord(formatMessage, draft, reasonFor);
   const percent =
     draft.status === "uploading" && draft.progress > 0
       ? Math.round(draft.progress * 100)
       : null;
   return {
-    text: size === null ? word : `${size} · ${word}`,
+    text: size === null ? word : formatMessage("attachments.status.sizeAndWord", { size, word }),
     danger: draft.status === "failed",
     percent,
   };
@@ -369,6 +386,7 @@ function statusKey(draft: AttachmentDraft): string {
  * 낱말로 묶이면 개수로 요약하고, 섞이면 개수만 말한다.
  */
 export function draftAnnouncement(
+  formatMessage: FormatMessage,
   previous: AttachmentDraft[],
   next: AttachmentDraft[],
   reasonFor?: UploadReasonFor
@@ -380,23 +398,27 @@ export function draftAnnouncement(
   if (changed.length === 0) return null;
   if (changed.length === 1) {
     const draft = changed[0];
-    return `${attachmentDisplayName(draft)} ${draftStatusLine(draft, reasonFor).text}`;
+    return formatMessage("attachments.announce.single", {
+      name: attachmentDisplayName(formatMessage, draft),
+      status: draftStatusLine(formatMessage, draft, reasonFor).text,
+    });
   }
   // 낱말별로 묶어 개수로 말한다. 「N개 상태가 바뀌었습니다」 같은 요약은 짧지만
   // 아무것도 말하지 않는다 — 무엇이 몇 개인지가 이 줄의 전부다.
   const counts = new Map<string, number>();
   for (const draft of changed) {
-    const word = draftStatusWord(draft, reasonFor);
+    const word = draftStatusWord(formatMessage, draft, reasonFor);
     counts.set(word, (counts.get(word) ?? 0) + 1);
   }
   const groups = [...counts.entries()]
     .sort((a, b) => b[1] - a[1])
     .map(([word, count], index) =>
-      index === 0
-        ? `${ATTACH_COPY.tray} ${count}개 ${word}`
-        : `${count}개 ${word}`
+      formatMessage(
+        index === 0 ? "attachments.announce.firstGroup" : "attachments.announce.nextGroup",
+        { count, word }
+      )
     );
-  return groups.join(", ");
+  return groups.reduce((first, second) => formatMessage("attachments.announce.pair", { first, second }));
 }
 
 /**
@@ -610,7 +632,7 @@ export function sendBlockReason(
 }
 
 /** 지금 막힌 이유에 맞는 발치 문장. 없는 버튼을 가리키지 않는다(M-1). */
-export function sendBlockCopy(drafts: AttachmentDraft[]): string | null {
+export function sendBlockKey(drafts: AttachmentDraft[]): AttachPlainKey | null {
   const reason = sendBlockReason(drafts);
   if (reason === null) return null;
   if (reason === "uploading") return ATTACH_COPY.sendBlocked;
@@ -691,43 +713,48 @@ const ARCHIVE_SUBTYPES = new Set([
  * 구체성은 파일명이 진다. `drain-2026-08-09.log` 옆의 "LOG" 는 같은 말을 두 번
  * 하는 것이고, 「텍스트」는 확장자가 말하지 않는 것을 말한다.
  */
-export function formatMimeLabel(mime: string): string {
+export function mimeLabelKey(mime: string): AttachPlainKey {
   const trimmed = mime.trim().toLowerCase();
   const slash = trimmed.indexOf("/");
   const top = slash < 0 ? trimmed : trimmed.slice(0, slash);
   const subtype = (slash < 0 ? "" : trimmed.slice(slash + 1).split(";")[0]) ?? "";
   switch (top) {
     case "image":
-      return "이미지";
+      return "attachments.kind.image";
     case "video":
-      return "동영상";
+      return "attachments.kind.video";
     case "audio":
-      return "오디오";
+      return "attachments.kind.audio";
     case "text":
-      return "텍스트";
+      return "attachments.kind.text";
     case "font":
-      return "글꼴";
+      return "attachments.kind.font";
     default:
       break;
   }
-  if (subtype === "pdf") return "PDF";
-  if (ARCHIVE_SUBTYPES.has(subtype)) return "압축";
+  if (subtype === "pdf") return "attachments.kind.pdf";
+  if (ARCHIVE_SUBTYPES.has(subtype)) return "attachments.kind.archive";
   if (subtype === "json" || subtype === "xml" || subtype.endsWith("+xml")) {
-    return "텍스트";
+    return "attachments.kind.text";
   }
-  return "파일";
+  return "attachments.kind.file";
 }
 
 /**
  * 카드 두 번째 줄. macOS `MomoMessageAttachmentCard.metadata`와 같은 조립이다.
  * 보내는 기기가 길이를 잰 영상이면 종류와 크기 사이에 길이가 든다(「동영상 · 0:42 · 58.4 MB」, #5208).
  */
-export function attachmentMetaLine(attachment: MessageAttachment): string {
-  const kind = formatMimeLabel(attachment.mime);
+export function attachmentMetaLine(formatMessage: FormatMessage, attachment: MessageAttachment): string {
+  const kind = formatMessage(mimeLabelKey(attachment.mime));
+  const size = formatBytes(attachment.sizeBytes);
   const media = attachmentMediaOf(attachment);
   return media === null
-    ? `${kind} · ${formatBytes(attachment.sizeBytes)}`
-    : `${kind} · ${formatVideoDuration(media.durationMs)} · ${formatBytes(attachment.sizeBytes)}`;
+    ? formatMessage("attachments.meta.kindSize", { kind, size })
+    : formatMessage("attachments.meta.kindDurationSize", {
+        kind,
+        duration: formatVideoDuration(media.durationMs),
+        size,
+      });
 }
 
 // ---- 영상 (#5208) -------------------------------------------------------------
@@ -947,7 +974,7 @@ export function looksLikeOpaqueFileName(name: string): boolean {
 }
 
 /** 종류별 일반 이름. 이름을 보일 수 없을 때 이것이 갈음한다. */
-export function genericAttachmentName(mime: string): string {
+export function genericAttachmentNameKey(mime: string): AttachPlainKey {
   if (isPdfAttachment({ mime })) return ATTACH_COPY.genericPdf;
   const top = mime.trim().toLowerCase().split("/")[0];
   switch (top) {
@@ -964,11 +991,12 @@ export function genericAttachmentName(mime: string): string {
 
 /** 화면과 보조기술이 쓰는 이름. 무작위 토큰 같은 이름은 일반 이름이 된다. */
 export function attachmentDisplayName(
+  formatMessage: FormatMessage,
   attachment: Pick<MessageAttachment, "name" | "mime">
 ): string {
   const name = attachment.name.trim();
   if (name === "" || looksLikeOpaqueFileName(name)) {
-    return genericAttachmentName(attachment.mime);
+    return formatMessage(genericAttachmentNameKey(attachment.mime));
   }
   return name;
 }

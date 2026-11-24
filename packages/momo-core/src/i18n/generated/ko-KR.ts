@@ -30,6 +30,550 @@ export const catalog: MessageCatalog = {
       "value": "단축키 찾기"
     }
   ],
+  "attachments.action.attach": [
+    {
+      "type": 0,
+      "value": "파일 첨부"
+    }
+  ],
+  "attachments.action.clearAll": [
+    {
+      "type": 0,
+      "value": "모두 지우기"
+    }
+  ],
+  "attachments.action.download": [
+    {
+      "type": 0,
+      "value": "첨부파일 내려받기"
+    }
+  ],
+  "attachments.action.downloadNamed": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " 첨부파일 내려받기"
+    }
+  ],
+  "attachments.action.expandImage": [
+    {
+      "type": 0,
+      "value": "크게 보기"
+    }
+  ],
+  "attachments.action.expandNamed": [
+    {
+      "type": 1,
+      "value": "label"
+    },
+    {
+      "type": 0,
+      "value": " 크게 보기"
+    }
+  ],
+  "attachments.action.expandNamedAt": [
+    {
+      "type": 1,
+      "value": "label"
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 1,
+      "value": "position"
+    },
+    {
+      "type": 0,
+      "value": " 크게 보기"
+    }
+  ],
+  "attachments.action.remove": [
+    {
+      "type": 0,
+      "value": "첨부 제거"
+    }
+  ],
+  "attachments.action.removeNamed": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " 첨부 제거"
+    }
+  ],
+  "attachments.action.retryNamed": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " 다시 시도"
+    }
+  ],
+  "attachments.announce.firstGroup": [
+    {
+      "type": 0,
+      "value": "첨부 파일 "
+    },
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "개 "
+    },
+    {
+      "type": 1,
+      "value": "word"
+    }
+  ],
+  "attachments.announce.nextGroup": [
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "개 "
+    },
+    {
+      "type": 1,
+      "value": "word"
+    }
+  ],
+  "attachments.announce.pair": [
+    {
+      "type": 1,
+      "value": "first"
+    },
+    {
+      "type": 0,
+      "value": ", "
+    },
+    {
+      "type": 1,
+      "value": "second"
+    }
+  ],
+  "attachments.announce.single": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 1,
+      "value": "status"
+    }
+  ],
+  "attachments.card.aria": [
+    {
+      "type": 1,
+      "value": "label"
+    },
+    {
+      "type": 0,
+      "value": ", "
+    },
+    {
+      "type": 1,
+      "value": "meta"
+    },
+    {
+      "type": 0,
+      "value": ", "
+    },
+    {
+      "type": 1,
+      "value": "state"
+    }
+  ],
+  "attachments.card.stateIdle": [
+    {
+      "type": 0,
+      "value": "첨부파일 내려받기, 공유하기"
+    }
+  ],
+  "attachments.issue.blocked": [
+    {
+      "type": 0,
+      "value": "이 배포의 보안 정책이 보관소 주소를 막았습니다"
+    }
+  ],
+  "attachments.issue.cameraPermissionDenied": [
+    {
+      "type": 0,
+      "value": "카메라 접근 권한이 꺼져 있어요"
+    }
+  ],
+  "attachments.issue.cameraUnavailable": [
+    {
+      "type": 0,
+      "value": "카메라를 열지 못했어요"
+    }
+  ],
+  "attachments.issue.forbidden": [
+    {
+      "type": 0,
+      "value": "이 채널에 파일을 올릴 수 없습니다"
+    }
+  ],
+  "attachments.issue.mismatch": [
+    {
+      "type": 0,
+      "value": "올라간 파일이 고른 파일과 다릅니다"
+    }
+  ],
+  "attachments.issue.noArchive": [
+    {
+      "type": 0,
+      "value": "파일 보관소가 연결돼 있지 않습니다"
+    }
+  ],
+  "attachments.issue.permissionDenied": [
+    {
+      "type": 0,
+      "value": "사진 접근 권한이 꺼져 있습니다"
+    }
+  ],
+  "attachments.issue.selectionCancelled": [
+    {
+      "type": 0,
+      "value": "선택을 취소했습니다"
+    }
+  ],
+  "attachments.issue.tooLarge": [
+    {
+      "type": 0,
+      "value": "100MB를 초과함"
+    }
+  ],
+  "attachments.issue.unavailable": [
+    {
+      "type": 0,
+      "value": "업로드 실패"
+    }
+  ],
+  "attachments.kind.archive": [
+    {
+      "type": 0,
+      "value": "압축"
+    }
+  ],
+  "attachments.kind.audio": [
+    {
+      "type": 0,
+      "value": "오디오"
+    }
+  ],
+  "attachments.kind.file": [
+    {
+      "type": 0,
+      "value": "파일"
+    }
+  ],
+  "attachments.kind.font": [
+    {
+      "type": 0,
+      "value": "글꼴"
+    }
+  ],
+  "attachments.kind.image": [
+    {
+      "type": 0,
+      "value": "이미지"
+    }
+  ],
+  "attachments.kind.pdf": [
+    {
+      "type": 0,
+      "value": "PDF"
+    }
+  ],
+  "attachments.kind.pdfDocument": [
+    {
+      "type": 0,
+      "value": "PDF 문서"
+    }
+  ],
+  "attachments.kind.text": [
+    {
+      "type": 0,
+      "value": "텍스트"
+    }
+  ],
+  "attachments.kind.video": [
+    {
+      "type": 0,
+      "value": "동영상"
+    }
+  ],
+  "attachments.meta.kindDurationSize": [
+    {
+      "type": 1,
+      "value": "kind"
+    },
+    {
+      "type": 0,
+      "value": " · "
+    },
+    {
+      "type": 1,
+      "value": "duration"
+    },
+    {
+      "type": 0,
+      "value": " · "
+    },
+    {
+      "type": 1,
+      "value": "size"
+    }
+  ],
+  "attachments.meta.kindSize": [
+    {
+      "type": 1,
+      "value": "kind"
+    },
+    {
+      "type": 0,
+      "value": " · "
+    },
+    {
+      "type": 1,
+      "value": "size"
+    }
+  ],
+  "attachments.next.blocked": [
+    {
+      "type": 0,
+      "value": "서버 설정을 확인하세요"
+    }
+  ],
+  "attachments.next.cameraPermissionDenied": [
+    {
+      "type": 0,
+      "value": "기기 설정에서 카메라 접근을 허용한 뒤 다시 시도해 주세요"
+    }
+  ],
+  "attachments.next.forbidden": [
+    {
+      "type": 0,
+      "value": "채널 관리자에게 문의하세요"
+    }
+  ],
+  "attachments.next.noArchive": [
+    {
+      "type": 0,
+      "value": "서버 관리자에게 알리세요"
+    }
+  ],
+  "attachments.next.permissionDenied": [
+    {
+      "type": 0,
+      "value": "기기 설정에서 사진 접근을 허용한 뒤 다시 시도하세요"
+    }
+  ],
+  "attachments.next.tooLarge": [
+    {
+      "type": 0,
+      "value": "더 작은 파일을 고르세요"
+    }
+  ],
+  "attachments.pdf.notPdf": [
+    {
+      "type": 0,
+      "value": "PDF 형식이 아니어서 열 수 없습니다. 파일을 내려받아 확인하세요."
+    }
+  ],
+  "attachments.pdf.open": [
+    {
+      "type": 0,
+      "value": "새 창에서 PDF 열기"
+    }
+  ],
+  "attachments.pdf.openDesktop": [
+    {
+      "type": 0,
+      "value": "기본 앱에서 PDF 열기"
+    }
+  ],
+  "attachments.pdf.openFailed": [
+    {
+      "type": 0,
+      "value": "PDF를 열지 못했습니다. 다시 시도하거나 파일을 내려받으세요."
+    }
+  ],
+  "attachments.pdf.opening": [
+    {
+      "type": 0,
+      "value": "PDF 여는 중"
+    }
+  ],
+  "attachments.pdf.popupBlocked": [
+    {
+      "type": 0,
+      "value": "새 창이 막혔습니다. 브라우저의 팝업 차단을 풀거나 파일을 내려받으세요."
+    }
+  ],
+  "attachments.preview.failed": [
+    {
+      "type": 0,
+      "value": "미리보기를 불러오지 못했습니다"
+    }
+  ],
+  "attachments.preview.loading": [
+    {
+      "type": 0,
+      "value": "미리보기 불러오는 중"
+    }
+  ],
+  "attachments.sendBlock.failed": [
+    {
+      "type": 0,
+      "value": "실패한 첨부를 지운 뒤 보낼 수 있습니다."
+    }
+  ],
+  "attachments.sendBlock.retryable": [
+    {
+      "type": 0,
+      "value": "실패한 첨부를 다시 시도하거나 지운 뒤 보낼 수 있습니다."
+    }
+  ],
+  "attachments.sendBlock.uploading": [
+    {
+      "type": 0,
+      "value": "업로드가 끝나면 보낼 수 있습니다."
+    }
+  ],
+  "attachments.status.downloadFailed": [
+    {
+      "type": 0,
+      "value": "내려받기 실패"
+    }
+  ],
+  "attachments.status.downloading": [
+    {
+      "type": 0,
+      "value": "내려받는 중"
+    }
+  ],
+  "attachments.status.downloadingPercent": [
+    {
+      "type": 0,
+      "value": "내려받는 중 "
+    },
+    {
+      "type": 2,
+      "value": "percent",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "%"
+    }
+  ],
+  "attachments.status.failedWithNext": [
+    {
+      "type": 1,
+      "value": "reason"
+    },
+    {
+      "type": 0,
+      "value": ". "
+    },
+    {
+      "type": 1,
+      "value": "next"
+    }
+  ],
+  "attachments.status.pairDot": [
+    {
+      "type": 1,
+      "value": "first"
+    },
+    {
+      "type": 0,
+      "value": " · "
+    },
+    {
+      "type": 1,
+      "value": "second"
+    }
+  ],
+  "attachments.status.queued": [
+    {
+      "type": 0,
+      "value": "대기 중"
+    }
+  ],
+  "attachments.status.sizeAndWord": [
+    {
+      "type": 1,
+      "value": "size"
+    },
+    {
+      "type": 0,
+      "value": " · "
+    },
+    {
+      "type": 1,
+      "value": "word"
+    }
+  ],
+  "attachments.status.uploaded": [
+    {
+      "type": 0,
+      "value": "업로드 완료"
+    }
+  ],
+  "attachments.status.uploading": [
+    {
+      "type": 0,
+      "value": "업로드 중"
+    }
+  ],
+  "attachments.status.uploadingNamed": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " 업로드 중"
+    }
+  ],
+  "attachments.tray.countLabel": [
+    {
+      "type": 0,
+      "value": "첨부 파일 "
+    },
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    }
+  ],
+  "attachments.tray.folderRejected": [
+    {
+      "type": 0,
+      "value": "폴더는 붙일 수 없습니다. 안에 있는 파일을 골라 주세요."
+    }
+  ],
   "attachments.tray.noticeDismiss": [
     {
       "type": 0,
@@ -64,6 +608,12 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": " 첨부 빼기"
+    }
+  ],
+  "attachments.tray.title": [
+    {
+      "type": 0,
+      "value": "첨부 파일"
     }
   ],
   "attachments.video.cardLabel": [

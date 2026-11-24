@@ -1,5 +1,5 @@
 import {
-  ATTACH_COPY,
+  ATTACH_COPY as ATTACH_KEYS,
   MAX_ATTACHMENT_BYTES,
   MAX_ATTACHMENTS_PER_MESSAGE,
   beginUpload,
@@ -8,12 +8,14 @@ import {
   failUpload,
   INLINE_PREVIEW_MAX_BYTES,
   progressUpload,
-  uploadIssueCopy,
-  uploadIssueNext,
+  uploadIssueKey,
+  uploadIssueNextKey,
   verifyUpload,
   type AttachmentDraft,
 } from '@momo/core/features/attachments/model';
 import * as declareModule from '@momo/core/features/attachments/declareImageSize';
+import {catalog as koCatalog} from '@momo/core/i18n/generated/ko-KR';
+import {createMessageCopy} from '@momo/core/testkit';
 import {ApiError} from '@momo/core/lib/api';
 import * as api from '@momo/core/lib/api';
 import {NetworkError} from '@momo/core/lib/http';
@@ -61,6 +63,19 @@ import * as uploadTransport from '../src/features/attachments/uploadTransport';
 import {SessionProvider, useSession} from '../src/session/useSession';
 import {recordDeviceOnline} from '../src/features/connection/deviceOnline';
 import {installAppClock} from './fixtures/fakeClock';
+
+// 문장은 사전에 있고 `ATTACH_COPY`·`uploadIssueKey`는 키다(#6058). 폰은 공급자 밖에서 한국어로 물러나므로 이 시험은 제품과 같은 한국어
+// 생성물로 키를 풀어 예전 한국어 문장을 그대로 단정한다.
+const ko = createMessageCopy({messageLocale: 'ko-KR', catalog: koCatalog});
+const ATTACH_COPY = Object.fromEntries(
+  Object.entries(ATTACH_KEYS).map(([name, key]) => [name, ko(key as never)]),
+) as Record<keyof typeof ATTACH_KEYS, string>;
+const uploadIssueCopy = (issue: Parameters<typeof uploadIssueKey>[0]) =>
+  ko(uploadIssueKey(issue));
+const uploadIssueNext = (issue: Parameters<typeof uploadIssueNextKey>[0]) => {
+  const key = uploadIssueNextKey(issue);
+  return key === null ? null : ko(key);
+};
 
 const EMPTY = makeDirectory([]);
 const TARGET = {workspaceId: 'ws-1', channelId: 'channel-1'};

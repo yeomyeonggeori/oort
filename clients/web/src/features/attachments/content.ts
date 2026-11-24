@@ -1,8 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import {
-  ATTACH_COPY,
-  hasPdfSignature,
-} from "@momo/core/features/attachments/model";
+import { hasPdfSignature } from "@momo/core/features/attachments/model";
 import { fetchAttachmentContent } from "@momo/core/lib/api";
 import { downloads } from "@/features/downloads/downloadsStore";
 import { IS_TAURI } from "@/lib/env";
@@ -271,7 +268,7 @@ function readAsArrayBuffer(blob: Blob): Promise<ArrayBuffer> {
 }
 
 /** 클릭 순간 부른다. 막혔으면 null 이다. */
-export function openPdfWindow(): Window | null {
+export function openPdfWindow(openingText: string): Window | null {
   const target = window.open("", "_blank");
   if (target === null) return null;
   try {
@@ -282,8 +279,8 @@ export function openPdfWindow(): Window | null {
   try {
     // 바이트가 오기 전의 빈 창이 흰 면으로만 서 있지 않게 한 줄을 적는다.
     // 마크업이 아니라 텍스트 노드다: 이 문서는 이 앱과 같은 출처다.
-    target.document.title = ATTACH_COPY.openingPdf;
-    target.document.body.textContent = ATTACH_COPY.openingPdf;
+    target.document.title = openingText;
+    target.document.body.textContent = openingText;
   } catch {
     /* 적지 못해도 열기는 계속한다. */
   }

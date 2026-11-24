@@ -8,7 +8,7 @@ import {
   PdfOpenError,
   type PdfOpenFailure,
 } from "@/features/attachments/content";
-import { pdfOpenLabel, pdfOpenMode } from "@/features/attachments/pdfOpenModel";
+import { pdfOpenLabelKey, pdfOpenMode } from "@/features/attachments/pdfOpenModel";
 import {
   ATTACH_COPY,
   attachmentDisplayName,
@@ -16,6 +16,7 @@ import {
 } from "@momo/core/features/attachments/model";
 import { Tooltip } from "@/design/ui/tooltip";
 import { useRowTipSide } from "@/features/timeline/rowTipSide";
+import { useFormatMessage } from "@/i18n/useFormatMessage";
 
 // PDF 카드의 「새 창에서 열기」 (#2701). 왜 새 창인지는 content.ts 의 PDF 절이
 // 말한다(CSP 가 임베드를 막는다). 이 파일은 그 버튼의 모양과 실패 문장뿐이다.
@@ -37,12 +38,13 @@ export function AttachmentOpenPdfButton({
   // 대화 줄의 파일 카드에만 서므로 툴팁 방향은 단추 자리로 가른다(#5980, `rowTipSide.ts`).
   const tip = useRowTipSide();
   const mode = pdfOpenMode();
-  const label = pdfOpenLabel(mode);
+  const formatMessage = useFormatMessage();
+  const label = formatMessage(pdfOpenLabelKey(mode));
   const fail = (error: unknown) =>
     onFailed?.(error instanceof PdfOpenError ? error.reason : "failed");
 
   return (
-    <Tooltip label={busy ? ATTACH_COPY.openingPdf : label} side={tip.side}>
+    <Tooltip label={busy ? formatMessage(ATTACH_COPY.openingPdf) : label} side={tip.side}>
       <button
         type="button"
         aria-busy={busy || undefined}
@@ -61,7 +63,7 @@ export function AttachmentOpenPdfButton({
             return;
           }
           // 창은 await **앞**에서 연다. 뒤에서 열면 팝업 차단에 걸린다.
-          const target = openPdfWindow();
+          const target = openPdfWindow(formatMessage(ATTACH_COPY.openingPdf));
           if (target === null) {
             onFailed?.("blocked");
             return;
@@ -71,7 +73,7 @@ export function AttachmentOpenPdfButton({
             .catch(fail)
             .finally(() => setBusy(false));
         }}
-        aria-label={`${attachmentDisplayName(attachment)} ${label}`}
+        aria-label={`${attachmentDisplayName(formatMessage, attachment)} ${label}`}
         data-testid="attachment-open-pdf"
         data-busy={busy ? "" : undefined}
         data-row-action=""

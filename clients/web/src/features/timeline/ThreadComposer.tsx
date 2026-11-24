@@ -58,7 +58,7 @@ import { ComposerLinkPreview } from "@/features/chat/ComposerLinkPreview";
 import { useComposerLinkPreview } from "@/features/chat/useComposerLinkPreview";
 import { EmojiPickerDialog } from "@/features/emoji/EmojiPickerDialog";
 import {
-  sendBlockCopy,
+  sendBlockKey,
   sendBlockReason,
 } from "@momo/core/features/attachments/model";
 import { COMPOSER_MAX_ROWS, useAutoGrow } from "./useAutoGrow";
@@ -278,7 +278,8 @@ export function ThreadComposer({
     addFiles(trayKey, attachTarget, files, batch);
   const drop = useComposerDropZone(onFiles);
   const attachBlock = sendBlockReason(tray.drafts);
-  const attachBlockCopy = sendBlockCopy(tray.drafts);
+  const attachBlockKey = sendBlockKey(tray.drafts);
+  const attachBlockCopy = attachBlockKey === null ? null : formatMessage(attachBlockKey);
 
   // 답글도 한 줄로 끝나지 않는다. 메인 컴포저가 1행에서 6행까지 자라는 것과 같은
   // 규칙이다 (R2 M4) — 다른 것은 이 창이 320px 패널 안에 있어서 접히는 줄이 더

@@ -20,7 +20,7 @@ import type {MessageAttachment, RosterMember} from '@momo/core/lib/api';
 import {
   ATTACH_COPY,
   MAX_ATTACHMENTS_PER_MESSAGE,
-  sendBlockCopy,
+  sendBlockKey,
   sendBlockReason,
 } from '@momo/core/features/attachments/model';
 import {
@@ -1429,7 +1429,7 @@ export function Composer({
   );
   const attachmentSurface = useAttachmentSurface(attachmentKey);
   const attachmentBlock = sendBlockReason(attachmentSurface.drafts);
-  const attachmentBlockCopy = sendBlockCopy(attachmentSurface.drafts);
+  const attachmentBlockKey = sendBlockKey(attachmentSurface.drafts);
 
   // 링크를 넣고 멈추면 입력창 위에 카드가 뜬다(#5016, 웹 입력칸 #5005 와 같은 규칙). 보낼 방은 첨부가 올라가는 방과
   // 같다(워크스페이스·채널, 스레드면 뿌리 메시지까지) — 이 입력창은 채널과 스레드가 함께 쓰고, 방을 모르면(첨부 대상이
@@ -2826,7 +2826,7 @@ export function Composer({
           <Pressable
             ref={attachRef}
             accessibilityRole="button"
-            accessibilityLabel={ATTACH_COPY.attach}
+            accessibilityLabel={formatMessage(ATTACH_COPY.attach)}
             accessibilityHint={
               offline
                 ? offlineNote ?? COMPOSER_OFFLINE_COPY
@@ -3036,7 +3036,9 @@ export function Composer({
           accessibilityHint={
             offline
               ? offlineNote ?? COMPOSER_OFFLINE_COPY
-              : attachmentBlockCopy ?? undefined
+              : attachmentBlockKey === null
+                ? undefined
+                : formatMessage(attachmentBlockKey)
           }
           accessibilityState={{disabled: !canSend}}
           disabled={!canSend}

@@ -223,6 +223,7 @@ export function VideoViewerPage({
   onActiveVideo: (handle: ActiveVideoHandle | null) => void;
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
+  const formatMessage = useFormatMessage();
   const posterUri = useAttachmentPoster(workspaceId, channelId, attachment, true);
 
   return (
@@ -232,7 +233,7 @@ export function VideoViewerPage({
         // 레이아웃 속성만 있는 View 는 평탄화되어 네이티브 뷰가 사라질 수 있다 — 그러면 닿는 대상이 못 된다.
         collapsable={false}
         accessible={!active}
-        accessibilityLabel={attachmentDisplayName(attachment)}
+        accessibilityLabel={attachmentDisplayName(formatMessage, attachment)}
         testID="attachment-viewer-page"
         {...responder}
       >

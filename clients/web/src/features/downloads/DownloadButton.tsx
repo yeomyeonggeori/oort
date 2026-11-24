@@ -5,6 +5,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/design/ui/popover";
 import { Tooltip } from "@/design/ui/tooltip";
 import { IS_TAURI } from "@/lib/env";
 import { DownloadPanel } from "./DownloadPanel";
+import { useFormatMessage } from "@/i18n/useFormatMessage";
 import { DOWNLOAD_COPY, downloadButtonLabel, finishedAnnouncement } from "./downloadsCopy";
 import { buttonView, type DownloadItem, type DownloadList, type RowAction } from "./downloadsModel";
 import {
@@ -41,6 +42,7 @@ export function DownloadButton({ store = downloads }: { store?: DownloadsStore }
 }
 
 function DownloadControl({ store }: { store: DownloadsStore }) {
+  const formatMessage = useFormatMessage();
   const items = useDownloadList(store);
   const view = useMemo(() => buttonView(items), [items]);
   const [open, setOpen] = useState(false);
@@ -51,10 +53,10 @@ function DownloadControl({ store }: { store: DownloadsStore }) {
 
   // 막 끝난 건을 낭독한다: 점은 색이라 이 줄이 없으면 보조기술은 끝난 줄을 모른다.
   useEffect(() => {
-    const said = finishedAnnouncement(previous.current, items);
+    const said = finishedAnnouncement(formatMessage, previous.current, items);
     previous.current = items;
     if (said !== null) setAnnouncement(said);
-  }, [items]);
+  }, [formatMessage, items]);
 
   // 열린 동안 끝난 건은 곧바로 본 것이다(열려 있는데 점이 켜지면 안 된다).
   useEffect(() => {

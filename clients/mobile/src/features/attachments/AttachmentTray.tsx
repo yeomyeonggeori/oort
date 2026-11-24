@@ -19,12 +19,12 @@ import {
   draftStatusLine,
   isImageMime,
   isRetryableIssue,
-  sendBlockCopy,
+  sendBlockKey,
   sendBlockReason,
   showsDraftThumbnail,
   splitFileName,
-  uploadIssueCopy,
-  uploadIssueNext,
+  uploadIssueKey,
+  uploadIssueNextKey,
   type AttachmentDraft,
   type UploadIssue,
   type UploadReasonFor,
@@ -68,7 +68,9 @@ export function AttachmentTray({
   inset?: number;
 }): React.JSX.Element | null {
   const styles = useStyles(buildStyles);
-  const blocked = sendBlockCopy(drafts);
+  const formatMessage = useFormatMessage();
+  const blockedKey = sendBlockKey(drafts);
+  const blocked = blockedKey === null ? null : formatMessage(blockedKey);
   const blockReason = sendBlockReason(drafts);
   // 파일·실패 칩은 가로 줄 안에서도 **줄 폭 하나**를 쓴다(이름·상태 문장이 좁은 칸에서 네 줄로 접히지 않게). 줄 폭 = 창 − 알약의 바깥 여백(도크 가장자리) − 안쪽 좌우 `inset`. 다음 칩은 오른쪽에서 비쳐 민다.
   const {width: windowWidth} = useWindowDimensions();
@@ -86,10 +88,10 @@ export function AttachmentTray({
   const reasonFor = useUploadReasonFor();
   const announcedDrafts = useRef<AttachmentDraft[]>([]);
   useEffect(() => {
-    const sentence = draftAnnouncement(announcedDrafts.current, drafts, reasonFor);
+    const sentence = draftAnnouncement(formatMessage, announcedDrafts.current, drafts, reasonFor);
     announcedDrafts.current = drafts;
     if (sentence !== null) AccessibilityInfo.announceForAccessibility(sentence);
-  }, [drafts, reasonFor]);
+  }, [drafts, formatMessage, reasonFor]);
 
   // picker 사유(선택 취소·권한 거부)는 draft가 되기 전의 실패라 위 문장에
   // 실리지 않는다 — 같은 채널로 따로 말한다. 사유가 걷히는 전이는 침묵한다.
@@ -98,19 +100,25 @@ export function AttachmentTray({
     if (pickerIssue === announcedPickerIssue.current) return;
     announcedPickerIssue.current = pickerIssue;
     if (pickerIssue === null) return;
-    const next = uploadIssueNext(pickerIssue);
+    const nextKey = uploadIssueNextKey(pickerIssue);
+    const reason = formatMessage(uploadIssueKey(pickerIssue));
     AccessibilityInfo.announceForAccessibility(
-      next === null
-        ? uploadIssueCopy(pickerIssue)
-        : `${uploadIssueCopy(pickerIssue)}. ${next}`,
+      nextKey === null
+        ? reason
+        : formatMessage('attachments.status.failedWithNext', {
+            reason,
+            next: formatMessage(nextKey),
+          }),
     );
-  }, [pickerIssue]);
+  }, [formatMessage, pickerIssue]);
 
   if (drafts.length === 0 && pickerIssue === null) return null;
 
   const pickerReason =
-    pickerIssue === null ? null : uploadIssueCopy(pickerIssue);
-  const pickerNext = pickerIssue === null ? null : uploadIssueNext(pickerIssue);
+    pickerIssue === null ? null : formatMessage(uploadIssueKey(pickerIssue));
+  const pickerNextKey =
+    pickerIssue === null ? null : uploadIssueNextKey(pickerIssue);
+  const pickerNext = pickerNextKey === null ? null : formatMessage(pickerNextKey);
 
   return (
     <View
@@ -124,13 +132,13 @@ export function AttachmentTray({
             <View style={styles.heading}>
               <Pressable
                 accessibilityRole="button"
-                accessibilityLabel={ATTACH_COPY.clearAll}
+                accessibilityLabel={formatMessage(ATTACH_COPY.clearAll)}
                 hitSlop={slopTo(line.meta)}
                 onPress={onClear}
                 style={({pressed}) => [styles.clear, pressed && styles.pressed]}
                 testID="attachment-clear"
               >
-                <Text style={styles.clearLabel}>{ATTACH_COPY.clearAll}</Text>
+                <Text style={styles.clearLabel}>{formatMessage(ATTACH_COPY.clearAll)}</Text>
               </Pressable>
             </View>
           ) : null}
@@ -222,9 +230,10 @@ function DraftRow({
   onRetry: (localId: string) => void;
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
+  const formatMessage = useFormatMessage();
   const reasonFor = useUploadReasonFor();
-  const status = draftStatusLine(draft, reasonFor);
-  const label = attachmentDisplayName(draft);
+  const status = draftStatusLine(formatMessage, draft, reasonFor);
+  const label = attachmentDisplayName(formatMessage, draft);
   const name = splitFileName(label);
   const retryable =
     draft.status === 'failed' &&
@@ -246,7 +255,7 @@ function DraftRow({
           accessibilityRole="progressbar"
           accessibilityValue={
             status.percent === null
-              ? {text: ATTACH_COPY.uploading}
+              ? {text: formatMessage(ATTACH_COPY.uploading)}
               : {min: 0, max: 100, now: status.percent}
           }
           style={styles.progressTrack}
@@ -272,7 +281,9 @@ function DraftRow({
   const remove = (
     <Pressable
       accessibilityRole="button"
-      accessibilityLabel={`${label} ${ATTACH_COPY.remove}`}
+      accessibilityLabel={formatMessage('attachments.action.removeNamed', {
+        name: label,
+      })}
       // 썸네일 위 ✕ 는 작은 원(`REMOVE_FACE`)이고 눌리는 면은 hitSlop 이 44 로 채운다(#5325). 파일 칩의 ✕ 는 44 면 그대로다.
       hitSlop={thumbUri !== undefined ? slopTo(REMOVE_FACE) : undefined}
       onPress={() => onRemove(draft.localId)}
@@ -341,12 +352,14 @@ function DraftRow({
       {retryable ? (
         <Pressable
           accessibilityRole="button"
-          accessibilityLabel={`${label} ${ATTACH_COPY.retry}`}
+          accessibilityLabel={formatMessage('attachments.action.retryNamed', {
+            name: label,
+          })}
           onPress={() => onRetry(draft.localId)}
           style={({pressed}) => [styles.retry, pressed && styles.pressed]}
           testID="attachment-draft-retry"
         >
-          <Text style={styles.retryLabel}>{ATTACH_COPY.retry}</Text>
+          <Text style={styles.retryLabel}>{formatMessage(ATTACH_COPY.retry)}</Text>
         </Pressable>
       ) : null}
       {remove}

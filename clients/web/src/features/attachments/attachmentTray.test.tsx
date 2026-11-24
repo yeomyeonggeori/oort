@@ -3,7 +3,7 @@
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import {
-  ATTACH_COPY,
+  ATTACH_COPY as ATTACH_KEYS,
   completeUpload,
   draftFor,
   failUpload,
@@ -13,6 +13,14 @@ import { LocaleProvider } from "@/i18n/LocaleProvider";
 import { koreanLocaleForTest } from "@/i18n/koreanLocaleForTest";
 import type { AppLocale } from "@/i18n/localeStore";
 import { AttachmentTray } from "./AttachmentTray";
+import { catalog as koCatalog } from "@momo/core/i18n/generated/ko-KR";
+import { createMessageCopy } from "@momo/core/testkit";
+
+// `ATTACH_COPY`는 사전 키 표다(#6058). 이 시험은 한국어 생성물로 풀어 화면의 한국어 문장과 그대로 견준다.
+const koCopy = createMessageCopy({ messageLocale: "ko-KR", catalog: koCatalog });
+const ATTACH_COPY = Object.fromEntries(
+  Object.entries(ATTACH_KEYS).map(([name, key]) => [name, koCopy(key as never)])
+) as Record<keyof typeof ATTACH_KEYS, string>;
 
 // 입력창 안 첨부 줄의 상호작용 (#5200). 여기서 재는 것:
 //   1. 카드 줄의 탭 정거장은 하나이고 ×는 탭 순서에 없다(로빙).

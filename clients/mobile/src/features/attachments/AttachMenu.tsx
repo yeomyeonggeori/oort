@@ -23,6 +23,7 @@ import {useSafeAreaInsets} from 'react-native-safe-area-context';
 import {ATTACH_COPY} from '@momo/core/features/attachments/model';
 
 import {BAR_CONTROL_MAX_SCALE} from '../../design/atoms';
+import {useFormatMessage} from '../../i18n/useFormatMessage';
 import {
   blurSupported,
   GLASS_BLUR_INTENSITY,
@@ -305,6 +306,7 @@ export function AttachMenu({
   onDismissed?: () => void;
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
+  const formatMessage = useFormatMessage();
   const palette = usePalette();
   const insets = useSafeAreaInsets();
   const win = useWindowDimensions();
@@ -584,7 +586,7 @@ export function AttachMenu({
           testID="attach-menu-backdrop"
         />
         <Animated.View
-          accessibilityLabel={ATTACH_COPY.attach}
+          accessibilityLabel={formatMessage(ATTACH_COPY.attach)}
           accessibilityRole="menu"
           style={[
             styles.card,

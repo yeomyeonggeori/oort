@@ -83,7 +83,7 @@ import {
   useAttachmentSurface,
 } from "@/features/attachments/draftStore";
 import {
-  sendBlockCopy,
+  sendBlockKey,
   sendBlockReason,
 } from "@momo/core/features/attachments/model";
 import { useComposerDropZone } from "@/features/attachments/useComposerDropZone";
@@ -447,7 +447,8 @@ export function Composer({
   const attachBlock = sendBlockReason(tray.drafts);
   // 발치의 문장과 버튼의 툴팁이 **한 곳**에서 난다. 갈라 두면 하나만 고쳐지고,
   // 리뷰 M-1 이 잡은 "없는 버튼을 가리키는 안내"가 툴팁에만 남는다.
-  const attachBlockCopy = sendBlockCopy(tray.drafts);
+  const attachBlockKey = sendBlockKey(tray.drafts);
+  const attachBlockCopy = attachBlockKey === null ? null : formatMessage(attachBlockKey);
 
   // ── 「작성 중」 (ADR-0149) ────────────────────────────────────────────────
   //

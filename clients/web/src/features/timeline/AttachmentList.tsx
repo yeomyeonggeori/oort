@@ -7,7 +7,7 @@ import { AttachmentDownloadButton } from "@/features/attachments/AttachmentDownl
 import { AttachmentOpenPdfButton } from "@/features/attachments/AttachmentOpenPdfButton";
 import {
   canOpenPdf,
-  pdfOpenFailureCopy,
+  pdfOpenFailureKey,
 } from "@/features/attachments/pdfOpenModel";
 import type { PdfOpenFailure } from "@/features/attachments/content";
 import { useAttachmentPreview } from "@/features/attachments/content";
@@ -21,13 +21,14 @@ import {
   type NaturalSize,
 } from "@/features/attachments/inlineImageModel";
 import { useRevealOnHover } from "@/features/attachments/useRevealOnHover";
+import { useFormatMessage } from "@/i18n/useFormatMessage";
 import {
   ATTACH_COPY,
   attachmentDisplayName,
   attachmentImageSizeOf,
   formatBytes,
-  formatMimeLabel,
-  genericAttachmentName,
+  mimeLabelKey,
+  genericAttachmentNameKey,
   imageGridColumns,
   isImageMime,
   showsInlinePreview,
@@ -163,10 +164,14 @@ function ImageTile({
   onOpen: (opener: HTMLButtonElement) => void;
   registerSource: (id: string, node: HTMLImageElement | null) => void;
 }) {
+  const formatMessage = useFormatMessage();
   const [failed, setFailed] = useState(false);
   const { revealed, handlers } = useRevealOnHover();
-  const label = attachmentDisplayName(attachment);
-  const actionName = `${label}${position === null ? "" : ` ${position}`} ${ATTACH_COPY.expandImage}`;
+  const label = attachmentDisplayName(formatMessage, attachment);
+  const actionName =
+    position === null
+      ? formatMessage("attachments.action.expandNamed", { label })
+      : formatMessage("attachments.action.expandNamedAt", { label, position });
   const preview = useAttachmentPreview(
     workspaceId,
     channelId,
@@ -253,12 +258,12 @@ function ImageTile({
             />
             {/* 글은 틀(`figure`, 이 칸의 `relative`) 위에 얹는다: 틀이 그림과 같은 크기라 같은 자리다. */}
             <span className="absolute inset-0 flex items-center justify-center px-2 text-meta text-ink-muted">
-              {waiting ? ATTACH_COPY.previewLoading : ATTACH_COPY.previewFailed}
+              {formatMessage(waiting ? ATTACH_COPY.previewLoading : ATTACH_COPY.previewFailed)}
             </span>
           </>
         ) : (
           <span className="px-2 text-meta text-ink-muted">
-            {waiting ? ATTACH_COPY.previewLoading : ATTACH_COPY.previewFailed}
+            {formatMessage(waiting ? ATTACH_COPY.previewLoading : ATTACH_COPY.previewFailed)}
           </span>
         )}
       </button>
@@ -275,7 +280,7 @@ function ImageTile({
             onStarted={() => setFailed(false)}
             onFailed={() => setFailed(true)}
           />
-          <Tooltip label={ATTACH_COPY.expandImage} side="bottom">
+          <Tooltip label={formatMessage(ATTACH_COPY.expandImage)} side="bottom">
             <button
               type="button"
               data-row-action=""
@@ -296,7 +301,7 @@ function ImageTile({
           className="absolute inset-x-1 bottom-1 rounded-sm bg-surface px-1 text-meta text-danger"
           data-testid="attachment-download-failed"
         >
-          {ATTACH_COPY.downloadFailed}
+          {formatMessage(ATTACH_COPY.downloadFailed)}
         </span>
       )}
     </figure>
@@ -354,12 +359,13 @@ function FileCard({
   channelId: string;
   attachment: MessageAttachment;
 }) {
+  const formatMessage = useFormatMessage();
   const [failed, setFailed] = useState(false);
   const [openFailure, setOpenFailure] = useState<PdfOpenFailure | null>(null);
   const { revealed, handlers } = useRevealOnHover({ alwaysOnTouch: true });
   const Icon = isImageMime(attachment.mime) ? ImageIcon : FileText;
   const opensPdf = canOpenPdf(attachment);
-  const label = attachmentDisplayName(attachment);
+  const label = attachmentDisplayName(formatMessage, attachment);
   const openFailureRef = useRef<HTMLParagraphElement | null>(null);
   // 실패 줄이 타임라인 맨 아래 행에서 생기면 컴포저 뒤로 들어간다(캡처에서 실측:
   // 행이 자라도 목록은 따라 내려가지 않는다). 문장이 선 순간 그 줄만 보이는
@@ -400,13 +406,16 @@ function FileCard({
           {label}
         </span>
         <span className="text-meta text-ink-muted" data-testid="attachment-meta">
-          {label === genericAttachmentName(attachment.mime)
+          {label === formatMessage(genericAttachmentNameKey(attachment.mime))
             ? formatBytes(attachment.sizeBytes)
-            : `${formatMimeLabel(attachment.mime)} · ${formatBytes(attachment.sizeBytes)}`}
+            : formatMessage("attachments.meta.kindSize", {
+                kind: formatMessage(mimeLabelKey(attachment.mime)),
+                size: formatBytes(attachment.sizeBytes),
+              })}
         </span>
         {failed && (
           <span className="text-meta text-danger" data-testid="attachment-download-failed">
-            {ATTACH_COPY.downloadFailed}
+            {formatMessage(ATTACH_COPY.downloadFailed)}
           </span>
         )}
       </span>
@@ -460,7 +469,7 @@ function FileCard({
         className={cn("max-w-pane-lg text-meta text-danger", openFailure !== null && "mt-1")}
         data-testid="attachment-open-failed"
       >
-        {openFailure === null ? null : pdfOpenFailureCopy(openFailure)}
+        {openFailure === null ? null : formatMessage(pdfOpenFailureKey(openFailure))}
       </p>
     </div>
   );

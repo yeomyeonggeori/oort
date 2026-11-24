@@ -34,6 +34,625 @@ export const catalog: MessageCatalog = {
       "value": "Search shortcuts"
     }
   ],
+  "attachments.action.attach": [
+    {
+      "type": 0,
+      "value": "Attach files"
+    }
+  ],
+  "attachments.action.clearAll": [
+    {
+      "type": 0,
+      "value": "Clear all"
+    }
+  ],
+  "attachments.action.download": [
+    {
+      "type": 0,
+      "value": "Download attachment"
+    }
+  ],
+  "attachments.action.downloadNamed": [
+    {
+      "type": 0,
+      "value": "Download "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    }
+  ],
+  "attachments.action.expandImage": [
+    {
+      "type": 0,
+      "value": "View larger"
+    }
+  ],
+  "attachments.action.expandNamed": [
+    {
+      "type": 0,
+      "value": "View "
+    },
+    {
+      "type": 1,
+      "value": "label"
+    },
+    {
+      "type": 0,
+      "value": " larger"
+    }
+  ],
+  "attachments.action.expandNamedAt": [
+    {
+      "type": 0,
+      "value": "View "
+    },
+    {
+      "type": 1,
+      "value": "label"
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 1,
+      "value": "position"
+    },
+    {
+      "type": 0,
+      "value": " larger"
+    }
+  ],
+  "attachments.action.remove": [
+    {
+      "type": 0,
+      "value": "Remove attachment"
+    }
+  ],
+  "attachments.action.removeNamed": [
+    {
+      "type": 0,
+      "value": "Remove attachment "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    }
+  ],
+  "attachments.action.retryNamed": [
+    {
+      "type": 0,
+      "value": "Retry "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    }
+  ],
+  "attachments.announce.firstGroup": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " attachment"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " attachments"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    },
+    {
+      "type": 0,
+      "value": ": "
+    },
+    {
+      "type": 1,
+      "value": "word"
+    }
+  ],
+  "attachments.announce.nextGroup": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " attachment"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " attachments"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    },
+    {
+      "type": 0,
+      "value": ": "
+    },
+    {
+      "type": 1,
+      "value": "word"
+    }
+  ],
+  "attachments.announce.pair": [
+    {
+      "type": 1,
+      "value": "first"
+    },
+    {
+      "type": 0,
+      "value": ", "
+    },
+    {
+      "type": 1,
+      "value": "second"
+    }
+  ],
+  "attachments.announce.single": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 1,
+      "value": "status"
+    }
+  ],
+  "attachments.card.aria": [
+    {
+      "type": 1,
+      "value": "label"
+    },
+    {
+      "type": 0,
+      "value": ", "
+    },
+    {
+      "type": 1,
+      "value": "meta"
+    },
+    {
+      "type": 0,
+      "value": ", "
+    },
+    {
+      "type": 1,
+      "value": "state"
+    }
+  ],
+  "attachments.card.stateIdle": [
+    {
+      "type": 0,
+      "value": "Download attachment, share"
+    }
+  ],
+  "attachments.issue.blocked": [
+    {
+      "type": 0,
+      "value": "This deployment's security policy blocked the storage address"
+    }
+  ],
+  "attachments.issue.cameraPermissionDenied": [
+    {
+      "type": 0,
+      "value": "Camera access is turned off"
+    }
+  ],
+  "attachments.issue.cameraUnavailable": [
+    {
+      "type": 0,
+      "value": "Couldn't open the camera"
+    }
+  ],
+  "attachments.issue.forbidden": [
+    {
+      "type": 0,
+      "value": "You can't upload files to this channel"
+    }
+  ],
+  "attachments.issue.mismatch": [
+    {
+      "type": 0,
+      "value": "The uploaded file doesn't match the one you picked"
+    }
+  ],
+  "attachments.issue.noArchive": [
+    {
+      "type": 0,
+      "value": "File storage isn't connected"
+    }
+  ],
+  "attachments.issue.permissionDenied": [
+    {
+      "type": 0,
+      "value": "Photo access is turned off"
+    }
+  ],
+  "attachments.issue.selectionCancelled": [
+    {
+      "type": 0,
+      "value": "Selection cancelled"
+    }
+  ],
+  "attachments.issue.tooLarge": [
+    {
+      "type": 0,
+      "value": "Over the 100 MB limit"
+    }
+  ],
+  "attachments.issue.unavailable": [
+    {
+      "type": 0,
+      "value": "Upload failed"
+    }
+  ],
+  "attachments.kind.archive": [
+    {
+      "type": 0,
+      "value": "Archive"
+    }
+  ],
+  "attachments.kind.audio": [
+    {
+      "type": 0,
+      "value": "Audio"
+    }
+  ],
+  "attachments.kind.file": [
+    {
+      "type": 0,
+      "value": "File"
+    }
+  ],
+  "attachments.kind.font": [
+    {
+      "type": 0,
+      "value": "Font"
+    }
+  ],
+  "attachments.kind.image": [
+    {
+      "type": 0,
+      "value": "Image"
+    }
+  ],
+  "attachments.kind.pdf": [
+    {
+      "type": 0,
+      "value": "PDF"
+    }
+  ],
+  "attachments.kind.pdfDocument": [
+    {
+      "type": 0,
+      "value": "PDF document"
+    }
+  ],
+  "attachments.kind.text": [
+    {
+      "type": 0,
+      "value": "Text"
+    }
+  ],
+  "attachments.kind.video": [
+    {
+      "type": 0,
+      "value": "Video"
+    }
+  ],
+  "attachments.meta.kindDurationSize": [
+    {
+      "type": 1,
+      "value": "kind"
+    },
+    {
+      "type": 0,
+      "value": " · "
+    },
+    {
+      "type": 1,
+      "value": "duration"
+    },
+    {
+      "type": 0,
+      "value": " · "
+    },
+    {
+      "type": 1,
+      "value": "size"
+    }
+  ],
+  "attachments.meta.kindSize": [
+    {
+      "type": 1,
+      "value": "kind"
+    },
+    {
+      "type": 0,
+      "value": " · "
+    },
+    {
+      "type": 1,
+      "value": "size"
+    }
+  ],
+  "attachments.next.blocked": [
+    {
+      "type": 0,
+      "value": "Check the server settings"
+    }
+  ],
+  "attachments.next.cameraPermissionDenied": [
+    {
+      "type": 0,
+      "value": "Allow camera access in device settings, then try again"
+    }
+  ],
+  "attachments.next.forbidden": [
+    {
+      "type": 0,
+      "value": "Ask a channel admin"
+    }
+  ],
+  "attachments.next.noArchive": [
+    {
+      "type": 0,
+      "value": "Tell a server admin"
+    }
+  ],
+  "attachments.next.permissionDenied": [
+    {
+      "type": 0,
+      "value": "Allow photo access in device settings, then try again"
+    }
+  ],
+  "attachments.next.tooLarge": [
+    {
+      "type": 0,
+      "value": "Pick a smaller file"
+    }
+  ],
+  "attachments.pdf.notPdf": [
+    {
+      "type": 0,
+      "value": "This isn't a PDF, so it can't be opened. Download the file to check it."
+    }
+  ],
+  "attachments.pdf.open": [
+    {
+      "type": 0,
+      "value": "Open PDF in a new window"
+    }
+  ],
+  "attachments.pdf.openDesktop": [
+    {
+      "type": 0,
+      "value": "Open PDF in the default app"
+    }
+  ],
+  "attachments.pdf.openFailed": [
+    {
+      "type": 0,
+      "value": "Couldn't open the PDF. Try again or download the file."
+    }
+  ],
+  "attachments.pdf.opening": [
+    {
+      "type": 0,
+      "value": "Opening PDF"
+    }
+  ],
+  "attachments.pdf.popupBlocked": [
+    {
+      "type": 0,
+      "value": "The new window was blocked. Allow pop-ups in your browser or download the file."
+    }
+  ],
+  "attachments.preview.failed": [
+    {
+      "type": 0,
+      "value": "Couldn't load the preview"
+    }
+  ],
+  "attachments.preview.loading": [
+    {
+      "type": 0,
+      "value": "Loading preview"
+    }
+  ],
+  "attachments.sendBlock.failed": [
+    {
+      "type": 0,
+      "value": "Remove the failed attachments, then send."
+    }
+  ],
+  "attachments.sendBlock.retryable": [
+    {
+      "type": 0,
+      "value": "Retry or remove the failed attachments, then send."
+    }
+  ],
+  "attachments.sendBlock.uploading": [
+    {
+      "type": 0,
+      "value": "You can send once the upload finishes."
+    }
+  ],
+  "attachments.status.downloadFailed": [
+    {
+      "type": 0,
+      "value": "Download failed"
+    }
+  ],
+  "attachments.status.downloading": [
+    {
+      "type": 0,
+      "value": "Downloading"
+    }
+  ],
+  "attachments.status.downloadingPercent": [
+    {
+      "type": 0,
+      "value": "Downloading "
+    },
+    {
+      "type": 2,
+      "value": "percent",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "%"
+    }
+  ],
+  "attachments.status.failedWithNext": [
+    {
+      "type": 1,
+      "value": "reason"
+    },
+    {
+      "type": 0,
+      "value": ". "
+    },
+    {
+      "type": 1,
+      "value": "next"
+    }
+  ],
+  "attachments.status.pairDot": [
+    {
+      "type": 1,
+      "value": "first"
+    },
+    {
+      "type": 0,
+      "value": " · "
+    },
+    {
+      "type": 1,
+      "value": "second"
+    }
+  ],
+  "attachments.status.queued": [
+    {
+      "type": 0,
+      "value": "Waiting"
+    }
+  ],
+  "attachments.status.sizeAndWord": [
+    {
+      "type": 1,
+      "value": "size"
+    },
+    {
+      "type": 0,
+      "value": " · "
+    },
+    {
+      "type": 1,
+      "value": "word"
+    }
+  ],
+  "attachments.status.uploaded": [
+    {
+      "type": 0,
+      "value": "Uploaded"
+    }
+  ],
+  "attachments.status.uploading": [
+    {
+      "type": 0,
+      "value": "Uploading"
+    }
+  ],
+  "attachments.status.uploadingNamed": [
+    {
+      "type": 0,
+      "value": "Uploading "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    }
+  ],
+  "attachments.tray.countLabel": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " attachment"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " attachments"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "attachments.tray.folderRejected": [
+    {
+      "type": 0,
+      "value": "Folders can't be attached. Pick the files inside instead."
+    }
+  ],
   "attachments.tray.noticeDismiss": [
     {
       "type": 0,
@@ -93,6 +712,12 @@ export const catalog: MessageCatalog = {
     {
       "type": 1,
       "value": "name"
+    }
+  ],
+  "attachments.tray.title": [
+    {
+      "type": 0,
+      "value": "Attachments"
     }
   ],
   "attachments.video.cardLabel": [

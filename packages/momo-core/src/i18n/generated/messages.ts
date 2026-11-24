@@ -4,9 +4,76 @@ export const messageKeys = [
   "app.shortcutHelp.empty",
   "app.shortcutHelp.reopenHint",
   "app.shortcutHelp.search",
+  "attachments.action.attach",
+  "attachments.action.clearAll",
+  "attachments.action.download",
+  "attachments.action.downloadNamed",
+  "attachments.action.expandImage",
+  "attachments.action.expandNamed",
+  "attachments.action.expandNamedAt",
+  "attachments.action.remove",
+  "attachments.action.removeNamed",
+  "attachments.action.retryNamed",
+  "attachments.announce.firstGroup",
+  "attachments.announce.nextGroup",
+  "attachments.announce.pair",
+  "attachments.announce.single",
+  "attachments.card.aria",
+  "attachments.card.stateIdle",
+  "attachments.issue.blocked",
+  "attachments.issue.cameraPermissionDenied",
+  "attachments.issue.cameraUnavailable",
+  "attachments.issue.forbidden",
+  "attachments.issue.mismatch",
+  "attachments.issue.noArchive",
+  "attachments.issue.permissionDenied",
+  "attachments.issue.selectionCancelled",
+  "attachments.issue.tooLarge",
+  "attachments.issue.unavailable",
+  "attachments.kind.archive",
+  "attachments.kind.audio",
+  "attachments.kind.file",
+  "attachments.kind.font",
+  "attachments.kind.image",
+  "attachments.kind.pdf",
+  "attachments.kind.pdfDocument",
+  "attachments.kind.text",
+  "attachments.kind.video",
+  "attachments.meta.kindDurationSize",
+  "attachments.meta.kindSize",
+  "attachments.next.blocked",
+  "attachments.next.cameraPermissionDenied",
+  "attachments.next.forbidden",
+  "attachments.next.noArchive",
+  "attachments.next.permissionDenied",
+  "attachments.next.tooLarge",
+  "attachments.pdf.notPdf",
+  "attachments.pdf.open",
+  "attachments.pdf.openDesktop",
+  "attachments.pdf.openFailed",
+  "attachments.pdf.opening",
+  "attachments.pdf.popupBlocked",
+  "attachments.preview.failed",
+  "attachments.preview.loading",
+  "attachments.sendBlock.failed",
+  "attachments.sendBlock.retryable",
+  "attachments.sendBlock.uploading",
+  "attachments.status.downloadFailed",
+  "attachments.status.downloading",
+  "attachments.status.downloadingPercent",
+  "attachments.status.failedWithNext",
+  "attachments.status.pairDot",
+  "attachments.status.queued",
+  "attachments.status.sizeAndWord",
+  "attachments.status.uploaded",
+  "attachments.status.uploading",
+  "attachments.status.uploadingNamed",
+  "attachments.tray.countLabel",
+  "attachments.tray.folderRejected",
   "attachments.tray.noticeDismiss",
   "attachments.tray.overflow",
   "attachments.tray.removeNamed",
+  "attachments.tray.title",
   "attachments.video.cardLabel",
   "attachments.video.cardLabelNoDuration",
   "attachments.video.failed",
@@ -2558,6 +2625,121 @@ export const argumentSpecs = {
     "key": "string"
   },
   "app.shortcutHelp.search": {},
+  "attachments.action.attach": {},
+  "attachments.action.clearAll": {},
+  "attachments.action.download": {},
+  "attachments.action.downloadNamed": {
+    "name": "string"
+  },
+  "attachments.action.expandImage": {},
+  "attachments.action.expandNamed": {
+    "label": "string"
+  },
+  "attachments.action.expandNamedAt": {
+    "label": "string",
+    "position": "string"
+  },
+  "attachments.action.remove": {},
+  "attachments.action.removeNamed": {
+    "name": "string"
+  },
+  "attachments.action.retryNamed": {
+    "name": "string"
+  },
+  "attachments.announce.firstGroup": {
+    "count": "number",
+    "word": "string"
+  },
+  "attachments.announce.nextGroup": {
+    "count": "number",
+    "word": "string"
+  },
+  "attachments.announce.pair": {
+    "first": "string",
+    "second": "string"
+  },
+  "attachments.announce.single": {
+    "name": "string",
+    "status": "string"
+  },
+  "attachments.card.aria": {
+    "label": "string",
+    "meta": "string",
+    "state": "string"
+  },
+  "attachments.card.stateIdle": {},
+  "attachments.issue.blocked": {},
+  "attachments.issue.cameraPermissionDenied": {},
+  "attachments.issue.cameraUnavailable": {},
+  "attachments.issue.forbidden": {},
+  "attachments.issue.mismatch": {},
+  "attachments.issue.noArchive": {},
+  "attachments.issue.permissionDenied": {},
+  "attachments.issue.selectionCancelled": {},
+  "attachments.issue.tooLarge": {},
+  "attachments.issue.unavailable": {},
+  "attachments.kind.archive": {},
+  "attachments.kind.audio": {},
+  "attachments.kind.file": {},
+  "attachments.kind.font": {},
+  "attachments.kind.image": {},
+  "attachments.kind.pdf": {},
+  "attachments.kind.pdfDocument": {},
+  "attachments.kind.text": {},
+  "attachments.kind.video": {},
+  "attachments.meta.kindDurationSize": {
+    "duration": "string",
+    "kind": "string",
+    "size": "string"
+  },
+  "attachments.meta.kindSize": {
+    "kind": "string",
+    "size": "string"
+  },
+  "attachments.next.blocked": {},
+  "attachments.next.cameraPermissionDenied": {},
+  "attachments.next.forbidden": {},
+  "attachments.next.noArchive": {},
+  "attachments.next.permissionDenied": {},
+  "attachments.next.tooLarge": {},
+  "attachments.pdf.notPdf": {},
+  "attachments.pdf.open": {},
+  "attachments.pdf.openDesktop": {},
+  "attachments.pdf.openFailed": {},
+  "attachments.pdf.opening": {},
+  "attachments.pdf.popupBlocked": {},
+  "attachments.preview.failed": {},
+  "attachments.preview.loading": {},
+  "attachments.sendBlock.failed": {},
+  "attachments.sendBlock.retryable": {},
+  "attachments.sendBlock.uploading": {},
+  "attachments.status.downloadFailed": {},
+  "attachments.status.downloading": {},
+  "attachments.status.downloadingPercent": {
+    "percent": "number"
+  },
+  "attachments.status.failedWithNext": {
+    "next": "string",
+    "reason": "string"
+  },
+  "attachments.status.pairDot": {
+    "first": "string",
+    "second": "string"
+  },
+  "attachments.status.queued": {},
+  "attachments.status.sizeAndWord": {
+    "size": "string",
+    "word": "string"
+  },
+  "attachments.status.uploaded": {},
+  "attachments.status.uploading": {},
+  "attachments.status.uploadingNamed": {
+    "name": "string"
+  },
+  "attachments.tray.countLabel": {
+    "count": "number"
+  },
+  "attachments.tray.folderRejected": {},
   "attachments.tray.noticeDismiss": {},
   "attachments.tray.overflow": {
     "count": "number",
@@ -2566,6 +2748,7 @@ export const argumentSpecs = {
   "attachments.tray.removeNamed": {
     "name": "string"
   },
+  "attachments.tray.title": {},
   "attachments.video.cardLabel": {
     "duration": "string",
     "name": "string"
@@ -6022,9 +6205,76 @@ export interface MessageArgs {
   "app.shortcutHelp.empty": Record<string, never>;
   "app.shortcutHelp.reopenHint": { key: string };
   "app.shortcutHelp.search": Record<string, never>;
+  "attachments.action.attach": Record<string, never>;
+  "attachments.action.clearAll": Record<string, never>;
+  "attachments.action.download": Record<string, never>;
+  "attachments.action.downloadNamed": { name: string };
+  "attachments.action.expandImage": Record<string, never>;
+  "attachments.action.expandNamed": { label: string };
+  "attachments.action.expandNamedAt": { label: string; position: string };
+  "attachments.action.remove": Record<string, never>;
+  "attachments.action.removeNamed": { name: string };
+  "attachments.action.retryNamed": { name: string };
+  "attachments.announce.firstGroup": { count: number; word: string };
+  "attachments.announce.nextGroup": { count: number; word: string };
+  "attachments.announce.pair": { first: string; second: string };
+  "attachments.announce.single": { name: string; status: string };
+  "attachments.card.aria": { label: string; meta: string; state: string };
+  "attachments.card.stateIdle": Record<string, never>;
+  "attachments.issue.blocked": Record<string, never>;
+  "attachments.issue.cameraPermissionDenied": Record<string, never>;
+  "attachments.issue.cameraUnavailable": Record<string, never>;
+  "attachments.issue.forbidden": Record<string, never>;
+  "attachments.issue.mismatch": Record<string, never>;
+  "attachments.issue.noArchive": Record<string, never>;
+  "attachments.issue.permissionDenied": Record<string, never>;
+  "attachments.issue.selectionCancelled": Record<string, never>;
+  "attachments.issue.tooLarge": Record<string, never>;
+  "attachments.issue.unavailable": Record<string, never>;
+  "attachments.kind.archive": Record<string, never>;
+  "attachments.kind.audio": Record<string, never>;
+  "attachments.kind.file": Record<string, never>;
+  "attachments.kind.font": Record<string, never>;
+  "attachments.kind.image": Record<string, never>;
+  "attachments.kind.pdf": Record<string, never>;
+  "attachments.kind.pdfDocument": Record<string, never>;
+  "attachments.kind.text": Record<string, never>;
+  "attachments.kind.video": Record<string, never>;
+  "attachments.meta.kindDurationSize": { duration: string; kind: string; size: string };
+  "attachments.meta.kindSize": { kind: string; size: string };
+  "attachments.next.blocked": Record<string, never>;
+  "attachments.next.cameraPermissionDenied": Record<string, never>;
+  "attachments.next.forbidden": Record<string, never>;
+  "attachments.next.noArchive": Record<string, never>;
+  "attachments.next.permissionDenied": Record<string, never>;
+  "attachments.next.tooLarge": Record<string, never>;
+  "attachments.pdf.notPdf": Record<string, never>;
+  "attachments.pdf.open": Record<string, never>;
+  "attachments.pdf.openDesktop": Record<string, never>;
+  "attachments.pdf.openFailed": Record<string, never>;
+  "attachments.pdf.opening": Record<string, never>;
+  "attachments.pdf.popupBlocked": Record<string, never>;
+  "attachments.preview.failed": Record<string, never>;
+  "attachments.preview.loading": Record<string, never>;
+  "attachments.sendBlock.failed": Record<string, never>;
+  "attachments.sendBlock.retryable": Record<string, never>;
+  "attachments.sendBlock.uploading": Record<string, never>;
+  "attachments.status.downloadFailed": Record<string, never>;
+  "attachments.status.downloading": Record<string, never>;
+  "attachments.status.downloadingPercent": { percent: number };
+  "attachments.status.failedWithNext": { next: string; reason: string };
+  "attachments.status.pairDot": { first: string; second: string };
+  "attachments.status.queued": Record<string, never>;
+  "attachments.status.sizeAndWord": { size: string; word: string };
+  "attachments.status.uploaded": Record<string, never>;
+  "attachments.status.uploading": Record<string, never>;
+  "attachments.status.uploadingNamed": { name: string };
+  "attachments.tray.countLabel": { count: number };
+  "attachments.tray.folderRejected": Record<string, never>;
   "attachments.tray.noticeDismiss": Record<string, never>;
   "attachments.tray.overflow": { count: number; max: number };
   "attachments.tray.removeNamed": { name: string };
+  "attachments.tray.title": Record<string, never>;
   "attachments.video.cardLabel": { duration: string; name: string };
   "attachments.video.cardLabelNoDuration": { name: string };
   "attachments.video.failed": Record<string, never>;
