@@ -250,6 +250,12 @@ pub struct AppState {
     /// `enabled`; the tick itself is started by `main`, never by [`AppState::new`], so a
     /// test drives `scheduler::run_tick` explicitly).
     pub scheduler: Arc<SchedulerSettings>,
+    /// ADR-0204 증보 7 A7-4 (#6072) — the operator's switch for the lock-screen reply
+    /// (`POST …/messages/{message}/push-reply`). **On** by default, read once when the
+    /// process starts (`MOMO_PUSH_REPLY_ENABLED`); off makes the route the same 403 as
+    /// a path off the push-action list, decided before any query. The decision route
+    /// does not read it.
+    pub push_reply_enabled: bool,
     /// Set by [`scheduler::start`] when the tick **refused** its database role (a superuser or
     /// BYPASSRLS pool). The scheduled-message routes then answer 503 `scheduler_disabled` like an
     /// operator's off switch: a server that will not send a schedule must not accept one
@@ -420,6 +426,7 @@ impl AppState {
             dev_access: Arc::new(config::DevAccessConfig::default()),
             mentions: Arc::new(MentionSettings::default()),
             scheduler: Arc::new(SchedulerSettings::default()),
+            push_reply_enabled: true,
             scheduler_blocked: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             attachment_reclaim_touched: Arc::new(attachment_reclaim::TouchedWorkspaces::default()),
             device_keys: Arc::new(DeviceKeySettings::default()),
@@ -774,6 +781,12 @@ impl AppState {
         self
     }
 
+    /// Set the lock-screen reply switch (ADR-0204 증보 7 A7-4). Default: on.
+    pub fn with_push_reply_enabled(mut self, enabled: bool) -> Self {
+        self.push_reply_enabled = enabled;
+        self
+    }
+
     /// Attach the device-key settings (#3022). Default: no instance id and no
     /// host-registration signature requirement.
     pub fn with_device_keys(mut self, settings: DeviceKeySettings) -> Self {
@@ -926,6 +939,18 @@ pub fn build_app(state: AppState) -> Router {
                 ))
                 .route_layer(member_write(rate_limit::MemberWrite::MessageSend))
                 .get(routes::messages::history),
+        )
+        // #6072 (ADR-0204 증보 7) — the lock screen's reply to the notification it was woken
+        // by. Not a second write path: the handler calls the send's own write function. Its
+        // body ceiling is this route's own (16 KiB), and it spends the same member send budget
+        // as the send above, so alternating the two cannot double it (A7-4).
+        .route(
+            "/v1/workspaces/{ws}/messages/{id}/push-reply",
+            post(routes::push_reply::reply)
+                .layer(axum::extract::DefaultBodyLimit::max(
+                    routes::push_reply::PUSH_REPLY_MAX_BODY_BYTES,
+                ))
+                .route_layer(member_write(rate_limit::MemberWrite::MessageSend)),
         )
         // B4.1 — one level of threads, the way the client already asks for them:
         // replies are read here and written through the send above with a

@@ -6,6 +6,11 @@
 //! no chance to refresh a session. This module is the credential for exactly
 //! that request, and for nothing else.
 //!
+//! ADR-0204 증보 7 (#6072) gives it a second request: a reply to the notification
+//! it was woken by, written into that notification's conversation. The server picks
+//! the conversation from the notified message; the request names neither a channel
+//! nor a thread.
+//!
 //! It is the `push_fetch` token's twin ([`crate::push_fetch_token`]) and is built
 //! on the same three facts, because those are what make a parked credential
 //! survivable:
@@ -15,10 +20,12 @@
 //!    everywhere that is not explicitly taught about this token it is simply not
 //!    a credential. It is also not a `push_fetch` token — each entry point
 //!    accepts exactly one `typ`, so neither token can stand in for the other.
-//! 2. **A closed route list of ONE** ([`push_action_route_allowed`]), judged by
-//!    the middleware before the database is touched:
-//!    `POST /v1/workspaces/{ws}/approvals/{approval}/decision`, in the token's
-//!    own workspace.
+//! 2. **A closed route list of TWO** ([`push_action_route`]), judged by the
+//!    middleware before the database is touched, both in the token's own
+//!    workspace:
+//!    `POST /v1/workspaces/{ws}/approvals/{approval}/decision` (ADR-0204 D6) and
+//!    `POST /v1/workspaces/{ws}/messages/{message}/push-reply` (증보 7). The
+//!    ordinary send, `POST …/channels/{ch}/messages`, stays off the list.
 //! 3. **It lives exactly as long as its session can rotate.** It is recorded as
 //!    a `session` row of the minting session's lineage and accepted only while
 //!    [`push_action_session_live`] finds a live refresh row in that lineage —
@@ -34,8 +41,11 @@
 //! required role, expiry, idempotency — and the token only replaces the bearer
 //! that carries the request. A token minted for someone who may not decide an
 //! approval gets the same `403 forbidden` receipt an ordinary access token
-//! would. It cannot read messages, change settings, mint another token or
-//! extend its session.
+//! would. The reply route writes through the ordinary send's one write function,
+//! so a person who could not post into that conversation from the app cannot post
+//! into it here; what it adds are limits (a notification on record, one reply per
+//! notification, text only). It cannot read messages, change settings, mint
+//! another token or extend its session.
 //!
 //! The scope string is a label for humans reading a token, not a control.
 
@@ -168,34 +178,58 @@ pub async fn push_action_session_live(
     narrow_token_session_live(conn, token_id, SESSION_LABEL_PUSH_ACTION).await
 }
 
-/// The only request a push-action token may make:
+/// The two requests a push-action token may make — which one a path is.
+///
+/// Named so the middleware can hold the reply behind its operator switch
+/// (ADR-0204 증보 7 A7-4) without a second parse of the path.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PushActionRoute {
+    /// `POST /v1/workspaces/{ws}/approvals/{approval}/decision` (ADR-0204 D6).
+    Decision,
+    /// `POST /v1/workspaces/{ws}/messages/{message}/push-reply` (ADR-0204 증보 7).
+    Reply,
+}
+
+/// The only requests a push-action token may make:
 ///
 /// * `POST /v1/workspaces/{ws}/approvals/{approval}/decision`
+/// * `POST /v1/workspaces/{ws}/messages/{message}/push-reply`
 ///
-/// `ws` must be the token's own workspace and `approval` a UUID. Both must be
+/// `ws` must be the token's own workspace and the other id a UUID. Both must be
 /// written in the canonical 36-character hyphenated form: `Uuid::parse_str` also
 /// takes `urn:uuid:…`, braces and the 32-hex "simple" form, and a credential
 /// this narrow has no reason to accept a spelling the native handler never
-/// sends. (Anything it accepts, the decision handler's own parse accepts too —
-/// the list is a subset of the route, never a different reading of it.) Another
-/// method, a trailing slash, an extra or missing segment, a query-shaped or
-/// percent-encoded segment, another tenant, or the compatibility route
-/// `POST /v1/agent-runs/{run}/approval-decisions` is refused. `path` is the URI
-/// path only.
-pub fn push_action_route_allowed(method: &str, path: &str, token_workspace: Uuid) -> bool {
+/// sends. (Anything it accepts, the handler's own parse accepts too — the list is
+/// a subset of the route, never a different reading of it.) Another method, a
+/// trailing slash, an extra or missing segment, a query-shaped or
+/// percent-encoded segment, another tenant, the compatibility route
+/// `POST /v1/agent-runs/{run}/approval-decisions` or the ordinary send
+/// `POST …/channels/{ch}/messages` is refused. `path` is the URI path only.
+pub fn push_action_route(
+    method: &str,
+    path: &str,
+    token_workspace: Uuid,
+) -> Option<PushActionRoute> {
     if method != "POST" {
-        return false;
+        return None;
     }
-    let Some(rest) = path.strip_prefix('/') else {
-        return false;
-    };
+    let rest = path.strip_prefix('/')?;
     let segments: Vec<&str> = rest.split('/').collect();
-    match segments.as_slice() {
+    let (ws, id, route) = match segments.as_slice() {
         ["v1", "workspaces", ws, "approvals", approval, "decision"] => {
-            canonical_uuid(ws) == Some(token_workspace) && canonical_uuid(approval).is_some()
+            (*ws, *approval, PushActionRoute::Decision)
         }
-        _ => false,
-    }
+        ["v1", "workspaces", ws, "messages", message, "push-reply"] => {
+            (*ws, *message, PushActionRoute::Reply)
+        }
+        _ => return None,
+    };
+    (canonical_uuid(ws) == Some(token_workspace) && canonical_uuid(id).is_some()).then_some(route)
+}
+
+/// Whether [`push_action_route`] names one of the two requests.
+pub fn push_action_route_allowed(method: &str, path: &str, token_workspace: Uuid) -> bool {
+    push_action_route(method, path, token_workspace).is_some()
 }
 
 /// A UUID in the 36-character hyphenated form, or nothing.
@@ -293,6 +327,115 @@ mod tests {
             APPROVAL.to_string().to_uppercase()
         );
         assert!(push_action_route_allowed("POST", &upper, WS));
+    }
+
+    #[test]
+    fn exactly_the_reply_of_its_own_workspace_is_allowed() {
+        let message = Uuid::from_u128(41);
+        let reply = format!("/v1/workspaces/{WS}/messages/{message}/push-reply");
+        assert_eq!(
+            push_action_route("POST", &reply, WS),
+            Some(PushActionRoute::Reply)
+        );
+        let decision = format!("/v1/workspaces/{WS}/approvals/{APPROVAL}/decision");
+        assert_eq!(
+            push_action_route("POST", &decision, WS),
+            Some(PushActionRoute::Decision)
+        );
+        let upper = format!(
+            "/v1/workspaces/{}/messages/{}/push-reply",
+            WS.to_string().to_uppercase(),
+            message.to_string().to_uppercase()
+        );
+        assert_eq!(
+            push_action_route("POST", &upper, WS),
+            Some(PushActionRoute::Reply)
+        );
+    }
+
+    /// ADR-0204 증보 7 A7-10 1 — the reply's own variants: another verb, a trailing
+    /// slash, an extra or missing segment, a non-canonical UUID, another tenant.
+    #[test]
+    fn the_reply_route_refuses_every_variant_of_itself() {
+        let message = Uuid::from_u128(41);
+        let other = Uuid::from_u128(21);
+        let refused = [
+            (
+                "GET",
+                format!("/v1/workspaces/{WS}/messages/{message}/push-reply"),
+            ),
+            (
+                "PUT",
+                format!("/v1/workspaces/{WS}/messages/{message}/push-reply"),
+            ),
+            (
+                "PATCH",
+                format!("/v1/workspaces/{WS}/messages/{message}/push-reply"),
+            ),
+            (
+                "DELETE",
+                format!("/v1/workspaces/{WS}/messages/{message}/push-reply"),
+            ),
+            (
+                "post",
+                format!("/v1/workspaces/{WS}/messages/{message}/push-reply"),
+            ),
+            (
+                "POST",
+                format!("/v1/workspaces/{other}/messages/{message}/push-reply"),
+            ),
+            (
+                "POST",
+                format!("/v1/workspaces/{WS}/messages/{message}/push-reply/"),
+            ),
+            (
+                "POST",
+                format!("/v1/workspaces/{WS}/messages/{message}/push-reply/x"),
+            ),
+            (
+                "POST",
+                format!("/v1/workspaces/{WS}/messages/{message}/push-replies"),
+            ),
+            ("POST", format!("/v1/workspaces/{WS}/messages//push-reply")),
+            ("POST", format!("/v1/workspaces/{WS}/messages/push-reply")),
+            (
+                "POST",
+                format!(
+                    "/v1/workspaces/{WS}/messages/{}/push-reply",
+                    message.simple()
+                ),
+            ),
+            (
+                "POST",
+                format!("/v1/workspaces/{WS}/messages/{}/push-reply", message.urn()),
+            ),
+            (
+                "POST",
+                format!("/v1/workspaces/{WS}/messages/%7B{message}%7D/push-reply"),
+            ),
+            (
+                "POST",
+                format!(
+                    "/v1/workspaces/{}/messages/{message}/push-reply",
+                    WS.simple()
+                ),
+            ),
+            (
+                "POST",
+                format!("/v1/workspaces/{WS}/channels/{message}/push-reply"),
+            ),
+            (
+                "POST",
+                format!("/v1/workspaces/{WS}/channels/{other}/messages/{message}/push-reply"),
+            ),
+        ];
+        for (method, path) in refused {
+            assert_eq!(
+                push_action_route(method, &path, WS),
+                None,
+                "{method} {path} must be refused"
+            );
+        }
     }
 
     #[test]

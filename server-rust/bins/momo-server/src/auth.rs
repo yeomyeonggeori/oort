@@ -71,11 +71,11 @@ use axum::middleware::Next;
 use axum::response::Response;
 use momo_auth::{
     agent_bearer_workspace_id, classify_agent_bearer_in_tx, finalize_agent_bearer_use_in_tx,
-    is_gateway_callback_route, push_action_route_allowed, push_action_session_live,
+    is_gateway_callback_route, push_action_route, push_action_session_live,
     push_fetch_route_allowed, push_fetch_session_live, required_agent_scope,
     resolve_agent_bearer_in_tx, token_state, verify_app_access, verify_app_push_action,
     verify_app_push_fetch, AgentBearerClass, AgentBearerIdentity, AgentBearerResolution, AuthError,
-    Principal, PrincipalKind, TokenState, AUDIT_DETAIL_SCHEMA,
+    Principal, PrincipalKind, PushActionRoute, TokenState, AUDIT_DETAIL_SCHEMA,
 };
 use momo_db::audit::{write_audit, AuditEntry};
 use momo_db::{with_tenant_tx, DbError};
@@ -105,12 +105,15 @@ pub struct LegacyGatewaySecret;
 ///
 /// The `Principal` it travels beside is deliberately indistinguishable from an
 /// access token's: a person, in a workspace, with a `token_id`. The marker adds
-/// no authority, and no handler may read it as a reason to ALLOW anything — it may
-/// only narrow. It exists so the one route that token may reach can say, in the
-/// audit log, which door the decision came through (`detail.via = "push_action"`)
-/// and can refuse the approvals that must be opened in the app (`opens_in_app`),
-/// and so the two token-minting routes can refuse a narrow bearer a second time
-/// (the route list already does, before the database). Only this middleware
+/// no authority, and no handler may read it as a reason to ALLOW anything the
+/// person could not already do — it may only narrow. It exists so the decision
+/// route can say, in the audit log, which door the decision came through
+/// (`detail.via = "push_action"`) and can refuse the approvals that must be
+/// opened in the app (`opens_in_app`); so the lock-screen reply route
+/// (ADR-0204 증보 7) can refuse every OTHER credential — a person's session has
+/// the ordinary send, and nothing else has a use for the reply; and so the two
+/// token-minting routes can refuse a narrow bearer a second time (the route list
+/// already does, before the database). Only this middleware
 /// inserts it, on the one arm that verified that `typ`, so a request cannot carry
 /// it in.
 #[derive(Debug, Clone, Copy)]
@@ -146,7 +149,8 @@ pub struct FullPersonSession;
 pub enum NarrowToken {
     /// The notification extension's two reads (#3121, ADR-0188 §8.7).
     PushFetch,
-    /// The lock screen's one decision (#3927, ADR-0204 D6).
+    /// The lock screen's decision (#3927, ADR-0204 D6) and its reply to the
+    /// notification it was woken by (#6072, ADR-0204 증보 7).
     PushAction,
 }
 
@@ -782,7 +786,15 @@ pub async fn require_principal(
                 Err(AuthError::NotAccessToken) => {
                     let principal = verify_app_push_action(&raw_token, &state.jwt_secret)
                         .map_err(|_| ApiError::unauthorized("not an access token"))?;
-                    if !push_action_route_allowed(&method, &path, principal.workspace_id) {
+                    // ADR-0204 증보 7 A7-4 — the reply sits behind the operator's switch,
+                    // judged here with the route list so that "off" is the same 403 as
+                    // "not on the list", before any query. The decision is never held.
+                    let allowed = match push_action_route(&method, &path, principal.workspace_id) {
+                        Some(PushActionRoute::Decision) => true,
+                        Some(PushActionRoute::Reply) => state.push_reply_enabled,
+                        None => false,
+                    };
+                    if !allowed {
                         return Err(ApiError::forbidden(
                             "push-action token is not allowed for this route",
                         ));

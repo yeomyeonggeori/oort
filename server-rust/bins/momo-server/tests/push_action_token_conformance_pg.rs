@@ -208,6 +208,11 @@ async fn world() -> World {
 }
 
 async fn world_with(device_keys: DeviceKeySettings) -> World {
+    world_built(move |state| state.with_device_keys(device_keys)).await
+}
+
+/// A world whose server state the caller finishes (the reply switch, the send budget).
+async fn world_built(finish: impl FnOnce(AppState) -> AppState) -> World {
     ensure_schema_and_roles();
     let su = superuser_pool().await;
     let workspace = Uuid::new_v4();
@@ -269,14 +274,11 @@ async fn world_with(device_keys: DeviceKeySettings) -> World {
     .expect("seed agent workspace membership");
     join_channel(&su, workspace, channel, agent).await;
 
-    let app = build_app(
-        AppState::new(
-            momo_app_pool().await,
-            TEST_JWT_SECRET.to_string(),
-            RealtimeAdvert::SameOrigin,
-        )
-        .with_device_keys(device_keys),
-    );
+    let app = build_app(finish(AppState::new(
+        momo_app_pool().await,
+        TEST_JWT_SECRET.to_string(),
+        RealtimeAdvert::SameOrigin,
+    )));
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
         .await
         .expect("bind momo-server");
@@ -1926,4 +1928,729 @@ async fn the_audit_rows_say_which_door_the_decision_came_through() {
         leaked, 0,
         "the credential name must not reach the broadcast or the job"
     );
+}
+
+// ---------------------------------------------------------------------------
+// ADR-0204 증보 7 (#6072) — the lock screen's reply to the notification it was
+// woken by: `POST /v1/workspaces/{ws}/messages/{message}/push-reply`.
+//
+// | test | revert that makes it red |
+// |---|---|
+// | `a_reply_lands_once_in_the_notified_conversation` | write somewhere other than the notified message's channel/thread, answer with more than id + seq, or drop the audit row (A7-10 3 · 4 · 9 · 11) |
+// | `retries_in_parallel_and_across_both_doors_are_one_message` | drop the dedupe-before-cap order, or key the retry on anything but the send's own idempotency (A7-10 4) |
+// | `one_notification_carries_one_reply_even_in_parallel` | drop the cap, or the per-notification lock before the count (A7-10 5) |
+// | `every_way_to_have_no_notification_is_the_same_refusal` | drop any condition of the notified-record lookup, or answer one case differently (A7-10 2) |
+// | `only_the_lock_screen_token_may_reply` | drop the credential check in the handler, or loosen the route list (A7-10 1) |
+// | `the_switch_holds_the_reply_before_any_query_and_not_the_decision` | read the switch in the handler instead of the middleware, or apply it to the decision (A7-10 8) |
+// | `the_body_is_closed_and_bounded` | accept another key, drop the character or byte ceiling (A7-10 3 · 6) |
+// | `the_existing_send_checks_still_answer` | skip the membership check of the send's write function, or let a logged-out lineage through (A7-10 7) |
+// | `the_reply_spends_the_send_budget` | mount the reply without the `MessageSend` member budget (A7-10 10) |
+// | `a_reply_leaves_no_text_or_token_in_the_server_log` | log the body or the bearer anywhere on the path (A7-10 9) |
+// ---------------------------------------------------------------------------
+
+impl World {
+    fn reply_path(&self, message: Uuid) -> String {
+        format!(
+            "/v1/workspaces/{}/messages/{message}/push-reply",
+            self.workspace
+        )
+    }
+
+    async fn reply(&self, bearer: &str, message: Uuid, key: Uuid, text: &str) -> (u16, Value) {
+        self.send(
+            "POST",
+            &self.reply_path(message),
+            bearer,
+            Some(json!({"clientMsgId": key, "body": text})),
+        )
+        .await
+    }
+
+    /// The ordinary send, as the app makes it.
+    async fn post(&self, bearer: &str, key: Uuid, root: Option<Uuid>, text: &str) -> (u16, Value) {
+        let mut body = json!({"clientMsgId": key, "body": text});
+        if let Some(root) = root {
+            body["rootId"] = json!(root);
+        }
+        self.send(
+            "POST",
+            &format!(
+                "/v1/workspaces/{}/channels/{}/messages",
+                self.workspace, self.channel
+            ),
+            bearer,
+            Some(body),
+        )
+        .await
+    }
+
+    /// A message someone else wrote in the channel — what a notification points at.
+    async fn posted_by(&self, bearer: &str, root: Option<Uuid>) -> Uuid {
+        let (status, body) = self
+            .post(bearer, Uuid::new_v4(), root, "알림을 만든 글")
+            .await;
+        assert_eq!(status, 201, "{body}");
+        body["id"].as_str().expect("id").parse().expect("uuid")
+    }
+
+    /// The dispatch row the notifier writes for `member` about `message`.
+    async fn notify(&self, member: Uuid, message: Uuid, status: Option<i32>, age: &str) {
+        sqlx::query(
+            "INSERT INTO push_dispatch_log (workspace_id, message_id, member_id, apns_status, created_at) \
+             VALUES ($1, $2, $3, $4, now() - $5::interval)",
+        )
+        .bind(self.workspace)
+        .bind(message)
+        .bind(member)
+        .bind(status)
+        .bind(age)
+        .execute(&self.su)
+        .await
+        .expect("seed dispatch row");
+    }
+
+    async fn notified(&self, member: Uuid, message: Uuid) {
+        self.notify(member, message, Some(200), "1 minute").await;
+    }
+
+    /// Messages written by `author` with `key`.
+    async fn rows_with_key(&self, author: Uuid, key: Uuid) -> i64 {
+        sqlx::query_scalar(
+            "SELECT count(*) FROM message WHERE workspace_id = $1 AND author_member_id = $2 \
+               AND client_msg_id = $3",
+        )
+        .bind(self.workspace)
+        .bind(author)
+        .bind(key)
+        .fetch_one(&self.su)
+        .await
+        .expect("count keyed rows")
+    }
+
+    async fn rows_by(&self, author: Uuid) -> i64 {
+        sqlx::query_scalar(
+            "SELECT count(*) FROM message WHERE workspace_id = $1 AND author_member_id = $2",
+        )
+        .bind(self.workspace)
+        .bind(author)
+        .fetch_one(&self.su)
+        .await
+        .expect("count authored rows")
+    }
+
+    async fn outbox_of(&self, kind: &str) -> i64 {
+        sqlx::query_scalar(
+            "SELECT count(*) FROM outbox WHERE workspace_id = $1 AND kind::text = $2",
+        )
+        .bind(self.workspace)
+        .bind(kind)
+        .fetch_one(&self.su)
+        .await
+        .expect("count outbox rows")
+    }
+
+    async fn reply_audits(&self) -> Vec<(Uuid, Value)> {
+        sqlx::query_as::<_, (Uuid, Value)>(
+            "SELECT target_id, detail FROM audit_log WHERE workspace_id = $1 \
+               AND action = 'message.push_reply' ORDER BY created_at",
+        )
+        .bind(self.workspace)
+        .fetch_all(&self.su)
+        .await
+        .expect("read reply audits")
+    }
+
+    /// A second person in the channel, signed in — the author of what gets notified.
+    async fn colleague(&self) -> (Uuid, Session) {
+        let (id, email) = self.add_human("member", true).await;
+        (id, self.login_as(&email, TEST_PASSWORD).await)
+    }
+}
+
+/// The two keys of every 2xx answer.
+fn assert_id_and_seq_only(body: &Value) {
+    let keys: Vec<&String> = body.as_object().expect("object").keys().collect();
+    assert_eq!(keys.len(), 2, "{body}");
+    assert!(body["id"].is_string() && body["seq"].is_i64(), "{body}");
+}
+
+#[tokio::test]
+#[ignore = "needs Postgres + runtime roles (DATABASE_URL)"]
+async fn a_reply_lands_once_in_the_notified_conversation() {
+    let _guard = test_lock().await;
+    let w = world().await;
+    let session = w.login().await;
+    let action = w.mint_action(&session).await;
+    let (_, colleague) = w.colleague().await;
+
+    // A notification about a channel message is answered in the channel itself.
+    let top = w.posted_by(&colleague.access, None).await;
+    w.notified(w.owner, top).await;
+    let broadcasts = w.outbox_of("broadcast").await;
+    let candidates = w.outbox_of("push_candidate").await;
+    let key = Uuid::new_v4();
+    let text = "잠금 화면에서 보낸 답장";
+    let (status, first) = w.reply(&action, top, key, text).await;
+    assert_eq!(status, 201, "{first}");
+    assert_id_and_seq_only(&first);
+    assert!(
+        !first.to_string().contains(text),
+        "the answer never carries the text"
+    );
+    let id: Uuid = first["id"].as_str().unwrap().parse().unwrap();
+    let (channel, root, body, seq): (Uuid, Option<Uuid>, Option<String>, i64) =
+        sqlx::query_as("SELECT channel_id, root_id, body, seq FROM message WHERE id = $1")
+            .bind(id)
+            .fetch_one(&w.su)
+            .await
+            .expect("read the reply");
+    assert_eq!(
+        (channel, root, body.as_deref()),
+        (w.channel, None, Some(text))
+    );
+    assert_eq!(first["seq"].as_i64(), Some(seq));
+    let one_broadcast = w.outbox_of("broadcast").await - broadcasts;
+    let one_candidate = w.outbox_of("push_candidate").await - candidates;
+    assert!(
+        one_broadcast >= 1,
+        "the message went out through the outbox"
+    );
+
+    // Four more tries of the same reply: the same answer, nothing new anywhere.
+    for _ in 0..4 {
+        let (status, again) = w.reply(&action, top, key, text).await;
+        assert_eq!(status, 201);
+        assert_eq!(again, first, "a retry answers exactly the first answer");
+    }
+    assert_eq!(w.rows_with_key(w.owner, key).await, 1);
+    assert_eq!(w.outbox_of("broadcast").await - broadcasts, one_broadcast);
+    assert_eq!(
+        w.outbox_of("push_candidate").await - candidates,
+        one_candidate
+    );
+
+    // A notification about a thread reply is answered in that thread.
+    let thread_root = w.posted_by(&colleague.access, None).await;
+    let in_thread = w.posted_by(&colleague.access, Some(thread_root)).await;
+    w.notified(w.owner, in_thread).await;
+    let (status, threaded) = w
+        .reply(&action, in_thread, Uuid::new_v4(), "스레드로")
+        .await;
+    assert_eq!(status, 201, "{threaded}");
+    let root: Option<Uuid> = sqlx::query_scalar("SELECT root_id FROM message WHERE id = $1")
+        .bind(threaded["id"].as_str().unwrap().parse::<Uuid>().unwrap())
+        .fetch_one(&w.su)
+        .await
+        .expect("read threaded reply");
+    assert_eq!(root, Some(thread_root));
+
+    // One audit row per written reply: ids and the door, never the text.
+    let audits = w.reply_audits().await;
+    assert_eq!(audits.len(), 2);
+    assert_eq!(audits[0].0, id);
+    assert_eq!(audits[0].1["via"], "push_action");
+    assert_eq!(audits[0].1["notified_message_id"], top.to_string());
+    assert_eq!(audits[0].1["channel_id"], w.channel.to_string());
+    assert!(!audits[0].1.to_string().contains(text));
+}
+
+#[tokio::test]
+#[ignore = "needs Postgres + runtime roles (DATABASE_URL)"]
+async fn retries_in_parallel_and_across_both_doors_are_one_message() {
+    let _guard = test_lock().await;
+    let w = world().await;
+    let session = w.login().await;
+    let action = w.mint_action(&session).await;
+    let (_, colleague) = w.colleague().await;
+
+    // Eight at once with one key.
+    let message = w.posted_by(&colleague.access, None).await;
+    w.notified(w.owner, message).await;
+    let key = Uuid::new_v4();
+    let answers =
+        futures::future::join_all((0..8).map(|_| w.reply(&action, message, key, "동시에"))).await;
+    let ids: std::collections::HashSet<String> = answers
+        .iter()
+        .map(|(status, body)| {
+            assert_eq!(*status, 201, "{body}");
+            body["id"].as_str().unwrap().to_string()
+        })
+        .collect();
+    assert_eq!(ids.len(), 1);
+    assert_eq!(w.rows_with_key(w.owner, key).await, 1);
+
+    // The app's send first, then the lock screen with the same key.
+    let message = w.posted_by(&colleague.access, None).await;
+    w.notified(w.owner, message).await;
+    let key = Uuid::new_v4();
+    let (status, sent) = w.post(&session.access, key, None, "앱에서 먼저").await;
+    assert_eq!(status, 201);
+    let (status, replied) = w.reply(&action, message, key, "앱에서 먼저").await;
+    assert_eq!(status, 201);
+    assert_eq!(replied["id"], sent["id"]);
+    assert_eq!(w.rows_with_key(w.owner, key).await, 1);
+
+    // The lock screen first, then the app with the same key.
+    let message = w.posted_by(&colleague.access, None).await;
+    w.notified(w.owner, message).await;
+    let key = Uuid::new_v4();
+    let (status, replied) = w.reply(&action, message, key, "잠금 화면이 먼저").await;
+    assert_eq!(status, 201);
+    let (status, sent) = w.post(&session.access, key, None, "잠금 화면이 먼저").await;
+    assert_eq!(status, 201);
+    assert_eq!(replied["id"], sent["id"]);
+    assert_eq!(w.rows_with_key(w.owner, key).await, 1);
+
+    // Both doors at once.
+    let message = w.posted_by(&colleague.access, None).await;
+    w.notified(w.owner, message).await;
+    let key = Uuid::new_v4();
+    let (a, b) = tokio::join!(
+        w.reply(&action, message, key, "섞어서"),
+        w.post(&session.access, key, None, "섞어서")
+    );
+    assert_eq!((a.0, b.0), (201, 201), "{} {}", a.1, b.1);
+    assert_eq!(a.1["id"], b.1["id"]);
+    assert_eq!(w.rows_with_key(w.owner, key).await, 1);
+}
+
+#[tokio::test]
+#[ignore = "needs Postgres + runtime roles (DATABASE_URL)"]
+async fn one_notification_carries_one_reply_even_in_parallel() {
+    let _guard = test_lock().await;
+    let w = world().await;
+    let session = w.login().await;
+    let action = w.mint_action(&session).await;
+    let (_, colleague) = w.colleague().await;
+
+    let message = w.posted_by(&colleague.access, None).await;
+    w.notified(w.owner, message).await;
+    let (status, _) = w.reply(&action, message, Uuid::new_v4(), "첫 답장").await;
+    assert_eq!(status, 201);
+    let before = w.rows_by(w.owner).await;
+    let (status, refused) = w
+        .reply(&action, message, Uuid::new_v4(), "두 번째 답장")
+        .await;
+    assert_eq!(status, 409, "{refused}");
+    assert_eq!(refused["error"]["code"], "push_reply_limit");
+    assert_eq!(w.rows_by(w.owner).await, before, "nothing was written");
+
+    let message = w.posted_by(&colleague.access, None).await;
+    w.notified(w.owner, message).await;
+    let answers = futures::future::join_all(
+        (0..8).map(|_| w.reply(&action, message, Uuid::new_v4(), "동시에 여덟")),
+    )
+    .await;
+    let written = answers.iter().filter(|(status, _)| *status == 201).count();
+    let refused = answers.iter().filter(|(status, _)| *status == 409).count();
+    assert_eq!((written, refused), (1, 7), "{answers:?}");
+    assert_eq!(w.rows_by(w.owner).await, before + 1);
+}
+
+#[tokio::test]
+#[ignore = "needs Postgres + runtime roles (DATABASE_URL)"]
+async fn every_way_to_have_no_notification_is_the_same_refusal() {
+    let _guard = test_lock().await;
+    let w = world().await;
+    let session = w.login().await;
+    let action = w.mint_action(&session).await;
+    let (colleague_id, colleague) = w.colleague().await;
+
+    let never = w.posted_by(&colleague.access, None).await;
+    let someone_elses = w.posted_by(&session.access, None).await;
+    w.notified(colleague_id, someone_elses).await;
+    let stale = w.posted_by(&colleague.access, None).await;
+    w.notify(w.owner, stale, Some(200), "25 hours").await;
+    let deleted = w.posted_by(&colleague.access, None).await;
+    w.notified(w.owner, deleted).await;
+    let (status, _) = w
+        .send(
+            "DELETE",
+            &format!("/v1/workspaces/{}/messages/{deleted}", w.workspace),
+            &colleague.access,
+            None,
+        )
+        .await;
+    assert!(
+        (200..300).contains(&status),
+        "the author deletes it: {status}"
+    );
+    let refused_by_apns = w.posted_by(&colleague.access, None).await;
+    w.notify(w.owner, refused_by_apns, Some(410), "1 minute")
+        .await;
+    let in_flight = w.posted_by(&colleague.access, None).await;
+    w.notify(w.owner, in_flight, None, "1 minute").await;
+    // Another workspace's message, notified to that workspace's owner.
+    let other = world().await;
+    let other_session = other.login().await;
+    let (status, foreign) = other
+        .post(&other_session.access, Uuid::new_v4(), None, "남의 글")
+        .await;
+    assert_eq!(status, 201);
+    let foreign: Uuid = foreign["id"].as_str().unwrap().parse().unwrap();
+    other.notified(other.owner, foreign).await;
+
+    let cases = [
+        ("never notified", never),
+        ("notified only to someone else", someone_elses),
+        ("notified 25 hours ago", stale),
+        ("deleted", deleted),
+        ("no such id", Uuid::new_v4()),
+        ("another workspace", foreign),
+        ("refused by APNs", refused_by_apns),
+        ("never settled", in_flight),
+    ];
+    let before = w.rows_by(w.owner).await;
+    let broadcasts = w.outbox_of("broadcast").await;
+    let mut answers = Vec::new();
+    for (case, message) in cases {
+        let answer = w.reply(&action, message, Uuid::new_v4(), "답장").await;
+        assert_eq!(answer.0, 403, "{case}: {}", answer.1);
+        assert_eq!(
+            answer.1["error"]["code"], "push_reply_unavailable",
+            "{case}"
+        );
+        answers.push(answer);
+    }
+    assert!(
+        answers.windows(2).all(|pair| pair[0] == pair[1]),
+        "every case is the same status and sentence: {answers:?}"
+    );
+    assert_eq!(w.rows_by(w.owner).await, before, "nothing was written");
+    assert_eq!(w.outbox_of("broadcast").await, broadcasts);
+
+    // The control: the same token, a notification on record.
+    let live = w.posted_by(&colleague.access, None).await;
+    w.notified(w.owner, live).await;
+    assert_eq!(w.reply(&action, live, Uuid::new_v4(), "답장").await.0, 201);
+}
+
+#[tokio::test]
+#[ignore = "needs Postgres + runtime roles (DATABASE_URL)"]
+async fn only_the_lock_screen_token_may_reply() {
+    let _guard = test_lock().await;
+    let w = world().await;
+    let session = w.login().await;
+    let action = w.mint_action(&session).await;
+    let fetch = w.mint_fetch(&session).await;
+    let (_, colleague) = w.colleague().await;
+    let message = w.posted_by(&colleague.access, None).await;
+    w.notified(w.owner, message).await;
+    // The agent's own bearer, seeded the way the agent route list sees it.
+    let secret = format!("{}{}", Uuid::new_v4().simple(), Uuid::new_v4().simple());
+    let agent_bearer = format!("momo_agent_v1.{}.{secret}", w.workspace);
+    sqlx::query(
+        "INSERT INTO token (workspace_id, kind, actor_member_id, subject_member_id, \
+                            token_hash, scopes, label) \
+         VALUES ($1, 'agent_bearer', $2, NULL, digest($3::text, 'sha256'), \
+                 ARRAY['messages:write'], 'push-reply-conformance')",
+    )
+    .bind(w.workspace)
+    .bind(w.agent)
+    .bind(&agent_bearer)
+    .execute(&w.su)
+    .await
+    .expect("seed agent bearer");
+
+    let before = w.rows_by(w.owner).await;
+    let agent_rows = w.rows_by(w.agent).await;
+    for (who, bearer) in [
+        ("a person's session", session.access.as_str()),
+        ("the extension's token", fetch.as_str()),
+        ("an agent bearer", agent_bearer.as_str()),
+    ] {
+        let (status, body) = w.reply(bearer, message, Uuid::new_v4(), "답장").await;
+        assert_eq!(status, 403, "{who}: {body}");
+    }
+    assert_eq!(w.rows_by(w.owner).await, before);
+    assert_eq!(w.rows_by(w.agent).await, agent_rows);
+
+    // The reply's own variants stay refused for the lock screen's token too.
+    let ws = w.workspace;
+    let foreign = Uuid::new_v4();
+    for (method, path, expected) in [
+        (
+            "GET",
+            format!("/v1/workspaces/{ws}/messages/{message}/push-reply"),
+            403,
+        ),
+        (
+            "PUT",
+            format!("/v1/workspaces/{ws}/messages/{message}/push-reply"),
+            403,
+        ),
+        (
+            "PATCH",
+            format!("/v1/workspaces/{ws}/messages/{message}/push-reply"),
+            403,
+        ),
+        (
+            "DELETE",
+            format!("/v1/workspaces/{ws}/messages/{message}/push-reply"),
+            403,
+        ),
+        (
+            "POST",
+            format!("/v1/workspaces/{foreign}/messages/{message}/push-reply"),
+            403,
+        ),
+        (
+            "POST",
+            format!(
+                "/v1/workspaces/{ws}/messages/{}/push-reply",
+                message.simple()
+            ),
+            403,
+        ),
+        (
+            "POST",
+            format!("/v1/workspaces/{ws}/messages/{message}/push-reply/"),
+            404,
+        ),
+        (
+            "POST",
+            format!("/v1/workspaces/{ws}/messages/{message}/push-reply/x"),
+            404,
+        ),
+        // The ordinary send stays closed to it.
+        (
+            "POST",
+            format!("/v1/workspaces/{ws}/channels/{}/messages", w.channel),
+            403,
+        ),
+    ] {
+        let body = json!({"clientMsgId": Uuid::new_v4(), "body": "답장"});
+        let (status, answer) = w.send(method, &path, &action, Some(body)).await;
+        assert_eq!(status, expected, "{method} {path}: {answer}");
+    }
+    assert_eq!(w.rows_by(w.owner).await, before);
+
+    // The control: the lock screen's token on the exact path.
+    let (status, body) = w.reply(&action, message, Uuid::new_v4(), "답장").await;
+    assert_eq!(status, 201, "{body}");
+}
+
+#[tokio::test]
+#[ignore = "needs Postgres + runtime roles (DATABASE_URL)"]
+async fn the_switch_holds_the_reply_before_any_query_and_not_the_decision() {
+    let _guard = test_lock().await;
+    let w = world_built(|state| state.with_push_reply_enabled(false)).await;
+    let session = w.login().await;
+    let action = w.mint_action(&session).await;
+    let (_, colleague) = w.colleague().await;
+    let message = w.posted_by(&colleague.access, None).await;
+    w.notified(w.owner, message).await;
+    let before = w.rows_by(w.owner).await;
+    let (status, _) = w.reply(&action, message, Uuid::new_v4(), "답장").await;
+    assert_eq!(status, 403, "off: refused");
+    assert_eq!(w.rows_by(w.owner).await, before);
+    // Before any query: a signed token that was never recorded is 403 with the switch
+    // off (the route list refused it) — with the switch on it reaches the token lookup
+    // and is 401.
+    let unrecorded = sign_push_action(w.owner, w.workspace, TEST_JWT_SECRET)
+        .expect("sign")
+        .token;
+    let (status, _) = w.reply(&unrecorded, message, Uuid::new_v4(), "답장").await;
+    assert_eq!(status, 403, "off: decided before the token lookup");
+    // The decision is not held by it.
+    let (_, approval) = w.seed_approval().await;
+    let (status, _) = w.decide(&action, approval, true, Uuid::new_v4()).await;
+    assert_eq!(status, 200);
+
+    // The control: the same two requests on a server with the switch on.
+    let on = world().await;
+    let session = on.login().await;
+    let action = on.mint_action(&session).await;
+    let (_, colleague) = on.colleague().await;
+    let message = on.posted_by(&colleague.access, None).await;
+    on.notified(on.owner, message).await;
+    let unrecorded = sign_push_action(on.owner, on.workspace, TEST_JWT_SECRET)
+        .expect("sign")
+        .token;
+    assert_eq!(
+        on.reply(&unrecorded, message, Uuid::new_v4(), "답장")
+            .await
+            .0,
+        401
+    );
+    assert_eq!(
+        on.reply(&action, message, Uuid::new_v4(), "답장").await.0,
+        201
+    );
+}
+
+#[tokio::test]
+#[ignore = "needs Postgres + runtime roles (DATABASE_URL)"]
+async fn the_body_is_closed_and_bounded() {
+    let _guard = test_lock().await;
+    let w = world().await;
+    let session = w.login().await;
+    let action = w.mint_action(&session).await;
+    let (_, colleague) = w.colleague().await;
+    let message = w.posted_by(&colleague.access, None).await;
+    w.notified(w.owner, message).await;
+    let before = w.rows_by(w.owner).await;
+    let path = w.reply_path(message);
+
+    for (key, value) in [
+        ("channelId", json!(w.channel)),
+        ("rootId", json!(message)),
+        ("props", json!({"a": "b"})),
+        ("attachmentIds", json!([Uuid::new_v4()])),
+        ("type", json!("text")),
+    ] {
+        let mut body = json!({"clientMsgId": Uuid::new_v4(), "body": "답장"});
+        body[key] = value;
+        let (status, answer) = w.send("POST", &path, &action, Some(body)).await;
+        assert_eq!(status, 400, "{key}: {answer}");
+    }
+    let over = "가".repeat(2_001);
+    assert_eq!(
+        w.reply(&action, message, Uuid::new_v4(), &over).await.0,
+        400
+    );
+    let huge = json!({"clientMsgId": Uuid::new_v4(), "body": "a".repeat(17 * 1024)});
+    assert_eq!(w.send("POST", &path, &action, Some(huge)).await.0, 413);
+    assert_eq!(w.rows_by(w.owner).await, before, "nothing was written");
+
+    // The longest legal reply passes.
+    let longest = "가".repeat(2_000);
+    let (status, answer) = w.reply(&action, message, Uuid::new_v4(), &longest).await;
+    assert_eq!(status, 201, "{answer}");
+}
+
+#[tokio::test]
+#[ignore = "needs Postgres + runtime roles (DATABASE_URL)"]
+async fn the_existing_send_checks_still_answer() {
+    let _guard = test_lock().await;
+    let w = world().await;
+    let session = w.login().await;
+    let action = w.mint_action(&session).await;
+    let (_, colleague) = w.colleague().await;
+    let message = w.posted_by(&colleague.access, None).await;
+    w.notified(w.owner, message).await;
+
+    // Left the channel: the same answer as the ordinary send's.
+    sqlx::query("UPDATE membership SET left_at = now() WHERE channel_id = $1 AND member_id = $2")
+        .bind(w.channel)
+        .bind(w.owner)
+        .execute(&w.su)
+        .await
+        .expect("leave the channel");
+    let before = w.rows_by(w.owner).await;
+    let replied = w.reply(&action, message, Uuid::new_v4(), "답장").await;
+    let sent = w.post(&session.access, Uuid::new_v4(), None, "답장").await;
+    assert_eq!(replied.0, 403, "{}", replied.1);
+    assert_eq!(replied, sent, "both doors give the same refusal");
+    assert_eq!(w.rows_by(w.owner).await, before);
+    sqlx::query("UPDATE membership SET left_at = NULL WHERE channel_id = $1 AND member_id = $2")
+        .bind(w.channel)
+        .bind(w.owner)
+        .execute(&w.su)
+        .await
+        .expect("rejoin the channel");
+
+    // Logged out with the refresh half: the token is gone.
+    assert_eq!(w.logout(&session, true).await, 200);
+    let (status, _) = w.reply(&action, message, Uuid::new_v4(), "답장").await;
+    assert_eq!(status, 401);
+    assert_eq!(w.rows_by(w.owner).await, before);
+}
+
+#[tokio::test]
+#[ignore = "needs Postgres + runtime roles (DATABASE_URL)"]
+async fn the_reply_spends_the_send_budget() {
+    let _guard = test_lock().await;
+    let w = world_built(|state| {
+        state.with_rate_limit(momo_server::config::RateLimitConfig {
+            message_send_per_member_limit: 3,
+            ..momo_server::config::RateLimitConfig::default()
+        })
+    })
+    .await;
+    let session = w.login().await;
+    let action = w.mint_action(&session).await;
+    // The notified messages are written straight into the table, so the colleague's
+    // own sends do not touch anyone's budget here.
+    let colleague = w.add_human("member", true).await.0;
+    let mut notified = Vec::new();
+    for _ in 0..3 {
+        let id: Uuid = sqlx::query_scalar(
+            "WITH s AS (UPDATE channel_seq SET last_seq = last_seq + 1 WHERE channel_id = $2 \
+                        RETURNING last_seq) \
+             INSERT INTO message (workspace_id, channel_id, author_member_id, type, body, seq, hlc_ts) \
+             SELECT $1, $2, $3, 'text', 'x', last_seq, (extract(epoch FROM now()) * 1000)::bigint \
+               FROM s RETURNING id",
+        )
+        .bind(w.workspace)
+        .bind(w.channel)
+        .bind(colleague)
+        .fetch_one(&w.su)
+        .await
+        .expect("seed a notified message");
+        w.notified(w.owner, id).await;
+        notified.push(id);
+    }
+    // send, reply, send, reply — a budget of three lets three through, whichever door.
+    let mut statuses = Vec::new();
+    statuses.push(w.post(&session.access, Uuid::new_v4(), None, "1").await.0);
+    statuses.push(w.reply(&action, notified[0], Uuid::new_v4(), "2").await.0);
+    statuses.push(w.post(&session.access, Uuid::new_v4(), None, "3").await.0);
+    statuses.push(w.reply(&action, notified[1], Uuid::new_v4(), "4").await.0);
+    statuses.push(w.reply(&action, notified[2], Uuid::new_v4(), "5").await.0);
+    assert_eq!(statuses, vec![201, 201, 201, 429, 429]);
+    assert_eq!(w.rows_by(w.owner).await, 3);
+}
+
+/// A buffer the server's log lines are written into, for one test.
+#[derive(Clone, Default)]
+struct CapturedLog(std::sync::Arc<Mutex<Vec<u8>>>);
+
+impl std::io::Write for CapturedLog {
+    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+        self.0.lock().expect("log buffer").extend_from_slice(bytes);
+        Ok(bytes.len())
+    }
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+impl<'a> tracing_subscriber::fmt::MakeWriter<'a> for CapturedLog {
+    type Writer = CapturedLog;
+    fn make_writer(&'a self) -> Self::Writer {
+        self.clone()
+    }
+}
+
+#[tokio::test]
+#[ignore = "needs Postgres + runtime roles (DATABASE_URL)"]
+async fn a_reply_leaves_no_text_or_token_in_the_server_log() {
+    let _guard = test_lock().await;
+    let log = CapturedLog::default();
+    // `#[tokio::test]` is a current-thread runtime: the spawned server runs on this
+    // thread, so a thread-local subscriber sees every line it writes.
+    let subscriber = tracing_subscriber::fmt()
+        .with_max_level(tracing::Level::TRACE)
+        .with_writer(log.clone())
+        .with_ansi(false)
+        .finish();
+    let _default = tracing::subscriber::set_default(subscriber);
+    let w = world().await;
+    let session = w.login().await;
+    let action = w.mint_action(&session).await;
+    let (_, colleague) = w.colleague().await;
+    let message = w.posted_by(&colleague.access, None).await;
+    w.notified(w.owner, message).await;
+    let text = format!("로그에-없어야-할-답장-{}", Uuid::new_v4().simple());
+    let start = log.0.lock().unwrap().len();
+    let (status, _) = w.reply(&action, message, Uuid::new_v4(), &text).await;
+    assert_eq!(status, 201);
+    // A refused one too (the cap), so both outcomes are read.
+    let (status, _) = w.reply(&action, message, Uuid::new_v4(), &text).await;
+    assert_eq!(status, 409);
+    let written = String::from_utf8_lossy(&log.0.lock().unwrap()[start..]).into_owned();
+    assert!(!written.is_empty(), "the capture saw the request");
+    assert!(!written.contains(&text), "the reply text is not logged");
+    assert!(!written.contains(&action), "the token is not logged");
 }
