@@ -375,7 +375,7 @@ export function TerminalDock({
               workConsoleProvided ? (
                 <Button
                   type="button"
-                  variant="outline"
+                  variant="secondary"
                   size="sm"
                   onClick={() => navigate(WORK_CONSOLE_VIEW_PATH)}
                   data-testid="terminal-dock-console"

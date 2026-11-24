@@ -518,7 +518,7 @@ function MySessionRow({
         {verb === null && (
           <Button
             type="button"
-            variant="outline"
+            variant="secondary"
             size="sm"
             onClick={onOpenThread}
             disabled={openingThread}
@@ -689,7 +689,7 @@ function SessionPeek({
         )}
         <Button
           type="button"
-          variant="outline"
+          variant="secondary"
           size="sm"
           onClick={onOpen}
           data-testid="work-session-open"
@@ -1176,7 +1176,7 @@ export function WorkPanel({
                 actions={
                   scope === "channel" ? (
                     <Button
-                      variant="outline"
+                      variant="secondary"
                       size="sm"
                       onClick={() => onScopeChange("all")}
                       data-testid="work-empty-all"

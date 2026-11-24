@@ -152,7 +152,7 @@ export function PersonalAgentRow({ harness, read, agent, port, onChanged, offlin
             }}
           />
         ) : read === "error" ? (
-          <Button type="button" size="sm" variant="outline" className="tap-target" onClick={onChanged} data-testid={`${testId}-personal-retry`}>
+          <Button type="button" size="sm" variant="secondary" className="tap-target" onClick={onChanged} data-testid={`${testId}-personal-retry`}>
             {COPY.retry}
           </Button>
         ) : null}

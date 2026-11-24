@@ -282,7 +282,7 @@ export function DoorbellSection({
           actions={
             <Button
               type="button"
-              variant="outline"
+              variant="secondary"
               size="sm"
               onClick={() => setGateClosed(false)}
               data-testid="hosted-doorbell-gate-retry"

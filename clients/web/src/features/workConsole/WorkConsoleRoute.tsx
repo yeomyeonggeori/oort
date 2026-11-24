@@ -365,7 +365,7 @@ export function WorkConsoleRoute() {
         </div>
         <div className="flex shrink-0 items-center gap-2">
           {panelChannelId !== null && (
-            <Button variant="outline" size="sm" className="tap-target" asChild>
+            <Button variant="secondary" size="sm" className="tap-target" asChild>
               <Link
                 to={`/c/${panelChannelId}?work-panel=1`}
                 data-testid="open-work-panel"

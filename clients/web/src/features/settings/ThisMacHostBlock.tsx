@@ -149,7 +149,7 @@ export function ThisMacHostBlock({
 
 function RecheckButton({ recheck }: { recheck: () => void }) {
   return (
-    <Button variant="outline" size="sm" onClick={recheck} data-testid="this-mac-recheck">
+    <Button variant="secondary" size="sm" onClick={recheck} data-testid="this-mac-recheck">
       다시 확인
     </Button>
   );
@@ -460,7 +460,7 @@ function Registered({
           )}
           {state.kind === "online" && (
             <Button
-              variant="outline"
+              variant="secondary"
               size="sm"
               aria-busy={stop.isPending || undefined}
               onClick={() => {

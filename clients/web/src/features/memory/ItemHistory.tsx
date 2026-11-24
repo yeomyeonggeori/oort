@@ -251,7 +251,7 @@ export function ItemHistory({
             <div className="flex justify-end gap-2">
               <Button
                 type="button"
-                variant="outline"
+                variant="secondary"
                 size="sm"
                 className="tap-target"
                 disabled={revert.isPending}

@@ -338,7 +338,7 @@ function WorkspaceAvatarField({
               같은 갈라내기다.) */}
           <Button
             type="button"
-            variant="outline"
+            variant="secondary"
             size="sm"
             aria-disabled={offline || undefined}
             aria-busy={uploading || undefined}

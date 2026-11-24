@@ -829,7 +829,7 @@ export function LocalTerminalDock({
             </DialogDescription>
           </div>
           <div className="flex items-center justify-end gap-2">
-            <Button type="button" variant="outline" size="sm" onClick={() => setConfirm(null)}>
+            <Button type="button" variant="secondary" size="sm" onClick={() => setConfirm(null)}>
               취소
             </Button>
             <Button

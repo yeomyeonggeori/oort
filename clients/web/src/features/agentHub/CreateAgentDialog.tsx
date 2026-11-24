@@ -417,7 +417,7 @@ function CreateAgentPanel({
       <div className="flex items-center justify-end gap-2 border-t border-line p-4">
         <Button
           type="button"
-          variant="outline"
+          variant="secondary"
           size="sm"
           disabled={pending}
           onClick={() => onOpenChange(false)}

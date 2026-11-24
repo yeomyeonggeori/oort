@@ -133,7 +133,7 @@ export function MemoryResetPanel({
           <Button
             ref={triggerRef}
             type="button"
-            variant="outline"
+            variant="secondary"
             size="sm"
             aria-disabled={offline || undefined}
             aria-describedby={offline ? REASON_ID : undefined}

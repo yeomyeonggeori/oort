@@ -1045,7 +1045,7 @@ function PickerScreen({
       <div className="flex flex-wrap items-center gap-2">
         <Button
           type="button"
-          variant="outline"
+          variant="secondary"
           size="sm"
           onClick={onStartNew}
           data-testid="hosted-wizard-start-new"
@@ -1389,7 +1389,7 @@ function DetectingStep({
         actions={
           <Button
             type="button"
-            variant="outline"
+            variant="secondary"
             size="sm"
             aria-busy={checking || undefined}
             onClick={onRecheck}
@@ -1723,7 +1723,7 @@ function ActivationStep({
           actions={
             <Button
               type="button"
-              variant="outline"
+              variant="secondary"
               size="sm"
               aria-busy={checking || undefined}
               onClick={onRecheck}
@@ -1745,7 +1745,7 @@ function ActivationStep({
               <p className="break-keep text-body text-ink-muted">
                 {testMentionSentence(channelName ?? "승인한 채널", agentHandle)}
               </p>
-              <Button variant="outline" size="sm" className="self-start" asChild>
+              <Button variant="secondary" size="sm" className="self-start" asChild>
                 <Link
                   to={`/c/${normalizedId(firstChannel)}?firstMention=${normalizedId(connection.agentMemberId)}`}
                   data-testid="hosted-test-mention"
@@ -1835,7 +1835,7 @@ function WizardActions({
         (regen.allowed ? (
           <Button
             type="button"
-            variant="outline"
+            variant="secondary"
             size="sm"
             aria-disabled={offline || busy || undefined}
             aria-busy={regenerating || undefined}
@@ -1911,7 +1911,7 @@ function CloseAction({ busy, onClose }: { busy: boolean; onClose: () => void }) 
   return (
     <Button
       type="button"
-      variant="outline"
+      variant="secondary"
       size="sm"
       aria-disabled={busy || undefined}
       className={cn(busy && "opacity-50")}

@@ -47,7 +47,7 @@ function LanguageControl({ locale }: { locale: AppLocale }) {
           <div role="alert" className="flex flex-wrap items-center gap-2 text-meta text-danger">
             <span>{t("settings.profile.languageLoadError")}</span>
             <Button
-              variant="outline"
+              variant="secondary"
               size="sm"
               className="tap-target"
               aria-busy={snapshot.status === "loading" || undefined}
