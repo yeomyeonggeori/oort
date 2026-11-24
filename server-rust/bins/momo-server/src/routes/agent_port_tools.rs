@@ -3006,7 +3006,13 @@ async fn prepare_expression(
                 if bytes.len() > momo_expressions::INPUT_BYTES {
                     return Err(ToolFailure::InvalidArguments);
                 }
-                let picture = match intake::picture_or_reason(bytes, Some(remaining())).await {
+                let picture = match intake::picture_or_reason(
+                    bytes,
+                    Some(remaining()),
+                    state.expression_rendition_table,
+                )
+                .await
+                {
                     Ok(intake::Picture::Ready(processed)) => (Some(*processed), None),
                     // A video attachment is the one card an attachment may become.
                     Ok(intake::Picture::Manual("video_processing_unavailable")) => {
@@ -3048,7 +3054,7 @@ async fn prepare_expression(
                     return Err(ToolFailure::InvalidArguments);
                 };
                 let processed =
-                    media::process_waiting(bytes, remaining())
+                    media::process_waiting(bytes, remaining(), state.expression_rendition_table)
                         .await
                         .map_err(|rejected| match rejected {
                             media::Rejected::Busy => ToolFailure::Unavailable,

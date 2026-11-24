@@ -404,6 +404,7 @@ impl AgentWorker {
             opened.picture,
             &program,
             &momo_expressions::media::decoder_slots(),
+            self.config.expression_rendition_table,
         )
         .await
         {

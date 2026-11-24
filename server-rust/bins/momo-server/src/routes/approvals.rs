@@ -1032,7 +1032,8 @@ async fn fetch_claimed_link(
     drop(permit);
     let bytes = fetched.map_err(|refused| refused.code())?;
     let remaining = momo_expressions::action::PREPARE_DEADLINE.saturating_sub(started.elapsed());
-    match intake::picture_or_reason(bytes, Some(remaining)).await {
+    match intake::picture_or_reason(bytes, Some(remaining), state.expression_rendition_table).await
+    {
         Ok(intake::Picture::Ready(processed)) => Ok(*processed),
         Ok(intake::Picture::Manual(code)) => Err(code),
         // The bytes came and no decoder did: the link is not at fault, and it was fetched once.

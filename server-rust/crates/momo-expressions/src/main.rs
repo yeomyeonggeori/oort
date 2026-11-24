@@ -1,23 +1,28 @@
-//! Single-job codec subprocess. Binary stdin only; no URL/path/env/DB input. The one argument it
-//! takes is a fixed mode the parent chooses: none (the renditions of any picture), `--prepare`
-//! (a member's photo, made ready to leave for an image model) or `--cutout` (a picture an image
-//! model drew, as a cut-out). Anything else is refused before stdin is read.
+//! Single-job codec subprocess. Binary stdin only; no URL/path/env/DB input. Its arguments are a fixed
+//! mode the parent chooses: none (the renditions of any picture), `--prepare` (a member's photo,
+//! made ready to leave for an image model) or `--cutout` (a picture an image model drew, as a
+//! cut-out); the renditions and the cut-out may be followed by `--wide` (the ADR-0218 §20 size
+//! table, #6071). Anything else is refused before stdin is read.
 #[cfg(target_os = "linux")]
 use momo_expressions::media::ALLOCATION_LIMIT;
 use momo_expressions::{
-    media::{self, Rejected},
+    media::{self, Rejected, RenditionTable},
     INPUT_BYTES,
 };
 use std::io::{Read, Write};
 use std::time::{Duration, Instant};
 
 fn main() {
-    let mode = std::env::args().nth(1);
-    if std::env::args().count() > 2
-        || !matches!(mode.as_deref(), None | Some("--prepare" | "--cutout"))
-    {
-        std::process::exit(2);
-    }
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    let args: Vec<&str> = args.iter().map(String::as_str).collect();
+    let (mode, table) = match args.as_slice() {
+        [] => (None, RenditionTable::Legacy),
+        ["--wide"] => (None, RenditionTable::Wide),
+        ["--prepare"] => (Some("--prepare"), RenditionTable::Legacy),
+        ["--cutout"] => (Some("--cutout"), RenditionTable::Legacy),
+        ["--cutout", "--wide"] => (Some("--cutout"), RenditionTable::Wide),
+        _ => std::process::exit(2),
+    };
     // Linux deployment: AS also bounds codec-internal allocations not covered
     // by image::Limits (e.g. WebP Huffman tables). macOS has no effective AS
     // cap; hard-memory runtime evidence must be measured on Linux at stack QA.
@@ -45,10 +50,10 @@ fn main() {
             return serde_json::to_vec(&Err::<(), _>(Rejected::TooLarge));
         }
         let end = Instant::now() + Duration::from_secs(10);
-        match mode.as_deref() {
+        match mode {
             Some("--prepare") => serde_json::to_vec(&media::prepare(&bytes, end)),
-            Some("--cutout") => serde_json::to_vec(&media::decode_cutout(&bytes, end)),
-            _ => serde_json::to_vec(&media::decode(&bytes, end)),
+            Some("--cutout") => serde_json::to_vec(&media::decode_cutout_with(&bytes, end, table)),
+            _ => serde_json::to_vec(&media::decode_with(&bytes, end, table)),
         }
     })()
     .unwrap_or_default();

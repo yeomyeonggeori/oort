@@ -1110,6 +1110,30 @@ fn subscription_agents_from_env() -> bool {
 /// off, a positive number = the ceiling. The api only **explains** the ceiling, so a value it cannot
 /// read is a warning and "not shown", never a refusal to boot (the worker, which enforces, fails
 /// loudly on the same value).
+/// ADR-0218 §20 Z2-7 (#6071): the size table expressions are stored at, from
+/// `EXPRESSION_RENDITION_TABLE` (`768` = the §20 table; unset, empty or `512` = the old one).
+pub fn expression_rendition_table_from_env() -> momo_expressions::media::RenditionTable {
+    expression_rendition_table_from_lookup(|key| std::env::var_os(key))
+}
+
+/// [`expression_rendition_table_from_env`] over a given lookup, so a test measures the wiring without
+/// `set_var`. Never fatal: a value it cannot read keeps the **old** table and the boot says so — a
+/// mistyped way back (Z7) must not leave the §20 table on, and the old table is what every client reads.
+pub fn expression_rendition_table_from_lookup(
+    lookup: impl Fn(&str) -> Option<std::ffi::OsString>,
+) -> momo_expressions::media::RenditionTable {
+    use momo_expressions::media::RenditionTable;
+    let raw = lookup(RenditionTable::SETTING)
+        .map(|value| operator_value_lossy(RenditionTable::SETTING, value));
+    RenditionTable::from_setting(raw.as_deref()).unwrap_or_else(|| {
+        tracing::warn!(
+            variable = RenditionTable::SETTING,
+            "unreadable expression size table; pictures are stored at the old table (512)"
+        );
+        RenditionTable::Legacy
+    })
+}
+
 pub fn team_ai_caps_from_env() -> momo_workspace_actions::team_ai_limits::OperatorCaps {
     team_ai_caps_from_lookup(|key| std::env::var_os(key))
 }

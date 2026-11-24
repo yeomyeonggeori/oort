@@ -146,6 +146,10 @@ pub struct WorkerConfig {
     /// The assembler child the hosted door runs for a motion (`None` = `momo-expression-assembler` next
     /// to this executable, the way every picture path finds it). A hook for tests, like `momo-server`'s.
     pub assembler_program: Option<std::path::PathBuf>,
+    /// ADR-0218 §20 Z2-7 (#6071) — the size table the hosted door stores a still at
+    /// (`EXPRESSION_RENDITION_TABLE`, the api's variable: set the same value on both). Default: the old
+    /// table; a value it cannot read keeps the old table too.
+    pub expression_rendition_table: momo_expressions::media::RenditionTable,
     /// The program the helper's PDF reader runs as its child (#4970, ADR-0151 증보 4): `None` = **this
     /// very executable** re-run with `--attachment-text-child`, which is what a deployment uses. A hook for
     /// tests (whose own executable is not the worker), like [`assembler_program`](Self::assembler_program).
@@ -703,6 +707,19 @@ fn claude_subscription_agents_switch_on(value: Option<&str>) -> bool {
 /// The operator's strict-media attestation (#4820 C2b 2부): **only an exact `1`**. Not `true`, not `yes`,
 /// not `01`, not a `1` with a space around it — a door that opens a path for the model to name a file
 /// does not open on a guess about what the operator meant.
+/// ADR-0218 §20 Z2-7 (#6071): the same reading of `EXPRESSION_RENDITION_TABLE` as the api's — a value
+/// it cannot read keeps the old table and says so.
+fn expression_rendition_table(raw: Option<&str>) -> momo_expressions::media::RenditionTable {
+    use momo_expressions::media::RenditionTable;
+    RenditionTable::from_setting(raw).unwrap_or_else(|| {
+        tracing::warn!(
+            variable = RenditionTable::SETTING,
+            "unreadable expression size table; pictures are stored at the old table (512)"
+        );
+        RenditionTable::Legacy
+    })
+}
+
 fn hosted_media_strict_attested(raw: Option<&str>) -> bool {
     raw == Some("1")
 }
@@ -867,6 +884,9 @@ impl WorkerConfig {
                 env(momo_workspace_actions::hosted_expression::STRICT_ENV).as_deref(),
             ),
             assembler_program: None,
+            expression_rendition_table: expression_rendition_table(
+                env(momo_expressions::media::RenditionTable::SETTING).as_deref(),
+            ),
             attachment_text_child: None,
             memory: MemoryConfig::from_env()?,
             claude_subscription_agents_enabled: claude_subscription_agents_switch_on(
@@ -917,6 +937,7 @@ impl WorkerConfig {
             api_internal_origin: None,
             hosted_media_strict: false,
             assembler_program: None,
+            expression_rendition_table: momo_expressions::media::RenditionTable::Legacy,
             attachment_text_child: None,
             memory: MemoryConfig::default(),
             claude_subscription_agents_enabled: false,
@@ -990,6 +1011,15 @@ impl WorkerConfig {
         program: impl Into<std::path::PathBuf>,
     ) -> WorkerConfig {
         self.attachment_text_child = Some(program.into());
+        self
+    }
+
+    /// The same config with the expression size table (ADR-0218 §20, #6071), for tests.
+    pub fn with_expression_rendition_table(
+        mut self,
+        table: momo_expressions::media::RenditionTable,
+    ) -> WorkerConfig {
+        self.expression_rendition_table = table;
         self
     }
 

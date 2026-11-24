@@ -477,6 +477,7 @@ fn fat_slot() -> e::media::Processed {
         large: fabricated(1_048_576, 512),
         small: fabricated(262_144, 128),
         thumb: fabricated(262_144, 128),
+        still: None,
     }
 }
 
@@ -1413,6 +1414,7 @@ async fn a9_the_cap_is_24_mib_to_the_byte_and_a_refused_write_leaves_nothing() {
         large: fabricated(1, 8),
         small: fabricated(1, 8),
         thumb: fabricated(1, 8),
+        still: None,
     };
     let images = images_of(&w.su, id).await;
     assert_eq!(images, 48);

@@ -45,16 +45,19 @@ async fn codec_subprocess_accepts_pixels_with_resource_limits_and_cleared_enviro
         "momo-expression-decoder",
         std::path::Path::new(env!("CARGO_BIN_EXE_momo-expression-decoder")),
     );
-    let media = momo_expressions::media::process(still()).await.unwrap();
+    let media = momo_expressions::media::process(still(), Default::default())
+        .await
+        .unwrap();
     assert_eq!(
         (media.large.info.width, media.large.info.height),
         (200, 100)
     );
     assert_eq!(media.small.info.mime, "image/png");
     assert_eq!(
-        momo_expressions::media::process(vec![
-            0, 0, 0, 12, b'f', b't', b'y', b'p', b'i', b's', b'o', b'm'
-        ])
+        momo_expressions::media::process(
+            vec![0, 0, 0, 12, b'f', b't', b'y', b'p', b'i', b's', b'o', b'm'],
+            Default::default()
+        )
         .await
         .unwrap_err(),
         Rejected::Video
@@ -606,4 +609,226 @@ fn a_shrunk_gif_past_a_palette_of_colours_is_no_further_from_its_picture_than_be
         worst <= old_worst,
         "worst channel error {worst} is above the old encoder's {old_worst}"
     );
+}
+
+// ---- #6071: the §20 size table (ADR-0218 증보 14) ---------------------------------------------
+
+use momo_expressions::media::{decode_with, RenditionTable};
+
+fn at(table: RenditionTable, bytes: &[u8]) -> Result<momo_expressions::media::Processed, Rejected> {
+    // A generous deadline: these measure sizes and limits, not the 10 s of a release build.
+    decode_with(bytes, Instant::now() + Duration::from_secs(120), table)
+}
+
+/// A GIF of `frames` frames on a `w` x `h` canvas, written with the `gif` crate's own palette (no
+/// quantising), each frame one flat colour: as cheap as a moving picture of that size gets, so a test
+/// of the frame or canvas limit fails on the limit and never on the 2 MiB output cap.
+fn flat_gif(w: u16, h: u16, frames: usize, delay_cs: u16) -> Vec<u8> {
+    let mut bytes = Vec::new();
+    {
+        let palette = [250, 40, 40, 40, 120, 250];
+        let mut encoder = gif::Encoder::new(&mut bytes, w, h, &palette).unwrap();
+        for n in 0..frames {
+            let frame = gif::Frame {
+                width: w,
+                height: h,
+                delay: delay_cs,
+                buffer: std::borrow::Cow::Owned(vec![
+                    (n % 2) as u8;
+                    usize::from(w) * usize::from(h)
+                ]),
+                ..gif::Frame::default()
+            };
+            encoder.write_frame(&frame).unwrap();
+        }
+    }
+    bytes
+}
+
+fn edge(r: &momo_expressions::media::Rendition) -> u32 {
+    r.info.width.max(r.info.height)
+}
+
+/// ZA1 · ZA5 · ZA9 (in the codec): a 1024 still is `large` 768 · `thumb` 256 · `small` 128 at the wide
+/// table, each under its byte cap and with no `still`; at the old table it is 512 · 128 · 128 as it
+/// always was. A 96 picture is never enlarged at either table.
+#[test]
+fn a_1024_still_is_768_256_128_at_the_wide_table_and_512_128_128_at_the_old_one() {
+    let source = png_bytes(&sticker(1024, false));
+    let wide = at(RenditionTable::Wide, &source).unwrap();
+    assert_eq!(
+        (edge(&wide.large), edge(&wide.thumb), edge(&wide.small)),
+        (768, 256, 128)
+    );
+    assert!(
+        wide.large.info.bytes <= 2 * 1024 * 1024,
+        "{}",
+        wide.large.info.bytes
+    );
+    assert!(
+        wide.thumb.info.bytes <= 512 * 1024,
+        "{}",
+        wide.thumb.info.bytes
+    );
+    assert!(
+        wide.small.info.bytes <= 256 * 1024,
+        "{}",
+        wide.small.info.bytes
+    );
+    assert!(
+        wide.still.is_none(),
+        "a still registration has no stopped frame"
+    );
+    assert_eq!(wide.variants().len(), 3);
+    let old = at(RenditionTable::Legacy, &source).unwrap();
+    assert_eq!(
+        (edge(&old.large), edge(&old.thumb), edge(&old.small)),
+        (512, 128, 128)
+    );
+    assert!(old.still.is_none());
+    assert_eq!(
+        old.thumb.data, old.small.data,
+        "the old table's thumb is its small, byte for byte"
+    );
+    for table in [RenditionTable::Legacy, RenditionTable::Wide] {
+        let tiny = at(table, &png_bytes(&sticker(96, false))).unwrap();
+        for (variant, r) in tiny.variants() {
+            assert_eq!(
+                (r.info.width, r.info.height),
+                (96, 96),
+                "{table:?} {variant}"
+            );
+        }
+    }
+}
+
+/// ZA2: a moving picture gets one `still` at the wide table — a PNG of one frame at `large`'s size,
+/// under 2 MiB, the same frame as `thumb` — and none at the old table.
+#[test]
+fn a_moving_picture_gets_one_still_of_larges_size_at_the_wide_table_only() {
+    let gif = flat_gif(500, 400, 3, 8);
+    let wide = at(RenditionTable::Wide, &gif).unwrap();
+    let still = wide.still.as_ref().expect("a stopped frame");
+    assert_eq!(still.info.mime, "image/png");
+    assert_eq!((still.info.frame_count, still.info.duration_ms), (1, 0));
+    assert_eq!(
+        (still.info.width, still.info.height),
+        (wide.large.info.width, wide.large.info.height)
+    );
+    assert_eq!(
+        (still.info.width, still.info.height),
+        (500, 400),
+        "never enlarged"
+    );
+    assert!(still.info.bytes <= 2 * 1024 * 1024);
+    assert_eq!(edge(&wide.thumb), 256);
+    assert_eq!(wide.large.info.mime, "image/gif");
+    assert_eq!(wide.large.info.frame_count, 3);
+    assert_eq!(wide.variants().len(), 4);
+    // The first frame, both of them: the stopped frame shrunk to the thumb's size is the thumb.
+    let first = image::load_from_memory(&still.data).unwrap();
+    let thumb = image::load_from_memory(&wide.thumb.data)
+        .unwrap()
+        .to_rgba8();
+    assert_eq!(first.thumbnail(256, 256).to_rgba8(), thumb);
+    let old = at(RenditionTable::Legacy, &gif).unwrap();
+    assert!(old.still.is_none());
+    assert_eq!(old.variants().len(), 3);
+    assert_eq!(edge(&old.large), 500);
+}
+
+/// ZA3: the wide table widens the moving canvas to 768 and nothing else. 768 passes and 769 is refused;
+/// at 768 x 768 the unchanged 32,000,000 decoded pixels admit 54 frames and refuse the 55th; 512 x 512
+/// still takes 100; past 10 s is refused. The old table keeps refusing a 768 canvas.
+#[test]
+fn the_wide_canvas_is_768_and_the_frame_and_pixel_limits_are_the_same() {
+    let wide = |b: &[u8]| at(RenditionTable::Wide, b);
+    let fifty_four = wide(&flat_gif(768, 768, 54, 2)).unwrap();
+    assert_eq!(fifty_four.large.info.frame_count, 54);
+    assert_eq!(edge(&fifty_four.large), 768);
+    assert_eq!(
+        wide(&flat_gif(768, 768, 55, 2)).unwrap_err(),
+        Rejected::Invalid
+    );
+    assert_eq!(
+        wide(&flat_gif(769, 300, 2, 2)).unwrap_err(),
+        Rejected::Invalid
+    );
+    assert_eq!(
+        wide(&flat_gif(300, 769, 2, 2)).unwrap_err(),
+        Rejected::Invalid
+    );
+    assert_eq!(
+        wide(&flat_gif(512, 512, 100, 2))
+            .unwrap()
+            .large
+            .info
+            .frame_count,
+        100
+    );
+    assert_eq!(
+        wide(&flat_gif(64, 64, 2, 600)).unwrap_err(),
+        Rejected::Invalid
+    );
+    assert_eq!(
+        at(RenditionTable::Legacy, &flat_gif(768, 768, 2, 2)).unwrap_err(),
+        Rejected::Invalid,
+        "with the switch off a 768 canvas is refused exactly as before"
+    );
+    assert_eq!(
+        at(RenditionTable::Legacy, &flat_gif(512, 512, 2, 2))
+            .unwrap()
+            .large
+            .info
+            .frame_count,
+        2
+    );
+}
+
+/// ZA4 (the encoder half): a `large` that cannot fit 2 MiB at 768 fails; it is never cut down or
+/// swapped for a smaller picture.
+#[test]
+fn a_768_large_over_2_mib_fails_without_shrinking_or_substituting() {
+    let mut seed = 0x6071_0001u32;
+    let noise = image::RgbaImage::from_fn(768, 768, |_, _| {
+        // See-through noise keeps all four channels: 768 x 768 x 4 is past 2 MiB before any header.
+        image::Rgba([
+            lcg(&mut seed),
+            lcg(&mut seed),
+            lcg(&mut seed),
+            lcg(&mut seed) | 1,
+        ])
+    });
+    let input = png_bytes(&noise);
+    assert!(
+        input.len() < 5 * 1024 * 1024,
+        "the input itself is admitted"
+    );
+    assert!(
+        at(RenditionTable::Wide, &input).is_err(),
+        "768 x 768 of noise does not fit 2 MiB: a failure, not a smaller large"
+    );
+}
+
+/// The real child and its fixed `--wide` argument: the api's path, not the in-process function.
+#[tokio::test]
+async fn the_codec_child_stores_at_the_table_it_is_told() {
+    beside::place(
+        "momo-expression-decoder",
+        std::path::Path::new(env!("CARGO_BIN_EXE_momo-expression-decoder")),
+    );
+    let source = png_bytes(&sticker(1024, false));
+    let wide = momo_expressions::media::process(source.clone(), RenditionTable::Wide)
+        .await
+        .unwrap();
+    assert_eq!((edge(&wide.large), edge(&wide.thumb)), (768, 256));
+    let old = momo_expressions::media::process(source, RenditionTable::Legacy)
+        .await
+        .unwrap();
+    assert_eq!((edge(&old.large), edge(&old.thumb)), (512, 128));
+    // A moving picture's four renditions come back through the child's stdout.
+    let moving = momo_expressions::media::process(flat_gif(700, 700, 4, 5), RenditionTable::Wide)
+        .await
+        .unwrap();
+    assert_eq!(moving.still.as_ref().map(edge), Some(700));
 }

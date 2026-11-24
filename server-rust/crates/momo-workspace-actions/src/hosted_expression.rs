@@ -690,13 +690,16 @@ pub async fn prepare(
     picture: Picture,
     assembler_program: &Path,
     slots: &Arc<Semaphore>,
+    table: media::RenditionTable,
 ) -> Prepared {
     let bytes = match picture_bytes(picture) {
         Ok(bytes) => bytes,
         Err(fault) => return card_or_retry(&fault),
     };
     match &request.motion {
-        DoorMotion::Still => match media::process_waiting(bytes, media::WAIT_MAX).await {
+        // The still is encoded from the answer's bytes, so it takes the operator's size table (ADR-0218
+        // §20 Z2-4); an assembled motion stays at the old table, like every assembly.
+        DoorMotion::Still => match media::process_waiting(bytes, media::WAIT_MAX, table).await {
             Ok(processed) => Prepared::Ready(vec![Slot::Ready(Box::new(processed))]),
             Err(rejected) => card_or_retry(&Fault::Rejected(rejected)),
         },

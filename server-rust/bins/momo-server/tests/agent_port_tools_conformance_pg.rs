@@ -30890,7 +30890,7 @@ async fn assemble_failure_codes_are_results_parameters_are_call_errors_and_busy_
     );
     // The same two slots serve a link/upload decode: with them taken, so is that one.
     assert_eq!(
-        momo_expressions::media::process(picture_4820(8, 8))
+        momo_expressions::media::process(picture_4820(8, 8), Default::default())
             .await
             .err(),
         Some(momo_expressions::media::Rejected::Busy),
