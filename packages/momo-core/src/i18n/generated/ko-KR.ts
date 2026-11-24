@@ -11716,6 +11716,78 @@ export const catalog: MessageCatalog = {
       "value": "이 답글이 달린 스레드 열기"
     }
   ],
+  "search.entry.thisChannel": [
+    {
+      "type": 0,
+      "value": "이 채널에서 검색"
+    }
+  ],
+  "search.entry.thisChannelQuery": [
+    {
+      "type": 0,
+      "value": "이 채널에서 '"
+    },
+    {
+      "type": 1,
+      "value": "query"
+    },
+    {
+      "type": 0,
+      "value": "' 검색"
+    }
+  ],
+  "search.entry.thisDm": [
+    {
+      "type": 0,
+      "value": "이 대화에서 검색"
+    }
+  ],
+  "search.entry.thisDmQuery": [
+    {
+      "type": 0,
+      "value": "이 대화에서 '"
+    },
+    {
+      "type": 1,
+      "value": "query"
+    },
+    {
+      "type": 0,
+      "value": "' 검색"
+    }
+  ],
+  "search.entry.workspace": [
+    {
+      "type": 0,
+      "value": "전체에서 검색"
+    }
+  ],
+  "search.entry.workspaceQuery": [
+    {
+      "type": 0,
+      "value": "전체에서 '"
+    },
+    {
+      "type": 1,
+      "value": "query"
+    },
+    {
+      "type": 0,
+      "value": "' 검색"
+    }
+  ],
+  "search.escalate.detail": [
+    {
+      "type": 0,
+      "value": "다른 채널에 있었을 수 있습니다. 같은 말로 전체를 찾아볼 수 있습니다."
+    }
+  ],
+  "search.escalate.label": [
+    {
+      "type": 0,
+      "value": "전체에서 찾기"
+    }
+  ],
   "search.group.channels": [
     {
       "type": 0,
@@ -11754,6 +11826,17 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "사람"
+    }
+  ],
+  "search.hint.shortQuery": [
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "자 이상 입력하면 찾기 시작합니다."
     }
   ],
   "search.input.clearLabel": [
@@ -11802,6 +11885,182 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "사람"
+    }
+  ],
+  "search.noResults.channelNamed": [
+    {
+      "type": 1,
+      "value": "quoted"
+    },
+    {
+      "type": 5,
+      "value": "josa",
+      "options": {
+        "final": {
+          "value": [
+            {
+              "type": 0,
+              "value": "이"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "가"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": 0,
+      "value": " 들어간 메시지가 "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "에는 없습니다."
+    }
+  ],
+  "search.noResults.dmNamed": [
+    {
+      "type": 1,
+      "value": "quoted"
+    },
+    {
+      "type": 5,
+      "value": "josa",
+      "options": {
+        "final": {
+          "value": [
+            {
+              "type": 0,
+              "value": "이"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "가"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": 0,
+      "value": " 들어간 메시지가 "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "님과의 대화에는 없습니다."
+    }
+  ],
+  "search.noResults.thisChannel": [
+    {
+      "type": 1,
+      "value": "quoted"
+    },
+    {
+      "type": 5,
+      "value": "josa",
+      "options": {
+        "final": {
+          "value": [
+            {
+              "type": 0,
+              "value": "이"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "가"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": 0,
+      "value": " 들어간 메시지가 이 채널에는 없습니다."
+    }
+  ],
+  "search.noResults.thisDm": [
+    {
+      "type": 1,
+      "value": "quoted"
+    },
+    {
+      "type": 5,
+      "value": "josa",
+      "options": {
+        "final": {
+          "value": [
+            {
+              "type": 0,
+              "value": "이"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "가"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": 0,
+      "value": " 들어간 메시지가 이 대화에는 없습니다."
+    }
+  ],
+  "search.noResults.workspace": [
+    {
+      "type": 1,
+      "value": "quoted"
+    },
+    {
+      "type": 5,
+      "value": "josa",
+      "options": {
+        "final": {
+          "value": [
+            {
+              "type": 0,
+              "value": "이"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "가"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": 0,
+      "value": " 들어간 메시지를 찾지 못했습니다."
     }
   ],
   "search.picker.agent": [
@@ -11862,6 +12121,44 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "어느 대화에서 찾을까요"
+    }
+  ],
+  "search.placeholder.channelNamed": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "에서 검색"
+    }
+  ],
+  "search.placeholder.default": [
+    {
+      "type": 0,
+      "value": "메시지 내용으로 검색"
+    }
+  ],
+  "search.placeholder.dmNamed": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "님과의 대화에서 검색"
+    }
+  ],
+  "search.placeholder.thisChannel": [
+    {
+      "type": 0,
+      "value": "이 채널에서 검색"
+    }
+  ],
+  "search.placeholder.thisDm": [
+    {
+      "type": 0,
+      "value": "이 대화에서 검색"
     }
   ],
   "search.recent.clearAll": [
@@ -11938,6 +12235,24 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": " 다시 찾기"
+    }
+  ],
+  "search.refusal.detail": [
+    {
+      "type": 0,
+      "value": "나갔거나, 없어졌거나, 처음부터 볼 수 없는 곳입니다. 같은 말로 전체를 찾아볼 수 있습니다."
+    }
+  ],
+  "search.refusal.headlineChannel": [
+    {
+      "type": 0,
+      "value": "이 채널의 메시지는 찾을 수 없습니다."
+    }
+  ],
+  "search.refusal.headlineDm": [
+    {
+      "type": 0,
+      "value": "이 대화의 메시지는 찾을 수 없습니다."
     }
   ],
   "search.row.agentLabel": [
@@ -12088,6 +12403,50 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "찾을 대화 고르기"
+    }
+  ],
+  "search.scope.tabsLabel": [
+    {
+      "type": 0,
+      "value": "검색 범위"
+    }
+  ],
+  "search.scope.tabsLabelNamed": [
+    {
+      "type": 0,
+      "value": "검색 범위("
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "search.scope.thisChannel": [
+    {
+      "type": 0,
+      "value": "이 채널에서"
+    }
+  ],
+  "search.scope.thisDm": [
+    {
+      "type": 0,
+      "value": "이 대화에서"
+    }
+  ],
+  "search.scope.workspace": [
+    {
+      "type": 0,
+      "value": "전체"
+    }
+  ],
+  "search.scopeNote.members": [
+    {
+      "type": 0,
+      "value": "내가 속한 채널의 메시지만 찾습니다. 다른 채널에 있었다면 그 채널에 들어간 뒤 다시 찾아보세요."
     }
   ],
   "search.state.errorDetail": [

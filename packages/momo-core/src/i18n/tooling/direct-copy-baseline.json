@@ -720,6 +720,7 @@
     "packages/momo-core/src/features/presence/pauseBanner.ts": {"ko": 0, "en": 0},
     "packages/momo-core/src/features/presence/pauseUntil.ts": {"ko": 16, "en": 0},
     "packages/momo-core/src/features/readState/copy.ts": {"ko": 0, "en": 0},
+    "packages/momo-core/src/features/search/searchModel.ts": {"ko": 0, "en": 0},
     "packages/momo-core/src/features/sidebar/dmVisibility.ts": {"ko": 0, "en": 0},
     "packages/momo-core/src/features/sidebar/goneDm.ts": {"ko": 0, "en": 0},
     "packages/momo-core/src/features/sidebar/sidebarSections.ts": {"ko": 0, "en": 0},

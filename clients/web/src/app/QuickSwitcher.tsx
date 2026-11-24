@@ -939,7 +939,7 @@ export function QuickSwitcher({
                   범위 이름은 표면의 칩과 **같은 한 줄**에서 온다
                   (`searchScopeLabel`) — 진입점이 「이 채널에서」라 하고 도착한
                   칩이 다른 말을 하면 사람은 매번 대조해야 한다. */}
-              {searchEntryLabel("workspace", null, typed)}
+              {searchEntryLabel(formatMessage, "workspace", null, typed)}
             </Command.Item>
             {/* 채널 안에서 ⌘K를 열었다면 「이 채널에서」로 곧장 갈 수 있다
                 (BT-3 / #1931). 이 줄이 검색 범위의 **유일한 진입 배선**이다:
@@ -961,6 +961,7 @@ export function QuickSwitcher({
               >
                 <Search className="size-4 opacity-70" />
                 {searchEntryLabel(
+                  formatMessage,
                   "channel",
                   {
                     channelId: currentChannel.id,

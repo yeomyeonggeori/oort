@@ -1703,12 +1703,21 @@ export const messageKeys = [
   "reply.home.headerSelf",
   "reply.home.headerUnknown",
   "reply.home.open",
+  "search.entry.thisChannel",
+  "search.entry.thisChannelQuery",
+  "search.entry.thisDm",
+  "search.entry.thisDmQuery",
+  "search.entry.workspace",
+  "search.entry.workspaceQuery",
+  "search.escalate.detail",
+  "search.escalate.label",
   "search.group.channels",
   "search.group.loadingMore",
   "search.group.messages",
   "search.group.more",
   "search.group.moreLabel",
   "search.group.people",
+  "search.hint.shortQuery",
   "search.input.clearLabel",
   "search.input.exitLabel",
   "search.input.placeholder",
@@ -1717,6 +1726,11 @@ export const messageKeys = [
   "search.kind.groupLabel",
   "search.kind.messages",
   "search.kind.people",
+  "search.noResults.channelNamed",
+  "search.noResults.dmNamed",
+  "search.noResults.thisChannel",
+  "search.noResults.thisDm",
+  "search.noResults.workspace",
   "search.picker.agent",
   "search.picker.all",
   "search.picker.channelPrivate",
@@ -1727,6 +1741,11 @@ export const messageKeys = [
   "search.picker.filterLabel",
   "search.picker.filterPlaceholder",
   "search.picker.title",
+  "search.placeholder.channelNamed",
+  "search.placeholder.default",
+  "search.placeholder.dmNamed",
+  "search.placeholder.thisChannel",
+  "search.placeholder.thisDm",
   "search.recent.clearAll",
   "search.recent.clearAllLabel",
   "search.recent.conversations",
@@ -1735,6 +1754,9 @@ export const messageKeys = [
   "search.recent.searches",
   "search.recent.searchInLabel",
   "search.recent.searchLabel",
+  "search.refusal.detail",
+  "search.refusal.headlineChannel",
+  "search.refusal.headlineDm",
   "search.row.agentLabel",
   "search.row.agentSubtitle",
   "search.row.channelLabel",
@@ -1750,6 +1772,12 @@ export const messageKeys = [
   "search.scope.groupLabel",
   "search.scope.pick",
   "search.scope.pickLabel",
+  "search.scope.tabsLabel",
+  "search.scope.tabsLabelNamed",
+  "search.scope.thisChannel",
+  "search.scope.thisDm",
+  "search.scope.workspace",
+  "search.scopeNote.members",
   "search.state.errorDetail",
   "search.state.errorHeadline",
   "search.state.loading",
@@ -4748,6 +4776,20 @@ export const argumentSpecs = {
   "reply.home.headerSelf": {},
   "reply.home.headerUnknown": {},
   "reply.home.open": {},
+  "search.entry.thisChannel": {},
+  "search.entry.thisChannelQuery": {
+    "query": "string"
+  },
+  "search.entry.thisDm": {},
+  "search.entry.thisDmQuery": {
+    "query": "string"
+  },
+  "search.entry.workspace": {},
+  "search.entry.workspaceQuery": {
+    "query": "string"
+  },
+  "search.escalate.detail": {},
+  "search.escalate.label": {},
   "search.group.channels": {},
   "search.group.loadingMore": {},
   "search.group.messages": {},
@@ -4756,6 +4798,9 @@ export const argumentSpecs = {
     "group": "string"
   },
   "search.group.people": {},
+  "search.hint.shortQuery": {
+    "count": "number"
+  },
   "search.input.clearLabel": {},
   "search.input.exitLabel": {},
   "search.input.placeholder": {},
@@ -4764,6 +4809,28 @@ export const argumentSpecs = {
   "search.kind.groupLabel": {},
   "search.kind.messages": {},
   "search.kind.people": {},
+  "search.noResults.channelNamed": {
+    "josa": "string",
+    "name": "string",
+    "quoted": "string"
+  },
+  "search.noResults.dmNamed": {
+    "josa": "string",
+    "name": "string",
+    "quoted": "string"
+  },
+  "search.noResults.thisChannel": {
+    "josa": "string",
+    "quoted": "string"
+  },
+  "search.noResults.thisDm": {
+    "josa": "string",
+    "quoted": "string"
+  },
+  "search.noResults.workspace": {
+    "josa": "string",
+    "quoted": "string"
+  },
   "search.picker.agent": {},
   "search.picker.all": {},
   "search.picker.channelPrivate": {},
@@ -4774,6 +4841,15 @@ export const argumentSpecs = {
   "search.picker.filterLabel": {},
   "search.picker.filterPlaceholder": {},
   "search.picker.title": {},
+  "search.placeholder.channelNamed": {
+    "name": "string"
+  },
+  "search.placeholder.default": {},
+  "search.placeholder.dmNamed": {
+    "name": "string"
+  },
+  "search.placeholder.thisChannel": {},
+  "search.placeholder.thisDm": {},
   "search.recent.clearAll": {},
   "search.recent.clearAllLabel": {},
   "search.recent.conversations": {},
@@ -4789,6 +4865,9 @@ export const argumentSpecs = {
   "search.recent.searchLabel": {
     "query": "string"
   },
+  "search.refusal.detail": {},
+  "search.refusal.headlineChannel": {},
+  "search.refusal.headlineDm": {},
   "search.row.agentLabel": {
     "handle": "string",
     "name": "string"
@@ -4824,6 +4903,14 @@ export const argumentSpecs = {
   "search.scope.groupLabel": {},
   "search.scope.pick": {},
   "search.scope.pickLabel": {},
+  "search.scope.tabsLabel": {},
+  "search.scope.tabsLabelNamed": {
+    "name": "string"
+  },
+  "search.scope.thisChannel": {},
+  "search.scope.thisDm": {},
+  "search.scope.workspace": {},
+  "search.scopeNote.members": {},
   "search.state.errorDetail": {},
   "search.state.errorHeadline": {},
   "search.state.loading": {},
@@ -7859,12 +7946,21 @@ export interface MessageArgs {
   "reply.home.headerSelf": Record<string, never>;
   "reply.home.headerUnknown": Record<string, never>;
   "reply.home.open": Record<string, never>;
+  "search.entry.thisChannel": Record<string, never>;
+  "search.entry.thisChannelQuery": { query: string };
+  "search.entry.thisDm": Record<string, never>;
+  "search.entry.thisDmQuery": { query: string };
+  "search.entry.workspace": Record<string, never>;
+  "search.entry.workspaceQuery": { query: string };
+  "search.escalate.detail": Record<string, never>;
+  "search.escalate.label": Record<string, never>;
   "search.group.channels": Record<string, never>;
   "search.group.loadingMore": Record<string, never>;
   "search.group.messages": Record<string, never>;
   "search.group.more": Record<string, never>;
   "search.group.moreLabel": { group: string };
   "search.group.people": Record<string, never>;
+  "search.hint.shortQuery": { count: number };
   "search.input.clearLabel": Record<string, never>;
   "search.input.exitLabel": Record<string, never>;
   "search.input.placeholder": Record<string, never>;
@@ -7873,6 +7969,11 @@ export interface MessageArgs {
   "search.kind.groupLabel": Record<string, never>;
   "search.kind.messages": Record<string, never>;
   "search.kind.people": Record<string, never>;
+  "search.noResults.channelNamed": { josa: string; name: string; quoted: string };
+  "search.noResults.dmNamed": { josa: string; name: string; quoted: string };
+  "search.noResults.thisChannel": { josa: string; quoted: string };
+  "search.noResults.thisDm": { josa: string; quoted: string };
+  "search.noResults.workspace": { josa: string; quoted: string };
   "search.picker.agent": Record<string, never>;
   "search.picker.all": Record<string, never>;
   "search.picker.channelPrivate": Record<string, never>;
@@ -7883,6 +7984,11 @@ export interface MessageArgs {
   "search.picker.filterLabel": Record<string, never>;
   "search.picker.filterPlaceholder": Record<string, never>;
   "search.picker.title": Record<string, never>;
+  "search.placeholder.channelNamed": { name: string };
+  "search.placeholder.default": Record<string, never>;
+  "search.placeholder.dmNamed": { name: string };
+  "search.placeholder.thisChannel": Record<string, never>;
+  "search.placeholder.thisDm": Record<string, never>;
   "search.recent.clearAll": Record<string, never>;
   "search.recent.clearAllLabel": Record<string, never>;
   "search.recent.conversations": Record<string, never>;
@@ -7891,6 +7997,9 @@ export interface MessageArgs {
   "search.recent.searches": Record<string, never>;
   "search.recent.searchInLabel": { query: string; where: string };
   "search.recent.searchLabel": { query: string };
+  "search.refusal.detail": Record<string, never>;
+  "search.refusal.headlineChannel": Record<string, never>;
+  "search.refusal.headlineDm": Record<string, never>;
   "search.row.agentLabel": { handle: string; name: string };
   "search.row.agentSubtitle": { handle: string };
   "search.row.channelLabel": { name: string };
@@ -7906,6 +8015,12 @@ export interface MessageArgs {
   "search.scope.groupLabel": Record<string, never>;
   "search.scope.pick": Record<string, never>;
   "search.scope.pickLabel": Record<string, never>;
+  "search.scope.tabsLabel": Record<string, never>;
+  "search.scope.tabsLabelNamed": { name: string };
+  "search.scope.thisChannel": Record<string, never>;
+  "search.scope.thisDm": Record<string, never>;
+  "search.scope.workspace": Record<string, never>;
+  "search.scopeNote.members": Record<string, never>;
   "search.state.errorDetail": Record<string, never>;
   "search.state.errorHeadline": Record<string, never>;
   "search.state.loading": Record<string, never>;

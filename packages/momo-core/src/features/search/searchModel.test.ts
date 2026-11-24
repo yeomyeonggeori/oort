@@ -21,7 +21,7 @@ import {
   SEARCH_CHANNEL_PARAM,
   SEARCH_SCOPE_ALL,
   SEARCH_SCOPE_PARAM,
-  searchScopeLabel,
+  searchScopeLabelKey,
   searchScopeParams,
   searchScopeTabs,
   SEARCH_MIN_CHARS,
@@ -30,6 +30,14 @@ import {
   trailsWithEllipsis,
   type SearchChannelContext,
 } from "./searchModel";
+
+import { catalog as koCatalog } from "../../i18n/generated/ko-KR";
+import { createMessageCopy } from "../../testkit";
+
+// 낱말은 사전에 있다(#6045). 시험은 한국어 생성물로 풀어 예전과 같은 문장을 그대로 단정한다.
+const ko = createMessageCopy({ messageLocale: "ko-KR", catalog: koCatalog });
+const tabText = (text: string | { key: string; values?: object }): string =>
+  typeof text === "string" ? text : ko(text.key as never, text.values as never);
 
 // 계약의 출처는 서버 두 파일이다:
 //   server-rust/bins/momo-server/src/routes/search.rs
@@ -193,15 +201,15 @@ describe("표면 상태", () => {
 describe("결과 없음 문구", () => {
   it("조사를 골라 붙인다", () => {
     // 받침이 있으면 이, 없으면 가. 뒤따옴표는 발음되지 않으므로 판정에서 빠진다.
-    expect(noResultsCopy("로그인")).toContain("'로그인'이 들어간");
-    expect(noResultsCopy("배포")).toContain("'배포'가 들어간");
+    expect(noResultsCopy(ko, "로그인")).toContain("'로그인'이 들어간");
+    expect(noResultsCopy(ko, "배포")).toContain("'배포'가 들어간");
   });
 
   it("한글이 아닌 끝은 열린 음절로 다룬다", () => {
     // 공용 헬퍼(lib/koreanParticle)의 규칙 그대로다: 라틴·이모지·숫자로 끝나면
     // 받침 없음으로 본다. 영어 단어에는 이것이 한국 독자가 기대하는 형태다.
-    expect(noResultsCopy("deploy")).toContain("'deploy'가 들어간");
-    expect(noResultsCopy("v2")).toContain("'v2'가 들어간");
+    expect(noResultsCopy(ko, "deploy")).toContain("'deploy'가 들어간");
+    expect(noResultsCopy(ko, "v2")).toContain("'v2'가 들어간");
   });
 
   it("[알려진 한계] 숫자로 끝나는 질의는 주격에서 읽히지 않는다", () => {
@@ -210,19 +218,19 @@ describe("결과 없음 문구", () => {
     // 아니다. 이 배치에서 고치지 않는 이유는 그 함수가 기존 호출처 7곳의
     // 출력을 함께 바꾸기 때문이다. 여기서 두 번째 규칙을 세우면 리뷰가 지적한
     // 바로 그 문제(판정이 두 벌로 갈라짐)를 다시 만든다.
-    expect(noResultsCopy("031")).toContain("'031'가 들어간");
+    expect(noResultsCopy(ko, "031")).toContain("'031'가 들어간");
   });
 
   it("'이(가)' 같은 회피형을 쓰지 않는다", () => {
     // 기계가 독자 앞에서 결정을 거부한 자국.
     for (const q of ["로그인", "배포", "deploy", "5"]) {
-      expect(noResultsCopy(q)).not.toMatch(/\(가\)|\(이\)|이\(가\)/);
+      expect(noResultsCopy(ko, q)).not.toMatch(/\(가\)|\(이\)|이\(가\)/);
     }
   });
 
   it("붙여넣은 문단이 헤드라인이 되지 않는다", () => {
     const paragraph = "가".repeat(400);
-    const copy = noResultsCopy(paragraph);
+    const copy = noResultsCopy(ko, paragraph);
     expect(copy.length).toBeLessThan(120);
     expect(copy).toContain("…");
   });
@@ -291,10 +299,10 @@ describe("검색 범위", () => {
   });
 
   it("DM이면 「채널」이 아니라 「대화」다", () => {
-    expect(searchScopeLabel("channel", CHANNEL)).toBe("이 채널에서");
-    expect(searchScopeLabel("channel", DM)).toBe("이 대화에서");
-    expect(searchScopeLabel("workspace", CHANNEL)).toBe("전체");
-    expect(searchScopeLabel("workspace", DM)).toBe("전체");
+    expect(ko(searchScopeLabelKey("channel", CHANNEL))).toBe("이 채널에서");
+    expect(ko(searchScopeLabelKey("channel", DM))).toBe("이 대화에서");
+    expect(ko(searchScopeLabelKey("workspace", CHANNEL))).toBe("전체");
+    expect(ko(searchScopeLabelKey("workspace", DM))).toBe("전체");
   });
 
   it("칩에는 채널 이름을 넣지 않는다", () => {
@@ -304,9 +312,9 @@ describe("검색 범위", () => {
       ...CHANNEL,
       label: "#프로젝트-알림-정말-긴-이름",
     };
-    expect(searchScopeLabel("channel", long)).not.toContain(long.label);
+    expect(ko(searchScopeLabelKey("channel", long))).not.toContain(long.label);
     // 대신 tablist의 접근성 이름이 그 이름을 든다 — 이쪽은 잘리지 않는다.
-    expect(searchScopeTabs(long).label).toContain(long.label);
+    expect(tabText(searchScopeTabs(long).label)).toContain(long.label);
   });
 
   it("탭 명세는 공용 컨트롤이 요구하는 네 규칙을 다 채운다", () => {
@@ -314,7 +322,7 @@ describe("검색 범위", () => {
     for (const scope of spec.values) {
       expect(spec.tabId(scope)).toMatch(/^search-scope-tab-/);
       expect(spec.testId(scope)).toBe(`search-scope-${scope}`);
-      expect(String(spec.labelFor(scope)).length).toBeGreaterThan(0);
+      expect(tabText(spec.labelFor(scope)).length).toBeGreaterThan(0);
     }
     // 결과 패널은 하나다: 범위를 바꿔도 목록은 같은 자리에서 갈린다.
     expect(spec.panelId("channel")).toBe(spec.panelId("workspace"));
@@ -372,10 +380,10 @@ describe("범위 전환은 커서를 버린다", () => {
 
 describe("빈 결과는 범위를 말한다", () => {
   it("전체에서 빈손이면 지금까지의 그 문장이다", () => {
-    expect(noResultsCopy("배포")).toBe(
+    expect(noResultsCopy(ko, "배포")).toBe(
       "'배포'가 들어간 메시지를 찾지 못했습니다."
     );
-    expect(noResultsCopy("배포", "workspace", CHANNEL)).toBe(
+    expect(noResultsCopy(ko, "배포", "workspace", CHANNEL)).toBe(
       "'배포'가 들어간 메시지를 찾지 못했습니다."
     );
   });
@@ -384,40 +392,40 @@ describe("빈 결과는 범위를 말한다", () => {
     // R1 H-1: 「이 채널에는」으로만 말하던 판본에서는 그 화면 어디에도 채널
     // 이름이 없었다. 결과가 있을 때는 행마다 이름이 붙어 우연히 메워지고,
     // 정작 어디서 못 찾았는지가 중요한 것은 결과가 없는 쪽이다.
-    const copy = noResultsCopy("배포", "channel", CHANNEL);
+    const copy = noResultsCopy(ko, "배포", "channel", CHANNEL);
     expect(copy).toContain("#배포에는");
     expect(copy).toContain("'배포'가");
     expect(copy).not.toBe("'배포'가 들어간 메시지를 찾지 못했습니다.");
   });
 
   it("DM이면 사람 이름과 존칭으로 말한다", () => {
-    expect(noResultsCopy("배포", "channel", DM)).toContain(
+    expect(noResultsCopy(ko, "배포", "channel", DM)).toContain(
       "김인턴님과의 대화에는"
     );
   });
 
   it("이름을 모르면 이름 없이 말한다", () => {
     // 못 푼 채널·디렉터리 미도착 DM. 내부 id를 문장에 세우지 않는다(R1 M-1).
-    const unresolved = noResultsCopy("배포", "channel", UNRESOLVED);
+    const unresolved = noResultsCopy(ko, "배포", "channel", UNRESOLVED);
     expect(unresolved).toContain("이 채널에는");
     expect(unresolved).not.toContain(UNRESOLVED.channelId.slice(0, 8));
 
-    const noPeer = noResultsCopy("배포", "channel", DM_NO_PEER);
+    const noPeer = noResultsCopy(ko, "배포", "channel", DM_NO_PEER);
     expect(noPeer).toContain("이 대화에는");
     // 「다이렉트 메시지님과의 대화에는」은 사람 이름이 아닌 것에 존칭을 붙인 말이다.
     expect(noPeer).not.toContain("다이렉트 메시지님");
   });
 
   it("좁힌 문구에서도 조사는 골라 붙인다", () => {
-    expect(noResultsCopy("로그인", "channel", CHANNEL)).toContain("'로그인'이");
-    expect(noResultsCopy("deploy", "channel", DM)).toContain("'deploy'가");
-    expect(noResultsCopy("배포", "channel", CHANNEL)).not.toMatch(
+    expect(noResultsCopy(ko, "로그인", "channel", CHANNEL)).toContain("'로그인'이");
+    expect(noResultsCopy(ko, "deploy", "channel", DM)).toContain("'deploy'가");
+    expect(noResultsCopy(ko, "배포", "channel", CHANNEL)).not.toMatch(
       /\(가\)|\(이\)/
     );
   });
 
   it("좁힌 문구도 붙여넣은 문단을 헤드라인으로 만들지 않는다", () => {
-    const copy = noResultsCopy("가".repeat(400), "channel", CHANNEL);
+    const copy = noResultsCopy(ko, "가".repeat(400), "channel", CHANNEL);
     expect(copy.length).toBeLessThan(120);
     expect(copy).toContain("…");
   });
@@ -425,13 +433,13 @@ describe("빈 결과는 범위를 말한다", () => {
 
 describe("입력 안내문", () => {
   it("좁혀 있으면 어느 채널인지 이름으로 말한다", () => {
-    expect(searchPlaceholder("channel", CHANNEL)).toBe("#배포에서 검색");
-    expect(searchPlaceholder("channel", DM)).toBe("김인턴님과의 대화에서 검색");
+    expect(searchPlaceholder(ko, "channel", CHANNEL)).toBe("#배포에서 검색");
+    expect(searchPlaceholder(ko, "channel", DM)).toBe("김인턴님과의 대화에서 검색");
   });
 
   it("전체이거나 문맥이 없으면 지금까지의 안내문이다", () => {
-    expect(searchPlaceholder("workspace", CHANNEL)).toBe("메시지 내용으로 검색");
-    expect(searchPlaceholder("channel", null)).toBe("메시지 내용으로 검색");
+    expect(searchPlaceholder(ko, "workspace", CHANNEL)).toBe("메시지 내용으로 검색");
+    expect(searchPlaceholder(ko, "channel", null)).toBe("메시지 내용으로 검색");
   });
 });
 
@@ -440,22 +448,22 @@ describe("존칭은 사람에게만 붙는다", () => {
     // R1 H-2: `channelLabel`은 상대를 못 찾으면 「다이렉트 메시지」를 돌려준다.
     // 거기에 「님」을 기계적으로 붙이면 「다이렉트 메시지님과의 대화에서 검색」이
     // 난다 — 디렉터리가 늦거나 실패하는, 흔한 상태에서.
-    expect(searchPlaceholder("channel", DM_NO_PEER)).toBe("이 대화에서 검색");
-    expect(searchPlaceholder("channel", DM_NO_PEER)).not.toContain("님");
+    expect(searchPlaceholder(ko, "channel", DM_NO_PEER)).toBe("이 대화에서 검색");
+    expect(searchPlaceholder(ko, "channel", DM_NO_PEER)).not.toContain("님");
     expect(scopeChannelName("channel", DM_NO_PEER)).toBeNull();
   });
 
   it("동명이인이라 핸들이 붙은 라벨에도 존칭이 핸들 뒤에 붙지 않는다", () => {
     // 라벨은 「김민지 @minji」이지만 사람 이름은 「김민지」다. 라벨에 붙이면
     // 「김민지 @minji님과의 대화에서 검색」이 난다.
-    expect(searchPlaceholder("channel", DM_AMBIGUOUS)).toBe(
+    expect(searchPlaceholder(ko, "channel", DM_AMBIGUOUS)).toBe(
       "김민지님과의 대화에서 검색"
     );
-    expect(searchPlaceholder("channel", DM_AMBIGUOUS)).not.toContain("@minji님");
+    expect(searchPlaceholder(ko, "channel", DM_AMBIGUOUS)).not.toContain("@minji님");
   });
 
   it("채널에는 존칭이 없다", () => {
-    expect(searchPlaceholder("channel", CHANNEL)).not.toContain("님");
+    expect(searchPlaceholder(ko, "channel", CHANNEL)).not.toContain("님");
     expect(scopeChannelName("channel", CHANNEL)).toBe("#배포");
   });
 });
@@ -464,19 +472,19 @@ describe("이름을 모르는 채널", () => {
   it("안내문이 내부 id를 세우지 않는다", () => {
     // R1 M-1: 1차 판본은 「019f9c99에서 검색」이라 적었다. 사람에게 아무것도
     // 말하지 않으면서 내부 식별자를 문장에 세운다.
-    const copy = searchPlaceholder("channel", UNRESOLVED);
+    const copy = searchPlaceholder(ko, "channel", UNRESOLVED);
     expect(copy).toBe("이 채널에서 검색");
     expect(copy).not.toContain(UNRESOLVED.channelId.slice(0, 8));
   });
 
   it("접근성 이름도 내부 id를 세우지 않는다", () => {
-    const label = searchScopeTabs(UNRESOLVED).label;
+    const label = tabText(searchScopeTabs(UNRESOLVED).label);
     expect(label).toBe("검색 범위");
     expect(label).not.toContain(UNRESOLVED.channelId.slice(0, 8));
   });
 
   it("이름을 알 때는 접근성 이름이 그것을 든다", () => {
-    expect(searchScopeTabs(CHANNEL).label).toBe("검색 범위(#배포)");
+    expect(tabText(searchScopeTabs(CHANNEL).label)).toBe("검색 범위(#배포)");
   });
 });
 
@@ -506,7 +514,7 @@ describe("좁힌 범위의 404는 「기능 미제공」이 아니다", () => {
   });
 
   it("문장이 볼 수 없는 채널의 이름을 부르지 않는다", () => {
-    const copy = channelScopeRefusalCopy(CHANNEL);
+    const copy = channelScopeRefusalCopy(ko, CHANNEL);
     expect(copy.headline).toBe("이 채널의 메시지는 찾을 수 없습니다.");
     expect(copy.headline).not.toContain(CHANNEL.label!);
     // 「채널을 열어 직접 찾아보세요」는 이 오류의 조건 자체와 모순된다.
@@ -515,7 +523,7 @@ describe("좁힌 범위의 404는 「기능 미제공」이 아니다", () => {
   });
 
   it("DM이면 「대화」로 말한다", () => {
-    expect(channelScopeRefusalCopy(DM).headline).toBe(
+    expect(channelScopeRefusalCopy(ko, DM).headline).toBe(
       "이 대화의 메시지는 찾을 수 없습니다."
     );
   });

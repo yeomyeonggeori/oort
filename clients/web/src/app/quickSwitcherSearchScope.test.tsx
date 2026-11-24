@@ -10,6 +10,18 @@ import { searchEntryLabel } from "@momo/core/features/search/searchModel";
 import { serverSurface } from "@momo/core/features/capabilities/serverSurfaces";
 import { SessionProvider, type SessionContextValue } from "@/app/session";
 import { QuickSwitcher } from "./QuickSwitcher";
+import { catalog as koCatalog } from "@momo/core/i18n/generated/ko-KR";
+import { createMessageCopy } from "@momo/core/testkit";
+import { LocaleProvider } from "@/i18n/LocaleProvider";
+import type { AppLocale } from "@/i18n/localeStore";
+import { koreanLocale } from "@/testing/koLocale";
+
+// 한국어 문구를 단정하는 시험이라 한국어 언어 객체로 감싼다(감싸지 않으면 번들된 영어로 그려진다).
+let koLocale: AppLocale;
+
+// 낱말은 사전에 있다(#6045). 시험은 한국어 생성물로 풀어 예전과 같은 문장을 그대로 단정한다.
+const koCopy = createMessageCopy({ messageLocale: "ko-KR", catalog: koCatalog });
+
 
 // =============================================================================
 // ⌘K의 검색 진입 두 줄 (R1 B-1 / B-2 / N-1).
@@ -162,7 +174,7 @@ async function openAt(path: string): Promise<void> {
     )
   );
   await act(async () => {
-    mountedRoot?.render(tree);
+    mountedRoot?.render(createElement(LocaleProvider, { locale: koLocale, children: tree }));
     await Promise.resolve();
   });
   await settle();
@@ -202,7 +214,8 @@ function isVisible(element: HTMLElement | null): boolean {
   return true;
 }
 
-beforeAll(() => {
+beforeAll(async () => {
+  koLocale = await koreanLocale();
   reactActEnvironment.IS_REACT_ACT_ENVIRONMENT = true;
   HTMLElement.prototype.scrollIntoView = () => undefined;
   HTMLElement.prototype.hasPointerCapture = () => false;
@@ -306,10 +319,11 @@ describe("두 줄이 같은 동사를 쓴다", () => {
     // 갈렸고, 채널 줄은 상태에 따라 동사가 또 바뀌었다.
     await openAt(`/c/${CH_DEPLOY}`);
     expect(row("switcher-message-search")!.textContent).toContain(
-      searchEntryLabel("workspace", null, "")
+      searchEntryLabel(koCopy, "workspace", null, "")
     );
     expect(row("switcher-message-search-channel")!.textContent).toContain(
       searchEntryLabel(
+      koCopy,
         "channel",
         { channelId: CH_DEPLOY, label: "배포", isDirect: false, peer: null },
         ""

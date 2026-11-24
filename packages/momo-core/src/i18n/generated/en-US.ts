@@ -12440,6 +12440,78 @@ export const catalog: MessageCatalog = {
       "value": "Open the thread this reply is in"
     }
   ],
+  "search.entry.thisChannel": [
+    {
+      "type": 0,
+      "value": "Search in this channel"
+    }
+  ],
+  "search.entry.thisChannelQuery": [
+    {
+      "type": 0,
+      "value": "Search in this channel for '"
+    },
+    {
+      "type": 1,
+      "value": "query"
+    },
+    {
+      "type": 0,
+      "value": "'"
+    }
+  ],
+  "search.entry.thisDm": [
+    {
+      "type": 0,
+      "value": "Search in this conversation"
+    }
+  ],
+  "search.entry.thisDmQuery": [
+    {
+      "type": 0,
+      "value": "Search in this conversation for '"
+    },
+    {
+      "type": 1,
+      "value": "query"
+    },
+    {
+      "type": 0,
+      "value": "'"
+    }
+  ],
+  "search.entry.workspace": [
+    {
+      "type": 0,
+      "value": "Search everywhere"
+    }
+  ],
+  "search.entry.workspaceQuery": [
+    {
+      "type": 0,
+      "value": "Search everywhere for '"
+    },
+    {
+      "type": 1,
+      "value": "query"
+    },
+    {
+      "type": 0,
+      "value": "'"
+    }
+  ],
+  "search.escalate.detail": [
+    {
+      "type": 0,
+      "value": "It may be in another channel. You can search everywhere for the same words."
+    }
+  ],
+  "search.escalate.label": [
+    {
+      "type": 0,
+      "value": "Search everywhere"
+    }
+  ],
   "search.group.channels": [
     {
       "type": 0,
@@ -12478,6 +12550,21 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "People"
+    }
+  ],
+  "search.hint.shortQuery": [
+    {
+      "type": 0,
+      "value": "Type at least "
+    },
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": " characters to start searching."
     }
   ],
   "search.input.clearLabel": [
@@ -12526,6 +12613,152 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "People"
+    }
+  ],
+  "search.noResults.channelNamed": [
+    {
+      "type": 0,
+      "value": "No messages containing "
+    },
+    {
+      "type": 1,
+      "value": "quoted"
+    },
+    {
+      "type": 0,
+      "value": " in "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "."
+    },
+    {
+      "type": 5,
+      "value": "josa",
+      "options": {
+        "final": {
+          "value": []
+        },
+        "other": {
+          "value": []
+        }
+      }
+    }
+  ],
+  "search.noResults.dmNamed": [
+    {
+      "type": 0,
+      "value": "No messages containing "
+    },
+    {
+      "type": 1,
+      "value": "quoted"
+    },
+    {
+      "type": 0,
+      "value": " in your conversation with "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "."
+    },
+    {
+      "type": 5,
+      "value": "josa",
+      "options": {
+        "final": {
+          "value": []
+        },
+        "other": {
+          "value": []
+        }
+      }
+    }
+  ],
+  "search.noResults.thisChannel": [
+    {
+      "type": 0,
+      "value": "No messages containing "
+    },
+    {
+      "type": 1,
+      "value": "quoted"
+    },
+    {
+      "type": 0,
+      "value": " in this channel."
+    },
+    {
+      "type": 5,
+      "value": "josa",
+      "options": {
+        "final": {
+          "value": []
+        },
+        "other": {
+          "value": []
+        }
+      }
+    }
+  ],
+  "search.noResults.thisDm": [
+    {
+      "type": 0,
+      "value": "No messages containing "
+    },
+    {
+      "type": 1,
+      "value": "quoted"
+    },
+    {
+      "type": 0,
+      "value": " in this conversation."
+    },
+    {
+      "type": 5,
+      "value": "josa",
+      "options": {
+        "final": {
+          "value": []
+        },
+        "other": {
+          "value": []
+        }
+      }
+    }
+  ],
+  "search.noResults.workspace": [
+    {
+      "type": 0,
+      "value": "Couldn't find any messages containing "
+    },
+    {
+      "type": 1,
+      "value": "quoted"
+    },
+    {
+      "type": 0,
+      "value": "."
+    },
+    {
+      "type": 5,
+      "value": "josa",
+      "options": {
+        "final": {
+          "value": []
+        },
+        "other": {
+          "value": []
+        }
+      }
     }
   ],
   "search.picker.agent": [
@@ -12586,6 +12819,44 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "Where should we search?"
+    }
+  ],
+  "search.placeholder.channelNamed": [
+    {
+      "type": 0,
+      "value": "Search in "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    }
+  ],
+  "search.placeholder.default": [
+    {
+      "type": 0,
+      "value": "Search message text"
+    }
+  ],
+  "search.placeholder.dmNamed": [
+    {
+      "type": 0,
+      "value": "Search your conversation with "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    }
+  ],
+  "search.placeholder.thisChannel": [
+    {
+      "type": 0,
+      "value": "Search in this channel"
+    }
+  ],
+  "search.placeholder.thisDm": [
+    {
+      "type": 0,
+      "value": "Search in this conversation"
     }
   ],
   "search.recent.clearAll": [
@@ -12654,6 +12925,24 @@ export const catalog: MessageCatalog = {
     {
       "type": 1,
       "value": "query"
+    }
+  ],
+  "search.refusal.detail": [
+    {
+      "type": 0,
+      "value": "You may have left it, it may be gone, or you may never have had access. You can search everywhere for the same words."
+    }
+  ],
+  "search.refusal.headlineChannel": [
+    {
+      "type": 0,
+      "value": "Messages in this channel can't be found."
+    }
+  ],
+  "search.refusal.headlineDm": [
+    {
+      "type": 0,
+      "value": "Messages in this conversation can't be found."
     }
   ],
   "search.row.agentLabel": [
@@ -12808,6 +13097,50 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "Choose a conversation to search"
+    }
+  ],
+  "search.scope.tabsLabel": [
+    {
+      "type": 0,
+      "value": "Search scope"
+    }
+  ],
+  "search.scope.tabsLabelNamed": [
+    {
+      "type": 0,
+      "value": "Search scope ("
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "search.scope.thisChannel": [
+    {
+      "type": 0,
+      "value": "In this channel"
+    }
+  ],
+  "search.scope.thisDm": [
+    {
+      "type": 0,
+      "value": "In this conversation"
+    }
+  ],
+  "search.scope.workspace": [
+    {
+      "type": 0,
+      "value": "Everywhere"
+    }
+  ],
+  "search.scopeNote.members": [
+    {
+      "type": 0,
+      "value": "Search only covers channels you belong to. If it was in another channel, join that channel and search again."
     }
   ],
   "search.state.errorDetail": [
