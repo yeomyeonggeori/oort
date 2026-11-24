@@ -177,14 +177,35 @@ pub async fn standing_in_tx(
     caller: Caller,
     server_setting_on: bool,
 ) -> Result<Result<Standing, Closed>, Error> {
-    let agent = sqlx::query(
+    standing_with(conn, caller, server_setting_on, true).await
+}
+
+/// [`standing_in_tx`] without the lock: the listing's and the body budget's question, asked on every Agent
+/// Port request, must not queue behind (or hold) the agent's row. Writes and locks nothing.
+pub async fn standing_unlocked_in_tx(
+    conn: &mut PgConnection,
+    caller: Caller,
+    server_setting_on: bool,
+) -> Result<Result<Standing, Closed>, Error> {
+    standing_with(conn, caller, server_setting_on, false).await
+}
+
+async fn standing_with(
+    conn: &mut PgConnection,
+    caller: Caller,
+    server_setting_on: bool,
+    lock: bool,
+) -> Result<Result<Standing, Closed>, Error> {
+    // `FOR NO KEY UPDATE`: serializes this agent's registrations without blocking the `FOR KEY SHARE` a
+    // foreign key check on the member row takes (a card approval writing `proposed_by`).
+    let agent = sqlx::query(&format!(
         "SELECT (m.kind = 'agent' AND m.status = 'active' AND m.deleted_at IS NULL \
                  AND NOT COALESCE(p.paused, false)) AS live \
            FROM member m \
            LEFT JOIN agent_profile p ON p.workspace_id = m.workspace_id AND p.agent_member_id = m.id \
-          WHERE m.workspace_id = $1 AND m.id = $2 \
-          FOR UPDATE OF m",
-    )
+          WHERE m.workspace_id = $1 AND m.id = $2 {}",
+        if lock { "FOR NO KEY UPDATE OF m" } else { "" }
+    ))
     .bind(caller.workspace)
     .bind(caller.agent)
     .fetch_optional(&mut *conn)
@@ -714,7 +735,7 @@ pub async fn give_in_tx(
         return Err(Error::NotFound);
     }
     // One grant at a time per agent: the agent's row is the lock (the register path takes the same one).
-    sqlx::query("SELECT 1 FROM member WHERE workspace_id = $1 AND id = $2 FOR UPDATE")
+    sqlx::query("SELECT 1 FROM member WHERE workspace_id = $1 AND id = $2 FOR NO KEY UPDATE")
         .bind(workspace)
         .bind(agent)
         .execute(&mut *conn)
@@ -759,7 +780,7 @@ pub async fn revoke_in_tx(
     if !is_agent_in_tx(conn, workspace, agent).await? {
         return Err(Error::NotFound);
     }
-    sqlx::query("SELECT 1 FROM member WHERE workspace_id = $1 AND id = $2 FOR UPDATE")
+    sqlx::query("SELECT 1 FROM member WHERE workspace_id = $1 AND id = $2 FOR NO KEY UPDATE")
         .bind(workspace)
         .bind(agent)
         .execute(&mut *conn)

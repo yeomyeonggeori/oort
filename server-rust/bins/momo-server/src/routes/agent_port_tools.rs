@@ -218,7 +218,7 @@ pub(crate) async fn register_door_open(state: &AppState, caller: HostedCaller) -
                     Ok(identity) => identity,
                     Err(_) => return Ok(false),
                 };
-            momo_expressions::self_register::standing_in_tx(
+            momo_expressions::self_register::standing_unlocked_in_tx(
                 conn,
                 register_caller(caller, &identity),
                 server_setting_on,
