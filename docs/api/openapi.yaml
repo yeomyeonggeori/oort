@@ -1033,7 +1033,7 @@ paths:
     post:
       tags: [auth]
       operationId: authPushActionToken
-      summary: Mint the lock screen's one-request approval token (ADR-0204 D6, #3927).
+      summary: Mint the lock screen's approval-decision and reply token (ADR-0204 D6 and addendum 7).
       description: >
         Human access bearer only. Returns a `typ = push_action` token that the
         phone parks in its app-only keychain group (never the group the

@@ -1591,7 +1591,7 @@ pub fn build_app(state: AppState) -> Router {
             "/v1/auth/push-fetch-token",
             post(routes::push_fetch::issue),
         )
-        // #3927 (ADR-0204 D6) — the lock screen's one-request token. Minted by
+        // #3927 (ADR-0204 D6, 증보 7) — the lock screen's decision-and-reply token. Minted by
         // the app from its ordinary session; neither narrow token can reach it.
         .route(
             "/v1/auth/push-action-token",

@@ -76,6 +76,11 @@ pub const PUSH_REPLY_WINDOW_HOURS: i32 = 24;
 pub const PUSH_REPLY_PER_NOTIFICATION: i64 = 1;
 
 /// The APNs status of a dispatch the gateway accepted — what "notified" means.
+/// The notifier settles an accepted push with the relay receipt's `apns_status`,
+/// which is APNs' own 200 (and 200 again when the relay said yes with a body it
+/// could not parse — `momo-notifier` `push_relay::decode_receipt`); the
+/// notification diagnostics read the same literal as "sent"
+/// (`momo_push::diagnostics`). No shared constant exists for it.
 const APNS_ACCEPTED: i32 = 200;
 
 /// The audit action of a message written through this door.

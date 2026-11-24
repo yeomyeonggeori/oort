@@ -2,9 +2,9 @@
 //!
 //! A phone that is locked can still show an approval notification with
 //! [승인] / [거절] buttons. Once Face ID passes, the app's native handler has to
-//! send ONE request — the approval decision — with no screen, no JS runtime and
-//! no chance to refresh a session. This module is the credential for exactly
-//! that request, and for nothing else.
+//! send the approval decision with no screen, no JS runtime and no chance to
+//! refresh a session. This module is the credential for that request — and,
+//! since ADR-0204 증보 7, for the reply below — and for nothing else.
 //!
 //! ADR-0204 증보 7 (#6072) gives it a second request: a reply to the notification
 //! it was woken by, written into that notification's conversation. The server picks
@@ -80,7 +80,9 @@ pub const AUDIT_VIA_PUSH_ACTION: &str = "push_action";
 /// hour must still be able to approve the card that lands next. The app remints
 /// on launch and once half the lifetime is gone. What a copy of it is worth is
 /// "decide an approval the holder could already decide, when the approval id is
-/// known", and the lineage sweep — not the clock — is what ends it early.
+/// known" and, since ADR-0204 증보 7, "write one text reply into the conversation
+/// of a message this server notified the holder of, within a day of that
+/// notification"; the lineage sweep — not the clock — is what ends it early.
 pub const PUSH_ACTION_TTL_SECONDS: i64 = 6 * 60 * 60;
 
 /// Sign a push-action token for `member_id` in `workspace_id`.

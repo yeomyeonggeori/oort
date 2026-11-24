@@ -1,4 +1,5 @@
-//! #3927 — the lock screen's token is one decision and nothing else (ADR-0204 D6).
+//! #3927 — the lock screen's token is the decision and nothing else (ADR-0204 D6); #6072 adds
+//! its one other request, the reply to a notification (ADR-0204 증보 7, the tests at the end).
 //!
 //! A locked phone shows [승인] / [거절] on an approval notification. Once Face ID
 //! passes, a native handler has no screen, no JS and no way to refresh a session,
@@ -13,7 +14,7 @@
 //! | test | revert that makes it red |
 //! |---|---|
 //! | `the_token_approves_and_rejects_through_the_one_route` | drop the `token` row insert in the mint route, or the `NotAccessToken` -> `verify_app_push_action` arm in `require_principal` |
-//! | `every_other_route_is_403_and_never_a_query` | add any second entry to `push_action_route_allowed`, or delete the route check in `require_principal` (the "before any query" half is pinned by `an_unrecorded_or_foreign_signed_token_is_401`: an unrecorded token is 403 off the list and 401 on it) |
+//! | `every_other_route_is_403_and_never_a_query` | add a third entry to `push_action_route` (the decision and the reply are the two), or delete the route check in `require_principal` (the "before any query" half is pinned by `an_unrecorded_or_foreign_signed_token_is_401`: an unrecorded token is 403 off the list and 401 on it) |
 //! | `method_case_and_shape_tricks_stay_refused` | loosen `push_action_route_allowed` (verb, empty approval segment, `%2F`, the UUID spellings). Routed shapes must be exactly 403; shapes no route matches are exactly 404 (nothing reachable) |
 //! | `the_two_narrow_tokens_cannot_stand_in_for_each_other` | let `verify_app_push_fetch`/`verify_app_push_action` accept the other `typ`, or merge the two route lists |
 //! | `neither_narrow_token_can_mint_a_successor` | put a mint route on a route list |
