@@ -300,7 +300,7 @@ function AgentProfilePanel({
     <div className="flex items-center justify-end gap-2 border-t border-line p-4">
       <Button
         type="button"
-        variant="outline"
+        variant="secondary"
         size="sm"
         disabled={handle.saving}
         onClick={() => onOpenChange(false)}
@@ -477,7 +477,7 @@ function AgentProfilePanel({
         {capability.support === "unknown" && !offline && (
           <Button
             type="button"
-            variant="outline"
+            variant="secondary"
             size="sm"
             className="self-start"
             onClick={capability.recheck}

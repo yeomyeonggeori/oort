@@ -290,7 +290,7 @@ export function ProfileSection({ offline }: { offline: boolean }) {
       <SettingsSection title="로그인" testId="profile-login-card">
         <SettingsRow label="로그아웃" description="이 기기에서 로그아웃해요. 다시 로그인하면 돌아와요.">
           <Button
-            variant="outline"
+            variant="secondary"
             size="sm"
             className="tap-target"
             onClick={logout}

@@ -644,7 +644,7 @@ export function WorkJobsRoute() {
                 <Button
                   type="button"
                   size="sm"
-                  variant="outline"
+                  variant="secondary"
                   className="tap-target"
                   onClick={() => navigate("/")}
                   data-testid="work-jobs-empty-action"
@@ -822,7 +822,7 @@ export function WorkJobsRoute() {
                   <Button
                     type="button"
                     size="sm"
-                    variant="outline"
+                    variant="secondary"
                     className="tap-target"
                     disabled={list.isFetchingNextPage}
                     onClick={() => void list.fetchNextPage()}

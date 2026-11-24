@@ -109,7 +109,7 @@ function RegistryRefreshButton({
 
   return (
     <Button
-      variant="outline"
+      variant="secondary"
       size="sm"
       disabled={offline}
       aria-busy={reloading || undefined}

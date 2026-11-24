@@ -98,7 +98,7 @@ export function IssuedInviteCard({
               label={INVITE_COPY_CARD_LABEL}
               testId="invite-copy-card"
             />
-            <Button asChild variant="outline" size="sm">
+            <Button asChild variant="secondary" size="sm">
               <a href={buildInviteMailto(card)}>메일 초안 열기</a>
             </Button>
           </>

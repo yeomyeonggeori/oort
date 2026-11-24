@@ -176,7 +176,7 @@ export function UsageSection({ workspaceId }: { workspaceId: string }) {
         testId="usage-controls"
         action={
           <Button
-            variant="outline"
+            variant="secondary"
             size="sm"
             onClick={() => {
               if (!query.isFetching) void query.refetch();
@@ -237,7 +237,7 @@ export function UsageSection({ workspaceId }: { workspaceId: string }) {
               plain
             >
               <Button
-                variant="outline"
+                variant="secondary"
                 size="sm"
                 onClick={() => void query.refetch()}
               >
@@ -263,7 +263,7 @@ export function UsageSection({ workspaceId }: { workspaceId: string }) {
                 plain
               >
                 <Button
-                  variant="outline"
+                  variant="secondary"
                   size="sm"
                   onClick={() => void query.refetch()}
                 >
@@ -324,11 +324,11 @@ function UsageBody({
             testId="usage-empty"
             actions={
               period === "7d" ? (
-                <Button variant="outline" size="sm" onClick={onWiden}>
+                <Button variant="secondary" size="sm" onClick={onWiden}>
                   30일로 보기
                 </Button>
               ) : (
-                <Button variant="outline" size="sm" onClick={onRetry}>
+                <Button variant="secondary" size="sm" onClick={onRetry}>
                   다시 불러오기
                 </Button>
               )

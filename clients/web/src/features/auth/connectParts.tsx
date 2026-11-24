@@ -141,7 +141,7 @@ export function ServerRow({
       </span>
       <Button
         type="button"
-        variant="outline"
+        variant="secondary"
         size="sm"
         className="onboarding-action-sm"
         data-variant="secondary"

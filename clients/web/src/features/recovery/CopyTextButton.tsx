@@ -33,7 +33,7 @@ export function CopyTextButton({
     <>
       <Button
         type="button"
-        variant="outline"
+        variant="secondary"
         size="sm"
         className={className}
         onClick={() => {

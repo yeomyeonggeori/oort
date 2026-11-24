@@ -631,7 +631,7 @@ function NonOperatorNotice({ workspaceId, memberId }: { workspaceId: string; mem
               <Button
                 key={member.id}
                 type="button"
-                variant="outline"
+                variant="secondary"
                 size="sm"
                 className="tap-target"
                 aria-busy={pendingMemberId === member.id || undefined}

@@ -742,7 +742,7 @@ export function DisplayObserver({
           </p>
           <Button
             type="button"
-            variant="outline"
+            variant="secondary"
             size="sm"
             onClick={() => void start()}
             data-testid="work-display-start"
@@ -837,7 +837,7 @@ export function DisplayObserver({
               {link === "unverified" && (
                 <Button
                   type="button"
-                  variant="outline"
+                  variant="secondary"
                   size="sm"
                   onClick={() => void start()}
                   data-testid="work-display-relink"
@@ -883,7 +883,7 @@ export function DisplayObserver({
             <div className="flex flex-wrap items-center gap-2 pt-1">
               <Button
                 type="button"
-                variant="outline"
+                variant="secondary"
                 size="sm"
                 onClick={stop}
                 data-testid="work-display-stop"

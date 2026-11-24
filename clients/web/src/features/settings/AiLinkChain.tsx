@@ -612,7 +612,7 @@ export function AiLinkChain({
       <div className="flex flex-wrap items-center gap-2">
         <Button
           type="button"
-          variant="outline"
+          variant="secondary"
           size="sm"
           aria-disabled={addLocked || undefined}
           // 잠긴 컨트롤은 사유를 든다. 이 버튼이 잠기는 사실은 셋이고, 이제 셋 다

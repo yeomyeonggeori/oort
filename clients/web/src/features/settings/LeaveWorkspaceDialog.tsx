@@ -101,7 +101,7 @@ function LeaveWorkspacePanel({
         <Button
           ref={cancelRef}
           type="button"
-          variant="outline"
+          variant="secondary"
           size="sm"
           aria-disabled={pending || undefined}
           className={pending ? "cursor-not-allowed opacity-50" : undefined}

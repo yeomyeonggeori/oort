@@ -132,7 +132,7 @@ export function ProfileAvatarField({
         <Button
           ref={changeRef}
           type="button"
-          variant="outline"
+          variant="secondary"
           size="sm"
           aria-label={
             uploading

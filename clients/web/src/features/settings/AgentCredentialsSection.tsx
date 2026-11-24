@@ -361,7 +361,7 @@ export function AgentCredentialsSection({ offline }: { offline: boolean }) {
                 const regenerateControl = gate.allowed && (
                   <Button
                     type="button"
-                    variant="outline"
+                    variant="secondary"
                     size="sm"
                     aria-disabled={regenerateLocked || undefined}
                     aria-describedby={lockReason(
@@ -460,7 +460,7 @@ export function AgentCredentialsSection({ offline }: { offline: boolean }) {
                           {offersDisconnect(row.status) && (
                             <Button
                               type="button"
-                              variant="outline"
+                              variant="secondary"
                               size="sm"
                               onClick={() => openLedger(row, "disconnect")}
                               data-testid="agent-credentials-disconnect"
@@ -471,7 +471,7 @@ export function AgentCredentialsSection({ offline }: { offline: boolean }) {
                           {offersDoorbell(row.status) && (
                             <Button
                               type="button"
-                              variant="outline"
+                              variant="secondary"
                               size="sm"
                               onClick={() => openLedger(row, "doorbell")}
                               data-testid="agent-credentials-doorbell"
@@ -482,7 +482,7 @@ export function AgentCredentialsSection({ offline }: { offline: boolean }) {
                           {offersRecord(row.status) && (
                             <Button
                               type="button"
-                              variant="outline"
+                              variant="secondary"
                               size="sm"
                               onClick={() => openLedger(row, "record")}
                               data-testid="agent-credentials-record"

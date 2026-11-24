@@ -125,7 +125,7 @@ export function AgentMonthlyReport({ workspaceId }: { workspaceId: string }) {
       // 초점이 body로 떨어진다). 연결이 없을 때만 aria-disabled + 흐림이고 가드가 누름을 막는다.
       action={
         <Button
-          variant="outline"
+          variant="secondary"
           size="sm"
           aria-busy={query.isFetching || undefined}
           aria-disabled={offline || undefined}

@@ -629,7 +629,7 @@ function ConsentBody({
       <div className="flex flex-wrap items-center justify-end gap-2">
         <Button
           type="button"
-          variant="outline"
+          variant="secondary"
           size="sm"
           aria-disabled={!canDecide || undefined}
           aria-busy={deny.isPending || undefined}

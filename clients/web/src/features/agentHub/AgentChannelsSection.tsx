@@ -223,7 +223,7 @@ export function AgentChannelsSection({
                 ) : (
                   <Button
                     type="button"
-                    variant="outline"
+                    variant="secondary"
                     size="sm"
                     disabled={offline || busy}
                     onClick={() => {

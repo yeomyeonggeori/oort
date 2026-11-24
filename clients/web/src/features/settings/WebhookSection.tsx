@@ -896,7 +896,7 @@ function WebhookRow({
             <Button
               type="button"
               size="sm"
-              variant="outline"
+              variant="secondary"
               aria-disabled={rotateLocked || undefined}
               aria-busy={rotating || undefined}
               aria-describedby={lockReason(rotating)}
@@ -913,7 +913,7 @@ function WebhookRow({
             <Button
               type="button"
               size="sm"
-              variant="outline"
+              variant="secondary"
               aria-disabled={revokeLocked || undefined}
               aria-busy={revoking || undefined}
               aria-describedby={lockReason(revoking)}

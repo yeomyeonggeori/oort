@@ -208,7 +208,7 @@ export function MemoryReceiptInspector({
           <div className="flex justify-end">
             <Button
               type="button"
-              variant="outline"
+              variant="secondary"
               size="sm"
               className="tap-target"
               onClick={() => onOpenChange(false)}
