@@ -5944,6 +5944,9 @@ pub struct AgentProfileDto {
     pub model_source: &'static str,
     /// ADR-0162 증보 5 W3 (#3851): `agent.thread_reply_wake`.
     pub thread_reply_wake: bool,
+    /// ADR-0200 증보 8 L10 (#6067): the agent's own reaction switch as stored — `"off"` ·
+    /// `"status"` · `"free"`, or `null` = follows the workspace. Always present.
+    pub agent_reactions: Option<String>,
 }
 
 /// Swift `AgentProfileResponse` (:577-579).

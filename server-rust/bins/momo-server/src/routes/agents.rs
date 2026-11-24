@@ -108,6 +108,7 @@ fn profile_dto(profile: &AgentProfile) -> AgentProfileDto {
         updated_at_ms: profile.updated_at_ms,
         model_source: profile.model_source.as_str(),
         thread_reply_wake: profile.thread_reply_wake,
+        agent_reactions: profile.agent_reactions.clone(),
     }
 }
 
