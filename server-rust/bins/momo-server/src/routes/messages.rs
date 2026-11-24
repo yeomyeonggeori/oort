@@ -552,7 +552,7 @@ pub(crate) const MESSAGE_BEFORE_LEAVE: &str = "message_before_leave";
 /// status and sentence the inline branch it replaced produced, so extracting the
 /// composition into [`deliver_message_in_tx`](crate::routes::deliver::deliver_message_in_tx)
 /// moved no byte of what REST answers.
-fn delivery_refusal(refusal: DeliverRefusal) -> ApiError {
+pub(crate) fn delivery_refusal(refusal: DeliverRefusal) -> ApiError {
     match refusal {
         DeliverRefusal::NotMember => ApiError::forbidden("not a member of this channel"),
         DeliverRefusal::ThreadRoot(invalid) => thread_root_rejection(invalid),

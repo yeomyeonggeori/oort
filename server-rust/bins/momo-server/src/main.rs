@@ -380,6 +380,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         // ADR-0208 D15: scheduled messages are on unless an operator turns them off; off is
         // visible (503 `scheduler_disabled`), never a silent accept.
         .with_scheduler(config.scheduler)
+        // ADR-0204 증보 7 A7-4 (#6072): the lock-screen reply is on unless an operator sets
+        // MOMO_PUSH_REPLY_ENABLED to anything but `true`; off, the phone keeps the reply and
+        // the app sends it through the ordinary send when it opens.
+        .with_push_reply_enabled(momo_server::config::push_reply_enabled_from_env())
         // ADR-0146 개정 (#3022): member-scoped host registration signatures are
         // verified when sent and required only when the operator turned on
         // MOMO_HOST_REGISTER_SIGNATURE_REQUIRED (off until the R1 re-review PASS).

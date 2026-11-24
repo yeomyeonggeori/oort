@@ -64,6 +64,7 @@ const PATHS: &[(&str, &str, &str, usize, Class, &str)] = &[
     ("bins/momo-relay/src/audience.rs", "SESSION_CARD_SEQ_SQL", "message", 1, Machine, "relay: the seq of a room frame's target, never sent (D17)"),
     ("bins/momo-server/src/routes/approvals.rs", "settle_link_then_decide_in_tx", "message", 1, Write, "expression candidate props on the card being decided; the decider is bound again in the spawned task"),
     ("bins/momo-server/src/routes/expressions.rs", "replace_candidate", "message", 1, Write, "expression candidate props on the caller's own card"),
+    ("bins/momo-server/src/routes/push_reply.rs", "reply", "message", 1, Write, "the lock-screen reply's target check (ADR-0204 증보 7): the notified message, in the reply's own tenant transaction with the requester bound; below the floor it is the same 403 as an unknown id"),
     ("bins/momo-server/src/routes/work_controls.rs", "card_thread_root_in_tx", "message", 1, Floor, "work control route"),
     ("bins/momo-server/src/routes/work_instructions.rs", "replay_in_tx", "message", 2, Floor, "work instruction route"),
     ("bins/momo-server/src/routes/work_sessions.rs", "signed_agent_matches_source_in_tx", "message", 1, Floor, "signed host or agent check in a work-session route"),

@@ -4,10 +4,12 @@
 //! Protected: the caller presents its ordinary access token, and gets back a
 //! second, narrower one to park in the app-only keychain group (NOT the group the
 //! notification extension reads). A native handler woken by a lock-screen
-//! [승인] / [거절] press sends it as the bearer of exactly one request,
-//! `POST /v1/workspaces/{ws}/approvals/{approval}/decision` — see
-//! [`momo_auth::push_action_token`] for what makes it narrow. The decision route
-//! keeps every check it has; this token only replaces the bearer.
+//! [승인] / [거절] press sends it as the bearer of the decision,
+//! `POST /v1/workspaces/{ws}/approvals/{approval}/decision`, and — since
+//! ADR-0204 증보 7 (#6072) — a lock-screen reply goes out with it through
+//! `POST /v1/workspaces/{ws}/messages/{id}/push-reply`; see
+//! [`momo_auth::push_action_token`] for what makes it narrow. Both routes keep
+//! every check they have; this token only replaces the bearer.
 //!
 //! Who may ask: a human access bearer, nothing else.
 //!   * a push-action token is refused by the middleware's route list, so it

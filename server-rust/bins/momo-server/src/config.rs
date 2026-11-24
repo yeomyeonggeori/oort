@@ -1099,6 +1099,15 @@ fn hosted_delivery_gate_open(value: Option<&str>) -> bool {
     value.is_some_and(|value| value.trim() == "true")
 }
 
+/// ADR-0204 증보 7 A7-4 (#6072) — read the lock-screen reply switch
+/// (`MOMO_PUSH_REPLY_ENABLED`). The same spelling as the subscription-agent kill
+/// switch: unset or blank = on (the shipped default), an exact `true` = on,
+/// anything else = off. Read once at start-up; to change it, change the value and
+/// restart the process.
+pub fn push_reply_enabled_from_env() -> bool {
+    subscription_agents_switch_on(env("MOMO_PUSH_REPLY_ENABLED").as_deref())
+}
+
 /// ADR-0193 D6 (#2815) — read the subscription-agent kill switch.
 fn subscription_agents_from_env() -> bool {
     subscription_agents_switch_on(env("MOMO_SUBSCRIPTION_AGENTS_ENABLED").as_deref())

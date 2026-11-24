@@ -289,6 +289,9 @@ services:
       # `true` = on (the default); any other value = off. `:-` so existing
       # stacks keep the default without a new required key.
       MOMO_SUBSCRIPTION_AGENTS_ENABLED: ${MOMO_SUBSCRIPTION_AGENTS_ENABLED:-}
+      # ADR-0204 증보 7 (#6072): the lock-screen reply switch. Blank/unset or `true`
+      # = on (the default); any other value = off. Read at start-up.
+      MOMO_PUSH_REPLY_ENABLED: ${MOMO_PUSH_REPLY_ENABLED:-}
       # #3397 (ADR-0193 증보 2026-10-03): Claude subscription agents are OFF by default;
       # only an exact `true` opens registration. Codex is unaffected.
       MOMO_CLAUDE_SUBSCRIPTION_AGENTS_ENABLED: ${MOMO_CLAUDE_SUBSCRIPTION_AGENTS_ENABLED:-}
