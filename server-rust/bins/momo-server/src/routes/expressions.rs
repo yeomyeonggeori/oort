@@ -29,6 +29,12 @@ pub(crate) fn failure(error: Error) -> ApiError {
     };
     ApiError::coded(status, code, code)
 }
+/// ADR-0218 §19 Y2.5 · §20 Z2-7 (#6069): the two optional keys `proposedBy` · `selfRegistered` ride
+/// the one server setting that says the team's devices read the new list shape. Off (the old table), the
+/// answers carry neither.
+pub(crate) fn agent_keys(state: &AppState) -> bool {
+    state.expression_rendition_table == media::RenditionTable::Wide
+}
 pub(crate) fn invalid() -> ApiError {
     failure(Error::Invalid)
 }
@@ -140,7 +146,7 @@ pub async fn list(
     Query(q): Query<Since>,
 ) -> Result<Json<Value>, ApiError> {
     Ok(Json(
-        expressions::list(&state.pool, actor(&ws, &p)?, q.since)
+        expressions::list_with(&state.pool, actor(&ws, &p)?, q.since, agent_keys(&state))
             .await
             .map_err(failure)?,
     ))
@@ -293,12 +299,13 @@ pub async fn patch(
     human(&p)?;
     let patch: Patch = json(request).await?;
     Ok(Json(
-        expressions::mutate(
+        expressions::mutate_with(
             &state.pool,
             actor(&ws, &p)?,
             id(&expression)?,
             Some(patch),
             None,
+            agent_keys(&state),
         )
         .await
         .map_err(failure)?,
@@ -311,9 +318,16 @@ pub async fn delete(
 ) -> Result<Json<Value>, ApiError> {
     human(&p)?;
     Ok(Json(
-        expressions::mutate(&state.pool, actor(&ws, &p)?, id(&expression)?, None, None)
-            .await
-            .map_err(failure)?,
+        expressions::mutate_with(
+            &state.pool,
+            actor(&ws, &p)?,
+            id(&expression)?,
+            None,
+            None,
+            agent_keys(&state),
+        )
+        .await
+        .map_err(failure)?,
     ))
 }
 pub async fn report(
@@ -325,12 +339,13 @@ pub async fn report(
     human(&p)?;
     let report: Report = json(request).await?;
     Ok(Json(
-        expressions::mutate(
+        expressions::mutate_with(
             &state.pool,
             actor(&ws, &p)?,
             id(&expression)?,
             None,
             Some(report),
+            agent_keys(&state),
         )
         .await
         .map_err(failure)?,

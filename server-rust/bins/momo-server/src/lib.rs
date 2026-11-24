@@ -2218,6 +2218,19 @@ pub fn build_app(state: AppState) -> Router {
         // #3873 (ADR-0147 증보 2026-10-16) — which AI link an agent is pinned to.
         // Instance operator only (both verbs); absent from the agent-route
         // allow-list, so an agent bearer cannot reach it.
+        // #6069 (ADR-0218 증보 13 §19 Y2.1) — the standing grant for an agent's own expressions. A
+        // person's full app session only (the handler's two checks); absent from the agent-route
+        // allow-list, so an agent bearer cannot reach it.
+        .route(
+            "/v1/workspaces/{ws}/agents/{agent}/expression-grant",
+            get(routes::expression_grants::get)
+                .put(routes::expression_grants::put)
+                .delete(routes::expression_grants::delete),
+        )
+        .route(
+            "/v1/workspaces/{ws}/expression-grants",
+            get(routes::expression_grants::list),
+        )
         .route(
             "/v1/workspaces/{ws}/agents/{agent}/provider-pin",
             get(routes::agent_provider_pin::get).put(routes::agent_provider_pin::put),

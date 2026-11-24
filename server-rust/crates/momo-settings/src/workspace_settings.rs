@@ -50,7 +50,18 @@ pub const ALLOWED_SETTINGS_KEYS: &[&str] = &[
     // ADR-0200 증보 8 L10 (#6067): the agent reaction switch, one of three words. The route stores
     // it only from a person's full app session ([`AGENT_REACTIONS_SETTING`]).
     "agent_reactions",
+    // ADR-0218 증보 13 §19 Y3 (#6069): the switch that closes every agent's own expressions at once —
+    // registrations without a card and unasked expression cards (absent = on). A boolean, stored only
+    // from a person's full app session ([`AGENT_SELF_EXPRESSIONS_SETTING`]); an agent's
+    // `workspace.settings.update` names two other keys.
+    "agent_self_expressions",
 ];
+
+/// The workspace settings key of the agent's own expressions switch (ADR-0218 증보 13 §19 Y3, #6069).
+/// `momo_expressions::self_register::SWITCH_SETTING` spells the same key for the reader (absent = on, a
+/// non-boolean = off). Written by an administrator through `PATCH …/settings` on a person's full app
+/// session only.
+pub const AGENT_SELF_EXPRESSIONS_SETTING: &str = "agent_self_expressions";
 
 /// The workspace settings key of the agent reaction switch (ADR-0200 증보 8 L10, #6067): one of
 /// [`AgentReactionsMode`]'s three words. Written by an administrator through `PATCH …/settings`
@@ -232,6 +243,8 @@ pub enum WorkspaceSettingsInvalid {
     AgentInitiativeShape,
     #[error("agent_reactions must be one of off, status, free")]
     AgentReactionsShape,
+    #[error("agent_self_expressions must be true or false")]
+    AgentSelfExpressionsShape,
     #[error("team_ai_roles must be an object of bundle → true or false")]
     TeamAiRolesShape,
     #[error("unknown team_ai_roles bundle: {0}")]
@@ -346,6 +359,14 @@ fn validate_settings_value(key: &str, value: &Value) -> Result<(), WorkspaceSett
             Some(_) => Ok(()),
             None => Err(WorkspaceSettingsInvalid::AgentReactionsShape),
         },
+        // A literal boolean, like `agent_initiative`: the reader closes anything else.
+        AGENT_SELF_EXPRESSIONS_SETTING => {
+            if value.is_boolean() {
+                Ok(())
+            } else {
+                Err(WorkspaceSettingsInvalid::AgentSelfExpressionsShape)
+            }
+        }
         _ => Err(WorkspaceSettingsInvalid::UnknownKey(key.to_string())),
     }
 }

@@ -1209,3 +1209,47 @@ BEGIN
   END LOOP;
 END $$;
 -- END agent-upload-token-lockdown
+
+-- BEGIN expression-agent-grant-lockdown (#6069; ADR-0218 증보 13 §19 Y2.1 · Y2.3). Identical in
+-- 192_expression_agent_grant.sql, bootstrap_roles.sql and bootstrap_runtime_roles.sql; tests compare the text between
+-- the markers. A row of expression_agent_grant lets one agent register team expressions nobody looks at first, and
+-- expression_agent_call is the source of that agent's daily, attempt and 30-day counts, and the BYPASSRLS roles skip
+-- RLS, so their table privileges are what keeps a forged, widened or deleted row away from a role with no business
+-- touching one. Only the api uses these tables, on a person's session (grant, revoke, read) and on the Agent Port
+-- register tool (count, record): momo_app reads and writes grants (SELECT, INSERT, UPDATE — a revoked grant is kept,
+-- never deleted) and calls (SELECT, INSERT, UPDATE, DELETE — the 45-day sweep). Nobody else holds anything — not the
+-- worker, relay, notifier, platform_admin, nor the two roles the worker may SET ROLE to (the helper's read role and
+-- momo_memory; named because a membership granted WITH INHERIT FALSE is invisible to has_table_privilege). Idempotent
+-- and order-proof (a pass before the tables or the roles exist finishes what it can, the pass after lands the rest),
+-- and it fails loudly if the result is not what is written here.
+DO $$
+DECLARE
+  t text;
+  r text;
+  p text;
+  allowed text[];
+BEGIN
+  FOREACH t IN ARRAY ARRAY['expression_agent_grant', 'expression_agent_call'] LOOP
+    CONTINUE WHEN to_regclass('public.' || t) IS NULL;
+    EXECUTE format('REVOKE ALL ON TABLE public.%I FROM PUBLIC', t);
+    FOREACH r IN ARRAY ARRAY['momo_app', 'momo_relay', 'momo_worker', 'momo_notifier', 'momo_platform_admin', 'momo_helper_read', 'momo_memory'] LOOP
+      CONTINUE WHEN NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = r);
+      allowed := CASE
+        WHEN r = 'momo_app' AND t = 'expression_agent_grant' THEN ARRAY['SELECT', 'INSERT', 'UPDATE']
+        WHEN r = 'momo_app' THEN ARRAY['SELECT', 'INSERT', 'UPDATE', 'DELETE']
+        ELSE ARRAY[]::text[]
+      END;
+      EXECUTE format('REVOKE ALL ON TABLE public.%I FROM %I', t, r);
+      IF cardinality(allowed) > 0 THEN
+        EXECUTE format('GRANT %s ON TABLE public.%I TO %I', array_to_string(allowed, ', '), t, r);
+      END IF;
+      FOREACH p IN ARRAY ARRAY['SELECT', 'INSERT', 'UPDATE', 'DELETE', 'TRUNCATE', 'REFERENCES', 'TRIGGER'] LOOP
+        IF has_table_privilege(r, 'public.' || t, p) IS DISTINCT FROM (p = ANY (allowed)) THEN
+          RAISE EXCEPTION 'role % must % % on %',
+            r, CASE WHEN p = ANY (allowed) THEN 'hold' ELSE 'not hold' END, p, t;
+        END IF;
+      END LOOP;
+    END LOOP;
+  END LOOP;
+END $$;
+-- END expression-agent-grant-lockdown
