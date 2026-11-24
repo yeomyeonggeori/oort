@@ -858,12 +858,17 @@ mod tests {
     /// channel fill, re-run with the row-security switch set inside its own `DO` block so it holds
     /// whether the file runs in one transaction or not, and a role that cannot bypass row security
     /// stops loudly instead of filling nothing. Data only — no DDL. (185 is #5899's.)
+    ///
+    /// 187 is #6066's work item (ADR-0222 원장-1): the RLS-FORCE tables `work_item` (per-workspace
+    /// number from the RLS-FORCE `work_item_counter`, assignee and on-behalf-of human by trigger,
+    /// requester immutable) and the nullable `work_item_id` on `agent_run`/`work_session` plus
+    /// `agent_run`'s requester and on-behalf-of columns (a child run carries its parent's item).
     #[test]
-    fn discovers_contiguous_migrations_001_to_186() {
+    fn discovers_contiguous_migrations_001_to_187() {
         let dir = default_migrations_dir();
         let migrations = discover_migrations(&dir).expect("migrations directory readable");
 
-        let expected: Vec<i64> = (1..=186).collect();
+        let expected: Vec<i64> = (1..=187).collect();
         let found: Vec<i64> = migrations
             .iter()
             .map(|migration| migration.version)
@@ -871,15 +876,11 @@ mod tests {
         assert_eq!(
             found,
             expected,
-            "expected contiguous 001..=186 under {}",
+            "expected contiguous 001..=187 under {}",
             dir.display()
         );
         assert!(migrations.first().unwrap().name.starts_with("001_init"));
-        assert!(migrations
-            .last()
-            .unwrap()
-            .name
-            .starts_with("186_channel_default_fill_safety_net"));
+        assert!(migrations.last().unwrap().name.starts_with("187_work_item"));
     }
 
     #[test]

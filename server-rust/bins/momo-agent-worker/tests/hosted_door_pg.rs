@@ -40,6 +40,9 @@
 //! | `an_ordinary_answer_without_a_picture_address_is_committed_byte_for_byte` | #4908: tidy, trim or re-line an answer that has no address / cut a `MEDIA:` line, a request block or a `data:` address that is not an image |
 //! | `a_picture_address_inside_a_completion_report_does_not_ride_the_card` | #4908: cut after the report is read (the address rides `props`) |
 
+#[path = "../../momo-server/tests/common/expression_children.rs"]
+mod expression_children;
+
 use std::collections::VecDeque;
 use std::os::unix::fs::PermissionsExt;
 use std::path::PathBuf;
@@ -541,19 +544,17 @@ struct Opts {
 /// asked for) when the test stands a program of its own in for it. An explicit override is
 /// trusted.
 fn require_children_4947(real_assembler: bool) {
-    let exe = std::env::current_exe().expect("test executable");
-    let mut dir = exe.parent().expect("target dir").to_path_buf();
-    if dir.file_name() == Some(std::ffi::OsStr::new("deps")) {
-        dir.pop();
-    }
     let mut wanted = Vec::new();
     if std::env::var_os("OORT_EXPRESSION_DECODER").is_none() {
-        wanted.push(dir.join("momo-expression-decoder"));
+        wanted.push("momo-expression-decoder");
     }
     if real_assembler && std::env::var_os("OORT_EXPRESSION_ASSEMBLER").is_none() {
-        wanted.push(dir.join("momo-expression-assembler"));
+        wanted.push("momo-expression-assembler");
     }
-    let missing: Vec<_> = wanted.iter().filter(|path| !path.is_file()).collect();
+    let missing: Vec<_> = wanted
+        .into_iter()
+        .filter_map(|name| expression_children::ready(name).err())
+        .collect();
     assert!(
         missing.is_empty(),
         "build the child programs first: cargo build -p momo-expressions --bins (missing {missing:?}); \

@@ -132,10 +132,9 @@ impl HuddleSweepConfig {
             ("http://", &url[url.len() - rest.len()..])
         } else if let Some(rest) = lower.strip_prefix("https://") {
             ("https://", &url[url.len() - rest.len()..])
-        } else if let Some(rest) = lower.strip_prefix("http://") {
-            ("http://", &url[url.len() - rest.len()..])
         } else {
-            return None;
+            let rest = lower.strip_prefix("http://")?;
+            ("http://", &url[url.len() - rest.len()..])
         };
         let rest = rest.trim_end_matches('/');
         if rest.is_empty() {

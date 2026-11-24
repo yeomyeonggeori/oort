@@ -158,6 +158,8 @@ fn gate(
 /// other tenant read on this server (invariant #6). A caller who is not a live
 /// member gets the subscribe proxy's own wording back and learns nothing about
 /// whether the channel exists.
+// Axum's `Response` as the error, like the other handlers; rust 1.100's clippy counts it as large.
+#[allow(clippy::result_large_err)]
 pub async fn issue_grant(
     State(state): State<AppState>,
     Extension(principal): Extension<Principal>,
@@ -240,6 +242,8 @@ pub async fn issue_grant(
 ///    invalid grants cannot make this server verify signatures without bound;
 /// 5. **grant** — the membership proof, bound to caller/workspace/channel;
 /// 6. **publish**.
+// Axum's `Response` as the error, like the other handlers; rust 1.100's clippy counts it as large.
+#[allow(clippy::result_large_err)]
 pub async fn typing(
     State(state): State<AppState>,
     Extension(principal): Extension<Principal>,
@@ -345,6 +349,8 @@ pub async fn typing(
 /// effective dot a co-member renders is `f(this availability, that member's
 /// durable declared status)`; this route carries only the availability half, and
 /// carries it without touching Postgres.
+// Axum's `Response` as the error, like the other handlers; rust 1.100's clippy counts it as large.
+#[allow(clippy::result_large_err)]
 pub async fn availability(
     State(state): State<AppState>,
     Extension(principal): Extension<Principal>,

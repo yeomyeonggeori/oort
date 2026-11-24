@@ -371,7 +371,7 @@ impl Canvas {
     /// is opaque, so this is the identity there.
     pub(super) fn into_frame(self) -> RgbaImage {
         let mut px = self.px;
-        for p in px.chunks_exact_mut(4) {
+        for p in px.as_chunks_mut::<4>().0 {
             let straight = if p[3] >= 128 {
                 let s = unpremultiply([p[0], p[1], p[2], p[3]]);
                 [s[0], s[1], s[2], 255]
@@ -925,7 +925,7 @@ mod tests {
         let tile = tile_of(&img, 288);
         assert_eq!((tile.w, tile.h), (288, 288));
         let mut rim = 0;
-        for p in tile.px.chunks_exact(4) {
+        for p in tile.px.as_chunks::<4>().0 {
             let straight = unpremultiply([p[0], p[1], p[2], p[3]]);
             if straight[3] > 0 {
                 rim += 1;

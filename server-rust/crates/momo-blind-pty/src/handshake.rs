@@ -44,7 +44,7 @@ impl NonceStore {
             return Err(Error::Malformed);
         }
         let mut used = HashMap::new();
-        for c in b.chunks_exact(STORE_ENTRY) {
+        for c in b.as_chunks::<STORE_ENTRY>().0 {
             let n: [u8; NONCE_LEN] = c[..NONCE_LEN].try_into().map_err(|_| Error::Malformed)?;
             let e = u64::from_be_bytes(c[NONCE_LEN..].try_into().map_err(|_| Error::Malformed)?);
             used.insert(n, e);

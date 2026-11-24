@@ -40,6 +40,9 @@
 //! | `the_worker_refuses_…` | drop the pre-checks before `mint`, `Policy::none()`, or add a retry |
 //! | `a_caller_that_hangs_up_…` | run `land` inline instead of `tokio::spawn(land(…))` |
 
+#[path = "common/expression_children.rs"]
+mod expression_children;
+
 use std::collections::{BTreeSet, HashMap};
 use std::io::Cursor;
 use std::net::SocketAddr;
@@ -162,14 +165,9 @@ fn require_decoder() {
     if std::env::var_os("OORT_EXPRESSION_DECODER").is_some() {
         return;
     }
-    let exe = std::env::current_exe().expect("test executable");
-    let mut dir = exe.parent().expect("target dir").to_path_buf();
-    if dir.file_name() == Some(std::ffi::OsStr::new("deps")) {
-        dir.pop();
-    }
-    let path = dir.join("momo-expression-decoder");
+    let path = expression_children::ready("momo-expression-decoder");
     assert!(
-        path.is_file(),
+        path.is_ok(),
         "build the decoder first: cargo build -p momo-expressions --bins ({path:?}); without it \
          every picture is invalid media"
     );

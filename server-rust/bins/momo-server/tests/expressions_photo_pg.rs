@@ -12,6 +12,9 @@
 //!
 //! Needs the isolated decoder child beside the test binary: `cargo build -p momo-expressions
 //! --bins` first (#4947); `require_decoder_4947` fails first and names the command.
+#[path = "common/expression_children.rs"]
+mod expression_children;
+
 use futures::future::BoxFuture;
 use momo_db::sqlx::{
     self,
@@ -366,14 +369,9 @@ fn require_decoder_4947() {
     if std::env::var_os("OORT_EXPRESSION_DECODER").is_some() {
         return;
     }
-    let exe = std::env::current_exe().expect("test executable");
-    let mut dir = exe.parent().expect("target dir").to_path_buf();
-    if dir.file_name() == Some(std::ffi::OsStr::new("deps")) {
-        dir.pop();
-    }
-    let path = dir.join("momo-expression-decoder");
+    let path = expression_children::ready("momo-expression-decoder");
     assert!(
-        path.is_file(),
+        path.is_ok(),
         "build the decoder first: cargo build -p momo-expressions --bins ({path:?}); without it \
          every picture is invalid media and every photo draft fails"
     );
