@@ -1,0 +1,6 @@
+{
+  "app.shortcutHelp.search": "Search shortcuts",
+  "app.shortcutHelp.empty": "No matching shortcuts",
+  "app.shortcutHelp.change": "Change shortcuts",
+  "app.shortcutHelp.reopenHint": "Press {key} to open this again"
+}

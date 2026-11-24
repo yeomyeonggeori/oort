@@ -2,6 +2,7 @@
 
 import { act, createElement } from "react";
 import { createRoot } from "react-dom/client";
+import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { ShortcutHelpDialog } from "./ShortcutHelpDialog";
 import { resetShortcutBindingsForTest, setBinding } from "./shortcutBindings";
@@ -26,7 +27,8 @@ describe("도움말 ← 재지정", () => {
     const host = document.createElement("div");
     document.body.append(host);
     const root = createRoot(host);
-    act(() => root.render(createElement(ShortcutHelpDialog)));
+    // 창의 「단축키 바꾸기」가 라우터로 설정에 가므로(#6081) 라우터 안에 띄운다.
+    act(() => root.render(createElement(MemoryRouter, null, createElement(ShortcutHelpDialog))));
     cleanup = () => {
       act(() => root.unmount());
       host.remove();
