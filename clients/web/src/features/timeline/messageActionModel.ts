@@ -3,8 +3,8 @@ import { pinActionLabelKey } from "@momo/core/features/timeline/pins";
 import { QUICK_REACTIONS } from "@momo/core/features/timeline/reactions";
 import { QUOTE_ACTION_LABEL } from "@momo/core/features/timeline/quote";
 import {
-  copyLinkActionLabel,
-  copyMessageActionLabel,
+  copyLinkActionKey,
+  copyMessageActionKey,
 } from "@momo/core/features/timeline/copyLabels";
 import { REMINDER_MENU_LABEL } from "@momo/core/features/reminders/model";
 import { MARK_UNREAD_ACTION_KEY } from "@momo/core/features/readState/copy";
@@ -94,6 +94,8 @@ interface MessageActionItemBase {
   key: MessageActionItemKey;
   testKey: string;
   accessibleLabel?: string;
+  /** 낱말이 키인 항목의 스크린리더 이름. 화면에는 `messageActionAccessibleLabel`로 푼다. */
+  accessibleLabelKey?: PlainMessageKey;
   tone?: "danger";
   group: MessageActionGroup;
   /**
@@ -111,6 +113,14 @@ export function messageActionLabel(
   formatMessage: (key: PlainMessageKey) => string
 ): string {
   return "labelKey" in item ? formatMessage(item.labelKey) : item.label;
+}
+
+/** 항목의 스크린리더 이름: 키로 옮긴 항목은 지금 언어로 푼 키, 나머지는 모델이 든 글이다. */
+export function messageActionAccessibleLabel(
+  item: Pick<MessageActionItem, "accessibleLabel" | "accessibleLabelKey">,
+  formatMessage: (key: PlainMessageKey) => string
+): string | undefined {
+  return item.accessibleLabelKey ? formatMessage(item.accessibleLabelKey) : item.accessibleLabel;
 }
 
 export const MESSAGE_ACTION_SURFACES = ["menu", "context", "sheet"] as const;
@@ -132,7 +142,7 @@ export interface MessageActionCopyState {
  * they must not grow a local branch.
  *
  *   * copy        — already shipped as raw-markdown copy. Visible copy is
- *                   `copyMessageActionLabel` so it sits next to the link
+ *                   `copyMessageActionKey` so it sits next to the link
  *                   action; both are verb phrases, same as the phone sheet.
  *   * copy-link   — `#/c/{ch}?msg=&seq=` already lands (ChatShell + searchHitPath).
  *   * mark unread — ADR-0178. 「여기부터 안 읽음」 in this inventory.
@@ -217,8 +227,8 @@ export function messageActionItems(
     items.push({
       key: "copy",
       testKey: "copy",
-      label: copyMessageActionLabel(copied),
-      accessibleLabel: copyMessageActionLabel(copied),
+      labelKey: copyMessageActionKey(copied),
+      accessibleLabelKey: copyMessageActionKey(copied),
       group: MESSAGE_ACTION_GROUP.copy,
     });
   }
@@ -226,8 +236,8 @@ export function messageActionItems(
     items.push({
       key: "copy-link",
       testKey: "copy-link",
-      label: copyLinkActionLabel(copiedLink),
-      accessibleLabel: copyLinkActionLabel(copiedLink),
+      labelKey: copyLinkActionKey(copiedLink),
+      accessibleLabelKey: copyLinkActionKey(copiedLink),
       group: MESSAGE_ACTION_GROUP.copy,
     });
   }

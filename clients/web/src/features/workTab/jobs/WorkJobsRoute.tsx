@@ -63,6 +63,7 @@ import {
   takeWorkReturnSpot,
   workConsoleSessionPath,
 } from "@/features/workConsole/model";
+import type { LocaleService } from "@momo/core/i18n";
 import { useFormatMessage } from "@/i18n/useFormatMessage";
 import { isDesktop } from "@/lib/tauri";
 import {
@@ -791,7 +792,7 @@ export function WorkJobsRoute() {
                               permission={false}
                               inApp={null}
                               settledLine={null}
-                              approval={kind === "approval" ? approvalFacts(row, decisions) : null}
+                              approval={kind === "approval" ? approvalFacts(row, decisions, formatMessage) : null}
                               guarded={false}
                               desktop={desktop}
                               onOpenPermission={() => undefined}
@@ -1083,14 +1084,18 @@ function slotApprovalFacts(slot: Slot, result: string | null, receiptMeta: strin
  * 원장에 같은 승인이 있어도 단추가 없다(ADR-0202 D5 「대신 승인 없음」). 대기 줄은 원장이 답했고 그 승인이 원장의 내 결정 목록에 없을
  * 때만 선다 — 원장이 오는 중이거나 없는 서버, 또는 내가 결정할 수 있는데 「팀 전체」라 단추만 없는 줄에서 「기다려요」를 지어내지 않는다.
  */
-function approvalFacts(row: WorkJobRow, decisions: ReturnType<typeof useWorkDecisions>): JobApprovalFacts {
+function approvalFacts(
+  row: WorkJobRow,
+  decisions: ReturnType<typeof useWorkDecisions>,
+  formatMessage: LocaleService["formatMessage"]
+): JobApprovalFacts {
   const runId = row.item.runId ?? row.id;
   const mine = decisions.byRun.get(runId.toLowerCase()) ?? null;
   return {
     decision: null,
     item: mine?.item ?? null,
     intent: decisions.intentFor(row.channelId, runId, mine?.approvalId),
-    waiting: mine === null && decisions.ledgerKnown ? approvalWaitingLine() : null,
+    waiting: mine === null && decisions.ledgerKnown ? approvalWaitingLine(formatMessage) : null,
     receipt: null,
   };
 }

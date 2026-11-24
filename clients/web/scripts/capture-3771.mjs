@@ -356,6 +356,7 @@ async function main() {
         deviceScaleFactor: 2,
         colorScheme: "light",
         reducedMotion: "reduce",
+        locale: "ko-KR",
       });
       await installMocks(context, {
         messages: STALE_THEN_RESULT,

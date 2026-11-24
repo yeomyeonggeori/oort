@@ -13,7 +13,7 @@ export interface DecisionStageEntry {
 export interface DecisionStageRequest {
   workspaceId: string;
   cards: readonly DecisionStageEntry[];
-  context: Omit<RequestBundleContext, "nowMs">;
+  context: Omit<RequestBundleContext, "nowMs" | "formatMessage">;
   selectedId?: string;
   opener: DialogFocusTarget | null;
   /** 매번 현재 위치를 찾아요. 없어진 카드는 hero 부품의 안전한 폴백을 따라요. */

@@ -1,15 +1,23 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  approvalCardNote,
+  approvalCardNote as buildApprovalCardNote,
   approvalNoteRank,
-  APPROVAL_ELSEWHERE_COPY,
+  APPROVAL_ELSEWHERE_KEY,
   APPROVAL_NOTE_BLOCKED_TWIN,
   APPROVAL_NOTE_TONE_ORDER,
   APPROVAL_NOTE_TONE_SPEC,
-  APPROVAL_OFFLINE_COPY,
+  APPROVAL_OFFLINE_KEY,
   type ApprovalCardNoteInput,
 } from "./approvalNote";
+import { catalog as koCatalog } from "../../i18n/generated/ko-KR";
+import { createMessageCopy } from "../../testkit";
+
+// 한국어 사전으로 풀어 예전과 같은 문장을 단정한다.
+const ko = createMessageCopy({ messageLocale: "ko-KR", catalog: koCatalog });
+const approvalCardNote = (note: ApprovalCardNoteInput) => buildApprovalCardNote(note, ko);
+const APPROVAL_ELSEWHERE_COPY = ko(APPROVAL_ELSEWHERE_KEY);
+const APPROVAL_OFFLINE_COPY = ko(APPROVAL_OFFLINE_KEY);
 
 // =============================================================================
 // 승인 카드의 한 줄 — 무엇을 말하고 어떤 격으로 말하는가 (design-review M-3)

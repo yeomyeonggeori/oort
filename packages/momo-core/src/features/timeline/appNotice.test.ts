@@ -1,5 +1,7 @@
 // 앱을 쓰다 막혔을 때의 문장 (plugins-v2-plan 2.5절, #3950 U-S2): 한 문장과 행동 하나.
 import { describe, expect, it } from "vitest";
+import { catalog as koCatalog } from "../../i18n/generated/ko-KR";
+import { createMessageCopy } from "../../testkit";
 import { APPS_SCREEN_PATH, appNoticeFor, hasAppNotice, minutesSince, parseAppNotice, type AppNoticeEnv } from "./appNotice";
 
 const PLUGINS = new Map([
@@ -7,7 +9,8 @@ const PLUGINS = new Map([
   ["github", { name: "GitHub", egressDomains: ["api.githubcopilot.com"] }],
 ]);
 const NOW = 10 * 60_000;
-const web: AppNoticeEnv = { surface: "web", plugins: PLUGINS, nowMs: NOW };
+const ko = createMessageCopy({ messageLocale: "ko-KR", catalog: koCatalog });
+const web: AppNoticeEnv = { surface: "web", plugins: PLUGINS, nowMs: NOW, formatMessage: ko };
 const phone: AppNoticeEnv = { ...web, surface: "phone" };
 const notice = (app_notice: unknown, env = web) => parseAppNotice({ app_notice }, env);
 

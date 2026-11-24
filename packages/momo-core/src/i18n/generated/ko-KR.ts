@@ -12866,6 +12866,280 @@ export const catalog: MessageCatalog = {
       "value": "일하는 에이전트"
     }
   ],
+  "timeline.appNotice.egressKnown": [
+    {
+      "type": 0,
+      "value": "에이전트가 "
+    },
+    {
+      "type": 1,
+      "value": "host"
+    },
+    {
+      "type": 0,
+      "value": "에 연결할 수 없어요."
+    }
+  ],
+  "timeline.appNotice.egressOutside": [
+    {
+      "type": 0,
+      "value": "에이전트가 바깥에 연결할 수 없어요."
+    }
+  ],
+  "timeline.appNotice.grantRevoked": [
+    {
+      "type": 0,
+      "value": "실행 중에 허용이 회수돼서 여기서 멈췄어요. 이미 한 일은 그대로예요."
+    }
+  ],
+  "timeline.appNotice.loginLostHermesNamed": [
+    {
+      "type": 1,
+      "value": "app"
+    },
+    {
+      "type": 0,
+      "value": " 로그인이 끊겼어요. 운영자가 다시 로그인해야 해요."
+    }
+  ],
+  "timeline.appNotice.loginLostHermesUnnamed": [
+    {
+      "type": 0,
+      "value": "이 앱 로그인이 끊겼어요. 운영자가 다시 로그인해야 해요."
+    }
+  ],
+  "timeline.appNotice.loginLostNamed": [
+    {
+      "type": 1,
+      "value": "app"
+    },
+    {
+      "type": 0,
+      "value": " 로그인이 끊겼어요."
+    }
+  ],
+  "timeline.appNotice.loginLostUnnamed": [
+    {
+      "type": 0,
+      "value": "이 앱 로그인이 끊겼어요."
+    }
+  ],
+  "timeline.appNotice.notAllowedPhone": [
+    {
+      "type": 0,
+      "value": "이 앱은 데스크탑이나 웹에서 허용해 주세요."
+    }
+  ],
+  "timeline.appNotice.notAllowedWeb": [
+    {
+      "type": 0,
+      "value": "먼저 내 사용을 허용해 주세요."
+    }
+  ],
+  "timeline.appNotice.openApp": [
+    {
+      "type": 0,
+      "value": "앱 열기"
+    }
+  ],
+  "timeline.appNotice.openOnWeb": [
+    {
+      "type": 0,
+      "value": "웹에서 열기"
+    }
+  ],
+  "timeline.appNotice.rateLimitedNamed": [
+    {
+      "type": 1,
+      "value": "app"
+    },
+    {
+      "type": 5,
+      "value": "josa",
+      "options": {
+        "final": {
+          "value": [
+            {
+              "type": 0,
+              "value": "이"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "가"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": 0,
+      "value": " 잠시 요청을 막았어요. 1분 뒤 다시 해 주세요."
+    }
+  ],
+  "timeline.appNotice.rateLimitedUnnamed": [
+    {
+      "type": 0,
+      "value": "이 앱이 잠시 요청을 막았어요. 1분 뒤 다시 해 주세요."
+    }
+  ],
+  "timeline.appNotice.signInAgain": [
+    {
+      "type": 0,
+      "value": "다시 로그인"
+    }
+  ],
+  "timeline.appNotice.siteOff": [
+    {
+      "type": 5,
+      "value": "site",
+      "options": {
+        "mac": {
+          "value": [
+            {
+              "type": 0,
+              "value": "내 맥이 꺼져 있어서 못 했어요. 맥을 켜면 다시 해 볼게요."
+            }
+          ]
+        },
+        "hermes": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Hermes가 꺼져 있어서 못 했어요."
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "에이전트가 있는 곳이 꺼져 있어서 못 했어요."
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "timeline.appNotice.siteSilent": [
+    {
+      "type": 5,
+      "value": "site",
+      "options": {
+        "mac": {
+          "value": [
+            {
+              "type": 0,
+              "value": "내 맥이"
+            }
+          ]
+        },
+        "hermes": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Hermes가"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "에이전트가"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": 0,
+      "value": " 답하지 않아요."
+    }
+  ],
+  "timeline.appNotice.working": [
+    {
+      "type": 5,
+      "value": "site",
+      "options": {
+        "mac": {
+          "value": [
+            {
+              "type": 0,
+              "value": "내 맥"
+            }
+          ]
+        },
+        "hermes": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Hermes"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "에이전트가 있는 곳"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": 0,
+      "value": "에서 하는 중"
+    }
+  ],
+  "timeline.appNotice.workingMinutes": [
+    {
+      "type": 5,
+      "value": "site",
+      "options": {
+        "mac": {
+          "value": [
+            {
+              "type": 0,
+              "value": "내 맥"
+            }
+          ]
+        },
+        "hermes": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Hermes"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "에이전트가 있는 곳"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": 0,
+      "value": "에서 하는 중 · "
+    },
+    {
+      "type": 1,
+      "value": "minutes"
+    },
+    {
+      "type": 0,
+      "value": "분째"
+    }
+  ],
   "timeline.approval.channelAgentIn": [
     {
       "type": 0,
@@ -12900,6 +13174,34 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "결정하지 않으면 에이전트가 다시 제안해야 해요."
+    }
+  ],
+  "timeline.approvalNote.elsewhere": [
+    {
+      "type": 0,
+      "value": "이 결정은 인박스나 데스크탑 앱에서 할 수 있어요."
+    }
+  ],
+  "timeline.approvalNote.offline": [
+    {
+      "type": 0,
+      "value": "연결이 끊겨 지금은 결정할 수 없어요. 다시 연결되면 여기서 승인하거나 거부할 수 있어요."
+    }
+  ],
+  "timeline.approvalNote.waitingNamed": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " 님의 허락을 기다려요"
+    }
+  ],
+  "timeline.approvalNote.waitingOther": [
+    {
+      "type": 0,
+      "value": "다른 참여자의 허락을 기다려요"
     }
   ],
   "timeline.artifactNote.awaitingApproval": [
@@ -13235,6 +13537,38 @@ export const catalog: MessageCatalog = {
       "value": "스레드를 열고 운영자를 멘션해 주세요."
     }
   ],
+  "timeline.commandSuggest.head": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 5,
+      "value": "josa",
+      "options": {
+        "final": {
+          "value": [
+            {
+              "type": 0,
+              "value": "이"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "가"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": 0,
+      "value": " 제안했어요"
+    }
+  ],
   "timeline.commandSuggest.oneLineAiConnect": [
     {
       "type": 1,
@@ -13453,6 +13787,24 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "팀 AI 키 보기"
+    }
+  ],
+  "timeline.copy.linkAction": [
+    {
+      "type": 0,
+      "value": "링크 복사하기"
+    }
+  ],
+  "timeline.copy.messageAction": [
+    {
+      "type": 0,
+      "value": "메시지 복사하기"
+    }
+  ],
+  "timeline.copy.messageDone": [
+    {
+      "type": 0,
+      "value": "메시지 복사됨"
     }
   ],
   "timeline.createChannel.privateDetail": [
@@ -14368,6 +14720,188 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "나(내 반응 취소)"
+    }
+  ],
+  "timeline.requestBundle.approvalRequest": [
+    {
+      "type": 0,
+      "value": "승인 요청"
+    }
+  ],
+  "timeline.requestBundle.cancelled": [
+    {
+      "type": 0,
+      "value": "요청이 취소됐어요"
+    }
+  ],
+  "timeline.requestBundle.chipAfterOnly": [
+    {
+      "type": 1,
+      "value": "label"
+    },
+    {
+      "type": 0,
+      "value": ": 이후 값 "
+    },
+    {
+      "type": 1,
+      "value": "after"
+    }
+  ],
+  "timeline.requestBundle.chipBeforeAfter": [
+    {
+      "type": 1,
+      "value": "label"
+    },
+    {
+      "type": 0,
+      "value": ": 이전 값 "
+    },
+    {
+      "type": 1,
+      "value": "before"
+    },
+    {
+      "type": 0,
+      "value": ", 이후 값 "
+    },
+    {
+      "type": 1,
+      "value": "after"
+    }
+  ],
+  "timeline.requestBundle.daysLeft": [
+    {
+      "type": 1,
+      "value": "count"
+    },
+    {
+      "type": 0,
+      "value": "일 남음"
+    }
+  ],
+  "timeline.requestBundle.declined": [
+    {
+      "type": 0,
+      "value": "거부됐어요"
+    }
+  ],
+  "timeline.requestBundle.declinedBy": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " 님이 거부했어요"
+    }
+  ],
+  "timeline.requestBundle.details": [
+    {
+      "type": 0,
+      "value": "자세히"
+    }
+  ],
+  "timeline.requestBundle.done": [
+    {
+      "type": 0,
+      "value": "실행을 마쳤어요"
+    }
+  ],
+  "timeline.requestBundle.executing": [
+    {
+      "type": 0,
+      "value": "승인됐어요 · 이어서 하는 중"
+    }
+  ],
+  "timeline.requestBundle.expiresSoon": [
+    {
+      "type": 0,
+      "value": "10분 안에 만료돼요"
+    }
+  ],
+  "timeline.requestBundle.failed": [
+    {
+      "type": 0,
+      "value": "실행을 끝내지 못했어요 · 다시 요청해 보세요"
+    }
+  ],
+  "timeline.requestBundle.hoursLeft": [
+    {
+      "type": 1,
+      "value": "count"
+    },
+    {
+      "type": 0,
+      "value": "시간 남음"
+    }
+  ],
+  "timeline.requestBundle.minutesLeft": [
+    {
+      "type": 1,
+      "value": "count"
+    },
+    {
+      "type": 0,
+      "value": "분 남음"
+    }
+  ],
+  "timeline.requestBundle.quietWithDetails": [
+    {
+      "type": 1,
+      "value": "quiet"
+    },
+    {
+      "type": 0,
+      "value": " · 자세히"
+    }
+  ],
+  "timeline.requestBundle.rationale": [
+    {
+      "type": 0,
+      "value": "사유"
+    }
+  ],
+  "timeline.requestBundle.requiredRole": [
+    {
+      "type": 0,
+      "value": "결정 권한"
+    }
+  ],
+  "timeline.requestBundle.thinking": [
+    {
+      "type": 0,
+      "value": "요청을 살펴보고 있어요"
+    }
+  ],
+  "timeline.requestBundle.toolRunNamed": [
+    {
+      "type": 0,
+      "value": "도구 「"
+    },
+    {
+      "type": 1,
+      "value": "tool"
+    },
+    {
+      "type": 0,
+      "value": "」 실행"
+    }
+  ],
+  "timeline.requestBundle.waitingAdmin": [
+    {
+      "type": 0,
+      "value": "관리자의 승인을 기다려요"
+    }
+  ],
+  "timeline.requestBundle.waitingNamed": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " 님의 승인을 기다려요"
     }
   ],
   "timeline.runException.open": [

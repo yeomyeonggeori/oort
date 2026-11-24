@@ -1867,12 +1867,34 @@ export const messageKeys = [
   "timeline.agentRail.openRecord",
   "timeline.agentRail.sheetClose",
   "timeline.agentRail.sheetTitle",
+  "timeline.appNotice.egressKnown",
+  "timeline.appNotice.egressOutside",
+  "timeline.appNotice.grantRevoked",
+  "timeline.appNotice.loginLostHermesNamed",
+  "timeline.appNotice.loginLostHermesUnnamed",
+  "timeline.appNotice.loginLostNamed",
+  "timeline.appNotice.loginLostUnnamed",
+  "timeline.appNotice.notAllowedPhone",
+  "timeline.appNotice.notAllowedWeb",
+  "timeline.appNotice.openApp",
+  "timeline.appNotice.openOnWeb",
+  "timeline.appNotice.rateLimitedNamed",
+  "timeline.appNotice.rateLimitedUnnamed",
+  "timeline.appNotice.signInAgain",
+  "timeline.appNotice.siteOff",
+  "timeline.appNotice.siteSilent",
+  "timeline.appNotice.working",
+  "timeline.appNotice.workingMinutes",
   "timeline.approval.channelAgentIn",
   "timeline.approval.channelNeedsMember",
   "timeline.approval.channelsRefused",
   "timeline.approval.reproposeBusy",
   "timeline.approval.reproposeSeeded",
   "timeline.approvalExpiry.soon",
+  "timeline.approvalNote.elsewhere",
+  "timeline.approvalNote.offline",
+  "timeline.approvalNote.waitingNamed",
+  "timeline.approvalNote.waitingOther",
   "timeline.artifactNote.awaitingApproval",
   "timeline.artifactNote.cancelled",
   "timeline.artifactNote.done",
@@ -1913,6 +1935,7 @@ export const messageKeys = [
   "timeline.commandSuggest.askNone",
   "timeline.commandSuggest.askOperator",
   "timeline.commandSuggest.askThread",
+  "timeline.commandSuggest.head",
   "timeline.commandSuggest.oneLineAiConnect",
   "timeline.commandSuggest.oneLineCard",
   "timeline.commandSuggest.onlyMe",
@@ -1947,6 +1970,9 @@ export const messageKeys = [
   "timeline.commandSuggest.targetWorkspace",
   "timeline.commandSuggest.teamClose",
   "timeline.commandSuggest.teamOpen",
+  "timeline.copy.linkAction",
+  "timeline.copy.messageAction",
+  "timeline.copy.messageDone",
   "timeline.createChannel.privateDetail",
   "timeline.createChannel.publicDetail",
   "timeline.decisionStage.position",
@@ -2034,6 +2060,27 @@ export const messageKeys = [
   "timeline.reaction.namesExtra2",
   "timeline.reaction.namesExtra3",
   "timeline.reaction.selfToken",
+  "timeline.requestBundle.approvalRequest",
+  "timeline.requestBundle.cancelled",
+  "timeline.requestBundle.chipAfterOnly",
+  "timeline.requestBundle.chipBeforeAfter",
+  "timeline.requestBundle.daysLeft",
+  "timeline.requestBundle.declined",
+  "timeline.requestBundle.declinedBy",
+  "timeline.requestBundle.details",
+  "timeline.requestBundle.done",
+  "timeline.requestBundle.executing",
+  "timeline.requestBundle.expiresSoon",
+  "timeline.requestBundle.failed",
+  "timeline.requestBundle.hoursLeft",
+  "timeline.requestBundle.minutesLeft",
+  "timeline.requestBundle.quietWithDetails",
+  "timeline.requestBundle.rationale",
+  "timeline.requestBundle.requiredRole",
+  "timeline.requestBundle.thinking",
+  "timeline.requestBundle.toolRunNamed",
+  "timeline.requestBundle.waitingAdmin",
+  "timeline.requestBundle.waitingNamed",
   "timeline.runException.open",
   "timeline.runException.settings",
   "timeline.send.discard",
@@ -4606,12 +4653,54 @@ export const argumentSpecs = {
   },
   "timeline.agentRail.sheetClose": {},
   "timeline.agentRail.sheetTitle": {},
+  "timeline.appNotice.egressKnown": {
+    "host": "string"
+  },
+  "timeline.appNotice.egressOutside": {},
+  "timeline.appNotice.grantRevoked": {},
+  "timeline.appNotice.loginLostHermesNamed": {
+    "app": "string"
+  },
+  "timeline.appNotice.loginLostHermesUnnamed": {},
+  "timeline.appNotice.loginLostNamed": {
+    "app": "string"
+  },
+  "timeline.appNotice.loginLostUnnamed": {},
+  "timeline.appNotice.notAllowedPhone": {},
+  "timeline.appNotice.notAllowedWeb": {},
+  "timeline.appNotice.openApp": {},
+  "timeline.appNotice.openOnWeb": {},
+  "timeline.appNotice.rateLimitedNamed": {
+    "app": "string",
+    "josa": "string"
+  },
+  "timeline.appNotice.rateLimitedUnnamed": {},
+  "timeline.appNotice.signInAgain": {},
+  "timeline.appNotice.siteOff": {
+    "site": "string"
+  },
+  "timeline.appNotice.siteSilent": {
+    "site": "string"
+  },
+  "timeline.appNotice.working": {
+    "site": "string"
+  },
+  "timeline.appNotice.workingMinutes": {
+    "minutes": "number",
+    "site": "string"
+  },
   "timeline.approval.channelAgentIn": {},
   "timeline.approval.channelNeedsMember": {},
   "timeline.approval.channelsRefused": {},
   "timeline.approval.reproposeBusy": {},
   "timeline.approval.reproposeSeeded": {},
   "timeline.approvalExpiry.soon": {},
+  "timeline.approvalNote.elsewhere": {},
+  "timeline.approvalNote.offline": {},
+  "timeline.approvalNote.waitingNamed": {
+    "name": "string"
+  },
+  "timeline.approvalNote.waitingOther": {},
   "timeline.artifactNote.awaitingApproval": {},
   "timeline.artifactNote.cancelled": {},
   "timeline.artifactNote.done": {},
@@ -4684,6 +4773,10 @@ export const argumentSpecs = {
   "timeline.commandSuggest.askNone": {},
   "timeline.commandSuggest.askOperator": {},
   "timeline.commandSuggest.askThread": {},
+  "timeline.commandSuggest.head": {
+    "josa": "string",
+    "name": "string"
+  },
   "timeline.commandSuggest.oneLineAiConnect": {
     "name": "string"
   },
@@ -4723,6 +4816,9 @@ export const argumentSpecs = {
   "timeline.commandSuggest.targetWorkspace": {},
   "timeline.commandSuggest.teamClose": {},
   "timeline.commandSuggest.teamOpen": {},
+  "timeline.copy.linkAction": {},
+  "timeline.copy.messageAction": {},
+  "timeline.copy.messageDone": {},
   "timeline.createChannel.privateDetail": {},
   "timeline.createChannel.publicDetail": {},
   "timeline.decisionStage.position": {
@@ -4921,6 +5017,48 @@ export const argumentSpecs = {
     "extra": "number"
   },
   "timeline.reaction.selfToken": {},
+  "timeline.requestBundle.approvalRequest": {},
+  "timeline.requestBundle.cancelled": {},
+  "timeline.requestBundle.chipAfterOnly": {
+    "after": "string",
+    "label": "string"
+  },
+  "timeline.requestBundle.chipBeforeAfter": {
+    "after": "string",
+    "before": "string",
+    "label": "string"
+  },
+  "timeline.requestBundle.daysLeft": {
+    "count": "number"
+  },
+  "timeline.requestBundle.declined": {},
+  "timeline.requestBundle.declinedBy": {
+    "name": "string"
+  },
+  "timeline.requestBundle.details": {},
+  "timeline.requestBundle.done": {},
+  "timeline.requestBundle.executing": {},
+  "timeline.requestBundle.expiresSoon": {},
+  "timeline.requestBundle.failed": {},
+  "timeline.requestBundle.hoursLeft": {
+    "count": "number"
+  },
+  "timeline.requestBundle.minutesLeft": {
+    "count": "number"
+  },
+  "timeline.requestBundle.quietWithDetails": {
+    "quiet": "string"
+  },
+  "timeline.requestBundle.rationale": {},
+  "timeline.requestBundle.requiredRole": {},
+  "timeline.requestBundle.thinking": {},
+  "timeline.requestBundle.toolRunNamed": {
+    "tool": "string"
+  },
+  "timeline.requestBundle.waitingAdmin": {},
+  "timeline.requestBundle.waitingNamed": {
+    "name": "string"
+  },
   "timeline.runException.open": {
     "text": "string"
   },
@@ -7118,12 +7256,34 @@ export interface MessageArgs {
   "timeline.agentRail.openRecord": { name: string };
   "timeline.agentRail.sheetClose": Record<string, never>;
   "timeline.agentRail.sheetTitle": Record<string, never>;
+  "timeline.appNotice.egressKnown": { host: string };
+  "timeline.appNotice.egressOutside": Record<string, never>;
+  "timeline.appNotice.grantRevoked": Record<string, never>;
+  "timeline.appNotice.loginLostHermesNamed": { app: string };
+  "timeline.appNotice.loginLostHermesUnnamed": Record<string, never>;
+  "timeline.appNotice.loginLostNamed": { app: string };
+  "timeline.appNotice.loginLostUnnamed": Record<string, never>;
+  "timeline.appNotice.notAllowedPhone": Record<string, never>;
+  "timeline.appNotice.notAllowedWeb": Record<string, never>;
+  "timeline.appNotice.openApp": Record<string, never>;
+  "timeline.appNotice.openOnWeb": Record<string, never>;
+  "timeline.appNotice.rateLimitedNamed": { app: string; josa: string };
+  "timeline.appNotice.rateLimitedUnnamed": Record<string, never>;
+  "timeline.appNotice.signInAgain": Record<string, never>;
+  "timeline.appNotice.siteOff": { site: string };
+  "timeline.appNotice.siteSilent": { site: string };
+  "timeline.appNotice.working": { site: string };
+  "timeline.appNotice.workingMinutes": { minutes: number; site: string };
   "timeline.approval.channelAgentIn": Record<string, never>;
   "timeline.approval.channelNeedsMember": Record<string, never>;
   "timeline.approval.channelsRefused": Record<string, never>;
   "timeline.approval.reproposeBusy": Record<string, never>;
   "timeline.approval.reproposeSeeded": Record<string, never>;
   "timeline.approvalExpiry.soon": Record<string, never>;
+  "timeline.approvalNote.elsewhere": Record<string, never>;
+  "timeline.approvalNote.offline": Record<string, never>;
+  "timeline.approvalNote.waitingNamed": { name: string };
+  "timeline.approvalNote.waitingOther": Record<string, never>;
   "timeline.artifactNote.awaitingApproval": Record<string, never>;
   "timeline.artifactNote.cancelled": Record<string, never>;
   "timeline.artifactNote.done": Record<string, never>;
@@ -7164,6 +7324,7 @@ export interface MessageArgs {
   "timeline.commandSuggest.askNone": Record<string, never>;
   "timeline.commandSuggest.askOperator": Record<string, never>;
   "timeline.commandSuggest.askThread": Record<string, never>;
+  "timeline.commandSuggest.head": { josa: string; name: string };
   "timeline.commandSuggest.oneLineAiConnect": { name: string };
   "timeline.commandSuggest.oneLineCard": { name: string; what: string };
   "timeline.commandSuggest.onlyMe": Record<string, never>;
@@ -7198,6 +7359,9 @@ export interface MessageArgs {
   "timeline.commandSuggest.targetWorkspace": Record<string, never>;
   "timeline.commandSuggest.teamClose": Record<string, never>;
   "timeline.commandSuggest.teamOpen": Record<string, never>;
+  "timeline.copy.linkAction": Record<string, never>;
+  "timeline.copy.messageAction": Record<string, never>;
+  "timeline.copy.messageDone": Record<string, never>;
   "timeline.createChannel.privateDetail": Record<string, never>;
   "timeline.createChannel.publicDetail": Record<string, never>;
   "timeline.decisionStage.position": { current: string; total: string };
@@ -7285,6 +7449,27 @@ export interface MessageArgs {
   "timeline.reaction.namesExtra2": { a: string; b: string; extra: number };
   "timeline.reaction.namesExtra3": { a: string; b: string; c: string; extra: number };
   "timeline.reaction.selfToken": Record<string, never>;
+  "timeline.requestBundle.approvalRequest": Record<string, never>;
+  "timeline.requestBundle.cancelled": Record<string, never>;
+  "timeline.requestBundle.chipAfterOnly": { after: string; label: string };
+  "timeline.requestBundle.chipBeforeAfter": { after: string; before: string; label: string };
+  "timeline.requestBundle.daysLeft": { count: number };
+  "timeline.requestBundle.declined": Record<string, never>;
+  "timeline.requestBundle.declinedBy": { name: string };
+  "timeline.requestBundle.details": Record<string, never>;
+  "timeline.requestBundle.done": Record<string, never>;
+  "timeline.requestBundle.executing": Record<string, never>;
+  "timeline.requestBundle.expiresSoon": Record<string, never>;
+  "timeline.requestBundle.failed": Record<string, never>;
+  "timeline.requestBundle.hoursLeft": { count: number };
+  "timeline.requestBundle.minutesLeft": { count: number };
+  "timeline.requestBundle.quietWithDetails": { quiet: string };
+  "timeline.requestBundle.rationale": Record<string, never>;
+  "timeline.requestBundle.requiredRole": Record<string, never>;
+  "timeline.requestBundle.thinking": Record<string, never>;
+  "timeline.requestBundle.toolRunNamed": { tool: string };
+  "timeline.requestBundle.waitingAdmin": Record<string, never>;
+  "timeline.requestBundle.waitingNamed": { name: string };
   "timeline.runException.open": { text: string };
   "timeline.runException.settings": Record<string, never>;
   "timeline.send.discard": Record<string, never>;

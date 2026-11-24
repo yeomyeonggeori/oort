@@ -53,7 +53,7 @@ import {
   decisionReceiptCopy,
 } from '../features/inbox/ApprovalDecision';
 import {ShellConnectionStrip} from '../features/connection/ShellConnectionStrip';
-import {APPROVAL_OFFLINE_COPY, useOnline} from '../features/inbox/useOnline';
+import {APPROVAL_OFFLINE_KEY, useOnline} from '../features/inbox/useOnline';
 import {usePhoneNeedsMe} from '../features/inbox/useNeedsMe';
 import {
   useInvalidateMailbox,
@@ -496,7 +496,7 @@ export default function InboxScreen({
       if (!online) {
         return (
           <Text style={styles.managed} testID={`decision-offline-${item.key}`}>
-            {APPROVAL_OFFLINE_COPY}
+            {formatMessage(APPROVAL_OFFLINE_KEY)}
           </Text>
         );
       }

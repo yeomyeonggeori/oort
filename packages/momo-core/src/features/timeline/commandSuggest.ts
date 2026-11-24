@@ -1,7 +1,7 @@
 import type { LocaleService } from "../../i18n/context";
 import type { PlainMessageKey } from "../../i18n/keys";
 import type { Message } from "../../lib/api";
-import { attachParticle } from "../../lib/koreanParticle";
+import { takesFinalForm } from "../../lib/koreanParticle";
 import { aiHubSection } from "../ai/aiHubModel";
 import {
   AGENT_SUGGESTABLE_COMMANDS,
@@ -445,8 +445,13 @@ export function commandSuggestOneLine(
 }
 
 /** 대상에게 보이는 카드 머리. 「hermes가 제안했어요」. */
-export function commandSuggestHead(card: CommandSuggestCard): string {
-  return `${attachParticle(card.agentName)} 제안했어요`;
+export function commandSuggestHead(
+  formatMessage: LocaleService["formatMessage"],
+  card: CommandSuggestCard
+): string {
+  // 한국어는 에이전트 이름 받침에 따라 이/가가 갈린다. 영어는 같은 인자를 쓰지 않는다.
+  const josa = takesFinalForm(card.agentName) ? "final" : "other";
+  return formatMessage("timeline.commandSuggest.head", { name: card.agentName, josa });
 }
 
 /** 머리의 칩. 1단계 로컬 카드의 「나에게만 보여요」 자리. */

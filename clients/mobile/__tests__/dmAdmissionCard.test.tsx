@@ -5,9 +5,13 @@ import React from 'react';
 
 import {MessageRow} from '../src/features/conversation/MessageRow';
 import type {ApprovalGate} from '../src/features/conversation/approvalGate';
-import {APPROVAL_OFFLINE_COPY} from '../src/features/inbox/useOnline';
+import {APPROVAL_OFFLINE_KEY} from '../src/features/inbox/useOnline';
 import {SessionProvider} from '../src/session/useSession';
 import {cleanup, render} from './fixtures/darkWorld';
+import {catalog as koCatalog} from '@momo/core/i18n/generated/ko-KR';
+import {createMessageService} from '@momo/core/i18n/service';
+
+const APPROVAL_OFFLINE_COPY = createMessageService({messageLocale: 'ko-KR', catalog: koCatalog}).formatMessage(APPROVAL_OFFLINE_KEY);
 
 // =============================================================================
 // DM 들이기 허락 카드 (ADR-0217, 행동 `dm.agent.admit`) — #4920

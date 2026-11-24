@@ -1,5 +1,5 @@
 import type {Message, RosterMember} from '@momo/core/lib/api';
-import {COPY_MESSAGE_ACTION_LABEL} from '@momo/core/features/timeline/copyLabels';
+import {COPY_MESSAGE_ACTION_KEY} from '@momo/core/features/timeline/copyLabels';
 import type {QuoteBlock as QuoteBlockModel} from '@momo/core/features/timeline/quote';
 import {quoteDraftFor} from '@momo/core/features/timeline/quote';
 import {makeDirectory} from '@momo/core/features/workspace/directory';
@@ -591,8 +591,8 @@ describe('#1079 N-1 — 같은 동사에 한 이름', () => {
     // 이 둘은 마크다운 답 하나에서 **동시에** 만날 수 있는 두 문이다.
     // 식별자만 보면 상수 값이 「메시지 담기」로 바뀌는 날도 초록이다.
     const sheet = codeOnly(SRC('MessageActionSheet.tsx'));
-    expect(sheet).toContain('COPY_MESSAGE_ACTION_LABEL');
-    expect(COPY_MESSAGE_ACTION_LABEL).toBe('메시지 복사하기');
+    expect(sheet).toContain('COPY_MESSAGE_ACTION_KEY');
+    expect(FORMAT(COPY_MESSAGE_ACTION_KEY)).toBe('메시지 복사하기');
     expect(codeOnly(SRC('MessageBody.tsx'))).toContain('복사하기');
   });
 });

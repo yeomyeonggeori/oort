@@ -522,7 +522,7 @@ function ApprovalBody({
   const context = approvalBundleContext(card, session.member, directory, run);
   const isAdmin = context.isWorkspaceAdmin;
   const bundle = card.isResumeOffer ? undefined : requestBundleModel(
-    approvalBundleCard(formatMessage, card, receipt), { ...context, nowMs }
+    approvalBundleCard(formatMessage, card, receipt), { ...context, formatMessage, nowMs }
   );
   // open을 명시하지 않은 서버 카드는 인라인 [승인][거부]를 그대로 유지해요.
   const openStage = card.bundle?.decisionMode === "open" ? (event?: React.MouseEvent<HTMLButtonElement>) => {
@@ -587,7 +587,7 @@ function ApprovalBody({
     unsupportedText: `${serverSurface("approvals").absentReason} ${
       serverSurface("approvals").fallback
     }`,
-  });
+ }, formatMessage);
 
   return (
     <CardFrame

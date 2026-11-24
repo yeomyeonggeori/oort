@@ -50,7 +50,7 @@ import {
   SECTION_MOVE_GROUP_KEY,
   SECTION_MOVE_TO_BASE_KEY,
 } from "@momo/core/features/sidebar/sidebarSections";
-import { COPY_LINK_ACTION_LABEL } from "@momo/core/features/timeline/copyLabels";
+import { COPY_LINK_ACTION_KEY } from "@momo/core/features/timeline/copyLabels";
 import {
   Dialog,
   DialogClose,
@@ -669,7 +669,7 @@ function OverlayExamples() {
                               container={subHost}
                               data-gallery-export="DropdownMenuSubContent"
                             >
-                              <DropdownMenuItem>{COPY_LINK_ACTION_LABEL}</DropdownMenuItem>
+                              <DropdownMenuItem>{t(COPY_LINK_ACTION_KEY)}</DropdownMenuItem>
                             </DropdownMenuSubContent>
                           )}
                         </OverlayCell>

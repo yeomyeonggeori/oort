@@ -1,6 +1,8 @@
 // 폰 「앱」 읽기 화면의 모델 (U-4 #3951, ADR-0113 증보 2 E4).
 import { describe, expect, it } from "vitest";
 import type { PluginCatalogItem, PluginDetail, PluginPolicyTool } from "../../lib/api";
+import { catalog as koCatalog } from "../../i18n/generated/ko-KR";
+import { createMessageCopy } from "../../testkit";
 import { aiExternalRowFromSettings } from "../ai/aiHubModel";
 import { SETTINGS_OPEN_SECTIONS } from "../timeline/commandSuggest";
 import { APPS_SCREEN_PATH, parseAppNotice } from "../timeline/appNotice";
@@ -42,11 +44,13 @@ describe("폰 「웹에서 열기」 링크: 경로가 아니라 설정 section 
   });
 });
 
+const ko = createMessageCopy({ messageLocale: "ko-KR", catalog: koCatalog });
+
 describe("폰의 막힘 문장은 채팅의 막힘 문장과 같은 글자다", () => {
   it("appNoticeFor(not_allowed, 폰) 의 문장과 행동 이름", () => {
     const notice = parseAppNotice(
       { app_notice: { kind: "not_allowed" } },
-      { surface: "phone", plugins: new Map(), nowMs: 0 },
+      { surface: "phone", plugins: new Map(), nowMs: 0, formatMessage: ko },
     );
     expect(notice?.sentence).toBe(PHONE_APP_BLOCKED_SENTENCE);
     expect(notice?.action?.label).toBe(PHONE_APP_WEB_ACTION);

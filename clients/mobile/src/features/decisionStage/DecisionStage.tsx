@@ -133,6 +133,7 @@ export function DecisionStage({
       entries.map(entry => ({
         id: entry.id,
         bundle: phoneRequestBundle(
+          formatMessage,
           entry.card,
           directory,
           viewerMemberId,
@@ -143,7 +144,7 @@ export function DecisionStage({
           entry.run,
         ),
       })),
-    [entries, directory, viewerMemberId, receipts, time, offline],
+    [entries, directory, viewerMemberId, receipts, time, offline, formatMessage],
   );
   const [selection, setSelection] = useState(() =>
     createDecisionStage(cards, selectedId),

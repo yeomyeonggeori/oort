@@ -142,6 +142,7 @@ import {useLinkPreviewPreference} from './linkPreviewPreference';
 import {messageRowKey} from './rowViewability';
 import {NO_UNFURLS} from './useMessageUnfurls';
 import {useFormatMessage} from '../../i18n/useFormatMessage';
+import type {LocaleService} from '@momo/core/i18n';
 import {useLocaleService} from '../../i18n/useLocaleService';
 import {editedMark} from '@momo/core/features/timeline/editedLabel';
 import {MessageEditorSheet} from './MessageEditorSheet';
@@ -1615,6 +1616,7 @@ function ApprovalActionRows({
 export function readApprovalCard(
   card: Extract<AgentCardModel, {kind: 'approval'}>,
   {
+    formatMessage,
     approvalGates,
     approvalReceipts,
     approvalOffline,
@@ -1623,6 +1625,8 @@ export function readApprovalCard(
     viewerMemberId,
     nameFor,
   }: {
+    /** 문장을 그리는 지금 언어의 사전. */
+    formatMessage: LocaleService['formatMessage'];
     approvalGates?: ReadonlyMap<string, ApprovalGate>;
     approvalReceipts?: ReadonlyMap<string, ApprovalReceipt>;
     approvalOffline?: boolean;
@@ -1688,7 +1692,7 @@ export function readApprovalCard(
     offline: approvalOffline === true,
     offlineText: approvalOfflineText,
     approvalsProvided,
-  });
+  }, formatMessage);
   return {approval, receipt, settledStatus, note};
 }
 
@@ -1761,6 +1765,7 @@ function AgentCard({
     // 곳에서 읽는다. 행의 로터(#2595)도 같은 답을 보고 「승인」·「거부」를 세운다 —
     // 두 자리가 따로 읽으면 버튼은 없는데 로터만 남는 날이 온다.
     const {approval, receipt, settledStatus, note} = readApprovalCard(card, {
+      formatMessage,
       approvalGates,
       approvalReceipts,
       approvalOffline,
@@ -2594,13 +2599,14 @@ function MessageRowInner({
     }),
     [message],
   );
+  const formatMessage = useFormatMessage();
   const requestSentence = useMemo(() => {
     if (!requestCardTarget) return undefined;
     const target = rowPresentation(requestCardTarget).card;
     return target?.kind === 'approval'
-      ? phoneRequestBundle(target, directory, undefined, null, undefined, nowMs, false, requestRun).sentence
+      ? phoneRequestBundle(formatMessage, target, directory, undefined, null, undefined, nowMs, false, requestRun).sentence
       : undefined;
-  }, [requestCardTarget, directory, nowMs, requestRun]);
+  }, [requestCardTarget, directory, formatMessage, nowMs, requestRun]);
   const suggestion = useMemo(
     () => commandSuggestCard(message, directory),
     [message, directory],
@@ -2617,7 +2623,7 @@ function MessageRowInner({
     [message, appsTail, authorKind],
   );
   // 앱을 쓰다 막혔을 때의 한 문장(+ 행동 하나). 칸이 없으면 null.
-  const appNotice = useAppNotice(message, actions?.workspaceId, nowMs);
+  const appNotice = useAppNotice(message, actions?.workspaceId, nowMs, formatMessage);
   // 폰의 행동은 「웹에서 열기」 하나다. 열 곳(서버 주소)을 모르면 세우지 않는다.
   const appNoticeWebUrl = appNotice?.action ? appsOnWebUrl() : null;
   // 서버가 GitHub 앱으로 보낸 알림이면 아랫줄이 「GitHub 알림」이라고 말한다(ADR-0205, #3955).
@@ -2672,6 +2678,7 @@ function MessageRowInner({
       return null;
     }
     const read = readApprovalCard(card, {
+      formatMessage,
       viewerMemberId: actions?.myMemberId,
       approvalGates,
       approvalReceipts,
@@ -2680,7 +2687,7 @@ function MessageRowInner({
     });
     if (read.note !== null || read.approval === null) return null;
     if (hasRequestBundle(card)) {
-      const bundle = phoneRequestBundle(card, directory, actions?.myMemberId, read.approval, read.receipt, nowMs, approvalOffline, requestRun);
+      const bundle = phoneRequestBundle(formatMessage, card, directory, actions?.myMemberId, read.approval, read.receipt, nowMs, approvalOffline, requestRun);
       if (!bundle.canDecide || (bundle.decisionMode === 'open' && actions?.onOpenDecision)) return null;
     }
     // 실행할 호스트가 하나도 없는 스폰 승인은 버튼도 꺼져 있다. 로터에도 세우지 않는다.
@@ -2693,6 +2700,7 @@ function MessageRowInner({
     approvalsProvided,
     directory,
     actions,
+    formatMessage,
     nowMs,
     requestRun,
   ]);
@@ -2704,6 +2712,7 @@ function MessageRowInner({
     const card = presentation.card;
     if (card?.kind !== 'approval') return null;
     const read = readApprovalCard(card, {
+      formatMessage,
       viewerMemberId: actions?.myMemberId,
       approvalGates,
       approvalReceipts,
@@ -2718,6 +2727,7 @@ function MessageRowInner({
     approvalReceipts,
     approvalOffline,
     approvalsProvided,
+    formatMessage,
     onOpenMessage,
   ]);
   const deleted = message.state === 'deleted';
@@ -2794,7 +2804,6 @@ function MessageRowInner({
   //      액션 시트)와 다른 문이고, 카드가 제 손가락을 먼저 받으므로 둘이 다투지 않는다.
   // 묘비에는 카드가 없다: 지워진 본문에 달린 미리보기를 보이는 것은 지워진 것이 무엇인지 말을 어긋나게 한다.
   // ===========================================================================
-  const formatMessage = useFormatMessage();
   // 시각을 문장으로 짓는 화면은 언어 서비스를 통째로 읽는다(`useFormatMessage` 는 `formatMessage` 만 준다, #5026).
   const locale = useLocaleService();
   // 한 접근성 원소가 읽는 답글 머리(「○○님 스레드에 답글」) — 줄(`ReplyHomeLine`)과 **같은 코어 문장**이고 화살표는 읽지 않는다(#4888).

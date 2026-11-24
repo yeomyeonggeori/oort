@@ -14,6 +14,12 @@ import { clearApprovalAvatarPreviews, resetApprovalAvatarPreviewsForTest } from 
 import { applyLogin, clearSession } from "@/lib/session";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
+import { LocaleProvider } from "@/i18n/LocaleProvider";
+import type { AppLocale } from "@/i18n/localeStore";
+import { koreanLocale } from "@/testing/koLocale";
+
+let koLocale: AppLocale;
+const withKo = (node: ReturnType<typeof createElement>) => createElement(LocaleProvider, { locale: koLocale, children: node });
 
 // =============================================================================
 // #4394: `member.avatar.set` 승인 카드 — 한 문장 · 제안된 사진 · 사진 주인 본인 문구.
@@ -116,7 +122,8 @@ const reactActEnvironment = globalThis as typeof globalThis & { IS_REACT_ACT_ENV
 let mountedRoot: Root | null = null;
 let mountHost: HTMLElement | null = null;
 
-beforeAll(() => {
+beforeAll(async () => {
+  koLocale = await koreanLocale();
   reactActEnvironment.IS_REACT_ACT_ENVIRONMENT = true;
 });
 beforeEach(() => {
@@ -171,7 +178,7 @@ async function mountCardOnly(props: Record<string, unknown>, viewerMemberId?: st
     createElement(AgentCard, { card, directory: DIRECTORY, viewerMemberId })
   );
   await act(async () => {
-    mountedRoot?.render(tree);
+    mountedRoot?.render(withKo(tree));
   });
   return mountHost;
 }

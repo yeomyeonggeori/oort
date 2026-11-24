@@ -33,6 +33,10 @@ import {
 } from "./workJobs";
 import { approvalWaitingLine } from "../timeline/requestBundle";
 import { createMessageService, loadMessageCatalog } from "../../i18n";
+import { catalog as koCatalog } from "../../i18n/generated/ko-KR";
+import { createMessageCopy } from "../../testkit";
+
+const ko = createMessageCopy({ messageLocale: "ko-KR", catalog: koCatalog });
 
 const ME = "00000000-0000-7000-8000-000000000101";
 const OTHER = "00000000-0000-7000-8000-000000000102";
@@ -619,7 +623,7 @@ describe("결과 칸의 종류 — 한 판정 (#5640 수리 1회차)", () => {
   });
 
   it("결정자가 아닌 줄의 대기 줄은 카드의 문장 그대로다", () => {
-    expect(approvalWaitingLine()).toBe("관리자의 승인을 기다려요");
-    expect(approvalWaitingLine("이서연")).toBe("이서연 님의 승인을 기다려요");
+    expect(approvalWaitingLine(ko)).toBe("관리자의 승인을 기다려요");
+    expect(approvalWaitingLine(ko, "이서연")).toBe("이서연 님의 승인을 기다려요");
   });
 });

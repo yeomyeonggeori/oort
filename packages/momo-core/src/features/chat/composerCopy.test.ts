@@ -12,7 +12,11 @@ import {
   composerPlaceholderClauses,
   fitComposerPlaceholder,
 } from "./composerCopy";
-import { APPROVAL_OFFLINE_COPY } from "../timeline/approvalNote";
+import { APPROVAL_OFFLINE_KEY } from "../timeline/approvalNote";
+import { catalog as koCatalog } from "../../i18n/generated/ko-KR";
+import { createMessageCopy } from "../../testkit";
+
+const APPROVAL_OFFLINE_COPY = createMessageCopy({ messageLocale: "ko-KR", catalog: koCatalog })(APPROVAL_OFFLINE_KEY);
 
 // =============================================================================
 // U4-6 리뷰 H-1 — 두 클라가 같은 상황에서 같은 말을 하는가.

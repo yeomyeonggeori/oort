@@ -23,7 +23,7 @@ export function approvalBundleContext(
   member: Member,
   directory: Directory,
   run?: Pick<AgentRunProgress, "bundle" | "phase" | "endReason">
-): Omit<RequestBundleContext, "nowMs"> {
+): Omit<RequestBundleContext, "nowMs" | "formatMessage"> {
   const viewer = memberFor(directory, member.id) ?? member;
   const role = memberFor(directory, member.id)?.role;
   return {
@@ -68,7 +68,7 @@ export function openApprovalDecisionStage({ formatMessage, card, member, directo
 }) {
   const context = approvalBundleContext(card, member, directory);
   const prepared = approvalBundleCard(formatMessage, card);
-  if (!requestBundleModel(prepared, { ...context, nowMs: Date.now() }).canDecide) return;
+  if (!requestBundleModel(prepared, { ...context, formatMessage, nowMs: Date.now() }).canDecide) return;
   const cards = [{ id: card.approvalId!, card: prepared }];
   openDecisionStage({ workspaceId, cards, context, selectedId: cards[0].id, opener, source, onSettled: settlement(cards) });
 }
@@ -103,7 +103,7 @@ export function openRunDecisionStage({ formatMessage, runs, member, directory, w
           const prepared = approvalBundleCard(formatMessage, card);
           // 그 승인을 가리키는 run의 bundle이 「못 한다」면 무대에 올리지 않아요(서버가 보는 사람 기준으로 판정).
           const run = runs.find((candidate) => runBundleCanDecide(candidate, card.approvalId) !== undefined);
-          if (requestBundleModel(prepared, { ...approvalBundleContext(card, member, directory, run), nowMs: Date.now() }).canDecide) {
+          if (requestBundleModel(prepared, { ...approvalBundleContext(card, member, directory, run), formatMessage, nowMs: Date.now() }).canDecide) {
             found.set(card.approvalId.toLowerCase(), { id: message.id, card: prepared });
           }
         }

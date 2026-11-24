@@ -52,7 +52,7 @@ export function DecisionStage({ request, open, onClose }: {
   const [nowMs, setNowMs] = useState(Date.now);
   const [selection, setSelection] = useState(() => createDecisionStage(
     request.cards.map((entry) => ({
-      id: entry.id, bundle: requestBundleModel(entry.card, { ...request.context, nowMs }),
+      id: entry.id, bundle: requestBundleModel(entry.card, { ...request.context, formatMessage, nowMs }),
     })), request.selectedId
   ));
   const selectedEntry = request.cards.find((entry) => entry.id === selection.selectedId) ?? request.cards[0];
@@ -63,8 +63,8 @@ export function DecisionStage({ request, open, onClose }: {
       ...entry.card, ...receipt,
       bundle: { ...entry.card.bundle, status: receipt.status },
     } : entry.card;
-    return { id: entry.id, bundle: requestBundleModel(card, { ...request.context, nowMs }) };
-  }), [request.cards, request.context, nowMs, selectedEntry, activeReceipt]);
+    return { id: entry.id, bundle: requestBundleModel(card, { ...request.context, formatMessage, nowMs }) };
+  }), [request.cards, request.context, formatMessage, nowMs, selectedEntry, activeReceipt]);
   const model = decisionStageModel(selection, cards);
   const current = model.current;
   const entry = request.cards.find((candidate) => candidate.id === current?.id);

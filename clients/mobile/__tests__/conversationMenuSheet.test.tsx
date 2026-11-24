@@ -10,7 +10,7 @@ import {
   channelMuteToggleKey,
 } from '@momo/core/features/channels/model';
 import {channelShareUrlFromServerBase} from '@momo/core/features/channels/shareLink';
-import {copyLinkActionLabel} from '@momo/core/features/timeline/copyLabels';
+import {copyLinkActionKey} from '@momo/core/features/timeline/copyLabels';
 import type {ChannelActionItem} from '@momo/core/features/channels/actionModel';
 import {catalog as koCatalog} from '@momo/core/i18n/generated/ko-KR';
 import {createMessageService} from '@momo/core/i18n/service';
@@ -1412,7 +1412,7 @@ describe('셸 — 정보 페이지의 복사: 영수증이 서도 페이지는 �
     // 같은 훅이 시트를 세우던 길(`setActive`)을 타지 않는다 — 정보 페이지 위에 ⋮ 시트가 뜨면 안 된다.
     expect(screen.queryByTestId('conversation-menu-sheet')).toBeNull();
     // 다른 줄은 그대로다.
-    expect(screen.getByTestId('conversation-info-copy-link')).toHaveTextContent(copyLinkActionLabel(false));
+    expect(screen.getByTestId('conversation-info-copy-link')).toHaveTextContent(koFormat(copyLinkActionKey(false)));
     // 영수증 시간이 지나면 훅이 `close()` 를 부른다 — 시트였다면 여기서 사라진다. 페이지는 남고 낱말만 돌아온다.
     await act(async () => {
       await jest.advanceTimersByTimeAsync(COPY_RECEIPT_MS + 50);
@@ -1428,7 +1428,7 @@ describe('셸 — 정보 페이지의 복사: 영수증이 서도 페이지는 �
     await openInfoPage();
     fireEvent.press(screen.getByTestId('conversation-info-copy-link'));
     await waitFor(() =>
-      expect(screen.getByTestId('conversation-info-copy-link')).toHaveTextContent(copyLinkActionLabel(true)),
+      expect(screen.getByTestId('conversation-info-copy-link')).toHaveTextContent(koFormat(copyLinkActionKey(true))),
     );
     expect(clipboardBox.value).toBe(channelShareUrlFromServerBase(BASE, 'ch-general'));
     fireEvent.press(screen.getByTestId('conversation-info-copy-id'));
@@ -1437,7 +1437,7 @@ describe('셸 — 정보 페이지의 복사: 영수증이 서도 페이지는 �
     );
     expect(clipboardBox.value).toBe('ch-general');
     // 앞 줄의 영수증은 새 영수증이 밀어낸다.
-    expect(screen.getByTestId('conversation-info-copy-link')).toHaveTextContent(copyLinkActionLabel(false));
+    expect(screen.getByTestId('conversation-info-copy-link')).toHaveTextContent(koFormat(copyLinkActionKey(false)));
   });
 
   it('DM 의 이름 복사는 상대의 이름이다', async () => {

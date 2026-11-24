@@ -207,7 +207,7 @@ function check(name, ok, detail = "") {
 const overflowX = (page) => page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
 
 async function open(browser, origin, scheme, viewport, channelId) {
-  const context = await browser.newContext({ viewport, colorScheme: scheme, reducedMotion: "reduce", serviceWorkers: "block", deviceScaleFactor: 2 });
+  const context = await browser.newContext({ viewport, colorScheme: scheme, reducedMotion: "reduce", serviceWorkers: "block", deviceScaleFactor: 2, locale: "ko-KR" });
   await installRoutes(context);
   const page = await context.newPage();
   await installRealtime(page);

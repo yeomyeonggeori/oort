@@ -2,12 +2,16 @@ import { describe, expect, it } from "vitest";
 import type { Message } from "../../lib/api";
 import { agentRequestBundle } from "./agentCardModel";
 import {
-  approvalCardNote,
+  approvalCardNote as buildApprovalCardNote,
   isParticipantConsent,
   participantWaitingLine,
   waitsForParticipant,
 } from "./approvalNote";
 import { requestLoopCopyViolations } from "./requestBundle";
+import { catalog as koCatalog } from "../../i18n/generated/ko-KR";
+import { createMessageCopy } from "../../testkit";
+const ko = createMessageCopy({ messageLocale: "ko-KR", catalog: koCatalog });
+const approvalCardNote = (input: Parameters<typeof buildApprovalCardNote>[0]) => buildApprovalCardNote(input, ko);
 
 // #4920. 두 트랙을 합친 트리에서 DM 들이기 허락 카드(ADR-0217, 행동 `dm.agent.admit`)가 결정할 사람을
 // 틀리게 말했다. 묶음 카드의 대체 문장 「관리자의 승인을 기다려요」와 현행 카드의 「이 카드에 표시된
@@ -65,6 +69,7 @@ function viewedBy(
 ) {
   const model = agentRequestBundle(message, {
     nowMs: NOW,
+    formatMessage: ko,
     nameFor: (id) => NAMES[id],
     ...(viewerMemberId !== undefined ? { viewerMemberId } : {}),
     viewerKind: "human",
@@ -204,7 +209,7 @@ describe("참여자 동의 카드의 판정과 문장은 한 곳이 져요 (#492
 
   it("묶음 카드의 대기 줄과 현행 카드의 참여자 줄은 같은 문장이에요", () => {
     for (const [name, line] of [["박연구원", TARGET_LINE], [undefined, UNNAMED_LINE]] as const) {
-      expect(participantWaitingLine(name)).toBe(line);
+      expect(participantWaitingLine(ko, name)).toBe(line);
       const note = approvalCardNote({
         waitingForParticipant: true,
         ...(name !== undefined ? { participantName: name } : {}),

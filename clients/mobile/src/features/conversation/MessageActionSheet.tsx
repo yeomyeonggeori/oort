@@ -5,7 +5,7 @@ import type {MessageActionAvailability} from '@momo/core/features/timeline/model
 import {QUOTE_ACTION_LABEL} from '@momo/core/features/timeline/quote';
 import {editedMark} from '@momo/core/features/timeline/editedLabel';
 import {pinActionLabelKey} from '@momo/core/features/timeline/pins';
-import {COPY_MESSAGE_ACTION_LABEL} from '@momo/core/features/timeline/copyLabels';
+import {COPY_MESSAGE_ACTION_KEY} from '@momo/core/features/timeline/copyLabels';
 import {
   QUICK_REACTIONS,
   type ReactionChip,
@@ -243,10 +243,10 @@ function SheetBody({
       />
     ) : null,
     onCopy ? (
-      // 동사형. 낱말은 코어의 `COPY_MESSAGE_ACTION_LABEL` — 웹 메뉴와 이 시트가 같은 말을 쓴다.
+      // 동사형. 낱말은 코어의 `COPY_MESSAGE_ACTION_KEY` — 웹 메뉴와 이 시트가 같은 말을 쓴다.
       <ListRow
         key="copy"
-        title={COPY_MESSAGE_ACTION_LABEL}
+        title={locale.formatMessage(COPY_MESSAGE_ACTION_KEY)}
         onPress={onCopy}
         closesSheet
         testID="sheet-copy"

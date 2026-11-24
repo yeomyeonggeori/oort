@@ -14,7 +14,7 @@ import {
   channelMuteToggleKey,
   normalizeChannelTopic,
 } from "./model";
-import { copyLinkActionLabel } from "../timeline/copyLabels";
+import { copyLinkActionKey } from "../timeline/copyLabels";
 import {
   channelStarToggleKey,
   SECTION_MOVE_GROUP_KEY,
@@ -525,7 +525,7 @@ export function channelActionItems(
     push({
       key: "copy-link",
       testKey: "copy-link",
-      label: copyLinkActionLabel(state.copiedLink),
+      label: formatMessage(copyLinkActionKey(state.copiedLink)),
       icon: "copy-link",
     });
   }

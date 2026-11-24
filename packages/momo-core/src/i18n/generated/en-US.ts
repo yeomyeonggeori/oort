@@ -13644,6 +13644,288 @@ export const catalog: MessageCatalog = {
       "value": "Working agents"
     }
   ],
+  "timeline.appNotice.egressKnown": [
+    {
+      "type": 0,
+      "value": "The agent can't connect to "
+    },
+    {
+      "type": 1,
+      "value": "host"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "timeline.appNotice.egressOutside": [
+    {
+      "type": 0,
+      "value": "The agent can't connect to the outside."
+    }
+  ],
+  "timeline.appNotice.grantRevoked": [
+    {
+      "type": 0,
+      "value": "Access was revoked while this was running, so it stopped here. What's already done stays as it is."
+    }
+  ],
+  "timeline.appNotice.loginLostHermesNamed": [
+    {
+      "type": 1,
+      "value": "app"
+    },
+    {
+      "type": 0,
+      "value": " was signed out. An admin needs to sign in again."
+    }
+  ],
+  "timeline.appNotice.loginLostHermesUnnamed": [
+    {
+      "type": 0,
+      "value": "This app was signed out. An admin needs to sign in again."
+    }
+  ],
+  "timeline.appNotice.loginLostNamed": [
+    {
+      "type": 1,
+      "value": "app"
+    },
+    {
+      "type": 0,
+      "value": " was signed out."
+    }
+  ],
+  "timeline.appNotice.loginLostUnnamed": [
+    {
+      "type": 0,
+      "value": "This app was signed out."
+    }
+  ],
+  "timeline.appNotice.notAllowedPhone": [
+    {
+      "type": 0,
+      "value": "Allow this app on the desktop or the web."
+    }
+  ],
+  "timeline.appNotice.notAllowedWeb": [
+    {
+      "type": 0,
+      "value": "Allow your own use first."
+    }
+  ],
+  "timeline.appNotice.openApp": [
+    {
+      "type": 0,
+      "value": "Open app"
+    }
+  ],
+  "timeline.appNotice.openOnWeb": [
+    {
+      "type": 0,
+      "value": "Open on the web"
+    }
+  ],
+  "timeline.appNotice.rateLimitedNamed": [
+    {
+      "type": 1,
+      "value": "app"
+    },
+    {
+      "type": 0,
+      "value": " is limiting requests for now. Try again in a minute."
+    },
+    {
+      "type": 5,
+      "value": "josa",
+      "options": {
+        "final": {
+          "value": []
+        },
+        "other": {
+          "value": []
+        }
+      }
+    }
+  ],
+  "timeline.appNotice.rateLimitedUnnamed": [
+    {
+      "type": 0,
+      "value": "This app is limiting requests for now. Try again in a minute."
+    }
+  ],
+  "timeline.appNotice.signInAgain": [
+    {
+      "type": 0,
+      "value": "Sign in again"
+    }
+  ],
+  "timeline.appNotice.siteOff": [
+    {
+      "type": 5,
+      "value": "site",
+      "options": {
+        "mac": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Your Mac is off, so this didn't run. Turn it on and I'll try again."
+            }
+          ]
+        },
+        "hermes": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Hermes is off, so this didn't run."
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "The place the agent runs is off, so this didn't run."
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "timeline.appNotice.siteSilent": [
+    {
+      "type": 5,
+      "value": "site",
+      "options": {
+        "mac": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Your Mac isn't"
+            }
+          ]
+        },
+        "hermes": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Hermes isn't"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "The agent isn't"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": 0,
+      "value": " responding."
+    }
+  ],
+  "timeline.appNotice.working": [
+    {
+      "type": 5,
+      "value": "site",
+      "options": {
+        "mac": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Working on your Mac"
+            }
+          ]
+        },
+        "hermes": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Working on Hermes"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Working on the agent's host"
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "timeline.appNotice.workingMinutes": [
+    {
+      "type": 5,
+      "value": "site",
+      "options": {
+        "mac": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Working on your Mac"
+            }
+          ]
+        },
+        "hermes": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Working on Hermes"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Working on the agent's host"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": 0,
+      "value": " · for "
+    },
+    {
+      "type": 6,
+      "value": "minutes",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " minute"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " minutes"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "timeline.approval.channelAgentIn": [
     {
       "type": 0,
@@ -13678,6 +13960,38 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "If you do not decide, the agent has to propose it again."
+    }
+  ],
+  "timeline.approvalNote.elsewhere": [
+    {
+      "type": 0,
+      "value": "You can make this decision from the inbox or the desktop app."
+    }
+  ],
+  "timeline.approvalNote.offline": [
+    {
+      "type": 0,
+      "value": "You're offline, so you can't decide right now. Once you're back online you can approve or deny here."
+    }
+  ],
+  "timeline.approvalNote.waitingNamed": [
+    {
+      "type": 0,
+      "value": "Waiting for "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " to allow this"
+    }
+  ],
+  "timeline.approvalNote.waitingOther": [
+    {
+      "type": 0,
+      "value": "Waiting for another participant to allow this"
     }
   ],
   "timeline.artifactNote.awaitingApproval": [
@@ -14050,6 +14364,28 @@ export const catalog: MessageCatalog = {
       "value": "Open the thread and mention the operator."
     }
   ],
+  "timeline.commandSuggest.head": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " suggested this"
+    },
+    {
+      "type": 5,
+      "value": "josa",
+      "options": {
+        "final": {
+          "value": []
+        },
+        "other": {
+          "value": []
+        }
+      }
+    }
+  ],
   "timeline.commandSuggest.oneLineAiConnect": [
     {
       "type": 0,
@@ -14268,6 +14604,24 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "Show team AI key"
+    }
+  ],
+  "timeline.copy.linkAction": [
+    {
+      "type": 0,
+      "value": "Copy link"
+    }
+  ],
+  "timeline.copy.messageAction": [
+    {
+      "type": 0,
+      "value": "Copy message"
+    }
+  ],
+  "timeline.copy.messageDone": [
+    {
+      "type": 0,
+      "value": "Message copied"
     }
   ],
   "timeline.createChannel.privateDetail": [
@@ -15376,6 +15730,270 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "You (remove my reaction)"
+    }
+  ],
+  "timeline.requestBundle.approvalRequest": [
+    {
+      "type": 0,
+      "value": "Approval request"
+    }
+  ],
+  "timeline.requestBundle.cancelled": [
+    {
+      "type": 0,
+      "value": "The request was cancelled"
+    }
+  ],
+  "timeline.requestBundle.chipAfterOnly": [
+    {
+      "type": 1,
+      "value": "label"
+    },
+    {
+      "type": 0,
+      "value": ": new value "
+    },
+    {
+      "type": 1,
+      "value": "after"
+    }
+  ],
+  "timeline.requestBundle.chipBeforeAfter": [
+    {
+      "type": 1,
+      "value": "label"
+    },
+    {
+      "type": 0,
+      "value": ": old value "
+    },
+    {
+      "type": 1,
+      "value": "before"
+    },
+    {
+      "type": 0,
+      "value": ", new value "
+    },
+    {
+      "type": 1,
+      "value": "after"
+    }
+  ],
+  "timeline.requestBundle.daysLeft": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " day"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " days"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    },
+    {
+      "type": 0,
+      "value": " left"
+    }
+  ],
+  "timeline.requestBundle.declined": [
+    {
+      "type": 0,
+      "value": "Declined"
+    }
+  ],
+  "timeline.requestBundle.declinedBy": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " declined"
+    }
+  ],
+  "timeline.requestBundle.details": [
+    {
+      "type": 0,
+      "value": "Details"
+    }
+  ],
+  "timeline.requestBundle.done": [
+    {
+      "type": 0,
+      "value": "Finished running"
+    }
+  ],
+  "timeline.requestBundle.executing": [
+    {
+      "type": 0,
+      "value": "Approved · continuing"
+    }
+  ],
+  "timeline.requestBundle.expiresSoon": [
+    {
+      "type": 0,
+      "value": "Expires in under 10 minutes"
+    }
+  ],
+  "timeline.requestBundle.failed": [
+    {
+      "type": 0,
+      "value": "Couldn't finish running · Try asking again"
+    }
+  ],
+  "timeline.requestBundle.hoursLeft": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " hour"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " hours"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    },
+    {
+      "type": 0,
+      "value": " left"
+    }
+  ],
+  "timeline.requestBundle.minutesLeft": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " minute"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " minutes"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    },
+    {
+      "type": 0,
+      "value": " left"
+    }
+  ],
+  "timeline.requestBundle.quietWithDetails": [
+    {
+      "type": 1,
+      "value": "quiet"
+    },
+    {
+      "type": 0,
+      "value": " · Details"
+    }
+  ],
+  "timeline.requestBundle.rationale": [
+    {
+      "type": 0,
+      "value": "Reason"
+    }
+  ],
+  "timeline.requestBundle.requiredRole": [
+    {
+      "type": 0,
+      "value": "Who can decide"
+    }
+  ],
+  "timeline.requestBundle.thinking": [
+    {
+      "type": 0,
+      "value": "Looking at the request"
+    }
+  ],
+  "timeline.requestBundle.toolRunNamed": [
+    {
+      "type": 0,
+      "value": "Run tool \""
+    },
+    {
+      "type": 1,
+      "value": "tool"
+    },
+    {
+      "type": 0,
+      "value": "\""
+    }
+  ],
+  "timeline.requestBundle.waitingAdmin": [
+    {
+      "type": 0,
+      "value": "Waiting for an admin to approve"
+    }
+  ],
+  "timeline.requestBundle.waitingNamed": [
+    {
+      "type": 0,
+      "value": "Waiting for "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " to approve"
     }
   ],
   "timeline.runException.open": [

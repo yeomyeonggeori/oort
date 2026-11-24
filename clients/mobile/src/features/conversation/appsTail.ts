@@ -6,6 +6,7 @@ import {
   type Message,
 } from '@momo/core/lib/api';
 import {coreHost} from '@momo/core/runtime/host';
+import type {LocaleService} from '@momo/core/i18n';
 import {isSurfaceProvided} from '@momo/core/features/capabilities/serverSurfaces';
 import {appsOnWebPath} from '@momo/core/features/plugins/phoneApps';
 import {
@@ -122,6 +123,7 @@ export function useAppNotice(
   message: Message,
   workspaceId: string | undefined,
   nowMs: number,
+  formatMessage: LocaleService['formatMessage'],
 ): AppNotice | null {
   const has = hasAppNotice(message);
   const ws = (workspaceId ?? '').toLowerCase();
@@ -135,7 +137,7 @@ export function useAppNotice(
   }, provider ?? NO_PROVIDER_CLIENT);
   const plugins = useMemo(() => pluginMap(catalog.data?.plugins), [catalog.data]);
   return has
-    ? appNoticeFor(message, {surface: 'phone', plugins, nowMs})
+    ? appNoticeFor(message, {surface: 'phone', plugins, nowMs, formatMessage})
     : null;
 }
 

@@ -110,6 +110,7 @@ export function RequestBundleCard({
     [],
   );
   const model = phoneRequestBundle(
+    formatMessage,
     card,
     directory,
     viewerMemberId,
@@ -122,6 +123,7 @@ export function RequestBundleCard({
   const decideAfterReconnect =
     offline === true &&
     phoneRequestBundle(
+      formatMessage,
       card,
       directory,
       viewerMemberId,
