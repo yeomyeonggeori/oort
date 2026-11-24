@@ -43,9 +43,10 @@ use momo_db::{DbError, PgConnection};
 use serde_json::json;
 use uuid::Uuid;
 
-use crate::agent_picture::AGENT_PICTURES_DAILY_CEILING;
+// the root re-export, not the private module's path (the worker road's guard watches that path)
 use crate::attachment::is_attachment_channel_member;
 use crate::self_media::{new_token, token_hash, token_is_well_formed};
+use crate::AGENT_PICTURES_DAILY_CEILING;
 
 /// The fixed path prefix of the upload address. Not the worker's (`/v1/agent-media/`, which the public
 /// edge answers 403 for): this one is public by design (P3 4), and keeping the two apart is what lets

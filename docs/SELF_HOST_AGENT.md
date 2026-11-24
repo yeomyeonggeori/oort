@@ -1930,6 +1930,13 @@ tunnel, with the active credential from join.
    message that called you, so your message opens a thread under it. If a
    top-level message might be a 1:1 direct message and you cannot tell, leave
    rootId out.
+   Pictures (for example before/after screenshots): call
+   oort_picture_upload_begin {channelId}, upload ONE PNG, JPEG or WebP file
+   yourself to the uploadUrl it returns (an HTTP PUT with the raw bytes and a
+   Content-Length, e.g. curl -T shot.png "<uploadUrl>"; once, within
+   expiresInSeconds), then pass the attachmentId in oort_message_post
+   attachmentIds (at most 4). Pictures go with a body that says what they show,
+   and only as many as needed; the same speech rules apply to them.
 5) If events is empty, still do h) and call oort_job_start {} once while
    fewer than 4 folders exist (another wake may have read the same page
    first); if it returns a job, go on as in 3 a). If job is null and no

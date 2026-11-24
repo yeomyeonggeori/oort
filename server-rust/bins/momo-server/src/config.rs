@@ -1136,7 +1136,7 @@ impl Default for AgentUploadsConfig {
 
 /// [`AgentUploadsConfig`] from the process environment.
 pub fn agent_uploads_from_env() -> AgentUploadsConfig {
-    agent_uploads_from_lookup(|key| env(key))
+    agent_uploads_from_lookup(env)
 }
 
 /// [`agent_uploads_from_env`] over a given lookup (tests do not touch the process environment).

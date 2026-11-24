@@ -1108,7 +1108,7 @@ async fn the_refusal_budget_keys_on_the_edge_setting() {
     let bogus = |ws: Uuid| format!("/v1/agent-uploads/{ws}/{}", "A".repeat(43));
 
     // untrusted (the default): rotating the header does not reset the first layer
-    let w = boot_with(|state| state.with_rate_limit(limit.clone())).await;
+    let w = boot_with(|state| state.with_rate_limit(limit)).await;
     let ws = Uuid::new_v4();
     let mut statuses = Vec::new();
     for hop in ["198.51.100.1", "198.51.100.2", "198.51.100.3"] {
@@ -1137,7 +1137,7 @@ async fn the_refusal_budget_keys_on_the_edge_setting() {
     // trusted: each first hop is its own caller
     let w = boot_with(|state| {
         state
-            .with_rate_limit(limit.clone())
+            .with_rate_limit(limit)
             .with_agent_uploads(AgentUploadsConfig {
                 pictures_enabled: true,
                 trusted_edge: true,
