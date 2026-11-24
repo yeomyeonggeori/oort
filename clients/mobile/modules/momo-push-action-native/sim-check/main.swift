@@ -1393,9 +1393,16 @@ final class FakeReplyStore: MomoPushReplyStore, @unchecked Sendable {
   var items: [String: Data] = [:]
   var refuseAdd = false
   var unreadable = false
-  func all() -> [Data]? { unreadable ? nil : Array(items.values) }
+  func entries() -> [MomoPushReplyEntry]? {
+    unreadable ? nil : items.map { MomoPushReplyEntry(account: $0.key, data: $0.value) }
+  }
   func add(account: String, data: Data) -> Bool {
     if refuseAdd || items[account] != nil { return false }
+    items[account] = data
+    return true
+  }
+  func update(account: String, data: Data) -> Bool {
+    guard items[account] != nil else { return false }
     items[account] = data
     return true
   }
@@ -1471,6 +1478,102 @@ do {
 
   check(MomoPushReplyCopy.isKorean(["ko"]) && MomoPushReplyCopy.isKorean(["ko-KR"]) && !MomoPushReplyCopy.isKorean(["en"]),
     "the line's language follows the app bundle's resolved localization")
+}
+
+// ---- the kept 답장's lifetime and the handler's record (#6092, ADR-0204 증보 7 A7-13) ----------
+
+do {
+  let memberID = "55555555-5555-4555-8555-555555555555"
+  let owner = MomoPushReplyOwner(workspaceID: workspaceID, memberID: memberID)
+  let day: Int64 = 24 * 60 * 60 * 1000
+  let now: Int64 = 1_900_000_000_000
+  func origin(message: String = messageID) -> String {
+    #"{"aps":{"category":"momo.message"},"momo":{"workspace_id":"\#(workspaceID)","channel_id":"\#(channelID)","message_id":"\#(message)"}}"#
+  }
+  func item(_ id: String, createdAtMs: Int64, v: Int = 1, request: String = "req-x", refusedAtMs: Int64? = nil) -> Data {
+    try! JSONEncoder().encode(MomoPushQueuedReply(
+      v: v, clientMsgId: id, workspaceID: workspaceID, memberID: memberID, text: "글",
+      requestIdentifier: request, origin: origin(), createdAtMs: createdAtMs, refusedAtMs: refusedAtMs))
+  }
+
+  check(MomoPushReplyContract.maxAgeMs == 7 * day, "the absolute lifetime is seven days")
+
+  // The sweep: ≥ 7 days and anything this build cannot read go; the rest stays.
+  let store = FakeReplyStore()
+  store.items["young"] = item("young", createdAtMs: now - 7 * day + 60_000)
+  store.items["aged"] = item("aged", createdAtMs: now - 7 * day, request: "req-aged")
+  store.items["older"] = item("older", createdAtMs: now - 30 * day, request: "req-older")
+  store.items["v2"] = item("v2", createdAtMs: now, v: 2)
+  store.items["junk"] = Data("not json".utf8)
+  store.items["refused"] = item("refused", createdAtMs: now - day, refusedAtMs: now - day)
+  let aged = MomoPushReplySweep.sweep(store: store, nowMs: now)
+  check(Set(store.items.keys) == ["young", "refused"],
+    "the sweep keeps a reply a minute short of seven days (and a refused one), and deletes one of exactly seven days, an older one, another version and bytes that do not decode")
+  check(Set(aged) == ["req-aged", "req-older"], "it names the notifications of the aged ones (an unreadable item names none)")
+  let unknown = FakeReplyStore()
+  unknown.items["aged"] = item("aged", createdAtMs: 0)
+  unknown.unreadable = true
+  check(MomoPushReplySweep.sweep(store: unknown, nowMs: now).isEmpty && unknown.items.count == 1,
+    "a keychain that will not answer is left alone (unknown is not empty)")
+
+  // An item written before `refusedAtMs` existed still reads as version 1.
+  let legacy = #"{"v":1,"clientMsgId":"c","workspaceID":"\#(workspaceID)","memberID":"\#(memberID)","text":"t","requestIdentifier":"r","origin":"{}","createdAtMs":\#(now)}"#
+  let legacyReply = try? JSONDecoder().decode(MomoPushQueuedReply.self, from: Data(legacy.utf8))
+  check(legacyReply != nil && legacyReply?.refusedAtMs == nil, "an item without refusedAtMs is still read (the field is optional)")
+  let legacyStore = FakeReplyStore()
+  legacyStore.items["c"] = Data(legacy.utf8)
+  MomoPushReplySweep.sweep(store: legacyStore, nowMs: now)
+  check(legacyStore.items.count == 1, "so an update does not sweep away the replies an older build kept")
+  check(!String(decoding: item("n", createdAtMs: now), as: UTF8.self).contains("refusedAtMs"),
+    "a reply that was never refused is written without the field")
+
+  // Keeping a new reply sweeps first.
+  let keeping = FakeReplyStore()
+  keeping.items["old"] = item("old", createdAtMs: now - 8 * day)
+  keeping.items["junk"] = Data([0xff])
+  let kept = MomoPushReplyCapture.keep(
+    text: "새 답장", requestIdentifier: "req-new",
+    userInfo: ["aps": ["category": "momo.message"], "momo": ["workspace_id": workspaceID, "message_id": messageID]],
+    owner: owner, store: keeping, newID: { "new" }, nowMs: now)
+  check(kept == .queued && Set(keeping.items.keys) == ["new"], "keeping a reply deletes the old and unreadable items first")
+
+  // The same words on one identifier but another message are another reply (L5).
+  let twice = MomoPushReplyCapture.keep(
+    text: "새 답장", requestIdentifier: "req-new",
+    userInfo: ["aps": ["category": "momo.message"], "momo": ["workspace_id": workspaceID, "message_id": approvalID]],
+    owner: owner, store: keeping, newID: { "new-2" }, nowMs: now)
+  check(twice == .queued && keeping.items.count == 2,
+    "the same text under the same identifier, answering another message, is kept as a second reply")
+  let again = MomoPushReplyCapture.keep(
+    text: "새 답장", requestIdentifier: "req-new",
+    userInfo: ["aps": ["category": "momo.message"], "momo": ["workspace_id": workspaceID, "message_id": messageID]],
+    owner: owner, store: keeping, newID: { "new-3" }, nowMs: now)
+  check(again == .alreadyQueued && keeping.items.count == 2, "the same response again is still one reply")
+
+  // Marking refused.
+  let marking = FakeReplyStore()
+  marking.items["m"] = item("m", createdAtMs: now - day)
+  check(MomoPushReplyCapture.markRefused(clientMsgId: "m", store: marking, nowMs: now), "a kept reply can be marked refused")
+  let marked = try? JSONDecoder().decode(MomoPushQueuedReply.self, from: marking.items["m"]!)
+  check(marked?.refusedAtMs == now && marked?.text == "글" && marked?.clientMsgId == "m" && marked?.createdAtMs == now - day,
+    "marking keeps every other field and only adds when it was refused")
+  check(MomoPushReplyCapture.markRefused(clientMsgId: "m", store: marking, nowMs: now + 5)
+    && (try? JSONDecoder().decode(MomoPushQueuedReply.self, from: marking.items["m"]!))?.refusedAtMs == now,
+    "marking twice keeps the first time")
+  check(!MomoPushReplyCapture.markRefused(clientMsgId: "absent", store: marking, nowMs: now), "an absent reply is not marked")
+
+  // The handler's record of what it did with each response.
+  let outcomes = MomoPushReplyOutcomes()
+  check(outcomes.outcome(requestIdentifier: "a") == nil, "a response the handler never took has no outcome")
+  outcomes.record(requestIdentifier: "a", kept: true)
+  outcomes.record(requestIdentifier: "b", kept: false)
+  check(outcomes.outcome(requestIdentifier: "a") == true && outcomes.outcome(requestIdentifier: "b") == false,
+    "kept and not kept are told apart per response")
+  outcomes.record(requestIdentifier: "a", kept: false)
+  check(outcomes.outcome(requestIdentifier: "a") == false, "the latest outcome for an identifier wins")
+  for index in 0..<MomoPushReplyOutcomes.capacity { outcomes.record(requestIdentifier: "n\(index)", kept: true) }
+  check(outcomes.outcome(requestIdentifier: "a") == nil && outcomes.outcome(requestIdentifier: "n0") == true,
+    "the record is bounded: the oldest identifiers go first")
 }
 
 print(failures == 0 ? "PASS" : "FAILED (\(failures))")

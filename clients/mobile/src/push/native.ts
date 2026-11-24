@@ -115,10 +115,11 @@ export function nativeApprovalHandlerAttached(): boolean {
 interface MomoPushActionReplies {
   /** 처리기가 붙어 있고 이 빌드가 앱 전용 키체인 그룹을 말할 때만 참 (#6036). */
   readonly handlesReplyActions?: boolean;
-  /** 지금 온 답장을 처리기가 **남기는가** — 위 조건 + 누구의 것인지 말해 줄 세션 항목이 있다. */
-  keepsRepliesNow?(): boolean;
+  /** 이 응답을 처리기가 어떻게 했는가 (#6092): 'kept' · 'notKept' · 이 프로세스에서 받은 적 없으면 null. */
+  replyOutcome?(requestIdentifier: string): string | null;
   queuedReplies?(): string[] | null;
   removeQueuedReply?(clientMsgId: string): void;
+  markQueuedReplyRefused?(clientMsgId: string): boolean;
   clearQueuedReplies?(): void;
 }
 
@@ -127,25 +128,34 @@ export interface QueuedReplyStore {
   /** 남은 항목(JSON 문자열). 키체인이 답하지 않으면 null — 「없음」이 아니라 「모름」이다. */
   list(): string[] | null;
   remove(clientMsgId: string): void;
+  /** 서버가 분명히 거절했다 — 다시 보내지 않는다고 적는다(ADR-0204 증보 7 A7-13). 적지 못하면 거짓. */
+  markRefused(clientMsgId: string): boolean;
   clear(): void;
 }
 
+/** 처리기가 이 답장 응답을 어떻게 했는가 (#6092). */
+export type NativeReplyOutcome = 'kept' | 'notKept';
+
 /**
- * 잠금 화면의 답장을 네이티브 처리기가 **지금 받아 남기는가** (#6036). 응답마다 묻는다. 참일 때만 `handlePushResponse` 가
- * 답장 갈래에서 물러난다 — 승인 · 거절과 같은 까닭으로 「iOS 이면」이 아니라 「처리기가 붙어 있으면」이다.
- * 옛 바이너리 위의 새 JS 에서는 거짓이라 예전처럼 JS 가 보낸다.
+ * 네이티브 처리기가 **이 응답을** 어떻게 했는가 (#6092). `'kept'` 일 때만 `handlePushResponse` 가 답장 갈래에서
+ * 물러난다 — 보내기는 보관 목록 한 길이 한다. `'notKept'`(세션 항목이 없었다 · 저장이 실패했다)이면 JS 가 예전처럼
+ * 보내고, 처리기가 띄운 「보내지 못했어요」 줄을 걷는다. 처리기가 없는 빌드(시험, 옛 바이너리)는 null 이다.
+ *
+ * 「지금 남기는가」(키체인을 새로 읽는 물음)도 「목록에 아직 있는가」도 아니다. 앞의 것은 토큰을 새로 놓는 틈(지우고 →
+ * 쓰기)에 처리기가 한 일과 다르게 답했고, 뒤의 것은 비우기가 먼저 보내고 지운 뒤에 물으면 「없다」고 답한다. 둘 다 한
+ * 답장이 두 번 가는 길이었다(#6036 보안 검수 r1 M1). 처리기는 `didReceive` 가 돌아가기 전에 이 응답의 결과를 메모리에
+ * 적고, 여기서는 그것을 식별자로 읽는다.
  */
-export function nativeReplyHandlerAttached(): boolean {
+export function nativeReplyOutcome(requestIdentifier: string): NativeReplyOutcome | null {
   const module = requireOptionalNativeModule<MomoPushActionReplies>(PUSH_ACTION_NATIVE_MODULE);
-  if (module?.handlesReplyActions !== true || typeof module.keepsRepliesNow !== 'function') {
-    return false;
+  if (module?.handlesReplyActions !== true || typeof module.replyOutcome !== 'function') {
+    return null;
   }
-  // 상수만으로는 모자란다: 자격(push_action 토큰)이 아직 놓이지 않았으면(옛 서버, 세션당 상한, 로그인
-  // 직후) 처리기는 답장을 남기지 않는다. 그때 JS 까지 물러나면 답장이 아무 데로도 가지 않는다.
   try {
-    return module.keepsRepliesNow.call(module) === true;
+    const answer = module.replyOutcome.call(module, requestIdentifier);
+    return answer === 'kept' || answer === 'notKept' ? answer : null;
   } catch {
-    return false;
+    return null;
   }
 }
 
@@ -156,14 +166,16 @@ export function nativeQueuedReplyStore(): QueuedReplyStore | null {
     !module ||
     typeof module.queuedReplies !== 'function' ||
     typeof module.removeQueuedReply !== 'function' ||
+    typeof module.markQueuedReplyRefused !== 'function' ||
     typeof module.clearQueuedReplies !== 'function'
   ) {
     return null;
   }
-  const {queuedReplies, removeQueuedReply, clearQueuedReplies} = module;
+  const {queuedReplies, removeQueuedReply, markQueuedReplyRefused, clearQueuedReplies} = module;
   return {
     list: () => queuedReplies.call(module) ?? null,
     remove: id => removeQueuedReply.call(module, id),
+    markRefused: id => markQueuedReplyRefused.call(module, id) === true,
     clear: () => clearQueuedReplies.call(module),
   };
 }

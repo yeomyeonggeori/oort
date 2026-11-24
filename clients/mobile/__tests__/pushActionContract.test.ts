@@ -11,6 +11,7 @@ import {
   PUSH_ENVELOPE_SCHEMA,
   PUSH_REASONS,
 } from '../src/push/contract';
+import {QUEUED_REPLY_MAX_AGE_MS} from '../src/push/queuedReplies';
 import {APP_ONLY_KEYCHAIN_ACCESS_GROUP} from '../src/storage/keychainGroups';
 
 // =============================================================================
@@ -210,6 +211,15 @@ describe('처리기가 지키는 규율', () => {
     // 바로 뒤에 같은 응답을 듣고 JS 가 목록을 읽으므로, 그때 항목이 이미 있어야 한다.
     const reply = body.slice(0, body.indexOf('guard let intent'));
     expect(reply).toMatch(/MomoPushReplyKeeper\.keep\([^)]*\)\s*\n\s*return true/);
+    // 답장 갈래의 `return true` 는 둘(빈 글 · 남긴 뒤)이고 둘 다 `isReply` 안이다. 그 앞에 하나라도 더 생기면 본문 탭이
+    // 콜드 런치에서 EmitterModule 로 가는 길을 먹는다(#6036 보안 검수 r1 L6).
+    const replyArm = reply.slice(reply.indexOf('if MomoPushReplyCapture.isReply('));
+    expect(reply.indexOf('if MomoPushReplyCapture.isReply(')).toBeGreaterThan(-1);
+    expect(code(reply).match(/return true/g)).toHaveLength(2);
+    expect(code(replyArm).match(/return true/g)).toHaveLength(2);
+    // 그 응답에 한 일(남김/못 남김)은 같은 호출 안에서 적힌다 — JS 가 바로 뒤에 묻는다(#6092).
+    const keeper = HANDLER.slice(HANDLER.indexOf('enum MomoPushReplyKeeper'), HANDLER.indexOf('final class MomoPushReplyTaskEnd'));
+    expect(code(keeper)).toMatch(/MomoPushReplyOutcomes\.shared\.record\(requestIdentifier: request\.identifier, kept: outcome\.kept\)/);
     // 완료는 NotificationCenterManager 가 부른다 — 두 번 부르지 않는다.
     expect(code(HANDLER)).not.toMatch(/completionHandler\s*\(\s*\)/);
     expect(code(JOB)).not.toMatch(/completionHandler/);
@@ -304,12 +314,15 @@ describe('처리기가 지키는 규율', () => {
     expect(src.match(/Constant\(/g)).toHaveLength(2);
     expect([...src.matchAll(/Function\("(\w+)"\)/g)].map(match => match[1]).sort()).toEqual([
       'clearQueuedReplies',
-      'keepsRepliesNow',
+      'markQueuedReplyRefused',
       'queuedReplies',
       'removeQueuedReply',
+      'replyOutcome',
     ]);
-    // 「지금 남기는가」는 불리언 하나다.
-    expect(src).toMatch(/Function\("keepsRepliesNow"\) \{ \(\) -> Bool in\s*MomoPushReplyCapture\.keepsNow\(\)\s*\}/);
+    // 「이 응답을 어떻게 했나」는 식별자를 받아 낱말 하나를 돌려준다(#6092) — 처리기가 적어 둔 메모리만 읽는다.
+    expect(src).toMatch(
+      /Function\("replyOutcome"\) \{ \(requestIdentifier: String\) -> String\? in\s*MomoPushReplyOutcomes\.shared\.outcome\(requestIdentifier: requestIdentifier\)\.map \{\s*\$0 \? "kept" : "notKept"\s*\}\s*\}/,
+    );
     expect(src).not.toMatch(/readSession|actionToken|readDeviceSecret|readReplyOwner/);
   });
 });
@@ -483,8 +496,20 @@ describe('잠금 화면 답장의 보관 목록 (#6036) — Swift 가 남기고 
     const swiftKeys = [...code(struct).matchAll(/\blet (\w+):/g)].map(match => match[1]).sort();
     const ts = read(join(APP_ROOT, 'src/push/queuedReplies.ts'));
     const iface = ts.slice(ts.indexOf('export interface QueuedReply {'), ts.indexOf('/** 이 판이 읽는 모양'));
-    const tsKeys = [...iface.matchAll(/^\s+(\w+): /gm)].map(match => match[1]).sort();
+    const tsKeys = [...iface.matchAll(/^\s+(\w+)\??: /gm)].map(match => match[1]).sort();
     expect(swiftKeys).toEqual(tsKeys);
+  });
+
+  it('절대 수명(7일)이 Swift 와 JS 에서 같고, 앱이 뜰 때 로그인과 상관없이 지운다 (ADR-0204 증보 7 A7-13)', () => {
+    const swiftExpr = QUEUE.match(/static let maxAgeMs: Int64 = ([\d *]+)\n/)?.[1];
+    expect(swiftExpr).toBeDefined();
+    const swiftMs = (swiftExpr ?? '').split('*').reduce((product, factor) => product * Number(factor.trim()), 1);
+    expect(swiftMs).toBe(QUEUED_REPLY_MAX_AGE_MS);
+    const install = code(HANDLER.slice(HANDLER.indexOf('public static func install()'), HANDLER.indexOf('enum MomoPushReplyLaunchSweep')));
+    expect(install).toContain('MomoPushReplyLaunchSweep.run()');
+    const sweep = code(HANDLER.slice(HANDLER.indexOf('enum MomoPushReplyLaunchSweep')));
+    expect(sweep).toContain('MomoPushReplySweep.sweep(');
+    expect(sweep).not.toMatch(/readReplyOwner|readSession/);
   });
 
   it('답장 버튼 · 범주가 JS 와 같고, 목록은 세션 항목과 다른 서비스에 있다', () => {
@@ -508,7 +533,7 @@ describe('잠금 화면 답장의 보관 목록 (#6036) — Swift 가 남기고 
       expect(MODULE_SWIFT).toContain(`Constant("${name}")`);
       expect(native).toContain(name);
     }
-    for (const name of ['keepsRepliesNow', 'queuedReplies', 'removeQueuedReply', 'clearQueuedReplies']) {
+    for (const name of ['replyOutcome', 'queuedReplies', 'removeQueuedReply', 'markQueuedReplyRefused', 'clearQueuedReplies']) {
       expect(MODULE_SWIFT).toContain(`Function("${name}")`);
       expect(native).toContain(`${name}?(`);
     }
