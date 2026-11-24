@@ -2,11 +2,13 @@ import { PackageCheck } from "lucide-react";
 import { Button } from "@/design/ui/button";
 import { memberFor, type Directory } from "@/features/workspace/useWorkspace";
 import {
-  ACTION_RESULT_SECRET_ONCE_NOTE,
+  ACTION_RESULT_SECRET_ONCE_KEY,
   actionResultStatusNote,
+  actionResultTitle,
   type AgentActionResultCard,
 } from "@momo/core/features/timeline/actionResultCard";
 import { formatCount } from "@momo/core/features/timeline/agentCardModel";
+import { useFormatMessage } from "@/i18n/useFormatMessage";
 import { isReachableSettingsSection } from "@/features/settings/settingsNav";
 import { CardFrame, LabeledRow } from "./AgentCard";
 import { ActionResultChip } from "./StatusChip";
@@ -89,6 +91,7 @@ export function ActionResultBody({
   card: AgentActionResultCard;
   directory: Directory;
 }) {
+  const formatMessage = useFormatMessage();
   const decidedBy = card.decidedByMemberId
     ? memberFor(directory, card.decidedByMemberId)
     : null;
@@ -98,7 +101,7 @@ export function ActionResultBody({
   return (
     <CardFrame
       icon={<PackageCheck className="size-4" aria-hidden="true" />}
-      title={card.title}
+      title={actionResultTitle(formatMessage, card)}
       chip={<ActionResultChip status={card.status} />}
       status={card.status}
       kind="action_result"
@@ -110,14 +113,14 @@ export function ActionResultBody({
             className="break-keep text-body text-ink"
             data-testid="action-result-note"
           >
-            {actionResultStatusNote(card.status, card.actionId)}
+            {actionResultStatusNote(formatMessage, card.status, card.actionId)}
           </p>
           {card.secretShownOnce && (
             <p
               className="mt-1 break-keep text-meta text-ink-muted"
               data-testid="action-result-secret-once"
             >
-              {ACTION_RESULT_SECRET_ONCE_NOTE}
+              {formatMessage(ACTION_RESULT_SECRET_ONCE_KEY)}
             </p>
           )}
           {next !== null && (

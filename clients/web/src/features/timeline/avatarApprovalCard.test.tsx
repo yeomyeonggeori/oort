@@ -356,10 +356,12 @@ describe("member.avatar.set 결과 카드 (#4394)", () => {
     mountedRoot = createRoot(mountHost);
     await act(async () => {
       mountedRoot?.render(
-        createElement(
-          SessionProvider,
-          { value: sessionValue() },
-          createElement(AgentCard, { card, directory: DIRECTORY })
+        withKo(
+          createElement(
+            SessionProvider,
+            { value: sessionValue() },
+            createElement(AgentCard, { card, directory: DIRECTORY })
+          )
         )
       );
     });

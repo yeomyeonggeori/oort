@@ -707,6 +707,7 @@
     "packages/momo-core/src/features/sidebar/goneDm.ts": {"ko": 0, "en": 0},
     "packages/momo-core/src/features/sidebar/sidebarSections.ts": {"ko": 0, "en": 0},
     "packages/momo-core/src/features/timeline/actionCopy.ts": {"ko": 0, "en": 0},
+    "packages/momo-core/src/features/timeline/actionResultCard.ts": {"ko": 0, "en": 0},
     "packages/momo-core/src/features/timeline/agentInitiative.ts": {"ko": 0, "en": 0},
     "packages/momo-core/src/features/timeline/appNotice.ts": {"ko": 0, "en": 0},
     "packages/momo-core/src/features/timeline/approvalNote.ts": {"ko": 0, "en": 0},

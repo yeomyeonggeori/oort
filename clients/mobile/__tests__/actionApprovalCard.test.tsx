@@ -35,9 +35,7 @@ import {
   APPROVAL_STATUS_LABEL,
   TURN_STATUS_LABEL,
 } from '@momo/core/features/timeline/agentCardModel';
-import {
-  ACTION_RESULT_SECRET_ONCE_NOTE,
-} from '@momo/core/features/timeline/actionResultCard';
+import {ACTION_RESULT_SECRET_ONCE_KEY} from '@momo/core/features/timeline/actionResultCard';
 import type {DecisionOutcome} from '@momo/core/features/timeline/approvalDecision';
 import type {RowPresentation} from '@momo/core/features/timeline/rowModel';
 import {color, TOUCH_TARGET} from '../src/design/tokens';
@@ -60,6 +58,7 @@ import {__resetServerBaseCache, setServerBase} from '../src/storage/serverBase';
 
 // 문장은 사전에 있다(#6044): 한국어 생성물로 키를 풀어 한국어 그대로 단정한다.
 const FORMAT = createMessageService({messageLocale: 'ko-KR', catalog: koCatalog}).formatMessage;
+const ACTION_RESULT_SECRET_ONCE_NOTE = FORMAT(ACTION_RESULT_SECRET_ONCE_KEY);
 const AGENT_INITIATIVE_LABEL = '먼저 제안';
 const AGENT_INITIATIVE_RATIONALE_LABEL = '에이전트가 쓴 글';
 

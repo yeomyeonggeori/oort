@@ -18,7 +18,7 @@ import {
   type CompletionOutcome,
 } from "@momo/core/features/timeline/completionReportCard";
 import {
-  ACTION_RESULT_STATUS_LABEL,
+  actionResultStatusLabel,
   type ActionResultStatus,
 } from "@momo/core/features/timeline/actionResultCard";
 import { COMPLETION_TONE_CLASS } from "./completionTone";
@@ -182,13 +182,14 @@ const ACTION_RESULT_CHIP_CLASS: Readonly<
 };
 
 export function ActionResultChip({ status }: { status: ActionResultStatus }) {
+  const formatMessage = useFormatMessage();
   return (
     <span
       data-testid="agent-status-chip"
       data-status={status}
       className={cn(CHIP_CLASS, ACTION_RESULT_CHIP_CLASS[status])}
     >
-      {ACTION_RESULT_STATUS_LABEL[status]}
+      {actionResultStatusLabel(formatMessage, status)}
     </span>
   );
 }

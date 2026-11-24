@@ -46,9 +46,10 @@ import {
   type AgentCardModel,
 } from '@momo/core/features/timeline/agentCardModel';
 import {
-  ACTION_RESULT_SECRET_ONCE_NOTE,
-  ACTION_RESULT_STATUS_LABEL,
+  ACTION_RESULT_SECRET_ONCE_KEY,
+  actionResultStatusLabel,
   actionResultStatusNote,
+  actionResultTitle,
   type ActionResultStatus,
   type AgentActionResultCard,
 } from '@momo/core/features/timeline/actionResultCard';
@@ -1434,6 +1435,7 @@ function ActionResultCardView({
   styles: ReturnType<typeof buildStyles>;
   noteStyle: ReturnType<typeof buildApprovalNoteStyle>;
 }): React.JSX.Element {
+  const formatMessage = useFormatMessage();
   const decidedBy =
     card.decidedByMemberId !== null
       ? memberFor(directory, card.decidedByMemberId)
@@ -1443,10 +1445,10 @@ function ActionResultCardView({
     <AgentCardFrame testID="agent-card">
       <View style={styles.cardHead}>
         <Text style={styles.cardTitle} numberOfLines={2}>
-          {card.title}
+          {actionResultTitle(formatMessage, card)}
         </Text>
         <StatusChip
-          label={ACTION_RESULT_STATUS_LABEL[card.status]}
+          label={actionResultStatusLabel(formatMessage, card.status)}
           tone={ACTION_RESULT_TONE[card.status]}
         />
       </View>
@@ -1482,13 +1484,13 @@ function ActionResultCardView({
         </View>
       ) : null}
       <Sentence style={styles.cardBody} testID="action-result-note">
-        {actionResultStatusNote(card.status, card.actionId)}
+        {actionResultStatusNote(formatMessage, card.status, card.actionId)}
       </Sentence>
       {card.secretShownOnce ? (
         <Sentence
           style={[styles.cardNote, noteStyle.guidance]}
           testID="action-result-secret-once">
-          {ACTION_RESULT_SECRET_ONCE_NOTE}
+          {formatMessage(ACTION_RESULT_SECRET_ONCE_KEY)}
         </Sentence>
       ) : null}
       {elsewhere !== null ? (
