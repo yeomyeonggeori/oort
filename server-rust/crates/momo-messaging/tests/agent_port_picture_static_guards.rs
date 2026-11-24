@@ -7,12 +7,16 @@
 //! |---|---|
 //! | `the_block_grants_the_api_alone_and_checks_every_verb` | a grant to any role but `momo_app`, a verb the api does not use, a role loop that no longer walks the helper's read role or `momo_memory`, an emptied block |
 //! | `the_block_comes_after_the_table_and_no_grant_stands_outside_it` | the block above `CREATE TABLE` (it would return before the table exists), a `GRANT` beside it |
+//! | `the_block_is_the_same_text_in_the_migration_and_both_bootstrap_files` | an edit to one copy and not the others |
+//! | `both_bootstrap_files_apply_the_block_after_they_grant_every_table` | the block above the `ALL TABLES` grant or the default privileges (the grant would hand every verb back to the BYPASSRLS roles) |
 //! | `the_token_table_has_no_foreign_key_and_the_mark_keeps_its_guard` | a `REFERENCES` / `FOREIGN KEY` on the token table; any statement on `agent_picture_mark` but dropping NOT NULL on `run_id` |
 
 use std::path::PathBuf;
 
 const BLOCK: &str = "agent-upload-token-lockdown";
 const MIGRATION: &str = "server/Migrations/189_agent_upload_token.sql";
+const DEV: &str = "infra/rust/sql/bootstrap_roles.sql";
+const RUNTIME: &str = "infra/rust/sql/bootstrap_runtime_roles.sql";
 
 fn read(relative: &str) -> String {
     let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -132,4 +136,35 @@ fn the_token_table_has_no_foreign_key_and_the_mark_keeps_its_guard() {
         ["ALTER TABLE agent_picture_mark ALTER COLUMN run_id DROP NOT NULL;"],
         "189 may only drop NOT NULL on agent_picture_mark.run_id"
     );
+}
+
+#[test]
+fn the_block_is_the_same_text_in_the_migration_and_both_bootstrap_files() {
+    let (_, migration) = block_of(MIGRATION, &read(MIGRATION));
+    for relative in [DEV, RUNTIME] {
+        let (_, copy) = block_of(relative, &read(relative));
+        assert_eq!(
+            migration, copy,
+            "{relative} drifted from the migration's block"
+        );
+    }
+}
+
+#[test]
+fn both_bootstrap_files_apply_the_block_after_they_grant_every_table() {
+    for relative in [DEV, RUNTIME] {
+        let text = read(relative);
+        let (begin, _) = block_of(relative, &text);
+        let grant = text
+            .rfind("ON ALL TABLES IN SCHEMA public")
+            .unwrap_or_else(|| panic!("{relative}: no ALL TABLES grant to come after"));
+        assert!(
+            grant < begin,
+            "{relative}: the lockdown must come after every ALL TABLES grant"
+        );
+        let defaults = text
+            .rfind("ALTER DEFAULT PRIVILEGES IN SCHEMA public")
+            .unwrap_or_else(|| panic!("{relative}: no default privileges"));
+        assert!(defaults < begin, "{relative}: the lockdown comes last");
+    }
 }

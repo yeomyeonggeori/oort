@@ -1024,8 +1024,9 @@ async fn one_token_is_one_picture_and_every_token_refusal_is_one_404() {
 async fn the_standing_is_asked_again_when_the_token_is_spent_and_when_the_row_is_written() {
     let _gate = GATE.lock().await;
     let w = boot().await;
-    let cases: [(&str, &str); 5] = [
+    let cases: [(&str, &str); 6] = [
         ("the credential is revoked", "UPDATE token SET revoked_at = now() WHERE workspace_id = $1 AND id = $2"),
+        ("the agent is paused", "UPDATE agent_profile SET paused = true WHERE workspace_id = $1 AND agent_member_id = (SELECT actor_member_id FROM token WHERE id = $2) AND $3 IS NOT NULL"),
         ("messages:write is taken back", "UPDATE hosted_agent_connection SET approved_scopes = array_remove(approved_scopes, 'messages:write') WHERE workspace_id = $1 AND active_token_id = $2"),
         ("the channel is no longer approved", "UPDATE hosted_agent_connection SET approved_channel_ids = array_remove(approved_channel_ids, $3) WHERE workspace_id = $1 AND active_token_id = $2"),
         ("the agent left the channel", "UPDATE membership SET left_at = now() WHERE workspace_id = $1 AND channel_id = $3 AND member_id = (SELECT actor_member_id FROM token WHERE id = $2)"),
@@ -1087,8 +1088,18 @@ async fn length_and_slot_refusals_come_before_the_token() {
         .expect("PUT");
     assert_eq!(response.status().as_u16(), 411);
     // more than 5 MiB
-    let seen = put(&w, &url, vec![0u8; FIVE_MIB + 1]).await;
-    assert_eq!(seen.status, 413, "{}", seen.body);
+    // announced, not sent: the answer comes from the head alone (sending the 5 MiB would race the
+    // server closing the connection after its early 413)
+    let status = head_then_part(
+        w.addr,
+        &path_of(&url),
+        FIVE_MIB + 1,
+        0,
+        Duration::from_secs(5),
+    )
+    .await
+    .expect("an answer from the head alone");
+    assert_eq!(status, 413);
     // the slot is held: busy, before the token
     let held = w.slots.clone().acquire_owned().await.expect("the one slot");
     let seen = put(&w, &url, png(32, 32)).await;
