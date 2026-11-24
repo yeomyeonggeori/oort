@@ -15,6 +15,7 @@ import {
   rememberConversation,
   rememberSearch,
 } from '../src/features/search/searchRecents';
+import {PUSH_ACTION_NATIVE_MODULE} from '../src/push/contract';
 import {SessionProvider, useSession} from '../src/session/useSession';
 import {__setNonSecretStore, NON_SECRET_KEYS} from '../src/storage/kv';
 import {
@@ -258,6 +259,55 @@ describe('로그아웃 — 알림 확장에게 건넨 것을 지운다 (#4316)',
     expect(isPushShowSenderOn()).toBe(false);
     expect(store.map.get(NON_SECRET_KEYS.pushPreview)).toBe('0');
     expect(store.map.get(NON_SECRET_KEYS.pushShowSender)).toBe('0');
+  });
+});
+
+// =============================================================================
+// #6036 · #6092 (보안 검수 r1 M3 · L1) — 로그아웃은 잠금 화면 답장의 보관 목록을 지운다.
+//
+// 목록은 사람이 쓴 글이고, 다음 사람의 이름으로 가면 안 된다. 「목록을 지운다」 함수만 따로 부르는 시험은 로그아웃이
+// 그것을 부르지 않게 돼도 초록이었다 — 여기서는 앱의 실제 `signOut` 으로 잰다. 그리고 처리기는 세션 항목이 있으면 답장을
+// 그 사람의 것으로 남기므로, 그 항목이 실제로 지워지기 **전** 몇 ms 사이에 온 답장도 남지 않아야 한다.
+// =============================================================================
+describe('로그아웃 — 잠금 화면 답장의 보관 목록을 지운다 (#6036 · #6092)', () => {
+  const requireNative = requireOptionalNativeModule as unknown as jest.Mock;
+  let list: Map<string, string>;
+
+  beforeEach(() => {
+    list = new Map([['aaaaaaaa-0000-4000-8000-000000000001', '{"v":1}']]);
+    requireNative.mockImplementation((name: string) => {
+      if (name === PUSH_ACTION_NATIVE_MODULE) {
+        return {
+          handlesReplyActions: true,
+          queuedReplies: () => [...list.values()],
+          removeQueuedReply: (id: string) => void list.delete(id),
+          markQueuedReplyRefused: () => true,
+          clearQueuedReplies: () => list.clear(),
+        };
+      }
+      return null;
+    });
+  });
+
+  afterEach(() => {
+    requireNative.mockImplementation(() => null);
+  });
+
+  it('로그아웃하는 그 순간 목록이 빈다 — 망도 키체인도 기다리지 않는다', () => {
+    signOutFromApp()();
+
+    expect(getAccessToken()).toBeNull();
+    expect(list.size).toBe(0);
+  });
+
+  it('첫 지우기 뒤 · 자격 지우기가 끝나기 전에 앞 사람 이름으로 남은 답장도, 자격 지우기가 끝난 뒤 지운다', async () => {
+    signOutFromApp()();
+    expect(list.size).toBe(0);
+
+    // 세션 항목을 지우는 일(`clearPushActionSession`, 비동기)이 끝나기 전에 처리기가 답장 하나를 앞 사람의 것으로 남겼다.
+    list.set('aaaaaaaa-0000-4000-8000-000000000002', '{"v":1}');
+
+    await waitFor(() => expect(list.size).toBe(0));
   });
 });
 
