@@ -272,7 +272,11 @@ pub async fn set_agent_reaction_in_tx(
     {
         return Ok(Err(AgentReactionRefused::Target));
     }
-    if let AgentReactionChoice::Expression(name) = &write.choice {
+    // Only a new reaction needs a usable expression: taking one off never does (R8, and the REST
+    // path's own rule — a hidden expression can still be withdrawn).
+    if let (AgentReactionChoice::Expression(name), ReactionAction::Added) =
+        (&write.choice, write.action)
+    {
         if !agent_expression_usable_in_tx(&mut *conn, write.workspace_id, name).await? {
             return Ok(Err(AgentReactionRefused::ExpressionUnavailable));
         }

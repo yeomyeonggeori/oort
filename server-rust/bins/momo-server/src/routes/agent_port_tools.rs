@@ -16,6 +16,8 @@
 //! | `oort_run_complete` | `routes::agent_gateway::complete_gateway_run_in_tx` |
 //! | `oort_action_propose` | `momo_agent::approval`'s producer — the *same* park #979 already wrote for tool calls |
 //! | `oort_card_suggest` | `momo_agent::card_suggest` (the gate the worker shares) + `momo_messaging::send_message_in_tx` |
+//! | `oort_reaction_set` | the card's run gate + `momo_messaging::agent_reaction::set_agent_reaction_in_tx` (ADR-0162 증보 8, #6068) |
+//! | `oort_expression_names` | the same run gate + `momo_messaging::agent_reaction::agent_expression_names_in_tx` |
 //!
 //! There is **no SQL in this file** beyond what those functions own, no second
 //! message or job ledger, and no Centrifugo publish: a hosted answer reaches a

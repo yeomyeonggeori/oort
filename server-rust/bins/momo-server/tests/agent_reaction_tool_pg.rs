@@ -958,6 +958,16 @@ async fn the_emoji_is_the_pickers_spelling_and_never_a_work_state() {
         agent_rows(&w, other_target).await,
         vec![":party:".to_string()]
     );
+    // Hidden afterwards: no new one, but the agent can still take its own off (R8).
+    exec(
+        &w.su,
+        "UPDATE expression SET status='hidden', hidden_at=now() WHERE workspace_id=$1 AND name='party'",
+        &[w.ws],
+    )
+    .await;
+    let (status, value) = react(&w, &handle, other_target, ":party:", "remove").await;
+    assert_eq!(ok(status, &value)["changed"], json!(true));
+    assert!(agent_rows(&w, other_target).await.is_empty());
 }
 
 // ---------------------------------------------------------------------------
@@ -1115,6 +1125,18 @@ async fn adds_and_removals_are_audited_and_refusals_only_traced() {
             "not the server's status reaction"
         );
     }
+
+    // The run's own ledger keeps each call as a `tool_call` row (name and closed code only).
+    assert_eq!(
+        count(
+            &w.su,
+            "SELECT count(*) FROM agent_run_event WHERE run_id=$1 AND kind='tool_call' \
+                AND tool='oort_reaction_set' AND code='ok'",
+            &[run],
+        )
+        .await,
+        2
+    );
 
     // Refusals: no audit line, and the call trace carries the closed cause.
     for (emoji, reason) in [
