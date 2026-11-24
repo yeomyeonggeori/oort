@@ -223,7 +223,7 @@ export function UpdateSection() {
         {!off && (
           <SettingsRow label="직접 확인" description="새 버전이 나왔는지 바로 물어봐요.">
             <Button
-              variant="outline"
+              variant="secondary"
               size="sm"
               disabled={busy}
               onClick={() => void checkForUpdate()}

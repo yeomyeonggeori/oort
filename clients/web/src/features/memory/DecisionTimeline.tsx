@@ -227,7 +227,7 @@ export function DecisionTimeline({
           </p>
           <div>
             <Button
-              variant="outline"
+              variant="secondary"
               size="sm"
               className="tap-target"
               aria-busy={list.isFetchingNextPage || undefined}

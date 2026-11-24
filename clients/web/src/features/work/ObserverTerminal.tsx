@@ -993,7 +993,7 @@ export function ObserverTerminal({
           </p>
           <Button
             type="button"
-            variant="outline"
+            variant="secondary"
             size="sm"
             onClick={() => void start()}
             data-testid="work-observer-start"
@@ -1126,7 +1126,7 @@ export function ObserverTerminal({
             {link === "unverified" && (
               <Button
                 type="button"
-                variant="outline"
+                variant="secondary"
                 size="sm"
                 onClick={() => void start()}
                 data-testid="work-observer-relink"
@@ -1154,7 +1154,7 @@ export function ObserverTerminal({
             </p>
             <Button
               type="button"
-              variant="outline"
+              variant="secondary"
               size="sm"
               onClick={jumpToTail}
               data-testid="work-observer-tail-jump"
@@ -1185,7 +1185,7 @@ export function ObserverTerminal({
             {!paneAtFullWidth && (
               <Button
                 type="button"
-                variant="outline"
+                variant="secondary"
                 size="sm"
                 className="pane-wide-toggle"
                 onClick={() => onWideChange(true)}
@@ -1233,7 +1233,7 @@ export function ObserverTerminal({
           <div className="flex flex-wrap items-center gap-2 pt-1">
             <Button
               type="button"
-              variant="outline"
+              variant="secondary"
               size="sm"
               onClick={stop}
               data-testid="work-observer-stop"

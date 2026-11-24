@@ -325,7 +325,7 @@ export function MemoryBrowserRoute() {
                     detail={BROWSER_NO_MATCH_DETAIL}
                     actions={
                       <Button
-                        variant="outline"
+                        variant="secondary"
                         size="sm"
                         className="tap-target"
                         onClick={() => {
@@ -390,7 +390,7 @@ export function MemoryBrowserRoute() {
                   {list.hasNextPage && (
                     <div className="px-4 py-3">
                       <Button
-                        variant="outline"
+                        variant="secondary"
                         size="sm"
                         className="tap-target"
                         aria-busy={list.isFetchingNextPage || undefined}

@@ -840,7 +840,7 @@ export function DisplayController({
           <div className="px-4 pb-2 pt-1">
             <Button
               type="button"
-              variant="outline"
+              variant="secondary"
               size="sm"
               onClick={onDone}
               data-testid="work-control-dismiss"
@@ -867,7 +867,7 @@ export function DisplayController({
           <div className="px-4 pb-2 pt-1">
             <Button
               type="button"
-              variant="outline"
+              variant="secondary"
               size="sm"
               onClick={onDone}
               data-testid="work-control-dismiss"
@@ -889,7 +889,7 @@ export function DisplayController({
           </p>
           <Button
             type="button"
-            variant="outline"
+            variant="secondary"
             size="sm"
             onClick={onDone}
             data-testid="work-control-dismiss"
@@ -1000,7 +1000,7 @@ export function DisplayController({
             <Button
               ref={returnButtonRef}
               type="button"
-              variant="outline"
+              variant="secondary"
               size="sm"
               onClick={() =>
                 void endControl(autoReturnFor({ kind: "person_returned" }))
@@ -1089,7 +1089,7 @@ export function ControlInvite({
       <div className="pt-2">
         <Button
           type="button"
-          variant="outline"
+          variant="secondary"
           size="sm"
           onClick={() => onArm(true)}
           data-testid="work-control-start"
@@ -1108,7 +1108,7 @@ export function ControlInvite({
       <div className="flex flex-wrap items-center gap-2">
         <Button
           type="button"
-          variant="outline"
+          variant="secondary"
           size="sm"
           onClick={onStart}
           data-testid="work-control-confirm-start"

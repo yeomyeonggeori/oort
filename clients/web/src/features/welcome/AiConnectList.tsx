@@ -264,7 +264,7 @@ function LoginRow({
       </p>
       <Button
         type="button"
-        variant="outline"
+        variant="secondary"
         size="sm"
         className="ai-connect-term-action ai-connect-secondary"
         aria-describedby={hintId}

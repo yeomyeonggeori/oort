@@ -148,7 +148,7 @@ export function AgentIdentityCard({
                 <Button
                   type="button"
                   size="sm"
-                  variant="outline"
+                  variant="secondary"
                   ref={editButton}
                   className="self-start"
                   disabled={offline}

@@ -570,7 +570,7 @@ const AddButton = forwardRef<HTMLButtonElement, { onClick: () => void }>(
         ref={ref}
         type="button"
         size="sm"
-      variant="outline"
+      variant="secondary"
         className="tap-target"
         onClick={onClick}
         data-testid="subscription-entry-open"

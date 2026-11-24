@@ -139,7 +139,7 @@ export function ProviderQuotaBlock({ workspaceId }: { workspaceId: string }) {
       // longer drop the keyboard.
       action={
         <Button
-          variant="outline"
+          variant="secondary"
           size="sm"
           onClick={() => {
             if (!query.isFetching) void query.refetch();

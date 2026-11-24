@@ -811,7 +811,7 @@ function CleanupPanel({
             // 그것을 말한다.
             <Button
               type="button"
-              variant="outline"
+              variant="secondary"
               size="sm"
               aria-disabled={repairLocked || undefined}
               aria-busy={repairing || undefined}

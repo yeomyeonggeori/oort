@@ -409,7 +409,7 @@ function TeamBoard({ offline, workspaceId }: { offline: boolean; workspaceId: st
       <Button
         ref={addRef}
         type="button"
-        variant="outline"
+        variant="secondary"
         size="sm"
         className="tap-target"
         onClick={() => startEditing()}

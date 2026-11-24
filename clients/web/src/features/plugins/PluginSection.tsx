@@ -383,7 +383,7 @@ export function PluginSection({ offline }: { offline: boolean }) {
             ? COPY.empty.noneRegistered
             : COPY.empty.filtered}
           actions={catalogQuery.data.plugins.length > 0 ? (
-            <Button variant="outline" size="sm" onClick={() => { setQuery(""); setFilter("all"); }}>
+            <Button variant="secondary" size="sm" onClick={() => { setQuery(""); setFilter("all"); }}>
               필터 지우기
             </Button>
           ) : undefined}
@@ -863,7 +863,7 @@ function PluginActions({
           detail={detail}
           scopes={activeScopes}
           label="내 권한 회수"
-          variant="outline"
+          variant="secondary"
           busy={isScopePending("revoke")}
           blocked={isScopeBlockedBySibling("revoke")}
           offline={offline}
@@ -884,7 +884,7 @@ function PluginActions({
             key="management"
             action={managementAction}
             label="설치 해제"
-            variant="outline"
+            variant="secondary"
             busy={isPending(managementAction)}
             blocked={isBlockedBySibling(managementAction)}
             offline={offline}
@@ -918,7 +918,7 @@ function PluginScopeConsentButton({
   detail: PluginDetail;
   scopes: string[];
   label: string;
-  variant?: "default" | "outline";
+  variant?: "default" | "outline" | "secondary";
   busy: boolean;
   blocked: boolean;
   offline: boolean;
@@ -973,7 +973,7 @@ function PluginActionButton({
 }: {
   action: PluginManagementAction;
   label: string;
-  variant?: "default" | "outline" | "destructive";
+  variant?: "default" | "outline" | "secondary" | "destructive";
   busy: boolean;
   blocked: boolean;
   offline: boolean;
@@ -1305,7 +1305,7 @@ function PluginScopeConsentDialog({
 
         <div className="flex items-center justify-end gap-2 border-t border-line p-4">
           <Button
-            variant="outline"
+            variant="secondary"
             size="sm"
             aria-disabled={pending || undefined}
             // 한 푸터, 한 폭(MOMO-676 M-3). 결정 버튼이 라벨로 상태를 말하느라
@@ -1403,7 +1403,7 @@ function ConfirmPluginAction({ action, pending, opener, onCancel, onConfirm }: {
               안 움직이는데, 144px를 빌려오면 47px 옆에 144px가 서서 3:1이 된다.
               여기 가장 긴 상태를 14px 여유로 담는 96px를 양쪽이 함께 쓴다. */}
           <div className="flex justify-end gap-2">
-            <Button variant="outline" size="sm" className="min-w-action-sm" disabled={pending} onClick={onCancel}>취소</Button>
+            <Button variant="secondary" size="sm" className="min-w-action-sm" disabled={pending} onClick={onCancel}>취소</Button>
             <Button
               variant="destructive"
               size="sm"

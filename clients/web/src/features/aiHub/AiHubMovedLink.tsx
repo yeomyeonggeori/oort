@@ -26,7 +26,7 @@ export function AiHubMovedLink({ section }: { section: string }) {
   return (
     <SettingsSection testId="ai-hub-moved-link" className="mb-4">
       <SettingsRow label={row?.settingsLine ?? AI_HUB_NAV_COPY.movedToHub}>
-        <Button asChild variant="outline" size="sm">
+        <Button asChild variant="secondary" size="sm">
           <Link to={to}>
             {AI_HUB_NAV_COPY.movedToHubAction}
             <ArrowUpRight aria-hidden />
