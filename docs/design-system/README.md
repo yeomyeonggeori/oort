@@ -643,6 +643,22 @@ owner 물음 「우리 저 부분 디자인 시스템에서 컴포넌트로 구�
 
 기계: `shellNarrowFloor.browser.test.ts`(WebKit·Chromium 계산 기하와 접힘 `transitionend`), `desktopShell.ds2.test.ts`(양보 선언의 자리), `gate:work-panel`의 `narrow-shell-*`(렌더된 앱, red proof `WORK_PANEL_GATE_PROVE_RED_SIDEBAR`).
 
+### 2.16 단축키 창 — 두 열 · 찾기 · 선 없는 묶음 ([#6081](https://github.com/yeomyeonggeori/oort/issues/6081), 2026-11-20 시안 장면 2 추천안)
+
+「?」로 여는 키보드 단축키 창(`app/ShortcutHelpDialog.tsx`)의 규격이다. 줄마다 선을 긋던 한 열 512 창이 표처럼 빽빽하고 길었다. 값은 모두 위 축(§2.3 간격 · §2.4 반경 · §2.5 타이포)의 이름이고 새 토큰은 없다.
+
+| 칸 | 규격 |
+|---|---|
+| 그릇 | 공용 `Dialog` 그대로(반경 20), 폭만 `max-w-pane-lg`(640). `DialogContent` 에는 여백을 주지 않고(대화 상자 여백 덮어쓰기 천장, `handBuiltResidue.test.ts`) 속의 세 칸이 각자 진다 |
+| 머리 | `px-6 pt-6`, 제목(`DialogTitle`)과 찾기 칸 사이 12(`gap-3`). 설명 문장 · 「닫기」 단추 줄은 없다: Esc · 바깥 누르기로 닫히고 바닥 한 줄이 다시 여는 키를 말한다 |
+| 찾기 칸 | 공용 `Input` + 앞의 `Search`(`size-4 text-ink-muted`, 안쪽 여백 `ps-8`), §2.14 ①의 목록 위 찾기 칸과 같은 그릇. 열리면 캐럿이 여기 선다. 친 말의 낱말마다 줄의 설명 · 묶음 머리 · 키캡 안에 있어야 남고, 마지막 낱말은 한글 조합 중이어도 맞는다(ADR-0225 D12 `looseTailIncludes`, ⌘K 팔레트와 같은 규칙). 0건이면 빈 상태 한 문장(`text-label text-ink-muted`) |
+| 몸 | `px-4 pt-4 pb-2`, 스크롤 상자. 몸 폭이 `@xl`(36rem) 이상이면 두 열(`gap-x-6`), 아니면 한 열 — 좁은 창과 큰 글자(200%)에서 한 열로 접힌다. 묶음은 차례를 지키며 앞에서부터 왼쪽 열을 채우다 절반(줄 + 머리)에 닿으면 오른쪽으로 간다. 묶음 사이 16(`gap-4`) |
+| 묶음 머리 | `h2`, `text-meta font-semibold text-ink-muted`, `px-2 pb-1`. **선이 아니라 이 머리와 여백이 묶음을 가른다** — 창 안에 위 · 아래 테두리는 찾기 칸 하나뿐이다 |
+| 줄 | `min-h-control`(32) · `px-2 py-1` · `gap-3` · `rounded-md`(10). 설명 `text-label text-ink`(줄바꿈 허용, 말줄임 없음), 키캡은 `Keycaps variant="inline"`. 가리킨 줄만 `hover:bg-surface-hover`. 줄 사이 선 없음 |
+| 바닥 | `px-4 pt-2 pb-4`, 양 끝 정렬(좁으면 감김). 왼쪽 `Button variant="ghost" size="sm"` 「단축키 바꾸기」 + `ArrowRight`(설정 › 단축키로, 이미 설정 안이면 기록을 쌓지 않는다). 오른쪽 `text-meta text-ink-muted` 「[?]로 다시 열 수 있어요」, 키캡은 사전 문장의 `{key}` 자리에 선다 |
+
+기계: `ShortcutHelpDialog.test.tsx`(찾기 · 빈 상태 · 첫 캐럿 · 설정으로 가기), `clients/web/scripts/capture-6081.mjs`(Chromium 배율 2 · 밝게 · 어둡게: 폭 1280 · 720 에서 창 640 · 두 열, 390 · 글자 200% 에서 한 열, 가로 넘침 0, 선 0, 잘린 글 0, 한글 조합 중 거르기, 가리킨 줄만 바탕).
+
 ---
 
 ## 3. 위계 규칙 — 파괴 > 주 > 보조

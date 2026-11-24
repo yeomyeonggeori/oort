@@ -1692,6 +1692,10 @@ export const messageKeys = [
   "settings.profile.languageReload",
   "settings.profile.languageRetry",
   "settings.profile.languageSystem",
+  "settings.shortcutHelp.change",
+  "settings.shortcutHelp.empty",
+  "settings.shortcutHelp.reopenHint",
+  "settings.shortcutHelp.search",
   "settings.updates.cutLine",
   "settings.updates.cutPanes",
   "settings.updates.cutSessions",
@@ -4373,6 +4377,12 @@ export const argumentSpecs = {
   "settings.profile.languageReload": {},
   "settings.profile.languageRetry": {},
   "settings.profile.languageSystem": {},
+  "settings.shortcutHelp.change": {},
+  "settings.shortcutHelp.empty": {},
+  "settings.shortcutHelp.reopenHint": {
+    "key": "string"
+  },
+  "settings.shortcutHelp.search": {},
   "settings.updates.cutLine": {
     "items": "string"
   },
@@ -6943,6 +6953,10 @@ export interface MessageArgs {
   "settings.profile.languageReload": Record<string, never>;
   "settings.profile.languageRetry": Record<string, never>;
   "settings.profile.languageSystem": Record<string, never>;
+  "settings.shortcutHelp.change": Record<string, never>;
+  "settings.shortcutHelp.empty": Record<string, never>;
+  "settings.shortcutHelp.reopenHint": { key: string };
+  "settings.shortcutHelp.search": Record<string, never>;
   "settings.updates.cutLine": { items: string };
   "settings.updates.cutPanes": { count: number };
   "settings.updates.cutSessions": { count: number };

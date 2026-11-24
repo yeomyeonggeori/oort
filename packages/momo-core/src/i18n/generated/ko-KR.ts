@@ -11615,6 +11615,34 @@ export const catalog: MessageCatalog = {
       "value": "기기 언어 따르기"
     }
   ],
+  "settings.shortcutHelp.change": [
+    {
+      "type": 0,
+      "value": "단축키 바꾸기"
+    }
+  ],
+  "settings.shortcutHelp.empty": [
+    {
+      "type": 0,
+      "value": "맞는 단축키가 없어요"
+    }
+  ],
+  "settings.shortcutHelp.reopenHint": [
+    {
+      "type": 1,
+      "value": "key"
+    },
+    {
+      "type": 0,
+      "value": "로 다시 열 수 있어요"
+    }
+  ],
+  "settings.shortcutHelp.search": [
+    {
+      "type": 0,
+      "value": "단축키 찾기"
+    }
+  ],
   "settings.updates.cutLine": [
     {
       "type": 0,

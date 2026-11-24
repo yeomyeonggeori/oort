@@ -119,5 +119,9 @@
   "settings.notifications.phoneDelayRetry": "Try again",
   "settings.notifications.phoneDelaySaveFailed": "Couldn't save the phone alert delay. Try again in a moment.",
   "settings.notifications.threadReplyName": "New replies in followed threads",
-  "settings.notifications.threadReplyDescription": "New replies from others in threads you follow."
+  "settings.notifications.threadReplyDescription": "New replies from others in threads you follow.",
+  "settings.shortcutHelp.search": "Search shortcuts",
+  "settings.shortcutHelp.empty": "No matching shortcuts",
+  "settings.shortcutHelp.change": "Change shortcuts",
+  "settings.shortcutHelp.reopenHint": "Press {key} to open this again"
 }

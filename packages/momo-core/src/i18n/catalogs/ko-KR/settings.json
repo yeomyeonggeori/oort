@@ -119,5 +119,9 @@
   "settings.notifications.phoneDelayRetry": "다시 시도",
   "settings.notifications.phoneDelaySaveFailed": "폰 알림 늦추기를 저장하지 못했어요. 잠시 후 다시 시도하세요.",
   "settings.notifications.threadReplyName": "참여한 스레드의 새 답글",
-  "settings.notifications.threadReplyDescription": "따라가는 스레드에 남이 쓴 새 답글이에요."
+  "settings.notifications.threadReplyDescription": "따라가는 스레드에 남이 쓴 새 답글이에요.",
+  "settings.shortcutHelp.search": "단축키 찾기",
+  "settings.shortcutHelp.empty": "맞는 단축키가 없어요",
+  "settings.shortcutHelp.change": "단축키 바꾸기",
+  "settings.shortcutHelp.reopenHint": "{key}로 다시 열 수 있어요"
 }
