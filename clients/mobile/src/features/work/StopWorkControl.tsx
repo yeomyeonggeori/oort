@@ -14,9 +14,9 @@ import {
 } from '@momo/core/features/work/stopWork';
 import {useQueryClient} from '@tanstack/react-query';
 import React, {useEffect, useState} from 'react';
-import {AccessibilityInfo, Pressable, StyleSheet, Text, View} from 'react-native';
+import {AccessibilityInfo, StyleSheet, Text, View} from 'react-native';
 
-import {SectionLabel, Sentence} from '../../design/atoms';
+import {DangerButton, OutlineButton, SectionLabel, Sentence} from '../../design/atoms';
 import {useStyles} from '../../design/theme';
 import {
   ds2Radius,
@@ -24,7 +24,6 @@ import {
   line,
   SAFE_GUTTER,
   space,
-  TOUCH_TARGET,
   type Palette,
 } from '../../design/tokens';
 import {haptics} from '../../lib/haptics';
@@ -161,51 +160,34 @@ export function StopWorkControlView({
             {note?.text ?? ''}
           </Sentence>
         ) : stage === 'idle' ? (
-          <Pressable
-            accessibilityRole="button"
+          <OutlineButton
+            label="멈추기"
             accessibilityLabel="작업 멈추기"
             accessibilityHint="확인 단계가 한 번 나와요"
             onPress={onAsk}
-            style={({pressed}) => [styles.ask, pressed && styles.pressed]}
-            testID="work-stop-ask">
-            <Text style={styles.askLabel}>멈추기</Text>
-          </Pressable>
+            testID="work-stop-ask"
+          />
         ) : (
           <View style={styles.confirm} testID="work-stop-confirm">
             <Text accessibilityRole="header" style={styles.confirmAsk}>
               {STOP_CONFIRM_ASK}
             </Text>
             <Sentence style={styles.hint}>{STOP_CONFIRM_DETAIL}</Sentence>
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel={busy ? STOP_BUSY_LINE : '이 작업 멈추기'}
-              accessibilityState={{disabled: busy, busy}}
-              disabled={busy}
+            <DangerButton
+              label="멈추기"
+              busyLabel={STOP_BUSY_LINE}
+              busy={busy}
+              accessibilityLabel="이 작업 멈추기"
               onPress={onConfirm}
-              style={({pressed}) => [
-                styles.danger,
-                busy && styles.inert,
-                pressed && !busy && styles.dangerPressed,
-              ]}
-              testID="work-stop-confirm-button">
-              <Text style={styles.dangerLabel}>
-                {busy ? STOP_BUSY_LINE : '멈추기'}
-              </Text>
-            </Pressable>
-            <Pressable
-              accessibilityRole="button"
+              testID="work-stop-confirm-button"
+            />
+            <OutlineButton
+              label="계속 두기"
               accessibilityLabel="멈추지 않고 계속 두기"
-              accessibilityState={{disabled: busy}}
               disabled={busy}
               onPress={onCancel}
-              style={({pressed}) => [
-                styles.cancel,
-                busy && styles.inert,
-                pressed && !busy && styles.pressed,
-              ]}
-              testID="work-stop-cancel">
-              <Text style={styles.cancelLabel}>계속 두기</Text>
-            </Pressable>
+              testID="work-stop-cancel"
+            />
           </View>
         )}
         {note?.failed ? (
@@ -228,56 +210,10 @@ const buildStyles = (color: Palette) =>
     line: {fontSize: font.label, lineHeight: line.label, color: color.text},
     hint: {fontSize: font.meta, lineHeight: line.meta, color: color.textMuted},
     dangerText: {color: color.dangerText},
-    ask: {
-      minHeight: TOUCH_TARGET,
-      alignItems: 'center',
-      justifyContent: 'center',
-      borderRadius: ds2Radius.row,
-      borderWidth: 1,
-      borderColor: color.dangerBorder,
-      backgroundColor: color.surface,
-      paddingHorizontal: space.md,
-    },
-    askLabel: {
-      fontSize: font.label,
-      lineHeight: line.label,
-      color: color.dangerText,
-      fontWeight: '600',
-    },
     confirm: {gap: space.sm},
     confirmAsk: {
       fontSize: font.body,
       lineHeight: line.body,
-      color: color.text,
-      fontWeight: '600',
-    },
-    danger: {
-      minHeight: TOUCH_TARGET,
-      alignItems: 'center',
-      justifyContent: 'center',
-      borderRadius: ds2Radius.row,
-      backgroundColor: color.dangerFill,
-      paddingHorizontal: space.md,
-    },
-    dangerLabel: {
-      fontSize: font.label,
-      lineHeight: line.label,
-      color: color.onDangerFill,
-      fontWeight: '600',
-    },
-    cancel: {
-      minHeight: TOUCH_TARGET,
-      alignItems: 'center',
-      justifyContent: 'center',
-      borderRadius: ds2Radius.row,
-      borderWidth: 1,
-      borderColor: color.textFaint,
-      backgroundColor: color.surface,
-      paddingHorizontal: space.md,
-    },
-    cancelLabel: {
-      fontSize: font.label,
-      lineHeight: line.label,
       color: color.text,
       fontWeight: '600',
     },
@@ -293,7 +229,4 @@ const buildStyles = (color: Palette) =>
       paddingHorizontal: space.sm,
       paddingVertical: space.xs,
     },
-    inert: {opacity: 0.5},
-    dangerPressed: {opacity: 0.85},
-    pressed: {backgroundColor: color.surfacePressed},
   });

@@ -8,9 +8,9 @@
 
 | 판정 | 칸 수 | 뜻 |
 |---|---|---|
-| **없음** | **3** | 그 일의 규격 절이 문서 어디에도 없다 — 웹 「고르개」 · 폰 「단추」 · 폰 「칩 · 배지」 |
+| **없음** | **2** | 그 일의 규격 절이 문서 어디에도 없다 — 웹 「고르개」 · 폰 「칩 · 배지」 |
 | 부분 | 14 | 절은 있으나 치수 · 상태 표 없이 일부만 다룬다(규칙 한 문단, 한 화면의 사례, 표면 단위 규칙 등) |
-| 있음 | 8 | 부품의 구성 · 치수 · 상태가 한 절에 있다 |
+| 있음 | 9 | 부품의 구성 · 치수 · 상태가 한 절에 있다 |
 | 해당 없음 | 3 | 그 표면에는 그 부품이 필요 없다 |
 
 규격 절이 생기거나 사라지면 이 표와 아래 표의 해당 칸을 같은 PR에서 고친다.
@@ -21,7 +21,7 @@
 
 | 일 | 웹 부품 | 폰 부품 | 규격(웹) | 규격(폰) | 상태 견본 | 지키는 시험 |
 |---|---|---|---|---|---|---|
-| 단추 | `Button` (`ui/button.tsx`) — 변형 5 · 크기 4 | `PrimaryButton` · `OutlineButton` (`atoms.tsx`). 화면이 따로 만든 단추 10종은 공용이 아니다 | 부분 — README §2.2(106행) · §3 위계. 변형·크기·상태 표는 없음 | 없음 | 웹 `Gallery.tsx`의 Button 상태 행 · 변형 4 · 원형 아이콘 단추 / 폰 견본 자리 없음 | 웹 `designSystem.test.ts` · `controlBorders.test.ts` · `pressLedger.test.ts` · `focusRing.test.ts` / 폰 `primaryButton.test.tsx` · `designSystem.test.ts`(스윕) |
+| 단추 | `Button` (`ui/button.tsx`) — 변형 5 · 크기 4 | `PrimaryButton` · `OutlineButton` · `QuietButton` · `DangerButton` (`atoms.tsx`) — 종류 4 · 크기 2. 화면이 따로 만든 단추 6종은 공용이 아니다(아래 「폰 단추」 절) | 부분 — README §2.2(106행) · §3 위계. 변형·크기·상태 표는 없음 | 있음 — 이 문서 「폰 단추」 절 | 웹 `Gallery.tsx`의 Button 상태 행 · 변형 4 · 원형 아이콘 단추 / 폰 `measure/buttons.tsx`(`BUTTONS` · `LIGHT-BUTTONS`) | 웹 `designSystem.test.ts` · `controlBorders.test.ts` · `pressLedger.test.ts` · `focusRing.test.ts` / 폰 `buttonFamily.test.tsx`(규격 표) · `primaryButton.test.tsx`(주 = 잉크) · `designSystem.test.ts`(스윕) · `designSystemResidue.test.ts`(손 `Pressable` 천장) |
 | 입력 | `Input` (`ui/input.tsx`). 여러 줄 입력 · 체크박스 · 라디오는 부품 없음 | `InputPill` (`sheetParts.tsx`). `Field` · `TextArea` · `FieldLabel`은 `shell/sheetForm.tsx`에 임시 | 부분 — README §2.2(106 · 109행) · §2.4(입력 그릇 반경) | 부분 — phone-sheets §4 · §7(임시 표) | 웹 Gallery의 Input · Select 행(rest · focus · disabled) / 폰 `measure/sheetKit.tsx`의 `status` 장면 | 웹 `controlBorders.test.ts` · `fieldTextFloor.browser.test.ts` / 폰 `sheetForm.test.tsx` · `sheetKit.test.tsx`(입력 알약 외곽선) |
 | 고르개 | `Select` · `ListboxSelect` · `SegmentedControl` · `Switch` · `Slider` (`ui/`), `FilterTabs` (`features/common`) | 전용 부품 없음. 라디오 행 `ChoiceRow` · 켜짐 줄은 `ListRow`의 `role="switch"` | 없음 — — | 부분 — phone-sheets §4(`ChoiceRow` · 행의 역할) | 웹 Gallery(Select · ListboxSelect · SegmentedControl · Switch · Slider. `FilterTabs`는 없음) / 폰 `measure/sheetKit.tsx` | 웹 `ListboxSelect.test.tsx` · `segmentedControl.test.tsx` · `switch.test.tsx` · `slider.test.tsx` / 폰 `sheetParts.test.tsx` |
 | 대화 상자 · 시트 | `Dialog` (`ui/dialog.tsx`) · `ConfirmDialog` · `ConfirmStage` (`ui/confirm-dialog.tsx`) | `PageSheet` · `SheetScroll` · `ConfirmStep` (`PageSheet.tsx` · `sheetParts.tsx`) | 부분 — README §2.14 ⑤(확인 창) · §3.4(겹침 층). `Dialog` 크기·여백 규격은 없음 | 있음 — phone-sheets §1 ~ §3 · §6 | 웹 Gallery의 「떠 있는 표면」 · 확인 창 견본 / 폰 `measure/sheetKit.tsx` | 웹 `dialog.test.ts` · `dialogEntryDismiss.test.tsx` · `ConfirmDialog.test.tsx` · `escapeLayer.test.ts` · `overlayLayers.test.ts` / 폰 `sheetKit.test.tsx` · `sheetDrag.test.tsx` · `sheetInventory.test.ts` |
@@ -87,7 +87,7 @@
 | `GroupCard` · `GroupCardItem` · `GroupLabel` · `ActionTile` · `ActionTileRow` · `TileIcon` | `design/sheetParts.tsx` | 묶음 |
 | `SectionLabel` | `design/atoms.tsx` | 묶음 |
 | `InputPill` | `design/sheetParts.tsx` | 입력 |
-| `PrimaryButton` · `OutlineButton` | `design/atoms.tsx` | 단추 |
+| `PrimaryButton` · `OutlineButton` · `QuietButton` · `DangerButton` | `design/atoms.tsx` | 단추 |
 | `CountBadge` | `design/atoms.tsx` | 칩 · 배지 (쓰는 곳 없음) |
 | `EmptyState` · `LoadingState` · `ErrorState` · `NoticeBlock` · `FailureBanner` · `Sentence` | `design/atoms.tsx` | 빈 · 로딩 · 오류 |
 | `OortLoader` | `design/brand/OortLoader.tsx` | 로더 |
@@ -102,9 +102,45 @@
 
 `design/` 밖에 임시로 둔 공용(`shell/sheetForm.tsx`의 `Field` · `TextArea` · `FieldLabel` · `SheetNotice`)은 phone-sheets §7 표가 정식 자리를 적는다. 폰 `Avatar`는 `features/conversation/Avatar.tsx`에 있고 `design/`이 아니다.
 
+## 폰 단추
+
+> #6075 (2026-11-25). 모양은 2026-11-20 시안 장면 4의 추천안(알약)이다. 부품은 `clients/mobile/src/design/atoms.tsx`, 치수 이름은 `clients/mobile/src/design/tokens.ts`의 `BUTTON`, 견본은 `clients/mobile/measure/buttons.tsx`, 규격 표의 주인 시험은 `clients/mobile/__tests__/buttonFamily.test.tsx`다.
+
+웹과 같은 네 종류 · 같은 낱말 · 같은 채움 규칙이다(부품은 두 표면이 공유하지 않는다 — ADR-0159). 네 종류는 몸이 하나라 props도 하나다: `label` · `onPress` · `busy` · `busyLabel` · `disabled` · `size` · `icon` · `accessory` · `flush` · `accessibilityLabel` · `accessibilityHint` · `testID`. 앞의 둘(`PrimaryButton` · `OutlineButton`)은 이름과 호출 모양을 그대로 두었다.
+
+| 종류 | 부품 | 채움 | 글자색 | 언제 |
+|---|---|---|---|---|
+| 주 | `PrimaryButton` | 잉크 `primary` | `onPrimary` | 화면의 주 행동 하나. 신호색(`accent`) · 커스텀 강조색은 칠하지 않는다(ADR-0189 D3) |
+| 보조 | `OutlineButton` | 시트 위 알약 문법 `circleLook` — 라이트 `surface` + 쉼 그림자, 다크 `surfaceMuted` + 가장자리 한 줄 | `text` | 주 행동 곁의 다른 길(「취소」 · 「다시 불러오기」 · 「거부」) |
+| 조용한 | `QuietButton` | 없음 | `text` | 막대 끝의 「뒤로」 · 「취소」 · 언어 칩. 막대 끝에서는 `flush` |
+| 위험 | `DangerButton` | `dangerFill` | `onDangerFill` | 되돌리기 어려운 행동의 확인(「멈추기」 · 「거부 보내기」) |
+
+| 치수 | 기본 | 작게 | 이름 |
+|---|---|---|---|
+| 높이 | 44 | 38 — 누르는 자리는 위아래 슬롭(`slopTo(38)` = 3)으로 44 | `BUTTON.height` · `BUTTON.smallHeight` |
+| 옆 여백 | 20(시안 제안 값 — 이 절에서 확정) | 16 | `BUTTON.padX` · `BUTTON.smallPadX` |
+| 모서리 | 알약 | 알약 | `radius.pill` |
+| 낱말 | `font.body` 16 · 600 · 줄 `line.body` | `font.label` 13 · 600 · 줄 `line.label` | 시안의 작게 14는 역할 표에 없어 가장 가까운 역할(13)로 둔다 |
+| 표시기 · 아이콘과 낱말 사이 | 8 | 8 | `BUTTON.gap` |
+| 두 줄로 접힐 때 위아래 | 8 | 8 | `BUTTON.padY` — 한 줄이면 높이는 `minHeight`가 정한다 |
+| 큰 글자 상한 | `BUTTON_MAX_SCALE` = 바 컨트롤과 같은 1.6 | 같음 | 단추는 크롬이다(`atoms.tsx` 머리의 상한 정책). 곁의 설명 문장은 상한이 없다 |
+
+| 상태 | 모양 | 값 |
+|---|---|---|
+| 쉼 | 제 채움 + 제 글자색 | — |
+| 눌림 | 채움을 갈아 끼우지 않고 흐림만 | `PRESSED_OPACITY` 0.6 |
+| 잠김 | 같은 채움을 흐리게(`disabled`이고 진행 중이 아닐 때). 눌러도 모양이 안 변한다 | `DISABLED_OPACITY` 0.55 |
+| 진행 중 | 채움 그대로 + 표시기 + 낱말(`busyLabel`, 맨몸 「저장 중」 — 표시기가 돌므로 말줄임을 붙이지 않는다). 흐리지 않는다. `disabled`를 같이 줘도 진행이 이긴다 | — |
+
+- **막대 끝(`flush`)**: 조용한 단추가 막대의 여백 선에 낱말을 맞춘다 — 옆 여백을 걷고 `justifyContent`를 그쪽 끝으로, 상자는 `TOUCH_TARGET` 아래로 좁아지지 않는다. 채움이 없어 걷은 여백은 보이지 않는다.
+- **잠김의 거래**: 앞 판의 주 단추는 잠기면 옅은 칸 + `textMuted` 글자로 서서 낱말 대비 4.5:1을 지켰다(#5100 · #5170 L1). 이 절은 시안의 「같은 채움을 흐리게」를 따른다. 바탕에 합성한 낱말 대비는 주 · 보조 · 조용한 3.7~3.8, 위험 2.5다(테마 3 × 모드 2, 바닥 · 시트 · 면 위 최저값). 잠긴 컨트롤은 WCAG 1.4.3의 예외다.
+- **보조 채움**: 시안은 `surfaceMuted`를 적었지만 폰 라이트 흑연 · 노을에서 그 값은 바닥 · 시트와 1.000:1이라 보조가 조용한 단추처럼 섰다. 그래서 시트 위 알약 문법(`circleLook`, phone-sheets §4)을 쓴다. `buttonFamily.test.tsx`가 바닥 · 시트 위 채움 대비 1.05 이상을 잰다.
+
+**화면이 따로 만든 단추 6종**(공용 아님, 다음 옮기기 칸 DS-14의 몫): `GlassButton` · `PillButton` · `TabButton` · `PlusButton` · `CodeCopyButton` · `ProfileAvatarButton`. 옮긴 것(#6075): `OnboardingButton` · `OnboardingGhostButton`(온보딩) · `SecondaryButton`(AI 연결 · 작업, 두 파일) · `DangerButton`(작업)과 작업 멈추기의 손 단추 셋.
+
 ## 폰 상태 값
 
-눌림 · 잠김의 흐림은 화면마다 숫자로 적지 않고 `clients/mobile/src/design/tokens.ts`의 이름으로 쓴다. 이름을 둔 것은 값이 같던 자리를 옮긴 것이고, 다른 흐림 값(눌림 0.85 · 0.8 · 0.86 · 0.7 · 0.5, 잠김 0.6 · 0.5 · 0.4 · 0.7)은 아직 화면마다 따로다 — 한 값으로 맞추면 화면이 바뀌므로 부품 칸에서 한다.
+눌림 · 잠김의 흐림은 화면마다 숫자로 적지 않고(단추 네 종류는 위 절의 값을 부품이 진다) `clients/mobile/src/design/tokens.ts`의 이름으로 쓴다. 이름을 둔 것은 값이 같던 자리를 옮긴 것이고, 다른 흐림 값(눌림 0.85 · 0.8 · 0.86 · 0.7 · 0.5, 잠김 0.6 · 0.5 · 0.4 · 0.7)은 아직 화면마다 따로다 — 한 값으로 맞추면 화면이 바뀌므로 부품 칸에서 한다.
 
 | 상태 | 이름 | 값 | 남은 숫자 | 지키는 시험 |
 |---|---|---|---|---|

@@ -14,7 +14,7 @@ import {QueryClientContext} from '@tanstack/react-query';
 import {refreshProfileAfterApproval} from '@momo/core/features/approvals/profileChange';
 import {replacePersistedMember} from '../../storage/secureSession';
 import {AccessibilityInfo, Pressable, StyleSheet, View} from 'react-native';
-import {font, radius, space, TOUCH_TARGET, type Palette} from '../../design/tokens';
+import {font, PRESSED_OPACITY, radius, space, TOUCH_TARGET, type Palette} from '../../design/tokens';
 import {Sentence} from '../../design/atoms';
 import {useStyles} from '../../design/theme';
 import {dismissApprovalNotifications} from '../../push/approvalNotifications';
@@ -363,7 +363,7 @@ export function ApprovalDecision({
             // 눌림은 **채움의 눌린 값**이다. 옅은 눌림 회색(`surfacePressed`)으로
             // 갈아 끼우면 채움의 흰 글자가 옅은 바탕에 앉는다(#3829 M4 — 라이트
             // 1:1 근처). 그래서 잉크 채움을 지키고 살짝 흐린다(웹 `hover:opacity-90` 의
-            // 짝): 상자는 atoms `PrimaryButton` 과 같은 0.86, 알약은 0.85.
+            // 짝): 상자는 atoms `PrimaryButton` 과 같은 `PRESSED_OPACITY`(#6075 에서 0.86 → 0.6), 알약은 0.85.
             pressed &&
               !busy &&
               canApprove &&
@@ -418,7 +418,7 @@ const buildStyles = (color: Palette) => StyleSheet.create({
   // 승인 단추는 한 색이다(알약의 `pillCommit`·셸 `PrimaryButton` 과 같은 역할).
   buttonCommit: {backgroundColor: color.primary},
   // 잉크 채움은 눌려도 잉크다 — 흐림만 낮춘다(atoms `PrimaryButton` 의 `buttonPressed` 와 같은 값).
-  buttonCommitPressed: {opacity: 0.86},
+  buttonCommitPressed: {opacity: PRESSED_OPACITY},
   // 잠긴 상자의 승인: 채움을 걷고 옅은 칸으로 두되 라벨은 `buttonLockedLabel` 이 읽히게 한다.
   buttonLocked: {backgroundColor: color.surfaceMuted},
   buttonInert: {opacity: 0.6},
