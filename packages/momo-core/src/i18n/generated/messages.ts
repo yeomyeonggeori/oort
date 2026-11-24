@@ -1585,6 +1585,39 @@ export const messageKeys = [
   "releaseNotes.version.current",
   "releaseNotes.version.label",
   "releaseNotes.version.releasedOn",
+  "reminders.action.complete",
+  "reminders.action.custom",
+  "reminders.action.delete",
+  "reminders.action.snooze",
+  "reminders.action.snoozeCommit",
+  "reminders.channel.unknown",
+  "reminders.confirm.detail",
+  "reminders.confirm.title",
+  "reminders.due.days",
+  "reminders.due.hours",
+  "reminders.due.minutes",
+  "reminders.due.overdue",
+  "reminders.due.soon",
+  "reminders.empty.detail",
+  "reminders.empty.headline",
+  "reminders.error.completeFailed",
+  "reminders.error.deleteFailed",
+  "reminders.error.forbiddenChange",
+  "reminders.error.forbiddenCreate",
+  "reminders.error.loadFailed",
+  "reminders.error.notFound",
+  "reminders.error.pastTime",
+  "reminders.error.saveFailed",
+  "reminders.error.snoozeFailed",
+  "reminders.item.fallbackPreview",
+  "reminders.menu.remind",
+  "reminders.notify.backlog",
+  "reminders.notify.title",
+  "reminders.preset.in1h",
+  "reminders.preset.in30m",
+  "reminders.preset.in3h",
+  "reminders.preset.nextMonday9",
+  "reminders.preset.tomorrow9",
   "reply.card.cancel",
   "reply.card.excerptEmpty",
   "reply.card.excerptExpression",
@@ -4602,6 +4635,47 @@ export const argumentSpecs = {
   "releaseNotes.version.releasedOn": {
     "date": "string"
   },
+  "reminders.action.complete": {},
+  "reminders.action.custom": {},
+  "reminders.action.delete": {},
+  "reminders.action.snooze": {},
+  "reminders.action.snoozeCommit": {},
+  "reminders.channel.unknown": {},
+  "reminders.confirm.detail": {},
+  "reminders.confirm.title": {},
+  "reminders.due.days": {
+    "count": "number"
+  },
+  "reminders.due.hours": {
+    "count": "number"
+  },
+  "reminders.due.minutes": {
+    "count": "number"
+  },
+  "reminders.due.overdue": {},
+  "reminders.due.soon": {},
+  "reminders.empty.detail": {},
+  "reminders.empty.headline": {},
+  "reminders.error.completeFailed": {},
+  "reminders.error.deleteFailed": {},
+  "reminders.error.forbiddenChange": {},
+  "reminders.error.forbiddenCreate": {},
+  "reminders.error.loadFailed": {},
+  "reminders.error.notFound": {},
+  "reminders.error.pastTime": {},
+  "reminders.error.saveFailed": {},
+  "reminders.error.snoozeFailed": {},
+  "reminders.item.fallbackPreview": {},
+  "reminders.menu.remind": {},
+  "reminders.notify.backlog": {
+    "count": "number"
+  },
+  "reminders.notify.title": {},
+  "reminders.preset.in1h": {},
+  "reminders.preset.in30m": {},
+  "reminders.preset.in3h": {},
+  "reminders.preset.nextMonday9": {},
+  "reminders.preset.tomorrow9": {},
   "reply.card.cancel": {},
   "reply.card.excerptEmpty": {},
   "reply.card.excerptExpression": {},
@@ -7786,6 +7860,39 @@ export interface MessageArgs {
   "releaseNotes.version.current": Record<string, never>;
   "releaseNotes.version.label": { version: string };
   "releaseNotes.version.releasedOn": { date: string };
+  "reminders.action.complete": Record<string, never>;
+  "reminders.action.custom": Record<string, never>;
+  "reminders.action.delete": Record<string, never>;
+  "reminders.action.snooze": Record<string, never>;
+  "reminders.action.snoozeCommit": Record<string, never>;
+  "reminders.channel.unknown": Record<string, never>;
+  "reminders.confirm.detail": Record<string, never>;
+  "reminders.confirm.title": Record<string, never>;
+  "reminders.due.days": { count: number };
+  "reminders.due.hours": { count: number };
+  "reminders.due.minutes": { count: number };
+  "reminders.due.overdue": Record<string, never>;
+  "reminders.due.soon": Record<string, never>;
+  "reminders.empty.detail": Record<string, never>;
+  "reminders.empty.headline": Record<string, never>;
+  "reminders.error.completeFailed": Record<string, never>;
+  "reminders.error.deleteFailed": Record<string, never>;
+  "reminders.error.forbiddenChange": Record<string, never>;
+  "reminders.error.forbiddenCreate": Record<string, never>;
+  "reminders.error.loadFailed": Record<string, never>;
+  "reminders.error.notFound": Record<string, never>;
+  "reminders.error.pastTime": Record<string, never>;
+  "reminders.error.saveFailed": Record<string, never>;
+  "reminders.error.snoozeFailed": Record<string, never>;
+  "reminders.item.fallbackPreview": Record<string, never>;
+  "reminders.menu.remind": Record<string, never>;
+  "reminders.notify.backlog": { count: number };
+  "reminders.notify.title": Record<string, never>;
+  "reminders.preset.in1h": Record<string, never>;
+  "reminders.preset.in30m": Record<string, never>;
+  "reminders.preset.in3h": Record<string, never>;
+  "reminders.preset.nextMonday9": Record<string, never>;
+  "reminders.preset.tomorrow9": Record<string, never>;
   "reply.card.cancel": Record<string, never>;
   "reply.card.excerptEmpty": Record<string, never>;
   "reply.card.excerptExpression": Record<string, never>;

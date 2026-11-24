@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   SCHEDULED_COPY,
-  SCHEDULED_UNKNOWN_CHANNEL_LABEL,
+  SCHEDULED_UNKNOWN_CHANNEL_KEY,
   dmConversationLabel,
   errorPlaceWord,
   failureLines,
@@ -157,7 +157,7 @@ describe("scheduled copy table (UI spec section 3)", () => {
     expect(say(dmConversationLabel("김인턴"))).toBe("김인턴과의 대화");
     expect(say(dmConversationLabel("하나"))).toBe("하나와의 대화");
     expect(say(dmConversationLabel("Hermes"))).toBe("Hermes와의 대화");
-    expect(SCHEDULED_UNKNOWN_CHANNEL_LABEL).toBe("알 수 없는 채널");
+    expect(ko(SCHEDULED_UNKNOWN_CHANNEL_KEY)).toBe("알 수 없는 채널");
   });
 });
 

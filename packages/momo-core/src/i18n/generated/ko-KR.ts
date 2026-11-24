@@ -10825,6 +10825,228 @@ export const catalog: MessageCatalog = {
       "value": " 공개"
     }
   ],
+  "reminders.action.complete": [
+    {
+      "type": 0,
+      "value": "완료"
+    }
+  ],
+  "reminders.action.custom": [
+    {
+      "type": 0,
+      "value": "날짜와 시간 고르기"
+    }
+  ],
+  "reminders.action.delete": [
+    {
+      "type": 0,
+      "value": "지우기"
+    }
+  ],
+  "reminders.action.snooze": [
+    {
+      "type": 0,
+      "value": "미루기"
+    }
+  ],
+  "reminders.action.snoozeCommit": [
+    {
+      "type": 0,
+      "value": "알림 미루기"
+    }
+  ],
+  "reminders.channel.unknown": [
+    {
+      "type": 0,
+      "value": "알 수 없는 채널"
+    }
+  ],
+  "reminders.confirm.detail": [
+    {
+      "type": 0,
+      "value": "완료한 알림은 목록에서 사라지고 되돌릴 수 없습니다."
+    }
+  ],
+  "reminders.confirm.title": [
+    {
+      "type": 0,
+      "value": "이 알림을 완료할까요?"
+    }
+  ],
+  "reminders.due.days": [
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "일 후"
+    }
+  ],
+  "reminders.due.hours": [
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "시간 후"
+    }
+  ],
+  "reminders.due.minutes": [
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "분 후"
+    }
+  ],
+  "reminders.due.overdue": [
+    {
+      "type": 0,
+      "value": "기한 지남"
+    }
+  ],
+  "reminders.due.soon": [
+    {
+      "type": 0,
+      "value": "곧"
+    }
+  ],
+  "reminders.empty.detail": [
+    {
+      "type": 0,
+      "value": "메시지 메뉴에서 나중에 알림을 누르면 여기 모입니다."
+    }
+  ],
+  "reminders.empty.headline": [
+    {
+      "type": 0,
+      "value": "아직 나중에 볼 메시지가 없습니다."
+    }
+  ],
+  "reminders.error.completeFailed": [
+    {
+      "type": 0,
+      "value": "알림을 완료하지 못했습니다. 다시 시도하세요."
+    }
+  ],
+  "reminders.error.deleteFailed": [
+    {
+      "type": 0,
+      "value": "알림을 지우지 못했습니다. 다시 시도하세요."
+    }
+  ],
+  "reminders.error.forbiddenChange": [
+    {
+      "type": 0,
+      "value": "이 계정으로는 그 알림을 바꿀 수 없습니다."
+    }
+  ],
+  "reminders.error.forbiddenCreate": [
+    {
+      "type": 0,
+      "value": "이 계정으로는 알림을 만들 수 없습니다."
+    }
+  ],
+  "reminders.error.loadFailed": [
+    {
+      "type": 0,
+      "value": "나중에 볼 메시지를 불러오지 못했습니다."
+    }
+  ],
+  "reminders.error.notFound": [
+    {
+      "type": 0,
+      "value": "그 알림을 찾지 못했습니다. 목록을 다시 불러 보세요."
+    }
+  ],
+  "reminders.error.pastTime": [
+    {
+      "type": 0,
+      "value": "지난 시각은 고를 수 없습니다. 다른 시각을 고르세요."
+    }
+  ],
+  "reminders.error.saveFailed": [
+    {
+      "type": 0,
+      "value": "알림을 저장하지 못했습니다. 다시 시도하세요."
+    }
+  ],
+  "reminders.error.snoozeFailed": [
+    {
+      "type": 0,
+      "value": "알림을 미루지 못했습니다. 다시 시도하세요."
+    }
+  ],
+  "reminders.item.fallbackPreview": [
+    {
+      "type": 0,
+      "value": "메시지"
+    }
+  ],
+  "reminders.menu.remind": [
+    {
+      "type": 0,
+      "value": "나중에 알림"
+    }
+  ],
+  "reminders.notify.backlog": [
+    {
+      "type": 0,
+      "value": "밀린 알림 "
+    },
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "건"
+    }
+  ],
+  "reminders.notify.title": [
+    {
+      "type": 0,
+      "value": "나중에 알림"
+    }
+  ],
+  "reminders.preset.in1h": [
+    {
+      "type": 0,
+      "value": "1시간 후"
+    }
+  ],
+  "reminders.preset.in30m": [
+    {
+      "type": 0,
+      "value": "30분 후"
+    }
+  ],
+  "reminders.preset.in3h": [
+    {
+      "type": 0,
+      "value": "3시간 후"
+    }
+  ],
+  "reminders.preset.nextMonday9": [
+    {
+      "type": 0,
+      "value": "다음 주 월요일 오전 9시"
+    }
+  ],
+  "reminders.preset.tomorrow9": [
+    {
+      "type": 0,
+      "value": "내일 오전 9시"
+    }
+  ],
   "reply.card.cancel": [
     {
       "type": 0,

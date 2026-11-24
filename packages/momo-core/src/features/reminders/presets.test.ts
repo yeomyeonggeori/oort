@@ -8,6 +8,11 @@ import {
   reminderPresetDueAtMs,
   REMINDER_PRESETS,
 } from "./presets";
+import { catalog as koCatalog } from "../../i18n/generated/ko-KR";
+import { createMessageCopy } from "../../testkit";
+
+// 프리셋 이름은 사전 키다(#6058). 한국어 생성물로 풀어 예전 한국어 이름을 그대로 단정한다.
+const ko = createMessageCopy({ messageLocale: "ko-KR", catalog: koCatalog });
 
 function at(
   year: number,
@@ -28,7 +33,7 @@ describe("reminder presets", () => {
       "tomorrow-9",
       "next-monday-9",
     ]);
-    expect(REMINDER_PRESETS.map((preset) => preset.label)).toEqual([
+    expect(REMINDER_PRESETS.map((preset) => ko(preset.labelKey))).toEqual([
       "30분 후",
       "1시간 후",
       "3시간 후",

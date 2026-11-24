@@ -1,7 +1,7 @@
 import type { MessageKey } from "../../i18n/generated/messages";
 import type { MessageRef, PlainMessageKey } from "../../i18n/keys";
 import { takesFinalForm } from "../../lib/koreanParticle";
-import { REMINDER_UNKNOWN_CHANNEL_LABEL } from "../reminders/model";
+import { REMINDER_UNKNOWN_CHANNEL_KEY } from "../reminders/model";
 import type { ScheduledFailureReason } from "./types";
 
 // =============================================================================
@@ -54,7 +54,7 @@ export function errorPlaceWord(kind: "public" | "private" | "dm" | undefined): E
 }
 
 /** 이름을 못 읽는 행(나간 비공개 채널 등)의 라벨. 리마인더와 같은 낱말을 쓴다(명세 0.1). */
-export const SCHEDULED_UNKNOWN_CHANNEL_LABEL = REMINDER_UNKNOWN_CHANNEL_LABEL;
+export const SCHEDULED_UNKNOWN_CHANNEL_KEY = REMINDER_UNKNOWN_CHANNEL_KEY;
 
 /** DM 행의 라벨 「{이름}과의 대화」. 과/와는 받침으로 가려 `josa`로 넘긴다(한국어 값만 쓴다, 명세 0.1). */
 export function dmConversationLabel(name: string): MessageRef<"scheduled.dm.conversationLabel"> {

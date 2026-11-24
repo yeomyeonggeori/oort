@@ -27,7 +27,7 @@ import type {
   ScheduledPatch,
 } from "@momo/core/features/scheduled/types";
 import {
-  SCHEDULED_UNKNOWN_CHANNEL_LABEL,
+  SCHEDULED_UNKNOWN_CHANNEL_KEY,
   dmConversationLabel,
   errorPlaceWord,
   placeWord,
@@ -387,8 +387,8 @@ export function useScheduledPlaces(): (channelId: string) => ScheduledPlaceInfo 
       const channel = [...groups.channels, ...groups.dms].find((entry) => uuidEq(entry.id, channelId));
       if (channel === undefined) {
         return {
-          label: SCHEDULED_UNKNOWN_CHANNEL_LABEL,
-          markedLabel: SCHEDULED_UNKNOWN_CHANNEL_LABEL,
+          label: formatMessage(SCHEDULED_UNKNOWN_CHANNEL_KEY),
+          markedLabel: formatMessage(SCHEDULED_UNKNOWN_CHANNEL_KEY),
           kind: undefined,
           isAgent: false,
           peer: null,

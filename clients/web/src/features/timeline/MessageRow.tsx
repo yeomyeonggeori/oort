@@ -138,7 +138,7 @@ import { useContextMenuYield } from "./useContextMenuYield";
 import type { MessageUnfurl } from "@momo/core/features/timeline/unfurl";
 import { UnfurlCards } from "./UnfurlCards";
 import { useSession } from "@/app/session";
-import { reminderFailureMessage } from "@momo/core/features/reminders/model";
+import { reminderFailureKey } from "@momo/core/features/reminders/model";
 import {
   MARK_UNREAD_SUCCESS_KEY,
   markUnreadFailureKey,
@@ -1473,7 +1473,8 @@ export function MessageRow({
                 {
                   onSuccess: () => setRemindOpen(false),
                   onError: (error: unknown) => {
-                    setRemindError(reminderFailureMessage(error, "create"));
+                    // 오류 줄은 이 행의 상태라 지금 언어로 문장을 지어 쥔다(알림 칸이 상태를 키로 쥐는 길은 이 행이 옮겨질 때, #6058).
+                    setRemindError(formatMessage(reminderFailureKey(error, "create")));
                   },
                 }
               );

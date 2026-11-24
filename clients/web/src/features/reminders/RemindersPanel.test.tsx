@@ -8,6 +8,15 @@ import type { MessageReminder } from "@momo/core/features/reminders/model";
 import { SessionProvider, type SessionContextValue } from "@/app/session";
 import { makeDirectory } from "@/features/workspace/useWorkspace";
 import { RemindersPanel } from "./RemindersPanel";
+import { LocaleProvider } from "@/i18n/LocaleProvider";
+import { koreanLocale } from "@/testing/koLocale";
+
+// 화면 문구는 사전에서 나오고 공급자 밖의 화면은 번들된 영어로 물러난다. 한국어 문장을 단정하는 이 시험은 한국어 언어 객체로 감싸 그대로 단정한다(#6058).
+let koLocale: Awaited<ReturnType<typeof koreanLocale>>;
+beforeAll(async () => {
+  koLocale = await koreanLocale();
+});
+const withKo = (element: ReactElement) => createElement(LocaleProvider, { locale: koLocale, children: element });
 
 const WS = "00000000-0000-7000-8000-000000000001";
 const MEMBER_ID = "00000000-0000-7000-8000-000000000101";
@@ -156,7 +165,7 @@ async function mount(): Promise<HTMLElement> {
     )
   );
   await act(async () => {
-    mountedRoot?.render(tree);
+    mountedRoot?.render(withKo(tree));
     await Promise.resolve();
   });
   return host;

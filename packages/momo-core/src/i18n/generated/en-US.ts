@@ -11499,6 +11499,320 @@ export const catalog: MessageCatalog = {
       "value": "date"
     }
   ],
+  "reminders.action.complete": [
+    {
+      "type": 0,
+      "value": "Done"
+    }
+  ],
+  "reminders.action.custom": [
+    {
+      "type": 0,
+      "value": "Pick a date and time"
+    }
+  ],
+  "reminders.action.delete": [
+    {
+      "type": 0,
+      "value": "Delete"
+    }
+  ],
+  "reminders.action.snooze": [
+    {
+      "type": 0,
+      "value": "Snooze"
+    }
+  ],
+  "reminders.action.snoozeCommit": [
+    {
+      "type": 0,
+      "value": "Snooze reminder"
+    }
+  ],
+  "reminders.channel.unknown": [
+    {
+      "type": 0,
+      "value": "Unknown channel"
+    }
+  ],
+  "reminders.confirm.detail": [
+    {
+      "type": 0,
+      "value": "A completed reminder leaves the list and can't be restored."
+    }
+  ],
+  "reminders.confirm.title": [
+    {
+      "type": 0,
+      "value": "Mark this reminder as done?"
+    }
+  ],
+  "reminders.due.days": [
+    {
+      "type": 0,
+      "value": "in "
+    },
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " day"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " days"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "reminders.due.hours": [
+    {
+      "type": 0,
+      "value": "in "
+    },
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " hour"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " hours"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "reminders.due.minutes": [
+    {
+      "type": 0,
+      "value": "in "
+    },
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " minute"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " minutes"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "reminders.due.overdue": [
+    {
+      "type": 0,
+      "value": "Overdue"
+    }
+  ],
+  "reminders.due.soon": [
+    {
+      "type": 0,
+      "value": "Soon"
+    }
+  ],
+  "reminders.empty.detail": [
+    {
+      "type": 0,
+      "value": "Choose Remind me later in a message's menu and it shows up here."
+    }
+  ],
+  "reminders.empty.headline": [
+    {
+      "type": 0,
+      "value": "No messages saved for later yet."
+    }
+  ],
+  "reminders.error.completeFailed": [
+    {
+      "type": 0,
+      "value": "Couldn't complete the reminder. Try again."
+    }
+  ],
+  "reminders.error.deleteFailed": [
+    {
+      "type": 0,
+      "value": "Couldn't delete the reminder. Try again."
+    }
+  ],
+  "reminders.error.forbiddenChange": [
+    {
+      "type": 0,
+      "value": "This account can't change that reminder."
+    }
+  ],
+  "reminders.error.forbiddenCreate": [
+    {
+      "type": 0,
+      "value": "This account can't create reminders."
+    }
+  ],
+  "reminders.error.loadFailed": [
+    {
+      "type": 0,
+      "value": "Couldn't load your saved messages."
+    }
+  ],
+  "reminders.error.notFound": [
+    {
+      "type": 0,
+      "value": "Couldn't find that reminder. Reload the list."
+    }
+  ],
+  "reminders.error.pastTime": [
+    {
+      "type": 0,
+      "value": "You can't pick a time in the past. Pick another time."
+    }
+  ],
+  "reminders.error.saveFailed": [
+    {
+      "type": 0,
+      "value": "Couldn't save the reminder. Try again."
+    }
+  ],
+  "reminders.error.snoozeFailed": [
+    {
+      "type": 0,
+      "value": "Couldn't snooze the reminder. Try again."
+    }
+  ],
+  "reminders.item.fallbackPreview": [
+    {
+      "type": 0,
+      "value": "Message"
+    }
+  ],
+  "reminders.menu.remind": [
+    {
+      "type": 0,
+      "value": "Remind me later"
+    }
+  ],
+  "reminders.notify.backlog": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " overdue reminder"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " overdue reminders"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "reminders.notify.title": [
+    {
+      "type": 0,
+      "value": "Remind me later"
+    }
+  ],
+  "reminders.preset.in1h": [
+    {
+      "type": 0,
+      "value": "In 1 hour"
+    }
+  ],
+  "reminders.preset.in30m": [
+    {
+      "type": 0,
+      "value": "In 30 minutes"
+    }
+  ],
+  "reminders.preset.in3h": [
+    {
+      "type": 0,
+      "value": "In 3 hours"
+    }
+  ],
+  "reminders.preset.nextMonday9": [
+    {
+      "type": 0,
+      "value": "Next Monday at 9 AM"
+    }
+  ],
+  "reminders.preset.tomorrow9": [
+    {
+      "type": 0,
+      "value": "Tomorrow at 9 AM"
+    }
+  ],
   "reply.card.cancel": [
     {
       "type": 0,
