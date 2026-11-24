@@ -7,12 +7,24 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vite
 import type { PresenceWrite, RosterMember } from "@momo/core/lib/api";
 import {
   CUSTOM_STATUS_PRESETS,
-  CUSTOM_STATUS_SAVING_LABEL,
-  CUSTOM_STATUS_TEXT_PLACEHOLDER,
-  customStatusFailureMessage,
+  CUSTOM_STATUS_SAVING_LABEL_KEY,
+  CUSTOM_STATUS_TEXT_PLACEHOLDER_KEY,
+  customStatusFailureKey,
 } from "@momo/core/features/presence/customStatus";
 import { SessionProvider, type SessionContextValue } from "@/app/session";
 import { SetStatusDialog } from "./SetStatusDialog";
+import { catalog as koCatalog } from "@momo/core/i18n/generated/ko-KR";
+import { createMessageCopy } from "@momo/core/testkit";
+import { LocaleProvider } from "@/i18n/LocaleProvider";
+import type { AppLocale } from "@/i18n/localeStore";
+import { koreanLocale } from "@/testing/koLocale";
+
+// 한국어 문구를 단정하는 시험이라 한국어 언어 객체로 감싼다(감싸지 않으면 번들된 영어로 그려진다).
+let koLocale: AppLocale;
+
+// 낱말은 사전에 있다(#6045). 시험은 한국어 생성물로 풀어 예전과 같은 문장을 그대로 단정한다.
+const koCopy = createMessageCopy({ messageLocale: "ko-KR", catalog: koCatalog });
+
 
 const WS = "00000000-0000-7000-8000-000000000001";
 const MEMBER_ID = "00000000-0000-7000-8000-000000000101";
@@ -40,7 +52,8 @@ const reactActEnvironment = globalThis as typeof globalThis & {
 let mountedRoot: Root | null = null;
 let mountedHost: HTMLElement | null = null;
 
-beforeAll(() => {
+beforeAll(async () => {
+  koLocale = await koreanLocale();
   reactActEnvironment.IS_REACT_ACT_ENVIRONMENT = true;
 });
 
@@ -152,21 +165,21 @@ function mountDialog(selfMember: RosterMember = rosterMember()): QueryClient {
       createElement(BoundDialog)
     )
   );
-  act(() => mountedRoot?.render(tree));
+  act(() => mountedRoot?.render(createElement(LocaleProvider, { locale: koLocale, children: tree })));
   return client;
 }
 
 describe("SetStatusDialog (#1889)", () => {
   it("lists the five A-42 preset copies", () => {
     mountDialog();
-    const labels = CUSTOM_STATUS_PRESETS.map((preset) => preset.label);
+    const labels = CUSTOM_STATUS_PRESETS.map((preset) => koCopy(preset.labelKey));
     expect(labels).toEqual(["회의 중", "이동 중", "병가", "휴가", "재택"]);
     for (const preset of CUSTOM_STATUS_PRESETS) {
       const chip = document.querySelector(
         `[data-testid="set-status-preset-${preset.id}"]`
       );
       expect(chip).not.toBeNull();
-      expect(chip?.textContent).toContain(preset.label);
+      expect(chip?.textContent).toContain(koCopy(preset.labelKey));
     }
   });
 
@@ -267,7 +280,7 @@ describe("SetStatusDialog (#1889)", () => {
     });
     expect(
       document.querySelector('[data-testid="set-status-error"]')?.textContent
-    ).toContain(customStatusFailureMessage());
+    ).toContain(koCopy(customStatusFailureKey()));
     expect(
       (document.querySelector('[data-testid="set-status-text"]') as HTMLInputElement)
         .value
@@ -311,7 +324,7 @@ describe("SetStatusDialog (#1889)", () => {
       '[data-testid="set-status-text"]'
     ) as HTMLInputElement | null;
     expect(document.body.textContent).toContain("선택");
-    expect(field?.placeholder).toBe(CUSTOM_STATUS_TEXT_PLACEHOLDER);
+    expect(field?.placeholder).toBe(koCopy(CUSTOM_STATUS_TEXT_PLACEHOLDER_KEY));
     expect(label).not.toBeNull();
   });
 
@@ -337,7 +350,7 @@ describe("SetStatusDialog (#1889)", () => {
     await vi.waitFor(() => {
       expect(
         document.querySelector('[data-testid="set-status-save"]')?.textContent
-      ).toBe(CUSTOM_STATUS_SAVING_LABEL);
+      ).toBe(koCopy(CUSTOM_STATUS_SAVING_LABEL_KEY));
     });
     await act(async () => {
       release?.({ status: "auto" });
@@ -490,7 +503,7 @@ describe("SetStatusDialog 추천 상태는 이모지·글·만료를 함께 채�
       expect(setPresenceStatus).toHaveBeenCalledWith(WS, {
         status: "auto",
         statusEmoji: preset.emoji,
-        statusText: preset.label,
+        statusText: koCopy(preset.labelKey),
         statusExpiresAtMs: expected,
       });
     }

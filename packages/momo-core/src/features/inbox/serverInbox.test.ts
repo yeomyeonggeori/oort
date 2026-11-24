@@ -12,6 +12,12 @@ import {
 } from "./serverInbox";
 import { isServerItemUnread, matchesMailboxFilter, mailboxCounts, serverEntry } from "./mailbox";
 
+import { catalog as koCatalog } from "../../i18n/generated/ko-KR";
+import { createMessageCopy } from "../../testkit";
+
+// 낱말은 사전에 있다(#6045). 시험은 한국어 생성물로 풀어 예전과 같은 문장을 그대로 단정한다.
+const ko = createMessageCopy({ messageLocale: "ko-KR", catalog: koCatalog });
+
 const ME = "00000000-0000-7000-8000-000000000101";
 const BOT = "00000000-0000-7000-8000-000000000301";
 
@@ -45,6 +51,7 @@ describe("부제: 제품 말투(#3694)", () => {
     const reasons = kinds.map(
       (kind) =>
         serverEntry(parseInboxItem({ ...WIRE_ITEM, kind })!, {
+          formatMessage: ko,
           channelLabel: "#agent-lab",
           place: { kind: "channel" as const, name: "agent-lab" },
           actor: { name: "그록봇", isAgent: false },
@@ -74,6 +81,7 @@ describe("parseInboxItem / parseInboxPage", () => {
     expect(item?.kind).toBe("reply_to_me");
     expect(item?.readAtMs).toBeNull();
     const entry = serverEntry(item!, {
+      formatMessage: ko,
       channelLabel: "#agent-lab",
           place: { kind: "channel" as const, name: "agent-lab" },
       actor: { name: "그록봇", handle: "grokbot", isAgent: true },
@@ -90,7 +98,7 @@ describe("parseInboxItem / parseInboxPage", () => {
 
   it("읽은 항목은 항목으로 남고 안 읽음이 아니다", () => {
     const read = parseInboxItem({ ...WIRE_ITEM, readAt: "2026-10-11T04:09:00.000001Z" })!;
-    const entry = serverEntry(read, {
+    const entry = serverEntry(read, { formatMessage: ko,
       channelLabel: "#agent-lab",
           place: { kind: "channel" as const, name: "agent-lab" },
       actor: { name: "그록봇", isAgent: false },
@@ -104,7 +112,7 @@ describe("parseInboxItem / parseInboxPage", () => {
       ...WIRE_ITEM,
       message: { ...WIRE_ITEM.message, preview: "", deleted: true },
     })!;
-    const entry = serverEntry(del, {
+    const entry = serverEntry(del, { formatMessage: ko,
       channelLabel: "#x",
       place: { kind: "channel", name: "x" },
       actor: { name: "a", isAgent: false },
@@ -128,6 +136,7 @@ describe("parseInboxItem / parseInboxPage", () => {
 
   it("필터는 종류가 아니라 사유로 건다(멘션이기도 한 답글은 멘션 탭에도 있다)", () => {
     const entry = serverEntry(parseInboxItem(WIRE_ITEM)!, {
+      formatMessage: ko,
       channelLabel: "#a",
       place: { kind: "channel", name: "a" },
       actor: { name: "a", isAgent: false },
@@ -280,7 +289,7 @@ describe("isServerItemUnread: 위치가 항목을 지났으면 목록이 낡았�
   });
 
   it("serverEntry는 그 판정을 쓰고 안 읽음 말고는 아무것도 바꾸지 않는다", () => {
-    const input = { channelLabel: "#agent-lab",
+    const input = { formatMessage: ko, channelLabel: "#agent-lab",
           place: { kind: "channel" as const, name: "agent-lab" }, actor: { name: "그록봇", isAgent: false }, nowMs: 0 };
     const plain = serverEntry(at(5), input);
     const passed = serverEntry(at(5), { ...input, lastReadSeq: 5 });

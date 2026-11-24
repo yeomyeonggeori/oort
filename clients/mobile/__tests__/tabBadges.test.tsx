@@ -21,6 +21,12 @@ import AppShell from '../src/shell/AppShell';
 import {tabAccessibilityLabel} from '../src/shell/ShellChrome';
 import {__resetSessionStore, sessionPort} from '../src/storage/secureSession';
 import {__resetServerBaseCache, setServerBase} from '../src/storage/serverBase';
+import {catalog as koCatalog} from '@momo/core/i18n/generated/ko-KR';
+import {createMessageCopy} from '@momo/core/testkit';
+
+// 낱말은 사전에 있다(#6045). 시험은 한국어 생성물로 풀어 예전과 같은 문장을 그대로 단정한다.
+const koCopy = createMessageCopy({messageLocale: 'ko-KR', catalog: koCatalog});
+
 
 // =============================================================================
 // 탭 배지 (#3342, 사이드바·알림 시안 §1.2 · 7)
@@ -64,7 +70,7 @@ function approval(id: string, status: Approval['status']): Approval {
 }
 
 function item(id: string, status: Approval['status']): FeedItem {
-  return approvalItem(
+  return approvalItem(koCopy, 
     approval(id, status),
     {name: '김인턴', isAgent: true},
     'general',

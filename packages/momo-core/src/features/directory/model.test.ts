@@ -25,10 +25,16 @@ import {
   parseRoleLabels,
   roleKeyLabel,
   roleLabel,
-  statusLabel,
+  statusLabelKey,
   switcherPeople,
   upsertChannel,
 } from "./model";
+
+import { catalog as koCatalog } from "../../i18n/generated/ko-KR";
+import { createMessageCopy } from "../../testkit";
+
+// 낱말은 사전에 있다(#6045). 시험은 한국어 생성물로 풀어 예전과 같은 문장을 그대로 단정한다.
+const ko = createMessageCopy({ messageLocale: "ko-KR", catalog: koCatalog });
 
 // Real momowebqa shapes, including the pair this workspace actually has: two
 // members displayed as 김인턴, one human and one agent, told apart only by the
@@ -430,12 +436,17 @@ describe("parseRoleLabels", () => {
   });
 });
 
+const statusText = (m: RosterMember): string | null => {
+  const key = statusLabelKey(m);
+  return key === null ? null : ko(key);
+};
+
 describe("statusLabel", () => {
   it("labels only the statuses worth saying", () => {
-    expect(statusLabel(DEMO)).toBeNull();
-    expect(statusLabel(member({ id: "a", status: "invited" }))).toBe("초대됨");
-    expect(statusLabel(member({ id: "b", status: "suspended" }))).toBe("정지됨");
-    expect(statusLabel(member({ id: "c", status: "deleted" }))).toBe("삭제됨");
+    expect(statusText(DEMO)).toBeNull();
+    expect(statusText(member({ id: "a", status: "invited" }))).toBe("초대됨");
+    expect(statusText(member({ id: "b", status: "suspended" }))).toBe("정지됨");
+    expect(statusText(member({ id: "c", status: "deleted" }))).toBe("삭제됨");
   });
 });
 
@@ -508,16 +519,16 @@ describe("countLabel", () => {
   const LOADED = { pending: false, failed: false };
 
   it("reports the roster split, not an invented metric", () => {
-    expect(countLabel(groupDirectory(ROSTER, ""), LOADED)).toBe(
+    expect(countLabel(ko, groupDirectory(ROSTER, ""), LOADED)).toBe(
       "사람 3 · 에이전트 2"
     );
-    expect(countLabel(groupDirectory([], ""), LOADED)).toBe(
+    expect(countLabel(ko, groupDirectory([], ""), LOADED)).toBe(
       "사람 0 · 에이전트 0"
     );
   });
 
   it("counts what the search left on screen, not the roster behind it", () => {
-    expect(countLabel(groupDirectory(ROSTER, "김인턴"), LOADED)).toBe(
+    expect(countLabel(ko, groupDirectory(ROSTER, "김인턴"), LOADED)).toBe(
       "사람 1 · 에이전트 1"
     );
   });
@@ -526,7 +537,7 @@ describe("countLabel", () => {
     // The list is a skeleton at this moment; a header counting to zero beside
     // it would be the screen answering a question it has not heard back on.
     expect(
-      countLabel(groupDirectory([], ""), { pending: true, failed: false })
+      countLabel(ko, groupDirectory([], ""), { pending: true, failed: false })
     ).toBeNull();
   });
 
@@ -534,7 +545,7 @@ describe("countLabel", () => {
     // The list says 명부를 불러오지 못했습니다. "사람 0 · 에이전트 0" beside it
     // is not a smaller truth, it is a contradicting claim.
     expect(
-      countLabel(groupDirectory([], ""), { pending: false, failed: true })
+      countLabel(ko, groupDirectory([], ""), { pending: false, failed: true })
     ).toBeNull();
   });
 
@@ -545,7 +556,7 @@ describe("countLabel", () => {
       { pending: true, failed: false },
       { pending: false, failed: true },
     ]) {
-      expect(countLabel(groupDirectory(ROSTER, ""), state)).toBe(
+      expect(countLabel(ko, groupDirectory(ROSTER, ""), state)).toBe(
         "사람 3 · 에이전트 2"
       );
     }
@@ -554,10 +565,10 @@ describe("countLabel", () => {
 
 describe("memberRowLabel", () => {
   it("names the human, the handle and the workspace role before the action", () => {
-    expect(memberRowLabel(MINSU, null)).toBe(
+    expect(memberRowLabel(ko, MINSU, null)).toBe(
       "구민수 @minsu, 관리자, 다이렉트 메시지 열기"
     );
-    expect(memberRowLabel(MINSU, null, { admin: "리드" })).toBe(
+    expect(memberRowLabel(ko, MINSU, null, { admin: "리드" })).toBe(
       "구민수 @minsu, 리드, 다이렉트 메시지 열기"
     );
   });
@@ -565,8 +576,8 @@ describe("memberRowLabel", () => {
   it("gives the two 김인턴 two different accessible names", () => {
     // The whole point: aria-label replaces the subtree, so a label of the
     // display name alone would offer a screen reader the same action twice.
-    const human = memberRowLabel(INTERN_HUMAN, null);
-    const agent = memberRowLabel(INTERN_AGENT, DEMO.displayName);
+    const human = memberRowLabel(ko, INTERN_HUMAN, null);
+    const agent = memberRowLabel(ko, INTERN_AGENT, DEMO.displayName);
     expect(human).not.toBe(agent);
     expect(human).toContain("@intern-kim");
     expect(agent).toContain("@kim-intern");
@@ -575,13 +586,13 @@ describe("memberRowLabel", () => {
   it("says an agent is an agent and who it is attributed to", () => {
     // Colour (--agent) reaches no screen reader, and "데모 사용자 님이 관리" is
     // on screen, so both are in the name (WCAG 2.5.3).
-    expect(memberRowLabel(INTERN_AGENT, DEMO.displayName)).toBe(
+    expect(memberRowLabel(ko, INTERN_AGENT, DEMO.displayName)).toBe(
       "김인턴 @kim-intern, 에이전트, 데모 사용자 님이 관리, 다이렉트 메시지 열기"
     );
   });
 
   it("still says 에이전트 when the roster has no row for the owner", () => {
-    expect(memberRowLabel(HERMES, null)).toBe(
+    expect(memberRowLabel(ko, HERMES, null)).toBe(
       "Hermes @hermes, 에이전트, 다이렉트 메시지 열기"
     );
   });
@@ -594,7 +605,7 @@ describe("memberRowLabel", () => {
       role: "member",
       status: "invited",
     });
-    expect(memberRowLabel(invited, null)).toBe(
+    expect(memberRowLabel(ko, invited, null)).toBe(
       "이서연 @seoyeon, 멤버, 초대됨, 다이렉트 메시지 열기"
     );
   });
@@ -610,23 +621,23 @@ describe("memberRowLabel", () => {
         role: "admin",
         ...over,
       });
-    expect(memberRowLabel(person({ online: true }), null, undefined, NOW)).toBe(
+    expect(memberRowLabel(ko, person({ online: true }), null, undefined, NOW)).toBe(
       "박서연 @seoyeon, 관리자, 온라인, 다이렉트 메시지 열기"
     );
-    expect(memberRowLabel(person({ online: false }), null, undefined, NOW)).toBe(
+    expect(memberRowLabel(ko, person({ online: false }), null, undefined, NOW)).toBe(
       "박서연 @seoyeon, 관리자, 오프라인, 다이렉트 메시지 열기"
     );
     // A declared status wins over connection, exactly as the dot does.
     expect(
-      memberRowLabel(person({ online: true, presenceStatus: "away" }), null, undefined, NOW)
+      memberRowLabel(ko, person({ online: true, presenceStatus: "away" }), null, undefined, NOW)
     ).toBe("박서연 @seoyeon, 관리자, 자리 비움, 다이렉트 메시지 열기");
     // Unknown availability says nothing: absence is not 오프라인.
-    expect(memberRowLabel(person({}), null, undefined, NOW)).toBe(
+    expect(memberRowLabel(ko, person({}), null, undefined, NOW)).toBe(
       "박서연 @seoyeon, 관리자, 다이렉트 메시지 열기"
     );
     // An agent's liveness is its own chip; `online` is never read for it.
     expect(
-      memberRowLabel({ ...INTERN_AGENT, online: true } as RosterMember, DEMO.displayName)
+      memberRowLabel(ko, { ...INTERN_AGENT, online: true } as RosterMember, DEMO.displayName)
     ).toBe("김인턴 @kim-intern, 에이전트, 데모 사용자 님이 관리, 다이렉트 메시지 열기");
   });
 
@@ -639,10 +650,10 @@ describe("memberRowLabel", () => {
       statusEmoji: "📅",
       statusText: "회의 중",
     });
-    expect(memberRowLabel(working, null, undefined, 1_800_000_000_000)).toBe(
+    expect(memberRowLabel(ko, working, null, undefined, 1_800_000_000_000)).toBe(
       "구민수 @minsu, 관리자, 회의 중, 다이렉트 메시지 열기"
     );
-    expect(memberRowLabel(working, null, undefined, 1_800_000_000_000)).not.toContain(
+    expect(memberRowLabel(ko, working, null, undefined, 1_800_000_000_000)).not.toContain(
       "📅"
     );
   });
@@ -655,7 +666,7 @@ describe("memberRowLabel", () => {
       role: "admin",
       statusEmoji: "🤒",
     });
-    expect(memberRowLabel(emojiOnly, null, undefined, 1_800_000_000_000)).toBe(
+    expect(memberRowLabel(ko, emojiOnly, null, undefined, 1_800_000_000_000)).toBe(
       "구민수 @minsu, 관리자, 🤒, 다이렉트 메시지 열기"
     );
   });
@@ -670,14 +681,14 @@ describe("memberRowLabel", () => {
       statusText: "회의 중",
       statusExpiresAtMs: 1,
     });
-    expect(memberRowLabel(expired, null, undefined, 1_800_000_000_000)).toBe(
+    expect(memberRowLabel(ko, expired, null, undefined, 1_800_000_000_000)).toBe(
       "구민수 @minsu, 관리자, 다이렉트 메시지 열기"
     );
   });
 
   it("ends with the action, so the row reads as a thing then a verb", () => {
     for (const m of ROSTER) {
-      expect(memberRowLabel(m, DEMO.displayName)).toMatch(
+      expect(memberRowLabel(ko, m, DEMO.displayName)).toMatch(
         /, 다이렉트 메시지 열기$/
       );
     }
@@ -723,7 +734,7 @@ describe("dmAvailability", () => {
   it("states why an inactive member cannot be a DM target", () => {
     expect(
       dmAvailability(member({ id: "z", status: "invited" }), DEMO.id)
-    ).toEqual({ kind: "inactive", label: "초대됨" });
+    ).toEqual({ kind: "inactive", labelKey: "directory.status.invited" });
   });
 });
 
@@ -756,7 +767,7 @@ describe("switcherPeople", () => {
   it("offers every active member, agents included", () => {
     const rows = switcherPeople([HERMES, MINSU], DEMO.id);
     expect(rows.every((r) => r.selectable)).toBe(true);
-    expect(rows.every((r) => r.reason === null)).toBe(true);
+    expect(rows.every((r) => r.reasonKey === null)).toBe(true);
   });
 
   it("drops a member the palette already lists as a DM row, uuid case aside", () => {
@@ -772,8 +783,8 @@ describe("switcherPeople", () => {
   it("keeps an inactive member visible but unselectable, with the reason", () => {
     const rows = switcherPeople([INVITED, SUSPENDED], DEMO.id);
     expect(rows).toEqual([
-      { member: INVITED, selectable: false, reason: "초대됨" },
-      { member: SUSPENDED, selectable: false, reason: "정지됨" },
+      { member: INVITED, selectable: false, reasonKey: "directory.status.invited" },
+      { member: SUSPENDED, selectable: false, reasonKey: "directory.status.suspended" },
     ]);
   });
 
@@ -838,25 +849,25 @@ describe("upsertChannel", () => {
 
 describe("openDmErrorMessage", () => {
   it("says who is missing and what to do about it", () => {
-    expect(openDmErrorMessage(new ApiError(404, "not found"), "구민수")).toBe(
+    expect(openDmErrorMessage(ko, new ApiError(404, "not found"), "구민수")).toBe(
       "구민수님은 이 워크스페이스의 활성 멤버가 아닙니다. 명부를 새로 고친 뒤 다시 시도하세요."
     );
   });
 
   it("separates a refusal from a rate limit", () => {
-    expect(openDmErrorMessage(new ApiError(403, "no"), "구민수")).toContain(
+    expect(openDmErrorMessage(ko, new ApiError(403, "no"), "구민수")).toContain(
       "권한이 없습니다"
     );
-    expect(openDmErrorMessage(new ApiError(429, "slow"), "구민수")).toContain(
+    expect(openDmErrorMessage(ko, new ApiError(429, "slow"), "구민수")).toContain(
       "잠시 뒤에 다시 시도"
     );
-    expect(openDmErrorMessage(new ApiError(400, "self"), "구민수")).toContain(
+    expect(openDmErrorMessage(ko, new ApiError(400, "self"), "구민수")).toContain(
       "자기 자신과는"
     );
   });
 
   it("does not report a dead network as a server refusal", () => {
-    const message = openDmErrorMessage(
+    const message = openDmErrorMessage(ko, 
       new NetworkError("timeout", 15_000),
       "Hermes"
     );
@@ -866,7 +877,7 @@ describe("openDmErrorMessage", () => {
   });
 
   it("still says what failed and what to do for an unknown error", () => {
-    expect(openDmErrorMessage(new Error("boom"), "Hermes")).toBe(
+    expect(openDmErrorMessage(ko, new Error("boom"), "Hermes")).toBe(
       "Hermes님과의 다이렉트 메시지를 열지 못했습니다. 다시 시도하세요."
     );
   });
@@ -877,7 +888,7 @@ describe("openDmErrorMessage", () => {
       new NetworkError("unreachable", 15_000),
       new Error("x"),
     ]) {
-      const message = openDmErrorMessage(error, "구민수");
+      const message = openDmErrorMessage(ko, error, "구민수");
       expect(message).not.toContain("죄송");
       expect(message).not.toContain("알 수 없");
     }
@@ -887,7 +898,7 @@ describe("openDmErrorMessage", () => {
 describe("changeWorkspaceRoleErrorMessage", () => {
   it("turns last-owner 409 into a next-step sentence", () => {
     expect(
-      changeWorkspaceRoleErrorMessage(
+      changeWorkspaceRoleErrorMessage(ko, 
         new ApiError(409, "workspace must retain at least one owner")
       )
     ).toBe(
@@ -897,23 +908,23 @@ describe("changeWorkspaceRoleErrorMessage", () => {
 
   it("surfaces 403 hierarchy refusals without inventing extra gates", () => {
     expect(
-      changeWorkspaceRoleErrorMessage(
+      changeWorkspaceRoleErrorMessage(ko, 
         new ApiError(403, "cannot manage an equal or higher role")
       )
     ).toBe("같거나 높은 역할의 멤버는 바꿀 수 없습니다.");
     expect(
-      changeWorkspaceRoleErrorMessage(
+      changeWorkspaceRoleErrorMessage(ko, 
         new ApiError(403, "admins cannot grant admin or owner")
       )
     ).toBe("관리자는 관리자나 소유자 역할을 부여할 수 없습니다.");
     expect(
-      changeWorkspaceRoleErrorMessage(new ApiError(403, "workspace admin required"))
+      changeWorkspaceRoleErrorMessage(ko, new ApiError(403, "workspace admin required"))
     ).toBe("이 워크스페이스에서 역할을 바꿀 권한이 없습니다.");
   });
 
   it("keeps 400 as a retryable form refusal", () => {
     expect(
-      changeWorkspaceRoleErrorMessage(new ApiError(400, "role must be owner, admin, member, or guest"))
+      changeWorkspaceRoleErrorMessage(ko, new ApiError(400, "role must be owner, admin, member, or guest"))
     ).toBe("역할을 바꿀 수 없습니다. 다른 역할을 고른 뒤 다시 시도하세요.");
   });
 
@@ -923,7 +934,7 @@ describe("changeWorkspaceRoleErrorMessage", () => {
       new NetworkError("unreachable", 15_000),
       new Error("x"),
     ]) {
-      const message = changeWorkspaceRoleErrorMessage(error);
+      const message = changeWorkspaceRoleErrorMessage(ko, error);
       expect(message).not.toContain("죄송");
       expect(message).not.toContain("알 수 없");
     }

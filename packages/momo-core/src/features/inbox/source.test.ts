@@ -127,7 +127,7 @@ describe("장소: 내 목록에 없는 채널은 서버가 준 값만 (보이는
         actorMemberId: DOHYUN,
         createdAt: "2026-11-13T01:00:00Z",
       })!,
-      { channelLabel: DM.slice(0, 8), place: p, actor: { name: "김도현", isAgent: false }, nowMs: 0 }
+      { formatMessage: copyKo, channelLabel: DM.slice(0, 8), place: p, actor: { name: "김도현", isAgent: false }, nowMs: 0 }
     );
     expect(mailboxSourceLine(entry.source, copyKo)).toBe("DM");
   });
@@ -162,12 +162,12 @@ describe("출처 판정", () => {
   });
 
   it("처리할 일은 지금의 종류 표시를 그 자리에 둔다", () => {
-    const task = taskEntry(
+    const task = taskEntry(copyKo,
       {
         key: "approval:a1", kind: "approval", approvalId: "a1", pending: true, actor: "@kim-intern",
         actorIsAgent: true, predicate: "배포 승인 요청", channelId: CH, channelLabel: "workbench",
         timeLabel: "방금", sortAtMs: 1, reason: "r", outcome: null, outcomeTone: "muted", tone: "warn",
-      } as Parameters<typeof taskEntry>[0],
+      } as Parameters<typeof taskEntry>[1],
       1
     );
     expect(task).not.toBeNull();
@@ -187,7 +187,7 @@ describe("출처 판정", () => {
         createdAt: "2026-11-13T01:00:00Z",
         ...over,
       })!;
-    const input = { channelLabel: "workbench", place: ch, actor: { name: "김도현", isAgent: false }, nowMs: 0 };
+    const input = { formatMessage: copyKo, channelLabel: "workbench", place: ch, actor: { name: "김도현", isAgent: false }, nowMs: 0 };
     const of = (over: Record<string, unknown>) => mailboxSourceLine(serverEntry(wire(over), input).source, copyKo);
     expect(of({ kind: "thread_reply", reasons: ["thread_reply"], rootId: "r1" })).toBe("스레드 · #workbench");
     expect(of({ rootId: "r1" })).toBe("스레드 · #workbench");

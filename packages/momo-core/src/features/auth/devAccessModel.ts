@@ -12,6 +12,7 @@
 
 import { uuidEq } from "../../lib/api";
 import { relativeLabel } from "../inbox/model";
+import type { LocaleService } from "../../i18n/context";
 import {
   DEV_EXPIRY_DEFAULT_DAYS,
   DEV_EXPIRY_MAX_DAYS,
@@ -313,7 +314,7 @@ export interface DevCredentialRow {
 
 export function devCredentialRow(
   credential: DevCredential,
-  options: { now: number; memberName?: string }
+  options: { now: number; memberName?: string; formatMessage: LocaleService["formatMessage"] }
 ): DevCredentialRow {
   const scopeKind = devScopeKind(credential.scopes);
   const expiry = devExpiry(credential.expiresAtMs, options.now);
@@ -331,7 +332,7 @@ export function devCredentialRow(
     lastUsedLabel:
       credential.lastUsedAtMs === undefined
         ? "아직 안 썼어요"
-        : relativeLabel(credential.lastUsedAtMs, options.now),
+        : relativeLabel(options.formatMessage, credential.lastUsedAtMs, options.now),
     neverUsed,
     expiryLabel: expiry.label,
     expired: expiry.expired,

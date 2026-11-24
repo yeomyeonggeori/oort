@@ -156,7 +156,7 @@ describe("팀 보드: 보는 사람 채널 멤버십 (#2863 Acceptance)", () => 
 
   it("카드마다 소유자 묶음·저장소·브랜치·하네스·상태·diff·마지막 활동·집 채널이 있다", async () => {
     board([sharedRow()]);
-    render(mount().ui);
+    render(mount("/work?view=team", await koreanLocale()).ui);
     const row = await screen.findByTestId("team-board-row");
     const text = row.textContent ?? "";
     for (const part of ["한글 입력 이중 전송 수리", "momo", "feat/2774-xterm", "claude", "응답 필요", "+128", "−40", "3분 전", "#workbench"]) {

@@ -4,6 +4,7 @@ import {dmPeerStatusDot, type StatusDot} from '@momo/core/features/presence/stat
 
 import {useAgentLiveness} from '../agents/useAgentLiveness';
 
+import {useFormatMessage} from '../../i18n/useFormatMessage';
 // =============================================================================
 // 한 멤버의 상태 점 — 프로필 시트의 칩 (#4319).
 //
@@ -20,9 +21,11 @@ export function useMemberStatusDot(
   viewerRole: MembershipRole | undefined,
   nowMs: number,
 ): StatusDot | null {
+  const formatMessage = useFormatMessage();
   const agentId = member?.kind === 'agent' ? member.id : null;
   const read = useAgentLiveness(agentId);
   return dmPeerStatusDot({
+    formatMessage,
     member,
     liveness: agentId === null ? undefined : read.liveness,
     mayAct: mayActOnLiveness(viewerRole),

@@ -28,6 +28,7 @@ import {
 import { useWorkstreams } from "./useWorkstreams";
 import { BlockedReason } from "@/features/common/BlockedReason";
 
+import { useFormatMessage } from "@/i18n/useFormatMessage";
 // =============================================================================
 // 작업 흐름 목록 (MOMO-677 / ADR-0143 이행 3).
 //
@@ -91,6 +92,7 @@ function WorkstreamRow({
   starterName: string;
   nowMs: number;
 }) {
+  const formatMessage = useFormatMessage();
   return (
     <li
       className="border-b border-line"
@@ -163,7 +165,7 @@ function WorkstreamRow({
             </span>
             <span className="shrink-0">· 갱신</span>
             <span className="shrink-0" data-testid="workstream-updated">
-              {relativeLabel(workstream.updatedAtMs, nowMs)}
+              {relativeLabel(formatMessage, workstream.updatedAtMs, nowMs)}
             </span>
           </span>
         </span>

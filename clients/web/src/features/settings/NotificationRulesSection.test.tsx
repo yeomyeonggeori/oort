@@ -237,7 +237,7 @@ describe("NotificationRulesSection DND regression", () => {
   // `{dnd: true}` 를 곧바로 보냈고, 그 기한 없는 켜짐이 15일 동안 풀리지 않았다.
   it("스위치를 켜려 하면 쓰지 않고 기한 다이얼로그를 연다", async () => {
     freezeClock();
-    const host = await mountSection();
+    const host = await mountSection(false, true);
     await vi.waitFor(() => {
       expect(
         host.querySelector('[data-testid="notification-rules-dnd"]')
@@ -256,7 +256,7 @@ describe("NotificationRulesSection DND regression", () => {
 
   it("기한을 고르고 확인하면 {dnd, dndUntilMs} 만 PATCH 로 보내고 스위치가 켜진다 (#3042)", async () => {
     freezeClock();
-    const host = await mountSection();
+    const host = await mountSection(false, true);
     await vi.waitFor(() => {
       expect(host.querySelector('[data-testid="notification-rules-dnd"]')).not.toBeNull();
     });
@@ -344,7 +344,7 @@ describe("NotificationRulesSection DND regression", () => {
   it("기한이 있는 행은 기한과 「기한 바꾸기」를 보이고, 누르면 지금 기한을 말하는 다이얼로그가 열린다", async () => {
     stored = { dnd: true, mentionOverridesMute: false, dndUntilMs: at(16, 21, 30) };
     freezeClock();
-    const host = await mountSection();
+    const host = await mountSection(false, true);
     await vi.waitFor(() => {
       expect(host.querySelector('[data-testid="notification-rules-until"]')).not.toBeNull();
     });
@@ -372,7 +372,7 @@ describe("NotificationRulesSection DND regression", () => {
   it("기한 없는 행은 「기한 없음 · 기한 정하기」 단추로 보이고, 눌러 기한을 걸 수 있다", async () => {
     stored = { dnd: true, mentionOverridesMute: false };
     freezeClock();
-    const host = await mountSection();
+    const host = await mountSection(false, true);
     await vi.waitFor(() => {
       expect(host.querySelector('[data-testid="notification-rules-until"]')).not.toBeNull();
     });

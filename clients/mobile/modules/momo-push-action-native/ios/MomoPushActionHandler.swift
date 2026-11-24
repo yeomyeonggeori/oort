@@ -225,20 +225,6 @@ public final class MomoPushActionHandler: NSObject, NotificationDelegate {
   }
 }
 
-extension MomoPushReplyCapture {
-  /// Whether a 답장 arriving now would be KEPT: the handler is attached, this build names
-  /// the app-only group, and the push_action session item says whose it is. JS steps aside
-  /// from sending a reply only on this (`src/push/native.ts`): when the token was never
-  /// minted (an older server, the per-session cap, the moments after sign-in) nothing is
-  /// kept, and a live JS must send the reply itself as it always did. A boolean, nothing more.
-  static func keepsNow() -> Bool {
-    guard MomoPushActionInstaller.isInstalled, let keychain = MomoPushActionKeychain.live() else {
-      return false
-    }
-    return keychain.readReplyOwner() != nil
-  }
-}
-
 /// Keeps one 답장 and answers it on the lock screen with one line.
 enum MomoPushReplyKeeper {
   static func keep(text: String, request: UNNotificationRequest) {
@@ -256,6 +242,9 @@ enum MomoPushReplyKeeper {
     } else {
       outcome = .storeFailed
     }
+    // What JS asks when it hears this same response (`replyOutcome`, #6092): kept means the
+    // list sends it, not kept means JS sends it. Written before `didReceive` returns.
+    MomoPushReplyOutcomes.shared.record(requestIdentifier: request.identifier, kept: outcome.kept)
     MomoPushActionLog.logger.notice("[push] \(outcome.logName, privacy: .public)")
 
     let korean = MomoPushReplyCopy.isKorean(Bundle.main.preferredLocalizations)
@@ -355,6 +344,33 @@ public enum MomoPushActionInstaller {
       state.handler = handler
       return true
     }
-    if attached { MomoPushActionLog.logger.notice("[push] action handler attached") }
+    if attached {
+      MomoPushActionLog.logger.notice("[push] action handler attached")
+      // Old and unreadable kept replies go at every launch, signed in or not (A7-13). Off the
+      // launch path: the keychain is not something `didFinishLaunching` should wait for.
+      DispatchQueue.global(qos: .utility).async { MomoPushReplyLaunchSweep.run() }
+    }
+  }
+}
+
+/// The launch half of the sweep: `MomoPushReplySweep` on the app-only list, then the
+/// 「앱을 열면 보내요」 lines of the aged replies come down. Only a line of ours (no category,
+/// so no buttons) is taken down: a notification of one collapse id reuses the identifier,
+/// and a newer message under it is not this file's to remove.
+enum MomoPushReplyLaunchSweep {
+  static func run() {
+    guard let keychain = MomoPushActionKeychain.live() else { return }
+    let aged = Set(
+      MomoPushReplySweep.sweep(
+        store: keychain.replyStore, nowMs: Int64(Date().timeIntervalSince1970 * 1000)))
+    guard !aged.isEmpty else { return }
+    MomoPushActionLog.logger.notice("[push] old replies removed")
+    let center = UNUserNotificationCenter.current()
+    center.getDeliveredNotifications { delivered in
+      let lines = delivered.filter {
+        aged.contains($0.request.identifier) && $0.request.content.categoryIdentifier.isEmpty
+      }.map(\.request.identifier)
+      if !lines.isEmpty { center.removeDeliveredNotifications(withIdentifiers: lines) }
+    }
   }
 }

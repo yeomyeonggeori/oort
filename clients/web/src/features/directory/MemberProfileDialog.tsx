@@ -19,7 +19,7 @@ import {
   roleChangeKind,
   roleKeyLabel,
   roleLabel,
-  statusLabel,
+  statusLabelKey,
   suspensionAction,
   workspaceRoleLock,
   type MemberLifecycleAction,
@@ -79,6 +79,7 @@ import {
   type OpenMemberProfile,
 } from "./memberProfileContext";
 import { memberProfileViewState } from "./memberProfileModel";
+import { useFormatMessage } from "@/i18n/useFormatMessage";
 
 // Reading this as: member profile dialog (a person card opened from the directory, a channel, a thread or a
 // mention) for internal team users on web+Tauri, density 6/10, motion 2/10.
@@ -238,8 +239,10 @@ function ProfileSkeleton({ label }: { label: string }) {
 
 /** 이름 옆 칩: 활성이 아닐 때만(정지됨·초대됨·삭제됨). 활성은 말할 가치가 없다(`statusLabel`). */
 function MembershipChip({ member }: { member: RosterMember }) {
-  const label = statusLabel(member);
-  if (label === null) return null;
+  const formatMessage = useFormatMessage();
+  const labelKey = statusLabelKey(member);
+  if (labelKey === null) return null;
+  const label = formatMessage(labelKey);
   return (
     <span
       className="inline-flex shrink-0 rounded-full bg-surface-muted px-2 py-px text-meta text-ink-muted"
@@ -880,7 +883,7 @@ function ReadyProfile({
     availability.kind === "self"
       ? t("directory.profile.dmSelf")
       : availability.kind === "inactive"
-        ? t("directory.profile.dmInactive", { status: availability.label })
+        ? t("directory.profile.dmInactive", { status: t(availability.labelKey) })
         : null;
 
   const finishRoleStage = (to: RoleKey) => {

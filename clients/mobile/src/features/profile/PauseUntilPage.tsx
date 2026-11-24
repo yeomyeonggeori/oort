@@ -1,15 +1,15 @@
 import {
-  PRESENCE_WRITE_FAILED,
+  PRESENCE_WRITE_FAILED_KEY,
 } from '@momo/core/features/presence/model';
 import {
-  PAUSE_UNTIL_OFFLINE_REASON,
+  PAUSE_UNTIL_OFFLINE_REASON_KEY,
   pauseUntilAtMs,
-  pauseUntilDescription,
+  pauseUntilDescriptionKey,
   pauseUntilHint,
   pauseUntilLabel,
   pauseUntilOptions,
-  pauseUntilPresetHint,
-  pauseUntilTitle,
+  pauseUntilPresetHintKey,
+  pauseUntilTitleKey,
   type PauseUntilKind,
   type PauseUntilPreset,
 } from '@momo/core/features/presence/pauseUntil';
@@ -28,6 +28,7 @@ import {PauseUntilCustom} from './PauseUntilCustom';
 import {usePauseNotifications, useSetPresence} from './selfStatus';
 import {ActionRow} from './settingsRows';
 
+import {useFormatMessage} from '../../i18n/useFormatMessage';
 // =============================================================================
 // 기한 고르기 — 알림 일시 중지·방해 금지가 켜지는 유일한 길 (ADR-0204 D2, #2899).
 //
@@ -74,6 +75,7 @@ export function PauseUntilPage({
    */
   onReveal: (y: number) => void;
 }): React.JSX.Element {
+  const formatMessage = useFormatMessage();
   const styles = useStyles(buildStyles);
   const nowMs = useNow();
   const pause = usePauseNotifications(workspaceId);
@@ -114,7 +116,7 @@ export function PauseUntilPage({
       }
       onDone();
     } catch {
-      setFailure(kind === 'pause' ? NOTIFICATION_PAUSE_SAVE_FAILED : PRESENCE_WRITE_FAILED);
+      setFailure(kind === 'pause' ? NOTIFICATION_PAUSE_SAVE_FAILED : formatMessage(PRESENCE_WRITE_FAILED_KEY));
     } finally {
       setPendingId(null);
     }
@@ -128,10 +130,10 @@ export function PauseUntilPage({
         {/* 완성된 한국어 문장이라 `Sentence` 다 — 큰 글씨에서 「언제까/지」처럼 어절 한가운데서 끊기지
             않게 한다(`lineBreakStrategyIOS="hangul-word"`, 같은 규칙이 한 자리에 있다). */}
         <Sentence accessibilityRole="header" style={styles.heading} testID="pause-until-title">
-          {pauseUntilTitle(kind)}
+          {formatMessage(pauseUntilTitleKey(kind))}
         </Sentence>
         <Sentence style={styles.caption} testID="pause-until-description">
-          {pauseUntilDescription(kind)}
+          {formatMessage(pauseUntilDescriptionKey(kind))}
         </Sentence>
         {active ? (
           <Sentence style={styles.caption} testID="pause-until-current">
@@ -146,7 +148,7 @@ export function PauseUntilPage({
       {online ? null : (
         <View accessibilityLiveRegion="polite">
           <NoticeBlock
-            headline={PAUSE_UNTIL_OFFLINE_REASON}
+            headline={formatMessage(PAUSE_UNTIL_OFFLINE_REASON_KEY)}
             testID="pause-until-offline"
           />
         </View>
@@ -160,7 +162,7 @@ export function PauseUntilPage({
           return (
             <ActionRow
               key={option.id}
-              title={option.label}
+              title={formatMessage(option.labelKey)}
               detail={hint}
               pending={pendingId === option.id}
               tone={custom && customOpen ? 'accent' : 'default'}
@@ -170,9 +172,16 @@ export function PauseUntilPage({
                 // 줄에 적힌 끝 시각(`hint`)과 저장되는 시각이 같도록 같은 시계로 센다.
                 else void commit(pauseUntilAtMs(option.id, nowMs), option.id);
               }}
-              accessibilityLabel={hint ? `${option.label}, ${hint}` : option.label}
+              accessibilityLabel={
+                hint
+                  ? formatMessage('presence.pauseUntil.optionWithHint', {
+                      label: formatMessage(option.labelKey),
+                      hint,
+                    })
+                  : formatMessage(option.labelKey)
+              }
               // 짧은 선택은 누르면 곧바로 켜진다 — 확인 단계가 없다는 것을 읽어 준다.
-              accessibilityHint={custom ? undefined : pauseUntilPresetHint(kind)}
+              accessibilityHint={custom ? undefined : formatMessage(pauseUntilPresetHintKey(kind))}
               expanded={custom ? customOpen : undefined}
               testID={`pause-until-option-${option.id}`}
             />

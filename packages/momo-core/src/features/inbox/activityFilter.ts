@@ -1,4 +1,5 @@
 import type { FilterTabsSpec } from "../common/filterTabs";
+import type { PlainMessageKey } from "../../i18n/keys";
 import type { FeedItem } from "./model";
 
 // =============================================================================
@@ -22,15 +23,15 @@ export const ACTIVITY_FILTERS: readonly ActivityFilter[] = [
   "done",
 ];
 
-const LABELS: Record<ActivityFilter, string> = {
-  all: "전체",
-  mine: "내 에이전트",
-  approvals: "승인",
-  done: "작업 끝남",
-};
+const LABEL_KEYS = {
+  all: "inbox.activity.filterAll",
+  mine: "inbox.activity.filterMine",
+  approvals: "inbox.activity.filterApprovals",
+  done: "inbox.activity.filterDone",
+} as const satisfies Record<ActivityFilter, PlainMessageKey>;
 
-export function activityFilterLabel(filter: ActivityFilter): string {
-  return LABELS[filter];
+export function activityFilterLabelKey(filter: ActivityFilter): PlainMessageKey {
+  return LABEL_KEYS[filter];
 }
 
 export function parseActivityFilter(raw: string | null): ActivityFilter {
@@ -53,9 +54,9 @@ export function matchesActivityFilter(
 }
 
 export const ACTIVITY_FILTER_TABS: FilterTabsSpec<ActivityFilter> = {
-  label: "활동 필터",
+  label: { key: "inbox.activity.tabsLabel" },
   values: ACTIVITY_FILTERS,
-  labelFor: activityFilterLabel,
+  labelFor: (filter) => ({ key: activityFilterLabelKey(filter) }),
   tabId: (f) => `activity-tab-${f}`,
   panelId: (f) => `activity-panel-${f}`,
   testId: (f) => `activity-tab-${f}`,

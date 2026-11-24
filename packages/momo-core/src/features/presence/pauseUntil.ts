@@ -2,7 +2,11 @@ import {
   customExpiryAtMs,
   localDateInputValue,
 } from "./customStatus";
-import { PRESENCE_DND_HINT } from "./model";
+import type { LocaleService } from "../../i18n/context";
+import type { PlainMessageKey } from "../../i18n/keys";
+
+// 문구는 `i18n/catalogs/<언어>/presence.json`에 있다. 시각 문장(`pauseUntilLabel` 등)은 아직 코드에 있다.
+type FormatMessage = LocaleService["formatMessage"];
 
 // =============================================================================
 // 알림 일시 중지·방해 금지의 기한 (ADR-0204 D2, #2899).
@@ -42,7 +46,7 @@ export type PauseUntilChoice = PauseUntilPreset | "custom";
 
 export interface PauseUntilOption {
   id: PauseUntilChoice;
-  label: string;
+  labelKey: PlainMessageKey;
 }
 
 /**
@@ -50,12 +54,12 @@ export interface PauseUntilOption {
  * 풀리지 않은 일시 중지가 다시 생긴다.
  */
 export const PAUSE_UNTIL_OPTIONS: readonly PauseUntilOption[] = [
-  { id: "30m", label: "30분" },
-  { id: "1h", label: "1시간" },
-  { id: "2h", label: "2시간" },
-  { id: "tomorrow", label: "내일 오전 9시까지" },
-  { id: "nextMonday", label: "다음 주 월요일 오전 9시까지" },
-  { id: "custom", label: "직접 고르기" },
+  { id: "30m", labelKey: "presence.pausePreset.min30" },
+  { id: "1h", labelKey: "presence.pausePreset.hour1" },
+  { id: "2h", labelKey: "presence.pausePreset.hour2" },
+  { id: "tomorrow", labelKey: "presence.pausePreset.tomorrow" },
+  { id: "nextMonday", labelKey: "presence.pausePreset.nextMonday" },
+  { id: "custom", labelKey: "presence.pausePreset.custom" },
 ];
 
 const MINUTE_MS = 60_000;
@@ -162,27 +166,28 @@ export function pauseUntilElapsed(
 }
 
 /** 기한 없는 행의 이름 — 「기한 없음」. */
-export const PAUSE_UNTIL_NONE_LABEL = "기한 없음";
+export const PAUSE_UNTIL_NONE_LABEL_KEY = "presence.pauseUntil.none" satisfies PlainMessageKey;
 
 /** 기한 없는 행에서 기한을 거는 길의 낱말. */
-export const PAUSE_UNTIL_SET_ACTION = "기한 정하기";
+export const PAUSE_UNTIL_SET_ACTION_KEY = "presence.pauseUntil.setAction" satisfies PlainMessageKey;
 
 /** 기한이 있는 행에서 기한을 다시 고르는 길의 낱말. */
-export const PAUSE_UNTIL_CHANGE_ACTION = "기한 바꾸기";
+export const PAUSE_UNTIL_CHANGE_ACTION_KEY = "presence.pauseUntil.changeAction" satisfies PlainMessageKey;
 
 /** 알림 일시 중지가 켜져 있는 동안 스위치 줄이 말하는 것. 기한은 따로 줄이 말한다. */
-export const PAUSE_ACTIVE_NOTE = "이 워크스페이스의 알림을 받지 않아요.";
+export const PAUSE_ACTIVE_NOTE_KEY = "presence.pauseUntil.activeNote" satisfies PlainMessageKey;
 
 /** ADR-0204 D2 의 줄: 「기한 없음 · 기한 정하기」. */
-export const PAUSE_UNTIL_NONE_ACTION_LABEL = `${PAUSE_UNTIL_NONE_LABEL} · ${PAUSE_UNTIL_SET_ACTION}`;
+export const PAUSE_UNTIL_NONE_ACTION_LABEL_KEY = "presence.pauseUntil.noneActionLabel" satisfies PlainMessageKey;
 
 /** 진행 중인 기한의 이름: 값이 있으면 「오후 9:30까지」, 없으면 「기한 없음」. */
 export function pauseUntilStateLabel(
+  formatMessage: FormatMessage,
   untilMs: number | undefined,
   nowMs: number
 ): string {
   return untilMs === undefined
-    ? PAUSE_UNTIL_NONE_LABEL
+    ? formatMessage(PAUSE_UNTIL_NONE_LABEL_KEY)
     : pauseUntilLabel(untilMs, nowMs);
 }
 
@@ -228,64 +233,62 @@ export function customPauseUntil(
 
 // ---- 문장 ---------------------------------------------------------------------
 
-export const PAUSE_UNTIL_INVALID_MESSAGE = "날짜와 시각을 확인하세요.";
+export const PAUSE_UNTIL_INVALID_MESSAGE_KEY = "presence.pauseUntil.invalid" satisfies PlainMessageKey;
 
 /**
  * 연결이 끊겼을 때 기한 장이 말하는 이유. 폰은 끊긴 동안 쓰기를 잠그고(대기열에 쌓인 뮤테이션은
  * 낙관값만 칠한 채 멈췄다가 재연결 뒤에 **지난 절대 시각**으로 나가 400 으로 되돌아온다), 웹은
  * 같은 문장으로 확인을 잠근다. 두 표면이 같은 상황에 같은 말을 한다.
  */
-export const PAUSE_UNTIL_OFFLINE_REASON = "연결이 끊겨 지금은 바꿀 수 없어요.";
-export const PAUSE_UNTIL_PAST_MESSAGE =
-  "지난 시각은 고를 수 없어요. 다른 시각을 고르세요.";
+export const PAUSE_UNTIL_OFFLINE_REASON_KEY = "presence.pauseUntil.offlineReason" satisfies PlainMessageKey;
+export const PAUSE_UNTIL_PAST_MESSAGE_KEY = "presence.pauseUntil.past" satisfies PlainMessageKey;
 
-export function customPauseUntilMessage(
+export function customPauseUntilMessageKey(
   reason: "invalid" | "past"
-): string {
+): PlainMessageKey {
   return reason === "past"
-    ? PAUSE_UNTIL_PAST_MESSAGE
-    : PAUSE_UNTIL_INVALID_MESSAGE;
+    ? PAUSE_UNTIL_PAST_MESSAGE_KEY
+    : PAUSE_UNTIL_INVALID_MESSAGE_KEY;
 }
 
 /** 어떤 스위치의 기한을 고르는가: 알림 일시 중지, 또는 방해 금지(알림도 함께 멈춘다). */
 export type PauseUntilKind = "pause" | "dnd";
 
-export const PAUSE_UNTIL_PAUSE_TITLE = "알림을 언제까지 멈출까요?";
-export const PAUSE_UNTIL_DND_TITLE = "방해 금지를 언제까지 켤까요?";
+export const PAUSE_UNTIL_PAUSE_TITLE_KEY = "presence.pauseUntil.pauseTitle" satisfies PlainMessageKey;
+export const PAUSE_UNTIL_DND_TITLE_KEY = "presence.pauseUntil.dndTitle" satisfies PlainMessageKey;
 
-export const PAUSE_UNTIL_PAUSE_DESCRIPTION =
-  "이 워크스페이스의 알림을 고른 시각까지 받지 않아요. 멘션과 승인 요청도 멈춰요. 시각이 지나면 저절로 다시 와요.";
+export const PAUSE_UNTIL_PAUSE_DESCRIPTION_KEY = "presence.pauseUntil.pauseDescription" satisfies PlainMessageKey;
 
-export const PAUSE_UNTIL_DND_DESCRIPTION = `${PRESENCE_DND_HINT} 시각이 지나면 저절로 풀려요.`;
+export const PAUSE_UNTIL_DND_DESCRIPTION_KEY = "presence.pauseUntil.dndDescription" satisfies PlainMessageKey;
 
-export const PAUSE_UNTIL_PAUSE_CONFIRM_LABEL = "알림 멈추기";
-export const PAUSE_UNTIL_DND_CONFIRM_LABEL = "방해 금지 켜기";
+export const PAUSE_UNTIL_PAUSE_CONFIRM_LABEL_KEY = "presence.pauseUntil.pauseConfirm" satisfies PlainMessageKey;
+export const PAUSE_UNTIL_DND_CONFIRM_LABEL_KEY = "presence.pauseUntil.dndConfirm" satisfies PlainMessageKey;
 
 /**
  * 짧은 선택 줄을 읽어 주는 힌트 — 이 줄은 **누르면 곧바로 켜진다**(확인 단계가 없다).
  * 시각을 직접 정하는 「직접 고르기」 줄은 펼치기만 하므로 이 힌트를 달지 않는다.
  */
-export const PAUSE_UNTIL_PAUSE_PRESET_HINT = "누르면 이 시각까지 알림을 멈춰요.";
-export const PAUSE_UNTIL_DND_PRESET_HINT = "누르면 이 시각까지 방해 금지를 켜요.";
+export const PAUSE_UNTIL_PAUSE_PRESET_HINT_KEY = "presence.pauseUntil.pausePresetHint" satisfies PlainMessageKey;
+export const PAUSE_UNTIL_DND_PRESET_HINT_KEY = "presence.pauseUntil.dndPresetHint" satisfies PlainMessageKey;
 
-export function pauseUntilTitle(kind: PauseUntilKind): string {
-  return kind === "dnd" ? PAUSE_UNTIL_DND_TITLE : PAUSE_UNTIL_PAUSE_TITLE;
+export function pauseUntilTitleKey(kind: PauseUntilKind): PlainMessageKey {
+  return kind === "dnd" ? PAUSE_UNTIL_DND_TITLE_KEY : PAUSE_UNTIL_PAUSE_TITLE_KEY;
 }
 
-export function pauseUntilDescription(kind: PauseUntilKind): string {
+export function pauseUntilDescriptionKey(kind: PauseUntilKind): PlainMessageKey {
   return kind === "dnd"
-    ? PAUSE_UNTIL_DND_DESCRIPTION
-    : PAUSE_UNTIL_PAUSE_DESCRIPTION;
+    ? PAUSE_UNTIL_DND_DESCRIPTION_KEY
+    : PAUSE_UNTIL_PAUSE_DESCRIPTION_KEY;
 }
 
-export function pauseUntilConfirmLabel(kind: PauseUntilKind): string {
+export function pauseUntilConfirmLabelKey(kind: PauseUntilKind): PlainMessageKey {
   return kind === "dnd"
-    ? PAUSE_UNTIL_DND_CONFIRM_LABEL
-    : PAUSE_UNTIL_PAUSE_CONFIRM_LABEL;
+    ? PAUSE_UNTIL_DND_CONFIRM_LABEL_KEY
+    : PAUSE_UNTIL_PAUSE_CONFIRM_LABEL_KEY;
 }
 
-export function pauseUntilPresetHint(kind: PauseUntilKind): string {
+export function pauseUntilPresetHintKey(kind: PauseUntilKind): PlainMessageKey {
   return kind === "dnd"
-    ? PAUSE_UNTIL_DND_PRESET_HINT
-    : PAUSE_UNTIL_PAUSE_PRESET_HINT;
+    ? PAUSE_UNTIL_DND_PRESET_HINT_KEY
+    : PAUSE_UNTIL_PAUSE_PRESET_HINT_KEY;
 }

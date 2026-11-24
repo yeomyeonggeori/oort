@@ -1,6 +1,7 @@
 import { useCallback, useRef } from "react";
 import { cn } from "@/design/lib/cn";
-import type { FilterTabsSpec } from "@momo/core/features/common/filterTabs";
+import type { FilterTabsSpec, FilterTabText } from "@momo/core/features/common/filterTabs";
+import { useFormatMessage } from "@/i18n/useFormatMessage";
 
 // =============================================================================
 // N개의 값 중 하나를 고르는 세그먼트 컨트롤 (R-1 §2).
@@ -40,6 +41,15 @@ export function FilterTabs<T extends string>({
   counts?: Partial<Record<T, number>>;
 }) {
   const listRef = useRef<HTMLDivElement>(null);
+  const formatMessage = useFormatMessage();
+  // 사전 키를 옮긴 표면은 키(와 값)를, 아직 옮기지 않은 표면은 글을 그대로 준다 — 여기서 한 번에 푼다.
+  const text = (value: FilterTabText): string =>
+    typeof value === "string"
+      ? value
+      : (formatMessage as (key: string, values?: object) => string)(
+          value.key,
+          "values" in value ? value.values : undefined
+        );
 
   const onKeyDown = useCallback(
     (event: React.KeyboardEvent) => {
@@ -61,7 +71,7 @@ export function FilterTabs<T extends string>({
     <div
       ref={listRef}
       role="tablist"
-      aria-label={spec.label}
+      aria-label={text(spec.label)}
       onKeyDown={onKeyDown}
       // flex-wrap은 다섯 값을 받으면서 붙었다: 세 개는 어느 판에서도 한 줄에
       // 들어가지만 다섯 개는 좁은 판에서 문서를 옆으로 밀 수 있고, 이 셸에서
@@ -99,7 +109,7 @@ export function FilterTabs<T extends string>({
                 : "text-ink-muted hover:bg-surface-hover"
             )}
           >
-            {spec.labelFor(filter)}
+            {text(spec.labelFor(filter))}
             {count > 0 && (
               <span className="text-timestamp text-ink-muted" data-numeric>
                 {count}

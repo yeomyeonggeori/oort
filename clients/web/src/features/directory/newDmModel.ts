@@ -1,4 +1,5 @@
 import { uuidEq, type Channel, type RosterMember } from "@momo/core/lib/api";
+import type { LocaleService } from "@momo/core/i18n";
 import {
   agentHostDot,
   humanPresenceDot,
@@ -51,9 +52,13 @@ export function newDmCandidates(
  * 그 접기는 오프라인을 「방해 금지」로 읽게 되므로, 코어의 낱말을 그대로 쓴다. 방해 금지는 만료 시각이 지나면
  * 자동(auto)으로 본다(서버는 만료 때 이벤트를 보내지 않는다).
  */
-export function peerDot(member: RosterMember | null, nowMs: number): StatusDot | null {
+export function peerDot(
+  formatMessage: LocaleService["formatMessage"],
+  member: RosterMember | null,
+  nowMs: number
+): StatusDot | null {
   if (!member) return null;
   return member.kind === "agent"
-    ? agentHostDot(member.hostOnline)
-    : humanPresenceDot(member, nowMs);
+    ? agentHostDot(formatMessage, member.hostOnline)
+    : humanPresenceDot(formatMessage, member, nowMs);
 }

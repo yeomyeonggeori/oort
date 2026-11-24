@@ -1,14 +1,14 @@
 import { useEffect, useId, useRef, useState } from "react";
 import {
   customPauseUntil,
-  customPauseUntilMessage,
+  customPauseUntilMessageKey,
   pauseUntilAtMs,
-  pauseUntilConfirmLabel,
-  pauseUntilDescription,
+  pauseUntilConfirmLabelKey,
+  pauseUntilDescriptionKey,
   pauseUntilHint,
   pauseUntilLabel,
   pauseUntilOptions,
-  pauseUntilTitle,
+  pauseUntilTitleKey,
   type PauseUntilChoice,
   type PauseUntilKind,
 } from "@momo/core/features/presence/pauseUntil";
@@ -30,6 +30,7 @@ import { InlineBanner } from "@/features/common/States";
 import { useOffline } from "@/features/common/useOffline";
 import { BlockedReason } from "@/features/common/BlockedReason";
 
+import { useFormatMessage } from "@/i18n/useFormatMessage";
 // Reading this as: confirm dialog for a notification pause, opened from settings and
 // from the sidebar profile menu, internal team users on web+Tauri, density 7/10,
 // motion 2/10.
@@ -97,6 +98,7 @@ export function PauseUntilDialog({
   /** 시험이 시계를 고정한다. 생략하면 `Date.now()`. */
   nowMs?: number;
 }) {
+  const formatMessage = useFormatMessage();
   const hookOffline = useOffline();
   const offline = offlineProp ?? hookOffline;
   const selectId = useId();
@@ -138,7 +140,7 @@ export function PauseUntilDialog({
     if (choice === "custom") {
       const parsed = customPauseUntil(date, time, clock);
       if (!parsed.ok) {
-        setCustomError(customPauseUntilMessage(parsed.reason));
+        setCustomError(formatMessage(customPauseUntilMessageKey(parsed.reason)));
         return;
       }
       setCustomError(null);
@@ -161,8 +163,8 @@ export function PauseUntilDialog({
         data-testid="pause-until-dialog"
         className="gap-3 p-4"
       >
-        <DialogTitle>{pauseUntilTitle(kind)}</DialogTitle>
-        <DialogDescription className="break-keep">{pauseUntilDescription(kind)}</DialogDescription>
+        <DialogTitle>{formatMessage(pauseUntilTitleKey(kind))}</DialogTitle>
+        <DialogDescription className="break-keep">{formatMessage(pauseUntilDescriptionKey(kind))}</DialogDescription>
 
         {running ? (
           <p className="text-meta text-ink-muted" data-testid="pause-until-current">
@@ -194,7 +196,7 @@ export function PauseUntilDialog({
             placeholder={SELECT_PLACEHOLDER}
             options={options.map((option) => ({
               value: option.id,
-              label: option.label,
+              label: formatMessage(option.labelKey),
               hint: option.id === "custom" ? undefined : pauseUntilHint(option.id, now),
             }))}
             onValueChange={(next) => {
@@ -273,7 +275,7 @@ export function PauseUntilDialog({
             data-testid="pause-until-confirm"
             onClick={confirm}
           >
-            {pending ? SAVING_LABEL : pauseUntilConfirmLabel(kind)}
+            {pending ? SAVING_LABEL : formatMessage(pauseUntilConfirmLabelKey(kind))}
           </Button>
         </div>
       </DialogContent>

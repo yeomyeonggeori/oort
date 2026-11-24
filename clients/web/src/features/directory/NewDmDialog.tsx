@@ -71,7 +71,7 @@ function PickRow({
 }) {
   const t = useFormatMessage();
   const isAgent = member.kind === "agent";
-  const dot = peerDot(member, Date.now());
+  const dot = peerDot(t, member, Date.now());
   return (
     <ListRow
       data-testid="new-dm-row"

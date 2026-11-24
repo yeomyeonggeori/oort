@@ -112,7 +112,7 @@ export function MailboxList({
               data-kind={entry.kind}
               data-unread={entry.unread ? "true" : "false"}
               aria-current={selected ? "true" : undefined}
-              aria-label={entryAriaLabel(entry, sourceLine)}
+              aria-label={entryAriaLabel(formatMessage, entry, sourceLine)}
               title={entry.reason}
               onClick={() => onSelect(entry)}
               className={cn(

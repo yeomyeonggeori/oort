@@ -10,6 +10,7 @@ import {
   type PaneAttention,
 } from "@/features/workbench/local/paneAttention";
 
+import { useFormatMessage } from "@/i18n/useFormatMessage";
 // Reading this as: 인박스 「이 기기의 칸」 줄 for internal team users on Tauri desktop,
 // density 7/10, motion 0/10.
 //
@@ -19,6 +20,7 @@ import {
 // 칸을 보면 줄이 내려간다. 비어 있으면 아무것도 그리지 않는다.
 
 export function LocalPaneInbox({ store = paneAttention() }: { store?: PaneAttention }) {
+  const formatMessage = useFormatMessage();
   const entries = useLocalPaneAttention(store);
   const navigate = useNavigate();
   if (entries.length === 0) return null;
@@ -51,7 +53,7 @@ export function LocalPaneInbox({ store = paneAttention() }: { store?: PaneAttent
               <span className="min-w-0 truncate font-medium text-ink">{e.name}</span>
               {/* 실패한 턴은 「작업이 끝났어요」가 아니라 무슨 일이 있었는지를 말한다(#5584 H1). */}
               <span className="min-w-0 flex-1 truncate text-ink-muted">{attentionLine(e.mark, e.signal)}</span>
-              <span className="shrink-0 text-timestamp text-ink-muted">{relativeLabel(e.atMs, now)}</span>
+              <span className="shrink-0 text-timestamp text-ink-muted">{relativeLabel(formatMessage, e.atMs, now)}</span>
             </button>
           </li>
         ))}

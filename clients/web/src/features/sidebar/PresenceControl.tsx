@@ -6,13 +6,13 @@ import {
   type RosterMember,
 } from "@momo/core/lib/api";
 import {
-  declaredStatusLabel,
-  PRESENCE_MENU_LABEL,
+  declaredStatusLabelKey,
+  PRESENCE_MENU_LABEL_KEY,
   PRESENCE_OPTIONS,
 } from "@momo/core/features/presence/model";
 import { effectivePresenceTone } from "@momo/core/features/presence/statusDot";
 import {
-  PAUSE_UNTIL_NONE_ACTION_LABEL,
+  PAUSE_UNTIL_NONE_ACTION_LABEL_KEY,
   pauseUntilLabel,
 } from "@momo/core/features/presence/pauseUntil";
 import {
@@ -31,6 +31,7 @@ import {
 import { useMemberAvatar } from "./useMemberAvatar";
 import { useSelfPresenceWrite } from "./useSelfPresenceWrite";
 
+import { useFormatMessage } from "@/i18n/useFormatMessage";
 // =============================================================================
 // Self presence (ADR-0160 ③, 프레즌스 6b). UX-D4 (#1756) moved the trigger: the
 // whole bottom identity row is now the profile card, and this file owns the
@@ -158,6 +159,7 @@ export function PresenceStatusItems({
    */
   onChooseDnd: () => void;
 }) {
+  const formatMessage = useFormatMessage();
   const [failed, setFailed] = useState(false);
   const menuLabelId = useId();
 
@@ -174,13 +176,13 @@ export function PresenceStatusItems({
           in the open panel said what the three words are *about* — a person
           arriving at 온라인 / 자리 비움 / 방해 금지 had to infer the question
           from the answers. The title is the same name the trigger already
-          speaks (`PRESENCE_MENU_LABEL`), and it is a real name rather than
+          speaks (`formatMessage(PRESENCE_MENU_LABEL_KEY)`), and it is a real name rather than
           decoration: the radio group points back at it with
           `aria-labelledby`, the idiom `HostPicker` already uses.
 
           **It stands first, above the failure banner** (design-review M1). */}
       <DropdownMenuLabel id={menuLabelId}>
-        {PRESENCE_MENU_LABEL}
+        {formatMessage(PRESENCE_MENU_LABEL_KEY)}
       </DropdownMenuLabel>
       {failed && (
         <InlineBanner
@@ -201,7 +203,7 @@ export function PresenceStatusItems({
           const dndNote =
             status === "dnd" && isCurrent
               ? selfMember?.dndUntilMs === undefined
-                ? PAUSE_UNTIL_NONE_ACTION_LABEL
+                ? formatMessage(PAUSE_UNTIL_NONE_ACTION_LABEL_KEY)
                 : pauseUntilLabel(selfMember.dndUntilMs, Date.now())
               : null;
           return (
@@ -245,7 +247,7 @@ export function PresenceStatusItems({
               </span>
               {dndNote ? (
                 <span className="flex min-w-0 flex-1 flex-col">
-                  <span>{declaredStatusLabel(status)}</span>
+                  <span>{formatMessage(declaredStatusLabelKey(status))}</span>
                   {/* 말줄임을 쓰지 않는다: 메뉴 폭은 192px 라 「10월 19일(월) 오전 9:00까지」(다음 주
                       월요일 항목이 만드는 라벨)가 한 줄에 못 든다. 행 높이는 가변이고, 어절 단위로
                       접어(`break-keep`) 날짜와 시각이 비슷한 길이의 두 줄이 되게 한다(`text-balance`). */}
@@ -257,7 +259,7 @@ export function PresenceStatusItems({
                   </span>
                 </span>
               ) : (
-                <span className="flex-1">{declaredStatusLabel(status)}</span>
+                <span className="flex-1">{formatMessage(declaredStatusLabelKey(status))}</span>
               )}
               {isCurrent && (
                 <Check className="size-4 shrink-0 text-ink-muted" aria-hidden="true" />

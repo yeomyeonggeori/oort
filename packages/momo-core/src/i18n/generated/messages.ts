@@ -653,6 +653,7 @@ export const messageKeys = [
   "desktop.workSession.backToListLabel",
   "desktop.workSession.listTitle",
   "desktop.workSession.pageTitle",
+  "directory.count.summary",
   "directory.lifecycle.cancel",
   "directory.lifecycle.errorForbidden",
   "directory.lifecycle.errorLastOwner",
@@ -688,6 +689,15 @@ export const messageKeys = [
   "directory.lifecycle.suspendUndo",
   "directory.manage.heading",
   "directory.manage.hint",
+  "directory.memberRow.agent",
+  "directory.memberRow.agentOwned",
+  "directory.memberRow.openDm",
+  "directory.openDm.failed",
+  "directory.openDm.forbidden",
+  "directory.openDm.network",
+  "directory.openDm.notActive",
+  "directory.openDm.rateLimited",
+  "directory.openDm.self",
   "directory.profile.close",
   "directory.profile.copied",
   "directory.profile.copyEmail",
@@ -711,6 +721,7 @@ export const messageKeys = [
   "directory.profile.ownerUnknown",
   "directory.profile.retry",
   "directory.profile.routing",
+  "directory.profile.sheetInactive",
   "directory.profile.title",
   "directory.profile.titleUnknown",
   "directory.role.cancel",
@@ -726,6 +737,20 @@ export const messageKeys = [
   "directory.role.lockedAdminCeiling",
   "directory.role.lockedOwnerPeer",
   "directory.role.placeholder",
+  "directory.roleChange.adminGrant",
+  "directory.roleChange.equalOrHigher",
+  "directory.roleChange.failed",
+  "directory.roleChange.forbidden",
+  "directory.roleChange.invalid",
+  "directory.roleChange.lastOwner",
+  "directory.roleChange.network",
+  "directory.roleChange.notFound",
+  "directory.roleChange.rateLimited",
+  "directory.roleChange.self",
+  "directory.status.deleted",
+  "directory.status.inactive",
+  "directory.status.invited",
+  "directory.status.suspended",
   "emoji.catalog.emptyDetail",
   "emoji.catalog.emptyHeadline",
   "emoji.catalog.error",
@@ -1061,7 +1086,64 @@ export const messageKeys = [
   "huddles.participants.one",
   "huddles.participants.two",
   "huddles.participants.waiting",
+  "inbox.actionType.fileWriteReindex",
+  "inbox.actionType.messageSend",
+  "inbox.actionType.workExec",
+  "inbox.actionType.workSpawn",
+  "inbox.activity.filterAll",
+  "inbox.activity.filterApprovals",
+  "inbox.activity.filterDone",
+  "inbox.activity.filterMine",
+  "inbox.activity.tabsLabel",
   "inbox.approval.open",
+  "inbox.deadline.daysLeft",
+  "inbox.deadline.hoursLeft",
+  "inbox.deadline.minutesLeft",
+  "inbox.deadline.passed",
+  "inbox.feedApproval.irreversible",
+  "inbox.feedApproval.predicate",
+  "inbox.feedMention.predicate",
+  "inbox.feedRun.outcomeFailed",
+  "inbox.feedRun.outcomePaused",
+  "inbox.feedRun.outcomeSucceeded",
+  "inbox.feedRun.outcomeTimedOut",
+  "inbox.feedRun.predicateTitled",
+  "inbox.feedRun.predicateUntitled",
+  "inbox.feedRun.steps",
+  "inbox.filter.agents",
+  "inbox.filter.mentions",
+  "inbox.filter.needsAction",
+  "inbox.filter.tabsLabel",
+  "inbox.filter.tabWithCount",
+  "inbox.mailbox.actorMe",
+  "inbox.mailbox.actorThread",
+  "inbox.mailbox.ariaLabel",
+  "inbox.mailbox.filterAll",
+  "inbox.mailbox.filterDm",
+  "inbox.mailbox.filterMention",
+  "inbox.mailbox.filterReply",
+  "inbox.mailbox.filterTask",
+  "inbox.mailbox.filterThread",
+  "inbox.mailbox.filterUnread",
+  "inbox.mailbox.previewMine",
+  "inbox.mailbox.threadPreview",
+  "inbox.mailboxType.dm",
+  "inbox.mailboxType.mention",
+  "inbox.mailboxType.reply",
+  "inbox.mailboxType.task",
+  "inbox.mailboxType.thread",
+  "inbox.preview.deleted",
+  "inbox.preview.empty",
+  "inbox.reason.approvalPending",
+  "inbox.reason.approvalSettled",
+  "inbox.reason.dm",
+  "inbox.reason.dmMine",
+  "inbox.reason.mention",
+  "inbox.reason.mentionServer",
+  "inbox.reason.reply",
+  "inbox.reason.run",
+  "inbox.reason.threadNewReply",
+  "inbox.reason.threadParticipant",
   "inbox.source.channelUnknown",
   "inbox.source.dm",
   "inbox.source.dmGroup",
@@ -1069,6 +1151,27 @@ export const messageKeys = [
   "inbox.source.task",
   "inbox.source.thread",
   "inbox.source.threadUnknown",
+  "inbox.time.daysAgo",
+  "inbox.time.hoursAgo",
+  "inbox.time.justNow",
+  "inbox.time.minutesAgo",
+  "inbox.toolAction.fallback",
+  "inbox.toolAction.sessionEnd",
+  "inbox.toolAction.sessionStart",
+  "inbox.workspaceAction.agentRename",
+  "inbox.workspaceAction.channelCreate",
+  "inbox.workspaceAction.channelMemberAdd",
+  "inbox.workspaceAction.fallback",
+  "inbox.workspaceAction.hostedChannelsGrant",
+  "inbox.workspaceAction.inviteCreate",
+  "inbox.workspaceAction.memberAvatarSet",
+  "inbox.workspaceAction.memberDisplayNameSet",
+  "inbox.workspaceAction.memoryUpdate",
+  "inbox.workspaceAction.pluginInstall",
+  "inbox.workspaceAction.teamAiRolesSet",
+  "inbox.workspaceAction.unfurlUpdate",
+  "inbox.workspaceAction.workspaceSettingsUpdate",
+  "inbox.workspaceAction.workTierUpdate",
   "memberList.empty.detail",
   "memberList.empty.headline",
   "memberList.empty.invite",
@@ -1238,6 +1341,74 @@ export const messageKeys = [
   "onboarding.harnessLogin.waitingBrowser",
   "onboarding.harnessLogin.waitingDetail",
   "onboarding.harnessLogin.waitingDevice",
+  "presence.dnd.hint",
+  "presence.dnd.hintPick",
+  "presence.menu.cardLabel",
+  "presence.menu.cardLabelCustom",
+  "presence.menu.label",
+  "presence.menu.statusLine",
+  "presence.menu.triggerLabel",
+  "presence.pauseBanner.dndAction",
+  "presence.pauseBanner.dndLabel",
+  "presence.pauseBanner.dndTitle",
+  "presence.pauseBanner.pausedLabel",
+  "presence.pauseBanner.pausedTitle",
+  "presence.pauseBanner.resumeAction",
+  "presence.pausePreset.custom",
+  "presence.pausePreset.hour1",
+  "presence.pausePreset.hour2",
+  "presence.pausePreset.min30",
+  "presence.pausePreset.nextMonday",
+  "presence.pausePreset.tomorrow",
+  "presence.pauseUntil.activeNote",
+  "presence.pauseUntil.changeAction",
+  "presence.pauseUntil.dndConfirm",
+  "presence.pauseUntil.dndDescription",
+  "presence.pauseUntil.dndPresetHint",
+  "presence.pauseUntil.dndTitle",
+  "presence.pauseUntil.invalid",
+  "presence.pauseUntil.labelWithChange",
+  "presence.pauseUntil.none",
+  "presence.pauseUntil.noneActionLabel",
+  "presence.pauseUntil.offlineReason",
+  "presence.pauseUntil.optionWithHint",
+  "presence.pauseUntil.past",
+  "presence.pauseUntil.pauseConfirm",
+  "presence.pauseUntil.pauseDescription",
+  "presence.pauseUntil.pausePresetHint",
+  "presence.pauseUntil.pauseTitle",
+  "presence.pauseUntil.setAction",
+  "presence.status.away",
+  "presence.status.dnd",
+  "presence.status.offline",
+  "presence.status.online",
+  "presence.statusDialog.clear",
+  "presence.statusDialog.clearFailed",
+  "presence.statusDialog.closeLabel",
+  "presence.statusDialog.description",
+  "presence.statusDialog.emojiClear",
+  "presence.statusDialog.emojiLabel",
+  "presence.statusDialog.expiryLabel",
+  "presence.statusDialog.expiryRow",
+  "presence.statusDialog.menuAria",
+  "presence.statusDialog.menuLabel",
+  "presence.statusDialog.save",
+  "presence.statusDialog.saveFailed",
+  "presence.statusDialog.saving",
+  "presence.statusDialog.textLabel",
+  "presence.statusDialog.textPlaceholder",
+  "presence.statusDialog.title",
+  "presence.statusExpiry.custom",
+  "presence.statusExpiry.hour1",
+  "presence.statusExpiry.min30",
+  "presence.statusExpiry.none",
+  "presence.statusExpiry.today",
+  "presence.statusPreset.commute",
+  "presence.statusPreset.meeting",
+  "presence.statusPreset.sick",
+  "presence.statusPreset.vacation",
+  "presence.statusPreset.wfh",
+  "presence.write.failed",
   "readState.markUnread.action",
   "readState.markUnread.done",
   "readState.markUnread.failed",
@@ -1772,12 +1943,21 @@ export const messageKeys = [
   "scheduled.status.sentNow",
   "scheduled.trigger.hint",
   "scheduled.trigger.label",
+  "search.entry.thisChannel",
+  "search.entry.thisChannelQuery",
+  "search.entry.thisDm",
+  "search.entry.thisDmQuery",
+  "search.entry.workspace",
+  "search.entry.workspaceQuery",
+  "search.escalate.detail",
+  "search.escalate.label",
   "search.group.channels",
   "search.group.loadingMore",
   "search.group.messages",
   "search.group.more",
   "search.group.moreLabel",
   "search.group.people",
+  "search.hint.shortQuery",
   "search.input.clearLabel",
   "search.input.exitLabel",
   "search.input.placeholder",
@@ -1786,6 +1966,11 @@ export const messageKeys = [
   "search.kind.groupLabel",
   "search.kind.messages",
   "search.kind.people",
+  "search.noResults.channelNamed",
+  "search.noResults.dmNamed",
+  "search.noResults.thisChannel",
+  "search.noResults.thisDm",
+  "search.noResults.workspace",
   "search.picker.agent",
   "search.picker.all",
   "search.picker.channelPrivate",
@@ -1796,6 +1981,11 @@ export const messageKeys = [
   "search.picker.filterLabel",
   "search.picker.filterPlaceholder",
   "search.picker.title",
+  "search.placeholder.channelNamed",
+  "search.placeholder.default",
+  "search.placeholder.dmNamed",
+  "search.placeholder.thisChannel",
+  "search.placeholder.thisDm",
   "search.recent.clearAll",
   "search.recent.clearAllLabel",
   "search.recent.conversations",
@@ -1804,6 +1994,9 @@ export const messageKeys = [
   "search.recent.searches",
   "search.recent.searchInLabel",
   "search.recent.searchLabel",
+  "search.refusal.detail",
+  "search.refusal.headlineChannel",
+  "search.refusal.headlineDm",
   "search.row.agentLabel",
   "search.row.agentSubtitle",
   "search.row.channelLabel",
@@ -1819,6 +2012,12 @@ export const messageKeys = [
   "search.scope.groupLabel",
   "search.scope.pick",
   "search.scope.pickLabel",
+  "search.scope.tabsLabel",
+  "search.scope.tabsLabelNamed",
+  "search.scope.thisChannel",
+  "search.scope.thisDm",
+  "search.scope.workspace",
+  "search.scopeNote.members",
   "search.state.errorDetail",
   "search.state.errorHeadline",
   "search.state.loading",
@@ -3512,6 +3711,10 @@ export const argumentSpecs = {
   "desktop.workSession.backToListLabel": {},
   "desktop.workSession.listTitle": {},
   "desktop.workSession.pageTitle": {},
+  "directory.count.summary": {
+    "agents": "number",
+    "people": "number"
+  },
   "directory.lifecycle.cancel": {},
   "directory.lifecycle.errorForbidden": {},
   "directory.lifecycle.errorLastOwner": {
@@ -3566,6 +3769,26 @@ export const argumentSpecs = {
     "admin": "string",
     "owner": "string"
   },
+  "directory.memberRow.agent": {},
+  "directory.memberRow.agentOwned": {
+    "owner": "string"
+  },
+  "directory.memberRow.openDm": {
+    "parts": "string"
+  },
+  "directory.openDm.failed": {
+    "name": "string"
+  },
+  "directory.openDm.forbidden": {},
+  "directory.openDm.network": {
+    "name": "string",
+    "reason": "string"
+  },
+  "directory.openDm.notActive": {
+    "name": "string"
+  },
+  "directory.openDm.rateLimited": {},
+  "directory.openDm.self": {},
   "directory.profile.close": {},
   "directory.profile.copied": {},
   "directory.profile.copyEmail": {},
@@ -3593,6 +3816,9 @@ export const argumentSpecs = {
   "directory.profile.ownerUnknown": {},
   "directory.profile.retry": {},
   "directory.profile.routing": {},
+  "directory.profile.sheetInactive": {
+    "status": "string"
+  },
   "directory.profile.title": {
     "name": "string"
   },
@@ -3630,6 +3856,22 @@ export const argumentSpecs = {
     "owner": "string"
   },
   "directory.role.placeholder": {},
+  "directory.roleChange.adminGrant": {},
+  "directory.roleChange.equalOrHigher": {},
+  "directory.roleChange.failed": {},
+  "directory.roleChange.forbidden": {},
+  "directory.roleChange.invalid": {},
+  "directory.roleChange.lastOwner": {},
+  "directory.roleChange.network": {
+    "reason": "string"
+  },
+  "directory.roleChange.notFound": {},
+  "directory.roleChange.rateLimited": {},
+  "directory.roleChange.self": {},
+  "directory.status.deleted": {},
+  "directory.status.inactive": {},
+  "directory.status.invited": {},
+  "directory.status.suspended": {},
   "emoji.catalog.emptyDetail": {},
   "emoji.catalog.emptyHeadline": {},
   "emoji.catalog.error": {},
@@ -4054,7 +4296,102 @@ export const argumentSpecs = {
     "second": "string"
   },
   "huddles.participants.waiting": {},
+  "inbox.actionType.fileWriteReindex": {},
+  "inbox.actionType.messageSend": {},
+  "inbox.actionType.workExec": {},
+  "inbox.actionType.workSpawn": {},
+  "inbox.activity.filterAll": {},
+  "inbox.activity.filterApprovals": {},
+  "inbox.activity.filterDone": {},
+  "inbox.activity.filterMine": {},
+  "inbox.activity.tabsLabel": {},
   "inbox.approval.open": {},
+  "inbox.deadline.daysLeft": {
+    "count": "number"
+  },
+  "inbox.deadline.hoursLeft": {
+    "count": "number"
+  },
+  "inbox.deadline.minutesLeft": {
+    "count": "number"
+  },
+  "inbox.deadline.passed": {},
+  "inbox.feedApproval.irreversible": {},
+  "inbox.feedApproval.predicate": {
+    "action": "string"
+  },
+  "inbox.feedMention.predicate": {},
+  "inbox.feedRun.outcomeFailed": {},
+  "inbox.feedRun.outcomePaused": {},
+  "inbox.feedRun.outcomeSucceeded": {},
+  "inbox.feedRun.outcomeTimedOut": {},
+  "inbox.feedRun.predicateTitled": {
+    "title": "string"
+  },
+  "inbox.feedRun.predicateUntitled": {},
+  "inbox.feedRun.steps": {
+    "max": "number",
+    "step": "number"
+  },
+  "inbox.filter.agents": {},
+  "inbox.filter.mentions": {},
+  "inbox.filter.needsAction": {},
+  "inbox.filter.tabsLabel": {},
+  "inbox.filter.tabWithCount": {
+    "count": "number",
+    "label": "string"
+  },
+  "inbox.mailbox.actorMe": {},
+  "inbox.mailbox.actorThread": {},
+  "inbox.mailbox.ariaLabel": {
+    "actor": "string",
+    "count": "number",
+    "kind": "string",
+    "preview": "string",
+    "showKind": "string",
+    "source": "string",
+    "time": "string",
+    "unread": "string"
+  },
+  "inbox.mailbox.filterAll": {},
+  "inbox.mailbox.filterDm": {},
+  "inbox.mailbox.filterMention": {},
+  "inbox.mailbox.filterReply": {},
+  "inbox.mailbox.filterTask": {},
+  "inbox.mailbox.filterThread": {},
+  "inbox.mailbox.filterUnread": {},
+  "inbox.mailbox.previewMine": {
+    "text": "string"
+  },
+  "inbox.mailbox.threadPreview": {
+    "count": "number",
+    "text": "string"
+  },
+  "inbox.mailboxType.dm": {
+    "channel": "string"
+  },
+  "inbox.mailboxType.mention": {
+    "channel": "string"
+  },
+  "inbox.mailboxType.reply": {
+    "channel": "string"
+  },
+  "inbox.mailboxType.task": {},
+  "inbox.mailboxType.thread": {
+    "channel": "string"
+  },
+  "inbox.preview.deleted": {},
+  "inbox.preview.empty": {},
+  "inbox.reason.approvalPending": {},
+  "inbox.reason.approvalSettled": {},
+  "inbox.reason.dm": {},
+  "inbox.reason.dmMine": {},
+  "inbox.reason.mention": {},
+  "inbox.reason.mentionServer": {},
+  "inbox.reason.reply": {},
+  "inbox.reason.run": {},
+  "inbox.reason.threadNewReply": {},
+  "inbox.reason.threadParticipant": {},
   "inbox.source.channelUnknown": {},
   "inbox.source.dm": {
     "name": "string"
@@ -4069,6 +4406,33 @@ export const argumentSpecs = {
     "channel": "string"
   },
   "inbox.source.threadUnknown": {},
+  "inbox.time.daysAgo": {
+    "count": "number"
+  },
+  "inbox.time.hoursAgo": {
+    "count": "number"
+  },
+  "inbox.time.justNow": {},
+  "inbox.time.minutesAgo": {
+    "count": "number"
+  },
+  "inbox.toolAction.fallback": {},
+  "inbox.toolAction.sessionEnd": {},
+  "inbox.toolAction.sessionStart": {},
+  "inbox.workspaceAction.agentRename": {},
+  "inbox.workspaceAction.channelCreate": {},
+  "inbox.workspaceAction.channelMemberAdd": {},
+  "inbox.workspaceAction.fallback": {},
+  "inbox.workspaceAction.hostedChannelsGrant": {},
+  "inbox.workspaceAction.inviteCreate": {},
+  "inbox.workspaceAction.memberAvatarSet": {},
+  "inbox.workspaceAction.memberDisplayNameSet": {},
+  "inbox.workspaceAction.memoryUpdate": {},
+  "inbox.workspaceAction.pluginInstall": {},
+  "inbox.workspaceAction.teamAiRolesSet": {},
+  "inbox.workspaceAction.unfurlUpdate": {},
+  "inbox.workspaceAction.workspaceSettingsUpdate": {},
+  "inbox.workspaceAction.workTierUpdate": {},
   "memberList.empty.detail": {},
   "memberList.empty.headline": {},
   "memberList.empty.invite": {},
@@ -4288,6 +4652,102 @@ export const argumentSpecs = {
     "cli": "string"
   },
   "onboarding.harnessLogin.waitingDevice": {},
+  "presence.dnd.hint": {},
+  "presence.dnd.hintPick": {},
+  "presence.menu.cardLabel": {
+    "name": "string",
+    "trigger": "string"
+  },
+  "presence.menu.cardLabelCustom": {
+    "custom": "string",
+    "name": "string",
+    "trigger": "string"
+  },
+  "presence.menu.label": {},
+  "presence.menu.statusLine": {
+    "status": "string"
+  },
+  "presence.menu.triggerLabel": {
+    "status": "string"
+  },
+  "presence.pauseBanner.dndAction": {},
+  "presence.pauseBanner.dndLabel": {
+    "action": "string",
+    "title": "string"
+  },
+  "presence.pauseBanner.dndTitle": {},
+  "presence.pauseBanner.pausedLabel": {
+    "action": "string",
+    "detail": "string",
+    "title": "string"
+  },
+  "presence.pauseBanner.pausedTitle": {},
+  "presence.pauseBanner.resumeAction": {},
+  "presence.pausePreset.custom": {},
+  "presence.pausePreset.hour1": {},
+  "presence.pausePreset.hour2": {},
+  "presence.pausePreset.min30": {},
+  "presence.pausePreset.nextMonday": {},
+  "presence.pausePreset.tomorrow": {},
+  "presence.pauseUntil.activeNote": {},
+  "presence.pauseUntil.changeAction": {},
+  "presence.pauseUntil.dndConfirm": {},
+  "presence.pauseUntil.dndDescription": {},
+  "presence.pauseUntil.dndPresetHint": {},
+  "presence.pauseUntil.dndTitle": {},
+  "presence.pauseUntil.invalid": {},
+  "presence.pauseUntil.labelWithChange": {
+    "label": "string"
+  },
+  "presence.pauseUntil.none": {},
+  "presence.pauseUntil.noneActionLabel": {},
+  "presence.pauseUntil.offlineReason": {},
+  "presence.pauseUntil.optionWithHint": {
+    "hint": "string",
+    "label": "string"
+  },
+  "presence.pauseUntil.past": {},
+  "presence.pauseUntil.pauseConfirm": {},
+  "presence.pauseUntil.pauseDescription": {},
+  "presence.pauseUntil.pausePresetHint": {},
+  "presence.pauseUntil.pauseTitle": {},
+  "presence.pauseUntil.setAction": {},
+  "presence.status.away": {},
+  "presence.status.dnd": {},
+  "presence.status.offline": {},
+  "presence.status.online": {},
+  "presence.statusDialog.clear": {},
+  "presence.statusDialog.clearFailed": {},
+  "presence.statusDialog.closeLabel": {},
+  "presence.statusDialog.description": {},
+  "presence.statusDialog.emojiClear": {},
+  "presence.statusDialog.emojiLabel": {},
+  "presence.statusDialog.expiryLabel": {},
+  "presence.statusDialog.expiryRow": {
+    "label": "string",
+    "value": "string"
+  },
+  "presence.statusDialog.menuAria": {
+    "line": "string"
+  },
+  "presence.statusDialog.menuLabel": {},
+  "presence.statusDialog.save": {},
+  "presence.statusDialog.saveFailed": {},
+  "presence.statusDialog.saving": {},
+  "presence.statusDialog.textLabel": {},
+  "presence.statusDialog.textPlaceholder": {},
+  "presence.statusDialog.title": {},
+  "presence.statusExpiry.custom": {},
+  "presence.statusExpiry.hour1": {},
+  "presence.statusExpiry.min30": {},
+  "presence.statusExpiry.none": {},
+  "presence.statusExpiry.today": {},
+  "presence.statusPreset.commute": {},
+  "presence.statusPreset.meeting": {},
+  "presence.statusPreset.sick": {},
+  "presence.statusPreset.vacation": {},
+  "presence.statusPreset.wfh": {},
+  "presence.write.failed": {},
   "readState.markUnread.action": {},
   "readState.markUnread.done": {},
   "readState.markUnread.failed": {},
@@ -4905,6 +5365,20 @@ export const argumentSpecs = {
   "scheduled.status.sentNow": {},
   "scheduled.trigger.hint": {},
   "scheduled.trigger.label": {},
+  "search.entry.thisChannel": {},
+  "search.entry.thisChannelQuery": {
+    "query": "string"
+  },
+  "search.entry.thisDm": {},
+  "search.entry.thisDmQuery": {
+    "query": "string"
+  },
+  "search.entry.workspace": {},
+  "search.entry.workspaceQuery": {
+    "query": "string"
+  },
+  "search.escalate.detail": {},
+  "search.escalate.label": {},
   "search.group.channels": {},
   "search.group.loadingMore": {},
   "search.group.messages": {},
@@ -4913,6 +5387,9 @@ export const argumentSpecs = {
     "group": "string"
   },
   "search.group.people": {},
+  "search.hint.shortQuery": {
+    "count": "number"
+  },
   "search.input.clearLabel": {},
   "search.input.exitLabel": {},
   "search.input.placeholder": {},
@@ -4921,6 +5398,28 @@ export const argumentSpecs = {
   "search.kind.groupLabel": {},
   "search.kind.messages": {},
   "search.kind.people": {},
+  "search.noResults.channelNamed": {
+    "josa": "string",
+    "name": "string",
+    "quoted": "string"
+  },
+  "search.noResults.dmNamed": {
+    "josa": "string",
+    "name": "string",
+    "quoted": "string"
+  },
+  "search.noResults.thisChannel": {
+    "josa": "string",
+    "quoted": "string"
+  },
+  "search.noResults.thisDm": {
+    "josa": "string",
+    "quoted": "string"
+  },
+  "search.noResults.workspace": {
+    "josa": "string",
+    "quoted": "string"
+  },
   "search.picker.agent": {},
   "search.picker.all": {},
   "search.picker.channelPrivate": {},
@@ -4931,6 +5430,15 @@ export const argumentSpecs = {
   "search.picker.filterLabel": {},
   "search.picker.filterPlaceholder": {},
   "search.picker.title": {},
+  "search.placeholder.channelNamed": {
+    "name": "string"
+  },
+  "search.placeholder.default": {},
+  "search.placeholder.dmNamed": {
+    "name": "string"
+  },
+  "search.placeholder.thisChannel": {},
+  "search.placeholder.thisDm": {},
   "search.recent.clearAll": {},
   "search.recent.clearAllLabel": {},
   "search.recent.conversations": {},
@@ -4946,6 +5454,9 @@ export const argumentSpecs = {
   "search.recent.searchLabel": {
     "query": "string"
   },
+  "search.refusal.detail": {},
+  "search.refusal.headlineChannel": {},
+  "search.refusal.headlineDm": {},
   "search.row.agentLabel": {
     "handle": "string",
     "name": "string"
@@ -4981,6 +5492,14 @@ export const argumentSpecs = {
   "search.scope.groupLabel": {},
   "search.scope.pick": {},
   "search.scope.pickLabel": {},
+  "search.scope.tabsLabel": {},
+  "search.scope.tabsLabelNamed": {
+    "name": "string"
+  },
+  "search.scope.thisChannel": {},
+  "search.scope.thisDm": {},
+  "search.scope.workspace": {},
+  "search.scopeNote.members": {},
   "search.state.errorDetail": {},
   "search.state.errorHeadline": {},
   "search.state.loading": {},
@@ -6966,6 +7485,7 @@ export interface MessageArgs {
   "desktop.workSession.backToListLabel": Record<string, never>;
   "desktop.workSession.listTitle": Record<string, never>;
   "desktop.workSession.pageTitle": Record<string, never>;
+  "directory.count.summary": { agents: number; people: number };
   "directory.lifecycle.cancel": Record<string, never>;
   "directory.lifecycle.errorForbidden": Record<string, never>;
   "directory.lifecycle.errorLastOwner": { owner: string };
@@ -7001,6 +7521,15 @@ export interface MessageArgs {
   "directory.lifecycle.suspendUndo": { admin: string; owner: string };
   "directory.manage.heading": Record<string, never>;
   "directory.manage.hint": { admin: string; owner: string };
+  "directory.memberRow.agent": Record<string, never>;
+  "directory.memberRow.agentOwned": { owner: string };
+  "directory.memberRow.openDm": { parts: string };
+  "directory.openDm.failed": { name: string };
+  "directory.openDm.forbidden": Record<string, never>;
+  "directory.openDm.network": { name: string; reason: string };
+  "directory.openDm.notActive": { name: string };
+  "directory.openDm.rateLimited": Record<string, never>;
+  "directory.openDm.self": Record<string, never>;
   "directory.profile.close": Record<string, never>;
   "directory.profile.copied": Record<string, never>;
   "directory.profile.copyEmail": Record<string, never>;
@@ -7024,6 +7553,7 @@ export interface MessageArgs {
   "directory.profile.ownerUnknown": Record<string, never>;
   "directory.profile.retry": Record<string, never>;
   "directory.profile.routing": Record<string, never>;
+  "directory.profile.sheetInactive": { status: string };
   "directory.profile.title": { name: string };
   "directory.profile.titleUnknown": Record<string, never>;
   "directory.role.cancel": Record<string, never>;
@@ -7039,6 +7569,20 @@ export interface MessageArgs {
   "directory.role.lockedAdminCeiling": { admin: string; owner: string };
   "directory.role.lockedOwnerPeer": { owner: string };
   "directory.role.placeholder": Record<string, never>;
+  "directory.roleChange.adminGrant": Record<string, never>;
+  "directory.roleChange.equalOrHigher": Record<string, never>;
+  "directory.roleChange.failed": Record<string, never>;
+  "directory.roleChange.forbidden": Record<string, never>;
+  "directory.roleChange.invalid": Record<string, never>;
+  "directory.roleChange.lastOwner": Record<string, never>;
+  "directory.roleChange.network": { reason: string };
+  "directory.roleChange.notFound": Record<string, never>;
+  "directory.roleChange.rateLimited": Record<string, never>;
+  "directory.roleChange.self": Record<string, never>;
+  "directory.status.deleted": Record<string, never>;
+  "directory.status.inactive": Record<string, never>;
+  "directory.status.invited": Record<string, never>;
+  "directory.status.suspended": Record<string, never>;
   "emoji.catalog.emptyDetail": Record<string, never>;
   "emoji.catalog.emptyHeadline": Record<string, never>;
   "emoji.catalog.error": Record<string, never>;
@@ -7374,7 +7918,64 @@ export interface MessageArgs {
   "huddles.participants.one": { first: string };
   "huddles.participants.two": { first: string; second: string };
   "huddles.participants.waiting": Record<string, never>;
+  "inbox.actionType.fileWriteReindex": Record<string, never>;
+  "inbox.actionType.messageSend": Record<string, never>;
+  "inbox.actionType.workExec": Record<string, never>;
+  "inbox.actionType.workSpawn": Record<string, never>;
+  "inbox.activity.filterAll": Record<string, never>;
+  "inbox.activity.filterApprovals": Record<string, never>;
+  "inbox.activity.filterDone": Record<string, never>;
+  "inbox.activity.filterMine": Record<string, never>;
+  "inbox.activity.tabsLabel": Record<string, never>;
   "inbox.approval.open": Record<string, never>;
+  "inbox.deadline.daysLeft": { count: number };
+  "inbox.deadline.hoursLeft": { count: number };
+  "inbox.deadline.minutesLeft": { count: number };
+  "inbox.deadline.passed": Record<string, never>;
+  "inbox.feedApproval.irreversible": Record<string, never>;
+  "inbox.feedApproval.predicate": { action: string };
+  "inbox.feedMention.predicate": Record<string, never>;
+  "inbox.feedRun.outcomeFailed": Record<string, never>;
+  "inbox.feedRun.outcomePaused": Record<string, never>;
+  "inbox.feedRun.outcomeSucceeded": Record<string, never>;
+  "inbox.feedRun.outcomeTimedOut": Record<string, never>;
+  "inbox.feedRun.predicateTitled": { title: string };
+  "inbox.feedRun.predicateUntitled": Record<string, never>;
+  "inbox.feedRun.steps": { max: number; step: number };
+  "inbox.filter.agents": Record<string, never>;
+  "inbox.filter.mentions": Record<string, never>;
+  "inbox.filter.needsAction": Record<string, never>;
+  "inbox.filter.tabsLabel": Record<string, never>;
+  "inbox.filter.tabWithCount": { count: number; label: string };
+  "inbox.mailbox.actorMe": Record<string, never>;
+  "inbox.mailbox.actorThread": Record<string, never>;
+  "inbox.mailbox.ariaLabel": { actor: string; count: number; kind: string; preview: string; showKind: string; source: string; time: string; unread: string };
+  "inbox.mailbox.filterAll": Record<string, never>;
+  "inbox.mailbox.filterDm": Record<string, never>;
+  "inbox.mailbox.filterMention": Record<string, never>;
+  "inbox.mailbox.filterReply": Record<string, never>;
+  "inbox.mailbox.filterTask": Record<string, never>;
+  "inbox.mailbox.filterThread": Record<string, never>;
+  "inbox.mailbox.filterUnread": Record<string, never>;
+  "inbox.mailbox.previewMine": { text: string };
+  "inbox.mailbox.threadPreview": { count: number; text: string };
+  "inbox.mailboxType.dm": { channel: string };
+  "inbox.mailboxType.mention": { channel: string };
+  "inbox.mailboxType.reply": { channel: string };
+  "inbox.mailboxType.task": Record<string, never>;
+  "inbox.mailboxType.thread": { channel: string };
+  "inbox.preview.deleted": Record<string, never>;
+  "inbox.preview.empty": Record<string, never>;
+  "inbox.reason.approvalPending": Record<string, never>;
+  "inbox.reason.approvalSettled": Record<string, never>;
+  "inbox.reason.dm": Record<string, never>;
+  "inbox.reason.dmMine": Record<string, never>;
+  "inbox.reason.mention": Record<string, never>;
+  "inbox.reason.mentionServer": Record<string, never>;
+  "inbox.reason.reply": Record<string, never>;
+  "inbox.reason.run": Record<string, never>;
+  "inbox.reason.threadNewReply": Record<string, never>;
+  "inbox.reason.threadParticipant": Record<string, never>;
   "inbox.source.channelUnknown": Record<string, never>;
   "inbox.source.dm": { name: string };
   "inbox.source.dmGroup": { count: number; names: string };
@@ -7382,6 +7983,27 @@ export interface MessageArgs {
   "inbox.source.task": Record<string, never>;
   "inbox.source.thread": { channel: string };
   "inbox.source.threadUnknown": Record<string, never>;
+  "inbox.time.daysAgo": { count: number };
+  "inbox.time.hoursAgo": { count: number };
+  "inbox.time.justNow": Record<string, never>;
+  "inbox.time.minutesAgo": { count: number };
+  "inbox.toolAction.fallback": Record<string, never>;
+  "inbox.toolAction.sessionEnd": Record<string, never>;
+  "inbox.toolAction.sessionStart": Record<string, never>;
+  "inbox.workspaceAction.agentRename": Record<string, never>;
+  "inbox.workspaceAction.channelCreate": Record<string, never>;
+  "inbox.workspaceAction.channelMemberAdd": Record<string, never>;
+  "inbox.workspaceAction.fallback": Record<string, never>;
+  "inbox.workspaceAction.hostedChannelsGrant": Record<string, never>;
+  "inbox.workspaceAction.inviteCreate": Record<string, never>;
+  "inbox.workspaceAction.memberAvatarSet": Record<string, never>;
+  "inbox.workspaceAction.memberDisplayNameSet": Record<string, never>;
+  "inbox.workspaceAction.memoryUpdate": Record<string, never>;
+  "inbox.workspaceAction.pluginInstall": Record<string, never>;
+  "inbox.workspaceAction.teamAiRolesSet": Record<string, never>;
+  "inbox.workspaceAction.unfurlUpdate": Record<string, never>;
+  "inbox.workspaceAction.workspaceSettingsUpdate": Record<string, never>;
+  "inbox.workspaceAction.workTierUpdate": Record<string, never>;
   "memberList.empty.detail": Record<string, never>;
   "memberList.empty.headline": Record<string, never>;
   "memberList.empty.invite": Record<string, never>;
@@ -7551,6 +8173,74 @@ export interface MessageArgs {
   "onboarding.harnessLogin.waitingBrowser": Record<string, never>;
   "onboarding.harnessLogin.waitingDetail": { cli: string };
   "onboarding.harnessLogin.waitingDevice": Record<string, never>;
+  "presence.dnd.hint": Record<string, never>;
+  "presence.dnd.hintPick": Record<string, never>;
+  "presence.menu.cardLabel": { name: string; trigger: string };
+  "presence.menu.cardLabelCustom": { custom: string; name: string; trigger: string };
+  "presence.menu.label": Record<string, never>;
+  "presence.menu.statusLine": { status: string };
+  "presence.menu.triggerLabel": { status: string };
+  "presence.pauseBanner.dndAction": Record<string, never>;
+  "presence.pauseBanner.dndLabel": { action: string; title: string };
+  "presence.pauseBanner.dndTitle": Record<string, never>;
+  "presence.pauseBanner.pausedLabel": { action: string; detail: string; title: string };
+  "presence.pauseBanner.pausedTitle": Record<string, never>;
+  "presence.pauseBanner.resumeAction": Record<string, never>;
+  "presence.pausePreset.custom": Record<string, never>;
+  "presence.pausePreset.hour1": Record<string, never>;
+  "presence.pausePreset.hour2": Record<string, never>;
+  "presence.pausePreset.min30": Record<string, never>;
+  "presence.pausePreset.nextMonday": Record<string, never>;
+  "presence.pausePreset.tomorrow": Record<string, never>;
+  "presence.pauseUntil.activeNote": Record<string, never>;
+  "presence.pauseUntil.changeAction": Record<string, never>;
+  "presence.pauseUntil.dndConfirm": Record<string, never>;
+  "presence.pauseUntil.dndDescription": Record<string, never>;
+  "presence.pauseUntil.dndPresetHint": Record<string, never>;
+  "presence.pauseUntil.dndTitle": Record<string, never>;
+  "presence.pauseUntil.invalid": Record<string, never>;
+  "presence.pauseUntil.labelWithChange": { label: string };
+  "presence.pauseUntil.none": Record<string, never>;
+  "presence.pauseUntil.noneActionLabel": Record<string, never>;
+  "presence.pauseUntil.offlineReason": Record<string, never>;
+  "presence.pauseUntil.optionWithHint": { hint: string; label: string };
+  "presence.pauseUntil.past": Record<string, never>;
+  "presence.pauseUntil.pauseConfirm": Record<string, never>;
+  "presence.pauseUntil.pauseDescription": Record<string, never>;
+  "presence.pauseUntil.pausePresetHint": Record<string, never>;
+  "presence.pauseUntil.pauseTitle": Record<string, never>;
+  "presence.pauseUntil.setAction": Record<string, never>;
+  "presence.status.away": Record<string, never>;
+  "presence.status.dnd": Record<string, never>;
+  "presence.status.offline": Record<string, never>;
+  "presence.status.online": Record<string, never>;
+  "presence.statusDialog.clear": Record<string, never>;
+  "presence.statusDialog.clearFailed": Record<string, never>;
+  "presence.statusDialog.closeLabel": Record<string, never>;
+  "presence.statusDialog.description": Record<string, never>;
+  "presence.statusDialog.emojiClear": Record<string, never>;
+  "presence.statusDialog.emojiLabel": Record<string, never>;
+  "presence.statusDialog.expiryLabel": Record<string, never>;
+  "presence.statusDialog.expiryRow": { label: string; value: string };
+  "presence.statusDialog.menuAria": { line: string };
+  "presence.statusDialog.menuLabel": Record<string, never>;
+  "presence.statusDialog.save": Record<string, never>;
+  "presence.statusDialog.saveFailed": Record<string, never>;
+  "presence.statusDialog.saving": Record<string, never>;
+  "presence.statusDialog.textLabel": Record<string, never>;
+  "presence.statusDialog.textPlaceholder": Record<string, never>;
+  "presence.statusDialog.title": Record<string, never>;
+  "presence.statusExpiry.custom": Record<string, never>;
+  "presence.statusExpiry.hour1": Record<string, never>;
+  "presence.statusExpiry.min30": Record<string, never>;
+  "presence.statusExpiry.none": Record<string, never>;
+  "presence.statusExpiry.today": Record<string, never>;
+  "presence.statusPreset.commute": Record<string, never>;
+  "presence.statusPreset.meeting": Record<string, never>;
+  "presence.statusPreset.sick": Record<string, never>;
+  "presence.statusPreset.vacation": Record<string, never>;
+  "presence.statusPreset.wfh": Record<string, never>;
+  "presence.write.failed": Record<string, never>;
   "readState.markUnread.action": Record<string, never>;
   "readState.markUnread.done": Record<string, never>;
   "readState.markUnread.failed": Record<string, never>;
@@ -8085,12 +8775,21 @@ export interface MessageArgs {
   "scheduled.status.sentNow": Record<string, never>;
   "scheduled.trigger.hint": Record<string, never>;
   "scheduled.trigger.label": Record<string, never>;
+  "search.entry.thisChannel": Record<string, never>;
+  "search.entry.thisChannelQuery": { query: string };
+  "search.entry.thisDm": Record<string, never>;
+  "search.entry.thisDmQuery": { query: string };
+  "search.entry.workspace": Record<string, never>;
+  "search.entry.workspaceQuery": { query: string };
+  "search.escalate.detail": Record<string, never>;
+  "search.escalate.label": Record<string, never>;
   "search.group.channels": Record<string, never>;
   "search.group.loadingMore": Record<string, never>;
   "search.group.messages": Record<string, never>;
   "search.group.more": Record<string, never>;
   "search.group.moreLabel": { group: string };
   "search.group.people": Record<string, never>;
+  "search.hint.shortQuery": { count: number };
   "search.input.clearLabel": Record<string, never>;
   "search.input.exitLabel": Record<string, never>;
   "search.input.placeholder": Record<string, never>;
@@ -8099,6 +8798,11 @@ export interface MessageArgs {
   "search.kind.groupLabel": Record<string, never>;
   "search.kind.messages": Record<string, never>;
   "search.kind.people": Record<string, never>;
+  "search.noResults.channelNamed": { josa: string; name: string; quoted: string };
+  "search.noResults.dmNamed": { josa: string; name: string; quoted: string };
+  "search.noResults.thisChannel": { josa: string; quoted: string };
+  "search.noResults.thisDm": { josa: string; quoted: string };
+  "search.noResults.workspace": { josa: string; quoted: string };
   "search.picker.agent": Record<string, never>;
   "search.picker.all": Record<string, never>;
   "search.picker.channelPrivate": Record<string, never>;
@@ -8109,6 +8813,11 @@ export interface MessageArgs {
   "search.picker.filterLabel": Record<string, never>;
   "search.picker.filterPlaceholder": Record<string, never>;
   "search.picker.title": Record<string, never>;
+  "search.placeholder.channelNamed": { name: string };
+  "search.placeholder.default": Record<string, never>;
+  "search.placeholder.dmNamed": { name: string };
+  "search.placeholder.thisChannel": Record<string, never>;
+  "search.placeholder.thisDm": Record<string, never>;
   "search.recent.clearAll": Record<string, never>;
   "search.recent.clearAllLabel": Record<string, never>;
   "search.recent.conversations": Record<string, never>;
@@ -8117,6 +8826,9 @@ export interface MessageArgs {
   "search.recent.searches": Record<string, never>;
   "search.recent.searchInLabel": { query: string; where: string };
   "search.recent.searchLabel": { query: string };
+  "search.refusal.detail": Record<string, never>;
+  "search.refusal.headlineChannel": Record<string, never>;
+  "search.refusal.headlineDm": Record<string, never>;
   "search.row.agentLabel": { handle: string; name: string };
   "search.row.agentSubtitle": { handle: string };
   "search.row.channelLabel": { name: string };
@@ -8132,6 +8844,12 @@ export interface MessageArgs {
   "search.scope.groupLabel": Record<string, never>;
   "search.scope.pick": Record<string, never>;
   "search.scope.pickLabel": Record<string, never>;
+  "search.scope.tabsLabel": Record<string, never>;
+  "search.scope.tabsLabelNamed": { name: string };
+  "search.scope.thisChannel": Record<string, never>;
+  "search.scope.thisDm": Record<string, never>;
+  "search.scope.workspace": Record<string, never>;
+  "search.scopeNote.members": Record<string, never>;
   "search.state.errorDetail": Record<string, never>;
   "search.state.errorHeadline": Record<string, never>;
   "search.state.loading": Record<string, never>;

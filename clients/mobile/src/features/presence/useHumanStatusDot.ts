@@ -7,6 +7,7 @@ import {
 import {useRealtime} from '../../realtime/RealtimeProvider';
 import {useSession} from '../../session/useSession';
 
+import {useFormatMessage} from '../../i18n/useFormatMessage';
 // =============================================================================
 // 사람 한 명의 상태 점 (#4692). 판정은 코어의 `humanPresenceDot`(선언 상태 > 접속 여부, 모르면 점 없음) 한
 // 함수이고, 이 훅이 가져다 넣는 것은 **보는 사람 자기 행**의 접속 여부 하나다: 자기 행은 이 폰 자신의 소켓
@@ -18,10 +19,12 @@ import {useSession} from '../../session/useSession';
 // =============================================================================
 
 export function useHumanStatusDot(member: RosterMember | null): StatusDot | null {
+  const formatMessage = useFormatMessage();
   const {member: self} = useSession();
   const {status} = useRealtime();
   if (member === null || member.kind !== 'human') return null;
   return humanPresenceDot(
+    formatMessage,
     withOwnConnection(member, self.id, status === 'connected'),
     Date.now(),
   );

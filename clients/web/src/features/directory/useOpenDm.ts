@@ -5,6 +5,7 @@ import { openDirectMessage, type Channel, type RosterMember } from "@momo/core/l
 import { useSession } from "@/app/session";
 import { openDmErrorMessage, upsertChannel } from "@momo/core/features/directory/model";
 
+import { useFormatMessage } from "@/i18n/useFormatMessage";
 // =============================================================================
 // DM 시작 (parity G-4). One place opens a DM, so the directory row and the ⌘K
 // people section cannot drift apart.
@@ -38,6 +39,7 @@ export interface OpenDmHandle {
 }
 
 export function useOpenDm(): OpenDmHandle {
+  const formatMessage = useFormatMessage();
   const { workspaceId } = useSession();
   const client = useQueryClient();
   const navigate = useNavigate();
@@ -61,14 +63,14 @@ export function useOpenDm(): OpenDmHandle {
       } catch (failure) {
         setError({
           memberId: member.id,
-          message: openDmErrorMessage(failure, member.displayName),
+          message: openDmErrorMessage(formatMessage, failure, member.displayName),
         });
         return false;
       } finally {
         setPendingMemberId(null);
       }
     },
-    [workspaceId, client, navigate]
+    [workspaceId, client, navigate, formatMessage]
   );
 
   const clearError = useCallback(() => setError(null), []);

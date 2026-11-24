@@ -7,6 +7,7 @@ import {
 import { useSession } from "@/app/session";
 import { useNowMsForExpiry } from "@/features/sidebar/useCustomStatusView";
 
+import { useFormatMessage } from "@/i18n/useFormatMessage";
 // =============================================================================
 // 사람 한 명의 상태 점 (#4692). 판정은 코어의 `humanPresenceDot`(선언 상태 > 접속 여부, 모르면 점 없음)
 // 한 함수이고, 이 훅이 가져다 넣는 것은 둘이다:
@@ -19,10 +20,12 @@ import { useNowMsForExpiry } from "@/features/sidebar/useCustomStatusView";
 // =============================================================================
 
 export function useHumanPresenceDot(member: RosterMember | null): StatusDot | null {
+  const formatMessage = useFormatMessage();
   const { session, connStatus } = useSession();
   const nowMs = useNowMsForExpiry(member?.dndUntilMs);
   if (member === null || member.kind !== "human") return null;
   return humanPresenceDot(
+    formatMessage,
     withOwnConnection(member, session.member.id, connStatus === "connected"),
     nowMs
   );

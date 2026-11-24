@@ -341,6 +341,7 @@ it("승인 종결은 카드·칩·인박스·문장이 같은 낱말이고 예�
       status,
     };
     const row = approvalItem(
+      ko,
       approval,
       { name: "달무리봇", isAgent: true },
       "실험실",
@@ -385,7 +386,7 @@ it.each([
     seq: 1, hlcTs: T, hlcCount: 0, createdAtMs: T,
     props: { approval_id: "approval", status: row.status, action_type: "tool_call", result },
   }, { nowMs: T, formatMessage: ko, run: r })!;
-  const inbox = approvalItem({
+  const inbox = approvalItem(ko, {
     id: "approval", workspaceId: "workspace", runId: "run", channelId: "channel",
     requestedBy: AGENT, actionType: "tool_call", status: row.status,
   }, { name: "달무리봇", isAgent: true }, "실험실", T, { run: r, result });

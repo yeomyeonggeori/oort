@@ -1,9 +1,9 @@
-import {PRESENCE_WRITE_FAILED} from '@momo/core/features/presence/model';
+import {PRESENCE_WRITE_FAILED_KEY} from '@momo/core/features/presence/model';
 import {
   pauseBanner,
   type PauseBannerKind,
 } from '@momo/core/features/presence/pauseBanner';
-import {PAUSE_UNTIL_OFFLINE_REASON} from '@momo/core/features/presence/pauseUntil';
+import {PAUSE_UNTIL_OFFLINE_REASON_KEY} from '@momo/core/features/presence/pauseUntil';
 import {NOTIFICATION_PAUSE_SAVE_FAILED} from '@momo/core/features/settings/notificationRules';
 import {memberFor} from '@momo/core/features/workspace/directory';
 import {useQueryClient} from '@tanstack/react-query';
@@ -32,6 +32,7 @@ import {
   useSetPresence,
 } from './selfStatus';
 
+import {useFormatMessage} from '../../i18n/useFormatMessage';
 // =============================================================================
 // 멈춤이 보인다 — 인박스 맨 위의 한 줄 (ADR-0204 D3, #3923).
 //
@@ -105,6 +106,7 @@ export function PauseBanner({
   /** 이 탭이 지금 보이는가. 보이게 되는 순간 서버에 다시 묻는다(탭은 언마운트되지 않는다). */
   active: boolean;
 }): React.JSX.Element | null {
+  const formatMessage = useFormatMessage();
   const styles = useStyles(buildStyles);
   const client = useQueryClient();
   const now = useNow();
@@ -115,6 +117,7 @@ export function PauseBanner({
   const self = memberFor(directory, selfId);
 
   const banner = pauseBanner(
+    formatMessage,
     {
       rulesReady: pause.ready,
       paused: pause.paused,
@@ -161,11 +164,11 @@ export function PauseBanner({
   const failed =
     failure !== null && failure.kind === banner.kind && failure.untilMs === banner.untilMs;
   const note = !online
-    ? PAUSE_UNTIL_OFFLINE_REASON
+    ? formatMessage(PAUSE_UNTIL_OFFLINE_REASON_KEY)
     : failed
       ? banner.kind === 'paused'
         ? NOTIFICATION_PAUSE_SAVE_FAILED
-        : PRESENCE_WRITE_FAILED
+        : formatMessage(PRESENCE_WRITE_FAILED_KEY)
       : null;
 
   const press = () => {

@@ -8,7 +8,7 @@ import {
   entryAriaLabel,
   filterMailbox,
   mailboxCounts,
-  mailboxFilterLabel,
+  mailboxFilterLabelKey,
   type MailboxEntry,
   type MailboxFilter,
 } from '@momo/core/features/inbox/mailbox';
@@ -17,7 +17,7 @@ import {
   agentsFeedPartial,
   approvalOpensOnCard,
   availableInboxFilters,
-  filterLabel,
+  filterLabelKey,
   parseFilter,
   relativeLabel,
   type FeedItem,
@@ -183,8 +183,8 @@ function isMailboxView(tab: Tab): tab is MailboxView {
   return (MAILBOX_VIEWS as readonly string[]).includes(tab);
 }
 
-function tabLabel(tab: Tab): string {
-  return isMailboxView(tab) ? mailboxFilterLabel(tab) : filterLabel(tab);
+function tabLabelKey(tab: Tab) {
+  return isMailboxView(tab) ? mailboxFilterLabelKey(tab) : filterLabelKey(tab);
 }
 
 function mailboxEmpty(
@@ -528,7 +528,7 @@ export default function InboxScreen({
         horizontal
         showsHorizontalScrollIndicator={false}
         accessibilityRole="tablist"
-        accessibilityLabel="인박스 필터"
+        accessibilityLabel={formatMessage('inbox.filter.tabsLabel')}
         style={styles.tabsScroll}
         contentContainerStyle={styles.tabs}>
         {tabs.map(value => (
@@ -538,8 +538,11 @@ export default function InboxScreen({
             accessibilityState={{selected: value === tab}}
             accessibilityLabel={
               chipCount(value) > 0
-                ? `${tabLabel(value)}, ${chipCount(value)}개`
-                : tabLabel(value)
+                ? formatMessage('inbox.filter.tabWithCount', {
+                    label: formatMessage(tabLabelKey(value)),
+                    count: chipCount(value),
+                  })
+                : formatMessage(tabLabelKey(value))
             }
             onPress={() => {
               // 이미 고른 칩을 다시 누르는 것은 값이 넘어가는 것이 아니다.
@@ -555,7 +558,7 @@ export default function InboxScreen({
             <View style={styles.tabInner}>
               <Text
                 style={[styles.tabLabel, value === tab && styles.tabLabelActive]}>
-                {tabLabel(value)}
+                {formatMessage(tabLabelKey(value))}
               </Text>
               {chipCount(value) > 0 ? (
                 <View style={styles.tabCount} testID={`inbox-tab-count-${value}`}>
@@ -600,6 +603,7 @@ export default function InboxScreen({
             (mailboxActive ? mailbox.updatedAtMs : feed.updatedAtMs) > 0
               ? formatMessage(CONNECTION_KEYS.lastSynced, {
                   relativeTime: relativeLabel(
+                    formatMessage,
                     mailboxActive ? mailbox.updatedAtMs : feed.updatedAtMs,
                     Date.now(),
                   ),
@@ -760,7 +764,7 @@ function MailboxRow({
     <View style={styles.rowShell} testID={`mailbox-row-${entry.key}`}>
       <Pressable
         accessibilityRole="button"
-        accessibilityLabel={entryAriaLabel(entry, sourceLine)}
+        accessibilityLabel={entryAriaLabel(formatMessage, entry, sourceLine)}
         onPress={onPress}
         style={({pressed}) => [styles.mailRow, pressed && styles.pressed]}>
         <View style={styles.rowHead}>

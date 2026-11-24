@@ -10,6 +10,12 @@ import type {
   NotificationRulesPatch,
 } from "@momo/core/features/settings/notificationRules";
 import { PauseBanner } from "./PauseBanner";
+import { LocaleProvider } from "@/i18n/LocaleProvider";
+import type { AppLocale } from "@/i18n/localeStore";
+import { koreanLocale } from "@/testing/koLocale";
+
+// 한국어 문구를 단정하는 시험이라 한국어 언어 객체로 감싼다(감싸지 않으면 번들된 영어로 그려진다).
+let koLocale: AppLocale;
 
 // =============================================================================
 // #3923 — 알림 일시 중지가 **보인다**: 사이드바 내 이름 아래의 한 줄 (ADR-0204 D3).
@@ -99,7 +105,8 @@ function rosterMember(over: Partial<RosterMember> = {}): RosterMember {
   };
 }
 
-beforeAll(() => {
+beforeAll(async () => {
+  koLocale = await koreanLocale();
   reactActEnvironment.IS_REACT_ACT_ENVIRONMENT = true;
 });
 
@@ -174,7 +181,7 @@ async function mount(selfMember: RosterMember | undefined = rosterMember()) {
     act(async () => {
       client.setQueryData<RosterMember[]>(ROSTER_KEY, member ? [member] : []);
       mountedRoot?.render(
-        createElement(QueryClientProvider, { client }, createElement(Host))
+        createElement(LocaleProvider, { locale: koLocale, children: createElement(QueryClientProvider, { client }, createElement(Host)) })
       );
       await Promise.resolve();
     });
@@ -506,7 +513,7 @@ describe("끊겨 있으면 단추 자리에 이유를 말한다 (#2899 H2 와 �
     connection.offline = true;
     await rerender(rosterMember());
     expect(button()).toBeNull();
-    expect(offlineLine()?.textContent).toContain("You're offline, so you can't change this right now.");
+    expect(offlineLine()?.textContent).toContain("오프라인이라 지금은 바꿀 수 없어요.");
     expect(offlineLine()?.getAttribute("role")).toBe("status");
     expect(lineText()).toBe("알림 일시 중지 중 · 오후 10:00까지");
     expect(patchNotificationRules).not.toHaveBeenCalled();

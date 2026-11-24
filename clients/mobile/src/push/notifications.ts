@@ -21,7 +21,8 @@ import {
   threadRootId,
   type PushEnvelope,
 } from './envelope';
-import {nativeApprovalHandlerAttached, nativeReplyHandlerAttached} from './native';
+import {nativeApprovalHandlerAttached, nativeReplyOutcome} from './native';
+import {dismissReplyLine} from './queuedReplies';
 
 // =============================================================================
 // expo-notifications wiring (goal RN-N1, ADR-0137 D7 정오 5항).
@@ -240,10 +241,13 @@ export async function handlePushResponse(
   ) {
     return {kind: 'ignored', reason: 'approval buttons are answered natively'};
   }
-  // 답장도 iOS 에서 처리기가 붙어 있으면 여기서 보내지 않는다 (#6036). 처리기가 응답을 받은 그 자리에서
-  // 앱 전용 보관 목록에 남기고, 보내기는 그 목록을 비우는 `queuedReplies.ts` 한 길이 한다 — 같은 열쇠로,
-  // 한 번만. 여기서도 보내면 열쇠가 다른 같은 글이 하나 더 간다.
-  if (action === PUSH_ACTION.quickReply && nativeReplyHandlerAttached()) {
+  // 답장도 iOS 에서 처리기가 **이 응답을 남겼으면** 여기서 보내지 않는다 (#6036 · #6092). 처리기는 응답을 받은 그
+  // 자리에서 앱 전용 보관 목록에 남기고, 보내기는 그 목록을 비우는 `queuedReplies.ts` 한 길이 한다 — 같은 열쇠로,
+  // 한 번만. 여기서도 보내면 열쇠가 다른 같은 글이 하나 더 간다. 남기지 못했으면(세션 항목이 없었다 · 저장이
+  // 실패했다) 아래에서 예전처럼 보낸다. 묻는 것은 처리기가 이 응답에 한 일이다(`nativeReplyOutcome`).
+  const replyOutcome =
+    action === PUSH_ACTION.quickReply ? nativeReplyOutcome(response.notification.request.identifier) : null;
+  if (replyOutcome === 'kept') {
     return {kind: 'ignored', reason: 'replies are kept natively and sent from the list'};
   }
 
@@ -307,6 +311,11 @@ export async function handlePushResponse(
             crypto.randomUUID(),
             text,
           );
+        }
+        // 처리기가 남기지 못해 「답장을 보내지 못했어요」 줄을 올린 응답이다. 글은 방금 갔으니 그 줄을 걷는다 — 보낸
+        // 글에 못 보냈다고 말하면 사람이 한 번 더 보낸다(#6036 보안 검수 r1 M1 ㉮).
+        if (replyOutcome === 'notKept') {
+          await dismissReplyLine(response.notification.request.identifier);
         }
         return {kind: 'replied'};
       } catch (cause) {

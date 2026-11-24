@@ -63,6 +63,7 @@ import {
 import {useSession} from '../session/useSession';
 import {queryFailureDetail} from './SidebarScreen';
 
+import {useFormatMessage} from '../i18n/useFormatMessage';
 // =============================================================================
 // 「작업」 — 팀 보드의 한 열 판 (#2864, 제안서 T12·시안 ⑦ 왼쪽, 웹 `TeamBoardRoute`의 짝).
 //
@@ -424,12 +425,13 @@ function BoardRow({
   rowRef: React.Ref<React.ElementRef<typeof Pressable>>;
   onPress: () => void;
 }): React.JSX.Element {
+  const formatMessage = useFormatMessage();
   const styles = useStyles(buildStyles);
   const where = whereLabel(item);
   const whereText = [where.primary, where.secondary]
     .filter((part): part is string => part !== null)
     .join(' / ');
-  const activity = relativeLabel(item.lastActivityAt * 1000, nowMs);
+  const activity = relativeLabel(formatMessage, item.lastActivityAt * 1000, nowMs);
   const channel = channelLabel(item);
   const latestStage =
     item.stages.length > 0 ? item.stages[item.stages.length - 1] : null;

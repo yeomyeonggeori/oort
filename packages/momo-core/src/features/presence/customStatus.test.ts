@@ -14,6 +14,12 @@ import {
   visibleCustomStatus,
 } from "./customStatus";
 
+import { catalog as koCatalog } from "../../i18n/generated/ko-KR";
+import { createMessageCopy } from "../../testkit";
+
+// 낱말은 사전에 있다(#6045). 시험은 한국어 생성물로 풀어 예전과 같은 문장을 그대로 단정한다.
+const ko = createMessageCopy({ messageLocale: "ko-KR", catalog: koCatalog });
+
 const NOW = 1_800_000_000_000;
 
 describe("presenceWriteBody (omit vs null)", () => {
@@ -156,7 +162,7 @@ describe("customStatusAccessibleText", () => {
 
 describe("A-42 preset chips", () => {
   it("ships the five fixed Korean copies in order", () => {
-    expect(CUSTOM_STATUS_PRESETS.map((preset) => preset.label)).toEqual([
+    expect(CUSTOM_STATUS_PRESETS.map((preset) => ko(preset.labelKey))).toEqual([
       "회의 중",
       "이동 중",
       "병가",

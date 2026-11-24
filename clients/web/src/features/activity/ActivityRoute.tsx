@@ -26,6 +26,7 @@ import { loadCauseOf } from "@/features/common/loadFailure";
 import { CONNECTION_KEYS } from "@momo/core/features/connection/copyKeys";
 import { BlockedListLine } from "@/features/common/BlockedReason";
 
+import { useFormatMessage } from "@/i18n/useFormatMessage";
 // =============================================================================
 // 활동 (R-1 §1, the second global surface). One line per thing an agent did:
 // "{누가} {무엇을} 해서 → {결과}". Same rows as the inbox 에이전트 tab, but for
@@ -62,6 +63,7 @@ const EMPTY_COPY: Record<ActivityFilter, { headline: string; detail: string }> =
 };
 
 export function ActivityRoute() {
+  const formatMessage = useFormatMessage();
   const { session } = useSession();
   const [params, setParams] = useSearchParams();
   const filter = parseActivityFilter(params.get("filter"));
@@ -125,7 +127,7 @@ export function ActivityRoute() {
           tone="neutral"
           message={
             <BlockedListLine
-              relativeTime={feed.updatedAtMs > 0 ? relativeLabel(feed.updatedAtMs, Date.now()) : null}
+              relativeTime={feed.updatedAtMs > 0 ? relativeLabel(formatMessage, feed.updatedAtMs, Date.now()) : null}
             />
           }
           testId="activity-offline"

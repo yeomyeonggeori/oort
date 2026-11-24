@@ -1,18 +1,18 @@
 import {
-  CUSTOM_STATUS_CLEAR_LABEL,
-  CUSTOM_STATUS_DIALOG_TITLE,
-  CUSTOM_STATUS_EXPIRY_LABEL,
+  CUSTOM_STATUS_CLEAR_LABEL_KEY,
+  CUSTOM_STATUS_DIALOG_TITLE_KEY,
+  CUSTOM_STATUS_EXPIRY_LABEL_KEY,
   CUSTOM_STATUS_PRESETS,
-  CUSTOM_STATUS_SAVE_LABEL,
-  CUSTOM_STATUS_SAVING_LABEL,
-  CUSTOM_STATUS_TEXT_LABEL,
+  CUSTOM_STATUS_SAVE_LABEL_KEY,
+  CUSTOM_STATUS_SAVING_LABEL_KEY,
+  CUSTOM_STATUS_TEXT_LABEL_KEY,
   CUSTOM_STATUS_TEXT_MAX,
-  CUSTOM_STATUS_TEXT_PLACEHOLDER,
+  CUSTOM_STATUS_TEXT_PLACEHOLDER_KEY,
   STATUS_EXPIRY_OPTIONS,
   clearCustomStatusWrite,
-  customStatusClearFailureMessage,
+  customStatusClearFailureKey,
   customStatusDraftWrite,
-  customStatusFailureMessage,
+  customStatusFailureKey,
   statusExpiryShortLabel,
   type PhoneStatusExpiryChoice,
 } from '@momo/core/features/presence/customStatus';
@@ -56,6 +56,8 @@ import { EmojiPicker } from '../emoji/EmojiPicker';
 import { emojiHaptic } from '../emoji/haptics';
 import {useEmojiTriggerFocus} from '../emoji/useEmojiTriggerFocus';
 
+import {useFormatMessage} from '../../i18n/useFormatMessage';
+import type {LocaleService} from '@momo/core/i18n';
 // =============================================================================
 // 「상태 설정」 바텀시트 — 이모지 + 한 문장 + 지우는 때 (#4457, ADR-0176; 옛 `StatusPage` 의 자리).
 //
@@ -67,7 +69,7 @@ import {useEmojiTriggerFocus} from '../emoji/useEmojiTriggerFocus';
 //   기간   「만료」 행 한 줄       값 + 펼침 ⌄ → 누르면 그 자리에서 고른다(시트 위 시트 없음)
 //   빠른 상태   이모지 + 이름 목록   누르면 이모지와 글을 채운다(저장은 ✓)
 //
-// 행 이름은 코어의 낱말(`CUSTOM_STATUS_EXPIRY_LABEL`, 웹 `SetStatusDialog` 와 같다)이다. 「지우기」는 이 시트에서 파괴 행
+// 행 이름은 코어의 낱말(`formatMessage(CUSTOM_STATUS_EXPIRY_LABEL_KEY)`, 웹 `SetStatusDialog` 와 같다)이다. 「지우기」는 이 시트에서 파괴 행
 // (「상태 지우기」, 위험색) 하나만의 이름이다 — 중립 선택기가 같은 동사를 입으면 위계(`phone-sheets.md` §3)가 흐려지고
 // 접힌 행이 「지우기 … 지우지 않음」으로 같은 동사를 두 번 말한다(design-review #4457 r1 H2).
 //
@@ -102,8 +104,12 @@ const PHONE_EXPIRY: readonly Exclude<PhoneStatusExpiryChoice, 'keep'>[] = [
   'today',
 ];
 
-function expiryLabel(id: Exclude<PhoneStatusExpiryChoice, 'keep'>): string {
-  return STATUS_EXPIRY_OPTIONS.find(option => option.id === id)?.label ?? id;
+function expiryLabel(
+  formatMessage: LocaleService['formatMessage'],
+  id: Exclude<PhoneStatusExpiryChoice, 'keep'>,
+): string {
+  const found = STATUS_EXPIRY_OPTIONS.find(option => option.id === id);
+  return found === undefined ? id : formatMessage(found.labelKey);
 }
 
 export function StatusSheet({
@@ -117,6 +123,7 @@ export function StatusSheet({
   self: RosterMember | undefined;
   onClose: () => void;
 }): React.JSX.Element {
+  const formatMessage = useFormatMessage();
   const [pickerOpen, setPickerOpen] = useState(false);
   return (
     <PageSheet
@@ -124,11 +131,11 @@ export function StatusSheet({
       onClose={onClose}
       onNavigateBack={pickerOpen ? () => setPickerOpen(false) : undefined}
       accessibilityLabel={
-        pickerOpen ? '이모지 고르기' : CUSTOM_STATUS_DIALOG_TITLE
+        pickerOpen ? '이모지 고르기' : formatMessage(CUSTOM_STATUS_DIALOG_TITLE_KEY)
       }
       testID="status-sheet"
       scrimTestID="status-sheet-scrim"
-      scrimLabel={`${CUSTOM_STATUS_DIALOG_TITLE} 닫기`}
+      scrimLabel={formatMessage('presence.statusDialog.closeLabel')}
     >
       <StatusSheetBody
         workspaceId={workspaceId}
@@ -157,6 +164,7 @@ function StatusSheetBody({
   self: RosterMember | undefined;
   onClose: () => void;
 }): React.JSX.Element {
+  const formatMessage = useFormatMessage();
   // 저장이 끝나면 스크림·끌기와 같이 미끄러져 나간다.
   const slideClose = usePageSheetClose() ?? onClose;
   const emojiTrigger = useEmojiTriggerFocus(pickerOpen);
@@ -186,11 +194,11 @@ function StatusSheetBody({
     if (!verdict.canSave) return;
     commit(
       customStatusDraftWrite({emoji, text, expiry}, declared, Date.now()),
-      customStatusFailureMessage(),
+      formatMessage(customStatusFailureKey()),
     );
   };
   const clear = () =>
-    commit(clearCustomStatusWrite(declared), customStatusClearFailureMessage());
+    commit(clearCustomStatusWrite(declared), formatMessage(customStatusClearFailureKey()));
 
   const choices: PhoneStatusExpiryChoice[] =
     seed.storedExpiry !== undefined
@@ -199,7 +207,7 @@ function StatusSheetBody({
   const choiceLabel = (id: PhoneStatusExpiryChoice): string =>
     id === 'keep' && seed.storedExpiry !== undefined
       ? `지금대로 · ${statusExpiryShortLabel(seed.storedExpiry, openedAtMs)}`
-      : expiryLabel(id as Exclude<PhoneStatusExpiryChoice, 'keep'>);
+      : expiryLabel(formatMessage, id as Exclude<PhoneStatusExpiryChoice, 'keep'>);
   const expiryValue = choiceLabel(expiry);
 
   if (pickerOpen)
@@ -217,14 +225,14 @@ function StatusSheetBody({
   return (
     <>
       <SheetHeader
-        title={CUSTOM_STATUS_DIALOG_TITLE}
-        closeLabel={`${CUSTOM_STATUS_DIALOG_TITLE} 닫기`}
+        title={formatMessage(CUSTOM_STATUS_DIALOG_TITLE_KEY)}
+        closeLabel={formatMessage('presence.statusDialog.closeLabel')}
         closeTestID="status-sheet-close"
         titleTestID="status-sheet-title"
         confirm={{
           label: write.isPending
-            ? CUSTOM_STATUS_SAVING_LABEL
-            : CUSTOM_STATUS_SAVE_LABEL,
+            ? formatMessage(CUSTOM_STATUS_SAVING_LABEL_KEY)
+            : formatMessage(CUSTOM_STATUS_SAVE_LABEL_KEY),
           onPress: save,
           disabled: !verdict.canSave || write.isPending,
           testID: 'status-save',
@@ -252,12 +260,15 @@ function StatusSheetBody({
 
         <GroupCard label="기간" testID="status-expiry-card">
           <ListRow
-            title={CUSTOM_STATUS_EXPIRY_LABEL}
+            title={formatMessage(CUSTOM_STATUS_EXPIRY_LABEL_KEY)}
             value={expiryValue}
             accessory="expand"
             expanded={expiryOpen}
             onPress={() => setExpiryOpen(open => !open)}
-            accessibilityLabel={`${CUSTOM_STATUS_EXPIRY_LABEL}, ${expiryValue}`}
+            accessibilityLabel={formatMessage('presence.statusDialog.expiryRow', {
+              label: formatMessage(CUSTOM_STATUS_EXPIRY_LABEL_KEY),
+              value: expiryValue,
+            })}
             accessibilityHint="상태가 사라질 때를 고릅니다."
             testID="status-expiry-row"
           />
@@ -278,26 +289,29 @@ function StatusSheetBody({
         </GroupCard>
 
         <GroupCard label="빠른 상태" testID="status-presets-card">
-          {CUSTOM_STATUS_PRESETS.map(preset => (
+          {CUSTOM_STATUS_PRESETS.map(preset => {
+            const presetLabel = formatMessage(preset.labelKey);
+            return (
             <ListRow
               key={preset.id}
               // 이모지는 글자로 이름 앞에 붙는다(앞 칸 없음). 낭독에는 이름만 읽힌다(`accessibilityLabel`).
-              title={`${preset.emoji}  ${preset.label}`}
+              title={`${preset.emoji}  ${presetLabel}`}
               onPress={() => {
                 setEmoji(preset.emoji);
-                setText(preset.label);
+                setText(presetLabel);
               }}
-              accessibilityLabel={preset.label}
+              accessibilityLabel={presetLabel}
               accessibilityHint="상태 글을 이것으로 채웁니다."
               testID={`status-preset-${preset.id}`}
             />
-          ))}
+            );
+          })}
         </GroupCard>
 
         {seed.hasVisible ? (
           <GroupCard testID="status-clear-card">
             <ListRow
-              title={CUSTOM_STATUS_CLEAR_LABEL}
+              title={formatMessage(CUSTOM_STATUS_CLEAR_LABEL_KEY)}
               tone="danger"
               disabled={write.isPending}
               onPress={clear}
@@ -335,6 +349,7 @@ function StatusInputPill({
   onOpenEmoji: () => void;
   onTextChange: (next: string) => void;
 }): React.JSX.Element {
+  const formatMessage = useFormatMessage();
   const styles = useStyles(buildStyles);
   const palette = usePalette();
   // 키보드 모양은 앱의 스킴이 정한다(#4526) — 시스템이 라이트인데 앱이 다크이면 어두운 시트에 밝은 키보드가 선다.
@@ -361,9 +376,9 @@ function StatusInputPill({
       <TextInput
         value={text}
         onChangeText={onTextChange}
-        placeholder={CUSTOM_STATUS_TEXT_PLACEHOLDER}
+        placeholder={formatMessage(CUSTOM_STATUS_TEXT_PLACEHOLDER_KEY)}
         placeholderTextColor={palette.textMuted}
-        accessibilityLabel={CUSTOM_STATUS_TEXT_LABEL}
+        accessibilityLabel={formatMessage(CUSTOM_STATUS_TEXT_LABEL_KEY)}
         maxLength={CUSTOM_STATUS_TEXT_MAX}
         returnKeyType="done"
         keyboardAppearance={keyboardAppearance}
