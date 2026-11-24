@@ -10,15 +10,22 @@ import {
   parseDevCredential,
 } from "@momo/core/features/auth/devAccess";
 import {
-  DEV_NOTICES,
+  DEV_NOTICES as DEV_NOTICE_MESSAGES,
   DEV_ONE_TIME_COPY,
-  devAccessErrorText,
-  devAccessGate,
-  devCredentialRow,
-  devScopeLabel,
-  devToolLabel,
-  retryAfterPhrase,
+  devAccessErrorMessage,
+  devAccessGate as devAccessGateModel,
+  devCredentialRow as devCredentialRowModel,
+  devScopeLabelKey,
+  devToolLabelKey,
+  type DevMessage,
 } from "@momo/core/features/auth/devAccessModel";
+import type {
+  DevAccessFailure,
+  DevAccessPolicy,
+  DevCredential,
+  DevTool,
+} from "@momo/core/features/auth/devAccess";
+import type { DevAccessAction } from "@momo/core/features/auth/devAccessModel";
 import { GONE_MEMBER_LABEL } from "@momo/core/features/workspace/directory";
 import { globalShortcutsHeld } from "@/app/globalShortcutHold";
 import { resetEscapeLayers } from "@/design/ui/escapeLayer";
@@ -181,7 +188,23 @@ let client: QueryClient;
 
 let ko: AppLocale;
 
-/** `korean`은 사전 문장을 단정하는 시험만 켠다(공급자가 없으면 번들된 영어로 물러난다). */
+// 문장은 사전(`auth.json`)에 있다(#6064). 기대값은 제품과 같은 한국어 생성물로 풀어 예전 한국어를 그대로 단정한다.
+const t = (message: DevMessage): string =>
+  ko.service.formatMessage(message.key, message.values as never);
+const devToolLabel = (tool: DevTool): string => ko.service.formatMessage(devToolLabelKey(tool));
+const devScopeLabel = (scopes: readonly string[], restricted: boolean): string =>
+  ko.service.formatMessage(devScopeLabelKey(scopes, restricted));
+const devAccessErrorText = (failure: DevAccessFailure, action: DevAccessAction): string =>
+  t(devAccessErrorMessage(failure, action));
+const devAccessGate = (policy: DevAccessPolicy) => {
+  const gate = devAccessGateModel(policy);
+  return { state: gate.state, text: t(gate.message) };
+};
+const devCredentialRow = (credential: DevCredential, options: { now: number; memberName?: string }) =>
+  devCredentialRowModel(ko.service.formatMessage, credential, options);
+const notice = (name: keyof typeof DEV_NOTICE_MESSAGES): string => t(DEV_NOTICE_MESSAGES[name]);
+
+/** 이 파일의 시험은 한국어 문장을 단정하므로 기본이 한국어다(공급자가 없으면 번들된 영어로 물러난다). */
 function mount(options: { offline?: boolean; korean?: boolean } = {}) {
   client = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
@@ -191,7 +214,9 @@ function mount(options: { offline?: boolean; korean?: boolean } = {}) {
       <DevAccessSection workspaceId={WS} memberId={ME} offline={options.offline ?? false} />
     </QueryClientProvider>
   );
-  return render(options.korean ? <LocaleProvider locale={ko}>{page}</LocaleProvider> : page);
+  return render(
+    options.korean === false ? page : <LocaleProvider locale={ko}>{page}</LocaleProvider>
+  );
 }
 
 const byId = (id: string) => screen.getByTestId(id);
@@ -459,7 +484,7 @@ describe("명령줄·AI 도구: 입력 검증과 오류", () => {
     await submitWith();
 
     const banner = await screen.findByTestId("dev-access-create-error");
-    expect(banner.textContent).toContain(retryAfterPhrase(42));
+    expect(banner.textContent).toContain("42초 뒤");
     expect(banner.textContent).toBe(
       devAccessErrorText({ kind: "rate_limited", retryAfterSeconds: 42 }, "create")
     );
@@ -611,8 +636,8 @@ describe("명령줄·AI 도구: 한 번만 보이는 화면", () => {
     // 만든 연결은 이 목록 읽기부터 보인다.
     routes[`GET ${CREDENTIALS}`] = () => json({ credentials: [row] });
 
-    expect(screen.getAllByRole("button", { name: DEV_ONE_TIME_COPY.confirmLabel })).toHaveLength(1);
-    fireEvent.click(screen.getByRole("button", { name: DEV_ONE_TIME_COPY.confirmLabel }));
+    expect(screen.getAllByRole("button", { name: ko.service.formatMessage(DEV_ONE_TIME_COPY.confirmKey) })).toHaveLength(1);
+    fireEvent.click(screen.getByRole("button", { name: ko.service.formatMessage(DEV_ONE_TIME_COPY.confirmKey) }));
 
     await waitFor(() => expect(maybe("dev-access-reveal")).toBeNull());
     expect(secretsOnScreen()).not.toContain(SECRET_TAIL);
@@ -651,7 +676,7 @@ describe("명령줄·AI 도구: 한 번만 보이는 화면", () => {
     await screen.findByTestId("dev-access-reveal");
     expect(globalShortcutsHeld()).toBe(true);
 
-    fireEvent.click(screen.getByRole("button", { name: DEV_ONE_TIME_COPY.confirmLabel }));
+    fireEvent.click(screen.getByRole("button", { name: ko.service.formatMessage(DEV_ONE_TIME_COPY.confirmKey) }));
     await waitFor(() => expect(maybe("dev-access-reveal")).toBeNull());
     expect(globalShortcutsHeld()).toBe(false);
   });
@@ -678,7 +703,7 @@ describe("명령줄·AI 도구: 한 번만 보이는 화면", () => {
     expect(maybe("dev-access-reveal")).not.toBeNull();
     expect(secretsOnScreen()).toContain(TOKEN);
 
-    fireEvent.click(screen.getByRole("button", { name: DEV_ONE_TIME_COPY.confirmLabel }));
+    fireEvent.click(screen.getByRole("button", { name: ko.service.formatMessage(DEV_ONE_TIME_COPY.confirmKey) }));
     await waitFor(() => expect(maybe("dev-access-reveal")).toBeNull());
     expect(secretsOnScreen()).not.toContain(SECRET_TAIL);
     // 폼은 지난 답대로 그대로 서 있다(오류 배너로 갈아 끼우지 않는다).
@@ -700,7 +725,7 @@ describe("명령줄·AI 도구: 한 번만 보이는 화면", () => {
     expect(maybe("dev-access-reveal")).not.toBeNull();
     expect(secretsOnScreen()).toContain(TOKEN);
 
-    fireEvent.click(screen.getByRole("button", { name: DEV_ONE_TIME_COPY.confirmLabel }));
+    fireEvent.click(screen.getByRole("button", { name: ko.service.formatMessage(DEV_ONE_TIME_COPY.confirmKey) }));
     await waitFor(() => expect(maybe("dev-access-reveal")).toBeNull());
     expect(secretsOnScreen()).not.toContain(SECRET_TAIL);
     const gate = await screen.findByTestId("dev-access-gate");
@@ -715,7 +740,7 @@ describe("명령줄·AI 도구: 한 번만 보이는 화면", () => {
     type("dev-access-name", "달무리 노트북");
     await submitWith();
     await screen.findByTestId("dev-access-reveal");
-    fireEvent.click(screen.getByRole("button", { name: DEV_ONE_TIME_COPY.confirmLabel }));
+    fireEvent.click(screen.getByRole("button", { name: ko.service.formatMessage(DEV_ONE_TIME_COPY.confirmKey) }));
     await waitFor(() => expect(maybe("dev-access-reveal")).toBeNull());
 
     expect((document.getElementById("dev-access-preset-read") as HTMLInputElement).checked).toBe(true);
@@ -862,11 +887,11 @@ describe("명령줄·AI 도구: 만들 수 있는가", () => {
     mount();
     const notes = byId("dev-access-notes").textContent ?? "";
     for (const line of [
-      DEV_NOTICES.passwordChangeEndsAll,
-      DEV_NOTICES.logoutKeepsConnections,
-      DEV_NOTICES.toolIsOnlyALabel,
-      DEV_NOTICES.fixedAfterIssue,
-      DEV_NOTICES.cardLimit,
+      notice("passwordChangeEndsAll"),
+      notice("logoutKeepsConnections"),
+      notice("toolIsOnlyALabel"),
+      notice("fixedAfterIssue"),
+      notice("cardLimit"),
     ]) {
       expect(notes).toContain(line);
     }
@@ -1000,7 +1025,7 @@ describe("명령줄·AI 도구: 지우기", () => {
     fireEvent.click(trigger(first));
     // 묻는 중: 되돌릴 수 없고 그 도구가 바로 끊긴다고 말한다.
     const question = within(byId(rowTestId(first))).getByTestId("dev-credential-revoke-question");
-    expect(question.textContent).toContain(DEV_NOTICES.revokeWarning);
+    expect(question.textContent).toContain(notice("revokeWarning"));
     expect(revokeCalls()).toHaveLength(0);
 
     fireEvent.click(within(question).getByTestId("dev-credential-revoke-confirm"));

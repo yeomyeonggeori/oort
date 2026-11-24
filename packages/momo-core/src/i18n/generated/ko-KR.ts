@@ -261,6 +261,924 @@ export const catalog: MessageCatalog = {
       "value": "이 링크는 이미 사용되었습니다. 로그인하세요."
     }
   ],
+  "auth.devAccessCommand.envClaude": [
+    {
+      "type": 0,
+      "value": "프로젝트 폴더의 "
+    },
+    {
+      "type": 1,
+      "value": "path"
+    },
+    {
+      "type": 0,
+      "value": "에 아래 내용을 넣어요. 이 파일에는 값이 없지만 서버 주소가 들어 있으니 저장소에 올리지 말아 주세요."
+    }
+  ],
+  "auth.devAccessCommand.envClaudeRun": [
+    {
+      "type": 0,
+      "value": "값을 넣은 같은 터미널에서 Claude Code를 실행해요."
+    }
+  ],
+  "auth.devAccessCommand.envCli": [
+    {
+      "type": 0,
+      "value": "아래 명령은 값을 명령 인자에 싣지 않고 curl 설정으로 넘겨요. 그래서 프로세스 목록에도 값이 보이지 않아요."
+    }
+  ],
+  "auth.devAccessCommand.envCliDone": [
+    {
+      "type": 0,
+      "value": "이 연결의 이름과 범위가 응답으로 나오면 잘 연결된 거예요."
+    }
+  ],
+  "auth.devAccessCommand.envCodex": [
+    {
+      "type": 1,
+      "value": "path"
+    },
+    {
+      "type": 0,
+      "value": "에 아래 내용을 더해요. 이 파일에는 값이 없지만 서버 주소가 들어 있으니 저장소에 올리지 말아 주세요."
+    }
+  ],
+  "auth.devAccessCommand.envCodexRun": [
+    {
+      "type": 0,
+      "value": "값을 넣은 같은 터미널에서 Codex를 실행해요."
+    }
+  ],
+  "auth.devAccessCommand.environmentCaveat": [
+    {
+      "type": 0,
+      "value": "환경 변수는 이 터미널에서 실행하는 다른 프로그램에도 전달돼요. 다 쓰고 나면 터미널을 닫아 주세요."
+    }
+  ],
+  "auth.devAccessCommand.envTitle": [
+    {
+      "type": 0,
+      "value": "환경 변수로 연결하기"
+    }
+  ],
+  "auth.devAccessCommand.helperClaude": [
+    {
+      "type": 0,
+      "value": "프로젝트 폴더의 "
+    },
+    {
+      "type": 1,
+      "value": "path"
+    },
+    {
+      "type": 0,
+      "value": "에 "
+    },
+    {
+      "type": 1,
+      "value": "command"
+    },
+    {
+      "type": 0,
+      "value": "을 헤더 도우미로 적어요."
+    }
+  ],
+  "auth.devAccessCommand.helperCli": [
+    {
+      "type": 0,
+      "value": "값은 "
+    },
+    {
+      "type": 1,
+      "value": "command"
+    },
+    {
+      "type": 0,
+      "value": "이 그때그때 꺼내 줘요. curl에는 설정으로 넘겨서 명령 인자에 값이 실리지 않아요."
+    }
+  ],
+  "auth.devAccessCommand.helperCodex": [
+    {
+      "type": 1,
+      "value": "path"
+    },
+    {
+      "type": 0,
+      "value": "에 "
+    },
+    {
+      "type": 1,
+      "value": "command"
+    },
+    {
+      "type": 0,
+      "value": "을 헤더 도우미로 적어요."
+    }
+  ],
+  "auth.devAccessCommand.helperLogin": [
+    {
+      "type": 0,
+      "value": "oort 명령줄 도구에 값을 한 번 저장해요. 값은 입력으로만 받아요."
+    }
+  ],
+  "auth.devAccessCommand.helperTitle": [
+    {
+      "type": 0,
+      "value": "oort token으로 연결하기"
+    }
+  ],
+  "auth.devAccessCommand.pasteAndEnter": [
+    {
+      "type": 0,
+      "value": "붙여넣고 Enter를 누르면 돼요. 입력한 값은 화면에 보이지 않아요. bash와 zsh 기준이에요."
+    }
+  ],
+  "auth.devAccessCommand.readIntoEnv": [
+    {
+      "type": 0,
+      "value": "복사한 값을 환경 변수 "
+    },
+    {
+      "type": 1,
+      "value": "env"
+    },
+    {
+      "type": 0,
+      "value": "에 넣어요. 값은 명령이 아니라 입력으로만 받아서 터미널 기록에 남지 않아요."
+    }
+  ],
+  "auth.devAccessCommand.stdioClaude": [
+    {
+      "type": 0,
+      "value": "그다음 Claude Code에 "
+    },
+    {
+      "type": 1,
+      "value": "command"
+    },
+    {
+      "type": 0,
+      "value": "를 붙여요."
+    }
+  ],
+  "auth.devAccessCommand.stdioCodex": [
+    {
+      "type": 0,
+      "value": "그다음 "
+    },
+    {
+      "type": 1,
+      "value": "path"
+    },
+    {
+      "type": 0,
+      "value": "에 "
+    },
+    {
+      "type": 1,
+      "value": "command"
+    },
+    {
+      "type": 0,
+      "value": "를 더해요."
+    }
+  ],
+  "auth.devAccessCommand.stdioLogin": [
+    {
+      "type": 0,
+      "value": "oort 명령줄 도구에 값을 한 번 저장해요. 값은 입력으로만 받고, 설정 파일에는 값이 들어가지 않아요."
+    }
+  ],
+  "auth.devAccessCommand.stdioTitle": [
+    {
+      "type": 0,
+      "value": "oort mcp로 연결하기"
+    }
+  ],
+  "auth.devAccessCommand.terminal": [
+    {
+      "type": 0,
+      "value": "터미널"
+    }
+  ],
+  "auth.devAccessCommand.unavailable": [
+    {
+      "type": 0,
+      "value": "서버 주소를 확인하지 못해서 설정 조각을 만들 수 없어요. 앱을 다시 열고 시도해 주세요."
+    }
+  ],
+  "auth.devAccessCreate.expiryHint": [
+    {
+      "type": 0,
+      "value": "만료일이 지나면 이 연결은 저절로 끊겨요. 만든 뒤에는 범위, 채널, 만료를 바꿀 수 없어요. 바꾸려면 새로 만들고 옛것을 지워요."
+    }
+  ],
+  "auth.devAccessError.accessDenied": [
+    {
+      "type": 0,
+      "value": "이 워크스페이스에서는 내 권한으로 이 기능을 쓸 수 없어요. 관리자에게 물어봐 주세요."
+    }
+  ],
+  "auth.devAccessError.accessDeniedCreate": [
+    {
+      "type": 0,
+      "value": "지금은 내 권한으로 연결을 만들 수 없어요. 관리자에게 켜 달라고 요청해 주세요."
+    }
+  ],
+  "auth.devAccessError.busy": [
+    {
+      "type": 0,
+      "value": "팀 구성을 바꾸는 중이라 바로 처리하지 못했어요. "
+    },
+    {
+      "type": 5,
+      "value": "unit",
+      "options": {
+        "soon": {
+          "value": [
+            {
+              "type": 0,
+              "value": "잠시 뒤"
+            }
+          ]
+        },
+        "second": {
+          "value": [
+            {
+              "type": 1,
+              "value": "amount"
+            },
+            {
+              "type": 0,
+              "value": "초 뒤"
+            }
+          ]
+        },
+        "minute": {
+          "value": [
+            {
+              "type": 1,
+              "value": "amount"
+            },
+            {
+              "type": 0,
+              "value": "분 뒤"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "amount"
+            },
+            {
+              "type": 0,
+              "value": "시간 뒤"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": 0,
+      "value": "에 다시 해 주세요."
+    }
+  ],
+  "auth.devAccessError.forbidden": [
+    {
+      "type": 0,
+      "value": "이 작업은 내 권한으로 할 수 없어요. 관리자에게 물어봐 주세요."
+    }
+  ],
+  "auth.devAccessError.forbiddenRevoke": [
+    {
+      "type": 0,
+      "value": "이 연결은 내 권한으로 지울 수 없어요. 소유자나 만든 사람에게 물어봐 주세요."
+    }
+  ],
+  "auth.devAccessError.invalid": [
+    {
+      "type": 0,
+      "value": "요청을 서버가 받아들이지 못했어요. 화면을 새로 열고 다시 시도해 주세요."
+    }
+  ],
+  "auth.devAccessError.invalidCreate": [
+    {
+      "type": 0,
+      "value": "입력한 값을 서버가 받아들이지 못했어요. 이름, 채널, 만료 기간을 확인하고 다시 눌러 주세요."
+    }
+  ],
+  "auth.devAccessError.limit": [
+    {
+      "type": 0,
+      "value": "카드 토큰은 한 사람이 "
+    },
+    {
+      "type": 2,
+      "value": "limit",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "개까지 만들 수 있어요. 안 쓰는 연결을 지운 뒤에 다시 만들어 주세요."
+    }
+  ],
+  "auth.devAccessError.network": [
+    {
+      "type": 0,
+      "value": "서버에 닿지 못했어요. 네트워크를 확인하고 다시 시도해 주세요."
+    }
+  ],
+  "auth.devAccessError.networkCreate": [
+    {
+      "type": 0,
+      "value": "서버에 닿지 못했어요. 연결이 만들어졌는지 알 수 없으니 목록을 확인한 뒤 다시 시도해 주세요."
+    }
+  ],
+  "auth.devAccessError.notFound": [
+    {
+      "type": 0,
+      "value": "이 서버는 아직 명령줄·AI 도구 연결을 지원하지 않아요. 서버를 업데이트한 뒤에 다시 열어 주세요."
+    }
+  ],
+  "auth.devAccessError.notFoundRevoke": [
+    {
+      "type": 0,
+      "value": "이미 지워졌거나 찾을 수 없는 연결이에요. 목록을 새로 불러와 확인해 주세요."
+    }
+  ],
+  "auth.devAccessError.passwordIncorrect": [
+    {
+      "type": 0,
+      "value": "현재 비밀번호가 맞지 않아요. 다시 입력해 주세요."
+    }
+  ],
+  "auth.devAccessError.passwordUnavailable": [
+    {
+      "type": 0,
+      "value": "이 계정에는 확인할 비밀번호가 없어요. 비밀번호를 만든 뒤에 다시 시도해 주세요."
+    }
+  ],
+  "auth.devAccessError.rateLimited": [
+    {
+      "type": 0,
+      "value": "너무 자주 시도해서 잠시 막았어요. "
+    },
+    {
+      "type": 5,
+      "value": "unit",
+      "options": {
+        "soon": {
+          "value": [
+            {
+              "type": 0,
+              "value": "잠시 뒤"
+            }
+          ]
+        },
+        "second": {
+          "value": [
+            {
+              "type": 1,
+              "value": "amount"
+            },
+            {
+              "type": 0,
+              "value": "초 뒤"
+            }
+          ]
+        },
+        "minute": {
+          "value": [
+            {
+              "type": 1,
+              "value": "amount"
+            },
+            {
+              "type": 0,
+              "value": "분 뒤"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "amount"
+            },
+            {
+              "type": 0,
+              "value": "시간 뒤"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": 0,
+      "value": "에 다시 해 주세요."
+    }
+  ],
+  "auth.devAccessError.unauthorized": [
+    {
+      "type": 0,
+      "value": "로그인이 끝났어요. 다시 로그인한 뒤에 시도해 주세요."
+    }
+  ],
+  "auth.devAccessError.unknown": [
+    {
+      "type": 0,
+      "value": "알 수 없는 문제가 생겼어요. 잠시 뒤에 다시 시도해 주세요."
+    }
+  ],
+  "auth.devAccessError.unknownCreate": [
+    {
+      "type": 0,
+      "value": "알 수 없는 문제가 생겼어요. 연결이 만들어졌는지 알 수 없으니 목록을 확인한 뒤 다시 시도해 주세요."
+    }
+  ],
+  "auth.devAccessExpiry.days": [
+    {
+      "type": 1,
+      "value": "days"
+    },
+    {
+      "type": 0,
+      "value": "일"
+    }
+  ],
+  "auth.devAccessExpiry.daysAway": [
+    {
+      "type": 1,
+      "value": "days"
+    },
+    {
+      "type": 0,
+      "value": "일 뒤"
+    }
+  ],
+  "auth.devAccessExpiry.passed": [
+    {
+      "type": 0,
+      "value": "만료 시각이 지났어요"
+    }
+  ],
+  "auth.devAccessExpiry.today": [
+    {
+      "type": 0,
+      "value": "오늘"
+    }
+  ],
+  "auth.devAccessGate.adminsOnly": [
+    {
+      "type": 0,
+      "value": "관리자가 켜 줘야 해요. 지금은 소유자와 관리자만 연결을 만들 수 있어요."
+    }
+  ],
+  "auth.devAccessGate.adminsOpen": [
+    {
+      "type": 0,
+      "value": "지금은 소유자와 관리자가 연결을 만들 수 있어요."
+    }
+  ],
+  "auth.devAccessGate.membersDenied": [
+    {
+      "type": 0,
+      "value": "이 계정으로는 연결을 만들 수 없어요. 자세한 내용은 관리자에게 물어봐 주세요."
+    }
+  ],
+  "auth.devAccessGate.membersOpen": [
+    {
+      "type": 0,
+      "value": "이 워크스페이스의 팀원은 모두 연결을 만들 수 있어요."
+    }
+  ],
+  "auth.devAccessGate.off": [
+    {
+      "type": 0,
+      "value": "명령줄·AI 도구 연결이 꺼져 있어요. 다시 켜기 전에는 새로 만들 수 없어요."
+    }
+  ],
+  "auth.devAccessGate.open": [
+    {
+      "type": 0,
+      "value": "연결을 만들 수 있어요."
+    }
+  ],
+  "auth.devAccessKind.card": [
+    {
+      "type": 0,
+      "value": "카드 토큰"
+    }
+  ],
+  "auth.devAccessKind.session": [
+    {
+      "type": 0,
+      "value": "로그인 세션"
+    }
+  ],
+  "auth.devAccessList.all": [
+    {
+      "type": 0,
+      "value": "전체"
+    }
+  ],
+  "auth.devAccessList.mine": [
+    {
+      "type": 0,
+      "value": "내 연결"
+    }
+  ],
+  "auth.devAccessNotice.cardLimit": [
+    {
+      "type": 0,
+      "value": "카드 토큰은 한 사람이 "
+    },
+    {
+      "type": 2,
+      "value": "limit",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "개까지 만들 수 있어요."
+    }
+  ],
+  "auth.devAccessNotice.fixedAfterIssue": [
+    {
+      "type": 0,
+      "value": "만든 뒤에는 범위, 채널, 만료를 바꿀 수 없어요. 바꾸려면 새로 만들고 옛것을 지워요."
+    }
+  ],
+  "auth.devAccessNotice.logoutKeepsConnections": [
+    {
+      "type": 0,
+      "value": "앱에서 로그아웃해도 연결은 끊기지 않아요. 여기서 따로 지워요."
+    }
+  ],
+  "auth.devAccessNotice.passwordChangeEndsAll": [
+    {
+      "type": 0,
+      "value": "비밀번호를 바꾸면 모든 연결이 끊겨요."
+    }
+  ],
+  "auth.devAccessNotice.revokeWarning": [
+    {
+      "type": 0,
+      "value": "지우면 되돌릴 수 없어요. 이 연결을 쓰던 도구는 바로 끊겨요."
+    }
+  ],
+  "auth.devAccessNotice.toolIsOnlyALabel": [
+    {
+      "type": 0,
+      "value": "쓰는 도구는 만든 사람이 고른 값이에요. 확인된 사실은 아니에요."
+    }
+  ],
+  "auth.devAccessOneTime.caution": [
+    {
+      "type": 0,
+      "value": "이 값을 아는 사람은 누구나 내 이름으로 이 연결이 허락한 일을 할 수 있어요. 다른 사람에게 보내지 마세요."
+    }
+  ],
+  "auth.devAccessOneTime.confirm": [
+    {
+      "type": 0,
+      "value": "저장했어요"
+    }
+  ],
+  "auth.devAccessOneTime.warning": [
+    {
+      "type": 0,
+      "value": "이 화면을 닫으면 다시 볼 수 없어요. 지금 복사해서 안전한 곳에 넣어 두세요."
+    }
+  ],
+  "auth.devAccessPhone.passwordAndToolNote": [
+    {
+      "type": 0,
+      "value": "비밀번호를 바꾸면 모든 연결이 끊겨요. 쓰는 도구는 만든 사람이 고른 값이에요. 확인된 사실은 아니에요."
+    }
+  ],
+  "auth.devAccessPreset.readDescription": [
+    {
+      "type": 0,
+      "value": "채널 목록, 메시지, 인박스를 읽기만 해요. 아무것도 보내지 못해요."
+    }
+  ],
+  "auth.devAccessPreset.readLabel": [
+    {
+      "type": 0,
+      "value": "읽기만"
+    }
+  ],
+  "auth.devAccessPreset.readWriteDescription": [
+    {
+      "type": 0,
+      "value": "읽기에 더해 내 이름으로 메시지를 바로 보내요. 보내기 전에 따로 확인하지 않아요."
+    }
+  ],
+  "auth.devAccessPreset.readWriteLabel": [
+    {
+      "type": 0,
+      "value": "읽기 + 보내기"
+    }
+  ],
+  "auth.devAccessRestriction.help": [
+    {
+      "type": 0,
+      "value": "고른 채널 안에서만 읽고 보내요. 내가 들어가 있는 채널만 고를 수 있고, 채널에서 나가면 이 연결도 그 채널을 쓸 수 없어요."
+    }
+  ],
+  "auth.devAccessRestriction.label": [
+    {
+      "type": 0,
+      "value": "고른 채널만 쓰기"
+    }
+  ],
+  "auth.devAccessReveal.expiryWithDate": [
+    {
+      "type": 1,
+      "value": "expiry"
+    },
+    {
+      "type": 0,
+      "value": " ("
+    },
+    {
+      "type": 1,
+      "value": "date"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "auth.devAccessReveal.scopeWithDetail": [
+    {
+      "type": 1,
+      "value": "label"
+    },
+    {
+      "type": 0,
+      "value": " ("
+    },
+    {
+      "type": 1,
+      "value": "detail"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "auth.devAccessRow.neverUsed": [
+    {
+      "type": 0,
+      "value": "아직 안 썼어요"
+    }
+  ],
+  "auth.devAccessScope.channelsRead": [
+    {
+      "type": 0,
+      "value": "채널 목록 읽기"
+    }
+  ],
+  "auth.devAccessScope.identity": [
+    {
+      "type": 0,
+      "value": "내 정보 확인"
+    }
+  ],
+  "auth.devAccessScope.inboxRead": [
+    {
+      "type": 0,
+      "value": "인박스 읽기"
+    }
+  ],
+  "auth.devAccessScope.messagesRead": [
+    {
+      "type": 0,
+      "value": "메시지 읽기"
+    }
+  ],
+  "auth.devAccessScope.messagesWrite": [
+    {
+      "type": 0,
+      "value": "메시지 보내기"
+    }
+  ],
+  "auth.devAccessScope.unknown": [
+    {
+      "type": 0,
+      "value": "알 수 없는 범위"
+    }
+  ],
+  "auth.devAccessScopeLabel.custom": [
+    {
+      "type": 0,
+      "value": "직접 정한 범위"
+    }
+  ],
+  "auth.devAccessScopeLabel.customChannelOnly": [
+    {
+      "type": 0,
+      "value": "직접 정한 범위 · 고른 채널만"
+    }
+  ],
+  "auth.devAccessScopeLabel.read": [
+    {
+      "type": 0,
+      "value": "읽기만"
+    }
+  ],
+  "auth.devAccessScopeLabel.readChannelOnly": [
+    {
+      "type": 0,
+      "value": "읽기만 · 고른 채널만"
+    }
+  ],
+  "auth.devAccessScopeLabel.readWrite": [
+    {
+      "type": 0,
+      "value": "읽기 + 보내기"
+    }
+  ],
+  "auth.devAccessScopeLabel.readWriteChannelOnly": [
+    {
+      "type": 0,
+      "value": "읽기 + 보내기 · 고른 채널만"
+    }
+  ],
+  "auth.devAccessTool.claudeCode": [
+    {
+      "type": 0,
+      "value": "Claude Code"
+    }
+  ],
+  "auth.devAccessTool.cli": [
+    {
+      "type": 0,
+      "value": "직접 명령"
+    }
+  ],
+  "auth.devAccessTool.codex": [
+    {
+      "type": 0,
+      "value": "Codex"
+    }
+  ],
+  "auth.devAccessTool.other": [
+    {
+      "type": 0,
+      "value": "기타"
+    }
+  ],
+  "auth.devAccessValidation.channelsRequired": [
+    {
+      "type": 0,
+      "value": "채널을 1개 이상 골라 주세요. 채널을 가리지 않으려면 「고른 채널만 쓰기」를 꺼 주세요."
+    }
+  ],
+  "auth.devAccessValidation.channelsTooMany": [
+    {
+      "type": 0,
+      "value": "채널은 "
+    },
+    {
+      "type": 2,
+      "value": "max",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "개까지 고를 수 있어요. 지금 "
+    },
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "개를 골랐으니 "
+    },
+    {
+      "type": 2,
+      "value": "excess",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "개를 빼 주세요."
+    }
+  ],
+  "auth.devAccessValidation.expiryNotInteger": [
+    {
+      "type": 0,
+      "value": "만료 기간은 1일부터 "
+    },
+    {
+      "type": 2,
+      "value": "max",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "일까지 정수로 입력해 주세요."
+    }
+  ],
+  "auth.devAccessValidation.expiryRequired": [
+    {
+      "type": 0,
+      "value": "만료 기간을 입력해 주세요. 1일부터 "
+    },
+    {
+      "type": 2,
+      "value": "max",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "일까지 정할 수 있어요."
+    }
+  ],
+  "auth.devAccessValidation.expiryTooLong": [
+    {
+      "type": 0,
+      "value": "만료 기간은 최대 "
+    },
+    {
+      "type": 2,
+      "value": "max",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "일이에요. 더 오래 쓰려면 만료 전에 새로 만들어 주세요."
+    }
+  ],
+  "auth.devAccessValidation.nameControl": [
+    {
+      "type": 0,
+      "value": "이름에는 줄바꿈 같은 제어 문자를 쓸 수 없어요. 글자만 남기고 다시 입력해 주세요."
+    }
+  ],
+  "auth.devAccessValidation.nameEnvelope": [
+    {
+      "type": 0,
+      "value": "이름에 토큰 값이 들어 있어요. 이름 칸에는 알아보기 쉬운 말만 넣어 주세요."
+    }
+  ],
+  "auth.devAccessValidation.nameRequired": [
+    {
+      "type": 0,
+      "value": "이름을 입력해 주세요. 목록에서 이 연결을 알아볼 수 있는 이름이면 돼요."
+    }
+  ],
+  "auth.devAccessValidation.nameTooLong": [
+    {
+      "type": 0,
+      "value": "이름은 "
+    },
+    {
+      "type": 2,
+      "value": "max",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "자까지 쓸 수 있어요. 지금 "
+    },
+    {
+      "type": 2,
+      "value": "length",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "자예요. 조금 줄여 주세요."
+    }
+  ],
+  "auth.devAccessValidation.passwordRequired": [
+    {
+      "type": 0,
+      "value": "현재 비밀번호를 입력해 주세요. 연결을 만들 때마다 한 번 더 확인해요."
+    }
+  ],
+  "auth.devAccessValidation.passwordTooLong": [
+    {
+      "type": 0,
+      "value": "비밀번호는 "
+    },
+    {
+      "type": 1,
+      "value": "max"
+    },
+    {
+      "type": 0,
+      "value": "자까지 입력할 수 있어요. 입력한 내용을 다시 확인해 주세요."
+    }
+  ],
   "auth.deviceKey.authFailed": [
     {
       "type": 0,

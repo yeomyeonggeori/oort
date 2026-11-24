@@ -286,6 +286,1132 @@ export const catalog: MessageCatalog = {
       "value": "This link has already been used. Sign in instead."
     }
   ],
+  "auth.devAccessCommand.envClaude": [
+    {
+      "type": 0,
+      "value": "Put the content below in your project folder's "
+    },
+    {
+      "type": 1,
+      "value": "path"
+    },
+    {
+      "type": 0,
+      "value": ". The file holds no value, but it does contain the server address, so don't commit it to a repository."
+    }
+  ],
+  "auth.devAccessCommand.envClaudeRun": [
+    {
+      "type": 0,
+      "value": "Run Claude Code from the same terminal where you entered the value."
+    }
+  ],
+  "auth.devAccessCommand.envCli": [
+    {
+      "type": 0,
+      "value": "The command below hands the value to curl through its config instead of putting it in the arguments, so it doesn't show up in the process list either."
+    }
+  ],
+  "auth.devAccessCommand.envCliDone": [
+    {
+      "type": 0,
+      "value": "If the response shows this connection's name and scope, it's connected."
+    }
+  ],
+  "auth.devAccessCommand.envCodex": [
+    {
+      "type": 0,
+      "value": "Add the content below to "
+    },
+    {
+      "type": 1,
+      "value": "path"
+    },
+    {
+      "type": 0,
+      "value": ". The file holds no value, but it does contain the server address, so don't commit it to a repository."
+    }
+  ],
+  "auth.devAccessCommand.envCodexRun": [
+    {
+      "type": 0,
+      "value": "Run Codex from the same terminal where you entered the value."
+    }
+  ],
+  "auth.devAccessCommand.environmentCaveat": [
+    {
+      "type": 0,
+      "value": "Environment variables are passed to other programs you run in this terminal. Close the terminal when you're done."
+    }
+  ],
+  "auth.devAccessCommand.envTitle": [
+    {
+      "type": 0,
+      "value": "Connect with an environment variable"
+    }
+  ],
+  "auth.devAccessCommand.helperClaude": [
+    {
+      "type": 0,
+      "value": "In your project folder's "
+    },
+    {
+      "type": 1,
+      "value": "path"
+    },
+    {
+      "type": 0,
+      "value": ", set "
+    },
+    {
+      "type": 1,
+      "value": "command"
+    },
+    {
+      "type": 0,
+      "value": " as the header helper."
+    }
+  ],
+  "auth.devAccessCommand.helperCli": [
+    {
+      "type": 1,
+      "value": "command"
+    },
+    {
+      "type": 0,
+      "value": " supplies the value each time. It's handed to curl through its config, so the value never appears in the command arguments."
+    }
+  ],
+  "auth.devAccessCommand.helperCodex": [
+    {
+      "type": 0,
+      "value": "In "
+    },
+    {
+      "type": 1,
+      "value": "path"
+    },
+    {
+      "type": 0,
+      "value": ", set "
+    },
+    {
+      "type": 1,
+      "value": "command"
+    },
+    {
+      "type": 0,
+      "value": " as the header helper."
+    }
+  ],
+  "auth.devAccessCommand.helperLogin": [
+    {
+      "type": 0,
+      "value": "Save the value once in the oort command-line tool. It's taken as input only."
+    }
+  ],
+  "auth.devAccessCommand.helperTitle": [
+    {
+      "type": 0,
+      "value": "Connect with oort token"
+    }
+  ],
+  "auth.devAccessCommand.pasteAndEnter": [
+    {
+      "type": 0,
+      "value": "Paste it and press Enter. What you type isn't shown on screen. This works in bash and zsh."
+    }
+  ],
+  "auth.devAccessCommand.readIntoEnv": [
+    {
+      "type": 0,
+      "value": "Put the copied value into the environment variable "
+    },
+    {
+      "type": 1,
+      "value": "env"
+    },
+    {
+      "type": 0,
+      "value": ". It's taken as input, not as part of a command, so it stays out of your terminal history."
+    }
+  ],
+  "auth.devAccessCommand.stdioClaude": [
+    {
+      "type": 0,
+      "value": "Then add "
+    },
+    {
+      "type": 1,
+      "value": "command"
+    },
+    {
+      "type": 0,
+      "value": " to Claude Code."
+    }
+  ],
+  "auth.devAccessCommand.stdioCodex": [
+    {
+      "type": 0,
+      "value": "Then add "
+    },
+    {
+      "type": 1,
+      "value": "command"
+    },
+    {
+      "type": 0,
+      "value": " to "
+    },
+    {
+      "type": 1,
+      "value": "path"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "auth.devAccessCommand.stdioLogin": [
+    {
+      "type": 0,
+      "value": "Save the value once in the oort command-line tool. It's taken as input only, and no config file holds it."
+    }
+  ],
+  "auth.devAccessCommand.stdioTitle": [
+    {
+      "type": 0,
+      "value": "Connect with oort mcp"
+    }
+  ],
+  "auth.devAccessCommand.terminal": [
+    {
+      "type": 0,
+      "value": "Terminal"
+    }
+  ],
+  "auth.devAccessCommand.unavailable": [
+    {
+      "type": 0,
+      "value": "Couldn't verify the server address, so there are no setup snippets to show. Reopen the app and try again."
+    }
+  ],
+  "auth.devAccessCreate.expiryHint": [
+    {
+      "type": 0,
+      "value": "The connection ends on its own once it expires. Once created, the scope, channels and expiry can't be changed. To change them, create a new one and remove the old one."
+    }
+  ],
+  "auth.devAccessError.accessDenied": [
+    {
+      "type": 0,
+      "value": "You can't use this feature with your permissions in this workspace. Ask an admin."
+    }
+  ],
+  "auth.devAccessError.accessDeniedCreate": [
+    {
+      "type": 0,
+      "value": "You can't create connections with your current permissions. Ask an admin to turn this on."
+    }
+  ],
+  "auth.devAccessError.busy": [
+    {
+      "type": 0,
+      "value": "The team is being reorganized, so this couldn't be handled right away. Try again "
+    },
+    {
+      "type": 5,
+      "value": "unit",
+      "options": {
+        "soon": {
+          "value": [
+            {
+              "type": 0,
+              "value": "in a moment"
+            }
+          ]
+        },
+        "second": {
+          "value": [
+            {
+              "type": 0,
+              "value": "in "
+            },
+            {
+              "type": 6,
+              "value": "amount",
+              "options": {
+                "one": {
+                  "value": [
+                    {
+                      "type": 7
+                    },
+                    {
+                      "type": 0,
+                      "value": " second"
+                    }
+                  ]
+                },
+                "other": {
+                  "value": [
+                    {
+                      "type": 7
+                    },
+                    {
+                      "type": 0,
+                      "value": " seconds"
+                    }
+                  ]
+                }
+              },
+              "offset": 0,
+              "pluralType": "cardinal"
+            }
+          ]
+        },
+        "minute": {
+          "value": [
+            {
+              "type": 0,
+              "value": "in "
+            },
+            {
+              "type": 6,
+              "value": "amount",
+              "options": {
+                "one": {
+                  "value": [
+                    {
+                      "type": 7
+                    },
+                    {
+                      "type": 0,
+                      "value": " minute"
+                    }
+                  ]
+                },
+                "other": {
+                  "value": [
+                    {
+                      "type": 7
+                    },
+                    {
+                      "type": 0,
+                      "value": " minutes"
+                    }
+                  ]
+                }
+              },
+              "offset": 0,
+              "pluralType": "cardinal"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "in "
+            },
+            {
+              "type": 6,
+              "value": "amount",
+              "options": {
+                "one": {
+                  "value": [
+                    {
+                      "type": 7
+                    },
+                    {
+                      "type": 0,
+                      "value": " hour"
+                    }
+                  ]
+                },
+                "other": {
+                  "value": [
+                    {
+                      "type": 7
+                    },
+                    {
+                      "type": 0,
+                      "value": " hours"
+                    }
+                  ]
+                }
+              },
+              "offset": 0,
+              "pluralType": "cardinal"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "auth.devAccessError.forbidden": [
+    {
+      "type": 0,
+      "value": "You can't do this with your permissions. Ask an admin."
+    }
+  ],
+  "auth.devAccessError.forbiddenRevoke": [
+    {
+      "type": 0,
+      "value": "You can't remove this connection with your permissions. Ask an owner or whoever created it."
+    }
+  ],
+  "auth.devAccessError.invalid": [
+    {
+      "type": 0,
+      "value": "The server didn't accept the request. Reopen this screen and try again."
+    }
+  ],
+  "auth.devAccessError.invalidCreate": [
+    {
+      "type": 0,
+      "value": "The server didn't accept what you entered. Check the name, channels and expiry, then try again."
+    }
+  ],
+  "auth.devAccessError.limit": [
+    {
+      "type": 0,
+      "value": "Each person can create up to "
+    },
+    {
+      "type": 2,
+      "value": "limit",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": " card tokens. Remove connections you don't use, then create it again."
+    }
+  ],
+  "auth.devAccessError.network": [
+    {
+      "type": 0,
+      "value": "Couldn't reach the server. Check your network and try again."
+    }
+  ],
+  "auth.devAccessError.networkCreate": [
+    {
+      "type": 0,
+      "value": "Couldn't reach the server. We can't tell whether the connection was created, so check the list before trying again."
+    }
+  ],
+  "auth.devAccessError.notFound": [
+    {
+      "type": 0,
+      "value": "This server doesn't support command-line and AI tool connections yet. Update the server, then open this again."
+    }
+  ],
+  "auth.devAccessError.notFoundRevoke": [
+    {
+      "type": 0,
+      "value": "This connection was already removed or can't be found. Reload the list to check."
+    }
+  ],
+  "auth.devAccessError.passwordIncorrect": [
+    {
+      "type": 0,
+      "value": "That isn't your current password. Please enter it again."
+    }
+  ],
+  "auth.devAccessError.passwordUnavailable": [
+    {
+      "type": 0,
+      "value": "This account has no password to check. Create a password, then try again."
+    }
+  ],
+  "auth.devAccessError.rateLimited": [
+    {
+      "type": 0,
+      "value": "Too many attempts, so we paused this for a moment. Try again "
+    },
+    {
+      "type": 5,
+      "value": "unit",
+      "options": {
+        "soon": {
+          "value": [
+            {
+              "type": 0,
+              "value": "in a moment"
+            }
+          ]
+        },
+        "second": {
+          "value": [
+            {
+              "type": 0,
+              "value": "in "
+            },
+            {
+              "type": 6,
+              "value": "amount",
+              "options": {
+                "one": {
+                  "value": [
+                    {
+                      "type": 7
+                    },
+                    {
+                      "type": 0,
+                      "value": " second"
+                    }
+                  ]
+                },
+                "other": {
+                  "value": [
+                    {
+                      "type": 7
+                    },
+                    {
+                      "type": 0,
+                      "value": " seconds"
+                    }
+                  ]
+                }
+              },
+              "offset": 0,
+              "pluralType": "cardinal"
+            }
+          ]
+        },
+        "minute": {
+          "value": [
+            {
+              "type": 0,
+              "value": "in "
+            },
+            {
+              "type": 6,
+              "value": "amount",
+              "options": {
+                "one": {
+                  "value": [
+                    {
+                      "type": 7
+                    },
+                    {
+                      "type": 0,
+                      "value": " minute"
+                    }
+                  ]
+                },
+                "other": {
+                  "value": [
+                    {
+                      "type": 7
+                    },
+                    {
+                      "type": 0,
+                      "value": " minutes"
+                    }
+                  ]
+                }
+              },
+              "offset": 0,
+              "pluralType": "cardinal"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "in "
+            },
+            {
+              "type": 6,
+              "value": "amount",
+              "options": {
+                "one": {
+                  "value": [
+                    {
+                      "type": 7
+                    },
+                    {
+                      "type": 0,
+                      "value": " hour"
+                    }
+                  ]
+                },
+                "other": {
+                  "value": [
+                    {
+                      "type": 7
+                    },
+                    {
+                      "type": 0,
+                      "value": " hours"
+                    }
+                  ]
+                }
+              },
+              "offset": 0,
+              "pluralType": "cardinal"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "auth.devAccessError.unauthorized": [
+    {
+      "type": 0,
+      "value": "Your login has ended. Log in again, then try again."
+    }
+  ],
+  "auth.devAccessError.unknown": [
+    {
+      "type": 0,
+      "value": "Something went wrong. Try again in a moment."
+    }
+  ],
+  "auth.devAccessError.unknownCreate": [
+    {
+      "type": 0,
+      "value": "Something went wrong. We can't tell whether the connection was created, so check the list before trying again."
+    }
+  ],
+  "auth.devAccessExpiry.days": [
+    {
+      "type": 6,
+      "value": "days",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " day"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " days"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "auth.devAccessExpiry.daysAway": [
+    {
+      "type": 0,
+      "value": "in "
+    },
+    {
+      "type": 6,
+      "value": "days",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " day"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " days"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "auth.devAccessExpiry.passed": [
+    {
+      "type": 0,
+      "value": "Expiry time has passed"
+    }
+  ],
+  "auth.devAccessExpiry.today": [
+    {
+      "type": 0,
+      "value": "Today"
+    }
+  ],
+  "auth.devAccessGate.adminsOnly": [
+    {
+      "type": 0,
+      "value": "An admin needs to turn this on. For now, only owners and admins can create connections."
+    }
+  ],
+  "auth.devAccessGate.adminsOpen": [
+    {
+      "type": 0,
+      "value": "For now, owners and admins can create connections."
+    }
+  ],
+  "auth.devAccessGate.membersDenied": [
+    {
+      "type": 0,
+      "value": "This account can't create connections. Ask an admin for details."
+    }
+  ],
+  "auth.devAccessGate.membersOpen": [
+    {
+      "type": 0,
+      "value": "Everyone on this workspace's team can create connections."
+    }
+  ],
+  "auth.devAccessGate.off": [
+    {
+      "type": 0,
+      "value": "Command-line and AI tool connections are turned off. You can't create new ones until they're turned back on."
+    }
+  ],
+  "auth.devAccessGate.open": [
+    {
+      "type": 0,
+      "value": "You can create connections."
+    }
+  ],
+  "auth.devAccessKind.card": [
+    {
+      "type": 0,
+      "value": "Card token"
+    }
+  ],
+  "auth.devAccessKind.session": [
+    {
+      "type": 0,
+      "value": "Login session"
+    }
+  ],
+  "auth.devAccessList.all": [
+    {
+      "type": 0,
+      "value": "All"
+    }
+  ],
+  "auth.devAccessList.mine": [
+    {
+      "type": 0,
+      "value": "My connections"
+    }
+  ],
+  "auth.devAccessNotice.cardLimit": [
+    {
+      "type": 0,
+      "value": "Each person can create up to "
+    },
+    {
+      "type": 2,
+      "value": "limit",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": " card tokens."
+    }
+  ],
+  "auth.devAccessNotice.fixedAfterIssue": [
+    {
+      "type": 0,
+      "value": "Once created, the scope, channels and expiry can't be changed. To change them, create a new one and remove the old one."
+    }
+  ],
+  "auth.devAccessNotice.logoutKeepsConnections": [
+    {
+      "type": 0,
+      "value": "Logging out of the app doesn't disconnect them. Remove them here."
+    }
+  ],
+  "auth.devAccessNotice.passwordChangeEndsAll": [
+    {
+      "type": 0,
+      "value": "Changing your password disconnects every connection."
+    }
+  ],
+  "auth.devAccessNotice.revokeWarning": [
+    {
+      "type": 0,
+      "value": "This can't be undone. The tool using this connection is disconnected right away."
+    }
+  ],
+  "auth.devAccessNotice.toolIsOnlyALabel": [
+    {
+      "type": 0,
+      "value": "The tool is whatever the creator picked. It isn't a verified fact."
+    }
+  ],
+  "auth.devAccessOneTime.caution": [
+    {
+      "type": 0,
+      "value": "Anyone who knows this value can do what this connection allows in your name. Don't send it to anyone."
+    }
+  ],
+  "auth.devAccessOneTime.confirm": [
+    {
+      "type": 0,
+      "value": "I've saved it"
+    }
+  ],
+  "auth.devAccessOneTime.warning": [
+    {
+      "type": 0,
+      "value": "You can't see this again once you close this screen. Copy it now and keep it somewhere safe."
+    }
+  ],
+  "auth.devAccessPhone.passwordAndToolNote": [
+    {
+      "type": 0,
+      "value": "Changing your password disconnects every connection. The tool is whatever the creator picked. It isn't a verified fact."
+    }
+  ],
+  "auth.devAccessPreset.readDescription": [
+    {
+      "type": 0,
+      "value": "Reads your channel list, messages and inbox. Can't send anything."
+    }
+  ],
+  "auth.devAccessPreset.readLabel": [
+    {
+      "type": 0,
+      "value": "Read only"
+    }
+  ],
+  "auth.devAccessPreset.readWriteDescription": [
+    {
+      "type": 0,
+      "value": "Reads too, and sends messages in your name right away, with no separate check before sending."
+    }
+  ],
+  "auth.devAccessPreset.readWriteLabel": [
+    {
+      "type": 0,
+      "value": "Read and send"
+    }
+  ],
+  "auth.devAccessRestriction.help": [
+    {
+      "type": 0,
+      "value": "Reads and sends only inside the channels you choose. You can only choose channels you're in, and if you leave a channel, this connection can't use it either."
+    }
+  ],
+  "auth.devAccessRestriction.label": [
+    {
+      "type": 0,
+      "value": "Only chosen channels"
+    }
+  ],
+  "auth.devAccessReveal.expiryWithDate": [
+    {
+      "type": 1,
+      "value": "expiry"
+    },
+    {
+      "type": 0,
+      "value": " ("
+    },
+    {
+      "type": 1,
+      "value": "date"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "auth.devAccessReveal.scopeWithDetail": [
+    {
+      "type": 1,
+      "value": "label"
+    },
+    {
+      "type": 0,
+      "value": " ("
+    },
+    {
+      "type": 1,
+      "value": "detail"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "auth.devAccessRow.neverUsed": [
+    {
+      "type": 0,
+      "value": "Not used yet"
+    }
+  ],
+  "auth.devAccessScope.channelsRead": [
+    {
+      "type": 0,
+      "value": "Read channel list"
+    }
+  ],
+  "auth.devAccessScope.identity": [
+    {
+      "type": 0,
+      "value": "Check my profile"
+    }
+  ],
+  "auth.devAccessScope.inboxRead": [
+    {
+      "type": 0,
+      "value": "Read inbox"
+    }
+  ],
+  "auth.devAccessScope.messagesRead": [
+    {
+      "type": 0,
+      "value": "Read messages"
+    }
+  ],
+  "auth.devAccessScope.messagesWrite": [
+    {
+      "type": 0,
+      "value": "Send messages"
+    }
+  ],
+  "auth.devAccessScope.unknown": [
+    {
+      "type": 0,
+      "value": "Unknown scope"
+    }
+  ],
+  "auth.devAccessScopeLabel.custom": [
+    {
+      "type": 0,
+      "value": "Custom scope"
+    }
+  ],
+  "auth.devAccessScopeLabel.customChannelOnly": [
+    {
+      "type": 0,
+      "value": "Custom scope · chosen channels only"
+    }
+  ],
+  "auth.devAccessScopeLabel.read": [
+    {
+      "type": 0,
+      "value": "Read only"
+    }
+  ],
+  "auth.devAccessScopeLabel.readChannelOnly": [
+    {
+      "type": 0,
+      "value": "Read only · chosen channels only"
+    }
+  ],
+  "auth.devAccessScopeLabel.readWrite": [
+    {
+      "type": 0,
+      "value": "Read and send"
+    }
+  ],
+  "auth.devAccessScopeLabel.readWriteChannelOnly": [
+    {
+      "type": 0,
+      "value": "Read and send · chosen channels only"
+    }
+  ],
+  "auth.devAccessTool.claudeCode": [
+    {
+      "type": 0,
+      "value": "Claude Code"
+    }
+  ],
+  "auth.devAccessTool.cli": [
+    {
+      "type": 0,
+      "value": "Direct command"
+    }
+  ],
+  "auth.devAccessTool.codex": [
+    {
+      "type": 0,
+      "value": "Codex"
+    }
+  ],
+  "auth.devAccessTool.other": [
+    {
+      "type": 0,
+      "value": "Other"
+    }
+  ],
+  "auth.devAccessValidation.channelsRequired": [
+    {
+      "type": 0,
+      "value": "Choose at least one channel. To allow any channel, turn off \"Only chosen channels\"."
+    }
+  ],
+  "auth.devAccessValidation.channelsTooMany": [
+    {
+      "type": 0,
+      "value": "You can choose up to "
+    },
+    {
+      "type": 2,
+      "value": "max",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": " channels. You've chosen "
+    },
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": ", so remove "
+    },
+    {
+      "type": 2,
+      "value": "excess",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "auth.devAccessValidation.expiryNotInteger": [
+    {
+      "type": 0,
+      "value": "Enter the expiry period as a whole number from 1 to "
+    },
+    {
+      "type": 2,
+      "value": "max",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": " days."
+    }
+  ],
+  "auth.devAccessValidation.expiryRequired": [
+    {
+      "type": 0,
+      "value": "Enter an expiry period. You can set it from 1 to "
+    },
+    {
+      "type": 2,
+      "value": "max",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": " days."
+    }
+  ],
+  "auth.devAccessValidation.expiryTooLong": [
+    {
+      "type": 0,
+      "value": "The longest expiry is "
+    },
+    {
+      "type": 2,
+      "value": "max",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": " days. To keep using it longer, create a new one before it expires."
+    }
+  ],
+  "auth.devAccessValidation.nameControl": [
+    {
+      "type": 0,
+      "value": "Names can't contain control characters such as line breaks. Keep only text and try again."
+    }
+  ],
+  "auth.devAccessValidation.nameEnvelope": [
+    {
+      "type": 0,
+      "value": "The name contains a token value. Use only easy-to-recognize words in the name field."
+    }
+  ],
+  "auth.devAccessValidation.nameRequired": [
+    {
+      "type": 0,
+      "value": "Enter a name. Anything that helps you recognize this connection in the list works."
+    }
+  ],
+  "auth.devAccessValidation.nameTooLong": [
+    {
+      "type": 0,
+      "value": "Names can be up to "
+    },
+    {
+      "type": 2,
+      "value": "max",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": " characters. This one is "
+    },
+    {
+      "type": 2,
+      "value": "length",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": ". Please shorten it a little."
+    }
+  ],
+  "auth.devAccessValidation.passwordRequired": [
+    {
+      "type": 0,
+      "value": "Enter your current password. We check it again each time you create a connection."
+    }
+  ],
+  "auth.devAccessValidation.passwordTooLong": [
+    {
+      "type": 0,
+      "value": "Passwords can be up to "
+    },
+    {
+      "type": 1,
+      "value": "max"
+    },
+    {
+      "type": 0,
+      "value": " characters. Please check what you typed."
+    }
+  ],
   "auth.deviceKey.authFailed": [
     {
       "type": 0,

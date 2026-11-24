@@ -4,14 +4,15 @@ import { formatDay } from "@momo/core/features/settings/model";
 import type { CreatedDevCredential, DevTool } from "@momo/core/features/auth/devAccess";
 import {
   commandTabsFor,
-  DEV_COMMANDS_UNAVAILABLE_TEXT,
+  DEV_COMMANDS_UNAVAILABLE_KEY,
   DEV_ONE_TIME_COPY,
+  DEV_TERMINAL_LABEL_KEY,
   DEV_TOOL_CHOICES,
   devExpiry,
   devScopeDetail,
   devScopeKind,
-  devScopeLabel,
-  devToolLabel,
+  devScopeLabelKey,
+  devToolLabelKey,
   type DevCommandOption,
   type DevCommandStep,
 } from "@momo/core/features/auth/devAccessModel";
@@ -25,6 +26,7 @@ import {
 import { FilterTabs } from "@/features/common/FilterTabs";
 import { OneTimeSecretCard } from "@/features/hostedAgents/OneTimeSecretCard";
 import { holdGlobalShortcuts } from "@/app/globalShortcutHold";
+import { useFormatMessage } from "@/i18n/useFormatMessage";
 import { absoluteApiBase } from "@/lib/serverBase";
 import { CopyButton, KeyValueRows } from "./SettingsFields";
 
@@ -56,10 +58,9 @@ import { CopyButton, KeyValueRows } from "./SettingsFields";
 // 만들지 않는다: 프로세스 목록과 셸 기록에 값이 남는다(ADR-0190 D3-h).
 // =============================================================================
 
-const COMMAND_TABS: FilterTabsSpec<DevTool> = {
+const COMMAND_TABS_BASE: Omit<FilterTabsSpec<DevTool>, "labelFor"> = {
   label: "도구별 연결 방법",
   values: DEV_TOOL_CHOICES,
-  labelFor: devToolLabel,
   tabId: (tool) => `dev-command-tab-${tool}`,
   panelId: (tool) => `dev-command-panel-${tool}`,
   testId: (tool) => `dev-command-tab-${tool}`,
@@ -82,6 +83,11 @@ export function DevAccessReveal({
   opener: DialogFocusTarget | null;
   onDone: () => void;
 }) {
+  const formatMessage = useFormatMessage();
+  const commandTabs: FilterTabsSpec<DevTool> = {
+    ...COMMAND_TABS_BASE,
+    labelFor: (value) => formatMessage(devToolLabelKey(value)),
+  };
   const [tool, setTool] = useState<DevTool>(() => initialTool(created.tool));
   const contentRef = useRef<HTMLDivElement | null>(null);
   const options = commandTabsFor(tool, {
@@ -108,10 +114,14 @@ export function DevAccessReveal({
 
   const restricted = created.channelIds !== undefined;
   const expiry = devExpiry(created.expiresAtMs, Date.now());
+  const scopeLabel = formatMessage(devScopeLabelKey(created.scopes, restricted));
   const scope =
     devScopeKind(created.scopes) === "custom"
-      ? `${devScopeLabel(created.scopes, restricted)} (${devScopeDetail(created.scopes)})`
-      : devScopeLabel(created.scopes, restricted);
+      ? formatMessage("auth.devAccessReveal.scopeWithDetail", {
+          label: scopeLabel,
+          detail: devScopeDetail(formatMessage, created.scopes),
+        })
+      : scopeLabel;
 
   return (
     <Dialog open onOpenChange={() => undefined}>
@@ -142,11 +152,14 @@ export function DevAccessReveal({
                 value: <span className="break-words">{created.name}</span>,
                 prose: true,
               },
-              { key: "쓰는 도구", value: devToolLabel(created.tool), prose: true },
+              { key: "쓰는 도구", value: formatMessage(devToolLabelKey(created.tool)), prose: true },
               { key: "범위", value: scope, prose: true },
               {
                 key: "만료",
-                value: `${expiry.label} (${formatDay(created.expiresAtMs)})`,
+                value: formatMessage("auth.devAccessReveal.expiryWithDate", {
+                  expiry: formatMessage(expiry.message.key, expiry.message.values as never),
+                  date: formatDay(created.expiresAtMs),
+                }),
                 prose: true,
               },
             ]}
@@ -154,13 +167,13 @@ export function DevAccessReveal({
 
           <OneTimeSecretCard
             headline="연결 값"
-            warning={DEV_ONE_TIME_COPY.warning}
-            notes={[DEV_ONE_TIME_COPY.caution]}
+            warning={formatMessage(DEV_ONE_TIME_COPY.warningKey)}
+            notes={[formatMessage(DEV_ONE_TIME_COPY.cautionKey)]}
             secretLabel="연결 값"
             secret={created.token}
             copyLabel="복사"
             onDone={onDone}
-            doneLabel={DEV_ONE_TIME_COPY.confirmLabel}
+            doneLabel={formatMessage(DEV_ONE_TIME_COPY.confirmKey)}
             testId="dev-access-secret"
           />
 
@@ -172,18 +185,18 @@ export function DevAccessReveal({
             <h3 id="dev-command-heading" className="text-body font-semibold text-ink">
               도구에 넣는 방법
             </h3>
-            <FilterTabs spec={COMMAND_TABS} value={tool} onChange={setTool} />
+            <FilterTabs spec={commandTabs} value={tool} onChange={setTool} />
             <div
               role="tabpanel"
-              id={COMMAND_TABS.panelId(tool)}
-              aria-labelledby={COMMAND_TABS.tabId(tool)}
+              id={commandTabs.panelId(tool)}
+              aria-labelledby={commandTabs.tabId(tool)}
               className="flex min-w-0 flex-col gap-4"
               data-testid="dev-command-panel"
               data-tool={tool}
             >
               {options.length === 0 ? (
                 <p className="break-keep text-body text-ink-muted" data-testid="dev-command-unavailable">
-                  {DEV_COMMANDS_UNAVAILABLE_TEXT}
+                  {formatMessage(DEV_COMMANDS_UNAVAILABLE_KEY)}
                 </p>
               ) : (
                 options.map((option) => <CommandOption key={option.id} option={option} />)
@@ -197,24 +210,31 @@ export function DevAccessReveal({
 }
 
 function CommandOption({ option }: { option: DevCommandOption }) {
+  const formatMessage = useFormatMessage();
   let codeIndex = 0;
   return (
     <div
       className="flex min-w-0 flex-col gap-2"
       data-testid={`dev-command-option-${option.id}`}
     >
-      <p className="break-keep text-body font-medium text-ink">{option.title}</p>
+      <p className="break-keep text-body font-medium text-ink">{formatMessage(option.titleKey)}</p>
       {option.steps.map((step, index) => {
         if (step.kind === "prose") {
           return (
             <p key={index} className="break-keep text-body text-ink-muted">
-              {step.text}
+              {formatMessage(step.message.key, step.message.values as never)}
             </p>
           );
         }
         codeIndex += 1;
+        const labelText =
+          step.label === undefined
+            ? "명령"
+            : step.label.kind === "terminal"
+              ? formatMessage(DEV_TERMINAL_LABEL_KEY)
+              : step.label.path;
         return (
-          <CodeStep key={index} step={step} subject={`${step.label ?? "명령"} ${codeIndex}`} />
+          <CodeStep key={index} step={step} labelText={labelText} subject={`${labelText} ${codeIndex}`} />
         );
       })}
     </div>
@@ -227,11 +247,19 @@ function CommandOption({ option }: { option: DevCommandOption }) {
  * 접힌 모양이 아니라 원문이다. 세로로 넘치면 상자 안에서 스크롤하고, 그 상자는 키보드가 닿도록 초점을
  * 받는다.
  */
-function CodeStep({ step, subject }: { step: DevCommandStep; subject: string }) {
+function CodeStep({
+  step,
+  labelText,
+  subject,
+}: {
+  step: Extract<DevCommandStep, { kind: "code" }>;
+  labelText: string;
+  subject: string;
+}) {
   return (
     <div className="flex min-w-0 flex-col gap-1" data-testid="dev-command-code">
       <div className="flex min-w-0 items-center justify-between gap-2">
-        <p className="min-w-0 break-keep text-meta text-ink-muted">{step.label ?? "명령"}</p>
+        <p className="min-w-0 break-keep text-meta text-ink-muted">{labelText}</p>
         <CopyButton value={step.text} label="복사" subject={subject} />
       </div>
       <pre

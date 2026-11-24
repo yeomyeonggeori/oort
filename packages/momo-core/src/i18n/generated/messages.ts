@@ -30,6 +30,106 @@ export const messageKeys = [
   "auth.claim.passwordRecheck",
   "auth.claim.unmapped",
   "auth.claim.used",
+  "auth.devAccessCommand.envClaude",
+  "auth.devAccessCommand.envClaudeRun",
+  "auth.devAccessCommand.envCli",
+  "auth.devAccessCommand.envCliDone",
+  "auth.devAccessCommand.envCodex",
+  "auth.devAccessCommand.envCodexRun",
+  "auth.devAccessCommand.environmentCaveat",
+  "auth.devAccessCommand.envTitle",
+  "auth.devAccessCommand.helperClaude",
+  "auth.devAccessCommand.helperCli",
+  "auth.devAccessCommand.helperCodex",
+  "auth.devAccessCommand.helperLogin",
+  "auth.devAccessCommand.helperTitle",
+  "auth.devAccessCommand.pasteAndEnter",
+  "auth.devAccessCommand.readIntoEnv",
+  "auth.devAccessCommand.stdioClaude",
+  "auth.devAccessCommand.stdioCodex",
+  "auth.devAccessCommand.stdioLogin",
+  "auth.devAccessCommand.stdioTitle",
+  "auth.devAccessCommand.terminal",
+  "auth.devAccessCommand.unavailable",
+  "auth.devAccessCreate.expiryHint",
+  "auth.devAccessError.accessDenied",
+  "auth.devAccessError.accessDeniedCreate",
+  "auth.devAccessError.busy",
+  "auth.devAccessError.forbidden",
+  "auth.devAccessError.forbiddenRevoke",
+  "auth.devAccessError.invalid",
+  "auth.devAccessError.invalidCreate",
+  "auth.devAccessError.limit",
+  "auth.devAccessError.network",
+  "auth.devAccessError.networkCreate",
+  "auth.devAccessError.notFound",
+  "auth.devAccessError.notFoundRevoke",
+  "auth.devAccessError.passwordIncorrect",
+  "auth.devAccessError.passwordUnavailable",
+  "auth.devAccessError.rateLimited",
+  "auth.devAccessError.unauthorized",
+  "auth.devAccessError.unknown",
+  "auth.devAccessError.unknownCreate",
+  "auth.devAccessExpiry.days",
+  "auth.devAccessExpiry.daysAway",
+  "auth.devAccessExpiry.passed",
+  "auth.devAccessExpiry.today",
+  "auth.devAccessGate.adminsOnly",
+  "auth.devAccessGate.adminsOpen",
+  "auth.devAccessGate.membersDenied",
+  "auth.devAccessGate.membersOpen",
+  "auth.devAccessGate.off",
+  "auth.devAccessGate.open",
+  "auth.devAccessKind.card",
+  "auth.devAccessKind.session",
+  "auth.devAccessList.all",
+  "auth.devAccessList.mine",
+  "auth.devAccessNotice.cardLimit",
+  "auth.devAccessNotice.fixedAfterIssue",
+  "auth.devAccessNotice.logoutKeepsConnections",
+  "auth.devAccessNotice.passwordChangeEndsAll",
+  "auth.devAccessNotice.revokeWarning",
+  "auth.devAccessNotice.toolIsOnlyALabel",
+  "auth.devAccessOneTime.caution",
+  "auth.devAccessOneTime.confirm",
+  "auth.devAccessOneTime.warning",
+  "auth.devAccessPhone.passwordAndToolNote",
+  "auth.devAccessPreset.readDescription",
+  "auth.devAccessPreset.readLabel",
+  "auth.devAccessPreset.readWriteDescription",
+  "auth.devAccessPreset.readWriteLabel",
+  "auth.devAccessRestriction.help",
+  "auth.devAccessRestriction.label",
+  "auth.devAccessReveal.expiryWithDate",
+  "auth.devAccessReveal.scopeWithDetail",
+  "auth.devAccessRow.neverUsed",
+  "auth.devAccessScope.channelsRead",
+  "auth.devAccessScope.identity",
+  "auth.devAccessScope.inboxRead",
+  "auth.devAccessScope.messagesRead",
+  "auth.devAccessScope.messagesWrite",
+  "auth.devAccessScope.unknown",
+  "auth.devAccessScopeLabel.custom",
+  "auth.devAccessScopeLabel.customChannelOnly",
+  "auth.devAccessScopeLabel.read",
+  "auth.devAccessScopeLabel.readChannelOnly",
+  "auth.devAccessScopeLabel.readWrite",
+  "auth.devAccessScopeLabel.readWriteChannelOnly",
+  "auth.devAccessTool.claudeCode",
+  "auth.devAccessTool.cli",
+  "auth.devAccessTool.codex",
+  "auth.devAccessTool.other",
+  "auth.devAccessValidation.channelsRequired",
+  "auth.devAccessValidation.channelsTooMany",
+  "auth.devAccessValidation.expiryNotInteger",
+  "auth.devAccessValidation.expiryRequired",
+  "auth.devAccessValidation.expiryTooLong",
+  "auth.devAccessValidation.nameControl",
+  "auth.devAccessValidation.nameEnvelope",
+  "auth.devAccessValidation.nameRequired",
+  "auth.devAccessValidation.nameTooLong",
+  "auth.devAccessValidation.passwordRequired",
+  "auth.devAccessValidation.passwordTooLong",
   "auth.deviceKey.authFailed",
   "auth.deviceKey.cancelled",
   "auth.deviceKey.changed",
@@ -2484,6 +2584,160 @@ export const argumentSpecs = {
   "auth.claim.passwordRecheck": {},
   "auth.claim.unmapped": {},
   "auth.claim.used": {},
+  "auth.devAccessCommand.envClaude": {
+    "path": "string"
+  },
+  "auth.devAccessCommand.envClaudeRun": {},
+  "auth.devAccessCommand.envCli": {},
+  "auth.devAccessCommand.envCliDone": {},
+  "auth.devAccessCommand.envCodex": {
+    "path": "string"
+  },
+  "auth.devAccessCommand.envCodexRun": {},
+  "auth.devAccessCommand.environmentCaveat": {},
+  "auth.devAccessCommand.envTitle": {},
+  "auth.devAccessCommand.helperClaude": {
+    "command": "string",
+    "path": "string"
+  },
+  "auth.devAccessCommand.helperCli": {
+    "command": "string"
+  },
+  "auth.devAccessCommand.helperCodex": {
+    "command": "string",
+    "path": "string"
+  },
+  "auth.devAccessCommand.helperLogin": {},
+  "auth.devAccessCommand.helperTitle": {},
+  "auth.devAccessCommand.pasteAndEnter": {},
+  "auth.devAccessCommand.readIntoEnv": {
+    "env": "string"
+  },
+  "auth.devAccessCommand.stdioClaude": {
+    "command": "string"
+  },
+  "auth.devAccessCommand.stdioCodex": {
+    "command": "string",
+    "path": "string"
+  },
+  "auth.devAccessCommand.stdioLogin": {},
+  "auth.devAccessCommand.stdioTitle": {},
+  "auth.devAccessCommand.terminal": {},
+  "auth.devAccessCommand.unavailable": {},
+  "auth.devAccessCreate.expiryHint": {},
+  "auth.devAccessError.accessDenied": {},
+  "auth.devAccessError.accessDeniedCreate": {},
+  "auth.devAccessError.busy": {
+    "amount": "number",
+    "unit": "string"
+  },
+  "auth.devAccessError.forbidden": {},
+  "auth.devAccessError.forbiddenRevoke": {},
+  "auth.devAccessError.invalid": {},
+  "auth.devAccessError.invalidCreate": {},
+  "auth.devAccessError.limit": {
+    "limit": "number"
+  },
+  "auth.devAccessError.network": {},
+  "auth.devAccessError.networkCreate": {},
+  "auth.devAccessError.notFound": {},
+  "auth.devAccessError.notFoundRevoke": {},
+  "auth.devAccessError.passwordIncorrect": {},
+  "auth.devAccessError.passwordUnavailable": {},
+  "auth.devAccessError.rateLimited": {
+    "amount": "number",
+    "unit": "string"
+  },
+  "auth.devAccessError.unauthorized": {},
+  "auth.devAccessError.unknown": {},
+  "auth.devAccessError.unknownCreate": {},
+  "auth.devAccessExpiry.days": {
+    "days": "number"
+  },
+  "auth.devAccessExpiry.daysAway": {
+    "days": "number"
+  },
+  "auth.devAccessExpiry.passed": {},
+  "auth.devAccessExpiry.today": {},
+  "auth.devAccessGate.adminsOnly": {},
+  "auth.devAccessGate.adminsOpen": {},
+  "auth.devAccessGate.membersDenied": {},
+  "auth.devAccessGate.membersOpen": {},
+  "auth.devAccessGate.off": {},
+  "auth.devAccessGate.open": {},
+  "auth.devAccessKind.card": {},
+  "auth.devAccessKind.session": {},
+  "auth.devAccessList.all": {},
+  "auth.devAccessList.mine": {},
+  "auth.devAccessNotice.cardLimit": {
+    "limit": "number"
+  },
+  "auth.devAccessNotice.fixedAfterIssue": {},
+  "auth.devAccessNotice.logoutKeepsConnections": {},
+  "auth.devAccessNotice.passwordChangeEndsAll": {},
+  "auth.devAccessNotice.revokeWarning": {},
+  "auth.devAccessNotice.toolIsOnlyALabel": {},
+  "auth.devAccessOneTime.caution": {},
+  "auth.devAccessOneTime.confirm": {},
+  "auth.devAccessOneTime.warning": {},
+  "auth.devAccessPhone.passwordAndToolNote": {},
+  "auth.devAccessPreset.readDescription": {},
+  "auth.devAccessPreset.readLabel": {},
+  "auth.devAccessPreset.readWriteDescription": {},
+  "auth.devAccessPreset.readWriteLabel": {},
+  "auth.devAccessRestriction.help": {},
+  "auth.devAccessRestriction.label": {},
+  "auth.devAccessReveal.expiryWithDate": {
+    "date": "string",
+    "expiry": "string"
+  },
+  "auth.devAccessReveal.scopeWithDetail": {
+    "detail": "string",
+    "label": "string"
+  },
+  "auth.devAccessRow.neverUsed": {},
+  "auth.devAccessScope.channelsRead": {},
+  "auth.devAccessScope.identity": {},
+  "auth.devAccessScope.inboxRead": {},
+  "auth.devAccessScope.messagesRead": {},
+  "auth.devAccessScope.messagesWrite": {},
+  "auth.devAccessScope.unknown": {},
+  "auth.devAccessScopeLabel.custom": {},
+  "auth.devAccessScopeLabel.customChannelOnly": {},
+  "auth.devAccessScopeLabel.read": {},
+  "auth.devAccessScopeLabel.readChannelOnly": {},
+  "auth.devAccessScopeLabel.readWrite": {},
+  "auth.devAccessScopeLabel.readWriteChannelOnly": {},
+  "auth.devAccessTool.claudeCode": {},
+  "auth.devAccessTool.cli": {},
+  "auth.devAccessTool.codex": {},
+  "auth.devAccessTool.other": {},
+  "auth.devAccessValidation.channelsRequired": {},
+  "auth.devAccessValidation.channelsTooMany": {
+    "count": "number",
+    "excess": "number",
+    "max": "number"
+  },
+  "auth.devAccessValidation.expiryNotInteger": {
+    "max": "number"
+  },
+  "auth.devAccessValidation.expiryRequired": {
+    "max": "number"
+  },
+  "auth.devAccessValidation.expiryTooLong": {
+    "max": "number"
+  },
+  "auth.devAccessValidation.nameControl": {},
+  "auth.devAccessValidation.nameEnvelope": {},
+  "auth.devAccessValidation.nameRequired": {},
+  "auth.devAccessValidation.nameTooLong": {
+    "length": "number",
+    "max": "number"
+  },
+  "auth.devAccessValidation.passwordRequired": {},
+  "auth.devAccessValidation.passwordTooLong": {
+    "max": "string"
+  },
   "auth.deviceKey.authFailed": {},
   "auth.deviceKey.cancelled": {},
   "auth.deviceKey.changed": {},
@@ -5754,6 +6008,106 @@ export interface MessageArgs {
   "auth.claim.passwordRecheck": Record<string, never>;
   "auth.claim.unmapped": Record<string, never>;
   "auth.claim.used": Record<string, never>;
+  "auth.devAccessCommand.envClaude": { path: string };
+  "auth.devAccessCommand.envClaudeRun": Record<string, never>;
+  "auth.devAccessCommand.envCli": Record<string, never>;
+  "auth.devAccessCommand.envCliDone": Record<string, never>;
+  "auth.devAccessCommand.envCodex": { path: string };
+  "auth.devAccessCommand.envCodexRun": Record<string, never>;
+  "auth.devAccessCommand.environmentCaveat": Record<string, never>;
+  "auth.devAccessCommand.envTitle": Record<string, never>;
+  "auth.devAccessCommand.helperClaude": { command: string; path: string };
+  "auth.devAccessCommand.helperCli": { command: string };
+  "auth.devAccessCommand.helperCodex": { command: string; path: string };
+  "auth.devAccessCommand.helperLogin": Record<string, never>;
+  "auth.devAccessCommand.helperTitle": Record<string, never>;
+  "auth.devAccessCommand.pasteAndEnter": Record<string, never>;
+  "auth.devAccessCommand.readIntoEnv": { env: string };
+  "auth.devAccessCommand.stdioClaude": { command: string };
+  "auth.devAccessCommand.stdioCodex": { command: string; path: string };
+  "auth.devAccessCommand.stdioLogin": Record<string, never>;
+  "auth.devAccessCommand.stdioTitle": Record<string, never>;
+  "auth.devAccessCommand.terminal": Record<string, never>;
+  "auth.devAccessCommand.unavailable": Record<string, never>;
+  "auth.devAccessCreate.expiryHint": Record<string, never>;
+  "auth.devAccessError.accessDenied": Record<string, never>;
+  "auth.devAccessError.accessDeniedCreate": Record<string, never>;
+  "auth.devAccessError.busy": { amount: number; unit: string };
+  "auth.devAccessError.forbidden": Record<string, never>;
+  "auth.devAccessError.forbiddenRevoke": Record<string, never>;
+  "auth.devAccessError.invalid": Record<string, never>;
+  "auth.devAccessError.invalidCreate": Record<string, never>;
+  "auth.devAccessError.limit": { limit: number };
+  "auth.devAccessError.network": Record<string, never>;
+  "auth.devAccessError.networkCreate": Record<string, never>;
+  "auth.devAccessError.notFound": Record<string, never>;
+  "auth.devAccessError.notFoundRevoke": Record<string, never>;
+  "auth.devAccessError.passwordIncorrect": Record<string, never>;
+  "auth.devAccessError.passwordUnavailable": Record<string, never>;
+  "auth.devAccessError.rateLimited": { amount: number; unit: string };
+  "auth.devAccessError.unauthorized": Record<string, never>;
+  "auth.devAccessError.unknown": Record<string, never>;
+  "auth.devAccessError.unknownCreate": Record<string, never>;
+  "auth.devAccessExpiry.days": { days: number };
+  "auth.devAccessExpiry.daysAway": { days: number };
+  "auth.devAccessExpiry.passed": Record<string, never>;
+  "auth.devAccessExpiry.today": Record<string, never>;
+  "auth.devAccessGate.adminsOnly": Record<string, never>;
+  "auth.devAccessGate.adminsOpen": Record<string, never>;
+  "auth.devAccessGate.membersDenied": Record<string, never>;
+  "auth.devAccessGate.membersOpen": Record<string, never>;
+  "auth.devAccessGate.off": Record<string, never>;
+  "auth.devAccessGate.open": Record<string, never>;
+  "auth.devAccessKind.card": Record<string, never>;
+  "auth.devAccessKind.session": Record<string, never>;
+  "auth.devAccessList.all": Record<string, never>;
+  "auth.devAccessList.mine": Record<string, never>;
+  "auth.devAccessNotice.cardLimit": { limit: number };
+  "auth.devAccessNotice.fixedAfterIssue": Record<string, never>;
+  "auth.devAccessNotice.logoutKeepsConnections": Record<string, never>;
+  "auth.devAccessNotice.passwordChangeEndsAll": Record<string, never>;
+  "auth.devAccessNotice.revokeWarning": Record<string, never>;
+  "auth.devAccessNotice.toolIsOnlyALabel": Record<string, never>;
+  "auth.devAccessOneTime.caution": Record<string, never>;
+  "auth.devAccessOneTime.confirm": Record<string, never>;
+  "auth.devAccessOneTime.warning": Record<string, never>;
+  "auth.devAccessPhone.passwordAndToolNote": Record<string, never>;
+  "auth.devAccessPreset.readDescription": Record<string, never>;
+  "auth.devAccessPreset.readLabel": Record<string, never>;
+  "auth.devAccessPreset.readWriteDescription": Record<string, never>;
+  "auth.devAccessPreset.readWriteLabel": Record<string, never>;
+  "auth.devAccessRestriction.help": Record<string, never>;
+  "auth.devAccessRestriction.label": Record<string, never>;
+  "auth.devAccessReveal.expiryWithDate": { date: string; expiry: string };
+  "auth.devAccessReveal.scopeWithDetail": { detail: string; label: string };
+  "auth.devAccessRow.neverUsed": Record<string, never>;
+  "auth.devAccessScope.channelsRead": Record<string, never>;
+  "auth.devAccessScope.identity": Record<string, never>;
+  "auth.devAccessScope.inboxRead": Record<string, never>;
+  "auth.devAccessScope.messagesRead": Record<string, never>;
+  "auth.devAccessScope.messagesWrite": Record<string, never>;
+  "auth.devAccessScope.unknown": Record<string, never>;
+  "auth.devAccessScopeLabel.custom": Record<string, never>;
+  "auth.devAccessScopeLabel.customChannelOnly": Record<string, never>;
+  "auth.devAccessScopeLabel.read": Record<string, never>;
+  "auth.devAccessScopeLabel.readChannelOnly": Record<string, never>;
+  "auth.devAccessScopeLabel.readWrite": Record<string, never>;
+  "auth.devAccessScopeLabel.readWriteChannelOnly": Record<string, never>;
+  "auth.devAccessTool.claudeCode": Record<string, never>;
+  "auth.devAccessTool.cli": Record<string, never>;
+  "auth.devAccessTool.codex": Record<string, never>;
+  "auth.devAccessTool.other": Record<string, never>;
+  "auth.devAccessValidation.channelsRequired": Record<string, never>;
+  "auth.devAccessValidation.channelsTooMany": { count: number; excess: number; max: number };
+  "auth.devAccessValidation.expiryNotInteger": { max: number };
+  "auth.devAccessValidation.expiryRequired": { max: number };
+  "auth.devAccessValidation.expiryTooLong": { max: number };
+  "auth.devAccessValidation.nameControl": Record<string, never>;
+  "auth.devAccessValidation.nameEnvelope": Record<string, never>;
+  "auth.devAccessValidation.nameRequired": Record<string, never>;
+  "auth.devAccessValidation.nameTooLong": { length: number; max: number };
+  "auth.devAccessValidation.passwordRequired": Record<string, never>;
+  "auth.devAccessValidation.passwordTooLong": { max: string };
   "auth.deviceKey.authFailed": Record<string, never>;
   "auth.deviceKey.cancelled": Record<string, never>;
   "auth.deviceKey.changed": Record<string, never>;

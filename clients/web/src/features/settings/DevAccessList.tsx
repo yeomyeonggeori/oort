@@ -7,13 +7,14 @@ import {
   type DevCredential,
 } from "@momo/core/features/auth/devAccess";
 import {
-  DEV_LIST_SCOPE_LABELS,
+  DEV_LIST_SCOPE_LABEL_KEYS,
   DEV_NOTICES,
-  devAccessErrorText,
+  devAccessErrorMessage,
   devCredentialRow,
   isOwnDevCredential,
   type DevCredentialRow,
 } from "@momo/core/features/auth/devAccessModel";
+import { useFormatMessage } from "@/i18n/useFormatMessage";
 import { cn } from "@/design/lib/cn";
 import { Button } from "@/design/ui/button";
 import { SegmentedControl } from "@/design/ui/segmented-control";
@@ -54,11 +55,6 @@ import { BlockedReason, type BlockedFrame } from "@/features/common/BlockedReaso
 const ROSTER_LOADING_LABEL = "불러오는 중";
 const OFFLINE_REVOKE_REASON: BlockedFrame = "deleteDevAccess";
 
-const SCOPE_OPTIONS = [
-  { value: "mine", label: DEV_LIST_SCOPE_LABELS.mine },
-  { value: "all", label: DEV_LIST_SCOPE_LABELS.all },
-] as const satisfies readonly { value: DevListScope; label: string }[];
-
 function revokeTriggerSelector(id: string): string {
   return `[data-testid="dev-credential-row-${id}"] [data-testid="dev-credential-revoke"]`;
 }
@@ -79,6 +75,11 @@ export function DevAccessList({
   onStartCreate?: () => void;
 }) {
   const client = useQueryClient();
+  const formatMessage = useFormatMessage();
+  const scopeOptions = [
+    { value: "mine", label: formatMessage(DEV_LIST_SCOPE_LABEL_KEYS.mine) },
+    { value: "all", label: formatMessage(DEV_LIST_SCOPE_LABEL_KEYS.all) },
+  ] as const satisfies readonly { value: DevListScope; label: string }[];
   const [view, setView] = useState<DevListScope>("mine");
   // 권한이 사라졌는데 전체 보기에 머무는 일은 없다.
   const scope: DevListScope = canManageAll ? view : "mine";
@@ -100,7 +101,7 @@ export function DevAccessList({
     const own = isOwnDevCredential(credential, memberId);
     return {
       own,
-      row: devCredentialRow(credential, {
+      row: devCredentialRow(formatMessage, credential, {
         now,
         ...(scope === "all"
           ? { memberName: own ? "나" : memberLabel(roster, credential.memberId) }
@@ -140,7 +141,8 @@ export function DevAccessList({
     onError: (error) => {
       landing.current = null;
       const failure = devAccessError(error);
-      const text = devAccessErrorText(failure, "revoke");
+      const message = devAccessErrorMessage(failure, "revoke");
+      const text = formatMessage(message.key, message.values as never);
       if (failure.kind === "not_found") setGoneNotice(text);
       else setRowError(text);
     },
@@ -163,6 +165,7 @@ export function DevAccessList({
     revoke.mutate(id);
   }
 
+  const listError = devAccessErrorMessage(devAccessError(list.error), "list");
   const revokingId = revoke.isPending ? (revoke.variables ?? null) : null;
   const busy = revoke.isPending;
   const hasOwn = rows.some((entry) => entry.own);
@@ -183,7 +186,7 @@ export function DevAccessList({
             <SegmentedControl
               legend="목록 범위"
               name="dev-credentials-scope"
-              options={SCOPE_OPTIONS}
+              options={scopeOptions}
               value={scope}
               onValueChange={(next) => {
                 setView(next);
@@ -208,7 +211,7 @@ export function DevAccessList({
         {list.isError && (
           <CardBody>
             <InlineBanner
-              message={devAccessErrorText(devAccessError(list.error), "list")}
+              message={formatMessage(listError.key, listError.values as never)}
               actionLabel="다시 시도"
               onAction={() => void list.refetch()}
               className="px-0"
@@ -339,6 +342,7 @@ function CredentialRow({
   offlineReasonId: string;
   onRevoke: () => void;
 }) {
+  const formatMessage = useFormatMessage();
   const [asking, setAsking] = useState(false);
   const Icon = row.kind === "session" ? MonitorSmartphone : Terminal;
   const locked = offline || (busy && !revoking);
@@ -400,7 +404,7 @@ function CredentialRow({
           <ConfirmButton
             label="지우기"
             subject={row.name}
-            question={DEV_NOTICES.revokeWarning}
+            question={formatMessage(DEV_NOTICES.revokeWarning.key)}
             confirmLabel="지우기"
             busy={revoking}
             busyLabel="지우는 중"

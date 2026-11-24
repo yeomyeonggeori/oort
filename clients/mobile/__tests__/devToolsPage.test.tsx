@@ -1,10 +1,18 @@
-import {parseDevCredential} from '@momo/core/features/auth/devAccess';
 import {
-  DEV_NOTICES,
-  devAccessErrorText,
-  devAccessGate,
-  devCredentialRow,
+  parseDevCredential,
+  type DevAccessFailure,
+  type DevCredential,
+} from '@momo/core/features/auth/devAccess';
+import {
+  DEV_NOTICES as DEV_NOTICE_MESSAGES,
+  devAccessErrorMessage,
+  devAccessGate as devAccessGateModel,
+  devCredentialRow as devCredentialRowModel,
+  type DevAccessAction,
+  type DevMessage,
 } from '@momo/core/features/auth/devAccessModel';
+import {createLocaleService, resolveLocaleContext} from '@momo/core/i18n';
+import {catalog as koCatalog} from '@momo/core/i18n/generated/ko-KR';
 import type {Member} from '@momo/core/lib/api';
 import {QueryClient, QueryClientProvider} from '@tanstack/react-query';
 import {act, cleanup, fireEvent, render, screen, waitFor} from '@testing-library/react-native';
@@ -209,6 +217,22 @@ const goOffline = () =>
   act(() => netInfo().__emit({isConnected: false, isInternetReachable: false}));
 const goOnline = () => act(() => netInfo().__emit({isConnected: true, isInternetReachable: true}));
 
+// 문장은 사전(`auth.json`)에 있다(#6064). 기대값은 제품과 같은 한국어 생성물로 풀어 예전 한국어를 그대로 단정한다.
+const {formatMessage} = createLocaleService({
+  ...resolveLocaleContext('ko-KR', {languages: ['ko-KR']}),
+  catalog: koCatalog,
+});
+const t = (message: DevMessage): string => formatMessage(message.key, message.values as never);
+const devAccessErrorText = (failure: DevAccessFailure, action: DevAccessAction): string =>
+  t(devAccessErrorMessage(failure, action));
+const devAccessGate = (policy: Parameters<typeof devAccessGateModel>[0]) => {
+  const gate = devAccessGateModel(policy);
+  return {state: gate.state, text: t(gate.message)};
+};
+const devCredentialRow = (credential: DevCredential, options: {now: number}) =>
+  devCredentialRowModel(formatMessage, credential, options);
+const notice = (name: keyof typeof DEV_NOTICE_MESSAGES): string => t(DEV_NOTICE_MESSAGES[name]);
+
 /** 표본에서 코어 모델이 만든 한 줄(화면이 보여야 하는 값). */
 const rowOf = (wire: Wire) => devCredentialRow(parseDevCredential(wire), {now: Date.now()});
 const baseOf = (wire: Wire) => `dev-credential-${String(wire.id)}`;
@@ -326,7 +350,7 @@ describe('지우기는 한 번 더 묻는다 (#4663)', () => {
       {exact: false},
     );
     expect(screen.getByTestId('dev-revoke-confirm-detail')).toHaveTextContent(
-      DEV_NOTICES.revokeWarning,
+      notice('revokeWarning'),
     );
     expect(screen.queryByTestId(base)).toBeNull();
     expect(revokeRequests()).toEqual([]);
@@ -642,13 +666,13 @@ describe('안내 문장 (#4663)', () => {
     mount();
     await screen.findByTestId(baseOf(CLAUDE));
     expect(screen.getByTestId('dev-tools-logout-note')).toHaveTextContent(
-      DEV_NOTICES.logoutKeepsConnections,
+      notice('logoutKeepsConnections'),
     );
     expect(screen.getByTestId('dev-tools-notes')).toHaveTextContent(
-      DEV_NOTICES.passwordChangeEndsAll,
+      notice('passwordChangeEndsAll'),
       {exact: false},
     );
-    expect(screen.getByTestId('dev-tools-notes')).toHaveTextContent(DEV_NOTICES.toolIsOnlyALabel, {
+    expect(screen.getByTestId('dev-tools-notes')).toHaveTextContent(notice('toolIsOnlyALabel'), {
       exact: false,
     });
   });

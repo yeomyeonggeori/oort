@@ -13,44 +13,97 @@ import {
 import {
   commandTabsFor,
   DEV_CARD_LIMIT,
-  DEV_CHANNEL_ONLY_LABEL,
-  DEV_CHANNEL_RESTRICTION_COPY,
-  DEV_COMMANDS_UNAVAILABLE_TEXT,
+  DEV_CHANNEL_RESTRICTION_COPY as DEV_CHANNEL_RESTRICTION_KEYS,
+  DEV_COMMANDS_UNAVAILABLE_KEY,
+  DEV_TERMINAL_LABEL_KEY,
   DEV_DEFAULT_PRESET,
   DEV_EXPIRY_CHOICES,
   DEV_EXPIRY_DEFAULT_DAYS,
   DEV_EXPIRY_MAX_DAYS,
-  DEV_LIST_SCOPE_LABELS,
-  DEV_NOTICES,
-  DEV_ONE_TIME_COPY,
+  DEV_LIST_SCOPE_LABEL_KEYS,
+  DEV_NOTICES as DEV_NOTICE_MESSAGES,
+  DEV_ONE_TIME_COPY as DEV_ONE_TIME_KEYS,
   DEV_PRESETS,
   DEV_TOOL_CHOICES,
   defaultDevCredentialName,
-  devAccessErrorText,
-  devAccessGate,
+  devAccessErrorMessage,
+  devAccessGate as devAccessGateModel,
   devCommandOptions,
-  devCredentialRow,
-  devExpiry,
-  devExpiryChoiceLabel,
+  devCredentialRow as devCredentialRowModel,
+  devExpiry as devExpiryModel,
+  devExpiryChoiceMessage,
   devScopeDetail,
   devScopeKind,
-  devScopeLabel,
-  devScopeName,
-  devToolLabel,
+  devScopeLabelKey,
+  devScopeNameKey,
+  devToolLabelKey,
   isOwnDevCredential,
   OORT_CLI_VERIFIED,
-  retryAfterPhrase,
+  retryAfterWait,
   validateChannelSelection,
   validateDevName,
   validateExpiryDays,
   validatePassword,
   type DevAccessAction,
   type DevCommandContext,
+  type DevCommandLabel,
   type DevCommandOption,
+  type DevMessage,
 } from "./devAccessModel";
+import { catalog as koCatalog } from "../../i18n/generated/ko-KR";
+import { createLocaleService, resolveLocaleContext } from "../../i18n";
 
 // #4663: the developer access model (ADR-0216 D2 to D10). Pure: nothing here touches the
 // network, a clock or a DOM. People and ids are made up.
+
+// 문장은 사전(`auth.json`)에 있다(#6064). 시험은 제품과 같은 한국어 생성물로 문장을 풀어 예전 한국어를 그대로 단정한다.
+const { formatMessage } = createLocaleService({
+  ...resolveLocaleContext("ko-KR", { languages: ["ko-KR"] }),
+  catalog: koCatalog,
+});
+const t = (message: DevMessage): string => formatMessage(message.key, message.values as never);
+const devScopeLabel = (scopes: readonly string[], restricted: boolean): string =>
+  formatMessage(devScopeLabelKey(scopes, restricted));
+const devScopeName = (scope: string): string => formatMessage(devScopeNameKey(scope));
+const devToolLabel = (tool: DevTool): string => formatMessage(devToolLabelKey(tool));
+const devExpiry = (expiresAtMs: number, nowMs: number): { label: string; expired: boolean } => {
+  const expiry = devExpiryModel(expiresAtMs, nowMs);
+  return { label: t(expiry.message), expired: expiry.expired };
+};
+const devCredentialRow = (
+  credential: DevCredential,
+  options: { now: number; memberName?: string }
+) => devCredentialRowModel(formatMessage, credential, options);
+const devAccessGate = (policy: DevAccessPolicy) => {
+  const gate = devAccessGateModel(policy);
+  return { state: gate.state, text: t(gate.message) };
+};
+const devAccessErrorText = (failure: DevAccessFailure, action: DevAccessAction): string =>
+  t(devAccessErrorMessage(failure, action));
+const DEV_LIST_SCOPE_LABELS = {
+  mine: formatMessage(DEV_LIST_SCOPE_LABEL_KEYS.mine),
+  all: formatMessage(DEV_LIST_SCOPE_LABEL_KEYS.all),
+};
+const DEV_NOTICES = Object.fromEntries(
+  Object.entries(DEV_NOTICE_MESSAGES).map(([name, message]) => [name, t(message)])
+) as Record<keyof typeof DEV_NOTICE_MESSAGES, string>;
+const DEV_ONE_TIME_COPY = {
+  warning: formatMessage(DEV_ONE_TIME_KEYS.warningKey),
+  caution: formatMessage(DEV_ONE_TIME_KEYS.cautionKey),
+  confirmLabel: formatMessage(DEV_ONE_TIME_KEYS.confirmKey),
+};
+const DEV_CHANNEL_RESTRICTION_COPY = {
+  label: formatMessage(DEV_CHANNEL_RESTRICTION_KEYS.labelKey),
+  help: formatMessage(DEV_CHANNEL_RESTRICTION_KEYS.helpKey),
+};
+const DEV_COMMANDS_UNAVAILABLE_TEXT = formatMessage(DEV_COMMANDS_UNAVAILABLE_KEY);
+const DEV_CHANNEL_ONLY_LABEL = "고른 채널만";
+const commandLabelText = (label: DevCommandLabel | undefined): string | undefined =>
+  label === undefined
+    ? undefined
+    : label.kind === "terminal"
+      ? formatMessage(DEV_TERMINAL_LABEL_KEY)
+      : label.path;
 
 const WS = "019f9b10-0000-7000-8000-00000000a001";
 const DOHYUN = "019f9b10-0000-7000-8000-00000000b001";
@@ -119,7 +172,7 @@ describe("scope presets and labels", () => {
   it("offers read-only first and as the default, then read and send", () => {
     expect(DEV_PRESETS.map((preset) => preset.id)).toEqual(["read", "read_write"]);
     expect(DEV_DEFAULT_PRESET).toBe(DEV_PRESETS[0]?.id);
-    expect(DEV_PRESETS.map((preset) => preset.label)).toEqual(["읽기만", "읽기 + 보내기"]);
+    expect(DEV_PRESETS.map((preset) => formatMessage(preset.labelKey))).toEqual(["읽기만", "읽기 + 보내기"]);
   });
 
   it("describes the same scopes the create body sends for each preset", () => {
@@ -163,7 +216,7 @@ describe("scope presets and labels", () => {
   });
 
   it("spells out every power of a custom list, and an unknown name as unknown", () => {
-    const detail = devScopeDetail(["dev:identity", "dev:messages:write", "dev:future:admin"]);
+    const detail = devScopeDetail(formatMessage, ["dev:identity", "dev:messages:write", "dev:future:admin"]);
     expect(detail).toContain(devScopeName("dev:identity"));
     expect(detail).toContain(devScopeName("dev:messages:write"));
     expect(detail).toContain(devScopeName("dev:future:admin"));
@@ -183,7 +236,7 @@ describe("tools", () => {
   });
 
   it("starts the name field with the tool's own name, never an invented device name", () => {
-    for (const tool of DEV_TOOLS) expect(defaultDevCredentialName(tool)).toBe(devToolLabel(tool));
+    for (const tool of DEV_TOOLS) expect(defaultDevCredentialName(formatMessage, tool)).toBe(devToolLabel(tool));
   });
 });
 
@@ -193,7 +246,7 @@ describe("expiry", () => {
     expect(DEV_EXPIRY_MAX_DAYS).toBe(90);
     expect(DEV_EXPIRY_CHOICES).toContain(30);
     expect(DEV_EXPIRY_CHOICES.every((days) => days >= 1 && days <= 90)).toBe(true);
-    expect(devExpiryChoiceLabel(30)).toBe("30일");
+    expect(t(devExpiryChoiceMessage(30))).toBe("30일");
   });
 
   it.each<[string | number, number]>([
@@ -212,7 +265,7 @@ describe("expiry", () => {
     (raw) => {
       const result = validateExpiryDays(raw);
       expect(result.ok).toBe(false);
-      if (!result.ok) expect(result.message.length).toBeGreaterThan(0);
+      if (!result.ok) expect(t(result.message).length).toBeGreaterThan(0);
     }
   );
 
@@ -222,8 +275,8 @@ describe("expiry", () => {
     expect(over.ok).toBe(false);
     expect(word.ok).toBe(false);
     if (!over.ok && !word.ok) {
-      expect(over.message).toContain("90");
-      expect(over.message).not.toBe(word.message);
+      expect(t(over.message)).toContain("90");
+      expect(t(over.message)).not.toBe(t(word.message));
     }
     expect(validateExpiryDays(100_000).ok).toBe(false);
   });
@@ -267,7 +320,7 @@ describe("field validation", () => {
     for (const result of [empty, long, control, envelope, refreshEnvelope, upper]) {
       expect(result.ok).toBe(false);
     }
-    const messages = [empty, long, control, envelope].map((result) => (result.ok ? "" : result.message));
+    const messages = [empty, long, control, envelope].map((result) => (result.ok ? "" : t(result.message)));
     expect(new Set(messages).size).toBe(4);
     expect(messages.every((message) => message.length > 0)).toBe(true);
     expect(validateDevName("a\nb").ok).toBe(false);
@@ -283,11 +336,11 @@ describe("field validation", () => {
     expect(validateChannelSelection(ids(50)).ok).toBe(true);
     const tooMany = validateChannelSelection(ids(51));
     expect(tooMany.ok).toBe(false);
-    if (!tooMany.ok) expect(tooMany.message).toContain("50");
+    if (!tooMany.ok) expect(t(tooMany.message)).toContain("50");
     const repeated = validateChannelSelection([...ids(49), ...ids(49).map((id) => id.toUpperCase()), ...ids(1)]);
     expect(repeated).toEqual({ ok: true, value: ids(49) });
     const none = validateChannelSelection([]);
-    if (!none.ok && !tooMany.ok) expect(none.message).not.toBe(tooMany.message);
+    if (!none.ok && !tooMany.ok) expect(t(none.message)).not.toBe(t(tooMany.message));
   });
 
   it("takes a password of 1 to 1024 characters exactly as typed", () => {
@@ -300,7 +353,7 @@ describe("field validation", () => {
     expect(validatePassword("😀".repeat(1025)).ok).toBe(false);
     const empty = validatePassword("");
     const long = validatePassword("a".repeat(1025));
-    if (!empty.ok && !long.ok) expect(empty.message).not.toBe(long.message);
+    if (!empty.ok && !long.ok) expect(t(empty.message)).not.toBe(t(long.message));
   });
 });
 
@@ -466,6 +519,11 @@ describe("failure sentences", () => {
   });
 
   it("rounds a wait up so it never promises less than the server asked", () => {
+    // The wait as the sentence says it: 「… 막았어요. <wait>에 다시 해 주세요.」
+    const retryAfterPhrase = (seconds?: number): string =>
+      text("rate_limited", "create", seconds).match(/막았어요\. (.+)에 다시 해 주세요\./)?.[1] ?? "";
+    expect(retryAfterWait(0)).toEqual({ unit: "soon", amount: 0 });
+    expect(retryAfterWait(61)).toEqual({ unit: "minute", amount: 2 });
     expect(retryAfterPhrase(undefined)).toBe("잠시 뒤");
     expect(retryAfterPhrase(0)).toBe("잠시 뒤");
     expect(retryAfterPhrase(1)).toBe("1초 뒤");
@@ -505,11 +563,13 @@ function secretShapeViolations(step: string): string[] {
 }
 
 function everyStep(options: DevCommandOption[]): string[] {
-  return options.flatMap((option) => option.steps.map((step) => step.text));
+  return options.flatMap((option) =>
+    option.steps.map((step) => (step.kind === "code" ? step.text : t(step.message)))
+  );
 }
 
 function codeSteps(option: DevCommandOption): string[] {
-  return option.steps.filter((step) => step.kind === "code").map((step) => step.text);
+  return option.steps.flatMap((step) => (step.kind === "code" ? [step.text] : []));
 }
 
 describe("command snippets", () => {
@@ -518,7 +578,7 @@ describe("command snippets", () => {
       const options = devCommandOptions(tool, CONTEXT);
       expect(options.map((option) => option.id)).toEqual(["stdio", "helper", "env"]);
       expect(options.map((option) => option.rank)).toEqual([1, 2, 3]);
-      expect(options.every((option) => option.steps.length > 0 && option.title.length > 0)).toBe(true);
+      expect(options.every((option) => option.steps.length > 0 && formatMessage(option.titleKey).length > 0)).toBe(true);
     }
     for (const tool of ["cli", "other"] as const) {
       const options = devCommandOptions(tool, CONTEXT);
@@ -556,15 +616,17 @@ describe("command snippets", () => {
     for (const tool of ALL_TOOLS) {
       const env = commandTabsFor(tool, CONTEXT)[0];
       const first = env?.steps.find((step) => step.kind === "code");
-      expect(first?.text).toBe("read -rs OORT_TOKEN && export OORT_TOKEN");
+      expect(first?.kind === "code" ? first.text : undefined).toBe("read -rs OORT_TOKEN && export OORT_TOKEN");
     }
   });
 
   it("points Claude Code at the people's MCP address with a reference to the variable", () => {
     const env = commandTabsFor("claude_code", CONTEXT)[0];
-    const file = env?.steps.find((step) => step.kind === "code" && step.label === ".mcp.json");
+    const file = env?.steps.find(
+      (step) => step.kind === "code" && commandLabelText(step.label) === ".mcp.json"
+    );
     expect(file).toBeDefined();
-    const parsed = JSON.parse(file?.text ?? "null") as {
+    const parsed = JSON.parse(file?.kind === "code" ? file.text : "null") as {
       mcpServers: { oort: { type: string; url: string; headers: { Authorization: string } } };
     };
     expect(parsed.mcpServers.oort.type).toBe("http");
@@ -575,8 +637,10 @@ describe("command snippets", () => {
 
   it("points Codex at the same address and names the variable to read", () => {
     const env = commandTabsFor("codex", CONTEXT)[0];
-    const file = env?.steps.find((step) => step.kind === "code" && step.label?.endsWith("config.toml"));
-    expect(file?.text.split("\n")).toEqual([
+    const file = env?.steps.find(
+      (step) => step.kind === "code" && commandLabelText(step.label)?.endsWith("config.toml")
+    );
+    expect(file?.kind === "code" ? file.text.split("\n") : undefined).toEqual([
       "[mcp_servers.oort]",
       'url = "https://oort.example.com/v1/mcp/me"',
       'bearer_token_env_var = "OORT_TOKEN"',
@@ -586,7 +650,7 @@ describe("command snippets", () => {
   it("asks the server who the token is, without the value ever being an argument", () => {
     const cli = commandTabsFor("cli", CONTEXT)[0];
     const command = cli?.steps.filter((step) => step.kind === "code")[1];
-    expect(command?.text).toBe(
+    expect(command?.kind === "code" ? command.text : undefined).toBe(
       `printf 'header = "Authorization: Bearer %s"\\n' "$OORT_TOKEN" | curl -sS -K - "https://oort.example.com/v1/workspaces/${WS}/dev-access/self"`
     );
   });
@@ -668,8 +732,10 @@ describe("command snippets", () => {
       expect(secretShapeViolations(code)).toEqual([]);
     }
     const helper = devCommandOptions("claude_code", CONTEXT).find((option) => option.id === "helper");
-    const file = helper?.steps.find((step) => step.label === ".mcp.json");
-    const parsed = JSON.parse(file?.text ?? "null") as { mcpServers: { oort: Record<string, string> } };
+    const file = helper?.steps.find(
+      (step) => step.kind === "code" && commandLabelText(step.label) === ".mcp.json"
+    );
+    const parsed = JSON.parse(file?.kind === "code" ? file.text : "null") as { mcpServers: { oort: Record<string, string> } };
     expect(parsed.mcpServers.oort["headersHelper"]).toBe("oort token --headers");
     expect(parsed.mcpServers.oort["headers"]).toBeUndefined();
   });
@@ -701,9 +767,14 @@ function copyViolations(text: string): string[] {
 describe("copy hygiene of the sentences built at run time", () => {
   function sentences(): string[] {
     const out: string[] = [];
-    for (const preset of DEV_PRESETS) out.push(preset.label, preset.description);
+    for (const preset of DEV_PRESETS) {
+      out.push(formatMessage(preset.labelKey), formatMessage(preset.descriptionKey));
+    }
     out.push(...Object.values(DEV_CHANNEL_RESTRICTION_COPY), ...Object.values(DEV_NOTICES));
     out.push(...Object.values(DEV_ONE_TIME_COPY), ...Object.values(DEV_LIST_SCOPE_LABELS));
+    for (const scopeSet of [DEV_READ_SCOPES, DEV_READ_WRITE_SCOPES, ["dev:identity"]]) {
+      for (const restricted of [false, true]) out.push(devScopeLabel(scopeSet, restricted));
+    }
     out.push(DEV_COMMANDS_UNAVAILABLE_TEXT, DEV_CHANNEL_ONLY_LABEL);
     for (const tool of DEV_TOOLS) out.push(devToolLabel(tool));
     for (const kind of ALL_FAILURES) {
@@ -719,7 +790,7 @@ describe("copy hygiene of the sentences built at run time", () => {
         out.push(devAccessGate({ policy, canCreate, canManageAll: false }).text);
       }
     }
-    const bad: Array<{ message: string } | { value: unknown }> = [
+    const bad: Array<{ message: DevMessage } | { value: unknown }> = [
       validateDevName(""),
       validateDevName("가".repeat(81)),
       validateDevName("a\tb"),
@@ -732,7 +803,7 @@ describe("copy hygiene of the sentences built at run time", () => {
       validateExpiryDays("x"),
       validateExpiryDays("91"),
     ];
-    for (const result of bad) if ("message" in result) out.push(result.message);
+    for (const result of bad) if ("message" in result) out.push(t(result.message));
     for (const label of [devExpiry(NOW - 1, NOW).label, devExpiry(NOW, NOW - 1).label, devExpiry(NOW + 5 * DAY, NOW).label]) {
       out.push(label);
     }
@@ -742,7 +813,10 @@ describe("copy hygiene of the sentences built at run time", () => {
     }
     for (const tool of ALL_TOOLS) {
       for (const option of devCommandOptions(tool, CONTEXT)) {
-        out.push(option.title, ...option.steps.filter((step) => step.kind === "prose").map((step) => step.text));
+        out.push(
+          formatMessage(option.titleKey),
+          ...option.steps.flatMap((step) => (step.kind === "prose" ? [t(step.message)] : []))
+        );
       }
     }
     return out.filter((entry) => entry !== "");

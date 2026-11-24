@@ -17,14 +17,16 @@ import {
   DEV_PRESETS,
   DEV_TOOL_CHOICES,
   defaultDevCredentialName,
-  devAccessErrorText,
-  devExpiryChoiceLabel,
-  devToolLabel,
+  devAccessErrorMessage,
+  devExpiryChoiceMessage,
+  devToolLabelKey,
+  type DevMessage,
   validateChannelSelection,
   validateDevName,
   validateExpiryDays,
   validatePassword,
 } from "@momo/core/features/auth/devAccessModel";
+import { useFormatMessage } from "@/i18n/useFormatMessage";
 import { cn } from "@/design/lib/cn";
 import { Button } from "@/design/ui/button";
 import { Input } from "@/design/ui/input";
@@ -69,7 +71,6 @@ const OFFLINE_CREATE_REASON: BlockedFrame = "createDevAccess";
 
 const NAME_HINT = "목록에서 이 연결을 알아볼 수 있는 이름이에요.";
 const PASSWORD_HINT = "연결을 만들 때마다 한 번 더 확인해요. 이 값은 저장하지 않아요.";
-const EXPIRY_HINT = `만료일이 지나면 이 연결은 저절로 끊겨요. ${DEV_NOTICES.fixedAfterIssue}`;
 const DAYS_HINT = `1일부터 ${DEV_EXPIRY_MAX_DAYS}일까지 정할 수 있어요.`;
 
 const DAYS_FIELD_ID = "dev-access-days";
@@ -79,32 +80,14 @@ const CHANNEL_ERROR_ID = "dev-access-channels-error-text";
 /** 만료 선택칸의 마지막 항목. 고르면 일수를 직접 쓰는 칸이 선다. */
 const CUSTOM_EXPIRY = "custom";
 
-const EXPIRY_CHOICES = [
-  ...DEV_EXPIRY_CHOICES.map((days) => ({
-    id: String(days),
-    label: devExpiryChoiceLabel(days),
-  })),
-  { id: CUSTOM_EXPIRY, label: "직접 정하기" },
-];
-
-const TOOL_OPTIONS = DEV_TOOL_CHOICES.map((tool) => ({
-  value: tool,
-  label: devToolLabel(tool),
-}));
-
-const PRESET_CHOICES = DEV_PRESETS.map((preset) => ({
-  id: preset.id,
-  label: preset.label,
-  detail: preset.description,
-}));
-
 const DEFAULT_TOOL: DevTool = DEV_TOOL_CHOICES[0];
 
+/** 칸마다 문장의 키와 값을 든다. 언어를 바꾸면 서 있는 오류도 새 언어로 다시 그려진다. */
 interface FieldErrors {
-  name?: string;
-  days?: string;
-  channels?: string;
-  password?: string;
+  name?: DevMessage;
+  days?: DevMessage;
+  channels?: DevMessage;
+  password?: DevMessage;
 }
 
 export function DevAccessCreateForm({
@@ -131,13 +114,14 @@ export function DevAccessCreateForm({
   onRevealChange: (up: boolean) => void;
 }) {
   const client = useQueryClient();
+  const formatMessage = useFormatMessage();
   const createButtonRef = useRef<HTMLButtonElement | null>(null);
   const passwordRef = useRef<HTMLInputElement | null>(null);
   const channelsRef = useRef<HTMLDivElement | null>(null);
   const nameEdited = useRef(false);
 
   const [tool, setTool] = useState<DevTool>(DEFAULT_TOOL);
-  const [name, setName] = useState(() => defaultDevCredentialName(DEFAULT_TOOL));
+  const [name, setName] = useState(() => defaultDevCredentialName(formatMessage, DEFAULT_TOOL));
   const [preset, setPreset] = useState<DevPresetId>(DEV_DEFAULT_PRESET);
   const [restrict, setRestrict] = useState(false);
   const [channelIds, setChannelIds] = useState<string[]>([]);
@@ -168,7 +152,7 @@ export function DevAccessCreateForm({
     if (!create.isError) return;
     const found = devAccessError(create.error);
     if (found.kind !== "password_incorrect") return;
-    setErrors((current) => ({ ...current, password: devAccessErrorText(found, "create") }));
+    setErrors((current) => ({ ...current, password: devAccessErrorMessage(found, "create") }));
     passwordRef.current?.focus();
   }, [create.isError, create.error]);
 
@@ -179,13 +163,13 @@ export function DevAccessCreateForm({
   function pickTool(next: DevTool) {
     setTool(next);
     // 이름 칸의 시작값은 도구 이름이다. 사람이 한 글자라도 고쳤으면 도구를 바꿔도 그대로 둔다.
-    if (!nameEdited.current) setName(defaultDevCredentialName(next));
+    if (!nameEdited.current) setName(defaultDevCredentialName(formatMessage, next));
   }
 
   function resetDraft() {
     nameEdited.current = false;
     setTool(DEFAULT_TOOL);
-    setName(defaultDevCredentialName(DEFAULT_TOOL));
+    setName(defaultDevCredentialName(formatMessage, DEFAULT_TOOL));
     setPreset(DEV_DEFAULT_PRESET);
     setRestrict(false);
     setChannelIds([]);
@@ -255,10 +239,41 @@ export function DevAccessCreateForm({
     onSaved(createdName);
   }
 
-  const bannerText =
+  const bannerMessage =
     failure !== null && failure.kind !== "password_incorrect"
-      ? devAccessErrorText(failure, "create")
+      ? devAccessErrorMessage(failure, "create")
       : null;
+  const bannerText =
+    bannerMessage === null ? null : formatMessage(bannerMessage.key, bannerMessage.values as never);
+  const nameError =
+    errors.name === undefined ? undefined : formatMessage(errors.name.key, errors.name.values as never);
+  const daysError =
+    errors.days === undefined ? undefined : formatMessage(errors.days.key, errors.days.values as never);
+  const channelsError =
+    errors.channels === undefined
+      ? undefined
+      : formatMessage(errors.channels.key, errors.channels.values as never);
+  const passwordError =
+    errors.password === undefined
+      ? undefined
+      : formatMessage(errors.password.key, errors.password.values as never);
+
+  const expiryChoices = [
+    ...DEV_EXPIRY_CHOICES.map((days) => {
+      const choice = devExpiryChoiceMessage(days);
+      return { id: String(days), label: formatMessage(choice.key, choice.values as never) };
+    }),
+    { id: CUSTOM_EXPIRY, label: "직접 정하기" },
+  ];
+  const toolOptions = DEV_TOOL_CHOICES.map((choice) => ({
+    value: choice,
+    label: formatMessage(devToolLabelKey(choice)),
+  }));
+  const presetChoices = DEV_PRESETS.map((entry) => ({
+    id: entry.id,
+    label: formatMessage(entry.labelKey),
+    detail: formatMessage(entry.descriptionKey),
+  }));
 
   return (
     <>
@@ -269,7 +284,7 @@ export function DevAccessCreateForm({
           data-testid="dev-access-create-form"
         >
           <div className="px-4 py-3">
-            <Field label="이름" htmlFor={nameFieldId} hint={NAME_HINT} error={errors.name}>
+            <Field label="이름" htmlFor={nameFieldId} hint={NAME_HINT} error={nameError}>
               <Input
                 id={nameFieldId}
                 name="devAccessName"
@@ -295,13 +310,13 @@ export function DevAccessCreateForm({
             <SegmentedControl
               legend="쓰는 도구"
               name="dev-access-tool"
-              options={TOOL_OPTIONS}
+              options={toolOptions}
               value={tool}
               onValueChange={pickTool}
               testId="dev-access-tool"
             />
             <p className="break-keep text-meta text-ink-muted" data-testid="dev-access-tool-note">
-              {DEV_NOTICES.toolIsOnlyALabel}
+              {formatMessage(DEV_NOTICES.toolIsOnlyALabel.key)}
             </p>
           </div>
 
@@ -309,7 +324,7 @@ export function DevAccessCreateForm({
             <ChoiceRadios
               name="dev-access-preset"
               legend="범위"
-              choices={PRESET_CHOICES}
+              choices={presetChoices}
               value={preset}
               onChange={(id) => setPreset(id === "read_write" ? "read_write" : "read")}
               busy={create.isPending}
@@ -321,8 +336,8 @@ export function DevAccessCreateForm({
             <div className="overflow-hidden rounded-md border border-line">
               <SettingsToggleRow
                 testId="dev-access-restrict"
-                name={DEV_CHANNEL_RESTRICTION_COPY.label}
-                description={DEV_CHANNEL_RESTRICTION_COPY.help}
+                name={formatMessage(DEV_CHANNEL_RESTRICTION_COPY.labelKey)}
+                description={formatMessage(DEV_CHANNEL_RESTRICTION_COPY.helpKey)}
                 checked={restrict}
                 onToggle={(next) => {
                   setRestrict(next);
@@ -340,16 +355,16 @@ export function DevAccessCreateForm({
                     setChannelIds(next);
                     clearError("channels");
                   }}
-                  describedBy={errors.channels ? CHANNEL_ERROR_ID : undefined}
+                  describedBy={channelsError ? CHANNEL_ERROR_ID : undefined}
                 />
-                {errors.channels && (
+                {channelsError && (
                   <p
                     id={CHANNEL_ERROR_ID}
                     className="break-keep text-meta text-danger"
                     role="alert"
                     data-testid="dev-access-channels-validation"
                   >
-                    {errors.channels}
+                    {channelsError}
                   </p>
                 )}
               </div>
@@ -361,9 +376,13 @@ export function DevAccessCreateForm({
               id="dev-access-expiry"
               label="만료"
               // `SelectField`의 힌트 문단은 어절 끊기가 없어 한국어가 음절 중간에서 꺾인다(390px 실측).
-              hint={<span className="break-keep">{EXPIRY_HINT}</span>}
+              hint={
+                <span className="break-keep">
+                  {formatMessage("auth.devAccessCreate.expiryHint")}
+                </span>
+              }
               value={expiry}
-              choices={EXPIRY_CHOICES}
+              choices={expiryChoices}
               onChange={(id) => {
                 setExpiry(id);
                 clearError("days");
@@ -371,7 +390,7 @@ export function DevAccessCreateForm({
               testId="dev-access-expiry"
             />
             {expiry === CUSTOM_EXPIRY && (
-              <Field label="만료 기간(일)" htmlFor={DAYS_FIELD_ID} hint={DAYS_HINT} error={errors.days}>
+              <Field label="만료 기간(일)" htmlFor={DAYS_FIELD_ID} hint={DAYS_HINT} error={daysError}>
                 <Input
                   id={DAYS_FIELD_ID}
                   name="devAccessDays"
@@ -395,7 +414,7 @@ export function DevAccessCreateForm({
               label="현재 비밀번호"
               htmlFor={PASSWORD_FIELD_ID}
               hint={PASSWORD_HINT}
-              error={errors.password}
+              error={passwordError}
             >
               <SecretInput
                 ref={passwordRef}
