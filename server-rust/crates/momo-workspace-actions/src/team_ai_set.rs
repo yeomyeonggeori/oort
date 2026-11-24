@@ -174,6 +174,8 @@ pub async fn propose_set_in_tx(
 
     // ---- the first write -------------------------------------------------------------------
     momo_agent::run::mark_run_started_in_tx(conn, context.run_id).await?;
+    // ADR-0200 증보 8 L3 (#6067): a start is a take — the eye, in this tx.
+    momo_messaging::status_reaction::on_run_taken_in_tx(conn, workspace_id, context.run_id).await?;
     if !momo_agent::run::park_run_for_approval_in_tx(conn, context.run_id, context.expires_at)
         .await?
     {

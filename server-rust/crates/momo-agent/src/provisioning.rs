@@ -486,6 +486,10 @@ pub struct AgentProfile {
     /// plain reply in a thread this agent opened wakes it. Also an `agent`
     /// column read with the profile, like `model_source`.
     pub thread_reply_wake: bool,
+    /// `agent.agent_reactions` (ADR-0200 증보 8 L10, #6067) — the agent's own reaction switch as
+    /// stored (`off` · `status` · `free`), `None` = follow the workspace. The **effective** value is
+    /// the narrower of this and the workspace's; this is the stored one, for the profile screen.
+    pub agent_reactions: Option<String>,
 }
 
 fn decode_profile(
@@ -525,6 +529,7 @@ fn decode_profile(
         thread_reply_wake: row
             .try_get::<Option<bool>, _>("thread_reply_wake")?
             .unwrap_or(true),
+        agent_reactions: row.try_get("agent_reactions")?,
     })
 }
 
@@ -576,7 +581,10 @@ const PROFILE_COLS: &str = "instructions, model_pref, effort_pref, enabled_tools
          AND a.workspace_id = agent_profile.workspace_id) AS model_source, \
      (SELECT a.thread_reply_wake FROM agent a \
        WHERE a.member_id = agent_profile.agent_member_id \
-         AND a.workspace_id = agent_profile.workspace_id) AS thread_reply_wake";
+         AND a.workspace_id = agent_profile.workspace_id) AS thread_reply_wake, \
+     (SELECT a.agent_reactions FROM agent a \
+       WHERE a.member_id = agent_profile.agent_member_id \
+         AND a.workspace_id = agent_profile.workspace_id) AS agent_reactions";
 
 /// The agent's own `agent.model` + its workspace's `settings` — the two inputs
 /// the ADR-0131 D2 allow-list needs, read inside the transaction that is about

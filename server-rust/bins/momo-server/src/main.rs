@@ -481,6 +481,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         } else {
             None
         };
+    // #6067 (ADR-0200 증보 8 L7 5): the follow-up removal of the status eyes the notifier's two
+    // sweeps leave (the notifier has no reaction privilege). Its own two-connection `momo_app`
+    // pool; `start` refuses a role that bypasses row security.
+    let (stop_status_eyes, status_eyes_stop) = tokio::sync::watch::channel(false);
+    let status_eyes_pool = momo_db::connect(&momo_db::PoolConfig {
+        max_connections: 2,
+        ..config.db.clone()
+    })
+    .await?;
+    let status_eyes_task = momo_server::status_reaction_sweep::start(
+        std::sync::Arc::clone(&state.status_reaction_touched),
+        status_eyes_pool,
+        status_eyes_stop,
+    )
+    .await;
     let app = build_app(state);
 
     let address: SocketAddr = format!("{}:{}", config.host, config.port).parse()?;
@@ -504,6 +519,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         // most `batch` files); a file whose archive delete has not answered by the time the process
         // exits keeps its row (the savepoint is never committed), and the next process retries.
         let _ = stop_reclaim.send(true);
+        let _ = stop_status_eyes.send(true);
     })
     .await?;
     if let Some(task) = scheduler_task {
@@ -521,6 +537,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             .is_err()
         {
             tracing::warn!("the attachment reclaim tick did not stop within 35 seconds");
+        }
+    }
+    if let Some(task) = status_eyes_task {
+        if tokio::time::timeout(std::time::Duration::from_secs(10), task)
+            .await
+            .is_err()
+        {
+            tracing::warn!("the agent status eye follow-up removal did not stop within 10 seconds");
         }
     }
     Ok(())

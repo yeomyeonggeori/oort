@@ -122,6 +122,14 @@ pub async fn pending_jobs(
                 let claimed = claim_gateway_jobs_in_tx(conn, workspace_id, agent_id, limit)
                     .await
                     .map_err(momo_db::DbError::from)?;
+                // ADR-0200 증보 8 L3 (#6067): a lease handed back (or a job closed) — the eye of a run no
+                // longer taken comes off, in this tx.
+                momo_messaging::status_reaction::on_agent_jobs_released_in_tx(
+                    conn,
+                    workspace_id,
+                    agent_id,
+                )
+                .await?;
                 Ok(Ok(claimed
                     .into_iter()
                     .map(|job| AgentGatewayPendingJob {
@@ -193,9 +201,18 @@ pub async fn release_lease(
 
     let released = agent_tenant_tx(&state.pool, workspace_id, move |conn| {
         Box::pin(async move {
-            release_gateway_lease_in_tx(conn, workspace_id, agent_id, lease)
+            let released = release_gateway_lease_in_tx(conn, workspace_id, agent_id, lease)
                 .await
-                .map_err(momo_db::DbError::from)
+                .map_err(momo_db::DbError::from)?;
+            // ADR-0200 증보 8 L3 (#6067): a lease handed back (or a job closed) — the eye of a run no
+            // longer taken comes off, in this tx.
+            momo_messaging::status_reaction::on_agent_jobs_released_in_tx(
+                conn,
+                workspace_id,
+                agent_id,
+            )
+            .await?;
+            Ok(released)
         })
     })
     .await
@@ -402,6 +419,8 @@ pub(crate) async fn record_gateway_event_in_tx(
 
     if matches!(status, "running" | "thinking" | "streaming") {
         mark_run_started_in_tx(conn, run_id).await?;
+        // ADR-0200 증보 8 L3 (#6067): a start is a take.
+        momo_messaging::status_reaction::on_run_taken_in_tx(conn, workspace_id, run_id).await?;
 
         // …and the rail is told what the gateway is doing (goal
         // SRV-B3d). This is the projection Swift gets wrong: it
@@ -956,6 +975,8 @@ pub(crate) async fn complete_gateway_run_in_tx(
         })
     });
     finish_run_in_tx(conn, run_id, succeeded, &output, error_json.as_ref()).await?;
+    // ADR-0200 증보 8 L4 (#6067): the eye comes off, a success adds the check — same tx.
+    momo_messaging::status_reaction::on_run_terminal_in_tx(conn, workspace_id, run_id).await?;
 
     // 3b. …and the rail is told the turn is over (goal SRV-B3c).
     //

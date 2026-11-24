@@ -104,6 +104,7 @@ pub mod search;
 pub mod self_media;
 /// ADR-0177 / #1932 — member-owned sidebar sections (no outbox fan-out).
 pub mod sidebar_prefs;
+pub mod status_reaction;
 /// ADR-0201 증보 v3 B10 / #4966 — the team AI's aliases follow its display name
 /// (`sync_team_ai_aliases_in_tx`, migration 166).
 pub mod team_ai_alias;

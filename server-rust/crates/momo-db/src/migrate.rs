@@ -864,6 +864,10 @@ mod tests {
     /// requester immutable) and the nullable `work_item_id` on `agent_run`/`work_session` plus
     /// `agent_run`'s requester and on-behalf-of columns (a child run carries its parent's item).
     ///
+    /// 188 is #6067's agent status reaction (ADR-0200 증보 8): `agent.agent_reactions` (the
+    /// agent's narrowing value, NULL = follow the workspace), `agent_run.status_eye_attach_count`
+    /// (L3's per-run cap) and a partial index on the eye rows the api's follow-up removal starts
+    /// from. No new table, trigger, definer or grant.
     /// 188 is #6067's (landing order: it lands before 189). 189 is #6013's Agent Port picture road
     /// (ADR-0151 증보 10 P2 · P7): the RLS-FORCE table `agent_upload_token` (hash-only one-time upload
     /// tokens, **no foreign key in either direction**, the single-use guard trigger of 175, privileges for

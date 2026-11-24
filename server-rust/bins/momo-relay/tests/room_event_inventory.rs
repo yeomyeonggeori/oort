@@ -69,6 +69,8 @@ const SITES: &[Site] = &[
     // `reaction.<ReactionAction::as_wire_label>` and `message.<PinAction::as_wire_label>`.
     ("crates/momo-messaging/src/interaction.rs", "set_pin_in_tx", 1, &[("ch", "message.pinned"), ("ch", "message.unpinned")]),
     ("crates/momo-messaging/src/interaction.rs", "set_reaction_in_tx", 1, &[("ch", "reaction.added"), ("ch", "reaction.removed")]),
+    // ADR-0200 증보 8 (#6067): the server-derived status 👀/✅ — the same reaction frames.
+    ("crates/momo-messaging/src/status_reaction.rs", "announce", 1, &[("ch", "reaction.added"), ("ch", "reaction.removed")]),
     ("crates/momo-messaging/src/interaction.rs", "stream_message_body_in_tx", 1, &[("ch", "message.edited")]),
     ("crates/momo-messaging/src/member_rename.rs", "enqueue_member_renamed", 1, &[("ch", "member.renamed")]),
     ("crates/momo-messaging/src/message.rs", "finish_send_in_tx", 2, &[("ch", "message.new"), ("ch", "thread.updated")]),
