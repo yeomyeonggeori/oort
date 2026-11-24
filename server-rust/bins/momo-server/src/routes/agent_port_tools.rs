@@ -184,6 +184,16 @@ pub(crate) async fn tool_view_for(state: &AppState, caller: HostedCaller) -> Too
             ToolView::empty()
         }
     };
+    // ADR-0218 증보 13 §19 Y2.2 (#6069): the register tool is listed only while this agent's door is open
+    // (grant, workspace switch, server setting), read for every request. A call that arrives anyway is
+    // refused by the tool's own judgement with the one closed answer — hiding is not the boundary.
+    let view = if view.callable(momo_mcp::TOOL_EXPRESSION_REGISTER).is_some()
+        && !register_door_open(state, caller).await
+    {
+        view.hide(&[momo_mcp::TOOL_EXPRESSION_REGISTER])
+    } else {
+        view
+    };
     // ADR-0162 증보 8 R3 · ADR-0200 증보 8 L10 (#6068): the agent's own reaction is listed — and callable
     // — only while the narrower of the workspace's and the agent's setting is 「자유롭게」. Read for
     // every request, so lowering the setting closes the next call; a read that fails closes it too.
@@ -194,6 +204,63 @@ pub(crate) async fn tool_view_for(state: &AppState, caller: HostedCaller) -> Too
         return view.without(&momo_mcp::AGENT_REACTION_TOOLS);
     }
     view
+}
+
+/// Whether `oort_expression_register`'s door is open for this caller right now (ADR-0218 증보 13 §19 Y2.4
+/// 1 ~ 5, 7): the listing's question and the 2 MiB body budget's (Y2.2 「큰 본문을 읽기 전에」). A failed
+/// read is closed. Writes nothing.
+pub(crate) async fn register_door_open(state: &AppState, caller: HostedCaller) -> bool {
+    let server_setting_on = crate::routes::expressions::agent_keys(state);
+    let read = momo_db::with_tenant_tx(&state.pool, caller.workspace_id, move |conn| {
+        Box::pin(async move {
+            let identity =
+                match authorize_in_tx(conn, caller, momo_auth::SCOPE_WORKSPACE_PROPOSE).await? {
+                    Ok(identity) => identity,
+                    Err(_) => return Ok(false),
+                };
+            momo_expressions::self_register::standing_unlocked_in_tx(
+                conn,
+                register_caller(caller, &identity),
+                server_setting_on,
+            )
+            .await
+            .map(|standing| standing.is_ok())
+            .map_err(expression_db_error)
+        })
+    })
+    .await;
+    match read {
+        Ok(open) => open,
+        Err(error) => {
+            tracing::error!(
+                error = %error,
+                route = "/v1/mcp/agent-port",
+                "Agent Port expression register door resolution failed"
+            );
+            false
+        }
+    }
+}
+
+fn register_caller(
+    caller: HostedCaller,
+    identity: &HostedToolIdentity,
+) -> momo_expressions::self_register::Caller {
+    momo_expressions::self_register::Caller {
+        workspace: caller.workspace_id,
+        agent: caller.agent_member_id,
+        connection: identity.connection_id,
+        token: caller.token_id,
+    }
+}
+
+/// A `momo_expressions::Error` inside a tool's own transaction: the database's own error, or (never
+/// expected on these paths) a domain error turned into a database one so the transaction rolls back.
+fn expression_db_error(error: momo_expressions::Error) -> DbError {
+    match error {
+        momo_expressions::Error::Db(error) => error,
+        other => DbError::from(momo_db::sqlx::Error::Protocol(other.to_string())),
+    }
 }
 
 /// Whether the caller's effective agent reaction setting is 「자유롭게」 (ADR-0200 증보 8 L10: the
@@ -315,6 +382,9 @@ pub(crate) async fn execute(
         momo_mcp::TOOL_PICTURE_UPLOAD_BEGIN => {
             picture_upload_begin(state, caller, &call.arguments).await
         }
+        momo_mcp::TOOL_EXPRESSION_REGISTER => {
+            expression_register(state, caller, &call.arguments).await
+        }
         momo_mcp::TOOL_REACTION_SET => reaction_set(state, caller, &call.arguments).await,
         momo_mcp::TOOL_EXPRESSION_NAMES => expression_names(state, caller, &call.arguments).await,
         _ => Err(ToolFailure::InvalidArguments),
@@ -329,6 +399,169 @@ pub(crate) async fn execute(
             failure.trace_reason(),
         ),
     }
+}
+
+// ---------------------------------------------------------------------------
+// oort_expression_register (ADR-0218 증보 13 §19, #6069)
+// ---------------------------------------------------------------------------
+
+fn register_refusal(refusal: momo_expressions::self_register::Refusal) -> ToolFailure {
+    use momo_expressions::self_register::Refusal;
+    use momo_mcp::RegisterRefusal as Wire;
+    ToolFailure::RegisterRefused(match refusal {
+        Refusal::NotAllowed(_) => Wire::NotAllowed,
+        Refusal::DailyCap => Wire::DailyCap,
+        Refusal::AttemptCap => Wire::AttemptCap,
+        Refusal::PeriodCap => Wire::PeriodCap,
+        Refusal::StoreCap => Wire::StoreCap,
+        Refusal::MediaInvalid => Wire::MediaInvalid,
+        Refusal::NameReserved => Wire::NameReserved,
+        Refusal::Quota => Wire::Quota,
+        Refusal::InFlight => Wire::InFlight,
+        Refusal::InvalidArguments => return ToolFailure::InvalidArguments,
+    })
+}
+
+/// `oort_expression_register` — ONE team expression an approved agent made itself, without a card.
+///
+/// 1. the arguments' own shape (closed keys by the schema; the name rule; strict base64 within 1 MiB) —
+///    nothing counted, nothing written;
+/// 2. **first transaction**: the connection and `workspace:propose`, then
+///    [`momo_expressions::self_register::begin_in_tx`] — the standing (grant · switch · server setting ·
+///    granter · agent · connection pin), a replay of the same `clientRequestId`, the ceilings **before the
+///    decoder** and a `pending` row that counts as an attempt;
+/// 3. the decode, outside any transaction (D2), through the same re-encoding as every road;
+/// 4. **second transaction**: [`momo_expressions::self_register::finish_in_tx`] — everything again under
+///    the agent's lock, then the registration and the settled row.
+///
+/// No message, run, card, approval or DM is written (Y2.3 「등록은 메시지를 쓰지 않는다」).
+async fn expression_register(
+    state: &AppState,
+    caller: HostedCaller,
+    arguments_value: &Value,
+) -> Result<Value, ToolFailure> {
+    use base64::Engine as _;
+    use momo_expressions::media;
+    use momo_expressions::self_register::{self, Begin, Prepared, Refusal};
+
+    let started = std::time::Instant::now();
+    let args = arguments(arguments_value)?;
+    let client_request_id = required_uuid(args, "clientRequestId")?;
+    let name = required_str(args, "name", 30)?.to_string();
+    let display_name = required_str(args, "displayName", 160)?.to_string();
+    let tags: Vec<String> = match args.get("tags") {
+        Some(Value::Array(items)) => items
+            .iter()
+            .map(|item| item.as_str().map(str::to_string))
+            .collect::<Option<Vec<_>>>()
+            .ok_or(ToolFailure::InvalidArguments)?,
+        _ => return Err(ToolFailure::InvalidArguments),
+    };
+    let image = args
+        .get("image")
+        .and_then(Value::as_object)
+        .ok_or(ToolFailure::InvalidArguments)?;
+    if image.get("source").and_then(Value::as_str) != Some("generated") {
+        return Err(ToolFailure::InvalidArguments);
+    }
+    let data = image
+        .get("dataBase64")
+        .and_then(Value::as_str)
+        .ok_or(ToolFailure::InvalidArguments)?;
+    let prompt = image
+        .get("prompt")
+        .and_then(Value::as_str)
+        .filter(|prompt| momo_expressions::action::valid_prompt(prompt))
+        .ok_or(ToolFailure::InvalidArguments)?
+        .to_string();
+    let meta = momo_expressions::Metadata {
+        name,
+        display_name,
+        tags,
+        subject_member_id: None,
+    };
+    // The name rule and the tags, before anything is counted (a reserved standard name is the library's
+    // own refusal, judged with the permanent names in the second transaction).
+    if let Err(momo_expressions::Error::Invalid) = meta.validate() {
+        return Err(ToolFailure::InvalidArguments);
+    }
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(data)
+        .map_err(|_| ToolFailure::InvalidArguments)?;
+    if bytes.len() > self_register::PICTURE_BYTES {
+        return Err(ToolFailure::InvalidArguments);
+    }
+    let server_setting_on = crate::routes::expressions::agent_keys(state);
+
+    let begun = momo_db::with_tenant_tx(&state.pool, caller.workspace_id, move |conn| {
+        Box::pin(async move {
+            let identity =
+                match authorize_in_tx(conn, caller, momo_auth::SCOPE_WORKSPACE_PROPOSE).await? {
+                    Ok(identity) => identity,
+                    Err(failure) => return Ok(Err(failure)),
+                };
+            let who = register_caller(caller, &identity);
+            let begun = self_register::begin_in_tx(conn, who, client_request_id, server_setting_on)
+                .await
+                .map_err(expression_db_error)?;
+            Ok(Ok((who, begun)))
+        })
+    })
+    .await
+    .map_err(|error| internal("agent_port.expression_register", error))??;
+    let (who, begun) = begun;
+    let call = match begun {
+        Begin::Refused(refusal) | Begin::Replay(Err(refusal)) => {
+            return Err(register_refusal(refusal))
+        }
+        Begin::Replay(Ok(expression_id)) => {
+            return Ok(json!({"expressionId": expression_id, "replayed": true}))
+        }
+        Begin::Proceed { call } => call,
+    };
+
+    // The decode, outside any transaction (D2). The bytes decide the format, never the declared mime.
+    let remaining = momo_expressions::action::PREPARE_DEADLINE.saturating_sub(started.elapsed());
+    let picture = if media::sniff(&bytes) != media::Sniffed::Image {
+        Err(Refusal::MediaInvalid)
+    } else {
+        match media::process_waiting(bytes, remaining, state.expression_rendition_table).await {
+            Ok(processed) => Ok(Prepared {
+                meta,
+                prompt,
+                media: processed,
+            }),
+            // Both decoder slots taken: the server's state, not the picture's. The attempt never
+            // reached the decoder, so its row goes and nothing is counted.
+            Err(media::Rejected::Busy) => {
+                let forgot =
+                    momo_db::with_tenant_tx(&state.pool, caller.workspace_id, move |conn| {
+                        Box::pin(async move {
+                            self_register::forget_unreached_in_tx(conn, who, call)
+                                .await
+                                .map_err(expression_db_error)
+                        })
+                    })
+                    .await;
+                if let Err(error) = forgot {
+                    tracing::warn!(error = %error, "agent port register: busy attempt row not removed");
+                }
+                return Err(ToolFailure::Unavailable);
+            }
+            Err(_) => Err(Refusal::MediaInvalid),
+        }
+    };
+
+    let finished = momo_db::with_tenant_tx(&state.pool, caller.workspace_id, move |conn| {
+        Box::pin(async move {
+            self_register::finish_in_tx(conn, who, call, server_setting_on, picture)
+                .await
+                .map_err(expression_db_error)
+        })
+    })
+    .await
+    .map_err(|error| internal("agent_port.expression_register", error))?;
+    finished.map_err(register_refusal)
 }
 
 // ---------------------------------------------------------------------------
@@ -413,6 +646,9 @@ async fn record_liveness(
         // opened it, a limit was reached): it says nothing about the CONNECTION, and recording
         // it would turn the connection `error` for a person reading the connection card.
         Err(_) if tool == momo_mcp::TOOL_ACTION_INITIATE => return,
+        // Same for the register door (ADR-0218 증보 13 §19, #6069): a closed grant, a ceiling or a refused
+        // picture is the door doing its job, not the connection failing.
+        Err(_) if tool == momo_mcp::TOOL_EXPRESSION_REGISTER => return,
         // Same for the agent's own reaction (ADR-0162 증보 8): a refused message, emoji, limit or run is
         // the door doing its job, not the connection failing.
         Err(_) if momo_mcp::AGENT_REACTION_TOOLS.contains(&tool) => return,

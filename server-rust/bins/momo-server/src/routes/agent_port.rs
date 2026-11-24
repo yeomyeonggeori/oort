@@ -108,6 +108,7 @@ pub async fn post(State(state): State<AppState>, request: Request) -> Response {
         match declared_name.value() {
             Some(momo_mcp::TOOL_ACTION_PROPOSE) => Some(momo_mcp::TOOL_ACTION_PROPOSE),
             Some(momo_mcp::TOOL_EXPRESSION_ASSEMBLE) => Some(momo_mcp::TOOL_EXPRESSION_ASSEMBLE),
+            Some(momo_mcp::TOOL_EXPRESSION_REGISTER) => Some(momo_mcp::TOOL_EXPRESSION_REGISTER),
             _ => None,
         }
     } else {
@@ -137,7 +138,31 @@ pub async fn post(State(state): State<AppState>, request: Request) -> Response {
                                 .iter()
                                 .any(|scope| scope == momo_auth::SCOPE_WORKSPACE_PROPOSE)
                         {
-                            body_cap = momo_mcp::MAX_EXPRESSION_REQUEST_BYTES;
+                            body_cap = if declared_large_tool
+                                == Some(momo_mcp::TOOL_EXPRESSION_REGISTER)
+                            {
+                                // ADR-0218 증보 13 §19 Y2.2 (#6069): 2 MiB, and only once the door is
+                                // judged open for this agent — the grant, the switch and the server
+                                // setting — before a byte of the big body is read.
+                                let open = match crate::routes::agent_port_tools::HostedCaller::from_principal(
+                                    &principal,
+                                ) {
+                                    Some(caller) => {
+                                        crate::routes::agent_port_tools::register_door_open(
+                                            &state, caller,
+                                        )
+                                        .await
+                                    }
+                                    None => false,
+                                };
+                                if open {
+                                    momo_mcp::MAX_REGISTER_REQUEST_BYTES
+                                } else {
+                                    momo_mcp::MAX_BODY_BYTES
+                                }
+                            } else {
+                                momo_mcp::MAX_EXPRESSION_REQUEST_BYTES
+                            };
                         }
                         AgentPortAdmission::Allowed(principal)
                     }

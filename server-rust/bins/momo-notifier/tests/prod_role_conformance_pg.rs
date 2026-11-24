@@ -1988,7 +1988,8 @@ async fn the_other_runtime_roles_reach_every_table_the_migrations_created() {
     // `self_media_token` (#4820 C2a L6 lockdown, see below), `team_ai_task` (#4967 r1 M1
     // lockdown, see below), `attachment_media` (#4673 C5 lockdown, see below),
     // `attachment_write_token` (#5371 lockdown, see below), `agent_picture_mark` (#5530 lockdown, see
-    // below), `agent_upload_token` (#6013 lockdown, see below) and the four `expression_set*` tables (#5459 S1a lockdown, see below) are the only tables
+    // below), `agent_upload_token` (#6013 lockdown, see below), the two `expression_agent_*` tables (#6069
+    // lockdown, measured by `expression_self_register_pg::only_the_api_holds_the_grant_tables`) and the four `expression_set*` tables (#5459 S1a lockdown, see below) are the only tables
     // outside the rule; everything else must be readable and writable by the three ALL-TABLES roles.
     let missing: Vec<String> = sqlx::query_scalar(
         "SELECT format('%s:%s:%s', r.rolname, c.relname, p.priv) \
@@ -2005,6 +2006,7 @@ async fn the_other_runtime_roles_reach_every_table_the_migrations_created() {
             AND c.relname <> 'attachment_write_token' \
             AND c.relname <> 'agent_picture_mark' \
             AND c.relname <> 'agent_upload_token' \
+            AND c.relname NOT IN ('expression_agent_grant', 'expression_agent_call') \
             AND c.relname NOT LIKE 'expression\\_set%' \
             AND NOT has_table_privilege(r.rolname, c.oid, p.priv) \
           ORDER BY 1",

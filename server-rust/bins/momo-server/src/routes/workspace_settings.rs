@@ -188,6 +188,16 @@ pub async fn patch(
             "agent_reactions can only be changed from a person's app session",
         ));
     }
+    // ADR-0218 증보 13 §19 Y3 (#6069): the same rule for the switch over every agent's own expressions.
+    if request
+        .get(momo_settings::AGENT_SELF_EXPRESSIONS_SETTING)
+        .is_some()
+        && full_person_session.is_none()
+    {
+        return Err(ApiError::forbidden(
+            "agent_self_expressions can only be changed from a person's app session",
+        ));
+    }
     let include_status = wants_limits_status(&query)?;
     // ADR-0201 증보 v3 B3 (#5040): a screen may carry the consent record of the 「공급자로 가는
     // 내용」 line on the PATCH it already sends. It is a record, not a setting — so it is taken out

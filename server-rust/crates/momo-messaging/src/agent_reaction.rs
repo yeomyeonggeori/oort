@@ -81,10 +81,11 @@ pub const STATUS_LIKE_EMOJI: [&str; 14] = [
 ];
 
 /// The one definition of "an expression an agent may react with", over a row aliased `e` (R6 · R10).
-/// Today: active (a hidden or deleted one is neither listed nor usable). ADR-0218 증보 13 §19 adds the
-/// card-less registrations (an `expression.grant_id`, #6069): that clause goes **here** and both the
-/// name list and the add path follow it.
-pub const AGENT_USABLE_EXPRESSION: &str = "e.status = 'active'";
+/// Active (a hidden or deleted one is neither listed nor usable), and not registered without a card
+/// (ADR-0218 증보 13 §19 Y2.5 · ADR-0162 증보 8 R6 3 · RA4 · RA8, #6069: a row with an
+/// `expression.grant_id` is one nobody looked at before it was saved). Both the name list and the add
+/// path follow this one clause.
+pub const AGENT_USABLE_EXPRESSION: &str = "e.status = 'active' AND e.grant_id IS NULL";
 
 /// NFC, then without U+FE0F / U+FE0E: two spellings of one emoji fold to one string.
 pub fn fold_emoji(raw: &str) -> String {

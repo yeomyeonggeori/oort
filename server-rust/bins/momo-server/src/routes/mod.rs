@@ -60,6 +60,7 @@ pub mod dms;
 pub mod ephemeral;
 /// #1222 — 이벤트 구독: what leaves the workspace, and who said it could.
 pub mod event_subscriptions;
+pub mod expression_grants;
 pub mod expression_photo;
 pub mod expressions;
 pub mod github_app;

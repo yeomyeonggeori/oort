@@ -43,6 +43,8 @@ pub use tools::{
 pub use tools::{
     ATTACHMENT_NOT_LINKABLE, MAX_MESSAGE_PICTURES, PICTURE_LIMIT_REACHED, TOOL_PICTURE_UPLOAD_BEGIN,
 };
+// #6069 (ADR-0218 증보 13 §19, ADR-0162 D3): the register tool, its refusal words and its body budget.
+pub use tools::{RegisterRefusal, TOOL_EXPRESSION_REGISTER};
 // #6068 (ADR-0162 증보 8): the agent's own reaction and the expression names it may use.
 pub use tools::{
     ReactionRefusal, AGENT_REACTION_TOOLS, MAX_REACTION_EMOJI_BYTES, REACTION_REFUSAL_REASONS,
@@ -111,6 +113,16 @@ fn mentions(body: &[u8], needle: &str) -> bool {
 /// `expression.create`'s, it is that one tool's budget and no wider limit: the base64 bound
 /// applies only under the `dataBase64` key of a call that parses as exactly this tool.
 pub const MAX_ASSEMBLE_BASE64_BYTES: usize = 5_592_408;
+
+/// ADR-0218 증보 13 §19 Y2.2 (#6069): `oort_expression_register` carries ONE generated picture of at most
+/// 1 MiB (base64, [`MAX_EXPRESSION_BASE64_BYTES`]) and its envelope — a 2 MiB budget of that one tool.
+pub const MAX_REGISTER_REQUEST_BYTES: usize = 2 * 1024 * 1024;
+
+/// Is `request` (already parsed) a `tools/call` of `oort_expression_register`?
+pub fn is_expression_register_call(request: &Value) -> bool {
+    request.get("method").and_then(Value::as_str) == Some("tools/call")
+        && request.pointer("/params/name").and_then(Value::as_str) == Some(TOOL_EXPRESSION_REGISTER)
+}
 
 /// Is `request` (already parsed) a `tools/call` of `oort_expression_assemble`?
 pub fn is_expression_assemble_call(request: &Value) -> bool {
@@ -658,7 +670,8 @@ fn dispatch_inner(
     if past_standard_limit
         && (request.body.len() > MAX_EXPRESSION_REQUEST_BYTES
             || !(mentions_expression_create(request.body)
-                || mentions(request.body, TOOL_EXPRESSION_ASSEMBLE)))
+                || mentions(request.body, TOOL_EXPRESSION_ASSEMBLE)
+                || mentions(request.body, TOOL_EXPRESSION_REGISTER)))
     {
         return error(
             413,
@@ -694,7 +707,10 @@ fn dispatch_inner(
     };
     let expression_budget = is_expression_create_call(&value);
     let assemble_budget = is_expression_assemble_call(&value);
-    if past_standard_limit && !(expression_budget || assemble_budget) {
+    // #6069: the register tool's own 2 MiB, never the 6 MiB of the two above.
+    let register_budget =
+        is_expression_register_call(&value) && request.body.len() <= MAX_REGISTER_REQUEST_BYTES;
+    if past_standard_limit && !(expression_budget || assemble_budget || register_budget) {
         return error(
             413,
             Value::Null,
@@ -705,7 +721,7 @@ fn dispatch_inner(
     }
     if let Err(message) = validate_bounds(
         &value,
-        if expression_budget {
+        if expression_budget || register_budget {
             MAX_EXPRESSION_BASE64_BYTES
         } else if assemble_budget {
             MAX_ASSEMBLE_BASE64_BYTES

@@ -339,6 +339,18 @@ pub(crate) async fn draft_json(conn: &mut PgConnection, row: &PgRow) -> Result<V
     Ok(v)
 }
 pub(crate) async fn expression_json(conn: &mut PgConnection, row: &PgRow) -> Result<Value, Error> {
+    expression_json_keyed(conn, row, false).await
+}
+/// [`expression_json`], and — only when `agent_keys` — the two optional keys of ADR-0218 §19 Y2.5:
+/// `proposedBy` (the agent that proposed it, card or not) and `selfRegistered: true` (registered without
+/// a card). The flag is the server setting §20 Z2-7 names (`EXPRESSION_RENDITION_TABLE`), and it is read
+/// **at response time only**: every stored copy (a draft's receipt, a card's result) stays key-free, so
+/// turning the setting off takes the keys out of every answer again (Y8).
+pub(crate) async fn expression_json_keyed(
+    conn: &mut PgConnection,
+    row: &PgRow,
+    agent_keys: bool,
+) -> Result<Value, Error> {
     let ws: Uuid = row.try_get("workspace_id")?;
     let id: Uuid = row.try_get("id")?;
     let status: String = row.try_get("status")?;
@@ -350,6 +362,15 @@ pub(crate) async fn expression_json(conn: &mut PgConnection, row: &PgRow) -> Res
         "origin":origin_json(row)?,"createdBy":row.try_get::<Uuid,_>("created_by")?,"createdAtMs":created.timestamp_millis(),"status":status,
         "kind":row.try_get::<String,_>("kind")?,
         "media":if status=="active" {media_json(conn,ws,id,false).await?} else {Value::Null}}).as_object().ok_or(Error::Invalid)?.clone());
+    if agent_keys {
+        let object = v.as_object_mut().ok_or(Error::Invalid)?;
+        if let Some(agent) = row.try_get::<Option<Uuid>, _>("proposed_by")? {
+            object.insert("proposedBy".into(), json!(agent));
+        }
+        if row.try_get::<Option<Uuid>, _>("grant_id")?.is_some() {
+            object.insert("selfRegistered".into(), json!(true));
+        }
+    }
     Ok(v)
 }
 
@@ -727,6 +748,16 @@ pub async fn activate(pool: &PgPool, actor: Actor, choice: Choice) -> Result<Val
 }
 
 pub async fn list(pool: &PgPool, actor: Actor, since: Option<String>) -> Result<Value, Error> {
+    list_with(pool, actor, since, false).await
+}
+
+/// [`list`] with the agent keys of §19 Y2.5 when `agent_keys` (see [`expression_json_keyed`]).
+pub async fn list_with(
+    pool: &PgPool,
+    actor: Actor,
+    since: Option<String>,
+    agent_keys: bool,
+) -> Result<Value, Error> {
     let since = since.map(|s| version(&s)).transpose()?;
     transaction(pool,actor,move|conn|Box::pin(async move {
         // Every writer holds this same lock: catalog/items/media share a snapshot
@@ -738,7 +769,7 @@ pub async fn list(pool: &PgPool, actor: Actor, since: Option<String>) -> Result<
         if rows.len()>1000 {reset=true;}
         if reset {rows=sqlx::query("SELECT * FROM expression WHERE workspace_id=$1 AND status='active' ORDER BY name,id LIMIT 1000").bind(actor.workspace).fetch_all(&mut *conn).await?;}
         let mut items=Vec::with_capacity(rows.len());
-        for row in rows {items.push(expression_json(conn,&row).await?);}
+        for row in rows {items.push(expression_json_keyed(conn,&row,agent_keys).await?);}
         Ok(json!({"workspaceId":actor.workspace,"version":v.to_string(),"baseVersion":if reset {None}else{since.map(|s|s.to_string())},"reset":reset,"addPolicy":policy,"items":items}))
     })).await
 }
@@ -749,6 +780,18 @@ pub async fn mutate(
     id: Uuid,
     patch: Option<Patch>,
     report: Option<Report>,
+) -> Result<Value, Error> {
+    mutate_with(pool, actor, id, patch, report, false).await
+}
+
+/// [`mutate`] with the agent keys of §19 Y2.5 in its answer when `agent_keys`.
+pub async fn mutate_with(
+    pool: &PgPool,
+    actor: Actor,
+    id: Uuid,
+    patch: Option<Patch>,
+    report: Option<Report>,
+    agent_keys: bool,
 ) -> Result<Value, Error> {
     if let Some(p) = &patch {
         p.validate()?;
@@ -791,7 +834,7 @@ pub async fn mutate(
             if next=="deleted" {sqlx::query("DELETE FROM expression_image WHERE workspace_id=$1 AND expression_id=$2").bind(actor.workspace).bind(id).execute(&mut *conn).await?;}
             (row,v)
         }else{(row,old_v)};
-        Ok(json!({"workspaceId":actor.workspace,"version":v.to_string(),"expression":expression_json(conn,&row).await?}))
+        Ok(json!({"workspaceId":actor.workspace,"version":v.to_string(),"expression":expression_json_keyed(conn,&row,agent_keys).await?}))
     })).await
 }
 
