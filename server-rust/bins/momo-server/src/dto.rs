@@ -5205,6 +5205,25 @@ pub struct AgentProfileInput {
     /// (a new agent starts with the column's default, on).
     #[serde(default, alias = "thread_reply_wake")]
     pub thread_reply_wake: Option<bool>,
+    /// ADR-0200 증보 8 L10 (#6067): on a profile PUT, the agent's own reaction switch — one of
+    /// `off` · `status` · `free`, or `null` to follow the workspace again; absent leaves it
+    /// unchanged. Stored as sent (a value wider than the workspace's is kept and read narrowed).
+    /// Ignored on create. Taken only from a person's full app session.
+    #[serde(
+        default,
+        alias = "agent_reactions",
+        deserialize_with = "present_or_null"
+    )]
+    pub agent_reactions: Option<Option<String>>,
+}
+
+/// A field that tells "absent" (`None`, via `#[serde(default)]`) from "explicitly null"
+/// (`Some(None)`).
+fn present_or_null<'de, D>(deserializer: D) -> Result<Option<Option<String>>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    Ok(Some(Option::<String>::deserialize(deserializer)?))
 }
 
 /// `POST /v1/workspaces/{ws}/subscription-agents/register` (#3392 AIH-2,

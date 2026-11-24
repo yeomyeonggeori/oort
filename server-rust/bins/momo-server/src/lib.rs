@@ -55,6 +55,7 @@ pub mod routes;
 /// ADR-0208 D5/D7 — the scheduled-message tick that lives in the api process.
 pub mod scheduler;
 mod session_end;
+pub mod status_reaction_sweep;
 pub mod work_host_auth;
 
 pub use realtime_advert::{
@@ -264,6 +265,10 @@ pub struct AppState {
     /// state built by [`AppState::new`], so a test drives `attachment_reclaim::sweep_once`
     /// explicitly.
     pub attachment_reclaim_touched: Arc<attachment_reclaim::TouchedWorkspaces>,
+    /// ADR-0200 증보 8 L7 5 (#6067): the workspaces this process has served an authenticated
+    /// request for since it started — filled by `auth::require_principal` from the credential's own
+    /// workspace, read by the agent status eye follow-up removal ([`status_reaction_sweep`]).
+    pub status_reaction_touched: Arc<status_reaction_sweep::StatusReactionTouched>,
     /// ADR-0146 개정 2026-09-28 (#3022): the instance id signed statements echo
     /// and the (default-off) host-registration signature requirement.
     pub device_keys: Arc<DeviceKeySettings>,
@@ -422,6 +427,9 @@ impl AppState {
             scheduler: Arc::new(SchedulerSettings::default()),
             scheduler_blocked: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             attachment_reclaim_touched: Arc::new(attachment_reclaim::TouchedWorkspaces::default()),
+            status_reaction_touched: Arc::new(
+                status_reaction_sweep::StatusReactionTouched::default(),
+            ),
             device_keys: Arc::new(DeviceKeySettings::default()),
             cloud_box: Arc::new(CloudBoxConfig::default()),
             cors: Arc::new(CorsConfig::default()),

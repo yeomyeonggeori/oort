@@ -760,6 +760,8 @@ pub async fn require_principal(
     if let Some(claimed_workspace) = agent_bearer_workspace_id(&raw_token) {
         let principal =
             authenticate_agent(&state, &raw_token, claimed_workspace, &method, &path).await?;
+        // #6067 (ADR-0200 증보 8 L7 5): the credential's own workspace, after authentication.
+        state.status_reaction_touched.touch(principal.workspace_id);
         let agent = principal.member_id;
         request.extensions_mut().insert(principal);
         return Ok(momo_db::tenant::REQUEST_AGENT_MEMBER
@@ -866,6 +868,8 @@ pub async fn require_principal(
             request.extensions_mut().insert(FullPersonSession);
         }
     }
+    // #6067 (ADR-0200 증보 8 L7 5): the credential's own workspace, after the token was found live.
+    state.status_reaction_touched.touch(principal.workspace_id);
     let kind = principal.kind;
     let member_id = principal.member_id;
     request.extensions_mut().insert(principal);
