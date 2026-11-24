@@ -655,6 +655,7 @@ owner 물음 「우리 저 부분 디자인 시스템에서 컴포넌트로 구�
 | 몸 | `px-4 pt-4 pb-2`, 스크롤 상자. 몸 폭이 `@xl`(36rem) 이상이면 두 열(`gap-x-6`), 아니면 한 열 — 좁은 창과 큰 글자(200%)에서 한 열로 접힌다. 묶음은 차례를 지키며 앞에서부터 왼쪽 열을 채우다 절반(줄 + 머리)에 닿으면 오른쪽으로 간다. 묶음 사이 16(`gap-4`) |
 | 묶음 머리 | `h2`, `text-meta font-semibold text-ink-muted`, `px-2 pb-1`. **선이 아니라 이 머리와 여백이 묶음을 가른다** — 창 안에 위 · 아래 테두리는 찾기 칸 하나뿐이다 |
 | 줄 | `min-h-control`(32) · `px-2 py-1` · `gap-3` · `rounded-md`(10). 설명 `text-label text-ink`(줄바꿈 허용, 말줄임 없음), 키캡은 `Keycaps variant="inline"`. 가리킨 줄만 `hover:bg-surface-hover`. 줄 사이 선 없음 |
+| 키캡 | 공용 `Keycaps`(같은 파일, ⌘K 팔레트 · 작성창 자동완성 · 설정 › 단축키가 같이 쓴다): 상자 `rounded-sm bg-muted-soft px-2 font-mono text-meta text-ink`, 줄 바꿈 없음. 세로 여백만 갈린다: 정의 목록처럼 키캡이 줄 높이를 정해도 되는 자리는 `block`(`py-1`, 26), 글줄에 얹히는 자리는 `inline`(`py-px`, 20 — 줄상자 안에 든다). 이 창의 줄과 바닥 문장은 `inline` 이다. 키 글자는 `keyboardShortcuts.ts` 의 `keycaps` 정본에서만 온다 |
 | 바닥 | `px-4 pt-2 pb-4`, 양 끝 정렬(좁으면 감김). 왼쪽 `Button variant="ghost" size="sm"` 「단축키 바꾸기」 + `ArrowRight`(설정 › 단축키로, 이미 설정 안이면 기록을 쌓지 않는다). 오른쪽 `text-meta text-ink-muted` 「[?]로 다시 열 수 있어요」, 키캡은 사전 문장의 `{key}` 자리에 선다 |
 
 기계: `ShortcutHelpDialog.test.tsx`(찾기 · 빈 상태 · 첫 캐럿 · 설정으로 가기), `clients/web/scripts/capture-6081.mjs`(Chromium 배율 2 · 밝게 · 어둡게: 폭 1280 · 720 에서 창 640 · 두 열, 390 · 글자 200% 에서 한 열, 가로 넘침 0, 선 0, 잘린 글 0, 한글 조합 중 거르기, 가리킨 줄만 바탕).
