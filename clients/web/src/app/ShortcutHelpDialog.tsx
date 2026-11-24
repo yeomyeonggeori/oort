@@ -160,9 +160,12 @@ function ShortcutHelpBody({
             aria-hidden="true"
             className="pointer-events-none absolute start-3 top-1/2 size-4 -translate-y-1/2 text-ink-muted"
           />
+          {/* 글 칸에 찾기 역할만 준다: type="search" 는 엔진이 제 색(파랑)의 지우기 X 를 그려 시안 밖 색이 서고,
+              Esc 가 칸 비우기와 창 닫기를 한 번에 한다. 이 창의 Esc 는 닫기 하나다. */}
           <Input
             ref={searchRef}
-            type="search"
+            type="text"
+            role="searchbox"
             value={query}
             onChange={(event) => setQuery(event.target.value)}
             aria-label={searchLabel}
