@@ -14,6 +14,12 @@ import { koreanLocaleForTest } from "@/i18n/koreanLocaleForTest";
 import type { AppLocale } from "@/i18n/localeStore";
 import { rememberSettledApproval, resetSettledApprovalsForTest } from "@/features/timeline/settledApprovals";
 import { InboxDetail } from "./InboxDetail";
+import { catalog as koCatalog } from "@momo/core/i18n/generated/ko-KR";
+import { createMessageCopy } from "@momo/core/testkit";
+
+// 낱말은 사전에 있다(#6045). 시험은 한국어 생성물로 풀어 예전과 같은 문장을 그대로 단정한다.
+const koCopy = createMessageCopy({ messageLocale: "ko-KR", catalog: koCatalog });
+
 
 // =============================================================================
 // 받은함 오른쪽 칸의 「처리할 일」: 카드로 보내는 승인 (#5462, planner 2026-11-07).
@@ -86,7 +92,7 @@ function entryFor(
     expiresAtMs: NOW + 600_000,
     ...(decisionMode === undefined ? {} : { decisionMode }),
   };
-  const entry = taskEntry(approvalItem(approval, AGENT, "#emoji", NOW), NOW);
+  const entry = taskEntry(koCopy, approvalItem(koCopy, approval, AGENT, "#emoji", NOW), NOW);
   if (entry === null) throw new Error("대기 중인 승인은 처리할 일이 된다");
   return entry;
 }

@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest";
 import type { AgentLivenessState, RosterMember } from "../../lib/api";
 import { livenessView } from "../agents/liveness";
 import {
-  AGENT_HOST_ONLINE_LABEL,
   MAC_HOST_OFF_LABEL,
   MAC_HOST_ON_LABEL,
   agentDotTone,
@@ -15,6 +14,12 @@ import {
   withOwnConnection,
   type StatusDotTone,
 } from "./statusDot";
+
+import { catalog as koCatalog } from "../../i18n/generated/ko-KR";
+import { createMessageCopy } from "../../testkit";
+
+// 낱말은 사전에 있다(#6045). 시험은 한국어 생성물로 풀어 예전과 같은 문장을 그대로 단정한다.
+const ko = createMessageCopy({ messageLocale: "ko-KR", catalog: koCatalog });
 
 const NOW = 1_800_000_000_000;
 
@@ -134,24 +139,23 @@ describe("작업 목록 세션 줄의 맥 점 (#5593)", () => {
 
 describe("생존 판정이 없는 에이전트: 호스트 연결 폴백", () => {
   it("닿아 있을 때만 초록 점이다", () => {
-    expect(agentHostDot(true)).toEqual({ tone: "ok", label: AGENT_HOST_ONLINE_LABEL });
-    expect(AGENT_HOST_ONLINE_LABEL).toBe("연결됨");
+    expect(agentHostDot(ko, true)).toEqual({ tone: "ok", label: "연결됨" });
   });
 
   it("닿아 있지 않거나 모르면 점이 없다 — 근거 없는 회색 오프라인 점을 만들지 않는다", () => {
-    expect(agentHostDot(false)).toBeNull();
-    expect(agentHostDot(undefined)).toBeNull();
+    expect(agentHostDot(ko, false)).toBeNull();
+    expect(agentHostDot(ko, undefined)).toBeNull();
   });
 });
 
 describe("사람: 선언 상태가 먼저이고, 선언이 없으면 접속 여부가 정한다 (#4692)", () => {
   it("자리 비움은 warn, 방해 금지는 danger — 접속 여부와 무관하다(선언이 이긴다)", () => {
     for (const online of [undefined, true, false]) {
-      expect(humanPresenceDot({ presenceStatus: "away", online }, NOW)).toEqual({
+      expect(humanPresenceDot(ko, { presenceStatus: "away", online }, NOW)).toEqual({
         tone: "warn",
         label: "자리 비움",
       });
-      expect(humanPresenceDot({ presenceStatus: "dnd", online }, NOW)).toEqual({
+      expect(humanPresenceDot(ko, { presenceStatus: "dnd", online }, NOW)).toEqual({
         tone: "danger",
         label: "방해 금지",
       });
@@ -159,32 +163,32 @@ describe("사람: 선언 상태가 먼저이고, 선언이 없으면 접속 여�
   });
 
   it("방해 금지는 접속 중이어도 방해 금지다 — 「지금 핑 금지」라는 뜻이다(ADR-0160 D3)", () => {
-    expect(humanPresenceDot({ presenceStatus: "dnd", online: true }, NOW)?.tone).toBe("danger");
+    expect(humanPresenceDot(ko, { presenceStatus: "dnd", online: true }, NOW)?.tone).toBe("danger");
   });
 
   it("auto 이고 접속 중이면 채운 초록, 접속이 없으면 속 빈 고리 — 에이전트 점과 같은 문법", () => {
     for (const presenceStatus of ["auto", undefined] as const) {
-      expect(humanPresenceDot({ presenceStatus, online: true }, NOW)).toEqual({
+      expect(humanPresenceDot(ko, { presenceStatus, online: true }, NOW)).toEqual({
         tone: "ok",
         label: "온라인",
       });
-      expect(humanPresenceDot({ presenceStatus, online: false }, NOW)).toEqual({
+      expect(humanPresenceDot(ko, { presenceStatus, online: false }, NOW)).toEqual({
         tone: "muted",
         label: "오프라인",
       });
     }
     // 같은 문법이라는 말의 뜻: 초록 = 살아 있다, 고리 = 꺼져 있다. 에이전트의 두 끝과 같은 톤이다.
-    expect(humanPresenceDot({ online: true }, NOW)?.tone).toBe(
+    expect(humanPresenceDot(ko, { online: true }, NOW)?.tone).toBe(
       agentLivenessDot({ state: "responsive", lastSignalAtMs: NOW }, NOW, false).tone
     );
-    expect(humanPresenceDot({ online: false }, NOW)?.tone).toBe(
+    expect(humanPresenceDot(ko, { online: false }, NOW)?.tone).toBe(
       agentLivenessDot({ state: "inactive" }, NOW, false).tone
     );
   });
 
   it("만료된 방해 금지는 선언이 아니다 — 서버는 만료 때 이벤트를 보내지 않으므로 접속 여부로 내려간다", () => {
     const expired = (dndUntilMs: number, online?: boolean) =>
-      humanPresenceDot({ presenceStatus: "dnd", dndUntilMs, online }, NOW);
+      humanPresenceDot(ko, { presenceStatus: "dnd", dndUntilMs, online }, NOW);
     expect(expired(NOW - 1, true)?.tone).toBe("ok");
     expect(expired(NOW, true)?.tone).toBe("ok"); // 지금 이 순간이 끝이다
     expect(expired(NOW - 1, false)?.tone).toBe("muted");
@@ -196,18 +200,18 @@ describe("사람: 선언 상태가 먼저이고, 선언이 없으면 접속 여�
 
   it("활성이 아닌 사람은 점이 없다(#5781): 정지된 줄의 선언 상태·접속 여부가 남아 있어도 말하지 않는다", () => {
     for (const status of ["suspended", "deleted", "invited"] as const) {
-      expect(humanPresenceDot({ status, online: true }, NOW)).toBeNull();
-      expect(humanPresenceDot({ status, presenceStatus: "away", online: false }, NOW)).toBeNull();
-      expect(humanPresenceDot({ status, presenceStatus: "dnd" }, NOW)).toBeNull();
+      expect(humanPresenceDot(ko, { status, online: true }, NOW)).toBeNull();
+      expect(humanPresenceDot(ko, { status, presenceStatus: "away", online: false }, NOW)).toBeNull();
+      expect(humanPresenceDot(ko, { status, presenceStatus: "dnd" }, NOW)).toBeNull();
     }
-    expect(humanPresenceDot({ status: "active", online: true }, NOW)?.tone).toBe("ok");
-    expect(humanPresenceDot({ status: "active", presenceStatus: "away" }, NOW)?.tone).toBe("warn");
+    expect(humanPresenceDot(ko, { status: "active", online: true }, NOW)?.tone).toBe("ok");
+    expect(humanPresenceDot(ko, { status: "active", presenceStatus: "away" }, NOW)?.tone).toBe("warn");
   });
 
   it("접속 여부를 모르면 점이 없다 — 모름은 꺼짐이 아니다(브로커가 느린 것만으로 모두가 꺼져 보이면 안 된다)", () => {
-    expect(humanPresenceDot({ presenceStatus: "auto" }, NOW)).toBeNull();
-    expect(humanPresenceDot({ presenceStatus: "auto", online: undefined }, NOW)).toBeNull();
-    expect(humanPresenceDot({}, NOW)).toBeNull();
+    expect(humanPresenceDot(ko, { presenceStatus: "auto" }, NOW)).toBeNull();
+    expect(humanPresenceDot(ko, { presenceStatus: "auto", online: undefined }, NOW)).toBeNull();
+    expect(humanPresenceDot(ko, {}, NOW)).toBeNull();
   });
 });
 
@@ -235,10 +239,10 @@ describe("withOwnConnection: 자기 행의 접속 여부는 이 클라이언트�
 
   it("그 위에서 점이 그려진다: 내 연결이 끊기면 내 행은 속 빈 고리, 모르는 남의 행은 점이 없다", () => {
     expect(
-      humanPresenceDot(withOwnConnection({ id: SELF, online: undefined }, SELF, false), NOW)?.tone
+      humanPresenceDot(ko, withOwnConnection({ id: SELF, online: undefined }, SELF, false), NOW)?.tone
     ).toBe("muted");
     expect(
-      humanPresenceDot(withOwnConnection({ id: OTHER, online: undefined }, SELF, false), NOW)
+      humanPresenceDot(ko, withOwnConnection({ id: OTHER, online: undefined }, SELF, false), NOW)
     ).toBeNull();
   });
 });
@@ -251,12 +255,12 @@ describe("dmPeerStatusDot: DM 상대 한 명", () => {
   const base = { mayAct: true, nowMs: NOW };
 
   it("상대를 모르면(나간 멤버) 점이 없다", () => {
-    expect(dmPeerStatusDot({ ...base, member: null, liveness: undefined })).toBeNull();
+    expect(dmPeerStatusDot({ formatMessage: ko, ...base, member: null, liveness: undefined })).toBeNull();
   });
 
   it("사람은 생존 판정을 보지 않는다", () => {
     expect(
-      dmPeerStatusDot({
+      dmPeerStatusDot({ formatMessage: ko,
         ...base,
         member: human({ presenceStatus: "away" }),
         // 사람에게 생존 판정이 실려 와도 읽지 않는다.
@@ -274,7 +278,7 @@ describe("dmPeerStatusDot: DM 상대 한 명", () => {
       for (const dndUntilMs of [undefined, NOW - 1, NOW + 1]) {
         for (const liveness of livenessInputs) {
           for (const online of [undefined, true]) {
-            const dot = dmPeerStatusDot({
+            const dot = dmPeerStatusDot({ formatMessage: ko,
               ...base,
               member: human({ presenceStatus, dndUntilMs, hostOnline: false, online }),
               liveness,
@@ -282,7 +286,7 @@ describe("dmPeerStatusDot: DM 상대 한 명", () => {
             expect(dot?.tone).not.toBe("muted");
           }
           // 접속 없음이 알려졌을 때: 선언이 없거나 만료됐을 때만 회색, 살아 있는 선언이 있으면 선언이 이긴다.
-          const offline = dmPeerStatusDot({
+          const offline = dmPeerStatusDot({ formatMessage: ko,
             ...base,
             member: human({ presenceStatus, dndUntilMs, hostOnline: true, online: false }),
             liveness,
@@ -298,29 +302,29 @@ describe("dmPeerStatusDot: DM 상대 한 명", () => {
 
   it("사람: 접속 중이면 초록, 접속 없음이면 고리 — DM 줄·머리가 읽는 같은 함수의 답이다", () => {
     const input = { ...base, liveness: undefined };
-    expect(dmPeerStatusDot({ ...input, member: human({ online: true }) })).toEqual({
+    expect(dmPeerStatusDot({ formatMessage: ko, ...input, member: human({ online: true }) })).toEqual({
       tone: "ok",
       label: "온라인",
     });
-    expect(dmPeerStatusDot({ ...input, member: human({ online: false }) })).toEqual({
+    expect(dmPeerStatusDot({ formatMessage: ko, ...input, member: human({ online: false }) })).toEqual({
       tone: "muted",
       label: "오프라인",
     });
-    expect(dmPeerStatusDot({ ...input, member: human({}) })).toBeNull();
+    expect(dmPeerStatusDot({ formatMessage: ko, ...input, member: human({}) })).toBeNull();
     // 정지된 상대(소유자·관리자의 명부에만 실림, #5814)는 DM 줄·머리에도 점이 없다(#5781).
-    expect(dmPeerStatusDot({ ...input, member: human({ status: "suspended", online: true }) })).toBeNull();
+    expect(dmPeerStatusDot({ formatMessage: ko, ...input, member: human({ status: "suspended", online: true }) })).toBeNull();
   });
 
   it("에이전트는 `online` 을 읽지 않는다 — 에이전트의 생존감은 서버의 생존 판정이다(ADR-0160 D4)", () => {
     expect(
-      dmPeerStatusDot({
+      dmPeerStatusDot({ formatMessage: ko,
         ...base,
         member: agent({ online: true, hostOnline: false }),
         liveness: undefined,
       })
     ).toBeNull();
     expect(
-      dmPeerStatusDot({
+      dmPeerStatusDot({ formatMessage: ko,
         ...base,
         member: agent({ online: false, hostOnline: true }),
         liveness: null,
@@ -330,7 +334,7 @@ describe("dmPeerStatusDot: DM 상대 한 명", () => {
 
   it("에이전트: 판정이 있으면 판정이 이긴다 — 호스트가 닿아 있어도 꺼짐은 회색이다", () => {
     expect(
-      dmPeerStatusDot({
+      dmPeerStatusDot({ formatMessage: ko,
         ...base,
         member: agent({ hostOnline: true }),
         liveness: { state: "inactive" },
@@ -340,16 +344,16 @@ describe("dmPeerStatusDot: DM 상대 한 명", () => {
 
   it("에이전트: 판정을 아직 모르면 점이 없다 — 호스트 폴백을 먼저 그리면 거짓을 한 번 그렸다 지운다", () => {
     expect(
-      dmPeerStatusDot({ ...base, member: agent({ hostOnline: true }), liveness: undefined })
+      dmPeerStatusDot({ formatMessage: ko, ...base, member: agent({ hostOnline: true }), liveness: undefined })
     ).toBeNull();
   });
 
   it("에이전트: 판정이 없다고 확정되면(null) 호스트 연결만으로", () => {
     expect(
-      dmPeerStatusDot({ ...base, member: agent({ hostOnline: true }), liveness: null })
+      dmPeerStatusDot({ formatMessage: ko, ...base, member: agent({ hostOnline: true }), liveness: null })
     ).toEqual({ tone: "ok", label: "연결됨" });
     expect(
-      dmPeerStatusDot({ ...base, member: agent({ hostOnline: false }), liveness: null })
+      dmPeerStatusDot({ formatMessage: ko, ...base, member: agent({ hostOnline: false }), liveness: null })
     ).toBeNull();
   });
 
@@ -359,7 +363,7 @@ describe("dmPeerStatusDot: DM 상대 한 명", () => {
       liveness: { state: "woken_not_collected" as const },
       nowMs: NOW,
     };
-    expect(dmPeerStatusDot({ ...input, mayAct: true })?.tone).toBe("warn");
-    expect(dmPeerStatusDot({ ...input, mayAct: false })?.tone).toBe("muted");
+    expect(dmPeerStatusDot({ formatMessage: ko, ...input, mayAct: true })?.tone).toBe("warn");
+    expect(dmPeerStatusDot({ formatMessage: ko, ...input, mayAct: false })?.tone).toBe("muted");
   });
 });

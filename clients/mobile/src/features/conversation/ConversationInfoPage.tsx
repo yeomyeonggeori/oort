@@ -274,7 +274,7 @@ function InfoBody({
               chips={
                 peer ? (
                   <StatusChips
-                    chip={memberChip(peer, status)}
+                    chip={memberChip(formatMessage, peer, status)}
                     custom={memberCustomStatus(peer, nowMs)}
                     ids={{
                       chip: 'conversation-info-status',

@@ -532,9 +532,11 @@ export default function ConversationScreen({
 
   // DM 머리의 상대 상태 점 (#4016). 홈 DM 줄과 같은 core 판정(`dmPeerStatusDot`)이고 같은 쿼리 키
   // (`useAgentLiveness`)라 요청을 나눠 쓴다. 사람은 스스로 정한 상태가 먼저이고 그 밖에는 명부의 접속 여부(#4692), 모르면 점이 없다.
+  const formatMessage = useFormatMessage();
   const peerAgentId = peer?.kind === 'agent' ? peer.id : null;
   const peerLiveness = useAgentLiveness(peerAgentId);
   const peerStatus = dmPeerStatusDot({
+    formatMessage,
     member: peer,
     liveness: peerAgentId === null ? undefined : peerLiveness.liveness,
     mayAct: mayActOnLiveness(memberFor(directory, member.id)?.role),
@@ -1625,7 +1627,6 @@ export default function ConversationScreen({
   // 보내기·올리기·승인을 막는 질문은 코어 연결 상태 모델이 답한다(#5222, 결정 ③): 기기 오프라인이거나 서버에 닿지 못함이 확정일 때만
   // 막고, 실시간(소켓)만 끊기면 열어 둔다. 모델이 없으면 NetInfo 만으로 같은 질문에 답한다.
   const gates = useConnectionGates();
-  const formatMessage = useFormatMessage();
   // 최근 검색은 홈 검색과 한 목록이다(#5384): 다른 대화 안에서 찾은 줄에만 그 대화의 범위 칩이 붙는다(이 대화 것은 이 화면이 곧 범위라 칩이 없다).
   const fallbackScopeTitle = formatMessage('search.row.fallbackTitle');
   const recentScope = useCallback(

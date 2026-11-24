@@ -8,6 +8,7 @@ import {
 import { changeWorkspaceRoleErrorMessage } from "@momo/core/features/directory/model";
 import { useSession } from "@/app/session";
 
+import { useFormatMessage } from "@/i18n/useFormatMessage";
 export interface ChangeWorkspaceRoleHandle {
   pending: boolean;
   error: string | null;
@@ -17,6 +18,7 @@ export interface ChangeWorkspaceRoleHandle {
 }
 
 export function useChangeWorkspaceRole(): ChangeWorkspaceRoleHandle {
+  const formatMessage = useFormatMessage();
   const { workspaceId } = useSession();
   const client = useQueryClient();
   const [pending, setPending] = useState(false);
@@ -31,13 +33,13 @@ export function useChangeWorkspaceRole(): ChangeWorkspaceRoleHandle {
         await client.invalidateQueries({ queryKey: ["roster", workspaceId] });
         return true;
       } catch (failure) {
-        setError(changeWorkspaceRoleErrorMessage(failure));
+        setError(changeWorkspaceRoleErrorMessage(formatMessage, failure));
         return false;
       } finally {
         setPending(false);
       }
     },
-    [workspaceId, client]
+    [workspaceId, client, formatMessage]
   );
 
   const clearError = useCallback(() => setError(null), []);

@@ -1406,6 +1406,7 @@ function AgentSquare({
  * 쿼리가 서지 않는다.
  */
 function useRowStatusDot(row: SidebarRow, directory: Directory): StatusDotModel | null {
+  const formatMessage = useFormatMessage();
   const {member} = useSession();
   const peer =
     row.kind === 'channel' || row.avatarMemberId === null
@@ -1414,6 +1415,7 @@ function useRowStatusDot(row: SidebarRow, directory: Directory): StatusDotModel 
   const agentId = peer?.kind === 'agent' ? peer.id : null;
   const read = useAgentLiveness(agentId);
   return dmPeerStatusDot({
+    formatMessage,
     member: peer,
     liveness: agentId === null ? undefined : read.liveness,
     mayAct: mayActOnLiveness(memberFor(directory, member.id)?.role),

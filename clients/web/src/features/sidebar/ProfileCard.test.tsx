@@ -8,7 +8,7 @@ import { MemoryRouter, useLocation } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { PresenceWrite, RosterMember } from "@momo/core/lib/api";
-import { PRESENCE_WRITE_FAILED } from "@momo/core/features/presence/model";
+import { PRESENCE_WRITE_FAILED_KEY } from "@momo/core/features/presence/model";
 import type { NotificationRulesPatch } from "@momo/core/features/settings/notificationRules";
 import { SessionProvider, type SessionContextValue } from "@/app/session";
 import { AddWorkspaceOpenContext } from "@/features/workspace/useAddWorkspace";
@@ -19,6 +19,12 @@ import { LocaleContext } from "@/i18n/localeContext";
 import { koreanLocaleForTest } from "@/i18n/koreanLocaleForTest";
 import type { AppLocale } from "@/i18n/localeStore";
 import { ProfileCard } from "./ProfileCard";
+import { catalog as koCatalog } from "@momo/core/i18n/generated/ko-KR";
+import { createMessageCopy } from "@momo/core/testkit";
+
+// 낱말은 사전에 있다(#6045). 시험은 한국어 생성물로 풀어 예전과 같은 문장을 그대로 단정한다.
+const koCopy = createMessageCopy({ messageLocale: "ko-KR", catalog: koCatalog });
+
 
 const WS = "00000000-0000-7000-8000-000000000001";
 const MEMBER_ID = "00000000-0000-7000-8000-000000000101";
@@ -827,7 +833,7 @@ describe("ProfileCard 방해 금지 기한 (#2899)", () => {
     await confirmAtNow();
 
     await vi.waitFor(() => expect(q("pause-until-error")).not.toBeNull());
-    expect(q("pause-until-error")!.textContent).toContain(PRESENCE_WRITE_FAILED);
+    expect(q("pause-until-error")!.textContent).toContain(koCopy(PRESENCE_WRITE_FAILED_KEY));
     expect(q("pause-until-dialog")).not.toBeNull();
     const [row] = lastClient!.getQueryData<RosterMember[]>(ROSTER_KEY)!;
     expect(row.presenceStatus).toBe("auto");

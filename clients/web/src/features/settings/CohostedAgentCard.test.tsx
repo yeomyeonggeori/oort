@@ -321,7 +321,7 @@ describe("CohostedAgentCard", () => {
     it("DM을 못 열면 그 자리에 문장으로 말하고 이동하지 않는다", async () => {
       dm.open.mockRejectedValue(new ApiError(403, "no"));
       api.request.mockImplementation(attested(true));
-      mount();
+      mount(false, true);
       await until("ai-cohosted-connected");
       await act(async () => q("ai-cohosted-open-dm")?.click());
       const banner = await until("ai-cohosted-dm-error");

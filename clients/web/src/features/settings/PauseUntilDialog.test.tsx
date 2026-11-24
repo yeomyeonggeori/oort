@@ -4,6 +4,12 @@ import { act, createElement, type ComponentProps } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { PauseUntilDialog } from "./PauseUntilDialog";
+import { LocaleProvider } from "@/i18n/LocaleProvider";
+import type { AppLocale } from "@/i18n/localeStore";
+import { koreanLocale } from "@/testing/koLocale";
+
+// 한국어 문구를 단정하는 시험이라 한국어 언어 객체로 감싼다(감싸지 않으면 번들된 영어로 그려진다).
+let koLocale: AppLocale;
 
 // 시험 시계는 **로컬 시계 생성자**로 만든다. 서버가 아니라 이 기기의 달력으로 세는 계약이라
 // 에폭 상수를 박으면 시간대가 다른 곳에서만 붉어진다(웹 vitest 는 TZ 를 고정하지만 이 시험은
@@ -23,7 +29,8 @@ const reactActEnvironment = globalThis as typeof globalThis & {
 let mountedRoot: Root | null = null;
 let mountedHost: HTMLElement | null = null;
 
-beforeAll(() => {
+beforeAll(async () => {
+  koLocale = await koreanLocale();
   reactActEnvironment.IS_REACT_ACT_ENVIRONMENT = true;
 });
 
@@ -72,11 +79,11 @@ function mount(over: Partial<Props> = {}) {
   document.body.append(host);
   mountedHost = host;
   mountedRoot = createRoot(host);
-  act(() => mountedRoot?.render(createElement(PauseUntilDialog, baseProps(over))));
+  act(() => mountedRoot?.render(createElement(LocaleProvider, { locale: koLocale, children: createElement(PauseUntilDialog, baseProps(over)) })));
   return {
     rerender(next: Partial<Props>) {
       act(() =>
-        mountedRoot?.render(createElement(PauseUntilDialog, baseProps({ ...over, ...next })))
+        mountedRoot?.render(createElement(LocaleProvider, { locale: koLocale, children: createElement(PauseUntilDialog, baseProps({ ...over, ...next })) }))
       );
     },
   };
@@ -454,7 +461,7 @@ describe("PauseUntilDialog 네 상태", () => {
   it("오프라인이면 이유를 말하고 선택과 확인이 잠긴다", async () => {
     const onConfirm = vi.fn();
     mount({ offline: true, onConfirm });
-    expect(q("pause-until-offline")!.textContent).toContain("You're offline, so you can't change this right now.");
+    expect(q("pause-until-offline")!.textContent).toContain("오프라인이라 지금은 바꿀 수 없어요.");
     expect(trigger().disabled).toBe(true);
     openList();
     expect(listbox()).toBeNull();

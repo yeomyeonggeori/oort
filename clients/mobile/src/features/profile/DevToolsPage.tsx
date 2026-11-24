@@ -31,6 +31,7 @@ import {
   TOUCH_TARGET,
   type Palette,
 } from '../../design/tokens';
+import {useFormatMessage} from '../../i18n/useFormatMessage';
 import {useNow} from '../../lib/useNow';
 import {SheetNotice} from '../../shell/sheetForm';
 import {useOnline} from '../inbox/useOnline';
@@ -110,6 +111,7 @@ export function DevToolsPage({
   const palette = usePalette();
   const online = useOnline();
   const now = useNow();
+  const formatMessage = useFormatMessage();
   const policy = useDevAccessPolicy(workspaceId);
   const list = useMyDevCredentials(workspaceId, selfId);
   const revoke = useRevokeDevCredential(workspaceId);
@@ -185,7 +187,7 @@ export function DevToolsPage({
       : gate.state === 'open'
         ? DEV_TOOLS_CREATE_ON_COMPUTER
         : gate.text;
-  const rows = list.data?.map(credential => devCredentialRow(credential, {now})) ?? null;
+  const rows = list.data?.map(credential => devCredentialRow(credential, {now, formatMessage})) ?? null;
 
   return (
     <View style={styles.page} testID="dev-tools-page">

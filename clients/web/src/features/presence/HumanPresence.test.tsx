@@ -6,6 +6,12 @@ import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import type { RosterMember } from "@momo/core/lib/api";
 import { SessionProvider, type SessionContextValue } from "@/app/session";
 import { AvatarWithPresence, HumanPresenceLabel } from "./HumanPresence";
+import { LocaleProvider } from "@/i18n/LocaleProvider";
+import type { AppLocale } from "@/i18n/localeStore";
+import { koreanLocale } from "@/testing/koLocale";
+
+// 한국어 문구를 단정하는 시험이라 한국어 언어 객체로 감싼다(감싸지 않으면 번들된 영어로 그려진다).
+let koLocale: AppLocale;
 
 // The two shapes a person's dot is drawn in (#4692, ADR-0160 ②③). The verdict is
 // core's `humanPresenceDot`; what is under test here is what reaches the screen:
@@ -24,7 +30,8 @@ const reactActEnvironment = globalThis as typeof globalThis & {
 let root: Root | null = null;
 let host: HTMLElement | null = null;
 
-beforeAll(() => {
+beforeAll(async () => {
+  koLocale = await koreanLocale();
   reactActEnvironment.IS_REACT_ACT_ENVIRONMENT = true;
 });
 
@@ -78,7 +85,7 @@ function render(
     document.body.append(host);
     root = createRoot(host);
   }
-  act(() => root?.render(createElement(SessionProvider, { value: sessionValue(connStatus) }, ui)));
+  act(() => root?.render(createElement(LocaleProvider, { locale: koLocale, children: createElement(SessionProvider, { value: sessionValue(connStatus) }, ui) })));
   return host as HTMLElement;
 }
 

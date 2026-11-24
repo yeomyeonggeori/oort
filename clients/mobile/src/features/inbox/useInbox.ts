@@ -47,6 +47,7 @@ import {
 } from '../workspace/queries';
 import {fetchMentionsAfter} from './mentions';
 
+import {useFormatMessage} from '../../i18n/useFormatMessage';
 // =============================================================================
 // The inbox feeds.
 //
@@ -251,6 +252,7 @@ export interface NeedsActionFeed extends Feed {
 }
 
 export function useNeedsAction(enabled: boolean): NeedsActionFeed {
+  const formatMessage = useFormatMessage();
   const {workspaceId} = useSession();
   const context = useFeedContext();
   const progress = useSyncExternalStore(
@@ -271,6 +273,7 @@ export function useNeedsAction(enabled: boolean): NeedsActionFeed {
     return orderFeed(
       (query.data ?? []).map(approval =>
         approvalItem(
+          formatMessage,
           approval,
           context.actorFor(approval.requestedBy),
           context.labelFor(approval.channelId),
@@ -283,7 +286,7 @@ export function useNeedsAction(enabled: boolean): NeedsActionFeed {
         ),
       ),
     );
-  }, [query.data, context, nowMs, progress]);
+  }, [query.data, context, nowMs, progress, formatMessage]);
 
   return {
     items,
@@ -349,6 +352,7 @@ export function useMentionMessages(enabled: boolean) {
 }
 
 export function useMentions(enabled: boolean): Feed {
+  const formatMessage = useFormatMessage();
   const {workspaceId} = useSession();
   const context = useFeedContext();
   const client = useQueryClient();
@@ -359,6 +363,7 @@ export function useMentions(enabled: boolean): Feed {
     return orderFeed(
       results.messages.map(message =>
         mentionItem(
+          formatMessage,
           message,
           context.actorFor(message.authorMemberId),
           context.labelFor(message.channelId),
@@ -366,7 +371,7 @@ export function useMentions(enabled: boolean): Feed {
         ),
       ),
     );
-  }, [results.messages, context, nowMs]);
+  }, [results.messages, context, nowMs, formatMessage]);
 
   // Depends on the query CLIENT, not on the `readStates` object — that object is
   // `{...query, byChannel}`, a fresh identity every render, which would make this
@@ -398,6 +403,7 @@ export function useMentions(enabled: boolean): Feed {
 // ---- 에이전트 --------------------------------------------------------------
 
 export function useAgentFeed(enabled: boolean, ownedBy: string): Feed {
+  const formatMessage = useFormatMessage();
   const {workspaceId} = useSession();
   const context = useFeedContext();
   const progress = useSyncExternalStore(
@@ -473,6 +479,7 @@ export function useAgentFeed(enabled: boolean, ownedBy: string): Feed {
       if (!mine(approval.requestedBy)) continue;
       rows.push(
         approvalItem(
+          formatMessage,
           approval,
           context.actorFor(approval.requestedBy),
           context.labelFor(approval.channelId),
@@ -489,6 +496,7 @@ export function useAgentFeed(enabled: boolean, ownedBy: string): Feed {
       if (!mine(run.agentMemberId)) continue;
       rows.push(
         runItem(
+          formatMessage,
           run,
           context.actorFor(run.agentMemberId),
           context.labelFor(run.channelId),
@@ -497,7 +505,7 @@ export function useAgentFeed(enabled: boolean, ownedBy: string): Feed {
       );
     }
     return orderFeed(rows);
-  }, [approvalQueries.approvals, runQueries.runs, context, ownedBy, nowMs, progress]);
+  }, [approvalQueries.approvals, runQueries.runs, context, ownedBy, nowMs, progress, formatMessage]);
 
   // Invalidation rather than a list of `refetch()` calls: this feed fans out
   // over four approval status pages and up to twelve channels, and the fan-out

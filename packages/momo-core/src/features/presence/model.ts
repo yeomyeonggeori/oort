@@ -16,6 +16,11 @@
 // =============================================================================
 
 import type { EffectivePresence, PresenceStatus } from "../../lib/api";
+import type { LocaleService } from "../../i18n/context";
+import type { PlainMessageKey } from "../../i18n/keys";
+
+// 문구는 `i18n/catalogs/<언어>/presence.json`에 있다. 이 파일은 어느 자리가 어느 키를 읽는지만 정한다.
+type FormatMessage = LocaleService["formatMessage"];
 
 /**
  * The status-change dropdown: the declared statuses, **in order and nothing
@@ -39,14 +44,14 @@ export const PRESENCE_OPTIONS: readonly PresenceStatus[] = ["auto", "away", "dnd
  * enum deliberately avoids `active`, a lifecycle label); this is only how the
  * choice is worded.
  */
-export function declaredStatusLabel(status: PresenceStatus): string {
+export function declaredStatusLabelKey(status: PresenceStatus): PlainMessageKey {
   switch (status) {
     case "auto":
-      return "온라인";
+      return "presence.status.online";
     case "away":
-      return "자리 비움";
+      return "presence.status.away";
     case "dnd":
-      return "방해 금지";
+      return "presence.status.dnd";
   }
 }
 
@@ -81,26 +86,28 @@ export const AVAILABILITY_REFRESH_MS = 30_000;
  * what it renders **while this client is connected** — that function is the self
  * radio's copy, not a roster fact.
  */
-export function otherMemberDeclaredPresenceLabel(
+export function otherMemberDeclaredPresenceLabelKey(
   status: PresenceStatus | undefined
-): string | null {
+): PlainMessageKey | null {
   if (status === "away" || status === "dnd") {
-    return declaredStatusLabel(status);
+    return declaredStatusLabelKey(status);
   }
   return null;
 }
 
 /** The label for an effective value, for the indicator's accessible name. */
-export function effectivePresenceLabel(effective: EffectivePresence): string {
+export function effectivePresenceLabelKey(
+  effective: EffectivePresence
+): PlainMessageKey {
   switch (effective) {
     case "online":
-      return "온라인";
+      return "presence.status.online";
     case "away":
-      return "자리 비움";
+      return "presence.status.away";
     case "dnd":
-      return "방해 금지";
+      return "presence.status.dnd";
     case "offline":
-      return "오프라인";
+      return "presence.status.offline";
   }
 }
 
@@ -114,15 +121,20 @@ export function effectivePresenceLabel(effective: EffectivePresence): string {
  * trigger already said 내 상태 before the menu had a title, so the title is not
  * new copy — it is that name, made visible where the options are.
  */
-export const PRESENCE_MENU_LABEL = "내 상태";
+export const PRESENCE_MENU_LABEL_KEY = "presence.menu.label" satisfies PlainMessageKey;
 
 /**
  * The accessible name for the status control's trigger: it states the current
  * effective status and that pressing changes it, so a screen-reader user is not
  * left with a color-only cue.
  */
-export function presenceTriggerLabel(effective: EffectivePresence): string {
-  return `${PRESENCE_MENU_LABEL}: ${effectivePresenceLabel(effective)} (변경하려면 누르세요)`;
+export function presenceTriggerLabel(
+  formatMessage: FormatMessage,
+  effective: EffectivePresence
+): string {
+  return formatMessage("presence.menu.triggerLabel", {
+    status: formatMessage(effectivePresenceLabelKey(effective)),
+  });
 }
 
 /**
@@ -134,8 +146,7 @@ export function presenceTriggerLabel(effective: EffectivePresence): string {
  * 알림이 15일 동안 멈춘 것을 화면에서 알 수 없었다(ADR-0204 맥락). 두 낱말의 경계는
  * `features/settings/notificationRules.ts` 의 낱말 주석에 있다.
  */
-export const PRESENCE_DND_HINT =
-  "다른 사람에게 보이는 표시예요. 알림도 함께 멈춰요.";
+export const PRESENCE_DND_HINT_KEY = "presence.dnd.hint" satisfies PlainMessageKey;
 
 /** 선언 상태 쓰기가 실패했을 때 (웹 `PresenceControl` 과 같은 문장). */
-export const PRESENCE_WRITE_FAILED = "상태를 바꾸지 못했습니다. 다시 시도하세요.";
+export const PRESENCE_WRITE_FAILED_KEY = "presence.write.failed" satisfies PlainMessageKey;

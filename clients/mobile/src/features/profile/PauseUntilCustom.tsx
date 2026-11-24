@@ -1,7 +1,7 @@
 import {
   customPauseUntil,
-  customPauseUntilMessage,
-  pauseUntilConfirmLabel,
+  customPauseUntilMessageKey,
+  pauseUntilConfirmLabelKey,
   pauseUntilLabel,
   type PauseUntilKind,
 } from '@momo/core/features/presence/pauseUntil';
@@ -39,6 +39,7 @@ import {
   type TimePick,
 } from './pauseCalendar';
 
+import {useFormatMessage} from '../../i18n/useFormatMessage';
 // =============================================================================
 // 「직접 고르기」 — 달력 한 달과 시각 칩 (ADR-0204 D2, #2899).
 //
@@ -71,6 +72,7 @@ export function PauseUntilCustom({
   offline: boolean;
   onConfirm: (atMs: number) => void;
 }): React.JSX.Element {
+  const formatMessage = useFormatMessage();
   const styles = useStyles(buildStyles);
   const [seed] = useState(() => nextWholeHour(nowMs));
   const [view, setView] = useState<MonthView>({
@@ -254,11 +256,11 @@ export function PauseUntilCustom({
             accessibilityLiveRegion="polite"
             style={styles.error}
             testID="pause-until-error">
-            {customPauseUntilMessage(result.reason)}
+            {formatMessage(customPauseUntilMessageKey(result.reason))}
           </Sentence>
         )}
         <PrimaryButton
-          label={pauseUntilConfirmLabel(kind)}
+          label={formatMessage(pauseUntilConfirmLabelKey(kind))}
           busyLabel="저장 중"
           busy={busy}
           disabled={!result.ok || offline}

@@ -1,4 +1,7 @@
 import type { PresenceStatus } from "../../lib/api";
+import type { PlainMessageKey } from "../../i18n/keys";
+
+// 문구는 `i18n/catalogs/<언어>/presence.json`에 있다. 만료 시각 문장(`statusExpiryShortLabel`)은 날짜 숫자를 짓는 일이라 아직 코드에 있다.
 
 // =============================================================================
 // Custom member status (ADR-0176 / A-42). Orthogonal to declared presence
@@ -16,14 +19,14 @@ export const CUSTOM_STATUS_EMOJI_MAX = 32;
  * 폰은 이 값을 읽지 않는다 — 폰 StatusPage 는 이모지·글만 채운다.
  */
 export const CUSTOM_STATUS_PRESETS = [
-  { id: "meeting", label: "회의 중", emoji: "📅", expiry: "1h" },
-  { id: "commute", label: "이동 중", emoji: "🚶", expiry: "30m" },
-  { id: "sick", label: "병가", emoji: "🤒", expiry: "today" },
-  { id: "vacation", label: "휴가", emoji: "🌴", expiry: "none" },
-  { id: "wfh", label: "재택", emoji: "🏠", expiry: "today" },
+  { id: "meeting", labelKey: "presence.statusPreset.meeting", emoji: "📅", expiry: "1h" },
+  { id: "commute", labelKey: "presence.statusPreset.commute", emoji: "🚶", expiry: "30m" },
+  { id: "sick", labelKey: "presence.statusPreset.sick", emoji: "🤒", expiry: "today" },
+  { id: "vacation", labelKey: "presence.statusPreset.vacation", emoji: "🌴", expiry: "none" },
+  { id: "wfh", labelKey: "presence.statusPreset.wfh", emoji: "🏠", expiry: "today" },
 ] as const satisfies readonly {
   id: string;
-  label: string;
+  labelKey: PlainMessageKey;
   emoji: string;
   expiry: Exclude<StatusExpiryChoice, "custom">;
 }[];
@@ -34,28 +37,27 @@ export type StatusExpiryChoice = "none" | "30m" | "1h" | "today" | "custom";
 
 export const STATUS_EXPIRY_OPTIONS: readonly {
   id: StatusExpiryChoice;
-  label: string;
+  labelKey: PlainMessageKey;
 }[] = [
-  { id: "none", label: "지우지 않음" },
-  { id: "30m", label: "30분" },
-  { id: "1h", label: "1시간" },
-  { id: "today", label: "오늘까지" },
-  { id: "custom", label: "시각 고르기" },
+  { id: "none", labelKey: "presence.statusExpiry.none" },
+  { id: "30m", labelKey: "presence.statusExpiry.min30" },
+  { id: "1h", labelKey: "presence.statusExpiry.hour1" },
+  { id: "today", labelKey: "presence.statusExpiry.today" },
+  { id: "custom", labelKey: "presence.statusExpiry.custom" },
 ];
 
-export const CUSTOM_STATUS_DIALOG_TITLE = "상태 설정";
-export const CUSTOM_STATUS_MENU_LABEL = "상태 설정";
-export const CUSTOM_STATUS_SAVE_LABEL = "상태 저장";
-export const CUSTOM_STATUS_SAVING_LABEL = "저장 중…";
-export const CUSTOM_STATUS_CLEAR_LABEL = "상태 지우기";
-export const CUSTOM_STATUS_CANCEL_LABEL = "취소";
-export const CUSTOM_STATUS_TEXT_LABEL = "상태 글";
-export const CUSTOM_STATUS_TEXT_PLACEHOLDER = "지금 하는 일";
-export const CUSTOM_STATUS_EMOJI_LABEL = "상태 이모지 고르기";
-export const CUSTOM_STATUS_EMOJI_CLEAR_LABEL = "이모지 지우기";
-export const CUSTOM_STATUS_EXPIRY_LABEL = "만료";
-export const CUSTOM_STATUS_DIALOG_DESCRIPTION =
-  "이모지와 짧은 글로 지금 하는 일을 알립니다.";
+export const CUSTOM_STATUS_DIALOG_TITLE_KEY = "presence.statusDialog.title" satisfies PlainMessageKey;
+export const CUSTOM_STATUS_MENU_LABEL_KEY = "presence.statusDialog.menuLabel" satisfies PlainMessageKey;
+export const CUSTOM_STATUS_SAVE_LABEL_KEY = "presence.statusDialog.save" satisfies PlainMessageKey;
+export const CUSTOM_STATUS_SAVING_LABEL_KEY = "presence.statusDialog.saving" satisfies PlainMessageKey;
+export const CUSTOM_STATUS_CLEAR_LABEL_KEY = "presence.statusDialog.clear" satisfies PlainMessageKey;
+export const CUSTOM_STATUS_CANCEL_LABEL_KEY = "common.action.cancel" satisfies PlainMessageKey;
+export const CUSTOM_STATUS_TEXT_LABEL_KEY = "presence.statusDialog.textLabel" satisfies PlainMessageKey;
+export const CUSTOM_STATUS_TEXT_PLACEHOLDER_KEY = "presence.statusDialog.textPlaceholder" satisfies PlainMessageKey;
+export const CUSTOM_STATUS_EMOJI_LABEL_KEY = "presence.statusDialog.emojiLabel" satisfies PlainMessageKey;
+export const CUSTOM_STATUS_EMOJI_CLEAR_LABEL_KEY = "presence.statusDialog.emojiClear" satisfies PlainMessageKey;
+export const CUSTOM_STATUS_EXPIRY_LABEL_KEY = "presence.statusDialog.expiryLabel" satisfies PlainMessageKey;
+export const CUSTOM_STATUS_DIALOG_DESCRIPTION_KEY = "presence.statusDialog.description" satisfies PlainMessageKey;
 
 export interface PresenceWrite {
   status: PresenceStatus;
@@ -232,12 +234,12 @@ export function localTimeInputValue(atMs: number): string {
   return `${hour}:${minute}`;
 }
 
-export function customStatusFailureMessage(): string {
-  return "상태를 저장하지 못했습니다. 다시 시도하세요.";
+export function customStatusFailureKey(): PlainMessageKey {
+  return "presence.statusDialog.saveFailed";
 }
 
-export function customStatusClearFailureMessage(): string {
-  return "상태를 지우지 못했습니다. 다시 시도하세요.";
+export function customStatusClearFailureKey(): PlainMessageKey {
+  return "presence.statusDialog.clearFailed";
 }
 
 // ---- 폰 프로필 시트의 상태 글 편집 (#2848) -----------------------------------

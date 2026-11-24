@@ -28,6 +28,7 @@ import { cohostedPromptKey, markCohostedPromptShown, wasCohostedPromptShown } fr
 import { LoadFailureNote } from "@/features/common/LoadFailureBox";
 import { CONNECTION_KEYS } from "@momo/core/features/connection/copyKeys";
 
+import { useFormatMessage } from "@/i18n/useFormatMessage";
 // Reading this as: AI hub (top of every pane) card (instance operator only) for internal team users on
 // web+Tauri, density 6/10, motion 1/10.
 
@@ -107,6 +108,7 @@ function CardBody({
   offline: boolean;
   workspaceId: string;
 }) {
+  const formatMessage = useFormatMessage();
   const client = useQueryClient();
   const connected = status.connectedAgentId;
   const searching = status.toolsLockAttested && connected === null;
@@ -144,10 +146,10 @@ function CardBody({
         void client.invalidateQueries({ queryKey: ["channels", workspaceId] });
         if (andGo) navigate(`/c/${opened.channel.id}`);
       } catch (failure) {
-        setDmError(openDmErrorMessage(failure, "Hermes"));
+        setDmError(openDmErrorMessage(formatMessage, failure, "Hermes"));
       }
     },
-    [workspaceId, client, navigate]
+    [workspaceId, client, navigate, formatMessage]
   );
 
   const connect = useMutation({

@@ -49,6 +49,12 @@ import {
   type DevCommandOption,
 } from "./devAccessModel";
 
+import { catalog as koCatalog } from "../../i18n/generated/ko-KR";
+import { createMessageCopy } from "../../testkit";
+
+// 낱말은 사전에 있다(#6045). 시험은 한국어 생성물로 풀어 예전과 같은 문장을 그대로 단정한다.
+const ko = createMessageCopy({ messageLocale: "ko-KR", catalog: koCatalog });
+
 // #4663: the developer access model (ADR-0216 D2 to D10). Pure: nothing here touches the
 // network, a clock or a DOM. People and ids are made up.
 
@@ -306,7 +312,7 @@ describe("field validation", () => {
 
 describe("list rows", () => {
   it("shows a card with what it carries and nothing it does not", () => {
-    const row = devCredentialRow(CARD, { now: NOW });
+    const row = devCredentialRow(CARD, { now: NOW, formatMessage: ko });
     expect(row).toMatchObject({
       id: CARD.id,
       kind: "card",
@@ -328,7 +334,7 @@ describe("list rows", () => {
   });
 
   it("shows a login session with its device, no tool and the channel limit", () => {
-    const row = devCredentialRow(SESSION, { now: NOW, memberName: "박서연" });
+    const row = devCredentialRow(SESSION, { now: NOW, formatMessage: ko, memberName: "박서연" });
     expect(row.kind).toBe("session");
     expect(row.kindLabel).toBe("로그인 세션");
     expect(row.deviceName).toBe("oort CLI · macOS");
@@ -339,23 +345,23 @@ describe("list rows", () => {
 
   it("says a token that was never used has not been used", () => {
     const { lastUsedAtMs: _never, ...unused } = CARD;
-    const row = devCredentialRow(unused, { now: NOW });
+    const row = devCredentialRow(unused, { now: NOW, formatMessage: ko });
     expect(row.neverUsed).toBe(true);
     expect(row.lastUsedLabel).toBe("아직 안 썼어요");
     // A use a moment ago is not the same statement.
-    const justNow = devCredentialRow({ ...CARD, lastUsedAtMs: NOW - 1000 }, { now: NOW });
+    const justNow = devCredentialRow({ ...CARD, lastUsedAtMs: NOW - 1000 }, { now: NOW, formatMessage: ko });
     expect(justNow.neverUsed).toBe(false);
     expect(justNow.lastUsedLabel).toBe("방금");
   });
 
   it("spells out a custom scope list on the row, and only then", () => {
-    const custom = devCredentialRow({ ...CARD, scopes: ["dev:identity", "dev:messages:write"] }, { now: NOW });
+    const custom = devCredentialRow({ ...CARD, scopes: ["dev:identity", "dev:messages:write"] }, { now: NOW, formatMessage: ko });
     expect(custom.scopeDetail).toContain(devScopeName("dev:messages:write"));
-    expect(devCredentialRow(CARD, { now: NOW }).scopeDetail).toBeUndefined();
+    expect(devCredentialRow(CARD, { now: NOW, formatMessage: ko }).scopeDetail).toBeUndefined();
   });
 
   it("marks a row whose time has passed", () => {
-    const row = devCredentialRow({ ...CARD, expiresAtMs: NOW - 1 }, { now: NOW });
+    const row = devCredentialRow({ ...CARD, expiresAtMs: NOW - 1 }, { now: NOW, formatMessage: ko });
     expect(row.expired).toBe(true);
     expect(row.expiryLabel).toBe(devExpiry(NOW - 1, NOW).label);
   });
@@ -737,7 +743,7 @@ describe("copy hygiene of the sentences built at run time", () => {
       out.push(label);
     }
     for (const credential of [CARD, SESSION, { ...CARD, scopes: ["dev:identity", "dev:future:admin"] }]) {
-      const row = devCredentialRow(credential, { now: NOW });
+      const row = devCredentialRow(credential, { now: NOW, formatMessage: ko });
       out.push(row.kindLabel, row.scopeLabel, row.lastUsedLabel, row.expiryLabel, row.scopeDetail ?? "");
     }
     for (const tool of ALL_TOOLS) {

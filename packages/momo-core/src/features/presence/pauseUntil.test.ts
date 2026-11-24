@@ -1,20 +1,26 @@
 import { describe, expect, it } from "vitest";
 import {
   customPauseUntil,
-  customPauseUntilMessage,
-  PAUSE_UNTIL_NONE_ACTION_LABEL,
-  PAUSE_UNTIL_OFFLINE_REASON,
+  customPauseUntilMessageKey,
+  PAUSE_UNTIL_NONE_ACTION_LABEL_KEY,
+  PAUSE_UNTIL_OFFLINE_REASON_KEY,
   PAUSE_UNTIL_OPTIONS,
   pauseUntilAtMs,
-  pauseUntilDescription,
+  pauseUntilDescriptionKey,
   pauseUntilElapsed,
   pauseUntilHint,
   pauseUntilLabel,
   pauseUntilOptions,
-  pauseUntilPresetHint,
+  pauseUntilPresetHintKey,
   pauseUntilStateLabel,
-  pauseUntilTitle,
+  pauseUntilTitleKey,
 } from "./pauseUntil";
+
+import { catalog as koCatalog } from "../../i18n/generated/ko-KR";
+import { createMessageCopy } from "../../testkit";
+
+// 낱말은 사전에 있다(#6045). 시험은 한국어 생성물로 풀어 예전과 같은 문장을 그대로 단정한다.
+const ko = createMessageCopy({ messageLocale: "ko-KR", catalog: koCatalog });
 
 // 시험은 **로컬 시계 생성자**로 시각을 만든다. 서버가 아니라 이 기기의 달력으로 세는 계약이라
 // 에폭 상수를 박으면 시간대가 다른 CI 에서만 붉어진다. 2026년 10월: 12 월 · 13 화 · 14 수 ·
@@ -26,7 +32,7 @@ const FRI_2107 = at(16, 21, 7);
 
 describe("PAUSE_UNTIL_OPTIONS (ADR-0204 D2)", () => {
   it("lists the six choices in order and never offers an open-ended one", () => {
-    expect(PAUSE_UNTIL_OPTIONS.map((option) => option.label)).toEqual([
+    expect(PAUSE_UNTIL_OPTIONS.map((option) => ko(option.labelKey))).toEqual([
       "30분",
       "1시간",
       "2시간",
@@ -35,8 +41,8 @@ describe("PAUSE_UNTIL_OPTIONS (ADR-0204 D2)", () => {
       "직접 고르기",
     ]);
     for (const option of PAUSE_UNTIL_OPTIONS) {
-      expect(option.label).not.toContain("끌 때까지");
-      expect(option.label).not.toContain("기한 없음");
+      expect(ko(option.labelKey)).not.toContain("끌 때까지");
+      expect(ko(option.labelKey)).not.toContain("기한 없음");
     }
   });
 });
@@ -134,9 +140,9 @@ describe("pauseUntilLabel (ADR-0204 D3 「오후 9:30까지」)", () => {
 
 describe("pauseUntilStateLabel", () => {
   it("names a running deadline, and the open-ended row 「기한 없음」", () => {
-    expect(pauseUntilStateLabel(at(16, 21, 30), FRI_2107)).toBe("오후 9:30까지");
-    expect(pauseUntilStateLabel(undefined, FRI_2107)).toBe("기한 없음");
-    expect(PAUSE_UNTIL_NONE_ACTION_LABEL).toBe("기한 없음 · 기한 정하기");
+    expect(pauseUntilStateLabel(ko, at(16, 21, 30), FRI_2107)).toBe("오후 9:30까지");
+    expect(pauseUntilStateLabel(ko, undefined, FRI_2107)).toBe("기한 없음");
+    expect(ko(PAUSE_UNTIL_NONE_ACTION_LABEL_KEY)).toBe("기한 없음 · 기한 정하기");
   });
 });
 
@@ -195,25 +201,25 @@ describe("customPauseUntil", () => {
   });
 
   it("words both refusals as a request, in the polite register", () => {
-    expect(customPauseUntilMessage("past")).toBe(
+    expect(ko(customPauseUntilMessageKey("past"))).toBe(
       "지난 시각은 고를 수 없어요. 다른 시각을 고르세요."
     );
-    expect(customPauseUntilMessage("invalid")).toBe("날짜와 시각을 확인하세요.");
+    expect(ko(customPauseUntilMessageKey("invalid"))).toBe("날짜와 시각을 확인하세요.");
   });
 });
 
 describe("titles and descriptions", () => {
   it("says the alerts stop together on the do-not-disturb page only", () => {
-    expect(pauseUntilTitle("pause")).toBe("알림을 언제까지 멈출까요?");
-    expect(pauseUntilTitle("dnd")).toBe("방해 금지를 언제까지 켤까요?");
-    expect(pauseUntilDescription("dnd")).toContain("알림도 함께 멈춰요");
-    expect(pauseUntilDescription("pause")).not.toContain("방해 금지");
+    expect(ko(pauseUntilTitleKey("pause"))).toBe("알림을 언제까지 멈출까요?");
+    expect(ko(pauseUntilTitleKey("dnd"))).toBe("방해 금지를 언제까지 켤까요?");
+    expect(ko(pauseUntilDescriptionKey("dnd"))).toContain("알림도 함께 멈춰요");
+    expect(ko(pauseUntilDescriptionKey("pause"))).not.toContain("방해 금지");
   });
 
   it("hints that a preset row turns the switch on at once, per switch", () => {
     // 누르면 곧바로 켜진다 — 확인 단계가 없다는 것을 읽어 줘야 하는 줄이다.
-    expect(pauseUntilPresetHint("pause")).toBe("누르면 이 시각까지 알림을 멈춰요.");
-    expect(pauseUntilPresetHint("dnd")).toBe("누르면 이 시각까지 방해 금지를 켜요.");
+    expect(ko(pauseUntilPresetHintKey("pause"))).toBe("누르면 이 시각까지 알림을 멈춰요.");
+    expect(ko(pauseUntilPresetHintKey("dnd"))).toBe("누르면 이 시각까지 방해 금지를 켜요.");
   });
 });
 
@@ -231,6 +237,6 @@ describe("pauseUntilElapsed — 서버에 다시 물을 때", () => {
 
 describe("연결이 끊겼을 때의 이유", () => {
   it("해요체로 이유를 말한다", () => {
-    expect(PAUSE_UNTIL_OFFLINE_REASON).toBe("연결이 끊겨 지금은 바꿀 수 없어요.");
+    expect(ko(PAUSE_UNTIL_OFFLINE_REASON_KEY)).toBe("연결이 끊겨 지금은 바꿀 수 없어요.");
   });
 });

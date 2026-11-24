@@ -5,6 +5,12 @@ import {
   newDmCandidates,
   peerDot,
 } from "./newDmModel";
+import { catalog as koCatalog } from "@momo/core/i18n/generated/ko-KR";
+import { createMessageCopy } from "@momo/core/testkit";
+
+// 낱말은 사전에 있다(#6045). 시험은 한국어 생성물로 풀어 예전과 같은 문장을 그대로 단정한다.
+const koCopy = createMessageCopy({ messageLocale: "ko-KR", catalog: koCatalog });
+
 
 const ME = "00000000-0000-7000-8000-00000000000A";
 const PEER = "00000000-0000-7000-8000-00000000000b";
@@ -61,7 +67,7 @@ describe("newDmCandidates", () => {
 
 describe("peerDot", () => {
   const now = 1_000;
-  const word = (m: Parameters<typeof peerDot>[0]) => peerDot(m, now)?.label ?? null;
+  const word = (m: Parameters<typeof peerDot>[1]) => peerDot(koCopy, m, now)?.label ?? null;
 
   it("사람: 선언 상태(자리 비움·방해 금지)가 먼저이고 접속 여부와 무관하다", () => {
     expect(word(member({ presenceStatus: "away" }))).toBe("자리 비움");
@@ -96,6 +102,6 @@ describe("peerDot", () => {
   });
 
   it("상대를 모르면 null이다", () => {
-    expect(peerDot(null, now)).toBeNull();
+    expect(peerDot(koCopy, null, now)).toBeNull();
   });
 });

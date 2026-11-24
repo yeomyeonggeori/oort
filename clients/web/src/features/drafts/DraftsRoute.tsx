@@ -42,6 +42,7 @@ import { loadCauseOf } from "@/features/common/loadFailure";
 import { CONNECTION_KEYS } from "@momo/core/features/connection/copyKeys";
 import { Tooltip } from "@/design/ui/tooltip";
 
+import { useFormatMessage } from "@/i18n/useFormatMessage";
 // =============================================================================
 // 크로스채널 초안 패널 (#1901). 쓰다 만 글은 이미 draftStore에 있고, 여기는
 // 그것을 한 목록으로 모아 해당 채널 컴포저로 돌려보낸다. 삭제는 로컬 초안이라
@@ -90,6 +91,7 @@ export function DraftRow({
   onCloseAutoFocus: (event: Event) => void;
   onClick?: MouseEventHandler<HTMLAnchorElement>;
 }) {
+  const formatMessage = useFormatMessage();
   const hoverNone = useHoverNone();
   const [hovered, setHovered] = useState(false);
   const [focusWithin, setFocusWithin] = useState(false);
@@ -149,7 +151,7 @@ export function DraftRow({
               data-numeric
               data-testid="draft-row-time"
             >
-              {relativeLabel(item.atMs, nowMs)}
+              {relativeLabel(formatMessage, item.atMs, nowMs)}
             </span>
           </span>
           <span

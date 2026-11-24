@@ -11,8 +11,14 @@
 // =============================================================================
 
 import { ApiError } from "../../lib/api";
-import { attachParticle } from "../../lib/koreanParticle";
+import { takesFinalForm } from "../../lib/koreanParticle";
+import type { LocaleService } from "../../i18n/context";
+import type { PlainMessageKey } from "../../i18n/keys";
 import type { FilterTabsSpec } from "../common/filterTabs";
+
+// 문구는 `i18n/catalogs/<언어>/search.json`에 있다. 이름·질의가 들어가 문장을 짓는 함수만 `formatMessage`를 첫 인자로 받는다.
+// 조사(이/가)는 이 파일이 받침을 판정해 `josa` 인자로 넘기고, 사전은 그 값으로 고른다(`select`).
+type FormatMessage = LocaleService["formatMessage"];
 
 /** 서버가 400으로 거절하는 문턱(`q must contain at least 2 characters`). */
 export const SEARCH_MIN_CHARS = 2;
@@ -41,7 +47,7 @@ export function isSearchable(raw: string): boolean {
  * 않는다. 이 코드베이스가 이미 세운 규칙이다(features/routing/capability.ts:
  * "원문이 필요한 사람은 네트워크 탭을 본다").
  */
-export const SHORT_QUERY_HINT = `${SEARCH_MIN_CHARS}자 이상 입력하면 찾기 시작합니다.`;
+export const SHORT_QUERY_HINT_KEY = "search.hint.shortQuery" as const;
 
 // ---- 검색 범위 (BT-3 / #1931) ------------------------------------------------
 //
@@ -106,12 +112,12 @@ export interface SearchChannelContext {
  * 이름이 실제로 도움이 되는 자리는 입력 상자의 안내문과 빈 결과 문구이고,
  * 거기서는 잘리지 않는다 — [`searchPlaceholder`], [`noResultsCopy`].
  */
-export function searchScopeLabel(
+export function searchScopeLabelKey(
   scope: SearchScope,
   context: SearchChannelContext | null
-): string {
-  if (scope === "workspace") return "전체";
-  return context?.isDirect ? "이 대화에서" : "이 채널에서";
+): PlainMessageKey {
+  if (scope === "workspace") return "search.scope.workspace";
+  return context?.isDirect ? "search.scope.thisDm" : "search.scope.thisChannel";
 }
 
 /**
@@ -131,9 +137,11 @@ export function searchScopeTabs(
     // 모르면 이름 없이 말한다(R1 M-1): 접근성 이름은 눈으로 읽는 문장보다
     // 내부 식별자를 숨기기 더 쉬운 자리가 아니라, 오히려 확인이 어려운 자리다.
     label:
-      context?.label == null ? "검색 범위" : `검색 범위(${context.label})`,
+      context?.label == null
+        ? { key: "search.scope.tabsLabel" }
+        : { key: "search.scope.tabsLabelNamed", values: { name: context.label } },
     values: SEARCH_SCOPES,
-    labelFor: (scope) => searchScopeLabel(scope, context),
+    labelFor: (scope) => ({ key: searchScopeLabelKey(scope, context) }),
     tabId: (scope) => `search-scope-tab-${scope}`,
     panelId: () => "search-results-panel",
     testId: (scope) => `search-scope-${scope}`,
@@ -264,17 +272,28 @@ export function searchQueryKey(
  * 표면 이름(「메시지 검색」)은 여기 없다. 그것은 그룹 머리글이 한 번 말한다.
  */
 export function searchEntryLabel(
+  formatMessage: FormatMessage,
   scope: SearchScope,
   context: SearchChannelContext | null,
   query: string
 ): string {
-  const named = searchScopeLabel(scope, context);
-  const where = scope === "workspace" ? `${named}에서` : named;
   const trimmed = normalizeQuery(query);
+  const place =
+    scope === "workspace" ? "workspace" : context?.isDirect ? "thisDm" : "thisChannel";
   // 팔레트 줄에도 문단이 붙여넣기될 수 있다. 빈 결과 문구와 같은 자로 자른다.
-  return trimmed === ""
-    ? `${where} 검색`
-    : `${where} '${clampQueryForCopy(trimmed)}' 검색`;
+  if (trimmed === "") {
+    return formatMessage(
+      place === "workspace"
+        ? "search.entry.workspace"
+        : place === "thisDm"
+          ? "search.entry.thisDm"
+          : "search.entry.thisChannel"
+    );
+  }
+  const values = { query: clampQueryForCopy(trimmed) };
+  if (place === "workspace") return formatMessage("search.entry.workspaceQuery", values);
+  if (place === "thisDm") return formatMessage("search.entry.thisDmQuery", values);
+  return formatMessage("search.entry.thisChannelQuery", values);
 }
 
 /**
@@ -331,7 +350,7 @@ export function scopeChannelName(
 ): string | null {
   const target = narrowedTo(scope, context);
   if (target === null) return null;
-  if (target.isDirect) return target.peer === null ? null : `${target.peer}님`;
+  if (target.isDirect) return target.peer;
   return target.label;
 }
 
@@ -343,23 +362,27 @@ export function scopeChannelName(
  * [`noResultsCopy`]가 그 답을 함께 진다 — R1 H-1이 짚은 자리다.
  */
 export function searchPlaceholder(
+  formatMessage: FormatMessage,
   scope: SearchScope,
   context: SearchChannelContext | null
 ): string {
   const target = narrowedTo(scope, context);
-  if (target === null) return "메시지 내용으로 검색";
+  if (target === null) return formatMessage("search.placeholder.default");
   const named = scopeChannelName(scope, context);
   if (named === null) {
     // 이름을 모르는 채로 좁혀 있다. 무엇을 좁혔는지는 칩이 말하고 있으므로
     // 안내문은 그 말을 되풀이한다 — 없는 이름을 지어내지 않는다.
-    return target.isDirect ? "이 대화에서 검색" : "이 채널에서 검색";
+    return formatMessage(
+      target.isDirect ? "search.placeholder.thisDm" : "search.placeholder.thisChannel"
+    );
   }
   // 「과/와」는 짝이 갈리는 조사이지만 여기서는 갈리지 않는다: DM의 `named`는
   // 언제나 「…님」으로 끝나고 ㅁ은 받침이라 답이 늘 「과」다. 사람 이름을 그대로
   // 쓰던 판본이었다면 lib/koreanParticle을 불렀어야 한다.
-  return target.isDirect
-    ? `${named}과의 대화에서 검색`
-    : `${named}에서 검색`;
+  return formatMessage(
+    target.isDirect ? "search.placeholder.dmNamed" : "search.placeholder.channelNamed",
+    { name: named }
+  );
 }
 
 /**
@@ -372,6 +395,7 @@ export function searchPlaceholder(
  * 읽고 검색을 그만두는데, 실제로는 자기가 속하지 않은 채널에 있을 수 있다.
  */
 export function noResultsCopy(
+  formatMessage: FormatMessage,
   query: string,
   scope: SearchScope = "workspace",
   context: SearchChannelContext | null = null
@@ -381,13 +405,14 @@ export function noResultsCopy(
   // 규칙은 이 레포에 이미 있다(lib/koreanParticle, mac에서 이식·호출처 7곳):
   // 뒤따옴표 같은 문장부호를 발음에서 빼므로 `'배포'가`와 `'로그인'이`가 그대로
   // 나온다. 여기서 두 번째 규칙을 세우면 같은 판정이 두 벌로 갈라진다.
+  // 판정은 여기서 하고(`josa`), 사전의 `select`가 이/가를 고른다.
   const quoted = `'${clampQueryForCopy(query)}'`;
-  const subject = attachParticle(quoted, "subject");
+  const josa = takesFinalForm(quoted) ? "final" : "other";
   // 범위를 좁혀 놓고 「찾지 못했습니다」로만 끝내면, 그 말은 워크스페이스
   // 전체에서 못 찾았다는 뜻으로 읽힌다 — 사람은 검색을 그만두는데 실제로는
   // 옆 채널에 있을 수 있다. **어디서** 못 찾았는지가 이 문장의 절반이다.
   if (scopedChannelId(scope, context) === undefined) {
-    return `${subject} 들어간 메시지를 찾지 못했습니다.`;
+    return formatMessage("search.noResults.workspace", { quoted, josa });
   }
   // **어느** 채널에서 못 찾았는지를 이 문장이 진다(R1 H-1).
   //
@@ -398,15 +423,16 @@ export function noResultsCopy(
   //
   // 이름을 모르면 이름 없이 말한다 — 내부 id를 문장에 세우지 않는다(R1 M-1).
   const named = scopeChannelName(scope, context);
-  const where =
-    named === null
-      ? context?.isDirect
-        ? "이 대화에는"
-        : "이 채널에는"
-      : context?.isDirect
-        ? `${named}과의 대화에는`
-        : `${named}에는`;
-  return `${subject} 들어간 메시지가 ${where} 없습니다.`;
+  if (named === null) {
+    return formatMessage(
+      context?.isDirect ? "search.noResults.thisDm" : "search.noResults.thisChannel",
+      { quoted, josa }
+    );
+  }
+  return formatMessage(
+    context?.isDirect ? "search.noResults.dmNamed" : "search.noResults.channelNamed",
+    { quoted, josa, name: named }
+  );
 }
 
 /**
@@ -417,9 +443,8 @@ export function noResultsCopy(
  * 승격은 한 번의 누름이다 — 라우트가 이 라벨로 버튼을 세우고 범위만 갈아 끼운다
  * (질의는 그대로 남으므로 다시 칠 필요가 없다).
  */
-export const ESCALATE_TO_WORKSPACE_DETAIL =
-  "다른 채널에 있었을 수 있습니다. 같은 말로 전체를 찾아볼 수 있습니다.";
-export const ESCALATE_TO_WORKSPACE_LABEL = "전체에서 찾기";
+export const ESCALATE_TO_WORKSPACE_DETAIL_KEY = "search.escalate.detail" satisfies PlainMessageKey;
+export const ESCALATE_TO_WORKSPACE_LABEL_KEY = "search.escalate.label" satisfies PlainMessageKey;
 
 // ---- 좁힌 범위에서 서버가 거절했을 때 (R1 B-3) --------------------------------
 //
@@ -458,18 +483,19 @@ export function isChannelScopeRefusal(
  * 않는다), 못 푼 id를 대신 세우는 것은 M-1이 막은 그 문장이다.
  */
 export function channelScopeRefusalCopy(
+  formatMessage: FormatMessage,
   context: SearchChannelContext | null
 ): { headline: string; detail: string } {
-  const what = context?.isDirect ? "이 대화의" : "이 채널의";
   return {
     // 「을/를」을 피해 「…의 메시지는」으로 짓는다. 앞말이 「대화」인지
     // 「채널」인지에 따라 조사가 갈리지 않는 형태여야 이 문장이 두 갈래에서
     // 같은 규칙으로 선다.
-    headline: `${what} 메시지는 찾을 수 없습니다.`,
+    headline: formatMessage(
+      context?.isDirect ? "search.refusal.headlineDm" : "search.refusal.headlineChannel"
+    ),
     // 세 가지 이유가 하나의 404로 온다. 어느 것인지 모르면서 하나를 고르면
     // 화면이 서버가 하지 않은 말을 하게 되므로, 셋을 셋으로 말한다.
-    detail:
-      "나갔거나, 없어졌거나, 처음부터 볼 수 없는 곳입니다. 같은 말로 전체를 찾아볼 수 있습니다.",
+    detail: formatMessage("search.refusal.detail"),
   };
 }
 
@@ -490,8 +516,7 @@ export function clampQueryForCopy(query: string): string {
   return `${chars.slice(0, QUERY_COPY_MAX_CHARS).join("")}…`;
 }
 
-export const NO_RESULTS_SCOPE_NOTE =
-  "내가 속한 채널의 메시지만 찾습니다. 다른 채널에 있었다면 그 채널에 들어간 뒤 다시 찾아보세요.";
+export const NO_RESULTS_SCOPE_NOTE_KEY = "search.scopeNote.members" satisfies PlainMessageKey;
 
 /** 스니펫을 강조 전/일치/강조 후 셋으로 자른 결과. */
 export interface SnippetSegments {

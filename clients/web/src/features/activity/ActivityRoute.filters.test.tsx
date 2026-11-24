@@ -6,6 +6,9 @@ import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { FeedItem } from "@momo/core/features/inbox/model";
 import { SessionProvider, type SessionContextValue } from "@/app/session";
+import { LocaleProvider } from "@/i18n/LocaleProvider";
+import type { AppLocale } from "@/i18n/localeStore";
+import { koreanLocale } from "@/testing/koLocale";
 import type { Feed } from "@/features/inbox/useInbox";
 import { ActivityRoute } from "./ActivityRoute";
 
@@ -97,15 +100,18 @@ async function mount(): Promise<HTMLElement> {
   document.body.append(host);
   mountedHost = host;
   mountedRoot = createRoot(host);
-  const tree: ReactElement = createElement(
-    SessionProvider,
-    { value: sessionValue() },
-    createElement(
-      MemoryRouter,
-      { initialEntries: ["/activity"] },
-      createElement(ActivityRoute)
-    )
-  );
+  const tree: ReactElement = createElement(LocaleProvider, {
+    locale: koLocale,
+    children: createElement(
+      SessionProvider,
+      { value: sessionValue() },
+      createElement(
+        MemoryRouter,
+        { initialEntries: ["/activity"] },
+        createElement(ActivityRoute)
+      )
+    ),
+  });
   await act(async () => {
     mountedRoot?.render(tree);
     await Promise.resolve();
@@ -113,7 +119,10 @@ async function mount(): Promise<HTMLElement> {
   return host;
 }
 
-beforeAll(() => {
+let koLocale: AppLocale;
+
+beforeAll(async () => {
+  koLocale = await koreanLocale();
   reactActEnvironment.IS_REACT_ACT_ENVIRONMENT = true;
 });
 

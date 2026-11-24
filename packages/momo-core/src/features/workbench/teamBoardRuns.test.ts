@@ -23,6 +23,12 @@ import {
   stateChipLabel,
 } from "./teamBoard";
 
+import { catalog as koCatalog } from "../../i18n/generated/ko-KR";
+import { createMessageCopy } from "../../testkit";
+
+// 낱말은 사전에 있다(#6045). 시험은 한국어 생성물로 풀어 예전과 같은 문장을 그대로 단정한다.
+const ko = createMessageCopy({ messageLocale: "ko-KR", catalog: koCatalog });
+
 const AGENT = "00000000-0000-7000-8000-0000000000aa";
 const HUMAN = "00000000-0000-7000-8000-000000000101";
 const RUN_ID = "00000000-0000-7000-8000-0000000000c1";
@@ -223,14 +229,14 @@ describe("활동 「작업 끝남」: 호스팅 실행 (#3518)", () => {
   const actor = { name: "그록봇", handle: "grok", isAgent: true };
 
   it("끝난 호스팅 실행은 작업 끝남 칩을 통과하고 마지막 단계·결과를 말한다", () => {
-    const item = runItem(hosted, actor, "#agent-lab", 10);
+    const item = runItem(ko, hosted, actor, "#agent-lab", 10);
     expect(matchesActivityFilter(item, "done")).toBe(true);
     expect(item.detail).toBe("PR 올림 · PR #12 · 커밋 1개 · +3 −0");
     expect(item.outcome).toBe("완료");
   });
 
   it("보고가 없는 실행은 예전 문구 그대로다", () => {
-    const item = runItem({ ...hosted, output: undefined }, actor, "#x", 10);
+    const item = runItem(ko, { ...hosted, output: undefined }, actor, "#x", 10);
     expect(item.detail).toBe("2/12 단계");
   });
 });

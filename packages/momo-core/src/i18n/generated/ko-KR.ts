@@ -3966,6 +3966,26 @@ export const catalog: MessageCatalog = {
       "value": "세션"
     }
   ],
+  "directory.count.summary": [
+    {
+      "type": 0,
+      "value": "사람 "
+    },
+    {
+      "type": 2,
+      "value": "people",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": " · 에이전트 "
+    },
+    {
+      "type": 2,
+      "value": "agents",
+      "style": null
+    }
+  ],
   "directory.lifecycle.cancel": [
     {
       "type": 0,
@@ -4244,6 +4264,88 @@ export const catalog: MessageCatalog = {
       "value": "에게만 보여요"
     }
   ],
+  "directory.memberRow.agent": [
+    {
+      "type": 0,
+      "value": "에이전트"
+    }
+  ],
+  "directory.memberRow.agentOwned": [
+    {
+      "type": 0,
+      "value": "에이전트, "
+    },
+    {
+      "type": 1,
+      "value": "owner"
+    },
+    {
+      "type": 0,
+      "value": " 님이 관리"
+    }
+  ],
+  "directory.memberRow.openDm": [
+    {
+      "type": 1,
+      "value": "parts"
+    },
+    {
+      "type": 0,
+      "value": ", 다이렉트 메시지 열기"
+    }
+  ],
+  "directory.openDm.failed": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "님과의 다이렉트 메시지를 열지 못했습니다. 다시 시도하세요."
+    }
+  ],
+  "directory.openDm.forbidden": [
+    {
+      "type": 0,
+      "value": "이 워크스페이스에서 다이렉트 메시지를 열 권한이 없습니다. 워크스페이스 관리자에게 문의하세요."
+    }
+  ],
+  "directory.openDm.network": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "님과의 대화를 열지 못했습니다. "
+    },
+    {
+      "type": 1,
+      "value": "reason"
+    }
+  ],
+  "directory.openDm.notActive": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "님은 이 워크스페이스의 활성 멤버가 아닙니다. 명부를 새로 고친 뒤 다시 시도하세요."
+    }
+  ],
+  "directory.openDm.rateLimited": [
+    {
+      "type": 0,
+      "value": "요청이 너무 잦습니다. 잠시 뒤에 다시 시도하세요."
+    }
+  ],
+  "directory.openDm.self": [
+    {
+      "type": 0,
+      "value": "자기 자신과는 다이렉트 메시지를 열 수 없습니다."
+    }
+  ],
   "directory.profile.close": [
     {
       "type": 0,
@@ -4388,6 +4490,20 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "라우팅 설정"
+    }
+  ],
+  "directory.profile.sheetInactive": [
+    {
+      "type": 0,
+      "value": "이 멤버는 "
+    },
+    {
+      "type": 1,
+      "value": "status"
+    },
+    {
+      "type": 0,
+      "value": " 상태입니다."
     }
   ],
   "directory.profile.title": [
@@ -4566,6 +4682,94 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "역할 고르기"
+    }
+  ],
+  "directory.roleChange.adminGrant": [
+    {
+      "type": 0,
+      "value": "관리자는 관리자나 소유자 역할을 부여할 수 없습니다."
+    }
+  ],
+  "directory.roleChange.equalOrHigher": [
+    {
+      "type": 0,
+      "value": "같거나 높은 역할의 멤버는 바꿀 수 없습니다."
+    }
+  ],
+  "directory.roleChange.failed": [
+    {
+      "type": 0,
+      "value": "역할을 바꾸지 못했습니다. 다시 시도하세요."
+    }
+  ],
+  "directory.roleChange.forbidden": [
+    {
+      "type": 0,
+      "value": "이 워크스페이스에서 역할을 바꿀 권한이 없습니다."
+    }
+  ],
+  "directory.roleChange.invalid": [
+    {
+      "type": 0,
+      "value": "역할을 바꿀 수 없습니다. 다른 역할을 고른 뒤 다시 시도하세요."
+    }
+  ],
+  "directory.roleChange.lastOwner": [
+    {
+      "type": 0,
+      "value": "마지막 소유자의 역할은 내릴 수 없습니다. 다른 멤버를 소유자로 지정한 뒤 다시 시도하세요."
+    }
+  ],
+  "directory.roleChange.network": [
+    {
+      "type": 0,
+      "value": "역할을 바꾸지 못했습니다. "
+    },
+    {
+      "type": 1,
+      "value": "reason"
+    }
+  ],
+  "directory.roleChange.notFound": [
+    {
+      "type": 0,
+      "value": "이 멤버를 명부에서 찾지 못했습니다. 명부를 새로 고친 뒤 다시 시도하세요."
+    }
+  ],
+  "directory.roleChange.rateLimited": [
+    {
+      "type": 0,
+      "value": "요청이 너무 잦습니다. 잠시 뒤에 다시 시도하세요."
+    }
+  ],
+  "directory.roleChange.self": [
+    {
+      "type": 0,
+      "value": "자기 자신의 역할은 바꿀 수 없습니다."
+    }
+  ],
+  "directory.status.deleted": [
+    {
+      "type": 0,
+      "value": "삭제됨"
+    }
+  ],
+  "directory.status.inactive": [
+    {
+      "type": 0,
+      "value": "비활성"
+    }
+  ],
+  "directory.status.invited": [
+    {
+      "type": 0,
+      "value": "초대됨"
+    }
+  ],
+  "directory.status.suspended": [
+    {
+      "type": 0,
+      "value": "정지됨"
     }
   ],
   "expressions.add.adminsOnly": [
@@ -6740,10 +6944,518 @@ export const catalog: MessageCatalog = {
       "value": "참가자 기다리는 중"
     }
   ],
+  "inbox.actionType.fileWriteReindex": [
+    {
+      "type": 0,
+      "value": "파일 쓰기와 재색인"
+    }
+  ],
+  "inbox.actionType.messageSend": [
+    {
+      "type": 0,
+      "value": "메시지 전송"
+    }
+  ],
+  "inbox.actionType.workExec": [
+    {
+      "type": 0,
+      "value": "명령 실행"
+    }
+  ],
+  "inbox.actionType.workSpawn": [
+    {
+      "type": 0,
+      "value": "작업 실행"
+    }
+  ],
+  "inbox.activity.filterAll": [
+    {
+      "type": 0,
+      "value": "전체"
+    }
+  ],
+  "inbox.activity.filterApprovals": [
+    {
+      "type": 0,
+      "value": "승인"
+    }
+  ],
+  "inbox.activity.filterDone": [
+    {
+      "type": 0,
+      "value": "작업 끝남"
+    }
+  ],
+  "inbox.activity.filterMine": [
+    {
+      "type": 0,
+      "value": "내 에이전트"
+    }
+  ],
+  "inbox.activity.tabsLabel": [
+    {
+      "type": 0,
+      "value": "활동 필터"
+    }
+  ],
   "inbox.approval.open": [
     {
       "type": 0,
       "value": "열기"
+    }
+  ],
+  "inbox.deadline.daysLeft": [
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "일 후 만료"
+    }
+  ],
+  "inbox.deadline.hoursLeft": [
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "시간 후 만료"
+    }
+  ],
+  "inbox.deadline.minutesLeft": [
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "분 후 만료"
+    }
+  ],
+  "inbox.deadline.passed": [
+    {
+      "type": 0,
+      "value": "기한 지남"
+    }
+  ],
+  "inbox.feedApproval.irreversible": [
+    {
+      "type": 0,
+      "value": "되돌릴 수 없음"
+    }
+  ],
+  "inbox.feedApproval.predicate": [
+    {
+      "type": 1,
+      "value": "action"
+    },
+    {
+      "type": 0,
+      "value": " 허가를 요청했어요"
+    }
+  ],
+  "inbox.feedMention.predicate": [
+    {
+      "type": 0,
+      "value": "나를 불렀어요"
+    }
+  ],
+  "inbox.feedRun.outcomeFailed": [
+    {
+      "type": 0,
+      "value": "실패"
+    }
+  ],
+  "inbox.feedRun.outcomePaused": [
+    {
+      "type": 0,
+      "value": "멈춤"
+    }
+  ],
+  "inbox.feedRun.outcomeSucceeded": [
+    {
+      "type": 0,
+      "value": "완료"
+    }
+  ],
+  "inbox.feedRun.outcomeTimedOut": [
+    {
+      "type": 0,
+      "value": "응답 없음"
+    }
+  ],
+  "inbox.feedRun.predicateTitled": [
+    {
+      "type": 0,
+      "value": "\""
+    },
+    {
+      "type": 1,
+      "value": "title"
+    },
+    {
+      "type": 0,
+      "value": "\" 작업을 실행했습니다"
+    }
+  ],
+  "inbox.feedRun.predicateUntitled": [
+    {
+      "type": 0,
+      "value": "작업을 실행했습니다"
+    }
+  ],
+  "inbox.feedRun.steps": [
+    {
+      "type": 2,
+      "value": "step",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "/"
+    },
+    {
+      "type": 2,
+      "value": "max",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": " 단계"
+    }
+  ],
+  "inbox.filter.agents": [
+    {
+      "type": 0,
+      "value": "에이전트"
+    }
+  ],
+  "inbox.filter.mentions": [
+    {
+      "type": 0,
+      "value": "멘션"
+    }
+  ],
+  "inbox.filter.needsAction": [
+    {
+      "type": 0,
+      "value": "결정 대기"
+    }
+  ],
+  "inbox.filter.tabsLabel": [
+    {
+      "type": 0,
+      "value": "인박스 필터"
+    }
+  ],
+  "inbox.filter.tabWithCount": [
+    {
+      "type": 1,
+      "value": "label"
+    },
+    {
+      "type": 0,
+      "value": ", "
+    },
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "개"
+    }
+  ],
+  "inbox.mailbox.actorMe": [
+    {
+      "type": 0,
+      "value": "나"
+    }
+  ],
+  "inbox.mailbox.actorThread": [
+    {
+      "type": 0,
+      "value": "스레드"
+    }
+  ],
+  "inbox.mailbox.ariaLabel": [
+    {
+      "type": 5,
+      "value": "unread",
+      "options": {
+        "many": {
+          "value": [
+            {
+              "type": 0,
+              "value": "안 읽음 "
+            },
+            {
+              "type": 2,
+              "value": "count",
+              "style": null
+            },
+            {
+              "type": 0,
+              "value": "개, "
+            }
+          ]
+        },
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "안 읽음, "
+            }
+          ]
+        },
+        "other": {
+          "value": []
+        }
+      }
+    },
+    {
+      "type": 5,
+      "value": "showKind",
+      "options": {
+        "yes": {
+          "value": [
+            {
+              "type": 1,
+              "value": "kind"
+            },
+            {
+              "type": 0,
+              "value": ", "
+            }
+          ]
+        },
+        "other": {
+          "value": []
+        }
+      }
+    },
+    {
+      "type": 1,
+      "value": "source"
+    },
+    {
+      "type": 0,
+      "value": ", "
+    },
+    {
+      "type": 1,
+      "value": "actor"
+    },
+    {
+      "type": 0,
+      "value": ", "
+    },
+    {
+      "type": 1,
+      "value": "time"
+    },
+    {
+      "type": 0,
+      "value": ", "
+    },
+    {
+      "type": 1,
+      "value": "preview"
+    }
+  ],
+  "inbox.mailbox.filterAll": [
+    {
+      "type": 0,
+      "value": "전체"
+    }
+  ],
+  "inbox.mailbox.filterDm": [
+    {
+      "type": 0,
+      "value": "DM"
+    }
+  ],
+  "inbox.mailbox.filterMention": [
+    {
+      "type": 0,
+      "value": "멘션"
+    }
+  ],
+  "inbox.mailbox.filterReply": [
+    {
+      "type": 0,
+      "value": "답글"
+    }
+  ],
+  "inbox.mailbox.filterTask": [
+    {
+      "type": 0,
+      "value": "처리할 일"
+    }
+  ],
+  "inbox.mailbox.filterThread": [
+    {
+      "type": 0,
+      "value": "스레드"
+    }
+  ],
+  "inbox.mailbox.filterUnread": [
+    {
+      "type": 0,
+      "value": "안 읽음"
+    }
+  ],
+  "inbox.mailbox.previewMine": [
+    {
+      "type": 0,
+      "value": "나: "
+    },
+    {
+      "type": 1,
+      "value": "text"
+    }
+  ],
+  "inbox.mailbox.threadPreview": [
+    {
+      "type": 0,
+      "value": "내 글에 답글 "
+    },
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "개: "
+    },
+    {
+      "type": 1,
+      "value": "text"
+    }
+  ],
+  "inbox.mailboxType.dm": [
+    {
+      "type": 0,
+      "value": "DM · "
+    },
+    {
+      "type": 1,
+      "value": "channel"
+    }
+  ],
+  "inbox.mailboxType.mention": [
+    {
+      "type": 0,
+      "value": "멘션 · "
+    },
+    {
+      "type": 1,
+      "value": "channel"
+    }
+  ],
+  "inbox.mailboxType.reply": [
+    {
+      "type": 0,
+      "value": "답글 · "
+    },
+    {
+      "type": 1,
+      "value": "channel"
+    }
+  ],
+  "inbox.mailboxType.task": [
+    {
+      "type": 0,
+      "value": "처리할 일 · 승인 요청"
+    }
+  ],
+  "inbox.mailboxType.thread": [
+    {
+      "type": 0,
+      "value": "스레드 · "
+    },
+    {
+      "type": 1,
+      "value": "channel"
+    }
+  ],
+  "inbox.preview.deleted": [
+    {
+      "type": 0,
+      "value": "삭제된 메시지예요."
+    }
+  ],
+  "inbox.preview.empty": [
+    {
+      "type": 0,
+      "value": "내용 없는 메시지예요."
+    }
+  ],
+  "inbox.reason.approvalPending": [
+    {
+      "type": 0,
+      "value": "에이전트가 실행 전에 사람의 허가를 요청했고, 내가 이 채널의 멤버입니다."
+    }
+  ],
+  "inbox.reason.approvalSettled": [
+    {
+      "type": 0,
+      "value": "승인 원장에 기록된 결정입니다."
+    }
+  ],
+  "inbox.reason.dm": [
+    {
+      "type": 0,
+      "value": "DM으로 온 메시지예요."
+    }
+  ],
+  "inbox.reason.dmMine": [
+    {
+      "type": 0,
+      "value": "내가 보낸 마지막 말이 있는 DM이에요."
+    }
+  ],
+  "inbox.reason.mention": [
+    {
+      "type": 0,
+      "value": "메시지에서 나를 불러 서버가 멘션으로 기록했어요."
+    }
+  ],
+  "inbox.reason.mentionServer": [
+    {
+      "type": 0,
+      "value": "메시지에서 나를 불렀어요."
+    }
+  ],
+  "inbox.reason.reply": [
+    {
+      "type": 0,
+      "value": "내 글에 답하거나 인용했어요."
+    }
+  ],
+  "inbox.reason.run": [
+    {
+      "type": 0,
+      "value": "에이전트 작업 실행 기록입니다."
+    }
+  ],
+  "inbox.reason.threadNewReply": [
+    {
+      "type": 0,
+      "value": "내가 쓴 글에 새 답글이 달렸어요."
+    }
+  ],
+  "inbox.reason.threadParticipant": [
+    {
+      "type": 0,
+      "value": "내가 참여한 스레드에 새 답글이 달렸어요."
     }
   ],
   "inbox.source.channelUnknown": [
@@ -6811,6 +7523,147 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "스레드"
+    }
+  ],
+  "inbox.time.daysAgo": [
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "일 전"
+    }
+  ],
+  "inbox.time.hoursAgo": [
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "시간 전"
+    }
+  ],
+  "inbox.time.justNow": [
+    {
+      "type": 0,
+      "value": "방금"
+    }
+  ],
+  "inbox.time.minutesAgo": [
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "분 전"
+    }
+  ],
+  "inbox.toolAction.fallback": [
+    {
+      "type": 0,
+      "value": "에이전트 도구 실행"
+    }
+  ],
+  "inbox.toolAction.sessionEnd": [
+    {
+      "type": 0,
+      "value": "작업 세션 종료"
+    }
+  ],
+  "inbox.toolAction.sessionStart": [
+    {
+      "type": 0,
+      "value": "작업 세션 시작"
+    }
+  ],
+  "inbox.workspaceAction.agentRename": [
+    {
+      "type": 0,
+      "value": "에이전트 이름 바꾸기"
+    }
+  ],
+  "inbox.workspaceAction.channelCreate": [
+    {
+      "type": 0,
+      "value": "채널 만들기"
+    }
+  ],
+  "inbox.workspaceAction.channelMemberAdd": [
+    {
+      "type": 0,
+      "value": "채널에 멤버 추가"
+    }
+  ],
+  "inbox.workspaceAction.fallback": [
+    {
+      "type": 0,
+      "value": "워크스페이스 변경"
+    }
+  ],
+  "inbox.workspaceAction.hostedChannelsGrant": [
+    {
+      "type": 0,
+      "value": "승인 채널 늘리기"
+    }
+  ],
+  "inbox.workspaceAction.inviteCreate": [
+    {
+      "type": 0,
+      "value": "초대 링크 만들기"
+    }
+  ],
+  "inbox.workspaceAction.memberAvatarSet": [
+    {
+      "type": 0,
+      "value": "내 프로필 사진 바꾸기"
+    }
+  ],
+  "inbox.workspaceAction.memberDisplayNameSet": [
+    {
+      "type": 0,
+      "value": "내 이름 바꾸기"
+    }
+  ],
+  "inbox.workspaceAction.memoryUpdate": [
+    {
+      "type": 0,
+      "value": "팀 기억 설정 바꾸기"
+    }
+  ],
+  "inbox.workspaceAction.pluginInstall": [
+    {
+      "type": 0,
+      "value": "앱 설치"
+    }
+  ],
+  "inbox.workspaceAction.teamAiRolesSet": [
+    {
+      "type": 0,
+      "value": "도우미 역할 켜고 끄기"
+    }
+  ],
+  "inbox.workspaceAction.unfurlUpdate": [
+    {
+      "type": 0,
+      "value": "링크 미리보기 설정 바꾸기"
+    }
+  ],
+  "inbox.workspaceAction.workspaceSettingsUpdate": [
+    {
+      "type": 0,
+      "value": "워크스페이스 설정 바꾸기"
+    }
+  ],
+  "inbox.workspaceAction.workTierUpdate": [
+    {
+      "type": 0,
+      "value": "워크스페이스 기본 재개 정책 바꾸기"
     }
   ],
   "memberList.empty.detail": [
@@ -8013,6 +8866,498 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "터미널에 나온 코드를 브라우저에 넣어 주세요."
+    }
+  ],
+  "presence.dnd.hint": [
+    {
+      "type": 0,
+      "value": "다른 사람에게 보이는 표시예요. 알림도 함께 멈춰요."
+    }
+  ],
+  "presence.dnd.hintPick": [
+    {
+      "type": 0,
+      "value": "다른 사람에게 보이는 표시예요. 알림도 함께 멈춰요. 누르면 기한을 골라요."
+    }
+  ],
+  "presence.menu.cardLabel": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": ". "
+    },
+    {
+      "type": 1,
+      "value": "trigger"
+    }
+  ],
+  "presence.menu.cardLabelCustom": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": ". "
+    },
+    {
+      "type": 1,
+      "value": "trigger"
+    },
+    {
+      "type": 0,
+      "value": ". "
+    },
+    {
+      "type": 1,
+      "value": "custom"
+    }
+  ],
+  "presence.menu.label": [
+    {
+      "type": 0,
+      "value": "내 상태"
+    }
+  ],
+  "presence.menu.statusLine": [
+    {
+      "type": 0,
+      "value": "내 상태: "
+    },
+    {
+      "type": 1,
+      "value": "status"
+    }
+  ],
+  "presence.menu.triggerLabel": [
+    {
+      "type": 0,
+      "value": "내 상태: "
+    },
+    {
+      "type": 1,
+      "value": "status"
+    },
+    {
+      "type": 0,
+      "value": " (변경하려면 누르세요)"
+    }
+  ],
+  "presence.pauseBanner.dndAction": [
+    {
+      "type": 0,
+      "value": "풀기"
+    }
+  ],
+  "presence.pauseBanner.dndLabel": [
+    {
+      "type": 1,
+      "value": "title"
+    },
+    {
+      "type": 0,
+      "value": " · "
+    },
+    {
+      "type": 1,
+      "value": "action"
+    }
+  ],
+  "presence.pauseBanner.dndTitle": [
+    {
+      "type": 0,
+      "value": "상태는 아직 방해 금지예요"
+    }
+  ],
+  "presence.pauseBanner.pausedLabel": [
+    {
+      "type": 1,
+      "value": "title"
+    },
+    {
+      "type": 0,
+      "value": " · "
+    },
+    {
+      "type": 1,
+      "value": "detail"
+    },
+    {
+      "type": 0,
+      "value": " · "
+    },
+    {
+      "type": 1,
+      "value": "action"
+    }
+  ],
+  "presence.pauseBanner.pausedTitle": [
+    {
+      "type": 0,
+      "value": "알림 일시 중지 중"
+    }
+  ],
+  "presence.pauseBanner.resumeAction": [
+    {
+      "type": 0,
+      "value": "다시 켜기"
+    }
+  ],
+  "presence.pausePreset.custom": [
+    {
+      "type": 0,
+      "value": "직접 고르기"
+    }
+  ],
+  "presence.pausePreset.hour1": [
+    {
+      "type": 0,
+      "value": "1시간"
+    }
+  ],
+  "presence.pausePreset.hour2": [
+    {
+      "type": 0,
+      "value": "2시간"
+    }
+  ],
+  "presence.pausePreset.min30": [
+    {
+      "type": 0,
+      "value": "30분"
+    }
+  ],
+  "presence.pausePreset.nextMonday": [
+    {
+      "type": 0,
+      "value": "다음 주 월요일 오전 9시까지"
+    }
+  ],
+  "presence.pausePreset.tomorrow": [
+    {
+      "type": 0,
+      "value": "내일 오전 9시까지"
+    }
+  ],
+  "presence.pauseUntil.activeNote": [
+    {
+      "type": 0,
+      "value": "이 워크스페이스의 알림을 받지 않아요."
+    }
+  ],
+  "presence.pauseUntil.changeAction": [
+    {
+      "type": 0,
+      "value": "기한 바꾸기"
+    }
+  ],
+  "presence.pauseUntil.dndConfirm": [
+    {
+      "type": 0,
+      "value": "방해 금지 켜기"
+    }
+  ],
+  "presence.pauseUntil.dndDescription": [
+    {
+      "type": 0,
+      "value": "다른 사람에게 보이는 표시예요. 알림도 함께 멈춰요. 시각이 지나면 저절로 풀려요."
+    }
+  ],
+  "presence.pauseUntil.dndPresetHint": [
+    {
+      "type": 0,
+      "value": "누르면 이 시각까지 방해 금지를 켜요."
+    }
+  ],
+  "presence.pauseUntil.dndTitle": [
+    {
+      "type": 0,
+      "value": "방해 금지를 언제까지 켤까요?"
+    }
+  ],
+  "presence.pauseUntil.invalid": [
+    {
+      "type": 0,
+      "value": "날짜와 시각을 확인하세요."
+    }
+  ],
+  "presence.pauseUntil.labelWithChange": [
+    {
+      "type": 1,
+      "value": "label"
+    },
+    {
+      "type": 0,
+      "value": " · 기한 바꾸기"
+    }
+  ],
+  "presence.pauseUntil.none": [
+    {
+      "type": 0,
+      "value": "기한 없음"
+    }
+  ],
+  "presence.pauseUntil.noneActionLabel": [
+    {
+      "type": 0,
+      "value": "기한 없음 · 기한 정하기"
+    }
+  ],
+  "presence.pauseUntil.offlineReason": [
+    {
+      "type": 0,
+      "value": "연결이 끊겨 지금은 바꿀 수 없어요."
+    }
+  ],
+  "presence.pauseUntil.optionWithHint": [
+    {
+      "type": 1,
+      "value": "label"
+    },
+    {
+      "type": 0,
+      "value": ", "
+    },
+    {
+      "type": 1,
+      "value": "hint"
+    }
+  ],
+  "presence.pauseUntil.past": [
+    {
+      "type": 0,
+      "value": "지난 시각은 고를 수 없어요. 다른 시각을 고르세요."
+    }
+  ],
+  "presence.pauseUntil.pauseConfirm": [
+    {
+      "type": 0,
+      "value": "알림 멈추기"
+    }
+  ],
+  "presence.pauseUntil.pauseDescription": [
+    {
+      "type": 0,
+      "value": "이 워크스페이스의 알림을 고른 시각까지 받지 않아요. 멘션과 승인 요청도 멈춰요. 시각이 지나면 저절로 다시 와요."
+    }
+  ],
+  "presence.pauseUntil.pausePresetHint": [
+    {
+      "type": 0,
+      "value": "누르면 이 시각까지 알림을 멈춰요."
+    }
+  ],
+  "presence.pauseUntil.pauseTitle": [
+    {
+      "type": 0,
+      "value": "알림을 언제까지 멈출까요?"
+    }
+  ],
+  "presence.pauseUntil.setAction": [
+    {
+      "type": 0,
+      "value": "기한 정하기"
+    }
+  ],
+  "presence.status.away": [
+    {
+      "type": 0,
+      "value": "자리 비움"
+    }
+  ],
+  "presence.status.dnd": [
+    {
+      "type": 0,
+      "value": "방해 금지"
+    }
+  ],
+  "presence.status.offline": [
+    {
+      "type": 0,
+      "value": "오프라인"
+    }
+  ],
+  "presence.status.online": [
+    {
+      "type": 0,
+      "value": "온라인"
+    }
+  ],
+  "presence.statusDialog.clear": [
+    {
+      "type": 0,
+      "value": "상태 지우기"
+    }
+  ],
+  "presence.statusDialog.clearFailed": [
+    {
+      "type": 0,
+      "value": "상태를 지우지 못했습니다. 다시 시도하세요."
+    }
+  ],
+  "presence.statusDialog.closeLabel": [
+    {
+      "type": 0,
+      "value": "상태 설정 닫기"
+    }
+  ],
+  "presence.statusDialog.description": [
+    {
+      "type": 0,
+      "value": "이모지와 짧은 글로 지금 하는 일을 알립니다."
+    }
+  ],
+  "presence.statusDialog.emojiClear": [
+    {
+      "type": 0,
+      "value": "이모지 지우기"
+    }
+  ],
+  "presence.statusDialog.emojiLabel": [
+    {
+      "type": 0,
+      "value": "상태 이모지 고르기"
+    }
+  ],
+  "presence.statusDialog.expiryLabel": [
+    {
+      "type": 0,
+      "value": "만료"
+    }
+  ],
+  "presence.statusDialog.expiryRow": [
+    {
+      "type": 1,
+      "value": "label"
+    },
+    {
+      "type": 0,
+      "value": ", "
+    },
+    {
+      "type": 1,
+      "value": "value"
+    }
+  ],
+  "presence.statusDialog.menuAria": [
+    {
+      "type": 0,
+      "value": "상태 설정, "
+    },
+    {
+      "type": 1,
+      "value": "line"
+    }
+  ],
+  "presence.statusDialog.menuLabel": [
+    {
+      "type": 0,
+      "value": "상태 설정"
+    }
+  ],
+  "presence.statusDialog.save": [
+    {
+      "type": 0,
+      "value": "상태 저장"
+    }
+  ],
+  "presence.statusDialog.saveFailed": [
+    {
+      "type": 0,
+      "value": "상태를 저장하지 못했습니다. 다시 시도하세요."
+    }
+  ],
+  "presence.statusDialog.saving": [
+    {
+      "type": 0,
+      "value": "저장 중…"
+    }
+  ],
+  "presence.statusDialog.textLabel": [
+    {
+      "type": 0,
+      "value": "상태 글"
+    }
+  ],
+  "presence.statusDialog.textPlaceholder": [
+    {
+      "type": 0,
+      "value": "지금 하는 일"
+    }
+  ],
+  "presence.statusDialog.title": [
+    {
+      "type": 0,
+      "value": "상태 설정"
+    }
+  ],
+  "presence.statusExpiry.custom": [
+    {
+      "type": 0,
+      "value": "시각 고르기"
+    }
+  ],
+  "presence.statusExpiry.hour1": [
+    {
+      "type": 0,
+      "value": "1시간"
+    }
+  ],
+  "presence.statusExpiry.min30": [
+    {
+      "type": 0,
+      "value": "30분"
+    }
+  ],
+  "presence.statusExpiry.none": [
+    {
+      "type": 0,
+      "value": "지우지 않음"
+    }
+  ],
+  "presence.statusExpiry.today": [
+    {
+      "type": 0,
+      "value": "오늘까지"
+    }
+  ],
+  "presence.statusPreset.commute": [
+    {
+      "type": 0,
+      "value": "이동 중"
+    }
+  ],
+  "presence.statusPreset.meeting": [
+    {
+      "type": 0,
+      "value": "회의 중"
+    }
+  ],
+  "presence.statusPreset.sick": [
+    {
+      "type": 0,
+      "value": "병가"
+    }
+  ],
+  "presence.statusPreset.vacation": [
+    {
+      "type": 0,
+      "value": "휴가"
+    }
+  ],
+  "presence.statusPreset.wfh": [
+    {
+      "type": 0,
+      "value": "재택"
+    }
+  ],
+  "presence.write.failed": [
+    {
+      "type": 0,
+      "value": "상태를 바꾸지 못했습니다. 다시 시도하세요."
     }
   ],
   "readState.markUnread.action": [
@@ -10367,6 +11712,78 @@ export const catalog: MessageCatalog = {
       "value": "이 답글이 달린 스레드 열기"
     }
   ],
+  "search.entry.thisChannel": [
+    {
+      "type": 0,
+      "value": "이 채널에서 검색"
+    }
+  ],
+  "search.entry.thisChannelQuery": [
+    {
+      "type": 0,
+      "value": "이 채널에서 '"
+    },
+    {
+      "type": 1,
+      "value": "query"
+    },
+    {
+      "type": 0,
+      "value": "' 검색"
+    }
+  ],
+  "search.entry.thisDm": [
+    {
+      "type": 0,
+      "value": "이 대화에서 검색"
+    }
+  ],
+  "search.entry.thisDmQuery": [
+    {
+      "type": 0,
+      "value": "이 대화에서 '"
+    },
+    {
+      "type": 1,
+      "value": "query"
+    },
+    {
+      "type": 0,
+      "value": "' 검색"
+    }
+  ],
+  "search.entry.workspace": [
+    {
+      "type": 0,
+      "value": "전체에서 검색"
+    }
+  ],
+  "search.entry.workspaceQuery": [
+    {
+      "type": 0,
+      "value": "전체에서 '"
+    },
+    {
+      "type": 1,
+      "value": "query"
+    },
+    {
+      "type": 0,
+      "value": "' 검색"
+    }
+  ],
+  "search.escalate.detail": [
+    {
+      "type": 0,
+      "value": "다른 채널에 있었을 수 있습니다. 같은 말로 전체를 찾아볼 수 있습니다."
+    }
+  ],
+  "search.escalate.label": [
+    {
+      "type": 0,
+      "value": "전체에서 찾기"
+    }
+  ],
   "search.group.channels": [
     {
       "type": 0,
@@ -10405,6 +11822,17 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "사람"
+    }
+  ],
+  "search.hint.shortQuery": [
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "자 이상 입력하면 찾기 시작합니다."
     }
   ],
   "search.input.clearLabel": [
@@ -10453,6 +11881,182 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "사람"
+    }
+  ],
+  "search.noResults.channelNamed": [
+    {
+      "type": 1,
+      "value": "quoted"
+    },
+    {
+      "type": 5,
+      "value": "josa",
+      "options": {
+        "final": {
+          "value": [
+            {
+              "type": 0,
+              "value": "이"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "가"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": 0,
+      "value": " 들어간 메시지가 "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "에는 없습니다."
+    }
+  ],
+  "search.noResults.dmNamed": [
+    {
+      "type": 1,
+      "value": "quoted"
+    },
+    {
+      "type": 5,
+      "value": "josa",
+      "options": {
+        "final": {
+          "value": [
+            {
+              "type": 0,
+              "value": "이"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "가"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": 0,
+      "value": " 들어간 메시지가 "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "님과의 대화에는 없습니다."
+    }
+  ],
+  "search.noResults.thisChannel": [
+    {
+      "type": 1,
+      "value": "quoted"
+    },
+    {
+      "type": 5,
+      "value": "josa",
+      "options": {
+        "final": {
+          "value": [
+            {
+              "type": 0,
+              "value": "이"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "가"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": 0,
+      "value": " 들어간 메시지가 이 채널에는 없습니다."
+    }
+  ],
+  "search.noResults.thisDm": [
+    {
+      "type": 1,
+      "value": "quoted"
+    },
+    {
+      "type": 5,
+      "value": "josa",
+      "options": {
+        "final": {
+          "value": [
+            {
+              "type": 0,
+              "value": "이"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "가"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": 0,
+      "value": " 들어간 메시지가 이 대화에는 없습니다."
+    }
+  ],
+  "search.noResults.workspace": [
+    {
+      "type": 1,
+      "value": "quoted"
+    },
+    {
+      "type": 5,
+      "value": "josa",
+      "options": {
+        "final": {
+          "value": [
+            {
+              "type": 0,
+              "value": "이"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "가"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": 0,
+      "value": " 들어간 메시지를 찾지 못했습니다."
     }
   ],
   "search.picker.agent": [
@@ -10513,6 +12117,44 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "어느 대화에서 찾을까요"
+    }
+  ],
+  "search.placeholder.channelNamed": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "에서 검색"
+    }
+  ],
+  "search.placeholder.default": [
+    {
+      "type": 0,
+      "value": "메시지 내용으로 검색"
+    }
+  ],
+  "search.placeholder.dmNamed": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "님과의 대화에서 검색"
+    }
+  ],
+  "search.placeholder.thisChannel": [
+    {
+      "type": 0,
+      "value": "이 채널에서 검색"
+    }
+  ],
+  "search.placeholder.thisDm": [
+    {
+      "type": 0,
+      "value": "이 대화에서 검색"
     }
   ],
   "search.recent.clearAll": [
@@ -10589,6 +12231,24 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": " 다시 찾기"
+    }
+  ],
+  "search.refusal.detail": [
+    {
+      "type": 0,
+      "value": "나갔거나, 없어졌거나, 처음부터 볼 수 없는 곳입니다. 같은 말로 전체를 찾아볼 수 있습니다."
+    }
+  ],
+  "search.refusal.headlineChannel": [
+    {
+      "type": 0,
+      "value": "이 채널의 메시지는 찾을 수 없습니다."
+    }
+  ],
+  "search.refusal.headlineDm": [
+    {
+      "type": 0,
+      "value": "이 대화의 메시지는 찾을 수 없습니다."
     }
   ],
   "search.row.agentLabel": [
@@ -10739,6 +12399,50 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "찾을 대화 고르기"
+    }
+  ],
+  "search.scope.tabsLabel": [
+    {
+      "type": 0,
+      "value": "검색 범위"
+    }
+  ],
+  "search.scope.tabsLabelNamed": [
+    {
+      "type": 0,
+      "value": "검색 범위("
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "search.scope.thisChannel": [
+    {
+      "type": 0,
+      "value": "이 채널에서"
+    }
+  ],
+  "search.scope.thisDm": [
+    {
+      "type": 0,
+      "value": "이 대화에서"
+    }
+  ],
+  "search.scope.workspace": [
+    {
+      "type": 0,
+      "value": "전체"
+    }
+  ],
+  "search.scopeNote.members": [
+    {
+      "type": 0,
+      "value": "내가 속한 채널의 메시지만 찾습니다. 다른 채널에 있었다면 그 채널에 들어간 뒤 다시 찾아보세요."
     }
   ],
   "search.state.errorDetail": [

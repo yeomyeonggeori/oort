@@ -32,6 +32,7 @@ import {
 import { ConfirmButton } from "./SettingsFields";
 import { SettingsSection } from "./shell/SettingsSection";
 import { CardBody } from "./workTierPolicy";
+import { useFormatMessage } from "@/i18n/useFormatMessage";
 import { BlockedReason, type BlockedFrame } from "@/features/common/BlockedReason";
 
 // Reading this as: settings for internal team users on web+Tauri,
@@ -79,6 +80,7 @@ export function DevAccessList({
   onStartCreate?: () => void;
 }) {
   const client = useQueryClient();
+  const formatMessage = useFormatMessage();
   const [view, setView] = useState<DevListScope>("mine");
   // 권한이 사라졌는데 전체 보기에 머무는 일은 없다.
   const scope: DevListScope = canManageAll ? view : "mine";
@@ -102,6 +104,7 @@ export function DevAccessList({
       own,
       row: devCredentialRow(credential, {
         now,
+        formatMessage,
         ...(scope === "all"
           ? { memberName: own ? "나" : memberLabel(roster, credential.memberId) }
           : {}),

@@ -1,10 +1,11 @@
 import { useEffect, useState } from "react";
-import { PRESENCE_WRITE_FAILED } from "@momo/core/features/presence/model";
+import { PRESENCE_WRITE_FAILED_KEY } from "@momo/core/features/presence/model";
 import type { RosterMember } from "@momo/core/lib/api";
 import type { DialogFocusTarget } from "@/design/ui/dialog";
 import { PauseUntilDialog } from "@/features/settings/PauseUntilDialog";
 import { useSelfPresenceWrite } from "./useSelfPresenceWrite";
 
+import { useFormatMessage } from "@/i18n/useFormatMessage";
 // =============================================================================
 // 방해 금지의 기한 다이얼로그 (ADR-0204 D2, #2899). 프로필 메뉴의 「방해 금지」 항목이
 // 연다. 방해 금지는 기한을 고르고 나서야 켜지고, 쓰기는 `PUT /presence`
@@ -31,6 +32,7 @@ export function PresenceDndDialog({
   /** 시험이 시계를 고정한다. */
   nowMs?: number;
 }) {
+  const formatMessage = useFormatMessage();
   const write = useSelfPresenceWrite(workspaceId, selfMemberId);
   const [failure, setFailure] = useState<string | null>(null);
 
@@ -58,7 +60,7 @@ export function PresenceDndDialog({
           { status: "dnd", dndUntilMs: untilMs },
           {
             onSuccess: () => onOpenChange(false),
-            onError: () => setFailure(PRESENCE_WRITE_FAILED),
+            onError: () => setFailure(formatMessage(PRESENCE_WRITE_FAILED_KEY)),
           }
         );
       }}
