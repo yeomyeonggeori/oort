@@ -1,11 +1,16 @@
 import {requireOptionalNativeModule} from 'expo-modules-core';
-import {DEFAULT_ACTION_IDENTIFIER} from 'expo-notifications';
+import {
+  DEFAULT_ACTION_IDENTIFIER,
+  dismissNotificationAsync,
+  getPresentedNotificationsAsync,
+} from 'expo-notifications';
 
 import {PUSH_ACTION, PUSH_ACTION_NATIVE_MODULE} from '../src/push/contract';
 import {approvalNotificationIds} from '../src/push/approvalNotifications';
 import {parsePushEnvelope, pushPayloadOf} from '../src/push/envelope';
-import {nativeApprovalHandlerAttached} from '../src/push/native';
+import {nativeApprovalHandlerAttached, nativeQueuedReplyStore} from '../src/push/native';
 import {handlePushResponse} from '../src/push/notifications';
+import {drainQueuedReplies} from '../src/push/queuedReplies';
 import {tapArrival} from '../src/push/tapArrival';
 
 // =============================================================================
@@ -25,6 +30,7 @@ const OTHER_WS = '22222222-2222-4222-8222-222222222222';
 const CHANNEL = '33333333-3333-4333-8333-333333333333';
 const MESSAGE = '44444444-4444-4444-8444-444444444444';
 const APPROVAL = '55555555-5555-4555-8555-555555555555';
+const ME = '77777777-7777-4777-8777-777777777777';
 
 const mockDecideApproval = jest.fn();
 const mockSendMessage = jest.fn();
@@ -149,16 +155,33 @@ describe('처리기가 붙어 있으면 JS 는 승인·거절에서 물러난다
   });
 });
 
-describe('답장을 처리기가 남기는 빌드에서는 JS 가 답장을 보내지 않는다 (#6036)', () => {
+describe('답장은 처리기가 **이 응답을 남겼을 때만** JS 가 보내지 않는다 (#6036 · #6092)', () => {
   const reply = () =>
     remote(
       PUSH_ACTION.quickReply,
       payload({aps: {category: 'momo.message'}, momo: {reason: 'dm', approval_id: undefined}}),
       '알겠어요',
     );
+  const presented = getPresentedNotificationsAsync as unknown as jest.Mock;
+  const dismiss = dismissNotificationAsync as unknown as jest.Mock;
 
-  it('처리기가 답장을 맡으면 물러난다 — 보내기는 보관 목록 한 길이다', async () => {
-    nativeModules({handlesApprovalActions: true, handlesReplyActions: true, keepsRepliesNow: () => true});
+  beforeEach(() => {
+    presented.mockReset().mockResolvedValue([]);
+    dismiss.mockClear();
+  });
+
+  /** 처리기가 `apns-1` 응답에 한 일을 말하는 모듈. */
+  function handlerSaid(outcome: string | null, extra: Record<string, unknown> = {}) {
+    nativeModules({
+      handlesApprovalActions: true,
+      handlesReplyActions: true,
+      replyOutcome: (id: string) => (id === 'apns-1' ? outcome : null),
+      ...extra,
+    });
+  }
+
+  it('처리기가 남겼으면 물러난다 — 보내기는 보관 목록 한 길이다', async () => {
+    handlerSaid('kept');
 
     const result = await handlePushResponse(reply(), {signedInWorkspaceId: WS});
 
@@ -167,19 +190,151 @@ describe('답장을 처리기가 남기는 빌드에서는 JS 가 답장을 보�
     expect(mockSendThreadReply).not.toHaveBeenCalled();
   });
 
+  // r1 M1 ㉯: 고치기 전 JS 는 「지금 남기는가」(세션 항목을 새로 읽음)를 물었다. 토큰을 새로 놓는 틈(지우고 → 쓰기)에 물으면
+  // 처리기가 이미 남긴 답장을 JS 도 보냈다(다른 열쇠 → 두 행). 이 모듈은 그 옛 물음에 「아니오」를 답하지만, 처리기는 남겼다.
+  it('처리기가 남긴 뒤 세션 항목이 잠깐 비어 있어도(토큰 다시 놓기) 보내지 않는다', async () => {
+    handlerSaid('kept', {keepsRepliesNow: () => false});
+
+    const result = await handlePushResponse(reply(), {signedInWorkspaceId: WS});
+
+    expect(result.kind).toBe('ignored');
+    expect(mockSendMessage).not.toHaveBeenCalled();
+  });
+
+  // r1 M1 ㉮: 처리기가 남기지 못해 「답장을 보내지 못했어요」를 올린 응답을 JS 가 보냈는데 그 줄이 남았다.
+  it('처리기가 남기지 못했으면 JS 가 보내고, 처리기가 올린 「보내지 못했어요」 줄을 걷는다', async () => {
+    handlerSaid('notKept', {keepsRepliesNow: () => true});
+    presented.mockResolvedValue([
+      {request: {identifier: 'apns-1', content: {categoryIdentifier: null}}},
+    ]);
+
+    const result = await handlePushResponse(reply(), {signedInWorkspaceId: WS});
+
+    expect(result).toEqual({kind: 'replied'});
+    expect(mockSendMessage).toHaveBeenCalledTimes(1);
+    expect(dismiss).toHaveBeenCalledWith('apns-1');
+  });
+
+  it('그 식별자에 새 메시지 알림이 와 있으면(범주 있음) 걷지 않는다 — 우리 줄만 걷는다', async () => {
+    handlerSaid('notKept');
+    presented.mockResolvedValue([
+      {request: {identifier: 'apns-1', content: {categoryIdentifier: 'momo.message'}}},
+    ]);
+
+    await handlePushResponse(reply(), {signedInWorkspaceId: WS});
+
+    expect(mockSendMessage).toHaveBeenCalledTimes(1);
+    expect(dismiss).not.toHaveBeenCalled();
+  });
+
+  it('보내기가 실패하면 「보내지 못했어요」 줄을 그대로 둔다', async () => {
+    handlerSaid('notKept');
+    presented.mockResolvedValue([{request: {identifier: 'apns-1', content: {categoryIdentifier: null}}}]);
+    mockSendMessage.mockRejectedValueOnce(new TypeError('Network request failed'));
+
+    const result = await handlePushResponse(reply(), {signedInWorkspaceId: WS});
+
+    expect(result.kind).toBe('failed');
+    expect(dismiss).not.toHaveBeenCalled();
+  });
+
   it.each([
     ['옛 모듈이라 상수가 없다', {handlesApprovalActions: true}],
-    ['상수가 불리언이 아니다', {handlesApprovalActions: true, handlesReplyActions: 'yes', keepsRepliesNow: () => true}],
-    // 처리기는 붙었지만 자격이 아직 없다(옛 서버 · 세션당 상한 · 로그인 직후): 처리기가 남기지 않으므로 JS 가 보낸다.
-    ['처리기는 있으나 지금은 남기지 않는다(세션 항목 없음)', {handlesApprovalActions: true, handlesReplyActions: true, keepsRepliesNow: () => false}],
+    ['상수가 불리언이 아니다', {handlesApprovalActions: true, handlesReplyActions: 'yes', replyOutcome: () => 'kept'}],
+    ['처리기가 이 응답을 받은 적이 없다', {handlesApprovalActions: true, handlesReplyActions: true, replyOutcome: () => null}],
+    ['모르는 답', {handlesApprovalActions: true, handlesReplyActions: true, replyOutcome: () => 'maybe'}],
     ['묻는 함수가 없다', {handlesApprovalActions: true, handlesReplyActions: true}],
-  ])('%s: 예전처럼 JS 가 보낸다 (대조군)', async (_name, module) => {
+  ])('%s: 예전처럼 JS 가 보내고 아무 줄도 걷지 않는다 (대조군)', async (_name, module) => {
     nativeModules(module);
 
     const result = await handlePushResponse(reply(), {signedInWorkspaceId: WS});
 
     expect(result).toEqual({kind: 'replied'});
     expect(mockSendMessage).toHaveBeenCalledTimes(1);
+    expect(dismiss).not.toHaveBeenCalled();
+  });
+});
+
+describe('처리기가 남긴 직후 JS 가 묻는 차례를 바꿔도 서버에는 한 행이다 (#6092 수용 기준 2)', () => {
+  // 서버: 같은 (채널, 작성자, 열쇠)는 한 행이다(`message_client_idem_uniq`). 행 수 = 서로 다른 열쇠의 수.
+  const rows = () => new Set(mockSendMessage.mock.calls.map(call => call[2] as string)).size;
+  const response = () =>
+    remote(
+      PUSH_ACTION.quickReply,
+      payload({aps: {category: 'momo.message'}, momo: {reason: 'dm', approval_id: undefined}}),
+      '알겠어요',
+    );
+
+  /** 처리기가 한 일: 남겼으면 목록에 항목 하나와 「kept」, 아니면 「notKept」. 그 뒤 세션 항목이 잠깐 비는 틈도 흉내 낸다. */
+  function phone(kept: boolean) {
+    const list = new Map<string, string>();
+    if (kept) {
+      list.set(
+        'aaaaaaaa-0000-4000-8000-00000000000a',
+        JSON.stringify({
+          v: 1,
+          clientMsgId: 'aaaaaaaa-0000-4000-8000-00000000000a',
+          workspaceID: WS,
+          memberID: ME,
+          text: '알겠어요',
+          requestIdentifier: 'apns-1',
+          origin: JSON.stringify(
+            payload({aps: {category: 'momo.message'}, momo: {reason: 'dm', approval_id: undefined}}),
+          ),
+          createdAtMs: Date.now() - 1_000,
+        }),
+      );
+    }
+    nativeModules({
+      handlesApprovalActions: true,
+      handlesReplyActions: true,
+      replyOutcome: (id: string) => (id === 'apns-1' ? (kept ? 'kept' : 'notKept') : null),
+      // 옛 물음(「지금 남기는가」)에는 토큰을 다시 놓는 틈이라 반대로 답한다 — 고치기 전 코드가 이것을 물었다.
+      keepsRepliesNow: () => !kept,
+      queuedReplies: () => [...list.values()],
+      removeQueuedReply: (id: string) => void list.delete(id),
+      markQueuedReplyRefused: () => true,
+      clearQueuedReplies: () => list.clear(),
+    });
+    return list;
+  }
+
+  async function drain() {
+    await drainQueuedReplies({
+      workspaceId: WS,
+      memberId: ME,
+      isCurrent: () => true,
+      copy: {drafted: 'd', notSentTitle: 't', notSentBody: 'b'},
+    }, {
+      store: nativeQueuedReplyStore(),
+      send: async (queued, envelope) => {
+        await mockSendMessage(envelope.workspaceId, envelope.channelId, queued.clientMsgId, queued.text);
+      },
+      now: Date.now,
+      notify: async () => {},
+      dismiss: async () => {},
+    });
+  }
+
+  it.each([
+    ['남김 → JS 가 묻고 → 비우기', true, 'ask-first'],
+    ['남김 → 비우기가 먼저 보내고 지움 → JS 가 물음', true, 'drain-first'],
+    ['못 남김 → JS 가 묻고 → 비우기', false, 'ask-first'],
+    ['못 남김 → 비우기 → JS 가 물음', false, 'drain-first'],
+  ])('%s: 서버 1행', async (_name, kept, order) => {
+    const list = phone(kept as boolean);
+    mockSendMessage.mockResolvedValue({id: 'm'});
+
+    if (order === 'ask-first') {
+      await handlePushResponse(response(), {signedInWorkspaceId: WS});
+      await drain();
+    } else {
+      await drain();
+      await handlePushResponse(response(), {signedInWorkspaceId: WS});
+    }
+
+    expect(rows()).toBe(1);
+    expect(list.size).toBe(0);
   });
 });
 

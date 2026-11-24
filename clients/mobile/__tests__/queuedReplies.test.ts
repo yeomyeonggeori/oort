@@ -3,6 +3,7 @@ import {ApiError} from '@momo/core/lib/api';
 import {
   channelDraftKey,
   readDraft,
+  readDrafts,
   saveDraft,
   threadDraftKey,
 } from '../src/features/conversation/drafts';
@@ -11,10 +12,18 @@ import {
   clearQueuedReplies,
   drainQueuedReplies,
   QUEUED_REPLY_GIVE_UP_MS,
+  QUEUED_REPLY_MAX_AGE_MS,
+  signedInDrainContext,
   type DrainContext,
   type DrainDeps,
   type QueuedReply,
 } from '../src/push/queuedReplies';
+
+// 저장된 세션(지금 들어와 있는 사람). 기본은 없음 — 초안의 글쓴이도 그때는 없음이다(`drafts.ts` `currentAuthor`).
+let mockSession: {member: {id: string}} | null = null;
+jest.mock('../src/storage/secureSession', () => ({
+  getPersistedSession: () => mockSession,
+}));
 
 // =============================================================================
 // #6036 — 잠금 화면 답장의 보관 목록을 비우는 쪽(JS). 네이티브가 남긴 항목을 사람의 세션으로 **같은 열쇠로
@@ -64,6 +73,7 @@ class FakeStore implements QueuedReplyStore {
   items = new Map<string, string>();
   removed: string[] = [];
   cleared = 0;
+  marked: string[] = [];
   constructor(...replies: QueuedReply[]) {
     for (const r of replies) this.items.set(r.clientMsgId, JSON.stringify(r));
   }
@@ -73,6 +83,15 @@ class FakeStore implements QueuedReplyStore {
   remove(id: string) {
     this.removed.push(id);
     this.items.delete(id);
+  }
+  /** Swift `markRefused` 처럼 항목에 거절된 때를 적는다(처음 한 번만). */
+  markRefused(id: string) {
+    const raw = this.items.get(id);
+    if (raw === undefined) return false;
+    this.marked.push(id);
+    const item = JSON.parse(raw) as QueuedReply;
+    this.items.set(id, JSON.stringify({...item, refusedAtMs: item.refusedAtMs ?? NOW}));
+    return true;
   }
   clear() {
     this.cleared += 1;
@@ -93,8 +112,14 @@ function deps(store: FakeStore, send: DrainDeps['send'], now = NOW) {
 }
 
 beforeEach(() => {
+  mockSession = null;
   for (const key of [channelDraftKey(CHANNEL), threadDraftKey(ROOT)]) saveDraft(key, '', NOW);
 });
+
+/** 초안 지도에 이 글이 어느 자리에든 있는가 — 읽는 사람과 상관없이(`readDraft` 는 글쓴이로 거른다). */
+function draftedAnywhere(text: string): boolean {
+  return Object.values(readDrafts()).some(draft => draft.body === text);
+}
 
 describe('보낸다 — 같은 열쇠로, 한 번만', () => {
   it('남긴 열쇠로 보내고, 목록에서 지우고, 「앱을 열면 보내요」 줄을 걷는다', async () => {
@@ -183,14 +208,13 @@ describe('끝내 못 보내면 그 대화의 초안으로 넣고 알린다', () 
     expect(readDraft(channelDraftKey(CHANNEL), NOW)).toBe('');
   });
 
-  it('하루가 지나도록 못 보냈으면(망 실패라도) 초안으로 넘긴다', async () => {
-    const store = new FakeStore(reply({createdAtMs: NOW - QUEUED_REPLY_GIVE_UP_MS}));
-    const d = deps(store, jest.fn().mockRejectedValue(new TypeError('Network request failed')));
+  it('서버가 거절하면 항목에 「거절됨」을 적는다 — 초안 자리가 차 있어 남아도 다시 보내지 않는다', async () => {
+    const store = new FakeStore(reply());
+    const d = deps(store, jest.fn().mockRejectedValue(new ApiError(403, 'forbidden')));
 
     await drainQueuedReplies(context(), d);
 
-    expect(readDraft(channelDraftKey(CHANNEL), NOW)).toBe('곧 갈게요');
-    expect(store.items.size).toBe(0);
+    expect(store.marked).toEqual(['aaaaaaaa-0000-4000-8000-000000000001']);
   });
 
   it('그 자리에 쓰던 초안이 있으면 덮지 않고 목록에 둔다', async () => {
@@ -204,7 +228,104 @@ describe('끝내 못 보내면 그 대화의 초안으로 넣고 알린다', () 
     expect(store.items.size).toBe(1);
     expect(d.notify).not.toHaveBeenCalled();
   });
+
+  // A7-13 수용 기준 4: 고치기 전에는 앞으로 올 때마다 같은 글을 다시 POST 했다(보안 검수 r1 M2 ②).
+  it('거절됐고 초안 자리가 찬 항목: 앱이 세 번 앞으로 와도 보내기는 처음 한 번뿐이고, 자리가 나면 초안으로 간다', async () => {
+    saveDraft(channelDraftKey(CHANNEL), '쓰던 글', NOW);
+    const store = new FakeStore(reply());
+    const send = jest.fn().mockRejectedValue(new ApiError(403, 'forbidden'));
+    const d = deps(store, send);
+
+    for (let foreground = 0; foreground < 3; foreground += 1) {
+      await drainQueuedReplies(context(), d);
+    }
+
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(store.items.size).toBe(1);
+    expect(readDraft(channelDraftKey(CHANNEL), NOW)).toBe('쓰던 글');
+
+    saveDraft(channelDraftKey(CHANNEL), '', NOW);
+    await drainQueuedReplies(context(), d);
+
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(readDraft(channelDraftKey(CHANNEL), NOW)).toBe('곧 갈게요');
+    expect(store.items.size).toBe(0);
+  });
+
+  // A7-13 수용 기준 5: 초안 저장소가 받지 않는 글(비밀 값처럼 보이는 글)은 고치기 전에는 목록에 영원히 남아 앞으로 올
+  // 때마다 다시 보내졌다(r1 M2 ③).
+  it('초안이 받지 않는 글: 목록에서 지우고 「보내지 못했어요」를 한 번 알린다', async () => {
+    const keyShaped = `이거 써요 sk-${'a1'.repeat(12)}`;
+    const store = new FakeStore(reply({text: keyShaped}));
+    const d = deps(store, jest.fn().mockRejectedValue(new ApiError(403, 'forbidden')));
+
+    await drainQueuedReplies(context(), d);
+    await drainQueuedReplies(context(), d);
+
+    expect(store.items.size).toBe(0);
+    expect(d.notify).toHaveBeenCalledTimes(1);
+    expect(d.notify).toHaveBeenCalledWith('apns-1', copy.notSentTitle, copy.notSentBody, origin());
+    expect(draftedAnywhere(keyShaped)).toBe(false);
+  });
+
+  // #6036 보안 검수 r1 L3: 「대화를 나가기 전에 보낸 글」의 재시도는 이미 있는 글이다. 거절로 읽으면 간 글이 초안에 또 든다.
+  it('409 message_before_leave 는 이미 간 글이다 — 조용히 지우고 줄을 걷는다', async () => {
+    const store = new FakeStore(reply());
+    const d = deps(
+      store,
+      jest.fn().mockRejectedValue(new ApiError(409, 'sent before leave', 'message_before_leave')),
+    );
+
+    await drainQueuedReplies(context(), d);
+
+    expect(store.items.size).toBe(0);
+    expect(draftedAnywhere('곧 갈게요')).toBe(false);
+    expect(d.notify).not.toHaveBeenCalled();
+    expect(d.dismiss).toHaveBeenCalledWith('apns-1');
+  });
 });
+
+// ADR-0204 증보 7 A7-13 「수명」: 나이는 남긴 시각부터, 보내기 **전에** 본다. 고치기 전에는 24시간을 보내기가 실패한 뒤에만
+// 봐서 며칠 전 답장도 앱을 열면 그대로 나갔다(r1 M2).
+describe('수명 — 보내기 전에 나이를 본다', () => {
+  it('24시간 이상: 보내지 않고 초안으로 넘긴다(보내기 0 · 초안 1 · 목록 0)', async () => {
+    const store = new FakeStore(reply({createdAtMs: NOW - QUEUED_REPLY_GIVE_UP_MS}));
+    const send = jest.fn(async () => {});
+    const d = deps(store, send);
+
+    await drainQueuedReplies(context(), d);
+
+    expect(send).not.toHaveBeenCalled();
+    expect(readDraft(channelDraftKey(CHANNEL), NOW)).toBe('곧 갈게요');
+    expect(store.items.size).toBe(0);
+    expect(d.notify).toHaveBeenCalledWith('apns-1', copy.drafted, '', origin());
+  });
+
+  it('24시간에 1분 모자라면 보낸다(보내기 1)', async () => {
+    const store = new FakeStore(reply({createdAtMs: NOW - QUEUED_REPLY_GIVE_UP_MS + 60_000}));
+    const send = jest.fn(async () => {});
+    const d = deps(store, send);
+
+    await drainQueuedReplies(context(), d);
+
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(store.items.size).toBe(0);
+    expect(readDraft(channelDraftKey(CHANNEL), NOW)).toBe('');
+  });
+
+  it('7일 이상: 보내지도 초안에 두지도 않고 지운다 — 새로 알리지 않고 줄만 걷는다', async () => {
+    const store = new FakeStore(reply({createdAtMs: NOW - QUEUED_REPLY_MAX_AGE_MS}));
+    const send = jest.fn(async () => {});
+    const d = deps(store, send);
+
+    await drainQueuedReplies(context(), d);
+
+    expect(send).not.toHaveBeenCalled();
+    expect(store.items.size).toBe(0);
+    expect(draftedAnywhere('곧 갈게요')).toBe(false);
+    expect(d.notify).not.toHaveBeenCalled();
+    expect(d.dismiss).toHaveBeenCalledWith('apns-1');
+  });});
 
 describe('남의 답장은 보내지도, 초안으로 두지도 않고 지운다', () => {
   it.each([
@@ -221,6 +342,38 @@ describe('남의 답장은 보내지도, 초안으로 두지도 않고 지운다
     expect(store.items.size).toBe(0);
     expect(readDraft(channelDraftKey(CHANNEL), NOW)).toBe('');
     expect(d.notify).not.toHaveBeenCalled();
+    // 지킬 수 없게 된 「앱을 열면 보내요」 줄은 걷는다(r1 L4). 새 알림은 없다(위).
+    expect(d.dismiss).toHaveBeenCalledWith('apns-1');
+  });
+
+  // r1 M3: 보내기가 실패하는 도중 사람이 바뀌면 앞 사람의 글이 지금 사람의 초안에 들어가면 안 된다. 초안은 쓸 때의
+  // 사람을 글쓴이로 적으므로, 이 자리에서 멈추지 않으면 그 글은 다음 사람의 입력창에 뜬다.
+  it('보내기가 거절되는 도중 사람이 바뀌면 초안에 아무것도 넣지 않는다', async () => {
+    mockSession = {member: {id: ME}};
+    const store = new FakeStore(reply());
+    const send = jest.fn(async () => {
+      mockSession = {member: {id: SOMEONE}};
+      throw new ApiError(403, 'forbidden');
+    });
+    const d = deps(store, send);
+
+    await drainQueuedReplies(signedInDrainContext(WS, ME, copy), d);
+
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(draftedAnywhere('곧 갈게요')).toBe(false);
+    expect(d.notify).not.toHaveBeenCalled();
+    // 항목은 남는다 — 다음 사람의 비우기가 「남의 것」으로 지운다.
+    expect(store.items.size).toBe(1);
+  });
+
+  it('로그인한 트리의 문맥은 「지금도 같은 사람인가」를 저장된 세션으로 물을 때마다 다시 읽는다', () => {
+    const live = signedInDrainContext(WS, ME.toUpperCase(), copy);
+    mockSession = {member: {id: ME}};
+    expect(live.isCurrent()).toBe(true);
+    mockSession = {member: {id: SOMEONE}};
+    expect(live.isCurrent()).toBe(false);
+    mockSession = null;
+    expect(live.isCurrent()).toBe(false);
   });
 
   it('비우는 중에 사람이 바뀌면(로그아웃) 거기서 멈춘다', async () => {
