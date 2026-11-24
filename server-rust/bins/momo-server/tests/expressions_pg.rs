@@ -699,3 +699,247 @@ async fn expression_http_openapi_and_unchanged_send_reaction_spine() {
     assert!(revoked.get("error").is_some());
     task.abort();
 }
+
+/// A 1024 still with some texture, so its renditions are real pictures and not one flat colour.
+fn png_1024() -> Vec<u8> {
+    let image = image::RgbaImage::from_fn(1024, 1024, |x, y| {
+        image::Rgba([(x / 4) as u8, (y / 4) as u8, ((x + y) / 8) as u8, 255])
+    });
+    let mut c = std::io::Cursor::new(Vec::new());
+    image::DynamicImage::ImageRgba8(image)
+        .write_to(&mut c, image::ImageFormat::Png)
+        .unwrap();
+    c.into_inner()
+}
+
+/// A moving picture on a 500 x 400 canvas (inside both tables' canvas), two flat frames.
+fn moving_500() -> Vec<u8> {
+    let mut bytes = Vec::new();
+    {
+        let mut encoder = image::codecs::gif::GifEncoder::new_with_speed(&mut bytes, 30);
+        for colour in [[250, 40, 40, 255], [40, 120, 250, 255]] {
+            encoder
+                .encode_frame(image::Frame::from_parts(
+                    image::RgbaImage::from_pixel(500, 400, image::Rgba(colour)),
+                    0,
+                    0,
+                    image::Delay::from_numer_denom_ms(80, 1),
+                ))
+                .unwrap();
+        }
+    }
+    bytes
+}
+
+/// ADR-0218 §20 ZA9 · ZA1 · ZA2 · ZA8 through the real route and the real decoder child: an api left at
+/// its default stores the old table (no row past 512, no `still`), the same api told
+/// `with_expression_rendition_table(Wide)` stores 768 · 256 · 128 and a moving picture's `still`, and
+/// `size=still` is served by the one image door with its 404s.
+#[tokio::test]
+#[ignore = "real PG; security-nightly workspace ignored pass"]
+async fn the_size_table_is_the_operators_switch_and_still_is_served_by_the_same_door() {
+    require_decoder_4947();
+    let url = std::env::var("DATABASE_URL").expect("dedicated DATABASE_URL");
+    momo_db::migrate::run_migrations(
+        &url,
+        &momo_db::migrate::default_migrations_dir(),
+        momo_db::migrate::SeedMode::None,
+    )
+    .unwrap();
+    let psql = if std::path::Path::new("/opt/homebrew/opt/libpq/bin/psql").is_file() {
+        "/opt/homebrew/opt/libpq/bin/psql"
+    } else {
+        "psql"
+    };
+    assert!(std::process::Command::new(psql)
+        .arg(&url)
+        .args(["--quiet", "--no-psqlrc", "-v", "ON_ERROR_STOP=1", "-f"])
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../../infra/rust/sql/bootstrap_roles.sql"
+        ))
+        .output()
+        .unwrap()
+        .status
+        .success());
+    let su = PgPoolOptions::new()
+        .max_connections(4)
+        .connect(&url)
+        .await
+        .unwrap();
+    let options: PgConnectOptions = url.parse().unwrap();
+    let api = PgPoolOptions::new()
+        .max_connections(8)
+        .connect_with(options.username("momo_app").password("momo_app_dev_pw"))
+        .await
+        .unwrap();
+    let serve = |table: momo_expressions::media::RenditionTable| {
+        let api = api.clone();
+        async move {
+            let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let base = format!("http://{}", listener.local_addr().unwrap());
+            let state = AppState::new(
+                api,
+                SECRET.into(),
+                "ws://localhost:8000/connection/websocket".to_string(),
+            )
+            .with_unfurl_http(Arc::new(NoNetwork))
+            .with_expression_rendition_table(table);
+            let task = tokio::spawn(async move {
+                axum::serve(listener, build_app(state)).await.unwrap();
+            });
+            (base, task)
+        }
+    };
+    let (legacy, legacy_task) = serve(Default::default()).await;
+    let (wide, wide_task) = serve(momo_expressions::media::RenditionTable::Wide).await;
+    let http = reqwest::Client::new();
+    let ws = workspace(&su).await;
+    let other_ws = workspace(&su).await;
+    let owner = seed(&su, ws, "owner", &http, &legacy).await;
+    let member = seed(&su, ws, "member", &http, &legacy).await;
+    let foreign = seed(&su, other_ws, "owner", &http, &legacy).await;
+    let upload = |base: String, name: &'static str, file: Vec<u8>| {
+        let http = http.clone();
+        let token = owner.token.clone();
+        async move {
+            let meta =
+                json!({"name":name,"displayName":"크기 표","tags":[],"subjectMemberId":null});
+            response(
+                http.post(format!("{base}/v1/workspaces/{ws}/expressions/uploads"))
+                    .bearer_auth(&token)
+                    .header(
+                        "content-type",
+                        "multipart/form-data; boundary=oort-expression-test",
+                    )
+                    .body(multipart(Some(meta), &file))
+                    .send()
+                    .await
+                    .unwrap(),
+                201,
+            )
+            .await
+        }
+    };
+    let edge = |m: &Value| {
+        m["width"]
+            .as_u64()
+            .unwrap()
+            .max(m["height"].as_u64().unwrap())
+    };
+    // Off (the default): the old table, as every client reads it today.
+    let off_still = upload(legacy.clone(), "rt-off-still", png_1024()).await;
+    let off_moving = upload(legacy.clone(), "rt-off-moving", moving_500()).await;
+    let m = &off_still["media"];
+    assert_eq!(
+        (edge(&m["large"]), edge(&m["thumb"]), edge(&m["small"])),
+        (512, 128, 128)
+    );
+    assert!(off_moving["media"].get("still").is_none());
+    let past_old: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM expression_draft_image WHERE workspace_id = $1 AND (variant = 'still' \
+           OR greatest(width, height) > CASE variant WHEN 'large' THEN 512 ELSE 128 END)",
+    )
+    .bind(ws)
+    .fetch_one(&su)
+    .await
+    .unwrap();
+    assert_eq!(
+        past_old, 0,
+        "with the switch off no row is of the new sizes"
+    );
+    // On: 768 · 256 · 128 under their caps, and a moving picture's stopped frame.
+    let on_still = upload(wide.clone(), "rt-on-still", png_1024()).await;
+    let m = &on_still["media"];
+    assert_eq!(
+        (edge(&m["large"]), edge(&m["thumb"]), edge(&m["small"])),
+        (768, 256, 128)
+    );
+    assert!(m["large"]["bytes"].as_u64().unwrap() <= 2 * 1024 * 1024);
+    assert!(m["thumb"]["bytes"].as_u64().unwrap() <= 512 * 1024);
+    assert!(
+        m.get("still").is_none(),
+        "a still registration has no stopped frame"
+    );
+    let on_moving = upload(wide.clone(), "rt-on-moving", moving_500()).await;
+    let m = &on_moving["media"];
+    assert_eq!(m["still"]["mime"], "image/png");
+    assert_eq!(m["still"]["frameCount"], 1);
+    assert_eq!(
+        (m["still"]["width"].clone(), m["still"]["height"].clone()),
+        (json!(500), json!(400))
+    );
+    assert_eq!(m["large"]["mime"], "image/gif");
+    // Registered, the list carries it and the image door serves it to a member of the workspace.
+    let registered = response(
+        http.post(format!("{wide}/v1/workspaces/{ws}/expressions"))
+            .bearer_auth(&owner.token)
+            .json(&choice(&on_moving))
+            .send()
+            .await
+            .unwrap(),
+        201,
+    )
+    .await;
+    let id = registered["expression"]["id"].as_str().unwrap().to_string();
+    let sha = registered["expression"]["media"]["still"]["sha256"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let image = |base: &str, token: &str, id: &str, size: &str, sha: &str| {
+        http.get(format!(
+            "{base}/v1/workspaces/{ws}/expressions/{id}/image?size={size}&v={sha}"
+        ))
+        .bearer_auth(token)
+        .send()
+    };
+    let served = image(&legacy, &member.token, &id, "still", &sha)
+        .await
+        .unwrap();
+    assert_eq!(
+        served.status(),
+        200,
+        "the door does not depend on the switch"
+    );
+    assert_eq!(served.headers()["content-type"], "image/png");
+    assert_eq!(served.headers()["cache-control"], "private, no-store");
+    // The same 404 for a wrong sha, another workspace, and an expression without a stopped frame.
+    let plain = response(
+        http.post(format!("{wide}/v1/workspaces/{ws}/expressions"))
+            .bearer_auth(&owner.token)
+            .json(&choice(&on_still))
+            .send()
+            .await
+            .unwrap(),
+        201,
+    )
+    .await;
+    let plain_id = plain["expression"]["id"].as_str().unwrap().to_string();
+    let plain_large = plain["expression"]["media"]["large"]["sha256"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    for (why, token, id, sha) in [
+        ("wrong sha", &member.token, &id, "0".repeat(64)),
+        ("no stopped frame", &member.token, &plain_id, plain_large),
+    ] {
+        let r = image(&legacy, token, id, "still", &sha).await.unwrap();
+        assert_eq!(r.status(), 404, "{why}");
+    }
+    // Another workspace's member is answered for `still` exactly as for `large`: the door is the same.
+    let large_sha = registered["expression"]["media"]["large"]["sha256"]
+        .as_str()
+        .unwrap();
+    let theirs_large = image(&legacy, &foreign.token, &id, "large", large_sha)
+        .await
+        .unwrap()
+        .status();
+    let theirs_still = image(&legacy, &foreign.token, &id, "still", &sha)
+        .await
+        .unwrap()
+        .status();
+    assert!(theirs_large.is_client_error());
+    assert_eq!(theirs_still, theirs_large, "another workspace");
+    legacy_task.abort();
+    wide_task.abort();
+}
