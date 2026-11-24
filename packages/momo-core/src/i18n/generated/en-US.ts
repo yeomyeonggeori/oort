@@ -4340,6 +4340,72 @@ export const catalog: MessageCatalog = {
       "value": "Session"
     }
   ],
+  "directory.count.summary": [
+    {
+      "type": 6,
+      "value": "people",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " person"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " people"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    },
+    {
+      "type": 0,
+      "value": " · "
+    },
+    {
+      "type": 6,
+      "value": "agents",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " agent"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " agents"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "directory.lifecycle.cancel": [
     {
       "type": 0,
@@ -4634,6 +4700,92 @@ export const catalog: MessageCatalog = {
       "value": " role see this"
     }
   ],
+  "directory.memberRow.agent": [
+    {
+      "type": 0,
+      "value": "Agent"
+    }
+  ],
+  "directory.memberRow.agentOwned": [
+    {
+      "type": 0,
+      "value": "Agent, managed by "
+    },
+    {
+      "type": 1,
+      "value": "owner"
+    }
+  ],
+  "directory.memberRow.openDm": [
+    {
+      "type": 1,
+      "value": "parts"
+    },
+    {
+      "type": 0,
+      "value": ", open direct message"
+    }
+  ],
+  "directory.openDm.failed": [
+    {
+      "type": 0,
+      "value": "Couldn't open a direct message with "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": ". Try again."
+    }
+  ],
+  "directory.openDm.forbidden": [
+    {
+      "type": 0,
+      "value": "You don't have permission to open direct messages in this workspace. Ask a workspace admin."
+    }
+  ],
+  "directory.openDm.network": [
+    {
+      "type": 0,
+      "value": "Couldn't open the conversation with "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": ". "
+    },
+    {
+      "type": 1,
+      "value": "reason"
+    }
+  ],
+  "directory.openDm.notActive": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " is not an active member of this workspace. Refresh the directory and try again."
+    }
+  ],
+  "directory.openDm.rateLimited": [
+    {
+      "type": 0,
+      "value": "Too many requests. Try again in a moment."
+    }
+  ],
+  "directory.openDm.self": [
+    {
+      "type": 0,
+      "value": "You can't open a direct message with yourself."
+    }
+  ],
   "directory.profile.close": [
     {
       "type": 0,
@@ -4782,6 +4934,20 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "Routing settings"
+    }
+  ],
+  "directory.profile.sheetInactive": [
+    {
+      "type": 0,
+      "value": "This member's status: "
+    },
+    {
+      "type": 1,
+      "value": "status"
+    },
+    {
+      "type": 0,
+      "value": "."
     }
   ],
   "directory.profile.title": [
@@ -4980,6 +5146,94 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "Choose a role"
+    }
+  ],
+  "directory.roleChange.adminGrant": [
+    {
+      "type": 0,
+      "value": "Admins can't grant the admin or owner role."
+    }
+  ],
+  "directory.roleChange.equalOrHigher": [
+    {
+      "type": 0,
+      "value": "You can't change a member with an equal or higher role."
+    }
+  ],
+  "directory.roleChange.failed": [
+    {
+      "type": 0,
+      "value": "Couldn't change the role. Try again."
+    }
+  ],
+  "directory.roleChange.forbidden": [
+    {
+      "type": 0,
+      "value": "You don't have permission to change roles in this workspace."
+    }
+  ],
+  "directory.roleChange.invalid": [
+    {
+      "type": 0,
+      "value": "This role can't be set. Pick another role and try again."
+    }
+  ],
+  "directory.roleChange.lastOwner": [
+    {
+      "type": 0,
+      "value": "The last owner's role can't be lowered. Make another member an owner first, then try again."
+    }
+  ],
+  "directory.roleChange.network": [
+    {
+      "type": 0,
+      "value": "Couldn't change the role. "
+    },
+    {
+      "type": 1,
+      "value": "reason"
+    }
+  ],
+  "directory.roleChange.notFound": [
+    {
+      "type": 0,
+      "value": "Couldn't find this member in the directory. Refresh the directory and try again."
+    }
+  ],
+  "directory.roleChange.rateLimited": [
+    {
+      "type": 0,
+      "value": "Too many requests. Try again in a moment."
+    }
+  ],
+  "directory.roleChange.self": [
+    {
+      "type": 0,
+      "value": "You can't change your own role."
+    }
+  ],
+  "directory.status.deleted": [
+    {
+      "type": 0,
+      "value": "Deleted"
+    }
+  ],
+  "directory.status.inactive": [
+    {
+      "type": 0,
+      "value": "Inactive"
+    }
+  ],
+  "directory.status.invited": [
+    {
+      "type": 0,
+      "value": "Invited"
+    }
+  ],
+  "directory.status.suspended": [
+    {
+      "type": 0,
+      "value": "Suspended"
     }
   ],
   "expressions.add.adminsOnly": [

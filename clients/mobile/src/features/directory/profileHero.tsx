@@ -1,4 +1,5 @@
-import {statusLabel} from '@momo/core/features/directory/model';
+import {statusLabelKey} from '@momo/core/features/directory/model';
+import type {LocaleService} from '@momo/core/i18n';
 import {
   customStatusAccessibleText,
   visibleCustomStatus,
@@ -54,12 +55,13 @@ export interface ProfileChip {
 }
 
 export function memberChip(
+  formatMessage: LocaleService['formatMessage'],
   member: RosterMember,
   status: PeerStatus | null,
 ): ProfileChip | null {
   const kind: StatusBadgeSubject = member.kind === 'agent' ? 'agent' : 'human';
-  const membershipWord = statusLabel(member);
-  if (membershipWord !== null) return {label: membershipWord, tone: null, kind};
+  const membershipKey = statusLabelKey(member);
+  if (membershipKey !== null) return {label: formatMessage(membershipKey), tone: null, kind};
   return status !== null ? {label: status.label, tone: status.tone, kind} : null;
 }
 

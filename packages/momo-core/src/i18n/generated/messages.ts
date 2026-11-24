@@ -586,6 +586,7 @@ export const messageKeys = [
   "desktop.workSession.backToListLabel",
   "desktop.workSession.listTitle",
   "desktop.workSession.pageTitle",
+  "directory.count.summary",
   "directory.lifecycle.cancel",
   "directory.lifecycle.errorForbidden",
   "directory.lifecycle.errorLastOwner",
@@ -621,6 +622,15 @@ export const messageKeys = [
   "directory.lifecycle.suspendUndo",
   "directory.manage.heading",
   "directory.manage.hint",
+  "directory.memberRow.agent",
+  "directory.memberRow.agentOwned",
+  "directory.memberRow.openDm",
+  "directory.openDm.failed",
+  "directory.openDm.forbidden",
+  "directory.openDm.network",
+  "directory.openDm.notActive",
+  "directory.openDm.rateLimited",
+  "directory.openDm.self",
   "directory.profile.close",
   "directory.profile.copied",
   "directory.profile.copyEmail",
@@ -644,6 +654,7 @@ export const messageKeys = [
   "directory.profile.ownerUnknown",
   "directory.profile.retry",
   "directory.profile.routing",
+  "directory.profile.sheetInactive",
   "directory.profile.title",
   "directory.profile.titleUnknown",
   "directory.role.cancel",
@@ -659,6 +670,20 @@ export const messageKeys = [
   "directory.role.lockedAdminCeiling",
   "directory.role.lockedOwnerPeer",
   "directory.role.placeholder",
+  "directory.roleChange.adminGrant",
+  "directory.roleChange.equalOrHigher",
+  "directory.roleChange.failed",
+  "directory.roleChange.forbidden",
+  "directory.roleChange.invalid",
+  "directory.roleChange.lastOwner",
+  "directory.roleChange.network",
+  "directory.roleChange.notFound",
+  "directory.roleChange.rateLimited",
+  "directory.roleChange.self",
+  "directory.status.deleted",
+  "directory.status.inactive",
+  "directory.status.invited",
+  "directory.status.suspended",
   "expressions.add.adminsOnly",
   "expressions.add.backLabel",
   "expressions.add.import",
@@ -3302,6 +3327,10 @@ export const argumentSpecs = {
   "desktop.workSession.backToListLabel": {},
   "desktop.workSession.listTitle": {},
   "desktop.workSession.pageTitle": {},
+  "directory.count.summary": {
+    "agents": "number",
+    "people": "number"
+  },
   "directory.lifecycle.cancel": {},
   "directory.lifecycle.errorForbidden": {},
   "directory.lifecycle.errorLastOwner": {
@@ -3356,6 +3385,26 @@ export const argumentSpecs = {
     "admin": "string",
     "owner": "string"
   },
+  "directory.memberRow.agent": {},
+  "directory.memberRow.agentOwned": {
+    "owner": "string"
+  },
+  "directory.memberRow.openDm": {
+    "parts": "string"
+  },
+  "directory.openDm.failed": {
+    "name": "string"
+  },
+  "directory.openDm.forbidden": {},
+  "directory.openDm.network": {
+    "name": "string",
+    "reason": "string"
+  },
+  "directory.openDm.notActive": {
+    "name": "string"
+  },
+  "directory.openDm.rateLimited": {},
+  "directory.openDm.self": {},
   "directory.profile.close": {},
   "directory.profile.copied": {},
   "directory.profile.copyEmail": {},
@@ -3383,6 +3432,9 @@ export const argumentSpecs = {
   "directory.profile.ownerUnknown": {},
   "directory.profile.retry": {},
   "directory.profile.routing": {},
+  "directory.profile.sheetInactive": {
+    "status": "string"
+  },
   "directory.profile.title": {
     "name": "string"
   },
@@ -3420,6 +3472,22 @@ export const argumentSpecs = {
     "owner": "string"
   },
   "directory.role.placeholder": {},
+  "directory.roleChange.adminGrant": {},
+  "directory.roleChange.equalOrHigher": {},
+  "directory.roleChange.failed": {},
+  "directory.roleChange.forbidden": {},
+  "directory.roleChange.invalid": {},
+  "directory.roleChange.lastOwner": {},
+  "directory.roleChange.network": {
+    "reason": "string"
+  },
+  "directory.roleChange.notFound": {},
+  "directory.roleChange.rateLimited": {},
+  "directory.roleChange.self": {},
+  "directory.status.deleted": {},
+  "directory.status.inactive": {},
+  "directory.status.invited": {},
+  "directory.status.suspended": {},
   "expressions.add.adminsOnly": {},
   "expressions.add.backLabel": {},
   "expressions.add.import": {},
@@ -6674,6 +6742,7 @@ export interface MessageArgs {
   "desktop.workSession.backToListLabel": Record<string, never>;
   "desktop.workSession.listTitle": Record<string, never>;
   "desktop.workSession.pageTitle": Record<string, never>;
+  "directory.count.summary": { agents: number; people: number };
   "directory.lifecycle.cancel": Record<string, never>;
   "directory.lifecycle.errorForbidden": Record<string, never>;
   "directory.lifecycle.errorLastOwner": { owner: string };
@@ -6709,6 +6778,15 @@ export interface MessageArgs {
   "directory.lifecycle.suspendUndo": { admin: string; owner: string };
   "directory.manage.heading": Record<string, never>;
   "directory.manage.hint": { admin: string; owner: string };
+  "directory.memberRow.agent": Record<string, never>;
+  "directory.memberRow.agentOwned": { owner: string };
+  "directory.memberRow.openDm": { parts: string };
+  "directory.openDm.failed": { name: string };
+  "directory.openDm.forbidden": Record<string, never>;
+  "directory.openDm.network": { name: string; reason: string };
+  "directory.openDm.notActive": { name: string };
+  "directory.openDm.rateLimited": Record<string, never>;
+  "directory.openDm.self": Record<string, never>;
   "directory.profile.close": Record<string, never>;
   "directory.profile.copied": Record<string, never>;
   "directory.profile.copyEmail": Record<string, never>;
@@ -6732,6 +6810,7 @@ export interface MessageArgs {
   "directory.profile.ownerUnknown": Record<string, never>;
   "directory.profile.retry": Record<string, never>;
   "directory.profile.routing": Record<string, never>;
+  "directory.profile.sheetInactive": { status: string };
   "directory.profile.title": { name: string };
   "directory.profile.titleUnknown": Record<string, never>;
   "directory.role.cancel": Record<string, never>;
@@ -6747,6 +6826,20 @@ export interface MessageArgs {
   "directory.role.lockedAdminCeiling": { admin: string; owner: string };
   "directory.role.lockedOwnerPeer": { owner: string };
   "directory.role.placeholder": Record<string, never>;
+  "directory.roleChange.adminGrant": Record<string, never>;
+  "directory.roleChange.equalOrHigher": Record<string, never>;
+  "directory.roleChange.failed": Record<string, never>;
+  "directory.roleChange.forbidden": Record<string, never>;
+  "directory.roleChange.invalid": Record<string, never>;
+  "directory.roleChange.lastOwner": Record<string, never>;
+  "directory.roleChange.network": { reason: string };
+  "directory.roleChange.notFound": Record<string, never>;
+  "directory.roleChange.rateLimited": Record<string, never>;
+  "directory.roleChange.self": Record<string, never>;
+  "directory.status.deleted": Record<string, never>;
+  "directory.status.inactive": Record<string, never>;
+  "directory.status.invited": Record<string, never>;
+  "directory.status.suspended": Record<string, never>;
   "expressions.add.adminsOnly": Record<string, never>;
   "expressions.add.backLabel": Record<string, never>;
   "expressions.add.import": Record<string, never>;

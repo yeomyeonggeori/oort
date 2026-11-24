@@ -3966,6 +3966,26 @@ export const catalog: MessageCatalog = {
       "value": "세션"
     }
   ],
+  "directory.count.summary": [
+    {
+      "type": 0,
+      "value": "사람 "
+    },
+    {
+      "type": 2,
+      "value": "people",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": " · 에이전트 "
+    },
+    {
+      "type": 2,
+      "value": "agents",
+      "style": null
+    }
+  ],
   "directory.lifecycle.cancel": [
     {
       "type": 0,
@@ -4244,6 +4264,88 @@ export const catalog: MessageCatalog = {
       "value": "에게만 보여요"
     }
   ],
+  "directory.memberRow.agent": [
+    {
+      "type": 0,
+      "value": "에이전트"
+    }
+  ],
+  "directory.memberRow.agentOwned": [
+    {
+      "type": 0,
+      "value": "에이전트, "
+    },
+    {
+      "type": 1,
+      "value": "owner"
+    },
+    {
+      "type": 0,
+      "value": " 님이 관리"
+    }
+  ],
+  "directory.memberRow.openDm": [
+    {
+      "type": 1,
+      "value": "parts"
+    },
+    {
+      "type": 0,
+      "value": ", 다이렉트 메시지 열기"
+    }
+  ],
+  "directory.openDm.failed": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "님과의 다이렉트 메시지를 열지 못했습니다. 다시 시도하세요."
+    }
+  ],
+  "directory.openDm.forbidden": [
+    {
+      "type": 0,
+      "value": "이 워크스페이스에서 다이렉트 메시지를 열 권한이 없습니다. 워크스페이스 관리자에게 문의하세요."
+    }
+  ],
+  "directory.openDm.network": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "님과의 대화를 열지 못했습니다. "
+    },
+    {
+      "type": 1,
+      "value": "reason"
+    }
+  ],
+  "directory.openDm.notActive": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "님은 이 워크스페이스의 활성 멤버가 아닙니다. 명부를 새로 고친 뒤 다시 시도하세요."
+    }
+  ],
+  "directory.openDm.rateLimited": [
+    {
+      "type": 0,
+      "value": "요청이 너무 잦습니다. 잠시 뒤에 다시 시도하세요."
+    }
+  ],
+  "directory.openDm.self": [
+    {
+      "type": 0,
+      "value": "자기 자신과는 다이렉트 메시지를 열 수 없습니다."
+    }
+  ],
   "directory.profile.close": [
     {
       "type": 0,
@@ -4388,6 +4490,20 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "라우팅 설정"
+    }
+  ],
+  "directory.profile.sheetInactive": [
+    {
+      "type": 0,
+      "value": "이 멤버는 "
+    },
+    {
+      "type": 1,
+      "value": "status"
+    },
+    {
+      "type": 0,
+      "value": " 상태입니다."
     }
   ],
   "directory.profile.title": [
@@ -4566,6 +4682,94 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "역할 고르기"
+    }
+  ],
+  "directory.roleChange.adminGrant": [
+    {
+      "type": 0,
+      "value": "관리자는 관리자나 소유자 역할을 부여할 수 없습니다."
+    }
+  ],
+  "directory.roleChange.equalOrHigher": [
+    {
+      "type": 0,
+      "value": "같거나 높은 역할의 멤버는 바꿀 수 없습니다."
+    }
+  ],
+  "directory.roleChange.failed": [
+    {
+      "type": 0,
+      "value": "역할을 바꾸지 못했습니다. 다시 시도하세요."
+    }
+  ],
+  "directory.roleChange.forbidden": [
+    {
+      "type": 0,
+      "value": "이 워크스페이스에서 역할을 바꿀 권한이 없습니다."
+    }
+  ],
+  "directory.roleChange.invalid": [
+    {
+      "type": 0,
+      "value": "역할을 바꿀 수 없습니다. 다른 역할을 고른 뒤 다시 시도하세요."
+    }
+  ],
+  "directory.roleChange.lastOwner": [
+    {
+      "type": 0,
+      "value": "마지막 소유자의 역할은 내릴 수 없습니다. 다른 멤버를 소유자로 지정한 뒤 다시 시도하세요."
+    }
+  ],
+  "directory.roleChange.network": [
+    {
+      "type": 0,
+      "value": "역할을 바꾸지 못했습니다. "
+    },
+    {
+      "type": 1,
+      "value": "reason"
+    }
+  ],
+  "directory.roleChange.notFound": [
+    {
+      "type": 0,
+      "value": "이 멤버를 명부에서 찾지 못했습니다. 명부를 새로 고친 뒤 다시 시도하세요."
+    }
+  ],
+  "directory.roleChange.rateLimited": [
+    {
+      "type": 0,
+      "value": "요청이 너무 잦습니다. 잠시 뒤에 다시 시도하세요."
+    }
+  ],
+  "directory.roleChange.self": [
+    {
+      "type": 0,
+      "value": "자기 자신의 역할은 바꿀 수 없습니다."
+    }
+  ],
+  "directory.status.deleted": [
+    {
+      "type": 0,
+      "value": "삭제됨"
+    }
+  ],
+  "directory.status.inactive": [
+    {
+      "type": 0,
+      "value": "비활성"
+    }
+  ],
+  "directory.status.invited": [
+    {
+      "type": 0,
+      "value": "초대됨"
+    }
+  ],
+  "directory.status.suspended": [
+    {
+      "type": 0,
+      "value": "정지됨"
     }
   ],
   "expressions.add.adminsOnly": [

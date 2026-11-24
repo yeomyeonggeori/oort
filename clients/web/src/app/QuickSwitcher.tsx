@@ -1156,7 +1156,7 @@ export function QuickSwitcher({
 
         {people.length > 0 && (
           <Command.Group heading="사람">
-            {people.map(({ member, selectable, reason }) => (
+            {people.map(({ member, selectable, reasonKey }) => (
               <Command.Item role="option"
                 key={member.id}
                 value={`${member.displayName} ${member.handle} ${member.id}`}
@@ -1187,7 +1187,7 @@ export function QuickSwitcher({
                 </span>
                 {/* Same word the directory row uses, same token, so the two
                  * surfaces do not invent two vocabularies for one status. */}
-                {reason && <span className="text-meta text-warn">{reason}</span>}
+                {reasonKey && <span className="text-meta text-warn">{formatMessage(reasonKey)}</span>}
                 {dm.pendingMemberId === member.id && (
                   <span className="text-meta text-ink-muted">여는 중</span>
                 )}

@@ -43,6 +43,7 @@ import {
 } from './profileHero';
 import {tilesFitInRow} from './profileTiles';
 
+import {useFormatMessage} from '../../i18n/useFormatMessage';
 // =============================================================================
 // 다른 사람 프로필 시트 (#4319, owner 10-24·25·27 — 「우리꺼는 너무 구려」).
 //
@@ -133,6 +134,7 @@ export function MemberProfileSheet({
    */
   onEnlargeAvatar?: (photo: ProfilePhoto) => void;
 }): React.JSX.Element {
+  const formatMessage = useFormatMessage();
   const styles = useStyles(buildStyles);
   const {width, fontScale} = useWindowDimensions();
   const availability = dmAvailability(member, selfMemberId);
@@ -143,7 +145,7 @@ export function MemberProfileSheet({
   const emailText = email?.trim() ? email.trim() : null;
 
   // ---- 상태 칩 · 한 줄 상태 · 이름 아래 한 줄 ---------------------------------
-  const chip = memberChip(member, status);
+  const chip = memberChip(formatMessage, member, status);
   const custom = memberCustomStatus(member, nowMs);
   const kindWord = isAgent ? '에이전트' : roleLabel(member, roleLabels);
 
@@ -235,7 +237,9 @@ export function MemberProfileSheet({
           }
       : availability.kind === 'inactive'
         ? {
-            headline: `이 멤버는 ${availability.label} 상태입니다.`,
+            headline: formatMessage('directory.profile.sheetInactive', {
+              status: formatMessage(availability.labelKey),
+            }),
             detail: '활성 멤버가 되면 다이렉트 메시지를 열 수 있습니다.',
           }
         : {
@@ -301,7 +305,7 @@ export function MemberProfileSheet({
 
         {dmError !== null ? (
           <FailureBanner
-            message={openDmErrorMessage(dmError, member.displayName)}
+            message={openDmErrorMessage(formatMessage, dmError, member.displayName)}
             onRetry={canOpenDm && !dmPending ? onOpenDm : undefined}
             testID="profile-dm-error"
           />

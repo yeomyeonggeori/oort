@@ -9,6 +9,7 @@ import { NetworkError } from "../../lib/http";
 import { customStatusAccessibleText } from "../presence/customStatus";
 import { humanPresenceDot } from "../presence/statusDot";
 import type { LocaleService } from "../../i18n/context";
+import type { PlainMessageKey } from "../../i18n/keys";
 
 // 문구는 `i18n/catalogs/<언어>/directory.json`에 있다. 값 둘 이상을 엮어 한 줄을 짓는 함수만 `formatMessage`를 첫 인자로 받는다.
 type FormatMessage = LocaleService["formatMessage"];
@@ -348,14 +349,14 @@ export function parseRoleLabels(value: unknown): RoleLabels {
  * Membership status, when it is worth saying. `active` is the normal case and
  * is left unlabelled: a chip on every row would carry no information.
  */
-export function statusLabel(member: RosterMember): string | null {
+export function statusLabelKey(member: RosterMember): PlainMessageKey | null {
   switch (member.status) {
     case "invited":
-      return "초대됨";
+      return "directory.status.invited";
     case "suspended":
-      return "정지됨";
+      return "directory.status.suspended";
     case "deleted":
-      return "삭제됨";
+      return "directory.status.deleted";
     default:
       return null;
   }
@@ -451,11 +452,15 @@ export interface RosterLoadState {
  * is still true.
  */
 export function countLabel(
+  formatMessage: FormatMessage,
   groups: DirectoryGroups,
   state: RosterLoadState
 ): string | null {
   if (groups.total === 0 && (state.pending || state.failed)) return null;
-  return `사람 ${groups.people.length} · 에이전트 ${groups.agents.length}`;
+  return formatMessage("directory.count.summary", {
+    people: groups.people.length,
+    agents: groups.agents.length,
+  });
 }
 
 /**
@@ -487,17 +492,21 @@ export function memberRowLabel(
     // reaches no screen reader, so here it is a word, followed by the same
     // "{owner} 님이 관리" attribution the row prints (WCAG 2.5.3: the visible
     // text is inside the accessible name).
-    parts.push(ownerName ? `에이전트, ${ownerName} 님이 관리` : "에이전트");
+    parts.push(
+      ownerName
+        ? formatMessage("directory.memberRow.agentOwned", { owner: ownerName })
+        : formatMessage("directory.memberRow.agent")
+    );
   }
-  const status = statusLabel(member);
-  if (status) parts.push(status);
+  const statusKey = statusLabelKey(member);
+  if (statusKey) parts.push(formatMessage(statusKey));
   // 사람의 점이 눈에 말하는 것(온라인·오프라인·자리 비움·방해 금지)을 접근 가능한 이름이 이어 말한다. 색과 모양만으로
   // 말하지 않는다(#4692). 에이전트의 생존감은 행의 생존 칩과 그 곁 낱말이 말하므로 여기서 더하지 않는다.
   const presence = member.kind === "human" ? humanPresenceDot(formatMessage, member, nowMs) : null;
   if (presence) parts.push(presence.label);
   const custom = customStatusAccessibleText(member, nowMs);
   if (custom) parts.push(custom);
-  return `${parts.join(", ")}, 다이렉트 메시지 열기`;
+  return formatMessage("directory.memberRow.openDm", { parts: parts.join(", ") });
 }
 
 /**
@@ -519,7 +528,7 @@ export function hasOtherMembers(
  */
 export type DmAvailability =
   | { kind: "self" }
-  | { kind: "inactive"; label: string }
+  | { kind: "inactive"; labelKey: PlainMessageKey }
   | { kind: "ready" };
 
 export function dmAvailability(
@@ -530,7 +539,10 @@ export function dmAvailability(
   // with === would show a DM button on your own row half the time.
   if (uuidEq(member.id, selfMemberId)) return { kind: "self" };
   if (member.status !== "active") {
-    return { kind: "inactive", label: statusLabel(member) ?? "비활성" };
+    return {
+      kind: "inactive",
+      labelKey: statusLabelKey(member) ?? "directory.status.inactive",
+    };
   }
   return { kind: "ready" };
 }
@@ -541,7 +553,7 @@ export interface SwitcherPerson {
   /** Can Enter open a DM with this person? */
   selectable: boolean;
   /** Why not, in the directory's words ("초대됨"), or null when it can. */
-  reason: string | null;
+  reasonKey: PlainMessageKey | null;
 }
 
 /**
@@ -580,7 +592,7 @@ export function switcherPeople(
     rows.push({
       member,
       selectable: availability.kind === "ready",
-      reason: availability.kind === "inactive" ? availability.label : null,
+      reasonKey: availability.kind === "inactive" ? availability.labelKey : null,
     });
   }
   return rows;
@@ -604,28 +616,32 @@ export function upsertChannel(channels: Channel[], next: Channel): Channel[] {
  * What went wrong opening a DM, in the reader's terms: what happened, then the
  * next step. Never an apology, never "알 수 없는 오류".
  */
-export function openDmErrorMessage(error: unknown, name: string): string {
+export function openDmErrorMessage(
+  formatMessage: FormatMessage,
+  error: unknown,
+  name: string
+): string {
   if (error instanceof ApiError) {
     if (error.status === 404) {
-      return `${name}님은 이 워크스페이스의 활성 멤버가 아닙니다. 명부를 새로 고친 뒤 다시 시도하세요.`;
+      return formatMessage("directory.openDm.notActive", { name });
     }
     if (error.status === 403) {
-      return "이 워크스페이스에서 다이렉트 메시지를 열 권한이 없습니다. 워크스페이스 관리자에게 문의하세요.";
+      return formatMessage("directory.openDm.forbidden");
     }
     if (error.status === 400) {
-      return "자기 자신과는 다이렉트 메시지를 열 수 없습니다.";
+      return formatMessage("directory.openDm.self");
     }
     if (error.status === 429) {
-      return "요청이 너무 잦습니다. 잠시 뒤에 다시 시도하세요.";
+      return formatMessage("directory.openDm.rateLimited");
     }
   }
   if (error instanceof NetworkError) {
     // The transport already writes measured copy for "nothing answered"
     // (timeout vs unreachable, with the deadline in seconds). Reuse it rather
     // than inventing a second vocabulary for the same failure.
-    return `${name}님과의 대화를 열지 못했습니다. ${error.message}`;
+    return formatMessage("directory.openDm.network", { name, reason: error.message });
   }
-  return `${name}님과의 다이렉트 메시지를 열지 못했습니다. 다시 시도하세요.`;
+  return formatMessage("directory.openDm.failed", { name });
 }
 
 /**
@@ -633,39 +649,42 @@ export function openDmErrorMessage(error: unknown, name: string): string {
  * only turns 400/403/409 (and transport absence) into a sentence. It does not
  * pre-empt the hierarchy rules.
  */
-export function changeWorkspaceRoleErrorMessage(error: unknown): string {
+export function changeWorkspaceRoleErrorMessage(
+  formatMessage: FormatMessage,
+  error: unknown
+): string {
   if (error instanceof ApiError) {
     const wire = error.message;
     if (
       error.status === 409 ||
       wire.includes("at least one owner")
     ) {
-      return "마지막 소유자의 역할은 내릴 수 없습니다. 다른 멤버를 소유자로 지정한 뒤 다시 시도하세요.";
+      return formatMessage("directory.roleChange.lastOwner");
     }
     if (wire.includes("cannot manage themselves")) {
-      return "자기 자신의 역할은 바꿀 수 없습니다.";
+      return formatMessage("directory.roleChange.self");
     }
     if (wire.includes("equal or higher")) {
-      return "같거나 높은 역할의 멤버는 바꿀 수 없습니다.";
+      return formatMessage("directory.roleChange.equalOrHigher");
     }
     if (wire.includes("cannot grant admin or owner")) {
-      return "관리자는 관리자나 소유자 역할을 부여할 수 없습니다.";
+      return formatMessage("directory.roleChange.adminGrant");
     }
     if (error.status === 403) {
-      return "이 워크스페이스에서 역할을 바꿀 권한이 없습니다.";
+      return formatMessage("directory.roleChange.forbidden");
     }
     if (error.status === 400) {
-      return "역할을 바꿀 수 없습니다. 다른 역할을 고른 뒤 다시 시도하세요.";
+      return formatMessage("directory.roleChange.invalid");
     }
     if (error.status === 404) {
-      return "이 멤버를 명부에서 찾지 못했습니다. 명부를 새로 고친 뒤 다시 시도하세요.";
+      return formatMessage("directory.roleChange.notFound");
     }
     if (error.status === 429) {
-      return "요청이 너무 잦습니다. 잠시 뒤에 다시 시도하세요.";
+      return formatMessage("directory.roleChange.rateLimited");
     }
   }
   if (error instanceof NetworkError) {
-    return `역할을 바꾸지 못했습니다. ${error.message}`;
+    return formatMessage("directory.roleChange.network", { reason: error.message });
   }
-  return "역할을 바꾸지 못했습니다. 다시 시도하세요.";
+  return formatMessage("directory.roleChange.failed");
 }

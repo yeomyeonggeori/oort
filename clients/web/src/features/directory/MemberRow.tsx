@@ -15,7 +15,7 @@ import {
   memberRowLabel,
   profileEmail,
   roleLabel,
-  statusLabel,
+  statusLabelKey,
 } from "@momo/core/features/directory/model";
 
 // =============================================================================
@@ -69,7 +69,8 @@ export function MemberRow({
   const viewerRole = memberFor(directory, selfMemberId)?.role;
   const email = profileEmail(viewerRole, member);
   const role = roleLabel(member, labels);
-  const status = statusLabel(member);
+  const statusKey = statusLabelKey(member);
+  const status = statusKey === null ? null : formatMessage(statusKey);
   const { visible: custom, nowMs } = useCustomStatusView(member);
 
   const subtitle = [
