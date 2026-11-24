@@ -208,6 +208,19 @@ describe('간격 축이 웹 정본과 같은 표 위에 있다', () => {
 // -----------------------------------------------------------------------------
 
 describe('반경 축', () => {
+  // #6077: 표는 하나이고, 합치기 전의 모든 이름이 합치기 전의 숫자를 그대로 가진다.
+  it('반경 표 정의가 하나이고 옛 이름의 값이 그대로다', () => {
+    const source = fs.readFileSync(path.join(SRC_DIR, TOKENS_FILE), 'utf8');
+    // DS2 단의 숫자가 한 번만 적혀 있다 — 별칭 표가 숫자를 따로 들고 있지 않다.
+    expect(source.match(/^\s*(?:badge|row|card|composer|sheet):\s*\d+,/gm)).toHaveLength(5);
+    expect({...radius}).toEqual({
+      sm: 6, md: 8, badge: 10, row: 14, card: 20, composer: 27, sheet: 30, pill: 999,
+    });
+    expect({...ds2Radius}).toEqual({
+      badge: 10, row: 14, card: 20, composer: 27, sheet: 30, pill: 999,
+    });
+  });
+
   // ADR-0189 D6(확정 항목 7): 폰·웹 반경의 **값 대조는 폐기**한다. 반경은 플랫폼층의
   // 일이고, 두 클라는 이름만 공유한다(폰 `10·14·20·27·30·pill`, 웹 `6·10·14·18·20·
   // pill`). 여기 있던 단정들 — 「sm 이 웹 --radius-sm 과 같다」「값이 다른 단계가 md
@@ -607,7 +620,8 @@ describe('반경 스윕 — 모서리는 세 이름에서만 나온다', () => {
   };
 
   it('스케일 밖 borderRadius 가 잔량 안에 있다', () => {
-    const scale = new Set<number>(Object.values(radius));
+    // 합친 표의 DS2 단(10·14·…)이 아니라 여명 3단만이 「스케일」이다 — 스윕이 느슨해지지 않게.
+    const scale = new Set<number>([radius.sm, radius.md, radius.pill]);
     expectWithinRemaining(
       sweep(/\bborderRadius:\s*(\d+)/, found => !scale.has(Number(found[1]))),
       REMAINING,
