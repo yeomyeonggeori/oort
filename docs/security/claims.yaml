@@ -388,6 +388,17 @@ claims:
       - "server-rust/bins/momo-server/tests/push_session_end_conformance_pg.rs#a_second_member_signing_in_on_the_same_phone_takes_the_registration_over"
       - "server-rust/bins/momo-server/tests/push_session_end_conformance_pg.rs#switching_push_off_on_a_phone_the_first_member_left_is_a_404_not_a_403"
       - "server-rust/bins/momo-server/tests/push_session_end_conformance_pg.rs#a_device_id_registered_in_another_workspace_is_a_403_not_a_500"
+  - id: PUSH-4
+    claim: "The lock-screen token can write a message only through its reply route and only in the conversation of a message the server notified that member of (an APNs-accepted dispatch within 24 hours, not deleted); every other case is the same 403 and writes nothing, one notification carries at most one reply even under parallel requests, and the same clientMsgId is one message across retries, parallel retries and the ordinary send."
+    scope: "Real PostgreSQL as momo_app (row-level security forced), through the real router (ADR-0204 addendum 7, #6072). Covers the server side only: the phone's keep-first handler, the lock-screen authentication requirement on the reply button and real-device behaviour are the phone half's (addendum 7 A7-10 12-15). The reply is refused to a person's session, an agent bearer and the push_fetch token here; a developer token is refused by the developer door's closed route table (its own sweep)."
+    priority: P1
+    runs: pr-ci
+    proofs:
+      - "server-rust/bins/momo-server/tests/push_action_token_conformance_pg.rs#only_the_lock_screen_token_may_reply"
+      - "server-rust/bins/momo-server/tests/push_action_token_conformance_pg.rs#every_way_to_have_no_notification_is_the_same_refusal"
+      - "server-rust/bins/momo-server/tests/push_action_token_conformance_pg.rs#retries_in_parallel_and_across_both_doors_are_one_message"
+      - "server-rust/bins/momo-server/tests/push_action_token_conformance_pg.rs#one_notification_carries_one_reply_even_in_parallel"
+      - "server-rust/bins/momo-server/tests/push_action_token_conformance_pg.rs#a_reply_lands_once_in_the_notified_conversation"
 
   # ---- 에이전트 · 승인 --------------------------------------------------------------
   - id: AGT-1

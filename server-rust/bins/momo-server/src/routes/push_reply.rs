@@ -189,9 +189,12 @@ pub async fn reply(
         move |conn| {
             Box::pin(async move {
                 // A7-4 — replies to one notification queue here, so the count below
-                // and the insert after it are one step per (member, notification).
-                // Taken first and nothing on this path waits for it while holding
-                // another lock, so it adds no edge to any lock order.
+                // and the insert before it are one step per (member, notification).
+                // Today the send's `channel_seq` row lock already serializes two
+                // writes into one channel; this lock keeps the cap from resting on
+                // that detail of the write function. Taken first, and nothing on this
+                // path waits for it while holding another lock, so it adds no edge to
+                // any lock order.
                 sqlx::query(
                     "SELECT pg_advisory_xact_lock(hashtextextended(\
                        'momo.push_reply.cap:' || $1::text || ':' || $2::text, 0))",
