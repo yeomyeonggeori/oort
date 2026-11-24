@@ -33,7 +33,7 @@ type Kind = (typeof KINDS)[number];
 
 /** 폴더(`features/<이름>` · `app`) -> 종류별 천장. 표에 없는 종류·폴더는 0. */
 const CEILING: Readonly<Record<string, Partial<Record<Kind, number>>>> = {
-  "app": { button: 3, outline: 1 },
+  "app": { button: 3 },
   "features/ade": { button: 5 },
   "features/agentHub": { button: 4, input: 2, textarea: 2, outline: 9 },
   "features/agents": { button: 10 },

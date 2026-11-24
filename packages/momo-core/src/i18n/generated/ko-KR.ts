@@ -2,6 +2,34 @@
 import type { MessageCatalog } from "../types";
 
 export const catalog: MessageCatalog = {
+  "app.shortcutHelp.change": [
+    {
+      "type": 0,
+      "value": "단축키 바꾸기"
+    }
+  ],
+  "app.shortcutHelp.empty": [
+    {
+      "type": 0,
+      "value": "맞는 단축키가 없어요"
+    }
+  ],
+  "app.shortcutHelp.reopenHint": [
+    {
+      "type": 1,
+      "value": "key"
+    },
+    {
+      "type": 0,
+      "value": "로 다시 열 수 있어요"
+    }
+  ],
+  "app.shortcutHelp.search": [
+    {
+      "type": 0,
+      "value": "단축키 찾기"
+    }
+  ],
   "attachments.tray.noticeDismiss": [
     {
       "type": 0,
