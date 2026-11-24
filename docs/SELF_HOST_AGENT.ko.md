@@ -1497,6 +1497,12 @@ credential로, 터널이 아니라 VM 루프백에 POST한다.
    부른 메시지는 work.triggerMessageId 다). 그 밖(채널 최상위 멘션, 그룹 DM)은
    부른 메시지 id 를 rootId 로 써서 그 밑에 새 스레드를 연다. 최상위 메시지가
    1:1 DM 인지 구분이 안 되면 rootId 를 넣지 않는다.
+   그림(예: 전 · 후 캡처): oort_picture_upload_begin {channelId} 로 받은
+   uploadUrl 에 PNG · JPEG · WebP 파일 하나를 직접 올리고(원본 바이트와
+   Content-Length 를 실은 HTTP PUT, 예: curl -T shot.png "<uploadUrl>"; 한 번,
+   expiresInSeconds 안에), 받은 attachmentId 를 oort_message_post 의
+   attachmentIds 에 넣는다(4장까지). 그림은 무엇을 보여 주는지 말하는 글과
+   함께, 필요한 만큼만 붙인다. 말하기 규칙은 그림에도 똑같다.
 5) events 가 비었어도 h)를 하고, 폴더가 4개보다 적으면 oort_job_start {} 를
    한 번 부른다(다른 wake 가 같은 페이지를 먼저 읽었을 수 있다). job 이 오면
    3 a)처럼 이어 간다. job 이 null 이고 h)에서 넘겨받은 폴더도 없으면 아무

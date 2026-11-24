@@ -316,6 +316,7 @@ impl DriveArchive for Files {
 
 struct World {
     base: String,
+    addr: SocketAddr,
     su: PgPool,
     app: PgPool,
     files: Arc<Files>,
@@ -380,6 +381,7 @@ async fn boot_with(tune: impl FnOnce(AppState) -> AppState) -> World {
     });
     World {
         base: format!("http://{addr}"),
+        addr,
         su,
         app,
         files,
@@ -904,6 +906,11 @@ async fn a_picture_is_uploaded_and_bound_to_the_agents_own_message() {
         (t.a.member, t.channel, "picture.jpg", None)
     );
     let stored = w.files.read(&drive_file_id).await;
+    assert_eq!(
+        seen.body["sizeBytes"],
+        json!(stored.len()),
+        "the answer names what was stored"
+    );
     assert_ne!(stored, input);
     assert!(stored
         .windows(MARKER.len())
@@ -1645,20 +1652,20 @@ async fn the_token_and_the_address_reach_no_record() {
     assert!(audits
         .iter()
         .any(|row| row.contains("agent_port_picture_refused")));
-    let events: Vec<String> = sqlx::query_scalar(
-        "SELECT row_to_json(e)::text FROM agent_run_event e WHERE workspace_id = $1",
-    )
-    .bind(t.ws)
-    .fetch_all(&w.su)
-    .await
-    .unwrap_or_default();
+    // positive controls: the Agent Port call record of the begin calls is there to be scanned (it is an
+    // audit row, `agent_port.call`), and the captured logs hold this server's own lines
+    let calls: Vec<&String> = audits
+        .iter()
+        .filter(|row| row.contains("agent_port.call") && row.contains("oort_picture_upload_begin"))
+        .collect();
+    assert!(calls.len() >= 2, "the begin calls are recorded: {audits:?}");
     let log_text = logs.text();
+    assert!(!log_text.is_empty(), "the capture sees this binary's logs");
     for url in [&good, &bad] {
         let token = token_of(url);
         let path = path_of(url);
         for (place, text) in [
             ("audit", audits.join("\n")),
-            ("call records", events.join("\n")),
             ("logs", log_text.clone()),
             ("error body", refused.body.to_string()),
         ] {
@@ -1666,4 +1673,101 @@ async fn the_token_and_the_address_reach_no_record() {
             assert!(!text.contains(&path), "the path is in the {place}");
         }
     }
+}
+
+// --- PA3: the head alone decides -----------------------------------------------
+
+/// Send a `PUT` head announcing `declared` bytes and then only `sent` of them, reading the answer at the
+/// same time. `None`: no answer within `patience` — a server that read the body before judging the token
+/// would still be waiting for the rest.
+async fn head_then_part(
+    addr: SocketAddr,
+    path: &str,
+    declared: usize,
+    sent: usize,
+    patience: Duration,
+) -> Option<u16> {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let socket = tokio::net::TcpStream::connect(addr).await.expect("connect");
+    let (mut reader, mut writer) = socket.into_split();
+    let head = format!("PUT {path} HTTP/1.1\r\nHost: {addr}\r\nContent-Length: {declared}\r\n\r\n");
+    let sender = tokio::spawn(async move {
+        if writer.write_all(head.as_bytes()).await.is_err() {
+            return;
+        }
+        let _ = writer.write_all(&vec![0u8; sent]).await;
+        std::future::pending::<()>().await;
+    });
+    let mut received = Vec::new();
+    let _ = tokio::time::timeout(patience, async {
+        let mut buffer = [0u8; 4096];
+        loop {
+            let n = reader.read(&mut buffer).await.unwrap_or(0);
+            if n == 0 {
+                break;
+            }
+            received.extend_from_slice(&buffer[..n]);
+            if received.windows(4).any(|window| window == b"\r\n\r\n") {
+                break;
+            }
+        }
+    })
+    .await;
+    sender.abort();
+    let line = String::from_utf8_lossy(&received)
+        .lines()
+        .next()?
+        .to_string();
+    line.split_whitespace().nth(1)?.parse().ok()
+}
+
+/// PA3: an unknown, a spent and an expired token are answered with the one 404 while the caller has sent
+/// 64 KiB of an announced 5 MiB — the token is judged before a byte of the body is read — and none starts
+/// the decoder or stores anything.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "needs DATABASE_URL to a disposable PG18"]
+async fn a_wrong_token_is_answered_before_its_body_is_read() {
+    let _gate = GATE.lock().await;
+    let w = boot().await;
+    let t = seed(&w.su).await;
+    let spent = begin(&w, &t.a, t.channel).await;
+    attachment_id(&put(&w, &spent, png(40, 40)).await);
+    let expired = with_tenant_tx(&w.app, t.ws, |conn| {
+        let (ws, connection, agent, channel) = (t.ws, t.a.connection, t.a.member, t.channel);
+        Box::pin(async move {
+            momo_messaging::issue_agent_upload_with_ttl_in_tx(
+                conn, ws, connection, agent, channel, 1, 200,
+            )
+            .await
+        })
+    })
+    .await
+    .expect("issue")
+    .expect("issued");
+    tokio::time::sleep(Duration::from_millis(1_300)).await;
+    let children = media::decoder_children_started();
+    let puts = w.files.puts();
+    for (what, path) in [
+        (
+            "unknown",
+            format!("/v1/agent-uploads/{}/{}", t.ws, "B".repeat(43)),
+        ),
+        ("spent", path_of(&spent)),
+        (
+            "expired",
+            format!("/v1/agent-uploads/{}/{}", t.ws, expired.token),
+        ),
+    ] {
+        let status = head_then_part(w.addr, &path, FIVE_MIB, 64 * 1024, Duration::from_secs(5))
+            .await
+            .unwrap_or_else(|| {
+                panic!(
+                    "{what}: no answer after 64 KiB of 5 MiB — the body is read before the token"
+                )
+            });
+        assert_eq!(status, 404, "{what}");
+    }
+    assert_eq!(media::decoder_children_started(), children);
+    assert_eq!(w.files.puts(), puts);
+    assert_eq!(attachments(&w, &t).await, 1, "only the control picture");
 }
