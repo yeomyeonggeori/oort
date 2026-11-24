@@ -564,7 +564,29 @@ pub async fn on_agent_jobs_released_in_tx(
     workspace_id: Uuid,
     agent_member_id: Uuid,
 ) -> Result<u64, DbError> {
-    let pairs = settled_eye_pairs(conn, workspace_id, Some(agent_member_id), i64::MAX).await?;
+    // The read runs in a savepoint too (L7 3): this is called from a claim, a lease hand-back, a
+    // disconnect and the agent's authentication, and none of them may fail because of it. A read
+    // that errors removes nothing now; the follow-up removal takes those eyes later.
+    sqlx::query("SAVEPOINT momo_status_reaction_read")
+        .execute(&mut *conn)
+        .await?;
+    let pairs = match settled_eye_pairs(conn, workspace_id, Some(agent_member_id), i64::MAX).await {
+        Ok(pairs) => {
+            sqlx::query("RELEASE SAVEPOINT momo_status_reaction_read")
+                .execute(&mut *conn)
+                .await?;
+            pairs
+        }
+        Err(_) => {
+            sqlx::query("ROLLBACK TO SAVEPOINT momo_status_reaction_read")
+                .execute(&mut *conn)
+                .await?;
+            sqlx::query("RELEASE SAVEPOINT momo_status_reaction_read")
+                .execute(&mut *conn)
+                .await?;
+            return Ok(0);
+        }
+    };
     remove_pairs(conn, workspace_id, &pairs).await
 }
 

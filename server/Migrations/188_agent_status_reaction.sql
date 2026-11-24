@@ -10,6 +10,10 @@
 --   agent_run.status_eye_attach_count run 하나에 서버가 눈을 단 횟수(L3, 3번까지). run 행에 묶여 있고
 --                                    에이전트가 쓰는 길이 없다. 0..3 CHECK. 눈을 실제로 단 tx에서만
 --                                    1 올린다. updated_at은 건드리지 않는다(스위프가 그 값을 읽는다).
+--   agent_run_trigger_pair_idx       눈 행마다 그 (글, 에이전트)의 run을 찾는 질의(가장 새 run · 가져간
+--                                    run 있는지)를 받치는 부분 색인. 부른 글이 있는 run만 싣는다.
+--                                    agent_run의 기존 색인 관례(187 agent_run_work_item_idx)대로
+--                                    migration tx 안의 보통 CREATE INDEX다.
 --   reaction_status_eye_idx          뒤따르는 정리(L7 5)가 「눈 행」에서 출발해 찾는 색인. 시간 창이
 --                                    없으므로 api가 오래 꺼져 있던 뒤에도 오래전에 끝난 run의 눈을
 --                                    놓치지 않는다.
@@ -55,3 +59,7 @@ $$;
 CREATE INDEX IF NOT EXISTS reaction_status_eye_idx
   ON reaction (workspace_id, message_id, member_id)
   WHERE emoji = '👀';
+
+CREATE INDEX IF NOT EXISTS agent_run_trigger_pair_idx
+  ON agent_run (workspace_id, trigger_message_id, agent_member_id, created_at DESC, id DESC)
+  WHERE trigger_message_id IS NOT NULL;
