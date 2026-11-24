@@ -5,7 +5,7 @@ import { FIXTURE_MEDIA } from "./fixtureMedia";
 import { PHOTO_BRANCHES, PHOTO_FAILURE_STATUS, PHOTO_PROVIDERS, type PhotoBranch, type PhotoCutout, type PhotoFailureCode, type PhotoProvider } from "./photo";
 import { FIXTURE_LIST, FIXTURE_MEMBER_ID, FIXTURE_NOW_MS, FIXTURE_READY_DRAFT, FIXTURE_WORKSPACE_ID } from "./fixtures";
 import { decideExpressionSet, EXPRESSION_SET_ACTION_ID, expressionSetSlotDraft, readySlots, type ExpressionSetCard, type ExpressionSetDecisionReceipt } from "./set";
-import type { Expression, ExpressionChoice, ExpressionDraft, ExpressionMetadata, ExpressionPatch, ExpressionVariant, ManualUploadCode } from "./types";
+import type { Expression, ExpressionChoice, ExpressionDraft, ExpressionMetadata, ExpressionMedia, ExpressionPatch, ManualUploadCode } from "./types";
 
 export interface ExpressionFixtureRequest {
   method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
@@ -186,7 +186,7 @@ export function createExpressionFixtureServer(options: {
           const variant = url.searchParams.get("size");
           if (draft.state !== "ready" || !["small", "large", "thumb", "still"].includes(variant ?? "")) return error(404, "not_found");
           // `still` (ADR-0218 §20) is one more size behind the same door: absent is the same 404.
-          const image = draft.media[variant as ExpressionVariant];
+          const image = draft.media[variant as keyof ExpressionMedia];
           if (!image || url.searchParams.get("v") !== image.sha256) return error(404, "not_found");
           return { status: 200, headers: { "Content-Type": image.mime, "Cache-Control": "private, no-store", "X-Content-Type-Options": "nosniff", "Content-Security-Policy": "default-src 'none'; sandbox" },
             bodyBase64: image.mime === "image/png" ? FIXTURE_MEDIA.png.bodyBase64 : FIXTURE_MEDIA.gif.bodyBase64 };
@@ -228,7 +228,7 @@ export function createExpressionFixtureServer(options: {
         if (request.method === "GET" && expressionMatch[2] === "/image") {
           const variant = url.searchParams.get("size");
           if (item.status !== "active" || !item.media || !["small", "large", "thumb", "still"].includes(variant ?? "")) return error(404, "not_found");
-          const media = item.media[variant as ExpressionVariant];
+          const media = item.media[variant as keyof ExpressionMedia];
           if (!media || url.searchParams.get("v") !== media.sha256) return error(404, "not_found");
           return { status: 200, headers: { "Content-Type": media.mime, "Cache-Control": "private, no-store", "X-Content-Type-Options": "nosniff", "Content-Security-Policy": "default-src 'none'; sandbox" },
             bodyBase64: media.mime === "image/png" ? FIXTURE_MEDIA.png.bodyBase64 : FIXTURE_MEDIA.gif.bodyBase64 };

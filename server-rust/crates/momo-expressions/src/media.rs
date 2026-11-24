@@ -1893,16 +1893,35 @@ mod tests {
         let vectors: serde_json::Value =
             serde_json::from_str(&std::fs::read_to_string(path).expect("the shared vectors"))
                 .expect("vectors are JSON");
-        for (name, table) in [("legacy", RenditionTable::Legacy), ("wide", RenditionTable::Wide)] {
+        for (name, table) in [
+            ("legacy", RenditionTable::Legacy),
+            ("wide", RenditionTable::Wide),
+        ] {
             let v = &vectors[name];
             let s = table.sizes();
             let pair = |key: &str| (v[key]["edge"].as_u64(), v[key]["bytes"].as_u64());
             let ours = |edge: u32, bytes: usize| (Some(u64::from(edge)), Some(bytes as u64));
-            assert_eq!(pair("small"), ours(s.small_edge, s.small_bytes), "{name} small");
-            assert_eq!(pair("thumb"), ours(s.thumb_edge, s.thumb_bytes), "{name} thumb");
-            assert_eq!(pair("large"), ours(s.large_edge, s.large_bytes), "{name} large");
+            assert_eq!(
+                pair("small"),
+                ours(s.small_edge, s.small_bytes),
+                "{name} small"
+            );
+            assert_eq!(
+                pair("thumb"),
+                ours(s.thumb_edge, s.thumb_bytes),
+                "{name} thumb"
+            );
+            assert_eq!(
+                pair("large"),
+                ours(s.large_edge, s.large_bytes),
+                "{name} large"
+            );
             if s.still {
-                assert_eq!(pair("still"), ours(s.large_edge, s.large_bytes), "{name} still");
+                assert_eq!(
+                    pair("still"),
+                    ours(s.large_edge, s.large_bytes),
+                    "{name} still"
+                );
             } else {
                 assert!(v["still"].is_null(), "{name} still");
             }

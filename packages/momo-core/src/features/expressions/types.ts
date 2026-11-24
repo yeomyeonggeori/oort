@@ -39,8 +39,12 @@ export const EXPRESSION_KINDS = ["emoji", "sticker"] as const;
 export type ExpressionKind = (typeof EXPRESSION_KINDS)[number];
 export type ExpressionStatus = "active" | "hidden" | "deleted";
 export type ExpressionAddPolicy = "members" | "admins";
-/** `still` exists only on a moving registration stored at the §20 table (ADR-0218 Z2-5). */
-export type ExpressionVariant = "small" | "large" | "thumb" | "still";
+/**
+ * The three sizes every registration has. A moving registration stored at the §20 table also has
+ * `still` (ADR-0218 Z2-5) — optional, so it is `ExpressionMedia.still` and not one of these: a client that
+ * indexes `media[variant]` with one of these always gets a picture.
+ */
+export type ExpressionVariant = "small" | "large" | "thumb";
 export interface ExpressionOrigin {
   kind: "upload" | "attachment" | "generated" | "url";
   /** Public HTTPS host/path only: no credentials, query, or fragment. */
