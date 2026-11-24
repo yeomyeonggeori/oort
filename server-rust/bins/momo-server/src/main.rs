@@ -365,6 +365,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         // ADR-0162: the Agent Port has its own token/agent/IP bounds and an optional
         // trusted Origin comparison. It never borrows the public join knobs.
         .with_agent_port(config.agent_port)
+        // ADR-0151 증보 10 P8 (#6013): the Agent Port picture road — on unless the operator turns
+        // MOMO_AGENT_PORT_PICTURES off, and only while MOMO_PUBLIC_BASE_URL is an https address.
+        .with_agent_uploads(momo_server::config::agent_uploads_from_env())
         // ADR-0216 D9 (#4660): the developer-token door's budgets. Always on; a 0 or a
         // value that does not parse keeps the default rather than switching one off.
         .with_dev_access(config.dev_access)

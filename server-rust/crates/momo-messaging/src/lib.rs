@@ -53,6 +53,9 @@ pub mod agent_card;
 /// crate is the names re-exported below, so a "no caller yet" guard that watches those names cannot be
 /// walked around with a module path.
 mod agent_picture;
+// #6013 (ADR-0151 증보 10): the Agent Port agent's own picture road. Private like `agent_picture`: callers
+// use the names exported below.
+mod agent_port_picture;
 pub mod approval_card;
 pub mod attachment;
 pub mod attachment_media;
@@ -140,6 +143,15 @@ pub use agent_picture::{
     run_picture_ids_in_tx, write_picture_in_tx, AgentPictureGrant, AgentPictureTarget,
     PictureWriteRefused, StoredPicture, AGENT_MEDIA_PATH_PREFIX, AGENT_MEDIA_TTL_SECS,
     AGENT_PICTURES_DAILY_CEILING, AGENT_PICTURES_PER_RUN, AGENT_PICTURE_MAX_INPUT_BYTES,
+};
+pub use agent_port_picture::{
+    issue_in_tx as issue_agent_upload_in_tx,
+    issue_with_ttl_in_tx as issue_agent_upload_with_ttl_in_tx, pictures_linkable_in_tx,
+    record_upload_refused_in_tx, redeem_in_tx as redeem_agent_upload_in_tx, upload_picture_name,
+    write_upload_picture_in_tx, AgentUploadGrant, AgentUploadTarget, StoredUploadPicture,
+    UploadIssueRefused, UploadWriteRefused, AGENT_PORT_PICTURES_PER_AGENT_DAILY,
+    AGENT_PORT_PICTURES_PER_MESSAGE, AGENT_UPLOADS_PATH_PREFIX, AGENT_UPLOAD_DAILY_ISSUES,
+    AGENT_UPLOAD_LIVE_TOKENS, AGENT_UPLOAD_TTL_SECS, AGENT_UPLOAD_UNLINKED_PICTURES,
 };
 pub use attachment::{
     create_pending_upload_in_tx, is_attachment_channel_member, link_attachments_in_tx,
